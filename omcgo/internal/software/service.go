@@ -447,6 +447,10 @@ func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequ
 	concurrency := 5
 
 	mode, schedAt := resolveScheduleMode(req.ScheduledAt, req.CreateSuspended)
+	createUser := strings.TrimSpace(req.CreateUser)
+	if createUser == "" {
+		createUser = "system"
+	}
 
 	mainTask := &UpgradeTask{
 		TaskName:         req.TaskName,
@@ -455,7 +459,7 @@ func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequ
 		FileName:         req.TargetFileNameTemplate, // 复用字段存放目标文件名模板
 		Status:           TaskPending,
 		CreateStatus:     CreateStatusActive,
-		CreateUser:       req.CreateUser,
+		CreateUser:       createUser,
 		TotalCount:       len(req.DeviceIDs),
 		MaxConcurrent:    concurrency,
 	}
@@ -739,6 +743,10 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 	}
 
 	mode, schedAt := resolveScheduleMode(req.ScheduledAt, req.CreateSuspended)
+	createUser := strings.TrimSpace(req.CreateUser)
+	if createUser == "" {
+		createUser = "system"
+	}
 
 	mainTask := &UpgradeTask{
 		TaskName:         req.TaskName,
@@ -751,7 +759,7 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 		ProductClass:     fw.ProductClass,
 		IsKeepConfig:     req.IsKeepConfig,
 		CreateStatus:     CreateStatusActive,
-		CreateUser:       "system",
+		CreateUser:       createUser,
 		TotalCount:       len(req.DeviceIDs),
 		MaxConcurrent:    concurrency,
 	}

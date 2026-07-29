@@ -28,7 +28,7 @@ func TestRedisCache_RoundTrip(t *testing.T) {
 	pmID := uuid.New()
 	p := &Product{
 		ID:                  id,
-		Name:                "QRTB 系列",
+		Name:                "QRTB Series",
 		Vendor:              "Baicells",
 		Tech:                "4G",
 		RadioModes:          "SC,CA",
@@ -94,7 +94,7 @@ func TestRedisCache_ProductMissesAfterVersionBump(t *testing.T) {
 
 	p := &Product{
 		ID:                 uuid.New(),
-		Name:               "BM 产品",
+		Name:               "BM",
 		EnableUnknownAlarm: false,
 	}
 

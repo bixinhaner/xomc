@@ -7504,7 +7504,7 @@ const messages: Record<string, string> = {
   'mrTask.create.section.targetDevice': 'Target Devices',
   'mrTask.field.deviceSn':              'Device SN',
   'mrTask.field.deviceName':            'Device Name',
-  'mrTask.field.productClass':          'Product Class',
+  'mrTask.field.productClass':          'Product Name',
   'mrTask.action.batchSnInput':         'Batch SN Input',
   'mrTask.placeholder.deviceSearch':    'Search by SN / Name',
   'mrTask.create.selectedDeviceCount':  '{count} selected',

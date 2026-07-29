@@ -752,6 +752,7 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 			DownloadFileType: typeDef.FileType,
 			IsKeepConfig:     req.IsKeepConfig,
 			Concurrency:      req.Concurrency,
+			CreateUser:       createUser,
 			CreateSuspended:  createSuspended,
 			ScheduledAt:      scheduledAt,
 		})
@@ -838,6 +839,7 @@ func (s *Service) createConfigRestoreTask(
 		return nil, fmt.Errorf("dispatch CONFIG_RESTORE by snapshot: %w", err)
 	}
 	s.persistDispatchedFiles(ctx, "CONFIG_RESTORE", placeholder.ID, dispatchedFiles)
+	placeholder = s.finalizeDirectDispatchPlaceholder(ctx, placeholder, len(sns), "CONFIG_RESTORE")
 
 	catalog, _ := s.loadTaskTypeCatalog(ctx)
 	return s.mapTask(ctx, catalog, placeholder)
@@ -908,9 +910,47 @@ func (s *Service) createLicenseUpgradeTask(
 		return nil, fmt.Errorf("dispatch LICENSE_UPGRADE: %w", err)
 	}
 	s.persistDispatchedFiles(ctx, "LICENSE_UPGRADE", placeholder.ID, dispatchedFiles)
+	placeholder = s.finalizeDirectDispatchPlaceholder(ctx, placeholder, len(sns), "LICENSE_UPGRADE")
 
 	catalog, _ := s.loadTaskTypeCatalog(ctx)
 	return s.mapTask(ctx, catalog, placeholder)
+}
+
+func (s *Service) finalizeDirectDispatchPlaceholder(
+	ctx context.Context,
+	placeholder *software.UpgradeTask,
+	deviceCount int,
+	typeCode string,
+) *software.UpgradeTask {
+	if placeholder == nil || s.softwareService == nil {
+		return placeholder
+	}
+	if err := s.softwareService.FinalizePlaceholderTrackingTask(ctx, placeholder.ID, deviceCount); err != nil {
+		s.logger.Warn("finalize direct-dispatch placeholder failed",
+			zap.String("type_code", typeCode),
+			zap.String("task_id", placeholder.ID.String()),
+			zap.Error(err))
+		return placeholder
+	}
+
+	now := coremodel.Time(time.Now())
+	placeholder.Status = software.TaskInProgress
+	placeholder.StartedAt = &now
+	if s.taskRepo == nil {
+		return placeholder
+	}
+	refreshed, err := s.taskRepo.GetByID(ctx, placeholder.ID)
+	if err != nil {
+		s.logger.Warn("reload direct-dispatch placeholder failed",
+			zap.String("type_code", typeCode),
+			zap.String("task_id", placeholder.ID.String()),
+			zap.Error(err))
+		return placeholder
+	}
+	if refreshed == nil {
+		return placeholder
+	}
+	return refreshed
 }
 
 // persistDispatchedFiles 把 dispatcher 返回的 sn → 文件名映射写回 upgrade_sub_tasks.dest_version。
@@ -1690,6 +1730,9 @@ func (s *Service) mapDeviceItem(
 			failureReason = "终止"
 		}
 	}
+	if isDirectDispatchFile && status == "ended" && startedAt == nil && endedAt != nil {
+		startedAt = endedAt
+	}
 
 	return &DeviceItem{
 		ID:              subTask.ID.String(),
@@ -1714,7 +1757,8 @@ func (s *Service) mapDeviceItem(
 		// issue #655：StartedAt / EndedAt 直接透传 PG repo 写入的 sub_task.started_at /
 		// completed_at（见 pg_upgrade_repository.go UpdateStatusWithCode，COALESCE 守卫
 		// 首次执行态写一次后不再覆盖）。LastReportAt 保留兼容 CSV / 北向 API。
-		// terminated 特例：startedAt 兜底 = endedAt，failureReason 兜底 = "终止"。
+		// 特例：terminated 以及旧 CONFIG_RESTORE / LICENSE_UPGRADE 成功终态缺 started_at 时，
+		// startedAt 兜底 = endedAt，避免页面显示 "-".
 		StartedAt:     startedAt,
 		EndedAt:       endedAt,
 		LastReportAt:  optionalTimePtr(lastReport),

@@ -4,19 +4,26 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuiltinProducts_GSMProductsReferenceGSMAlarmLibrary(t *testing.T) {
+func loadBuiltinProductsForTest(t *testing.T) xmlProducts {
+	t.Helper()
 	path := filepath.Join("..", "..", "data", "param-mappings", "products.xml")
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
 
 	var doc xmlProducts
 	require.NoError(t, xml.Unmarshal(raw, &doc))
+	return doc
+}
+
+func TestBuiltinProducts_GSMProductsReferenceGSMAlarmLibrary(t *testing.T) {
+	doc := loadBuiltinProductsForTest(t)
 
 	productsByName := make(map[string]xmlProduct, len(doc.Products))
 	for _, product := range doc.Products {
@@ -32,8 +39,19 @@ func TestBuiltinProducts_GSMProductsReferenceGSMAlarmLibrary(t *testing.T) {
 		assert.NotEqual(t, "GSM", product.Alarm.NeType, "%s 不是 2G 产品，不应引用 GSM 告警库", product.Name)
 	}
 
-	for _, name := range []string{"BSC 产品", "BTS 产品"} {
+	for _, name := range []string{"BSC", "BTS"} {
 		_, exists := productsByName[name]
 		require.True(t, exists, "内置产品 %s 不存在", name)
+	}
+}
+
+func TestBuiltinProducts_DisplayMetadataIsEnglishSafe(t *testing.T) {
+	doc := loadBuiltinProductsForTest(t)
+	han := regexp.MustCompile(`\p{Han}`)
+
+	for _, product := range doc.Products {
+		assert.Falsef(t, han.MatchString(product.Name), "product name %q must not contain Chinese characters", product.Name)
+		assert.Falsef(t, han.MatchString(product.Vendor), "vendor %q for %q must not contain Chinese characters", product.Vendor, product.Name)
+		assert.Falsef(t, han.MatchString(product.Description), "description %q for %q must not contain Chinese characters", product.Description, product.Name)
 	}
 }

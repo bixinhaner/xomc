@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <products totalProducts="15" totalPatterns="52" generatedAt="2026-05-06">
   <!-- ============ 1. BAIBLQ 产品 ============ -->
-  <product name="BAIBLQ 产品" vendor="Baicells" tech="4G" radioModes="SC">
+  <product name="BAIBLQ" vendor="Baicells" tech="4G" radioModes="SC">
     <description>Baicells BAIBLQ</description>
     <paramModel>BLQ</paramModel>
     <enableFileType11>true</enableFileType11>
@@ -13,7 +13,7 @@
     </patterns>
   </product>
   <!-- ============ 2. BLX 产品 ============ -->
-  <product name="BLX 产品" vendor="Baicells" tech="4G" radioModes="SC">
+  <product name="BLX" vendor="Baicells" tech="4G" radioModes="SC">
     <description>Baicells BLX</description>
     <paramModel>BLQ</paramModel>
     <enableFileType11>true</enableFileType11>
@@ -25,8 +25,8 @@
     </patterns>
   </product>
   <!-- ============ 3. QRTB 系列 ============ -->
-  <product name="QRTB 系列" vendor="Baicells" tech="4G" radioModes="SC,CA,DC">
-    <description>Baicells QRTB；含 SC/CA/DC 多种射频模式</description>
+  <product name="QRTB Series" vendor="Baicells" tech="4G" radioModes="SC,CA,DC">
+    <description>Baicells QRTB; supports SC/CA/DC radio modes</description>
     <paramModel>BLQ</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
@@ -40,7 +40,7 @@
     </patterns>
   </product>
   <!-- ============ 4. MLQ 产品 ============ -->
-  <product name="MLQ 产品" vendor="Baicells" tech="4G" radioModes="SC">
+  <product name="MLQ" vendor="Baicells" tech="4G" radioModes="SC">
     <description>Baicells MLQ</description>
     <paramModel>MLQ</paramModel>
     <enableFileType11>true</enableFileType11>
@@ -52,8 +52,8 @@
     </patterns>
   </product>
   <!-- ============ 5. MLN 系列 ============ -->
-  <product name="MLN 系列" vendor="Baicells" tech="4G" radioModes="SC,CA,DC">
-    <description>Baicells MLN；含 SC/CA/DC 多种射频模式</description>
+  <product name="MLN Series" vendor="Baicells" tech="4G" radioModes="SC,CA,DC">
+    <description>Baicells MLN; supports SC/CA/DC radio modes</description>
     <paramModel>MLN</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
@@ -66,7 +66,7 @@
     </patterns>
   </product>
   <!-- ============ 6. BM 产品 ============ -->
-  <product name="BM 产品" vendor="Baicells" tech="4G" radioModes="">
+  <product name="BM" vendor="Baicells" tech="4G" radioModes="">
     <description>Baicells BM</description>
     <paramModel>BM</paramModel>
     <enableFileType11>true</enableFileType11>
@@ -78,8 +78,8 @@
     </patterns>
   </product>
   <!-- ============ 7. BSC 产品 ============ -->
-  <product name="BSC 产品" vendor="Baicells" tech="2G" radioModes="">
-    <description>Baicells BSC 产品</description>
+  <product name="BSC" vendor="Baicells" tech="2G" radioModes="">
+    <description>Baicells BSC</description>
     <paramModel>BSC</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
@@ -90,8 +90,8 @@
     </patterns>
   </product>
   <!-- ============ 8. BTS 产品 ============ -->
-  <product name="BTS 产品" vendor="Baicells" tech="2G" radioModes="">
-    <description>Baicells BTS；2G 基站；KPI 由 BSC 统一上报</description>
+  <product name="BTS" vendor="Baicells" tech="2G" radioModes="">
+    <description>Baicells BTS; 2G base station; KPIs are reported by BSC</description>
     <paramModel>BTS</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
@@ -102,8 +102,8 @@
     </patterns>
   </product>
   <!-- ============ 9. BaiBNQ 5G 产品 ============ -->
-  <product name="BaiBNQ 5G 产品" vendor="Baicells" tech="5G" radioModes="">
-    <description>Baicells BaiBNQ；5G NR 基站；TR069 参数集和 KPI 公式集统一命名为 BaiBNQ</description>
+  <product name="BaiBNQ 5G" vendor="Baicells" tech="5G" radioModes="">
+    <description>Baicells BaiBNQ; 5G NR base station; TR-069 parameters and KPI formulas use BaiBNQ</description>
     <paramModel>BaiBNQ</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
@@ -137,7 +137,7 @@
     </patterns>
   </product>
   <!-- ============ 10. CICT SC3400(L1821) 产品 ============ -->
-  <product name="CICT SC3400(L1821) 产品" vendor="CICT" tech="4G" radioModes="">
+  <product name="CICT SC3400(L1821)" vendor="CICT" tech="4G" radioModes="">
     <description>CICT SC3400(L1821)</description>
     <paramModel>ENB_DEFAULT_181</paramModel>
     <enableFileType11>true</enableFileType11>
@@ -149,8 +149,8 @@
     </patterns>
   </product>
   <!-- ============ 11. 大唐 fBS3251 系列 ============ -->
-  <product name="大唐 fBS3251 系列" vendor="大唐" tech="4G" radioModes="">
-    <description>大唐 fBS3251；含 2 个型号变体</description>
+  <product name="Datang fBS3251 Series" vendor="Datang" tech="4G" radioModes="">
+    <description>Datang fBS3251; includes 2 model variants</description>
     <paramModel>ENB_DEFAULT_181</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
@@ -162,8 +162,8 @@
     </patterns>
   </product>
   <!-- ============ 12. 第三方 FDD-LTE-Enterprise ============ -->
-  <product name="第三方 FDD-LTE-Enterprise" vendor="第三方" tech="4G" radioModes="">
-    <description>第三方 FDD-LTE-Enterprise</description>
+  <product name="Third-party FDD-LTE-Enterprise" vendor="Third-party" tech="4G" radioModes="">
+    <description>Third-party FDD-LTE-Enterprise</description>
     <paramModel>ENB_DEFAULT_098</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
@@ -174,8 +174,8 @@
     </patterns>
   </product>
   <!-- ============ 13. 华为 TCELL 系列 ============ -->
-  <product name="华为 TCELL 系列" vendor="华为" tech="4G" radioModes="">
-    <description>华为 TCELL；含 6 个型号变体</description>
+  <product name="Huawei TCELL Series" vendor="Huawei" tech="4G" radioModes="">
+    <description>Huawei TCELL; includes 6 model variants</description>
     <paramModel>ENB_DEFAULT_098</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
@@ -191,8 +191,8 @@
     </patterns>
   </product>
   <!-- ============ 14. 京信 LTE-FDD_N 系列 ============ -->
-  <product name="京信 LTE-FDD_N 系列" vendor="京信" tech="4G" radioModes="">
-    <description>京信 LTE-FDD_N；含 4 个型号变体</description>
+  <product name="Comba LTE-FDD_N Series" vendor="Comba" tech="4G" radioModes="">
+    <description>Comba LTE-FDD_N; includes 4 model variants</description>
     <paramModel>ENB_DEFAULT_098</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
@@ -206,8 +206,8 @@
     </patterns>
   </product>
   <!-- ============ 15. 京信 femto_au 产品 ============ -->
-  <product name="京信 femto_au 产品" vendor="京信" tech="4G" radioModes="">
-    <description>京信 femto_au</description>
+  <product name="Comba femto_au" vendor="Comba" tech="4G" radioModes="">
+    <description>Comba femto_au</description>
     <paramModel>ENB_DEFAULT_098</paramModel>
     <enableFileType11>true</enableFileType11>
     <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />

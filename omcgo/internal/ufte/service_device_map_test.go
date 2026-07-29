@@ -371,6 +371,42 @@ func TestMapDeviceItem_StartedAndEndedAt_Ended(t *testing.T) {
 	assert.False(t, item.StartedAt.Equal(*item.EndedAt), "StartedAt 与 EndedAt 必须能区分开（避免回归到都用 updated_at）")
 }
 
+func TestMapDeviceItem_ConfigRestoreCompletedBackfillsMissingStartedAt(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "CONFIG_RESTORE")
+	parent := &software.UpgradeTask{
+		ID:               uuid.New(),
+		TaskName:         "restore-task",
+		TaskType:         software.TaskTypeLogCollect,
+		DownloadFileType: "10 <OUI> Configuration File",
+		ProductClass:     "4G eNB",
+	}
+	completedAt := time.Date(2026, 7, 28, 10, 30, 0, 0, time.UTC)
+	completedAtModel := coremodel.Time(completedAt)
+	sub := software.UpgradeSubTaskWithTaskName{
+		UpgradeSubTask: software.UpgradeSubTask{
+			ID:          uuid.New(),
+			TaskID:      parent.ID,
+			DeviceID:    uuid.New(),
+			DeviceSN:    "SN-217R",
+			Status:      software.UpgradeCompleted,
+			StartedAt:   nil,
+			CompletedAt: &completedAtModel,
+			UpdatedAt:   coremodel.Time(completedAt),
+			DestVersion: "snapshot_SN-217R.nv",
+		},
+		TaskName: "restore-task",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{
+		sub.DeviceID: {ID: sub.DeviceID, SerialNumber: "SN-217R", ProductClass: "4G eNB"},
+	}
+	item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+	require.NoError(t, err)
+	assert.Equal(t, "ended", item.Status, "前置：配置恢复子任务已成功结束")
+	assertTimePtrEqual(t, completedAt, item.EndedAt)
+	assertTimePtrEqual(t, completedAt, item.StartedAt, "配置恢复历史数据 started_at 为空时不应在页面显示 '-'")
+}
+
 // pending：未进入执行态 → 两字段都为空。
 func TestMapDeviceItem_StartedAndEndedAt_Pending(t *testing.T) {
 	svc := newServiceForMap(t)
