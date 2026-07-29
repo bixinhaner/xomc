@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
 import { Alert, AutoComplete, Button, Card, Checkbox, Col, Form, Input, Row, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import type { FormInstance } from 'antd';
-import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParameterSchema, useSearchParameters, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
@@ -37,12 +37,14 @@ import {
 import { inferDeviceTimeMode, isNrNetworkType, mapDeviceTimeModeLabel } from './deviceTimeMode';
 import { formatDeviceFaultBrief } from './MultiInstanceTable';
 import {
-  parsePlmnList,
+  isPlmnRowLimitReached,
   serializePlmnList,
+  toPlmnRows,
   validatePlmnList,
   type PlmnListValidationError,
   type PlmnRow,
 } from './plmnList';
+import { AddRowButton } from './AddRowButton';
 import {
   canApplySubmittedReadback,
   ParameterReadbackTimeoutError,
@@ -716,6 +718,7 @@ interface CellParameterFormProps {
   instanceContext: QuickSettingsInstanceContext;
   locale: 'zh-CN' | 'en-US';
   onIpsecControlChange?: (value: string | undefined) => void;
+  actionMode?: 'standalone' | 'staged';
 }
 
 interface BindSelectOption {
@@ -758,21 +761,6 @@ interface PlmnListTableProps {
   maxRows?: number;
 }
 
-function isPlmnRows(value: unknown): value is PlmnRow[] {
-  return Array.isArray(value)
-    && value.every((item) => item && typeof item === 'object' && 'plmn' in item);
-}
-
-function toPlmnRows(value: unknown): PlmnRow[] {
-  if (isPlmnRows(value)) {
-    return value.map((row, index) => ({
-      key: row.key || `plmn-${index}`,
-      plmn: String(row.plmn ?? ''),
-    }));
-  }
-  return parsePlmnList(value);
-}
-
 function plmnValidationMessage(
   error: PlmnListValidationError | null,
   maxRows: number,
@@ -791,9 +779,8 @@ function PlmnListTable({
   maxRows = 6,
 }: PlmnListTableProps) {
   const t = useT();
-  const rows = isPlmnRows(value) ? value : [];
-  const configuredCount = rows.filter((row) => String(row.plmn ?? '').trim()).length;
-  const maxReached = configuredCount >= maxRows;
+  const rows = toPlmnRows(value);
+  const maxReached = isPlmnRowLimitReached(rows, maxRows);
 
   const updateRow = (key: string, plmn: string) => {
     onChange?.(rows.map((row) => (row.key === key ? { ...row, plmn } : row)));
@@ -855,15 +842,12 @@ function PlmnListTable({
         dataSource={rows}
         columns={columns}
       />
-      <Button
-        type="dashed"
-        block
-        icon={<PlusOutlined />}
+      <AddRowButton
         onClick={addRow}
         disabled={disabled || maxReached}
       >
         {t('device.cell.addRow')}
-      </Button>
+      </AddRowButton>
       <Alert
         type={maxReached ? 'warning' : 'info'}
         showIcon
@@ -1010,13 +994,12 @@ function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale, maxRow
         columns={columns}
         dataSource={rows}
       />
-      <Button
-        icon={<PlusOutlined />}
+      <AddRowButton
         onClick={addRow}
         disabled={disabled || maxReached}
       >
         {t('device.cell.addRow')}
-      </Button>
+      </AddRowButton>
       {maxRows !== undefined && (
         <Alert
           type={maxReached ? 'warning' : 'info'}
@@ -1151,7 +1134,15 @@ function findRawValueBySuffix(parameters: DeviceParameter[] | undefined, suffix:
  *  4. 顶部"保存"按钮收集本表单全部脏字段，一次性 SetParameterValues
  *  5. Save 部分失败时按字段标红保留输入值（继承 Antd Form 校验/状态行为）
  */
-export default function CellParameterForm({ deviceId, active = true, group, instanceContext, locale, onIpsecControlChange }: CellParameterFormProps) {
+export default function CellParameterForm({
+  deviceId,
+  active = true,
+  group,
+  instanceContext,
+  locale,
+  onIpsecControlChange,
+  actionMode = 'standalone',
+}: CellParameterFormProps) {
   const t = useT();
   const [form] = Form.useForm();
   const gnssSyncSourceRef = useRef<string[]>([]);
@@ -2119,7 +2110,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     <Card
       title={title}
       size="small"
-      extra={
+      extra={actionMode === 'staged' ? null : (
         <Space>
           {visibleLastSubmit && (() => {
             const spec = statusTagSpec(visibleLastSubmit, lastTask?.status, t);
@@ -2143,7 +2134,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             {updateMutation.isPending ? t('device.cell.dispatching') : t('common.save')}
           </Button>
         </Space>
-      }
+      )}
       style={{ marginBottom: 16 }}
     >
       <Spin spinning={isSchemaLoading}>
@@ -2172,7 +2163,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             if (special?.kind === 'mme-ip-plmn-table') {
               setDraftField(fbKey, name, toMmeIpPlmnRows(value));
             } else if (special?.kind === 'plmn-list-table') {
-              setDraftField(fbKey, name, serializePlmnList(toPlmnRows(value)));
+              setDraftField(fbKey, name, toPlmnRows(value));
             } else if (p?.type === 'multiCheckbox') {
               const normalized = isBscCodecSupportParam(path)
                 ? normalizeBscCodecSupportValue(value)

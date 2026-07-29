@@ -529,6 +529,16 @@ func insertReleaseRequestForPGRepoTest(
 
 func TestPGRepository_ListReleaseCandidatesFiltersState(t *testing.T) {
 	pool := newParamSyncTestPool(t)
+	var preexistingEligible int
+	require.NoError(t, pool.QueryRow(context.Background(), `
+		SELECT count(*)
+		FROM devices d
+		LEFT JOIN parameter_sync_device_state state ON state.device_id = d.id
+		WHERE d.deleted_at IS NULL
+		  AND d.lifecycle_state = $1
+		  AND d.is_online = true
+		  AND (state.next_auto_sync_at IS NULL OR state.next_auto_sync_at <= now())
+	`, model.LifecycleCommissioned).Scan(&preexistingEligible))
 	campaignID := uuid.New()
 	noRequestID := uuid.New()
 	offlineID := uuid.New()
@@ -564,7 +574,7 @@ func TestPGRepository_ListReleaseCandidatesFiltersState(t *testing.T) {
 	devices, err := NewPGRepository(pool).ListReleaseCandidates(
 		context.Background(),
 		campaignID,
-		20,
+		preexistingEligible+5,
 	)
 
 	require.NoError(t, err)

@@ -1,7 +1,9 @@
 package device
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -74,6 +76,79 @@ func setupParamTreeRouter(h *ParameterTreeHandler) *gin.Engine {
 	r := gin.New()
 	h.RegisterRoutes(r.Group("/api/v1"))
 	return r
+}
+
+func TestParameterTreeHandler_SetParameterValues_MLNIPSecStandardPath(t *testing.T) {
+	deviceRepo := newFakeDeviceRepo()
+	paramRepo := newFakeParamRepo()
+	logger := zap.NewNop()
+	service := NewDeviceService(deviceRepo, paramRepo, nil, nil, logger)
+	enqueuer := &fakeEnqueuer{}
+	service.SetTaskService(enqueuer)
+
+	deviceID := uuid.New()
+	productID := uuid.New()
+	paramModelID := uuid.New()
+	seeded := seedDevice(deviceRepo, deviceID, "SN-MLN-IPSEC-001", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+	seeded.ProductClass = "MLN"
+
+	productRepo := &fakeProductRepoForDevice{
+		products: map[uuid.UUID]*product.Product{
+			productID: {
+				ID:           productID,
+				Name:         "MLN",
+				ParamModelID: &paramModelID,
+			},
+		},
+		patterns: []product.ProductClassPattern{{
+			ID:           uuid.New(),
+			ProductID:    productID,
+			ProductClass: "^MLN$",
+			SortOrder:    1,
+			IsActive:     true,
+		}},
+	}
+	paramModelRepo := &fakeParamModelRepoForDevice{
+		defaultByModel: map[uuid.UUID][]parammodel.ParamMapping{
+			paramModelID: {
+				{
+					ID:           uuid.New(),
+					ParamModelID: paramModelID,
+					StandardPath: "Device.FAP.Ipsec.{i}.TUNNEL_ENABLE",
+					PrivatePath:  "Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_TUNNELENABLE",
+					EntryType:    "parameter",
+					Access:       "READ_WRITE",
+					DataType:     "BOOLEAN",
+				},
+			},
+		},
+	}
+
+	productRegistry := product.NewRegistry(productRepo, product.NopCache{}, product.NewRegistryMetrics(nil), logger)
+	require.NoError(t, productRegistry.Refresh(context.Background()))
+	paramRegistry := parammodel.NewRegistry(paramModelRepo, parammodel.NopCache{}, productRegistry, parammodel.NewRegistryMetrics(nil), logger)
+	handler := NewParameterTreeHandler(service, paramRepo, paramRegistry, productRegistry, logger)
+	router := setupParamTreeRouter(handler)
+
+	body := []byte(`{"parameters":[{"path":"Device.FAP.Ipsec.1.TUNNEL_ENABLE","value":"0","type":"BOOLEAN"}]}`)
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/devices/"+deviceID.String()+"/parameters", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	require.Len(t, enqueuer.calls, 1)
+	assert.Equal(t, "SetParameterValues", enqueuer.calls[0].Method)
+
+	var queued struct {
+		Values []struct {
+			Name string `json:"name"`
+		} `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal(enqueuer.calls[0].Params, &queued))
+	require.Len(t, queued.Values, 1)
+	assert.Equal(t, "Device.FAP.Ipsec.1.TUNNEL_ENABLE", queued.Values[0].Name)
 }
 
 func TestParameterTreeHandler_UsesDefaultParamModelForTreeAndChildren(t *testing.T) {
