@@ -59,9 +59,9 @@ COPY omcmb/frontend-core/ ./frontend-core/
 # 清除可能残留的旧构建产物
 RUN rm -rf webcode/dist
 
-# 应用版本号注入：build-release.sh 通过 --build-arg APP_VERSION=$VERSION 传入
-# （形如 1.0.0-20260522-1530），vite build 读取 VITE_APP_VERSION 内联进产物，
-# 左侧菜单底部据此显示。未传时默认空串 → 前端回退 'dev'。
+# 应用版本号注入：build-release.sh 通过 --build-arg APP_VERSION 传入，vite build
+# 读取 VITE_APP_VERSION 内联进产物，左侧菜单底部据此显示。release 渠道传入不带
+# 时间戳的基础版本，test 渠道传入完整版本。未传时默认空串 → 前端回退 'dev'。
 ARG APP_VERSION=""
 ENV VITE_APP_VERSION=$APP_VERSION
 

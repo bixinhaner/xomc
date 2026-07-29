@@ -795,28 +795,33 @@ sep "8/9 启动业务 + web + 监控"
 log "${DC[*]} up -d"
 "${DC[@]}" up -d
 
-# 监控配置均从 release 目录 bind mount。升级切换 current 软链后，存量容器的
-# mount namespace 仍指向上一版真实目录；仅执行普通 up -d 不会重建镜像未变化
-# 的监控容器，导致新告警/采集/Grafana 配置实际上未加载。只重建有配置挂载的
-# 六个监控服务，--no-deps 避免连带重启 PostgreSQL/Redis 等基础设施。
-if [ "$SKIP_MONITORING" = 0 ]; then
-  log "刷新监控配置 bind mount（Prometheus / Alertmanager / Loki / Tempo / OTel / Grafana）..."
-  "${DC[@]}" up -d --force-recreate --no-deps prometheus alertmanager loki tempo otelcol grafana
-fi
-
-log "等待业务容器启动（10s）..."
-sleep 10
+log "等待业务容器启动（最多 90s，健康检查每 5s 重试）..."
+HEALTHCHECK_TIMEOUT=90
+HEALTHCHECK_INTERVAL=5
+HEALTHCHECK_WAIT=0
+HEALTHCHECK_LOG="$(mktemp)"
+HEALTH_OK=0
+while [ "$HEALTHCHECK_WAIT" -lt "$HEALTHCHECK_TIMEOUT" ]; do
+  if bash "$OMC_ROOT/current/deploy/healthcheck.sh" >"$HEALTHCHECK_LOG" 2>&1; then
+    HEALTH_OK=1
+    break
+  fi
+  sleep "$HEALTHCHECK_INTERVAL"
+  HEALTHCHECK_WAIT=$((HEALTHCHECK_WAIT + HEALTHCHECK_INTERVAL))
+done
 
 # =============================================================================
 # Step 9. healthcheck
 # =============================================================================
 sep "9/9 健康检查"
 
-if bash "$OMC_ROOT/current/deploy/healthcheck.sh"; then
-  HEALTH_OK=1
+if [ "$HEALTH_OK" -eq 1 ]; then
+  cat "$HEALTHCHECK_LOG"
 else
-  HEALTH_OK=0
+  cat "$HEALTHCHECK_LOG"
+  warn "健康检查在 ${HEALTHCHECK_TIMEOUT}s 内未通过"
 fi
+rm -f "$HEALTHCHECK_LOG"
 
 echo
 sep "部署完成"
