@@ -11,7 +11,7 @@
  *   G6-Gap-12 联动：PanelConfigDrawer 跳转携带 ?preset=panel&device_sns=...&metric_paths=...&granularities=...
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { useIntl, type IntlShape } from 'react-intl';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -27,9 +27,10 @@ import {
   Descriptions,
   Typography,
   message,
+  Tabs,
 } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
-import { PlusOutlined, DeleteOutlined, EditOutlined, StopOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
+import { PlusOutlined, DeleteOutlined, EditOutlined, StopOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   usePmAdhocList,
   usePmAdhocRuns,
@@ -47,6 +48,7 @@ import type {
   AdhocTask,
   AdhocTaskRun,
 } from '@core/types/pmAdhoc';
+import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import { displayAdhocTaskName } from '../adhocTaskDisplay';
 
@@ -60,6 +62,14 @@ import { CreateAdhocTaskDrawer, type CreateAdhocPreset } from './CreateAdhocTask
 import { AdhocResultPanel } from './AdhocResultPanel';
 import BuiltinMetricEditModal from './BuiltinMetricEditModal';
 import SelectedMetricsTags from './SelectedMetricsTags';
+import {
+  buildPmAdhocListStateSnapshot,
+  DEFAULT_PM_ADHOC_TABLE_PAGINATION,
+  PM_ADHOC_PAGE_KEY,
+  restorePmAdhocListState,
+  type PmAdhocListArea,
+  type PmAdhocTablePaginationState,
+} from './pmAdhocListState';
 
 const statusColor: Record<AdhocStatus, string> = {
   pending: 'default',
@@ -244,6 +254,8 @@ function TaskTable({
   onEdit,
   onDelete,
   onResume,
+  pagination,
+  onPaginationChange,
   currentUsername,
   isSuperAdmin,
 }: {
@@ -260,6 +272,8 @@ function TaskTable({
   onDelete?: (t: AdhocTask) => void;
   // #674：恢复已取消任务。
   onResume?: (id: string) => void;
+  pagination: PmAdhocTablePaginationState;
+  onPaginationChange: (pagination: PmAdhocTablePaginationState) => void;
   currentUsername: string;
   isSuperAdmin: boolean;
 }) {
@@ -382,6 +396,7 @@ function TaskTable({
       onEdit,
       onDelete,
       onResume,
+      onPaginationChange,
       currentUsername,
       isSuperAdmin,
       labelForTechnology,
@@ -395,7 +410,13 @@ function TaskTable({
       loading={loading}
       dataSource={tasks}
       columns={columns}
-      pagination={{ pageSize: 10, size: 'small' }}
+      pagination={{ ...pagination, size: 'small' }}
+      onChange={(nextPagination: TablePaginationConfig) => {
+        onPaginationChange({
+          current: nextPagination.current ?? DEFAULT_PM_ADHOC_TABLE_PAGINATION.current,
+          pageSize: nextPagination.pageSize ?? DEFAULT_PM_ADHOC_TABLE_PAGINATION.pageSize,
+        });
+      }}
     />
   );
 }
@@ -405,14 +426,21 @@ export default function PmAdhocPage() {
   const { labelForTechnology } = useTechnologyDictionary();
   const currentUsername = useUserStore((s) => s.currentUser?.username ?? '');
   const isSuperAdmin = useUserStore((s) => Boolean(s.currentUser?.isSuperAdmin));
+  const listMountFreshKeyRef = useRef(`${Date.now()}-${Math.random()}`);
   // T-0186：分两区，各发一次 list（内置 / 自建）。
   const { data: builtinTasks = [], isLoading: builtinLoading } = usePmAdhocList({
     refetchInterval: ADHOC_POLL_FALLBACK_MS,
     isBuiltin: true,
+    refetchOnMount: 'always',
+    staleTime: 0,
+    freshKey: listMountFreshKeyRef.current,
   });
   const { data: customTasks = [], isLoading: customLoading } = usePmAdhocList({
     refetchInterval: ADHOC_POLL_FALLBACK_MS,
     isBuiltin: false,
+    refetchOnMount: 'always',
+    staleTime: 0,
+    freshKey: listMountFreshKeyRef.current,
   });
 
   // issue #399：收集两区运行中（含 pending）任务 id，订阅进度 SSE；终态/scheduled 不订阅。
@@ -433,9 +461,56 @@ export default function PmAdhocPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [createOpen, setCreateOpen] = useState(false);
   const [createPreset, setCreatePreset] = useState<CreateAdhocPreset | undefined>(undefined);
-  const [selectedTask, setSelectedTask] = useState<AdhocTask | null>(null);
+  const restoredListState = useMemo(
+    () => restorePmAdhocListState(usePmPageStateStore.getState().getPageState(PM_ADHOC_PAGE_KEY)),
+    [],
+  );
+  const resetClearPendingRef = useRef(false);
+  const [activeListArea, setActiveListArea] = useState<PmAdhocListArea>(restoredListState.activeListArea);
+  const [builtinPagination, setBuiltinPagination] = useState<PmAdhocTablePaginationState>(
+    restoredListState.builtinPagination,
+  );
+  const [customPagination, setCustomPagination] = useState<PmAdhocTablePaginationState>(
+    restoredListState.customPagination,
+  );
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(restoredListState.detailTaskId);
   // T-0194：内置任务「编辑指标」弹窗状态。
   const [builtinEditTask, setBuiltinEditTask] = useState<AdhocTask | null>(null);
+  const selectedTask = useMemo(
+    () => [...builtinTasks, ...customTasks].find((task) => task.id === selectedTaskId) ?? null,
+    [builtinTasks, customTasks, selectedTaskId],
+  );
+
+  useEffect(() => {
+    usePmPageStateStore.getState().savePageState(
+      PM_ADHOC_PAGE_KEY,
+      buildPmAdhocListStateSnapshot({
+        activeListArea,
+        builtinPagination,
+        customPagination,
+        detailTaskId: selectedTaskId,
+      }),
+    );
+    if (!resetClearPendingRef.current) return;
+    const isDefaultState =
+      activeListArea === 'builtin' &&
+      builtinPagination.current === DEFAULT_PM_ADHOC_TABLE_PAGINATION.current &&
+      builtinPagination.pageSize === DEFAULT_PM_ADHOC_TABLE_PAGINATION.pageSize &&
+      customPagination.current === DEFAULT_PM_ADHOC_TABLE_PAGINATION.current &&
+      customPagination.pageSize === DEFAULT_PM_ADHOC_TABLE_PAGINATION.pageSize &&
+      selectedTaskId === null;
+    resetClearPendingRef.current = false;
+    if (isDefaultState) {
+      usePmPageStateStore.getState().clearPageState(PM_ADHOC_PAGE_KEY);
+    }
+  }, [activeListArea, builtinPagination, customPagination, selectedTaskId]);
+
+  useEffect(() => {
+    if (!selectedTaskId || builtinLoading || customLoading) return;
+    if (!selectedTask) {
+      setSelectedTaskId(null);
+    }
+  }, [builtinLoading, customLoading, selectedTask, selectedTaskId]);
 
   // G6-Gap-12 联动：URL preset 触发自动打开 Drawer
   useEffect(() => {
@@ -475,6 +550,20 @@ export default function PmAdhocPage() {
   };
   const handleEditBuiltin = (t: AdhocTask) => {
     setBuiltinEditTask(t);
+  };
+
+  const handleView = (area: PmAdhocListArea, task: AdhocTask) => {
+    setActiveListArea(area);
+    setSelectedTaskId(task.id);
+  };
+
+  const handleResetListState = () => {
+    setActiveListArea('builtin');
+    setBuiltinPagination({ ...DEFAULT_PM_ADHOC_TABLE_PAGINATION });
+    setCustomPagination({ ...DEFAULT_PM_ADHOC_TABLE_PAGINATION });
+    setSelectedTaskId(null);
+    resetClearPendingRef.current = true;
+    usePmPageStateStore.getState().clearPageState(PM_ADHOC_PAGE_KEY);
   };
 
   const handleCancel = (id: string) => {
@@ -533,29 +622,14 @@ export default function PmAdhocPage() {
 
   return (
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
-      <Card
-        title={intl.formatMessage({ id: 'perf.adhoc.cardBuiltin' })}
-        size="small"
-        extra={<Tag color="blue">{intl.formatMessage({ id: 'perf.adhoc.systemPreset' })}</Tag>}
-      >
-        <TaskTable
-          tasks={builtinTasks}
-          loading={builtinLoading}
-          isBuiltinArea
-          liveProgress={liveProgress}
-          onView={setSelectedTask}
-          onCancel={handleCancel}
-          onEdit={handleEditBuiltin}
-          onResume={handleResume}
-          currentUsername={currentUsername}
-          isSuperAdmin={isSuperAdmin}
-        />
-      </Card>
-
-      <Card
-        title={intl.formatMessage({ id: 'perf.adhoc.cardCustom' })}
-        size="small"
-        extra={
+      <Space style={{ width: '100%', justifyContent: 'space-between' }} align="center">
+        <Typography.Title level={5} style={{ margin: 0 }}>
+          {intl.formatMessage({ id: 'nav.performance.adhoc' })}
+        </Typography.Title>
+        <Space>
+          <Button size="small" icon={<ReloadOutlined />} onClick={handleResetListState}>
+            {intl.formatMessage({ id: 'common.reset' })}
+          </Button>
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -563,22 +637,69 @@ export default function PmAdhocPage() {
           >
             {intl.formatMessage({ id: 'perf.adhoc.btnNewTask' })}
           </Button>
-        }
-      >
-        <TaskTable
-          tasks={customTasks}
-          loading={customLoading}
-          isBuiltinArea={false}
-          liveProgress={liveProgress}
-          onView={setSelectedTask}
-          onCancel={handleCancel}
-          onEdit={handleEditCustom}
-          onDelete={handleDelete}
-          onResume={handleResume}
-          currentUsername={currentUsername}
-          isSuperAdmin={isSuperAdmin}
-        />
-      </Card>
+        </Space>
+      </Space>
+
+      <Tabs
+        activeKey={activeListArea}
+        onChange={(key) => setActiveListArea(key as PmAdhocListArea)}
+        items={[
+          {
+            key: 'builtin',
+            label: intl.formatMessage({ id: 'perf.adhoc.cardBuiltin' }),
+            children: (
+              <Card
+                size="small"
+                extra={<Tag color="blue">{intl.formatMessage({ id: 'perf.adhoc.systemPreset' })}</Tag>}
+              >
+                <TaskTable
+                  tasks={builtinTasks}
+                  loading={builtinLoading}
+                  isBuiltinArea
+                  liveProgress={liveProgress}
+                  onView={(task) => handleView('builtin', task)}
+                  onCancel={handleCancel}
+                  onEdit={handleEditBuiltin}
+                  onResume={handleResume}
+                  pagination={builtinPagination}
+                  onPaginationChange={(pagination) => {
+                    setActiveListArea('builtin');
+                    setBuiltinPagination(pagination);
+                  }}
+                  currentUsername={currentUsername}
+                  isSuperAdmin={isSuperAdmin}
+                />
+              </Card>
+            ),
+          },
+          {
+            key: 'custom',
+            label: intl.formatMessage({ id: 'perf.adhoc.cardCustom' }),
+            children: (
+              <Card size="small">
+                <TaskTable
+                  tasks={customTasks}
+                  loading={customLoading}
+                  isBuiltinArea={false}
+                  liveProgress={liveProgress}
+                  onView={(task) => handleView('custom', task)}
+                  onCancel={handleCancel}
+                  onEdit={handleEditCustom}
+                  onDelete={handleDelete}
+                  onResume={handleResume}
+                  pagination={customPagination}
+                  onPaginationChange={(pagination) => {
+                    setActiveListArea('custom');
+                    setCustomPagination(pagination);
+                  }}
+                  currentUsername={currentUsername}
+                  isSuperAdmin={isSuperAdmin}
+                />
+              </Card>
+            ),
+          },
+        ]}
+      />
 
       <CreateAdhocTaskDrawer
         open={createOpen}
@@ -599,8 +720,8 @@ export default function PmAdhocPage() {
             : intl.formatMessage({ id: 'perf.adhoc.detailTitleDefault' })
         }
         size={920}
-        open={Boolean(selectedTask)}
-        onClose={() => setSelectedTask(null)}
+        open={Boolean(selectedTaskId && selectedTask)}
+        onClose={() => setSelectedTaskId(null)}
         destroyOnClose
       >
         {selectedTask && (

@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createApiSwitch } from '../../services/apiSwitch';
 import { pmAdhocApi, pmAdhocMock } from '../../services/api/pmAdhocApi';
 import type {
+  AdhocTask,
   AdhocDimension,
   CreateAdhocTaskInput,
   UpdateAdhocTaskInput,
@@ -16,15 +17,23 @@ const api = createApiSwitch(pmAdhocMock, pmAdhocApi);
 
 const ADHOC_KEY = ['pm-adhoc-tasks'] as const;
 
-export function usePmAdhocList(opts?: { refetchInterval?: number; isBuiltin?: boolean }) {
+export function usePmAdhocList(opts?: {
+  refetchInterval?: number;
+  isBuiltin?: boolean;
+  refetchOnMount?: boolean | 'always';
+  staleTime?: number;
+  freshKey?: string | number;
+}) {
   // locale 并入查询键：切语言后内置任务名随后端本地化重取（pm-name-i18n）。
   const locale = useAppStore((s) => s.locale);
-  return useQuery({
+  return useQuery<AdhocTask[]>({
     // 查询键带 isBuiltin，内置区/自建区两次调用各自独立缓存（T-0186）
-    queryKey: [...ADHOC_KEY, 'list', { isBuiltin: opts?.isBuiltin ?? null, locale }],
+    queryKey: [...ADHOC_KEY, 'list', { isBuiltin: opts?.isBuiltin ?? null, locale, freshKey: opts?.freshKey ?? null }],
     queryFn: () =>
       api.list(opts?.isBuiltin === undefined ? undefined : { isBuiltin: opts.isBuiltin }),
     refetchInterval: opts?.refetchInterval,
+    refetchOnMount: opts?.refetchOnMount,
+    staleTime: opts?.staleTime,
   });
 }
 
