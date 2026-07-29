@@ -114,10 +114,11 @@ services:
               "-c", "shared_buffers=${TSDB_SHARED_BUFFERS:-3GB}", "-c", "effective_cache_size=${TSDB_EFFECTIVE_CACHE_SIZE:-7GB}",
               "-c", "work_mem=${TSDB_WORK_MEM:-16MB}", "-c", "maintenance_work_mem=${TSDB_MAINTENANCE_WORK_MEM:-1GB}",
               "-c", "max_wal_size=${TSDB_MAX_WAL_SIZE:-4GB}", "-c", "checkpoint_completion_target=0.9",
+              "-c", "shared_preload_libraries=timescaledb,pg_stat_statements", "-c", "track_io_timing=${TSDB_TRACK_IO_TIMING:-on}",
               "-c", "log_checkpoints=${TSDB_LOG_CHECKPOINTS:-off}", "-c", "log_autovacuum_min_duration=${TSDB_LOG_AUTOVACUUM_MIN_DURATION:--1}",
-              "-c", "log_statement=${TSDB_LOG_STATEMENT:-none}", "-c", "log_min_duration_statement=${TSDB_LOG_MIN_DURATION_STATEMENT:--1}",
+              "-c", "log_statement=${TSDB_LOG_STATEMENT:-none}", "-c", "log_min_duration_statement=${TSDB_LOG_MIN_DURATION_STATEMENT:-1000}",
               "-c", "log_connections=${TSDB_LOG_CONNECTIONS:-off}", "-c", "log_disconnections=${TSDB_LOG_DISCONNECTIONS:-off}",
-              "-c", "log_temp_files=${TSDB_LOG_TEMP_FILES:--1}", "-c", "log_min_messages=${TSDB_LOG_MIN_MESSAGES:-warning}"]
+              "-c", "log_temp_files=${TSDB_LOG_TEMP_FILES:-0}", "-c", "log_min_messages=${TSDB_LOG_MIN_MESSAGES:-warning}"]
     logging:
       driver: json-file
       options:

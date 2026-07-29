@@ -226,7 +226,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
       render: (v: string, row: ParamMapping) => {
         const stdCount = countPlaceholder(v);
         const privCount = countPlaceholder(row.privatePath);
-        const mismatch = stdCount !== privCount;
+        const mismatch = privCount > stdCount;
         return (
           <PathCell
             value={v}

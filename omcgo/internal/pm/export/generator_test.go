@@ -60,7 +60,7 @@ func TestStreamCSVToObject_EnglishFixedHeaders(t *testing.T) {
 
 func TestStreamCSVToObject_MissingMetricCellUsesPlaceholder(t *testing.T) {
 	src := &sliceSource{batches: [][]ExportRow{{
-		{Device: "d1", MetricCode: "K1", Value: 1},
+		{Device: "d1", MetricCode: "K1", Value: 0},
 	}}}
 	up := &stubUploader{}
 	cols := []WideColumn{{Code: "K1", Type: "kpi", Name: "K1"}, {Code: "K2", Type: "kpi", Name: "K2"}}
@@ -72,6 +72,7 @@ func TestStreamCSVToObject_MissingMetricCellUsesPlaceholder(t *testing.T) {
 	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
 	require.NoError(t, err)
 	require.Len(t, recs, 2)
+	assert.Equal(t, "0", recs[1][5], "真实 0 必须保留，不能误判为缺值")
 	assert.Equal(t, "-", recs[1][6])
 }
 
@@ -108,16 +109,21 @@ func TestStreamCSVToObject_UploadError_Propagates(t *testing.T) {
 }
 
 func TestStreamCSVToObject_EmptySource(t *testing.T) {
-	// 无数据：只写 BOM + 表头，行数 0，仍上传成功（空结果合法）。
+	// 所有配置指标都无真实行：保留完整指标表头，但不造对象/时间数据行。
 	src := &sliceSource{batches: nil}
 	up := &stubUploader{}
-	res, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, nil, csvLayout{FirstColHeader: "设备", IncludeCell: true}, nil)
+	cols := []WideColumn{
+		{Code: "K1", Type: "kpi", Name: "指标一"},
+		{Code: "K2", Type: "kpi", Name: "指标二"},
+	}
+	res, err := streamCSVToObject(context.Background(), up, "bkt", "obj.csv", src, cols, csvLayout{FirstColHeader: "设备", IncludeCell: true, MissingMetricValuePlaceholder: "-"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), res.RowCount)
 	body := strings.TrimPrefix(string(up.gotBody), string(utf8BOM))
 	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
 	require.NoError(t, err)
-	assert.Len(t, recs, 1) // 仅表头
+	require.Len(t, recs, 1)
+	assert.Equal(t, []string{"开始时间", "结束时间", "设备", "Cell ID", "PLMN", "指标一", "指标二"}, recs[0])
 }
 
 // 确保 BOM 字节序常量没漂。

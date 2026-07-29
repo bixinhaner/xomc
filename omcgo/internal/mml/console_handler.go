@@ -139,8 +139,8 @@ func (h *ConsoleHandler) GetCommandCompatibility(c *gin.Context) {
 // format 缺省为 tree（向后兼容递归树）；format=flat 返 Task #4 扁平响应。
 // product_class 缺省时不做产品级过滤（向后兼容）；非空时按 T-0172 方案 X
 // 过滤命令并给每条命令挂 supported_path_count / unsupported_paths / product_resolved。
-// device_sn 非空时按该设备对应 ParamModel 的支持集合过滤，优先用于控制台，
-// 使命令树与 sub-fields 参数列表使用同一设备支持口径。
+// product_class 非空时优先按产品/站型过滤；device_sn 仅作兼容兜底。
+// 控制台多设备选择时同一批设备已被前端约束为同一站型，因此命令树不按设备数量求交集。
 type GroupTreeQuery struct {
 	Root         string `form:"root"`
 	Lang         string `form:"lang"`
@@ -177,10 +177,12 @@ func (h *ConsoleHandler) GetGroupTree(c *gin.Context) {
 	lang := resolveLang(c, q.Lang)
 	var tree []GroupTreeNode
 	var err error
-	if deviceSN != "" {
+	if productClass != "" {
+		tree, err = h.svc.BuildGroupTreeFiltered(c.Request.Context(), q.Root, lang, productClass)
+	} else if deviceSN != "" {
 		tree, err = h.svc.BuildGroupTreeFilteredByDevice(c.Request.Context(), q.Root, lang, deviceSN)
 	} else {
-		tree, err = h.svc.BuildGroupTreeFiltered(c.Request.Context(), q.Root, lang, productClass)
+		tree, err = h.svc.BuildGroupTreeFiltered(c.Request.Context(), q.Root, lang, "")
 	}
 	if err != nil {
 		h.logger.Error("build group tree", zap.Error(err),

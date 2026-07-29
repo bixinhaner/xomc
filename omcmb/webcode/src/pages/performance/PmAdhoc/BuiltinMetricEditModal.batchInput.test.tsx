@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import zhCN from '@core/i18n/zh-CN';
+import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import BuiltinMetricEditModal from './BuiltinMetricEditModal';
 
@@ -85,6 +86,8 @@ describe('BuiltinMetricEditModal batch metric input', () => {
   beforeEach(() => {
     updateMutateAsync.mockReset();
     useIndicatorCandidatesSpy.mockClear();
+    usePmPageStateStore.setState({ pages: {} });
+    sessionStorage.clear();
     indicatorCandidates = [
       { id: 'K0001', name: 'availability', cnName: '可用率', enName: 'Availability', isCounter: false },
       { id: 'C0001', name: 'rrc_att', cnName: 'RRC请求次数', enName: 'RRC Attempts', isCounter: true },
@@ -104,7 +107,7 @@ describe('BuiltinMetricEditModal batch metric input', () => {
       target: { value: 'C0001, C404, C0001' },
     });
     fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
 
     await waitFor(() => {
       expect(updateMutateAsync).toHaveBeenCalledWith({
@@ -126,7 +129,7 @@ describe('BuiltinMetricEditModal batch metric input', () => {
       target: { value: indicatorCandidates.map((item) => item.id).join('\n') },
     });
     fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
 
     await waitFor(() => {
       expect(updateMutateAsync).toHaveBeenCalledWith({
@@ -143,8 +146,30 @@ describe('BuiltinMetricEditModal batch metric input', () => {
     );
     renderModal({ ...task, metricPaths: overLimitMetricPaths });
 
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
 
     expect(updateMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('restores unsaved builtin metric selections after the edit layer is reopened', async () => {
+    const { unmount } = renderModal();
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入指标 ID/ }));
+    fireEvent.change(screen.getByPlaceholderText(/K000000001/), {
+      target: { value: 'C0001' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+    expect(screen.getByText('已选 2 个指标')).toBeInTheDocument();
+
+    unmount();
+    renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith({
+        id: 'builtin-1',
+        input: { metricPaths: ['K0001', 'C0001'] },
+      });
+    });
   });
 });

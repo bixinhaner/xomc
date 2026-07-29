@@ -4,6 +4,9 @@ import {
   seriesKeyOf,
   seriesLabelOf,
   buildMetricCharts,
+  buildTrustedSeriesIdentities,
+  formatMetricChartDisplayName,
+  ensureConfiguredMetricCharts,
   filterChartsByMetricPaths,
   filterRowsByMetricPaths,
 } from './taskDashboardUtils';
@@ -105,6 +108,24 @@ describe('seriesLabelOf — 系列标签', () => {
 });
 
 describe('buildMetricCharts — 转置', () => {
+  it('图标题同时展示指标名称和指标 ID', () => {
+    const rows = [row({ metricPath: 'K001', displayName: 'RRC 成功率', startTime: 't0', metricValue: 1 })];
+    const charts = buildMetricCharts(rows, 'network', 'hourly');
+    expect(charts[0].displayName).toBe('RRC 成功率（K001）');
+  });
+
+  it('结果行名称等于指标 ID 时，用指标库名称兜底生成图标题', () => {
+    const rows = [row({ metricPath: 'C001', displayName: 'C001', startTime: 't0', metricValue: 1 })];
+    const charts = buildMetricCharts(
+      rows,
+      'network',
+      'hourly',
+      'zh-CN',
+      new Map([['C001', '上行流量原始计数']]),
+    );
+    expect(charts[0].displayName).toBe('上行流量原始计数（C001）');
+  });
+
   it('按指标分图：N 指标 → N 张图', () => {
     const rows = [
       row({ metricPath: 'M1', startTime: 't0', metricValue: 1 }),
@@ -215,7 +236,7 @@ describe('buildMetricCharts — 转置', () => {
   it('displayName 回填系列名（network 仍用维度标签）', () => {
     const rows = [row({ metricPath: 'K001', displayName: 'RRC 成功率', startTime: 't0', metricValue: 1 })];
     const charts = buildMetricCharts(rows, 'network', 'hourly');
-    expect(charts[0].displayName).toBe('RRC 成功率');
+    expect(charts[0].displayName).toBe('RRC 成功率（K001）');
     expect(charts[0].series[0].name).toBe('全网');
   });
   it('同一指标多行单位一致时，图表保留该单位', () => {
@@ -359,6 +380,112 @@ describe('filterChartsByMetricPaths — T-0194 按任务已选指标过滤出图
 
     expect(out).toHaveLength(14);
     expect(out.map((c) => c.metricPath)).toEqual(taskMetrics);
+  });
+});
+
+describe('ensureConfiguredMetricCharts — #198 任务指标空图骨架', () => {
+  it('混合有/无结果时仍按 metric_paths 生成全部图卡，空指标不补 0', () => {
+    const charts = buildMetricCharts(
+      [row({ metricPath: 'K1', deviceSn: 'SN-A', startTime: 't0', metricValue: 7 })],
+      'device',
+      'hourly',
+    );
+
+    const out = ensureConfiguredMetricCharts(
+      charts,
+      ['K1', 'K2', 'K1'],
+      [{ key: 'SN-A', name: 'SN-A' }],
+      new Map([['K2', 'VoLTE 接通率']]),
+    );
+
+    expect(out.map((chart) => chart.metricPath)).toEqual(['K1', 'K2']);
+    expect(out[0].series[0].values).toEqual([7]);
+    expect(out[1]).toMatchObject({
+      metricPath: 'K2',
+      displayName: 'VoLTE 接通率（K2）',
+      buckets: [],
+      bucketEnds: [],
+      series: [{ key: 'SN-A', name: 'SN-A', values: [] }],
+    });
+    expect(out[1].series.flatMap((series) => series.values)).not.toContain(0);
+  });
+});
+
+describe('formatMetricChartDisplayName — 指标标题统一格式', () => {
+  it('有名称时显示 名称（ID），名称缺失或等于 ID 时只显示 ID', () => {
+    expect(formatMetricChartDisplayName('K001', 'RRC 成功率')).toBe('RRC 成功率（K001）');
+    expect(formatMetricChartDisplayName('K001', 'K001')).toBe('K001');
+    expect(formatMetricChartDisplayName('K001', '  ')).toBe('K001');
+    expect(formatMetricChartDisplayName('K001')).toBe('K001');
+  });
+});
+
+describe('buildTrustedSeriesIdentities — #198 空图系列只取可信骨架', () => {
+  const labels = {
+    network: '全网',
+    band: '频段',
+    deviceGroup: '设备组',
+    product: '产品',
+    aggregateGroup: '聚合组',
+  };
+
+  it('按维度选择任务配置或 filter-options，未知来源不造 __unknown__ 假线', () => {
+    expect(buildTrustedSeriesIdentities('network', {}, labels)).toEqual([
+      { key: '__network__', name: '全网' },
+    ]);
+    expect(
+      buildTrustedSeriesIdentities('device', { deviceSns: ['SN-A', 'SN-A', 'SN-B'] }, labels),
+    ).toEqual([
+      { key: 'SN-A', name: 'SN-A' },
+      { key: 'SN-B', name: 'SN-B' },
+    ]);
+    expect(
+      buildTrustedSeriesIdentities('aggregate_group', {
+        objectLdns: ['Cell=1', 'Cell=2'],
+      }, labels),
+    ).toEqual([
+      { key: 'Cell=1', name: '聚合组 Cell=1' },
+      { key: 'Cell=2', name: '聚合组 Cell=2' },
+    ]);
+    expect(
+      buildTrustedSeriesIdentities('product', {
+        filterOptions: [
+          { value: 'prod-a', label: '产品 A' },
+          { value: 'prod-b', label: '产品 B' },
+        ],
+        selectedKeys: ['prod-b'],
+      }, labels),
+    ).toEqual([{ key: 'prod-b', name: '产品 B' }]);
+    expect(
+      buildTrustedSeriesIdentities('device_group', {
+        filterOptions: [{ value: 'DeviceGroup=group-a', label: '华东' }],
+      }, labels),
+    ).toEqual([{ key: 'DeviceGroup=group-a', name: '设备组 华东' }]);
+    expect(
+      buildTrustedSeriesIdentities('band', {
+        filterOptions: [{ value: 'Band=78', label: 'Band=78' }],
+      }, labels),
+    ).toEqual([{ key: 'Band=78', name: '频段 78' }]);
+    expect(buildTrustedSeriesIdentities('product', {}, labels)).toEqual([]);
+  });
+
+  it('系列前缀由调用方国际化资源注入，不在纯函数内写死语言', () => {
+    const englishLabels = {
+      network: 'Network',
+      band: 'Band',
+      deviceGroup: 'Device Group',
+      product: 'Product',
+      aggregateGroup: 'Aggregate Group',
+    };
+
+    expect(buildTrustedSeriesIdentities('network', {}, englishLabels)).toEqual([
+      { key: '__network__', name: 'Network' },
+    ]);
+    expect(
+      buildTrustedSeriesIdentities('product', {
+        filterOptions: [{ value: 'prod-a', label: 'Product A' }],
+      }, englishLabels),
+    ).toEqual([{ key: 'prod-a', name: 'Product A' }]);
   });
 });
 

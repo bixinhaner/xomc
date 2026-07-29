@@ -261,8 +261,10 @@ func parseDashboardKPIGranularity(raw string) (metrics.Granularity, error) {
 		return metrics.GranularityHourly, nil
 	case string(metrics.GranularityDaily):
 		return metrics.GranularityDaily, nil
+	case string(metrics.GranularityWeekly):
+		return metrics.GranularityWeekly, nil
 	default:
-		return "", fmt.Errorf("invalid granularity %q (allowed: hourly, daily)", raw)
+		return "", fmt.Errorf("invalid granularity %q (allowed: hourly, daily, weekly)", raw)
 	}
 }
 
@@ -317,10 +319,17 @@ func (h *Handler) GetKPITimeSeries(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.GetKPITimeSeries(c.Request.Context(), kpiNames, technology, granularity, startTime, endTime)
+	result, metadata, err := h.service.GetKPITimeSeriesWithMetadata(c.Request.Context(), kpiNames, technology, granularity, startTime, endTime)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		status := commonerrors.HTTPStatusFromError(err)
+		if status == http.StatusServiceUnavailable {
+			c.Header("Retry-After", "1")
+		}
+		commonerrors.AbortWithError(c, status, err)
 		return
+	}
+	if metadata.Stale {
+		c.Header("X-OMC-Data-Stale", "true")
 	}
 	response.OK(c, result)
 }

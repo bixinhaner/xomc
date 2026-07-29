@@ -112,7 +112,11 @@ func (inf *Infra) InitTracer(ctx context.Context, cfg appconfig.TracerConfig, se
 // ConnectPostgres 初始化 PostgreSQL 连接池，并注册健康检查和优雅关机回调。
 // 供主库（devices/alarms 等）使用，结果存入 Infra.PgPool。
 func (inf *Infra) ConnectPostgres(ctx context.Context, cfg appconfig.PostgresConfig) error {
-	pool, err := postgres.NewPostgresPool(ctx, cfg, inf.Logger)
+	mainRegisterer := prometheus.WrapRegistererWith(
+		prometheus.Labels{"pool": "main"},
+		inf.MetricsReg,
+	)
+	pool, err := postgres.NewPostgresPoolWithRegisterer(ctx, cfg, inf.Logger, mainRegisterer)
 	if err != nil {
 		return fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
@@ -123,8 +127,7 @@ func (inf *Infra) ConnectPostgres(ctx context.Context, cfg appconfig.PostgresCon
 	})
 	// 连接池资源指标（pgxpool_in_use/idle/max/acquire_total），带 pool="main" 常量标签
 	// 与时序库（pool="tsdb"）区分，避免同名指标在同一 registry 冲突。
-	mainPoolMetrics := postgres.RegisterPoolMetrics(pool,
-		prometheus.WrapRegistererWith(prometheus.Labels{"pool": "main"}, inf.MetricsReg))
+	mainPoolMetrics := postgres.RegisterPoolMetrics(pool, mainRegisterer)
 	// 优先级 1：采样器先于连接池关闭（优先级 4）停止，避免采样已关闭的 pool。
 	inf.GS.Register("postgres-pool-metrics", 1, func(context.Context) error { mainPoolMetrics.Stop(); return nil })
 	return nil
@@ -133,7 +136,11 @@ func (inf *Infra) ConnectPostgres(ctx context.Context, cfg appconfig.PostgresCon
 // ConnectTimescale 初始化 TimescaleDB 连接池，并注册健康检查和优雅关机回调。
 // 供 PM/KPI 超表使用，结果存入 Infra.TsPool。
 func (inf *Infra) ConnectTimescale(ctx context.Context, cfg appconfig.PostgresConfig) error {
-	pool, err := postgres.NewTimescalePool(ctx, cfg, inf.Logger)
+	tsdbRegisterer := prometheus.WrapRegistererWith(
+		prometheus.Labels{"pool": "tsdb"},
+		inf.MetricsReg,
+	)
+	pool, err := postgres.NewTimescalePoolWithRegisterer(ctx, cfg, inf.Logger, tsdbRegisterer)
 	if err != nil {
 		return fmt.Errorf("connect to TimescaleDB: %w", err)
 	}
@@ -143,8 +150,7 @@ func (inf *Infra) ConnectTimescale(ctx context.Context, cfg appconfig.PostgresCo
 		return pool.Ping(ctx)
 	})
 	// 时序库连接池资源指标，带 pool="tsdb" 常量标签与主库（pool="main"）区分。
-	tsPoolMetrics := postgres.RegisterPoolMetrics(pool,
-		prometheus.WrapRegistererWith(prometheus.Labels{"pool": "tsdb"}, inf.MetricsReg))
+	tsPoolMetrics := postgres.RegisterPoolMetrics(pool, tsdbRegisterer)
 	inf.GS.Register("timescale-pool-metrics", 1, func(context.Context) error { tsPoolMetrics.Stop(); return nil })
 	return nil
 }

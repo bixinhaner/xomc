@@ -4,6 +4,13 @@ export type { DeviceType, TimezoneMode, ThemeMode, LocaleCode } from './appStore
 export { useTabStore } from './tabStore';
 export type { TabItem } from './tabStore';
 
+export {
+  usePmPageStateStore,
+  isPerformanceTabPath,
+  performancePageKeyFromPath,
+} from './pmPageStateStore';
+export type { JsonObject, JsonValue, PmPageLastActionState, PmPageStateSnapshot } from './pmPageStateStore';
+
 export { useAlarmStore, selectTotalActive } from './alarmStore';
 export type { AlarmCounts, AlarmSeverity } from './alarmStore';
 

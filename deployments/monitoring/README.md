@@ -16,6 +16,7 @@ deployments/monitoring/
 │   ├── omc-rules.yml             # starter 告警规则（三进程存活）
 │   ├── connection-pool-alerts.yml
 │   ├── infra-alerts.yml          # pg/redis/nats/minio 基础服务（T-0155 P2b 改写）
+│   ├── dashboard-kpi-alerts.yml  # Dashboard 查询、全网上卷与 TSDB 临时写入
 │   └── otelcol-alerts.yml        # otelcol 自身管道健康（T-0155 收尾）
 ├── loki/
 │   └── loki-config.yml           # Loki 单节点 filesystem 存储 + 7d retention
@@ -204,6 +205,18 @@ redis    :6379 ──┘  └─ transform/promote_pg_resource ──┘
 > ⚠️ **OMC 三进程未启动时**，Prometheus targets 会显示 `down`，这是预期行为，
 > 不影响监控栈自身 healthy。启动 `app/acs/worker` 三进程后，target 会在
 > 一个 scrape interval（15s）内变为 `up`。
+
+## Dashboard 与 TSDB 保护指标
+
+首页 KPI 只读取现有全网小时、天、周聚合结果。`omcgo-app` 暴露查询延迟、
+并发、超时/拒绝、缓存、缺失/不完整窗口和上卷延迟指标；OTel Collector 的
+`sqlquery/tsdb` 每 30 秒采集 TSDB 临时写入累计值与超过 5 秒的活跃查询。
+
+- `pg_stat_database_temp_bytes` / `temp_files` 是 PostgreSQL 启动或统计重置以来的累计值，看板和告警必须使用 `rate()`。
+- `omc-overview` 底部展示 Dashboard P50/P95/P99、保护状态、缓存和完整性。
+- `omc-infra` 底部展示 TSDB 临时写入、长查询、CPU/内存和容器磁盘读写。
+- 默认告警阈值见 `alerts/dashboard-kpi-alerts.yml`；生产基线稳定后可按容量调整。
+- `TSDB_LOG_MIN_DURATION_STATEMENT` 可调慢 SQL 日志阈值，`TSDB_LOG_TEMP_FILES=-1` 可临时关闭临时文件日志；不要关闭 Prometheus 指标采集。
 
 ## 加新告警规则
 

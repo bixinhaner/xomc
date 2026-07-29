@@ -8,14 +8,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { TechnologyType } from './kpi-config';
-import { useKPILayout } from '@core/hooks/api/useDashboard';
-import { useMultiKPITrendComparison, useMultiKPIWeekSeries } from '@core/hooks/api/useDashboard';
+import {
+  useDashboardKPIWindowSeries,
+  useKPILayout,
+} from '@core/hooks/api/useDashboard';
 import { LayoutKPIPanel } from '@/components/dashboard/LayoutKPIPanel';
 import { resolveLayout, collectMetrics } from './layoutMapping';
-import type { KPILayoutPanel } from '@core/types/dashboard';
-import { useSystemClock } from '@core/hooks/useSystemClock';
-
-type CompareWindow = 'yesterday' | 'last_week';
+import type { DashboardKPIGranularity } from '@core/types/dashboard';
 
 interface DashboardKPIModulesProps {
   /** 当前制式 */
@@ -35,8 +34,7 @@ export function DashboardKPIModules({
   startDelay = 2,
 }: DashboardKPIModulesProps) {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [compareWindows, setCompareWindows] = useState<Record<string, CompareWindow>>({});
-  const { date: systemDateKey } = useSystemClock(60_000);
+  const [granularity, setGranularity] = useState<DashboardKPIGranularity>('hourly');
 
   // 读全局布局（按制式）；读不到 / 为空 / 出错由 resolveLayout 回退内置默认。
   const { data: remoteLayout } = useKPILayout(technology);
@@ -45,23 +43,12 @@ export function DashboardKPIModules({
     [technology, remoteLayout],
   );
 
-  // 汇总当前制式所有图要画的指标，去重；默认拉 yesterday，last_week 按需启用。
+  // 汇总当前制式所有图要画的指标，整页每次只发一个对应粒度的批量请求。
   const metrics = useMemo(() => collectMetrics(layout.panels), [layout.panels]);
-  const needsLastWeekData = useMemo(
-    () => Object.values(compareWindows).some((window) => window === 'last_week'),
-    [compareWindows],
-  );
-  const { data: yesterdayTrendData, isLoading: isYesterdayLoading } = useMultiKPITrendComparison(
+  const { data: trendData, isLoading, window } = useDashboardKPIWindowSeries(
     metrics,
-    'yesterday',
+    granularity,
     metrics.length > 0,
-    systemDateKey,
-    technology,
-  );
-  const { data: lastWeekTrendData, isLoading: isLastWeekLoading, dateKeys: weekDateKeys } = useMultiKPIWeekSeries(
-    metrics,
-    metrics.length > 0 && needsLastWeekData,
-    systemDateKey,
     technology,
   );
 
@@ -77,9 +64,6 @@ export function DashboardKPIModules({
 
   const shouldAnimate = enableScrollReveal && isInitialLoad;
 
-  const getPanelKey = (panel: KPILayoutPanel) =>
-    `${technology}:${panel.x}:${panel.y}:${panel.title}`;
-
   return (
     <div
       style={{
@@ -90,13 +74,6 @@ export function DashboardKPIModules({
       className={shouldAnimate ? 'omc-scroll-reveal omc-visible' : ''}
     >
       {panels.map((panel, index) => {
-        const panelKey = getPanelKey(panel);
-        const compareWindow = compareWindows[panelKey] ?? 'yesterday';
-        const trendData = compareWindow === 'last_week' ? lastWeekTrendData : yesterdayTrendData;
-        const isLoading = compareWindow === 'last_week'
-          ? isLastWeekLoading
-          : isYesterdayLoading;
-
         // 奇数个 panel 时，最后一个占满整行
         const isLastOdd = index === panels.length - 1 && panels.length % 2 === 1;
 
@@ -111,13 +88,9 @@ export function DashboardKPIModules({
               panel={panel}
               trendData={trendData}
               isLoading={isLoading}
-              compareWindow={compareWindow}
-              weekDateKeys={weekDateKeys}
-              onCompareWindowChange={(nextWindow) => {
-                setCompareWindows((prev) => (
-                  prev[panelKey] === nextWindow ? prev : { ...prev, [panelKey]: nextWindow }
-                ));
-              }}
+              granularity={granularity}
+              bucketKeys={window?.bucketKeys ?? []}
+              onGranularityChange={setGranularity}
               height={280}
             />
           </div>

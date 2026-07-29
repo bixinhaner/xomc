@@ -181,7 +181,7 @@ func TestDashHandler_KPITimeSeries_InvalidBothTimes(t *testing.T) {
 func TestDashHandler_KPITimeSeries_InvalidGranularity(t *testing.T) {
 	router, _ := dashHSetupRouter()
 	w := dashHDoRequest(router, http.MethodGet,
-		"/api/v1/dashboard/kpi-time-series?kpi_names=rrc&granularity=weekly")
+		"/api/v1/dashboard/kpi-time-series?kpi_names=rrc&granularity=15min")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
@@ -221,7 +221,8 @@ func TestParseDashboardKPIGranularity(t *testing.T) {
 		{"", metrics.GranularityHourly, false},
 		{"hourly", metrics.GranularityHourly, false},
 		{"daily", metrics.GranularityDaily, false},
-		{"weekly", "", true},
+		{"weekly", metrics.GranularityWeekly, false},
+		{"15min", "", true},
 	}
 	for _, tt := range tests {
 		got, err := parseDashboardKPIGranularity(tt.input)

@@ -50,7 +50,6 @@ import (
 	"github.com/omcgo/omcgo/internal/ops"
 	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/pm"
-	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/provision"
@@ -1358,29 +1357,26 @@ func initRebootRecordModule(c *Container) error {
 func initDashboardModule(c *Container) error {
 	logger := c.Logger.Named("dashboard")
 
-	// T-2026-07-06: SSE notifier for dashboard auto-refresh
-	dashSSENotifier := dashboard.NewSSENotifier(c.miscDeps.messageHub, logger)
-	cleanupSSE, err := dashSSENotifier.Subscribe(c.EventBus)
-	if err != nil {
-		logger.Warn("dashboard sse notifier subscribe failed", zap.Error(err))
-	} else {
-		// 注册到优雅关机
-		c.GS.Register("dashboard-sse", 2, func(ctx context.Context) error {
-			cleanupSSE()
-			return nil
-		})
-	}
-
 	// KPI/时序库物理分离：alarms_history / alarm_efficiency_metrics matview 在时序库（TsPool），新增 tsPool 入参。
 	// issue #213 Phase1：注入 PM 的 indicator 仓库（perf_indicators_{enb,gsm,gnb}），
 	// 供 GetKPIDefinitions 按别名表 K 编号反查 cnName / unit。dashboard 依赖 pm，pmHandlerDeps 此时已就绪。
 	var dashIndicatorRepo indicator.IndicatorRepository
-	var dashPMAggregator *aggregator.Aggregator
 	if c.pmHandlerDeps != nil {
 		dashIndicatorRepo = c.pmHandlerDeps.pmIndicatorRepo
-		dashPMAggregator = c.pmHandlerDeps.pmAggregator
 	}
-	dashboardService := dashboard.NewService(c.DeviceService, c.AlarmPgStore, c.PMKPIRepo, c.PgPool, c.TsPool, c.GroupRepo, dashIndicatorRepo, dashPMAggregator, logger)
+	dashboardCfg := c.Cfg.Dashboard.Defaults()
+	dashboardMetrics := dashboard.NewMetrics(c.MetricsReg)
+	networkRollups := dashboard.NewNetworkRollupRepository(c.TsPool, dashboardCfg.StatementTimeout)
+	queryGuard := dashboard.NewKPIQueryGuard(dashboard.KPIQueryGuardConfig{
+		QueryTimeout:  dashboardCfg.QueryTimeout,
+		MaxConcurrent: dashboardCfg.MaxConcurrent,
+		QueueTimeout:  dashboardCfg.QueueTimeout,
+		FreshTTL:      dashboardCfg.FreshCacheTTL,
+		StaleTTL:      dashboardCfg.StaleTTL,
+	}, dashboardMetrics)
+	dashboardService := dashboard.NewService(c.DeviceService, c.AlarmPgStore, c.PMKPIRepo, c.PgPool, c.TsPool, c.GroupRepo, dashIndicatorRepo, networkRollups, logger)
+	dashboardService.SetKPIQueryGuard(queryGuard)
+	dashboardService.SetMetrics(dashboardMetrics)
 	// issue #213 S1：存全局布局接口在 handler 层再校验管理员身份，注入 RoleRepo 作 Casbin 权限检查器
 	// （super_admin 旁路 + 端点级权限点）。RoleRepo 实现 admin.PermissionChecker；为 nil 时只认 super_admin。
 	var dashPermChecker admin.PermissionChecker
@@ -1788,6 +1784,7 @@ func initMiscModules(c *Container) error {
 		}
 
 		var productID uuid.UUID
+		var productTech string
 		var paramModelID *uuid.UUID
 		if dev.ProductID != nil {
 			p, err := c.ProductRegistry.GetProductByID(ctx, *dev.ProductID)
@@ -1796,6 +1793,7 @@ func initMiscModules(c *Container) error {
 			}
 			if p != nil {
 				productID = p.ID
+				productTech = p.Tech
 				paramModelID = p.ParamModelID
 			}
 		}
@@ -1814,6 +1812,7 @@ func initMiscModules(c *Container) error {
 			if errors.Is(err, product.ErrInactiveParamModel) {
 				if mr != nil && mr.Product != nil {
 					productID = mr.Product.ID
+					productTech = mr.Product.Tech
 					paramModelID = mr.Product.ParamModelID
 				}
 				var pidPtr *uuid.UUID
@@ -1824,6 +1823,7 @@ func initMiscModules(c *Container) error {
 				return &mml.SupportedSet{
 					ProductClass:    dev.ProductClass,
 					ProductID:       pidPtr,
+					ProductTech:     productTech,
 					ParamModelID:    paramModelID,
 					ProductResolved: true,
 					Paths:           map[string]struct{}{},
@@ -1836,6 +1836,7 @@ func initMiscModules(c *Container) error {
 				return &mml.SupportedSet{ProductResolved: false, Paths: map[string]struct{}{}}, nil
 			}
 			productID = mr.Product.ID
+			productTech = mr.Product.Tech
 			paramModelID = mr.Product.ParamModelID
 		}
 		if paramModelID == nil {
@@ -1843,6 +1844,7 @@ func initMiscModules(c *Container) error {
 			return &mml.SupportedSet{
 				ProductClass:    dev.ProductClass,
 				ProductID:       &pid,
+				ProductTech:     productTech,
 				ProductResolved: false,
 				Paths:           map[string]struct{}{},
 			}, nil
@@ -1858,6 +1860,7 @@ func initMiscModules(c *Container) error {
 				return &mml.SupportedSet{
 					ProductClass:    dev.ProductClass,
 					ProductID:       &pid,
+					ProductTech:     productTech,
 					ParamModelID:    &pmID,
 					ProductResolved: true,
 					Paths:           map[string]struct{}{},
@@ -1899,6 +1902,7 @@ SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g')
 		return &mml.SupportedSet{
 			ProductClass:    dev.ProductClass,
 			ProductID:       &pid,
+			ProductTech:     productTech,
 			ParamModelID:    &pmID,
 			ProductResolved: true,
 			Paths:           paths,
@@ -1984,6 +1988,7 @@ SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g')
 				if mr != nil && mr.Product != nil {
 					productID := mr.Product.ID
 					set.ProductID = &productID
+					set.ProductTech = mr.Product.Tech
 					if mr.Product.ParamModelID != nil {
 						paramModelID := *mr.Product.ParamModelID
 						set.ParamModelID = &paramModelID
@@ -2018,6 +2023,7 @@ SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g')
 					return &mml.SupportedSet{
 						ProductClass:    productClass,
 						ProductID:       &productID,
+						ProductTech:     mr.Product.Tech,
 						ParamModelID:    &paramModelID,
 						ProductResolved: true,
 						Paths:           map[string]struct{}{},
@@ -2036,6 +2042,7 @@ SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g')
 			return &mml.SupportedSet{
 				ProductClass:    productClass,
 				ProductID:       &productID,
+				ProductTech:     mr.Product.Tech,
 				ParamModelID:    &paramModelID,
 				ProductResolved: true,
 				Paths:           paths,

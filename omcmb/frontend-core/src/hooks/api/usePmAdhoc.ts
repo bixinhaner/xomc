@@ -16,7 +16,10 @@ const api = createApiSwitch(pmAdhocMock, pmAdhocApi);
 
 const ADHOC_KEY = ['pm-adhoc-tasks'] as const;
 
-export function usePmAdhocList(opts?: { refetchInterval?: number; isBuiltin?: boolean }) {
+export function usePmAdhocList(opts?: {
+  refetchInterval?: number;
+  isBuiltin?: boolean;
+}) {
   // locale 并入查询键：切语言后内置任务名随后端本地化重取（pm-name-i18n）。
   const locale = useAppStore((s) => s.locale);
   return useQuery({

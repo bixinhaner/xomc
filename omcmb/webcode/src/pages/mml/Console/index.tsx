@@ -18,6 +18,7 @@ import type {
   ResultColumn,
   ResultRow,
 } from './types';
+import type { MMLTask } from '@core/types/mml';
 import { isReadOp, opLabel } from './constants';
 import { commandUsesPathSelection } from './pathSelection';
 import { useConsoleHistory } from './useConsoleHistory';
@@ -61,6 +62,21 @@ interface LiveExec {
    * 收口时据此走 buildMODReadbackRows 关联「下发 vs 回读」；非 MOD 为空。
    */
   setValues?: Record<string, string>;
+}
+
+function buildTerminalFallbackRows(le: LiveExec, task: MMLTask): ResultRow[] {
+  const success = task.successCount ?? 0;
+  const failed = task.failedCount ?? 0;
+  const fallbackFault = `任务已结束，结果详情暂不可用（成功 ${success} / 失败 ${failed}）`;
+  return le.rows.map((row) => {
+    if (!['pending', 'running'].includes(row.status)) return row;
+    return {
+      ...row,
+      status: 'unverified',
+      faultCode: row.faultCode ?? fallbackFault,
+      unverifiedReason: 'query-failed',
+    };
+  });
 }
 
 /**
@@ -107,10 +123,10 @@ export default function MMLConsole() {
 
   // 统一收口：拉 /results → buildDeviceRows（逐 PATH 合并）→ 落命令记录。
   // SSE 完成帧（handleCompleted）与轮询兜底都走这里，确保结果不取自被逐帧覆盖的 SSE 行。
-  const finalizeFromResults = async (taskId: string): Promise<void> => {
-    if (finalizedRef.current.has(taskId)) return;
+  const finalizeFromResults = async (taskId: string, fallbackRows?: ResultRow[]): Promise<boolean> => {
+    if (finalizedRef.current.has(taskId)) return true;
     const le = liveExecsRef.current.get(taskId);
-    if (!le) return;
+    if (!le) return false;
     let rows: ResultRow[] | null = null;
     try {
       // MOD 复合（下发 + 回读 LST）每设备 2 条 device_task，pageSize 预留回读条目空间。
@@ -128,9 +144,11 @@ export default function MMLConsole() {
     } catch {
       /* 拉取失败：交给轮询下个 tick 重试 */
     }
-    // 拉不到结果不收口，交给轮询下个 tick 重试，避免落入被 SSE 逐帧覆盖的空行。
-    if (!rows) return;
-    if (finalizedRef.current.has(taskId)) return;
+    // SSE 完成帧拉不到结果时不收口，交给轮询下个 tick 重试；轮询已确认后端终态时传入
+    // fallbackRows，避免后端已完成但前端 liveExec 长期残留，结果区一直 loading。
+    rows ??= fallbackRows ?? null;
+    if (!rows) return false;
+    if (finalizedRef.current.has(taskId)) return true;
     finalizedRef.current.add(taskId);
     // 原地更新点击执行时插入的「执行中」记录（同 recordId/commandId）：沿用下发时间、补齐
     // 结果行、记录态置 done。#217：用 update 不抢占用户当前选中焦点——后台并发任务收口时，
@@ -155,6 +173,7 @@ export default function MMLConsole() {
       next.delete(taskId);
       return next;
     });
+    return true;
   };
 
   const structuredMutation = useExecuteStatementsStructured();
@@ -215,7 +234,8 @@ export default function MMLConsole() {
             const task = await mmlApi.getTaskById(taskId);
             if (cancelled || !task || !TERMINAL_TASK_STATUS.has(task.status)) return;
             // 与 SSE 完成路径共用收口（/results → buildDeviceRows），由 finalizedRef 去重。
-            await finalizeFromResults(taskId);
+            const le = liveExecsRef.current.get(taskId);
+            await finalizeFromResults(taskId, le ? buildTerminalFallbackRows(le, task) : undefined);
           } catch {
             /* 忽略，下个 tick 再试 */
           }

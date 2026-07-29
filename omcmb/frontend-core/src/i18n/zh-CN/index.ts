@@ -3044,6 +3044,7 @@ const messages: Record<string, string> = {
   // Dashboard视图模式 - v2.0新增
   'dashboard.viewMode.day':    '天',
   'dashboard.viewMode.week':   '周',
+  'dashboard.viewMode.hour':   '小时',
 
   // Dashboard提示信息 - v2.0新增
   'dashboard.selectTimeRange': '请选择时间范围',
@@ -7702,8 +7703,8 @@ const messages: Record<string, string> = {
   'product.paramModel.mappings.filterStorable': '仅可存储',
   'product.paramModel.mappings.newBtn': '新增映射',
   'product.paramModel.mappings.newTitle': '新增映射',
-  'product.paramModel.mappings.placeholderMismatch': '占位符 {i} 数量不匹配：standard={std} private={priv}',
-  'product.paramModel.mappings.privatePathExtra': '支持 {i} 占位符；与 private_path 的 {i} 数量必须一致',
+  'product.paramModel.mappings.placeholderMismatch': 'private_path 的 {i} 数量不能多于 standard_path：standard={std} private={priv}',
+  'product.paramModel.mappings.privatePathExtra': '支持 {i} 占位符；private_path 的 {i} 数量不能多于 standard_path',
   'product.paramModel.models.builtinHint': '内置参数模型不可在线删除。如需移除,请联系管理员',
   'product.paramModel.models.colTotalEntries': '总条目',
   'product.paramModel.models.colTotalObjects': '对象数',
@@ -8344,6 +8345,7 @@ const messages: Record<string, string> = {
   'dashboard.kpiPanel.empty.title':      '暂无聚合数据',
   'dashboard.kpiPanel.empty.hint':       '全网指标每小时整点更新；刚灌入的数据将在下个整点后或回退原始明细后显示。',
   'dashboard.kpiPanel.empty.lastWeekHint': '所选对比周期暂无历史聚合数据；请联系运维确认上周数据是否已完成跑批。',
+  'dashboard.kpiPanel.empty.rollupHint': '当前小时、天或周聚合窗口暂无数据，请联系运维检查聚合任务状态。',
 
   // qa-614 c5 — software 固件/升级（#369 / #371 / #379）
   'software.firmware.selectOrInputProductClass': '请选择或输入产品类型',

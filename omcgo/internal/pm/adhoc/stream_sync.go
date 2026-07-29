@@ -17,14 +17,18 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 	if r.streamRepo == nil || task == nil {
 		return nil
 	}
-	enabledPaths, err := r.resolveEnabledStreamingMetricPaths(ctx, task.Technology)
-	if err != nil {
-		return err
+	outputMetricPaths := streamingTaskOutputMetricPaths(task, nil)
+	if task.IsBuiltin {
+		enabledPaths, err := r.resolveEnabledStreamingMetricPaths(ctx, task.Technology)
+		if err != nil {
+			return err
+		}
+		outputMetricPaths = streamingTaskOutputMetricPaths(task, enabledPaths)
 	}
 	rules, err := r.resolveStreamingRules(
 		ctx,
 		task.Technology,
-		streamingOutputMetricPaths(task.MetricPaths, enabledPaths),
+		outputMetricPaths,
 	)
 	if err != nil {
 		return err
@@ -37,13 +41,13 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 	if err != nil {
 		return err
 	}
-	if len(members) == 0 {
+	if shouldRejectEmptyStreamingMembers(task, members) {
 		return fmt.Errorf("PM aggregation task resolved no devices")
 	}
 	granularities := streamingRollupGranularities()
 	_, err = r.streamRepo.Save(ctx, pmstream.SaveTaskRequest{
 		TaskID: task.ID, Name: task.Name, Enabled: enabled,
-		Visibility: string(normalizeVisibility(task.Visibility)), Creator: task.Creator,
+		Visibility: string(normalizeVisibility(task.Visibility)), Creator: streamingTaskCreator(task),
 		Technology: task.Technology, Dimension: pmstream.Dimension(task.Dimension),
 		Granularities: granularities, ObjectLDNs: task.ObjectLDNs,
 		Metrics: rules, Counters: counters, Members: members, PlannedEndAt: task.PlannedEndAt,
@@ -52,6 +56,27 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 		return fmt.Errorf("save PM streaming task version: %w", err)
 	}
 	return nil
+}
+
+func shouldRejectEmptyStreamingMembers(task *Task, members []pmstream.TaskMember) bool {
+	return task != nil && !task.IsBuiltin && len(members) == 0
+}
+
+func streamingTaskCreator(task *Task) string {
+	if task == nil || task.Creator == "" {
+		return "system"
+	}
+	return task.Creator
+}
+
+func streamingTaskOutputMetricPaths(task *Task, enabledPaths []string) []string {
+	if task == nil {
+		return nil
+	}
+	if !task.IsBuiltin {
+		return streamingOutputMetricPaths(task.MetricPaths, nil)
+	}
+	return streamingOutputMetricPaths(task.MetricPaths, enabledPaths)
 }
 
 func streamingRollupGranularities() []pmstream.Granularity {

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { mmlApi } from '@core/services/api/mmlApi';
 import type { ExecRecord } from './types';
@@ -62,6 +62,11 @@ function writeIds(ids: string[]): void {
   }
 }
 
+export function isMissingTaskError(error: unknown): boolean {
+  const status = (error as { response?: { status?: unknown } } | null)?.response?.status;
+  return status === 404 || status === 410;
+}
+
 export function useConsoleHistory(): ConsoleHistory {
   const [ids, setIds] = useState<string[]>(readIds);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -81,6 +86,21 @@ export function useConsoleHistory(): ConsoleHistory {
   queries.forEach((q, i) => {
     if (q.data) fetchedById.set(missingIds[i], mapTaskToRecord(q.data));
   });
+  const missingErrorKey = queries
+    .map((q, i) => (q.isError && isMissingTaskError(q.error) ? missingIds[i] : ''))
+    .filter(Boolean)
+    .join('|');
+
+  useEffect(() => {
+    if (!missingErrorKey) return;
+    const deadIds = new Set(missingErrorKey.split('|'));
+    setIds((prev) => {
+      const next = prev.filter((id) => !deadIds.has(id));
+      if (next.length === prev.length) return prev;
+      writeIds(next);
+      return next;
+    });
+  }, [missingErrorKey]);
 
   // 合并：本会话完整记录优先，其次拉取重建的记录；解析不到的 ID 剔除。保持 localStorage 顺序。
   const records = ids

@@ -38,8 +38,9 @@ type partialPrefixTranslation struct {
 
 // NewTranslator 从 MappingSet 构造 Translator。
 //
-// 构造期校验：standardPath 与 privatePath 的 `{i}` 出现次数必须相等（设计 §1.7）。
-// 不等条目跳过，记 WARN 日志 + Prometheus 计数。
+// 构造期校验：privatePath 的 `{i}` 出现次数不能多于 standardPath。
+// standardPath 允许多出上层实例（例如 FAPService.{i}），翻译到更扁平的私有路径时
+// 多余实例号会被丢弃。不满足条目跳过，记 WARN 日志 + Prometheus 计数。
 //
 // 重复 standardPath / privatePath：后者覆盖前者（按设计假定一对一，不应发生；
 // 若发生则记录 WARN 并按字典顺序最后一条胜出）。
@@ -480,29 +481,29 @@ func matchPathTemplateNode[V any](
 	return zero, nil, false
 }
 
-// substituteInstanceNumbers 把已按源模板 `{i}` 位置捕获的运行时实例号，按顺序
-// 回填到目标模板的 `{i}` 槽。目标模板中的固定数字段保持原值。
+// substituteInstanceNumbers 把已按源模板 `{i}` 位置捕获的运行时实例号，回填到目标模板的
+// `{i}` 槽。目标模板中的固定数字段保持原值。如果源模板比目标模板多出上层实例号，
+// 多出的前置实例号会被丢弃，使较扁平的私有路径保留业务对象实例号。
 //
 // 返回 ok=false 当：
 //   - 目标模板为空
-//   - 捕获实例号数量 != 目标模板的 {i} 槽数
+//   - 捕获实例号数量 < 目标模板的 {i} 槽数
 func substituteInstanceNumbers(instanceNumbers []string, dstTemplate string) (string, bool) {
 	if dstTemplate == "" {
 		return "", false
 	}
 	parts := strings.Split(dstTemplate, ".")
+	slotCount := strings.Count(dstTemplate, placeholderToken)
+	if len(instanceNumbers) < slotCount {
+		return "", false
+	}
+	start := len(instanceNumbers) - slotCount
 	consumed := 0
 	for i, seg := range parts {
 		if seg == placeholderToken {
-			if consumed >= len(instanceNumbers) {
-				return "", false
-			}
-			parts[i] = instanceNumbers[consumed]
+			parts[i] = instanceNumbers[start+consumed]
 			consumed++
 		}
-	}
-	if consumed != len(instanceNumbers) {
-		return "", false
 	}
 	return strings.Join(parts, "."), true
 }
@@ -519,9 +520,9 @@ func (t *Translator) Source() MappingSource { return t.set.Source }
 // SkippedCount 返回因 `{i}` 校验跳过的条目数；可用于运维巡检。
 func (t *Translator) SkippedCount() int { return t.skippedCount }
 
-// validatePlaceholders 校验两侧 `{i}` 出现次数是否相等。
+// validatePlaceholders 校验 privatePath 不需要比 standardPath 更多的实例号。
 func validatePlaceholders(standard, private string) bool {
-	return strings.Count(standard, placeholderToken) == strings.Count(private, placeholderToken)
+	return strings.Count(standard, placeholderToken) >= strings.Count(private, placeholderToken)
 }
 
 // paramModelLabel 给 metric / log 取一个稳定可读的标签：

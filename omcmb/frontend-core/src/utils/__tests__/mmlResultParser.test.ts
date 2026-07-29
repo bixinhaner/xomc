@@ -84,6 +84,58 @@ describe('parseMmlDeviceTaskResult', () => {
     expect(got?.params).toHaveLength(3); // 回退到 raw 解析
   });
 
+  it('GPV → 超大 raw_response 默认完整解析，避免任务详情/CSV 静默截断', () => {
+    const structs = Array.from({ length: 85 }, (_v, i) => `
+      <ParameterValueStruct>
+        <Name>DeviceGSM.Bts.1.Param${i}</Name>
+        <Value xsi:type="xsd:string">v&amp;${i}</Value>
+      </ParameterValueStruct>
+    `).join('');
+    const got = parseMmlDeviceTaskResult({
+      method: 'GetParameterValuesResponse',
+      raw_response: `<GetParameterValuesResponse>${structs}</GetParameterValuesResponse>${' '.repeat(501_000)}`,
+    });
+
+    expect(got?.kind).toBe('gpv');
+    expect(got?.params).toHaveLength(85);
+    expect(got?.params?.[0]).toEqual({ name: 'DeviceGSM.Bts.1.Param0', value: 'v&0', type: 'xsd:string' });
+    expect(got?.params?.[84]?.name).toBe('DeviceGSM.Bts.1.Param84');
+  });
+
+  it('GPV → 调用方显式 maxParams 时才截断大 raw_response', () => {
+    const structs = Array.from({ length: 85 }, (_v, i) => `
+      <ParameterValueStruct>
+        <Name>DeviceGSM.Bts.1.Param${i}</Name>
+        <Value xsi:type="xsd:string">v${i}</Value>
+      </ParameterValueStruct>
+    `).join('');
+    const got = parseMmlDeviceTaskResult(
+      {
+        method: 'GetParameterValuesResponse',
+        raw_response: `<GetParameterValuesResponse>${structs}</GetParameterValuesResponse>${' '.repeat(501_000)}`,
+      },
+      { maxParams: 80 },
+    );
+
+    expect(got?.params).toHaveLength(80);
+    expect(got?.params?.[79]?.name).toBe('DeviceGSM.Bts.1.Param79');
+  });
+
+  it('GPV → standard_parameter_values 也只在调用方显式 maxParams 时截断', () => {
+    const values = Array.from({ length: 3 }, (_v, i) => ({ name: `Device.X.${i}`, value: `v${i}` }));
+    expect(parseMmlDeviceTaskResult({
+      method: 'GetParameterValuesResponse',
+      raw_response: gpvSample,
+      standard_parameter_values: values,
+    })?.params).toHaveLength(3);
+
+    expect(parseMmlDeviceTaskResult({
+      method: 'GetParameterValuesResponse',
+      raw_response: gpvSample,
+      standard_parameter_values: values,
+    }, { maxParams: 2 })?.params).toHaveLength(2);
+  });
+
   it('SPV Status=0 → 立即生效', () => {
     const got = parseMmlDeviceTaskResult({
       method: 'SetParameterValuesResponse',

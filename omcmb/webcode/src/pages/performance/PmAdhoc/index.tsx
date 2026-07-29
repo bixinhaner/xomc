@@ -60,6 +60,7 @@ import { CreateAdhocTaskDrawer, type CreateAdhocPreset } from './CreateAdhocTask
 import { AdhocResultPanel } from './AdhocResultPanel';
 import BuiltinMetricEditModal from './BuiltinMetricEditModal';
 import SelectedMetricsTags from './SelectedMetricsTags';
+import { clearActiveBuiltinMetricTaskId, getActiveBuiltinMetricTaskId } from './pmAdhocDraftState';
 
 const statusColor: Record<AdhocStatus, string> = {
   pending: 'default',
@@ -437,6 +438,16 @@ export default function PmAdhocPage() {
   // T-0194：内置任务「编辑指标」弹窗状态。
   const [builtinEditTask, setBuiltinEditTask] = useState<AdhocTask | null>(null);
 
+  useEffect(() => {
+    if (builtinEditTask || builtinLoading) return;
+    const activeTaskId = getActiveBuiltinMetricTaskId();
+    if (!activeTaskId) return;
+    const activeTask = builtinTasks.find((task) => task.id === activeTaskId);
+    if (activeTask) {
+      setBuiltinEditTask(activeTask);
+    }
+  }, [builtinEditTask, builtinLoading, builtinTasks]);
+
   // G6-Gap-12 联动：URL preset 触发自动打开 Drawer
   useEffect(() => {
     if (searchParams.get('preset') === 'panel') {
@@ -530,6 +541,19 @@ export default function PmAdhocPage() {
       },
     });
   };
+
+  if (builtinEditTask) {
+    return (
+      <BuiltinMetricEditModal
+        task={builtinEditTask}
+        open
+        onClose={() => {
+          clearActiveBuiltinMetricTaskId(builtinEditTask.id);
+          setBuiltinEditTask(null);
+        }}
+      />
+    );
+  }
 
   return (
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
@@ -697,13 +721,6 @@ export default function PmAdhocPage() {
           </>
         )}
       </Drawer>
-
-      {/* T-0194：内置任务「编辑指标」弹窗 */}
-      <BuiltinMetricEditModal
-        task={builtinEditTask}
-        open={Boolean(builtinEditTask)}
-        onClose={() => setBuiltinEditTask(null)}
-      />
     </Space>
   );
 }

@@ -15,7 +15,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ImportOutlined } from '@ant-design/icons';
 import {
   Alert,
@@ -37,6 +37,7 @@ import dayjs from 'dayjs';
 import { InputAddon } from '@/components/common/InputAddon';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import { useCreatePmAdhoc, useUpdatePmAdhoc, usePmAdhocDetail } from '@core/hooks/api/usePmAdhoc';
+import { useTabStore } from '@core/store/tabStore';
 import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
@@ -53,6 +54,13 @@ import {
   type MetricBatchSelectionResult,
 } from '@/components/MetricPickerModal';
 import { resolveLimitedTransferSelection } from './selectionLimit';
+import {
+  clearCustomWizardDraft,
+  getCustomWizardDraft,
+  saveCustomWizardDraft,
+  type CustomWizardDraftKey,
+  type PmAdhocCustomWizardDraft,
+} from './pmAdhocDraftState';
 
 // 制式（含 GSM，networkType 过滤直接用小写值）
 type WizardTech = TechnologyType;
@@ -82,7 +90,9 @@ function isSameStringArray(a: string[], b: string[]): boolean {
 
 export default function PmAdhocWizard() {
   const intl = useIntl();
+  const location = useLocation();
   const navigate = useNavigate();
+  const openTab = useTabStore((s) => s.openTab);
   const {
     options: techOptions,
     isLoading: techOptionsLoading,
@@ -95,6 +105,20 @@ export default function PmAdhocWizard() {
   const isEdit = Boolean(editId);
   const updateMut = useUpdatePmAdhoc();
   const { data: editTask } = usePmAdhocDetail(editId);
+  const draftKey = useMemo<CustomWizardDraftKey>(
+    () => (isEdit && editId ? { mode: 'edit', taskId: editId } : { mode: 'new' }),
+    [editId, isEdit],
+  );
+
+  useEffect(() => {
+    openTab({
+      key: '/performance/pm-adhoc',
+      label: 'nav.performance.adhoc',
+      path: location.pathname + location.search,
+      closable: true,
+      labelRaw: false,
+    });
+  }, [location.pathname, location.search, openTab]);
 
   // 制式选项来自 network_type 字典；value 仍保持 lte/nr/gsm。
   const DIMENSION_OPTIONS = useMemo<{ label: string; value: AdhocDimension; hint: string }[]>(
@@ -171,6 +195,30 @@ export default function PmAdhocWizard() {
   const [prefilled, setPrefilled] = useState(false);
   const [drilldownTouched, setDrilldownTouched] = useState(false);
   const [originalObjectLdns, setOriginalObjectLdns] = useState<string[]>([]);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+
+  const applyDraft = (draft: PmAdhocCustomWizardDraft) => {
+    setCurrent(draft.current);
+    setName(draft.name);
+    setTechnology(draft.technology);
+    setExpireDays(draft.expireDays);
+    setVisibility(draft.visibility);
+    setDimension(draft.dimension);
+    setSelectedSns(draft.selectedSns);
+    setCellSel(draft.cellSel);
+    setMetricPaths(draft.metricPaths);
+    setMetricTypeFilter(draft.metricTypeFilter);
+    const windowStart = dayjs(draft.windowStart);
+    const windowEnd = dayjs(draft.windowEnd);
+    if (windowStart.isValid() && windowEnd.isValid()) {
+      setWindow([windowStart, windowEnd]);
+    }
+    const planned = draft.plannedEndAt ? dayjs(draft.plannedEndAt) : null;
+    setPlannedEndAt(planned && planned.isValid() ? planned : null);
+    setPlannedEndTouched(draft.plannedEndTouched);
+    setDrilldownTouched(draft.drilldownTouched);
+    setOriginalObjectLdns(draft.originalObjectLdns);
+  };
 
   // 编辑模式：详情到手后按各步初值预填（名称/制式/模式/维度/设备/指标/粒度/时窗）。
   // 制式与模式预填后在 UI 锁定只读（结构性字段不可改）。
@@ -196,14 +244,62 @@ export default function PmAdhocWizard() {
     }
     setPlannedEndTouched(false);
     setOriginalObjectLdns(editTask.objectLdns ?? []);
+    const restoredDraft = editId ? getCustomWizardDraft({ mode: 'edit', taskId: editId }) : undefined;
+    if (restoredDraft) {
+      applyDraft(restoredDraft);
+    }
     setPrefilled(true);
-  }, [isEdit, prefilled, editTask]);
+    setDraftHydrated(true);
+  }, [isEdit, prefilled, editTask, editId]);
 
   useEffect(() => {
-    if (isEdit) return;
-    setPlannedEndAt(dayjs().add(30, 'day'));
-    setPlannedEndTouched(false);
-  }, [isEdit]);
+    if (isEdit || draftHydrated) return;
+    const restoredDraft = getCustomWizardDraft({ mode: 'new' });
+    if (restoredDraft) {
+      applyDraft(restoredDraft);
+    }
+    setDraftHydrated(true);
+  }, [isEdit, draftHydrated]);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+    saveCustomWizardDraft(draftKey, {
+      current,
+      name,
+      technology,
+      expireDays,
+      visibility,
+      dimension,
+      selectedSns,
+      cellSel,
+      metricPaths,
+      metricTypeFilter,
+      windowStart: window[0]?.toISOString() ?? '',
+      windowEnd: window[1]?.toISOString() ?? '',
+      plannedEndAt: plannedEndAt?.toISOString() ?? null,
+      plannedEndTouched,
+      drilldownTouched,
+      originalObjectLdns,
+    });
+  }, [
+    draftHydrated,
+    draftKey,
+    current,
+    name,
+    technology,
+    expireDays,
+    visibility,
+    dimension,
+    selectedSns,
+    cellSel,
+    metricPaths,
+    metricTypeFilter,
+    window,
+    plannedEndAt,
+    plannedEndTouched,
+    drilldownTouched,
+    originalObjectLdns,
+  ]);
 
   useEffect(() => {
     if (
@@ -361,6 +457,7 @@ export default function PmAdhocWizard() {
           },
         });
         message.success(intl.formatMessage({ id: 'perf.adhoc.taskUpdated' }));
+        clearCustomWizardDraft({ mode: 'edit', taskId: editId });
         navigate('/performance/pm-adhoc');
         return;
       }
@@ -386,6 +483,7 @@ export default function PmAdhocWizard() {
       }
       await createMut.mutateAsync(createInput);
       message.success(intl.formatMessage({ id: 'perf.adhoc.taskCreated' }));
+      clearCustomWizardDraft({ mode: 'new' });
       navigate('/performance/pm-adhoc');
     } catch (e) {
       message.error(

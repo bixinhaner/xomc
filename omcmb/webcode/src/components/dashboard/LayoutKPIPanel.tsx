@@ -28,8 +28,7 @@ import LineChart from '@/components/Charts/LineChart';
 import { useT } from '@/hooks/useT';
 import { useIntl } from 'react-intl';
 import { useThemeToken } from '@/hooks/useThemeToken';
-import { generateDayAxisLabels, generateDayAxisTimestamps } from '@core/utils/format';
-import type { KPILayoutPanel } from '@core/types/dashboard';
+import type { DashboardKPIGranularity, KPILayoutPanel } from '@core/types/dashboard';
 import type { MultiTrendComparisonData } from '@core/types/dashboard';
 import type { TechnologyType } from '@/pages/dashboard/kpi-config';
 import { useMetricMetadata, resolveMetricMeta } from './useMetricMetadata';
@@ -46,12 +45,12 @@ export interface LayoutKPIPanelProps {
   trendData: MultiTrendComparisonData | undefined;
   /** 批量取数是否加载中。 */
   isLoading: boolean;
-  /** 当前卡片的趋势对比时窗。 */
-  compareWindow: 'yesterday' | 'last_week';
-  /** 当前卡片切换趋势对比时窗。 */
-  onCompareWindowChange: (compareWindow: 'yesterday' | 'last_week') => void;
-  /** 周模式固定的七个自然日日期键。 */
-  weekDateKeys?: string[];
+  /** 当前整页聚合粒度。 */
+  granularity: DashboardKPIGranularity;
+  /** 切换整页聚合粒度。 */
+  onGranularityChange: (granularity: DashboardKPIGranularity) => void;
+  /** 后端聚合桶对应的固定横轴键。 */
+  bucketKeys?: string[];
   /** 图表高度。 */
   height?: number;
 }
@@ -61,9 +60,9 @@ export function LayoutKPIPanel({
   panel,
   trendData,
   isLoading,
-  compareWindow,
-  onCompareWindowChange,
-  weekDateKeys = [],
+  granularity,
+  onGranularityChange,
+  bucketKeys = [],
   height = 280,
 }: LayoutKPIPanelProps) {
   const t = useT();
@@ -120,33 +119,23 @@ export function LayoutKPIPanel({
   const titleFallbackKey = selectedMetrics[0] ?? panel.metrics[0] ?? '';
   const titleFallback = titleFallbackKey ? resolveOne(titleFallbackKey).name : '';
 
-  const todayLabel = compareWindow === 'last_week'
-    ? t('dashboard.compareWindow.week')
-    : t('dashboard.timeRange.today');
-
-  const compareLabel = t('dashboard.timeRange.yesterday');
-
-  const xData = useMemo(() => generateDayAxisLabels(), []);
-  const xDataFull = useMemo(() => generateDayAxisTimestamps(), []);
-
   const { series, weekXData, weekXDataFull } = useMemo(
     () => buildSeries(
       selectedMetrics,
       trendData,
-      xData,
-      todayLabel,
-      compareLabel,
+      [],
+      '',
+      '',
       resolveOne,
       undefined,
-      compareWindow,
-      weekDateKeys,
+      granularity,
+      bucketKeys,
     ),
-    [selectedMetrics, trendData, xData, todayLabel, compareLabel, resolveOne, compareWindow, weekDateKeys],
+    [selectedMetrics, trendData, resolveOne, granularity, bucketKeys],
   );
 
-  // last_week 模式用按天聚合后的日期轴（由 buildSeries 返回），yesterday 用固定 24h 轴。
-  const chartXData = compareWindow === 'last_week' ? (weekXData ?? []) : xData;
-  const chartXDataFull = compareWindow === 'last_week' ? (weekXDataFull ?? []) : xDataFull;
+  const chartXData = weekXData ?? [];
+  const chartXDataFull = weekXDataFull ?? [];
 
   // 至少一条 series 有真实数据点？无任何点时给"暂无聚合数据"提示（issue #359 保留）。
   const hasSeriesData = useMemo(
@@ -215,23 +204,16 @@ export function LayoutKPIPanel({
                   : panel.title
                 : titleFallback}
             </Text>
-            {selectedMetrics.length <= 1 ? (
-              <Segmented
-                size="small"
-                value={compareWindow}
-                onChange={(value) => onCompareWindowChange(value as 'yesterday' | 'last_week')}
-                options={[
-                  { label: t('dashboard.compareWindow.day'), value: 'yesterday' },
-                  { label: t('dashboard.compareWindow.week'), value: 'last_week' },
-                ]}
-              />
-            ) : (
-              <Tooltip title={compareWindow === 'last_week' ? t('dashboard.compareWindow.multiMetricWeekHint') : t('dashboard.compareWindow.multiMetricHint')}>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {compareWindow === 'last_week' ? t('dashboard.compareWindow.thisWeekOnly') : t('dashboard.compareWindow.todayOnly')}
-                </Text>
-              </Tooltip>
-            )}
+            <Segmented
+              size="small"
+              value={granularity}
+              onChange={(value) => onGranularityChange(value as DashboardKPIGranularity)}
+              options={[
+                { label: t('dashboard.viewMode.hour'), value: 'hourly' },
+                { label: t('dashboard.viewMode.day'), value: 'daily' },
+                { label: t('dashboard.viewMode.week'), value: 'weekly' },
+              ]}
+            />
           </div>
           {/*
            * 宽度分档 + responsive tag：
@@ -286,9 +268,7 @@ export function LayoutKPIPanel({
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ color: token.colorText }}>{t('dashboard.kpiPanel.empty.title')}</div>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {compareWindow === 'last_week'
-                      ? t('dashboard.kpiPanel.empty.lastWeekHint')
-                      : t('dashboard.kpiPanel.empty.hint')}
+                    {t('dashboard.kpiPanel.empty.rollupHint')}
                   </Text>
                 </div>
               }
@@ -296,15 +276,15 @@ export function LayoutKPIPanel({
           </div>
         ) : (
           <LineChart
-            // compareWindow 变化时 x 轴格式从 HH:mm 切换到 MM/DD，需强制 remount 清空旧 ECharts 实例。
-            key={`${technology}-${panel.title}-${compareWindow}`}
+            // 粒度变化时横轴格式随之变化，强制 remount 清空旧 ECharts 实例。
+            key={`${technology}-${panel.title}-${granularity}`}
             title=""
             xData={chartXData}
             xDataFull={chartXDataFull}
             series={series}
             height={height - 70}
             smooth
-            showLegend={shouldShowKPIChartLegend(compareWindow, selectedMetrics.length)}
+            showLegend={shouldShowKPIChartLegend(granularity, selectedMetrics.length)}
             unit={sharedUnit}
           />
         )}

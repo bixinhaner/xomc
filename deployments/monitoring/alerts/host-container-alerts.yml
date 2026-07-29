@@ -239,6 +239,46 @@ groups:
             Impact: 即使整体 CPU 利用率不高，请求也会因限流而抖动变慢。
             Action: 调大 CPU limit；或核对 limit 是否设得过紧。
 
+      - alert: TSDBContainerCPUHigh
+        expr: |
+          (
+            sum by (name) (rate(container_cpu_usage_seconds_total{name=~"(omcgo|docker)-postgres-tsdb-.*"}[5m]))
+            /
+            sum by (name) (
+              container_spec_cpu_quota{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+              / container_spec_cpu_period{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+            )
+          ) > 0.70
+        for: 10m
+        labels: {severity: warning, domain: omc, service: postgres-tsdb}
+        annotations: {summary: "postgres-tsdb CPU 持续超过配额 70%：{{ $labels.name }}"}
+
+      - alert: TSDBContainerCPUCritical
+        expr: |
+          (
+            sum by (name) (rate(container_cpu_usage_seconds_total{name=~"(omcgo|docker)-postgres-tsdb-.*"}[5m]))
+            /
+            sum by (name) (
+              container_spec_cpu_quota{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+              / container_spec_cpu_period{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+            )
+          ) > 0.90
+        for: 5m
+        labels: {severity: critical, domain: omc, service: postgres-tsdb}
+        annotations: {summary: "postgres-tsdb CPU 持续超过配额 90%：{{ $labels.name }}"}
+
+      - alert: TSDBContainerMemoryHigh
+        expr: |
+          (
+            container_memory_working_set_bytes{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+            /
+            container_spec_memory_limit_bytes{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+          ) > 0.85
+          and container_spec_memory_limit_bytes{name=~"(omcgo|docker)-postgres-tsdb-.*"} < 64e9
+        for: 10m
+        labels: {severity: warning, domain: omc, service: postgres-tsdb}
+        annotations: {summary: "postgres-tsdb 内存持续超过限额 85%：{{ $labels.name }}"}
+
   - name: omc.nginx
     interval: 30s
     rules:

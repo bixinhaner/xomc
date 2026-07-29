@@ -342,10 +342,42 @@ type AppConfig struct {
 	Task            TaskConfig            `mapstructure:"task"`
 	MR              MRConfig              `mapstructure:"mr"`
 	Notification    NotificationConfig    `mapstructure:"notification"`
+	Dashboard       DashboardConfig       `mapstructure:"dashboard"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
 	Tracer          TracerConfig          `mapstructure:"tracer"`
 	Log             LogConfig             `mapstructure:"log"`
 	RequestIDPrefix string                `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "app"
+}
+
+type DashboardConfig struct {
+	QueryTimeout     time.Duration `mapstructure:"query_timeout"`
+	StatementTimeout time.Duration `mapstructure:"statement_timeout"`
+	MaxConcurrent    int           `mapstructure:"max_concurrent"`
+	QueueTimeout     time.Duration `mapstructure:"queue_timeout"`
+	FreshCacheTTL    time.Duration `mapstructure:"fresh_cache_ttl"`
+	StaleTTL         time.Duration `mapstructure:"stale_ttl"`
+}
+
+func (c DashboardConfig) Defaults() DashboardConfig {
+	if c.QueryTimeout <= 0 {
+		c.QueryTimeout = 3 * time.Second
+	}
+	if c.StatementTimeout <= 0 {
+		c.StatementTimeout = 2500 * time.Millisecond
+	}
+	if c.MaxConcurrent <= 0 {
+		c.MaxConcurrent = 4
+	}
+	if c.QueueTimeout <= 0 {
+		c.QueueTimeout = 100 * time.Millisecond
+	}
+	if c.FreshCacheTTL <= 0 {
+		c.FreshCacheTTL = 4*time.Minute + 30*time.Second
+	}
+	if c.StaleTTL <= 0 {
+		c.StaleTTL = 15 * time.Minute
+	}
+	return c
 }
 
 // TaskConfig 配置 task 子系统的全局默认行为（T-0157 C1 引入）。

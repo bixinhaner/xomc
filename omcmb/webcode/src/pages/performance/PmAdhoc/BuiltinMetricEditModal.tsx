@@ -1,5 +1,5 @@
 /**
- * T-0194：内置任务「编辑指标」轻量弹窗。
+ * T-0194：内置任务「编辑指标」页面内编辑层。
  *
  * 仅含指标穿梭框（预填当前 metric_paths、按任务制式加载候选、含 all/kpi/counter 类型筛选），
  * 与向导第 3 步同口径。提交只改 metric_paths（调 PATCH，后端守门只取 metric_paths）。
@@ -10,9 +10,8 @@ import type { CSSProperties } from 'react';
 import { useMemo, useState, useEffect } from 'react';
 import { useIntl } from 'react-intl';
 import { ImportOutlined } from '@ant-design/icons';
-import { Alert, Button, Modal, Select, Space, Spin, Tag, Tooltip, Transfer, message } from 'antd';
+import { Alert, Button, Card, Select, Space, Spin, Tag, Tooltip, Transfer, message } from 'antd';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
-import { SIDEBAR_WIDTH } from '@/theme/tokens';
 import { useUpdatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
@@ -30,14 +29,12 @@ import {
 } from '@/components/MetricPickerModal';
 import { resolveLimitedTransferSelection } from './selectionLimit';
 import { displayAdhocTaskName } from '../adhocTaskDisplay';
+import {
+  clearBuiltinMetricDraft,
+  getBuiltinMetricDraft,
+  saveBuiltinMetricDraft,
+} from './pmAdhocDraftState';
 
-const METRIC_MODAL_RIGHT_GUTTER = 24;
-const METRIC_MODAL_WIDTH = `calc(100vw - ${SIDEBAR_WIDTH + METRIC_MODAL_RIGHT_GUTTER}px)`;
-const METRIC_MODAL_STYLE: CSSProperties = {
-  marginLeft: SIDEBAR_WIDTH,
-  marginRight: METRIC_MODAL_RIGHT_GUTTER,
-  maxWidth: METRIC_MODAL_WIDTH,
-};
 const METRIC_TRANSFER_SECTION_STYLE: CSSProperties = {
   flex: '1 1 0',
   minWidth: 0,
@@ -92,15 +89,29 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
   const [metricPaths, setMetricPaths] = useState<string[]>([]);
   const [metricTypeFilter, setMetricTypeFilter] = useState<'all' | 'kpi' | 'counter'>('all');
   const [metricBatchOpen, setMetricBatchOpen] = useState(false);
+  const [hydratedTaskId, setHydratedTaskId] = useState<string | null>(null);
 
   // 打开/切换任务时预填当前指标集。
   useEffect(() => {
     if (open && task) {
-      setMetricPaths([...task.metricPaths]);
-      setMetricTypeFilter('all');
+      const restoredDraft = getBuiltinMetricDraft(task.id);
+      setMetricPaths(restoredDraft ? restoredDraft.metricPaths : [...task.metricPaths]);
+      setMetricTypeFilter(restoredDraft?.metricTypeFilter ?? 'all');
       setMetricBatchOpen(false);
+      setHydratedTaskId(task.id);
+      return;
     }
+    setHydratedTaskId(null);
   }, [open, task]);
+
+  useEffect(() => {
+    if (!open || !task || hydratedTaskId !== task.id) return;
+    saveBuiltinMetricDraft({
+      taskId: task.id,
+      metricPaths,
+      metricTypeFilter,
+    });
+  }, [open, task, hydratedTaskId, metricPaths, metricTypeFilter]);
 
   // 内置任务 technology 决定候选 deviceType；无制式（理论上内置都有）回退 ENB。
   const taskTechnology = task?.technology;
@@ -190,6 +201,7 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
     try {
       await updateMut.mutateAsync({ id: task.id, input: { metricPaths } });
       message.success(intl.formatMessage({ id: 'perf.adhoc.editMetricSaved' }));
+      clearBuiltinMetricDraft(task.id);
       onClose();
     } catch (e) {
       message.error(
@@ -198,23 +210,24 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
     }
   };
 
+  if (!open || !task) return null;
+
   return (
-    <Modal
-      title={
-        task
-          ? intl.formatMessage(
-              { id: 'perf.adhoc.editMetricTitle' },
-              { name: displayAdhocTaskName(task, labelForTechnology) },
-            )
-          : intl.formatMessage({ id: 'perf.adhoc.editMetricTitleDefault' })
+    <Card
+      title={intl.formatMessage(
+        { id: 'perf.adhoc.editMetricTitle' },
+        { name: displayAdhocTaskName(task, labelForTechnology) },
+      )}
+      extra={
+        <Space>
+          <Button onClick={onClose}>
+            {intl.formatMessage({ id: 'perf.adhoc.backToList' })}
+          </Button>
+          <Button type="primary" loading={updateMut.isPending} onClick={handleOk}>
+            {intl.formatMessage({ id: 'perf.adhoc.btnSaveEdit' })}
+          </Button>
+        </Space>
       }
-      open={open}
-      onCancel={onClose}
-      onOk={handleOk}
-      confirmLoading={updateMut.isPending}
-      width={METRIC_MODAL_WIDTH}
-      style={METRIC_MODAL_STYLE}
-      destroyOnHidden
     >
       <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         <Alert
@@ -306,6 +319,6 @@ export default function BuiltinMetricEditModal({ task, open, onClose }: Props) {
           }}
         />
       </Space>
-    </Modal>
+    </Card>
   );
 }
