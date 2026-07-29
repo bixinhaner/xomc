@@ -511,7 +511,7 @@ func TestQueueSaturationAlertRequiresFreshSamplerData(t *testing.T) {
 	require.Contains(t, alerts, "alert: OMCPMQueueAckRateBelowDelivery")
 	require.Contains(t, alerts, "and max without (subject, durable) (")
 	require.Contains(t, alerts,
-		`time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"}`)
+		`time() - omc_pm_queue_sample_timestamp_seconds{deployment_unit="acs",subject="pm.file.received",durable="pm-workers"}`)
 	require.Contains(t, alerts, ") < 60")
 }
 
