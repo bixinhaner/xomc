@@ -148,6 +148,45 @@
         {"expr": "prometheus_tsdb_head_series", "legendFormat": "head series"}
       ],
       "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "title": "TSDB 临时写入",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "targets": [
+        {"expr": "rate(pg_stat_database_temp_bytes{instance=\"postgres-tsdb\"}[$__rate_interval])", "legendFormat": "bytes/s"},
+        {"expr": "rate(pg_stat_database_temp_files{instance=\"postgres-tsdb\"}[$__rate_interval])", "legendFormat": "files/s"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps"}}
+    },
+    {
+      "title": "TSDB 超过 5 秒的活跃查询",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+      "targets": [
+        {"expr": "pg_active_long_queries{instance=\"postgres-tsdb\"}", "legendFormat": "{{database}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "title": "postgres-tsdb CPU / 内存饱和度",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 44},
+      "targets": [
+        {"expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"(omcgo|docker)-postgres-tsdb-.*\"}[$__rate_interval])) / sum by (name) (container_spec_cpu_quota{name=~\"(omcgo|docker)-postgres-tsdb-.*\"} / container_spec_cpu_period{name=~\"(omcgo|docker)-postgres-tsdb-.*\"})", "legendFormat": "CPU {{name}}"},
+        {"expr": "container_memory_working_set_bytes{name=~\"(omcgo|docker)-postgres-tsdb-.*\"} / container_spec_memory_limit_bytes{name=~\"(omcgo|docker)-postgres-tsdb-.*\"}", "legendFormat": "memory {{name}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+    },
+    {
+      "title": "postgres-tsdb 容器磁盘读写",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 44},
+      "targets": [
+        {"expr": "sum by (name) (rate(container_fs_reads_bytes_total{name=~\"(omcgo|docker)-postgres-tsdb-.*\"}[$__rate_interval]))", "legendFormat": "read {{name}}"},
+        {"expr": "sum by (name) (rate(container_fs_writes_bytes_total{name=~\"(omcgo|docker)-postgres-tsdb-.*\"}[$__rate_interval]))", "legendFormat": "write {{name}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps"}}
     }
   ],
   "schemaVersion": 39,

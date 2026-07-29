@@ -3044,6 +3044,7 @@ const messages: Record<string, string> = {
   // Dashboard视图模式 - v2.0新增
   'dashboard.viewMode.day':    '天',
   'dashboard.viewMode.week':   '周',
+  'dashboard.viewMode.hour':   '小时',
 
   // Dashboard提示信息 - v2.0新增
   'dashboard.selectTimeRange': '请选择时间范围',
@@ -8344,6 +8345,7 @@ const messages: Record<string, string> = {
   'dashboard.kpiPanel.empty.title':      '暂无聚合数据',
   'dashboard.kpiPanel.empty.hint':       '全网指标每小时整点更新；刚灌入的数据将在下个整点后或回退原始明细后显示。',
   'dashboard.kpiPanel.empty.lastWeekHint': '所选对比周期暂无历史聚合数据；请联系运维确认上周数据是否已完成跑批。',
+  'dashboard.kpiPanel.empty.rollupHint': '当前小时、天或周聚合窗口暂无数据，请联系运维检查聚合任务状态。',
 
   // qa-614 c5 — software 固件/升级（#369 / #371 / #379）
   'software.firmware.selectOrInputProductClass': '请选择或输入产品类型',

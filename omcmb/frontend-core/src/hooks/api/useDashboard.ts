@@ -1,4 +1,3 @@
-import { useDashboardRealtime } from './useDashboardRealtime';
 import { useQuery, useQueries, useQueryClient, useMutation } from '@tanstack/react-query';
 import { dashboardService } from '../../mock/services/dashboardService';
 import { dashboardApi } from '../../services/api/dashboardApi';
@@ -33,6 +32,18 @@ type KPITimeSeriesParams = {
 
 const api = createApiSwitchWithMock(dashboardService, dashboardApi);
 
+export const DASHBOARD_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+export const DASHBOARD_FRESH_TIME_MS = 4 * 60 * 1000 + 30 * 1000;
+
+const dashboardPollingOptions = {
+  retry: false,
+  staleTime: DASHBOARD_FRESH_TIME_MS,
+  refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
+  refetchIntervalInBackground: false,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
+} as const;
+
 export function buildDashboardKPIQueryKey(params?: Partial<KPITimeSeriesParams>) {
   return ['dashboard', 'kpi-time-series', params] as const;
 }
@@ -62,7 +73,7 @@ export function buildDashboardKPIQueryOptions(
       params?.technology,
     ),
     enabled: enabled && Boolean(params?.kpi_names?.length),
-    staleTime: 30000,
+    ...dashboardPollingOptions,
   };
 }
 
@@ -97,6 +108,57 @@ export function buildDashboardWeekRange(now: Date, systemTimezone?: string) {
   };
 }
 
+export interface DashboardKPIWindow {
+  start_time: string;
+  end_time: string;
+  bucketKeys: string[];
+}
+
+function dashboardBucketKey(
+  value: ReturnType<typeof dashboardNow>,
+  granularity: DashboardKPIGranularity,
+) {
+  return granularity === 'hourly'
+    ? value.format('YYYY-MM-DDTHH')
+    : value.format('YYYY-MM-DD');
+}
+
+export function buildDashboardKPIWindow(
+  now: Date,
+  granularity: DashboardKPIGranularity,
+  systemTimezone?: string,
+): DashboardKPIWindow {
+  const current = dashboardNow(now, systemTimezone);
+  let end;
+  let count;
+  let unit: 'hour' | 'day' | 'week';
+
+  if (granularity === 'hourly') {
+    end = current.startOf('hour');
+    count = 24;
+    unit = 'hour';
+  } else if (granularity === 'daily') {
+    end = current.startOf('day');
+    count = 30;
+    unit = 'day';
+  } else {
+    const weekday = current.day() || 7;
+    end = current.subtract(weekday - 1, 'day').startOf('day');
+    count = 12;
+    unit = 'week';
+  }
+  const start = end.subtract(count, unit);
+
+  return {
+    start_time: start.format(),
+    end_time: end.format(),
+    bucketKeys: Array.from(
+      { length: count },
+      (_, index) => dashboardBucketKey(start.add(index, unit), granularity),
+    ),
+  };
+}
+
 export function isDashboardBusinessTimezoneReady(systemTimezone?: string): boolean {
   return Boolean(systemTimezone?.trim());
 }
@@ -108,10 +170,10 @@ export interface DashboardDataResponse {
 }
 
 export function useDashboardData() {
-  useDashboardRealtime();
   return useQuery<DashboardDataResponse>({
     queryKey: ['dashboard', 'all'],
     queryFn: () => api.getDashboardData() as unknown as Promise<DashboardDataResponse>,
+    ...dashboardPollingOptions,
   });
 }
 
@@ -120,6 +182,7 @@ export function useDashboardSummary(apiScope: string, userScope: string | undefi
     queryKey: ['dashboard', 'summary', apiScope, userScope],
     queryFn: () => api.getSummary(),
     enabled: Boolean(userScope),
+    ...dashboardPollingOptions,
   });
 }
 
@@ -138,8 +201,7 @@ export function useDashboardDeviceStats(apiScope: string, userScope: string | un
       return stats;
     },
     enabled: Boolean(userScope),
-    refetchInterval: 60_000,
-    refetchOnWindowFocus: 'always',
+    ...dashboardPollingOptions,
   });
 }
 
@@ -173,6 +235,7 @@ export function useDeviceStatusByType() {
   return useQuery({
     queryKey: ['dashboard', 'device-status-by-type'],
     queryFn: () => api.getDeviceStatusByType(),
+    ...dashboardPollingOptions,
   });
 }
 
@@ -268,6 +331,53 @@ export function useKPITimeSeries(
   enabled = true
 ) {
   return useQuery(buildDashboardKPIQueryOptions(params, enabled));
+}
+
+export function useDashboardKPIWindowSeries(
+  kpiNames: string[],
+  granularity: DashboardKPIGranularity,
+  enabled = true,
+  technology?: string,
+) {
+  const { systemTimezone } = useSystemTimezone();
+  const query = useQuery({
+    queryKey: ['dashboard', 'kpi-window-series', kpiNames, granularity, technology, systemTimezone],
+    queryFn: async () => {
+      const window = buildDashboardKPIWindow(new Date(), granularity, systemTimezone);
+      const raw = await api.getKPITimeSeries(
+        kpiNames,
+        window.start_time,
+        window.end_time,
+        granularity,
+        technology,
+      );
+      return { raw, window };
+    },
+    enabled: enabled
+      && kpiNames.length > 0
+      && isDashboardBusinessTimezoneReady(systemTimezone),
+    ...dashboardPollingOptions,
+  });
+
+  const data = useMemo(() => {
+    if (!query.data?.raw) return undefined;
+    return kpiNames.reduce<MultiTrendComparisonData>((acc, name) => {
+      acc[name] = calculateTrendComparison(
+        query.data.raw,
+        {},
+        name,
+        'last_week',
+      );
+      return acc;
+    }, {});
+  }, [kpiNames, query.data]);
+
+  return {
+    data,
+    window: query.data?.window,
+    isLoading: query.isLoading,
+    error: query.error,
+  };
 }
 
 /**

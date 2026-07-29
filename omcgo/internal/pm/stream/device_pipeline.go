@@ -13,11 +13,19 @@ var builtinNetworkRuleIDs = map[string]uuid.UUID{
 	"gsm": uuid.MustParse("0184dddd-0001-4000-8000-000000000003"),
 }
 
+// BuiltinNetworkTaskID returns the stable built-in network aggregation task
+// for a radio technology. Callers must use this function instead of copying
+// task UUIDs so the rollup producer and readers share one mapping.
+func BuiltinNetworkTaskID(technology string) (uuid.UUID, bool) {
+	id, ok := builtinNetworkRuleIDs[strings.ToLower(strings.TrimSpace(technology))]
+	return id, ok
+}
+
 func devicePipelineVersion(source *TaskVersionSnapshot) (*TaskVersionSnapshot, bool) {
 	if source == nil || source.Dimension != DimensionNetwork || source.Technology == "" {
 		return nil, false
 	}
-	systemRuleID, ok := builtinNetworkRuleIDs[strings.ToLower(source.Technology)]
+	systemRuleID, ok := BuiltinNetworkTaskID(source.Technology)
 	if !ok || source.TaskID != systemRuleID {
 		return nil, false
 	}

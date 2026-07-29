@@ -47,7 +47,6 @@ import {
   useDashboardSummary,
   useDeviceStatusByType,
 } from '@core/hooks/api/useDashboard';
-import { useDashboardRealtime } from '@core/hooks/api/useDashboardRealtime';
 import { DashboardKPIModules } from './DashboardKPIModules';
 import type { TechnologyType } from './kpi-config';
 import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
@@ -130,7 +129,6 @@ export default function DashboardPage() {
     import.meta.env.VITE_API_PROXY_TARGET,
     window.location.origin,
   );
-  useDashboardRealtime();
   const {
     data: dashboardSummary,
     dataUpdatedAt: dashboardUpdatedAt,

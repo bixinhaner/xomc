@@ -3,6 +3,7 @@ package appconfig
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7/pkg/s3utils"
 )
@@ -50,12 +51,41 @@ func (c *AppConfig) Validate() error {
 	if err := c.Notification.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.Dashboard.Defaults().Validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.MinIO.Buckets.validateConfigBackup(); err != nil {
 		errs = append(errs, err.Error())
 	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+	return nil
+}
+
+func (c DashboardConfig) Validate() error {
+	var errs []string
+	if c.QueryTimeout <= 0 {
+		errs = append(errs, "dashboard.query_timeout must be > 0")
+	}
+	if c.StatementTimeout <= 0 || c.StatementTimeout >= c.QueryTimeout {
+		errs = append(errs, "dashboard.statement_timeout must be > 0 and less than query_timeout")
+	}
+	if c.MaxConcurrent < 1 || c.MaxConcurrent > 64 {
+		errs = append(errs, "dashboard.max_concurrent must be between 1 and 64")
+	}
+	if c.QueueTimeout <= 0 {
+		errs = append(errs, "dashboard.queue_timeout must be > 0")
+	}
+	if c.FreshCacheTTL <= 0 || c.FreshCacheTTL >= 5*time.Minute {
+		errs = append(errs, "dashboard.fresh_cache_ttl must be > 0 and less than 5m")
+	}
+	if c.StaleTTL < 2*c.FreshCacheTTL {
+		errs = append(errs, "dashboard.stale_ttl must be at least twice fresh_cache_ttl")
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
 }

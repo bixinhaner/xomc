@@ -95,6 +95,45 @@ receivers:
       postgresql.index.scans:
         enabled: false
 
+  # TSDB 专项 SQL 指标：累计临时写入量/文件数，以及持续超过 5 秒的活跃查询。
+  # 属性只保留 database，避免 query text / pid 等高基数标签进入 Prometheus。
+  sqlquery/tsdb:
+    driver: postgres
+    datasource: "host=postgres-tsdb port=5432 user=omcgo password=${env:POSTGRES_TSDB_PASSWORD} dbname=omcgo sslmode=disable"
+    collection_interval: 30s
+    queries:
+      - sql: |
+          SELECT datname AS database,
+                 temp_bytes::bigint AS temp_bytes,
+                 temp_files::bigint AS temp_files
+          FROM pg_stat_database
+          WHERE datname = current_database()
+        metrics:
+          - metric_name: pg_stat_database_temp_bytes
+            value_column: temp_bytes
+            attribute_columns: [database]
+            value_type: int
+            monotonic: true
+            aggregation: cumulative
+          - metric_name: pg_stat_database_temp_files
+            value_column: temp_files
+            attribute_columns: [database]
+            value_type: int
+            monotonic: true
+            aggregation: cumulative
+      - sql: |
+          SELECT current_database() AS database,
+                 count(*)::bigint AS active_long_queries
+          FROM pg_stat_activity
+          WHERE state = 'active'
+            AND pid <> pg_backend_pid()
+            AND query_start < now() - interval '5 seconds'
+        metrics:
+          - metric_name: pg_active_long_queries
+            value_column: active_long_queries
+            attribute_columns: [database]
+            value_type: int
+
   # ─── Metrics: Redis ───────────────────────────────────────────────
   redis:
     endpoint: redis:6379
@@ -405,7 +444,7 @@ service:
     # 时序库 postgres-tsdb 指标：同主库管道但 instance=postgres-tsdb 区分，
     # 防两实例同名 series 碰撞（duplicate sample for timestamp）。
     metrics/tsdb:
-      receivers: [postgresql/tsdb]
+      receivers: [postgresql/tsdb, sqlquery/tsdb]
       processors: [memory_limiter, transform/promote_pg_resource, transform/pg_instance_tsdb, metricstransform, resource/metrics, batch]
       exporters: [prometheusremotewrite]
 

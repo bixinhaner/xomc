@@ -6,6 +6,10 @@
 
 import { useMemo } from 'react';
 import { useQueries } from '@tanstack/react-query';
+import {
+  DASHBOARD_FRESH_TIME_MS,
+  DASHBOARD_REFRESH_INTERVAL_MS,
+} from '@core/hooks/api/useDashboard';
 import { dashboardApi } from '@core/services/api/dashboardApi';
 import { dashboardService } from '@core/mock/services/dashboardService';
 import { useMock } from '@core/services/apiSwitch';
@@ -158,8 +162,12 @@ export function useKPIPanelData(
       queryKey: q.queryKey,
       queryFn: () => api.getKPITimeSeries(q.params.kpi_names, q.params.start_time, q.params.end_time),
       enabled: enabled,
-      refetchInterval: 60000, // 1分钟刷新
-      staleTime: 30000,
+      retry: false,
+      refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      staleTime: DASHBOARD_FRESH_TIME_MS,
     })),
   });
 
