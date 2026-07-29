@@ -7807,6 +7807,10 @@ const messages: Record<string, string> = {
   'perf.dashboard.metricCount':          '{count} 指标',
   'perf.dashboard.truncated':            '结果可能不全',
   'perf.dashboard.truncatedDesc':        '本次时间段命中的结果行已达上限（{limit} 行），图中可能未包含全部数据。请缩小时间段或减少指标/系列。',
+  'perf.dashboard.partialPeriod':        '当前周期进行中',
+  'perf.dashboard.partialPeriodDesc':    '当前筛选范围内最低覆盖实体已收到 {received}/{expected} 个槽位，覆盖率 {coverage}%，修订版 {revision}；任务版本有效区间：{from} 至 {to}。该结果尚不代表完整自然周期。',
+  'perf.dashboard.progressUnavailable':  '当前周期数据暂不可用',
+  'perf.dashboard.progressUnavailableDesc': '当前日/周聚合状态读取超时或存储暂不可用，页面不会用旧任务版本冒充当前结果；系统将在下一次 5 分钟定时刷新时重试。',
   'perf.dashboard.emptyGranNoData':      '{gran} 粒度暂无数据',
   'perf.dashboard.emptyTaskNoData':      '任务暂无数据',
   // 筛选条

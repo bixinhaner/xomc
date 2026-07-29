@@ -89,7 +89,7 @@ compose 项目名（默认 `omc omcgo`）。
 | app | 512 | 1536 | 8 | 运维 UI + OSS 轮询，非设备量驱动 |
 | nats | 384 | 1024 | 6 | JetStream + PM 突发 in-flight |
 | minio | 512 | 2048 | 6 | 对象存储，瓶颈在磁盘非内存 |
-| redis | 1024 | 4096 | 8 | PM 多粒度窗口权威状态；内存不足拒绝写入并告警，禁止淘汰 |
+| redis | 5120 | 8192 | 8 | 12 分钟关窗会短时并存相邻两个小时窗口；20k 基站实测需 4GiB `maxmemory`，另留 1GiB AOF COW 余量 |
 | web | 192 | 512 | 0 | nginx 静态+反代，近似固定 |
 
 监控栈默认**不计入**（dev 本地通常不起）；`--with-monitoring` 把约 4.1 GiB 固定块计入预算。
@@ -105,7 +105,7 @@ compose 项目名（默认 `omc omcgo`）。
 | PG `shared_buffers` | `0.25 × 该实例 MEM`（留 OS page cache 给 Timescale 解压） |
 | PG `effective_cache_size` | `0.60 × 该实例 MEM` |
 | PG `max_connections` | `300`（覆盖 Go 端 ~180 池 + exporter + psql + 余量） |
-| Redis `maxmemory` | `REDIS_MEM − 256MiB`，最低 128MiB；策略固定 `noeviction`，保留 AOF rewrite COW 余量 |
+| Redis `maxmemory` | `REDIS_MEM − 1GiB`，`REDIS_MEM` 下限 5GiB；策略固定 `noeviction` |
 
 ### 3.5 双 PG 合计实占 OOM 自检（关键）
 
@@ -122,7 +122,7 @@ compose 项目名（默认 `omc omcgo`）。
 （已加 `.gitignore`）。可手改，约束写在文件头：
 
 - `*_GOMEMLIMIT` 必须 < 对应 `*_MEM`（建议 0.90×）
-- `REDIS_MEM` 必须 ≥ `REDIS_MAXMEMORY + 256MiB`
+- `REDIS_MEM` 必须 ≥ `REDIS_MAXMEMORY + 1GiB`
 - 两 PG 的 `shared_buffers` 之和 + maintenance + backends 余量 须 < VM 内存
 - `PG/TSDB_MAX_CONNECTIONS` 必须 ≥ Go 端连接池总和（当前 ~180）
 

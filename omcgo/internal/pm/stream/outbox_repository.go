@@ -25,6 +25,23 @@ type OutboxRepository struct {
 	pool *pgxpool.Pool
 }
 
+func staleBarrierRedeliveryUpdate(table string, before time.Time) sq.UpdateBuilder {
+	return storage.Psql.Update(table).
+		Set("published_at", nil).
+		Set("last_error", nil).
+		Where("published_at IS NOT NULL").
+		Where("consumed_at IS NULL").
+		Where(sq.Eq{"barrier_eligible": true}).
+		Where(sq.Lt{"published_at": before})
+}
+
+func pendingOutboxSelect(table string, columns ...string) sq.SelectBuilder {
+	return storage.Psql.Select(columns...).
+		From(table).
+		Where("published_at IS NULL").
+		Where("consumed_at IS NULL")
+}
+
 func NewOutboxRepository(pool *pgxpool.Pool) *OutboxRepository {
 	return &OutboxRepository{pool: pool}
 }
@@ -40,8 +57,14 @@ func InsertOutbox(
 		return err
 	}
 	query, args, err := storage.Psql.Insert("pm_aggregation_outbox").
-		Columns("event_id", "source_file_id", "ingest_batch_id", "payload").
-		Values(payload.EventID, payload.SourceFileID, payload.IngestBatchID, json.RawMessage(data)).
+		Columns(
+			"event_id", "source_file_id", "ingest_batch_id",
+			"event_window_start", "event_window_end", "payload", "barrier_eligible",
+		).
+		Values(
+			payload.EventID, payload.SourceFileID, payload.IngestBatchID,
+			payload.WindowStart, payload.WindowEnd, json.RawMessage(data), true,
+		).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build PM aggregation outbox insert: %w", err)
@@ -49,7 +72,65 @@ func InsertOutbox(
 	if _, err := tx.Exec(ctx, query, args...); err != nil {
 		return fmt.Errorf("insert PM aggregation outbox: %w", err)
 	}
+	replayQuery, replayArgs, err := storage.Psql.Insert("pm_aggregation_replay_sources").
+		Columns("event_window_start", "event_id", "payload", "created_at").
+		Values(payload.WindowStart, payload.EventID, json.RawMessage(data), time.Now().UTC()).
+		Suffix("ON CONFLICT (event_window_start, event_id) DO NOTHING").
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build PM replay source insert: %w", err)
+	}
+	if _, err := tx.Exec(ctx, replayQuery, replayArgs...); err != nil {
+		return fmt.Errorf("insert PM replay source: %w", err)
+	}
 	return nil
+}
+
+func (r *OutboxRepository) DeleteReplayBefore(ctx context.Context, before time.Time) error {
+	if _, err := r.pool.Exec(
+		ctx,
+		"SELECT drop_chunks('public.pm_aggregation_replay_sources', older_than => $1::timestamptz)",
+		before,
+	); err != nil {
+		return fmt.Errorf("cleanup PM replay source chunks: %w", err)
+	}
+	return nil
+}
+
+// MarkConsumed advances the durable consumer barrier only after every
+// contribution from the event has been committed to its Redis/SQL window.
+func (r *OutboxRepository) MarkConsumed(ctx context.Context, eventID uuid.UUID) error {
+	query, args, err := storage.Psql.Update("pm_aggregation_outbox").
+		Set("consumed_at", time.Now().UTC()).
+		Where(sq.Eq{"event_id": eventID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build mark PM aggregation outbox consumed: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("mark PM aggregation outbox consumed: %w", err)
+	}
+	return nil
+}
+
+// RequeueStaleUnconsumed closes the publish/ack crash gap. Publishing and
+// marking the durable consumer barrier are separate commits, so a process
+// termination between them must not block the event-time watermark forever.
+func (r *OutboxRepository) RequeueStaleUnconsumed(
+	ctx context.Context,
+	before time.Time,
+) (int64, error) {
+	query, args, err := staleBarrierRedeliveryUpdate(
+		"pm_aggregation_outbox", before,
+	).ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build requeue stale PM aggregation outbox SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("requeue stale PM aggregation outbox: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (r *OutboxRepository) lockNext(ctx context.Context, tx pgx.Tx) (*OutboxRecord, error) {
@@ -67,10 +148,10 @@ func (r *OutboxRepository) lockBatch(ctx context.Context, tx pgx.Tx, limit uint6
 	if limit == 0 {
 		limit = 1
 	}
-	query, args, err := storage.Psql.Select(
+	query, args, err := pendingOutboxSelect(
+		"pm_aggregation_outbox",
 		"event_id", "source_file_id", "payload", "created_at",
-	).From("pm_aggregation_outbox").
-		Where("published_at IS NULL").
+	).
 		OrderBy("created_at", "event_id").
 		Limit(limit).
 		Suffix("FOR UPDATE SKIP LOCKED").
@@ -132,9 +213,22 @@ func markOutboxFailed(ctx context.Context, tx pgx.Tx, eventID uuid.UUID, publish
 	return nil
 }
 
-func (r *OutboxRepository) DeletePublishedBefore(ctx context.Context, before time.Time) error {
+func (r *OutboxRepository) DeletePublishedBefore(
+	ctx context.Context,
+	before, legacyBefore time.Time,
+) error {
 	query, args, err := storage.Psql.Delete("pm_aggregation_outbox").
-		Where(sq.Lt{"published_at": before}).
+		Where(sq.Or{
+			sq.And{
+				sq.Lt{"published_at": before},
+				sq.Expr("consumed_at IS NOT NULL"),
+				sq.Eq{"barrier_eligible": true},
+			},
+			sq.And{
+				sq.Lt{"published_at": legacyBefore},
+				sq.Eq{"barrier_eligible": false},
+			},
+		}).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build cleanup PM aggregation outbox SQL: %w", err)
@@ -143,4 +237,45 @@ func (r *OutboxRepository) DeletePublishedBefore(ctx context.Context, before tim
 		return fmt.Errorf("cleanup PM aggregation outbox: %w", err)
 	}
 	return nil
+}
+
+func (r *OutboxRepository) ListPayloadsForPeriod(
+	ctx context.Context,
+	start, end time.Time,
+) ([]event.PMAggregationNormalizedPayload, error) {
+	query := `
+SELECT payload
+FROM (
+    SELECT event_window_start, event_id, payload
+    FROM pm_aggregation_replay_sources
+    WHERE event_window_start >= $1 AND event_window_start < $2
+    UNION ALL
+    SELECT event_window_start, event_id, payload
+    FROM pm_aggregation_outbox
+    WHERE barrier_eligible = false
+      AND event_window_start >= $1 AND event_window_start < $2
+) replay
+ORDER BY event_window_start, event_id`
+	args := []any{start, end}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query durable PM source events: %w", err)
+	}
+	defer rows.Close()
+	var payloads []event.PMAggregationNormalizedPayload
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("scan durable PM source event: %w", err)
+		}
+		var payload event.PMAggregationNormalizedPayload
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, fmt.Errorf("decode durable PM source event: %w", err)
+		}
+		payloads = append(payloads, payload)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate durable PM source events: %w", err)
+	}
+	return payloads, nil
 }

@@ -74,7 +74,10 @@ func TestPMBuiltinTaskMetricPathsMatchEnabledDefaults(t *testing.T) {
 
 	enbDefault := enabledDefaults["lte"]
 	require.Contains(t, enbDefault, "C000060216")
+	require.Contains(t, enbDefault, "C000060273")
+	require.Contains(t, enbDefault, "K900010076")
 	require.Equal(t, 1, countDefaultEnabledIndicator(t, seedSQL, "enabled_pm_indicators_enb", "C000060216"))
+	require.Equal(t, 1, countDefaultEnabledIndicator(t, seedSQL, "enabled_pm_indicators_enb", "C000060273"))
 
 	tasks := parseBuiltinPMTasks(t, seedSQL)
 	require.Len(t, tasks, 12)
@@ -85,7 +88,28 @@ func TestPMBuiltinTaskMetricPathsMatchEnabledDefaults(t *testing.T) {
 			require.Containsf(t, enabled, metricPath, "builtin task %s (%s) references metric %s outside %s default enabled list",
 				task.name, task.technology, metricPath, task.technology)
 		}
+		if task.technology == "lte" {
+			require.Contains(t, task.metricPaths, "K900010076",
+				"LTE builtin task must output the availability KPI")
+			require.NotContains(t, task.metricPaths, "C000060216",
+				"formula dependency must not replace the availability KPI output")
+		}
 	}
+}
+
+func TestPMEnabledIndicatorDependencyClosureRepairMigrationContract(t *testing.T) {
+	migrationSQL := readMigration(t, filepath.Join(
+		"..", "..", "migrations", "000004_repair_enabled_indicator_dependencies.sql",
+	))
+
+	for _, suffix := range []string{"enb", "gnb", "gsm"} {
+		require.Contains(t, migrationSQL, "enabled_pm_indicators_"+suffix)
+		require.Contains(t, migrationSQL, "perf_indicators_"+suffix)
+	}
+	require.Contains(t, migrationSQL, "WITH RECURSIVE dependency_closure")
+	require.Contains(t, migrationSQL, "ON CONFLICT (operator_code, indicator_id) DO NOTHING")
+	require.Contains(t, migrationSQL, "K900010076")
+	require.Contains(t, migrationSQL, "C000060216")
 }
 
 func TestStreamingWorkerDoesNotReferenceRawPMTables(t *testing.T) {

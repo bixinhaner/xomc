@@ -3,9 +3,11 @@ package stream
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/storage"
@@ -22,6 +24,11 @@ type WindowRepository struct {
 	pool *pgxpool.Pool
 }
 
+// versionMetadataBackfillLockID serializes the one-time historical metadata
+// backfill across app and worker startup. The value is the ASCII bytes for
+// "PMVMETA", kept stable because PostgreSQL advisory locks are process-wide.
+const versionMetadataBackfillLockID int64 = 0x504d564d455441
+
 func NewWindowRepository(pool *pgxpool.Pool) *WindowRepository {
 	return &WindowRepository{pool: pool}
 }
@@ -31,13 +38,24 @@ func (r *WindowRepository) EnsureOpen(ctx context.Context, contribution Contribu
 		Columns(
 			"task_id", "task_version_id", "granularity",
 			"entity_key", "window_start", "window_end", "expected_slots",
+			"version_effective_from", "version_effective_to",
 		).
 		Values(
 			contribution.Key.TaskID, contribution.Key.TaskVersionID,
 			string(contribution.Key.Granularity), contribution.Key.EntityKey, contribution.Key.Start,
 			contribution.Key.End, contribution.ExpectedSlots,
+			contribution.VersionEffectiveFrom, contribution.VersionEffectiveTo,
 		).
-		Suffix("ON CONFLICT (task_version_id, entity_key, granularity, window_start) DO NOTHING").
+		Suffix(`
+ON CONFLICT (task_version_id, entity_key, granularity, window_start) DO UPDATE SET
+  version_effective_from = COALESCE(
+    pm_aggregation_windows.version_effective_from,
+    EXCLUDED.version_effective_from
+  ),
+  version_effective_to = COALESCE(
+    pm_aggregation_windows.version_effective_to,
+    EXCLUDED.version_effective_to
+  )`).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build ensure PM aggregation window SQL: %w", err)
@@ -48,21 +66,106 @@ func (r *WindowRepository) EnsureOpen(ctx context.Context, contribution Contribu
 	return nil
 }
 
+func (r *WindowRepository) BackfillVersionMetadata(
+	ctx context.Context,
+	snapshot *TaskSnapshot,
+) error {
+	_, err := r.backfillVersionMetadata(ctx, snapshot, false)
+	return err
+}
+
+// TryBackfillVersionMetadata performs the backfill only when no other process
+// currently owns it. The app uses this non-blocking form so a worker doing the
+// same one-time upgrade work cannot delay or fail HTTP startup.
+func (r *WindowRepository) TryBackfillVersionMetadata(
+	ctx context.Context,
+	snapshot *TaskSnapshot,
+) (bool, error) {
+	return r.backfillVersionMetadata(ctx, snapshot, true)
+}
+
+func (r *WindowRepository) backfillVersionMetadata(
+	ctx context.Context,
+	snapshot *TaskSnapshot,
+	tryLock bool,
+) (bool, error) {
+	if snapshot == nil {
+		return true, nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin PM aggregation version metadata backfill: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if tryLock {
+		var acquired bool
+		if err := tx.QueryRow(
+			ctx,
+			versionMetadataBackfillLockSQL(true),
+			versionMetadataBackfillLockID,
+		).Scan(&acquired); err != nil {
+			return false, fmt.Errorf("try lock PM aggregation version metadata backfill: %w", err)
+		}
+		if !acquired {
+			return false, nil
+		}
+	} else if _, err := tx.Exec(
+		ctx,
+		versionMetadataBackfillLockSQL(false),
+		versionMetadataBackfillLockID,
+	); err != nil {
+		return false, fmt.Errorf("lock PM aggregation version metadata backfill: %w", err)
+	}
+	for _, versionID := range sortedSnapshotVersionIDs(snapshot) {
+		version := snapshot.ByVersion[versionID]
+		if version == nil || version.EffectiveFrom.IsZero() {
+			continue
+		}
+		query, args, buildErr := storage.Psql.Update("pm_aggregation_windows").
+			Set("version_effective_from", version.EffectiveFrom).
+			Set("version_effective_to", version.EffectiveTo).
+			Where(sq.Eq{"task_version_id": versionID, "version_effective_from": nil}).
+			ToSql()
+		if buildErr != nil {
+			return false, fmt.Errorf("build PM aggregation version metadata backfill: %w", buildErr)
+		}
+		if _, execErr := tx.Exec(ctx, query, args...); execErr != nil {
+			return false, fmt.Errorf("backfill PM aggregation version metadata: %w", execErr)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit PM aggregation version metadata backfill: %w", err)
+	}
+	return true, nil
+}
+
+func versionMetadataBackfillLockSQL(tryLock bool) string {
+	if tryLock {
+		return "SELECT pg_try_advisory_xact_lock($1)"
+	}
+	return "SELECT pg_advisory_xact_lock($1)"
+}
+
+func sortedSnapshotVersionIDs(snapshot *TaskSnapshot) []uuid.UUID {
+	if snapshot == nil {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(snapshot.ByVersion))
+	for versionID := range snapshot.ByVersion {
+		ids = append(ids, versionID)
+	}
+	sort.Slice(ids, func(left, right int) bool {
+		return ids[left].String() < ids[right].String()
+	})
+	return ids
+}
+
 func (r *WindowRepository) ObserveReceived(
 	ctx context.Context,
 	key WindowKey,
 	received int64,
 ) error {
-	query, args, err := storage.Psql.Update("pm_aggregation_windows").
-		Set("received_slots", received).
-		Set("updated_at", time.Now().UTC()).
-		Where(sq.Eq{
-			"task_version_id": key.TaskVersionID,
-			"entity_key":      key.EntityKey,
-			"granularity":     string(key.Granularity),
-			"window_start":    key.Start,
-			"status":          "open",
-		}).
+	query, args, err := observeReceivedUpdate(key, received).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build observe PM aggregation window SQL: %w", err)
@@ -73,22 +176,42 @@ func (r *WindowRepository) ObserveReceived(
 	return nil
 }
 
-func (r *WindowRepository) IsPublished(ctx context.Context, key WindowKey) (bool, error) {
+func observeReceivedUpdate(key WindowKey, received int64) sq.UpdateBuilder {
+	return storage.Psql.Update("pm_aggregation_windows").
+		Set("received_slots", received).
+		Set("status", "open").
+		Set("last_error", nil).
+		Set("updated_at", time.Now().UTC()).
+		Where(sq.Eq{
+			"task_version_id": key.TaskVersionID,
+			"entity_key":      key.EntityKey,
+			"granularity":     string(key.Granularity),
+			"window_start":    key.Start,
+			"status":          []string{"open", "failed"},
+		})
+}
+
+func (r *WindowRepository) Status(ctx context.Context, key WindowKey) (string, error) {
 	query, args, err := storage.Psql.Select("status").
 		From("pm_aggregation_windows").
 		Where(windowKeyPredicate(key)).
 		ToSql()
 	if err != nil {
-		return false, fmt.Errorf("build PM aggregation window status SQL: %w", err)
+		return "", fmt.Errorf("build PM aggregation window status SQL: %w", err)
 	}
 	var status string
 	if err := r.pool.QueryRow(ctx, query, args...).Scan(&status); err != nil {
 		if err == pgx.ErrNoRows {
-			return false, nil
+			return "", nil
 		}
-		return false, fmt.Errorf("query PM aggregation window status: %w", err)
+		return "", fmt.Errorf("query PM aggregation window status: %w", err)
 	}
-	return status == "published", nil
+	return status, nil
+}
+
+func (r *WindowRepository) IsPublished(ctx context.Context, key WindowKey) (bool, error) {
+	status, err := r.Status(ctx, key)
+	return status == "published", err
 }
 
 func (r *WindowRepository) ListDue(
@@ -100,9 +223,10 @@ func (r *WindowRepository) ListDue(
 	query, args, err := storage.Psql.Select(
 		"task_id", "task_version_id", "entity_key", "granularity", "window_start", "window_end",
 		"status", "expected_slots", "received_slots",
-	).From("pm_aggregation_windows").
+	).From("pm_aggregation_windows w").
 		Where(sq.Eq{"status": []string{"open", "failed"}}).
 		Where(sq.LtOrEq{"window_end": now.Add(-grace)}).
+		Where(queueBarrierConsumedPredicate()).
 		OrderBy("window_end").
 		Limit(limit).
 		ToSql()
@@ -148,9 +272,10 @@ func (r *WindowRepository) ListDueByGranularityAfter(
 	builder := storage.Psql.Select(
 		"task_id", "task_version_id", "entity_key", "granularity", "window_start", "window_end",
 		"status", "expected_slots", "received_slots",
-	).From("pm_aggregation_windows").
+	).From("pm_aggregation_windows w").
 		Where(sq.Eq{"status": []string{"open", "failed"}}).
 		Where(due).
+		Where(queueBarrierConsumedPredicate()).
 		OrderBy("window_end", "task_version_id", "entity_key", "granularity", "window_start").
 		Limit(limit).
 		PlaceholderFormat(sq.Dollar)
@@ -165,6 +290,99 @@ func (r *WindowRepository) ListDueByGranularityAfter(
 		return nil, fmt.Errorf("build list due PM aggregation windows by granularity SQL: %w", err)
 	}
 	return r.queryWindows(ctx, query, args...)
+}
+
+func queueBarrierConsumedPredicate() sq.Sqlizer {
+	return sq.Expr(`
+NOT EXISTS (
+    SELECT 1
+    FROM pm_aggregation_outbox source_event
+    WHERE w.granularity = 'hourly'
+      AND source_event.consumed_at IS NULL
+      AND source_event.barrier_eligible
+      AND source_event.event_window_start >= w.window_start
+      AND source_event.event_window_start < w.window_end
+)
+AND NOT EXISTS (
+    SELECT 1
+    FROM pm_aggregation_rollup_outbox source_rollup
+    WHERE source_rollup.consumed_at IS NULL
+      AND source_rollup.barrier_eligible
+      AND source_rollup.window_start >= w.window_start
+      AND source_rollup.window_start < w.window_end
+      AND (
+          (w.granularity = 'daily' AND source_rollup.subject = ?)
+          OR
+          (w.granularity IN ('weekly', 'monthly') AND source_rollup.subject = ?)
+      )
+)`,
+		"pmaggregation.hourly.rollup",
+		"pmaggregation.daily.rollup",
+	)
+}
+
+func (r *WindowRepository) CountWatermarkBlocked(
+	ctx context.Context,
+	now time.Time,
+	graceByGranularity map[Granularity]time.Duration,
+	fallbackGrace time.Duration,
+) (int64, error) {
+	due := sq.Or{}
+	for _, granularity := range []Granularity{
+		GranularityHourly, GranularityDaily, GranularityWeekly, GranularityMonthly,
+	} {
+		grace := graceByGranularity[granularity]
+		if grace <= 0 {
+			grace = fallbackGrace
+		}
+		due = append(due, sq.And{
+			sq.Eq{"w.granularity": string(granularity)},
+			sq.LtOrEq{"w.window_end": now.Add(-grace)},
+		})
+	}
+	query, args, err := storage.Psql.Select("COUNT(*)").
+		From("pm_aggregation_windows w").
+		Where(sq.Eq{"w.status": []string{"open", "failed"}}).
+		Where(due).
+		Where(queueBarrierPendingPredicate()).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build count PM windows blocked by queue watermark: %w", err)
+	}
+	var count int64
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count PM windows blocked by queue watermark: %w", err)
+	}
+	return count, nil
+}
+
+func queueBarrierPendingPredicate() sq.Sqlizer {
+	return sq.Expr(`
+EXISTS (
+    SELECT 1
+    FROM pm_aggregation_outbox source_event
+    WHERE w.granularity = 'hourly'
+      AND source_event.consumed_at IS NULL
+      AND source_event.barrier_eligible
+      AND source_event.event_window_start >= w.window_start
+      AND source_event.event_window_start < w.window_end
+)
+OR EXISTS (
+    SELECT 1
+    FROM pm_aggregation_rollup_outbox source_rollup
+    WHERE source_rollup.consumed_at IS NULL
+      AND source_rollup.barrier_eligible
+      AND source_rollup.window_start >= w.window_start
+      AND source_rollup.window_start < w.window_end
+      AND (
+          (w.granularity = 'daily' AND source_rollup.subject = ?)
+          OR
+          (w.granularity IN ('weekly', 'monthly') AND source_rollup.subject = ?)
+      )
+)`,
+		"pmaggregation.hourly.rollup",
+		"pmaggregation.daily.rollup",
+	)
 }
 
 func (r *WindowRepository) ListActive(ctx context.Context, limit uint64) ([]WindowRecord, error) {

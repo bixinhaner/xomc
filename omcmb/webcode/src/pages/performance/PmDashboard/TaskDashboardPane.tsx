@@ -214,9 +214,10 @@ export default function TaskDashboardPane({ taskId }: Props) {
       objectLdns: submitted?.objectLdns,
       weekdays: submitted?.weekdays,
       hours: submitted?.hours,
+      includePartial: true,
     },
   );
-  const rawRows = rowsResp?.rows ?? [];
+  const rawRows = [...(rowsResp?.rows ?? []), ...(rowsResp?.progressRows ?? [])];
   // 周期对比开关打开时再拉一次上一周期（同任务、上一周期窗口、同 weekdays/hours）。
   const { data: prevResp, isLoading: prevLoading } = usePmAdhocResults(
     submitted?.compare && resultsQueryReady ? taskId : undefined,
@@ -233,13 +234,27 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const rawPrevRows = prevResp?.rows ?? [];
 
   // 触顶提示：结果接口 LIMIT 上限，触顶可能截断 → 给可见提示，不静默。
-  const truncated = rawRows.length >= RESULTS_LIMIT;
+  const truncated = (rowsResp?.total ?? 0) > (rowsResp?.rows.length ?? 0);
 
   const granularities = useMemo(
     () => taskQuery.data?.granularities ?? [],
     [taskQuery.data?.granularities],
   );
   const effectiveGran = activeGran && granularities.includes(activeGran) ? activeGran : granularities[0];
+  const activeProgress = useMemo(() => {
+    if (effectiveGran !== 'daily' && effectiveGran !== 'weekly') return undefined;
+    return (rowsResp?.periodProgress ?? [])
+      .filter((progress) => progress.granularity === effectiveGran)
+      .sort((left, right) => right.windowStart.localeCompare(left.windowStart))[0];
+  }, [effectiveGran, rowsResp?.periodProgress]);
+  const activeCoverage = activeProgress && (activeProgress.expectedSlots ?? 0) > 0
+    ? Math.min(
+        100,
+        Math.round(
+          ((activeProgress.receivedSlots ?? 0) / (activeProgress.expectedSlots ?? 1)) * 100,
+        ),
+      )
+    : 0;
   const chartLocale = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
   const metricDisplayNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -469,6 +484,36 @@ export default function TaskDashboardPane({ taskId }: Props) {
           </Button>
         </Space>
       </Card>
+
+      {activeProgress && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={intl.formatMessage({ id: 'perf.dashboard.partialPeriod' })}
+          description={intl.formatMessage(
+            { id: 'perf.dashboard.partialPeriodDesc' },
+            {
+              received: activeProgress.receivedSlots ?? 0,
+              expected: activeProgress.expectedSlots ?? 0,
+              coverage: activeCoverage,
+              revision: activeProgress.revision ?? 1,
+              from: activeProgress.versionEffectiveFrom ?? '-',
+              to: activeProgress.versionEffectiveTo ?? '-',
+            },
+          )}
+        />
+      )}
+
+      {rowsResp?.progressState === 'unavailable' && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={intl.formatMessage({ id: 'perf.dashboard.progressUnavailable' })}
+          description={intl.formatMessage({ id: 'perf.dashboard.progressUnavailableDesc' })}
+        />
+      )}
 
       {truncated && (
         <Alert

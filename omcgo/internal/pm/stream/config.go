@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const minimumHourlyCloseGrace = 12 * time.Minute
+
 type Config struct {
 	Enabled             bool
 	CloseGrace          time.Duration
@@ -17,12 +19,14 @@ type Config struct {
 	FinalizeConcurrency int
 	MaxEventBytes       int
 	WindowTTL           time.Duration
+	OutboxRetention     time.Duration
+	ReplayRetention     time.Duration
 }
 
 func DefaultConfig() Config {
 	return Config{
 		Enabled:             true,
-		CloseGrace:          5 * time.Minute,
+		CloseGrace:          12 * time.Minute,
 		DailyCloseGrace:     15 * time.Minute,
 		WeeklyCloseGrace:    30 * time.Minute,
 		MonthlyCloseGrace:   30 * time.Minute,
@@ -31,6 +35,8 @@ func DefaultConfig() Config {
 		FinalizeConcurrency: 4,
 		MaxEventBytes:       8 << 20,
 		WindowTTL:           45 * 24 * time.Hour,
+		OutboxRetention:     24 * time.Hour,
+		ReplayRetention:     45 * 24 * time.Hour,
 	}
 }
 
@@ -38,6 +44,9 @@ func ConfigFromEnv() Config {
 	cfg := DefaultConfig()
 	cfg.Enabled = envBool("PM_AGGREGATION_ENABLED", cfg.Enabled)
 	cfg.CloseGrace = envDuration("PM_AGGREGATION_CLOSE_GRACE", cfg.CloseGrace)
+	if cfg.CloseGrace < minimumHourlyCloseGrace {
+		cfg.CloseGrace = minimumHourlyCloseGrace
+	}
 	cfg.DailyCloseGrace = envDuration("PM_AGGREGATION_DAILY_CLOSE_GRACE", cfg.DailyCloseGrace)
 	cfg.WeeklyCloseGrace = envDuration("PM_AGGREGATION_WEEKLY_CLOSE_GRACE", cfg.WeeklyCloseGrace)
 	cfg.MonthlyCloseGrace = envDuration("PM_AGGREGATION_MONTHLY_CLOSE_GRACE", cfg.MonthlyCloseGrace)
@@ -46,7 +55,25 @@ func ConfigFromEnv() Config {
 	cfg.FinalizeConcurrency = envInt("PM_AGGREGATION_FINALIZE_CONCURRENCY", cfg.FinalizeConcurrency)
 	cfg.MaxEventBytes = envInt("PM_AGGREGATION_MAX_EVENT_BYTES", cfg.MaxEventBytes)
 	cfg.WindowTTL = envDuration("PM_AGGREGATION_WINDOW_TTL", cfg.WindowTTL)
+	cfg.OutboxRetention = boundedDuration(
+		envDuration("PM_AGGREGATION_OUTBOX_RETENTION", cfg.OutboxRetention),
+		time.Hour, 7*24*time.Hour,
+	)
+	cfg.ReplayRetention = boundedDuration(
+		envDuration("PM_AGGREGATION_REPLAY_RETENTION", cfg.ReplayRetention),
+		45*24*time.Hour, 90*24*time.Hour,
+	)
 	return cfg
+}
+
+func boundedDuration(value, minimum, maximum time.Duration) time.Duration {
+	if value < minimum {
+		return minimum
+	}
+	if value > maximum {
+		return maximum
+	}
+	return value
 }
 
 func envBool(key string, fallback bool) bool {

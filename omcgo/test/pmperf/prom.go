@@ -14,16 +14,17 @@ import (
 // pmProm 是 worker 进程 /metrics 里与 PM 解析入库相关的指标快照。
 // 取测试前后两次快照做差，得到本轮的解析吞吐 / 时延 / 失败 / 迟到数据。
 type pmProm struct {
-	filesSuccess       float64 // omc_pm_files_processed_total{status="success"}
-	filesFailed        float64 // omc_pm_files_processed_total{status="failed"}
-	filesLate          float64 // omc_pm_files_processed_total{status="late_arrival"}
-	lateArrivalTotal   float64 // omc_pm_late_arrival_files_total（全标签求和）
-	discoveredCounters float64 // omc_pm_discovered_counters_total（全标签求和）
-	procDurSum         float64 // omc_pm_processing_duration_seconds_sum
-	procDurCount       float64 // omc_pm_processing_duration_seconds_count
-	delaySum           float64 // omc_pm_report_delay_seconds_sum（全标签求和）
-	delayCount         float64 // omc_pm_report_delay_seconds_count（全标签求和）
-	scraped            bool    // 是否成功抓取（抓取失败时整组按 0 处理并提示）
+	filesSuccess     float64 // omc_pm_files_processed_total{status="success"}
+	filesFailed      float64 // omc_pm_files_processed_total{status="failed"}
+	filesLate        float64 // omc_pm_files_processed_total{status="late_arrival"}
+	lateArrivalTotal float64 // omc_pm_late_arrival_files_total（全标签求和）
+	whitelistMiss    float64 // omc_pm_whitelist_miss_values_total（全标签求和）
+	knownDisabled    float64 // omc_pm_known_disabled_values_total（全标签求和）
+	procDurSum       float64 // omc_pm_processing_duration_seconds_sum
+	procDurCount     float64 // omc_pm_processing_duration_seconds_count
+	delaySum         float64 // omc_pm_report_delay_seconds_sum（全标签求和）
+	delayCount       float64 // omc_pm_report_delay_seconds_count（全标签求和）
+	scraped          bool    // 是否成功抓取（抓取失败时整组按 0 处理并提示）
 }
 
 // avgProcMillis 单文件平均处理耗时（毫秒）。
@@ -45,16 +46,17 @@ func (p pmProm) avgDelaySec() float64 {
 // sub 计算两次快照差（after - before），用于报告本轮增量。
 func (p pmProm) sub(b pmProm) pmProm {
 	return pmProm{
-		filesSuccess:       p.filesSuccess - b.filesSuccess,
-		filesFailed:        p.filesFailed - b.filesFailed,
-		filesLate:          p.filesLate - b.filesLate,
-		lateArrivalTotal:   p.lateArrivalTotal - b.lateArrivalTotal,
-		discoveredCounters: p.discoveredCounters - b.discoveredCounters,
-		procDurSum:         p.procDurSum - b.procDurSum,
-		procDurCount:       p.procDurCount - b.procDurCount,
-		delaySum:           p.delaySum - b.delaySum,
-		delayCount:         p.delayCount - b.delayCount,
-		scraped:            p.scraped && b.scraped,
+		filesSuccess:     p.filesSuccess - b.filesSuccess,
+		filesFailed:      p.filesFailed - b.filesFailed,
+		filesLate:        p.filesLate - b.filesLate,
+		lateArrivalTotal: p.lateArrivalTotal - b.lateArrivalTotal,
+		whitelistMiss:    p.whitelistMiss - b.whitelistMiss,
+		knownDisabled:    p.knownDisabled - b.knownDisabled,
+		procDurSum:       p.procDurSum - b.procDurSum,
+		procDurCount:     p.procDurCount - b.procDurCount,
+		delaySum:         p.delaySum - b.delaySum,
+		delayCount:       p.delayCount - b.delayCount,
+		scraped:          p.scraped && b.scraped,
 	}
 }
 
@@ -101,8 +103,10 @@ func scrapeProm(ctx context.Context, url string, timeout time.Duration) pmProm {
 			}
 		case "omc_pm_late_arrival_files_total":
 			out.lateArrivalTotal += val
-		case "omc_pm_discovered_counters_total":
-			out.discoveredCounters += val
+		case "omc_pm_whitelist_miss_values_total":
+			out.whitelistMiss += val
+		case "omc_pm_known_disabled_values_total":
+			out.knownDisabled += val
 		case "omc_pm_processing_duration_seconds_sum":
 			out.procDurSum += val
 		case "omc_pm_processing_duration_seconds_count":

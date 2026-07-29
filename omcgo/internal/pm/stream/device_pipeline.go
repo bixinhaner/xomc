@@ -2,7 +2,6 @@ package stream
 
 import (
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -70,7 +69,10 @@ func deviceRollupVersion(source *TaskVersionSnapshot) (*TaskVersionSnapshot, boo
 	pipeline.VersionID = pipeline.RollupVersionID
 	pipeline.VersionNo = 1
 	pipeline.Name = "设备逐级汇聚-" + strings.ToUpper(source.Technology)
-	pipeline.EffectiveFrom = time.Time{}
+	pipeline.EffectiveFrom = source.LineageEffectiveFrom
+	if pipeline.EffectiveFrom.IsZero() {
+		pipeline.EffectiveFrom = source.EffectiveFrom
+	}
 	pipeline.EffectiveTo = nil
 	pipeline.DevicePipeline = false
 	pipeline.DeviceRollup = true

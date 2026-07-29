@@ -415,12 +415,14 @@ func (r *PgTaskRepository) LoadMatchable(ctx context.Context, at time.Time) ([]*
 	query, args, err := storage.Psql.Select(
 		"t.id", "v.id", "v.version_no", "t.name", "v.enabled",
 		"COALESCE(v.technology, '')", "v.dimension", "v.granularities",
-		"v.object_ldns", "v.effective_from", "v.effective_to", "t.planned_end_at",
+		"v.object_ldns", "v.effective_from",
+		"(SELECT MIN(lineage.effective_from) FROM pm_aggregation_task_versions lineage WHERE lineage.task_id = v.task_id)",
+		"v.effective_to", "t.planned_end_at",
 	).From("pm_aggregation_task_versions v").
 		Join("pm_aggregation_tasks t ON t.id = v.task_id").
 		Where(sq.Or{
 			sq.Eq{"v.effective_to": nil},
-			sq.GtOrEq{"v.effective_to": at.Add(-35 * 24 * time.Hour)},
+			sq.GtOrEq{"v.effective_to": at.Add(-45 * 24 * time.Hour)},
 		}).
 		OrderBy("v.task_id", "v.version_no").
 		ToSql()
@@ -439,7 +441,8 @@ func (r *PgTaskRepository) LoadMatchable(ctx context.Context, at time.Time) ([]*
 		if err := rows.Scan(
 			&version.TaskID, &version.VersionID, &version.VersionNo, &version.Name, &version.Enabled,
 			&version.Technology, &version.Dimension, &granularityStrings, &objectLDNs,
-			&version.EffectiveFrom, &version.EffectiveTo, &version.PlannedEndAt,
+			&version.EffectiveFrom, &version.LineageEffectiveFrom,
+			&version.EffectiveTo, &version.PlannedEndAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan matchable PM aggregation task version: %w", err)
 		}

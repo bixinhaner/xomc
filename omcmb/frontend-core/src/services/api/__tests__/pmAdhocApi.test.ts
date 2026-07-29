@@ -149,6 +149,54 @@ describe('pmAdhocApi.results — 维度子集过滤 query（手动 snake_case，
     expect('product_ids' in opts.params).toBe(false);
     expect('object_ldns' in opts.params).toBe(false);
   });
+
+  it('默认不请求进行中结果，显式 opt-in 后才带 include_partial', async () => {
+    await pmAdhocApi.results('t1');
+    expect(getMock.mock.calls[0][1].params.include_partial).toBeUndefined();
+
+    await pmAdhocApi.results(
+      't1', 100, 0, undefined, undefined, undefined, undefined,
+      undefined, undefined, true,
+    );
+    expect(getMock.mock.calls[1][1].params.include_partial).toBe(true);
+  });
+
+  it('进行中结果与持久结果分离，不污染 total 与分页', async () => {
+    const row = {
+      id: 'r1', task_id: 't1', metric_path: 'K1', metric_value: 1,
+      granularity: 'daily', start_time: '2026-07-29T00:00:00Z',
+      end_time: '2026-07-30T00:00:00Z', extra: { partial: false },
+    };
+    getMock.mockResolvedValue({
+      data: {
+        items: [row], total: 10,
+        progress_items: [{ ...row, id: 'p1', extra: { partial: true } }],
+        progress_total: 1, progress_state: 'available',
+        period_progress: [{
+          granularity: 'daily',
+          window_start: '2026-07-29T00:00:00Z',
+          window_end: '2026-07-30T00:00:00Z',
+          entity_key: 'lowest-entity',
+          revision: 2,
+          version_effective_from: '2026-07-01T00:00:00Z',
+          received_slots: 0,
+          expected_slots: 24,
+        }],
+      },
+    });
+
+    const result = await pmAdhocApi.results('t1');
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.total).toBe(10);
+    expect(result.progressRows).toHaveLength(1);
+    expect(result.progressTotal).toBe(1);
+    expect(result.periodProgress).toEqual([
+      expect.objectContaining({
+        entityKey: 'lowest-entity', receivedSlots: 0, expectedSlots: 24,
+      }),
+    ]);
+  });
 });
 
 describe('pmAdhocApi.filterOptions — 端点 + 响应透传', () => {

@@ -38,13 +38,15 @@ const parseReadBufferSize = 64 * 1024
 //
 // G3 合表为 pm_metrics 后，三字段将写入新表 start_time / end_time / ingest_time 列（NOT NULL）。
 type PMFileContent struct {
-	DeviceSN      string
-	CollectTime   time.Time // 兼容：沿用 granPeriod.endTime
-	FileBeginTime time.Time // G4: fileHeader/measCollec/@beginTime
-	FileEndTime   time.Time // G4: fileFooter/measCollec/@endTime
-	IngestTime    time.Time // G4: Parse 完成时刻（OMC 时钟）
-	Granularity   int       // minutes
-	Counters      []model.PMCounter
+	DeviceSN            string
+	CollectTime         time.Time // 兼容：沿用 granPeriod.endTime
+	FileBeginTime       time.Time // G4: fileHeader/measCollec/@beginTime
+	FileEndTime         time.Time // G4: fileFooter/measCollec/@endTime
+	IngestTime          time.Time // G4: Parse 完成时刻（OMC 时钟）
+	Granularity         int       // minutes
+	Counters            []model.PMCounter
+	whitelistMissValues int
+	knownDisabledValues int
 }
 
 // StatisDurationReportKey 是合成「统计时长」计数器的上报名（report_key）。

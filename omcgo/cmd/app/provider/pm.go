@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
@@ -97,6 +98,28 @@ func initPMModule(c *Container) error {
 	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, nil, logger.Named("adhoc")).
 		WithEnabledMetricSelectionService(adhoc.NewEnabledMetricSelectionService(enabledRepo)).
 		WithTimezoneProvider(c.SystemTimezone)
+	if c.Redis != nil {
+		streamCfg := pmstream.ConfigFromEnv()
+		progressStore := pmstream.NewRedisWindowStore(c.Redis, streamCfg.WindowTTL)
+		progressTasks := pmstream.NewPgTaskRepository(c.PgPool, c.EventBus)
+		backfillCtx, backfillCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		progressVersions, loadErr := progressTasks.LoadMatchable(backfillCtx, time.Now().UTC())
+		backfilled := false
+		if loadErr == nil {
+			backfilled, loadErr = pmstream.NewWindowRepository(c.TsPool).
+				TryBackfillVersionMetadata(backfillCtx, pmstream.BuildTaskSnapshot(progressVersions))
+		}
+		backfillCancel()
+		if loadErr != nil {
+			logger.Warn("backfill PM progress version metadata; worker will retry",
+				zap.Error(loadErr))
+		} else if !backfilled {
+			logger.Info("PM progress version metadata backfill already owned by worker")
+		}
+		pmAdhocHandler.WithProgressService(
+			pmstream.NewProgressService(c.TsPool, progressStore, progressTasks),
+		)
+	}
 
 	// T-0174 阶段 1：指标查询页"查询模板"REST 入口（5 CRUD：list/get/create/update/delete）。
 	pmQueryTemplateRepo := querytemplate.NewPgRepository(c.PgPool)

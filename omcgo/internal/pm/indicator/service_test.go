@@ -80,21 +80,30 @@ func (f *fakeIndicatorRepo) ListByIDs(ctx context.Context, dt DeviceType, ids []
 }
 
 type fakeEnabledRepo struct {
+	enabledIDs  []string
+	createCalls int
+	createdIDs  []string
+	createTx    pgx.Tx
 	deleteCalls int
 	deletedIDs  []string
+	deleteTx    pgx.Tx
 }
 
 func (f *fakeEnabledRepo) List(context.Context, DeviceType, string) ([]string, error) {
-	return nil, nil
+	return append([]string(nil), f.enabledIDs...), nil
 }
 
-func (f *fakeEnabledRepo) BatchCreate(context.Context, DeviceType, string, []string, pgx.Tx) error {
+func (f *fakeEnabledRepo) BatchCreate(_ context.Context, _ DeviceType, _ string, indicatorIDs []string, tx pgx.Tx) error {
+	f.createCalls++
+	f.createdIDs = append([]string(nil), indicatorIDs...)
+	f.createTx = tx
 	return nil
 }
 
-func (f *fakeEnabledRepo) BatchDelete(_ context.Context, _ DeviceType, _ string, indicatorIDs []string, _ pgx.Tx) error {
+func (f *fakeEnabledRepo) BatchDelete(_ context.Context, _ DeviceType, _ string, indicatorIDs []string, tx pgx.Tx) error {
 	f.deleteCalls++
 	f.deletedIDs = append([]string(nil), indicatorIDs...)
+	f.deleteTx = tx
 	return nil
 }
 
@@ -120,6 +129,15 @@ func item(id, arithmetic string) IndicatorListItem {
 		a = &arithmetic
 	}
 	return IndicatorListItem{PerfIndicator: PerfIndicator{ID: id, Arithmetic: a}}
+}
+
+func dependencyItem(id, arithmetic, isCounter string) IndicatorListItem {
+	value := arithmetic
+	return IndicatorListItem{PerfIndicator: PerfIndicator{
+		ID:         id,
+		Arithmetic: &value,
+		IsCounter:  isCounter,
+	}}
 }
 
 // TestBuildIDMap_BypassesGroupTable is the #134 regression guard: on a fresh
@@ -194,9 +212,15 @@ func TestDisableIndicators_RejectsDashboardLayoutReferences(t *testing.T) {
 
 func TestDisableIndicators_AllowsWhenDashboardDoesNotReference(t *testing.T) {
 	enabledRepo := &fakeEnabledRepo{}
+	beginner := &fakeBeginner{tx: &fakeTx{}}
 	svc := &IndicatorManagementService{
+		indicatorRepo: &fakeIndicatorRepo{items: []IndicatorListItem{
+			dependencyItem("K900010040", "C000000001", "0"),
+			dependencyItem("C000000001", "C000000001", "1"),
+		}},
 		enabledRepo:     enabledRepo,
 		dashboardLayout: fakeDashboardLayoutRef{},
+		pool:            beginner,
 	}
 
 	err := svc.DisableIndicators(context.Background(), &EnableIndicatorsRequest{
@@ -214,6 +238,107 @@ func TestDisableIndicators_AllowsWhenDashboardDoesNotReference(t *testing.T) {
 	if got := enabledRepo.deletedIDs; len(got) != 1 || got[0] != "K900010040" {
 		t.Fatalf("deleted IDs = %v, want [K900010040]", got)
 	}
+}
+
+func TestEnableIndicators_AutomaticallyEnablesDependencyClosure(t *testing.T) {
+	enabledRepo := &fakeEnabledRepo{}
+	beginner := &fakeBeginner{tx: &fakeTx{}}
+	svc := &IndicatorManagementService{
+		indicatorRepo: &fakeIndicatorRepo{items: []IndicatorListItem{
+			dependencyItem("K900010076", "C000000216/C000000273*100", "0"),
+			dependencyItem("C000000216", "C000000216", "1"),
+			dependencyItem("C000000273", "C000000273", "1"),
+		}},
+		enabledRepo: enabledRepo,
+		pool:        beginner,
+	}
+
+	err := svc.EnableIndicators(context.Background(), &EnableIndicatorsRequest{
+		DeviceType:   string(DeviceTypeENB),
+		OperatorCode: "default",
+		IndicatorIDs: []string{"K900010076"},
+	})
+	if err != nil {
+		t.Fatalf("EnableIndicators returned error: %v", err)
+	}
+	want := []string{"C000000216", "C000000273", "K900010076"}
+	if got := enabledRepo.createdIDs; !equalStrings(got, want) {
+		t.Fatalf("created IDs = %v, want %v", got, want)
+	}
+	if enabledRepo.createTx == nil {
+		t.Fatal("dependency closure must be enabled in one transaction")
+	}
+	if beginner.tx.commits != 1 {
+		t.Fatalf("transaction commits = %d, want 1", beginner.tx.commits)
+	}
+}
+
+func TestDisableIndicators_RejectsCounterRequiredByEnabledKPI(t *testing.T) {
+	enabledRepo := &fakeEnabledRepo{
+		enabledIDs: []string{"C000000216", "C000000273", "K900010076"},
+	}
+	beginner := &fakeBeginner{tx: &fakeTx{}}
+	svc := &IndicatorManagementService{
+		indicatorRepo: &fakeIndicatorRepo{items: []IndicatorListItem{
+			dependencyItem("K900010076", "C000000216/C000000273*100", "0"),
+			dependencyItem("C000000216", "C000000216", "1"),
+			dependencyItem("C000000273", "C000000273", "1"),
+		}},
+		enabledRepo: enabledRepo,
+		pool:        beginner,
+	}
+
+	err := svc.DisableIndicators(context.Background(), &EnableIndicatorsRequest{
+		DeviceType:   string(DeviceTypeENB),
+		OperatorCode: "default",
+		IndicatorIDs: []string{"C000000216"},
+	})
+	if !errors.Is(err, ErrEnabledKPIDependency) {
+		t.Fatalf("DisableIndicators error = %v, want ErrEnabledKPIDependency", err)
+	}
+	if enabledRepo.deleteCalls != 0 {
+		t.Fatalf("BatchDelete calls = %d, want 0", enabledRepo.deleteCalls)
+	}
+}
+
+func TestDisableIndicators_AllowsKPIAndDependencyTogether(t *testing.T) {
+	enabledRepo := &fakeEnabledRepo{
+		enabledIDs: []string{"C000000216", "C000000273", "K900010076"},
+	}
+	beginner := &fakeBeginner{tx: &fakeTx{}}
+	svc := &IndicatorManagementService{
+		indicatorRepo: &fakeIndicatorRepo{items: []IndicatorListItem{
+			dependencyItem("K900010076", "C000000216/C000000273*100", "0"),
+			dependencyItem("C000000216", "C000000216", "1"),
+			dependencyItem("C000000273", "C000000273", "1"),
+		}},
+		enabledRepo: enabledRepo,
+		pool:        beginner,
+	}
+
+	err := svc.DisableIndicators(context.Background(), &EnableIndicatorsRequest{
+		DeviceType:   string(DeviceTypeENB),
+		OperatorCode: "default",
+		IndicatorIDs: []string{"K900010076", "C000000216"},
+	})
+	if err != nil {
+		t.Fatalf("DisableIndicators returned error: %v", err)
+	}
+	if enabledRepo.deleteTx == nil || beginner.tx.commits != 1 {
+		t.Fatalf("disable was not committed transactionally: tx=%v commits=%d", enabledRepo.deleteTx != nil, beginner.tx.commits)
+	}
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestRESTHandler_ListIndicators_DefaultsOperatorCodeForEnabledFilter(t *testing.T) {

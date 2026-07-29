@@ -53,8 +53,8 @@ func names(cs []model.PMCounter) []string {
 	return out
 }
 
-// 核心场景：白名单命中项改写成编号并补元数据，配置外项保留原始上报名等待动态登记。
-func TestFilterByWhitelist_RewritesKnownAndPreservesUnknown(t *testing.T) {
+// 核心场景：白名单命中项改写成编号并补元数据，配置外项在此阶段剔除且只计一次。
+func TestFilterByWhitelist_RewritesKnownAndRemovesUnknown(t *testing.T) {
 	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
 		"L.Cell.Avail": {IndicatorID: "C000010001", Unit: "%", StatisType: "avg"},
 		"RRC.AttConn":  {IndicatorID: "C000010002", Unit: "number", StatisType: "sum"},
@@ -62,7 +62,7 @@ func TestFilterByWhitelist_RewritesKnownAndPreservesUnknown(t *testing.T) {
 	in := sample("L.Cell.Avail", "MR.RIPPRB", "RRC.AttConn", "MR.RECEIVEDIPOWER")
 	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
 	// 命中后 CounterName 已是编号（不再是上报名）。
-	assert.ElementsMatch(t, []string{"C000010001", "MR.RIPPRB", "C000010002", "MR.RECEIVEDIPOWER"}, names(out))
+	assert.ElementsMatch(t, []string{"C000010001", "C000010002"}, names(out))
 	statisByID := map[string]string{}
 	for _, c := range out {
 		statisByID[c.CounterName] = c.StatisType
@@ -96,16 +96,15 @@ func TestFilterByWhitelist_MatchesByReportKeyNotEnName(t *testing.T) {
 	assert.Equal(t, "sum", out[0].StatisType)
 }
 
-// 稀疏存储：配置外新指标也必须保留原始上报名和值，由入库层动态登记最小字典记录。
-func TestFilterByWhitelist_UnmatchedReportKey_PreservedForDynamicRegistration(t *testing.T) {
+// 配置外上报名不具备完整指标元数据，必须在启用过滤前剔除，避免随后再次计为 disabled。
+func TestFilterByWhitelist_UnmatchedReportKey_RemovedOnce(t *testing.T) {
 	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
 		"L.Cell.Avail": {IndicatorID: "C000010001", StatisType: "avg"},
 	}})
 	in := sample("L.Cell.Avail", "WILD.Counter")
 	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
-	require.Len(t, out, 2)
+	require.Len(t, out, 1)
 	assert.Equal(t, "C000010001", out[0].CounterName)
-	assert.Equal(t, "WILD.Counter", out[1].CounterName)
 }
 
 // fail-open：whitelist 未注入（nil）→ 不过滤。
@@ -157,43 +156,29 @@ func TestFilterByWhitelist_BUG6_BaicellsOrphans(t *testing.T) {
 	in = append(in, model.PMCounter{CounterName: "RRC.AttConnEstab", CellID: "Cell1"})
 
 	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
-	require.Len(t, out, 107)
+	require.Len(t, out, 1)
 	// PM-P2：命中后 CounterName 已改写成编号。
-	assert.Equal(t, "MR.RIPPRB", out[0].CounterName)
-	assert.Equal(t, "C000010099", out[len(out)-1].CounterName)
+	assert.Equal(t, "C000010099", out[0].CounterName)
 }
 
-// 配置外 counter 会被保留并登记，因此主指标必须描述为 discovered；
-// 旧 dropped 名仅作为一个发布周期的兼容别名，并始终与主指标同值。
-func TestFilterByWhitelist_DiscoveredCountersMetricWithDeprecatedAlias(t *testing.T) {
+// 配置外 counter 被剔除并返回待提交计数；marker 成功前不增加指标，避免重投重复计数。
+func TestFilterByWhitelist_ReportsMissWithoutIncrementingBeforeCommit(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
 		"L.Cell.Avail": {IndicatorID: "C000010001", StatisType: "avg"},
 	}})
 	c.SetMetrics(pm.NewPMMetrics(reg))
 
-	// 命中 1 个，发现 2 个配置外指标；指标仍保留，但可观测计数继续记录。
+	// 命中 1 个，发现 2 个配置外指标。
 	in := sample("L.Cell.Avail", "MR.RIPPRB", "MR.RECEIVEDIPOWER")
-	out := c.filterByWhitelist(context.Background(), "SN-1", "cmcc", "lte", in)
-	require.Len(t, out, 3)
+	out, _, unknown := c.filterByWhitelistWithAllow(context.Background(), "SN-1", in)
+	require.Len(t, out, 1)
+	require.Equal(t, 2, unknown)
 
-	discovered := testutil.ToFloat64(c.metrics.DiscoveredCountersTotal.WithLabelValues("cmcc", "lte", "whitelist_miss"))
-	deprecatedAlias := testutil.ToFloat64(c.metrics.DroppedCountersTotal.WithLabelValues("cmcc", "lte", "whitelist_miss"))
-	assert.Equal(t, float64(2), discovered, "应记录 2 个被保留的配置外 counter")
-	assert.Equal(t, discovered, deprecatedAlias, "兼容别名必须与新指标同值")
-
-	families, err := reg.Gather()
-	require.NoError(t, err)
-	for _, family := range families {
-		switch family.GetName() {
-		case "omc_pm_discovered_counters_total":
-			assert.NotContains(t, family.GetHelp(), "dropped")
-			assert.Contains(t, family.GetHelp(), "preserved")
-		case "omc_pm_dropped_counters_total":
-			assert.Contains(t, family.GetHelp(), "Deprecated alias")
-			assert.Contains(t, family.GetHelp(), "preserved")
-		}
-	}
+	misses := testutil.ToFloat64(c.metrics.WhitelistMissValuesTotal.WithLabelValues("cmcc", "lte"))
+	disabled := testutil.ToFloat64(c.metrics.KnownDisabledValuesTotal.WithLabelValues("cmcc", "lte"))
+	assert.Zero(t, misses)
+	assert.Zero(t, disabled)
 }
 
 func TestFilterAndFillByWhitelist_AddsNullRowsForSupportedMissingCounters(t *testing.T) {

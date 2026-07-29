@@ -11,7 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const advisoryLockKey int64 = 0x524157434c45414e // "RAWCLEAN"
+const (
+	advisoryLockKey              int64 = 0x524157434c45414e // "RAWCLEAN"
+	pmAggregationReplayRetention       = 45 * 24 * time.Hour
+)
 
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
@@ -226,10 +229,9 @@ func (r *PGRepository) CleanupMetadata(ctx context.Context, cutoff time.Time, li
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var deleted int64
 	if len(pmIDs) > 0 {
-		deleteOutbox, args, buildErr := psql.Delete("pm_aggregation_outbox").
-			Where(sq.Eq{"source_file_id": pmIDs}).
-			Where("published_at IS NOT NULL").
-			Where("NOT EXISTS (SELECT 1 FROM pm_aggregation_counter_rollups r WHERE r.event_id = pm_aggregation_outbox.event_id)").ToSql()
+		deleteOutbox, args, buildErr := buildPMOutboxCleanupQuery(
+			pmIDs, time.Now().UTC(),
+		)
 		if buildErr != nil {
 			return 0, fmt.Errorf("build PM outbox metadata cleanup: %w", buildErr)
 		}
@@ -281,6 +283,15 @@ func (r *PGRepository) CleanupMetadata(ctx context.Context, cutoff time.Time, li
 		return 0, fmt.Errorf("commit raw metadata cleanup: %w", err)
 	}
 	return deleted, nil
+}
+
+func buildPMOutboxCleanupQuery(pmIDs []uuid.UUID, now time.Time) (string, []any, error) {
+	return psql.Delete("pm_aggregation_outbox").
+		Where(sq.Eq{"source_file_id": pmIDs}).
+		Where("published_at IS NOT NULL").
+		Where(sq.Lt{"created_at": now.Add(-pmAggregationReplayRetention)}).
+		Where("NOT EXISTS (SELECT 1 FROM pm_aggregation_counter_rollups r WHERE r.event_id = pm_aggregation_outbox.event_id)").
+		ToSql()
 }
 
 func (r *PGRepository) metadataIDs(ctx context.Context, kind Kind, cutoff time.Time, limit int) ([]uuid.UUID, error) {

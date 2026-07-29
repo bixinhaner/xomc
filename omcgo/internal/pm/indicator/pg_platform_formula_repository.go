@@ -13,7 +13,7 @@ import (
 )
 
 var formulaColumns = []string{
-	"id", "platform_name", "indicator_id", "formula", "created_at", "updated_at",
+	"id", "platform_name", "indicator_id", "formula", "report_key", "created_at", "updated_at",
 }
 
 var _ PlatformFormulaRepository = (*PgPlatformFormulaRepository)(nil)
@@ -64,10 +64,10 @@ func (r *PgPlatformFormulaRepository) BatchCreate(ctx context.Context, dt Device
 	now := time.Now()
 
 	builder := storage.Psql.Insert(table).
-		Columns("platform_name", "indicator_id", "formula", "created_at", "updated_at")
+		Columns("platform_name", "indicator_id", "formula", "report_key", "created_at", "updated_at")
 
 	for _, f := range formulas {
-		builder = builder.Values(f.PlatformName, f.IndicatorID, f.Formula, now, now)
+		builder = builder.Values(f.PlatformName, f.IndicatorID, f.Formula, f.ReportKey, now, now)
 	}
 
 	query, args, err := builder.ToSql()
@@ -224,7 +224,10 @@ func (r *PgPlatformFormulaRepository) ListPlatformNames(ctx context.Context, dt 
 
 func scanFormula(rows pgx.Rows) (*PlatformFormula, error) {
 	var f PlatformFormula
-	err := rows.Scan(&f.ID, &f.PlatformName, &f.IndicatorID, &f.Formula, &f.CreatedAt, &f.UpdatedAt)
+	err := rows.Scan(
+		&f.ID, &f.PlatformName, &f.IndicatorID, &f.Formula,
+		&f.ReportKey, &f.CreatedAt, &f.UpdatedAt,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("scan platform_formula row: %w", err)
 	}

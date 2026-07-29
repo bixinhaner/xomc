@@ -54,6 +54,41 @@ func TestRedisWindowStoreAccumulateIsIdempotentAndComplete(t *testing.T) {
 	require.False(t, server.Exists(keys.defs[0]))
 }
 
+func TestRedisWindowStoreFencesNormalWritesDuringRebuild(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	store := NewRedisWindowStore(client, time.Hour)
+	start := time.Date(2026, 7, 29, 1, 0, 0, 0, time.UTC)
+	key := WindowKey{
+		TaskID: uuid.New(), TaskVersionID: uuid.New(), Granularity: GranularityHourly,
+		EntityKey: "network", Start: start, End: start.Add(time.Hour),
+	}
+	contribution := Contribution{
+		Key: key, SourceFileID: uuid.NewString(), DeviceID: uuid.NewString(),
+		SlotStart: start, ExpectedSlots: 1,
+		Values: []ContributionValue{{
+			Dimension: DimensionNetwork, DimensionKey: "network",
+			MetricPath: "C001", MetricType: "counter", Operation: AggregationSum, Value: 1,
+		}},
+	}
+
+	lock, err := store.TryFinalizeLock(context.Background(), key, time.Minute)
+	require.NoError(t, err)
+	require.NotNil(t, lock)
+
+	_, err = store.Accumulate(context.Background(), contribution)
+	require.ErrorContains(t, err, "PM_AGGREGATION_WINDOW_LOCKED")
+
+	_, err = store.accumulateWithLock(context.Background(), contribution, lock)
+	require.NoError(t, err)
+	require.NoError(t, store.DeleteState(context.Background(), key))
+	require.True(t, server.Exists(redisKeys(key, 1).lock), "state deletion must retain fencing lock")
+
+	require.NoError(t, lock.Extend(context.Background(), 2*time.Minute))
+	require.NoError(t, lock.Release(context.Background()))
+	require.False(t, server.Exists(redisKeys(key, 1).lock))
+}
+
 func TestRedisWindowStoreUsesOneCompactHashFieldPerMetric(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})

@@ -82,6 +82,7 @@ func BuildTaskSnapshot(versions []*TaskVersionSnapshot) *TaskSnapshot {
 		}
 	}
 	for _, version := range allVersions {
+		version.DimensionMemberCounts = buildDimensionMemberCounts(version.Members)
 		next.ByVersion[version.VersionID] = version
 		for deviceID := range version.Members {
 			next.ByDevice[deviceID] = append(next.ByDevice[deviceID], version)
@@ -103,6 +104,23 @@ func BuildTaskSnapshot(versions []*TaskVersionSnapshot) *TaskSnapshot {
 		}
 	}
 	return next
+}
+
+func buildDimensionMemberCounts(
+	members map[uuid.UUID][]TaskMember,
+) map[string]int64 {
+	counts := make(map[string]int64)
+	for _, deviceMembers := range members {
+		seen := make(map[string]struct{}, len(deviceMembers))
+		for _, member := range deviceMembers {
+			if _, ok := seen[member.DimensionKey]; ok {
+				continue
+			}
+			seen[member.DimensionKey] = struct{}{}
+			counts[member.DimensionKey]++
+		}
+	}
+	return counts
 }
 
 func (s *SnapshotStore) Current() *TaskSnapshot {

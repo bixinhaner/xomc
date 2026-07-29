@@ -119,6 +119,7 @@ type PlatformFormula struct {
 	PlatformName string    `json:"platform_name"`
 	IndicatorID  string    `json:"indicator_id"`
 	Formula      string    `json:"formula"`
+	ReportKey    *string   `json:"report_key,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

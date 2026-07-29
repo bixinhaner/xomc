@@ -803,7 +803,7 @@ curl -fsS http://localhost:8081/healthz
 
 - Redis 必须开启 AOF、`appendfsync everysec` 和 `maxmemory-policy noeviction`；worker 启动时会校验。
 - `PM_AGGREGATION_ENABLED`：是否启用在线聚合，默认 `true`。
-- `PM_AGGREGATION_CLOSE_GRACE`：缺数据窗口的关闭宽限，默认 `5m`。
+- `PM_AGGREGATION_CLOSE_GRACE`：小时缺数据窗口的最小关闭宽限，默认 `12m`。到期后仍需等待聚合事件水位满足关闭条件。
 - `PM_AGGREGATION_OUTBOX_BATCH`：发布/拉取批量，默认 `100`。
 - `PM_AGGREGATION_CONSUMER_CONCURRENCY`：标准事件消费并发，默认 `8`。
 - `PM_AGGREGATION_FINALIZE_CONCURRENCY`：窗口落库并发预算，默认 `4`。

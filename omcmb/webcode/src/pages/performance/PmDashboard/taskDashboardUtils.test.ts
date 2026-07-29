@@ -32,6 +32,9 @@ function row(p: Partial<AdhocResultRow>): AdhocResultRow {
     objectLdn: p.objectLdn,
     productName: p.productName,
     deviceGroupName: p.deviceGroupName,
+    partial: p.partial,
+    receivedSlots: p.receivedSlots,
+    expectedSlots: p.expectedSlots,
   };
 }
 
