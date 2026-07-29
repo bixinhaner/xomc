@@ -438,7 +438,7 @@ func TestMapDeviceItem_StartedAndEndedAt_Pending(t *testing.T) {
 
 // issue #655 追加：被操作者主动终止的子任务在执行态之前被叫停 → repo 只写了
 // completed_at(=EndedAt)，started_at 为空。mapDeviceItem 应兜底 StartedAt = EndedAt，
-// 同时 FailureReason 在 sub_task 为空时兜底为「终止」（与前端列展示对齐）。
+// 同时 FailureReason 在 sub_task 为空时兜底为稳定错误码（交给前端 i18n 展示）。
 func TestMapDeviceItem_Terminated_StartedAtFallbackAndFailureReason(t *testing.T) {
 	svc := newServiceForMap(t)
 	catalog := mustCatalog(t, "RUNTIME_LOG_COLLECT")
@@ -472,7 +472,7 @@ func TestMapDeviceItem_Terminated_StartedAtFallbackAndFailureReason(t *testing.T
 	assert.Equal(t, "terminated", item.Result, "前置：terminated 走的是 result=terminated 分支")
 	assertTimePtrEqual(t, completedAt, item.EndedAt)
 	assertTimePtrEqual(t, completedAt, item.StartedAt, "terminated 且 StartedAt 空时应兜底 = EndedAt")
-	assert.Equal(t, "终止", item.FailureReason, "terminated 且 FailureReason 空时应兜底为「终止」")
+	assert.Equal(t, "OPERATOR_TERMINATED", item.FailureReason, "terminated 且 FailureReason 空时应兜底为稳定错误码")
 	assert.Equal(t, "task terminated by operator", item.FailureDetail, "FailureDetail 保持设备原始 ErrorMessage 不动")
 }
 

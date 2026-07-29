@@ -1720,14 +1720,14 @@ func (s *Service) mapDeviceItem(
 	// 因此 sub_task.started_at 一般为空。前端列「开始时间 / 结束时间」只有结束、没开始
 	// 显示别扭——补一个 startedAt = endedAt 让两端对齐（语义上"在结束的同一刻被终止"）。
 	// failure_reason 同理：TerminateUpgrade 只写 error_message="task terminated by operator"，
-	// failure_reason 留空，前端「失败原因」列空着不够直观——补「终止」短标，CSV 走
-	// translateFailureReason 找不到映射会原样返回，三端口径一致。
+	// failure_reason 留空，前端「失败原因」列空着不够直观——补稳定 code，由前端 i18n
+	// 和 CSV 导出各自翻译，避免英文环境露中文。
 	if result == "terminated" {
 		if startedAt == nil && endedAt != nil {
 			startedAt = endedAt
 		}
 		if failureReason == "" {
-			failureReason = "终止"
+			failureReason = failureCodeOperatorTerminated
 		}
 	}
 	if isDirectDispatchFile && status == "ended" && startedAt == nil && endedAt != nil {

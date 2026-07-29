@@ -89,6 +89,7 @@ import {
   renderTaskStatus,
 } from '../shared.render';
 import { resolveAutoSelectedCategory } from './categorySelection';
+import { normalizeFailureReasonCode } from './failureReason';
 import { resolveTargetFileDisplay } from './targetFileDisplay';
 import {
   resolveTaskTypeFilterValue,
@@ -627,9 +628,8 @@ export default function FileTransferCenter() {
     width: 260,
     render: (value: string, record: UnifiedFileTransferDeviceItem) => {
       if (!value) return '-';
-      // 终止时 SoftwareService.TerminateUpgrade 给 sub_task 写的固定串
-      // "task terminated by operator"——历史代码没用 code，这里做一层兜底翻译。
-      const codeOrRaw = value === 'task terminated by operator' ? 'OPERATOR_TERMINATED' : value;
+      // 终止任务的历史兜底值统一归一到 code，由 i18n 包负责各语言展示。
+      const codeOrRaw = normalizeFailureReasonCode(value);
       const i18nLabel = t(`software.failureCode.${codeOrRaw}` as Parameters<typeof t>[0]);
       const display = i18nLabel && i18nLabel !== `software.failureCode.${codeOrRaw}` ? i18nLabel : value;
       // 设备厂商原始 fault（FaultCode + FaultString）放 Tooltip 里——i18n label 只看到统一
