@@ -780,9 +780,59 @@ func TestHandleRegisteredDeviceSyncEvent_CreatedDeviceClosedModeStartsMACOnlySyn
 	assert.Empty(t, fullStarter.calls)
 	require.Len(t, macStarter.calls, 1)
 	assert.Equal(t, deviceID, macStarter.calls[0].deviceID)
-	assert.Equal(t, deviceID.String(), macStarter.calls[0].sourceID)
+	assert.NotEqual(t, deviceID.String(), macStarter.calls[0].sourceID)
 	_, err = uuid.Parse(macStarter.calls[0].sourceID)
 	assert.NoError(t, err, "device_tasks.source_id is a UUID column")
+}
+
+func TestHandleRegisteredDeviceSyncEvent_ExistingDeviceClosedModeStartsMACRefresh(t *testing.T) {
+	h := newFullEngineHarness()
+	deviceID := uuid.New()
+	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
+		return &model.Device{ID: deviceID, SerialNumber: "SN-CLOSED-EXISTING"}, nil
+	}
+	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
+	h.engine.config.AutoSync.Enabled = true
+	h.engine.config.AutoSync.SyncOnBootstrap = true
+	h.engine.SetParamSyncRoutingMode("closed")
+	h.engine.registeredMACSync = macStarter
+
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
+		DeviceID: deviceID, SerialNumber: "SN-CLOSED-EXISTING", Created: false,
+	})
+	require.NoError(t, err)
+
+	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
+	require.NoError(t, err)
+	require.Len(t, macStarter.calls, 1)
+	assert.NotEqual(t, deviceID.String(), macStarter.calls[0].sourceID)
+	_, err = uuid.Parse(macStarter.calls[0].sourceID)
+	assert.NoError(t, err)
+}
+
+func TestHandleRegisteredDeviceSyncEvent_ClosedModeAlwaysRefreshesMACOnRegistration(t *testing.T) {
+	h := newFullEngineHarness()
+	deviceID := uuid.New()
+	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
+		return &model.Device{ID: deviceID, SerialNumber: "SN-CLOSED-HAS-MAC"}, nil
+	}
+	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
+	h.engine.config.AutoSync.Enabled = true
+	h.engine.config.AutoSync.SyncOnBootstrap = true
+	h.engine.SetParamSyncRoutingMode("closed")
+	h.engine.registeredMACSync = macStarter
+
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
+		DeviceID: deviceID, SerialNumber: "SN-CLOSED-HAS-MAC", Created: true,
+	})
+	require.NoError(t, err)
+
+	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
+	require.NoError(t, err)
+	require.Len(t, macStarter.calls, 1)
+	assert.NotEqual(t, deviceID.String(), macStarter.calls[0].sourceID)
+	_, err = uuid.Parse(macStarter.calls[0].sourceID)
+	assert.NoError(t, err)
 }
 
 func TestHandleBootstrap_CreateTaskError(t *testing.T) {
@@ -1331,6 +1381,31 @@ func TestHandleDeviceOnline_RedisDown_StillProceeds(t *testing.T) {
 	assert.NoError(t, err, "Redis 失败应不阻塞主流程（容忍 Redis 抖动）")
 }
 
+func TestHandleDeviceOnline_ClosedModeStartsMACRefresh(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{ID: deviceID, SerialNumber: "SN-ONLINE-MISSING-MAC"}, nil
+		},
+	}
+	engine, _ := newOnlineHarness(t, deviceRepo)
+	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
+	engine.config.AutoSync.Enabled = true
+	engine.config.AutoSync.SyncOnBootstrap = true
+	engine.SetParamSyncRoutingMode("closed")
+	engine.registeredMACSync = macStarter
+
+	err := engine.HandleDeviceOnline(context.Background(), device.DeviceOnlineEvent{
+		DeviceID: deviceID, SerialNumber: "SN-ONLINE-MISSING-MAC",
+	})
+
+	require.NoError(t, err)
+	require.Len(t, macStarter.calls, 1)
+	assert.NotEqual(t, deviceID.String(), macStarter.calls[0].sourceID)
+	_, err = uuid.Parse(macStarter.calls[0].sourceID)
+	assert.NoError(t, err)
+}
+
 func TestHandleGPVResponse_EmptySyncGPVStillFinalizesPathB(t *testing.T) {
 	deviceID := uuid.New()
 	deviceSN := "SN-NR-EMPTY-GPV"
@@ -1584,6 +1659,61 @@ func TestHandleFirmwareChanged_RedisDown_StillProceeds(t *testing.T) {
 	err := engine.HandleFirmwareChanged(context.Background(), evt)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, lookupCount, "Redis 失败仍应推进到 device lookup")
+}
+
+func TestHandleFirmwareChanged_ClosedModeBecameOnlineStartsMACRefresh(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{ID: deviceID, SerialNumber: "SN-FW-MISSING-MAC"}, nil
+		},
+	}
+	engine, _ := newOnlineHarness(t, deviceRepo)
+	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
+	engine.config.AutoSync.Enabled = true
+	engine.config.AutoSync.SyncOnBootstrap = true
+	engine.SetParamSyncRoutingMode("closed")
+	engine.registeredMACSync = macStarter
+
+	err := engine.HandleFirmwareChanged(context.Background(), device.DeviceFirmwareChangedEvent{
+		DeviceID:     deviceID,
+		SerialNumber: "SN-FW-MISSING-MAC",
+		OldVersion:   "0.9.0",
+		NewVersion:   "1.0.0",
+		BecameOnline: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, macStarter.calls, 1)
+	assert.NotEqual(t, deviceID.String(), macStarter.calls[0].sourceID)
+	_, err = uuid.Parse(macStarter.calls[0].sourceID)
+	assert.NoError(t, err)
+}
+
+func TestHandleFirmwareChanged_ClosedModeWithoutOnlineTransitionDoesNotStartMACSync(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{ID: deviceID, SerialNumber: "SN-FW-STILL-ONLINE"}, nil
+		},
+	}
+	engine, _ := newOnlineHarness(t, deviceRepo)
+	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
+	engine.config.AutoSync.Enabled = true
+	engine.config.AutoSync.SyncOnBootstrap = true
+	engine.SetParamSyncRoutingMode("closed")
+	engine.registeredMACSync = macStarter
+
+	err := engine.HandleFirmwareChanged(context.Background(), device.DeviceFirmwareChangedEvent{
+		DeviceID:     deviceID,
+		SerialNumber: "SN-FW-STILL-ONLINE",
+		OldVersion:   "0.9.0",
+		NewVersion:   "1.0.0",
+		BecameOnline: false,
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, macStarter.calls)
 }
 
 // ---------------------------------------------------------------------------
