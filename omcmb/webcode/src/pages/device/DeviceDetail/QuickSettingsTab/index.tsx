@@ -387,6 +387,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
               instanceContext={instanceContext}
               locale={locale}
               onIpsecControlChange={group.id === 'device-ipsec-control' ? setIpsecControlValue : undefined}
+              actionMode={group.id === 'device-ipsec-control' ? 'staged' : 'standalone'}
             />
           );
         }}

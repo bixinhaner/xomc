@@ -73,18 +73,11 @@ func (h *ParameterTreeHandler) SetPermissionService(ps VisibleGroupsResolver) {
 // resolveMappingValidator 尝试构造当前设备的 MappingValidator。
 // 任意一步失败返回 nil；调用方需做空检查后跳过校验/富化逻辑。
 func (h *ParameterTreeHandler) resolveMappingValidator(ctx context.Context, dev *model.Device) *parammodel.MappingValidator {
-	if h.paramRegistry == nil || h.productRegistry == nil || dev == nil || dev.ProductClass == "" {
+	writeModel := h.resolveParameterWriteModel(ctx, dev)
+	if writeModel == nil {
 		return nil
 	}
-	match, err := h.productRegistry.MatchProductClass(ctx, dev.ProductClass)
-	if err != nil || match == nil || match.Product == nil {
-		return nil
-	}
-	set, err := h.paramRegistry.GetByProduct(ctx, match.Product.ID, dev.FirmwareVersion)
-	if err != nil || set == nil {
-		return nil
-	}
-	return parammodel.NewMappingValidator(set)
+	return writeModel.validator
 }
 
 // resolveDefaultMappingValidator returns the product-bound default param model only.
@@ -364,27 +357,15 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 
 	// Mapping-based validation（T-0098 P5-01：已无 dmRegistry 兜底，未命中即跳过）。
 	var rebootRequired bool
-	if mv := h.resolveMappingValidator(c.Request.Context(), dev); mv != nil {
-		var validationErrors []*parammodel.MappingValidationError
-		for _, item := range req.Parameters {
-			if ve := mv.ValidateValue(item.Path, item.Value); ve != nil {
-				validationErrors = append(validationErrors, ve)
-			}
-		}
-		if len(validationErrors) > 0 {
+	if writeModel := h.resolveParameterWriteModel(c.Request.Context(), dev); writeModel != nil {
+		validation := validateParameterWrites(writeModel, req.Parameters)
+		if len(validation.Errors) > 0 {
 			response.FailWithData(c, http.StatusBadRequest,
 				"parameter validation failed",
-				gin.H{"validation_errors": validationErrors})
+				gin.H{"validation_errors": validation.Errors})
 			return
 		}
-		for _, item := range req.Parameters {
-			if def := mv.LookupParam(item.Path); def != nil {
-				if def.ChangeApplies == "RebootRequired" || def.ChangeApplies == "NotifyRequired" {
-					rebootRequired = true
-					break
-				}
-			}
-		}
+		rebootRequired = validation.RebootRequired
 	}
 
 	taskID, err := h.deviceService.SetParameters(c.Request.Context(), id, req.Parameters, admin.UserIDStringFromCtx(c))

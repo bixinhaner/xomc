@@ -36,6 +36,11 @@ import {
   type QuickSettingsInstanceContext,
 } from './validators';
 import { buildEffectivePlmnRows, validatePlmnList } from './plmnList';
+import {
+  buildIpsecSubmissionPlan,
+  executeIpsecSubmissionPlan,
+  type IpsecSubmissionPhase,
+} from './ipsecSubmission';
 
 import { useT } from '@/hooks/useT';
 
@@ -964,17 +969,25 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     [deviceId],
   );
   const ipsecControlDraft = useQuickSettingsFeedbackStore((s) => s.drafts[ipsecControlDraftKey]?.IPSEC_ENABLE);
+  const currentIpsecGlobalValue = useMemo(
+    () => ipsecGlobalParams?.find((item) => item.parameterPath === ipsecGlobalEnablePath)?.parameterValue,
+    [ipsecGlobalEnablePath, ipsecGlobalParams],
+  );
+  const isIpsecGlobalStateReady = !isIpsecGroup || currentIpsecGlobalValue !== undefined;
+  const currentIpsecEnabled = isEnabledValue(currentIpsecGlobalValue);
+  const targetIpsecEnabled = isEnabledValue(
+    ipsecControlDraft ?? ipsecControlValue ?? currentIpsecGlobalValue,
+  );
+  const hasIpsecGlobalChange = Boolean(
+    isIpsecGroup
+    && currentIpsecGlobalValue !== undefined
+    && (ipsecControlDraft !== undefined || ipsecControlValue !== undefined)
+    && targetIpsecEnabled !== currentIpsecEnabled,
+  );
   const ipsecGlobalEnabled = useMemo(() => {
     if (!isIpsecGroup) return true;
-    if (ipsecControlValue !== undefined) {
-      return isEnabledValue(ipsecControlValue);
-    }
-    if (ipsecControlDraft !== undefined) {
-      return isEnabledValue(ipsecControlDraft);
-    }
-    const currentValue = ipsecGlobalParams?.find((item) => item.parameterPath === ipsecGlobalEnablePath)?.parameterValue;
-    return isEnabledValue(currentValue);
-  }, [isIpsecGroup, ipsecControlDraft, ipsecControlValue, ipsecGlobalEnablePath, ipsecGlobalParams]);
+    return targetIpsecEnabled;
+  }, [isIpsecGroup, targetIpsecEnabled]);
   // BSC 邻区兼容：部分 GSM 设备不按 TR-181 子对象上报，而是把整张邻区列表打包到 BTS 父对象单标量。
   // 这种 group 不存在 currentInstances，常规多实例渲染会出现「暂无数据」。改走打包标量解析路径。
   const packedSpec = PACKED_NEIGHBOR_TABLE_BY_GROUP_ID[group.id];
@@ -1035,7 +1048,12 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
   const draft = useQuickSettingsFeedbackStore((s) => s.drafts[fbKey]);
+  const tunnelDraftRevision = useQuickSettingsFeedbackStore((s) => s.draftRevisions[fbKey] ?? 0);
+  const ipsecControlDraftRevision = useQuickSettingsFeedbackStore(
+    (s) => s.draftRevisions[ipsecControlDraftKey] ?? 0,
+  );
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
+  const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
   const clearDraftPrefix = useQuickSettingsFeedbackStore((s) => s.clearDraftPrefix);
   const { data: lastTask } = useDeviceTaskStatus(active ? lastAction?.taskId : undefined, { intervalMs: 800 });
 
@@ -1166,12 +1184,18 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
 
   const submittedPendingAdds = useMemo<PendingAddRow[]>(() => {
     if (!lastAction?.pendingAddRows || lastAction.pendingAddRows.length === 0) return [];
-    if (lastAction.submitStatus !== 'queued') return [];
+    const preserveFailedIpsecAdds = isIpsecGroup && lastAction.ipsecOperationStatus === 'failed';
+    if (lastAction.submitStatus !== 'queued' && !preserveFailedIpsecAdds) return [];
     if (lastAction.taskId && lastAction.syncedForTaskId === lastAction.taskId) return [];
-    if (lastTask && isDeviceTaskTerminal(lastTask.status) && lastTask.status !== 'completed') return [];
+    if (
+      !preserveFailedIpsecAdds
+      && lastTask
+      && isDeviceTaskTerminal(lastTask.status)
+      && lastTask.status !== 'completed'
+    ) return [];
     const localTempIds = new Set(pendingAdds.map((row) => row.tempId));
     return lastAction.pendingAddRows.filter((row) => !localTempIds.has(row.tempId));
-  }, [lastAction, lastTask, pendingAdds]);
+  }, [isIpsecGroup, lastAction, lastTask, pendingAdds]);
 
   const buildInitialEditValues = useCallback((): Record<string, string> => {
     const values = Object.fromEntries(
@@ -1215,8 +1239,11 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         paths.add(applyInstanceContext(param.extraInfoPath, instanceContext));
       }
     }
+    if (isIpsecGroup && ipsecGlobalEnablePath) {
+      paths.add(ipsecGlobalEnablePath);
+    }
     return Array.from(paths).filter(Boolean).sort();
-  }, [group.objectPath, group.params, instanceContext]);
+  }, [group.objectPath, group.params, instanceContext, ipsecGlobalEnablePath, isIpsecGroup]);
 
   useEffect(() => {
     if (!draft) return;
@@ -1244,6 +1271,31 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       return next;
     });
   }, [draft, groupParamByLeaf, objectPath, schemaByPath, leafSchemaByLeaf]);
+
+  useEffect(() => {
+    if (!isIpsecGroup) return;
+    const shouldRestoreDeletes = lastAction?.ipsecOperationStatus === 'running'
+      || lastAction?.ipsecOperationStatus === 'awaiting-readback'
+      || lastAction?.ipsecOperationStatus === 'failed';
+    if (!shouldRestoreDeletes || !lastAction.pendingDeleteInstIds?.length) return;
+    setPendingDeletes(new Set(lastAction.pendingDeleteInstIds));
+  }, [
+    isIpsecGroup,
+    lastAction?.at,
+    lastAction?.ipsecOperationStatus,
+    lastAction?.pendingDeleteInstIds,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isIpsecGroup
+      || lastAction?.ipsecOperationStatus !== 'completed'
+      || draft
+    ) return;
+    setRowEdits(new Map());
+    setPendingAdds([]);
+    setPendingDeletes(new Set());
+  }, [draft, isIpsecGroup, lastAction?.at, lastAction?.ipsecOperationStatus]);
 
   const cellValue = useCallback(
     (instId: string, leaf: string): string => {
@@ -1275,12 +1327,30 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     });
   }, [clearDraftPrefix, fbKey]);
 
-  const clearLocalBatchChanges = useCallback(() => {
+  const clearTunnelLocalBatchChanges = useCallback(() => {
     setPendingAdds([]);
     setPendingDeletes(new Set());
     setRowEdits(new Map());
     clearDraftPrefix(fbKey, '');
   }, [clearDraftPrefix, fbKey]);
+
+  const clearLocalBatchChanges = useCallback(() => {
+    clearTunnelLocalBatchChanges();
+    if (isIpsecGroup) {
+      clearDraft(ipsecControlDraftKey);
+      patchFeedback(fbKey, {
+        pendingAddRows: [],
+        pendingDeleteInstIds: [],
+      });
+    }
+  }, [
+    clearDraft,
+    clearTunnelLocalBatchChanges,
+    fbKey,
+    ipsecControlDraftKey,
+    isIpsecGroup,
+    patchFeedback,
+  ]);
 
   const restoreHiddenInstance = useCallback((instId: string) => {
     if (!/^\d+$/.test(instId)) return;
@@ -1303,7 +1373,10 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     throw new Error(t('device.multi.waitTaskTimeout'));
   }, [t]);
 
-  const syncRelatedParameters = useCallback(async (): Promise<{ synced: boolean; schema?: ParameterSchemaResponse }> => {
+  const syncRelatedParameters = useCallback(async (
+    options: { preserveLocalEdits?: boolean } = {},
+  ): Promise<{ synced: boolean; schema?: ParameterSchemaResponse }> => {
+    const preserveLocalEdits = options.preserveLocalEdits ?? false;
     if (scopedSyncPaths.length === 0) {
       const refreshed = await refetch();
       return { synced: false, schema: refreshed.data };
@@ -1315,7 +1388,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       if (syncResult.gpvTaskCount === 0) {
         deviceParameterApi.invalidateParameterSchemaCache(deviceId, objectPath);
         const refreshed = await refetch();
-        setRowEdits(new Map());
+        if (!preserveLocalEdits) {
+          setRowEdits(new Map());
+        }
         return { synced: false, schema: refreshed.data };
       }
       const timeoutAt = Date.now() + 60000;
@@ -1340,7 +1415,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     }
     deviceParameterApi.invalidateParameterSchemaCache(deviceId, objectPath);
     const refreshed = await refetch();
-    setRowEdits(new Map());
+    if (!preserveLocalEdits) {
+      setRowEdits(new Map());
+    }
     if (synced) {
       setOptimisticallyRemoved(new Set());
     }
@@ -1358,6 +1435,8 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
   //    且 还未为该 taskId 做过回滚(invalidatedForTaskId 去重)。与 index.tsx BSC 须知一致。
   useEffect(() => {
     if (!active) return;
+    // IPSec 统一提交在 handler 内逐阶段等待并完成统一回读，旧的单任务 effect 不得抢先清草稿。
+    if (isIpsecGroup && lastAction?.ipsecOperationStatus) return;
     if (!lastTask || !isDeviceTaskTerminal(lastTask.status)) return;
     // 旧的 action=add 只表示 AddObject 阶段，不需要 SPV 终态回读；
     // 批量提交里的新增行会把最后一次 SPV taskId 也记为 add，并带 addedInstIds/savedInstIds，
@@ -1474,6 +1553,22 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         try {
           const syncResult = await syncRelatedParameters();
           if (!cancelled && lastAction?.taskId === lastTask.id) {
+            if (isIpsecGroup && lastAction.ipsecTargetEnabled !== undefined) {
+              const globalParams = await deviceParameterApi.searchParameters(
+                deviceId,
+                ipsecGlobalEnableQuery,
+                20,
+              );
+              const globalValue = globalParams.find(
+                (item) => item.parameterPath === ipsecGlobalEnablePath,
+              )?.parameterValue;
+              if (
+                globalValue === undefined
+                || isEnabledValue(globalValue) !== lastAction.ipsecTargetEnabled
+              ) {
+                throw new Error(t('device.ipsec.globalReadbackMismatch'));
+              }
+            }
             const refreshedObject = syncResult.schema?.objects.find((o) => o.path === objectPath);
             const refreshedInstances = refreshedObject?.currentInstances ?? [];
             const listMatchesAction = (() => {
@@ -1758,10 +1853,10 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         objectPath: `${objectPath}${inst}.`,
       });
       await waitForTaskTerminal(rollbackTaskId);
-      await syncRelatedParameters();
+      await syncRelatedParameters({ preserveLocalEdits: isIpsecGroup });
     } catch (err) {
       if (isObjectInstanceNotFoundError(err)) {
-        await syncRelatedParameters();
+        await syncRelatedParameters({ preserveLocalEdits: isIpsecGroup });
         return;
       }
       console.warn('[MultiInstanceTable] add rollback failed', { inst, reason, err });
@@ -1771,7 +1866,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         duration: 6,
       });
     }
-  }, [clearDraftPrefix, deleteMutation, deviceId, fbKey, group.titleZh, objectPath, syncRelatedParameters, t, waitForTaskTerminal]);
+  }, [clearDraftPrefix, deleteMutation, deviceId, fbKey, group.titleZh, isIpsecGroup, objectPath, syncRelatedParameters, t, waitForTaskTerminal]);
 
   const handleSaveEditModal = useCallback(async () => {
     if (!editModal) return;
@@ -1829,16 +1924,34 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     message.success({ content: t('device.multi.batchStaged'), duration: 3 });
   }, [clearDraftPrefix, editModal, fbKey, pendingAdds, setDraftField, t, validateEditModalValues]);
 
-  const pendingChangeCount = pendingAdds.length + pendingDeletes.size + rowEdits.size;
+  const tunnelPendingChangeCount = pendingAdds.length + pendingDeletes.size + rowEdits.size;
+  const pendingChangeCount = tunnelPendingChangeCount + (hasIpsecGlobalChange ? 1 : 0);
   const batchAwaitingDevice = Boolean(
-    lastAction?.submitStatus === 'queued'
-    && lastAction.taskId
-    && lastAction.syncedForTaskId !== lastAction.taskId
-    && (!lastTask || !isDeviceTaskTerminal(lastTask.status) || lastTask.status === 'completed'),
+    (
+      isIpsecGroup
+      && (
+        lastAction?.ipsecOperationStatus === 'running'
+        || lastAction?.ipsecOperationStatus === 'awaiting-readback'
+      )
+    )
+    || (
+      lastAction?.submitStatus === 'queued'
+      && lastAction.taskId
+      && lastAction.syncedForTaskId !== lastAction.taskId
+      && (!lastTask || !isDeviceTaskTerminal(lastTask.status) || lastTask.status === 'completed')
+    ),
   );
 
   const handleSubmitBatch = useCallback(async () => {
     if (pendingChangeCount === 0 || submittingRef.current || batchAwaitingDevice) return;
+    if (!isIpsecGlobalStateReady) {
+      notification.error({
+        message: t('device.ipsec.unifiedSubmitFailed'),
+        description: t('device.ipsec.globalStateUnavailable'),
+        duration: ERROR_FEEDBACK_DURATION_SECONDS,
+      });
+      return;
+    }
     const deletedInstIds = Array.from(pendingDeletes);
     const editedRows = Array.from(rowEdits.entries());
     const addRows = [...pendingAdds];
@@ -1911,29 +2024,125 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       return;
     }
 
+    const ipsecPlan = isIpsecGroup
+      ? buildIpsecSubmissionPlan({
+          currentEnabled: currentIpsecEnabled,
+          targetEnabled: targetIpsecEnabled,
+          hasGlobalChange: hasIpsecGlobalChange,
+          hasTunnelChanges: tunnelPendingChangeCount > 0,
+        })
+      : null;
+    if (ipsecPlan && !ipsecPlan.ok) {
+      notification.error({
+        message: t('device.ipsec.unifiedSubmitFailed'),
+        description: t('device.ipsec.tunnelRequiresEnabled'),
+        duration: ERROR_FEEDBACK_DURATION_SECONDS,
+      });
+      return;
+    }
+
     submittingRef.current = true;
     setIsSubmitting(true);
     const savedInstIds: string[] = [];
     const submittedAddedInstIds: string[] = [];
     const submittedDeletedInstIds: string[] = [];
     const submittedEditedInstIds: string[] = [];
+    const submittedTaskIds: string[] = [];
+    const completedIpsecPhases: IpsecSubmissionPhase[] = [];
+    let activeIpsecPhase: IpsecSubmissionPhase | undefined;
     let lastTaskId: string | undefined;
     let addCreatedInst: string | undefined;
     let currentAddTempId: string | undefined;
+    const submittedTunnelDraftRevision = tunnelDraftRevision;
+    const submittedControlDraftRevision = ipsecControlDraftRevision;
+    const batchAction = addRows.length > 0 ? 'add' : deletedInstIds.length > 0 ? 'delete' : 'save';
 
-    try {
+    if (isIpsecGroup) {
+      setFeedback(fbKey, {
+        kind: 'multi',
+        action: batchAction,
+        submitStatus: 'queued',
+        pendingAddRows: addRows,
+        pendingDeleteInstIds: deletedInstIds,
+        ipsecTaskIds: [],
+        ipsecTargetEnabled: targetIpsecEnabled,
+        ipsecCompletedPhases: [],
+        ipsecOperationStatus: 'running',
+        detail: t('device.ipsec.preparingSubmit'),
+        at: Date.now(),
+      });
+    }
+
+    const recordTask = (taskId: string | undefined) => {
+      lastTaskId = taskId;
+      if (!taskId) return;
+      submittedTaskIds.push(taskId);
+      if (isIpsecGroup) {
+        patchFeedback(fbKey, {
+          taskId,
+          ipsecTaskIds: [...submittedTaskIds],
+          ipsecActivePhase: activeIpsecPhase,
+        });
+      }
+    };
+
+    const requireCompletedTask = async (taskId: string, phase: IpsecSubmissionPhase) => {
+      const task = await waitForTaskTerminal(taskId);
+      if (task.status !== 'completed') {
+        const fallbackKey = phase === 'enable-global'
+          ? 'device.ipsec.enableFailed'
+          : phase === 'disable-global'
+            ? 'device.ipsec.disableFailed'
+            : 'device.ipsec.tunnelFailed';
+        throw new Error(task.errorMessage || t(fallbackKey));
+      }
+    };
+
+    const submitGlobalPhase = async (phase: 'enable-global' | 'disable-global') => {
+      const result = await updateMutation.mutateAsync({
+        deviceId,
+        parameters: [{
+          parameterPath: ipsecGlobalEnablePath,
+          parameterValue: targetIpsecEnabled ? '1' : '0',
+          parameterType: 'boolean',
+        }],
+      });
+      recordTask(result.taskId);
+      if (result.taskId) {
+        await requireCompletedTask(result.taskId, phase);
+      }
+    };
+
+    const submitTunnelChanges = async () => {
       for (const instId of deletedInstIds) {
         try {
           const result = await deleteMutation.mutateAsync({ deviceId, objectPath: `${objectPath}${instId}.` });
-          lastTaskId = result.taskId;
+          recordTask(result.taskId);
+          if (isIpsecGroup && result.taskId) {
+            await requireCompletedTask(result.taskId, 'apply-tunnels');
+          }
           savedInstIds.push(instId);
           submittedDeletedInstIds.push(instId);
+          if (isIpsecGroup) {
+            patchFeedback(fbKey, {
+              pendingDeleteInstIds: deletedInstIds.filter(
+                (pendingId) => !submittedDeletedInstIds.includes(pendingId),
+              ),
+            });
+          }
           hideStaleInstance(instId);
         } catch (err) {
           if (isObjectInstanceNotFoundError(err)) {
             hideStaleInstance(instId);
             savedInstIds.push(instId);
             submittedDeletedInstIds.push(instId);
+            if (isIpsecGroup) {
+              patchFeedback(fbKey, {
+                pendingDeleteInstIds: deletedInstIds.filter(
+                  (pendingId) => !submittedDeletedInstIds.includes(pendingId),
+                ),
+              });
+            }
             continue;
           }
           throw err;
@@ -1943,7 +2152,10 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       const editUpdates = editedRows.flatMap(([instId, state]) => buildUpdatesForRow(instId, state.edits));
       if (editUpdates.length > 0) {
         const result = await updateMutation.mutateAsync({ deviceId, parameters: editUpdates });
-        lastTaskId = result.taskId;
+        recordTask(result.taskId);
+        if (isIpsecGroup && result.taskId) {
+          await requireCompletedTask(result.taskId, 'apply-tunnels');
+        }
         editedRows.forEach(([instId]) => {
           savedInstIds.push(instId);
           submittedEditedInstIds.push(instId);
@@ -1953,6 +2165,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       for (const row of addRows) {
         currentAddTempId = row.tempId;
         const addResult = await addMutation.mutateAsync({ deviceId, objectPath });
+        recordTask(addResult.taskId);
         const addTask = await waitForTaskTerminal(addResult.taskId);
         if (addTask.status !== 'completed') {
           throw new Error(addTask.errorMessage || t('device.multi.addInstanceFailed', { status: addTask.status }));
@@ -1973,7 +2186,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         });
         if (updates.length > 0) {
           const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
-          lastTaskId = result.taskId;
+          recordTask(result.taskId);
           if (result.taskId) {
             const spvTask = await waitForTaskTerminal(result.taskId);
             if (spvTask.status !== 'completed') {
@@ -1986,38 +2199,174 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         addCreatedInst = undefined;
         currentAddTempId = undefined;
       }
+    };
 
-      setFeedback(fbKey, {
-        kind: 'multi',
-        action: addRows.length > 0 ? 'add' : deletedInstIds.length > 0 ? 'delete' : 'save',
-        submitStatus: 'queued',
-        taskId: lastTaskId,
-        savedInstIds,
-        addedInstIds: submittedAddedInstIds,
-        deletedInstIds: submittedDeletedInstIds,
-        editedInstIds: submittedEditedInstIds,
-        pendingAddRows: addRows,
-        detail: t('device.multi.batchSubmitted', { count: pendingChangeCount }),
-        at: Date.now(),
-      });
-      message.success({ content: t('device.multi.batchSubmitted', { count: pendingChangeCount }), duration: 4 });
+    try {
+      if (ipsecPlan?.ok) {
+        await executeIpsecSubmissionPlan(ipsecPlan.phases, async (phase) => {
+          activeIpsecPhase = phase;
+          const phaseDetailKey = phase === 'enable-global'
+            ? 'device.ipsec.enabling'
+            : phase === 'disable-global'
+              ? 'device.ipsec.disabling'
+              : 'device.ipsec.applyingTunnels';
+          patchFeedback(fbKey, {
+            ipsecActivePhase: phase,
+            detail: t(phaseDetailKey),
+          });
+          if (phase === 'apply-tunnels') {
+            await submitTunnelChanges();
+          } else {
+            await submitGlobalPhase(phase);
+          }
+          completedIpsecPhases.push(phase);
+          activeIpsecPhase = undefined;
+          patchFeedback(fbKey, {
+            ipsecActivePhase: undefined,
+            ipsecCompletedPhases: [...completedIpsecPhases],
+          });
+        });
+      } else {
+        await submitTunnelChanges();
+      }
+      const submittedDetail = isIpsecGroup
+        ? t('device.ipsec.unifiedSubmitted', { count: pendingChangeCount })
+        : t('device.multi.batchSubmitted', { count: pendingChangeCount });
+
+      if (isIpsecGroup) {
+        patchFeedback(fbKey, {
+          taskId: lastTaskId,
+          ipsecTaskIds: [...submittedTaskIds],
+          ipsecCompletedPhases: [...completedIpsecPhases],
+          ipsecActivePhase: undefined,
+          ipsecOperationStatus: 'awaiting-readback',
+          detail: t('device.ipsec.confirmingReadback'),
+        });
+        const syncResult = await syncRelatedParameters({ preserveLocalEdits: true });
+        const globalParams = await deviceParameterApi.searchParameters(
+          deviceId,
+          ipsecGlobalEnableQuery,
+          20,
+        );
+        const globalValue = globalParams.find(
+          (item) => item.parameterPath === ipsecGlobalEnablePath,
+        )?.parameterValue;
+        if (
+          globalValue === undefined
+          || isEnabledValue(globalValue) !== targetIpsecEnabled
+        ) {
+          throw new Error(t('device.ipsec.globalReadbackMismatch'));
+        }
+        queryClient.setQueryData(
+          ['devices', 'parameters', 'search', deviceId, ipsecGlobalEnableQuery, 20],
+          globalParams,
+        );
+        await queryClient.invalidateQueries({
+          queryKey: ['devices', 'parameter-schema', deviceId],
+        });
+        const refreshedInstances = syncResult.schema?.objects.find(
+          (item) => item.path === objectPath,
+        )?.currentInstances ?? [];
+        const addedOk = submittedAddedInstIds.every(
+          (instId) => /^\d+$/.test(instId) && refreshedInstances.includes(Number(instId)),
+        );
+        const deletedOk = submittedDeletedInstIds.every(
+          (instId) => /^\d+$/.test(instId) && !refreshedInstances.includes(Number(instId)),
+        );
+        if (!addedOk || !deletedOk) {
+          throw new Error(t('device.multi.readbackFailed', { group: group.titleZh }));
+        }
+
+        const latestStore = useQuickSettingsFeedbackStore.getState();
+        const tunnelDraftUnchanged = (latestStore.draftRevisions[fbKey] ?? 0)
+          === submittedTunnelDraftRevision;
+        const controlDraftUnchanged = (latestStore.draftRevisions[ipsecControlDraftKey] ?? 0)
+          === submittedControlDraftRevision;
+        if (tunnelDraftUnchanged) {
+          clearTunnelLocalBatchChanges();
+        }
+        if (controlDraftUnchanged) {
+          clearDraft(ipsecControlDraftKey);
+        }
+        setFeedback(fbKey, {
+          kind: 'multi',
+          action: batchAction,
+          submitStatus: 'queued',
+          taskId: lastTaskId,
+          savedInstIds,
+          addedInstIds: submittedAddedInstIds,
+          deletedInstIds: submittedDeletedInstIds,
+          editedInstIds: submittedEditedInstIds,
+          pendingAddRows: tunnelDraftUnchanged ? undefined : addRows,
+          pendingDeleteInstIds: tunnelDraftUnchanged ? undefined : deletedInstIds.filter(
+            (instId) => !submittedDeletedInstIds.includes(instId),
+          ),
+          syncedForTaskId: lastTaskId,
+          ipsecTaskIds: [...submittedTaskIds],
+          ipsecTargetEnabled: targetIpsecEnabled,
+          ipsecCompletedPhases: [...completedIpsecPhases],
+          ipsecOperationStatus: 'completed',
+          detail: submittedDetail,
+          at: Date.now(),
+        });
+        message.success({ content: submittedDetail, duration: 4 });
+      } else {
+        setFeedback(fbKey, {
+          kind: 'multi',
+          action: batchAction,
+          submitStatus: 'queued',
+          taskId: lastTaskId,
+          savedInstIds,
+          addedInstIds: submittedAddedInstIds,
+          deletedInstIds: submittedDeletedInstIds,
+          editedInstIds: submittedEditedInstIds,
+          pendingAddRows: addRows,
+          detail: submittedDetail,
+          at: Date.now(),
+        });
+        message.success({ content: submittedDetail, duration: 4 });
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       if (addCreatedInst) {
         await rollbackAddedInstance(addCreatedInst, errMsg);
       }
-      if (currentAddTempId) {
+      if (currentAddTempId && !isIpsecGroup) {
         setPendingAdds((prev) => prev.filter((row) => row.tempId !== currentAddTempId));
+      }
+      if (isIpsecGroup) {
+        try {
+          await syncRelatedParameters({ preserveLocalEdits: true });
+        } catch (syncErr) {
+          console.warn('[MultiInstanceTable] IPSec failure refresh failed', { objectPath, syncErr });
+        }
       }
       setFeedback(fbKey, {
         kind: 'multi',
-        action: addRows.length > 0 ? 'add' : deletedInstIds.length > 0 ? 'delete' : 'save',
+        action: batchAction,
         submitStatus: 'failed_to_queue',
+        taskId: lastTaskId,
+        savedInstIds,
+        addedInstIds: submittedAddedInstIds,
+        deletedInstIds: submittedDeletedInstIds,
+        editedInstIds: submittedEditedInstIds,
+        pendingAddRows: isIpsecGroup ? addRows : undefined,
+        pendingDeleteInstIds: isIpsecGroup
+          ? deletedInstIds.filter((instId) => !submittedDeletedInstIds.includes(instId))
+          : undefined,
+        ipsecTaskIds: isIpsecGroup ? submittedTaskIds : undefined,
+        ipsecTargetEnabled: isIpsecGroup ? targetIpsecEnabled : undefined,
+        ipsecCompletedPhases: isIpsecGroup ? completedIpsecPhases : undefined,
+        ipsecFailedPhase: isIpsecGroup ? activeIpsecPhase : undefined,
+        ipsecOperationStatus: isIpsecGroup ? 'failed' : undefined,
+        ipsecActivePhase: isIpsecGroup ? activeIpsecPhase : undefined,
         detail: t('device.multi.detailFailed', { target: t('device.multi.batchSubmit'), err: errMsg }),
         at: Date.now(),
       });
       notification.error({
-        message: t('device.multi.batchSubmitFailed', { group: group.titleZh }),
+        message: isIpsecGroup
+          ? t('device.ipsec.unifiedSubmitFailed')
+          : t('device.multi.batchSubmitFailed', { group: group.titleZh }),
         description: errMsg,
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
@@ -2030,6 +2379,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     addMutation,
     batchAwaitingDevice,
     buildUpdatesForRow,
+    clearDraft,
+    clearTunnelLocalBatchChanges,
+    currentIpsecEnabled,
     deleteMutation,
     deviceId,
     fbKey,
@@ -2037,6 +2389,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     group.id,
     group.maxInstances,
     groupParamByLeaf,
+    hasIpsecGlobalChange,
     hideStaleInstance,
     instanceIds,
     leafSchemaByLeaf,
@@ -2044,12 +2397,23 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     pendingAdds,
     pendingChangeCount,
     pendingDeletes,
+    ipsecControlDraftKey,
+    ipsecControlDraftRevision,
+    ipsecGlobalEnablePath,
+    ipsecGlobalEnableQuery,
+    isIpsecGlobalStateReady,
+    isIpsecGroup,
+    patchFeedback,
     queryClient,
     rollbackAddedInstance,
     rowEdits,
     schemaByPath,
     setFeedback,
+    syncRelatedParameters,
     t,
+    targetIpsecEnabled,
+    tunnelDraftRevision,
+    tunnelPendingChangeCount,
     updateMutation,
     waitForTaskTerminal,
   ]);
@@ -2129,12 +2493,40 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
             size="small"
             icon={<EditOutlined />}
             onClick={() => openEditModal(row)}
-            disabled={isIpsecGroup && !ipsecGlobalEnabled}
+            disabled={isIpsecGroup && (
+              !ipsecGlobalEnabled
+              || isSubmitting
+              || batchAwaitingDevice
+            )}
           >
             {t('common.edit')}
           </Button>
-          <Popconfirm title={t('device.multi.deleteConfirm')} onConfirm={() => row.instanceId && void handleDelete(row.instanceId)} disabled={(!canDelete && row.pending !== 'add') || (isIpsecGroup && !ipsecGlobalEnabled)}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />} disabled={(!canDelete && row.pending !== 'add') || (isIpsecGroup && !ipsecGlobalEnabled)}>
+          <Popconfirm
+            title={t('device.multi.deleteConfirm')}
+            onConfirm={() => row.instanceId && void handleDelete(row.instanceId)}
+            disabled={
+              (!canDelete && row.pending !== 'add')
+              || (isIpsecGroup && (
+                !ipsecGlobalEnabled
+                || isSubmitting
+                || batchAwaitingDevice
+              ))
+            }
+          >
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              disabled={
+                (!canDelete && row.pending !== 'add')
+                || (isIpsecGroup && (
+                  !ipsecGlobalEnabled
+                  || isSubmitting
+                  || batchAwaitingDevice
+                ))
+              }
+            >
               {t('common.delete')}
             </Button>
           </Popconfirm>
@@ -2215,10 +2607,15 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
                 type="primary"
                 icon={<SendOutlined />}
                 loading={isSubmitting || batchAwaitingDevice}
-                disabled={batchAwaitingDevice}
+                disabled={batchAwaitingDevice || !isIpsecGlobalStateReady}
                 onClick={() => void handleSubmitBatch()}
               >
-                {t('device.multi.batchSubmitWithCount', { count: pendingChangeCount })}
+                {t(
+                  isIpsecGroup
+                    ? 'device.ipsec.unifiedSubmitWithCount'
+                    : 'device.multi.batchSubmitWithCount',
+                  { count: pendingChangeCount },
+                )}
               </Button>
             </>
           )}

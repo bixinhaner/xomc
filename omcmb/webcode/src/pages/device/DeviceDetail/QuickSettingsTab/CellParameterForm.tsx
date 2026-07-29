@@ -716,6 +716,7 @@ interface CellParameterFormProps {
   instanceContext: QuickSettingsInstanceContext;
   locale: 'zh-CN' | 'en-US';
   onIpsecControlChange?: (value: string | undefined) => void;
+  actionMode?: 'standalone' | 'staged';
 }
 
 interface BindSelectOption {
@@ -1151,7 +1152,15 @@ function findRawValueBySuffix(parameters: DeviceParameter[] | undefined, suffix:
  *  4. 顶部"保存"按钮收集本表单全部脏字段，一次性 SetParameterValues
  *  5. Save 部分失败时按字段标红保留输入值（继承 Antd Form 校验/状态行为）
  */
-export default function CellParameterForm({ deviceId, active = true, group, instanceContext, locale, onIpsecControlChange }: CellParameterFormProps) {
+export default function CellParameterForm({
+  deviceId,
+  active = true,
+  group,
+  instanceContext,
+  locale,
+  onIpsecControlChange,
+  actionMode = 'standalone',
+}: CellParameterFormProps) {
   const t = useT();
   const [form] = Form.useForm();
   const gnssSyncSourceRef = useRef<string[]>([]);
@@ -2119,7 +2128,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
     <Card
       title={title}
       size="small"
-      extra={
+      extra={actionMode === 'staged' ? null : (
         <Space>
           {visibleLastSubmit && (() => {
             const spec = statusTagSpec(visibleLastSubmit, lastTask?.status, t);
@@ -2143,7 +2152,7 @@ export default function CellParameterForm({ deviceId, active = true, group, inst
             {updateMutation.isPending ? t('device.cell.dispatching') : t('common.save')}
           </Button>
         </Space>
-      }
+      )}
       style={{ marginBottom: 16 }}
     >
       <Spin spinning={isSchemaLoading}>
