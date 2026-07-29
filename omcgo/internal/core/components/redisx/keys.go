@@ -56,6 +56,11 @@ func (KeyBuilder) ACSContinuousWake(deviceSN string) string {
 	return acsContinuousWakePrefix + deviceSN
 }
 
+// ACSUECountProbe Periodic Inform 触发的 UE Count 查询原子租约。
+func (KeyBuilder) ACSUECountProbe(deviceSN string) string {
+	return acsUECountProbePrefix + deviceSN
+}
+
 // ACSSTUN 按设备 SN 维护 UDP Connection Request 的 STUN 地址。
 func (KeyBuilder) ACSSTUN(deviceSN string) string { return acsSTUNPrefix + deviceSN }
 
@@ -314,6 +319,7 @@ const (
 	acsOnlineSetKey         = "acs:online"
 	acsConnReqPendingPrefix = "acs:connreq:pending:"
 	acsContinuousWakePrefix = "acs:continuous_wake:"
+	acsUECountProbePrefix   = "acs:ue_count:probe:"
 	acsSTUNPrefix           = "acs:stun:"
 	acsTaskQueuePrefix      = "acs:taskq:"
 	acsTaskDetailPrefix     = "acs:task:"

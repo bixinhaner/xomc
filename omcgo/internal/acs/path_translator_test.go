@@ -89,6 +89,36 @@ func TestPathTranslationService_Enabled(t *testing.T) {
 	}
 }
 
+func TestPathTranslationService_ResolveUECountPathsUsesCurrentProductMappings(t *testing.T) {
+	dev := &coremodel.Device{ProductClass: "X-MLN", FirmwareVersion: "1.0.0"}
+	modelID := uuid.New()
+	prod := &product.Product{ID: uuid.New(), ParamModelID: &modelID}
+	tr := parammodel.NewTranslator(&parammodel.MappingSet{
+		Mappings: []parammodel.ParamMapping{
+			{StandardPath: "Device.DeviceInfo.2.UE_Count", PrivatePath: "Device.FAP.2.UE", EntryType: "parameter", IsActive: true, IsSupported: true},
+			{StandardPath: "Device.DeviceInfo.UE_Count", PrivatePath: "Device.FAP.1.UE", EntryType: "parameter", IsActive: true, IsSupported: true},
+			{StandardPath: "Device.DeviceInfo.1.UE_Count", PrivatePath: "Device.FAP.Alias.UE", EntryType: "parameter", IsActive: true, IsSupported: true},
+			{StandardPath: "Device.DeviceInfo.3.UE_Count", PrivatePath: "Device.FAP.3.UE", EntryType: "parameter", IsActive: false, IsSupported: true},
+			{StandardPath: "Device.DeviceInfo.4.UE_Count", PrivatePath: "Device.FAP.4.UE", EntryType: "parameter", IsActive: true, IsSupported: false},
+			{StandardPath: "Device.DeviceInfo.UpTime", PrivatePath: "Device.Info.UpTime", EntryType: "parameter", IsActive: true, IsSupported: true},
+		},
+	}, nil, zap.NewNop())
+	service := NewPathTranslationService(
+		&stubDeviceLookup{dev: dev},
+		&stubProductMatcher{res: &product.MatchResult{Product: prod}},
+		&stubTranslatorFactory{tr: tr},
+		zap.NewNop(),
+	)
+
+	paths, err := service.ResolveUECountPaths(context.Background(), "SN-220")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"Device.DeviceInfo.UE_Count",
+		"Device.DeviceInfo.2.UE_Count",
+	}, paths)
+}
+
 func TestTranslateTaskParams_Passthrough_WhenDisabled(t *testing.T) {
 	// no dependencies → Enabled=false → original Params returned
 	s := NewPathTranslationService(nil, nil, nil, zap.NewNop())

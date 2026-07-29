@@ -175,6 +175,15 @@ func runACS(cmd *cobra.Command, args []string) error {
 	// 但这里独立组装是为了让 ACS HTTP server（非 metrics 端口）也能直接探测。
 	deps.ReadinessCheckers = buildACSReadinessCheckers(inf)
 	deps.PathTranslator = pathTranslator
+	if pathTranslator != nil && inf.Redis != nil {
+		deps.UECountPolicy = acs.NewUECountPolicy(
+			pathTranslator,
+			taskService,
+			acs.NewRedisUECountProbeGate(inf.Redis, 0),
+			inf.Logger,
+		)
+		inf.Logger.Info("periodic UE count query enabled (#220)")
+	}
 	deps.GPVFaultRecoverer = paramsync.NewGPVFaultRecoverer(inf.PgPool, taskService)
 	deps.DurableReadbackEnabled = cfg.ParamSync.RunEnabled && cfg.ParamSync.ResultConsumerEnabled &&
 		cfg.ParamSync.StagingEnabled && cfg.ParamSync.CanaryPercent == 100
