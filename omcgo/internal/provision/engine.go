@@ -62,6 +62,16 @@ type RegisteredDeviceSyncStarter interface {
 	) error
 }
 
+// RegisteredDeviceMACSyncStarter submits the Issue #219 narrow MAC read
+// without enabling the Issue #148 durable full-sync route.
+type RegisteredDeviceMACSyncStarter interface {
+	StartRegisteredDeviceMACSync(
+		ctx context.Context,
+		dev *model.Device,
+		sourceID string,
+	) (used bool, taskCount int, err error)
+}
+
 type ProvisioningEngine struct {
 	taskRepo           ProvisioningTaskRepository
 	deviceService      *device.DeviceService
@@ -73,6 +83,7 @@ type ProvisioningEngine struct {
 	modelUploadService *ModelUploadService
 	syncService        *SyncService
 	registeredSync     RegisteredDeviceSyncStarter
+	registeredMACSync  RegisteredDeviceMACSyncStarter
 	productRegistry    productClassMatcher
 	productRepo        productBinder
 	// deviceCache 在 lazy bind 写库成功后失效 SN 缓存。
@@ -120,6 +131,7 @@ func (e *ProvisioningEngine) SetModelUploadService(svc *ModelUploadService) {
 // SetSyncService sets the sync service for parameter synchronization.
 func (e *ProvisioningEngine) SetSyncService(svc *SyncService) {
 	e.syncService = svc
+	e.registeredMACSync = svc
 }
 
 func (e *ProvisioningEngine) SetRegisteredDeviceSyncStarter(starter RegisteredDeviceSyncStarter) {
@@ -664,9 +676,21 @@ func (e *ProvisioningEngine) handleRegisteredDeviceSyncEvent(ctx context.Context
 	if err := evt.DecodePayload(&registered); err != nil {
 		return fmt.Errorf("decode registered-device sync event: %w", err)
 	}
-	if !registered.Created ||
-		e.paramSyncRoutingMode != "durable" ||
-		e.registeredSync == nil {
+	if !registered.Created {
+		return nil
+	}
+	switch e.paramSyncRoutingMode {
+	case "durable":
+		if e.registeredSync == nil {
+			return nil
+		}
+	case "closed":
+		if !e.config.AutoSync.Enabled ||
+			!e.config.AutoSync.SyncOnBootstrap ||
+			e.registeredMACSync == nil {
+			return nil
+		}
+	default:
 		return nil
 	}
 	dev, err := e.deviceService.GetDevice(ctx, registered.DeviceID)
@@ -684,14 +708,34 @@ func (e *ProvisioningEngine) startRegisteredDeviceSync(
 	evt bootstrapEvent,
 	dev *model.Device,
 ) error {
-	if !evt.Created || e.paramSyncRoutingMode != "durable" || e.registeredSync == nil {
+	if !evt.Created {
 		return nil
 	}
-	err := e.registeredSync.StartRegisteredDeviceSync(
-		ctx,
-		dev,
-		"device_registered:"+dev.ID.String(),
-	)
+	var err error
+	switch e.paramSyncRoutingMode {
+	case "durable":
+		if e.registeredSync == nil {
+			return nil
+		}
+		err = e.registeredSync.StartRegisteredDeviceSync(
+			ctx,
+			dev,
+			"device_registered:"+dev.ID.String(),
+		)
+	case "closed":
+		if !e.config.AutoSync.Enabled ||
+			!e.config.AutoSync.SyncOnBootstrap ||
+			e.registeredMACSync == nil {
+			return nil
+		}
+		_, _, err = e.registeredMACSync.StartRegisteredDeviceMACSync(
+			ctx,
+			dev,
+			dev.ID.String(),
+		)
+	default:
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("start registered-device parameter sync: %w", err)
 	}

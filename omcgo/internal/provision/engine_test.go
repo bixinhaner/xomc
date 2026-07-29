@@ -639,6 +639,20 @@ func (f *fakeRegisteredDeviceSyncStarter) StartRegisteredDeviceSync(
 	return nil
 }
 
+type fakeRegisteredDeviceMACSyncStarter struct {
+	calls []registeredDeviceSyncCall
+	err   error
+}
+
+func (f *fakeRegisteredDeviceMACSyncStarter) StartRegisteredDeviceMACSync(
+	_ context.Context,
+	dev *model.Device,
+	sourceID string,
+) (bool, int, error) {
+	f.calls = append(f.calls, registeredDeviceSyncCall{deviceID: dev.ID, sourceID: sourceID})
+	return true, 1, f.err
+}
+
 func TestProvisioningEngine_Subscribe_RegisteredSyncRetriesSubmitFailure(t *testing.T) {
 	deviceID := uuid.New()
 	devRepo := &mockDeviceRepo{
@@ -742,15 +756,19 @@ func TestHandleRegisteredDeviceSyncEvent_ExistingDeviceDoesNotStartSync(t *testi
 	assert.Empty(t, starter.calls)
 }
 
-func TestHandleRegisteredDeviceSyncEvent_CreatedDeviceClosedModeDoesNotStartSync(t *testing.T) {
+func TestHandleRegisteredDeviceSyncEvent_CreatedDeviceClosedModeStartsMACOnlySync(t *testing.T) {
 	h := newFullEngineHarness()
 	deviceID := uuid.New()
 	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
 		return &model.Device{ID: deviceID, SerialNumber: "SN-CLOSED"}, nil
 	}
-	starter := &fakeRegisteredDeviceSyncStarter{}
+	fullStarter := &fakeRegisteredDeviceSyncStarter{}
+	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
+	h.engine.config.AutoSync.Enabled = true
+	h.engine.config.AutoSync.SyncOnBootstrap = true
 	h.engine.SetParamSyncRoutingMode("closed")
-	h.engine.SetRegisteredDeviceSyncStarter(starter)
+	h.engine.SetRegisteredDeviceSyncStarter(fullStarter)
+	h.engine.registeredMACSync = macStarter
 
 	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
 		DeviceID: deviceID, SerialNumber: "SN-CLOSED", Created: true,
@@ -759,7 +777,12 @@ func TestHandleRegisteredDeviceSyncEvent_CreatedDeviceClosedModeDoesNotStartSync
 
 	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
 	require.NoError(t, err)
-	assert.Empty(t, starter.calls)
+	assert.Empty(t, fullStarter.calls)
+	require.Len(t, macStarter.calls, 1)
+	assert.Equal(t, deviceID, macStarter.calls[0].deviceID)
+	assert.Equal(t, deviceID.String(), macStarter.calls[0].sourceID)
+	_, err = uuid.Parse(macStarter.calls[0].sourceID)
+	assert.NoError(t, err, "device_tasks.source_id is a UUID column")
 }
 
 func TestHandleBootstrap_CreateTaskError(t *testing.T) {
