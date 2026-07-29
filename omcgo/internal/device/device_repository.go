@@ -1569,7 +1569,7 @@ func recycleBinSelectColumns() []string {
 		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
 		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
 		"di.rf_status", "di.cell_status", "di.op_state", "di.mme_status", "di.sync_status", "di.kpi_status",
-		"di.num_of_cells", "di.gps_status",
+		"di.num_of_cells", "di.gps_status", "COALESCE(di.ue_count, 0)",
 		"NULL::text AS alarm_severity", // Placeholder for compatibility with DeviceWithInfo
 		"di.license_status",
 		"di.mac", "di.hardware_version",

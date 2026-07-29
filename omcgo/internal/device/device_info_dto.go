@@ -92,6 +92,9 @@ type DeviceWithInfo struct {
 	// NumOfCells 载波数量
 	NumOfCells *int `json:"num_of_cells"`
 
+	// UECount 当前接入 UE 数，由 device_info.ue_count 透传到设备列表。
+	UECount int `json:"ue_count"`
+
 	// GPSStatus GPS 状态
 	GPSStatus *string `json:"gps_status"`
 
