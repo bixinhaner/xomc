@@ -15,7 +15,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ImportOutlined } from '@ant-design/icons';
 import {
   Alert,
@@ -37,6 +37,7 @@ import dayjs from 'dayjs';
 import { InputAddon } from '@/components/common/InputAddon';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import { useCreatePmAdhoc, useUpdatePmAdhoc, usePmAdhocDetail } from '@core/hooks/api/usePmAdhoc';
+import { useTabStore } from '@core/store/tabStore';
 import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
@@ -89,7 +90,9 @@ function isSameStringArray(a: string[], b: string[]): boolean {
 
 export default function PmAdhocWizard() {
   const intl = useIntl();
+  const location = useLocation();
   const navigate = useNavigate();
+  const openTab = useTabStore((s) => s.openTab);
   const {
     options: techOptions,
     isLoading: techOptionsLoading,
@@ -106,6 +109,16 @@ export default function PmAdhocWizard() {
     () => (isEdit && editId ? { mode: 'edit', taskId: editId } : { mode: 'new' }),
     [editId, isEdit],
   );
+
+  useEffect(() => {
+    openTab({
+      key: '/performance/pm-adhoc',
+      label: 'nav.performance.adhoc',
+      path: location.pathname + location.search,
+      closable: true,
+      labelRaw: false,
+    });
+  }, [location.pathname, location.search, openTab]);
 
   // 制式选项来自 network_type 字典；value 仍保持 lte/nr/gsm。
   const DIMENSION_OPTIONS = useMemo<{ label: string; value: AdhocDimension; hint: string }[]>(

@@ -273,6 +273,66 @@ describe('pmPageStateStore', () => {
     expect(usePmPageStateStore.getState().getPageState('/performance/query')).toBeNull()
   })
 
+  it('keeps the adhoc wizard child route in the same tab route group', () => {
+    useTabStore.getState().openTab({
+      key: 'pm-adhoc',
+      label: 'nav.performance.adhoc',
+      path: '/performance/pm-adhoc',
+      closable: true,
+    })
+
+    useTabStore.getState().syncActiveTabPath('/performance/pm-adhoc/new')
+
+    expect(useTabStore.getState().tabs.find((tab) => tab.key === 'pm-adhoc')?.path).toBe('/performance/pm-adhoc/new')
+
+    useTabStore.getState().openTab({
+      key: 'pm-dashboard',
+      label: 'nav.performance.dashboard',
+      path: '/performance',
+      closable: true,
+    })
+
+    expect(useTabStore.getState().activateByPath('/performance/pm-adhoc')).toBe(true)
+    expect(useTabStore.getState().activeTabKey).toBe('pm-adhoc')
+
+    useTabStore.getState().syncActiveTabPath('/performance/pm-adhoc/adhoc-001/edit')
+
+    expect(useTabStore.getState().tabs.find((tab) => tab.key === 'pm-adhoc')?.path).toBe(
+      '/performance/pm-adhoc/adhoc-001/edit',
+    )
+  })
+
+  it('clears adhoc draft state when closing an adhoc child-route tab', () => {
+    useTabStore.getState().openTab({
+      key: 'pm-adhoc',
+      label: 'nav.performance.adhoc',
+      path: '/performance/pm-adhoc/new',
+      closable: true,
+    })
+    usePmPageStateStore.getState().savePageState('/performance/pm-adhoc', {
+      view: {
+        adhocDrafts: {
+          custom: {
+            new: {
+              formValues: {
+                name: 'Issue210 草稿',
+                granularity: 'hourly',
+                dimension: 'device',
+                aggregation: 'avg',
+                metricPaths: ['pm.cpu.avg'],
+              },
+              currentStep: 2,
+            },
+          },
+        },
+      },
+    })
+
+    useTabStore.getState().closeTab('pm-adhoc')
+
+    expect(usePmPageStateStore.getState().getPageState('/performance/pm-adhoc')).toBeNull()
+  })
+
   it('clears performance page states on logout and user switch', () => {
     useUserStore.getState().login(mockUser)
     usePmPageStateStore.getState().savePageState('/performance/query', {

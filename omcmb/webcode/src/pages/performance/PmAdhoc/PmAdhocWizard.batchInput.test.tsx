@@ -22,6 +22,7 @@ let indicatorCandidates = [
 ];
 
 vi.mock('react-router-dom', () => ({
+  useLocation: () => ({ pathname: routeParams.id ? `/performance/pm-adhoc/${routeParams.id}/edit` : '/performance/pm-adhoc/new', search: '' }),
   useNavigate: () => navigateSpy,
   useParams: () => routeParams,
 }));
