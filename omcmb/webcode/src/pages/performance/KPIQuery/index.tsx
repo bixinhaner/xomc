@@ -8,7 +8,7 @@
  *   - 结果 → 透视表（行=时间 / 列=N 指标 / 单元格=值）
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -49,6 +49,7 @@ import dayjs from 'dayjs';
 import { useIntl } from 'react-intl';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
+import { queryClient } from '@/providers/queryClient';
 import {
   useQueryTemplates,
   useCreateQueryTemplate,
@@ -58,6 +59,7 @@ import {
   useMetricObjectsByDevices,
 } from '@core/hooks/api/usePmQuery';
 import { useUserStore } from '@core/store/userStore';
+import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
@@ -84,6 +86,16 @@ import { synchronizeUpdatedTemplateState } from './templateUpdateState';
 import QueryTemplateDetailModal from './QueryTemplateDetailModal';
 import { resolveTemplateMetricPaths } from './templateMetricResolver';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
+import {
+  buildKpiQueryStateSnapshot,
+  buildKpiQuerySubmittedSnapshot,
+  kpiQuerySignature,
+  KPI_QUERY_DEFAULT_PIVOT_PAGE_SIZE,
+  PM_KPI_QUERY_PAGE_KEY,
+  restoredKpiQueryDelayMs,
+  restoreKpiQueryState,
+  type KpiQuerySubmittedQuery,
+} from './kpiQueryState';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -114,8 +126,6 @@ const DEFAULT_PAYLOAD: QueryTemplatePayload = {
   timeRangePreset: getDefaultTimeRangeForGranularity('15min'),
   deviceType: 'ENB',
 };
-
-const DEFAULT_PIVOT_PAGE_SIZE = 50;
 
 function formatMetricDisplay(id: string, label?: string): string {
   return label && label !== id ? `${id} ${label}` : id;
@@ -159,16 +169,19 @@ export default function KPIQuery() {
     deviceTypeOptions,
     isLoading: deviceTypeOptionsLoading,
   } = useTechnologyDictionary();
+  const restoredState = useMemo(
+    () => restoreKpiQueryState(usePmPageStateStore.getState().getPageState(PM_KPI_QUERY_PAGE_KEY)),
+    [],
+  );
+  const skipNextSaveRef = useRef(false);
 
   // ── 查询表单状态 ─────────────────────────────────────────────────
-  const [payload, setPayload] = useState<QueryTemplatePayload>(DEFAULT_PAYLOAD);
-  const [customRange, setCustomRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  const [payload, setPayload] = useState<QueryTemplatePayload>(restoredState.payload);
+  const [customRange, setCustomRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(restoredState.customRange);
   // #595: 用户手动修改过时间范围后标记 dirty，粒度切换不再覆盖
-  const [timeRangeDirty, setTimeRangeDirty] = useState(false);
+  const [timeRangeDirty, setTimeRangeDirty] = useState(restoredState.timeRangeDirty);
   // #619：测量对象（小区）下钻选择，按设备勾选要查的小区子集。
-  const [cellSel, setCellSel] = useState<CellSelection>({});
-  // #619: 提交后才生效的快照——勾选变化不立即重查，等点「查询」才同步。
-  const [submittedCellSel, setSubmittedCellSel] = useState<CellSelection>({});
+  const [cellSel, setCellSel] = useState<CellSelection>(restoredState.cellSel);
   // 指标选中值（KPI=编号）→ 友好名，供「已选 N 个」摘要展示，避免露出 K 编号。
   const [metricLabels, setMetricLabels] = useState<Record<string, string>>({});
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
@@ -180,9 +193,11 @@ export default function KPIQuery() {
   const t = useT();
 
   // ── 模板侧栏状态 ─────────────────────────────────────────────────
-  const [templateTab, setTemplateTab] = useState<'public' | 'private'>('public');
-  const [activeTemplateId, setActiveTemplateId] = useState<string | undefined>(undefined);
+  const [templateTab, setTemplateTab] = useState<'public' | 'private'>(restoredState.templateTab);
+  const [activeTemplateId, setActiveTemplateId] = useState<string | undefined>(restoredState.activeTemplateId);
   const [detailTemplateId, setDetailTemplateId] = useState<string | undefined>(undefined);
+  // 左侧模板栏折叠态也属于本页轻量现场；不保存模板列表结果。
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(restoredState.sidebarCollapsed);
 
   const { data: templatesData, isLoading: templatesLoading, refetch: refetchTemplates } =
     useQueryTemplates({ pageSize: 200 });
@@ -217,11 +232,14 @@ export default function KPIQuery() {
   const [saveForm, setSaveForm] = useState<SaveTemplateFormState>(() => createBlankSaveTemplateForm(false));
 
   // ── 查询执行状态 ─────────────────────────────────────────────────
-  // submittedPayload 是真正用于查询的快照；表单编辑时不立即查询，等用户点"查询"
-  const [submittedPayload, setSubmittedPayload] = useState<QueryTemplatePayload | null>(null);
-  const [submittedRange, setSubmittedRange] = useState<{ start: string; end: string } | null>(null);
-  const [pivotPage, setPivotPage] = useState(1);
-  const [pivotPageSize, setPivotPageSize] = useState(DEFAULT_PIVOT_PAGE_SIZE);
+  // submitted 是真正用于查询的快照；表单编辑时不立即查询，等用户点"查询"
+  const [submitted, setSubmitted] = useState<KpiQuerySubmittedQuery | null>(restoredState.submitted);
+  const [pivotPage, setPivotPage] = useState(restoredState.pivotPage);
+  const [pivotPageSize, setPivotPageSize] = useState(restoredState.pivotPageSize);
+  const initialRestoredQueryDelayMs = restoredState.shouldRestoreQuery
+    ? restoredKpiQueryDelayMs(restoredState.savedAt, Date.now())
+    : 0;
+  const [resultsQueryReady, setResultsQueryReady] = useState(!restoredState.shouldRestoreQuery);
   const firstAvailableDeviceType = deviceTypeOptions[0]?.value;
   const hasAvailableDeviceTypes = deviceTypeOptions.length > 0;
   const isAvailableDeviceType = useCallback(
@@ -229,6 +247,15 @@ export default function KPIQuery() {
       Boolean(deviceType && deviceTypeOptions.some((option) => option.value === deviceType)),
     [deviceTypeOptions],
   );
+
+  useEffect(() => {
+    if (!restoredState.shouldRestoreQuery) return undefined;
+    const timer = window.setTimeout(() => {
+      queryClient.removeQueries({ queryKey: ['pm-aggregated'] });
+      setResultsQueryReady(true);
+    }, initialRestoredQueryDelayMs);
+    return () => window.clearTimeout(timer);
+  }, [initialRestoredQueryDelayMs, queryClient, restoredState.shouldRestoreQuery]);
 
   useEffect(() => {
     if (deviceTypeOptionsLoading || !firstAvailableDeviceType || isAvailableDeviceType(payload.deviceType)) {
@@ -241,7 +268,6 @@ export default function KPIQuery() {
       metricPaths: [],
     }));
     setCellSel({});
-    setSubmittedCellSel({});
   }, [deviceTypeOptionsLoading, firstAvailableDeviceType, isAvailableDeviceType, payload.deviceType]);
 
   useEffect(() => {
@@ -270,26 +296,25 @@ export default function KPIQuery() {
     isAvailableDeviceType,
   ]);
 
-  // #619：加载当前选中设备的可用小区列表（供 CellDrilldownSelector 展示选项）。
-  const { byDevice } = useMetricObjectsByDevices(
-    payload.deviceSns,
-    payload.deviceType ? deviceTypeToTechnology(payload.deviceType) : undefined,
+  // #619：计算已提交查询快照里的有效 object_ldn 白名单（全选/未选 = 空数组 = 不过滤）。
+  // 不依赖实时编辑态，避免查询后继续改设备/小区时串改上次结果和导出条件。
+  const { byDevice: submittedObjectsByDevice } = useMetricObjectsByDevices(
+    submitted?.payload.deviceSns ?? [],
+    submitted?.payload.deviceType ? deviceTypeToTechnology(submitted.payload.deviceType) : undefined,
   );
-
-  // #619：计算用户勾选的有效 object_ldn 白名单（全选/未选 = 空数组 = 不过滤）。
-  // 用 submittedCellSel（快照）而非实时 cellSel，避免勾选变化立即触发查询。
   const effectiveLdns = useMemo(
-    () => getEffectiveLdns(submittedCellSel, byDevice),
-    [submittedCellSel, byDevice],
+    () => getEffectiveLdns(submitted?.cellSel ?? {}, submittedObjectsByDevice),
+    [submitted, submittedObjectsByDevice],
   );
 
   const baseAggParams = useMemo(() => {
-    if (!submittedPayload || !submittedRange) return null;
+    if (!submitted) return null;
+    if (!isAvailableDeviceType(submitted.payload.deviceType)) return null;
     return {
-      granularity: submittedPayload.granularity,
-      metricPaths: submittedPayload.metricPaths,
-      startTime: submittedRange.start,
-      endTime: submittedRange.end,
+      granularity: submitted.payload.granularity,
+      metricPaths: submitted.payload.metricPaths,
+      startTime: submitted.range.start,
+      endTime: submitted.range.end,
       limit: pivotPageSize,
       offset: (pivotPage - 1) * pivotPageSize,
       pageBy: 'pivot_row' as const,
@@ -298,7 +323,7 @@ export default function KPIQuery() {
       // #619：测量对象后端过滤（空 = 不过滤）。
       objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
     };
-  }, [submittedPayload, submittedRange, effectiveLdns, pivotPage, pivotPageSize]);
+  }, [effectiveLdns, isAvailableDeviceType, pivotPage, pivotPageSize, submitted]);
 
   const {
     data: aggregatedRows,
@@ -315,9 +340,13 @@ export default function KPIQuery() {
       startTime: undefined,
       endTime: undefined,
     },
-    submittedPayload?.deviceSns ?? [],
-    Boolean(baseAggParams),
+    submitted?.payload.deviceSns ?? [],
+    Boolean(baseAggParams) && resultsQueryReady,
   );
+  const restoreQueryPending = Boolean(submitted) && !resultsQueryReady;
+  const displayedRows = restoreQueryPending ? [] : aggregatedRows;
+  const displayedTotal = restoreQueryPending ? 0 : aggTotal;
+  const displayedLoading = restoreQueryPending || aggLoading || aggFetching;
 
   useEffect(() => {
     if (aggErrors.length > 0) {
@@ -325,6 +354,39 @@ export default function KPIQuery() {
       message.error(t('perf.kpiQuery.queryFailed', { msg: first?.message ?? t('perf.kpiQuery.unknownError') }));
     }
   }, [aggErrors, message, t]);
+
+  useEffect(() => {
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
+    usePmPageStateStore.getState().savePageState(
+      PM_KPI_QUERY_PAGE_KEY,
+      buildKpiQueryStateSnapshot({
+        payload,
+        customRange,
+        timeRangeDirty,
+        cellSel,
+        submitted,
+        pivotPage,
+        pivotPageSize,
+        templateTab,
+        activeTemplateId,
+        sidebarCollapsed,
+      }),
+    );
+  }, [
+    activeTemplateId,
+    cellSel,
+    customRange,
+    payload,
+    pivotPage,
+    pivotPageSize,
+    sidebarCollapsed,
+    submitted,
+    templateTab,
+    timeRangeDirty,
+  ]);
 
   // ── 行为 ─────────────────────────────────────────────────────────
   const isSelectionExceedsLimit = (target: QueryTemplatePayload): boolean =>
@@ -385,29 +447,32 @@ export default function KPIQuery() {
       message.warning(t('perf.kpiQuery.selectRangeRequired'));
       return;
     }
-    setSubmittedPayload(payload);
-    setSubmittedRange(range);
+    const nextSubmitted = buildKpiQuerySubmittedSnapshot(payload, range, cellSel);
+    const sameSubmitted = kpiQuerySignature(nextSubmitted) === kpiQuerySignature(submitted);
+    setResultsQueryReady(true);
+    setSubmitted(nextSubmitted);
     setPivotPage(1);
-    // #619：点查询时才把勾选起到快照，之后过滤才生效。
-    setSubmittedCellSel(cellSel);
     // 「查询」兼并旧「刷新」按钮的强刷语义：同条件再次点击也强制重拉一次最新数据
     // （react-query 默认 30s staleTime，同 key 不会重发——这里显式 refetch 覆盖）。
-    void refetchAgg();
+    if (sameSubmitted) {
+      void refetchAgg();
+    }
   };
 
-  // 导出取「最近一次实际查询」的筛选快照（submittedPayload/submittedRange），而非表单实时值。
+  // 导出取「最近一次实际查询」的筛选快照（submitted），而非表单实时值。
   // 表格已是后端分页，导出不带当前页 limit/offset，口径是当前筛选条件下的全量数据。
   // 复用 dashboard 取数链路，但用 kpi_query 来源输出查询页表格列。
   const handleExport = () => {
-    if (warnIfSelectionExceedsLimit(payload)) {
+    if (!submitted) {
+      void warnIfSelectionExceedsLimit(payload);
       return;
     }
-    if (!submittedPayload || !submittedRange) return; // 按钮已禁用，双保险
-    if (warnIfSelectionExceedsLimit(submittedPayload)) {
+    if (!isAvailableDeviceType(submitted.payload.deviceType)) return;
+    if (warnIfSelectionExceedsLimit(submitted.payload)) {
       return;
     }
     const sel = {
-      ...kpiQueryToDashboardSelection(submittedPayload, submittedRange),
+      ...kpiQueryToDashboardSelection(submitted.payload, submitted.range),
       objectLdns: effectiveLdns.length > 0 ? effectiveLdns : undefined,
     };
     const ts = dayjs().format('YYYYMMDD_HHmmss');
@@ -533,12 +598,15 @@ export default function KPIQuery() {
           const { paths, labels } = await resolveTemplateMetricPaths(dt, updated.payload.metricPaths);
           const next = synchronizeUpdatedTemplateState(
             activeTemplateId,
-            { formPayload: payload, submittedPayload },
+            { formPayload: payload, submittedPayload: submitted?.payload ?? null },
             updated,
             paths,
           );
           setMetricLabels((prev) => ({ ...prev, ...labels }));
           setPayload(next.formPayload);
+          setSubmitted((current) =>
+            current && next.submittedPayload ? { ...current, payload: next.submittedPayload } : current,
+          );
           setTimeRangeDirty(false);
           if (
             updated.payload.timeRangePreset === 'custom'
@@ -678,9 +746,6 @@ export default function KPIQuery() {
       </List.Item>
     );
   };
-
-  // 左侧模板栏折叠态（仅本页、仅当前会话内，不记忆；默认展开）。
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const sidebar = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -865,7 +930,6 @@ export default function KPIQuery() {
                     onChange={(v) => {
                       setPayload({ ...payload, deviceType: v, deviceSns: [], metricPaths: [] });
                       setCellSel({});
-                      setSubmittedCellSel({});
                     }}
                     options={deviceTypeOptions}
                   />
@@ -991,7 +1055,7 @@ export default function KPIQuery() {
                   icon={<ExportOutlined />}
                   onClick={handleExport}
                   loading={createExport.isPending}
-                  disabled={aggFetching || (!submittedPayload && !isSelectionExceedsLimit(payload))}
+                  disabled={aggFetching || (!submitted && !isSelectionExceedsLimit(payload))}
                 >
                   {t('perf.kpiQuery.exportCsv')}
                 </Button>
@@ -1007,12 +1071,13 @@ export default function KPIQuery() {
                     setCustomRange(null);
                     setTimeRangeDirty(false);
                     setCellSel({});
-                    setSubmittedCellSel({});
                     setActiveTemplateId(undefined);
-                    setSubmittedPayload(null);
-                    setSubmittedRange(null);
+                    setSubmitted(null);
+                    setResultsQueryReady(true);
                     setPivotPage(1);
-                    setPivotPageSize(DEFAULT_PIVOT_PAGE_SIZE);
+                    setPivotPageSize(KPI_QUERY_DEFAULT_PIVOT_PAGE_SIZE);
+                    skipNextSaveRef.current = true;
+                    usePmPageStateStore.getState().clearPageState(PM_KPI_QUERY_PAGE_KEY);
                   }}
                 >
                   {t('common.reset')}
@@ -1022,14 +1087,14 @@ export default function KPIQuery() {
           </Form>
         </Card>
 
-        {aggTruncated ? (
+        {!restoreQueryPending && aggTruncated ? (
           <Alert
             type="warning"
             showIcon
             style={{ flexShrink: 0 }}
             message={intl.formatMessage(
               { id: 'perf.dashboard.truncatedTip' },
-              { shown: aggregatedRows.length, total: aggTotal },
+              { shown: displayedRows.length, total: displayedTotal },
             )}
           />
         ) : null}
@@ -1049,12 +1114,12 @@ export default function KPIQuery() {
           }}
         >
           <PivotTable
-            rows={aggregatedRows}
-            loading={aggLoading || aggFetching}
+            rows={displayedRows}
+            loading={displayedLoading}
             pagination={{
               current: pivotPage,
               pageSize: pivotPageSize,
-              total: aggTotal,
+              total: displayedTotal,
               showSizeChanger: true,
               showTotal: (count) => t('perf.kpiQuery.pivot.totalRows', { count }),
               onChange: (page, pageSize) => {
@@ -1064,9 +1129,9 @@ export default function KPIQuery() {
             }}
             // gNB 查空时给更明确的引导（#201）：5G 真机样本厂商错配会让 KPI 算不出、
             // 后端返回 items=null，泛化「暂无数据」无法区分「指标库未注册」与「时段无采样」。
-            // 仅在已发起查询（submittedPayload 存在）且制式=gNB 时替换文案。
+            // 仅在已发起查询（submitted 存在）且制式=gNB 时替换文案。
             emptyDescription={
-              submittedPayload?.deviceType === 'GNB' ? (
+              submitted?.payload.deviceType === 'GNB' ? (
                 <Text type="secondary">
                   {t('perf.kpiQuery.gnbEmptyHint')}
                 </Text>
@@ -1084,7 +1149,6 @@ export default function KPIQuery() {
             } else {
               setPayload({ ...payload, deviceSns: sns });
               setCellSel({}); // #619：设备变更时清空小区选择
-              setSubmittedCellSel({});
             }
           }}
           initialSelected={pickerTarget === 'modal' ? saveForm.payload.deviceSns : payload.deviceSns}
