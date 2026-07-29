@@ -4,6 +4,7 @@ import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import type { DashboardExportSelection } from '@core/utils/kpiExportParams';
 import {
   buildDeviceViewExportInput,
+  buildSubmittedDeviceViewExportSelection,
   isDeviceViewDeviceSelectionOverLimit,
   isDeviceViewMetricSelectionOverLimit,
 } from './DeviceListPane';
@@ -13,6 +14,12 @@ import {
   defaultRangeForGranularity,
   toDeviceViewRequestRFC3339,
 } from './deviceListPaneTimeUtils';
+import {
+  buildDeviceViewStateSnapshot,
+  buildDeviceViewSubmittedQuery,
+  restoredDeviceViewQueryDelayMs,
+  restoreDeviceViewState,
+} from './deviceViewState';
 
 const selection: DashboardExportSelection = {
   technology: 'lte',
@@ -50,6 +57,49 @@ describe('buildDeviceViewExportInput', () => {
   });
 });
 
+describe('buildSubmittedDeviceViewExportSelection', () => {
+  it('没有已提交出图条件时不构造导出参数', () => {
+    expect(buildSubmittedDeviceViewExportSelection(null, null, 'UTC')).toBeNull();
+  });
+
+  it('导出只使用已提交出图条件，并优先使用后端实际时间范围', () => {
+    const submitted = buildDeviceViewSubmittedQuery({
+      tech: 'nr',
+      deviceSns: ['GNB00001'],
+      metricPaths: ['K001'],
+      granularity: 'hourly',
+      filter: {
+        range: [dayjs('2026-07-01T00:00:00Z'), dayjs('2026-07-02T00:00:00Z')] as [dayjs.Dayjs, dayjs.Dayjs],
+        weekdays: [1, 2],
+        hours: [8, 9],
+        compare: false,
+      },
+      allowedLdns: ['Cell=1'],
+      systemTimezone: 'UTC',
+    });
+
+    const selectionFromSubmitted = buildSubmittedDeviceViewExportSelection(
+      submitted,
+      [dayjs('2026-07-01T01:00:00Z'), dayjs('2026-07-01T23:00:00Z')],
+      'UTC',
+    );
+    const expectedStart = toDeviceViewRequestRFC3339(dayjs('2026-07-01T01:00:00Z'), 'UTC');
+    const expectedEnd = toDeviceViewRequestRFC3339(dayjs('2026-07-01T23:00:00Z'), 'UTC');
+
+    expect(selectionFromSubmitted).toMatchObject({
+      technology: 'nr',
+      deviceSns: ['GNB00001'],
+      metricPaths: ['K001'],
+      granularity: 'hourly',
+      objectLdns: ['Cell=1'],
+      weekdays: [1, 2],
+      hours: [8, 9],
+      startTime: expectedStart,
+      endTime: expectedEnd,
+    });
+  });
+});
+
 describe('isDeviceViewMetricSelectionOverLimit', () => {
   it('设备性能查看沿用 PM 查询设备数量上限', () => {
     expect(isDeviceViewDeviceSelectionOverLimit(
@@ -67,6 +117,105 @@ describe('isDeviceViewMetricSelectionOverLimit', () => {
     expect(isDeviceViewMetricSelectionOverLimit(
       Array.from({ length: PM_QUERY_SELECTION_LIMIT + 1 }, (_, index) => `K${index + 1}`),
     )).toBe(true);
+  });
+});
+
+describe('device view page state snapshot', () => {
+  it('恢复设备、指标、粒度、时间范围、星期、小时段、小区对象、周期对比和已提交条件', () => {
+    const filter = {
+      range: [dayjs('2026-07-01T00:00:00Z'), dayjs('2026-07-02T00:00:00Z')] as [dayjs.Dayjs, dayjs.Dayjs],
+      weekdays: [1, 2, 3],
+      hours: [8, 9],
+      compare: true,
+    };
+    const snapshot = {
+      ...buildDeviceViewStateSnapshot({
+        tech: 'nr',
+        deviceSns: ['GNB00001'],
+        cellSel: { GNB00001: ['Cell=1'] },
+        metricPaths: ['K001'],
+        metricsTouched: true,
+        granularity: 'hourly',
+        rangeTouched: true,
+        filter,
+        submitted: {
+          tech: 'nr',
+          deviceSns: ['GNB00001'],
+          metricPaths: ['K001'],
+          granularity: 'hourly',
+          startTime: '2026-07-01T00:00:00Z',
+          endTime: '2026-07-02T00:00:00Z',
+          weekdays: [1, 2, 3],
+          hours: [8, 9],
+          compare: true,
+          offsetMs: 86_400_000,
+          prevStartTime: '2026-06-30T00:00:00Z',
+          prevEndTime: '2026-07-01T00:00:00Z',
+          allowedLdns: ['Cell=1'],
+        },
+        refreshed: true,
+      }),
+      savedAt: '2026-07-02T00:00:00.000Z',
+    };
+
+    const restored = restoreDeviceViewState(snapshot, 'UTC');
+
+    expect(restored.tech).toBe('nr');
+    expect(restored.deviceSns).toEqual(['GNB00001']);
+    expect(restored.metricPaths).toEqual(['K001']);
+    expect(restored.granularity).toBe('hourly');
+    expect(restored.filter.range.map((d) => d.toISOString())).toEqual([
+      '2026-07-01T00:00:00.000Z',
+      '2026-07-02T00:00:00.000Z',
+    ]);
+    expect(restored.filter.weekdays).toEqual([1, 2, 3]);
+    expect(restored.filter.hours).toEqual([8, 9]);
+    expect(restored.filter.compare).toBe(true);
+    expect(restored.cellSel).toEqual({ GNB00001: ['Cell=1'] });
+    expect(restored.submitted?.allowedLdns).toEqual(['Cell=1']);
+    expect(restored.shouldRestoreQuery).toBe(true);
+  });
+
+  it('未提交出图时不恢复 submitted，也不标记自动请求', () => {
+    const filter = {
+      range: [dayjs('2026-07-01T00:00:00Z'), dayjs('2026-07-02T00:00:00Z')] as [dayjs.Dayjs, dayjs.Dayjs],
+      weekdays: [1],
+      hours: [8],
+      compare: false,
+    };
+    const snapshot = {
+      ...buildDeviceViewStateSnapshot({
+        tech: 'lte',
+        deviceSns: ['ENB00001'],
+        cellSel: {},
+        metricPaths: ['K001'],
+        metricsTouched: true,
+        granularity: '15min',
+        rangeTouched: true,
+        filter,
+        submitted: null,
+        refreshed: false,
+      }),
+      savedAt: '2026-07-02T00:00:00.000Z',
+    };
+
+    const restored = restoreDeviceViewState(snapshot, 'UTC');
+
+    expect(restored.deviceSns).toEqual(['ENB00001']);
+    expect(restored.metricPaths).toEqual(['K001']);
+    expect(restored.submitted).toBeNull();
+    expect(restored.shouldRestoreQuery).toBe(false);
+  });
+
+  it('按保存时间计算恢复请求的轻量节流时间', () => {
+    expect(restoredDeviceViewQueryDelayMs(
+      '2026-07-30T11:59:58.000Z',
+      Date.parse('2026-07-30T12:00:00.000Z'),
+    )).toBe(8_000);
+    expect(restoredDeviceViewQueryDelayMs(
+      '2026-07-30T11:59:40.000Z',
+      Date.parse('2026-07-30T12:00:00.000Z'),
+    )).toBe(0);
   });
 });
 
