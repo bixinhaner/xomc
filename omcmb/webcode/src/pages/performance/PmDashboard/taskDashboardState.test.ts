@@ -6,6 +6,7 @@ import {
   buildSubmittedTaskDashboardQuery,
   buildTaskDashboardStateSnapshot,
   buildTaskDashboardTaskSwitchReset,
+  restoredQueryDelayMs,
   restoreTaskDashboardState,
   taskDashboardQuerySignature,
 } from './taskDashboardState';
@@ -253,5 +254,10 @@ describe('taskDashboardState', () => {
     expect(taskDashboardQuerySignature('task-1', submitted)).toBe(
       taskDashboardQuerySignature('task-1', { ...submitted }),
     );
+  });
+
+  it('calculates restored query throttle delay', () => {
+    expect(restoredQueryDelayMs('2026-07-30T11:59:59.000Z', Date.parse('2026-07-30T12:00:00.000Z'))).toBe(1_000);
+    expect(restoredQueryDelayMs('2026-07-30T11:59:40.000Z', Date.parse('2026-07-30T12:00:00.000Z'))).toBe(0);
   });
 });

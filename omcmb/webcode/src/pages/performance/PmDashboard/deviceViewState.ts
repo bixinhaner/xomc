@@ -12,7 +12,7 @@ import {
 } from './deviceListPaneTimeUtils';
 
 export const PM_DEVICE_VIEW_PAGE_KEY = '/performance/device-view';
-export const DEVICE_VIEW_RESTORED_QUERY_THROTTLE_MS = 10_000;
+export const DEVICE_VIEW_RESTORED_QUERY_THROTTLE_MS = 2_000;
 
 export interface DeviceViewSubmittedQuery {
   tech: TechnologyType;

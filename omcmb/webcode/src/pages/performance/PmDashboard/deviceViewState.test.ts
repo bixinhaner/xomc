@@ -201,7 +201,7 @@ describe('deviceViewState', () => {
   });
 
   it('calculates restored query throttle delay', () => {
-    expect(restoredDeviceViewQueryDelayMs('2026-07-30T11:59:58.000Z', Date.parse('2026-07-30T12:00:00.000Z'))).toBe(8_000);
+    expect(restoredDeviceViewQueryDelayMs('2026-07-30T11:59:59.000Z', Date.parse('2026-07-30T12:00:00.000Z'))).toBe(1_000);
     expect(restoredDeviceViewQueryDelayMs('2026-07-30T11:59:40.000Z', Date.parse('2026-07-30T12:00:00.000Z'))).toBe(0);
   });
 });

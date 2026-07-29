@@ -140,7 +140,7 @@ describe('TaskDashboardPane page-state restore query behavior', () => {
   it('delays a recently restored submitted snapshot, then runs one results query after the throttle window', () => {
     seedPageState({
       submitted: true,
-      savedAt: '2026-07-30T11:59:58.000Z',
+      savedAt: '2026-07-30T11:59:59.000Z',
     });
 
     renderPane();
@@ -148,7 +148,7 @@ describe('TaskDashboardPane page-state restore query behavior', () => {
     expect(resultTaskIds()).not.toContain('task-1');
 
     act(() => {
-      vi.advanceTimersByTime(8_000);
+      vi.advanceTimersByTime(1_000);
     });
 
     expect(resultTaskIds()).toContain('task-1');

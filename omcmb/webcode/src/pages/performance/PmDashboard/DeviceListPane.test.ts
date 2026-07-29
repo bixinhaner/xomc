@@ -209,9 +209,9 @@ describe('device view page state snapshot', () => {
 
   it('按保存时间计算恢复请求的轻量节流时间', () => {
     expect(restoredDeviceViewQueryDelayMs(
-      '2026-07-30T11:59:58.000Z',
+      '2026-07-30T11:59:59.000Z',
       Date.parse('2026-07-30T12:00:00.000Z'),
-    )).toBe(8_000);
+    )).toBe(1_000);
     expect(restoredDeviceViewQueryDelayMs(
       '2026-07-30T11:59:40.000Z',
       Date.parse('2026-07-30T12:00:00.000Z'),

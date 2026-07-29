@@ -50,7 +50,7 @@ const DEFAULT_RANGE_MODE: DashboardRangeMode = {
   kind: 'relative',
   durationMs: DEFAULT_RELATIVE_DURATION_MS,
 };
-export const RESTORED_QUERY_THROTTLE_MS = 10_000;
+export const RESTORED_QUERY_THROTTLE_MS = 2_000;
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
