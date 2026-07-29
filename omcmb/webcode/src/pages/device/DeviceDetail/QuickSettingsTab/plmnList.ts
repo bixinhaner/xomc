@@ -1,13 +1,32 @@
-export interface PlmnRow {
+export type PlmnRow = {
   key: string;
   plmn: string;
-}
+};
 
 export interface PlmnBatchState {
   existingRows: PlmnRow[];
   deletedKeys: ReadonlySet<string>;
   editedValues: ReadonlyMap<string, string>;
   addedRows: PlmnRow[];
+}
+
+function isPlmnRows(value: unknown): value is PlmnRow[] {
+  return Array.isArray(value)
+    && value.every((item) => item && typeof item === 'object' && 'plmn' in item);
+}
+
+export function toPlmnRows(value: unknown): PlmnRow[] {
+  if (isPlmnRows(value)) {
+    return value.map((row, index) => ({
+      key: row.key || `plmn-${index}`,
+      plmn: String(row.plmn ?? ''),
+    }));
+  }
+  return parsePlmnList(value);
+}
+
+export function isPlmnRowLimitReached(rows: PlmnRow[], maxRows: number): boolean {
+  return rows.length >= maxRows;
 }
 
 export function buildEffectivePlmnRows({

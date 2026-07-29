@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildEffectivePlmnRows,
+  isPlmnRowLimitReached,
   parsePlmnList,
   serializePlmnList,
+  toPlmnRows,
   validatePlmnList,
 } from '../plmnList';
 
@@ -22,6 +24,33 @@ describe('serializePlmnList', () => {
       { key: '2', plmn: '' },
       { key: '3', plmn: '46001' },
     ])).toBe('46000,46001');
+  });
+});
+
+describe('toPlmnRows', () => {
+  it('preserves a newly added blank row in the form draft', () => {
+    const rows = [
+      { key: 'existing', plmn: '222222' },
+      { key: 'new', plmn: '' },
+    ];
+
+    expect(toPlmnRows(rows)).toEqual(rows);
+  });
+
+  it('rehydrates a legacy serialized PLMN draft', () => {
+    expect(toPlmnRows('222222,46001')).toEqual([
+      { key: 'plmn-0-222222', plmn: '222222' },
+      { key: 'plmn-1-46001', plmn: '46001' },
+    ]);
+  });
+});
+
+describe('isPlmnRowLimitReached', () => {
+  it('counts blank draft rows toward the add-row limit', () => {
+    expect(isPlmnRowLimitReached([
+      { key: 'existing', plmn: '222222' },
+      { key: 'new', plmn: '' },
+    ], 2)).toBe(true);
   });
 });
 
