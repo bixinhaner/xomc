@@ -55,7 +55,7 @@ docker compose -p omcgo \
   down -v --remove-orphans
 ```
 
-Expected: OMC 容器、网络和九个命名卷被删除。
+Expected: OMC 容器、网络和十个命名卷被删除。
 
 - [ ] **Step 3: 删除已确认的 OMC 运行日志**
 
@@ -155,7 +155,7 @@ Cover:
 - queue latch releases while disk is in an unlatched neutral band;
 - disk and I/O unavailable signals retain only their already-confirmed latch semantics from the design;
 - queue failure starts fail-open but preserves an existing queue latch;
-- disabled clears every latch.
+- disabled immediately opens the gate but retains confirmed latches until a fresh low-watermark sample proves recovery.
 
 - [ ] **Step 5: 运行包测试**
 

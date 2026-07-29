@@ -353,7 +353,7 @@ TSDB_SAT=$(( TSDB_SHARED_BUFFERS + TSDB_MAINT_WORK_MEM + TSDB_MAXCONN * (10 + TS
 # Redis：maxmemory = 0.66 × 限额，且保证 限额 − maxmemory ≥ 1 GiB（AOF rewrite 的 COW 余量）
 REDIS_MAXMEM=$(mul_pct "$REDIS_MEM" 66)
 [ $(( REDIS_MEM - REDIS_MAXMEM )) -lt 1024 ] && REDIS_MAXMEM=$(( REDIS_MEM - 1024 ))
-REDIS_POLICY=volatile-lru                           # 仅淘汰带 TTL 的键，保护无 TTL 的队列
+REDIS_POLICY=noeviction                            # PM 聚合窗口是权威状态，内存不足必须告警扩容
 
 # ---------------------------------------------------------------------------
 # 4. 输出规划表 + 写 resources.env（需求 ③④）

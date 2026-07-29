@@ -51,6 +51,7 @@ I/O 均未饱和，但 PM 数据链路存在三个相互独立的局部故障：
   - `omcgo_natsdata`
   - `omcgo_miniodata`
   - `omcgo_prometheusdata`
+  - `omcgo_alertmanagerdata`
   - `omcgo_lokidata`
   - `omcgo_tempodata`
   - `omcgo_grafanadata`
@@ -89,6 +90,8 @@ I/O 均未饱和，但 PM 数据链路存在三个相互独立的局部故障：
 
 - watchdog 启动前没有确认过压力时，探测失败继续 fail-open；
 - 已确认的对应压力信号在采样失败时不得被错误释放；
+- 配置临时关闭背压时立即开放入口，但保留已确认的 latch；重新启用后必须由新鲜低水位
+  样本证明恢复；
 - CPU load 继续只监控，不参与背压决策。
 
 ### 2. Redis 聚合窗口紧凑格式
