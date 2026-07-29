@@ -38,6 +38,73 @@ Expected: per-container CPU cores used. NO-DATA means cAdvisor/container discove
 sum by (service) (container_memory_working_set_bytes{service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"})
 Expected: per-container working set bytes. NO-DATA means cAdvisor/container discovery is unavailable; 0 is not a substitute for absent telemetry.
 
+## F-02 Memory Usage by Service (MUST-HAVE when OMC services are running)
+sum by (service) (container_memory_working_set_bytes{service=~"app|acs|worker"})
+Expected: exactly the OMC service dimensions `app`, `acs`, and `worker` when those containers are running; values are working-set bytes and must not be replaced by a `cadvisor` aggregate or an empty result.
+
+## F-03 Highest CPU saturation by service (MUST-HAVE when CPU limits are configured)
+max(sum by (service) (rate(container_cpu_usage_seconds_total{service=~"app|acs|worker"}[5m])) / sum by (service) ((container_spec_cpu_quota{service=~"app|acs|worker"} > 0) / container_spec_cpu_period{service=~"app|acs|worker"}))
+Expected: one finite ratio in `[0,1]` for the highest OMC service saturation; the denominator must calculate valid per-container `quota / period` before service aggregation, and unlimited containers (`quota <= 0`) must be excluded.
+
+## F-04 Highest memory saturation by service (MUST-HAVE when memory limits are configured)
+max(sum by (service) (container_memory_working_set_bytes{service=~"app|acs|worker"}) / sum by (service) ((container_spec_memory_limit_bytes{service=~"app|acs|worker"} > 0) and (container_spec_memory_limit_bytes{service=~"app|acs|worker"} < 64e9)))
+Expected: one finite ratio in `[0,1]` for the highest OMC service working-set saturation; positive per-container memory limits below the `64e9` host-memory sentinel are filtered before service aggregation, and unlimited containers are excluded.
+
+## F-05 Container restarts in the selected range (MUST-HAVE when cAdvisor is running)
+sum(changes(container_start_time_seconds{service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web|prometheus|grafana|loki|tempo|otelcol|alertmanager|cadvisor|node-exporter|nginx-exporter|nats-exporter"}[1h]))
+Expected: one scalar restart count covering OMC, dependency, monitoring, and exporter containers; `0` is a valid measured value when no container restarted, while an empty result means restart telemetry is unavailable.
+
+## F-06 CPU saturation by service (MUST-HAVE when CPU limits are configured)
+sum by (service) (rate(container_cpu_usage_seconds_total{service=~"app|acs|worker"}[5m])) / sum by (service) ((container_spec_cpu_quota{service=~"app|acs|worker"} > 0) / container_spec_cpu_period{service=~"app|acs|worker"})
+Expected: finite CPU usage/limit ratios for `acs`, `app`, and `worker`; quota and period are calculated per container before service aggregation, containers with `quota <= 0` are excluded, and the panel plus `ContainerCPUSaturation` alert use the same service-level denominator.
+
+## F-07 Container CPU usage vs limit (MUST-HAVE when CPU limits are configured)
+sum by (service) (rate(container_cpu_usage_seconds_total{service=~"app|acs|worker"}[5m]))
+sum by (service) ((container_spec_cpu_quota{service=~"app|acs|worker"} > 0) / container_spec_cpu_period{service=~"app|acs|worker"})
+Expected: two non-empty vectors with matching `acs`, `app`, and `worker` service dimensions; the usage vector is CPU cores and the limit vector is cores calculated per container before service aggregation, with unlimited containers excluded rather than diluting the limit.
+
+## F-08 Container memory saturation by service (MUST-HAVE when memory limits are configured)
+sum by (service) (container_memory_working_set_bytes{service=~"app|acs|worker"}) / sum by (service) ((container_spec_memory_limit_bytes{service=~"app|acs|worker"} > 0) and (container_spec_memory_limit_bytes{service=~"app|acs|worker"} < 64e9))
+Expected: finite working-set/limit ratios for `acs`, `app`, and `worker`; positive limits below the host-memory sentinel are filtered per container before service aggregation, and unlimited containers are excluded.
+
+## F-09 Container CPU CFS throttling ratio (MUST-HAVE when cAdvisor exposes CFS counters)
+(sum by (service) (rate(container_cpu_cfs_throttled_periods_total{service=~"app|acs|worker"}[5m])) / sum by (service) (rate(container_cpu_cfs_periods_total{service=~"app|acs|worker"}[5m]))) and on (service) (sum by (service) (rate(container_cpu_cfs_periods_total{service=~"app|acs|worker"}[5m])) > 0)
+Expected: finite ratios for services with positive CFS periods; a real zero throttling ratio is valid, while a missing/zero denominator remains no-data instead of infinity.
+
+## F-10 Container network receive/transmit (MUST-HAVE when cAdvisor exposes network counters)
+sum by (service) (rate(container_network_receive_bytes_total{service=~"app|acs|worker",interface!~"lo|veth.*|docker.*|cni.*|flannel.*|br-.*"}[5m]))
+sum by (service) (rate(container_network_transmit_bytes_total{service=~"app|acs|worker",interface!~"lo|veth.*|docker.*|cni.*|flannel.*|br-.*"}[5m]))
+Expected: receive and transmit byte rates by `acs`, `app`, and `worker`, using real container interfaces and excluding loopback/virtual interfaces.
+
+## F-11 Container OOM events (MUST-HAVE when cAdvisor exposes OOM counters)
+sum by (service) (increase(container_oom_events_total{service=~"app|acs|worker"}[1h]))
+Expected: OOM event increments by service; a returned zero is a real no-event state, while an absent metric remains visibly unavailable rather than being coerced to zero.
+
+## F-12 Container block IO read/write (MUST-HAVE when cAdvisor exposes byte counters)
+sum by (service) (rate(container_fs_reads_bytes_total{service=~"app|acs|worker",device!=""}[5m]))
+sum by (service) (rate(container_fs_writes_bytes_total{service=~"app|acs|worker",device!=""}[5m]))
+Expected: read/write byte rates by available OMC service and non-empty device; a service without cAdvisor byte counters remains no-data and is not fabricated as zero.
+
+## F-13 Dependency container CPU saturation (MUST-HAVE when dependency limits are configured)
+sum by (service) (rate(container_cpu_usage_seconds_total{service=~"postgres|postgres-tsdb|redis|nats|minio|web"}[5m])) / sum by (service) ((container_spec_cpu_quota{service=~"postgres|postgres-tsdb|redis|nats|minio|web"} > 0) / container_spec_cpu_period{service=~"postgres|postgres-tsdb|redis|nats|minio|web"})
+Expected: finite CPU saturation ratios for dependency services; quota/period is paired per container before service aggregation.
+
+## F-14 Dependency container memory saturation (MUST-HAVE when dependency limits are configured)
+sum by (service) (container_memory_working_set_bytes{service=~"postgres|postgres-tsdb|redis|nats|minio|web"}) / sum by (service) ((container_spec_memory_limit_bytes{service=~"postgres|postgres-tsdb|redis|nats|minio|web"} > 0) and (container_spec_memory_limit_bytes{service=~"postgres|postgres-tsdb|redis|nats|minio|web"} < 64e9))
+Expected: finite working-set/limit ratios for dependency services; positive limits below the host sentinel are filtered per container before service aggregation.
+
+## F-15 Monitoring-stack container memory (MUST-HAVE when cAdvisor is running)
+sum by (service) (container_memory_working_set_bytes{container_id=~".*/docker-[^/]+\\.scope",container_label_com_docker_compose_service=~"prometheus|grafana|loki|tempo|otelcol|alertmanager|cadvisor"})
+Expected: separate Prometheus/Grafana/Loki/Tempo/OTel/Alertmanager/cAdvisor series; host cgroups and unlabelled buildkit/system samples are excluded, so `service=cadvisor` cannot become a host-memory aggregate.
+
+## F-16 Container CPU by container ID (MUST-HAVE when cAdvisor is running)
+sum by (container_id) (rate(container_cpu_usage_seconds_total{container_id=~".*/docker-[^/]+\\.scope"}[1m]))
+Expected: non-empty CPU series for systemd Docker scope IDs such as `/system.slice/docker-<id>.scope`; root/system cgroups are excluded.
+
+## F-17 Container memory by container ID (MUST-HAVE when cAdvisor is running)
+sum by (container_id) (container_memory_working_set_bytes{container_id=~".*/docker-[^/]+\\.scope"})
+Expected: non-empty working-set series for systemd Docker scope IDs, with root/system cgroups excluded.
+
 ## MinIO (MUST-HAVE after MinIO is started)
 minio_cluster_capacity_usable_free_bytes
 Expected: usable free bytes. NO-DATA means MinIO metrics are unavailable; zero is a real full-capacity condition.

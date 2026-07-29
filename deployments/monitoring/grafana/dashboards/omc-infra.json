@@ -117,7 +117,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
       "targets": [
-        {"expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}[$__rate_interval])) / (sum by (service) (container_spec_cpu_quota{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"} > 0) / sum by (service) (container_spec_cpu_period{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}))", "legendFormat": "{{service}}"}
+        {"expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}[$__rate_interval])) / sum by (service) ((container_spec_cpu_quota{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"} > 0) / container_spec_cpu_period{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"})", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.9}]}}}
     },
@@ -126,7 +126,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
       "targets": [
-        {"expr": "sum by (service) (container_memory_working_set_bytes{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}) / (sum by (service) (container_spec_memory_limit_bytes{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}) < 64e9)", "legendFormat": "{{service}}"}
+        {"expr": "sum by (service) (container_memory_working_set_bytes{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}) / sum by (service) ((container_spec_memory_limit_bytes{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"} > 0) and (container_spec_memory_limit_bytes{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"} < 64e9))", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.9}]}}}
     },
@@ -136,7 +136,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
       "targets": [
-        {"expr": "sum by (service) (container_memory_working_set_bytes{service=~\"prometheus|grafana|loki|tempo|otelcol|alertmanager|cadvisor\"})", "legendFormat": "{{service}}"}
+        {"expr": "sum by (service) (container_memory_working_set_bytes{container_id=~\".*/docker-[^/]+\\\\.scope\",container_label_com_docker_compose_service=~\"prometheus|grafana|loki|tempo|otelcol|alertmanager|cadvisor\"})", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes"}}
     },

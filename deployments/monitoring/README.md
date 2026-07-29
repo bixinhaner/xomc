@@ -280,6 +280,14 @@ chmod +x deployments/monitoring/tests/validate-storage-targets.sh
 deployments/monitoring/tests/validate-storage-targets.sh
 ```
 
+容器服务级 CPU/内存面板依赖 cAdvisor 导出的有限 Compose service 标签；提交
+cAdvisor 或容器资源面板改动时，同时执行：
+
+```bash
+chmod +x deployments/monitoring/tests/validate-cadvisor-service-labels.sh
+deployments/monitoring/tests/validate-cadvisor-service-labels.sh
+```
+
 `tests/promql-probes.txt` 是资源、队列和写入保护的查询清单。它不是 dashboard
 或告警规则的替代品；其中标为 `MUST-HAVE` 的 probe 在对应 exporter/service 启动后
 必须返回时间序列。

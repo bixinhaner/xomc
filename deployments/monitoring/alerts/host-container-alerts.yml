@@ -171,23 +171,27 @@ groups:
 
       - alert: ContainerCPUSaturation
         # release bundle 强制设 CPU limit（cpu_quota 有限值），此为一线生效规则。
-        # `cpu_quota > 0` 守卫排除未设限容器（cgroup 无限额时 quota = -1）。
-        # limit 核数 = cpu_quota / cpu_period。
+        # usage、quota、period 使用 cAdvisor Compose service 标签统一聚合。
+        # 先按容器计算 quota / period，再按 service 汇总；quota <= 0 的无限额容器被排除。
         expr: |
-          (sum by (name) (rate(container_cpu_usage_seconds_total{name=~"(omcgo|docker)-(app|acs|worker)-.*"}[5m]))
-           / sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-(app|acs|worker)-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-(app|acs|worker)-.*"}) > 0.9)
-          and (sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-(app|acs|worker)-.*"}) > 0)
+          (
+            sum by (service) (rate(container_cpu_usage_seconds_total{service=~"app|acs|worker"}[5m]))
+            /
+            sum by (service) ((container_spec_cpu_quota{service=~"app|acs|worker"} > 0) / container_spec_cpu_period{service=~"app|acs|worker"})
+          ) > 0.9
+          and on (service)
+          (sum by (service) (container_spec_cpu_quota{service=~"app|acs|worker"} > 0) > 0)
         for: 10m
         labels:
           severity: warning
           domain: omc
-          service: cadvisor
+          observer: cadvisor
         annotations:
-          summary: "容器 CPU 接近 limit（> 90%）：{{ $labels.name }}"
+          summary: "服务 CPU 接近 limit（> 90%）：{{ $labels.service }}"
           description: |
-            容器 {{ $labels.name }} CPU 使用已达其 CPU limit 的 90%，持续 10 分钟。
+            服务 {{ $labels.service }} CPU 使用已达其 CPU limit 的 90%，持续 10 分钟。
             Impact: 触限将被 CFS 限流，请求延迟上升。
-            Action: 评估调大 CPU limit 或水平扩容；定位 CPU 热点（开 pprof CPU profile）。
+            Action: 评估调大 CPU limit 或水平扩容；按 service 定位 CPU 热点（开 pprof CPU profile）。
 
       - alert: ContainerCPUThrottling
         # CFS 限流比 = 被限流周期 / 总周期；持续偏高说明 CPU limit 偏紧。

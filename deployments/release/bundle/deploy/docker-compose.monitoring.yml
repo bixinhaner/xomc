@@ -322,6 +322,11 @@ services:
   cadvisor:
     image: ${IMAGE_CADVISOR}
     restart: unless-stopped
+    # Keep only the bounded Compose service label for Prometheus service-level
+    # panels; do not export arbitrary container labels.
+    command:
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.service
     privileged: true
     devices:
       - /dev/kmsg

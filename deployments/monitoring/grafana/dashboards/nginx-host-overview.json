@@ -98,7 +98,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
       "targets": [
-        {"expr": "sum by (container_id) (rate(container_cpu_usage_seconds_total{container_id=~\"/docker/.+\"}[1m]))", "legendFormat": "{{container_id}}"}
+        {"expr": "sum by (container_id) (rate(container_cpu_usage_seconds_total{container_id=~\".*/docker-[^/]+\\\\.scope\"}[1m]))", "legendFormat": "{{container_id}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "cores"}}
     },
@@ -107,7 +107,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
       "targets": [
-        {"expr": "sum by (container_id) (container_memory_working_set_bytes{container_id=~\"/docker/.+\"})", "legendFormat": "{{container_id}}"}
+        {"expr": "sum by (container_id) (container_memory_working_set_bytes{container_id=~\".*/docker-[^/]+\\\\.scope\"})", "legendFormat": "{{container_id}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes"}}
     },

@@ -32,7 +32,7 @@
 | 主题 | 文档 | 说明 |
 |------|------|------|
 | 交付与部署手册 | `operations/OMC交付构建快速上手.md` · `OMC离线交付包构建手册（构建侧）.md` · `OMC内网离线部署手册（运维侧）.md` | 离线交付包构建与内网部署 SOP |
-| 可观测性使用手册 | `operations/OMC可观测性使用手册.md` | OTel Collector → Tempo/Loki/Prometheus 落地（trace↔log 关联）|
+| 可观测性使用手册 | `operations/OMC可观测性使用手册.md` · `operations/资源、队列与存储保护监控说明-20260728.md` | OTel Collector → Tempo/Loki/Prometheus 落地；资源、队列与存储写入保护监控入口和实现说明 |
 | 告警处置 / 诊断 | `operations/告警处置Runbook.md` · `diag-mml-gpn-probe.md` · `troubleshoot-mml-rpc.md` | 运维侧处置与 MML 诊断 |
 | 故障演练 Runbook（8 篇）| `runbook/` | `acs-overload` · `db-backup-restore` · `disaster-recovery` · `pg-failover` · `redis-failover` · `nats-failover` · `mr-task-troubleshooting` · `parammodel-iteration-annotation-guide` |
 
