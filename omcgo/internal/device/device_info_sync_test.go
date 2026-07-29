@@ -631,6 +631,35 @@ func TestInfoSyncer_SyncFromParameters_ComputesQuickFieldsWithoutCarrierMapping(
 	assert.NoError(t, err)
 }
 
+func TestInfoSyncer_SyncFromParameters_AggregatesUECountAcrossPhysicalCells(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.UE_Count", ParameterValue: "2"},
+		{ParameterPath: "Device.DeviceInfo.2.UE_Count", ParameterValue: "3"},
+	}}
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(
+		_ context.Context,
+		gotDeviceID uuid.UUID,
+		fields map[string]interface{},
+	) error {
+		assert.Equal(t, deviceID, gotDeviceID)
+		assert.Equal(t, 5, fields["ue_count"])
+		return nil
+	}}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(
+		context.Background(),
+		deviceID,
+		model.CarrierCMCC,
+		model.TechLTE,
+		"",
+	)
+	assert.NoError(t, err)
+}
+
 func TestInfoSyncer_SyncFromParameters_RFProjection(t *testing.T) {
 	tests := []struct {
 		name         string

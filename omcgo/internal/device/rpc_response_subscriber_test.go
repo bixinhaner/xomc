@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
 type rpcRespTestMatcher struct {
@@ -32,6 +33,133 @@ type rpcRespTestTranslatorFactory struct{}
 
 func (rpcRespTestTranslatorFactory) Translator(context.Context, uuid.UUID, string) (*parammodel.Translator, error) {
 	return nil, nil
+}
+
+type rpcRespRecordingTranslatorFactory struct {
+	productID uuid.UUID
+	tr        *parammodel.Translator
+}
+
+func (f *rpcRespRecordingTranslatorFactory) Translator(
+	_ context.Context,
+	productID uuid.UUID,
+	_ string,
+) (*parammodel.Translator, error) {
+	f.productID = productID
+	return f.tr, nil
+}
+
+func TestRPCResponseSubscriberResolveTranslatorUsesProductID(t *testing.T) {
+	productID := uuid.New()
+	paramModelID := uuid.New()
+	tr := parammodel.NewTranslator(&parammodel.MappingSet{}, nil, zap.NewNop())
+	factory := &rpcRespRecordingTranslatorFactory{tr: tr}
+	s := &RPCResponseSubscriber{
+		productMatcher: rpcRespTestMatcher{result: &product.MatchResult{Product: &product.Product{
+			ID:           productID,
+			ParamModelID: &paramModelID,
+		}}},
+		translatorFactory: factory,
+		logger:            zap.NewNop(),
+	}
+
+	got := s.resolveTranslator(context.Background(), &model.Device{
+		SerialNumber:    "SN-220",
+		ProductClass:    "X-MLN",
+		FirmwareVersion: "1.0.0",
+	})
+
+	require.Same(t, tr, got)
+	require.Equal(t, productID, factory.productID)
+}
+
+type rpcRespDeviceLookupStub struct {
+	device *model.Device
+}
+
+func (s rpcRespDeviceLookupStub) GetBySerialNumber(context.Context, string) (*model.Device, error) {
+	return s.device, nil
+}
+
+type rpcRespTrackingParamRepo struct {
+	stubDeviceParamRepo
+	rows []model.DeviceParameter
+}
+
+func (r *rpcRespTrackingParamRepo) BatchUpsert(
+	_ context.Context,
+	_ uuid.UUID,
+	rows []model.DeviceParameter,
+) error {
+	r.rows = append(r.rows, rows...)
+	return nil
+}
+
+type rpcRespTrackingInfoRefresher struct {
+	calls int
+}
+
+func (r *rpcRespTrackingInfoRefresher) SyncFromParameters(
+	context.Context,
+	uuid.UUID,
+	model.CarrierCode,
+	model.Technology,
+	string,
+) ([]string, error) {
+	r.calls++
+	return nil, nil
+}
+
+func TestRPCResponseSubscriber_UECountResponsePersistsStandardPathsAndRefreshesInfo(t *testing.T) {
+	productID := uuid.New()
+	paramModelID := uuid.New()
+	deviceID := uuid.New()
+	tr := parammodel.NewTranslator(&parammodel.MappingSet{
+		Mappings: []parammodel.ParamMapping{
+			{
+				StandardPath: "Device.DeviceInfo.UE_Count",
+				PrivatePath:  "Device.DeviceInfo.X_COM_UE_Count",
+			},
+			{
+				StandardPath: "Device.DeviceInfo.2.UE_Count",
+				PrivatePath:  "Device.Services.FAPService.2.CellConfig.LTE.RAN.Status.LteUECount",
+			},
+		},
+	}, nil, zap.NewNop())
+	paramRepo := &rpcRespTrackingParamRepo{}
+	infoRefresher := &rpcRespTrackingInfoRefresher{}
+	s := &RPCResponseSubscriber{
+		productMatcher: rpcRespTestMatcher{result: &product.MatchResult{Product: &product.Product{
+			ID:           productID,
+			ParamModelID: &paramModelID,
+		}}},
+		translatorFactory: &rpcRespRecordingTranslatorFactory{tr: tr},
+		deviceLookup: rpcRespDeviceLookupStub{device: &model.Device{
+			ID:           deviceID,
+			SerialNumber: "SN-220",
+			ProductClass: "X-MLN",
+			Carrier:      model.CarrierCMCC,
+			Technology:   model.TechLTE,
+		}},
+		paramRepo:     paramRepo,
+		infoRefresher: infoRefresher,
+		logger:        zap.NewNop(),
+	}
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]interface{}{
+		"device_sn": "SN-220",
+		"method":    "GetParameterValuesResponse",
+		"parameter_values": []tr069.ParameterValueStruct{
+			{Name: "Device.DeviceInfo.X_COM_UE_Count", Value: "2"},
+			{Name: "Device.Services.FAPService.2.CellConfig.LTE.RAN.Status.LteUECount", Value: "3"},
+		},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.handleGPVResponse(context.Background(), evt))
+	require.Len(t, paramRepo.rows, 2)
+	require.Equal(t, "Device.DeviceInfo.UE_Count", paramRepo.rows[0].ParameterPath)
+	require.Equal(t, "Device.DeviceInfo.2.UE_Count", paramRepo.rows[1].ParameterPath)
+	require.Equal(t, 1, infoRefresher.calls)
 }
 
 func TestRPCResponseSubscriberResolveTranslator_OrphanFallbackIsWarnNotError(t *testing.T) {

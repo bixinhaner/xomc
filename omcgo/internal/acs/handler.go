@@ -118,6 +118,7 @@ type Handler struct {
 	// #746: 心跳周期自动调整策略。设备 BOOTSTRAP/BOOT 时入队 GPV 查询当前心跳周期，
 	// 与配置目标值比较后决定是否入队 SPV 调整。nil 时功能关闭（不影响 Inform 处理）。
 	informPeriodPolicy     *InformPeriodPolicy
+	ueCountPolicy          *UECountPolicy
 	gpvFaultRecoverer      GPVFaultRecoverer
 	durableReadbackEnabled bool
 }
@@ -590,6 +591,16 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 			// Durable request accepted by NATS; APP plans the GPV task.
 		} else if err := h.informPeriodPolicy.EnqueueGPVTask(r.Context(), deviceSN, productClass); err != nil {
 			log.Warn("enqueue inform period GPV task failed (non-blocking)",
+				zap.String("device_sn", deviceSN),
+				zap.Error(err))
+		}
+	}
+
+	// #220: 周期 Inform 会话中查询当前产品支持的 UE Count 参数。普通 GPV 回包
+	// 复用既有 device_parameters 入库与 device_info 投影链路。
+	if h.ueCountPolicy.ShouldTrigger(eventCodes) {
+		if err := h.ueCountPolicy.Enqueue(r.Context(), deviceSN); err != nil {
+			log.Warn("enqueue UE count GPV task failed (non-blocking)",
 				zap.String("device_sn", deviceSN),
 				zap.Error(err))
 		}

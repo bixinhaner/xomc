@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -161,6 +162,69 @@ func (s *PathTranslationService) resolveTranslator(ctx context.Context, deviceSN
 		return nil, false
 	}
 	return tr, true
+}
+
+// ResolveUECountPaths returns the concrete standard UE Count paths supported
+// by the device's current product mapping. The root path represents physical
+// cell 1; if an explicit ".1" alias also exists, the root path wins.
+func (s *PathTranslationService) ResolveUECountPaths(ctx context.Context, deviceSN string) ([]string, error) {
+	if !s.Enabled() {
+		return nil, fmt.Errorf("ACS path translator is disabled")
+	}
+	tr, ok := s.resolveTranslator(ctx, deviceSN)
+	if !ok {
+		return nil, fmt.Errorf("translator unavailable for device %s", deviceSN)
+	}
+	return supportedUECountPaths(tr.Mappings()), nil
+}
+
+func supportedUECountPaths(mappings []parammodel.ParamMapping) []string {
+	pathsByCell := make(map[int]string)
+	for _, mapping := range mappings {
+		if !mapping.IsActive ||
+			!mapping.IsSupported ||
+			!strings.EqualFold(mapping.EntryType, "parameter") {
+			continue
+		}
+		cellIndex, root, ok := ueCountCellIndex(mapping.StandardPath)
+		if !ok {
+			continue
+		}
+		if current, exists := pathsByCell[cellIndex]; !exists || root || current == "" {
+			pathsByCell[cellIndex] = mapping.StandardPath
+		}
+	}
+
+	indices := make([]int, 0, len(pathsByCell))
+	for index := range pathsByCell {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+	paths := make([]string, 0, len(indices))
+	for _, index := range indices {
+		paths = append(paths, pathsByCell[index])
+	}
+	return paths
+}
+
+func ueCountCellIndex(path string) (index int, root bool, ok bool) {
+	const (
+		rootPath = "Device.DeviceInfo.UE_Count"
+		prefix   = "Device.DeviceInfo."
+		suffix   = ".UE_Count"
+	)
+	if path == rootPath {
+		return 1, true, true
+	}
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return 0, false, false
+	}
+	rawIndex := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	index, err := strconv.Atoi(rawIndex)
+	if err != nil || index <= 0 {
+		return 0, false, false
+	}
+	return index, false, true
 }
 
 // TranslateResponseNames 把基站响应里的参数名（私有 path）回译为标准 path（issue #424）。
