@@ -145,6 +145,66 @@ func TestDecideBackpressureQueueSignal_HighWatermarksActivate(t *testing.T) {
 	assert.Equal(t, pressureReasonQueueOldest, oldest.Reason)
 }
 
+func TestBackpressureStateQueueRecoveryIgnoresUnlatchedDiskNeutralBand(t *testing.T) {
+	cfg := BackpressureConfig{
+		Enabled: true, DiskHighPct: 70, DiskLowPct: 60,
+		IOSomeHighPct: 70, IOSomeLowPct: 20,
+		QueuePendingHigh: 2000, QueuePendingLow: 500,
+		QueueOldestHigh: 10 * time.Minute, QueueOldestLow: 2 * time.Minute,
+	}
+	engaged, decision := decideBackpressureState(0, 68, 0, QueueSignal{
+		Configured:     true,
+		Available:      true,
+		RatesAvailable: true,
+		Stats:          event.QueueStats{Pending: 2000},
+	}, cfg)
+	require.True(t, engaged.has(pressureQueue))
+	require.False(t, engaged.has(pressureDisk),
+		"disk in the neutral band must not latch unless it crossed the high watermark")
+	require.True(t, decision.Active)
+	require.Equal(t, pressureReasonQueuePending, decision.Reason)
+
+	recovered, decision := decideBackpressureState(engaged, 68, 0, QueueSignal{
+		Configured:     true,
+		Available:      true,
+		RatesAvailable: true,
+		Stats:          event.QueueStats{Pending: 0},
+		Rates:          QueueRates{PendingPerSecond: 0},
+	}, cfg)
+	require.Zero(t, recovered)
+	require.False(t, decision.Active)
+	require.Equal(t, pressureReasonRecovered, decision.Reason)
+}
+
+func TestBackpressureStateKeepsOnlySignalsThatActuallyLatched(t *testing.T) {
+	cfg := BackpressureConfig{
+		Enabled: true, DiskHighPct: 70, DiskLowPct: 60,
+		IOSomeHighPct: 70, IOSomeLowPct: 20,
+		QueuePendingHigh: 2000, QueuePendingLow: 500,
+		QueueOldestHigh: 10 * time.Minute, QueueOldestLow: 2 * time.Minute,
+	}
+	queueLow := QueueSignal{
+		Configured:     true,
+		Available:      true,
+		RatesAvailable: true,
+		Stats:          event.QueueStats{Pending: 0},
+	}
+
+	engaged, _ := decideBackpressureState(0, 72, 0, queueLow, cfg)
+	require.True(t, engaged.has(pressureDisk))
+	require.False(t, engaged.has(pressureQueue))
+
+	stillEngaged, decision := decideBackpressureState(engaged, 68, 0, queueLow, cfg)
+	require.Equal(t, pressureDisk, stillEngaged)
+	require.True(t, decision.Active)
+	require.Equal(t, pressureReasonDisk, decision.Reason)
+
+	recovered, decision := decideBackpressureState(stillEngaged, 59, 0, queueLow, cfg)
+	require.Zero(t, recovered)
+	require.False(t, decision.Active)
+	require.Equal(t, pressureReasonRecovered, decision.Reason)
+}
+
 func TestDecideBackpressureQueueSignal_ReleaseRequiresEveryLowSignalAndNonPositiveSlope(t *testing.T) {
 	cfg := BackpressureConfig{
 		Enabled: true, DiskHighPct: 85, DiskLowPct: 75,

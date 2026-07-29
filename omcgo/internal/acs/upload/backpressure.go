@@ -127,6 +127,18 @@ type BackpressureDecision struct {
 	Reason string
 }
 
+type pressureState uint32
+
+const (
+	pressureDisk pressureState = 1 << iota
+	pressureIO
+	pressureQueue
+)
+
+func (s pressureState) has(flag pressureState) bool {
+	return s&flag != 0
+}
+
 // QueueStatsSource exposes only the independent sampler cache. Implementations
 // must not perform a new JetStream management query here.
 type QueueStatsSource interface {
@@ -304,6 +316,74 @@ func decideBackpressureWithQueue(
 	return BackpressureDecision{Reason: pressureReasonRecovered}
 }
 
+// decideBackpressureState independently applies hysteresis to disk, I/O and
+// queue pressure. A signal in its neutral band only keeps its own previously
+// latched bit; it cannot keep an unrelated pressure source active.
+func decideBackpressureState(
+	previous pressureState,
+	diskPct, ioSomePct float64,
+	queue QueueSignal,
+	cfg BackpressureConfig,
+) (pressureState, BackpressureDecision) {
+	if !cfg.Enabled {
+		return 0, BackpressureDecision{Reason: pressureReasonDisabled}
+	}
+
+	next := previous
+	if diskPct < 0 || (next.has(pressureDisk) && diskPct <= cfg.DiskLowPct) {
+		next &^= pressureDisk
+	} else if diskPct >= cfg.DiskHighPct {
+		next |= pressureDisk
+	}
+	if ioSomePct < 0 || (next.has(pressureIO) && ioSomePct <= cfg.IOSomeLowPct) {
+		next &^= pressureIO
+	} else if ioSomePct >= cfg.IOSomeHighPct {
+		next |= pressureIO
+	}
+
+	queueReason := ""
+	if !queue.Configured {
+		next &^= pressureQueue
+	} else if next.has(pressureQueue) {
+		switch {
+		case !queue.Available:
+			queueReason = pressureReasonQueueFailure
+		case queue.Stats.Pending > uint64(cfg.QueuePendingLow):
+			queueReason = pressureReasonQueuePending
+		case queue.Stats.OldestPendingAge > cfg.QueueOldestLow:
+			queueReason = pressureReasonQueueOldest
+		case !queue.RatesAvailable:
+			queueReason = pressureReasonQueueSlopeUnknown
+		case queue.Rates.PendingPerSecond > 0:
+			queueReason = pressureReasonQueueGrowing
+		default:
+			next &^= pressureQueue
+		}
+	} else if queue.Available {
+		switch {
+		case queue.Stats.Pending >= uint64(cfg.QueuePendingHigh):
+			next |= pressureQueue
+			queueReason = pressureReasonQueuePending
+		case queue.Stats.OldestPendingAge >= cfg.QueueOldestHigh:
+			next |= pressureQueue
+			queueReason = pressureReasonQueueOldest
+		}
+	}
+
+	if next == 0 {
+		return 0, BackpressureDecision{Reason: pressureReasonRecovered}
+	}
+	reason := queueReason
+	if next.has(pressureDisk) {
+		reason = pressureReasonDisk
+	} else if next.has(pressureIO) {
+		reason = pressureReasonIO
+	} else if reason == "" {
+		reason = pressureReasonQueuePending
+	}
+	return next, BackpressureDecision{Active: true, Reason: reason}
+}
+
 func deriveQueueRates(previous, current event.QueueStats, window time.Duration) (QueueRates, bool) {
 	elapsed := current.SampledAt.Sub(previous.SampledAt)
 	if previous.SampledAt.IsZero() || current.SampledAt.IsZero() ||
@@ -421,8 +501,8 @@ type Watchdog struct {
 	stateMu       sync.Mutex
 
 	cfg                atomic.Pointer[BackpressureConfig]
-	active             atomic.Bool // true = 背压中（拒收 PM）
-	rememberedPressure atomic.Bool // policy state retained while Enabled=false
+	active             atomic.Bool   // true = 背压中（拒收 PM）
+	rememberedPressure atomic.Uint32 // pressureState retained while Enabled=false
 	inflight           atomic.Int64
 }
 
@@ -617,10 +697,22 @@ func (w *Watchdog) sample(ctx context.Context) {
 	decision := BackpressureDecision{Reason: pressureReasonDisabled}
 	next := false
 	if cfg.Enabled {
-		policyCurrent := prevActive || w.rememberedPressure.Load()
-		decision = decideBackpressureWithQueue(policyCurrent, diskPct, ioSomePct, queueSignal, cfg)
-		next = decision.Active
-		w.rememberedPressure.Store(next)
+		previous := pressureState(w.rememberedPressure.Load())
+		// Compatibility for tests and any caller that restored only the public
+		// active bit before the independent latch state existed.
+		if previous == 0 && prevActive {
+			if queueSignal.Configured {
+				previous = pressureQueue
+			} else {
+				previous = pressureDisk | pressureIO
+			}
+		}
+		state, stateDecision := decideBackpressureState(
+			previous, diskPct, ioSomePct, queueSignal, cfg,
+		)
+		decision = stateDecision
+		next = state != 0
+		w.rememberedPressure.Store(uint32(state))
 	}
 	if next != prevActive {
 		w.active.Store(next)
