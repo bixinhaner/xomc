@@ -330,15 +330,19 @@ func decideBackpressureState(
 	}
 
 	next := previous
-	if diskPct < 0 || (next.has(pressureDisk) && diskPct <= cfg.DiskLowPct) {
-		next &^= pressureDisk
-	} else if diskPct >= cfg.DiskHighPct {
-		next |= pressureDisk
+	if diskPct >= 0 {
+		if next.has(pressureDisk) && diskPct <= cfg.DiskLowPct {
+			next &^= pressureDisk
+		} else if diskPct >= cfg.DiskHighPct {
+			next |= pressureDisk
+		}
 	}
-	if ioSomePct < 0 || (next.has(pressureIO) && ioSomePct <= cfg.IOSomeLowPct) {
-		next &^= pressureIO
-	} else if ioSomePct >= cfg.IOSomeHighPct {
-		next |= pressureIO
+	if ioSomePct >= 0 {
+		if next.has(pressureIO) && ioSomePct <= cfg.IOSomeLowPct {
+			next &^= pressureIO
+		} else if ioSomePct >= cfg.IOSomeHighPct {
+			next |= pressureIO
+		}
 	}
 
 	queueReason := ""

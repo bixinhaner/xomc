@@ -205,6 +205,23 @@ func TestBackpressureStateKeepsOnlySignalsThatActuallyLatched(t *testing.T) {
 	require.Equal(t, pressureReasonRecovered, decision.Reason)
 }
 
+func TestBackpressureStateUnavailableDiskAndIORetainOnlyConfirmedLatches(t *testing.T) {
+	cfg := BackpressureConfig{
+		Enabled: true, DiskHighPct: 70, DiskLowPct: 60,
+		IOSomeHighPct: 70, IOSomeLowPct: 20,
+	}
+
+	unlatched, decision := decideBackpressureState(0, -1, -1, QueueSignal{}, cfg)
+	require.Zero(t, unlatched, "unavailable probes must remain fail-open before pressure is confirmed")
+	require.False(t, decision.Active)
+
+	previous := pressureDisk | pressureIO
+	retained, decision := decideBackpressureState(previous, -1, -1, QueueSignal{}, cfg)
+	require.Equal(t, previous, retained,
+		"unavailable probes must not release previously confirmed disk or I/O pressure")
+	require.True(t, decision.Active)
+}
+
 func TestDecideBackpressureQueueSignal_ReleaseRequiresEveryLowSignalAndNonPositiveSlope(t *testing.T) {
 	cfg := BackpressureConfig{
 		Enabled: true, DiskHighPct: 85, DiskLowPct: 75,
