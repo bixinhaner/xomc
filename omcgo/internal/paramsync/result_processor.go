@@ -95,10 +95,20 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		errorMessage = run.ErrorMessage
 	}
 	if !failed {
+		var recoveredStateValues []projectedValue
 		if taskMetadata.Recovered {
 			if standardPath, learnable := learnableRecovered9005StandardPath(taskMetadata, run.Coverage); learnable {
 				if err := recordRecoveredReadUnsupportedPath(ctx, tx, run, standardPath, result.DeviceSN, p.now()); err != nil {
 					return ResultProcessOutcome{}, err
+				}
+			}
+			if value, ok := projectRecoveredMLNDCRFUnknown(taskMetadata, run.Coverage); ok {
+				isMLNDC, err := isMLNDCDevice(ctx, tx, run.DeviceID)
+				if err != nil {
+					return ResultProcessOutcome{}, err
+				}
+				if isMLNDC {
+					recoveredStateValues = append(recoveredStateValues, value)
 				}
 			}
 			if err := markRecoveredCoverageIncomplete(ctx, tx, run, taskMetadata); err != nil {
@@ -106,6 +116,7 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 			}
 		}
 		values := projectTaskValues(rawValues, run.Coverage)
+		values = append(values, recoveredStateValues...)
 		if run.SyncScope.IsFull() {
 			if err := writeStagingValues(ctx, tx, run, result.TaskID, values, p.now()); err != nil {
 				return ResultProcessOutcome{}, err
@@ -598,6 +609,48 @@ func projectTaskValues(values []tr069.ParameterValueStruct, coverage []CoverageS
 		})
 	}
 	return projected
+}
+
+func projectRecoveredMLNDCRFUnknown(
+	stored storedTaskResult,
+	coverage []CoverageScope,
+) (projectedValue, bool) {
+	if !stored.Recovered || stored.FaultCode != 9005 || len(stored.RequestedNames) != 1 {
+		return projectedValue{}, false
+	}
+	privatePath := strings.TrimSpace(stored.RequestedNames[0])
+	if normalizeRuntimePath(privatePath) != mlnDCRFStatusPrivatePath {
+		return projectedValue{}, false
+	}
+	values := projectTaskValues([]tr069.ParameterValueStruct{{
+		Name:  privatePath,
+		Value: "unknown",
+		Type:  "string",
+	}}, coverage)
+	if len(values) != 1 ||
+		normalizeRuntimePath(values[0].ParameterPath) != mlnDCRFStatusStandardPath {
+		return projectedValue{}, false
+	}
+	return values[0], true
+}
+
+func isMLNDCDevice(ctx context.Context, tx pgx.Tx, deviceID uuid.UUID) (bool, error) {
+	query, args, err := storage.Psql.
+		Select("COALESCE(product_class, '')").
+		From("devices").
+		Where(sq.Eq{"id": deviceID}).
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build load MLN/DC product class: %w", err)
+	}
+	var productClass string
+	if err := tx.QueryRow(ctx, query, args...).Scan(&productClass); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("load MLN/DC product class: %w", err)
+	}
+	return strings.EqualFold(strings.TrimSpace(productClass), mlnDCProductClass), nil
 }
 
 func inferProjectedParameterType(soapType string) string {

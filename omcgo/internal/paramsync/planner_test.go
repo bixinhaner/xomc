@@ -155,6 +155,227 @@ func TestPlanner_ScopeIsStructuralAndDeterministic(t *testing.T) {
 	require.Len(t, privateObjectReadback.Coverage[0].Mappings, 1)
 }
 
+func TestPlanner_MLNDCFullSyncQueriesBothPhysicalCarrierRFStates(t *testing.T) {
+	set := &parammodel.MappingSet{Mappings: []parammodel.ParamMapping{{
+		StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+		PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState",
+		IsStorable:   true,
+		IsSupported:  true,
+	}}}
+	planner := NewPlanner(staticMappings{set: set}, 50)
+
+	plan, err := planner.Plan(context.Background(), PlanCommand{
+		Device: &model.Device{ProductClass: "FAP/MLN/DC"},
+		Scope:  SyncScopeFull,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.AdminCellState",
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.AdminCellState",
+	}, flattenPaths(plan.Batches))
+}
+
+func TestPlanner_MLNDCTemplateRFReadbackQueriesBothPhysicalCarriers(t *testing.T) {
+	set := &parammodel.MappingSet{Mappings: []parammodel.ParamMapping{{
+		StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+		PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState",
+		IsStorable:   true,
+		IsSupported:  true,
+	}}}
+	planner := NewPlanner(staticMappings{set: set}, 50)
+
+	plan, err := planner.Plan(context.Background(), PlanCommand{
+		Device:         &model.Device{ProductClass: "FAP/MLN/DC"},
+		Scope:          SyncScopeReadback,
+		RequestedPaths: []string{"Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.AdminCellState",
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.AdminCellState",
+	}, flattenPaths(plan.Batches))
+}
+
+func TestPlanner_MLNDCConcreteRFReadbackPreservesRequestedCarrierInstance(t *testing.T) {
+	set := &parammodel.MappingSet{Mappings: []parammodel.ParamMapping{{
+		StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+		PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState",
+		IsStorable:   true,
+		IsSupported:  true,
+	}}}
+	planner := NewPlanner(staticMappings{set: set}, 50)
+
+	for _, carrier := range []string{"1", "2"} {
+		t.Run("carrier_"+carrier, func(t *testing.T) {
+			plan, err := planner.Plan(context.Background(), PlanCommand{
+				Device:         &model.Device{ProductClass: "FAP/MLN/DC"},
+				Scope:          SyncScopeReadback,
+				RequestedPaths: []string{"Device.Services.FAPService." + carrier + ".FAPControl.LTE.RFTxStatus"},
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, []string{
+				"Device.Services.FAPService." + carrier + ".CellConfig.LTE.RAN.RF.AdminCellState",
+			}, flattenPaths(plan.Batches))
+		})
+	}
+}
+
+func TestPlanner_MLNDCConcreteCell2ObjectReadbackIncludesCell2RFState(t *testing.T) {
+	set := &parammodel.MappingSet{Mappings: []parammodel.ParamMapping{{
+		StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+		PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState",
+		IsStorable:   true,
+		IsSupported:  true,
+	}}}
+	planner := NewPlanner(staticMappings{set: set}, 50)
+
+	plan, err := planner.Plan(context.Background(), PlanCommand{
+		Device:         &model.Device{ProductClass: "FAP/MLN/DC"},
+		Scope:          SyncScopeReadback,
+		RequestedPaths: []string{"Device.Services.FAPService.2.FAPControl.LTE."},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.AdminCellState",
+	}, flattenPaths(plan.Batches))
+}
+
+func TestMLNDCRFStatusPathsGeneratesAnyConfiguredCarrierCount(t *testing.T) {
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.AdminCellState",
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.AdminCellState",
+		"Device.Services.FAPService.3.CellConfig.LTE.RAN.RF.AdminCellState",
+	}, mlnDCRFStatusPaths(SyncScopeFull, nil, 3))
+
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.3.CellConfig.LTE.RAN.RF.AdminCellState",
+	}, mlnDCRFStatusPaths(SyncScopeReadback, []string{
+		"Device.Services.FAPService.3.FAPControl.LTE.",
+	}, 3))
+}
+
+func TestPlanner_MLNDCRFPathsAreFaultIsolated(t *testing.T) {
+	set := &parammodel.MappingSet{Mappings: []parammodel.ParamMapping{
+		{
+			StandardPath: mlnDCRFStatusStandardPath,
+			PrivatePath:  mlnDCRFStatusPrivatePath,
+			IsStorable:   true,
+			IsSupported:  true,
+		},
+		{
+			StandardPath: "Device.Safe.Status",
+			PrivatePath:  "Device.Safe.Status",
+			IsStorable:   true,
+			IsSupported:  true,
+		},
+	}}
+	planner := NewPlanner(staticMappings{set: set}, 50)
+
+	plan, err := planner.Plan(context.Background(), PlanCommand{
+		Device: &model.Device{ProductClass: "FAP/MLN/DC"},
+		Scope:  SyncScopeFull,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, plan.Batches, 3)
+	assert.Equal(t, []string{"Device.Safe.Status"}, plan.Batches[0].Paths)
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.AdminCellState",
+	}, plan.Batches[1].Paths)
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.AdminCellState",
+	}, plan.Batches[2].Paths)
+}
+
+func TestPlanner_MLNNonDCProductsKeepSingletonFAPServiceRFPlanning(t *testing.T) {
+	set := &parammodel.MappingSet{Mappings: []parammodel.ParamMapping{{
+		StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+		PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState",
+		IsStorable:   true,
+		IsSupported:  true,
+	}}}
+	planner := NewPlanner(staticMappings{set: set}, 50)
+
+	plan, err := planner.Plan(context.Background(), PlanCommand{
+		Device: &model.Device{ProductClass: "FAP/MLN/SC"},
+		Scope:  SyncScopeFull,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.AdminCellState",
+	}, flattenPaths(plan.Batches))
+}
+
+func TestPlanner_MLNDCDoesNotExpandDifferentProductRFMapping(t *testing.T) {
+	set := &parammodel.MappingSet{Mappings: []parammodel.ParamMapping{{
+		StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+		PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable",
+		IsStorable:   true,
+		IsSupported:  true,
+	}}}
+	planner := NewPlanner(staticMappings{set: set}, 50)
+
+	plan, err := planner.Plan(context.Background(), PlanCommand{
+		Device: &model.Device{ProductClass: "FAP/MLN/DC"},
+		Scope:  SyncScopeFull,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable",
+	}, flattenPaths(plan.Batches))
+}
+
+func TestProjectTaskValuesMapsMLNAdminCellStateToStandardRFStatusPerCarrier(t *testing.T) {
+	set := &parammodel.MappingSet{Mappings: []parammodel.ParamMapping{{
+		StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+		PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState",
+		Access:       "readWrite",
+		DataType:     "boolean",
+		IsStorable:   true,
+		IsSupported:  true,
+	}}}
+	plan, err := NewPlanner(staticMappings{set: set}, 50).Plan(context.Background(), PlanCommand{
+		Device: &model.Device{ProductClass: "FAP/MLN/DC"},
+		Scope:  SyncScopeFull,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.AdminCellState",
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.AdminCellState",
+	}, flattenPaths(plan.Batches))
+
+	got := projectTaskValues([]tr069.ParameterValueStruct{
+		{Name: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.AdminCellState", Value: "1", Type: "xsd:unsignedInt"},
+		{Name: "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.AdminCellState", Value: "0", Type: "xsd:unsignedInt"},
+	}, plan.Coverage)
+
+	require.Len(t, got, 2)
+	assert.Equal(t, projectedValue{
+		ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus",
+		PrivatePath:   "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.AdminCellState",
+		Value:         "1",
+		ParameterType: "unsignedInt",
+		Writable:      true,
+		FAPInstance:   1,
+		ParamGroup:    "fap_control",
+	}, got[0])
+	assert.Equal(t, projectedValue{
+		ParameterPath: "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus",
+		PrivatePath:   "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.AdminCellState",
+		Value:         "0",
+		ParameterType: "unsignedInt",
+		Writable:      true,
+		FAPInstance:   2,
+		ParamGroup:    "fap_control",
+	}, got[1])
+}
+
 func TestProjectTaskValuesUsesFrozenMappingSemantics(t *testing.T) {
 	coverage := []CoverageScope{{
 		Path: "Device.Radio.", Complete: true, Subtree: true,

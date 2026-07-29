@@ -45,6 +45,60 @@ func TestRecoveredPrivateLeafMarksOnlyItsFrozenStandardCoverageIncomplete(t *tes
 	require.Equal(t, []int{0}, indexes)
 }
 
+func TestRecoveredMLNDCCarrier9005MarksRFMappingIncomplete(t *testing.T) {
+	coverage := []CoverageScope{
+		{Path: mlnDCRFStatusStandardPath, Complete: true, Mappings: []FrozenMapping{{
+			StandardPath: mlnDCRFStatusStandardPath,
+			PrivatePath:  mlnDCRFStatusPrivatePath,
+			IsStorable:   true,
+		}}},
+		{Path: "Device.Info.Serial", Complete: true, Mappings: []FrozenMapping{{
+			StandardPath: "Device.Info.Serial",
+			PrivatePath:  "Device.Info.Serial",
+			IsStorable:   true,
+		}}},
+	}
+	const missingCarrierPath = "Device.Services.FAPService.3.CellConfig.LTE.RAN.RF.AdminCellState"
+
+	indexes := recoveredIncompleteCoverageIndexes(coverage, storedTaskResult{
+		Recovered:      true,
+		FaultCode:      9005,
+		BadPath:        missingCarrierPath,
+		RequestedNames: []string{missingCarrierPath},
+	})
+
+	require.Equal(t, []int{0}, indexes)
+}
+
+func TestRecoveredMLNDCRFUnknownUsesIsolatedRequestWhenFaultPathDiffers(t *testing.T) {
+	const (
+		privatePath  = "Device.Services.FAPService.3.CellConfig.LTE.RAN.RF.AdminCellState"
+		standardPath = "Device.Services.FAPService.3.FAPControl.LTE.RFTxStatus"
+	)
+	coverage := []CoverageScope{{
+		Path: mlnDCRFStatusStandardPath,
+		Mappings: []FrozenMapping{{
+			StandardPath: mlnDCRFStatusStandardPath,
+			PrivatePath:  mlnDCRFStatusPrivatePath,
+			Access:       "readWrite",
+			IsStorable:   true,
+		}},
+	}}
+
+	value, ok := projectRecoveredMLNDCRFUnknown(storedTaskResult{
+		Recovered:      true,
+		FaultCode:      9005,
+		BadPath:        "Device.Vendor.UnparseableFaultPath",
+		BadPaths:       []string{privatePath},
+		RequestedNames: []string{privatePath},
+	}, coverage)
+
+	require.True(t, ok)
+	assert.Equal(t, standardPath, value.ParameterPath)
+	assert.Equal(t, privatePath, value.PrivatePath)
+	assert.Equal(t, "unknown", value.Value)
+}
+
 func TestRecoveredPrivateObjectPrefixMarksItsFrozenSubtreeIncomplete(t *testing.T) {
 	coverage := []CoverageScope{{
 		Path: "Device.Radio.", Complete: true, Subtree: true,
