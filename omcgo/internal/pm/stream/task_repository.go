@@ -370,27 +370,43 @@ func insertCounterRules(ctx context.Context, tx pgx.Tx, versionID uuid.UUID, rul
 	return nil
 }
 
-func insertTaskMembers(ctx context.Context, tx pgx.Tx, versionID uuid.UUID, members []TaskMember) error {
+const (
+	taskMemberInsertBatchSize = 1000
+	taskMemberColumnCount     = 6
+)
+
+func taskMemberBatches(members []TaskMember) [][]TaskMember {
 	if len(members) == 0 {
 		return nil
 	}
-	builder := storage.Psql.Insert("pm_aggregation_version_members").
-		Columns(
-			"task_version_id", "device_id", "device_sn",
-			"dimension_key", "dimension_name", "object_ldn",
-		)
-	for _, member := range members {
-		builder = builder.Values(
-			versionID, member.DeviceID, member.DeviceSN,
-			member.DimensionKey, member.DimensionName, member.ObjectLDN,
-		)
+	batches := make([][]TaskMember, 0, (len(members)+taskMemberInsertBatchSize-1)/taskMemberInsertBatchSize)
+	for start := 0; start < len(members); start += taskMemberInsertBatchSize {
+		end := min(start+taskMemberInsertBatchSize, len(members))
+		batches = append(batches, members[start:end])
 	}
-	query, args, err := builder.ToSql()
-	if err != nil {
-		return fmt.Errorf("build insert PM aggregation members SQL: %w", err)
-	}
-	if _, err := tx.Exec(ctx, query, args...); err != nil {
-		return fmt.Errorf("insert PM aggregation members: %w", err)
+	return batches
+}
+
+func insertTaskMembers(ctx context.Context, tx pgx.Tx, versionID uuid.UUID, members []TaskMember) error {
+	for batchIndex, batch := range taskMemberBatches(members) {
+		builder := storage.Psql.Insert("pm_aggregation_version_members").
+			Columns(
+				"task_version_id", "device_id", "device_sn",
+				"dimension_key", "dimension_name", "object_ldn",
+			)
+		for _, member := range batch {
+			builder = builder.Values(
+				versionID, member.DeviceID, member.DeviceSN,
+				member.DimensionKey, member.DimensionName, member.ObjectLDN,
+			)
+		}
+		query, args, err := builder.ToSql()
+		if err != nil {
+			return fmt.Errorf("build insert PM aggregation members SQL batch %d: %w", batchIndex+1, err)
+		}
+		if _, err := tx.Exec(ctx, query, args...); err != nil {
+			return fmt.Errorf("insert PM aggregation members batch %d: %w", batchIndex+1, err)
+		}
 	}
 	return nil
 }
