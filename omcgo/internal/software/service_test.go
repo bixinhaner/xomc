@@ -553,7 +553,7 @@ func TestService_BatchUpgrade_FirmwareNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "get firmware")
 }
 
-func TestService_HandleTransferComplete_Success(t *testing.T) {
+func TestService_HandleTransferComplete_InformOnlyDoesNotAdvanceActiveUpgrade(t *testing.T) {
 	deviceID := uuid.New()
 	taskID := uuid.New()
 
@@ -569,8 +569,10 @@ func TestService_HandleTransferComplete_Success(t *testing.T) {
 	}
 
 	var updatedStatus UpgradeState
+	getActiveCalled := false
 	subTaskRepo := &svcMockSubTaskRepo{
 		getActiveByDeviceFn: func(_ context.Context, _ uuid.UUID) (*UpgradeSubTask, error) {
+			getActiveCalled = true
 			return &UpgradeSubTask{
 				ID:     uuid.New(),
 				TaskID: taskID,
@@ -600,11 +602,107 @@ func TestService_HandleTransferComplete_Success(t *testing.T) {
 
 	err := svc.HandleTransferComplete(context.Background(), evt)
 	require.NoError(t, err)
-	// 4G (LTE) device: downloading → completed directly
+	assert.False(t, getActiveCalled, "Inform-level 7 TRANSFER COMPLETE has no CommandKey/FaultStruct and must not be correlated by active device")
+	assert.Empty(t, updatedStatus, "only TC body with matching CommandKey may advance the upgrade")
+}
+
+func TestService_HandleTransferComplete_EmptyCommandKeyFaultDoesNotFailActiveUpgrade(t *testing.T) {
+	var updatedStatus UpgradeState
+	getByCommandKeyCalled := false
+	subTaskRepo := &svcMockSubTaskRepo{
+		getByCommandKeyFn: func(_ context.Context, _ string) (*UpgradeSubTask, error) {
+			getByCommandKeyCalled = true
+			return nil, assert.AnError
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, status UpgradeState, _ string) error {
+			updatedStatus = status
+			return nil
+		},
+	}
+
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{},
+		&svcMockTaskRepo{},
+		subTaskRepo,
+		&svcMockDeviceRepo{},
+		&svcMockCmdQueue{}, nil, nil, "test-bucket",
+		&svcMockEventBus{}, nil, zap.NewNop(),
+	)
+
+	evt, err := event.NewEvent(event.SubjectDeviceTransferComplete, map[string]any{
+		"command_key": "",
+		"fault_struct": map[string]any{
+			"fault_code":   9013,
+			"fault_string": "Url invalid, only support FTP and HTTP protocol.",
+		},
+	})
+	require.NoError(t, err)
+
+	err = svc.HandleTransferComplete(context.Background(), evt)
+	require.NoError(t, err)
+	assert.False(t, getByCommandKeyCalled, "empty CommandKey TransferComplete must not be matched to an active upgrade")
+	assert.Empty(t, updatedStatus)
+}
+
+func TestService_HandleTransferComplete_MatchingCommandKeySuccess(t *testing.T) {
+	deviceID := uuid.New()
+	taskID := uuid.New()
+	subTaskID := uuid.New()
+	commandKey := "Download Upgrade," + subTaskID.String()
+
+	mr := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer redisClient.Close()
+
+	deviceRepo := &svcMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			assert.Equal(t, "SN-TC-001", sn)
+			return &model.Device{ID: deviceID, SerialNumber: sn, Technology: model.TechLTE}, nil
+		},
+	}
+
+	var updatedStatus UpgradeState
+	subTaskRepo := &svcMockSubTaskRepo{
+		getByCommandKeyFn: func(_ context.Context, got string) (*UpgradeSubTask, error) {
+			assert.Equal(t, commandKey, got)
+			return &UpgradeSubTask{
+				ID:         subTaskID,
+				TaskID:     taskID,
+				Status:     UpgradeDownloading,
+				DeviceSN:   "SN-TC-001",
+				CommandKey: commandKey,
+			}, nil
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, status UpgradeState, _ string) error {
+			updatedStatus = status
+			return nil
+		},
+	}
+
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{},
+		&svcMockTaskRepo{},
+		subTaskRepo,
+		deviceRepo,
+		&svcMockCmdQueue{}, nil, nil, "test-bucket",
+		&svcMockEventBus{}, redisClient, zap.NewNop(),
+	)
+
+	evt, err := event.NewEvent(event.SubjectDeviceTransferComplete, map[string]any{
+		"command_key": commandKey,
+		"fault_struct": map[string]any{
+			"fault_code":   0,
+			"fault_string": "",
+		},
+	})
+	require.NoError(t, err)
+
+	err = svc.HandleTransferComplete(context.Background(), evt)
+	require.NoError(t, err)
 	assert.Equal(t, UpgradeCompleted, updatedStatus)
 }
 
-func TestService_HandleTransferComplete_NoActiveUpgrade(t *testing.T) {
+func TestService_HandleTransferComplete_LegacyDeviceSNPayloadIgnored(t *testing.T) {
 	deviceRepo := &svcMockDeviceRepo{
 		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
 			return &model.Device{ID: uuid.New(), SerialNumber: "SN-001"}, nil
@@ -614,7 +712,7 @@ func TestService_HandleTransferComplete_NoActiveUpgrade(t *testing.T) {
 	svc := NewSoftwareService(
 		&svcMockFirmwareRepo{},
 		&svcMockTaskRepo{},
-		&svcMockSubTaskRepo{}, // GetActiveByDeviceID returns ErrNotFound
+		&svcMockSubTaskRepo{},
 		deviceRepo,
 		&svcMockCmdQueue{}, nil, nil, "test-bucket",
 		&svcMockEventBus{}, nil, zap.NewNop(),

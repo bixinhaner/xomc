@@ -1144,8 +1144,11 @@ func (s *SoftwareService) launchControlledExecution(taskID uuid.UUID, n int) (co
 //  2. TC SOAP body level (from handleTransferComplete): payload is tr069.TransferComplete with
 //     command_key, fault_struct (FaultCode/FaultString), start_time, complete_time — but no device_sn
 //
-// Both are needed: #2 carries fault information, #1 carries device identity.
-// We try to decode both formats and route accordingly.
+// Only #2 is authoritative for software/UFTE state advancement: the TR-069
+// CommandKey is the correlation key that proves this TransferComplete belongs to
+// the Download/Upload RPC we issued. Inform-level "7 TRANSFER COMPLETE" can
+// appear with an empty CommandKey for stale/unrelated transfers; correlating it
+// by "current active task on this device" can advance the wrong upgrade.
 func (s *SoftwareService) HandleTransferComplete(ctx context.Context, evt event.Event) error {
 	s.logger.Info("handling TransferComplete event", zap.String("subject", evt.Subject))
 
@@ -1161,20 +1164,8 @@ func (s *SoftwareService) HandleTransferComplete(ctx context.Context, evt event.
 	}
 	hasTCBody := evt.DecodePayload(&tcPayload) == nil && tcPayload.CommandKey != ""
 
-	// Try decoding as Inform-level event (has device_sn)
-	var informPayload struct {
-		DeviceID struct {
-			SerialNumber string `json:"SerialNumber"`
-		} `json:"device_id"`
-	}
-	hasInformBody := evt.DecodePayload(&informPayload) == nil && informPayload.DeviceID.SerialNumber != ""
-
-	// Route to the appropriate handler
 	if hasTCBody {
 		return s.handleTCBody(ctx, tcPayload.CommandKey, tcPayload.FaultStruct)
-	}
-	if hasInformBody {
-		return s.handleTCInform(ctx, informPayload.DeviceID.SerialNumber)
 	}
 	return nil
 }
@@ -1232,30 +1223,6 @@ func (s *SoftwareService) handleTCBody(ctx context.Context, commandKey string, f
 
 	dev, err := s.deviceRepo.GetBySerialNumber(ctx, subTask.DeviceSN)
 	if err != nil || dev == nil {
-		return nil
-	}
-
-	return s.advanceAfterTC(ctx, subTask, dev)
-}
-
-// handleTCInform processes Inform-level TC events (from ACS publishInformEvents).
-// These carry device_sn but no fault information.
-func (s *SoftwareService) handleTCInform(ctx context.Context, deviceSN string) error {
-	dev, err := s.deviceRepo.GetBySerialNumber(ctx, deviceSN)
-	if err != nil {
-		return fmt.Errorf("get device by SN: %w", err)
-	}
-	if dev == nil {
-		return fmt.Errorf("device not found: %s", deviceSN)
-	}
-
-	subTask, err := s.subTaskRepo.GetActiveByDeviceID(ctx, dev.ID)
-	if err != nil {
-		return nil
-	}
-
-	// 同 handleTCBody：在途阶段（下载 / 上传）才接受 TC 事件推进。
-	if subTask.Status != UpgradeDownloading && subTask.Status != UpgradeUploading {
 		return nil
 	}
 
