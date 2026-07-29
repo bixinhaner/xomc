@@ -64,6 +64,30 @@ func TestPMBuiltinTaskRecoveryMigrationContract(t *testing.T) {
 	}
 }
 
+func TestPMBuiltinTaskMetricPathsMatchEnabledDefaults(t *testing.T) {
+	seedSQL := readMigration(t, filepath.Join("..", "..", "migrations", "seed", "000001_init_seed.sql"))
+	enabledDefaults := map[string]map[string]struct{}{
+		"lte": parseDefaultEnabledIndicators(t, seedSQL, "enabled_pm_indicators_enb"),
+		"nr":  parseDefaultEnabledIndicators(t, seedSQL, "enabled_pm_indicators_gnb"),
+		"gsm": parseDefaultEnabledIndicators(t, seedSQL, "enabled_pm_indicators_gsm"),
+	}
+
+	enbDefault := enabledDefaults["lte"]
+	require.Contains(t, enbDefault, "C000060216")
+	require.Equal(t, 1, countDefaultEnabledIndicator(t, seedSQL, "enabled_pm_indicators_enb", "C000060216"))
+
+	tasks := parseBuiltinPMTasks(t, seedSQL)
+	require.Len(t, tasks, 12)
+	for _, task := range tasks {
+		enabled, ok := enabledDefaults[task.technology]
+		require.Truef(t, ok, "builtin task %s uses unsupported technology %q", task.name, task.technology)
+		for _, metricPath := range task.metricPaths {
+			require.Containsf(t, enabled, metricPath, "builtin task %s (%s) references metric %s outside %s default enabled list",
+				task.name, task.technology, metricPath, task.technology)
+		}
+	}
+}
+
 func TestStreamingWorkerDoesNotReferenceRawPMTables(t *testing.T) {
 	streamDir := filepath.Join("..", "..", "internal", "pm", "stream")
 	entries, err := os.ReadDir(streamDir)
@@ -87,4 +111,134 @@ func readMigration(t *testing.T, path string) string {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return string(data)
+}
+
+type builtinPMTask struct {
+	name        string
+	technology  string
+	metricPaths []string
+}
+
+func parseDefaultEnabledIndicators(t *testing.T, seedSQL, table string) map[string]struct{} {
+	t.Helper()
+	ids := parseDefaultEnabledIndicatorIDs(t, seedSQL, table)
+	out := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+func countDefaultEnabledIndicator(t *testing.T, seedSQL, table, indicatorID string) int {
+	t.Helper()
+	count := 0
+	for _, id := range parseDefaultEnabledIndicatorIDs(t, seedSQL, table) {
+		if id == indicatorID {
+			count++
+		}
+	}
+	return count
+}
+
+func parseDefaultEnabledIndicatorIDs(t *testing.T, seedSQL, table string) []string {
+	t.Helper()
+	insertMarker := "INSERT INTO public." + table + " (operator_code, indicator_id)"
+	insertStart := strings.Index(seedSQL, insertMarker)
+	require.NotEqualf(t, -1, insertStart, "missing %s default seed insert", table)
+
+	block := seedSQL[insertStart:]
+	require.Containsf(t, block, "SELECT 'default', indicator_id", "%s seed must populate the default operator", table)
+
+	idsStartMarker := "FROM regexp_split_to_table($ids$\n"
+	idsStart := strings.Index(block, idsStartMarker)
+	require.NotEqualf(t, -1, idsStart, "missing %s $ids$ start", table)
+	idsStart += len(idsStartMarker)
+
+	idsEnd := strings.Index(block[idsStart:], "\n$ids$")
+	require.NotEqualf(t, -1, idsEnd, "missing %s $ids$ end", table)
+	return strings.Fields(block[idsStart : idsStart+idsEnd])
+}
+
+func parseBuiltinPMTasks(t *testing.T, seedSQL string) []builtinPMTask {
+	t.Helper()
+	insertMarker := "INSERT INTO public.pm_tasks ("
+	insertStart := strings.Index(seedSQL, insertMarker)
+	require.NotEqual(t, -1, insertStart, "missing pm_tasks seed insert")
+
+	block := seedSQL[insertStart:]
+	valuesStart := strings.Index(block, ") VALUES\n")
+	require.NotEqual(t, -1, valuesStart, "missing pm_tasks VALUES")
+	valuesStart += len(") VALUES\n")
+	valuesEnd := strings.Index(block[valuesStart:], " ON CONFLICT DO NOTHING;")
+	require.NotEqual(t, -1, valuesEnd, "missing pm_tasks ON CONFLICT")
+
+	var tasks []builtinPMTask
+	for _, line := range strings.Split(block[valuesStart:valuesStart+valuesEnd], "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		row := strings.TrimSuffix(line, ",")
+		row = strings.TrimPrefix(row, "(")
+		row = strings.TrimSuffix(row, ")")
+		fields := splitSQLValues(t, row)
+		require.Len(t, fields, 25)
+		if unquoteSQLValue(fields[12]) != "adhoc_aggregation" || fields[22] != "true" {
+			continue
+		}
+		tasks = append(tasks, builtinPMTask{
+			name:        unquoteSQLValue(fields[1]),
+			technology:  unquoteSQLValue(fields[21]),
+			metricPaths: parsePGTextArray(unquoteSQLValue(fields[15])),
+		})
+	}
+	return tasks
+}
+
+func splitSQLValues(t *testing.T, row string) []string {
+	t.Helper()
+	var fields []string
+	var current strings.Builder
+	inQuote := false
+	for i := 0; i < len(row); i++ {
+		ch := row[i]
+		if ch == '\'' {
+			current.WriteByte(ch)
+			if inQuote && i+1 < len(row) && row[i+1] == '\'' {
+				i++
+				current.WriteByte(row[i])
+				continue
+			}
+			inQuote = !inQuote
+			continue
+		}
+		if ch == ',' && !inQuote {
+			fields = append(fields, strings.TrimSpace(current.String()))
+			current.Reset()
+			continue
+		}
+		current.WriteByte(ch)
+	}
+	require.False(t, inQuote, "unterminated SQL string in pm_tasks row")
+	fields = append(fields, strings.TrimSpace(current.String()))
+	return fields
+}
+
+func unquoteSQLValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
+		value = value[1 : len(value)-1]
+		value = strings.ReplaceAll(value, "''", "'")
+	}
+	return value
+}
+
+func parsePGTextArray(value string) []string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "{")
+	value = strings.TrimSuffix(value, "}")
+	if value == "" {
+		return nil
+	}
+	return strings.Split(value, ",")
 }
