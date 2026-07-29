@@ -834,7 +834,7 @@ func deviceWithInfoSelectColumns() []string {
 		"di.device_name", "di.address", "di.remark", "di.project_status", "di.height",
 		"di.eci", "di.pci", "di.cell_id", "di.freq_point", "di.bandwidth", "di.transmit_power", "di.plmn",
 		"di.rf_status", "di.cell_status", "di.op_state", "di.mme_status", "di.sync_status", "di.kpi_status",
-		"di.num_of_cells", "di.gps_status",
+		"di.num_of_cells", "di.gps_status", "COALESCE(di.ue_count, 0)",
 		// #361: 告警级别不再读 di.alarm_severity（该冗余列仅 Radisys 自报路径写、
 		// 与 OMC 告警引擎无关、从无人维护）。改实时 JOIN alarms_active 子查询 aa，
 		// 取每设备未 cleared 活动告警最严重级别(MIN(severity)，兼容 1/31001..4/31004)
@@ -1114,7 +1114,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&diDeviceName, &diAddress, &diRemark, &diProjectStatus, &diHeight,
 		&diECI, &diPCI, &diCellID, &diFreqPoint, &diBandwidth, &diTransmitPower, &diPLMN,
 		&diRFStatus, &diCellStatus, &diOpState, &diMMEStatus, &diSyncStatus, &diKPIStatus,
-		&diNumOfCells, &diGPSStatus, &diAlarmSeverity, &diLicenseStatus,
+		&diNumOfCells, &diGPSStatus, &d.UECount, &diAlarmSeverity, &diLicenseStatus,
 		&diMAC, &diHWVersion,
 		&diFirstOnline, &diLastOnline, &diLastOffline, &diRunTime,
 		&diCumOnline, // T-0173: cumulative_online_duration（与 select 列顺序一致)

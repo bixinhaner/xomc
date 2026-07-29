@@ -1,6 +1,7 @@
 package device
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -371,6 +372,19 @@ func TestDeviceWithInfoSelectColumns_AlarmAggregation(t *testing.T) {
 	assert.Contains(t, alarmsActiveAggJoin, "COUNT(*)")
 	assert.Contains(t, alarmsActiveAggJoin, "status <> 'cleared'")
 	assert.Contains(t, alarmsActiveAggJoin, "aa ON aa.device_id = d.id")
+}
+
+func TestDeviceWithInfoListContractIncludesUECount(t *testing.T) {
+	assert.Contains(t, deviceWithInfoSelectColumns(), "COALESCE(di.ue_count, 0)",
+		"设备列表查询必须读取 device_info.ue_count")
+
+	body, err := json.Marshal(DeviceWithInfo{UECount: 9})
+	require.NoError(t, err)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(body, &payload))
+	assert.EqualValues(t, 9, payload["ue_count"],
+		"设备列表响应必须向前端输出 ue_count")
 }
 
 func TestBuildRecycleBinListBuilders_SearchIncludesMACInListAndCount(t *testing.T) {
