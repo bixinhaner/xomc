@@ -7,15 +7,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDefaultConfigUsesTwelveMinuteHourlyCloseGrace(t *testing.T) {
+	cfg := DefaultConfig()
+
+	require.Equal(t, 12*time.Minute, cfg.CloseGrace)
+	require.Equal(t, 15*time.Minute, cfg.DailyCloseGrace)
+	require.Equal(t, 30*time.Minute, cfg.WeeklyCloseGrace)
+	require.Equal(t, 30*time.Minute, cfg.MonthlyCloseGrace)
+	require.Equal(t, 24*time.Hour, cfg.OutboxRetention)
+	require.Equal(t, 45*24*time.Hour, cfg.ReplayRetention)
+}
+
 func TestConfigFromEnv(t *testing.T) {
 	t.Setenv("PM_AGGREGATION_ENABLED", "false")
 	t.Setenv("PM_AGGREGATION_CLOSE_GRACE", "7m")
 	t.Setenv("PM_AGGREGATION_CONSUMER_CONCURRENCY", "12")
 	t.Setenv("PM_AGGREGATION_WINDOW_TTL", "50h")
+	t.Setenv("PM_AGGREGATION_OUTBOX_RETENTION", "30m")
+	t.Setenv("PM_AGGREGATION_REPLAY_RETENTION", "2880h")
 
 	cfg := ConfigFromEnv()
 	require.False(t, cfg.Enabled)
-	require.Equal(t, 7*time.Minute, cfg.CloseGrace)
+	require.Equal(t, 12*time.Minute, cfg.CloseGrace)
 	require.Equal(t, 12, cfg.ConsumerConcurrency)
 	require.Equal(t, 50*time.Hour, cfg.WindowTTL)
+	require.Equal(t, time.Hour, cfg.OutboxRetention)
+	require.Equal(t, 90*24*time.Hour, cfg.ReplayRetention)
 }

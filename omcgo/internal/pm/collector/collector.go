@@ -169,6 +169,7 @@ type PMCollector struct {
 	fileMarkerLookup    FileMarkerLookup
 	counterWhitelist    CounterWhitelist
 	enabledIndicators   EnabledIndicatorLookup
+	quarantineStore     QuarantineStore
 	numberProcessLookup NumberProcessLookup
 	copyIngestor        CopyIngestor
 	archiver            rawArchiver
@@ -231,6 +232,12 @@ func (c *PMCollector) SetCounterWhitelist(w CounterWhitelist) {
 // Nil-safe — unset keeps the pre-#171 behavior and is used by narrow unit tests.
 func (c *PMCollector) SetEnabledIndicatorLookup(lookup EnabledIndicatorLookup) {
 	c.enabledIndicators = lookup
+}
+
+// SetQuarantineStore wires durable metadata storage for PM files whose XML
+// technology conflicts with the resolved device identity.
+func (c *PMCollector) SetQuarantineStore(store QuarantineStore) {
+	c.quarantineStore = store
 }
 
 // SetNumberProcessLookup 注入 indicator.process.number 读取函数，供 15min 入库前结果值规范化使用。
@@ -425,6 +432,19 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	span.SetAttributes(attribute.Int("pm.parsed_counters", len(content.Counters)))
 	c.logger.Info("parsed PM file", zap.Int("counters", len(content.Counters)))
 
+	quarantined, err := c.checkTechnologyConsistency(ctx, &payload, content)
+	if err != nil {
+		return err
+	}
+	if quarantined {
+		if c.metrics != nil {
+			c.metrics.FilesProcessedTotal.WithLabelValues("quarantined").Inc()
+			c.metrics.ProcessingDurationSecs.Observe(time.Since(startTime).Seconds())
+		}
+		span.SetAttributes(attribute.String("pm.outcome", "technology_mismatch"))
+		return nil
+	}
+
 	// G4-Gap-1: 上报延迟 = ingest_time - end_time。仅在两值齐全且 end_time 非 zero 时记录；
 	// 时钟漂移可能产生负值，Prometheus histogram 不接受负 Observe，需 clamp 到 0。
 	if c.metrics != nil && !content.FileEndTime.IsZero() && !content.IngestTime.IsZero() {
@@ -443,7 +463,9 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	// 过滤逻辑 fail-open：lookup 失败 / 空白名单时跳过过滤，避免在本阶段误删全部 counter。
 	// #866 后续 normalizeResults 会校验每条待写结果的 Unit/StatisType，缺失元数据时失败并暴露。
 	var allow map[string]CounterMeta
-	content.Counters, allow = c.filterByWhitelistWithAllow(ctx, payload.DeviceSN, payload.Carrier, payload.Technology, content.Counters)
+	content.Counters, allow, content.whitelistMissValues = c.filterByWhitelistWithAllow(
+		ctx, payload.DeviceSN, content.Counters,
+	)
 
 	// PM 入库统一走 copy-direct 原子写路径（pm_files 标记 + counter + 内存算出的 KPI 单事务 plain
 	// COPY，见 ingestViaCopy / metrics.CopyIngest）。worker 启动期总是注入 copyIngestor；未注入仅见
@@ -455,6 +477,48 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		ctx, span, startTime, now, fileSize, deviceID, &payload, content, allow,
 		rawCompressed, contentHasher.Sum(nil),
 	)
+}
+
+func (c *PMCollector) checkTechnologyConsistency(
+	ctx context.Context,
+	payload *FileReceivedPayload,
+	content *PMFileContent,
+) (bool, error) {
+	evidence := ClassifyTechnologyWithIdentity(content.DeviceSN, content.Counters)
+	declared := strings.ToLower(strings.TrimSpace(payload.Technology))
+	if evidence.Technology == "" || declared == "" || evidence.Technology == declared {
+		return false, nil
+	}
+	if c.quarantineStore == nil {
+		return false, fmt.Errorf(
+			"save PM technology mismatch quarantine: quarantine store not wired",
+		)
+	}
+	record := QuarantineRecord{
+		SourceFileID:       quarantineSourceFileID(payload),
+		DeviceSN:           payload.DeviceSN,
+		DeclaredTechnology: declared,
+		DetectedTechnology: evidence.Technology,
+		Reason:             technologyMismatchReason,
+		MinIOPath:          payload.MinIOPath,
+		Evidence:           evidence.Signals,
+	}
+	inserted, err := c.quarantineStore.Save(ctx, record)
+	if err != nil {
+		return false, fmt.Errorf("save PM technology mismatch quarantine: %w", err)
+	}
+	if inserted && c.metrics != nil {
+		c.metrics.TechnologyMismatchFilesTotal.
+			WithLabelValues(declared, evidence.Technology).
+			Inc()
+	}
+	c.logger.Warn("quarantined PM file with mismatched XML technology",
+		zap.String("device_sn", payload.DeviceSN),
+		zap.String("declared_technology", declared),
+		zap.String("detected_technology", evidence.Technology),
+		zap.String("minio_path", payload.MinIOPath),
+		zap.Int("evidence_count", len(evidence.Signals)))
+	return true, nil
 }
 
 // ingestViaCopy 是 copy 模式的写收尾：用内存 counter 算出 KPI（只算不写），把 counter + KPI +
@@ -496,9 +560,7 @@ func (c *PMCollector) ingestViaCopy(
 		kpis = filterKPIsByEnabled(kpis, enabled)
 		enabledAllow = filterAllowByEnabled(allow, enabled)
 		if droppedCounters, droppedKPIs := beforeCounters-len(content.Counters), beforeKPIs-len(kpis); droppedCounters > 0 || droppedKPIs > 0 {
-			if c.metrics != nil && droppedCounters > 0 {
-				c.metrics.DroppedCountersTotal.WithLabelValues(payload.Carrier, payload.Technology, "disabled").Add(float64(droppedCounters))
-			}
+			content.knownDisabledValues = droppedCounters
 			c.logger.Info("filtered disabled PM indicators before 15min ingest",
 				zap.String("device_sn", payload.DeviceSN),
 				zap.String("carrier", payload.Carrier),
@@ -559,6 +621,18 @@ func (c *PMCollector) ingestViaCopy(
 		// issue #321：仅新入库时把原始 XML 压缩回写 MinIO 省盘（已 gzip 则零成本跳过）。
 		// 异步有界并发，不阻塞 ack；nil-safe。压成功后经 onTerminal 标记 pm_files.raw_compressed=true。
 		c.archiver.Schedule(c.bucket, payload.MinIOPath, c.markRawCompressed)
+	}
+	if ingested && c.metrics != nil {
+		if content.whitelistMissValues > 0 {
+			c.metrics.WhitelistMissValuesTotal.
+				WithLabelValues(payload.Carrier, payload.Technology).
+				Add(float64(content.whitelistMissValues))
+		}
+		if content.knownDisabledValues > 0 {
+			c.metrics.KnownDisabledValuesTotal.
+				WithLabelValues(payload.Carrier, payload.Technology).
+				Add(float64(content.knownDisabledValues))
+		}
 	}
 	if c.metrics != nil {
 		c.metrics.FilesProcessedTotal.WithLabelValues("success").Inc()
@@ -685,36 +759,40 @@ func applyPayloadIdentity(counters []model.PMCounter, oui, sn string) {
 // fail-open：whitelist 未注入 / 查询失败 / 空集合 → 返回原 counters 不过滤。
 // #866 接入结果值规范化后，最终写入前仍会要求每条结果具备 Unit/StatisType。
 //
-// 配置外 counter 会保留并由稀疏入库层登记；同时记录
-// omc_pm_discovered_counters_total（reason=whitelist_miss，标签带
-// carrier × technology），让厂家上报名漂移成为可告警的可观测信号。
+// 配置外 counter 缺少完整指标元数据，不能进入结果规范化和写入；本阶段剔除并记录
+// omc_pm_whitelist_miss_values_total，让厂家上报名漂移成为可告警信号。
+// 未命中项不会继续进入 enabled filter，因此不会被重复计为 known_disabled。
 func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) []model.PMCounter {
-	out, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, carrier, technology, counters)
+	out, _, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, counters)
 	return out
 }
 
 func (c *PMCollector) filterAndFillByWhitelist(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) []model.PMCounter {
-	filtered, allow := c.filterByWhitelistWithAllow(ctx, deviceSN, carrier, technology, counters)
+	filtered, allow, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, counters)
 	if len(allow) == 0 {
 		return filtered
 	}
 	return fillMissingSupportedCounters(filtered, allow)
 }
 
-func (c *PMCollector) filterByWhitelistWithAllow(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) ([]model.PMCounter, map[string]CounterMeta) {
+func (c *PMCollector) filterByWhitelistWithAllow(
+	ctx context.Context,
+	deviceSN string,
+	counters []model.PMCounter,
+) ([]model.PMCounter, map[string]CounterMeta, int) {
 	if c.counterWhitelist == nil || len(counters) == 0 {
-		return counters, nil
+		return counters, nil, 0
 	}
 	allow, err := c.counterWhitelist.LookupCounters(ctx, deviceSN)
 	if err != nil {
 		c.logger.Warn("counter whitelist lookup failed, skip filter",
 			zap.String("device_sn", deviceSN), zap.Error(err))
-		return counters, nil
+		return counters, nil, 0
 	}
 	if len(allow) == 0 {
 		c.logger.Warn("counter whitelist empty, skip filter (likely cache warming / product not matched)",
 			zap.String("device_sn", deviceSN))
-		return counters, nil
+		return counters, nil, 0
 	}
 
 	kept := counters[:0] // 原地 reslice 复用 slice
@@ -735,25 +813,17 @@ func (c *PMCollector) filterByWhitelistWithAllow(ctx context.Context, deviceSN, 
 			ctr.Unit = meta.Unit               // #866：填充单位元数据，入库前规范化 result value
 			kept = append(kept, ctr)
 		} else {
-			// 配置外指标仍是文件实际报告的数据：保留原始 report key 和值，
-			// 由稀疏入库层登记最小字典记录，后续指标同步再补齐元数据。
-			kept = append(kept, ctr)
 			unknown++
 		}
 	}
 	if unknown > 0 {
-		if c.metrics != nil {
-			c.metrics.DiscoveredCountersTotal.WithLabelValues(carrier, technology, "whitelist_miss").Add(float64(unknown))
-			// 一个发布周期的兼容别名由同一个 collector 从共享快照发出，
-			// 不能再单独 Add，否则会破坏严格别名语义。
-		}
-		c.logger.Info("preserved counters not in indicator library for dynamic registration",
+		c.logger.Info("filtered PM report keys not registered in routed indicator library",
 			zap.String("device_sn", deviceSN),
 			zap.Int("kept", len(kept)),
-			zap.Int("unknown_metrics", unknown),
+			zap.Int("whitelist_miss_values", unknown),
 			zap.Int("whitelist_size", len(allow)))
 	}
-	return kept, allow
+	return kept, allow, unknown
 }
 
 type missingCounterAnchor struct {

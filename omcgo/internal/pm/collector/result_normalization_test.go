@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
@@ -14,11 +16,51 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	pmroot "github.com/omcgo/omcgo/internal/pm"
 	pmkpi "github.com/omcgo/omcgo/internal/pm/kpi"
 	pmrouter "github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 )
+
+func TestIngestViaCopy_IncrementsDiscoveryMetricsOnlyForNewMarker(t *testing.T) {
+	ctx := context.Background()
+	registry := prometheus.NewRegistry()
+	copyIngestor := &recordingCopyIngestor{ingested: false}
+	c := &PMCollector{
+		copyIngestor: copyIngestor, eventBus: noopEventBus{},
+		logger: zap.NewNop(), metrics: pmroot.NewPMMetrics(registry),
+	}
+	content := &PMFileContent{
+		CollectTime: time.Now(), whitelistMissValues: 2, knownDisabledValues: 3,
+	}
+	payload := &FileReceivedPayload{
+		MinIOPath: "pm/A.xml", DeviceSN: "SN-1", Carrier: "cmcc", Technology: "lte",
+	}
+	run := func() {
+		require.NoError(t, c.ingestViaCopy(
+			ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 1, uuid.New(),
+			payload, content, nil, false, make([]byte, 32),
+		))
+	}
+
+	run()
+	require.Zero(t, testutil.ToFloat64(
+		c.metrics.WhitelistMissValuesTotal.WithLabelValues("cmcc", "lte"),
+	))
+	require.Zero(t, testutil.ToFloat64(
+		c.metrics.KnownDisabledValuesTotal.WithLabelValues("cmcc", "lte"),
+	))
+
+	copyIngestor.ingested = true
+	run()
+	require.Equal(t, float64(2), testutil.ToFloat64(
+		c.metrics.WhitelistMissValuesTotal.WithLabelValues("cmcc", "lte"),
+	))
+	require.Equal(t, float64(3), testutil.ToFloat64(
+		c.metrics.KnownDisabledValuesTotal.WithLabelValues("cmcc", "lte"),
+	))
+}
 
 func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 	ctx := context.Background()

@@ -16,7 +16,14 @@ local source_incomplete_delta = tonumber(ARGV[10])
 local chunk_index = tonumber(ARGV[11])
 local chunk_count = tonumber(ARGV[12])
 local shard_count = tonumber(ARGV[13])
+local lock_token = ARGV[14 + value_count * 7]
 local entity_id = string.match(slot_id, "^(.-)|") or slot_id
+local lock_key = KEYS[6 + shard_count * 2]
+
+local active_lock = redis.call("GET", lock_key)
+if active_lock and active_lock ~= lock_token then
+  return redis.error_reply("PM_AGGREGATION_WINDOW_LOCKED")
+end
 
 local function format_number(value)
   return string.format("%.17g", value)

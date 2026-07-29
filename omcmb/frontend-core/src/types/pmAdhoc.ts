@@ -141,6 +141,16 @@ export interface AdhocResultRow {
   taskVersionId?: string;
   complete?: boolean;
   missingSlots?: number;
+  revision?: number;
+  versionEffectiveFrom?: string;
+  versionEffectiveTo?: string;
+  receivedSlots?: number;
+  expectedSlots?: number;
+  versionExpectedSlots?: number;
+  naturalExpectedSlots?: number;
+  versionSliceComplete?: boolean;
+  periodComplete?: boolean;
+  partial?: boolean;
 }
 
 /**
@@ -227,6 +237,16 @@ export interface BackendAdhocResultRow {
   task_version_id?: string;
   complete?: boolean;
   missing_slots?: number;
+  revision?: number;
+  version_effective_from?: string;
+  version_effective_to?: string;
+  received_slots?: number;
+  expected_slots?: number;
+  version_expected_slots?: number;
+  natural_expected_slots?: number;
+  version_slice_complete?: boolean;
+  period_complete?: boolean;
+  partial?: boolean;
 }
 
 export interface BackendAdhocTaskRun {
@@ -314,5 +334,15 @@ export function mapBackendAdhocResult(b: BackendAdhocResultRow): AdhocResultRow 
     taskVersionId: b.task_version_id || undefined,
     complete: b.complete ?? false,
     missingSlots: b.missing_slots ?? 0,
+    revision: b.revision ?? 1,
+    versionEffectiveFrom: b.version_effective_from || undefined,
+    versionEffectiveTo: b.version_effective_to || undefined,
+    receivedSlots: b.received_slots ?? 0,
+    expectedSlots: b.expected_slots ?? 0,
+    versionExpectedSlots: b.version_expected_slots ?? b.expected_slots ?? 0,
+    naturalExpectedSlots: b.natural_expected_slots ?? b.expected_slots ?? 0,
+    versionSliceComplete: b.version_slice_complete ?? false,
+    periodComplete: b.period_complete ?? b.complete ?? false,
+    partial: b.partial ?? false,
   };
 }

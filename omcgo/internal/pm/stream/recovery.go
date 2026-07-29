@@ -34,6 +34,7 @@ type Recovery struct {
 	snapshot *SnapshotStore
 	matcher  *Matcher
 	rollups  *RollupOutboxRepository
+	outbox   *OutboxRepository
 	logger   *zap.Logger
 }
 
@@ -50,7 +51,8 @@ func NewRecovery(
 	}
 	return &Recovery{
 		js: js, windows: windows, store: store, snapshot: snapshot,
-		matcher: matcher, rollups: NewRollupOutboxRepository(windows.pool), logger: logger,
+		matcher: matcher, rollups: NewRollupOutboxRepository(windows.pool),
+		outbox: NewOutboxRepository(windows.pool), logger: logger,
 	}
 }
 

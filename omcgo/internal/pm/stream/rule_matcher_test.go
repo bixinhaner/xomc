@@ -61,6 +61,65 @@ func TestMatchDeviceHourRulesFansOneDeviceIntoEveryGroup(t *testing.T) {
 	}
 }
 
+func TestMatchDeviceHourRuleWindowSelectsOnlyTargetVersionAndDimension(t *testing.T) {
+	deviceID := uuid.New()
+	target := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		Technology: "lte", Dimension: DimensionDeviceGroup,
+		Granularities: []Granularity{GranularityHourly},
+		Counters: map[string]CounterRule{
+			"C1": {MetricPath: "C1", Aggregation: AggregationSum},
+		},
+		Members: map[uuid.UUID][]TaskMember{
+			deviceID: {
+				{DeviceID: deviceID, DimensionKey: "DeviceGroup=A", DimensionName: "A"},
+				{DeviceID: deviceID, DimensionKey: "DeviceGroup=B", DimensionName: "B"},
+			},
+		},
+	}
+	unrelated := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		Technology: "lte", Dimension: DimensionNetwork,
+		Granularities: []Granularity{GranularityHourly},
+		Members: map[uuid.UUID][]TaskMember{
+			deviceID: {{DeviceID: deviceID, DimensionKey: "network"}},
+		},
+	}
+	start := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	payload := RollupPayload{
+		SchemaVersion: SchemaVersion, EventID: uuid.New(),
+		TaskID: uuid.New(), TaskVersionID: uuid.New(),
+		SourceGranularity: GranularityHourly, EntityKey: deviceID.String(),
+		WindowStart: start, WindowEnd: start.Add(time.Hour),
+		SourceExpectedSlots: 4, SourceReceivedSlots: 4, Complete: true,
+		ChunkCount: 1,
+		Values: []ContributionValue{{
+			Technology: "lte", MetricPath: "C1", MetricType: "counter",
+			Operation: AggregationSum, Sum: 10, Count: 4, Composed: true,
+		}},
+	}
+	snapshot := BuildTaskSnapshot([]*TaskVersionSnapshot{target, unrelated})
+
+	contributions, err := matchDeviceHourRuleWindow(payload, snapshot, WindowKey{
+		TaskID: target.TaskID, TaskVersionID: target.VersionID,
+		EntityKey: "DeviceGroup=B", Granularity: GranularityHourly,
+		Start: start, End: start.Add(time.Hour),
+	})
+
+	require.NoError(t, err)
+	require.Len(t, contributions, 1)
+	require.Equal(t, target.VersionID, contributions[0].Key.TaskVersionID)
+	require.Equal(t, "DeviceGroup=B", contributions[0].Key.EntityKey)
+	require.Equal(t, "B", contributions[0].Values[0].DimensionName)
+
+	contributions, err = matchDeviceHourRuleWindow(payload, snapshot, WindowKey{
+		TaskVersionID: target.VersionID, EntityKey: "DeviceGroup=missing",
+		Granularity: GranularityHourly,
+	})
+	require.NoError(t, err)
+	require.Empty(t, contributions)
+}
+
 func TestMatchDeviceHourRulesPreservesEmptySourceChunk(t *testing.T) {
 	deviceID := uuid.New()
 	version := &TaskVersionSnapshot{
@@ -161,4 +220,27 @@ func TestIsDeviceHourPayloadAcceptsOnlyStableDeviceRollup(t *testing.T) {
 	payload.TaskVersionID = stableID
 	payload.SourceGranularity = GranularityDaily
 	require.False(t, isDeviceHourPayload(payload, snapshot))
+}
+
+func TestTaskSnapshotCachesDistinctDimensionMemberCounts(t *testing.T) {
+	first, second := uuid.New(), uuid.New()
+	version := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(),
+		Members: map[uuid.UUID][]TaskMember{
+			first: {
+				{DeviceID: first, DimensionKey: "network"},
+				{DeviceID: first, DimensionKey: "Band=3"},
+				{DeviceID: first, DimensionKey: "Band=3"},
+			},
+			second: {
+				{DeviceID: second, DimensionKey: "network"},
+			},
+		},
+	}
+
+	BuildTaskSnapshot([]*TaskVersionSnapshot{version})
+
+	require.EqualValues(t, 2, ruleDimensionMemberCount(version, "network"))
+	require.EqualValues(t, 1, ruleDimensionMemberCount(version, "Band=3"))
+	require.EqualValues(t, 0, ruleDimensionMemberCount(version, "missing"))
 }

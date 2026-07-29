@@ -316,6 +316,7 @@ func (s *IndicatorManagementService) CreateIndicator(ctx context.Context, req *C
 				PlatformName: f.PlatformName,
 				IndicatorID:  id,
 				Formula:      f.Formula,
+				ReportKey:    indicator.ReportKey,
 			})
 		}
 		if err := s.platformRepo.BatchCreate(ctx, dt, batch, tx); err != nil {
@@ -329,6 +330,7 @@ func (s *IndicatorManagementService) CreateIndicator(ctx context.Context, req *C
 			PlatformName: req.Platform,
 			IndicatorID:  id,
 			Formula:      req.Arithmetic,
+			ReportKey:    indicator.ReportKey,
 		}
 		if err := s.platformRepo.BatchCreate(ctx, dt, []*PlatformFormula{formula}, tx); err != nil {
 			return nil, fmt.Errorf("create platform formula placeholder: %w", err)
@@ -442,7 +444,8 @@ func (s *IndicatorManagementService) UpsertPlatformFormula(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.indicatorRepo.GetByID(ctx, dt, indicatorID); err != nil {
+	indicatorRecord, err := s.indicatorRepo.GetByID(ctx, dt, indicatorID)
+	if err != nil {
 		return nil, err
 	}
 	idMap, err := s.buildIDMap(ctx, dt)
@@ -453,6 +456,10 @@ func (s *IndicatorManagementService) UpsertPlatformFormula(ctx context.Context, 
 	result := validator.Validate(formula)
 	if !result.IsValid {
 		return nil, fmt.Errorf("%w: formula validation failed (platform=%s): %s", commonerrors.ErrInvalidInput, platform, result.ErrorMsg)
+	}
+	existing, err := s.platformRepo.ListByIndicatorID(ctx, dt, indicatorID)
+	if err != nil {
+		return nil, fmt.Errorf("list existing platform formulas: %w", err)
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -468,6 +475,15 @@ func (s *IndicatorManagementService) UpsertPlatformFormula(ctx context.Context, 
 		PlatformName: platform,
 		IndicatorID:  indicatorID,
 		Formula:      formula,
+	}
+	if indicatorRecord != nil {
+		out.ReportKey = indicatorRecord.ReportKey
+	}
+	for _, item := range existing {
+		if item.PlatformName == platform && item.ReportKey != nil {
+			out.ReportKey = item.ReportKey
+			break
+		}
 	}
 	if err := s.platformRepo.BatchCreate(ctx, dt, []*PlatformFormula{out}, tx); err != nil {
 		return nil, fmt.Errorf("create platform formula: %w", err)
@@ -513,14 +529,43 @@ func (s *IndicatorManagementService) DeletePlatformFormula(ctx context.Context, 
 
 // ── Enable/Disable ────────────────────────────────────────────────────────────
 
-var ErrIndicatorUsedByDashboardLayout = fmt.Errorf("%w: indicator is used by dashboard KPI layout", commonerrors.ErrInvalidInput)
+var (
+	ErrIndicatorUsedByDashboardLayout = fmt.Errorf("%w: indicator is used by dashboard KPI layout", commonerrors.ErrInvalidInput)
+	ErrEnabledKPIDependency           = fmt.Errorf("%w: indicator is required by an enabled KPI", commonerrors.ErrInvalidInput)
+)
 
 func (s *IndicatorManagementService) EnableIndicators(ctx context.Context, req *EnableIndicatorsRequest) error {
 	dt, err := ParseDeviceType(req.DeviceType)
 	if err != nil {
 		return fmt.Errorf("parse device type: %w", err)
 	}
-	return s.enabledRepo.BatchCreate(ctx, dt, req.OperatorCode, req.IndicatorIDs, nil)
+	arithmetic, counters, err := s.indicatorDependencyMetadata(ctx, dt)
+	if err != nil {
+		return fmt.Errorf("load indicator dependencies: %w", err)
+	}
+	closure, err := ResolveDependencyClosure(req.IndicatorIDs, arithmetic, counters)
+	if err != nil {
+		return fmt.Errorf("resolve indicator dependency closure: %w", err)
+	}
+	indicatorIDs := sortedUnique(append(append([]string(nil), closure.KPIs...), closure.Counters...))
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin enable indicators: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := lockEnabledIndicatorSet(ctx, tx, dt, req.OperatorCode); err != nil {
+		return err
+	}
+	if err := s.enabledRepo.BatchCreate(ctx, dt, req.OperatorCode, indicatorIDs, tx); err != nil {
+		return fmt.Errorf("enable indicator dependency closure: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit enable indicators: %w", err)
+	}
+	s.refreshRedisCache(ctx, dt)
+	s.invalidateRouteCache(ctx, RouteInvalidationTriggerIndicatorWrite)
+	return nil
 }
 
 func (s *IndicatorManagementService) DisableIndicators(ctx context.Context, req *EnableIndicatorsRequest) error {
@@ -531,7 +576,26 @@ func (s *IndicatorManagementService) DisableIndicators(ctx context.Context, req 
 	if err := s.ensureNotReferencedByDashboardLayout(ctx, dt, req.IndicatorIDs); err != nil {
 		return err
 	}
-	return s.enabledRepo.BatchDelete(ctx, dt, req.OperatorCode, req.IndicatorIDs, nil)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin disable indicators: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := lockEnabledIndicatorSet(ctx, tx, dt, req.OperatorCode); err != nil {
+		return err
+	}
+	if err := s.ensureNotRequiredByEnabledKPI(ctx, dt, req.OperatorCode, req.IndicatorIDs, tx); err != nil {
+		return err
+	}
+	if err := s.enabledRepo.BatchDelete(ctx, dt, req.OperatorCode, req.IndicatorIDs, tx); err != nil {
+		return fmt.Errorf("disable indicators: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit disable indicators: %w", err)
+	}
+	s.refreshRedisCache(ctx, dt)
+	s.invalidateRouteCache(ctx, RouteInvalidationTriggerIndicatorWrite)
+	return nil
 }
 
 func (s *IndicatorManagementService) GetEnabledIndicatorIDs(ctx context.Context, dt DeviceType, operatorCode string) ([]string, error) {
@@ -554,6 +618,89 @@ func (s *IndicatorManagementService) ensureNotReferencedByDashboardLayout(ctx co
 	}
 	if len(referenced) > 0 {
 		return fmt.Errorf("%w: %v", ErrIndicatorUsedByDashboardLayout, referenced)
+	}
+	return nil
+}
+
+func (s *IndicatorManagementService) indicatorDependencyMetadata(
+	ctx context.Context,
+	dt DeviceType,
+) (map[string]string, map[string]bool, error) {
+	items, err := s.indicatorRepo.ListAll(ctx, IndicatorListFilter{DeviceType: string(dt)})
+	if err != nil {
+		return nil, nil, err
+	}
+	arithmetic := make(map[string]string, len(items))
+	counters := make(map[string]bool, len(items))
+	for _, item := range items {
+		if item.Arithmetic != nil {
+			arithmetic[item.ID] = *item.Arithmetic
+		}
+		counters[item.ID] = item.IsCounter == "1"
+	}
+	return arithmetic, counters, nil
+}
+
+func (s *IndicatorManagementService) ensureNotRequiredByEnabledKPI(
+	ctx context.Context,
+	dt DeviceType,
+	operatorCode string,
+	indicatorIDs []string,
+	tx pgx.Tx,
+) error {
+	var enabledIDs []string
+	var err error
+	if repo, ok := s.enabledRepo.(interface {
+		ListTx(context.Context, DeviceType, string, pgx.Tx) ([]string, error)
+	}); ok {
+		enabledIDs, err = repo.ListTx(ctx, dt, operatorCode, tx)
+	} else {
+		enabledIDs, err = s.enabledRepo.List(ctx, dt, operatorCode)
+	}
+	if err != nil {
+		return fmt.Errorf("list enabled indicators: %w", err)
+	}
+	arithmetic, counters, err := s.indicatorDependencyMetadata(ctx, dt)
+	if err != nil {
+		return fmt.Errorf("load indicator dependencies: %w", err)
+	}
+	disabling := make(map[string]struct{}, len(indicatorIDs))
+	for _, id := range indicatorIDs {
+		disabling[id] = struct{}{}
+	}
+	for _, enabledID := range enabledIDs {
+		if counters[enabledID] {
+			continue
+		}
+		if _, beingDisabled := disabling[enabledID]; beingDisabled {
+			continue
+		}
+		closure, err := ResolveDependencyClosure([]string{enabledID}, arithmetic, counters)
+		if err != nil {
+			return fmt.Errorf("resolve enabled KPI %s dependencies: %w", enabledID, err)
+		}
+		dependencies := append(append([]string(nil), closure.Counters...), closure.KPIs...)
+		for _, dependencyID := range dependencies {
+			if dependencyID == enabledID {
+				continue
+			}
+			if _, conflict := disabling[dependencyID]; conflict {
+				return fmt.Errorf("%w: %s depends on %s", ErrEnabledKPIDependency, enabledID, dependencyID)
+			}
+		}
+	}
+	return nil
+}
+
+func lockEnabledIndicatorSet(
+	ctx context.Context,
+	tx pgx.Tx,
+	dt DeviceType,
+	operatorCode string,
+) error {
+	lockKey := dt.EnabledTable() + "\x1f" + operatorCode
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lockKey); err != nil {
+		return fmt.Errorf("lock enabled indicator set: %w", err)
 	}
 	return nil
 }

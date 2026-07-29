@@ -7772,6 +7772,10 @@ const messages: Record<string, string> = {
   'perf.dashboard.metricCount':          '{count} metrics',
   'perf.dashboard.truncated':            'Results may be incomplete',
   'perf.dashboard.truncatedDesc':        'The result rows matched for this time window have reached the limit ({limit} rows), so the chart may not include all data. Please narrow the time window or reduce metrics/series.',
+  'perf.dashboard.partialPeriod':        'Current period in progress',
+  'perf.dashboard.partialPeriodDesc':    'Lowest-covered entity in the current filter: {received}/{expected} slots ({coverage}%), revision {revision}; task-version interval: {from} to {to}. This is not yet a complete natural period.',
+  'perf.dashboard.progressUnavailable':  'Current-period data is unavailable',
+  'perf.dashboard.progressUnavailableDesc': 'The current daily/weekly aggregation timed out or its state store is unavailable. Older task-version results are not shown as current; the next scheduled 5-minute refresh will retry.',
   'perf.dashboard.emptyGranNoData':      'No data at {gran} granularity',
   'perf.dashboard.emptyTaskNoData':      'No data for this task',
   // Filter bar

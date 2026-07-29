@@ -127,13 +127,17 @@
       }
     },
     {
-      "title": "PM Counters Discovered Outside Indicator Library",
+      "title": "PM Indicator Library Drift and Disabled Values",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 36},
       "targets": [
         {
-          "expr": "sum by (carrier, technology, reason) (rate(omc_pm_discovered_counters_total[5m]))",
-          "legendFormat": "{{carrier}} / {{technology}} / {{reason}}"
+          "expr": "sum by (carrier, technology) (rate(omc_pm_whitelist_miss_values_total[5m]))",
+          "legendFormat": "{{carrier}} / {{technology}} / whitelist_miss"
+        },
+        {
+          "expr": "sum by (carrier, technology) (rate(omc_pm_known_disabled_values_total[5m]))",
+          "legendFormat": "{{carrier}} / {{technology}} / known_but_disabled"
         }
       ]
     }

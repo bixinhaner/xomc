@@ -37,6 +37,8 @@ type Contribution struct {
 	SourceExpectedSlots   int64
 	SourceReceivedSlots   int64
 	SourceIncompleteSlots int64
+	VersionEffectiveFrom  time.Time
+	VersionEffectiveTo    *time.Time
 	Rollup                bool
 	RollupChunkIndex      int
 	RollupChunkCount      int
@@ -103,10 +105,12 @@ func (m *Matcher) MatchGranularity(
 					EntityKey:   payload.DeviceID.String(),
 					Granularity: granularity, Start: window.Start, End: window.End,
 				},
-				SourceFileID:  payload.SourceFileID.String(),
-				DeviceID:      payload.DeviceID.String(),
-				SlotStart:     payload.WindowStart.UTC(),
-				ExpectedSlots: 4,
+				SourceFileID:         payload.SourceFileID.String(),
+				DeviceID:             payload.DeviceID.String(),
+				SlotStart:            payload.WindowStart.UTC(),
+				ExpectedSlots:        4,
+				VersionEffectiveFrom: version.EffectiveFrom,
+				VersionEffectiveTo:   version.EffectiveTo,
 			}
 			for _, measurement := range payload.Measurements {
 				if len(version.ObjectLDNs) > 0 {

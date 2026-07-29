@@ -311,6 +311,7 @@ func flattenDocsByDeviceType(docs []xmlIndicatorModel, isGnb bool) (map[string]i
 				PlatformName: platform,
 				IndicatorID:  ind.ID,
 				Formula:      ind.Formula,
+				ReportKey:    ind.ReportKey,
 				LoadedFrom:   doc.LoadedFrom,
 			})
 		}
@@ -323,6 +324,7 @@ type formulaRow struct {
 	PlatformName string
 	IndicatorID  string
 	Formula      string
+	ReportKey    string
 	// LoadedFrom 是声明该公式/平台的 XML 文件相对路径(含 builtin/custom 前缀)。
 	// 一个 XML 文件即一个平台,故同一 platform_name 的所有 formula 行此值单值;
 	// SummaryByTech 按平台聚合时取它得「该平台的加载源」,并由前缀派生 source。
@@ -523,9 +525,13 @@ func rewriteFormulas(ctx context.Context, tx pgx.Tx, table string, formulas []fo
 		if end > len(toInsert) {
 			end = len(toInsert)
 		}
-		ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert(table).Columns("platform_name", "indicator_id", "formula", "loaded_from")
+		ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert(table).
+			Columns("platform_name", "indicator_id", "formula", "report_key", "loaded_from")
 		for _, f := range toInsert[i:end] {
-			ib = ib.Values(f.PlatformName, f.IndicatorID, f.Formula, f.LoadedFrom)
+			ib = ib.Values(
+				f.PlatformName, f.IndicatorID, f.Formula,
+				nullIfEmpty(f.ReportKey), f.LoadedFrom,
+			)
 		}
 		sqlStr, args, err := ib.ToSql()
 		if err != nil {

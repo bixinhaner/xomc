@@ -88,7 +88,8 @@ func TestBuildTaskSnapshotKeepsHourlyDefinitionsImmutable(t *testing.T) {
 	first := &TaskVersionSnapshot{
 		TaskID: builtinNetworkRuleIDs["lte"], VersionID: uuid.New(), VersionNo: 1,
 		Enabled: true, Technology: "lte", Dimension: DimensionNetwork,
-		EffectiveFrom: time.Now().UTC().Add(-2 * time.Hour),
+		EffectiveFrom:        time.Now().UTC().Add(-2 * time.Hour),
+		LineageEffectiveFrom: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		Counters: map[string]CounterRule{
 			"OLD": {MetricPath: "OLD", Aggregation: AggregationSum},
 		},
@@ -101,7 +102,7 @@ func TestBuildTaskSnapshotKeepsHourlyDefinitionsImmutable(t *testing.T) {
 	second := &TaskVersionSnapshot{
 		TaskID: first.TaskID, VersionID: uuid.New(), VersionNo: 2,
 		Enabled: true, Technology: "lte", Dimension: DimensionNetwork,
-		EffectiveFrom: end,
+		EffectiveFrom: end, LineageEffectiveFrom: first.LineageEffectiveFrom,
 		Counters: map[string]CounterRule{
 			"NEW": {MetricPath: "NEW", Aggregation: AggregationSum},
 		},
@@ -122,4 +123,19 @@ func TestBuildTaskSnapshotKeepsHourlyDefinitionsImmutable(t *testing.T) {
 	require.Contains(t, rollup.Counters, "OLD")
 	require.Contains(t, rollup.Counters, "NEW")
 	require.Equal(t, second.Metrics, rollup.Metrics)
+	require.Equal(t, first.LineageEffectiveFrom, rollup.EffectiveFrom)
+}
+
+func TestDeviceRollupEpochDoesNotDriftWithMatchableHistory(t *testing.T) {
+	source := &TaskVersionSnapshot{
+		TaskID: builtinNetworkRuleIDs["lte"], VersionID: uuid.New(),
+		Enabled: true, Technology: "lte", Dimension: DimensionNetwork,
+		EffectiveFrom:        time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		LineageEffectiveFrom: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	rollup, ok := deviceRollupVersion(source)
+
+	require.True(t, ok)
+	require.Equal(t, source.LineageEffectiveFrom, rollup.EffectiveFrom)
 }

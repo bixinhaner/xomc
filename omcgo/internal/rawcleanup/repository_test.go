@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestCandidateQueriesSplitNewAndRetryReadyPopulations(t *testing.T) {
@@ -24,6 +26,27 @@ func TestCandidateQueriesSplitNewAndRetryReadyPopulations(t *testing.T) {
 	if !strings.Contains(queries[1].sql, "raw_delete_next_attempt_at <= NOW()") ||
 		!strings.Contains(queries[1].sql, "ORDER BY raw_delete_next_attempt_at ASC, collect_time ASC, id ASC LIMIT 100") {
 		t.Fatalf("retry query does not match retry index: %s", queries[1].sql)
+	}
+}
+
+func TestPMOutboxCleanupPreservesRebuildReplayHorizon(t *testing.T) {
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	query, args, err := buildPMOutboxCleanupQuery([]uuid.UUID{uuid.New()}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(query, "created_at <") {
+		t.Fatalf("cleanup query has no durable replay retention boundary: %s", query)
+	}
+	want := now.Add(-45 * 24 * time.Hour)
+	found := false
+	for _, arg := range args {
+		if value, ok := arg.(time.Time); ok && value.Equal(want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("cleanup query args do not contain 45-day replay cutoff: %#v", args)
 	}
 }
 

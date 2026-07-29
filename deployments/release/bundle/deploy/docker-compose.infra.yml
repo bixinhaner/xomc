@@ -184,7 +184,9 @@ services:
     # --no-appendfsync-on-rewrite：rewrite 期不 fsync，削峰；--save ""：AOF 已开，关 RDB save
     # 点避免双 fork COW（重启恢复走 AOF）。
     # 1GiB + 500% 避免在线聚合高写入下频繁重写，AOF everysec 与 noeviction 保持不变。
-    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save "" --auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500
+    # 12 分钟关窗会让相邻两个小时的约 4 万设备窗口短时并存；20k 基站实测
+    # 2GiB 在积压恢复时会拒绝写入，因此生产默认按双窗口容量取 4GiB。
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-4gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save "" --auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500
     # AOF rewrite/fsync 落盘窗口
     stop_grace_period: 30s
     deploy:
@@ -192,7 +194,7 @@ services:
         limits:
           # CPU 1→2核对齐 plan-resources.sh medium 档（32核/32G 目标机型）。
           cpus: "${REDIS_CPUS:-2}"
-          memory: "${REDIS_MEM:-3g}"
+          memory: "${REDIS_MEM:-5g}"
         reservations:
           cpus: "0.25"
           memory: 256m

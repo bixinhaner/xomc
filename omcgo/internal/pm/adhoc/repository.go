@@ -228,7 +228,8 @@ SELECT r.id, r.task_id, r.device_oui, r.device_sn, r.product_id, r.metric_path, 
 FROM pm_adhoc_aggregation_results r
 LEFT JOIN product_dim p ON p.id = r.product_id
 LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
-WHERE r.task_id = $1`
+WHERE r.task_id = $1
+  AND COALESCE((r.extra->>'active_version')::boolean, true)`
 	args := []any{taskID}
 	pos := 2
 	if f.DeviceSN != "" {
@@ -315,7 +316,9 @@ WHERE r.task_id = $1`
 // 复用与 buildResultsQuery 完全相同的 WHERE 过滤（去掉 LEFT JOIN / ORDER BY / LIMIT / OFFSET），
 // 让 total 反映命中行真实总数（T-0194 截断诚实提示）。
 func buildResultsCountQuery(taskID uuid.UUID, f resultsFilter) (string, []any) {
-	q := `SELECT COUNT(*) FROM pm_adhoc_aggregation_results r WHERE r.task_id = $1`
+	q := `SELECT COUNT(*) FROM pm_adhoc_aggregation_results r
+WHERE r.task_id = $1
+  AND COALESCE((r.extra->>'active_version')::boolean, true)`
 	args := []any{taskID}
 	pos := 2
 	if f.DeviceSN != "" {

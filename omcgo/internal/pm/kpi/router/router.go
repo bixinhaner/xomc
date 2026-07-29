@@ -389,7 +389,26 @@ func (r *Router) loadFromDB(ctx context.Context, prod *product.Product) (*KPIRou
 		return nil, fmt.Errorf("list indicators by IDs (%d): %w", len(indicatorIDs), err)
 	}
 
-	return assembleRoute(prod, dt, indicators, r.logger), nil
+	route := assembleRoute(prod, dt, indicators, r.logger)
+	applyPlatformReportKeys(route, formulas)
+	return route, nil
+}
+
+func applyPlatformReportKeys(
+	route *KPIRoute,
+	formulas []*indicator.PlatformFormula,
+) {
+	byIndicator := make(map[string]string, len(formulas))
+	for _, formula := range formulas {
+		if formula.ReportKey != nil && *formula.ReportKey != "" {
+			byIndicator[formula.IndicatorID] = *formula.ReportKey
+		}
+	}
+	for i := range route.Counters {
+		if reportKey := byIndicator[route.Counters[i].IndicatorID]; reportKey != "" {
+			route.Counters[i].ReportKey = reportKey
+		}
+	}
 }
 
 func uniqueIndicatorIDs(formulas []*indicator.PlatformFormula) []string {

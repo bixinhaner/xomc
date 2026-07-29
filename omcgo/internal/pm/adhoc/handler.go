@@ -23,6 +23,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
 
 // Handler 是 G7 adhoc 任务的 REST 入口。
@@ -32,7 +33,13 @@ type Handler struct {
 	hub                    *ProgressHub
 	enabledMetricValidator *EnabledMetricSelectionService
 	timezone               calendarfilter.TimezoneProvider
+	progress               *pmstream.ProgressService
 	logger                 *zap.Logger
+}
+
+func (h *Handler) WithProgressService(progress *pmstream.ProgressService) *Handler {
+	h.progress = progress
+	return h
 }
 
 // NewHandler 构造 Handler。
@@ -145,17 +152,27 @@ type adhocResultDTO struct {
 	MetricType string `json:"metric_type"`
 	// MetricValue 用 jsonx.Float（底层 float64）兜底非有限值（NaN/Inf → null），
 	// 避免单个 NaN 行致整批 JSON 编码失败、返回空 body（issue #387）。
-	MetricValue   jsonx.Float `json:"metric_value"`
-	StatisType    *string     `json:"statis_type,omitempty"`
-	Granularity   string      `json:"granularity"`
-	Time          time.Time   `json:"time"`
-	StartTime     time.Time   `json:"start_time"`
-	EndTime       time.Time   `json:"end_time"`
-	IngestTime    time.Time   `json:"ingest_time"`
-	ObjectLDN     *string     `json:"object_ldn,omitempty"`
-	TaskVersionID string      `json:"task_version_id,omitempty"`
-	Complete      bool        `json:"complete"`
-	MissingSlots  int64       `json:"missing_slots"`
+	MetricValue          jsonx.Float `json:"metric_value"`
+	StatisType           *string     `json:"statis_type,omitempty"`
+	Granularity          string      `json:"granularity"`
+	Time                 time.Time   `json:"time"`
+	StartTime            time.Time   `json:"start_time"`
+	EndTime              time.Time   `json:"end_time"`
+	IngestTime           time.Time   `json:"ingest_time"`
+	ObjectLDN            *string     `json:"object_ldn,omitempty"`
+	TaskVersionID        string      `json:"task_version_id,omitempty"`
+	Complete             bool        `json:"complete"`
+	MissingSlots         int64       `json:"missing_slots"`
+	Revision             int         `json:"revision"`
+	VersionEffectiveFrom *time.Time  `json:"version_effective_from,omitempty"`
+	VersionEffectiveTo   *time.Time  `json:"version_effective_to,omitempty"`
+	ReceivedSlots        int64       `json:"received_slots"`
+	ExpectedSlots        int64       `json:"expected_slots"`
+	VersionExpectedSlots int64       `json:"version_expected_slots"`
+	NaturalExpectedSlots int64       `json:"natural_expected_slots"`
+	VersionSliceComplete bool        `json:"version_slice_complete"`
+	PeriodComplete       bool        `json:"period_complete"`
+	Partial              bool        `json:"partial"`
 }
 
 type optionalTime struct {
@@ -845,15 +862,35 @@ func (h *Handler) Results(c *gin.Context) {
 		dto.ID = resultID.String()
 		dto.TaskID = taskID.String()
 		var aggregateMeta struct {
-			TaskVersionID string `json:"task_version_id"`
-			Complete      bool   `json:"complete"`
-			MissingSlots  int64  `json:"missing_slots"`
+			TaskVersionID        string     `json:"task_version_id"`
+			Complete             bool       `json:"complete"`
+			MissingSlots         int64      `json:"missing_slots"`
+			Revision             int        `json:"revision"`
+			VersionEffectiveFrom *time.Time `json:"version_effective_from"`
+			VersionEffectiveTo   *time.Time `json:"version_effective_to"`
+			ReceivedSlots        int64      `json:"received_slots"`
+			ExpectedSlots        int64      `json:"expected_slots"`
+			VersionExpectedSlots int64      `json:"version_expected_slots"`
+			NaturalExpectedSlots int64      `json:"natural_expected_slots"`
+			VersionSliceComplete bool       `json:"version_slice_complete"`
+			PeriodComplete       bool       `json:"period_complete"`
+			Partial              bool       `json:"partial"`
 		}
 		if len(extraBytes) > 0 {
 			_ = json.Unmarshal(extraBytes, &aggregateMeta)
 			dto.TaskVersionID = aggregateMeta.TaskVersionID
 			dto.Complete = aggregateMeta.Complete
 			dto.MissingSlots = aggregateMeta.MissingSlots
+			dto.Revision = aggregateMeta.Revision
+			dto.VersionEffectiveFrom = aggregateMeta.VersionEffectiveFrom
+			dto.VersionEffectiveTo = aggregateMeta.VersionEffectiveTo
+			dto.ReceivedSlots = aggregateMeta.ReceivedSlots
+			dto.ExpectedSlots = aggregateMeta.ExpectedSlots
+			dto.VersionExpectedSlots = aggregateMeta.VersionExpectedSlots
+			dto.NaturalExpectedSlots = aggregateMeta.NaturalExpectedSlots
+			dto.VersionSliceComplete = aggregateMeta.VersionSliceComplete
+			dto.PeriodComplete = aggregateMeta.PeriodComplete
+			dto.Partial = aggregateMeta.Partial
 		}
 		if productID != nil && *productID != uuid.Nil {
 			dto.ProductID = productID.String()
@@ -867,13 +904,33 @@ func (h *Handler) Results(c *gin.Context) {
 		items = append(items, dto)
 	}
 
+	var progressItems []adhocResultDTO
+	var periodProgress []pmstream.PeriodProgress
+	progressState := "not_applicable"
+	includePartial := strings.EqualFold(strings.TrimSpace(c.Query("include_partial")), "true")
+	if includePartial && h.progress != nil {
+		progressState = "available"
+		start, _ := time.Parse(time.RFC3339, filter.StartTime)
+		end, _ := time.Parse(time.RFC3339, filter.EndTime)
+		progressResult, progressErr := h.progress.Query(c.Request.Context(), id, start, end)
+		if progressErr != nil {
+			progressState = "unavailable"
+			h.logger.Warn("query current PM daily/weekly progress", zap.Error(progressErr))
+		} else {
+			progressItems = progressResultDTOs(progressResult.Rows, filter)
+			periodProgress = progressResult.Periods
+		}
+	}
+
 	// 回填 display_name：按 metric_path 编号查指标库取友好名——counter 与 kpi 同口径
 	// （counter 编号 is_counter='1' 同样落在 perf_indicators_* 三表，与导出 name_resolver 一致）。
 	// 查不到回退编号本身，保证非空。横表展示列名「编号(名·类型)」依赖此处给出中文名。
 	codeSet := make(map[string]struct{})
-	for i := range items {
-		if items[i].MetricPath != "" {
-			codeSet[items[i].MetricPath] = struct{}{}
+	for _, resultItems := range [][]adhocResultDTO{items, progressItems} {
+		for i := range resultItems {
+			if resultItems[i].MetricPath != "" {
+				codeSet[resultItems[i].MetricPath] = struct{}{}
+			}
 		}
 	}
 	var metadataByCode map[string]indicatorDisplayMetadata
@@ -885,6 +942,7 @@ func (h *Handler) Results(c *gin.Context) {
 		metadataByCode = h.lookupIndicatorDisplayMetadata(c.Request.Context(), codes)
 	}
 	backfillAdhocResultDisplayMetadata(items, metadataByCode)
+	backfillAdhocResultDisplayMetadata(progressItems, metadataByCode)
 
 	// 真实总数：跑一次同 WHERE 的 COUNT(*)，让 total 反映命中行真实总数而非本页返回行数
 	// （T-0194 截断诚实提示）。COUNT 失败不阻断结果返回，退回本页行数作兜底。
@@ -895,7 +953,126 @@ func (h *Handler) Results(c *gin.Context) {
 		total = realTotal
 	}
 
-	response.OK(c, gin.H{"items": items, "total": total})
+	response.OK(c, gin.H{
+		"items": items, "total": total,
+		"progress_items": progressItems, "progress_total": len(progressItems),
+		"period_progress": periodProgress,
+		"progress_state":  progressState,
+	})
+}
+
+func progressResultDTOs(rows []pmstream.ProgressResult, filter resultsFilter) []adhocResultDTO {
+	allowedMetrics := make(map[string]struct{}, len(filter.TaskMetricPaths))
+	for _, metric := range filter.TaskMetricPaths {
+		allowedMetrics[metric] = struct{}{}
+	}
+	allowedProducts := stringSet(filter.ProductIDs)
+	allowedObjects := stringSet(filter.ObjectLDNs)
+	allowedSubsets := stringSet(filter.SubsetLDNs)
+	allowedWeekdays := intSet(filter.Weekdays)
+	allowedHours := intSet(filter.Hours)
+	location, err := time.LoadLocation(calendarfilter.NormalizeName(filter.CalendarTimezone))
+	if err != nil {
+		location = time.UTC
+	}
+	out := make([]adhocResultDTO, 0, len(rows))
+	for _, row := range rows {
+		if filter.Granularity != "" && string(row.Granularity) != filter.Granularity {
+			continue
+		}
+		if len(allowedMetrics) > 0 {
+			if _, ok := allowedMetrics[row.MetricPath]; !ok {
+				continue
+			}
+		}
+		if filter.MetricPath != "" && row.MetricPath != filter.MetricPath {
+			continue
+		}
+		if filter.DeviceSN != "" && row.DeviceSN != filter.DeviceSN {
+			continue
+		}
+		objectLDN := row.ObjectLDN
+		if row.Dimension == pmstream.DimensionNetwork {
+			objectLDN = "Network"
+		} else if row.Dimension != pmstream.DimensionDevice {
+			objectLDN = row.DimensionKey
+		}
+		if len(allowedProducts) > 0 {
+			if row.Dimension != pmstream.DimensionProduct {
+				continue
+			}
+			if _, ok := allowedProducts[row.DimensionKey]; !ok {
+				continue
+			}
+		}
+		if len(allowedObjects) > 0 {
+			if _, ok := allowedObjects[objectLDN]; !ok {
+				continue
+			}
+		}
+		if len(allowedSubsets) > 0 {
+			if _, ok := allowedSubsets[objectLDN]; !ok {
+				continue
+			}
+		}
+		localStart := row.WindowStart.In(location)
+		if len(allowedWeekdays) > 0 && len(allowedWeekdays) < 7 {
+			if _, ok := allowedWeekdays[int(localStart.Weekday())]; !ok {
+				continue
+			}
+		}
+		if len(allowedHours) > 0 && len(allowedHours) < 24 {
+			if _, ok := allowedHours[localStart.Hour()]; !ok {
+				continue
+			}
+		}
+		var objectPtr *string
+		if objectLDN != "" {
+			objectPtr = &objectLDN
+		}
+		deviceSN := row.DeviceSN
+		if row.Dimension != pmstream.DimensionDevice {
+			deviceSN = "AGGREGATED"
+		}
+		dto := adhocResultDTO{
+			ID: row.ID.String(), TaskID: row.TaskID.String(),
+			DeviceOUI: row.DeviceOUI, DeviceSN: deviceSN,
+			MetricPath: row.MetricPath, MetricType: row.MetricType,
+			MetricValue: jsonx.Float(row.Value), Granularity: string(row.Granularity),
+			Time: row.WindowStart, StartTime: row.WindowStart, EndTime: row.WindowEnd,
+			IngestTime: time.Now().UTC(), ObjectLDN: objectPtr,
+			TaskVersionID: row.TaskVersionID.String(), Complete: row.PeriodComplete,
+			MissingSlots: max(0, row.ExpectedSlots-row.ReceivedSlots),
+			Revision:     row.Revision, VersionEffectiveFrom: &row.VersionEffectiveFrom,
+			VersionEffectiveTo: row.VersionEffectiveTo,
+			ReceivedSlots:      row.ReceivedSlots, ExpectedSlots: row.ExpectedSlots,
+			VersionExpectedSlots: row.VersionExpectedSlots,
+			NaturalExpectedSlots: row.NaturalExpectedSlots,
+			VersionSliceComplete: row.VersionSliceComplete,
+			PeriodComplete:       row.PeriodComplete, Partial: row.Partial,
+		}
+		if row.Dimension == pmstream.DimensionProduct {
+			dto.ProductID = row.DimensionKey
+		}
+		out = append(out, dto)
+	}
+	return out
+}
+
+func stringSet(values []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		out[value] = struct{}{}
+	}
+	return out
+}
+
+func intSet(values []int) map[int]struct{} {
+	out := make(map[int]struct{}, len(values))
+	for _, value := range values {
+		out[value] = struct{}{}
+	}
+	return out
 }
 
 // parseCSVQuery 读取一个既支持 CSV（逗号分隔）又支持重复参数（?k=a&k=b）的 query。
@@ -991,7 +1168,9 @@ func buildFilterOptionsQuery(dim Dimension, taskID uuid.UUID, metricPaths []stri
 SELECT DISTINCT r.product_id, p.product_name
 FROM pm_adhoc_aggregation_results r
 LEFT JOIN product_dim p ON p.id = r.product_id
-WHERE r.task_id = $1 AND r.product_id IS NOT NULL
+WHERE r.task_id = $1
+  AND COALESCE((r.extra->>'active_version')::boolean, true)
+  AND r.product_id IS NOT NULL
 ` + metricClause + `
 ORDER BY p.product_name`, args, true
 	case DimensionDeviceGroup:
@@ -1000,14 +1179,18 @@ ORDER BY p.product_name`, args, true
 SELECT DISTINCT r.object_ldn, g.name
 FROM pm_adhoc_aggregation_results r
 LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
-WHERE r.task_id = $1 AND r.object_ldn LIKE 'DeviceGroup=%'
+WHERE r.task_id = $1
+  AND COALESCE((r.extra->>'active_version')::boolean, true)
+  AND r.object_ldn LIKE 'DeviceGroup=%'
 ` + metricClause + `
 ORDER BY g.name`, args, true
 	case DimensionBand:
 		return `
 SELECT DISTINCT r.object_ldn
 FROM pm_adhoc_aggregation_results r
-WHERE r.task_id = $1 AND r.object_ldn LIKE 'Band=%'
+WHERE r.task_id = $1
+  AND COALESCE((r.extra->>'active_version')::boolean, true)
+  AND r.object_ldn LIKE 'Band=%'
 ` + metricClause + `
 ORDER BY r.object_ldn`, args, true
 	default:

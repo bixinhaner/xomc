@@ -149,7 +149,9 @@ services:
     # PM 在线聚合窗口是运行期权威状态，禁止淘汰；AOF everysec 保证进程重启可恢复。
     # 内存不足必须告警和扩容，不能通过 LRU 静默损坏窗口。
     # 提高 rewrite 阈值，避免高频聚合写入下小 AOF 约每分钟重写一次。
-    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction --auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500
+    # 12 分钟关窗会让相邻两个小时的设备窗口短时并存，默认容量覆盖 20k
+    # 基站的双窗口重叠，并为 AOF rewrite 另留 1GiB COW 余量。
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-4gb} --maxmemory-policy noeviction --auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500
     volumes:
       - ${REDIS_DATA_PATH:-redisdata}:/data
       - /etc/localtime:/etc/localtime:ro
@@ -159,7 +161,7 @@ services:
       resources:
         limits:
           cpus: "${REDIS_CPUS:-1}"
-          memory: ${REDIS_MEM:-3g}
+          memory: ${REDIS_MEM:-5g}
         reservations:
           cpus: "0.25"
           memory: 256m
@@ -449,7 +451,7 @@ services:
       GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-}"
       GOMAXPROCS: "${WORKER_GOMAXPROCS:-}"
       PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"
-      PM_AGGREGATION_CLOSE_GRACE: "${PM_AGGREGATION_CLOSE_GRACE:-5m}"
+      PM_AGGREGATION_CLOSE_GRACE: "${PM_AGGREGATION_CLOSE_GRACE:-12m}"
       PM_AGGREGATION_DAILY_CLOSE_GRACE: "${PM_AGGREGATION_DAILY_CLOSE_GRACE:-15m}"
       PM_AGGREGATION_WEEKLY_CLOSE_GRACE: "${PM_AGGREGATION_WEEKLY_CLOSE_GRACE:-30m}"
       PM_AGGREGATION_MONTHLY_CLOSE_GRACE: "${PM_AGGREGATION_MONTHLY_CLOSE_GRACE:-30m}"

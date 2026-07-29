@@ -27,6 +27,11 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
   return redis.call("DEL", KEYS[1])
 end
 return 0`)
+	extendLockScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("PEXPIRE", KEYS[1], ARGV[2])
+end
+return 0`)
 )
 
 type AccumulateResult struct {
@@ -122,6 +127,25 @@ func (s *RedisWindowStore) Accumulate(
 	ctx context.Context,
 	contribution Contribution,
 ) (AccumulateResult, error) {
+	return s.accumulate(ctx, contribution, "")
+}
+
+func (s *RedisWindowStore) accumulateWithLock(
+	ctx context.Context,
+	contribution Contribution,
+	lock *Lock,
+) (AccumulateResult, error) {
+	if lock == nil {
+		return AccumulateResult{}, errors.New("PM aggregation rebuild lock is nil")
+	}
+	return s.accumulate(ctx, contribution, lock.token)
+}
+
+func (s *RedisWindowStore) accumulate(
+	ctx context.Context,
+	contribution Contribution,
+	lockToken string,
+) (AccumulateResult, error) {
 	if err := contribution.Validate(); err != nil {
 		return AccumulateResult{}, err
 	}
@@ -162,10 +186,12 @@ func (s *RedisWindowStore) Accumulate(
 		}
 		args = append(args, definitionID, encoded, shard, sum, count, minValue, maxValue)
 	}
+	args = append(args, lockToken)
 	scriptKeys := []string{keys.seen, keys.slots, keys.meta, keys.entityMeta, keys.chunks}
 	for shard := 0; shard < shardCount; shard++ {
 		scriptKeys = append(scriptKeys, keys.acc[shard], keys.defs[shard])
 	}
+	scriptKeys = append(scriptKeys, keys.lock)
 	raw, err := accumulateScript.Run(
 		ctx, s.client,
 		scriptKeys,
@@ -435,7 +461,31 @@ func (l *Lock) Release(ctx context.Context) error {
 	return nil
 }
 
+func (l *Lock) Extend(ctx context.Context, ttl time.Duration) error {
+	if l == nil {
+		return errors.New("PM aggregation lock is nil")
+	}
+	result, err := extendLockScript.Run(
+		ctx, l.client, []string{l.key}, l.token, ttl.Milliseconds(),
+	).Int64()
+	if err != nil {
+		return fmt.Errorf("extend PM aggregation lock: %w", err)
+	}
+	if result != 1 {
+		return errors.New("PM aggregation lock ownership lost")
+	}
+	return nil
+}
+
 func (s *RedisWindowStore) Delete(ctx context.Context, key WindowKey) error {
+	return s.delete(ctx, key, true)
+}
+
+func (s *RedisWindowStore) DeleteState(ctx context.Context, key WindowKey) error {
+	return s.delete(ctx, key, false)
+}
+
+func (s *RedisWindowStore) delete(ctx context.Context, key WindowKey, includeLock bool) error {
 	rootKeys := redisKeys(key, 1)
 	shardCountValue, err := s.client.HGet(ctx, rootKeys.meta, "shard_count").Int()
 	if err != nil && !errors.Is(err, redis.Nil) {
@@ -446,7 +496,10 @@ func (s *RedisWindowStore) Delete(ctx context.Context, key WindowKey) error {
 	}
 	keys := redisKeys(key, shardCountValue)
 	deleteKeys := []string{
-		keys.seen, keys.slots, keys.meta, keys.entityMeta, keys.chunks, keys.lock,
+		keys.seen, keys.slots, keys.meta, keys.entityMeta, keys.chunks,
+	}
+	if includeLock {
+		deleteKeys = append(deleteKeys, keys.lock)
 	}
 	deleteKeys = append(deleteKeys, keys.acc...)
 	deleteKeys = append(deleteKeys, keys.defs...)

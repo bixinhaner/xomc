@@ -247,6 +247,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// normalizeResults 会在写入前要求 Unit/StatisType 齐全，缺失时失败并暴露。
 	pmCollector.SetCounterWhitelist(&routerCounterWhitelist{r: pmKPIRouter, log: logger})
 	pmCollector.SetEnabledIndicatorLookup(newEnabledIndicatorLookup(indicator.NewPgEnabledRepository(w.PgPool)))
+	pmCollector.SetQuarantineStore(collector.NewPgQuarantineStore(w.TsPool))
 	pmResultNormSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
 	pmCollector.SetNumberProcessLookup(func(ctx context.Context) (string, error) {
 		row, err := pmResultNormSysCfg.GetByKey(ctx, resultnorm.ConfigCategory, resultnorm.ConfigKey)

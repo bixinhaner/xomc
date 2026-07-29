@@ -17,9 +17,16 @@ func Test_buildResultsQuery_NoTimeRange(t *testing.T) {
 	assert.NotContains(t, q, "AND r.time >=")
 	assert.NotContains(t, q, "AND r.time <=")
 	assert.Contains(t, q, "WHERE r.task_id = $1")
+	assert.Contains(t, q, "COALESCE((r.extra->>'active_version')::boolean, true)")
 	assert.Contains(t, q, "ORDER BY r.time DESC LIMIT $2 OFFSET $3")
 	// args = [taskID, limit, offset]
 	assert.Equal(t, []any{id, 100, 0}, args)
+}
+
+func Test_buildResultsCountQuery_FiltersInactiveVersionSlices(t *testing.T) {
+	q, _ := buildResultsCountQuery(uuid.New(), resultsFilter{})
+
+	assert.Contains(t, q, "COALESCE((r.extra->>'active_version')::boolean, true)")
 }
 
 // PM-线名解析：SELECT 带出解析名两列，LEFT JOIN products / device_groups。

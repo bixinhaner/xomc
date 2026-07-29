@@ -12,12 +12,16 @@ import (
 )
 
 type OutboxRelay struct {
-	repo     *OutboxRepository
-	bus      event.EventBus
-	interval time.Duration
-	logger   *zap.Logger
-	metrics  *Metrics
-	batch    int
+	repo            *OutboxRepository
+	bus             event.EventBus
+	interval        time.Duration
+	logger          *zap.Logger
+	metrics         *Metrics
+	batch           int
+	outboxRetention time.Duration
+	replayRetention time.Duration
+	redeliveryAfter time.Duration
+	redeliveryEvery time.Duration
 }
 
 func (r *OutboxRelay) SetMetrics(metrics *Metrics) *OutboxRelay {
@@ -29,7 +33,22 @@ func NewOutboxRelay(repo *OutboxRepository, bus event.EventBus, logger *zap.Logg
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &OutboxRelay{repo: repo, bus: bus, interval: 200 * time.Millisecond, logger: logger, batch: 100}
+	return &OutboxRelay{
+		repo: repo, bus: bus, interval: 200 * time.Millisecond,
+		logger: logger, batch: 100,
+		outboxRetention: 24 * time.Hour, replayRetention: 45 * 24 * time.Hour,
+		redeliveryAfter: 5 * time.Minute, redeliveryEvery: time.Minute,
+	}
+}
+
+func (r *OutboxRelay) SetRetention(outbox, replay time.Duration) *OutboxRelay {
+	if outbox > 0 {
+		r.outboxRetention = outbox
+	}
+	if replay > 0 {
+		r.replayRetention = replay
+	}
+	return r
 }
 
 func (r *OutboxRelay) SetBatch(batch int) *OutboxRelay {
@@ -44,6 +63,9 @@ func (r *OutboxRelay) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	cleanupTicker := time.NewTicker(time.Hour)
 	defer cleanupTicker.Stop()
+	go runRedeliveryLoop(ctx, r.redeliveryEvery, func() {
+		r.requeueStale(ctx)
+	})
 	for {
 		published, err := r.publishBatch(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -59,11 +81,52 @@ func (r *OutboxRelay) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-cleanupTicker.C:
-			if err := r.repo.DeletePublishedBefore(ctx, time.Now().UTC().Add(-24*time.Hour)); err != nil {
+			now := time.Now().UTC()
+			if err := r.repo.DeletePublishedBefore(
+				ctx, now.Add(-r.outboxRetention), now.Add(-r.replayRetention),
+			); err != nil {
 				r.logger.Warn("cleanup PM aggregation outbox", zap.Error(err))
+			}
+			if err := r.repo.DeleteReplayBefore(ctx, now.Add(-r.replayRetention)); err != nil {
+				r.logger.Warn("cleanup PM aggregation replay sources", zap.Error(err))
 			}
 		case <-ticker.C:
 		}
+	}
+}
+
+func runRedeliveryLoop(ctx context.Context, every time.Duration, run func()) {
+	if every <= 0 {
+		every = time.Minute
+	}
+	run()
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
+}
+
+func (r *OutboxRelay) requeueStale(ctx context.Context) {
+	count, err := r.repo.RequeueStaleUnconsumed(
+		ctx, time.Now().UTC().Add(-r.redeliveryAfter),
+	)
+	if err != nil {
+		if r.metrics != nil {
+			r.metrics.OutboxErrorsTotal.Inc()
+		}
+		r.logger.Warn("requeue stale PM aggregation outbox", zap.Error(err))
+		return
+	}
+	if count > 0 {
+		r.logger.Warn("requeued stale PM aggregation events after consumer acknowledgement timeout",
+			zap.Int64("events", count),
+			zap.Duration("ack_timeout", r.redeliveryAfter))
 	}
 }
 

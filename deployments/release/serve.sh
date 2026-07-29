@@ -200,7 +200,7 @@ case "$ACTION" in
     if is_running; then
       if [ -f "$UNIT_FILE" ]; then
         unit="$(cat "$UNIT_FILE")"
-        echo "运行中（systemd 瞬态服务 $unit），端口=$port"
+        echo "运行中（systemd 瞬态服务 ${unit}），端口=$port"
         echo "日志：journalctl -u $unit -f"
       else
         echo "运行中：PID=$(cat "$PID_FILE")，端口=$port"
@@ -208,8 +208,8 @@ case "$ACTION" in
       fi
     else
       echo "未运行"
-      [ -f "$UNIT_FILE" ] && echo "（残留 unit 标记 $UNIT_FILE，可手动清理）"
-      [ -f "$PID_FILE" ]  && echo "（残留 PID 文件 $PID_FILE，可手动清理）"
+      [ -f "$UNIT_FILE" ] && echo "（残留 unit 标记 ${UNIT_FILE}，可手动清理）"
+      [ -f "$PID_FILE" ]  && echo "（残留 PID 文件 ${PID_FILE}，可手动清理）"
     fi
     exit 0
     ;;
@@ -220,7 +220,7 @@ case "$ACTION" in
       unit="$(cat "$UNIT_FILE" 2>/dev/null || true)"
       if [ -n "$unit" ] && systemctl is-active --quiet "$unit" 2>/dev/null; then
         systemctl stop "$unit" 2>/dev/null || true
-        echo "已停止（systemd 瞬态服务 $unit）"
+        echo "已停止（systemd 瞬态服务 ${unit}）"
       else
         echo "未运行"
       fi
@@ -281,7 +281,7 @@ case "$ACTION" in
         rm -f "$PID_FILE"
         sleep 0.5
         if systemctl is-active --quiet "$RUN_UNIT"; then
-          echo "已启动（systemd 瞬态服务 $RUN_UNIT，端口 $PORT）—— 关 ssh / 退出登录不掉。"
+          echo "已启动（systemd 瞬态服务 ${RUN_UNIT}，端口 ${PORT}）—— 关 ssh / 退出登录不掉。"
           echo "停止：$0 stop   |   状态：$0 status   |   日志：journalctl -u $RUN_UNIT -f"
           echo "（开机自启 / 崩溃重启请装静态 unit：见 deployments/release/README.md「下载服务长期运行」）"
           exit 0
@@ -309,7 +309,7 @@ case "$ACTION" in
     echo "$PORT"  > "$PORT_FILE"
     sleep 0.5
     if kill -0 "$pid" 2>/dev/null; then
-      echo "已启动 (PID=$pid，端口 $PORT)"
+      echo "已启动 (PID=${pid}，端口 $PORT)"
       echo "停止：$0 stop   |   状态：$0 status   |   日志：tail -f $LOG_FILE"
     else
       rm -f "$PID_FILE" "$PORT_FILE"
@@ -323,7 +323,7 @@ case "$ACTION" in
   __serve)
     # 后台 worker：start 通过 setsid/nohup 唤起，stdin/stdout/stderr 已重定向到 $LOG_FILE
     prepare_env
-    print_banner "$PORT" "本日志（$LOG_FILE）"
+    print_banner "$PORT" "本日志（${LOG_FILE}）"
     run_http_server "$PORT"
     ;;
 

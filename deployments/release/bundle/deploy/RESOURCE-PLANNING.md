@@ -88,7 +88,7 @@ CPU 空闲预算 = nproc − 主机CPU保留 − max(其它容器CPU, ⌈load15�
 | worker | 1024 | 2048 | 25% | PM/MR XML 解析最吃内存（111→1111 文件/s）；1M 走横向 |
 | **postgres** | **5120** | 16384 | 25% | **须容 `max_connections=200`**（180池+余量）：shared_buffers+maint+200×(10+work_mem) 须舒适放进限额 |
 | **postgres-tsdb** | **4096** | 12288 | 22% | **时序库（#347）独立 TimescaleDB 实例**：PM COPY 入库 + KPI 聚合写主要在此；与主库分别计入预算，防双 PG 同机超分 OOM。同源派生 `TSDB_*`（shared_buffers 25% 等），`max_connections=300` 与主库对齐（实际池仅 ~65，余量充足） |
-| redis | 3072 | 8192 | 15% | appendonly；限额须 ≥ maxmemory + 1GiB（AOF rewrite 的 fork COW 余量） |
+| redis | 5120 | 8192 | 15% | 12 分钟关窗会短时并存相邻两个小时的约 4 万设备窗口；20k 基站实测需 4GiB `maxmemory`，另留 1GiB AOF rewrite COW 余量 |
 | nats | 512 | 2048 | 5% | JetStream file store |
 | minio | 3072 | 4096 | 8% | 对象存储；压测发现按可见CPU配额自动估算的并发上限过于保守，且线上巡检 2.5GiB 配额下已到 88%，floor/ceil 上调留余量 |
 | web | 512 | 512 | 0% | nginx 静态+反代，固定 |
@@ -106,7 +106,7 @@ CPU 空闲预算 = nproc − 主机CPU保留 − max(其它容器CPU, ⌈load15�
 | PG `shared_buffers` | `0.25 × PG_MEM` | 取 25% 非 40%——留 OS page cache 给 Timescale 列存解压 |
 | PG `effective_cache_size` | `0.70 × PG_MEM` | 规划器提示（当前 4GB 默认对 2g 容器说谎） |
 | PG `max_connections` | `200`（固定） | 覆盖 Go 端 180 池 + 余量；自检饱和估算逼近限额时告警建议 pgbouncer |
-| Redis `maxmemory` | `0.66 × REDIS_MEM`，且保证 `限额−maxmemory ≥ 1GiB` | COW 余量；策略固定 `noeviction`，PM 聚合窗口不足时告警扩容而非静默淘汰 |
+| Redis `maxmemory` | `REDIS_MEM − 1GiB`；`REDIS_MEM` 下限 5GiB | 覆盖 12 分钟关窗造成的双小时窗口重叠，并保留 1GiB COW 余量；策略固定 `noeviction` |
 | `TSDB_*`（时序库 #347） | 同各 PG 公式 | 独立实例 postgres-tsdb 同源派生 `shared_buffers`/`effective_cache_size`/`work_mem`/`maint`/`max_wal`；`max_connections=300` 与主库对齐 |
 
 ---
@@ -185,7 +185,7 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
        GOMAXPROCS: "${APP_GOMAXPROCS:-2}"
    # 例：docker-compose.infra.yml
    redis:
-     command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-2gb}
+     command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-4gb}
               --maxmemory-policy noeviction
               --no-appendfsync-on-rewrite yes --save ""
    postgres:

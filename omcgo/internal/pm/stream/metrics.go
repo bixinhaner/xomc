@@ -15,6 +15,9 @@ type Metrics struct {
 	EventsFailedTotal           prometheus.Counter
 	DuplicateEventsTotal        prometheus.Counter
 	LateEventsTotal             prometheus.Counter
+	WatermarkBlockedTotal       prometheus.Counter
+	RebuildsTotal               *prometheus.CounterVec
+	RebuildErrorsTotal          prometheus.Counter
 	WindowsFinalizedTotal       *prometheus.CounterVec
 	FinalizeErrorsTotal         prometheus.Counter
 	FinalizeDuration            prometheus.Histogram
@@ -60,7 +63,19 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}),
 		LateEventsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_late_events_total",
-			Help: "Events received after their aggregation window was published.",
+			Help: "Events received after their aggregation window was published and queued for revision rebuild.",
+		}),
+		WatermarkBlockedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_watermark_blocked_total",
+			Help: "Timeout-close candidates held open because source queue events remain unconsumed.",
+		}),
+		RebuildsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_rebuilds_total",
+			Help: "Late-event aggregation rebuilds completed by granularity.",
+		}, []string{"granularity"}),
+		RebuildErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_rebuild_errors_total",
+			Help: "Late-event aggregation rebuild failures.",
 		}),
 		WindowsFinalizedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_windows_finalized_total",
@@ -102,6 +117,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.EventsFailedTotal,
 		m.DuplicateEventsTotal,
 		m.LateEventsTotal,
+		m.WatermarkBlockedTotal,
+		m.RebuildsTotal,
+		m.RebuildErrorsTotal,
 		m.WindowsFinalizedTotal,
 		m.FinalizeErrorsTotal,
 		m.FinalizeDuration,

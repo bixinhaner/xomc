@@ -104,6 +104,10 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	}
 	matcher := pmstream.NewMatcher(tz.Current())
 	windowRepo := pmstream.NewWindowRepository(w.TsPool)
+	if err := windowRepo.BackfillVersionMetadata(ctx, snapshot.Current()); err != nil {
+		logger.Error("backfill PM aggregation window version metadata", zap.Error(err))
+		return
+	}
 	finalizer := pmstream.NewFinalizer(windowRepo, store, logger).
 		SetConcurrency(cfg.FinalizeConcurrency).
 		SetSnapshot(snapshot).
@@ -112,9 +116,14 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	if err := recovery.RestoreActiveWindows(ctx); err != nil {
 		logger.Error("restore active PM aggregation windows", zap.Error(err))
 	}
+	outboxRepo := pmstream.NewOutboxRepository(w.TsPool)
+	rollupOutboxRepo := pmstream.NewRollupOutboxRepository(w.TsPool)
+	rebuildRepo := pmstream.NewRebuildRepository(w.TsPool)
 	consumer := pmstream.NewConsumer(
 		w.EventBus, snapshot, matcher, windowRepo, store, finalizer, logger,
-	).SetMetrics(streamMetrics)
+	).SetMetrics(streamMetrics).
+		SetConsumeBarriers(outboxRepo, rollupOutboxRepo).
+		SetRebuildRepository(rebuildRepo)
 	if setter, ok := w.EventBus.(interface {
 		SetPullTuning(string, event.PullTuning)
 	}); ok {
@@ -141,13 +150,19 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 		return
 	}
 	relay := pmstream.NewOutboxRelay(
-		pmstream.NewOutboxRepository(w.TsPool), w.EventBus, logger,
-	).SetBatch(cfg.OutboxBatch).SetMetrics(streamMetrics)
+		outboxRepo, w.EventBus, logger,
+	).SetBatch(cfg.OutboxBatch).
+		SetRetention(cfg.OutboxRetention, cfg.ReplayRetention).
+		SetMetrics(streamMetrics)
 	rollupRelay := pmstream.NewRollupOutboxRelay(
-		pmstream.NewRollupOutboxRepository(w.TsPool), w.EventBus, logger,
+		rollupOutboxRepo, w.EventBus, logger,
 	).SetBatch(cfg.OutboxBatch).SetMetrics(streamMetrics)
 	scanner := pmstream.NewTimeoutScanner(windowRepo, finalizer, cfg.CloseGrace, logger).
-		SetGranularityGrace(cfg.DailyCloseGrace, cfg.WeeklyCloseGrace, cfg.MonthlyCloseGrace)
+		SetGranularityGrace(cfg.DailyCloseGrace, cfg.WeeklyCloseGrace, cfg.MonthlyCloseGrace).
+		SetMetrics(streamMetrics)
+	rebuilder := pmstream.NewRebuilder(
+		rebuildRepo, recovery, finalizer, store, rollupOutboxRepo, logger,
+	).SetMetrics(streamMetrics)
 	go func() {
 		if err := relay.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("PM aggregation outbox relay stopped", zap.Error(err))
@@ -164,6 +179,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	go adhoc.NewPlannedEndScheduler(adhocRepo, time.Minute, logger).Run(ctx)
 	go snapshot.RunRefresh(ctx, time.Minute)
 	go recovery.Run(ctx, time.Minute)
+	go rebuilder.Run(ctx)
 	go scanner.Run(ctx)
 	streamMetrics.Ready.Set(1)
 	logger.Info("PM streaming aggregation ready",

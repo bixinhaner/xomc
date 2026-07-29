@@ -234,6 +234,8 @@ func rollupContributions(
 			SourceExpectedSlots:   payload.SourceExpectedSlots,
 			SourceReceivedSlots:   payload.SourceReceivedSlots,
 			SourceIncompleteSlots: incomplete,
+			VersionEffectiveFrom:  version.EffectiveFrom,
+			VersionEffectiveTo:    version.EffectiveTo,
 			Rollup:                true,
 			RollupChunkIndex:      payload.ChunkIndex,
 			RollupChunkCount:      payload.ChunkCount,

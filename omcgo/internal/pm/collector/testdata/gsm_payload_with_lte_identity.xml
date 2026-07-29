@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile>
+  <fileHeader vendorName="RegressionFixture">
+    <measCollec beginTime="2026-07-29T13:00:00+08:00"/>
+  </fileHeader>
+  <measData>
+    <managedElement localDn="SubNetwork=fixture,MeContext=eNB-FIXTURE"/>
+    <measInfo measInfoId="GSM">
+      <granPeriod duration="PT900S" endTime="2026-07-29T13:15:00+08:00"/>
+      <measType p="1">BTS.ActiveSeconds</measType>
+      <measType p="2">CALL.TotalAttempts</measType>
+      <measType p="3">SDCCH.Attempts</measType>
+      <measType p="4">TCH.SeizureAttempts</measType>
+      <measValue measObjLdn="BtsId=fixture-1">
+        <r p="1">900</r>
+        <r p="2">10</r>
+        <r p="3">8</r>
+        <r p="4">7</r>
+      </measValue>
+    </measInfo>
+  </measData>
+  <fileFooter>
+    <measCollec endTime="2026-07-29T13:15:00+08:00"/>
+  </fileFooter>
+</measCollecFile>

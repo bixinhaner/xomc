@@ -733,8 +733,8 @@ func printIngestReport(cfg config, runs []*ratRun, r *ingestReport) {
 		fmt.Printf("  [%-3s] 平台 %-8s 新增 counter %d，KPI %d\n", rr.prof.rat, rr.prof.platform, rr.addCnt, rr.addKpi)
 	}
 	if r.promScraped {
-		fmt.Printf("worker 指标增量: 成功 %.0f / 失败 %.0f / 迟到 %.0f 文件；发现并保留配置外 counter %.0f；单文件均 %.1fms；上报延迟均 %.1fs\n",
-			r.prom.filesSuccess, r.prom.filesFailed, r.prom.filesLate, r.prom.discoveredCounters, r.prom.avgProcMillis(), r.prom.avgDelaySec())
+		fmt.Printf("worker 指标增量: 成功 %.0f / 失败 %.0f / 迟到 %.0f 文件；白名单未命中值 %.0f；已知但禁用值 %.0f；单文件均 %.1fms；上报延迟均 %.1fs\n",
+			r.prom.filesSuccess, r.prom.filesFailed, r.prom.filesLate, r.prom.whitelistMiss, r.prom.knownDisabled, r.prom.avgProcMillis(), r.prom.avgDelaySec())
 	} else {
 		fmt.Printf("worker 指标   : %s\n", promHint(cfg.workerMetrics))
 	}

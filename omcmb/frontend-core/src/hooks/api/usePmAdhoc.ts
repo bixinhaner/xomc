@@ -114,6 +114,7 @@ export function usePmAdhocResults(
     // #599：星期/小时段后端过滤（全选/空 = 不传 = 不过滤）。
     weekdays?: number[];
     hours?: number[];
+    includePartial?: boolean;
   },
 ) {
   // T-0187 仪表盘自动出图要取更多结果行（默认 100 保持 AdhocResultPanel 现状）。
@@ -125,6 +126,7 @@ export function usePmAdhocResults(
   const objectLdns = opts?.objectLdns;
   const weekdays = opts?.weekdays;
   const hours = opts?.hours;
+  const includePartial = opts?.includePartial ?? false;
   // locale 并入查询键：切语言后图表标题指标名随后端本地化重取（pm-name-i18n）。
   const locale = useAppStore((s) => s.locale);
   return useQuery({
@@ -133,11 +135,17 @@ export function usePmAdhocResults(
       ...ADHOC_KEY,
       'results',
       taskId,
-      { limit, startTime, endTime, productIds, objectLdns, weekdays, hours, locale },
+      { limit, startTime, endTime, productIds, objectLdns, weekdays, hours, includePartial, locale },
     ],
     queryFn: () =>
-      api.results(taskId as string, limit, 0, startTime, endTime, productIds, objectLdns, weekdays, hours),
+      api.results(
+        taskId as string, limit, 0, startTime, endTime,
+        productIds, objectLdns, weekdays, hours, includePartial,
+      ),
     enabled: Boolean(taskId),
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 }
 

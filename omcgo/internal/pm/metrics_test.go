@@ -2,7 +2,6 @@ package pm
 
 import (
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -10,51 +9,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPMMetrics_DiscoveredAndDeprecatedAliasShareConcurrentSnapshot(t *testing.T) {
+func TestPMMetrics_FilteringReasonsUseIndependentCounters(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewPMMetrics(reg)
-	counter := m.DiscoveredCountersTotal.WithLabelValues("cmcc", "lte", "whitelist_miss")
-	counter.Inc()
 
-	stop := make(chan struct{})
-	var updater sync.WaitGroup
-	updater.Add(1)
-	go func() {
-		defer updater.Done()
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-				counter.Inc()
-			}
-		}
-	}()
-	defer func() {
-		close(stop)
-		updater.Wait()
-	}()
+	m.WhitelistMissValuesTotal.WithLabelValues("cmcc", "lte").Add(2)
+	m.KnownDisabledValuesTotal.WithLabelValues("cmcc", "lte").Add(3)
+	m.TechnologyMismatchFilesTotal.WithLabelValues("lte", "gsm").Inc()
 
-	for i := 0; i < 100; i++ {
-		families, err := reg.Gather()
-		require.NoError(t, err)
-
-		values := make(map[string]float64, 2)
-		for _, family := range families {
-			switch family.GetName() {
-			case "omc_pm_discovered_counters_total", "omc_pm_dropped_counters_total":
-				require.Len(t, family.Metric, 1)
-				values[family.GetName()] = family.Metric[0].GetCounter().GetValue()
-			}
-		}
-		require.Contains(t, values, "omc_pm_discovered_counters_total")
-		require.Contains(t, values, "omc_pm_dropped_counters_total")
-		require.Equal(t,
-			values["omc_pm_discovered_counters_total"],
-			values["omc_pm_dropped_counters_total"],
-			"deprecated alias must be emitted from the same gathered snapshot",
-		)
-	}
+	expected := `
+# HELP omc_pm_known_disabled_values_total PM counter values removed because their registered indicator is disabled.
+# TYPE omc_pm_known_disabled_values_total counter
+omc_pm_known_disabled_values_total{carrier="cmcc",technology="lte"} 3
+# HELP omc_pm_technology_mismatch_files_total PM files quarantined because XML evidence conflicts with the declared device technology.
+# TYPE omc_pm_technology_mismatch_files_total counter
+omc_pm_technology_mismatch_files_total{declared_technology="lte",detected_technology="gsm"} 1
+# HELP omc_pm_whitelist_miss_values_total PM counter values removed because the vendor report key is not registered in the routed indicator library.
+# TYPE omc_pm_whitelist_miss_values_total counter
+omc_pm_whitelist_miss_values_total{carrier="cmcc",technology="lte"} 2
+`
+	require.NoError(t, testutil.GatherAndCompare(
+		reg,
+		strings.NewReader(expected),
+		"omc_pm_whitelist_miss_values_total",
+		"omc_pm_known_disabled_values_total",
+		"omc_pm_technology_mismatch_files_total",
+	))
 }
 
 // G4-Gap-1: 验证 ReportDelaySeconds histogram 注册成功且能按 carrier×technology 维度记录。

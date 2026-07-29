@@ -25,12 +25,29 @@ type Consumer struct {
 	windows   *WindowRepository
 	store     *RedisWindowStore
 	finalizer *Finalizer
+	outbox    *OutboxRepository
+	rollups   *RollupOutboxRepository
+	rebuilds  *RebuildRepository
 	logger    *zap.Logger
 	metrics   *Metrics
 }
 
+func (c *Consumer) SetRebuildRepository(rebuilds *RebuildRepository) *Consumer {
+	c.rebuilds = rebuilds
+	return c
+}
+
 func (c *Consumer) SetMetrics(metrics *Metrics) *Consumer {
 	c.metrics = metrics
+	return c
+}
+
+func (c *Consumer) SetConsumeBarriers(
+	outbox *OutboxRepository,
+	rollups *RollupOutboxRepository,
+) *Consumer {
+	c.outbox = outbox
+	c.rollups = rollups
 	return c
 }
 
@@ -125,6 +142,11 @@ func (c *Consumer) handleRollup(ctx context.Context, envelope event.Event) error
 		}
 		return err
 	}
+	if c.rollups != nil {
+		if err := c.rollups.MarkConsumed(ctx, payload.EventID); err != nil {
+			return err
+		}
+	}
 	if c.metrics != nil {
 		c.metrics.EventsProcessedTotal.Inc()
 	}
@@ -156,20 +178,34 @@ func (c *Consumer) process(ctx context.Context, envelope event.Event) error {
 	if err != nil {
 		return fmt.Errorf("match PM aggregation event: %w", err)
 	}
-	return c.processContributions(ctx, contributions)
+	if err := c.processContributions(ctx, contributions); err != nil {
+		return err
+	}
+	if c.outbox != nil {
+		if err := c.outbox.MarkConsumed(ctx, payload.EventID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Consumer) processContributions(ctx context.Context, contributions []Contribution) error {
 	for _, contribution := range contributions {
-		published, err := c.windows.IsPublished(ctx, contribution.Key)
+		status, err := c.windows.Status(ctx, contribution.Key)
 		if err != nil {
 			return err
 		}
-		if published {
+		if status == "published" || status == "finalizing" || status == "rebuilding" {
 			if c.metrics != nil {
 				c.metrics.LateEventsTotal.Inc()
 			}
-			c.logger.Info("ignore late PM aggregation event",
+			if c.rebuilds == nil {
+				return fmt.Errorf("late PM aggregation event requires rebuild repository")
+			}
+			if err := c.rebuilds.Enqueue(ctx, contribution.Key, contribution.SourceFileID); err != nil {
+				return fmt.Errorf("enqueue late PM aggregation rebuild: %w", err)
+			}
+			c.logger.Info("queued late PM aggregation event for revision rebuild",
 				zap.String("source_file_id", contribution.SourceFileID),
 				zap.String("task_version_id", contribution.Key.TaskVersionID.String()),
 				zap.Time("window_start", contribution.Key.Start))
@@ -188,11 +224,6 @@ func (c *Consumer) processContributions(ctx context.Context, contributions []Con
 		if err := c.windows.ObserveReceived(ctx, contribution.Key, result.ReceivedSlots); err != nil {
 			return err
 		}
-		if result.Complete {
-			if err := c.finalizer.Finalize(ctx, contribution.Key, CloseComplete); err != nil {
-				return err
-			}
-		}
 	}
 	return nil
 }
@@ -203,6 +234,7 @@ type TimeoutScanner struct {
 	grace              time.Duration
 	graceByGranularity map[Granularity]time.Duration
 	logger             *zap.Logger
+	metrics            *Metrics
 }
 
 func NewTimeoutScanner(
@@ -240,6 +272,11 @@ func (s *TimeoutScanner) SetGranularityGrace(
 	return s
 }
 
+func (s *TimeoutScanner) SetMetrics(metrics *Metrics) *TimeoutScanner {
+	s.metrics = metrics
+	return s
+}
+
 func (s *TimeoutScanner) Run(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -258,6 +295,15 @@ func (s *TimeoutScanner) Run(ctx context.Context) {
 func (s *TimeoutScanner) runOnce(ctx context.Context) error {
 	const pageSize = 200
 	now := time.Now().UTC()
+	blocked, err := s.windows.CountWatermarkBlocked(
+		ctx, now, s.graceByGranularity, s.grace,
+	)
+	if err != nil {
+		return err
+	}
+	if blocked > 0 && s.metrics != nil {
+		s.metrics.WatermarkBlockedTotal.Add(float64(blocked))
+	}
 	var after *WindowKey
 	var finalizeErrors []error
 	for {
@@ -277,7 +323,11 @@ func (s *TimeoutScanner) runOnce(ctx context.Context) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := s.finalizer.Finalize(ctx, window.Key, CloseTimeout); err != nil {
+				reason := CloseTimeout
+				if window.ExpectedSlots > 0 && window.ReceivedSlots >= window.ExpectedSlots {
+					reason = CloseComplete
+				}
+				if err := s.finalizer.Finalize(ctx, window.Key, reason); err != nil {
 					s.logger.Warn("finalize timed out PM aggregation window",
 						zap.String("task_version_id", window.Key.TaskVersionID.String()),
 						zap.String("entity_key", window.Key.EntityKey),
