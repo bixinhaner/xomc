@@ -2,7 +2,10 @@ package topology
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -117,4 +120,41 @@ func TestDeviceGroupCountsCache_InvalidationRejectsInFlightStaleResult(t *testin
 
 	_, hit, _ = repo.cachedTreeWithCounts()
 	assert.False(t, hit, "失效前启动的查询结果不能在失效后重新写回缓存")
+}
+
+func TestDeviceGroupCountsCache_ConcurrentMissesShareOneLoad(t *testing.T) {
+	t.Parallel()
+
+	repo := &PgDeviceGroupRepository{}
+	var loads atomic.Int32
+	load := func(context.Context) ([]DeviceGroup, error) {
+		loads.Add(1)
+		time.Sleep(50 * time.Millisecond)
+		return []DeviceGroup{{Name: "shared"}}, nil
+	}
+
+	const callers = 32
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for range callers {
+		go func() {
+			defer wg.Done()
+			<-start
+			groups, err := repo.getTreeWithCountsCached(context.Background(), load)
+			if err == nil {
+				assert.Equal(t, "shared", groups[0].Name)
+			}
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, int32(1), loads.Load(), "并发冷缓存只能触发一次真实数据库查询")
 }
