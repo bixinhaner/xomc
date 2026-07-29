@@ -55,6 +55,18 @@ func TestStreamingTaskOutputMetricPathsBuiltinIncludesEnabledMetrics(t *testing.
 	require.Equal(t, []string{"K_TASK", "K_ENABLED"}, got)
 }
 
+func TestShouldRejectEmptyStreamingMembersCustomOnly(t *testing.T) {
+	require.True(t, shouldRejectEmptyStreamingMembers(&Task{IsBuiltin: false}, nil))
+	require.False(t, shouldRejectEmptyStreamingMembers(&Task{IsBuiltin: true}, nil))
+	require.False(t, shouldRejectEmptyStreamingMembers(nil, nil))
+}
+
+func TestStreamingTaskCreatorDefaultsToSystem(t *testing.T) {
+	require.Equal(t, "system", streamingTaskCreator(nil))
+	require.Equal(t, "system", streamingTaskCreator(&Task{}))
+	require.Equal(t, "alice", streamingTaskCreator(&Task{Creator: "alice"}))
+}
+
 func TestStreamingEnabledDeviceTypesUsesTaskTechnology(t *testing.T) {
 	got, err := streamingEnabledDeviceTypes("lte")
 
