@@ -338,13 +338,24 @@ GPV 旧消费者积压尚未部署根治版本时，Redis 数据集继续增长�
 - 当前自然日 daily 窗口已创建但仍 open；自然日尚未结束，因此没有 daily final，
   weekly 也未到可发布点。不能把进行中周期解释成完整自然周期。
 - `PMRebuildSnapshotScanSlow` 曾短暂 pending，随后清除；快照扫描样本 1 次、
-  57.42 秒。固定 PM/PM_AGG 消费无积压，但终点
-  `PMFinalizeOldestDueHigh` 正在 firing，oldest due 约 2166 秒，
-  finalize errors 为 0、claim conflicts 为 0、inflight 为 1。这说明历史窗口修复
-  读取仍拖慢关闭新鲜度，必须继续部署有界历史扫描/公平轮转修复后复验，不能宣称
-  PM 聚合完全无异常。
+  57.42 秒。`git merge-base --is-ancestor 25d6ea0f4 c77d57b55` 返回 0，确认部署版本
+  已包含有界历史版本查询和公平轮转修复，不能把当时的关闭告警解释成“修复未部署”。
+- 12:48 终点 `PMFinalizeOldestDueHigh` 一度 firing。按代码中的实际 outbox 水位屏障
+  条件定位后，唯一到期组是 19:00 小时、版本 `444fd458…` 的 20000 个设备窗口：
+  4/4 源槽完整、`last_error` 为空、失败重试数为 0、claim conflict/error 均为 0。
+  这批窗口的 due_at 完全相同，因此整批清完前 oldest-due 秒数仍会增长。
+- 实际排空样本为 open `3923 → 2525`、claims `13907 → 15305`，60 秒恰好关闭
+  1398 个；按该速度当时预计约 1.8 分钟清空。12:56:21 复核已经
+  `published=20000, open=0`、`oldest_due_seconds=0`、inflight=0，
+  `PMFinalizeOldestDueHigh` 随后清除。结论是部署恢复期的同批历史欠账被公平调度稳定
+  排空，不是新鲜窗口阻塞或调度停滞。
+- 清空后 `PMAggregationWatermarkBlocked` 短暂 pending，但两个 outbox 的
+  unconsumed/barrier 均为 0，固定 PM_AGG consumer pending/redelivery 均为 0；
+  这是 10 分钟 increase 窗口仍包含先前水位等待计数，不是当前屏障积压。
 - 两个既有外部业务告警仍为 `PMReportKeysMissingFromLibrary` 和
   `PMKnownIndicatorsDisabled`；其含义与前述厂家上报名/指标库覆盖漂移一致。
-- 终点另有两个 `ContainerMemoryNearLimit` 处于 pending：PostgreSQL 约 92.3%，
-  Tempo 约 97.6%。尚未持续到 firing，但资源告警有效，需继续观察并调整对应上限或
-  工作集。
+- 终点曾有 PostgreSQL、Tempo 两个 `ContainerMemoryNearLimit` pending。12:56
+  复核 Tempo working set 已降至 341528576 / 536870912 bytes（约 63.6%），告警
+  已清除；PostgreSQL 为 6828449792 / 7516192768 bytes（约 90.8%），仍在阈值附近
+  短暂 pending、尚未 firing，需要继续观察其 working set，而不能写成两个服务都
+  持续接近上限。
