@@ -712,7 +712,7 @@ func TestPrepareGPVHandoffFromActiveLegacyConsumerCapturesSwitchWindow(t *testin
 	require.NoError(t, sub.Unsubscribe())
 }
 
-func TestPrepareGPVHandoffFromConfiguredDurableUsesItsAckFloor(t *testing.T) {
+func TestPrepareGPVHandoffRejectsConfiguredNonRPCDurable(t *testing.T) {
 	url := os.Getenv("GPV_NATS_TEST_URL")
 	if url == "" {
 		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
@@ -756,17 +756,157 @@ func TestPrepareGPVHandoffFromConfiguredDurableUsesItsAckFloor(t *testing.T) {
 		require.NoError(t, msg.AckSync())
 	}
 
-	result, err := PrepareGPVHandoff(context.Background(), js, GPVHandoffConfig{
+	_, err = PrepareGPVHandoff(context.Background(), js, GPVHandoffConfig{
 		Subject: subject, TargetDurable: target, SourceConsumer: source,
 		AckWait: time.Second, MaxDeliver: 5, MaxAckPending: 10,
 	})
-	require.NoError(t, err)
-	require.Equal(t, source, result.SourceConsumer)
-	require.Equal(t, uint64(3), result.StartSequence)
+	require.ErrorContains(t, err, "is not a strict legacy RPC ephemeral")
+	_, targetErr := js.ConsumerInfo(stream, target)
+	require.ErrorIs(t, targetErr, nats.ErrConsumerNotFound)
 	require.NoError(t, legacy.Unsubscribe())
 }
 
-func TestPrepareGPVHandoffWithoutSourceStartsAtTailAndCapturesFutureMessages(t *testing.T) {
+func TestPrepareGPVHandoffAutoDiscoveryIgnoresOtherGPVPushDurables(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("GPV_PRODUCTION_TOPOLOGY_%d", suffix)
+	subject := fmt.Sprintf("test.gpv.production.topology.%d", suffix)
+	target := fmt.Sprintf("device-rpc-gpv-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name: stream, Subjects: []string{subject}, Storage: nats.MemoryStorage,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	legacyRPC, err := js.SubscribeSync(subject, nats.DeliverAll(), nats.AckExplicit())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = legacyRPC.Unsubscribe() })
+	alarmSync, err := js.QueueSubscribeSync(
+		subject,
+		"alarm-sync-gpv",
+		nats.Durable("alarm-sync-gpv"),
+		nats.DeliverAll(),
+		nats.AckExplicit(),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = alarmSync.Unsubscribe() })
+	softwareRollback, err := js.QueueSubscribeSync(
+		subject,
+		"software-rollback-gpv-resp",
+		nats.Durable("software-rollback-gpv-resp"),
+		nats.DeliverAll(),
+		nats.AckExplicit(),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = softwareRollback.Unsubscribe() })
+
+	for sequence := 1; sequence <= 2; sequence++ {
+		evt, eventErr := NewEvent(subject, map[string]any{"device_sn": "SN-TOPOLOGY", "sequence": sequence})
+		require.NoError(t, eventErr)
+		data, marshalErr := json.Marshal(evt)
+		require.NoError(t, marshalErr)
+		_, publishErr := js.Publish(subject, data)
+		require.NoError(t, publishErr)
+	}
+	msg, err := legacyRPC.NextMsg(time.Second)
+	require.NoError(t, err)
+	require.NoError(t, msg.AckSync())
+	legacyInfo, err := legacyRPC.ConsumerInfo()
+	require.NoError(t, err)
+
+	result, err := PrepareGPVHandoff(context.Background(), js, GPVHandoffConfig{
+		Subject: subject, TargetDurable: target,
+		AckWait: time.Second, MaxDeliver: 5, MaxAckPending: 10,
+	})
+	require.NoError(t, err)
+	require.Equal(t, legacyInfo.Name, result.SourceConsumer)
+	require.Equal(t, uint64(2), result.StartSequence)
+}
+
+func TestPrepareGPVHandoffRejectsMultipleLegacyRPCEphemerals(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("GPV_AMBIGUOUS_HANDOFF_%d", suffix)
+	subject := fmt.Sprintf("test.gpv.ambiguous.handoff.%d", suffix)
+	target := fmt.Sprintf("device-rpc-gpv-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name: stream, Subjects: []string{subject}, Storage: nats.MemoryStorage,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	first, err := js.SubscribeSync(subject, nats.DeliverAll(), nats.AckExplicit())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = first.Unsubscribe() })
+	second, err := js.SubscribeSync(subject, nats.DeliverAll(), nats.AckExplicit())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = second.Unsubscribe() })
+
+	_, err = PrepareGPVHandoff(context.Background(), js, GPVHandoffConfig{
+		Subject: subject, TargetDurable: target,
+		AckWait: time.Second, MaxDeliver: 5, MaxAckPending: 10,
+	})
+	require.ErrorContains(t, err, "multiple strict legacy RPC ephemeral consumers")
+	_, targetErr := js.ConsumerInfo(stream, target)
+	require.ErrorIs(t, targetErr, nats.ErrConsumerNotFound)
+}
+
+func TestPrepareGPVHandoffWithoutSourceRejectsNonEmptyStream(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("GPV_UNSAFE_TAIL_HANDOFF_%d", suffix)
+	subject := fmt.Sprintf("test.gpv.unsafe.tail.handoff.%d", suffix)
+	target := fmt.Sprintf("device-rpc-gpv-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name: stream, Subjects: []string{subject}, Storage: nats.MemoryStorage,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	evt, err := NewEvent(subject, map[string]any{"device_sn": "SN-UNSAFE", "sequence": 1})
+	require.NoError(t, err)
+	data, err := json.Marshal(evt)
+	require.NoError(t, err)
+	_, err = js.Publish(subject, data)
+	require.NoError(t, err)
+
+	_, err = PrepareGPVHandoff(context.Background(), js, GPVHandoffConfig{
+		Subject: subject, TargetDurable: target,
+		AckWait: time.Second, MaxDeliver: 5, MaxAckPending: 10,
+	})
+	require.ErrorContains(t, err, "has messages but no strict legacy RPC source")
+	_, targetErr := js.ConsumerInfo(stream, target)
+	require.ErrorIs(t, targetErr, nats.ErrConsumerNotFound)
+}
+
+func TestPrepareGPVHandoffFreshInstallStartsAtTailAndCapturesFutureMessages(t *testing.T) {
 	url := os.Getenv("GPV_NATS_TEST_URL")
 	if url == "" {
 		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
@@ -795,7 +935,7 @@ func TestPrepareGPVHandoffWithoutSourceStartsAtTailAndCapturesFutureMessages(t *
 	require.NoError(t, err)
 
 	result, err := PrepareGPVHandoff(context.Background(), js, GPVHandoffConfig{
-		Subject: subject, TargetDurable: target,
+		Subject: subject, TargetDurable: target, FreshInstall: true,
 		AckWait: time.Second, MaxDeliver: 5, MaxAckPending: 10,
 	})
 	require.NoError(t, err)

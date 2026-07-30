@@ -97,6 +97,11 @@ contains "svc 加载 handoff 库" 'gpv-handoff-lib.sh' "$SVC"
 contains "install 在业务 up 前准备 durable" 'gpv_handoff_prepare' "$INSTALL"
 contains "svc 在重启前准备 durable" 'gpv_handoff_prepare' "$SVC"
 contains "真实 NATS 验证脚本强制注入地址" 'GPV_NATS_TEST_URL=' "$RELEASE_NATS_VERIFY"
+if bash "$RELEASE_NATS_VERIFY"; then
+  ok
+else
+  bad "真实 NATS GPV handoff / FIFO 回归"
+fi
 not_contains "业务镜像存在时不得提前重启 app" '业务镜像已存在，跳过 load，重启业务容器' "$INSTALL"
 if bash "$RELEASE_DEPLOY/install-resource-preflight_test.sh"; then
   ok

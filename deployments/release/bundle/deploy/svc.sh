@@ -141,31 +141,16 @@ refresh_resource_plan_metrics() {
 
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 
-action_stops_running_app() {
-  local target
-  case "$ACTION" in
-    down) return 0 ;;
-    stop|restart)
-      [ ${#TARGETS[@]} -eq 0 ] && return 0
-      for target in "${TARGETS[@]}"; do
-        [ "$target" = "app" ] && return 0
-      done
-      ;;
-  esac
-  return 1
-}
-
-app_is_running() {
+app_exists() {
   local cid
-  cid="$("${DC[@]}" ps -q app 2>/dev/null || true)"
-  [ -n "$cid" ] &&
-    [ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || true)" = "true" ]
+  cid="$("${DC[@]}" ps -a -q app 2>/dev/null || true)"
+  [ -n "$cid" ]
 }
 
-if action_stops_running_app && app_is_running; then
-  log "在停止/重建 app 前预创建 GPV RPC 固定 durable ..."
+if gpv_handoff_action_touches_app "$ACTION" "${TARGETS[@]}" && app_exists; then
+  log "在启动、停止或重建现有 app 前预创建 GPV RPC 固定 durable ..."
   gpv_handoff_prepare ||
-    die "GPV consumer handoff 失败；旧 app 保持运行，未执行 $ACTION"
+    die "GPV consumer handoff 失败；未改变现有 app，未执行 $ACTION"
 fi
 
 # 行为分派

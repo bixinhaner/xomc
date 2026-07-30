@@ -15,6 +15,7 @@ type GPVHandoffConfig struct {
 	TargetDurable        string
 	SourceConsumer       string
 	ProvisionPullDurable string
+	FreshInstall         bool
 	AckWait              time.Duration
 	MaxDeliver           int
 	MaxAckPending        int
@@ -89,6 +90,22 @@ func PrepareGPVHandoff(
 		startSequence = source.AckFloor.Stream + 1
 		result.StartSequence = startSequence
 		deliverPolicy = nats.DeliverByStartSequencePolicy
+	} else if !config.FreshInstall {
+		streamInfo, streamErr := js.StreamInfo(stream, nats.Context(ctx))
+		if streamErr != nil {
+			return GPVHandoffResult{}, fmt.Errorf(
+				"load GPV stream state for %s: %w",
+				stream,
+				streamErr,
+			)
+		}
+		if streamInfo.State.Msgs > 0 {
+			return GPVHandoffResult{}, fmt.Errorf(
+				"GPV stream %s has messages but no strict legacy RPC source; "+
+					"refusing DeliverNew without an explicit fresh-install marker",
+				stream,
+			)
+		}
 	}
 
 	consumerConfig := &nats.ConsumerConfig{
@@ -135,9 +152,9 @@ func findGPVHandoffSource(
 				err,
 			)
 		}
-		if !consumerFiltersSubject(source.Config, config.Subject) {
+		if !isStrictLegacyRPCEphemeral(source.Config, config.Subject) {
 			return nil, fmt.Errorf(
-				"configured GPV source consumer %s/%s does not filter %s",
+				"configured GPV source consumer %s/%s is not a strict legacy RPC ephemeral for %s",
 				stream,
 				config.SourceConsumer,
 				config.Subject,
@@ -152,8 +169,7 @@ func findGPVHandoffSource(
 			info.Name == config.ProvisionPullDurable {
 			continue
 		}
-		if info.Config.DeliverSubject == "" ||
-			!consumerFiltersSubject(info.Config, config.Subject) {
+		if !isStrictLegacyRPCEphemeral(info.Config, config.Subject) {
 			continue
 		}
 		candidates = append(candidates, info)
@@ -172,11 +188,21 @@ func findGPVHandoffSource(
 			names = append(names, candidate.Name)
 		}
 		return nil, fmt.Errorf(
-			"multiple GPV push consumers match %s: %s; configure the source consumer explicitly",
+			"multiple strict legacy RPC ephemeral consumers match %s: %s; "+
+				"refusing handoff until the obsolete consumer is removed",
 			config.Subject,
 			strings.Join(names, ","),
 		)
 	}
+}
+
+func isStrictLegacyRPCEphemeral(config nats.ConsumerConfig, subject string) bool {
+	return config.Durable == "" &&
+		config.DeliverSubject != "" &&
+		config.DeliverGroup == "" &&
+		config.DeliverPolicy == nats.DeliverAllPolicy &&
+		config.AckPolicy == nats.AckExplicitPolicy &&
+		consumerFiltersSubject(config, subject)
 }
 
 func validateGPVHandoffTarget(info *nats.ConsumerInfo, config GPVHandoffConfig) error {

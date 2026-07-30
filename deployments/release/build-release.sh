@@ -45,11 +45,13 @@ iso_time() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 # ── 参数解析 ────────────────────────────────────────────────────────────
 VERSION=""
 CHANNEL="${RELEASE_CHANNEL:-test}"
+VERIFY_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -v|--version) VERSION="$2"; shift 2 ;;
     --channel)    CHANNEL="$2"; shift 2 ;;
     --arch)       ARCHES="$2"; shift 2 ;;
+    --verify-only) VERIFY_ONLY=1; shift ;;
     -h|--help)    sed -n '3,26p' "$0"; exit 0 ;;
     *)            die "未知参数：$1（-h 查看用法）" ;;
   esac
@@ -66,6 +68,13 @@ for _a in $ARCHES; do
         如确实需要 arm64：见 release.conf 中关于 架构支持 的注释,
         改 ARCHES + 移除本脚本的校验后自行验证。"
 done
+
+RELEASE_VERIFY_SCRIPT="$SCRIPT_DIR/bundle/deploy/storage-compose_test.sh"
+log "运行发布前回归门禁 ..."
+if ! bash "$RELEASE_VERIFY_SCRIPT"; then
+  die "发布前回归门禁失败：$RELEASE_VERIFY_SCRIPT"
+fi
+[ "$VERIFY_ONLY" = 1 ] && exit 0
 
 # ── 前置检查 ────────────────────────────────────────────────────────────
 # 本工具是构建脚本，应以【普通用户】运行，不要 sudo。本工具【不需要 docker】。
