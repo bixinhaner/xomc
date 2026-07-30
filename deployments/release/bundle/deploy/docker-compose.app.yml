@@ -230,6 +230,12 @@ services:
   acs:
     image: ${IMAGE_ACS}
     restart: unless-stopped
+    # 2 万设备同步 Inform 波峰会瞬时建立数千条 Nginx→ACS 连接。默认
+    # somaxconn=4096 / SYN backlog=2048 会让连接在代理侧超时；显式扩大
+    # 容器网络命名空间内的监听队列，与 session.max_concurrent=30000 对齐。
+    sysctls:
+      net.core.somaxconn: "32768"
+      net.ipv4.tcp_max_syn_backlog: "32768"
     # 与 Go 端 shutdown_timeout(30s) 对齐
     stop_grace_period: 30s
     deploy:
