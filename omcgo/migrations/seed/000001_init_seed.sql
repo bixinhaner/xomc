@@ -26316,6 +26316,14 @@ SET report_key = CASE indicator_id
 WHERE platform_name = 'BLQ'
   AND indicator_id IN ('C000010070', 'C000010080');
 
+-- BLQ devices report the complete ACCESS suffix. Keep this repair scoped to the
+-- BLQ route so another platform's legacy spelling cannot leak into its mapping.
+UPDATE public.rela_platform_indicator_formula_enb
+SET report_key = 'RRC.SuccConnEstab.HIGHPRIORITYACCESS',
+    updated_at = now()
+WHERE platform_name = 'BLQ'
+  AND indicator_id = 'C000000014';
+
 -- Repair every persisted enabled-indicator set, including operator-specific sets
 -- changed before dependency-closure validation was introduced.
 WITH RECURSIVE dependency_closure(operator_code, indicator_id) AS (

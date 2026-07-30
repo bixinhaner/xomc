@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBLQCriticalERABReportKeysMatchDevicePayload(t *testing.T) {
+func TestBLQCriticalReportKeysMatchDevicePayload(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BLQ.xml")
 	file, err := os.Open(path)
 	require.NoError(t, err)
@@ -24,4 +24,5 @@ func TestBLQCriticalERABReportKeysMatchDevicePayload(t *testing.T) {
 	}
 	require.Equal(t, "ERAB.EstabInitAttNbr.Sum", byID["C000010070"].ReportKey)
 	require.Equal(t, "ERAB.EstabInitSuccNbr.Sum", byID["C000010080"].ReportKey)
+	require.Equal(t, "RRC.SuccConnEstab.HIGHPRIORITYACCESS", byID["C000000014"].ReportKey)
 }
