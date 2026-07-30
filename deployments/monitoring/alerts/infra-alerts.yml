@@ -99,35 +99,37 @@ groups:
             Impact: 新连接可能被拒，应用侧 pgxpool 取连接排队、p99 抖动。
             Action: 查连接泄漏 / 慢查询占用连接；评估调大 max_connections 或连接池配额。
 
-      - alert: RedisMemoryHigh
+      - alert: RedisAggregationMemoryHigh
         # redis_memory_max_bytes=0（或缺失）表示未设 maxmemory ——
-        # 用 and 守卫避免除零 / 缺失误报。dev 环境通常 maxmemory 未设。
-        expr: (redis_memory_used_bytes / redis_memory_max_bytes > 0.85) and (redis_memory_max_bytes > 0)
+        # 用 and 守卫避免除零 / 缺失误报。聚合状态与普通缓存共享 Redis，
+        # 因此这里监控实际 Redis 水位而非不完整的抽样估算。
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes >= 0.80) and (redis_memory_max_bytes > 0)
         for: 5m
         labels:
           severity: warning
           domain: omc
           service: redis
         annotations:
-          summary: "Redis 内存使用接近 maxmemory（> 85%）"
+          summary: "Redis 聚合内存使用接近 maxmemory（>= 80%）"
           description: |
-            Redis 已用内存超过 maxmemory 的 85%，持续 5 分钟。
+            Redis 已用内存达到 maxmemory 的 80%，持续 5 分钟。
             Impact: 当前 noeviction 会拒绝新写入，PM 聚合窗口将无法累加并触发消息重投。
-            Action: 查 pmagg 大 key、活跃窗口数量与 TTL；按资源预算扩容或降低状态开销。
+            Action: 查 pmagg 活跃窗口/抽样 bytes、TTL 和 sweeper；确认 Redis v2 已启用，
+                    按资源预算扩容或降低状态开销。
 
-      - alert: RedisMemoryCritical
-        expr: (redis_memory_used_bytes / redis_memory_max_bytes > 0.95) and (redis_memory_max_bytes > 0)
-        for: 1m
+      - alert: RedisAggregationMemoryCritical
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes >= 0.90) and (redis_memory_max_bytes > 0)
+        for: 2m
         labels:
           severity: critical
           domain: omc
           service: redis
         annotations:
-          summary: "Redis 内存即将达到 maxmemory（> 95%）"
+          summary: "Redis 聚合内存即将达到 maxmemory（>= 90%）"
           description: |
-            Redis 已用内存超过 maxmemory 的 95%。noeviction 会拒绝新写入，
+            Redis 已用内存达到 maxmemory 的 90%。noeviction 会拒绝新写入，
             PM 聚合状态、幂等键和运行时缓存都可能写入失败。
-            立即检查 pmagg 状态规模、异常恢复循环和 Redis 容量。
+            立即检查 pmagg 状态规模、异常恢复循环和 Redis 容量；不要切换为淘汰策略。
 
 # TODO（留 T-0153 续）：NATS JetStream 积压告警。
 # prometheus-nats-exporter 的 JetStream 指标名随 exporter 版本而异，需在监控栈

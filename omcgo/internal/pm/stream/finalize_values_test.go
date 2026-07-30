@@ -31,6 +31,17 @@ func TestFinalizationCoverageUsesClosedVersionSlotsForResultCompleteness(t *test
 	require.EqualValues(t, 11, state.ExpectedSlots)
 	require.EqualValues(t, 11, result.VersionExpectedSlots)
 	require.False(t, result.PeriodComplete)
+	require.True(t, result.DailyVersionExpectedSlotsMismatch)
+}
+
+func TestFinalizationCoverageDoesNotFlagNaturalDailyVersion(t *testing.T) {
+	windowStart := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	version := &TaskVersionSnapshot{EffectiveFrom: windowStart}
+	key := WindowKey{Granularity: GranularityDaily, Start: windowStart, End: windowStart.Add(24 * time.Hour)}
+
+	_, coverage := finalizationCoverageFor(key, version, WindowState{ExpectedSlots: 24}, time.UTC)
+
+	require.False(t, coverage.DailyVersionExpectedSlotsMismatch)
 }
 
 func TestFinalizerUsesConfiguredLocationForDSTVersionBoundary(t *testing.T) {

@@ -283,6 +283,65 @@ groups:
             迟到事件已进入持久重建队列但执行失败。
             Action: 检查 pm_aggregation_rebuilds.last_error、持久 outbox 保留和 Redis/TSDB 状态。
 
+      - alert: PMFinalizeOldestDueHigh
+        # warning > 30m。仅由有界关闭调度器维护；无 due 窗口时不会输出序列，
+        # 因此不会空窗误报。
+        expr: omc_pm_aggregation_finalize_oldest_due_seconds > 1800
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 窗口关闭尾延迟持续超过 30 分钟"
+          description: |
+            最老已到关闭宽限的 PM 聚合窗口仍未完成关闭超过 30 分钟。
+            Action: 对照 finalize inflight、claim conflict、worker CPU、NATS 水位和 TSDB 写入耗时；
+                    不要通过缩短关闭宽限或跳过迟到重算掩盖积压。
+
+      - alert: PMFinalizeOldestDueCritical
+        # critical > 60m。
+        expr: omc_pm_aggregation_finalize_oldest_due_seconds > 3600
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 窗口关闭尾延迟超过 60 分钟"
+          description: |
+            有 PM 聚合窗口在到达关闭宽限后超过 60 分钟仍未发布。
+            Impact: 小时/天/周 KPI 新鲜度持续下降，迟到重算会继续放大数据库负载。
+            Action: 立即检查 worker、TSDB、Redis 和 finalize lease；必要时扩资源后让有界调度器排空。
+
+      - alert: PMRebuildSnapshotScanSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(omc_pm_aggregation_rebuild_snapshot_scan_seconds_bucket[10m]))) > 10
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 迟到重算紧凑快照扫描 P95 持续超过 10 秒"
+          description: |
+            共享 rollup 快照扫描的 P95 超过 10 秒，说明重算数据库读取成本偏高。
+            Action: 对照 rebuild batch 大小、扫描行数、coalesced 数和 TSDB CPU/I/O；
+                    禁止恢复按 network/product/group 重复扫描的旧路径。
+
+      - alert: PMDailyVersionExpectedSlotsMismatch
+        expr: increase(omc_pm_aggregation_daily_version_expected_slots_mismatch_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "日聚合版本片段期望槽位与自然周期不一致"
+          description: |
+            已成功发布的规则日窗口中，version-calibrated expected slots 与自然日槽位不同。
+            这是版本中途生效的可观测事实，不等同于数据缺失；检查结果中的 version_expected_slots、
+            natural_expected_slots 和 period_complete，确认消费者没有把版本片段误判为完整自然日。
+
   - name: omc.meta
     interval: 30s
     rules:

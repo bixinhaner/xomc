@@ -27,6 +27,8 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 	metrics.RedisSampledEstimatedBytes.WithLabelValues("hourly").Set(4096)
 	metrics.RedisSweeperDeletedTotal.Inc()
 	metrics.RedisWriteErrorsTotal.Inc()
+	metrics.DailyVersionExpectedSlotsMismatchTotal.Inc()
+	metrics.ResultReplaceSeconds.Observe(0.01)
 
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.Ready))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DuplicateEventsTotal))
@@ -41,6 +43,7 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 	require.Equal(t, float64(2), testutil.ToFloat64(metrics.FinalizeInflight))
 	require.Equal(t, float64(3600), testutil.ToFloat64(metrics.FinalizeOldestDueSeconds))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.FinalizeClaimConflictsTotal))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DailyVersionExpectedSlotsMismatchTotal))
 
 	families, err := registry.Gather()
 	require.NoError(t, err)
@@ -58,6 +61,8 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 		"omc_pm_aggregation_redis_sampled_estimated_bytes",
 		"omc_pm_aggregation_redis_sweeper_deleted_total",
 		"omc_pm_aggregation_redis_write_errors_total",
+		"omc_pm_aggregation_daily_version_expected_slots_mismatch_total",
+		"omc_pm_aggregation_result_replace_seconds",
 	} {
 		require.Contains(t, names, name)
 	}

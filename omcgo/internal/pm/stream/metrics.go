@@ -6,39 +6,41 @@ import "github.com/prometheus/client_golang/prometheus"
 // aggregation path. Task, device and metric identifiers are deliberately not
 // labels because a production system can have tens of thousands of each.
 type Metrics struct {
-	Ready                       prometheus.Gauge
-	OutboxPublishedTotal        prometheus.Counter
-	OutboxErrorsTotal           prometheus.Counter
-	RollupOutboxPublishedTotal  prometheus.Counter
-	RollupOutboxErrorsTotal     prometheus.Counter
-	EventsProcessedTotal        prometheus.Counter
-	EventsFailedTotal           prometheus.Counter
-	DuplicateEventsTotal        prometheus.Counter
-	LateEventsTotal             prometheus.Counter
-	WatermarkBlockedTotal       prometheus.Counter
-	RebuildsTotal               *prometheus.CounterVec
-	RebuildErrorsTotal          prometheus.Counter
-	RebuildBatchesTotal         prometheus.Counter
-	RebuildJobsPerBatch         prometheus.Histogram
-	RebuildSnapshotRowsTotal    prometheus.Counter
-	RebuildSnapshotScanSeconds  prometheus.Histogram
-	RebuildCoalescedTotal       prometheus.Counter
-	WindowsFinalizedTotal       *prometheus.CounterVec
-	FinalizeErrorsTotal         prometheus.Counter
-	FinalizeDuration            prometheus.Histogram
-	FinalizeClaims              prometheus.Counter
-	FinalizeInflight            prometheus.Gauge
-	FinalizeOldestDueSeconds    prometheus.Gauge
-	FinalizeClaimConflictsTotal prometheus.Counter
-	RedisSampledActiveWindows   *prometheus.GaugeVec
-	RedisSampledKeys            *prometheus.GaugeVec
-	RedisSampledEstimatedBytes  *prometheus.GaugeVec
-	RedisSweeperDeletedTotal    prometheus.Counter
-	RedisWriteErrorsTotal       prometheus.Counter
-	BuiltinReconcileRunsTotal   prometheus.Counter
-	BuiltinReconcileErrorsTotal prometheus.Counter
-	BuiltinVersionsChangedTotal prometheus.Counter
-	BuiltinDefinitionsEmpty     prometheus.Gauge
+	Ready                                  prometheus.Gauge
+	OutboxPublishedTotal                   prometheus.Counter
+	OutboxErrorsTotal                      prometheus.Counter
+	RollupOutboxPublishedTotal             prometheus.Counter
+	RollupOutboxErrorsTotal                prometheus.Counter
+	EventsProcessedTotal                   prometheus.Counter
+	EventsFailedTotal                      prometheus.Counter
+	DuplicateEventsTotal                   prometheus.Counter
+	LateEventsTotal                        prometheus.Counter
+	WatermarkBlockedTotal                  prometheus.Counter
+	RebuildsTotal                          *prometheus.CounterVec
+	RebuildErrorsTotal                     prometheus.Counter
+	RebuildBatchesTotal                    prometheus.Counter
+	RebuildJobsPerBatch                    prometheus.Histogram
+	RebuildSnapshotRowsTotal               prometheus.Counter
+	RebuildSnapshotScanSeconds             prometheus.Histogram
+	RebuildCoalescedTotal                  prometheus.Counter
+	WindowsFinalizedTotal                  *prometheus.CounterVec
+	FinalizeErrorsTotal                    prometheus.Counter
+	FinalizeDuration                       prometheus.Histogram
+	FinalizeClaims                         prometheus.Counter
+	FinalizeInflight                       prometheus.Gauge
+	FinalizeOldestDueSeconds               prometheus.Gauge
+	FinalizeClaimConflictsTotal            prometheus.Counter
+	DailyVersionExpectedSlotsMismatchTotal prometheus.Counter
+	ResultReplaceSeconds                   prometheus.Histogram
+	RedisSampledActiveWindows              *prometheus.GaugeVec
+	RedisSampledKeys                       *prometheus.GaugeVec
+	RedisSampledEstimatedBytes             *prometheus.GaugeVec
+	RedisSweeperDeletedTotal               prometheus.Counter
+	RedisWriteErrorsTotal                  prometheus.Counter
+	BuiltinReconcileRunsTotal              prometheus.Counter
+	BuiltinReconcileErrorsTotal            prometheus.Counter
+	BuiltinVersionsChangedTotal            prometheus.Counter
+	BuiltinDefinitionsEmpty                prometheus.Gauge
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -142,6 +144,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_pm_aggregation_finalize_claim_conflicts_total",
 			Help: "Finalize claim attempts blocked by an unexpired lease.",
 		}),
+		DailyVersionExpectedSlotsMismatchTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_daily_version_expected_slots_mismatch_total",
+			Help: "Finalized rule daily windows whose version-calibrated expected slots differ from the natural daily period.",
+		}),
+		ResultReplaceSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "omc_pm_aggregation_result_replace_seconds",
+			Help:    "Time spent staging and upserting one PM aggregation result window in TimescaleDB.",
+			Buckets: prometheus.DefBuckets,
+		}),
 		RedisSampledActiveWindows: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "omc_pm_aggregation_redis_sampled_active_windows",
 			Help: "Active Redis aggregation windows observed in the latest bounded sample.",
@@ -204,6 +215,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.FinalizeInflight,
 		m.FinalizeOldestDueSeconds,
 		m.FinalizeClaimConflictsTotal,
+		m.DailyVersionExpectedSlotsMismatchTotal,
+		m.ResultReplaceSeconds,
 		m.RedisSampledActiveWindows,
 		m.RedisSampledKeys,
 		m.RedisSampledEstimatedBytes,

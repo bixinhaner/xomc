@@ -33,14 +33,15 @@ type Finalizer struct {
 }
 
 type finalizationCoverage struct {
-	SourceExpectedSlots  int64
-	SourceReceivedSlots  int64
-	MissingSlots         int64
-	ChildrenComplete     bool
-	DataComplete         bool
-	VersionExpectedSlots int64
-	NaturalSlots         int64
-	PeriodComplete       bool
+	SourceExpectedSlots               int64
+	SourceReceivedSlots               int64
+	MissingSlots                      int64
+	ChildrenComplete                  bool
+	DataComplete                      bool
+	VersionExpectedSlots              int64
+	NaturalSlots                      int64
+	PeriodComplete                    bool
+	DailyVersionExpectedSlotsMismatch bool
 }
 
 func (f *Finalizer) SetSnapshot(snapshot *SnapshotStore) *Finalizer {
@@ -238,6 +239,7 @@ func (f *Finalizer) writeFinal(
 			return fmt.Errorf("persist compact PM Counter rollup: %w", err)
 		}
 	}
+	resultReplaceStarted := time.Now()
 	resultCount, err := ReplaceWindowResults(
 		ctx,
 		tx,
@@ -252,6 +254,9 @@ func (f *Finalizer) writeFinal(
 	)
 	if err != nil {
 		return err
+	}
+	if f.metrics != nil {
+		f.metrics.ResultReplaceSeconds.Observe(time.Since(resultReplaceStarted).Seconds())
 	}
 	publishSQL, publishArgs, err := storage.Psql.Update("pm_aggregation_windows").
 		Set("status", "published").
@@ -270,6 +275,9 @@ func (f *Finalizer) writeFinal(
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit PM aggregation window: %w", err)
+	}
+	if f.metrics != nil && coverage.DailyVersionExpectedSlotsMismatch {
+		f.metrics.DailyVersionExpectedSlotsMismatchTotal.Inc()
 	}
 	return nil
 }
@@ -299,7 +307,19 @@ func finalizationCoverageFor(
 		VersionExpectedSlots: state.ExpectedSlots,
 		NaturalSlots:         naturalExpectedSlots(version, key, state),
 		PeriodComplete:       dataComplete && versionCoversNaturalPeriod(version, key),
+		DailyVersionExpectedSlotsMismatch: dailyVersionExpectedSlotsMismatch(
+			key, version, state.ExpectedSlots, naturalExpectedSlots(version, key, state),
+		),
 	}
+}
+
+func dailyVersionExpectedSlotsMismatch(
+	key WindowKey,
+	version *TaskVersionSnapshot,
+	versionExpectedSlots, naturalSlots int64,
+) bool {
+	return key.Granularity == GranularityDaily && version != nil && !version.DevicePipeline &&
+		versionExpectedSlots != naturalSlots
 }
 
 func (f *Finalizer) finalizationLocation() *time.Location {

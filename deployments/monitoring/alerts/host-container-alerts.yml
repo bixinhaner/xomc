@@ -279,6 +279,50 @@ groups:
         labels: {severity: warning, domain: omc, service: postgres-tsdb}
         annotations: {summary: "postgres-tsdb 内存持续超过限额 85%：{{ $labels.name }}"}
 
+      - alert: OMCResourcePlanDrift
+        # 期望基线来自本次根治发布的完整 resources.env（Task 8），而不是主机容量：
+        # app 2/1536MiB, acs 5/4096MiB, worker 8/2048MiB,
+        # postgres 10/7168MiB, postgres-tsdb 16/7168MiB, redis 2/8192MiB,
+        # nats 1/1024MiB, minio 4/4096MiB, web 1/512MiB。
+        # cAdvisor 的 container_spec_* 是 Docker 实际 cgroup limit；与以上声明不等
+        # 即代表 resources.env → compose → inspect 三层之一漂移。Task 8 healthcheck
+        # 仍是部署时的逐项硬校验，此规则用于运行期持续发现后续漂移。
+        expr: |
+          (
+            sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-app-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-app-.*"}) != 2
+            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-acs-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-acs-.*"}) != 5
+            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-worker-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-worker-.*"}) != 8
+            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-postgres-[0-9]+$"} / container_spec_cpu_period{name=~"(omcgo|docker)-postgres-[0-9]+$"}) != 10
+            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-postgres-tsdb-[0-9]+$"} / container_spec_cpu_period{name=~"(omcgo|docker)-postgres-tsdb-[0-9]+$"}) != 16
+            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-redis-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-redis-.*"}) != 2
+            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-nats-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-nats-.*"}) != 1
+            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-minio-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-minio-.*"}) != 4
+            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-web-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-web-.*"}) != 1
+          )
+          or
+          (
+            sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-app-.*"}) != 1610612736
+            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-acs-.*"}) != 4294967296
+            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-worker-.*"}) != 2147483648
+            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-postgres-[0-9]+$"}) != 7516192768
+            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-postgres-tsdb-[0-9]+$"}) != 7516192768
+            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-redis-.*"}) != 8589934592
+            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-nats-.*"}) != 1073741824
+            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-minio-.*"}) != 4294967296
+            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-web-.*"}) != 536870912
+          )
+        for: 3m
+        labels:
+          severity: critical
+          domain: omc
+          service: resource-plan
+        annotations:
+          summary: "OMC 声明资源基线与容器实际 limit 不一致：{{ $labels.name }}"
+          description: |
+            cAdvisor 报告的实际 cgroup CPU 或内存限额已偏离本次完整 resources.env 的生产基线。
+            Action: 先运行 release healthcheck.sh 定位 resources.env、Compose 渲染或 Docker inspect
+                    的哪一层漂移；禁止只改单层或用容器重启掩盖问题。
+
   - name: omc.nginx
     interval: 30s
     rules:
