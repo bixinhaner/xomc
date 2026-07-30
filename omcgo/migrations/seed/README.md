@@ -2,6 +2,8 @@
 
 主库种子数据（DML）迁移目录，独立 goose 版本表 `goose_db_version_seed`，由 docker compose 的 `migrate-seed` 服务在 `migrate-schema` 完成后执行。当前仅保留最终状态 consolidated baseline `000001_init_seed.sql`（见 `../README.md`）。
 
+> ⚠️ 当前软件尚未封版本，本目录只允许维护 `000001_init_seed.sql`，不允许新增 `000002+` seed 迁移。新增 seed 数据变化必须折回 `000001_init_seed.sql`。软件封版本后，先更新根 `AGENTS.md`、`../README.md` 和本 README，明确允许追加迁移，再从 `000002` 开始新增 seed 迁移。
+
 > ⚠️ **必须用独立版本表执行**（生产做法）：
 > ```bash
 > go run ./cmd/migrate up --path migrations                                          # schema（默认表 goose_db_version）
@@ -40,6 +42,12 @@
 
 > 历史上曾把测试环境整库（含 3.3 万测试设备 + 全部 XML 字典）pg_dump 进 `000001`，导致全新部署被灌入大量测试数据；2026-06-08 拆分后部署得到干净最小基础数据。
 
-## 新增 seed 迁移
+## 当前未封版本的 seed 维护规则
 
-从该流**现有最大版本号 + 1** 起递增（当前在 `000001`，下一号 `000002`）。版本号规则、重生 baseline 标准流程、连接池核定见 `../README.md`；完整迁移规范见 `../../CLAUDE.md` §4.6。
+当前软件尚未封版本，seed 流处于 baseline 维护期：
+
+- 不允许新增 `000002+` seed 迁移。
+- 新增部署内置数据、RBAC、菜单、API 权限、系统字典、配置、MML 命令树、标准参数等 seed 变化，必须折回 `000001_init_seed.sql`。
+- 软件封版本后，先更新根 `AGENTS.md`、`../README.md` 和本 README，明确允许追加迁移，再从 `000002` 开始新增 seed 迁移。
+
+版本号规则、重生 baseline 标准流程、连接池核定见 `../README.md`；完整迁移规范见 `../../CLAUDE.md` §4.6。

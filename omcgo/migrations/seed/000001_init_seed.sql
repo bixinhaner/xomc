@@ -26147,6 +26147,372 @@ UPDATE sys_configs
  WHERE category='acs.backpressure' AND key='disk_low_pct' AND value='75';
 
 
+-- Consolidated from pre-release baseline-only migrations: main data 000003-000004 and seed 000002-000005
+
+-- MML 全局“基站网管参数管理-查询基站网关连接”补充 SSL 状态只读参数。
+-- +goose StatementBegin
+DO $$
+DECLARE
+    lst_command_id uuid;
+    end_date_id uuid;
+    start_date_id uuid;
+BEGIN
+    INSERT INTO public.standard_params (
+        id, standard_path, entry_type, access, data_type, change_applies
+    ) VALUES (
+        gen_random_uuid(),
+        'Device.ManagementServer.sslStatus.endDate',
+        'parameter', 'READ_ONLY', 'STRING', 'Immediate'
+    )
+    ON CONFLICT (standard_path) DO NOTHING;
+
+    INSERT INTO public.standard_params (
+        id, standard_path, entry_type, access, data_type, change_applies
+    ) VALUES (
+        gen_random_uuid(),
+        'Device.ManagementServer.sslStatus.startDate',
+        'parameter', 'READ_ONLY', 'STRING', 'Immediate'
+    )
+    ON CONFLICT (standard_path) DO NOTHING;
+
+    SELECT id
+      INTO end_date_id
+      FROM public.standard_params
+     WHERE standard_path = 'Device.ManagementServer.sslStatus.endDate';
+
+    SELECT id
+      INTO start_date_id
+      FROM public.standard_params
+     WHERE standard_path = 'Device.ManagementServer.sslStatus.startDate';
+
+    SELECT id
+      INTO lst_command_id
+      FROM public.mml_commands
+     WHERE command_code = 'LST MANAGEMENT_SERVER'
+       AND deprecated_at IS NULL
+     ORDER BY created_at
+     LIMIT 1;
+
+    IF lst_command_id IS NULL THEN
+        RAISE EXCEPTION 'MML command LST MANAGEMENT_SERVER is missing';
+    END IF;
+
+    INSERT INTO public.mml_command_sub_fields (
+        id, command_id, mml_code, label_i18n,
+        default_selected, is_required, sort_order,
+        standard_path_id, access_type, is_supported
+    ) VALUES (
+        gen_random_uuid(),
+        lst_command_id,
+        'END_DATE',
+        '{"zh-CN":"SSL状态结束时间","en-US":"End Date"}'::jsonb,
+        true, false, 10006,
+        end_date_id, 'RO', true
+    )
+    ON CONFLICT (command_id, standard_path_id) DO UPDATE
+       SET mml_code = EXCLUDED.mml_code,
+           label_i18n = EXCLUDED.label_i18n,
+           default_selected = EXCLUDED.default_selected,
+           is_required = EXCLUDED.is_required,
+           sort_order = EXCLUDED.sort_order,
+           access_type = EXCLUDED.access_type,
+           is_supported = EXCLUDED.is_supported,
+           deprecated_at = NULL,
+           updated_at = NOW();
+
+    INSERT INTO public.mml_command_sub_fields (
+        id, command_id, mml_code, label_i18n,
+        default_selected, is_required, sort_order,
+        standard_path_id, access_type, is_supported
+    ) VALUES (
+        gen_random_uuid(),
+        lst_command_id,
+        'START_DATE',
+        '{"zh-CN":"SSL状态开始时间","en-US":"Start Date"}'::jsonb,
+        true, false, 10007,
+        start_date_id, 'RO', true
+    )
+    ON CONFLICT (command_id, standard_path_id) DO UPDATE
+       SET mml_code = EXCLUDED.mml_code,
+           label_i18n = EXCLUDED.label_i18n,
+           default_selected = EXCLUDED.default_selected,
+           is_required = EXCLUDED.is_required,
+           sort_order = EXCLUDED.sort_order,
+           access_type = EXCLUDED.access_type,
+           is_supported = EXCLUDED.is_supported,
+           deprecated_at = NULL,
+           updated_at = NOW();
+
+    UPDATE public.param_mappings
+       SET is_supported = true,
+           updated_at = NOW()
+     WHERE standard_path IN (
+               'Device.ManagementServer.sslStatus.endDate',
+               'Device.ManagementServer.sslStatus.startDate'
+           )
+       AND is_active = true;
+
+    UPDATE public.mml_command_sub_fields AS csf
+       SET deprecated_at = NOW(),
+           updated_at = NOW()
+      FROM public.mml_commands AS command,
+           public.standard_params AS sp
+     WHERE csf.command_id = command.id
+       AND sp.id = csf.standard_path_id
+       AND command.command_code = 'MOD MANAGEMENT_SERVER'
+       AND command.deprecated_at IS NULL
+       AND sp.standard_path IN (
+               'Device.ManagementServer.sslStatus.endDate',
+               'Device.ManagementServer.sslStatus.startDate'
+           )
+       AND csf.deprecated_at IS NULL;
+
+    UPDATE public.mml_commands AS command
+       SET target_paths = COALESCE((
+               SELECT jsonb_agg(sp.standard_path ORDER BY csf.sort_order)
+                 FROM public.mml_command_sub_fields AS csf
+                 JOIN public.standard_params AS sp
+                   ON sp.id = csf.standard_path_id
+                WHERE csf.command_id = command.id
+                  AND csf.deprecated_at IS NULL
+           ), '[]'::jsonb),
+           tree_node_refs = COALESCE((
+               SELECT jsonb_agg(sp.standard_path ORDER BY csf.sort_order)
+                 FROM public.mml_command_sub_fields AS csf
+                 JOIN public.standard_params AS sp
+                   ON sp.id = csf.standard_path_id
+                WHERE csf.command_id = command.id
+                  AND csf.deprecated_at IS NULL
+           ), '[]'::jsonb),
+           updated_at = NOW()
+     WHERE command.command_code IN (
+               'LST MANAGEMENT_SERVER',
+               'MOD MANAGEMENT_SERVER'
+           )
+       AND command.deprecated_at IS NULL;
+END;
+$$;
+-- +goose StatementEnd
+
+UPDATE public.rela_platform_indicator_formula_enb AS route
+SET report_key = indicator.report_key
+FROM public.perf_indicators_enb AS indicator
+WHERE indicator.id = route.indicator_id;
+UPDATE public.rela_platform_indicator_formula_gsm AS route
+SET report_key = indicator.report_key
+FROM public.perf_indicators_gsm AS indicator
+WHERE indicator.id = route.indicator_id;
+UPDATE public.rela_platform_indicator_formula_gnb AS route
+SET report_key = indicator.report_key
+FROM public.perf_indicators_gnb AS indicator
+WHERE indicator.id = route.indicator_id;
+
+UPDATE public.rela_platform_indicator_formula_enb
+SET report_key = CASE indicator_id
+        WHEN 'C000010070' THEN 'ERAB.EstabInitAttNbr.Sum'
+        WHEN 'C000010080' THEN 'ERAB.EstabInitSuccNbr.Sum'
+    END,
+    updated_at = now()
+WHERE platform_name = 'BLQ'
+  AND indicator_id IN ('C000010070', 'C000010080');
+
+-- Repair every persisted enabled-indicator set, including operator-specific sets
+-- changed before dependency-closure validation was introduced.
+WITH RECURSIVE dependency_closure(operator_code, indicator_id) AS (
+    SELECT operator_code, indicator_id
+    FROM public.enabled_pm_indicators_enb
+    UNION
+    SELECT closure.operator_code, dependency.id
+    FROM dependency_closure AS closure
+    JOIN public.perf_indicators_enb AS parent ON parent.id = closure.indicator_id
+    CROSS JOIN LATERAL regexp_matches(
+        COALESCE(parent.arithmetic, ''),
+        '([CK][A-Za-z0-9_.]+)',
+        'g'
+    ) AS parsed(dependency_id)
+    JOIN public.perf_indicators_enb AS dependency
+      ON lower(dependency.id) = lower(parsed.dependency_id[1])
+)
+INSERT INTO public.enabled_pm_indicators_enb (operator_code, indicator_id)
+SELECT operator_code, indicator_id
+FROM dependency_closure
+ON CONFLICT (operator_code, indicator_id) DO NOTHING;
+
+WITH RECURSIVE dependency_closure(operator_code, indicator_id) AS (
+    SELECT operator_code, indicator_id
+    FROM public.enabled_pm_indicators_gnb
+    UNION
+    SELECT closure.operator_code, dependency.id
+    FROM dependency_closure AS closure
+    JOIN public.perf_indicators_gnb AS parent ON parent.id = closure.indicator_id
+    CROSS JOIN LATERAL regexp_matches(
+        COALESCE(parent.arithmetic, ''),
+        '([CK][A-Za-z0-9_.]+)',
+        'g'
+    ) AS parsed(dependency_id)
+    JOIN public.perf_indicators_gnb AS dependency
+      ON lower(dependency.id) = lower(parsed.dependency_id[1])
+)
+INSERT INTO public.enabled_pm_indicators_gnb (operator_code, indicator_id)
+SELECT operator_code, indicator_id
+FROM dependency_closure
+ON CONFLICT (operator_code, indicator_id) DO NOTHING;
+
+WITH RECURSIVE dependency_closure(operator_code, indicator_id) AS (
+    SELECT operator_code, indicator_id
+    FROM public.enabled_pm_indicators_gsm
+    UNION
+    SELECT closure.operator_code, dependency.id
+    FROM dependency_closure AS closure
+    JOIN public.perf_indicators_gsm AS parent ON parent.id = closure.indicator_id
+    CROSS JOIN LATERAL regexp_matches(
+        COALESCE(parent.arithmetic, ''),
+        '([CK][A-Za-z0-9_.]+)',
+        'g'
+    ) AS parsed(dependency_id)
+    JOIN public.perf_indicators_gsm AS dependency
+      ON lower(dependency.id) = lower(parsed.dependency_id[1])
+)
+INSERT INTO public.enabled_pm_indicators_gsm (operator_code, indicator_id)
+SELECT operator_code, indicator_id
+FROM dependency_closure
+ON CONFLICT (operator_code, indicator_id) DO NOTHING;
+
+-- K900010076 is the dashboard output. C000060216 and C000060273 are formula
+-- inputs and are retained by the closure above, but must not replace the KPI.
+UPDATE public.pm_tasks
+SET metric_paths = array_replace(metric_paths, 'C000060216', 'K900010076'),
+    updated_at = now()
+WHERE id IN (
+    '0184dddd-0001-4000-8000-000000000001',
+    '0184dddd-0002-4000-8000-000000000001',
+    '0184dddd-0003-4000-8000-000000000001',
+    '0184dddd-0004-4000-8000-000000000001'
+)
+  AND metric_paths @> ARRAY['C000060216']::text[]
+  AND NOT metric_paths @> ARRAY['K900010076']::text[];
+
+UPDATE public.pm_tasks
+SET metric_paths = array_remove(metric_paths, 'C000060216'),
+    updated_at = now()
+WHERE id IN (
+    '0184dddd-0001-4000-8000-000000000001',
+    '0184dddd-0002-4000-8000-000000000001',
+    '0184dddd-0003-4000-8000-000000000001',
+    '0184dddd-0004-4000-8000-000000000001'
+)
+  AND metric_paths @> ARRAY['C000060216', 'K900010076']::text[];
+
+INSERT INTO public.sys_configs (
+    id, category, key, value, value_type, description, is_public,
+    created_at, updated_at, description_i18n
+) VALUES (
+    'ef07a965-4e50-4a27-af18-e14dca393d7e',
+    'minio.retention',
+    'cleanup_mode',
+    'shadow',
+    'string',
+    '原始对象精确清理阶段：shadow/fallback/exclusive',
+    false,
+    now(),
+    now(),
+    '{}'::jsonb
+)
+ON CONFLICT DO NOTHING;
+
+WITH mapping(old_name, new_name, new_vendor, new_description) AS (
+    VALUES
+        ('BAIBLQ 产品', 'BAIBLQ', 'Baicells', 'Baicells BAIBLQ'),
+        ('BLX 产品', 'BLX', 'Baicells', 'Baicells BLX'),
+        ('QRTB 系列', 'QRTB Series', 'Baicells', 'Baicells QRTB; supports SC/CA/DC radio modes'),
+        ('MLQ 产品', 'MLQ', 'Baicells', 'Baicells MLQ'),
+        ('MLN 系列', 'MLN Series', 'Baicells', 'Baicells MLN; supports SC/CA/DC radio modes'),
+        ('BM 产品', 'BM', 'Baicells', 'Baicells BM'),
+        ('BSC 产品', 'BSC', 'Baicells', 'Baicells BSC'),
+        ('BTS 产品', 'BTS', 'Baicells', 'Baicells BTS; 2G base station; KPIs are reported by BSC'),
+        ('BaiBNQ 5G 产品', 'BaiBNQ 5G', 'Baicells', 'Baicells BaiBNQ; 5G NR base station; TR-069 parameters and KPI formulas use BaiBNQ'),
+        ('CICT SC3400(L1821) 产品', 'CICT SC3400(L1821)', 'CICT', 'CICT SC3400(L1821)'),
+        ('大唐 fBS3251 系列', 'Datang fBS3251 Series', 'Datang', 'Datang fBS3251; includes 2 model variants'),
+        ('第三方 FDD-LTE-Enterprise', 'Third-party FDD-LTE-Enterprise', 'Third-party', 'Third-party FDD-LTE-Enterprise'),
+        ('华为 TCELL 系列', 'Huawei TCELL Series', 'Huawei', 'Huawei TCELL; includes 6 model variants'),
+        ('京信 LTE-FDD_N 系列', 'Comba LTE-FDD_N Series', 'Comba', 'Comba LTE-FDD_N; includes 4 model variants'),
+        ('京信 femto_au 产品', 'Comba femto_au', 'Comba', 'Comba femto_au')
+)
+UPDATE public.products AS p
+SET product_name = mapping.new_name,
+    vendor = mapping.new_vendor,
+    description = mapping.new_description,
+    updated_at = now()
+FROM mapping
+WHERE p.product_name = mapping.old_name;
+
+WITH mapping(old_name, new_name) AS (
+    VALUES
+        ('BAIBLQ 产品', 'BAIBLQ'),
+        ('BLX 产品', 'BLX'),
+        ('QRTB 系列', 'QRTB Series'),
+        ('MLQ 产品', 'MLQ'),
+        ('MLN 系列', 'MLN Series'),
+        ('BM 产品', 'BM'),
+        ('BSC 产品', 'BSC'),
+        ('BTS 产品', 'BTS'),
+        ('BaiBNQ 5G 产品', 'BaiBNQ 5G'),
+        ('CICT SC3400(L1821) 产品', 'CICT SC3400(L1821)'),
+        ('大唐 fBS3251 系列', 'Datang fBS3251 Series'),
+        ('第三方 FDD-LTE-Enterprise', 'Third-party FDD-LTE-Enterprise'),
+        ('华为 TCELL 系列', 'Huawei TCELL Series'),
+        ('京信 LTE-FDD_N 系列', 'Comba LTE-FDD_N Series'),
+        ('京信 femto_au 产品', 'Comba femto_au')
+)
+UPDATE public.ufte_task_types AS tt
+SET product_scope = (
+        SELECT COALESCE(jsonb_agg(to_jsonb(COALESCE(mapping.new_name, entry.value)) ORDER BY entry.ord), '[]'::jsonb)
+        FROM jsonb_array_elements_text(tt.product_scope) WITH ORDINALITY AS entry(value, ord)
+        LEFT JOIN mapping ON mapping.old_name = entry.value
+    ),
+    updated_at = now()
+WHERE EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(tt.product_scope) AS entry(value)
+    JOIN mapping ON mapping.old_name = entry.value
+);
+
+WITH mapping(old_name, new_name, new_vendor, new_description) AS (
+    VALUES
+        ('BAIBLQ', 'BLQ', 'Baicells', 'Baicells BLQ'),
+        ('QRTB Series', 'QRTB', 'Baicells', 'Baicells QRTB; supports SC/CA/DC radio modes'),
+        ('MLN Series', 'MLN', 'Baicells', 'Baicells MLN; supports SC/CA/DC radio modes'),
+        ('BaiBNQ 5G', 'BNQ', 'Baicells', 'Baicells BNQ; 5G NR base station; TR-069 parameters and KPI formulas use BaiBNQ')
+)
+UPDATE public.products AS p
+SET product_name = mapping.new_name,
+    vendor = mapping.new_vendor,
+    description = mapping.new_description,
+    updated_at = now()
+FROM mapping
+WHERE p.product_name = mapping.old_name;
+
+WITH mapping(old_name, new_name) AS (
+    VALUES
+        ('BAIBLQ', 'BLQ'),
+        ('QRTB Series', 'QRTB'),
+        ('MLN Series', 'MLN'),
+        ('BaiBNQ 5G', 'BNQ')
+)
+UPDATE public.ufte_task_types AS tt
+SET product_scope = (
+        SELECT COALESCE(jsonb_agg(to_jsonb(COALESCE(mapping.new_name, entry.value)) ORDER BY entry.ord), '[]'::jsonb)
+        FROM jsonb_array_elements_text(tt.product_scope) WITH ORDINALITY AS entry(value, ord)
+        LEFT JOIN mapping ON mapping.old_name = entry.value
+    ),
+    updated_at = now()
+WHERE EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(tt.product_scope) AS entry(value)
+    JOIN mapping ON mapping.old_name = entry.value
+);
+
+
 COMMIT;
 
 -- +goose Down

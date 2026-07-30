@@ -12,7 +12,9 @@
 | 主库 seed (DML) | 最终状态 baseline | `migrations/seed/000001_init_seed.sql` | `goose_db_version_seed` | `migrate-seed` | postgres |
 | 时序库 schema | 最终状态 baseline | `migrations/tsdb/000001_tsdb_schema.sql` | `goose_db_version_tsdb` | `migrate-tsdb-schema` | postgres-tsdb（TimescaleDB）|
 
-三个 `000001` 文件包含截至 2026-07-25 的最终结构、流式 PM 聚合表、12 个内置聚合任务、内置角色权限修复和 PM 反压默认值。后续新需求再按各自流从 `000002` 开始追加。
+三个 `000001` 文件包含截至 2026-07-25 的最终结构、流式 PM 聚合表、12 个内置聚合任务、内置角色权限修复和 PM 反压默认值。
+
+> ⚠️ 当前软件尚未封版本，迁移目录只允许维护上述三个基线文件，不允许新增 `000002+`。新增 DB、seed、tsdb 变化必须折回对应的 `000001` 基线文件。软件封版本后，先更新根 `AGENTS.md` 与迁移 README 解除该限制，再按各自流从 `000002` 开始追加迁移。
 
 > ⚠️ 此基线仅兼容全新安装或允许清库重建的环境，不是既有数据库的就地升级路径。三条流在干净数据库上分别从版本 `000001` 起跑。
 
@@ -43,11 +45,21 @@ OMC 跑两个 PostgreSQL/TimescaleDB 实例，迁移分两条物理目标库的�
 | `alarms_history` | 7 days | （无压缩）| 365 days |
 | `trace_messages` | 1 day | （无压缩）| 3 days |
 
-## 新增迁移的版本号规则
+## 当前未封版本的迁移维护规则
+
+当前软件尚未封版本，迁移目录处于 baseline 维护期：
+
+- 不允许新增 `000002+` 迁移文件。
+- 主库 schema 变化折回 `migrations/000001_init_schema.sql`。
+- 主库 seed 变化折回 `migrations/seed/000001_init_seed.sql`。
+- 时序库 schema 变化折回 `migrations/tsdb/000001_tsdb_schema.sql`。
+- 软件封版本后，必须先更新根 `AGENTS.md`、本 README 和 `migrations/seed/README.md`，明确允许追加迁移，再从各自流的 `000002` 开始新增文件。
+
+## 封版本后的新增迁移版本号规则
 
 三条流是相互独立的 goose 版本序列，记在不同版本表、**不共享号段**——所以 `000001` 在三处各出现一次是**正常的**（不是撞号）。查撞号要**分目录各查**，别把三个目录的文件名合并去重。
 
-- 新增 = 该流**现有最大号 + 1**。当前三条流的下一号均是 `000002`。
+- 新增 = 该流**现有最大号 + 1**。当前三条流在封版本后的下一号均是 `000002`；封版本前不得使用该号段。
 - 从本基线开始，不回填空号、不重排或复用同一发布基线内已经应用过的版本号。三条流使用独立版本表，必须分目录判断下一号。
 - DDL → `migrations/`，DML 种子 → `migrations/seed/`，时序 DDL → `migrations/tsdb/`。
 - `DO $$` / `CREATE [OR REPLACE] FUNCTION` / 循环条件 → 必须 goose `StatementBegin/End` 包裹。

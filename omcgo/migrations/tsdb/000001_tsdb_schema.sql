@@ -1230,6 +1230,295 @@ WHERE r.dimension = 'device_group' AND r.granularity = 'monthly'
 ORDER BY r.dimension_key, r.metric_id, r.window_start, r.technology, r.created_at DESC;
 
 
+-- Consolidated from pre-release baseline-only migrations: TSDB schema 000002-000008
+
+ALTER TABLE public.pm_files
+    ADD COLUMN IF NOT EXISTS raw_deleted_at timestamptz,
+    ADD COLUMN IF NOT EXISTS raw_delete_attempts integer NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS raw_delete_next_attempt_at timestamptz,
+    ADD COLUMN IF NOT EXISTS raw_delete_last_error varchar(512);
+
+ALTER TABLE public.mr_files
+    ADD COLUMN IF NOT EXISTS raw_deleted_at timestamptz,
+    ADD COLUMN IF NOT EXISTS raw_delete_attempts integer NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS raw_delete_next_attempt_at timestamptz,
+    ADD COLUMN IF NOT EXISTS raw_delete_last_error varchar(512);
+
+CREATE INDEX IF NOT EXISTS idx_pm_files_raw_cleanup
+    ON public.pm_files (collect_time, id)
+    WHERE raw_deleted_at IS NULL AND raw_delete_next_attempt_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_pm_files_raw_cleanup_retry
+    ON public.pm_files (raw_delete_next_attempt_at, collect_time, id)
+    WHERE raw_deleted_at IS NULL AND raw_delete_next_attempt_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_mr_files_created
+    ON public.mr_files (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mr_files_raw_cleanup
+    ON public.mr_files (collect_time, id)
+    WHERE raw_deleted_at IS NULL AND raw_delete_next_attempt_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_mr_files_raw_cleanup_retry
+    ON public.mr_files (raw_delete_next_attempt_at, collect_time, id)
+    WHERE raw_deleted_at IS NULL AND raw_delete_next_attempt_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_mr_records_file_time
+    ON public.mr_records (file_id, "time" DESC);
+CREATE INDEX IF NOT EXISTS idx_pm_anchors_source_file
+    ON public.pm_measurement_anchors (source_file_id)
+    WHERE source_file_id IS NOT NULL;
+
+TRUNCATE TABLE
+    public.pm_aggregation_rollup_outbox,
+    public.pm_aggregation_counter_rollups,
+    public.pm_aggregation_windows,
+    public.pm_aggregation_results;
+
+ALTER TABLE public.pm_aggregation_counter_rollups
+    ADD COLUMN IF NOT EXISTS entity_key text;
+ALTER TABLE public.pm_aggregation_counter_rollups
+    ALTER COLUMN entity_key SET NOT NULL;
+
+DROP INDEX IF EXISTS public.idx_pm_aggregation_counter_rollups_recovery;
+CREATE INDEX idx_pm_aggregation_counter_rollups_recovery
+    ON public.pm_aggregation_counter_rollups (
+        task_version_id, entity_key, granularity, window_start, chunk_index
+    );
+
+ALTER TABLE public.pm_aggregation_windows
+    ADD COLUMN IF NOT EXISTS entity_key text;
+ALTER TABLE public.pm_aggregation_windows
+    ALTER COLUMN entity_key SET NOT NULL;
+ALTER TABLE public.pm_aggregation_windows
+    DROP CONSTRAINT IF EXISTS pm_aggregation_windows_pkey;
+ALTER TABLE public.pm_aggregation_windows
+    ADD CONSTRAINT pm_aggregation_windows_pkey
+    PRIMARY KEY (task_version_id, entity_key, granularity, window_start);
+
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_results_dashboard_network
+    ON public.pm_aggregation_results (
+        task_id,
+        granularity,
+        technology,
+        metric_path,
+        window_start DESC,
+        created_at DESC
+    )
+    WHERE dimension = 'network';
+
+CREATE TABLE IF NOT EXISTS public.pm_file_quarantines (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_file_id uuid NOT NULL,
+    device_sn text NOT NULL,
+    declared_technology varchar(16) NOT NULL,
+    detected_technology varchar(16) NOT NULL,
+    reason varchar(64) NOT NULL,
+    minio_path text NOT NULL,
+    evidence jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT uq_pm_file_quarantines_source_reason
+        UNIQUE (source_file_id, reason)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pm_file_quarantines_created_at
+    ON public.pm_file_quarantines (created_at DESC);
+
+ALTER TABLE public.pm_aggregation_outbox
+    ADD COLUMN event_window_start timestamptz,
+    ADD COLUMN event_window_end timestamptz,
+    ADD COLUMN consumed_at timestamptz,
+    ADD COLUMN barrier_eligible boolean;
+
+UPDATE public.pm_aggregation_outbox
+SET event_window_start = (payload->>'window_start')::timestamptz,
+    event_window_end = (payload->>'window_end')::timestamptz
+WHERE event_window_start IS NULL;
+
+UPDATE public.pm_aggregation_outbox SET barrier_eligible = false;
+
+ALTER TABLE public.pm_aggregation_outbox
+    ALTER COLUMN event_window_start SET NOT NULL,
+    ALTER COLUMN event_window_end SET NOT NULL,
+    ALTER COLUMN barrier_eligible SET DEFAULT false,
+    ALTER COLUMN barrier_eligible SET NOT NULL;
+
+CREATE INDEX idx_pm_aggregation_outbox_consume_barrier
+    ON public.pm_aggregation_outbox (event_window_start, created_at)
+    WHERE consumed_at IS NULL AND barrier_eligible;
+
+ALTER TABLE public.pm_aggregation_rollup_outbox
+    ADD COLUMN consumed_at timestamptz,
+    ADD COLUMN barrier_eligible boolean;
+
+UPDATE public.pm_aggregation_rollup_outbox
+SET barrier_eligible = false;
+
+ALTER TABLE public.pm_aggregation_rollup_outbox
+    ALTER COLUMN barrier_eligible SET DEFAULT false,
+    ALTER COLUMN barrier_eligible SET NOT NULL;
+
+CREATE INDEX idx_pm_aggregation_rollup_consume_barrier
+    ON public.pm_aggregation_rollup_outbox (subject, window_start)
+    WHERE consumed_at IS NULL AND barrier_eligible;
+
+ALTER TABLE public.pm_aggregation_windows
+    ADD COLUMN revision integer NOT NULL DEFAULT 1,
+    ADD COLUMN rebuild_requested_at timestamptz,
+    ADD COLUMN version_effective_from timestamptz,
+    ADD COLUMN version_effective_to timestamptz;
+
+ALTER TABLE public.pm_aggregation_windows
+    DROP CONSTRAINT chk_pm_aggregation_windows_status;
+ALTER TABLE public.pm_aggregation_windows
+    ADD CONSTRAINT chk_pm_aggregation_windows_status
+        CHECK (status IN ('open', 'finalizing', 'published', 'failed', 'rebuilding'));
+
+ALTER TABLE public.pm_aggregation_results
+    ADD COLUMN revision integer NOT NULL DEFAULT 1,
+    ADD COLUMN version_effective_from timestamptz,
+    ADD COLUMN version_effective_to timestamptz,
+    ADD COLUMN received_slots bigint NOT NULL DEFAULT 0,
+    ADD COLUMN expected_slots bigint NOT NULL DEFAULT 0,
+    ADD COLUMN version_expected_slots bigint NOT NULL DEFAULT 0,
+    ADD COLUMN natural_expected_slots bigint NOT NULL DEFAULT 0,
+    ADD COLUMN version_slice_complete boolean NOT NULL DEFAULT false,
+    ADD COLUMN period_complete boolean NOT NULL DEFAULT false;
+
+CREATE TABLE public.pm_aggregation_rebuilds (
+    id bigserial PRIMARY KEY,
+    task_id uuid NOT NULL,
+    task_version_id uuid NOT NULL,
+    entity_key text NOT NULL,
+    granularity varchar(16) NOT NULL,
+    window_start timestamptz NOT NULL,
+    window_end timestamptz NOT NULL,
+    source_event_id text NOT NULL,
+    request_generation bigint NOT NULL DEFAULT 1,
+    status varchar(16) NOT NULL DEFAULT 'pending',
+    attempts integer NOT NULL DEFAULT 0,
+    last_error text,
+    requested_at timestamptz NOT NULL DEFAULT now(),
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    started_at timestamptz,
+    lease_expires_at timestamptz,
+    lease_owner uuid,
+    completed_at timestamptz,
+    CONSTRAINT chk_pm_aggregation_rebuilds_granularity
+        CHECK (granularity IN ('hourly', 'daily', 'weekly', 'monthly')),
+    CONSTRAINT chk_pm_aggregation_rebuilds_status
+        CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+    UNIQUE (task_version_id, entity_key, granularity, window_start)
+);
+
+CREATE INDEX idx_pm_aggregation_rebuilds_pending
+    ON public.pm_aggregation_rebuilds (next_attempt_at, requested_at, id)
+    WHERE status IN ('pending', 'failed', 'running');
+
+DROP INDEX IF EXISTS public.idx_pm_aggregation_outbox_consume_barrier;
+CREATE INDEX idx_pm_aggregation_outbox_consume_barrier
+    ON public.pm_aggregation_outbox (event_window_start, created_at)
+    WHERE consumed_at IS NULL AND barrier_eligible;
+DROP INDEX IF EXISTS public.idx_pm_aggregation_rollup_consume_barrier;
+CREATE INDEX idx_pm_aggregation_rollup_consume_barrier
+    ON public.pm_aggregation_rollup_outbox (subject, window_start)
+    WHERE consumed_at IS NULL AND barrier_eligible;
+
+CREATE TABLE public.pm_aggregation_replay_sources (
+    event_window_start timestamptz NOT NULL,
+    event_id uuid NOT NULL,
+    payload jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (event_window_start, event_id)
+);
+
+SELECT create_hypertable(
+    'public.pm_aggregation_replay_sources',
+    by_range('event_window_start', INTERVAL '1 day'),
+    if_not_exists => TRUE,
+    migrate_data => TRUE
+);
+
+ALTER TABLE public.pm_aggregation_replay_sources SET (
+    timescaledb.compress,
+    timescaledb.compress_orderby = 'event_window_start, event_id'
+);
+SELECT add_compression_policy(
+    'public.pm_aggregation_replay_sources',
+    INTERVAL '1 day',
+    if_not_exists => TRUE
+);
+
+CREATE OR REPLACE VIEW public.pm_adhoc_aggregation_results AS
+SELECT
+    r.id, r.task_id, r.device_oui,
+    CASE WHEN r.dimension = 'device' THEN r.device_sn ELSE 'AGGREGATED' END::text AS device_sn,
+    CASE WHEN r.dimension = 'product' THEN r.dimension_key::uuid ELSE NULL::uuid END AS product_id,
+    r.metric_path, r.metric_type, r.metric_value,
+    r.aggregation_op::text AS statis_type, r.granularity::text,
+    r.window_start AS "time", r.window_start AS start_time, r.window_end AS end_time,
+    r.created_at AS ingest_time,
+    CASE
+        WHEN r.dimension = 'device' THEN NULLIF(r.object_ldn, '')
+        WHEN r.dimension = 'network' THEN 'Network'
+        ELSE r.dimension_key
+    END::text AS object_ldn,
+    jsonb_build_object(
+        'task_version_id', r.task_version_id,
+        'complete', r.period_complete,
+        'missing_slots', r.missing_slots,
+        'dimension', r.dimension,
+        'revision', r.revision,
+        'version_effective_from', r.version_effective_from,
+        'version_effective_to', r.version_effective_to,
+        'received_slots', r.received_slots,
+        'expected_slots', r.expected_slots,
+        'version_expected_slots', r.version_expected_slots,
+        'natural_expected_slots', r.natural_expected_slots,
+        'version_slice_complete', r.version_slice_complete,
+        'period_complete', r.period_complete,
+        'active_version', r.task_version_id = (
+            SELECT candidate.task_version_id
+            FROM public.pm_aggregation_results candidate
+            WHERE candidate.task_id = r.task_id
+              AND candidate.granularity = r.granularity
+              AND candidate.window_start = r.window_start
+            GROUP BY candidate.task_version_id, candidate.version_effective_from
+            ORDER BY candidate.version_effective_from DESC NULLS LAST,
+                     MAX(candidate.revision) DESC,
+                     MAX(candidate.created_at) DESC,
+                     candidate.task_version_id DESC
+            LIMIT 1
+        ) AND NOT EXISTS (
+            SELECT 1
+            FROM public.pm_aggregation_windows active_window
+            WHERE active_window.task_id = r.task_id
+              AND active_window.granularity = r.granularity
+              AND active_window.window_start = r.window_start
+              AND active_window.task_version_id <> r.task_version_id
+              AND active_window.status IN ('open', 'finalizing', 'rebuilding', 'failed')
+              AND active_window.version_effective_from IS NOT NULL
+              AND (
+                  r.version_effective_from IS NULL
+                  OR active_window.version_effective_from > r.version_effective_from
+              )
+        ),
+        'partial', false
+    ) AS extra
+FROM public.pm_aggregation_results r;
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_outbox_unacknowledged
+    ON public.pm_aggregation_outbox (published_at, event_id)
+    WHERE consumed_at IS NULL
+      AND barrier_eligible
+      AND published_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_rollup_unacknowledged
+    ON public.pm_aggregation_rollup_outbox (published_at, event_id)
+    WHERE consumed_at IS NULL
+      AND barrier_eligible
+      AND published_at IS NOT NULL;
+
+
 -- +goose Down
 -- DROP 全部对象（同名视图 → matview + 函数 → 镜像/归库表 → 影子表 → 15 张时序表；策略随 DROP TABLE 级联消失）。
 DROP VIEW IF EXISTS public.alarm_definitions;
@@ -1279,6 +1568,9 @@ DROP TABLE IF EXISTS public.pm_hourly_values;
 DROP TABLE IF EXISTS public.pm_hourly_anchors;
 DROP TABLE IF EXISTS public.pm_hourly_rollup_batches;
 DROP TABLE IF EXISTS public.pm_hourly_bucket_versions;
+DROP TABLE IF EXISTS public.pm_aggregation_replay_sources;
+DROP TABLE IF EXISTS public.pm_aggregation_rebuilds;
+DROP TABLE IF EXISTS public.pm_file_quarantines;
 DROP TABLE IF EXISTS public.pm_aggregation_rollup_outbox;
 DROP TABLE IF EXISTS public.pm_aggregation_counter_rollups;
 DROP TABLE IF EXISTS public.pm_aggregation_results;

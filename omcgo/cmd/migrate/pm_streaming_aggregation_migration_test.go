@@ -60,7 +60,7 @@ func TestPMBuiltinTaskRecoveryMigrationContract(t *testing.T) {
 		"0184dddd-0004-4000-8000-000000000002",
 		"0184dddd-0004-4000-8000-000000000003",
 	} {
-		require.Equalf(t, 1, strings.Count(seedSQL, id), "builtin task %s must be inserted exactly once", id)
+		require.Equalf(t, 1, countBuiltinPMTaskInsertID(t, seedSQL, id), "builtin task %s must be inserted exactly once", id)
 	}
 }
 
@@ -98,18 +98,16 @@ func TestPMBuiltinTaskMetricPathsMatchEnabledDefaults(t *testing.T) {
 }
 
 func TestPMEnabledIndicatorDependencyClosureRepairMigrationContract(t *testing.T) {
-	migrationSQL := readMigration(t, filepath.Join(
-		"..", "..", "migrations", "000004_repair_enabled_indicator_dependencies.sql",
-	))
+	seedSQL := readMigration(t, filepath.Join("..", "..", "migrations", "seed", "000001_init_seed.sql"))
 
 	for _, suffix := range []string{"enb", "gnb", "gsm"} {
-		require.Contains(t, migrationSQL, "enabled_pm_indicators_"+suffix)
-		require.Contains(t, migrationSQL, "perf_indicators_"+suffix)
+		require.Contains(t, seedSQL, "enabled_pm_indicators_"+suffix)
+		require.Contains(t, seedSQL, "perf_indicators_"+suffix)
 	}
-	require.Contains(t, migrationSQL, "WITH RECURSIVE dependency_closure")
-	require.Contains(t, migrationSQL, "ON CONFLICT (operator_code, indicator_id) DO NOTHING")
-	require.Contains(t, migrationSQL, "K900010076")
-	require.Contains(t, migrationSQL, "C000060216")
+	require.Contains(t, seedSQL, "WITH RECURSIVE dependency_closure")
+	require.Contains(t, seedSQL, "ON CONFLICT (operator_code, indicator_id) DO NOTHING")
+	require.Contains(t, seedSQL, "K900010076")
+	require.Contains(t, seedSQL, "C000060216")
 }
 
 func TestStreamingWorkerDoesNotReferenceRawPMTables(t *testing.T) {
@@ -162,6 +160,16 @@ func countDefaultEnabledIndicator(t *testing.T, seedSQL, table, indicatorID stri
 		}
 	}
 	return count
+}
+
+func countBuiltinPMTaskInsertID(t *testing.T, seedSQL, id string) int {
+	t.Helper()
+	insertMarker := "INSERT INTO public.pm_tasks ("
+	insertStart := strings.Index(seedSQL, insertMarker)
+	require.NotEqual(t, -1, insertStart, "missing pm_tasks seed insert")
+	insertEnd := strings.Index(seedSQL[insertStart:], ";\n")
+	require.NotEqual(t, -1, insertEnd, "unterminated pm_tasks seed insert")
+	return strings.Count(seedSQL[insertStart:insertStart+insertEnd], id)
 }
 
 func parseDefaultEnabledIndicatorIDs(t *testing.T, seedSQL, table string) []string {
