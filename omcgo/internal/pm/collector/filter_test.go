@@ -180,10 +180,11 @@ func TestFilterByWhitelist_ReportsMissWithoutIncrementingBeforeCommit(t *testing
 
 	// 命中 1 个，发现 2 个配置外指标。
 	in := sample("L.Cell.Avail", "MR.RIPPRB", "MR.RECEIVEDIPOWER")
-	out, _, unknown, knownDisabled := c.filterByWhitelistWithAllow(context.Background(), "SN-1", "lte", in)
+	out, _, unknown, knownDisabled, missSample := c.filterByWhitelistWithAllow(context.Background(), "SN-1", "lte", in)
 	require.Len(t, out, 1)
 	require.Equal(t, 2, unknown)
 	require.Zero(t, knownDisabled)
+	assert.ElementsMatch(t, []string{"MR.RIPPRB", "MR.RECEIVEDIPOWER"}, missSample)
 
 	misses := testutil.ToFloat64(c.metrics.WhitelistMissValuesTotal.WithLabelValues("cmcc", "lte"))
 	disabled := testutil.ToFloat64(c.metrics.KnownDisabledValuesTotal.WithLabelValues("cmcc", "lte"))
@@ -200,7 +201,7 @@ func TestFilterByWhitelist_ClassifiesKnownButUnroutedWithoutDuplicateMiss(t *tes
 		"Cqi.00":       {},
 	}})
 
-	out, _, misses, knownDisabled := c.filterByWhitelistWithAllow(
+	out, _, misses, knownDisabled, missSample := c.filterByWhitelistWithAllow(
 		context.Background(),
 		"SN-1",
 		"lte",
@@ -211,6 +212,38 @@ func TestFilterByWhitelist_ClassifiesKnownButUnroutedWithoutDuplicateMiss(t *tes
 	assert.Equal(t, "C000010001", out[0].CounterName)
 	assert.Equal(t, 1, misses, "只有全局指标库也不存在的上报名才是 whitelist_miss")
 	assert.Equal(t, 1, knownDisabled, "全局已知但未进入产品路由的上报名归入 known_but_disabled")
+	assert.Equal(t, []string{"VENDOR.New.Counter"}, missSample)
+}
+
+func TestFilterByWhitelist_BoundsAndDeduplicatesUnknownReportKeySample(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"KNOWN": {IndicatorID: "C0001", Unit: "number", StatisType: "sum"},
+	}})
+	in := sample(
+		"UNKNOWN-1", "UNKNOWN-1", "UNKNOWN-2", "UNKNOWN-3", "UNKNOWN-4",
+		"UNKNOWN-5", "UNKNOWN-6", "UNKNOWN-7", "UNKNOWN-8", "UNKNOWN-9",
+	)
+
+	_, _, misses, _, missSample := c.filterByWhitelistWithAllow(
+		context.Background(), "SN-1", "lte", in,
+	)
+
+	assert.Equal(t, 10, misses, "指标计数按值统计，重复上报仍应计入")
+	assert.Equal(t, []string{
+		"UNKNOWN-1", "UNKNOWN-2", "UNKNOWN-3", "UNKNOWN-4",
+		"UNKNOWN-5", "UNKNOWN-6", "UNKNOWN-7", "UNKNOWN-8",
+	}, missSample)
+}
+
+func TestShouldLogWhitelistMissRateLimitsByCarrierTechnology(t *testing.T) {
+	c := &PMCollector{}
+	now := time.Date(2026, 7, 31, 5, 45, 0, 0, time.UTC)
+
+	assert.True(t, c.shouldLogWhitelistMiss("cmcc", "lte", now))
+	assert.False(t, c.shouldLogWhitelistMiss("cmcc", "lte", now.Add(59*time.Second)))
+	assert.True(t, c.shouldLogWhitelistMiss("cmcc", "nr", now.Add(10*time.Second)),
+		"不同制式使用独立限频槽")
+	assert.True(t, c.shouldLogWhitelistMiss("cmcc", "lte", now.Add(time.Minute)))
 }
 
 func TestFilterAndFillByWhitelist_AddsNullRowsForSupportedMissingCounters(t *testing.T) {

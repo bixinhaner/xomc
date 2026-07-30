@@ -47,6 +47,7 @@ type PMFileContent struct {
 	Granularity         int       // minutes
 	Counters            []model.PMCounter
 	whitelistMissValues int
+	whitelistMissSample []string
 	knownDisabledValues int
 }
 

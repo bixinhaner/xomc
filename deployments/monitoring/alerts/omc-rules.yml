@@ -223,10 +223,10 @@ groups:
         annotations:
           summary: "PM 厂家上报名未命中指标库（{{ $labels.carrier }}/{{ $labels.technology }}）"
           description: |
-            最近 15 分钟持续出现未在当前产品指标路由中登记的厂家上报名。
-            这些值因缺少完整指标元数据没有进入时序库；同一值不会再重复计入禁用指标。
-            Action: 检查 worker 的 "filtered PM report keys not registered" 日志，
-                    核对产品指标库 report_key、大小写和厂家版本。
+            最近 15 分钟持续出现制式全局指标库也未登记、且未被明确处置的厂家上报名。
+            这些值因缺少完整指标元数据没有进入时序库；全局已知但未绑定当前产品的值只计入禁用指标。
+            Action: 检查 worker 的 "PM report keys missing from indicator library" 日志，
+                    按 report_key_sample 核对指标库 report_key、大小写和厂家版本。
 
       - alert: PMTechnologyMismatch
         expr: sum by (declared_technology, detected_technology) (increase(omc_pm_technology_mismatch_files_total[15m])) > 0
