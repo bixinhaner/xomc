@@ -7754,6 +7754,7 @@ const messages: Record<string, string> = {
   'product.products.resetSuccess': '{count} rows reset',
   'product.standardParams.editTitle': 'Edit standard param',
   'product.standardParams.newTitle': 'New standard param',
+  'product.standardParams.pathExists': 'Standard PATH "{path}" already exists; edit the existing record instead',
   // -------------------------------------------------------------------------
   // Performance dashboard (PmDashboard) — i18n-dashboard
   // -------------------------------------------------------------------------
