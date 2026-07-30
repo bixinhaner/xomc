@@ -24,6 +24,9 @@ WORKER_PROD_CONFIG="$REPO_ROOT/omcgo/cmd/worker/etc/config.prod.yaml"
 INSTALL="$RELEASE_DEPLOY/install.sh"
 SVC="$RELEASE_DEPLOY/svc.sh"
 BUILD="$REPO_ROOT/deployments/release/build-release.sh"
+RELEASE_HANDOFF="$RELEASE_DEPLOY/gpv-handoff-lib.sh"
+RELEASE_NATS_VERIFY="$RELEASE_DEPLOY/verify-gpv-nats.sh"
+APP_DOCKERFILE="$REPO_ROOT/deployments/docker/Dockerfile.app"
 DEV_PLANNER="$REPO_ROOT/deployments/docker/plan-resources.sh"
 NGINX_DEFAULT="$REPO_ROOT/deployments/docker/default.conf"
 NGINX_LOCAL="$REPO_ROOT/deployments/docker/default.local.conf"
@@ -35,6 +38,10 @@ bad() { echo "FAIL: $*" >&2; FAIL=$((FAIL + 1)); }
 contains() {
   local name="$1" pattern="$2" file="$3"
   if grep -Fq -- "$pattern" "$file"; then ok; else bad "$name: $file 未包含 [$pattern]"; fi
+}
+not_contains() {
+  local name="$1" pattern="$2" file="$3"
+  if grep -Fq -- "$pattern" "$file"; then bad "$name: $file 不应包含 [$pattern]"; else ok; fi
 }
 
 echo "── release compose 五个 bind mount ──"
@@ -62,7 +69,7 @@ for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINI
   contains "$key 升级继承" "$key" "$INSTALL"
 done
 for key in GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH \
-  GPV_RPC_DURABLE GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH \
+  GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH \
   GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING; do
   contains "$key release app 透传" "$key:" "$RELEASE_APP_COMPOSE"
   contains "$key 升级继承" "$key" "$INSTALL"
@@ -83,6 +90,14 @@ contains "install 加载存储库" 'storage-paths-lib.sh' "$INSTALL"
 contains "install 准备目录" 'storage_prepare_configured_env_paths "$ENV_FILE"' "$INSTALL"
 contains "svc 加载存储库" 'storage-paths-lib.sh' "$SVC"
 contains "svc 准备目录" 'storage_prepare_configured_env_paths ".env"' "$SVC"
+contains "app 镜像构建 GPV handoff 工具" 'omcgo-gpv-handoff ./cmd/gpv-handoff' "$APP_DOCKERFILE"
+contains "release compose 提供 handoff 一次性服务" 'gpv-handoff:' "$RELEASE_APP_COMPOSE"
+contains "install 加载 handoff 库" 'gpv-handoff-lib.sh' "$INSTALL"
+contains "svc 加载 handoff 库" 'gpv-handoff-lib.sh' "$SVC"
+contains "install 在业务 up 前准备 durable" 'gpv_handoff_prepare' "$INSTALL"
+contains "svc 在重启前准备 durable" 'gpv_handoff_prepare' "$SVC"
+contains "真实 NATS 验证脚本强制注入地址" 'GPV_NATS_TEST_URL=' "$RELEASE_NATS_VERIFY"
+not_contains "业务镜像存在时不得提前重启 app" '业务镜像已存在，跳过 load，重启业务容器' "$INSTALL"
 if bash "$RELEASE_DEPLOY/install-resource-preflight_test.sh"; then
   ok
 else

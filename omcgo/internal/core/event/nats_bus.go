@@ -55,6 +55,7 @@ type PullTuning struct {
 	BatchSize     int
 	Concurrency   int
 	AckWait       time.Duration
+	MaxDeliver    int
 	MaxAckPending int
 }
 
@@ -646,9 +647,8 @@ func (b *NATSEventBus) KeyedQueueSubscribe(
 			return
 		}
 		if submitErr := dispatcher.Submit(b.ctx, key, func() {
-			handlerErr := handler(b.ctx, evt)
+			b.processKeyedMsg(b.ctx, evt, msg, tuning, handler)
 			stopProgress()
-			b.settleDecodedMsg(evt, msg, handlerErr, tuning.MaxDeliver)
 		}); submitErr != nil {
 			stopProgress()
 			b.metrics.inc(evt.Subject, deliveryOutcomeNak)
@@ -711,7 +711,7 @@ func (b *NATSEventBus) PullSubscribe(subject string, queue string, handler Event
 		nats.AckExplicit(),
 		nats.AckWait(tuning.AckWait),
 		nats.MaxAckPending(tuning.MaxAckPending),
-		nats.MaxDeliver(maxDeliveries),
+		nats.MaxDeliver(tuning.MaxDeliver),
 	}
 	if durableDeliveryPlan(info, 0).policy == durableDeliveryNew {
 		options = append(options, nats.DeliverNew())
@@ -799,7 +799,7 @@ func (b *NATSEventBus) KeyedPullSubscribe(
 		nats.AckExplicit(),
 		nats.AckWait(tuning.AckWait),
 		nats.MaxAckPending(tuning.MaxAckPending),
-		nats.MaxDeliver(maxDeliveries),
+		nats.MaxDeliver(tuning.MaxDeliver),
 	}
 	if durableDeliveryPlan(info, 0).policy == durableDeliveryNew {
 		options = append(options, nats.DeliverNew())
@@ -1050,12 +1050,24 @@ func pullDurableName(queue string) string {
 
 func defaultPullTuningForSubject(subject string) PullTuning {
 	if subject == SubjectCommandGetParamsResponse {
-		return PullTuning{BatchSize: gpvPullBatchSize, Concurrency: gpvPullConcurrent, AckWait: gpvPullAckWait, MaxAckPending: defaultPullMaxAckPending}
+		return PullTuning{
+			BatchSize: gpvPullBatchSize, Concurrency: gpvPullConcurrent,
+			AckWait: gpvPullAckWait, MaxDeliver: maxDeliveries,
+			MaxAckPending: defaultPullMaxAckPending,
+		}
 	}
 	if subject == SubjectParamSyncTaskResult {
-		return PullTuning{BatchSize: paramSyncResultPullBatchSize, Concurrency: paramSyncResultPullConcurrent, AckWait: paramSyncResultPullAckWait, MaxAckPending: paramSyncResultMaxAckPending}
+		return PullTuning{
+			BatchSize: paramSyncResultPullBatchSize, Concurrency: paramSyncResultPullConcurrent,
+			AckWait: paramSyncResultPullAckWait, MaxDeliver: maxDeliveries,
+			MaxAckPending: paramSyncResultMaxAckPending,
+		}
 	}
-	return PullTuning{BatchSize: 32, Concurrency: defaultPullConcurrent, AckWait: gpvPullAckWait, MaxAckPending: defaultPullMaxAckPending}
+	return PullTuning{
+		BatchSize: 32, Concurrency: defaultPullConcurrent,
+		AckWait: gpvPullAckWait, MaxDeliver: maxDeliveries,
+		MaxAckPending: defaultPullMaxAckPending,
+	}
 }
 
 func (b *NATSEventBus) pullTuningForSubject(subject string) PullTuning {
@@ -1075,6 +1087,9 @@ func (b *NATSEventBus) pullTuningForSubject(subject string) PullTuning {
 	if configured.AckWait > 0 {
 		tuning.AckWait = configured.AckWait
 	}
+	if configured.MaxDeliver > 0 {
+		tuning.MaxDeliver = configured.MaxDeliver
+	}
 	if configured.MaxAckPending > 0 {
 		tuning.MaxAckPending = configured.MaxAckPending
 	}
@@ -1088,6 +1103,9 @@ func reconcilePullTuningWithExisting(desired PullTuning, info *nats.ConsumerInfo
 	out := desired
 	if info.Config.AckWait > 0 {
 		out.AckWait = info.Config.AckWait
+	}
+	if info.Config.MaxDeliver != 0 {
+		out.MaxDeliver = info.Config.MaxDeliver
 	}
 	if info.Config.MaxAckPending > 0 {
 		out.MaxAckPending = info.Config.MaxAckPending
@@ -1106,6 +1124,10 @@ func updatedPullConsumerConfig(info *nats.ConsumerInfo, desired PullTuning) (nat
 	changed := false
 	if desired.AckWait > 0 && cfg.AckWait != desired.AckWait {
 		cfg.AckWait = desired.AckWait
+		changed = true
+	}
+	if desired.MaxDeliver > 0 && cfg.MaxDeliver != desired.MaxDeliver {
+		cfg.MaxDeliver = desired.MaxDeliver
 		changed = true
 	}
 	if desired.MaxAckPending > 0 && cfg.MaxAckPending != desired.MaxAckPending {
@@ -1244,16 +1266,18 @@ func (b *NATSEventBus) runKeyedPullSubscription(
 			key, keyErr := keyFunc(evt)
 			if keyErr != nil {
 				stopProgress()
-				b.settleDecodedMsg(evt, msg, keyErr, maxDeliveries)
+				b.settleDecodedMsg(evt, msg, keyErr, tuning.MaxDeliver)
 				continue
 			}
 			currentMsg := msg
 			currentEvent := evt
 			currentStop := stopProgress
 			if submitErr := dispatcher.Submit(ctx, key, func() {
-				handlerErr := handler(ctx, currentEvent)
+				b.processKeyedMsg(ctx, currentEvent, currentMsg, QueueTuning{
+					AckWait:    tuning.AckWait,
+					MaxDeliver: tuning.MaxDeliver,
+				}, handler)
 				currentStop()
-				b.settleDecodedMsg(currentEvent, currentMsg, handlerErr, maxDeliveries)
 			}); submitErr != nil {
 				currentStop()
 				b.metrics.inc(currentEvent.Subject, deliveryOutcomeNak)
@@ -1339,11 +1363,24 @@ func (b *NATSEventBus) settleDecodedMsg(
 	handlerErr error,
 	maxDelivery int,
 ) {
+	b.settleDecodedMsgAtDelivery(evt, msg, handlerErr, messageDeliveryCount(msg), maxDelivery)
+}
+
+func messageDeliveryCount(msg *nats.Msg) uint64 {
 	deliveries := uint64(1)
 	if meta, mErr := msg.Metadata(); mErr == nil && meta != nil {
 		deliveries = meta.NumDelivered
 	}
+	return deliveries
+}
 
+func (b *NATSEventBus) settleDecodedMsgAtDelivery(
+	evt Event,
+	msg *nats.Msg,
+	handlerErr error,
+	deliveries uint64,
+	maxDelivery int,
+) {
 	decision := decideAck(handlerErr, deliveries, uint64(maxDelivery))
 	switch decision.action {
 	case ackActionAck:
@@ -1367,6 +1404,79 @@ func (b *NATSEventBus) settleDecodedMsg(
 			zap.Error(handlerErr))
 		_ = msg.NakWithDelay(decision.backoff)
 	}
+}
+
+// processKeyedMsg keeps a failed head message inside its device lane until it
+// either succeeds or reaches the configured terminal attempt. NAKing the head
+// immediately would release the lane and allow a later response for the same
+// device to persist before the redelivery.
+func (b *NATSEventBus) processKeyedMsg(
+	ctx context.Context,
+	evt Event,
+	msg *nats.Msg,
+	tuning QueueTuning,
+	handler EventHandler,
+) {
+	if tuning.MaxDeliver <= 0 {
+		tuning.MaxDeliver = maxDeliveries
+	}
+	if tuning.AckWait <= 0 {
+		tuning.AckWait = gpvPullAckWait
+	}
+	serverDelivery := messageDeliveryCount(msg)
+	for localAttempt := uint64(0); ; localAttempt++ {
+		handlerErr := handler(ctx, evt)
+		effectiveDelivery := serverDelivery + localAttempt
+		if handlerErr == nil || errors.Is(handlerErr, reliability.ErrPermanent) ||
+			effectiveDelivery >= uint64(tuning.MaxDeliver) {
+			b.settleDecodedMsgAtDelivery(
+				evt,
+				msg,
+				handlerErr,
+				effectiveDelivery,
+				tuning.MaxDeliver,
+			)
+			return
+		}
+
+		backoff := keyedRetryBackoff(effectiveDelivery, tuning.AckWait)
+		b.logger.Warn("keyed event head failed; retrying in lane",
+			zap.String("subject", evt.Subject),
+			zap.Uint64("attempt", effectiveDelivery),
+			zap.Duration("backoff", backoff),
+			zap.Error(handlerErr))
+		_ = msg.InProgress()
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			b.metrics.inc(evt.Subject, deliveryOutcomeNak)
+			_ = msg.NakWithDelay(time.Second)
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+func keyedRetryBackoff(attempt uint64, ackWait time.Duration) time.Duration {
+	if attempt == 0 {
+		attempt = 1
+	}
+	shift := attempt - 1
+	if shift > 30 {
+		shift = 30
+	}
+	backoff := time.Duration(1<<shift) * time.Second
+	maxBackoff := ackWait / 3
+	if maxBackoff < 10*time.Millisecond {
+		maxBackoff = 10 * time.Millisecond
+	}
+	if backoff > maxBackoff {
+		return maxBackoff
+	}
+	return backoff
 }
 
 // ackAction 表示对一条 NATS 消息的处置动作。

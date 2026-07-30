@@ -217,7 +217,7 @@ fi
 echo "── svc 缺失资源契约时禁止 restart ──"
 SVC_DIR="$TMP/svc"
 mkdir -p "$SVC_DIR"
-for file in svc.sh storage-paths-lib.sh resource-env-lib.sh resource-plan-metrics.sh monitoring-profile-lib.sh; do
+for file in svc.sh storage-paths-lib.sh resource-env-lib.sh resource-plan-metrics.sh monitoring-profile-lib.sh gpv-handoff-lib.sh; do
   cp "$SCRIPT_DIR/$file" "$SVC_DIR/$file"
 done
 : >"$SVC_DIR/docker-compose.app.yml"

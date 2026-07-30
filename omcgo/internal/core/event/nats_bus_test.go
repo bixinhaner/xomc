@@ -733,10 +733,13 @@ func keysForDifferentShards(shards int) (string, string) {
 }
 
 func TestUpdatedPullConsumerConfig_OverwritesMutableTuning(t *testing.T) {
-	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+	desired := PullTuning{
+		BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute,
+		MaxDeliver: 7, MaxAckPending: 512,
+	}
 	existing := &nats.ConsumerInfo{
 		Name:   "param-sync-results-pull",
-		Config: nats.ConsumerConfig{AckWait: 30 * time.Second, MaxAckPending: 2048},
+		Config: nats.ConsumerConfig{AckWait: 30 * time.Second, MaxDeliver: 5, MaxAckPending: 2048},
 	}
 
 	got, changed := updatedPullConsumerConfig(existing, desired)
@@ -744,14 +747,21 @@ func TestUpdatedPullConsumerConfig_OverwritesMutableTuning(t *testing.T) {
 	require.True(t, changed)
 	assert.Equal(t, "param-sync-results-pull", got.Durable)
 	assert.Equal(t, 2*time.Minute, got.AckWait)
+	assert.Equal(t, 7, got.MaxDeliver)
 	assert.Equal(t, 512, got.MaxAckPending)
 }
 
 func TestUpdatedPullConsumerConfig_NoChangeWhenAlreadyAligned(t *testing.T) {
-	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
+	desired := PullTuning{
+		BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute,
+		MaxDeliver: 7, MaxAckPending: 512,
+	}
 	existing := &nats.ConsumerInfo{
-		Name:   "param-sync-results-pull",
-		Config: nats.ConsumerConfig{Durable: "param-sync-results-pull", AckWait: 2 * time.Minute, MaxAckPending: 512},
+		Name: "param-sync-results-pull",
+		Config: nats.ConsumerConfig{
+			Durable: "param-sync-results-pull", AckWait: 2 * time.Minute,
+			MaxDeliver: 7, MaxAckPending: 512,
+		},
 	}
 
 	got, changed := updatedPullConsumerConfig(existing, desired)
@@ -802,14 +812,20 @@ func TestReconcilePullTuningWithExisting_NilKeepsDesired(t *testing.T) {
 }
 
 func TestReconcilePullTuningWithExisting_FallbackPreservesServerConsumerConfig(t *testing.T) {
-	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
-	existing := &nats.ConsumerInfo{Config: nats.ConsumerConfig{AckWait: 30 * time.Second, MaxAckPending: 2048}}
+	desired := PullTuning{
+		BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute,
+		MaxDeliver: 7, MaxAckPending: 512,
+	}
+	existing := &nats.ConsumerInfo{Config: nats.ConsumerConfig{
+		AckWait: 30 * time.Second, MaxDeliver: 3, MaxAckPending: 2048,
+	}}
 
 	got := reconcilePullTuningWithExisting(desired, existing)
 
 	assert.Equal(t, desired.BatchSize, got.BatchSize)
 	assert.Equal(t, desired.Concurrency, got.Concurrency)
 	assert.Equal(t, 30*time.Second, got.AckWait)
+	assert.Equal(t, 3, got.MaxDeliver)
 	assert.Equal(t, 2048, got.MaxAckPending)
 }
 

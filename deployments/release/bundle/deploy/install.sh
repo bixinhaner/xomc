@@ -92,6 +92,11 @@ if [ -f "$DEPLOY_DIR/monitoring-profile-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/monitoring-profile-lib.sh（监控部署模式状态库，由 build-release.sh 随包发布）" 1
 fi
+if [ -f "$DEPLOY_DIR/gpv-handoff-lib.sh" ]; then
+  . "$DEPLOY_DIR/gpv-handoff-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/gpv-handoff-lib.sh（GPV 无损升级接力库，由 build-release.sh 随包发布）" 1
+fi
 
 # 升级时 deploy/.env 里【运维自定义】的键 —— 跨版本继承,不被新包默认值覆盖。
 # 注：6 个密钥键虽仍在此列（升级时把上一版有效凭证带进新 .env，供 ensure_secrets 首迁导入），
@@ -100,7 +105,7 @@ fi
 # 【版本相关】键(PROJECT_VERSION / IMAGE_*)不在此列,始终用新包值。
 # 注：POSTGRES_TSDB_USER/PASSWORD/DB（时序库凭据，#347）跨版本继承；TSDB_HOST 是 compose 服务名
 # （随包固定值），故【不】列入继承白名单，始终用新包值。
-ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH PM_AGGREGATION_FINALIZE_CONCURRENCY GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH GPV_RPC_DURABLE GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING"
+ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH PM_AGGREGATION_FINALIZE_CONCURRENCY GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING"
 
 # merge_env_preserve <prev_env> <new_env>
 # 升级继承:以新包 .env 为基底(拿到新镜像 tag),把上一版 .env 中白名单键的值
@@ -676,8 +681,7 @@ if [ "$SKIP_INFRA" = 0 ]; then
   MON_IMAGES=("${IMAGE_PROMETHEUS:-}" "${IMAGE_ALERTMANAGER:-}" "${IMAGE_GRAFANA:-}" "${IMAGE_LOKI:-}" "${IMAGE_TEMPO:-}" "${IMAGE_OTELCOL:-}" "${IMAGE_NATS_EXPORTER:-}")
 
   if images_exist "${INFRA_IMAGES[@]}" "${MON_IMAGES[@]}"; then
-    log "基础设施 + 监控镜像已存在，跳过 load，重启容器"
-    $COMPOSE -p "$COMPOSE_PROJECT" restart postgres postgres-tsdb redis nats minio 2>/dev/null || true
+    log "基础设施 + 监控镜像已存在，跳过 load；handoff 完成前保持现有容器不动"
   else
     log "load 基础设施 + 监控镜像（$INFRA_DIR/images/）"
     for tar in "$INFRA_DIR/images"/*.tar; do
@@ -693,8 +697,7 @@ fi
 BIZ_IMAGES=("$IMAGE_APP" "$IMAGE_ACS" "$IMAGE_WORKER" "$IMAGE_WEB")
 
 if images_exist "${BIZ_IMAGES[@]}"; then
-  log "业务镜像已存在，跳过 load，重启业务容器"
-  $COMPOSE -p "$COMPOSE_PROJECT" restart app acs worker web 2>/dev/null || true
+  log "业务镜像已存在，跳过 load；handoff 完成前保持现有 app 不动"
   biz_loaded=1
 else
   log "load 业务镜像（$RELEASE_DIR/images/）"
@@ -750,6 +753,23 @@ COMPOSE_FILES=( -f docker-compose.infra.yml -f docker-compose.app.yml )
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 log "compose 命令：${DC[*]}"
 
+HANDOFF_PREPARED=0
+APP_CID="$("${DC[@]}" ps -q app 2>/dev/null || true)"
+NATS_CID="$("${DC[@]}" ps -q nats 2>/dev/null || true)"
+APP_RUNNING=0
+NATS_RUNNING=0
+[ -n "$APP_CID" ] && [ "$(docker inspect -f '{{.State.Running}}' "$APP_CID" 2>/dev/null || true)" = "true" ] && APP_RUNNING=1
+[ -n "$NATS_CID" ] && [ "$(docker inspect -f '{{.State.Running}}' "$NATS_CID" 2>/dev/null || true)" = "true" ] && NATS_RUNNING=1
+if [ "$APP_RUNNING" = 1 ] && [ "$NATS_RUNNING" != 1 ]; then
+  die "旧 app 仍在运行但 NATS 不可用，无法读取 GPV consumer AckFloor；未停止旧 app" 2
+fi
+if [ "$NATS_RUNNING" = 1 ]; then
+  log "在停止/重建旧 app 前预创建 GPV RPC 固定 durable ..."
+  gpv_handoff_prepare ||
+    die "GPV consumer handoff 失败；未停止旧 app，修复 NATS/consumer 配置后重试" 2
+  HANDOFF_PREPARED=1
+fi
+
 # =============================================================================
 # Step 7. 启动基础设施 + 等就绪 → 跑 migrate / seed（一次性容器）
 # =============================================================================
@@ -766,12 +786,13 @@ log "启动基础设施容器 ..."
 
 log "等待基础设施 ready（最多 90s）..."
 WAIT=0
-PG_OK=0; TS_OK=0; RD_OK=0
+PG_OK=0; TS_OK=0; RD_OK=0; NATS_OK=0
 while [ $WAIT -lt 90 ]; do
   sleep 3; WAIT=$((WAIT+3))
   PG_CID="$("${DC[@]}" ps -q postgres 2>/dev/null || true)"
   TS_CID="$("${DC[@]}" ps -q postgres-tsdb 2>/dev/null || true)"
   RD_CID="$("${DC[@]}" ps -q redis 2>/dev/null || true)"
+  NATS_CID="$("${DC[@]}" ps -q nats 2>/dev/null || true)"
   if [ -n "$PG_CID" ]; then
     docker exec "$PG_CID" pg_isready -U "${POSTGRES_USER:-omcgo}" >/dev/null 2>&1 && PG_OK=1 || PG_OK=0
   fi
@@ -782,15 +803,26 @@ while [ $WAIT -lt 90 ]; do
   if [ -n "$RD_CID" ]; then
     docker exec "$RD_CID" redis-cli ping >/dev/null 2>&1 && RD_OK=1 || RD_OK=0
   fi
-  [ "$PG_OK" = 1 ] && [ "$TS_OK" = 1 ] && [ "$RD_OK" = 1 ] && break
-  echo "  ... ${WAIT}s (PG=$PG_OK TSDB=$TS_OK RD=$RD_OK)"
+  if [ -n "$NATS_CID" ]; then
+    [ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$NATS_CID" 2>/dev/null || true)" = "healthy" ] &&
+      NATS_OK=1 || NATS_OK=0
+  fi
+  [ "$PG_OK" = 1 ] && [ "$TS_OK" = 1 ] && [ "$RD_OK" = 1 ] && [ "$NATS_OK" = 1 ] && break
+  echo "  ... ${WAIT}s (PG=$PG_OK TSDB=$TS_OK RD=$RD_OK NATS=$NATS_OK)"
 done
-if [ "$PG_OK" != 1 ] || [ "$TS_OK" != 1 ] || [ "$RD_OK" != 1 ]; then
-  die "基础设施 90s 内未就绪：PG=$PG_OK TSDB=$TS_OK RD=$RD_OK
+if [ "$PG_OK" != 1 ] || [ "$TS_OK" != 1 ] || [ "$RD_OK" != 1 ] || [ "$NATS_OK" != 1 ]; then
+  die "基础设施 90s 内未就绪：PG=$PG_OK TSDB=$TS_OK RD=$RD_OK NATS=$NATS_OK
   手动检查：${DC[*]} ps
             ${DC[*]} logs postgres postgres-tsdb redis" 2
 fi
-log "基础设施已就绪 (PG / TSDB / Redis)"
+log "基础设施已就绪 (PG / TSDB / Redis / NATS)"
+
+if [ "$HANDOFF_PREPARED" != 1 ]; then
+  log "首次部署/原 NATS 未运行：在 app 首次启动前创建 GPV RPC 固定 durable ..."
+  gpv_handoff_prepare ||
+    die "GPV consumer handoff 失败；尚未启动 app，修复 NATS/consumer 配置后重试" 2
+  HANDOFF_PREPARED=1
+fi
 
 # 7.2 验证 omcgo-net 网络已创建
 log "验证 omcgo-net 网络 ..."

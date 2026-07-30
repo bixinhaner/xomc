@@ -17,6 +17,25 @@ networks:
     driver: bridge
 
 services:
+  # ── GPV RPC 无损升级接力（升级/重启 app 前一次性运行）────────────────
+  gpv-handoff:
+    image: ${IMAGE_APP}
+    restart: "no"
+    profiles: ["operations"]
+    entrypoint: ["omcgo-gpv-handoff"]
+    command: ["--config", "/etc/omcgo/app.prod.yaml"]
+    environment:
+      GPV_PROVISION_QUEUE: "${GPV_PROVISION_QUEUE:-provision-gpv}"
+      GPV_RPC_DURABLE: "${GPV_RPC_DURABLE:-device-rpc-gpv}"
+      GPV_RPC_SOURCE_CONSUMER: "${GPV_RPC_SOURCE_CONSUMER:-}"
+      GPV_ACK_WAIT: "${GPV_ACK_WAIT:-30s}"
+      GPV_MAX_DELIVER: "${GPV_MAX_DELIVER:-5}"
+      GPV_MAX_ACK_PENDING: "${GPV_MAX_ACK_PENDING:-2000}"
+    volumes:
+      - /opt/omc/etc/app.prod.yaml:/etc/omcgo/app.prod.yaml:ro
+    networks:
+      - omcgo-net
+
   # ── 数据库迁移（首次部署 + 每次升级都跑；幂等）────────────────────────
   #   使用 network_mode: "service:postgres" 共享 postgres 网络命名空间，
   #   127.0.0.1:5432 即 postgres 进程本身——不经 DNS、不经 NAT、零跳转。

@@ -372,6 +372,7 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 			BatchSize:     gpvPullBatchSize,
 			Concurrency:   gpvConfig.ProvisionConcurrency,
 			AckWait:       gpvConfig.AckWait,
+			MaxDeliver:    gpvConfig.MaxDeliver,
 			MaxAckPending: gpvConfig.MaxAckPending,
 		})
 	}
@@ -406,6 +407,7 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 				BatchSize:     gpvPullBatchSize,
 				Concurrency:   1,
 				AckWait:       gpvConfig.AckWait,
+				MaxDeliver:    gpvConfig.MaxDeliver,
 				MaxAckPending: 1,
 			})
 		}

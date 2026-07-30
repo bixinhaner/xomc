@@ -254,7 +254,7 @@ func TestProvisioningEngine_Subscribe_GPVUsesOrderedKeyedPullSubscribe(t *testin
 		ProvisionConcurrency: 2,
 		ProvisionQueueDepth:  8,
 		AckWait:              30 * time.Second,
-		MaxDeliver:           5,
+		MaxDeliver:           9,
 		MaxAckPending:        2000,
 	}
 
@@ -294,6 +294,7 @@ func TestProvisioningEngine_Subscribe_GPVUsesOrderedKeyedPullSubscribe(t *testin
 		BatchSize:     64,
 		Concurrency:   2,
 		AckWait:       30 * time.Second,
+		MaxDeliver:    9,
 		MaxAckPending: 2000,
 	}, h.eventBus.pullTuning[event.SubjectCommandGetParamsResponse])
 }

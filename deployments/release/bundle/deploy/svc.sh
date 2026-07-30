@@ -101,6 +101,11 @@ if [ -f "$SCRIPT_DIR/monitoring-profile-lib.sh" ]; then
 else
   die "缺 $SCRIPT_DIR/monitoring-profile-lib.sh"
 fi
+if [ -f "$SCRIPT_DIR/gpv-handoff-lib.sh" ]; then
+  . "$SCRIPT_DIR/gpv-handoff-lib.sh"
+else
+  die "缺 $SCRIPT_DIR/gpv-handoff-lib.sh"
+fi
 
 # 显式 flag 优先；无 flag 时读取 install.sh 持久化在 .env 的部署模式。
 monitoring_profile_apply_runtime ".env" "$SKIP_MONITORING" ||
@@ -135,6 +140,33 @@ refresh_resource_plan_metrics() {
 }
 
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
+
+action_stops_running_app() {
+  local target
+  case "$ACTION" in
+    down) return 0 ;;
+    stop|restart)
+      [ ${#TARGETS[@]} -eq 0 ] && return 0
+      for target in "${TARGETS[@]}"; do
+        [ "$target" = "app" ] && return 0
+      done
+      ;;
+  esac
+  return 1
+}
+
+app_is_running() {
+  local cid
+  cid="$("${DC[@]}" ps -q app 2>/dev/null || true)"
+  [ -n "$cid" ] &&
+    [ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || true)" = "true" ]
+}
+
+if action_stops_running_app && app_is_running; then
+  log "在停止/重建 app 前预创建 GPV RPC 固定 durable ..."
+  gpv_handoff_prepare ||
+    die "GPV consumer handoff 失败；旧 app 保持运行，未执行 $ACTION"
+fi
 
 # 行为分派
 case "$ACTION" in

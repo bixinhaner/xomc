@@ -217,6 +217,162 @@ func TestKeyedQueueHandlerFailureNaksThenSuccessAcks(t *testing.T) {
 	require.NoError(t, sub.Unsubscribe())
 }
 
+func TestKeyedQueueTransientHeadFailureDoesNotReleaseSameDeviceFollower(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("GPV_PUSH_HEAD_%d", suffix)
+	subject := fmt.Sprintf("test.gpv.push.head.%d", suffix)
+	durable := fmt.Sprintf("gpv-rpc-head-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name: stream, Subjects: []string{subject}, Storage: nats.MemoryStorage,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	for sequence := 1; sequence <= 2; sequence++ {
+		evt, eventErr := NewEvent(subject, map[string]any{
+			"device_sn": "SN-HEAD",
+			"sequence":  sequence,
+		})
+		require.NoError(t, eventErr)
+		data, marshalErr := json.Marshal(evt)
+		require.NoError(t, marshalErr)
+		_, publishErr := js.Publish(subject, data)
+		require.NoError(t, publishErr)
+	}
+
+	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	t.Cleanup(func() { _ = bus.Close() })
+	var (
+		mu       sync.Mutex
+		order    []int
+		attempts = make(map[int]int)
+	)
+	sub, err := bus.KeyedQueueSubscribe(
+		subject,
+		KeyedQueueConfig{
+			Durable:       durable,
+			StartSequence: 1,
+			Concurrency:   1,
+			QueueDepth:    2,
+			AckWait:       300 * time.Millisecond,
+			MaxDeliver:    3,
+			MaxAckPending: 3,
+		},
+		func(Event) (string, error) { return "SN-HEAD", nil },
+		func(_ context.Context, evt Event) error {
+			var payload struct {
+				Sequence int `json:"sequence"`
+			}
+			require.NoError(t, evt.DecodePayload(&payload))
+			mu.Lock()
+			attempts[payload.Sequence]++
+			order = append(order, payload.Sequence)
+			attempt := attempts[payload.Sequence]
+			mu.Unlock()
+			if payload.Sequence == 1 && attempt == 1 {
+				return errors.New("transient database failure")
+			}
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(order) == 3
+	}, 5*time.Second, 20*time.Millisecond)
+	mu.Lock()
+	require.Equal(t, []int{1, 1, 2}, order)
+	mu.Unlock()
+	require.NoError(t, sub.Unsubscribe())
+}
+
+func TestKeyedQueueTerminalHeadFailureExhaustsMaxDeliverBeforeFollower(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("GPV_PUSH_TERM_%d", suffix)
+	subject := fmt.Sprintf("test.gpv.push.term.%d", suffix)
+	durable := fmt.Sprintf("gpv-rpc-term-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name: stream, Subjects: []string{subject}, Storage: nats.MemoryStorage,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	for sequence := 1; sequence <= 2; sequence++ {
+		evt, eventErr := NewEvent(subject, map[string]any{
+			"device_sn": "SN-TERM",
+			"sequence":  sequence,
+		})
+		require.NoError(t, eventErr)
+		data, marshalErr := json.Marshal(evt)
+		require.NoError(t, marshalErr)
+		_, publishErr := js.Publish(subject, data)
+		require.NoError(t, publishErr)
+	}
+
+	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	t.Cleanup(func() { _ = bus.Close() })
+	var (
+		mu    sync.Mutex
+		order []int
+	)
+	sub, err := bus.KeyedQueueSubscribe(
+		subject,
+		KeyedQueueConfig{
+			Durable: durable, StartSequence: 1, Concurrency: 1, QueueDepth: 2,
+			AckWait: 300 * time.Millisecond, MaxDeliver: 3, MaxAckPending: 3,
+		},
+		func(Event) (string, error) { return "SN-TERM", nil },
+		func(_ context.Context, evt Event) error {
+			var payload struct {
+				Sequence int `json:"sequence"`
+			}
+			require.NoError(t, evt.DecodePayload(&payload))
+			mu.Lock()
+			order = append(order, payload.Sequence)
+			mu.Unlock()
+			if payload.Sequence == 1 {
+				return errors.New("persistent database failure")
+			}
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(order) == 4
+	}, 5*time.Second, 20*time.Millisecond)
+	mu.Lock()
+	require.Equal(t, []int{1, 1, 1, 2}, order)
+	mu.Unlock()
+	require.Eventually(t, func() bool {
+		info, infoErr := js.ConsumerInfo(stream, durable)
+		return infoErr == nil && info.NumPending == 0 && info.NumAckPending == 0
+	}, 5*time.Second, 20*time.Millisecond)
+	require.NoError(t, sub.Unsubscribe())
+}
+
 func TestKeyedQueueSlowBacklogKeepsAckAliveAndSameDeviceFIFO(t *testing.T) {
 	url := os.Getenv("GPV_NATS_TEST_URL")
 	if url == "" {
@@ -378,5 +534,309 @@ func TestKeyedPullAdjacentFetchPreservesSameDeviceFIFO(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 10, info.Config.MaxAckPending)
 	require.Zero(t, info.NumRedelivered)
+	require.NoError(t, sub.Unsubscribe())
+}
+
+func TestKeyedPullTransientHeadFailureDoesNotReleaseSameDeviceFollower(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("GPV_PULL_HEAD_%d", suffix)
+	subject := fmt.Sprintf("test.gpv.pull.head.%d", suffix)
+	queue := fmt.Sprintf("gpv-provision-head-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name: stream, Subjects: []string{subject}, Storage: nats.MemoryStorage,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	bus.SetPullTuning(subject, PullTuning{
+		BatchSize: 2, Concurrency: 1, AckWait: 300 * time.Millisecond,
+		MaxDeliver: 3, MaxAckPending: 2,
+	})
+	t.Cleanup(func() { _ = bus.Close() })
+	var (
+		mu       sync.Mutex
+		order    []int
+		attempts = make(map[int]int)
+	)
+	sub, err := bus.KeyedPullSubscribe(
+		subject,
+		queue,
+		2,
+		func(Event) (string, error) { return "SN-HEAD", nil },
+		func(_ context.Context, evt Event) error {
+			var payload struct {
+				Sequence int `json:"sequence"`
+			}
+			require.NoError(t, evt.DecodePayload(&payload))
+			mu.Lock()
+			attempts[payload.Sequence]++
+			order = append(order, payload.Sequence)
+			attempt := attempts[payload.Sequence]
+			mu.Unlock()
+			if payload.Sequence == 1 && attempt == 1 {
+				return errors.New("transient database failure")
+			}
+			return nil
+		},
+	)
+	require.NoError(t, err)
+
+	for sequence := 1; sequence <= 2; sequence++ {
+		evt, eventErr := NewEvent(subject, map[string]any{
+			"device_sn": "SN-HEAD",
+			"sequence":  sequence,
+		})
+		require.NoError(t, eventErr)
+		data, marshalErr := json.Marshal(evt)
+		require.NoError(t, marshalErr)
+		_, publishErr := js.Publish(subject, data)
+		require.NoError(t, publishErr)
+	}
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(order) == 3
+	}, 5*time.Second, 20*time.Millisecond)
+	mu.Lock()
+	require.Equal(t, []int{1, 1, 2}, order)
+	mu.Unlock()
+	info, err := js.ConsumerInfo(stream, pullDurableName(queue))
+	require.NoError(t, err)
+	require.Equal(t, 3, info.Config.MaxDeliver)
+	require.NoError(t, sub.Unsubscribe())
+}
+
+func TestPrepareGPVHandoffFromActiveLegacyConsumerCapturesSwitchWindow(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("GPV_RELEASE_HANDOFF_%d", suffix)
+	subject := fmt.Sprintf("test.gpv.release.handoff.%d", suffix)
+	target := fmt.Sprintf("device-rpc-gpv-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name: stream, Subjects: []string{subject}, Storage: nats.MemoryStorage,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	for sequence := 1; sequence <= 3; sequence++ {
+		evt, eventErr := NewEvent(subject, map[string]any{"device_sn": "SN-HANDOFF", "sequence": sequence})
+		require.NoError(t, eventErr)
+		data, marshalErr := json.Marshal(evt)
+		require.NoError(t, marshalErr)
+		_, publishErr := js.Publish(subject, data)
+		require.NoError(t, publishErr)
+	}
+	legacy, err := js.SubscribeSync(subject, nats.DeliverAll(), nats.AckExplicit())
+	require.NoError(t, err)
+	for sequence := 1; sequence <= 2; sequence++ {
+		msg, nextErr := legacy.NextMsg(time.Second)
+		require.NoError(t, nextErr)
+		require.NoError(t, msg.AckSync())
+	}
+	legacyInfo, err := legacy.ConsumerInfo()
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), legacyInfo.AckFloor.Stream)
+
+	result, err := PrepareGPVHandoff(context.Background(), js, GPVHandoffConfig{
+		Subject:       subject,
+		TargetDurable: target,
+		AckWait:       time.Second,
+		MaxDeliver:    5,
+		MaxAckPending: 10,
+	})
+	require.NoError(t, err)
+	require.Equal(t, legacyInfo.Name, result.SourceConsumer)
+	require.Equal(t, uint64(3), result.StartSequence)
+
+	duringSwitch, err := NewEvent(subject, map[string]any{"device_sn": "SN-HANDOFF", "sequence": 4})
+	require.NoError(t, err)
+	data, err := json.Marshal(duringSwitch)
+	require.NoError(t, err)
+	_, err = js.Publish(subject, data)
+	require.NoError(t, err)
+	require.NoError(t, legacy.Unsubscribe())
+
+	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	t.Cleanup(func() { _ = bus.Close() })
+	var (
+		mu  sync.Mutex
+		got []int
+	)
+	sub, err := bus.KeyedQueueSubscribe(
+		subject,
+		KeyedQueueConfig{
+			Durable: target, Concurrency: 1, QueueDepth: 4,
+			AckWait: time.Second, MaxDeliver: 5, MaxAckPending: 10,
+		},
+		func(Event) (string, error) { return "SN-HANDOFF", nil },
+		func(_ context.Context, evt Event) error {
+			var payload struct {
+				Sequence int `json:"sequence"`
+			}
+			require.NoError(t, evt.DecodePayload(&payload))
+			mu.Lock()
+			got = append(got, payload.Sequence)
+			mu.Unlock()
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(got) == 2
+	}, 5*time.Second, 20*time.Millisecond)
+	mu.Lock()
+	require.Equal(t, []int{3, 4}, got, "must capture the switch window without replaying acknowledged history")
+	mu.Unlock()
+	require.NoError(t, sub.Unsubscribe())
+}
+
+func TestPrepareGPVHandoffFromConfiguredDurableUsesItsAckFloor(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("GPV_CONFIGURED_HANDOFF_%d", suffix)
+	subject := fmt.Sprintf("test.gpv.configured.handoff.%d", suffix)
+	source := fmt.Sprintf("legacy-rpc-%d", suffix)
+	target := fmt.Sprintf("device-rpc-gpv-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name: stream, Subjects: []string{subject}, Storage: nats.MemoryStorage,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	legacy, err := js.QueueSubscribeSync(
+		subject,
+		source,
+		nats.Durable(source),
+		nats.DeliverAll(),
+		nats.AckExplicit(),
+	)
+	require.NoError(t, err)
+	for sequence := 1; sequence <= 3; sequence++ {
+		evt, eventErr := NewEvent(subject, map[string]any{"device_sn": "SN-CONFIGURED", "sequence": sequence})
+		require.NoError(t, eventErr)
+		data, marshalErr := json.Marshal(evt)
+		require.NoError(t, marshalErr)
+		_, publishErr := js.Publish(subject, data)
+		require.NoError(t, publishErr)
+	}
+	for sequence := 1; sequence <= 2; sequence++ {
+		msg, nextErr := legacy.NextMsg(time.Second)
+		require.NoError(t, nextErr)
+		require.NoError(t, msg.AckSync())
+	}
+
+	result, err := PrepareGPVHandoff(context.Background(), js, GPVHandoffConfig{
+		Subject: subject, TargetDurable: target, SourceConsumer: source,
+		AckWait: time.Second, MaxDeliver: 5, MaxAckPending: 10,
+	})
+	require.NoError(t, err)
+	require.Equal(t, source, result.SourceConsumer)
+	require.Equal(t, uint64(3), result.StartSequence)
+	require.NoError(t, legacy.Unsubscribe())
+}
+
+func TestPrepareGPVHandoffWithoutSourceStartsAtTailAndCapturesFutureMessages(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("GPV_FRESH_HANDOFF_%d", suffix)
+	subject := fmt.Sprintf("test.gpv.fresh.handoff.%d", suffix)
+	target := fmt.Sprintf("device-rpc-gpv-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name: stream, Subjects: []string{subject}, Storage: nats.MemoryStorage,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	oldEvent, err := NewEvent(subject, map[string]any{"device_sn": "SN-FRESH", "sequence": 1})
+	require.NoError(t, err)
+	data, err := json.Marshal(oldEvent)
+	require.NoError(t, err)
+	_, err = js.Publish(subject, data)
+	require.NoError(t, err)
+
+	result, err := PrepareGPVHandoff(context.Background(), js, GPVHandoffConfig{
+		Subject: subject, TargetDurable: target,
+		AckWait: time.Second, MaxDeliver: 5, MaxAckPending: 10,
+	})
+	require.NoError(t, err)
+	require.Empty(t, result.SourceConsumer)
+	require.Zero(t, result.StartSequence)
+
+	futureEvent, err := NewEvent(subject, map[string]any{"device_sn": "SN-FRESH", "sequence": 2})
+	require.NoError(t, err)
+	data, err = json.Marshal(futureEvent)
+	require.NoError(t, err)
+	_, err = js.Publish(subject, data)
+	require.NoError(t, err)
+
+	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	t.Cleanup(func() { _ = bus.Close() })
+	got := make(chan int, 2)
+	sub, err := bus.KeyedQueueSubscribe(
+		subject,
+		KeyedQueueConfig{
+			Durable: target, Concurrency: 1, QueueDepth: 2,
+			AckWait: time.Second, MaxDeliver: 5, MaxAckPending: 10,
+		},
+		func(Event) (string, error) { return "SN-FRESH", nil },
+		func(_ context.Context, evt Event) error {
+			var payload struct {
+				Sequence int `json:"sequence"`
+			}
+			if err := evt.DecodePayload(&payload); err != nil {
+				return err
+			}
+			got <- payload.Sequence
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	select {
+	case sequence := <-got:
+		require.Equal(t, 2, sequence)
+	case <-time.After(5 * time.Second):
+		t.Fatal("future message was not captured by pre-created durable")
+	}
+	require.Never(t, func() bool { return len(got) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.NoError(t, sub.Unsubscribe())
 }
