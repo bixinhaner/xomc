@@ -85,6 +85,14 @@ codex plugin marketplace add .agents/plugins
 - `ps` / `pgrep` 等进程查询通常会被 sandbox 限制；收尾或排查残留进程时直接按权限规则提权执行。
 - `go test ./...` 中涉及 `miniredis` / `httptest` 本地监听时，普通 sandbox 可能报 `bind: operation not permitted`；直接提权复跑以区分环境问题和真实测试失败。
 
+## PM 性能管理知识库
+
+处理 PM 指标、KPI/counter、聚合、导出、设备性能查看、指标查询、`pm_metrics`、`pm_adhoc_aggregation_results`、`statis_type`、15 分钟点、hourly/daily/weekly/monthly 口径问题时，必须先阅读：
+
+- `docs/ref/pm-metrics-knowledge.md`
+
+排查时先确认统计口径和入口矩阵，再看具体代码；涉及页面行为必须用浏览器验证真实请求参数。
+
 ## 常用验证
 
 按改动范围选择验证，不能假装跑过。
