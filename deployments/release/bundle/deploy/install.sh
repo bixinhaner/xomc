@@ -894,6 +894,17 @@ sep "8/9 启动业务 + web + 监控"
 log "${DC[*]} up -d"
 "${DC[@]}" up -d
 
+# Compose records the resolved bind-mount source inode when a container is
+# created. OMC_ROOT/current is switched to the new immutable release above,
+# but an unchanged monitoring image/config leaves the old container attached
+# to the previous release directory. Recreate only the stateless services that
+# mount release-local configuration; --no-deps protects all data services and
+# named volumes remain attached.
+if [ "$SKIP_MONITORING" = 0 ]; then
+  log "刷新版本目录 bind mount（仅监控无状态容器，保留数据卷）..."
+  "${DC[@]}" up -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo
+fi
+
 log "等待业务容器启动（最多 90s，健康检查每 5s 重试）..."
 HEALTHCHECK_TIMEOUT=90
 HEALTHCHECK_INTERVAL=5
