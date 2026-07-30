@@ -11,6 +11,7 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"go.uber.org/zap"
@@ -44,6 +45,9 @@ func rebuildClaimBatchSelect(quietPeriod time.Duration, limit uint64) sq.SelectB
 	if limit == 0 {
 		limit = 1
 	}
+	if limit > rebuildBatchSize {
+		limit = rebuildBatchSize
+	}
 	return storage.Psql.Select(
 		"id", "task_id", "task_version_id", "entity_key", "granularity",
 		"window_start", "window_end", "source_event_id",
@@ -68,6 +72,27 @@ func rebuildClaimBatchSelect(quietPeriod time.Duration, limit uint64) sq.SelectB
 		Suffix("FOR UPDATE SKIP LOCKED")
 }
 
+func rebuildLeaseBatchUpdate(
+	jobs []RebuildJob,
+	duration time.Duration,
+) sq.UpdateBuilder {
+	owners := make(sq.Or, 0, len(jobs))
+	for _, job := range jobs {
+		owners = append(owners, sq.And{
+			sq.Eq{"id": job.ID},
+			sq.Eq{"lease_owner": job.LeaseOwner},
+		})
+	}
+	return storage.Psql.Update("pm_aggregation_rebuilds").
+		Set("lease_expires_at", sq.Expr(
+			"now() + (? * interval '1 microsecond')",
+			duration.Microseconds(),
+		)).
+		Where(sq.Eq{"status": "running"}).
+		Where("lease_expires_at > now()").
+		Where(owners)
+}
+
 func rebuildCompletionStatus(claimedGeneration, currentGeneration int64) string {
 	if currentGeneration > claimedGeneration {
 		return "pending"
@@ -83,6 +108,15 @@ type RebuildRepository struct {
 	pool    *pgxpool.Pool
 	metrics *Metrics
 }
+
+type rebuildCompletionTx interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Commit(context.Context) error
+	Rollback(context.Context) error
+}
+
+type rebuildCompletionBegin func(context.Context) (rebuildCompletionTx, error)
 
 func NewRebuildRepository(pool *pgxpool.Pool) *RebuildRepository {
 	return &RebuildRepository{pool: pool}
@@ -219,24 +253,55 @@ func (r *RebuildRepository) ClaimRebuildBatch(
 	return jobs, nil
 }
 
-func (r *RebuildRepository) renewLease(ctx context.Context, job RebuildJob) error {
-	query, args, err := storage.Psql.Update("pm_aggregation_rebuilds").
-		Set("lease_expires_at", time.Now().UTC().Add(rebuildLeaseDuration)).
-		Where(sq.Eq{
-			"id": job.ID, "status": "running", "lease_owner": job.LeaseOwner,
-		}).
-		ToSql()
+func (r *RebuildRepository) renewLeases(
+	ctx context.Context,
+	jobs []RebuildJob,
+) error {
+	if len(jobs) == 0 || len(jobs) > rebuildBatchSize {
+		return fmt.Errorf(
+			"PM aggregation rebuild lease batch size %d is outside 1..%d",
+			len(jobs), rebuildBatchSize,
+		)
+	}
+	query, args, err := rebuildLeaseBatchUpdate(
+		jobs, rebuildLeaseDuration,
+	).ToSql()
 	if err != nil {
-		return err
+		return fmt.Errorf("build renew PM aggregation rebuild leases: %w", err)
 	}
 	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return err
+		return fmt.Errorf("renew PM aggregation rebuild leases: %w", err)
 	}
-	if tag.RowsAffected() != 1 {
-		return fmt.Errorf("PM aggregation rebuild lease ownership lost")
+	if tag.RowsAffected() != int64(len(jobs)) {
+		return fmt.Errorf(
+			"PM aggregation rebuild lease ownership lost: renewed %d of %d",
+			tag.RowsAffected(), len(jobs),
+		)
 	}
 	return nil
+}
+
+func maintainRebuildLeases(
+	ctx context.Context,
+	ticks <-chan time.Time,
+	renew func(context.Context) error,
+	cancelWork context.CancelFunc,
+) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticks:
+			if err := renew(ctx); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				cancelWork()
+				return err
+			}
+		}
+	}
 }
 
 func (r *RebuildRepository) resetWindow(ctx context.Context, key WindowKey) (RebuildWindowState, error) {
@@ -305,55 +370,110 @@ func (r *RebuildRepository) reopenAfterReplay(ctx context.Context, key WindowKey
 	return nil
 }
 
-func (r *RebuildRepository) finish(
+func (r *RebuildRepository) finishAndEnqueueParents(
 	ctx context.Context,
 	job RebuildJob,
+	snapshot *TaskSnapshot,
 	rebuildErr error,
 ) (bool, error) {
-	builder := storage.Psql.Update("pm_aggregation_rebuilds").
-		Where(sq.Eq{"id": job.ID, "lease_owner": job.LeaseOwner})
-	if rebuildErr == nil {
-		completedAt := time.Now().UTC()
-		builder = builder.
-			Set("status", sq.Expr(
-				"CASE WHEN request_generation > ? THEN 'pending' ELSE 'completed' END",
-				job.RequestGeneration,
-			)).
-			Set("completed_at", rebuildCompletedAtExpr(
-				job.RequestGeneration, completedAt,
-			)).
-			Set("lease_expires_at", nil).
-			Set("lease_owner", nil).
-			Set("next_attempt_at", sq.Expr(
-				"CASE WHEN request_generation > ? THEN ? ELSE next_attempt_at END",
-				job.RequestGeneration, time.Now().UTC(),
-			)).
-			Set("last_error", nil)
-	} else {
-		builder = builder.Set("status", "failed").
-			Set("completed_at", nil).
-			Set("lease_expires_at", nil).
-			Set("lease_owner", nil).
-			Set("next_attempt_at", time.Now().UTC().Add(rebuildRetryDelay(job.Attempts))).
-			Set("last_error", rebuildErr.Error())
-	}
-	query, args, err := builder.ToSql()
+	return completeRebuildAtomically(
+		ctx,
+		func(ctx context.Context) (rebuildCompletionTx, error) {
+			return r.pool.Begin(ctx)
+		},
+		job,
+		snapshot,
+		rebuildErr,
+	)
+}
+
+func completeRebuildAtomically(
+	ctx context.Context,
+	begin rebuildCompletionBegin,
+	job RebuildJob,
+	snapshot *TaskSnapshot,
+	rebuildErr error,
+) (bool, error) {
+	tx, err := begin(ctx)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("begin complete PM aggregation rebuild: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	generationSQL, generationArgs, err := storage.Psql.Select("request_generation").
+		From("pm_aggregation_rebuilds").
+		Where(sq.Eq{
+			"id": job.ID, "status": "running", "lease_owner": job.LeaseOwner,
+		}).
+		Where("lease_expires_at > now()").
+		Suffix("FOR UPDATE").
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build lock PM aggregation rebuild completion: %w", err)
 	}
 	var currentGeneration int64
-	if err := r.pool.QueryRow(
-		ctx, query+" RETURNING request_generation", args...,
+	if err := tx.QueryRow(
+		ctx, generationSQL, generationArgs...,
 	).Scan(&currentGeneration); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, fmt.Errorf("PM aggregation rebuild lease ownership lost before finish")
 		}
-		return false, fmt.Errorf("finish PM aggregation rebuild: %w", err)
+		return false, fmt.Errorf("lock PM aggregation rebuild completion: %w", err)
 	}
-	if rebuildErr != nil {
-		return false, nil
+	if currentGeneration < job.RequestGeneration {
+		return false, fmt.Errorf(
+			"PM aggregation rebuild generation regressed from %d to %d",
+			job.RequestGeneration, currentGeneration,
+		)
 	}
-	return rebuildGenerationStable(job, currentGeneration), nil
+	stable := rebuildGenerationStable(job, currentGeneration)
+	builder := storage.Psql.Update("pm_aggregation_rebuilds").
+		Set("lease_expires_at", nil).
+		Set("lease_owner", nil).
+		Where(sq.Eq{
+			"id": job.ID, "status": "running", "lease_owner": job.LeaseOwner,
+		}).
+		Where("lease_expires_at > now()")
+	if !stable {
+		builder = builder.
+			Set("status", "pending").
+			Set("completed_at", nil).
+			Set("next_attempt_at", sq.Expr("now()")).
+			Set("last_error", nil)
+	} else if rebuildErr != nil {
+		builder = builder.
+			Set("status", "failed").
+			Set("completed_at", nil).
+			Set("next_attempt_at", sq.Expr(
+				"now() + (? * interval '1 microsecond')",
+				rebuildRetryDelay(job.Attempts).Microseconds(),
+			)).
+			Set("last_error", rebuildErr.Error())
+	} else {
+		builder = builder.
+			Set("status", "completed").
+			Set("completed_at", sq.Expr("now()")).
+			Set("last_error", nil)
+	}
+	updateSQL, updateArgs, err := builder.ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build complete PM aggregation rebuild: %w", err)
+	}
+	tag, err := tx.Exec(ctx, updateSQL, updateArgs...)
+	if err != nil {
+		return false, fmt.Errorf("complete PM aggregation rebuild: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return false, fmt.Errorf("PM aggregation rebuild lease ownership lost before finish")
+	}
+	if stable && rebuildErr == nil {
+		if err := enqueuePublishedParentsTx(ctx, tx, job, snapshot); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit PM aggregation rebuild completion: %w", err)
+	}
+	return stable && rebuildErr == nil, nil
 }
 
 func rebuildCompletedAtExpr(
@@ -419,14 +539,18 @@ func publishedParentsSelect(
 		Where(sq.Gt{"window_end": job.Key.Start})
 }
 
-func (r *RebuildRepository) enqueuePublishedParents(
+func enqueuePublishedParentsTx(
 	ctx context.Context,
+	tx rebuildCompletionTx,
 	job RebuildJob,
 	snapshot *TaskSnapshot,
 ) error {
 	parentTaskID, parentVersionID := rebuildParentLineage(job.Key, snapshot)
 	for _, target := range RebuildCascadeTargets(job.Key) {
-		sourceID := fmt.Sprintf("cascade:%d:%s", job.ID, target)
+		sourceID := fmt.Sprintf(
+			"cascade:%d:%d:%s",
+			job.ID, job.RequestGeneration, target,
+		)
 		selectBuilder := publishedParentsSelect(
 			job, target, parentTaskID, parentVersionID, sourceID,
 		)
@@ -447,13 +571,14 @@ ON CONFLICT (task_version_id, entity_key, granularity, window_start) DO UPDATE S
   status = CASE
     WHEN pm_aggregation_rebuilds.status = 'completed' THEN 'pending'
     ELSE pm_aggregation_rebuilds.status
-  END`).
+  END
+WHERE pm_aggregation_rebuilds.source_event_id IS DISTINCT FROM EXCLUDED.source_event_id`).
 			ToSql()
 		if err != nil {
-			return err
+			return fmt.Errorf("build enqueue parent PM aggregation rebuild: %w", err)
 		}
-		if _, err := r.pool.Exec(ctx, query, args...); err != nil {
-			return err
+		if _, err := tx.Exec(ctx, query, args...); err != nil {
+			return fmt.Errorf("enqueue parent PM aggregation rebuild: %w", err)
 		}
 	}
 	return nil
@@ -529,28 +654,22 @@ func (r *Rebuilder) runOnce(ctx context.Context) error {
 		r.metrics.RebuildBatchesTotal.Inc()
 		r.metrics.RebuildJobsPerBatch.Observe(float64(len(jobs)))
 	}
-	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	batchCtx, cancelBatch := context.WithCancel(ctx)
 	heartbeatDone := make(chan error, 1)
 	go func() {
 		ticker := time.NewTicker(rebuildLeaseDuration / 3)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-heartbeatCtx.Done():
-				heartbeatDone <- nil
-				return
-			case <-ticker.C:
-				for _, job := range jobs {
-					if err := r.repo.renewLease(heartbeatCtx, job); err != nil {
-						heartbeatDone <- err
-						return
-					}
-				}
-			}
-		}
+		heartbeatDone <- maintainRebuildLeases(
+			batchCtx,
+			ticker.C,
+			func(ctx context.Context) error {
+				return r.repo.renewLeases(ctx, jobs)
+			},
+			cancelBatch,
+		)
 	}()
-	results := r.rebuildClaimedBatch(ctx, jobs)
-	stopHeartbeat()
+	results := r.rebuildClaimedBatch(batchCtx, jobs)
+	cancelBatch()
 	heartbeatErr := <-heartbeatDone
 	var batchErr error
 	for _, job := range jobs {
@@ -558,22 +677,10 @@ func (r *Rebuilder) runOnce(ctx context.Context) error {
 		if heartbeatErr != nil {
 			rebuildErr = errors.Join(rebuildErr, heartbeatErr)
 		}
-		stable, finishErr := r.repo.finish(ctx, job, rebuildErr)
+		stable, finishErr := r.repo.finishAndEnqueueParents(
+			ctx, job, r.recovery.snapshot.Current(), rebuildErr,
+		)
 		rebuildErr = errors.Join(rebuildErr, finishErr)
-		if rebuildErr == nil && stable {
-			if err := r.repo.enqueuePublishedParents(
-				ctx, job, r.recovery.snapshot.Current(),
-			); err != nil {
-				// The child is already durable. Requeue it so a transient
-				// parent-cascade failure cannot permanently lose propagation.
-				rebuildErr = err
-				if enqueueErr := r.repo.Enqueue(
-					ctx, job.Key, "cascade-retry:"+job.SourceID,
-				); enqueueErr != nil {
-					rebuildErr = errors.Join(rebuildErr, enqueueErr)
-				}
-			}
-		}
 		if rebuildErr != nil {
 			if r.metrics != nil {
 				r.metrics.RebuildErrorsTotal.Inc()
@@ -581,7 +688,7 @@ func (r *Rebuilder) runOnce(ctx context.Context) error {
 			batchErr = errors.Join(batchErr, rebuildErr)
 			continue
 		}
-		if r.metrics != nil {
+		if stable && r.metrics != nil {
 			r.metrics.RebuildsTotal.WithLabelValues(
 				string(job.Key.Granularity),
 			).Inc()

@@ -1,15 +1,239 @@
 package stream
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+func TestRebuildLeaseBatchRenewalUsesDatabaseClockAndRejectsExpired(t *testing.T) {
+	owner := uuid.New()
+	jobs := []RebuildJob{
+		{ID: 11, LeaseOwner: owner},
+		{ID: 12, LeaseOwner: owner},
+	}
+
+	query, args, err := rebuildLeaseBatchUpdate(
+		jobs, rebuildLeaseDuration,
+	).ToSql()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(query, "lease_expires_at = now() +") {
+		t.Fatalf("lease renewal does not use database clock: %s", query)
+	}
+	if !strings.Contains(query, "lease_expires_at > now()") {
+		t.Fatalf("expired rebuild lease can be revived: %s", query)
+	}
+	if strings.Contains(fmt.Sprint(args), time.Now().UTC().Format("2006-01-02")) {
+		t.Fatalf("lease renewal unexpectedly carries a worker wall-clock timestamp: %v", args)
+	}
+	for _, job := range jobs {
+		if !strings.Contains(fmt.Sprint(args), fmt.Sprint(job.ID)) {
+			t.Fatalf("batch renewal args lack job %d: %v", job.ID, args)
+		}
+	}
+}
+
+func TestRebuildLeaseBatchFailureCancelsWorkImmediately(t *testing.T) {
+	workCtx, cancelWork := context.WithCancel(context.Background())
+	defer cancelWork()
+	ticks := make(chan time.Time, 1)
+	wantErr := errors.New("lease ownership lost")
+	done := make(chan error, 1)
+	go func() {
+		done <- maintainRebuildLeases(
+			workCtx,
+			ticks,
+			func(context.Context) error { return wantErr },
+			cancelWork,
+		)
+	}()
+
+	ticks <- time.Now()
+
+	select {
+	case <-workCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("batch work was not canceled after lease renewal failed")
+	}
+	if err := <-done; !errors.Is(err, wantErr) {
+		t.Fatalf("heartbeat error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestRebuildLeaseHeartbeatIgnoresConcurrentShutdownCancellation(t *testing.T) {
+	workCtx, cancelWork := context.WithCancel(context.Background())
+	ticks := make(chan time.Time, 1)
+	ticks <- time.Now()
+
+	err := maintainRebuildLeases(
+		workCtx,
+		ticks,
+		func(context.Context) error {
+			cancelWork()
+			return context.Canceled
+		},
+		cancelWork,
+	)
+
+	if err != nil {
+		t.Fatalf("normal batch shutdown became a renewal failure: %v", err)
+	}
+}
+
+type fakeRebuildCompletionRow struct {
+	generation int64
+	err        error
+}
+
+func (row fakeRebuildCompletionRow) Scan(dest ...any) error {
+	if row.err != nil {
+		return row.err
+	}
+	*(dest[0].(*int64)) = row.generation
+	return nil
+}
+
+type fakeRebuildCompletionTx struct {
+	generation  int64
+	failParent  int
+	parentExecs int
+	queries     []string
+	args        [][]any
+	committed   bool
+	rolledBack  bool
+}
+
+func (tx *fakeRebuildCompletionTx) QueryRow(
+	_ context.Context,
+	query string,
+	args ...any,
+) pgx.Row {
+	tx.queries = append(tx.queries, query)
+	tx.args = append(tx.args, args)
+	return fakeRebuildCompletionRow{generation: tx.generation}
+}
+
+func (tx *fakeRebuildCompletionTx) Exec(
+	_ context.Context,
+	query string,
+	args ...any,
+) (pgconn.CommandTag, error) {
+	tx.queries = append(tx.queries, query)
+	tx.args = append(tx.args, args)
+	if strings.Contains(query, "INSERT INTO pm_aggregation_rebuilds") {
+		tx.parentExecs++
+		if tx.failParent > 0 && tx.parentExecs == tx.failParent {
+			return pgconn.CommandTag{}, errors.New("injected parent cascade failure")
+		}
+	}
+	return pgconn.NewCommandTag("UPDATE 1"), nil
+}
+
+func (tx *fakeRebuildCompletionTx) Commit(context.Context) error {
+	tx.committed = true
+	return nil
+}
+
+func (tx *fakeRebuildCompletionTx) Rollback(context.Context) error {
+	tx.rolledBack = true
+	return nil
+}
+
+func TestRebuildCompletionAndAllParentCascadesRollbackTogether(t *testing.T) {
+	job := RebuildJob{
+		ID: 91, LeaseOwner: uuid.New(), RequestGeneration: 7,
+		Key: WindowKey{
+			TaskID: uuid.New(), TaskVersionID: uuid.New(),
+			EntityKey: "Network", Granularity: GranularityDaily,
+			Start: time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
+			End:   time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	first := &fakeRebuildCompletionTx{generation: 7, failParent: 2}
+
+	stable, err := completeRebuildAtomically(
+		context.Background(),
+		func(context.Context) (rebuildCompletionTx, error) { return first, nil },
+		job,
+		nil,
+		nil,
+	)
+
+	if err == nil || stable {
+		t.Fatalf("partial parent cascade = (stable=%v, err=%v), want rollback error", stable, err)
+	}
+	if first.committed || !first.rolledBack {
+		t.Fatalf("partial cascade transaction commit=%v rollback=%v",
+			first.committed, first.rolledBack)
+	}
+
+	retry := &fakeRebuildCompletionTx{generation: 7}
+	stable, err = completeRebuildAtomically(
+		context.Background(),
+		func(context.Context) (rebuildCompletionTx, error) { return retry, nil },
+		job,
+		nil,
+		nil,
+	)
+	if err != nil || !stable || !retry.committed {
+		t.Fatalf("retry = (stable=%v, committed=%v, err=%v), want atomic success",
+			stable, retry.committed, err)
+	}
+	if retry.parentExecs != 2 {
+		t.Fatalf("retry parent cascades = %d, want weekly and monthly once", retry.parentExecs)
+	}
+	for _, query := range retry.queries {
+		if strings.Contains(query, "INSERT INTO pm_aggregation_rebuilds") &&
+			!strings.Contains(query, "source_event_id IS DISTINCT FROM") {
+			t.Fatalf("parent upsert is not generation-idempotent: %s", query)
+		}
+	}
+	joinedArgs := fmt.Sprint(retry.args)
+	if !strings.Contains(joinedArgs, "cascade:91:7:weekly") ||
+		!strings.Contains(joinedArgs, "cascade:91:7:monthly") {
+		t.Fatalf("parent source IDs are not generation-idempotent: %s", joinedArgs)
+	}
+}
+
+func TestRebuildCompletionDefersParentsWhenGenerationChanged(t *testing.T) {
+	job := RebuildJob{
+		ID: 92, LeaseOwner: uuid.New(), RequestGeneration: 7,
+		Key: WindowKey{
+			TaskID: uuid.New(), TaskVersionID: uuid.New(),
+			EntityKey: "Network", Granularity: GranularityHourly,
+			Start: time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC),
+			End:   time.Date(2026, 7, 30, 14, 0, 0, 0, time.UTC),
+		},
+	}
+	tx := &fakeRebuildCompletionTx{generation: 8}
+
+	stable, err := completeRebuildAtomically(
+		context.Background(),
+		func(context.Context) (rebuildCompletionTx, error) { return tx, nil },
+		job,
+		nil,
+		nil,
+	)
+
+	if err != nil || stable {
+		t.Fatalf("changed generation = (stable=%v, err=%v), want pending", stable, err)
+	}
+	if !tx.committed || tx.parentExecs != 0 {
+		t.Fatalf("changed generation commit=%v parent cascades=%d, want pending without parent",
+			tx.committed, tx.parentExecs)
+	}
+}
 
 func TestRebuildClaimBatchCoalescesUntilDatabaseQuietPeriod(t *testing.T) {
 	query, args, err := rebuildClaimBatchSelect(2*time.Minute, 100).ToSql()
