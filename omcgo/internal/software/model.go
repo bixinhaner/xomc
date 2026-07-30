@@ -18,7 +18,9 @@ type UpgradeState string
 
 const (
 	UpgradePending UpgradeState = "pending"
-	// UpgradeDownloading 仅给 Download RPC（固件升级 / 回滚）使用——CPE 正在从 ACS 拉文件。
+	// UpgradeDownloading 表示"短 RPC 响应窗口"：
+	// 普通升级为 Download RPC 等 DownloadResponse；回退阶段一复用该状态等 GPV 响应，
+	// 展示层与 reaper 会按 task_type/command_key 改写为回退语义。
 	UpgradeDownloading UpgradeState = "downloading"
 	// UpgradeUploading 给 Upload RPC（备份 / 日志采集 / 配置恢复）使用——Upload 命令已派发，
 	// 涵盖：等 CPE 回 UploadResponse + CPE HTTP PUT 文件到 ACS + 等 CPE 主动发 TransferComplete。
@@ -65,6 +67,13 @@ const (
 	FailureDownloadFile    FailureCode = "DOWNLOAD_FILE_ERROR" // system — firmware file not found
 	FailureDownloadFault   FailureCode = "DOWNLOAD_FAULT"      // device — CPE rejected Download RPC
 	FailureUploadFault     FailureCode = "UPLOAD_FAULT"        // device — CPE rejected Upload RPC
+
+	// Stage: version rollback
+	FailureRollbackEnableCheckTimeout FailureCode = "ROLLBACK_ENABLE_CHECK_TIMEOUT" // timeout — no GPV response for rollback enable check
+	FailureRollbackApplyTimeout       FailureCode = "ROLLBACK_APPLY_TIMEOUT"        // timeout — no reboot completion after rollback SPV
+	FailureRollbackEnableCheckFault   FailureCode = "ROLLBACK_ENABLE_CHECK_FAULT"   // device — CPE rejected rollback enable GPV
+	FailureRollbackSetFault           FailureCode = "ROLLBACK_SET_FAULT"            // device — CPE rejected rollback SPV
+	FailureRollbackNotSupported       FailureCode = "ROLLBACK_NOT_SUPPORTED"        // device — rollback enable value is false/empty
 
 	// Stage: transfer complete
 	FailureTCFault FailureCode = "TC_FAULT" // device — CPE returned TransferComplete with fault

@@ -106,8 +106,12 @@ function renderNoWrapDeviceStatus(status: BadgeStatus, text: ReactNode) {
 export function renderDeviceStatus(status: UnifiedFileTransferDeviceItem['status'], t: Translate) {
   switch (status) {
     case 'downloading':
-      // 升级 / 回滚类 Download RPC：CPE 正在从 ACS 拉镜像 / 补丁文件
+      // 升级类 Download RPC：CPE 正在从 ACS 拉镜像 / 补丁文件
       return renderNoWrapDeviceStatus('processing', t('ufte.status.downloading'));
+    case 'rollback_checking':
+      return renderNoWrapDeviceStatus('processing', t('ufte.status.rollbackChecking'));
+    case 'rolling_back':
+      return renderNoWrapDeviceStatus('processing', t('ufte.status.rollingBack'));
     case 'uploading':
       // 备份 / 日志采集 Upload RPC：Upload 命令已派发，等 UploadResponse + CPE 通过 HTTP PUT
       // 把文件上传到 ACS（这两步在 TR-069 上紧贴，ACS 侧合并到同一段展示）

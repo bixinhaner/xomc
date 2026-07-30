@@ -690,7 +690,7 @@ func normalizeTaskResult(result software.TaskResult) string {
 // normalizeDeviceStatus 把 software.UpgradeSubTask.Status 翻译成设备列表展示状态。
 //
 // 状态本身就是任务类型语义：
-//   - UpgradeDownloading（Download RPC，升级 / 回滚）→ "downloading"
+//   - UpgradeDownloading（普通升级 Download RPC）→ "downloading"
 //   - UpgradeUploading（Upload RPC，备份 / 日志采集）→ "uploading"
 //     · 子分支：fileLanded=true（backup_restore_file 已落地）→ "awaiting_tc"
 //     —— TR-069 上"等 UploadResponse"和"CPE PUT 文件中"两步紧贴且无独立 ACS 信号，
@@ -717,6 +717,67 @@ func normalizeDeviceStatus(status software.UpgradeState, fileLanded bool) string
 	default:
 		return "pending"
 	}
+}
+
+func normalizeDeviceStatusForTask(taskType software.TaskType, status software.UpgradeState, fileLanded bool) string {
+	if taskType == software.TaskTypeRollback {
+		switch status {
+		case software.UpgradeDownloading:
+			return "rollback_checking"
+		case software.UpgradeRebooting, software.UpgradeVerifying:
+			return "rolling_back"
+		}
+	}
+	return normalizeDeviceStatus(status, fileLanded)
+}
+
+const rollbackEnableCheckCommandKeyPrefix = "rollback-enable-check-"
+
+func normalizeFailureReasonForTask(taskType software.TaskType, commandKey, failureReason, failureDetail string) string {
+	if taskType != software.TaskTypeRollback || failureReason == "" {
+		return failureReason
+	}
+
+	detailLower := strings.ToLower(failureDetail)
+	switch failureReason {
+	case string(software.FailureDownloadTimeout):
+		if strings.HasPrefix(commandKey, rollbackEnableCheckCommandKeyPrefix) {
+			return string(software.FailureRollbackEnableCheckTimeout)
+		}
+	case string(software.FailureTaskTimeout):
+		return string(software.FailureRollbackApplyTimeout)
+	case string(software.FailureUploadFault):
+		if strings.Contains(detailLower, "rollback") && strings.Contains(detailLower, "setparametervalues") {
+			return string(software.FailureRollbackSetFault)
+		}
+	case string(software.FailureInternalError):
+		if strings.Contains(detailLower, "enable check rejected") {
+			return string(software.FailureRollbackEnableCheckFault)
+		}
+		if strings.Contains(detailLower, "does not support rollback") {
+			return string(software.FailureRollbackNotSupported)
+		}
+	}
+	return failureReason
+}
+
+func normalizeFailureDetailForTask(taskType software.TaskType, failureReason, failureDetail string) string {
+	if taskType != software.TaskTypeRollback || failureDetail == "" {
+		return failureDetail
+	}
+
+	detailLower := strings.ToLower(failureDetail)
+	switch failureReason {
+	case string(software.FailureRollbackEnableCheckTimeout):
+		if strings.Contains(detailLower, "downloadresponse") {
+			return "Rollback enable check timed out: no GetParameterValuesResponse from device."
+		}
+	case string(software.FailureRollbackApplyTimeout):
+		if strings.Contains(detailLower, "transfercomplete") {
+			return "Rollback timed out: no reboot completion from device after SetParameterValues."
+		}
+	}
+	return failureDetail
 }
 
 func progressFromCounts(total, success, failed int, status software.TaskStatus) int {
@@ -757,11 +818,11 @@ func stepForTask(item TaskType, status software.TaskStatus) string {
 
 func progressForDeviceStatus(status string) int {
 	switch status {
-	case "downloading", "uploading":
+	case "downloading", "uploading", "rollback_checking":
 		return 45
 	case "awaiting_tc":
 		return 70
-	case "verifying":
+	case "verifying", "rolling_back":
 		return 75
 	case "ended", "failed":
 		return 100
