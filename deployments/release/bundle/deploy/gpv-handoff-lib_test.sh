@@ -76,4 +76,82 @@ for action in start up restart stop; do
   fi
 done
 
+SYSTEMD_BIN="$TMP/systemd-bin"
+SYSTEMD_UNITS="$TMP/systemd-units"
+SYSTEMD_IMAGES="$TMP/systemd-images"
+SYSTEMD_CONFIG="$TMP/app.prod.yaml"
+SYSTEMD_CALLS="$TMP/systemd-calls"
+mkdir -p "$SYSTEMD_BIN" "$SYSTEMD_UNITS" "$SYSTEMD_IMAGES"
+: >"$SYSTEMD_CONFIG"
+cat >"$SYSTEMD_BIN/docker" <<'SH'
+#!/usr/bin/env bash
+printf 'docker %s\n' "$*" >>"${GPV_SYSTEMD_TEST_CALLS:?}"
+case "${1:-} ${2:-}" in
+  "image inspect") exit 0 ;;
+  "run --rm") exit "${GPV_SYSTEMD_HANDOFF_EXIT:-0}" ;;
+esac
+exit 0
+SH
+cat >"$SYSTEMD_BIN/systemctl" <<'SH'
+#!/usr/bin/env bash
+printf 'systemctl %s\n' "$*" >>"${GPV_SYSTEMD_TEST_CALLS:?}"
+case "${1:-}" in
+  list-unit-files) exit 0 ;;
+  is-active)
+    [ "${3:-}" = "omcgo-app" ] && [ "${GPV_SYSTEMD_APP_ACTIVE:-0}" = "1" ]
+    exit
+    ;;
+esac
+exit 0
+SH
+chmod +x "$SYSTEMD_BIN/docker" "$SYSTEMD_BIN/systemctl"
+
+reset_systemd_units() {
+  rm -f "$SYSTEMD_UNITS"/*
+  for service in omcgo-app omcgo-acs omcgo-worker; do
+    : >"$SYSTEMD_UNITS/$service.service"
+  done
+  : >"$SYSTEMD_CALLS"
+}
+
+export GPV_SYSTEMD_TEST_CALLS="$SYSTEMD_CALLS"
+export GPV_SYSTEMD_APP_ACTIVE=1
+export GPV_SYSTEMD_UNIT_DIR="$SYSTEMD_UNITS"
+export GPV_SYSTEMD_HANDOFF_EXIT=0
+reset_systemd_units
+PATH="$SYSTEMD_BIN:$PATH" gpv_handoff_migrate_legacy_systemd \
+  "omcgo/app:test" "$SYSTEMD_IMAGES" "$SYSTEMD_CONFIG" || {
+    echo "FAIL: active legacy systemd app must migrate after successful handoff" >&2
+    exit 1
+  }
+handoff_line="$(grep -n '^docker run --rm ' "$SYSTEMD_CALLS" | cut -d: -f1)"
+first_stop_line="$(grep -n '^systemctl stop ' "$SYSTEMD_CALLS" | head -1 | cut -d: -f1)"
+[ -n "$handoff_line" ] && [ -n "$first_stop_line" ] && [ "$handoff_line" -lt "$first_stop_line" ] || {
+  echo "FAIL: handoff must complete before any legacy service is stopped" >&2
+  exit 1
+}
+grep -Fq -- '--network host' "$SYSTEMD_CALLS" &&
+  grep -Fq -- 'OMCGO_NATS_URL=nats://127.0.0.1:4222' "$SYSTEMD_CALLS" &&
+  grep -Fq -- '--entrypoint omcgo-gpv-handoff omcgo/app:test' "$SYSTEMD_CALLS" || {
+    echo "FAIL: systemd migration must use the release handoff tool against host NATS" >&2
+    exit 1
+  }
+actual_stop_order="$(grep '^systemctl stop ' "$SYSTEMD_CALLS" | sed 's/^systemctl stop //' | tr '\n' ' ')"
+[ "$actual_stop_order" = "omcgo-acs omcgo-worker omcgo-app " ] || {
+  echo "FAIL: producers and worker must stop before the legacy app: $actual_stop_order" >&2
+  exit 1
+}
+
+export GPV_SYSTEMD_HANDOFF_EXIT=29
+reset_systemd_units
+if PATH="$SYSTEMD_BIN:$PATH" gpv_handoff_migrate_legacy_systemd \
+  "omcgo/app:test" "$SYSTEMD_IMAGES" "$SYSTEMD_CONFIG"; then
+  echo "FAIL: failed systemd handoff must abort migration" >&2
+  exit 1
+fi
+if grep -Eq '^systemctl (stop|disable) ' "$SYSTEMD_CALLS"; then
+  echo "FAIL: failed handoff must not stop or disable any legacy service" >&2
+  exit 1
+fi
+
 echo "PASS: GPV handoff gate propagates failure before app restart"

@@ -95,8 +95,14 @@ contains "release compose 提供 handoff 一次性服务" 'gpv-handoff:' "$RELEA
 contains "install 加载 handoff 库" 'gpv-handoff-lib.sh' "$INSTALL"
 contains "svc 加载 handoff 库" 'gpv-handoff-lib.sh' "$SVC"
 contains "install 在业务 up 前准备 durable" 'gpv_handoff_prepare' "$INSTALL"
+contains "install 在 systemd 停服前执行迁移门禁" 'gpv_handoff_migrate_legacy_systemd' "$INSTALL"
 contains "svc 在重启前准备 durable" 'gpv_handoff_prepare' "$SVC"
 contains "真实 NATS 验证脚本强制注入地址" 'GPV_NATS_TEST_URL=' "$RELEASE_NATS_VERIFY"
+if bash "$RELEASE_DEPLOY/gpv-handoff-lib_test.sh"; then
+  ok
+else
+  bad "systemd 到 container 的 GPV handoff 顺序回归"
+fi
 if bash "$RELEASE_NATS_VERIFY"; then
   ok
 else

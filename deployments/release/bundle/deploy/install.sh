@@ -372,31 +372,19 @@ fi
 # =============================================================================
 sep "2/9 旧 systemd 单元自动迁移"
 
-if command -v systemctl >/dev/null 2>&1; then
-  HAS_OLD=0
-  for svc in omcgo-app omcgo-acs omcgo-worker; do
-    UNIT="/etc/systemd/system/$svc.service"
-    if [ -f "$UNIT" ] || systemctl list-unit-files "$svc.service" >/dev/null 2>&1; then
-      HAS_OLD=1
-      log "检测到旧 systemd 单元：$svc"
-      systemctl stop "$svc" 2>/dev/null || true
-      systemctl disable "$svc" 2>/dev/null || true
-      if [ -f "$UNIT" ]; then
-        BAK="$UNIT.bak.$(date +%Y%m%d%H%M%S)"
-        mv "$UNIT" "$BAK"
-        log "  · 备份并移除单元 → $BAK"
-      fi
-    fi
-  done
-  if [ "$HAS_OLD" = 1 ]; then
-    systemctl daemon-reload
-    log "旧 systemd 单元已停掉并禁用（业务进程将由 docker compose 接管）"
-    warn "宿主机旧 OMC 二进制（如 /opt/omc/current/bin/）保留未删，请运维确认无残留进程后自行清理"
-  else
-    log "未检测到旧 systemd 单元，跳过"
-  fi
-else
-  log "systemctl 不存在（非 systemd 系统），跳过旧单元迁移"
+HANDOFF_PREPARED=0
+GPV_SYSTEMD_HANDOFF_PREPARED=0
+SYSTEMD_HANDOFF_IMAGE="$(gpv_handoff_env_get "$PKG_ROOT/deploy/.env" IMAGE_APP 2>/dev/null || true)"
+if ! gpv_handoff_migrate_legacy_systemd \
+  "$SYSTEMD_HANDOFF_IMAGE" \
+  "$PKG_ROOT/images" \
+  "$OMC_ROOT/etc/app.prod.yaml"; then
+  die "旧 systemd app 的 GPV handoff 失败；未停止或禁用任何旧业务服务" 2
+fi
+if [ "$GPV_SYSTEMD_HANDOFF_PREPARED" = 1 ]; then
+  HANDOFF_PREPARED=1
+  log "旧 systemd app 的 GPV durable 已预创建，并已按 ACS → worker → app 顺序停服"
+  warn "宿主机旧 OMC 二进制（如 /opt/omc/current/bin/）保留未删，请运维确认无残留进程后自行清理"
 fi
 
 # =============================================================================
@@ -757,7 +745,6 @@ COMPOSE_FILES=( -f docker-compose.infra.yml -f docker-compose.app.yml )
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 log "compose 命令：${DC[*]}"
 
-HANDOFF_PREPARED=0
 APP_CID="$("${DC[@]}" ps -q app 2>/dev/null || true)"
 NATS_CID="$("${DC[@]}" ps -q nats 2>/dev/null || true)"
 APP_RUNNING=0
@@ -770,7 +757,7 @@ fi
 if [ "$APP_RUNNING" = 1 ] && [ "$NATS_RUNNING" != 1 ]; then
   die "旧 app 仍在运行但 NATS 不可用，无法读取 GPV consumer AckFloor；未停止旧 app" 2
 fi
-if [ "$NATS_RUNNING" = 1 ]; then
+if [ "$HANDOFF_PREPARED" != 1 ] && [ "$NATS_RUNNING" = 1 ]; then
   log "在停止/重建旧 app 前预创建 GPV RPC 固定 durable ..."
   gpv_handoff_prepare ||
     die "GPV consumer handoff 失败；未停止旧 app，修复 NATS/consumer 配置后重试" 2
