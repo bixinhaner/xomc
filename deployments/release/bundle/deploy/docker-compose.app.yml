@@ -154,6 +154,18 @@ services:
       # Go 1.25 自动按 cgroup CPU 配额推导。
       GOMEMLIMIT: "${APP_GOMEMLIMIT:-1382MiB}"
       GOMAXPROCS: "${APP_GOMAXPROCS:-}"
+      # command.get_parameters.response 两条消费链独立限流。显式 start_sequence
+      # 用于从旧 consumer AckFloor+1 无损切换；0 表示新 durable 从当前流尾开始。
+      GPV_PROVISION_QUEUE: "${GPV_PROVISION_QUEUE:-provision-gpv}"
+      GPV_PROVISION_CONCURRENCY: "${GPV_PROVISION_CONCURRENCY:-2}"
+      GPV_PROVISION_QUEUE_DEPTH: "${GPV_PROVISION_QUEUE_DEPTH:-256}"
+      GPV_RPC_DURABLE: "${GPV_RPC_DURABLE:-device-rpc-gpv}"
+      GPV_RPC_START_SEQUENCE: "${GPV_RPC_START_SEQUENCE:-0}"
+      GPV_RPC_CONCURRENCY: "${GPV_RPC_CONCURRENCY:-2}"
+      GPV_RPC_QUEUE_DEPTH: "${GPV_RPC_QUEUE_DEPTH:-1000}"
+      GPV_ACK_WAIT: "${GPV_ACK_WAIT:-30s}"
+      GPV_MAX_DELIVER: "${GPV_MAX_DELIVER:-5}"
+      GPV_MAX_ACK_PENDING: "${GPV_MAX_ACK_PENDING:-2000}"
       # 配置凭据单一真值源 = deploy/.env；app.prod.yaml 用 ${VAR} 引用，Load() 解析前展开。
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

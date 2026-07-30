@@ -439,10 +439,16 @@ func (s *RPCResponseSubscriber) handleGPVResponse(ctx context.Context, evt event
 	}
 
 	device, err := s.deviceLookup.GetBySerialNumber(ctx, deviceSN)
-	if err != nil || device == nil {
-		s.logger.Warn("device lookup failed; persist raw privatePath",
+	if err != nil {
+		s.logger.Warn("device lookup failed; retry GPV response",
 			zap.String("device_sn", deviceSN),
 			zap.Error(err),
+		)
+		return fmt.Errorf("lookup GPV response device %s: %w", deviceSN, err)
+	}
+	if device == nil {
+		s.logger.Warn("device lookup failed; persist raw privatePath",
+			zap.String("device_sn", deviceSN),
 		)
 		return nil
 	}

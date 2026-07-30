@@ -99,10 +99,11 @@ func TestRPCResponseSubscriberResolveTranslatorUsesProductID(t *testing.T) {
 
 type rpcRespDeviceLookupStub struct {
 	device *model.Device
+	err    error
 }
 
 func (s rpcRespDeviceLookupStub) GetBySerialNumber(context.Context, string) (*model.Device, error) {
-	return s.device, nil
+	return s.device, s.err
 }
 
 type rpcRespSubscriptionStub struct{}
@@ -275,6 +276,39 @@ func TestRPCResponseSubscriber_UECountResponsePersistsStandardPathsAndRefreshesI
 	require.Equal(t, "Device.DeviceInfo.UE_Count", paramRepo.rows[0].ParameterPath)
 	require.Equal(t, "Device.DeviceInfo.2.UE_Count", paramRepo.rows[1].ParameterPath)
 	require.Equal(t, 1, infoRefresher.calls)
+}
+
+func TestRPCResponseSubscriber_DeviceLookupFailureIsRetried(t *testing.T) {
+	lookupErr := errors.New("database unavailable")
+	s := &RPCResponseSubscriber{
+		deviceLookup: rpcRespDeviceLookupStub{err: lookupErr},
+		logger:       zap.NewNop(),
+	}
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]interface{}{
+		"device_sn": "SN-DB-ERROR",
+		"parameter_values": []tr069.ParameterValueStruct{
+			{Name: "Device.DeviceInfo.X_COM_UE_Count", Value: "2"},
+		},
+	})
+	require.NoError(t, err)
+
+	require.ErrorIs(t, s.handleGPVResponse(context.Background(), evt), lookupErr)
+}
+
+func TestRPCResponseSubscriber_MissingDeviceIsTerminal(t *testing.T) {
+	s := &RPCResponseSubscriber{
+		deviceLookup: rpcRespDeviceLookupStub{},
+		logger:       zap.NewNop(),
+	}
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]interface{}{
+		"device_sn": "SN-NOT-FOUND",
+		"parameter_values": []tr069.ParameterValueStruct{
+			{Name: "Device.DeviceInfo.X_COM_UE_Count", Value: "2"},
+		},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.handleGPVResponse(context.Background(), evt))
 }
 
 func TestRPCResponseSubscriberResolveTranslator_OrphanFallbackIsWarnNotError(t *testing.T) {

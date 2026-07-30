@@ -376,11 +376,49 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 		})
 	}
 	e.ensureGPVWorkersStarted()
-	if _, err := bus.PullSubscribe(event.SubjectCommandGetParamsResponse, gpvConfig.ProvisionQueue, func(ctx context.Context, evt event.Event) error {
+	gpvHandler := func(ctx context.Context, evt event.Event) error {
 		return e.enqueueGPVResponseEvent(ctx, evt)
-	}); err != nil {
+	}
+	var gpvSub event.Subscription
+	if keyedBus, ok := bus.(interface {
+		KeyedPullSubscribe(
+			subject, queue string,
+			queueDepth int,
+			keyFunc event.EventKeyFunc,
+			handler event.EventHandler,
+		) (event.Subscription, error)
+	}); ok {
+		gpvSub, err = keyedBus.KeyedPullSubscribe(
+			event.SubjectCommandGetParamsResponse,
+			gpvConfig.ProvisionQueue,
+			gpvConfig.ProvisionQueueDepth,
+			provisionGPVDeviceKey,
+			gpvHandler,
+		)
+	} else {
+		// Non-NATS test buses do not expose ordered keyed pull. Keep their
+		// delivery single-threaded so adjacent responses for one device cannot
+		// enter the engine shards out of order.
+		if tuner, ok := bus.(interface {
+			SetPullTuning(string, event.PullTuning)
+		}); ok {
+			tuner.SetPullTuning(event.SubjectCommandGetParamsResponse, event.PullTuning{
+				BatchSize:     gpvPullBatchSize,
+				Concurrency:   1,
+				AckWait:       gpvConfig.AckWait,
+				MaxAckPending: 1,
+			})
+		}
+		gpvSub, err = bus.PullSubscribe(
+			event.SubjectCommandGetParamsResponse,
+			gpvConfig.ProvisionQueue,
+			gpvHandler,
+		)
+	}
+	if err != nil {
 		e.logger.Warn("failed to subscribe to GPV response", zap.Error(err))
 	} else {
+		_ = gpvSub
 		e.logger.Info("provisioning engine subscribed to GPV response events")
 	}
 
@@ -1263,6 +1301,17 @@ func gpvShardIndex(deviceSN string, shardCount int) int {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(deviceSN))
 	return int(h.Sum32() % uint32(shardCount))
+}
+
+func provisionGPVDeviceKey(evt event.Event) (string, error) {
+	var payload gpvResponsePayload
+	if err := evt.DecodePayload(&payload); err != nil {
+		return "", fmt.Errorf("decode GPV response key: %w", err)
+	}
+	if payload.DeviceSN == "" {
+		return "", fmt.Errorf("GPV response key missing device SN")
+	}
+	return payload.DeviceSN, nil
 }
 
 // handleGPVResponse processes GetParameterValuesResponse events from ACS.

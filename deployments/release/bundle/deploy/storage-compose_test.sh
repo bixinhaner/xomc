@@ -61,10 +61,17 @@ for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINI
   contains "$key 模板" "$key=" "$BUILD"
   contains "$key 升级继承" "$key" "$INSTALL"
 done
+for key in GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH \
+  GPV_RPC_DURABLE GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH \
+  GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING; do
+  contains "$key release app 透传" "$key:" "$RELEASE_APP_COMPOSE"
+  contains "$key 升级继承" "$key" "$INSTALL"
+done
 
 echo "── 实例配置安全升级 ──"
 contains "install 加载实例配置升级库" 'config-upgrade-lib.sh' "$INSTALL"
 contains "普通升级迁移 ACS 历史默认值" 'upgrade_acs_session_limit' "$INSTALL"
+contains "普通升级补齐 GPV 消费配置" 'upgrade_app_gpv_response_config' "$INSTALL"
 if bash "$RELEASE_DEPLOY/config-upgrade-lib_test.sh"; then
   ok
 else

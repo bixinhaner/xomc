@@ -98,3 +98,59 @@ unset -f mv
 }
 
 echo "PASS: ACS session limit upgrade preserves operator configuration"
+
+cat > "$tmp/app-template.yaml" <<'YAML'
+provision:
+  auto_configure: true
+  gpv_response:
+    provision_queue: "${GPV_PROVISION_QUEUE:-provision-gpv}"
+    rpc_durable: "${GPV_RPC_DURABLE:-device-rpc-gpv}"
+    rpc_start_sequence: ${GPV_RPC_START_SEQUENCE:-0}
+    ack_wait: "${GPV_ACK_WAIT:-30s}"
+server:
+  port: 8081
+YAML
+
+cat > "$tmp/app-legacy.yaml" <<'YAML'
+provision:
+  auto_configure: false
+  batch:
+    enabled: true
+server:
+  port: 18081
+YAML
+upgrade_app_gpv_response_config "$tmp/app-legacy.yaml" "$tmp/app-template.yaml"
+grep -q '^  gpv_response:$' "$tmp/app-legacy.yaml" || {
+  echo "FAIL: legacy app config did not receive gpv_response" >&2
+  exit 1
+}
+grep -q '^  auto_configure: false$' "$tmp/app-legacy.yaml" || {
+  echo "FAIL: GPV config merge changed operator provision settings" >&2
+  exit 1
+}
+grep -q '^  port: 18081$' "$tmp/app-legacy.yaml" || {
+  echo "FAIL: GPV config merge changed unrelated settings" >&2
+  exit 1
+}
+
+before_gpv_current="$(cksum < "$tmp/app-legacy.yaml")"
+upgrade_app_gpv_response_config "$tmp/app-legacy.yaml" "$tmp/app-template.yaml"
+[ "$(cksum < "$tmp/app-legacy.yaml")" = "$before_gpv_current" ] || {
+  echo "FAIL: GPV config merge must be idempotent" >&2
+  exit 1
+}
+
+cat > "$tmp/app-custom.yaml" <<'YAML'
+provision:
+  gpv_response:
+    rpc_durable: operator-custom
+    rpc_start_sequence: 12345
+YAML
+before_gpv_custom="$(cksum < "$tmp/app-custom.yaml")"
+upgrade_app_gpv_response_config "$tmp/app-custom.yaml" "$tmp/app-template.yaml"
+[ "$(cksum < "$tmp/app-custom.yaml")" = "$before_gpv_custom" ] || {
+  echo "FAIL: existing operator GPV config must be preserved" >&2
+  exit 1
+}
+
+echo "PASS: app GPV response config upgrade is additive and idempotent"

@@ -634,11 +634,17 @@ func TestDurableDeliveryPlanBindsExistingConsumerWithoutResettingItsPosition(t *
 	require.Zero(t, plan.startSequence)
 }
 
-func TestDurableDeliveryPlanFreshConsumerUsesDeliverAllNotDeliverNew(t *testing.T) {
+func TestDurableDeliveryPlanFreshConsumerStartsAtCurrentStreamTail(t *testing.T) {
 	plan := durableDeliveryPlan(nil, 0)
 
-	require.Equal(t, durableDeliveryAll, plan.policy)
+	require.Equal(t, durableDeliveryNew, plan.policy)
 	require.Zero(t, plan.startSequence)
+}
+
+func TestKeyedMaxAckPendingIsBoundedByDispatcherCapacity(t *testing.T) {
+	require.Equal(t, 6, keyedMaxAckPending(2, 2, 2000))
+	require.Equal(t, 4, keyedMaxAckPending(2, 2, 4))
+	require.Equal(t, 1, keyedMaxAckPending(1, 0, 0))
 }
 
 func TestKeyedDispatcherRunsDifferentDevicesInParallelAndSameDeviceInOrder(t *testing.T) {
