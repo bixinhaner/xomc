@@ -1,6 +1,8 @@
 package components
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +30,10 @@ func TestPrometheusStorageCollectorReturnsRealSourceSpecificMetrics(t *testing.T
 			result = vectorSample(now, map[string]string{"instance": "node-exporter:9100", "mountpoint": "/", "device": "/dev/vda1", "fstype": "ext4"}, value("1000"))
 		case strings.Contains(query, "node_filesystem_avail_bytes"):
 			result = vectorSample(now, map[string]string{"instance": "node-exporter:9100", "mountpoint": "/", "device": "/dev/vda1", "fstype": "ext4"}, value("250"))
+		case strings.Contains(query, "node_filesystem_files_free"):
+			result = vectorSample(now, map[string]string{"instance": "node-exporter:9100", "mountpoint": "/", "device": "/dev/vda1", "fstype": "ext4"}, value("200"))
+		case strings.Contains(query, "node_filesystem_files"):
+			result = vectorSample(now, map[string]string{"instance": "node-exporter:9100", "mountpoint": "/", "device": "/dev/vda1", "fstype": "ext4"}, value("800"))
 		case strings.Contains(query, "minio_cluster_capacity_usable_total_bytes"):
 			result = vectorSample(now, map[string]string{}, value("2000"))
 		case strings.Contains(query, "minio_cluster_capacity_usable_free_bytes"):
@@ -49,11 +55,21 @@ func TestPrometheusStorageCollectorReturnsRealSourceSpecificMetrics(t *testing.T
 
 	host := requireStorageMetric(t, metrics, "host_filesystem")
 	require.Equal(t, "prometheus/node_exporter", host.Source)
+	require.Equal(t, "host-node-exporter-9100--dev-vda1-ext4", host.ID, "legacy host metric ID must remain stable")
 	require.Equal(t, "/", host.MountPath)
 	require.Equal(t, uint64(1000), requireValue(t, host.TotalBytes))
 	require.Equal(t, uint64(750), requireValue(t, host.UsedBytes))
 	require.Equal(t, uint64(250), requireValue(t, host.AvailableBytes))
 	require.InDelta(t, 75, requirePercent(t, host.UsedPercent), 0.001)
+	requireStorageMetricJSON(t, host, map[string]any{
+		"target_type":        "host_filesystem",
+		"target_id":          "host-node-exporter-9100-dev-vda1-ext4",
+		"mountpoint":         "/",
+		"total_inodes":       float64(800),
+		"available_inodes":   float64(200),
+		"used_inodes":        float64(600),
+		"used_inode_percent": float64(75),
+	})
 
 	minio := requireStorageMetric(t, metrics, "minio_cluster")
 	require.Equal(t, "prometheus/minio", minio.Source)
@@ -94,7 +110,9 @@ func TestPrometheusStorageCollectorRejectsStaleSourceSamples(t *testing.T) {
 
 	require.NotEmpty(t, metrics)
 	for _, metric := range metrics {
-		require.Equal(t, "unavailable", metric.Status)
+		require.Equal(t, "stale", metric.Status)
+		require.NotNil(t, metric.CollectedAt)
+		require.Equal(t, now.Add(-2*time.Minute), *metric.CollectedAt)
 		require.Contains(t, metric.Error, "stale")
 	}
 }
@@ -130,7 +148,10 @@ func TestPrometheusStorageCollectorDoesNotServeFreshCacheWithStaleSamples(t *tes
 	metrics := collector.Collect(t.Context())
 	require.Greater(t, requests.Load(), firstRequests, "stale source samples must bypass the response cache")
 	for _, metric := range metrics {
-		require.Equal(t, "unavailable", metric.Status)
+		require.Equal(t, "stale", metric.Status)
+		require.NotNil(t, metric.CollectedAt)
+		require.Equal(t, firstNow, *metric.CollectedAt)
+		require.Contains(t, metric.Error, "stale")
 	}
 }
 
@@ -145,12 +166,39 @@ func TestBuildHostFilesystemMetricsRequiresExactLabelMatch(t *testing.T) {
 		value:  250, at: now,
 	}}
 
-	metrics := buildHostFilesystemMetrics(sizes, available, nil)
+	metrics := buildHostFilesystemMetrics(sizes, available, nil, nil, nil, nil)
 	require.Len(t, metrics, 2)
 	for _, metric := range metrics {
 		require.Equal(t, "unavailable", metric.Status)
 		require.Nil(t, metric.UsedPercent)
 	}
+}
+
+func TestBuildHostFilesystemMetricsKeepsBytesWhenInodeQueriesFail(t *testing.T) {
+	now := time.Now().UTC()
+	labels := map[string]string{"instance": "node:9100", "device": "/dev/vda1", "mountpoint": "/", "fstype": "ext4"}
+	metrics := buildHostFilesystemMetrics(
+		[]prometheusSample{{labels: labels, value: 1000, at: now}},
+		[]prometheusSample{{labels: labels, value: 250, at: now}},
+		nil, nil, nil, errors.New("files query failed"),
+	)
+
+	require.Len(t, metrics, 1)
+	require.Equal(t, "available", metrics[0].Status)
+	require.Equal(t, uint64(1000), requireValue(t, metrics[0].TotalBytes))
+	require.Equal(t, uint64(750), requireValue(t, metrics[0].UsedBytes))
+	require.Nil(t, metrics[0].TotalInodes)
+	require.Contains(t, metrics[0].Error, "inode metrics unavailable")
+}
+
+func TestErrorsJoinHardFailureWinsOverStale(t *testing.T) {
+	stale := &staleSourceError{at: time.Now().UTC(), err: errors.New("stale source")}
+	err := errorsJoin(stale, errors.New("HTTP 503"))
+	metric := unavailableStorageMetric("host-filesystem", "host_filesystem", "Host filesystems", "prometheus/node_exporter", err)
+
+	require.Equal(t, "unavailable", metric.Status)
+	require.Nil(t, metric.CollectedAt)
+	require.Contains(t, metric.Error, "HTTP 503")
 }
 
 func TestBuildHostFilesystemMetricsDeduplicatesBindMountsOfSameDevice(t *testing.T) {
@@ -167,7 +215,7 @@ func TestBuildHostFilesystemMetricsDeduplicatesBindMountsOfSameDevice(t *testing
 
 	metrics := buildHostFilesystemMetrics(
 		[]prometheusSample{sample("/var/lib", 1000), sample("/var/lib/docker", 1000)},
-		[]prometheusSample{sample("/var/lib", 250), sample("/var/lib/docker", 250)}, nil,
+		[]prometheusSample{sample("/var/lib", 250), sample("/var/lib/docker", 250)}, nil, nil, nil, nil,
 	)
 	require.Len(t, metrics, 1)
 	require.Equal(t, "/var/lib", metrics[0].MountPath)
@@ -175,7 +223,12 @@ func TestBuildHostFilesystemMetricsDeduplicatesBindMountsOfSameDevice(t *testing
 }
 
 func TestNodeFilesystemQueriesExcludePseudoFilesystems(t *testing.T) {
-	for _, query := range []string{nodeSizeQuery, nodeSizeTimeQuery, nodeAvailQuery, nodeAvailTimeQuery} {
+	for _, query := range []string{
+		nodeSizeQuery, nodeSizeTimeQuery, nodeAvailQuery, nodeAvailTimeQuery,
+		nodeFilesQuery, nodeFilesTimeQuery, nodeFilesFreeQuery, nodeFilesFreeTimeQuery,
+	} {
+		require.Contains(t, query, `fstype!~"`, "filesystem selectors must use PromQL's negative regex matcher")
+		require.NotContains(t, query, `fstype!~=`, "PromQL does not support a combined !~=")
 		require.Contains(t, query, "fakeowner")
 		require.Contains(t, query, "selfowner")
 		require.Contains(t, query, "virtiofs")
@@ -183,15 +236,62 @@ func TestNodeFilesystemQueriesExcludePseudoFilesystems(t *testing.T) {
 	}
 }
 
+func TestNodeFilesystemQueriesAreAcceptedByPrometheus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Query().Get("query"), `fstype!~=`) {
+			http.Error(w, `parse error: unexpected "=" in label matching`, http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+	}))
+	defer server.Close()
+
+	collector := NewPrometheusStorageCollector(server.URL, time.Second, time.Minute, server.Client())
+	for _, query := range []string{
+		nodeSizeQuery, nodeSizeTimeQuery, nodeAvailQuery, nodeAvailTimeQuery,
+		nodeFilesQuery, nodeFilesTimeQuery, nodeFilesFreeQuery, nodeFilesFreeTimeQuery,
+	} {
+		_, err := collector.queryRaw(t.Context(), query)
+		require.NoError(t, err, "Prometheus rejected filesystem query %q", query)
+	}
+}
+
+func TestCollectAppFilesystemMetricIncludesInodesAndTargetDimensions(t *testing.T) {
+	collectedAt := time.Date(2026, time.July, 28, 8, 0, 0, 0, time.UTC)
+	metric := collectAppFilesystemMetric("/app/logs", collectedAt, func(string) (filesystemStats, error) {
+		return filesystemStats{
+			blockSize:       1,
+			blocks:          100,
+			availableBlocks: 25,
+			files:           50,
+			availableFiles:  10,
+		}, nil
+	})
+
+	requireStorageMetricJSON(t, metric, map[string]any{
+		"target_type":        "application",
+		"target_id":          "app-logs",
+		"mountpoint":         "/app/logs",
+		"total_inodes":       float64(50),
+		"available_inodes":   float64(10),
+		"used_inodes":        float64(40),
+		"used_inode_percent": float64(80),
+	})
+}
+
 func TestStorageCompositeTimestampUsesOldestInputSample(t *testing.T) {
 	newer := time.Date(2026, time.July, 21, 2, 30, 0, 0, time.UTC)
 	older := newer.Add(-5 * time.Second)
+	inodeOlder := older.Add(-5 * time.Second)
 	labels := map[string]string{"instance": "node:9100", "device": "/dev/vda1", "mountpoint": "/", "fstype": "ext4"}
 	host := buildHostFilesystemMetrics(
 		[]prometheusSample{{labels: labels, value: 1000, at: newer}},
-		[]prometheusSample{{labels: labels, value: 250, at: older}}, nil,
+		[]prometheusSample{{labels: labels, value: 250, at: older}},
+		[]prometheusSample{{labels: labels, value: 800, at: inodeOlder}},
+		[]prometheusSample{{labels: labels, value: 200, at: inodeOlder}}, nil, nil,
 	)
-	require.Equal(t, older, *host[0].CollectedAt)
+	require.Equal(t, inodeOlder, *host[0].CollectedAt)
 
 	minio := buildMinIOMetric(
 		[]prometheusSample{{value: 2000, at: newer}},
@@ -252,4 +352,15 @@ func requirePercent(t *testing.T, value *float64) float64 {
 	t.Helper()
 	require.NotNil(t, value)
 	return *value
+}
+
+func requireStorageMetricJSON(t *testing.T, metric StorageMetric, expected map[string]any) {
+	t.Helper()
+	encoded, err := json.Marshal(metric)
+	require.NoError(t, err)
+	var actual map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &actual))
+	for key, value := range expected {
+		require.Equal(t, value, actual[key], key)
+	}
 }

@@ -17,6 +17,7 @@ OMC 是面向小基站运维的系统，核心协议是 TR069/CWMP，按运营�
 - 后端 SQL 使用 Squirrel + pgx，禁止 ORM 和字符串拼接 SQL。
 - 后端错误要包装上下文：`fmt.Errorf("context: %w", err)`。
 - 运营商差异走 `internal/core/carrier/`，禁止散落 `if carrier == "cmcc"`。
+- 当前软件未封版本，`omcgo/migrations/` 只允许维护三个基线文件：`000001_init_schema.sql`、`seed/000001_init_seed.sql`、`tsdb/000001_tsdb_schema.sql`。不允许新增 `000002+` 迁移；新增 DB / seed / tsdb 变化必须折回对应 `000001`。软件封版本后，先更新本文件和 `omcgo/migrations/README.md`、`omcgo/migrations/seed/README.md`，再允许从 `000002` 开始追加迁移。
 
 ## 前端易错规则
 

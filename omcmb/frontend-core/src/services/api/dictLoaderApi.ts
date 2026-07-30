@@ -75,10 +75,10 @@ export const KNOWN_DICT_LOADERS: ReadonlyArray<{
   },
   {
     name: 'indicator',
-    labelI18n: { 'zh-CN': 'KPI 指标库', 'en-US': 'KPI Indicator Library' },
+    labelI18n: { 'zh-CN': 'PM 指标库', 'en-US': 'PM Indicator Library' },
     descriptionI18n: {
-      'zh-CN': '重读 KPI 指标定义。',
-      'en-US': 'Reload KPI indicator definitions.',
+      'zh-CN': '重读 PM 指标定义。',
+      'en-US': 'Reload PM indicator definitions.',
     },
   },
   {

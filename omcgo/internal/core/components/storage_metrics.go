@@ -3,6 +3,7 @@ package components
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -18,19 +19,26 @@ import (
 const storageMetricsCacheTTL = 15 * time.Second
 
 type StorageMetric struct {
-	ID             string     `json:"id"`
-	Kind           string     `json:"kind"`
-	Label          string     `json:"label"`
-	Source         string     `json:"source"`
-	MountPath      string     `json:"mount_path,omitempty"`
-	Instance       string     `json:"instance,omitempty"`
-	TotalBytes     *uint64    `json:"total_bytes,omitempty"`
-	UsedBytes      *uint64    `json:"used_bytes,omitempty"`
-	AvailableBytes *uint64    `json:"available_bytes,omitempty"`
-	UsedPercent    *float64   `json:"used_percent,omitempty"`
-	CollectedAt    *time.Time `json:"collected_at,omitempty"`
-	Status         string     `json:"status"`
-	Error          string     `json:"error,omitempty"`
+	ID               string     `json:"id"`
+	Kind             string     `json:"kind"`
+	Label            string     `json:"label"`
+	Source           string     `json:"source"`
+	MountPath        string     `json:"mount_path,omitempty"`
+	Mountpoint       string     `json:"mountpoint,omitempty"`
+	Instance         string     `json:"instance,omitempty"`
+	TargetType       string     `json:"target_type,omitempty"`
+	TargetID         string     `json:"target_id,omitempty"`
+	TotalBytes       *uint64    `json:"total_bytes,omitempty"`
+	UsedBytes        *uint64    `json:"used_bytes,omitempty"`
+	AvailableBytes   *uint64    `json:"available_bytes,omitempty"`
+	UsedPercent      *float64   `json:"used_percent,omitempty"`
+	TotalInodes      *uint64    `json:"total_inodes,omitempty"`
+	UsedInodes       *uint64    `json:"used_inodes,omitempty"`
+	AvailableInodes  *uint64    `json:"available_inodes,omitempty"`
+	UsedInodePercent *float64   `json:"used_inode_percent,omitempty"`
+	CollectedAt      *time.Time `json:"collected_at,omitempty"`
+	Status           string     `json:"status"`
+	Error            string     `json:"error,omitempty"`
 }
 
 type StorageCollector interface {
@@ -108,11 +116,15 @@ const (
 	// Docker Desktop and container hosts expose synthetic bind/image filesystems
 	// with plausible-looking but non-physical capacities. Exclude them explicitly;
 	// the remaining samples represent writable host/device filesystems.
-	nodeFilesystemSelector = `{fstype!~="^(tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?)$"}`
+	nodeFilesystemSelector = `{fstype!~"^(tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?)$"}`
 	nodeSizeQuery          = `node_filesystem_size_bytes` + nodeFilesystemSelector
 	nodeSizeTimeQuery      = `timestamp(node_filesystem_size_bytes` + nodeFilesystemSelector + `)`
 	nodeAvailQuery         = `node_filesystem_avail_bytes` + nodeFilesystemSelector
 	nodeAvailTimeQuery     = `timestamp(node_filesystem_avail_bytes` + nodeFilesystemSelector + `)`
+	nodeFilesQuery         = `node_filesystem_files` + nodeFilesystemSelector
+	nodeFilesTimeQuery     = `timestamp(node_filesystem_files` + nodeFilesystemSelector + `)`
+	nodeFilesFreeQuery     = `node_filesystem_files_free` + nodeFilesystemSelector
+	nodeFilesFreeTimeQuery = `timestamp(node_filesystem_files_free` + nodeFilesystemSelector + `)`
 	minioTotalQuery        = `sum(minio_cluster_capacity_usable_total_bytes)`
 	minioTotalTimeQuery    = `min(timestamp(minio_cluster_capacity_usable_total_bytes))`
 	minioFreeQuery         = `sum(minio_cluster_capacity_usable_free_bytes)`
@@ -128,12 +140,14 @@ func (c *PrometheusStorageCollector) collectUncached(ctx context.Context, now ti
 
 	sizes, sizeErr := c.query(ctx, nodeSizeQuery, nodeSizeTimeQuery, now)
 	available, availableErr := c.query(ctx, nodeAvailQuery, nodeAvailTimeQuery, now)
+	files, filesErr := c.query(ctx, nodeFilesQuery, nodeFilesTimeQuery, now)
+	filesFree, filesFreeErr := c.query(ctx, nodeFilesFreeQuery, nodeFilesFreeTimeQuery, now)
 	minioTotal, minioTotalErr := c.query(ctx, minioTotalQuery, minioTotalTimeQuery, now)
 	minioFree, minioFreeErr := c.query(ctx, minioFreeQuery, minioFreeTimeQuery, now)
 	databaseSizes, databaseErr := c.query(ctx, pgSizeQuery, pgSizeTimeQuery, now)
 
 	metrics := make([]StorageMetric, 0, len(sizes)+3)
-	metrics = append(metrics, buildHostFilesystemMetrics(sizes, available, errorsJoin(sizeErr, availableErr))...)
+	metrics = append(metrics, buildHostFilesystemMetrics(sizes, available, files, filesFree, errorsJoin(sizeErr, availableErr), errorsJoin(filesErr, filesFreeErr))...)
 	metrics = append(metrics, buildMinIOMetric(minioTotal, minioFree, errorsJoin(minioTotalErr, minioFreeErr)))
 	metrics = append(metrics, buildDatabaseMetrics(databaseSizes, databaseErr)...)
 	return metrics
@@ -166,7 +180,7 @@ func (c *PrometheusStorageCollector) query(ctx context.Context, valueQuery, time
 		at := time.Unix(0, int64(timestamp.value*float64(time.Second))).UTC()
 		age := now.Sub(at)
 		if age > c.maxAge || age < -5*time.Second {
-			return nil, fmt.Errorf("Prometheus source sample is stale or from the future: collected_at=%s", at.Format(time.RFC3339))
+			return nil, &staleSourceError{at: at, err: fmt.Errorf("Prometheus source sample is stale or from the future: collected_at=%s", at.Format(time.RFC3339))}
 		}
 		values[i].at = at
 	}
@@ -256,11 +270,11 @@ func prometheusLabelsKey(labels map[string]string) string {
 	return builder.String()
 }
 
-func buildHostFilesystemMetrics(sizes, available []prometheusSample, queryErr error) []StorageMetric {
-	if queryErr != nil {
-		return []StorageMetric{unavailableStorageMetric("host-filesystem", "host_filesystem", "Host filesystems", "prometheus/node_exporter", queryErr)}
+func buildHostFilesystemMetrics(sizes, available, files, filesFree []prometheusSample, byteErr, inodeErr error) []StorageMetric {
+	if byteErr != nil {
+		return []StorageMetric{unavailableStorageMetric("host-filesystem", "host_filesystem", "Host filesystems", "prometheus/node_exporter", byteErr)}
 	}
-	type pair struct{ size, available *prometheusSample }
+	type pair struct{ size, available, files, filesFree *prometheusSample }
 	pairs := make(map[string]*pair)
 	keyFor := func(sample prometheusSample) string {
 		return prometheusLabelsKey(sample.labels)
@@ -275,6 +289,20 @@ func buildHostFilesystemMetrics(sizes, available []prometheusSample, queryErr er
 			pairs[key] = &pair{}
 		}
 		pairs[key].available = &available[i]
+	}
+	for i := range files {
+		key := keyFor(files[i])
+		if pairs[key] == nil {
+			pairs[key] = &pair{}
+		}
+		pairs[key].files = &files[i]
+	}
+	for i := range filesFree {
+		key := keyFor(filesFree[i])
+		if pairs[key] == nil {
+			pairs[key] = &pair{}
+		}
+		pairs[key].filesFree = &filesFree[i]
 	}
 	keys := make([]string, 0, len(pairs))
 	for key := range pairs {
@@ -293,13 +321,32 @@ func buildHostFilesystemMetrics(sizes, available []prometheusSample, queryErr er
 		avail := uint64(pair.available.value)
 		used := total - avail
 		pct := math.Round(float64(used)*10000/float64(total)) / 100
-		collectedAt := oldestTime(pair.size.at, pair.available.at)
-		deviceKey := pair.size.labels["instance"] + "\x00" + pair.size.labels["device"] + "\x00" + pair.size.labels["fstype"]
+		collectedAt := oldestNonZeroTime(pair.size.at, pair.available.at)
+		legacyDeviceKey := pair.size.labels["instance"] + "\x00" + pair.size.labels["device"] + "\x00" + pair.size.labels["fstype"]
+		deviceKey := pair.size.labels["instance"] + "\x00" + strings.Trim(pair.size.labels["device"], "/") + "\x00" + pair.size.labels["fstype"]
 		metric := StorageMetric{
-			ID: "host-" + safeMetricID(deviceKey), Kind: "host_filesystem", Label: pair.size.labels["mountpoint"],
-			Source: "prometheus/node_exporter", MountPath: pair.size.labels["mountpoint"], Instance: pair.size.labels["instance"],
+			ID: "host-" + safeMetricID(legacyDeviceKey), Kind: "host_filesystem", Label: pair.size.labels["mountpoint"],
+			Source: "prometheus/node_exporter", MountPath: pair.size.labels["mountpoint"], Mountpoint: pair.size.labels["mountpoint"], Instance: pair.size.labels["instance"],
+			TargetType: "host_filesystem", TargetID: "host-" + safeMetricID(deviceKey),
 			TotalBytes: &total, UsedBytes: &used, AvailableBytes: &avail, UsedPercent: &pct,
 			CollectedAt: &collectedAt, Status: "available",
+		}
+		if pair.files != nil {
+			collectedAt = oldestNonZeroTime(collectedAt, pair.files.at)
+		}
+		if pair.filesFree != nil {
+			collectedAt = oldestNonZeroTime(collectedAt, pair.filesFree.at)
+		}
+		metric.CollectedAt = &collectedAt
+		if pair.files != nil && pair.filesFree != nil && pair.files.value >= pair.filesFree.value && pair.files.value > 0 {
+			totalInodes := uint64(pair.files.value)
+			availableInodes := uint64(pair.filesFree.value)
+			usedInodes := totalInodes - availableInodes
+			inodePercent := math.Round(float64(usedInodes)*10000/float64(totalInodes)) / 100
+			metric.TotalInodes, metric.UsedInodes, metric.AvailableInodes = &totalInodes, &usedInodes, &availableInodes
+			metric.UsedInodePercent = &inodePercent
+		} else if inodeErr != nil {
+			metric.Error = fmt.Errorf("inode metrics unavailable: %w", inodeErr).Error()
 		}
 		current, exists := bestByDevice[deviceKey]
 		if !exists || betterMountPath(metric.MountPath, current.MountPath) {
@@ -372,20 +419,52 @@ func unavailableStorageMetric(id, kind, label, source string, err error) Storage
 	if err != nil {
 		message = err.Error()
 	}
-	return StorageMetric{ID: id, Kind: kind, Label: label, Source: source, Status: "unavailable", Error: message}
+	metric := StorageMetric{ID: id, Kind: kind, Label: label, Source: source, Status: "unavailable", Error: message}
+	var stale *staleSourceError
+	if errors.As(err, &stale) {
+		metric.Status = "stale"
+		at := stale.at
+		metric.CollectedAt = &at
+	}
+	return metric
 }
+
+type staleSourceError struct {
+	at  time.Time
+	err error
+}
+
+func (e *staleSourceError) Error() string { return e.err.Error() }
+func (e *staleSourceError) Unwrap() error { return e.err }
 
 func errorsJoin(errs ...error) error {
 	parts := make([]string, 0, len(errs))
+	var staleErr *staleSourceError
+	var hardErr error
 	for _, err := range errs {
 		if err != nil {
 			parts = append(parts, err.Error())
+			var candidate *staleSourceError
+			if errors.As(err, &candidate) {
+				if staleErr == nil {
+					staleErr = candidate
+				}
+			} else if hardErr == nil {
+				hardErr = err
+			}
 		}
 	}
 	if len(parts) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%s", strings.Join(parts, "; "))
+	message := strings.Join(parts, "; ")
+	if hardErr != nil {
+		return fmt.Errorf("%s: %w", message, hardErr)
+	}
+	if staleErr != nil {
+		return fmt.Errorf("%s: %w", message, staleErr)
+	}
+	return fmt.Errorf("%s", message)
 }
 
 func safeMetricID(value string) string {
@@ -399,4 +478,17 @@ func oldestTime(left, right time.Time) time.Time {
 		return left
 	}
 	return right
+}
+
+func oldestNonZeroTime(times ...time.Time) time.Time {
+	var oldest time.Time
+	for _, candidate := range times {
+		if candidate.IsZero() {
+			continue
+		}
+		if oldest.IsZero() || candidate.Before(oldest) {
+			oldest = candidate
+		}
+	}
+	return oldest
 }

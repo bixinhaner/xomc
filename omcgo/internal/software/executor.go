@@ -250,7 +250,7 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 	if e.shouldAbortDispatch(ctx, subTask) {
 		// 用 detached ctx 释放锁：此刻 ctx 很可能已被急停 cancel，带它调 Redis Del 会
 		// 因 context canceled 失败、把设备锁留到 1h TTL 才过期，挡住后续重试。
-		e.releaseDeviceLock(context.Background(), dev.SerialNumber)
+		e.releaseDeviceLock(context.Background(), dev.SerialNumber, subTask.ID)
 		e.logger.Info("upgrade dispatch aborted: sub-task suspended/terminated before download",
 			zap.String("sub_task_id", subTask.ID.String()),
 			zap.String("device_sn", dev.SerialNumber))
@@ -281,7 +281,7 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 		"raw_mode":        rawMode,
 	})
 	if err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.failSubTask(ctx, subTask, fmt.Sprintf("Upgrade can not be started, internal error: %v", err), FailureInternalError)
 		return
 	}
@@ -294,7 +294,7 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 		CommandKey: subTask.ID.String(),
 	})
 	if err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.failSubTask(ctx, subTask, "Upgrade can not be started, failed to send download command to device.", FailureCommandPush)
 		return
 	}
@@ -584,7 +584,7 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 	})
 	uploadURL, err := buildTransferUploadURL(uploadBaseURL, resolvedPath)
 	if err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.failSubTask(ctx, subTask, fmt.Sprintf("Log collect can not be started, invalid upload URL: %v", err), FailureInternalError)
 		return
 	}
@@ -604,7 +604,7 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 		"target_file_name": targetFileName,
 	})
 	if err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.failSubTask(ctx, subTask, fmt.Sprintf("Log collect can not be started, internal error: %v", err), FailureInternalError)
 		return
 	}
@@ -616,7 +616,7 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 		Source:     devtask.TaskSourceSystem,
 		CommandKey: commandKey,
 	}); err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.failSubTask(ctx, subTask, "Log collect can not be started, failed to push Upload command.", FailureCommandPush)
 		return
 	}
@@ -714,7 +714,7 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 	})
 	uploadURL, err := buildTransferUploadURL(uploadBaseURL, resolvedPath)
 	if err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.failSubTask(ctx, subTask, fmt.Sprintf("Log collect can not be started, invalid upload URL: %v", err), FailureInternalError)
 		return
 	}
@@ -765,7 +765,7 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 	// 不知道为啥失败。此处直接 fail，并把 productClass / standardPath 全打到
 	// failure_reason 里，便于运维查脏数据 / 漏映射。
 	if dispatchPath == "" {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		msg := fmt.Sprintf("SPV log-collect aborted: empty dispatch path (productClass=%s, fw=%s, standardPath=%q). Check param_mappings or task_type url_template.",
 			dev.ProductClass, dev.FirmwareVersion, paramPath)
 		e.logger.Error(msg, zap.String("device_sn", dev.SerialNumber))
@@ -786,7 +786,7 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 		"command_key": subTask.ID.String(),
 	})
 	if err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.failSubTask(ctx, subTask, fmt.Sprintf("Log collect can not be started, internal error: %v", err), FailureInternalError)
 		return
 	}
@@ -798,7 +798,7 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 		Source:     devtask.TaskSourceSystem,
 		CommandKey: subTask.ID.String(),
 	}); err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.failSubTask(ctx, subTask, "Log collect can not be started, failed to push SetParameterValues command.", FailureCommandPush)
 		return
 	}
@@ -843,7 +843,7 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 //     · success → 保持 Uploading 等文件落地（OnLogFileLanded hook 推进）
 //
 //   - Rollback / Rebooting：基站版本回退（adapter 决定 4G/5G 路径与值）
-//     · fault → fail，记 UPLOAD_FAULT（避免 30 min 后才被 reaper 兜底）
+//     · fault → fail，记 ROLLBACK_SET_FAULT（避免 30 min 后才被 reaper 兜底）
 //     · success → 保持 Rebooting 等 reboot_complete 事件
 //
 // 历史教训：原版只服务 LogCollect 一条路径（带 parent.TaskType==LogCollect 过滤），
@@ -901,7 +901,7 @@ func (e *UpgradeExecutor) HandleSetParamsResponse(ctx context.Context, evt event
 			e.failSubTask(ctx, subTask,
 				fmt.Sprintf("Rollback failed, device rejected SetParameterValues. FaultCode: %d, FaultString: %s",
 					payload.FaultCode, payload.FaultStr),
-				FailureUploadFault)
+				FailureRollbackSetFault)
 			return nil
 		}
 		e.logger.Info("SPV accepted, waiting for device reboot",
@@ -1078,12 +1078,22 @@ func (e *UpgradeExecutor) HandleUploadResponse(ctx context.Context, evt event.Ev
 func (e *UpgradeExecutor) HandleRebootComplete(ctx context.Context, evt event.Event) error {
 	var payload struct {
 		DeviceSN string `json:"device_sn"`
+		DeviceID struct {
+			SerialNumber string `json:"serial_number"`
+		} `json:"device_id"`
 	}
-	if err := evt.DecodePayload(&payload); err != nil || payload.DeviceSN == "" {
+	if err := evt.DecodePayload(&payload); err != nil {
+		return nil
+	}
+	deviceSN := payload.DeviceSN
+	if deviceSN == "" {
+		deviceSN = payload.DeviceID.SerialNumber
+	}
+	if deviceSN == "" {
 		return nil
 	}
 
-	dev, err := e.deviceRepo.GetBySerialNumber(ctx, payload.DeviceSN)
+	dev, err := e.deviceRepo.GetBySerialNumber(ctx, deviceSN)
 	if err != nil || dev == nil {
 		return nil
 	}
@@ -1113,7 +1123,7 @@ func (e *UpgradeExecutor) HandleRebootComplete(ctx context.Context, evt event.Ev
 
 	e.logger.Info("reboot complete, task finalized",
 		zap.String("sub_task_id", subTask.ID.String()),
-		zap.String("device_sn", payload.DeviceSN))
+		zap.String("device_sn", deviceSN))
 	return nil
 }
 
@@ -1334,7 +1344,7 @@ func (e *UpgradeExecutor) shouldAbortDispatch(ctx context.Context, subTask *Upgr
 }
 
 func (e *UpgradeExecutor) acquireDeviceLock(ctx context.Context, deviceSN string, taskID uuid.UUID) (bool, error) {
-	key := fmt.Sprintf("software:upgrade:active:%s", deviceSN)
+	key := upgradeDeviceLockKey(deviceSN)
 	ok, err := e.redis.SetNX(ctx, key, taskID.String(), time.Hour).Result()
 	if err != nil {
 		return false, fmt.Errorf("acquire device lock: %w", err)
@@ -1342,9 +1352,13 @@ func (e *UpgradeExecutor) acquireDeviceLock(ctx context.Context, deviceSN string
 	return ok, nil
 }
 
-func (e *UpgradeExecutor) releaseDeviceLock(ctx context.Context, deviceSN string) {
-	key := fmt.Sprintf("software:upgrade:active:%s", deviceSN)
-	e.redis.Del(ctx, key)
+func (e *UpgradeExecutor) releaseDeviceLock(ctx context.Context, deviceSN string, subTaskID uuid.UUID) {
+	if err := releaseOwnedDeviceLock(ctx, e.redis, deviceSN, subTaskID); err != nil {
+		e.logger.Warn("release device lock",
+			zap.String("sub_task_id", subTaskID.String()),
+			zap.String("device_sn", deviceSN),
+			zap.Error(err))
+	}
 }
 
 // verifyFirmware 在 Download 下发前对固件做完整性 / 签名校验（issue #8）。
@@ -1398,7 +1412,7 @@ func (e *UpgradeExecutor) failSubTask(ctx context.Context, subTask *UpgradeSubTa
 		e.logger.Error("fail sub-task", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
 	}
 	if subTask.DeviceSN != "" {
-		e.releaseDeviceLock(ctx, subTask.DeviceSN)
+		e.releaseDeviceLock(ctx, subTask.DeviceSN, subTask.ID)
 	}
 	if err := e.taskRepo.IncrementCounts(ctx, subTask.TaskID, 0, 1); err != nil {
 		e.logger.Error("increment fail count", zap.Error(err))
@@ -1424,7 +1438,7 @@ func (e *UpgradeExecutor) completeSubTask(ctx context.Context, subTask *UpgradeS
 	// 仅当 DestVersion 仍为空时才回填，避免覆盖创建时已显式指定的目标固件版本。
 	e.backfillDestVersion(ctx, subTask, deviceSN)
 
-	e.releaseDeviceLock(ctx, deviceSN)
+	e.releaseDeviceLock(ctx, deviceSN, subTask.ID)
 
 	// Clean up Redis flags
 	tcKey := fmt.Sprintf("TransferCompleteReq_%s", subTask.ID.String())

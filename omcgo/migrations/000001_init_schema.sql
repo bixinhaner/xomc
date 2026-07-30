@@ -19530,6 +19530,92 @@ CREATE INDEX idx_pm_aggregation_task_versions_content_hash
     ON public.pm_aggregation_task_versions (task_id, content_hash);
 
 
+-- Consolidated from pre-release baseline-only migrations: main schema 000002-000005
+
+ALTER TABLE public.pm_tasks
+    ADD COLUMN IF NOT EXISTS planned_end_at timestamp with time zone;
+
+COMMENT ON COLUMN public.pm_tasks.planned_end_at IS
+    'PM adhoc 自建 continuous 任务计划结束时间；NULL 表示老任务或内置任务不设置计划结束。';
+
+ALTER TABLE public.pm_aggregation_tasks
+    ADD COLUMN IF NOT EXISTS planned_end_at timestamp with time zone;
+
+COMMENT ON COLUMN public.pm_aggregation_tasks.planned_end_at IS
+    '流式聚合任务计划结束时间；NULL 表示不设置计划结束。';
+
+ALTER TABLE public.rela_platform_indicator_formula_enb
+    ADD COLUMN IF NOT EXISTS report_key text;
+ALTER TABLE public.rela_platform_indicator_formula_gsm
+    ADD COLUMN IF NOT EXISTS report_key text;
+ALTER TABLE public.rela_platform_indicator_formula_gnb
+    ADD COLUMN IF NOT EXISTS report_key text;
+
+CREATE INDEX IF NOT EXISTS idx_device_tasks_open_method_description
+    ON public.device_tasks (device_sn, method, description, created_at DESC)
+    WHERE status IN ('pending', 'sent');
+
+-- Consolidated from pre-release storage protection migrations. The current
+-- deployment has one physical filesystem target; logical components share it.
+CREATE TABLE IF NOT EXISTS public.storage_protection_policies (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    target_type varchar(32) NOT NULL,
+    target_id varchar(128) NOT NULL,
+    write_scope varchar(32) NOT NULL,
+    enabled boolean NOT NULL DEFAULT false,
+    warn_used_percent integer NOT NULL DEFAULT 80,
+    block_used_percent integer NOT NULL DEFAULT 90,
+    recover_used_percent integer NOT NULL DEFAULT 85,
+    check_interval_seconds integer NOT NULL DEFAULT 30,
+    unknown_behavior varchar(32) NOT NULL DEFAULT 'allow_with_alarm',
+    current_state varchar(16) NOT NULL DEFAULT 'normal',
+    state_observations integer NOT NULL DEFAULT 0,
+    last_observed_ratio double precision,
+    last_observed_at timestamptz,
+    last_state_changed_at timestamptz,
+    updated_by varchar(64) NOT NULL DEFAULT 'system',
+    version bigint NOT NULL DEFAULT 1,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT storage_protection_thresholds_chk CHECK (
+        warn_used_percent >= 0 AND
+        warn_used_percent < recover_used_percent AND
+        recover_used_percent < block_used_percent AND
+        block_used_percent <= 100
+    ),
+    CONSTRAINT storage_protection_target_type_chk CHECK (
+        target_type = 'filesystem' AND target_id = 'root' AND write_scope = 'all'
+    ),
+    CONSTRAINT storage_protection_unknown_behavior_chk CHECK (
+        unknown_behavior IN ('allow_with_alarm', 'block_new_uploads')
+    ),
+    CONSTRAINT storage_protection_state_chk CHECK (
+        current_state IN ('normal', 'warning', 'blocked', 'unknown')
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS storage_protection_policy_target_scope_uq
+    ON public.storage_protection_policies (target_type, target_id, write_scope);
+
+CREATE TABLE IF NOT EXISTS public.storage_protection_events (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    policy_id uuid NOT NULL REFERENCES public.storage_protection_policies(id) ON DELETE CASCADE,
+    target_type varchar(32) NOT NULL,
+    target_id varchar(128) NOT NULL,
+    write_scope varchar(32) NOT NULL,
+    previous_state varchar(16),
+    new_state varchar(16) NOT NULL,
+    reason varchar(256) NOT NULL,
+    observed_ratio double precision,
+    policy_version bigint NOT NULL,
+    operator_id varchar(64) NOT NULL DEFAULT 'system',
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS storage_protection_events_target_time_idx
+    ON public.storage_protection_events (target_type, target_id, write_scope, created_at DESC);
+
+
 -- +goose Down
 -- +goose StatementBegin
 CREATE SCHEMA goose_baseline_meta;

@@ -11,13 +11,15 @@ receiver + loki exporter 链路承担。
 ```
 deployments/monitoring/
 ├── prometheus.yml                # Prometheus 主配置（scrape + 告警路由）
+├── storage-targets.yml           # 统一物理存储目标与逻辑分类（部署契约）
 ├── alertmanager.yml              # AlertManager 路由 + receiver（占位 webhook）
 ├── alerts/
 │   ├── omc-rules.yml             # starter 告警规则（三进程存活）
 │   ├── connection-pool-alerts.yml
 │   ├── infra-alerts.yml          # pg/redis/nats/minio 基础服务（T-0155 P2b 改写）
 │   ├── dashboard-kpi-alerts.yml  # Dashboard 查询、全网上卷与 TSDB 临时写入
-│   └── otelcol-alerts.yml        # otelcol 自身管道健康（T-0155 收尾）
+│   ├── otelcol-alerts.yml        # otelcol 自身管道健康（T-0155 收尾）
+│   └── storage-queue-alerts.yml  # 存储与 Redis/NATS/PG 队列治理
 ├── loki/
 │   └── loki-config.yml           # Loki 单节点 filesystem 存储 + 7d retention
 ├── promtail/                      # 旧 Promtail 配置（T-0155 P3 后已下线，保留作历史参考）
@@ -42,7 +44,9 @@ deployments/monitoring/
 │   │   │   └── tempo.yml         # 自动注册 Tempo 数据源 + trace-to-logs 跳 Loki
 │   │   └── dashboards/default.yml
 │   └── dashboards/
-│       └── omc-overview.json
+│       ├── omc-overview.json
+│       ├── omc-storage-queue-governance.json
+│       └── omc-alert-overview.json
 ├── grafana-dashboard.json        # 历史 dashboard 原件
 └── README.md                     # 本文件
 ```
@@ -206,6 +210,27 @@ redis    :6379 ──┘  └─ transform/promote_pg_resource ──┘
 > 不影响监控栈自身 healthy。启动 `app/acs/worker` 三进程后，target 会在
 > 一个 scrape interval（15s）内变为 `up`。
 
+## 存储目标映射
+
+`storage-targets.yml` 是部署侧的存储契约，不会被 Prometheus 当作
+scrape target 自动加载。当前部署只定义一个物理目标 `filesystem/root`（宿主机
+`/`）；PostgreSQL、MinIO、Prometheus、Loki、Tempo 等 named volume 作为同一物理
+目标下的逻辑归属和 retention 分类，并限制 MinIO bucket 只使用固定业务分类。
+
+Prometheus 仍从 node-exporter 的 `mountpoint`、容量和 inode 指标，以及 MinIO
+cluster endpoint 获取实测值。目标未配置、采集失败或样本过期时，Grafana 必须显示
+No data / unavailable，不能用 `0` 代替。部署到非默认 Docker data root 时，应同时
+更新 `storage-targets.yml` 的物理 `mountpoint`，再由 OMC 写入保护模块读取同一映射。
+逻辑组件不得新增独立容量阈值；只有确认挂载了独立磁盘或接入外部存储时，才新增物理目标。
+
+## 队列治理观测
+
+OMC 业务观测器在 app/worker 启动时分别采集 Redis 和 PostgreSQL 持久化队列：
+
+- Redis 使用 `SCAN`，固定 `queue_family=cmdq|taskq`，输出总长度、活动设备数、最大队列长度、最老任务年龄、扫描耗时和失败状态；设备 SN 只用于内部查询，不进入指标标签。
+- PostgreSQL 使用固定 SQL 采集 `device_tasks`、`async_jobs`、parameter-sync/northbound outbox、PM 导出、Trace 导出、备份任务和 dead letters；查询失败保留上次业务快照，并将 `*_up=0`、失败计数递增。
+- Grafana 总览为 `OMC - 存储与队列治理`（UID `omc-storage-queue-governance`）；告警页为 `OMC - 告警总览`（UID `omc-alert-overview`），读取 Prometheus `ALERTS`/`ALERTS_FOR_STATE` 展示当前 Firing/Pending 告警。应用内 Go Channel、worker 内存切片、SSE 缓存等不纳入队列积压指标。
+
 ## Dashboard 与 TSDB 保护指标
 
 首页 KPI 只读取现有全网小时、天、周聚合结果。`omcgo-app` 暴露查询延迟、
@@ -217,6 +242,13 @@ redis    :6379 ──┘  └─ transform/promote_pg_resource ──┘
 - `omc-infra` 底部展示 TSDB 临时写入、长查询、CPU/内存和容器磁盘读写。
 - 默认告警阈值见 `alerts/dashboard-kpi-alerts.yml`；生产基线稳定后可按容量调整。
 - `TSDB_LOG_MIN_DURATION_STATEMENT` 可调慢 SQL 日志阈值，`TSDB_LOG_TEMP_FILES=-1` 可临时关闭临时文件日志；不要关闭 Prometheus 指标采集。
+
+新增 dashboard 或队列指标后，先执行：
+
+```bash
+deployments/monitoring/tests/validate-dashboards.sh
+jq empty deployments/monitoring/grafana/dashboards/*.json
+```
 
 ## 加新告警规则
 
@@ -248,6 +280,61 @@ redis    :6379 ──┘  └─ transform/promote_pg_resource ──┘
 3. 30s 内 Grafana provisioner 自动加载（`updateIntervalSeconds`）。
 4. 注意 dashboard 顶部 `uid` 字段必须唯一，否则会覆盖已有 dashboard。
 
+提交前先运行静态入口，新增的 JSON 会被自动发现；四个现有 provisioned
+dashboard 缺失、JSON 无效、UID 重复，或仍使用
+`namespace="omcgo"` / `name=~` 失效筛选时都会失败：
+
+```bash
+chmod +x deployments/monitoring/tests/validate-dashboards.sh
+deployments/monitoring/tests/validate-dashboards.sh
+```
+
+同时校验存储目标契约及固定 MinIO bucket 分类：
+
+```bash
+chmod +x deployments/monitoring/tests/validate-storage-targets.sh
+deployments/monitoring/tests/validate-storage-targets.sh
+```
+
+容器服务级 CPU/内存面板依赖 cAdvisor 导出的有限 Compose service 标签；提交
+cAdvisor 或容器资源面板改动时，同时执行：
+
+```bash
+chmod +x deployments/monitoring/tests/validate-cadvisor-service-labels.sh
+deployments/monitoring/tests/validate-cadvisor-service-labels.sh
+```
+
+`tests/promql-probes.txt` 是资源、队列和写入保护的查询清单。它不是 dashboard
+或告警规则的替代品；其中标为 `MUST-HAVE` 的 probe 在对应 exporter/service 启动后
+必须返回时间序列。
+
+### PromQL 到浏览器的验证顺序
+
+每次改动 PromQL、Grafana panel 或指标导出时，必须按以下顺序验收：
+
+1. 先经 Prometheus `/api/v1/query` 验证查询本身。例如：
+
+   ```bash
+   curl -sG http://localhost:9090/api/v1/query \
+     --data-urlencode 'query=omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"}' \
+     | jq
+   ```
+
+2. 再在 Grafana 的对应 panel 中确认同一时间范围、数据源和 legend 显示的值与
+   Prometheus 返回一致。
+3. 最后在浏览器打开实际 provisioned dashboard，确认 panel 已加载、No data 和
+   错误状态可见、刷新后仍保持正确。**不得只因 JSON 中存在 panel 就判定功能完成。**
+
+应用进程内部内存队列不纳入这些 queue probes：包括 Go Channel、Worker Channel、
+参数同步内存 Channel、Trace 本地 Capture Queue，以及其他没有持久化权威来源的临时
+缓冲。诊断这类队列应使用进程运行时指标或日志，不应伪造成持久化队列的 Prometheus
+时间序列。
+
+面板和告警必须区分三种状态：Prometheus 返回一个值为 `0` 的样本，才是队列为空、
+没有拒绝写入或资源使用为零的真实 `zero`；查询没有返回时间序列时必须显示 `No data`，
+不能补零；Prometheus、exporter 或 Grafana 查询报错时是 `failure`，应显示错误并排查
+采集链路。写入保护指标在 Task 8 暴露前允许 `No data`，但不得据此推断写入被允许。
+
 ## 生产部署注意事项
 
 > 本目录的所有配置仅适用于 **dev 环境**。生产部署前必须修改：
@@ -261,6 +348,39 @@ redis    :6379 ──┘  └─ transform/promote_pg_resource ──┘
 | TLS | 无 | 接入 ingress / TLS termination |
 
 ## 与 omcgo 的指标契约
+
+### 资源与队列指标契约（Task 1）
+
+后续资源监控、队列观测器和 Grafana 面板必须复用下面的命名、标签和语义。
+`queue`、`status`、`result`、`subject`、`durable` 只能取配置或代码中登记的有限枚举；
+不得把 device SN、完整 Redis key、对象路径、数据库 row ID 或请求 ID 作为标签。
+
+| 指标后缀/指标 | 标签 | 单位 | 空值/0 语义 | 采集失败语义 |
+|---|---|---|---|---|
+| `pending` | `queue,status` | 条 | 队列为空时为真实 `0` | 保留上次值 |
+| `oldest_age_seconds` | `queue,status` | 秒 | 无积压时为真实 `0` | 保留上次值 |
+| `failed_total` | `queue` | 次 | 尚无失败时可从 `0` 开始 | 观测失败不冒充业务失败 |
+| `dead_letter_total` | `queue` | 条 | 无死信时为真实 `0` | 保留上次值并记录观测失败 |
+| `processed_total` | `queue,result` | 次 | 尚未处理时可从 `0` 开始 | 观测失败不冒充处理结果 |
+| `observer_failures_total` | `queue` | 次 | 尚无失败时可从 `0` 开始 | 每次查询/采集失败递增 |
+| `omc_pm_queue_pending` | `subject,durable` | 条 | Worker 启动和空队列均为真实 `0` | 保留上次值 |
+| `omc_pm_queue_oldest_age_seconds` | `subject,durable` | 秒 | 无积压时为真实 `0` | 保留上次值 |
+| `omc_pm_queue_sample_failures_total` | `subject,durable` | 次 | 尚无失败时可从 `0` 开始 | 失败时递增 |
+
+统一持久化队列目录固定为：`device_tasks`、`async_jobs`、
+`parameter_sync_outbox`、`northbound_outbox`、`pm_kpi_export`、`trace_export`、
+`backup_tasks`、`dead_letters`。状态值固定为 `pending`、`sent`、`running`、
+`succeeded`、`failed`、`dead_letter`；`processed_total` 的 `result` 使用
+`succeeded` 或 `failed`。
+
+查询语义必须区分“真实 0”和“不可用”：PromQL 返回存在且值为 `0` 的时间序列，
+表示观测器成功采集到空队列；查询失败、序列缺失或样本过期表示指标不可用，面板和告警
+不得把它转换成 `0`。NATS/PM 等观测器应保留上次业务值，并递增对应的
+`*_observer_failures_total` 或 `omc_pm_queue_sample_failures_total`。
+
+本期明确排除应用进程内部内存队列：Go Channel、Worker Channel、参数同步内存
+Channel、Trace 本地 Capture Queue，以及其他仅存在于进程内且没有持久化权威来源的
+临时缓冲。它们不创建 Prometheus 队列时间序列；如需诊断，应使用进程级运行时指标或日志。
 
 omcgo 三进程通过以下端口暴露 `/metrics`（容器内）：
 

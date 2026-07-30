@@ -25,6 +25,8 @@ export const TIMEZONE_CONFIG_KEY = 'timezoneCode';
 export const TIMEZONE_CONFIG_CATEGORY = 'basic';
 /** 解析失败 / 未配置时的回落时区。 */
 export const DEFAULT_SYSTEM_TIMEZONE = 'UTC';
+/** 顶部时钟读取系统时区使用的 React Query key。 */
+export const SYSTEM_TIMEZONE_QUERY_KEY = ['sysConfig', 'basic', 'timezone'] as const;
 
 /**
  * useSystemTimezone —— 登录后拉取系统时区并同步进 appStore。
@@ -38,7 +40,7 @@ export function useSystemTimezone(): { systemTimezone: string | undefined } {
   const stored = useAppStore((s) => s.systemTimezone);
 
   const { data } = useQuery<SysConfigItem[]>({
-    queryKey: ['sysConfig', 'basic', 'timezone'],
+    queryKey: SYSTEM_TIMEZONE_QUERY_KEY,
     queryFn: () => adminApi.getSysConfigsByCategory(TIMEZONE_CONFIG_CATEGORY),
     enabled: isAuthenticated,
     staleTime: 5 * 60_000,

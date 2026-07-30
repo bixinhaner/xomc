@@ -31,6 +31,18 @@ func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 		require.Contains(t, tsdbSQL, "CREATE TABLE public."+table)
 	}
 	require.Contains(t, tsdbSQL, "CREATE UNIQUE INDEX uq_pm_aggregation_results_business")
+	for _, fragment := range []string{
+		"ADD COLUMN finalize_lease_owner uuid",
+		"ADD COLUMN finalize_lease_until timestamptz",
+		"ADD COLUMN finalize_attempts integer NOT NULL DEFAULT 0",
+		"ADD COLUMN finalize_next_attempt_at timestamptz NOT NULL DEFAULT '-infinity'",
+		"ADD COLUMN version_audit_fingerprint text",
+		"CREATE INDEX idx_pm_windows_due_claim",
+		"CREATE INDEX idx_pm_windows_oldest_due",
+		"CREATE INDEX idx_pm_windows_version_audit",
+	} {
+		require.Contains(t, tsdbSQL, fragment)
+	}
 	require.Contains(t, tsdbSQL, "DROP TABLE IF EXISTS public.pm_metrics_daily")
 	require.Contains(t, mainSQL, "DROP TABLE IF EXISTS public.pm_completion_watermarks")
 	require.NotContains(t, strings.ToUpper(tsdbSQL), "INSERT INTO PUBLIC.PM_AGGREGATION_RESULTS SELECT")
@@ -60,7 +72,7 @@ func TestPMBuiltinTaskRecoveryMigrationContract(t *testing.T) {
 		"0184dddd-0004-4000-8000-000000000002",
 		"0184dddd-0004-4000-8000-000000000003",
 	} {
-		require.Equalf(t, 1, strings.Count(seedSQL, id), "builtin task %s must be inserted exactly once", id)
+		require.Equalf(t, 1, countBuiltinPMTaskInsertID(t, seedSQL, id), "builtin task %s must be inserted exactly once", id)
 	}
 }
 
@@ -98,18 +110,16 @@ func TestPMBuiltinTaskMetricPathsMatchEnabledDefaults(t *testing.T) {
 }
 
 func TestPMEnabledIndicatorDependencyClosureRepairMigrationContract(t *testing.T) {
-	migrationSQL := readMigration(t, filepath.Join(
-		"..", "..", "migrations", "000004_repair_enabled_indicator_dependencies.sql",
-	))
+	seedSQL := readMigration(t, filepath.Join("..", "..", "migrations", "seed", "000001_init_seed.sql"))
 
 	for _, suffix := range []string{"enb", "gnb", "gsm"} {
-		require.Contains(t, migrationSQL, "enabled_pm_indicators_"+suffix)
-		require.Contains(t, migrationSQL, "perf_indicators_"+suffix)
+		require.Contains(t, seedSQL, "enabled_pm_indicators_"+suffix)
+		require.Contains(t, seedSQL, "perf_indicators_"+suffix)
 	}
-	require.Contains(t, migrationSQL, "WITH RECURSIVE dependency_closure")
-	require.Contains(t, migrationSQL, "ON CONFLICT (operator_code, indicator_id) DO NOTHING")
-	require.Contains(t, migrationSQL, "K900010076")
-	require.Contains(t, migrationSQL, "C000060216")
+	require.Contains(t, seedSQL, "WITH RECURSIVE dependency_closure")
+	require.Contains(t, seedSQL, "ON CONFLICT (operator_code, indicator_id) DO NOTHING")
+	require.Contains(t, seedSQL, "K900010076")
+	require.Contains(t, seedSQL, "C000060216")
 }
 
 func TestStreamingWorkerDoesNotReferenceRawPMTables(t *testing.T) {
@@ -162,6 +172,16 @@ func countDefaultEnabledIndicator(t *testing.T, seedSQL, table, indicatorID stri
 		}
 	}
 	return count
+}
+
+func countBuiltinPMTaskInsertID(t *testing.T, seedSQL, id string) int {
+	t.Helper()
+	insertMarker := "INSERT INTO public.pm_tasks ("
+	insertStart := strings.Index(seedSQL, insertMarker)
+	require.NotEqual(t, -1, insertStart, "missing pm_tasks seed insert")
+	insertEnd := strings.Index(seedSQL[insertStart:], ";\n")
+	require.NotEqual(t, -1, insertEnd, "unterminated pm_tasks seed insert")
+	return strings.Count(seedSQL[insertStart:insertStart+insertEnd], id)
 }
 
 func parseDefaultEnabledIndicatorIDs(t *testing.T, seedSQL, table string) []string {

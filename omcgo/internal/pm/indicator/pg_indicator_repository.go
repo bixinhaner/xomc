@@ -528,19 +528,12 @@ func applyIndicatorFilters(builder sq.SelectBuilder, f IndicatorListFilter, dt D
 			builder = builder.Where("e.indicator_id IS NULL")
 		}
 	}
-	if f.PlatformName != nil && *f.PlatformName != "" {
-		// 2026-06-25:counter(is_counter='1') 是原始计数器,跨 platform 全局可见,
-		// 不应被 platform_name EXISTS 过滤排除 —— 否则详情态 ?platform=ALL 列表会
-		// 看不到任何计数器（counter 在 perf_formulas_<dt> 没有公式行）。
-		// 修复方案:counter 直通 OR 派生 KPI 必须有公式行命中当前 platform。
-		// 同步去掉了 IndicatorFormModal 在 counter 新建时下发的 platform 占位（用户反馈 #2）。
-		builder = builder.Where(sq.Or{
-			sq.Eq{"i.is_counter": "1"},
-			sq.Expr(
-				fmt.Sprintf("EXISTS (SELECT 1 FROM %s f WHERE f.indicator_id = i.id AND f.platform_name = ?)", dt.FormulaTable()),
-				*f.PlatformName,
-			),
-		})
+	if f.PlatformName != nil && strings.TrimSpace(*f.PlatformName) != "" {
+		platform := strings.TrimSpace(*f.PlatformName)
+		builder = builder.Where(sq.Expr(
+			fmt.Sprintf("EXISTS (SELECT 1 FROM %s f WHERE f.indicator_id = i.id AND f.platform_name = ANY(?))", dt.FormulaTable()),
+			[]string{platform},
+		))
 	}
 	return builder
 }

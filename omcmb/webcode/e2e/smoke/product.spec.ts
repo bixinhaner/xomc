@@ -5,7 +5,7 @@ import { expectPageRenders, smokeLogin } from './helpers';
  * 产品中心域冒烟（真实后端，super_admin 守卫路由）：
  *   /product/products        产品装配件列表（ProductRegistry）
  *   /product/param-model     参数模型清单（ModelsTab 列表态）
- *   /product/kpi-library     KPI 指标库（SummaryTab 平台一级列表）
+ *   /product/kpi-library     PM 指标库（SummaryTab 平台一级列表）
  *   /product/orphan-devices  孤儿设备只读列表（数据稀疏时为 Empty 态）
  *   /product/standard-params 标准参数树（列表 + 搜索 + 类型过滤 + 新增）
  *   /product/alarm-library   告警库（NeTypesTable 一级 drill-down 列表态）

@@ -75,4 +75,19 @@ describe('SystemDashboard disk usage', () => {
     expect(screen.getByText('1 KiB')).toBeInTheDocument();
     expect(screen.queryByText('NaN%')).not.toBeInTheDocument();
   });
+
+  it('renders stale source data as unavailable instead of showing a stale gauge', () => {
+    systemInfoMocks.useSystemInfo.mockReturnValue({ data: {
+      storage: [{
+        id: 'host-filesystem', kind: 'host_filesystem', label: 'Host filesystems',
+        source: 'prometheus/node_exporter', status: 'stale', error: 'sample is stale',
+      }],
+    } });
+
+    render(<SystemDashboard />);
+
+    expect(screen.getByText('system.dashboard.storage.stale')).toBeInTheDocument();
+    expect(screen.getByText('sample is stale')).toBeInTheDocument();
+    expect(screen.queryByText('NaN%')).not.toBeInTheDocument();
+  });
 });

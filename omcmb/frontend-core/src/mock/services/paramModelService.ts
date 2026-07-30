@@ -119,7 +119,11 @@ export const paramModelService = {
 
   async createStandard(input: UpsertStandardInput): Promise<StandardParam> {
     if (standardParams.some((item) => item.standardPath === input.standardPath)) {
-      throw new Error(`参数 path "${input.standardPath}" 已存在，只能在原有记录上修改`);
+      const error = new Error(
+        `standard path "${input.standardPath}" already exists; update the existing record instead`,
+      ) as Error & { bizCode: number };
+      error.bizCode = 2034;
+      throw error;
     }
     const created: StandardParam = {
       ...input,

@@ -42,6 +42,8 @@ type filesystemStats struct {
 	blockSize       uint64
 	blocks          uint64
 	availableBlocks uint64
+	files           uint64
+	availableFiles  uint64
 }
 
 type filesystemStatfs func(path string) (filesystemStats, error)
@@ -133,7 +135,8 @@ func (h *SystemInfoHandler) collectStorageMetrics(ctx context.Context) []Storage
 func collectAppFilesystemMetric(mountPath string, collectedAt time.Time, statfs filesystemStatfs) StorageMetric {
 	metric := StorageMetric{
 		ID: filesystemID(mountPath), Kind: "app_filesystem", Label: mountPath,
-		Source: "statfs/app", MountPath: mountPath, Status: "unavailable",
+		Source: "statfs/app", MountPath: mountPath, Mountpoint: mountPath,
+		TargetType: "application", TargetID: filesystemID(mountPath), Status: "unavailable",
 	}
 
 	stats, err := statfs(mountPath)
@@ -162,6 +165,14 @@ func collectAppFilesystemMetric(mountPath string, collectedAt time.Time, statfs 
 	used := total - available
 	percent := math.Round(float64(used)*10000/float64(total)) / 100
 	metric.TotalBytes, metric.UsedBytes, metric.AvailableBytes = &total, &used, &available
+	if stats.files > 0 && stats.availableFiles <= stats.files {
+		usedFiles := stats.files - stats.availableFiles
+		inodePercent := math.Round(float64(usedFiles)*10000/float64(stats.files)) / 100
+		metric.TotalInodes = &stats.files
+		metric.UsedInodes = &usedFiles
+		metric.AvailableInodes = &stats.availableFiles
+		metric.UsedInodePercent = &inodePercent
+	}
 	metric.UsedPercent, metric.CollectedAt, metric.Status = &percent, &collectedAt, "available"
 	return metric
 }
@@ -201,5 +212,7 @@ func systemStatfs(path string) (filesystemStats, error) {
 		blockSize:       uint64(stat.Bsize),
 		blocks:          stat.Blocks,
 		availableBlocks: stat.Bavail,
+		files:           stat.Files,
+		availableFiles:  stat.Ffree,
 	}, nil
 }

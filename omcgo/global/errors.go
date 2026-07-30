@@ -63,6 +63,7 @@ const (
 	// PUT/DELETE/move /products/:id/patterns/:pid 命中 source='builtin' 的内置正则 → 403
 	// (内置正则来自 products.xml,UI 只读;管理员经 UI 新增的 source='custom' 行才可改/删/移)
 	ErrCodeProductPatternBuiltinReadonly = 2033
+	ErrCodeStandardParamDuplicate        = 2034 // 标准参数 PATH 重复
 
 	// T-0180 Indicator 自定义 XML 分层目录 (2040-2049 段,对标 T-0178 范式)
 	// IndicatorBuiltinNotDeletable: DELETE /indicators/files/{path} 命中内置 XML → 403

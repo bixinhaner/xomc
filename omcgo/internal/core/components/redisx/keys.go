@@ -107,6 +107,16 @@ func (KeyBuilder) ACSTaskQueuePattern() string { return acsTaskQueuePrefix + "*"
 // ACSTaskTransitionPending 待完成 PG 同步或跨 slot 索引清理的任务转换索引。
 func (KeyBuilder) ACSTaskTransitionPending() string { return acsTaskTransitionPendingKey }
 
+// ACSCommandQueue returns the legacy per-device command queue sorted set.
+// It is retained for observability during migration to the unified task queue.
+func (KeyBuilder) ACSCommandQueue(deviceSN string) string { return acsCommandQueuePrefix + deviceSN }
+
+// ACSCommandQueuePrefix returns the legacy per-device command queue prefix.
+func (KeyBuilder) ACSCommandQueuePrefix() string { return acsCommandQueuePrefix }
+
+// ACSCommandQueuePattern returns the legacy command queue scan pattern.
+func (KeyBuilder) ACSCommandQueuePattern() string { return acsCommandQueuePrefix + "*" }
+
 // ACSTaskDetail 任务详情 Hash（活跃态 4h；终态默认 15m、最低 10m）。
 func (KeyBuilder) ACSTaskDetail(taskID string) string { return acsTaskDetailPrefix + taskID }
 
@@ -325,6 +335,7 @@ const (
 	acsUECountProbePrefix       = "acs:ue_count:probe:"
 	acsSTUNPrefix               = "acs:stun:"
 	acsTaskQueuePrefix          = "acs:taskq:"
+	acsCommandQueuePrefix       = "acs:cmdq:"
 	acsTaskDetailPrefix         = "acs:task:"
 	acsCWMP2TaskPrefix          = "acs:cwmp2task:"
 	acsTaskTransitionPendingKey = "acs:task:transition:pending"

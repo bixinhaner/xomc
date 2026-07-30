@@ -114,6 +114,37 @@ func TestQueueHealthSamplerOnlyObservesSuccessfulSamples(t *testing.T) {
 	assert.NotEmpty(t, families)
 }
 
+func TestQueueHealthSamplerFailurePreservesLastSuccessfulSnapshot(t *testing.T) {
+	source := &queueStatsSourceStub{
+		stats:  QueueStats{Pending: 9, AckPending: 2, SampledAt: time.Now()},
+		called: make(chan struct{}, 1),
+	}
+	reg := prometheus.NewRegistry()
+	metrics := NewEventBusMetrics(reg)
+	sampler := NewQueueHealthSampler(source, metrics, time.Hour, zap.NewNop())
+
+	require.NoError(t, sampler.Sample(context.Background()))
+	previous, ok := sampler.LatestStats()
+	require.True(t, ok)
+
+	source.err = errors.New("NATS consumer stopped")
+	err := sampler.Sample(context.Background())
+	require.Error(t, err)
+
+	latest, ok := sampler.LatestStats()
+	require.True(t, ok)
+	assert.Equal(t, previous.Pending, latest.Pending)
+	assert.Equal(t, previous.AckPending, latest.AckPending)
+	assert.Equal(t, previous.SampledAt.UnixNano(), latest.SampledAt.UnixNano())
+	assert.Equal(t, previous.SampledAt.UnixNano(), sampler.LastSuccessfulSample().UnixNano())
+	assert.Equal(t, float64(previous.Pending), testutil.ToFloat64(
+		metrics.QueuePending.WithLabelValues(SubjectPMFileReceived, pmQueueStatsDurable),
+	))
+	attemptedAt, succeeded := sampler.LastSampleAttempt()
+	assert.True(t, attemptedAt.After(previous.SampledAt))
+	assert.False(t, succeeded)
+}
+
 func TestQueueHealthSamplerTimeoutDoesNotObserveOrCache(t *testing.T) {
 	source := &queueStatsSourceStub{block: true, called: make(chan struct{}, 1)}
 	reg := prometheus.NewRegistry()

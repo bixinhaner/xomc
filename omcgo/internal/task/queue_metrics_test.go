@@ -1,0 +1,100 @@
+package task
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+)
+
+func TestRedisQueueObserverCollectsBoundedBacklog(t *testing.T) {
+	mini := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer client.Close()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewTaskMetrics(reg)
+	queuedAt := time.Now().Add(-2 * time.Minute).UTC()
+	taskData, err := json.Marshal(&Task{ID: "task-1", CreatedAt: queuedAt})
+	require.NoError(t, err)
+	require.NoError(t, client.ZAdd(context.Background(), redisx.Keys.ACSTaskQueue("device-1"), redis.Z{
+		Score:  1,
+		Member: "task-1",
+	}).Err())
+	require.NoError(t, client.HSet(context.Background(), redisx.Keys.ACSTaskDetail("task-1"), "data", taskData).Err())
+	require.NoError(t, client.ZAdd(context.Background(), redisx.Keys.ACSCommandQueue("device-2"), redis.Z{
+		Score:  1,
+		Member: `{"method":"GetParameterValues"}`,
+	}).Err())
+
+	observer := NewRedisQueueObserver(client, metrics, time.Hour, zap.NewNop())
+	observer.Collect(context.Background())
+
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueLengthTotal.WithLabelValues(redisQueueFamilyTask)))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueActiveDevices.WithLabelValues(redisQueueFamilyTask)))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueMaxLength.WithLabelValues(redisQueueFamilyTask)))
+	require.Greater(t, testutil.ToFloat64(metrics.RedisTaskQueueOldestAgeSeconds.WithLabelValues(redisQueueFamilyTask)), float64(100))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueUp.WithLabelValues(redisQueueFamilyTask)))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueLengthTotal.WithLabelValues(redisQueueFamilyCommand)))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueActiveDevices.WithLabelValues(redisQueueFamilyCommand)))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueUp.WithLabelValues(redisQueueFamilyCommand)))
+}
+
+func TestRedisQueueObserverUsesQueueScoreWhenTaskDetailExpired(t *testing.T) {
+	mini := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer client.Close()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewTaskMetrics(reg)
+	// Keep the task older than the priority component in queueScore. In
+	// production a missing detail hash means the task has already outlived its
+	// Redis TTL, so this also matches the real stale-backlog shape.
+	queuedAt := time.Now().Add(-48 * time.Hour).UTC()
+	// The queue score is retained after the task-detail hash expires. This is
+	// the production failure mode: backlog remains visible but age must not be
+	// reported as zero just because HGET returns redis.Nil.
+	score := queueScore(&Task{Priority: 3, CreatedAt: queuedAt})
+	require.NoError(t, client.ZAdd(context.Background(), redisx.Keys.ACSTaskQueue("device-expired-detail"), redis.Z{
+		Score:  score,
+		Member: "task-detail-expired",
+	}).Err())
+
+	observer := NewRedisQueueObserver(client, metrics, time.Hour, zap.NewNop())
+	observer.Collect(context.Background())
+
+	require.Greater(t,
+		testutil.ToFloat64(metrics.RedisTaskQueueOldestAgeSeconds.WithLabelValues(redisQueueFamilyTask)),
+		float64(100),
+		"queue score should provide oldest age when task detail is unavailable")
+}
+
+func TestRedisQueueObserverFailurePreservesBusinessGauges(t *testing.T) {
+	mini := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer client.Close()
+	reg := prometheus.NewRegistry()
+	metrics := NewTaskMetrics(reg)
+	observer := NewRedisQueueObserver(client, metrics, time.Hour, zap.NewNop())
+
+	key := redisx.Keys.ACSTaskQueue("device-1")
+	require.NoError(t, client.ZAdd(context.Background(), key, redis.Z{Score: 1, Member: "task-1"}).Err())
+	observer.Collect(context.Background())
+	before := testutil.ToFloat64(metrics.RedisTaskQueueLengthTotal.WithLabelValues(redisQueueFamilyTask))
+	require.Equal(t, float64(1), before)
+
+	mini.Close()
+	observer.Collect(context.Background())
+
+	require.Equal(t, before, testutil.ToFloat64(metrics.RedisTaskQueueLengthTotal.WithLabelValues(redisQueueFamilyTask)))
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.RedisTaskQueueUp.WithLabelValues(redisQueueFamilyTask)))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueScanFailuresTotal.WithLabelValues(redisQueueFamilyTask)))
+}

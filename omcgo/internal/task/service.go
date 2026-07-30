@@ -785,6 +785,7 @@ func (s *TaskService) recordCompletion(task *Task, status TaskStatus) {
 func (s *TaskService) recordDualWriteFail(op string) {
 	if s.metrics != nil {
 		s.metrics.DualWriteFailTotal.WithLabelValues(op).Inc()
+		s.metrics.QueueWriteFailuresTotal.WithLabelValues(op).Inc()
 	}
 }
 

@@ -20,6 +20,12 @@ import { systemApi } from '../../services/api/systemApi';
 import { deviceApi } from '../../services/api/deviceApi';
 import { deviceService } from '../../mock/services/deviceService';
 import { useMock } from '../../services/apiSwitch';
+import { useAppStore } from '../../store/appStore';
+import {
+  SYSTEM_TIMEZONE_QUERY_KEY,
+  TIMEZONE_CONFIG_CATEGORY,
+  TIMEZONE_CONFIG_KEY,
+} from './useSystemTimezone';
 
 // Users
 export function useUsers(params: UserListParams & PageRequest) {
@@ -458,6 +464,21 @@ export function useBatchUpdateSysConfigs() {
     mutationFn: (payload: BatchUpdateSysConfigPayload) => adminApi.batchUpdateSysConfigs(payload),
     onSuccess: (_result: BatchUpdateSysConfigResult, variables) => {
       void queryClient.invalidateQueries({ queryKey: ['system', 'sysConfig', variables.category] });
+      if (variables.category === TIMEZONE_CONFIG_CATEGORY) {
+        const timezoneItem = variables.items.find((item) => item.key === TIMEZONE_CONFIG_KEY);
+        if (!timezoneItem) return;
+        const timezone = timezoneItem.value.trim();
+        if (timezone) {
+          useAppStore.getState().setSystemTimezone(timezone);
+          queryClient.setQueryData<SysConfigItem[] | undefined>(
+            SYSTEM_TIMEZONE_QUERY_KEY,
+            (current) => current?.map((item) => (
+              item.key === TIMEZONE_CONFIG_KEY ? { ...item, value: timezone } : item
+            )),
+          );
+        }
+        void queryClient.invalidateQueries({ queryKey: SYSTEM_TIMEZONE_QUERY_KEY });
+      }
     },
   });
 }

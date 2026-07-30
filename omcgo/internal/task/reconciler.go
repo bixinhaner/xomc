@@ -169,11 +169,13 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) 
 
 	stats := pendingStats
 	stats.Scanned += len(tasks)
+	staleDetected := 0
 	// issue #20：本轮观测到的活跃任务积压绝对快照（不漂移的权威背压信号）。
 	// 注意：受 grace + batchSize 限制，这是"超过 grace 仍活跃且本批可见"的下界，
 	// 足以驱动"积压持续走高"告警；精确全量统计成本更高，按需再加。
 	if r.metrics != nil {
 		r.metrics.BacklogTotal.Set(float64(len(tasks)))
+		r.metrics.RedisPGDiff.Set(0)
 	}
 	for _, t := range tasks {
 		if t == nil {
@@ -200,6 +202,8 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) 
 		// （即便随后修复失败也已计入，反映分叉发生频率本身）。
 		if r.metrics != nil {
 			r.metrics.StaleDetectedTotal.Inc()
+			staleDetected++
+			r.metrics.RedisPGDiff.Set(float64(staleDetected))
 		}
 
 		// 把 Redis 终态同步回 PG。复制终态字段到 PG 侧对象后 Update ——

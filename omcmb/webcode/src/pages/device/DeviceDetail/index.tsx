@@ -49,7 +49,12 @@ import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import { deviceApi } from '@core/services/api/deviceApi';
 import { isDeviceTaskTerminal, type DeviceTaskStatus } from '@core/types/deviceTask';
 import { useDictionary } from '@core/hooks/api/useSystem';
-import { displayActivationStatusLabelOf, displayActivationStatusOf } from '@core/utils/activationStatus';
+import {
+  activationStatusLabelOf,
+  activationStatusOf,
+  displayActivationStatusLabelOf,
+  displayActivationStatusOf,
+} from '@core/utils/activationStatus';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
 import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useTriggerAlarmSync, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
@@ -943,14 +948,14 @@ const buildCellRecords = (device: Device, detailCells?: DeviceDetailCell[]): Cel
 
 const renderCellOpState = (
   value: string | undefined,
-  isOnline: boolean | undefined | null,
+  _isOnline: boolean | undefined | null,
   t: ReturnType<typeof useT>,
   details?: { label?: string; value?: string; status?: boolean }[],
   locale: 'zh-CN' | 'en-US' = 'zh-CN',
 ) => {
-  const status = displayActivationStatusOf(value, isOnline);
+  const status = activationStatusOf(value);
   if (status == null) return '-';
-  const label = displayActivationStatusLabelOf(value, isOnline, details, {
+  const label = activationStatusLabelOf(value, details, {
     active: t('status.active'),
     inactive: t('status.inactive'),
   }, locale);

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"time"
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
@@ -9,7 +11,9 @@ import (
 	"github.com/omcgo/omcgo/internal/core/carrier/ctcc"
 	"github.com/omcgo/omcgo/internal/core/carrier/cucc"
 	"github.com/omcgo/omcgo/internal/core/components"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -23,7 +27,8 @@ type workerInfra struct {
 	// TaskMetrics 在 initWorker 内构造并挂到 TaskService，registerSubscribers / reconciler
 	// 复用同一实例（避免重复 MustRegister 触发 Prometheus duplicate collector panic）。
 	// 在 RestorePendingQueues 之前就绪，确保启动期 recovery 动作能被记到指标。
-	TaskMetrics *task.TaskMetrics
+	TaskMetrics       *task.TaskMetrics
+	StorageProtection *storageprotection.Service
 }
 
 // initWorker initializes all infrastructure for the background worker.
@@ -76,12 +81,59 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	// metrics 还是 nil。reconciler / 双写中断指标复用同一实例。
 	taskMetrics := task.NewTaskMetrics(inf.MetricsReg)
 	taskSvc.SetMetrics(taskMetrics)
+	startRedisQueueObserver(inf.Redis, taskMetrics, inf.GS, inf.Logger)
+	persistentQueueMetrics := components.NewPersistentQueueMetrics(inf.MetricsReg)
+	persistentQueueObserver := components.NewPersistentQueueObserver(inf.PgPool, persistentQueueMetrics, 30*time.Second, inf.Logger)
+	persistentQueueObserver.Start(context.Background())
+	inf.GS.Register("persistent-queue-observer", 1, func(context.Context) error {
+		persistentQueueObserver.Stop()
+		return nil
+	})
+	prometheusURL := os.Getenv("OMCGO_SYSTEM_INFO_PROMETHEUS_URL")
+	if prometheusURL == "" {
+		prometheusURL = "http://prometheus:9090"
+	}
+	storageCollector := components.NewPrometheusStorageCollector(prometheusURL, 2*time.Second, time.Minute, nil)
+	storageProtection := storageprotection.NewService(
+		storageprotection.NewPgRepository(inf.PgPool),
+		storageprotection.NewCollectorUsageProvider(storageCollector),
+		storageprotection.NewMetrics(inf.MetricsReg),
+		inf.Logger,
+	)
+	storageProtection.SetLogAdmissionController(inf.LogGate)
+	storageProtection.Start(context.Background(), 30*time.Second)
+	inf.GS.Register("storage-protection", 1, func(context.Context) error {
+		storageProtection.Stop()
+		return nil
+	})
 	w.TaskService = taskSvc
 	w.TaskRepo = taskRepo
 	w.TaskQueue = taskQueue
 	w.TaskMetrics = taskMetrics
+	w.StorageProtection = storageProtection
 
 	return w, nil
+}
+
+// startRedisQueueObserver wires the Redis backlog observer into the worker's
+// lifecycle. Worker and app share the same Redis database, so both processes
+// must sample the queue; otherwise the worker's pre-initialized up=0 gauges
+// look like an outage even when the queue is readable.
+func startRedisQueueObserver(
+	client redis.UniversalClient,
+	metrics *task.TaskMetrics,
+	gs *components.GracefulShutdown,
+	logger *zap.Logger,
+) *task.RedisQueueObserver {
+	observer := task.NewRedisQueueObserver(client, metrics, 30*time.Second, logger)
+	observer.Start(context.Background())
+	if gs != nil {
+		gs.Register("redis-task-queue-observer", 1, func(context.Context) error {
+			observer.Stop()
+			return nil
+		})
+	}
+	return observer
 }
 
 func (w *workerInfra) registerCarriers() {

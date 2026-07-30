@@ -3,6 +3,7 @@ package software
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -37,6 +38,47 @@ func TestShouldSetSubTaskStartedAt(t *testing.T) {
 					c.status, got, c.want, c.why)
 			}
 		})
+	}
+}
+
+func TestDefaultUpgradeTaskReaperTimeouts_DownloadingWaitsTenMinutes(t *testing.T) {
+	timeouts := defaultUpgradeTaskReaperTimeouts()
+	if timeouts.RPCResponse != 10*time.Minute {
+		t.Fatalf("downloading RPC response timeout = %s, want 10m", timeouts.RPCResponse)
+	}
+	if timeouts.TransferComplete != 30*time.Minute {
+		t.Fatalf("TransferComplete timeout = %s, want 30m", timeouts.TransferComplete)
+	}
+}
+
+func TestBuildFailStaleSubTasksSQL_DownloadingUsesDownloadTimeoutReason(t *testing.T) {
+	query := buildFailStaleSubTasksSQL()
+
+	if !strings.Contains(query, "WHEN ust.status = 'downloading' THEN 'Download response timed out: no DownloadResponse from device.'") {
+		t.Fatalf("downloading stale message must describe DownloadResponse timeout, not TransferComplete.\nSQL: %s", query)
+	}
+	if !strings.Contains(query, "WHEN ust.status = 'downloading' THEN 'DOWNLOAD_TIMEOUT'") {
+		t.Fatalf("downloading stale failure_reason must be DOWNLOAD_TIMEOUT so UI i18n does not show TransferComplete timeout.\nSQL: %s", query)
+	}
+	if strings.Contains(query, "WHEN ust.status = 'downloading' THEN 'Timed out waiting for TransferComplete") {
+		t.Fatalf("downloading stale path must not mention TransferComplete.\nSQL: %s", query)
+	}
+}
+
+func TestBuildFailStaleSubTasksSQL_RollbackUsesRollbackTimeoutReasons(t *testing.T) {
+	query := buildFailStaleSubTasksSQL()
+
+	if !strings.Contains(query, "WHEN ut.task_type = 2 AND ust.status = 'downloading' AND ust.command_key LIKE 'rollback-enable-check-%' THEN 'Rollback enable check timed out: no GetParameterValuesResponse from device.'") {
+		t.Fatalf("rollback enable-check stale message must mention GetParameterValuesResponse, not DownloadResponse.\nSQL: %s", query)
+	}
+	if !strings.Contains(query, "WHEN ut.task_type = 2 AND ust.status = 'rebooting' THEN 'Rollback timed out: no reboot completion from device after SetParameterValues.'") {
+		t.Fatalf("rollback SPV stale message must mention reboot completion after SetParameterValues.\nSQL: %s", query)
+	}
+	if !strings.Contains(query, "WHEN ut.task_type = 2 AND ust.status = 'downloading' AND ust.command_key LIKE 'rollback-enable-check-%' THEN 'ROLLBACK_ENABLE_CHECK_TIMEOUT'") {
+		t.Fatalf("rollback enable-check stale failure_reason must not reuse DOWNLOAD_TIMEOUT.\nSQL: %s", query)
+	}
+	if !strings.Contains(query, "WHEN ut.task_type = 2 AND ust.status = 'rebooting' THEN 'ROLLBACK_APPLY_TIMEOUT'") {
+		t.Fatalf("rollback SPV stale failure_reason must not reuse TASK_TIMEOUT.\nSQL: %s", query)
 	}
 }
 

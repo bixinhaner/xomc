@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
@@ -26,6 +27,51 @@ type contextKey int
 const (
 	requestIDKey contextKey = iota
 )
+
+// AdmissionGate controls whether an OMC service is allowed to emit logs.
+//
+// It is deliberately process-local: app, acs and worker each observe the
+// shared storage policy and update their own gate. The logger core checks the
+// gate before encoding, so neither the configured log file nor stdout receives
+// entries while the gate is blocked (Docker's json-file driver therefore also
+// receives no application log lines).
+type AdmissionGate struct {
+	blocked atomic.Bool
+}
+
+type levelEnablerFunc func(zapcore.Level) bool
+
+func (f levelEnablerFunc) Enabled(level zapcore.Level) bool { return f(level) }
+
+// NewAdmissionGate returns an open gate. Storage protection closes it when the
+// unified filesystem enters blocked/unknown state and opens it after recovery.
+func NewAdmissionGate() *AdmissionGate { return &AdmissionGate{} }
+
+// Allow reports whether a log entry may be emitted.
+func (g *AdmissionGate) Allow() bool {
+	return g == nil || !g.blocked.Load()
+}
+
+// SetBlocked updates the gate atomically so logger calls and the storage
+// protection evaluator can run concurrently without a data race.
+func (g *AdmissionGate) SetBlocked(blocked bool) {
+	if g == nil {
+		return
+	}
+	g.blocked.Store(blocked)
+}
+
+// AdmissionLevelEnabler combines the configured level with the storage log
+// gate. Keeping this at the zapcore level means suppressed entries are not
+// encoded or handed to any WriteSyncer.
+func AdmissionLevelEnabler(gate *AdmissionGate, base zapcore.LevelEnabler) zapcore.LevelEnabler {
+	if base == nil {
+		base = levelEnablerFunc(func(zapcore.Level) bool { return true })
+	}
+	return levelEnablerFunc(func(level zapcore.Level) bool {
+		return (gate == nil || gate.Allow()) && base.Enabled(level)
+	})
+}
 
 // WithRequestID stores the request ID in the context.
 func WithRequestID(ctx context.Context, requestID string) context.Context {
@@ -44,6 +90,13 @@ func GetRequestID(ctx context.Context) string {
 // NewLogger creates a new zap logger from configuration.
 // Supports both console output and file output with rotation via lumberjack.
 func NewLogger(cfg appconfig.LogConfig) (*zap.Logger, error) {
+	return NewLoggerWithAdmissionGate(cfg, nil)
+}
+
+// NewLoggerWithAdmissionGate is NewLogger with a dynamic storage-protection
+// gate. NewLogger remains available for tools/tests that do not have storage
+// protection wiring.
+func NewLoggerWithAdmissionGate(cfg appconfig.LogConfig, gate *AdmissionGate) (*zap.Logger, error) {
 	var zapCfg zap.Config
 
 	switch cfg.Format {
@@ -62,65 +115,60 @@ func NewLogger(cfg appconfig.LogConfig) (*zap.Logger, error) {
 	}
 	zapCfg.Level = zap.NewAtomicLevelAt(level)
 
-	// Handle output paths
-	if len(cfg.OutputPaths) > 0 {
-		// Build custom cores for each output
-		cores := make([]zapcore.Core, 0, len(cfg.OutputPaths))
+	// Handle output paths. When omitted, match zap's development/production
+	// default (stderr) while still using a gated core.
+	outputPaths := cfg.OutputPaths
+	if len(outputPaths) == 0 {
+		outputPaths = zapCfg.OutputPaths
+	}
+	if len(outputPaths) == 0 {
+		outputPaths = []string{"stderr"}
+	}
+	// Build custom cores for each output
+	cores := make([]zapcore.Core, 0, len(outputPaths))
 
-		var encoder zapcore.Encoder
-		if cfg.Format == "console" {
-			encoder = zapcore.NewConsoleEncoder(zapCfg.EncoderConfig)
-		} else {
-			encoder = zapcore.NewJSONEncoder(zapCfg.EncoderConfig)
-		}
-
-		for _, path := range cfg.OutputPaths {
-			var writer io.Writer
-			switch path {
-			case "stdout":
-				writer = os.Stdout
-			case "stderr":
-				writer = os.Stderr
-			default:
-				// File output with rotation support
-				dir := filepath.Dir(path)
-				if err := os.MkdirAll(dir, 0755); err != nil {
-					return nil, fmt.Errorf("create log directory %s: %w", dir, err)
-				}
-
-				if cfg.Rotation.Enabled {
-					writer = NewLumberjackWriter(path, cfg.Rotation)
-				} else {
-					file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-					if err != nil {
-						return nil, fmt.Errorf("open log file %s: %w", path, err)
-					}
-					writer = file
-				}
-			}
-
-			core := zapcore.NewCore(encoder, zapcore.AddSync(writer), zapCfg.Level)
-			cores = append(cores, core)
-		}
-
-		// Combine all cores
-		core := zapcore.NewTee(cores...)
-		logger := zap.New(core,
-			zap.AddCaller(),
-			zap.AddStacktrace(zapcore.ErrorLevel),
-		)
-		return logger, nil
+	var encoder zapcore.Encoder
+	if cfg.Format == "console" {
+		encoder = zapcore.NewConsoleEncoder(zapCfg.EncoderConfig)
+	} else {
+		encoder = zapcore.NewJSONEncoder(zapCfg.EncoderConfig)
 	}
 
-	// Fallback to default zap config if no output paths specified
-	logger, err := zapCfg.Build(
+	for _, path := range outputPaths {
+		var writer io.Writer
+		switch path {
+		case "stdout":
+			writer = os.Stdout
+		case "stderr":
+			writer = os.Stderr
+		default:
+			// File output with rotation support
+			dir := filepath.Dir(path)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return nil, fmt.Errorf("create log directory %s: %w", dir, err)
+			}
+
+			if cfg.Rotation.Enabled {
+				writer = NewLumberjackWriterWithAdmissionGate(path, cfg.Rotation, gate)
+			} else {
+				file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+				if err != nil {
+					return nil, fmt.Errorf("open log file %s: %w", path, err)
+				}
+				writer = file
+			}
+		}
+
+		core := zapcore.NewCore(encoder, zapcore.AddSync(writer), AdmissionLevelEnabler(gate, zapCfg.Level))
+		cores = append(cores, core)
+	}
+
+	// Combine all cores
+	core := zapcore.NewTee(cores...)
+	logger := zap.New(core,
 		zap.AddCaller(),
 		zap.AddStacktrace(zapcore.ErrorLevel),
 	)
-	if err != nil {
-		return nil, fmt.Errorf("build logger: %w", err)
-	}
-
 	return logger, nil
 }
 
@@ -141,6 +189,14 @@ func NewLogger(cfg appconfig.LogConfig) (*zap.Logger, error) {
 // MaxSizeMB 与页面配置的 rotate_interval_minutes 是 OR 关系：任一满足都触发切割。空文件保护防止
 // 低流量环境下每个 tick 产生空 .gz 归档。
 func NewLumberjackWriter(path string, cfg appconfig.RotationConfig) io.Writer {
+	return NewLumberjackWriterWithAdmissionGate(path, cfg, nil)
+}
+
+// NewLumberjackWriterWithAdmissionGate is the gated variant used by service
+// loggers and ACS protocol logging. Rotation/compaction also stop while the
+// gate is blocked, so the maintenance goroutines cannot create new archives
+// after normal log emission has been denied.
+func NewLumberjackWriterWithAdmissionGate(path string, cfg appconfig.RotationConfig, gate *AdmissionGate) io.Writer {
 	maxSize := cfg.MaxSizeMB
 	if maxSize <= 0 {
 		maxSize = 50 // default 50MB
@@ -169,9 +225,9 @@ func NewLumberjackWriter(path string, cfg appconfig.RotationConfig) io.Writer {
 	}
 	// Compactor 模式下故意不设 MaxBackups/MaxAge/Compress，让 lumberjack 仅做切割
 
-	startTimedRotation(lj, path, DefaultRotateInterval)
+	startTimedRotation(lj, path, DefaultRotateInterval, gate)
 	if useCompactor {
-		startCompactor(lj, path, cfg.KeepUncompressed, time.Duration(maxAge)*24*time.Hour)
+		startCompactor(lj, path, cfg.KeepUncompressed, time.Duration(maxAge)*24*time.Hour, gate)
 	}
 
 	return lj
@@ -181,7 +237,7 @@ func NewLumberjackWriter(path string, cfg appconfig.RotationConfig) io.Writer {
 //
 // goroutine 生命周期与进程一致——OMC 进程没有热替换 logger 的场景，所以不提供 Stop()。
 // 空文件保护防止低流量环境下每个 tick 都产生 ~20 字节的空 .gz 归档。
-func startTimedRotation(lj *lumberjack.Logger, path string, interval time.Duration) {
+func startTimedRotation(lj *lumberjack.Logger, path string, interval time.Duration, gate *AdmissionGate) {
 	go func() {
 		lastAttempt := time.Now()
 		for {
@@ -199,6 +255,9 @@ func startTimedRotation(lj *lumberjack.Logger, path string, interval time.Durati
 				continue
 			}
 			lastAttempt = now
+			if gate != nil && !gate.Allow() {
+				continue
+			}
 			info, err := os.Stat(path)
 			if err != nil || info.Size() == 0 {
 				continue // 文件不存在或为空 — 跳过这次轮转
@@ -237,16 +296,19 @@ func truncateToMinute(path string) string {
 // keepUncompressed/maxAge 是启动期 YAML 值；每个 tick 通过 effectiveRotation 与运行期
 // sys_configs override 合并（见 rotation.go），故 log.rotation 改完 ≤1 分钟生效。lj 用于
 // max_size override 的 size 切割（enforceMaxSize 调 lumberjack 线程安全 Rotate）。
-func startCompactor(lj *lumberjack.Logger, path string, keepUncompressed int, maxAge time.Duration) {
+func startCompactor(lj *lumberjack.Logger, path string, keepUncompressed int, maxAge time.Duration, gate *AdmissionGate) {
 	go func() {
 		t := time.NewTicker(1 * time.Minute)
 		defer t.Stop()
 		for range t.C {
+			if gate != nil && !gate.Allow() {
+				continue
+			}
 			keep, age, maxSizeMB := effectiveRotation(keepUncompressed, maxAge)
 			if maxSizeMB > 0 {
 				enforceMaxSize(lj, path, int64(maxSizeMB)*1024*1024)
 			}
-			compactOnce(path, keep, age)
+			compactOnceWithAdmissionGate(path, keep, age, gate)
 		}
 	}()
 }
@@ -259,6 +321,13 @@ type backupEntry struct {
 
 // compactOnce 执行一次归档目录扫描 + 整理。
 func compactOnce(path string, keepUncompressed int, maxAge time.Duration) {
+	compactOnceWithAdmissionGate(path, keepUncompressed, maxAge, nil)
+}
+
+func compactOnceWithAdmissionGate(path string, keepUncompressed int, maxAge time.Duration, gate *AdmissionGate) {
+	if gate != nil && !gate.Allow() {
+		return
+	}
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
 	ext := filepath.Ext(base)
@@ -299,12 +368,17 @@ func compactOnce(path string, keepUncompressed int, maxAge time.Duration) {
 	cutoff := time.Now().Add(-maxAge)
 
 	for i := range all {
+		if gate != nil && !gate.Allow() {
+			return
+		}
 		e := &all[i]
 
 		// 超龄整删（不管是否压缩）
 		if e.mtime.Before(cutoff) {
 			if err := os.Remove(e.path); err != nil {
-				stdlog.Printf("[logger compactor] remove expired %s: %v", e.path, err)
+				if gate == nil || gate.Allow() {
+					stdlog.Printf("[logger compactor] remove expired %s: %v", e.path, err)
+				}
 			}
 			continue
 		}
@@ -332,7 +406,9 @@ func compactOnce(path string, keepUncompressed int, maxAge time.Duration) {
 			}
 		}
 		if err := gzipFile(e.path); err != nil {
-			stdlog.Printf("[logger compactor] gzip %s: %v", e.path, err)
+			if gate == nil || gate.Allow() {
+				stdlog.Printf("[logger compactor] gzip %s: %v", e.path, err)
+			}
 		}
 	}
 }

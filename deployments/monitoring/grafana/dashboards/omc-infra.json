@@ -11,186 +11,834 @@
     {
       "title": "PG 连接数（主+时序）",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 5, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
-        {"expr": "sum(pg_stat_database_numbackends)", "legendFormat": "backends"}
+        {
+          "expr": "sum(pg_stat_database_numbackends)",
+          "legendFormat": "backends"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "short"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
     },
     {
       "title": "PG 连接饱和度",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 5, "x": 5, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 5,
+        "y": 0
+      },
       "targets": [
-        {"expr": "sum(pg_stat_database_numbackends) / max(pg_settings_max_connections)", "legendFormat": "saturation"}
+        {
+          "expr": "sum(pg_stat_database_numbackends) / max(pg_settings_max_connections)",
+          "legendFormat": "saturation"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.95}]}}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "red",
+                "value": 0.95
+              }
+            ]
+          }
+        }
+      }
     },
     {
       "title": "Redis 客户端连接",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 4, "x": 10, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 10,
+        "y": 0
+      },
       "targets": [
-        {"expr": "sum(redis_connected_clients)", "legendFormat": "clients"}
+        {
+          "expr": "sum(redis_connected_clients)",
+          "legendFormat": "clients"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "short"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
     },
     {
       "title": "Redis 内存使用",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 5, "x": 14, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 14,
+        "y": 0
+      },
       "targets": [
-        {"expr": "sum(redis_memory_used_bytes)", "legendFormat": "used"}
+        {
+          "expr": "sum(redis_memory_used_bytes)",
+          "legendFormat": "used"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "bytes"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
     },
     {
       "title": "依赖在线（nats/minio/otelcol）",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 5, "x": 19, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 0
+      },
       "targets": [
-        {"expr": "sum(up{job=~\"nats|minio|otelcol\"})", "legendFormat": "up"}
+        {
+          "expr": "sum(up{job=~\"nats|minio|otelcol\"})",
+          "legendFormat": "up"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"steps": [{"color": "red", "value": null}, {"color": "green", "value": 3}]}}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 3
+              }
+            ]
+          }
+        }
+      }
     },
-
     {
       "title": "PostgreSQL 连接数（按实例）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 4},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 4
+      },
       "targets": [
-        {"expr": "sum by (instance) (pg_stat_database_numbackends)", "legendFormat": "{{instance}}"}
+        {
+          "expr": "sum by (instance) (pg_stat_database_numbackends)",
+          "legendFormat": "{{instance}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "short"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
     },
     {
       "title": "PostgreSQL 库大小（按实例）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 4},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 4
+      },
       "targets": [
-        {"expr": "sum by (instance) (pg_database_size_bytes)", "legendFormat": "{{instance}}"}
+        {
+          "expr": "sum by (instance) (pg_database_size_bytes)",
+          "legendFormat": "{{instance}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "bytes"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
     },
     {
       "title": "PostgreSQL 事务速率（commit/rollback）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 4},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 4
+      },
       "targets": [
-        {"expr": "sum(rate(pg_stat_database_xact_commit[$__rate_interval]))", "legendFormat": "commit"},
-        {"expr": "sum(rate(pg_stat_database_xact_rollback[$__rate_interval]))", "legendFormat": "rollback"}
+        {
+          "expr": "sum(rate(pg_stat_database_xact_commit[$__rate_interval]))",
+          "legendFormat": "commit"
+        },
+        {
+          "expr": "sum(rate(pg_stat_database_xact_rollback[$__rate_interval]))",
+          "legendFormat": "rollback"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "ops"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      }
     },
-
     {
       "title": "Redis 内存 used vs max",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 12},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 12
+      },
       "targets": [
-        {"expr": "redis_memory_used_bytes", "legendFormat": "used"},
-        {"expr": "redis_memory_max_bytes > 0", "legendFormat": "max"}
+        {
+          "expr": "redis_memory_used_bytes",
+          "legendFormat": "used"
+        },
+        {
+          "expr": "redis_memory_max_bytes > 0",
+          "legendFormat": "max"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "bytes"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
     },
     {
       "title": "Redis 命中率",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 12},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 12
+      },
       "targets": [
-        {"expr": "rate(redis_keyspace_hits_total[$__rate_interval]) / (rate(redis_keyspace_hits_total[$__rate_interval]) + rate(redis_keyspace_misses_total[$__rate_interval]))", "legendFormat": "hit ratio"}
+        {
+          "expr": "rate(redis_keyspace_hits_total[$__rate_interval]) / (rate(redis_keyspace_hits_total[$__rate_interval]) + rate(redis_keyspace_misses_total[$__rate_interval]))",
+          "legendFormat": "hit ratio"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        }
+      }
     },
     {
       "title": "Redis 命令处理速率",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 12},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
       "targets": [
-        {"expr": "rate(redis_commands_processed_total[$__rate_interval])", "legendFormat": "cmds/s"}
+        {
+          "expr": "rate(redis_commands_processed_total[$__rate_interval])",
+          "legendFormat": "cmds/s"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "ops"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      }
     },
-
     {
-      "title": "依赖容器 CPU 饱和度（占限额 %，按容器）",
+      "title": "依赖容器 CPU 饱和度（占限额 %，按服务）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
       "targets": [
-        {"expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"(omcgo|docker)-(postgres|postgres-tsdb|redis|nats|minio|web)-.*\"}[$__rate_interval])) / (sum by (name) (container_spec_cpu_quota{name=~\"(omcgo|docker)-(postgres|postgres-tsdb|redis|nats|minio|web)-.*\"} > 0) / sum by (name) (container_spec_cpu_period{name=~\"(omcgo|docker)-(postgres|postgres-tsdb|redis|nats|minio|web)-.*\"}))", "legendFormat": "{{name}}"}
+        {
+          "expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}[$__rate_interval])) / sum by (service) ((container_spec_cpu_quota{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"} > 0) / container_spec_cpu_period{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"})",
+          "legendFormat": "{{service}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.9}]}}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          }
+        }
+      }
     },
     {
-      "title": "依赖容器内存饱和度（占限额 %，按容器）",
+      "title": "依赖容器内存饱和度（占限额 %，按服务）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
       "targets": [
-        {"expr": "sum by (name) (container_memory_working_set_bytes{name=~\"(omcgo|docker)-(postgres|postgres-tsdb|redis|nats|minio|web)-.*\"}) / (sum by (name) (container_spec_memory_limit_bytes{name=~\"(omcgo|docker)-(postgres|postgres-tsdb|redis|nats|minio|web)-.*\"}) < 64e9)", "legendFormat": "{{name}}"}
+        {
+          "expr": "sum by (service) (container_memory_working_set_bytes{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"}) / sum by (service) ((container_spec_memory_limit_bytes{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"} > 0) and (container_spec_memory_limit_bytes{service=~\"postgres|postgres-tsdb|redis|nats|minio|web\"} < 64e9))",
+          "legendFormat": "{{service}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.8}, {"color": "red", "value": 0.9}]}}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          }
+        }
+      }
     },
-
     {
-      "title": "监控栈容器内存（按容器）",
+      "title": "监控栈容器内存（按服务）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
       "targets": [
-        {"expr": "sum by (name) (container_memory_working_set_bytes{name=~\"(omcgo|docker)-(prometheus|grafana|loki|tempo|otelcol|alertmanager|cadvisor)-.*\"})", "legendFormat": "{{name}}"}
+        {
+          "expr": "sum by (service) (container_memory_working_set_bytes{container_id=~\".*/docker-[^/]+\\\\.scope\",container_label_com_docker_compose_service=~\"prometheus|grafana|loki|tempo|otelcol|alertmanager|cadvisor\"})",
+          "legendFormat": "{{service}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "bytes"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
     },
     {
       "title": "Prometheus 时序数（head series）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
       "targets": [
-        {"expr": "prometheus_tsdb_head_series", "legendFormat": "head series"}
+        {
+          "expr": "prometheus_tsdb_head_series",
+          "legendFormat": "head series"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "short"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "title": "主机及数据盘容量使用率",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "targets": [
+        {
+          "expr": "1 - (node_filesystem_avail_bytes{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\\\..*)?|fuse(\\\\..*)?\"} / node_filesystem_size_bytes{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\\\..*)?|fuse(\\\\..*)?\"})",
+          "legendFormat": "{{mountpoint}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "文件系统 inode 使用率",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "targets": [
+        {
+          "expr": "1 - (node_filesystem_files_free{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\\\..*)?|fuse(\\\\..*)?\"} / node_filesystem_files{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\\\..*)?|fuse(\\\\..*)?\"})",
+          "legendFormat": "{{mountpoint}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "red",
+                "value": 0.95
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "文件系统预计耗尽（4小时预测）",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "targets": [
+        {
+          "expr": "predict_linear(node_filesystem_avail_bytes{job=\"node\",fstype!~\"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\\\..*)?|fuse(\\\\..*)?\"}[6h], 4 * 3600)",
+          "legendFormat": "{{mountpoint}} {{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        }
+      }
+    },
+    {
+      "title": "MinIO 集群容量（总量/已用/可用）",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "targets": [
+        {
+          "expr": "minio_cluster_capacity_usable_total_bytes",
+          "legendFormat": "total"
+        },
+        {
+          "expr": "minio_cluster_capacity_usable_total_bytes - minio_cluster_capacity_usable_free_bytes",
+          "legendFormat": "used"
+        },
+        {
+          "expr": "minio_cluster_capacity_usable_free_bytes",
+          "legendFormat": "free"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        }
+      }
+    },
+    {
+      "title": "MinIO 使用率",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 52
+      },
+      "targets": [
+        {
+          "expr": "1 - (minio_cluster_capacity_usable_free_bytes / minio_cluster_capacity_usable_total_bytes)",
+          "legendFormat": "capacity used ratio"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        }
+      }
+    },
+    {
+      "title": "NATS JetStream 积压",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 52
+      },
+      "targets": [
+        {
+          "expr": "omc_nats_consumer_pending",
+          "legendFormat": "{{stream}}/{{durable}} pending"
+        },
+        {
+          "expr": "omc_nats_consumer_ack_pending",
+          "legendFormat": "{{stream}}/{{durable}} ack pending"
+        },
+        {
+          "expr": "omc_nats_consumer_oldest_age_seconds",
+          "legendFormat": "{{stream}}/{{durable}} oldest age"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        }
+      }
+    },
+    {
+      "title": "MinIO 业务桶容量（固定分类）",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 60
+      },
+      "targets": [
+        {
+          "expr": "max by (category) (omc_minio_bucket_usage_bytes{category=~\"pm|mr|firmware|config-backup|logs|reports|exchange|ui-assets|trace|file-bundles|config-snapshots|device-licenses\"})",
+          "legendFormat": "{{category}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        }
+      }
+    },
+    {
+      "title": "MinIO ILM 待处理",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 60
+      },
+      "targets": [
+        {
+          "expr": "minio_node_ilm_expiry_pending_tasks",
+          "legendFormat": "ILM pending"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        }
+      }
+    },
+    {
+      "title": "Redis 任务队列积压",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 68
+      },
+      "targets": [
+        {
+          "expr": "omc_redis_task_queue_length_total",
+          "legendFormat": "{{queue_family}} length"
+        },
+        {
+          "expr": "omc_redis_task_queue_active_devices",
+          "legendFormat": "{{queue_family}} active devices"
+        },
+        {
+          "expr": "omc_redis_task_queue_max_length",
+          "legendFormat": "{{queue_family}} max length"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        }
+      }
+    },
+    {
+      "title": "Redis 任务队列最老任务年龄",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 68
+      },
+      "targets": [
+        {
+          "expr": "omc_redis_task_queue_oldest_age_seconds and on (deployment_unit, service, instance, job, queue_family) (omc_redis_task_queue_up == 1) and on (deployment_unit, service, instance, job, queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120)",
+          "legendFormat": "{{queue_family}} oldest age"
+        }
+      ],
+      "description": "仅展示 observer 正常且最近 120 秒内成功采样的年龄；无数据表示观测不可用或采样过期。",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        }
+      }
+    },
+    {
+      "title": "PostgreSQL 持久化队列积压",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 76
+      },
+      "targets": [
+        {
+          "expr": "sum by (queue, status) (omc_persistent_queue_pending)",
+          "legendFormat": "{{queue}}/{{status}} pending"
+        },
+        {
+          "expr": "omc_persistent_queue_dead_letter_total",
+          "legendFormat": "{{queue}} dead letter"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        }
+      }
+    },
+    {
+      "title": "PostgreSQL 持久化队列最老任务",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 76
+      },
+      "targets": [
+        {
+          "expr": "omc_persistent_queue_oldest_age_seconds",
+          "legendFormat": "{{queue}}/{{status}} oldest age"
+        },
+        {
+          "expr": "omc_persistent_queue_up",
+          "legendFormat": "{{queue}} observer up"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        }
+      }
     },
     {
       "title": "TSDB 临时写入",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 84
+      },
       "targets": [
-        {"expr": "rate(pg_stat_database_temp_bytes{instance=\"postgres-tsdb\"}[$__rate_interval])", "legendFormat": "bytes/s"},
-        {"expr": "rate(pg_stat_database_temp_files{instance=\"postgres-tsdb\"}[$__rate_interval])", "legendFormat": "files/s"}
+        {
+          "expr": "rate(pg_stat_database_temp_bytes{instance=\"postgres-tsdb\"}[$__rate_interval])",
+          "legendFormat": "bytes/s"
+        },
+        {
+          "expr": "rate(pg_stat_database_temp_files{instance=\"postgres-tsdb\"}[$__rate_interval])",
+          "legendFormat": "files/s"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "Bps"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        }
+      }
     },
     {
       "title": "TSDB 超过 5 秒的活跃查询",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 92
+      },
       "targets": [
-        {"expr": "pg_active_long_queries{instance=\"postgres-tsdb\"}", "legendFormat": "{{database}}"}
+        {
+          "expr": "pg_active_long_queries{instance=\"postgres-tsdb\"}",
+          "legendFormat": "{{database}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "short"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
     },
     {
       "title": "postgres-tsdb CPU / 内存饱和度",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 44},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 100
+      },
       "targets": [
-        {"expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"(omcgo|docker)-postgres-tsdb-.*\"}[$__rate_interval])) / sum by (name) (container_spec_cpu_quota{name=~\"(omcgo|docker)-postgres-tsdb-.*\"} / container_spec_cpu_period{name=~\"(omcgo|docker)-postgres-tsdb-.*\"})", "legendFormat": "CPU {{name}}"},
-        {"expr": "container_memory_working_set_bytes{name=~\"(omcgo|docker)-postgres-tsdb-.*\"} / container_spec_memory_limit_bytes{name=~\"(omcgo|docker)-postgres-tsdb-.*\"}", "legendFormat": "memory {{name}}"}
+        {
+          "expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=\"postgres-tsdb\"}[$__rate_interval])) / sum by (service) ((container_spec_cpu_quota{service=\"postgres-tsdb\"} > 0) / container_spec_cpu_period{service=\"postgres-tsdb\"})",
+          "legendFormat": "CPU {{service}}"
+        },
+        {
+          "expr": "container_memory_working_set_bytes{service=\"postgres-tsdb\"} / container_spec_memory_limit_bytes{service=\"postgres-tsdb\"}",
+          "legendFormat": "memory {{service}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        }
+      }
     },
     {
       "title": "postgres-tsdb 容器磁盘读写",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 44},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 108
+      },
       "targets": [
-        {"expr": "sum by (name) (rate(container_fs_reads_bytes_total{name=~\"(omcgo|docker)-postgres-tsdb-.*\"}[$__rate_interval]))", "legendFormat": "read {{name}}"},
-        {"expr": "sum by (name) (rate(container_fs_writes_bytes_total{name=~\"(omcgo|docker)-postgres-tsdb-.*\"}[$__rate_interval]))", "legendFormat": "write {{name}}"}
+        {
+          "expr": "sum by (service) (rate(container_fs_reads_bytes_total{service=\"postgres-tsdb\"}[$__rate_interval]))",
+          "legendFormat": "read {{service}}"
+        },
+        {
+          "expr": "sum by (service) (rate(container_fs_writes_bytes_total{service=\"postgres-tsdb\"}[$__rate_interval]))",
+          "legendFormat": "write {{service}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "Bps"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        }
+      }
     }
   ],
+  "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["omcgo", "infra", "dependencies"],
+  "tags": [
+    "omcgo",
+    "infra",
+    "dependencies"
+  ],
   "templating": {
     "list": []
   },

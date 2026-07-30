@@ -16,13 +16,20 @@ interface BackendStorageMetric {
   label: string;
   source: string;
   mount_path?: string;
+  mountpoint?: string;
   instance?: string;
+  target_type?: string;
+  target_id?: string;
   total_bytes?: number;
   used_bytes?: number;
   available_bytes?: number;
   used_percent?: number;
+  total_inodes?: number;
+  used_inodes?: number;
+  available_inodes?: number;
+  used_inode_percent?: number;
   collected_at?: string;
-  status: 'available' | 'unavailable';
+  status: 'available' | 'stale' | 'unavailable';
   error?: string;
 }
 
@@ -34,13 +41,20 @@ export interface StorageMetric {
   label: string;
   source: string;
   mountPath?: string;
+  mountpoint?: string;
   instance?: string;
+  targetType?: string;
+  targetId?: string;
   totalBytes?: number;
   usedBytes?: number;
   availableBytes?: number;
   usedPercent?: number;
+  totalInodes?: number;
+  usedInodes?: number;
+  availableInodes?: number;
+  usedInodePercent?: number;
   collectedAt?: string;
-  status: 'available' | 'unavailable';
+  status: 'available' | 'stale' | 'unavailable';
   error?: string;
 }
 
@@ -61,11 +75,18 @@ function mapBackendStorageMetric(info: BackendStorageMetric): StorageMetric {
     label: info.label,
     source: info.source,
     mountPath: info.mount_path,
+    mountpoint: info.mountpoint,
     instance: info.instance,
+    targetType: info.target_type,
+    targetId: info.target_id,
     totalBytes: info.total_bytes,
     usedBytes: info.used_bytes,
     availableBytes: info.available_bytes,
     usedPercent: info.used_percent,
+    totalInodes: info.total_inodes,
+    usedInodes: info.used_inodes,
+    availableInodes: info.available_inodes,
+    usedInodePercent: info.used_inode_percent,
     collectedAt: info.collected_at,
     status: info.status,
     error: info.error,

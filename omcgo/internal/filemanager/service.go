@@ -12,16 +12,22 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/internal/task"
 )
 
 // FileService provides business logic for file management operations.
 type FileService struct {
-	repo        FileRepository
-	minioClient *minio.Client
-	bucket      string
-	taskSvc     task.Enqueuer
-	logger      *zap.Logger
+	repo             FileRepository
+	minioClient      *minio.Client
+	bucket           string
+	taskSvc          task.Enqueuer
+	storageAdmission storageprotection.WriteAdmission
+	logger           *zap.Logger
+}
+
+func (s *FileService) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	s.storageAdmission = admission
 }
 
 // NewFileService creates a new FileService.
@@ -48,6 +54,15 @@ func (s *FileService) UploadFile(ctx context.Context, file io.Reader, fileSize i
 
 	if contentType == "" {
 		contentType = "application/octet-stream"
+	}
+	if s.storageAdmission != nil {
+		decision, err := s.storageAdmission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeUpload)
+		if err != nil {
+			return nil, fmt.Errorf("storage admission check: %w", err)
+		}
+		if !decision.Allowed {
+			return nil, fmt.Errorf("storage write protected: %s", decision.Reason)
+		}
 	}
 
 	// Upload to MinIO

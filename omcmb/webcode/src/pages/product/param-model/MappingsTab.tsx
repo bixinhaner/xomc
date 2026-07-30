@@ -45,6 +45,10 @@ import {
 } from '@/components/Table/resizableColumns';
 import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
+import {
+  PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
+  PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
+} from '../pagination';
 
 // 长 TR069 PATH 单元格（#214）：列宽放不下时——悬浮 tooltip 看完整路径 + 一键复制；
 // 配合可拖拽列宽（useResizableColumns），三管齐下确保完整路径可见/可取。
@@ -140,7 +144,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
   // 手动搜索:仅在 onSearch(回车/点击搜索)时应用 keyword。
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
 
   // 过滤条件变化时回到第一页——渲染期重置,避免 set-state-in-effect。
   const filterKey = `${keyword}|${entryFilter}|${selectedName ?? ''}`;
@@ -419,7 +423,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
             pageSize,
             total: filtered.length,
             showSizeChanger: true,
-            pageSizeOptions: ['10', '20', '50', '1000'],
+            pageSizeOptions: PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
             showTotal: (n) => t('common.totalCount', { count: n }),
             onChange: (p, ps) => {
               setPage(p);

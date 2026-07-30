@@ -139,7 +139,7 @@ export default function SystemDashboard() {
                       <Statistic title={t('system.dashboard.storage.used')} value={formatBytes(metric.usedBytes)} />
                     ) : (
                       <div style={{ padding: '28px 0', color: '#999', textAlign: 'center' }}>
-                        {t('common.notAvailable')}
+                        {metric.status === 'stale' ? t('system.dashboard.storage.stale') : t('common.notAvailable')}
                       </div>
                     )}
                     <div style={{ marginTop: 8, color: '#999', fontSize: 12, wordBreak: 'break-all' }}>

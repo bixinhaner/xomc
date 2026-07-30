@@ -28,6 +28,7 @@ import {
 // #241：三个下拉(参数模型/KPI平台/告警neType)改字典数据源绑定(T-0182),由字典机制统一刷新,
 // 不再各下拉各搞一套 query key。与设备列表 network_type/product_class 同范式。
 import { useDictionary } from '@core/hooks/api/useSystem';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import type {
   Product,
   ProductPattern,
@@ -63,9 +64,9 @@ function toDictOptions(
   return (dict?.sysDictionaryDetails ?? []).map((d) => ({ label: d.label, value: d.value }));
 }
 
-const TECH_OPTIONS = [
-  { label: 'LTE (4G)', value: 'lte' },
-  { label: 'NR (5G)', value: 'nr' },
+const FALLBACK_TECH_OPTIONS = [
+  { label: 'eNB (LTE)', value: 'lte' },
+  { label: 'gNB (NR)', value: 'nr' },
   { label: 'GSM', value: 'gsm' },
 ];
 
@@ -98,6 +99,8 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
   const { data: paramModelDict } = useDictionary('param_model_name');
   const { data: kpiPlatformDict } = useDictionary('kpi_platform_enb');
   const { data: alarmNeTypeDict } = useDictionary('alarm_ne_type');
+  const { options: technologyOptions, isLoading: technologyOptionsLoading } = useTechnologyDictionary();
+  const techOptions = technologyOptions.length > 0 ? technologyOptions : FALLBACK_TECH_OPTIONS;
 
   // 指标设备类型由制式派生(不再单独编辑);ENB(lte) 才需要选指标平台
   const tech = Form.useWatch('tech', form);
@@ -343,7 +346,8 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                   </Form.Item>
                   <Form.Item name="tech" label={t('product.products.tech')} rules={[{ required: true }]}>
                     <Select
-                      options={TECH_OPTIONS}
+                      options={techOptions}
+                      loading={technologyOptionsLoading}
                       onChange={(val) => {
                         // 制式变更后:非 ENB(lte) 清空指标平台(平台仅 ENB 适用)
                         if ((TECH_TO_DEVTYPE[val] || '') !== 'enb') {

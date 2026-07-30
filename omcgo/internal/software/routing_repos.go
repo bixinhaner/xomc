@@ -529,8 +529,8 @@ func (r *RoutingSubTaskRepository) DeleteByTaskID(ctx context.Context, taskID uu
 	return firstErr
 }
 
-func (r *RoutingSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeouts) (map[uuid.UUID]int64, error) {
-	merged := make(map[uuid.UUID]int64)
+func (r *RoutingSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeouts) (StaleFailures, error) {
+	var merged StaleFailures
 	// per-business override：fault_log_collect 的 uploading 走 FaultLogUpload（默认 15min），
 	// 跟其它表（30min TransferComplete）拉开。其它业务暂时无差异化需求，沿用 cutoffs 原值。
 	faultLogCuts := cutoffs
@@ -544,11 +544,9 @@ func (r *RoutingSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleT
 		}
 		m, err := repo.FailStale(ctx, c)
 		if err != nil {
-			return nil, err
+			return StaleFailures{}, err
 		}
-		for k, v := range m {
-			merged[k] = v
-		}
+		merged.Merge(m)
 	}
 	return merged, nil
 }

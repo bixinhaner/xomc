@@ -6,6 +6,7 @@
  * - 用词统一：「禁用」→「锁定」
  */
 export const BIZ_CODE_I18N_MAP: Record<number, string> = {
+  2034: 'product.standardParams.pathExists',
   // 登录相关错误码（7000-7099）
   7000: 'login.error.invalidCredentials',  // 登录凭据无效
   7001: 'login.error.userNotFound',        // 用户不存在

@@ -33,11 +33,11 @@
       ]
     },
     {
-      "title": "Pod Count",
+      "title": "OMC 服务在线",
       "type": "stat",
       "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
       "targets": [
-        {"expr": "count(up{namespace=\"omcgo\"})", "legendFormat": "Running Pods"}
+        {"expr": "sum(up{job=~\"omc-.*\"})", "legendFormat": "online"}
       ]
     },
     {
@@ -71,7 +71,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
       "targets": [
-        {"expr": "sum(rate(http_requests_total{namespace=\"omcgo\"}[1m])) by (component)", "legendFormat": "{{component}}"}
+        {"expr": "sum by (component) (rate(http_requests_total[1m]))", "legendFormat": "{{component}}"}
       ],
       "fieldConfig": {
         "defaults": {"unit": "reqps"}
@@ -86,22 +86,22 @@
       ]
     },
     {
-      "title": "CPU Usage by Pod",
+      "title": "CPU Usage by Service",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
       "targets": [
-        {"expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"omcgo\"}[1m])) by (pod)", "legendFormat": "{{pod}}"}
+        {"expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\"app|acs|worker\"}[1m]))", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {
-        "defaults": {"unit": "percentunit"}
+        "defaults": {"unit": "cores"}
       }
     },
     {
-      "title": "Memory Usage by Pod",
+      "title": "Memory Usage by Service",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
       "targets": [
-        {"expr": "container_memory_working_set_bytes{namespace=\"omcgo\"}", "legendFormat": "{{pod}}"}
+        {"expr": "sum by (service) (container_memory_working_set_bytes{service=~\"app|acs|worker\"})", "legendFormat": "{{service}}"}
       ],
       "fieldConfig": {
         "defaults": {"unit": "bytes"}
@@ -112,7 +112,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
       "targets": [
-        {"expr": "go_goroutines{namespace=\"omcgo\"}", "legendFormat": "{{pod}}"}
+        {"expr": "go_goroutines{job=~\"omc-.*\"}", "legendFormat": "{{deployment_unit}}"}
       ]
     },
     {
@@ -120,7 +120,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
       "targets": [
-        {"expr": "rate(go_gc_duration_seconds_sum{namespace=\"omcgo\"}[1m])", "legendFormat": "{{pod}}"}
+        {"expr": "rate(go_gc_duration_seconds_sum{job=~\"omc-.*\"}[1m])", "legendFormat": "{{deployment_unit}}"}
       ],
       "fieldConfig": {
         "defaults": {"unit": "s"}
@@ -420,6 +420,7 @@
       "fieldConfig": {"defaults": {"unit": "short"}}
     }
   ],
+  "refresh": "30s",
   "schemaVersion": 39,
   "tags": ["omcgo", "tr069", "acs"],
   "templating": {

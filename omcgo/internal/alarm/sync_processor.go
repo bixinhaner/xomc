@@ -178,8 +178,6 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 		result.FailedAdd = len(tr069Alarms)
 		return result
 	}
-	localAlarmByKey := indexActiveAlarms(localAlarms)
-
 	// 3. Resolve device-derived fields for any newly added alarms.
 	deviceID, carrier, technology, productClass := p.resolveDeviceFields(ctx, deviceSN, localAlarms)
 	remoteAlarms := make([]*model.Alarm, 0, len(tr069Alarms))
@@ -217,9 +215,10 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 	}
 
 	// 6. Apply diff: ToUpdate — merge remote fields into existing local alarm
-	for matchKey, remoteAlarm := range diff.ToUpdate {
-		localAlarm := localAlarmByKey[matchKey]
-		if localAlarm == nil {
+	for _, update := range diff.ToUpdate {
+		localAlarm := update.Local
+		remoteAlarm := update.Remote
+		if localAlarm == nil || remoteAlarm == nil {
 			result.FailedUpdate++
 			continue
 		}
@@ -233,7 +232,7 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 		if localAlarm.RaisedAt.IsZero() && !remoteAlarm.RaisedAt.IsZero() {
 			localAlarm.RaisedAt = remoteAlarm.RaisedAt
 		}
-		localAlarm.LastUpdatedAt = resolveAlarmBusinessTime(remoteAlarm, time.Now())
+		localAlarm.LastUpdatedAt = time.Now()
 		// Merge additional info
 		for k, v := range remoteAlarm.AdditionalInfo {
 			localAlarm.AdditionalInfo[k] = v
@@ -249,8 +248,7 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 	}
 
 	// 7. Apply diff: ToClear
-	for _, matchKey := range diff.ToClear {
-		alarm := localAlarmByKey[matchKey]
+	for _, alarm := range diff.ToClear {
 		if alarm == nil {
 			result.Cleared++
 			continue
@@ -263,6 +261,44 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 		} else {
 			result.Cleared++
 		}
+	}
+
+	// 8. Apply diff: stale duplicate rows for keys that still exist remotely.
+	for _, duplicate := range diff.ToClearDuplicates {
+		alarm := duplicate.Duplicate
+		if alarm == nil {
+			result.FailedClear++
+			continue
+		}
+		clearedBy := "system:alarm_sync_duplicate"
+		clearNote := "duplicate active alarm reconciled by full sync"
+		alarm.ClearedBy = &clearedBy
+		alarm.ClearNote = &clearNote
+		if err := p.engine.ClearBySync(ctx, alarm); err != nil {
+			p.logger.Error("sync clear duplicate alarm", zap.Error(err),
+				zap.String("device_sn", deviceSN),
+				zap.String("alarm_identifier", alarm.AlarmIdentifier),
+				zap.String("alarm_id", alarm.ID.String()))
+			result.FailedClear++
+			continue
+		}
+		if duplicate.Keeper != nil && p.engine.redisStore != nil {
+			if err := p.engine.redisStore.Set(
+				ctx,
+				duplicate.Keeper.DeviceSN,
+				activeAlarmMatchKey(duplicate.Keeper),
+				duplicate.Keeper.ID.String(),
+			); err != nil {
+				p.logger.Warn("restore keeper redis key after duplicate clear",
+					zap.Error(err),
+					zap.String("device_sn", deviceSN),
+					zap.String("alarm_identifier", duplicate.Keeper.AlarmIdentifier))
+			}
+		}
+		if p.engine.metrics != nil {
+			p.engine.metrics.ReconciliationTotal.WithLabelValues("sync_duplicate_cleared").Inc()
+		}
+		result.Cleared++
 	}
 
 	return result

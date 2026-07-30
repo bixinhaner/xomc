@@ -1,5 +1,5 @@
 /**
- * SummaryTab — KPI 指标库一级列表(2026-06-02:"一个平台一条")。
+ * SummaryTab — PM 指标库一级列表(2026-06-02:"一个平台一条")。
  *
  * 用户决策:一个 XML 文件即一个平台,一级列表按平台聚合,每平台唯一一行。
  * 列:序号 / 平台(link → 二级) / 加载源 / 指标数 / 描述 / 操作(编辑描述)。
@@ -20,6 +20,10 @@ import {
 } from '@core/hooks/api/useIndicatorsLibrary';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
+import {
+  PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
+  PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
+} from '../pagination';
 
 interface Props {
   onSelect: (tech: TechLower, platform: string) => void;
@@ -46,7 +50,7 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
   const [editRow, setEditRow] = useState<IndicatorPlatformSummary | null>(null);
   const [draft, setDraft] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
 
   // 搜索词变化时回到第一页——渲染期重置,避免 set-state-in-effect。
   const [prevQuery, setPrevQuery] = useState(query);
@@ -202,7 +206,7 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
           pageSize,
           total: items.length,
           showSizeChanger: true,
-          pageSizeOptions: ['10', '20', '50', '1000'],
+          pageSizeOptions: PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
           showTotal: (n) => t('common.totalCount', { count: n }),
           onChange: (p, ps) => {
             setPage(p);

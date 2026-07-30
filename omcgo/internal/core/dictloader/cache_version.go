@@ -70,13 +70,17 @@ func (cv *CacheVersion) Increment(ctx context.Context) (int64, error) {
 	if cv.rdb == nil {
 		return 0, errors.New("dictloader.cacheversion: nil redis client")
 	}
+	// Serialize the Redis mutation with refresh's read. Without holding the
+	// same lock across both network operations, Watch can observe the new
+	// Redis value before Increment publishes it locally and mistake our own
+	// write for a remote bump.
+	cv.mu.Lock()
+	defer cv.mu.Unlock()
 	n, err := cv.rdb.Incr(ctx, cv.key).Result()
 	if err != nil {
 		return 0, fmt.Errorf("dictloader.cacheversion: incr %s: %w", cv.key, err)
 	}
-	cv.mu.Lock()
 	cv.local = n
-	cv.mu.Unlock()
 	return n, nil
 }
 
@@ -113,23 +117,28 @@ func (cv *CacheVersion) refresh(ctx context.Context) {
 	if cv.rdb == nil {
 		return
 	}
+	// The Redis read and local comparison form one serialized observation with
+	// Increment, preventing both forward and stale-backward interleavings.
+	cv.mu.Lock()
 	raw, err := cv.rdb.Get(ctx, cv.key).Result()
 	if errors.Is(err, redis.Nil) {
+		cv.mu.Unlock()
 		return
 	}
 	if err != nil {
+		cv.mu.Unlock()
 		cv.logger.Warn("dictloader.cacheversion: poll failed",
 			zap.String("domain", cv.domain), zap.Error(err))
 		return
 	}
 	remote, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
+		cv.mu.Unlock()
 		cv.logger.Warn("dictloader.cacheversion: parse failed",
 			zap.String("domain", cv.domain), zap.String("raw", raw), zap.Error(err))
 		return
 	}
 
-	cv.mu.Lock()
 	bumped := remote != cv.local
 	cv.local = remote
 	callbacks := append([]func(){}, cv.onBump...)

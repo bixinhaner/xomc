@@ -1648,7 +1648,7 @@ func (s *Service) mapDeviceItem(
 			targetFile = landedFile
 		}
 	}
-	status := normalizeDeviceStatus(subTask.Status, fileLanded)
+	status := normalizeDeviceStatusForTask(typeDef.softwareTaskType, subTask.Status, fileLanded)
 	result := ""
 	if status == "ended" {
 		result = "success"
@@ -1715,7 +1715,8 @@ func (s *Service) mapDeviceItem(
 
 	startedAt := modelTimePtrToTimePtr(subTask.StartedAt)
 	endedAt := modelTimePtrToTimePtr(subTask.CompletedAt)
-	failureReason := subTask.FailureReason
+	failureReason := normalizeFailureReasonForTask(typeDef.softwareTaskType, subTask.CommandKey, subTask.FailureReason, subTask.ErrorMessage)
+	failureDetail := normalizeFailureDetailForTask(typeDef.softwareTaskType, failureReason, subTask.ErrorMessage)
 	// issue #655 追加：被操作者主动终止的子任务，多半在「未进入执行态」前就被叫停，
 	// 因此 sub_task.started_at 一般为空。前端列「开始时间 / 结束时间」只有结束、没开始
 	// 显示别扭——补一个 startedAt = endedAt 让两端对齐（语义上"在结束的同一刻被终止"）。
@@ -1765,7 +1766,7 @@ func (s *Service) mapDeviceItem(
 		CreatedAt:     optionalTimePtr(time.Time(subTask.CreatedAt)),
 		OperatorScope: parent.CreateUser,
 		FailureReason: failureReason,
-		FailureDetail: subTask.ErrorMessage,
+		FailureDetail: failureDetail,
 	}, nil
 }
 
