@@ -202,7 +202,7 @@ oss.alarm.forward                  oss.pm.export
 
 ### 4.6 数据库迁移核心铁律
 
-**工具**：`pressly/goose/v3`，版本记录在 `goose_db_version`（schema）/ `goose_db_version_seed`（seed）。**2026-05-31 已做 consolidated baseline**（schema 从 `000001` baseline + 增量；非从历史 0 连续），唯一事实源 = `migrations/README.md`。
+**工具**：`pressly/goose/v3`，版本记录在 `goose_db_version`（schema）/ `goose_db_version_seed`（seed）。迁移日常入口是 `migrations/README.md`；低频 baseline 重生、既有库处理和连接池核定见 `../docs/ref/migration-baseline-runbook.md`。
 
 **新增迁移铁律**：
 - 版本号 = 现有最大号 + 1（无跳跃、无重复、不重用已删号、不插低版本）。`ls migrations/ migrations/seed/ | sort | uniq -d` 查撞号。
