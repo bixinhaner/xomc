@@ -3,6 +3,7 @@ package software
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -37,6 +38,30 @@ func TestShouldSetSubTaskStartedAt(t *testing.T) {
 					c.status, got, c.want, c.why)
 			}
 		})
+	}
+}
+
+func TestDefaultUpgradeTaskReaperTimeouts_DownloadingWaitsTenMinutes(t *testing.T) {
+	timeouts := defaultUpgradeTaskReaperTimeouts()
+	if timeouts.RPCResponse != 10*time.Minute {
+		t.Fatalf("downloading RPC response timeout = %s, want 10m", timeouts.RPCResponse)
+	}
+	if timeouts.TransferComplete != 30*time.Minute {
+		t.Fatalf("TransferComplete timeout = %s, want 30m", timeouts.TransferComplete)
+	}
+}
+
+func TestBuildFailStaleSubTasksSQL_DownloadingUsesDownloadTimeoutReason(t *testing.T) {
+	query := buildFailStaleSubTasksSQL()
+
+	if !strings.Contains(query, "WHEN ust.status = 'downloading' THEN 'Download response timed out: no DownloadResponse from device.'") {
+		t.Fatalf("downloading stale message must describe DownloadResponse timeout, not TransferComplete.\nSQL: %s", query)
+	}
+	if !strings.Contains(query, "WHEN ust.status = 'downloading' THEN 'DOWNLOAD_TIMEOUT'") {
+		t.Fatalf("downloading stale failure_reason must be DOWNLOAD_TIMEOUT so UI i18n does not show TransferComplete timeout.\nSQL: %s", query)
+	}
+	if strings.Contains(query, "WHEN ust.status = 'downloading' THEN 'Timed out waiting for TransferComplete") {
+		t.Fatalf("downloading stale path must not mention TransferComplete.\nSQL: %s", query)
 	}
 }
 

@@ -557,16 +557,16 @@ func (r *PgSubTaskRepository) DeleteByTaskID(ctx context.Context, taskID uuid.UU
 	return nil
 }
 
-
-func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeouts) (map[uuid.UUID]int64, error) {
+func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeouts) (StaleFailures, error) {
 	rpcCutoff := time.Now().Add(-cutoffs.RPCResponse)
 	onlineCutoff := time.Now().Add(-cutoffs.DeviceOnline)
 	tcCutoff := time.Now().Add(-cutoffs.TransferComplete)
+	query := buildFailStaleSubTasksSQL()
 
 	// 三段超时口径：
-	//   · 'downloading'（Download RPC，固件升级 / 回滚）→ RPCResponse 短超时（默认 5min）
-	//     —— 设备拿到 Download SOAP 后应该很快回 DownloadResponse；超时多半是 ACS 没派发或 CPE 没回。
-	//   · 'suspended' → DeviceOnline 长超时（默认 60min）—— 等设备 inform 上线。
+	//   · 'downloading'（Download RPC，固件升级 / 回滚）→ RPCResponse 短超时（默认 10min）
+	//     —— 设备拿到 Download SOAP 后应该回 DownloadResponse；超时多半是 ACS 没派发或 CPE 没回。
+	//   · 'suspended' → DeviceOnline 长超时（默认 10min）—— 等设备 inform 上线。
 	//   · 其它（'uploading' / 'rebooting' / 'verifying'）→ TransferComplete 超时（默认 30min）
 	//     —— 文件上传 + CPE 内部安装 / 回写 TC 都属于"已派发 RPC，等事务完成"阶段，时间窗较长。
 	// 这里把 'uploading' 归入第三段而不是 'downloading' 同款 RPCResponse 短超时，是 fix 顺手修的 BUG：
@@ -577,13 +577,38 @@ func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeou
 	// （shouldSetSubTaskStartedAt 覆盖），但 reaper 是直接 SQL 不走 ORM；万一未来有路径
 	// 绕过 UpdateStatusWithCode 直接 UPDATE 状态，这里兜底保证「被 reaper 处理过的 sub_task
 	// 一定有 started_at」，避免前端「开始时间」空列。COALESCE 守卫不会覆盖已有值。
-	query := `WITH failed AS (
+	rows, err := r.pool.Query(ctx, query, rpcCutoff, onlineCutoff, tcCutoff)
+	if err != nil {
+		return StaleFailures{}, fmt.Errorf("fail stale sub-tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var result StaleFailures
+	for rows.Next() {
+		var taskID, subTaskID uuid.UUID
+		var deviceSN sql.NullString
+		if err := rows.Scan(&taskID, &subTaskID, &deviceSN); err != nil {
+			return StaleFailures{}, fmt.Errorf("scan stale sub-task: %w", err)
+		}
+		result.Add(taskID, subTaskID, deviceSN.String)
+	}
+	if err := rows.Err(); err != nil {
+		return StaleFailures{}, fmt.Errorf("fail stale sub-tasks rows: %w", err)
+	}
+	return result, nil
+}
+
+func buildFailStaleSubTasksSQL() string {
+	return `WITH failed AS (
 		UPDATE upgrade_sub_tasks ust
 		SET status = 'failed', error_message = CASE
-		    WHEN ust.status = 'downloading' THEN 'Timed out waiting for RPC response from device.'
+		    WHEN ust.status = 'downloading' THEN 'Download response timed out: no DownloadResponse from device.'
 		    WHEN ust.status = 'uploading'   THEN 'Timed out waiting for upload / TransferComplete from device.'
 		    WHEN ust.status = 'suspended'   THEN 'Timed out waiting for device to come online.'
 		    ELSE                                 'Timed out waiting for TransferComplete from device.'
+		END, failure_reason = CASE
+		    WHEN ust.status = 'downloading' THEN 'DOWNLOAD_TIMEOUT'
+		    ELSE                                 'TASK_TIMEOUT'
 		END, started_at = COALESCE(ust.started_at, NOW()), completed_at = NOW(), updated_at = NOW()
 		FROM upgrade_tasks ut
 		WHERE ust.task_id = ut.id
@@ -593,32 +618,12 @@ func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeou
 		    OR (ust.status = 'suspended'  AND ust.updated_at < $2)
 		    OR (ust.status NOT IN ('completed', 'failed', 'terminated', 'downloading', 'suspended') AND ust.updated_at < $3)
 		  )
-		RETURNING ust.task_id
-	)
-	SELECT task_id, COUNT(*)::bigint AS cnt
-	FROM failed
-	GROUP BY task_id`
-
-	rows, err := r.pool.Query(ctx, query, rpcCutoff, onlineCutoff, tcCutoff)
-	if err != nil {
-		return nil, fmt.Errorf("fail stale sub-tasks: %w", err)
-	}
-	defer rows.Close()
-
-	result := make(map[uuid.UUID]int64)
-	for rows.Next() {
-		var taskID uuid.UUID
-		var cnt int64
-		if err := rows.Scan(&taskID, &cnt); err != nil {
-			return nil, fmt.Errorf("scan stale task counts: %w", err)
-		}
-		result[taskID] = cnt
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("fail stale sub-tasks rows: %w", err)
-	}
-	return result, nil
+			RETURNING ust.task_id, ust.id, ust.device_sn
+		)
+		SELECT task_id, id, device_sn
+		FROM failed`
 }
+
 // ListAll returns sub-tasks across all main tasks, JOINing upgrade_tasks for task_name.
 func (r *PgSubTaskRepository) ListAll(ctx context.Context, filter AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
 	cols := append([]string{"ust." + subTaskColumns[0]}, subTaskColumns[1:]...)
@@ -808,10 +813,11 @@ func (r *PgSubTaskRepository) UpdateDestVersionByID(ctx context.Context, id uuid
 	return nil
 }
 
-// UpdateFailureReasonByTask sets failure_reason for all failed sub-tasks under a main task.
+// UpdateFailureReasonByTask fills failure_reason for failed sub-tasks under a main task.
+// Existing codes are preserved because FailStale may already have written a more specific reason.
 func (r *PgSubTaskRepository) UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code FailureCode) error {
 	query, args, err := storage.Psql.Update("upgrade_sub_tasks").
-		Set("failure_reason", string(code)).
+		Set("failure_reason", sq.Expr("COALESCE(NULLIF(failure_reason, ''), ?)", string(code))).
 		Where(sq.And{
 			sq.Eq{"task_id": taskID},
 			sq.Eq{"status": UpgradeFailed},

@@ -33,6 +33,35 @@ type fakePolicyGetter struct {
 	err    error
 }
 
+type deadlineRecordingResponseWriter struct {
+	*httptest.ResponseRecorder
+	readDeadlines  []time.Time
+	writeDeadlines []time.Time
+}
+
+func (w *deadlineRecordingResponseWriter) SetReadDeadline(t time.Time) error {
+	w.readDeadlines = append(w.readDeadlines, t)
+	return nil
+}
+
+func (w *deadlineRecordingResponseWriter) SetWriteDeadline(t time.Time) error {
+	w.writeDeadlines = append(w.writeDeadlines, t)
+	return nil
+}
+
+func TestServeHTTP_ClearsDeadlinesForLargeFileUploads(t *testing.T) {
+	h := &Handler{logger: zap.NewNop()}
+	req := httptest.NewRequest(http.MethodPost, "/smallcell/FileUploadService", strings.NewReader("payload"))
+	rec := &deadlineRecordingResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+
+	h.ServeHTTP(rec, req)
+
+	require.NotEmpty(t, rec.readDeadlines)
+	require.True(t, rec.readDeadlines[0].IsZero())
+	require.NotEmpty(t, rec.writeDeadlines)
+	require.True(t, rec.writeDeadlines[0].IsZero())
+}
+
 func (f *fakePolicyGetter) Get(_ context.Context) (*backup.BackupPolicy, error) {
 	return f.policy, f.err
 }
@@ -597,6 +626,7 @@ func TestCheckPMUploadDuplicate_EmptySNNeverSkips(t *testing.T) {
 	assert.False(t, h.checkPMUploadDuplicate(context.Background(), "", "f.xml"),
 		"empty device_sn can't form a reliable dedup key, must fail open")
 }
+
 // fakeBackpressureGate 让测试可以精确控制 Acquire() 是否放行，不依赖真实
 // /proc/pressure/io 或磁盘水位。
 type fakeBackpressureGate struct {
@@ -610,7 +640,7 @@ func (f *fakeBackpressureGate) Acquire() (bool, string) {
 	}
 	return false, f.reason
 }
-func (f *fakeBackpressureGate) Release()               {}
+func (f *fakeBackpressureGate) Release()              {}
 func (f *fakeBackpressureGate) RecordRejected(string) {}
 
 // TestServeHTTP_PMUpload_BackpressureRejectionDoesNotPoisonDedup 是 2026-07-20

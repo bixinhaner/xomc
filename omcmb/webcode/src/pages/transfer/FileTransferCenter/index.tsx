@@ -89,7 +89,7 @@ import {
   renderTaskStatus,
 } from '../shared.render';
 import { resolveAutoSelectedCategory } from './categorySelection';
-import { normalizeFailureReasonCode } from './failureReason';
+import { formatFailureReasonDisplay } from './failureReason';
 import { resolveTargetFileDisplay } from './targetFileDisplay';
 import {
   resolveTaskTypeFilterValue,
@@ -628,10 +628,7 @@ export default function FileTransferCenter() {
     width: 260,
     render: (value: string, record: UnifiedFileTransferDeviceItem) => {
       if (!value) return '-';
-      // 终止任务的历史兜底值统一归一到 code，由 i18n 包负责各语言展示。
-      const codeOrRaw = normalizeFailureReasonCode(value);
-      const i18nLabel = t(`software.failureCode.${codeOrRaw}` as Parameters<typeof t>[0]);
-      const display = i18nLabel && i18nLabel !== `software.failureCode.${codeOrRaw}` ? i18nLabel : value;
+      const { display } = formatFailureReasonDisplay(value, t);
       // 设备厂商原始 fault（FaultCode + FaultString）放 Tooltip 里——i18n label 只看到统一
       // 错误码描述，hover 后能拿到设备端原文（如 "FaultCode: 0, FaultString: httpUpload OM
       // Http Put Upload stat file error"），方便厂商侧排查。
@@ -2232,14 +2229,17 @@ function TaskDetailDevicesPanel({ taskId }: { taskId: string }) {
       dataIndex: 'failureReason',
       key: 'failureReason',
       ellipsis: true,
-      render: (reason: string | undefined, record) =>
-        reason ? (
+      render: (reason: string | undefined, record) => {
+        if (!reason) {
+          return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+        }
+        const { display } = formatFailureReasonDisplay(reason, t);
+        return (
           <Tooltip title={record.failureDetail || reason}>
-            <Text type="danger" style={{ fontSize: 12 }}>{reason}</Text>
+            <Text type="danger" style={{ fontSize: 12 }}>{display}</Text>
           </Tooltip>
-        ) : (
-          <Text type="secondary" style={{ fontSize: 12 }}>-</Text>
-        ),
+        );
+      },
     },
   ];
 

@@ -148,8 +148,8 @@ func (m *swHSubTaskRepo) BatchCreate(_ context.Context, tasks []*UpgradeSubTask)
 	}
 	return nil
 }
-func (m *swHSubTaskRepo) FailStale(_ context.Context, _ StaleTimeouts) (map[uuid.UUID]int64, error) {
-	return nil, nil
+func (m *swHSubTaskRepo) FailStale(_ context.Context, _ StaleTimeouts) (StaleFailures, error) {
+	return StaleFailures{}, nil
 }
 func (m *swHSubTaskRepo) DeleteByTaskID(_ context.Context, _ uuid.UUID) error { return nil }
 

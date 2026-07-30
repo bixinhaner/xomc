@@ -5258,7 +5258,7 @@ const messages: Record<string, string> = {
   'software.failureCode.DEVICE_LOCKED':      'Task cannot start: device is already running another task',
   'software.failureCode.DEVICE_OFFLINE':     'Task cannot start: device offline',
   'software.failureCode.COMMAND_PUSH_FAILED': 'Task cannot start: failed to push command to device',
-  'software.failureCode.DOWNLOAD_TIMEOUT':    'Download did not start: no DownloadResponse from device',
+  'software.failureCode.DOWNLOAD_TIMEOUT':    'Download response timed out: no DownloadResponse from device',
   'software.failureCode.DOWNLOAD_FILE_ERROR': 'Download failed: target file not found',
   'software.failureCode.DOWNLOAD_FAULT':      'Download failed: device rejected the Download request',
   'software.failureCode.UPLOAD_FAULT':        'Upload failed: device rejected the Upload / SetParameterValues request',

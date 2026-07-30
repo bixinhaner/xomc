@@ -5286,7 +5286,7 @@ const messages: Record<string, string> = {
   'software.failureCode.DEVICE_LOCKED':      '任务无法启动，设备已在其他任务中运行',
   'software.failureCode.DEVICE_OFFLINE':     '任务无法启动，设备离线',
   'software.failureCode.COMMAND_PUSH_FAILED': '任务无法启动，下发命令失败',
-  'software.failureCode.DOWNLOAD_TIMEOUT':    '下载未启动，未收到设备 DownloadResponse',
+  'software.failureCode.DOWNLOAD_TIMEOUT':    '下载响应超时，未收到设备 DownloadResponse',
   'software.failureCode.DOWNLOAD_FILE_ERROR': '下载失败，找不到目标文件',
   'software.failureCode.DOWNLOAD_FAULT':      '下载失败，设备拒绝 Download 请求',
   'software.failureCode.UPLOAD_FAULT':        '上传失败，设备拒绝 Upload / SetParameterValues 请求',
