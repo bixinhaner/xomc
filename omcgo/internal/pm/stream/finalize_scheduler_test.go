@@ -149,6 +149,25 @@ func TestFinalizeSchedulerRunCycleKeepsFixedWorkerBoundAndRefills(t *testing.T) 
 	}
 }
 
+func TestFinalizeSchedulerClaimsBacklogInBoundedBatches(t *testing.T) {
+	deviceVersion := uuid.MustParse("11000000-0000-4000-8000-000000000011")
+	repo := newMemoryFinalizeRepository(
+		finalizeTestWindows(deviceVersion, GranularityHourly, 64)...,
+	)
+	scanner := newTestTimeoutScanner(repo, deviceVersion, 32, func(
+		context.Context, WindowKey, CloseReason, uuid.UUID,
+	) error {
+		return nil
+	})
+
+	if err := scanner.runOnce(context.Background()); err != nil {
+		t.Fatalf("run batched finalize scheduler: %v", err)
+	}
+	if got := repo.claimCallCount(); got > 20 {
+		t.Fatalf("claim SQL calls = %d, want <= 20 for 64 windows with 32 workers", got)
+	}
+}
+
 func TestFinalizeSchedulerPoisonWindowDoesNotStopHealthyBacklogAcrossQueues(t *testing.T) {
 	deviceVersion := uuid.MustParse("18000000-0000-4000-8000-000000000018")
 	otherVersion := uuid.MustParse("19000000-0000-4000-8000-000000000019")
@@ -466,9 +485,10 @@ type memoryFinalizeWindow struct {
 }
 
 type memoryFinalizeRepository struct {
-	mu      sync.Mutex
-	windows []memoryFinalizeWindow
-	now     time.Time
+	mu            sync.Mutex
+	windows       []memoryFinalizeWindow
+	now           time.Time
+	claimDueCalls int
 }
 
 func newMemoryFinalizeRepository(records ...WindowRecord) *memoryFinalizeRepository {
@@ -500,6 +520,7 @@ func (r *memoryFinalizeRepository) claimDue(
 ) ([]WindowRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.claimDueCalls++
 	now := r.currentTimeLocked()
 	result := make([]WindowRecord, 0, limit)
 	for uint64(len(result)) < limit {
@@ -530,6 +551,12 @@ func (r *memoryFinalizeRepository) claimDue(
 		result = append(result, r.windows[selected].record)
 	}
 	return result, nil
+}
+
+func (r *memoryFinalizeRepository) claimCallCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.claimDueCalls
 }
 
 func (r *memoryFinalizeRepository) CompleteClaim(
