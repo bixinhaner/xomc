@@ -131,6 +131,13 @@ type CounterWhitelist interface {
 	LookupCounters(ctx context.Context, deviceSN string) (map[string]CounterMeta, error)
 }
 
+// KnownReportKeyLookup 返回某制式全局指标库中已经登记或明确处置的 Counter report_key。
+// 它用于区分“库里存在但未绑定当前产品”和“全局库也不存在”，避免把前者误报成
+// 厂家上报名漂移。返回集合只读；真实实现应缓存结果，不能按 PM 文件逐次查询主库。
+type KnownReportKeyLookup interface {
+	LookupKnownReportKeys(ctx context.Context, technology string) (map[string]struct{}, error)
+}
+
 // EnabledIndicatorLookup 读取当前制式下已启用的指标编号集。
 //
 // 真实实现必须走主库控制面元数据（enabled_pm_indicators_<tech>），不能走时序库。
@@ -168,6 +175,7 @@ type PMCollector struct {
 	deviceLookup        DeviceLookup
 	fileMarkerLookup    FileMarkerLookup
 	counterWhitelist    CounterWhitelist
+	knownReportKeys     KnownReportKeyLookup
 	enabledIndicators   EnabledIndicatorLookup
 	quarantineStore     QuarantineStore
 	numberProcessLookup NumberProcessLookup
@@ -226,6 +234,12 @@ func (c *PMCollector) SetFileMarkerLookup(lookup FileMarkerLookup) {
 // counter。Nil-safe — 未设置时 collector 不过滤，行为退化到注入前。
 func (c *PMCollector) SetCounterWhitelist(w CounterWhitelist) {
 	c.counterWhitelist = w
+}
+
+// SetKnownReportKeyLookup wires the global report-key catalog used to classify
+// routed-whitelist misses. Nil keeps the conservative legacy classification.
+func (c *PMCollector) SetKnownReportKeyLookup(lookup KnownReportKeyLookup) {
+	c.knownReportKeys = lookup
 }
 
 // SetEnabledIndicatorLookup wires the enabled-indicator filter for 15min raw ingest.
@@ -463,8 +477,8 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	// 过滤逻辑 fail-open：lookup 失败 / 空白名单时跳过过滤，避免在本阶段误删全部 counter。
 	// #866 后续 normalizeResults 会校验每条待写结果的 Unit/StatisType，缺失元数据时失败并暴露。
 	var allow map[string]CounterMeta
-	content.Counters, allow, content.whitelistMissValues = c.filterByWhitelistWithAllow(
-		ctx, payload.DeviceSN, content.Counters,
+	content.Counters, allow, content.whitelistMissValues, content.knownDisabledValues = c.filterByWhitelistWithAllow(
+		ctx, payload.DeviceSN, payload.Technology, content.Counters,
 	)
 
 	// PM 入库统一走 copy-direct 原子写路径（pm_files 标记 + counter + 内存算出的 KPI 单事务 plain
@@ -560,7 +574,7 @@ func (c *PMCollector) ingestViaCopy(
 		kpis = filterKPIsByEnabled(kpis, enabled)
 		enabledAllow = filterAllowByEnabled(allow, enabled)
 		if droppedCounters, droppedKPIs := beforeCounters-len(content.Counters), beforeKPIs-len(kpis); droppedCounters > 0 || droppedKPIs > 0 {
-			content.knownDisabledValues = droppedCounters
+			content.knownDisabledValues += droppedCounters
 			c.logger.Info("filtered disabled PM indicators before 15min ingest",
 				zap.String("device_sn", payload.DeviceSN),
 				zap.String("carrier", payload.Carrier),
@@ -759,16 +773,16 @@ func applyPayloadIdentity(counters []model.PMCounter, oui, sn string) {
 // fail-open：whitelist 未注入 / 查询失败 / 空集合 → 返回原 counters 不过滤。
 // #866 接入结果值规范化后，最终写入前仍会要求每条结果具备 Unit/StatisType。
 //
-// 配置外 counter 缺少完整指标元数据，不能进入结果规范化和写入；本阶段剔除并记录
-// omc_pm_whitelist_miss_values_total，让厂家上报名漂移成为可告警信号。
-// 未命中项不会继续进入 enabled filter，因此不会被重复计为 known_disabled。
+// 当前产品路由外的 counter 缺少完整指标元数据，不能进入结果规范化和写入。本阶段
+// 将它们剔除并按全局目录分类：全局已知项计 known_disabled，全局未知项才计
+// whitelist_miss。未命中项不会继续进入 enabled filter，因此两类不会重复计数。
 func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) []model.PMCounter {
-	out, _, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, counters)
+	out, _, _, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, technology, counters)
 	return out
 }
 
 func (c *PMCollector) filterAndFillByWhitelist(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) []model.PMCounter {
-	filtered, allow, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, counters)
+	filtered, allow, _, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, technology, counters)
 	if len(allow) == 0 {
 		return filtered
 	}
@@ -778,25 +792,39 @@ func (c *PMCollector) filterAndFillByWhitelist(ctx context.Context, deviceSN, ca
 func (c *PMCollector) filterByWhitelistWithAllow(
 	ctx context.Context,
 	deviceSN string,
+	technology string,
 	counters []model.PMCounter,
-) ([]model.PMCounter, map[string]CounterMeta, int) {
+) ([]model.PMCounter, map[string]CounterMeta, int, int) {
 	if c.counterWhitelist == nil || len(counters) == 0 {
-		return counters, nil, 0
+		return counters, nil, 0, 0
 	}
 	allow, err := c.counterWhitelist.LookupCounters(ctx, deviceSN)
 	if err != nil {
 		c.logger.Warn("counter whitelist lookup failed, skip filter",
 			zap.String("device_sn", deviceSN), zap.Error(err))
-		return counters, nil, 0
+		return counters, nil, 0, 0
 	}
 	if len(allow) == 0 {
 		c.logger.Warn("counter whitelist empty, skip filter (likely cache warming / product not matched)",
 			zap.String("device_sn", deviceSN))
-		return counters, nil, 0
+		return counters, nil, 0, 0
+	}
+
+	var known map[string]struct{}
+	if c.knownReportKeys != nil {
+		known, err = c.knownReportKeys.LookupKnownReportKeys(ctx, technology)
+		if err != nil {
+			c.logger.Warn("known report-key catalog lookup failed; classify unrouted keys as whitelist misses",
+				zap.String("device_sn", deviceSN),
+				zap.String("technology", technology),
+				zap.Error(err))
+			known = nil
+		}
 	}
 
 	kept := counters[:0] // 原地 reslice 复用 slice
 	unknown := 0
+	knownDisabled := 0
 	for _, ctr := range counters {
 		// PM-P2：按 report_key（=上报名 ctr.CounterName）命中白名单。命中后
 		// 把 CounterName 改写成指标编号（落库即编号化的唯一翻译入口），并填 statis_type。
@@ -813,17 +841,22 @@ func (c *PMCollector) filterByWhitelistWithAllow(
 			ctr.Unit = meta.Unit               // #866：填充单位元数据，入库前规范化 result value
 			kept = append(kept, ctr)
 		} else {
-			unknown++
+			if _, ok := known[ctr.CounterName]; ok {
+				knownDisabled++
+			} else {
+				unknown++
+			}
 		}
 	}
-	if unknown > 0 {
-		c.logger.Info("filtered PM report keys not registered in routed indicator library",
+	if unknown > 0 || knownDisabled > 0 {
+		c.logger.Info("classified PM report keys outside current product route",
 			zap.String("device_sn", deviceSN),
 			zap.Int("kept", len(kept)),
 			zap.Int("whitelist_miss_values", unknown),
+			zap.Int("known_but_unrouted_values", knownDisabled),
 			zap.Int("whitelist_size", len(allow)))
 	}
-	return kept, allow, unknown
+	return kept, allow, unknown, knownDisabled
 }
 
 type missingCounterAnchor struct {

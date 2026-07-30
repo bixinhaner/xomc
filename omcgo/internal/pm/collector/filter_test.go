@@ -30,6 +30,15 @@ func (f *fakeWhitelist) LookupCounters(_ context.Context, _ string) (map[string]
 	return f.set, f.err
 }
 
+type fakeKnownReportKeys struct {
+	set map[string]struct{}
+	err error
+}
+
+func (f *fakeKnownReportKeys) LookupKnownReportKeys(_ context.Context, _ string) (map[string]struct{}, error) {
+	return f.set, f.err
+}
+
 func collectorWithWhitelist(w CounterWhitelist) *PMCollector {
 	return &PMCollector{
 		counterWhitelist: w,
@@ -171,14 +180,37 @@ func TestFilterByWhitelist_ReportsMissWithoutIncrementingBeforeCommit(t *testing
 
 	// 命中 1 个，发现 2 个配置外指标。
 	in := sample("L.Cell.Avail", "MR.RIPPRB", "MR.RECEIVEDIPOWER")
-	out, _, unknown := c.filterByWhitelistWithAllow(context.Background(), "SN-1", in)
+	out, _, unknown, knownDisabled := c.filterByWhitelistWithAllow(context.Background(), "SN-1", "lte", in)
 	require.Len(t, out, 1)
 	require.Equal(t, 2, unknown)
+	require.Zero(t, knownDisabled)
 
 	misses := testutil.ToFloat64(c.metrics.WhitelistMissValuesTotal.WithLabelValues("cmcc", "lte"))
 	disabled := testutil.ToFloat64(c.metrics.KnownDisabledValuesTotal.WithLabelValues("cmcc", "lte"))
 	assert.Zero(t, misses)
 	assert.Zero(t, disabled)
+}
+
+func TestFilterByWhitelist_ClassifiesKnownButUnroutedWithoutDuplicateMiss(t *testing.T) {
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]CounterMeta{
+		"L.Cell.Avail": {IndicatorID: "C000010001", Unit: "%", StatisType: "avg"},
+	}})
+	c.SetKnownReportKeyLookup(&fakeKnownReportKeys{set: map[string]struct{}{
+		"L.Cell.Avail": {},
+		"Cqi.00":       {},
+	}})
+
+	out, _, misses, knownDisabled := c.filterByWhitelistWithAllow(
+		context.Background(),
+		"SN-1",
+		"lte",
+		sample("L.Cell.Avail", "Cqi.00", "VENDOR.New.Counter"),
+	)
+
+	require.Len(t, out, 1)
+	assert.Equal(t, "C000010001", out[0].CounterName)
+	assert.Equal(t, 1, misses, "只有全局指标库也不存在的上报名才是 whitelist_miss")
+	assert.Equal(t, 1, knownDisabled, "全局已知但未进入产品路由的上报名归入 known_but_disabled")
 }
 
 func TestFilterAndFillByWhitelist_AddsNullRowsForSupportedMissingCounters(t *testing.T) {
