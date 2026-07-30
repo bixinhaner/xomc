@@ -10,6 +10,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -164,26 +165,33 @@ type CopyIngestor interface {
 // is registered directly, preserving legacy behaviour for tests / single-process
 // deployments without DLQ infra.
 type PMCollector struct {
-	minioClient         *minio.Client
-	bucket              string
-	parser              *PMXMLParser
-	kpiEngine           *kpi.KPIEngine
-	fileStore           pm.PMFileStore
-	eventBus            event.EventBus
-	metrics             *pm.PMMetrics
-	runner              runner.Wrapper
-	deviceLookup        DeviceLookup
-	fileMarkerLookup    FileMarkerLookup
-	counterWhitelist    CounterWhitelist
-	knownReportKeys     KnownReportKeyLookup
-	enabledIndicators   EnabledIndicatorLookup
-	quarantineStore     QuarantineStore
-	numberProcessLookup NumberProcessLookup
-	copyIngestor        CopyIngestor
-	archiver            rawArchiver
-	concurrency         int
-	logger              *zap.Logger
+	minioClient          *minio.Client
+	bucket               string
+	parser               *PMXMLParser
+	kpiEngine            *kpi.KPIEngine
+	fileStore            pm.PMFileStore
+	eventBus             event.EventBus
+	metrics              *pm.PMMetrics
+	runner               runner.Wrapper
+	deviceLookup         DeviceLookup
+	fileMarkerLookup     FileMarkerLookup
+	counterWhitelist     CounterWhitelist
+	knownReportKeys      KnownReportKeyLookup
+	enabledIndicators    EnabledIndicatorLookup
+	quarantineStore      QuarantineStore
+	numberProcessLookup  NumberProcessLookup
+	copyIngestor         CopyIngestor
+	archiver             rawArchiver
+	concurrency          int
+	logger               *zap.Logger
+	diagnosticMu         sync.Mutex
+	lastWhitelistMissLog map[string]time.Time
 }
+
+const (
+	maxWhitelistMissSample   = 8
+	whitelistMissLogInterval = time.Minute
+)
 
 // NewPMCollector creates a new PM collector.
 func NewPMCollector(
@@ -477,7 +485,7 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	// 过滤逻辑 fail-open：lookup 失败 / 空白名单时跳过过滤，避免在本阶段误删全部 counter。
 	// #866 后续 normalizeResults 会校验每条待写结果的 Unit/StatisType，缺失元数据时失败并暴露。
 	var allow map[string]CounterMeta
-	content.Counters, allow, content.whitelistMissValues, content.knownDisabledValues = c.filterByWhitelistWithAllow(
+	content.Counters, allow, content.whitelistMissValues, content.knownDisabledValues, content.whitelistMissSample = c.filterByWhitelistWithAllow(
 		ctx, payload.DeviceSN, payload.Technology, content.Counters,
 	)
 
@@ -636,6 +644,15 @@ func (c *PMCollector) ingestViaCopy(
 		// 异步有界并发，不阻塞 ack；nil-safe。压成功后经 onTerminal 标记 pm_files.raw_compressed=true。
 		c.archiver.Schedule(c.bucket, payload.MinIOPath, c.markRawCompressed)
 	}
+	if ingested && content.whitelistMissValues > 0 &&
+		c.shouldLogWhitelistMiss(payload.Carrier, payload.Technology, time.Now()) {
+		c.logger.Warn("PM report keys missing from indicator library",
+			zap.String("device_sn", payload.DeviceSN),
+			zap.String("carrier", payload.Carrier),
+			zap.String("technology", payload.Technology),
+			zap.Int("whitelist_miss_values", content.whitelistMissValues),
+			zap.Strings("report_key_sample", content.whitelistMissSample))
+	}
 	if ingested && c.metrics != nil {
 		if content.whitelistMissValues > 0 {
 			c.metrics.WhitelistMissValuesTotal.
@@ -777,12 +794,12 @@ func applyPayloadIdentity(counters []model.PMCounter, oui, sn string) {
 // 将它们剔除并按全局目录分类：全局已知项计 known_disabled，全局未知项才计
 // whitelist_miss。未命中项不会继续进入 enabled filter，因此两类不会重复计数。
 func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) []model.PMCounter {
-	out, _, _, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, technology, counters)
+	out, _, _, _, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, technology, counters)
 	return out
 }
 
 func (c *PMCollector) filterAndFillByWhitelist(ctx context.Context, deviceSN, carrier, technology string, counters []model.PMCounter) []model.PMCounter {
-	filtered, allow, _, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, technology, counters)
+	filtered, allow, _, _, _ := c.filterByWhitelistWithAllow(ctx, deviceSN, technology, counters)
 	if len(allow) == 0 {
 		return filtered
 	}
@@ -794,20 +811,20 @@ func (c *PMCollector) filterByWhitelistWithAllow(
 	deviceSN string,
 	technology string,
 	counters []model.PMCounter,
-) ([]model.PMCounter, map[string]CounterMeta, int, int) {
+) ([]model.PMCounter, map[string]CounterMeta, int, int, []string) {
 	if c.counterWhitelist == nil || len(counters) == 0 {
-		return counters, nil, 0, 0
+		return counters, nil, 0, 0, nil
 	}
 	allow, err := c.counterWhitelist.LookupCounters(ctx, deviceSN)
 	if err != nil {
 		c.logger.Warn("counter whitelist lookup failed, skip filter",
 			zap.String("device_sn", deviceSN), zap.Error(err))
-		return counters, nil, 0, 0
+		return counters, nil, 0, 0, nil
 	}
 	if len(allow) == 0 {
 		c.logger.Warn("counter whitelist empty, skip filter (likely cache warming / product not matched)",
 			zap.String("device_sn", deviceSN))
-		return counters, nil, 0, 0
+		return counters, nil, 0, 0, nil
 	}
 
 	var known map[string]struct{}
@@ -825,6 +842,8 @@ func (c *PMCollector) filterByWhitelistWithAllow(
 	kept := counters[:0] // 原地 reslice 复用 slice
 	unknown := 0
 	knownDisabled := 0
+	var unknownSample []string
+	unknownSampleSet := make(map[string]struct{}, maxWhitelistMissSample)
 	for _, ctr := range counters {
 		// PM-P2：按 report_key（=上报名 ctr.CounterName）命中白名单。命中后
 		// 把 CounterName 改写成指标编号（落库即编号化的唯一翻译入口），并填 statis_type。
@@ -845,18 +864,30 @@ func (c *PMCollector) filterByWhitelistWithAllow(
 				knownDisabled++
 			} else {
 				unknown++
+				if len(unknownSample) < maxWhitelistMissSample {
+					if _, duplicate := unknownSampleSet[ctr.CounterName]; !duplicate {
+						unknownSampleSet[ctr.CounterName] = struct{}{}
+						unknownSample = append(unknownSample, ctr.CounterName)
+					}
+				}
 			}
 		}
 	}
-	if unknown > 0 || knownDisabled > 0 {
-		c.logger.Info("classified PM report keys outside current product route",
-			zap.String("device_sn", deviceSN),
-			zap.Int("kept", len(kept)),
-			zap.Int("whitelist_miss_values", unknown),
-			zap.Int("known_but_unrouted_values", knownDisabled),
-			zap.Int("whitelist_size", len(allow)))
+	return kept, allow, unknown, knownDisabled, unknownSample
+}
+
+func (c *PMCollector) shouldLogWhitelistMiss(carrier, technology string, now time.Time) bool {
+	key := carrier + "\x00" + technology
+	c.diagnosticMu.Lock()
+	defer c.diagnosticMu.Unlock()
+	if c.lastWhitelistMissLog == nil {
+		c.lastWhitelistMissLog = make(map[string]time.Time)
 	}
-	return kept, allow, unknown, knownDisabled
+	if last, ok := c.lastWhitelistMissLog[key]; ok && now.Sub(last) < whitelistMissLogInterval {
+		return false
+	}
+	c.lastWhitelistMissLog[key] = now
+	return true
 }
 
 type missingCounterAnchor struct {
