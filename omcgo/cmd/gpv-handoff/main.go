@@ -40,9 +40,30 @@ func main() {
 	}
 }
 
+// handoffConfig deliberately contains only the configuration required to
+// create the GPV durable. The handoff command runs before the new app starts
+// and must not depend on unrelated application secrets or backing services.
+type handoffConfig struct {
+	NATS      appconfig.NATSConfig `mapstructure:"nats"`
+	Provision struct {
+		GPVResponse appconfig.GPVResponseConsumerConfig `mapstructure:"gpv_response"`
+	} `mapstructure:"provision"`
+}
+
+func loadHandoffConfig(path string) (handoffConfig, error) {
+	var config handoffConfig
+	if err := appconfig.Load(path, &config); err != nil {
+		return handoffConfig{}, err
+	}
+	if strings.TrimSpace(config.NATS.URL) == "" {
+		return handoffConfig{}, fmt.Errorf("nats.url must not be empty")
+	}
+	return config, nil
+}
+
 func run(ctx context.Context, configPath, sourceConsumer string, freshInstall bool) error {
-	var config appconfig.AppConfig
-	if err := appconfig.Load(configPath, &config); err != nil {
+	config, err := loadHandoffConfig(configPath)
+	if err != nil {
 		return fmt.Errorf("load app config: %w", err)
 	}
 	gpv := config.Provision.GPVResponse.Defaults()
