@@ -39,6 +39,7 @@ import { makeSeqColumn } from '@/components/Table/seqColumn';
 import SearchInput from '@/components/SearchInput';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { useT } from '@/hooks/useT';
+import { getI18nKeyByBizCode } from '@core/i18n/bizCodeMessages';
 import { nextPageOnPaginationChange } from './pagination';
 
 export default function StandardParamsPage() {
@@ -191,8 +192,17 @@ export default function StandardParamsPage() {
       setCreating(false);
       form.resetFields();
     } catch (e) {
-      const msg = (e as Error).message;
-      if (msg) message.error(msg);
+      const error = e as Error & {
+        bizCode?: number;
+        response?: { data?: { biz_code?: number; code?: number } };
+      };
+      const bizCode = error.bizCode ?? error.response?.data?.biz_code ?? error.response?.data?.code;
+      const i18nKey = getI18nKeyByBizCode(bizCode);
+      if (i18nKey === 'product.standardParams.pathExists') {
+        message.error(t(i18nKey, { path: form.getFieldValue('standardPath') }));
+      } else if (error.message) {
+        message.error(error.message);
+      }
     }
   };
 

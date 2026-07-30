@@ -7,12 +7,21 @@ describe('paramModelService.createStandard', () => {
   it('rejects an existing standard path instead of overwriting or duplicating it', async () => {
     const existing = mockStandardParams[0];
 
-    await expect(
+    const error = await paramModelService.createStandard({
+      ...existing,
+      access: existing.access === 'readOnly' ? 'readWrite' : 'readOnly',
+    }).catch((err: unknown) => err as Error & { bizCode?: number });
+
+    expect(error).toMatchObject({
+      bizCode: 2034,
+      message: `standard path "${existing.standardPath}" already exists; update the existing record instead`,
+    });
+    expect(
       paramModelService.createStandard({
         ...existing,
         access: existing.access === 'readOnly' ? 'readWrite' : 'readOnly',
       }),
-    ).rejects.toThrow(`参数 path "${existing.standardPath}" 已存在，只能在原有记录上修改`);
+    ).rejects.toMatchObject({ bizCode: 2034 });
 
     const result = await paramModelService.listStandard({ keyword: existing.standardPath });
     expect(result.items.filter((item) => item.standardPath === existing.standardPath)).toHaveLength(1);

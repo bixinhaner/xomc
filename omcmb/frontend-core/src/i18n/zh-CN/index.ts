@@ -7789,6 +7789,7 @@ const messages: Record<string, string> = {
   'product.products.resetSuccess': '已重置 {count} 条',
   'product.standardParams.editTitle': '编辑标准参数',
   'product.standardParams.newTitle': '新增标准参数',
+  'product.standardParams.pathExists': '参数 PATH「{path}」已存在，只能编辑原有记录',
   // -------------------------------------------------------------------------
   // Performance dashboard (PmDashboard) — i18n-dashboard
   // -------------------------------------------------------------------------
