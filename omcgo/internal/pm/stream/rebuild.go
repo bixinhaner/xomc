@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -304,6 +305,55 @@ func maintainRebuildLeases(
 	}
 }
 
+type rebuildActiveLeases struct {
+	mu   sync.Mutex
+	jobs map[int64]RebuildJob
+}
+
+func newRebuildActiveLeases(jobs []RebuildJob) *rebuildActiveLeases {
+	active := &rebuildActiveLeases{
+		jobs: make(map[int64]RebuildJob, len(jobs)),
+	}
+	for _, job := range jobs {
+		active.jobs[job.ID] = job
+	}
+	return active
+}
+
+func (active *rebuildActiveLeases) renew(
+	ctx context.Context,
+	renew func(context.Context, []RebuildJob) error,
+) error {
+	active.mu.Lock()
+	defer active.mu.Unlock()
+	if len(active.jobs) == 0 {
+		return nil
+	}
+	jobs := make([]RebuildJob, 0, len(active.jobs))
+	for _, job := range active.jobs {
+		jobs = append(jobs, job)
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].ID < jobs[j].ID
+	})
+	return renew(ctx, jobs)
+}
+
+// beginCompletion excludes one job from future batch renewals only after its
+// completion transaction has acquired the row lock. Holding this guard while
+// acquiring that lock prevents a concurrent renewal from observing a
+// half-completed job and treating it as lost ownership.
+func (active *rebuildActiveLeases) beginCompletion(jobID int64) func() {
+	active.mu.Lock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			delete(active.jobs, jobID)
+			active.mu.Unlock()
+		})
+	}
+}
+
 func (r *RebuildRepository) resetWindow(ctx context.Context, key WindowKey) (RebuildWindowState, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -375,6 +425,7 @@ func (r *RebuildRepository) finishAndEnqueueParents(
 	job RebuildJob,
 	snapshot *TaskSnapshot,
 	rebuildErr error,
+	onLocked func(),
 ) (bool, error) {
 	return completeRebuildAtomically(
 		ctx,
@@ -384,6 +435,7 @@ func (r *RebuildRepository) finishAndEnqueueParents(
 		job,
 		snapshot,
 		rebuildErr,
+		onLocked,
 	)
 }
 
@@ -393,6 +445,7 @@ func completeRebuildAtomically(
 	job RebuildJob,
 	snapshot *TaskSnapshot,
 	rebuildErr error,
+	onLocked ...func(),
 ) (bool, error) {
 	tx, err := begin(ctx)
 	if err != nil {
@@ -418,6 +471,9 @@ func completeRebuildAtomically(
 			return false, fmt.Errorf("PM aggregation rebuild lease ownership lost before finish")
 		}
 		return false, fmt.Errorf("lock PM aggregation rebuild completion: %w", err)
+	}
+	if len(onLocked) > 0 && onLocked[0] != nil {
+		onLocked[0]()
 	}
 	if currentGeneration < job.RequestGeneration {
 		return false, fmt.Errorf(
@@ -654,6 +710,7 @@ func (r *Rebuilder) runOnce(ctx context.Context) error {
 		r.metrics.RebuildBatchesTotal.Inc()
 		r.metrics.RebuildJobsPerBatch.Observe(float64(len(jobs)))
 	}
+	activeLeases := newRebuildActiveLeases(jobs)
 	batchCtx, cancelBatch := context.WithCancel(ctx)
 	heartbeatDone := make(chan error, 1)
 	go func() {
@@ -663,23 +720,22 @@ func (r *Rebuilder) runOnce(ctx context.Context) error {
 			batchCtx,
 			ticker.C,
 			func(ctx context.Context) error {
-				return r.repo.renewLeases(ctx, jobs)
+				return activeLeases.renew(ctx, r.repo.renewLeases)
 			},
 			cancelBatch,
 		)
 	}()
 	results := r.rebuildClaimedBatch(batchCtx, jobs)
-	cancelBatch()
-	heartbeatErr := <-heartbeatDone
 	var batchErr error
 	for _, job := range jobs {
 		rebuildErr := results[job.ID]
-		if heartbeatErr != nil {
-			rebuildErr = errors.Join(rebuildErr, heartbeatErr)
-		}
+		releaseLeaseGuard := activeLeases.beginCompletion(job.ID)
 		stable, finishErr := r.repo.finishAndEnqueueParents(
-			ctx, job, r.recovery.snapshot.Current(), rebuildErr,
+			batchCtx, job, r.recovery.snapshot.Current(), rebuildErr,
+			releaseLeaseGuard,
 		)
+		// Release also covers begin/query failures before the row-lock callback.
+		releaseLeaseGuard()
 		rebuildErr = errors.Join(rebuildErr, finishErr)
 		if rebuildErr != nil {
 			if r.metrics != nil {
@@ -694,6 +750,8 @@ func (r *Rebuilder) runOnce(ctx context.Context) error {
 			).Inc()
 		}
 	}
+	cancelBatch()
+	batchErr = errors.Join(batchErr, <-heartbeatDone)
 	return batchErr
 }
 

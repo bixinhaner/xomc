@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -88,6 +90,74 @@ func TestRebuildLeaseHeartbeatIgnoresConcurrentShutdownCancellation(t *testing.T
 
 	if err != nil {
 		t.Fatalf("normal batch shutdown became a renewal failure: %v", err)
+	}
+}
+
+func TestRebuildLeaseSetKeepsTailAliveDuringHundredSlowCompletions(t *testing.T) {
+	const (
+		jobCount = 100
+		leaseTTL = 100 * time.Millisecond
+	)
+	owner := uuid.New()
+	jobs := make([]RebuildJob, jobCount)
+	deadlines := make(map[int64]time.Time, jobCount)
+	now := time.Now()
+	for index := range jobs {
+		jobs[index] = RebuildJob{ID: int64(index + 1), LeaseOwner: owner}
+		deadlines[jobs[index].ID] = now.Add(leaseTTL)
+	}
+	active := newRebuildActiveLeases(jobs)
+	var deadlineMu sync.Mutex
+	var renewCalls atomic.Int64
+	workCtx, cancelWork := context.WithCancel(context.Background())
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	done := make(chan error, 1)
+	go func() {
+		done <- maintainRebuildLeases(
+			workCtx,
+			ticker.C,
+			func(ctx context.Context) error {
+				return active.renew(ctx, func(_ context.Context, leased []RebuildJob) error {
+					renewCalls.Add(1)
+					deadlineMu.Lock()
+					defer deadlineMu.Unlock()
+					next := time.Now().Add(leaseTTL)
+					for _, job := range leased {
+						deadlines[job.ID] = next
+					}
+					return nil
+				})
+			},
+			cancelWork,
+		)
+	}()
+
+	tailID := jobs[len(jobs)-1].ID
+	for _, job := range jobs {
+		// Production holds this guard until SELECT ... FOR UPDATE has fenced
+		// the completing row, then removes only that row from future renewals.
+		release := active.beginCompletion(job.ID)
+		release()
+		time.Sleep(4 * time.Millisecond)
+
+		deadlineMu.Lock()
+		jobDeadline := deadlines[job.ID]
+		tailDeadline := deadlines[tailID]
+		deadlineMu.Unlock()
+		if !jobDeadline.After(time.Now()) {
+			t.Fatalf("job %d lease expired during slow completion", job.ID)
+		}
+		if job.ID != tailID && !tailDeadline.After(time.Now()) {
+			t.Fatalf("tail job lease expired while %d earlier jobs completed", job.ID)
+		}
+	}
+	cancelWork()
+	if err := <-done; err != nil {
+		t.Fatalf("lease heartbeat failed: %v", err)
+	}
+	if renewCalls.Load() < 20 {
+		t.Fatalf("renewals stopped before completion tail: %d", renewCalls.Load())
 	}
 }
 
