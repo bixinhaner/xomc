@@ -2,9 +2,56 @@ package stream
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestFinalizationCoverageUsesClosedVersionSlotsForResultCompleteness(t *testing.T) {
+	windowStart := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	closedAt := windowStart.Add(16 * time.Hour)
+	version := &TaskVersionSnapshot{
+		EffectiveFrom: windowStart.Add(5 * time.Hour),
+		EffectiveTo:   &closedAt,
+	}
+	key := WindowKey{
+		Granularity: GranularityDaily,
+		Start:       windowStart,
+		End:         windowStart.Add(24 * time.Hour),
+	}
+	state := WindowState{
+		ExpectedSlots:       19,
+		ReceivedSlots:       11,
+		SourceExpectedSlots: 11,
+		SourceReceivedSlots: 11,
+	}
+
+	state, result := finalizationCoverageFor(key, version, state, time.UTC)
+
+	require.EqualValues(t, 11, state.ExpectedSlots)
+	require.EqualValues(t, 11, result.VersionExpectedSlots)
+	require.False(t, result.PeriodComplete)
+}
+
+func TestFinalizerUsesConfiguredLocationForDSTVersionBoundary(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	window, err := WindowFor(
+		time.Date(2026, 3, 2, 0, 0, 0, 0, location),
+		GranularityWeekly,
+		location,
+	)
+	require.NoError(t, err)
+	key := WindowKey{Granularity: GranularityWeekly, Start: window.Start, End: window.End}
+	version := &TaskVersionSnapshot{EffectiveFrom: key.End}
+	finalizer := NewFinalizer(nil, nil, nil).SetLocation(location)
+
+	state, _ := finalizer.finalizationCoverageFor(
+		key, version, WindowState{ExpectedSlots: 7},
+	)
+
+	require.EqualValues(t, 7, state.ExpectedSlots)
+}
 
 func TestBuildFinalizedMetricsCalculatesKPIFromAggregatedRawCounters(t *testing.T) {
 	base := ContributionValue{

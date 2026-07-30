@@ -27,10 +27,29 @@ type Finalizer struct {
 	metrics  *Metrics
 	slots    chan struct{}
 	snapshot *SnapshotStore
+	location *time.Location
+}
+
+type finalizationCoverage struct {
+	SourceExpectedSlots  int64
+	SourceReceivedSlots  int64
+	MissingSlots         int64
+	ChildrenComplete     bool
+	DataComplete         bool
+	VersionExpectedSlots int64
+	NaturalSlots         int64
+	PeriodComplete       bool
 }
 
 func (f *Finalizer) SetSnapshot(snapshot *SnapshotStore) *Finalizer {
 	f.snapshot = snapshot
+	return f
+}
+
+func (f *Finalizer) SetLocation(location *time.Location) *Finalizer {
+	if location != nil {
+		f.location = location
+	}
 	return f
 }
 
@@ -146,6 +165,7 @@ func (f *Finalizer) writeFinal(
 	if f.snapshot != nil && f.snapshot.Current() != nil {
 		version = f.snapshot.Current().ByVersion[key.TaskVersionID]
 	}
+	state, coverage := f.finalizationCoverageFor(key, version, state)
 	rollups, err := buildRollupPayloads(
 		key, reason, state, version, defaultRollupBatchValues,
 	)
@@ -156,31 +176,7 @@ func (f *Finalizer) writeFinal(
 	if err != nil {
 		return err
 	}
-	sourceExpected := state.SourceExpectedSlots
-	sourceReceived := state.SourceReceivedSlots
-	if sourceExpected == 0 {
-		sourceExpected = state.ExpectedSlots
-		sourceReceived = state.ReceivedSlots
-	}
-	childrenComplete := state.ReceivedSlots >= state.ExpectedSlots
-	missing := max64(0, sourceExpected-sourceReceived)
-	dataComplete := childrenComplete && missing == 0 &&
-		state.SourceIncompleteSlots == 0
-
-	claimSQL, claimArgs, err := storage.Psql.Update("pm_aggregation_windows").
-		Set("status", "finalizing").
-		Set("close_reason", string(reason)).
-		Set("received_slots", state.ReceivedSlots).
-		Set("source_expected_slots", sourceExpected).
-		Set("source_received_slots", sourceReceived).
-		Set("missing_slots", missing).
-		Set("children_complete", childrenComplete).
-		Set("source_incomplete_slots", state.SourceIncompleteSlots).
-		Set("data_complete", dataComplete).
-		Set("updated_at", time.Now().UTC()).
-		Where(windowKeyPredicate(key)).
-		Where(sq.Eq{"status": []string{"open", "failed", "finalizing", "rebuilding"}}).
-		ToSql()
+	claimSQL, claimArgs, err := finalizationClaimUpdate(key, reason, state, coverage, version).ToSql()
 	if err != nil {
 		return fmt.Errorf("build claim PM aggregation window SQL: %w", err)
 	}
@@ -211,10 +207,6 @@ func (f *Finalizer) writeFinal(
 		return fmt.Errorf("replace PM aggregation results: %w", err)
 	}
 
-	versionSliceComplete := dataComplete
-	periodComplete := dataComplete && versionCoversNaturalPeriod(version, key)
-	versionExpectedSlots := state.ExpectedSlots
-	naturalSlots := naturalExpectedSlots(version, key, state)
 	resultCount := 0
 	for start := 0; start < len(finalMetrics); start += finalResultBatchSize {
 		end := start + finalResultBatchSize
@@ -241,11 +233,11 @@ func (f *Finalizer) writeFinal(
 				definition.ObjectLDN, definition.DeviceOUI, definition.DeviceSN,
 				definition.Technology, metric.MetricID, definition.MetricPath,
 				metric.MetricType, string(metric.Operation), metric.Value,
-				metric.SampleCount, periodComplete && metric.FormulaComplete, missing,
+				metric.SampleCount, coverage.PeriodComplete && metric.FormulaComplete, coverage.MissingSlots,
 				revision, versionEffectiveFrom(version), versionEffectiveTo(version),
-				state.ReceivedSlots, naturalSlots, versionExpectedSlots, naturalSlots,
-				versionSliceComplete && metric.FormulaComplete,
-				periodComplete && metric.FormulaComplete,
+				state.ReceivedSlots, coverage.NaturalSlots, coverage.VersionExpectedSlots, coverage.NaturalSlots,
+				coverage.DataComplete && metric.FormulaComplete,
+				coverage.PeriodComplete && metric.FormulaComplete,
 			)
 		}
 		query, args, buildErr := builder.Suffix(`
@@ -294,6 +286,49 @@ ON CONFLICT (
 		return fmt.Errorf("commit PM aggregation window: %w", err)
 	}
 	return nil
+}
+
+func finalizationCoverageFor(
+	key WindowKey,
+	version *TaskVersionSnapshot,
+	state WindowState,
+	location *time.Location,
+) (WindowState, finalizationCoverage) {
+	state.ExpectedSlots = expectedSlotsForFinalization(key, version, state.ExpectedSlots, location)
+	sourceExpected := state.SourceExpectedSlots
+	sourceReceived := state.SourceReceivedSlots
+	if sourceExpected == 0 {
+		sourceExpected = state.ExpectedSlots
+		sourceReceived = state.ReceivedSlots
+	}
+	childrenComplete := state.ReceivedSlots >= state.ExpectedSlots
+	missing := max64(0, sourceExpected-sourceReceived)
+	dataComplete := childrenComplete && missing == 0 && state.SourceIncompleteSlots == 0
+	return state, finalizationCoverage{
+		SourceExpectedSlots:  sourceExpected,
+		SourceReceivedSlots:  sourceReceived,
+		MissingSlots:         missing,
+		ChildrenComplete:     childrenComplete,
+		DataComplete:         dataComplete,
+		VersionExpectedSlots: state.ExpectedSlots,
+		NaturalSlots:         naturalExpectedSlots(version, key, state),
+		PeriodComplete:       dataComplete && versionCoversNaturalPeriod(version, key),
+	}
+}
+
+func (f *Finalizer) finalizationLocation() *time.Location {
+	if f.location != nil {
+		return f.location
+	}
+	return time.UTC
+}
+
+func (f *Finalizer) finalizationCoverageFor(
+	key WindowKey,
+	version *TaskVersionSnapshot,
+	state WindowState,
+) (WindowState, finalizationCoverage) {
+	return finalizationCoverageFor(key, version, state, f.finalizationLocation())
 }
 
 func versionCoversNaturalPeriod(version *TaskVersionSnapshot, key WindowKey) bool {

@@ -111,6 +111,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	finalizer := pmstream.NewFinalizer(windowRepo, store, logger).
 		SetConcurrency(cfg.FinalizeConcurrency).
 		SetSnapshot(snapshot).
+		SetLocation(tz.Current()).
 		SetMetrics(streamMetrics)
 	recovery := pmstream.NewRecovery(w.NATS.JS, windowRepo, store, snapshot, matcher, logger)
 	if err := recovery.RestoreActiveWindows(ctx); err != nil {

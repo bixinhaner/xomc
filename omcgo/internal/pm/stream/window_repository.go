@@ -191,6 +191,35 @@ func observeReceivedUpdate(key WindowKey, received int64) sq.UpdateBuilder {
 		})
 }
 
+func finalizationClaimUpdate(
+	key WindowKey,
+	reason CloseReason,
+	state WindowState,
+	coverage finalizationCoverage,
+	version *TaskVersionSnapshot,
+) sq.UpdateBuilder {
+	builder := storage.Psql.Update("pm_aggregation_windows").
+		Set("status", "finalizing").
+		Set("close_reason", string(reason)).
+		Set("expected_slots", state.ExpectedSlots).
+		Set("received_slots", state.ReceivedSlots).
+		Set("source_expected_slots", coverage.SourceExpectedSlots).
+		Set("source_received_slots", coverage.SourceReceivedSlots).
+		Set("missing_slots", coverage.MissingSlots).
+		Set("children_complete", coverage.ChildrenComplete).
+		Set("source_incomplete_slots", state.SourceIncompleteSlots).
+		Set("data_complete", coverage.DataComplete).
+		Set("updated_at", time.Now().UTC()).
+		Where(windowKeyPredicate(key)).
+		Where(sq.Eq{"status": []string{"open", "failed", "finalizing", "rebuilding"}})
+	if version != nil {
+		builder = builder.
+			Set("version_effective_from", version.EffectiveFrom).
+			Set("version_effective_to", versionEffectiveTo(version))
+	}
+	return builder
+}
+
 func (r *WindowRepository) Status(ctx context.Context, key WindowKey) (string, error) {
 	query, args, err := storage.Psql.Select("status").
 		From("pm_aggregation_windows").
