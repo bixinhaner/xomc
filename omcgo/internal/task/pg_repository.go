@@ -21,6 +21,11 @@ type PgTaskRepository struct {
 	syncLockSlots chan struct{}
 }
 
+// sentTaskExpiryGrace separates the absolute dispatch deadline from an RPC
+// already written to a live CWMP session. The ACS idle timeout is 120 seconds;
+// after that bound the task is genuinely stale and may be expired normally.
+const sentTaskExpiryGrace = 2 * time.Minute
+
 // NewPgTaskRepository 创建 PostgreSQL 任务仓库
 func NewPgTaskRepository(pool *pgxpool.Pool) *PgTaskRepository {
 	lockSlots := 1
@@ -213,6 +218,8 @@ func (r *PgTaskRepository) TransitionIfStatus(
 func (r *PgTaskRepository) MarkSentIfPending(ctx context.Context, taskID, cwmpID string, sentAt time.Time) (bool, error) {
 	const query = `UPDATE device_tasks SET status=$2, cwmp_id=$3, sent_at=$4
 WHERE id=$1 AND status='pending' AND (
+  expires_at IS NULL OR expires_at > $4
+) AND (
   COALESCE(source, '') <> 'param_sync' OR EXISTS (
 SELECT 1 FROM parameter_sync_runs r
 WHERE r.id=device_tasks.source_id
@@ -925,16 +932,31 @@ func (r *PgTaskRepository) ListPendingPage(ctx context.Context, after PendingCur
 
 // ListExpiredCandidates 查找已过期但仍处于活跃态(pending/sent)的任务（T-0157 C2）。
 //
-// 条件：expires_at IS NOT NULL AND expires_at < now() AND status IN (pending, sent)。
+// 条件：
+//   - pending：expires_at < now()，绝对截止后不可再下发；
+//   - sent：expires_at < now() 且 sent_at 已超过有界在途保护窗口。
+//
+// 这样 TTL 仍然限制排队/重试总时长，但不会把截止前刚写入 CWMP 会话、正在等待
+// 设备响应的 RPC 抢先标成 expired。
 // 排序：expires_at ASC（最早过期的先处理）。limit > 0 时限制单批数量防 worker 长事务。
 //
 // 调用方（worker/task_sweeper）拿到后调 task.MarkExpired + Update + publish task.expired。
 func (r *PgTaskRepository) ListExpiredCandidates(ctx context.Context, now time.Time, limit int) ([]*Task, error) {
+	sentCutoff := now.Add(-sentTaskExpiryGrace)
 	q := storage.Psql.Select(taskColumns()...).
 		From("device_tasks").
 		Where(sq.NotEq{"expires_at": nil}).
 		Where(sq.Lt{"expires_at": now}).
-		Where(sq.Eq{"status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
+		Where(sq.Or{
+			sq.Eq{"status": TaskStatusPending},
+			sq.And{
+				sq.Eq{"status": TaskStatusSent},
+				sq.Or{
+					sq.Eq{"sent_at": nil},
+					sq.LtOrEq{"sent_at": sentCutoff},
+				},
+			},
+		}).
 		OrderBy("expires_at ASC")
 	if limit > 0 {
 		q = q.Limit(uint64(limit))
