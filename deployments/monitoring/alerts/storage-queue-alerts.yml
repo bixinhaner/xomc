@@ -16,15 +16,17 @@ groups:
           description: "Redis {{ $labels.queue_family }} 聚合积压已持续 10 分钟超过阈值；检查设备在线率、ACS 消费和单设备最大队列。"
 
       - alert: RedisTaskQueueOldestAgeHigh
-        expr: (max by (queue_family) (omc_redis_task_queue_oldest_age_seconds and on (deployment_unit, service, instance, job, queue_family) (omc_redis_task_queue_up == 1) and on (deployment_unit, service, instance, job, queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120)) and on (queue_family) (min by (queue_family) (omc_redis_task_queue_up * on (deployment_unit, service, instance, job, queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120)) == 1)) > 900
+        # PM auto-setup tasks have a legitimate 60-minute TTL. Alert only after
+        # that business window plus a five-minute expiry/index-cleanup grace.
+        expr: (max by (queue_family) (omc_redis_task_queue_oldest_age_seconds and on (deployment_unit, service, instance, job, queue_family) (omc_redis_task_queue_up == 1) and on (deployment_unit, service, instance, job, queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120)) and on (queue_family) (min by (queue_family) (omc_redis_task_queue_up * on (deployment_unit, service, instance, job, queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120)) == 1)) > 3900
         for: 10m
         labels:
           severity: warning
           domain: omc
           subsystem: redis
         annotations:
-          summary: "Redis {{ $labels.queue_family }} 最老任务超过 15 分钟"
-          description: "Redis 队列最老任务年龄持续升高；检查 ACS worker、设备连接和 Redis 观测状态。"
+          summary: "Redis {{ $labels.queue_family }} 最老任务超过 65 分钟"
+          description: "Redis 队列最老任务已超过最长业务 TTL（60 分钟）及 5 分钟清理宽限；检查 ACS worker、设备连接、过期扫描和 Redis 索引清理。"
 
       - alert: RedisTaskQueueObserverUnavailable
         expr: omc_redis_task_queue_up == 0
