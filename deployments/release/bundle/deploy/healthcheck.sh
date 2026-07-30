@@ -95,6 +95,20 @@ container_running() {
   [ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "true" ]
 }
 
+container_sysctl_equals() { # container_sysctl_equals <service> <key> <expected>
+  local svc="$1" key="$2" expected="$3" actual
+  actual="$("${DC[@]}" exec -T "$svc" sysctl -n "$key" 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
+  [ "$actual" = "$expected" ]
+}
+
+web_acs_upstream_pool_loaded() {
+  local rendered
+  rendered="$("${DC[@]}" exec -T web nginx -T 2>&1)" || return 1
+  printf '%s\n' "$rendered" | grep -Fq 'server acs:7557 resolve;'
+  printf '%s\n' "$rendered" | grep -Fq 'keepalive 4096;'
+  printf '%s\n' "$rendered" | grep -Fq 'proxy_pass http://acs_backend;'
+}
+
 echo "== docker compose 业务容器 =="
 for svc in app acs worker; do
   check "$svc 容器 running" container_running "$svc"
@@ -108,7 +122,13 @@ done
 if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
   echo "== docker compose web 容器 =="
   check "web 容器 running" container_running web
+  check "web ACS upstream 连接池已加载" web_acs_upstream_pool_loaded
+  check "web 临时端口范围" container_sysctl_equals web net.ipv4.ip_local_port_range "10240 65535"
 fi
+
+echo "== ACS 高并发网络参数 =="
+check "ACS accept backlog" container_sysctl_equals acs net.core.somaxconn "32768"
+check "ACS SYN backlog" container_sysctl_equals acs net.ipv4.tcp_max_syn_backlog "32768"
 
 if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "$SKIP_MONITORING" = 0 ]; then
   echo "== docker compose 监控容器 =="
