@@ -62,6 +62,18 @@ resource_env_get() {
   ' "$file"
 }
 
+resource_env_key_count() {
+  local file="$1" key="$2"
+  awk -v key="$key" '
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+    {
+      pos=index($0, "=")
+      if (pos > 0 && substr($0, 1, pos - 1) == key) count++
+    }
+    END { print count + 0 }
+  ' "$file"
+}
+
 resource_env_positive_integer() { [[ "$1" =~ ^[1-9][0-9]*$ ]]; }
 resource_env_positive_cpu() {
   [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]] && awk -v value="$1" 'BEGIN { exit !(value > 0) }'
@@ -99,6 +111,10 @@ resource_env_validate() {
     value="$(resource_env_get "$file" "$key")"
     if [ -z "$value" ]; then
       echo "[resource-env] 缺少必填键: $key" >&2
+      invalid=1
+    fi
+    if [ "$(resource_env_key_count "$file" "$key")" -gt 1 ]; then
+      echo "[resource-env] 契约键不可重复赋值: $key" >&2
       invalid=1
     fi
   done < <(resource_env_required_keys)

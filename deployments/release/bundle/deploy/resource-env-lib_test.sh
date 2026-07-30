@@ -104,6 +104,10 @@ REDIS_MAXMEMORY=4gb
 EOF
 expect_invalid partial "$TMP/partial.env" APP_CPUS
 
+cp "$TMP/complete.env" "$TMP/duplicate-contract-key.env"
+printf 'REDIS_MAXMEMORY=5g\n' >>"$TMP/duplicate-contract-key.env"
+expect_invalid duplicate-contract-key "$TMP/duplicate-contract-key.env" REDIS_MAXMEMORY
+
 cp "$TMP/complete.env" "$TMP/bad-cpu.env"
 set_key "$TMP/bad-cpu.env" APP_CPUS 0
 expect_invalid bad-cpu "$TMP/bad-cpu.env" APP_CPUS
