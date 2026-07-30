@@ -77,7 +77,9 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	}
 	logger := w.Logger.Named("pm-streaming-aggregation")
 	streamMetrics := pmstream.NewMetrics(w.MetricsReg)
-	store := pmstream.NewRedisWindowStore(w.Redis, cfg.WindowTTL).SetMetrics(streamMetrics)
+	store := pmstream.NewRedisWindowStore(w.Redis, cfg.WindowTTL).
+		SetMetrics(streamMetrics).
+		SetV2WriteEnabled(cfg.RedisV2WriteEnabled)
 	if err := store.ValidateConfiguration(ctx); err != nil {
 		streamMetrics.Ready.Set(0)
 		logger.Error("PM streaming aggregation Redis configuration rejected", zap.Error(err))
@@ -196,7 +198,8 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	streamMetrics.Ready.Set(1)
 	logger.Info("PM streaming aggregation ready",
 		zap.Duration("close_grace", cfg.CloseGrace),
-		zap.Duration("window_ttl", cfg.WindowTTL))
+		zap.Duration("window_ttl", cfg.WindowTTL),
+		zap.Bool("redis_v2_write_enabled", cfg.RedisV2WriteEnabled))
 }
 
 // runPMRuleCatalogRefreshLoop refreshes immutable membership definitions only.

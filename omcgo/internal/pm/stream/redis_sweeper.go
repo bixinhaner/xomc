@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 )
 
 const redisSweepLockTTL = 2 * time.Minute
+const redisSweepOperationTimeout = 30 * time.Second
 
 type PublishedStateVerifier interface {
 	CanSweepRedisState(
@@ -35,6 +35,9 @@ type RedisStateSweeper struct {
 	mu      sync.Mutex
 	cursor  uint64
 	pending []string
+
+	sampleCursor  uint64
+	samplePending []string
 }
 
 type redisStateSample struct {
@@ -90,16 +93,26 @@ func (s *RedisStateSweeper) SweepPublishedState(
 		if !ok {
 			continue
 		}
-		lock, lockErr := s.store.TryFinalizeLock(ctx, key, redisSweepLockTTL)
+		operationCtx, cancel := context.WithTimeout(ctx, redisSweepOperationTimeout)
+		lock, lockErr := s.store.TryFinalizeLock(operationCtx, key, redisSweepLockTTL)
 		if lockErr != nil {
+			cancel()
 			return deleted, lockErr
 		}
 		if lock == nil {
+			cancel()
 			continue
 		}
-		canSweep, verifyErr := s.verifier.CanSweepRedisState(ctx, key, publishedBefore)
+		canSweep, verifyErr := s.verifier.CanSweepRedisState(
+			operationCtx, key, publishedBefore,
+		)
 		if verifyErr == nil && canSweep {
-			verifyErr = s.store.unlink(ctx, key, false, unlinkBatch)
+			verifyErr = s.store.unlinkFenced(
+				operationCtx, key, false, unlinkBatch,
+				func(batchCtx context.Context) error {
+					return lock.Extend(batchCtx, redisSweepLockTTL)
+				},
+			)
 			if verifyErr == nil {
 				deleted++
 				if s.metrics != nil {
@@ -107,6 +120,7 @@ func (s *RedisStateSweeper) SweepPublishedState(
 				}
 			}
 		}
+		cancel()
 		releaseErr := lock.Release(context.Background())
 		if verifyErr != nil || releaseErr != nil {
 			return deleted, errors.Join(verifyErr, releaseErr)
@@ -121,22 +135,40 @@ func (s *RedisStateSweeper) nextMetaKeys(
 ) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for len(s.pending) < limit && (len(s.pending) == 0 || s.cursor != 0) {
+	return s.nextBoundedMetaKeys(ctx, limit, &s.cursor, &s.pending)
+}
+
+func (s *RedisStateSweeper) nextSampleMetaKeys(
+	ctx context.Context,
+	limit int,
+) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.nextBoundedMetaKeys(ctx, limit, &s.sampleCursor, &s.samplePending)
+}
+
+func (s *RedisStateSweeper) nextBoundedMetaKeys(
+	ctx context.Context,
+	limit int,
+	cursor *uint64,
+	pending *[]string,
+) ([]string, error) {
+	for len(*pending) < limit && (len(*pending) == 0 || *cursor != 0) {
 		keys, next, err := s.store.client.Scan(
-			ctx, s.cursor, "pmagg:*:meta", int64(limit),
+			ctx, *cursor, "pmagg:*:meta", int64(limit),
 		).Result()
 		if err != nil {
 			return nil, fmt.Errorf("scan PM aggregation Redis metadata: %w", err)
 		}
-		s.pending = append(s.pending, keys...)
-		s.cursor = next
+		*pending = append(*pending, keys...)
+		*cursor = next
 		if next == 0 || len(keys) == 0 {
 			break
 		}
 	}
-	count := min(limit, len(s.pending))
-	result := append([]string(nil), s.pending[:count]...)
-	s.pending = s.pending[count:]
+	count := min(limit, len(*pending))
+	result := append([]string(nil), (*pending)[:count]...)
+	*pending = (*pending)[count:]
 	return result, nil
 }
 
@@ -225,27 +257,25 @@ func (s *RedisStateSweeper) sampleRedisState(
 	if s.metrics == nil || windowLimit <= 0 || keyLimit <= 0 {
 		return nil
 	}
-	metaKeys, _, err := s.store.client.Scan(
-		ctx, 0, "pmagg:*:meta", int64(windowLimit),
-	).Result()
+	metaKeys, err := s.nextSampleMetaKeys(ctx, windowLimit)
 	if err != nil {
 		return fmt.Errorf("scan sampled PM aggregation Redis metadata: %w", err)
-	}
-	if len(metaKeys) > windowLimit {
-		metaKeys = metaKeys[:windowLimit]
 	}
 	samples := make(map[Granularity]*redisStateSample)
 	remaining := keyLimit
 	for _, metaKey := range metaKeys {
-		granularityRaw, err := s.store.client.HGet(ctx, metaKey, "granularity").Result()
-		if err != nil {
+		windowKey, ok, keyErr := s.windowKeyFromMeta(ctx, metaKey)
+		if keyErr != nil {
+			return keyErr
+		}
+		if !ok {
 			continue
 		}
-		granularity := Granularity(granularityRaw)
-		if granularity != GranularityHourly && granularity != GranularityDaily &&
-			granularity != GranularityWeekly && granularity != GranularityMonthly {
+		shardCount, shardErr := s.store.client.HGet(ctx, metaKey, "shard_count").Int()
+		if shardErr != nil || shardCount <= 0 || shardCount > maxWindowShards {
 			continue
 		}
+		granularity := windowKey.Granularity
 		sample := samples[granularity]
 		if sample == nil {
 			sample = &redisStateSample{}
@@ -255,17 +285,17 @@ func (s *RedisStateSweeper) sampleRedisState(
 		if remaining == 0 {
 			continue
 		}
-		prefix := strings.TrimSuffix(metaKey, ":meta")
-		keys, _, scanErr := s.store.client.Scan(
-			ctx, 0, prefix+":*", int64(remaining),
-		).Result()
-		if scanErr != nil {
-			return fmt.Errorf("scan sampled PM aggregation Redis window keys: %w", scanErr)
+		keys := redisKeys(windowKey, shardCount)
+		candidates := []string{
+			keys.seen, keys.slots, keys.meta, keys.entityMeta,
+			keys.chunks, keys.identities, keys.lock,
 		}
-		if len(keys) > remaining {
-			keys = keys[:remaining]
-		}
-		for _, key := range keys {
+		candidates = append(candidates, keys.acc...)
+		candidates = append(candidates, keys.defs...)
+		for _, key := range candidates {
+			if remaining == 0 {
+				break
+			}
 			bytes, usageErr := s.store.client.MemoryUsage(ctx, key, 5).Result()
 			if usageErr != nil {
 				continue
@@ -273,9 +303,6 @@ func (s *RedisStateSweeper) sampleRedisState(
 			sample.keys++
 			sample.bytes += bytes
 			remaining--
-			if remaining == 0 {
-				break
-			}
 		}
 	}
 	for _, granularity := range []Granularity{

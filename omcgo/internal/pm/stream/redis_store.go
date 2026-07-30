@@ -10,9 +10,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -102,6 +104,7 @@ type RedisWindowStore struct {
 
 	definitionCache sync.Map
 	definitionMu    sync.Mutex
+	v2WriteEnabled  atomic.Bool
 }
 
 func NewRedisWindowStore(client redis.UniversalClient, ttl time.Duration) *RedisWindowStore {
@@ -118,6 +121,11 @@ func (s *RedisWindowStore) SetSnapshot(snapshot *SnapshotStore) *RedisWindowStor
 
 func (s *RedisWindowStore) SetMetrics(metrics *Metrics) *RedisWindowStore {
 	s.metrics = metrics
+	return s
+}
+
+func (s *RedisWindowStore) SetV2WriteEnabled(enabled bool) *RedisWindowStore {
+	s.v2WriteEnabled.Store(enabled)
 	return s
 }
 
@@ -189,8 +197,17 @@ func (s *RedisWindowStore) accumulate(
 	}
 	shardCount := windowShardCount(contribution.ExpectedSlots, contribution.Key.Granularity)
 	keys := redisKeys(contribution.Key, shardCount)
+	writeV2 := s.v2WriteEnabled.Load()
 	versionDefinitions := redisVersionDefinitionsKey(contribution.Key.TaskVersionID)
 	pendingDefinitions := make(map[string]any)
+	identities := make(map[string]string)
+	type encodedValue struct {
+		v2ID, legacyID, legacyDefinition string
+		shard                            int
+		sum, min, max                    float64
+		count                            int64
+	}
+	encodedValues := make([]encodedValue, 0, len(contribution.Values))
 	deviceOUI, deviceSN := "", ""
 	for _, value := range contribution.Values {
 		if value.DeviceOUI != "" || value.DeviceSN != "" {
@@ -198,7 +215,7 @@ func (s *RedisWindowStore) accumulate(
 			break
 		}
 	}
-	args := []any{
+	fixedArgs := []any{
 		contribution.SourceFileID,
 		contribution.DeviceID + "|" + contribution.SlotStart.UTC().Format(time.RFC3339Nano),
 		contribution.ExpectedSlots,
@@ -230,13 +247,20 @@ func (s *RedisWindowStore) accumulate(
 		if err != nil {
 			return AccumulateResult{}, err
 		}
+		legacyDefinition, err := encodeDefinition(value)
+		if err != nil {
+			return AccumulateResult{}, err
+		}
 		metricID, metricDefinition, err := encodeAccumulatorMetricDefinition(value)
 		if err != nil {
 			return AccumulateResult{}, err
 		}
-		cacheKey := contribution.Key.TaskVersionID.String() + "|" + metricID
-		if _, loaded := s.definitionCache.Load(cacheKey); !loaded {
-			pendingDefinitions[metricID] = metricDefinition
+		if writeV2 {
+			cacheKey := contribution.Key.TaskVersionID.String() + "|" + metricID
+			if _, loaded := s.definitionCache.Load(cacheKey); !loaded {
+				pendingDefinitions[metricID] = metricDefinition
+			}
+			identities[identityID] = identity
 		}
 		entityKey := aggregationGroupKey(value)
 		if entityKey == "" {
@@ -247,13 +271,29 @@ func (s *RedisWindowStore) accumulate(
 		if value.Composed {
 			sum, count, minValue, maxValue = value.Sum, value.Count, value.Min, value.Max
 		}
+		encodedValues = append(encodedValues, encodedValue{
+			v2ID: identityID + "|" + metricID, legacyID: legacyID,
+			legacyDefinition: legacyDefinition, shard: shard,
+			sum: sum, count: count, min: minValue, max: maxValue,
+		})
+	}
+	args := append(fixedArgs, boolInt(writeV2), len(identities))
+	identityIDs := make([]string, 0, len(identities))
+	for identityID := range identities {
+		identityIDs = append(identityIDs, identityID)
+	}
+	sort.Strings(identityIDs)
+	for _, identityID := range identityIDs {
+		args = append(args, identityID, identities[identityID])
+	}
+	for _, value := range encodedValues {
 		args = append(
-			args, identityID+"|"+metricID, legacyID, identity,
-			shard, sum, count, minValue, maxValue,
+			args, value.v2ID, value.legacyID, value.legacyDefinition,
+			value.shard, value.sum, value.count, value.min, value.max,
 		)
 	}
 	args = append(args, lockToken)
-	if len(pendingDefinitions) > 0 {
+	if writeV2 && len(pendingDefinitions) > 0 {
 		if err := s.ensureVersionDefinitions(
 			ctx, contribution.Key.TaskVersionID, versionDefinitions, pendingDefinitions,
 		); err != nil {
@@ -628,6 +668,16 @@ func (s *RedisWindowStore) unlink(
 	includeLock bool,
 	batchSize int,
 ) error {
+	return s.unlinkFenced(ctx, key, includeLock, batchSize, nil)
+}
+
+func (s *RedisWindowStore) unlinkFenced(
+	ctx context.Context,
+	key WindowKey,
+	includeLock bool,
+	batchSize int,
+	beforeBatch func(context.Context) error,
+) error {
 	rootKeys := redisKeys(key, 1)
 	shardCountValue, err := s.client.HGet(ctx, rootKeys.meta, "shard_count").Int()
 	if err != nil && !errors.Is(err, redis.Nil) {
@@ -638,7 +688,7 @@ func (s *RedisWindowStore) unlink(
 	}
 	keys := redisKeys(key, shardCountValue)
 	deleteKeys := []string{
-		keys.seen, keys.slots, keys.meta, keys.entityMeta, keys.chunks, keys.identities,
+		keys.seen, keys.slots, keys.entityMeta, keys.chunks, keys.identities,
 	}
 	if includeLock {
 		deleteKeys = append(deleteKeys, keys.lock)
@@ -650,10 +700,24 @@ func (s *RedisWindowStore) unlink(
 	}
 	for start := 0; start < len(deleteKeys); start += batchSize {
 		end := min(start+batchSize, len(deleteKeys))
+		if beforeBatch != nil {
+			if err := beforeBatch(ctx); err != nil {
+				return err
+			}
+		}
 		if err := s.client.Unlink(ctx, deleteKeys[start:end]...).Err(); err != nil {
 			s.recordRedisWriteError()
 			return fmt.Errorf("unlink PM aggregation Redis window: %w", err)
 		}
+	}
+	if beforeBatch != nil {
+		if err := beforeBatch(ctx); err != nil {
+			return err
+		}
+	}
+	if err := s.client.Unlink(ctx, keys.meta).Err(); err != nil {
+		s.recordRedisWriteError()
+		return fmt.Errorf("unlink PM aggregation Redis window metadata: %w", err)
 	}
 	return nil
 }
@@ -821,17 +885,24 @@ func (s *RedisWindowStore) readAccumulatorIdentities(
 	ctx context.Context,
 	key string,
 ) (map[string]accumulatorIdentity, error) {
-	raw, err := s.client.HGetAll(ctx, key).Result()
-	if err != nil {
-		return nil, fmt.Errorf("read PM aggregation window identities: %w", err)
-	}
-	result := make(map[string]accumulatorIdentity, len(raw))
-	for id, encoded := range raw {
-		var identity accumulatorIdentity
-		if err := decodeAccumulatorMetadata(encoded, &identity); err != nil {
-			return nil, err
+	result := make(map[string]accumulatorIdentity)
+	var cursor uint64
+	for {
+		fields, next, err := s.client.HScan(ctx, key, cursor, "", 1000).Result()
+		if err != nil {
+			return nil, fmt.Errorf("scan PM aggregation window identities: %w", err)
 		}
-		result[id] = identity
+		for index := 0; index+1 < len(fields); index += 2 {
+			var identity accumulatorIdentity
+			if err := decodeAccumulatorMetadata(fields[index+1], &identity); err != nil {
+				return nil, err
+			}
+			result[fields[index]] = identity
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
 	}
 	return result, nil
 }

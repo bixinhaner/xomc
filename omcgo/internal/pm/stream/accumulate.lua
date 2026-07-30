@@ -17,7 +17,10 @@ local source_incomplete_delta = tonumber(ARGV[10])
 local chunk_index = tonumber(ARGV[11])
 local chunk_count = tonumber(ARGV[12])
 local shard_count = tonumber(ARGV[13])
-local lock_token = ARGV[22 + value_count * 8]
+local write_v2 = tonumber(ARGV[22]) == 1
+local identity_count = tonumber(ARGV[23])
+local value_offset = 24 + identity_count * 2
+local lock_token = ARGV[value_offset + value_count * 8]
 local entity_id = string.match(slot_id, "^(.-)|") or slot_id
 local lock_key = KEYS[7 + shard_count * 2]
 
@@ -112,11 +115,19 @@ if slot_added == 1 then
   end
 end
 
-local offset = 22
+if write_v2 then
+  local identity_offset = 24
+  for i = 1, identity_count do
+    redis.call("HSETNX", identities, ARGV[identity_offset], ARGV[identity_offset + 1])
+    identity_offset = identity_offset + 2
+  end
+end
+
+local offset = value_offset
 for i = 1, value_count do
   local base = ARGV[offset]
   local legacy_base = ARGV[offset + 1]
-  local identity = ARGV[offset + 2]
+  local definition = ARGV[offset + 2]
   local shard = tonumber(ARGV[offset + 3])
   local value_sum = tonumber(ARGV[offset + 4])
   local value_count_delta = tonumber(ARGV[offset + 5])
@@ -128,54 +139,53 @@ for i = 1, value_count do
   local count_key = legacy_base .. "|count"
   local min_key = legacy_base .. "|min"
   local max_key = legacy_base .. "|max"
-  local identity_id = string.match(base, "^([^|]+)|")
-
-  local current = redis.call("HGET", acc, base)
   local current_sum = 0
   local current_count = 0
   local current_min = value_min
   local current_max = value_max
-  if current then
-    current_sum, current_count, current_min, current_max =
-      decode_v2(current, base)
-  end
+  local migrated_legacy = false
 
-  -- A rolling upgrade can leave v1 and v2 writers active concurrently.
-  -- Fold every v1 representation into v2 on each new write. If an old
-  -- writer runs afterwards, the Go reader still merges both representations.
-  local legacy_compact = redis.call("HGET", acc, legacy_base)
-  if legacy_compact then
-    local ignored_definition
-    local legacy_sum
-    local legacy_count
-    local legacy_min
-    local legacy_max
-    ignored_definition, legacy_sum, legacy_count, legacy_min, legacy_max =
-      decode_legacy_compact(legacy_compact, legacy_base)
-    if current_count == 0 then
-      current_min = legacy_min
-      current_max = legacy_max
+  if write_v2 then
+    local current = redis.call("HGET", acc, base)
+    if current then
+      current_sum, current_count, current_min, current_max =
+        decode_v2(current, base)
     else
-      current_min = math.min(current_min, legacy_min)
-      current_max = math.max(current_max, legacy_max)
+      -- Old writers are drained before the gate is enabled. Therefore v1 is
+      -- probed only once per metric, when no v2 state exists yet.
+      local legacy_compact = redis.call("HGET", acc, legacy_base)
+      if legacy_compact then
+        migrated_legacy = true
+        local ignored_definition
+        ignored_definition, current_sum, current_count, current_min, current_max =
+          decode_legacy_compact(legacy_compact, legacy_base)
+      else
+        current_sum = tonumber(redis.call("HGET", acc, sum_key) or "0")
+        current_count = tonumber(redis.call("HGET", acc, count_key) or "0")
+        if current_count > 0 then
+          migrated_legacy = true
+          current_min = tonumber(redis.call("HGET", acc, min_key) or tostring(value_min))
+          current_max = tonumber(redis.call("HGET", acc, max_key) or tostring(value_max))
+        end
+      end
     end
-    current_sum = current_sum + legacy_sum
-    current_count = current_count + legacy_count
-  end
-  local legacy_count = tonumber(redis.call("HGET", acc, count_key) or "0")
-  if legacy_count > 0 then
-    local legacy_sum = tonumber(redis.call("HGET", acc, sum_key) or "0")
-    local legacy_min = tonumber(redis.call("HGET", acc, min_key) or tostring(value_min))
-    local legacy_max = tonumber(redis.call("HGET", acc, max_key) or tostring(value_max))
-    if current_count == 0 then
-      current_min = legacy_min
-      current_max = legacy_max
+  else
+    local current = redis.call("HGET", acc, legacy_base)
+    if current then
+      definition, current_sum, current_count, current_min, current_max =
+        decode_legacy_compact(current, legacy_base)
     else
-      current_min = math.min(current_min, legacy_min)
-      current_max = math.max(current_max, legacy_max)
+      local legacy_definition = redis.call("HGET", defs, legacy_base)
+      if legacy_definition then
+        definition = legacy_definition
+      end
+      current_sum = tonumber(redis.call("HGET", acc, sum_key) or "0")
+      current_count = tonumber(redis.call("HGET", acc, count_key) or "0")
+      if current_count > 0 then
+        current_min = tonumber(redis.call("HGET", acc, min_key) or tostring(value_min))
+        current_max = tonumber(redis.call("HGET", acc, max_key) or tostring(value_max))
+      end
     end
-    current_sum = current_sum + legacy_sum
-    current_count = current_count + legacy_count
   end
 
   local next_sum = current_sum + value_sum
@@ -188,14 +198,26 @@ for i = 1, value_count do
   if value_max > next_max then
     next_max = value_max
   end
-  local packed = "v2|" .. format_number(next_sum) ..
-    "|" .. tostring(next_count) ..
-    "|" .. format_number(next_min) ..
-    "|" .. format_number(next_max)
-  redis.call("HSETNX", identities, identity_id, identity)
-  redis.call("HSET", acc, base, packed)
-  redis.call("HDEL", acc, legacy_base, sum_key, count_key, min_key, max_key)
-  redis.call("HDEL", defs, legacy_base)
+  if write_v2 then
+    local packed = "v2|" .. format_number(next_sum) ..
+      "|" .. tostring(next_count) ..
+      "|" .. format_number(next_min) ..
+      "|" .. format_number(next_max)
+    redis.call("HSET", acc, base, packed)
+    if migrated_legacy then
+      redis.call("HDEL", acc, legacy_base, sum_key, count_key, min_key, max_key)
+      redis.call("HDEL", defs, legacy_base)
+    end
+  else
+    local packed = "v1|" .. definition ..
+      "|" .. format_number(next_sum) ..
+      "|" .. tostring(next_count) ..
+      "|" .. format_number(next_min) ..
+      "|" .. format_number(next_max)
+    redis.call("HSET", acc, legacy_base, packed)
+    redis.call("HDEL", acc, sum_key, count_key, min_key, max_key)
+    redis.call("HDEL", defs, legacy_base)
+  end
   offset = offset + 8
 end
 

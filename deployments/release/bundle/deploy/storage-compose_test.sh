@@ -51,7 +51,9 @@ contains "worker 默认 8 核" 'cpus: "${WORKER_CPUS:-8}"' "$RELEASE_APP_COMPOSE
 echo "── PM 流式聚合生产旋钮 ──"
 contains "release worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"' "$RELEASE_APP_COMPOSE"
 contains "release worker 透传窗口状态 TTL" 'PM_AGGREGATION_WINDOW_TTL: "${PM_AGGREGATION_WINDOW_TTL:-1080h}"' "$RELEASE_APP_COMPOSE"
+contains "release worker 默认关闭 Redis v2 写入" 'PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-false}"' "$RELEASE_APP_COMPOSE"
 contains "开发 worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"' "$DEV_COMPOSE"
+contains "开发 worker 默认关闭 Redis v2 写入" 'PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-false}"' "$DEV_COMPOSE"
 
 echo "── release .env 模板和升级继承 ──"
 for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do

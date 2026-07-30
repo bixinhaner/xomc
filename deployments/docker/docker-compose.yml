@@ -460,6 +460,7 @@ services:
       PM_AGGREGATION_FINALIZE_CONCURRENCY: "${PM_AGGREGATION_FINALIZE_CONCURRENCY:-4}"
       PM_AGGREGATION_MAX_EVENT_BYTES: "${PM_AGGREGATION_MAX_EVENT_BYTES:-8388608}"
       PM_AGGREGATION_WINDOW_TTL: "${PM_AGGREGATION_WINDOW_TTL:-1080h}"
+      PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-false}"
     volumes:
       - ../../run/logs/worker:/run/logs/worker
       # 共享 secrets 卷只读 — omcctl/scripts 默认从此读 .api-key

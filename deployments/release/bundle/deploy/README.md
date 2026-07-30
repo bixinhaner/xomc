@@ -33,6 +33,17 @@ rendered Compose limits, Docker `NanoCpus`/`Memory`, Go GOMAXPROCS metrics,
 Redis runtime settings, and PostgreSQL/TimescaleDB runtime settings. Any
 mismatch names the service with its expected and actual values.
 
+## Redis aggregation v2 rollout gate
+
+`PM_AGGREGATION_REDIS_V2_WRITE_ENABLED` defaults to `false`. Deploy the
+dual-reader release with that default first. Enable it only after deployment
+inspection proves that every old Worker container has stopped and the running
+Worker count matches the new release.
+
+After v2 has been enabled, rollback is supported only to a release that can
+dual-read v1/v2; set the gate back to `false` before resuming traffic. Never
+roll back to a pre-dual-reader Worker because it cannot finalize v2 state.
+
 ## Configuration backup bucket compatibility
 
 The physical S3/MinIO bucket is `config-backup`. The legacy `config_backup`

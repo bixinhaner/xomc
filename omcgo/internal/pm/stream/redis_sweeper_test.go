@@ -38,6 +38,7 @@ type fakePublishedStateVerifier struct {
 	mu              sync.Mutex
 	published       map[WindowKey]bool
 	publishedBefore []time.Time
+	onVerify        func()
 }
 
 func (f *fakePublishedStateVerifier) CanSweepRedisState(
@@ -48,6 +49,9 @@ func (f *fakePublishedStateVerifier) CanSweepRedisState(
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.publishedBefore = append(f.publishedBefore, publishedBefore)
+	if f.onVerify != nil {
+		f.onVerify()
+	}
 	return f.published[key], nil
 }
 
@@ -103,6 +107,46 @@ func TestRedisSweeperHasHardScanLimitAndSkipsUnverifiableMetadata(t *testing.T) 
 	require.LessOrEqual(t, deleted, int64(1))
 	require.True(t, server.Exists("pmagg:{unverifiable}:meta"),
 		"metadata that cannot be tied to an exact DB window must be retained")
+}
+
+func TestRedisSweeperDoesNotUnlinkAfterOwnershipExpires(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	store := NewRedisWindowStore(client, time.Hour)
+	verifier := &fakePublishedStateVerifier{published: make(map[WindowKey]bool)}
+	sweeper := NewRedisStateSweeper(store, verifier, 30*time.Minute, nil, nil)
+	start := time.Date(2026, 7, 30, 6, 0, 0, 0, time.UTC)
+	key := sweepTestWindow(t, store, start, "expired-owner")
+	verifier.published[key] = true
+	verifier.onVerify = func() { server.FastForward(redisSweepLockTTL + time.Second) }
+
+	deleted, err := sweeper.SweepPublishedState(context.Background(), 8, 2)
+	require.ErrorContains(t, err, "ownership lost")
+	require.Zero(t, deleted)
+	require.True(t, server.Exists(redisKeys(key, 1).meta),
+		"expired sweep ownership must prevent every UNLINK batch")
+}
+
+func TestRedisSamplerAdvancesItsOwnBoundedCursor(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	store := NewRedisWindowStore(client, time.Hour)
+	sweeper := NewRedisStateSweeper(
+		store, &fakePublishedStateVerifier{published: make(map[WindowKey]bool)},
+		time.Hour, nil, nil,
+	)
+	start := time.Date(2026, 7, 30, 7, 0, 0, 0, time.UTC)
+	sweepTestWindow(t, store, start, "sample-a")
+	sweepTestWindow(t, store, start, "sample-b")
+
+	first, err := sweeper.nextSampleMetaKeys(context.Background(), 1)
+	require.NoError(t, err)
+	second, err := sweeper.nextSampleMetaKeys(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.Len(t, second, 1)
+	require.NotEqual(t, first[0], second[0],
+		"sampling must advance a bounded cursor instead of restarting SCAN at zero")
 }
 
 func sweepTestWindow(
