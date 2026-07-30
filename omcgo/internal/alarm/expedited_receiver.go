@@ -110,6 +110,7 @@ func (r *ExpeditedEventReceiver) handleExpeditedAlarmEvent(ctx context.Context, 
 		return nil
 	}
 
+	hasValidEvent := false
 	for _, exp := range events {
 		if err := exp.Validate(); err != nil {
 			r.logger.Warn("invalid expedited event, skipping",
@@ -118,6 +119,7 @@ func (r *ExpeditedEventReceiver) handleExpeditedAlarmEvent(ctx context.Context, 
 				zap.Int("index", exp.Index))
 			continue
 		}
+		hasValidEvent = true
 
 		switch exp.NotificationType {
 		case NotificationNewAlarm:
@@ -178,6 +180,9 @@ func (r *ExpeditedEventReceiver) handleExpeditedAlarmEvent(ctx context.Context, 
 				zap.String("device_sn", payload.DeviceSN),
 				zap.Int("index", exp.Index))
 		}
+	}
+	if hasValidEvent {
+		publishAlarmSyncRequest(ctx, r.eventBus, r.logger, payload.DeviceSN)
 	}
 
 	return nil
