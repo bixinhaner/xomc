@@ -162,7 +162,7 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
           pageSize,
           total: items.length,
           showSizeChanger: true,
-          pageSizeOptions: ['10', '20', '50', '1000'],
+          pageSizeOptions: ['10', '20', '50', '100'],
           showTotal: (n) => t('common.totalCount', { count: n }),
           onChange: (p, ps) => {
             setPage(p);

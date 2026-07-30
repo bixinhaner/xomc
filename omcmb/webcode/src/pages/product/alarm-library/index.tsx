@@ -447,7 +447,7 @@ export default function AlarmLibraryPage() {
               pageSize: detailData?.pageSize || 20,
               total: detailData?.total || 0,
               showSizeChanger: true,
-              pageSizeOptions: ['10', '20', '50', '1000'],
+              pageSizeOptions: ['10', '20', '50', '100'],
               showTotal: (n) => t('common.totalCount', { count: n }),
               onChange: (page, pageSize) =>
                 setDetailFilter((f) => ({ ...f, page, pageSize })),
@@ -465,7 +465,7 @@ export default function AlarmLibraryPage() {
               pageSize: nePageSize,
               total: neTypesItems.length,
               showSizeChanger: true,
-              pageSizeOptions: ['10', '20', '50', '1000'],
+              pageSizeOptions: ['10', '20', '50', '100'],
               showTotal: (n) => t('product.alarm.totalNeTypes', { count: n }),
               onChange: (p, ps) => {
                 setNePage(p);

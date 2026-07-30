@@ -18,9 +18,9 @@ import { nextPageOnPaginationChange } from '../pagination';
 
 describe('nextPageOnPaginationChange（issue #190 死判）', () => {
   it('改每页条数 → 回第 1 页', () => {
-    // 在第 5 页、原 50/页，改成 1000/页：应归 1。
-    const r = nextPageOnPaginationChange(5, 1000, 50);
-    expect(r).toEqual({ page: 1, pageSize: 1000, sizeChanged: true });
+    // 在第 5 页、原 50/页，改成 100/页：应归 1。
+    const r = nextPageOnPaginationChange(5, 100, 50);
+    expect(r).toEqual({ page: 1, pageSize: 100, sizeChanged: true });
   });
 
   it('仅翻页（每页条数不变）→ 按目标页码走', () => {

@@ -81,7 +81,7 @@ export default function OrphanDevicesPage() {
               pageSize,
               total,
               showSizeChanger: true,
-              pageSizeOptions: ['10', '20', '50', '1000'],
+              pageSizeOptions: ['10', '20', '50', '100'],
               showTotal: (total) => t('product.orphan.totalDevices', { count: total }),
               onChange: (p, ps) => {
                 setPage(p);

@@ -264,7 +264,7 @@ export default function StandardParamsPage() {
             pageSize,
             total: items.length,
             showSizeChanger: true,
-            pageSizeOptions: ['10', '20', '50', '1000'],
+            pageSizeOptions: ['10', '20', '50', '100'],
             showTotal: (n) => t('common.totalCount', { count: n }),
             onChange: (p, ps) => {
               // 改每页条数时回到第 1 页重新切片(issue #190:约 2000 条标准参数树,
