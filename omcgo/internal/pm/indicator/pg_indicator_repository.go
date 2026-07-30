@@ -34,6 +34,50 @@ func NewPgIndicatorRepository(pool *pgxpool.Pool) *PgIndicatorRepository {
 	return &PgIndicatorRepository{db: storage.NewPoolDB(pool)}
 }
 
+// ListCounterReportKeys returns the global registered Counter report-key set for
+// one radio technology. Product routing is intentionally not applied here: callers
+// use this catalog to distinguish a known-but-unrouted key from a genuinely unknown
+// vendor key.
+func (r *PgIndicatorRepository) ListCounterReportKeys(ctx context.Context, dt DeviceType) ([]string, error) {
+	query, args, err := buildCounterReportKeysQuery(dt)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list counter report keys from %s: %w", dt.IndicatorTable(), err)
+	}
+	defer rows.Close()
+
+	var result []string
+	for rows.Next() {
+		var reportKey string
+		if err := rows.Scan(&reportKey); err != nil {
+			return nil, fmt.Errorf("scan counter report key from %s: %w", dt.IndicatorTable(), err)
+		}
+		result = append(result, reportKey)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate counter report keys from %s: %w", dt.IndicatorTable(), err)
+	}
+	return result, nil
+}
+
+func buildCounterReportKeysQuery(dt DeviceType) (string, []any, error) {
+	query, args, err := storage.Psql.
+		Select("DISTINCT report_key").
+		From(dt.IndicatorTable()).
+		Where(sq.Eq{"is_counter": "1"}).
+		Where("report_key IS NOT NULL").
+		Where("BTRIM(report_key) <> ?", "").
+		OrderBy("report_key").
+		ToSql()
+	if err != nil {
+		return "", nil, fmt.Errorf("build counter report-key query for %s: %w", dt, err)
+	}
+	return query, args, nil
+}
+
 func (r *PgIndicatorRepository) List(ctx context.Context, filter IndicatorListFilter) (*model.ListResponse[IndicatorListItem], error) {
 	dt, err := ParseDeviceType(filter.DeviceType)
 	if err != nil {

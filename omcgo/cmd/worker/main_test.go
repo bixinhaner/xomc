@@ -130,3 +130,54 @@ func (f *fakeEnabledIndicatorRepo) ListAll(_ context.Context, dt indicator.Devic
 	}
 	return append([]string(nil), f.ids[dt]...), nil
 }
+
+func TestKnownReportKeyLookupCachesByDeviceType(t *testing.T) {
+	now := time.Date(2026, 7, 31, 5, 0, 0, 0, time.UTC)
+	repo := &fakeKnownReportKeyRepo{
+		keys: map[indicator.DeviceType][]string{
+			indicator.DeviceTypeENB: {"RRC.AttConn", "", "Cqi.00"},
+		},
+	}
+	lookup := &knownReportKeyLookup{
+		repo:  repo,
+		ttl:   5 * time.Minute,
+		now:   func() time.Time { return now },
+		cache: make(map[indicator.DeviceType]knownReportKeyCacheEntry),
+	}
+
+	first, err := lookup.LookupKnownReportKeys(context.Background(), "lte")
+	require.NoError(t, err)
+	require.Contains(t, first, "RRC.AttConn")
+	require.Contains(t, first, "Cqi.00")
+	require.NotContains(t, first, "")
+
+	second, err := lookup.LookupKnownReportKeys(context.Background(), "lte")
+	require.NoError(t, err)
+	require.Contains(t, second, "RRC.AttConn")
+	require.Equal(t, 1, repo.calls[indicator.DeviceTypeENB], "TTL 内不应重复查指标库")
+
+	repo.keys[indicator.DeviceTypeENB] = []string{"RRC.New"}
+	now = now.Add(5*time.Minute + time.Nanosecond)
+	expired, err := lookup.LookupKnownReportKeys(context.Background(), "lte")
+	require.NoError(t, err)
+	require.Contains(t, expired, "RRC.New")
+	require.NotContains(t, expired, "RRC.AttConn")
+	require.Equal(t, 2, repo.calls[indicator.DeviceTypeENB])
+}
+
+type fakeKnownReportKeyRepo struct {
+	keys  map[indicator.DeviceType][]string
+	err   error
+	calls map[indicator.DeviceType]int
+}
+
+func (f *fakeKnownReportKeyRepo) ListCounterReportKeys(_ context.Context, dt indicator.DeviceType) ([]string, error) {
+	if f.calls == nil {
+		f.calls = make(map[indicator.DeviceType]int)
+	}
+	f.calls[dt]++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return append([]string(nil), f.keys[dt]...), nil
+}

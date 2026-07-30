@@ -246,6 +246,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// filterByWhitelist 本阶段 fail-open（lookup 失败 / 空集合时跳过过滤，避免误删）；#866
 	// normalizeResults 会在写入前要求 Unit/StatisType 齐全，缺失时失败并暴露。
 	pmCollector.SetCounterWhitelist(&routerCounterWhitelist{r: pmKPIRouter, log: logger})
+	// 全局 report_key 目录与产品路由白名单分离：前者用于识别“指标库已知但当前
+	// 产品未绑定”，避免把这类配置状态误报为厂家新上报名。五分钟缓存避免按文件查库。
+	pmCollector.SetKnownReportKeyLookup(newKnownReportKeyLookup(pmIndicatorRepo))
 	pmCollector.SetEnabledIndicatorLookup(newEnabledIndicatorLookup(indicator.NewPgEnabledRepository(w.PgPool)))
 	pmCollector.SetQuarantineStore(collector.NewPgQuarantineStore(w.TsPool))
 	pmResultNormSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
@@ -1235,6 +1238,116 @@ type enabledIndicatorLookup struct {
 	loads singleflight.Group
 }
 
+type knownReportKeyRepository interface {
+	ListCounterReportKeys(ctx context.Context, dt indicator.DeviceType) ([]string, error)
+}
+
+type knownReportKeyCacheEntry struct {
+	keys      map[string]struct{}
+	expiresAt time.Time
+}
+
+type knownReportKeyLookup struct {
+	repo knownReportKeyRepository
+	ttl  time.Duration
+	now  func() time.Time
+
+	mu    sync.RWMutex
+	cache map[indicator.DeviceType]knownReportKeyCacheEntry
+	loads singleflight.Group
+}
+
+func newKnownReportKeyLookup(repo knownReportKeyRepository) *knownReportKeyLookup {
+	return &knownReportKeyLookup{
+		repo:  repo,
+		ttl:   defaultEnabledIndicatorCacheTTL,
+		now:   time.Now,
+		cache: make(map[indicator.DeviceType]knownReportKeyCacheEntry),
+	}
+}
+
+func (l *knownReportKeyLookup) LookupKnownReportKeys(ctx context.Context, technology string) (map[string]struct{}, error) {
+	dt, err := indicatorDeviceTypeFromTechnology(technology)
+	if err != nil {
+		return nil, err
+	}
+	now := l.nowTime()
+	if cached, ok := l.lookupCache(dt, now); ok {
+		return cached, nil
+	}
+
+	value, err, _ := l.loads.Do(string(dt), func() (interface{}, error) {
+		now := l.nowTime()
+		if cached, ok := l.lookupCache(dt, now); ok {
+			return cached, nil
+		}
+		if l.repo == nil {
+			return nil, fmt.Errorf("known PM report-key repository is not configured")
+		}
+		keys, err := l.repo.ListCounterReportKeys(ctx, dt)
+		if err != nil {
+			return nil, fmt.Errorf("list known PM report keys (%s): %w", dt, err)
+		}
+		out := make(map[string]struct{}, len(keys))
+		for _, key := range keys {
+			if key != "" {
+				out[key] = struct{}{}
+			}
+		}
+		for _, key := range indicator.KnownUnstoredReportKeys(dt) {
+			if key != "" {
+				out[key] = struct{}{}
+			}
+		}
+		l.storeCache(dt, out, now.Add(l.ttlDuration()))
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	keys, ok := value.(map[string]struct{})
+	if !ok {
+		return nil, fmt.Errorf("known PM report-key cache returned unexpected type %T", value)
+	}
+	return keys, nil
+}
+
+func (l *knownReportKeyLookup) lookupCache(dt indicator.DeviceType, now time.Time) (map[string]struct{}, bool) {
+	l.mu.RLock()
+	entry, ok := l.cache[dt]
+	l.mu.RUnlock()
+	if !ok || now.After(entry.expiresAt) {
+		return nil, false
+	}
+	return entry.keys, true
+}
+
+func (l *knownReportKeyLookup) storeCache(dt indicator.DeviceType, keys map[string]struct{}, expiresAt time.Time) {
+	l.mu.Lock()
+	if l.cache == nil {
+		l.cache = make(map[indicator.DeviceType]knownReportKeyCacheEntry)
+	}
+	l.cache[dt] = knownReportKeyCacheEntry{
+		keys:      keys,
+		expiresAt: expiresAt,
+	}
+	l.mu.Unlock()
+}
+
+func (l *knownReportKeyLookup) ttlDuration() time.Duration {
+	if l.ttl <= 0 {
+		return defaultEnabledIndicatorCacheTTL
+	}
+	return l.ttl
+}
+
+func (l *knownReportKeyLookup) nowTime() time.Time {
+	if l.now == nil {
+		return time.Now()
+	}
+	return l.now()
+}
+
 func newEnabledIndicatorLookup(repo enabledIndicatorRepository) *enabledIndicatorLookup {
 	return &enabledIndicatorLookup{
 		repo:  repo,
@@ -1338,7 +1451,7 @@ func indicatorDeviceTypeFromTechnology(technology string) (indicator.DeviceType,
 	case model.TechGSM:
 		return indicator.DeviceTypeGSM, nil
 	default:
-		return "", fmt.Errorf("unsupported PM technology for enabled indicators: %q", technology)
+		return "", fmt.Errorf("unsupported PM technology for indicator metadata: %q", technology)
 	}
 }
 

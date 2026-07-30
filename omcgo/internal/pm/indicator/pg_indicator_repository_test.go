@@ -35,3 +35,14 @@ func TestApplyIndicatorFiltersPlatformNameKeepsAllScopedToAllOnly(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, []any{[]string{PlatformAll}}, args)
 }
+
+func TestBuildCounterReportKeysQueryUsesTechnologyTableAndCounterRowsOnly(t *testing.T) {
+	sql, args, err := buildCounterReportKeysQuery(DeviceTypeENB)
+
+	require.NoError(t, err)
+	assert.Contains(t, sql, "SELECT DISTINCT report_key FROM perf_indicators_enb")
+	assert.Contains(t, sql, "is_counter = $1")
+	assert.Contains(t, sql, "report_key IS NOT NULL")
+	assert.Contains(t, sql, "BTRIM(report_key) <> $2")
+	assert.Equal(t, []any{"1", ""}, args)
+}
