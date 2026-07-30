@@ -97,22 +97,26 @@ func (m *mockUserRepo) GetUsernamesByIDs(ctx context.Context, ids []uuid.UUID) (
 }
 
 type mockRoleRepo struct {
-	createFn               func(ctx context.Context, role *Role) error
-	getByIDFn              func(ctx context.Context, id uuid.UUID) (*Role, error)
-	getByNameFn            func(ctx context.Context, name string) (*Role, error)
-	updateFn               func(ctx context.Context, role *Role) error
-	deleteFn               func(ctx context.Context, id uuid.UUID) error
-	listFn                 func(ctx context.Context) ([]Role, error)
-	listWithPaginationFn   func(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error)
-	assignRoleFn           func(ctx context.Context, userID, roleID uuid.UUID) error
-	removeRoleFn           func(ctx context.Context, userID, roleID uuid.UUID) error
-	getUserRolesFn         func(ctx context.Context, userID uuid.UUID) ([]Role, error)
-	listUserIDsByRoleFn    func(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
-	getPermissionsFn       func(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
-	checkPermissionFn      func(ctx context.Context, userID uuid.UUID, resource, action string) (bool, error)
-	listAllPermissionsFn   func(ctx context.Context) ([]Permission, error)
-	addPermissionsFn       func(ctx context.Context, roleID uuid.UUID, perms []Permission) error
-	removeAllPermissionsFn func(ctx context.Context, roleID uuid.UUID) error
+	createFn                func(ctx context.Context, role *Role) error
+	getByIDFn               func(ctx context.Context, id uuid.UUID) (*Role, error)
+	getByNameFn             func(ctx context.Context, name string) (*Role, error)
+	updateFn                func(ctx context.Context, role *Role) error
+	deleteFn                func(ctx context.Context, id uuid.UUID) error
+	getDeviceGroupDataFn    func(ctx context.Context, roleID uuid.UUID) (*RoleDeviceGroupData, error)
+	setDeviceGroupDataFn    func(ctx context.Context, roleID uuid.UUID, data RoleDeviceGroupData) error
+	getRoleAPIEndpointIDsFn func(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
+	setRoleAPIEndpointsFn   func(ctx context.Context, roleID uuid.UUID, endpointIDs []uuid.UUID) error
+	listFn                  func(ctx context.Context) ([]Role, error)
+	listWithPaginationFn    func(ctx context.Context, filter RoleFilter) (*model.ListResponse[Role], error)
+	assignRoleFn            func(ctx context.Context, userID, roleID uuid.UUID) error
+	removeRoleFn            func(ctx context.Context, userID, roleID uuid.UUID) error
+	getUserRolesFn          func(ctx context.Context, userID uuid.UUID) ([]Role, error)
+	listUserIDsByRoleFn     func(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
+	getPermissionsFn        func(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
+	checkPermissionFn       func(ctx context.Context, userID uuid.UUID, resource, action string) (bool, error)
+	listAllPermissionsFn    func(ctx context.Context) ([]Permission, error)
+	addPermissionsFn        func(ctx context.Context, roleID uuid.UUID, perms []Permission) error
+	removeAllPermissionsFn  func(ctx context.Context, roleID uuid.UUID) error
 }
 
 func (m *mockRoleRepo) Create(ctx context.Context, role *Role) error {
@@ -146,6 +150,34 @@ func (m *mockRoleRepo) Update(ctx context.Context, role *Role) error {
 func (m *mockRoleRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	if m.deleteFn != nil {
 		return m.deleteFn(ctx, id)
+	}
+	return nil
+}
+
+func (m *mockRoleRepo) GetDeviceGroupData(ctx context.Context, roleID uuid.UUID) (*RoleDeviceGroupData, error) {
+	if m.getDeviceGroupDataFn != nil {
+		return m.getDeviceGroupDataFn(ctx, roleID)
+	}
+	return &RoleDeviceGroupData{}, nil
+}
+
+func (m *mockRoleRepo) SetDeviceGroupData(ctx context.Context, roleID uuid.UUID, data RoleDeviceGroupData) error {
+	if m.setDeviceGroupDataFn != nil {
+		return m.setDeviceGroupDataFn(ctx, roleID, data)
+	}
+	return nil
+}
+
+func (m *mockRoleRepo) GetRoleApiEndpointIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
+	if m.getRoleAPIEndpointIDsFn != nil {
+		return m.getRoleAPIEndpointIDsFn(ctx, roleID)
+	}
+	return []uuid.UUID{}, nil
+}
+
+func (m *mockRoleRepo) SetRoleApiEndpoints(ctx context.Context, roleID uuid.UUID, endpointIDs []uuid.UUID) error {
+	if m.setRoleAPIEndpointsFn != nil {
+		return m.setRoleAPIEndpointsFn(ctx, roleID, endpointIDs)
 	}
 	return nil
 }
@@ -259,9 +291,10 @@ func (m *mockAuditRepo) List(ctx context.Context, filter AuditLogFilter) (*model
 }
 
 type mockMenuRepo struct {
-	getAllActiveFn func(ctx context.Context) ([]Menu, error)
-	getByRoleFn    func(ctx context.Context, roleID uuid.UUID) ([]Menu, error)
-	setRoleMenusFn func(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error
+	getAllActiveFn   func(ctx context.Context) ([]Menu, error)
+	getByRoleFn      func(ctx context.Context, roleID uuid.UUID) ([]Menu, error)
+	getRoleMenuIDsFn func(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
+	setRoleMenusFn   func(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error
 }
 
 func (m *mockMenuRepo) Create(_ context.Context, _ *Menu, _ uuid.UUID) error  { return nil }
@@ -300,7 +333,10 @@ func (m *mockMenuRepo) SetRoleMenus(ctx context.Context, roleID uuid.UUID, menuI
 	}
 	return nil
 }
-func (m *mockMenuRepo) GetRoleMenuIDs(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+func (m *mockMenuRepo) GetRoleMenuIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
+	if m.getRoleMenuIDsFn != nil {
+		return m.getRoleMenuIDsFn(ctx, roleID)
+	}
 	return nil, nil
 }
 
@@ -748,6 +784,237 @@ func TestAdminService_SetRoleMenus_ExpandsAncestors(t *testing.T) {
 			assert.ElementsMatch(t, tc.wantIn, captured)
 		})
 	}
+}
+
+func newCopyRoleTestService(t *testing.T, roleRepo *mockRoleRepo, menuRepo *mockMenuRepo) *AdminService {
+	t.Helper()
+	jwt, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
+	return NewAdminService(
+		&mockUserRepo{},
+		roleRepo,
+		menuRepo,
+		&mockAuditRepo{},
+		jwt,
+		zap.NewNop(),
+	)
+}
+
+func copyRoleFixtureRepository(sourceID, copiedID uuid.UUID) *mockRoleRepo {
+	return &mockRoleRepo{
+		createFn: func(_ context.Context, role *Role) error {
+			role.ID = copiedID
+			return nil
+		},
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*Role, error) {
+			switch id {
+			case sourceID:
+				return &Role{ID: sourceID, Name: "operator", Description: "source"}, nil
+			case copiedID:
+				return &Role{ID: copiedID, Name: "operator_copy", Description: "source"}, nil
+			default:
+				return nil, commonerrors.ErrNotFound
+			}
+		},
+	}
+}
+
+func TestAdminService_CopyRole_CopiesExactAPIPermissions(t *testing.T) {
+	sourceID := uuid.MustParse("30000000-0000-0000-0000-000000000001")
+	copiedID := uuid.MustParse("30000000-0000-0000-0000-000000000002")
+	endpointIDs := []uuid.UUID{
+		uuid.MustParse("40000000-0000-0000-0000-000000000001"),
+		uuid.MustParse("40000000-0000-0000-0000-000000000002"),
+	}
+	roleRepo := copyRoleFixtureRepository(sourceID, copiedID)
+	roleRepo.getRoleAPIEndpointIDsFn = func(_ context.Context, roleID uuid.UUID) ([]uuid.UUID, error) {
+		require.Equal(t, sourceID, roleID)
+		return endpointIDs, nil
+	}
+	var savedRoleID uuid.UUID
+	var savedEndpointIDs []uuid.UUID
+	roleRepo.setRoleAPIEndpointsFn = func(_ context.Context, roleID uuid.UUID, ids []uuid.UUID) error {
+		savedRoleID = roleID
+		savedEndpointIDs = append([]uuid.UUID(nil), ids...)
+		return nil
+	}
+
+	svc := newCopyRoleTestService(t, roleRepo, &mockMenuRepo{})
+	_, err := svc.CopyRole(context.Background(), sourceID)
+
+	require.NoError(t, err)
+	assert.Equal(t, copiedID, savedRoleID)
+	assert.Equal(t, endpointIDs, savedEndpointIDs)
+}
+
+func TestAdminService_CopyRole_PersistsEmptyAPIPermissions(t *testing.T) {
+	sourceID := uuid.MustParse("30000000-0000-0000-0000-000000000011")
+	copiedID := uuid.MustParse("30000000-0000-0000-0000-000000000012")
+	roleRepo := copyRoleFixtureRepository(sourceID, copiedID)
+	setCalled := false
+	roleRepo.setRoleAPIEndpointsFn = func(_ context.Context, roleID uuid.UUID, ids []uuid.UUID) error {
+		setCalled = true
+		assert.Equal(t, copiedID, roleID)
+		assert.Empty(t, ids)
+		return nil
+	}
+
+	svc := newCopyRoleTestService(t, roleRepo, &mockMenuRepo{})
+	_, err := svc.CopyRole(context.Background(), sourceID)
+
+	require.NoError(t, err)
+	assert.True(t, setCalled)
+}
+
+func TestAdminService_CopyRole_APIPermissionFailureDeletesCopy(t *testing.T) {
+	sourceID := uuid.MustParse("30000000-0000-0000-0000-000000000021")
+	copiedID := uuid.MustParse("30000000-0000-0000-0000-000000000022")
+	roleRepo := copyRoleFixtureRepository(sourceID, copiedID)
+	roleRepo.getRoleAPIEndpointIDsFn = func(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+		return nil, fmt.Errorf("read endpoint grants")
+	}
+	var deletedID uuid.UUID
+	roleRepo.deleteFn = func(_ context.Context, id uuid.UUID) error {
+		deletedID = id
+		return nil
+	}
+
+	svc := newCopyRoleTestService(t, roleRepo, &mockMenuRepo{})
+	_, err := svc.CopyRole(context.Background(), sourceID)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "copy role API permissions")
+	assert.ErrorContains(t, err, "read endpoint grants")
+	assert.Equal(t, copiedID, deletedID)
+}
+
+func TestAdminService_CopyRole_CleanupFailurePreservesBothErrors(t *testing.T) {
+	sourceID := uuid.MustParse("30000000-0000-0000-0000-000000000031")
+	copiedID := uuid.MustParse("30000000-0000-0000-0000-000000000032")
+	roleRepo := copyRoleFixtureRepository(sourceID, copiedID)
+	roleRepo.getRoleAPIEndpointIDsFn = func(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+		return nil, fmt.Errorf("read endpoint grants")
+	}
+	roleRepo.deleteFn = func(_ context.Context, _ uuid.UUID) error {
+		return fmt.Errorf("delete copied role")
+	}
+
+	svc := newCopyRoleTestService(t, roleRepo, &mockMenuRepo{})
+	_, err := svc.CopyRole(context.Background(), sourceID)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "read endpoint grants")
+	assert.ErrorContains(t, err, "cleanup copied role")
+	assert.ErrorContains(t, err, "delete copied role")
+}
+
+func TestAdminService_CopyRole_GroupFailureStopsBeforeAPIPersistence(t *testing.T) {
+	sourceID := uuid.MustParse("30000000-0000-0000-0000-000000000041")
+	copiedID := uuid.MustParse("30000000-0000-0000-0000-000000000042")
+	roleRepo := copyRoleFixtureRepository(sourceID, copiedID)
+	roleRepo.getDeviceGroupDataFn = func(_ context.Context, _ uuid.UUID) (*RoleDeviceGroupData, error) {
+		return nil, fmt.Errorf("read device group grants")
+	}
+	apiWriteCalled := false
+	roleRepo.setRoleAPIEndpointsFn = func(_ context.Context, _ uuid.UUID, _ []uuid.UUID) error {
+		apiWriteCalled = true
+		return nil
+	}
+	var deletedID uuid.UUID
+	roleRepo.deleteFn = func(_ context.Context, id uuid.UUID) error {
+		deletedID = id
+		return nil
+	}
+
+	svc := newCopyRoleTestService(t, roleRepo, &mockMenuRepo{})
+	_, err := svc.CopyRole(context.Background(), sourceID)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "copy role device groups")
+	assert.False(t, apiWriteCalled)
+	assert.Equal(t, copiedID, deletedID)
+}
+
+func TestAdminService_CopyRole_MenuFailureStopsBeforeAPIPersistence(t *testing.T) {
+	sourceID := uuid.MustParse("30000000-0000-0000-0000-000000000051")
+	copiedID := uuid.MustParse("30000000-0000-0000-0000-000000000052")
+	roleRepo := copyRoleFixtureRepository(sourceID, copiedID)
+	apiWriteCalled := false
+	roleRepo.setRoleAPIEndpointsFn = func(_ context.Context, _ uuid.UUID, _ []uuid.UUID) error {
+		apiWriteCalled = true
+		return nil
+	}
+	var deletedID uuid.UUID
+	roleRepo.deleteFn = func(_ context.Context, id uuid.UUID) error {
+		deletedID = id
+		return nil
+	}
+	menuRepo := &mockMenuRepo{
+		getRoleMenuIDsFn: func(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+			return nil, fmt.Errorf("read menu grants")
+		},
+	}
+
+	svc := newCopyRoleTestService(t, roleRepo, menuRepo)
+	_, err := svc.CopyRole(context.Background(), sourceID)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "copy role menus")
+	assert.False(t, apiWriteCalled)
+	assert.Equal(t, copiedID, deletedID)
+}
+
+func TestAdminService_CopyRole_FinalReadFailureDeletesCopy(t *testing.T) {
+	sourceID := uuid.MustParse("30000000-0000-0000-0000-000000000061")
+	copiedID := uuid.MustParse("30000000-0000-0000-0000-000000000062")
+	roleRepo := copyRoleFixtureRepository(sourceID, copiedID)
+	roleRepo.getByIDFn = func(_ context.Context, id uuid.UUID) (*Role, error) {
+		if id == sourceID {
+			return &Role{ID: sourceID, Name: "operator", Description: "source"}, nil
+		}
+		return nil, fmt.Errorf("read copied role")
+	}
+	var deletedID uuid.UUID
+	roleRepo.deleteFn = func(_ context.Context, id uuid.UUID) error {
+		deletedID = id
+		return nil
+	}
+
+	svc := newCopyRoleTestService(t, roleRepo, &mockMenuRepo{})
+	_, err := svc.CopyRole(context.Background(), sourceID)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "get copied role")
+	assert.ErrorContains(t, err, "read copied role")
+	assert.Equal(t, copiedID, deletedID)
+}
+
+func TestAdminService_CopyRole_CanceledRequestStillDeletesCopy(t *testing.T) {
+	sourceID := uuid.MustParse("30000000-0000-0000-0000-000000000071")
+	copiedID := uuid.MustParse("30000000-0000-0000-0000-000000000072")
+	roleRepo := copyRoleFixtureRepository(sourceID, copiedID)
+	ctx, cancel := context.WithCancel(context.Background())
+	roleRepo.getRoleAPIEndpointIDsFn = func(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+		cancel()
+		return nil, context.Canceled
+	}
+	deleteCalled := false
+	roleRepo.deleteFn = func(cleanupCtx context.Context, id uuid.UUID) error {
+		deleteCalled = true
+		assert.Equal(t, copiedID, id)
+		assert.NoError(t, cleanupCtx.Err(), "补偿清理不能继承已取消的请求 context")
+		_, hasDeadline := cleanupCtx.Deadline()
+		assert.True(t, hasDeadline, "补偿清理必须有独立的超时上限")
+		return cleanupCtx.Err()
+	}
+
+	svc := newCopyRoleTestService(t, roleRepo, &mockMenuRepo{})
+	_, err := svc.CopyRole(ctx, sourceID)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.True(t, deleteCalled)
+	assert.NotContains(t, err.Error(), "cleanup copied role")
 }
 
 // ===================== P0-④ 单点登录 — 登录时撤销旧 token =====================
