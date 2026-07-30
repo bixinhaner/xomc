@@ -104,13 +104,13 @@ func (KeyBuilder) ACSTaskQueuePrefix() string { return acsTaskQueuePrefix }
 // ACSTaskQueuePattern 队列扫描通配符（供 KEYS/SCAN 使用）。
 func (KeyBuilder) ACSTaskQueuePattern() string { return acsTaskQueuePrefix + "*" }
 
-// ACSTaskDetail 任务详情 Hash（24h TTL）。
+// ACSTaskDetail 任务详情 Hash（活跃态 4h；终态默认 15m、最低 10m）。
 func (KeyBuilder) ACSTaskDetail(taskID string) string { return acsTaskDetailPrefix + taskID }
 
 // ACSTaskDetailPrefix 任务详情键前缀。
 func (KeyBuilder) ACSTaskDetailPrefix() string { return acsTaskDetailPrefix }
 
-// ACSCWMP2Task CWMP ID → Task ID 反查（24h TTL）。传入已哈希后的 CWMP ID。
+// ACSCWMP2Task CWMP ID → Task ID 反查（活跃态 4h，任务终态时立即删除）。
 func (KeyBuilder) ACSCWMP2Task(hashed string) string { return acsCWMP2TaskPrefix + hashed }
 
 // ACSCWMP2TaskPrefix CWMP 反查键前缀。

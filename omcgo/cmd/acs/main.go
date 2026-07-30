@@ -94,7 +94,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 	if inf.PgPool == nil {
 		return fmt.Errorf("PostgreSQL connection required for ACS task service")
 	}
-	taskQueue := task.NewRedisTaskQueue(inf.Redis)
+	taskQueue := task.NewRedisTaskQueueWithTerminalTTL(inf.Redis, cfg.Task.EffectiveTerminalRedisTTL())
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	taskService := task.NewTaskService(taskQueue, taskRepo, inf.Logger)
 	// Broadcast terminal task states so APP/Worker subscribers (MML ResultAggregator)

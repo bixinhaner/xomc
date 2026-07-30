@@ -174,6 +174,7 @@ task:
   default_expires_in_seconds: 120
   sweep_interval_seconds: 10
   wake_concurrency: 256
+  terminal_redis_ttl: 15m
 
 # F05 MR 测量任务（详见 docs/project/prd/F05-mr-task-management.md）
 # 字段语义参 internal/core/appconfig/config.go MRConfig 注释

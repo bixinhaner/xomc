@@ -14,17 +14,33 @@ import (
 const (
 	// #168：24h→4h，与命令实际生命周期匹配，抑制 Redis 工作集增长（2.36G 撑爆事故的增长真因
 	// 之一就是 24h 任务态累积）。被淘汰/过期的任务态以 PG 双写为权威源，可重建。
-	taskDetailTTL     = 4 * time.Hour // 任务详情 TTL
-	cwmpMappingTTL    = 4 * time.Hour // CWMP ID → Task ID 映射 TTL
-	queuePeekLimit    = 32
-	queuePopScanLimit = 256
-	queueScoreFactor  = 1e13
+	taskDetailTTL          = 4 * time.Hour // 活跃任务详情 TTL
+	cwmpMappingTTL         = 4 * time.Hour // CWMP ID → Task ID 映射 TTL
+	defaultTerminalTaskTTL = 15 * time.Minute
+	minimumTerminalTaskTTL = 10 * time.Minute
+	queuePeekLimit         = 32
+	queuePopScanLimit      = 256
+	queueScoreFactor       = 1e13
 )
 
 // RedisTaskQueue 实现 TaskQueue 接口
 type RedisTaskQueue struct {
-	client redis.UniversalClient
+	client      redis.UniversalClient
+	terminalTTL time.Duration
 }
+
+var terminalTaskTransitionScript = redis.NewScript(`
+if redis.call("EXISTS", KEYS[1]) == 0 and ARGV[4] ~= "1" then
+	return -1
+end
+local current = redis.call("HGET", KEYS[1], "status")
+if current == "completed" or current == "failed" or current == "expired" or current == "cancelled" then
+	return 0
+end
+redis.call("HSET", KEYS[1], "data", ARGV[1], "status", ARGV[2])
+redis.call("PEXPIRE", KEYS[1], ARGV[3])
+return 1
+`)
 
 // PurgeBySourceResult summarizes a source-scoped Redis queue purge.
 // Matched counts tasks whose source matched; Deleted is only incremented after
@@ -39,7 +55,21 @@ type PurgeBySourceResult struct {
 
 // NewRedisTaskQueue 创建 Redis 任务队列
 func NewRedisTaskQueue(client redis.UniversalClient) *RedisTaskQueue {
-	return &RedisTaskQueue{client: client}
+	return NewRedisTaskQueueWithTerminalTTL(client, defaultTerminalTaskTTL)
+}
+
+// NewRedisTaskQueueWithTerminalTTL 创建带可配置终态保留时间的任务队列。
+// 终态 Hash 至少保留 10 分钟，覆盖 ACS 5 分钟会话超时并留出迟到余量，
+// 同时显著大于跨进程 Redis→PG 对账窗口；
+// 未配置时保留 15 分钟。活跃任务仍使用 4 小时 TTL。
+func NewRedisTaskQueueWithTerminalTTL(client redis.UniversalClient, terminalTTL time.Duration) *RedisTaskQueue {
+	if terminalTTL <= 0 {
+		terminalTTL = defaultTerminalTaskTTL
+	}
+	if terminalTTL < minimumTerminalTaskTTL {
+		terminalTTL = minimumTerminalTaskTTL
+	}
+	return &RedisTaskQueue{client: client, terminalTTL: terminalTTL}
 }
 
 // queueKey 返回设备队列的 Redis key
@@ -87,7 +117,7 @@ func (q *RedisTaskQueue) Push(ctx context.Context, task *Task) error {
 	})
 
 	// 2. 存储任务详情
-	pipe.HSet(ctx, q.taskKey(task.ID), "data", taskData)
+	pipe.HSet(ctx, q.taskKey(task.ID), "data", taskData, "status", string(task.Status))
 	pipe.Expire(ctx, q.taskKey(task.ID), taskDetailTTL)
 
 	_, err = pipe.Exec(ctx)
@@ -207,17 +237,28 @@ func (q *RedisTaskQueue) Len(ctx context.Context, deviceSN string) (int64, error
 
 // GetByID 根据 ID 获取任务详情
 func (q *RedisTaskQueue) GetByID(ctx context.Context, taskID string) (*Task, error) {
-	taskData, err := q.client.HGet(ctx, q.taskKey(taskID), "data").Result()
-	if err == redis.Nil {
-		return nil, nil // 任务不存在
-	}
+	values, err := q.client.HMGet(ctx, q.taskKey(taskID), "data", "status").Result()
 	if err != nil {
 		return nil, fmt.Errorf("get task: %w", err)
+	}
+	if len(values) < 1 || values[0] == nil {
+		return nil, nil // 任务不存在
+	}
+	taskData, ok := values[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("get task: unexpected data type %T", values[0])
 	}
 
 	var task Task
 	if err := json.Unmarshal([]byte(taskData), &task); err != nil {
 		return nil, fmt.Errorf("unmarshal task: %w", err)
+	}
+	if len(values) < 2 || values[1] == nil {
+		// 滚动升级兼容：旧版本 Hash 只有 data 字段。先以 HSETNX 补回已序列化
+		// 状态，终态 Lua fence 才能识别旧终态并拒绝迟到响应覆盖它。
+		if err := q.client.HSetNX(ctx, q.taskKey(taskID), "status", string(task.Status)).Err(); err != nil {
+			return nil, fmt.Errorf("backfill task status: %w", err)
+		}
 	}
 
 	return &task, nil
@@ -247,12 +288,18 @@ func (q *RedisTaskQueue) Update(ctx context.Context, task *Task) error {
 		return fmt.Errorf("marshal task: %w", err)
 	}
 
+	if isTerminal(task.Status) {
+		_, err := q.transitionTerminal(ctx, task, taskData, true)
+		return err
+	}
+
 	// Keep the detail hash and executable queue membership consistent. A task is
 	// executable iff it is pending; every other state must remove any stale
 	// sorted-set member left by recovery, cancellation, or a concurrent terminal
 	// transition.
 	pipe := q.client.Pipeline()
-	pipe.HSet(ctx, q.taskKey(task.ID), "data", taskData)
+	pipe.HSet(ctx, q.taskKey(task.ID), "data", taskData, "status", string(task.Status))
+	pipe.Expire(ctx, q.taskKey(task.ID), taskDetailTTL)
 	if task.Status == TaskStatusPending {
 		score := queueScore(task)
 		pipe.ZAdd(ctx, q.queueKey(task.DeviceSN), redis.Z{
@@ -472,7 +519,8 @@ func (q *RedisTaskQueue) MarkTaskSent(ctx context.Context, taskID, cwmpID string
 	pipe := q.client.Pipeline()
 
 	taskData, _ := json.Marshal(task)
-	pipe.HSet(ctx, q.taskKey(taskID), "data", taskData)
+	pipe.HSet(ctx, q.taskKey(taskID), "data", taskData, "status", string(task.Status))
+	pipe.Expire(ctx, q.taskKey(taskID), taskDetailTTL)
 	pipe.Set(ctx, q.cwmpKey(cwmpID), taskID, cwmpMappingTTL)
 
 	_, err = pipe.Exec(ctx)
@@ -481,28 +529,25 @@ func (q *RedisTaskQueue) MarkTaskSent(ctx context.Context, taskID, cwmpID string
 
 // MarkTaskCompleted 标记任务完成
 func (q *RedisTaskQueue) MarkTaskCompleted(ctx context.Context, taskID string, result json.RawMessage) error {
+	_, err := q.markTaskCompleted(ctx, taskID, result)
+	return err
+}
+
+func (q *RedisTaskQueue) markTaskCompleted(ctx context.Context, taskID string, result json.RawMessage) (bool, error) {
 	task, err := q.GetByID(ctx, taskID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if task == nil {
-		return ErrTaskNotFound
+		return false, ErrTaskNotFound
 	}
 
 	task.MarkCompleted(result)
-
-	// 更新任务详情
-	taskData, _ := json.Marshal(task)
-	if err := q.client.HSet(ctx, q.taskKey(taskID), "data", taskData).Err(); err != nil {
-		return err
+	taskData, err := json.Marshal(task)
+	if err != nil {
+		return false, fmt.Errorf("marshal completed task: %w", err)
 	}
-
-	// 删除 CWMP 映射
-	if task.CWMPID != "" {
-		q.DeleteCWMPIDMapping(ctx, task.CWMPID)
-	}
-
-	return nil
+	return q.transitionTerminal(ctx, task, taskData, false)
 }
 
 // MarkTaskFailed 标记任务失败
@@ -513,28 +558,72 @@ func (q *RedisTaskQueue) MarkTaskFailed(ctx context.Context, taskID string, erro
 // MarkTaskFailedWithResult 标记任务失败并附带结构化 result（如 SetParameterValuesFault 详情）。
 // result 为空时等价于 MarkTaskFailed。
 func (q *RedisTaskQueue) MarkTaskFailedWithResult(ctx context.Context, taskID string, errorCode int, errorMsg string, result json.RawMessage) error {
+	_, err := q.markTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, result)
+	return err
+}
+
+func (q *RedisTaskQueue) markTaskFailedWithResult(ctx context.Context, taskID string, errorCode int, errorMsg string, result json.RawMessage) (bool, error) {
 	task, err := q.GetByID(ctx, taskID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if task == nil {
-		return ErrTaskNotFound
+		return false, ErrTaskNotFound
 	}
 
 	task.MarkFailedWithResult(errorCode, errorMsg, result)
+	taskData, err := json.Marshal(task)
+	if err != nil {
+		return false, fmt.Errorf("marshal failed task: %w", err)
+	}
+	return q.transitionTerminal(ctx, task, taskData, false)
+}
 
-	// 更新任务详情
-	taskData, _ := json.Marshal(task)
-	if err := q.client.HSet(ctx, q.taskKey(taskID), "data", taskData).Err(); err != nil {
-		return err
+// transitionTerminal 通过单 key Lua 脚本把状态数据与短 TTL 一次提交，避免
+// HSET 成功而 EXPIRE 丢失导致终态 Hash 再次滞留 4 小时。脚本同时提供终态 fence：
+// 并发或迟到重复响应不能覆盖第一个终态，也不会延长其保留时间。
+//
+// 队列 ZSET 与 cwmp2task 可能位于 Redis Cluster 的不同 slot，无法和详情 Hash
+// 放进同一个 Lua 脚本；终态提交后执行幂等清理，调用重试时即使状态未变化仍会
+// 再次清理，保证残留最终收敛。
+func (q *RedisTaskQueue) transitionTerminal(
+	ctx context.Context,
+	task *Task,
+	taskData []byte,
+	materializeMissing bool,
+) (bool, error) {
+	if task == nil || !isTerminal(task.Status) {
+		return false, fmt.Errorf("terminal task required")
+	}
+	materializeArg := "0"
+	if materializeMissing {
+		materializeArg = "1"
+	}
+	result, err := terminalTaskTransitionScript.Run(
+		ctx,
+		q.client,
+		[]string{q.taskKey(task.ID)},
+		taskData,
+		string(task.Status),
+		q.terminalTTL.Milliseconds(),
+		materializeArg,
+	).Int64()
+	if err != nil {
+		return false, fmt.Errorf("transition task terminal: %w", err)
+	}
+	if result < 0 {
+		return false, ErrTaskNotFound
 	}
 
-	// 删除 CWMP 映射
+	pipe := q.client.Pipeline()
+	pipe.ZRem(ctx, q.queueKey(task.DeviceSN), task.ID)
 	if task.CWMPID != "" {
-		q.DeleteCWMPIDMapping(ctx, task.CWMPID)
+		pipe.Del(ctx, q.cwmpKey(task.CWMPID))
 	}
-
-	return nil
+	if _, err := pipe.Exec(ctx); err != nil {
+		return result == 1, fmt.Errorf("clean terminal task indexes: %w", err)
+	}
+	return result == 1, nil
 }
 
 // GetQueueLengths 获取所有设备的队列长度（用于监控）

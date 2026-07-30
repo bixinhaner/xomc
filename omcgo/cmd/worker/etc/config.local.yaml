@@ -61,6 +61,7 @@ task:
   default_expires_in_seconds: 120
   sweep_interval_seconds: 10
   reconcile_interval_seconds: 30
+  terminal_redis_ttl: 15m
 
 # #358: 离线设备活动告警清理器（local 开发用分钟级短阈值，便于本地复现收敛）。
 # 任一字段 <=0 或缺省则回退代码 Default*（threshold 3600s / interval 300s / batch 200）。

@@ -556,8 +556,20 @@ func (s *TaskService) releaseUnwrittenSendClaim(ctx context.Context, taskID, cwm
 // MarkTaskCompleted 标记任务完成
 func (s *TaskService) MarkTaskCompleted(ctx context.Context, taskID string, result json.RawMessage) error {
 	// 更新 Redis
-	if err := s.queue.MarkTaskCompleted(ctx, taskID, result); err != nil {
-		return fmt.Errorf("mark task completed in queue: %w", err)
+	changed, transitionErr := s.queue.markTaskCompleted(ctx, taskID, result)
+	if transitionErr != nil && !changed {
+		return fmt.Errorf("mark task completed in queue: %w", transitionErr)
+	}
+	if transitionErr != nil {
+		// 详情 Hash 的终态与短 TTL 已原子提交；索引清理失败不应阻断 PG
+		// 双写及完成事件，幂等重复调用会再次尝试清理。
+		logger.L(ctx).Warn("clean completed task redis indexes",
+			zap.String("task_id", taskID),
+			zap.Error(transitionErr))
+	}
+	if !changed {
+		// 迟到/重复响应：第一个终态获胜，不能重复写 PG、计数或发布事件。
+		return nil
 	}
 
 	// 同步更新 PostgreSQL
@@ -603,6 +615,11 @@ func (s *TaskService) MarkTaskFailedWithResult(ctx context.Context, taskID strin
 	if err != nil {
 		return fmt.Errorf("get failed task: %w", err)
 	}
+	if task != nil && isTerminal(task.Status) {
+		// 已完成任务收到迟到重复 Fault 时保持第一个终态；尤其不能把仍有
+		// retry budget 的 MML completed task 重新放回 pending。
+		return nil
+	}
 	if shouldAutoRetryOnFailure(task) {
 		oldCWMPID := task.CWMPID
 		if len(result) > 0 {
@@ -636,8 +653,17 @@ func (s *TaskService) MarkTaskFailedWithResult(ctx context.Context, taskID strin
 	}
 
 	// 更新 Redis
-	if err := s.queue.MarkTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, result); err != nil {
-		return fmt.Errorf("mark task failed in queue: %w", err)
+	changed, transitionErr := s.queue.markTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, result)
+	if transitionErr != nil && !changed {
+		return fmt.Errorf("mark task failed in queue: %w", transitionErr)
+	}
+	if transitionErr != nil {
+		logger.L(ctx).Warn("clean failed task redis indexes",
+			zap.String("task_id", taskID),
+			zap.Error(transitionErr))
+	}
+	if !changed {
+		return nil
 	}
 
 	// 同步更新 PostgreSQL
@@ -668,8 +694,8 @@ func (s *TaskService) MarkTaskFailedWithResult(ctx context.Context, taskID strin
 // ExpireTask 把单个任务标记为 expired（T-0157 C2）。
 //
 // 与 MarkTaskFailed 不同：调用方已通过 repo.ListExpiredCandidates 持有完整 Task 对象，
-// 跳过 GetByID 一次往返。流程：MarkExpired → repo.Update → queue.Delete（可能已被 popper
-// 清掉，warn 不中断）→ metrics 计数 → notifyCompletion 广播（复用 task.failed 主题，
+// 跳过 GetByID 一次往返。流程：MarkExpired → repo.Update → queue.Update（原子写入短 TTL
+// 终态并清理索引，warn 不中断）→ metrics 计数 → notifyCompletion 广播（复用 task.failed 主题，
 // 订阅器按 task.Status 区分 failed / expired —— 详见 SubjectForStatus）。
 //
 // 用于 worker 进程的 ExpiredSweeper；其他场景请用 MarkTaskFailed 走 Redis 真相源。
@@ -681,8 +707,8 @@ func (s *TaskService) ExpireTask(ctx context.Context, task *Task) error {
 	if err := s.repo.Update(ctx, task); err != nil {
 		return fmt.Errorf("update task to expired: %w", err)
 	}
-	if err := s.queue.Delete(ctx, task.ID); err != nil {
-		s.logger.Warn("queue delete expired task",
+	if err := s.queue.Update(ctx, task); err != nil {
+		s.logger.Warn("queue update expired task",
 			zap.String("task_id", task.ID),
 			zap.Error(err))
 	}
@@ -763,9 +789,10 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID string) error {
 	task.Status = TaskStatusCancelled
 	task.CompletedAt = &now
 
-	// 从 Redis 删除
-	if err := s.queue.Delete(ctx, taskID); err != nil {
-		return fmt.Errorf("delete task from queue: %w", err)
+	// Redis 保留短期终态 tombstone，既让迟到重复请求幂等，又避免 4 小时
+	// 大结果 Hash 堆积；Update 内原子写入终态数据+短 TTL，并清理队列索引。
+	if err := s.queue.Update(ctx, task); err != nil {
+		return fmt.Errorf("mark cancelled task in queue: %w", err)
 	}
 
 	// 更新 PostgreSQL

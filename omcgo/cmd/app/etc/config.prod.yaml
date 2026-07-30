@@ -156,6 +156,7 @@ task:
   default_expires_in_seconds: 120
   sweep_interval_seconds: 10
   wake_concurrency: 256  # issue #12: wakeDevice 唤醒并发上界（防 10 万风暴峰值 OOM）
+  terminal_redis_ttl: 15m
 
 provision:
   enabled: true

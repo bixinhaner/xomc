@@ -29,6 +29,7 @@ type ACSConfig struct {
 	Redis                   RedisConfig           `mapstructure:"redis"`
 	NATS                    NATSConfig            `mapstructure:"nats"`
 	ParamSync               ParamSyncConfig       `mapstructure:"param_sync"`
+	Task                    TaskConfig            `mapstructure:"task"`
 	DB                      PostgresConfig        `mapstructure:"db"`
 	TSDB                    PostgresConfig        `mapstructure:"tsdb"` // KPI/时序库物理分离：ACS 写 trace_messages（已迁时序库）所需的第二个连接池
 	MinIO                   MinIOConfig           `mapstructure:"minio"`
@@ -403,11 +404,28 @@ func (c DashboardConfig) Defaults() DashboardConfig {
 // ReconcileIntervalSeconds: worker 进程 task_reconciler 周期对账 Redis↔PG 状态分叉的间隔（秒，#13）。
 //
 //	<= 0 时 reconciler 不启动。修复 "PG 滞后于 Redis 终态" 的孤儿/陈旧记录。
+//
+// TerminalRedisTTL: Redis 终态 task Hash 的短期保留窗口。
+//
+//	默认 15 分钟，覆盖 ACS 5 分钟会话迟到响应和 worker 60 秒对账宽限；
+//	小于 10 分钟会钳到 10 分钟。pending/sent/待重试仍保留 4 小时。
 type TaskConfig struct {
-	DefaultExpiresInSeconds  int `mapstructure:"default_expires_in_seconds"`
-	SweepIntervalSeconds     int `mapstructure:"sweep_interval_seconds"`
-	WakeConcurrency          int `mapstructure:"wake_concurrency"`
-	ReconcileIntervalSeconds int `mapstructure:"reconcile_interval_seconds"`
+	DefaultExpiresInSeconds  int           `mapstructure:"default_expires_in_seconds"`
+	SweepIntervalSeconds     int           `mapstructure:"sweep_interval_seconds"`
+	WakeConcurrency          int           `mapstructure:"wake_concurrency"`
+	ReconcileIntervalSeconds int           `mapstructure:"reconcile_interval_seconds"`
+	TerminalRedisTTL         time.Duration `mapstructure:"terminal_redis_ttl"`
+}
+
+// EffectiveTerminalRedisTTL 返回终态 task Hash 的安全保留窗口。
+func (c TaskConfig) EffectiveTerminalRedisTTL() time.Duration {
+	if c.TerminalRedisTTL <= 0 {
+		return 15 * time.Minute
+	}
+	if c.TerminalRedisTTL < 10*time.Minute {
+		return 10 * time.Minute
+	}
+	return c.TerminalRedisTTL
 }
 
 // OfflineAlarmCleanupConfig 配置离线设备活动告警清理器（worker 进程的 OfflineAlarmCleaner）。

@@ -144,8 +144,8 @@ TechNR  Technology = "nr"
 ```
 acs:session:{device_serial}          — 会话状态 Hash（TTL 5 分钟）
 acs:taskq:{device_serial}            — 任务队列 Sorted Set（member=taskID）
-acs:task:{taskID}                    — 任务详情 Hash（TTL 24h）
-acs:cwmp2task:{hash}                 — CWMP ID → Task ID 映射（TTL 24h）
+acs:task:{taskID}                    — 任务详情 Hash（活跃态 TTL 4h；终态默认 15m）
+acs:cwmp2task:{hash}                 — CWMP ID → Task ID 映射（活跃态 TTL 4h，终态删除）
 acs:heartbeat:{device_serial}        — 心跳时间戳（TTL = 2×inform_interval）
 acs:connreq:pending:{device_serial}  — Connection Request 去重（TTL 30 秒）
 acs:admission:slots                  — 全局准入 Sorted Set（member=sessionID, score=过期 unix 秒；TTL 自愈丢失的 Release）（issue #65 Option B）
