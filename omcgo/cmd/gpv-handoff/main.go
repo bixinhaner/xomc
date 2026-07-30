@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	natscomponent "github.com/omcgo/omcgo/internal/core/components/nats"
 	"github.com/omcgo/omcgo/internal/core/event"
 )
 
@@ -67,6 +69,16 @@ func run(ctx context.Context, configPath, sourceConsumer string, freshInstall bo
 		return fmt.Errorf("load app config: %w", err)
 	}
 	gpv := config.Provision.GPVResponse.Defaults()
+	if freshInstall {
+		client, bootstrapErr := natscomponent.NewNATSClient(config.NATS, zap.NewNop())
+		if bootstrapErr != nil {
+			return fmt.Errorf("connect NATS for fresh install stream bootstrap: %w", bootstrapErr)
+		}
+		defer client.Conn.Close()
+		if bootstrapErr := client.EnsureStreams(ctx, false); bootstrapErr != nil {
+			return fmt.Errorf("bootstrap fresh install streams: %w", bootstrapErr)
+		}
+	}
 	nc, err := nats.Connect(
 		config.NATS.URL,
 		nats.Name("omcgo-gpv-handoff"),

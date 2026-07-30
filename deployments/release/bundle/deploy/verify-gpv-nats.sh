@@ -39,6 +39,6 @@ grep -Fq 'Server is ready' "$LOG" || {
 
 cd "$REPO_ROOT/omcgo"
 GPV_NATS_TEST_URL="nats://127.0.0.1:$PORT" \
-  go test ./internal/core/event \
-    -run 'TestKeyedQueue|TestKeyedPull|TestPrepareGPVHandoff' \
+  go test ./internal/core/event ./cmd/gpv-handoff \
+    -run 'TestKeyedQueue|TestKeyedPull|TestPrepareGPVHandoff|TestRunFreshInstall' \
     -count=1 -v

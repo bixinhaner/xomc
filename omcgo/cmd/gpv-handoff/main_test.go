@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,4 +51,40 @@ provision:
 
 	_, err := loadHandoffConfig(path)
 	require.ErrorContains(t, err, "nats.url must not be empty")
+}
+
+func TestRunFreshInstallBootstrapsEmptyJetStream(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+	for name := range js.StreamNames() {
+		require.NoError(t, js.DeleteStream(name))
+	}
+
+	path := filepath.Join(t.TempDir(), "app.prod.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(`
+nats:
+  url: %s
+provision:
+  gpv_response:
+    rpc_durable: rpc-fresh-install
+`, url)), 0o600))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, run(ctx, path, "", true))
+
+	stream, err := js.StreamNameBySubject("command.get_parameters.response")
+	require.NoError(t, err)
+	require.Equal(t, "COMMAND", stream)
+	consumer, err := js.ConsumerInfo(stream, "rpc-fresh-install")
+	require.NoError(t, err)
+	require.Equal(t, nats.DeliverNewPolicy, consumer.Config.DeliverPolicy)
 }
