@@ -2098,6 +2098,7 @@ SELECT DISTINCT regexp_replace(parameter_path::text, '\.[0-9]+\.', '.{i}.', 'g')
 			device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger, device.NewPgLocationObservationRepository(c.PgPool)),
 			c.DeviceRepo, // migration 000146: 写 last_param_sync_failed_at + error
 			c.miscDeps.taskSvc,
+			c.Cfg.Provision.GPVResponse,
 			logger,
 		)
 		if err := rpcRespSub.Start(); err != nil {

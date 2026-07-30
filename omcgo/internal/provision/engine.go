@@ -364,8 +364,19 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 	}
 
 	// Subscribe to GPV response for parameter sync processing.
+	gpvConfig := e.config.GPVResponse.Defaults()
+	if tuner, ok := bus.(interface {
+		SetPullTuning(string, event.PullTuning)
+	}); ok {
+		tuner.SetPullTuning(event.SubjectCommandGetParamsResponse, event.PullTuning{
+			BatchSize:     gpvPullBatchSize,
+			Concurrency:   gpvConfig.ProvisionConcurrency,
+			AckWait:       gpvConfig.AckWait,
+			MaxAckPending: gpvConfig.MaxAckPending,
+		})
+	}
 	e.ensureGPVWorkersStarted()
-	if _, err := bus.PullSubscribe(event.SubjectCommandGetParamsResponse, "provision-gpv", func(ctx context.Context, evt event.Event) error {
+	if _, err := bus.PullSubscribe(event.SubjectCommandGetParamsResponse, gpvConfig.ProvisionQueue, func(ctx context.Context, evt event.Event) error {
 		return e.enqueueGPVResponseEvent(ctx, evt)
 	}); err != nil {
 		e.logger.Warn("failed to subscribe to GPV response", zap.Error(err))
@@ -1170,35 +1181,27 @@ type gpvResponsePayload struct {
 type gpvWorkItem struct {
 	ctx     context.Context
 	payload gpvResponsePayload
+	result  chan error
 }
 
 const (
-	defaultGPVWorkerShardCount = 8
-	defaultGPVWorkerQueueDepth = 256
+	gpvPullBatchSize = 64
 )
 
 func (e *ProvisioningEngine) ensureGPVWorkersStarted() {
 	e.gpvWorkersOnce.Do(func() {
-		shards := defaultGPVWorkerShardCount
-		if e.config.AutoSync.MaxConcurrent > 0 {
-			shards = e.config.AutoSync.MaxConcurrent
-		}
-		if shards < 1 {
-			shards = 1
-		}
-		if shards > 32 {
-			shards = 32
-		}
+		config := e.config.GPVResponse.Defaults()
+		shards := config.ProvisionConcurrency
 
 		e.gpvWorkerChans = make([]chan gpvWorkItem, shards)
 		for i := 0; i < shards; i++ {
-			ch := make(chan gpvWorkItem, defaultGPVWorkerQueueDepth)
+			ch := make(chan gpvWorkItem, config.ProvisionQueueDepth)
 			e.gpvWorkerChans[i] = ch
 			go e.runGPVWorker(i, ch)
 		}
 		e.logger.Info("gpv workers started",
 			zap.Int("shards", shards),
-			zap.Int("queue_depth", defaultGPVWorkerQueueDepth))
+			zap.Int("queue_depth", config.ProvisionQueueDepth))
 	})
 }
 
@@ -1208,11 +1211,15 @@ func (e *ProvisioningEngine) runGPVWorker(shard int, ch <-chan gpvWorkItem) {
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		if err := e.handleGPVPayload(ctx, item.payload); err != nil {
+		err := e.handleGPVPayload(ctx, item.payload)
+		if err != nil {
 			e.logger.Error("gpv worker failed",
 				zap.Int("shard", shard),
 				zap.String("device_sn", item.payload.DeviceSN),
 				zap.Error(err))
+		}
+		if item.result != nil {
+			item.result <- err
 		}
 	}
 }
@@ -1233,13 +1240,19 @@ func (e *ProvisioningEngine) enqueueGPVResponseEvent(ctx context.Context, evt ev
 		return fmt.Errorf("gpv workers not initialized")
 	}
 	shard := gpvShardIndex(payload.DeviceSN, len(e.gpvWorkerChans))
-	item := gpvWorkItem{ctx: ctx, payload: payload}
+	result := make(chan error, 1)
+	item := gpvWorkItem{ctx: ctx, payload: payload, result: result}
 
 	select {
 	case e.gpvWorkerChans[shard] <- item:
-		return nil
-	default:
-		return fmt.Errorf("gpv worker queue full: shard=%d device_sn=%s", shard, payload.DeviceSN)
+	case <-ctx.Done():
+		return fmt.Errorf("enqueue GPV response for %s: %w", payload.DeviceSN, ctx.Err())
+	}
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("wait GPV response for %s: %w", payload.DeviceSN, ctx.Err())
 	}
 }
 
@@ -1285,7 +1298,7 @@ func (e *ProvisioningEngine) handleGPVPayload(ctx context.Context, payload gpvRe
 	dev, err := e.deviceService.GetBySerialNumber(ctx, payload.DeviceSN)
 	if err != nil {
 		e.logger.Error("find device for GPV response", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
-		return nil
+		return fmt.Errorf("find device for GPV response %s: %w", payload.DeviceSN, err)
 	}
 	if dev == nil {
 		e.logger.Warn("device not found for GPV response, skipping", zap.String("device_sn", payload.DeviceSN))
@@ -1298,7 +1311,7 @@ func (e *ProvisioningEngine) handleGPVPayload(ctx context.Context, payload gpvRe
 
 	if used, err := e.syncService.HandleSyncResultPathB(ctx, dev, payload.ParameterValues, payload.CommandKey); err != nil {
 		e.logger.Error("path-b save parameter values", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
-		return nil
+		return fmt.Errorf("save path-b GPV response for %s: %w", payload.DeviceSN, err)
 	} else if used {
 		e.logger.Info("path-b parameter values saved",
 			zap.String("device_sn", payload.DeviceSN),
@@ -1309,7 +1322,7 @@ func (e *ProvisioningEngine) handleGPVPayload(ctx context.Context, payload gpvRe
 
 	if err := e.syncService.HandleSyncResult(ctx, dev, payload.ParameterValues); err != nil {
 		e.logger.Error("save parameter values", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
-		return nil
+		return fmt.Errorf("save GPV response for %s: %w", payload.DeviceSN, err)
 	}
 	e.logger.Info("parameter values saved (privatePath direct)",
 		zap.String("device_sn", payload.DeviceSN),

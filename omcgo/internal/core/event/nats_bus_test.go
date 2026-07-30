@@ -588,10 +588,15 @@ func TestPullTuningForSubject_DefaultsAndOverride(t *testing.T) {
 	bus := NewNATSEventBus(nil, nil, zap.NewNop())
 
 	gpv := bus.pullTuningForSubject(SubjectCommandGetParamsResponse)
-	assert.Equal(t, 1, gpv.Concurrency)
+	assert.Equal(t, 2, gpv.Concurrency)
 	assert.Equal(t, gpvPullBatchSize, gpv.BatchSize)
 	assert.Equal(t, gpvPullAckWait, gpv.AckWait)
 	assert.Equal(t, defaultPullMaxAckPending, gpv.MaxAckPending)
+
+	gpvQueue := bus.queueTuningForSubject(SubjectCommandGetParamsResponse)
+	assert.Equal(t, 30*time.Second, gpvQueue.AckWait)
+	assert.Equal(t, 5, gpvQueue.MaxDeliver)
+	assert.Equal(t, 2000, gpvQueue.MaxAckPending)
 
 	paramSync := bus.pullTuningForSubject(SubjectParamSyncTaskResult)
 	assert.Equal(t, paramSyncResultPullConcurrent, paramSync.Concurrency)
@@ -604,6 +609,121 @@ func TestPullTuningForSubject_DefaultsAndOverride(t *testing.T) {
 	assert.Equal(t, 3, overridden.Concurrency)
 	assert.Equal(t, 45*time.Second, overridden.AckWait)
 	assert.Equal(t, 99, overridden.MaxAckPending)
+}
+
+func TestDurableDeliveryPlanNeverSkipsOrReplaysWhenMigratingFromAckFloor(t *testing.T) {
+	plan := durableDeliveryPlan(nil, 416825)
+
+	require.Equal(t, durableDeliveryFromSequence, plan.policy)
+	require.Equal(t, uint64(416825), plan.startSequence)
+}
+
+func TestDurableDeliveryPlanBindsExistingConsumerWithoutResettingItsPosition(t *testing.T) {
+	existing := &nats.ConsumerInfo{
+		Name: "device-rpc-gpv",
+		Config: nats.ConsumerConfig{
+			Durable:       "device-rpc-gpv",
+			DeliverPolicy: nats.DeliverByStartSequencePolicy,
+			OptStartSeq:   416825,
+		},
+	}
+
+	plan := durableDeliveryPlan(existing, 1)
+
+	require.Equal(t, durableDeliveryBindExisting, plan.policy)
+	require.Zero(t, plan.startSequence)
+}
+
+func TestDurableDeliveryPlanFreshConsumerUsesDeliverAllNotDeliverNew(t *testing.T) {
+	plan := durableDeliveryPlan(nil, 0)
+
+	require.Equal(t, durableDeliveryAll, plan.policy)
+	require.Zero(t, plan.startSequence)
+}
+
+func TestKeyedDispatcherRunsDifferentDevicesInParallelAndSameDeviceInOrder(t *testing.T) {
+	dispatcher := newKeyedDispatcher(2, 2)
+	t.Cleanup(dispatcher.Close)
+
+	keyA, keyB := keysForDifferentShards(2)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondStarted := make(chan struct{})
+	otherStarted := make(chan struct{})
+
+	require.NoError(t, dispatcher.Submit(context.Background(), keyA, func() {
+		close(firstStarted)
+		<-releaseFirst
+	}))
+	<-firstStarted
+	require.NoError(t, dispatcher.Submit(context.Background(), keyA, func() {
+		close(secondStarted)
+	}))
+	require.NoError(t, dispatcher.Submit(context.Background(), keyB, func() {
+		close(otherStarted)
+	}))
+
+	select {
+	case <-otherStarted:
+	case <-time.After(time.Second):
+		t.Fatal("different-device work did not run in parallel")
+	}
+	select {
+	case <-secondStarted:
+		t.Fatal("same-device work ran out of order")
+	default:
+	}
+
+	close(releaseFirst)
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("same-device second item did not run after the first")
+	}
+}
+
+func TestKeyedDispatcherAppliesBoundedBackpressure(t *testing.T) {
+	dispatcher := newKeyedDispatcher(1, 1)
+	t.Cleanup(dispatcher.Close)
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	require.NoError(t, dispatcher.Submit(context.Background(), "SN-1", func() {
+		close(firstStarted)
+		<-releaseFirst
+	}))
+	<-firstStarted
+	require.NoError(t, dispatcher.Submit(context.Background(), "SN-1", func() {}))
+
+	thirdSubmitted := make(chan error, 1)
+	go func() {
+		thirdSubmitted <- dispatcher.Submit(context.Background(), "SN-1", func() {})
+	}()
+	select {
+	case err := <-thirdSubmitted:
+		t.Fatalf("third submit bypassed bounded queue: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(releaseFirst)
+	select {
+	case err := <-thirdSubmitted:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("blocked submit did not resume when capacity became available")
+	}
+}
+
+func keysForDifferentShards(shards int) (string, string) {
+	first := "SN-0"
+	firstShard := keyedShardIndex(first, shards)
+	for i := 1; i < 100; i++ {
+		candidate := fmt.Sprintf("SN-%d", i)
+		if keyedShardIndex(candidate, shards) != firstShard {
+			return first, candidate
+		}
+	}
+	panic("failed to find keys for distinct shards")
 }
 
 func TestUpdatedPullConsumerConfig_OverwritesMutableTuning(t *testing.T) {

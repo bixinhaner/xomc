@@ -161,6 +161,17 @@ provision:
   enabled: true
   auto_configure: false
   task_timeout: 15m
+  gpv_response:
+    provision_queue: "${GPV_PROVISION_QUEUE:-provision-gpv}"
+    provision_concurrency: ${GPV_PROVISION_CONCURRENCY:-2}
+    provision_queue_depth: ${GPV_PROVISION_QUEUE_DEPTH:-256}
+    rpc_durable: "${GPV_RPC_DURABLE:-device-rpc-gpv}"
+    rpc_start_sequence: ${GPV_RPC_START_SEQUENCE:-0}
+    rpc_concurrency: ${GPV_RPC_CONCURRENCY:-2}
+    rpc_queue_depth: ${GPV_RPC_QUEUE_DEPTH:-1000}
+    ack_wait: "${GPV_ACK_WAIT:-30s}"
+    max_deliver: ${GPV_MAX_DELIVER:-5}
+    max_ack_pending: ${GPV_MAX_ACK_PENDING:-2000}
   model_upload:
     enabled: false
     upload_url: "http://acs:7547/smallcell/FileUploadService"

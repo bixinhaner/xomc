@@ -128,9 +128,17 @@ type mockEventBus struct {
 	QueueSubscribeFn func(subject string, queue string, handler event.EventHandler) (event.Subscription, error)
 	PullSubscribeFn  func(subject string, queue string, handler event.EventHandler) (event.Subscription, error)
 	CloseFn          func() error
+	pullTuning       map[string]event.PullTuning
 
 	// Capture published events for assertions.
 	published []publishedEvent
+}
+
+func (m *mockEventBus) SetPullTuning(subject string, tuning event.PullTuning) {
+	if m.pullTuning == nil {
+		m.pullTuning = make(map[string]event.PullTuning)
+	}
+	m.pullTuning[subject] = tuning
 }
 
 type publishedEvent struct {
@@ -223,6 +231,14 @@ func newEngineHarness(deviceRepo device.DeviceRepository) *engineHarness {
 func TestProvisioningEngine_Subscribe_GPVUsesPullSubscribe(t *testing.T) {
 	devRepo := &mockDeviceRepo{}
 	h := newEngineHarness(devRepo)
+	h.engine.config.GPVResponse = appconfig.GPVResponseConsumerConfig{
+		ProvisionQueue:       "provision-gpv-existing",
+		ProvisionConcurrency: 2,
+		ProvisionQueueDepth:  8,
+		AckWait:              30 * time.Second,
+		MaxDeliver:           5,
+		MaxAckPending:        2000,
+	}
 
 	var pullSubject, pullQueue string
 	var pullCalled int
@@ -237,7 +253,83 @@ func TestProvisioningEngine_Subscribe_GPVUsesPullSubscribe(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, pullCalled, "GPV should be subscribed via pull consumer")
 	assert.Equal(t, event.SubjectCommandGetParamsResponse, pullSubject)
-	assert.Equal(t, "provision-gpv", pullQueue)
+	assert.Equal(t, "provision-gpv-existing", pullQueue)
+	require.Equal(t, event.PullTuning{
+		BatchSize:     64,
+		Concurrency:   2,
+		AckWait:       30 * time.Second,
+		MaxAckPending: 2000,
+	}, h.eventBus.pullTuning[event.SubjectCommandGetParamsResponse])
+}
+
+func TestProvisioningGPVPullHandlerWaitsForPersistenceBeforeAck(t *testing.T) {
+	lookupStarted := make(chan struct{})
+	releaseLookup := make(chan struct{})
+	deviceRepo := &mockDeviceRepo{
+		GetBySerialNumberFn: func(context.Context, string) (*model.Device, error) {
+			close(lookupStarted)
+			<-releaseLookup
+			return &model.Device{ID: uuid.New(), SerialNumber: "SN-WAIT"}, nil
+		},
+	}
+	h := newEngineHarness(deviceRepo)
+	h.engine.config.GPVResponse = appconfig.GPVResponseConsumerConfig{
+		ProvisionConcurrency: 2,
+		ProvisionQueueDepth:  1,
+	}
+	var pullHandler event.EventHandler
+	h.eventBus.PullSubscribeFn = func(_ string, _ string, handler event.EventHandler) (event.Subscription, error) {
+		pullHandler = handler
+		return &mockSubscription{}, nil
+	}
+	require.NoError(t, h.engine.Subscribe(h.eventBus))
+	require.NotNil(t, pullHandler)
+
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]any{
+		"device_sn":        "SN-WAIT",
+		"parameter_values": []map[string]any{},
+	})
+	require.NoError(t, err)
+	result := make(chan error, 1)
+	go func() { result <- pullHandler(context.Background(), evt) }()
+	<-lookupStarted
+
+	select {
+	case err := <-result:
+		t.Fatalf("pull handler returned before persistence completed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(releaseLookup)
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("pull handler did not return after persistence completed")
+	}
+}
+
+func TestProvisioningGPVPullHandlerReturnsTransientFailureForNak(t *testing.T) {
+	deviceRepo := &mockDeviceRepo{
+		GetBySerialNumberFn: func(context.Context, string) (*model.Device, error) {
+			return nil, errors.New("database unavailable")
+		},
+	}
+	h := newEngineHarness(deviceRepo)
+	var pullHandler event.EventHandler
+	h.eventBus.PullSubscribeFn = func(_ string, _ string, handler event.EventHandler) (event.Subscription, error) {
+		pullHandler = handler
+		return &mockSubscription{}, nil
+	}
+	require.NoError(t, h.engine.Subscribe(h.eventBus))
+
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]any{
+		"device_sn":        "SN-ERROR",
+		"parameter_values": []map[string]any{},
+	})
+	require.NoError(t, err)
+
+	err = pullHandler(context.Background(), evt)
+	require.ErrorContains(t, err, "find device for GPV response")
 }
 
 // ---------------------------------------------------------------------------
