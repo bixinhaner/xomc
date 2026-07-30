@@ -311,6 +311,19 @@ func TestRPCResponseSubscriber_MissingDeviceIsTerminal(t *testing.T) {
 	require.NoError(t, s.handleGPVResponse(context.Background(), evt))
 }
 
+func TestDecodeParameterValues_NullPayloadIsAnEmptyResult(t *testing.T) {
+	values, err := decodeParameterValues(nil)
+
+	require.NoError(t, err)
+	require.Empty(t, values)
+}
+
+func TestDecodeParameterValues_RejectsMalformedScalar(t *testing.T) {
+	_, err := decodeParameterValues("not-an-array")
+
+	require.ErrorContains(t, err, "unexpected type string")
+}
+
 func TestRPCResponseSubscriberResolveTranslator_OrphanFallbackIsWarnNotError(t *testing.T) {
 	core, logs := observer.New(zapcore.DebugLevel)
 	s := &RPCResponseSubscriber{

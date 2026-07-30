@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -72,12 +73,20 @@ func (s *stubUECountTaskService) createdCount() int {
 }
 
 type stubUECountProbeGate struct {
-	acquired bool
-	err      error
+	acquired   bool
+	err        error
+	retryDelay *time.Duration
 }
 
 func (g stubUECountProbeGate) Acquire(context.Context, string) (bool, error) {
 	return g.acquired, g.err
+}
+
+func (g stubUECountProbeGate) RetryAfter(_ context.Context, _ string, delay time.Duration) error {
+	if g.retryDelay != nil {
+		*g.retryDelay = delay
+	}
+	return nil
 }
 
 func TestUECountPolicy_ShouldTriggerOnlyPeriodicInform(t *testing.T) {
@@ -168,6 +177,22 @@ func TestUECountPolicy_EnqueueReturnsDependencyErrors(t *testing.T) {
 	assert.ErrorIs(t, policy.Enqueue(context.Background(), "SN-220"), openErr)
 }
 
+func TestUECountPolicy_EnqueueSchedulesShortRetryAfterTaskCreationFailure(t *testing.T) {
+	createErr := errors.New("redis queue timeout")
+	var retryDelay time.Duration
+	policy := NewUECountPolicy(
+		&stubUECountPathResolver{paths: []string{"Device.DeviceInfo.UE_Count"}},
+		&stubUECountTaskService{createErr: createErr},
+		stubUECountProbeGate{acquired: true, retryDelay: &retryDelay},
+		zap.NewNop(),
+	)
+
+	err := policy.Enqueue(context.Background(), "SN-220")
+
+	require.ErrorIs(t, err, createErr)
+	require.Equal(t, 5*time.Minute, retryDelay)
+}
+
 func TestRedisUECountProbeGate_AllowsOnlyOneConcurrentProbe(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
@@ -190,6 +215,77 @@ func TestRedisUECountProbeGate_AllowsOnlyOneConcurrentProbe(t *testing.T) {
 	wg.Wait()
 
 	assert.Equal(t, int32(1), acquired.Load())
+}
+
+func TestRedisUECountProbeGate_ColdStartSpreadsDevicesAcrossCadence(t *testing.T) {
+	server := miniredis.RunT(t)
+	baseTime := time.Unix(1_800_000_000, 0)
+	server.SetTime(baseTime)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	gate := NewRedisUECountProbeGate(client, time.Hour)
+
+	const deviceCount = 120
+	admitted := make(map[string]int, deviceCount)
+	slotCounts := make([]int, 12)
+	for slot := range slotCounts {
+		server.SetTime(baseTime.Add(time.Duration(slot) * 5 * time.Minute))
+		for i := range deviceCount {
+			deviceSN := fmt.Sprintf("SN-%03d", i)
+			ok, err := gate.Acquire(context.Background(), deviceSN)
+			require.NoError(t, err)
+			if ok {
+				admitted[deviceSN]++
+				slotCounts[slot]++
+			}
+		}
+	}
+
+	require.Len(t, admitted, deviceCount, "one cadence must cover every device")
+	for deviceSN, count := range admitted {
+		require.Equal(t, 1, count, "device %s must be admitted exactly once per cadence", deviceSN)
+	}
+	for slot, count := range slotCounts {
+		require.LessOrEqual(t, count, 20,
+			"cold start slot %d contains a synchronized task wave: %v", slot, slotCounts)
+	}
+}
+
+func TestRedisUECountProbeGate_RetryAfterShortensFailedProbeDelay(t *testing.T) {
+	server := miniredis.RunT(t)
+	baseTime := time.Unix(1_800_000_000, 0)
+	server.SetTime(baseTime)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	gate := NewRedisUECountProbeGate(client, time.Hour)
+
+	var admittedSN string
+	for i := range 120 {
+		deviceSN := fmt.Sprintf("SN-%03d", i)
+		ok, err := gate.Acquire(context.Background(), deviceSN)
+		require.NoError(t, err)
+		if ok {
+			admittedSN = deviceSN
+			break
+		}
+	}
+	require.NotEmpty(t, admittedSN, "fixture must include a cold-start slot-zero device")
+
+	retryGate, ok := gate.(interface {
+		RetryAfter(context.Context, string, time.Duration) error
+	})
+	require.True(t, ok, "Redis UE count gate must support scheduling a short retry")
+
+	server.SetTime(baseTime.Add(time.Minute))
+	require.NoError(t, retryGate.RetryAfter(context.Background(), admittedSN, 5*time.Minute))
+	admitted, err := gate.Acquire(context.Background(), admittedSN)
+	require.NoError(t, err)
+	require.False(t, admitted, "retry must not be admitted before its delay")
+
+	server.SetTime(baseTime.Add(6 * time.Minute))
+	admitted, err = gate.Acquire(context.Background(), admittedSN)
+	require.NoError(t, err)
+	require.True(t, admitted, "failed probe must be admitted after the short retry delay")
 }
 
 func TestUECountPolicy_EnqueueHasBoundedDependencyDeadline(t *testing.T) {

@@ -242,7 +242,7 @@ func (ts *testableTaskService) CreateTask(ctx context.Context, req *CreateTaskRe
 		return task, nil
 	}
 	if err := ts.queue.Push(ctx, task); err != nil {
-		ts.repo.Delete(ctx, task.ID)
+		_ = deleteCreatedTaskAfterEnqueueFailure(ctx, ts.repo, task.ID)
 		return nil, fmt.Errorf("enqueue task: %w", err)
 	}
 	return task, nil
@@ -491,6 +491,30 @@ func Test_CreateTask_QueueFailure_DeletesDBRecord(t *testing.T) {
 	assert.Nil(t, task)
 	assert.Contains(t, err.Error(), "enqueue task")
 	assert.NotEmpty(t, deletedID, "should attempt to delete the DB record on queue failure")
+}
+
+func Test_CreateTask_QueueFailureUsesIndependentRollbackContext(t *testing.T) {
+	ts := newTestableService()
+	rollbackContextUsable := false
+	ts.repo.createFn = func(context.Context, *Task) error {
+		return nil
+	}
+	ts.repo.deleteFn = func(ctx context.Context, _ string) error {
+		rollbackContextUsable = ctx.Err() == nil
+		return nil
+	}
+	ts.queue.pushFn = func(context.Context, *Task) error {
+		return fmt.Errorf("redis push deadline exceeded")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	task, err := ts.CreateTask(ctx, &CreateTaskRequest{DeviceSN: "SN001", Method: "Reboot"})
+
+	require.ErrorContains(t, err, "enqueue task")
+	require.Nil(t, task)
+	require.True(t, rollbackContextUsable,
+		"PG compensation must not inherit the failed Redis request cancellation")
 }
 
 func Test_GetTask_FoundInQueue(t *testing.T) {

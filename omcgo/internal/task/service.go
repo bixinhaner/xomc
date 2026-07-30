@@ -29,6 +29,8 @@ import (
 // 生产可经 SetWakeConcurrency 调整。
 const defaultWakeConcurrency = 256
 
+const taskCreateRollbackTimeout = 3 * time.Second
+
 // ErrQueueFull is returned by CreateTask when a device's pending-task queue has
 // reached its configured depth cap. It is a backpressure signal (issue #7): an
 // untrusted / offline device must not let its queue grow without bound and
@@ -112,6 +114,23 @@ type TaskService struct {
 // 实现端（internal/notification）负责按 task.CreatorID 隔离 + 渲染文案 + UpsertByDedup。
 // closure 不返回 error —— 通知失败不应影响 CreateTask 的错误返回链路。
 type CreateFailureNotifier func(ctx context.Context, task *Task, errMsg string)
+
+type createdTaskRollbackRepository interface {
+	Delete(ctx context.Context, id string) error
+}
+
+func deleteCreatedTaskAfterEnqueueFailure(
+	ctx context.Context,
+	repo createdTaskRollbackRepository,
+	taskID string,
+) error {
+	rollbackCtx, cancel := context.WithTimeout(
+		context.WithoutCancel(ctx),
+		taskCreateRollbackTimeout,
+	)
+	defer cancel()
+	return repo.Delete(rollbackCtx, taskID)
+}
 
 // NewTaskService 创建任务服务
 func NewTaskService(queue *RedisTaskQueue, repo *PgTaskRepository, log *zap.Logger) *TaskService {
@@ -271,7 +290,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 	if err := s.queue.Push(ctx, task); err != nil {
 		// 回滚 PostgreSQL 记录。回滚失败 → PG 留下 pending 孤儿（#13）：记 error + metric，
 		// 由 RestorePendingQueues（启动期）/ ExpiredSweeper（过期）兜底，不让其静默漂移。
-		if derr := s.repo.Delete(ctx, task.ID); derr != nil {
+		if derr := deleteCreatedTaskAfterEnqueueFailure(ctx, s.repo, task.ID); derr != nil {
 			s.recordDualWriteFail("create_rollback")
 			logger.L(ctx).Error("rollback task pg record after enqueue failure",
 				zap.String("task_id", task.ID),
