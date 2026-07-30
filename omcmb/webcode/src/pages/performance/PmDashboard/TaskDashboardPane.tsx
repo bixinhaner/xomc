@@ -233,8 +233,8 @@ export default function TaskDashboardPane({ taskId }: Props) {
   );
   const rawPrevRows = prevResp?.rows ?? [];
 
-  // 触顶提示：结果接口 LIMIT 上限，触顶可能截断 → 给可见提示，不静默。
-  const truncated = (rowsResp?.total ?? 0) > (rowsResp?.rows.length ?? 0);
+  // 触顶提示：后端用 limit+1 判断是否截断，前端直接信任 truncated 标记。
+  const truncated = rowsResp?.truncated ?? false;
 
   const granularities = useMemo(
     () => taskQuery.data?.granularities ?? [],

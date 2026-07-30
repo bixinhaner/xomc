@@ -169,7 +169,7 @@ describe('pmAdhocApi.results — 维度子集过滤 query（手动 snake_case，
     };
     getMock.mockResolvedValue({
       data: {
-        items: [row], total: 10,
+        items: [row], total: 10, truncated: true,
         progress_items: [{ ...row, id: 'p1', extra: { partial: true } }],
         progress_total: 1, progress_state: 'available',
         period_progress: [{
@@ -189,6 +189,7 @@ describe('pmAdhocApi.results — 维度子集过滤 query（手动 snake_case，
 
     expect(result.rows).toHaveLength(1);
     expect(result.total).toBe(10);
+    expect(result.truncated).toBe(true);
     expect(result.progressRows).toHaveLength(1);
     expect(result.progressTotal).toBe(1);
     expect(result.periodProgress).toEqual([

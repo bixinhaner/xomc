@@ -30,6 +30,7 @@ interface ListResponse {
 interface ResultsResponse {
   items: BackendAdhocResultRow[];
   total: number;
+  truncated?: boolean;
   progress_items?: BackendAdhocResultRow[];
   progress_total?: number;
   period_progress?: Array<{
@@ -161,6 +162,7 @@ export const pmAdhocApi = {
   ): Promise<{
     rows: AdhocResultRow[];
     total: number;
+    truncated: boolean;
     progressRows: AdhocResultRow[];
     progressTotal: number;
     periodProgress: Array<{
@@ -202,10 +204,11 @@ export const pmAdhocApi = {
     });
     const rows = (data.items ?? []).map(mapBackendAdhocResult);
     const progressRows = (data.progress_items ?? []).map(mapBackendAdhocResult);
-    // T-0194：total 是后端真实 COUNT(*)，rows.length<total 即被 limit 截断（前端据此提示）。
+    // total 现在是 limit+1 快速分页口径，不是精确 COUNT；截断提示以后端 truncated 为准。
     return {
       rows,
       total: data.total ?? rows.length,
+      truncated: data.truncated ?? ((data.total ?? rows.length) > rows.length),
       progressRows,
       progressTotal: data.progress_total ?? progressRows.length,
       periodProgress: (data.period_progress ?? []).map((progress) => ({
@@ -335,7 +338,7 @@ export const pmAdhocMock: typeof pmAdhocApi = {
   },
   async results() {
     return {
-      rows: [], total: 0, progressRows: [], progressTotal: 0, periodProgress: [],
+      rows: [], total: 0, truncated: false, progressRows: [], progressTotal: 0, periodProgress: [],
       progressState: 'not_applicable' as const,
     };
   },

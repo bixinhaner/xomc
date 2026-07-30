@@ -1305,6 +1305,39 @@ CREATE INDEX IF NOT EXISTS idx_pm_aggregation_results_dashboard_network
         created_at DESC
     )
     WHERE dimension = 'network';
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_results_dashboard_product
+    ON public.pm_aggregation_results (
+        task_id,
+        granularity,
+        dimension_key,
+        window_start DESC,
+        metric_path,
+        task_version_id,
+        created_at DESC
+    )
+    WHERE dimension = 'product';
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_results_dashboard_device_group
+    ON public.pm_aggregation_results (
+        task_id,
+        granularity,
+        dimension_key,
+        window_start DESC,
+        metric_path,
+        task_version_id,
+        created_at DESC
+    )
+    WHERE dimension = 'device_group';
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_results_dashboard_band
+    ON public.pm_aggregation_results (
+        task_id,
+        granularity,
+        dimension_key,
+        window_start DESC,
+        metric_path,
+        task_version_id,
+        created_at DESC
+    )
+    WHERE dimension = 'band';
 
 CREATE TABLE IF NOT EXISTS public.pm_file_quarantines (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1371,6 +1404,31 @@ ALTER TABLE public.pm_aggregation_windows
     ADD COLUMN finalize_attempts integer NOT NULL DEFAULT 0,
     ADD COLUMN finalize_next_attempt_at timestamptz NOT NULL DEFAULT '-infinity',
     ADD COLUMN version_audit_fingerprint text;
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_active_version_guard
+    ON public.pm_aggregation_windows (
+        task_id,
+        granularity,
+        window_start,
+        version_effective_from DESC,
+        task_version_id
+    )
+    WHERE status IN ('open', 'finalizing', 'rebuilding', 'failed')
+      AND version_effective_from IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_dashboard_published
+    ON public.pm_aggregation_windows (
+        task_id,
+        granularity,
+        window_start,
+        task_version_id,
+        entity_key,
+        version_effective_from DESC,
+        revision DESC,
+        published_at DESC,
+        updated_at DESC
+    )
+    WHERE status = 'published';
 
 ALTER TABLE public.pm_aggregation_windows
     DROP CONSTRAINT chk_pm_aggregation_windows_status;

@@ -16,10 +16,16 @@ func Test_buildFilterOptionsQuery_Product(t *testing.T) {
 	q, args, supported := buildFilterOptionsQuery(DimensionProduct, id, nil)
 
 	assert.True(t, supported)
-	assert.Contains(t, q, "SELECT DISTINCT r.product_id, p.product_name")
-	assert.Contains(t, q, "LEFT JOIN product_dim p ON p.id = r.product_id")
+	assert.Contains(t, q, "SELECT DISTINCT r.dimension_key::uuid AS product_id, p.product_name")
+	assert.Contains(t, q, "FROM pm_aggregation_results r")
+	assert.NotContains(t, q, "pm_adhoc_aggregation_results")
+	assert.Contains(t, q, "JOIN current_versions cv")
+	assert.Contains(t, q, "JOIN pm_aggregation_windows published_window")
+	assert.Contains(t, q, "published_window.status = 'published'")
+	assert.Contains(t, q, "LEFT JOIN product_dim p ON p.id::text = r.dimension_key")
 	assert.Contains(t, q, "WHERE r.task_id = $1")
-	assert.Contains(t, q, "r.product_id IS NOT NULL")
+	assert.Contains(t, q, "r.dimension = 'product'")
+	assert.Contains(t, q, "r.dimension_key <> ''")
 	// 验收 4：选项不被结果上限截断 —— SQL 不含 LIMIT/OFFSET
 	assert.NotContains(t, q, "LIMIT")
 	assert.NotContains(t, q, "OFFSET")
@@ -32,10 +38,13 @@ func Test_buildFilterOptionsQuery_DeviceGroup(t *testing.T) {
 	q, args, supported := buildFilterOptionsQuery(DimensionDeviceGroup, id, nil)
 
 	assert.True(t, supported)
-	assert.Contains(t, q, "SELECT DISTINCT r.object_ldn, g.name")
+	assert.Contains(t, q, "SELECT DISTINCT r.dimension_key AS object_ldn, g.name")
 	// 设备组制式治本：object_ldn 带 ',Tech=<制式>' 后缀，取组名 JOIN 需 split_part 剥逗号前段。
-	assert.Contains(t, q, "LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)")
-	assert.Contains(t, q, "r.object_ldn LIKE 'DeviceGroup=%'")
+	assert.Contains(t, q, "LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.dimension_key, ',', 1)")
+	assert.Contains(t, q, "r.dimension = 'device_group'")
+	assert.Contains(t, q, "r.dimension_key LIKE 'DeviceGroup=%'")
+	assert.Contains(t, q, "published_window.status = 'published'")
+	assert.NotContains(t, q, "pm_adhoc_aggregation_results")
 	assert.NotContains(t, q, "LIMIT")
 	assert.NotContains(t, q, "OFFSET")
 	assert.Equal(t, []any{id}, args)
@@ -47,9 +56,12 @@ func Test_buildFilterOptionsQuery_Band(t *testing.T) {
 	q, args, supported := buildFilterOptionsQuery(DimensionBand, id, nil)
 
 	assert.True(t, supported)
-	assert.Contains(t, q, "SELECT DISTINCT r.object_ldn")
-	assert.Contains(t, q, "r.object_ldn LIKE 'Band=%'")
+	assert.Contains(t, q, "SELECT DISTINCT r.dimension_key AS object_ldn")
+	assert.Contains(t, q, "r.dimension = 'band'")
+	assert.Contains(t, q, "r.dimension_key LIKE 'Band=%'")
+	assert.Contains(t, q, "published_window.status = 'published'")
 	assert.NotContains(t, q, "LEFT JOIN")
+	assert.NotContains(t, q, "pm_adhoc_aggregation_results")
 	assert.NotContains(t, q, "LIMIT")
 	assert.NotContains(t, q, "OFFSET")
 	assert.Equal(t, []any{id}, args)
@@ -88,19 +100,19 @@ func Test_buildResultsQuery_NoDimFilter(t *testing.T) {
 	id := uuid.New()
 	q, args := buildResultsQuery(id, resultsFilter{}, 100, 0)
 
-	assert.NotContains(t, q, "r.product_id = ANY")
+	assert.NotContains(t, q, "r.dimension_key = ANY")
 	// object_ldn = ANY 不应出现（既无任务白名单也无子集过滤）
-	assert.NotContains(t, q, "r.object_ldn = ANY")
+	assert.NotContains(t, q, "= ANY")
 	assert.Equal(t, []any{id, 100, 0}, args)
 }
 
-// 传 ProductIDs → SQL 含 r.product_id = ANY，占位号顺延入 args。
+// 传 ProductIDs → SQL 含 product 维度 dimension_key = ANY，占位号顺延入 args。
 func Test_buildResultsQuery_ProductIDsSubset(t *testing.T) {
 	id := uuid.New()
 	pids := []string{uuid.NewString(), uuid.NewString()}
 	q, args := buildResultsQuery(id, resultsFilter{ProductIDs: pids}, 100, 0)
 
-	assert.Contains(t, q, "AND r.product_id = ANY($2)")
+	assert.Contains(t, q, "AND r.dimension = 'product' AND r.dimension_key = ANY($2)")
 	assert.Contains(t, q, "LIMIT $3 OFFSET $4")
 	if assert.Len(t, args, 4) {
 		assert.Equal(t, id, args[0])
@@ -110,13 +122,13 @@ func Test_buildResultsQuery_ProductIDsSubset(t *testing.T) {
 	}
 }
 
-// 传 SubsetLDNs → SQL 含 r.object_ldn = ANY（设备组/频段共用此子集参数）。
+// 传 SubsetLDNs → SQL 含投影 object_ldn = ANY（设备组/频段共用此子集参数）。
 func Test_buildResultsQuery_SubsetLDNs(t *testing.T) {
 	id := uuid.New()
 	ldns := []string{"DeviceGroup=abc", "Band=42"}
 	q, args := buildResultsQuery(id, resultsFilter{SubsetLDNs: ldns}, 100, 0)
 
-	assert.Contains(t, q, "AND r.object_ldn = ANY($2)")
+	assert.Contains(t, q, "ELSE r.dimension_key END = ANY($2)")
 	assert.Contains(t, q, "LIMIT $3 OFFSET $4")
 	if assert.Len(t, args, 4) {
 		assert.Equal(t, id, args[0])
@@ -137,51 +149,41 @@ func Test_buildResultsQuery_DimFilterStacksWithWhitelist(t *testing.T) {
 	}, 100, 0)
 
 	// 顺序：任务白名单 object_ldn($2) → product_id($3) → 子集 object_ldn($4)
-	assert.Contains(t, q, "AND r.object_ldn = ANY($2)")
-	assert.Contains(t, q, "AND r.product_id = ANY($3)")
-	assert.Contains(t, q, "AND r.object_ldn = ANY($4)")
+	assert.Contains(t, q, "ELSE r.dimension_key END = ANY($2)")
+	assert.Contains(t, q, "AND r.dimension = 'product' AND r.dimension_key = ANY($3)")
+	assert.Contains(t, q, "ELSE r.dimension_key END = ANY($4)")
 	assert.Contains(t, q, "LIMIT $5 OFFSET $6")
 	assert.Len(t, args, 6)
 	// product_id 子句在第一个 object_ldn 子句之后、第二个之前
-	first := strings.Index(q, "r.object_ldn = ANY($2)")
-	prod := strings.Index(q, "r.product_id = ANY($3)")
-	second := strings.Index(q, "r.object_ldn = ANY($4)")
+	first := strings.Index(q, "ANY($2)")
+	prod := strings.Index(q, "r.dimension = 'product' AND r.dimension_key = ANY($3)")
+	second := strings.Index(q, "ANY($4)")
 	assert.True(t, first < prod && prod < second)
 }
 
-// ── buildResultsCountQuery：与主查询同口径 ────────────────────────────────────
+// ── results 分页截断：不再跑精确 COUNT(*) ────────────────────────────────────
 
-// 都不传 → count 无新增维度 WHERE。
-func Test_buildResultsCountQuery_NoDimFilter(t *testing.T) {
+// 都不传 → 主查询无新增维度 WHERE，也不生成 COUNT(*)。
+func Test_buildResultsQuery_NoDimFilterAndNoExactCount(t *testing.T) {
 	id := uuid.New()
-	q, args := buildResultsCountQuery(id, resultsFilter{})
-	assert.NotContains(t, q, "r.product_id = ANY")
-	assert.NotContains(t, q, "r.object_ldn = ANY")
-	assert.Equal(t, []any{id}, args)
+	q, args := buildResultsQuery(id, resultsFilter{}, 100, 0)
+
+	assert.NotContains(t, q, "COUNT(*)")
+	assert.NotContains(t, q, "r.dimension_key = ANY")
+	assert.NotContains(t, q, "= ANY")
+	assert.Equal(t, []any{id, 100, 0}, args)
 }
 
-// 传 ProductIDs/SubsetLDNs → count 的 WHERE 与主查询完全一致（同样的 ANY 子句、占位顺序，去分页）。
-func Test_buildResultsCountQuery_SameDimFilterAsData(t *testing.T) {
+// 传 ProductIDs/SubsetLDNs → 主查询保留维度过滤；是否截断由 limit+1 返回行判断，不再额外 COUNT。
+func Test_buildResultsQuery_DimFiltersWithoutExactCount(t *testing.T) {
 	id := uuid.New()
 	pids := []string{uuid.NewString()}
 	ldns := []string{"DeviceGroup=g1"}
 	f := resultsFilter{ProductIDs: pids, SubsetLDNs: ldns}
 
-	cq, cargs := buildResultsCountQuery(id, f)
-	assert.Contains(t, cq, "AND r.product_id = ANY($2)")
-	assert.Contains(t, cq, "AND r.object_ldn = ANY($3)")
-	assert.NotContains(t, cq, "LIMIT")
-	assert.NotContains(t, cq, "OFFSET")
-	// args = [taskID, productIDs, subsetLDNs]，无分页尾巴
-	if assert.Len(t, cargs, 3) {
-		assert.Equal(t, id, cargs[0])
-		assert.Equal(t, pids, cargs[1])
-		assert.Equal(t, ldns, cargs[2])
-	}
-
-	// 与主查询同口径：主查询 WHERE 段（截到 ORDER BY 前）应含与 count 相同的两个谓词、同占位号
 	dq, _ := buildResultsQuery(id, f, 100, 0)
-	dqWhere := dq[:strings.Index(dq, "ORDER BY")]
-	assert.Contains(t, dqWhere, "AND r.product_id = ANY($2)")
-	assert.Contains(t, dqWhere, "AND r.object_ldn = ANY($3)")
+	dqWhere := dq[:strings.LastIndex(dq, "ORDER BY")]
+	assert.NotContains(t, dq, "COUNT(*)")
+	assert.Contains(t, dqWhere, "AND r.dimension = 'product' AND r.dimension_key = ANY($2)")
+	assert.Contains(t, dqWhere, "ELSE r.dimension_key END = ANY($3)")
 }
