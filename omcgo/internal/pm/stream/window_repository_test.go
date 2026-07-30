@@ -183,6 +183,7 @@ func TestRenewFinalizeClaimUsesDatabaseClockAndClaimToken(t *testing.T) {
 		"finalize_lease_until = CURRENT_TIMESTAMP + ($",
 		"updated_at = CURRENT_TIMESTAMP",
 		"finalize_lease_owner = $",
+		"finalize_lease_until > CURRENT_TIMESTAMP",
 	} {
 		if !strings.Contains(query, fragment) {
 			t.Fatalf("renew finalize claim SQL %q missing %q", query, fragment)

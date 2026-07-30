@@ -495,7 +495,8 @@ func renewFinalizeClaimUpdate(
 		)).
 		Set("updated_at", sq.Expr("CURRENT_TIMESTAMP")).
 		Where(windowKeyPredicate(key)).
-		Where(sq.Eq{"finalize_lease_owner": leaseOwner})
+		Where(sq.Eq{"finalize_lease_owner": leaseOwner}).
+		Where(sq.Expr("finalize_lease_until > CURRENT_TIMESTAMP"))
 }
 
 func (r *WindowRepository) ReleaseClaim(
