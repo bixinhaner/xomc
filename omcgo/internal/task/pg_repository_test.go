@@ -554,6 +554,72 @@ func TestPgRepo_Integration_Update(t *testing.T) {
 	assert.NotNil(t, got.SentAt)
 }
 
+func TestPgRepo_MarkSentIfPendingRejectsExpiredTask(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	tk := freshTaskForPG("expired-send-fence", "expired-send-fence")
+	expiredAt := time.Now().Add(-time.Second)
+	tk.ExpiresAt = &expiredAt
+	require.NoError(t, repo.Create(ctx, tk))
+
+	acquired, err := repo.MarkSentIfPending(ctx, tk.ID, "cwmp-expired-send", time.Now())
+
+	require.NoError(t, err)
+	assert.False(t, acquired, "绝对截止时间已过的 pending 任务不得再下发")
+	got, err := repo.GetByID(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, TaskStatusPending, got.Status)
+	assert.Nil(t, got.SentAt)
+}
+
+func TestPgRepo_ListExpiredCandidatesProtectsFreshInFlightTask(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+	now := time.Now()
+	expiredAt := now.Add(-time.Minute)
+
+	pending := freshTaskForPG("expired-pending", "expired-pending")
+	pending.ExpiresAt = &expiredAt
+	require.NoError(t, repo.Create(ctx, pending))
+
+	freshSent := freshTaskForPG("fresh-inflight", "fresh-inflight")
+	freshSent.Status = TaskStatusSent
+	freshSent.ExpiresAt = &expiredAt
+	freshSentAt := now.Add(-sentTaskExpiryGrace / 2)
+	freshSent.SentAt = &freshSentAt
+	require.NoError(t, repo.Create(ctx, freshSent))
+
+	staleSent := freshTaskForPG("stale-inflight", "stale-inflight")
+	staleSent.Status = TaskStatusSent
+	staleSent.ExpiresAt = &expiredAt
+	staleSentAt := now.Add(-sentTaskExpiryGrace - time.Second)
+	staleSent.SentAt = &staleSentAt
+	require.NoError(t, repo.Create(ctx, staleSent))
+
+	candidates, err := repo.ListExpiredCandidates(ctx, now, 1000)
+	require.NoError(t, err)
+	candidateIDs := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidateIDs[candidate.ID] = struct{}{}
+	}
+
+	assert.Contains(t, candidateIDs, pending.ID, "尚未下发且已到期的任务应立即清理")
+	assert.NotContains(t, candidateIDs, freshSent.ID, "刚下发的RPC应获得有界响应保护")
+	assert.Contains(t, candidateIDs, staleSent.ID, "超过在途保护窗口的任务仍必须终结")
+}
+
 func TestPgRepo_Integration_UpdateDoesNotDowngradeTerminalTask(t *testing.T) {
 	pool := newTestPool(t)
 	if pool == nil {
