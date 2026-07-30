@@ -692,7 +692,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (queue, status) (omc_persistent_queue_pending)",
+          "expr": "max by (queue, status) (omc_persistent_queue_pending)",
           "legendFormat": "{{queue}}/{{status}} pending"
         },
         {

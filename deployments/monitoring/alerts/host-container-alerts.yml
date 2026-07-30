@@ -151,6 +151,11 @@ groups:
   - name: omc.container
     interval: 30s
     rules:
+      - record: omc:container_last_seen:fresh
+        # Prometheus 在目标消失后默认仍保留旧序列约 5 分钟。容器重建期间若直接
+        # sum by(service)，旧、新容器 limit 会被相加并产生资源漂移假告警。
+        expr: (time() - container_last_seen{name!=""}) < 90
+
       - alert: ContainerMetricsAbsent
         expr: up{job="cadvisor"} == 0
         for: 2m
@@ -174,6 +179,7 @@ groups:
            / container_spec_memory_limit_bytes{name!=""} > 0.90)
           and (container_spec_memory_limit_bytes{name!=""} > 0)
           and (container_spec_memory_limit_bytes{name!=""} < 64e9)
+          and on (id) omc:container_last_seen:fresh
         for: 10m
         labels:
           severity: warning
@@ -208,12 +214,26 @@ groups:
         # 先按容器计算 quota / period，再按 service 汇总；quota <= 0 的无限额容器被排除。
         expr: |
           (
-            sum by (service) (rate(container_cpu_usage_seconds_total{service=~"app|acs|worker"}[5m]))
+            sum by (service) (
+              rate(container_cpu_usage_seconds_total{service=~"app|acs|worker"}[5m])
+              and on (id) omc:container_last_seen:fresh
+            )
             /
-            sum by (service) ((container_spec_cpu_quota{service=~"app|acs|worker"} > 0) / container_spec_cpu_period{service=~"app|acs|worker"})
+            sum by (service) (
+              (
+                (container_spec_cpu_quota{service=~"app|acs|worker"} > 0)
+                / container_spec_cpu_period{service=~"app|acs|worker"}
+              )
+              and on (id) omc:container_last_seen:fresh
+            )
           ) > 0.9
           and on (service)
-          (sum by (service) (container_spec_cpu_quota{service=~"app|acs|worker"} > 0) > 0)
+          (
+            sum by (service) (
+              (container_spec_cpu_quota{service=~"app|acs|worker"} > 0)
+              and on (id) omc:container_last_seen:fresh
+            ) > 0
+          )
         for: 10m
         labels:
           severity: warning
@@ -229,8 +249,11 @@ groups:
       - alert: ContainerCPUThrottling
         # CFS 限流比 = 被限流周期 / 总周期；持续偏高说明 CPU limit 偏紧。
         expr: |
-          (rate(container_cpu_cfs_throttled_periods_total{name=~"(omcgo|docker)-(app|acs|worker)-.*"}[5m])
-           / rate(container_cpu_cfs_periods_total{name=~"(omcgo|docker)-(app|acs|worker)-.*"}[5m])) > 0.25
+          (
+            rate(container_cpu_cfs_throttled_periods_total{name=~"(omcgo|docker)-(app|acs|worker)-.*"}[5m])
+            / rate(container_cpu_cfs_periods_total{name=~"(omcgo|docker)-(app|acs|worker)-.*"}[5m])
+          ) > 0.25
+          and on (id) omc:container_last_seen:fresh
         for: 10m
         labels:
           severity: warning
@@ -246,11 +269,17 @@ groups:
       - alert: TSDBContainerCPUHigh
         expr: |
           (
-            sum by (name) (rate(container_cpu_usage_seconds_total{name=~"(omcgo|docker)-postgres-tsdb-.*"}[5m]))
+            sum by (name) (
+              rate(container_cpu_usage_seconds_total{name=~"(omcgo|docker)-postgres-tsdb-.*"}[5m])
+              and on (id) omc:container_last_seen:fresh
+            )
             /
             sum by (name) (
-              container_spec_cpu_quota{name=~"(omcgo|docker)-postgres-tsdb-.*"}
-              / container_spec_cpu_period{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+              (
+                container_spec_cpu_quota{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+                / container_spec_cpu_period{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+              )
+              and on (id) omc:container_last_seen:fresh
             )
           ) > 0.70
         for: 10m
@@ -260,11 +289,17 @@ groups:
       - alert: TSDBContainerCPUCritical
         expr: |
           (
-            sum by (name) (rate(container_cpu_usage_seconds_total{name=~"(omcgo|docker)-postgres-tsdb-.*"}[5m]))
+            sum by (name) (
+              rate(container_cpu_usage_seconds_total{name=~"(omcgo|docker)-postgres-tsdb-.*"}[5m])
+              and on (id) omc:container_last_seen:fresh
+            )
             /
             sum by (name) (
-              container_spec_cpu_quota{name=~"(omcgo|docker)-postgres-tsdb-.*"}
-              / container_spec_cpu_period{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+              (
+                container_spec_cpu_quota{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+                / container_spec_cpu_period{name=~"(omcgo|docker)-postgres-tsdb-.*"}
+              )
+              and on (id) omc:container_last_seen:fresh
             )
           ) > 0.90
         for: 5m
@@ -279,6 +314,7 @@ groups:
             container_spec_memory_limit_bytes{name=~"(omcgo|docker)-postgres-tsdb-.*"}
           ) > 0.85
           and container_spec_memory_limit_bytes{name=~"(omcgo|docker)-postgres-tsdb-.*"} < 64e9
+          and on (id) omc:container_last_seen:fresh
         for: 10m
         labels: {severity: warning, domain: omc, service: postgres-tsdb}
         annotations: {summary: "postgres-tsdb 内存持续超过限额 85%：{{ $labels.name }}"}
@@ -315,7 +351,10 @@ groups:
           unless on (compose_service)
           label_replace(
             count by (container_label_com_docker_compose_service) (
-              container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+              (
+                container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+              )
+              and on (id) omc:container_last_seen:fresh
             ),
             "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"
           )
@@ -334,7 +373,10 @@ groups:
           unless on (compose_service)
           label_replace(
             count by (container_label_com_docker_compose_service) (
-              container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+              (
+                container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+              )
+              and on (id) omc:container_last_seen:fresh
             ),
             "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"
           )
@@ -353,7 +395,10 @@ groups:
           unless on (compose_service)
           label_replace(
             count by (container_label_com_docker_compose_service) (
-              container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+              (
+                container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+              )
+              and on (id) omc:container_last_seen:fresh
             ),
             "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"
           )
@@ -373,8 +418,11 @@ groups:
           (
             label_replace(
               sum by (container_label_com_docker_compose_service) (
-                container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
-                / container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+                (
+                  container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+                  / container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+                )
+                and on (id) omc:container_last_seen:fresh
               ),
               "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"
             )
@@ -386,6 +434,7 @@ groups:
             label_replace(
               sum by (container_label_com_docker_compose_service) (
                 container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+                and on (id) omc:container_last_seen:fresh
               ),
               "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"
             )

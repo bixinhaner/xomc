@@ -242,6 +242,16 @@ contains "资源计划漂移检查 CPU period" 'container_spec_cpu_period' "$HOS
 contains "资源计划漂移检查内存实际限额" 'container_spec_memory_limit_bytes' "$HOST_ALERTS"
 contains "资源漂移规则使用生成的计划 CPU 指标" 'omc_resource_plan_cpu_cores' "$HOST_ALERTS"
 contains "资源漂移规则使用生成的计划内存指标" 'omc_resource_plan_memory_limit_bytes' "$HOST_ALERTS"
+contains "cAdvisor 当前容器新鲜度记录规则" 'record: omc:container_last_seen:fresh' "$HOST_ALERTS"
+fresh_container_filters=$(grep -Fc 'and on (id) omc:container_last_seen:fresh' "$HOST_ALERTS")
+if [ "$fresh_container_filters" -ge 10 ]; then
+  ok
+else
+  bad "cAdvisor 资源告警新鲜度过滤不足：got=$fresh_container_filters want>=10"
+fi
+contains "持久化队列告警去重多进程快照" 'sum by (queue) (max by (queue, status) (omc_persistent_queue_pending{status=~"pending|sent|running"})) > 1000' "$REPO_ROOT/deployments/monitoring/alerts/storage-queue-alerts.yml"
+contains "存储队列 Dashboard 去重多进程快照" 'max by (queue, status) (omc_persistent_queue_pending)' "$REPO_ROOT/deployments/monitoring/grafana/dashboards/omc-storage-queue-governance.json"
+contains "基础设施 Dashboard 去重多进程快照" 'max by (queue, status) (omc_persistent_queue_pending)' "$REPO_ROOT/deployments/monitoring/grafana/dashboards/omc-infra.json"
 contains "node exporter 读取资源计划 textfile" '--collector.textfile.directory=/textfile' "$RELEASE_MONITORING_COMPOSE"
 contains "node exporter 挂载资源计划 textfile" '/opt/omc/run/monitoring:/textfile:ro' "$RELEASE_MONITORING_COMPOSE"
 contains "cAdvisor 使用 Docker 29/overlayfs 支持版本" 'ghcr.io/google/cadvisor:0.55.1' "$REPO_ROOT/deployments/release/release.conf"
