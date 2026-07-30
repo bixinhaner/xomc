@@ -750,13 +750,14 @@ type resultsFilter struct {
 	Granularity string
 	StartTime   string // RFC3339；非法/空则忽略
 	EndTime     string // RFC3339；非法/空则忽略
-	// ObjectLDNs T-0193：任务自带的小区/PLMN 白名单。非空时叠加 object_ldn = ANY(...) 过滤；
+	Dimension   Dimension
+	// ObjectLDNs T-0193：任务自带的小区/PLMN 白名单。非空时叠加对象键过滤；
 	// 空 = 不过滤（全小区）。与"只看 N 指标"同一层查看级收口。
 	ObjectLDNs []string
-	// ProductIDs PM-DASH-DIMFILTER：product 维度仪表盘按选中产品子集过滤（product_id = ANY，uuid 数组）。
+	// ProductIDs PM-DASH-DIMFILTER：product 维度仪表盘按选中产品子集过滤（dimension_key = ANY，uuid 数组）。
 	// 空 = 不过滤。独立于 T-0193 的 ObjectLDNs（那是任务白名单），两者作为独立 WHERE 子句叠加（AND 取交集）。
 	ProductIDs []string
-	// SubsetLDNs PM-DASH-DIMFILTER：device_group/band 维度仪表盘按选中子集过滤（object_ldn = ANY，text 数组，
+	// SubsetLDNs PM-DASH-DIMFILTER：device_group/band 维度仪表盘按选中子集过滤（对象键 = ANY，text 数组，
 	// 值形态 'DeviceGroup=<uuid>' / 'Band=<值>'）。空 = 不过滤。与 ObjectLDNs（任务白名单）各自独立成子句。
 	SubsetLDNs []string
 	// TaskMetricPaths #532：任务配置的指标集（task.MetricPaths）。显示侧收口——把「配置指标=显示范围」
@@ -816,6 +817,7 @@ func (h *Handler) Results(c *gin.Context) {
 		Granularity: c.Query("granularity"),
 		StartTime:   c.Query("start_time"),
 		EndTime:     c.Query("end_time"),
+		Dimension:   normalizedTaskDimension(task.Dimension),
 		ObjectLDNs:  task.ObjectLDNs, // 任务自带白名单（空=全小区）
 		// PM-DASH-DIMFILTER：仪表盘维度子集过滤（默认两者都不传 = 不过滤 = 现行行为）。
 		// product_ids 是纯 UUID（永不含逗号），可走 CSV 切分兼容单参数多值。
@@ -830,11 +832,11 @@ func (h *Handler) Results(c *gin.Context) {
 		CalendarTimezone: calendarfilter.ProviderName(c.Request.Context(), h.timezone),
 	}
 	// #192：展示/API 查询范围严格等于任务配置 metric_paths。后台允许多算多存，
-	// 但 /results、分页 COUNT、页面图表、周期对比和导出都不能返回配置外指标。
+	// 但 /results、页面图表、周期对比和导出都不能返回配置外指标。
 	if len(task.MetricPaths) > 0 {
 		filter.TaskMetricPaths = task.MetricPaths
 	}
-	q, args := buildResultsQuery(id, filter, limit, offset)
+	q, args := buildResultsQuery(id, filter, limit+1, offset)
 
 	rows, err := h.pool.Query(c.Request.Context(), q, args...)
 	if err != nil {
@@ -903,6 +905,7 @@ func (h *Handler) Results(c *gin.Context) {
 		}
 		items = append(items, dto)
 	}
+	items, total, truncated := finalizeResultsPage(items, limit, offset)
 
 	var progressItems []adhocResultDTO
 	var periodProgress []pmstream.PeriodProgress
@@ -944,21 +947,27 @@ func (h *Handler) Results(c *gin.Context) {
 	backfillAdhocResultDisplayMetadata(items, metadataByCode)
 	backfillAdhocResultDisplayMetadata(progressItems, metadataByCode)
 
-	// 真实总数：跑一次同 WHERE 的 COUNT(*)，让 total 反映命中行真实总数而非本页返回行数
-	// （T-0194 截断诚实提示）。COUNT 失败不阻断结果返回，退回本页行数作兜底。
-	total := len(items)
-	cq, cargs := buildResultsCountQuery(id, filter)
-	var realTotal int
-	if err := h.pool.QueryRow(c.Request.Context(), cq, cargs...).Scan(&realTotal); err == nil {
-		total = realTotal
-	}
-
 	response.OK(c, gin.H{
-		"items": items, "total": total,
+		"items": items, "total": total, "truncated": truncated,
 		"progress_items": progressItems, "progress_total": len(progressItems),
 		"period_progress": periodProgress,
 		"progress_state":  progressState,
 	})
+}
+
+func normalizedTaskDimension(dim Dimension) Dimension {
+	if dim == "" {
+		return DimensionDevice
+	}
+	return dim
+}
+
+func finalizeResultsPage(items []adhocResultDTO, limit, offset int) ([]adhocResultDTO, int, bool) {
+	if len(items) <= limit {
+		return items, offset + len(items), false
+	}
+	items = items[:limit]
+	return items, offset + len(items) + 1, true
 }
 
 func progressResultDTOs(rows []pmstream.ProgressResult, filter resultsFilter) []adhocResultDTO {
@@ -1155,44 +1164,78 @@ type filterOptionDTO struct {
 //
 // 三条 SQL 均无 LIMIT/OFFSET —— 选项是与结果分页/上限完全解耦的权威全量子集（不被结果上限截断）。
 func buildFilterOptionsQuery(dim Dimension, taskID uuid.UUID, metricPaths []string) (string, []any, bool) {
-	args := []any{taskID}
-	metricClause := ""
-	if len(metricPaths) > 0 {
-		metricClause = " AND r.metric_path = ANY($2)"
-		args = append(args, metricPaths)
-	}
+	where, cteWhere, filterArgs, _ := buildAdhocAggregationResultFilters(
+		resultsFilter{TaskMetricPaths: metricPaths}, true, 2,
+	)
+	args := append([]any{taskID}, filterArgs...)
 	switch dim {
 	case DimensionProduct:
 		// 查询跑在 TsPool；products 改读本库影子表 product_dim。
-		return `
-SELECT DISTINCT r.product_id, p.product_name
-FROM pm_adhoc_aggregation_results r
-LEFT JOIN product_dim p ON p.id = r.product_id
+		return adhocCurrentVersionsCTE(cteWhere) + `
+SELECT DISTINCT r.dimension_key::uuid AS product_id, p.product_name
+FROM pm_aggregation_results r
+JOIN current_versions cv
+  ON cv.task_id = r.task_id
+ AND cv.granularity = r.granularity
+ AND cv.window_start = r.window_start
+ AND cv.task_version_id = r.task_version_id
+JOIN pm_aggregation_windows published_window
+  ON published_window.task_id = r.task_id
+ AND published_window.task_version_id = r.task_version_id
+ AND published_window.entity_key = r.dimension_key
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+LEFT JOIN product_dim p ON p.id::text = r.dimension_key
 WHERE r.task_id = $1
-  AND COALESCE((r.extra->>'active_version')::boolean, true)
-  AND r.product_id IS NOT NULL
-` + metricClause + `
+  AND r.dimension = 'product'
+  AND r.dimension_key <> ''
+` + where + `
 ORDER BY p.product_name`, args, true
 	case DimensionDeviceGroup:
 		// 查询跑在 TsPool；device_groups 改读本库影子表 device_group_dim。
-		return `
-SELECT DISTINCT r.object_ldn, g.name
-FROM pm_adhoc_aggregation_results r
-LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
+		return adhocCurrentVersionsCTE(cteWhere) + `
+SELECT DISTINCT r.dimension_key AS object_ldn, g.name
+FROM pm_aggregation_results r
+JOIN current_versions cv
+  ON cv.task_id = r.task_id
+ AND cv.granularity = r.granularity
+ AND cv.window_start = r.window_start
+ AND cv.task_version_id = r.task_version_id
+JOIN pm_aggregation_windows published_window
+  ON published_window.task_id = r.task_id
+ AND published_window.task_version_id = r.task_version_id
+ AND published_window.entity_key = r.dimension_key
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.dimension_key, ',', 1)
 WHERE r.task_id = $1
-  AND COALESCE((r.extra->>'active_version')::boolean, true)
-  AND r.object_ldn LIKE 'DeviceGroup=%'
-` + metricClause + `
+  AND r.dimension = 'device_group'
+  AND r.dimension_key LIKE 'DeviceGroup=%'
+` + where + `
 ORDER BY g.name`, args, true
 	case DimensionBand:
-		return `
-SELECT DISTINCT r.object_ldn
-FROM pm_adhoc_aggregation_results r
+		return adhocCurrentVersionsCTE(cteWhere) + `
+SELECT DISTINCT r.dimension_key AS object_ldn
+FROM pm_aggregation_results r
+JOIN current_versions cv
+  ON cv.task_id = r.task_id
+ AND cv.granularity = r.granularity
+ AND cv.window_start = r.window_start
+ AND cv.task_version_id = r.task_version_id
+JOIN pm_aggregation_windows published_window
+  ON published_window.task_id = r.task_id
+ AND published_window.task_version_id = r.task_version_id
+ AND published_window.entity_key = r.dimension_key
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
 WHERE r.task_id = $1
-  AND COALESCE((r.extra->>'active_version')::boolean, true)
-  AND r.object_ldn LIKE 'Band=%'
-` + metricClause + `
-ORDER BY r.object_ldn`, args, true
+  AND r.dimension = 'band'
+  AND r.dimension_key LIKE 'Band=%'
+` + where + `
+ORDER BY r.dimension_key`, args, true
 	default:
 		// device / aggregate_group / network：无可筛子集
 		return "", nil, false

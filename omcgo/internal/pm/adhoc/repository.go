@@ -22,7 +22,7 @@ import (
 
 // Repository 是 G7 adhoc 任务的持久化接口。
 //
-// 实现共用 pm_tasks 表（task_subtype='adhoc_aggregation' 行）+ pm_adhoc_aggregation_results。
+// 实现共用 pm_tasks 表（task_subtype='adhoc_aggregation' 行）+ PM 聚合结果。
 // 与 pm.PgTaskRepository 同表但独立 Repository，避免破坏老接口。
 type Repository interface {
 	// Create 插入一行 adhoc 任务（pending 状态），返回 ID。
@@ -81,7 +81,7 @@ type Repository interface {
 	// ListRuns 按 task_id 取运行历史，倒序 started_at，支持 limit/offset。
 	ListRuns(ctx context.Context, taskID uuid.UUID, limit, offset int) ([]TaskRun, error)
 
-	// ListResultMetricPaths 按结果过滤条件发现任务结果中真实出现过的指标。
+	// ListResultMetricPaths 按结果过滤条件从当前稳定聚合结果中发现真实出现过的指标。
 	ListResultMetricPaths(ctx context.Context, taskID uuid.UUID, filter resultsFilter) ([]string, error)
 }
 
@@ -104,10 +104,10 @@ var (
 // 双池（KPI/时序库物理分离）：
 //   - pool（主库 PgPool）：pm_tasks / pm_adhoc_task_runs 任务生命周期表（Create/Update/Get/List/
 //     Cancel/LockNextPending/UpdateStatus/InsertRun/FinishRun/ListRuns/NextRunSeq）。
-//   - tsPool（时序库 TsPool）：pm_adhoc_aggregation_results 结果表（仅 InsertResults）。
+//   - tsPool（时序库 TsPool）：adhoc legacy 写入表 + streaming 聚合结果表。
 type PgRepository struct {
 	pool   *pgxpool.Pool // 主库：任务生命周期表
-	tsPool *pgxpool.Pool // 时序库：pm_adhoc_aggregation_results
+	tsPool *pgxpool.Pool // 时序库：adhoc legacy 写入表 + streaming 聚合结果表
 	// watermarks 读上游「完成水位」（#528 P3）。新建持续任务时把初始游标 last_fire_at
 	// 置为「建任务时刻当前对应水位桶起点」——从「现在」起算、不回扫历史、结果表不冒出史前空格。
 	// nil 安全：不注入则 last_fire_at 留 NULL（退化到 created_at），行为不回归。
@@ -125,7 +125,7 @@ type streamingTaskRepository interface {
 
 // NewPgRepository 创建 PgRepository。
 //
-// pgPool=主库（pm_tasks/pm_adhoc_task_runs），tsPool=时序库（pm_adhoc_aggregation_results）。
+// pgPool=主库（pm_tasks/pm_adhoc_task_runs），tsPool=时序库（PM 结果表）。
 func NewPgRepository(pgPool, tsPool *pgxpool.Pool) *PgRepository {
 	return &PgRepository{pool: pgPool, tsPool: tsPool, loc: func() *time.Location { return time.UTC }}
 }
@@ -172,46 +172,147 @@ func (r *PgRepository) ListResultMetricPaths(ctx context.Context, taskID uuid.UU
 }
 
 func buildResultMetricScopeQuery(taskID uuid.UUID, f resultsFilter) (string, []any, error) {
-	b := storage.Psql.Select("DISTINCT r.metric_path").
-		From("pm_adhoc_aggregation_results r").
-		Where(sq.Eq{"r.task_id": taskID})
+	where, cteWhere, filterArgs, _ := buildAdhocAggregationResultFilters(f, false, 2)
+	args := append([]any{taskID}, filterArgs...)
+	q := adhocCurrentVersionsCTE(cteWhere) + `
+SELECT DISTINCT r.metric_path
+FROM pm_aggregation_results r
+JOIN current_versions cv
+  ON cv.task_id = r.task_id
+ AND cv.granularity = r.granularity
+ AND cv.window_start = r.window_start
+ AND cv.task_version_id = r.task_version_id
+JOIN pm_aggregation_windows published_window
+  ON published_window.task_id = r.task_id
+ AND published_window.task_version_id = r.task_version_id
+ AND published_window.entity_key = r.dimension_key
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+WHERE r.task_id = $1` + where + `
+ORDER BY r.metric_path`
+	return q, args, nil
+}
+
+func buildAdhocAggregationResultFilters(f resultsFilter, includeTaskMetricPaths bool, startPos int) (whereSQL, cteWhereSQL string, args []any, nextPos int) {
+	pos := startPos
+	add := func(format string, arg any) {
+		whereSQL += fmt.Sprintf(format, pos)
+		args = append(args, arg)
+		pos++
+	}
+	addShared := func(whereFormat, cteFormat string, arg any) {
+		whereSQL += fmt.Sprintf(whereFormat, pos)
+		cteWhereSQL += fmt.Sprintf(cteFormat, pos)
+		args = append(args, arg)
+		pos++
+	}
+	objectExpr := "CASE WHEN r.dimension = 'device' THEN NULLIF(r.object_ldn, '') WHEN r.dimension = 'network' THEN 'Network' ELSE r.dimension_key END"
+	deviceSNExpr := "CASE WHEN r.dimension = 'device' THEN r.device_sn ELSE 'AGGREGATED' END"
+	if predicate := dimensionPredicate(f.Dimension); predicate != "" {
+		whereSQL += " AND " + predicate
+	}
 	if f.DeviceSN != "" {
-		b = b.Where(sq.Eq{"r.device_sn": f.DeviceSN})
+		add(" AND "+deviceSNExpr+" = $%d", f.DeviceSN)
 	}
 	if f.MetricPath != "" {
-		b = b.Where(sq.Eq{"r.metric_path": f.MetricPath})
+		add(" AND r.metric_path = $%d", f.MetricPath)
 	}
 	if f.Granularity != "" {
-		b = b.Where(sq.Eq{"r.granularity": f.Granularity})
+		addShared(" AND r.granularity = $%d", " AND granularity = $%d", f.Granularity)
 	}
 	if f.StartTime != "" {
 		if t, err := time.Parse(time.RFC3339, f.StartTime); err == nil {
-			b = b.Where(sq.GtOrEq{"r.time": t})
+			addShared(" AND r.window_start >= $%d", " AND window_start >= $%d", t)
 		}
 	}
 	if f.EndTime != "" {
 		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
-			b = b.Where(sq.Lt{"r.time": t})
+			addShared(" AND r.window_start < $%d", " AND window_start < $%d", t)
 		}
 	}
 	if len(f.ObjectLDNs) > 0 {
-		b = b.Where(sq.Eq{"r.object_ldn": f.ObjectLDNs})
+		add(" AND "+objectExpr+" = ANY($%d)", f.ObjectLDNs)
 	}
 	if len(f.ProductIDs) > 0 {
-		b = b.Where(sq.Eq{"r.product_id": f.ProductIDs})
+		add(" AND r.dimension = 'product' AND r.dimension_key = ANY($%d)", f.ProductIDs)
 	}
 	if len(f.SubsetLDNs) > 0 {
-		b = b.Where(sq.Eq{"r.object_ldn": f.SubsetLDNs})
+		add(" AND "+objectExpr+" = ANY($%d)", f.SubsetLDNs)
+	}
+	if includeTaskMetricPaths && len(f.TaskMetricPaths) > 0 {
+		add(" AND r.metric_path = ANY($%d)", f.TaskMetricPaths)
 	}
 	if len(f.Weekdays) > 0 && len(f.Weekdays) < 7 {
-		b = b.Where(sq.Expr(calendarfilter.ExtractDOWPredicate("r.start_time"),
-			calendarfilter.NormalizeName(f.CalendarTimezone), f.Weekdays))
+		whereSQL += fmt.Sprintf(" AND EXTRACT(dow FROM (r.window_start AT TIME ZONE $%d))::int = ANY($%d)", pos, pos+1)
+		args = append(args, calendarfilter.NormalizeName(f.CalendarTimezone), f.Weekdays)
+		pos += 2
 	}
 	if len(f.Hours) > 0 && len(f.Hours) < 24 {
-		b = b.Where(sq.Expr(calendarfilter.ExtractHourPredicate("r.start_time"),
-			calendarfilter.NormalizeName(f.CalendarTimezone), f.Hours))
+		whereSQL += fmt.Sprintf(" AND EXTRACT(hour FROM (r.window_start AT TIME ZONE $%d))::int = ANY($%d)", pos, pos+1)
+		args = append(args, calendarfilter.NormalizeName(f.CalendarTimezone), f.Hours)
+		pos += 2
 	}
-	return b.OrderBy("r.metric_path").ToSql()
+	return whereSQL, cteWhereSQL, args, pos
+}
+
+func dimensionPredicate(dim Dimension) string {
+	switch dim {
+	case DimensionDevice:
+		return "r.dimension = 'device'"
+	case DimensionAggregateGroup:
+		return "r.dimension = 'aggregate_group'"
+	case DimensionProduct:
+		return "r.dimension = 'product'"
+	case DimensionBand:
+		return "r.dimension = 'band'"
+	case DimensionNetwork:
+		return "r.dimension = 'network'"
+	case DimensionDeviceGroup:
+		return "r.dimension = 'device_group'"
+	default:
+		return ""
+	}
+}
+
+func adhocCurrentVersionsCTE(cteWhere string) string {
+	return `WITH current_versions AS MATERIALIZED (
+    SELECT DISTINCT ON (candidate.task_id, candidate.granularity, candidate.window_start)
+        candidate.task_id,
+        candidate.granularity,
+        candidate.window_start,
+        candidate.task_version_id
+    FROM (
+        SELECT task_id, granularity, window_start, task_version_id, version_effective_from,
+               MAX(revision) AS max_revision,
+               MAX(published_at) AS max_published_at,
+               MAX(updated_at) AS max_updated_at
+        FROM pm_aggregation_windows
+        WHERE task_id = $1
+          AND status = 'published'` + cteWhere + `
+        GROUP BY task_id, granularity, window_start, task_version_id, version_effective_from
+    ) candidate
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM pm_aggregation_windows active_window
+        WHERE active_window.task_id = candidate.task_id
+          AND active_window.granularity = candidate.granularity
+          AND active_window.window_start = candidate.window_start
+          AND active_window.task_version_id <> candidate.task_version_id
+          AND active_window.status IN ('open', 'finalizing', 'rebuilding', 'failed')
+          AND active_window.version_effective_from IS NOT NULL
+          AND (
+              candidate.version_effective_from IS NULL
+              OR active_window.version_effective_from > candidate.version_effective_from
+          )
+    )
+    ORDER BY candidate.task_id, candidate.granularity, candidate.window_start,
+             candidate.version_effective_from DESC NULLS LAST,
+             candidate.max_revision DESC,
+             candidate.max_published_at DESC NULLS LAST,
+             candidate.max_updated_at DESC,
+             candidate.task_version_id DESC
+)`
 }
 
 // buildResultsQuery 纯函数：拼 adhoc results 查询 SQL + 占位参数。
@@ -220,176 +321,53 @@ func buildResultsQuery(taskID uuid.UUID, f resultsFilter, limit, offset int) (st
 	// PM-线名解析：LEFT JOIN 在读时把分组键 ID 解析成可读名 —— product 维度按 product_id 取
 	// product_dim.product_name；device_group 维度按 'DeviceGroup='||id 比对 object_ldn 取 device_group_dim.name。
 	// 两 JOIN 都是 LEFT，互不影响（product 任务时组名 NULL、组任务时产品名 NULL）；名缺失（脏数据/已删）也返 NULL，前端回退 id 前 8 位。
-	// 查询跑在 TsPool（pm_adhoc_aggregation_results 在时序库），products/device_groups 改读本库影子表。
-	q := `
-SELECT r.id, r.task_id, r.device_oui, r.device_sn, r.product_id, r.metric_path, r.metric_type, r.metric_value,
-       r.statis_type, r.granularity, r.time, r.start_time, r.end_time, r.ingest_time, r.object_ldn, r.extra,
+	// 查询跑在 TsPool；结果直接读 pm_aggregation_results，products/device_groups 改读本库影子表。
+	where, cteWhere, filterArgs, pos := buildAdhocAggregationResultFilters(f, true, 2)
+	args := append([]any{taskID}, filterArgs...)
+	q := adhocCurrentVersionsCTE(cteWhere) + `
+SELECT r.id, r.task_id, r.device_oui,
+       CASE WHEN r.dimension = 'device' THEN r.device_sn ELSE 'AGGREGATED' END AS device_sn,
+       CASE WHEN r.dimension = 'product' THEN r.dimension_key::uuid ELSE NULL::uuid END AS product_id,
+       r.metric_path, r.metric_type, r.metric_value,
+       r.aggregation_op::text AS statis_type, r.granularity::text,
+       r.window_start AS "time", r.window_start AS start_time, r.window_end AS end_time,
+       r.created_at AS ingest_time,
+       CASE WHEN r.dimension = 'device' THEN NULLIF(r.object_ldn, '') WHEN r.dimension = 'network' THEN 'Network' ELSE r.dimension_key END AS object_ldn,
+       jsonb_build_object(
+           'task_version_id', r.task_version_id,
+           'complete', r.period_complete,
+           'missing_slots', r.missing_slots,
+           'dimension', r.dimension,
+           'revision', r.revision,
+           'version_effective_from', r.version_effective_from,
+           'version_effective_to', r.version_effective_to,
+           'received_slots', r.received_slots,
+           'expected_slots', r.expected_slots,
+           'version_expected_slots', r.version_expected_slots,
+           'natural_expected_slots', r.natural_expected_slots,
+           'version_slice_complete', r.version_slice_complete,
+           'period_complete', r.period_complete,
+           'partial', false
+       ) AS extra,
        p.product_name, g.name AS device_group_name
-FROM pm_adhoc_aggregation_results r
-LEFT JOIN product_dim p ON p.id = r.product_id
-LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.object_ldn, ',', 1)
-WHERE r.task_id = $1
-  AND COALESCE((r.extra->>'active_version')::boolean, true)`
-	args := []any{taskID}
-	pos := 2
-	if f.DeviceSN != "" {
-		q += fmt.Sprintf(" AND r.device_sn = $%d", pos)
-		args = append(args, f.DeviceSN)
-		pos++
-	}
-	if f.MetricPath != "" {
-		q += fmt.Sprintf(" AND r.metric_path = $%d", pos)
-		args = append(args, f.MetricPath)
-		pos++
-	}
-	if f.Granularity != "" {
-		q += fmt.Sprintf(" AND r.granularity = $%d", pos)
-		args = append(args, f.Granularity)
-		pos++
-	}
-	// 可选大时间段过滤（页签1 仪表盘大时间段驱动取数）：start_time/end_time 用 RFC3339 解析，
-	// 命中则按 time 列窗口过滤，与现有 ORDER BY time DESC 同列；非法值忽略（容错而非 400）。
-	if f.StartTime != "" {
-		if t, err := time.Parse(time.RFC3339, f.StartTime); err == nil {
-			q += fmt.Sprintf(" AND r.time >= $%d", pos)
-			args = append(args, t)
-			pos++
-		}
-	}
-	if f.EndTime != "" {
-		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
-			q += fmt.Sprintf(" AND r.time < $%d", pos)
-			args = append(args, t)
-			pos++
-		}
-	}
-	// T-0193：任务小区/PLMN 白名单（查看级收口）。非空时只返回选中 object_ldn 行；
-	// 空 = 不过滤（全小区，向后兼容旧任务）。与上面"只看 N 指标"同层。
-	if len(f.ObjectLDNs) > 0 {
-		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
-		args = append(args, f.ObjectLDNs)
-		pos++
-	}
-	// PM-DASH-DIMFILTER：仪表盘维度子集过滤（与上面任务白名单各自独立成子句，AND 取交集）。
-	// product 维度按 product_id 子集；device_group/band 维度按 object_ldn 子集。空 = 不过滤（向后兼容）。
-	if len(f.ProductIDs) > 0 {
-		q += fmt.Sprintf(" AND r.product_id = ANY($%d)", pos)
-		args = append(args, f.ProductIDs)
-		pos++
-	}
-	if len(f.SubsetLDNs) > 0 {
-		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
-		args = append(args, f.SubsetLDNs)
-		pos++
-	}
-	// #532 显示侧收口：按任务配置指标集过滤（与用户临时选的 MetricPath 各自独立成子句、AND 取交集）。
-	// 空 = 不过滤（历史/边界任务向后兼容）。须与 buildResultsCountQuery 同口径，否则 count 与数据对不上。
-	if len(f.TaskMetricPaths) > 0 {
-		q += fmt.Sprintf(" AND r.metric_path = ANY($%d)", pos)
-		args = append(args, f.TaskMetricPaths)
-		pos++
-	}
-	// #599：星期/小时段后端过滤（EXTRACT(dow/hour FROM start_time)）。
-	// 全选（7 天/24 时）或空 = 不加条件（向后兼容）。
-	if len(f.Weekdays) > 0 && len(f.Weekdays) < 7 {
-		tzPos := pos
-		args = append(args, calendarfilter.NormalizeName(f.CalendarTimezone))
-		pos++
-		q += fmt.Sprintf(" AND EXTRACT(dow FROM (r.start_time AT TIME ZONE $%d))::int = ANY($%d)", tzPos, pos)
-		args = append(args, f.Weekdays)
-		pos++
-	}
-	if len(f.Hours) > 0 && len(f.Hours) < 24 {
-		tzPos := pos
-		args = append(args, calendarfilter.NormalizeName(f.CalendarTimezone))
-		pos++
-		q += fmt.Sprintf(" AND EXTRACT(hour FROM (r.start_time AT TIME ZONE $%d))::int = ANY($%d)", tzPos, pos)
-		args = append(args, f.Hours)
-		pos++
-	}
-	q += fmt.Sprintf(" ORDER BY r.time DESC LIMIT $%d OFFSET $%d", pos, pos+1)
+FROM pm_aggregation_results r
+JOIN current_versions cv
+  ON cv.task_id = r.task_id
+ AND cv.granularity = r.granularity
+ AND cv.window_start = r.window_start
+ AND cv.task_version_id = r.task_version_id
+JOIN pm_aggregation_windows published_window
+  ON published_window.task_id = r.task_id
+ AND published_window.task_version_id = r.task_version_id
+ AND published_window.entity_key = r.dimension_key
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+LEFT JOIN product_dim p ON r.dimension = 'product' AND p.id::text = r.dimension_key
+LEFT JOIN device_group_dim g ON r.dimension = 'device_group' AND ('DeviceGroup=' || g.id::text) = split_part(r.dimension_key, ',', 1)
+WHERE r.task_id = $1` + where
+	q += fmt.Sprintf(" ORDER BY r.window_start DESC LIMIT $%d OFFSET $%d", pos, pos+1)
 	args = append(args, limit, offset)
-	return q, args
-}
-
-// buildResultsCountQuery 纯函数：拼 adhoc results 的真实总数 COUNT(*) SQL + 占位参数。
-// 复用与 buildResultsQuery 完全相同的 WHERE 过滤（去掉 LEFT JOIN / ORDER BY / LIMIT / OFFSET），
-// 让 total 反映命中行真实总数（T-0194 截断诚实提示）。
-func buildResultsCountQuery(taskID uuid.UUID, f resultsFilter) (string, []any) {
-	q := `SELECT COUNT(*) FROM pm_adhoc_aggregation_results r
-WHERE r.task_id = $1
-  AND COALESCE((r.extra->>'active_version')::boolean, true)`
-	args := []any{taskID}
-	pos := 2
-	if f.DeviceSN != "" {
-		q += fmt.Sprintf(" AND r.device_sn = $%d", pos)
-		args = append(args, f.DeviceSN)
-		pos++
-	}
-	if f.MetricPath != "" {
-		q += fmt.Sprintf(" AND r.metric_path = $%d", pos)
-		args = append(args, f.MetricPath)
-		pos++
-	}
-	if f.Granularity != "" {
-		q += fmt.Sprintf(" AND r.granularity = $%d", pos)
-		args = append(args, f.Granularity)
-		pos++
-	}
-	if f.StartTime != "" {
-		if t, err := time.Parse(time.RFC3339, f.StartTime); err == nil {
-			q += fmt.Sprintf(" AND r.time >= $%d", pos)
-			args = append(args, t)
-			pos++
-		}
-	}
-	if f.EndTime != "" {
-		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
-			q += fmt.Sprintf(" AND r.time < $%d", pos)
-			args = append(args, t)
-			pos++
-		}
-	}
-	if len(f.ObjectLDNs) > 0 {
-		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
-		args = append(args, f.ObjectLDNs)
-		pos++
-	}
-	// PM-DASH-DIMFILTER：与 buildResultsQuery 同口径——同样的 ProductIDs / SubsetLDNs 子句，
-	// 否则 count 与数据对不上（T-0194 踩过）。
-	if len(f.ProductIDs) > 0 {
-		q += fmt.Sprintf(" AND r.product_id = ANY($%d)", pos)
-		args = append(args, f.ProductIDs)
-		pos++
-	}
-	if len(f.SubsetLDNs) > 0 {
-		q += fmt.Sprintf(" AND r.object_ldn = ANY($%d)", pos)
-		args = append(args, f.SubsetLDNs)
-		pos++
-	}
-	// #532：与 buildResultsQuery 同口径——同样的任务配置指标集子句，否则 count 与数据对不上。
-	if len(f.TaskMetricPaths) > 0 {
-		q += fmt.Sprintf(" AND r.metric_path = ANY($%d)", pos)
-		args = append(args, f.TaskMetricPaths)
-		pos++
-	}
-	// #599：与 buildResultsQuery 同口径——星期/小时段过滤。
-	if len(f.Weekdays) > 0 && len(f.Weekdays) < 7 {
-		tzPos := pos
-		args = append(args, calendarfilter.NormalizeName(f.CalendarTimezone))
-		pos++
-		q += fmt.Sprintf(" AND EXTRACT(dow FROM (r.start_time AT TIME ZONE $%d))::int = ANY($%d)", tzPos, pos)
-		args = append(args, f.Weekdays)
-		pos++
-	}
-	if len(f.Hours) > 0 && len(f.Hours) < 24 {
-		tzPos := pos
-		args = append(args, calendarfilter.NormalizeName(f.CalendarTimezone))
-		pos++
-		q += fmt.Sprintf(" AND EXTRACT(hour FROM (r.start_time AT TIME ZONE $%d))::int = ANY($%d)", tzPos, pos)
-		args = append(args, f.Hours)
-		pos++
-	}
 	return q, args
 }
 

@@ -73,7 +73,7 @@ func Test_buildResultsQuery_SubsetLDNWithCommaIntact(t *testing.T) {
 
 	q, args := buildResultsQuery(uuid.New(), resultsFilter{SubsetLDNs: ldns}, 100, 0)
 
-	assert.Contains(t, q, "AND r.object_ldn = ANY($2)")
+	assert.Contains(t, q, "ELSE r.dimension_key END = ANY($2)")
 	// 占位参数里是完整含逗号整值（[]string 单元素），不是被拆开的两段
 	gotArr, ok := args[1].([]string)
 	assert.True(t, ok, "SubsetLDNs 应作为 []string 占位参数入 args")
