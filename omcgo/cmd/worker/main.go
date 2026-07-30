@@ -480,7 +480,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 			0, // grace 默认 60s
 			0, // batchSize 默认 100
 			logger,
-		)
+		).WithTransitionPublisher(w.TaskService.PublishTransitionEvent)
 		go reconciler.Run(context.Background())
 		logger.Info("task reconciler started (#13)",
 			zap.Int("interval_seconds", cfg.Task.ReconcileIntervalSeconds))

@@ -565,7 +565,7 @@ func (s *TaskService) commitTransition(
 	current, candidate *Task,
 	materializeMissing bool,
 ) (bool, error) {
-	changed, err := s.queue.prepareTransition(ctx, current, candidate, materializeMissing)
+	token, changed, err := s.queue.prepareTransition(ctx, current, candidate, materializeMissing)
 	if err != nil || !changed {
 		return changed, err
 	}
@@ -577,13 +577,22 @@ func (s *TaskService) commitTransition(
 	if !pgChanged {
 		return false, nil
 	}
-	if err := s.queue.acknowledgeTransition(ctx, candidate.ID); err != nil {
+	if err := s.queue.acknowledgeTransition(ctx, candidate.ID, token); err != nil {
 		// PG is already authoritative. Keep the persistent pending index so the
 		// worker can retry cross-slot cleanup without replaying the business event.
 		s.recordDualWriteFail("cleanup_transition")
 		logger.L(ctx).Warn("defer task transition cleanup",
 			zap.String("task_id", candidate.ID),
 			zap.Error(err))
+	}
+	if isTerminal(candidate.Status) && (candidate.SourceID != "" || candidate.CreatorID != "") {
+		if err := s.PublishTransitionEvent(ctx, candidate, token); err != nil {
+			s.recordDualWriteFail("publish_transition")
+			logger.L(ctx).Warn("defer task transition event",
+				zap.String("task_id", candidate.ID),
+				zap.String("transition_token", token),
+				zap.Error(err))
+		}
 	}
 	return true, nil
 }
@@ -616,8 +625,6 @@ func (s *TaskService) MarkTaskCompleted(ctx context.Context, taskID string, resu
 	logger.L(ctx).Info("task completed",
 		zap.String("task_id", taskID),
 		zap.String("method", task.Method))
-
-	s.notifyCompletion(ctx, task)
 
 	return nil
 }
@@ -709,8 +716,6 @@ func (s *TaskService) MarkTaskFailedWithResult(ctx context.Context, taskID strin
 		zap.String("error_message", errorMsg),
 		zap.Int("result_bytes", len(result)))
 
-	s.notifyCompletion(ctx, task)
-
 	return nil
 }
 
@@ -742,7 +747,6 @@ func (s *TaskService) ExpireTask(ctx context.Context, task *Task) error {
 		zap.String("task_id", task.ID),
 		zap.String("device_sn", task.DeviceSN),
 		zap.Time("expires_at", deref(task.ExpiresAt)))
-	s.notifyCompletion(ctx, task)
 	return nil
 }
 
@@ -823,8 +827,6 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID string) error {
 	}
 	task = candidate
 	s.recordCompletion(candidate, TaskStatusCancelled)
-	s.notifyCompletion(ctx, candidate)
-
 	logger.L(ctx).Info("task cancelled", zap.String("task_id", taskID))
 
 	return nil
@@ -874,7 +876,6 @@ func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) 
 				continue
 			}
 			s.recordCompletion(candidate, TaskStatusFailed)
-			s.notifyCompletion(ctx, candidate)
 			continue
 		}
 		if interval := task.RetryInterval(); interval > 0 && task.SentAt != nil {
@@ -1205,6 +1206,42 @@ func (s *TaskService) notifyCompletion(ctx context.Context, task *Task) {
 	for _, cb := range s.callbacks {
 		cb.OnTaskCompleted(ctx, task)
 	}
+}
+
+// PublishTransitionEvent publishes the durable transition outbox entry using
+// the transition token as a stable event id. Subscriber deduplication therefore
+// makes publish-then-ack crash recovery safe.
+func (s *TaskService) PublishTransitionEvent(
+	ctx context.Context,
+	task *Task,
+	token string,
+) error {
+	if task == nil || token == "" {
+		return fmt.Errorf("task and transition token are required")
+	}
+	if task.SourceID == "" && task.CreatorID == "" {
+		return s.queue.acknowledgeTransitionEvent(ctx, task.ID, token)
+	}
+	if s.eventBus != nil {
+		subject := SubjectForStatus(task.Status)
+		if subject == "" {
+			return s.queue.acknowledgeTransitionEvent(ctx, task.ID, token)
+		}
+		evt, err := event.NewEvent(subject, task)
+		if err != nil {
+			return fmt.Errorf("build transition event: %w", err)
+		}
+		evt.ID = "task-transition-" + token
+		evt.Metadata = map[string]string{"transition_token": token}
+		if err := s.eventBus.Publish(ctx, subject, evt); err != nil {
+			return fmt.Errorf("publish transition event: %w", err)
+		}
+	} else {
+		for _, cb := range s.callbacks {
+			cb.OnTaskCompleted(ctx, task)
+		}
+	}
+	return s.queue.acknowledgeTransitionEvent(ctx, task.ID, token)
 }
 
 // StaleNotificationLookup 实现 notification.StaleTaskLookup 接口（T-0157 stale sync）。

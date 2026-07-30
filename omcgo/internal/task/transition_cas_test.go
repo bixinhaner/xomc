@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -61,7 +62,7 @@ func TestRedisTaskQueue_FirstTransitionWinnerFencesRetryCancelAndExpire(t *testi
 
 	completed := cloneTransitionTask(sent)
 	completed.MarkCompleted(json.RawMessage(`{"winner":"completed"}`))
-	changed, err := q.prepareTransition(ctx, sent, completed, false)
+	_, changed, err := q.prepareTransition(ctx, sent, completed, false)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.LessOrEqual(t, m.TTL(q.taskKey(sent.ID)), time.Duration(0),
@@ -69,7 +70,7 @@ func TestRedisTaskQueue_FirstTransitionWinnerFencesRetryCancelAndExpire(t *testi
 
 	retry := cloneTransitionTask(sent)
 	retry.ResetForRetry()
-	changed, err = q.prepareTransition(ctx, sent, retry, false)
+	_, changed, err = q.prepareTransition(ctx, sent, retry, false)
 	require.NoError(t, err)
 	require.False(t, changed, "retry must not revive a terminal winner")
 
@@ -77,13 +78,13 @@ func TestRedisTaskQueue_FirstTransitionWinnerFencesRetryCancelAndExpire(t *testi
 	now := time.Now()
 	cancelled.Status = TaskStatusCancelled
 	cancelled.CompletedAt = &now
-	changed, err = q.prepareTransition(ctx, sent, cancelled, false)
+	_, changed, err = q.prepareTransition(ctx, sent, cancelled, false)
 	require.NoError(t, err)
 	require.False(t, changed, "cancel must not overwrite a terminal winner")
 
 	expired := cloneTransitionTask(sent)
 	expired.MarkExpired()
-	changed, err = q.prepareTransition(ctx, sent, expired, false)
+	_, changed, err = q.prepareTransition(ctx, sent, expired, false)
 	require.NoError(t, err)
 	require.False(t, changed, "expire must not overwrite a terminal winner")
 
@@ -100,7 +101,7 @@ func TestRedisTaskQueue_TerminalTTLStartsOnlyAfterPGAndCleanupAck(t *testing.T) 
 	completed := cloneTransitionTask(sent)
 	completed.MarkCompleted(json.RawMessage(`{"ok":true}`))
 
-	changed, err := q.prepareTransition(ctx, sent, completed, false)
+	token, changed, err := q.prepareTransition(ctx, sent, completed, false)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.LessOrEqual(t, m.TTL(q.taskKey(sent.ID)), time.Duration(0))
@@ -110,7 +111,7 @@ func TestRedisTaskQueue_TerminalTTLStartsOnlyAfterPGAndCleanupAck(t *testing.T) 
 	require.True(t, m.Exists(q.taskKey(sent.ID)),
 		"PG outage longer than the former 4h TTL must not lose the only terminal state")
 
-	require.NoError(t, q.acknowledgeTransition(ctx, sent.ID))
+	require.NoError(t, q.acknowledgeTransition(ctx, sent.ID, token))
 	require.Equal(t, 15*time.Minute, m.TTL(q.taskKey(sent.ID)))
 	require.Empty(t, mustPendingTransitionIDs(t, q, ctx))
 	require.False(t, m.Exists(q.cwmpKey(sent.CWMPID)))
@@ -124,19 +125,19 @@ func TestRedisTaskQueue_CleanupFailureRemainsDurableAndRetryable(t *testing.T) {
 	completed := cloneTransitionTask(sent)
 	completed.MarkCompleted(nil)
 
-	changed, err := q.prepareTransition(ctx, sent, completed, false)
+	token, changed, err := q.prepareTransition(ctx, sent, completed, false)
 	require.NoError(t, err)
 	require.True(t, changed)
 
 	q.cleanupTransition = func(context.Context, *Task, string) error {
 		return errors.New("redis cluster slot unavailable")
 	}
-	require.Error(t, q.acknowledgeTransition(ctx, sent.ID))
+	require.Error(t, q.acknowledgeTransition(ctx, sent.ID, token))
 	require.LessOrEqual(t, m.TTL(q.taskKey(sent.ID)), time.Duration(0))
 	require.Equal(t, []string{sent.ID}, mustPendingTransitionIDs(t, q, ctx))
 
 	q.cleanupTransition = nil
-	require.NoError(t, q.acknowledgeTransition(ctx, sent.ID))
+	require.NoError(t, q.acknowledgeTransition(ctx, sent.ID, token))
 	require.Equal(t, 15*time.Minute, m.TTL(q.taskKey(sent.ID)))
 	require.Empty(t, mustPendingTransitionIDs(t, q, ctx))
 }
@@ -148,14 +149,16 @@ func TestRedisTaskQueue_DeferPendingTransitionMovesFailureToTail(t *testing.T) {
 		sent := sentTaskForTransition(t, q, id)
 		completed := cloneTransitionTask(sent)
 		completed.MarkCompleted(nil)
-		changed, err := q.prepareTransition(ctx, sent, completed, false)
+		_, changed, err := q.prepareTransition(ctx, sent, completed, false)
 		require.NoError(t, err)
 		require.True(t, changed)
 		time.Sleep(time.Millisecond)
 	}
 	require.Equal(t, []string{"first", "second", "third"}, mustPendingTransitionIDs(t, q, ctx))
 
-	require.NoError(t, q.deferPendingTransition(ctx, "first"))
+	refs, err := q.listPendingTransitions(ctx, 100)
+	require.NoError(t, err)
+	require.NoError(t, q.deferPendingTransition(ctx, refs[0].TaskID, refs[0].Token))
 	require.Equal(t, []string{"second", "third", "first"}, mustPendingTransitionIDs(t, q, ctx))
 }
 
@@ -165,7 +168,7 @@ func TestReconciler_PGOutageBeyondTTLRetainsAndRepairsTransition(t *testing.T) {
 	sent := sentTaskForTransition(t, q, "pg-outage-retained")
 	completed := cloneTransitionTask(sent)
 	completed.MarkCompleted(json.RawMessage(`{"ok":true}`))
-	changed, err := q.prepareTransition(ctx, sent, completed, false)
+	_, changed, err := q.prepareTransition(ctx, sent, completed, false)
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -193,13 +196,133 @@ func TestReconciler_PGOutageBeyondTTLRetainsAndRepairsTransition(t *testing.T) {
 	require.Empty(t, mustPendingTransitionIDs(t, q, ctx))
 }
 
+func TestRedisTaskQueue_OldAckCannotClearNewTransition(t *testing.T) {
+	q, _ := newRedisQueueWithTerminalTTL(t, 15*time.Minute)
+	ctx := context.Background()
+	sent := sentTaskForTransition(t, q, "old-ack-new-transition")
+	failed := cloneTransitionTask(sent)
+	failed.MarkFailed(9002, "retryable")
+	oldToken, changed, err := q.prepareTransition(ctx, sent, failed, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, q.acknowledgeTransition(ctx, sent.ID, oldToken))
+
+	pending := cloneTransitionTask(failed)
+	pending.MaxRetries = 2
+	pending.ResetForRetry()
+	newToken, changed, err := q.prepareTransition(ctx, failed, pending, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	require.Error(t, q.acknowledgeTransition(ctx, sent.ID, oldToken))
+	values, err := q.client.HMGet(
+		ctx, q.taskKey(sent.ID), "transition_token", "pg_sync_pending", "cleanup_pending",
+	).Result()
+	require.NoError(t, err)
+	require.Equal(t, newToken, values[0])
+	require.Equal(t, "1", values[1])
+	require.Equal(t, "1", values[2])
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			require.Error(t, q.acknowledgeTransition(ctx, sent.ID, oldToken))
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		require.NoError(t, q.acknowledgeTransition(ctx, sent.ID, newToken))
+	}()
+	close(start)
+	wg.Wait()
+
+	got, err := q.GetByID(ctx, sent.ID)
+	require.NoError(t, err)
+	require.Equal(t, TaskStatusPending, got.Status)
+	require.Empty(t, mustPendingTransitionIDs(t, q, ctx))
+}
+
+func TestRedisTaskQueue_WinnerTTLIsUsedAcrossProcesses(t *testing.T) {
+	qWinner, m := newRedisQueueWithTerminalTTL(t, 20*time.Minute)
+	qReconciler := NewRedisTaskQueueWithTerminalTTL(qWinner.client, 10*time.Minute)
+	ctx := context.Background()
+	sent := sentTaskForTransition(t, qWinner, "cross-process-ttl")
+	completed := cloneTransitionTask(sent)
+	completed.MarkCompleted(nil)
+	token, changed, err := qWinner.prepareTransition(ctx, sent, completed, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	require.NoError(t, qReconciler.acknowledgeTransition(ctx, sent.ID, token))
+	require.Equal(t, 20*time.Minute, m.TTL(qWinner.taskKey(sent.ID)))
+}
+
+func TestReconciler_PGRecoveryPublishesStableEventOnce(t *testing.T) {
+	q, _ := newRedisQueueWithTerminalTTL(t, 15*time.Minute)
+	ctx := context.Background()
+	sent := sentTaskForTransition(t, q, "event-outbox")
+	sent.SourceID = "source-event-outbox"
+	require.NoError(t, q.Update(ctx, sent))
+	completed := cloneTransitionTask(sent)
+	completed.MarkCompleted(nil)
+	token, changed, err := q.prepareTransition(ctx, sent, completed, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	repairer := &compensationRepairer{task: cloneTransitionTask(sent), failures: 1}
+	var attempts, published int
+	var eventIDs []string
+	reconciler := NewReconciler(
+		&fakeActiveLister{}, q, repairer, nil,
+		time.Second, time.Minute, 10, nil,
+	).WithTransitionPublisher(func(ctx context.Context, task *Task, gotToken string) error {
+		attempts++
+		eventIDs = append(eventIDs, "task-transition-"+gotToken)
+		if attempts == 1 {
+			return errors.New("nats unavailable")
+		}
+		published++
+		return q.acknowledgeTransitionEvent(ctx, task.ID, gotToken)
+	})
+
+	_, err = reconciler.ReconcileOnce(ctx) // PG fails: event must not publish.
+	require.NoError(t, err)
+	require.Zero(t, attempts)
+	_, err = reconciler.ReconcileOnce(ctx) // PG succeeds, first publish fails.
+	require.NoError(t, err)
+	require.Equal(t, 1, attempts)
+	require.Equal(t, []string{sent.ID}, mustPendingTransitionIDs(t, q, ctx))
+	_, err = reconciler.ReconcileOnce(ctx) // Same stable event id is retried.
+	require.NoError(t, err)
+	require.Equal(t, 2, attempts)
+	require.Equal(t, 1, published)
+	require.Equal(t, []string{
+		"task-transition-" + token,
+		"task-transition-" + token,
+	}, eventIDs)
+	require.Empty(t, mustPendingTransitionIDs(t, q, ctx))
+	_, err = reconciler.ReconcileOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, attempts)
+}
+
 func mustPendingTransitionIDs(
 	t *testing.T,
 	q *RedisTaskQueue,
 	ctx context.Context,
 ) []string {
 	t.Helper()
-	ids, err := q.listPendingTransitionIDs(ctx, 100)
+	refs, err := q.listPendingTransitions(ctx, 100)
 	require.NoError(t, err)
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ids = append(ids, ref.TaskID)
+	}
 	return ids
 }
