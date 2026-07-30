@@ -14,6 +14,7 @@ import (
 type compensationRepairer struct {
 	task     *Task
 	failures int
+	getCalls int
 }
 
 func (r *compensationRepairer) Update(context.Context, *Task) error { return nil }
@@ -33,6 +34,7 @@ func (r *compensationRepairer) TransitionIfStatus(
 }
 
 func (r *compensationRepairer) GetByID(context.Context, string) (*Task, error) {
+	r.getCalls++
 	return cloneTransitionTask(r.task), nil
 }
 
@@ -409,6 +411,74 @@ func TestReconciler_PGRollbackWinsWhenSentTransitionStillNeedsPGSync(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, TaskStatusPending, got.Status)
 	require.Equal(t, int64(1), mustQueueLen(t, q, ctx, pending.DeviceSN))
+}
+
+func TestReconciler_AckResponseLostStillHonorsPGRollback(t *testing.T) {
+	q, _ := newRedisQueueWithTerminalTTL(t, 15*time.Minute)
+	ctx := context.Background()
+	pending := newTaskForQueue("sent-ack-response-lost", "SN-ACK-LOST", "Reboot")
+	require.NoError(t, q.Push(ctx, pending))
+	sent := cloneTransitionTask(pending)
+	sent.MarkSent("cwmp-ack-lost")
+	token, changed, err := q.prepareTransition(ctx, pending, sent, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	// Redis executed the PG acknowledgement, but the client lost the response
+	// before cleanup. The service then rolled PG back while Redis was unavailable.
+	result, err := acknowledgeTaskTransitionFieldScript.Run(
+		ctx, q.client, []string{q.taskKey(pending.ID)}, token, "pg_sync_pending",
+	).Int64()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result)
+
+	repairer := &compensationRepairer{task: cloneTransitionTask(pending)}
+	reconciler := NewReconciler(
+		&fakeActiveLister{}, q, repairer, nil,
+		time.Second, time.Minute, 10, nil,
+	)
+	stats, err := reconciler.ReconcileOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Repaired)
+	require.Equal(t, 1, repairer.getCalls)
+	got, err := q.GetByID(ctx, pending.ID)
+	require.NoError(t, err)
+	require.Equal(t, TaskStatusPending, got.Status)
+	require.Equal(t, int64(1), mustQueueLen(t, q, ctx, pending.DeviceSN))
+}
+
+func TestReconciler_AcknowledgedSentWithPGSentIsNotRolledBack(t *testing.T) {
+	q, _ := newRedisQueueWithTerminalTTL(t, 15*time.Minute)
+	ctx := context.Background()
+	pending := newTaskForQueue("sent-pg-still-sent", "SN-PG-SENT", "Reboot")
+	require.NoError(t, q.Push(ctx, pending))
+	sent := cloneTransitionTask(pending)
+	sent.MarkSent("cwmp-pg-sent")
+	token, changed, err := q.prepareTransition(ctx, pending, sent, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+	_, err = acknowledgeTaskTransitionFieldScript.Run(
+		ctx, q.client, []string{q.taskKey(pending.ID)}, token, "pg_sync_pending",
+	).Result()
+	require.NoError(t, err)
+
+	repairer := &compensationRepairer{task: cloneTransitionTask(sent)}
+	reconciler := NewReconciler(
+		&fakeActiveLister{}, q, repairer, nil,
+		time.Second, time.Minute, 1, nil,
+	)
+	stats, err := reconciler.ReconcileOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Repaired)
+	require.Equal(t, 1, repairer.getCalls,
+		"sent PG verification must remain bounded by the reconciler batch")
+	got, err := q.GetByID(ctx, pending.ID)
+	require.NoError(t, err)
+	require.Equal(t, TaskStatusSent, got.Status)
+	require.Zero(t, mustQueueLen(t, q, ctx, pending.DeviceSN))
+	byCWMP, err := q.GetByCWMPID(ctx, sent.CWMPID)
+	require.NoError(t, err)
+	require.NotNil(t, byCWMP)
 }
 
 func TestRedisTaskQueue_OldSentRollbackCannotOverwriteNewTransition(t *testing.T) {

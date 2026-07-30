@@ -282,26 +282,26 @@ func (r *Reconciler) reconcilePendingTransitions(ctx context.Context) ReconcileS
 			_ = store.removePendingTransition(ctx, id, token)
 			continue
 		}
-		if prepared.PGSyncPending {
-			if prepared.Task.Status == TaskStatusSent {
-				durable, loadErr := repairer.GetByID(ctx, id)
-				if loadErr != nil {
+		if prepared.Task.Status == TaskStatusSent {
+			durable, loadErr := repairer.GetByID(ctx, id)
+			if loadErr != nil {
+				stats.RepairFailed++
+				_ = store.deferPendingTransition(ctx, id, token)
+				continue
+			}
+			if durable != nil && durable.Status == TaskStatusPending {
+				if err := store.rollbackSentTransition(
+					ctx, durable, prepared.Task.CWMPID, token,
+				); err != nil {
 					stats.RepairFailed++
 					_ = store.deferPendingTransition(ctx, id, token)
 					continue
 				}
-				if durable != nil && durable.Status == TaskStatusPending {
-					if err := store.rollbackSentTransition(
-						ctx, durable, prepared.Task.CWMPID, token,
-					); err != nil {
-						stats.RepairFailed++
-						_ = store.deferPendingTransition(ctx, id, token)
-						continue
-					}
-					stats.Repaired++
-					continue
-				}
+				stats.Repaired++
+				continue
 			}
+		}
+		if prepared.PGSyncPending {
 			changed, transitionErr := repairer.TransitionIfStatus(
 				ctx, prepared.Task, prepared.From,
 			)
