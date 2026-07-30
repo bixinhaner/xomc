@@ -10,6 +10,7 @@ type ACSMetrics struct {
 	RPCErrorsTotal         *prometheus.CounterVec
 	SessionDuration        prometheus.Histogram
 	RateLimitRejected      prometheus.Counter
+	AdmissionRejected      prometheus.Counter
 	RateLimitDeviceCount   prometheus.Gauge
 	PostSessionWakeTotal   prometheus.Counter
 	UECountQueueDepth      prometheus.Gauge
@@ -47,6 +48,10 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 		RateLimitRejected: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "acs_rate_limit_rejected_total",
 			Help: "Total number of requests rejected by per-device rate limiter",
+		}),
+		AdmissionRejected: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "acs_admission_rejected_total",
+			Help: "Total number of Inform requests rejected by the global ACS session admission limit",
 		}),
 		RateLimitDeviceCount: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "acs_rate_limit_device_count",
@@ -86,6 +91,7 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 		m.RPCErrorsTotal,
 		m.SessionDuration,
 		m.RateLimitRejected,
+		m.AdmissionRejected,
 		m.RateLimitDeviceCount,
 		m.PostSessionWakeTotal,
 		m.UECountQueueDepth,

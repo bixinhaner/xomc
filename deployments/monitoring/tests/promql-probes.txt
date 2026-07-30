@@ -175,3 +175,7 @@ Expected: protection state: 0 permits writes, 1 blocks writes. Before the export
 ## Storage write rejections (NO-DATA until Task 8 exposes the metric; MUST-HAVE after that)
 increase(omc_storage_write_rejected_total[5m])
 Expected: rejected writes in the last five minutes. ZERO means no rejected writes; NO-DATA means telemetry is unavailable, not that writes were accepted.
+
+## ACS global session admission rejects (MUST-HAVE after ACS starts)
+increase(acs_admission_rejected_total[5m])
+Expected: HTTP 503 responses caused by the global ACS session limit. ZERO means no admission rejects; NO-DATA means ACS telemetry is unavailable.

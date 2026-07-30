@@ -659,6 +659,7 @@ func TestServeHTTP_Inform_AdmissionDenied_Returns503(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Equal(t, float64(1), testutil.ToFloat64(h.metrics.AdmissionRejected))
 	assert.Empty(t, taskSvc.recoveredDevices, "rejected Inform must not mutate sent tasks")
 }
 
