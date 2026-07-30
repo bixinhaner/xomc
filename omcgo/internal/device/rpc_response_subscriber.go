@@ -577,6 +577,8 @@ func isPathBSyncCommandKey(commandKey string) bool {
 // of map[string]interface{}）。
 func decodeParameterValues(raw interface{}) ([]tr069.ParameterValueStruct, error) {
 	switch v := raw.(type) {
+	case nil:
+		return []tr069.ParameterValueStruct{}, nil
 	case []tr069.ParameterValueStruct:
 		return v, nil
 	case []interface{}:

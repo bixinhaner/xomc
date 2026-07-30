@@ -18,7 +18,6 @@ const (
 	redisQueueFamilyCommand = "cmdq"
 	redisQueueFamilyTask    = "taskq"
 	defaultQueueScanCount   = int64(100)
-	defaultQueueMaxKeys     = 10000
 	queueAgeSampleSize      = int64(32)
 )
 
@@ -52,7 +51,6 @@ type RedisQueueObserver struct {
 	metrics   *TaskMetrics
 	interval  time.Duration
 	scanCount int64
-	maxKeys   int
 	logger    *zap.Logger
 
 	mu     sync.Mutex
@@ -74,7 +72,6 @@ func NewRedisQueueObserver(client redis.UniversalClient, metrics *TaskMetrics, i
 		metrics:   metrics,
 		interval:  interval,
 		scanCount: defaultQueueScanCount,
-		maxKeys:   defaultQueueMaxKeys,
 		logger:    logger.Named("redis-task-queue-observer"),
 	}
 }
@@ -168,16 +165,11 @@ func (o *RedisQueueObserver) collectFamily(ctx context.Context, family, pattern 
 func (o *RedisQueueObserver) scanFamily(ctx context.Context, family, pattern string) (redisQueueFamilySnapshot, error) {
 	var snapshot redisQueueFamilySnapshot
 	var cursor uint64
-	seen := 0
 	now := time.Now()
 	for {
 		keys, next, err := o.client.Scan(ctx, cursor, pattern, o.scanCount).Result()
 		if err != nil {
 			return redisQueueFamilySnapshot{}, fmt.Errorf("scan %s: %w", family, err)
-		}
-		seen += len(keys)
-		if seen > o.maxKeys {
-			return redisQueueFamilySnapshot{}, fmt.Errorf("scan %s exceeded %d keys", family, o.maxKeys)
 		}
 		for _, key := range keys {
 			length, oldest, known, err := o.inspectQueue(ctx, family, key, now)
@@ -209,6 +201,11 @@ func (o *RedisQueueObserver) inspectQueue(ctx context.Context, family, key strin
 		return 0, 0, false, fmt.Errorf("type: %w", err)
 	}
 	switch kind {
+	case "none":
+		// SCAN does not provide a snapshot. A queue can legitimately become
+		// empty and disappear before TYPE runs; treat that race as an empty
+		// queue while keeping all other foreign types visible as corruption.
+		return 0, 0, false, nil
 	case "zset":
 		length, err := o.client.ZCard(ctx, key).Result()
 		if err != nil {

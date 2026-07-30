@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -97,4 +98,66 @@ func TestRedisQueueObserverFailurePreservesBusinessGauges(t *testing.T) {
 	require.Equal(t, before, testutil.ToFloat64(metrics.RedisTaskQueueLengthTotal.WithLabelValues(redisQueueFamilyTask)))
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.RedisTaskQueueUp.WithLabelValues(redisQueueFamilyTask)))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueScanFailuresTotal.WithLabelValues(redisQueueFamilyTask)))
+}
+
+func TestRedisQueueObserverScansMoreThanLegacyTenThousandKeyLimit(t *testing.T) {
+	mini := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer client.Close()
+	ctx := context.Background()
+
+	pipe := client.Pipeline()
+	for i := range 10_001 {
+		pipe.ZAdd(ctx, redisx.Keys.ACSCommandQueue(fmt.Sprintf("device-%05d", i)), redis.Z{
+			Score:  1,
+			Member: `{"method":"GetParameterValues"}`,
+		})
+	}
+	_, err := pipe.Exec(ctx)
+	require.NoError(t, err)
+
+	observer := NewRedisQueueObserver(client, NewTaskMetrics(prometheus.NewRegistry()), time.Hour, zap.NewNop())
+	observer.scanCount = 20_000
+	snapshot, err := observer.scanFamily(ctx, redisQueueFamilyCommand, redisx.Keys.ACSCommandQueuePattern())
+
+	require.NoError(t, err)
+	require.Equal(t, int64(10_001), snapshot.length)
+	require.Equal(t, int64(10_001), snapshot.active)
+}
+
+func TestRedisQueueObserverIgnoresQueueDeletedAfterScan(t *testing.T) {
+	mini := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer client.Close()
+	observer := NewRedisQueueObserver(client, NewTaskMetrics(prometheus.NewRegistry()), time.Hour, zap.NewNop())
+
+	length, oldest, known, err := observer.inspectQueue(
+		context.Background(),
+		redisQueueFamilyTask,
+		redisx.Keys.ACSTaskQueue("already-deleted"),
+		time.Now(),
+	)
+
+	require.NoError(t, err)
+	require.Zero(t, length)
+	require.Zero(t, oldest)
+	require.False(t, known)
+}
+
+func TestRedisQueueObserverRejectsUnexpectedQueueType(t *testing.T) {
+	mini := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer client.Close()
+	key := redisx.Keys.ACSTaskQueue("corrupt")
+	require.NoError(t, client.Set(context.Background(), key, "not-a-queue", 0).Err())
+	observer := NewRedisQueueObserver(client, NewTaskMetrics(prometheus.NewRegistry()), time.Hour, zap.NewNop())
+
+	_, _, _, err := observer.inspectQueue(
+		context.Background(),
+		redisQueueFamilyTask,
+		key,
+		time.Now(),
+	)
+
+	require.ErrorContains(t, err, `unsupported redis type "string"`)
 }

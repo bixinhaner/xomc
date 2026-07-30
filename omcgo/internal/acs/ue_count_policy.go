@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"time"
 
 	"go.uber.org/zap"
@@ -18,7 +19,9 @@ const ueCountGPVDescription = "UECountPolicy:GPV"
 
 const (
 	defaultUECountProbeTimeout  = 500 * time.Millisecond
-	defaultUECountProbeLeaseTTL = 30 * time.Second
+	defaultUECountProbeLeaseTTL = time.Hour
+	defaultUECountProbeRetry    = 5 * time.Minute
+	ueCountProbeSpreadSlot      = 5 * time.Minute
 )
 
 // UECountPathResolver resolves concrete, product-supported standard paths for
@@ -39,12 +42,53 @@ type UECountTaskService interface {
 // UECountProbeGate atomically admits at most one concurrent probe per device.
 type UECountProbeGate interface {
 	Acquire(ctx context.Context, deviceSN string) (bool, error)
+	RetryAfter(ctx context.Context, deviceSN string, delay time.Duration) error
 }
 
 type redisUECountProbeGate struct {
 	client redis.Cmdable
 	ttl    time.Duration
 }
+
+var acquireUECountProbeScript = redis.NewScript(`
+local clock = redis.call("TIME")
+local now = tonumber(clock[1])
+local raw = redis.call("GET", KEYS[1])
+local period = tonumber(ARGV[1])
+local cold_delay = tonumber(ARGV[2])
+local retention = tonumber(ARGV[3])
+
+if not raw or raw == "1" then
+	local first_due = now + cold_delay
+	local admitted = 0
+	if cold_delay == 0 then
+		first_due = now + period
+		admitted = 1
+	end
+	redis.call("SET", KEYS[1], tostring(first_due), "EX", retention)
+	return admitted
+end
+
+local due = tonumber(raw)
+if not due then
+	return redis.error_reply("invalid UE count probe due timestamp")
+end
+if due > now then
+	return 0
+end
+
+redis.call("SET", KEYS[1], tostring(now + period), "EX", retention)
+return 1
+`)
+
+var retryUECountProbeScript = redis.NewScript(`
+local clock = redis.call("TIME")
+local now = tonumber(clock[1])
+local delay = tonumber(ARGV[1])
+local retention = tonumber(ARGV[2])
+redis.call("SET", KEYS[1], tostring(now + delay), "EX", retention)
+return 1
+`)
 
 func NewRedisUECountProbeGate(client redis.Cmdable, ttl time.Duration) UECountProbeGate {
 	if client == nil {
@@ -60,16 +104,45 @@ func (g *redisUECountProbeGate) Acquire(ctx context.Context, deviceSN string) (b
 	if g == nil || g.client == nil {
 		return false, fmt.Errorf("UE count probe gate is disabled")
 	}
-	acquired, err := g.client.SetNX(
-		ctx,
-		redisx.Keys.ACSUECountProbe(deviceSN),
-		"1",
-		g.ttl,
-	).Result()
+	periodSeconds := max(int64(g.ttl/time.Second), int64(1))
+	retentionSeconds := max(periodSeconds*2, int64(1))
+	spreadSlots := max(int(g.ttl/ueCountProbeSpreadSlot), 1)
+	hasher := fnv.New32a()
+	_, _ = hasher.Write([]byte(deviceSN))
+	coldDelaySeconds := int64(hasher.Sum32()%uint32(spreadSlots)) *
+		int64(ueCountProbeSpreadSlot/time.Second)
+	admitted, err := acquireUECountProbeScript.Run(
+		ctx, g.client,
+		[]string{
+			redisx.Keys.ACSUECountProbe(deviceSN),
+		},
+		periodSeconds,
+		coldDelaySeconds,
+		retentionSeconds,
+	).Int()
 	if err != nil {
 		return false, fmt.Errorf("acquire UE count probe lease: %w", err)
 	}
-	return acquired, nil
+	return admitted == 1, nil
+}
+
+func (g *redisUECountProbeGate) RetryAfter(ctx context.Context, deviceSN string, delay time.Duration) error {
+	if g == nil || g.client == nil {
+		return fmt.Errorf("UE count probe gate is disabled")
+	}
+	delaySeconds := max(int64(delay/time.Second), int64(1))
+	periodSeconds := max(int64(g.ttl/time.Second), int64(1))
+	retentionSeconds := max(periodSeconds*2, delaySeconds*2)
+	if err := retryUECountProbeScript.Run(
+		ctx,
+		g.client,
+		[]string{redisx.Keys.ACSUECountProbe(deviceSN)},
+		delaySeconds,
+		retentionSeconds,
+	).Err(); err != nil {
+		return fmt.Errorf("schedule UE count probe retry: %w", err)
+	}
+	return nil
 }
 
 // UECountPolicy schedules one direct GPV during a Periodic Inform session.
@@ -118,7 +191,7 @@ func (p *UECountPolicy) ShouldTrigger(eventCodes []string) bool {
 
 // Enqueue creates a normal (non sync-gpv) system task so the existing GPV
 // response subscriber persists device_parameters and refreshes device_info.
-func (p *UECountPolicy) Enqueue(ctx context.Context, deviceSN string) error {
+func (p *UECountPolicy) Enqueue(ctx context.Context, deviceSN string) (retErr error) {
 	if !p.Enabled() {
 		return nil
 	}
@@ -138,6 +211,21 @@ func (p *UECountPolicy) Enqueue(ctx context.Context, deviceSN string) error {
 			zap.String("device_sn", deviceSN))
 		return nil
 	}
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		retryCtx, retryCancel := context.WithTimeout(
+			context.WithoutCancel(ctx),
+			defaultUECountProbeTimeout,
+		)
+		defer retryCancel()
+		if retryErr := p.gate.RetryAfter(retryCtx, deviceSN, defaultUECountProbeRetry); retryErr != nil {
+			p.logger.Warn("schedule failed UE count query retry",
+				zap.String("device_sn", deviceSN),
+				zap.Error(retryErr))
+		}
+	}()
 
 	open, err := p.tasks.LatestOpenTaskByDeviceAndMethod(
 		probeCtx,
