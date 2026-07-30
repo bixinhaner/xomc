@@ -50,4 +50,4 @@
 - 新增部署内置数据、RBAC、菜单、API 权限、系统字典、配置、MML 命令树、标准参数等 seed 变化，必须折回 `000001_init_seed.sql`。
 - 软件封版本后，先更新根 `AGENTS.md`、`../README.md` 和本 README，明确允许追加迁移，再从 `000002` 开始新增 seed 迁移。
 
-版本号规则、重生 baseline 标准流程、连接池核定见 `../README.md`；完整迁移规范见 `../../CLAUDE.md` §4.6。
+版本号规则、重生 baseline 标准流程、连接池核定见 `../../../docs/ref/migration-baseline-runbook.md`；完整迁移规范见 `../../CLAUDE.md` §4.6。
