@@ -28,10 +28,12 @@ func (s *queueStatsSourceStub) QueueStats(ctx context.Context, subject, durable 
 	s.calls.Add(1)
 	s.subject = subject
 	s.durable = durable
-	select {
-	case s.called <- struct{}{}:
-	default:
-	}
+	defer func() {
+		select {
+		case s.called <- struct{}{}:
+		default:
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return QueueStats{}, err
 	}
@@ -61,6 +63,14 @@ func TestQueueHealthSamplerRunsWithoutBackpressureOrStorageDependencies(t *testi
 	case <-time.After(time.Second):
 		t.Fatal("queue health sampler did not make its startup sample")
 	}
+	require.Eventually(t, func() bool {
+		attemptedAt, succeeded := sampler.LastSampleAttempt()
+		_, ok := sampler.LatestStats()
+		return !sampler.LastSuccessfulSample().IsZero() &&
+			!attemptedAt.IsZero() &&
+			succeeded &&
+			ok
+	}, time.Second, time.Millisecond, "startup sample state was not published")
 
 	assert.Equal(t, SubjectPMFileReceived, source.subject)
 	assert.Equal(t, pmQueueStatsDurable, source.durable)
