@@ -6,13 +6,17 @@ import { makeSeqColumn } from '@/components/Table/seqColumn';
 import EmptyState from '@/components/DataTable/EmptyState';
 import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
+import {
+  PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
+  PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
+} from '../pagination';
 
 export default function OrphanDevicesPage() {
   const t = useT();
   // 2026-06-02 用户决策:孤儿设备页改为纯只读列表 —— 去掉运营商/操作列、
   // 去掉"全量重新匹配"/"批量绑定"操作;搜索框模糊匹配 SN/OUI/产品类型/厂商。
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState('');
   const { data, isLoading } = useOrphanDevices({ page, pageSize, search });
 
@@ -81,7 +85,7 @@ export default function OrphanDevicesPage() {
               pageSize,
               total,
               showSizeChanger: true,
-              pageSizeOptions: ['10', '20', '50', '1000'],
+              pageSizeOptions: PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
               showTotal: (total) => t('product.orphan.totalDevices', { count: total }),
               onChange: (p, ps) => {
                 setPage(p);

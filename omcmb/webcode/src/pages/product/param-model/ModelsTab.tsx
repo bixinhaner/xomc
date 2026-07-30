@@ -10,6 +10,10 @@ import {
 import type { ParamModel, UpdateParamModelInput } from '@core/types/paramModel';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
+import {
+  PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
+  PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
+} from '../pagination';
 
 interface Props {
   selectedName?: string;
@@ -28,7 +32,7 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
 
   const [editing, setEditing] = useState<ParamModel | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
   const [form] = Form.useForm<UpdateParamModelInput>();
 
   // 关键字变化时回到第一页(避免过滤后停留在空页)——渲染期重置,避免 set-state-in-effect。
@@ -162,7 +166,7 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
           pageSize,
           total: items.length,
           showSizeChanger: true,
-          pageSizeOptions: ['10', '20', '50', '1000'],
+          pageSizeOptions: PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
           showTotal: (n) => t('common.totalCount', { count: n }),
           onChange: (p, ps) => {
             setPage(p);

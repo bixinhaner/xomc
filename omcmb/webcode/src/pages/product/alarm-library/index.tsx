@@ -54,6 +54,10 @@ import AlarmUploadXmlModal from './AlarmUploadXmlModal';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
+import {
+  PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
+  PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
+} from '../pagination';
 // 2026-05-29:"未识别频次"入口暂时隐藏(后端聚合 / 统计逻辑未完工,详见
 // backlog T-0181)。组件文件 UnknownStatsModal.tsx 保留备用,功能就绪后:
 //   1) 取消下方 import 注释  2) 恢复一级 toolbar 的 <Tooltip>+<Button>
@@ -112,7 +116,7 @@ export default function AlarmLibraryPage() {
   // 参数且数据量小(LTE/GSM/NR 等数行),故在前端按 neType 客户端过滤。
   const [neKeyword, setNeKeyword] = useState('');
   const [nePage, setNePage] = useState(1);
-  const [nePageSize, setNePageSize] = useState(20);
+  const [nePageSize, setNePageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
   const { data: neTypesData, isLoading: isNeTypesLoading } = useAlarmNeTypeStats();
   const neTypesItems = useMemo<AlarmNeTypeStat[]>(() => {
     const all = neTypesData?.items || [];
@@ -124,7 +128,7 @@ export default function AlarmLibraryPage() {
   // ── 二级(AlarmDefinition 详情) ─────────────────────────────────
   const [detailFilter, setDetailFilter] = useState<AlarmDefinitionFilter>({
     page: 1,
-    pageSize: 20,
+    pageSize: PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
   });
   const detailQueryFilter = useMemo<AlarmDefinitionFilter>(
     () => (
@@ -439,15 +443,15 @@ export default function AlarmLibraryPage() {
           <Table<AlarmDefinition>
             rowKey="id"
             loading={isDetailLoading}
-            columns={[makeSeqColumn<AlarmDefinition>({ title: t('table.rowNumber'), current: detailData?.page || 1, pageSize: detailData?.pageSize || 20 }), ...detailColumns]}
+            columns={[makeSeqColumn<AlarmDefinition>({ title: t('table.rowNumber'), current: detailData?.page || 1, pageSize: detailData?.pageSize || PRODUCT_TABLE_DEFAULT_PAGE_SIZE }), ...detailColumns]}
             dataSource={detailItems}
             size="small"
             pagination={{
               current: detailData?.page || 1,
-              pageSize: detailData?.pageSize || 20,
+              pageSize: detailData?.pageSize || PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
               total: detailData?.total || 0,
               showSizeChanger: true,
-              pageSizeOptions: ['10', '20', '50', '1000'],
+              pageSizeOptions: PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
               showTotal: (n) => t('common.totalCount', { count: n }),
               onChange: (page, pageSize) =>
                 setDetailFilter((f) => ({ ...f, page, pageSize })),
@@ -465,7 +469,7 @@ export default function AlarmLibraryPage() {
               pageSize: nePageSize,
               total: neTypesItems.length,
               showSizeChanger: true,
-              pageSizeOptions: ['10', '20', '50', '1000'],
+              pageSizeOptions: PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
               showTotal: (n) => t('product.alarm.totalNeTypes', { count: n }),
               onChange: (p, ps) => {
                 setNePage(p);

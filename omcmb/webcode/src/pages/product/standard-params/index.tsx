@@ -41,6 +41,10 @@ import { formatSystemTime } from '@core/utils/systemTime';
 import { useT } from '@/hooks/useT';
 import { getI18nKeyByBizCode } from '@core/i18n/bizCodeMessages';
 import { nextPageOnPaginationChange } from './pagination';
+import {
+  PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
+  PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
+} from '../pagination';
 
 export default function StandardParamsPage() {
   const t = useT();
@@ -53,7 +57,7 @@ export default function StandardParamsPage() {
   const [keyword, setKeyword] = useState('');
   const [entryType, setEntryType] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
   const { data, isLoading } = useStandardParams({
     keyword: keyword || undefined,
     entryType: entryType || undefined,
@@ -264,7 +268,7 @@ export default function StandardParamsPage() {
             pageSize,
             total: items.length,
             showSizeChanger: true,
-            pageSizeOptions: ['10', '20', '50', '1000'],
+            pageSizeOptions: PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
             showTotal: (n) => t('common.totalCount', { count: n }),
             onChange: (p, ps) => {
               // 改每页条数时回到第 1 页重新切片(issue #190:约 2000 条标准参数树,

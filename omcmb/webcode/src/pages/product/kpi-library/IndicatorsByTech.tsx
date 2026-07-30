@@ -25,6 +25,10 @@ import IndicatorDrawer from './IndicatorDrawer';
 import { enabledIndicatorErrorMessage } from './enabledIndicatorErrors';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
+import {
+  PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
+  PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
+} from '../pagination';
 
 interface Filter {
   keyword?: string;
@@ -45,7 +49,7 @@ const NAME_COLUMN_WIDTH = 240;
 export default function IndicatorsByTech({ deviceType, filter }: Props) {
   const t = useT();
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
 
   // filter 任意变化即 reset page=1(避免分页 + 过滤错位返空)
   useEffect(() => {
@@ -148,7 +152,7 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
           pageSize,
           total: data?.total || 0,
           showSizeChanger: true,
-          pageSizeOptions: ['10', '20', '50', '1000'],
+          pageSizeOptions: PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
           showTotal: (n) => t('common.totalCount', { count: n }),
           onChange: (p, ps) => {
             setPage(p);
