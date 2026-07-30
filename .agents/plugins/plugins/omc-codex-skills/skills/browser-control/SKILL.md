@@ -58,7 +58,7 @@ nodeRepl.write(await browser.documentation());
 ## OMC 本地约定
 
 - OMC Docker 部署默认验证 `http://127.0.0.1:8081`，除非用户指定其他地址。
-- 操作或验证 OMC 性能管理页面时，先加载并遵循 `omc-codex-skills:omc-pm-metrics` skill 的“页面结构”规则；进入页面后先扫描 URL、导航、页签、表单控件、按钮、图表/表格状态和关键请求参数，把运行时扫描结果写入本次任务证据，再执行点击、筛选、出图或导出。
+- 操作或验证 OMC 性能管理页面时，先加载 `omc-codex-skills:omc-pm-metrics`，并阅读 `docs/ref/pm-metrics-knowledge.md` 的页面结构与浏览器验证规则；进入页面后先扫描 URL、导航、页签、表单控件、按钮、图表/表格状态和关键请求参数，把运行时扫描结果写入本次任务证据，再执行点击、筛选、出图或导出。
 - 需要登录时走真实 UI 登录流程。除非任务明确是 API-only，不绕过 UI。
 - 除非明确需要并获批，不要运行 `npx playwright install`。
 - 如果操作可能改变线上/本地运行栈的全局设置，或触发真实设备侧工作流，必须先停下并请求用户明确授权。
