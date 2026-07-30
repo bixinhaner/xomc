@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -22,6 +23,18 @@ type WindowRecord struct {
 
 type WindowRepository struct {
 	pool *pgxpool.Pool
+}
+
+type claimOrder int
+
+const (
+	claimOldestFirst claimOrder = iota
+	claimNewestFirst
+)
+
+type claimVersionFilter struct {
+	versionIDs []uuid.UUID
+	exclude    bool
 }
 
 // versionMetadataBackfillLockID serializes the one-time historical metadata
@@ -220,6 +233,21 @@ func finalizationClaimUpdate(
 	return builder
 }
 
+func finalizationClaimUpdateForOwner(
+	key WindowKey,
+	reason CloseReason,
+	state WindowState,
+	coverage finalizationCoverage,
+	version *TaskVersionSnapshot,
+	leaseOwner *uuid.UUID,
+) sq.UpdateBuilder {
+	builder := finalizationClaimUpdate(key, reason, state, coverage, version)
+	if leaseOwner != nil {
+		builder = builder.Where(sq.Eq{"finalize_lease_owner": *leaseOwner})
+	}
+	return builder
+}
+
 func (r *WindowRepository) Status(ctx context.Context, key WindowKey) (string, error) {
 	query, args, err := storage.Psql.Select("status").
 		From("pm_aggregation_windows").
@@ -241,6 +269,226 @@ func (r *WindowRepository) Status(ctx context.Context, key WindowKey) (string, e
 func (r *WindowRepository) IsPublished(ctx context.Context, key WindowKey) (bool, error) {
 	status, err := r.Status(ctx, key)
 	return status == "published", err
+}
+
+func (r *WindowRepository) ClaimDue(
+	ctx context.Context,
+	granularity Granularity,
+	dueBefore time.Time,
+	limit uint64,
+	leaseOwner uuid.UUID,
+	leaseUntil time.Time,
+) ([]WindowRecord, error) {
+	return r.claimDue(
+		ctx, granularity, dueBefore, limit, leaseOwner, leaseUntil,
+		claimVersionFilter{}, claimOldestFirst,
+	)
+}
+
+func (r *WindowRepository) claimDue(
+	ctx context.Context,
+	granularity Granularity,
+	dueBefore time.Time,
+	limit uint64,
+	leaseOwner uuid.UUID,
+	leaseUntil time.Time,
+	filter claimVersionFilter,
+	order claimOrder,
+) ([]WindowRecord, error) {
+	if limit == 0 || (len(filter.versionIDs) == 0 && !filter.exclude &&
+		filter.versionIDs != nil) {
+		return nil, nil
+	}
+	if leaseOwner == uuid.Nil {
+		return nil, fmt.Errorf("claim PM aggregation windows: lease owner is required")
+	}
+	leaseFor := time.Until(leaseUntil)
+	if leaseFor <= 0 {
+		return nil, fmt.Errorf("claim PM aggregation windows: lease must expire in the future")
+	}
+	query, args, err := claimDueUpdate(
+		granularity, dueBefore, limit, leaseOwner, leaseFor, filter, order,
+	).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build claim due PM aggregation windows SQL: %w", err)
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin claim due PM aggregation windows: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("claim due PM aggregation windows: %w", err)
+	}
+	result, err := scanWindowRows(rows)
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit claimed PM aggregation windows: %w", err)
+	}
+	return result, nil
+}
+
+func claimDueUpdate(
+	granularity Granularity,
+	dueBefore time.Time,
+	limit uint64,
+	leaseOwner uuid.UUID,
+	leaseFor time.Duration,
+	filter claimVersionFilter,
+	order claimOrder,
+) sq.UpdateBuilder {
+	candidates := storage.Psql.Select(
+		"w.task_version_id", "w.entity_key", "w.granularity", "w.window_start",
+	).From("pm_aggregation_windows w").
+		Where(sq.Eq{
+			"w.status":      []string{"open", "failed"},
+			"w.granularity": string(granularity),
+		}).
+		Where(sq.LtOrEq{"w.window_end": dueBefore}).
+		Where(sq.Or{
+			sq.Eq{"w.finalize_lease_until": nil},
+			sq.Expr("w.finalize_lease_until <= CURRENT_TIMESTAMP"),
+		}).
+		Where(queueBarrierConsumedPredicate()).
+		Limit(limit)
+	candidates = applyClaimVersionFilter(candidates, filter)
+	if order == claimNewestFirst {
+		candidates = candidates.OrderBy(
+			"w.window_end DESC", "w.task_version_id", "w.entity_key", "w.window_start",
+		)
+	} else {
+		candidates = candidates.OrderBy(
+			"w.window_end", "w.task_version_id", "w.entity_key", "w.window_start",
+		)
+	}
+	candidates = candidates.
+		Suffix("FOR UPDATE SKIP LOCKED").
+		PlaceholderFormat(sq.Question)
+	return storage.Psql.Update("pm_aggregation_windows w").
+		PrefixExpr(sq.Expr("WITH candidates AS (?)", candidates)).
+		Set("finalize_lease_owner", leaseOwner).
+		Set("finalize_lease_until", sq.Expr(
+			"CURRENT_TIMESTAMP + (? * INTERVAL '1 second')", leaseFor.Seconds(),
+		)).
+		Set("updated_at", sq.Expr("CURRENT_TIMESTAMP")).
+		From("candidates c").
+		Where(`
+w.task_version_id = c.task_version_id
+AND w.entity_key = c.entity_key
+AND w.granularity = c.granularity
+AND w.window_start = c.window_start`).
+		Suffix(`
+RETURNING w.task_id, w.task_version_id, w.entity_key, w.granularity,
+          w.window_start, w.window_end, w.status, w.expected_slots, w.received_slots`)
+}
+
+func applyClaimVersionFilter(
+	builder sq.SelectBuilder,
+	filter claimVersionFilter,
+) sq.SelectBuilder {
+	if filter.versionIDs == nil {
+		return builder
+	}
+	if filter.exclude {
+		return builder.Where(sq.Expr(
+			"w.task_version_id <> ALL(?)", filter.versionIDs,
+		))
+	}
+	return builder.Where(sq.Expr(
+		"w.task_version_id = ANY(?)", filter.versionIDs,
+	))
+}
+
+func (r *WindowRepository) hasClaimConflict(
+	ctx context.Context,
+	granularity Granularity,
+	dueBefore time.Time,
+	filter claimVersionFilter,
+	leaseOwner uuid.UUID,
+) (bool, error) {
+	query, args, err := claimConflictSelect(
+		granularity, dueBefore, filter, leaseOwner,
+	).ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build PM aggregation finalize claim conflict SQL: %w", err)
+	}
+	var marker int
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&marker); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("query PM aggregation finalize claim conflict: %w", err)
+	}
+	return true, nil
+}
+
+func claimConflictSelect(
+	granularity Granularity,
+	dueBefore time.Time,
+	filter claimVersionFilter,
+	leaseOwner uuid.UUID,
+) sq.SelectBuilder {
+	builder := storage.Psql.Select("1").
+		From("pm_aggregation_windows w").
+		Where(sq.Eq{
+			"w.status":      []string{"open", "failed"},
+			"w.granularity": string(granularity),
+		}).
+		Where(sq.LtOrEq{"w.window_end": dueBefore}).
+		Where(sq.Expr("w.finalize_lease_until > CURRENT_TIMESTAMP")).
+		Where(sq.NotEq{"w.finalize_lease_owner": leaseOwner}).
+		Where(queueBarrierConsumedPredicate()).
+		Limit(1)
+	return applyClaimVersionFilter(builder, filter)
+}
+
+func (r *WindowRepository) CompleteClaim(
+	ctx context.Context,
+	key WindowKey,
+	leaseOwner uuid.UUID,
+) error {
+	return r.clearFinalizeClaim(ctx, key, leaseOwner, "complete")
+}
+
+func (r *WindowRepository) ReleaseClaim(
+	ctx context.Context,
+	key WindowKey,
+	leaseOwner uuid.UUID,
+) error {
+	return r.clearFinalizeClaim(ctx, key, leaseOwner, "release")
+}
+
+func (r *WindowRepository) clearFinalizeClaim(
+	ctx context.Context,
+	key WindowKey,
+	leaseOwner uuid.UUID,
+	action string,
+) error {
+	query, args, err := clearFinalizeClaimUpdate(key, leaseOwner).ToSql()
+	if err != nil {
+		return fmt.Errorf("build %s PM aggregation finalize claim SQL: %w", action, err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("%s PM aggregation finalize claim: %w", action, err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("%w: %s affected %d rows", ErrFinalizeClaimLost, action, tag.RowsAffected())
+	}
+	return nil
+}
+
+func clearFinalizeClaimUpdate(key WindowKey, leaseOwner uuid.UUID) sq.UpdateBuilder {
+	return storage.Psql.Update("pm_aggregation_windows").
+		Set("finalize_lease_owner", nil).
+		Set("finalize_lease_until", nil).
+		Set("updated_at", sq.Expr("CURRENT_TIMESTAMP")).
+		Where(windowKeyPredicate(key)).
+		Where(sq.Eq{"finalize_lease_owner": leaseOwner})
 }
 
 func (r *WindowRepository) ListDue(
@@ -454,6 +702,10 @@ func (r *WindowRepository) queryWindows(
 		return nil, fmt.Errorf("query PM aggregation windows: %w", err)
 	}
 	defer rows.Close()
+	return scanWindowRows(rows)
+}
+
+func scanWindowRows(rows pgx.Rows) ([]WindowRecord, error) {
 	var result []WindowRecord
 	for rows.Next() {
 		var record WindowRecord

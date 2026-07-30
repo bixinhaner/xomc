@@ -21,6 +21,10 @@ type Metrics struct {
 	WindowsFinalizedTotal       *prometheus.CounterVec
 	FinalizeErrorsTotal         prometheus.Counter
 	FinalizeDuration            prometheus.Histogram
+	FinalizeClaims              prometheus.Counter
+	FinalizeInflight            prometheus.Gauge
+	FinalizeOldestDueSeconds    prometheus.Gauge
+	FinalizeClaimConflictsTotal prometheus.Counter
 	BuiltinReconcileRunsTotal   prometheus.Counter
 	BuiltinReconcileErrorsTotal prometheus.Counter
 	BuiltinVersionsChangedTotal prometheus.Counter
@@ -90,6 +94,22 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help:    "Time spent finalizing one aggregation window.",
 			Buckets: prometheus.DefBuckets,
 		}),
+		FinalizeClaims: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_finalize_claims",
+			Help: "Aggregation windows leased by the bounded finalization scheduler.",
+		}),
+		FinalizeInflight: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_finalize_inflight",
+			Help: "Leased aggregation windows currently being finalized.",
+		}),
+		FinalizeOldestDueSeconds: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_finalize_oldest_due_seconds",
+			Help: "Current age past close grace of the oldest due aggregation window observed by scheduling class.",
+		}),
+		FinalizeClaimConflictsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_finalize_claim_conflicts_total",
+			Help: "Finalize claim attempts blocked by an unexpired lease.",
+		}),
 		BuiltinReconcileRunsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_builtin_reconcile_runs_total",
 			Help: "Built-in PM aggregation reconciliation runs.",
@@ -123,6 +143,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.WindowsFinalizedTotal,
 		m.FinalizeErrorsTotal,
 		m.FinalizeDuration,
+		m.FinalizeClaims,
+		m.FinalizeInflight,
+		m.FinalizeOldestDueSeconds,
+		m.FinalizeClaimConflictsTotal,
 		m.BuiltinReconcileRunsTotal,
 		m.BuiltinReconcileErrorsTotal,
 		m.BuiltinVersionsChangedTotal,

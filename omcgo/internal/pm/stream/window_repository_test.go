@@ -1,12 +1,180 @@
 package stream
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+func TestClaimDueUsesLeaseAndSkipLocked(t *testing.T) {
+	leaseOwner := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	claimAt := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	dueBefore := claimAt.Add(-12 * time.Minute)
+	leaseUntil := claimAt.Add(2 * time.Minute)
+
+	query, args, err := claimDueUpdate(
+		GranularityHourly, dueBefore, 4, leaseOwner, leaseUntil.Sub(claimAt),
+		claimVersionFilter{}, claimOldestFirst,
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build claim due SQL: %v", err)
+	}
+	for _, fragment := range []string{
+		"WITH candidates AS",
+		"FOR UPDATE SKIP LOCKED",
+		"finalize_lease_until IS NULL",
+		"finalize_lease_until <= CURRENT_TIMESTAMP",
+		"finalize_lease_owner = $",
+		"CURRENT_TIMESTAMP + ($",
+		"RETURNING",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("claim due SQL %q missing %q", query, fragment)
+		}
+	}
+	for _, want := range []any{
+		string(GranularityHourly), dueBefore, leaseOwner, leaseUntil.Sub(claimAt).Seconds(),
+	} {
+		if !containsSQLArg(args, want) {
+			t.Fatalf("claim due args %v missing %v", args, want)
+		}
+	}
+	lastPlaceholder := fmt.Sprintf("$%d", len(args))
+	if !strings.Contains(query, lastPlaceholder) {
+		t.Fatalf("claim due SQL reuses nested placeholders: last placeholder %s missing from %q", lastPlaceholder, query)
+	}
+}
+
+func TestClaimDueTwoScannersCannotClaimAnUnexpiredLease(t *testing.T) {
+	firstOwner := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	secondOwner := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	claimAt := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+
+	firstQuery, _, err := claimDueUpdate(
+		GranularityHourly, claimAt, 1, firstOwner, 2*time.Minute,
+		claimVersionFilter{}, claimOldestFirst,
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build first scanner claim: %v", err)
+	}
+	secondQuery, secondArgs, err := claimDueUpdate(
+		GranularityHourly, claimAt, 1, secondOwner, 2*time.Minute,
+		claimVersionFilter{}, claimOldestFirst,
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build second scanner claim: %v", err)
+	}
+	if !strings.Contains(firstQuery, "FOR UPDATE SKIP LOCKED") ||
+		!strings.Contains(secondQuery, "FOR UPDATE SKIP LOCKED") {
+		t.Fatalf("both scanner claims must skip rows locked by the other transaction")
+	}
+	if !strings.Contains(secondQuery, "finalize_lease_until <= CURRENT_TIMESTAMP") ||
+		!containsSQLArg(secondArgs, (2*time.Minute).Seconds()) {
+		t.Fatalf("second scanner claim must exclude the first scanner's unexpired database-time lease")
+	}
+}
+
+func TestClaimDueExpiredLeaseCanBeReclaimedAfterProcessExit(t *testing.T) {
+	leaseOwner := uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+	restartedAt := time.Date(2026, 7, 30, 10, 5, 0, 0, time.UTC)
+
+	query, args, err := claimDueUpdate(
+		GranularityDaily, restartedAt, 1, leaseOwner, 2*time.Minute,
+		claimVersionFilter{}, claimOldestFirst,
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build expired lease reclaim: %v", err)
+	}
+	if !strings.Contains(query, "finalize_lease_until <= CURRENT_TIMESTAMP") ||
+		!containsSQLArg(args, (2*time.Minute).Seconds()) {
+		t.Fatalf("claim SQL must make database-time expired leases eligible: %q %v", query, args)
+	}
+}
+
+func TestClaimDueVersionFilterUsesOneArrayArgument(t *testing.T) {
+	versionIDs := []uuid.UUID{
+		uuid.MustParse("11111111-1111-4111-8111-111111111111"),
+		uuid.MustParse("22222222-2222-4222-8222-222222222222"),
+	}
+	claimAt := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	query, args, err := claimDueUpdate(
+		GranularityHourly, claimAt, 1, uuid.New(), time.Minute,
+		claimVersionFilter{versionIDs: versionIDs}, claimOldestFirst,
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build version-filtered claim: %v", err)
+	}
+	if !strings.Contains(query, "task_version_id = ANY($") {
+		t.Fatalf("version-filtered claim SQL = %q, want one PostgreSQL array predicate", query)
+	}
+	arrayArgs := 0
+	for _, arg := range args {
+		if _, ok := arg.([]uuid.UUID); ok {
+			arrayArgs++
+		}
+	}
+	if arrayArgs != 1 {
+		t.Fatalf("version-filtered claim args = %v, want exactly one UUID array", args)
+	}
+}
+
+func TestClaimDueConflictUsesOnlyUnexpiredDatabaseTimeLeases(t *testing.T) {
+	dueBefore := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	query, args, err := claimConflictSelect(
+		GranularityHourly, dueBefore, claimVersionFilter{},
+		uuid.MustParse("77777777-7777-4777-8777-777777777777"),
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build claim conflict SQL: %v", err)
+	}
+	for _, fragment := range []string{
+		"finalize_lease_until > CURRENT_TIMESTAMP",
+		"finalize_lease_owner <> $",
+		"window_end <= $",
+		"LIMIT 1",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("claim conflict SQL %q missing %q", query, fragment)
+		}
+	}
+	if !containsSQLArg(args, dueBefore) {
+		t.Fatalf("claim conflict args %v missing due cutoff %v", args, dueBefore)
+	}
+}
+
+func TestCompleteAndReleaseClaimCannotClearAnotherScannerLease(t *testing.T) {
+	key := WindowKey{
+		TaskVersionID: uuid.MustParse("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+		EntityKey:     "device-1",
+		Granularity:   GranularityHourly,
+		Start:         time.Date(2026, 7, 30, 8, 0, 0, 0, time.UTC),
+	}
+	owner := uuid.MustParse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+	for _, name := range []string{"complete", "release"} {
+		t.Run(name, func(t *testing.T) {
+			query, args, err := clearFinalizeClaimUpdate(key, owner).ToSql()
+			if err != nil {
+				t.Fatalf("build %s claim SQL: %v", name, err)
+			}
+			if !strings.Contains(query, "finalize_lease_owner = $") ||
+				!containsSQLArg(args, owner) {
+				t.Fatalf("%s claim SQL must require the current lease owner: %q %v", name, query, args)
+			}
+		})
+	}
+}
+
+func containsSQLArg(args []any, want any) bool {
+	for _, arg := range args {
+		if fmt.Sprint(arg) == fmt.Sprint(want) {
+			return true
+		}
+	}
+	return false
+}
 
 func TestSortedSnapshotVersionIDsUsesStableLockOrder(t *testing.T) {
 	first := uuid.MustParse("11111111-1111-1111-1111-111111111111")
@@ -123,5 +291,30 @@ func TestFinalizationClaimPreservesVersionMetadataWhenSnapshotIsMissing(t *testi
 		if strings.Contains(query, field) {
 			t.Fatalf("finalization claim SQL %q must preserve existing %q when snapshot is missing", query, field)
 		}
+	}
+}
+
+func TestFinalizationClaimedWindowFencesStateTransitionByLeaseOwner(t *testing.T) {
+	owner := uuid.MustParse("ffffffff-ffff-4fff-8fff-ffffffffffff")
+	key := WindowKey{
+		TaskVersionID: uuid.MustParse("66666666-6666-4666-8666-666666666666"),
+		EntityKey:     "device-1",
+		Granularity:   GranularityHourly,
+		Start:         time.Date(2026, 7, 30, 8, 0, 0, 0, time.UTC),
+	}
+	query, args, err := finalizationClaimUpdateForOwner(
+		key,
+		CloseTimeout,
+		WindowState{ExpectedSlots: 4},
+		finalizationCoverage{},
+		nil,
+		&owner,
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build owner-fenced finalization claim: %v", err)
+	}
+	if !strings.Contains(query, "finalize_lease_owner = $") ||
+		!containsSQLArg(args, owner) {
+		t.Fatalf("finalization claim must fence state transition by owner: %q %v", query, args)
 	}
 }

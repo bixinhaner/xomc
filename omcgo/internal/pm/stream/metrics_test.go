@@ -18,6 +18,10 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 	metrics.BuiltinReconcileErrorsTotal.Inc()
 	metrics.BuiltinVersionsChangedTotal.Add(2)
 	metrics.BuiltinDefinitionsEmpty.Set(3)
+	metrics.FinalizeClaims.Inc()
+	metrics.FinalizeInflight.Set(2)
+	metrics.FinalizeOldestDueSeconds.Set(3600)
+	metrics.FinalizeClaimConflictsTotal.Inc()
 
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.Ready))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DuplicateEventsTotal))
@@ -28,4 +32,23 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.BuiltinReconcileErrorsTotal))
 	require.Equal(t, float64(2), testutil.ToFloat64(metrics.BuiltinVersionsChangedTotal))
 	require.Equal(t, float64(3), testutil.ToFloat64(metrics.BuiltinDefinitionsEmpty))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.FinalizeClaims))
+	require.Equal(t, float64(2), testutil.ToFloat64(metrics.FinalizeInflight))
+	require.Equal(t, float64(3600), testutil.ToFloat64(metrics.FinalizeOldestDueSeconds))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.FinalizeClaimConflictsTotal))
+
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	names := make(map[string]struct{}, len(families))
+	for _, family := range families {
+		names[family.GetName()] = struct{}{}
+	}
+	for _, name := range []string{
+		"omc_pm_aggregation_finalize_claims",
+		"omc_pm_aggregation_finalize_inflight",
+		"omc_pm_aggregation_finalize_oldest_due_seconds",
+		"omc_pm_aggregation_finalize_claim_conflicts_total",
+	} {
+		require.Contains(t, names, name)
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -19,6 +20,8 @@ const (
 	CloseTimeout         CloseReason = "timeout"
 	finalResultBatchSize             = 1000
 )
+
+var ErrFinalizeClaimLost = errors.New("PM aggregation finalize claim ownership lost")
 
 type Finalizer struct {
 	windows  *WindowRepository
@@ -71,12 +74,37 @@ func (f *Finalizer) SetConcurrency(concurrency int) *Finalizer {
 	return f
 }
 
+func (f *Finalizer) Concurrency() int {
+	if f.slots == nil {
+		return 1
+	}
+	return cap(f.slots)
+}
+
 func (f *Finalizer) SetMetrics(metrics *Metrics) *Finalizer {
 	f.metrics = metrics
 	return f
 }
 
 func (f *Finalizer) Finalize(ctx context.Context, key WindowKey, reason CloseReason) error {
+	return f.finalize(ctx, key, reason, nil)
+}
+
+func (f *Finalizer) FinalizeClaimed(
+	ctx context.Context,
+	key WindowKey,
+	reason CloseReason,
+	leaseOwner uuid.UUID,
+) error {
+	return f.finalize(ctx, key, reason, &leaseOwner)
+}
+
+func (f *Finalizer) finalize(
+	ctx context.Context,
+	key WindowKey,
+	reason CloseReason,
+	leaseOwner *uuid.UUID,
+) error {
 	if f.slots != nil {
 		select {
 		case f.slots <- struct{}{}:
@@ -101,10 +129,19 @@ func (f *Finalizer) Finalize(ctx context.Context, key WindowKey, reason CloseRea
 			f.logger.Warn("release PM aggregation finalize lock", zap.Error(err))
 		}
 	}()
-	return f.finalizeUnderLock(ctx, key, reason)
+	return f.finalizeUnderLockWithClaim(ctx, key, reason, leaseOwner)
 }
 
 func (f *Finalizer) finalizeUnderLock(ctx context.Context, key WindowKey, reason CloseReason) error {
+	return f.finalizeUnderLockWithClaim(ctx, key, reason, nil)
+}
+
+func (f *Finalizer) finalizeUnderLockWithClaim(
+	ctx context.Context,
+	key WindowKey,
+	reason CloseReason,
+	leaseOwner *uuid.UUID,
+) error {
 	published, err := f.windows.IsPublished(ctx, key)
 	if err != nil {
 		return err
@@ -119,7 +156,10 @@ func (f *Finalizer) finalizeUnderLock(ctx context.Context, key WindowKey, reason
 		}
 		return err
 	}
-	if err := f.writeFinal(ctx, key, reason, state); err != nil {
+	if err := f.writeFinal(ctx, key, reason, state, leaseOwner); err != nil {
+		if errors.Is(err, ErrFinalizeClaimLost) {
+			return err
+		}
 		if f.metrics != nil {
 			f.metrics.FinalizeErrorsTotal.Inc()
 		}
@@ -143,6 +183,7 @@ func (f *Finalizer) writeFinal(
 	key WindowKey,
 	reason CloseReason,
 	state WindowState,
+	leaseOwner *uuid.UUID,
 ) error {
 	tx, err := f.windows.pool.Begin(ctx)
 	if err != nil {
@@ -176,7 +217,10 @@ func (f *Finalizer) writeFinal(
 	if err != nil {
 		return err
 	}
-	claimSQL, claimArgs, err := finalizationClaimUpdate(key, reason, state, coverage, version).ToSql()
+	claimBuilder := finalizationClaimUpdateForOwner(
+		key, reason, state, coverage, version, leaseOwner,
+	)
+	claimSQL, claimArgs, err := claimBuilder.ToSql()
 	if err != nil {
 		return fmt.Errorf("build claim PM aggregation window SQL: %w", err)
 	}
@@ -185,6 +229,9 @@ func (f *Finalizer) writeFinal(
 		return fmt.Errorf("claim PM aggregation window: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
+		if leaseOwner != nil {
+			return ErrFinalizeClaimLost
+		}
 		return nil
 	}
 	for _, payload := range rollups {
