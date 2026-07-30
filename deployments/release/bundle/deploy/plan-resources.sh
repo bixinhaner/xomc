@@ -393,7 +393,16 @@ for storage_key in $STORAGE_PATH_KEYS; do
   log "    $storage_key=$(storage_env_get "$STORAGE_ENV_FILE" "$storage_key")"
 done
 
-# 写 resources.env（带注释，可手改）
+# 在目标文件同目录生成候选，校验成功后用 rename 原子替换。这样校验失败、磁盘写入失败
+# 或中断都不会截断/删除上一份 last-good resources.env。
+OUT_TMP="$(mktemp "${OUT_FILE}.tmp.XXXXXX")" ||
+  die "无法在 resources.env 同目录创建临时文件：${OUT_FILE}.tmp.XXXXXX" 1
+cleanup_resource_output_tmp() {
+  [ -z "${OUT_TMP:-}" ] || rm -f "$OUT_TMP"
+}
+trap cleanup_resource_output_tmp EXIT
+
+# 写 resources.env 候选（带注释，可手改）
 {
   echo "# =============================================================================="
   echo "# resources.env —— OMC 容器资源限额（由 plan-resources.sh 生成，可手动调整）"
@@ -440,12 +449,16 @@ done
   echo "OMC_RESOURCE_PLAN_HOST_MEM_MIB=$MEM_TOTAL_MIB"
   echo "OMC_PLAN_TIER=$TIER"
   echo "OMC_PLAN_SKIP_MONITORING=$SKIP_MONITORING"
-} > "$OUT_FILE"
+} > "$OUT_TMP"
 
-if ! resource_env_validate "$OUT_FILE"; then
-  rm -f "$OUT_FILE"
-  die "生成的 resources.env 未通过完整资源契约验证，已删除无效文件" 1
+if ! resource_env_validate "$OUT_TMP"; then
+  die "生成的 resources.env 候选未通过完整资源契约验证；已保留上一份有效文件" 1
 fi
+chmod 0644 "$OUT_TMP" ||
+  die "无法设置 resources.env 候选权限；已保留上一份有效文件" 1
+mv -f "$OUT_TMP" "$OUT_FILE" ||
+  die "无法原子替换 resources.env；已保留上一份有效文件" 1
+OUT_TMP=""
 
 log "\n${C_G}✓ 已写入：$OUT_FILE${C_0}"
 log "  下一步：检视/调整该文件 → 运行 install.sh（将以 --env-file resources.env 动态部署）。"

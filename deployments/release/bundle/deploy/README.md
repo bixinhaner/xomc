@@ -20,13 +20,21 @@ on `127.0.0.1`, and `healthcheck.sh` probes it externally from the host.
 
 ## Resource-plan contract
 
-`resources.env` is optional, but once present it is a complete deployment
-contract rather than a best-effort override file. Generate it with
-`plan-resources.sh`; it records schema version `2` and the probed host CPU and
-memory. `install.sh` and `svc.sh` reject a partial, malformed, or internally
-inconsistent file before Compose is assembled, including legacy files that
-only contain Redis values. Re-run `plan-resources.sh` instead of deleting keys
-to fall back to Compose defaults.
+`resources.env` is a required, complete deployment contract rather than a
+best-effort override file. Generate it with `plan-resources.sh`; it records
+schema version `2` and the probed host CPU and memory. The planner writes and
+validates a temporary file in the destination directory, then atomically
+replaces `resources.env`; generation or validation failure preserves the
+previous last-good file.
+
+`install.sh --check-only` validates the candidate that a real install would
+use: the new package's `deploy/resources.env`, otherwise the current release,
+otherwise `etc/resources.env.saved`. A normal install validates that candidate
+before switching `current` or restarting anything, then validates the copied
+file again. `install.sh` and `svc.sh` reject missing, partial, malformed, or
+internally inconsistent files, including legacy files that only contain Redis
+values. Re-run `plan-resources.sh`; deleting the file no longer falls back to
+Compose defaults.
 
 After deployment, `healthcheck.sh` validates a present contract against the
 rendered Compose limits, Docker `NanoCpus`/`Memory`, Go GOMAXPROCS metrics,

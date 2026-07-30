@@ -17,6 +17,12 @@ check_eq() {
   local name="$1" got="$2" want="$3"
   if [ "$got" = "$want" ]; then ok; else bad "$name: got=[$got] want=[$want]"; fi
 }
+file_inode() {
+  stat -f '%i' "$1" 2>/dev/null || stat -c '%i' "$1"
+}
+file_mtime() {
+  stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1"
+}
 
 MOUNTS='107374182400|/
 536870912000|/data-large
@@ -47,6 +53,8 @@ run_large_planner() {
 echo "── 最大可用存储写入 .env ──"
 ENV_FILE="$TMP/generated.env"
 printf 'OMC_PUBLIC_HOST=10.0.0.1\n' > "$ENV_FILE"
+printf 'LAST_GOOD=must-be-atomically-replaced\n' >"$TMP/resources.env"
+BEFORE_INODE="$(file_inode "$TMP/resources.env")"
 if run_planner "$ENV_FILE" "$TMP/resources.env" > "$TMP/output" 2>&1; then
   if resource_env_validate "$TMP/resources.env"; then
     ok
@@ -69,6 +77,11 @@ if run_planner "$ENV_FILE" "$TMP/resources.env" > "$TMP/output" 2>&1; then
   check_eq "32核 medium 主库 CPU" "$(storage_env_get "$TMP/resources.env" POSTGRES_CPUS)" "10"
   check_eq "32核 medium TimescaleDB CPU" "$(storage_env_get "$TMP/resources.env" TSDB_CPUS)" "16"
   check_eq "32核 medium worker CPU" "$(storage_env_get "$TMP/resources.env" WORKER_CPUS)" "8"
+  if [ "$(file_inode "$TMP/resources.env")" != "$BEFORE_INODE" ]; then
+    ok
+  else
+    bad "planner 成功时应以同目录临时文件原子替换正式 resources.env"
+  fi
 else
   bad "planner 应成功运行"
 fi
@@ -100,6 +113,47 @@ if grep -q '人工.*\.env' "$TMP/dry-output" && grep -q '不会.*迁移' "$TMP/d
   ok
 else
   bad "dry-run 输出应提示人工修改 .env 且不会迁移数据"
+fi
+
+echo "── 生成/验证失败保留 last-good ──"
+FAIL_PLANNER_DIR="$TMP/failing-planner"
+mkdir -p "$FAIL_PLANNER_DIR"
+cp "$PLANNER" "$SCRIPT_DIR/storage-paths-lib.sh" "$SCRIPT_DIR/resource-env-lib.sh" "$FAIL_PLANNER_DIR/"
+cat >>"$FAIL_PLANNER_DIR/resource-env-lib.sh" <<'EOF'
+resource_env_validate() {
+  echo "[resource-env] injected validation failure" >&2
+  return 73
+}
+EOF
+FAIL_ENV="$TMP/failing.env"
+printf 'OMC_PUBLIC_HOST=10.0.0.4\n' >"$FAIL_ENV"
+LAST_GOOD="$TMP/last-good-resources.env"
+printf 'LAST_GOOD=preserve-me\n' >"$LAST_GOOD"
+BEFORE_SUM="$(cksum <"$LAST_GOOD")"
+BEFORE_MTIME="$(file_mtime "$LAST_GOOD")"
+if env \
+  OMC_PROBE_CPU=32 \
+  OMC_PROBE_MEM_TOTAL_MIB=32768 \
+  OMC_PROBE_MEM_AVAIL_MIB=32768 \
+  OMC_PROBE_LOAD15=0 \
+  OMC_PROBE_STORAGE_MOUNTS="$MOUNTS" \
+  OMC_STORAGE_ENV_FILE="$FAIL_ENV" \
+  bash "$FAIL_PLANNER_DIR/plan-resources.sh" --assume-dedicated --skip-monitoring \
+    -o "$LAST_GOOD" >"$TMP/failing-output" 2>&1; then
+  bad "注入资源契约验证失败时 planner 必须返回失败"
+else
+  ok
+fi
+if [ -f "$LAST_GOOD" ]; then
+  check_eq "验证失败保留 last-good 内容" "$(cksum <"$LAST_GOOD")" "$BEFORE_SUM"
+  check_eq "验证失败保留 last-good mtime" "$(file_mtime "$LAST_GOOD")" "$BEFORE_MTIME"
+else
+  bad "验证失败不得删除 last-good resources.env"
+fi
+if find "$TMP" -maxdepth 1 -name 'last-good-resources.env.tmp.*' | grep -q .; then
+  bad "验证失败后不得残留同目录临时资源文件"
+else
+  ok
 fi
 
 echo "════ Results: PASS=$PASS FAIL=$FAIL ════"

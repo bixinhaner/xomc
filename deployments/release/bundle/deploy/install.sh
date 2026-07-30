@@ -184,6 +184,23 @@ confirm() {
   case "${yn:-Y}" in [Yy]*|"") return 0 ;; *) return 1 ;; esac
 }
 
+# resolve_resource_env_candidate —— 安装前资源契约候选优先级：
+#   1) 新交付包内由 plan-resources.sh 生成的文件；
+#   2) 当前生效 release；
+#   3) uninstall 保留的 saved 快照。
+# 一旦较高优先级候选存在，就必须校验该文件，禁止因其非法而回退到较旧候选。
+resolve_resource_env_candidate() {
+  if [ -f "$PKG_ROOT/deploy/resources.env" ]; then
+    printf '%s\n' "$PKG_ROOT/deploy/resources.env"
+  elif [ -f "$OMC_ROOT/current/deploy/resources.env" ]; then
+    printf '%s\n' "$OMC_ROOT/current/deploy/resources.env"
+  elif [ -f "$OMC_ROOT/etc/resources.env.saved" ]; then
+    printf '%s\n' "$OMC_ROOT/etc/resources.env.saved"
+  else
+    return 1
+  fi
+}
+
 # heal_main_pg_timescaledb_downgrade —— 升级自愈（#347 主库 timescaledb → 纯 PG 降级）
 # 旧版 release 主库用 timescaledb 镜像初始化，卷内 postgresql.conf 写死
 # shared_preload_libraries='timescaledb'；本版主库降级 postgres:16-alpine（无该库），旧卷
@@ -309,6 +326,14 @@ docker info >/dev/null 2>&1 || die "docker 服务不可用，请先 systemctl st
 [ "$SKIP_WEB" = 1 ]        || [ -f "$PKG_ROOT/deploy/docker-compose.web.yml" ]        || die "缺 deploy/docker-compose.web.yml（或加 --skip-web）" 1
 [ "$SKIP_MONITORING" = 1 ] || [ -f "$PKG_ROOT/deploy/docker-compose.monitoring.yml" ] || die "缺 deploy/docker-compose.monitoring.yml（或加 --skip-monitoring）" 1
 
+# 资源契约是部署必需输入。必须在 --check-only 退出、current 切换和任何容器重启之前
+# 校验真正会被本次安装采用的候选，不能等到 Step 6 组装 Compose 才发现旧三行文件。
+RESOURCE_ENV_CANDIDATE="$(resolve_resource_env_candidate)" ||
+  die "未找到 resources.env；请先运行 bash $PKG_ROOT/deploy/plan-resources.sh，禁止静默回退 Compose 默认限额" 1
+resource_env_validate "$RESOURCE_ENV_CANDIDATE" ||
+  die "resources.env 不是完整资源规划：${RESOURCE_ENV_CANDIDATE}；请重新运行 plan-resources.sh" 1
+log "资源规划预检通过：$RESOURCE_ENV_CANDIDATE"
+
 # 兜底：旧版 build-release.sh 在 umask=027 机器上构建时 monitoring/ 配置会落 0640，
 # prometheus/loki/tempo/alertmanager 等非 root 容器读不动直接 fail。
 # 新版 build-release.sh 已 baked chmod a+rX 到 tar；这里再 defensive 兜一遍。
@@ -397,13 +422,18 @@ fi
 # resources.env(plan-resources.sh 生成的资源限额,operator 独有,不随交付包)同样快照:
 # 它是独立文件、无包内默认值可合并,故整文件继承(而非走 ENV_PRESERVE_KEYS 键级合并)。
 PREV_RESOURCES_SNAPSHOT=""
-if [ -f "$OMC_ROOT/current/deploy/resources.env" ]; then
+if [ "$RESOURCE_ENV_CANDIDATE" = "$PKG_ROOT/deploy/resources.env" ]; then
+  :
+elif [ "$RESOURCE_ENV_CANDIDATE" = "$OMC_ROOT/current/deploy/resources.env" ]; then
   PREV_RESOURCES_SNAPSHOT="$(mktemp)" || PREV_RESOURCES_SNAPSHOT=""
-  [ -n "$PREV_RESOURCES_SNAPSHOT" ] && { cp "$OMC_ROOT/current/deploy/resources.env" "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || PREV_RESOURCES_SNAPSHOT=""; }
-elif [ -f "$OMC_ROOT/etc/resources.env.saved" ]; then
+  [ -n "$PREV_RESOURCES_SNAPSHOT" ] && { cp "$RESOURCE_ENV_CANDIDATE" "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || PREV_RESOURCES_SNAPSHOT=""; }
+elif [ "$RESOURCE_ENV_CANDIDATE" = "$OMC_ROOT/etc/resources.env.saved" ]; then
   PREV_RESOURCES_SNAPSHOT="$(mktemp)" || PREV_RESOURCES_SNAPSHOT=""
-  [ -n "$PREV_RESOURCES_SNAPSHOT" ] && { cp "$OMC_ROOT/etc/resources.env.saved" "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || PREV_RESOURCES_SNAPSHOT=""; }
+  [ -n "$PREV_RESOURCES_SNAPSHOT" ] && { cp "$RESOURCE_ENV_CANDIDATE" "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || PREV_RESOURCES_SNAPSHOT=""; }
 fi
+[ "$RESOURCE_ENV_CANDIDATE" = "$PKG_ROOT/deploy/resources.env" ] ||
+  [ -n "$PREV_RESOURCES_SNAPSHOT" ] ||
+  die "resources.env 快照失败，未切换 current；请检查临时目录空间与文件权限" 1
 
 # 保存上一版随包 builtin 基线，用于区分“未修改的旧 builtin”与“运维在原 builtin
 # 文件上做过的扩展”。仅看 .custom 不够：指标库 force 覆盖 GSM.xml/BSC 平台时为了
@@ -438,11 +468,17 @@ merge_env_preserve "$PREV_ENV_SNAPSHOT" "$RELEASE_DIR/deploy/.env"
 
 # 资源限额 resources.env 整文件继承到新 release(交付包不含此文件,故仅在上一版存在时拷入)。
 if [ -n "$PREV_RESOURCES_SNAPSHOT" ] && [ ! -f "$RELEASE_DIR/deploy/resources.env" ]; then
-  cp "$PREV_RESOURCES_SNAPSHOT" "$RELEASE_DIR/deploy/resources.env" 2>/dev/null \
-    && log "resources.env:已从上一版继承资源限额(plan-resources.sh 调优值不丢)" \
-    || warn "resources.env:继承失败,请手动核对 $RELEASE_DIR/deploy/resources.env"
+  cp "$PREV_RESOURCES_SNAPSHOT" "$RELEASE_DIR/deploy/resources.env" 2>/dev/null ||
+    die "resources.env 继承复制失败，未切换 current：$RELEASE_DIR/deploy/resources.env" 1
+  log "resources.env:已从上一版继承资源限额(plan-resources.sh 调优值不丢)"
 fi
 [ -n "$PREV_RESOURCES_SNAPSHOT" ] && rm -f "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || true
+
+# 防 TOCTOU、复制故障和目标目录陈旧文件：对即将成为 current 的实际文件再校验一次。
+[ -f "$RELEASE_DIR/deploy/resources.env" ] ||
+  die "复制/继承后的 resources.env 缺失，未切换 current；请重新运行 plan-resources.sh" 1
+resource_env_validate "$RELEASE_DIR/deploy/resources.env" ||
+  die "复制/继承后的 resources.env 未通过完整资源规划校验，未切换 current：$RELEASE_DIR/deploy/resources.env" 1
 
 # ── data 外置 + 升级反向合并(三库导入XML重构 Phase 2,D1/D2)───────────────────
 # 模型 B:整个 data 目录外置到 $OMC_ROOT/data,bind-mount(RW)进 app/worker;
@@ -694,17 +730,14 @@ cd "$OMC_ROOT/current/deploy"
 # 注意：一旦显式传任一 --env-file，compose 不再自动加载 ./.env，故 .env 也必须显式传。
 ENV_FILES=()
 [ -f .env ] && ENV_FILES+=( --env-file .env )
-if [ -f resources.env ]; then
-  resource_env_validate resources.env ||
-    die "resources.env 不是完整资源规划；请重新运行 plan-resources.sh，禁止缺失项静默回退 Compose 默认值"
-  resource_plan_metrics_write resources.env ||
-    die "无法生成 resources.env 对应的 Prometheus 资源计划指标"
-  ENV_FILES+=( --env-file resources.env )
-  log "已检出 resources.env → 按其资源限额部署（plan-resources.sh 生成）"
-else
-  resource_plan_metrics_remove
-  log "未检出 resources.env → 用 compose 内置默认限额（如需按主机空闲资源规划，部署前先跑：bash plan-resources.sh）"
-fi
+[ -f resources.env ] ||
+  die "current/deploy/resources.env 缺失；禁止静默回退 Compose 默认限额，请重新运行 plan-resources.sh"
+resource_env_validate resources.env ||
+  die "resources.env 不是完整资源规划；请重新运行 plan-resources.sh，禁止缺失项静默回退 Compose 默认值"
+resource_plan_metrics_write resources.env ||
+  die "无法生成 resources.env 对应的 Prometheus 资源计划指标"
+ENV_FILES+=( --env-file resources.env )
+log "已检出完整 resources.env → 按其资源限额部署（plan-resources.sh 生成）"
 
 COMPOSE_FILES=( -f docker-compose.infra.yml -f docker-compose.app.yml )
 [ "$SKIP_WEB" = 0 ]        && COMPOSE_FILES+=( -f docker-compose.web.yml )

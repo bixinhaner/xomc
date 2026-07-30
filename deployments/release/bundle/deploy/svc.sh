@@ -120,22 +120,18 @@ fi
 
 # 资源限额：compose 经 --env-file 读取 resources.env(plan-resources.sh 生成)。改完
 # resources.env 后 svc.sh restart 即按新限额重建。一旦显式传任一 --env-file，compose
-# 不再自动加载 ./.env，故 .env 也必须显式传(无则退化为今天行为)。
+# 不再自动加载 ./.env，故 .env 也必须显式传；resources.env 缺失则拒绝执行。
 ENV_FILES=()
 [ -f .env ]          && ENV_FILES+=( --env-file .env )
-if [ -f resources.env ]; then
-  resource_env_validate resources.env ||
-    die "resources.env 不是完整资源规划；请重新运行 plan-resources.sh，禁止缺失项静默回退 Compose 默认值"
-  ENV_FILES+=( --env-file resources.env )
-fi
+[ -f resources.env ] ||
+  die "缺少 resources.env；请先运行 plan-resources.sh，禁止静默回退 Compose 默认限额"
+resource_env_validate resources.env ||
+  die "resources.env 不是完整资源规划；请重新运行 plan-resources.sh，禁止缺失项静默回退 Compose 默认值"
+ENV_FILES+=( --env-file resources.env )
 
 refresh_resource_plan_metrics() {
-  if [ -f resources.env ]; then
-    resource_plan_metrics_write resources.env ||
-      die "无法生成 resources.env 对应的 Prometheus 资源计划指标"
-  else
-    resource_plan_metrics_remove
-  fi
+  resource_plan_metrics_write resources.env ||
+    die "无法生成 resources.env 对应的 Prometheus 资源计划指标"
 }
 
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )

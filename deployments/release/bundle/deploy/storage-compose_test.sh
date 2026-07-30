@@ -76,6 +76,11 @@ contains "install 加载存储库" 'storage-paths-lib.sh' "$INSTALL"
 contains "install 准备目录" 'storage_prepare_configured_env_paths "$ENV_FILE"' "$INSTALL"
 contains "svc 加载存储库" 'storage-paths-lib.sh' "$SVC"
 contains "svc 准备目录" 'storage_prepare_configured_env_paths ".env"' "$SVC"
+if bash "$RELEASE_DEPLOY/install-resource-preflight_test.sh"; then
+  ok
+else
+  bad "install/svc resources.env preflight regression"
+fi
 
 echo "── 开发 compose 保留命名卷默认值 ──"
 contains "开发 PostgreSQL 默认命名卷" '${POSTGRES_DATA_PATH:-pgdata}:/var/lib/postgresql/data' "$DEV_COMPOSE"
