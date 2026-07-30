@@ -308,12 +308,12 @@ groups:
       - alert: OMCResourcePlanCPUQuotaSeriesAbsent
         expr: |
           omc_resource_plan_cpu_cores
-          unless on (service)
+          unless on (compose_service)
           label_replace(
             count by (container_label_com_docker_compose_service) (
               container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
             ),
-            "service", "$1", "container_label_com_docker_compose_service", "(.*)"
+            "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"
           )
         for: 2m
         labels:
@@ -321,18 +321,18 @@ groups:
           domain: omc
           subsystem: resource-plan
         annotations:
-          summary: "资源计划服务缺少 cAdvisor CPU quota 序列：{{ $labels.service }}"
+          summary: "资源计划服务缺少 cAdvisor CPU quota 序列：{{ $labels.compose_service }}"
           description: "已声明资源计划的服务没有对应 cAdvisor container_spec_cpu_quota 序列。Task 8 必须核验 Docker 29/overlayfs；若持续缺失，接入 Docker API 资源 exporter 后才可上线。"
 
       - alert: OMCResourcePlanCPUPeriodSeriesAbsent
         expr: |
           omc_resource_plan_cpu_cores
-          unless on (service)
+          unless on (compose_service)
           label_replace(
             count by (container_label_com_docker_compose_service) (
               container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
             ),
-            "service", "$1", "container_label_com_docker_compose_service", "(.*)"
+            "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"
           )
         for: 2m
         labels:
@@ -340,18 +340,18 @@ groups:
           domain: omc
           subsystem: resource-plan
         annotations:
-          summary: "资源计划服务缺少 cAdvisor CPU period 序列：{{ $labels.service }}"
+          summary: "资源计划服务缺少 cAdvisor CPU period 序列：{{ $labels.compose_service }}"
           description: "已声明资源计划的服务没有对应 cAdvisor container_spec_cpu_period 序列，无法计算 CPU 实际 limit。"
 
       - alert: OMCResourcePlanMemoryLimitSeriesAbsent
         expr: |
           omc_resource_plan_memory_limit_bytes
-          unless on (service)
+          unless on (compose_service)
           label_replace(
             count by (container_label_com_docker_compose_service) (
               container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
             ),
-            "service", "$1", "container_label_com_docker_compose_service", "(.*)"
+            "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"
           )
         for: 2m
         labels:
@@ -359,7 +359,7 @@ groups:
           domain: omc
           subsystem: resource-plan
         annotations:
-          summary: "资源计划服务缺少 cAdvisor 内存 limit 序列：{{ $labels.service }}"
+          summary: "资源计划服务缺少 cAdvisor 内存 limit 序列：{{ $labels.compose_service }}"
           description: "已声明资源计划的服务没有对应 cAdvisor container_spec_memory_limit_bytes 序列。"
 
       - alert: OMCResourcePlanDrift
@@ -367,20 +367,26 @@ groups:
         # cAdvisor 的 Docker cgroup。按 compose service 标签一一比对，不把计划写死在规则中。
         expr: |
           (
-            sum by (container_label_com_docker_compose_service) (
-              container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
-              / container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+            label_replace(
+              sum by (container_label_com_docker_compose_service) (
+                container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+                / container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+              ),
+              "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"
             )
-            != on (container_label_com_docker_compose_service)
-            label_replace(omc_resource_plan_cpu_cores, "container_label_com_docker_compose_service", "$1", "service", "(.*)")
+            != on (compose_service)
+            omc_resource_plan_cpu_cores
           )
           or
           (
-            sum by (container_label_com_docker_compose_service) (
-              container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+            label_replace(
+              sum by (container_label_com_docker_compose_service) (
+                container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+              ),
+              "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"
             )
-            != on (container_label_com_docker_compose_service)
-            label_replace(omc_resource_plan_memory_limit_bytes, "container_label_com_docker_compose_service", "$1", "service", "(.*)")
+            != on (compose_service)
+            omc_resource_plan_memory_limit_bytes
           )
         for: 3m
         labels:

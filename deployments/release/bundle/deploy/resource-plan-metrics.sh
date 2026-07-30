@@ -23,8 +23,11 @@ EOF
     cpu="$(resource_env_get "$resource_env" "${prefix}_CPUS")"
     mem_mib="$(resource_env_memory_mib "$(resource_env_get "$resource_env" "${prefix}_MEM")")" || return 1
     memory_bytes="$(awk -v mib="$mem_mib" 'BEGIN { printf "%.0f", mib * 1024 * 1024 }')"
-    printf 'omc_resource_plan_cpu_cores{service="%s"} %s\n' "$service" "$cpu"
-    printf 'omc_resource_plan_memory_limit_bytes{service="%s"} %s\n' "$service" "$memory_bytes"
+    # Avoid the Prometheus target-level `service="node"` label. Using the same
+    # name here makes Prometheus rename this label to `exported_service`, which
+    # breaks resource-plan/cAdvisor joins and raises false missing-series alerts.
+    printf 'omc_resource_plan_cpu_cores{compose_service="%s"} %s\n' "$service" "$cpu"
+    printf 'omc_resource_plan_memory_limit_bytes{compose_service="%s"} %s\n' "$service" "$memory_bytes"
   done
 }
 

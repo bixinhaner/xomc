@@ -6,17 +6,17 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
-      - series: 'omc_resource_plan_cpu_cores{service="app"}'
+      - series: 'omc_resource_plan_cpu_cores{compose_service="app",service="node"}'
         values: '2 2 2 2'
-      - series: 'omc_resource_plan_cpu_cores{service="acs"}'
+      - series: 'omc_resource_plan_cpu_cores{compose_service="acs",service="node"}'
         values: '5 5 5 5'
-      - series: 'omc_resource_plan_cpu_cores{service="worker"}'
+      - series: 'omc_resource_plan_cpu_cores{compose_service="worker",service="node"}'
         values: '8 8 8 8'
-      - series: 'omc_resource_plan_memory_limit_bytes{service="app"}'
+      - series: 'omc_resource_plan_memory_limit_bytes{compose_service="app",service="node"}'
         values: '1610612736 1610612736 1610612736 1610612736'
-      - series: 'omc_resource_plan_memory_limit_bytes{service="acs"}'
+      - series: 'omc_resource_plan_memory_limit_bytes{compose_service="acs",service="node"}'
         values: '4294967296 4294967296 4294967296 4294967296'
-      - series: 'omc_resource_plan_memory_limit_bytes{service="worker"}'
+      - series: 'omc_resource_plan_memory_limit_bytes{compose_service="worker",service="node"}'
         values: '2147483648 2147483648 2147483648 2147483648'
       - series: 'container_spec_cpu_quota{container_label_com_docker_compose_service="worker"}'
         values: '800000 800000 800000 800000'
@@ -29,7 +29,8 @@ tests:
         alertname: OMCResourcePlanCPUQuotaSeriesAbsent
         exp_alerts:
           - exp_labels:
-              service: app
+              compose_service: app
+              service: node
               severity: critical
               domain: omc
               subsystem: resource-plan
@@ -37,7 +38,8 @@ tests:
               summary: "资源计划服务缺少 cAdvisor CPU quota 序列：app"
               description: "已声明资源计划的服务没有对应 cAdvisor container_spec_cpu_quota 序列。Task 8 必须核验 Docker 29/overlayfs；若持续缺失，接入 Docker API 资源 exporter 后才可上线。"
           - exp_labels:
-              service: acs
+              compose_service: acs
+              service: node
               severity: critical
               domain: omc
               subsystem: resource-plan
@@ -48,7 +50,8 @@ tests:
         alertname: OMCResourcePlanCPUPeriodSeriesAbsent
         exp_alerts:
           - exp_labels:
-              service: app
+              compose_service: app
+              service: node
               severity: critical
               domain: omc
               subsystem: resource-plan
@@ -56,7 +59,8 @@ tests:
               summary: "资源计划服务缺少 cAdvisor CPU period 序列：app"
               description: "已声明资源计划的服务没有对应 cAdvisor container_spec_cpu_period 序列，无法计算 CPU 实际 limit。"
           - exp_labels:
-              service: acs
+              compose_service: acs
+              service: node
               severity: critical
               domain: omc
               subsystem: resource-plan
@@ -67,7 +71,8 @@ tests:
         alertname: OMCResourcePlanMemoryLimitSeriesAbsent
         exp_alerts:
           - exp_labels:
-              service: app
+              compose_service: app
+              service: node
               severity: critical
               domain: omc
               subsystem: resource-plan
@@ -75,7 +80,8 @@ tests:
               summary: "资源计划服务缺少 cAdvisor 内存 limit 序列：app"
               description: "已声明资源计划的服务没有对应 cAdvisor container_spec_memory_limit_bytes 序列。"
           - exp_labels:
-              service: acs
+              compose_service: acs
+              service: node
               severity: critical
               domain: omc
               subsystem: resource-plan

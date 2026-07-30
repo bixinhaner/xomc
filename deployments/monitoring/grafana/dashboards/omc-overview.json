@@ -326,7 +326,7 @@
       "targets": [
         {"expr": "label_replace(sum by (container_label_com_docker_compose_service) (container_spec_cpu_quota{container_label_com_docker_compose_service=~\"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web\"} / container_spec_cpu_period{container_label_com_docker_compose_service=~\"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web\"}), \"service\", \"$1\", \"container_label_com_docker_compose_service\", \"(.*)\")", "legendFormat": "实际 CPU limit {{service}}"},
         {"expr": "label_replace(sum by (container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_service=~\"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web\"}[$__rate_interval])), \"service\", \"$1\", \"container_label_com_docker_compose_service\", \"(.*)\")", "legendFormat": "实际 CPU usage {{service}}"},
-        {"expr": "omc_resource_plan_cpu_cores", "legendFormat": "声明 CPU 核数 {{service}}"}
+        {"expr": "omc_resource_plan_cpu_cores", "legendFormat": "声明 CPU 核数 {{compose_service}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "cores"}}
     },
@@ -338,7 +338,7 @@
       "targets": [
         {"expr": "label_replace(sum by (container_label_com_docker_compose_service) (container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~\"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web\"}), \"service\", \"$1\", \"container_label_com_docker_compose_service\", \"(.*)\")", "legendFormat": "实际 memory limit {{service}}"},
         {"expr": "label_replace(sum by (container_label_com_docker_compose_service) (container_memory_working_set_bytes{container_label_com_docker_compose_service=~\"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web\"}), \"service\", \"$1\", \"container_label_com_docker_compose_service\", \"(.*)\")", "legendFormat": "实际 memory usage {{service}}"},
-        {"expr": "omc_resource_plan_memory_limit_bytes", "legendFormat": "声明 memory {{service}}"}
+        {"expr": "omc_resource_plan_memory_limit_bytes", "legendFormat": "声明 memory {{compose_service}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes"}}
     },
