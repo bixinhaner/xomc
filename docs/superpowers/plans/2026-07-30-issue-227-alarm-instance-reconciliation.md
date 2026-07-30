@@ -103,7 +103,8 @@ In `alarm_identity.go`:
 
 - add the `additional_text` key constant;
 - normalize whitespace with `strings.Join(strings.Fields(value), " ")`;
-- reject MOI values prefixed by `Device.FaultMgmt.CurrentAlarm.`, `Device.FaultMgmt.ExpeditedEvent.`, and `Device.FaultMgmt.HistoryEvent.`;
+- reject transport-container MOI values prefixed by `Device.FaultMgmt.{CurrentAlarm,ExpeditedEvent,HistoryEvent}.`;
+- apply the same rejection to IGD roots: `InternetGatewayDevice.FaultMgmt.{CurrentAlarm,ExpeditedEvent,HistoryEvent}.`;
 - when AdditionalInformation begins with `AdditionalText + "("`, use the text before the first semicolon as the object scope;
 - otherwise use AdditionalText, then normalized AdditionalInformation;
 - retain the existing identifier-only fallback when the qualifier is empty.
@@ -309,15 +310,20 @@ type AlarmUpdate struct {
 	Remote *model.Alarm
 }
 
+type DuplicateAlarmClear struct {
+	Duplicate *model.Alarm
+	Keeper    *model.Alarm
+}
+
 type AlarmDiff struct {
 	ToAdd             []*model.Alarm
 	ToUpdate          []AlarmUpdate
 	ToClear           []*model.Alarm
-	ToClearDuplicates []*model.Alarm
+	ToClearDuplicates []DuplicateAlarmClear
 }
 ```
 
-- Produces: deterministic local keeper selection based on remote RaisedAt, then newest local RaisedAt, CreatedAt, and ID.
+- Produces: deterministic local keeper selection based on remote RaisedAt, then newest local RaisedAt, CreatedAt, and ID. Each duplicate-clear item carries both the stale row and its keeper so Redis state can be restored to the surviving instance after the stale row is archived.
 - Consumed by: `AlarmSyncProcessor.processSync`.
 
 - [ ] **Step 1: Write failing diff tests**
@@ -359,7 +365,7 @@ Expected: current map-based diff loses one local duplicate and cannot expose a d
 - choose one remote record per key using latest RaisedAt for malformed duplicate remote rows;
 - choose the local keeper whose RaisedAt has the smallest absolute distance to remote RaisedAt;
 - break ties by latest local RaisedAt, latest CreatedAt, then lexical ID;
-- put non-keeper locals in `ToClearDuplicates`;
+- put non-keeper locals in `ToClearDuplicates` as `DuplicateAlarmClear{Duplicate, Keeper}` pairs;
 - put every local record for remote-absent keys in `ToClear`;
 - return direct local/remote update pairs so `sync_processor.go` no longer reconstructs a lossy local map.
 

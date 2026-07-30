@@ -56,10 +56,9 @@ AlarmIdentifier | StableObjectScope
 但 `StableObjectScope` 不再直接使用原始 MOI，而由统一的身份解析器按以下优先级生成：
 
 1. **真实管理对象 MOI**
-   - 非 `Device.FaultMgmt.CurrentAlarm.*`
-   - 非 `Device.FaultMgmt.ExpeditedEvent.*`
-   - 非 `Device.FaultMgmt.HistoryEvent.*`
-   - 例如 `Device.Radio.1`、`Device.Cell.1` 可直接使用。
+   - 排除 `Device.FaultMgmt.{CurrentAlarm,ExpeditedEvent,HistoryEvent}.*` 传输容器路径。
+   - 同时排除 IGD 设备使用的 `InternetGatewayDevice.FaultMgmt.{CurrentAlarm,ExpeditedEvent,HistoryEvent}.*` 传输容器路径。
+   - 例如 `Device.Radio.1`、`Device.Cell.1`、`InternetGatewayDevice.LANDevice.1` 等真实业务对象路径可直接使用。
 2. **AdditionalInformation 中的稳定对象前缀**
    - 当字符串以 `AdditionalText` 对应的对象名开头，并带括号标识时，使用首个分号前的前缀。
    - 现场示例：`LTE0(73828545);S1setup fail...` 解析为 `LTE0(73828545)`。
