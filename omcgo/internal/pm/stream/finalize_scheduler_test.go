@@ -163,8 +163,8 @@ func TestFinalizeSchedulerClaimsBacklogInBoundedBatches(t *testing.T) {
 	if err := scanner.runOnce(context.Background()); err != nil {
 		t.Fatalf("run batched finalize scheduler: %v", err)
 	}
-	if got := repo.claimCallCount(); got > 20 {
-		t.Fatalf("claim SQL calls = %d, want <= 20 for 64 windows with 32 workers", got)
+	if got := repo.claimCallCount(); got > 10 {
+		t.Fatalf("claim SQL calls = %d, want <= 10 for 64 windows with 32 workers", got)
 	}
 }
 

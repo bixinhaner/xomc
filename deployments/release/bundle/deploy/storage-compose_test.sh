@@ -30,6 +30,8 @@ APP_DOCKERFILE="$REPO_ROOT/deployments/docker/Dockerfile.app"
 DEV_PLANNER="$REPO_ROOT/deployments/docker/plan-resources.sh"
 NGINX_DEFAULT="$REPO_ROOT/deployments/docker/default.conf"
 NGINX_LOCAL="$REPO_ROOT/deployments/docker/default.local.conf"
+TSDB_BASELINE="$REPO_ROOT/omcgo/migrations/tsdb/000001_tsdb_schema.sql"
+SEED_BASELINE="$REPO_ROOT/omcgo/migrations/seed/000001_init_seed.sql"
 
 PASS=0
 FAIL=0
@@ -219,12 +221,14 @@ contains "healthcheck 核对 ACS SYN backlog" 'net.ipv4.tcp_max_syn_backlog' "$R
 echo "── PM 指标漂移与禁用值监控 ──"
 contains "PM 配置外指标告警使用 whitelist miss" 'omc_pm_whitelist_miss_values_total' "$OMC_ALERTS"
 not_contains "按配置禁用的 PM 指标不得触发持续业务告警" 'alert: PMKnownIndicatorsDisabled' "$OMC_ALERTS"
+contains "BLQ 路由基线修复高优先级接入拼写" "indicator_id = 'C000000014'" "$SEED_BASELINE"
 contains "主 Grafana dashboard 展示 whitelist miss" 'omc_pm_whitelist_miss_values_total' "$GRAFANA_DASHBOARD"
 contains "主 Grafana dashboard 展示 disabled" 'omc_pm_known_disabled_values_total' "$GRAFANA_DASHBOARD"
 contains "overview dashboard 展示 whitelist miss" 'omc_pm_whitelist_miss_values_total' "$GRAFANA_OVERVIEW"
 contains "overview dashboard 展示 disabled" 'omc_pm_known_disabled_values_total' "$GRAFANA_OVERVIEW"
 
 echo "── PM 聚合关闭、Redis 与资源漂移监控 ──"
+contains "终结领取索引覆盖稳定排序键" 'granularity, window_end, task_version_id, entity_key, window_start' "$TSDB_BASELINE"
 contains "资源计划漂移告警" 'alert: OMCResourcePlanDrift' "$HOST_ALERTS"
 contains "资源计划 cAdvisor 缺失 critical 告警" 'alert: OMCResourcePlanCAdvisorAbsent' "$HOST_ALERTS"
 contains "资源计划 CPU quota 序列缺失告警" 'alert: OMCResourcePlanCPUQuotaSeriesAbsent' "$HOST_ALERTS"

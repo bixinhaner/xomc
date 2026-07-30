@@ -1447,6 +1447,14 @@ CREATE INDEX idx_pm_windows_oldest_due
     ON public.pm_aggregation_windows (granularity, window_end)
     WHERE status IN ('open', 'failed');
 
+-- The finalizer alternates oldest/newest scans. Keep every stable ordering
+-- column in one partial index so PostgreSQL can scan it in either direction
+-- without sorting the full due hour again for every claimed batch.
+CREATE INDEX idx_pm_windows_due_claim_order
+    ON public.pm_aggregation_windows (granularity, window_end, task_version_id, entity_key, window_start)
+    INCLUDE (finalize_next_attempt_at, finalize_lease_until)
+    WHERE status IN ('open', 'failed');
+
 CREATE INDEX idx_pm_windows_version_audit
     ON public.pm_aggregation_windows (
         task_version_id, version_audit_fingerprint,
