@@ -77,6 +77,11 @@ if [ -f "$DEPLOY_DIR/storage-paths-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/storage-paths-lib.sh（有状态服务数据路径库，由 build-release.sh 随包发布）" 1
 fi
+if [ -f "$DEPLOY_DIR/resource-env-lib.sh" ]; then
+  . "$DEPLOY_DIR/resource-env-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/resource-env-lib.sh（完整资源规划契约库）" 1
+fi
 if [ -f "$DEPLOY_DIR/monitoring-profile-lib.sh" ]; then
   . "$DEPLOY_DIR/monitoring-profile-lib.sh"
 else
@@ -685,6 +690,8 @@ cd "$OMC_ROOT/current/deploy"
 ENV_FILES=()
 [ -f .env ] && ENV_FILES+=( --env-file .env )
 if [ -f resources.env ]; then
+  resource_env_validate resources.env ||
+    die "resources.env 不是完整资源规划；请重新运行 plan-resources.sh，禁止缺失项静默回退 Compose 默认值"
   ENV_FILES+=( --env-file resources.env )
   log "已检出 resources.env → 按其资源限额部署（plan-resources.sh 生成）"
 else

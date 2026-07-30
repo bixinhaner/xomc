@@ -18,6 +18,21 @@ run a shell, `curl`, or `wget` inside that container. Its `health_check`
 extension listens on port 13133, the release compose publishes that port only
 on `127.0.0.1`, and `healthcheck.sh` probes it externally from the host.
 
+## Resource-plan contract
+
+`resources.env` is optional, but once present it is a complete deployment
+contract rather than a best-effort override file. Generate it with
+`plan-resources.sh`; it records schema version `2` and the probed host CPU and
+memory. `install.sh` and `svc.sh` reject a partial, malformed, or internally
+inconsistent file before Compose is assembled, including legacy files that
+only contain Redis values. Re-run `plan-resources.sh` instead of deleting keys
+to fall back to Compose defaults.
+
+After deployment, `healthcheck.sh` validates a present contract against the
+rendered Compose limits, Docker `NanoCpus`/`Memory`, Go GOMAXPROCS metrics,
+Redis runtime settings, and PostgreSQL/TimescaleDB runtime settings. Any
+mismatch names the service with its expected and actual values.
+
 ## Configuration backup bucket compatibility
 
 The physical S3/MinIO bucket is `config-backup`. The legacy `config_backup`

@@ -86,6 +86,11 @@ if [ -f "$SCRIPT_DIR/storage-paths-lib.sh" ]; then
 else
   die "缺 $SCRIPT_DIR/storage-paths-lib.sh"
 fi
+if [ -f "$SCRIPT_DIR/resource-env-lib.sh" ]; then
+  . "$SCRIPT_DIR/resource-env-lib.sh"
+else
+  die "缺 $SCRIPT_DIR/resource-env-lib.sh（完整资源规划契约库）"
+fi
 if [ -f "$SCRIPT_DIR/monitoring-profile-lib.sh" ]; then
   . "$SCRIPT_DIR/monitoring-profile-lib.sh"
 else
@@ -113,7 +118,11 @@ fi
 # 不再自动加载 ./.env，故 .env 也必须显式传(无则退化为今天行为)。
 ENV_FILES=()
 [ -f .env ]          && ENV_FILES+=( --env-file .env )
-[ -f resources.env ] && ENV_FILES+=( --env-file resources.env )
+if [ -f resources.env ]; then
+  resource_env_validate resources.env ||
+    die "resources.env 不是完整资源规划；请重新运行 plan-resources.sh，禁止缺失项静默回退 Compose 默认值"
+  ENV_FILES+=( --env-file resources.env )
+fi
 
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 

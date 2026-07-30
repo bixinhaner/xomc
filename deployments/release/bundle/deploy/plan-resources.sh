@@ -44,6 +44,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/storage-paths-lib.sh"
+. "$SCRIPT_DIR/resource-env-lib.sh"
 OUT_FILE="$SCRIPT_DIR/resources.env"
 STORAGE_ENV_FILE="${OMC_STORAGE_ENV_FILE:-$SCRIPT_DIR/.env}"
 DRY_RUN=0
@@ -434,9 +435,17 @@ done
   echo "WEB_CPUS=$CPU_web";       echo "WEB_MEM=${WEB_MEM}m"
   echo ""
   echo "# ── 规划元信息（仅记录，compose 不读取）──"
+  echo "OMC_RESOURCE_SCHEMA_VERSION=2"
+  echo "OMC_RESOURCE_PLAN_HOST_CPU=$HOST_CPU"
+  echo "OMC_RESOURCE_PLAN_HOST_MEM_MIB=$MEM_TOTAL_MIB"
   echo "OMC_PLAN_TIER=$TIER"
   echo "OMC_PLAN_SKIP_MONITORING=$SKIP_MONITORING"
 } > "$OUT_FILE"
+
+if ! resource_env_validate "$OUT_FILE"; then
+  rm -f "$OUT_FILE"
+  die "生成的 resources.env 未通过完整资源契约验证，已删除无效文件" 1
+fi
 
 log "\n${C_G}✓ 已写入：$OUT_FILE${C_0}"
 log "  下一步：检视/调整该文件 → 运行 install.sh（将以 --env-file resources.env 动态部署）。"

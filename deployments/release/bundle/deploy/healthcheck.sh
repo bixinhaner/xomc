@@ -33,6 +33,12 @@ else
   echo "  [FAIL] 缺 $DEPLOY_DIR/monitoring-profile-lib.sh"
   exit 1
 fi
+if [ -f "$DEPLOY_DIR/resource-env-lib.sh" ]; then
+  . "$DEPLOY_DIR/resource-env-lib.sh"
+else
+  echo "  [FAIL] 缺 $DEPLOY_DIR/resource-env-lib.sh"
+  exit 1
+fi
 monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING" || {
   echo "  [FAIL] 无法读取 monitoring profile"
   exit 1
@@ -56,7 +62,10 @@ done
 if [ "$SKIP_MONITORING" = 0 ] && [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ]; then
   COMPOSE_FILES+=( -f "$DEPLOY_DIR/docker-compose.monitoring.yml" )
 fi
-DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${COMPOSE_FILES[@]}" )
+ENV_FILES=()
+[ -f "$DEPLOY_DIR/.env" ] && ENV_FILES+=( --env-file "$DEPLOY_DIR/.env" )
+[ -f "$DEPLOY_DIR/resources.env" ] && ENV_FILES+=( --env-file "$DEPLOY_DIR/resources.env" )
+DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 
 ok=0; fail=0
 check() {  # check <描述> <命令...>
@@ -65,6 +74,15 @@ check() {  # check <描述> <命令...>
     echo "  [OK]   $desc"; ok=$((ok+1))
   else
     echo "  [FAIL] $desc"; fail=$((fail+1))
+  fi
+}
+
+check_value() { # check_value <描述> <期望> <实际>
+  local desc="$1" expected="$2" actual="$3"
+  if [ "$expected" = "$actual" ]; then
+    echo "  [OK]   $desc"; ok=$((ok+1))
+  else
+    echo "  [FAIL] $desc（期望: $expected；实际: $actual）"; fail=$((fail+1))
   fi
 }
 
@@ -112,6 +130,108 @@ check "worker /healthz (:9092)"  curl -fsS http://127.0.0.1:9092/healthz
 check "app    /metrics (:9091)"  curl -fsS http://127.0.0.1:9091/metrics
 # 前端 SPA：web 容器 nginx :8081 served（:8080 是 ACS CWMP 反代，GET / 不响应，不检）。
 check "前端 SPA (:8081)"          curl -fsS http://127.0.0.1:8081/ -o /dev/null
+
+# resources.env 存在时，必须同时证明「文件 → compose 渲染 → 容器/进程实际值」没有漂移。
+# 未使用规划器的历史部署仍允许使用 compose 默认值；但一旦有该文件，残缺或不一致绝不静默通过。
+if [ -f "$DEPLOY_DIR/resources.env" ]; then
+  echo "== resources.env 实际值核对 =="
+  if ! resource_env_validate "$DEPLOY_DIR/resources.env"; then
+    echo "  [FAIL] resources.env 完整资源契约"; fail=$((fail+1))
+  else
+    echo "  [OK]   resources.env 完整资源契约"; ok=$((ok+1))
+    COMPOSE_RENDERED="$("${DC[@]}" config 2>/dev/null || true)"
+
+    compose_limit() { # compose_limit <服务> <cpus|memory>
+      local svc="$1" field="$2"
+      printf '%s\n' "$COMPOSE_RENDERED" | awk -v svc="$svc" -v field="$field" '
+        $0 ~ "^  " svc ":" { in_service=1; in_limits=0; next }
+        in_service && $0 ~ /^  [A-Za-z0-9_-]+:$/ { exit }
+        in_service && $0 ~ /^[[:space:]]+limits:$/ { in_limits=1; next }
+        in_service && $0 ~ /^[[:space:]]+reservations:$/ { in_limits=0 }
+        in_service && in_limits && $0 ~ "^[[:space:]]+" field ":" {
+          sub("^[[:space:]]+" field ":[[:space:]]*", "")
+          gsub(/"/, "")
+          print
+          exit
+        }
+      '
+    }
+    resource_bytes() {
+      local mib
+      mib="$(resource_env_memory_mib "$1")" || return 1
+      awk -v mib="$mib" 'BEGIN { printf "%.0f", mib * 1024 * 1024 }'
+    }
+    check_service_limits() { # service key-prefix
+      local svc="$1" prefix="$2" cid expected_cpu expected_mem expected_nano expected_bytes actual_nano actual_bytes rendered_cpu rendered_mem rendered_bytes
+      expected_cpu="$(resource_env_get "$DEPLOY_DIR/resources.env" "${prefix}_CPUS")"
+      expected_mem="$(resource_env_get "$DEPLOY_DIR/resources.env" "${prefix}_MEM")"
+      rendered_cpu="$(compose_limit "$svc" cpus)"
+      rendered_mem="$(compose_limit "$svc" memory)"
+      expected_bytes="$(resource_bytes "$expected_mem")"
+      if [[ "$rendered_mem" =~ ^[0-9]+$ ]]; then
+        rendered_bytes="$rendered_mem"
+      else
+        rendered_bytes="$(resource_bytes "$rendered_mem" 2>/dev/null || true)"
+      fi
+      check_value "$svc compose cpus" "$expected_cpu" "$rendered_cpu"
+      check_value "$svc compose memory (bytes)" "$expected_bytes" "$rendered_bytes"
+      cid="$("${DC[@]}" ps -q "$svc" 2>/dev/null | head -n1)"
+      if [ -z "$cid" ]; then
+        echo "  [FAIL] $svc docker inspect（未找到容器）"; fail=$((fail+1)); return
+      fi
+      read -r actual_nano actual_bytes <<EOF
+$(docker inspect -f '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}' "$cid" 2>/dev/null)
+EOF
+      expected_nano="$(awk -v cpu="$expected_cpu" 'BEGIN { printf "%.0f", cpu * 1000000000 }')"
+      check_value "$svc docker inspect NanoCpus" "$expected_nano" "$actual_nano"
+      check_value "$svc docker inspect Memory" "$expected_bytes" "$actual_bytes"
+    }
+    for spec in 'app APP' 'acs ACS' 'worker WORKER' 'postgres POSTGRES' 'postgres-tsdb TSDB' 'redis REDIS' 'nats NATS' 'minio MINIO'; do
+      check_service_limits ${spec}
+    done
+    [ -f "$DEPLOY_DIR/docker-compose.web.yml" ] && check_service_limits web WEB
+
+    check_gomaxprocs() { # name port resource key
+      local name="$1" port="$2" key="$3" expected actual
+      expected="$(resource_env_get "$DEPLOY_DIR/resources.env" "$key")"
+      actual="$(curl -fsS "http://127.0.0.1:$port/metrics" 2>/dev/null | awk '/^go_sched_gomaxprocs_threads / { print $2; exit }')"
+      check_value "$name go_sched_gomaxprocs_threads" "$expected" "$actual"
+    }
+    check_gomaxprocs app 9091 APP_GOMAXPROCS
+    check_gomaxprocs acs 9095 ACS_GOMAXPROCS
+    check_gomaxprocs worker 9092 WORKER_GOMAXPROCS
+
+    redis_expected="$(resource_bytes "$(resource_env_get "$DEPLOY_DIR/resources.env" REDIS_MAXMEMORY)")"
+    redis_actual="$("${DC[@]}" exec -T redis redis-cli CONFIG GET maxmemory 2>/dev/null | tail -n1)"
+    redis_policy="$("${DC[@]}" exec -T redis redis-cli CONFIG GET maxmemory-policy 2>/dev/null | tail -n1)"
+    check_value "redis CONFIG GET maxmemory" "$redis_expected" "$redis_actual"
+    check_value "redis CONFIG GET maxmemory-policy" "noeviction" "$redis_policy"
+
+    deploy_env_get() { awk -F= -v key="$2" '$1 == key { print substr($0, length(key)+2); exit }' "$1"; }
+    pg_user="$(deploy_env_get "$DEPLOY_DIR/.env" POSTGRES_USER)"
+    tsdb_user="$(deploy_env_get "$DEPLOY_DIR/.env" POSTGRES_TSDB_USER)"
+    pg_check_settings() { # service user prefix
+      local svc="$1" user="$2" prefix="$3" expected actual setting
+      for setting in shared_buffers work_mem max_connections; do
+        case "$setting" in
+          shared_buffers) expected="$(resource_env_get "$DEPLOY_DIR/resources.env" "${prefix}_SHARED_BUFFERS")" ;;
+          work_mem) expected="$(resource_env_get "$DEPLOY_DIR/resources.env" "${prefix}_WORK_MEM")" ;;
+          max_connections) expected="$(resource_env_get "$DEPLOY_DIR/resources.env" "${prefix}_MAX_CONNECTIONS")" ;;
+        esac
+        actual="$("${DC[@]}" exec -T "$svc" psql -U "$user" -d postgres -tAc "SHOW $setting" 2>/dev/null | tr -d '[:space:]')"
+        if [ "$setting" = "max_connections" ]; then
+          check_value "$svc SHOW $setting" "$expected" "$actual"
+        else
+          expected_mib="$(resource_env_memory_mib "$expected")"
+          actual_mib="$(resource_env_memory_mib "$actual" 2>/dev/null || true)"
+          check_value "$svc SHOW $setting" "$expected_mib" "$actual_mib"
+        fi
+      done
+    }
+    pg_check_settings postgres "$pg_user" PG
+    pg_check_settings postgres-tsdb "$tsdb_user" TSDB
+  fi
+fi
 
 echo
 echo "compose ps 详情："

@@ -4,6 +4,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLANNER="$SCRIPT_DIR/plan-resources.sh"
 . "$SCRIPT_DIR/storage-paths-lib.sh"
+. "$SCRIPT_DIR/resource-env-lib.sh"
 
 PASS=0
 FAIL=0
@@ -47,6 +48,14 @@ echo "── 最大可用存储写入 .env ──"
 ENV_FILE="$TMP/generated.env"
 printf 'OMC_PUBLIC_HOST=10.0.0.1\n' > "$ENV_FILE"
 if run_planner "$ENV_FILE" "$TMP/resources.env" > "$TMP/output" 2>&1; then
+  if resource_env_validate "$TMP/resources.env"; then
+    ok
+  else
+    bad "planner 输出必须满足完整资源契约"
+  fi
+  check_eq "资源契约版本" "$(storage_env_get "$TMP/resources.env" OMC_RESOURCE_SCHEMA_VERSION)" "2"
+  check_eq "规划主机 CPU 元数据" "$(storage_env_get "$TMP/resources.env" OMC_RESOURCE_PLAN_HOST_CPU)" "32"
+  check_eq "规划主机内存元数据" "$(storage_env_get "$TMP/resources.env" OMC_RESOURCE_PLAN_HOST_MEM_MIB)" "32768"
   check_eq "PostgreSQL 默认路径" "$(storage_env_get "$ENV_FILE" POSTGRES_DATA_PATH)" "/data-large/omc-data/postgres"
   check_eq "TimescaleDB 默认路径" "$(storage_env_get "$ENV_FILE" TSDB_DATA_PATH)" "/data-large/omc-data/timescaledb"
   check_eq "Redis 默认路径" "$(storage_env_get "$ENV_FILE" REDIS_DATA_PATH)" "/data-large/omc-data/redis"

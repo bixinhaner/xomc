@@ -163,6 +163,17 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
 
 部署人员检视/微调 `resources.env` 后，运行 `install.sh`（Phase 2 后将自动消费该文件）。
 
+### 完整资源契约（schema v2）
+
+`resources.env` 不是可随意截取的 Compose 覆盖片段。规划器写入
+`OMC_RESOURCE_SCHEMA_VERSION=2`、`OMC_RESOURCE_PLAN_HOST_CPU` 与
+`OMC_RESOURCE_PLAN_HOST_MEM_MIB`，并在落盘后立即校验全部资源键和联动约束。
+当文件存在时，`install.sh`、`svc.sh` 和部署后 `healthcheck.sh` 都使用同一验证库：
+缺任何服务的键、单位不可解析、Go 堆上限不低于容器内存、Redis 未保留 1 GiB COW
+余量或任一数据库连接数低于 180，都会失败。尤其是仅含三行 Redis 的历史文件会被
+拒绝，不能再静默混用 Compose 默认值。需要重新规划时运行
+`bash plan-resources.sh`，不要手工删键。
+
 ---
 
 ## 6. Phase 2 接线（✅ 已实施）
