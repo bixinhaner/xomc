@@ -38,6 +38,7 @@ type stubUECountTaskService struct {
 	createErr error
 	created   []*task.CreateTaskRequest
 	block     bool
+	entered   chan struct{}
 }
 
 func (s *stubUECountTaskService) LatestOpenTaskByDeviceAndMethod(
@@ -45,6 +46,12 @@ func (s *stubUECountTaskService) LatestOpenTaskByDeviceAndMethod(
 	_, _, _ string,
 ) (*task.Task, error) {
 	if s.block {
+		if s.entered != nil {
+			select {
+			case s.entered <- struct{}{}:
+			default:
+			}
+		}
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
@@ -73,12 +80,16 @@ func (s *stubUECountTaskService) createdCount() int {
 }
 
 type stubUECountProbeGate struct {
-	acquired   bool
-	err        error
-	retryDelay *time.Duration
+	acquired     bool
+	err          error
+	retryDelay   *time.Duration
+	acquireCalls *atomic.Int32
 }
 
 func (g stubUECountProbeGate) Acquire(context.Context, string) (bool, error) {
+	if g.acquireCalls != nil {
+		g.acquireCalls.Add(1)
+	}
 	return g.acquired, g.err
 }
 
@@ -106,7 +117,7 @@ func TestUECountPolicy_ShouldTriggerOnlyPeriodicInform(t *testing.T) {
 	assert.False(t, nilPolicy.ShouldTrigger([]string{tr069.EventPeriodic}))
 }
 
-func TestUECountPolicy_EnqueueCreatesDirectGPVForSupportedPaths(t *testing.T) {
+func TestUECountPolicy_ProcessCreatesDirectGPVForSupportedPaths(t *testing.T) {
 	resolver := &stubUECountPathResolver{paths: []string{
 		"Device.DeviceInfo.UE_Count",
 		"Device.DeviceInfo.2.UE_Count",
@@ -114,7 +125,7 @@ func TestUECountPolicy_EnqueueCreatesDirectGPVForSupportedPaths(t *testing.T) {
 	tasks := &stubUECountTaskService{}
 	policy := NewUECountPolicy(resolver, tasks, stubUECountProbeGate{acquired: true}, zap.NewNop())
 
-	err := policy.Enqueue(context.Background(), "SN-220")
+	err := policy.process(context.Background(), "SN-220")
 
 	require.NoError(t, err)
 	assert.Equal(t, "SN-220", resolver.sn)
@@ -133,18 +144,18 @@ func TestUECountPolicy_EnqueueCreatesDirectGPVForSupportedPaths(t *testing.T) {
 	}, params.Names)
 }
 
-func TestUECountPolicy_EnqueueCoalescesOutstandingQuery(t *testing.T) {
+func TestUECountPolicy_ProcessCoalescesOutstandingQuery(t *testing.T) {
 	resolver := &stubUECountPathResolver{paths: []string{"Device.DeviceInfo.UE_Count"}}
 	tasks := &stubUECountTaskService{
 		open: &task.Task{ID: "existing", Status: task.TaskStatusSent},
 	}
 	policy := NewUECountPolicy(resolver, tasks, stubUECountProbeGate{acquired: true}, zap.NewNop())
 
-	require.NoError(t, policy.Enqueue(context.Background(), "SN-220"))
+	require.NoError(t, policy.process(context.Background(), "SN-220"))
 	assert.Zero(t, tasks.createdCount())
 }
 
-func TestUECountPolicy_EnqueueSkipsWhenProductHasNoSupportedPath(t *testing.T) {
+func TestUECountPolicy_ProcessSkipsWhenProductHasNoSupportedPath(t *testing.T) {
 	tasks := &stubUECountTaskService{}
 	policy := NewUECountPolicy(
 		&stubUECountPathResolver{},
@@ -153,11 +164,11 @@ func TestUECountPolicy_EnqueueSkipsWhenProductHasNoSupportedPath(t *testing.T) {
 		zap.NewNop(),
 	)
 
-	require.NoError(t, policy.Enqueue(context.Background(), "SN-220"))
+	require.NoError(t, policy.process(context.Background(), "SN-220"))
 	assert.Zero(t, tasks.createdCount())
 }
 
-func TestUECountPolicy_EnqueueReturnsDependencyErrors(t *testing.T) {
+func TestUECountPolicy_ProcessReturnsDependencyErrors(t *testing.T) {
 	resolveErr := errors.New("mapping unavailable")
 	policy := NewUECountPolicy(
 		&stubUECountPathResolver{err: resolveErr},
@@ -165,7 +176,7 @@ func TestUECountPolicy_EnqueueReturnsDependencyErrors(t *testing.T) {
 		stubUECountProbeGate{acquired: true},
 		zap.NewNop(),
 	)
-	assert.ErrorIs(t, policy.Enqueue(context.Background(), "SN-220"), resolveErr)
+	assert.ErrorIs(t, policy.process(context.Background(), "SN-220"), resolveErr)
 
 	openErr := errors.New("task lookup unavailable")
 	policy = NewUECountPolicy(
@@ -174,10 +185,10 @@ func TestUECountPolicy_EnqueueReturnsDependencyErrors(t *testing.T) {
 		stubUECountProbeGate{acquired: true},
 		zap.NewNop(),
 	)
-	assert.ErrorIs(t, policy.Enqueue(context.Background(), "SN-220"), openErr)
+	assert.ErrorIs(t, policy.process(context.Background(), "SN-220"), openErr)
 }
 
-func TestUECountPolicy_EnqueueSchedulesShortRetryAfterTaskCreationFailure(t *testing.T) {
+func TestUECountPolicy_ProcessSchedulesShortRetryAfterTaskCreationFailure(t *testing.T) {
 	createErr := errors.New("redis queue timeout")
 	var retryDelay time.Duration
 	policy := NewUECountPolicy(
@@ -187,7 +198,7 @@ func TestUECountPolicy_EnqueueSchedulesShortRetryAfterTaskCreationFailure(t *tes
 		zap.NewNop(),
 	)
 
-	err := policy.Enqueue(context.Background(), "SN-220")
+	err := policy.process(context.Background(), "SN-220")
 
 	require.ErrorIs(t, err, createErr)
 	require.Equal(t, 5*time.Minute, retryDelay)
@@ -288,7 +299,7 @@ func TestRedisUECountProbeGate_RetryAfterShortensFailedProbeDelay(t *testing.T) 
 	require.True(t, admitted, "failed probe must be admitted after the short retry delay")
 }
 
-func TestUECountPolicy_EnqueueHasBoundedDependencyDeadline(t *testing.T) {
+func TestUECountPolicy_ProcessHasBoundedDependencyDeadline(t *testing.T) {
 	policy := NewUECountPolicy(
 		&stubUECountPathResolver{paths: []string{"Device.DeviceInfo.UE_Count"}},
 		&stubUECountTaskService{block: true},
@@ -298,8 +309,82 @@ func TestUECountPolicy_EnqueueHasBoundedDependencyDeadline(t *testing.T) {
 	policy.timeout = 20 * time.Millisecond
 
 	started := time.Now()
-	err := policy.Enqueue(context.Background(), "SN-220")
+	err := policy.process(context.Background(), "SN-220")
 
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Less(t, time.Since(started), 250*time.Millisecond)
+}
+
+func TestUECountPolicy_EnqueueDoesNotWaitForDependencies(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	policy := NewUECountPolicy(
+		&stubUECountPathResolver{paths: []string{"Device.DeviceInfo.UE_Count"}},
+		&stubUECountTaskService{block: true, entered: entered},
+		stubUECountProbeGate{acquired: true},
+		zap.NewNop(),
+	)
+	policy.timeout = 50 * time.Millisecond
+	policy.workerCount = 1
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		policy.Run(runCtx)
+		close(done)
+	}()
+
+	started := time.Now()
+	require.NoError(t, policy.Enqueue(context.Background(), "SN-220"))
+	assert.Less(t, time.Since(started), 20*time.Millisecond,
+		"Inform request path must not wait for Redis, PostgreSQL, or path translation")
+	require.Eventually(t, func() bool {
+		select {
+		case <-entered:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+}
+
+func TestUECountPolicy_EnqueueCoalescesPendingDevice(t *testing.T) {
+	policy := NewUECountPolicy(
+		&stubUECountPathResolver{},
+		&stubUECountTaskService{},
+		stubUECountProbeGate{acquired: true},
+		zap.NewNop(),
+	)
+	policy.queue = make(chan string, 2)
+
+	require.NoError(t, policy.Enqueue(context.Background(), "SN-220"))
+	require.NoError(t, policy.Enqueue(context.Background(), "SN-220"))
+	assert.Len(t, policy.queue, 1)
+}
+
+func TestUECountPolicy_EnqueueRejectsOverflowWithoutAcquiringLease(t *testing.T) {
+	var acquireCalls atomic.Int32
+	policy := NewUECountPolicy(
+		&stubUECountPathResolver{},
+		&stubUECountTaskService{},
+		stubUECountProbeGate{acquired: true, acquireCalls: &acquireCalls},
+		zap.NewNop(),
+	)
+	policy.queue = make(chan string, 1)
+
+	require.NoError(t, policy.Enqueue(context.Background(), "SN-220"))
+	err := policy.Enqueue(context.Background(), "SN-221")
+
+	require.ErrorIs(t, err, ErrUECountPolicyQueueFull)
+	assert.Len(t, policy.queue, 1)
+	assert.Zero(t, acquireCalls.Load())
 }

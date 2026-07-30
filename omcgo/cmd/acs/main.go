@@ -210,6 +210,13 @@ func runACS(cmd *cobra.Command, args []string) error {
 			acs.NewRedisUECountProbeGate(inf.Redis, 0),
 			inf.Logger,
 		)
+		deps.UECountPolicy.SetMetrics(deps.Metrics)
+		ueCountCtx, ueCountCancel := context.WithCancel(context.Background())
+		go deps.UECountPolicy.Run(ueCountCtx)
+		inf.GS.Register("ue-count-policy", 1, func(context.Context) error {
+			ueCountCancel()
+			return nil
+		})
 		inf.Logger.Info("periodic UE count query enabled (#220)")
 	}
 	deps.GPVFaultRecoverer = paramsync.NewGPVFaultRecoverer(inf.PgPool, taskService)
