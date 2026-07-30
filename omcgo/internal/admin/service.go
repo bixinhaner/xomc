@@ -85,18 +85,31 @@ type PermissionInvalidator interface {
 	InvalidateUserCache(ctx context.Context, userID uuid.UUID) error
 }
 
+// roleCopyBindingRepository is the narrow association interface required by
+// CopyRole. Keeping it separate from RoleRepository avoids coupling ordinary
+// role CRUD tests and callers to every device-group/API binding operation.
+type roleCopyBindingRepository interface {
+	GetDeviceGroupData(ctx context.Context, roleID uuid.UUID) (*RoleDeviceGroupData, error)
+	SetDeviceGroupData(ctx context.Context, roleID uuid.UUID, data RoleDeviceGroupData) error
+	GetRoleApiEndpointIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
+	SetRoleApiEndpoints(ctx context.Context, roleID uuid.UUID, endpointIDs []uuid.UUID) error
+}
+
+const copyRoleCleanupTimeout = 5 * time.Second
+
 // AdminService provides user management, authentication, and RBAC functionality.
 type AdminService struct {
-	userRepo        UserRepository
-	roleRepo        RoleRepository
-	menuRepo        MenuRepository
-	auditRepo       AuditRepository
-	jwt             *JWTService
-	revoker         *TokenRevoker
-	permInvalidator PermissionInvalidator
-	metrics         *AdminMetrics
-	policy          *SecurityPolicy // 可选；nil 时单点登录 / 密码策略等走 default
-	logger          *zap.Logger
+	userRepo         UserRepository
+	roleRepo         RoleRepository
+	roleCopyBindings roleCopyBindingRepository
+	menuRepo         MenuRepository
+	auditRepo        AuditRepository
+	jwt              *JWTService
+	revoker          *TokenRevoker
+	permInvalidator  PermissionInvalidator
+	metrics          *AdminMetrics
+	policy           *SecurityPolicy // 可选；nil 时单点登录 / 密码策略等走 default
+	logger           *zap.Logger
 }
 
 // NewAdminService creates a new AdminService.
@@ -119,7 +132,7 @@ func NewAdminService(
 	if logger != nil {
 		audit.SetFallbackLogger(logger.Named("audit"))
 	}
-	return &AdminService{
+	svc := &AdminService{
 		userRepo:  userRepo,
 		roleRepo:  roleRepo,
 		menuRepo:  menuRepo,
@@ -127,6 +140,10 @@ func NewAdminService(
 		jwt:       jwtService,
 		logger:    logger.Named("admin"),
 	}
+	if bindingRepo, ok := roleRepo.(roleCopyBindingRepository); ok {
+		svc.roleCopyBindings = bindingRepo
+	}
+	return svc
 }
 
 // SetTokenRevoker 注入 token 撤销器，启用强制下线能力。
@@ -1182,10 +1199,12 @@ func (s *AdminService) DeleteRole(ctx context.Context, id uuid.UUID) error {
 }
 
 // CopyRole 一键复制一个角色（roles.md §7 P2 #9）。
-// 复制项：name + "_copy_N"（N 自动递增直到不冲突）/ description / permissions / role_menus / role_device_groups（含 network_types）。
+// 复制项：name + "_copy_N"（N 自动递增直到不冲突）/ description /
+// role_menus / role_device_groups（含 network_types）/ role_api_permissions。
 // 不复制项：is_system（副本固定 false，绝不会复制出新内置角色）/ created_by / updated_by（重新写为操作者）。
 //
-// 失败语义：源不存在 → ErrNotFound；副本名冲突超 99 次 → 报错；其它操作失败立即返回（已创建副本不回滚，便于排查）。
+// 失败语义：源不存在 → ErrNotFound；副本名冲突超 99 次 → 报错；任一绑定
+// 复制失败时删除新建副本，避免留下权限不完整的半成品角色。
 func (s *AdminService) CopyRole(ctx context.Context, sourceID uuid.UUID) (*Role, error) {
 	src, err := s.roleRepo.GetByID(ctx, sourceID)
 	if err != nil {
@@ -1209,39 +1228,71 @@ func (s *AdminService) CopyRole(ctx context.Context, sourceID uuid.UUID) (*Role,
 		return nil, fmt.Errorf("create copy role: %w", err)
 	}
 
-	// B3-Phase2-B：permissions 表已 DROP；复制路径走 role_menus。
-	// src.Permissions 字段保留向后兼容，不消费。
+	// B3-Phase2-B：permissions 表已 DROP；复制路径走 role_menus +
+	// role_api_permissions。src.Permissions 字段保留向后兼容，不消费。
 	_ = src.Permissions
 
-	// 复制 role_device_groups（含 network_types）：
-	// 该绑定走 RoleDeviceGroupRepository 接口；当前 service 没有独立字段引用它，
-	// 直接调 PgRoleRepository（生产实现）与 LockUserByUsername 中的类型断言模式一致。
-	if pgRepo, ok := s.roleRepo.(*PgRoleRepository); ok {
-		// device groups + network_types
-		if data, err := pgRepo.GetDeviceGroupData(ctx, sourceID); err == nil && data != nil && len(data.GroupIDs) > 0 {
-			if err := pgRepo.SetDeviceGroupData(ctx, copied.ID, *data); err != nil {
-				s.logger.Warn("copy role device groups failed",
-					zap.String("role_id", copied.ID.String()), zap.Error(err))
-			}
-		}
-	} else {
-		s.logger.Warn("copy role: roleRepo not *PgRoleRepository, device-groups skipped",
-			zap.String("role_id", copied.ID.String()))
+	if s.roleCopyBindings == nil {
+		return nil, s.copyRoleFailure(ctx, copied.ID,
+			fmt.Errorf("copy role bindings: %w", commonerrors.ErrInternal))
 	}
 
-	// 复制 role_menus（menuRepo 接口本身有 GetRoleMenuIDs / SetRoleMenus）
-	if menuIDs, err := s.menuRepo.GetRoleMenuIDs(ctx, sourceID); err == nil && len(menuIDs) > 0 {
-		opID := uuid.Nil
-		if op != nil {
-			opID = *op
-		}
-		if err := s.menuRepo.SetRoleMenus(ctx, copied.ID, menuIDs, opID); err != nil {
-			s.logger.Warn("copy role menus failed",
-				zap.String("role_id", copied.ID.String()), zap.Error(err))
-		}
+	groupData, err := s.roleCopyBindings.GetDeviceGroupData(ctx, sourceID)
+	if err != nil {
+		return nil, s.copyRoleFailure(ctx, copied.ID,
+			fmt.Errorf("copy role device groups: %w", err))
+	}
+	if groupData == nil {
+		groupData = &RoleDeviceGroupData{}
+	}
+	if err := s.roleCopyBindings.SetDeviceGroupData(ctx, copied.ID, *groupData); err != nil {
+		return nil, s.copyRoleFailure(ctx, copied.ID,
+			fmt.Errorf("copy role device groups: %w", err))
 	}
 
-	return s.GetRole(ctx, copied.ID)
+	menuIDs, err := s.menuRepo.GetRoleMenuIDs(ctx, sourceID)
+	if err != nil {
+		return nil, s.copyRoleFailure(ctx, copied.ID,
+			fmt.Errorf("copy role menus: %w", err))
+	}
+	opID := uuid.Nil
+	if op != nil {
+		opID = *op
+	}
+	if err := s.menuRepo.SetRoleMenus(ctx, copied.ID, menuIDs, opID); err != nil {
+		return nil, s.copyRoleFailure(ctx, copied.ID,
+			fmt.Errorf("copy role menus: %w", err))
+	}
+
+	// API 权限最后写入。SetRoleApiEndpoints 会刷新 Casbin；把它放在最后可
+	// 避免菜单/设备组的后续失败在内存中留下已删除副本的策略。
+	endpointIDs, err := s.roleCopyBindings.GetRoleApiEndpointIDs(ctx, sourceID)
+	if err != nil {
+		return nil, s.copyRoleFailure(ctx, copied.ID,
+			fmt.Errorf("copy role API permissions: %w", err))
+	}
+	if err := s.roleCopyBindings.SetRoleApiEndpoints(ctx, copied.ID, endpointIDs); err != nil {
+		return nil, s.copyRoleFailure(ctx, copied.ID,
+			fmt.Errorf("copy role API permissions: %w", err))
+	}
+
+	result, err := s.GetRole(ctx, copied.ID)
+	if err != nil {
+		return nil, s.copyRoleFailure(ctx, copied.ID,
+			fmt.Errorf("get copied role: %w", err))
+	}
+	return result, nil
+}
+
+func (s *AdminService) copyRoleFailure(ctx context.Context, copiedID uuid.UUID, cause error) error {
+	// HTTP 请求取消/超时正是最需要补偿的场景；保留 context values，但让清理
+	// 脱离原请求的取消信号，并用短超时防止后台无限悬挂。
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), copyRoleCleanupTimeout)
+	defer cancel()
+	if err := s.roleRepo.Delete(cleanupCtx, copiedID); err != nil {
+		return fmt.Errorf("%w; cleanup copied role: %w", cause, err)
+	}
+	return cause
 }
 
 // allocateCopyRoleName 寻找一个可用的副本角色名：base_copy / base_copy_2 / base_copy_3 ...
