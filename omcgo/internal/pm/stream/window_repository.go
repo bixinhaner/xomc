@@ -361,6 +361,7 @@ func claimDueUpdate(
 		Where(sq.Expr("w.finalize_next_attempt_at <= CURRENT_TIMESTAMP")).
 		Where(queueBarrierConsumedPredicate()).
 		Limit(limit)
+	candidates = applyHourlyHierarchyBarrier(candidates, granularity, filter)
 	candidates = applyClaimVersionFilter(candidates, filter)
 	if order == claimNewestFirst {
 		candidates = candidates.OrderBy(
@@ -410,6 +411,36 @@ func applyClaimVersionFilter(
 	))
 }
 
+func applyHourlyHierarchyBarrier(
+	builder sq.SelectBuilder,
+	granularity Granularity,
+	filter claimVersionFilter,
+) sq.SelectBuilder {
+	if granularity != GranularityHourly || !filter.exclude || len(filter.versionIDs) == 0 {
+		return builder
+	}
+	return builder.Where(sq.Expr(`
+NOT EXISTS (
+    SELECT 1
+    FROM pm_aggregation_windows source_window
+    WHERE source_window.granularity = 'hourly'
+      AND source_window.window_start = w.window_start
+      AND source_window.task_version_id = ANY(?)
+      AND source_window.status IN ('open', 'failed', 'finalizing', 'rebuilding')
+)
+AND NOT EXISTS (
+    SELECT 1
+    FROM pm_aggregation_rollup_outbox source_rollup
+    WHERE source_rollup.consumed_at IS NULL
+      AND source_rollup.barrier_eligible
+      AND source_rollup.subject = ?
+      AND source_rollup.window_start = w.window_start
+)`,
+		filter.versionIDs,
+		"pmaggregation.hourly.rollup",
+	))
+}
+
 func (r *WindowRepository) hasClaimConflict(
 	ctx context.Context,
 	granularity Granularity,
@@ -450,6 +481,7 @@ func claimConflictSelect(
 		Where(sq.NotEq{"w.finalize_lease_owner": leaseOwner}).
 		Where(queueBarrierConsumedPredicate()).
 		Limit(1)
+	builder = applyHourlyHierarchyBarrier(builder, granularity, filter)
 	return applyClaimVersionFilter(builder, filter)
 }
 
