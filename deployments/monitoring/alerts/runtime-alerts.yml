@@ -59,3 +59,17 @@ groups:
             {{ $labels.deployment_unit }} 进程堆已用 > GOMEMLIMIT 软限的 90%，持续 10 分钟。
             Impact: 已进入 GC 背压区，GC 更频繁吃 CPU；再涨触容器 mem limit 即被 OOMKill。
             Action: 查堆增长来源（开 pprof heap profile）；评估调大容器 mem limit + GOMEMLIMIT。
+
+      - alert: ACSGlobalAdmissionRejected
+        expr: increase(acs_admission_rejected_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: acs
+        annotations:
+          summary: "ACS 全局会话准入在最近 5 分钟发生拒绝"
+          description: |
+            ACS 全局会话上限导致 Inform 返回 HTTP 503，持续至少 1 分钟。
+            Impact: 设备需要重试 Inform，任务下发和 PM 上报可能延迟。
+            Action: 检查 acs_active_sessions、会话时延和 Redis 准入槽位；确认会话上限与 CPU/内存配置匹配。

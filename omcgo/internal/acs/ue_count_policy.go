@@ -20,12 +20,15 @@ import (
 const ueCountGPVDescription = "UECountPolicy:GPV"
 
 const (
-	defaultUECountProbeTimeout  = 3 * time.Second
-	defaultUECountProbeLeaseTTL = time.Hour
-	defaultUECountProbeRetry    = 5 * time.Minute
-	ueCountProbeSpreadSlot      = 5 * time.Minute
-	defaultUECountQueueSize     = 4096
-	defaultUECountWorkerCount   = 32
+	defaultUECountProbeTimeout             = 3 * time.Second
+	defaultUECountProbeLeaseTTL            = time.Hour
+	defaultUECountProbeRetry               = 5 * time.Minute
+	ueCountProbeSpreadSlot                 = 5 * time.Minute
+	defaultUECountQueueSize                = 4096
+	defaultUECountWorkerCount              = 32
+	defaultUECountTaskMaxRetries           = 10
+	defaultUECountTaskRetryIntervalSeconds = 30
+	defaultUECountTaskExpiresInSeconds     = 12 * 60
 )
 
 var ErrUECountPolicyQueueFull = errors.New("UE count policy queue is full")
@@ -376,13 +379,17 @@ func (p *UECountPolicy) process(ctx context.Context, deviceSN string) (retErr er
 	if err != nil {
 		return fmt.Errorf("marshal UE count query: %w", err)
 	}
+	maxRetries := defaultUECountTaskMaxRetries
 	_, err = p.tasks.CreateTask(probeCtx, &task.CreateTaskRequest{
-		DeviceSN:    deviceSN,
-		Method:      "GetParameterValues",
-		Params:      params,
-		Priority:    10,
-		Source:      task.TaskSourceSystem,
-		Description: ueCountGPVDescription,
+		DeviceSN:             deviceSN,
+		Method:               "GetParameterValues",
+		Params:               params,
+		Priority:             10,
+		Source:               task.TaskSourceSystem,
+		Description:          ueCountGPVDescription,
+		MaxRetries:           &maxRetries,
+		RetryIntervalSeconds: defaultUECountTaskRetryIntervalSeconds,
+		ExpiresIn:            defaultUECountTaskExpiresInSeconds,
 	})
 	if err != nil {
 		return fmt.Errorf("create UE count query: %w", err)

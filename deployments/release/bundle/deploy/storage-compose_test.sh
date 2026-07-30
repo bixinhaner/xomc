@@ -218,6 +218,7 @@ contains "healthcheck 核对 ACS upstream 连接池" 'nginx -T' "$RELEASE_HEALTH
 contains "healthcheck 核对 web 临时端口范围" 'net.ipv4.ip_local_port_range' "$RELEASE_HEALTHCHECK"
 contains "healthcheck 核对 ACS accept backlog" 'net.core.somaxconn' "$RELEASE_HEALTHCHECK"
 contains "healthcheck 核对 ACS SYN backlog" 'net.ipv4.tcp_max_syn_backlog' "$RELEASE_HEALTHCHECK"
+contains "ACS 全局会话拒绝告警" 'alert: ACSGlobalAdmissionRejected' "$REPO_ROOT/deployments/monitoring/alerts/runtime-alerts.yml"
 
 echo "── PM 指标漂移与禁用值监控 ──"
 contains "PM 配置外指标告警使用 whitelist miss" 'omc_pm_whitelist_miss_values_total' "$OMC_ALERTS"

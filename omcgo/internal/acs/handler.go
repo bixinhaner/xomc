@@ -446,6 +446,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	// 准入控制 —— 全局 Redis 槽位，持有直到会话完成（completeSession）或 TTL 自愈回收。
 	// 在孤儿清理之前申请：若全局已满直接拒绝，不动设备会话指针，避免误清理后又被拒。
 	if !h.admission.Acquire(r.Context(), sessionID) {
+		h.metrics.AdmissionRejected.Inc()
 		log.Warn("admission denied", zap.String("device_sn", deviceSN))
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return

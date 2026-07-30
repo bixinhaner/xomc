@@ -135,6 +135,10 @@ func TestUECountPolicy_ProcessCreatesDirectGPVForSupportedPaths(t *testing.T) {
 	assert.Equal(t, "GetParameterValues", req.Method)
 	assert.Equal(t, task.TaskSourceSystem, req.Source)
 	assert.Equal(t, ueCountGPVDescription, req.Description)
+	require.NotNil(t, req.MaxRetries)
+	assert.Equal(t, 10, *req.MaxRetries)
+	assert.Equal(t, 30, req.RetryIntervalSeconds)
+	assert.Equal(t, 12*60, req.ExpiresIn)
 
 	var params GPVParams
 	require.NoError(t, json.Unmarshal(req.Params, &params))
