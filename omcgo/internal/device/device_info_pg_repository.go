@@ -60,6 +60,35 @@ func NewPgDeviceInfoRepository(pool *pgxpool.Pool) *PgDeviceInfoRepository {
 	return &PgDeviceInfoRepository{pool: pool}
 }
 
+func (r *PgDeviceInfoRepository) GetStringFieldLimits(ctx context.Context) (map[string]int, error) {
+	const query = `
+SELECT column_name, character_maximum_length
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'device_info'
+  AND character_maximum_length IS NOT NULL`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query device_info string limits: %w", err)
+	}
+	defer rows.Close()
+
+	limits := make(map[string]int)
+	for rows.Next() {
+		var column string
+		var limit int
+		if err := rows.Scan(&column, &limit); err != nil {
+			return nil, fmt.Errorf("scan device_info string limit: %w", err)
+		}
+		limits[column] = limit
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device_info string limits: %w", err)
+	}
+	return limits, nil
+}
+
 func (r *PgDeviceInfoRepository) GetByDeviceID(ctx context.Context, deviceID uuid.UUID) (*DeviceInfo, error) {
 	query, args, err := storage.Psql.Select(deviceInfoColumns()...).
 		From("device_info").

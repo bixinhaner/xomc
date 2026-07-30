@@ -1289,7 +1289,7 @@ CREATE TABLE public.device_info (
     bandwidth numeric(8,2),
     transmit_power numeric(8,2),
     plmn character varying(40),
-    rf_status character varying(20),
+    rf_status character varying(64),
     cell_status character varying(20),
     mme_status character varying(20),
     sync_status character varying(32),
@@ -1440,7 +1440,7 @@ COMMENT ON COLUMN public.device_info.plmn IS '公共陆地移动网络号（MCC+
 -- Name: COLUMN device_info.rf_status; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_info.rf_status IS 'RF 状态聚合:on/off,多小区时可逗号分隔;由 InfoSyncer.CalcRFStatus 从参数派生。';
+COMMENT ON COLUMN public.device_info.rf_status IS 'RF 状态聚合:on/off,多小区时可逗号分隔;支持最多 9 个小区状态;由 InfoSyncer.CalcRFStatus 从参数派生。';
 
 
 --

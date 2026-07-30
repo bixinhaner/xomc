@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -31,6 +32,7 @@ func (testCarrier) SupportsMRType(model.MRType) bool                            
 
 type stubDeviceInfoRepo struct {
 	updateSyncFields func(ctx context.Context, deviceID uuid.UUID, fields map[string]interface{}) error
+	stringLimits     map[string]int
 }
 
 func (s stubDeviceInfoRepo) GetByDeviceID(context.Context, uuid.UUID) (*DeviceInfo, error) {
@@ -48,6 +50,13 @@ func (s stubDeviceInfoRepo) UpdateSyncFields(ctx context.Context, deviceID uuid.
 		return s.updateSyncFields(ctx, deviceID, fields)
 	}
 	return nil
+}
+
+func (s stubDeviceInfoRepo) GetStringFieldLimits(context.Context) (map[string]int, error) {
+	if s.stringLimits != nil {
+		return s.stringLimits, nil
+	}
+	return defaultDeviceInfoVarcharLimits, nil
 }
 
 func (s stubDeviceInfoRepo) GetTopologyAttributes(context.Context, uuid.UUID) (map[string]string, error) {
@@ -1106,6 +1115,24 @@ func TestEnforceDeviceInfoFieldSizeLimits_TrimsCSVInsteadOfFailingWholeSync(t *t
 	assert.Equal(t, "46068,46088,46066,46077,46055,46044", fields["plmn"], "PLMN CSV 应按 varchar(40) 边界保留完整条目")
 }
 
+func TestEnforceDeviceInfoFieldSizeLimits_UsesSchemaAndDropsUnsafeScalar(t *testing.T) {
+	fields := map[string]interface{}{
+		"rf_status":        "off,off,off,off,off,off,on,on,on",
+		"hardware_version": "BM_2.1.3_1.8G_freq_20260604_103928",
+		"mac":              "52:af:00:7c:92:6d",
+	}
+
+	enforceDeviceInfoFieldSizeLimitsWithSchema(fields, map[string]int{
+		"rf_status":        64,
+		"hardware_version": 16,
+		"mac":              64,
+	}, zap.NewNop(), uuid.New())
+
+	assert.Equal(t, "off,off,off,off,off,off,on,on,on", fields["rf_status"], "9 个小区 RF 状态应能完整保存")
+	assert.Equal(t, "52:af:00:7c:92:6d", fields["mac"], "合法字段不能被超长字段拖累")
+	assert.NotContains(t, fields, "hardware_version", "普通字符串超长时跳过更新，避免截断成坏数据")
+}
+
 func TestInfoSyncer_SyncFromParameters_OverlongIpsecCSVDoesNotAbortOtherFields(t *testing.T) {
 	deviceID := uuid.New()
 	params := []model.DeviceParameter{
@@ -1128,6 +1155,40 @@ func TestInfoSyncer_SyncFromParameters_OverlongIpsecCSVDoesNotAbortOtherFields(t
 	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
 	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "")
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_NineCellRFStatusDoesNotAbortMAC(t *testing.T) {
+	deviceID := uuid.New()
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Ethernet.Interface.MACAddress", ParameterValue: "52:af:00:7c:92:6d"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells", ParameterValue: "9"},
+	}
+	for i := 1; i <= 9; i++ {
+		params = append(params, model.DeviceParameter{
+			ParameterPath:  "Device.Services.FAPService." + strconv.Itoa(i) + ".FAPControl.LTE.RFTxStatus",
+			ParameterValue: "0",
+		})
+	}
+
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	infoRepo := stubDeviceInfoRepo{
+		stringLimits: map[string]int{
+			"rf_status": 64,
+			"mac":       64,
+		},
+		updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+			assert.Equal(t, "52:af:00:7c:92:6d", fields["mac"])
+			assert.Equal(t, "off,off,off,off,off,off,off,off,off", fields["rf_status"])
+			return nil
+		},
+	}
+	paramRepo := stubDeviceParamRepo{params: params}
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "FAP/BU1810")
 	assert.NoError(t, err)
 }
 
