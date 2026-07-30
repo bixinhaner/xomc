@@ -159,6 +159,236 @@ func TestMatchDeviceHourRulesPreservesEmptySourceChunk(t *testing.T) {
 	require.Equal(t, 2, contributions[0].RollupChunkCount)
 }
 
+func TestMatchDeviceHourRulesDropsSourceObjectLDNForNetworkRollup(t *testing.T) {
+	deviceID := uuid.New()
+	version := pctRollupVersion(deviceID, DimensionNetwork, []TaskMember{
+		{DimensionKey: "network", DimensionName: "Network"},
+	})
+	start := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	payload := pctRollupPayload(deviceID, start)
+
+	contributions, err := matchDeviceHourRules(
+		payload, BuildTaskSnapshot([]*TaskVersionSnapshot{version}), time.UTC,
+	)
+
+	require.NoError(t, err)
+	requirePctRollupMetric(t, version, contributions, DimensionNetwork, "network", "")
+}
+
+func TestMatchDeviceHourRulesDropsSourceObjectLDNForDimensionRollups(t *testing.T) {
+	tests := []struct {
+		name         string
+		dimension    Dimension
+		dimensionKey string
+	}{
+		{
+			name:         "product",
+			dimension:    DimensionProduct,
+			dimensionKey: "Product=LTE",
+		},
+		{
+			name:         "device group",
+			dimension:    DimensionDeviceGroup,
+			dimensionKey: "DeviceGroup=A",
+		},
+		{
+			name:         "aggregate group",
+			dimension:    DimensionAggregateGroup,
+			dimensionKey: "AggregateGroup=North",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deviceID := uuid.New()
+			version := pctRollupVersion(deviceID, tt.dimension, []TaskMember{
+				{DimensionKey: tt.dimensionKey, DimensionName: tt.dimensionKey},
+			})
+			start := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+			payload := pctRollupPayload(deviceID, start)
+
+			contributions, err := matchDeviceHourRules(
+				payload, BuildTaskSnapshot([]*TaskVersionSnapshot{version}), time.UTC,
+			)
+
+			require.NoError(t, err)
+			requirePctRollupMetric(t, version, contributions, tt.dimension, tt.dimensionKey, "")
+		})
+	}
+}
+
+func TestMatchDeviceHourRulesCalculatesPctAfterBandRollup(t *testing.T) {
+	deviceID := uuid.New()
+	version := pctRollupVersion(deviceID, DimensionBand, []TaskMember{
+		{DimensionKey: "Band=3", DimensionName: "Band=3", ObjectLDN: "10497"},
+		{DimensionKey: "Band=3", DimensionName: "Band=3", ObjectLDN: "10498"},
+	})
+	start := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	payload := pctRollupPayload(deviceID, start)
+
+	contributions, err := matchDeviceHourRules(
+		payload, BuildTaskSnapshot([]*TaskVersionSnapshot{version}), time.UTC,
+	)
+
+	require.NoError(t, err)
+	requirePctRollupMetric(t, version, contributions, DimensionBand, "Band=3", "Band=3")
+}
+
+func TestMatchDeviceHourRulesCalculatesPctFromSummedDependencies(t *testing.T) {
+	deviceID := uuid.New()
+	version := pctRollupVersion(deviceID, DimensionNetwork, []TaskMember{
+		{DimensionKey: "network", DimensionName: "Network"},
+	})
+	start := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	payload := pctRollupPayload(deviceID, start)
+	for i := range payload.Values {
+		value := &payload.Values[i]
+		if value.MetricPath == "C_DEN" &&
+			value.ObjectLDN == "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.Cellid=10498" {
+			value.Sum = 300
+			value.Min = 300
+			value.Max = 300
+		}
+	}
+
+	contributions, err := matchDeviceHourRules(
+		payload, BuildTaskSnapshot([]*TaskVersionSnapshot{version}), time.UTC,
+	)
+
+	require.NoError(t, err)
+	requirePctRollupMetricValue(
+		t, version, contributions, DimensionNetwork, "network", "",
+		30.0/400.0,
+	)
+}
+
+func pctRollupVersion(
+	deviceID uuid.UUID,
+	dimension Dimension,
+	members []TaskMember,
+) *TaskVersionSnapshot {
+	for i := range members {
+		members[i].DeviceID = deviceID
+	}
+	return &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		Technology: "lte", Dimension: dimension,
+		EffectiveFrom: time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC),
+		Granularities: []Granularity{GranularityHourly},
+		Counters: map[string]CounterRule{
+			"C_NUM": {MetricPath: "C_NUM", Aggregation: AggregationSum},
+			"C_DEN": {MetricPath: "C_DEN", Aggregation: AggregationSum},
+		},
+		Metrics: map[string]MetricRule{
+			"K_AVAIL": {
+				MetricID: "K_AVAIL", MetricPath: "K_AVAIL", MetricType: "kpi",
+				Aggregation: AggregationFormula, Formula: "C_NUM/C_DEN",
+				Dependencies: []string{"C_NUM", "C_DEN"},
+			},
+		},
+		Members: map[uuid.UUID][]TaskMember{
+			deviceID: members,
+		},
+	}
+}
+
+func pctRollupPayload(deviceID uuid.UUID, start time.Time) RollupPayload {
+	return RollupPayload{
+		SchemaVersion: SchemaVersion, EventID: uuid.New(), TaskID: uuid.New(),
+		TaskVersionID: uuid.New(), SourceGranularity: GranularityHourly,
+		EntityKey: deviceID.String(), WindowStart: start, WindowEnd: start.Add(time.Hour),
+		SourceExpectedSlots: 4, SourceReceivedSlots: 4, Complete: true,
+		ChunkCount: 1,
+		Values: []ContributionValue{
+			{
+				Dimension: DimensionDevice, DimensionKey: deviceID.String(),
+				ObjectLDN:  "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.Cellid=10497",
+				Technology: "lte",
+				MetricPath: "C_NUM", MetricType: "counter", Operation: AggregationSum,
+				Sum: 10, Count: 1, Min: 10, Max: 10, Composed: true,
+			},
+			{
+				Dimension: DimensionDevice, DimensionKey: deviceID.String(),
+				ObjectLDN:  "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.Cellid=10497",
+				Technology: "lte",
+				MetricPath: "C_DEN", MetricType: "counter", Operation: AggregationSum,
+				Sum: 100, Count: 1, Min: 100, Max: 100, Composed: true,
+			},
+			{
+				Dimension: DimensionDevice, DimensionKey: deviceID.String(),
+				ObjectLDN:  "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.Cellid=10498",
+				Technology: "lte",
+				MetricPath: "C_NUM", MetricType: "counter", Operation: AggregationSum,
+				Sum: 20, Count: 1, Min: 20, Max: 20, Composed: true,
+			},
+			{
+				Dimension: DimensionDevice, DimensionKey: deviceID.String(),
+				ObjectLDN:  "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.Cellid=10498",
+				Technology: "lte",
+				MetricPath: "C_DEN", MetricType: "counter", Operation: AggregationSum,
+				Sum: 100, Count: 1, Min: 100, Max: 100, Composed: true,
+			},
+		},
+	}
+}
+
+func requirePctRollupMetric(
+	t *testing.T,
+	version *TaskVersionSnapshot,
+	contributions []Contribution,
+	expectedDimension Dimension,
+	expectedDimensionKey string,
+	expectedObjectLDN string,
+) {
+	t.Helper()
+	requirePctRollupMetricValue(
+		t, version, contributions, expectedDimension, expectedDimensionKey, expectedObjectLDN,
+		30.0/200.0,
+	)
+}
+
+func requirePctRollupMetricValue(
+	t *testing.T,
+	version *TaskVersionSnapshot,
+	contributions []Contribution,
+	expectedDimension Dimension,
+	expectedDimensionKey string,
+	expectedObjectLDN string,
+	expectedValue float64,
+) {
+	t.Helper()
+	require.Len(t, contributions, 1)
+	require.Equal(t, expectedDimensionKey, contributions[0].Key.EntityKey)
+	require.Len(t, contributions[0].Values, 4)
+	accumulatorsByDefinitionID := make(map[string]*Accumulator)
+	for _, value := range contributions[0].Values {
+		require.Equal(t, expectedDimension, value.Dimension)
+		require.Equal(t, expectedDimensionKey, value.DimensionKey)
+		require.Equal(t, expectedObjectLDN, value.ObjectLDN)
+		id, err := accumulatorDefinitionID(value)
+		require.NoError(t, err)
+		accumulator := accumulatorsByDefinitionID[id]
+		if accumulator == nil {
+			accumulator = &Accumulator{Definition: value}
+			accumulatorsByDefinitionID[id] = accumulator
+		}
+		accumulator.Sum += value.Sum
+		accumulator.Count += value.Count
+	}
+	require.Len(t, accumulatorsByDefinitionID, 2, "pct dependencies should group by counter, not source object")
+
+	state := WindowState{Accumulators: make([]Accumulator, 0, len(accumulatorsByDefinitionID))}
+	for _, accumulator := range accumulatorsByDefinitionID {
+		state.Accumulators = append(state.Accumulators, *accumulator)
+	}
+	metrics, incomplete, err := buildFinalizedMetrics(version, state)
+	require.NoError(t, err)
+	require.False(t, incomplete)
+	require.Len(t, metrics, 1)
+	require.Equal(t, "K_AVAIL", metrics[0].MetricID)
+	require.InDelta(t, expectedValue, metrics[0].Value, 1e-12)
+}
+
 func TestMatchDeviceHourRulesMergesSameDimensionMembersPerSourceChunk(t *testing.T) {
 	deviceID := uuid.New()
 	version := &TaskVersionSnapshot{
@@ -200,6 +430,7 @@ func TestMatchDeviceHourRulesMergesSameDimensionMembersPerSourceChunk(t *testing
 	require.Equal(t, "Band=3", contributions[0].Key.EntityKey)
 	require.Len(t, contributions[0].Values, 1)
 	require.Equal(t, "C1", contributions[0].Values[0].MetricPath)
+	require.Equal(t, "Band=3", contributions[0].Values[0].ObjectLDN)
 	require.EqualValues(t, 1, contributions[0].ExpectedSlots)
 }
 

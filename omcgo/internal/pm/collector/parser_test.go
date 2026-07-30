@@ -345,6 +345,68 @@ func TestPMXMLParser_StatisDurationDedupAcrossMeasInfo(t *testing.T) {
 	assert.Equal(t, 1, count, "同小区同采集窗口跨多 measInfo 只注入一条统计时长")
 }
 
+func TestPMXMLParser_StatisDurationSkipsPLMNSubObjects(t *testing.T) {
+	const xmlWithPLMN = `<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile>
+  <fileHeader dnPrefix="DC=cmcc"/>
+  <measData>
+    <managedElement localDn="MeContext=eNB001"/>
+    <measInfo measInfoId="Service">
+      <granPeriod duration="PT900S" endTime="2026-03-06T15:00:00+08:00"/>
+      <measType p="1">OTHER.CellServiceTime</measType>
+      <measValue measObjLdn="Cellid=10497">
+        <r p="1">900</r>
+      </measValue>
+      <measValue measObjLdn="Cellid=10497,PLMN=46068">
+        <r p="1">900</r>
+      </measValue>
+    </measInfo>
+  </measData>
+</measCollecFile>`
+
+	parser := NewPMXMLParser()
+	result, err := parser.Parse(strings.NewReader(xmlWithPLMN), uuid.New())
+	require.NoError(t, err)
+
+	statisByCell := make(map[string]int)
+	realCounterByCell := make(map[string]int)
+	for _, c := range result.Counters {
+		if c.CounterName == StatisDurationReportKey {
+			statisByCell[c.CellID]++
+			continue
+		}
+		realCounterByCell[c.CellID]++
+	}
+	require.Equal(t, map[string]int{"Cellid=10497": 1}, statisByCell)
+	require.Equal(t, map[string]int{
+		"Cellid=10497":            1,
+		"Cellid=10497,PLMN=46068": 1,
+	}, realCounterByCell)
+}
+
+func TestIsBaseCellObjectLDN(t *testing.T) {
+	tests := []struct {
+		name string
+		ldn  string
+		want bool
+	}{
+		{name: "lte base cell", ldn: "Cellid=10497", want: true},
+		{name: "lte plmn child", ldn: "Cellid=10497,PLMN=46068", want: false},
+		{name: "nr cu cell", ldn: "Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,CUID=1", want: true},
+		{name: "nr plmn child", ldn: "Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,CUID=1,PLMNID=00101", want: false},
+		{name: "nr slice child", ldn: "Type=Cell,Mode=SA,gNBID=350251605,NrCGI=15153,CUID=1,NSSAI=1/2/3", want: false},
+		{name: "gsm cell", ldn: "Uid=4002-1", want: true},
+		{name: "unknown single object keeps legacy injection", ldn: "SomeObj=value", want: true},
+		{name: "unknown child object skips injection", ldn: "SomeObj=value,Child=1", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isBaseCellObjectLDN(tt.ldn))
+		})
+	}
+}
+
 func TestExtractDeviceSN(t *testing.T) {
 	tests := []struct {
 		localDn string
@@ -391,8 +453,6 @@ func TestExtractCellID(t *testing.T) {
 		})
 	}
 }
-
-
 
 func TestParseDuration(t *testing.T) {
 	tests := []struct {

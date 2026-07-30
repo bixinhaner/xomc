@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
 // parseReadBufferSize 是包在传入 io.Reader 外的 bufio 缓冲上限（64 KiB）。
@@ -236,13 +237,15 @@ func (p *PMXMLParser) Parse(r io.Reader, deviceID uuid.UUID) (*PMFileContent, er
 				// ISSUE-389 阶段2：登记该（小区, 采集窗口）需注入一条「统计时长」。
 				// granSeconds 取本 measInfo granPeriod/@duration 的真实秒数（PT900S→900），
 				// 非写死；同一 key 已登记则跳过（首个 measInfo 的 group 胜出，去重防多块重复注入）。
-				sdKey := statisDurKey{cellID: cellID, endTS: mi.GranPeriod.EndTime, gran: content.Granularity}
-				if _, exists := statisDurSeen[sdKey]; !exists {
-					statisDurSeen[sdKey] = statisDurInfo{
-						collectTime: collectTime,
-						seconds:     granSeconds,
-						granMinutes: content.Granularity,
-						group:       counterGroup,
+				if isBaseCellObjectLDN(cellID) {
+					sdKey := statisDurKey{cellID: cellID, endTS: mi.GranPeriod.EndTime, gran: content.Granularity}
+					if _, exists := statisDurSeen[sdKey]; !exists {
+						statisDurSeen[sdKey] = statisDurInfo{
+							collectTime: collectTime,
+							seconds:     granSeconds,
+							granMinutes: content.Granularity,
+							group:       counterGroup,
+						}
 					}
 				}
 
@@ -334,6 +337,25 @@ func extractDeviceSN(localDn string) string {
 // 需要裸小区号的场景（频段映射等）应在读取时调用 ParseObjectLDN().BaseCellID()。
 func extractCellID(measObjLdn string) string {
 	return measObjLdn
+}
+
+func isBaseCellObjectLDN(measObjLdn string) bool {
+	trimmed := strings.TrimSpace(measObjLdn)
+	if trimmed == "" {
+		return false
+	}
+	fields := metrics.ParseObjectLDN(trimmed)
+	switch fields.Tech {
+	case metrics.TechLTE:
+		return fields.CellID != "" && fields.Plmn == ""
+	case metrics.TechNR:
+		return fields.BaseCellID() != "" &&
+			fields.PLMNID == "" && fields.NSSAI == "" && fields.SliceGroup == ""
+	case metrics.TechGSM:
+		return fields.BaseCellID() != ""
+	default:
+		return !strings.Contains(trimmed, ",") && strings.Contains(trimmed, "=")
+	}
 }
 
 // parseDuration parses an ISO 8601 duration like "PT900S" to seconds.
