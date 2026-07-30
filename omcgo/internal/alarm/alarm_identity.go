@@ -39,6 +39,9 @@ func stableManagedObjectInstance(value string) string {
 		"Device.FaultMgmt.CurrentAlarm.",
 		"Device.FaultMgmt.ExpeditedEvent.",
 		"Device.FaultMgmt.HistoryEvent.",
+		"InternetGatewayDevice.FaultMgmt.CurrentAlarm.",
+		"InternetGatewayDevice.FaultMgmt.ExpeditedEvent.",
+		"InternetGatewayDevice.FaultMgmt.HistoryEvent.",
 	} {
 		if strings.HasPrefix(value, prefix) {
 			return ""

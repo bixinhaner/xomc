@@ -270,7 +270,7 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 			result.FailedClear++
 			continue
 		}
-		clearedBy := "system"
+		clearedBy := "system:alarm_sync_duplicate"
 		clearNote := "duplicate active alarm reconciled by full sync"
 		alarm.ClearedBy = &clearedBy
 		alarm.ClearNote = &clearNote

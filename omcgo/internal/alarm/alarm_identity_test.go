@@ -48,6 +48,28 @@ func TestActiveAlarmMatchKey_IgnoresCurrentAlarmTableIndex(t *testing.T) {
 	)
 }
 
+func TestActiveAlarmMatchKey_IgnoresIGDFaultManagementChannelMOI(t *testing.T) {
+	makeAlarm := func(moi string) *model.Alarm {
+		return &model.Alarm{
+			AlarmIdentifier: "11109",
+			AdditionalInfo: map[string]string{
+				"managed_object_instance": moi,
+				"additional_text":         "LTE0",
+				"additional_information":  "LTE0(73828545);S1setup fail",
+			},
+		}
+	}
+
+	expected := activeAlarmMatchKey(makeAlarm("Device.FaultMgmt.CurrentAlarm.3."))
+	for _, moi := range []string{
+		"InternetGatewayDevice.FaultMgmt.CurrentAlarm.3.",
+		"InternetGatewayDevice.FaultMgmt.ExpeditedEvent.",
+		"InternetGatewayDevice.FaultMgmt.HistoryEvent.4.",
+	} {
+		assert.Equal(t, expected, activeAlarmMatchKey(makeAlarm(moi)), moi)
+	}
+}
+
 func TestActiveAlarmMatchKey_PreservesRealManagedObjectInstance(t *testing.T) {
 	makeAlarm := func(moi string) *model.Alarm {
 		return &model.Alarm{

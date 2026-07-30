@@ -211,7 +211,7 @@ func TestToModel(t *testing.T) {
 	assert.Equal(t, "slot=1", alarm.AdditionalInfo["additional_information"])
 	assert.Equal(t, "Critical temperature alert", alarm.AdditionalInfo["additional_text"])
 	assert.Equal(t, "Device.Radio.1", alarm.AdditionalInfo["managed_object_instance"])
-	assert.True(t, alarm.RaisedAt.IsZero())
+	assert.Equal(t, raisedTime, alarm.RaisedAt)
 	assert.True(t, alarm.LastUpdatedAt.IsZero())
 }
 

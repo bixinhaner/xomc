@@ -105,10 +105,33 @@ func TestProcessSyncReconcilesIssue227SixActiveAlarmsToTwo(t *testing.T) {
 		archived := historyByID[duplicate.ID]
 		require.NotNil(t, archived)
 		require.NotNil(t, archived.ClearedBy)
-		assert.Equal(t, "system", *archived.ClearedBy)
+		assert.Equal(t, "system:alarm_sync_duplicate", *archived.ClearedBy)
 		require.NotNil(t, archived.ClearNote)
 		assert.Equal(t, "duplicate active alarm reconciled by full sync", *archived.ClearNote)
 	}
+}
+
+func TestProcessSyncUsesRemoteRaisedTimeToSelectDuplicateKeeper(t *testing.T) {
+	const deviceSN = "SN-SYNC-REMOTE-TIME"
+	ctx := context.Background()
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	processor := NewAlarmSyncProcessor(engine, store, nil, nil, zap.NewNop())
+	deviceID := uuid.New()
+	remoteRaisedAt := time.Date(2026, 7, 30, 16, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
+	closerOlder := issue227LocalAlarm(deviceID, deviceSN, "11109", "S1 Setup failure", model.AlarmMajor, remoteRaisedAt.Add(-time.Second))
+	newerButFarther := issue227LocalAlarm(deviceID, deviceSN, "11109", "S1 Setup failure", model.AlarmMajor, remoteRaisedAt.Add(30*time.Minute))
+	require.NoError(t, store.SaveActive(ctx, closerOlder))
+	require.NoError(t, store.SaveActive(ctx, newerButFarther))
+	params := issue227CurrentAlarmParams()[:8]
+	params[1].Value = remoteRaisedAt.Format(time.RFC3339)
+
+	result := processor.processSync(ctx, deviceSN, params)
+
+	require.Equal(t, 1, result.Cleared)
+	require.Len(t, store.active, 1)
+	assert.Contains(t, store.active, closerOlder.ID)
+	assert.NotContains(t, store.active, newerButFarther.ID)
 }
 
 func TestProcessSyncRestoresKeeperRedisKeyAfterDuplicateClear(t *testing.T) {
