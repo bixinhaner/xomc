@@ -8,7 +8,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/carrier"
@@ -181,7 +183,7 @@ var compiledInstanceAggregationRules []instanceAggregationRule
 // `\{x\}`），运行时替换为 `(\d+)` 形成捕获组。
 var instancePlaceholderRegex = regexp.MustCompile(`\\\{[a-zA-Z_]\\\}`)
 
-var deviceInfoVarcharLimits = map[string]int{
+var defaultDeviceInfoVarcharLimits = map[string]int{
 	"admin_state": 16,
 	"band":        16,
 	"cell_id":     64,
@@ -191,8 +193,13 @@ var deviceInfoVarcharLimits = map[string]int{
 	"lock_status": 16,
 	"pci":         64,
 	"plmn":        40,
+	"rf_status":   64,
 	"tac":         16,
 	"ul_earfcn":   32,
+}
+
+type deviceInfoStringLimitReader interface {
+	GetStringFieldLimits(ctx context.Context) (map[string]int, error)
 }
 
 func init() {
@@ -281,7 +288,7 @@ func aggregateInstanceFields(paramValues map[string]string, fields map[string]in
 }
 
 func fitCSVWithinLimit(value string, maxLen int) string {
-	if len(value) <= maxLen {
+	if utf8.RuneCountInString(value) <= maxLen {
 		return value
 	}
 
@@ -293,7 +300,7 @@ func fitCSVWithinLimit(value string, maxLen int) string {
 		if part == "" {
 			continue
 		}
-		nextLen := currentLen + len(part)
+		nextLen := currentLen + utf8.RuneCountInString(part)
 		if len(kept) > 0 {
 			nextLen++
 		}
@@ -307,19 +314,92 @@ func fitCSVWithinLimit(value string, maxLen int) string {
 }
 
 func enforceDeviceInfoFieldSizeLimits(fields map[string]interface{}) {
-	for column, maxLen := range deviceInfoVarcharLimits {
+	enforceDeviceInfoFieldSizeLimitsWithSchema(fields, defaultDeviceInfoVarcharLimits, nil, uuid.Nil)
+}
+
+func enforceDeviceInfoFieldSizeLimitsWithSchema(fields map[string]interface{}, limits map[string]int, logger *zap.Logger, deviceID uuid.UUID) {
+	for column, maxLen := range limits {
+		if maxLen <= 0 {
+			continue
+		}
 		value, ok := fields[column].(string)
-		if !ok || value == "" || len(value) <= maxLen {
+		if !ok || value == "" || utf8.RuneCountInString(value) <= maxLen {
 			continue
 		}
 
-		trimmed := fitCSVWithinLimit(value, maxLen)
-		if trimmed == "" {
-			delete(fields, column)
-			continue
+		if strings.Contains(value, ",") {
+			trimmed := fitCSVWithinLimit(value, maxLen)
+			if trimmed != "" {
+				fields[column] = trimmed
+				if logger != nil {
+					logger.Warn("trimmed overlong device_info CSV field before update",
+						zap.String("device_id", deviceID.String()),
+						zap.String("column", column),
+						zap.Int("max_chars", maxLen),
+						zap.String("value", value),
+						zap.String("trimmed", trimmed))
+				}
+				continue
+			}
 		}
-		fields[column] = trimmed
+
+		if logger != nil {
+			logger.Warn("dropped overlong device_info field before update",
+				zap.String("device_id", deviceID.String()),
+				zap.String("column", column),
+				zap.Int("max_chars", maxLen),
+				zap.String("value", value))
+		}
+		delete(fields, column)
 	}
+}
+
+func copyStringIntMap(in map[string]int) map[string]int {
+	out := make(map[string]int, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func mergeStringIntMaps(base, override map[string]int) map[string]int {
+	out := copyStringIntMap(base)
+	for k, v := range override {
+		if v > 0 {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func (s *InfoSyncer) deviceInfoStringLimits(ctx context.Context) map[string]int {
+	s.stringLimitsMu.Lock()
+	defer s.stringLimitsMu.Unlock()
+	if s.stringLimits != nil {
+		return s.stringLimits
+	}
+
+	limits := defaultDeviceInfoVarcharLimits
+	if reader, ok := s.infoRepo.(deviceInfoStringLimitReader); ok {
+		dbLimits, err := reader.GetStringFieldLimits(ctx)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("load device_info string field limits failed; using defaults", zap.Error(err))
+			}
+		} else if len(dbLimits) > 0 {
+			limits = mergeStringIntMaps(defaultDeviceInfoVarcharLimits, dbLimits)
+		}
+	}
+
+	s.stringLimits = copyStringIntMap(limits)
+	return s.stringLimits
+}
+
+func (s *InfoSyncer) enforceDeviceInfoFieldSizeLimits(ctx context.Context, deviceID uuid.UUID, fields map[string]interface{}) {
+	if len(fields) == 0 {
+		return
+	}
+	enforceDeviceInfoFieldSizeLimitsWithSchema(fields, s.deviceInfoStringLimits(ctx), s.logger, deviceID)
 }
 
 // universalInformMapping maps TR069 parameter paths to device_info columns
@@ -656,6 +736,8 @@ type InfoSyncer struct {
 	locationObservationRepo LocationObservationRepository
 	carrierRegistry         *carrier.CarrierRegistry
 	logger                  *zap.Logger
+	stringLimitsMu          sync.Mutex
+	stringLimits            map[string]int
 }
 
 // NewInfoSyncer creates a new InfoSyncer.
@@ -840,7 +922,7 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 			zap.String("technology", string(tech)),
 			zap.String("reason", frequencyProjection.reason))
 	}
-	enforceDeviceInfoFieldSizeLimits(fields)
+	s.enforceDeviceInfoFieldSizeLimits(ctx, deviceID, fields)
 
 	latitude, longitude, sourcePath, hasCoordinates := LookupGPSCoordinates(paramValues)
 
