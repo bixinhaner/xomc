@@ -145,6 +145,41 @@ func TestOldestDueQueryUsesDatabaseTimeAndIncludesActiveLeases(t *testing.T) {
 	}
 }
 
+func TestCountWatermarkBlockedGroupsSharedPeriodsBeforeQueueProbe(t *testing.T) {
+	now := time.Date(2026, 7, 31, 6, 30, 0, 0, time.UTC)
+	query, args, err := countWatermarkBlockedSelect(now, map[Granularity]time.Duration{
+		GranularityHourly:  12 * time.Minute,
+		GranularityDaily:   15 * time.Minute,
+		GranularityWeekly:  30 * time.Minute,
+		GranularityMonthly: 30 * time.Minute,
+	}, 5*time.Minute).ToSql()
+	if err != nil {
+		t.Fatalf("build count watermark-blocked SQL: %v", err)
+	}
+	for _, fragment := range []string{
+		"GROUP BY w.granularity, w.window_start, w.window_end",
+		"SUM(due_windows.window_count)",
+		"source_event.event_window_start >= due_windows.window_start",
+		"source_rollup.window_start >= due_windows.window_start",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("watermark-blocked SQL %q missing grouped-period fragment %q", query, fragment)
+		}
+	}
+	if strings.Contains(query, "source_event.event_window_start >= w.window_start") {
+		t.Fatalf("watermark-blocked SQL must not probe the queue once per window: %q", query)
+	}
+	for _, want := range []any{
+		now.Add(-12 * time.Minute),
+		now.Add(-15 * time.Minute),
+		now.Add(-30 * time.Minute),
+	} {
+		if !containsSQLArg(args, want) {
+			t.Fatalf("watermark-blocked args %v missing cutoff %v", args, want)
+		}
+	}
+}
+
 func TestClaimDueTwoScannersCannotClaimAnUnexpiredLease(t *testing.T) {
 	firstOwner := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	secondOwner := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")

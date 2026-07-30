@@ -812,6 +812,24 @@ func (r *WindowRepository) CountWatermarkBlocked(
 	graceByGranularity map[Granularity]time.Duration,
 	fallbackGrace time.Duration,
 ) (int64, error) {
+	query, args, err := countWatermarkBlockedSelect(
+		now, graceByGranularity, fallbackGrace,
+	).ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build count PM windows blocked by queue watermark: %w", err)
+	}
+	var count int64
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count PM windows blocked by queue watermark: %w", err)
+	}
+	return count, nil
+}
+
+func countWatermarkBlockedSelect(
+	now time.Time,
+	graceByGranularity map[Granularity]time.Duration,
+	fallbackGrace time.Duration,
+) sq.SelectBuilder {
 	due := sq.Or{}
 	for _, granularity := range []Granularity{
 		GranularityHourly, GranularityDaily, GranularityWeekly, GranularityMonthly,
@@ -825,45 +843,49 @@ func (r *WindowRepository) CountWatermarkBlocked(
 			sq.LtOrEq{"w.window_end": now.Add(-grace)},
 		})
 	}
-	query, args, err := storage.Psql.Select("COUNT(*)").
+	dueWindows := storage.Psql.
+		Select(
+			"w.granularity",
+			"w.window_start",
+			"w.window_end",
+			"COUNT(*) AS window_count",
+		).
 		From("pm_aggregation_windows w").
 		Where(sq.Eq{"w.status": []string{"open", "failed"}}).
 		Where(due).
-		Where(queueBarrierPendingPredicate()).
-		ToSql()
-	if err != nil {
-		return 0, fmt.Errorf("build count PM windows blocked by queue watermark: %w", err)
-	}
-	var count int64
-	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count PM windows blocked by queue watermark: %w", err)
-	}
-	return count, nil
+		GroupBy("w.granularity", "w.window_start", "w.window_end")
+
+	return storage.Psql.
+		Select("COALESCE(SUM(due_windows.window_count), 0)::bigint").
+		FromSelect(dueWindows, "due_windows").
+		Where(queueBarrierPendingForDueWindowsPredicate())
 }
 
-func queueBarrierPendingPredicate() sq.Sqlizer {
+func queueBarrierPendingForDueWindowsPredicate() sq.Sqlizer {
 	return sq.Expr(`
+(
 EXISTS (
     SELECT 1
     FROM pm_aggregation_outbox source_event
-    WHERE w.granularity = 'hourly'
+    WHERE due_windows.granularity = 'hourly'
       AND source_event.consumed_at IS NULL
       AND source_event.barrier_eligible
-      AND source_event.event_window_start >= w.window_start
-      AND source_event.event_window_start < w.window_end
+      AND source_event.event_window_start >= due_windows.window_start
+      AND source_event.event_window_start < due_windows.window_end
 )
 OR EXISTS (
     SELECT 1
     FROM pm_aggregation_rollup_outbox source_rollup
     WHERE source_rollup.consumed_at IS NULL
       AND source_rollup.barrier_eligible
-      AND source_rollup.window_start >= w.window_start
-      AND source_rollup.window_start < w.window_end
+      AND source_rollup.window_start >= due_windows.window_start
+      AND source_rollup.window_start < due_windows.window_end
       AND (
-          (w.granularity = 'daily' AND source_rollup.subject = ?)
+          (due_windows.granularity = 'daily' AND source_rollup.subject = ?)
           OR
-          (w.granularity IN ('weekly', 'monthly') AND source_rollup.subject = ?)
+          (due_windows.granularity IN ('weekly', 'monthly') AND source_rollup.subject = ?)
       )
+)
 )`,
 		"pmaggregation.hourly.rollup",
 		"pmaggregation.daily.rollup",
