@@ -229,6 +229,7 @@ contains "overview dashboard 展示 disabled" 'omc_pm_known_disabled_values_tota
 
 echo "── PM 聚合关闭、Redis 与资源漂移监控 ──"
 contains "终结领取索引覆盖稳定排序键" 'granularity, window_end, task_version_id, entity_key, window_start' "$TSDB_BASELINE"
+contains "小时层级水位索引覆盖上游窗口" 'granularity, window_start, task_version_id' "$TSDB_BASELINE"
 contains "资源计划漂移告警" 'alert: OMCResourcePlanDrift' "$HOST_ALERTS"
 contains "资源计划 cAdvisor 缺失 critical 告警" 'alert: OMCResourcePlanCAdvisorAbsent' "$HOST_ALERTS"
 contains "资源计划 CPU quota 序列缺失告警" 'alert: OMCResourcePlanCPUQuotaSeriesAbsent' "$HOST_ALERTS"

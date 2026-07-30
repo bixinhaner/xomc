@@ -218,6 +218,69 @@ func TestClaimDueVersionFilterUsesOneArrayArgument(t *testing.T) {
 	}
 }
 
+func TestClaimDueHourlyRuleWaitsForDeviceWindowsAndRollupConsumption(t *testing.T) {
+	deviceVersionIDs := []uuid.UUID{
+		uuid.MustParse("11111111-1111-4111-8111-111111111111"),
+		uuid.MustParse("22222222-2222-4222-8222-222222222222"),
+	}
+	query, args, err := claimDueUpdate(
+		GranularityHourly,
+		time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC),
+		32,
+		uuid.New(),
+		time.Minute,
+		claimVersionFilter{versionIDs: deviceVersionIDs, exclude: true},
+		claimOldestFirst,
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build hourly rule claim: %v", err)
+	}
+	for _, fragment := range []string{
+		"source_window.task_version_id = ANY($",
+		"source_window.window_start = w.window_start",
+		"source_window.status IN ('open', 'failed', 'finalizing', 'rebuilding')",
+		"source_rollup.subject = $",
+		"source_rollup.window_start = w.window_start",
+		"source_rollup.consumed_at IS NULL",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("hourly rule claim SQL %q missing hierarchy barrier %q", query, fragment)
+		}
+	}
+	for _, want := range []any{"pmaggregation.hourly.rollup"} {
+		if !containsSQLArg(args, want) {
+			t.Fatalf("hourly rule claim args %v missing %v", args, want)
+		}
+	}
+}
+
+func TestClaimDueHourlyDeviceDoesNotWaitForItsOwnFutureRollup(t *testing.T) {
+	query, _, err := claimDueUpdate(
+		GranularityHourly,
+		time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC),
+		32,
+		uuid.New(),
+		time.Minute,
+		claimVersionFilter{
+			versionIDs: []uuid.UUID{
+				uuid.MustParse("11111111-1111-4111-8111-111111111111"),
+			},
+		},
+		claimOldestFirst,
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build hourly device claim: %v", err)
+	}
+	for _, forbidden := range []string{
+		"source_window.task_version_id",
+		"source_rollup.window_start = w.window_start",
+	} {
+		if strings.Contains(query, forbidden) {
+			t.Fatalf("hourly device claim SQL %q must not self-block on %q", query, forbidden)
+		}
+	}
+}
+
 func TestClaimDueConflictUsesOnlyUnexpiredDatabaseTimeLeases(t *testing.T) {
 	dueBefore := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
 	query, args, err := claimConflictSelect(

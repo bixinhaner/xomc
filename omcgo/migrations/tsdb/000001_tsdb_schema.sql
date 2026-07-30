@@ -1455,6 +1455,13 @@ CREATE INDEX idx_pm_windows_due_claim_order
     INCLUDE (finalize_next_attempt_at, finalize_lease_until)
     WHERE status IN ('open', 'failed');
 
+-- Hourly rule windows must not close before their device-hour source windows
+-- have published every durable rollup. This partial index keeps that
+-- correlated hierarchy watermark bounded while the 20k-device hour drains.
+CREATE INDEX idx_pm_windows_hourly_source_barrier
+    ON public.pm_aggregation_windows (granularity, window_start, task_version_id)
+    WHERE status IN ('open', 'failed', 'finalizing', 'rebuilding');
+
 CREATE INDEX idx_pm_windows_version_audit
     ON public.pm_aggregation_windows (
         task_version_id, version_audit_fingerprint,
