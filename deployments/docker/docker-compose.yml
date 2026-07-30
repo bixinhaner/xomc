@@ -216,7 +216,10 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:latest
+    # Pin the image because the dashboard uses the MinIO metrics-v2 names;
+    # metrics-v3 renames the capacity series. Upgrade only with a metrics
+    # compatibility check and an explicit IMAGE_MINIO override in release.
+    image: ${IMAGE_MINIO:-minio/minio:RELEASE.2024-06-13T22-53-53Z}
     environment:
       TZ: "Asia/Shanghai"
       MINIO_ROOT_USER: minioadmin
@@ -877,10 +880,16 @@ services:
   cadvisor:
     # gcr.io 不受 daemon.json registry-mirrors（仅代理 docker.io）覆盖；国内拉取超时时
     # 用 IMAGE_CADVISOR 覆盖为可达镜像（与 release bundle 同 IMAGE_CADVISOR 变量），如：
-    #   export IMAGE_CADVISOR=gcr.m.daocloud.io/cadvisor/cadvisor:v0.49.1
-    #   或       gcr.nju.edu.cn/cadvisor/cadvisor:v0.49.1
-    image: ${IMAGE_CADVISOR:-gcr.io/cadvisor/cadvisor:v0.49.1}
+    #   export IMAGE_CADVISOR=gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1
+    #   或       gcr.nju.edu.cn/cadvisor/cadvisor:v0.55.1
+    image: ${IMAGE_CADVISOR:-gcr.io/cadvisor/cadvisor:v0.55.1}
     restart: unless-stopped
+    # Export only the bounded Compose service label. cAdvisor defaults to
+    # omitting container labels, which leaves Prometheus with service=cadvisor
+    # (the scrape target label) and makes service-level CPU panels empty.
+    command:
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.service
     privileged: true
     devices:
       - /dev/kmsg

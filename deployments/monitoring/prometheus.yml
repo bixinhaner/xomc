@@ -105,6 +105,9 @@ scrape_configs:
           - "node-exporter:9100"
         labels:
           service: "node"
+    # Logical data-volume identity is maintained in storage-targets.yml. Do
+    # not add target labels here: node-exporter already owns mountpoint/device
+    # labels and missing mappings must remain visible as no-data, not zero.
 
   # ── 容器资源（cAdvisor：各容器 CPU / 内存 / 网络 / 磁盘）──────────────
   - job_name: "cadvisor"
@@ -113,3 +116,14 @@ scrape_configs:
           - "cadvisor:8080"
         labels:
           service: "cadvisor"
+    # cAdvisor 暴露的是 cgroup `id` 与 Docker Compose 原始标签；复制为
+    # 稳定查询口径，不删除原始标签，便于过渡期排障和兼容旧序列。
+    metric_relabel_configs:
+      - source_labels: [id]
+        regex: "(.+)"
+        target_label: container_id
+        replacement: "$1"
+      - source_labels: [container_label_com_docker_compose_service]
+        regex: "(.+)"
+        target_label: service
+        replacement: "$1"

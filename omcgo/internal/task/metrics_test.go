@@ -69,3 +69,80 @@ func TestTaskMetrics_LifecycleObservability(t *testing.T) {
 	assert.Equal(t, float64(1),
 		testutil.ToFloat64(m.RecoveryActionTotal.WithLabelValues(RecoveryActionReconcileRepair)))
 }
+
+func TestTaskMetrics_ContractUsesOnlyLowCardinalityLabels(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewTaskMetrics(reg)
+
+	m.CompletedTotal.WithLabelValues("mml", "completed").Inc()
+	m.DurationSeconds.WithLabelValues("mml").Observe(1)
+	m.NoHandlerTotal.WithLabelValues("unknown-source").Inc()
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		for _, metric := range family.Metric {
+			for _, label := range metric.Label {
+				assert.NotContains(t, label.GetName(), "device_sn")
+				assert.NotContains(t, label.GetName(), "redis_key")
+				assert.NotContains(t, label.GetName(), "object_path")
+				assert.NotContains(t, label.GetValue(), "device-sn-001")
+				assert.NotContains(t, label.GetValue(), "redis:acs:taskq:")
+			}
+		}
+	}
+}
+
+func TestTaskMetrics_PersistentQueueMetricContract(t *testing.T) {
+	assert.Equal(t, []string{
+		"device_tasks",
+		"async_jobs",
+		"parameter_sync_outbox",
+		"northbound_outbox",
+		"pm_kpi_export",
+		"trace_export",
+		"backup_tasks",
+		"dead_letters",
+	}, PersistentQueueNames())
+	assert.Equal(t, "pending", PersistentQueueMetricPending)
+	assert.Equal(t, "oldest_age_seconds", PersistentQueueMetricOldestAgeSeconds)
+	assert.Equal(t, "failed_total", PersistentQueueMetricFailedTotal)
+	assert.Equal(t, "dead_letter_total", PersistentQueueMetricDeadLetterTotal)
+	assert.Equal(t, "processed_total", PersistentQueueMetricProcessedTotal)
+	assert.Equal(t, "observer_failures_total", PersistentQueueMetricObserverFailuresTotal)
+	assert.Equal(t, []string{"pending", "sent", "running", "succeeded", "failed", "dead_letter"}, PersistentQueueStatuses())
+}
+
+func TestPersistentQueueLabelsRejectUnregisteredValues(t *testing.T) {
+	for name, values := range map[string][3]string{
+		"queue":  {"device-sn-001", "pending", ""},
+		"status": {"device_tasks", "redis-key:abc", ""},
+		"result": {"device_tasks", "succeeded", "/object/path/file"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewPersistentQueueLabels(values[0], values[1], values[2])
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestPersistentQueueLabelsExposeOnlyValidatedValues(t *testing.T) {
+	labels, err := NewPersistentQueueLabels("device_tasks", "pending", "")
+	require.NoError(t, err)
+	assert.Equal(t, [3]string{"device_tasks", "pending", ""}, labels.Values())
+
+	names := PersistentQueueNames()
+	names[0] = "device-sn-001"
+	assert.Equal(t, "device_tasks", PersistentQueueNames()[0], "queue registry must not be externally mutable")
+}
+
+func TestPersistentQueueLabelsOnlyProduceValidatedMetricValues(t *testing.T) {
+	labels, err := NewPersistentQueueLabels("device_tasks", "failed", "failed")
+	require.NoError(t, err)
+	values, err := labels.LabelValues()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"device_tasks", "failed", "failed"}, values)
+
+	_, err = (PersistentQueueLabels{}).LabelValues()
+	require.Error(t, err)
+}

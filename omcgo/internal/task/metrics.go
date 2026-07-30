@@ -1,6 +1,135 @@
 package task
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"fmt"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+// PersistentQueueName constants are the bounded queue dimension for the
+// unified persistent-queue metrics. Values must be registered queue names,
+// never a device identity, complete Redis key, object path, or database row ID.
+const (
+	PersistentQueueDeviceTasks         = "device_tasks"
+	PersistentQueueAsyncJobs           = "async_jobs"
+	PersistentQueueParameterSyncOutbox = "parameter_sync_outbox"
+	PersistentQueueNorthboundOutbox    = "northbound_outbox"
+	PersistentQueuePMKPIExport         = "pm_kpi_export"
+	PersistentQueueTraceExport         = "trace_export"
+	PersistentQueueBackupTasks         = "backup_tasks"
+	PersistentQueueDeadLetters         = "dead_letters"
+	PersistentQueueStatusPending       = "pending"
+	PersistentQueueStatusSent          = "sent"
+	PersistentQueueStatusRunning       = "running"
+	PersistentQueueStatusSucceeded     = "succeeded"
+	PersistentQueueStatusFailed        = "failed"
+	PersistentQueueStatusDeadLetter    = "dead_letter"
+	PersistentQueueResultSucceeded     = "succeeded"
+	PersistentQueueResultFailed        = "failed"
+)
+
+// PersistentQueueNames returns a fresh copy so callers cannot mutate the
+// registry used by future metric constructors.
+func PersistentQueueNames() []string {
+	return []string{
+		PersistentQueueDeviceTasks,
+		PersistentQueueAsyncJobs,
+		PersistentQueueParameterSyncOutbox,
+		PersistentQueueNorthboundOutbox,
+		PersistentQueuePMKPIExport,
+		PersistentQueueTraceExport,
+		PersistentQueueBackupTasks,
+		PersistentQueueDeadLetters,
+	}
+}
+
+// Persistent queue metric suffixes are shared by PM, task, and storage-backed
+// queue observers. Units are encoded in the suffix where applicable.
+const (
+	PersistentQueueMetricPending               = "pending"
+	PersistentQueueMetricOldestAgeSeconds      = "oldest_age_seconds"
+	PersistentQueueMetricFailedTotal           = "failed_total"
+	PersistentQueueMetricDeadLetterTotal       = "dead_letter_total"
+	PersistentQueueMetricProcessedTotal        = "processed_total"
+	PersistentQueueMetricObserverFailuresTotal = "observer_failures_total"
+)
+
+// PersistentQueueStatuses returns a fresh copy of the only status vocabulary
+// for queue snapshots. Empty queues are represented by pending=0; observer
+// failures retain the previous value and increment observer_failures_total.
+func PersistentQueueStatuses() []string {
+	return []string{
+		PersistentQueueStatusPending,
+		PersistentQueueStatusSent,
+		PersistentQueueStatusRunning,
+		PersistentQueueStatusSucceeded,
+		PersistentQueueStatusFailed,
+		PersistentQueueStatusDeadLetter,
+	}
+}
+
+// Persistent queue labels are deliberately bounded. Do not add device_sn,
+// redis_key, object_path, row ID, or other per-item dimensions.
+const (
+	PersistentQueueLabelQueue  = "queue"
+	PersistentQueueLabelStatus = "status"
+	PersistentQueueLabelResult = "result"
+)
+
+// PersistentQueueLabels contains only validated bounded label values. New
+// persistent-queue metric constructors should obtain labels through
+// NewPersistentQueueLabels rather than accepting arbitrary strings.
+type PersistentQueueLabels struct {
+	queue  string
+	status string
+	result string
+}
+
+// NewPersistentQueueLabels rejects unregistered queue, status, and result
+// values before they can become Prometheus label values. result may be empty
+// for metrics that do not use the result dimension.
+func NewPersistentQueueLabels(queue, status, result string) (PersistentQueueLabels, error) {
+	if !isPersistentQueueValue(queue, PersistentQueueNames()) {
+		return PersistentQueueLabels{}, fmt.Errorf("invalid persistent queue %q", queue)
+	}
+	if !isPersistentQueueValue(status, PersistentQueueStatuses()) {
+		return PersistentQueueLabels{}, fmt.Errorf("invalid persistent queue status %q", status)
+	}
+	if result != "" && result != PersistentQueueResultSucceeded && result != PersistentQueueResultFailed {
+		return PersistentQueueLabels{}, fmt.Errorf("invalid persistent queue result %q", result)
+	}
+	return PersistentQueueLabels{queue: queue, status: status, result: result}, nil
+}
+
+func isPersistentQueueValue(value string, registered []string) bool {
+	for _, candidate := range registered {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+// Values returns the validated queue, status, and optional result values in
+// the order used by the bounded label contract.
+func (l PersistentQueueLabels) Values() [3]string {
+	return [3]string{l.queue, l.status, l.result}
+}
+
+// LabelValues returns only values accepted by the persistent-queue label
+// contract, in queue/status/result order. The result label is omitted when it
+// is not used by the metric. Zero-value or otherwise invalid labels cannot be
+// passed to a Prometheus vector through this method.
+func (l PersistentQueueLabels) LabelValues() ([]string, error) {
+	if _, err := NewPersistentQueueLabels(l.queue, l.status, l.result); err != nil {
+		return nil, err
+	}
+	values := []string{l.queue, l.status}
+	if l.result != "" {
+		values = append(values, l.result)
+	}
+	return values, nil
+}
 
 // TaskMetrics holds Prometheus metrics for the task queue module.
 //
@@ -52,6 +181,24 @@ type TaskMetrics struct {
 	//   - "reconcile_repair" Reconciler 把 PG 滞后态同步到 Redis 终态
 	// 让"系统自愈了多少次"可观测——平时应为 0/低频，突增说明上游有故障在被兜底掩盖。
 	RecoveryActionTotal *prometheus.CounterVec
+
+	// RedisPGDiff 是最近一次 Redis↔PostgreSQL 对账发现的任务分叉数量。
+	RedisPGDiff prometheus.Gauge
+
+	// QueueWriteFailuresTotal 是持久化队列双写失败的统一指标。DualWriteFailTotal
+	// 保留兼容现有告警和看板，两个指标在同一失败点递增。
+	QueueWriteFailuresTotal *prometheus.CounterVec
+
+	// Redis 队列聚合观测指标。queue_family 只允许 cmdq/taskq，禁止设备 SN、完整
+	// Redis key 等高基数标签。
+	RedisTaskQueueLengthTotal       *prometheus.GaugeVec
+	RedisTaskQueueActiveDevices     *prometheus.GaugeVec
+	RedisTaskQueueMaxLength         *prometheus.GaugeVec
+	RedisTaskQueueOldestAgeSeconds  *prometheus.GaugeVec
+	RedisTaskQueueScanDuration      *prometheus.GaugeVec
+	RedisTaskQueueScanFailuresTotal *prometheus.CounterVec
+	RedisTaskQueueUp                *prometheus.GaugeVec
+	RedisTaskQueueSampleTimestamp   *prometheus.GaugeVec
 }
 
 // NewTaskMetrics creates and registers task metrics.
@@ -95,9 +242,58 @@ func NewTaskMetrics(reg prometheus.Registerer) *TaskMetrics {
 			Help: "Tasks detected stale (PG active vs Redis terminal divergence), counted at detection regardless of repair outcome.",
 		}),
 		RecoveryActionTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "omc_tasks_recovery_action_total",
+			Name: "omc_task_queue_recovery_action_total",
 			Help: "Self-healing recovery actions executed, by action (restore_pending/reconcile_repair).",
 		}, []string{"action"}),
+		RedisPGDiff: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_task_queue_redis_pg_diff",
+			Help: "Number of task state divergences observed during the latest Redis to PostgreSQL reconciliation round.",
+		}),
+		QueueWriteFailuresTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_task_queue_write_failures_total",
+			Help: "Persistent task queue dual-write failures by operation.",
+		}, []string{"operation"}),
+		RedisTaskQueueLengthTotal: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_length_total",
+			Help: "Total number of entries in Redis task queues by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueActiveDevices: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_active_devices",
+			Help: "Number of non-empty Redis device queues by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueMaxLength: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_max_length",
+			Help: "Largest Redis device queue length observed by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueOldestAgeSeconds: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_oldest_age_seconds",
+			Help: "Age in seconds of the oldest Redis task by queue family; uses a queue-score lower bound when task detail has expired.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueScanDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_scan_duration_seconds",
+			Help: "Duration of the latest Redis queue SCAN by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueScanFailuresTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_redis_task_queue_scan_failures_total",
+			Help: "Redis queue observation failures by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueUp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_up",
+			Help: "Whether the latest Redis queue observation succeeded, by bounded queue family.",
+		}, []string{"queue_family"}),
+		RedisTaskQueueSampleTimestamp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_redis_task_queue_sample_timestamp_seconds",
+			Help: "Unix timestamp of the latest Redis queue observation, by bounded queue family.",
+		}, []string{"queue_family"}),
+	}
+	for _, family := range []string{redisQueueFamilyCommand, redisQueueFamilyTask} {
+		m.RedisTaskQueueLengthTotal.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueActiveDevices.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueMaxLength.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueOldestAgeSeconds.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueScanDuration.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueUp.WithLabelValues(family).Set(0)
+		m.RedisTaskQueueSampleTimestamp.WithLabelValues(family).Set(0)
 	}
 
 	reg.MustRegister(
@@ -111,6 +307,16 @@ func NewTaskMetrics(reg prometheus.Registerer) *TaskMetrics {
 		m.BacklogTotal,
 		m.StaleDetectedTotal,
 		m.RecoveryActionTotal,
+		m.RedisPGDiff,
+		m.QueueWriteFailuresTotal,
+		m.RedisTaskQueueLengthTotal,
+		m.RedisTaskQueueActiveDevices,
+		m.RedisTaskQueueMaxLength,
+		m.RedisTaskQueueOldestAgeSeconds,
+		m.RedisTaskQueueScanDuration,
+		m.RedisTaskQueueScanFailuresTotal,
+		m.RedisTaskQueueUp,
+		m.RedisTaskQueueSampleTimestamp,
 	)
 	return m
 }

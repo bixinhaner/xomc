@@ -98,6 +98,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		Carriers:   app.Carriers,
 		Cfg:        &cfg,
 		Logger:     app.Logger,
+		LogGate:    app.LogGate,
 		GS:         app.GS,
 		MetricsReg: app.MetricsReg,
 		Health:     app.Health,

@@ -104,6 +104,16 @@ func (KeyBuilder) ACSTaskQueuePrefix() string { return acsTaskQueuePrefix }
 // ACSTaskQueuePattern 队列扫描通配符（供 KEYS/SCAN 使用）。
 func (KeyBuilder) ACSTaskQueuePattern() string { return acsTaskQueuePrefix + "*" }
 
+// ACSCommandQueue returns the legacy per-device command queue sorted set.
+// It is retained for observability during migration to the unified task queue.
+func (KeyBuilder) ACSCommandQueue(deviceSN string) string { return acsCommandQueuePrefix + deviceSN }
+
+// ACSCommandQueuePrefix returns the legacy per-device command queue prefix.
+func (KeyBuilder) ACSCommandQueuePrefix() string { return acsCommandQueuePrefix }
+
+// ACSCommandQueuePattern returns the legacy command queue scan pattern.
+func (KeyBuilder) ACSCommandQueuePattern() string { return acsCommandQueuePrefix + "*" }
+
 // ACSTaskDetail 任务详情 Hash（24h TTL）。
 func (KeyBuilder) ACSTaskDetail(taskID string) string { return acsTaskDetailPrefix + taskID }
 
@@ -322,6 +332,7 @@ const (
 	acsUECountProbePrefix   = "acs:ue_count:probe:"
 	acsSTUNPrefix           = "acs:stun:"
 	acsTaskQueuePrefix      = "acs:taskq:"
+	acsCommandQueuePrefix   = "acs:cmdq:"
 	acsTaskDetailPrefix     = "acs:task:"
 	acsCWMP2TaskPrefix      = "acs:cwmp2task:"
 	// issue #65（Option B）— ACS 横扩去进程态：准入槽位 / 设备会话指针 / CR URL / nonce

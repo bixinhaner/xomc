@@ -1,0 +1,177 @@
+# Resource, queue, and storage-protection PromQL probes
+#
+# Run a probe through Prometheus first, for example:
+# curl -sG http://localhost:9090/api/v1/query --data-urlencode 'query=<PROMQL>' | jq
+#
+# Semantics:
+# - MUST-HAVE: after the named exporter/service is running, the query must return
+#   at least one series. An empty result is a collection/configuration failure.
+# - NO-DATA: the panel must visibly show "No data". It must not render an empty
+#   result as 0, because that hides unavailable telemetry or an unavailable service.
+# - ZERO: a returned sample with value 0 is a real measured empty/clear state.
+
+## Host CPU (MUST-HAVE: node_exporter)
+100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+Expected: CPU utilization percent. NO-DATA means node_exporter is unavailable; 0 is valid idle host.
+
+## Host memory (MUST-HAVE: node_exporter)
+1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+Expected: host memory utilization ratio. NO-DATA means node_exporter is unavailable; 0 is valid.
+
+## Host filesystem (MUST-HAVE: node_exporter)
+1 - (node_filesystem_avail_bytes{job="node",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs.*|fuse.*"} / node_filesystem_size_bytes{job="node",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs.*|fuse.*"})
+Expected: persistent filesystem utilization ratio. NO-DATA means the filesystem/node exporter is unavailable; 0 is valid free usage.
+
+## Host filesystem inode usage (MUST-HAVE: node_exporter)
+1 - (node_filesystem_files_free{job="node",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs.*|fuse.*"} / node_filesystem_files{job="node",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs.*|fuse.*"})
+Expected: inode utilization by mountpoint. NO-DATA means inode telemetry is unavailable; 0 is a real measured empty inode state.
+
+## Host filesystem exhaustion forecast (MUST-HAVE: node_exporter)
+predict_linear(node_filesystem_avail_bytes{job="node",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs.*|fuse.*"}[6h], 4 * 3600)
+Expected: predicted available bytes four hours ahead. A value below zero indicates likely exhaustion; NO-DATA is not zero.
+
+## cAdvisor container CPU (MUST-HAVE when containers are running)
+sum by (service) (rate(container_cpu_usage_seconds_total{service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}[5m]))
+Expected: per-container CPU cores used. NO-DATA means cAdvisor/container discovery is unavailable; 0 is valid idle container.
+
+## cAdvisor container memory (MUST-HAVE when containers are running)
+sum by (service) (container_memory_working_set_bytes{service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"})
+Expected: per-container working set bytes. NO-DATA means cAdvisor/container discovery is unavailable; 0 is not a substitute for absent telemetry.
+
+## F-02 Memory Usage by Service (MUST-HAVE when OMC services are running)
+sum by (service) (container_memory_working_set_bytes{service=~"app|acs|worker"})
+Expected: exactly the OMC service dimensions `app`, `acs`, and `worker` when those containers are running; values are working-set bytes and must not be replaced by a `cadvisor` aggregate or an empty result.
+
+## F-03 Highest CPU saturation by service (MUST-HAVE when CPU limits are configured)
+max(sum by (service) (rate(container_cpu_usage_seconds_total{service=~"app|acs|worker"}[5m])) / sum by (service) ((container_spec_cpu_quota{service=~"app|acs|worker"} > 0) / container_spec_cpu_period{service=~"app|acs|worker"}))
+Expected: one finite ratio in `[0,1]` for the highest OMC service saturation; the denominator must calculate valid per-container `quota / period` before service aggregation, and unlimited containers (`quota <= 0`) must be excluded.
+
+## F-04 Highest memory saturation by service (MUST-HAVE when memory limits are configured)
+max(sum by (service) (container_memory_working_set_bytes{service=~"app|acs|worker"}) / sum by (service) ((container_spec_memory_limit_bytes{service=~"app|acs|worker"} > 0) and (container_spec_memory_limit_bytes{service=~"app|acs|worker"} < 64e9)))
+Expected: one finite ratio in `[0,1]` for the highest OMC service working-set saturation; positive per-container memory limits below the `64e9` host-memory sentinel are filtered before service aggregation, and unlimited containers are excluded.
+
+## F-05 Container restarts in the selected range (MUST-HAVE when cAdvisor is running)
+sum(changes(container_start_time_seconds{service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web|prometheus|grafana|loki|tempo|otelcol|alertmanager|cadvisor|node-exporter|nginx-exporter|nats-exporter"}[1h]))
+Expected: one scalar restart count covering OMC, dependency, monitoring, and exporter containers; `0` is a valid measured value when no container restarted, while an empty result means restart telemetry is unavailable.
+
+## F-06 CPU saturation by service (MUST-HAVE when CPU limits are configured)
+sum by (service) (rate(container_cpu_usage_seconds_total{service=~"app|acs|worker"}[5m])) / sum by (service) ((container_spec_cpu_quota{service=~"app|acs|worker"} > 0) / container_spec_cpu_period{service=~"app|acs|worker"})
+Expected: finite CPU usage/limit ratios for `acs`, `app`, and `worker`; quota and period are calculated per container before service aggregation, containers with `quota <= 0` are excluded, and the panel plus `ContainerCPUSaturation` alert use the same service-level denominator.
+
+## F-07 Container CPU usage vs limit (MUST-HAVE when CPU limits are configured)
+sum by (service) (rate(container_cpu_usage_seconds_total{service=~"app|acs|worker"}[5m]))
+sum by (service) ((container_spec_cpu_quota{service=~"app|acs|worker"} > 0) / container_spec_cpu_period{service=~"app|acs|worker"})
+Expected: two non-empty vectors with matching `acs`, `app`, and `worker` service dimensions; the usage vector is CPU cores and the limit vector is cores calculated per container before service aggregation, with unlimited containers excluded rather than diluting the limit.
+
+## F-08 Container memory saturation by service (MUST-HAVE when memory limits are configured)
+sum by (service) (container_memory_working_set_bytes{service=~"app|acs|worker"}) / sum by (service) ((container_spec_memory_limit_bytes{service=~"app|acs|worker"} > 0) and (container_spec_memory_limit_bytes{service=~"app|acs|worker"} < 64e9))
+Expected: finite working-set/limit ratios for `acs`, `app`, and `worker`; positive limits below the host-memory sentinel are filtered per container before service aggregation, and unlimited containers are excluded.
+
+## F-09 Container CPU CFS throttling ratio (MUST-HAVE when cAdvisor exposes CFS counters)
+(sum by (service) (rate(container_cpu_cfs_throttled_periods_total{service=~"app|acs|worker"}[5m])) / sum by (service) (rate(container_cpu_cfs_periods_total{service=~"app|acs|worker"}[5m]))) and on (service) (sum by (service) (rate(container_cpu_cfs_periods_total{service=~"app|acs|worker"}[5m])) > 0)
+Expected: finite ratios for services with positive CFS periods; a real zero throttling ratio is valid, while a missing/zero denominator remains no-data instead of infinity.
+
+## F-10 Container network receive/transmit (MUST-HAVE when cAdvisor exposes network counters)
+sum by (service) (rate(container_network_receive_bytes_total{service=~"app|acs|worker",interface!~"lo|veth.*|docker.*|cni.*|flannel.*|br-.*"}[5m]))
+sum by (service) (rate(container_network_transmit_bytes_total{service=~"app|acs|worker",interface!~"lo|veth.*|docker.*|cni.*|flannel.*|br-.*"}[5m]))
+Expected: receive and transmit byte rates by `acs`, `app`, and `worker`, using real container interfaces and excluding loopback/virtual interfaces.
+
+## F-11 Container OOM events (MUST-HAVE when cAdvisor exposes OOM counters)
+sum by (service) (increase(container_oom_events_total{service=~"app|acs|worker"}[1h]))
+Expected: OOM event increments by service; a returned zero is a real no-event state, while an absent metric remains visibly unavailable rather than being coerced to zero.
+
+## F-12 Container block IO read/write (MUST-HAVE when cAdvisor exposes byte counters)
+sum by (service) (rate(container_fs_reads_bytes_total{service=~"app|acs|worker",device!=""}[5m]))
+sum by (service) (rate(container_fs_writes_bytes_total{service=~"app|acs|worker",device!=""}[5m]))
+Expected: read/write byte rates by available OMC service and non-empty device; a service without cAdvisor byte counters remains no-data and is not fabricated as zero.
+
+## F-13 Dependency container CPU saturation (MUST-HAVE when dependency limits are configured)
+sum by (service) (rate(container_cpu_usage_seconds_total{service=~"postgres|postgres-tsdb|redis|nats|minio|web"}[5m])) / sum by (service) ((container_spec_cpu_quota{service=~"postgres|postgres-tsdb|redis|nats|minio|web"} > 0) / container_spec_cpu_period{service=~"postgres|postgres-tsdb|redis|nats|minio|web"})
+Expected: finite CPU saturation ratios for dependency services; quota/period is paired per container before service aggregation.
+
+## F-14 Dependency container memory saturation (MUST-HAVE when dependency limits are configured)
+sum by (service) (container_memory_working_set_bytes{service=~"postgres|postgres-tsdb|redis|nats|minio|web"}) / sum by (service) ((container_spec_memory_limit_bytes{service=~"postgres|postgres-tsdb|redis|nats|minio|web"} > 0) and (container_spec_memory_limit_bytes{service=~"postgres|postgres-tsdb|redis|nats|minio|web"} < 64e9))
+Expected: finite working-set/limit ratios for dependency services; positive limits below the host sentinel are filtered per container before service aggregation.
+
+## F-15 Monitoring-stack container memory (MUST-HAVE when cAdvisor is running)
+sum by (service) (container_memory_working_set_bytes{container_id=~".*/docker-[^/]+\\.scope",container_label_com_docker_compose_service=~"prometheus|grafana|loki|tempo|otelcol|alertmanager|cadvisor"})
+Expected: separate Prometheus/Grafana/Loki/Tempo/OTel/Alertmanager/cAdvisor series; host cgroups and unlabelled buildkit/system samples are excluded, so `service=cadvisor` cannot become a host-memory aggregate.
+
+## F-16 Container CPU by container ID (MUST-HAVE when cAdvisor is running)
+sum by (container_id) (rate(container_cpu_usage_seconds_total{container_id=~".*/docker-[^/]+\\.scope"}[1m]))
+Expected: non-empty CPU series for systemd Docker scope IDs such as `/system.slice/docker-<id>.scope`; root/system cgroups are excluded.
+
+## F-17 Container memory by container ID (MUST-HAVE when cAdvisor is running)
+sum by (container_id) (container_memory_working_set_bytes{container_id=~".*/docker-[^/]+\\.scope"})
+Expected: non-empty working-set series for systemd Docker scope IDs, with root/system cgroups excluded.
+
+## MinIO (MUST-HAVE after MinIO is started)
+minio_cluster_capacity_usable_free_bytes
+Expected: usable free bytes. NO-DATA means MinIO metrics are unavailable; zero is a real full-capacity condition.
+
+## P-01/P-04 MinIO business bucket usage by fixed category
+max by (category) (omc_minio_bucket_usage_bytes{category=~"pm|mr|firmware|config-backup|logs|reports|exchange|ui-assets|trace|file-bundles|config-snapshots|device-licenses"})
+Expected: at most one series per fixed category. `config-backup` is emitted by app/acs/worker as the same global gauge, so duplicate deployment-unit samples must be collapsed with max rather than summed.
+
+## NATS JetStream / PM transport (MUST-HAVE after the observer and PM consumer exist)
+omc_nats_consumer_pending{stream="omcgo",durable="pm-workers"}
+Expected: OMC observer pending messages by fixed stream/durable. ZERO means an empty consumer backlog; NO-DATA means the observer or consumer is unavailable.
+
+## NATS observer failures (MUST-HAVE after the observer starts)
+increase(omc_nats_observer_failures_total[5m])
+Expected: observer query failures in the last five minutes. ZERO means successful observation; NO-DATA means observer telemetry is unavailable.
+
+## Redis (MUST-HAVE after otelcol Redis receiver is connected)
+redis_memory_used_bytes
+Expected: used bytes. NO-DATA means the Redis receiver/remote-write path is unavailable; 0 is valid only when Prometheus returned a real sample.
+
+## Redis task queues (MUST-HAVE after the OMC Redis queue observer starts)
+omc_redis_task_queue_length_total{queue_family=~"cmdq|taskq"}
+max by (queue_family) (omc_redis_task_queue_length_total)
+Expected: aggregate task backlog by fixed queue family after de-duplicating app/worker observers. ZERO means the scanned key set is empty; NO-DATA means Redis observation failed.
+
+## Redis task queue observer health across deployment units (MUST-HAVE after the observer starts)
+min by (queue_family) (omc_redis_task_queue_up * on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120))
+Expected: one health value per queue family across all deployment units. ZERO means at least one observed unit is unavailable or stale; NO-DATA means no observer metric exists.
+
+## Redis task queue observer failures (MUST-HAVE after the observer starts)
+increase(omc_redis_task_queue_scan_failures_total{queue_family=~"cmdq|taskq"}[5m])
+Expected: Redis SCAN failures in the last five minutes. ZERO means successful observation; NO-DATA means observer telemetry is unavailable.
+
+## Redis task queue oldest age (MUST-HAVE after the observer starts)
+omc_redis_task_queue_oldest_age_seconds{queue_family=~"cmdq|taskq"}
+  and on (deployment_unit,service,instance,job,queue_family) (omc_redis_task_queue_up == 1)
+  and on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120)
+Expected: oldest age only while the matching observer is healthy and sampled within 120 seconds. NO-DATA means the age must not be interpreted as zero.
+
+## Redis task queue oldest-age alert safety (MUST-HAVE after the observer starts)
+(max by (queue_family) (omc_redis_task_queue_oldest_age_seconds and on (deployment_unit,service,instance,job,queue_family) (omc_redis_task_queue_up == 1) and on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120)) and on (queue_family) (min by (queue_family) (omc_redis_task_queue_up * on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120)) == 1)) > 900
+Expected: oldest-age alert fires only for a fresh, healthy full-family sample; observer failure or stale samples must suppress the alert instead of evaluating a retained gauge.
+
+## PostgreSQL (MUST-HAVE after otelcol PostgreSQL receiver is connected)
+pg_stat_database_numbackends
+Expected: active database backends. NO-DATA means the PostgreSQL receiver/remote-write path is unavailable; 0 is a real measured idle state.
+
+## PostgreSQL persistent queues (MUST-HAVE after the OMC observer starts)
+omc_persistent_queue_pending{queue=~"device_tasks|async_jobs|parameter_sync_outbox|northbound_outbox|pm_kpi_export|trace_export|backup_tasks|dead_letters"}
+Expected: fixed queue/status backlog. ZERO means a real empty queue; NO-DATA means the observer or database is unavailable.
+
+## PostgreSQL persistent queue observer failures (MUST-HAVE after the observer starts)
+increase(omc_persistent_queue_observer_failures_total{queue=~"device_tasks|async_jobs|parameter_sync_outbox|northbound_outbox|pm_kpi_export|trace_export|backup_tasks|dead_letters"}[5m])
+Expected: observation failures by fixed queue. ZERO means successful observation; NO-DATA means the observer metric is unavailable.
+
+## PM durable queue (MUST-HAVE after Worker starts)
+omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"}
+Expected: PM consumer pending count. ZERO means Worker observed an empty durable queue; NO-DATA means sampling is unavailable and must remain visible as No data.
+
+## PM durable queue sample failure (MUST-HAVE after Worker starts)
+increase(omc_pm_queue_sample_failures_total{subject="pm.file.received",durable="pm-workers"}[5m])
+Expected: sampling failures in the last five minutes. ZERO means successful sampling; NO-DATA means the observer metric itself is unavailable.
+
+## Storage write protection (NO-DATA until Task 8 exposes the metric; MUST-HAVE after that)
+omc_storage_admission_state
+Expected: protection state: 0 permits writes, 1 blocks writes. Before the exporter exists the panel must show NO-DATA, never 0.
+
+## Storage write rejections (NO-DATA until Task 8 exposes the metric; MUST-HAVE after that)
+increase(omc_storage_write_rejected_total[5m])
+Expected: rejected writes in the last five minutes. ZERO means no rejected writes; NO-DATA means telemetry is unavailable, not that writes were accepted.

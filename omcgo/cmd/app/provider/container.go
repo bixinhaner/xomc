@@ -31,6 +31,7 @@ import (
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/omcgo/omcgo/internal/quicksettings"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
 )
@@ -45,20 +46,24 @@ import (
 // 后初始化的模块从 Container 读取所需依赖。
 type Container struct {
 	// ===== 基础设施（由 bootstrap 设置）=====
-	PgPool     *pgxpool.Pool
-	TsPool     *pgxpool.Pool
-	Redis      redis.UniversalClient
-	MinIO      *minio.Client
-	EventBus   event.EventBus
-	Realtime   *realtime.CoreNATS
-	Deduper    *event.Deduper
-	TaskSvc    *task.TaskService
-	Carriers   *carrier.CarrierRegistry
-	Cfg        *appconfig.AppConfig
-	Logger     *zap.Logger
-	GS         *components.GracefulShutdown
-	MetricsReg *prometheus.Registry
-	Health     *components.HealthChecker
+	PgPool                   *pgxpool.Pool
+	TsPool                   *pgxpool.Pool
+	Redis                    redis.UniversalClient
+	MinIO                    *minio.Client
+	EventBus                 event.EventBus
+	Realtime                 *realtime.CoreNATS
+	Deduper                  *event.Deduper
+	TaskSvc                  *task.TaskService
+	Carriers                 *carrier.CarrierRegistry
+	Cfg                      *appconfig.AppConfig
+	Logger                   *zap.Logger
+	LogGate                  storageprotection.LogAdmissionController
+	GS                       *components.GracefulShutdown
+	MetricsReg               *prometheus.Registry
+	Health                   *components.HealthChecker
+	StorageProtection        *storageprotection.Service
+	StorageProtectionHandler *storageprotection.Handler
+	StorageCollector         components.StorageCollector
 
 	// ===== 共享服务（由各模块 Init 设置）=====
 

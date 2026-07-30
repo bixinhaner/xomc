@@ -36,7 +36,10 @@ import (
 // 各微服务入口（cmd/acs、cmd/app、cmd/worker）选择性调用 Connect* 方法按需初始化组件。
 // 它同时整合了健康检查、优雅关机、Prometheus 指标和 /healthz 接口，是服务启动的唯一入口。
 type Infra struct {
-	Logger     *zap.Logger
+	Logger *zap.Logger
+	// LogGate is shared with storage protection so every service logger can
+	// stop emitting to both stdout and its mounted log file at the same time.
+	LogGate    *logpkg.AdmissionGate
 	GS         *GracefulShutdown
 	PgPool     *pgxpool.Pool
 	TsPool     *pgxpool.Pool
@@ -64,7 +67,8 @@ func (inf *Infra) SetPprof(enabled, contention bool) {
 
 // NewInfra creates a base Infra with logger, graceful shutdown, metrics registry, and health checker.
 func NewInfra(logCfg appconfig.LogConfig, metricsPort int) (*Infra, error) {
-	logger, err := logpkg.NewLogger(logCfg)
+	logGate := logpkg.NewAdmissionGate()
+	logger, err := logpkg.NewLoggerWithAdmissionGate(logCfg, logGate)
 	if err != nil {
 		return nil, fmt.Errorf("init logger: %w", err)
 	}
@@ -81,6 +85,7 @@ func NewInfra(logCfg appconfig.LogConfig, metricsPort int) (*Infra, error) {
 
 	return &Infra{
 		Logger:      logger,
+		LogGate:     logGate,
 		GS:          NewGracefulShutdown(30*time.Second, logger),
 		MetricsReg:  metricsReg,
 		Health:      NewHealthChecker(),
@@ -185,8 +190,10 @@ func (inf *Infra) ConnectNATS(ctx context.Context, cfg appconfig.NATSConfig) err
 	inf.Health.Register("nats", func(ctx context.Context) error {
 		return client.HealthCheck()
 	})
-	// 连接资源指标（nats_conn_status / nats_reconnect_total / nats_msgs_*）。
-	// RegisterMetrics 在装计数回调的同时保留 NewNATSClient 的「重连」日志。
+	// 连接资源指标（nats_conn_status / nats_reconnect_total / nats_msgs_*）及
+	// 固定 JetStream stream/consumer 积压指标（omc_nats_*）。RegisterMetrics
+	// 使用同一个 NATSClient.JS 启动两类观测，ConnMetrics.Stop 会先停止队列
+	// observer，再由 GracefulShutdown 关闭 NATS 连接，避免查询协程泄漏。
 	natsConnMetrics := client.RegisterMetrics(inf.MetricsReg)
 	inf.GS.Register("nats-conn-metrics", 1, func(context.Context) error { natsConnMetrics.Stop(); return nil })
 

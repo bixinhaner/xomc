@@ -1,0 +1,37 @@
+# Stable physical storage series for Grafana and the admission evaluator. The
+# source series remain visible when a target is not mapped; these rules
+# intentionally emit no sample instead of manufacturing zero. MinIO and DB
+# logical gauges are shown separately and are not capacity-policy targets.
+groups:
+  - name: omc.storage.targets
+    interval: 30s
+    rules:
+      - record: omc_storage_capacity_bytes
+        expr: node_filesystem_size_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?"}
+        labels:
+          target_type: filesystem
+          target_id: root
+          write_scope: all
+
+      - record: omc_storage_used_bytes
+        expr: node_filesystem_size_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?"} - node_filesystem_avail_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?"}
+        labels:
+          target_type: filesystem
+          target_id: root
+          write_scope: all
+
+      - record: omc_storage_used_ratio
+        expr: 1 - (node_filesystem_avail_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?"} / node_filesystem_size_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?"})
+        labels:
+          target_type: filesystem
+          target_id: root
+          write_scope: all
+
+      # The existing backup policy poller exposes the same global bucket gauge
+      # from app, acs and worker. Those deployment units are duplicate views of
+      # one physical bucket, not additive capacity. Collapse them before adding
+      # the fixed category label; no source sample means no recording-rule value.
+      - record: omc_minio_bucket_usage_bytes
+        expr: max by () (omc_backup_storage_used_bytes)
+        labels:
+          category: config-backup

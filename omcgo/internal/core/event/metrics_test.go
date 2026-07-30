@@ -1,6 +1,7 @@
 package event
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -109,6 +110,29 @@ func TestEventBusMetrics_Inc_ByOutcome(t *testing.T) {
 		testutil.ToFloat64(m.DeliveryTotal.WithLabelValues("alarm.raised", deliveryOutcomeTerminated)))
 	assert.Equal(t, float64(1),
 		testutil.ToFloat64(m.DeliveryTotal.WithLabelValues("alarm.raised", deliveryOutcomeDropped)))
+}
+
+func TestEventBusMetrics_ContractUsesOnlyLowCardinalityLabels(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewEventBusMetrics(reg)
+
+	m.observeQueueStats("acs:taskq:DEVICE-SN-001", "redis:key:acs:taskq:DEVICE-SN-001", QueueStats{SampledAt: time.Now()})
+	m.observeQueueStats(SubjectPMFileReceived, pmQueueStatsDurable, QueueStats{SampledAt: time.Now()})
+	m.observeQueueSampleFailure(SubjectPMFileReceived, pmQueueStatsDurable)
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		for _, metric := range family.Metric {
+			for _, label := range metric.Label {
+				assert.NotContains(t, label.GetName(), "device_sn")
+				assert.NotContains(t, label.GetName(), "redis_key")
+				assert.NotContains(t, label.GetName(), "object_path")
+				assert.False(t, strings.Contains(label.GetValue(), "DEVICE-SN-001"), "high-cardinality device value must not be a label")
+				assert.False(t, strings.Contains(label.GetValue(), "acs:taskq:"), "complete Redis key must not be a label")
+			}
+		}
+	}
 }
 
 // nil 安全：metrics 未注入（单进程 / 单测）时 inc 不 panic。
