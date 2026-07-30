@@ -1078,12 +1078,22 @@ func (e *UpgradeExecutor) HandleUploadResponse(ctx context.Context, evt event.Ev
 func (e *UpgradeExecutor) HandleRebootComplete(ctx context.Context, evt event.Event) error {
 	var payload struct {
 		DeviceSN string `json:"device_sn"`
+		DeviceID struct {
+			SerialNumber string `json:"serial_number"`
+		} `json:"device_id"`
 	}
-	if err := evt.DecodePayload(&payload); err != nil || payload.DeviceSN == "" {
+	if err := evt.DecodePayload(&payload); err != nil {
+		return nil
+	}
+	deviceSN := payload.DeviceSN
+	if deviceSN == "" {
+		deviceSN = payload.DeviceID.SerialNumber
+	}
+	if deviceSN == "" {
 		return nil
 	}
 
-	dev, err := e.deviceRepo.GetBySerialNumber(ctx, payload.DeviceSN)
+	dev, err := e.deviceRepo.GetBySerialNumber(ctx, deviceSN)
 	if err != nil || dev == nil {
 		return nil
 	}
@@ -1113,7 +1123,7 @@ func (e *UpgradeExecutor) HandleRebootComplete(ctx context.Context, evt event.Ev
 
 	e.logger.Info("reboot complete, task finalized",
 		zap.String("sub_task_id", subTask.ID.String()),
-		zap.String("device_sn", payload.DeviceSN))
+		zap.String("device_sn", deviceSN))
 	return nil
 }
 
