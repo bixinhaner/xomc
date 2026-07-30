@@ -36,6 +36,11 @@ resource_plan_metrics_write() { # <resources.env> [output.prom]
     rm -f "$tmp"
     return 1
   fi
+  # mktemp 默认是 owner-only；node-exporter 以非 root 用户读取 textfile 时会被拒绝。
+  if ! chmod 0644 "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
   mv "$tmp" "$output"
 }
 

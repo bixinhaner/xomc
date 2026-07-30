@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/resource-plan-metrics.sh"
@@ -51,6 +51,8 @@ OMC_RESOURCE_PLAN_HOST_MEM_MIB=32768
 EOF
 
 resource_plan_metrics_write "$TMP/resources.env" "$TMP/resource-plan.prom"
+mode="$(stat -f '%Lp' "$TMP/resource-plan.prom" 2>/dev/null || stat -c '%a' "$TMP/resource-plan.prom")"
+[ "$mode" = 644 ]
 grep -Fx 'omc_resource_plan_cpu_cores{service="worker"} 8' "$TMP/resource-plan.prom"
 grep -Fx 'omc_resource_plan_memory_limit_bytes{service="redis"} 8589934592' "$TMP/resource-plan.prom"
 grep -Fx 'omc_resource_plan_memory_limit_bytes{service="app"} 1610612736' "$TMP/resource-plan.prom"
