@@ -181,7 +181,7 @@ contains "资源漂移规则使用生成的计划 CPU 指标" 'omc_resource_plan
 contains "资源漂移规则使用生成的计划内存指标" 'omc_resource_plan_memory_limit_bytes' "$HOST_ALERTS"
 contains "node exporter 读取资源计划 textfile" '--collector.textfile.directory=/textfile' "$RELEASE_MONITORING_COMPOSE"
 contains "node exporter 挂载资源计划 textfile" '/opt/omc/run/monitoring:/textfile:ro' "$RELEASE_MONITORING_COMPOSE"
-contains "cAdvisor 使用 Docker 29/overlayfs 支持版本" 'ghcr.io/google/cadvisor:v0.55.1' "$REPO_ROOT/deployments/release/release.conf"
+contains "cAdvisor 使用 Docker 29/overlayfs 支持版本" 'ghcr.io/google/cadvisor:0.55.1' "$REPO_ROOT/deployments/release/release.conf"
 contains "安装生成资源计划指标" 'resource_plan_metrics_write' "$INSTALL"
 contains "服务控制生成资源计划指标" 'resource_plan_metrics_write' "$SVC"
 if bash "$RELEASE_DEPLOY/resource-plan-metrics_test.sh"; then

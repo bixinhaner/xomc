@@ -878,8 +878,8 @@ services:
   cadvisor:
     # gcr.io 不受 daemon.json registry-mirrors（仅代理 docker.io）覆盖；国内拉取超时时
     # 用 IMAGE_CADVISOR 覆盖为可达镜像（与 release bundle 同 IMAGE_CADVISOR 变量），如：
-    #   export IMAGE_CADVISOR=ghcr.io/google/cadvisor:v0.55.1
-    image: ${IMAGE_CADVISOR:-ghcr.io/google/cadvisor:v0.55.1}
+    #   export IMAGE_CADVISOR=ghcr.io/google/cadvisor:0.55.1
+    image: ${IMAGE_CADVISOR:-ghcr.io/google/cadvisor:0.55.1}
     restart: unless-stopped
     privileged: true
     devices:
