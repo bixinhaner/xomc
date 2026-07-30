@@ -7,13 +7,15 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"go.uber.org/zap"
 )
 
 const (
-	publishedVersionRepairBatchSize = uint64(100)
-	publishedVersionRepairLockID    = int64(0x504d565245504149) // "PMVREPAI"
+	publishedVersionRepairBatchSize         = uint64(100)
+	publishedVersionRepairVersionQueryLimit = 8
+	publishedVersionRepairLockID            = int64(0x504d565245504149) // "PMVREPAI"
 )
 
 type publishedVersionRepairCandidate struct {
@@ -34,9 +36,11 @@ type publishedVersionRepairAction struct {
 }
 
 type PublishedVersionRepairResult struct {
-	Scanned  int
-	Audited  int
-	Enqueued int
+	Scanned                      int
+	Audited                      int
+	Enqueued                     int
+	VersionQueries               int
+	CompletedVersionFingerprints map[uuid.UUID]string
 }
 
 func normalizePublishedVersionRepairLimit(limit uint64) uint64 {
@@ -51,6 +55,14 @@ func publishedVersionRepairRemaining(limit uint64, scanned int) uint64 {
 		return 0
 	}
 	return limit - uint64(scanned)
+}
+
+func publishedVersionRepairBatchCompleted(
+	candidateCount int,
+	queryLimit uint64,
+	allAudited bool,
+) bool {
+	return allAudited && candidateCount < int(queryLimit)
 }
 
 func publishedVersionAuditFingerprint(
@@ -194,14 +206,17 @@ ON CONFLICT (task_version_id, entity_key, granularity, window_start) DO UPDATE S
   END`)
 }
 
-func (r *WindowRepository) RepairPublishedVersionWindows(
+func (r *WindowRepository) RepairPublishedVersionBatch(
 	ctx context.Context,
-	snapshot *TaskSnapshot,
+	versions []*TaskVersionSnapshot,
 	location *time.Location,
 	limit uint64,
 ) (PublishedVersionRepairResult, error) {
-	var result PublishedVersionRepairResult
-	if snapshot == nil {
+	result := PublishedVersionRepairResult{
+		CompletedVersionFingerprints: make(map[uuid.UUID]string),
+	}
+	versions = normalizePublishedVersionRepairVersions(versions)
+	if len(versions) == 0 {
 		return result, nil
 	}
 	limit = normalizePublishedVersionRepairLimit(limit)
@@ -222,21 +237,22 @@ func (r *WindowRepository) RepairPublishedVersionWindows(
 		return result, nil
 	}
 
-	for _, versionID := range sortedSnapshotVersionIDs(snapshot) {
+	for index, version := range versions {
 		remaining := publishedVersionRepairRemaining(limit, result.Scanned)
 		if remaining == 0 {
 			break
 		}
-		version := snapshot.ByVersion[versionID]
 		if version == nil || version.DevicePipeline || version.DeviceRollup ||
 			version.EffectiveFrom.IsZero() {
 			continue
 		}
+		versionsRemaining := uint64(len(versions) - index)
+		versionLimit := (remaining + versionsRemaining - 1) / versionsRemaining
 		fingerprint := publishedVersionAuditFingerprint(version, location)
 		query, args, buildErr := publishedVersionRepairCandidates(
 			version,
 			fingerprint,
-			remaining,
+			versionLimit,
 		).ToSql()
 		if buildErr != nil {
 			return result, fmt.Errorf("build published PM version repair candidates: %w", buildErr)
@@ -245,6 +261,7 @@ func (r *WindowRepository) RepairPublishedVersionWindows(
 		if queryErr != nil {
 			return result, fmt.Errorf("query published PM version repair candidates: %w", queryErr)
 		}
+		result.VersionQueries++
 		var candidates []publishedVersionRepairCandidate
 		for rows.Next() {
 			var candidate publishedVersionRepairCandidate
@@ -273,9 +290,11 @@ func (r *WindowRepository) RepairPublishedVersionWindows(
 			return result, fmt.Errorf("iterate published PM version repair candidates: %w", rows.Err())
 		}
 		result.Scanned += len(candidates)
+		allAudited := true
 		for _, candidate := range candidates {
 			action, ok := planPublishedVersionRepair(candidate, version, location)
 			if !ok {
+				allAudited = false
 				continue
 			}
 			updateSQL, updateArgs, buildErr := publishedVersionRepairAuditUpdate(action).ToSql()
@@ -287,6 +306,7 @@ func (r *WindowRepository) RepairPublishedVersionWindows(
 				return result, fmt.Errorf("update published PM version audit: %w", execErr)
 			}
 			if tag.RowsAffected() != 1 {
+				allAudited = false
 				continue
 			}
 			result.Audited++
@@ -302,6 +322,13 @@ func (r *WindowRepository) RepairPublishedVersionWindows(
 			}
 			result.Enqueued++
 		}
+		if publishedVersionRepairBatchCompleted(
+			len(candidates),
+			versionLimit,
+			allAudited,
+		) {
+			result.CompletedVersionFingerprints[version.VersionID] = fingerprint
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return result, fmt.Errorf("commit published PM version window repair: %w", err)
@@ -309,15 +336,36 @@ func (r *WindowRepository) RepairPublishedVersionWindows(
 	return result, nil
 }
 
+func normalizePublishedVersionRepairVersions(
+	versions []*TaskVersionSnapshot,
+) []*TaskVersionSnapshot {
+	if len(versions) <= publishedVersionRepairVersionQueryLimit {
+		return versions
+	}
+	return versions[:publishedVersionRepairVersionQueryLimit]
+}
+
+type publishedVersionRepairBatchStore interface {
+	RepairPublishedVersionBatch(
+		context.Context,
+		[]*TaskVersionSnapshot,
+		*time.Location,
+		uint64,
+	) (PublishedVersionRepairResult, error)
+}
+
 type PublishedVersionRepairer struct {
-	windows  *WindowRepository
-	snapshot *SnapshotStore
-	location *time.Location
-	logger   *zap.Logger
+	windows           publishedVersionRepairBatchStore
+	snapshot          *SnapshotStore
+	location          *time.Location
+	logger            *zap.Logger
+	versionQueryLimit int
+	cursor            uuid.UUID
+	completed         map[uuid.UUID]string
 }
 
 func NewPublishedVersionRepairer(
-	windows *WindowRepository,
+	windows publishedVersionRepairBatchStore,
 	snapshot *SnapshotStore,
 	location *time.Location,
 	logger *zap.Logger,
@@ -330,6 +378,95 @@ func NewPublishedVersionRepairer(
 	}
 	return &PublishedVersionRepairer{
 		windows: windows, snapshot: snapshot, location: location, logger: logger,
+		versionQueryLimit: publishedVersionRepairVersionQueryLimit,
+		completed:         make(map[uuid.UUID]string),
+	}
+}
+
+func (r *PublishedVersionRepairer) runOnce(
+	ctx context.Context,
+) (PublishedVersionRepairResult, error) {
+	snapshot := r.snapshot.Current()
+	r.pruneCompletedVersions(snapshot)
+	versions := nextPublishedVersionRepairBatch(
+		snapshot,
+		r.location,
+		r.completed,
+		r.cursor,
+		r.versionQueryLimit,
+	)
+	if len(versions) == 0 {
+		return PublishedVersionRepairResult{}, nil
+	}
+	r.cursor = versions[len(versions)-1].VersionID
+	result, err := r.windows.RepairPublishedVersionBatch(
+		ctx,
+		versions,
+		r.location,
+		publishedVersionRepairBatchSize,
+	)
+	if err != nil {
+		return result, err
+	}
+	for versionID, fingerprint := range result.CompletedVersionFingerprints {
+		r.completed[versionID] = fingerprint
+	}
+	return result, nil
+}
+
+func nextPublishedVersionRepairBatch(
+	snapshot *TaskSnapshot,
+	location *time.Location,
+	completed map[uuid.UUID]string,
+	after uuid.UUID,
+	limit int,
+) []*TaskVersionSnapshot {
+	if snapshot == nil || limit <= 0 {
+		return nil
+	}
+	var versions []*TaskVersionSnapshot
+	for _, versionID := range sortedSnapshotVersionIDs(snapshot) {
+		version := snapshot.ByVersion[versionID]
+		if version == nil || version.DevicePipeline || version.DeviceRollup ||
+			version.EffectiveFrom.IsZero() {
+			continue
+		}
+		if completed[versionID] == publishedVersionAuditFingerprint(version, location) {
+			continue
+		}
+		versions = append(versions, version)
+	}
+	if len(versions) == 0 {
+		return nil
+	}
+	start := 0
+	if after != uuid.Nil {
+		start = len(versions)
+		for index, version := range versions {
+			if version.VersionID.String() > after.String() {
+				start = index
+				break
+			}
+		}
+		if start == len(versions) {
+			start = 0
+		}
+	}
+	count := min(limit, len(versions))
+	selected := make([]*TaskVersionSnapshot, 0, count)
+	for offset := range count {
+		selected = append(selected, versions[(start+offset)%len(versions)])
+	}
+	return selected
+}
+
+func (r *PublishedVersionRepairer) pruneCompletedVersions(snapshot *TaskSnapshot) {
+	for versionID := range r.completed {
+		version := snapshot.ByVersion[versionID]
+		if version == nil || version.DevicePipeline || version.DeviceRollup ||
+			version.EffectiveFrom.IsZero() {
+			delete(r.completed, versionID)
+		}
 	}
 }
 
@@ -338,12 +475,7 @@ func (r *PublishedVersionRepairer) Run(ctx context.Context, interval time.Durati
 		interval = time.Minute
 	}
 	runOnce := func() {
-		result, err := r.windows.RepairPublishedVersionWindows(
-			ctx,
-			r.snapshot.Current(),
-			r.location,
-			publishedVersionRepairBatchSize,
-		)
+		result, err := r.runOnce(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
 				r.logger.Warn("repair published PM version windows", zap.Error(err))
@@ -354,7 +486,8 @@ func (r *PublishedVersionRepairer) Run(ctx context.Context, interval time.Durati
 			r.logger.Info("audited published PM version windows",
 				zap.Int("scanned", result.Scanned),
 				zap.Int("audited", result.Audited),
-				zap.Int("rebuilds_enqueued", result.Enqueued))
+				zap.Int("rebuilds_enqueued", result.Enqueued),
+				zap.Int("version_queries", result.VersionQueries))
 		}
 	}
 	runOnce()
