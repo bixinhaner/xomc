@@ -25,20 +25,63 @@ const (
 
 // RedisTaskQueue 实现 TaskQueue 接口
 type RedisTaskQueue struct {
-	client      redis.UniversalClient
-	terminalTTL time.Duration
+	client            redis.UniversalClient
+	terminalTTL       time.Duration
+	cleanupTransition func(context.Context, *Task, string) error
 }
 
-var terminalTaskTransitionScript = redis.NewScript(`
-if redis.call("EXISTS", KEYS[1]) == 0 and ARGV[4] ~= "1" then
+var taskTransitionCASScript = redis.NewScript(`
+if redis.call("EXISTS", KEYS[1]) == 0 and ARGV[5] ~= "1" then
 	return -1
 end
 local current = redis.call("HGET", KEYS[1], "status")
-if current == "completed" or current == "failed" or current == "expired" or current == "cancelled" then
+if current == "completed" or current == "failed" or
+   current == "expired" or current == "cancelled" then
+	if ARGV[6] ~= "1" then
+		return 0
+	end
+end
+if current and current ~= ARGV[1] then
 	return 0
 end
-redis.call("HSET", KEYS[1], "data", ARGV[1], "status", ARGV[2])
-redis.call("PEXPIRE", KEYS[1], ARGV[3])
+redis.call("HSET", KEYS[1],
+	"data", ARGV[2],
+	"status", ARGV[3],
+	"transition_from", ARGV[1],
+	"transition_old_cwmp", ARGV[4],
+	"pg_sync_pending", "1",
+	"cleanup_pending", "1")
+redis.call("PERSIST", KEYS[1])
+return 1
+`)
+
+var finalizeTaskTransitionScript = redis.NewScript(`
+if redis.call("EXISTS", KEYS[1]) == 0 then
+	return -1
+end
+if redis.call("HGET", KEYS[1], "pg_sync_pending") ~= "0" or
+   redis.call("HGET", KEYS[1], "cleanup_pending") ~= "0" then
+	return 0
+end
+redis.call("HDEL", KEYS[1],
+	"transition_from", "transition_old_cwmp",
+	"pg_sync_pending", "cleanup_pending")
+redis.call("PEXPIRE", KEYS[1], ARGV[1])
+return 1
+`)
+
+var resolveTaskTransitionScript = redis.NewScript(`
+if redis.call("EXISTS", KEYS[1]) == 0 then
+	return -1
+end
+if redis.call("HGET", KEYS[1], "pg_sync_pending") == false then
+	return 0
+end
+redis.call("HSET", KEYS[1],
+	"data", ARGV[1],
+	"status", ARGV[2],
+	"pg_sync_pending", "0")
+redis.call("PERSIST", KEYS[1])
 return 1
 `)
 
@@ -85,6 +128,10 @@ func (q *RedisTaskQueue) taskKey(taskID string) string {
 // cwmpKey 返回 CWMP ID 映射的 Redis key
 func (q *RedisTaskQueue) cwmpKey(cwmpID string) string {
 	return redisx.Keys.ACSCWMP2Task(CWMPIDHash(cwmpID))
+}
+
+func (q *RedisTaskQueue) pendingTransitionKey() string {
+	return redisx.Keys.ACSTaskTransitionPending()
 }
 
 func queueScore(task *Task) float64 {
@@ -283,14 +330,36 @@ func (q *RedisTaskQueue) Update(ctx context.Context, task *Task) error {
 		return fmt.Errorf("task is nil")
 	}
 
+	if isTerminal(task.Status) {
+		current, getErr := q.GetByID(ctx, task.ID)
+		if getErr != nil {
+			return getErr
+		}
+		if current == nil {
+			current = task
+		}
+		changed, transitionErr := q.prepareTransition(ctx, current, task, true)
+		if transitionErr != nil || !changed {
+			return transitionErr
+		}
+		return q.acknowledgeTransition(ctx, task.ID)
+	}
+
+	current, err := q.GetByID(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+	if current != nil && current.Status != task.Status {
+		changed, transitionErr := q.prepareTransition(ctx, current, task, false)
+		if transitionErr != nil || !changed {
+			return transitionErr
+		}
+		return q.acknowledgeTransition(ctx, task.ID)
+	}
+
 	taskData, err := json.Marshal(task)
 	if err != nil {
 		return fmt.Errorf("marshal task: %w", err)
-	}
-
-	if isTerminal(task.Status) {
-		_, err := q.transitionTerminal(ctx, task, taskData, true)
-		return err
 	}
 
 	// Keep the detail hash and executable queue membership consistent. A task is
@@ -504,33 +573,35 @@ func (q *RedisTaskQueue) DeleteCWMPIDMapping(ctx context.Context, cwmpID string)
 
 // MarkTaskSent 标记任务已发送（供 ACS Handler 调用）
 func (q *RedisTaskQueue) MarkTaskSent(ctx context.Context, taskID, cwmpID string) error {
-	task, err := q.GetByID(ctx, taskID)
+	current, err := q.GetByID(ctx, taskID)
 	if err != nil {
 		return err
 	}
-	if task == nil {
+	if current == nil {
 		return ErrTaskNotFound
 	}
-
-	// 更新任务状态
+	if current.Status != TaskStatusPending {
+		return ErrTaskNotPending
+	}
+	task := cloneTaskSnapshot(current)
 	task.MarkSent(cwmpID)
-
-	// 使用 pipeline 原子更新
-	pipe := q.client.Pipeline()
-
-	taskData, _ := json.Marshal(task)
-	pipe.HSet(ctx, q.taskKey(taskID), "data", taskData, "status", string(task.Status))
-	pipe.Expire(ctx, q.taskKey(taskID), taskDetailTTL)
-	pipe.Set(ctx, q.cwmpKey(cwmpID), taskID, cwmpMappingTTL)
-
-	_, err = pipe.Exec(ctx)
-	return err
+	changed, err := q.prepareTransition(ctx, current, task, false)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return ErrTaskNotPending
+	}
+	return q.acknowledgeTransition(ctx, taskID)
 }
 
 // MarkTaskCompleted 标记任务完成
 func (q *RedisTaskQueue) MarkTaskCompleted(ctx context.Context, taskID string, result json.RawMessage) error {
-	_, err := q.markTaskCompleted(ctx, taskID, result)
-	return err
+	changed, err := q.markTaskCompleted(ctx, taskID, result)
+	if err != nil || !changed {
+		return err
+	}
+	return q.acknowledgeTransition(ctx, taskID)
 }
 
 func (q *RedisTaskQueue) markTaskCompleted(ctx context.Context, taskID string, result json.RawMessage) (bool, error) {
@@ -542,12 +613,9 @@ func (q *RedisTaskQueue) markTaskCompleted(ctx context.Context, taskID string, r
 		return false, ErrTaskNotFound
 	}
 
+	current := *task
 	task.MarkCompleted(result)
-	taskData, err := json.Marshal(task)
-	if err != nil {
-		return false, fmt.Errorf("marshal completed task: %w", err)
-	}
-	return q.transitionTerminal(ctx, task, taskData, false)
+	return q.prepareTransition(ctx, &current, task, false)
 }
 
 // MarkTaskFailed 标记任务失败
@@ -558,8 +626,11 @@ func (q *RedisTaskQueue) MarkTaskFailed(ctx context.Context, taskID string, erro
 // MarkTaskFailedWithResult 标记任务失败并附带结构化 result（如 SetParameterValuesFault 详情）。
 // result 为空时等价于 MarkTaskFailed。
 func (q *RedisTaskQueue) MarkTaskFailedWithResult(ctx context.Context, taskID string, errorCode int, errorMsg string, result json.RawMessage) error {
-	_, err := q.markTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, result)
-	return err
+	changed, err := q.markTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, result)
+	if err != nil || !changed {
+		return err
+	}
+	return q.acknowledgeTransition(ctx, taskID)
 }
 
 func (q *RedisTaskQueue) markTaskFailedWithResult(ctx context.Context, taskID string, errorCode int, errorMsg string, result json.RawMessage) (bool, error) {
@@ -571,59 +642,215 @@ func (q *RedisTaskQueue) markTaskFailedWithResult(ctx context.Context, taskID st
 		return false, ErrTaskNotFound
 	}
 
+	current := *task
 	task.MarkFailedWithResult(errorCode, errorMsg, result)
-	taskData, err := json.Marshal(task)
-	if err != nil {
-		return false, fmt.Errorf("marshal failed task: %w", err)
-	}
-	return q.transitionTerminal(ctx, task, taskData, false)
+	return q.prepareTransition(ctx, &current, task, false)
 }
 
-// transitionTerminal 通过单 key Lua 脚本把状态数据与短 TTL 一次提交，避免
-// HSET 成功而 EXPIRE 丢失导致终态 Hash 再次滞留 4 小时。脚本同时提供终态 fence：
-// 并发或迟到重复响应不能覆盖第一个终态，也不会延长其保留时间。
-//
-// 队列 ZSET 与 cwmp2task 可能位于 Redis Cluster 的不同 slot，无法和详情 Hash
-// 放进同一个 Lua 脚本；终态提交后执行幂等清理，调用重试时即使状态未变化仍会
-// 再次清理，保证残留最终收敛。
-func (q *RedisTaskQueue) transitionTerminal(
+// prepareTransition atomically fences a task state transition in the detail
+// hash and makes the hash persistent until PostgreSQL and cross-slot indexes
+// have both acknowledged the transition.
+func (q *RedisTaskQueue) prepareTransition(
 	ctx context.Context,
-	task *Task,
-	taskData []byte,
+	current, candidate *Task,
 	materializeMissing bool,
 ) (bool, error) {
-	if task == nil || !isTerminal(task.Status) {
-		return false, fmt.Errorf("terminal task required")
+	if current == nil || candidate == nil || current.ID == "" || current.ID != candidate.ID {
+		return false, fmt.Errorf("valid matching transition tasks required")
+	}
+	taskData, err := json.Marshal(candidate)
+	if err != nil {
+		return false, fmt.Errorf("marshal transitioned task: %w", err)
 	}
 	materializeArg := "0"
 	if materializeMissing {
 		materializeArg = "1"
 	}
-	result, err := terminalTaskTransitionScript.Run(
+	allowTerminalRetry := "0"
+	if candidate.Status == TaskStatusPending &&
+		(current.Status == TaskStatusFailed || current.Status == TaskStatusExpired) {
+		allowTerminalRetry = "1"
+	}
+	// The pending index is a different Redis Cluster slot from the task hash,
+	// so no single Lua script can update both. Write the idempotent index first:
+	// a stale member is safe and swept, while a winning persistent hash without
+	// an index would have no bounded recovery path.
+	if err := q.client.ZAddNX(ctx, q.pendingTransitionKey(), redis.Z{
+		Score:  float64(time.Now().UnixNano()),
+		Member: candidate.ID,
+	}).Err(); err != nil {
+		return false, fmt.Errorf("index pending task transition: %w", err)
+	}
+	result, err := taskTransitionCASScript.Run(
 		ctx,
 		q.client,
-		[]string{q.taskKey(task.ID)},
+		[]string{q.taskKey(candidate.ID)},
+		string(current.Status),
 		taskData,
-		string(task.Status),
-		q.terminalTTL.Milliseconds(),
+		string(candidate.Status),
+		current.CWMPID,
 		materializeArg,
+		allowTerminalRetry,
 	).Int64()
 	if err != nil {
-		return false, fmt.Errorf("transition task terminal: %w", err)
+		return false, fmt.Errorf("prepare task transition: %w", err)
 	}
 	if result < 0 {
 		return false, ErrTaskNotFound
 	}
+	if result == 0 {
+		return false, nil
+	}
+	return true, nil
+}
 
+func (q *RedisTaskQueue) defaultCleanupTransition(ctx context.Context, task *Task, oldCWMPID string) error {
 	pipe := q.client.Pipeline()
-	pipe.ZRem(ctx, q.queueKey(task.DeviceSN), task.ID)
-	if task.CWMPID != "" {
-		pipe.Del(ctx, q.cwmpKey(task.CWMPID))
+	if task.Status == TaskStatusPending {
+		pipe.ZAdd(ctx, q.queueKey(task.DeviceSN), redis.Z{Score: queueScore(task), Member: task.ID})
+	} else {
+		pipe.ZRem(ctx, q.queueKey(task.DeviceSN), task.ID)
+	}
+	if task.Status == TaskStatusSent && task.CWMPID != "" {
+		pipe.Set(ctx, q.cwmpKey(task.CWMPID), task.ID, cwmpMappingTTL)
+	}
+	if oldCWMPID != "" {
+		pipe.Del(ctx, q.cwmpKey(oldCWMPID))
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
-		return result == 1, fmt.Errorf("clean terminal task indexes: %w", err)
+		return fmt.Errorf("clean task transition indexes: %w", err)
 	}
-	return result == 1, nil
+	return nil
+}
+
+func (q *RedisTaskQueue) acknowledgeTransition(ctx context.Context, taskID string) error {
+	key := q.taskKey(taskID)
+	if err := q.client.HSet(ctx, key, "pg_sync_pending", "0").Err(); err != nil {
+		return fmt.Errorf("ack task pg transition: %w", err)
+	}
+	values, err := q.client.HMGet(ctx, key, "data", "transition_old_cwmp").Result()
+	if err != nil {
+		return fmt.Errorf("load pending task transition: %w", err)
+	}
+	if len(values) == 0 || values[0] == nil {
+		_ = q.client.ZRem(ctx, q.pendingTransitionKey(), taskID).Err()
+		return ErrTaskNotFound
+	}
+	var task Task
+	if err := json.Unmarshal([]byte(values[0].(string)), &task); err != nil {
+		return fmt.Errorf("unmarshal pending task transition: %w", err)
+	}
+	oldCWMPID := ""
+	if len(values) > 1 && values[1] != nil {
+		oldCWMPID, _ = values[1].(string)
+	}
+	cleanup := q.cleanupTransition
+	if cleanup == nil {
+		cleanup = q.defaultCleanupTransition
+	}
+	if err := cleanup(ctx, &task, oldCWMPID); err != nil {
+		return err
+	}
+	if err := q.client.HSet(ctx, key, "cleanup_pending", "0").Err(); err != nil {
+		return fmt.Errorf("ack task index cleanup: %w", err)
+	}
+	ttl := taskDetailTTL
+	if isTerminal(task.Status) {
+		ttl = q.terminalTTL
+	}
+	finalized, err := finalizeTaskTransitionScript.Run(
+		ctx, q.client, []string{key}, ttl.Milliseconds(),
+	).Int64()
+	if err != nil {
+		return fmt.Errorf("finalize task transition: %w", err)
+	}
+	if finalized < 0 {
+		_ = q.client.ZRem(ctx, q.pendingTransitionKey(), taskID).Err()
+		return ErrTaskNotFound
+	}
+	if finalized == 1 {
+		if err := q.client.ZRem(ctx, q.pendingTransitionKey(), taskID).Err(); err != nil {
+			return fmt.Errorf("remove pending task transition: %w", err)
+		}
+	}
+	return nil
+}
+
+func (q *RedisTaskQueue) listPendingTransitionIDs(ctx context.Context, limit int64) ([]string, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	return q.client.ZRange(ctx, q.pendingTransitionKey(), 0, limit-1).Result()
+}
+
+func (q *RedisTaskQueue) deferPendingTransition(ctx context.Context, taskID string) error {
+	return q.client.ZAddXX(ctx, q.pendingTransitionKey(), redis.Z{
+		Score:  float64(time.Now().UnixNano()),
+		Member: taskID,
+	}).Err()
+}
+
+type preparedTaskTransition struct {
+	Task          *Task
+	From          TaskStatus
+	PGSyncPending bool
+}
+
+func (q *RedisTaskQueue) loadPendingTransition(
+	ctx context.Context,
+	taskID string,
+) (*preparedTaskTransition, error) {
+	values, err := q.client.HMGet(
+		ctx, q.taskKey(taskID), "data", "transition_from", "pg_sync_pending",
+	).Result()
+	if err != nil {
+		return nil, fmt.Errorf("load pending transition: %w", err)
+	}
+	if len(values) < 3 || values[0] == nil || values[1] == nil {
+		return nil, nil
+	}
+	data, ok := values[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("pending transition data has type %T", values[0])
+	}
+	var task Task
+	if err := json.Unmarshal([]byte(data), &task); err != nil {
+		return nil, fmt.Errorf("unmarshal pending transition: %w", err)
+	}
+	from, _ := values[1].(string)
+	pgPending, _ := values[2].(string)
+	return &preparedTaskTransition{
+		Task:          &task,
+		From:          TaskStatus(from),
+		PGSyncPending: pgPending != "0",
+	}, nil
+}
+
+func (q *RedisTaskQueue) removePendingTransition(ctx context.Context, taskID string) error {
+	return q.client.ZRem(ctx, q.pendingTransitionKey(), taskID).Err()
+}
+
+func (q *RedisTaskQueue) resolvePendingTransition(
+	ctx context.Context,
+	durable *Task,
+) error {
+	if durable == nil {
+		return fmt.Errorf("durable task is nil")
+	}
+	data, err := json.Marshal(durable)
+	if err != nil {
+		return fmt.Errorf("marshal durable transition state: %w", err)
+	}
+	result, err := resolveTaskTransitionScript.Run(
+		ctx, q.client, []string{q.taskKey(durable.ID)}, data, string(durable.Status),
+	).Int64()
+	if err != nil {
+		return fmt.Errorf("resolve pending transition from pg: %w", err)
+	}
+	if result < 0 {
+		return ErrTaskNotFound
+	}
+	return nil
 }
 
 // GetQueueLengths 获取所有设备的队列长度（用于监控）

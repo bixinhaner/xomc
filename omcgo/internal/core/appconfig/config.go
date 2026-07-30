@@ -428,6 +428,21 @@ func (c TaskConfig) EffectiveTerminalRedisTTL() time.Duration {
 	return c.TerminalRedisTTL
 }
 
+// EffectiveTerminalRedisTTLFor additionally enforces the runtime safety
+// window required by the ACS session and the task reconciler. It prevents a
+// configuration change from expiring a terminal tombstone while the matching
+// device session or compensation grace period can still be active.
+func (c TaskConfig) EffectiveTerminalRedisTTLFor(
+	sessionTimeout, reconcilerGrace time.Duration,
+) time.Duration {
+	effective := c.EffectiveTerminalRedisTTL()
+	required := sessionTimeout + reconcilerGrace
+	if required > effective {
+		return required
+	}
+	return effective
+}
+
 // OfflineAlarmCleanupConfig 配置离线设备活动告警清理器（worker 进程的 OfflineAlarmCleaner）。
 //
 // 解决 issue #358：原阈值硬编码 1h（DefaultOfflineAlarmCleanupThreshold），运营商无法把告警

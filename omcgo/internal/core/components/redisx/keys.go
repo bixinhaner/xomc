@@ -104,6 +104,9 @@ func (KeyBuilder) ACSTaskQueuePrefix() string { return acsTaskQueuePrefix }
 // ACSTaskQueuePattern 队列扫描通配符（供 KEYS/SCAN 使用）。
 func (KeyBuilder) ACSTaskQueuePattern() string { return acsTaskQueuePrefix + "*" }
 
+// ACSTaskTransitionPending 待完成 PG 同步或跨 slot 索引清理的任务转换索引。
+func (KeyBuilder) ACSTaskTransitionPending() string { return acsTaskTransitionPendingKey }
+
 // ACSTaskDetail 任务详情 Hash（活跃态 4h；终态默认 15m、最低 10m）。
 func (KeyBuilder) ACSTaskDetail(taskID string) string { return acsTaskDetailPrefix + taskID }
 
@@ -314,16 +317,17 @@ func (KeyBuilder) RateLimitFixedWindowPrefix() string { return rateLimitFixedWin
 
 const (
 	// ACS
-	acsSessionPrefix        = "acs:session:id:"
-	acsHeartbeatPrefix      = "acs:heartbeat:"
-	acsOnlineSetKey         = "acs:online"
-	acsConnReqPendingPrefix = "acs:connreq:pending:"
-	acsContinuousWakePrefix = "acs:continuous_wake:"
-	acsUECountProbePrefix   = "acs:ue_count:probe:"
-	acsSTUNPrefix           = "acs:stun:"
-	acsTaskQueuePrefix      = "acs:taskq:"
-	acsTaskDetailPrefix     = "acs:task:"
-	acsCWMP2TaskPrefix      = "acs:cwmp2task:"
+	acsSessionPrefix            = "acs:session:id:"
+	acsHeartbeatPrefix          = "acs:heartbeat:"
+	acsOnlineSetKey             = "acs:online"
+	acsConnReqPendingPrefix     = "acs:connreq:pending:"
+	acsContinuousWakePrefix     = "acs:continuous_wake:"
+	acsUECountProbePrefix       = "acs:ue_count:probe:"
+	acsSTUNPrefix               = "acs:stun:"
+	acsTaskQueuePrefix          = "acs:taskq:"
+	acsTaskDetailPrefix         = "acs:task:"
+	acsCWMP2TaskPrefix          = "acs:cwmp2task:"
+	acsTaskTransitionPendingKey = "acs:task:transition:pending"
 	// issue #65（Option B）— ACS 横扩去进程态：准入槽位 / 设备会话指针 / CR URL / nonce
 	acsAdmissionSlotsKey   = "acs:admission:slots"
 	acsDeviceSessionPrefix = "acs:device:session:"

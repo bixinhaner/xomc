@@ -26,3 +26,13 @@ func TestTaskConfig_EffectiveTerminalRedisTTL(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskConfig_EffectiveTerminalRedisTTLForRuntimeWindow(t *testing.T) {
+	cfg := TaskConfig{TerminalRedisTTL: 10 * time.Minute}
+	require.Equal(t, 13*time.Minute,
+		cfg.EffectiveTerminalRedisTTLFor(12*time.Minute, time.Minute))
+
+	cfg.TerminalRedisTTL = 20 * time.Minute
+	require.Equal(t, 20*time.Minute,
+		cfg.EffectiveTerminalRedisTTLFor(12*time.Minute, time.Minute))
+}

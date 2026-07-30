@@ -166,6 +166,47 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
 	return nil
 }
 
+// TransitionIfStatus applies a complete task snapshot only when the durable
+// row still has the state observed by the Redis transition winner. This is the
+// PostgreSQL half of the first-writer-wins fence and prevents a late retry,
+// cancellation, expiration, or sent update from reviving a terminal row.
+func (r *PgTaskRepository) TransitionIfStatus(
+	ctx context.Context,
+	task *Task,
+	from TaskStatus,
+) (bool, error) {
+	if task == nil {
+		return false, fmt.Errorf("task is nil")
+	}
+	query, args, err := storage.Psql.Update("device_tasks").
+		Set("method", task.Method).
+		Set("params", task.Params).
+		Set("priority", task.Priority).
+		Set("command_key", task.CommandKey).
+		Set("cwmp_id", task.CWMPID).
+		Set("status", task.Status).
+		Set("retry_count", task.RetryCount).
+		Set("max_retries", task.MaxRetries).
+		Set("retry_interval_seconds", task.RetryIntervalSeconds).
+		Set("sent_at", task.SentAt).
+		Set("completed_at", task.CompletedAt).
+		Set("expires_at", task.ExpiresAt).
+		Set("next_attempt_at", task.NextAttemptAt).
+		Set("result", task.Result).
+		Set("error_code", task.ErrorCode).
+		Set("error_message", task.ErrorMessage).
+		Where(sq.Eq{"id": task.ID, "status": from}).
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build conditional task transition: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("execute conditional task transition: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // MarkSentIfPending is the PostgreSQL execution fence used immediately before
 // ACS sends an RPC. A cancelled/expired/terminal task can never be revived to
 // sent, even when a stale copy is still present in Redis.
