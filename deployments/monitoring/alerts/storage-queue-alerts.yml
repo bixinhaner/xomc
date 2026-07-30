@@ -41,16 +41,30 @@ groups:
 
       - alert: PersistentQueueBacklogHigh
         # app 与 worker 都会采集同一 PostgreSQL 快照。先按 queue/status 取最大值
-        # 去重采集副本，再跨活动状态求和，避免同一积压被按进程数放大。
-        expr: sum by (queue) (max by (queue, status) (omc_persistent_queue_pending{status=~"pending|sent|running"})) > 1000
+        # 去重采集副本，再跨真正待处理状态求和。sent 是已下发、等待设备响应的
+        # 在途任务，不属于 worker backlog；它由下方独立的年龄告警治理。
+        expr: (sum by (queue) (max by (queue, status) (omc_persistent_queue_pending{status=~"pending|running"} and on (deployment_unit, service, instance, job, queue) (omc_persistent_queue_up == 1) and on (deployment_unit, service, instance, job, queue) (time() - omc_persistent_queue_sample_timestamp_seconds < 120))) and on (queue) (min by (queue) (omc_persistent_queue_up * on (deployment_unit, service, instance, job, queue) (time() - omc_persistent_queue_sample_timestamp_seconds < bool 120)) == 1)) > 1000
         for: 10m
         labels:
           severity: warning
           domain: omc
           subsystem: postgres
         annotations:
-          summary: "PostgreSQL 持久化队列 {{ $labels.queue }} 积压超过 1000"
-          description: "固定队列积压持续超过阈值；检查对应 worker、数据库连接池和死信数量。"
+          summary: "PostgreSQL 持久化队列 {{ $labels.queue }} 待处理积压超过 1000"
+          description: "固定队列 pending/running 积压持续超过阈值；检查对应 worker、数据库连接池和死信数量。"
+
+      - alert: PersistentQueueInFlightStale
+        # 按每条任务自身的 expires_at 判断逾期，兼容 MML 等合法长 TTL。
+        # 逾期 5 分钟仍未清理，才表示 ACS 响应/过期/状态对账可能失效。
+        expr: (max by (queue) (omc_persistent_queue_overdue_oldest_age_seconds{queue="device_tasks",status="sent"} and on (deployment_unit, service, instance, job, queue) (omc_persistent_queue_up{queue="device_tasks"} == 1) and on (deployment_unit, service, instance, job, queue) (time() - omc_persistent_queue_sample_timestamp_seconds{queue="device_tasks"} < 120)) and on (queue) (min by (queue) (omc_persistent_queue_up{queue="device_tasks"} * on (deployment_unit, service, instance, job, queue) (time() - omc_persistent_queue_sample_timestamp_seconds{queue="device_tasks"} < bool 120)) == 1)) > 300
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: postgres
+        annotations:
+          summary: "PostgreSQL 持久化队列 {{ $labels.queue }} 在途任务逾期超过 5 分钟"
+          description: "device_tasks 的 sent 任务已超过自身 expires_at 5 分钟并持续未清理；检查 ACS 响应处理、过期扫描和 Redis/PG 状态对账。"
 
       - alert: PersistentQueueObserverUnavailable
         expr: omc_persistent_queue_up == 0

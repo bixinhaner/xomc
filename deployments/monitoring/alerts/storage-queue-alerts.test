@@ -59,6 +59,170 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks",status="pending"}'
+        values: '100x12'
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks",status="running"}'
+        values: '0x12'
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks",status="sent"}'
+        values: '2000x12'
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks",status="pending"}'
+        values: '100x12'
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks",status="running"}'
+        values: '0x12'
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks",status="sent"}'
+        values: '2000x12'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '1x12'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '0+60x11'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '1x12'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '0+60x11'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: PersistentQueueBacklogHigh
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks",status="pending"}'
+        values: '1001x12'
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks",status="running"}'
+        values: '0x12'
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks",status="pending"}'
+        values: '1001x12'
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks",status="running"}'
+        values: '0x12'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '1x12'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '0+60x11'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '1x12'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '0+60x11'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: PersistentQueueBacklogHigh
+        exp_alerts:
+          - exp_labels:
+              queue: device_tasks
+              severity: warning
+              domain: omc
+              subsystem: postgres
+            exp_annotations:
+              summary: "PostgreSQL 持久化队列 device_tasks 待处理积压超过 1000"
+              description: "固定队列 pending/running 积压持续超过阈值；检查对应 worker、数据库连接池和死信数量。"
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks",status="pending"}'
+        values: '1001x12'
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks",status="pending"}'
+        values: '1001x12'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '1x12'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '0+60x11'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '0x12'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '0+60x11'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: PersistentQueueBacklogHigh
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks",status="pending"}'
+        values: '1001x12'
+      - series: 'omc_persistent_queue_pending{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks",status="pending"}'
+        values: '1001x12'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '1x12'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '0+60x11'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '1x12'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '0x12'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: PersistentQueueBacklogHigh
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_persistent_queue_overdue_oldest_age_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks",status="sent"}'
+        values: '0+60x20'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '1x21'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '0+60x20'
+      - series: 'omc_persistent_queue_overdue_oldest_age_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks",status="sent"}'
+        values: '0+60x20'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '1x21'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '0+60x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: PersistentQueueInFlightStale
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: PersistentQueueInFlightStale
+        exp_alerts:
+          - exp_labels:
+              queue: device_tasks
+              severity: warning
+              domain: omc
+              subsystem: postgres
+            exp_annotations:
+              summary: "PostgreSQL 持久化队列 device_tasks 在途任务逾期超过 5 分钟"
+              description: "device_tasks 的 sent 任务已超过自身 expires_at 5 分钟并持续未清理；检查 ACS 响应处理、过期扫描和 Redis/PG 状态对账。"
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_persistent_queue_overdue_oldest_age_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks",status="sent"}'
+        values: '600x17'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '1x17'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '0+60x16'
+      - series: 'omc_persistent_queue_overdue_oldest_age_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks",status="sent"}'
+        values: '600x17'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '0x17'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '0+60x16'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: PersistentQueueInFlightStale
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_persistent_queue_overdue_oldest_age_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks",status="sent"}'
+        values: '600x17'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '1x17'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue="device_tasks"}'
+        values: '0+60x16'
+      - series: 'omc_persistent_queue_overdue_oldest_age_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks",status="sent"}'
+        values: '600x17'
+      - series: 'omc_persistent_queue_up{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '1x17'
+      - series: 'omc_persistent_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue="device_tasks"}'
+        values: '0x17'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: PersistentQueueInFlightStale
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
       - series: 'omc_redis_task_queue_oldest_age_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue_family="taskq"}'
         values: '4000x81'
       - series: 'omc_redis_task_queue_up{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue_family="taskq"}'

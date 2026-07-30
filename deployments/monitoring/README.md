@@ -359,6 +359,7 @@ deployments/monitoring/tests/validate-cadvisor-service-labels.sh
 |---|---|---|---|---|
 | `pending` | `queue,status` | 条 | 队列为空时为真实 `0` | 保留上次值 |
 | `oldest_age_seconds` | `queue,status` | 秒 | 无积压时为真实 `0` | 保留上次值 |
+| `overdue_oldest_age_seconds` | `queue,status` | 秒 | 未超过任务自身 `expires_at` 时为真实 `0` | 保留上次值 |
 | `failed_total` | `queue` | 次 | 尚无失败时可从 `0` 开始 | 观测失败不冒充业务失败 |
 | `dead_letter_total` | `queue` | 条 | 无死信时为真实 `0` | 保留上次值并记录观测失败 |
 | `processed_total` | `queue,result` | 次 | 尚未处理时可从 `0` 开始 | 观测失败不冒充处理结果 |

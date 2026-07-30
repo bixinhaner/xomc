@@ -249,7 +249,9 @@ if [ "$fresh_container_filters" -ge 10 ]; then
 else
   bad "cAdvisor 资源告警新鲜度过滤不足：got=$fresh_container_filters want>=10"
 fi
-contains "持久化队列告警去重多进程快照" 'sum by (queue) (max by (queue, status) (omc_persistent_queue_pending{status=~"pending|sent|running"})) > 1000' "$REPO_ROOT/deployments/monitoring/alerts/storage-queue-alerts.yml"
+contains "持久化队列告警去重多进程快照" 'sum by (queue) (max by (queue, status) (omc_persistent_queue_pending{status=~"pending|running"}' "$REPO_ROOT/deployments/monitoring/alerts/storage-queue-alerts.yml"
+contains "持久化队列 sent 任务独立按年龄治理" 'alert: PersistentQueueInFlightStale' "$REPO_ROOT/deployments/monitoring/alerts/storage-queue-alerts.yml"
+contains "持久化队列 sent 任务按自身到期时间治理" 'omc_persistent_queue_overdue_oldest_age_seconds{queue="device_tasks",status="sent"}' "$REPO_ROOT/deployments/monitoring/alerts/storage-queue-alerts.yml"
 contains "存储队列 Dashboard 去重多进程快照" 'max by (queue, status) (omc_persistent_queue_pending)' "$REPO_ROOT/deployments/monitoring/grafana/dashboards/omc-storage-queue-governance.json"
 contains "基础设施 Dashboard 去重多进程快照" 'max by (queue, status) (omc_persistent_queue_pending)' "$REPO_ROOT/deployments/monitoring/grafana/dashboards/omc-infra.json"
 contains "node exporter 读取资源计划 textfile" '--collector.textfile.directory=/textfile' "$RELEASE_MONITORING_COMPOSE"

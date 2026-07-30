@@ -46,12 +46,13 @@ func PersistentQueueNames() []string {
 // Persistent queue metric suffixes are shared by PM, task, and storage-backed
 // queue observers. Units are encoded in the suffix where applicable.
 const (
-	PersistentQueueMetricPending               = "pending"
-	PersistentQueueMetricOldestAgeSeconds      = "oldest_age_seconds"
-	PersistentQueueMetricFailedTotal           = "failed_total"
-	PersistentQueueMetricDeadLetterTotal       = "dead_letter_total"
-	PersistentQueueMetricProcessedTotal        = "processed_total"
-	PersistentQueueMetricObserverFailuresTotal = "observer_failures_total"
+	PersistentQueueMetricPending                 = "pending"
+	PersistentQueueMetricOldestAgeSeconds        = "oldest_age_seconds"
+	PersistentQueueMetricOverdueOldestAgeSeconds = "overdue_oldest_age_seconds"
+	PersistentQueueMetricFailedTotal             = "failed_total"
+	PersistentQueueMetricDeadLetterTotal         = "dead_letter_total"
+	PersistentQueueMetricProcessedTotal          = "processed_total"
+	PersistentQueueMetricObserverFailuresTotal   = "observer_failures_total"
 )
 
 // PersistentQueueStatuses returns a fresh copy of the only status vocabulary
