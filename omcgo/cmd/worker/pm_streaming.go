@@ -22,6 +22,11 @@ import (
 const pmBuiltinInitialRetryInterval = 2 * time.Second
 const pmBuiltinInitialRetryTimeout = time.Minute
 const pmRuleCatalogRefreshInterval = 5 * time.Minute
+const pmRedisSweepInterval = 5 * time.Minute
+const pmRedisSweepSafetyThreshold = 30 * time.Minute
+const pmRedisSweepScanLimit = 64
+const pmRedisSweepUnlinkBatch = 128
+const pmPublishedVersionRepairInterval = time.Minute
 
 type pmBuiltinReconcileFunc func(context.Context) (adhoc.BuiltinReconcileResult, error)
 type pmSnapshotReloadFunc func(context.Context) error
@@ -73,7 +78,9 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	}
 	logger := w.Logger.Named("pm-streaming-aggregation")
 	streamMetrics := pmstream.NewMetrics(w.MetricsReg)
-	store := pmstream.NewRedisWindowStore(w.Redis, cfg.WindowTTL)
+	store := pmstream.NewRedisWindowStore(w.Redis, cfg.WindowTTL).
+		SetMetrics(streamMetrics).
+		SetV2WriteEnabled(cfg.RedisV2WriteEnabled)
 	if err := store.ValidateConfiguration(ctx); err != nil {
 		streamMetrics.Ready.Set(0)
 		logger.Error("PM streaming aggregation Redis configuration rejected", zap.Error(err))
@@ -102,6 +109,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 		logger.Error("load initial PM aggregation task snapshot", zap.Error(err))
 		return
 	}
+	store.SetSnapshot(snapshot)
 	matcher := pmstream.NewMatcher(tz.Current())
 	windowRepo := pmstream.NewWindowRepository(w.TsPool)
 	if err := windowRepo.BackfillVersionMetadata(ctx, snapshot.Current()); err != nil {
@@ -111,6 +119,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	finalizer := pmstream.NewFinalizer(windowRepo, store, logger).
 		SetConcurrency(cfg.FinalizeConcurrency).
 		SetSnapshot(snapshot).
+		SetLocation(tz.Current()).
 		SetMetrics(streamMetrics)
 	recovery := pmstream.NewRecovery(w.NATS.JS, windowRepo, store, snapshot, matcher, logger)
 	if err := recovery.RestoreActiveWindows(ctx); err != nil {
@@ -163,6 +172,12 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	rebuilder := pmstream.NewRebuilder(
 		rebuildRepo, recovery, finalizer, store, rollupOutboxRepo, logger,
 	).SetMetrics(streamMetrics)
+	redisSweeper := pmstream.NewRedisStateSweeper(
+		store, windowRepo, pmRedisSweepSafetyThreshold, streamMetrics, logger,
+	)
+	publishedVersionRepairer := pmstream.NewPublishedVersionRepairer(
+		windowRepo, snapshot, tz.Current(), logger,
+	)
 	go func() {
 		if err := relay.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("PM aggregation outbox relay stopped", zap.Error(err))
@@ -181,10 +196,15 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	go recovery.Run(ctx, time.Minute)
 	go rebuilder.Run(ctx)
 	go scanner.Run(ctx)
+	go publishedVersionRepairer.Run(ctx, pmPublishedVersionRepairInterval)
+	go redisSweeper.Run(
+		ctx, pmRedisSweepInterval, pmRedisSweepScanLimit, pmRedisSweepUnlinkBatch,
+	)
 	streamMetrics.Ready.Set(1)
 	logger.Info("PM streaming aggregation ready",
 		zap.Duration("close_grace", cfg.CloseGrace),
-		zap.Duration("window_ttl", cfg.WindowTTL))
+		zap.Duration("window_ttl", cfg.WindowTTL),
+		zap.Bool("redis_v2_write_enabled", cfg.RedisV2WriteEnabled))
 }
 
 // runPMRuleCatalogRefreshLoop refreshes immutable membership definitions only.

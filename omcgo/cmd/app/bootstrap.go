@@ -62,7 +62,7 @@ func initApp(ctx context.Context, cfg *appconfig.AppConfig) (*appInfra, error) {
 
 	// 创建统一任务队列：TaskService（Redis + PG 双写）。
 	// 业务模块直连 TaskService.CreateTask；旧的 cmdqueue 兼容适配层已下线。
-	taskQueue := task.NewRedisTaskQueue(inf.Redis)
+	taskQueue := task.NewRedisTaskQueueWithTerminalTTL(inf.Redis, cfg.Task.EffectiveTerminalRedisTTL())
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	app.TaskSvc = task.NewTaskService(taskQueue, taskRepo, inf.Logger)
 	// T-0157 C1: 注入默认超时兜底（详见 appconfig.TaskConfig 注释）

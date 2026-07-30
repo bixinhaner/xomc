@@ -2,7 +2,10 @@ package stream
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +14,154 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCompactAccumulatorV2StoresOnlyNumericState(t *testing.T) {
+	value := ContributionValue{
+		Dimension: DimensionDevice, DimensionKey: uuid.NewString(),
+		DimensionName: "ENB-000001", ObjectLDN: "Device.Services.FAPService.1.CellConfig.LTE.RAN",
+		DeviceOUI: "001A2B", DeviceSN: "SN-000001", Technology: "LTE",
+		MetricPath: "C000010070", MetricType: "counter", Operation: AggregationAvg,
+	}
+	legacyDefinition, err := encodeDefinition(value)
+	require.NoError(t, err)
+	legacy := strings.Join([]string{
+		"v1", legacyDefinition, "12345.6789", "96", "-120.5", "38.75",
+	}, "|")
+
+	encoded := encodeCompactAccumulatorV2(12345.6789, 96, -120.5, 38.75)
+	require.LessOrEqual(t, len(encoded), len(legacy)*45/100)
+	require.NotContains(t, encoded, value.MetricPath)
+	require.NotContains(t, encoded, base64.RawURLEncoding.EncodeToString([]byte(value.MetricPath)))
+
+	sum, count, minValue, maxValue, err := decodeCompactAccumulatorV2(encoded)
+	require.NoError(t, err)
+	require.Equal(t, 12345.6789, sum)
+	require.EqualValues(t, 96, count)
+	require.Equal(t, -120.5, minValue)
+	require.Equal(t, 38.75, maxValue)
+}
+
+func TestRedisMemoryModelPlanningEstimateV2FitsTwentyThousandDevices(t *testing.T) {
+	const (
+		devices       = int64(20_000)
+		metrics       = int64(146)
+		granularities = int64(4)
+		// Redis hash entry overhead varies by allocator/encoding. Use a
+		// deliberately conservative 96 bytes on top of the actual v2 field
+		// and value lengths so this is a capacity guard, not an optimistic
+		// serialization-only estimate.
+		hashEntryOverhead = int64(96)
+		windowOverhead    = int64(1536)
+	)
+	fieldBytes := int64(len("0123456789abcdef01234567|0123456789abcdef"))
+	valueBytes := int64(len(encodeCompactAccumulatorV2(12345.6789, 96, -120.5, 38.75)))
+	total := devices * granularities *
+		(windowOverhead + metrics*(fieldBytes+valueBytes+hashEntryOverhead))
+
+	require.Less(t, total, int64(5*1024*1024*1024/2),
+		"analytical planning estimate must stay below 2.5 GiB; Task 8 verifies real Redis")
+}
+
+func TestRedisWindowStoreV2StoresDefinitionOnceAndIdentityOncePerWindow(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	hook := &redisCommandRecordingHook{}
+	client.AddHook(hook)
+	store := NewRedisWindowStore(client, time.Hour).SetV2WriteEnabled(true)
+	start := time.Date(2026, 7, 30, 1, 0, 0, 0, time.UTC)
+	versionID := uuid.New()
+	key := WindowKey{
+		TaskID: uuid.New(), TaskVersionID: versionID, Granularity: GranularityHourly,
+		EntityKey: "device-1", Start: start, End: start.Add(time.Hour),
+	}
+	values := []ContributionValue{
+		{
+			Dimension: DimensionDevice, DimensionKey: "device-1", DimensionName: "ENB-1",
+			DeviceOUI: "001A2B", DeviceSN: "SN-1", Technology: "LTE",
+			MetricPath: "C001", MetricType: "counter", Operation: AggregationSum, Value: 12,
+		},
+		{
+			Dimension: DimensionDevice, DimensionKey: "device-1", DimensionName: "ENB-1",
+			DeviceOUI: "001A2B", DeviceSN: "SN-1", Technology: "LTE",
+			MetricPath: "C002", MetricType: "counter", Operation: AggregationMax, Value: 7,
+		},
+	}
+	for slot := 0; slot < 2; slot++ {
+		_, err := store.Accumulate(context.Background(), Contribution{
+			Key: key, SourceFileID: uuid.NewString(), DeviceID: "device-1",
+			SlotStart: start.Add(time.Duration(slot) * slotDuration), ExpectedSlots: 4,
+			Values: values,
+		})
+		require.NoError(t, err)
+	}
+	hook.mu.Lock()
+	require.NotContains(t, hook.commands, "hsetnx",
+		"definitions must not add one Redis round trip per metric")
+	require.LessOrEqual(t, countStrings(hook.commands, "hset"), 1,
+		"task-version definitions must be written in one bounded batch")
+	hook.mu.Unlock()
+
+	keys := redisKeys(key, 1)
+	identityCount, err := client.HLen(context.Background(), keys.identities).Result()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, identityCount,
+		"device/entity identity must be stored once per window")
+	identityValues, err := client.HVals(context.Background(), keys.identities).Result()
+	require.NoError(t, err)
+	require.Len(t, identityValues, 1)
+	identityJSON, err := base64.RawURLEncoding.DecodeString(identityValues[0])
+	require.NoError(t, err)
+	require.NotContains(t, string(identityJSON), `"oui"`,
+		"device identity must not be repeated in every result identity")
+	require.NotContains(t, string(identityJSON), `"sn"`,
+		"device identity must not be repeated in every result identity")
+	require.Equal(t, "001A2B", server.HGet(keys.meta, "device_oui"))
+	require.Equal(t, "SN-1", server.HGet(keys.meta, "device_sn"))
+	definitionCount, err := client.HLen(
+		context.Background(), redisVersionDefinitionsKey(versionID),
+	).Result()
+	require.NoError(t, err)
+	require.EqualValues(t, 2, definitionCount,
+		"metric definitions must be stored once per immutable task version")
+	definitionTTL, err := client.TTL(
+		context.Background(), redisVersionDefinitionsKey(versionID),
+	).Result()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, definitionTTL, 44*24*time.Hour,
+		"shared definitions must outlive every supported active window")
+	fields, err := server.HKeys(keys.acc[0])
+	require.NoError(t, err)
+	require.Len(t, fields, 2)
+	for _, field := range fields {
+		require.True(t, strings.HasPrefix(server.HGet(keys.acc[0], field), "v2|"))
+	}
+
+	state, err := store.Read(context.Background(), key)
+	require.NoError(t, err)
+	require.Len(t, state.Accumulators, 2)
+	hook.mu.Lock()
+	require.Contains(t, hook.commands, "hscan")
+	require.LessOrEqual(t, countStrings(hook.commands, "hgetall"), 1,
+		"window identities must use bounded HSCAN; only version definitions may use HGETALL")
+	hook.mu.Unlock()
+}
+
+func TestAccumulatorV2LuaKeepsStableMetricLoopFreeOfIdentityAndLegacyWork(t *testing.T) {
+	loop := strings.Index(accumulateLua, "for i = 1, value_count do")
+	require.Positive(t, loop)
+	identityWrite := strings.Index(accumulateLua, `redis.call("HSETNX", identities`)
+	require.Positive(t, identityWrite)
+	require.Less(t, identityWrite, loop,
+		"identity registration must happen once per unique entity before the metric loop")
+	currentLookup := strings.Index(accumulateLua, `local current = redis.call("HGET", acc, base)`)
+	require.Positive(t, currentLookup)
+	migrationElse := currentLookup + strings.Index(accumulateLua[currentLookup:], "\n    else\n")
+	require.Greater(t, migrationElse, currentLookup)
+	require.Greater(t,
+		strings.Index(accumulateLua, `local legacy_compact = redis.call("HGET", acc, legacy_base)`),
+		migrationElse,
+		"legacy probes must run only for the one-time v1-to-v2 migration path")
+}
 
 func TestRedisWindowStoreAccumulateIsIdempotentAndComplete(t *testing.T) {
 	server := miniredis.RunT(t)
@@ -50,8 +201,37 @@ func TestRedisWindowStoreAccumulateIsIdempotentAndComplete(t *testing.T) {
 	fields, err := server.HKeys(keys.acc[0])
 	require.NoError(t, err)
 	require.Len(t, fields, 1)
-	require.Less(t, len(fields[0]), 40, "accumulator fields must use compact IDs")
+	require.Less(t, len(fields[0]), 48, "accumulator fields must use compact IDs")
 	require.False(t, server.Exists(keys.defs[0]))
+}
+
+func TestRedisWindowStoreDefaultsToRollbackSafeV1Writes(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	store := NewRedisWindowStore(client, time.Hour)
+	start := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
+	key := WindowKey{
+		TaskID: uuid.New(), TaskVersionID: uuid.New(), Granularity: GranularityHourly,
+		EntityKey: "network", Start: start, End: start.Add(time.Hour),
+	}
+	_, err := store.Accumulate(context.Background(), Contribution{
+		Key: key, SourceFileID: uuid.NewString(), DeviceID: uuid.NewString(),
+		SlotStart: start, ExpectedSlots: 4,
+		Values: []ContributionValue{{
+			Dimension: DimensionNetwork, DimensionKey: "network",
+			MetricPath: "C001", MetricType: "counter", Operation: AggregationSum, Value: 1,
+		}},
+	})
+	require.NoError(t, err)
+	fields, err := server.HKeys(redisKeys(key, 1).acc[0])
+	require.NoError(t, err)
+	require.Len(t, fields, 1)
+	require.True(t, strings.HasPrefix(
+		server.HGet(redisKeys(key, 1).acc[0], fields[0]),
+		legacyCompactAccumulatorVersion+"|",
+	))
+	require.False(t, server.Exists(redisVersionDefinitionsKey(key.TaskVersionID)))
+	require.False(t, server.Exists(redisKeys(key, 1).identities))
 }
 
 func TestRedisWindowStoreFencesNormalWritesDuringRebuild(t *testing.T) {
@@ -126,7 +306,7 @@ func TestRedisWindowStoreUsesOneCompactHashFieldPerMetric(t *testing.T) {
 		require.NotContains(t, field, "|min")
 		require.NotContains(t, field, "|max")
 		raw := server.HGet(keys.acc[0], field)
-		require.True(t, strings.HasPrefix(raw, compactAccumulatorVersion+"|"))
+		require.True(t, strings.HasPrefix(raw, legacyCompactAccumulatorVersion+"|"))
 	}
 	require.False(t, server.Exists(keys.defs[0]),
 		"new compact windows must not allocate a separate definitions hash")
@@ -135,7 +315,7 @@ func TestRedisWindowStoreUsesOneCompactHashFieldPerMetric(t *testing.T) {
 func TestRedisWindowStoreMigratesLegacyAccumulatorOnFirstWrite(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
-	store := NewRedisWindowStore(client, time.Hour)
+	store := NewRedisWindowStore(client, time.Hour).SetV2WriteEnabled(true)
 	start := time.Date(2026, 7, 29, 2, 0, 0, 0, time.UTC)
 	key := WindowKey{
 		TaskID: uuid.New(), TaskVersionID: uuid.New(), Granularity: GranularityHourly,
@@ -182,10 +362,211 @@ func TestRedisWindowStoreMigratesLegacyAccumulatorOnFirstWrite(t *testing.T) {
 
 	fields, err := server.HKeys(keys.acc[0])
 	require.NoError(t, err)
-	require.Equal(t, []string{id}, fields)
-	raw := server.HGet(keys.acc[0], id)
+	require.Len(t, fields, 1)
+	require.NotEqual(t, id, fields[0], "the v1 full-definition ID must be migrated")
+	raw := server.HGet(keys.acc[0], fields[0])
 	require.True(t, strings.HasPrefix(raw, compactAccumulatorVersion+"|"))
 	require.False(t, server.Exists(keys.defs[0]))
+}
+
+func TestRedisWindowStoreMergesV1WrittenDuringRollingUpgrade(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	store := NewRedisWindowStore(client, time.Hour).SetV2WriteEnabled(true)
+	start := time.Date(2026, 7, 30, 3, 0, 0, 0, time.UTC)
+	key := WindowKey{
+		TaskID: uuid.New(), TaskVersionID: uuid.New(), Granularity: GranularityHourly,
+		EntityKey: "network", Start: start, End: start.Add(time.Hour),
+	}
+	value := ContributionValue{
+		Dimension: DimensionNetwork, DimensionKey: "network",
+		MetricPath: "C001", MetricType: "counter", Operation: AggregationSum, Value: 12,
+	}
+	_, err := store.Accumulate(context.Background(), Contribution{
+		Key: key, SourceFileID: uuid.NewString(), DeviceID: uuid.NewString(),
+		SlotStart: start, ExpectedSlots: 4, Values: []ContributionValue{value},
+	})
+	require.NoError(t, err)
+
+	legacyID, err := accumulatorDefinitionID(value)
+	require.NoError(t, err)
+	legacyDefinition, err := encodeDefinition(value)
+	require.NoError(t, err)
+	require.NoError(t, client.HSet(
+		context.Background(), redisKeys(key, 1).acc[0], legacyID,
+		strings.Join([]string{
+			legacyCompactAccumulatorVersion, legacyDefinition, "5", "1", "5", "5",
+		}, "|"),
+	).Err())
+
+	state, err := store.Read(context.Background(), key)
+	require.NoError(t, err)
+	require.Len(t, state.Accumulators, 1)
+	require.Equal(t, 17.0, state.Accumulators[0].Sum)
+	require.EqualValues(t, 2, state.Accumulators[0].Count)
+}
+
+func TestRedisWindowStoreCanDisableV2AfterDrainWithoutLosingDualReadState(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	store := NewRedisWindowStore(client, time.Hour).SetV2WriteEnabled(true)
+	start := time.Date(2026, 7, 30, 3, 30, 0, 0, time.UTC)
+	key := WindowKey{
+		TaskID: uuid.New(), TaskVersionID: uuid.New(), Granularity: GranularityHourly,
+		EntityKey: "network", Start: start, End: start.Add(time.Hour),
+	}
+	value := ContributionValue{
+		Dimension: DimensionNetwork, DimensionKey: "network",
+		MetricPath: "C001", MetricType: "counter", Operation: AggregationSum, Value: 12,
+	}
+	_, err := store.Accumulate(context.Background(), Contribution{
+		Key: key, SourceFileID: uuid.NewString(), DeviceID: uuid.NewString(),
+		SlotStart: start, ExpectedSlots: 4, Values: []ContributionValue{value},
+	})
+	require.NoError(t, err)
+	store.SetV2WriteEnabled(false)
+	value.Value = 5
+	_, err = store.Accumulate(context.Background(), Contribution{
+		Key: key, SourceFileID: uuid.NewString(), DeviceID: uuid.NewString(),
+		SlotStart: start.Add(slotDuration), ExpectedSlots: 4,
+		Values: []ContributionValue{value},
+	})
+	require.NoError(t, err)
+
+	state, err := store.Read(context.Background(), key)
+	require.NoError(t, err)
+	require.Len(t, state.Accumulators, 1)
+	require.Equal(t, 17.0, state.Accumulators[0].Sum)
+	require.EqualValues(t, 2, state.Accumulators[0].Count)
+}
+
+type redisCommandRecordingHook struct {
+	mu       sync.Mutex
+	commands []string
+}
+
+func countStrings(values []string, target string) int {
+	count := 0
+	for _, value := range values {
+		if value == target {
+			count++
+		}
+	}
+	return count
+}
+
+func (h *redisCommandRecordingHook) DialHook(next redis.DialHook) redis.DialHook {
+	return next
+}
+
+func (h *redisCommandRecordingHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		h.mu.Lock()
+		h.commands = append(h.commands, cmd.Name())
+		h.mu.Unlock()
+		return next(ctx, cmd)
+	}
+}
+
+func (h *redisCommandRecordingHook) ProcessPipelineHook(
+	next redis.ProcessPipelineHook,
+) redis.ProcessPipelineHook {
+	return func(ctx context.Context, commands []redis.Cmder) error {
+		h.mu.Lock()
+		for _, command := range commands {
+			h.commands = append(h.commands, command.Name())
+		}
+		h.mu.Unlock()
+		return next(ctx, commands)
+	}
+}
+
+func TestRedisWindowStoreDeletesLargeStateWithUnlink(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	hook := &redisCommandRecordingHook{}
+	client.AddHook(hook)
+	store := NewRedisWindowStore(client, time.Hour)
+	start := time.Date(2026, 7, 30, 4, 0, 0, 0, time.UTC)
+	key := WindowKey{
+		TaskID: uuid.New(), TaskVersionID: uuid.New(), Granularity: GranularityHourly,
+		EntityKey: "network", Start: start, End: start.Add(time.Hour),
+	}
+	_, err := store.Accumulate(context.Background(), Contribution{
+		Key: key, SourceFileID: uuid.NewString(), DeviceID: uuid.NewString(),
+		SlotStart: start, ExpectedSlots: 4,
+		Values: []ContributionValue{{
+			Dimension: DimensionNetwork, DimensionKey: "network",
+			MetricPath: "C001", MetricType: "counter", Operation: AggregationSum, Value: 1,
+		}},
+	})
+	require.NoError(t, err)
+	hook.mu.Lock()
+	hook.commands = nil
+	hook.mu.Unlock()
+
+	require.NoError(t, store.DeleteState(context.Background(), key))
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
+	require.Contains(t, hook.commands, "unlink")
+	require.NotContains(t, hook.commands, "del")
+}
+
+type failNthUnlinkHook struct {
+	nth   int
+	count int
+}
+
+func (h *failNthUnlinkHook) DialHook(next redis.DialHook) redis.DialHook {
+	return next
+}
+
+func (h *failNthUnlinkHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		if cmd.Name() == "unlink" {
+			h.count++
+			if h.count == h.nth {
+				return errors.New("injected unlink failure")
+			}
+		}
+		return next(ctx, cmd)
+	}
+}
+
+func (h *failNthUnlinkHook) ProcessPipelineHook(
+	next redis.ProcessPipelineHook,
+) redis.ProcessPipelineHook {
+	return next
+}
+
+func TestRedisWindowStoreRetainsMetaUntilAllUnlinkBatchesSucceed(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	hook := &failNthUnlinkHook{nth: 3}
+	client.AddHook(hook)
+	store := NewRedisWindowStore(client, time.Hour)
+	start := time.Date(2026, 7, 30, 5, 0, 0, 0, time.UTC)
+	key := WindowKey{
+		TaskID: uuid.New(), TaskVersionID: uuid.New(), Granularity: GranularityHourly,
+		EntityKey: "network", Start: start, End: start.Add(time.Hour),
+	}
+	_, err := store.Accumulate(context.Background(), Contribution{
+		Key: key, SourceFileID: uuid.NewString(), DeviceID: uuid.NewString(),
+		SlotStart: start, ExpectedSlots: 4,
+		Values: []ContributionValue{{
+			Dimension: DimensionNetwork, DimensionKey: "network",
+			MetricPath: "C001", MetricType: "counter", Operation: AggregationSum, Value: 1,
+		}},
+	})
+	require.NoError(t, err)
+
+	err = store.unlink(context.Background(), key, false, 2)
+	require.ErrorContains(t, err, "injected unlink failure")
+	require.True(t, server.Exists(redisKeys(key, 1).meta),
+		"meta and shard_count are the retry anchor and must be unlinked last")
+
+	require.NoError(t, store.unlink(context.Background(), key, false, 2))
+	require.False(t, server.Exists(redisKeys(key, 1).meta))
 }
 
 func TestRedisWindowStoreCountsRollupSlotAfterAllChunks(t *testing.T) {

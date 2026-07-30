@@ -543,7 +543,13 @@ func (s *TaskService) releaseUnwrittenSendClaim(ctx context.Context, taskID, cwm
 	if err != nil {
 		repairErrs = append(repairErrs, fmt.Errorf("load released task send claim: %w", err))
 	} else if pending != nil {
-		if err := s.queue.Update(ctx, pending); err != nil {
+		var transitionErr *taskTransitionError
+		if errors.As(cause, &transitionErr) {
+			err = s.queue.rollbackSentTransition(ctx, pending, cwmpID, transitionErr.token)
+		} else {
+			err = s.queue.Update(ctx, pending)
+		}
+		if err != nil {
 			repairErrs = append(repairErrs, fmt.Errorf("restore released task queue entry: %w", err))
 		}
 	}
@@ -553,23 +559,71 @@ func (s *TaskService) releaseUnwrittenSendClaim(ctx context.Context, taskID, cwm
 	return errors.Join(append([]error{fmt.Errorf("mark task sent in queue: %w", cause)}, repairErrs...)...)
 }
 
+// commitTransition owns the Redis/PG state transition protocol:
+//  1. Redis CAS elects exactly one winner and persists its snapshot.
+//  2. PostgreSQL conditionally applies it from the same observed source state.
+//  3. Only after PG confirmation are cross-slot indexes cleaned and a TTL set.
+//
+// A PG or cleanup outage therefore leaves a durable Redis compensation record
+// for the reconciler instead of losing the only winning state after a short TTL.
+func (s *TaskService) commitTransition(
+	ctx context.Context,
+	current, candidate *Task,
+	materializeMissing bool,
+) (bool, error) {
+	token, changed, err := s.queue.prepareTransition(ctx, current, candidate, materializeMissing)
+	if err != nil || !changed {
+		return changed, err
+	}
+	pgChanged, err := s.repo.TransitionIfStatus(ctx, candidate, current.Status)
+	if err != nil {
+		s.recordDualWriteFail("sync_transition")
+		return false, fmt.Errorf("persist task transition: %w", err)
+	}
+	if !pgChanged {
+		return false, nil
+	}
+	if err := s.queue.acknowledgeTransition(ctx, candidate.ID, token); err != nil {
+		// PG is already authoritative. Keep the persistent pending index so the
+		// worker can retry cross-slot cleanup without replaying the business event.
+		s.recordDualWriteFail("cleanup_transition")
+		logger.L(ctx).Warn("defer task transition cleanup",
+			zap.String("task_id", candidate.ID),
+			zap.Error(err))
+	}
+	if isTerminal(candidate.Status) && (candidate.SourceID != "" || candidate.CreatorID != "") {
+		if err := s.PublishTransitionEvent(ctx, candidate, token); err != nil {
+			s.recordDualWriteFail("publish_transition")
+			logger.L(ctx).Warn("defer task transition event",
+				zap.String("task_id", candidate.ID),
+				zap.String("transition_token", token),
+				zap.Error(err))
+		}
+	}
+	return true, nil
+}
+
 // MarkTaskCompleted 标记任务完成
 func (s *TaskService) MarkTaskCompleted(ctx context.Context, taskID string, result json.RawMessage) error {
-	// 更新 Redis
-	if err := s.queue.MarkTaskCompleted(ctx, taskID, result); err != nil {
-		return fmt.Errorf("mark task completed in queue: %w", err)
-	}
-
-	// 同步更新 PostgreSQL
-	task, err := s.queue.GetByID(ctx, taskID)
+	current, err := s.queue.GetByID(ctx, taskID)
 	if err != nil {
-		return fmt.Errorf("get completed task: %w", err)
+		return fmt.Errorf("get task for completion: %w", err)
 	}
-	if task != nil {
-		if err := s.repo.Update(ctx, task); err != nil {
-			s.recordDualWriteFail("sync_terminal")
-			logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", taskID))
-		}
+	if current == nil {
+		return ErrTaskNotFound
+	}
+	task := cloneTaskSnapshot(current)
+	task.MarkCompleted(result)
+	changed, transitionErr := s.commitTransition(ctx, current, task, false)
+	if transitionErr != nil {
+		// ACS already accepted the device response. The persistent transition
+		// record lets the worker retry PG sync; do not make the CWMP response fail.
+		logger.L(ctx).Error("defer completed task persistence",
+			zap.String("task_id", taskID), zap.Error(transitionErr))
+		return nil
+	}
+	if !changed {
+		return nil
 	}
 
 	s.recordCompletion(task, TaskStatusCompleted)
@@ -577,8 +631,6 @@ func (s *TaskService) MarkTaskCompleted(ctx context.Context, taskID string, resu
 	logger.L(ctx).Info("task completed",
 		zap.String("task_id", taskID),
 		zap.String("method", task.Method))
-
-	s.notifyCompletion(ctx, task)
 
 	return nil
 }
@@ -592,6 +644,16 @@ func shouldAutoRetryOnFailure(t *Task) bool {
 	return t != nil && t.Source == TaskSourceMML && t.CanRetry()
 }
 
+func cloneTaskSnapshot(task *Task) *Task {
+	if task == nil {
+		return nil
+	}
+	clone := *task
+	clone.Params = append(json.RawMessage(nil), task.Params...)
+	clone.Result = append(json.RawMessage(nil), task.Result...)
+	return &clone
+}
+
 // MarkTaskFailedWithResult 标记任务失败并附带结构化 result（如 per-param SetParameterValuesFault 详情）。
 // result 为空时等价于 MarkTaskFailed —— 不会清空已有 task.Result。
 //
@@ -603,54 +665,54 @@ func (s *TaskService) MarkTaskFailedWithResult(ctx context.Context, taskID strin
 	if err != nil {
 		return fmt.Errorf("get failed task: %w", err)
 	}
+	if task != nil && isTerminal(task.Status) {
+		// 已完成任务收到迟到重复 Fault 时保持第一个终态；尤其不能把仍有
+		// retry budget 的 MML completed task 重新放回 pending。
+		return nil
+	}
+	if task == nil {
+		return ErrTaskNotFound
+	}
 	if shouldAutoRetryOnFailure(task) {
-		oldCWMPID := task.CWMPID
+		current := cloneTaskSnapshot(task)
+		candidate := cloneTaskSnapshot(task)
 		if len(result) > 0 {
-			task.Result = result
+			candidate.Result = result
 		}
-		task.ErrorCode = errorCode
-		task.ErrorMessage = errorMsg
-		task.ResetForRetryAfter(task.RetryInterval())
-		if oldCWMPID != "" {
-			if err := s.queue.DeleteCWMPIDMapping(ctx, oldCWMPID); err != nil {
-				s.logger.Warn("delete cwmp mapping before retry",
-					zap.String("task_id", taskID),
-					zap.String("cwmp_id", oldCWMPID),
-					zap.Error(err))
-			}
+		candidate.ErrorCode = errorCode
+		candidate.ErrorMessage = errorMsg
+		candidate.ResetForRetryAfter(candidate.RetryInterval())
+		changed, transitionErr := s.commitTransition(ctx, current, candidate, false)
+		if transitionErr != nil {
+			logger.L(ctx).Error("defer retry task persistence",
+				zap.String("task_id", taskID), zap.Error(transitionErr))
+			return nil
 		}
-		if err := s.queue.Update(ctx, task); err != nil {
-			return fmt.Errorf("schedule task retry in queue: %w", err)
-		}
-		if err := s.repo.Update(ctx, task); err != nil {
-			s.recordDualWriteFail("sync_retry")
-			logger.L(ctx).Error("sync retry task to db", zap.Error(err), zap.String("task_id", taskID))
+		if !changed {
+			return nil
 		}
 		logger.L(ctx).Info("mml task scheduled for retry",
 			zap.String("task_id", taskID),
-			zap.Int("retry_count", task.RetryCount),
-			zap.Int("max_retries", task.MaxRetries),
-			zap.Int("retry_interval_seconds", task.RetryIntervalSeconds),
-			zap.Time("next_attempt_at", deref(task.NextAttemptAt)))
+			zap.Int("retry_count", candidate.RetryCount),
+			zap.Int("max_retries", candidate.MaxRetries),
+			zap.Int("retry_interval_seconds", candidate.RetryIntervalSeconds),
+			zap.Time("next_attempt_at", deref(candidate.NextAttemptAt)))
 		return nil
 	}
 
-	// 更新 Redis
-	if err := s.queue.MarkTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, result); err != nil {
-		return fmt.Errorf("mark task failed in queue: %w", err)
+	current := cloneTaskSnapshot(task)
+	candidate := cloneTaskSnapshot(task)
+	candidate.MarkFailedWithResult(errorCode, errorMsg, result)
+	changed, transitionErr := s.commitTransition(ctx, current, candidate, false)
+	if transitionErr != nil {
+		logger.L(ctx).Error("defer failed task persistence",
+			zap.String("task_id", taskID), zap.Error(transitionErr))
+		return nil
 	}
-
-	// 同步更新 PostgreSQL
-	task, err = s.queue.GetByID(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("get failed task: %w", err)
+	if !changed {
+		return nil
 	}
-	if task != nil {
-		if err := s.repo.Update(ctx, task); err != nil {
-			s.recordDualWriteFail("sync_terminal")
-			logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", taskID))
-		}
-	}
+	task = candidate
 
 	s.recordCompletion(task, TaskStatusFailed)
 
@@ -660,16 +722,14 @@ func (s *TaskService) MarkTaskFailedWithResult(ctx context.Context, taskID strin
 		zap.String("error_message", errorMsg),
 		zap.Int("result_bytes", len(result)))
 
-	s.notifyCompletion(ctx, task)
-
 	return nil
 }
 
 // ExpireTask 把单个任务标记为 expired（T-0157 C2）。
 //
 // 与 MarkTaskFailed 不同：调用方已通过 repo.ListExpiredCandidates 持有完整 Task 对象，
-// 跳过 GetByID 一次往返。流程：MarkExpired → repo.Update → queue.Delete（可能已被 popper
-// 清掉，warn 不中断）→ metrics 计数 → notifyCompletion 广播（复用 task.failed 主题，
+// 跳过 GetByID 一次往返。流程：MarkExpired → repo.Update → queue.Update（原子写入短 TTL
+// 终态并清理索引，warn 不中断）→ metrics 计数 → notifyCompletion 广播（复用 task.failed 主题，
 // 订阅器按 task.Status 区分 failed / expired —— 详见 SubjectForStatus）。
 //
 // 用于 worker 进程的 ExpiredSweeper；其他场景请用 MarkTaskFailed 走 Redis 真相源。
@@ -677,21 +737,22 @@ func (s *TaskService) ExpireTask(ctx context.Context, task *Task) error {
 	if task == nil {
 		return nil
 	}
-	task.MarkExpired()
-	if err := s.repo.Update(ctx, task); err != nil {
-		return fmt.Errorf("update task to expired: %w", err)
+	current := cloneTaskSnapshot(task)
+	candidate := cloneTaskSnapshot(task)
+	candidate.MarkExpired()
+	changed, err := s.commitTransition(ctx, current, candidate, true)
+	if err != nil {
+		return fmt.Errorf("expire task: %w", err)
 	}
-	if err := s.queue.Delete(ctx, task.ID); err != nil {
-		s.logger.Warn("queue delete expired task",
-			zap.String("task_id", task.ID),
-			zap.Error(err))
+	if !changed {
+		return nil
 	}
-	s.recordCompletion(task, TaskStatusExpired)
+	task = candidate
+	s.recordCompletion(candidate, TaskStatusExpired)
 	s.logger.Info("task expired by sweeper",
 		zap.String("task_id", task.ID),
 		zap.String("device_sn", task.DeviceSN),
 		zap.Time("expires_at", deref(task.ExpiresAt)))
-	s.notifyCompletion(ctx, task)
 	return nil
 }
 
@@ -759,24 +820,20 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID string) error {
 		return fmt.Errorf("cannot cancel task with status: %s", task.Status)
 	}
 
-	// 更新状态
+	current := cloneTaskSnapshot(task)
+	candidate := cloneTaskSnapshot(task)
 	now := time.Now()
-	task.Status = TaskStatusCancelled
-	task.CompletedAt = &now
-
-	// 从 Redis 删除
-	if err := s.queue.Delete(ctx, taskID); err != nil {
-		return fmt.Errorf("delete task from queue: %w", err)
+	candidate.Status = TaskStatusCancelled
+	candidate.CompletedAt = &now
+	changed, err := s.commitTransition(ctx, current, candidate, false)
+	if err != nil {
+		return fmt.Errorf("cancel task: %w", err)
 	}
-
-	// 更新 PostgreSQL
-	if err := s.repo.Update(ctx, task); err != nil {
-		return fmt.Errorf("update cancelled task: %w", err)
+	if !changed {
+		return nil
 	}
-
-	s.recordCompletion(task, TaskStatusCancelled)
-	s.notifyCompletion(ctx, task)
-
+	task = candidate
+	s.recordCompletion(candidate, TaskStatusCancelled)
 	logger.L(ctx).Info("task cancelled", zap.String("task_id", taskID))
 
 	return nil
@@ -814,23 +871,18 @@ func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) 
 	for _, task := range staleTasks {
 		if !task.CanRetry() {
 			// 超过最大重试次数，标记为失败
-			oldCWMPID := task.CWMPID
-			task.MarkFailed(0, "exceeded max retries")
-			if oldCWMPID != "" {
-				if err := s.queue.DeleteCWMPIDMapping(ctx, oldCWMPID); err != nil {
-					logger.L(ctx).Warn("delete stale cwmp mapping", zap.Error(err), zap.String("task_id", task.ID), zap.String("cwmp_id", oldCWMPID))
-				}
-			}
-			if err := s.queue.Update(ctx, task); err != nil {
-				logger.L(ctx).Error("mark exhausted task failed in queue", zap.Error(err), zap.String("task_id", task.ID))
+			current := cloneTaskSnapshot(task)
+			candidate := cloneTaskSnapshot(task)
+			candidate.MarkFailed(0, "exceeded max retries")
+			changed, err := s.commitTransition(ctx, current, candidate, true)
+			if err != nil {
+				logger.L(ctx).Error("defer exhausted task transition", zap.Error(err), zap.String("task_id", task.ID))
 				continue
 			}
-			if err := s.repo.Update(ctx, task); err != nil {
-				s.recordDualWriteFail("sync_terminal")
-				logger.L(ctx).Error("sync exhausted task to db", zap.Error(err), zap.String("task_id", task.ID))
+			if !changed {
+				continue
 			}
-			s.recordCompletion(task, TaskStatusFailed)
-			s.notifyCompletion(ctx, task)
+			s.recordCompletion(candidate, TaskStatusFailed)
 			continue
 		}
 		if interval := task.RetryInterval(); interval > 0 && task.SentAt != nil {
@@ -844,30 +896,21 @@ func (s *TaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) 
 			}
 		}
 
-		// 重置任务状态
-		oldCWMPID := task.CWMPID
-		task.ResetForRetry()
-		if oldCWMPID != "" {
-			if err := s.queue.DeleteCWMPIDMapping(ctx, oldCWMPID); err != nil {
-				logger.L(ctx).Warn("delete stale cwmp mapping", zap.Error(err), zap.String("task_id", task.ID), zap.String("cwmp_id", oldCWMPID))
-			}
-		}
-
-		// 更新 Redis；Update 会在 pending 状态下重新加入设备队列 ZSET。
-		if err := s.queue.Update(ctx, task); err != nil {
-			logger.L(ctx).Error("reset stale task", zap.Error(err), zap.String("task_id", task.ID))
+		current := cloneTaskSnapshot(task)
+		candidate := cloneTaskSnapshot(task)
+		candidate.ResetForRetry()
+		changed, err := s.commitTransition(ctx, current, candidate, true)
+		if err != nil {
+			logger.L(ctx).Error("defer stale task retry", zap.Error(err), zap.String("task_id", task.ID))
 			continue
 		}
-
-		// 同步 PostgreSQL
-		if err := s.repo.Update(ctx, task); err != nil {
-			s.recordDualWriteFail("sync_retry")
-			logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", task.ID))
+		if !changed {
+			continue
 		}
 
 		logger.L(ctx).Info("task recovered",
 			zap.String("task_id", task.ID),
-			zap.Int("retry_count", task.RetryCount))
+			zap.Int("retry_count", candidate.RetryCount))
 	}
 
 	return nil
@@ -1015,19 +1058,19 @@ func (s *TaskService) RetryTask(ctx context.Context, task *Task) error {
 		return fmt.Errorf("task is nil")
 	}
 
-	// 更新 Redis
-	if err := s.queue.Update(ctx, task); err != nil {
-		return fmt.Errorf("update task in queue: %w", err)
+	current, err := s.repo.GetByID(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("load durable task for retry: %w", err)
 	}
-
-	// 重新入队
-	if err := s.queue.Push(ctx, task); err != nil {
-		return fmt.Errorf("requeue task: %w", err)
+	if current == nil {
+		return ErrTaskNotFound
 	}
-
-	// 同步 PostgreSQL
-	if err := s.repo.Update(ctx, task); err != nil {
-		logger.L(ctx).Error("sync task to db", zap.Error(err), zap.String("task_id", task.ID))
+	changed, err := s.commitTransition(ctx, current, task, true)
+	if err != nil {
+		return fmt.Errorf("retry task: %w", err)
+	}
+	if !changed {
+		return ErrTaskNotPending
 	}
 
 	logger.L(ctx).Info("task retried",
@@ -1170,6 +1213,42 @@ func (s *TaskService) notifyCompletion(ctx context.Context, task *Task) {
 	for _, cb := range s.callbacks {
 		cb.OnTaskCompleted(ctx, task)
 	}
+}
+
+// PublishTransitionEvent publishes the durable transition outbox entry using
+// the transition token as a stable event id. Subscriber deduplication therefore
+// makes publish-then-ack crash recovery safe.
+func (s *TaskService) PublishTransitionEvent(
+	ctx context.Context,
+	task *Task,
+	token string,
+) error {
+	if task == nil || token == "" {
+		return fmt.Errorf("task and transition token are required")
+	}
+	if task.SourceID == "" && task.CreatorID == "" {
+		return s.queue.acknowledgeTransitionEvent(ctx, task.ID, token)
+	}
+	if s.eventBus != nil {
+		subject := SubjectForStatus(task.Status)
+		if subject == "" {
+			return s.queue.acknowledgeTransitionEvent(ctx, task.ID, token)
+		}
+		evt, err := event.NewEvent(subject, task)
+		if err != nil {
+			return fmt.Errorf("build transition event: %w", err)
+		}
+		evt.ID = "task-transition-" + token
+		evt.Metadata = map[string]string{"transition_token": token}
+		if err := s.eventBus.Publish(ctx, subject, evt); err != nil {
+			return fmt.Errorf("publish transition event: %w", err)
+		}
+	} else {
+		for _, cb := range s.callbacks {
+			cb.OnTaskCompleted(ctx, task)
+		}
+	}
+	return s.queue.acknowledgeTransitionEvent(ctx, task.ID, token)
 }
 
 // StaleNotificationLookup 实现 notification.StaleTaskLookup 接口（T-0157 stale sync）。

@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/product"
@@ -45,8 +46,18 @@ type RPCResponseSubscriber struct {
 	deviceWriter      DeviceSyncFailureWriter // migration 000146: 写 last_param_sync_failed_at + error
 	taskEnqueuer      task.Enqueuer
 	logger            *zap.Logger
+	gpvConsumer       appconfig.GPVResponseConsumerConfig
 
 	subscriptions []event.Subscription
+}
+
+type keyedQueueEventBus interface {
+	KeyedQueueSubscribe(
+		subject string,
+		config event.KeyedQueueConfig,
+		keyFunc event.EventKeyFunc,
+		handler event.EventHandler,
+	) (event.Subscription, error)
 }
 
 // DeviceSyncFailureWriter 窄接口:仅负责把 Path B GPV task 失败回写到 devices 表
@@ -90,6 +101,7 @@ func NewRPCResponseSubscriber(
 	infoRefresher rpcResponseDeviceInfoRefresher,
 	deviceWriter DeviceSyncFailureWriter,
 	taskEnqueuer task.Enqueuer,
+	gpvConsumer appconfig.GPVResponseConsumerConfig,
 	logger *zap.Logger,
 ) *RPCResponseSubscriber {
 	return &RPCResponseSubscriber{
@@ -101,6 +113,7 @@ func NewRPCResponseSubscriber(
 		infoRefresher:     infoRefresher,
 		deviceWriter:      deviceWriter,
 		taskEnqueuer:      taskEnqueuer,
+		gpvConsumer:       gpvConsumer,
 		logger:            logger.Named("device-rpc-resp-sub"),
 	}
 }
@@ -114,9 +127,47 @@ func (s *RPCResponseSubscriber) Start() error {
 		s.logger.Warn("event bus is nil; RPC response subscriber disabled")
 		return nil
 	}
-	sub, err := s.bus.Subscribe(event.SubjectCommandGetParamsResponse, s.handleGPVResponse)
+	config := s.gpvConsumer.Defaults()
+	var (
+		sub event.Subscription
+		err error
+	)
+	if keyedBus, ok := s.bus.(keyedQueueEventBus); ok {
+		sub, err = keyedBus.KeyedQueueSubscribe(
+			event.SubjectCommandGetParamsResponse,
+			event.KeyedQueueConfig{
+				Durable:       config.RPCDurable,
+				StartSequence: config.RPCStartSequence,
+				Concurrency:   config.RPCConcurrency,
+				QueueDepth:    config.RPCQueueDepth,
+				AckWait:       config.AckWait,
+				MaxDeliver:    config.MaxDeliver,
+				MaxAckPending: config.MaxAckPending,
+			},
+			gpvResponseDeviceKey,
+			s.handleGPVResponse,
+		)
+	} else {
+		if config.RPCStartSequence > 0 {
+			return fmt.Errorf(
+				"subscribe %s: event bus does not support lossless start sequence %d",
+				event.SubjectCommandGetParamsResponse,
+				config.RPCStartSequence,
+			)
+		}
+		sub, err = s.bus.QueueSubscribe(
+			event.SubjectCommandGetParamsResponse,
+			config.RPCDurable,
+			s.handleGPVResponse,
+		)
+	}
 	if err != nil {
-		return fmt.Errorf("subscribe %s: %w", event.SubjectCommandGetParamsResponse, err)
+		return fmt.Errorf(
+			"queue subscribe %s (%s): %w",
+			event.SubjectCommandGetParamsResponse,
+			config.RPCDurable,
+			err,
+		)
 	}
 	s.subscriptions = append(s.subscriptions, sub)
 	delSub, err := s.bus.Subscribe(event.SubjectCommandDeleteObjectResponse, s.handleDeleteObjectResponse)
@@ -139,6 +190,16 @@ func (s *RPCResponseSubscriber) Start() error {
 		}),
 	)
 	return nil
+}
+
+func gpvResponseDeviceKey(evt event.Event) (string, error) {
+	var payload struct {
+		DeviceSN string `json:"device_sn"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil {
+		return "", fmt.Errorf("decode GPV device key: %w", err)
+	}
+	return payload.DeviceSN, nil
 }
 
 // handleSyncTaskFailed 处理 task.failed (包含 failed/expired/cancelled)。
@@ -378,10 +439,16 @@ func (s *RPCResponseSubscriber) handleGPVResponse(ctx context.Context, evt event
 	}
 
 	device, err := s.deviceLookup.GetBySerialNumber(ctx, deviceSN)
-	if err != nil || device == nil {
-		s.logger.Warn("device lookup failed; persist raw privatePath",
+	if err != nil {
+		s.logger.Warn("device lookup failed; retry GPV response",
 			zap.String("device_sn", deviceSN),
 			zap.Error(err),
+		)
+		return fmt.Errorf("lookup GPV response device %s: %w", deviceSN, err)
+	}
+	if device == nil {
+		s.logger.Warn("device lookup failed; persist raw privatePath",
+			zap.String("device_sn", deviceSN),
 		)
 		return nil
 	}

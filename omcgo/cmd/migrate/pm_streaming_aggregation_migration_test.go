@@ -31,6 +31,18 @@ func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 		require.Contains(t, tsdbSQL, "CREATE TABLE public."+table)
 	}
 	require.Contains(t, tsdbSQL, "CREATE UNIQUE INDEX uq_pm_aggregation_results_business")
+	for _, fragment := range []string{
+		"ADD COLUMN finalize_lease_owner uuid",
+		"ADD COLUMN finalize_lease_until timestamptz",
+		"ADD COLUMN finalize_attempts integer NOT NULL DEFAULT 0",
+		"ADD COLUMN finalize_next_attempt_at timestamptz NOT NULL DEFAULT '-infinity'",
+		"ADD COLUMN version_audit_fingerprint text",
+		"CREATE INDEX idx_pm_windows_due_claim",
+		"CREATE INDEX idx_pm_windows_oldest_due",
+		"CREATE INDEX idx_pm_windows_version_audit",
+	} {
+		require.Contains(t, tsdbSQL, fragment)
+	}
 	require.Contains(t, tsdbSQL, "DROP TABLE IF EXISTS public.pm_metrics_daily")
 	require.Contains(t, mainSQL, "DROP TABLE IF EXISTS public.pm_completion_watermarks")
 	require.NotContains(t, strings.ToUpper(tsdbSQL), "INSERT INTO PUBLIC.PM_AGGREGATION_RESULTS SELECT")

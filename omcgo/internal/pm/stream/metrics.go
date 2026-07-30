@@ -6,25 +6,41 @@ import "github.com/prometheus/client_golang/prometheus"
 // aggregation path. Task, device and metric identifiers are deliberately not
 // labels because a production system can have tens of thousands of each.
 type Metrics struct {
-	Ready                       prometheus.Gauge
-	OutboxPublishedTotal        prometheus.Counter
-	OutboxErrorsTotal           prometheus.Counter
-	RollupOutboxPublishedTotal  prometheus.Counter
-	RollupOutboxErrorsTotal     prometheus.Counter
-	EventsProcessedTotal        prometheus.Counter
-	EventsFailedTotal           prometheus.Counter
-	DuplicateEventsTotal        prometheus.Counter
-	LateEventsTotal             prometheus.Counter
-	WatermarkBlockedTotal       prometheus.Counter
-	RebuildsTotal               *prometheus.CounterVec
-	RebuildErrorsTotal          prometheus.Counter
-	WindowsFinalizedTotal       *prometheus.CounterVec
-	FinalizeErrorsTotal         prometheus.Counter
-	FinalizeDuration            prometheus.Histogram
-	BuiltinReconcileRunsTotal   prometheus.Counter
-	BuiltinReconcileErrorsTotal prometheus.Counter
-	BuiltinVersionsChangedTotal prometheus.Counter
-	BuiltinDefinitionsEmpty     prometheus.Gauge
+	Ready                                  prometheus.Gauge
+	OutboxPublishedTotal                   prometheus.Counter
+	OutboxErrorsTotal                      prometheus.Counter
+	RollupOutboxPublishedTotal             prometheus.Counter
+	RollupOutboxErrorsTotal                prometheus.Counter
+	EventsProcessedTotal                   prometheus.Counter
+	EventsFailedTotal                      prometheus.Counter
+	DuplicateEventsTotal                   prometheus.Counter
+	LateEventsTotal                        prometheus.Counter
+	WatermarkBlockedTotal                  prometheus.Counter
+	RebuildsTotal                          *prometheus.CounterVec
+	RebuildErrorsTotal                     prometheus.Counter
+	RebuildBatchesTotal                    prometheus.Counter
+	RebuildJobsPerBatch                    prometheus.Histogram
+	RebuildSnapshotRowsTotal               prometheus.Counter
+	RebuildSnapshotScanSeconds             prometheus.Histogram
+	RebuildCoalescedTotal                  prometheus.Counter
+	WindowsFinalizedTotal                  *prometheus.CounterVec
+	FinalizeErrorsTotal                    prometheus.Counter
+	FinalizeDuration                       prometheus.Histogram
+	FinalizeClaims                         prometheus.Counter
+	FinalizeInflight                       prometheus.Gauge
+	FinalizeOldestDueSeconds               prometheus.Gauge
+	FinalizeClaimConflictsTotal            prometheus.Counter
+	DailyVersionExpectedSlotsMismatchTotal prometheus.Counter
+	ResultReplaceSeconds                   prometheus.Histogram
+	RedisSampledActiveWindows              *prometheus.GaugeVec
+	RedisSampledKeys                       *prometheus.GaugeVec
+	RedisSampledEstimatedBytes             *prometheus.GaugeVec
+	RedisSweeperDeletedTotal               prometheus.Counter
+	RedisWriteErrorsTotal                  prometheus.Counter
+	BuiltinReconcileRunsTotal              prometheus.Counter
+	BuiltinReconcileErrorsTotal            prometheus.Counter
+	BuiltinVersionsChangedTotal            prometheus.Counter
+	BuiltinDefinitionsEmpty                prometheus.Gauge
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -77,6 +93,28 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_pm_aggregation_rebuild_errors_total",
 			Help: "Late-event aggregation rebuild failures.",
 		}),
+		RebuildBatchesTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_rebuild_batches_total",
+			Help: "Quiet-period rebuild batches claimed for processing.",
+		}),
+		RebuildJobsPerBatch: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "omc_pm_aggregation_rebuild_jobs_per_batch",
+			Help:    "Number of coalesced rebuild jobs processed in one batch.",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 8),
+		}),
+		RebuildSnapshotRowsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_rebuild_snapshot_rows_total",
+			Help: "Compact rollup snapshot rows read by rebuild batch scans.",
+		}),
+		RebuildSnapshotScanSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "omc_pm_aggregation_rebuild_snapshot_scan_seconds",
+			Help:    "Time spent sequentially scanning compact rollup snapshots for a rebuild batch.",
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 15, 30, 60},
+		}),
+		RebuildCoalescedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_rebuild_coalesced_total",
+			Help: "Additional late-event generations coalesced into claimed rebuild jobs.",
+		}),
 		WindowsFinalizedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_windows_finalized_total",
 			Help: "Aggregation windows finalized by close reason.",
@@ -89,6 +127,51 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:    "omc_pm_aggregation_finalize_duration_seconds",
 			Help:    "Time spent finalizing one aggregation window.",
 			Buckets: prometheus.DefBuckets,
+		}),
+		FinalizeClaims: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_finalize_claims_total",
+			Help: "Aggregation windows leased by the bounded finalization scheduler.",
+		}),
+		FinalizeInflight: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_finalize_inflight",
+			Help: "Leased aggregation windows currently being finalized.",
+		}),
+		FinalizeOldestDueSeconds: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_finalize_oldest_due_seconds",
+			Help: "Current age past close grace of the oldest due aggregation window observed by scheduling class.",
+		}),
+		FinalizeClaimConflictsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_finalize_claim_conflicts_total",
+			Help: "Finalize claim attempts blocked by an unexpired lease.",
+		}),
+		DailyVersionExpectedSlotsMismatchTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_daily_version_expected_slots_mismatch_total",
+			Help: "Finalized rule daily windows whose version-calibrated expected slots differ from the natural daily period.",
+		}),
+		ResultReplaceSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "omc_pm_aggregation_result_replace_seconds",
+			Help:    "Time spent staging and upserting one PM aggregation result window in TimescaleDB.",
+			Buckets: prometheus.DefBuckets,
+		}),
+		RedisSampledActiveWindows: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_redis_sampled_active_windows",
+			Help: "Active Redis aggregation windows observed in the latest bounded sample.",
+		}, []string{"granularity"}),
+		RedisSampledKeys: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_redis_sampled_keys",
+			Help: "Redis aggregation keys observed in the latest bounded sample.",
+		}, []string{"granularity"}),
+		RedisSampledEstimatedBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_redis_sampled_estimated_bytes",
+			Help: "Redis MEMORY USAGE bytes observed in the latest bounded aggregation-state sample.",
+		}, []string{"granularity"}),
+		RedisSweeperDeletedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_redis_sweeper_deleted_total",
+			Help: "Published Redis aggregation windows safely removed by the bounded sweeper.",
+		}),
+		RedisWriteErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_redis_write_errors_total",
+			Help: "Redis aggregation state write or UNLINK failures.",
 		}),
 		BuiltinReconcileRunsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_builtin_reconcile_runs_total",
@@ -120,9 +203,25 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.WatermarkBlockedTotal,
 		m.RebuildsTotal,
 		m.RebuildErrorsTotal,
+		m.RebuildBatchesTotal,
+		m.RebuildJobsPerBatch,
+		m.RebuildSnapshotRowsTotal,
+		m.RebuildSnapshotScanSeconds,
+		m.RebuildCoalescedTotal,
 		m.WindowsFinalizedTotal,
 		m.FinalizeErrorsTotal,
 		m.FinalizeDuration,
+		m.FinalizeClaims,
+		m.FinalizeInflight,
+		m.FinalizeOldestDueSeconds,
+		m.FinalizeClaimConflictsTotal,
+		m.DailyVersionExpectedSlotsMismatchTotal,
+		m.ResultReplaceSeconds,
+		m.RedisSampledActiveWindows,
+		m.RedisSampledKeys,
+		m.RedisSampledEstimatedBytes,
+		m.RedisSweeperDeletedTotal,
+		m.RedisWriteErrorsTotal,
 		m.BuiltinReconcileRunsTotal,
 		m.BuiltinReconcileErrorsTotal,
 		m.BuiltinVersionsChangedTotal,

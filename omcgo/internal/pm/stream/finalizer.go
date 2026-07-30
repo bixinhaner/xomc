@@ -7,6 +7,7 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -15,10 +16,11 @@ import (
 type CloseReason string
 
 const (
-	CloseComplete        CloseReason = "complete"
-	CloseTimeout         CloseReason = "timeout"
-	finalResultBatchSize             = 1000
+	CloseComplete CloseReason = "complete"
+	CloseTimeout  CloseReason = "timeout"
 )
+
+var ErrFinalizeClaimLost = errors.New("PM aggregation finalize claim ownership lost")
 
 type Finalizer struct {
 	windows  *WindowRepository
@@ -27,10 +29,30 @@ type Finalizer struct {
 	metrics  *Metrics
 	slots    chan struct{}
 	snapshot *SnapshotStore
+	location *time.Location
+}
+
+type finalizationCoverage struct {
+	SourceExpectedSlots               int64
+	SourceReceivedSlots               int64
+	MissingSlots                      int64
+	ChildrenComplete                  bool
+	DataComplete                      bool
+	VersionExpectedSlots              int64
+	NaturalSlots                      int64
+	PeriodComplete                    bool
+	DailyVersionExpectedSlotsMismatch bool
 }
 
 func (f *Finalizer) SetSnapshot(snapshot *SnapshotStore) *Finalizer {
 	f.snapshot = snapshot
+	return f
+}
+
+func (f *Finalizer) SetLocation(location *time.Location) *Finalizer {
+	if location != nil {
+		f.location = location
+	}
 	return f
 }
 
@@ -52,12 +74,37 @@ func (f *Finalizer) SetConcurrency(concurrency int) *Finalizer {
 	return f
 }
 
+func (f *Finalizer) Concurrency() int {
+	if f.slots == nil {
+		return 1
+	}
+	return cap(f.slots)
+}
+
 func (f *Finalizer) SetMetrics(metrics *Metrics) *Finalizer {
 	f.metrics = metrics
 	return f
 }
 
 func (f *Finalizer) Finalize(ctx context.Context, key WindowKey, reason CloseReason) error {
+	return f.finalize(ctx, key, reason, nil)
+}
+
+func (f *Finalizer) FinalizeClaimed(
+	ctx context.Context,
+	key WindowKey,
+	reason CloseReason,
+	leaseOwner uuid.UUID,
+) error {
+	return f.finalize(ctx, key, reason, &leaseOwner)
+}
+
+func (f *Finalizer) finalize(
+	ctx context.Context,
+	key WindowKey,
+	reason CloseReason,
+	leaseOwner *uuid.UUID,
+) error {
 	if f.slots != nil {
 		select {
 		case f.slots <- struct{}{}:
@@ -82,10 +129,19 @@ func (f *Finalizer) Finalize(ctx context.Context, key WindowKey, reason CloseRea
 			f.logger.Warn("release PM aggregation finalize lock", zap.Error(err))
 		}
 	}()
-	return f.finalizeUnderLock(ctx, key, reason)
+	return f.finalizeUnderLockWithClaim(ctx, key, reason, leaseOwner)
 }
 
 func (f *Finalizer) finalizeUnderLock(ctx context.Context, key WindowKey, reason CloseReason) error {
+	return f.finalizeUnderLockWithClaim(ctx, key, reason, nil)
+}
+
+func (f *Finalizer) finalizeUnderLockWithClaim(
+	ctx context.Context,
+	key WindowKey,
+	reason CloseReason,
+	leaseOwner *uuid.UUID,
+) error {
 	published, err := f.windows.IsPublished(ctx, key)
 	if err != nil {
 		return err
@@ -100,7 +156,10 @@ func (f *Finalizer) finalizeUnderLock(ctx context.Context, key WindowKey, reason
 		}
 		return err
 	}
-	if err := f.writeFinal(ctx, key, reason, state); err != nil {
+	if err := f.writeFinal(ctx, key, reason, state, leaseOwner); err != nil {
+		if errors.Is(err, ErrFinalizeClaimLost) {
+			return err
+		}
 		if f.metrics != nil {
 			f.metrics.FinalizeErrorsTotal.Inc()
 		}
@@ -124,6 +183,7 @@ func (f *Finalizer) writeFinal(
 	key WindowKey,
 	reason CloseReason,
 	state WindowState,
+	leaseOwner *uuid.UUID,
 ) error {
 	tx, err := f.windows.pool.Begin(ctx)
 	if err != nil {
@@ -146,6 +206,7 @@ func (f *Finalizer) writeFinal(
 	if f.snapshot != nil && f.snapshot.Current() != nil {
 		version = f.snapshot.Current().ByVersion[key.TaskVersionID]
 	}
+	state, coverage := f.finalizationCoverageFor(key, version, state)
 	rollups, err := buildRollupPayloads(
 		key, reason, state, version, defaultRollupBatchValues,
 	)
@@ -156,31 +217,10 @@ func (f *Finalizer) writeFinal(
 	if err != nil {
 		return err
 	}
-	sourceExpected := state.SourceExpectedSlots
-	sourceReceived := state.SourceReceivedSlots
-	if sourceExpected == 0 {
-		sourceExpected = state.ExpectedSlots
-		sourceReceived = state.ReceivedSlots
-	}
-	childrenComplete := state.ReceivedSlots >= state.ExpectedSlots
-	missing := max64(0, sourceExpected-sourceReceived)
-	dataComplete := childrenComplete && missing == 0 &&
-		state.SourceIncompleteSlots == 0
-
-	claimSQL, claimArgs, err := storage.Psql.Update("pm_aggregation_windows").
-		Set("status", "finalizing").
-		Set("close_reason", string(reason)).
-		Set("received_slots", state.ReceivedSlots).
-		Set("source_expected_slots", sourceExpected).
-		Set("source_received_slots", sourceReceived).
-		Set("missing_slots", missing).
-		Set("children_complete", childrenComplete).
-		Set("source_incomplete_slots", state.SourceIncompleteSlots).
-		Set("data_complete", dataComplete).
-		Set("updated_at", time.Now().UTC()).
-		Where(windowKeyPredicate(key)).
-		Where(sq.Eq{"status": []string{"open", "failed", "finalizing", "rebuilding"}}).
-		ToSql()
+	claimBuilder := finalizationClaimUpdateForOwner(
+		key, reason, state, coverage, version, leaseOwner,
+	)
+	claimSQL, claimArgs, err := claimBuilder.ToSql()
 	if err != nil {
 		return fmt.Errorf("build claim PM aggregation window SQL: %w", err)
 	}
@@ -189,6 +229,9 @@ func (f *Finalizer) writeFinal(
 		return fmt.Errorf("claim PM aggregation window: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
+		if leaseOwner != nil {
+			return ErrFinalizeClaimLost
+		}
 		return nil
 	}
 	for _, payload := range rollups {
@@ -196,84 +239,24 @@ func (f *Finalizer) writeFinal(
 			return fmt.Errorf("persist compact PM Counter rollup: %w", err)
 		}
 	}
-	deleteResultsSQL, deleteResultsArgs, err := storage.Psql.Delete("pm_aggregation_results").
-		Where(sq.Eq{
-			"task_version_id": key.TaskVersionID,
-			"granularity":     string(key.Granularity),
-			"window_start":    key.Start,
-			"dimension_key":   key.EntityKey,
-		}).
-		ToSql()
+	resultReplaceStarted := time.Now()
+	resultCount, err := ReplaceWindowResults(
+		ctx,
+		tx,
+		key,
+		revision,
+		finalMetrics,
+		resultCompleteness{
+			version:       version,
+			coverage:      coverage,
+			receivedSlots: state.ReceivedSlots,
+		},
+	)
 	if err != nil {
-		return fmt.Errorf("build replace PM aggregation results SQL: %w", err)
+		return err
 	}
-	if _, err := tx.Exec(ctx, deleteResultsSQL, deleteResultsArgs...); err != nil {
-		return fmt.Errorf("replace PM aggregation results: %w", err)
-	}
-
-	versionSliceComplete := dataComplete
-	periodComplete := dataComplete && versionCoversNaturalPeriod(version, key)
-	versionExpectedSlots := state.ExpectedSlots
-	naturalSlots := naturalExpectedSlots(version, key, state)
-	resultCount := 0
-	for start := 0; start < len(finalMetrics); start += finalResultBatchSize {
-		end := start + finalResultBatchSize
-		if end > len(finalMetrics) {
-			end = len(finalMetrics)
-		}
-		builder := storage.Psql.Insert("pm_aggregation_results").
-			Columns(
-				"window_start", "window_end", "task_id", "task_version_id",
-				"granularity", "dimension", "dimension_key", "dimension_name",
-				"object_ldn", "device_oui", "device_sn", "technology",
-				"metric_id", "metric_path", "metric_type",
-				"aggregation_op", "metric_value", "sample_count", "complete", "missing_slots",
-				"revision", "version_effective_from", "version_effective_to",
-				"received_slots", "expected_slots", "version_expected_slots",
-				"natural_expected_slots", "version_slice_complete", "period_complete",
-			)
-		for _, metric := range finalMetrics[start:end] {
-			definition := metric.Definition
-			builder = builder.Values(
-				key.Start, key.End, key.TaskID, key.TaskVersionID,
-				string(key.Granularity), string(definition.Dimension),
-				definition.DimensionKey, definition.DimensionName,
-				definition.ObjectLDN, definition.DeviceOUI, definition.DeviceSN,
-				definition.Technology, metric.MetricID, definition.MetricPath,
-				metric.MetricType, string(metric.Operation), metric.Value,
-				metric.SampleCount, periodComplete && metric.FormulaComplete, missing,
-				revision, versionEffectiveFrom(version), versionEffectiveTo(version),
-				state.ReceivedSlots, naturalSlots, versionExpectedSlots, naturalSlots,
-				versionSliceComplete && metric.FormulaComplete,
-				periodComplete && metric.FormulaComplete,
-			)
-		}
-		query, args, buildErr := builder.Suffix(`
-ON CONFLICT (
-  task_version_id, granularity, window_start, dimension_key, object_ldn, technology, metric_id
-) DO UPDATE SET
-  window_end = EXCLUDED.window_end,
-  metric_value = EXCLUDED.metric_value,
-  sample_count = EXCLUDED.sample_count,
-  complete = EXCLUDED.complete,
-  missing_slots = EXCLUDED.missing_slots,
-  revision = EXCLUDED.revision,
-  version_effective_from = EXCLUDED.version_effective_from,
-  version_effective_to = EXCLUDED.version_effective_to,
-  received_slots = EXCLUDED.received_slots,
-  expected_slots = EXCLUDED.expected_slots,
-  version_expected_slots = EXCLUDED.version_expected_slots,
-  natural_expected_slots = EXCLUDED.natural_expected_slots,
-  version_slice_complete = EXCLUDED.version_slice_complete,
-  period_complete = EXCLUDED.period_complete`).ToSql()
-		if buildErr != nil {
-			return fmt.Errorf("build insert PM aggregation result SQL: %w", buildErr)
-		}
-		tag, execErr := tx.Exec(ctx, query, args...)
-		if execErr != nil {
-			return fmt.Errorf("insert PM aggregation result: %w", execErr)
-		}
-		resultCount += int(tag.RowsAffected())
+	if f.metrics != nil {
+		f.metrics.ResultReplaceSeconds.Observe(time.Since(resultReplaceStarted).Seconds())
 	}
 	publishSQL, publishArgs, err := storage.Psql.Update("pm_aggregation_windows").
 		Set("status", "published").
@@ -293,7 +276,69 @@ ON CONFLICT (
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit PM aggregation window: %w", err)
 	}
+	if f.metrics != nil && shouldRecordDailyVersionExpectedSlotsMismatch(revision, coverage) {
+		f.metrics.DailyVersionExpectedSlotsMismatchTotal.Inc()
+	}
 	return nil
+}
+
+func finalizationCoverageFor(
+	key WindowKey,
+	version *TaskVersionSnapshot,
+	state WindowState,
+	location *time.Location,
+) (WindowState, finalizationCoverage) {
+	state.ExpectedSlots = expectedSlotsForFinalization(key, version, state.ExpectedSlots, location)
+	sourceExpected := state.SourceExpectedSlots
+	sourceReceived := state.SourceReceivedSlots
+	if sourceExpected == 0 {
+		sourceExpected = state.ExpectedSlots
+		sourceReceived = state.ReceivedSlots
+	}
+	childrenComplete := state.ReceivedSlots >= state.ExpectedSlots
+	missing := max64(0, sourceExpected-sourceReceived)
+	dataComplete := childrenComplete && missing == 0 && state.SourceIncompleteSlots == 0
+	return state, finalizationCoverage{
+		SourceExpectedSlots:  sourceExpected,
+		SourceReceivedSlots:  sourceReceived,
+		MissingSlots:         missing,
+		ChildrenComplete:     childrenComplete,
+		DataComplete:         dataComplete,
+		VersionExpectedSlots: state.ExpectedSlots,
+		NaturalSlots:         naturalExpectedSlots(version, key, state),
+		PeriodComplete:       dataComplete && versionCoversNaturalPeriod(version, key),
+		DailyVersionExpectedSlotsMismatch: dailyVersionExpectedSlotsMismatch(
+			key, version, state.ExpectedSlots, naturalExpectedSlots(version, key, state),
+		),
+	}
+}
+
+func dailyVersionExpectedSlotsMismatch(
+	key WindowKey,
+	version *TaskVersionSnapshot,
+	versionExpectedSlots, naturalSlots int64,
+) bool {
+	return key.Granularity == GranularityDaily && version != nil && !version.DevicePipeline &&
+		versionExpectedSlots != naturalSlots
+}
+
+func shouldRecordDailyVersionExpectedSlotsMismatch(revision int, coverage finalizationCoverage) bool {
+	return revision == 1 && coverage.DailyVersionExpectedSlotsMismatch
+}
+
+func (f *Finalizer) finalizationLocation() *time.Location {
+	if f.location != nil {
+		return f.location
+	}
+	return time.UTC
+}
+
+func (f *Finalizer) finalizationCoverageFor(
+	key WindowKey,
+	version *TaskVersionSnapshot,
+	state WindowState,
+) (WindowState, finalizationCoverage) {
+	return finalizationCoverageFor(key, version, state, f.finalizationLocation())
 }
 
 func versionCoversNaturalPeriod(version *TaskVersionSnapshot, key WindowKey) bool {

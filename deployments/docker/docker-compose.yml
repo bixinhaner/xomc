@@ -399,6 +399,18 @@ services:
       # 触发 InfoSyncer + applyProductMetadata —— batch path 漏接这两个的 follow-up bug
       # 在另一 commit 中修复）。生产默认保持 batch 启用以保证 Inform 吞吐。
       OMCGO_BATCH_PROCESSOR_ENABLED: "${OMCGO_BATCH_PROCESSOR_ENABLED:-true}"
+      # command.get_parameters.response 两条消费链独立限流。RPC durable/start_sequence
+      # 支持从旧 consumer AckFloor+1 无损切换；正常部署保持 start_sequence=0。
+      GPV_PROVISION_QUEUE: "${GPV_PROVISION_QUEUE:-provision-gpv}"
+      GPV_PROVISION_CONCURRENCY: "${GPV_PROVISION_CONCURRENCY:-2}"
+      GPV_PROVISION_QUEUE_DEPTH: "${GPV_PROVISION_QUEUE_DEPTH:-256}"
+      GPV_RPC_DURABLE: "${GPV_RPC_DURABLE:-device-rpc-gpv}"
+      GPV_RPC_START_SEQUENCE: "${GPV_RPC_START_SEQUENCE:-0}"
+      GPV_RPC_CONCURRENCY: "${GPV_RPC_CONCURRENCY:-2}"
+      GPV_RPC_QUEUE_DEPTH: "${GPV_RPC_QUEUE_DEPTH:-1000}"
+      GPV_ACK_WAIT: "${GPV_ACK_WAIT:-30s}"
+      GPV_MAX_DELIVER: "${GPV_MAX_DELIVER:-5}"
+      GPV_MAX_ACK_PENDING: "${GPV_MAX_ACK_PENDING:-2000}"
       # Go 运行时上限（resources.env 注入）；缺省空串 = 历史行为（GOMEMLIMIT 关、GOMAXPROCS 由 cgroup 推断）。
       GOMEMLIMIT: "${APP_GOMEMLIMIT:-}"
       GOMAXPROCS: "${APP_GOMAXPROCS:-}"
@@ -463,6 +475,7 @@ services:
       PM_AGGREGATION_FINALIZE_CONCURRENCY: "${PM_AGGREGATION_FINALIZE_CONCURRENCY:-4}"
       PM_AGGREGATION_MAX_EVENT_BYTES: "${PM_AGGREGATION_MAX_EVENT_BYTES:-8388608}"
       PM_AGGREGATION_WINDOW_TTL: "${PM_AGGREGATION_WINDOW_TTL:-1080h}"
+      PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-false}"
     volumes:
       - ../../run/logs/worker:/run/logs/worker
       # 共享 secrets 卷只读 — omcctl/scripts 默认从此读 .api-key
@@ -880,9 +893,8 @@ services:
   cadvisor:
     # gcr.io 不受 daemon.json registry-mirrors（仅代理 docker.io）覆盖；国内拉取超时时
     # 用 IMAGE_CADVISOR 覆盖为可达镜像（与 release bundle 同 IMAGE_CADVISOR 变量），如：
-    #   export IMAGE_CADVISOR=gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1
-    #   或       gcr.nju.edu.cn/cadvisor/cadvisor:v0.55.1
-    image: ${IMAGE_CADVISOR:-gcr.io/cadvisor/cadvisor:v0.55.1}
+    #   export IMAGE_CADVISOR=ghcr.io/google/cadvisor:0.55.1
+    image: ${IMAGE_CADVISOR:-ghcr.io/google/cadvisor:0.55.1}
     restart: unless-stopped
     # Export only the bounded Compose service label. cAdvisor defaults to
     # omitting container labels, which leaves Prometheus with service=cadvisor

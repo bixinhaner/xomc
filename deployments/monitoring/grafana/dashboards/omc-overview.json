@@ -317,6 +317,107 @@
         {"expr": "max by (technology, granularity) (pm_network_rollup_lag_seconds)", "legendFormat": "lag {{technology}}/{{granularity}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "title": "资源计划与容器实际限额 - CPU",
+      "description": "声明 CPU 核数为本次完整 resources.env 的期望基线；实际限额来自 cAdvisor cgroup，使用量来自运行中容器。",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 108},
+      "targets": [
+        {"expr": "label_replace(sum by (container_label_com_docker_compose_service) (container_spec_cpu_quota{container_label_com_docker_compose_service=~\"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web\"} / container_spec_cpu_period{container_label_com_docker_compose_service=~\"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web\"}), \"service\", \"$1\", \"container_label_com_docker_compose_service\", \"(.*)\")", "legendFormat": "实际 CPU limit {{service}}"},
+        {"expr": "label_replace(sum by (container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_service=~\"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web\"}[$__rate_interval])), \"service\", \"$1\", \"container_label_com_docker_compose_service\", \"(.*)\")", "legendFormat": "实际 CPU usage {{service}}"},
+        {"expr": "omc_resource_plan_cpu_cores", "legendFormat": "声明 CPU 核数 {{compose_service}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "cores"}}
+    },
+    {
+      "title": "资源计划与容器实际限额 - 内存",
+      "description": "声明内存为本次完整 resources.env 的期望基线；实际限额来自 cAdvisor cgroup，使用量是 working set。",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 108},
+      "targets": [
+        {"expr": "label_replace(sum by (container_label_com_docker_compose_service) (container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~\"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web\"}), \"service\", \"$1\", \"container_label_com_docker_compose_service\", \"(.*)\")", "legendFormat": "实际 memory limit {{service}}"},
+        {"expr": "label_replace(sum by (container_label_com_docker_compose_service) (container_memory_working_set_bytes{container_label_com_docker_compose_service=~\"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web\"}), \"service\", \"$1\", \"container_label_com_docker_compose_service\", \"(.*)\")", "legendFormat": "实际 memory usage {{service}}"},
+        {"expr": "omc_resource_plan_memory_limit_bytes", "legendFormat": "声明 memory {{compose_service}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "title": "Redis 聚合状态与内存水位",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 116},
+      "targets": [
+        {"expr": "redis_memory_used_bytes", "legendFormat": "Redis dataset bytes"},
+        {"expr": "redis_memory_max_bytes", "legendFormat": "Redis maxmemory"},
+        {"expr": "sum by (granularity) (omc_pm_aggregation_redis_sampled_estimated_bytes)", "legendFormat": "pmagg estimated {{granularity}} bytes"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "title": "PM 窗口关闭 - 并发与领取",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 116},
+      "targets": [
+        {"expr": "omc_pm_aggregation_finalize_inflight", "legendFormat": "finalize inflight"},
+        {"expr": "sum(rate(omc_pm_aggregation_finalize_claims_total[$__rate_interval]))", "legendFormat": "claims/s"},
+        {"expr": "sum(rate(omc_pm_aggregation_finalize_claim_conflicts_total[$__rate_interval]))", "legendFormat": "claim conflicts/s"}
+      ]
+    },
+    {
+      "title": "PM 窗口关闭 - 尾延迟",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 124},
+      "targets": [
+        {"expr": "omc_pm_aggregation_finalize_oldest_due_seconds", "legendFormat": "oldest due age"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "title": "PM 重算批量与行数",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 124},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(omc_pm_aggregation_rebuild_jobs_per_batch_bucket[$__rate_interval])))", "legendFormat": "rebuild batch p95 jobs"},
+        {"expr": "sum(rate(omc_pm_aggregation_rebuild_snapshot_rows_total[$__rate_interval]))", "legendFormat": "snapshot rows/s"},
+        {"expr": "sum(rate(omc_pm_aggregation_rebuild_coalesced_total[$__rate_interval]))", "legendFormat": "coalesced generations/s"}
+      ]
+    },
+    {
+      "title": "PM 重算快照扫描时延",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 132},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(omc_pm_aggregation_rebuild_snapshot_scan_seconds_bucket[$__rate_interval])))", "legendFormat": "snapshot scan p95"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "title": "PM 结果替换时延",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 132},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(omc_pm_aggregation_result_replace_seconds_bucket[$__rate_interval])))", "legendFormat": "TSDB result replace p95"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(omc_pm_aggregation_finalize_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "window finalize p95"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "title": "PM 上卷快照发布速率",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 140},
+      "targets": [
+        {"expr": "sum(rate(omc_pm_aggregation_rollup_outbox_published_total[$__rate_interval]))", "legendFormat": "rollup snapshots published/s"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "title": "Redis 聚合活动窗口数",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 148},
+      "targets": [
+        {"expr": "sum by (granularity) (omc_pm_aggregation_redis_sampled_active_windows)", "legendFormat": "pmagg active {{granularity}} windows"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
     }
   ],
   "refresh": "30s",

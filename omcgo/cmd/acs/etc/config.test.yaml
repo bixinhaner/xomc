@@ -37,6 +37,9 @@ redis:
   db: 0
   pool_size: 100
 
+task:
+  terminal_redis_ttl: 15m
+
 # Reliable parameter-sync data plane. Keep disabled until migration 000021 is applied.
 param_sync:
   run_enabled: false

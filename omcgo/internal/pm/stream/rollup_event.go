@@ -275,3 +275,36 @@ func expectedVersionChildWindows(
 	}
 	return count
 }
+
+// expectedSlotsForFinalization refreshes the expected child window count from
+// the latest rule version. Redis state may have been created while the version
+// was still open, so its original value must not outlive a later EffectiveTo.
+func expectedSlotsForFinalization(
+	key WindowKey,
+	version *TaskVersionSnapshot,
+	accumulated int64,
+	location *time.Location,
+) int64 {
+	if version == nil || version.DevicePipeline || version.DeviceRollup {
+		return accumulated
+	}
+	if location == nil {
+		location = time.UTC
+	}
+	var source Granularity
+	switch key.Granularity {
+	case GranularityDaily:
+		source = GranularityHourly
+	case GranularityWeekly, GranularityMonthly:
+		source = GranularityDaily
+	default:
+		return accumulated
+	}
+	expected := expectedVersionChildWindows(
+		Window{Start: key.Start, End: key.End}, source, version, location,
+	)
+	if expected > 0 {
+		return expected
+	}
+	return accumulated
+}

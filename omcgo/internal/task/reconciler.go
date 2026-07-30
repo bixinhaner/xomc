@@ -33,10 +33,11 @@ type Reconciler struct {
 	repairer TaskRepairer
 	metrics  *TaskMetrics
 
-	interval  time.Duration
-	grace     time.Duration
-	batchSize int
-	logger    *zap.Logger
+	interval          time.Duration
+	grace             time.Duration
+	batchSize         int
+	logger            *zap.Logger
+	publishTransition func(context.Context, *Task, string) error
 }
 
 // ActiveTaskLister 抽象 repo.ListActiveTasks，便于单测。
@@ -53,6 +54,28 @@ type QueueStateReader interface {
 // TaskRepairer 抽象 repo.Update（把修复后的终态写回 PG），便于单测。
 type TaskRepairer interface {
 	Update(ctx context.Context, task *Task) error
+}
+
+type conditionalTaskRepairer interface {
+	TransitionIfStatus(ctx context.Context, task *Task, from TaskStatus) (bool, error)
+	GetByID(ctx context.Context, id string) (*Task, error)
+}
+
+type pendingTransitionStore interface {
+	listPendingTransitions(ctx context.Context, limit int64) ([]pendingTransitionRef, error)
+	loadPendingTransition(ctx context.Context, taskID, token string) (*preparedTaskTransition, error)
+	acknowledgeTransition(ctx context.Context, taskID, token string) error
+	deferPendingTransition(ctx context.Context, taskID, token string) error
+	removePendingTransition(ctx context.Context, taskID, token string) error
+	resolvePendingTransition(ctx context.Context, durable *Task, token string) error
+	rollbackSentTransition(ctx context.Context, pending *Task, oldCWMPID, token string) error
+}
+
+func (r *Reconciler) WithTransitionPublisher(
+	publisher func(context.Context, *Task, string) error,
+) *Reconciler {
+	r.publishTransition = publisher
+	return r
 }
 
 // ReconcileStats 汇报一轮对账的处理结果。
@@ -137,13 +160,15 @@ func (r *Reconciler) Run(ctx context.Context) {
 // ReconcileOnce 跑一轮对账，返回处理统计 + 第一个致命错误。
 // 仅 lister 报错才是致命错误；单条任务的读 Redis / 回写 PG 失败仅记 warn + metric，继续下一条。
 func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) {
+	pendingStats := r.reconcilePendingTransitions(ctx)
 	olderThan := time.Now().Add(-r.grace)
 	tasks, err := r.lister.ListActiveTasks(ctx, olderThan, r.batchSize)
 	if err != nil {
-		return ReconcileStats{}, err
+		return pendingStats, err
 	}
 
-	stats := ReconcileStats{Scanned: len(tasks)}
+	stats := pendingStats
+	stats.Scanned += len(tasks)
 	staleDetected := 0
 	// issue #20：本轮观测到的活跃任务积压绝对快照（不漂移的权威背压信号）。
 	// 注意：受 grace + batchSize 限制，这是"超过 grace 仍活跃且本批可见"的下界，
@@ -183,7 +208,17 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) 
 
 		// 把 Redis 终态同步回 PG。复制终态字段到 PG 侧对象后 Update ——
 		// 直接用 live（已是终态完整对象）回写。
-		if err := r.repairer.Update(ctx, live); err != nil {
+		var repairErr error
+		if conditional, ok := r.repairer.(conditionalTaskRepairer); ok {
+			var changed bool
+			changed, repairErr = conditional.TransitionIfStatus(ctx, live, t.Status)
+			if repairErr == nil && !changed {
+				continue
+			}
+		} else {
+			repairErr = r.repairer.Update(ctx, live)
+		}
+		if repairErr != nil {
 			stats.RepairFailed++
 			if r.metrics != nil {
 				r.metrics.ReconcileTotal.WithLabelValues("repair_failed").Inc()
@@ -193,7 +228,7 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) 
 				zap.String("device_sn", t.DeviceSN),
 				zap.String("pg_status", string(t.Status)),
 				zap.String("redis_status", string(live.Status)),
-				zap.Error(err))
+				zap.Error(repairErr))
 			continue
 		}
 
@@ -216,4 +251,101 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) 
 			zap.Int("repair_failed", stats.RepairFailed))
 	}
 	return stats, nil
+}
+
+// reconcilePendingTransitions consumes the durable Redis compensation index
+// before the legacy PG-active scan. Failed entries are moved to the tail so a
+// long PG outage for one task cannot starve newer transitions in a fixed batch.
+func (r *Reconciler) reconcilePendingTransitions(ctx context.Context) ReconcileStats {
+	store, ok := r.reader.(pendingTransitionStore)
+	if !ok {
+		return ReconcileStats{}
+	}
+	repairer, ok := r.repairer.(conditionalTaskRepairer)
+	if !ok {
+		return ReconcileStats{}
+	}
+	refs, err := store.listPendingTransitions(ctx, int64(r.batchSize))
+	if err != nil {
+		r.logger.Warn("reconcile: list pending transitions failed", zap.Error(err))
+		return ReconcileStats{RepairFailed: 1}
+	}
+	stats := ReconcileStats{Scanned: len(refs)}
+	for _, ref := range refs {
+		id, token := ref.TaskID, ref.Token
+		prepared, err := store.loadPendingTransition(ctx, id, token)
+		if err != nil {
+			stats.RepairFailed++
+			_ = store.deferPendingTransition(ctx, id, token)
+			continue
+		}
+		if prepared == nil || prepared.Task == nil {
+			// Hash was explicitly deleted after the index write. Remove the
+			// stale index member; normal transitions are PERSISTed and cannot
+			// disappear because of TTL while PG is unavailable.
+			_ = store.removePendingTransition(ctx, id, token)
+			continue
+		}
+		if prepared.Task.Status == TaskStatusSent {
+			durable, loadErr := repairer.GetByID(ctx, id)
+			if loadErr != nil {
+				stats.RepairFailed++
+				_ = store.deferPendingTransition(ctx, id, token)
+				continue
+			}
+			if durable != nil && durable.Status == TaskStatusPending {
+				if err := store.rollbackSentTransition(
+					ctx, durable, prepared.Task.CWMPID, token,
+				); err != nil {
+					stats.RepairFailed++
+					_ = store.deferPendingTransition(ctx, id, token)
+					continue
+				}
+				stats.Repaired++
+				continue
+			}
+		}
+		if prepared.PGSyncPending {
+			changed, transitionErr := repairer.TransitionIfStatus(
+				ctx, prepared.Task, prepared.From,
+			)
+			if transitionErr != nil {
+				stats.RepairFailed++
+				_ = store.deferPendingTransition(ctx, id, token)
+				continue
+			}
+			if !changed {
+				durable, loadErr := repairer.GetByID(ctx, id)
+				if loadErr != nil || durable == nil {
+					stats.RepairFailed++
+					_ = store.deferPendingTransition(ctx, id, token)
+					continue
+				}
+				if durable.Status != prepared.Task.Status {
+					if !isTerminal(durable.Status) ||
+						store.resolvePendingTransition(ctx, durable, token) != nil {
+						stats.RepairFailed++
+						_ = store.deferPendingTransition(ctx, id, token)
+						continue
+					}
+					prepared.Task = durable
+				}
+			}
+		}
+		if err := store.acknowledgeTransition(ctx, id, token); err != nil {
+			stats.RepairFailed++
+			_ = store.deferPendingTransition(ctx, id, token)
+			continue
+		}
+		if prepared.EventPending {
+			if r.publishTransition == nil ||
+				r.publishTransition(ctx, prepared.Task, token) != nil {
+				stats.RepairFailed++
+				_ = store.deferPendingTransition(ctx, id, token)
+				continue
+			}
+		}
+		stats.Repaired++
+	}
+	return stats
 }

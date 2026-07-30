@@ -21,6 +21,7 @@ type Config struct {
 	WindowTTL           time.Duration
 	OutboxRetention     time.Duration
 	ReplayRetention     time.Duration
+	RedisV2WriteEnabled bool
 }
 
 func DefaultConfig() Config {
@@ -37,6 +38,7 @@ func DefaultConfig() Config {
 		WindowTTL:           45 * 24 * time.Hour,
 		OutboxRetention:     24 * time.Hour,
 		ReplayRetention:     45 * 24 * time.Hour,
+		RedisV2WriteEnabled: false,
 	}
 }
 
@@ -62,6 +64,9 @@ func ConfigFromEnv() Config {
 	cfg.ReplayRetention = boundedDuration(
 		envDuration("PM_AGGREGATION_REPLAY_RETENTION", cfg.ReplayRetention),
 		45*24*time.Hour, 90*24*time.Hour,
+	)
+	cfg.RedisV2WriteEnabled = envBool(
+		"PM_AGGREGATION_REDIS_V2_WRITE_ENABLED", cfg.RedisV2WriteEnabled,
 	)
 	return cfg
 }

@@ -77,10 +77,25 @@ if [ -f "$DEPLOY_DIR/storage-paths-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/storage-paths-lib.sh（有状态服务数据路径库，由 build-release.sh 随包发布）" 1
 fi
+if [ -f "$DEPLOY_DIR/resource-env-lib.sh" ]; then
+  . "$DEPLOY_DIR/resource-env-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/resource-env-lib.sh（完整资源规划契约库）" 1
+fi
+if [ -f "$DEPLOY_DIR/resource-plan-metrics.sh" ]; then
+  . "$DEPLOY_DIR/resource-plan-metrics.sh"
+else
+  die "缺 $DEPLOY_DIR/resource-plan-metrics.sh（资源计划 Prometheus 指标生成器）" 1
+fi
 if [ -f "$DEPLOY_DIR/monitoring-profile-lib.sh" ]; then
   . "$DEPLOY_DIR/monitoring-profile-lib.sh"
 else
   die "缺 $DEPLOY_DIR/monitoring-profile-lib.sh（监控部署模式状态库，由 build-release.sh 随包发布）" 1
+fi
+if [ -f "$DEPLOY_DIR/gpv-handoff-lib.sh" ]; then
+  . "$DEPLOY_DIR/gpv-handoff-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/gpv-handoff-lib.sh（GPV 无损升级接力库，由 build-release.sh 随包发布）" 1
 fi
 
 # 升级时 deploy/.env 里【运维自定义】的键 —— 跨版本继承,不被新包默认值覆盖。
@@ -90,7 +105,7 @@ fi
 # 【版本相关】键(PROJECT_VERSION / IMAGE_*)不在此列,始终用新包值。
 # 注：POSTGRES_TSDB_USER/PASSWORD/DB（时序库凭据，#347）跨版本继承；TSDB_HOST 是 compose 服务名
 # （随包固定值），故【不】列入继承白名单，始终用新包值。
-ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH"
+ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH PM_AGGREGATION_FINALIZE_CONCURRENCY GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING"
 
 # merge_env_preserve <prev_env> <new_env>
 # 升级继承:以新包 .env 为基底(拿到新镜像 tag),把上一版 .env 中白名单键的值
@@ -172,6 +187,23 @@ confirm() {
   local yn
   read -rp "$1 [Y/n] " yn
   case "${yn:-Y}" in [Yy]*|"") return 0 ;; *) return 1 ;; esac
+}
+
+# resolve_resource_env_candidate —— 安装前资源契约候选优先级：
+#   1) 新交付包内由 plan-resources.sh 生成的文件；
+#   2) 当前生效 release；
+#   3) uninstall 保留的 saved 快照。
+# 一旦较高优先级候选存在，就必须校验该文件，禁止因其非法而回退到较旧候选。
+resolve_resource_env_candidate() {
+  if [ -f "$PKG_ROOT/deploy/resources.env" ]; then
+    printf '%s\n' "$PKG_ROOT/deploy/resources.env"
+  elif [ -f "$OMC_ROOT/current/deploy/resources.env" ]; then
+    printf '%s\n' "$OMC_ROOT/current/deploy/resources.env"
+  elif [ -f "$OMC_ROOT/etc/resources.env.saved" ]; then
+    printf '%s\n' "$OMC_ROOT/etc/resources.env.saved"
+  else
+    return 1
+  fi
 }
 
 # heal_main_pg_timescaledb_downgrade —— 升级自愈（#347 主库 timescaledb → 纯 PG 降级）
@@ -299,6 +331,14 @@ docker info >/dev/null 2>&1 || die "docker 服务不可用，请先 systemctl st
 [ "$SKIP_WEB" = 1 ]        || [ -f "$PKG_ROOT/deploy/docker-compose.web.yml" ]        || die "缺 deploy/docker-compose.web.yml（或加 --skip-web）" 1
 [ "$SKIP_MONITORING" = 1 ] || [ -f "$PKG_ROOT/deploy/docker-compose.monitoring.yml" ] || die "缺 deploy/docker-compose.monitoring.yml（或加 --skip-monitoring）" 1
 
+# 资源契约是部署必需输入。必须在 --check-only 退出、current 切换和任何容器重启之前
+# 校验真正会被本次安装采用的候选，不能等到 Step 6 组装 Compose 才发现旧三行文件。
+RESOURCE_ENV_CANDIDATE="$(resolve_resource_env_candidate)" ||
+  die "未找到 resources.env；请先运行 bash $PKG_ROOT/deploy/plan-resources.sh，禁止静默回退 Compose 默认限额" 1
+resource_env_validate "$RESOURCE_ENV_CANDIDATE" ||
+  die "resources.env 不是完整资源规划：${RESOURCE_ENV_CANDIDATE}；请重新运行 plan-resources.sh" 1
+log "资源规划预检通过：$RESOURCE_ENV_CANDIDATE"
+
 # 兜底：旧版 build-release.sh 在 umask=027 机器上构建时 monitoring/ 配置会落 0640，
 # prometheus/loki/tempo/alertmanager 等非 root 容器读不动直接 fail。
 # 新版 build-release.sh 已 baked chmod a+rX 到 tar；这里再 defensive 兜一遍。
@@ -332,31 +372,19 @@ fi
 # =============================================================================
 sep "2/9 旧 systemd 单元自动迁移"
 
-if command -v systemctl >/dev/null 2>&1; then
-  HAS_OLD=0
-  for svc in omcgo-app omcgo-acs omcgo-worker; do
-    UNIT="/etc/systemd/system/$svc.service"
-    if [ -f "$UNIT" ] || systemctl list-unit-files "$svc.service" >/dev/null 2>&1; then
-      HAS_OLD=1
-      log "检测到旧 systemd 单元：$svc"
-      systemctl stop "$svc" 2>/dev/null || true
-      systemctl disable "$svc" 2>/dev/null || true
-      if [ -f "$UNIT" ]; then
-        BAK="$UNIT.bak.$(date +%Y%m%d%H%M%S)"
-        mv "$UNIT" "$BAK"
-        log "  · 备份并移除单元 → $BAK"
-      fi
-    fi
-  done
-  if [ "$HAS_OLD" = 1 ]; then
-    systemctl daemon-reload
-    log "旧 systemd 单元已停掉并禁用（业务进程将由 docker compose 接管）"
-    warn "宿主机旧 OMC 二进制（如 /opt/omc/current/bin/）保留未删，请运维确认无残留进程后自行清理"
-  else
-    log "未检测到旧 systemd 单元，跳过"
-  fi
-else
-  log "systemctl 不存在（非 systemd 系统），跳过旧单元迁移"
+HANDOFF_PREPARED=0
+GPV_SYSTEMD_HANDOFF_PREPARED=0
+SYSTEMD_HANDOFF_IMAGE="$(gpv_handoff_env_get "$PKG_ROOT/deploy/.env" IMAGE_APP 2>/dev/null || true)"
+if ! gpv_handoff_migrate_legacy_systemd \
+  "$SYSTEMD_HANDOFF_IMAGE" \
+  "$PKG_ROOT/images" \
+  "$OMC_ROOT/etc/app.prod.yaml"; then
+  die "旧 systemd app 的 GPV handoff 失败；未停止或禁用任何旧业务服务" 2
+fi
+if [ "$GPV_SYSTEMD_HANDOFF_PREPARED" = 1 ]; then
+  HANDOFF_PREPARED=1
+  log "旧 systemd app 的 GPV durable 已预创建，并已按 ACS → worker → app 顺序停服"
+  warn "宿主机旧 OMC 二进制（如 /opt/omc/current/bin/）保留未删，请运维确认无残留进程后自行清理"
 fi
 
 # =============================================================================
@@ -375,6 +403,10 @@ mkdir -p "$OMC_ROOT/releases" "$OMC_ROOT/etc" "$OMC_ROOT/packages" \
 # 必须在可能 mv/覆盖旧版本目录之前抓取 —— current 软链此刻仍指向上一版;首次部署无 current → 空。
 # 兼容 uninstall.sh：若 current 已被卸载移除,退而读卸载时保存的凭据 $OMC_ROOT/etc/.env.saved。
 PREV_ENV_SNAPSHOT=""
+FRESH_INSTALL=0
+if gpv_handoff_is_fresh_install "$OMC_ROOT"; then
+  FRESH_INSTALL=1
+fi
 if [ -f "$OMC_ROOT/current/deploy/.env" ]; then
   PREV_ENV_SNAPSHOT="$(mktemp)" || PREV_ENV_SNAPSHOT=""
   [ -n "$PREV_ENV_SNAPSHOT" ] && { cp "$OMC_ROOT/current/deploy/.env" "$PREV_ENV_SNAPSHOT" 2>/dev/null || PREV_ENV_SNAPSHOT=""; }
@@ -387,13 +419,18 @@ fi
 # resources.env(plan-resources.sh 生成的资源限额,operator 独有,不随交付包)同样快照:
 # 它是独立文件、无包内默认值可合并,故整文件继承(而非走 ENV_PRESERVE_KEYS 键级合并)。
 PREV_RESOURCES_SNAPSHOT=""
-if [ -f "$OMC_ROOT/current/deploy/resources.env" ]; then
+if [ "$RESOURCE_ENV_CANDIDATE" = "$PKG_ROOT/deploy/resources.env" ]; then
+  :
+elif [ "$RESOURCE_ENV_CANDIDATE" = "$OMC_ROOT/current/deploy/resources.env" ]; then
   PREV_RESOURCES_SNAPSHOT="$(mktemp)" || PREV_RESOURCES_SNAPSHOT=""
-  [ -n "$PREV_RESOURCES_SNAPSHOT" ] && { cp "$OMC_ROOT/current/deploy/resources.env" "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || PREV_RESOURCES_SNAPSHOT=""; }
-elif [ -f "$OMC_ROOT/etc/resources.env.saved" ]; then
+  [ -n "$PREV_RESOURCES_SNAPSHOT" ] && { cp "$RESOURCE_ENV_CANDIDATE" "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || PREV_RESOURCES_SNAPSHOT=""; }
+elif [ "$RESOURCE_ENV_CANDIDATE" = "$OMC_ROOT/etc/resources.env.saved" ]; then
   PREV_RESOURCES_SNAPSHOT="$(mktemp)" || PREV_RESOURCES_SNAPSHOT=""
-  [ -n "$PREV_RESOURCES_SNAPSHOT" ] && { cp "$OMC_ROOT/etc/resources.env.saved" "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || PREV_RESOURCES_SNAPSHOT=""; }
+  [ -n "$PREV_RESOURCES_SNAPSHOT" ] && { cp "$RESOURCE_ENV_CANDIDATE" "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || PREV_RESOURCES_SNAPSHOT=""; }
 fi
+[ "$RESOURCE_ENV_CANDIDATE" = "$PKG_ROOT/deploy/resources.env" ] ||
+  [ -n "$PREV_RESOURCES_SNAPSHOT" ] ||
+  die "resources.env 快照失败，未切换 current；请检查临时目录空间与文件权限" 1
 
 # 保存上一版随包 builtin 基线，用于区分“未修改的旧 builtin”与“运维在原 builtin
 # 文件上做过的扩展”。仅看 .custom 不够：指标库 force 覆盖 GSM.xml/BSC 平台时为了
@@ -428,11 +465,17 @@ merge_env_preserve "$PREV_ENV_SNAPSHOT" "$RELEASE_DIR/deploy/.env"
 
 # 资源限额 resources.env 整文件继承到新 release(交付包不含此文件,故仅在上一版存在时拷入)。
 if [ -n "$PREV_RESOURCES_SNAPSHOT" ] && [ ! -f "$RELEASE_DIR/deploy/resources.env" ]; then
-  cp "$PREV_RESOURCES_SNAPSHOT" "$RELEASE_DIR/deploy/resources.env" 2>/dev/null \
-    && log "resources.env:已从上一版继承资源限额(plan-resources.sh 调优值不丢)" \
-    || warn "resources.env:继承失败,请手动核对 $RELEASE_DIR/deploy/resources.env"
+  cp "$PREV_RESOURCES_SNAPSHOT" "$RELEASE_DIR/deploy/resources.env" 2>/dev/null ||
+    die "resources.env 继承复制失败，未切换 current：$RELEASE_DIR/deploy/resources.env" 1
+  log "resources.env:已从上一版继承资源限额(plan-resources.sh 调优值不丢)"
 fi
 [ -n "$PREV_RESOURCES_SNAPSHOT" ] && rm -f "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || true
+
+# 防 TOCTOU、复制故障和目标目录陈旧文件：对即将成为 current 的实际文件再校验一次。
+[ -f "$RELEASE_DIR/deploy/resources.env" ] ||
+  die "复制/继承后的 resources.env 缺失，未切换 current；请重新运行 plan-resources.sh" 1
+resource_env_validate "$RELEASE_DIR/deploy/resources.env" ||
+  die "复制/继承后的 resources.env 未通过完整资源规划校验，未切换 current：$RELEASE_DIR/deploy/resources.env" 1
 
 # ── data 外置 + 升级反向合并(三库导入XML重构 Phase 2,D1/D2)───────────────────
 # 模型 B:整个 data 目录外置到 $OMC_ROOT/data,bind-mount(RW)进 app/worker;
@@ -572,6 +615,10 @@ else
     else
       warn "ACS session.max_concurrent 自动迁移失败，保留现网配置；请人工核对新包模板"
     fi
+    upgrade_app_gpv_response_config \
+      "$OMC_ROOT/etc/app.prod.yaml" \
+      "$RELEASE_DIR/etc/app.prod.yaml" ||
+      die "app.prod.yaml 缺少 provision.gpv_response 且自动补齐失败；未切换 current" 1
     log "$OMC_ROOT/etc/ 已有实例配置，保留不覆盖（如需覆盖加 --overwrite-etc）"
   fi
 fi
@@ -626,8 +673,7 @@ if [ "$SKIP_INFRA" = 0 ]; then
   MON_IMAGES=("${IMAGE_PROMETHEUS:-}" "${IMAGE_ALERTMANAGER:-}" "${IMAGE_GRAFANA:-}" "${IMAGE_LOKI:-}" "${IMAGE_TEMPO:-}" "${IMAGE_OTELCOL:-}" "${IMAGE_NATS_EXPORTER:-}")
 
   if images_exist "${INFRA_IMAGES[@]}" "${MON_IMAGES[@]}"; then
-    log "基础设施 + 监控镜像已存在，跳过 load，重启容器"
-    $COMPOSE -p "$COMPOSE_PROJECT" restart postgres postgres-tsdb redis nats minio 2>/dev/null || true
+    log "基础设施 + 监控镜像已存在，跳过 load；handoff 完成前保持现有容器不动"
   else
     log "load 基础设施 + 监控镜像（$INFRA_DIR/images/）"
     for tar in "$INFRA_DIR/images"/*.tar; do
@@ -643,8 +689,7 @@ fi
 BIZ_IMAGES=("$IMAGE_APP" "$IMAGE_ACS" "$IMAGE_WORKER" "$IMAGE_WEB")
 
 if images_exist "${BIZ_IMAGES[@]}"; then
-  log "业务镜像已存在，跳过 load，重启业务容器"
-  $COMPOSE -p "$COMPOSE_PROJECT" restart app acs worker web 2>/dev/null || true
+  log "业务镜像已存在，跳过 load；handoff 完成前保持现有 app 不动"
   biz_loaded=1
 else
   log "load 业务镜像（$RELEASE_DIR/images/）"
@@ -684,12 +729,14 @@ cd "$OMC_ROOT/current/deploy"
 # 注意：一旦显式传任一 --env-file，compose 不再自动加载 ./.env，故 .env 也必须显式传。
 ENV_FILES=()
 [ -f .env ] && ENV_FILES+=( --env-file .env )
-if [ -f resources.env ]; then
-  ENV_FILES+=( --env-file resources.env )
-  log "已检出 resources.env → 按其资源限额部署（plan-resources.sh 生成）"
-else
-  log "未检出 resources.env → 用 compose 内置默认限额（如需按主机空闲资源规划，部署前先跑：bash plan-resources.sh）"
-fi
+[ -f resources.env ] ||
+  die "current/deploy/resources.env 缺失；禁止静默回退 Compose 默认限额，请重新运行 plan-resources.sh"
+resource_env_validate resources.env ||
+  die "resources.env 不是完整资源规划；请重新运行 plan-resources.sh，禁止缺失项静默回退 Compose 默认值"
+resource_plan_metrics_write resources.env ||
+  die "无法生成 resources.env 对应的 Prometheus 资源计划指标"
+ENV_FILES+=( --env-file resources.env )
+log "已检出完整 resources.env → 按其资源限额部署（plan-resources.sh 生成）"
 
 COMPOSE_FILES=( -f docker-compose.infra.yml -f docker-compose.app.yml )
 [ "$SKIP_WEB" = 0 ]        && COMPOSE_FILES+=( -f docker-compose.web.yml )
@@ -697,6 +744,25 @@ COMPOSE_FILES=( -f docker-compose.infra.yml -f docker-compose.app.yml )
 
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 log "compose 命令：${DC[*]}"
+
+APP_CID="$("${DC[@]}" ps -q app 2>/dev/null || true)"
+NATS_CID="$("${DC[@]}" ps -q nats 2>/dev/null || true)"
+APP_RUNNING=0
+NATS_RUNNING=0
+[ -n "$APP_CID" ] && [ "$(docker inspect -f '{{.State.Running}}' "$APP_CID" 2>/dev/null || true)" = "true" ] && APP_RUNNING=1
+[ -n "$NATS_CID" ] && [ "$(docker inspect -f '{{.State.Running}}' "$NATS_CID" 2>/dev/null || true)" = "true" ] && NATS_RUNNING=1
+if [ -n "$APP_CID" ] || [ -n "$NATS_CID" ]; then
+  FRESH_INSTALL=0
+fi
+if [ "$APP_RUNNING" = 1 ] && [ "$NATS_RUNNING" != 1 ]; then
+  die "旧 app 仍在运行但 NATS 不可用，无法读取 GPV consumer AckFloor；未停止旧 app" 2
+fi
+if [ "$HANDOFF_PREPARED" != 1 ] && [ "$NATS_RUNNING" = 1 ]; then
+  log "在停止/重建旧 app 前预创建 GPV RPC 固定 durable ..."
+  gpv_handoff_prepare ||
+    die "GPV consumer handoff 失败；未停止旧 app，修复 NATS/consumer 配置后重试" 2
+  HANDOFF_PREPARED=1
+fi
 
 # =============================================================================
 # Step 7. 启动基础设施 + 等就绪 → 跑 migrate / seed（一次性容器）
@@ -714,12 +780,13 @@ log "启动基础设施容器 ..."
 
 log "等待基础设施 ready（最多 90s）..."
 WAIT=0
-PG_OK=0; TS_OK=0; RD_OK=0
+PG_OK=0; TS_OK=0; RD_OK=0; NATS_OK=0
 while [ $WAIT -lt 90 ]; do
   sleep 3; WAIT=$((WAIT+3))
   PG_CID="$("${DC[@]}" ps -q postgres 2>/dev/null || true)"
   TS_CID="$("${DC[@]}" ps -q postgres-tsdb 2>/dev/null || true)"
   RD_CID="$("${DC[@]}" ps -q redis 2>/dev/null || true)"
+  NATS_CID="$("${DC[@]}" ps -q nats 2>/dev/null || true)"
   if [ -n "$PG_CID" ]; then
     docker exec "$PG_CID" pg_isready -U "${POSTGRES_USER:-omcgo}" >/dev/null 2>&1 && PG_OK=1 || PG_OK=0
   fi
@@ -730,15 +797,28 @@ while [ $WAIT -lt 90 ]; do
   if [ -n "$RD_CID" ]; then
     docker exec "$RD_CID" redis-cli ping >/dev/null 2>&1 && RD_OK=1 || RD_OK=0
   fi
-  [ "$PG_OK" = 1 ] && [ "$TS_OK" = 1 ] && [ "$RD_OK" = 1 ] && break
-  echo "  ... ${WAIT}s (PG=$PG_OK TSDB=$TS_OK RD=$RD_OK)"
+  if [ -n "$NATS_CID" ]; then
+    [ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$NATS_CID" 2>/dev/null || true)" = "healthy" ] &&
+      NATS_OK=1 || NATS_OK=0
+  fi
+  [ "$PG_OK" = 1 ] && [ "$TS_OK" = 1 ] && [ "$RD_OK" = 1 ] && [ "$NATS_OK" = 1 ] && break
+  echo "  ... ${WAIT}s (PG=$PG_OK TSDB=$TS_OK RD=$RD_OK NATS=$NATS_OK)"
 done
-if [ "$PG_OK" != 1 ] || [ "$TS_OK" != 1 ] || [ "$RD_OK" != 1 ]; then
-  die "基础设施 90s 内未就绪：PG=$PG_OK TSDB=$TS_OK RD=$RD_OK
+if [ "$PG_OK" != 1 ] || [ "$TS_OK" != 1 ] || [ "$RD_OK" != 1 ] || [ "$NATS_OK" != 1 ]; then
+  die "基础设施 90s 内未就绪：PG=$PG_OK TSDB=$TS_OK RD=$RD_OK NATS=$NATS_OK
   手动检查：${DC[*]} ps
             ${DC[*]} logs postgres postgres-tsdb redis" 2
 fi
-log "基础设施已就绪 (PG / TSDB / Redis)"
+log "基础设施已就绪 (PG / TSDB / Redis / NATS)"
+
+if [ "$HANDOFF_PREPARED" != 1 ]; then
+  log "首次部署/原 NATS 未运行：在 app 首次启动前创建 GPV RPC 固定 durable ..."
+  HANDOFF_ARGS=()
+  [ "$FRESH_INSTALL" = 1 ] && HANDOFF_ARGS+=(--fresh-install)
+  gpv_handoff_prepare "${HANDOFF_ARGS[@]}" ||
+    die "GPV consumer handoff 失败；尚未启动 app，修复 NATS/consumer 配置后重试" 2
+  HANDOFF_PREPARED=1
+fi
 
 # 7.2 验证 omcgo-net 网络已创建
 log "验证 omcgo-net 网络 ..."

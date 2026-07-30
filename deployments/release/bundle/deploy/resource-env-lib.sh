@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# 资源规划契约：只解析 KEY=VALUE，不执行 operator 可编辑的 resources.env。
+
+resource_env_required_keys() {
+  cat <<'EOF'
+APP_CPUS
+APP_MEM
+APP_GOMEMLIMIT
+APP_GOMAXPROCS
+ACS_CPUS
+ACS_MEM
+ACS_GOMEMLIMIT
+ACS_GOMAXPROCS
+WORKER_CPUS
+WORKER_MEM
+WORKER_GOMEMLIMIT
+WORKER_GOMAXPROCS
+POSTGRES_CPUS
+POSTGRES_MEM
+PG_SHARED_BUFFERS
+PG_EFFECTIVE_CACHE_SIZE
+PG_MAX_CONNECTIONS
+PG_WORK_MEM
+PG_MAINTENANCE_WORK_MEM
+PG_MAX_WAL_SIZE
+TSDB_CPUS
+TSDB_MEM
+TSDB_SHARED_BUFFERS
+TSDB_EFFECTIVE_CACHE_SIZE
+TSDB_MAX_CONNECTIONS
+TSDB_WORK_MEM
+TSDB_MAINTENANCE_WORK_MEM
+TSDB_MAX_WAL_SIZE
+REDIS_CPUS
+REDIS_MEM
+REDIS_MAXMEMORY
+NATS_CPUS
+NATS_MEM
+NATS_MAX_MEMORY_STORE
+MINIO_CPUS
+MINIO_MEM
+WEB_CPUS
+WEB_MEM
+OMC_RESOURCE_SCHEMA_VERSION
+OMC_RESOURCE_PLAN_HOST_CPU
+OMC_RESOURCE_PLAN_HOST_MEM_MIB
+EOF
+}
+
+resource_env_get() {
+  local file="$1" key="$2"
+  awk -v key="$key" '
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+    {
+      pos=index($0, "=")
+      if (pos == 0) next
+      name=substr($0, 1, pos - 1)
+      value=substr($0, pos + 1)
+      sub(/\r$/, "", value)
+      if (name == key) { print value; exit }
+    }
+  ' "$file"
+}
+
+resource_env_key_count() {
+  local file="$1" key="$2"
+  awk -v key="$key" '
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+    {
+      pos=index($0, "=")
+      if (pos > 0 && substr($0, 1, pos - 1) == key) count++
+    }
+    END { print count + 0 }
+  ' "$file"
+}
+
+resource_env_positive_integer() { [[ "$1" =~ ^[1-9][0-9]*$ ]]; }
+resource_env_positive_cpu() {
+  [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]] && awk -v value="$1" 'BEGIN { exit !(value > 0) }'
+}
+resource_env_memory_mib() {
+  local value="$1" number unit
+  if [[ "$value" =~ ^([0-9]+([.][0-9]+)?)([mMgG]([iI])?([bB])?)$ ]]; then
+    number="${BASH_REMATCH[1]}"
+    unit="${BASH_REMATCH[3],,}"
+    awk -v number="$number" -v unit="$unit" 'BEGIN {
+      if (number <= 0) exit 1
+      if (unit ~ /^g/) printf "%.6f", number * 1024
+      else printf "%.6f", number
+    }'
+  else
+    return 1
+  fi
+}
+resource_env_memory_is_positive() { resource_env_memory_mib "$1" >/dev/null; }
+resource_env_less_than() {
+  local left="$1" right="$2"
+  awk -v left="$left" -v right="$right" 'BEGIN { exit !(left < right) }'
+}
+resource_env_at_most() {
+  local left="$1" right="$2"
+  awk -v left="$left" -v right="$right" 'BEGIN { exit !(left <= right) }'
+}
+
+resource_env_validate() {
+  local file="$1" key value invalid=0
+  local app_mem acs_mem worker_mem redis_mem redis_max
+  [ -f "$file" ] || { echo "[resource-env] 文件不存在: $file" >&2; return 1; }
+
+  while IFS= read -r key; do
+    value="$(resource_env_get "$file" "$key")"
+    if [ -z "$value" ]; then
+      echo "[resource-env] 缺少必填键: $key" >&2
+      invalid=1
+    fi
+    if [ "$(resource_env_key_count "$file" "$key")" -gt 1 ]; then
+      echo "[resource-env] 契约键不可重复赋值: $key" >&2
+      invalid=1
+    fi
+  done < <(resource_env_required_keys)
+  [ "$invalid" -eq 0 ] || return 1
+
+  for key in APP_CPUS ACS_CPUS WORKER_CPUS POSTGRES_CPUS TSDB_CPUS REDIS_CPUS NATS_CPUS MINIO_CPUS WEB_CPUS; do
+    value="$(resource_env_get "$file" "$key")"
+    if ! resource_env_positive_cpu "$value"; then
+      echo "[resource-env] $key 必须是正数 CPU 值: $value" >&2; invalid=1
+    fi
+  done
+  for key in APP_MEM APP_GOMEMLIMIT ACS_MEM ACS_GOMEMLIMIT WORKER_MEM WORKER_GOMEMLIMIT POSTGRES_MEM PG_SHARED_BUFFERS PG_EFFECTIVE_CACHE_SIZE PG_WORK_MEM PG_MAINTENANCE_WORK_MEM PG_MAX_WAL_SIZE TSDB_MEM TSDB_SHARED_BUFFERS TSDB_EFFECTIVE_CACHE_SIZE TSDB_WORK_MEM TSDB_MAINTENANCE_WORK_MEM TSDB_MAX_WAL_SIZE REDIS_MEM REDIS_MAXMEMORY NATS_MEM MINIO_MEM WEB_MEM; do
+    value="$(resource_env_get "$file" "$key")"
+    if ! resource_env_memory_is_positive "$value"; then
+      echo "[resource-env] $key 必须是带可解析单位的正内存值: $value" >&2; invalid=1
+    fi
+  done
+  for key in APP_GOMAXPROCS ACS_GOMAXPROCS WORKER_GOMAXPROCS PG_MAX_CONNECTIONS TSDB_MAX_CONNECTIONS NATS_MAX_MEMORY_STORE OMC_RESOURCE_PLAN_HOST_CPU OMC_RESOURCE_PLAN_HOST_MEM_MIB; do
+    value="$(resource_env_get "$file" "$key")"
+    if ! resource_env_positive_integer "$value"; then
+      echo "[resource-env] $key 必须是正整数: $value" >&2; invalid=1
+    fi
+  done
+  value="$(resource_env_get "$file" OMC_RESOURCE_SCHEMA_VERSION)"
+  if [ "$value" != "2" ]; then
+    echo "[resource-env] OMC_RESOURCE_SCHEMA_VERSION 必须为 2: $value" >&2; invalid=1
+  fi
+  [ "$invalid" -eq 0 ] || return 1
+
+  app_mem="$(resource_env_memory_mib "$(resource_env_get "$file" APP_MEM)")"
+  acs_mem="$(resource_env_memory_mib "$(resource_env_get "$file" ACS_MEM)")"
+  worker_mem="$(resource_env_memory_mib "$(resource_env_get "$file" WORKER_MEM)")"
+  redis_mem="$(resource_env_memory_mib "$(resource_env_get "$file" REDIS_MEM)")"
+  redis_max="$(resource_env_memory_mib "$(resource_env_get "$file" REDIS_MAXMEMORY)")"
+  if ! resource_env_less_than "$(resource_env_memory_mib "$(resource_env_get "$file" APP_GOMEMLIMIT)")" "$app_mem"; then
+    echo "[resource-env] APP_GOMEMLIMIT 必须 < APP_MEM" >&2; invalid=1
+  fi
+  if ! resource_env_less_than "$(resource_env_memory_mib "$(resource_env_get "$file" ACS_GOMEMLIMIT)")" "$acs_mem"; then
+    echo "[resource-env] ACS_GOMEMLIMIT 必须 < ACS_MEM" >&2; invalid=1
+  fi
+  if ! resource_env_less_than "$(resource_env_memory_mib "$(resource_env_get "$file" WORKER_GOMEMLIMIT)")" "$worker_mem"; then
+    echo "[resource-env] WORKER_GOMEMLIMIT 必须 < WORKER_MEM" >&2; invalid=1
+  fi
+  if ! resource_env_at_most "$redis_max" "$(awk -v value="$redis_mem" 'BEGIN { printf "%.6f", value - 1024 }')"; then
+    echo "[resource-env] REDIS_MAXMEMORY 必须 <= REDIS_MEM - 1GiB" >&2; invalid=1
+  fi
+  if [ "$(resource_env_get "$file" PG_MAX_CONNECTIONS)" -lt 180 ]; then
+    echo "[resource-env] PG_MAX_CONNECTIONS 必须 >= 180" >&2; invalid=1
+  fi
+  if [ "$(resource_env_get "$file" TSDB_MAX_CONNECTIONS)" -lt 180 ]; then
+    echo "[resource-env] TSDB_MAX_CONNECTIONS 必须 >= 180" >&2; invalid=1
+  fi
+  [ "$invalid" -eq 0 ]
+}

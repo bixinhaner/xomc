@@ -12,9 +12,9 @@ import (
 // 无意中改了字面量导致线上扫 key 的运维脚本失效。
 func TestKeyBuilder_Composition(t *testing.T) {
 	cases := []struct {
-		name   string
-		got    string
-		want   string
+		name string
+		got  string
+		want string
 	}{
 		// ACS
 		{"ACSSession", redisx.Keys.ACSSession("S1"), "acs:session:id:S1"},
@@ -27,6 +27,7 @@ func TestKeyBuilder_Composition(t *testing.T) {
 		{"ACSCWMP2Task", redisx.Keys.ACSCWMP2Task("H1"), "acs:cwmp2task:H1"},
 		{"ACSTaskQueuePrefix", redisx.Keys.ACSTaskQueuePrefix(), "acs:taskq:"},
 		{"ACSTaskQueuePattern", redisx.Keys.ACSTaskQueuePattern(), "acs:taskq:*"},
+		{"ACSTaskTransitionPending", redisx.Keys.ACSTaskTransitionPending(), "acs:task:transition:pending"},
 
 		// datamodel
 		{"DataModelCacheVersion", redisx.Keys.DataModelCacheVersion(), "datamodel:cache_version"},

@@ -29,6 +29,7 @@ type ACSConfig struct {
 	Redis                   RedisConfig           `mapstructure:"redis"`
 	NATS                    NATSConfig            `mapstructure:"nats"`
 	ParamSync               ParamSyncConfig       `mapstructure:"param_sync"`
+	Task                    TaskConfig            `mapstructure:"task"`
 	DB                      PostgresConfig        `mapstructure:"db"`
 	TSDB                    PostgresConfig        `mapstructure:"tsdb"` // KPI/时序库物理分离：ACS 写 trace_messages（已迁时序库）所需的第二个连接池
 	MinIO                   MinIOConfig           `mapstructure:"minio"`
@@ -403,11 +404,43 @@ func (c DashboardConfig) Defaults() DashboardConfig {
 // ReconcileIntervalSeconds: worker 进程 task_reconciler 周期对账 Redis↔PG 状态分叉的间隔（秒，#13）。
 //
 //	<= 0 时 reconciler 不启动。修复 "PG 滞后于 Redis 终态" 的孤儿/陈旧记录。
+//
+// TerminalRedisTTL: Redis 终态 task Hash 的短期保留窗口。
+//
+//	默认 15 分钟，覆盖 ACS 5 分钟会话迟到响应和 worker 60 秒对账宽限；
+//	小于 10 分钟会钳到 10 分钟。pending/sent/待重试仍保留 4 小时。
 type TaskConfig struct {
-	DefaultExpiresInSeconds  int `mapstructure:"default_expires_in_seconds"`
-	SweepIntervalSeconds     int `mapstructure:"sweep_interval_seconds"`
-	WakeConcurrency          int `mapstructure:"wake_concurrency"`
-	ReconcileIntervalSeconds int `mapstructure:"reconcile_interval_seconds"`
+	DefaultExpiresInSeconds  int           `mapstructure:"default_expires_in_seconds"`
+	SweepIntervalSeconds     int           `mapstructure:"sweep_interval_seconds"`
+	WakeConcurrency          int           `mapstructure:"wake_concurrency"`
+	ReconcileIntervalSeconds int           `mapstructure:"reconcile_interval_seconds"`
+	TerminalRedisTTL         time.Duration `mapstructure:"terminal_redis_ttl"`
+}
+
+// EffectiveTerminalRedisTTL 返回终态 task Hash 的安全保留窗口。
+func (c TaskConfig) EffectiveTerminalRedisTTL() time.Duration {
+	if c.TerminalRedisTTL <= 0 {
+		return 15 * time.Minute
+	}
+	if c.TerminalRedisTTL < 10*time.Minute {
+		return 10 * time.Minute
+	}
+	return c.TerminalRedisTTL
+}
+
+// EffectiveTerminalRedisTTLFor additionally enforces the runtime safety
+// window required by the ACS session and the task reconciler. It prevents a
+// configuration change from expiring a terminal tombstone while the matching
+// device session or compensation grace period can still be active.
+func (c TaskConfig) EffectiveTerminalRedisTTLFor(
+	sessionTimeout, reconcilerGrace time.Duration,
+) time.Duration {
+	effective := c.EffectiveTerminalRedisTTL()
+	required := sessionTimeout + reconcilerGrace
+	if required > effective {
+		return required
+	}
+	return effective
 }
 
 // OfflineAlarmCleanupConfig 配置离线设备活动告警清理器（worker 进程的 OfflineAlarmCleaner）。
@@ -634,13 +667,63 @@ func (c NEDirectConfig) DeviceRateLimit() int {
 //  2. 匹配参数模板 → 自动下发配置（AutoConfigure=true 时）
 //  3. 参数同步（AutoSync）→ GPV 批量读取设备当前值存入 device_parameters 表
 type ProvisionConfig struct {
-	Enabled       bool              `mapstructure:"enabled"`
-	AutoConfigure bool              `mapstructure:"auto_configure"` // Path A: 匹配模版后自动下发配置（需要参数路径映射层）
-	TaskTimeout   time.Duration     `mapstructure:"task_timeout"`   // 超时自动 fail 非终态 task（默认 15 分钟）
-	ModelUpload   ModelUploadConfig `mapstructure:"model_upload"`
-	AutoSync      AutoSyncConfig    `mapstructure:"auto_sync"`
+	Enabled       bool                      `mapstructure:"enabled"`
+	AutoConfigure bool                      `mapstructure:"auto_configure"` // Path A: 匹配模版后自动下发配置（需要参数路径映射层）
+	TaskTimeout   time.Duration             `mapstructure:"task_timeout"`   // 超时自动 fail 非终态 task（默认 15 分钟）
+	ModelUpload   ModelUploadConfig         `mapstructure:"model_upload"`
+	AutoSync      AutoSyncConfig            `mapstructure:"auto_sync"`
+	GPVResponse   GPVResponseConsumerConfig `mapstructure:"gpv_response"`
 	// 周期性参数同步配置从 sys_configs (category='device') 读，不再走 YAML。
 	// 参 internal/provision/periodic_sync_policy.go。
+}
+
+// GPVResponseConsumerConfig controls the two independent consumers of
+// command.get_parameters.response. ProvisionQueue remains the base name of the
+// established pull durable ("-pull" is appended by the event bus). RPCDurable
+// is a fixed push durable; RPCStartSequence is used only for a one-time
+// handoff, and must be the predecessor consumer's captured AckFloor+1.
+type GPVResponseConsumerConfig struct {
+	ProvisionQueue       string        `mapstructure:"provision_queue"`
+	ProvisionConcurrency int           `mapstructure:"provision_concurrency"`
+	ProvisionQueueDepth  int           `mapstructure:"provision_queue_depth"`
+	RPCDurable           string        `mapstructure:"rpc_durable"`
+	RPCStartSequence     uint64        `mapstructure:"rpc_start_sequence"`
+	RPCConcurrency       int           `mapstructure:"rpc_concurrency"`
+	RPCQueueDepth        int           `mapstructure:"rpc_queue_depth"`
+	AckWait              time.Duration `mapstructure:"ack_wait"`
+	MaxDeliver           int           `mapstructure:"max_deliver"`
+	MaxAckPending        int           `mapstructure:"max_ack_pending"`
+}
+
+func (c GPVResponseConsumerConfig) Defaults() GPVResponseConsumerConfig {
+	if c.ProvisionQueue == "" {
+		c.ProvisionQueue = "provision-gpv"
+	}
+	if c.ProvisionConcurrency <= 0 {
+		c.ProvisionConcurrency = 2
+	}
+	if c.ProvisionQueueDepth <= 0 {
+		c.ProvisionQueueDepth = 256
+	}
+	if c.RPCDurable == "" {
+		c.RPCDurable = "device-rpc-gpv"
+	}
+	if c.RPCConcurrency <= 0 {
+		c.RPCConcurrency = 2
+	}
+	if c.RPCQueueDepth <= 0 {
+		c.RPCQueueDepth = 1000
+	}
+	if c.AckWait <= 0 {
+		c.AckWait = 30 * time.Second
+	}
+	if c.MaxDeliver <= 0 {
+		c.MaxDeliver = 5
+	}
+	if c.MaxAckPending < 2000 {
+		c.MaxAckPending = 2000
+	}
+	return c
 }
 
 // UpgradeConfig 配置固件升级/回退的超时和并发策略。

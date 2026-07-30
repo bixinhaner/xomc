@@ -95,7 +95,11 @@ func runACS(cmd *cobra.Command, args []string) error {
 	if inf.PgPool == nil {
 		return fmt.Errorf("PostgreSQL connection required for ACS task service")
 	}
-	taskQueue := task.NewRedisTaskQueue(inf.Redis)
+	const taskReconcilerGrace = time.Minute
+	effectiveTerminalTTL := cfg.Task.EffectiveTerminalRedisTTLFor(
+		cfg.Session.Timeout, taskReconcilerGrace,
+	)
+	taskQueue := task.NewRedisTaskQueueWithTerminalTTL(inf.Redis, effectiveTerminalTTL)
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	taskService := task.NewTaskService(taskQueue, taskRepo, inf.Logger)
 	// Broadcast terminal task states so APP/Worker subscribers (MML ResultAggregator)
@@ -103,7 +107,10 @@ func runACS(cmd *cobra.Command, args []string) error {
 	if inf.EventBus != nil {
 		taskService.SetEventBus(inf.EventBus)
 	}
-	inf.Logger.Info("task service initialized")
+	inf.Logger.Info("task service initialized",
+		zap.Duration("terminal_redis_ttl", effectiveTerminalTTL),
+		zap.Duration("session_timeout", cfg.Session.Timeout),
+		zap.Duration("reconciler_grace", taskReconcilerGrace))
 
 	// ACS owns the CPE upload write path, so it must perform the same storage
 	// admission check as the app/worker processes before MinIO PutObject.

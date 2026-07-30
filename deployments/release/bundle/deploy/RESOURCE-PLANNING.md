@@ -163,12 +163,29 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
 
 部署人员检视/微调 `resources.env` 后，运行 `install.sh`（Phase 2 后将自动消费该文件）。
 
+### 完整资源契约（schema v2）
+
+`resources.env` 不是可随意截取的 Compose 覆盖片段。规划器写入
+`OMC_RESOURCE_SCHEMA_VERSION=2`、`OMC_RESOURCE_PLAN_HOST_CPU` 与
+`OMC_RESOURCE_PLAN_HOST_MEM_MIB`。规划器先在目标目录写临时候选并校验全部资源键和
+联动约束，成功后才原子替换正式文件；生成或校验失败时保留上一份 last-good 文件。
+
+`resources.env` 是安装和服务重启的必需输入，不存在时禁止回退 Compose 默认限额。
+`install.sh --check-only` 会按“新包 → current → `etc/resources.env.saved`”的实际采用
+顺序校验候选。正常安装在切换 `current` 和任何容器重启前完成第一次校验，继承复制到
+新 release 后再校验实际文件。`install.sh`、`svc.sh` 和部署后 `healthcheck.sh` 使用
+同一验证库：
+缺任何服务的键、单位不可解析、Go 堆上限不低于容器内存、Redis 未保留 1 GiB COW
+余量或任一数据库连接数低于 180，都会失败。尤其是仅含三行 Redis 的历史文件会被
+拒绝；失败不会切换 `current` 或启动/重启容器。需要重新规划时运行
+`bash plan-resources.sh`，不要手工删键。
+
 ---
 
 ## 6. Phase 2 接线（✅ 已实施）
 
-> 已落地为可运行代码（`docker compose config` 双向验证：无 resources.env 渲染 = 历史值、零告警；
-> 有 resources.env 各旋钮按文件覆盖）。下列为实现要点。
+> 已落地为可运行代码：完整 resources.env 的各旋钮按文件覆盖；缺失或非法文件在
+> Compose 执行前失败。下列为实现要点。
 
 1. **compose 模板化**（✅）：4 个 yml 的 `cpus/memory` 及 redis `--maxmemory/--maxmemory-policy`、
    postgres `-c` 调优、Go `GOMEMLIMIT/GOMAXPROCS` 全改为 `${VAR:-<默认>}`。
@@ -194,7 +211,7 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
                "-c","effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-1536MB}", ...]
    ```
 2. **install.sh 接线**：compose 命令加 `--env-file .env --env-file resources.env`；
-   precheck 检出无 `resources.env` 时提示先跑 plan-resources.sh（或回退到字面量默认）。
+   precheck 必须解析并验证本次实际候选，缺失时提示先跑 plan-resources.sh 并失败。
 3. **svc.sh 接线（需求⑥的执行面）**：`svc.sh` 是日常 start/restart 的入口，必须**同样**
    消费 `resources.env`，否则改了文件用 `svc.sh restart` 不生效。当前 `svc.sh` 靠 compose
    **自动加载 `./.env`**（未显式传 `--env-file`），而 compose **只按名自动加载 `.env`、绝不自动
@@ -208,11 +225,13 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
    DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
    ```
    这样 `svc.sh start` / `svc.sh restart`（内部 `up -d --force-recreate`）/ `svc.sh up`
-   都会按 `resources.env` 的新限额重建容器。无 `resources.env` 时退化为今天的行为（仅 `.env`）。
+   都会按 `resources.env` 的新限额重建容器。无 `resources.env` 时直接失败，不允许仅凭
+   `.env` 和 Compose 字面默认值重建。
 4. **升级存活**（✅，实现略有调整）：`resources.env` 是 operator 独有、**不随交付包**的独立文件，
    故用**整文件继承**而非 `ENV_PRESERVE_KEYS` 键级合并（后者只作用于 `.env`）。install.sh 在升级时
-   快照上一版 `resources.env`（或 `etc/resources.env.saved` 兜底）→ 拷入新 release 的 `deploy/` →
-   切 current 软链后再落 `etc/resources.env.saved`，与 `.env.saved` 完全对称。
+   安装预检先验证上一版 `resources.env`（或 `etc/resources.env.saved` 兜底）→ 快照并
+   拷入新 release 的 `deploy/` → 再次验证实际文件 → 切 current 软链后再落
+   `etc/resources.env.saved`。仅三行 Redis 的旧文件会在任何切换/重启前失败。
 5. **生效命令（需求 ⑥）**：改完 `resources.env` 后任选其一——
    ```bash
    bash svc.sh restart                  # 推荐：按 depends_on 有序重建，经健康门控

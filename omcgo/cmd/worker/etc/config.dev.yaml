@@ -88,6 +88,7 @@ task:
   default_expires_in_seconds: 120
   sweep_interval_seconds: 10
   reconcile_interval_seconds: 30
+  terminal_redis_ttl: 15m
 
 # #358: 离线设备活动告警清理器阈值/周期/批量。设备离线满 threshold_seconds 仍未恢复，
 # 下一轮扫描（<=interval_seconds）把其当前活动告警归档到历史告警（clearedBy=system:offline_timeout）。

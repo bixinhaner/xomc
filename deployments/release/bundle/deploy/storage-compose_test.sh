@@ -14,6 +14,7 @@ OTELCOL_CONFIG="$REPO_ROOT/deployments/monitoring/otelcol/config.yaml"
 OMC_ALERTS="$REPO_ROOT/deployments/monitoring/alerts/omc-rules.yml"
 INFRA_ALERTS="$REPO_ROOT/deployments/monitoring/alerts/infra-alerts.yml"
 HOST_ALERTS="$REPO_ROOT/deployments/monitoring/alerts/host-container-alerts.yml"
+RESOURCE_PLAN_METRICS="$RELEASE_DEPLOY/resource-plan-metrics.sh"
 GRAFANA_DASHBOARD="$REPO_ROOT/deployments/monitoring/grafana-dashboard.json"
 GRAFANA_OVERVIEW="$REPO_ROOT/deployments/monitoring/grafana/dashboards/omc-overview.json"
 HOST_DASHBOARD="$REPO_ROOT/deployments/monitoring/grafana/dashboards/nginx-host-overview.json"
@@ -23,6 +24,9 @@ WORKER_PROD_CONFIG="$REPO_ROOT/omcgo/cmd/worker/etc/config.prod.yaml"
 INSTALL="$RELEASE_DEPLOY/install.sh"
 SVC="$RELEASE_DEPLOY/svc.sh"
 BUILD="$REPO_ROOT/deployments/release/build-release.sh"
+RELEASE_HANDOFF="$RELEASE_DEPLOY/gpv-handoff-lib.sh"
+RELEASE_NATS_VERIFY="$RELEASE_DEPLOY/verify-gpv-nats.sh"
+APP_DOCKERFILE="$REPO_ROOT/deployments/docker/Dockerfile.app"
 DEV_PLANNER="$REPO_ROOT/deployments/docker/plan-resources.sh"
 NGINX_DEFAULT="$REPO_ROOT/deployments/docker/default.conf"
 NGINX_LOCAL="$REPO_ROOT/deployments/docker/default.local.conf"
@@ -34,6 +38,10 @@ bad() { echo "FAIL: $*" >&2; FAIL=$((FAIL + 1)); }
 contains() {
   local name="$1" pattern="$2" file="$3"
   if grep -Fq -- "$pattern" "$file"; then ok; else bad "$name: $file 未包含 [$pattern]"; fi
+}
+not_contains() {
+  local name="$1" pattern="$2" file="$3"
+  if grep -Fq -- "$pattern" "$file"; then bad "$name: $file 不应包含 [$pattern]"; else ok; fi
 }
 
 echo "── release compose 五个 bind mount ──"
@@ -51,17 +59,26 @@ contains "worker 默认 8 核" 'cpus: "${WORKER_CPUS:-8}"' "$RELEASE_APP_COMPOSE
 echo "── PM 流式聚合生产旋钮 ──"
 contains "release worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"' "$RELEASE_APP_COMPOSE"
 contains "release worker 透传窗口状态 TTL" 'PM_AGGREGATION_WINDOW_TTL: "${PM_AGGREGATION_WINDOW_TTL:-1080h}"' "$RELEASE_APP_COMPOSE"
+contains "release worker 默认关闭 Redis v2 写入" 'PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-false}"' "$RELEASE_APP_COMPOSE"
 contains "开发 worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"' "$DEV_COMPOSE"
+contains "开发 worker 默认关闭 Redis v2 写入" 'PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-false}"' "$DEV_COMPOSE"
 
 echo "── release .env 模板和升级继承 ──"
 for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
   contains "$key 模板" "$key=" "$BUILD"
   contains "$key 升级继承" "$key" "$INSTALL"
 done
+for key in GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH \
+  GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH \
+  GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING; do
+  contains "$key release app 透传" "$key:" "$RELEASE_APP_COMPOSE"
+  contains "$key 升级继承" "$key" "$INSTALL"
+done
 
 echo "── 实例配置安全升级 ──"
 contains "install 加载实例配置升级库" 'config-upgrade-lib.sh' "$INSTALL"
 contains "普通升级迁移 ACS 历史默认值" 'upgrade_acs_session_limit' "$INSTALL"
+contains "普通升级补齐 GPV 消费配置" 'upgrade_app_gpv_response_config' "$INSTALL"
 if bash "$RELEASE_DEPLOY/config-upgrade-lib_test.sh"; then
   ok
 else
@@ -73,6 +90,30 @@ contains "install 加载存储库" 'storage-paths-lib.sh' "$INSTALL"
 contains "install 准备目录" 'storage_prepare_configured_env_paths "$ENV_FILE"' "$INSTALL"
 contains "svc 加载存储库" 'storage-paths-lib.sh' "$SVC"
 contains "svc 准备目录" 'storage_prepare_configured_env_paths ".env"' "$SVC"
+contains "app 镜像构建 GPV handoff 工具" 'omcgo-gpv-handoff ./cmd/gpv-handoff' "$APP_DOCKERFILE"
+contains "release compose 提供 handoff 一次性服务" 'gpv-handoff:' "$RELEASE_APP_COMPOSE"
+contains "install 加载 handoff 库" 'gpv-handoff-lib.sh' "$INSTALL"
+contains "svc 加载 handoff 库" 'gpv-handoff-lib.sh' "$SVC"
+contains "install 在业务 up 前准备 durable" 'gpv_handoff_prepare' "$INSTALL"
+contains "install 在 systemd 停服前执行迁移门禁" 'gpv_handoff_migrate_legacy_systemd' "$INSTALL"
+contains "svc 在重启前准备 durable" 'gpv_handoff_prepare' "$SVC"
+contains "真实 NATS 验证脚本强制注入地址" 'GPV_NATS_TEST_URL=' "$RELEASE_NATS_VERIFY"
+if bash "$RELEASE_DEPLOY/gpv-handoff-lib_test.sh"; then
+  ok
+else
+  bad "systemd 到 container 的 GPV handoff 顺序回归"
+fi
+if bash "$RELEASE_NATS_VERIFY"; then
+  ok
+else
+  bad "真实 NATS GPV handoff / FIFO 回归"
+fi
+not_contains "业务镜像存在时不得提前重启 app" '业务镜像已存在，跳过 load，重启业务容器' "$INSTALL"
+if bash "$RELEASE_DEPLOY/install-resource-preflight_test.sh"; then
+  ok
+else
+  bad "install/svc resources.env preflight regression"
+fi
 
 echo "── 开发 compose 保留命名卷默认值 ──"
 contains "开发 PostgreSQL 默认命名卷" '${POSTGRES_DATA_PATH:-pgdata}:/var/lib/postgresql/data' "$DEV_COMPOSE"
@@ -164,6 +205,54 @@ contains "主 Grafana dashboard 展示 whitelist miss" 'omc_pm_whitelist_miss_va
 contains "主 Grafana dashboard 展示 disabled" 'omc_pm_known_disabled_values_total' "$GRAFANA_DASHBOARD"
 contains "overview dashboard 展示 whitelist miss" 'omc_pm_whitelist_miss_values_total' "$GRAFANA_OVERVIEW"
 contains "overview dashboard 展示 disabled" 'omc_pm_known_disabled_values_total' "$GRAFANA_OVERVIEW"
+
+echo "── PM 聚合关闭、Redis 与资源漂移监控 ──"
+contains "资源计划漂移告警" 'alert: OMCResourcePlanDrift' "$HOST_ALERTS"
+contains "资源计划 cAdvisor 缺失 critical 告警" 'alert: OMCResourcePlanCAdvisorAbsent' "$HOST_ALERTS"
+contains "资源计划 CPU quota 序列缺失告警" 'alert: OMCResourcePlanCPUQuotaSeriesAbsent' "$HOST_ALERTS"
+contains "资源计划 CPU period 序列缺失告警" 'alert: OMCResourcePlanCPUPeriodSeriesAbsent' "$HOST_ALERTS"
+contains "资源计划内存 limit 序列缺失告警" 'alert: OMCResourcePlanMemoryLimitSeriesAbsent' "$HOST_ALERTS"
+contains "资源计划漂移检查 CPU quota" 'container_spec_cpu_quota' "$HOST_ALERTS"
+contains "资源计划漂移检查 CPU period" 'container_spec_cpu_period' "$HOST_ALERTS"
+contains "资源计划漂移检查内存实际限额" 'container_spec_memory_limit_bytes' "$HOST_ALERTS"
+contains "资源漂移规则使用生成的计划 CPU 指标" 'omc_resource_plan_cpu_cores' "$HOST_ALERTS"
+contains "资源漂移规则使用生成的计划内存指标" 'omc_resource_plan_memory_limit_bytes' "$HOST_ALERTS"
+contains "node exporter 读取资源计划 textfile" '--collector.textfile.directory=/textfile' "$RELEASE_MONITORING_COMPOSE"
+contains "node exporter 挂载资源计划 textfile" '/opt/omc/run/monitoring:/textfile:ro' "$RELEASE_MONITORING_COMPOSE"
+contains "cAdvisor 使用 Docker 29/overlayfs 支持版本" 'ghcr.io/google/cadvisor:0.55.1' "$REPO_ROOT/deployments/release/release.conf"
+contains "安装生成资源计划指标" 'resource_plan_metrics_write' "$INSTALL"
+contains "服务控制生成资源计划指标" 'resource_plan_metrics_write' "$SVC"
+if bash "$RELEASE_DEPLOY/resource-plan-metrics_test.sh"; then
+  ok
+else
+  bad "资源计划 Prometheus textfile 生成回归"
+fi
+contains "Redis 聚合内存 warning 告警" 'alert: RedisAggregationMemoryHigh' "$INFRA_ALERTS"
+contains "Redis 聚合内存 warning 阈值" '>= 0.80' "$INFRA_ALERTS"
+contains "Redis 聚合内存 critical 告警" 'alert: RedisAggregationMemoryCritical' "$INFRA_ALERTS"
+contains "Redis 聚合内存 critical 阈值" '>= 0.90' "$INFRA_ALERTS"
+contains "关闭尾延迟 warning 告警" 'alert: PMFinalizeOldestDueHigh' "$OMC_ALERTS"
+contains "关闭尾延迟 warning 阈值" '> 30m' "$OMC_ALERTS"
+contains "关闭尾延迟 critical 告警" 'alert: PMFinalizeOldestDueCritical' "$OMC_ALERTS"
+contains "关闭尾延迟 critical 阈值" '> 60m' "$OMC_ALERTS"
+contains "重算快照扫描成本告警" 'alert: PMRebuildSnapshotScanSlow' "$OMC_ALERTS"
+contains "重算快照扫描 P95 指标" 'omc_pm_aggregation_rebuild_snapshot_scan_seconds_bucket' "$OMC_ALERTS"
+contains "日聚合版本槽位不完整告警" 'alert: PMDailyVersionExpectedSlotsMismatch' "$OMC_ALERTS"
+contains "日聚合版本槽位不一致指标" 'omc_pm_aggregation_daily_version_expected_slots_mismatch_total' "$OMC_ALERTS"
+contains "overview 展示资源计划和实际限额" '资源计划与容器实际限额' "$GRAFANA_OVERVIEW"
+contains "overview 展示 Redis 聚合状态" 'Redis 聚合状态与内存水位' "$GRAFANA_OVERVIEW"
+contains "overview 展示关闭并发" 'PM 窗口关闭 - 并发与领取' "$GRAFANA_OVERVIEW"
+contains "overview 展示关闭尾延迟" 'PM 窗口关闭 - 尾延迟' "$GRAFANA_OVERVIEW"
+contains "overview 展示重算成本" 'PM 重算快照扫描时延' "$GRAFANA_OVERVIEW"
+contains "overview 展示结果替换成本" 'PM 结果替换时延' "$GRAFANA_OVERVIEW"
+contains "overview 展示声明 CPU" '声明 CPU 核数' "$GRAFANA_OVERVIEW"
+contains "overview 实际值按 Compose service 对齐" 'container_label_com_docker_compose_service' "$GRAFANA_OVERVIEW"
+contains "overview 展示 Redis maxmemory" 'redis_memory_max_bytes' "$GRAFANA_OVERVIEW"
+contains "overview 将 Redis 活动窗口拆为数量面板" 'Redis 聚合活动窗口数' "$GRAFANA_OVERVIEW"
+contains "overview 展示 finalize inflight" 'omc_pm_aggregation_finalize_inflight' "$GRAFANA_OVERVIEW"
+contains "overview 展示 rebuild batch" 'omc_pm_aggregation_rebuild_jobs_per_batch' "$GRAFANA_OVERVIEW"
+contains "overview 展示 snapshot scan" 'omc_pm_aggregation_rebuild_snapshot_scan_seconds_bucket' "$GRAFANA_OVERVIEW"
+contains "overview 展示窗口结果替换" 'omc_pm_aggregation_result_replace_seconds_bucket' "$GRAFANA_OVERVIEW"
 
 echo "── 开发 planner maximize 分支 ──"
 TMP_MAX="$(mktemp)"

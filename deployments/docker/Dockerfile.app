@@ -29,7 +29,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux go build \
       -ldflags="-s -w -X github.com/omcgo/omcgo/internal/buildinfo.ReleaseVersion=${RELEASE_VERSION} -X github.com/omcgo/omcgo/internal/buildinfo.GitCommit=${GIT_COMMIT}" \
       -o /build/bin/omcgo-app ./cmd/app && \
-    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migrate ./cmd/migrate
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migrate ./cmd/migrate && \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-gpv-handoff ./cmd/gpv-handoff
 
 # ---
 
@@ -45,6 +46,7 @@ RUN mkdir -p /var/log/omcgo && chmod 777 /var/log/omcgo
 
 COPY --from=builder /build/bin/omcgo-app /usr/local/bin/omcgo-app
 COPY --from=builder /build/bin/omcgo-migrate /usr/local/bin/omcgo-migrate
+COPY --from=builder /build/bin/omcgo-gpv-handoff /usr/local/bin/omcgo-gpv-handoff
 COPY --from=builder /build/cmd/app/etc/config.dev.yaml /etc/omcgo/app.dev.yaml
 COPY --from=builder /build/cmd/app/etc/config.test.yaml /etc/omcgo/app.test.yaml
 COPY --from=builder /build/cmd/app/etc/config.prod.yaml /etc/omcgo/app.prod.yaml

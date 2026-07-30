@@ -246,3 +246,24 @@ func TestRollupContributionsClipsRuleDayAtVersionBoundary(t *testing.T) {
 	require.EqualValues(t, 13, oldContributions[0].ExpectedSlots)
 	require.EqualValues(t, 11, newContributions[0].ExpectedSlots)
 }
+
+func TestExpectedSlotsForFinalizationClipsVersionBoundaryAfterWindowOpened(t *testing.T) {
+	windowStart := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	closedAt := windowStart.Add(16 * time.Hour)
+	version := &TaskVersionSnapshot{
+		EffectiveFrom: windowStart.Add(5 * time.Hour),
+		EffectiveTo:   &closedAt,
+	}
+	key := WindowKey{
+		Granularity: GranularityDaily,
+		Start:       windowStart,
+		End:         windowStart.Add(24 * time.Hour),
+	}
+
+	got := expectedSlotsForFinalization(key, version, 19, time.UTC)
+
+	require.EqualValues(t, 11, got)
+	devicePipeline := *version
+	devicePipeline.DevicePipeline = true
+	require.EqualValues(t, 19, expectedSlotsForFinalization(key, &devicePipeline, 19, time.UTC))
+}

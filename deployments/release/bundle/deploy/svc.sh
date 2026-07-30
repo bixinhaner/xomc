@@ -86,10 +86,25 @@ if [ -f "$SCRIPT_DIR/storage-paths-lib.sh" ]; then
 else
   die "缺 $SCRIPT_DIR/storage-paths-lib.sh"
 fi
+if [ -f "$SCRIPT_DIR/resource-env-lib.sh" ]; then
+  . "$SCRIPT_DIR/resource-env-lib.sh"
+else
+  die "缺 $SCRIPT_DIR/resource-env-lib.sh（完整资源规划契约库）"
+fi
+if [ -f "$SCRIPT_DIR/resource-plan-metrics.sh" ]; then
+  . "$SCRIPT_DIR/resource-plan-metrics.sh"
+else
+  die "缺 $SCRIPT_DIR/resource-plan-metrics.sh（资源计划 Prometheus 指标生成器）"
+fi
 if [ -f "$SCRIPT_DIR/monitoring-profile-lib.sh" ]; then
   . "$SCRIPT_DIR/monitoring-profile-lib.sh"
 else
   die "缺 $SCRIPT_DIR/monitoring-profile-lib.sh"
+fi
+if [ -f "$SCRIPT_DIR/gpv-handoff-lib.sh" ]; then
+  . "$SCRIPT_DIR/gpv-handoff-lib.sh"
+else
+  die "缺 $SCRIPT_DIR/gpv-handoff-lib.sh"
 fi
 
 # 显式 flag 优先；无 flag 时读取 install.sh 持久化在 .env 的部署模式。
@@ -110,12 +125,33 @@ fi
 
 # 资源限额：compose 经 --env-file 读取 resources.env(plan-resources.sh 生成)。改完
 # resources.env 后 svc.sh restart 即按新限额重建。一旦显式传任一 --env-file，compose
-# 不再自动加载 ./.env，故 .env 也必须显式传(无则退化为今天行为)。
+# 不再自动加载 ./.env，故 .env 也必须显式传；resources.env 缺失则拒绝执行。
 ENV_FILES=()
 [ -f .env ]          && ENV_FILES+=( --env-file .env )
-[ -f resources.env ] && ENV_FILES+=( --env-file resources.env )
+[ -f resources.env ] ||
+  die "缺少 resources.env；请先运行 plan-resources.sh，禁止静默回退 Compose 默认限额"
+resource_env_validate resources.env ||
+  die "resources.env 不是完整资源规划；请重新运行 plan-resources.sh，禁止缺失项静默回退 Compose 默认值"
+ENV_FILES+=( --env-file resources.env )
+
+refresh_resource_plan_metrics() {
+  resource_plan_metrics_write resources.env ||
+    die "无法生成 resources.env 对应的 Prometheus 资源计划指标"
+}
 
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
+
+app_exists() {
+  local cid
+  cid="$("${DC[@]}" ps -a -q app 2>/dev/null || true)"
+  [ -n "$cid" ]
+}
+
+if gpv_handoff_action_touches_app "$ACTION" "${TARGETS[@]}" && app_exists; then
+  log "在启动、停止或重建现有 app 前预创建 GPV RPC 固定 durable ..."
+  gpv_handoff_prepare ||
+    die "GPV consumer handoff 失败；未改变现有 app，未执行 $ACTION"
+fi
 
 # 行为分派
 case "$ACTION" in
@@ -127,6 +163,7 @@ case "$ACTION" in
   start|up)
     storage_prepare_configured_env_paths ".env" ||
       die "有状态服务数据路径校验/创建失败；请检查 .env 中五个 *_DATA_PATH"
+    refresh_resource_plan_metrics
     if [ ${#TARGETS[@]} -gt 0 ]; then
       log "启动服务：${TARGETS[*]}"
       "${DC[@]}" up -d "${TARGETS[@]}"
@@ -149,6 +186,7 @@ case "$ACTION" in
   restart)
     storage_prepare_configured_env_paths ".env" ||
       die "有状态服务数据路径校验/创建失败；请检查 .env 中五个 *_DATA_PATH"
+    refresh_resource_plan_metrics
     # 一次性迁移 job（run-once，跑完即 Exited）。对已退出容器执行 docker compose
     # restart 语义不对，且会脱离 depends_on 健康门控在错误时机被强行拉起。
     ONESHOT_RE='^(migrate-schema|migrate-seed-sql|migrate-seed)$'

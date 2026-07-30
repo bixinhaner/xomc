@@ -810,6 +810,9 @@ curl -fsS http://localhost:8081/healthz
 - `PM_AGGREGATION_MAX_EVENT_BYTES`：单个标准事件上限，默认 `8MiB`，必须小于 NATS `max_payload`。
 - `PM_AGGREGATION_WINDOW_TTL`：未知粒度的 Redis 窗口兜底 TTL；小时/日/周/月分别固定为
   `4h`、`72h`、`14d`、`45d`。
+- `PM_AGGREGATION_REDIS_V2_WRITE_ENABLED`：Redis v2 紧凑写入门禁，默认 `false`。升级时先保持
+  v1 写入和 v1/v2 双读；确认所有旧 Worker 实例为 0 后才能改为 `true`。如需回退，只能回退到
+  已具备 v1/v2 双读能力的版本并重新设为 `false`，禁止回退到不识别 v2 的旧二进制。
 
 JetStream 按计算层级拆分，均使用 LimitsPolicy、S2 压缩、10GiB 硬容量上限和
 `DiscardOld`：`PM_AGG_15M` 保留 2 小时，`PM_AGG_HOURLY` 保留 48 小时，

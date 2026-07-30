@@ -17,6 +17,25 @@ networks:
     driver: bridge
 
 services:
+  # ── GPV RPC 无损升级接力（升级/重启 app 前一次性运行）────────────────
+  gpv-handoff:
+    image: ${IMAGE_APP}
+    restart: "no"
+    profiles: ["operations"]
+    entrypoint: ["omcgo-gpv-handoff"]
+    command: ["--config", "/etc/omcgo/app.prod.yaml"]
+    environment:
+      GPV_PROVISION_QUEUE: "${GPV_PROVISION_QUEUE:-provision-gpv}"
+      GPV_RPC_DURABLE: "${GPV_RPC_DURABLE:-device-rpc-gpv}"
+      GPV_RPC_SOURCE_CONSUMER: "${GPV_RPC_SOURCE_CONSUMER:-}"
+      GPV_ACK_WAIT: "${GPV_ACK_WAIT:-30s}"
+      GPV_MAX_DELIVER: "${GPV_MAX_DELIVER:-5}"
+      GPV_MAX_ACK_PENDING: "${GPV_MAX_ACK_PENDING:-2000}"
+    volumes:
+      - /opt/omc/etc/app.prod.yaml:/etc/omcgo/app.prod.yaml:ro
+    networks:
+      - omcgo-net
+
   # ── 数据库迁移（首次部署 + 每次升级都跑；幂等）────────────────────────
   #   使用 network_mode: "service:postgres" 共享 postgres 网络命名空间，
   #   127.0.0.1:5432 即 postgres 进程本身——不经 DNS、不经 NAT、零跳转。
@@ -154,6 +173,18 @@ services:
       # Go 1.25 自动按 cgroup CPU 配额推导。
       GOMEMLIMIT: "${APP_GOMEMLIMIT:-1382MiB}"
       GOMAXPROCS: "${APP_GOMAXPROCS:-}"
+      # command.get_parameters.response 两条消费链独立限流。显式 start_sequence
+      # 用于从旧 consumer AckFloor+1 无损切换；0 表示新 durable 从当前流尾开始。
+      GPV_PROVISION_QUEUE: "${GPV_PROVISION_QUEUE:-provision-gpv}"
+      GPV_PROVISION_CONCURRENCY: "${GPV_PROVISION_CONCURRENCY:-2}"
+      GPV_PROVISION_QUEUE_DEPTH: "${GPV_PROVISION_QUEUE_DEPTH:-256}"
+      GPV_RPC_DURABLE: "${GPV_RPC_DURABLE:-device-rpc-gpv}"
+      GPV_RPC_START_SEQUENCE: "${GPV_RPC_START_SEQUENCE:-0}"
+      GPV_RPC_CONCURRENCY: "${GPV_RPC_CONCURRENCY:-2}"
+      GPV_RPC_QUEUE_DEPTH: "${GPV_RPC_QUEUE_DEPTH:-1000}"
+      GPV_ACK_WAIT: "${GPV_ACK_WAIT:-30s}"
+      GPV_MAX_DELIVER: "${GPV_MAX_DELIVER:-5}"
+      GPV_MAX_ACK_PENDING: "${GPV_MAX_ACK_PENDING:-2000}"
       # 配置凭据单一真值源 = deploy/.env；app.prod.yaml 用 ${VAR} 引用，Load() 解析前展开。
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -291,6 +322,7 @@ services:
       PM_AGGREGATION_FINALIZE_CONCURRENCY: "${PM_AGGREGATION_FINALIZE_CONCURRENCY:-4}"
       PM_AGGREGATION_MAX_EVENT_BYTES: "${PM_AGGREGATION_MAX_EVENT_BYTES:-8388608}"
       PM_AGGREGATION_WINDOW_TTL: "${PM_AGGREGATION_WINDOW_TTL:-1080h}"
+      PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-false}"
       # 传输 Outbox 仅保留短期；可重算源进入 Timescale 压缩超表独立保留。
       PM_AGGREGATION_OUTBOX_RETENTION: "${PM_AGGREGATION_OUTBOX_RETENTION:-24h}"
       PM_AGGREGATION_REPLAY_RETENTION: "${PM_AGGREGATION_REPLAY_RETENTION:-1080h}"

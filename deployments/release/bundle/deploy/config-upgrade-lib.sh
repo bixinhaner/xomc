@@ -96,3 +96,97 @@ upgrade_acs_session_limit() {
   [ "$(acs_session_max_concurrent "$live_config")" = "30000" ] || return 1
   ACS_SESSION_LIMIT_UPGRADE_RESULT="migrated"
 }
+
+app_has_gpv_response_config() {
+  local config="$1"
+  [ -f "$config" ] || return 1
+  awk '
+    /^[^[:space:]#][^:]*:/ {
+      in_provision = ($0 ~ /^provision:[[:space:]]*(#.*)?$/)
+    }
+    in_provision && /^  gpv_response:[[:space:]]*(#.*)?$/ {
+      found = 1
+      exit
+    }
+    END { if (!found) exit 1 }
+  ' "$config"
+}
+
+# upgrade_app_gpv_response_config <现网 app 配置> <新包 app 模板>
+#
+# 老版本实例配置会被 install.sh 保留，因而不会自然获得新增的
+# provision.gpv_response。这里只从新模板复制缺失的完整子段，不改动任何已有
+# provision/其它业务配置；同目录临时文件 + 原子替换保证失败时现网文件不被截断。
+upgrade_app_gpv_response_config() {
+  local live_config="$1" template_config="$2"
+  local block tmp
+
+  [ -f "$live_config" ] || return 0
+  [ -f "$template_config" ] || return 1
+  app_has_gpv_response_config "$live_config" && return 0
+
+  block="$(mktemp "${live_config}.gpv-block.XXXXXX")" || return 1
+  if ! awk '
+      /^[^[:space:]#][^:]*:/ {
+        in_provision = ($0 ~ /^provision:[[:space:]]*(#.*)?$/)
+      }
+      in_provision && /^  gpv_response:[[:space:]]*(#.*)?$/ {
+        capture = 1
+      }
+      capture && printed && /^[^[:space:]#][^:]*:/ {
+        exit
+      }
+      capture && printed && /^  [^[:space:]#][^:]*:[[:space:]]*/ {
+        exit
+      }
+      capture {
+        print
+        printed = 1
+      }
+      END { if (!printed) exit 42 }
+    ' "$template_config" > "$block"; then
+    rm -f "$block"
+    return 1
+  fi
+
+  tmp="$(mktemp "${live_config}.tmp.XXXXXX")" || {
+    rm -f "$block"
+    return 1
+  }
+  if ! cp -p "$live_config" "$tmp"; then
+    rm -f "$block" "$tmp"
+    return 1
+  fi
+  if ! awk -v block_file="$block" '
+      BEGIN {
+        while ((getline line < block_file) > 0) {
+          block[++block_count] = line
+        }
+        close(block_file)
+      }
+      function emit_block(    i) {
+        for (i = 1; i <= block_count; i++) print block[i]
+        inserted = 1
+      }
+      /^[^[:space:]#][^:]*:/ {
+        if (in_provision && !inserted) emit_block()
+        in_provision = ($0 ~ /^provision:[[:space:]]*(#.*)?$/)
+        if (in_provision) saw_provision = 1
+      }
+      { print }
+      END {
+        if (in_provision && !inserted) emit_block()
+        if (!saw_provision || !inserted) exit 42
+      }
+    ' "$live_config" > "$tmp"; then
+    rm -f "$block" "$tmp"
+    return 1
+  fi
+  rm -f "$block"
+
+  if ! mv -f "$tmp" "$live_config"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  app_has_gpv_response_config "$live_config"
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"sync"
 	"time"
@@ -26,8 +27,10 @@ const (
 	defaultPullFetchWait     = 500 * time.Millisecond
 
 	// 以下三个常量专为 provision-gpv pull consumer 调优。
-	gpvPullBatchSize = 64               // 每次 Fetch 最多拉取 64 条
-	gpvPullAckWait   = 30 * time.Second // handler 处理超时，超时后 NATS 重投
+	gpvPullBatchSize      = 64               // 每次 Fetch 最多拉取 64 条
+	gpvPullConcurrent     = 2                // 两个 fetch/dispatch 槽覆盖 20k 设备周期 GPV 峰值
+	gpvPullAckWait        = 30 * time.Second // handler 处理超时，超时后 NATS 重投
+	gpvQueueMaxAckPending = 2000             // RPC 持久化双 worker 的服务端在途上限
 
 	// queueSubscribeAckWait 是 QueueSubscribe（push consumer，pm-workers 等）的
 	// 显式 ack_wait。此前不设置，NATS 用服务端默认 30s + 无限 MaxDeliver，高并发下
@@ -52,6 +55,7 @@ type PullTuning struct {
 	BatchSize     int
 	Concurrency   int
 	AckWait       time.Duration
+	MaxDeliver    int
 	MaxAckPending int
 }
 
@@ -60,6 +64,194 @@ type QueueTuning struct {
 	AckWait       time.Duration
 	MaxDeliver    int
 	MaxAckPending int
+}
+
+type EventKeyFunc func(Event) (string, error)
+
+// KeyedQueueConfig configures a fixed durable whose messages are dispatched
+// through a bounded hash-sharded worker set. StartSequence is a one-time
+// migration input and is ignored when Durable already exists.
+type KeyedQueueConfig struct {
+	Durable       string
+	StartSequence uint64
+	Concurrency   int
+	QueueDepth    int
+	AckWait       time.Duration
+	MaxDeliver    int
+	MaxAckPending int
+}
+
+type durableDeliveryPolicy uint8
+
+const (
+	durableDeliveryBindExisting durableDeliveryPolicy = iota
+	durableDeliveryNew
+	durableDeliveryFromSequence
+)
+
+type durableDelivery struct {
+	policy        durableDeliveryPolicy
+	startSequence uint64
+}
+
+// durableDeliveryPlan keeps consumer creation lossless:
+//   - an existing durable is always bound in place, preserving its delivery state;
+//   - an explicit migration starts exactly at the captured predecessor AckFloor+1;
+//   - a fresh consumer without a handoff sequence starts at the current tail,
+//     matching the legacy ephemeral subscriber without replaying retained history.
+//
+// A lossless upgrade must explicitly pass the predecessor AckFloor+1. Treating
+// zero as DeliverAll would replay the entire retained COMMAND stream whenever an
+// older app.prod.yaml is upgraded without the new gpv_response section.
+func durableDeliveryPlan(existing *nats.ConsumerInfo, startSequence uint64) durableDelivery {
+	if existing != nil {
+		return durableDelivery{policy: durableDeliveryBindExisting}
+	}
+	if startSequence > 0 {
+		return durableDelivery{
+			policy:        durableDeliveryFromSequence,
+			startSequence: startSequence,
+		}
+	}
+	return durableDelivery{policy: durableDeliveryNew}
+}
+
+func keyedMaxAckPending(concurrency, queueDepth, requested int) int {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if queueDepth < 0 {
+		queueDepth = 0
+	}
+	capacity := concurrency * (queueDepth + 1)
+	if requested <= 0 || requested > capacity {
+		return capacity
+	}
+	return requested
+}
+
+type keyedJob func()
+
+// keyedDispatcher is a bounded, hash-sharded executor. FIFO within one shard
+// keeps all events for the same device ordered, while independent shards run
+// concurrently. Submit blocks at the configured queue depth, propagating
+// backpressure to JetStream instead of acknowledging work before it runs.
+type keyedDispatcher struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	queues    []chan keyedJob
+	wg        sync.WaitGroup
+	closeOnce sync.Once
+}
+
+func newKeyedDispatcher(concurrency, queueDepth int) *keyedDispatcher {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if queueDepth < 1 {
+		queueDepth = 1
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	d := &keyedDispatcher{
+		ctx:    ctx,
+		cancel: cancel,
+		queues: make([]chan keyedJob, concurrency),
+	}
+	for i := range d.queues {
+		queue := make(chan keyedJob, queueDepth)
+		d.queues[i] = queue
+		d.wg.Add(1)
+		go func() {
+			defer d.wg.Done()
+			for {
+				select {
+				case <-d.ctx.Done():
+					return
+				case job := <-queue:
+					if job != nil {
+						job()
+					}
+				}
+			}
+		}()
+	}
+	return d
+}
+
+func (d *keyedDispatcher) Submit(ctx context.Context, key string, job keyedJob) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	queue := d.queues[keyedShardIndex(key, len(d.queues))]
+	select {
+	case queue <- job:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("submit keyed work: %w", ctx.Err())
+	case <-d.ctx.Done():
+		return fmt.Errorf("submit keyed work: dispatcher closed")
+	}
+}
+
+func (d *keyedDispatcher) Close() {
+	d.closeOnce.Do(d.cancel)
+	d.wg.Wait()
+}
+
+func keyedShardIndex(key string, shardCount int) int {
+	if shardCount <= 1 {
+		return 0
+	}
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(key))
+	return int(hash.Sum32() % uint32(shardCount))
+}
+
+// keepAckPendingAlive renews the JetStream acknowledgement deadline while a
+// message is waiting in a keyed shard or executing a slow handler. Without
+// this, queued messages can be redelivered after AckWait and overtake earlier
+// work for the same device.
+func (b *NATSEventBus) keepAckPendingAlive(
+	parent context.Context,
+	msg *nats.Msg,
+	ackWait time.Duration,
+) func() {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if ackWait <= 0 {
+		ackWait = gpvPullAckWait
+	}
+	interval := ackWait / 3
+	if interval < 10*time.Millisecond {
+		interval = 10 * time.Millisecond
+	}
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := msg.InProgress(); err != nil && ctx.Err() == nil {
+					b.logger.Warn("renew keyed message ack deadline failed",
+						zap.String("subject", msg.Subject),
+						zap.Error(err))
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			<-done
+		})
+	}
 }
 
 // QueueStats is a point-in-time JetStream durable consumer health sample.
@@ -112,18 +304,19 @@ func (r jetStreamQueueStatsReader) NextMessage(ctx context.Context, stream strin
 // QueueSubscribe 使用 Durable Consumer，各实例彺负载均衡，适用于多实例水平扩展。
 // 事件处理失败后指数退退重新投递（最多 5 次），超出后终止该消息防止无限重试。
 type NATSEventBus struct {
-	conn              *nats.Conn
-	js                nats.JetStreamContext
-	subs              []*nats.Subscription // push / queue subscriptions
-	pullSubscriptions []*pullSubscription  // pull subscriptions；Close() 负责 drain + unsubscribe
-	mu                sync.Mutex
-	pullTuning        map[string]PullTuning
-	queueTuning       map[string]QueueTuning
-	logger            *zap.Logger
-	metrics           *EventBusMetrics // issue #20：投递结果指标；nil 时（单进程/单测）静默 no-op。
-	queueStatsReader  queueStatsReader // nil 时直接通过 js 读取；测试可替换为受控 reader。
-	ctx               context.Context
-	cancel            context.CancelFunc
+	conn               *nats.Conn
+	js                 nats.JetStreamContext
+	subs               []*nats.Subscription // push / queue subscriptions
+	pullSubscriptions  []*pullSubscription  // pull subscriptions；Close() 负责 drain + unsubscribe
+	keyedSubscriptions []*keyedQueueSubscription
+	mu                 sync.Mutex
+	pullTuning         map[string]PullTuning
+	queueTuning        map[string]QueueTuning
+	logger             *zap.Logger
+	metrics            *EventBusMetrics // issue #20：投递结果指标；nil 时（单进程/单测）静默 no-op。
+	queueStatsReader   queueStatsReader // nil 时直接通过 js 读取；测试可替换为受控 reader。
+	ctx                context.Context
+	cancel             context.CancelFunc
 }
 
 // QueueStats returns a consistent read-only health sample for one durable
@@ -346,17 +539,184 @@ func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler Even
 	return &natsSubscription{sub: sub}, nil
 }
 
+// KeyedQueueSubscribe creates or binds a fixed push durable and dispatches its
+// messages by key. The single NATS callback preserves JetStream delivery order
+// while the bounded shard queues provide cross-key parallelism. A message is
+// settled only by the worker after handler completion; filling a shard queue
+// blocks the callback and lets MaxAckPending apply server-side backpressure.
+func (b *NATSEventBus) KeyedQueueSubscribe(
+	subject string,
+	config KeyedQueueConfig,
+	keyFunc EventKeyFunc,
+	handler EventHandler,
+) (Subscription, error) {
+	if config.Durable == "" {
+		return nil, fmt.Errorf("keyed queue subscribe to %s: durable is required", subject)
+	}
+	if keyFunc == nil {
+		return nil, fmt.Errorf("keyed queue subscribe to %s: key function is required", subject)
+	}
+	if config.Concurrency < 1 {
+		config.Concurrency = 1
+	}
+	if config.QueueDepth < 1 {
+		config.QueueDepth = 1
+	}
+	if config.AckWait <= 0 {
+		config.AckWait = gpvPullAckWait
+	}
+	if config.MaxDeliver <= 0 {
+		config.MaxDeliver = maxDeliveries
+	}
+	config.MaxAckPending = keyedMaxAckPending(
+		config.Concurrency,
+		config.QueueDepth,
+		config.MaxAckPending,
+	)
+
+	stream, err := b.js.StreamNameBySubject(subject)
+	if err != nil {
+		return nil, fmt.Errorf("resolve keyed queue stream for %s: %w", subject, err)
+	}
+	info, err := b.js.ConsumerInfo(stream, config.Durable)
+	if err != nil {
+		if !errors.Is(err, nats.ErrConsumerNotFound) {
+			return nil, fmt.Errorf(
+				"load keyed queue consumer %s/%s: %w",
+				stream,
+				config.Durable,
+				err,
+			)
+		}
+		info = nil
+	}
+	if info != nil {
+		if info.Config.DeliverSubject == "" {
+			return nil, fmt.Errorf(
+				"keyed queue consumer %s/%s is pull-based; refusing unsafe replacement",
+				stream,
+				config.Durable,
+			)
+		}
+		if info.Config.FilterSubject != "" && info.Config.FilterSubject != subject {
+			return nil, fmt.Errorf(
+				"keyed queue consumer %s/%s filters %s, expected %s",
+				stream,
+				config.Durable,
+				info.Config.FilterSubject,
+				subject,
+			)
+		}
+	}
+
+	tuning := b.ensureQueueConsumerTuningWithDesired(subject, config.Durable, QueueTuning{
+		AckWait:       config.AckWait,
+		MaxDeliver:    config.MaxDeliver,
+		MaxAckPending: config.MaxAckPending,
+	})
+	options := []nats.SubOpt{
+		nats.Durable(config.Durable),
+		nats.AckExplicit(),
+		nats.ManualAck(),
+		nats.AckWait(tuning.AckWait),
+		nats.MaxDeliver(tuning.MaxDeliver),
+		nats.MaxAckPending(tuning.MaxAckPending),
+	}
+	switch plan := durableDeliveryPlan(info, config.StartSequence); plan.policy {
+	case durableDeliveryNew:
+		options = append(options, nats.DeliverNew())
+	case durableDeliveryFromSequence:
+		options = append(options, nats.StartSequence(plan.startSequence))
+	case durableDeliveryBindExisting:
+		// No delivery-policy option: bind without resetting consumer state.
+	}
+
+	dispatcher := newKeyedDispatcher(config.Concurrency, config.QueueDepth)
+	sub, err := b.js.QueueSubscribe(subject, config.Durable, func(msg *nats.Msg) {
+		stopProgress := b.keepAckPendingAlive(b.ctx, msg, tuning.AckWait)
+		evt, decodeErr := decodeEventBytes(msg.Data)
+		if decodeErr != nil {
+			stopProgress()
+			b.dropMalformedMsg(msg, decodeErr)
+			return
+		}
+		key, keyErr := keyFunc(evt)
+		if keyErr != nil {
+			stopProgress()
+			b.settleDecodedMsg(evt, msg, keyErr, tuning.MaxDeliver)
+			return
+		}
+		if submitErr := dispatcher.Submit(b.ctx, key, func() {
+			b.processKeyedMsg(b.ctx, evt, msg, tuning, handler)
+			stopProgress()
+		}); submitErr != nil {
+			stopProgress()
+			b.metrics.inc(evt.Subject, deliveryOutcomeNak)
+			_ = msg.NakWithDelay(time.Second)
+		}
+	}, options...)
+	if err != nil {
+		dispatcher.Close()
+		return nil, fmt.Errorf(
+			"keyed queue subscribe to %s (durable=%s): %w",
+			subject,
+			config.Durable,
+			err,
+		)
+	}
+	msgLimit, bytesLimit := pendingLimitsForSubject(subject)
+	if err := sub.SetPendingLimits(msgLimit, bytesLimit); err != nil {
+		_ = sub.Unsubscribe()
+		dispatcher.Close()
+		return nil, fmt.Errorf(
+			"set keyed pending limits for %s (durable=%s): %w",
+			subject,
+			config.Durable,
+			err,
+		)
+	}
+
+	keyedSub := &keyedQueueSubscription{sub: sub, dispatcher: dispatcher}
+	b.mu.Lock()
+	b.keyedSubscriptions = append(b.keyedSubscriptions, keyedSub)
+	b.mu.Unlock()
+	b.logger.Info("keyed queue subscription started",
+		zap.String("subject", subject),
+		zap.String("durable", config.Durable),
+		zap.Uint64("start_sequence", config.StartSequence),
+		zap.Int("concurrency", config.Concurrency),
+		zap.Int("queue_depth", config.QueueDepth),
+		zap.Duration("ack_wait", tuning.AckWait),
+		zap.Int("max_deliver", tuning.MaxDeliver),
+		zap.Int("max_ack_pending", tuning.MaxAckPending))
+	return keyedSub, nil
+}
+
 func (b *NATSEventBus) PullSubscribe(subject string, queue string, handler EventHandler) (Subscription, error) {
 	durable := pullDurableName(queue)
+	stream, err := b.js.StreamNameBySubject(subject)
+	if err != nil {
+		return nil, fmt.Errorf("resolve pull consumer stream for %s: %w", subject, err)
+	}
+	info, err := b.js.ConsumerInfo(stream, durable)
+	if err != nil {
+		if !errors.Is(err, nats.ErrConsumerNotFound) {
+			return nil, fmt.Errorf("load pull consumer %s/%s: %w", stream, durable, err)
+		}
+		info = nil
+	}
 	tuning := b.pullTuningForSubject(subject)
 	tuning = b.ensurePullTuningForDurable(subject, durable, tuning)
-	sub, err := b.js.PullSubscribe(subject, durable,
+	options := []nats.SubOpt{
 		nats.AckExplicit(),
-		nats.DeliverNew(), // 首次创建时从当前 stream 尾部开始，不重播历史消息（review R1）
 		nats.AckWait(tuning.AckWait),
 		nats.MaxAckPending(tuning.MaxAckPending),
-		nats.MaxDeliver(maxDeliveries),
-	)
+		nats.MaxDeliver(tuning.MaxDeliver),
+	}
+	if durableDeliveryPlan(info, 0).policy == durableDeliveryNew {
+		options = append(options, nats.DeliverNew())
+	}
+	sub, err := b.js.PullSubscribe(subject, durable, options...)
 	if err != nil {
 		return nil, fmt.Errorf("pull subscribe to %s (durable=%s): %w", subject, durable, err)
 	}
@@ -386,8 +746,102 @@ func (b *NATSEventBus) PullSubscribe(subject string, queue string, handler Event
 
 	// 自动清理同 queue 名对应的旧 push consumer（迁移到 pull 后的遗留，
 	// consumer 名即 queue 本身，不含 "-pull" 后缀）。幂等：不存在时静默跳过。
-	b.cleanupLegacyPushConsumer(subject, queue)
+	if queue != durable {
+		b.cleanupLegacyPushConsumer(subject, queue)
+	}
 
+	return ps, nil
+}
+
+// KeyedPullSubscribe preserves fetch order while dispatching different keys in
+// parallel. Messages are decoded and submitted to the hash shard sequentially
+// in JetStream delivery order; each shard then processes one key's events FIFO.
+func (b *NATSEventBus) KeyedPullSubscribe(
+	subject, queue string,
+	queueDepth int,
+	keyFunc EventKeyFunc,
+	handler EventHandler,
+) (Subscription, error) {
+	if keyFunc == nil {
+		return nil, fmt.Errorf("keyed pull subscribe to %s: key function is required", subject)
+	}
+	if queueDepth < 1 {
+		queueDepth = 1
+	}
+	durable := pullDurableName(queue)
+	stream, err := b.js.StreamNameBySubject(subject)
+	if err != nil {
+		return nil, fmt.Errorf("resolve keyed pull stream for %s: %w", subject, err)
+	}
+	info, err := b.js.ConsumerInfo(stream, durable)
+	if err != nil {
+		if !errors.Is(err, nats.ErrConsumerNotFound) {
+			return nil, fmt.Errorf("load keyed pull consumer %s/%s: %w", stream, durable, err)
+		}
+		info = nil
+	}
+	if info != nil && info.Config.DeliverSubject != "" {
+		return nil, fmt.Errorf(
+			"keyed pull consumer %s/%s is push-based; refusing unsafe replacement",
+			stream,
+			durable,
+		)
+	}
+
+	tuning := b.pullTuningForSubject(subject)
+	tuning.MaxAckPending = keyedMaxAckPending(
+		tuning.Concurrency,
+		queueDepth,
+		tuning.MaxAckPending,
+	)
+	tuning = b.ensurePullTuningForDurable(subject, durable, tuning)
+	options := []nats.SubOpt{
+		nats.AckExplicit(),
+		nats.AckWait(tuning.AckWait),
+		nats.MaxAckPending(tuning.MaxAckPending),
+		nats.MaxDeliver(tuning.MaxDeliver),
+	}
+	if durableDeliveryPlan(info, 0).policy == durableDeliveryNew {
+		options = append(options, nats.DeliverNew())
+	}
+	sub, err := b.js.PullSubscribe(subject, durable, options...)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"keyed pull subscribe to %s (durable=%s): %w",
+			subject,
+			durable,
+			err,
+		)
+	}
+
+	ctx, cancel := context.WithCancel(b.ctx)
+	ps := &pullSubscription{sub: sub, cancel: cancel, done: make(chan struct{})}
+	dispatcher := newKeyedDispatcher(tuning.Concurrency, queueDepth)
+	go b.runKeyedPullSubscription(
+		ctx,
+		ps,
+		subject,
+		durable,
+		tuning,
+		dispatcher,
+		keyFunc,
+		handler,
+	)
+
+	b.mu.Lock()
+	b.pullSubscriptions = append(b.pullSubscriptions, ps)
+	b.mu.Unlock()
+	b.logger.Info("keyed pull subscription started",
+		zap.String("subject", subject),
+		zap.String("durable", durable),
+		zap.Int("batch_size", tuning.BatchSize),
+		zap.Int("concurrency", tuning.Concurrency),
+		zap.Int("queue_depth", queueDepth),
+		zap.Duration("ack_wait", tuning.AckWait),
+		zap.Int("max_ack_pending", tuning.MaxAckPending))
+	if queue != durable {
+		b.cleanupLegacyPushConsumer(subject, queue)
+	}
 	return ps, nil
 }
 
@@ -443,8 +897,13 @@ func (b *NATSEventBus) ensurePullTuningForDurable(subject, durable string, desir
 // 不支持修改某字段）则退回沿用已有配置，避免后续 QueueSubscribe 因期望值与已存在
 // consumer 不一致而报错——与 ensurePullTuningForDurable 的处理方式保持一致。
 func (b *NATSEventBus) ensureQueueConsumerTuning(subject, durable string) QueueTuning {
-	desired := b.queueTuningForSubject(subject)
+	return b.ensureQueueConsumerTuningWithDesired(subject, durable, b.queueTuningForSubject(subject))
+}
 
+func (b *NATSEventBus) ensureQueueConsumerTuningWithDesired(
+	subject, durable string,
+	desired QueueTuning,
+) QueueTuning {
 	stream, err := b.js.StreamNameBySubject(subject)
 	if err != nil {
 		b.logger.Warn("resolve queue consumer stream failed",
@@ -508,6 +967,10 @@ func (b *NATSEventBus) queueTuningForSubject(subject string) QueueTuning {
 		AckWait:       queueSubscribeAckWait,
 		MaxDeliver:    maxDeliveries,
 		MaxAckPending: defaultQueueMaxAckPending,
+	}
+	if subject == SubjectCommandGetParamsResponse {
+		tuning.AckWait = gpvPullAckWait
+		tuning.MaxAckPending = gpvQueueMaxAckPending
 	}
 	b.mu.Lock()
 	configured, ok := b.queueTuning[subject]
@@ -587,12 +1050,24 @@ func pullDurableName(queue string) string {
 
 func defaultPullTuningForSubject(subject string) PullTuning {
 	if subject == SubjectCommandGetParamsResponse {
-		return PullTuning{BatchSize: gpvPullBatchSize, Concurrency: defaultPullConcurrent, AckWait: gpvPullAckWait, MaxAckPending: defaultPullMaxAckPending}
+		return PullTuning{
+			BatchSize: gpvPullBatchSize, Concurrency: gpvPullConcurrent,
+			AckWait: gpvPullAckWait, MaxDeliver: maxDeliveries,
+			MaxAckPending: defaultPullMaxAckPending,
+		}
 	}
 	if subject == SubjectParamSyncTaskResult {
-		return PullTuning{BatchSize: paramSyncResultPullBatchSize, Concurrency: paramSyncResultPullConcurrent, AckWait: paramSyncResultPullAckWait, MaxAckPending: paramSyncResultMaxAckPending}
+		return PullTuning{
+			BatchSize: paramSyncResultPullBatchSize, Concurrency: paramSyncResultPullConcurrent,
+			AckWait: paramSyncResultPullAckWait, MaxDeliver: maxDeliveries,
+			MaxAckPending: paramSyncResultMaxAckPending,
+		}
 	}
-	return PullTuning{BatchSize: 32, Concurrency: defaultPullConcurrent, AckWait: gpvPullAckWait, MaxAckPending: defaultPullMaxAckPending}
+	return PullTuning{
+		BatchSize: 32, Concurrency: defaultPullConcurrent,
+		AckWait: gpvPullAckWait, MaxDeliver: maxDeliveries,
+		MaxAckPending: defaultPullMaxAckPending,
+	}
 }
 
 func (b *NATSEventBus) pullTuningForSubject(subject string) PullTuning {
@@ -612,6 +1087,9 @@ func (b *NATSEventBus) pullTuningForSubject(subject string) PullTuning {
 	if configured.AckWait > 0 {
 		tuning.AckWait = configured.AckWait
 	}
+	if configured.MaxDeliver > 0 {
+		tuning.MaxDeliver = configured.MaxDeliver
+	}
 	if configured.MaxAckPending > 0 {
 		tuning.MaxAckPending = configured.MaxAckPending
 	}
@@ -625,6 +1103,9 @@ func reconcilePullTuningWithExisting(desired PullTuning, info *nats.ConsumerInfo
 	out := desired
 	if info.Config.AckWait > 0 {
 		out.AckWait = info.Config.AckWait
+	}
+	if info.Config.MaxDeliver != 0 {
+		out.MaxDeliver = info.Config.MaxDeliver
 	}
 	if info.Config.MaxAckPending > 0 {
 		out.MaxAckPending = info.Config.MaxAckPending
@@ -643,6 +1124,10 @@ func updatedPullConsumerConfig(info *nats.ConsumerInfo, desired PullTuning) (nat
 	changed := false
 	if desired.AckWait > 0 && cfg.AckWait != desired.AckWait {
 		cfg.AckWait = desired.AckWait
+		changed = true
+	}
+	if desired.MaxDeliver > 0 && cfg.MaxDeliver != desired.MaxDeliver {
+		cfg.MaxDeliver = desired.MaxDeliver
 		changed = true
 	}
 	if desired.MaxAckPending > 0 && cfg.MaxAckPending != desired.MaxAckPending {
@@ -729,6 +1214,79 @@ func (b *NATSEventBus) runPullSubscription(ctx context.Context, ps *pullSubscrip
 	}
 }
 
+func (b *NATSEventBus) runKeyedPullSubscription(
+	ctx context.Context,
+	ps *pullSubscription,
+	subject, durable string,
+	tuning PullTuning,
+	dispatcher *keyedDispatcher,
+	keyFunc EventKeyFunc,
+	handler EventHandler,
+) {
+	defer close(ps.done)
+	defer dispatcher.Close()
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		fetchCtx, fetchCancel := context.WithTimeout(ctx, defaultPullFetchWait)
+		msgs, err := ps.sub.Fetch(tuning.BatchSize, nats.Context(fetchCtx))
+		fetchCancel()
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) ||
+				errors.Is(err, nats.ErrBadSubscription) {
+				return
+			}
+			if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
+				continue
+			}
+			b.logger.Warn("keyed pull fetch failed",
+				zap.String("subject", subject),
+				zap.String("durable", durable),
+				zap.Error(err))
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		// Fetch can return several messages at once. Start deadline renewal for
+		// the whole batch before a hot shard can block sequential submission.
+		stops := make([]func(), len(msgs))
+		for index, msg := range msgs {
+			stops[index] = b.keepAckPendingAlive(ctx, msg, tuning.AckWait)
+		}
+		for index, msg := range msgs {
+			stopProgress := stops[index]
+			evt, decodeErr := decodeEventBytes(msg.Data)
+			if decodeErr != nil {
+				stopProgress()
+				b.dropMalformedMsg(msg, decodeErr)
+				continue
+			}
+			key, keyErr := keyFunc(evt)
+			if keyErr != nil {
+				stopProgress()
+				b.settleDecodedMsg(evt, msg, keyErr, tuning.MaxDeliver)
+				continue
+			}
+			currentMsg := msg
+			currentEvent := evt
+			currentStop := stopProgress
+			if submitErr := dispatcher.Submit(ctx, key, func() {
+				b.processKeyedMsg(ctx, currentEvent, currentMsg, QueueTuning{
+					AckWait:    tuning.AckWait,
+					MaxDeliver: tuning.MaxDeliver,
+				}, handler)
+				currentStop()
+			}); submitErr != nil {
+				currentStop()
+				b.metrics.inc(currentEvent.Subject, deliveryOutcomeNak)
+				_ = currentMsg.NakWithDelay(time.Second)
+			}
+		}
+	}
+}
+
 func pendingLimitsForSubject(subject string) (msgLimit int, bytesLimit int) {
 	if subject == SubjectCommandGetParamsResponse {
 		return gpvPendingMsgLimit, gpvPendingBytesLimit
@@ -752,6 +1310,15 @@ func (b *NATSEventBus) Close() error {
 	}
 
 	b.mu.Lock()
+	keyedSubs := append([]*keyedQueueSubscription(nil), b.keyedSubscriptions...)
+	b.mu.Unlock()
+	for _, sub := range keyedSubs {
+		if err := sub.Unsubscribe(); err != nil {
+			b.logger.Warn("keyed queue unsubscribe error", zap.Error(err))
+		}
+	}
+
+	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	for _, sub := range b.subs {
@@ -761,6 +1328,7 @@ func (b *NATSEventBus) Close() error {
 	}
 	b.subs = nil
 	b.pullSubscriptions = nil
+	b.keyedSubscriptions = nil
 	return nil
 }
 
@@ -773,21 +1341,47 @@ func (b *NATSEventBus) wrapHandler(handler EventHandler) nats.MsgHandler {
 func (b *NATSEventBus) processMsg(handler EventHandler, msg *nats.Msg) {
 	evt, parseErr := decodeEventBytes(msg.Data)
 	if parseErr != nil {
-		b.logger.Error("unmarshal event", zap.Error(parseErr))
-		// Permanent parse error — terminate to avoid infinite retry.
-		// subject 用 msg.Subject（已解出 evt 之前），保证 dropped 指标有 subject 维度。
-		b.metrics.inc(msg.Subject, deliveryOutcomeDropped)
-		_ = msg.Term()
+		b.dropMalformedMsg(msg, parseErr)
 		return
 	}
 
 	handlerErr := handler(b.ctx, evt)
+	b.settleDecodedMsg(evt, msg, handlerErr, maxDeliveries)
+}
+
+func (b *NATSEventBus) dropMalformedMsg(msg *nats.Msg, parseErr error) {
+	b.logger.Error("unmarshal event", zap.Error(parseErr))
+	// Permanent parse error — terminate to avoid infinite retry.
+	// subject 用 msg.Subject（已解出 evt 之前），保证 dropped 指标有 subject 维度。
+	b.metrics.inc(msg.Subject, deliveryOutcomeDropped)
+	_ = msg.Term()
+}
+
+func (b *NATSEventBus) settleDecodedMsg(
+	evt Event,
+	msg *nats.Msg,
+	handlerErr error,
+	maxDelivery int,
+) {
+	b.settleDecodedMsgAtDelivery(evt, msg, handlerErr, messageDeliveryCount(msg), maxDelivery)
+}
+
+func messageDeliveryCount(msg *nats.Msg) uint64 {
 	deliveries := uint64(1)
 	if meta, mErr := msg.Metadata(); mErr == nil && meta != nil {
 		deliveries = meta.NumDelivered
 	}
+	return deliveries
+}
 
-	decision := decideAck(handlerErr, deliveries, maxDeliveries)
+func (b *NATSEventBus) settleDecodedMsgAtDelivery(
+	evt Event,
+	msg *nats.Msg,
+	handlerErr error,
+	deliveries uint64,
+	maxDelivery int,
+) {
+	decision := decideAck(handlerErr, deliveries, uint64(maxDelivery))
 	switch decision.action {
 	case ackActionAck:
 		b.metrics.inc(evt.Subject, deliveryOutcomeAck)
@@ -810,6 +1404,79 @@ func (b *NATSEventBus) processMsg(handler EventHandler, msg *nats.Msg) {
 			zap.Error(handlerErr))
 		_ = msg.NakWithDelay(decision.backoff)
 	}
+}
+
+// processKeyedMsg keeps a failed head message inside its device lane until it
+// either succeeds or reaches the configured terminal attempt. NAKing the head
+// immediately would release the lane and allow a later response for the same
+// device to persist before the redelivery.
+func (b *NATSEventBus) processKeyedMsg(
+	ctx context.Context,
+	evt Event,
+	msg *nats.Msg,
+	tuning QueueTuning,
+	handler EventHandler,
+) {
+	if tuning.MaxDeliver <= 0 {
+		tuning.MaxDeliver = maxDeliveries
+	}
+	if tuning.AckWait <= 0 {
+		tuning.AckWait = gpvPullAckWait
+	}
+	serverDelivery := messageDeliveryCount(msg)
+	for localAttempt := uint64(0); ; localAttempt++ {
+		handlerErr := handler(ctx, evt)
+		effectiveDelivery := serverDelivery + localAttempt
+		if handlerErr == nil || errors.Is(handlerErr, reliability.ErrPermanent) ||
+			effectiveDelivery >= uint64(tuning.MaxDeliver) {
+			b.settleDecodedMsgAtDelivery(
+				evt,
+				msg,
+				handlerErr,
+				effectiveDelivery,
+				tuning.MaxDeliver,
+			)
+			return
+		}
+
+		backoff := keyedRetryBackoff(effectiveDelivery, tuning.AckWait)
+		b.logger.Warn("keyed event head failed; retrying in lane",
+			zap.String("subject", evt.Subject),
+			zap.Uint64("attempt", effectiveDelivery),
+			zap.Duration("backoff", backoff),
+			zap.Error(handlerErr))
+		_ = msg.InProgress()
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			b.metrics.inc(evt.Subject, deliveryOutcomeNak)
+			_ = msg.NakWithDelay(time.Second)
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+func keyedRetryBackoff(attempt uint64, ackWait time.Duration) time.Duration {
+	if attempt == 0 {
+		attempt = 1
+	}
+	shift := attempt - 1
+	if shift > 30 {
+		shift = 30
+	}
+	backoff := time.Duration(1<<shift) * time.Second
+	maxBackoff := ackWait / 3
+	if maxBackoff < 10*time.Millisecond {
+		maxBackoff = 10 * time.Millisecond
+	}
+	if backoff > maxBackoff {
+		return maxBackoff
+	}
+	return backoff
 }
 
 // ackAction 表示对一条 NATS 消息的处置动作。
@@ -877,6 +1544,21 @@ type natsSubscription struct {
 
 func (s *natsSubscription) Unsubscribe() error {
 	return s.sub.Unsubscribe()
+}
+
+type keyedQueueSubscription struct {
+	sub        *nats.Subscription
+	dispatcher *keyedDispatcher
+	once       sync.Once
+	err        error
+}
+
+func (s *keyedQueueSubscription) Unsubscribe() error {
+	s.once.Do(func() {
+		s.err = s.sub.Unsubscribe()
+		s.dispatcher.Close()
+	})
+	return s.err
 }
 
 type pullSubscription struct {

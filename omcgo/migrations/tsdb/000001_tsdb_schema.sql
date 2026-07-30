@@ -1365,13 +1365,37 @@ ALTER TABLE public.pm_aggregation_windows
     ADD COLUMN revision integer NOT NULL DEFAULT 1,
     ADD COLUMN rebuild_requested_at timestamptz,
     ADD COLUMN version_effective_from timestamptz,
-    ADD COLUMN version_effective_to timestamptz;
+    ADD COLUMN version_effective_to timestamptz,
+    ADD COLUMN finalize_lease_owner uuid,
+    ADD COLUMN finalize_lease_until timestamptz,
+    ADD COLUMN finalize_attempts integer NOT NULL DEFAULT 0,
+    ADD COLUMN finalize_next_attempt_at timestamptz NOT NULL DEFAULT '-infinity',
+    ADD COLUMN version_audit_fingerprint text;
 
 ALTER TABLE public.pm_aggregation_windows
     DROP CONSTRAINT chk_pm_aggregation_windows_status;
 ALTER TABLE public.pm_aggregation_windows
     ADD CONSTRAINT chk_pm_aggregation_windows_status
         CHECK (status IN ('open', 'finalizing', 'published', 'failed', 'rebuilding'));
+
+CREATE INDEX idx_pm_windows_due_claim
+    ON public.pm_aggregation_windows (
+        granularity, finalize_next_attempt_at, window_end,
+        task_version_id, entity_key, window_start
+    )
+    WHERE status IN ('open', 'failed');
+
+CREATE INDEX idx_pm_windows_oldest_due
+    ON public.pm_aggregation_windows (granularity, window_end)
+    WHERE status IN ('open', 'failed');
+
+CREATE INDEX idx_pm_windows_version_audit
+    ON public.pm_aggregation_windows (
+        task_version_id, version_audit_fingerprint,
+        window_start, entity_key, granularity
+    )
+    WHERE status = 'published'
+      AND granularity IN ('daily', 'weekly', 'monthly');
 
 ALTER TABLE public.pm_aggregation_results
     ADD COLUMN revision integer NOT NULL DEFAULT 1,

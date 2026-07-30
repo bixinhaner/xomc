@@ -66,7 +66,7 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	w.registerCarriers()
 
 	// 创建统一任务队列：TaskService（Redis + PG）
-	taskQueue := task.NewRedisTaskQueue(inf.Redis)
+	taskQueue := task.NewRedisTaskQueueWithTerminalTTL(inf.Redis, cfg.Task.EffectiveTerminalRedisTTL())
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	taskSvc := task.NewTaskService(taskQueue, taskRepo, inf.Logger)
 	// 关键：worker 的 ExpiredSweeper 调 TaskService.ExpireTask → notifyCompletion。

@@ -18,6 +18,40 @@ run a shell, `curl`, or `wget` inside that container. Its `health_check`
 extension listens on port 13133, the release compose publishes that port only
 on `127.0.0.1`, and `healthcheck.sh` probes it externally from the host.
 
+## Resource-plan contract
+
+`resources.env` is a required, complete deployment contract rather than a
+best-effort override file. Generate it with `plan-resources.sh`; it records
+schema version `2` and the probed host CPU and memory. The planner writes and
+validates a temporary file in the destination directory, then atomically
+replaces `resources.env`; generation or validation failure preserves the
+previous last-good file.
+
+`install.sh --check-only` validates the candidate that a real install would
+use: the new package's `deploy/resources.env`, otherwise the current release,
+otherwise `etc/resources.env.saved`. A normal install validates that candidate
+before switching `current` or restarting anything, then validates the copied
+file again. `install.sh` and `svc.sh` reject missing, partial, malformed, or
+internally inconsistent files, including legacy files that only contain Redis
+values. Re-run `plan-resources.sh`; deleting the file no longer falls back to
+Compose defaults.
+
+After deployment, `healthcheck.sh` validates a present contract against the
+rendered Compose limits, Docker `NanoCpus`/`Memory`, Go GOMAXPROCS metrics,
+Redis runtime settings, and PostgreSQL/TimescaleDB runtime settings. Any
+mismatch names the service with its expected and actual values.
+
+## Redis aggregation v2 rollout gate
+
+`PM_AGGREGATION_REDIS_V2_WRITE_ENABLED` defaults to `false`. Deploy the
+dual-reader release with that default first. Enable it only after deployment
+inspection proves that every old Worker container has stopped and the running
+Worker count matches the new release.
+
+After v2 has been enabled, rollback is supported only to a release that can
+dual-read v1/v2; set the gate back to `false` before resuming traffic. Never
+roll back to a pre-dual-reader Worker because it cannot finalize v2 state.
+
 ## Configuration backup bucket compatibility
 
 The physical S3/MinIO bucket is `config-backup`. The legacy `config_backup`

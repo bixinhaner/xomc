@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -13,6 +14,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/product"
@@ -33,6 +35,28 @@ type rpcRespTestTranslatorFactory struct{}
 
 func (rpcRespTestTranslatorFactory) Translator(context.Context, uuid.UUID, string) (*parammodel.Translator, error) {
 	return nil, nil
+}
+
+func TestNewRPCResponseSubscriberKeepsGPVConsumerConfig(t *testing.T) {
+	config := appconfig.GPVResponseConsumerConfig{
+		RPCDurable:       "handoff-consumer",
+		RPCStartSequence: 416825,
+		RPCConcurrency:   3,
+	}
+	s := NewRPCResponseSubscriber(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		config,
+		zap.NewNop(),
+	)
+
+	require.Equal(t, config, s.gpvConsumer)
 }
 
 type rpcRespRecordingTranslatorFactory struct {
@@ -75,10 +99,102 @@ func TestRPCResponseSubscriberResolveTranslatorUsesProductID(t *testing.T) {
 
 type rpcRespDeviceLookupStub struct {
 	device *model.Device
+	err    error
 }
 
 func (s rpcRespDeviceLookupStub) GetBySerialNumber(context.Context, string) (*model.Device, error) {
-	return s.device, nil
+	return s.device, s.err
+}
+
+type rpcRespSubscriptionStub struct{}
+
+func (rpcRespSubscriptionStub) Unsubscribe() error { return nil }
+
+type rpcRespBusCall struct {
+	subject string
+	queue   string
+}
+
+type rpcRespKeyedCall struct {
+	subject string
+	config  event.KeyedQueueConfig
+}
+
+type rpcRespRecordingBus struct {
+	subscribeCalls []rpcRespBusCall
+	queueCalls     []rpcRespBusCall
+	keyedCalls     []rpcRespKeyedCall
+}
+
+func (b *rpcRespRecordingBus) Publish(context.Context, string, event.Event) error { return nil }
+
+func (b *rpcRespRecordingBus) Subscribe(
+	subject string,
+	_ event.EventHandler,
+) (event.Subscription, error) {
+	b.subscribeCalls = append(b.subscribeCalls, rpcRespBusCall{subject: subject})
+	return rpcRespSubscriptionStub{}, nil
+}
+
+func (b *rpcRespRecordingBus) QueueSubscribe(
+	subject, queue string,
+	_ event.EventHandler,
+) (event.Subscription, error) {
+	b.queueCalls = append(b.queueCalls, rpcRespBusCall{subject: subject, queue: queue})
+	return rpcRespSubscriptionStub{}, nil
+}
+
+func (b *rpcRespRecordingBus) KeyedQueueSubscribe(
+	subject string,
+	config event.KeyedQueueConfig,
+	_ event.EventKeyFunc,
+	_ event.EventHandler,
+) (event.Subscription, error) {
+	b.keyedCalls = append(b.keyedCalls, rpcRespKeyedCall{subject: subject, config: config})
+	return rpcRespSubscriptionStub{}, nil
+}
+
+func (b *rpcRespRecordingBus) PullSubscribe(
+	string,
+	string,
+	event.EventHandler,
+) (event.Subscription, error) {
+	return rpcRespSubscriptionStub{}, nil
+}
+
+func (b *rpcRespRecordingBus) Close() error { return nil }
+
+func TestRPCResponseSubscriberStartUsesConfiguredLosslessKeyedGPVConsumer(t *testing.T) {
+	bus := &rpcRespRecordingBus{}
+	s := &RPCResponseSubscriber{bus: bus, logger: zap.NewNop()}
+	s.gpvConsumer = appconfig.GPVResponseConsumerConfig{
+		RPCDurable:       "existing-rpc-consumer",
+		RPCStartSequence: 416825,
+		RPCConcurrency:   2,
+		RPCQueueDepth:    1000,
+		AckWait:          30 * time.Second,
+		MaxDeliver:       5,
+		MaxAckPending:    2000,
+	}
+
+	require.NoError(t, s.Start())
+	require.Empty(t, bus.queueCalls)
+	require.Equal(t, []rpcRespKeyedCall{{
+		subject: event.SubjectCommandGetParamsResponse,
+		config: event.KeyedQueueConfig{
+			Durable:       "existing-rpc-consumer",
+			StartSequence: 416825,
+			Concurrency:   2,
+			QueueDepth:    1000,
+			AckWait:       30 * time.Second,
+			MaxDeliver:    5,
+			MaxAckPending: 2000,
+		},
+	}}, bus.keyedCalls)
+	require.Equal(t, []rpcRespBusCall{
+		{subject: event.SubjectCommandDeleteObjectResponse},
+		{subject: event.SubjectTaskFailed},
+	}, bus.subscribeCalls)
 }
 
 type rpcRespTrackingParamRepo struct {
@@ -160,6 +276,39 @@ func TestRPCResponseSubscriber_UECountResponsePersistsStandardPathsAndRefreshesI
 	require.Equal(t, "Device.DeviceInfo.UE_Count", paramRepo.rows[0].ParameterPath)
 	require.Equal(t, "Device.DeviceInfo.2.UE_Count", paramRepo.rows[1].ParameterPath)
 	require.Equal(t, 1, infoRefresher.calls)
+}
+
+func TestRPCResponseSubscriber_DeviceLookupFailureIsRetried(t *testing.T) {
+	lookupErr := errors.New("database unavailable")
+	s := &RPCResponseSubscriber{
+		deviceLookup: rpcRespDeviceLookupStub{err: lookupErr},
+		logger:       zap.NewNop(),
+	}
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]interface{}{
+		"device_sn": "SN-DB-ERROR",
+		"parameter_values": []tr069.ParameterValueStruct{
+			{Name: "Device.DeviceInfo.X_COM_UE_Count", Value: "2"},
+		},
+	})
+	require.NoError(t, err)
+
+	require.ErrorIs(t, s.handleGPVResponse(context.Background(), evt), lookupErr)
+}
+
+func TestRPCResponseSubscriber_MissingDeviceIsTerminal(t *testing.T) {
+	s := &RPCResponseSubscriber{
+		deviceLookup: rpcRespDeviceLookupStub{},
+		logger:       zap.NewNop(),
+	}
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]interface{}{
+		"device_sn": "SN-NOT-FOUND",
+		"parameter_values": []tr069.ParameterValueStruct{
+			{Name: "Device.DeviceInfo.X_COM_UE_Count", Value: "2"},
+		},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.handleGPVResponse(context.Background(), evt))
 }
 
 func TestRPCResponseSubscriberResolveTranslator_OrphanFallbackIsWarnNotError(t *testing.T) {
