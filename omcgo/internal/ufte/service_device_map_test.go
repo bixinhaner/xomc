@@ -137,6 +137,148 @@ func TestMapDeviceItem_ConfigRestore_EmptyDestVersionShowsEmptyTargetFile(t *tes
 	assert.Empty(t, item.TargetFile, "未写回前 TargetFile 保持空（不应回退用 parent.FileName）")
 }
 
+func TestMapDeviceItem_VersionRollbackShowsRollbackSpecificRunningStates(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "VERSION_ROLLBACK")
+	parent := &software.UpgradeTask{
+		ID:           uuid.New(),
+		TaskName:     "rollback-task",
+		TaskType:     software.TaskTypeRollback,
+		ProductClass: "FAP/BAIBLQ/SC",
+	}
+	cache := map[uuid.UUID]*coremodel.Device{}
+
+	cases := []struct {
+		name   string
+		status software.UpgradeState
+		want   string
+	}{
+		{name: "enable-check GPV in-flight", status: software.UpgradeDownloading, want: "rollback_checking"},
+		{name: "rollback SPV accepted waiting reboot", status: software.UpgradeRebooting, want: "rolling_back"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			deviceID := uuid.New()
+			cache[deviceID] = &coremodel.Device{
+				ID:              deviceID,
+				SerialNumber:    "SN-ROLLBACK",
+				ProductClass:    "FAP/BAIBLQ/SC",
+				FirmwareVersion: "BaiBLQ_5.1.12.1",
+			}
+			sub := software.UpgradeSubTaskWithTaskName{
+				UpgradeSubTask: software.UpgradeSubTask{
+					ID:         uuid.New(),
+					TaskID:     parent.ID,
+					DeviceID:   deviceID,
+					DeviceSN:   "SN-ROLLBACK",
+					Status:     tt.status,
+					OriVersion: "BaiBLQ_5.1.12.1",
+				},
+				TaskName: parent.TaskName,
+			}
+
+			item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, item.Status)
+		})
+	}
+}
+
+func TestMapDeviceItem_VersionRollbackRemapsLegacyFailureReasons(t *testing.T) {
+	svc := newServiceForMap(t)
+	catalog := mustCatalog(t, "VERSION_ROLLBACK")
+	parent := &software.UpgradeTask{
+		ID:           uuid.New(),
+		TaskName:     "rollback-task",
+		TaskType:     software.TaskTypeRollback,
+		ProductClass: "FAP/BAIBLQ/SC",
+	}
+
+	cases := []struct {
+		name          string
+		commandKey    string
+		failureReason string
+		errorMessage  string
+		want          string
+		wantDetail    string
+	}{
+		{
+			name:          "enable check timeout written as download timeout",
+			commandKey:    "rollback-enable-check-11111111-1111-1111-1111-111111111111",
+			failureReason: string(software.FailureDownloadTimeout),
+			errorMessage:  "Download response timed out: no DownloadResponse from device.",
+			want:          string(software.FailureRollbackEnableCheckTimeout),
+			wantDetail:    "Rollback enable check timed out: no GetParameterValuesResponse from device.",
+		},
+		{
+			name:          "rollback apply timeout written as generic task timeout",
+			commandKey:    "22222222-2222-2222-2222-222222222222",
+			failureReason: string(software.FailureTaskTimeout),
+			errorMessage:  "Timed out waiting for TransferComplete from device.",
+			want:          string(software.FailureRollbackApplyTimeout),
+			wantDetail:    "Rollback timed out: no reboot completion from device after SetParameterValues.",
+		},
+		{
+			name:          "set fault written as upload fault",
+			commandKey:    "33333333-3333-3333-3333-333333333333",
+			failureReason: string(software.FailureUploadFault),
+			errorMessage:  "Rollback failed, device rejected SetParameterValues. FaultCode: 9003, FaultString: invalid value",
+			want:          string(software.FailureRollbackSetFault),
+			wantDetail:    "Rollback failed, device rejected SetParameterValues. FaultCode: 9003, FaultString: invalid value",
+		},
+		{
+			name:          "enable check fault written as internal error",
+			commandKey:    "rollback-enable-check-44444444-4444-4444-4444-444444444444",
+			failureReason: string(software.FailureInternalError),
+			errorMessage:  "Rollback can not be started, enable check rejected by device. FaultCode: 9003, FaultString: invalid name",
+			want:          string(software.FailureRollbackEnableCheckFault),
+			wantDetail:    "Rollback can not be started, enable check rejected by device. FaultCode: 9003, FaultString: invalid name",
+		},
+		{
+			name:          "unsupported rollback written as internal error",
+			commandKey:    "rollback-enable-check-55555555-5555-5555-5555-555555555555",
+			failureReason: string(software.FailureInternalError),
+			errorMessage:  "Rollback can not be started, device does not support rollback (ROLLBACK_ENABLE=\"0\").",
+			want:          string(software.FailureRollbackNotSupported),
+			wantDetail:    "Rollback can not be started, device does not support rollback (ROLLBACK_ENABLE=\"0\").",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			deviceID := uuid.New()
+			cache := map[uuid.UUID]*coremodel.Device{
+				deviceID: {
+					ID:              deviceID,
+					SerialNumber:    "SN-ROLLBACK",
+					ProductClass:    "FAP/BAIBLQ/SC",
+					FirmwareVersion: "BaiBLQ_5.1.12.1",
+				},
+			}
+			sub := software.UpgradeSubTaskWithTaskName{
+				UpgradeSubTask: software.UpgradeSubTask{
+					ID:            uuid.New(),
+					TaskID:        parent.ID,
+					DeviceID:      deviceID,
+					DeviceSN:      "SN-ROLLBACK",
+					Status:        software.UpgradeFailed,
+					CommandKey:    tt.commandKey,
+					FailureReason: tt.failureReason,
+					ErrorMessage:  tt.errorMessage,
+					OriVersion:    "BaiBLQ_5.1.12.1",
+				},
+				TaskName: parent.TaskName,
+			}
+
+			item, err := svc.mapDeviceItem(context.Background(), catalog, sub, parent, cache)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, item.FailureReason)
+			assert.Equal(t, tt.wantDetail, item.FailureDetail)
+		})
+	}
+}
+
 func TestMapDeviceItem_FaultLogQuotaDeletedFileIsShownWithoutDownloadURL(t *testing.T) {
 	svc := newServiceForMap(t)
 	catalog := mustCatalog(t, "FAULT_LOG_COLLECT")

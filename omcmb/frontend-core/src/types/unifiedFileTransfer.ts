@@ -98,7 +98,9 @@ export interface UnifiedFileTransferTask {
 
 export type UnifiedFileTransferDeviceStatus =
   | 'pending'
-  | 'downloading'   // 升级 / 回滚类 Download RPC，CPE 正在从 ACS 拉文件
+  | 'downloading'   // 升级类 Download RPC，CPE 正在从 ACS 拉文件
+  | 'rollback_checking' // 版本回退前置 GPV，检查设备是否允许回退
+  | 'rolling_back'  // 版本回退 SPV 已下发，等待设备回退/重启完成
   | 'uploading'     // 备份 / 日志采集类 Upload RPC，已派发 Upload + 等 UploadResponse + CPE PUT 文件中
   | 'awaiting_tc'   // 备份 / 日志采集类 Upload RPC，文件已落 ACS，等 CPE 主动发 TransferComplete
   | 'verifying'

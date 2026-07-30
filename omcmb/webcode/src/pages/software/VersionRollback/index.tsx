@@ -71,6 +71,48 @@ const TASK_STATUS_COLORS: Record<number, string> = {
 // TASK_RESULT_COLORS / SUB_TASK_STATUS_COLORS 占位常量已拆到同级 ./constants.ts
 // （react-refresh/only-export-components：页面文件只导出组件）。
 
+const ROLLBACK_ENABLE_CHECK_PREFIX = 'rollback-enable-check-';
+
+function normalizeRollbackFailureCode(
+  code: string | undefined,
+  commandKey: string | undefined,
+  detail: string | undefined,
+): string | undefined {
+  if (!code) return code;
+  const text = (detail || '').toLowerCase();
+  if (code === 'DOWNLOAD_TIMEOUT' && commandKey?.startsWith(ROLLBACK_ENABLE_CHECK_PREFIX)) {
+    return 'ROLLBACK_ENABLE_CHECK_TIMEOUT';
+  }
+  if (code === 'TASK_TIMEOUT') {
+    return 'ROLLBACK_APPLY_TIMEOUT';
+  }
+  if (code === 'UPLOAD_FAULT' && text.includes('rollback') && text.includes('setparametervalues')) {
+    return 'ROLLBACK_SET_FAULT';
+  }
+  if (code === 'INTERNAL_ERROR' && text.includes('enable check rejected')) {
+    return 'ROLLBACK_ENABLE_CHECK_FAULT';
+  }
+  if (code === 'INTERNAL_ERROR' && text.includes('does not support rollback')) {
+    return 'ROLLBACK_NOT_SUPPORTED';
+  }
+  return code;
+}
+
+function normalizeRollbackFailureDetail(
+  code: string | undefined,
+  detail: string | undefined,
+): string | undefined {
+  if (!detail) return detail;
+  const text = detail.toLowerCase();
+  if (code === 'ROLLBACK_ENABLE_CHECK_TIMEOUT' && text.includes('downloadresponse')) {
+    return 'Rollback enable check timed out: no GetParameterValuesResponse from device.';
+  }
+  if (code === 'ROLLBACK_APPLY_TIMEOUT' && text.includes('transfercomplete')) {
+    return 'Rollback timed out: no reboot completion from device after SetParameterValues.';
+  }
+  return detail;
+}
+
 export default function VersionRollback() {
   const t = useT();
 
@@ -147,14 +189,27 @@ export default function VersionRollback() {
   // Sub-task status config with i18n
   const SUB_TASK_STATUS_MAP = useMemo(() => ({
     pending: { color: 'default', text: t('software.status.waiting') },
-    downloading: { color: 'processing', text: t('software.status.downloading') },
-    rebooting: { color: 'processing', text: t('software.status.rebooting') },
+    downloading: { color: 'processing', text: t('software.status.rollbackChecking') },
+    rebooting: { color: 'processing', text: t('software.status.rollingBack') },
     verifying: { color: 'processing', text: t('software.status.verifying') },
     completed: { color: 'success', text: t('status.success') },
     failed: { color: 'error', text: t('status.failed') },
     suspended: { color: 'warning', text: t('software.status.paused') },
     terminated: { color: 'default', text: t('common.terminate') },
   }), [t]);
+
+  const renderRollbackFailureReason = useCallback((errorMessage: unknown, record: UpgradeSubTaskInfo) => {
+    const rawDetail = typeof errorMessage === 'string' ? errorMessage : record.errorMessage;
+    const code = normalizeRollbackFailureCode(record.failureReason, record.commandKey, rawDetail);
+    const detail = normalizeRollbackFailureDetail(code, rawDetail);
+    if (!code && !detail) return '-';
+
+    const key = code ? `software.failureCode.${code}` : '';
+    const label = code ? t(key as Parameters<typeof t>[0]) : '';
+    const display = label && label !== key ? label : (code || detail || '-');
+    const title = detail && detail !== display ? detail : undefined;
+    return <span style={{ color: '#ff4d4f' }} title={title}>{display}</span>;
+  }, [t]);
 
   // ---- Derived data ----
 
@@ -704,15 +759,12 @@ export default function VersionRollback() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'failureReason', title: t('software.failureReason'), dataIndex: 'errorMessage', width: 150, ellipsis: true, render: (val: unknown, record: UpgradeSubTaskInfo) => {
-      const text = record.failureReason || (val as string);
-      return text ? <span style={{ color: '#ff4d4f' }}>{text}</span> : '-';
-    }},
+    { key: 'failureReason', title: t('software.failureReason'), dataIndex: 'errorMessage', width: 150, ellipsis: true, render: renderRollbackFailureReason },
     { key: 'operator', title: t('table.operator'), width: 100, render: () => '-' },
     { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: unknown) => val ? formatSystemTime(val as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-' },
     { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: unknown) => val ? formatSystemTime(val as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-' },
     { key: 'endTime', title: t('software.endTime'), dataIndex: 'completedAt', width: 160, render: (val: unknown) => val ? formatSystemTime(val as string, { format: 'YYYY-MM-DD HH:mm:ss', placeholder: '-' }) : '-' },
-  ], [t, SUB_TASK_STATUS_MAP]);
+  ], [t, SUB_TASK_STATUS_MAP, renderRollbackFailureReason]);
 
   // ---- Header buttons ----
   const headerExtra = useMemo(() => (
@@ -1253,8 +1305,7 @@ export default function VersionRollback() {
                       width: 120,
                       ellipsis: true,
                       render: (val: string, record: UpgradeSubTaskInfo) => {
-                        const text = record.failureReason || val;
-                        return text ? <span style={{ color: '#ff4d4f' }}>{text}</span> : '-';
+                        return renderRollbackFailureReason(val, record);
                       },
                     },
                   ]}

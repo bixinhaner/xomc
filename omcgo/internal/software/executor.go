@@ -843,7 +843,7 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 //     · success → 保持 Uploading 等文件落地（OnLogFileLanded hook 推进）
 //
 //   - Rollback / Rebooting：基站版本回退（adapter 决定 4G/5G 路径与值）
-//     · fault → fail，记 UPLOAD_FAULT（避免 30 min 后才被 reaper 兜底）
+//     · fault → fail，记 ROLLBACK_SET_FAULT（避免 30 min 后才被 reaper 兜底）
 //     · success → 保持 Rebooting 等 reboot_complete 事件
 //
 // 历史教训：原版只服务 LogCollect 一条路径（带 parent.TaskType==LogCollect 过滤），
@@ -901,7 +901,7 @@ func (e *UpgradeExecutor) HandleSetParamsResponse(ctx context.Context, evt event
 			e.failSubTask(ctx, subTask,
 				fmt.Sprintf("Rollback failed, device rejected SetParameterValues. FaultCode: %d, FaultString: %s",
 					payload.FaultCode, payload.FaultStr),
-				FailureUploadFault)
+				FailureRollbackSetFault)
 			return nil
 		}
 		e.logger.Info("SPV accepted, waiting for device reboot",

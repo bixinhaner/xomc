@@ -564,8 +564,9 @@ func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeou
 	query := buildFailStaleSubTasksSQL()
 
 	// 三段超时口径：
-	//   · 'downloading'（Download RPC，固件升级 / 回滚）→ RPCResponse 短超时（默认 10min）
-	//     —— 设备拿到 Download SOAP 后应该回 DownloadResponse；超时多半是 ACS 没派发或 CPE 没回。
+	//   · 'downloading' → RPCResponse 短超时（默认 10min）。
+	//     普通升级是 Download RPC，超时表示未收到 DownloadResponse；4G 回退阶段一复用
+	//     该短窗口等回退能力 GPV 响应，需用 command_key + task_type 改写成回退语义。
 	//   · 'suspended' → DeviceOnline 长超时（默认 10min）—— 等设备 inform 上线。
 	//   · 其它（'uploading' / 'rebooting' / 'verifying'）→ TransferComplete 超时（默认 30min）
 	//     —— 文件上传 + CPE 内部安装 / 回写 TC 都属于"已派发 RPC，等事务完成"阶段，时间窗较长。
@@ -602,11 +603,15 @@ func buildFailStaleSubTasksSQL() string {
 	return `WITH failed AS (
 		UPDATE upgrade_sub_tasks ust
 		SET status = 'failed', error_message = CASE
+		    WHEN ut.task_type = 2 AND ust.status = 'downloading' AND ust.command_key LIKE 'rollback-enable-check-%' THEN 'Rollback enable check timed out: no GetParameterValuesResponse from device.'
+		    WHEN ut.task_type = 2 AND ust.status = 'rebooting' THEN 'Rollback timed out: no reboot completion from device after SetParameterValues.'
 		    WHEN ust.status = 'downloading' THEN 'Download response timed out: no DownloadResponse from device.'
 		    WHEN ust.status = 'uploading'   THEN 'Timed out waiting for upload / TransferComplete from device.'
 		    WHEN ust.status = 'suspended'   THEN 'Timed out waiting for device to come online.'
 		    ELSE                                 'Timed out waiting for TransferComplete from device.'
 		END, failure_reason = CASE
+		    WHEN ut.task_type = 2 AND ust.status = 'downloading' AND ust.command_key LIKE 'rollback-enable-check-%' THEN 'ROLLBACK_ENABLE_CHECK_TIMEOUT'
+		    WHEN ut.task_type = 2 AND ust.status = 'rebooting' THEN 'ROLLBACK_APPLY_TIMEOUT'
 		    WHEN ust.status = 'downloading' THEN 'DOWNLOAD_TIMEOUT'
 		    ELSE                                 'TASK_TIMEOUT'
 		END, started_at = COALESCE(ust.started_at, NOW()), completed_at = NOW(), updated_at = NOW()

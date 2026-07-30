@@ -65,6 +65,23 @@ func TestBuildFailStaleSubTasksSQL_DownloadingUsesDownloadTimeoutReason(t *testi
 	}
 }
 
+func TestBuildFailStaleSubTasksSQL_RollbackUsesRollbackTimeoutReasons(t *testing.T) {
+	query := buildFailStaleSubTasksSQL()
+
+	if !strings.Contains(query, "WHEN ut.task_type = 2 AND ust.status = 'downloading' AND ust.command_key LIKE 'rollback-enable-check-%' THEN 'Rollback enable check timed out: no GetParameterValuesResponse from device.'") {
+		t.Fatalf("rollback enable-check stale message must mention GetParameterValuesResponse, not DownloadResponse.\nSQL: %s", query)
+	}
+	if !strings.Contains(query, "WHEN ut.task_type = 2 AND ust.status = 'rebooting' THEN 'Rollback timed out: no reboot completion from device after SetParameterValues.'") {
+		t.Fatalf("rollback SPV stale message must mention reboot completion after SetParameterValues.\nSQL: %s", query)
+	}
+	if !strings.Contains(query, "WHEN ut.task_type = 2 AND ust.status = 'downloading' AND ust.command_key LIKE 'rollback-enable-check-%' THEN 'ROLLBACK_ENABLE_CHECK_TIMEOUT'") {
+		t.Fatalf("rollback enable-check stale failure_reason must not reuse DOWNLOAD_TIMEOUT.\nSQL: %s", query)
+	}
+	if !strings.Contains(query, "WHEN ut.task_type = 2 AND ust.status = 'rebooting' THEN 'ROLLBACK_APPLY_TIMEOUT'") {
+		t.Fatalf("rollback SPV stale failure_reason must not reuse TASK_TIMEOUT.\nSQL: %s", query)
+	}
+}
+
 // TestBuildUpdateSubTaskStatusSQL_StartedAtGate 验证 buildUpdateSubTaskStatusSQL 的 SQL
 // 输出在 applyStartedAt=true（UpdateStatusWithCode）和 applyStartedAt=false
 // （UpdateStatusByOperator）两条路径下对 started_at 列的处理差异。

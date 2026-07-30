@@ -1630,8 +1630,11 @@ export default function FileTransferCenter() {
                         onChange={(value) => setDeviceStatusFilter(value)}
                         options={[
                           { label: t('ufte.status.pending'), value: 'pending' },
-                          // 升级 / 回滚类（Download RPC）
+                          // 升级类（Download RPC）
                           { label: t('ufte.status.downloading'), value: 'downloading' },
+                          // 版本回退类（GPV 检查 + SPV 触发）
+                          { label: t('ufte.status.rollbackChecking'), value: 'rollback_checking' },
+                          { label: t('ufte.status.rollingBack'), value: 'rolling_back' },
                           // 备份 / 日志采集类（Upload RPC）的两个子阶段
                           { label: t('ufte.status.uploading'), value: 'uploading' },
                           { label: t('ufte.status.awaitingTc'), value: 'awaiting_tc' },
