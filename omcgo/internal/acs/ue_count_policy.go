@@ -26,9 +26,12 @@ const (
 	ueCountProbeSpreadSlot                 = 5 * time.Minute
 	defaultUECountQueueSize                = 4096
 	defaultUECountWorkerCount              = 32
-	defaultUECountTaskMaxRetries           = 10
 	defaultUECountTaskRetryIntervalSeconds = 30
-	defaultUECountTaskExpiresInSeconds     = 12 * 60
+	// 任务生命周期必须覆盖聚合关闭宽限(12m)、下一次 Periodic Inform(5m)
+	// 和调度抖动(1m)。结果即使晚于 12m 关闭点到达，也会由现有迟到事件重算吸收。
+	defaultUECountTaskExpiresInSeconds = 18 * 60
+	// 重试预算与 TTL 同源，保证在线设备不会在 expires_at 之前先因固定次数耗尽而失败。
+	defaultUECountTaskMaxRetries = defaultUECountTaskExpiresInSeconds / defaultUECountTaskRetryIntervalSeconds
 )
 
 var ErrUECountPolicyQueueFull = errors.New("UE count policy queue is full")
