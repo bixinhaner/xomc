@@ -109,6 +109,10 @@ Expected: non-empty working-set series for systemd Docker scope IDs, with root/s
 minio_cluster_capacity_usable_free_bytes
 Expected: usable free bytes. NO-DATA means MinIO metrics are unavailable; zero is a real full-capacity condition.
 
+## P-01/P-04 MinIO business bucket usage by fixed category
+max by (category) (omc_minio_bucket_usage_bytes{category=~"pm|mr|firmware|config-backup|logs|reports|exchange|ui-assets|trace|file-bundles|config-snapshots|device-licenses"})
+Expected: at most one series per fixed category. `config-backup` is emitted by app/acs/worker as the same global gauge, so duplicate deployment-unit samples must be collapsed with max rather than summed.
+
 ## NATS JetStream / PM transport (MUST-HAVE after the observer and PM consumer exist)
 omc_nats_consumer_pending{stream="omcgo",durable="pm-workers"}
 Expected: OMC observer pending messages by fixed stream/durable. ZERO means an empty consumer backlog; NO-DATA means the observer or consumer is unavailable.
@@ -123,11 +127,26 @@ Expected: used bytes. NO-DATA means the Redis receiver/remote-write path is unav
 
 ## Redis task queues (MUST-HAVE after the OMC Redis queue observer starts)
 omc_redis_task_queue_length_total{queue_family=~"cmdq|taskq"}
-Expected: aggregate task backlog by fixed queue family. ZERO means the scanned key set is empty; NO-DATA means Redis observation failed.
+max by (queue_family) (omc_redis_task_queue_length_total)
+Expected: aggregate task backlog by fixed queue family after de-duplicating app/worker observers. ZERO means the scanned key set is empty; NO-DATA means Redis observation failed.
+
+## Redis task queue observer health across deployment units (MUST-HAVE after the observer starts)
+min by (queue_family) (omc_redis_task_queue_up * on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120))
+Expected: one health value per queue family across all deployment units. ZERO means at least one observed unit is unavailable or stale; NO-DATA means no observer metric exists.
 
 ## Redis task queue observer failures (MUST-HAVE after the observer starts)
 increase(omc_redis_task_queue_scan_failures_total{queue_family=~"cmdq|taskq"}[5m])
 Expected: Redis SCAN failures in the last five minutes. ZERO means successful observation; NO-DATA means observer telemetry is unavailable.
+
+## Redis task queue oldest age (MUST-HAVE after the observer starts)
+omc_redis_task_queue_oldest_age_seconds{queue_family=~"cmdq|taskq"}
+  and on (deployment_unit,service,instance,job,queue_family) (omc_redis_task_queue_up == 1)
+  and on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120)
+Expected: oldest age only while the matching observer is healthy and sampled within 120 seconds. NO-DATA means the age must not be interpreted as zero.
+
+## Redis task queue oldest-age alert safety (MUST-HAVE after the observer starts)
+(max by (queue_family) (omc_redis_task_queue_oldest_age_seconds and on (deployment_unit,service,instance,job,queue_family) (omc_redis_task_queue_up == 1) and on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120)) and on (queue_family) (min by (queue_family) (omc_redis_task_queue_up * on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120)) == 1)) > 900
+Expected: oldest-age alert fires only for a fresh, healthy full-family sample; observer failure or stale samples must suppress the alert instead of evaluating a retained gauge.
 
 ## PostgreSQL (MUST-HAVE after otelcol PostgreSQL receiver is connected)
 pg_stat_database_numbackends

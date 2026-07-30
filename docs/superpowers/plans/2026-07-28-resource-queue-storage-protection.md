@@ -4,7 +4,7 @@
 
 **Goal:** 在现有 OMC 监控基础上，补齐 CPU、内存、磁盘、MinIO、监控数据盘和持久化队列的可观测性；在 Grafana 中提供可验证的资源与队列治理视图；在 OMC 管理页面配置磁盘写入保护和数据有效期，并将准入策略真正接入日志、上报文件、备份、报表、Trace 等业务写入路径。
 
-**Architecture:** Prometheus 负责指标采集和告警规则，Grafana 负责展示；OMC app/acs/worker 负责产生 NATS JetStream、Redis、PostgreSQL、PM/MR/Trace 和写入保护指标；`storageprotection` 领域服务负责策略、状态机、准入判定和审计；业务写入者通过统一 `WriteAdmission` 接口在创建对象、打开文件或提交持久化任务前检查；清理服务按统一 retention policy 执行，并上报释放空间和失败指标。
+**Architecture:** Prometheus 负责指标采集和告警规则，Grafana 负责展示；OMC app/acs/worker 负责产生 NATS JetStream、Redis、PostgreSQL、PM/MR/Trace 和写入保护指标；`storageprotection` 领域服务以宿主机 `/` 为唯一物理容量目标，负责策略、状态机、准入判定和审计；业务写入者通过统一 `WriteAdmission` 接口在创建对象、打开文件或提交持久化任务前检查；清理服务按统一 retention policy 执行，并上报释放空间和失败指标。
 
 **Tech Stack:** Go、Gin、pgx/Squirrel、PostgreSQL/Goose、Redis、NATS JetStream、MinIO、Prometheus client_golang、Prometheus rule files、Grafana dashboard JSON、React/TypeScript、React Query、Ant Design、Vitest、Playwright。
 
@@ -15,7 +15,7 @@
 - Docker Compose 环境统一使用 `service`、`container_id`、`instance`、`mountpoint` 等标签；不再新增依赖 `namespace="omcgo"` 或 cAdvisor `name` 标签的查询。
 - 指标缺失、采集失败、队列为空三种状态必须可区分：空队列输出 0，采集失败保留失败/新鲜度指标，查询无 series 时 Grafana 明确显示 No data。
 - Prometheus rules 是告警事实源，Grafana 只展示状态和历史；Alertmanager 负责通知，不在 Grafana JSON 中复制告警判定逻辑。
-- 磁盘写入保护只拦截 OMC 业务可控写入，不能宣称阻止 PostgreSQL WAL、Docker daemon、Prometheus/Loki/Tempo 内部写入；日志在策略允许时执行降级，错误日志、安全审计和写入保护审计不可静默丢失。
+- 磁盘写入保护只拦截 OMC 业务可控写入，不能宣称阻止 PostgreSQL WAL、Docker daemon、Prometheus/Loki/Tempo 内部写入；app/acs/worker 应用日志在 blocked/unknown 时由统一 logger 门禁停止落盘，storage-protection 状态和审计仍通过数据库/指标保留。
 - 三条 Goose 迁移流独立编号：主库 schema 使用 `migrations/000002`，seed 按现有 `000002` 之后使用 `migrations/seed/000003`；TSDB 只有在实际增加时序对象时才增加 `migrations/tsdb/000002`。
 - 前端所有用户可见文字进入中英文 i18n；页面、菜单和浏览器验收以 `omcmb/webcode` 的 V1 实际路由和 DOM 为准。
 
@@ -135,9 +135,9 @@ jq empty deployments/monitoring/grafana/dashboards/*.json
 **Steps:**
 
 - [ ] 保留 `/system/info` 的来源状态和采集时间，扩展 host filesystem 的 mountpoint、inode 总量/可用量、使用比例和 stale 状态。
-- [ ] 为 Prometheus recording rules/目标映射定义 `target_type`、`target_id`、`mountpoint`、`write_scope`；至少覆盖 application、PostgreSQL、MinIO、Prometheus、Loki、Tempo 和 Docker data root。
+- [ ] 为 Prometheus recording rules/目标映射定义唯一物理目标 `target_type=filesystem`、`target_id=root`、`mountpoint=/`；application、PostgreSQL、MinIO、Prometheus、Loki、Tempo 和 Docker data root 作为逻辑归属或 monitor-only 分类，不重复配置物理阈值。
 - [ ] 增加 MinIO 总容量、已用/可用容量和有限 bucket 分类指标；bucket 标签只允许固定业务分类，不允许任意对象路径。
-- [ ] 对 `/var/lib/postgresql`、`/var/lib/minio`、监控数据目录等部署目标提供明确映射；未配置目标时仍可展示 node filesystem，不把缺配置伪装成 0。
+- [ ] 对 `/var/lib/postgresql`、`/var/lib/minio`、监控数据目录等提供逻辑归属说明；统一从宿主机 `/` 采集物理容量，未配置目标时仍可展示 node filesystem，不把缺配置伪装成 0。
 - [ ] 为容量、inode、增长预测和 MinIO bucket 增加 dashboard panel，并在 `/system/info` 中将不可用来源显示为 unavailable。
 
 **Verification:**
@@ -282,6 +282,7 @@ promtool check rules deployments/monitoring/alerts/*.yml
 **Files:**
 
 - Create: `omcgo/migrations/000002_storage_protection.sql`
+- Create: `omcgo/migrations/000003_unified_storage_protection.sql`
 - Create: `omcgo/internal/storageprotection/model.go`
 - Create: `omcgo/internal/storageprotection/repository.go`
 - Create: `omcgo/internal/storageprotection/pg_repository.go`
@@ -295,8 +296,8 @@ promtool check rules deployments/monitoring/alerts/*.yml
 
 **Steps:**
 
-- [ ] 主库迁移新增 `storage_protection_policies`、状态/事件审计所需表和约束；策略字段包括 target、write scope、enabled、warn/block/recover、check interval、unknown behavior、version、timestamps。
-- [ ] 加入数据库约束 `0 <= warn < recover < block <= 100`，同一 target/scope 只能有一个启用策略；无策略时仅监控，不改变业务写入行为。
+- [ ] 主库迁移新增 `storage_protection_policies`、状态/事件审计所需表和约束；策略字段包括统一 physical target、write scope、enabled、warn/block/recover、check interval、unknown behavior、version、timestamps。
+- [ ] 加入数据库约束 `0 <= warn < recover < block <= 100`，并限制 `target_type=filesystem`、`target_id=root`、`write_scope=all` 只能有一条策略；业务 write scope 只作为优先级/审计标签，无独立容量阈值；无策略时仅监控，不改变业务写入行为。
 - [ ] 实现 `normal → warning → blocked`、`blocked → warning → normal` 和 `unknown` 状态机；连续两次检查确认，恢复使用 hysteresis，防止磁盘抖动导致反复拒写/放行。
 - [ ] 实现设计文档规定的接口：`WriteAdmission.Check(ctx, StorageTarget, WriteScope) AdmissionDecision`；返回 Allowed、State、Reason、RetryAfter、ObservedAt。
 - [ ] 注册 `omc_storage_capacity_bytes`、`omc_storage_used_bytes`、`omc_storage_used_ratio`、`omc_storage_admission_state`、write rejected/degraded、check failures、policy info、cleanup released bytes 指标。
@@ -331,10 +332,10 @@ go test ./test/integration -run Migration
 **Steps:**
 
 - [ ] 在 MinIO `PutObject`、本地文件 `OpenFile/Create`、大文件临时文件创建、PG 持久化任务提交前统一调用 `WriteAdmission.Check`，检查发生在产生不可回收数据之前。
-- [ ] P2 首先接入 PM/MR 上报文件、备份/config snapshot、report/exchange/trace、firmware/config/certificate/license 等明确业务写入；为每类写入设置稳定 `write_scope`。
+- [ ] P2 首先接入 PM/MR 上报文件、备份/config snapshot、report/exchange/trace、firmware/config/certificate/license 等明确业务写入；为每类写入设置稳定 `write_scope`，但统一检查 `filesystem/root` 的共享物理阈值。
 - [ ] 被阻止时返回稳定业务错误/HTTP 语义、Retry-After 和审计事件；不得先写对象再异步删除。
 - [ ] 写入失败后的对象与元数据补偿保持幂等；拒写计数带 target/write_scope/reason，不能带设备号或对象路径。
-- [ ] PM/日志路径按设计实现降级策略：日志优先降级，错误日志、安全审计和 storage-protection audit 仍必须写入；无法保证时转为明确 error。
+- [x] app/acs/worker 日志路径接入统一门禁：日志文件、stdout、ACS protocol.log 及轮转/压缩任务在 blocked/unknown 时停止写入；Nginx、PostgreSQL、Redis 和监控组件日志保留运维边界。
 - [ ] 对所有调用点增加“normal 放行、warning 放行并记录、blocked 拒绝、unknown 按策略、恢复后放行”测试。
 
 **Verification:**
@@ -437,7 +438,7 @@ npm run test:e2e -- webcode/e2e/smoke/system.spec.ts
 
 **Steps:**
 
-- [ ] 主库策略表统一保存 data class、target、retention days、max bytes、max objects、schedule、batch size、delete order、orphan policy、enabled 和 version。
+- [ ] 主库策略表统一保存 data class、统一物理 target=`filesystem/root`、retention days、max bytes、max objects、schedule、batch size、delete order、orphan policy、enabled 和 version；data class 不得再派生独立磁盘阈值。
 - [ ] 统一覆盖 MinIO PM/MR/log/backup/config/exchange/trace、TSDB PM/MR/Trace/alarm、应用日志、NATS、Redis TTL、PG task metadata、Prometheus/Loki/Tempo 等数据类别；不能由 OMC 直接控制的内部数据明确标记为 monitor-only。
 - [ ] 清理 runner 按小批量、可重入、可暂停、幂等执行；先删除过期/孤儿对象，再按容量上限做最老优先清理，并记录释放 bytes/objects、失败、耗时和最后成功时间。
 - [ ] 迁移已有 PM/log/alarm/backup 清理逻辑为 adapter，保留现有业务语义和默认值；禁止新旧 runner 同时删除同一类数据。

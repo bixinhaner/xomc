@@ -213,7 +213,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 60},
       "targets": [
-        {"expr": "omc_minio_bucket_usage_bytes{category=~\"pm|mr|firmware|config-backup|logs|reports|exchange|ui-assets|trace|file-bundles|config-snapshots|device-licenses\"}", "legendFormat": "{{category}}"}
+        {"expr": "max by (category) (omc_minio_bucket_usage_bytes{category=~\"pm|mr|firmware|config-backup|logs|reports|exchange|ui-assets|trace|file-bundles|config-snapshots|device-licenses\"})", "legendFormat": "{{category}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}}
     },
@@ -242,8 +242,9 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 68},
       "targets": [
-        {"expr": "omc_redis_task_queue_oldest_age_seconds", "legendFormat": "{{queue_family}} oldest age"}
+        {"expr": "omc_redis_task_queue_oldest_age_seconds and on (deployment_unit, service, instance, job, queue_family) (omc_redis_task_queue_up == 1) and on (deployment_unit, service, instance, job, queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120)", "legendFormat": "{{queue_family}} oldest age"}
       ],
+      "description": "仅展示 observer 正常且最近 120 秒内成功采样的年龄；无数据表示观测不可用或采样过期。",
       "fieldConfig": {"defaults": {"unit": "s", "min": 0}}
     },
     {

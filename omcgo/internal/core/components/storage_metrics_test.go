@@ -227,10 +227,33 @@ func TestNodeFilesystemQueriesExcludePseudoFilesystems(t *testing.T) {
 		nodeSizeQuery, nodeSizeTimeQuery, nodeAvailQuery, nodeAvailTimeQuery,
 		nodeFilesQuery, nodeFilesTimeQuery, nodeFilesFreeQuery, nodeFilesFreeTimeQuery,
 	} {
+		require.Contains(t, query, `fstype!~"`, "filesystem selectors must use PromQL's negative regex matcher")
+		require.NotContains(t, query, `fstype!~=`, "PromQL does not support a combined !~=")
 		require.Contains(t, query, "fakeowner")
 		require.Contains(t, query, "selfowner")
 		require.Contains(t, query, "virtiofs")
 		require.Contains(t, query, "fuse")
+	}
+}
+
+func TestNodeFilesystemQueriesAreAcceptedByPrometheus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Query().Get("query"), `fstype!~=`) {
+			http.Error(w, `parse error: unexpected "=" in label matching`, http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+	}))
+	defer server.Close()
+
+	collector := NewPrometheusStorageCollector(server.URL, time.Second, time.Minute, server.Client())
+	for _, query := range []string{
+		nodeSizeQuery, nodeSizeTimeQuery, nodeAvailQuery, nodeAvailTimeQuery,
+		nodeFilesQuery, nodeFilesTimeQuery, nodeFilesFreeQuery, nodeFilesFreeTimeQuery,
+	} {
+		_, err := collector.queryRaw(t.Context(), query)
+		require.NoError(t, err, "Prometheus rejected filesystem query %q", query)
 	}
 }
 

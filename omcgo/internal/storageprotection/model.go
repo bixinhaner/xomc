@@ -5,13 +5,25 @@ import "time"
 type TargetType string
 
 const (
-	TargetFilesystem  TargetType = "filesystem"
+	TargetFilesystem TargetType = "filesystem"
+	// The remaining target types are kept for wire compatibility with older
+	// clients. New policies must use the single physical filesystem target
+	// defined below; logical component targets are not independent disks.
 	TargetMinIO       TargetType = "minio"
 	TargetDatabase    TargetType = "database"
 	TargetRedis       TargetType = "redis"
 	TargetNATS        TargetType = "nats"
 	TargetMonitoring  TargetType = "monitoring"
 	TargetApplication TargetType = "application"
+)
+
+const (
+	// UnifiedStorageTargetID is the canonical storage-protection target for
+	// the current deployment model. All OMC containers share the host root
+	// filesystem, so capacity thresholds are evaluated once on that physical
+	// mount instead of once per component or logical data store.
+	UnifiedStorageTargetID   = "root"
+	UnifiedStorageMountpoint = "/"
 )
 
 type WriteScope string

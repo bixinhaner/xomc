@@ -11,7 +11,7 @@ receiver + loki exporter 链路承担。
 ```
 deployments/monitoring/
 ├── prometheus.yml                # Prometheus 主配置（scrape + 告警路由）
-├── storage-targets.yml           # 数据卷/MinIO 逻辑目标映射（部署契约）
+├── storage-targets.yml           # 统一物理存储目标与逻辑分类（部署契约）
 ├── alertmanager.yml              # AlertManager 路由 + receiver（占位 webhook）
 ├── alerts/
 │   ├── omc-rules.yml             # starter 告警规则（三进程存活）
@@ -44,7 +44,8 @@ deployments/monitoring/
 │   │   └── dashboards/default.yml
 │   └── dashboards/
 │       ├── omc-overview.json
-│       └── omc-storage-queue-governance.json
+│       ├── omc-storage-queue-governance.json
+│       └── omc-alert-overview.json
 ├── grafana-dashboard.json        # 历史 dashboard 原件
 └── README.md                     # 本文件
 ```
@@ -210,14 +211,16 @@ redis    :6379 ──┘  └─ transform/promote_pg_resource ──┘
 
 ## 存储目标映射
 
-`storage-targets.yml` 是部署侧的逻辑目标契约，不会被 Prometheus 当作
-scrape target 自动加载。它把 PostgreSQL、MinIO、Prometheus、Loki、Tempo
-等 named volume 映射到宿主机文件系统，并限制 MinIO bucket 只使用固定业务分类。
+`storage-targets.yml` 是部署侧的存储契约，不会被 Prometheus 当作
+scrape target 自动加载。当前部署只定义一个物理目标 `filesystem/root`（宿主机
+`/`）；PostgreSQL、MinIO、Prometheus、Loki、Tempo 等 named volume 作为同一物理
+目标下的逻辑归属和 retention 分类，并限制 MinIO bucket 只使用固定业务分类。
 
 Prometheus 仍从 node-exporter 的 `mountpoint`、容量和 inode 指标，以及 MinIO
 cluster endpoint 获取实测值。目标未配置、采集失败或样本过期时，Grafana 必须显示
 No data / unavailable，不能用 `0` 代替。部署到非默认 Docker data root 时，应同时
-更新 `storage-targets.yml` 的 `mountpoint`，再由 OMC 写入保护模块读取同一映射。
+更新 `storage-targets.yml` 的物理 `mountpoint`，再由 OMC 写入保护模块读取同一映射。
+逻辑组件不得新增独立容量阈值；只有确认挂载了独立磁盘或接入外部存储时，才新增物理目标。
 
 ## 队列治理观测
 
@@ -225,7 +228,7 @@ OMC 业务观测器在 app/worker 启动时分别采集 Redis 和 PostgreSQL 持
 
 - Redis 使用 `SCAN`，固定 `queue_family=cmdq|taskq`，输出总长度、活动设备数、最大队列长度、最老任务年龄、扫描耗时和失败状态；设备 SN 只用于内部查询，不进入指标标签。
 - PostgreSQL 使用固定 SQL 采集 `device_tasks`、`async_jobs`、parameter-sync/northbound outbox、PM 导出、Trace 导出、备份任务和 dead letters；查询失败保留上次业务快照，并将 `*_up=0`、失败计数递增。
-- Grafana 总览为 `OMC - 存储与队列治理`（UID `omc-storage-queue-governance`）；应用内 Go Channel、worker 内存切片、SSE 缓存等不纳入队列积压指标。
+- Grafana 总览为 `OMC - 存储与队列治理`（UID `omc-storage-queue-governance`）；告警页为 `OMC - 告警总览`（UID `omc-alert-overview`），读取 Prometheus `ALERTS`/`ALERTS_FOR_STATE` 展示当前 Firing/Pending 告警。应用内 Go Channel、worker 内存切片、SSE 缓存等不纳入队列积压指标。
 
 新增 dashboard 或队列指标后，先执行：
 

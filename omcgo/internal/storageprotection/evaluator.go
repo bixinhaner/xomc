@@ -11,6 +11,12 @@ func validatePolicy(policy *Policy) error {
 	if policy.TargetType == "" || policy.TargetID == "" || policy.WriteScope == "" {
 		return errInvalidPolicy("target type, target id and write scope are required")
 	}
+	if policy.TargetType != TargetFilesystem || policy.TargetID != UnifiedStorageTargetID {
+		return errInvalidPolicy("storage protection only supports the unified physical filesystem target root")
+	}
+	if policy.WriteScope != WriteScopeAll {
+		return errInvalidPolicy("storage protection thresholds are global; write scope must be all")
+	}
 	if policy.WarnUsedPercent < 0 || policy.WarnUsedPercent >= policy.RecoverUsedPercent ||
 		policy.RecoverUsedPercent >= policy.BlockUsedPercent || policy.BlockUsedPercent > 100 {
 		return errInvalidPolicy("thresholds must satisfy 0 <= warn < recover < block <= 100")
@@ -48,6 +54,13 @@ func evaluateState(policy *Policy, ratio float64, observedAt time.Time) (State, 
 			return StateBlocked, observations, "usage below recovery threshold; recovery confirmation pending"
 		}
 		return StateBlocked, 0, "usage remains above recovery threshold"
+	}
+	if previous == StateWarning && ratio >= float64(policy.WarnUsedPercent)/100 {
+		// Keep warning latched while usage remains at or above the warning
+		// threshold. Re-running the two-check confirmation from StateWarning
+		// would alternate warning/normal on every poll and repeatedly toggle
+		// the process log admission gate.
+		return StateWarning, 0, "usage remains above warning threshold"
 	}
 	if ratio >= float64(policy.WarnUsedPercent)/100 {
 		observations := policy.StateObservations + 1

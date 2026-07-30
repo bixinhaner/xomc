@@ -5,7 +5,7 @@ groups:
     interval: 30s
     rules:
       - alert: RedisTaskQueueBacklogHigh
-        expr: sum by (queue_family) (omc_redis_task_queue_length_total) > 1000
+        expr: max by (queue_family) (omc_redis_task_queue_length_total) > 1000
         for: 10m
         labels:
           severity: warning
@@ -16,7 +16,7 @@ groups:
           description: "Redis {{ $labels.queue_family }} 聚合积压已持续 10 分钟超过阈值；检查设备在线率、ACS 消费和单设备最大队列。"
 
       - alert: RedisTaskQueueOldestAgeHigh
-        expr: max by (queue_family) (omc_redis_task_queue_oldest_age_seconds) > 900
+        expr: (max by (queue_family) (omc_redis_task_queue_oldest_age_seconds and on (deployment_unit, service, instance, job, queue_family) (omc_redis_task_queue_up == 1) and on (deployment_unit, service, instance, job, queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120)) and on (queue_family) (min by (queue_family) (omc_redis_task_queue_up * on (deployment_unit, service, instance, job, queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120)) == 1)) > 900
         for: 10m
         labels:
           severity: warning
@@ -82,7 +82,7 @@ groups:
           description: "NATS backlog 的业务快照已过期；检查 JetStream API、连接和固定 consumer 配置。"
 
       - alert: StorageCapacityWarning
-        expr: omc_storage_used_ratio > 0.8
+        expr: omc_storage_used_ratio{target_type="filesystem",target_id="root"} > 0.8
         for: 10m
         labels:
           severity: warning
@@ -93,7 +93,7 @@ groups:
           description: "检查 MinIO、日志、上报文件和监控数据清理状态；必要时扩容。"
 
       - alert: StorageCapacityCritical
-        expr: omc_storage_used_ratio > 0.9
+        expr: omc_storage_used_ratio{target_type="filesystem",target_id="root"} > 0.9
         for: 5m
         labels:
           severity: critical
@@ -104,7 +104,7 @@ groups:
           description: "达到默认阻断阈值；确认 OMC 写入保护状态和被拒绝写入计数。"
 
       - alert: StorageWriteAdmissionBlocked
-        expr: omc_storage_admission_state == 1
+        expr: omc_storage_admission_state{target_type="filesystem",target_id="root"} == 1
         for: 2m
         labels:
           severity: critical
@@ -115,7 +115,7 @@ groups:
           description: "OMC 业务写入已被策略阻断；处理容量或等待策略恢复阈值生效。"
 
       - alert: StorageWriteRejected
-        expr: increase(omc_storage_write_rejected_total[5m]) > 0
+        expr: increase(omc_storage_write_rejected_total{target_type="filesystem",target_id="root"}[5m]) > 0
         for: 2m
         labels:
           severity: warning

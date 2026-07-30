@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/components"
 	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -80,6 +81,7 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	// metrics 还是 nil。reconciler / 双写中断指标复用同一实例。
 	taskMetrics := task.NewTaskMetrics(inf.MetricsReg)
 	taskSvc.SetMetrics(taskMetrics)
+	startRedisQueueObserver(inf.Redis, taskMetrics, inf.GS, inf.Logger)
 	persistentQueueMetrics := components.NewPersistentQueueMetrics(inf.MetricsReg)
 	persistentQueueObserver := components.NewPersistentQueueObserver(inf.PgPool, persistentQueueMetrics, 30*time.Second, inf.Logger)
 	persistentQueueObserver.Start(context.Background())
@@ -98,6 +100,7 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 		storageprotection.NewMetrics(inf.MetricsReg),
 		inf.Logger,
 	)
+	storageProtection.SetLogAdmissionController(inf.LogGate)
 	storageProtection.Start(context.Background(), 30*time.Second)
 	inf.GS.Register("storage-protection", 1, func(context.Context) error {
 		storageProtection.Stop()
@@ -110,6 +113,27 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	w.StorageProtection = storageProtection
 
 	return w, nil
+}
+
+// startRedisQueueObserver wires the Redis backlog observer into the worker's
+// lifecycle. Worker and app share the same Redis database, so both processes
+// must sample the queue; otherwise the worker's pre-initialized up=0 gauges
+// look like an outage even when the queue is readable.
+func startRedisQueueObserver(
+	client redis.UniversalClient,
+	metrics *task.TaskMetrics,
+	gs *components.GracefulShutdown,
+	logger *zap.Logger,
+) *task.RedisQueueObserver {
+	observer := task.NewRedisQueueObserver(client, metrics, 30*time.Second, logger)
+	observer.Start(context.Background())
+	if gs != nil {
+		gs.Register("redis-task-queue-observer", 1, func(context.Context) error {
+			observer.Stop()
+			return nil
+		})
+	}
+	return observer
 }
 
 func (w *workerInfra) registerCarriers() {

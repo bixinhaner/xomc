@@ -16,8 +16,54 @@ type Service struct {
 	logger  *zap.Logger
 	now     func() time.Time
 	mu      sync.Mutex
+	logMu   sync.RWMutex
+	logGate LogAdmissionController
 	cancel  context.CancelFunc
 	done    chan struct{}
+}
+
+// LogAdmissionController is implemented by the process logger gate. Keeping
+// this small interface here avoids coupling the storage-protection domain to a
+// concrete logging package while allowing app/acs/worker to share identical
+// behavior.
+type LogAdmissionController interface {
+	SetBlocked(bool)
+}
+
+// SetLogAdmissionController connects storage state to the service logger. The
+// controller is intentionally optional so storage-protection unit tests and
+// command-line tools can use the service without a logger gate.
+func (s *Service) SetLogAdmissionController(controller LogAdmissionController) {
+	if s == nil {
+		return
+	}
+	s.logMu.Lock()
+	s.logGate = controller
+	s.logMu.Unlock()
+}
+
+func (s *Service) setLogAdmissionBlocked(blocked bool) {
+	if s == nil {
+		return
+	}
+	s.logMu.RLock()
+	controller := s.logGate
+	s.logMu.RUnlock()
+	if controller != nil {
+		controller.SetBlocked(blocked)
+	}
+}
+
+// syncLogAdmission mirrors the physical storage state into the process-local
+// log gate. Unknown is fail-closed for logs: if the service cannot establish
+// that the filesystem is safe, continuing to emit unbounded logs could make a
+// full disk worse. A normal/warning state re-opens the gate.
+func (s *Service) syncLogAdmission(policy *Policy) {
+	if policy == nil {
+		s.setLogAdmissionBlocked(false)
+		return
+	}
+	s.setLogAdmissionBlocked(policy.CurrentState == StateBlocked || policy.CurrentState == StateUnknown)
 }
 
 // Start periodically evaluates all enabled policies. Admission checks still
@@ -79,13 +125,20 @@ func (s *Service) evaluateAll(ctx context.Context) {
 		s.logger.Warn("list storage protection policies failed", zap.Error(err))
 		return
 	}
+	hasEnabledPolicy := false
 	for _, policy := range policies {
 		if !policy.Enabled {
 			continue
 		}
+		hasEnabledPolicy = true
 		if _, err := s.Check(ctx, policy.TargetType, policy.TargetID, policy.WriteScope); err != nil {
 			s.logger.Warn("evaluate storage protection policy failed", zap.String("policy_id", policy.ID), zap.Error(err))
 		}
+	}
+	if !hasEnabledPolicy {
+		// A policy can be disabled or deleted while a previous state was
+		// blocked. Do not leave the process logger permanently closed.
+		s.setLogAdmissionBlocked(false)
 	}
 }
 
@@ -99,7 +152,14 @@ func NewService(repo Repository, usage UsageProvider, metrics *Metrics, logger *
 // Check implements WriteAdmission. A missing policy is deliberately fail-open:
 // monitoring alone must not unexpectedly block existing deployments.
 func (s *Service) Check(ctx context.Context, targetType TargetType, targetID string, scope WriteScope) (AdmissionDecision, error) {
+	// Business callers may still identify the destination as MinIO or another
+	// logical component. Those components share one physical filesystem in the
+	// current deployment, so every admission check uses the canonical target.
+	targetType, targetID = TargetFilesystem, UnifiedStorageTargetID
 	if s == nil || s.repo == nil {
+		if s != nil {
+			s.setLogAdmissionBlocked(false)
+		}
 		return AdmissionDecision{Allowed: true, State: StateNormal, Reason: "storage protection is not configured", ObservedAt: time.Now()}, nil
 	}
 	policy, err := s.repo.GetEnabledPolicy(ctx, targetType, targetID, scope)
@@ -107,6 +167,7 @@ func (s *Service) Check(ctx context.Context, targetType TargetType, targetID str
 		return AdmissionDecision{}, fmt.Errorf("load storage protection policy: %w", err)
 	}
 	if policy == nil {
+		s.setLogAdmissionBlocked(false)
 		return AdmissionDecision{Allowed: true, State: StateNormal, Reason: "no enabled storage protection policy", ObservedAt: s.now()}, nil
 	}
 	if err := validatePolicy(policy); err != nil {
@@ -145,13 +206,14 @@ func (s *Service) Check(ctx context.Context, targetType TargetType, targetID str
 	if err := s.repo.UpdateState(ctx, policy); err != nil {
 		return AdmissionDecision{}, fmt.Errorf("persist storage protection state: %w", err)
 	}
+	s.syncLogAdmission(policy)
 	if policy.CurrentState != previous {
 		event := Event{PolicyID: policy.ID, TargetType: targetType, TargetID: targetID, WriteScope: scope, PreviousState: previous, NewState: policy.CurrentState, Reason: transitionReason(previous, policy.CurrentState, reason), ObservedRatio: floatPtr(usage.UsedRatio), PolicyVersion: policy.Version, OperatorID: "system", CreatedAt: s.now()}
 		if err := s.repo.RecordEvent(ctx, event); err != nil {
 			return AdmissionDecision{}, fmt.Errorf("record storage protection transition: %w", err)
 		}
 	}
-	return s.decision(policy, usage.ObservedAt, reason), nil
+	return s.decision(policy, scope, usage.ObservedAt, reason), nil
 }
 
 func (s *Service) handleUnknown(ctx context.Context, policy *Policy, scope WriteScope, reason string) (AdmissionDecision, error) {
@@ -169,6 +231,7 @@ func (s *Service) handleUnknown(ctx context.Context, policy *Policy, scope Write
 	if err := s.repo.UpdateState(ctx, policy); err != nil {
 		return AdmissionDecision{}, fmt.Errorf("persist unknown storage protection state: %w", err)
 	}
+	s.syncLogAdmission(policy)
 	if previous != StateUnknown {
 		event := Event{
 			PolicyID: policy.ID, TargetType: policy.TargetType, TargetID: policy.TargetID,
@@ -179,16 +242,16 @@ func (s *Service) handleUnknown(ctx context.Context, policy *Policy, scope Write
 			return AdmissionDecision{}, fmt.Errorf("record storage protection unknown transition: %w", err)
 		}
 	}
-	return s.unknownDecision(policy, reason), nil
+	return s.unknownDecision(policy, scope, reason), nil
 }
 
-func (s *Service) unknownDecision(policy *Policy, reason string) AdmissionDecision {
+func (s *Service) unknownDecision(policy *Policy, scope WriteScope, reason string) AdmissionDecision {
 	if s.metrics != nil {
-		s.metrics.AdmissionState.WithLabelValues(string(policy.TargetType), policy.TargetID, string(policy.WriteScope)).Set(stateValue(StateUnknown))
+		s.metrics.AdmissionState.WithLabelValues(string(policy.TargetType), policy.TargetID, string(scope)).Set(stateValue(StateUnknown))
 	}
 	allowed := policy.UnknownBehavior == UnknownAllowWithAlarm
 	if !allowed && s.metrics != nil {
-		s.metrics.WriteRejectedTotal.WithLabelValues(string(policy.TargetType), policy.TargetID, string(policy.WriteScope), "unknown").Inc()
+		s.metrics.WriteRejectedTotal.WithLabelValues(string(policy.TargetType), policy.TargetID, string(scope), "unknown").Inc()
 	}
 	return AdmissionDecision{Allowed: allowed, State: StateUnknown, Reason: reason, RetryAfter: time.Duration(policy.CheckIntervalSeconds) * time.Second, ObservedAt: s.now()}
 }
@@ -214,18 +277,19 @@ func (s *Service) setPolicyInfo(policy *Policy) {
 	).Set(1)
 }
 
-func (s *Service) decision(policy *Policy, observedAt time.Time, reason string) AdmissionDecision {
+func (s *Service) decision(policy *Policy, scope WriteScope, observedAt time.Time, reason string) AdmissionDecision {
+	s.syncLogAdmission(policy)
 	allowed := policy.CurrentState != StateBlocked
 	if policy.CurrentState == StateUnknown {
 		allowed = policy.UnknownBehavior == UnknownAllowWithAlarm
 	}
 	if s.metrics != nil {
-		labels := []string{string(policy.TargetType), policy.TargetID, string(policy.WriteScope)}
+		labels := []string{string(policy.TargetType), policy.TargetID, string(scope)}
 		s.metrics.AdmissionState.WithLabelValues(labels...).Set(stateValue(policy.CurrentState))
 		if policy.CurrentState == StateBlocked {
-			s.metrics.WriteRejectedTotal.WithLabelValues(string(policy.TargetType), policy.TargetID, string(policy.WriteScope), "blocked").Inc()
+			s.metrics.WriteRejectedTotal.WithLabelValues(string(policy.TargetType), policy.TargetID, string(scope), "blocked").Inc()
 		} else if policy.CurrentState == StateWarning {
-			s.metrics.WriteDegradedTotal.WithLabelValues(string(policy.TargetType), policy.TargetID, string(policy.WriteScope), "warning").Inc()
+			s.metrics.WriteDegradedTotal.WithLabelValues(string(policy.TargetType), policy.TargetID, string(scope), "warning").Inc()
 		}
 	}
 	return AdmissionDecision{Allowed: allowed, State: policy.CurrentState, Reason: reason, RetryAfter: time.Duration(policy.CheckIntervalSeconds) * time.Second, ObservedAt: observedAt}
@@ -252,7 +316,19 @@ func (s *Service) ListTargets(ctx context.Context) ([]TargetSnapshot, error) {
 	}
 	entries := make(map[string]*targetEntry)
 	order := make([]string, 0)
+	// Expose the physical target even before an administrator creates a
+	// policy. This keeps the targets endpoint useful for capacity observation
+	// and avoids implying that a missing policy means a missing disk.
+	rootKey := string(TargetFilesystem) + "\x00" + UnifiedStorageTargetID
+	entries[rootKey] = &targetEntry{
+		snapshot: TargetSnapshot{TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, CurrentState: StateNormal},
+		seen:     make(map[WriteScope]struct{}),
+	}
+	order = append(order, rootKey)
 	for _, policy := range policies {
+		if policy.TargetType != TargetFilesystem || policy.TargetID != UnifiedStorageTargetID {
+			continue
+		}
 		key := string(policy.TargetType) + "\x00" + policy.TargetID
 		entry, ok := entries[key]
 		if !ok {

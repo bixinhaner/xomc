@@ -22,6 +22,13 @@ export type StorageWriteScope =
 export type StorageProtectionState = 'normal' | 'warning' | 'blocked' | 'unknown';
 export type StorageUnknownBehavior = 'allow_with_alarm' | 'block_new_uploads';
 
+export const UNIFIED_STORAGE_TARGET = {
+  targetType: 'filesystem' as const,
+  targetId: 'root',
+  mountpoint: '/',
+  writeScope: 'all' as const,
+};
+
 export interface StorageProtectionPolicy {
   id: string;
   targetType: StorageTargetType;
@@ -159,9 +166,12 @@ function mapPolicy(policy: BackendStorageProtectionPolicy): StorageProtectionPol
 
 function mapPayload(payload: StorageProtectionPolicyPayload) {
   return {
-    target_type: payload.targetType,
-    target_id: payload.targetId,
-    write_scope: payload.writeScope,
+    // Keep the API defensive even if an older page or cached form submits a
+    // logical component target. Capacity policy is global to the one physical
+    // filesystem in this deployment.
+    target_type: UNIFIED_STORAGE_TARGET.targetType,
+    target_id: UNIFIED_STORAGE_TARGET.targetId,
+    write_scope: UNIFIED_STORAGE_TARGET.writeScope,
     enabled: payload.enabled,
     warn_used_percent: payload.warnUsedPercent,
     block_used_percent: payload.blockUsedPercent,

@@ -116,7 +116,7 @@ const (
 	// Docker Desktop and container hosts expose synthetic bind/image filesystems
 	// with plausible-looking but non-physical capacities. Exclude them explicitly;
 	// the remaining samples represent writable host/device filesystems.
-	nodeFilesystemSelector = `{fstype!~="^(tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?)$"}`
+	nodeFilesystemSelector = `{fstype!~"^(tmpfs|overlay|squashfs|ramfs|erofs|fakeowner|selfowner|virtiofs(\\..*)?|fuse(\\..*)?)$"}`
 	nodeSizeQuery          = `node_filesystem_size_bytes` + nodeFilesystemSelector
 	nodeSizeTimeQuery      = `timestamp(node_filesystem_size_bytes` + nodeFilesystemSelector + `)`
 	nodeAvailQuery         = `node_filesystem_avail_bytes` + nodeFilesystemSelector

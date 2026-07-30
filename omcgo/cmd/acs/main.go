@@ -118,6 +118,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 		storageprotection.NewMetrics(inf.MetricsReg),
 		inf.Logger,
 	)
+	storageAdmission.SetLogAdmissionController(inf.LogGate)
 	storageAdmission.Start(context.Background(), 30*time.Second)
 	inf.GS.Register("storage-protection", 1, func(context.Context) error {
 		storageAdmission.Stop()
@@ -443,7 +444,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 
 	// 协议交互日志：独立的 zap logger 写入专用文件，记录完整 XML
 	if cfg.ProtocolLog.Enabled && cfg.ProtocolLog.FilePath != "" {
-		protocolLogger, err := newProtocolLogger(cfg.ProtocolLog)
+		protocolLogger, err := newProtocolLogger(cfg.ProtocolLog, inf.LogGate)
 		if err != nil {
 			inf.Logger.Error("failed to create protocol logger", zap.Error(err))
 		} else {
@@ -648,7 +649,7 @@ const defaultProtocolLogMaxBodySize = 4096
 // 自动路由 compactor / legacy 双模式（与主 acs.log 同款）。protocol_log 体积大且
 // 含 SOAP 凭据敏感，dev/test 用 compactor 自动 gzip 压缩 + max_age 删旧；prod 默认
 // enabled=false 等保合规。
-func newProtocolLogger(cfg appconfig.ProtocolLogConfig) (*zap.Logger, error) {
+func newProtocolLogger(cfg appconfig.ProtocolLogConfig, gate *logger.AdmissionGate) (*zap.Logger, error) {
 	dir := filepath.Dir(cfg.FilePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create protocol log directory %s: %w", dir, err)
@@ -656,7 +657,7 @@ func newProtocolLogger(cfg appconfig.ProtocolLogConfig) (*zap.Logger, error) {
 
 	var writer io.Writer
 	if cfg.Rotation.Enabled {
-		writer = logger.NewLumberjackWriter(cfg.FilePath, cfg.Rotation)
+		writer = logger.NewLumberjackWriterWithAdmissionGate(cfg.FilePath, cfg.Rotation, gate)
 	} else {
 		f, err := os.OpenFile(cfg.FilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
@@ -675,7 +676,7 @@ func newProtocolLogger(cfg appconfig.ProtocolLogConfig) (*zap.Logger, error) {
 	core := zapcore.NewCore(
 		zapcore.NewJSONEncoder(encoderCfg),
 		zapcore.AddSync(writer),
-		parseProtocolLogLevel(cfg.Level),
+		logger.AdmissionLevelEnabler(gate, parseProtocolLogLevel(cfg.Level)),
 	)
 
 	return zap.New(core), nil

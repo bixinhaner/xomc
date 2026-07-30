@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -258,6 +259,14 @@ func (o *RedisQueueObserver) oldestFromZSet(ctx context.Context, family, key str
 			} else if getErr != redis.Nil {
 				return 0, false, fmt.Errorf("task detail: %w", getErr)
 			}
+			// Task detail hashes intentionally have a short TTL. A queue entry can
+			// outlive its hash during a stale backlog, but its sorted-set score is
+			// still available. The score includes a priority offset, so this is a
+			// conservative lower-bound age; fresh entries use the exact detail time
+			// above whenever it is readable.
+			if !memberKnown {
+				age, memberKnown = queueScoreAge(entry.Score, now)
+			}
 		} else {
 			age, memberKnown = queueMemberAge(member, now)
 		}
@@ -266,6 +275,34 @@ func (o *RedisQueueObserver) oldestFromZSet(ctx context.Context, family, key str
 		}
 	}
 	return oldest, known, nil
+}
+
+// queueScoreAge returns an age from the timestamp-shaped part of a task queue
+// score when its detail hash is unavailable. queueScore stores Unix nanoseconds
+// plus a priority offset; treating the complete score as a timestamp therefore
+// underestimates the true age by that offset, but preserves a useful positive
+// backlog signal without inventing a precise value.
+func queueScoreAge(score float64, now time.Time) (float64, bool) {
+	// Keep the float-to-int64 conversion bounded for malformed or foreign
+	// sorted-set scores; normal Unix-nanosecond scores are ~1e18.
+	if math.IsNaN(score) || math.IsInf(score, 0) || score <= 0 || score >= 9.223372036854776e18 {
+		return 0, false
+	}
+	var queuedAt time.Time
+	switch {
+	case score >= 1e15:
+		// Current task queues use Unix nanoseconds (plus priority offset).
+		queuedAt = time.Unix(0, int64(score))
+	case score >= 1e9:
+		// Be tolerant of legacy queues that used Unix seconds.
+		queuedAt = time.Unix(int64(score), 0)
+	default:
+		return 0, false
+	}
+	if queuedAt.After(now) {
+		return 0, false
+	}
+	return ageSeconds(queuedAt, now), true
 }
 
 func ageSeconds(queuedAt, now time.Time) float64 {

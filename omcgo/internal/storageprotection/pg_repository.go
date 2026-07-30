@@ -32,10 +32,7 @@ type PgRepository struct {
 func NewPgRepository(pool *pgxpool.Pool) *PgRepository { return &PgRepository{pool: pool} }
 
 func (r *PgRepository) GetEnabledPolicy(ctx context.Context, targetType TargetType, targetID string, scope WriteScope) (*Policy, error) {
-	for _, candidateScope := range []WriteScope{scope, WriteScopeAll} {
-		if candidateScope == WriteScopeAll && scope == WriteScopeAll {
-			continue
-		}
+	for _, candidateScope := range policyLookupScopes(scope) {
 		query, args, err := storage.Psql.Select(policyColumns...).From("storage_protection_policies").
 			Where(sq.Eq{"target_type": string(targetType), "target_id": targetID, "write_scope": string(candidateScope), "enabled": true}).
 			Limit(1).ToSql()
@@ -52,6 +49,13 @@ func (r *PgRepository) GetEnabledPolicy(ctx context.Context, targetType TargetTy
 		return &policy, nil
 	}
 	return nil, nil
+}
+
+func policyLookupScopes(scope WriteScope) []WriteScope {
+	if scope == WriteScopeAll {
+		return []WriteScope{WriteScopeAll}
+	}
+	return []WriteScope{scope, WriteScopeAll}
 }
 
 func (r *PgRepository) List(ctx context.Context) ([]Policy, error) {

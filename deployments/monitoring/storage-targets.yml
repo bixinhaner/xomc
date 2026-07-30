@@ -2,108 +2,34 @@
 #
 # This file is deployment metadata, not a Prometheus scrape configuration. The
 # application/OMC admission controller and the dashboard build consume it to
-# give the same logical target a stable identity. Prometheus still obtains the
+# give the same physical target a stable identity. Prometheus still obtains
 # measured capacity from node-exporter/MinIO metrics; an absent target mapping
 # must never be rendered as zero capacity.
 version: 1
 
 storage_targets:
-  # The application can write logs, uploads and temporary files to the host
-  # filesystem visible at these paths.
-  - target_type: application
+  # All current OMC data is stored on the same host filesystem. This is the
+  # only target that may receive capacity warning/block/recovery thresholds.
+  - target_type: filesystem
     target_id: root
     mountpoint: /
-    write_scope: [log, upload, report, trace, all]
-    components: [application, logs, uploads]
+    source: node_exporter
+    write_scope: [all]
+    components: [application, pgdata, tsdbdata, redisdata, natsdata, miniodata, prometheusdata, alertmanagerdata, grafanadata, lokidata, tempodata, promtaildata, omcgo-secrets]
 
-  # Named Docker volumes are physically stored below Docker's data root. Keep
-  # the logical volume names so operators can distinguish PostgreSQL, MinIO
-  # and monitoring data even when they share one host filesystem.
-  - target_type: host_filesystem
-    target_id: docker-data
-    mountpoint: /var/lib/docker
-    write_scope: [database, queue, object, monitoring, all]
-    components: [pgdata, tsdbdata, redisdata, natsdata, miniodata, prometheusdata, alertmanagerdata, grafanadata, lokidata, tempodata, promtaildata, omcgo-secrets]
-
-  - target_type: database
-    target_id: postgres-data
-    mountpoint: /var/lib/docker
-    container_path: /var/lib/postgresql/data
-    volume: pgdata
-    write_scope: [database]
-    components: [postgres]
-
-  - target_type: database
-    target_id: postgres-tsdb-data
-    mountpoint: /var/lib/docker
-    container_path: /var/lib/postgresql/data
-    volume: tsdbdata
-    write_scope: [database, pm, mr]
-    components: [postgres-tsdb]
-
-  - target_type: minio
-    target_id: minio-data
-    mountpoint: /var/lib/docker
-    container_path: /data
-    volume: miniodata
-    write_scope: [upload, pm, mr, firmware, backup, report, trace, all]
-    components: [minio]
-
-  - target_type: monitoring
-    target_id: prometheus-data
-    mountpoint: /var/lib/docker
-    container_path: /prometheus
-    volume: prometheusdata
-    write_scope: [monitoring]
-    retention: 15d
-    components: [prometheus]
-
-  - target_type: monitoring
-    target_id: loki-data
-    mountpoint: /var/lib/docker
-    container_path: /loki
-    volume: lokidata
-    write_scope: [log]
-    retention: 7d
-    components: [loki]
-
-  - target_type: monitoring
-    target_id: tempo-data
-    mountpoint: /var/lib/docker
-    container_path: /var/tempo
-    volume: tempodata
-    write_scope: [trace]
-    retention: 24h
-    components: [tempo]
-
-  - target_type: monitoring
-    target_id: grafana-data
-    mountpoint: /var/lib/docker
-    container_path: /var/lib/grafana
-    volume: grafanadata
-    write_scope: [monitoring]
-    components: [grafana]
-
-  - target_type: monitoring
-    target_id: alertmanager-data
-    mountpoint: /var/lib/docker
-    container_path: /alertmanager
-    volume: alertmanagerdata
-    write_scope: [monitoring]
-    retention: 15d
-    components: [alertmanager]
-
-  # Kept for migration visibility. Promtail is no longer started by the
-  # current compose stack, but its named volume must not be mistaken for an
-  # unaccounted data directory during upgrade/cleanup.
-  - target_type: monitoring
-    target_id: promtail-data
-    mountpoint: /var/lib/docker
-    container_path: /promtail
-    volume: promtaildata
-    write_scope: [log]
-    retention: 7d
-    components: [promtail, legacy]
+# These are logical ownership/retention classes on the same physical target.
+# They are not storage-protection targets and must not receive independent
+# capacity thresholds. Add a second storage_targets entry only for a future
+# independently mounted disk or explicitly configured external storage.
+logical_components:
+  - id: application
+    write_scope: [log, upload, report, trace]
+  - id: database
+    write_scope: [database, queue, pm, mr]
+  - id: object
+    write_scope: [upload, pm, mr, firmware, backup, report, trace]
+  - id: monitoring
+    write_scope: [monitoring, log, trace]
 
 # Bucket labels are deliberately a fixed business taxonomy. The values are
 # the default MinIO bucket names in cmd/{app,acs,worker}/etc/config.*.yaml;

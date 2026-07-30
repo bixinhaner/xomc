@@ -6,12 +6,13 @@
   "links": [],
   "panels": [
     {
-      "title": "存储目标使用率",
+      "title": "统一物理文件系统使用率",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
       "targets": [
-        {"expr": "omc_storage_used_ratio", "legendFormat": "{{target_type}}/{{target_id}}"}
+        {"expr": "omc_storage_used_ratio{target_type=\"filesystem\",target_id=\"root\"}", "legendFormat": "filesystem/root"}
       ],
+      "description": "所有 OMC 数据共用宿主机 /；MinIO、数据库和监控数据的逻辑指标不重复计入容量阈值。",
       "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
     },
     {
@@ -19,7 +20,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
       "targets": [
-        {"expr": "omc_minio_bucket_usage_bytes", "legendFormat": "{{category}}"}
+        {"expr": "max by (category) (omc_minio_bucket_usage_bytes)", "legendFormat": "{{category}}"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}}
     },
@@ -39,9 +40,9 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "targets": [
-        {"expr": "omc_redis_task_queue_length_total", "legendFormat": "{{queue_family}} length"},
-        {"expr": "omc_redis_task_queue_active_devices", "legendFormat": "{{queue_family}} active devices"},
-        {"expr": "omc_redis_task_queue_max_length", "legendFormat": "{{queue_family}} max length"}
+        {"expr": "max by (queue_family) (omc_redis_task_queue_length_total)", "legendFormat": "{{queue_family}} length"},
+        {"expr": "max by (queue_family) (omc_redis_task_queue_active_devices)", "legendFormat": "{{queue_family}} active devices"},
+        {"expr": "max by (queue_family) (omc_redis_task_queue_max_length)", "legendFormat": "{{queue_family}} max length"}
       ],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
     },
@@ -50,8 +51,9 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
       "targets": [
-        {"expr": "omc_redis_task_queue_oldest_age_seconds", "legendFormat": "{{queue_family}}"}
+        {"expr": "max by (queue_family) (omc_redis_task_queue_oldest_age_seconds and on (deployment_unit, service, instance, job, queue_family) (omc_redis_task_queue_up == 1) and on (deployment_unit, service, instance, job, queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120))", "legendFormat": "{{queue_family}}"}
       ],
+      "description": "仅展示 observer 正常且最近 120 秒内成功采样的年龄；无数据表示观测不可用或采样过期。",
       "fieldConfig": {"defaults": {"unit": "s", "min": 0}}
     },
     {
@@ -78,10 +80,22 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
       "targets": [
-        {"expr": "omc_storage_admission_state", "legendFormat": "{{target_id}} state"},
-        {"expr": "increase(omc_storage_write_rejected_total[5m])", "legendFormat": "{{target_id}} rejected/5m"}
+        {"expr": "omc_storage_admission_state{target_type=\"filesystem\",target_id=\"root\"}", "legendFormat": "filesystem/root state"},
+        {"expr": "increase(omc_storage_write_rejected_total{target_type=\"filesystem\",target_id=\"root\"}[5m])", "legendFormat": "filesystem/root rejected/5m"}
       ],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0}}
+    },
+    {
+      "title": "Redis 队列观测健康（全量/部署单元）",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+      "targets": [
+        {"expr": "min by (queue_family) (omc_redis_task_queue_up * on (deployment_unit, service, instance, job, queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120))", "legendFormat": "{{queue_family}} all observers"},
+        {"expr": "min by (deployment_unit, queue_family) (omc_redis_task_queue_up * on (deployment_unit, service, instance, job, queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120))", "legendFormat": "{{deployment_unit}}/{{queue_family}} observer"}
+      ],
+      "description": "1 表示对应 observer 最近 120 秒采样正常；0 表示部署单元 observer 不可用或采样过期。全量值为 0 时不得把队列数值解释为空；无数据表示没有 observer 指标。",
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}},
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"}
     }
   ],
   "refresh": "30s",

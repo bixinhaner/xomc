@@ -56,6 +56,7 @@ type Container struct {
 	Carriers                 *carrier.CarrierRegistry
 	Cfg                      *appconfig.AppConfig
 	Logger                   *zap.Logger
+	LogGate                  storageprotection.LogAdmissionController
 	GS                       *components.GracefulShutdown
 	MetricsReg               *prometheus.Registry
 	Health                   *components.HealthChecker

@@ -267,7 +267,7 @@ func NewTaskMetrics(reg prometheus.Registerer) *TaskMetrics {
 		}, []string{"queue_family"}),
 		RedisTaskQueueOldestAgeSeconds: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "omc_redis_task_queue_oldest_age_seconds",
-			Help: "Age in seconds of the oldest Redis task with a readable task detail, by queue family.",
+			Help: "Age in seconds of the oldest Redis task by queue family; uses a queue-score lower bound when task detail has expired.",
 		}, []string{"queue_family"}),
 		RedisTaskQueueScanDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "omc_redis_task_queue_scan_duration_seconds",

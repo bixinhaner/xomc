@@ -44,13 +44,17 @@ func (p *CollectorUsageProvider) Snapshot(ctx context.Context, targetType Target
 }
 
 func matchesTarget(metric components.StorageMetric, targetType TargetType, targetID string) bool {
-	if metric.TargetID != targetID {
+	if targetType != TargetFilesystem || targetID != UnifiedStorageTargetID || metric.Kind != "host_filesystem" {
 		return false
 	}
-	if string(targetType) == metric.TargetType {
-		return true
+	// A failed host query still returns a stable unavailable metric without a
+	// mountpoint. Match it so the policy enters the configured unknown state;
+	// available capacity must come from the physical host root mount, never the
+	// duplicate application-visible statfs value or a logical MinIO/DB metric.
+	if metric.Status != "available" {
+		return metric.ID == "host-filesystem"
 	}
-	return targetType == TargetFilesystem && metric.Kind == "app_filesystem"
+	return metric.Mountpoint == UnifiedStorageMountpoint || metric.MountPath == UnifiedStorageMountpoint
 }
 
 func valueTime(value *time.Time) time.Time {

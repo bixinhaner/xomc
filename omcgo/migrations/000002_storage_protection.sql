@@ -27,8 +27,10 @@ CREATE TABLE IF NOT EXISTS storage_protection_policies (
         recover_used_percent < block_used_percent AND
         block_used_percent <= 100
     ),
+    -- The current deployment has one physical storage target. Logical
+    -- component names are admission scopes, not independent disks.
     CONSTRAINT storage_protection_target_type_chk CHECK (
-        target_type IN ('filesystem', 'minio', 'database', 'redis', 'nats', 'monitoring', 'application')
+        target_type = 'filesystem' AND target_id = 'root' AND write_scope = 'all'
     ),
     CONSTRAINT storage_protection_unknown_behavior_chk CHECK (
         unknown_behavior IN ('allow_with_alarm', 'block_new_uploads')

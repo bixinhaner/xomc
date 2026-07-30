@@ -36,7 +36,10 @@ import (
 // 各微服务入口（cmd/acs、cmd/app、cmd/worker）选择性调用 Connect* 方法按需初始化组件。
 // 它同时整合了健康检查、优雅关机、Prometheus 指标和 /healthz 接口，是服务启动的唯一入口。
 type Infra struct {
-	Logger     *zap.Logger
+	Logger *zap.Logger
+	// LogGate is shared with storage protection so every service logger can
+	// stop emitting to both stdout and its mounted log file at the same time.
+	LogGate    *logpkg.AdmissionGate
 	GS         *GracefulShutdown
 	PgPool     *pgxpool.Pool
 	TsPool     *pgxpool.Pool
@@ -64,7 +67,8 @@ func (inf *Infra) SetPprof(enabled, contention bool) {
 
 // NewInfra creates a base Infra with logger, graceful shutdown, metrics registry, and health checker.
 func NewInfra(logCfg appconfig.LogConfig, metricsPort int) (*Infra, error) {
-	logger, err := logpkg.NewLogger(logCfg)
+	logGate := logpkg.NewAdmissionGate()
+	logger, err := logpkg.NewLoggerWithAdmissionGate(logCfg, logGate)
 	if err != nil {
 		return nil, fmt.Errorf("init logger: %w", err)
 	}
@@ -81,6 +85,7 @@ func NewInfra(logCfg appconfig.LogConfig, metricsPort int) (*Infra, error) {
 
 	return &Infra{
 		Logger:      logger,
+		LogGate:     logGate,
 		GS:          NewGracefulShutdown(30*time.Second, logger),
 		MetricsReg:  metricsReg,
 		Health:      NewHealthChecker(),

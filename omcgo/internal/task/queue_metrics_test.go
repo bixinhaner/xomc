@@ -48,6 +48,35 @@ func TestRedisQueueObserverCollectsBoundedBacklog(t *testing.T) {
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueUp.WithLabelValues(redisQueueFamilyCommand)))
 }
 
+func TestRedisQueueObserverUsesQueueScoreWhenTaskDetailExpired(t *testing.T) {
+	mini := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer client.Close()
+
+	reg := prometheus.NewRegistry()
+	metrics := NewTaskMetrics(reg)
+	// Keep the task older than the priority component in queueScore. In
+	// production a missing detail hash means the task has already outlived its
+	// Redis TTL, so this also matches the real stale-backlog shape.
+	queuedAt := time.Now().Add(-48 * time.Hour).UTC()
+	// The queue score is retained after the task-detail hash expires. This is
+	// the production failure mode: backlog remains visible but age must not be
+	// reported as zero just because HGET returns redis.Nil.
+	score := queueScore(&Task{Priority: 3, CreatedAt: queuedAt})
+	require.NoError(t, client.ZAdd(context.Background(), redisx.Keys.ACSTaskQueue("device-expired-detail"), redis.Z{
+		Score:  score,
+		Member: "task-detail-expired",
+	}).Err())
+
+	observer := NewRedisQueueObserver(client, metrics, time.Hour, zap.NewNop())
+	observer.Collect(context.Background())
+
+	require.Greater(t,
+		testutil.ToFloat64(metrics.RedisTaskQueueOldestAgeSeconds.WithLabelValues(redisQueueFamilyTask)),
+		float64(100),
+		"queue score should provide oldest age when task detail is unavailable")
+}
+
 func TestRedisQueueObserverFailurePreservesBusinessGauges(t *testing.T) {
 	mini := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})

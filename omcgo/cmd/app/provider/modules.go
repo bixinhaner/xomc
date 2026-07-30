@@ -1554,6 +1554,7 @@ func initMiscModules(c *Container) error {
 			storageprotection.NewMetrics(c.MetricsReg),
 			logger,
 		)
+		storageProtection.SetLogAdmissionController(c.LogGate)
 		storageProtection.Start(context.Background(), 30*time.Second)
 		c.StorageCollector = storageCollector
 		c.StorageProtection = storageProtection
