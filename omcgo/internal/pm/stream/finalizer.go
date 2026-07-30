@@ -16,9 +16,8 @@ import (
 type CloseReason string
 
 const (
-	CloseComplete        CloseReason = "complete"
-	CloseTimeout         CloseReason = "timeout"
-	finalResultBatchSize             = 1000
+	CloseComplete CloseReason = "complete"
+	CloseTimeout  CloseReason = "timeout"
 )
 
 var ErrFinalizeClaimLost = errors.New("PM aggregation finalize claim ownership lost")
@@ -239,80 +238,20 @@ func (f *Finalizer) writeFinal(
 			return fmt.Errorf("persist compact PM Counter rollup: %w", err)
 		}
 	}
-	deleteResultsSQL, deleteResultsArgs, err := storage.Psql.Delete("pm_aggregation_results").
-		Where(sq.Eq{
-			"task_version_id": key.TaskVersionID,
-			"granularity":     string(key.Granularity),
-			"window_start":    key.Start,
-			"dimension_key":   key.EntityKey,
-		}).
-		ToSql()
+	resultCount, err := ReplaceWindowResults(
+		ctx,
+		tx,
+		key,
+		revision,
+		finalMetrics,
+		resultCompleteness{
+			version:       version,
+			coverage:      coverage,
+			receivedSlots: state.ReceivedSlots,
+		},
+	)
 	if err != nil {
-		return fmt.Errorf("build replace PM aggregation results SQL: %w", err)
-	}
-	if _, err := tx.Exec(ctx, deleteResultsSQL, deleteResultsArgs...); err != nil {
-		return fmt.Errorf("replace PM aggregation results: %w", err)
-	}
-
-	resultCount := 0
-	for start := 0; start < len(finalMetrics); start += finalResultBatchSize {
-		end := start + finalResultBatchSize
-		if end > len(finalMetrics) {
-			end = len(finalMetrics)
-		}
-		builder := storage.Psql.Insert("pm_aggregation_results").
-			Columns(
-				"window_start", "window_end", "task_id", "task_version_id",
-				"granularity", "dimension", "dimension_key", "dimension_name",
-				"object_ldn", "device_oui", "device_sn", "technology",
-				"metric_id", "metric_path", "metric_type",
-				"aggregation_op", "metric_value", "sample_count", "complete", "missing_slots",
-				"revision", "version_effective_from", "version_effective_to",
-				"received_slots", "expected_slots", "version_expected_slots",
-				"natural_expected_slots", "version_slice_complete", "period_complete",
-			)
-		for _, metric := range finalMetrics[start:end] {
-			definition := metric.Definition
-			builder = builder.Values(
-				key.Start, key.End, key.TaskID, key.TaskVersionID,
-				string(key.Granularity), string(definition.Dimension),
-				definition.DimensionKey, definition.DimensionName,
-				definition.ObjectLDN, definition.DeviceOUI, definition.DeviceSN,
-				definition.Technology, metric.MetricID, definition.MetricPath,
-				metric.MetricType, string(metric.Operation), metric.Value,
-				metric.SampleCount, coverage.PeriodComplete && metric.FormulaComplete, coverage.MissingSlots,
-				revision, versionEffectiveFrom(version), versionEffectiveTo(version),
-				state.ReceivedSlots, coverage.NaturalSlots, coverage.VersionExpectedSlots, coverage.NaturalSlots,
-				coverage.DataComplete && metric.FormulaComplete,
-				coverage.PeriodComplete && metric.FormulaComplete,
-			)
-		}
-		query, args, buildErr := builder.Suffix(`
-ON CONFLICT (
-  task_version_id, granularity, window_start, dimension_key, object_ldn, technology, metric_id
-) DO UPDATE SET
-  window_end = EXCLUDED.window_end,
-  metric_value = EXCLUDED.metric_value,
-  sample_count = EXCLUDED.sample_count,
-  complete = EXCLUDED.complete,
-  missing_slots = EXCLUDED.missing_slots,
-  revision = EXCLUDED.revision,
-  version_effective_from = EXCLUDED.version_effective_from,
-  version_effective_to = EXCLUDED.version_effective_to,
-  received_slots = EXCLUDED.received_slots,
-  expected_slots = EXCLUDED.expected_slots,
-  version_expected_slots = EXCLUDED.version_expected_slots,
-  natural_expected_slots = EXCLUDED.natural_expected_slots,
-  version_slice_complete = EXCLUDED.version_slice_complete,
-  period_complete = EXCLUDED.period_complete`).ToSql()
-		if buildErr != nil {
-			return fmt.Errorf("build insert PM aggregation result SQL: %w", buildErr)
-		}
-		tag, execErr := tx.Exec(ctx, query, args...)
-		if execErr != nil {
-			return fmt.Errorf("insert PM aggregation result: %w", execErr)
-		}
-		resultCount += int(tag.RowsAffected())
+		return err
 	}
 	publishSQL, publishArgs, err := storage.Psql.Update("pm_aggregation_windows").
 		Set("status", "published").
