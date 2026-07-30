@@ -557,7 +557,7 @@ func (r *PgSubTaskRepository) DeleteByTaskID(ctx context.Context, taskID uuid.UU
 	return nil
 }
 
-func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeouts) (map[uuid.UUID]int64, error) {
+func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeouts) (StaleFailures, error) {
 	rpcCutoff := time.Now().Add(-cutoffs.RPCResponse)
 	onlineCutoff := time.Now().Add(-cutoffs.DeviceOnline)
 	tcCutoff := time.Now().Add(-cutoffs.TransferComplete)
@@ -579,21 +579,21 @@ func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeou
 	// 一定有 started_at」，避免前端「开始时间」空列。COALESCE 守卫不会覆盖已有值。
 	rows, err := r.pool.Query(ctx, query, rpcCutoff, onlineCutoff, tcCutoff)
 	if err != nil {
-		return nil, fmt.Errorf("fail stale sub-tasks: %w", err)
+		return StaleFailures{}, fmt.Errorf("fail stale sub-tasks: %w", err)
 	}
 	defer rows.Close()
 
-	result := make(map[uuid.UUID]int64)
+	var result StaleFailures
 	for rows.Next() {
-		var taskID uuid.UUID
-		var cnt int64
-		if err := rows.Scan(&taskID, &cnt); err != nil {
-			return nil, fmt.Errorf("scan stale task counts: %w", err)
+		var taskID, subTaskID uuid.UUID
+		var deviceSN sql.NullString
+		if err := rows.Scan(&taskID, &subTaskID, &deviceSN); err != nil {
+			return StaleFailures{}, fmt.Errorf("scan stale sub-task: %w", err)
 		}
-		result[taskID] = cnt
+		result.Add(taskID, subTaskID, deviceSN.String)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("fail stale sub-tasks rows: %w", err)
+		return StaleFailures{}, fmt.Errorf("fail stale sub-tasks rows: %w", err)
 	}
 	return result, nil
 }
@@ -618,11 +618,10 @@ func buildFailStaleSubTasksSQL() string {
 		    OR (ust.status = 'suspended'  AND ust.updated_at < $2)
 		    OR (ust.status NOT IN ('completed', 'failed', 'terminated', 'downloading', 'suspended') AND ust.updated_at < $3)
 		  )
-		RETURNING ust.task_id
-	)
-	SELECT task_id, COUNT(*)::bigint AS cnt
-	FROM failed
-	GROUP BY task_id`
+			RETURNING ust.task_id, ust.id, ust.device_sn
+		)
+		SELECT task_id, id, device_sn
+		FROM failed`
 }
 
 // ListAll returns sub-tasks across all main tasks, JOINing upgrade_tasks for task_name.

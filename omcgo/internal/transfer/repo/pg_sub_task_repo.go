@@ -437,7 +437,7 @@ func (r *PgSubTaskRepo) DeleteByTaskID(ctx context.Context, taskID uuid.UUID) er
 // 备注：新业务（备份 / 下发 / 日志）的"downloading"在实际语义上多为 RPC 派发但等待 TC 的阶段，
 // 跟 firmware 升级的 downloading 不完全对等；但既然 schema 同源、状态机也复用了 software 的
 // UpgradeState 枚举，这里保留同样的三段超时分类，由 StaleTimeouts.RPCResponse 单调参数控制。
-func (r *PgSubTaskRepo) FailStale(ctx context.Context, cutoffs software.StaleTimeouts) (map[uuid.UUID]int64, error) {
+func (r *PgSubTaskRepo) FailStale(ctx context.Context, cutoffs software.StaleTimeouts) (software.StaleFailures, error) {
 	rpcCutoff := time.Now().Add(-cutoffs.RPCResponse)
 	onlineCutoff := time.Now().Add(-cutoffs.DeviceOnline)
 	tcCutoff := time.Now().Add(-cutoffs.TransferComplete)
@@ -458,29 +458,28 @@ func (r *PgSubTaskRepo) FailStale(ctx context.Context, cutoffs software.StaleTim
 		    OR (ust.status = 'suspended'  AND ust.updated_at < $2)
 		    OR (ust.status NOT IN ('completed', 'failed', 'terminated', 'downloading', 'suspended') AND ust.updated_at < $3)
 		  )
-		RETURNING ust.task_id
-	)
-	SELECT task_id, COUNT(*)::bigint AS cnt
-	FROM failed
-	GROUP BY task_id`, r.subTaskTable, r.mainTable)
+			RETURNING ust.task_id, ust.id, ust.device_sn
+		)
+		SELECT task_id, id, device_sn
+		FROM failed`, r.subTaskTable, r.mainTable)
 
 	rows, err := r.pool.Query(ctx, query, rpcCutoff, onlineCutoff, tcCutoff)
 	if err != nil {
-		return nil, fmt.Errorf("fail stale %s: %w", r.subTaskTable, err)
+		return software.StaleFailures{}, fmt.Errorf("fail stale %s: %w", r.subTaskTable, err)
 	}
 	defer rows.Close()
 
-	result := make(map[uuid.UUID]int64)
+	var result software.StaleFailures
 	for rows.Next() {
-		var taskID uuid.UUID
-		var cnt int64
-		if err := rows.Scan(&taskID, &cnt); err != nil {
-			return nil, fmt.Errorf("scan stale task counts: %w", err)
+		var taskID, subTaskID uuid.UUID
+		var deviceSN sql.NullString
+		if err := rows.Scan(&taskID, &subTaskID, &deviceSN); err != nil {
+			return software.StaleFailures{}, fmt.Errorf("scan stale sub-task: %w", err)
 		}
-		result[taskID] = cnt
+		result.Add(taskID, subTaskID, deviceSN.String)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("fail stale %s rows: %w", r.subTaskTable, err)
+		return software.StaleFailures{}, fmt.Errorf("fail stale %s rows: %w", r.subTaskTable, err)
 	}
 	return result, nil
 }

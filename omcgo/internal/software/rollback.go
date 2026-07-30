@@ -104,7 +104,7 @@ func (e *RollbackExecutor) RollbackOne(ctx context.Context, subTask *UpgradeSubT
 		return
 	}
 	if dev.Status != model.DeviceActive {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, device is %s. Please retry when device is online.", dev.Status), FailureDeviceOffline)
 		return
 	}
@@ -145,7 +145,7 @@ func (e *RollbackExecutor) pushEnableCheckGPV(ctx context.Context, subTask *Upgr
 		"command_key":     cmdKey,
 	})
 	if err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, internal error: %v", err), FailureInternalError)
 		return
 	}
@@ -156,7 +156,7 @@ func (e *RollbackExecutor) pushEnableCheckGPV(ctx context.Context, subTask *Upgr
 		Source:     devtask.TaskSourceSystem,
 		CommandKey: cmdKey,
 	}); err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, failed to push enable-check command: %v", err), FailureCommandPush)
 		return
 	}
@@ -214,7 +214,7 @@ func (e *RollbackExecutor) dispatchRollbackSPV(ctx context.Context, subTask *Upg
 		"command_key": subTask.ID.String(),
 	})
 	if err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, internal error: %v", err), FailureInternalError)
 		return
 	}
@@ -225,7 +225,7 @@ func (e *RollbackExecutor) dispatchRollbackSPV(ctx context.Context, subTask *Upg
 		Source:     devtask.TaskSourceSystem,
 		CommandKey: subTask.ID.String(),
 	}); err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, failed to send set params command to device: %v", err), FailureCommandPush)
 		return
 	}
@@ -373,7 +373,7 @@ func isRollbackEnabled(v string) bool {
 }
 
 func (e *RollbackExecutor) acquireDeviceLock(ctx context.Context, deviceSN string, taskID interface{ String() string }) (bool, error) {
-	key := fmt.Sprintf("software:upgrade:active:%s", deviceSN)
+	key := upgradeDeviceLockKey(deviceSN)
 	ok, err := e.redis.SetNX(ctx, key, taskID.String(), time.Hour).Result()
 	if err != nil {
 		return false, fmt.Errorf("acquire device lock: %w", err)
@@ -381,9 +381,13 @@ func (e *RollbackExecutor) acquireDeviceLock(ctx context.Context, deviceSN strin
 	return ok, nil
 }
 
-func (e *RollbackExecutor) releaseDeviceLock(ctx context.Context, deviceSN string) {
-	key := fmt.Sprintf("software:upgrade:active:%s", deviceSN)
-	e.redis.Del(ctx, key)
+func (e *RollbackExecutor) releaseDeviceLock(ctx context.Context, deviceSN string, subTaskID uuid.UUID) {
+	if err := releaseOwnedDeviceLock(ctx, e.redis, deviceSN, subTaskID); err != nil {
+		e.logger.Warn("release rollback device lock",
+			zap.String("sub_task_id", subTaskID.String()),
+			zap.String("device_sn", deviceSN),
+			zap.Error(err))
+	}
 }
 
 // FailRollbackSubTask marks a sub-task as failed and finalizes the parent task.
@@ -392,7 +396,7 @@ func (e *RollbackExecutor) FailRollbackSubTask(ctx context.Context, subTask *Upg
 		e.logger.Error("fail rollback sub-task", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
 	}
 	if subTask.DeviceSN != "" {
-		e.releaseDeviceLock(ctx, subTask.DeviceSN)
+		e.releaseDeviceLock(ctx, subTask.DeviceSN, subTask.ID)
 	}
 	if err := e.taskRepo.IncrementCounts(ctx, subTask.TaskID, 0, 1); err != nil {
 		e.logger.Error("increment rollback fail count", zap.Error(err))

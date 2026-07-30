@@ -1457,8 +1457,7 @@ func (s *SoftwareService) TerminateUpgrade(ctx context.Context, taskID uuid.UUID
 			// 不能依赖。注意 sub_task 行刚拿出来时 DeviceSN 可能为空（还没进 ExecuteOne）→
 			// 此时也没拿过锁，跳过即可。
 			if subTask.DeviceSN != "" {
-				key := fmt.Sprintf("software:upgrade:active:%s", subTask.DeviceSN)
-				if err := s.redis.Del(ctx, key).Err(); err != nil {
+				if err := releaseOwnedDeviceLock(ctx, s.redis, subTask.DeviceSN, subTask.ID); err != nil {
 					s.logger.Warn("release device lock on terminate",
 						zap.String("sub_task_id", subTask.ID.String()),
 						zap.String("device_sn", subTask.DeviceSN),
@@ -2045,28 +2044,8 @@ func (s *SoftwareService) StartTaskReaper() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for range ticker.C {
-			taskCounts, err := s.subTaskRepo.FailStale(context.Background(), timeouts)
-			if err != nil {
+			if err := s.reapStaleSubTasksOnce(context.Background(), timeouts); err != nil {
 				s.logger.Error("reap stale upgrade tasks", zap.Error(err))
-				continue
-			}
-			var total int64
-			for _, cnt := range taskCounts {
-				total += cnt
-			}
-			if total > 0 {
-				s.logger.Warn("reaped stale upgrade tasks", zap.Int64("count", total))
-				for taskID, cnt := range taskCounts {
-					if err := s.subTaskRepo.UpdateFailureReasonByTask(context.Background(), taskID, FailureTaskTimeout); err != nil {
-						s.logger.Error("set failure_reason for reaped sub-tasks",
-							zap.String("task_id", taskID.String()), zap.Error(err))
-					}
-					if err := s.taskRepo.IncrementCounts(context.Background(), taskID, 0, int(cnt)); err != nil {
-						s.logger.Error("increment fail count for reaped task",
-							zap.String("task_id", taskID.String()), zap.Error(err))
-					}
-					finalizeTask(context.Background(), s.taskRepo, s.logger, taskID)
-				}
 			}
 		}
 	}()
@@ -2076,6 +2055,43 @@ func (s *SoftwareService) StartTaskReaper() {
 		zap.Duration("device_online_timeout", timeouts.DeviceOnline),
 		zap.Duration("transfer_complete_timeout", timeouts.TransferComplete),
 		zap.Duration("fault_log_upload_timeout", timeouts.FaultLogUpload))
+}
+
+func (s *SoftwareService) reapStaleSubTasksOnce(ctx context.Context, timeouts StaleTimeouts) error {
+	failures, err := s.subTaskRepo.FailStale(ctx, timeouts)
+	if err != nil {
+		return err
+	}
+	for _, lock := range failures.Locks {
+		if err := releaseOwnedDeviceLock(ctx, s.redis, lock.DeviceSN, lock.SubTaskID); err != nil {
+			s.logger.Warn("release device lock for reaped sub-task",
+				zap.String("sub_task_id", lock.SubTaskID.String()),
+				zap.String("device_sn", lock.DeviceSN),
+				zap.Error(err))
+		}
+	}
+
+	var total int64
+	for _, cnt := range failures.TaskCounts {
+		total += cnt
+	}
+	if total == 0 {
+		return nil
+	}
+
+	s.logger.Warn("reaped stale upgrade tasks", zap.Int64("count", total))
+	for taskID, cnt := range failures.TaskCounts {
+		if err := s.subTaskRepo.UpdateFailureReasonByTask(ctx, taskID, FailureTaskTimeout); err != nil {
+			s.logger.Error("set failure_reason for reaped sub-tasks",
+				zap.String("task_id", taskID.String()), zap.Error(err))
+		}
+		if err := s.taskRepo.IncrementCounts(ctx, taskID, 0, int(cnt)); err != nil {
+			s.logger.Error("increment fail count for reaped task",
+				zap.String("task_id", taskID.String()), zap.Error(err))
+		}
+		finalizeTask(ctx, s.taskRepo, s.logger, taskID)
+	}
+	return nil
 }
 
 func defaultUpgradeTaskReaperTimeouts() StaleTimeouts {

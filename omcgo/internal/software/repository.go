@@ -10,8 +10,8 @@ import (
 
 // StaleTimeouts configures per-phase reaper timeouts.
 type StaleTimeouts struct {
-	RPCResponse     time.Duration // waiting for Upload/Download Response
-	DeviceOnline    time.Duration // waiting for offline device to come back
+	RPCResponse      time.Duration // waiting for Upload/Download Response
+	DeviceOnline     time.Duration // waiting for offline device to come back
 	TransferComplete time.Duration // waiting for TransferComplete after RPC accepted
 	// FaultLogUpload 是 FAULT_LOG_COLLECT 专用的 uploading 状态超时（SPV 触发后等
 	// 设备主动 PUT 故障日志到 ACS）。语义和 TransferComplete 不同：CPE 收到 SPV 后
@@ -19,6 +19,40 @@ type StaleTimeouts struct {
 	// RUNTIME_LOG_COLLECT 走 Upload RPC 可能上传大日志包要更久。该值仅作用于
 	// fault_log_collect_sub_tasks 表；为 0 时退化到 TransferComplete。
 	FaultLogUpload time.Duration
+}
+
+// StaleFailures is the exact set of rows a reaper pass moved to failed.
+// TaskCounts drives parent task counters; Locks lets service release only the
+// Redis locks owned by those timed-out sub-tasks.
+type StaleFailures struct {
+	TaskCounts map[uuid.UUID]int64
+	Locks      []StaleDeviceLock
+}
+
+// StaleDeviceLock identifies the Redis device lock held by one stale sub-task.
+type StaleDeviceLock struct {
+	DeviceSN  string
+	SubTaskID uuid.UUID
+}
+
+func (f *StaleFailures) Add(taskID uuid.UUID, subTaskID uuid.UUID, deviceSN string) {
+	if f.TaskCounts == nil {
+		f.TaskCounts = make(map[uuid.UUID]int64)
+	}
+	f.TaskCounts[taskID]++
+	if deviceSN != "" {
+		f.Locks = append(f.Locks, StaleDeviceLock{DeviceSN: deviceSN, SubTaskID: subTaskID})
+	}
+}
+
+func (f *StaleFailures) Merge(other StaleFailures) {
+	for taskID, cnt := range other.TaskCounts {
+		if f.TaskCounts == nil {
+			f.TaskCounts = make(map[uuid.UUID]int64)
+		}
+		f.TaskCounts[taskID] += cnt
+	}
+	f.Locks = append(f.Locks, other.Locks...)
 }
 
 // FirmwareRepository provides persistence for firmware versions.
@@ -66,7 +100,7 @@ type SubTaskRepository interface {
 	GetByCommandKey(ctx context.Context, commandKey string) (*UpgradeSubTask, error)
 	BatchCreate(ctx context.Context, tasks []*UpgradeSubTask) error
 	DeleteByTaskID(ctx context.Context, taskID uuid.UUID) error
-	FailStale(ctx context.Context, cutoffs StaleTimeouts) (map[uuid.UUID]int64, error)
+	FailStale(ctx context.Context, cutoffs StaleTimeouts) (StaleFailures, error)
 	UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code FailureCode) error
 	// UpdateDestVersionByCommandKey 按 command_key 单字段更新 dest_version。
 	// CONFIG_RESTORE / LICENSE_UPGRADE 等"占位任务"在 dispatcher 派发完成后写回
