@@ -50,6 +50,25 @@ func TestClaimDueUsesLeaseAndSkipLocked(t *testing.T) {
 	}
 }
 
+func TestClaimDueNewestOrderCanUseDueClaimIndexBackwards(t *testing.T) {
+	query, _, err := claimDueUpdate(
+		GranularityHourly,
+		time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC),
+		32,
+		uuid.New(),
+		time.Minute,
+		claimVersionFilter{},
+		claimNewestFirst,
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build newest claim SQL: %v", err)
+	}
+	if !strings.Contains(query,
+		"w.window_end DESC, w.task_version_id DESC, w.entity_key DESC, w.window_start DESC") {
+		t.Fatalf("newest claim order must be the exact reverse of the due-claim index: %q", query)
+	}
+}
+
 func TestFailFinalizeClaimPersistsRetryAndFencesByClaimToken(t *testing.T) {
 	key := WindowKey{
 		TaskVersionID: uuid.MustParse("abababab-abab-4bab-8bab-abababababab"),

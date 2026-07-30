@@ -292,7 +292,7 @@ const (
 	finalizeRetryBase              = 30 * time.Second
 	finalizeRetryMax               = 30 * time.Minute
 	finalizeOldestDueQueryInterval = 30 * time.Second
-	finalizeClaimBatchSize         = 8
+	finalizeClaimBatchSize         = 32
 )
 
 var finalizeQuotaWheel = [...]finalizeQueue{
