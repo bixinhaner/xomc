@@ -134,7 +134,7 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 		if err := r.processAlarmPayload(ctx, payload); err != nil {
 			return err
 		}
-		r.publishAlarmSyncRequest(ctx, payload.DeviceSN)
+		publishAlarmSyncRequest(ctx, r.eventBus, r.logger, payload.DeviceSN)
 		return nil
 	}
 
@@ -157,7 +157,7 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 			return err
 		}
 	}
-	r.publishAlarmSyncRequest(ctx, informPayload.DeviceID.SerialNumber)
+	publishAlarmSyncRequest(ctx, r.eventBus, r.logger, informPayload.DeviceID.SerialNumber)
 	return nil
 }
 
@@ -239,18 +239,6 @@ func (r *AlarmReceiver) processAlarmPayload(ctx context.Context, payload AlarmPa
 	}
 
 	return nil
-}
-
-func (r *AlarmReceiver) publishAlarmSyncRequest(ctx context.Context, deviceSN string) {
-	if r.eventBus == nil || deviceSN == "" {
-		return
-	}
-	syncPayload := map[string]string{"device_sn": deviceSN}
-	if syncEvt, err := event.NewEvent(event.SubjectAlarmSyncRequested, syncPayload); err == nil {
-		if pubErr := r.eventBus.Publish(ctx, event.SubjectAlarmSyncRequested, syncEvt); pubErr != nil {
-			r.logger.Warn("publish alarm sync request", zap.Error(pubErr))
-		}
-	}
 }
 
 func (r *AlarmReceiver) buildAlarmPayloadsFromInform(ctx context.Context, payload informAlarmEventPayload) ([]AlarmPayload, error) {
