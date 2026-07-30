@@ -1,5 +1,5 @@
 /**
- * KPI 指标库新建保存回归测试（issue #63）。
+ * PM 指标库新建保存回归测试（issue #63）。
  *
  * HTTP 非 secure context 下浏览器可能没有 crypto.randomUUID；新建指标/分组保存路径
  * 不能依赖前端生成 ID，应直接调用 create mutation，由后端创建接口生成真实 ID。
@@ -78,7 +78,7 @@ beforeEach(() => {
   hideRandomUUID();
 });
 
-describe('KPI 指标库 create 保存路径', () => {
+describe('PM 指标库 create 保存路径', () => {
   it('新建指标在 randomUUID 不可用时仍调用 create mutation 且不传 id', async () => {
     render(
       <IndicatorFormModal

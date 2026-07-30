@@ -104,7 +104,7 @@ func (s *IndicatorManagementService) GetGroupTree(ctx context.Context, req Indic
 		return nil, err
 	}
 
-	counts, err := s.groupRepo.CountIndicatorsByGroup(ctx, dt)
+	counts, err := s.groupRepo.CountIndicatorsByGroup(ctx, dt, req.Platform)
 	if err != nil {
 		s.logger.Warn("failed to count indicators by group", zap.Error(err))
 	}

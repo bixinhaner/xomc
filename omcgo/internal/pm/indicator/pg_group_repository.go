@@ -53,16 +53,9 @@ func (r *PgGroupRepository) listInternal(ctx context.Context, dt DeviceType, pla
 		prefixedCols[i] = "g." + c
 	}
 	builder := storage.Psql.Select(prefixedCols...).From(table + " g")
-	if platform != "" {
+	if strings.TrimSpace(platform) != "" {
 		// EXISTS 嵌套 EXISTS 与 pg_indicator_repository.go::PlatformName 过滤一致语义
-		builder = builder.Where(sq.Expr(
-			fmt.Sprintf(
-				"EXISTS (SELECT 1 FROM %s i WHERE i.group_id = g.id "+
-					"AND EXISTS (SELECT 1 FROM %s f WHERE f.indicator_id = i.id AND f.platform_name = ?))",
-				dt.IndicatorTable(), dt.FormulaTable(),
-			),
-			platform,
-		))
+		builder = builder.Where(groupPlatformFilterExpr(dt, platform))
 	}
 	query, args, err := builder.OrderBy("g.en_name").ToSql()
 	if err != nil {
@@ -87,6 +80,17 @@ func (r *PgGroupRepository) listInternal(ctx context.Context, dt DeviceType, pla
 		return nil, fmt.Errorf("iterating group rows: %w", err)
 	}
 	return groups, nil
+}
+
+func groupPlatformFilterExpr(dt DeviceType, platform string) sq.Sqlizer {
+	return sq.Expr(
+		fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM %s i WHERE i.group_id = g.id "+
+				"AND EXISTS (SELECT 1 FROM %s f WHERE f.indicator_id = i.id AND f.platform_name = ?))",
+			dt.IndicatorTable(), dt.FormulaTable(),
+		),
+		strings.TrimSpace(platform),
+	)
 }
 
 func (r *PgGroupRepository) GetByID(ctx context.Context, dt DeviceType, id string) (*IndicatorGroup, error) {
@@ -186,17 +190,8 @@ func (r *PgGroupRepository) Delete(ctx context.Context, dt DeviceType, id string
 	return nil
 }
 
-func (r *PgGroupRepository) CountIndicatorsByGroup(ctx context.Context, dt DeviceType) (map[string]int64, error) {
-	indTable := dt.IndicatorTable()
-	grpTable := dt.GroupTable()
-
-	// Count indicators per group, including groups with 0 indicators.
-	query, args, err := storage.Psql.Select(
-		"g.id", "COALESCE(COUNT(i.id), 0)").
-		From(grpTable + " g").
-		LeftJoin(indTable + " i ON i.group_id = g.id").
-		GroupBy("g.id").
-		ToSql()
+func (r *PgGroupRepository) CountIndicatorsByGroup(ctx context.Context, dt DeviceType, platform string) (map[string]int64, error) {
+	query, args, err := buildGroupIndicatorCountSQL(dt, platform)
 	if err != nil {
 		return nil, fmt.Errorf("build count indicators by group SQL: %w", err)
 	}
@@ -220,6 +215,25 @@ func (r *PgGroupRepository) CountIndicatorsByGroup(ctx context.Context, dt Devic
 		return nil, fmt.Errorf("iterating group count rows: %w", err)
 	}
 	return counts, nil
+}
+
+func buildGroupIndicatorCountSQL(dt DeviceType, platform string) (string, []any, error) {
+	indTable := dt.IndicatorTable()
+	grpTable := dt.GroupTable()
+
+	builder := storage.Psql.Select("g.id").
+		From(grpTable + " g").
+		LeftJoin(indTable + " i ON i.group_id = g.id").
+		GroupBy("g.id")
+
+	if strings.TrimSpace(platform) == "" {
+		return builder.Column("COALESCE(COUNT(i.id), 0)").ToSql()
+	}
+
+	return builder.
+		Column("COUNT(DISTINCT i.id) FILTER (WHERE f.indicator_id IS NOT NULL)").
+		LeftJoin(dt.FormulaTable()+" f ON f.indicator_id = i.id AND f.platform_name = ?", strings.TrimSpace(platform)).
+		ToSql()
 }
 
 func scanGroup(rows pgx.Rows) (*IndicatorGroup, error) {

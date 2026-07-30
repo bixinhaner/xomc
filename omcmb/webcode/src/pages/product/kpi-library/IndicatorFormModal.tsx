@@ -1,7 +1,7 @@
 /**
  * IndicatorFormModal — KPI 指标新建/编辑 UI (Issue #535 + #640, v1 webcode/Antd5)。
  *
- * 指标全生命周期管理统一进 产品中心→KPI指标库。本 Modal 承载「新建/编辑指标」:
+ * 指标全生命周期管理统一进 产品中心→PM指标库。本 Modal 承载「新建/编辑指标」:
  *   · 字段:中文名(必填) / 英文名(必填) / 归属分组(必填) / 单位 / 统计类型(statisType) /
  *     级别 / 指标类型(indicatorType：直接采集/公式计算) / 描述。
  *   · 公式维护区「PlatformFormulasSection」的可见性按「本次开弹是否为新建」区分：

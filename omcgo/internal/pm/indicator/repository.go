@@ -24,7 +24,8 @@ type GroupRepository interface {
 	// Delete removes a group. If tx is non-nil, participates in the transaction.
 	Delete(ctx context.Context, dt DeviceType, id string, tx pgx.Tx) error
 	// CountIndicatorsByGroup returns a map of group_id -> indicator count.
-	CountIndicatorsByGroup(ctx context.Context, dt DeviceType) (map[string]int64, error)
+	// Non-empty platform scopes the count to indicators bound to that platform.
+	CountIndicatorsByGroup(ctx context.Context, dt DeviceType, platform string) (map[string]int64, error)
 }
 
 // IndicatorRepository manages indicator persistence.
