@@ -26,6 +26,10 @@ import type { Product, ProductListFilter } from '@core/types/product';
 import ProductDrawer from './ProductDrawer';
 import MatchTester from './MatchTester';
 import { useT } from '@/hooks/useT';
+import {
+  PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
+  PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
+} from '../pagination';
 
 const { Text } = Typography;
 
@@ -41,7 +45,7 @@ export default function ProductsPage() {
   const t = useT();
   const [filter, setFilter] = useState<ProductListFilter>({});
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
   const { data, isLoading } = useProductList(filter);
   const { data: matchOrderData } = useMatchOrder();
 
@@ -241,7 +245,7 @@ export default function ProductsPage() {
             pageSize,
             total: sortedItems.length,
             showSizeChanger: true,
-            pageSizeOptions: ['10', '20', '50', '100'],
+            pageSizeOptions: PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
             showTotal: (n) => t('common.totalCount', { count: n }),
             onChange: (p, ps) => {
               setPage(p);

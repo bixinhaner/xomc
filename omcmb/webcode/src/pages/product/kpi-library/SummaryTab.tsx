@@ -20,6 +20,10 @@ import {
 } from '@core/hooks/api/useIndicatorsLibrary';
 import { makeSeqColumn } from '@/components/Table/seqColumn';
 import { useT } from '@/hooks/useT';
+import {
+  PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
+  PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
+} from '../pagination';
 
 interface Props {
   onSelect: (tech: TechLower, platform: string) => void;
@@ -46,7 +50,7 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
   const [editRow, setEditRow] = useState<IndicatorPlatformSummary | null>(null);
   const [draft, setDraft] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
 
   // 搜索词变化时回到第一页——渲染期重置,避免 set-state-in-effect。
   const [prevQuery, setPrevQuery] = useState(query);
@@ -202,7 +206,7 @@ export default function SummaryTab({ onSelect, query = '' }: Props) {
           pageSize,
           total: items.length,
           showSizeChanger: true,
-          pageSizeOptions: ['10', '20', '50', '100'],
+          pageSizeOptions: PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
           showTotal: (n) => t('common.totalCount', { count: n }),
           onChange: (p, ps) => {
             setPage(p);
