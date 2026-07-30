@@ -8,7 +8,119 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/prometheus/client_golang/prometheus"
 )
+
+func TestRebuildClaimBatchCoalescesUntilDatabaseQuietPeriod(t *testing.T) {
+	query, args, err := rebuildClaimBatchSelect(2*time.Minute, 100).ToSql()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(query, "requested_at <= now() - (") ||
+		!strings.Contains(query, "interval '1 microsecond'") {
+		t.Fatalf("claim query does not enforce a database-clock quiet period: %s", query)
+	}
+	if !strings.Contains(query, "FOR UPDATE SKIP LOCKED") {
+		t.Fatalf("claim query is not safe for concurrent rebuilders: %s", query)
+	}
+	if !strings.Contains(fmt.Sprint(args), "120000000") {
+		t.Fatalf("claim query does not carry the two-minute quiet period: %v", args)
+	}
+}
+
+func TestRebuildCoalesceGenerationRunsAtMostOneFollowUp(t *testing.T) {
+	if got := rebuildCompletionStatus(100, 100); got != "completed" {
+		t.Fatalf("stable generation status = %q, want completed", got)
+	}
+	if got := rebuildCompletionStatus(100, 101); got != "pending" {
+		t.Fatalf("one late generation status = %q, want pending", got)
+	}
+	if got := rebuildCompletionStatus(100, 200); got != "pending" {
+		t.Fatalf("many late generations status = %q, want one pending follow-up", got)
+	}
+}
+
+func TestRebuildCoalesceDefersParentUntilChildGenerationStable(t *testing.T) {
+	if rebuildGenerationStable(RebuildJob{RequestGeneration: 7}, 8) {
+		t.Fatal("parent rebuild must not be enqueued while the child generation changed")
+	}
+	if !rebuildGenerationStable(RebuildJob{RequestGeneration: 8}, 8) {
+		t.Fatal("stable child generation must allow exactly one parent enqueue")
+	}
+}
+
+func TestRebuildCoalesceGroupsSameSourceVersionsAndPeriod(t *testing.T) {
+	deviceRollupVersionID := uuid.New()
+	ruleVersionID := uuid.New()
+	start := time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC)
+	snapshot := BuildTaskSnapshot([]*TaskVersionSnapshot{
+		{
+			TaskID: uuid.New(), VersionID: deviceRollupVersionID,
+			Technology: "LTE", DeviceRollup: true,
+		},
+		{
+			TaskID: uuid.New(), VersionID: ruleVersionID,
+			Technology: "LTE", Enabled: true,
+		},
+	})
+	jobs := make([]RebuildJob, 100)
+	for index := range jobs {
+		jobs[index].Key = WindowKey{
+			TaskVersionID: ruleVersionID,
+			EntityKey:     fmt.Sprintf("group-%03d", index),
+			Granularity:   GranularityHourly,
+			Start:         start,
+			End:           start.Add(time.Hour),
+		}
+	}
+
+	groups, ungrouped := groupRollupRebuildJobs(jobs, snapshot)
+
+	if len(ungrouped) != 0 {
+		t.Fatalf("rollup rebuilds left ungrouped: %d", len(ungrouped))
+	}
+	if len(groups) != 1 {
+		t.Fatalf("shared source-period groups = %d, want 1", len(groups))
+	}
+	if len(groups[0].Jobs) != 100 {
+		t.Fatalf("jobs in shared scan = %d, want 100", len(groups[0].Jobs))
+	}
+	if len(groups[0].SourceVersionIDs) != 1 ||
+		groups[0].SourceVersionIDs[0] != deviceRollupVersionID {
+		t.Fatalf("source versions = %v, want [%s]",
+			groups[0].SourceVersionIDs, deviceRollupVersionID)
+	}
+}
+
+func TestRebuildCoalesceMetricsAreRegistered(t *testing.T) {
+	registry := prometheus.NewPedanticRegistry()
+	metrics := NewMetrics(registry)
+	metrics.RebuildBatchesTotal.Inc()
+	metrics.RebuildJobsPerBatch.Observe(2)
+	metrics.RebuildSnapshotRowsTotal.Add(3)
+	metrics.RebuildSnapshotScanSeconds.Observe(0.01)
+	metrics.RebuildCoalescedTotal.Add(4)
+
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]bool, len(families))
+	for _, family := range families {
+		got[family.GetName()] = true
+	}
+	for _, name := range []string{
+		"omc_pm_aggregation_rebuild_batches_total",
+		"omc_pm_aggregation_rebuild_jobs_per_batch",
+		"omc_pm_aggregation_rebuild_snapshot_rows_total",
+		"omc_pm_aggregation_rebuild_snapshot_scan_seconds",
+		"omc_pm_aggregation_rebuild_coalesced_total",
+	} {
+		if !got[name] {
+			t.Errorf("metric %s is not registered", name)
+		}
+	}
+}
 
 func TestRebuildParentLineageUsesStableDeviceRollupVersion(t *testing.T) {
 	taskID := uuid.MustParse("10000000-0000-4000-8000-000000000001")

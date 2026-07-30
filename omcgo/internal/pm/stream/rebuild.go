@@ -33,10 +33,55 @@ type RebuildWindowState struct {
 const (
 	rebuildLeaseDuration = 2 * time.Minute
 	rebuildLockDuration  = 15 * time.Minute
+	rebuildQuietPeriod   = 2 * time.Minute
+	rebuildBatchSize     = 100
 )
 
+func rebuildClaimBatchSelect(quietPeriod time.Duration, limit uint64) sq.SelectBuilder {
+	if quietPeriod < 0 {
+		quietPeriod = 0
+	}
+	if limit == 0 {
+		limit = 1
+	}
+	return storage.Psql.Select(
+		"id", "task_id", "task_version_id", "entity_key", "granularity",
+		"window_start", "window_end", "source_event_id",
+		"attempts", "request_generation",
+	).From("pm_aggregation_rebuilds").
+		Where(sq.Expr(
+			"requested_at <= now() - (? * interval '1 microsecond')",
+			quietPeriod.Microseconds(),
+		)).
+		Where(sq.Or{
+			sq.And{
+				sq.Eq{"status": []string{"pending", "failed"}},
+				sq.Expr("next_attempt_at <= now()"),
+			},
+			sq.And{
+				sq.Eq{"status": "running"},
+				sq.Expr("lease_expires_at < now()"),
+			},
+		}).
+		OrderBy("next_attempt_at", "requested_at", "id").
+		Limit(limit).
+		Suffix("FOR UPDATE SKIP LOCKED")
+}
+
+func rebuildCompletionStatus(claimedGeneration, currentGeneration int64) string {
+	if currentGeneration > claimedGeneration {
+		return "pending"
+	}
+	return "completed"
+}
+
+func rebuildGenerationStable(job RebuildJob, currentGeneration int64) bool {
+	return rebuildCompletionStatus(job.RequestGeneration, currentGeneration) == "completed"
+}
+
 type RebuildRepository struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	metrics *Metrics
 }
 
 func NewRebuildRepository(pool *pgxpool.Pool) *RebuildRepository {
@@ -68,13 +113,18 @@ ON CONFLICT (task_version_id, entity_key, granularity, window_start) DO UPDATE S
   status = CASE
     WHEN pm_aggregation_rebuilds.status = 'completed' THEN 'pending'
     ELSE pm_aggregation_rebuilds.status
-  END`).
+  END
+RETURNING request_generation`).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build enqueue PM aggregation rebuild: %w", err)
 	}
-	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+	var generation int64
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&generation); err != nil {
 		return fmt.Errorf("enqueue PM aggregation rebuild: %w", err)
+	}
+	if generation > 1 && r.metrics != nil {
+		r.metrics.RebuildCoalescedTotal.Inc()
 	}
 	markSQL, markArgs, err := storage.Psql.Update("pm_aggregation_windows").
 		Set("rebuild_requested_at", time.Now().UTC()).
@@ -90,64 +140,83 @@ ON CONFLICT (task_version_id, entity_key, granularity, window_start) DO UPDATE S
 }
 
 func (r *RebuildRepository) claimNext(ctx context.Context) (*RebuildJob, error) {
+	jobs, err := r.ClaimRebuildBatch(ctx, 0, 1)
+	if err != nil {
+		return nil, err
+	}
+	return &jobs[0], nil
+}
+
+// ClaimRebuildBatch leases jobs that have received no new request during the
+// supplied quiet period. Eligibility and lease timestamps use the database
+// clock so workers cannot disagree because of host clock skew.
+func (r *RebuildRepository) ClaimRebuildBatch(
+	ctx context.Context,
+	quietBefore time.Duration,
+	limit uint64,
+) ([]RebuildJob, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("begin claim PM aggregation rebuild batch: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	query, args, err := storage.Psql.Select(
-		"id", "task_id", "task_version_id", "entity_key", "granularity",
-		"window_start", "window_end", "source_event_id",
-		"attempts", "request_generation",
-	).From("pm_aggregation_rebuilds").
-		Where(sq.Or{
-			sq.And{
-				sq.Eq{"status": []string{"pending", "failed"}},
-				sq.LtOrEq{"next_attempt_at": time.Now().UTC()},
-			},
-			sq.And{
-				sq.Eq{"status": "running"},
-				sq.Lt{"lease_expires_at": time.Now().UTC()},
-			},
-		}).
-		OrderBy("next_attempt_at", "requested_at", "id").
-		Limit(1).
-		Suffix("FOR UPDATE SKIP LOCKED").
-		ToSql()
+	query, args, err := rebuildClaimBatchSelect(quietBefore, limit).ToSql()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build claim PM aggregation rebuild batch: %w", err)
 	}
-	var job RebuildJob
-	job.LeaseOwner = uuid.New()
-	if err := tx.QueryRow(ctx, query, args...).Scan(
-		&job.ID, &job.Key.TaskID, &job.Key.TaskVersionID, &job.Key.EntityKey,
-		&job.Key.Granularity, &job.Key.Start, &job.Key.End, &job.SourceID,
-		&job.Attempts,
-		&job.RequestGeneration,
-	); err != nil {
-		return nil, err
-	}
-	updateSQL, updateArgs, err := storage.Psql.Update("pm_aggregation_rebuilds").
-		Set("status", "running").
-		Set("attempts", sq.Expr("attempts + 1")).
-		Set("started_at", time.Now().UTC()).
-		Set("lease_expires_at", time.Now().UTC().Add(rebuildLeaseDuration)).
-		Set("lease_owner", job.LeaseOwner).
-		Set("completed_at", nil).
-		Set("last_error", nil).
-		Where(sq.Eq{"id": job.ID}).
-		ToSql()
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query claim PM aggregation rebuild batch: %w", err)
 	}
-	if _, err := tx.Exec(ctx, updateSQL, updateArgs...); err != nil {
-		return nil, err
+	jobs := make([]RebuildJob, 0, limit)
+	for rows.Next() {
+		var job RebuildJob
+		job.LeaseOwner = uuid.New()
+		if err := rows.Scan(
+			&job.ID, &job.Key.TaskID, &job.Key.TaskVersionID, &job.Key.EntityKey,
+			&job.Key.Granularity, &job.Key.Start, &job.Key.End, &job.SourceID,
+			&job.Attempts, &job.RequestGeneration,
+		); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan claim PM aggregation rebuild batch: %w", err)
+		}
+		jobs = append(jobs, job)
 	}
-	job.Attempts++
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("iterate claim PM aggregation rebuild batch: %w", err)
+	}
+	rows.Close()
+	if len(jobs) == 0 {
+		return nil, pgx.ErrNoRows
+	}
+	for index := range jobs {
+		job := &jobs[index]
+		updateSQL, updateArgs, err := storage.Psql.Update("pm_aggregation_rebuilds").
+			Set("status", "running").
+			Set("attempts", sq.Expr("attempts + 1")).
+			Set("started_at", sq.Expr("now()")).
+			Set("lease_expires_at", sq.Expr(
+				"now() + (? * interval '1 microsecond')",
+				rebuildLeaseDuration.Microseconds(),
+			)).
+			Set("lease_owner", job.LeaseOwner).
+			Set("completed_at", nil).
+			Set("last_error", nil).
+			Where(sq.Eq{"id": job.ID}).
+			ToSql()
+		if err != nil {
+			return nil, fmt.Errorf("build lease PM aggregation rebuild batch: %w", err)
+		}
+		if _, err := tx.Exec(ctx, updateSQL, updateArgs...); err != nil {
+			return nil, fmt.Errorf("lease PM aggregation rebuild batch: %w", err)
+		}
+		job.Attempts++
+	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("commit claim PM aggregation rebuild batch: %w", err)
 	}
-	return &job, nil
+	return jobs, nil
 }
 
 func (r *RebuildRepository) renewLease(ctx context.Context, job RebuildJob) error {
@@ -236,7 +305,11 @@ func (r *RebuildRepository) reopenAfterReplay(ctx context.Context, key WindowKey
 	return nil
 }
 
-func (r *RebuildRepository) finish(ctx context.Context, job RebuildJob, rebuildErr error) error {
+func (r *RebuildRepository) finish(
+	ctx context.Context,
+	job RebuildJob,
+	rebuildErr error,
+) (bool, error) {
 	builder := storage.Psql.Update("pm_aggregation_rebuilds").
 		Where(sq.Eq{"id": job.ID, "lease_owner": job.LeaseOwner})
 	if rebuildErr == nil {
@@ -266,16 +339,21 @@ func (r *RebuildRepository) finish(ctx context.Context, job RebuildJob, rebuildE
 	}
 	query, args, err := builder.ToSql()
 	if err != nil {
-		return err
+		return false, err
 	}
-	tag, err := r.pool.Exec(ctx, query, args...)
-	if err != nil {
-		return err
+	var currentGeneration int64
+	if err := r.pool.QueryRow(
+		ctx, query+" RETURNING request_generation", args...,
+	).Scan(&currentGeneration); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, fmt.Errorf("PM aggregation rebuild lease ownership lost before finish")
+		}
+		return false, fmt.Errorf("finish PM aggregation rebuild: %w", err)
 	}
-	if tag.RowsAffected() != 1 {
-		return fmt.Errorf("PM aggregation rebuild lease ownership lost before finish")
+	if rebuildErr != nil {
+		return false, nil
 	}
-	return nil
+	return rebuildGenerationStable(job, currentGeneration), nil
 }
 
 func rebuildCompletedAtExpr(
@@ -421,6 +499,7 @@ func NewRebuilder(
 
 func (r *Rebuilder) SetMetrics(metrics *Metrics) *Rebuilder {
 	r.metrics = metrics
+	r.repo.metrics = metrics
 	return r
 }
 
@@ -440,9 +519,15 @@ func (r *Rebuilder) Run(ctx context.Context) {
 }
 
 func (r *Rebuilder) runOnce(ctx context.Context) error {
-	job, err := r.repo.claimNext(ctx)
+	jobs, err := r.repo.ClaimRebuildBatch(
+		ctx, rebuildQuietPeriod, rebuildBatchSize,
+	)
 	if err != nil {
 		return err
+	}
+	if r.metrics != nil {
+		r.metrics.RebuildBatchesTotal.Inc()
+		r.metrics.RebuildJobsPerBatch.Observe(float64(len(jobs)))
 	}
 	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
 	heartbeatDone := make(chan error, 1)
@@ -455,36 +540,264 @@ func (r *Rebuilder) runOnce(ctx context.Context) error {
 				heartbeatDone <- nil
 				return
 			case <-ticker.C:
-				if err := r.repo.renewLease(heartbeatCtx, *job); err != nil {
-					heartbeatDone <- err
-					return
+				for _, job := range jobs {
+					if err := r.repo.renewLease(heartbeatCtx, job); err != nil {
+						heartbeatDone <- err
+						return
+					}
 				}
 			}
 		}
 	}()
-	rebuildErr := r.rebuild(ctx, *job)
-	if rebuildErr == nil {
-		rebuildErr = r.repo.enqueuePublishedParents(
-			ctx, *job, r.recovery.snapshot.Current(),
+	results := r.rebuildClaimedBatch(ctx, jobs)
+	stopHeartbeat()
+	heartbeatErr := <-heartbeatDone
+	var batchErr error
+	for _, job := range jobs {
+		rebuildErr := results[job.ID]
+		if heartbeatErr != nil {
+			rebuildErr = errors.Join(rebuildErr, heartbeatErr)
+		}
+		stable, finishErr := r.repo.finish(ctx, job, rebuildErr)
+		rebuildErr = errors.Join(rebuildErr, finishErr)
+		if rebuildErr == nil && stable {
+			if err := r.repo.enqueuePublishedParents(
+				ctx, job, r.recovery.snapshot.Current(),
+			); err != nil {
+				// The child is already durable. Requeue it so a transient
+				// parent-cascade failure cannot permanently lose propagation.
+				rebuildErr = err
+				if enqueueErr := r.repo.Enqueue(
+					ctx, job.Key, "cascade-retry:"+job.SourceID,
+				); enqueueErr != nil {
+					rebuildErr = errors.Join(rebuildErr, enqueueErr)
+				}
+			}
+		}
+		if rebuildErr != nil {
+			if r.metrics != nil {
+				r.metrics.RebuildErrorsTotal.Inc()
+			}
+			batchErr = errors.Join(batchErr, rebuildErr)
+			continue
+		}
+		if r.metrics != nil {
+			r.metrics.RebuildsTotal.WithLabelValues(
+				string(job.Key.Granularity),
+			).Inc()
+		}
+	}
+	return batchErr
+}
+
+func (r *Rebuilder) rebuildClaimedBatch(
+	ctx context.Context,
+	jobs []RebuildJob,
+) map[int64]error {
+	results := make(map[int64]error, len(jobs))
+	snapshot := r.recovery.snapshot.Current()
+	groups, ungrouped := groupRollupRebuildJobs(jobs, snapshot)
+	for _, job := range ungrouped {
+		results[job.ID] = r.rebuild(ctx, job)
+	}
+	for _, group := range groups {
+		for id, err := range r.rebuildRollupGroup(ctx, group, snapshot) {
+			results[id] = err
+		}
+	}
+	return results
+}
+
+type preparedRebuild struct {
+	job      RebuildJob
+	lock     *Lock
+	previous RebuildWindowState
+	matched  bool
+	err      error
+}
+
+func (r *Rebuilder) rebuildRollupGroup(
+	ctx context.Context,
+	group rollupRebuildGroup,
+	snapshot *TaskSnapshot,
+) map[int64]error {
+	results := make(map[int64]error, len(group.Jobs))
+	prepared := make([]*preparedRebuild, 0, len(group.Jobs))
+	byWindow := make(map[string]*preparedRebuild, len(group.Jobs))
+	for _, job := range group.Jobs {
+		item := &preparedRebuild{job: job}
+		lock, err := r.store.TryFinalizeLock(ctx, job.Key, rebuildLockDuration)
+		if err != nil {
+			results[job.ID] = err
+			continue
+		}
+		if lock == nil {
+			results[job.ID] = fmt.Errorf("PM aggregation rebuild window is busy")
+			continue
+		}
+		item.lock = lock
+		previous, err := r.repo.resetWindow(ctx, job.Key)
+		if err == nil {
+			err = r.store.DeleteState(ctx, job.Key)
+		}
+		if err != nil {
+			results[job.ID] = err
+			if releaseErr := lock.Release(context.Background()); releaseErr != nil {
+				results[job.ID] = errors.Join(results[job.ID], releaseErr)
+			}
+			continue
+		}
+		item.previous = previous
+		prepared = append(prepared, item)
+		byWindow[rebuildWindowIdentity(job.Key)] = item
+	}
+	defer func() {
+		for _, item := range prepared {
+			if err := item.lock.Release(context.Background()); err != nil {
+				r.logger.Warn("release batched PM aggregation rebuild lock",
+					zap.Error(err))
+			}
+		}
+	}()
+	if len(prepared) == 0 {
+		return results
+	}
+	workCtx, cancelWork := context.WithCancel(ctx)
+	lockHeartbeatDone := make(chan error, 1)
+	go func() {
+		ticker := time.NewTicker(rebuildLockDuration / 3)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-workCtx.Done():
+				lockHeartbeatDone <- nil
+				return
+			case <-ticker.C:
+				for _, item := range prepared {
+					if err := item.lock.Extend(workCtx, rebuildLockDuration); err != nil {
+						lockHeartbeatDone <- err
+						cancelWork()
+						return
+					}
+				}
+			}
+		}
+	}()
+	scanStarted := time.Now()
+	rows, scanErr := visitSnapshotsForRebuildBatch(
+		workCtx,
+		r.rollups,
+		group.SourceVersionIDs,
+		group.SourceGranularity,
+		group.Start,
+		group.End,
+		func(payload RollupPayload) error {
+			contributions, err := rebuildBatchContributions(
+				payload, snapshot, group.TargetGranularity,
+				r.recovery.matcher.location,
+			)
+			if err != nil {
+				return err
+			}
+			for _, contribution := range contributions {
+				item := byWindow[rebuildWindowIdentity(contribution.Key)]
+				if item == nil || item.err != nil {
+					continue
+				}
+				if _, err := r.store.accumulateWithLock(
+					workCtx, contribution, item.lock,
+				); err != nil {
+					item.err = err
+					continue
+				}
+				item.matched = true
+			}
+			return nil
+		},
+	)
+	if r.metrics != nil {
+		r.metrics.RebuildSnapshotRowsTotal.Add(float64(rows))
+		r.metrics.RebuildSnapshotScanSeconds.Observe(
+			time.Since(scanStarted).Seconds(),
 		)
 	}
-	stopHeartbeat()
-	if heartbeatErr := <-heartbeatDone; heartbeatErr != nil {
-		rebuildErr = errors.Join(rebuildErr, heartbeatErr)
-	}
-	if finishErr := r.repo.finish(ctx, *job, rebuildErr); finishErr != nil {
-		return errors.Join(rebuildErr, finishErr)
-	}
-	if rebuildErr != nil {
-		if r.metrics != nil {
-			r.metrics.RebuildErrorsTotal.Inc()
+	for _, item := range prepared {
+		if scanErr != nil {
+			item.err = errors.Join(item.err, scanErr)
 		}
-		return rebuildErr
+		if item.err == nil && !item.matched {
+			item.err = fmt.Errorf("no durable rollup source matched PM rebuild window")
+		}
+		if item.err == nil {
+			item.err = r.completeRebuildUnderLock(
+				workCtx, item.job.Key, item.previous,
+			)
+		}
+		results[item.job.ID] = item.err
 	}
-	if r.metrics != nil {
-		r.metrics.RebuildsTotal.WithLabelValues(string(job.Key.Granularity)).Inc()
+	cancelWork()
+	if heartbeatErr := <-lockHeartbeatDone; heartbeatErr != nil {
+		for _, item := range prepared {
+			results[item.job.ID] = errors.Join(
+				results[item.job.ID], heartbeatErr,
+			)
+		}
 	}
-	return nil
+	return results
+}
+
+func rebuildWindowIdentity(key WindowKey) string {
+	return fmt.Sprintf(
+		"%s|%s|%s|%s|%d|%d",
+		key.TaskID,
+		key.TaskVersionID,
+		key.EntityKey,
+		key.Granularity,
+		key.Start.UTC().UnixNano(),
+		key.End.UTC().UnixNano(),
+	)
+}
+
+func rebuildBatchContributions(
+	payload RollupPayload,
+	snapshot *TaskSnapshot,
+	target Granularity,
+	location *time.Location,
+) ([]Contribution, error) {
+	if target == GranularityHourly {
+		if !isDeviceHourPayload(payload, snapshot) {
+			return nil, nil
+		}
+		return matchDeviceHourRules(payload, snapshot, location)
+	}
+	return rollupContributions(
+		payload, snapshot.ByVersion[payload.TaskVersionID], location,
+	)
+}
+
+func (r *Rebuilder) completeRebuildUnderLock(
+	ctx context.Context,
+	key WindowKey,
+	previous RebuildWindowState,
+) error {
+	state, err := r.store.Read(ctx, key)
+	if err != nil {
+		return fmt.Errorf("read rebuilt PM aggregation window: %w", err)
+	}
+	if state.ReceivedSlots < previous.PreviousReceived {
+		return fmt.Errorf(
+			"durable PM rebuild source incomplete: recovered %d slots, previously published %d",
+			state.ReceivedSlots, previous.PreviousReceived,
+		)
+	}
+	if !previous.WasPublished {
+		return r.repo.reopenAfterReplay(ctx, key)
+	}
+	reason := CloseTimeout
+	if state.ExpectedSlots > 0 && state.ReceivedSlots >= state.ExpectedSlots {
+		reason = CloseComplete
+	}
+	return r.finalizer.finalizeUnderLock(ctx, key, reason)
 }
 
 func (r *Rebuilder) rebuild(ctx context.Context, job RebuildJob) (rebuildErr error) {
@@ -530,24 +843,7 @@ func (r *Rebuilder) rebuild(ctx context.Context, job RebuildJob) (rebuildErr err
 	if err := r.replaySources(ctx, job.Key, lock); err != nil {
 		return err
 	}
-	state, err := r.store.Read(ctx, job.Key)
-	if err != nil {
-		return fmt.Errorf("read rebuilt PM aggregation window: %w", err)
-	}
-	if state.ReceivedSlots < previous.PreviousReceived {
-		return fmt.Errorf(
-			"durable PM rebuild source incomplete: recovered %d slots, previously published %d",
-			state.ReceivedSlots, previous.PreviousReceived,
-		)
-	}
-	if !previous.WasPublished {
-		return r.repo.reopenAfterReplay(ctx, job.Key)
-	}
-	reason := CloseTimeout
-	if state.ExpectedSlots > 0 && state.ReceivedSlots >= state.ExpectedSlots {
-		reason = CloseComplete
-	}
-	return r.finalizer.finalizeUnderLock(ctx, job.Key, reason)
+	return r.completeRebuildUnderLock(ctx, job.Key, previous)
 }
 
 func rebuildUsesRawSources(key WindowKey, snapshot *TaskSnapshot) bool {
@@ -578,6 +874,74 @@ func deviceRollupVersionsForRule(
 		return versionIDs[i].String() < versionIDs[j].String()
 	})
 	return versionIDs
+}
+
+type rollupRebuildGroup struct {
+	SourceVersionIDs  []uuid.UUID
+	SourceGranularity Granularity
+	TargetGranularity Granularity
+	Start             time.Time
+	End               time.Time
+	Jobs              []RebuildJob
+}
+
+func groupRollupRebuildJobs(
+	jobs []RebuildJob,
+	snapshot *TaskSnapshot,
+) ([]rollupRebuildGroup, []RebuildJob) {
+	if snapshot == nil {
+		return nil, append([]RebuildJob(nil), jobs...)
+	}
+	groups := make([]rollupRebuildGroup, 0)
+	groupIndexes := make(map[string]int)
+	var ungrouped []RebuildJob
+	for _, job := range jobs {
+		if rebuildUsesRawSources(job.Key, snapshot) {
+			ungrouped = append(ungrouped, job)
+			continue
+		}
+		sourceGranularity := GranularityHourly
+		if job.Key.Granularity == GranularityWeekly ||
+			job.Key.Granularity == GranularityMonthly {
+			sourceGranularity = GranularityDaily
+		}
+		sourceVersionIDs := []uuid.UUID{job.Key.TaskVersionID}
+		if job.Key.Granularity == GranularityHourly {
+			sourceVersionIDs = deviceRollupVersionsForRule(
+				snapshot, snapshot.ByVersion[job.Key.TaskVersionID],
+			)
+		}
+		if len(sourceVersionIDs) == 0 {
+			ungrouped = append(ungrouped, job)
+			continue
+		}
+		parts := make([]string, 0, len(sourceVersionIDs))
+		for _, versionID := range sourceVersionIDs {
+			parts = append(parts, versionID.String())
+		}
+		groupKey := fmt.Sprintf(
+			"%s|%s|%d|%d|%s",
+			sourceGranularity,
+			job.Key.Granularity,
+			job.Key.Start.UTC().UnixNano(),
+			job.Key.End.UTC().UnixNano(),
+			strings.Join(parts, ","),
+		)
+		index, exists := groupIndexes[groupKey]
+		if !exists {
+			index = len(groups)
+			groupIndexes[groupKey] = index
+			groups = append(groups, rollupRebuildGroup{
+				SourceVersionIDs:  sourceVersionIDs,
+				SourceGranularity: sourceGranularity,
+				TargetGranularity: job.Key.Granularity,
+				Start:             job.Key.Start,
+				End:               job.Key.End,
+			})
+		}
+		groups[index].Jobs = append(groups[index].Jobs, job)
+	}
+	return groups, ungrouped
 }
 
 func (r *Rebuilder) replaySources(ctx context.Context, key WindowKey, lock *Lock) error {

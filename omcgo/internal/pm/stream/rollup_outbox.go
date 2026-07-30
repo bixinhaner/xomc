@@ -307,6 +307,36 @@ func (r *RollupOutboxRepository) VisitSnapshotsForPeriod(
 	return rows.Err()
 }
 
+type rebuildSnapshotSource interface {
+	VisitSnapshotsForPeriod(
+		context.Context,
+		[]uuid.UUID,
+		Granularity,
+		time.Time,
+		time.Time,
+		func(RollupPayload) error,
+	) error
+}
+
+func visitSnapshotsForRebuildBatch(
+	ctx context.Context,
+	source rebuildSnapshotSource,
+	taskVersionIDs []uuid.UUID,
+	granularity Granularity,
+	start, end time.Time,
+	dispatch func(RollupPayload) error,
+) (int, error) {
+	rows := 0
+	err := source.VisitSnapshotsForPeriod(
+		ctx, taskVersionIDs, granularity, start, end,
+		func(payload RollupPayload) error {
+			rows++
+			return dispatch(payload)
+		},
+	)
+	return rows, err
+}
+
 type RollupOutboxRelay struct {
 	repo            *RollupOutboxRepository
 	bus             event.EventBus

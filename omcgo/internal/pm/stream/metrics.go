@@ -18,6 +18,11 @@ type Metrics struct {
 	WatermarkBlockedTotal       prometheus.Counter
 	RebuildsTotal               *prometheus.CounterVec
 	RebuildErrorsTotal          prometheus.Counter
+	RebuildBatchesTotal         prometheus.Counter
+	RebuildJobsPerBatch         prometheus.Histogram
+	RebuildSnapshotRowsTotal    prometheus.Counter
+	RebuildSnapshotScanSeconds  prometheus.Histogram
+	RebuildCoalescedTotal       prometheus.Counter
 	WindowsFinalizedTotal       *prometheus.CounterVec
 	FinalizeErrorsTotal         prometheus.Counter
 	FinalizeDuration            prometheus.Histogram
@@ -81,6 +86,28 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_pm_aggregation_rebuild_errors_total",
 			Help: "Late-event aggregation rebuild failures.",
 		}),
+		RebuildBatchesTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_rebuild_batches_total",
+			Help: "Quiet-period rebuild batches claimed for processing.",
+		}),
+		RebuildJobsPerBatch: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "omc_pm_aggregation_rebuild_jobs_per_batch",
+			Help:    "Number of coalesced rebuild jobs processed in one batch.",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 8),
+		}),
+		RebuildSnapshotRowsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_rebuild_snapshot_rows_total",
+			Help: "Compact rollup snapshot rows read by rebuild batch scans.",
+		}),
+		RebuildSnapshotScanSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "omc_pm_aggregation_rebuild_snapshot_scan_seconds",
+			Help:    "Time spent sequentially scanning compact rollup snapshots for a rebuild batch.",
+			Buckets: prometheus.DefBuckets,
+		}),
+		RebuildCoalescedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_rebuild_coalesced_total",
+			Help: "Additional late-event generations coalesced into claimed rebuild jobs.",
+		}),
 		WindowsFinalizedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_windows_finalized_total",
 			Help: "Aggregation windows finalized by close reason.",
@@ -140,6 +167,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.WatermarkBlockedTotal,
 		m.RebuildsTotal,
 		m.RebuildErrorsTotal,
+		m.RebuildBatchesTotal,
+		m.RebuildJobsPerBatch,
+		m.RebuildSnapshotRowsTotal,
+		m.RebuildSnapshotScanSeconds,
+		m.RebuildCoalescedTotal,
 		m.WindowsFinalizedTotal,
 		m.FinalizeErrorsTotal,
 		m.FinalizeDuration,
