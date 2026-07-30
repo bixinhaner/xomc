@@ -30,6 +30,11 @@ type Metrics struct {
 	FinalizeInflight            prometheus.Gauge
 	FinalizeOldestDueSeconds    prometheus.Gauge
 	FinalizeClaimConflictsTotal prometheus.Counter
+	RedisSampledActiveWindows   *prometheus.GaugeVec
+	RedisSampledKeys            *prometheus.GaugeVec
+	RedisSampledEstimatedBytes  *prometheus.GaugeVec
+	RedisSweeperDeletedTotal    prometheus.Counter
+	RedisWriteErrorsTotal       prometheus.Counter
 	BuiltinReconcileRunsTotal   prometheus.Counter
 	BuiltinReconcileErrorsTotal prometheus.Counter
 	BuiltinVersionsChangedTotal prometheus.Counter
@@ -137,6 +142,26 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_pm_aggregation_finalize_claim_conflicts_total",
 			Help: "Finalize claim attempts blocked by an unexpired lease.",
 		}),
+		RedisSampledActiveWindows: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_redis_sampled_active_windows",
+			Help: "Active Redis aggregation windows observed in the latest bounded sample.",
+		}, []string{"granularity"}),
+		RedisSampledKeys: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_redis_sampled_keys",
+			Help: "Redis aggregation keys observed in the latest bounded sample.",
+		}, []string{"granularity"}),
+		RedisSampledEstimatedBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_aggregation_redis_sampled_estimated_bytes",
+			Help: "Redis MEMORY USAGE bytes observed in the latest bounded aggregation-state sample.",
+		}, []string{"granularity"}),
+		RedisSweeperDeletedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_redis_sweeper_deleted_total",
+			Help: "Published Redis aggregation windows safely removed by the bounded sweeper.",
+		}),
+		RedisWriteErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_redis_write_errors_total",
+			Help: "Redis aggregation state write or UNLINK failures.",
+		}),
 		BuiltinReconcileRunsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_builtin_reconcile_runs_total",
 			Help: "Built-in PM aggregation reconciliation runs.",
@@ -179,6 +204,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.FinalizeInflight,
 		m.FinalizeOldestDueSeconds,
 		m.FinalizeClaimConflictsTotal,
+		m.RedisSampledActiveWindows,
+		m.RedisSampledKeys,
+		m.RedisSampledEstimatedBytes,
+		m.RedisSweeperDeletedTotal,
+		m.RedisWriteErrorsTotal,
 		m.BuiltinReconcileRunsTotal,
 		m.BuiltinReconcileErrorsTotal,
 		m.BuiltinVersionsChangedTotal,

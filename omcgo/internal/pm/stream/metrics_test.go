@@ -22,6 +22,11 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 	metrics.FinalizeInflight.Set(2)
 	metrics.FinalizeOldestDueSeconds.Set(3600)
 	metrics.FinalizeClaimConflictsTotal.Inc()
+	metrics.RedisSampledActiveWindows.WithLabelValues("hourly").Set(3)
+	metrics.RedisSampledKeys.WithLabelValues("hourly").Set(12)
+	metrics.RedisSampledEstimatedBytes.WithLabelValues("hourly").Set(4096)
+	metrics.RedisSweeperDeletedTotal.Inc()
+	metrics.RedisWriteErrorsTotal.Inc()
 
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.Ready))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.DuplicateEventsTotal))
@@ -48,6 +53,11 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 		"omc_pm_aggregation_finalize_inflight",
 		"omc_pm_aggregation_finalize_oldest_due_seconds",
 		"omc_pm_aggregation_finalize_claim_conflicts_total",
+		"omc_pm_aggregation_redis_sampled_active_windows",
+		"omc_pm_aggregation_redis_sampled_keys",
+		"omc_pm_aggregation_redis_sampled_estimated_bytes",
+		"omc_pm_aggregation_redis_sweeper_deleted_total",
+		"omc_pm_aggregation_redis_write_errors_total",
 	} {
 		require.Contains(t, names, name)
 	}

@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -48,7 +50,10 @@ type Accumulator struct {
 	Max        float64
 }
 
-const compactAccumulatorVersion = "v1"
+const (
+	compactAccumulatorVersion       = "v2"
+	legacyCompactAccumulatorVersion = "v1"
+)
 
 type compactAccumulator struct {
 	Definition ContributionValue
@@ -56,6 +61,20 @@ type compactAccumulator struct {
 	Count      int64
 	Min        float64
 	Max        float64
+}
+
+type accumulatorIdentity struct {
+	Dimension     Dimension `json:"d"`
+	DimensionKey  string    `json:"dk"`
+	DimensionName string    `json:"dn,omitempty"`
+	ObjectLDN     string    `json:"o,omitempty"`
+	Technology    string    `json:"t,omitempty"`
+}
+
+type accumulatorMetricDefinition struct {
+	MetricPath string        `json:"m"`
+	MetricType string        `json:"mt"`
+	Operation  AggregationOp `json:"op"`
 }
 
 type WindowState struct {
@@ -76,8 +95,13 @@ type EntityCompleteness struct {
 }
 
 type RedisWindowStore struct {
-	client redis.UniversalClient
-	ttl    time.Duration
+	client   redis.UniversalClient
+	ttl      time.Duration
+	snapshot *SnapshotStore
+	metrics  *Metrics
+
+	definitionCache sync.Map
+	definitionMu    sync.Mutex
 }
 
 func NewRedisWindowStore(client redis.UniversalClient, ttl time.Duration) *RedisWindowStore {
@@ -85,6 +109,16 @@ func NewRedisWindowStore(client redis.UniversalClient, ttl time.Duration) *Redis
 		ttl = 45 * 24 * time.Hour
 	}
 	return &RedisWindowStore{client: client, ttl: ttl}
+}
+
+func (s *RedisWindowStore) SetSnapshot(snapshot *SnapshotStore) *RedisWindowStore {
+	s.snapshot = snapshot
+	return s
+}
+
+func (s *RedisWindowStore) SetMetrics(metrics *Metrics) *RedisWindowStore {
+	s.metrics = metrics
+	return s
 }
 
 func (s *RedisWindowStore) windowTTL(granularity Granularity) time.Duration {
@@ -100,6 +134,10 @@ func (s *RedisWindowStore) windowTTL(granularity Granularity) time.Duration {
 	default:
 		return s.ttl
 	}
+}
+
+func (s *RedisWindowStore) definitionTTL() time.Duration {
+	return max(s.ttl, 2*s.windowTTL(GranularityMonthly))
 }
 
 func (s *RedisWindowStore) ValidateConfiguration(ctx context.Context) error {
@@ -151,6 +189,15 @@ func (s *RedisWindowStore) accumulate(
 	}
 	shardCount := windowShardCount(contribution.ExpectedSlots, contribution.Key.Granularity)
 	keys := redisKeys(contribution.Key, shardCount)
+	versionDefinitions := redisVersionDefinitionsKey(contribution.Key.TaskVersionID)
+	pendingDefinitions := make(map[string]any)
+	deviceOUI, deviceSN := "", ""
+	for _, value := range contribution.Values {
+		if value.DeviceOUI != "" || value.DeviceSN != "" {
+			deviceOUI, deviceSN = value.DeviceOUI, value.DeviceSN
+			break
+		}
+	}
 	args := []any{
 		contribution.SourceFileID,
 		contribution.DeviceID + "|" + contribution.SlotStart.UTC().Format(time.RFC3339Nano),
@@ -165,15 +212,31 @@ func (s *RedisWindowStore) accumulate(
 		contribution.RollupChunkIndex,
 		contribution.RollupChunkCount,
 		shardCount,
+		contribution.Key.TaskID.String(),
+		contribution.Key.TaskVersionID.String(),
+		contribution.Key.EntityKey,
+		string(contribution.Key.Granularity),
+		contribution.Key.Start.UTC().Format(time.RFC3339Nano),
+		contribution.Key.End.UTC().Format(time.RFC3339Nano),
+		deviceOUI,
+		deviceSN,
 	}
 	for _, value := range contribution.Values {
-		encoded, err := encodeDefinition(value)
+		legacyID, err := accumulatorDefinitionID(value)
 		if err != nil {
 			return AccumulateResult{}, err
 		}
-		definitionID, err := accumulatorDefinitionID(value)
+		identityID, identity, err := encodeAccumulatorIdentity(value)
 		if err != nil {
 			return AccumulateResult{}, err
+		}
+		metricID, metricDefinition, err := encodeAccumulatorMetricDefinition(value)
+		if err != nil {
+			return AccumulateResult{}, err
+		}
+		cacheKey := contribution.Key.TaskVersionID.String() + "|" + metricID
+		if _, loaded := s.definitionCache.Load(cacheKey); !loaded {
+			pendingDefinitions[metricID] = metricDefinition
 		}
 		entityKey := aggregationGroupKey(value)
 		if entityKey == "" {
@@ -184,10 +247,22 @@ func (s *RedisWindowStore) accumulate(
 		if value.Composed {
 			sum, count, minValue, maxValue = value.Sum, value.Count, value.Min, value.Max
 		}
-		args = append(args, definitionID, encoded, shard, sum, count, minValue, maxValue)
+		args = append(
+			args, identityID+"|"+metricID, legacyID, identity,
+			shard, sum, count, minValue, maxValue,
+		)
 	}
 	args = append(args, lockToken)
-	scriptKeys := []string{keys.seen, keys.slots, keys.meta, keys.entityMeta, keys.chunks}
+	if len(pendingDefinitions) > 0 {
+		if err := s.ensureVersionDefinitions(
+			ctx, contribution.Key.TaskVersionID, versionDefinitions, pendingDefinitions,
+		); err != nil {
+			return AccumulateResult{}, err
+		}
+	}
+	scriptKeys := []string{
+		keys.seen, keys.slots, keys.meta, keys.entityMeta, keys.chunks, keys.identities,
+	}
 	for shard := 0; shard < shardCount; shard++ {
 		scriptKeys = append(scriptKeys, keys.acc[shard], keys.defs[shard])
 	}
@@ -198,6 +273,7 @@ func (s *RedisWindowStore) accumulate(
 		args...,
 	).Slice()
 	if err != nil {
+		s.recordRedisWriteError()
 		return AccumulateResult{}, fmt.Errorf("accumulate PM aggregation window: %w", err)
 	}
 	if len(raw) != 3 {
@@ -220,6 +296,43 @@ func (s *RedisWindowStore) accumulate(
 	}, nil
 }
 
+func (s *RedisWindowStore) ensureVersionDefinitions(
+	ctx context.Context,
+	versionID uuid.UUID,
+	redisKey string,
+	definitions map[string]any,
+) error {
+	s.definitionMu.Lock()
+	defer s.definitionMu.Unlock()
+	pending := make(map[string]any, len(definitions))
+	for metricID, definition := range definitions {
+		cacheKey := versionID.String() + "|" + metricID
+		if _, loaded := s.definitionCache.Load(cacheKey); !loaded {
+			pending[metricID] = definition
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	pipe := s.client.TxPipeline()
+	pipe.HSet(ctx, redisKey, pending)
+	pipe.Expire(ctx, redisKey, s.definitionTTL())
+	if _, err := pipe.Exec(ctx); err != nil {
+		s.recordRedisWriteError()
+		return fmt.Errorf("store PM aggregation task-version metric definitions: %w", err)
+	}
+	for metricID := range pending {
+		s.definitionCache.Store(versionID.String()+"|"+metricID, struct{}{})
+	}
+	return nil
+}
+
+func (s *RedisWindowStore) recordRedisWriteError() {
+	if s.metrics != nil {
+		s.metrics.RedisWriteErrorsTotal.Inc()
+	}
+}
+
 func boolInt(value bool) int {
 	if value {
 		return 1
@@ -233,11 +346,12 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 		ctx, rootKeys.meta,
 		"expected_slots", "received_slots", "source_expected_slots",
 		"source_received_slots", "source_incomplete_slots", "shard_count",
+		"device_oui", "device_sn",
 	).Result()
 	if err != nil {
 		return WindowState{}, fmt.Errorf("read PM aggregation Redis window metadata: %w", err)
 	}
-	if len(meta) != 6 || meta[0] == nil {
+	if len(meta) != 8 || meta[0] == nil {
 		return WindowState{}, redis.Nil
 	}
 	state := WindowState{Entities: make(map[string]EntityCompleteness)}
@@ -247,6 +361,13 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 	state.SourceReceivedSlots = parseRedisInt(meta[3])
 	state.SourceIncompleteSlots = parseRedisInt(meta[4])
 	shardCount := int(parseRedisInt(meta[5]))
+	deviceOUI, deviceSN := fmt.Sprint(meta[6]), fmt.Sprint(meta[7])
+	if meta[6] == nil {
+		deviceOUI = ""
+	}
+	if meta[7] == nil {
+		deviceSN = ""
+	}
 	if shardCount <= 0 || shardCount > maxWindowShards {
 		shardCount = 1
 	}
@@ -286,17 +407,18 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 		}
 	}
 
-	type partial struct {
-		def   ContributionValue
-		sum   float64
-		count int64
-		min   float64
-		max   float64
+	identities, err := s.readAccumulatorIdentities(ctx, keys.identities)
+	if err != nil {
+		return WindowState{}, err
 	}
-	values := make(map[string]*partial)
-	compactIDs := make(map[string]struct{})
+	metricDefinitions, err := s.readAccumulatorMetricDefinitions(ctx, key.TaskVersionID)
+	if err != nil {
+		return WindowState{}, err
+	}
+	values := make(map[string]*compactAccumulator)
 	for shard := 0; shard < shardCount; shard++ {
 		var cursor uint64
+		legacyNumeric := make(map[string]*compactAccumulator)
 		for {
 			fields, next, scanErr := s.client.HScan(
 				ctx, keys.acc[shard], cursor, "", 1000,
@@ -310,30 +432,63 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 			missingSet := make(map[string]struct{})
 			for index := 0; index+1 < len(fields); index += 2 {
 				field, raw := fields[index], fields[index+1]
-				suffixIndex := strings.LastIndexByte(field, '|')
-				if suffixIndex <= 0 {
+				if strings.HasPrefix(raw, compactAccumulatorVersion+"|") {
+					definition, decodeErr := decodeV2AccumulatorDefinition(
+						field, identities, metricDefinitions, deviceOUI, deviceSN,
+					)
+					if decodeErr != nil {
+						return WindowState{}, decodeErr
+					}
+					sum, count, minValue, maxValue, decodeErr :=
+						decodeCompactAccumulatorV2(raw)
+					if decodeErr != nil {
+						return WindowState{}, fmt.Errorf(
+							"decode v2 PM aggregation accumulator %s: %w", field, decodeErr,
+						)
+					}
+					mergeCompactAccumulator(values, compactAccumulator{
+						Definition: definition, Sum: sum, Count: count,
+						Min: minValue, Max: maxValue,
+					})
+					continue
+				}
+				if strings.HasPrefix(raw, legacyCompactAccumulatorVersion+"|") {
 					item, decodeErr := decodeCompactAccumulator(raw)
 					if decodeErr != nil {
 						return WindowState{}, fmt.Errorf(
-							"decode compact PM aggregation accumulator %s: %w", field, decodeErr,
+							"decode legacy compact PM aggregation accumulator %s: %w",
+							field, decodeErr,
 						)
 					}
-					values[field] = &partial{
-						def: item.Definition, sum: item.Sum, count: item.Count,
-						min: item.Min, max: item.Max,
-					}
-					compactIDs[field] = struct{}{}
+					mergeCompactAccumulator(values, item)
 					continue
 				}
-				base := field[:suffixIndex]
-				if _, compact := compactIDs[base]; compact {
+				suffixIndex := strings.LastIndexByte(field, '|')
+				if suffixIndex <= 0 {
 					continue
 				}
-				if values[base] == nil {
+				base, suffix := field[:suffixIndex], field[suffixIndex+1:]
+				if suffix != "sum" && suffix != "count" &&
+					suffix != "min" && suffix != "max" {
+					continue
+				}
+				if legacyNumeric[base] == nil {
+					legacyNumeric[base] = &compactAccumulator{}
 					if _, exists := missingSet[base]; !exists {
 						missingSet[base] = struct{}{}
 						missingDefinitions = append(missingDefinitions, base)
 					}
+				}
+				item := legacyNumeric[base]
+				switch suffix {
+				case "sum":
+					item.Sum, _ = strconv.ParseFloat(raw, 64)
+				case "count":
+					item.Count, _ = strconv.ParseInt(raw, 10, 64)
+				case "min":
+					item.Min, _ = strconv.ParseFloat(raw, 64)
+				case "max":
+					item.Max, _ = strconv.ParseFloat(raw, 64)
 				}
 			}
 			if len(missingDefinitions) > 0 {
@@ -351,37 +506,11 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 							"PM aggregation accumulator definition %s is missing", base,
 						)
 					}
-					encoded := fmt.Sprint(definitions[index])
-					def, decodeErr := decodeDefinition(encoded)
+					def, decodeErr := decodeDefinition(fmt.Sprint(definitions[index]))
 					if decodeErr != nil {
 						return WindowState{}, decodeErr
 					}
-					values[base] = &partial{def: def}
-				}
-			}
-			for index := 0; index+1 < len(fields); index += 2 {
-				field, raw := fields[index], fields[index+1]
-				suffixIndex := strings.LastIndexByte(field, '|')
-				if suffixIndex <= 0 {
-					continue
-				}
-				base, suffix := field[:suffixIndex], field[suffixIndex+1:]
-				if _, compact := compactIDs[base]; compact {
-					continue
-				}
-				item := values[base]
-				if item == nil {
-					continue
-				}
-				switch suffix {
-				case "sum":
-					item.sum, _ = strconv.ParseFloat(raw, 64)
-				case "count":
-					item.count, _ = strconv.ParseInt(raw, 10, 64)
-				case "min":
-					item.min, _ = strconv.ParseFloat(raw, 64)
-				case "max":
-					item.max, _ = strconv.ParseFloat(raw, 64)
+					legacyNumeric[base].Definition = def
 				}
 			}
 			cursor = next
@@ -389,10 +518,14 @@ func (s *RedisWindowStore) Read(ctx context.Context, key WindowKey) (WindowState
 				break
 			}
 		}
+		for _, item := range legacyNumeric {
+			mergeCompactAccumulator(values, *item)
+		}
 	}
 	for _, item := range values {
 		state.Accumulators = append(state.Accumulators, Accumulator{
-			Definition: item.def, Sum: item.sum, Count: item.count, Min: item.min, Max: item.max,
+			Definition: item.Definition, Sum: item.Sum, Count: item.Count,
+			Min: item.Min, Max: item.Max,
 		})
 	}
 	return state, nil
@@ -486,6 +619,15 @@ func (s *RedisWindowStore) DeleteState(ctx context.Context, key WindowKey) error
 }
 
 func (s *RedisWindowStore) delete(ctx context.Context, key WindowKey, includeLock bool) error {
+	return s.unlink(ctx, key, includeLock, 128)
+}
+
+func (s *RedisWindowStore) unlink(
+	ctx context.Context,
+	key WindowKey,
+	includeLock bool,
+	batchSize int,
+) error {
 	rootKeys := redisKeys(key, 1)
 	shardCountValue, err := s.client.HGet(ctx, rootKeys.meta, "shard_count").Int()
 	if err != nil && !errors.Is(err, redis.Nil) {
@@ -496,22 +638,29 @@ func (s *RedisWindowStore) delete(ctx context.Context, key WindowKey, includeLoc
 	}
 	keys := redisKeys(key, shardCountValue)
 	deleteKeys := []string{
-		keys.seen, keys.slots, keys.meta, keys.entityMeta, keys.chunks,
+		keys.seen, keys.slots, keys.meta, keys.entityMeta, keys.chunks, keys.identities,
 	}
 	if includeLock {
 		deleteKeys = append(deleteKeys, keys.lock)
 	}
 	deleteKeys = append(deleteKeys, keys.acc...)
 	deleteKeys = append(deleteKeys, keys.defs...)
-	if err := s.client.Del(ctx, deleteKeys...).Err(); err != nil {
-		return fmt.Errorf("delete PM aggregation Redis window: %w", err)
+	if batchSize <= 0 {
+		batchSize = 128
+	}
+	for start := 0; start < len(deleteKeys); start += batchSize {
+		end := min(start+batchSize, len(deleteKeys))
+		if err := s.client.Unlink(ctx, deleteKeys[start:end]...).Err(); err != nil {
+			s.recordRedisWriteError()
+			return fmt.Errorf("unlink PM aggregation Redis window: %w", err)
+		}
 	}
 	return nil
 }
 
 type windowRedisKeys struct {
-	seen, slots, meta, entityMeta, chunks, lock string
-	acc, defs                                   []string
+	seen, slots, meta, entityMeta, chunks, identities, lock string
+	acc, defs                                               []string
 }
 
 func redisKeys(key WindowKey, shardCount int) windowRedisKeys {
@@ -528,7 +677,8 @@ func redisKeys(key WindowKey, shardCount int) windowRedisKeys {
 	keys := windowRedisKeys{
 		seen: prefix + ":seen", slots: prefix + ":slots",
 		meta: prefix + ":meta", entityMeta: prefix + ":entities",
-		chunks: prefix + ":chunks", lock: prefix + ":finalize-lock",
+		chunks: prefix + ":chunks", identities: prefix + ":identities",
+		lock: prefix + ":finalize-lock",
 	}
 	keys.acc = make([]string, shardCount)
 	keys.defs = make([]string, shardCount)
@@ -537,6 +687,10 @@ func redisKeys(key WindowKey, shardCount int) windowRedisKeys {
 		keys.defs[shard] = fmt.Sprintf("%s:defs:%03d", prefix, shard)
 	}
 	return keys
+}
+
+func redisVersionDefinitionsKey(versionID uuid.UUID) string {
+	return fmt.Sprintf("pmagg:{%s}:definitions:v2", versionID)
 }
 
 func encodeDefinition(value ContributionValue) (string, error) {
@@ -560,7 +714,7 @@ func decodeCompactAccumulator(raw string) (compactAccumulator, error) {
 			"invalid compact accumulator field count %d", len(parts),
 		)
 	}
-	if parts[0] != compactAccumulatorVersion {
+	if parts[0] != legacyCompactAccumulatorVersion {
 		return compactAccumulator{}, fmt.Errorf("unsupported compact accumulator version %q", parts[0])
 	}
 	definition, err := decodeDefinition(parts[1])
@@ -590,6 +744,194 @@ func decodeCompactAccumulator(raw string) (compactAccumulator, error) {
 		Min:        minValue,
 		Max:        maxValue,
 	}, nil
+}
+
+func encodeCompactAccumulatorV2(sum float64, count int64, minValue, maxValue float64) string {
+	return strings.Join([]string{
+		compactAccumulatorVersion,
+		strconv.FormatFloat(sum, 'g', 17, 64),
+		strconv.FormatInt(count, 10),
+		strconv.FormatFloat(minValue, 'g', 17, 64),
+		strconv.FormatFloat(maxValue, 'g', 17, 64),
+	}, "|")
+}
+
+func decodeCompactAccumulatorV2(raw string) (float64, int64, float64, float64, error) {
+	parts := strings.Split(raw, "|")
+	if len(parts) != 5 || parts[0] != compactAccumulatorVersion {
+		return 0, 0, 0, 0, fmt.Errorf("invalid v2 compact accumulator")
+	}
+	sum, err := strconv.ParseFloat(parts[1], 64)
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("parse v2 accumulator sum: %w", err)
+	}
+	count, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("parse v2 accumulator count: %w", err)
+	}
+	minValue, err := strconv.ParseFloat(parts[3], 64)
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("parse v2 accumulator min: %w", err)
+	}
+	maxValue, err := strconv.ParseFloat(parts[4], 64)
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("parse v2 accumulator max: %w", err)
+	}
+	return sum, count, minValue, maxValue, nil
+}
+
+func encodeAccumulatorIdentity(value ContributionValue) (string, string, error) {
+	identity := accumulatorIdentity{
+		Dimension: value.Dimension, DimensionKey: value.DimensionKey,
+		DimensionName: value.DimensionName, ObjectLDN: value.ObjectLDN,
+		Technology: value.Technology,
+	}
+	return encodeAccumulatorMetadata(identity, 12)
+}
+
+func encodeAccumulatorMetricDefinition(value ContributionValue) (string, string, error) {
+	definition := accumulatorMetricDefinition{
+		MetricPath: value.MetricPath, MetricType: value.MetricType, Operation: value.Operation,
+	}
+	return encodeAccumulatorMetadata(definition, 8)
+}
+
+func encodeAccumulatorMetadata(value any, idBytes int) (string, string, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "", "", fmt.Errorf("marshal PM aggregation compact metadata: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:idBytes]),
+		base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func decodeAccumulatorMetadata(encoded string, target any) error {
+	data, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return fmt.Errorf("decode PM aggregation compact metadata: %w", err)
+	}
+	if err := json.Unmarshal(data, target); err != nil {
+		return fmt.Errorf("unmarshal PM aggregation compact metadata: %w", err)
+	}
+	return nil
+}
+
+func (s *RedisWindowStore) readAccumulatorIdentities(
+	ctx context.Context,
+	key string,
+) (map[string]accumulatorIdentity, error) {
+	raw, err := s.client.HGetAll(ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("read PM aggregation window identities: %w", err)
+	}
+	result := make(map[string]accumulatorIdentity, len(raw))
+	for id, encoded := range raw {
+		var identity accumulatorIdentity
+		if err := decodeAccumulatorMetadata(encoded, &identity); err != nil {
+			return nil, err
+		}
+		result[id] = identity
+	}
+	return result, nil
+}
+
+func (s *RedisWindowStore) readAccumulatorMetricDefinitions(
+	ctx context.Context,
+	versionID uuid.UUID,
+) (map[string]accumulatorMetricDefinition, error) {
+	raw, err := s.client.HGetAll(ctx, redisVersionDefinitionsKey(versionID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("read PM aggregation task-version definitions: %w", err)
+	}
+	result := make(map[string]accumulatorMetricDefinition, len(raw))
+	for id, encoded := range raw {
+		var definition accumulatorMetricDefinition
+		if err := decodeAccumulatorMetadata(encoded, &definition); err != nil {
+			return nil, err
+		}
+		result[id] = definition
+	}
+	if s.snapshot == nil || s.snapshot.Current() == nil {
+		return result, nil
+	}
+	version := s.snapshot.Current().ByVersion[versionID]
+	if version == nil {
+		return result, nil
+	}
+	for path, rule := range version.Counters {
+		value := ContributionValue{
+			MetricPath: path, MetricType: "counter", Operation: rule.Aggregation,
+		}
+		id, _, encodeErr := encodeAccumulatorMetricDefinition(value)
+		if encodeErr != nil {
+			return nil, encodeErr
+		}
+		if _, exists := result[id]; !exists {
+			result[id] = accumulatorMetricDefinition{
+				MetricPath: path, MetricType: "counter", Operation: rule.Aggregation,
+			}
+		}
+	}
+	return result, nil
+}
+
+func decodeV2AccumulatorDefinition(
+	field string,
+	identities map[string]accumulatorIdentity,
+	metrics map[string]accumulatorMetricDefinition,
+	deviceOUI string,
+	deviceSN string,
+) (ContributionValue, error) {
+	parts := strings.Split(field, "|")
+	if len(parts) != 2 {
+		return ContributionValue{}, fmt.Errorf("invalid v2 PM accumulator identity %q", field)
+	}
+	identity, ok := identities[parts[0]]
+	if !ok {
+		return ContributionValue{}, fmt.Errorf("v2 PM accumulator identity %s is missing", parts[0])
+	}
+	metric, ok := metrics[parts[1]]
+	if !ok {
+		return ContributionValue{}, fmt.Errorf("v2 PM accumulator metric %s is missing", parts[1])
+	}
+	definition := ContributionValue{
+		Dimension: identity.Dimension, DimensionKey: identity.DimensionKey,
+		DimensionName: identity.DimensionName, ObjectLDN: identity.ObjectLDN,
+		Technology: identity.Technology, MetricPath: metric.MetricPath,
+		MetricType: metric.MetricType, Operation: metric.Operation,
+	}
+	if identity.Dimension == DimensionDevice {
+		definition.DeviceOUI, definition.DeviceSN = deviceOUI, deviceSN
+	}
+	return definition, nil
+}
+
+func mergeCompactAccumulator(
+	values map[string]*compactAccumulator,
+	incoming compactAccumulator,
+) {
+	id, err := accumulatorDefinitionID(incoming.Definition)
+	if err != nil {
+		return
+	}
+	current := values[id]
+	if current == nil {
+		copy := incoming
+		values[id] = &copy
+		return
+	}
+	if incoming.Count <= 0 {
+		return
+	}
+	if current.Count <= 0 {
+		current.Min, current.Max = incoming.Min, incoming.Max
+	} else {
+		current.Min = min(current.Min, incoming.Min)
+		current.Max = max(current.Max, incoming.Max)
+	}
+	current.Sum += incoming.Sum
+	current.Count += incoming.Count
 }
 
 func decodeDefinition(value string) (ContributionValue, error) {
