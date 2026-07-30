@@ -1,0 +1,77 @@
+rule_files:
+  - storage-queue-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'omc_redis_task_queue_oldest_age_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue_family="taskq"}'
+        values: '0+60x80'
+      - series: 'omc_redis_task_queue_up{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue_family="taskq"}'
+        values: '1x81'
+      - series: 'omc_redis_task_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue_family="taskq"}'
+        values: '0+60x80'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: RedisTaskQueueOldestAgeHigh
+        exp_alerts: []
+      # The five-minute expiry/index-cleanup grace ends at 65 minutes. The
+      # strict greater-than threshold must remain inactive at the boundary.
+      - eval_time: 65m
+        alertname: RedisTaskQueueOldestAgeHigh
+        exp_alerts: []
+      # The alert condition first becomes true at minute 66, so its ten-minute
+      # persistence window has not elapsed at minute 75.
+      - eval_time: 75m
+        alertname: RedisTaskQueueOldestAgeHigh
+        exp_alerts: []
+      - eval_time: 76m
+        alertname: RedisTaskQueueOldestAgeHigh
+        exp_alerts:
+          - exp_labels:
+              queue_family: taskq
+              severity: warning
+              domain: omc
+              subsystem: redis
+            exp_annotations:
+              summary: "Redis taskq 最老任务超过 65 分钟"
+              description: "Redis 队列最老任务已超过最长业务 TTL（60 分钟）及 5 分钟清理宽限；检查 ACS worker、设备连接、过期扫描和 Redis 索引清理。"
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_redis_task_queue_oldest_age_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue_family="taskq"}'
+        values: '4000x81'
+      - series: 'omc_redis_task_queue_up{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue_family="taskq"}'
+        values: '1x81'
+      - series: 'omc_redis_task_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue_family="taskq"}'
+        values: '0+60x80'
+      - series: 'omc_redis_task_queue_oldest_age_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue_family="taskq"}'
+        values: '4000x81'
+      - series: 'omc_redis_task_queue_up{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue_family="taskq"}'
+        values: '0x81'
+      - series: 'omc_redis_task_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue_family="taskq"}'
+        values: '0+60x80'
+    alert_rule_test:
+      - eval_time: 76m
+        alertname: RedisTaskQueueOldestAgeHigh
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_redis_task_queue_oldest_age_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue_family="taskq"}'
+        values: '4000x81'
+      - series: 'omc_redis_task_queue_up{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue_family="taskq"}'
+        values: '1x81'
+      - series: 'omc_redis_task_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="app",instance="app:9091",job="omc",queue_family="taskq"}'
+        values: '0+60x80'
+      - series: 'omc_redis_task_queue_oldest_age_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue_family="taskq"}'
+        values: '4000x81'
+      - series: 'omc_redis_task_queue_up{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue_family="taskq"}'
+        values: '1x81'
+      - series: 'omc_redis_task_queue_sample_timestamp_seconds{deployment_unit="omcgo",service="worker",instance="worker:9092",job="omc",queue_family="taskq"}'
+        values: '0x81'
+    alert_rule_test:
+      - eval_time: 76m
+        alertname: RedisTaskQueueOldestAgeHigh
+        exp_alerts: []

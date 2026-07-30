@@ -145,8 +145,8 @@ omc_redis_task_queue_oldest_age_seconds{queue_family=~"cmdq|taskq"}
 Expected: oldest age only while the matching observer is healthy and sampled within 120 seconds. NO-DATA means the age must not be interpreted as zero.
 
 ## Redis task queue oldest-age alert safety (MUST-HAVE after the observer starts)
-(max by (queue_family) (omc_redis_task_queue_oldest_age_seconds and on (deployment_unit,service,instance,job,queue_family) (omc_redis_task_queue_up == 1) and on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120)) and on (queue_family) (min by (queue_family) (omc_redis_task_queue_up * on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120)) == 1)) > 900
-Expected: oldest-age alert fires only for a fresh, healthy full-family sample; observer failure or stale samples must suppress the alert instead of evaluating a retained gauge.
+(max by (queue_family) (omc_redis_task_queue_oldest_age_seconds and on (deployment_unit,service,instance,job,queue_family) (omc_redis_task_queue_up == 1) and on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < 120)) and on (queue_family) (min by (queue_family) (omc_redis_task_queue_up * on (deployment_unit,service,instance,job,queue_family) (time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120)) == 1)) > 3900
+Expected: oldest-age alert condition becomes true only after the longest business task TTL (60 minutes) plus five minutes of expiry/index-cleanup grace, and only for a fresh, healthy full-family sample. The alert rule then requires the condition to persist for 10 minutes; observer failure or stale samples must suppress the alert instead of evaluating a retained gauge.
 
 ## PostgreSQL (MUST-HAVE after otelcol PostgreSQL receiver is connected)
 pg_stat_database_numbackends
