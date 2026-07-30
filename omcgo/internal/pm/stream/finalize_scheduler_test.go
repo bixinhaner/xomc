@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -145,6 +146,62 @@ func TestFinalizeSchedulerRunCycleKeepsFixedWorkerBoundAndRefills(t *testing.T) 
 	}
 	if got := maximum.Load(); got != 3 {
 		t.Fatalf("maximum active finalizers = %d, want fixed worker bound 3 with continuous refill", got)
+	}
+}
+
+func TestFinalizeSchedulerPoisonWindowDoesNotStopHealthyBacklogAcrossQueues(t *testing.T) {
+	deviceVersion := uuid.MustParse("18000000-0000-4000-8000-000000000018")
+	otherVersion := uuid.MustParse("19000000-0000-4000-8000-000000000019")
+	deviceWindows := finalizeTestWindows(deviceVersion, GranularityHourly, 2)
+	deviceWindows[0].Key.EntityKey = "poison"
+	otherWindows := finalizeTestWindows(otherVersion, GranularityHourly, 1)
+	longWindows := finalizeTestWindows(otherVersion, GranularityDaily, 1)
+	repo := newMemoryFinalizeRepository(append(
+		append(deviceWindows, otherWindows...),
+		longWindows...,
+	)...)
+	finalized := make(map[string]int)
+	scanner := newTestTimeoutScanner(repo, deviceVersion, 1, func(
+		_ context.Context, key WindowKey, _ CloseReason, _ uuid.UUID,
+	) error {
+		if key.EntityKey == "poison" {
+			return errors.New("permanent formula error")
+		}
+		finalized[finalizeTestKey(key)]++
+		return nil
+	})
+
+	err := scanner.runOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "permanent formula error") {
+		t.Fatalf("scheduler error = %v, want the isolated poison failure", err)
+	}
+	if len(finalized) != 3 {
+		t.Fatalf("healthy finalized windows = %d, want device/other/long-period backlog all drained", len(finalized))
+	}
+	poison := repo.window(deviceWindows[0].Key)
+	if poison.attempts != 1 {
+		t.Fatalf("poison attempts = %d, want one persisted failure", poison.attempts)
+	}
+	if !poison.nextAttemptAt.After(repo.currentTime()) {
+		t.Fatalf("poison next attempt = %v, want persistent retry deferral", poison.nextAttemptAt)
+	}
+}
+
+func TestFinalizeRetryDelayIsBoundedExponential(t *testing.T) {
+	tests := []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{attempt: 1, want: 30 * time.Second},
+		{attempt: 2, want: time.Minute},
+		{attempt: 3, want: 2 * time.Minute},
+		{attempt: 8, want: 30 * time.Minute},
+		{attempt: 100, want: 30 * time.Minute},
+	}
+	for _, test := range tests {
+		if got := finalizeRetryDelay(test.attempt); got != test.want {
+			t.Fatalf("finalizeRetryDelay(%d) = %s, want %s", test.attempt, got, test.want)
+		}
 	}
 }
 
@@ -290,6 +347,43 @@ func TestFinalizeSchedulerMetricsDistinguishLeaseConflictFromEmptyQueue(t *testi
 	if got := testutil.ToFloat64(metrics.FinalizeClaimConflictsTotal); got != 1 {
 		t.Fatalf("foreign active lease recorded %v claim conflicts, want 1", got)
 	}
+	if got := testutil.ToFloat64(metrics.FinalizeOldestDueSeconds); got <= 0 {
+		t.Fatalf("foreign active lease oldest due seconds = %v, want an alertable positive age", got)
+	}
+}
+
+func TestFinalizeOldestDueGaugeGrowsWithRepositoryTimeWhileLeaseIsActive(t *testing.T) {
+	deviceVersion := uuid.MustParse("58000000-0000-4000-8000-000000000058")
+	repo := newMemoryFinalizeRepository(
+		finalizeTestWindows(deviceVersion, GranularityHourly, 1)...,
+	)
+	base := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	repo.setCurrentTime(base)
+	repo.windows[0].record.Key.End = base.Add(-time.Hour)
+	repo.windows[0].leaseOwner = uuid.New()
+	repo.windows[0].leaseUntil = base.Add(time.Hour)
+	registry := prometheus.NewRegistry()
+	metrics := NewMetrics(registry)
+	scanner := newTestTimeoutScanner(
+		repo, deviceVersion, 1,
+		func(context.Context, WindowKey, CloseReason, uuid.UUID) error {
+			t.Fatal("actively leased window must not be finalized by this scanner")
+			return nil
+		},
+	).SetMetrics(metrics)
+
+	if err := scanner.refreshOldestDue(context.Background()); err != nil {
+		t.Fatalf("refresh oldest due at base time: %v", err)
+	}
+	first := testutil.ToFloat64(metrics.FinalizeOldestDueSeconds)
+	repo.setCurrentTime(base.Add(10 * time.Minute))
+	if err := scanner.refreshOldestDue(context.Background()); err != nil {
+		t.Fatalf("refresh oldest due after clock advance: %v", err)
+	}
+	second := testutil.ToFloat64(metrics.FinalizeOldestDueSeconds)
+	if delta := second - first; delta < 599.999 || delta > 600.001 {
+		t.Fatalf("oldest due grew by %v seconds, want %v", second-first, (10 * time.Minute).Seconds())
+	}
 }
 
 func TestFinalizeSchedulerSameScannerReclaimUsesNewTokenAndRejectsStaleCompletion(t *testing.T) {
@@ -363,15 +457,18 @@ func TestFinalizeSchedulerRenewsShortLeaseDuringSlowFinalize(t *testing.T) {
 }
 
 type memoryFinalizeWindow struct {
-	record     WindowRecord
-	leaseOwner uuid.UUID
-	leaseUntil time.Time
-	done       bool
+	record        WindowRecord
+	leaseOwner    uuid.UUID
+	leaseUntil    time.Time
+	done          bool
+	attempts      int
+	nextAttemptAt time.Time
 }
 
 type memoryFinalizeRepository struct {
 	mu      sync.Mutex
 	windows []memoryFinalizeWindow
+	now     time.Time
 }
 
 func newMemoryFinalizeRepository(records ...WindowRecord) *memoryFinalizeRepository {
@@ -403,7 +500,7 @@ func (r *memoryFinalizeRepository) claimDue(
 ) ([]WindowRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	now := time.Now()
+	now := r.currentTimeLocked()
 	result := make([]WindowRecord, 0, limit)
 	for uint64(len(result)) < limit {
 		selected := -1
@@ -412,6 +509,7 @@ func (r *memoryFinalizeRepository) claimDue(
 			if window.done || window.record.Key.Granularity != granularity ||
 				window.record.Key.End.After(dueBefore) ||
 				(!window.leaseUntil.IsZero() && window.leaseUntil.After(now)) ||
+				window.nextAttemptAt.After(now) ||
 				!matchesClaimVersionFilter(window.record.Key.TaskVersionID, filter) {
 				continue
 			}
@@ -428,6 +526,7 @@ func (r *memoryFinalizeRepository) claimDue(
 		}
 		r.windows[selected].leaseOwner = leaseOwner
 		r.windows[selected].leaseUntil = leaseUntil
+		r.windows[selected].record.FinalizeAttempts = r.windows[selected].attempts
 		result = append(result, r.windows[selected].record)
 	}
 	return result, nil
@@ -455,6 +554,32 @@ func (r *memoryFinalizeRepository) CompleteClaim(
 	return fmt.Errorf("complete unknown finalize test window")
 }
 
+func (r *memoryFinalizeRepository) FailClaim(
+	_ context.Context,
+	key WindowKey,
+	leaseOwner uuid.UUID,
+	cause error,
+	retryAfter time.Duration,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for index := range r.windows {
+		window := &r.windows[index]
+		if sameFinalizeTestWindow(window.record.Key, key) {
+			if window.leaseOwner != leaseOwner {
+				return ErrFinalizeClaimLost
+			}
+			window.record.Status = "failed"
+			window.attempts++
+			window.nextAttemptAt = r.currentTimeLocked().Add(retryAfter)
+			window.leaseOwner = uuid.Nil
+			window.leaseUntil = time.Time{}
+			return nil
+		}
+	}
+	return fmt.Errorf("fail unknown finalize test window: %v", cause)
+}
+
 func (r *memoryFinalizeRepository) hasClaimConflict(
 	_ context.Context,
 	granularity Granularity,
@@ -464,7 +589,7 @@ func (r *memoryFinalizeRepository) hasClaimConflict(
 ) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	now := time.Now()
+	now := r.currentTimeLocked()
 	for index := range r.windows {
 		window := &r.windows[index]
 		if !window.done &&
@@ -477,6 +602,34 @@ func (r *memoryFinalizeRepository) hasClaimConflict(
 		}
 	}
 	return false, nil
+}
+
+func (r *memoryFinalizeRepository) OldestDue(
+	_ context.Context,
+	graceByGranularity map[Granularity]time.Duration,
+	fallbackGrace time.Duration,
+) (time.Duration, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := r.currentTimeLocked()
+	var oldest time.Duration
+	for index := range r.windows {
+		window := &r.windows[index]
+		if window.done ||
+			(window.record.Status != "" && window.record.Status != "open" &&
+				window.record.Status != "failed") {
+			continue
+		}
+		grace := graceByGranularity[window.record.Key.Granularity]
+		if grace <= 0 {
+			grace = fallbackGrace
+		}
+		age := now.Sub(window.record.Key.End.Add(grace))
+		if age > oldest {
+			oldest = age
+		}
+	}
+	return oldest, nil
 }
 
 func (r *memoryFinalizeRepository) ReleaseClaim(
@@ -508,7 +661,7 @@ func (r *memoryFinalizeRepository) RenewClaim(
 ) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	now := time.Now()
+	now := r.currentTimeLocked()
 	for index := range r.windows {
 		window := &r.windows[index]
 		if sameFinalizeTestWindow(window.record.Key, key) {
@@ -520,6 +673,36 @@ func (r *memoryFinalizeRepository) RenewClaim(
 		}
 	}
 	return fmt.Errorf("renew unknown finalize test window")
+}
+
+func (r *memoryFinalizeRepository) setCurrentTime(now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.now = now
+}
+
+func (r *memoryFinalizeRepository) currentTime() time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.currentTimeLocked()
+}
+
+func (r *memoryFinalizeRepository) currentTimeLocked() time.Time {
+	if !r.now.IsZero() {
+		return r.now
+	}
+	return time.Now()
+}
+
+func (r *memoryFinalizeRepository) window(key WindowKey) memoryFinalizeWindow {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for index := range r.windows {
+		if sameFinalizeTestWindow(r.windows[index].record.Key, key) {
+			return r.windows[index]
+		}
+	}
+	return memoryFinalizeWindow{}
 }
 
 func newTestTimeoutScanner(

@@ -26,6 +26,7 @@ const pmRedisSweepInterval = 5 * time.Minute
 const pmRedisSweepSafetyThreshold = 30 * time.Minute
 const pmRedisSweepScanLimit = 64
 const pmRedisSweepUnlinkBatch = 128
+const pmPublishedVersionRepairInterval = time.Minute
 
 type pmBuiltinReconcileFunc func(context.Context) (adhoc.BuiltinReconcileResult, error)
 type pmSnapshotReloadFunc func(context.Context) error
@@ -174,6 +175,9 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	redisSweeper := pmstream.NewRedisStateSweeper(
 		store, windowRepo, pmRedisSweepSafetyThreshold, streamMetrics, logger,
 	)
+	publishedVersionRepairer := pmstream.NewPublishedVersionRepairer(
+		windowRepo, snapshot, tz.Current(), logger,
+	)
 	go func() {
 		if err := relay.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("PM aggregation outbox relay stopped", zap.Error(err))
@@ -192,6 +196,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	go recovery.Run(ctx, time.Minute)
 	go rebuilder.Run(ctx)
 	go scanner.Run(ctx)
+	go publishedVersionRepairer.Run(ctx, pmPublishedVersionRepairInterval)
 	go redisSweeper.Run(
 		ctx, pmRedisSweepInterval, pmRedisSweepScanLimit, pmRedisSweepUnlinkBatch,
 	)

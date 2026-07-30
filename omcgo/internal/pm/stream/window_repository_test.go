@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -27,6 +28,7 @@ func TestClaimDueUsesLeaseAndSkipLocked(t *testing.T) {
 		"FOR UPDATE SKIP LOCKED",
 		"finalize_lease_until IS NULL",
 		"finalize_lease_until <= CURRENT_TIMESTAMP",
+		"finalize_next_attempt_at <= CURRENT_TIMESTAMP",
 		"finalize_lease_owner = $",
 		"CURRENT_TIMESTAMP + ($",
 		"RETURNING",
@@ -45,6 +47,82 @@ func TestClaimDueUsesLeaseAndSkipLocked(t *testing.T) {
 	lastPlaceholder := fmt.Sprintf("$%d", len(args))
 	if !strings.Contains(query, lastPlaceholder) {
 		t.Fatalf("claim due SQL reuses nested placeholders: last placeholder %s missing from %q", lastPlaceholder, query)
+	}
+}
+
+func TestFailFinalizeClaimPersistsRetryAndFencesByClaimToken(t *testing.T) {
+	key := WindowKey{
+		TaskVersionID: uuid.MustParse("abababab-abab-4bab-8bab-abababababab"),
+		EntityKey:     "poison",
+		Granularity:   GranularityHourly,
+		Start:         time.Date(2026, 7, 30, 8, 0, 0, 0, time.UTC),
+	}
+	token := uuid.MustParse("cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd")
+	query, args, err := failFinalizeClaimUpdate(
+		key, token, errors.New("permanent formula error"), 2*time.Minute,
+	).ToSql()
+	if err != nil {
+		t.Fatalf("build failed finalize claim SQL: %v", err)
+	}
+	for _, fragment := range []string{
+		"status = $",
+		"finalize_attempts = finalize_attempts + 1",
+		"finalize_next_attempt_at = CURRENT_TIMESTAMP + ($",
+		"finalize_lease_owner = $",
+		"finalize_lease_owner = $",
+		"finalize_lease_until = $",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("failed finalize claim SQL %q missing %q", query, fragment)
+		}
+	}
+	for _, want := range []any{"failed", "permanent formula error", token, (2 * time.Minute).Microseconds()} {
+		if !containsSQLArg(args, want) {
+			t.Fatalf("failed finalize claim args %v missing %v", args, want)
+		}
+	}
+}
+
+func TestOldestDueQueryUsesDatabaseTimeAndIncludesActiveLeases(t *testing.T) {
+	grace := map[Granularity]time.Duration{
+		GranularityHourly:  12 * time.Minute,
+		GranularityDaily:   15 * time.Minute,
+		GranularityWeekly:  30 * time.Minute,
+		GranularityMonthly: 30 * time.Minute,
+	}
+	query, args, err := oldestDueSelect(grace, 5*time.Minute).ToSql()
+	if err != nil {
+		t.Fatalf("build oldest due query: %v", err)
+	}
+	for _, fragment := range []string{
+		"CURRENT_TIMESTAMP",
+		"MIN(eligible.due_at)",
+		"w.window_end <= CURRENT_TIMESTAMP - ($",
+		"status IN ($",
+		"pm_aggregation_outbox",
+		"pm_aggregation_rollup_outbox",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("oldest due SQL %q missing %q", query, fragment)
+		}
+	}
+	for _, forbidden := range []string{
+		"finalize_lease_owner",
+		"finalize_lease_until",
+		"finalize_next_attempt_at",
+	} {
+		if strings.Contains(query, forbidden) {
+			t.Fatalf("oldest due SQL %q must include eligible rows regardless of %q", query, forbidden)
+		}
+	}
+	for _, want := range []any{
+		(12 * time.Minute).Microseconds(),
+		(15 * time.Minute).Microseconds(),
+		(30 * time.Minute).Microseconds(),
+	} {
+		if !containsSQLArg(args, want) {
+			t.Fatalf("oldest due args %v missing grace %v", args, want)
+		}
 	}
 }
 

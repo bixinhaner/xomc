@@ -241,6 +241,7 @@ type TimeoutScanner struct {
 	metrics            *Metrics
 	claimLease         time.Duration
 	renewInterval      time.Duration
+	oldestDueInterval  time.Duration
 	selector           *finalizeClaimSelector
 	deviceVersionsFor  *TaskSnapshot
 	deviceVersionIDs   []uuid.UUID
@@ -273,6 +274,12 @@ type finalizeWindowRepository interface {
 	RenewClaim(context.Context, WindowKey, uuid.UUID, time.Time) error
 	CompleteClaim(context.Context, WindowKey, uuid.UUID) error
 	ReleaseClaim(context.Context, WindowKey, uuid.UUID) error
+	FailClaim(context.Context, WindowKey, uuid.UUID, error, time.Duration) error
+	OldestDue(
+		context.Context,
+		map[Granularity]time.Duration,
+		time.Duration,
+	) (time.Duration, error)
 }
 
 type finalizeQueue int
@@ -281,7 +288,10 @@ const (
 	finalizeHourlyDevice finalizeQueue = iota
 	finalizeHourlyOther
 	finalizeLongPeriod
-	finalizeClaimLease = 5 * time.Minute
+	finalizeClaimLease             = 5 * time.Minute
+	finalizeRetryBase              = 30 * time.Second
+	finalizeRetryMax               = 30 * time.Minute
+	finalizeOldestDueQueryInterval = 30 * time.Second
 )
 
 var finalizeQuotaWheel = [...]finalizeQueue{
@@ -328,6 +338,7 @@ func (s *finalizeClaimSelector) nextOrder(queue finalizeQueue) claimOrder {
 type finalizeJob struct {
 	window WindowRecord
 	token  uuid.UUID
+	queue  finalizeQueue
 }
 
 type finalizeClaimAttempt struct {
@@ -338,7 +349,9 @@ type finalizeClaimAttempt struct {
 }
 
 type finalizeResult struct {
-	err error
+	key   WindowKey
+	queue finalizeQueue
+	err   error
 }
 
 func NewTimeoutScanner(
@@ -356,7 +369,8 @@ func NewTimeoutScanner(
 		snapshot: finalizer.snapshot, workerCount: workerCount,
 		grace: grace, logger: logger,
 		claimLease: finalizeClaimLease, renewInterval: finalizeClaimLease / 3,
-		selector: newFinalizeClaimSelector(),
+		oldestDueInterval: finalizeOldestDueQueryInterval,
+		selector:          newFinalizeClaimSelector(),
 		graceByGranularity: map[Granularity]time.Duration{
 			GranularityHourly:  grace,
 			GranularityDaily:   15 * time.Minute,
@@ -402,6 +416,12 @@ func (s *TimeoutScanner) Run(ctx context.Context) {
 		close(jobs)
 		workers.Wait()
 	}()
+	oldestDueDone := make(chan struct{})
+	go func() {
+		defer close(oldestDueDone)
+		s.runOldestDueMonitor(ctx)
+	}()
+	defer func() { <-oldestDueDone }()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -431,7 +451,7 @@ func (s *TimeoutScanner) runOnce(ctx context.Context) error {
 	err := s.runCycle(ctx, jobs, results, workerCount)
 	close(jobs)
 	workers.Wait()
-	return err
+	return errors.Join(err, s.refreshOldestDue(ctx))
 }
 
 func (s *TimeoutScanner) runCycle(
@@ -450,9 +470,6 @@ func (s *TimeoutScanner) runCycle(
 	if blocked > 0 && s.metrics != nil {
 		s.metrics.WatermarkBlockedTotal.Add(float64(blocked))
 	}
-	if s.metrics != nil {
-		s.metrics.FinalizeOldestDueSeconds.Set(0)
-	}
 	available := map[finalizeQueue]bool{
 		finalizeHourlyDevice: true,
 		finalizeHourlyOther:  true,
@@ -460,7 +477,6 @@ func (s *TimeoutScanner) runCycle(
 	}
 	inflight := 0
 	claimsSinceRefresh := 0
-	oldestDueByQueue := map[finalizeQueue]float64{}
 	var finalizeErrors []error
 	for {
 		for inflight < workerCount && anyFinalizeQueueAvailable(available) {
@@ -479,10 +495,6 @@ func (s *TimeoutScanner) runCycle(
 				if reportedConflict && s.metrics != nil {
 					s.metrics.FinalizeClaimConflictsTotal.Inc()
 				}
-				if !reportedConflict {
-					oldestDueByQueue[queue] = 0
-					s.updateOldestDueMetric(oldestDueByQueue)
-				}
 				available[queue] = false
 				continue
 			}
@@ -496,16 +508,9 @@ func (s *TimeoutScanner) runCycle(
 			}
 			if s.metrics != nil {
 				s.metrics.FinalizeClaims.Inc()
-				if attempt.order == claimOldestFirst {
-					age := claimAt.Sub(
-						window.Key.End.Add(s.graceFor(window.Key.Granularity)),
-					).Seconds()
-					oldestDueByQueue[queue] = max(0, age)
-					s.updateOldestDueMetric(oldestDueByQueue)
-				}
 			}
 			select {
-			case jobs <- finalizeJob{window: *window, token: attempt.token}:
+			case jobs <- finalizeJob{window: *window, token: attempt.token, queue: queue}:
 				inflight++
 				if s.metrics != nil {
 					s.metrics.FinalizeInflight.Inc()
@@ -525,9 +530,13 @@ func (s *TimeoutScanner) runCycle(
 			inflight--
 			if result.err != nil {
 				finalizeErrors = append(finalizeErrors, result.err)
-				available[finalizeHourlyDevice] = false
-				available[finalizeHourlyOther] = false
-				available[finalizeLongPeriod] = false
+				s.logger.Warn("PM aggregation finalize job failed; continuing healthy queues",
+					zap.String("queue", finalizeQueueName(result.queue)),
+					zap.String("task_version_id", result.key.TaskVersionID.String()),
+					zap.String("entity_key", result.key.EntityKey),
+					zap.String("granularity", string(result.key.Granularity)),
+					zap.Time("window_start", result.key.Start),
+					zap.Error(result.err))
 			}
 		case <-ctx.Done():
 			return errors.Join(append(finalizeErrors, ctx.Err())...)
@@ -621,19 +630,66 @@ func (s *TimeoutScanner) claimRenewInterval() time.Duration {
 	return s.claimLeaseDuration() / 3
 }
 
-func (s *TimeoutScanner) updateOldestDueMetric(
-	oldestDueByQueue map[finalizeQueue]float64,
-) {
+func (s *TimeoutScanner) refreshOldestDue(ctx context.Context) error {
 	if s.metrics == nil {
-		return
+		return nil
 	}
-	oldest := float64(0)
-	for _, age := range oldestDueByQueue {
-		if age > oldest {
-			oldest = age
+	oldest, err := s.windows.OldestDue(ctx, s.graceByGranularity, s.grace)
+	if err != nil {
+		return fmt.Errorf("query oldest due PM aggregation window: %w", err)
+	}
+	s.metrics.FinalizeOldestDueSeconds.Set(oldest.Seconds())
+	return nil
+}
+
+func (s *TimeoutScanner) runOldestDueMonitor(ctx context.Context) {
+	interval := s.oldestDueInterval
+	if interval <= 0 {
+		interval = finalizeOldestDueQueryInterval
+	}
+	refresh := func() {
+		if err := s.refreshOldestDue(ctx); err != nil && ctx.Err() == nil {
+			s.logger.Warn("refresh PM aggregation oldest due metric", zap.Error(err))
 		}
 	}
-	s.metrics.FinalizeOldestDueSeconds.Set(oldest)
+	refresh()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refresh()
+		}
+	}
+}
+
+func finalizeQueueName(queue finalizeQueue) string {
+	switch queue {
+	case finalizeHourlyDevice:
+		return "hourly_device"
+	case finalizeHourlyOther:
+		return "hourly_other"
+	case finalizeLongPeriod:
+		return "long_period"
+	default:
+		return fmt.Sprintf("unknown_%d", queue)
+	}
+}
+
+func finalizeRetryDelay(attempt int) time.Duration {
+	if attempt <= 1 {
+		return finalizeRetryBase
+	}
+	delay := finalizeRetryBase
+	for range attempt - 1 {
+		if delay >= finalizeRetryMax/2 {
+			return finalizeRetryMax
+		}
+		delay *= 2
+	}
+	return min(delay, finalizeRetryMax)
 }
 
 func (s *TimeoutScanner) graceFor(granularity Granularity) time.Duration {
@@ -695,7 +751,13 @@ func (s *TimeoutScanner) finalizeWorker(
 				zap.String("entity_key", window.Key.EntityKey),
 				zap.Time("window_start", window.Key.Start),
 				zap.Error(err))
-			clearErr := s.windows.ReleaseClaim(clearCtx, window.Key, job.token)
+			clearErr := s.windows.FailClaim(
+				clearCtx,
+				window.Key,
+				job.token,
+				err,
+				finalizeRetryDelay(window.FinalizeAttempts+1),
+			)
 			err = errors.Join(err, clearErr)
 		} else {
 			err = s.windows.CompleteClaim(clearCtx, window.Key, job.token)
@@ -704,7 +766,7 @@ func (s *TimeoutScanner) finalizeWorker(
 		if s.metrics != nil {
 			s.metrics.FinalizeInflight.Dec()
 		}
-		results <- finalizeResult{err: err}
+		results <- finalizeResult{key: window.Key, queue: job.queue, err: err}
 	}
 }
 
