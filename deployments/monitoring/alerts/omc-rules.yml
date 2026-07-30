@@ -228,20 +228,6 @@ groups:
             Action: 检查 worker 的 "filtered PM report keys not registered" 日志，
                     核对产品指标库 report_key、大小写和厂家版本。
 
-      - alert: PMKnownIndicatorsDisabled
-        expr: sum by (carrier, technology) (increase(omc_pm_known_disabled_values_total[15m])) > 0
-        for: 5m
-        labels:
-          severity: warning
-          domain: omc
-          subsystem: pm
-        annotations:
-          summary: "PM 已登记指标被配置为未启用（{{ $labels.carrier }}/{{ $labels.technology }}）"
-          description: |
-            最近 15 分钟存在已命中指标库、但未进入当前 enabled_pm_indicators 集合的值。
-            这些值按启用配置被过滤，不代表厂家上报名未知。
-            Action: 核对指标启用范围；若启用了 KPI，确认其 Counter 依赖闭包也已启用。
-
       - alert: PMTechnologyMismatch
         expr: sum by (declared_technology, detected_technology) (increase(omc_pm_technology_mismatch_files_total[15m])) > 0
         for: 0s

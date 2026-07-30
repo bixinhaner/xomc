@@ -218,7 +218,7 @@ contains "healthcheck 核对 ACS SYN backlog" 'net.ipv4.tcp_max_syn_backlog' "$R
 
 echo "── PM 指标漂移与禁用值监控 ──"
 contains "PM 配置外指标告警使用 whitelist miss" 'omc_pm_whitelist_miss_values_total' "$OMC_ALERTS"
-contains "PM 禁用指标告警使用独立指标" 'omc_pm_known_disabled_values_total' "$OMC_ALERTS"
+not_contains "按配置禁用的 PM 指标不得触发持续业务告警" 'alert: PMKnownIndicatorsDisabled' "$OMC_ALERTS"
 contains "主 Grafana dashboard 展示 whitelist miss" 'omc_pm_whitelist_miss_values_total' "$GRAFANA_DASHBOARD"
 contains "主 Grafana dashboard 展示 disabled" 'omc_pm_known_disabled_values_total' "$GRAFANA_DASHBOARD"
 contains "overview dashboard 展示 whitelist miss" 'omc_pm_whitelist_miss_values_total' "$GRAFANA_OVERVIEW"
