@@ -57,11 +57,24 @@ func TestAuthorizeDeviceAccess_UngroupedDeviceDenied(t *testing.T) {
 	}
 }
 
-func TestAuthorizeDeviceAccess_UnassignedPseudoGroupAllowsUngroupedDevice(t *testing.T) {
-	unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
-	err := AuthorizeDeviceAccess(context.Background(), fakeReader{groups: nil}, uuid.New(), []uuid.UUID{unassigned})
+func TestAuthorizeDeviceAccess_DefaultGroupAllowsLegacyUngroupedDevice(t *testing.T) {
+	defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
+	err := AuthorizeDeviceAccess(context.Background(), fakeReader{groups: nil}, uuid.New(), []uuid.UUID{defaultGroup})
 	if err != nil {
-		t.Fatalf("unassigned pseudo-group should allow ungrouped device, got %v", err)
+		t.Fatalf("default group should allow legacy ungrouped device, got %v", err)
+	}
+}
+
+func TestAuthorizeDeviceAccess_DefaultGroupAllowsPhysicalMember(t *testing.T) {
+	defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
+	err := AuthorizeDeviceAccess(
+		context.Background(),
+		fakeReader{groups: []uuid.UUID{defaultGroup}},
+		uuid.New(),
+		[]uuid.UUID{defaultGroup},
+	)
+	if err != nil {
+		t.Fatalf("default group should allow physical default-group member, got %v", err)
 	}
 }
 
@@ -85,6 +98,36 @@ func TestAuthorizeDeviceAccessByGrants(t *testing.T) {
 
 	t.Run("空技术列表视为不限制", func(t *testing.T) {
 		err := AuthorizeDeviceAccessByGrants([]uuid.UUID{groupA}, model.TechNR, []model.DeviceVisibilityGrant{{GroupIDs: []uuid.UUID{groupA}, Technologies: []model.Technology{}}})
+		if err != nil {
+			t.Fatalf("AuthorizeDeviceAccessByGrants() = %v, want nil", err)
+		}
+	})
+
+	t.Run("默认组真实成员且制式命中时放行", func(t *testing.T) {
+		defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
+		err := AuthorizeDeviceAccessByGrants(
+			[]uuid.UUID{defaultGroup},
+			model.TechLTE,
+			[]model.DeviceVisibilityGrant{{
+				GroupIDs:     []uuid.UUID{defaultGroup},
+				Technologies: []model.Technology{model.TechLTE},
+			}},
+		)
+		if err != nil {
+			t.Fatalf("AuthorizeDeviceAccessByGrants() = %v, want nil", err)
+		}
+	})
+
+	t.Run("默认组继续兼容历史未分组设备", func(t *testing.T) {
+		defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
+		err := AuthorizeDeviceAccessByGrants(
+			nil,
+			model.TechLTE,
+			[]model.DeviceVisibilityGrant{{
+				GroupIDs:     []uuid.UUID{defaultGroup},
+				Technologies: []model.Technology{model.TechLTE},
+			}},
+		)
 		if err != nil {
 			t.Fatalf("AuthorizeDeviceAccessByGrants() = %v, want nil", err)
 		}
@@ -158,6 +201,29 @@ func TestApplyDeviceVisibilityGrantsFilter(t *testing.T) {
 			t.Fatalf("expected 1 arg, got %v", args)
 		}
 	})
+
+	t.Run("默认组同时匹配真实成员和历史未分组设备", func(t *testing.T) {
+		defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
+		sql, args, err := ApplyDeviceVisibilityGrantsFilter(
+			storage.Psql.Select("*").From("devices"), "d.id", "d.technology",
+			[]model.DeviceVisibilityGrant{{
+				GroupIDs:     []uuid.UUID{defaultGroup},
+				Technologies: []model.Technology{model.TechLTE},
+			}},
+		).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "d.id IN (SELECT device_id FROM device_group_members WHERE group_id IN ($1))") {
+			t.Fatalf("expected physical default-group predicate in sql: %q", sql)
+		}
+		if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)") {
+			t.Fatalf("expected legacy ungrouped predicate in sql: %q", sql)
+		}
+		if len(args) != 2 || args[0] != defaultGroup || args[1] != model.TechLTE {
+			t.Fatalf("expected default group and LTE args, got %v", args)
+		}
+	})
 }
 
 func TestApplyDeviceVisibilityFilter(t *testing.T) {
@@ -213,6 +279,24 @@ func TestApplyDeviceVisibilityFilter(t *testing.T) {
 			t.Fatalf("expected 2 args (carrier, g1), got %v", args)
 		}
 	})
+
+	t.Run("默认组同时匹配真实成员和历史未分组设备", func(t *testing.T) {
+		defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
+		sql, args, err := ApplyDeviceVisibilityFilter(
+			storage.Psql.Select("*").From("alarms_active"), "alarms_active.device_id", []uuid.UUID{g1, defaultGroup}).ToSql()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sql, "alarms_active.device_id IN (SELECT device_id FROM device_group_members WHERE group_id IN ($1,$2))") {
+			t.Fatalf("expected physical default-group predicate in sql: %q", sql)
+		}
+		if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = alarms_active.device_id)") {
+			t.Fatalf("expected legacy ungrouped predicate in sql: %q", sql)
+		}
+		if len(args) != 2 || args[1] != defaultGroup {
+			t.Fatalf("expected default group in query args, got %v", args)
+		}
+	})
 }
 
 func TestApplyDeviceSNVisibilityFilter(t *testing.T) {
@@ -255,27 +339,21 @@ func TestApplyDeviceSNVisibilityFilter(t *testing.T) {
 		}
 	})
 
-	t.Run("包含未分组伪节点时 OR NOT EXISTS", func(t *testing.T) {
-		unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
-		sql, _, err := ApplyDeviceVisibilityFilter(
-			storage.Psql.Select("*").From("alarms_active"), "alarms_active.device_id", []uuid.UUID{g1, unassigned}).ToSql()
+	t.Run("默认组序列号过滤同时匹配真实成员和历史未分组设备", func(t *testing.T) {
+		defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
+		sql, args, err := ApplyDeviceSNVisibilityFilter(
+			storage.Psql.Select("*").From("pm_metrics"), "device_sn", []uuid.UUID{defaultGroup}).ToSql()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = alarms_active.device_id)") {
-			t.Fatalf("expected unassigned predicate in sql: %q", sql)
-		}
-	})
-
-	t.Run("包含未分组伪节点时 OR 未分组子查询", func(t *testing.T) {
-		unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
-		sql, _, err := ApplyDeviceSNVisibilityFilter(
-			storage.Psql.Select("*").From("pm_metrics"), "device_sn", []uuid.UUID{unassigned}).ToSql()
-		if err != nil {
-			t.Fatal(err)
+		if !strings.Contains(sql, "device_sn IN (SELECT serial_number FROM devices WHERE id IN (SELECT device_id FROM device_group_members WHERE group_id IN ($1)))") {
+			t.Fatalf("expected physical default-group device-sn predicate in sql: %q", sql)
 		}
 		if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)") {
-			t.Fatalf("expected unassigned device-sn predicate in sql: %q", sql)
+			t.Fatalf("expected legacy ungrouped device-sn predicate in sql: %q", sql)
+		}
+		if len(args) != 1 || args[0] != defaultGroup {
+			t.Fatalf("expected default group in query args, got %v", args)
 		}
 	})
 }
@@ -348,15 +426,15 @@ func TestVisibleSNSubquerySQL(t *testing.T) {
 		}
 	})
 
-	t.Run("未分组伪节点时返回未分组 SQL", func(t *testing.T) {
-		unassigned := uuid.MustParse(global.DefaultLevel2GroupID)
-		sql, groups := VisibleSNSubquerySQL("m.device_sn", "$3", []uuid.UUID{unassigned})
-		want := "m.device_sn IN (SELECT serial_number FROM devices d WHERE NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id))"
+	t.Run("默认组时返回真实成员和历史未分组 SQL", func(t *testing.T) {
+		defaultGroup := uuid.MustParse(global.DefaultLevel2GroupID)
+		sql, groups := VisibleSNSubquerySQL("m.device_sn", "$3", []uuid.UUID{defaultGroup})
+		want := "(m.device_sn IN (SELECT serial_number FROM devices WHERE id IN (SELECT device_id FROM device_group_members WHERE group_id = ANY($3))) OR m.device_sn IN (SELECT serial_number FROM devices d WHERE NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = d.id)))"
 		if sql != want {
 			t.Fatalf("unexpected sql: %q", sql)
 		}
-		if groups != nil {
-			t.Fatalf("expected nil real groups, got %v", groups)
+		if len(groups) != 1 || groups[0] != defaultGroup {
+			t.Fatalf("expected default group in real groups, got %v", groups)
 		}
 	})
 }
