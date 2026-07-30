@@ -1,0 +1,96 @@
+groups:
+  - name: omc.dashboard_kpi
+    interval: 30s
+    rules:
+      - alert: DashboardKPIQuerySlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(dashboard_kpi_query_duration_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels: {severity: warning, domain: omc, subsystem: dashboard}
+        annotations:
+          summary: "Dashboard KPI 查询 P95 持续超过 2 秒"
+          description: "检查缓存命中、TSDB 长查询和 postgres-tsdb CPU/磁盘 I/O；禁止恢复原始 PM 扫描。"
+
+      - alert: DashboardKPIQueryTimeout
+        expr: increase(dashboard_kpi_query_timeout_total[5m]) > 0
+        for: 2m
+        labels: {severity: critical, domain: omc, subsystem: dashboard}
+        annotations:
+          summary: "Dashboard KPI 查询持续超时"
+          description: "查询已被 3 秒应用超时或 2.5 秒 statement timeout 截断，请联查 TSDB 资源和执行计划。"
+
+      - alert: DashboardKPIQueryRejected
+        expr: increase(dashboard_kpi_query_rejected_total[5m]) > 0
+        for: 2m
+        labels: {severity: warning, domain: omc, subsystem: dashboard}
+        annotations:
+          summary: "Dashboard KPI 查询触发并发保护"
+          description: "并发槽或 100ms 排队窗口已满，接口会返回 503；检查异常客户端并发和 TSDB 延迟。"
+
+      - alert: DashboardKPIResultMissing
+        expr: increase(dashboard_kpi_missing_result_total[10m]) > 0
+        for: 10m
+        labels: {severity: warning, domain: omc, subsystem: dashboard}
+        annotations:
+          summary: "Dashboard 所需全网预聚合结果缺失"
+          description: "检查 LTE/NR/GSM 内置全网上卷任务的指标选择和窗口完成状态，不得回退原始明细补算。"
+
+      - alert: PMNetworkRollupLagHigh
+        expr: pm_network_rollup_lag_seconds{granularity="hourly"} > 5400
+        for: 10m
+        labels: {severity: warning, domain: omc, subsystem: pm}
+        annotations: {summary: "全网小时聚合延迟超过 90 分钟"}
+
+      - alert: PMNetworkRollupLagCritical
+        expr: pm_network_rollup_lag_seconds{granularity="hourly"} > 7200
+        for: 5m
+        labels: {severity: critical, domain: omc, subsystem: pm}
+        annotations: {summary: "全网小时聚合延迟超过 2 小时"}
+
+      - alert: PMNetworkDailyRollupLagHigh
+        expr: pm_network_rollup_lag_seconds{granularity="daily"} > 129600
+        for: 30m
+        labels: {severity: warning, domain: omc, subsystem: pm}
+        annotations: {summary: "全网天聚合延迟超过 36 小时"}
+
+      - alert: PMNetworkDailyRollupLagCritical
+        expr: pm_network_rollup_lag_seconds{granularity="daily"} > 172800
+        for: 15m
+        labels: {severity: critical, domain: omc, subsystem: pm}
+        annotations: {summary: "全网天聚合延迟超过 48 小时"}
+
+      - alert: PMNetworkWeeklyRollupLagHigh
+        expr: pm_network_rollup_lag_seconds{granularity="weekly"} > 691200
+        for: 1h
+        labels: {severity: warning, domain: omc, subsystem: pm}
+        annotations: {summary: "全网周聚合延迟超过 8 天"}
+
+      - alert: PMNetworkWeeklyRollupLagCritical
+        expr: pm_network_rollup_lag_seconds{granularity="weekly"} > 864000
+        for: 30m
+        labels: {severity: critical, domain: omc, subsystem: pm}
+        annotations: {summary: "全网周聚合延迟超过 10 天"}
+
+  - name: omc.tsdb_query_resources
+    interval: 30s
+    rules:
+      - alert: TSDBTempWriteHigh
+        expr: rate(pg_stat_database_temp_bytes{instance="postgres-tsdb"}[5m]) > 10 * 1024 * 1024
+        for: 5m
+        labels: {severity: warning, domain: omc, subsystem: tsdb}
+        annotations:
+          summary: "TimescaleDB 临时写入持续超过 10 MiB/s"
+          description: "查询开始落盘，检查 Dashboard 执行计划、work_mem 和并发；不要通过增大无界查询窗口规避。"
+
+      - alert: TSDBTempWriteCritical
+        expr: rate(pg_stat_database_temp_bytes{instance="postgres-tsdb"}[5m]) > 50 * 1024 * 1024
+        for: 5m
+        labels: {severity: critical, domain: omc, subsystem: tsdb}
+        annotations: {summary: "TimescaleDB 临时写入持续超过 50 MiB/s"}
+
+      - alert: TSDBLongQueryActive
+        expr: pg_active_long_queries{instance="postgres-tsdb"} > 0
+        for: 5m
+        labels: {severity: warning, domain: omc, subsystem: tsdb}
+        annotations:
+          summary: "TimescaleDB 存在持续超过 5 秒的活跃查询"
+          description: "结合 pg_stat_statements、应用 query_hash 和 Dashboard 请求指标定位慢查询。"

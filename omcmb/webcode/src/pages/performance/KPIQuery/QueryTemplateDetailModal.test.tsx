@@ -27,6 +27,17 @@ vi.mock('@core/hooks/api/useIndicatorsLibrary', () => ({
   }),
 }));
 
+vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
+  useTechnologyDictionary: () => ({
+    deviceTypeOptions: [{ label: 'eNB(LTE)', value: 'ENB', sort: 1, technology: 'lte' }],
+    labelForTechnology: (tech?: string | null) => (tech ? tech.toUpperCase() : '—'),
+    labelForRadioMode: (mode?: string | null) => (mode === 'ENB' ? 'eNB(LTE)' : mode ?? '—'),
+    isLoading: false,
+  }),
+  deviceTypeToTechnology: (deviceType: string) =>
+    ({ ENB: 'lte', GNB: 'nr', GSM: 'gsm' })[deviceType] ?? 'lte',
+}));
+
 const template: QueryTemplate = {
   id: 'template-36',
   name: '小时模板',

@@ -213,20 +213,75 @@ groups:
   - name: omc.pm_ingest
     interval: 30s
     rules:
-      - alert: PMCountersDiscoveredOutsideLibrary
-        expr: sum by (carrier, technology) (increase(omc_pm_discovered_counters_total[15m])) > 0
+      - alert: PMReportKeysMissingFromLibrary
+        expr: sum by (carrier, technology) (increase(omc_pm_whitelist_miss_values_total[15m])) > 0
         for: 5m
         labels:
           severity: warning
           domain: omc
           subsystem: pm
         annotations:
-          summary: "PM 发现指标库外 counter（{{ $labels.carrier }}/{{ $labels.technology }}）"
+          summary: "PM 厂家上报名未命中指标库（{{ $labels.carrier }}/{{ $labels.technology }}）"
           description: |
-            最近 15 分钟持续发现指标库外 counter。这些值已被保留并进入动态登记，
-            没有被丢弃；告警表示厂家上报名或指标库配置发生漂移。
-            Action: 检查 worker 的 "preserved counters not in indicator library" 日志，
-                    核对对应产品指标库 report_key 并完成正式登记。
+            最近 15 分钟持续出现未在当前产品指标路由中登记的厂家上报名。
+            这些值因缺少完整指标元数据没有进入时序库；同一值不会再重复计入禁用指标。
+            Action: 检查 worker 的 "filtered PM report keys not registered" 日志，
+                    核对产品指标库 report_key、大小写和厂家版本。
+
+      - alert: PMKnownIndicatorsDisabled
+        expr: sum by (carrier, technology) (increase(omc_pm_known_disabled_values_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 已登记指标被配置为未启用（{{ $labels.carrier }}/{{ $labels.technology }}）"
+          description: |
+            最近 15 分钟存在已命中指标库、但未进入当前 enabled_pm_indicators 集合的值。
+            这些值按启用配置被过滤，不代表厂家上报名未知。
+            Action: 核对指标启用范围；若启用了 KPI，确认其 Counter 依赖闭包也已启用。
+
+      - alert: PMTechnologyMismatch
+        expr: sum by (declared_technology, detected_technology) (increase(omc_pm_technology_mismatch_files_total[15m])) > 0
+        for: 0s
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM XML 制式与设备身份不一致（{{ $labels.declared_technology }}→{{ $labels.detected_technology }}）"
+          description: |
+            PM XML 中多个独立指标家族表明其实际制式与设备元数据不一致。
+            文件原件仍保留在 MinIO，隔离元数据已写入 pm_file_quarantines；
+            该文件没有进入指标路由、KPI 计算或聚合 outbox。
+            Action: 检查上游生成器、上传路由和设备产品/制式配置，修正后重新发布原文件。
+
+      - alert: PMAggregationWatermarkBlocked
+        expr: increase(omc_pm_aggregation_watermark_blocked_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 聚合窗口持续等待消费水位"
+          description: |
+            窗口已超过最小关闭宽限，但对应 15 分钟或上卷事件仍未消费。
+            Action: 检查 outbox、NATS consumer pending 和 worker CPU/内存资源。
+
+      - alert: PMAggregationRebuildFailed
+        expr: increase(omc_pm_aggregation_rebuild_errors_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 迟到事件修订重建失败"
+          description: |
+            迟到事件已进入持久重建队列但执行失败。
+            Action: 检查 pm_aggregation_rebuilds.last_error、持久 outbox 保留和 Redis/TSDB 状态。
 
   - name: omc.meta
     interval: 30s
@@ -347,7 +402,7 @@ groups:
             联查 pending、redelivery、delivery/ack rate 和 worker 错误日志。
 
       - alert: OMCPMQueueSampleStale
-        expr: time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"} > 300
+        expr: time() - omc_pm_queue_sample_timestamp_seconds{deployment_unit="acs",subject="pm.file.received",durable="pm-workers"} > 300
         for: 2m
         labels:
           severity: critical
@@ -367,7 +422,7 @@ groups:
           and acs_pm_queue_ack_rate < acs_pm_queue_delivery_rate
           and acs_pm_queue_backlog_slope > 0
           and max without (subject, durable) (
-            time() - omc_pm_queue_sample_timestamp_seconds{subject="pm.file.received",durable="pm-workers"}
+            time() - omc_pm_queue_sample_timestamp_seconds{deployment_unit="acs",subject="pm.file.received",durable="pm-workers"}
           ) < 60
         for: 10m
         labels:
@@ -418,3 +473,16 @@ groups:
           description: |
             Redis 窗口状态会保留并重试。检查 TimescaleDB、窗口 failed 状态和 Redis 内存；
             禁止通过查询原始 PM 表进行人工补算。
+
+      - alert: OMCPMStreamingAggregationEventFailures
+        expr: increase(omc_pm_aggregation_events_failed_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 聚合事件持续处理失败"
+          description: |
+            Worker 在确认消息前持续处理失败，可能导致 NATS 重投和聚合窗口延迟。
+            检查 Redis maxmemory/OOM、TimescaleDB 写入、窗口恢复日志和 consumer redelivery。

@@ -433,7 +433,7 @@ func (s *RPCResponseSubscriber) resolveTranslator(ctx context.Context, device *m
 		)
 		return nil
 	}
-	translator, err := s.translatorFactory.Translator(ctx, *matchRes.Product.ParamModelID, device.FirmwareVersion)
+	translator, err := s.translatorFactory.Translator(ctx, matchRes.Product.ID, device.FirmwareVersion)
 	if err != nil {
 		// ErrNoMapping 是合法业务态（产品未配 mapping），不算错误。
 		if !errors.Is(err, parammodel.ErrNoMapping) {

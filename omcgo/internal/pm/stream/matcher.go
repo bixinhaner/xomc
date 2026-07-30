@@ -10,22 +10,22 @@ import (
 )
 
 type ContributionValue struct {
-	Dimension     Dimension
-	DimensionKey  string
-	DimensionName string
-	ObjectLDN     string
-	DeviceOUI     string
-	DeviceSN      string
-	Technology    string
-	MetricPath    string
-	MetricType    string
-	Operation     AggregationOp
-	Value         float64
-	Sum           float64
-	Count         int64
-	Min           float64
-	Max           float64
-	Composed      bool
+	Dimension     Dimension     `json:"d"`
+	DimensionKey  string        `json:"dk"`
+	DimensionName string        `json:"dn,omitempty"`
+	ObjectLDN     string        `json:"o,omitempty"`
+	DeviceOUI     string        `json:"oui,omitempty"`
+	DeviceSN      string        `json:"sn,omitempty"`
+	Technology    string        `json:"t,omitempty"`
+	MetricPath    string        `json:"m"`
+	MetricType    string        `json:"mt"`
+	Operation     AggregationOp `json:"op"`
+	Value         float64       `json:"v,omitempty"`
+	Sum           float64       `json:"s,omitempty"`
+	Count         int64         `json:"c,omitempty"`
+	Min           float64       `json:"n,omitempty"`
+	Max           float64       `json:"x,omitempty"`
+	Composed      bool          `json:"cp,omitempty"`
 }
 
 type Contribution struct {
@@ -37,6 +37,8 @@ type Contribution struct {
 	SourceExpectedSlots   int64
 	SourceReceivedSlots   int64
 	SourceIncompleteSlots int64
+	VersionEffectiveFrom  time.Time
+	VersionEffectiveTo    *time.Time
 	Rollup                bool
 	RollupChunkIndex      int
 	RollupChunkCount      int
@@ -74,7 +76,7 @@ func (m *Matcher) MatchGranularity(
 	versions := snapshot.ByDevice[payload.DeviceID]
 	out := make([]Contribution, 0)
 	for _, version := range versions {
-		if !version.Enabled || (version.Technology != "" &&
+		if !version.DevicePipeline || !version.Enabled || (version.Technology != "" &&
 			!strings.EqualFold(version.Technology, payload.Technology)) {
 			continue
 		}
@@ -93,18 +95,22 @@ func (m *Matcher) MatchGranularity(
 				return nil, err
 			}
 			if window.Start.Before(version.EffectiveFrom) ||
-				(version.EffectiveTo != nil && !window.Start.Before(*version.EffectiveTo)) {
+				(version.EffectiveTo != nil && !window.Start.Before(*version.EffectiveTo)) ||
+				(version.PlannedEndAt != nil && !window.Start.Before(*version.PlannedEndAt)) {
 				continue
 			}
 			contribution := Contribution{
 				Key: WindowKey{
 					TaskID: version.TaskID, TaskVersionID: version.VersionID,
+					EntityKey:   payload.DeviceID.String(),
 					Granularity: granularity, Start: window.Start, End: window.End,
 				},
-				SourceFileID:  payload.SourceFileID.String(),
-				DeviceID:      payload.DeviceID.String(),
-				SlotStart:     payload.WindowStart.UTC(),
-				ExpectedSlots: expectedSlots(window, len(version.Members)),
+				SourceFileID:         payload.SourceFileID.String(),
+				DeviceID:             payload.DeviceID.String(),
+				SlotStart:            payload.WindowStart.UTC(),
+				ExpectedSlots:        4,
+				VersionEffectiveFrom: version.EffectiveFrom,
+				VersionEffectiveTo:   version.EffectiveTo,
 			}
 			for _, measurement := range payload.Measurements {
 				if len(version.ObjectLDNs) > 0 {
@@ -169,7 +175,7 @@ func expectedChildWindows(window Window, target Granularity, location *time.Loca
 }
 
 func (c Contribution) Validate() error {
-	if c.Key.TaskVersionID == uuid.Nil || c.SourceFileID == "" ||
+	if c.Key.TaskVersionID == uuid.Nil || c.Key.EntityKey == "" || c.SourceFileID == "" ||
 		c.DeviceID == "" || c.SlotStart.IsZero() || !c.Key.End.After(c.Key.Start) {
 		return fmt.Errorf("invalid PM aggregation contribution")
 	}

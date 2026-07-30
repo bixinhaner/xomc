@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -131,7 +132,8 @@ func rawFileLifecycleConfig(days int) *lifecycle.Configuration {
 	return lc
 }
 
-// ensureRawFileLifecycle 幂等设置原始文件桶的 days 天过期生命周期（重设覆盖）。bucket 为空跳过。
+// ensureRawFileLifecycle updates only OMC-owned raw-expiry rules and preserves
+// unrelated operator-managed lifecycle rules. bucket 为空跳过。
 type bucketLifecycleClient interface {
 	GetBucketLifecycle(ctx context.Context, bucketName string) (*lifecycle.Configuration, error)
 	SetBucketLifecycle(ctx context.Context, bucketName string, config *lifecycle.Configuration) error
@@ -141,7 +143,19 @@ func ensureRawFileLifecycle(ctx context.Context, client bucketLifecycleClient, b
 	if bucket == "" {
 		return nil
 	}
-	if err := client.SetBucketLifecycle(ctx, bucket, rawFileLifecycleConfig(days)); err != nil {
+	current, err := getBucketLifecycleOrEmpty(ctx, client, bucket)
+	if err != nil {
+		return fmt.Errorf("read lifecycle on bucket %s: %w", bucket, err)
+	}
+	rules := make([]lifecycle.Rule, 0, len(current.Rules)+1)
+	for _, rule := range current.Rules {
+		if !strings.HasPrefix(rule.ID, "omc-raw-expire-") {
+			rules = append(rules, rule)
+		}
+	}
+	rules = append(rules, rawFileLifecycleConfig(days).Rules[0])
+	current.Rules = rules
+	if err := client.SetBucketLifecycle(ctx, bucket, current); err != nil {
 		return fmt.Errorf("set lifecycle on bucket %s: %w", bucket, err)
 	}
 	actual, err := client.GetBucketLifecycle(ctx, bucket)
@@ -149,7 +163,7 @@ func ensureRawFileLifecycle(ctx context.Context, client bucketLifecycleClient, b
 		return fmt.Errorf("read back lifecycle on bucket %s: %w", bucket, err)
 	}
 	if !rawFileLifecycleMatches(actual, days) {
-		return fmt.Errorf("verify lifecycle on bucket %s: expected one enabled %d-day raw-file rule", bucket, days)
+		return fmt.Errorf("verify lifecycle on bucket %s: expected enabled %d-day raw-file rule", bucket, days)
 	}
 	return nil
 }
@@ -164,6 +178,78 @@ func ApplyRawFileLifecycle(ctx context.Context, client *minio.Client, buckets []
 		return fmt.Errorf("MinIO lifecycle client is nil")
 	}
 	return applyRawFileLifecycle(ctx, client, buckets, days)
+}
+
+// RemoveRawFileLifecycleRules removes only lifecycle rules owned by OMC raw
+// cleanup and preserves unrelated operator-managed rules.
+func RemoveRawFileLifecycleRules(ctx context.Context, client *minio.Client, buckets []string) error {
+	if client == nil {
+		return fmt.Errorf("MinIO lifecycle client is nil")
+	}
+	return removeRawFileLifecycleRules(ctx, client, buckets)
+}
+
+func removeRawFileLifecycleRules(ctx context.Context, client bucketLifecycleClient, buckets []string) error {
+	previous := make(map[string]*lifecycle.Configuration, len(buckets))
+	ordered := make([]string, 0, len(buckets))
+	for _, bucket := range buckets {
+		if bucket == "" {
+			continue
+		}
+		config, err := getBucketLifecycleOrEmpty(ctx, client, bucket)
+		if err != nil {
+			return fmt.Errorf("read lifecycle on bucket %s: %w", bucket, err)
+		}
+		previous[bucket] = config
+		ordered = append(ordered, bucket)
+	}
+	updated := make([]string, 0, len(ordered))
+	for _, bucket := range ordered {
+		config := previous[bucket]
+		kept := make([]lifecycle.Rule, 0, len(config.Rules))
+		for _, rule := range config.Rules {
+			if !strings.HasPrefix(rule.ID, "omc-raw-expire-") {
+				kept = append(kept, rule)
+			}
+		}
+		if len(kept) == len(config.Rules) {
+			continue
+		}
+		desired := lifecycle.NewConfiguration()
+		desired.Rules = kept
+		updated = append(updated, bucket)
+		// minio-go treats an empty lifecycle as DELETE lifecycle.
+		if err := client.SetBucketLifecycle(ctx, bucket, desired); err != nil {
+			return rollbackRawFileLifecycleRemoval(ctx, client, bucket, err, updated, previous)
+		}
+		actual, err := getBucketLifecycleOrEmpty(ctx, client, bucket)
+		if err != nil {
+			return rollbackRawFileLifecycleRemoval(ctx, client, bucket, err, updated, previous)
+		}
+		if !lifecycleConfigurationsEqual(actual, desired) {
+			return rollbackRawFileLifecycleRemoval(ctx, client, bucket,
+				fmt.Errorf("lifecycle read-back mismatch"), updated, previous)
+		}
+	}
+	return nil
+}
+
+func rollbackRawFileLifecycleRemoval(
+	ctx context.Context,
+	client bucketLifecycleClient,
+	bucket string,
+	cause error,
+	updated []string,
+	previous map[string]*lifecycle.Configuration,
+) error {
+	rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lifecycleRollbackTimeout)
+	defer cancel()
+	rollbackErr := rollbackRawFileLifecycles(rollbackCtx, client, updated, previous)
+	err := fmt.Errorf("remove OMC lifecycle on bucket %s: %w", bucket, cause)
+	if rollbackErr != nil {
+		return fmt.Errorf("%w; compensating rollback failed: %v", err, rollbackErr)
+	}
+	return err
 }
 
 func applyRawFileLifecycle(ctx context.Context, client bucketLifecycleClient, buckets []string, days int) error {
@@ -247,11 +333,19 @@ func lifecycleConfigurationsEqual(left, right *lifecycle.Configuration) bool {
 }
 
 func rawFileLifecycleMatches(config *lifecycle.Configuration, days int) bool {
-	if config == nil || len(config.Rules) != 1 {
+	if config == nil {
 		return false
 	}
-	rule := config.Rules[0]
-	return rule.Status == "Enabled" && rule.RuleFilter.Prefix == "" && int(rule.Expiration.Days) == days
+	matches := 0
+	for _, rule := range config.Rules {
+		if strings.HasPrefix(rule.ID, "omc-raw-expire-") {
+			if rule.Status != "Enabled" || rule.RuleFilter.Prefix != "" || int(rule.Expiration.Days) != days {
+				return false
+			}
+			matches++
+		}
+	}
+	return matches == 1
 }
 
 // MinIOHealthCheck verifies the MinIO connection is alive.

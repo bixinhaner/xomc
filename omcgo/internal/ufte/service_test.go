@@ -137,6 +137,42 @@ func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 	assert.False(t, has5GFpga)
 }
 
+func TestBuiltInTaskTypes_UpgradeProductScopesMatchTechnology(t *testing.T) {
+	defaults := builtInTaskTypes()
+	seen := make(map[string]TaskType, len(defaults))
+	for _, item := range defaults {
+		seen[item.TypeCode] = item
+	}
+
+	enbProducts := []string{
+		"BLQ",
+		"BLX",
+		"QRTB",
+		"MLQ",
+		"MLN",
+		"BM",
+		"CICT SC3400(L1821)",
+		"Datang fBS3251 Series",
+		"Third-party FDD-LTE-Enterprise",
+		"Huawei TCELL Series",
+		"Comba LTE-FDD_N Series",
+		"Comba femto_au",
+	}
+	for _, code := range []string{"ENB_IMG_UPGRADE", "ENB_PATCH_UPGRADE", "ENB_FPGA_UPGRADE"} {
+		require.Contains(t, seen, code)
+		assert.Equal(t, enbProducts, seen[code].Products)
+		assert.NotContains(t, seen[code].Products, "BNQ")
+		assert.NotContains(t, seen[code].Products, "BSC")
+		assert.NotContains(t, seen[code].Products, "BTS")
+	}
+
+	require.Contains(t, seen, "GNB_IMG_UPGRADE")
+	assert.Equal(t, []string{"BNQ"}, seen["GNB_IMG_UPGRADE"].Products)
+
+	require.Contains(t, seen, "GSM_IMG_UPGRADE")
+	assert.Equal(t, []string{"BSC", "BTS"}, seen["GSM_IMG_UPGRADE"].Products)
+}
+
 func TestMaterializeTaskTypes_NormalizesLegacyConfigBackupReferences(t *testing.T) {
 	catalog := materializeTaskTypes([]TaskType{{
 		TypeCode:      "CONFIG_RESTORE",

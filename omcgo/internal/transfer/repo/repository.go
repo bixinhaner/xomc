@@ -52,7 +52,7 @@ type SubTaskRepo interface {
 	GetByCommandKey(ctx context.Context, commandKey string) (*software.UpgradeSubTask, error)
 	BatchCreate(ctx context.Context, tasks []*software.UpgradeSubTask) error
 	DeleteByTaskID(ctx context.Context, taskID uuid.UUID) error
-	FailStale(ctx context.Context, cutoffs software.StaleTimeouts) (map[uuid.UUID]int64, error)
+	FailStale(ctx context.Context, cutoffs software.StaleTimeouts) (software.StaleFailures, error)
 	UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code software.FailureCode) error
 }
 
@@ -72,10 +72,10 @@ type DeviceLockRepo interface {
 
 // DeviceLock 对应 device_active_tasks 行。
 type DeviceLock struct {
-	DeviceID      uuid.UUID
-	SubTaskID     uuid.UUID
-	BusinessType  string // upgrade / rollback / config_backup / config_restore / runtime_log_collect / fault_log_collect
-	SubTaskTable  string // 物理 sub_task 表名（reaper / FK 反查用）
+	DeviceID     uuid.UUID
+	SubTaskID    uuid.UUID
+	BusinessType string // upgrade / rollback / config_backup / config_restore / runtime_log_collect / fault_log_collect
+	SubTaskTable string // 物理 sub_task 表名（reaper / FK 反查用）
 }
 
 // Business 业务标识枚举。同步 device_active_tasks.business_type CHECK 约束。

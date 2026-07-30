@@ -48,12 +48,26 @@ export interface MultiFeedback {
   editedInstIds?: string[];
   /** 批量新增已提交但还未完成基站回读时,继续在表格中展示的本地行快照。 */
   pendingAddRows?: MultiPendingAddRow[];
+  /** IPSec 统一提交尚未确认完成的删除实例，供重挂载后恢复待处理状态。 */
+  pendingDeleteInstIds?: string[];
   /** save 动作来源:区分新增后的 SPV 与编辑已有实例的 SPV,避免把编辑失败误当新增失败回滚。 */
   saveMode?: 'add' | 'edit';
   /** BSC add 动作:AddObject 创建出来的实例号,用于 SPV 失败时自动回滚 DeleteObject。 */
   instanceNumber?: number;
   /** add_rollback 动作:从被回滚的原 SPV 失败任务中提取的简短被拒原因,用于 Tag 文案。 */
   originFaultBrief?: string;
+  /** IPSec 统一提交可能拆成多个设备任务，按实际创建顺序持久化全部 task id。 */
+  ipsecTaskIds?: string[];
+  /** IPSec 统一提交成功后期望回读到的总开关状态。 */
+  ipsecTargetEnabled?: boolean;
+  /** IPSec 已完成的有序阶段，用于切换页签后恢复进度说明。 */
+  ipsecCompletedPhases?: Array<'enable-global' | 'apply-tunnels' | 'disable-global'>;
+  /** IPSec 统一提交失败时终止所在阶段。 */
+  ipsecFailedPhase?: 'enable-global' | 'apply-tunnels' | 'disable-global';
+  /** IPSec 统一操作状态；running/awaiting-readback 会在组件重挂载后继续阻止重复提交。 */
+  ipsecOperationStatus?: 'running' | 'awaiting-readback' | 'completed' | 'failed';
+  /** IPSec 当前正在执行的阶段。 */
+  ipsecActivePhase?: 'enable-global' | 'apply-tunnels' | 'disable-global';
 }
 
 export type Feedback = CellFeedback | MultiFeedback;
@@ -135,6 +149,20 @@ interface FeedbackState {
   patchQuickSettingsSync: (deviceId: string, patch: Partial<QuickSettingsSyncMonitor>) => void;
   finishQuickSettingsSync: (deviceId: string, result?: QuickSettingsScopedSyncResult) => void;
   clearLastScopedSync: (deviceId: string) => void;
+}
+
+function withoutTransientIpsecOperations(
+  entries: Record<string, Feedback>,
+): Record<string, Feedback> {
+  return Object.fromEntries(
+    Object.entries(entries).filter(([, feedback]) => !(
+      feedback.kind === 'multi'
+      && (
+        feedback.ipsecOperationStatus === 'running'
+        || feedback.ipsecOperationStatus === 'awaiting-readback'
+      )
+    )),
+  );
 }
 
 export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
@@ -268,12 +296,23 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
       // 会按时钟容差误判一次 success → 弹无关 toast。partialize 显式排除该字段，
       // 让它只在内存中存在；其它字段（entries/drafts/draftRevisions/refreshTicks/lastScopedSyncs）继续持久化。
       partialize: (state) => ({
-        entries: state.entries,
+        // 运行中的 IPSec 编排由当前页面闭包继续驱动，不能跨整页刷新恢复。
+        // 不把临时锁写入 sessionStorage；页内切 Tab 仍共享 Zustand 内存状态，
+        // 整页刷新则保留草稿但释放无法恢复的运行锁，避免永久禁用提交/清空。
+        entries: withoutTransientIpsecOperations(state.entries),
         drafts: state.drafts,
         draftRevisions: state.draftRevisions,
         refreshTicks: state.refreshTicks,
         lastScopedSyncs: state.lastScopedSyncs,
       }),
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<FeedbackState>;
+        return {
+          ...current,
+          ...saved,
+          entries: withoutTransientIpsecOperations(saved.entries ?? {}),
+        };
+      },
     },
   ),
 );

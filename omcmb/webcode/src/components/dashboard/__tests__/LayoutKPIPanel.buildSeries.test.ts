@@ -227,3 +227,61 @@ describe('buildSeries — rolling week 模式', () => {
     expect(shouldShowKPIChartLegend('yesterday', 1)).toBe(true);
   });
 });
+
+describe('buildSeries — direct rollup windows', () => {
+  it('hourly 将 UTC 点位映射到固定的最近 24 个完整小时桶', () => {
+    const hourlyTrendData: MultiTrendComparisonData = {
+      K900010015: {
+        current: [
+          { time: '2026-07-28T04:00:00Z', value: 61 },
+          { time: '2026-07-28T09:00:00Z', value: 66 },
+        ],
+        compare: [],
+        metadata: { kpi_name: 'K900010015', compare_type: 'last_week' },
+      },
+    };
+    const bucketKeys = [
+      '2026-07-27T16', '2026-07-27T17', '2026-07-27T18', '2026-07-27T19',
+      '2026-07-27T20', '2026-07-27T21', '2026-07-27T22', '2026-07-27T23',
+      '2026-07-28T00', '2026-07-28T01', '2026-07-28T02', '2026-07-28T03',
+      '2026-07-28T04', '2026-07-28T05', '2026-07-28T06', '2026-07-28T07',
+      '2026-07-28T08', '2026-07-28T09', '2026-07-28T10', '2026-07-28T11',
+      '2026-07-28T12', '2026-07-28T13', '2026-07-28T14', '2026-07-28T15',
+    ];
+
+    const direct = buildSeries(
+      ['K900010015'],
+      hourlyTrendData,
+      [],
+      'unused',
+      'unused',
+      fakeResolveMeta,
+      undefined,
+      'hourly',
+      bucketKeys,
+    );
+
+    expect(direct.series[0].data[12]).toBe(61);
+    expect(direct.series[0].data[17]).toBe(66);
+  });
+
+  it('小时、天、周都只展示后端对应粒度返回的当前序列', () => {
+    const bucketKeys = ['2026-07-06', '2026-07-13'];
+    const direct = buildSeries(
+      ['K900010015'],
+      weekTrendData,
+      [],
+      'unused',
+      'unused',
+      fakeResolveMeta,
+      undefined,
+      'weekly',
+      bucketKeys,
+    );
+
+    expect(direct.series).toHaveLength(1);
+    expect(direct.series[0].data).toEqual([3.23, null]);
+    expect(direct.weekXDataFull).toEqual(bucketKeys);
+    expect(shouldShowKPIChartLegend('weekly', 1)).toBe(false);
+  });
+});

@@ -2,7 +2,7 @@
  * T-0185：自定义聚合任务「新建向导」整页 5 步。
  *
  * 顶部横向 antd Steps，5 步：
- *   ① 基本信息   — 任务名 / 制式（LTE/NR/GSM）/ 持续性（持续·非持续）/ 过期天数（仅非持续）
+ *   ① 基本信息   — 任务名 / 制式（network_type 字典下拉，提交值 lte/nr/gsm）
  *   ② 聚合范围   — 维度 5 选；自选设备按制式过滤多选到 SN；network/band 无需选；
  *                  device_group/product 全量聚合不给子选（给说明文案）
  *   ③ 指标选择   — 按制式 → deviceType 列指标库多选（收集指标 id = K/C 码，min 1）
@@ -15,7 +15,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useIntl } from 'react-intl';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ImportOutlined } from '@ant-design/icons';
 import {
   Alert,
@@ -37,13 +37,15 @@ import dayjs from 'dayjs';
 import { InputAddon } from '@/components/common/InputAddon';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import { useCreatePmAdhoc, useUpdatePmAdhoc, usePmAdhocDetail } from '@core/hooks/api/usePmAdhoc';
+import { useTabStore } from '@core/store/tabStore';
 import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
 import { useIndicatorCandidates } from '@core/hooks/api/usePerformance';
 import type { IndicatorCandidate } from '@core/services/api/pmApi';
-import type { AdhocDimension, AdhocMode, AdhocVisibility } from '@core/types/pmAdhoc';
-import type { DeviceType } from '@core/types/indicatorLibrary';
+import type { AdhocDimension, AdhocMode, AdhocVisibility, CreateAdhocTaskInput } from '@core/types/pmAdhoc';
 import { formatIndicatorLevel, shouldShowIndicatorLevel } from '@core/utils/indicatorLevelDisplay';
+import type { TechnologyType } from '@core/types/technology';
+import { technologyToDeviceType, useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
 import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
 import {
@@ -52,17 +54,17 @@ import {
   type MetricBatchSelectionResult,
 } from '@/components/MetricPickerModal';
 import { resolveLimitedTransferSelection } from './selectionLimit';
+import {
+  clearCustomWizardDraft,
+  getCustomWizardDraft,
+  saveCustomWizardDraft,
+  type CustomWizardDraftKey,
+  type PmAdhocCustomWizardDraft,
+} from './pmAdhocDraftState';
 
 // 制式（含 GSM，networkType 过滤直接用小写值）
-type WizardTech = 'lte' | 'nr' | 'gsm';
+type WizardTech = TechnologyType;
 const ROLLUP_GRANULARITIES = ['hourly', 'daily', 'weekly', 'monthly'];
-
-// 制式 → 指标库 deviceType（大写枚举）。
-const TECH_TO_DEVICE_TYPE: Record<WizardTech, DeviceType> = {
-  lte: 'ENB',
-  nr: 'GNB',
-  gsm: 'GSM',
-};
 
 interface DeviceTransferItem {
   key: string; // SN
@@ -88,24 +90,37 @@ function isSameStringArray(a: string[], b: string[]): boolean {
 
 export default function PmAdhocWizard() {
   const intl = useIntl();
+  const location = useLocation();
   const navigate = useNavigate();
+  const openTab = useTabStore((s) => s.openTab);
+  const {
+    options: techOptions,
+    isLoading: techOptionsLoading,
+    labelForTechnology,
+  } = useTechnologyDictionary();
+  const hasAvailableTechOptions = techOptions.length > 0;
   const createMut = useCreatePmAdhoc();
   // T-0194：编辑模式 —— 路由带 :id 即编辑（复用本向导），无 id 则为新建。
   const { id: editId } = useParams<{ id: string }>();
   const isEdit = Boolean(editId);
   const updateMut = useUpdatePmAdhoc();
   const { data: editTask } = usePmAdhocDetail(editId);
-
-  // 制式 / 维度选项：value 不变，仅 label / hint 走 i18n。
-  const TECH_OPTIONS = useMemo<{ label: string; value: WizardTech }[]>(
-    () => [
-      { label: intl.formatMessage({ id: 'perf.adhoc.techLte' }), value: 'lte' },
-      { label: intl.formatMessage({ id: 'perf.adhoc.techNr' }), value: 'nr' },
-      { label: intl.formatMessage({ id: 'perf.adhoc.techGsm' }), value: 'gsm' },
-    ],
-    [intl],
+  const draftKey = useMemo<CustomWizardDraftKey>(
+    () => (isEdit && editId ? { mode: 'edit', taskId: editId } : { mode: 'new' }),
+    [editId, isEdit],
   );
 
+  useEffect(() => {
+    openTab({
+      key: '/performance/pm-adhoc',
+      label: 'nav.performance.adhoc',
+      path: location.pathname + location.search,
+      closable: true,
+      labelRaw: false,
+    });
+  }, [location.pathname, location.search, openTab]);
+
+  // 制式选项来自 network_type 字典；value 仍保持 lte/nr/gsm。
   const DIMENSION_OPTIONS = useMemo<{ label: string; value: AdhocDimension; hint: string }[]>(
     () => [
       {
@@ -152,7 +167,7 @@ export default function PmAdhocWizard() {
   // ① 基本信息
   const [name, setName] = useState('');
   const [technology, setTechnology] = useState<WizardTech>('lte');
-  const [mode] = useState<AdhocMode>('continuous');
+  const [mode, setMode] = useState<AdhocMode>('continuous');
   const [expireDays, setExpireDays] = useState<number>(60);
   const [visibility, setVisibility] = useState<AdhocVisibility>('private');
 
@@ -173,11 +188,40 @@ export default function PmAdhocWizard() {
     dayjs().subtract(1, 'day'),
     dayjs(),
   ]);
+  const [plannedEndAt, setPlannedEndAt] = useState<dayjs.Dayjs | null>(() => dayjs().add(30, 'day'));
+  const [plannedEndTouched, setPlannedEndTouched] = useState(false);
 
   // T-0194 编辑模式：预填守卫（只预填一次，避免覆盖用户后续编辑）+ 下钻是否被用户改动。
   const [prefilled, setPrefilled] = useState(false);
   const [drilldownTouched, setDrilldownTouched] = useState(false);
   const [originalObjectLdns, setOriginalObjectLdns] = useState<string[]>([]);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+  const [restoredFromDraft, setRestoredFromDraft] = useState(false);
+
+  const applyDraft = (draft: PmAdhocCustomWizardDraft) => {
+    setCurrent(draft.current);
+    setName(draft.name);
+    setMode(draft.mode);
+    setTechnology(draft.technology);
+    setExpireDays(draft.expireDays);
+    setVisibility(draft.visibility);
+    setDimension(draft.dimension);
+    setSelectedSns(draft.selectedSns);
+    setCellSel(draft.cellSel);
+    setMetricPaths(draft.metricPaths);
+    setMetricTypeFilter(draft.metricTypeFilter);
+    const windowStart = dayjs(draft.windowStart);
+    const windowEnd = dayjs(draft.windowEnd);
+    if (windowStart.isValid() && windowEnd.isValid()) {
+      setWindow([windowStart, windowEnd]);
+    }
+    const planned = draft.plannedEndAt ? dayjs(draft.plannedEndAt) : null;
+    setPlannedEndAt(planned && planned.isValid() ? planned : null);
+    setPlannedEndTouched(draft.plannedEndTouched);
+    setDrilldownTouched(draft.drilldownTouched);
+    setOriginalObjectLdns(draft.originalObjectLdns);
+    setRestoredFromDraft(true);
+  };
 
   // 编辑模式：详情到手后按各步初值预填（名称/制式/模式/维度/设备/指标/粒度/时窗）。
   // 制式与模式预填后在 UI 锁定只读（结构性字段不可改）。
@@ -189,6 +233,7 @@ export default function PmAdhocWizard() {
     }
     setExpireDays(editTask.expireDays || 60);
     setVisibility(editTask.visibility ?? 'private');
+    setMode(editTask.mode === 'oneshot' ? 'oneshot' : 'continuous');
     setDimension(editTask.dimension);
     setSelectedSns(editTask.deviceSns ?? []);
     setMetricPaths(editTask.metricPaths ?? []);
@@ -197,16 +242,91 @@ export default function PmAdhocWizard() {
       const we = dayjs(editTask.windowEnd);
       if (ws.isValid() && we.isValid()) setWindow([ws, we]);
     }
+    if (editTask.mode === 'continuous') {
+      const planned = editTask.plannedEndAt ? dayjs(editTask.plannedEndAt) : null;
+      setPlannedEndAt(planned && planned.isValid() ? planned : null);
+    }
+    setPlannedEndTouched(false);
     setOriginalObjectLdns(editTask.objectLdns ?? []);
+    const restoredDraft = editId ? getCustomWizardDraft({ mode: 'edit', taskId: editId }) : undefined;
+    if (restoredDraft) {
+      applyDraft(restoredDraft);
+    }
     setPrefilled(true);
-  }, [isEdit, prefilled, editTask]);
+    setDraftHydrated(true);
+  }, [isEdit, prefilled, editTask, editId]);
+
+  useEffect(() => {
+    if (isEdit || draftHydrated) return;
+    const restoredDraft = getCustomWizardDraft({ mode: 'new' });
+    if (restoredDraft) {
+      applyDraft(restoredDraft);
+    }
+    setDraftHydrated(true);
+  }, [isEdit, draftHydrated]);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+    saveCustomWizardDraft(draftKey, {
+      current,
+      name,
+      mode,
+      technology,
+      expireDays,
+      visibility,
+      dimension,
+      selectedSns,
+      cellSel,
+      metricPaths,
+      metricTypeFilter,
+      windowStart: window[0]?.toISOString() ?? '',
+      windowEnd: window[1]?.toISOString() ?? '',
+      plannedEndAt: plannedEndAt?.toISOString() ?? null,
+      plannedEndTouched,
+      drilldownTouched,
+      originalObjectLdns,
+    });
+  }, [
+    draftHydrated,
+    draftKey,
+    current,
+    name,
+    mode,
+    technology,
+    expireDays,
+    visibility,
+    dimension,
+    selectedSns,
+    cellSel,
+    metricPaths,
+    metricTypeFilter,
+    window,
+    plannedEndAt,
+    plannedEndTouched,
+    drilldownTouched,
+    originalObjectLdns,
+  ]);
+
+  useEffect(() => {
+    if (
+      isEdit ||
+      !hasAvailableTechOptions ||
+      techOptions.some((option) => option.value === technology)
+    ) {
+      return;
+    }
+    setTechnology(techOptions[0].value);
+    setSelectedSns([]);
+    setCellSel({});
+    setMetricPaths([]);
+  }, [hasAvailableTechOptions, isEdit, techOptions, technology]);
 
   const needsDevicePick = dimension === 'device' || dimension === 'aggregate_group';
 
   // 设备列表（自选设备步用，按制式过滤）。仅在需要选设备时才发请求。
   const { data: deviceResp, isLoading: devicesLoading } = useDeviceList(
     { networkType: technology, page: 1, pageSize: 500 },
-    { enabled: needsDevicePick },
+    { enabled: needsDevicePick && (isEdit || hasAvailableTechOptions) },
   );
   const deviceItems: DeviceTransferItem[] = useMemo(
     () =>
@@ -218,6 +338,28 @@ export default function PmAdhocWizard() {
     [deviceResp],
   );
 
+  useEffect(() => {
+    if (!draftHydrated || !restoredFromDraft || !needsDevicePick || devicesLoading) return;
+    const visibleDeviceSns = new Set(deviceItems.map((item) => item.key));
+    const nextSelectedSns = selectedSns.filter((sn) => visibleDeviceSns.has(sn));
+    if (isSameStringArray(selectedSns, nextSelectedSns)) return;
+    setSelectedSns(nextSelectedSns);
+    setCellSel((previous) => {
+      const nextCellSel: CellSelection = {};
+      for (const sn of nextSelectedSns) {
+        if (previous[sn]) nextCellSel[sn] = previous[sn];
+      }
+      return nextCellSel;
+    });
+  }, [
+    deviceItems,
+    devicesLoading,
+    draftHydrated,
+    needsDevicePick,
+    restoredFromDraft,
+    selectedSns,
+  ]);
+
   // T-0193：下钻白名单计算用的「按设备小区清单」（与选择器内部同 query key 去重，无额外请求）。
   const { byDevice: objectsByDevice } = useMetricObjectsByDevices(
     needsDevicePick ? selectedSns : [],
@@ -226,7 +368,7 @@ export default function PmAdhocWizard() {
 
   // 指标候选（按制式 → deviceType）。走 pm 权限的 /pm/kpi/definitions：运维可访问、
   // 全量加载无截断、含计数器。替代原 super_admin 的 /indicators（截断 + 403）。
-  const deviceType = TECH_TO_DEVICE_TYPE[technology];
+  const deviceType = technologyToDeviceType(technology);
   const { data: candidates, isLoading: indicatorsLoading } = useIndicatorCandidates(deviceType, {
     includeCounters: true,
     enabledOnly: true,
@@ -238,6 +380,13 @@ export default function PmAdhocWizard() {
     for (const ind of indicatorItems) m.set(ind.id, ind);
     return m;
   }, [indicatorItems]);
+
+  useEffect(() => {
+    if (!draftHydrated || !restoredFromDraft || indicatorsLoading) return;
+    const nextMetricPaths = metricPaths.filter((metricPath) => indicatorById.has(metricPath));
+    if (isSameStringArray(metricPaths, nextMetricPaths)) return;
+    setMetricPaths(nextMetricPaths);
+  }, [draftHydrated, indicatorById, indicatorsLoading, metricPaths, restoredFromDraft]);
   // Transfer dataSource：类型筛选在 dataSource 层预过滤（不靠 antd 的 filterOption——
   // 后者只在搜索框有输入时才被调用，空搜索下类型筛选会失效）。
   // 规则：保留「类型匹配」或「已被选中」的候选——已选项无论类型都进 dataSource，
@@ -266,13 +415,15 @@ export default function PmAdhocWizard() {
   );
 
   // ── 步骤校验（决定"下一步"是否可点 / 提交是否可点）──────────────────────
-  const step1Valid = name.trim().length > 0;
+  const step1Valid = name.trim().length > 0 && (isEdit || hasAvailableTechOptions);
   const step2Valid = needsDevicePick
     ? selectedSns.length > 0 && selectedSns.length <= PM_QUERY_SELECTION_LIMIT
     : true;
   const step3Valid = metricPaths.length >= 1 && metricPaths.length <= PM_QUERY_SELECTION_LIMIT;
   const step4Valid =
-    mode === 'continuous' || (window[0] && window[1] && window[1].isAfter(window[0]));
+    mode === 'continuous'
+      ? isEdit || plannedEndAt == null || !plannedEndTouched || plannedEndAt.isAfter(dayjs())
+      : (window[0] && window[1] && window[1].isAfter(window[0]));
 
   const canNext = [step1Valid, step2Valid, step3Valid, step4Valid][current];
 
@@ -307,6 +458,7 @@ export default function PmAdhocWizard() {
   };
 
   const handleSubmit = async () => {
+    if (!isEdit && !hasAvailableTechOptions) return;
     if (needsDevicePick && warnDeviceLimitExceeded(selectedSns.length)) return;
     if (warnMetricLimitExceeded(metricPaths.length)) return;
     if (!step1Valid || !step2Valid || !step3Valid || !step4Valid) {
@@ -320,6 +472,9 @@ export default function PmAdhocWizard() {
       if (isEdit && !drilldownTouched && objectLdns.length === 0) {
         objectLdns = originalObjectLdns;
       }
+      const submitPlannedEndAt = mode === 'continuous'
+        ? (!isEdit && !plannedEndTouched ? undefined : plannedEndAt?.toISOString() ?? null)
+        : undefined;
       if (isEdit && editId) {
         // 编辑：mode/technology/dimension 锁定不可改，只发可改字段；后端按既有任务校验。
         await updateMut.mutateAsync({
@@ -330,16 +485,18 @@ export default function PmAdhocWizard() {
             metricPaths,
             granularities: ROLLUP_GRANULARITIES,
             visibility,
+            plannedEndAt: submitPlannedEndAt,
             windowStart: mode === 'oneshot' ? window[0].toISOString() : undefined,
             windowEnd: mode === 'oneshot' ? window[1].toISOString() : undefined,
             objectLdns: objectLdns.length > 0 ? objectLdns : undefined,
           },
         });
         message.success(intl.formatMessage({ id: 'perf.adhoc.taskUpdated' }));
+        clearCustomWizardDraft({ mode: 'edit', taskId: editId });
         navigate('/performance/pm-adhoc');
         return;
       }
-      await createMut.mutateAsync({
+      const createInput: CreateAdhocTaskInput = {
         name: name.trim(),
         mode,
         dimension,
@@ -348,15 +505,20 @@ export default function PmAdhocWizard() {
         metricPaths,
         granularities: ROLLUP_GRANULARITIES,
         visibility,
-        // oneshot 带 window；continuous 不带（后端开窗滚动）
+        // oneshot 带 window；continuous 源数据窗口不带（后端开窗滚动）
         windowStart: mode === 'oneshot' ? window[0].toISOString() : undefined,
         windowEnd: mode === 'oneshot' ? window[1].toISOString() : undefined,
         // 过期天数仅非持续型生效
         expireDays: mode === 'oneshot' ? expireDays : undefined,
         // 小区/PLMN 白名单（空=不传）
         objectLdns: objectLdns.length > 0 ? objectLdns : undefined,
-      });
+      };
+      if (submitPlannedEndAt !== undefined) {
+        createInput.plannedEndAt = submitPlannedEndAt;
+      }
+      await createMut.mutateAsync(createInput);
       message.success(intl.formatMessage({ id: 'perf.adhoc.taskCreated' }));
+      clearCustomWizardDraft({ mode: 'new' });
       navigate('/performance/pm-adhoc');
     } catch (e) {
       message.error(
@@ -366,6 +528,11 @@ export default function PmAdhocWizard() {
         ),
       );
     }
+  };
+
+  const handleBackToList = () => {
+    clearCustomWizardDraft(draftKey);
+    navigate('/performance/pm-adhoc');
   };
 
   // ── 各步内容 ──────────────────────────────────────────────────────────────
@@ -395,41 +562,27 @@ export default function PmAdhocWizard() {
       <div>
         <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldTechReq' })}</div>
         {/* T-0194 编辑模式：制式锁定只读（建后不可改） */}
-        <Radio.Group
-          optionType="button"
-          buttonStyle="solid"
-          options={TECH_OPTIONS}
-          value={technology}
-          disabled={isEdit}
-          onChange={(e) => {
-            setTechnology(e.target.value);
-            // 制式切换后清空已选设备 / 指标（避免跨制式残留）
-            setSelectedSns([]);
-            setCellSel({}); // 下钻选择重置（全选）
-            setMetricPaths([]);
-          }}
-        />
+        {isEdit ? (
+          <Tag color="geekblue">{labelForTechnology(technology)}</Tag>
+        ) : (
+          <Select
+            style={{ width: 220 }}
+            value={technology}
+            loading={techOptionsLoading}
+            disabled={!hasAvailableTechOptions}
+            options={techOptions}
+            onChange={(next: WizardTech) => {
+              setTechnology(next);
+              // 制式切换后清空已选设备 / 指标（避免跨制式残留）
+              setSelectedSns([]);
+              setCellSel({}); // 下钻选择重置（全选）
+              setMetricPaths([]);
+            }}
+          />
+        )}
         {isEdit && (
           <div style={{ marginTop: 6, color: '#999', fontSize: 12 }}>
             {intl.formatMessage({ id: 'perf.adhoc.editLockedTech' })}
-          </div>
-        )}
-      </div>
-      <div>
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldModeReq' })}</div>
-        {/* T-0194 编辑模式：模式锁定只读（变更会翻转时窗↔cron 语义） */}
-        <Radio.Group
-          optionType="button"
-          buttonStyle="solid"
-          value={mode}
-          disabled
-          options={[
-            { label: intl.formatMessage({ id: 'perf.adhoc.modeContinuousFull' }), value: 'continuous' },
-          ]}
-        />
-        {isEdit && (
-          <div style={{ marginTop: 6, color: '#999', fontSize: 12 }}>
-            {intl.formatMessage({ id: 'perf.adhoc.editLockedMode' })}
           </div>
         )}
       </div>
@@ -486,7 +639,7 @@ export default function PmAdhocWizard() {
             <div style={{ marginBottom: 8, fontWeight: 500 }}>
               {intl.formatMessage(
                 { id: 'perf.adhoc.devicePickLabel' },
-                { tech: technology.toUpperCase(), count: selectedSns.length },
+                { tech: labelForTechnology(technology), count: selectedSns.length },
               )}
             </div>
             <Spin spinning={devicesLoading}>
@@ -566,7 +719,7 @@ export default function PmAdhocWizard() {
         showIcon
         title={intl.formatMessage(
           { id: 'perf.adhoc.metricHint' },
-          { tech: technology.toUpperCase(), deviceType },
+          { tech: labelForTechnology(technology), deviceType },
         )}
       />
       <Space size="middle" align="center">
@@ -680,12 +833,28 @@ export default function PmAdhocWizard() {
           />
         </div>
       ) : (
-        <Alert
-          type="info"
-          showIcon
-          title={intl.formatMessage({ id: 'perf.adhoc.continuousNoRange' })}
-          description={intl.formatMessage({ id: 'perf.adhoc.continuousNoRangeDesc' })}
-        />
+        <div>
+          <div style={{ marginBottom: 8, fontWeight: 500 }}>
+            {intl.formatMessage({ id: 'perf.adhoc.fieldPlannedEndAt' })}
+          </div>
+          <DatePicker
+            showTime
+            style={{ width: '100%' }}
+            value={plannedEndAt}
+            disabledDate={
+              isEdit
+                ? undefined
+                : (currentDate) => Boolean(currentDate && currentDate.isBefore(dayjs().startOf('day')))
+            }
+            onChange={(v) => {
+              setPlannedEndAt(v);
+              setPlannedEndTouched(true);
+            }}
+          />
+          <div style={{ marginTop: 8, color: '#888' }}>
+            {intl.formatMessage({ id: 'perf.adhoc.plannedEndAtHint' })}
+          </div>
+        </div>
       )}
     </Space>
   );
@@ -705,13 +874,8 @@ export default function PmAdhocWizard() {
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTaskName' })}>
           {name || <Tag>{intl.formatMessage({ id: 'perf.adhoc.confirmNotFilled' })}</Tag>}
         </Descriptions.Item>
-        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTech' })}>{technology.toUpperCase()}</Descriptions.Item>
-        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmMode' })}>
-          {mode === 'continuous' ? (
-            <Tag color="purple">{intl.formatMessage({ id: 'perf.adhoc.modeContinuousFull' })}</Tag>
-          ) : (
-            <Tag>{intl.formatMessage({ id: 'perf.adhoc.modeOneshotFull' })}</Tag>
-          )}
+        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTech' })}>
+          {labelForTechnology(technology)}
         </Descriptions.Item>
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmVisibility' })}>
           <Tag color={visibility === 'public' ? 'green' : undefined}>
@@ -725,6 +889,13 @@ export default function PmAdhocWizard() {
         {mode === 'oneshot' && (
           <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmExpireDays' })}>
             {expireDays} {intl.formatMessage({ id: 'perf.adhoc.daySuffix' })}
+          </Descriptions.Item>
+        )}
+        {mode === 'continuous' && (
+          <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmPlannedEndAt' })}>
+            {plannedEndAt
+              ? plannedEndAt.format('YYYY-MM-DD HH:mm:ss')
+              : <Tag>{intl.formatMessage({ id: 'perf.adhoc.confirmNoPlannedEndAt' })}</Tag>}
           </Descriptions.Item>
         )}
         <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmDimension' })}>
@@ -799,7 +970,7 @@ export default function PmAdhocWizard() {
         id: isEdit ? 'perf.adhoc.wizardEditTitle' : 'perf.adhoc.wizardTitle',
       })}
       extra={
-        <Button onClick={() => navigate('/performance/pm-adhoc')}>
+        <Button onClick={handleBackToList}>
           {intl.formatMessage({ id: 'perf.adhoc.backToList' })}
         </Button>
       }

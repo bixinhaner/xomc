@@ -108,11 +108,13 @@ function buildMockKPIBucketTimes(
   const systemTimezone = useAppStore.getState().systemTimezone || 'UTC';
   const result: string[] = [];
 
-  if (granularity === 'daily') {
+  if (granularity === 'daily' || granularity === 'weekly') {
     let cursor = dayjs(start).tz(systemTimezone);
     while (cursor.isBefore(end)) {
       result.push(cursor.format('YYYY-MM-DDTHH:mm:ssZ'));
-      const nextWallClock = cursor.add(1, 'day').format('YYYY-MM-DD HH:mm:ss');
+      const nextWallClock = cursor
+        .add(1, granularity === 'weekly' ? 'week' : 'day')
+        .format('YYYY-MM-DD HH:mm:ss');
       cursor = dayjs.tz(nextWallClock, 'YYYY-MM-DD HH:mm:ss', systemTimezone);
     }
     return result;
@@ -188,7 +190,10 @@ export const dashboardService = {
     return { ...mockDashboardChartData };
   },
 
-  async getAlarmTrend(days = 7): Promise<DashboardChartData['alarmTrend']> {
+  async getAlarmTrend(
+    days = 7,
+    _metric: 'raised' | 'active' = 'raised',
+  ): Promise<DashboardChartData['alarmTrend']> {
     await delay(100, 200);
     return mockDashboardChartData.alarmTrend.slice(-days);
   },

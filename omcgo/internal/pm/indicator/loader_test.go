@@ -61,6 +61,74 @@ func TestSeedBaselineGNBDefaultEnabledMatchesGNBXML(t *testing.T) {
 	assert.Equal(t, want, got, "GNB 默认全部启用清单必须与 GNB.xml 保持一致")
 }
 
+func TestENBReleaseCounterRegisteredAcrossRuntimeAndDeliveryCopies(t *testing.T) {
+	for _, file := range []string{
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BM.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "MLN.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_098.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_181.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BM.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "MLN.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "ENB_DEFAULT_098.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "ENB_DEFAULT_181.xml"),
+	} {
+		t.Run(file, func(t *testing.T) {
+			var doc xmlIndicatorModel
+			require.NoError(t, readXML(file, &doc), file)
+			var matches []xmlIndicator
+			for _, ind := range doc.Indicators {
+				if ind.ID == "C000010228" {
+					matches = append(matches, ind)
+				}
+			}
+			require.Len(t, matches, 1, "%s 中 C000010228 应存在且唯一", file)
+
+			ind := matches[0]
+			assert.Equal(t, "1", ind.IsCounter)
+			assert.Equal(t, "sum", ind.StatisType)
+			assert.Equal(t, "C000010228", ind.Arithmetic)
+		})
+	}
+}
+
+func TestENBERABSetupCountersUsePMReportKeyCase(t *testing.T) {
+	files := []string{
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BLQ.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_181.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "MLN.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "MLQ.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BM.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BLX.xml"),
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_098.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BLQ.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "ENB_DEFAULT_181.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "MLN.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "MLQ.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BM.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BLX.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "ENB_DEFAULT_098.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BAIBLQ.xml"),
+	}
+	want := map[string]string{
+		"C000010070": "ERAB.EstabInitAttNbr.Sum",
+		"C000010106": "ERAB.EstabAddAttNbr.Sum",
+		"C000010116": "ERAB.EstabAddSuccNbr.Sum",
+	}
+
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			var doc xmlIndicatorModel
+			require.NoError(t, readXML(file, &doc), file)
+			for id, reportKey := range want {
+				ind, ok := findIndicatorByID([]xmlIndicatorModel{doc}, id)
+				require.True(t, ok, "%s 中 %s 应存在", file, id)
+				assert.Equal(t, reportKey, ind.ReportKey, "%s reportKey 必须与 PM 原文字段大小写一致", id)
+				assert.Equal(t, reportKey, ind.EnName, "%s enName 必须与 PM 原文字段大小写一致", id)
+			}
+		})
+	}
+}
+
 // #98：reload 重灌 builtin 公式时，已被用户自定义公式覆盖的 (平台, 指标) 必须跳过，
 // 避免与保留下来的自定义行重复 / 覆盖用户意图。
 func TestExcludeCustomOverridden(t *testing.T) {
@@ -133,6 +201,7 @@ func TestStatisDurationAndCellAvailabilityRegistered(t *testing.T) {
 	cases := []struct {
 		tech       string
 		files      []string
+		serviceID  string
 		durationID string
 		availID    string
 		availArith string // 期望小区可用率公式（arithmetic，C 编号口径）
@@ -140,6 +209,7 @@ func TestStatisDurationAndCellAvailabilityRegistered(t *testing.T) {
 		{
 			tech:       "4G/ENB",
 			files:      []string{"enb/BLX.xml", "enb/BM.xml", "enb/MLQ.xml", "enb/BLQ.xml", "enb/MLN.xml"},
+			serviceID:  "C000060216",
 			durationID: "C000060273",
 			availID:    "K900010076",
 			availArith: "C000060216/C000060273*100",
@@ -147,21 +217,30 @@ func TestStatisDurationAndCellAvailabilityRegistered(t *testing.T) {
 		{
 			tech:       "5G/GNB",
 			files:      []string{"GNB.xml"},
+			serviceID:  "C010120026",
 			durationID: "C010120025",
 			availID:    "KGNB0570",
-			availArith: "OTHER.CellServiceTime/C010120025*100",
+			availArith: "C010120026/C010120025*100",
 		},
 		{
 			tech:       "GSM",
 			files:      []string{"GSM.xml"},
+			serviceID:  "CGSM0080002",
 			durationID: "CGSM0080001",
 			availID:    "KGSM0143",
-			availArith: "OTHER.CellServiceTime/CGSM0080001*100",
+			availArith: "CGSM0080002/CGSM0080001*100",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.tech, func(t *testing.T) {
 			docs := parseLibFiles(t, c.files...)
+
+			// 在服时长：原始 PM Counter 必须有编号元数据，流式 KPI 才能严格解析依赖。
+			service, ok := findIndicatorByID(docs, c.serviceID)
+			require.True(t, ok, "%s 在服时长 %s 应登记", c.tech, c.serviceID)
+			assert.Equal(t, "1", service.IsCounter, "在服时长应为计数器")
+			assert.Equal(t, "sum", service.StatisType, "在服时长应累加")
+			assert.Equal(t, "OTHER.CellServiceTime", service.ReportKey)
 
 			// 统计时长：计数器 + sum + 合成（reportKey=OTHER.StatisDuration）。
 			dur, ok := findIndicatorByID(docs, c.durationID)

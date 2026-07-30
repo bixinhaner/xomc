@@ -447,6 +447,10 @@ func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequ
 	concurrency := 5
 
 	mode, schedAt := resolveScheduleMode(req.ScheduledAt, req.CreateSuspended)
+	createUser := strings.TrimSpace(req.CreateUser)
+	if createUser == "" {
+		createUser = "system"
+	}
 
 	mainTask := &UpgradeTask{
 		TaskName:         req.TaskName,
@@ -455,7 +459,7 @@ func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequ
 		FileName:         req.TargetFileNameTemplate, // 复用字段存放目标文件名模板
 		Status:           TaskPending,
 		CreateStatus:     CreateStatusActive,
-		CreateUser:       req.CreateUser,
+		CreateUser:       createUser,
 		TotalCount:       len(req.DeviceIDs),
 		MaxConcurrent:    concurrency,
 	}
@@ -739,6 +743,10 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 	}
 
 	mode, schedAt := resolveScheduleMode(req.ScheduledAt, req.CreateSuspended)
+	createUser := strings.TrimSpace(req.CreateUser)
+	if createUser == "" {
+		createUser = "system"
+	}
 
 	mainTask := &UpgradeTask{
 		TaskName:         req.TaskName,
@@ -751,7 +759,7 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 		ProductClass:     fw.ProductClass,
 		IsKeepConfig:     req.IsKeepConfig,
 		CreateStatus:     CreateStatusActive,
-		CreateUser:       "system",
+		CreateUser:       createUser,
 		TotalCount:       len(req.DeviceIDs),
 		MaxConcurrent:    concurrency,
 	}
@@ -1136,8 +1144,11 @@ func (s *SoftwareService) launchControlledExecution(taskID uuid.UUID, n int) (co
 //  2. TC SOAP body level (from handleTransferComplete): payload is tr069.TransferComplete with
 //     command_key, fault_struct (FaultCode/FaultString), start_time, complete_time — but no device_sn
 //
-// Both are needed: #2 carries fault information, #1 carries device identity.
-// We try to decode both formats and route accordingly.
+// Only #2 is authoritative for software/UFTE state advancement: the TR-069
+// CommandKey is the correlation key that proves this TransferComplete belongs to
+// the Download/Upload RPC we issued. Inform-level "7 TRANSFER COMPLETE" can
+// appear with an empty CommandKey for stale/unrelated transfers; correlating it
+// by "current active task on this device" can advance the wrong upgrade.
 func (s *SoftwareService) HandleTransferComplete(ctx context.Context, evt event.Event) error {
 	s.logger.Info("handling TransferComplete event", zap.String("subject", evt.Subject))
 
@@ -1153,20 +1164,8 @@ func (s *SoftwareService) HandleTransferComplete(ctx context.Context, evt event.
 	}
 	hasTCBody := evt.DecodePayload(&tcPayload) == nil && tcPayload.CommandKey != ""
 
-	// Try decoding as Inform-level event (has device_sn)
-	var informPayload struct {
-		DeviceID struct {
-			SerialNumber string `json:"SerialNumber"`
-		} `json:"device_id"`
-	}
-	hasInformBody := evt.DecodePayload(&informPayload) == nil && informPayload.DeviceID.SerialNumber != ""
-
-	// Route to the appropriate handler
 	if hasTCBody {
 		return s.handleTCBody(ctx, tcPayload.CommandKey, tcPayload.FaultStruct)
-	}
-	if hasInformBody {
-		return s.handleTCInform(ctx, informPayload.DeviceID.SerialNumber)
 	}
 	return nil
 }
@@ -1224,30 +1223,6 @@ func (s *SoftwareService) handleTCBody(ctx context.Context, commandKey string, f
 
 	dev, err := s.deviceRepo.GetBySerialNumber(ctx, subTask.DeviceSN)
 	if err != nil || dev == nil {
-		return nil
-	}
-
-	return s.advanceAfterTC(ctx, subTask, dev)
-}
-
-// handleTCInform processes Inform-level TC events (from ACS publishInformEvents).
-// These carry device_sn but no fault information.
-func (s *SoftwareService) handleTCInform(ctx context.Context, deviceSN string) error {
-	dev, err := s.deviceRepo.GetBySerialNumber(ctx, deviceSN)
-	if err != nil {
-		return fmt.Errorf("get device by SN: %w", err)
-	}
-	if dev == nil {
-		return fmt.Errorf("device not found: %s", deviceSN)
-	}
-
-	subTask, err := s.subTaskRepo.GetActiveByDeviceID(ctx, dev.ID)
-	if err != nil {
-		return nil
-	}
-
-	// 同 handleTCBody：在途阶段（下载 / 上传）才接受 TC 事件推进。
-	if subTask.Status != UpgradeDownloading && subTask.Status != UpgradeUploading {
 		return nil
 	}
 
@@ -1482,8 +1457,7 @@ func (s *SoftwareService) TerminateUpgrade(ctx context.Context, taskID uuid.UUID
 			// 不能依赖。注意 sub_task 行刚拿出来时 DeviceSN 可能为空（还没进 ExecuteOne）→
 			// 此时也没拿过锁，跳过即可。
 			if subTask.DeviceSN != "" {
-				key := fmt.Sprintf("software:upgrade:active:%s", subTask.DeviceSN)
-				if err := s.redis.Del(ctx, key).Err(); err != nil {
+				if err := releaseOwnedDeviceLock(ctx, s.redis, subTask.DeviceSN, subTask.ID); err != nil {
 					s.logger.Warn("release device lock on terminate",
 						zap.String("sub_task_id", subTask.ID.String()),
 						zap.String("device_sn", subTask.DeviceSN),
@@ -2065,48 +2039,13 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 // stale (timed-out) upgrade sub-tasks and marks them as failed.
 func (s *SoftwareService) StartTaskReaper() {
 	interval := 2 * time.Minute
-	// DeviceOnline: 设备 inform_interval 默认 300s（5 min），offline detector
-	// 留 2× 缓冲（10 min）才标 offline。
-	//   · 历史：原 10 min 在 2026-05-20 改 60 min（避免 inform 延迟一次就错杀）；
-	//   · 现在改回 10 min —— 运维诉求"挂起一小时太久不可接受"，且设备实际 inform
-	//     周期普遍 60s（远低于 inform_interval=300s 配置默认值），10 min 足够容错 5+
-	//     个心跳周期，再上不来就 failed 让用户重试更直观。
-	//   · executor 端 Redis wait key TTL 同步保持 10 min，避免 Redis 已过期不会
-	//     自动唤醒、reaper 又没兜底失败的中间态。
-	timeouts := StaleTimeouts{
-		RPCResponse:      5 * time.Minute,
-		DeviceOnline:     10 * time.Minute,
-		TransferComplete: 30 * time.Minute,
-		// FAULT_LOG_COLLECT 走 SPV → CPE 主动 PUT 故障日志，秒～分钟级即可。15min 充裕，
-		// 比 30min TC 通用值短一半，配合"文件落地即成功"语义快速失败更直观。
-		FaultLogUpload: 15 * time.Minute,
-	}
+	timeouts := defaultUpgradeTaskReaperTimeouts()
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for range ticker.C {
-			taskCounts, err := s.subTaskRepo.FailStale(context.Background(), timeouts)
-			if err != nil {
+			if err := s.reapStaleSubTasksOnce(context.Background(), timeouts); err != nil {
 				s.logger.Error("reap stale upgrade tasks", zap.Error(err))
-				continue
-			}
-			var total int64
-			for _, cnt := range taskCounts {
-				total += cnt
-			}
-			if total > 0 {
-				s.logger.Warn("reaped stale upgrade tasks", zap.Int64("count", total))
-				for taskID, cnt := range taskCounts {
-					if err := s.subTaskRepo.UpdateFailureReasonByTask(context.Background(), taskID, FailureTaskTimeout); err != nil {
-						s.logger.Error("set failure_reason for reaped sub-tasks",
-							zap.String("task_id", taskID.String()), zap.Error(err))
-					}
-					if err := s.taskRepo.IncrementCounts(context.Background(), taskID, 0, int(cnt)); err != nil {
-						s.logger.Error("increment fail count for reaped task",
-							zap.String("task_id", taskID.String()), zap.Error(err))
-					}
-					finalizeTask(context.Background(), s.taskRepo, s.logger, taskID)
-				}
 			}
 		}
 	}()
@@ -2116,6 +2055,62 @@ func (s *SoftwareService) StartTaskReaper() {
 		zap.Duration("device_online_timeout", timeouts.DeviceOnline),
 		zap.Duration("transfer_complete_timeout", timeouts.TransferComplete),
 		zap.Duration("fault_log_upload_timeout", timeouts.FaultLogUpload))
+}
+
+func (s *SoftwareService) reapStaleSubTasksOnce(ctx context.Context, timeouts StaleTimeouts) error {
+	failures, err := s.subTaskRepo.FailStale(ctx, timeouts)
+	if err != nil {
+		return err
+	}
+	for _, lock := range failures.Locks {
+		if err := releaseOwnedDeviceLock(ctx, s.redis, lock.DeviceSN, lock.SubTaskID); err != nil {
+			s.logger.Warn("release device lock for reaped sub-task",
+				zap.String("sub_task_id", lock.SubTaskID.String()),
+				zap.String("device_sn", lock.DeviceSN),
+				zap.Error(err))
+		}
+	}
+
+	var total int64
+	for _, cnt := range failures.TaskCounts {
+		total += cnt
+	}
+	if total == 0 {
+		return nil
+	}
+
+	s.logger.Warn("reaped stale upgrade tasks", zap.Int64("count", total))
+	for taskID, cnt := range failures.TaskCounts {
+		if err := s.subTaskRepo.UpdateFailureReasonByTask(ctx, taskID, FailureTaskTimeout); err != nil {
+			s.logger.Error("set failure_reason for reaped sub-tasks",
+				zap.String("task_id", taskID.String()), zap.Error(err))
+		}
+		if err := s.taskRepo.IncrementCounts(ctx, taskID, 0, int(cnt)); err != nil {
+			s.logger.Error("increment fail count for reaped task",
+				zap.String("task_id", taskID.String()), zap.Error(err))
+		}
+		finalizeTask(ctx, s.taskRepo, s.logger, taskID)
+	}
+	return nil
+}
+
+func defaultUpgradeTaskReaperTimeouts() StaleTimeouts {
+	// DeviceOnline: 设备 inform_interval 默认 300s（5 min），offline detector
+	// 留 2× 缓冲（10 min）才标 offline。
+	//   · 历史：原 10 min 在 2026-05-20 改 60 min（避免 inform 延迟一次就错杀）；
+	//   · 现在改回 10 min —— 运维诉求"挂起一小时太久不可接受"，且设备实际 inform
+	//     周期普遍 60s（远低于 inform_interval=300s 配置默认值），10 min 足够容错 5+
+	//     个心跳周期，再上不来就 failed 让用户重试更直观。
+	//   · executor 端 Redis wait key TTL 同步保持 10 min，避免 Redis 已过期不会
+	//     自动唤醒、reaper 又没兜底失败的中间态。
+	return StaleTimeouts{
+		RPCResponse:      10 * time.Minute,
+		DeviceOnline:     10 * time.Minute,
+		TransferComplete: 30 * time.Minute,
+		// FAULT_LOG_COLLECT 走 SPV → CPE 主动 PUT 故障日志，秒～分钟级即可。15min 充裕，
+		// 比 30min TC 通用值短一半，配合"文件落地即成功"语义快速失败更直观。
+		FaultLogUpload: 15 * time.Minute,
+	}
 }
 
 // RestorePendingUpgrades recovers upgrade tasks that were in-progress when

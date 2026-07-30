@@ -118,6 +118,7 @@ type Handler struct {
 	// #746: 心跳周期自动调整策略。设备 BOOTSTRAP/BOOT 时入队 GPV 查询当前心跳周期，
 	// 与配置目标值比较后决定是否入队 SPV 调整。nil 时功能关闭（不影响 Inform 处理）。
 	informPeriodPolicy     *InformPeriodPolicy
+	ueCountPolicy          *UECountPolicy
 	gpvFaultRecoverer      GPVFaultRecoverer
 	durableReadbackEnabled bool
 }
@@ -595,6 +596,16 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		}
 	}
 
+	// #220: 周期 Inform 会话中查询当前产品支持的 UE Count 参数。普通 GPV 回包
+	// 复用既有 device_parameters 入库与 device_info 投影链路。
+	if h.ueCountPolicy.ShouldTrigger(eventCodes) {
+		if err := h.ueCountPolicy.Enqueue(r.Context(), deviceSN); err != nil {
+			log.Warn("enqueue UE count GPV task failed (non-blocking)",
+				zap.String("device_sn", deviceSN),
+				zap.Error(err))
+		}
+	}
+
 	// 重置连续唤醒计数器 —— 设备已连接，允许新的唤醒周期。
 	h.resetContinuousWake(r.Context(), deviceSN)
 
@@ -678,13 +689,14 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	if err != nil {
 		log.Error("pop sendable task from queue", zap.Error(err))
 	} else if taskItem != nil {
+		originalParams := append(json.RawMessage(nil), taskItem.Params...)
 		// standardPath → privatePath 翻译（T-XXX：翻译职责从 App fanout 迁移到 ACS）
 		h.translateTaskParamsInPlace(r.Context(), taskItem, log)
 
 		// 更新会话状态
 		session.State = StateRPCPending
 		session.LastRPC = taskItem.Method
-		session.LastCommandParams = taskItem.Params
+		session.LastCommandParams = originalParams
 		session.LastTaskID = taskItem.ID
 		session.LastTaskCWMPID = cwmpID
 		session.RPCCount++
@@ -883,7 +895,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 					for i, pv := range pvs {
 						names[i] = pv.Name
 					}
-					stdNames, _ := h.pathTranslator.TranslateResponseNames(r.Context(), taskItem.DeviceSN, names)
+					stdNames, _ := h.pathTranslator.TranslateResponseNamesForRequest(r.Context(), taskItem.DeviceSN, names, session.LastCommandParams)
 					std := make([]tr069.ParameterValueStruct, len(pvs))
 					for i, pv := range pvs {
 						std[i] = tr069.ParameterValueStruct{Name: stdNames[i], Value: pv.Value, Type: pv.Type}

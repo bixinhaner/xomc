@@ -18,7 +18,11 @@ import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import EmptyState from '@/components/common/EmptyState';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
+import { usePmPageStateStore } from '@core/store/pmPageStateStore';
+import { displayAdhocTaskName } from '../adhocTaskDisplay';
 import TaskDashboardPane from './TaskDashboardPane';
+import { PM_DASHBOARD_PAGE_KEY, restoreTaskDashboardState } from './taskDashboardState';
 
 interface TaskGroup {
   key: 'builtin' | 'custom';
@@ -29,6 +33,7 @@ interface TaskGroup {
 
 function TaskDashboardTab() {
   const intl = useIntl();
+  const { labelForTechnology } = useTechnologyDictionary();
   const [searchParams, setSearchParams] = useSearchParams();
   const taskId = searchParams.get('task') ?? undefined;
   const { token } = theme.useToken();
@@ -71,19 +76,26 @@ function TaskDashboardTab() {
     () => [...builtinTasks, ...customTasks],
     [builtinTasks, customTasks],
   );
+  const restoredTaskId = useMemo(
+    () => restoreTaskDashboardState(usePmPageStateStore.getState().getPageState(PM_DASHBOARD_PAGE_KEY)).taskId,
+    [],
+  );
 
   // 默认选中：URL 未指定 / 指向的任务已不存在 → 回退首个内置（再退化自建第一个）。
   // 放 useEffect 而非 render body，避免 React 19 严格模式「渲染中更新组件」告警。
   const selectedMissing = Boolean(taskId) && !allTasks.some((t) => t.id === taskId);
   useEffect(() => {
     if (!isLoading && allTasks.length > 0 && (!taskId || selectedMissing)) {
-      const first = builtinTasks[0] ?? customTasks[0];
+      const restoredTask = !taskId && restoredTaskId
+        ? allTasks.find((t) => t.id === restoredTaskId)
+        : undefined;
+      const first = restoredTask ?? builtinTasks[0] ?? customTasks[0];
       if (first && first.id !== taskId) {
         setSearchParams({ task: first.id }, { replace: true });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, allTasks, taskId, selectedMissing]);
+  }, [isLoading, allTasks, taskId, selectedMissing, restoredTaskId]);
 
   const handleSelect = (t: AdhocTask) => {
     setSearchParams({ task: t.id });
@@ -183,9 +195,6 @@ function TaskDashboardTab() {
                       }}
                     >
                       <Space size={4} style={{ width: '100%' }}>
-                        {t.technology && (
-                          <Tag style={{ marginRight: 0 }}>{t.technology.toUpperCase()}</Tag>
-                        )}
                         <span
                           style={{
                             flex: 1,
@@ -194,7 +203,7 @@ function TaskDashboardTab() {
                             whiteSpace: 'nowrap',
                           }}
                         >
-                          {t.name}
+                          {displayAdhocTaskName(t, labelForTechnology)}
                         </span>
                       </Space>
                     </div>

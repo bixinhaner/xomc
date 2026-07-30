@@ -372,9 +372,19 @@ func normalizeBinaryState(raw string) string {
 // AssembleCells builds cell info for multi-carrier devices from device_parameters.
 // numOfCells determines how many FAPService instances to look for.
 // params should be the full device parameters (or a broad prefix query result).
-func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
+func AssembleCells(params []model.DeviceParameter, numOfCells int, productClass ...string) []CellInfo {
 	if numOfCells <= 0 {
 		numOfCells = 1
+	}
+	if len(productClass) > 0 {
+		switch strings.ToUpper(strings.TrimSpace(productClass[0])) {
+		case "FAP/MLN/SC":
+			numOfCells = 1
+		case "FAP/MLN/DC":
+			if numOfCells > 2 {
+				numOfCells = 2
+			}
+		}
 	}
 
 	// 某些设备的 num_of_cells 可能滞后于实际上报参数（例如仍为 1，
@@ -478,9 +488,19 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 			}
 		}
 
-		cells = append(cells, cell)
+		if len(productClass) == 0 || i == 1 || hasCellConfigData(cell) {
+			cells = append(cells, cell)
+		}
 	}
 	return cells
+}
+
+func hasCellConfigData(cell CellInfo) bool {
+	return cell.CellID != "" ||
+		cell.PCI != "" ||
+		cell.FreqPoint != "" ||
+		cell.Bandwidth != "" ||
+		cell.Band != ""
 }
 
 // AssembleGSMCells builds BM GSM cell info from Device.Services.GsmBTSCellDT.{i}.*

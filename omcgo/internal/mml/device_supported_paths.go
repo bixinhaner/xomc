@@ -38,6 +38,9 @@ type SupportedSet struct {
 	// ProductID 是 productClass 经 ProductRegistry 路由的产品 UUID。
 	// 孤儿场景为 nil。
 	ProductID *uuid.UUID
+	// ProductTech 是匹配到的产品制式（如 lte / nr / gsm）。
+	// 命令树过滤会用它屏蔽跨制式 catalog 命令；路径翻译仍只看 Paths。
+	ProductTech string
 	// ParamModelID 是 product 的参数模型 UUID。
 	// 孤儿或产品无 paramModel 为 nil。
 	ParamModelID *uuid.UUID

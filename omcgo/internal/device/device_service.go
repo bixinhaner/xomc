@@ -2043,7 +2043,7 @@ func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID u
 	} else {
 		result.Info.OmcStatus = "disconnected"
 	}
-	result.Cells = AssembleCells(allParams, numOfCells)
+	result.Cells = AssembleCells(allParams, numOfCells, device.ProductClass)
 	result.GSMCells = AssembleGSMCells(allParams)
 
 	return result, nil

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile>
+  <fileHeader vendorName="RegressionFixture">
+    <measCollec beginTime="2026-07-29T13:00:00+08:00"/>
+  </fileHeader>
+  <measData>
+    <managedElement localDn="SubNetwork=fixture,MeContext=eNB-FIXTURE"/>
+    <measInfo measInfoId="BLQ">
+      <granPeriod duration="PT900S" endTime="2026-07-29T13:15:00+08:00"/>
+      <measType p="1">ERAB.EstabInitAttNbr.Sum</measType>
+      <measType p="2">ERAB.EstabInitSuccNbr.Sum</measType>
+      <measType p="3">OTHER.CellServiceTime</measType>
+      <measValue measObjLdn="CellId=fixture-1">
+        <r p="1">100</r>
+        <r p="2">99</r>
+        <r p="3">900</r>
+      </measValue>
+    </measInfo>
+  </measData>
+  <fileFooter>
+    <measCollec endTime="2026-07-29T13:15:00+08:00"/>
+  </fileFooter>
+</measCollecFile>

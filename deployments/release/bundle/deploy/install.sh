@@ -67,6 +67,11 @@ if [ -f "$DEPLOY_DIR/data-upgrade-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/data-upgrade-lib.sh（data 升级保护库，由 build-release.sh 随包发布）" 1
 fi
+if [ -f "$DEPLOY_DIR/config-upgrade-lib.sh" ]; then
+  . "$DEPLOY_DIR/config-upgrade-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/config-upgrade-lib.sh（实例配置升级库，由 build-release.sh 随包发布）" 1
+fi
 if [ -f "$DEPLOY_DIR/storage-paths-lib.sh" ]; then
   . "$DEPLOY_DIR/storage-paths-lib.sh"
 else
@@ -553,6 +558,20 @@ else
     warn "etc 已重置为新包模板 —— 请从 $BAK 取回已改口令 / JWT / TLS / 自定义项"
     warn "  参考 diff：diff -ru $BAK $OMC_ROOT/etc | less"
   else
+    if upgrade_acs_session_limit \
+      "$OMC_ROOT/etc/acs.prod.yaml" \
+      "$RELEASE_DIR/etc/acs.prod.yaml"; then
+      case "${ACS_SESSION_LIMIT_UPGRADE_RESULT:-noop}" in
+        migrated)
+          log "升级 ACS 会话容量：session.max_concurrent 10000 → 30000（其他实例配置保持不变）"
+          ;;
+        preserved)
+          log "ACS session.max_concurrent 为运维自定义值，升级时保持不变"
+          ;;
+      esac
+    else
+      warn "ACS session.max_concurrent 自动迁移失败，保留现网配置；请人工核对新包模板"
+    fi
     log "$OMC_ROOT/etc/ 已有实例配置，保留不覆盖（如需覆盖加 --overwrite-etc）"
   fi
 fi
@@ -795,19 +814,33 @@ sep "8/9 启动业务 + web + 监控"
 log "${DC[*]} up -d"
 "${DC[@]}" up -d
 
-log "等待业务容器启动（10s）..."
-sleep 10
+log "等待业务容器启动（最多 90s，健康检查每 5s 重试）..."
+HEALTHCHECK_TIMEOUT=90
+HEALTHCHECK_INTERVAL=5
+HEALTHCHECK_WAIT=0
+HEALTHCHECK_LOG="$(mktemp)"
+HEALTH_OK=0
+while [ "$HEALTHCHECK_WAIT" -lt "$HEALTHCHECK_TIMEOUT" ]; do
+  if bash "$OMC_ROOT/current/deploy/healthcheck.sh" >"$HEALTHCHECK_LOG" 2>&1; then
+    HEALTH_OK=1
+    break
+  fi
+  sleep "$HEALTHCHECK_INTERVAL"
+  HEALTHCHECK_WAIT=$((HEALTHCHECK_WAIT + HEALTHCHECK_INTERVAL))
+done
 
 # =============================================================================
 # Step 9. healthcheck
 # =============================================================================
 sep "9/9 健康检查"
 
-if bash "$OMC_ROOT/current/deploy/healthcheck.sh"; then
-  HEALTH_OK=1
+if [ "$HEALTH_OK" -eq 1 ]; then
+  cat "$HEALTHCHECK_LOG"
 else
-  HEALTH_OK=0
+  cat "$HEALTHCHECK_LOG"
+  warn "健康检查在 ${HEALTHCHECK_TIMEOUT}s 内未通过"
 fi
+rm -f "$HEALTHCHECK_LOG"
 
 echo
 sep "部署完成"

@@ -341,7 +341,7 @@ func (e *AlarmEngine) clearActiveAlarm(ctx context.Context, alarm *model.Alarm) 
 
 	// Remove from Redis
 	if e.redisStore != nil {
-		if redisErr := e.redisStore.Delete(ctx, alarm.DeviceSN, alarm.AlarmIdentifier); redisErr != nil {
+		if redisErr := e.redisStore.Delete(ctx, alarm.DeviceSN, activeAlarmMatchKey(alarm)); redisErr != nil {
 			e.logger.Warn("redis delete alarm dedup key", zap.Error(redisErr))
 		}
 	}
@@ -365,13 +365,52 @@ func (e *AlarmEngine) clearActiveAlarm(ctx context.Context, alarm *model.Alarm) 
 // AutoClear clears a device-originated alarm using the same instance-level key
 // as creation and update flows.
 func (e *AlarmEngine) AutoClear(ctx context.Context, alarm *model.Alarm) error {
-	existing, err := loadMatchingActiveAlarm(ctx, e.store, alarm)
+	alarms, err := e.store.GetActiveByDeviceSN(ctx, alarm.DeviceSN)
 	if err != nil {
 		return fmt.Errorf("get alarm by device and identifier: %w", err)
 	}
+
+	existing := findMatchingActiveAlarm(alarms, alarm)
 	if existing == nil {
-		return nil // No active alarm to clear
+		if e.metrics != nil {
+			e.metrics.ReconciliationTotal.WithLabelValues("clear_exact_miss").Inc()
+		}
+		candidates := findActiveAlarmsByIdentifier(alarms, alarm)
+		switch len(candidates) {
+		case 0:
+			e.logger.Debug("alarm clear exact match missed",
+				zap.String("device_sn", alarm.DeviceSN),
+				zap.String("alarm_identifier", alarm.AlarmIdentifier),
+				zap.String("match_key", activeAlarmMatchKey(alarm)))
+			return nil
+		case 1:
+			existing = candidates[0]
+			if e.metrics != nil {
+				e.metrics.ReconciliationTotal.WithLabelValues("clear_unique_fallback").Inc()
+			}
+			e.logger.Info("alarm clear resolved by unique identifier fallback",
+				zap.String("device_sn", alarm.DeviceSN),
+				zap.String("alarm_identifier", alarm.AlarmIdentifier),
+				zap.String("alarm_id", existing.ID.String()),
+				zap.String("match_key", activeAlarmMatchKey(alarm)))
+		default:
+			candidateIDs := make([]string, 0, len(candidates))
+			for _, candidate := range candidates {
+				candidateIDs = append(candidateIDs, candidate.ID.String())
+			}
+			if e.metrics != nil {
+				e.metrics.ReconciliationTotal.WithLabelValues("clear_ambiguous").Inc()
+			}
+			e.logger.Warn("alarm clear ambiguous; sync requested",
+				zap.String("device_sn", alarm.DeviceSN),
+				zap.String("alarm_identifier", alarm.AlarmIdentifier),
+				zap.String("match_key", activeAlarmMatchKey(alarm)),
+				zap.Int("candidate_count", len(candidates)),
+				zap.Strings("candidate_ids", candidateIDs))
+			return nil
+		}
 	}
+
 	clearedBy := "system"
 	clearNote := "auto-cleared"
 	existing.ClearedBy = &clearedBy
@@ -489,7 +528,7 @@ func (e *AlarmEngine) ClearBySync(ctx context.Context, alarm *model.Alarm) (err 
 		_ = e.redisStore.DecrementActiveAlarmCount(ctx, alarm.DeviceID.String())
 	}
 	if e.redisStore != nil {
-		if err := e.redisStore.Delete(ctx, alarm.DeviceSN, alarm.AlarmIdentifier); err != nil {
+		if err := e.redisStore.Delete(ctx, alarm.DeviceSN, activeAlarmMatchKey(alarm)); err != nil {
 			e.logger.Warn("redis delete alarm on sync clear", zap.Error(err))
 		}
 	}

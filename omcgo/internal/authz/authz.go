@@ -42,8 +42,9 @@ type GroupReader interface {
 	GetDeviceGroupIDs(ctx context.Context, deviceID uuid.UUID) ([]uuid.UUID, error)
 }
 
-// SplitVisibleGroups separates real visible group IDs from the special
-// "unassigned devices" pseudo group.
+// SplitVisibleGroups returns the real visible group IDs and whether legacy
+// devices without any membership row should also be visible. The default L2
+// group is a real group, but retains compatibility with legacy ungrouped data.
 func SplitVisibleGroups(visibleGroups []uuid.UUID) (realGroups []uuid.UUID, includeUngrouped bool) {
 	if visibleGroups == nil {
 		return nil, false
@@ -52,7 +53,6 @@ func SplitVisibleGroups(visibleGroups []uuid.UUID) (realGroups []uuid.UUID, incl
 	for _, gid := range visibleGroups {
 		if gid.String() == global.DefaultLevel2GroupID {
 			includeUngrouped = true
-			continue
 		}
 		realGroups = append(realGroups, gid)
 	}
@@ -110,7 +110,7 @@ func (r *Resolver) FromContext(c *gin.Context) (groups []uuid.UUID, ok bool) {
 //	visibleGroups == nil   → 超管：放行。
 //	reader == nil          → dev/test 退化：放行（nil-safe）。
 //	len(visibleGroups)==0  → 无任何分组权限：ErrForbidden。
-//	否则                   → 设备分组与 visibleGroups 有交集才放行，否则 ErrForbidden。
+//	否则                   → 设备分组与 visibleGroups 有交集才放行；默认 L2 组还兼容无归属记录的历史设备。
 //
 // 设备是否存在由调用方上层另行判定（本函数不查 devices 表）。
 func AuthorizeDeviceAccess(ctx context.Context, reader GroupReader, deviceID uuid.UUID, visibleGroups []uuid.UUID) error {
@@ -172,7 +172,7 @@ func AuthorizeDevicesAccess(ctx context.Context, reader GroupReader, visibleGrou
 //
 //	nil       → 不过滤（超管）
 //	[]        → WHERE FALSE（fail-closed）
-//	[g1,...]  → WHERE deviceIDColumn IN (SELECT device_id FROM device_group_members WHERE group_id IN (...))
+//	[g1,...]  → 按 device_group_members 归属过滤；包含默认 L2 组时额外兼容无归属记录的历史设备
 func ApplyDeviceVisibilityFilter(b sq.SelectBuilder, deviceIDColumn string, visibleGroups []uuid.UUID) sq.SelectBuilder {
 	if visibleGroups == nil {
 		return b
@@ -248,15 +248,7 @@ func ApplyDeviceVisibilityGrantsFilter(b sq.SelectBuilder, deviceIDColumn, techn
 		if len(grant.GroupIDs) == 0 {
 			continue
 		}
-		groupIDs := make([]uuid.UUID, 0, len(grant.GroupIDs))
-		hasUngrouped := false
-		for _, groupID := range grant.GroupIDs {
-			if groupID.String() == global.DefaultLevel2GroupID {
-				hasUngrouped = true
-				continue
-			}
-			groupIDs = append(groupIDs, groupID)
-		}
+		groupIDs, includeUngrouped := SplitVisibleGroups(grant.GroupIDs)
 		predicates := make(sq.Or, 0, 2)
 		if len(groupIDs) > 0 {
 			sub := sq.Select("device_id").
@@ -264,8 +256,8 @@ func ApplyDeviceVisibilityGrantsFilter(b sq.SelectBuilder, deviceIDColumn, techn
 				Where(sq.Eq{"group_id": groupIDs})
 			predicates = append(predicates, sq.Expr(deviceIDColumn+" IN (?)", sub))
 		}
-		if hasUngrouped {
-			predicates = append(predicates, sq.Expr("NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = " + deviceIDColumn + ")"))
+		if includeUngrouped {
+			predicates = append(predicates, sq.Expr("NOT EXISTS (SELECT 1 FROM device_group_members m WHERE m.device_id = "+deviceIDColumn+")"))
 		}
 		if len(predicates) == 0 {
 			continue
@@ -309,9 +301,6 @@ func intersectsGrantGroups(deviceGroups []uuid.UUID, grantGroups []uuid.UUID) bo
 	}
 	visible := make(map[uuid.UUID]struct{}, len(grantGroups))
 	for _, gid := range grantGroups {
-		if gid.String() == global.DefaultLevel2GroupID {
-			continue
-		}
 		visible[gid] = struct{}{}
 	}
 	for _, gid := range deviceGroups {
@@ -341,9 +330,8 @@ func grantIncludesUngrouped(grantGroups []uuid.UUID) bool {
 //
 //	nil       → 不过滤（超管）
 //	[]        → WHERE FALSE（fail-closed）
-//	[g1,...]  → WHERE snColumn IN (SELECT serial_number FROM devices
-//	                               WHERE id IN (SELECT device_id FROM device_group_members
-//	                                            WHERE group_id IN (...)))
+//	[g1,...]  → 按 device_group_members 归属映射到设备序列号；包含默认 L2 组时
+//	             额外兼容无归属记录的历史设备
 func ApplyDeviceSNVisibilityFilter(b sq.SelectBuilder, snColumn string, visibleGroups []uuid.UUID) sq.SelectBuilder {
 	if visibleGroups == nil {
 		return b
@@ -403,6 +391,7 @@ func ApplyGroupVisibilityFilter(b sq.SelectBuilder, groupIDColumn string, visibl
 //
 // 调用方负责把 placeholder（用传入的 paramRef，如 "$3"）与 args 拼进自己的 WHERE。
 // nil → 返回 ("", nil)（不过滤）；[] → 返回 ("FALSE", nil)（fail-closed）。
+// visibleGroups 包含默认 L2 组时，SQL 额外 OR 无归属记录的历史设备分支。
 func VisibleSNSubquerySQL(snColumn, paramRef string, visibleGroups []uuid.UUID) (string, []uuid.UUID) {
 	if visibleGroups == nil {
 		return "", nil

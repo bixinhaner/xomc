@@ -22,6 +22,7 @@ import type { UploadFile, UploadProps } from 'antd/es/upload/interface';
 import { InboxOutlined } from '@ant-design/icons';
 import type { AxiosError } from 'axios';
 import { useIndicatorUploadXml, useIndicatorFiles } from '@core/hooks/api/useIndicatorsLibrary';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 import type { TechLower } from '@core/types/indicatorLibrary';
 import { extractXmlRootAttr } from '@core/utils/xmlRootAttr';
 import { useT } from '@/hooks/useT';
@@ -33,11 +34,17 @@ interface Props {
 
 const MAX_SIZE = 1 * 1024 * 1024; // 1 MiB,与后端 MaxUploadXMLSize 一致
 
-const TECH_OPTIONS: { label: string; value: TechLower }[] = [
-  { label: 'ENB (LTE)', value: 'enb' },
+const FALLBACK_TECH_OPTIONS: { label: string; value: TechLower }[] = [
+  { label: 'eNB (LTE)', value: 'enb' },
+  { label: 'gNB (NR)', value: 'gnb' },
   { label: 'GSM', value: 'gsm' },
-  { label: 'GNB (5G NR)', value: 'gnb' },
 ];
+
+const DEVICE_TYPE_TO_TECH: Record<string, TechLower> = {
+  ENB: 'enb',
+  GNB: 'gnb',
+  GSM: 'gsm',
+};
 
 interface FormValues {
   tech?: TechLower;
@@ -53,6 +60,14 @@ export default function UploadXmlModal({ open, onClose }: Props) {
   const [derivedName, setDerivedName] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | undefined>();
   const uploadMut = useIndicatorUploadXml();
+  const { deviceTypeOptions, isLoading: techOptionsLoading } = useTechnologyDictionary();
+  const techOptions =
+    deviceTypeOptions.length > 0
+      ? deviceTypeOptions.map((option) => ({
+          label: option.label,
+          value: DEVICE_TYPE_TO_TECH[option.value],
+        })).filter((option): option is { label: string; value: TechLower } => Boolean(option.value))
+      : FALLBACK_TECH_OPTIONS;
 
   // 上传前查重数据源:按当前所选制式取已存在的 XML 文件清单(loadedFrom)。
   // 文件名比对走 <platform>.xml basename 大小写不敏感,与后端同名判定口径一致。
@@ -197,7 +212,7 @@ export default function UploadXmlModal({ open, onClose }: Props) {
           label={t('product.kpi.upload.targetTech')}
           rules={[{ required: true, message: t('product.kpi.upload.techRequired') }]}
         >
-          <Select options={TECH_OPTIONS} placeholder={t('product.kpi.upload.techPh')} />
+          <Select options={techOptions} loading={techOptionsLoading} placeholder={t('common.pleaseSelect')} />
         </Form.Item>
         <Form.Item
           label={t('product.kpi.upload.xmlFile')}

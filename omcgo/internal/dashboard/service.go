@@ -13,11 +13,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/alarm"
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
-	pmaggregator "github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
@@ -158,20 +159,15 @@ type Service struct {
 	// enabledIndicatorRepo 读取 enabled_pm_indicators_*，用于保存首页 KPI 布局时拒绝未启用指标。
 	// 生产由 NewService 基于主库 PgPool 注入；nil 时跳过校验（测试/退化场景）。
 	enabledIndicatorRepo indicator.EnabledIndicatorRepository
-	// pmAggregator 复用 PM 的 network 维度查询链路，为首页 KPI 折线图提供 counter-first KPI 重算口径。
-	// 可能为 nil（部分测试场景）：运行时应由 provider 注入，缺失时 KPI 时序查询返回配置错误。
-	pmAggregator dashboardKPIAggregator
+	// networkRollups 只读现有内置任务发布的 network 维度全网结果。
+	// Dashboard 不得回退原始 PM 明细或调用在线聚合。
+	networkRollups NetworkRollupReader
+	kpiQueryGuard  *KPIQueryGuard
+	metrics        *Metrics
 	// layoutRepo 是 issue #213 S1 全局 KPI 首页布局（dashboard_kpi_layouts）读写仓库。
 	// 可能为 nil（部分测试场景）：此时 GetKPILayout 回退内置默认，SaveKPILayout 报错。
 	layoutRepo KPILayoutRepository
 	logger     *zap.Logger
-}
-
-// dashboardKPIAggregator is the narrow PM query capability used by dashboard
-// time-series. Keeping this boundary small also makes query-granularity
-// regressions observable in service tests.
-type dashboardKPIAggregator interface {
-	Query(context.Context, pmaggregator.QueryRequest) ([]pmaggregator.Row, error)
 }
 
 // NewService creates a new dashboard service.
@@ -183,19 +179,19 @@ func NewService(
 	tsPool *pgxpool.Pool,
 	groupRepo topology.DeviceGroupRepository,
 	indicatorRepo indicator.IndicatorRepository,
-	pmAggregator *pmaggregator.Aggregator,
+	networkRollups NetworkRollupReader,
 	logger *zap.Logger,
 ) *Service {
 	s := &Service{
-		deviceService: deviceService,
-		alarmStore:    alarmStore,
-		kpiRepo:       kpiRepo,
-		pgPool:        pgPool,
-		tsPool:        tsPool,
-		groupRepo:     groupRepo,
-		indicatorRepo: indicatorRepo,
-		pmAggregator:  pmAggregator,
-		logger:        logger.Named("dashboard"),
+		deviceService:  deviceService,
+		alarmStore:     alarmStore,
+		kpiRepo:        kpiRepo,
+		pgPool:         pgPool,
+		tsPool:         tsPool,
+		groupRepo:      groupRepo,
+		indicatorRepo:  indicatorRepo,
+		networkRollups: networkRollups,
+		logger:         logger.Named("dashboard"),
 	}
 	// 全局 KPI 布局仓库走主库（dashboard_kpi_layouts 在主库）。pgPool 为 nil 时（测试）留空。
 	if pgPool != nil {
@@ -203,6 +199,14 @@ func NewService(
 		s.enabledIndicatorRepo = indicator.NewPgEnabledRepository(pgPool)
 	}
 	return s
+}
+
+func (s *Service) SetKPIQueryGuard(guard *KPIQueryGuard) {
+	s.kpiQueryGuard = guard
+}
+
+func (s *Service) SetMetrics(metrics *Metrics) {
+	s.metrics = metrics
 }
 
 // GetSummary aggregates dashboard data from multiple sources in parallel.
@@ -216,7 +220,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		totalDevices     int64
 		onlineDevices    int64
 		rawAlarmStats    *alarm.AlarmStatistics
-		rawKPIValues     []model.KPIValue
+		rawKPIValues     []NetworkRollupPoint
 		rawAlarms        []model.Alarm
 		alarmDeviceCount int64
 	)
@@ -251,41 +255,35 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		return nil
 	})
 
-	// 3. Latest KPI value per metric_path (last 24h)
-	//
-	// 历史实现走 kpiRepo.Query(PageSize=10, SortBy=time desc)，是"top-10 行"上限不是"每指标取最新"，
-	// 当全网指标 >> 10 时 UE_ACTIVE 等会被截断 → 首页活跃 UE 卡常驻 0（issue HD01 根因）。
-	// 改走 DISTINCT ON (metric_path) ORDER BY metric_path, time DESC，确保每个指标编号都拿到最新值。
+	// 3. Latest published network KPI value per technology + metric (last 24h).
+	// This path must never scan raw PM tables or invoke online aggregation.
 	g.Go(func() error {
+		if s.networkRollups == nil {
+			s.logger.Warn("dashboard: network rollup reader not configured")
+			return nil
+		}
 		now := time.Now()
-		query, args, err := buildLatestKPIPerNameQuery(now.Add(-24*time.Hour), now)
+		load := func(loadCtx context.Context) (any, error) {
+			return s.networkRollups.ListLatestHourly(loadCtx, now.Add(-24*time.Hour), now)
+		}
+		var loaded any
+		var err error
+		if s.kpiQueryGuard != nil {
+			loaded, _, err = s.kpiQueryGuard.Do(gctx, "summary:latest-hourly", load)
+		} else {
+			loaded, err = load(gctx)
+		}
 		if err != nil {
-			s.logger.Warn("dashboard: build latest kpi query failed", zap.Error(err))
+			logDashboardQueryFailure(s.logger, "dashboard: latest network rollup query failed", err)
 			return nil
 		}
-		rows, err := s.tsPool.Query(gctx, query, args...)
-		if err != nil {
-			logDashboardQueryFailure(s.logger, "dashboard: latest kpi query failed", err)
+		points, ok := loaded.([]NetworkRollupPoint)
+		if !ok {
+			s.logger.Warn("dashboard: latest network rollup cache type mismatch")
 			return nil
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var path string
-			var val float64
-			if err := rows.Scan(&path, &val); err != nil {
-				s.logger.Warn("dashboard: scan latest kpi row failed", zap.Error(err))
-				return nil
-			}
-			// 仅填 KPIName/IndicatorID/KPIValue —— 下游只读这三项映射进 KPIOverview。
-			rawKPIValues = append(rawKPIValues, model.KPIValue{
-				KPIName:     path,
-				IndicatorID: path,
-				KPIValue:    val,
-			})
-		}
-		if err := rows.Err(); err != nil {
-			logDashboardQueryFailure(s.logger, "dashboard: iterate latest kpi rows failed", err)
-		}
+		rawKPIValues = append([]NetworkRollupPoint(nil), points...)
+		s.observeNetworkRollups(points, nil, "", metrics.GranularityHourly, now)
 		return nil
 	})
 
@@ -344,10 +342,11 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		}
 	}
 
-	// Map KPI values to named fields (use latest value per KPI name)
-	for _, v := range rawKPIValues {
-		key := v.KPIName
-		setDashboardKPIOverviewValue(summary.KPIOverview, key, v.KPIValue)
+	overview, conflicts := buildKPIOverviewFromNetworkRollups(rawKPIValues)
+	summary.KPIOverview = overview
+	if len(conflicts) > 0 {
+		s.logger.Warn("dashboard: cross-technology KPI paths skipped",
+			zap.Strings("metric_paths", conflicts))
 	}
 
 	// Map recent alarms to frontend format (aggregate by device)
@@ -386,6 +385,48 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	)
 
 	return summary, nil
+}
+
+func buildKPIOverviewFromNetworkRollups(points []NetworkRollupPoint) (map[string]float64, []string) {
+	type selectedPoint struct {
+		technology  model.Technology
+		windowStart time.Time
+		value       float64
+	}
+	selected := make(map[string]selectedPoint, len(points))
+	conflictSet := make(map[string]struct{})
+	for _, point := range points {
+		path := strings.TrimSpace(point.MetricPath)
+		if path == "" {
+			continue
+		}
+		if _, conflicted := conflictSet[path]; conflicted {
+			continue
+		}
+		current, exists := selected[path]
+		if exists && current.technology != point.Technology {
+			delete(selected, path)
+			conflictSet[path] = struct{}{}
+			continue
+		}
+		if !exists || point.WindowStart.After(current.windowStart) {
+			selected[path] = selectedPoint{
+				technology:  point.Technology,
+				windowStart: point.WindowStart,
+				value:       float64(point.Value),
+			}
+		}
+	}
+	overview := make(map[string]float64, len(selected))
+	for path, point := range selected {
+		setDashboardKPIOverviewValue(overview, path, point.value)
+	}
+	conflicts := make([]string, 0, len(conflictSet))
+	for path := range conflictSet {
+		conflicts = append(conflicts, path)
+	}
+	sort.Strings(conflicts)
+	return overview, conflicts
 }
 
 func setDashboardKPIOverviewValue(overview map[string]float64, key string, value float64) {
@@ -765,6 +806,225 @@ func (s *Service) queryAlarmTrendInto(ctx context.Context, pool *pgxpool.Pool, t
 	return nil
 }
 
+type alarmTrendSnapshot struct {
+	Date string
+	At   time.Time
+}
+
+type alarmTrendSnapshotCount struct {
+	Ordinal  int
+	Critical int64
+	Major    int64
+	Minor    int64
+	Warning  int64
+	AlarmIDs []uuid.UUID
+}
+
+func buildAlarmTrendSnapshots(now time.Time, days int) []alarmTrendSnapshot {
+	if days < 1 {
+		return nil
+	}
+
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	snapshots := make([]alarmTrendSnapshot, 0, days)
+	for offset := days - 1; offset >= 0; offset-- {
+		dayStart := today.AddDate(0, 0, -offset)
+		snapshotAt := dayStart.AddDate(0, 0, 1).Add(-time.Nanosecond)
+		if offset == 0 {
+			snapshotAt = now
+		}
+		snapshots = append(snapshots, alarmTrendSnapshot{
+			Date: dayStart.Format("2006-01-02"),
+			At:   snapshotAt,
+		})
+	}
+	return snapshots
+}
+
+func alarmTrendSnapshotSelect(idColumn string, includeAlarmIDs bool) sq.SelectBuilder {
+	columns := []string{
+		"snapshots.ordinality",
+		fmt.Sprintf("COUNT(DISTINCT %s) FILTER (WHERE alarm.severity IN (1, 31001)) AS critical", idColumn),
+		fmt.Sprintf("COUNT(DISTINCT %s) FILTER (WHERE alarm.severity IN (2, 31002)) AS major", idColumn),
+		fmt.Sprintf("COUNT(DISTINCT %s) FILTER (WHERE alarm.severity IN (3, 31003)) AS minor", idColumn),
+		fmt.Sprintf("COUNT(DISTINCT %s) FILTER (WHERE alarm.severity IN (4, 31004)) AS warning", idColumn),
+	}
+	if includeAlarmIDs {
+		columns = append(columns, fmt.Sprintf(
+			"COALESCE(array_agg(DISTINCT %s) FILTER (WHERE %s IS NOT NULL AND snapshots.ordinality = cardinality($1::timestamptz[])), '{}'::uuid[]) AS alarm_ids",
+			idColumn,
+			idColumn,
+		))
+	} else {
+		columns = append(columns, "'{}'::uuid[] AS alarm_ids")
+	}
+	return sq.Select(columns...).
+		From("unnest(?::timestamptz[]) WITH ORDINALITY AS snapshots(snapshot_at, ordinality)").
+		GroupBy("snapshots.ordinality").
+		OrderBy("snapshots.ordinality")
+}
+
+func buildActiveAlarmTrendSnapshotQuery(snapshotTimes []time.Time, visibleGroups []uuid.UUID) (string, []any, error) {
+	builder := alarmTrendSnapshotSelect("alarm.id", true).
+		LeftJoin("alarms_active alarm ON alarm.raised_at <= snapshots.snapshot_at")
+	builder = authz.ApplyDeviceVisibilityFilter(builder, "alarm.device_id", visibleGroups)
+	query, queryArgs, err := builder.PlaceholderFormat(sq.Dollar).ToSql()
+	return query, append([]any{snapshotTimes}, queryArgs...), err
+}
+
+func buildHistoryAlarmTrendSnapshotQuery(
+	snapshotTimes []time.Time,
+	visibleGroups []uuid.UUID,
+	activeIDs []uuid.UUID,
+) (string, []any, error) {
+	builder := alarmTrendSnapshotSelect("alarm.alarm_id", false).
+		LeftJoin(`alarms_history alarm
+			ON alarm.raised_at <= snapshots.snapshot_at
+			AND alarm.cleared_at > snapshots.snapshot_at`)
+	builder = authz.ApplyDeviceVisibilityFilter(builder, "alarm.device_id", visibleGroups)
+	builder = builder.Where(sq.Or{
+		sq.Expr("alarm.alarm_id IS NULL"),
+		sq.Expr("NOT (alarm.alarm_id = ANY(?::uuid[]))", activeIDs),
+	})
+	query, queryArgs, err := builder.PlaceholderFormat(sq.Dollar).ToSql()
+	return query, append([]any{snapshotTimes}, queryArgs...), err
+}
+
+func mergeAlarmTrendSnapshotCounts(entries []AlarmTrendEntry, counts []alarmTrendSnapshotCount) error {
+	for _, count := range counts {
+		index := count.Ordinal - 1
+		if index < 0 || index >= len(entries) {
+			return fmt.Errorf("alarm trend snapshot ordinal %d out of range", count.Ordinal)
+		}
+		entries[index].Critical += count.Critical
+		entries[index].Major += count.Major
+		entries[index].Minor += count.Minor
+		entries[index].Warning += count.Warning
+	}
+	return nil
+}
+
+func collectAlarmTrendSnapshotIDs(counts []alarmTrendSnapshotCount) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{})
+	ids := make([]uuid.UUID, 0)
+	for _, count := range counts {
+		for _, alarmID := range count.AlarmIDs {
+			if _, exists := seen[alarmID]; exists {
+				continue
+			}
+			seen[alarmID] = struct{}{}
+			ids = append(ids, alarmID)
+		}
+	}
+	return ids
+}
+
+func queryAlarmTrendSnapshotCounts(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	source string,
+	query string,
+	args []any,
+	expectedCount int,
+) ([]alarmTrendSnapshotCount, error) {
+	if pool == nil || expectedCount == 0 {
+		return nil, nil
+	}
+
+	rows, err := pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query active alarm trend from %s: %w", source, err)
+	}
+	defer rows.Close()
+
+	counts := make([]alarmTrendSnapshotCount, 0, expectedCount)
+	for rows.Next() {
+		var count alarmTrendSnapshotCount
+		if err := rows.Scan(
+			&count.Ordinal,
+			&count.Critical,
+			&count.Major,
+			&count.Minor,
+			&count.Warning,
+			&count.AlarmIDs,
+		); err != nil {
+			return nil, fmt.Errorf("scan active alarm trend row from %s: %w", source, err)
+		}
+		counts = append(counts, count)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active alarm trend rows from %s: %w", source, err)
+	}
+	return counts, nil
+}
+
+// GetActiveAlarmTrend returns end-of-day active-alarm snapshots, using now for today's point.
+func (s *Service) GetActiveAlarmTrend(ctx context.Context, days int, visibleGroups []uuid.UUID) ([]AlarmTrendEntry, error) {
+	if days < 1 {
+		days = 7
+	}
+	if days > 365 {
+		days = 365
+	}
+
+	now := response.TimeInCurrentLocation(ctx, time.Now())
+	snapshots := buildAlarmTrendSnapshots(now, days)
+	entries := make([]AlarmTrendEntry, len(snapshots))
+	snapshotTimes := make([]time.Time, len(snapshots))
+	for index, snapshot := range snapshots {
+		entries[index].Date = snapshot.Date
+		snapshotTimes[index] = snapshot.At
+	}
+
+	activeQuery, activeArgs, err := buildActiveAlarmTrendSnapshotQuery(snapshotTimes, visibleGroups)
+	if err != nil {
+		return nil, fmt.Errorf("build active alarm trend query for alarms_active: %w", err)
+	}
+	activeCounts, err := queryAlarmTrendSnapshotCounts(
+		ctx,
+		s.pgPool,
+		"alarms_active",
+		activeQuery,
+		activeArgs,
+		len(snapshotTimes),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := mergeAlarmTrendSnapshotCounts(entries, activeCounts); err != nil {
+		return nil, fmt.Errorf("merge active alarm trend from alarms_active: %w", err)
+	}
+
+	// Today's point deliberately comes only from alarms_active so it has the
+	// same inventory source as the current-alarm cards. Historical rows are
+	// only needed to reconstruct alarms that were still active on prior days.
+	historySnapshotTimes := snapshotTimes[:len(snapshotTimes)-1]
+	activeIDs := collectAlarmTrendSnapshotIDs(activeCounts)
+	historyQuery, historyArgs, err := buildHistoryAlarmTrendSnapshotQuery(
+		historySnapshotTimes,
+		visibleGroups,
+		activeIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build active alarm trend query for alarms_history: %w", err)
+	}
+	historyCounts, err := queryAlarmTrendSnapshotCounts(
+		ctx,
+		s.tsPool,
+		"alarms_history",
+		historyQuery,
+		historyArgs,
+		len(historySnapshotTimes),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := mergeAlarmTrendSnapshotCounts(entries, historyCounts); err != nil {
+		return nil, fmt.Errorf("merge active alarm trend from alarms_history: %w", err)
+	}
+	return entries, nil
+}
+
 // GetDeviceStatus returns device counts grouped by status.
 func (s *Service) GetDeviceStatus(ctx context.Context) (map[model.DeviceStatus]int64, error) {
 	counts, err := s.deviceService.CountByStatus(ctx, nil)
@@ -1042,12 +1302,35 @@ func (s *Service) GetAlarmTypePie(ctx context.Context) ([]AlarmTypePieEntry, err
 
 // GetKPITimeSeries returns time-series data for multiple KPI names within a time range.
 //
-// 取数源：复用 PM Aggregator 的 network 维度查询链路。
-// 历史完整桶读 hourly；点位时间与性能仪表板一致，使用桶起点。
-// KPI 派生指标先聚合 counter 依赖，再在时间桶内按公式重算；dashboard 不直接平均 KPI 行。
+// 取数源：只读现有内置任务发布的 network 维度全网预聚合结果。
+// 小时、天、周严格按请求粒度读取；点位时间使用已发布窗口的桶起点。
 //
 // 查询键：前端传指标编号（K/C 编号），直接查 metric_path。
 func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
+	result, _, err := s.GetKPITimeSeriesWithMetadata(ctx, kpiNames, technology, granularity, startTime, endTime)
+	return result, err
+}
+
+func (s *Service) GetKPITimeSeriesWithMetadata(ctx context.Context, kpiNames []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) (KPITimeSeriesResponse, KPIQueryMetadata, error) {
+	if s.kpiQueryGuard == nil || len(kpiNames) == 0 {
+		result, err := s.getKPITimeSeriesUnprotected(ctx, kpiNames, technology, granularity, startTime, endTime)
+		return result, KPIQueryMetadata{}, err
+	}
+	key := dashboardSeriesCacheKey(kpiNames, technology, granularity, startTime, endTime)
+	value, metadata, err := s.kpiQueryGuard.Do(ctx, key, func(loadCtx context.Context) (any, error) {
+		return s.getKPITimeSeriesUnprotected(loadCtx, kpiNames, technology, granularity, startTime, endTime)
+	})
+	if err != nil {
+		return nil, KPIQueryMetadata{}, err
+	}
+	result, ok := value.(KPITimeSeriesResponse)
+	if !ok {
+		return nil, KPIQueryMetadata{}, fmt.Errorf("dashboard KPI series cache type mismatch")
+	}
+	return cloneKPITimeSeriesResponse(result), metadata, nil
+}
+
+func (s *Service) getKPITimeSeriesUnprotected(ctx context.Context, kpiNames []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
 	result := make(KPITimeSeriesResponse, len(kpiNames))
 
 	if len(kpiNames) == 0 {
@@ -1069,14 +1352,7 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, techn
 		}
 	}
 
-	// 取全网时序：走 PM Aggregator 的 network 维度，保持与 PM 查询页一致的 KPI 重算口径。
-	var points []networkSeriesPoint
-	var err error
-	if granularity == metrics.GranularityDaily {
-		points, err = s.fetchNetworkKCodeDailySeries(ctx, kcodes, technology, startTime, endTime)
-	} else {
-		points, err = s.fetchNetworkKCodeSeries(ctx, kcodes, technology, startTime, endTime)
-	}
+	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, technology, granularity, startTime, endTime)
 	if err != nil {
 		return nil, err
 	}
@@ -1093,26 +1369,68 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, techn
 	return result, nil
 }
 
-func (s *Service) fetchNetworkKCodeDailySeries(ctx context.Context, kcodes []string, technology model.Technology, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
-	if s.pmAggregator == nil {
-		return nil, fmt.Errorf("dashboard network KPI aggregator not configured")
+func (s *Service) observeNetworkRollups(points []NetworkRollupPoint, requested []string, technology model.Technology, granularity metrics.Granularity, now time.Time) {
+	if s.metrics == nil {
+		return
 	}
-	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPIDailySeriesRequest(kcodes, technology, startTime, endTime))
-	if err != nil {
-		return nil, fmt.Errorf("query dashboard network daily kpi series: %w", err)
-	}
-	return sortAndDedupeNetworkSeriesPoints(networkRowsToDailySeriesPoints(rows, startTime, endTime)), nil
-}
-
-func networkRowsToDailySeriesPoints(rows []pmaggregator.Row, startTime, endTime time.Time) []networkSeriesPoint {
-	points := make([]networkSeriesPoint, 0, len(rows))
-	for _, r := range rows {
-		if r.Time.Before(startTime) || !r.Time.Before(endTime) {
+	latest := make(map[model.Technology]time.Time)
+	incomplete := make(map[model.Technology]int)
+	present := make(map[model.Technology]map[string]struct{})
+	for _, point := range points {
+		if technology != "" && point.Technology != technology {
 			continue
 		}
-		points = append(points, networkSeriesPoint{code: r.MetricPath, time: r.Time, value: r.MetricValue})
+		if point.WindowEnd.After(latest[point.Technology]) {
+			latest[point.Technology] = point.WindowEnd
+		}
+		if !point.Complete || point.MissingSlots > 0 {
+			incomplete[point.Technology]++
+		}
+		if present[point.Technology] == nil {
+			present[point.Technology] = make(map[string]struct{})
+		}
+		present[point.Technology][point.MetricPath] = struct{}{}
 	}
-	return points
+	for tech, count := range incomplete {
+		s.metrics.ObserveIncomplete(string(tech), string(granularity), float64(count))
+	}
+	for tech, windowStart := range latest {
+		lag := now.Sub(windowStart).Seconds()
+		if lag < 0 {
+			lag = 0
+		}
+		s.metrics.SetRollupLag(string(tech), string(granularity), lag)
+	}
+	if technology != "" && len(requested) > 0 {
+		missing := 0
+		for _, path := range normalizeMetricPaths(requested) {
+			if _, ok := present[technology][path]; !ok {
+				missing++
+			}
+		}
+		s.metrics.ObserveMissing(string(technology), string(granularity), float64(missing))
+	}
+}
+
+func dashboardSeriesCacheKey(kpiNames []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) string {
+	names := normalizeMetricPaths(kpiNames)
+	return fmt.Sprintf("series:%s:%s:%s:%s:%s",
+		technology,
+		granularity,
+		strings.Join(names, ","),
+		startTime.UTC().Format(time.RFC3339Nano),
+		endTime.UTC().Format(time.RFC3339Nano),
+	)
+}
+
+func cloneKPITimeSeriesResponse(source KPITimeSeriesResponse) KPITimeSeriesResponse {
+	clone := make(KPITimeSeriesResponse, len(source))
+	for name, entries := range source {
+		clonedEntries := make([]KPITimeSeriesEntry, len(entries))
+		copy(clonedEntries, entries)
+		clone[name] = clonedEntries
+	}
+	return clone
 }
 
 // networkSeriesPoint 是全网时序的一行（指标编号 + 图表点位时间 + 值），供 GetKPITimeSeries 回填用。
@@ -1122,35 +1440,31 @@ type networkSeriesPoint struct {
 	value jsonx.Float
 }
 
-// fetchNetworkKCodeSeries 读多个指标编号的首页全网时序。
-// 读 hourly 聚合表，并保持与性能仪表板相同的完整桶口径。
-func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, technology model.Technology, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
-	if s.pmAggregator == nil {
-		return nil, fmt.Errorf("dashboard network KPI aggregator not configured")
+// fetchNetworkKCodeSeries 直接读取多个指标编号的首页全网发布结果。
+func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
+	if s.networkRollups == nil {
+		return nil, fmt.Errorf("dashboard network rollup reader not configured")
 	}
 
-	rows, err := s.pmAggregator.Query(ctx, buildNetworkKPIHourlySeriesRequest(kcodes, technology, startTime, endTime))
+	rows, err := s.networkRollups.ListSeries(ctx, NetworkRollupQuery{
+		Technology: technology, Granularity: granularity,
+		MetricPaths: kcodes, StartTime: startTime, EndTime: endTime,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("query dashboard network kpi series: %w", err)
+		return nil, fmt.Errorf("query dashboard network %s kpi series: %w", granularity, err)
 	}
+	s.observeNetworkRollups(rows, kcodes, technology, granularity, time.Now())
 
-	return sortAndDedupeNetworkSeriesPoints(networkRowsToSeriesPoints(rows, startTime, endTime)), nil
-}
-
-// networkRowsToSeriesPoints 使用 PM 桶起点作为图表点位，与性能仪表板保持一致。
-func networkRowsToSeriesPoints(rows []pmaggregator.Row, startTime, endTime time.Time) []networkSeriesPoint {
 	points := make([]networkSeriesPoint, 0, len(rows))
-	for _, r := range rows {
-		if r.Time.Before(startTime) || !r.Time.Before(endTime) {
+	for _, row := range rows {
+		if row.WindowStart.Before(startTime) || !row.WindowStart.Before(endTime) {
 			continue
 		}
 		points = append(points, networkSeriesPoint{
-			code:  r.MetricPath,
-			time:  r.Time,
-			value: r.MetricValue,
+			code: row.MetricPath, time: row.WindowStart, value: row.Value,
 		})
 	}
-	return points
+	return sortAndDedupeNetworkSeriesPoints(points), nil
 }
 
 func sortAndDedupeNetworkSeriesPoints(points []networkSeriesPoint) []networkSeriesPoint {
@@ -1180,8 +1494,7 @@ func sortAndDedupeNetworkSeriesPoints(points []networkSeriesPoint) []networkSeri
 func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, startTime, endTime time.Time) ([]KPITrendEntry, error) {
 	kcodes := []string{kpiName}
 
-	// 与 GetKPITimeSeries 同源：通过 PM Aggregator 做 network 维度 hourly 查询与 KPI 重算。
-	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, "", startTime, endTime)
+	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, "", metrics.GranularityHourly, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("query network kpi series: %w", err)
 	}

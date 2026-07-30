@@ -550,6 +550,28 @@ func TestServeHTTP_Inform_Periodic_PublishesPeriodicEvent(t *testing.T) {
 	assert.Equal(t, event.SubjectDevicePeriodic, bus.published[0].Subject)
 }
 
+func TestServeHTTP_Inform_Periodic_EnqueuesUECountQuery(t *testing.T) {
+	h := newTestACSHandler()
+	taskSvc := h.taskService.(*acsHTaskService)
+	h.ueCountPolicy = NewUECountPolicy(
+		&stubUECountPathResolver{paths: []string{
+			"Device.DeviceInfo.UE_Count",
+			"Device.DeviceInfo.2.UE_Count",
+		}},
+		taskSvc,
+		stubUECountProbeGate{acquired: true},
+		zap.NewNop(),
+	)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, taskSvc.tasks, 1)
+	assert.Equal(t, ueCountGPVDescription, taskSvc.tasks[0].Description)
+}
+
 func TestHasExpeditedEventParams_InternetGatewayDevicePrefix(t *testing.T) {
 	params := []tr069.ParameterValueStruct{
 		{Name: "InternetGatewayDevice.DeviceInfo.Manufacturer", Value: "Baicells"},
@@ -1150,6 +1172,24 @@ func (m *acsHTaskService) CreateTask(ctx context.Context, req *task.CreateTaskRe
 	}
 	m.tasks = append(m.tasks, t)
 	return t, nil
+}
+
+func (m *acsHTaskService) LatestOpenTaskByDeviceAndMethod(
+	_ context.Context,
+	deviceSN, method, description string,
+) (*task.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := len(m.tasks) - 1; i >= 0; i-- {
+		candidate := m.tasks[i]
+		if candidate.DeviceSN == deviceSN &&
+			candidate.Method == method &&
+			candidate.Description == description &&
+			(candidate.Status == task.TaskStatusPending || candidate.Status == task.TaskStatusSent) {
+			return candidate, nil
+		}
+	}
+	return nil, nil
 }
 
 // TestTaskQueue_ProcessMultipleRPCMethods tests processing multiple TR069 RPC methods

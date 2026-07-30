@@ -102,6 +102,7 @@ type svcMockSubTaskRepo struct {
 	getByCommandKeyFn   func(ctx context.Context, commandKey string) (*UpgradeSubTask, error)
 	batchCreateFn       func(ctx context.Context, tasks []*UpgradeSubTask) error
 	updateDestByIDFn    func(ctx context.Context, id uuid.UUID, destVersion string) error
+	failStaleFn         func(ctx context.Context, cutoffs StaleTimeouts) (StaleFailures, error)
 }
 
 func (m *svcMockSubTaskRepo) Create(ctx context.Context, task *UpgradeSubTask) error {
@@ -218,10 +219,51 @@ func (m *svcMockSubTaskRepo) BatchCreate(ctx context.Context, tasks []*UpgradeSu
 	}
 	return nil
 }
-func (m *svcMockSubTaskRepo) FailStale(_ context.Context, _ StaleTimeouts) (map[uuid.UUID]int64, error) {
-	return nil, nil
+func (m *svcMockSubTaskRepo) FailStale(ctx context.Context, cutoffs StaleTimeouts) (StaleFailures, error) {
+	if m.failStaleFn != nil {
+		return m.failStaleFn(ctx, cutoffs)
+	}
+	return StaleFailures{}, nil
 }
 func (m *svcMockSubTaskRepo) DeleteByTaskID(_ context.Context, _ uuid.UUID) error { return nil }
+
+func TestReapStaleSubTasksOnceReleasesTimedOutDeviceLock(t *testing.T) {
+	ctx := context.Background()
+	taskID := uuid.New()
+	subTaskID := uuid.New()
+	deviceSN := "SN-REAPER-LOCK"
+
+	mr := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = redisClient.Close() })
+
+	require.NoError(t, redisClient.Set(ctx, upgradeDeviceLockKey(deviceSN), subTaskID.String(), time.Hour).Err())
+
+	subRepo := &svcMockSubTaskRepo{
+		failStaleFn: func(_ context.Context, _ StaleTimeouts) (StaleFailures, error) {
+			return StaleFailures{
+				TaskCounts: map[uuid.UUID]int64{taskID: 1},
+				Locks: []StaleDeviceLock{{
+					DeviceSN:  deviceSN,
+					SubTaskID: subTaskID,
+				}},
+			}, nil
+		},
+	}
+	taskRepo := &svcMockTaskRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*UpgradeTask, error) {
+			return &UpgradeTask{ID: id, Status: TaskInProgress, TotalCount: 1, FailCount: 1}, nil
+		},
+	}
+	service := NewSoftwareService(
+		&svcMockFirmwareRepo{}, taskRepo, subRepo, &svcMockDeviceRepo{},
+		&svcMockCmdQueue{}, nil, nil, "", &svcMockEventBus{}, redisClient, zap.NewNop(),
+	)
+
+	require.NoError(t, service.reapStaleSubTasksOnce(ctx, defaultUpgradeTaskReaperTimeouts()))
+
+	assert.False(t, mr.Exists(upgradeDeviceLockKey(deviceSN)), "reaper must release Redis lock owned by timed-out sub-task")
+}
 
 type svcMockDeviceRepo struct {
 	getByIDFn           func(ctx context.Context, id uuid.UUID) (*model.Device, error)
@@ -473,6 +515,62 @@ func TestService_BatchUpgrade_PersistsDownloadFileTypeOverride(t *testing.T) {
 	require.NotNil(t, createdTask)
 	assert.Equal(t, "Firmware Upgrade Fpga", createdTask.DownloadFileType)
 }
+
+func TestService_BatchUpgrade_PersistsCreateUserFromRequest(t *testing.T) {
+	deviceID := uuid.New()
+	firmwareID := uuid.New()
+	var createdTask *UpgradeTask
+
+	fwRepo := &svcMockFirmwareRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*FirmwareVersion, error) {
+			require.Equal(t, firmwareID, id)
+			return &FirmwareVersion{
+				ID:           firmwareID,
+				Version:      "V1.0.0",
+				FileName:     "fw.bin",
+				MD5Val:       "abc123",
+				MinIOPath:    "firmware/cmcc/SC/V1.0.0/fw.bin",
+				FileSize:     2048,
+				ProductClass: "SmallCell-LTE",
+			}, nil
+		},
+	}
+	taskRepo := &svcMockTaskRepo{
+		createFn: func(_ context.Context, task *UpgradeTask) error {
+			task.ID = uuid.New()
+			copyTask := *task
+			createdTask = &copyTask
+			return nil
+		},
+	}
+
+	svc := NewSoftwareService(
+		fwRepo,
+		taskRepo,
+		&svcMockSubTaskRepo{},
+		&svcMockDeviceRepo{},
+		&svcMockCmdQueue{},
+		nil,
+		nil,
+		"test-bucket",
+		&svcMockEventBus{},
+		nil,
+		zap.NewNop(),
+	)
+
+	_, err := svc.BatchUpgrade(context.Background(), BatchUpgradeRequest{
+		DeviceIDs:       []uuid.UUID{deviceID},
+		FirmwareID:      firmwareID,
+		TaskName:        "operator-upgrade",
+		TaskType:        TaskTypeUpgrade,
+		CreateUser:      "operator01",
+		CreateSuspended: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, createdTask)
+	assert.Equal(t, "operator01", createdTask.CreateUser)
+}
+
 func TestService_BatchUpgrade_FirmwareNotFound(t *testing.T) {
 	svc := NewSoftwareService(
 		&svcMockFirmwareRepo{},
@@ -497,7 +595,7 @@ func TestService_BatchUpgrade_FirmwareNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "get firmware")
 }
 
-func TestService_HandleTransferComplete_Success(t *testing.T) {
+func TestService_HandleTransferComplete_InformOnlyDoesNotAdvanceActiveUpgrade(t *testing.T) {
 	deviceID := uuid.New()
 	taskID := uuid.New()
 
@@ -513,8 +611,10 @@ func TestService_HandleTransferComplete_Success(t *testing.T) {
 	}
 
 	var updatedStatus UpgradeState
+	getActiveCalled := false
 	subTaskRepo := &svcMockSubTaskRepo{
 		getActiveByDeviceFn: func(_ context.Context, _ uuid.UUID) (*UpgradeSubTask, error) {
+			getActiveCalled = true
 			return &UpgradeSubTask{
 				ID:     uuid.New(),
 				TaskID: taskID,
@@ -544,11 +644,107 @@ func TestService_HandleTransferComplete_Success(t *testing.T) {
 
 	err := svc.HandleTransferComplete(context.Background(), evt)
 	require.NoError(t, err)
-	// 4G (LTE) device: downloading → completed directly
+	assert.False(t, getActiveCalled, "Inform-level 7 TRANSFER COMPLETE has no CommandKey/FaultStruct and must not be correlated by active device")
+	assert.Empty(t, updatedStatus, "only TC body with matching CommandKey may advance the upgrade")
+}
+
+func TestService_HandleTransferComplete_EmptyCommandKeyFaultDoesNotFailActiveUpgrade(t *testing.T) {
+	var updatedStatus UpgradeState
+	getByCommandKeyCalled := false
+	subTaskRepo := &svcMockSubTaskRepo{
+		getByCommandKeyFn: func(_ context.Context, _ string) (*UpgradeSubTask, error) {
+			getByCommandKeyCalled = true
+			return nil, assert.AnError
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, status UpgradeState, _ string) error {
+			updatedStatus = status
+			return nil
+		},
+	}
+
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{},
+		&svcMockTaskRepo{},
+		subTaskRepo,
+		&svcMockDeviceRepo{},
+		&svcMockCmdQueue{}, nil, nil, "test-bucket",
+		&svcMockEventBus{}, nil, zap.NewNop(),
+	)
+
+	evt, err := event.NewEvent(event.SubjectDeviceTransferComplete, map[string]any{
+		"command_key": "",
+		"fault_struct": map[string]any{
+			"fault_code":   9013,
+			"fault_string": "Url invalid, only support FTP and HTTP protocol.",
+		},
+	})
+	require.NoError(t, err)
+
+	err = svc.HandleTransferComplete(context.Background(), evt)
+	require.NoError(t, err)
+	assert.False(t, getByCommandKeyCalled, "empty CommandKey TransferComplete must not be matched to an active upgrade")
+	assert.Empty(t, updatedStatus)
+}
+
+func TestService_HandleTransferComplete_MatchingCommandKeySuccess(t *testing.T) {
+	deviceID := uuid.New()
+	taskID := uuid.New()
+	subTaskID := uuid.New()
+	commandKey := "Download Upgrade," + subTaskID.String()
+
+	mr := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer redisClient.Close()
+
+	deviceRepo := &svcMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			assert.Equal(t, "SN-TC-001", sn)
+			return &model.Device{ID: deviceID, SerialNumber: sn, Technology: model.TechLTE}, nil
+		},
+	}
+
+	var updatedStatus UpgradeState
+	subTaskRepo := &svcMockSubTaskRepo{
+		getByCommandKeyFn: func(_ context.Context, got string) (*UpgradeSubTask, error) {
+			assert.Equal(t, commandKey, got)
+			return &UpgradeSubTask{
+				ID:         subTaskID,
+				TaskID:     taskID,
+				Status:     UpgradeDownloading,
+				DeviceSN:   "SN-TC-001",
+				CommandKey: commandKey,
+			}, nil
+		},
+		updateStatusFn: func(_ context.Context, _ uuid.UUID, status UpgradeState, _ string) error {
+			updatedStatus = status
+			return nil
+		},
+	}
+
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{},
+		&svcMockTaskRepo{},
+		subTaskRepo,
+		deviceRepo,
+		&svcMockCmdQueue{}, nil, nil, "test-bucket",
+		&svcMockEventBus{}, redisClient, zap.NewNop(),
+	)
+
+	evt, err := event.NewEvent(event.SubjectDeviceTransferComplete, map[string]any{
+		"command_key": commandKey,
+		"fault_struct": map[string]any{
+			"fault_code":   0,
+			"fault_string": "",
+		},
+	})
+	require.NoError(t, err)
+
+	err = svc.HandleTransferComplete(context.Background(), evt)
+	require.NoError(t, err)
 	assert.Equal(t, UpgradeCompleted, updatedStatus)
 }
 
-func TestService_HandleTransferComplete_NoActiveUpgrade(t *testing.T) {
+func TestService_HandleTransferComplete_LegacyDeviceSNPayloadIgnored(t *testing.T) {
 	deviceRepo := &svcMockDeviceRepo{
 		getBySerialNumberFn: func(_ context.Context, _ string) (*model.Device, error) {
 			return &model.Device{ID: uuid.New(), SerialNumber: "SN-001"}, nil
@@ -558,7 +754,7 @@ func TestService_HandleTransferComplete_NoActiveUpgrade(t *testing.T) {
 	svc := NewSoftwareService(
 		&svcMockFirmwareRepo{},
 		&svcMockTaskRepo{},
-		&svcMockSubTaskRepo{}, // GetActiveByDeviceID returns ErrNotFound
+		&svcMockSubTaskRepo{},
 		deviceRepo,
 		&svcMockCmdQueue{}, nil, nil, "test-bucket",
 		&svcMockEventBus{}, nil, zap.NewNop(),

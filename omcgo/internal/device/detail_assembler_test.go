@@ -219,6 +219,20 @@ func TestAssembleCells_SingleCell(t *testing.T) {
 	assert.Equal(t, 1, cells[0].Index)
 }
 
+func TestAssembleCells_SCDoesNotReturnPhantomCarriers(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity", ParameterValue: "210922753"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.OpState", ParameterValue: "false"},
+		{ParameterPath: "Device.Services.FAPService.2.FAPControl.LTE.OpState", ParameterValue: "false"},
+		{ParameterPath: "Device.Services.FAPService.3.FAPControl.LTE.RFTxStatus", ParameterValue: "false"},
+	}
+
+	cells := AssembleCells(params, 3, "FAP/MLN/SC")
+
+	assert.Len(t, cells, 1)
+	assert.Equal(t, 1, cells[0].Index)
+}
+
 // TestAssembleCells_FAPControlPaths verifies strict OpState mapping + RF/Admin mapping —
 // 实际上报路径：
 //   - OpState 来自 `FAPControl.LTE.OpState`

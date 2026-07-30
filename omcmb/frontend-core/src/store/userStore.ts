@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { User } from '../types/system';
 import { useMenuStore } from './menuStore';
+import { usePmPageStateStore } from './pmPageStateStore';
 import { useTabStore } from './tabStore';
 
 export type { User };
@@ -51,10 +52,15 @@ export function getLockedSession(): LockedSession | null {
 
 function clearPersistedTabs(): void {
   useTabStore.getState().closeAllTabs();
+  usePmPageStateStore.getState().clearAllPageStates();
+  safeRemoveStorage(sessionStorage, 'omc-pm-page-state-store');
   safeRemoveStorage(sessionStorage, 'omc-tab-store');
 }
 
-function restoreLockedSessionFor(user: User): void {
+function prepareUserSessionFor(user: User, currentUser: User | null): void {
+  if (currentUser && currentUser.id !== user.id) {
+    clearPersistedTabs();
+  }
   const lockedSession = getLockedSession();
   if (lockedSession && lockedSession.userId !== user.id) {
     clearPersistedTabs();
@@ -118,11 +124,11 @@ export const useUserStore = create<UserState>()(
       mustChangePassword: false,
 
       login: (user) => {
-        restoreLockedSessionFor(user);
+        prepareUserSessionFor(user, get().currentUser);
         set({ currentUser: user, isAuthenticated: true });
       },
       setUser: (user) => {
-        restoreLockedSessionFor(user);
+        prepareUserSessionFor(user, get().currentUser);
         set({ currentUser: user, isAuthenticated: true });
       },
 

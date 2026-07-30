@@ -9,6 +9,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  DASHBOARD_REFRESH_INTERVAL_MS,
+  buildDashboardKPIWindow,
   buildDashboardDayRanges,
   buildDashboardKPIQueryOptions,
   buildDashboardKPIQueryKey,
@@ -248,6 +250,25 @@ describe('useDashboard 工具函数', () => {
 });
 
 describe('dashboard KPI 系统时区窗口', () => {
+  it('小时、天、周窗口直接对应现有聚合粒度和固定历史长度', () => {
+    const now = new Date('2026-07-13T01:30:00Z');
+
+    const hourly = buildDashboardKPIWindow(now, 'hourly', 'Asia/Shanghai');
+    expect(hourly.start_time).toBe('2026-07-12T09:00:00+08:00');
+    expect(hourly.end_time).toBe('2026-07-13T09:00:00+08:00');
+    expect(hourly.bucketKeys).toHaveLength(24);
+
+    const daily = buildDashboardKPIWindow(now, 'daily', 'Asia/Shanghai');
+    expect(daily.start_time).toBe('2026-06-13T00:00:00+08:00');
+    expect(daily.end_time).toBe('2026-07-13T00:00:00+08:00');
+    expect(daily.bucketKeys).toHaveLength(30);
+
+    const weekly = buildDashboardKPIWindow(now, 'weekly', 'Asia/Shanghai');
+    expect(weekly.start_time).toBe('2026-04-20T00:00:00+08:00');
+    expect(weekly.end_time).toBe('2026-07-13T00:00:00+08:00');
+    expect(weekly.bucketKeys).toHaveLength(12);
+  });
+
   it('周查询必须等待系统业务时区就绪，禁止静默回落 UTC', () => {
     expect(isDashboardBusinessTimezoneReady(undefined)).toBe(false);
     expect(isDashboardBusinessTimezoneReady('')).toBe(false);
@@ -354,5 +375,19 @@ describe('dashboard KPI 系统时区窗口', () => {
       client,
     );
     expect(disabled.enabled).toBe(false);
+  });
+
+  it('KPI 查询只按五分钟轮询，不通过窗口焦点或重连即时刷新', () => {
+    const options = buildDashboardKPIQueryOptions({
+      kpi_names: ['K1'],
+      start_time: '2026-07-01T00:00:00+08:00',
+      end_time: '2026-07-02T00:00:00+08:00',
+      granularity: 'hourly',
+    });
+
+    expect(options.refetchInterval).toBe(DASHBOARD_REFRESH_INTERVAL_MS);
+    expect(options.refetchIntervalInBackground).toBe(false);
+    expect(options.refetchOnWindowFocus).toBe(false);
+    expect(options.refetchOnReconnect).toBe(false);
   });
 });

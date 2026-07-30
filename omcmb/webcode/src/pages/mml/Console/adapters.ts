@@ -41,6 +41,8 @@ import type {
  * 避免在 .tsx 里硬编码中文字面量触发 guard。
  */
 export const PATH_FAILED_CELL = '✗ 失败';
+export const MAX_OBJECT_PATH_COLUMNS = 80;
+const CONSOLE_PARSE_OPTIONS = { maxParams: MAX_OBJECT_PATH_COLUMNS };
 
 /** 真实设备 → 设备弹框行视图。 */
 export function mapDeviceToItem(d: Device): DeviceItem {
@@ -454,6 +456,7 @@ export function expandObjectPathColumns(
 ): ResultColumn[] {
   const expanded: ResultColumn[] = [];
   const emittedPaths = new Set<string>();
+  let objectPathColumnCount = 0;
   for (const column of columns) {
     if (!column.path.endsWith('.')) {
       if (emittedPaths.has(column.path)) continue;
@@ -467,9 +470,11 @@ export function expandObjectPathColumns(
     for (const row of rows) {
       for (const path of Object.keys(row.cells)) {
         if (path === column.path || !path.startsWith(column.path)) continue;
+        if (objectPathColumnCount >= MAX_OBJECT_PATH_COLUMNS) continue;
         hasDescendant = true;
         if (emittedPaths.has(path)) continue;
         emittedPaths.add(path);
+        objectPathColumnCount += 1;
         descendantPaths.push(path);
       }
     }
@@ -535,7 +540,7 @@ export function applyFrameToRow(
       raw = typeof frame.result === 'string' ? frame.result : JSON.stringify(frame.result, null, 2);
     }
     if (read && status === 'success') {
-      const parsed = parseMmlDeviceTaskResult(frame.result);
+      const parsed = parseMmlDeviceTaskResult(frame.result, CONSOLE_PARSE_OPTIONS);
       if (parsed?.kind === 'gpv' && parsed.params) {
         const byPath = new Map(parsed.params.map((p) => [p.name, p.value]));
         const byLeaf = new Map(parsed.params.map((p) => [leafName(p.name), p.value]));
@@ -574,7 +579,7 @@ export function mapResultItemToRow(
   if (read && status === 'success' && item.result.parsedData) {
     // parsedData 是结果信封 {method, raw_response}，需解析 raw_response 的 GPV 取 name→value
     // （与 SSE 路径 applyFrameToRow 一致）；早前直接把信封当 name→value 映射导致读回值全空。
-    const parsed = parseMmlDeviceTaskResult(item.result.parsedData);
+    const parsed = parseMmlDeviceTaskResult(item.result.parsedData, CONSOLE_PARSE_OPTIONS);
     if (parsed?.kind === 'gpv' && parsed.params) {
       const byPath = new Map(parsed.params.map((p) => [p.name, p.value]));
       const byLeaf = new Map(parsed.params.map((p) => [leafName(p.name), p.value]));
@@ -684,7 +689,7 @@ export function buildMODReadbackRows(
 ): ResultRow[] {
   // 按结果报文判别下发(SPV)/回读(GPV)，不依赖 commands_detail 是否透出回读命令。
   const isLst = (it: DeviceTaskResultItem): boolean =>
-    !!it.result?.parsedData && parseMmlDeviceTaskResult(it.result.parsedData)?.kind === 'gpv';
+    !!it.result?.parsedData && parseMmlDeviceTaskResult(it.result.parsedData, CONSOLE_PARSE_OPTIONS)?.kind === 'gpv';
 
   const byDevice = new Map<string, DeviceTaskResultItem[]>();
   for (const it of items) {
@@ -704,7 +709,7 @@ export function buildMODReadbackRows(
     const readback = new Map<string, string>();
     const readbackPairs: { path: string; value: string }[] = [];
     if (lstItem?.result?.parsedData) {
-      const parsed = parseMmlDeviceTaskResult(lstItem.result.parsedData);
+      const parsed = parseMmlDeviceTaskResult(lstItem.result.parsedData, CONSOLE_PARSE_OPTIONS);
       if (parsed?.kind === 'gpv' && parsed.params) {
         for (const p of parsed.params) {
           readback.set(p.name, p.value);

@@ -155,6 +155,7 @@ func (t *TR069Alarm) ToModel(deviceID uuid.UUID, deviceSN string, carrier model.
 		AlarmSource:     strPtr("TR069"),
 		Severity:        mapSeverity(t.PerceivedSeverity),
 		Status:          model.AlarmActive,
+		RaisedAt:        t.AlarmRaisedTime,
 		AdditionalInfo:  make(map[string]string),
 	}
 

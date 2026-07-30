@@ -42,7 +42,7 @@ docker compose -p omc \
 |------|------|
 | **CPU** | 每服务 `deploy.resources.limits.cpus`，参数化为 `${PG_CPUS:-8}` 等；CPU 是可突发的软上限 |
 | **内存** | 每服务 `limits.memory`，参数化为 `${PG_MEM:-10g}` 等；cgroup 硬限/熔断 |
-| **缓存（Redis）** | `--maxmemory ${REDIS_MAXMEMORY:-512mb}` + `allkeys-lru`；OMC 实测用量仅数 MB，封顶 512MB 防过配 |
+| **运行状态（Redis）** | PM 小时/天/周/月聚合窗口是运行期权威状态；`noeviction` 防止静默丢窗口，容量按活跃窗口规划 |
 | **PostgreSQL 调优** | 两个实例各自的 `shared_buffers / effective_cache_size / work_mem / maintenance_work_mem / max_wal_size / max_connections` 全参数化 |
 | **Go 运行时** | acs/app/worker 新增 `GOMEMLIMIT`（堆软限，把硬 OOM-kill 换成 GC 背压）+ `GOMAXPROCS`（对齐 CFS 配额）|
 | **磁盘 / 存储路径** | 数据走 Docker 命名卷（pgdata/tsdbdata/redisdata/natsdata/miniodata…）落在 Docker 引擎盘；日志 bind-mount 到 `run/logs/`。脚本探测盘可用空间并在偏小时告警（生产时序量大须独立数据盘，见 §6）|
@@ -89,7 +89,7 @@ compose 项目名（默认 `omc omcgo`）。
 | app | 512 | 1536 | 8 | 运维 UI + OSS 轮询，非设备量驱动 |
 | nats | 384 | 1024 | 6 | JetStream + PM 突发 in-flight |
 | minio | 512 | 2048 | 6 | 对象存储，瓶颈在磁盘非内存 |
-| redis | 384 | 1024 | 4 | OMC 实测仅数 MB，ceiling 低是有意 |
+| redis | 5120 | 8192 | 8 | 12 分钟关窗会短时并存相邻两个小时窗口；20k 基站实测需 4GiB `maxmemory`，另留 1GiB AOF COW 余量 |
 | web | 192 | 512 | 0 | nginx 静态+反代，近似固定 |
 
 监控栈默认**不计入**（dev 本地通常不起）；`--with-monitoring` 把约 4.1 GiB 固定块计入预算。
@@ -105,7 +105,7 @@ compose 项目名（默认 `omc omcgo`）。
 | PG `shared_buffers` | `0.25 × 该实例 MEM`（留 OS page cache 给 Timescale 解压） |
 | PG `effective_cache_size` | `0.60 × 该实例 MEM` |
 | PG `max_connections` | `300`（覆盖 Go 端 ~180 池 + exporter + psql + 余量） |
-| Redis `maxmemory` | `min(512MB, REDIS_MEM − 256)`，且保证 `cap − maxmemory ≥ 256MiB`（AOF rewrite COW 余量） |
+| Redis `maxmemory` | `REDIS_MEM − 1GiB`，`REDIS_MEM` 下限 5GiB；策略固定 `noeviction` |
 
 ### 3.5 双 PG 合计实占 OOM 自检（关键）
 
@@ -122,7 +122,7 @@ compose 项目名（默认 `omc omcgo`）。
 （已加 `.gitignore`）。可手改，约束写在文件头：
 
 - `*_GOMEMLIMIT` 必须 < 对应 `*_MEM`（建议 0.90×）
-- `REDIS_MEM` 必须 ≥ `REDIS_MAXMEMORY + 256MiB`
+- `REDIS_MEM` 必须 ≥ `REDIS_MAXMEMORY + 1GiB`
 - 两 PG 的 `shared_buffers` 之和 + maintenance + backends 余量 须 < VM 内存
 - `PG/TSDB_MAX_CONNECTIONS` 必须 ≥ Go 端连接池总和（当前 ~180）
 

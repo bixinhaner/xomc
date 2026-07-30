@@ -17,9 +17,16 @@ func Test_buildResultsQuery_NoTimeRange(t *testing.T) {
 	assert.NotContains(t, q, "AND r.time >=")
 	assert.NotContains(t, q, "AND r.time <=")
 	assert.Contains(t, q, "WHERE r.task_id = $1")
+	assert.Contains(t, q, "COALESCE((r.extra->>'active_version')::boolean, true)")
 	assert.Contains(t, q, "ORDER BY r.time DESC LIMIT $2 OFFSET $3")
 	// args = [taskID, limit, offset]
 	assert.Equal(t, []any{id, 100, 0}, args)
+}
+
+func Test_buildResultsCountQuery_FiltersInactiveVersionSlices(t *testing.T) {
+	q, _ := buildResultsCountQuery(uuid.New(), resultsFilter{})
+
+	assert.Contains(t, q, "COALESCE((r.extra->>'active_version')::boolean, true)")
 }
 
 // PM-线名解析：SELECT 带出解析名两列，LEFT JOIN products / device_groups。
@@ -244,6 +251,59 @@ func Test_buildResultsCountQuery_FilterByTaskMetricPaths(t *testing.T) {
 	}
 }
 
+func Test_buildResultsQueryAndCountQuery_UseSameMetricScopeWithDashboardFilters(t *testing.T) {
+	id := uuid.New()
+	f := resultsFilter{
+		Granularity:      "hourly",
+		StartTime:        "2026-07-27T18:00:00+08:00",
+		EndTime:          "2026-07-27T22:00:00+08:00",
+		ProductIDs:       []string{"11111111-1111-1111-1111-111111111111"},
+		TaskMetricPaths:  []string{"K1", "K2"},
+		Weekdays:         []int{1, 2, 3},
+		Hours:            []int{8, 9},
+		CalendarTimezone: "Asia/Shanghai",
+	}
+
+	dataSQL, dataArgs := buildResultsQuery(id, f, 100, 0)
+	countSQL, countArgs := buildResultsCountQuery(id, f)
+
+	for _, want := range []string{
+		"AND r.granularity = $2",
+		"AND r.time >= $3",
+		"AND r.time < $4",
+		"AND r.product_id = ANY($5)",
+		"AND r.metric_path = ANY($6)",
+		"AND EXTRACT(dow FROM (r.start_time AT TIME ZONE $7))::int = ANY($8)",
+		"AND EXTRACT(hour FROM (r.start_time AT TIME ZONE $9))::int = ANY($10)",
+	} {
+		assert.Contains(t, dataSQL, want)
+		assert.Contains(t, countSQL, want)
+	}
+	assert.Contains(t, dataSQL, "ORDER BY r.time DESC LIMIT $11 OFFSET $12")
+	assert.NotContains(t, countSQL, "ORDER BY")
+	assert.Equal(t, dataArgs[:len(dataArgs)-2], countArgs)
+}
+
+func Test_buildResultsQuery_CalendarFiltersUseConfiguredTimezone(t *testing.T) {
+	id := uuid.New()
+	f := resultsFilter{
+		StartTime:        "2026-07-28T00:00:00+08:00",
+		EndTime:          "2026-07-28T01:00:00+08:00",
+		Weekdays:         []int{2},
+		Hours:            []int{0},
+		CalendarTimezone: "Asia/Shanghai",
+	}
+
+	q, args := buildResultsQuery(id, f, 100, 0)
+
+	assert.Contains(t, q, "EXTRACT(dow FROM (r.start_time AT TIME ZONE $4))::int = ANY($5)")
+	assert.Contains(t, q, "EXTRACT(hour FROM (r.start_time AT TIME ZONE $6))::int = ANY($7)")
+	assert.NotContains(t, q, "EXTRACT(dow FROM r.start_time)")
+	assert.Contains(t, args, "Asia/Shanghai")
+	assert.Contains(t, args, []int{2})
+	assert.Contains(t, args, []int{0})
+}
+
 // count 空配置回退：与数据查询一致，配置集为空时不过滤。
 func Test_buildResultsCountQuery_EmptyTaskMetricPathsNoFilter(t *testing.T) {
 	id := uuid.New()
@@ -251,4 +311,29 @@ func Test_buildResultsCountQuery_EmptyTaskMetricPathsNoFilter(t *testing.T) {
 
 	assert.NotContains(t, q, "r.metric_path = ANY")
 	assert.Equal(t, []any{id}, args)
+}
+
+// #185：展示侧扩展显示白名单时，会先按当前过滤条件发现结果里真实出现过的版本输出指标。
+func Test_buildResultMetricScopeQuery_UsesSameResultFiltersWithoutTaskMetricGate(t *testing.T) {
+	id := uuid.New()
+	q, args, err := buildResultMetricScopeQuery(id, resultsFilter{
+		MetricPath:  "C000000005",
+		Granularity: "hourly",
+		StartTime:   "2026-07-27T18:00:00+08:00",
+		EndTime:     "2026-07-27T22:00:00+08:00",
+		// 原任务指标白名单不能参与这次发现，否则新增进版本输出清单的指标仍会被挡掉。
+		TaskMetricPaths: []string{"K-OLD"},
+	})
+
+	assert.NoError(t, err)
+	assert.Contains(t, q, "SELECT DISTINCT r.metric_path")
+	assert.Contains(t, q, "AND r.metric_path = $2")
+	assert.Contains(t, q, "AND r.granularity = $3")
+	assert.Contains(t, q, "AND r.time >= $4")
+	assert.Contains(t, q, "AND r.time < $5")
+	assert.NotContains(t, q, "r.metric_path = ANY")
+	assert.Contains(t, q, "ORDER BY r.metric_path")
+	assert.Len(t, args, 5)
+	assert.Equal(t, id.String(), args[0])
+	assert.Equal(t, "C000000005", args[1])
 }

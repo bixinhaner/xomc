@@ -1,14 +1,36 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from 'antd';
 import { IntlProvider } from 'react-intl';
 import { zhCN } from '@core/i18n';
+import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import type { QueryTemplate } from '@core/types/pmQuery';
 import KPIQuery from './index';
+import { buildKpiQueryStateSnapshot, PM_KPI_QUERY_PAGE_KEY } from './kpiQueryState';
 
 const refetchAggSpy = vi.fn();
 const createTemplateSpy = vi.fn();
 const createExportSpy = vi.fn();
+const metricPickerRenderSpy = vi.hoisted(() => vi.fn());
+const aggregatedQuerySpy = vi.hoisted(() => vi.fn());
+const technologyDictionaryState = vi.hoisted(() => {
+  const defaultDictionary = {
+    options: [
+      { label: 'eNB(LTE)', value: 'lte', sort: 1 },
+      { label: 'gNB(NR)', value: 'nr', sort: 2 },
+      { label: 'GSM', value: 'gsm', sort: 3 },
+    ],
+    deviceTypeOptions: [
+      { label: 'eNB(LTE)', value: 'ENB', sort: 1, technology: 'lte' },
+      { label: 'gNB(NR)', value: 'GNB', sort: 2, technology: 'nr' },
+      { label: 'GSM', value: 'GSM', sort: 3, technology: 'gsm' },
+    ],
+    labelForTechnology: (tech?: string | null) => (tech ? tech.toUpperCase() : '—'),
+    labelForRadioMode: (radioMode?: string | null) => (radioMode ? radioMode : '—'),
+    isLoading: false,
+  };
+  return { current: defaultDictionary, defaultDictionary };
+});
 
 const validTemplate: QueryTemplate = {
   id: 'tpl-valid',
@@ -53,15 +75,22 @@ vi.mock('@core/hooks/api/usePmQuery', () => ({
   useCreateQueryTemplate: () => ({ mutateAsync: createTemplateSpy, isPending: false }),
   useUpdateQueryTemplate: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteQueryTemplate: () => ({ mutateAsync: vi.fn() }),
-  useAggregatedMetricsByDevices: () => ({
-    data: [],
-    total: 0,
-    truncated: false,
-    isLoading: false,
-    isFetching: false,
-    errors: [],
-    refetch: refetchAggSpy,
-  }),
+  useAggregatedMetricsByDevices: (
+    baseParams: Record<string, unknown>,
+    deviceSns: string[],
+    enabled: boolean,
+  ) => {
+    aggregatedQuerySpy(baseParams, deviceSns, enabled);
+    return {
+      data: [],
+      total: 0,
+      truncated: false,
+      isLoading: false,
+      isFetching: false,
+      errors: [],
+      refetch: refetchAggSpy,
+    };
+  },
   useMetricObjectsByDevices: () => ({ byDevice: {} }),
 }));
 
@@ -76,6 +105,12 @@ vi.mock('@core/hooks/api/useSystemTimezone', () => ({
 
 vi.mock('@core/hooks/api/useKpiExport', () => ({
   useCreateKpiExport: () => ({ mutate: createExportSpy, isPending: false }),
+}));
+
+vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
+  useTechnologyDictionary: () => technologyDictionaryState.current,
+  deviceTypeToTechnology: (deviceType: string) =>
+    ({ ENB: 'lte', GNB: 'nr', GSM: 'gsm' })[deviceType] ?? 'lte',
 }));
 
 vi.mock('@/hooks/useThemeToken', () => ({
@@ -98,17 +133,26 @@ vi.mock('./components/DevicePickerModal', () => ({
 }));
 
 vi.mock('@/components/MetricPickerModal', () => ({
-  default: () => null,
+  default: (props: Record<string, unknown>) => {
+    metricPickerRenderSpy(props);
+    return null;
+  },
 }));
 
 vi.mock('./components/PivotTable', () => ({
-  default: () => <div data-testid="pivot-table" />,
+  default: (props: { rows: unknown[]; loading: boolean }) => (
+    <div
+      data-testid="pivot-table"
+      data-loading={String(props.loading)}
+      data-row-count={String(props.rows.length)}
+    />
+  ),
 }));
 
 vi.mock('./templateMetricResolver', () => ({
   resolveTemplateMetricPaths: async (_deviceType: string, paths: string[]) => ({
     paths,
-    labels: {},
+    labels: paths.includes('K-1') ? { 'K-1': '小区可用率' } : {},
     ambiguous: [],
   }),
 }));
@@ -137,11 +181,173 @@ async function findModalByTitle(title: string) {
   return modal as HTMLElement;
 }
 
-describe('KPIQuery 模板数量限制', () => {
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('KPIQuery 顶部 tab 现场保持', () => {
   beforeEach(() => {
+    usePmPageStateStore.setState({ pages: {} });
+    sessionStorage.clear();
     refetchAggSpy.mockClear();
+    aggregatedQuerySpy.mockClear();
     createTemplateSpy.mockReset();
     createExportSpy.mockReset();
+    technologyDictionaryState.current = technologyDictionaryState.defaultDictionary;
+  });
+
+  it('切回已查询页面时按已提交条件和分页重新启用聚合查询', async () => {
+    vi.useFakeTimers();
+    usePmPageStateStore.setState({
+      pages: {
+        [PM_KPI_QUERY_PAGE_KEY]: {
+          ...buildKpiQueryStateSnapshot({
+            payload: {
+              deviceType: 'ENB',
+              deviceSns: ['SN-EDITED'],
+              metricPaths: ['K-EDITED'],
+              granularity: 'daily',
+              timeRangePreset: 'last_7d',
+            },
+            customRange: null,
+            timeRangeDirty: true,
+            cellSel: { 'SN-EDITED': ['Cell=9'] },
+            submitted: {
+              payload: {
+                deviceType: 'ENB',
+                deviceSns: ['SN-SUBMITTED'],
+                metricPaths: ['K-SUBMITTED'],
+                granularity: 'hourly',
+                timeRangePreset: 'last_1h',
+              },
+              range: {
+                start: '2026-07-01T00:00:00+08:00',
+                end: '2026-07-01T01:00:00+08:00',
+              },
+              cellSel: {},
+            },
+            pivotPage: 3,
+            pivotPageSize: 50,
+            templateTab: 'private',
+            activeTemplateId: 'tpl-valid',
+            sidebarCollapsed: false,
+          }),
+          savedAt: '2026-07-29T00:00:00.000Z',
+        },
+      },
+    });
+
+    renderPage();
+
+    expect(aggregatedQuerySpy.mock.calls.some(([, , enabled]) => enabled === true)).toBe(false);
+    expect(screen.getByTestId('pivot-table')).toHaveAttribute('data-loading', 'true');
+    expect(screen.getByTestId('pivot-table')).toHaveAttribute('data-row-count', '0');
+
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
+
+    expect(aggregatedQuerySpy.mock.calls.some(([params, deviceSns, enabled]) =>
+      enabled === true &&
+      deviceSns[0] === 'SN-SUBMITTED' &&
+      (params.metricPaths as string[] | undefined)?.[0] === 'K-SUBMITTED' &&
+      params.offset === 100,
+    )).toBe(true);
+  });
+
+  it('只恢复未提交条件时不会自动启用聚合查询', async () => {
+    usePmPageStateStore.setState({
+      pages: {
+        [PM_KPI_QUERY_PAGE_KEY]: {
+          ...buildKpiQueryStateSnapshot({
+            payload: {
+              deviceType: 'ENB',
+              deviceSns: ['SN-EDITED'],
+              metricPaths: ['K-EDITED'],
+              granularity: 'daily',
+              timeRangePreset: 'last_7d',
+            },
+            customRange: null,
+            timeRangeDirty: true,
+            cellSel: {},
+            submitted: null,
+            pivotPage: 2,
+            pivotPageSize: 100,
+            templateTab: 'public',
+            sidebarCollapsed: false,
+          }),
+          savedAt: '2026-07-29T00:00:00.000Z',
+        },
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('已选 1 个：SN-EDITED')).toBeTruthy();
+    });
+    expect(aggregatedQuerySpy.mock.calls.some(([, , enabled]) => enabled === true)).toBe(false);
+  });
+
+  it('点击重置会清理条件、分页和保存状态', async () => {
+    usePmPageStateStore.setState({
+      pages: {
+        [PM_KPI_QUERY_PAGE_KEY]: {
+          ...buildKpiQueryStateSnapshot({
+            payload: {
+              deviceType: 'ENB',
+              deviceSns: ['SN-EDITED'],
+              metricPaths: ['K-EDITED'],
+              granularity: 'daily',
+              timeRangePreset: 'last_7d',
+            },
+            customRange: null,
+            timeRangeDirty: true,
+            cellSel: {},
+            submitted: {
+              payload: {
+                deviceType: 'ENB',
+                deviceSns: ['SN-SUBMITTED'],
+                metricPaths: ['K-SUBMITTED'],
+                granularity: 'hourly',
+                timeRangePreset: 'last_1h',
+              },
+              range: {
+                start: '2026-07-01T00:00:00+08:00',
+                end: '2026-07-01T01:00:00+08:00',
+              },
+              cellSel: {},
+            },
+            pivotPage: 3,
+            pivotPageSize: 100,
+            templateTab: 'private',
+            sidebarCollapsed: true,
+          }),
+          savedAt: '2026-07-29T00:00:00.000Z',
+        },
+      },
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /重\s*置/ }));
+
+    await waitFor(() => {
+      expect(usePmPageStateStore.getState().getPageState(PM_KPI_QUERY_PAGE_KEY)).toBeNull();
+    });
+    expect(screen.getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('');
+    expect(screen.getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('');
+  });
+});
+
+describe('KPIQuery 模板数量限制', () => {
+  beforeEach(() => {
+    usePmPageStateStore.setState({ pages: {} });
+    sessionStorage.clear();
+    refetchAggSpy.mockClear();
+    aggregatedQuerySpy.mockClear();
+    createTemplateSpy.mockReset();
+    createExportSpy.mockReset();
+    technologyDictionaryState.current = technologyDictionaryState.defaultDictionary;
   });
 
   it('老模板仍可展示，但超 50 个设备时点击查询不会执行聚合查询', async () => {
@@ -180,7 +386,7 @@ describe('KPIQuery 模板数量限制', () => {
     expect(createExportSpy).not.toHaveBeenCalled();
   });
 
-  it('已有查询快照时，当前老模板超 50 个设备也不能发起导出', async () => {
+  it('已有查询快照时，当前老模板超 50 个设备不影响按已提交条件导出', async () => {
     renderPage();
 
     fireEvent.click(screen.getByText('正常模板'));
@@ -195,15 +401,46 @@ describe('KPIQuery 模板数量限制', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /导出 CSV/ }));
 
-    expect(createExportSpy).not.toHaveBeenCalled();
+    expect(createExportSpy).toHaveBeenCalledTimes(1);
+    expect(createExportSpy.mock.calls[0][0].params.device_sns).toEqual(['SN-OK']);
+    expect(createExportSpy.mock.calls[0][0].params.metric_paths).toEqual(['K-1']);
+  });
+
+  it('字典禁用 ENB 时，主查询和模板弹窗切到首个可用设备类型', async () => {
+    technologyDictionaryState.current = {
+      ...technologyDictionaryState.defaultDictionary,
+      options: [
+        { label: 'gNB(NR)', value: 'nr', sort: 2 },
+        { label: 'GSM', value: 'gsm', sort: 3 },
+      ],
+      deviceTypeOptions: [
+        { label: 'gNB(NR)', value: 'GNB', sort: 2, technology: 'nr' },
+        { label: 'GSM', value: 'GSM', sort: 3, technology: 'gsm' },
+      ],
+    };
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByText('gNB(NR)').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '新建查询模板' }));
+    const dialog = await findModalByTitle('新建查询模板');
+    expect(within(dialog).getAllByText('gNB(NR)').length).toBeGreaterThan(0);
   });
 });
 
 describe('KPIQuery 模板弹窗初始值', () => {
   beforeEach(() => {
+    usePmPageStateStore.setState({ pages: {} });
+    sessionStorage.clear();
     refetchAggSpy.mockClear();
+    aggregatedQuerySpy.mockClear();
     createTemplateSpy.mockReset();
     createExportSpy.mockReset();
+    metricPickerRenderSpy.mockClear();
+    technologyDictionaryState.current = technologyDictionaryState.defaultDictionary;
   });
 
   it('侧栏新建模板每次打开都使用干净初始值', async () => {
@@ -222,7 +459,7 @@ describe('KPIQuery 模板弹窗初始值', () => {
     expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('');
     expect(within(dialog).getByText('近 3 小时')).toBeTruthy();
     expect(within(dialog).queryByDisplayValue('已选 1 个：SN-OK')).toBeNull();
-    expect(within(dialog).queryByDisplayValue('已选 1 个：K-1')).toBeNull();
+    expect(within(dialog).queryByDisplayValue('已选 1 个：K-1 小区可用率')).toBeNull();
   });
 
   it('侧栏新建模板再次打开不会残留上一次输入', async () => {
@@ -240,7 +477,7 @@ describe('KPIQuery 模板弹窗初始值', () => {
       target: { value: '上一次创建的描述' },
     });
     fireEvent.mouseDown(within(firstDialog).getByText('近 3 小时'));
-    fireEvent.click(await screen.findByText('近 1 小时'));
+    fireEvent.click((await screen.findAllByText('近 1 小时')).at(-1) as HTMLElement);
     fireEvent.click(within(firstDialog).getByRole('button', { name: /取\s*消/ }));
 
     fireEvent.click(screen.getByRole('button', { name: '新建查询模板' }));
@@ -267,7 +504,7 @@ describe('KPIQuery 模板弹窗初始值', () => {
 
     const dialog = await findModalByTitle('新建查询模板');
     expect(within(dialog).getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('已选 1 个：SN-OK');
-    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1');
+    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1 小区可用率');
     expect(within(dialog).getByText('近 1 小时')).toBeTruthy();
   });
 
@@ -281,7 +518,62 @@ describe('KPIQuery 模板弹窗初始值', () => {
     expect(within(dialog).getByDisplayValue('正常模板描述')).toBeTruthy();
     expect(within(dialog).getByLabelText('公共（所有人可见）')).toBeChecked();
     expect(within(dialog).getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('已选 1 个：SN-OK');
-    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1');
+    expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1 小区可用率');
     expect(within(dialog).getByText('近 1 小时')).toBeTruthy();
+  });
+
+  it('指标摘要显示 ID 和名称，并把 metricLabels 传给指标选择弹窗', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByText('正常模板'));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('已选 1 个：K-1 小区可用率')).toBeTruthy();
+    });
+
+    await waitFor(() => {
+      expect(metricPickerRenderSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          initialLabels: expect.objectContaining({ 'K-1': '小区可用率' }),
+        }),
+      );
+    });
+  });
+
+  it('保存模板和导出 payload 仍只携带指标 ID', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByText('正常模板'));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('已选 1 个：K-1 小区可用率')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /存为模板/ }));
+    const dialog = await findModalByTitle('新建查询模板');
+    fireEvent.change(within(dialog).getByPlaceholderText('例如：eNB 基础 KPI'), {
+      target: { value: '复制正常模板' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }));
+
+    await waitFor(() => {
+      expect(createTemplateSpy).toHaveBeenCalled();
+    });
+    const createInput = createTemplateSpy.mock.calls[0]?.[0];
+    expect(createInput.payload.metricPaths).toEqual(['K-1']);
+    expect(JSON.stringify(createInput.payload)).not.toContain('小区可用率');
+
+    fireEvent.click(screen.getByRole('button', { name: /查询$/ }));
+
+    const exportButton = screen.getByRole('button', { name: /导出 CSV/ });
+    await waitFor(() => {
+      expect(exportButton).not.toBeDisabled();
+    });
+    fireEvent.click(exportButton);
+
+    await waitFor(() => {
+      expect(createExportSpy).toHaveBeenCalled();
+    });
+    const exportInput = createExportSpy.mock.calls[0]?.[0];
+    expect(exportInput.params.metric_paths).toEqual(['K-1']);
+    expect(JSON.stringify(exportInput.params)).not.toContain('小区可用率');
   });
 });

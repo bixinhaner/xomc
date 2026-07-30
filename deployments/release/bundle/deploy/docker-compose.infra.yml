@@ -137,6 +137,14 @@ services:
       - "max_wal_size=${TSDB_MAX_WAL_SIZE:-4GB}"
       - "-c"
       - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "shared_preload_libraries=timescaledb,pg_stat_statements"
+      - "-c"
+      - "track_io_timing=${TSDB_TRACK_IO_TIMING:-on}"
+      - "-c"
+      - "log_min_duration_statement=${TSDB_LOG_MIN_DURATION_STATEMENT:-1000}"
+      - "-c"
+      - "log_temp_files=${TSDB_LOG_TEMP_FILES:-0}"
     stop_grace_period: 60s
     deploy:
       resources:
@@ -152,6 +160,9 @@ services:
     volumes:
       - ${TSDB_DATA_PATH:-tsdbdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
+    # PostgreSQL parallel worker 的动态共享内存使用 /dev/shm；Docker 默认 64 MiB
+    # 容易在并行查询扩容时触发 SQLSTATE 53100。查询侧已轻量化，此处作为兜底。
+    shm_size: ${TSDB_SHM_SIZE:-512m}
     networks:
       - omcgo-net
     healthcheck:
@@ -172,8 +183,10 @@ services:
     # 约束：limits.memory 须 ≥ maxmemory + 1GiB（AOF rewrite 的 fork COW 余量）。
     # --no-appendfsync-on-rewrite：rewrite 期不 fsync，削峰；--save ""：AOF 已开，关 RDB save
     # 点避免双 fork COW（重启恢复走 AOF）。
-    # 256MiB + 300% 避免在线聚合高写入下频繁重写，AOF everysec 与 noeviction 保持不变。
-    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save "" --auto-aof-rewrite-min-size 256mb --auto-aof-rewrite-percentage 300
+    # 1GiB + 500% 避免在线聚合高写入下频繁重写，AOF everysec 与 noeviction 保持不变。
+    # 12 分钟关窗会让相邻两个小时的约 4 万设备窗口短时并存；20k 基站实测
+    # 2GiB 在积压恢复时会拒绝写入，因此生产默认按双窗口容量取 4GiB。
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-4gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save "" --auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500
     # AOF rewrite/fsync 落盘窗口
     stop_grace_period: 30s
     deploy:
@@ -181,7 +194,7 @@ services:
         limits:
           # CPU 1→2核对齐 plan-resources.sh medium 档（32核/32G 目标机型）。
           cpus: "${REDIS_CPUS:-2}"
-          memory: "${REDIS_MEM:-3g}"
+          memory: "${REDIS_MEM:-5g}"
         reservations:
           cpus: "0.25"
           memory: 256m
@@ -262,6 +275,8 @@ services:
       MINIO_API_REQUESTS_DEADLINE: "${MINIO_API_REQUESTS_DEADLINE:-2m}"
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # 海量小对象场景降低后台 scanner 对随机读 IOPS 的持续争抢；生命周期仍正常执行。
+      MINIO_SCANNER_SPEED: "slowest"
       # MinIO 自带 Prometheus 指标端点 /minio/v2/metrics/*；public 模式免 token 抓取（T-0151）。
       MINIO_PROMETHEUS_AUTH_TYPE: "public"
     ports:

@@ -21,6 +21,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
+	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -51,6 +52,7 @@ type Handler struct {
 	resolver        *authz.Resolver               // #64 设备组数据权限：PM 读链路按调用者可见分组过滤
 	productResolver ProductPatternResolver        // #602; nil-safe (product_id 过滤参数被忽略)
 	metrics         *PMMetrics
+	timezone        calendarfilter.TimezoneProvider
 	logger          *zap.Logger
 }
 
@@ -146,12 +148,23 @@ func groupInVisible(groupID uuid.UUID, visibleGroups []uuid.UUID) bool {
 // 调用方：cmd/app/provider/router.go 在初始化 pm.Handler 后调用。
 func (h *Handler) WithAggregator(aggr *aggregator.Aggregator) *Handler {
 	h.aggr = aggr
+	if h.aggr != nil && h.timezone != nil {
+		h.aggr.SetTimezoneProvider(h.timezone)
+	}
 	return h
 }
 
 // WithAsyncJobRepo 注入 asyncjob 仓库（G5-Gap-2 手动重算端点用）。
 func (h *Handler) WithAsyncJobRepo(repo asyncjob.Repository) *Handler {
 	h.asyncJobRepo = repo
+	return h
+}
+
+func (h *Handler) WithTimezoneProvider(provider calendarfilter.TimezoneProvider) *Handler {
+	h.timezone = provider
+	if h.aggr != nil {
+		h.aggr.SetTimezoneProvider(provider)
+	}
 	return h
 }
 
@@ -458,6 +471,7 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 	if v := c.Query("hours"); v != "" {
 		req.Hours = parseCSVInts(v)
 	}
+	req.CalendarTimezone = calendarfilter.ProviderName(c.Request.Context(), h.timezone)
 	// #619：测量对象（object_ldn）后端过滤。
 	// LDN 值自身合法含逗号（如 Cellid=x,PLMN=y），不能 CSV split——
 	// 前端以「重复键」形态发 ?object_ldns=a&object_ldns=b（与 #401 修复同模式），后端用 QueryArray 整值取回。

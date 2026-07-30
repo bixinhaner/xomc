@@ -1022,8 +1022,11 @@ func (h *Handler) CreateStandard(c *gin.Context) {
 	})
 	if err != nil {
 		if errors.Is(err, ErrStandardParamExists) {
-			commonerrors.AbortWithError(c, http.StatusConflict,
-				fmt.Errorf("参数 path %q 已存在，只能在原有记录上修改", req.StandardPath))
+			commonerrors.AbortWithError(c, http.StatusConflict, commonerrors.NewBusinessError(
+				global.ErrCodeStandardParamDuplicate,
+				fmt.Sprintf("standard path %q already exists; update the existing record instead", req.StandardPath),
+				err,
+			))
 			return
 		}
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)

@@ -17,7 +17,10 @@ import (
 )
 
 func TestRawAwareDeviceSelectUsesCorrectPhysicalSource(t *testing.T) {
-	req := QueryRequest{MetricPaths: []string{"C1"}}
+	req := QueryRequest{
+		Granularity: metrics.Granularity15Min,
+		MetricPaths: []string{"C1"},
+	}
 	rawSQL, _, err := newRawAwareDeviceSelect(
 		storage.Psql, "pm_metrics", req, deviceTableColumns...,
 	).ToSql()
@@ -27,15 +30,115 @@ func TestRawAwareDeviceSelectUsesCorrectPhysicalSource(t *testing.T) {
 	assert.NotContains(t, rawSQL, "FROM pm_hourly_anchors")
 	assert.NotContains(t, rawSQL, "FROM pm_hourly_values")
 
-	hourlySQL, _, err := newRawAwareDeviceSelect(
-		storage.Psql, "pm_metrics_hourly", req, deviceTableColumns...,
-	).ToSql()
+	rolledUp := []struct {
+		granularity metrics.Granularity
+		table       string
+	}{
+		{metrics.GranularityHourly, "pm_metrics_hourly"},
+		{metrics.GranularityDaily, "pm_metrics_daily"},
+		{metrics.GranularityWeekly, "pm_metrics_weekly"},
+		{metrics.GranularityMonthly, "pm_metrics_monthly"},
+	}
+	for _, tc := range rolledUp {
+		t.Run(string(tc.granularity), func(t *testing.T) {
+			rolledSQL, args, err := newRawAwareDeviceSelect(
+				storage.Psql,
+				tc.table,
+				QueryRequest{
+					Granularity: tc.granularity,
+					DeviceSNs:   []string{"SN-1"},
+					MetricPaths: []string{"K1"},
+				},
+				deviceTableColumns...,
+			).ToSql()
+			require.NoError(t, err)
+			assert.Contains(t, rolledSQL, "FROM pm_aggregation_results r")
+			assert.NotContains(t, rolledSQL, "FROM "+tc.table)
+			assert.Contains(t, rolledSQL, "r.dimension =")
+			assert.Contains(t, rolledSQL, "r.granularity =")
+			assert.Contains(t, rolledSQL, "r.dimension_key IN (SELECT id::text FROM device_dim")
+			assert.Contains(t, args, string(tc.granularity))
+			assert.Contains(t, args, []string{"SN-1"})
+		})
+	}
+
+	for _, dimension := range []Dimension{DimensionAggregateGroup, DimensionNetwork} {
+		t.Run(string(dimension)+"_keeps_shared_view", func(t *testing.T) {
+			otherSQL, _, err := newRawAwareDeviceSelect(
+				storage.Psql,
+				"pm_metrics_hourly",
+				QueryRequest{
+					Granularity: metrics.GranularityHourly,
+					Dimension:   dimension,
+					DeviceSNs:   []string{"SN-1"},
+				},
+				deviceTableColumns...,
+			).ToSql()
+			require.NoError(t, err)
+			assert.Contains(t, otherSQL, "FROM pm_metrics_hourly")
+			assert.NotContains(t, otherSQL, "FROM pm_aggregation_results")
+		})
+	}
+
+	t.Run("table_name_enforces_granularity", func(t *testing.T) {
+		rolledSQL, args, err := newRawAwareDeviceSelect(
+			storage.Psql,
+			"pm_metrics_hourly",
+			QueryRequest{DeviceSNs: []string{"SN-1"}},
+			deviceTableColumns...,
+		).ToSql()
+		require.NoError(t, err)
+		assert.Contains(t, rolledSQL, "r.granularity =")
+		assert.Contains(t, args, string(metrics.GranularityHourly))
+	})
+}
+
+func Test_buildDeviceTableSQL_RolledUpFiltersBeforeDedupAndPreservesProjection(t *testing.T) {
+	metricType := metrics.MetricTypeKPI
+	visibleGroup := uuid.MustParse("49adf511-d82a-4552-a040-1320e5c32ac5")
+	start := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 28, 16, 0, 0, 0, time.UTC)
+
+	sql, args, err := buildDeviceTableSQL("pm_metrics_hourly", QueryRequest{
+		Granularity: metrics.GranularityHourly,
+		DeviceOUIs:  []string{"0019C0"},
+		DeviceSNs:   []string{"120200024118AA01241"},
+		Technologies: []string{
+			"lte",
+		},
+		MetricPaths:   []string{"K900010002"},
+		MetricType:    &metricType,
+		ObjectLDNs:    []string{"Cellid=1,PLMN=46000"},
+		StartTime:     start,
+		EndTime:       end,
+		VisibleGroups: []uuid.UUID{visibleGroup},
+	})
 	require.NoError(t, err)
-	assert.Contains(t, hourlySQL, "FROM pm_metrics_hourly")
-	assert.NotContains(t, hourlySQL, "pm_hourly_bucket_versions")
-	assert.NotContains(t, hourlySQL, "pm_hourly_anchors")
-	assert.NotContains(t, hourlySQL, "pm_hourly_values")
-	assert.NotContains(t, hourlySQL, "FROM pm_measurement_anchors")
+
+	assert.Contains(t, sql, "FROM pm_aggregation_results r")
+	assert.NotContains(t, sql, "FROM pm_metrics_hourly")
+	assert.Contains(t, sql, "r.dimension_key IN (SELECT id::text FROM device_dim")
+	assert.Contains(t, sql, "r.device_oui AS device_oui")
+	assert.Contains(t, sql, "r.device_sn AS device_sn")
+	assert.Contains(t, sql, "r.aggregation_op::text AS statis_type")
+	assert.Contains(t, sql, `r.window_start AS "time"`)
+	assert.Contains(t, sql, "r.created_at AS ingest_time")
+	assert.Contains(t, sql, "r.object_ldn AS object_ldn")
+	assert.Contains(t, sql, "jsonb_build_object")
+	assert.Contains(t, sql, `DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+	assert.Contains(t, sql, "metric_path IN")
+	assert.Contains(t, sql, "time >=")
+	assert.Contains(t, sql, "time <")
+	assert.Contains(t, sql, "object_ldn IN")
+	assert.Contains(t, sql, "device_group_members")
+	assert.Contains(t, args, "0019C0")
+	assert.Contains(t, args, []string{"120200024118AA01241"})
+	assert.Contains(t, args, []string{"lte"})
+	assert.Contains(t, args, "K900010002")
+	assert.Contains(t, args, start)
+	assert.Contains(t, args, end)
+	assert.Contains(t, args, "Cellid=1,PLMN=46000")
+	assert.Contains(t, args, visibleGroup)
 }
 
 func Test_applyScalarFilters_TimeRangeIsHalfOpen(t *testing.T) {
@@ -49,6 +152,37 @@ func Test_applyScalarFilters_TimeRangeIsHalfOpen(t *testing.T) {
 	assert.Contains(t, sql, "time < $2")
 	assert.NotContains(t, sql, "time <= $2")
 	assert.Equal(t, []any{start, end}, args)
+}
+
+func Test_applyScalarFilters_CalendarFiltersUseConfiguredTimezone(t *testing.T) {
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	localMidnight := time.Date(2026, 7, 28, 0, 0, 0, 0, shanghai)
+	require.Equal(t, time.Tuesday, localMidnight.Weekday())
+	require.Equal(t, time.Monday, localMidnight.UTC().Weekday(), "UTC would misclassify this bucket as Monday")
+
+	qb := storage.Psql.Select("metric_path").From("pm_metrics_hourly")
+	sql, args, err := applyScalarFilters(qb, QueryRequest{
+		StartTime:        localMidnight,
+		EndTime:          localMidnight.Add(time.Hour),
+		Weekdays:         []int{2},
+		Hours:            []int{0},
+		CalendarTimezone: shanghai.String(),
+	}).ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, sql, "EXTRACT(dow FROM (start_time AT TIME ZONE $3))::int = ANY($4)")
+	assert.Contains(t, sql, "EXTRACT(hour FROM (start_time AT TIME ZONE $5))::int = ANY($6)")
+	assert.NotContains(t, sql, "EXTRACT(dow FROM start_time)")
+	assert.NotContains(t, sql, "EXTRACT(hour FROM start_time)")
+	assert.Equal(t, []any{
+		localMidnight,
+		localMidnight.Add(time.Hour),
+		"Asia/Shanghai",
+		[]int{2},
+		"Asia/Shanghai",
+		[]int{0},
+	}, args)
 }
 
 func Test_queryProductTable_TimeRangeIsHalfOpen(t *testing.T) {
@@ -230,7 +364,33 @@ func Test_buildDeviceTableSQL_PageByPivotRowSkeletonPagesKeysWithoutMetricFilter
 	pageKeySQL := sql[pageKeysAt:]
 	assert.NotContains(t, pageKeySQL, "metric_path IN")
 	assert.NotContains(t, pageKeySQL, "metric_type =")
+	assert.Contains(t, pageKeySQL, "FROM pm_measurement_anchors a")
+	assert.Contains(t, pageKeySQL, "JOIN device_dim dev ON dev.id = a.device_dim_id")
+	assert.NotContains(t, pageKeySQL, "FROM pm_metrics ")
+	assert.NotContains(t, pageKeySQL, "pm_metric_dictionary")
+	assert.NotContains(t, pageKeySQL, "pm_metric_values")
 	assert.Equal(t, 1, args[len(args)-1])
+}
+
+func Test_buildDeviceTableSQL_RolledUpPivotSkeletonReadsAggregationResults(t *testing.T) {
+	sql, _, err := buildDeviceTableSQL("pm_metrics_daily", QueryRequest{
+		Granularity:    metrics.GranularityDaily,
+		DeviceSNs:      []string{"SN-1"},
+		MetricPaths:    []string{"K1"},
+		ObjectLDNs:     []string{"Cellid=1,PLMN=46000"},
+		StartTime:      time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		EndTime:        time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC),
+		PageByPivotRow: true,
+		Limit:          10,
+	})
+	require.NoError(t, err)
+
+	pageKeysAt := strings.Index(sql, "page_keys AS")
+	require.NotEqual(t, -1, pageKeysAt)
+	pageKeySQL := sql[pageKeysAt:]
+	assert.Contains(t, pageKeySQL, "FROM pm_aggregation_results r")
+	assert.Contains(t, pageKeySQL, "dimension =")
+	assert.NotContains(t, pageKeySQL, "FROM pm_metrics_daily")
 }
 
 func Test_SelectTable_UnknownGranularity(t *testing.T) {

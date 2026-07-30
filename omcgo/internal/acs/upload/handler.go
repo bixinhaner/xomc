@@ -145,6 +145,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	h.clearTransferDeadlines(w)
 
 	// 2. Validate Basic Auth credentials (skip if no credentials configured)
 	runtimeCfg := h.currentSettings(r.Context())
@@ -595,6 +596,16 @@ func (h *Handler) currentSettings(ctx context.Context) transfercfg.UploadSetting
 		Username:    h.username,
 		Password:    h.password,
 		MaxFileSize: h.maxFileSize,
+	}
+}
+
+func (h *Handler) clearTransferDeadlines(w http.ResponseWriter) {
+	controller := http.NewResponseController(w)
+	if err := controller.SetReadDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		h.logger.Warn("clear file upload read deadline", zap.Error(err))
+	}
+	if err := controller.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		h.logger.Warn("clear file upload write deadline", zap.Error(err))
 	}
 }
 

@@ -75,6 +75,7 @@ type SaveTaskRequest struct {
 	Members       []TaskMember
 	Now           time.Time
 	EffectiveFrom time.Time
+	PlannedEndAt  *time.Time
 }
 
 type TaskVersionSnapshot struct {
@@ -89,8 +90,23 @@ type TaskVersionSnapshot struct {
 	Granularities []Granularity
 	ObjectLDNs    map[string]struct{}
 	EffectiveFrom time.Time
-	EffectiveTo   *time.Time
-	Metrics       map[string]MetricRule
-	Counters      map[string]CounterRule
-	Members       map[uuid.UUID][]TaskMember
+	// LineageEffectiveFrom is the first persisted effective_from for the task.
+	// It is loaded without the matchable-history cutoff so synthetic stable
+	// rollups never acquire a moving epoch as old catalog versions age out.
+	LineageEffectiveFrom time.Time
+	EffectiveTo          *time.Time
+	PlannedEndAt         *time.Time
+	Metrics              map[string]MetricRule
+	Counters             map[string]CounterRule
+	Members              map[uuid.UUID][]TaskMember
+	// DimensionMemberCounts caches distinct device counts per dimension key.
+	// It prevents all-member scans for every device-hour contribution.
+	DimensionMemberCounts map[string]int64
+	// DevicePipeline marks a synthetic catalog-backed version used by the
+	// fixed raw-to-hour device pipeline. Each definition has an immutable ID.
+	DevicePipeline bool
+	// DeviceRollup marks the stable hour-to-day-to-week/month lineage. It is
+	// indexed only by version ID and never matches raw PM events directly.
+	DeviceRollup    bool
+	RollupVersionID uuid.UUID
 }

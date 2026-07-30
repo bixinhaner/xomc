@@ -207,13 +207,16 @@ sudo bash install-docker.sh -h                      # 查看所有参数</pre>
 <p class="tip">install-docker.sh 自动:解压二进制 → 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。<br>
 <b>已装 docker 时</b>:跳过 dockerd 安装,但**仍补装** docker compose V2 + buildx plugin 到 <code>/usr/local/lib/docker/cli-plugins/</code>,解决系统 apt 装的 V1 Python compose 不识别 v3.x 写法问题。</p>
 
-<h3>3.2 卸载 Docker(install-docker.sh --uninstall)</h3>
-<p class="lead">支持彻底卸载:同时清掉 install-docker.sh 装的二进制 <b>和</b> 系统包管理器(apt/yum/dnf)装的 docker。默认 dry-run 安全,需 <code>--force</code> 才真删。</p>
-<pre>sudo bash install-docker.sh --uninstall                              # dry-run:列要做的 9 步,不实际执行
-sudo bash install-docker.sh --uninstall --force                 # 真删 + 删 /var/lib/docker(数据)
-sudo bash install-docker.sh --uninstall --force --keep-data     # 真删 dockerd 但保留 /var/lib/docker</pre>
-<p class="tip"><b>卸载 9 步</b>:① 停所有容器 → ② <code>systemctl disable</code> docker/containerd → ③ 删 install-docker.sh 写的 systemd unit → ④ <code>apt/yum/dnf remove</code> 系统装的 docker.io / docker-ce / docker-compose-plugin / buildx-plugin / containerd.io 等 → ⑤ 删 <code>/usr/local/bin/</code> 下 docker 二进制 → ⑥ 删 <code>/usr/local/lib/docker/cli-plugins/</code> → ⑦ (可选)删 data-root + containerd root 数据目录 → ⑧ 删 <code>/etc/docker/</code> → ⑨ 删 docker 用户组。<br>
-<b>不删 /opt/omc 业务数据</b>。要一并清:先跑 <code>sudo bash uninstall.sh --purge --force</code>(卸载默认保留数据,--purge 才连数据一并清),再跑本脚本。</p>
+<h3>3.2 卸载 OMC（uninstall.sh）</h3>
+<p class="lead"><code>uninstall.sh</code> 只负责卸载 OMC 业务栈，不卸载 Docker 引擎。默认是 dry-run，仅列出计划；加 <code>--force</code> 才会实际执行，并会进行确认。</p>
+<pre>cd /opt/omc/current/deploy
+
+sudo bash uninstall.sh                              # dry-run：卸载 OMC，保留数据
+sudo bash uninstall.sh --force                      # 真卸载 OMC，保留数据和凭据
+sudo bash uninstall.sh --purge --force              # 真卸载并删除数据卷、/opt/omc
+sudo bash uninstall.sh --purge --force --keep-data  # 兼容旧命令；--purge 仍会删除数据</pre>
+<p class="tip"><b>默认卸载：</b>删除 OMC 容器、网络、业务镜像和代码运行目录，保留数据库、MinIO、Redis、NATS、监控数据卷，以及 <code>/opt/omc/data</code>、<code>/opt/omc/etc</code> 和凭据，便于后续重新部署。<br>
+<b>彻底清除：</b><code>--purge</code> 会连同所有 OMC 数据卷和整个 <code>/opt/omc</code> 一并删除，数据不可恢复。<code>--keep-data</code> 仅为兼容旧调用保留，不能覆盖 <code>--purge</code> 的删除行为。</p>
 
 <div class="danger">⚠️ 若 <code>docker.service</code> 启动报
 <code>failed to create NAT chain DOCKER: iptables not found</code>,

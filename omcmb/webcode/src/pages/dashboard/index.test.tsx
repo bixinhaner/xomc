@@ -52,7 +52,6 @@ const dashboardMocks = vi.hoisted(() => ({
   } as DeviceStatsHookResult,
   useDashboardSummary: vi.fn(),
   useDashboardDeviceStats: vi.fn(),
-  useDashboardRealtime: vi.fn(),
 }));
 
 const navigationMocks = vi.hoisted(() => ({
@@ -78,10 +77,6 @@ vi.mock('@core/hooks/api/useDashboard', () => ({
   useDashboardSummary: dashboardMocks.useDashboardSummary,
   useDashboardDeviceStats: dashboardMocks.useDashboardDeviceStats,
   useDeviceStatusByType: () => ({ data: {}, isLoading: false }),
-}));
-
-vi.mock('@core/hooks/api/useDashboardRealtime', () => ({
-  useDashboardRealtime: dashboardMocks.useDashboardRealtime,
 }));
 
 vi.mock('@/components/KPICard', () => ({
@@ -118,7 +113,7 @@ vi.mock('./DashboardKPIModules', () => ({
   DashboardKPIModules: () => <div data-testid="dashboard-kpi-modules" />,
 }));
 
-vi.mock('@/components/dashboard/useTechnologyDictionary', () => ({
+vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
   useTechnologyDictionary: () => ({ options: [] }),
 }));
 

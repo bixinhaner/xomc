@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -44,6 +45,7 @@ type PgDeviceGroupRepository struct {
 	treeCountsAt   time.Time
 	treeCountsData []DeviceGroup
 	treeCountsGen  uint64
+	treeCountsLoad singleflight.Group
 }
 
 // NewPgDeviceGroupRepository creates a new PgDeviceGroupRepository.
@@ -284,22 +286,49 @@ const getTreeWithCountsRawSQL = `
 // TTL 窗口内的重复调用收敛成一次真实查询，避免规划开销被并发放大成 CPU 热点。分组
 // 结构和设备计数没有强一致性要求，短暂（几秒）过期可接受。
 func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]DeviceGroup, error) {
-	cached, ok, generation := r.cachedTreeWithCounts()
-	if ok {
-		return cached, nil
-	}
+	return r.getTreeWithCountsCached(ctx, r.loadTreeWithCounts)
+}
 
+func (r *PgDeviceGroupRepository) loadTreeWithCounts(ctx context.Context) ([]DeviceGroup, error) {
 	rows, err := r.pool.Query(ctx, getTreeWithCountsRawSQL, global.DefaultLevel2GroupID)
 	if err != nil {
 		return nil, fmt.Errorf("get tree with counts: %w", err)
 	}
 	defer rows.Close()
 
-	groups, err := scanGroupsWithCount(rows)
+	return scanGroupsWithCount(rows)
+}
+
+// getTreeWithCountsCached combines concurrent cache misses into one database
+// load. The second cache check inside the singleflight callback is required:
+// another request may have filled the cache after this caller's fast-path miss.
+func (r *PgDeviceGroupRepository) getTreeWithCountsCached(
+	ctx context.Context,
+	load func(context.Context) ([]DeviceGroup, error),
+) ([]DeviceGroup, error) {
+	cached, ok, generation := r.cachedTreeWithCounts()
+	if ok {
+		return cached, nil
+	}
+
+	value, err, _ := r.treeCountsLoad.Do("tree-with-counts", func() (any, error) {
+		if cached, ok, currentGeneration := r.cachedTreeWithCounts(); ok {
+			return cached, nil
+		} else {
+			generation = currentGeneration
+		}
+
+		groups, loadErr := load(ctx)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		r.storeTreeWithCountsCache(groups, generation)
+		return groups, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	r.storeTreeWithCountsCache(groups, generation)
+	groups := value.([]DeviceGroup)
 	return cloneDeviceGroups(groups), nil
 }
 

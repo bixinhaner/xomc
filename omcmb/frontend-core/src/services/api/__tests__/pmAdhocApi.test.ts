@@ -13,14 +13,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // 用 vi.hoisted 让 mock 工厂能安全引用 mock fn（vi.mock 被提升到文件顶部）。
-const { getMock, postMock, patchMock, deleteMock } = vi.hoisted(() => ({
+const { getMock, postMock, putMock, patchMock, deleteMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   postMock: vi.fn(),
+  putMock: vi.fn(),
   patchMock: vi.fn(),
   deleteMock: vi.fn(),
 }));
 vi.mock('../../http', () => ({
-  default: { get: getMock, post: postMock, patch: patchMock, delete: deleteMock },
+  default: { get: getMock, post: postMock, put: putMock, patch: patchMock, delete: deleteMock },
 }));
 
 import { pmAdhocApi } from '../pmAdhocApi';
@@ -30,6 +31,8 @@ beforeEach(() => {
   getMock.mockResolvedValue({ data: { items: [], total: 0 } });
   postMock.mockReset();
   postMock.mockResolvedValue({ data: { id: 'created-task' } });
+  putMock.mockReset();
+  putMock.mockResolvedValue({ data: { id: 'updated-task' } });
   patchMock.mockReset();
   patchMock.mockResolvedValue({ data: { id: 'updated-task' } });
   deleteMock.mockReset();
@@ -58,9 +61,45 @@ describe('pmAdhocApi.create / update — 可见性字段透传', () => {
       visibility: 'private',
     });
 
-    const [url, payload] = patchMock.mock.calls[0];
+    const [url, payload] = putMock.mock.calls[0];
     expect(url).toBe('/pm/adhoc/tasks/task-1');
+    expect(payload.metric_paths).toEqual(['K0001']);
     expect(payload.visibility).toBe('private');
+    expect(patchMock).not.toHaveBeenCalled();
+  });
+
+  it('create / update 透传计划结束时间为 planned_end_at', async () => {
+    await pmAdhocApi.create({
+      name: '临时观察',
+      mode: 'continuous',
+      deviceSns: [],
+      metricPaths: ['K0001'],
+      plannedEndAt: '2026-08-26T12:00:00.000Z',
+    });
+    expect(postMock.mock.calls[0][1].planned_end_at).toBe('2026-08-26T12:00:00.000Z');
+
+    await pmAdhocApi.update('task-1', {
+      metricPaths: ['K0001'],
+      plannedEndAt: '2026-08-27T12:00:00.000Z',
+    });
+    expect(putMock.mock.calls[0][1].planned_end_at).toBe('2026-08-27T12:00:00.000Z');
+  });
+
+  it('create / update 透传计划结束时间清空值 null', async () => {
+    await pmAdhocApi.create({
+      name: '不设结束时间',
+      mode: 'continuous',
+      deviceSns: [],
+      metricPaths: ['K0001'],
+      plannedEndAt: null,
+    });
+    expect(postMock.mock.calls[0][1].planned_end_at).toBeNull();
+
+    await pmAdhocApi.update('task-1', {
+      metricPaths: ['K0001'],
+      plannedEndAt: null,
+    });
+    expect(putMock.mock.calls[0][1].planned_end_at).toBeNull();
   });
 });
 
@@ -109,6 +148,54 @@ describe('pmAdhocApi.results — 维度子集过滤 query（手动 snake_case，
     const [, opts] = getMock.mock.calls[0];
     expect('product_ids' in opts.params).toBe(false);
     expect('object_ldns' in opts.params).toBe(false);
+  });
+
+  it('默认不请求进行中结果，显式 opt-in 后才带 include_partial', async () => {
+    await pmAdhocApi.results('t1');
+    expect(getMock.mock.calls[0][1].params.include_partial).toBeUndefined();
+
+    await pmAdhocApi.results(
+      't1', 100, 0, undefined, undefined, undefined, undefined,
+      undefined, undefined, true,
+    );
+    expect(getMock.mock.calls[1][1].params.include_partial).toBe(true);
+  });
+
+  it('进行中结果与持久结果分离，不污染 total 与分页', async () => {
+    const row = {
+      id: 'r1', task_id: 't1', metric_path: 'K1', metric_value: 1,
+      granularity: 'daily', start_time: '2026-07-29T00:00:00Z',
+      end_time: '2026-07-30T00:00:00Z', extra: { partial: false },
+    };
+    getMock.mockResolvedValue({
+      data: {
+        items: [row], total: 10,
+        progress_items: [{ ...row, id: 'p1', extra: { partial: true } }],
+        progress_total: 1, progress_state: 'available',
+        period_progress: [{
+          granularity: 'daily',
+          window_start: '2026-07-29T00:00:00Z',
+          window_end: '2026-07-30T00:00:00Z',
+          entity_key: 'lowest-entity',
+          revision: 2,
+          version_effective_from: '2026-07-01T00:00:00Z',
+          received_slots: 0,
+          expected_slots: 24,
+        }],
+      },
+    });
+
+    const result = await pmAdhocApi.results('t1');
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.total).toBe(10);
+    expect(result.progressRows).toHaveLength(1);
+    expect(result.progressTotal).toBe(1);
+    expect(result.periodProgress).toEqual([
+      expect.objectContaining({
+        entityKey: 'lowest-entity', receivedSlots: 0, expectedSlots: 24,
+      }),
+    ]);
   });
 });
 

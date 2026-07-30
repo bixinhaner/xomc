@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -162,6 +164,69 @@ func (s *PathTranslationService) resolveTranslator(ctx context.Context, deviceSN
 	return tr, true
 }
 
+// ResolveUECountPaths returns the concrete standard UE Count paths supported
+// by the device's current product mapping. The root path represents physical
+// cell 1; if an explicit ".1" alias also exists, the root path wins.
+func (s *PathTranslationService) ResolveUECountPaths(ctx context.Context, deviceSN string) ([]string, error) {
+	if !s.Enabled() {
+		return nil, fmt.Errorf("ACS path translator is disabled")
+	}
+	tr, ok := s.resolveTranslator(ctx, deviceSN)
+	if !ok {
+		return nil, fmt.Errorf("translator unavailable for device %s", deviceSN)
+	}
+	return supportedUECountPaths(tr.Mappings()), nil
+}
+
+func supportedUECountPaths(mappings []parammodel.ParamMapping) []string {
+	pathsByCell := make(map[int]string)
+	for _, mapping := range mappings {
+		if !mapping.IsActive ||
+			!mapping.IsSupported ||
+			!strings.EqualFold(mapping.EntryType, "parameter") {
+			continue
+		}
+		cellIndex, root, ok := ueCountCellIndex(mapping.StandardPath)
+		if !ok {
+			continue
+		}
+		if current, exists := pathsByCell[cellIndex]; !exists || root || current == "" {
+			pathsByCell[cellIndex] = mapping.StandardPath
+		}
+	}
+
+	indices := make([]int, 0, len(pathsByCell))
+	for index := range pathsByCell {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+	paths := make([]string, 0, len(indices))
+	for _, index := range indices {
+		paths = append(paths, pathsByCell[index])
+	}
+	return paths
+}
+
+func ueCountCellIndex(path string) (index int, root bool, ok bool) {
+	const (
+		rootPath = "Device.DeviceInfo.UE_Count"
+		prefix   = "Device.DeviceInfo."
+		suffix   = ".UE_Count"
+	)
+	if path == rootPath {
+		return 1, true, true
+	}
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return 0, false, false
+	}
+	rawIndex := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	index, err := strconv.Atoi(rawIndex)
+	if err != nil || index <= 0 {
+		return 0, false, false
+	}
+	return index, false, true
+}
+
 // TranslateResponseNames 把基站响应里的参数名（私有 path）回译为标准 path（issue #424）。
 //
 // 与出站 TranslateTaskParams 对称、共用 resolveTranslator；用于 GPV/GPA 响应的
@@ -187,6 +252,192 @@ func (s *PathTranslationService) TranslateResponseNames(ctx context.Context, dev
 		}
 	}
 	return out, true
+}
+
+// TranslateResponseNamesForRequest 回译 GPV 响应时优先使用本次请求的 standard names 作为锚点。
+// 这能保留调用方已填好的上层实例号：例如请求
+// Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Author 被 ACS 翻译成
+// Device.FAP.License.Author 下发后，响应里的私有 path 必须回到带 ".1." 的请求 path，
+// 不能退化成映射模板里的 "{i}"。
+func (s *PathTranslationService) TranslateResponseNamesForRequest(
+	ctx context.Context,
+	deviceSN string,
+	names []string,
+	requestParams json.RawMessage,
+) ([]string, bool) {
+	out := make([]string, len(names))
+	copy(out, names)
+	if !s.Enabled() || len(names) == 0 {
+		return out, false
+	}
+	tr, ok := s.resolveTranslator(ctx, deviceSN)
+	if !ok {
+		return out, false
+	}
+	requestedStandards := requestStandardNames(requestParams)
+	anchors := responseNameAnchors(requestParams, tr)
+	for i, n := range out {
+		if n == "" {
+			continue
+		}
+		if std, ok := matchResponseNameAnchor(n, anchors); ok {
+			out[i] = std
+			continue
+		}
+		if res := tr.ToStandard(n); res.Found {
+			if !strings.Contains(res.Translated, "{i}") {
+				out[i] = res.Translated
+				continue
+			}
+			if concrete, ok := instantiateStandardTemplateFromRequests(res.Translated, requestedStandards); ok {
+				out[i] = concrete
+			}
+		}
+	}
+	return out, true
+}
+
+type responseNameAnchor struct {
+	private  string
+	standard string
+}
+
+func responseNameAnchors(requestParams json.RawMessage, tr *parammodel.Translator) []responseNameAnchor {
+	if len(requestParams) == 0 || taskParamsUsePrivatePathMode(requestParams) {
+		return nil
+	}
+	requested := requestStandardNames(requestParams)
+	if len(requested) == 0 {
+		return nil
+	}
+	anchors := make([]responseNameAnchor, 0, len(requested))
+	for _, standard := range requested {
+		standard = strings.TrimSpace(standard)
+		if standard == "" {
+			continue
+		}
+		candidates := tr.ToPrivateCandidates(standard)
+		if len(candidates) == 0 {
+			anchors = appendResponseNameAnchor(anchors, standard, standard)
+			continue
+		}
+		for _, candidate := range candidates {
+			anchors = appendResponseNameAnchor(anchors, candidate.Translated, standard)
+		}
+	}
+	sortResponseNameAnchors(anchors)
+	return anchors
+}
+
+func requestStandardNames(requestParams json.RawMessage) []string {
+	if len(requestParams) == 0 || taskParamsUsePrivatePathMode(requestParams) {
+		return nil
+	}
+	var p struct {
+		Names []string `json:"names"`
+	}
+	if err := json.Unmarshal(requestParams, &p); err != nil || len(p.Names) == 0 {
+		return nil
+	}
+	return p.Names
+}
+
+func appendResponseNameAnchor(anchors []responseNameAnchor, private, standard string) []responseNameAnchor {
+	private = strings.TrimSpace(private)
+	standard = strings.TrimSpace(standard)
+	if private == "" || standard == "" {
+		return anchors
+	}
+	for _, anchor := range anchors {
+		if anchor.private == private && anchor.standard == standard {
+			return anchors
+		}
+	}
+	return append(anchors, responseNameAnchor{private: private, standard: standard})
+}
+
+func sortResponseNameAnchors(anchors []responseNameAnchor) {
+	sort.SliceStable(anchors, func(i, j int) bool {
+		return len(anchors[i].private) > len(anchors[j].private)
+	})
+}
+
+func matchResponseNameAnchor(name string, anchors []responseNameAnchor) (string, bool) {
+	for _, anchor := range anchors {
+		if name == anchor.private {
+			return anchor.standard, true
+		}
+		if strings.HasSuffix(anchor.private, ".") && strings.HasSuffix(anchor.standard, ".") &&
+			strings.HasPrefix(name, anchor.private) {
+			return anchor.standard + strings.TrimPrefix(name, anchor.private), true
+		}
+	}
+	return "", false
+}
+
+func instantiateStandardTemplateFromRequests(template string, requests []string) (string, bool) {
+	for _, request := range requests {
+		if concrete, ok := instantiateStandardTemplateFromRequest(template, request); ok {
+			return concrete, true
+		}
+	}
+	return "", false
+}
+
+func instantiateStandardTemplateFromRequest(template, request string) (string, bool) {
+	template = strings.TrimSpace(template)
+	request = strings.TrimSpace(request)
+	if template == "" || request == "" {
+		return "", false
+	}
+	templateParts := strings.Split(strings.TrimSuffix(template, "."), ".")
+	requestParts := strings.Split(strings.TrimSuffix(request, "."), ".")
+	if len(requestParts) > len(templateParts) {
+		return "", false
+	}
+	values := make([]string, 0, 4)
+	for i, reqPart := range requestParts {
+		tplPart := templateParts[i]
+		if tplPart == "{i}" {
+			if !isDecimalSegment(reqPart) {
+				return "", false
+			}
+			values = append(values, reqPart)
+			continue
+		}
+		if tplPart != reqPart {
+			return "", false
+		}
+	}
+	if len(values) == 0 {
+		return "", false
+	}
+	out := make([]string, len(templateParts))
+	copy(out, templateParts)
+	next := 0
+	for i, part := range out {
+		if part != "{i}" {
+			continue
+		}
+		if next >= len(values) {
+			return "", false
+		}
+		out[i] = values[next]
+		next++
+	}
+	return strings.Join(out, "."), true
+}
+
+func isDecimalSegment(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // methodNeedsTranslation 报告哪些 RPC 方法的 params 含 path 字段。

@@ -17,7 +17,19 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 	if r.streamRepo == nil || task == nil {
 		return nil
 	}
-	rules, err := r.resolveStreamingRules(ctx, task.Technology, task.MetricPaths)
+	outputMetricPaths := streamingTaskOutputMetricPaths(task, nil)
+	if task.IsBuiltin {
+		enabledPaths, err := r.resolveEnabledStreamingMetricPaths(ctx, task.Technology)
+		if err != nil {
+			return err
+		}
+		outputMetricPaths = streamingTaskOutputMetricPaths(task, enabledPaths)
+	}
+	rules, err := r.resolveStreamingRules(
+		ctx,
+		task.Technology,
+		outputMetricPaths,
+	)
 	if err != nil {
 		return err
 	}
@@ -29,21 +41,42 @@ func (r *PgRepository) syncStreamingTask(ctx context.Context, task *Task, enable
 	if err != nil {
 		return err
 	}
-	if len(members) == 0 {
+	if shouldRejectEmptyStreamingMembers(task, members) {
 		return fmt.Errorf("PM aggregation task resolved no devices")
 	}
 	granularities := streamingRollupGranularities()
 	_, err = r.streamRepo.Save(ctx, pmstream.SaveTaskRequest{
 		TaskID: task.ID, Name: task.Name, Enabled: enabled,
-		Visibility: string(normalizeVisibility(task.Visibility)), Creator: task.Creator,
+		Visibility: string(normalizeVisibility(task.Visibility)), Creator: streamingTaskCreator(task),
 		Technology: task.Technology, Dimension: pmstream.Dimension(task.Dimension),
 		Granularities: granularities, ObjectLDNs: task.ObjectLDNs,
-		Metrics: rules, Counters: counters, Members: members,
+		Metrics: rules, Counters: counters, Members: members, PlannedEndAt: task.PlannedEndAt,
 	})
 	if err != nil {
 		return fmt.Errorf("save PM streaming task version: %w", err)
 	}
 	return nil
+}
+
+func shouldRejectEmptyStreamingMembers(task *Task, members []pmstream.TaskMember) bool {
+	return task != nil && !task.IsBuiltin && len(members) == 0
+}
+
+func streamingTaskCreator(task *Task) string {
+	if task == nil || task.Creator == "" {
+		return "system"
+	}
+	return task.Creator
+}
+
+func streamingTaskOutputMetricPaths(task *Task, enabledPaths []string) []string {
+	if task == nil {
+		return nil
+	}
+	if !task.IsBuiltin {
+		return streamingOutputMetricPaths(task.MetricPaths, nil)
+	}
+	return streamingOutputMetricPaths(task.MetricPaths, enabledPaths)
 }
 
 func streamingRollupGranularities() []pmstream.Granularity {
@@ -132,6 +165,87 @@ SELECT id, COALESCE(is_counter, '0'), COALESCE(statis_type, ''), COALESCE(arithm
 		rules = append(rules, rule)
 	}
 	return rules, nil
+}
+
+func (r *PgRepository) resolveEnabledStreamingMetricPaths(
+	ctx context.Context,
+	technology string,
+) ([]string, error) {
+	deviceTypes, err := streamingEnabledDeviceTypes(technology)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	var paths []string
+	for _, deviceType := range deviceTypes {
+		table := deviceType.EnabledTable()
+		query, args, buildErr := storage.Psql.Select("DISTINCT indicator_id").
+			From(table).
+			Where(sq.Eq{"operator_code": "default"}).
+			OrderBy("indicator_id").
+			ToSql()
+		if buildErr != nil {
+			return nil, fmt.Errorf("build PM aggregation enabled metric SQL: %w", buildErr)
+		}
+		rows, queryErr := r.pool.Query(ctx, query, args...)
+		if queryErr != nil {
+			return nil, fmt.Errorf("resolve PM aggregation enabled metrics from %s: %w", table, queryErr)
+		}
+		for rows.Next() {
+			var path string
+			if err := rows.Scan(&path); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan PM aggregation enabled metric from %s: %w", table, err)
+			}
+			if path == "" {
+				continue
+			}
+			if _, exists := seen[path]; exists {
+				continue
+			}
+			seen[path] = struct{}{}
+			paths = append(paths, path)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate PM aggregation enabled metrics from %s: %w", table, err)
+		}
+		rows.Close()
+	}
+	return paths, nil
+}
+
+func streamingEnabledDeviceTypes(technology string) ([]indicator.DeviceType, error) {
+	if technology != "" {
+		deviceType, err := indicatorDeviceTypeForTechnology(technology)
+		if err != nil {
+			return nil, err
+		}
+		return []indicator.DeviceType{deviceType}, nil
+	}
+	return []indicator.DeviceType{
+		indicator.DeviceTypeENB,
+		indicator.DeviceTypeGNB,
+		indicator.DeviceTypeGSM,
+	}, nil
+}
+
+func streamingOutputMetricPaths(taskPaths, enabledPaths []string) []string {
+	seen := make(map[string]struct{}, len(taskPaths)+len(enabledPaths))
+	out := make([]string, 0, len(taskPaths)+len(enabledPaths))
+	for _, paths := range [][]string{taskPaths, enabledPaths} {
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			if _, exists := seen[path]; exists {
+				continue
+			}
+			seen[path] = struct{}{}
+			out = append(out, path)
+		}
+	}
+	return out
 }
 
 func (r *PgRepository) resolveStreamingCounters(
@@ -294,10 +408,12 @@ func (r *PgRepository) resolveDeviceGroupMembers(
 	task *Task,
 ) ([]pmstream.TaskMember, error) {
 	builder := storage.Psql.Select(
-		"d.id", "d.serial_number", "g.id", "g.name",
-	).From("device_group_members gm").
-		Join("devices d ON d.id = gm.device_id").
-		Join("device_groups g ON g.id = gm.group_id").
+		"d.id", "d.serial_number",
+		"COALESCE(g.id, '00000000-0000-4000-8000-000000000001'::uuid)",
+		"COALESCE(g.name, '未分组设备')",
+	).From("devices d").
+		LeftJoin("device_group_members gm ON gm.device_id = d.id").
+		LeftJoin("device_groups g ON g.id = gm.group_id").
 		Where("d.deleted_at IS NULL")
 	if task.Technology != "" {
 		builder = builder.Where(sq.Eq{"d.technology": task.Technology})

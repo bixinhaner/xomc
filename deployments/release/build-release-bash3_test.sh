@@ -3,6 +3,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_SCRIPT="$SCRIPT_DIR/build-release.sh"
+SERVE_SCRIPT="$SCRIPT_DIR/serve.sh"
 
 # macOS /bin/bash 3.2 在 set -u 下展开空数组 "${array[@]}" 会报 unbound variable。
 # `${array[@]+"${array[@]}"}` 在 Bash 3.2/4+/5+ 均能保持“空数组不传参数”的语义。
@@ -24,6 +25,12 @@ if LC_ALL=C grep -Eq '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' "$BUILD_SCRIPT"; then
   exit 1
 fi
 echo "PASS: build-release variables before Chinese punctuation are braced"
+
+if LC_ALL=C grep -Eq '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' "$SERVE_SCRIPT"; then
+  echo "FAIL: serve.sh has an unbraced variable directly before non-ASCII punctuation" >&2
+  exit 1
+fi
+echo "PASS: serve.sh variables before Chinese punctuation are braced"
 
 if grep -Fq -- '--platform "linux/$ARCH"' "$BUILD_SCRIPT"; then
   echo "PASS: docker build pins the requested target architecture"

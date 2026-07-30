@@ -22,6 +22,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/realtime"
+	"github.com/omcgo/omcgo/internal/core/systimezone"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -116,6 +117,7 @@ type Container struct {
 	SysConfigSvc   *admin.SysConfigService  // 提供 RegisterSavedHook 给其他模块挂 cache invalidate
 	SecurityPolicy *admin.SecurityPolicy    // 让其他模块可注册 InvalidateCache hook
 	DictService    *admin.DictionaryService // #241：三库导入 XML 后按 source_table 刷新绑定字典（依赖 admin 模块先初始化）
+	SystemTimezone *systimezone.Provider    // 系统时区统一源（basic/timezoneCode）
 
 	// MinIO 预签名 client 运行时订阅桥（issue #548 切片 2 D 后端）。
 	// 由 minio-presign-bridge 模块装配；sys_configs 写入 storage.minio_public_endpoint

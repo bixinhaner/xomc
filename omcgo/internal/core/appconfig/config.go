@@ -82,6 +82,16 @@ type UploadConfig struct {
 	TokenSecret string        `mapstructure:"token_secret"`  // JWT signing secret (optional)
 	TokenTTL    time.Duration `mapstructure:"token_ttl"`     // Token validity duration
 	MaxFileSize int64         `mapstructure:"max_file_size"` // Max file size in bytes
+	PMDedupTTL  time.Duration `mapstructure:"pm_dedup_ttl"`  // PM upload event deduplication TTL
+}
+
+// EffectivePMDedupTTL 返回 PM 上传事件去重窗口。四小时覆盖正常上报重试和短时
+// NATS 重投，同时避免每台设备的 24 小时历史键长期占用 Redis。
+func (c UploadConfig) EffectivePMDedupTTL() time.Duration {
+	if c.PMDedupTTL <= 0 {
+		return 4 * time.Hour
+	}
+	return c.PMDedupTTL
 }
 
 // BackpressureConfig supplies deployment defaults for queue-risk admission.
@@ -332,10 +342,42 @@ type AppConfig struct {
 	Task            TaskConfig            `mapstructure:"task"`
 	MR              MRConfig              `mapstructure:"mr"`
 	Notification    NotificationConfig    `mapstructure:"notification"`
+	Dashboard       DashboardConfig       `mapstructure:"dashboard"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
 	Tracer          TracerConfig          `mapstructure:"tracer"`
 	Log             LogConfig             `mapstructure:"log"`
 	RequestIDPrefix string                `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "app"
+}
+
+type DashboardConfig struct {
+	QueryTimeout     time.Duration `mapstructure:"query_timeout"`
+	StatementTimeout time.Duration `mapstructure:"statement_timeout"`
+	MaxConcurrent    int           `mapstructure:"max_concurrent"`
+	QueueTimeout     time.Duration `mapstructure:"queue_timeout"`
+	FreshCacheTTL    time.Duration `mapstructure:"fresh_cache_ttl"`
+	StaleTTL         time.Duration `mapstructure:"stale_ttl"`
+}
+
+func (c DashboardConfig) Defaults() DashboardConfig {
+	if c.QueryTimeout <= 0 {
+		c.QueryTimeout = 3 * time.Second
+	}
+	if c.StatementTimeout <= 0 {
+		c.StatementTimeout = 2500 * time.Millisecond
+	}
+	if c.MaxConcurrent <= 0 {
+		c.MaxConcurrent = 4
+	}
+	if c.QueueTimeout <= 0 {
+		c.QueueTimeout = 100 * time.Millisecond
+	}
+	if c.FreshCacheTTL <= 0 {
+		c.FreshCacheTTL = 4*time.Minute + 30*time.Second
+	}
+	if c.StaleTTL <= 0 {
+		c.StaleTTL = 15 * time.Minute
+	}
+	return c
 }
 
 // TaskConfig 配置 task 子系统的全局默认行为（T-0157 C1 引入）。
@@ -690,6 +732,7 @@ type WorkerConfig struct {
 	ParamSync           ParamSyncConfig           `mapstructure:"param_sync"`
 	OfflineAlarmCleanup OfflineAlarmCleanupConfig `mapstructure:"offline_alarm_cleanup"` // #358: 离线设备活动告警清理阈值/周期/批量可配
 	PM                  PMConfig                  `mapstructure:"pm"`                    // 设备上线时自动下发 PM 上传配置
+	RawCleanup          RawCleanupConfig          `mapstructure:"raw_cleanup"`           // PM/MR 原始对象精确分批清理
 	// PMConsumerConcurrency 是 PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。
 	// NATS push 订阅 async 回调由 nats.go 单 goroutine 串行投递，单订阅只用 ~1 核；N 个订阅共享同一
 	// durable consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。<=0 时 worker 启动期
@@ -709,6 +752,54 @@ type WorkerConfig struct {
 	Tracer            TracerConfig     `mapstructure:"tracer"`
 	Log               LogConfig        `mapstructure:"log"`
 	RequestIDPrefix   string           `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "worker"
+}
+
+const (
+	RawCleanupModeShadow    = "shadow"
+	RawCleanupModeFallback  = "fallback"
+	RawCleanupModeExclusive = "exclusive"
+)
+
+// RawCleanupConfig controls exact-path cleanup of PM/MR raw objects.
+type RawCleanupConfig struct {
+	Enabled             bool          `mapstructure:"enabled"`
+	Mode                string        `mapstructure:"mode"`
+	BatchSize           int           `mapstructure:"batch_size"`
+	MinRate             float64       `mapstructure:"min_rate"`
+	MaxRate             float64       `mapstructure:"max_rate"`
+	RateHeadroom        float64       `mapstructure:"rate_headroom"`
+	RecalculateInterval time.Duration `mapstructure:"recalculate_interval"`
+	ObjectTimeout       time.Duration `mapstructure:"object_timeout"`
+	PrometheusURL       string        `mapstructure:"prometheus_url"`
+}
+
+// Defaults normalizes unset or invalid cleanup knobs to conservative values.
+func (c RawCleanupConfig) Defaults() RawCleanupConfig {
+	if c.Mode != RawCleanupModeShadow && c.Mode != RawCleanupModeFallback && c.Mode != RawCleanupModeExclusive {
+		c.Mode = RawCleanupModeShadow
+	}
+	if c.BatchSize <= 0 {
+		c.BatchSize = 100
+	}
+	if c.MinRate <= 0 {
+		c.MinRate = 5
+	}
+	if c.MaxRate <= 0 {
+		c.MaxRate = 100
+	}
+	if c.MaxRate < c.MinRate {
+		c.MaxRate = c.MinRate
+	}
+	if c.RateHeadroom <= 0 {
+		c.RateHeadroom = 1.5
+	}
+	if c.RecalculateInterval <= 0 {
+		c.RecalculateInterval = 5 * time.Minute
+	}
+	if c.ObjectTimeout <= 0 {
+		c.ObjectTimeout = 10 * time.Second
+	}
+	return c
 }
 
 // PMConfig 配置 PM 文件上传自动下发流程。

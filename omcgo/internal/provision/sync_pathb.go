@@ -47,11 +47,45 @@ func (s *SyncService) PathBEnabled(ctx context.Context, dev *model.Device) bool 
 // 返回 (true, nil) 表示已切到 Path B；(false, nil) 表示无法走新栈，调用方应降级旧栈；
 // (false, err) 表示新栈选中后执行出错（不再降级，由 engine 处理）。
 func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, int, error) {
+	return s.startPathBSync(ctx, dev, sourceID, true, opts...)
+}
+
+var registeredDeviceMACStandardPaths = []string{
+	"Device.Ethernet.Interface.MACAddress",
+	"Device.Ethernet.Interface.{i}.MACAddress",
+}
+
+// StartRegisteredDeviceMACSync is the narrow Issue #219 registration path.
+// Production keeps routing_mode=closed, so this path deliberately uses the
+// established Path B mapping/result projection without entering durable full
+// sync or its registration/release reconcilers.
+func (s *SyncService) StartRegisteredDeviceMACSync(
+	ctx context.Context,
+	dev *model.Device,
+	sourceID string,
+) (bool, int, error) {
+	return s.startPathBSync(
+		ctx,
+		dev,
+		sourceID,
+		false,
+		WithReason("device_registered_mac"),
+		WithParameterPaths(registeredDeviceMACStandardPaths),
+	)
+}
+
+func (s *SyncService) startPathBSync(
+	ctx context.Context,
+	dev *model.Device,
+	sourceID string,
+	preferDurable bool,
+	opts ...PathBOption,
+) (bool, int, error) {
 	var pbOpts pathBOptions
 	for _, opt := range opts {
 		opt(&pbOpts)
 	}
-	if s.durableStarter != nil {
+	if preferDurable && s.durableStarter != nil {
 		// Transition rule: every trigger reaches the durable parameter_sync_*
 		// data plane first. Returning handled=false intentionally falls back to
 		// the legacy sync-gpv Path B pipeline for now; remove this fallback once
@@ -144,7 +178,8 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 	}
 
 	gpvTaskCount := len(buildGPVBatches(prefixes, s.batchSize))
-	if err := s.enqueueGPVPrefixes(ctx, dev, prefixes, sourceID); err != nil {
+	macRegistrationPartial := pbOpts.reason == "device_registered_mac"
+	if err := s.enqueueGPVPrefixes(ctx, dev, prefixes, sourceID, macRegistrationPartial); err != nil {
 		return true, gpvTaskCount, fmt.Errorf("enqueue path-b GPV: %w", err)
 	}
 	s.recordPathBSyncPendingBatches(ctx, dev.ID, gpvTaskCount)
@@ -705,12 +740,13 @@ func deriveReconcilePrefixes(params []model.DeviceParameter) []string {
 }
 
 // isFullSyncTrigger 判定本次 GPV 响应是否来自"全量 Path B 同步"上下文。
-// 仅 SyncService.StartSync / enqueueGPVPrefixes 入队的 task 用 "sync-gpv-" 前缀
-// (manual / periodic / online-trigger 三路统一走这两个入口);其他 follow-up GPV
-// (auto-gpv-after-spv-* / auto-gpv-after-addobject-* / 北向调试 GPV) 不入白名单,
-// 避免 reconcile 把同 prefix 下未在响应里的兄弟实例误删。
+// sync-gpv-partial-* 仍由 Path B 翻译和 ACS Fault 自愈处理，但响应只覆盖显式
+// 请求范围，不能参与全量缺失日志或对象实例删除对账。
+const partialSyncGPVCommandKeyPrefix = "sync-gpv-partial-"
+
 func isFullSyncTrigger(commandKey string) bool {
-	return strings.HasPrefix(commandKey, "sync-gpv-")
+	return strings.HasPrefix(commandKey, "sync-gpv-") &&
+		!strings.HasPrefix(commandKey, partialSyncGPVCommandKeyPrefix)
 }
 
 func isPositiveInteger(s string) bool {

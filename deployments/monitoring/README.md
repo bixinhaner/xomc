@@ -17,6 +17,7 @@ deployments/monitoring/
 │   ├── omc-rules.yml             # starter 告警规则（三进程存活）
 │   ├── connection-pool-alerts.yml
 │   ├── infra-alerts.yml          # pg/redis/nats/minio 基础服务（T-0155 P2b 改写）
+│   ├── dashboard-kpi-alerts.yml  # Dashboard 查询、全网上卷与 TSDB 临时写入
 │   ├── otelcol-alerts.yml        # otelcol 自身管道健康（T-0155 收尾）
 │   └── storage-queue-alerts.yml  # 存储与 Redis/NATS/PG 队列治理
 ├── loki/
@@ -229,6 +230,18 @@ OMC 业务观测器在 app/worker 启动时分别采集 Redis 和 PostgreSQL 持
 - Redis 使用 `SCAN`，固定 `queue_family=cmdq|taskq`，输出总长度、活动设备数、最大队列长度、最老任务年龄、扫描耗时和失败状态；设备 SN 只用于内部查询，不进入指标标签。
 - PostgreSQL 使用固定 SQL 采集 `device_tasks`、`async_jobs`、parameter-sync/northbound outbox、PM 导出、Trace 导出、备份任务和 dead letters；查询失败保留上次业务快照，并将 `*_up=0`、失败计数递增。
 - Grafana 总览为 `OMC - 存储与队列治理`（UID `omc-storage-queue-governance`）；告警页为 `OMC - 告警总览`（UID `omc-alert-overview`），读取 Prometheus `ALERTS`/`ALERTS_FOR_STATE` 展示当前 Firing/Pending 告警。应用内 Go Channel、worker 内存切片、SSE 缓存等不纳入队列积压指标。
+
+## Dashboard 与 TSDB 保护指标
+
+首页 KPI 只读取现有全网小时、天、周聚合结果。`omcgo-app` 暴露查询延迟、
+并发、超时/拒绝、缓存、缺失/不完整窗口和上卷延迟指标；OTel Collector 的
+`sqlquery/tsdb` 每 30 秒采集 TSDB 临时写入累计值与超过 5 秒的活跃查询。
+
+- `pg_stat_database_temp_bytes` / `temp_files` 是 PostgreSQL 启动或统计重置以来的累计值，看板和告警必须使用 `rate()`。
+- `omc-overview` 底部展示 Dashboard P50/P95/P99、保护状态、缓存和完整性。
+- `omc-infra` 底部展示 TSDB 临时写入、长查询、CPU/内存和容器磁盘读写。
+- 默认告警阈值见 `alerts/dashboard-kpi-alerts.yml`；生产基线稳定后可按容量调整。
+- `TSDB_LOG_MIN_DURATION_STATEMENT` 可调慢 SQL 日志阈值，`TSDB_LOG_TEMP_FILES=-1` 可临时关闭临时文件日志；不要关闭 Prometheus 指标采集。
 
 新增 dashboard 或队列指标后，先执行：
 

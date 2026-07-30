@@ -36,6 +36,11 @@ type DeviceLookup interface {
 	GetBySerialNumber(ctx context.Context, sn string) (*coremodel.Device, error)
 }
 
+type rawArchiver interface {
+	Schedule(bucket, object string, onTerminal func(context.Context, string, string, string))
+	RemoveOld(ctx context.Context, bucket, object string)
+}
+
 // MRCollector handles MR file download, type detection, parsing, and storage.
 type MRCollector struct {
 	minioClient *minio.Client
@@ -44,7 +49,7 @@ type MRCollector struct {
 	store       mr.MRStore
 	devices     DeviceLookup // 可 nil；nil 时强制要求 payload.DeviceID 非空
 	eventBus    event.EventBus
-	archiver    *rawarchive.Archiver
+	archiver    rawArchiver
 	logger      *zap.Logger
 }
 
@@ -225,7 +230,7 @@ func (c *MRCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	// issue #321：真机按 TR-069 上传 .xml.gz，MinIO 原样存压缩字节；解析前按 gzip
 	// 魔数嗅探透明解压（明文原样透传）。解压在 LimitReader 之前 → 体积上限作用于
 	// 解压后内容，兼防 gzip 炸弹。
-	decoded, _, derr := compress.MaybeGunzip(obj)
+	decoded, rawCompressed, derr := compress.MaybeGunzip(obj)
 	if derr != nil {
 		c.logger.Warn("decompress MR file",
 			zap.Error(derr),
@@ -256,7 +261,9 @@ func (c *MRCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 
 	// issue #321：入库成功后把原始 MR XML 压缩回写 MinIO 省盘（已 gzip 则零成本跳过）。
 	// 异步有界并发，不阻塞 ack；nil-safe。压成功后经 onTerminal 标记 mr_files.raw_compressed=true。
-	c.archiver.Schedule(bucket, payload.MinioPath, c.markRawCompressed)
+	if err := c.finalizeRawArchive(ctx, bucket, payload.MinioPath, rawCompressed); err != nil {
+		return err
+	}
 
 	// Publish parsed event
 	parsedPayload := map[string]interface{}{
@@ -279,5 +286,26 @@ func (c *MRCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		zap.String("type", mrType),
 		zap.Int("records", len(data.Records)))
 
+	return nil
+}
+
+// finalizeRawArchive 利用解析阶段已经完成的 gzip 魔数探测，避免对设备原生 gzip
+// 对象再次排队、HEAD 和读取。明文对象仍交给异步 archiver 做一次性压缩回写。
+func (c *MRCollector) finalizeRawArchive(ctx context.Context, bucket, object string, rawCompressed bool) error {
+	if rawCompressed {
+		if c.store == nil {
+			return nil
+		}
+		if err := c.store.MarkCompressed(ctx, map[string]string{object: object}); err != nil {
+			// 文件记录和解析结果已经成功入库；压缩状态只是存储优化元数据，
+			// 失败时不能让整条 NATS 消息重试并重复创建 mr_files 记录。
+			c.logger.Warn("mark detected gzip MR object",
+				zap.String("object", object), zap.Error(err))
+		}
+		return nil
+	}
+	if c.archiver != nil {
+		c.archiver.Schedule(bucket, object, c.markRawCompressed)
+	}
 	return nil
 }

@@ -179,7 +179,7 @@ func (h *RESTHandler) ListIndicators(c *gin.Context) {
 }
 
 // ListPlatforms 返回某 deviceType 下公式表中出现过的全部平台名。
-// 用于 KPI 指标库列表页的平台筛选下拉。
+// 用于 PM 指标库列表页的平台筛选下拉。
 func (h *RESTHandler) ListPlatforms(c *gin.Context) {
 	dt, err := parseDeviceTypeQuery(c)
 	if err != nil {

@@ -231,13 +231,13 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 #   worker        1024    2048        25           PM/MR 解析最吃内存；1M 走横向
 #   postgres      7168   16384        25           业务主库；须容 max_connections=300(池+exporter+余,与 main #131 对齐)
 #   postgres-tsdb 4096   12288        22           时序库(#347)：PM COPY 入库 + KPI 聚合，写压力主要在此；独立实例，计入预算防双 PG 超分 OOM
-#   redis         3072    8192        15           appendonly，限额需≥1.5×maxmemory
+#   redis         5120    8192        15           12分钟关窗双小时重叠；4GiB窗口 + 1GiB AOF COW
 #   nats          1024    2048         5           JetStream backlog + client buffers，避免 512MiB cgroup 临界
 #   minio         3072    4096         8           对象存储；压测发现按可见CPU配额自动估算的并发上限过于保守，且线上巡检 2.5GiB 配额下已到 88%，floor/ceil 一并调大留余量
 #   web            512     512         0           静态+反代，固定
 # 监控栈（固定块，不纵向伸缩，但计入预算）：~4224 MiB
 COMP_NAMES=(app acs worker postgres postgres-tsdb redis nats minio web)
-COMP_FLOOR=(1536 4096 1024 7168 4096 3072 1024 3072 512)
+COMP_FLOOR=(1536 4096 1024 7168 4096 5120 1024 3072 512)
 COMP_CEIL=(3072 6144 2048 16384 12288 8192 2048 4096 512)
 COMP_WEIGHT=(10 18 25 25 22 15 5 8 0)
 
@@ -350,10 +350,11 @@ TSDB_SAT=$(( TSDB_SHARED_BUFFERS + TSDB_MAINT_WORK_MEM + TSDB_MAXCONN * (10 + TS
 [ "$TSDB_SAT" -gt "$(mul_pct "$TSDB_MEM" 92)" ] && \
   warn "Postgres-tsdb 饱和估算 $(to_gib "$TSDB_SAT") GiB 接近限额 $(to_gib "$TSDB_MEM") GiB；建议增大内存或下调 TSDB_MAX_CONNECTIONS（时序库连接池仅 ~65）。"
 
-# Redis：maxmemory = 0.66 × 限额，且保证 限额 − maxmemory ≥ 1 GiB（AOF rewrite 的 COW 余量）
-REDIS_MAXMEM=$(mul_pct "$REDIS_MEM" 66)
-[ $(( REDIS_MEM - REDIS_MAXMEM )) -lt 1024 ] && REDIS_MAXMEM=$(( REDIS_MEM - 1024 ))
-REDIS_POLICY=volatile-lru                           # 仅淘汰带 TTL 的键，保护无 TTL 的队列
+# Redis：20k 基站在 12 分钟关窗下会短时并存相邻两个小时的窗口。实测 2GiB
+# 单小时档在积压恢复时 OOM；下限 5GiB，其中 maxmemory 4GiB，并始终保留
+# 1GiB 给 AOF rewrite 的 fork COW。
+REDIS_MAXMEM=$(( REDIS_MEM - 1024 ))
+REDIS_POLICY=noeviction                            # PM 聚合窗口是权威状态，内存不足必须告警扩容
 
 # ---------------------------------------------------------------------------
 # 4. 输出规划表 + 写 resources.env（需求 ③④）

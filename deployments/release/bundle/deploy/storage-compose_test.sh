@@ -9,10 +9,14 @@ RELEASE_MONITORING_COMPOSE="$RELEASE_DEPLOY/docker-compose.monitoring.yml"
 RELEASE_HEALTHCHECK="$RELEASE_DEPLOY/healthcheck.sh"
 MONITORING_PROFILE_LIB="$RELEASE_DEPLOY/monitoring-profile-lib.sh"
 DEV_COMPOSE="$REPO_ROOT/deployments/docker/docker-compose.yml"
+TEST_COMPOSE="$REPO_ROOT/deployments/docker/docker-compose.test.yml"
 OTELCOL_CONFIG="$REPO_ROOT/deployments/monitoring/otelcol/config.yaml"
 OMC_ALERTS="$REPO_ROOT/deployments/monitoring/alerts/omc-rules.yml"
+INFRA_ALERTS="$REPO_ROOT/deployments/monitoring/alerts/infra-alerts.yml"
+HOST_ALERTS="$REPO_ROOT/deployments/monitoring/alerts/host-container-alerts.yml"
 GRAFANA_DASHBOARD="$REPO_ROOT/deployments/monitoring/grafana-dashboard.json"
 GRAFANA_OVERVIEW="$REPO_ROOT/deployments/monitoring/grafana/dashboards/omc-overview.json"
+HOST_DASHBOARD="$REPO_ROOT/deployments/monitoring/grafana/dashboards/nginx-host-overview.json"
 APP_PROD_CONFIG="$REPO_ROOT/omcgo/cmd/app/etc/config.prod.yaml"
 ACS_PROD_CONFIG="$REPO_ROOT/omcgo/cmd/acs/etc/config.prod.yaml"
 WORKER_PROD_CONFIG="$REPO_ROOT/omcgo/cmd/worker/etc/config.prod.yaml"
@@ -29,7 +33,7 @@ ok() { PASS=$((PASS + 1)); }
 bad() { echo "FAIL: $*" >&2; FAIL=$((FAIL + 1)); }
 contains() {
   local name="$1" pattern="$2" file="$3"
-  if grep -Fq "$pattern" "$file"; then ok; else bad "$name: $file 未包含 [$pattern]"; fi
+  if grep -Fq -- "$pattern" "$file"; then ok; else bad "$name: $file 未包含 [$pattern]"; fi
 }
 
 echo "── release compose 五个 bind mount ──"
@@ -44,16 +48,25 @@ contains "PostgreSQL 默认 10 核" 'cpus: "${POSTGRES_CPUS:-10}"' "$RELEASE_COM
 contains "TimescaleDB 默认 16 核" 'cpus: "${TSDB_CPUS:-16}"' "$RELEASE_COMPOSE"
 contains "worker 默认 8 核" 'cpus: "${WORKER_CPUS:-8}"' "$RELEASE_APP_COMPOSE"
 
-echo "── PM 小时聚合生产旋钮 ──"
-contains "release worker 透传小时批次" 'PM_HOURLY_BATCH_DEVICES: "${PM_HOURLY_BATCH_DEVICES:-2500}"' "$RELEASE_APP_COMPOSE"
-contains "release worker 透传迟到窗口" 'PM_LATE_DATA_WINDOW: "${PM_LATE_DATA_WINDOW:-168h}"' "$RELEASE_APP_COMPOSE"
-contains "开发 worker 默认 2500 台/批" 'PM_HOURLY_BATCH_DEVICES: "${PM_HOURLY_BATCH_DEVICES:-2500}"' "$DEV_COMPOSE"
+echo "── PM 流式聚合生产旋钮 ──"
+contains "release worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"' "$RELEASE_APP_COMPOSE"
+contains "release worker 透传窗口状态 TTL" 'PM_AGGREGATION_WINDOW_TTL: "${PM_AGGREGATION_WINDOW_TTL:-1080h}"' "$RELEASE_APP_COMPOSE"
+contains "开发 worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"' "$DEV_COMPOSE"
 
 echo "── release .env 模板和升级继承 ──"
 for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
   contains "$key 模板" "$key=" "$BUILD"
   contains "$key 升级继承" "$key" "$INSTALL"
 done
+
+echo "── 实例配置安全升级 ──"
+contains "install 加载实例配置升级库" 'config-upgrade-lib.sh' "$INSTALL"
+contains "普通升级迁移 ACS 历史默认值" 'upgrade_acs_session_limit' "$INSTALL"
+if bash "$RELEASE_DEPLOY/config-upgrade-lib_test.sh"; then
+  ok
+else
+  bad "ACS session limit config migration regression"
+fi
 
 echo "── install/svc 启动前准备路径 ──"
 contains "install 加载存储库" 'storage-paths-lib.sh' "$INSTALL"
@@ -69,6 +82,8 @@ contains "开发 NATS 默认命名卷" '${NATS_DATA_PATH:-natsdata}:/data' "$DEV
 contains "开发 MinIO 默认命名卷" '${MINIO_DATA_PATH:-miniodata}:/data' "$DEV_COMPOSE"
 
 echo "── 过载保护配置 ──"
+contains "release TimescaleDB 共享内存兜底" 'shm_size: ${TSDB_SHM_SIZE:-512m}' "$RELEASE_COMPOSE"
+contains "开发 TimescaleDB 共享内存兜底" 'shm_size: ${TSDB_SHM_SIZE:-512m}' "$DEV_COMPOSE"
 contains "release NATS 内存存储上限" 'max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}' "$RELEASE_COMPOSE"
 contains "开发 NATS 内存存储上限" 'max_memory_store: ${NATS_MAX_MEMORY_STORE:-134217728}' "$DEV_COMPOSE"
 contains "release NATS 大积压恢复宽限" 'start_period: 5m' "$RELEASE_COMPOSE"
@@ -77,6 +92,45 @@ contains "ACS access log 默认关闭" 'access_log off; # ACS 高频请求由应
 contains "本地 ACS access log 默认关闭" 'access_log off; # ACS 高频请求由应用指标观测，避免与数据盘竞争 IO' "$NGINX_LOCAL"
 contains "ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_DEFAULT"
 contains "本地 ACS 请求体不落临时文件" 'proxy_request_buffering off;' "$NGINX_LOCAL"
+contains "release MinIO scanner 最低速" 'MINIO_SCANNER_SPEED: "slowest"' "$RELEASE_COMPOSE"
+contains "开发 MinIO scanner 最低速" 'MINIO_SCANNER_SPEED: "slowest"' "$DEV_COMPOSE"
+contains "release Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$RELEASE_COMPOSE"
+contains "开发 Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$DEV_COMPOSE"
+contains "测试 Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$TEST_COMPOSE"
+contains "release Redis 禁止淘汰聚合状态" '--maxmemory-policy noeviction' "$RELEASE_COMPOSE"
+contains "开发 Redis 禁止淘汰聚合状态" '--maxmemory-policy noeviction' "$DEV_COMPOSE"
+contains "release Redis 默认容纳双小时重叠窗口" '--maxmemory ${REDIS_MAXMEMORY:-4gb}' "$RELEASE_COMPOSE"
+contains "release Redis 默认保留 AOF COW 余量" 'memory: "${REDIS_MEM:-5g}"' "$RELEASE_COMPOSE"
+contains "开发 Redis 默认容纳双小时重叠窗口" '--maxmemory ${REDIS_MAXMEMORY:-4gb}' "$DEV_COMPOSE"
+contains "开发 Redis 默认保留 AOF COW 余量" 'memory: ${REDIS_MEM:-5g}' "$DEV_COMPOSE"
+contains "release 资源规划 Redis 双窗口下限" 'redis         5120    8192' "$RELEASE_DEPLOY/plan-resources.sh"
+contains "release 资源规划 Redis 保留 1GiB COW" 'REDIS_MAXMEM=$(( REDIS_MEM - 1024 ))' "$RELEASE_DEPLOY/plan-resources.sh"
+contains "开发资源规划 Redis 双窗口下限" 'redis        5120  8192' "$DEV_PLANNER"
+contains "开发资源规划 Redis 保留 1GiB COW" 'REDIS_MAXMEM=$(( REDIS_MEM - 1024 ))' "$DEV_PLANNER"
+contains "release 资源规划禁止淘汰聚合状态" 'REDIS_POLICY=noeviction' "$RELEASE_DEPLOY/plan-resources.sh"
+contains "开发资源规划禁止淘汰聚合状态" 'REDIS_POLICY=noeviction' "$DEV_PLANNER"
+contains "队列样本陈旧只检查 ACS" 'omc_pm_queue_sample_timestamp_seconds{deployment_unit="acs",subject="pm.file.received",durable="pm-workers"}' "$OMC_ALERTS"
+contains "Redis 上限告警说明 noeviction" 'noeviction 会拒绝新写入' "$INFRA_ALERTS"
+contains "PM 聚合事件失败告警" 'alert: OMCPMStreamingAggregationEventFailures' "$OMC_ALERTS"
+contains "开发 TSDB 保留 TimescaleDB 并预载 pg_stat_statements" 'shared_preload_libraries=timescaledb,pg_stat_statements' "$DEV_COMPOSE"
+contains "release TSDB 保留 TimescaleDB 并预载 pg_stat_statements" 'shared_preload_libraries=timescaledb,pg_stat_statements' "$RELEASE_COMPOSE"
+contains "开发 TSDB 开启 I/O timing" 'track_io_timing=${TSDB_TRACK_IO_TIMING:-on}' "$DEV_COMPOSE"
+contains "release TSDB 开启 I/O timing" 'track_io_timing=${TSDB_TRACK_IO_TIMING:-on}' "$RELEASE_COMPOSE"
+contains "开发 TSDB 慢 SQL 默认 1 秒" 'log_min_duration_statement=${TSDB_LOG_MIN_DURATION_STATEMENT:-1000}' "$DEV_COMPOSE"
+contains "release TSDB 慢 SQL 默认 1 秒" 'log_min_duration_statement=${TSDB_LOG_MIN_DURATION_STATEMENT:-1000}' "$RELEASE_COMPOSE"
+contains "开发 TSDB 记录全部临时文件" 'log_temp_files=${TSDB_LOG_TEMP_FILES:-0}' "$DEV_COMPOSE"
+contains "release TSDB 记录全部临时文件" 'log_temp_files=${TSDB_LOG_TEMP_FILES:-0}' "$RELEASE_COMPOSE"
+contains "collector 配置 TSDB SQL 指标采集" 'sqlquery/tsdb:' "$OTELCOL_CONFIG"
+contains "TSDB 指标管道包含 SQL 采集" 'receivers: [postgresql/tsdb, sqlquery/tsdb]' "$OTELCOL_CONFIG"
+
+echo "── 磁盘 I/O 可观测性 ──"
+contains "磁盘活动时钟面板不称为利用率" '磁盘 I/O 活动时钟占比' "$HOST_DASHBOARD"
+contains "磁盘排队面板" 'node_disk_io_time_weighted_seconds_total' "$HOST_DASHBOARD"
+contains "MinIO scanner 面板" 'minio_node_scanner_objects_scanned' "$HOST_DASHBOARD"
+contains "磁盘复合饱和告警" 'alert: HostDiskIOSaturated' "$HOST_ALERTS"
+contains "磁盘告警要求活动时间" 'node_disk_io_time_seconds_total' "$HOST_ALERTS"
+contains "磁盘告警要求等待时延" 'node_disk_read_time_seconds_total' "$HOST_ALERTS"
+contains "磁盘告警要求排队" 'node_disk_io_time_weighted_seconds_total' "$HOST_ALERTS"
 
 echo "── production tracing + monitoring profile ──"
 if bash "$RELEASE_DEPLOY/monitoring-profile_test.sh"; then
@@ -90,6 +144,7 @@ for config in "$APP_PROD_CONFIG" "$ACS_PROD_CONFIG" "$WORKER_PROD_CONFIG"; do
 done
 contains "默认安装包含完整监控 compose" '[ "$SKIP_MONITORING" = 0 ] && COMPOSE_FILES+=( -f docker-compose.monitoring.yml )' "$INSTALL"
 contains "install 在 source 后应用监控 profile" 'monitoring_profile_apply_install "$ENV_FILE" "$SKIP_MONITORING"' "$INSTALL"
+contains "升级统一刷新完整 compose stack" '"${DC[@]}" up -d' "$INSTALL"
 contains "服务控制读取持久化监控 profile" 'monitoring_profile_apply_runtime ".env" "$SKIP_MONITORING"' "$SVC"
 contains "监控 profile 关闭 tracing" 'export OMCGO_TRACER_ENABLED=false' "$MONITORING_PROFILE_LIB"
 contains "业务容器 tracing 尊重配置与显式覆盖" 'OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"' "$RELEASE_APP_COMPOSE"
@@ -102,10 +157,13 @@ contains "healthcheck 覆盖 nginx exporter" 'nginx-exporter' "$RELEASE_HEALTHCH
 contains "healthcheck 覆盖 node exporter" 'node-exporter' "$RELEASE_HEALTHCHECK"
 contains "healthcheck 覆盖 cAdvisor" 'cadvisor' "$RELEASE_HEALTHCHECK"
 
-echo "── discovered counter operational queries ──"
-contains "PM 配置外指标告警使用新名称" 'omc_pm_discovered_counters_total' "$OMC_ALERTS"
-contains "主 Grafana dashboard 使用新名称" 'omc_pm_discovered_counters_total' "$GRAFANA_DASHBOARD"
-contains "overview dashboard 使用新名称" 'omc_pm_discovered_counters_total' "$GRAFANA_OVERVIEW"
+echo "── PM 指标漂移与禁用值监控 ──"
+contains "PM 配置外指标告警使用 whitelist miss" 'omc_pm_whitelist_miss_values_total' "$OMC_ALERTS"
+contains "PM 禁用指标告警使用独立指标" 'omc_pm_known_disabled_values_total' "$OMC_ALERTS"
+contains "主 Grafana dashboard 展示 whitelist miss" 'omc_pm_whitelist_miss_values_total' "$GRAFANA_DASHBOARD"
+contains "主 Grafana dashboard 展示 disabled" 'omc_pm_known_disabled_values_total' "$GRAFANA_DASHBOARD"
+contains "overview dashboard 展示 whitelist miss" 'omc_pm_whitelist_miss_values_total' "$GRAFANA_OVERVIEW"
+contains "overview dashboard 展示 disabled" 'omc_pm_known_disabled_values_total' "$GRAFANA_OVERVIEW"
 
 echo "── 开发 planner maximize 分支 ──"
 TMP_MAX="$(mktemp)"

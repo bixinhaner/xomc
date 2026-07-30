@@ -12,4 +12,9 @@ describe('UFTE i18n messages', () => {
     expect(messages['zh-CN']['ufte.search.tasks']).toBe('按任务名称搜索');
     expect(messages['en-US']['ufte.search.tasks']).toBe('Search by task name');
   });
+
+  it('uses product-name wording for the MR task device table', () => {
+    expect(messages['zh-CN']['mrTask.field.productClass']).toBe('产品名称');
+    expect(messages['en-US']['mrTask.field.productClass']).toBe('Product Name');
+  });
 });

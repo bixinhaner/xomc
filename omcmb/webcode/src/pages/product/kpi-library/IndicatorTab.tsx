@@ -13,6 +13,10 @@ import IndicatorDrawer from './IndicatorDrawer';
 import { enabledIndicatorErrorMessage } from './enabledIndicatorErrors';
 import SearchInput from '@/components/SearchInput';
 import { useT } from '@/hooks/useT';
+import {
+  PRODUCT_TABLE_DEFAULT_PAGE_SIZE,
+  PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
+} from '../pagination';
 
 interface Props {
   deviceType: DeviceType;
@@ -26,7 +30,7 @@ export default function IndicatorTab({ deviceType }: Props) {
   const [keyword, setKeyword] = useState('');
   const [platform, setPlatform] = useState<string | undefined>(undefined);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(PRODUCT_TABLE_DEFAULT_PAGE_SIZE);
   const { data: platformData } = usePlatformList(deviceType);
   const platformOptions = useMemo(
     () => (platformData?.items || []).map((p) => ({ label: p, value: p })),
@@ -167,7 +171,7 @@ export default function IndicatorTab({ deviceType }: Props) {
           pageSize,
           total: data?.total || 0,
           showSizeChanger: true,
-          pageSizeOptions: ['10', '20', '50', '1000'],
+          pageSizeOptions: PRODUCT_TABLE_PAGE_SIZE_OPTIONS,
           showTotal: (n) => t('common.totalCount', { count: n }),
           onChange: (p, ps) => {
             setPage(p);

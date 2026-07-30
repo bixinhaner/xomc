@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/jsonx"
+	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
@@ -240,7 +241,8 @@ func completeSkeletonBuckets(req QueryRequest, applyCalendarFilters bool) []time
 		return nil
 	}
 	out := make([]time.Time, 0)
-	for t := firstCompleteSkeletonBucket(req.StartTime, req.Granularity); !t.IsZero() && !nextSkeletonBucket(t, req.Granularity).After(req.EndTime); t = nextSkeletonBucket(t, req.Granularity) {
+	loc, _ := calendarfilter.Location(req.CalendarTimezone)
+	for t := firstCompleteSkeletonBucket(req.StartTime, req.Granularity, loc); !t.IsZero() && !nextSkeletonBucket(t, req.Granularity).After(req.EndTime); t = nextSkeletonBucket(t, req.Granularity) {
 		if applyCalendarFilters && !bucketPassesCalendarFilters(t, req) {
 			continue
 		}
@@ -262,13 +264,14 @@ type BucketWindow struct {
 // BuildBucketWindow returns the complete-bucket range for a request.
 //
 // Bucket rule: bucket_start >= query_start and bucket_start + granularity <= query_end.
-// Boundaries are calculated in the process timezone so day/week/month buckets follow the system locale.
+// Boundaries are calculated in the request calendar timezone so day/week/month buckets follow the system locale.
 func BuildBucketWindow(req QueryRequest) BucketWindow {
+	_, timezoneName := calendarfilter.Location(req.CalendarTimezone)
 	win := BucketWindow{
 		RequestedStartTime: req.StartTime,
 		RequestedEndTime:   req.EndTime,
 		Granularity:        string(req.Granularity),
-		Timezone:           time.Local.String(),
+		Timezone:           timezoneName,
 	}
 	buckets := completeSkeletonBuckets(req, false)
 	if len(buckets) == 0 {
@@ -304,26 +307,29 @@ func bucketKey(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-func firstCompleteSkeletonBucket(start time.Time, gran metrics.Granularity) time.Time {
+func firstCompleteSkeletonBucket(start time.Time, gran metrics.Granularity, loc *time.Location) time.Time {
 	if start.IsZero() {
 		return time.Time{}
 	}
-	local := start.In(time.Local)
+	if loc == nil {
+		loc = time.UTC
+	}
+	local := start.In(loc)
 	var aligned time.Time
 	switch gran {
 	case metrics.Granularity15Min:
 		minute := (local.Minute() / 15) * 15
-		aligned = time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), minute, 0, 0, time.Local)
+		aligned = time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), minute, 0, 0, loc)
 		if aligned.Before(local) {
 			aligned = aligned.Add(15 * time.Minute)
 		}
 	case metrics.GranularityHourly:
-		aligned = time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), 0, 0, 0, time.Local)
+		aligned = time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), 0, 0, 0, loc)
 		if aligned.Before(local) {
 			aligned = aligned.Add(time.Hour)
 		}
 	case metrics.GranularityDaily:
-		aligned = time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local)
+		aligned = time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
 		if aligned.Before(local) {
 			aligned = aligned.AddDate(0, 0, 1)
 		}
@@ -332,19 +338,19 @@ func firstCompleteSkeletonBucket(start time.Time, gran metrics.Granularity) time
 		if weekday == 0 {
 			weekday = 7
 		}
-		aligned = time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local).AddDate(0, 0, 1-weekday)
+		aligned = time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, 1-weekday)
 		if aligned.Before(local) {
 			aligned = aligned.AddDate(0, 0, 7)
 		}
 	case metrics.GranularityMonthly:
-		aligned = time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, time.Local)
+		aligned = time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, loc)
 		if aligned.Before(local) {
 			aligned = aligned.AddDate(0, 1, 0)
 		}
 	default:
 		return time.Time{}
 	}
-	return aligned.In(start.Location())
+	return aligned
 }
 
 func knownSkeletonGranularity(gran metrics.Granularity) bool {
@@ -374,7 +380,8 @@ func nextSkeletonBucket(t time.Time, gran metrics.Granularity) time.Time {
 }
 
 func bucketPassesCalendarFilters(t time.Time, req QueryRequest) bool {
-	local := t.In(time.Local)
+	loc, _ := calendarfilter.Location(req.CalendarTimezone)
+	local := t.In(loc)
 	if len(req.Weekdays) > 0 && len(req.Weekdays) < 7 && !intInSlice(int(local.Weekday()), req.Weekdays) {
 		return false
 	}

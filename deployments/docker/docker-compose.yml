@@ -103,6 +103,10 @@ services:
     volumes:
       - ${TSDB_DATA_PATH:-tsdbdata}:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
+    # PostgreSQL 并行查询的动态共享内存使用 /dev/shm。Docker 默认 64 MiB 在多个
+    # parallel worker 同时扩容时会触发 SQLSTATE 53100；SQL 查询已做轻量化，这里
+    # 仍保留可调的容量作为其它合法并行查询的防护。
+    shm_size: ${TSDB_SHM_SIZE:-512m}
     # 写吞吐优化档同主库 postgres（PM copy 入库走本库，写压力主要在此）。
     # ↓ TSDB_* 旋钮由 resources.env 注入；不传 env 取 :- 默认 = 历史值（与主库同档）。
     command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai",
@@ -110,10 +114,11 @@ services:
               "-c", "shared_buffers=${TSDB_SHARED_BUFFERS:-3GB}", "-c", "effective_cache_size=${TSDB_EFFECTIVE_CACHE_SIZE:-7GB}",
               "-c", "work_mem=${TSDB_WORK_MEM:-16MB}", "-c", "maintenance_work_mem=${TSDB_MAINTENANCE_WORK_MEM:-1GB}",
               "-c", "max_wal_size=${TSDB_MAX_WAL_SIZE:-4GB}", "-c", "checkpoint_completion_target=0.9",
+              "-c", "shared_preload_libraries=timescaledb,pg_stat_statements", "-c", "track_io_timing=${TSDB_TRACK_IO_TIMING:-on}",
               "-c", "log_checkpoints=${TSDB_LOG_CHECKPOINTS:-off}", "-c", "log_autovacuum_min_duration=${TSDB_LOG_AUTOVACUUM_MIN_DURATION:--1}",
-              "-c", "log_statement=${TSDB_LOG_STATEMENT:-none}", "-c", "log_min_duration_statement=${TSDB_LOG_MIN_DURATION_STATEMENT:--1}",
+              "-c", "log_statement=${TSDB_LOG_STATEMENT:-none}", "-c", "log_min_duration_statement=${TSDB_LOG_MIN_DURATION_STATEMENT:-1000}",
               "-c", "log_connections=${TSDB_LOG_CONNECTIONS:-off}", "-c", "log_disconnections=${TSDB_LOG_DISCONNECTIONS:-off}",
-              "-c", "log_temp_files=${TSDB_LOG_TEMP_FILES:--1}", "-c", "log_min_messages=${TSDB_LOG_MIN_MESSAGES:-warning}"]
+              "-c", "log_temp_files=${TSDB_LOG_TEMP_FILES:-0}", "-c", "log_min_messages=${TSDB_LOG_MIN_MESSAGES:-warning}"]
     logging:
       driver: json-file
       options:
@@ -144,7 +149,9 @@ services:
     # PM 在线聚合窗口是运行期权威状态，禁止淘汰；AOF everysec 保证进程重启可恢复。
     # 内存不足必须告警和扩容，不能通过 LRU 静默损坏窗口。
     # 提高 rewrite 阈值，避免高频聚合写入下小 AOF 约每分钟重写一次。
-    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-2gb} --maxmemory-policy noeviction --auto-aof-rewrite-min-size 256mb --auto-aof-rewrite-percentage 300
+    # 12 分钟关窗会让相邻两个小时的设备窗口短时并存，默认容量覆盖 20k
+    # 基站的双窗口重叠，并为 AOF rewrite 另留 1GiB COW 余量。
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-4gb} --maxmemory-policy noeviction --auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500
     volumes:
       - ${REDIS_DATA_PATH:-redisdata}:/data
       - /etc/localtime:/etc/localtime:ro
@@ -154,7 +161,7 @@ services:
       resources:
         limits:
           cpus: "${REDIS_CPUS:-1}"
-          memory: ${REDIS_MEM:-3g}
+          memory: ${REDIS_MEM:-5g}
         reservations:
           cpus: "0.25"
           memory: 256m
@@ -217,6 +224,8 @@ services:
       TZ: "Asia/Shanghai"
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      # 海量小对象场景降低后台 scanner 对随机读 IOPS 的持续争抢；生命周期仍正常执行。
+      MINIO_SCANNER_SPEED: "slowest"
       # MinIO 自带 Prometheus 指标端点 /minio/v2/metrics/*；public 模式免 token 抓取（T-0151）。
       MINIO_PROMETHEUS_AUTH_TYPE: "public"
     ports:
@@ -445,7 +454,7 @@ services:
       GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-}"
       GOMAXPROCS: "${WORKER_GOMAXPROCS:-}"
       PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"
-      PM_AGGREGATION_CLOSE_GRACE: "${PM_AGGREGATION_CLOSE_GRACE:-5m}"
+      PM_AGGREGATION_CLOSE_GRACE: "${PM_AGGREGATION_CLOSE_GRACE:-12m}"
       PM_AGGREGATION_DAILY_CLOSE_GRACE: "${PM_AGGREGATION_DAILY_CLOSE_GRACE:-15m}"
       PM_AGGREGATION_WEEKLY_CLOSE_GRACE: "${PM_AGGREGATION_WEEKLY_CLOSE_GRACE:-30m}"
       PM_AGGREGATION_MONTHLY_CLOSE_GRACE: "${PM_AGGREGATION_MONTHLY_CLOSE_GRACE:-30m}"

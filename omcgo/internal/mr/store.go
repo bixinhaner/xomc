@@ -91,11 +91,6 @@ type MRStore interface {
 	GetFileByID(ctx context.Context, fileID uuid.UUID) (*MRFileInfo, error)
 	QueryRecords(ctx context.Context, filter MRRecordFilter) (*model.ListResponse[MRRecordEntry], error)
 
-	// DeleteFilesBefore 删除 collect_time < cutoff 的 mr_files 行。
-	// 由 internal/mr/task/cleaner.go 在 MinIO 清理后调用，保持两端一致。
-	// 返回删除行数。
-	DeleteFilesBefore(ctx context.Context, cutoff time.Time) (int64, error)
-
 	// ListFileDeviceAggregates 按 device_sn 聚合 mr_files，返回每台设备的
 	// 起止 collect_time + 文件数。给 File Management → MR Tab 主列表用。
 	ListFileDeviceAggregates(ctx context.Context, filter MRFileDeviceFilter) (*model.ListResponse[MRFileDeviceAggregate], error)

@@ -194,14 +194,14 @@ log "  内存空闲预算  : ${C_G}${C_B}$(to_gib "$IDLE_MEM_MIB") GiB${C_0}  = 
 #   worker        768  2560   20     PM/MR XML 解析最吃内存
 #   postgres     1024  6144   14     业务主库；KPI/时序已分离到 tsdb，本库写量较小
 #   postgres-tsdb 1024 8192   22     时序库：承载 PM COPY 入库 + KPI 聚合，写压力主要在此
-#   redis         384  1024    4     OMC 实测仅数 MB；ceiling 低是有意（别再过配）
+#   redis        5120  8192    8     12分钟关窗双小时重叠；4GiB窗口 + 1GiB AOF COW
 #   nats          384  1024    6     JetStream file store + PM 突发 in-flight
 #   minio         512  2048    6     对象存储，瓶颈在磁盘非内存
 #   web           192   512    0     nginx 静态+反代，近似固定
 COMP_NAMES=(app acs worker postgres postgres-tsdb redis nats minio web)
-COMP_FLOOR=(512 512 768 1024 1024 384 384 512 192)
-COMP_CEIL=(1536 2048 2560 6144 8192 1024 1024 2048 512)
-COMP_WEIGHT=(8 12 20 14 22 4 6 6 0)
+COMP_FLOOR=(512 512 768 1024 1024 5120 384 512 192)
+COMP_CEIL=(1536 2048 2560 6144 8192 8192 1024 2048 512)
+COMP_WEIGHT=(8 12 20 14 22 8 6 6 0)
 
 # 监控栈（固定块，不纵向伸缩）：prometheus1024+grafana512+loki512+tempo512+otelcol512
 #   +alertmgr512+exporters(128*3)+cadvisor256 ≈ 4224 MiB。dev 本地默认不起，故默认不计入。
@@ -230,7 +230,7 @@ if [ "$MAXIMIZE" = 1 ]; then
   APP_MEM=$(clampm 3 2048 8192)
   MINIO_MEM=$(clampm 5 4096 8192)      # 对象存储；压测实测高并发 PM/MR 上传下内存可占满 1-2GiB，下限对齐 ACS/worker（2026-07-21）
   NATS_MEM=$(clampm 3 1024 4096)
-  REDIS_MEM=$(clampm 2 1024 4096)      # OMC redis 实占极小，cap 给余量即可
+  REDIS_MEM=$(clampm 8 5120 8192)      # 12分钟关窗需同时容纳相邻两个小时窗口
   WEB_MEM=512
   log "  物理内存      : $(to_gib "$VM_MEM_MIB") GiB；shared_buffers 总量 $(to_gib "$SB_TOTAL") GiB(25%)，余量留 OS page cache"
   log "  CPU 限额      : 各服务 = 全部 ${VM_CPU} 逻辑核（谁抢到是谁的，不按进程切）"
@@ -312,7 +312,8 @@ PG_ALLOW=$(pg_allow "$PG_WORK"); TSDB_ALLOW=$(pg_allow "$TSDB_WORK")
 # PG 真正吃满的是 shared_buffers + maintenance + 每实例 backends/work/temp 余量。
 # 非 PG 服务实测只用几十~几百 MB（按实占估，非 cap）；据此留给两 PG 的安全预算 = PG_AVAIL。
 NONPG_ACTUAL_EST=$(( 400 + 350 + 600 + 200 + 350 + 60 ))  # app/acs/worker/nats/minio/web 实占估
-REDIS_MAXMEM=$(awk -v m="$REDIS_MEM" 'BEGIN{v=m-256; if(v>512)v=512; if(v<128)v=128; printf "%d", v}')  # OMC redis 用量极小，封顶 512MB
+REDIS_MAXMEM=$(( REDIS_MEM - 1024 ))
+REDIS_POLICY=noeviction
 NONPG_ACTUAL_EST=$(( NONPG_ACTUAL_EST + REDIS_MAXMEM ))
 [ "$WITH_MONITORING" = 1 ] && NONPG_ACTUAL_EST=$(( NONPG_ACTUAL_EST + 2000 ))  # 监控实占估
 PG_AVAIL=$(( VM_MEM_MIB - OS_RESERVE_MIB - OTHER_RESERVE_MIB - NONPG_ACTUAL_EST ))
@@ -353,7 +354,7 @@ printf '  %-14s %6sMiB  %5s   GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' acs    "$ACS_MEM
 printf '  %-14s %6sMiB  %5s   GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' worker "$WORKER_MEM" "$CPU_worker" "$WORKER_GOMEM" "$WORKER_GOMAXPROCS"
 printf '  %-14s %6sMiB  %5s   shared_buffers=%sMB effective_cache=%sMB work_mem=%sMB maint=%sMB\n' postgres      "$PG_MEM"   "$CPU_pg"   "$PG_SB"   "$PG_EFF"   "$PG_WORK"  "$PG_MAINT"
 printf '  %-14s %6sMiB  %5s   shared_buffers=%sMB effective_cache=%sMB work_mem=%sMB maint=%sMB\n' postgres-tsdb "$TSDB_MEM" "$CPU_tsdb" "$TSDB_SB" "$TSDB_EFF" "$TSDB_WORK" "$TSDB_MAINT"
-printf '  %-14s %6sMiB  %5s   maxmemory=%sMB policy=allkeys-lru（cap−maxmemory=%sMiB COW余量）\n' redis "$REDIS_MEM" "$CPU_redis" "$REDIS_MAXMEM" "$(( REDIS_MEM - REDIS_MAXMEM ))"
+printf '  %-14s %6sMiB  %5s   maxmemory=%sMB policy=%s（cap−maxmemory=%sMiB COW余量）\n' redis "$REDIS_MEM" "$CPU_redis" "$REDIS_MAXMEM" "$REDIS_POLICY" "$(( REDIS_MEM - REDIS_MAXMEM ))"
 printf '  %-14s %6sMiB  %5s\n' nats  "$NATS_MEM"  "$CPU_nats"
 printf '  %-14s %6sMiB  %5s\n' minio "$MINIO_MEM" "$CPU_minio"
 printf '  %-14s %6sMiB  %5s\n' web   "$WEB_MEM"   "$CPU_web"
@@ -430,7 +431,7 @@ fi
   echo "# 不传 env-file 时取 compose 内 :- 默认（= 历史 PM 写吞吐档），行为不变。"
   echo "# 约束（手改时务必遵守，否则重演 OOM 事故）："
   echo "#   · *_GOMEMLIMIT 必须 < 对应 *_MEM（软限，建议 0.90×）"
-  echo "#   · REDIS_MEM 必须 ≥ REDIS_MAXMEMORY + 256MiB（AOF rewrite 的 fork COW 余量）"
+  echo "#   · REDIS_MEM 必须 ≥ REDIS_MAXMEMORY + 1GiB（AOF rewrite 的 fork COW 余量）"
   echo "#   · 两 PG 的 shared_buffers 之和 + maintenance + backends 余量 须 < VM 内存（防双库 OOM）"
   echo "#   · PG/TSDB_MAX_CONNECTIONS 必须 ≥ Go 端连接池总和（当前 ~180）"
   echo "# =============================================================================="
@@ -452,9 +453,9 @@ fi
   echo "TSDB_MAX_CONNECTIONS=$TSDB_MAXCONN"; echo "TSDB_WORK_MEM=${TSDB_WORK}MB"
   echo "TSDB_MAINTENANCE_WORK_MEM=${TSDB_MAINT}MB"; echo "TSDB_MAX_WAL_SIZE=$TSDB_WAL"
   echo ""
-  echo "# ── Redis ── 缓存/会话/队列；OMC 用量极小，maxmemory 封顶 512MB（cap ≥ maxmemory+256MiB）"
+  echo "# ── Redis ── PM 多粒度聚合窗口权威状态；禁止淘汰（cap ≥ maxmemory+256MiB）"
   echo "REDIS_CPUS=$CPU_redis";   echo "REDIS_MEM=${REDIS_MEM}m"
-  echo "REDIS_MAXMEMORY=${REDIS_MAXMEM}mb"; echo "REDIS_MAXMEMORY_POLICY=allkeys-lru"
+  echo "REDIS_MAXMEMORY=${REDIS_MAXMEM}mb"; echo "REDIS_MAXMEMORY_POLICY=$REDIS_POLICY"
   echo ""
   echo "# ── NATS / MinIO / Web ──"
   echo "NATS_CPUS=$CPU_nats";     echo "NATS_MEM=${NATS_MEM}m"; echo "NATS_MAX_MEMORY_STORE=$NATS_MAX_MEMORY_STORE"

@@ -32,6 +32,8 @@ type DashboardParams struct {
 	Technologies   []string `json:"technologies"`
 	StartTime      string   `json:"start_time"`
 	EndTime        string   `json:"end_time"`
+	Weekdays       []int    `json:"weekdays"`
+	Hours          []int    `json:"hours"`
 	// ObjectLDNs 是小区/PLMN 下钻白名单（A1）。空 = 不过滤，导该设备全部小区/PLMN；
 	// 非空 = 只导命中行，与仪表盘下钻定格口径一致。device 维度专属（聚合维度无意义）。
 	ObjectLDNs []string `json:"object_ldns"`
@@ -39,9 +41,24 @@ type DashboardParams struct {
 
 // AdhocParams 是 adhoc 结果类导出 params(jsonb) 的字段集。
 type AdhocParams struct {
-	TaskID    string `json:"task_id"`
-	StartTime string `json:"start_time"` // 可选二次时窗筛选
-	EndTime   string `json:"end_time"`
+	TaskID     string   `json:"task_id"`
+	StartTime  string   `json:"start_time"` // 可选二次时窗筛选
+	EndTime    string   `json:"end_time"`
+	ProductIDs []string `json:"product_ids"`
+	ObjectLDNs []string `json:"object_ldns"`
+	Weekdays   []int    `json:"weekdays"`
+	Hours      []int    `json:"hours"`
+}
+
+type adhocExportFilter struct {
+	TaskID           uuid.UUID
+	StartTime        time.Time
+	EndTime          time.Time
+	ProductIDs       []uuid.UUID
+	ObjectLDNs       []string
+	Weekdays         []int
+	Hours            []int
+	CalendarTimezone string
 }
 
 func validateDashboardExportLimits(raw []byte) error {
@@ -83,6 +100,8 @@ func parseDashboardParams(raw []byte) (aggregator.QueryRequest, []string, error)
 		MetricPaths:  p.MetricPaths,
 		Technologies: p.Technologies,
 		ObjectLDNs:   p.ObjectLDNs,
+		Weekdays:     p.Weekdays,
+		Hours:        p.Hours,
 	}
 	if p.MetricType != "" {
 		mt := metrics.MetricType(p.MetricType)
@@ -120,31 +139,44 @@ func parseDashboardParams(raw []byte) (aggregator.QueryRequest, []string, error)
 }
 
 // parseAdhocParams 把 params(jsonb) 解析成 adhoc 取数条件。
-func parseAdhocParams(raw []byte) (taskID uuid.UUID, startTime, endTime time.Time, err error) {
+func parseAdhocParams(raw []byte) (adhocExportFilter, error) {
 	var p AdhocParams
 	if len(raw) > 0 {
 		if uerr := json.Unmarshal(raw, &p); uerr != nil {
-			return uuid.Nil, time.Time{}, time.Time{}, fmt.Errorf("parse adhoc export params: %w", uerr)
+			return adhocExportFilter{}, fmt.Errorf("parse adhoc export params: %w", uerr)
 		}
 	}
 	if p.TaskID == "" {
-		return uuid.Nil, time.Time{}, time.Time{}, fmt.Errorf("adhoc export params: task_id is required")
+		return adhocExportFilter{}, fmt.Errorf("adhoc export params: task_id is required")
 	}
-	taskID, err = uuid.Parse(p.TaskID)
+	taskID, err := uuid.Parse(p.TaskID)
 	if err != nil {
-		return uuid.Nil, time.Time{}, time.Time{}, fmt.Errorf("adhoc export params: invalid task_id %q: %w", p.TaskID, err)
+		return adhocExportFilter{}, fmt.Errorf("adhoc export params: invalid task_id %q: %w", p.TaskID, err)
+	}
+	filter := adhocExportFilter{
+		TaskID:     taskID,
+		ObjectLDNs: p.ObjectLDNs,
+		Weekdays:   p.Weekdays,
+		Hours:      p.Hours,
 	}
 	if p.StartTime != "" {
-		startTime, err = time.Parse(time.RFC3339, p.StartTime)
+		filter.StartTime, err = time.Parse(time.RFC3339, p.StartTime)
 		if err != nil {
-			return uuid.Nil, time.Time{}, time.Time{}, fmt.Errorf("adhoc export params: invalid start_time %q: %w", p.StartTime, err)
+			return adhocExportFilter{}, fmt.Errorf("adhoc export params: invalid start_time %q: %w", p.StartTime, err)
 		}
 	}
 	if p.EndTime != "" {
-		endTime, err = time.Parse(time.RFC3339, p.EndTime)
+		filter.EndTime, err = time.Parse(time.RFC3339, p.EndTime)
 		if err != nil {
-			return uuid.Nil, time.Time{}, time.Time{}, fmt.Errorf("adhoc export params: invalid end_time %q: %w", p.EndTime, err)
+			return adhocExportFilter{}, fmt.Errorf("adhoc export params: invalid end_time %q: %w", p.EndTime, err)
 		}
 	}
-	return taskID, startTime, endTime, nil
+	for _, s := range p.ProductIDs {
+		id, perr := uuid.Parse(s)
+		if perr != nil {
+			return adhocExportFilter{}, fmt.Errorf("adhoc export params: invalid product_id %q: %w", s, perr)
+		}
+		filter.ProductIDs = append(filter.ProductIDs, id)
+	}
+	return filter, nil
 }

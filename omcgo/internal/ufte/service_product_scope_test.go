@@ -13,7 +13,7 @@ import (
 func TestDeviceMatchesTaskType_ProductScope(t *testing.T) {
 	item := TaskType{
 		TypeCode: "ENB_IMG_UPGRADE",
-		Products: []string{"BAIBLQ 产品", "BAIQAFA 产品"},
+		Products: []string{"BLQ", "BAIQAFA"},
 		// 故意给一个会命中旧关键字的 PlatformScope，验证 product_scope 非空时不再走旧口径。
 		PlatformScope: []string{"4G eNB"},
 	}
@@ -22,11 +22,11 @@ func TestDeviceMatchesTaskType_ProductScope(t *testing.T) {
 	svc.productNameLookup = func(_ context.Context, pc string) (string, bool) {
 		switch pc {
 		case "FAP/BAIBLQ/SC":
-			return "BAIBLQ 产品", true
+			return "BLQ", true
 		case "FAP/BAIQAFA/CA":
-			return "BAIQAFA 产品", true
+			return "BAIQAFA", true
 		case "FAP/OTHER":
-			return "其它产品", true
+			return "Other Product", true
 		default:
 			return "", false
 		}
@@ -46,7 +46,7 @@ func TestDeviceMatchesTaskType_ProductScope(t *testing.T) {
 
 // product_scope 非空但 productNameLookup 未注入 → 不放行（不退回旧 PlatformScope 误放行）。
 func TestDeviceMatchesTaskType_ProductScope_NoLookup(t *testing.T) {
-	item := TaskType{TypeCode: "ENB_IMG_UPGRADE", Products: []string{"BAIBLQ 产品"}, PlatformScope: []string{"4G eNB"}}
+	item := TaskType{TypeCode: "ENB_IMG_UPGRADE", Products: []string{"BLQ"}, PlatformScope: []string{"4G eNB"}}
 	svc := NewService(nil, nil, nil, nil, nil, zap.NewNop())
 	assert.False(t, svc.deviceMatchesTaskType(context.Background(), item, "4G eNB"),
 		"product_scope 非空但无 lookup 时不应回退旧 PlatformScope 放行")

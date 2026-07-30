@@ -23,6 +23,24 @@ func NewPgEnabledRepository(pool *pgxpool.Pool) *PgEnabledRepository {
 }
 
 func (r *PgEnabledRepository) List(ctx context.Context, dt DeviceType, operatorCode string) ([]string, error) {
+	return r.list(ctx, dt, operatorCode, nil)
+}
+
+func (r *PgEnabledRepository) ListTx(
+	ctx context.Context,
+	dt DeviceType,
+	operatorCode string,
+	tx pgx.Tx,
+) ([]string, error) {
+	return r.list(ctx, dt, operatorCode, tx)
+}
+
+func (r *PgEnabledRepository) list(
+	ctx context.Context,
+	dt DeviceType,
+	operatorCode string,
+	tx pgx.Tx,
+) ([]string, error) {
 	table := dt.EnabledTable()
 	query, args, err := storage.Psql.Select("indicator_id").
 		From(table).
@@ -32,7 +50,7 @@ func (r *PgEnabledRepository) List(ctx context.Context, dt DeviceType, operatorC
 		return nil, fmt.Errorf("build list %s SQL: %w", table, err)
 	}
 
-	rows, err := r.db.Query(ctx, query, args...)
+	rows, err := querier(r.db, tx).Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list %s: %w", table, err)
 	}

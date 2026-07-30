@@ -35,8 +35,8 @@ type FileRepository interface {
 	// (2026-06-02 用户决策:一个 XML 文件即一个平台,一级列表"一个平台一条")。
 	//
 	// 计数来源 rela_platform_indicator_formula_<tech>:platform_name 是平台归属的
-	// 权威来源(perf_indicators 无 platform 列且按 id 全局去重)。GROUP BY platform_name,
-	// COUNT(DISTINCT indicator_id) 即该平台/文件的指标数。
+	// 权威来源(perf_indicators 无 platform 列且按 id 全局去重)。平台行仍按 platform_name
+	// 一平台一行；指标数与详情列表同口径：只统计当前 platform 自己的指标。
 	SummaryByTech(ctx context.Context) ([]PlatformSummary, error)
 
 	// UpsertFileDescription 按 (tech, platform) 维度 upsert 一条可编辑描述
@@ -79,7 +79,7 @@ type FileRepository interface {
 //
 // 2026-06-02 用户决策:一个 XML 文件即一个平台,一级列表"一个平台一条"。
 //   - 每个 (tech, platform_name) 唯一一行
-//   - Indicators 是该平台的指标计数(COUNT(DISTINCT indicator_id) from 公式表)
+//   - Indicators 是与详情列表一致的指标计数:只统计当前 platform 自己的指标
 //   - Description 是按 (tech, platform) 维度的可编辑描述(LEFT JOIN indicator_file_descriptions)
 //
 // 不再返回 loaded_from / source / deletable:一级列表去掉"加载源/来源/删除"列,
@@ -243,20 +243,7 @@ DELETE FROM enabled_pm_indicators_%s
 func (r *PgFileRepository) SummaryByTech(ctx context.Context) ([]PlatformSummary, error) {
 	out := make([]PlatformSummary, 0, 16)
 	for _, tech := range []string{"enb", "gsm", "gnb"} {
-		// d.description LEFT JOIN 在 (tech, platform) 主键上至多一行,MAX 仅为满足 GROUP BY。
-		// MAX(rf.loaded_from):一个 XML 文件即一个平台,同 platform_name 的 formula 行
-		// loaded_from 单值,MAX 仅为满足 GROUP BY,取的即该平台的加载源。
-		sqlStr := fmt.Sprintf(`
-SELECT rf.platform_name,
-       COUNT(DISTINCT rf.indicator_id) AS indicators,
-       COALESCE(MAX(rf.loaded_from), '') AS loaded_from,
-       COALESCE(MAX(d.description), '') AS description
-  FROM rela_platform_indicator_formula_%s rf
-  LEFT JOIN indicator_file_descriptions d
-    ON d.tech = $1 AND d.platform = rf.platform_name
- GROUP BY rf.platform_name
- ORDER BY rf.platform_name`, tech)
-
+		sqlStr := buildPlatformSummarySQL(tech)
 		rows, err := r.pool.Query(ctx, sqlStr, tech)
 		if err != nil {
 			return nil, fmt.Errorf("summary platforms (%s): %w", tech, err)
@@ -276,6 +263,27 @@ SELECT rf.platform_name,
 		}
 	}
 	return out, nil
+}
+
+func buildPlatformSummarySQL(tech string) string {
+	table := fmt.Sprintf("rela_platform_indicator_formula_%s", tech)
+
+	// d.description LEFT JOIN 在 (tech, platform) 主键上至多一行。
+	// loaded_from 与 indicators 均按当前 platform 自己的归属统计。
+	sqlStr := fmt.Sprintf(`
+SELECT rf.platform_name,
+       COUNT(DISTINCT rf.indicator_id) AS indicators,
+       COALESCE(MAX(rf.loaded_from), '') AS loaded_from,
+       COALESCE(d.description, '') AS description
+  FROM %s rf
+  JOIN perf_indicators_%s i
+    ON i.id = rf.indicator_id
+  LEFT JOIN indicator_file_descriptions d
+    ON d.tech = $1 AND d.platform = rf.platform_name
+ GROUP BY rf.platform_name, d.description
+ ORDER BY rf.platform_name`, table, tech)
+
+	return sqlStr
 }
 
 // UpsertFileDescription 实现 FileRepository — 按 (tech, platform) upsert 描述。

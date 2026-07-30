@@ -474,7 +474,8 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	ph := c.pmHandlerDeps
 	pmHandler := pm.NewHandler(ph.pmCounterRepo, ph.pmKPIRepo, ph.pmKPIEngine, ph.pmTaskRepo, ph.pmFileStore, c.MinIO, c.Cfg.MinIO.Buckets.PMFiles, c.TsPool, ph.pmIndicatorRepo, c.Logger).
 		WithAggregator(ph.pmAggregator).
-		WithAsyncJobRepo(ph.pmAsyncJobRepo)
+		WithAsyncJobRepo(ph.pmAsyncJobRepo).
+		WithTimezoneProvider(c.SystemTimezone)
 	pmHandler.SetMetrics(pm.NewPMMetrics(c.MetricsReg))
 	pmHandler.SetPermissionService(c.PermService) // #64 设备组可见性数据权限
 	if c.ProductRegistry != nil {
@@ -559,6 +560,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	}
 
 	// ----- Dashboard routes → resource "devices" -----
+	md.dashboardHandler.SetPermissionService(c.PermService)
 	md.dashboardHandler.RegisterRoutes(permGroup("devices"))
 
 	// ----- Syslog routes → resource "devices" -----

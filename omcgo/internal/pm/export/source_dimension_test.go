@@ -94,7 +94,7 @@ func TestAdhocSource_DeviceGroupLabel(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("", "", "C1", 1, strptr("DeviceGroup=abcdef1234-0000"), nil, nil, strptr("华东A组")),
 	}}
-	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "device_group", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, adhocExportFilter{}, "device_group", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -107,7 +107,7 @@ func TestAdhocSource_DeviceGroupFallback(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("", "", "C1", 1, strptr("DeviceGroup=abcdef1234-0000"), nil, nil, nil),
 	}}
-	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "device_group", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, adhocExportFilter{}, "device_group", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -121,7 +121,7 @@ func TestAdhocSource_DeviceGroupTechnology(t *testing.T) {
 		adhocRow("", "", "C1", 1, strptr("DeviceGroup=abcdef1234-0000,Tech=lte"), nil, nil, strptr("华东A组")),
 		adhocRow("", "", "C1", 2, strptr("DeviceGroup=abcdef1234-0000,Tech=nr"), nil, nil, strptr("华东A组")),
 	}}
-	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "device_group", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, adhocExportFilter{}, "device_group", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
@@ -135,7 +135,7 @@ func TestAdhocSource_NonDeviceGroupNoTechnology(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("OUI1", "SN1", "C1", 1, strptr("Cellid=111"), nil, nil, nil),
 	}}
-	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "device", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, adhocExportFilter{}, "device", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -145,13 +145,13 @@ func TestAdhocSource_NonDeviceGroupNoTechnology(t *testing.T) {
 // product 维度：首列取产品名。
 func TestAdhocSource_ProductLabel(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
-		adhocRow("", "", "C1", 1, nil, strptr("11112222-3333-4444"), strptr("BLX 产品"), nil),
+		adhocRow("", "", "C1", 1, nil, strptr("11112222-3333-4444"), strptr("BLX"), nil),
 	}}
-	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "product", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, adhocExportFilter{}, "product", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, "BLX 产品", rows[0].Device)
+	assert.Equal(t, "BLX", rows[0].Device)
 	assert.Equal(t, "", rows[0].CellPLMN)
 }
 
@@ -160,7 +160,7 @@ func TestAdhocSource_DeviceLabelKeepsCell(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("OUI1", "SN1", "C1", 1, strptr("Cellid=111"), nil, nil, nil),
 	}}
-	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "device", 0)
+	src := newAdhocSource(stub, uuid.New(), nil, adhocExportFilter{}, "device", 0)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -173,7 +173,7 @@ func TestAdhocSource_AggregateGroupLabel(t *testing.T) {
 	stub := &adhocStubQuerier{rows: [][]any{
 		adhocRow("", "AGGREGATED", "C1", 1, nil, nil, nil, nil),
 	}}
-	src := newAdhocSource(stub, uuid.New(), nil, time.Time{}, time.Time{}, "aggregate_group", 2)
+	src := newAdhocSource(stub, uuid.New(), nil, adhocExportFilter{}, "aggregate_group", 2)
 	rows, _, err := src.Next(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)

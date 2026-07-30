@@ -43,11 +43,12 @@ import {
   type AdhocLiveProgress,
 } from '@core/hooks/api/useAdhocProgress';
 import type {
-  AdhocMode,
   AdhocStatus,
   AdhocTask,
   AdhocTaskRun,
 } from '@core/types/pmAdhoc';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
+import { displayAdhocTaskName } from '../adhocTaskDisplay';
 
 // issue #399：SSE 接通后进度由事件实时驱动，轮询降为低频兜底（状态翻转 + 断连兜底）。
 const ADHOC_POLL_FALLBACK_MS = 30000;
@@ -59,6 +60,12 @@ import { CreateAdhocTaskDrawer, type CreateAdhocPreset } from './CreateAdhocTask
 import { AdhocResultPanel } from './AdhocResultPanel';
 import BuiltinMetricEditModal from './BuiltinMetricEditModal';
 import SelectedMetricsTags from './SelectedMetricsTags';
+import {
+  clearBuiltinMetricDraft,
+  clearCustomWizardDraft,
+  getActiveBuiltinMetricTaskId,
+  getActiveCustomWizard,
+} from './pmAdhocDraftState';
 
 const statusColor: Record<AdhocStatus, string> = {
   pending: 'default',
@@ -95,25 +102,12 @@ const GRANULARITY_LABEL_KEY: Record<string, string> = {
   monthly: 'perf.adhoc.gran.monthly',
 };
 
-const TECHNOLOGY_LABEL_KEY: Record<string, string> = {
-  lte: 'perf.adhoc.techLte',
-  nr: 'perf.adhoc.techNr',
-  gsm: 'perf.adhoc.techGsm',
-};
-
 const VISIBILITY_LABEL_KEY: Record<string, string> = {
   private: 'perf.adhoc.visibilityPrivate',
   public: 'perf.adhoc.visibilityPublic',
 };
 
 export const RUN_HISTORY_SCROLL_X = 1250;
-
-// 制式短标签（用于「聚合范围」说明句，比「LTE (4G)」更精炼）。
-const TECH_SHORT_LABEL: Record<string, string> = {
-  lte: 'LTE',
-  nr: 'NR',
-  gsm: 'GSM',
-};
 
 // 「聚合范围」说明句语料键：仅产品/设备组/频段三维度是「按制式全量、按维度分组」（无子集可选），
 // 各给一句范围声明（带制式 / 不限制式两版，避免空制式时多余空格）。其余维度不渲染该行
@@ -152,12 +146,7 @@ export function granularityLabel(
     .join(' / ');
 }
 
-function technologyLabel(intl: IntlShape, t?: string): string {
-  const id = t ? TECHNOLOGY_LABEL_KEY[t] : undefined;
-  return id ? intl.formatMessage({ id }) : (t ?? '');
-}
-
-function fmtTime(v?: string): string {
+function fmtTime(v?: string | null): string {
   if (!v) return '—';
   return formatSystemTime(v, { placeholder: '—' });
 }
@@ -281,19 +270,13 @@ function TaskTable({
   isSuperAdmin: boolean;
 }) {
   const intl = useIntl();
+  const { labelForTechnology } = useTechnologyDictionary();
   const columns: ColumnsType<AdhocTask> = useMemo(
     () => [
-      { title: intl.formatMessage({ id: 'perf.adhoc.colName' }), dataIndex: 'name' },
       {
-        title: intl.formatMessage({ id: 'perf.adhoc.colMode' }),
-        dataIndex: 'mode',
-        width: 90,
-        render: (m: AdhocMode) =>
-          m === 'continuous' ? (
-            <Tag color="purple">{intl.formatMessage({ id: 'perf.adhoc.modeContinuous' })}</Tag>
-          ) : (
-            <Tag>{intl.formatMessage({ id: 'perf.adhoc.modeOneshot' })}</Tag>
-          ),
+        title: intl.formatMessage({ id: 'perf.adhoc.colName' }),
+        dataIndex: 'name',
+        render: (_: string, r) => displayAdhocTaskName(r, labelForTechnology),
       },
       {
         title: intl.formatMessage({ id: 'perf.adhoc.colStatus' }),
@@ -338,6 +321,13 @@ function TaskTable({
               dataIndex: 'createdAt',
               width: 180,
               render: (v: string) => fmtTime(v),
+            } as ColumnsType<AdhocTask>[number],
+            {
+              title: intl.formatMessage({ id: 'perf.adhoc.colPlannedEndAt' }),
+              dataIndex: 'plannedEndAt',
+              width: 180,
+              render: (_: string | undefined, r: AdhocTask) =>
+                r.mode === 'continuous' ? fmtTime(r.plannedEndAt) : '—',
             } as ColumnsType<AdhocTask>[number],
           ]),
       {
@@ -389,7 +379,19 @@ function TaskTable({
         },
       },
     ],
-    [intl, isBuiltinArea, liveProgress, onView, onCancel, onEdit, onDelete, onResume, currentUsername, isSuperAdmin],
+    [
+      intl,
+      isBuiltinArea,
+      liveProgress,
+      onView,
+      onCancel,
+      onEdit,
+      onDelete,
+      onResume,
+      currentUsername,
+      isSuperAdmin,
+      labelForTechnology,
+    ],
   );
 
   return (
@@ -406,6 +408,7 @@ function TaskTable({
 
 export default function PmAdhocPage() {
   const intl = useIntl();
+  const { labelForTechnology } = useTechnologyDictionary();
   const currentUsername = useUserStore((s) => s.currentUser?.username ?? '');
   const isSuperAdmin = useUserStore((s) => Boolean(s.currentUser?.isSuperAdmin));
   // T-0186：分两区，各发一次 list（内置 / 自建）。
@@ -439,6 +442,33 @@ export default function PmAdhocPage() {
   const [selectedTask, setSelectedTask] = useState<AdhocTask | null>(null);
   // T-0194：内置任务「编辑指标」弹窗状态。
   const [builtinEditTask, setBuiltinEditTask] = useState<AdhocTask | null>(null);
+
+  useEffect(() => {
+    const activeCustomWizard = getActiveCustomWizard();
+    if (!activeCustomWizard) return;
+    if (activeCustomWizard.mode === 'new') {
+      navigate('/performance/pm-adhoc/new');
+      return;
+    }
+    if (customLoading) return;
+    if (!customTasks.some((task) => task.id === activeCustomWizard.taskId)) {
+      clearCustomWizardDraft(activeCustomWizard);
+      return;
+    }
+    navigate(`/performance/pm-adhoc/${activeCustomWizard.taskId}/edit`);
+  }, [customLoading, customTasks, navigate]);
+
+  useEffect(() => {
+    if (builtinEditTask || builtinLoading) return;
+    const activeTaskId = getActiveBuiltinMetricTaskId();
+    if (!activeTaskId) return;
+    const activeTask = builtinTasks.find((task) => task.id === activeTaskId);
+    if (activeTask) {
+      setBuiltinEditTask(activeTask);
+      return;
+    }
+    clearBuiltinMetricDraft(activeTaskId);
+  }, [builtinEditTask, builtinLoading, builtinTasks]);
 
   // G6-Gap-12 联动：URL preset 触发自动打开 Drawer
   useEffect(() => {
@@ -534,6 +564,19 @@ export default function PmAdhocPage() {
     });
   };
 
+  if (builtinEditTask) {
+    return (
+      <BuiltinMetricEditModal
+        task={builtinEditTask}
+        open
+        onClose={() => {
+          clearBuiltinMetricDraft(builtinEditTask.id);
+          setBuiltinEditTask(null);
+        }}
+      />
+    );
+  }
+
   return (
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <Card
@@ -595,7 +638,10 @@ export default function PmAdhocPage() {
       <Drawer
         title={
           selectedTask
-            ? intl.formatMessage({ id: 'perf.adhoc.detailTitle' }, { name: selectedTask.name })
+            ? intl.formatMessage(
+                { id: 'perf.adhoc.detailTitle' },
+                { name: displayAdhocTaskName(selectedTask, labelForTechnology) },
+              )
             : intl.formatMessage({ id: 'perf.adhoc.detailTitleDefault' })
         }
         size={920}
@@ -606,11 +652,6 @@ export default function PmAdhocPage() {
         {selectedTask && (
           <>
             <Descriptions size="small" column={2} bordered style={{ marginBottom: 16 }}>
-              <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descMode' })}>
-                {selectedTask.mode === 'continuous'
-                  ? intl.formatMessage({ id: 'perf.adhoc.modeContinuous' })
-                  : intl.formatMessage({ id: 'perf.adhoc.modeOneshot' })}
-              </Descriptions.Item>
               <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descDimension' })}>
                 {dimensionLabel(intl, selectedTask.dimension)}
               </Descriptions.Item>
@@ -620,7 +661,7 @@ export default function PmAdhocPage() {
               <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descTech' })}>
                 {/* T-0186：制式只读，建后不可改，无切换控件 */}
                 {selectedTask.technology ? (
-                  <Tag color="geekblue">{technologyLabel(intl, selectedTask.technology)}</Tag>
+                  <Tag color="geekblue">{labelForTechnology(selectedTask.technology)}</Tag>
                 ) : (
                   <Tag>{intl.formatMessage({ id: 'perf.adhoc.anyTech' })}</Tag>
                 )}
@@ -639,6 +680,11 @@ export default function PmAdhocPage() {
                         : 'perf.adhoc.visibilityPrivate',
                     })}
                   </Tag>
+                </Descriptions.Item>
+              )}
+              {!selectedTask.isBuiltin && selectedTask.mode === 'continuous' && (
+                <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descPlannedEndAt' })}>
+                  {fmtTime(selectedTask.plannedEndAt)}
                 </Descriptions.Item>
               )}
               {/* T-0194：已选指标 — 按制式解析为可读指标名（编号+名），查不到回退显编号 */}
@@ -686,9 +732,7 @@ export default function PmAdhocPage() {
                         : SCOPE_KEY[selectedTask.dimension].anyTech,
                     },
                     {
-                      tech: selectedTask.technology
-                        ? TECH_SHORT_LABEL[selectedTask.technology] ?? selectedTask.technology
-                        : '',
+                      tech: selectedTask.technology ? labelForTechnology(selectedTask.technology) : '',
                     },
                   )}
                 </Descriptions.Item>
@@ -699,13 +743,6 @@ export default function PmAdhocPage() {
           </>
         )}
       </Drawer>
-
-      {/* T-0194：内置任务「编辑指标」弹窗 */}
-      <BuiltinMetricEditModal
-        task={builtinEditTask}
-        open={Boolean(builtinEditTask)}
-        onClose={() => setBuiltinEditTask(null)}
-      />
     </Space>
   );
 }

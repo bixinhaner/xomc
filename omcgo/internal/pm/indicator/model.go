@@ -119,6 +119,7 @@ type PlatformFormula struct {
 	PlatformName string    `json:"platform_name"`
 	IndicatorID  string    `json:"indicator_id"`
 	Formula      string    `json:"formula"`
+	ReportKey    *string   `json:"report_key,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -251,7 +252,7 @@ type CreateIndicatorRequest struct {
 	ProductTypes   string `json:"product_types"`
 	IndicatorLevel string `json:"indicator_level"`
 	OperatorCode   string `json:"operator_code"`
-	// Platform 可选:KPI 指标库详情页(IndicatorsByTech)由 URL ?platform= 锁定,新建指标必须落到该
+	// Platform 可选:PM 指标库详情页(IndicatorsByTech)由 URL ?platform= 锁定,新建指标必须落到该
 	// platform 才能被详情列表的 platform_name EXISTS 过滤命中(否则保存成功但查不到)。前端从父级
 	// 透传当前 selectedPlatform;非空时 service 在同事务内向 perf_formulas_<dt> 写一行占位
 	// (Formula=Arithmetic,允许为空),与 indicator 创建原子。列表态不传(全量新建,后续在抽屉里挂公式)。

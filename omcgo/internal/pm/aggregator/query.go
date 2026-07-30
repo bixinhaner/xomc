@@ -15,6 +15,7 @@ import (
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
@@ -71,6 +72,9 @@ type QueryRequest struct {
 	// Hours #599：小时段过滤（0..23，对齐 PostgreSQL EXTRACT(hour)）。
 	// 空/全选 = 不过滤。筛的是 start_time 的整点小时。
 	Hours []int
+	// CalendarTimezone 是星期/小时筛选使用的系统时区 IANA 名称。
+	// 空时 Aggregator.Query/Count 会从注入的 TimezoneProvider 取值；无 provider 回落 UTC。
+	CalendarTimezone string
 	// RecomputeAllKPIs（KPI-ALL-IND）：全网/全聚任务放开到全库时置 true。聚合层在汇总
 	// 全部 counter 的同时，额外从指标库加载全库「派生 KPI」按公式重算并产出 KPI 行，
 	// 使「首页读现成全网预聚合表」时 KPI 也有线（否则全聚只产 counter 行、KPI 面板空线）。
@@ -141,6 +145,7 @@ type Row struct {
 //   - weekly × ...         → pm_metrics_weekly / pm_group_metrics_weekly
 //   - monthly × ...        → pm_metrics_monthly / pm_group_metrics_monthly
 func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
+	q = a.withCalendarTimezone(ctx, q)
 	if q.Dimension == "" {
 		q.Dimension = DimensionDevice
 	}
@@ -189,6 +194,7 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 // KPI recompute 不改变分组身份（只把同 (object,time) 分组的 counter 行重算成 KPI 行），
 // 故总数以「存储层命中分组数」为准，是诚实的「DB 命中多少」。
 func (a *Aggregator) Count(ctx context.Context, q QueryRequest) (int, error) {
+	q = a.withCalendarTimezone(ctx, q)
 	if q.Dimension == "" {
 		q.Dimension = DimensionDevice
 	}
@@ -295,15 +301,12 @@ func (a *Aggregator) countByQueryResult(ctx context.Context, q QueryRequest) (in
 // 用于 "全部小区" 查询补骨架：请求未显式传 object_ldns 时，后端从同一粒度表发现展示全集。
 // 指标过滤在这里刻意清空，否则当前指标完全无数据时无法发现 object 集合。
 func (a *Aggregator) DiscoverObjectLDNs(ctx context.Context, q QueryRequest) ([]string, error) {
+	q = a.withCalendarTimezone(ctx, q)
 	if q.Dimension == "" {
 		q.Dimension = DimensionDevice
 	}
 	if !CanAutoDiscoverObjectSkeletonRequest(q) {
 		return nil, nil
-	}
-	table, err := SelectTable(q.Granularity, q.Dimension)
-	if err != nil {
-		return nil, err
 	}
 	discoverReq := q
 	discoverReq.MetricPaths = nil
@@ -312,12 +315,7 @@ func (a *Aggregator) DiscoverObjectLDNs(ctx context.Context, q QueryRequest) ([]
 	discoverReq.Limit = 0
 	discoverReq.Offset = 0
 
-	qb := storage.Psql.Select("DISTINCT object_ldn").
-		From(table).
-		Where("object_ldn <> ''").
-		OrderBy("object_ldn")
-	qb = applyDeviceFilters(qb, discoverReq)
-	sqlStr, args, err := qb.ToSql()
+	sqlStr, args, err := buildObjectLDNDiscoverySQL(discoverReq)
 	if err != nil {
 		return nil, fmt.Errorf("aggregator.DiscoverObjectLDNs build: %w", err)
 	}
@@ -339,6 +337,82 @@ func (a *Aggregator) DiscoverObjectLDNs(ctx context.Context, q QueryRequest) ([]
 		return nil, fmt.Errorf("aggregator.DiscoverObjectLDNs rows: %w", err)
 	}
 	return out, nil
+}
+
+// buildObjectLDNDiscoverySQL 只读取能够表达“设备在窗口内出现过哪些测量对象”的最小数据源。
+// 15min 锚点已经持有 object_ldn；小时以上统一结果表也直接持有 object_ldn。这里不能复用
+// pm_metrics* 兼容视图：原始视图会展开指标集并关联指标值、PM 文件和入库批次，仅为 DISTINCT
+// object_ldn 就放大成数百万行并行扫描。
+//
+// 两个源都投影成 applyDeviceFilters 熟悉的列名，再复用同一套设备、制式、时间窗和可见分组
+// 过滤，避免轻量查询绕过既有权限语义。
+func buildObjectLDNDiscoverySQL(q QueryRequest) (string, []any, error) {
+	if _, err := SelectTable(q.Granularity, q.Dimension); err != nil {
+		return "", nil, err
+	}
+
+	source := newDeviceObjectSource(storage.Psql, q)
+	qb := storage.Psql.Select("DISTINCT object_ldn").
+		FromSelect(source, "object_source").
+		Where("object_ldn <> ''").
+		OrderBy("object_ldn")
+	qb = applyDeviceFilters(qb, q)
+	return qb.ToSql()
+}
+
+// newDeviceObjectSource 只投影设备透视骨架需要的列。15min 的锚点天然就是
+// (device, object_ldn, granularity, time) 存在性记录；小时以上的统一上卷结果同样直接持有
+// 这些列。调用方在外层统一套 applyDeviceFilters，既复用权限/过滤语义，也避免为了分页键、
+// 计数或对象发现而展开指标字典和值表。
+func newDeviceObjectSource(builder sq.StatementBuilderType, q QueryRequest) sq.SelectBuilder {
+	switch q.Granularity {
+	case metrics.Granularity15Min:
+		return builder.Select(
+			"a.object_ldn AS object_ldn",
+			"dev.oui AS device_oui",
+			"dev.serial_number AS device_sn",
+			"dev.technology AS technology",
+			"a.granularity AS granularity",
+			`a."time" AS "time"`,
+			"a.start_time AS start_time",
+		).
+			From("pm_measurement_anchors a").
+			Join("device_dim dev ON dev.id = a.device_dim_id")
+	default:
+		source := builder.Select(
+			"r.object_ldn AS object_ldn",
+			"r.device_oui AS device_oui",
+			"r.device_sn AS device_sn",
+			"r.technology AS technology",
+			"r.granularity AS granularity",
+			`r.window_start AS "time"`,
+			"r.window_start AS start_time",
+		).
+			From("pm_aggregation_results r").
+			Where(sq.Eq{
+				"r.dimension":   string(DimensionDevice),
+				"r.granularity": string(q.Granularity),
+			})
+		if frag, args, ok := deviceDimIDPrefilter("r.dimension_key", "id::text", q); ok {
+			source = source.Where(frag, args...)
+		}
+		return source
+	}
+}
+
+func newDeviceObjectKeySelect(builder sq.StatementBuilderType, q QueryRequest) sq.SelectBuilder {
+	source := newDeviceObjectSource(builder, q)
+	qb := builder.Select(
+		"device_oui",
+		"device_sn",
+		"COALESCE(object_ldn, '') AS object_ldn",
+		"granularity",
+		`"time"`,
+	).
+		FromSelect(source, "object_source").
+		Distinct()
+	qb = applyDeviceFilters(qb, q)
+	return qb
 }
 
 func (a *Aggregator) scanCount(ctx context.Context, qb sq.SelectBuilder) (int, error) {
@@ -544,6 +618,11 @@ func newRawAwareDeviceSelect(
 	q QueryRequest,
 	columns ...string,
 ) sq.SelectBuilder {
+	rolledGranularity, isRolledUpTable := rolledUpDeviceGranularity(table)
+	isDeviceDimension := q.Dimension == "" || q.Dimension == DimensionDevice
+	if isRolledUpTable && isDeviceDimension {
+		return newRolledUpDeviceSelect(builder, rolledGranularity, q, columns...)
+	}
 	if len(q.MetricPaths) == 0 || table != "pm_metrics" {
 		return builder.Select(columns...).From(table)
 	}
@@ -566,7 +645,113 @@ func newRawAwareDeviceSelect(
 		LeftJoin("pm_ingest_batches b ON b.ingest_batch_id=a.ingest_batch_id").
 		LeftJoin("device_dim dev ON dev.id=a.device_dim_id")
 	targeted = targeted.Where(sq.Eq{"d.metric_path": q.MetricPaths})
+	// 性能收口（万级设备规模下曾实测触发 26-30s 超时/500）：applyDeviceFilters 在外层只能对
+	// COALESCE(dev.serial_number, f.device_sn) 这种跨两个 LEFT JOIN 算出来的列做等值过滤，
+	// 规划器无法把它下推进 JOIN，导致必须先把请求时间窗内【全部设备】的 anchors 都拉出来
+	// JOIN 一遍，最后才筛掉绝大多数行（EXPLAIN 实测 cost ~27万，扫 ~278万行只为留 1-2 行）。
+	// 这里在 targeted 子查询内部提前对 a.device_dim_id（真实索引列，idx_pm_anchors_device_time /
+	// idx_pm_anchors_15min_device_time_default 都以它打头）加一段语义完全冗余、但可被规划器
+	// 下推命中索引的等价谓词，把 anchors 扫描收窄到目标设备。device_dim 保留软删行
+	// （tsdbsync/runner.go），不会漏历史设备；仅当从未同步过 device_dim（理论上不应发生）
+	// 时才可能收窄过头，落回 f.device_sn 兜底路径——比原先「必现的全表 JOIN 超时」风险小得多。
+	if frag, args, ok := deviceDimIDPrefilter("a.device_dim_id", "id", q); ok {
+		targeted = targeted.Where(frag, args...)
+	}
 	return builder.Select(columns...).FromSelect(targeted, "pm_metrics")
+}
+
+func rolledUpDeviceGranularity(table string) (metrics.Granularity, bool) {
+	switch table {
+	case "pm_metrics_hourly":
+		return metrics.GranularityHourly, true
+	case "pm_metrics_daily":
+		return metrics.GranularityDaily, true
+	case "pm_metrics_weekly":
+		return metrics.GranularityWeekly, true
+	case "pm_metrics_monthly":
+		return metrics.GranularityMonthly, true
+	default:
+		return "", false
+	}
+}
+
+// newRolledUpDeviceSelect 绕过 pm_metrics_{hourly,daily,weekly,monthly} 兼容视图。
+// 兼容视图会先对全体设备做 DISTINCT ON，外层设备过滤无法下推；这里先按统一结果表的
+// dimension_key 和 granularity 收口，再投影成原查询契约，由调用方在 DISTINCT ON 前继续
+// 追加指标、时间、对象和权限过滤。
+func newRolledUpDeviceSelect(
+	builder sq.StatementBuilderType,
+	granularity metrics.Granularity,
+	q QueryRequest,
+	columns ...string,
+) sq.SelectBuilder {
+	targeted := builder.Select(
+		"r.device_oui AS device_oui",
+		"r.device_sn AS device_sn",
+		"r.metric_path AS metric_path",
+		"r.metric_type AS metric_type",
+		"r.metric_value AS metric_value",
+		"r.aggregation_op::text AS statis_type",
+		"r.granularity::text AS granularity",
+		`r.window_start AS "time"`,
+		"r.window_start AS start_time",
+		"r.window_end AS end_time",
+		"r.created_at AS ingest_time",
+		"r.object_ldn AS object_ldn",
+		`jsonb_build_object(
+			'task_id',r.task_id,'task_version_id',r.task_version_id,
+			'complete',r.complete,'missing_slots',r.missing_slots) AS extra`,
+	).
+		From("pm_aggregation_results r").
+		Where(sq.Eq{
+			"r.dimension":   string(DimensionDevice),
+			"r.granularity": string(granularity),
+		})
+	if frag, args, ok := deviceDimIDPrefilter("r.dimension_key", "id::text", q); ok {
+		targeted = targeted.Where(frag, args...)
+	}
+	return builder.Select(columns...).FromSelect(targeted, "pm_metrics")
+}
+
+// deviceDimIDPrefilter 把 QueryRequest 里的设备过滤（DeviceOUIs/DeviceSNs/Technologies）
+// 镜像映射成一段基于 device_dim 的子查询谓词，供 newRawAwareDeviceSelect 提前收口
+// 原始锚点的 a.device_dim_id 或统一结果的 r.dimension_key。deviceIDColumn 和 idProjection
+// 只由内部固定调用点传入，不接收外部输入。分支与 applyDeviceFilters 一一对应，纯粹是
+// 同一批过滤条件的等价改写（不引入新语义），未传设备过滤时返回 ok=false。
+func deviceDimIDPrefilter(deviceIDColumn, idProjection string, q QueryRequest) (string, []any, bool) {
+	prefix := deviceIDColumn + " IN (SELECT " + idProjection + " FROM device_dim WHERE "
+	switch {
+	case len(q.DeviceSNs) > 0 && len(q.Technologies) > 0:
+		if len(q.DeviceOUIs) > 0 {
+			return prefix + "serial_number = ANY(?) AND technology = ANY(?) AND oui = ANY(?))",
+				[]any{q.DeviceSNs, q.Technologies, q.DeviceOUIs}, true
+		}
+		return prefix + "serial_number = ANY(?) AND technology = ANY(?))",
+			[]any{q.DeviceSNs, q.Technologies}, true
+	case len(q.DeviceOUIs) > 0 && len(q.DeviceSNs) > 0:
+		n := len(q.DeviceOUIs)
+		if len(q.DeviceSNs) < n {
+			n = len(q.DeviceSNs)
+		}
+		var b strings.Builder
+		args := make([]any, 0, n*2)
+		b.WriteString(prefix)
+		for i := 0; i < n; i++ {
+			if i > 0 {
+				b.WriteString(" OR ")
+			}
+			b.WriteString("(oui = ? AND serial_number = ?)")
+			args = append(args, q.DeviceOUIs[i], q.DeviceSNs[i])
+		}
+		b.WriteString(")")
+		return b.String(), args, true
+	case len(q.DeviceOUIs) > 0:
+		return prefix + "oui = ANY(?))", []any{q.DeviceOUIs}, true
+	case len(q.DeviceSNs) > 0:
+		return prefix + "serial_number = ANY(?))", []any{q.DeviceSNs}, true
+	default:
+		return "", nil, false
+	}
 }
 
 // buildDeviceTableSQL 构造 device 维度直读 pm_metrics 的去重查询（纯函数，便于单测）。
@@ -618,12 +803,17 @@ func buildDevicePivotRowPageSQL(table string, q QueryRequest) (string, []any, er
 		pageReq.MetricPaths = nil
 		pageReq.MetricType = nil
 	}
-	pageInner := newRawAwareDeviceSelect(builder, table, pageReq, deviceTableColumns...).
-		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
-	pageInner = applyDeviceFilters(pageInner, pageReq)
-	pageInner = pageInner.OrderBy(
-		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
-	)
+	var pageInner sq.SelectBuilder
+	if IsExplicitObjectSkeletonRequest(q) {
+		pageInner = newDeviceObjectKeySelect(builder, pageReq)
+	} else {
+		pageInner = newRawAwareDeviceSelect(builder, table, pageReq, deviceTableColumns...).
+			Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+		pageInner = applyDeviceFilters(pageInner, pageReq)
+		pageInner = pageInner.OrderBy(
+			"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+		)
+	}
 	pageInnerSQL, pageArgs, err := pageInner.ToSql()
 	if err != nil {
 		return "", nil, err
@@ -670,6 +860,7 @@ ORDER BY d."time" DESC, d.device_sn ASC, COALESCE(d.object_ldn, '') ASC, d.metri
 }
 
 func (a *Aggregator) DevicePivotRowKeys(ctx context.Context, q QueryRequest) ([]PivotRowKey, error) {
+	q = a.withCalendarTimezone(ctx, q)
 	if q.Dimension == "" {
 		q.Dimension = DimensionDevice
 	}
@@ -707,12 +898,17 @@ func buildDevicePivotRowKeysSQL(table string, q QueryRequest) (string, []any, er
 		pageReq.MetricPaths = nil
 		pageReq.MetricType = nil
 	}
-	inner := newRawAwareDeviceSelect(builder, table, pageReq, deviceTableColumns...).
-		Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
-	inner = applyDeviceFilters(inner, pageReq)
-	inner = inner.OrderBy(
-		"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
-	)
+	var inner sq.SelectBuilder
+	if IsExplicitObjectSkeletonRequest(q) {
+		inner = newDeviceObjectKeySelect(builder, pageReq)
+	} else {
+		inner = newRawAwareDeviceSelect(builder, table, pageReq, deviceTableColumns...).
+			Options(`DISTINCT ON (device_oui, device_sn, metric_path, granularity, "time", object_ldn)`)
+		inner = applyDeviceFilters(inner, pageReq)
+		inner = inner.OrderBy(
+			"device_oui", "device_sn", "metric_path", "granularity", `"time"`, "object_ldn", "ingest_time DESC",
+		)
+	}
 	innerSQL, args, err := inner.ToSql()
 	if err != nil {
 		return "", nil, err
@@ -748,11 +944,16 @@ func prefixedColumns(prefix string, cols []string) string {
 }
 
 func (a *Aggregator) countDevicePivotRows(ctx context.Context, table string, q QueryRequest) (int, error) {
-	keySub := newRawAwareDeviceSelect(
-		storage.Psql, table, q,
-		"device_oui", "device_sn", "COALESCE(object_ldn, '') AS object_ldn", "granularity", `"time"`,
-	).Distinct()
-	keySub = applyDeviceFilters(keySub, q)
+	var keySub sq.SelectBuilder
+	if len(q.MetricPaths) == 0 && len(q.ObjectLDNs) > 0 {
+		keySub = newDeviceObjectKeySelect(storage.Psql, q)
+	} else {
+		keySub = newRawAwareDeviceSelect(
+			storage.Psql, table, q,
+			"device_oui", "device_sn", "COALESCE(object_ldn, '') AS object_ldn", "granularity", `"time"`,
+		).Distinct()
+		keySub = applyDeviceFilters(keySub, q)
+	}
 	return a.scanCountSub(ctx, keySub)
 }
 
@@ -905,6 +1106,14 @@ func (a *Aggregator) queryProductTable(ctx context.Context, table string, q Quer
 	}
 	if len(q.Technologies) > 0 {
 		where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
+	}
+	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {
+		where = append(where, fmt.Sprintf("EXTRACT(dow FROM (m.start_time AT TIME ZONE %s))::int = ANY(%s)",
+			add(calendarfilter.NormalizeName(q.CalendarTimezone)), add(q.Weekdays)))
+	}
+	if len(q.Hours) > 0 && len(q.Hours) < 24 {
+		where = append(where, fmt.Sprintf("EXTRACT(hour FROM (m.start_time AT TIME ZONE %s))::int = ANY(%s)",
+			add(calendarfilter.NormalizeName(q.CalendarTimezone)), add(q.Hours)))
 	}
 	// #64 设备组数据权限：JOIN devices 后按 m.device_sn 收口到可见分组（fail-closed）。
 	where = appendVisibleSNWhere(where, "m.device_sn", q.VisibleGroups, add)
@@ -1145,6 +1354,14 @@ func (a *Aggregator) queryBandTable(ctx context.Context, table string, q QueryRe
 	if len(q.Technologies) > 0 {
 		where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
 	}
+	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {
+		where = append(where, fmt.Sprintf("EXTRACT(dow FROM (m.start_time AT TIME ZONE %s))::int = ANY(%s)",
+			add(calendarfilter.NormalizeName(q.CalendarTimezone)), add(q.Weekdays)))
+	}
+	if len(q.Hours) > 0 && len(q.Hours) < 24 {
+		where = append(where, fmt.Sprintf("EXTRACT(hour FROM (m.start_time AT TIME ZONE %s))::int = ANY(%s)",
+			add(calendarfilter.NormalizeName(q.CalendarTimezone)), add(q.Hours)))
+	}
 	// #64 设备组数据权限：JOIN devices 后按 m.device_sn 收口到可见分组（fail-closed）。
 	where = appendVisibleSNWhere(where, "m.device_sn", q.VisibleGroups, add)
 	whereSQL := ""
@@ -1356,11 +1573,14 @@ func applyScalarFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 		qb = qb.Where(sq.Lt{"time": q.EndTime})
 	}
 	// #599：星期/小时段后端过滤（全选/空 = 不加条件，向后兼容）。
+	// 按系统时区转成本地钟面后再判断，避免数据库会话时区把 +08 桶误判成 UTC 前一天/前一小时。
 	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {
-		qb = qb.Where("EXTRACT(dow FROM start_time)::int = ANY(?)", q.Weekdays)
+		qb = qb.Where(calendarfilter.ExtractDOWPredicate("start_time"),
+			calendarfilter.NormalizeName(q.CalendarTimezone), q.Weekdays)
 	}
 	if len(q.Hours) > 0 && len(q.Hours) < 24 {
-		qb = qb.Where("EXTRACT(hour FROM start_time)::int = ANY(?)", q.Hours)
+		qb = qb.Where(calendarfilter.ExtractHourPredicate("start_time"),
+			calendarfilter.NormalizeName(q.CalendarTimezone), q.Hours)
 	}
 	// #619：测量对象（object_ldn）后端过滤（空 = 不过滤，向后兼容）。
 	if len(q.ObjectLDNs) > 0 {

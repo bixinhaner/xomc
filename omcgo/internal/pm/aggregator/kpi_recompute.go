@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/jsonx"
+	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi/expr"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
@@ -533,10 +534,12 @@ func buildDirectRollupKPI15MinSQL(q QueryRequest, kpis []kpiMeta) (string, []any
 		where = append(where, fmt.Sprintf("m.object_ldn = ANY(%s)", add(q.ObjectLDNs)))
 	}
 	if len(q.Weekdays) > 0 && len(q.Weekdays) < 7 {
-		where = append(where, fmt.Sprintf("EXTRACT(dow FROM m.start_time)::int = ANY(%s)", add(q.Weekdays)))
+		where = append(where, fmt.Sprintf("EXTRACT(dow FROM (m.start_time AT TIME ZONE %s))::int = ANY(%s)",
+			add(calendarfilter.NormalizeName(q.CalendarTimezone)), add(q.Weekdays)))
 	}
 	if len(q.Hours) > 0 && len(q.Hours) < 24 {
-		where = append(where, fmt.Sprintf("EXTRACT(hour FROM m.start_time)::int = ANY(%s)", add(q.Hours)))
+		where = append(where, fmt.Sprintf("EXTRACT(hour FROM (m.start_time AT TIME ZONE %s))::int = ANY(%s)",
+			add(calendarfilter.NormalizeName(q.CalendarTimezone)), add(q.Hours)))
 	}
 
 	joins := []string{"JOIN kpi_defs kd ON kd.metric_path = m.metric_path"}

@@ -223,14 +223,34 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 // 可按保守字节估算合批以降低 BSC 256 BTS 场景的串行往返数，同时把估算 NATS payload
 // 控制在 5MB 以下。
 //
-// commandKey 一律用 "sync-gpv-{sn}-{i}" 前缀。该前缀同时是 ACS handler 判定
-// "本任务允许 Fault 自愈"和 Path B "允许 reconcile" 的关键标识。
+// commandKey 默认使用 "sync-gpv-{sn}-{i}"；issue #219 的新设备 MAC 定向查询
+// 使用 "sync-gpv-partial-{sn}-{i}"。两者都保留 sync-gpv- 前缀供 ACS Fault
+// 自愈和 Path B 结果翻译识别，partial 子前缀则明确禁止全量差异对账。
 //
 // ExpiresIn=syncGPVTaskExpiresIn（1800s）：保留给慢设备/异常大对象的多批兜底窗口。
 // 常规 BSC BTS 对象在 5MB 预算内会一次整对象同步，不再产生 200+ 个实例 task。
 //
 // 返回入队成功的 task ID 列表，调用方可用于追溯/北向返回。
 func (s *SyncService) EnqueueGPVBatches(ctx context.Context, deviceSN string, paramPaths []string, sourceID string) ([]string, error) {
+	return s.enqueueGPVBatches(ctx, deviceSN, paramPaths, sourceID, "sync-gpv-")
+}
+
+func (s *SyncService) enqueuePartialGPVBatches(
+	ctx context.Context,
+	deviceSN string,
+	paramPaths []string,
+	sourceID string,
+) ([]string, error) {
+	return s.enqueueGPVBatches(ctx, deviceSN, paramPaths, sourceID, partialSyncGPVCommandKeyPrefix)
+}
+
+func (s *SyncService) enqueueGPVBatches(
+	ctx context.Context,
+	deviceSN string,
+	paramPaths []string,
+	sourceID string,
+	commandKeyPrefix string,
+) ([]string, error) {
 	if deviceSN == "" {
 		return nil, fmt.Errorf("EnqueueGPVBatches: empty deviceSN")
 	}
@@ -252,7 +272,7 @@ func (s *SyncService) EnqueueGPVBatches(ctx context.Context, deviceSN string, pa
 			Params:     gpvParams,
 			Priority:   10 + i,
 			ExpiresIn:  syncGPVTaskExpiresIn,
-			CommandKey: fmt.Sprintf("sync-gpv-%s-%d", deviceSN, i),
+			CommandKey: fmt.Sprintf("%s%s-%d", commandKeyPrefix, deviceSN, i),
 			Source:     task.TaskSourceSystem,
 			SourceID:   sourceID,
 		})
@@ -312,12 +332,23 @@ func (s *SyncService) HandleSyncResult(ctx context.Context, dev *model.Device,
 // 路径形态由 basePrefix 决定（含 "{i}" 截到对象前缀，其余原样）。CPE 收到对象前缀
 // 时自动展开子树，收到叶子时返回该叶子的值。批次拆分逻辑由 EnqueueGPVBatches 统一
 // 实现（标量合并 + 对象前缀 size=1），ACS handler.tryRecoverGPVFault 在仍发生 fault 时兜底。
-func (s *SyncService) enqueueGPVPrefixes(ctx context.Context, dev *model.Device, prefixes []string, sourceID string) error {
+func (s *SyncService) enqueueGPVPrefixes(
+	ctx context.Context,
+	dev *model.Device,
+	prefixes []string,
+	sourceID string,
+	partial bool,
+) error {
 	log, _ := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
 	if log != nil {
 		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoverySyncing, "")
 	}
-	_, err := s.EnqueueGPVBatches(ctx, dev.SerialNumber, prefixes, sourceID)
+	var err error
+	if partial {
+		_, err = s.enqueuePartialGPVBatches(ctx, dev.SerialNumber, prefixes, sourceID)
+	} else {
+		_, err = s.EnqueueGPVBatches(ctx, dev.SerialNumber, prefixes, sourceID)
+	}
 	return err
 }
 

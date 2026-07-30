@@ -31,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/omcgo/omcgo/internal/pm/kpi/expr"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
@@ -106,6 +107,7 @@ type Aggregator struct {
 	metaDB              PgQuerier
 	kpiRouter           KPIRouter
 	numberProcessLookup func(ctx context.Context) (string, error)
+	timezone            calendarfilter.TimezoneProvider
 	logger              *zap.Logger
 }
 
@@ -131,6 +133,19 @@ func NewWithMeta(db, metaDB PgQuerier, kpiRouter KPIRouter, logger *zap.Logger) 
 // Empty values are allowed and make resultnorm use its default policy.
 func (a *Aggregator) SetNumberProcessLookup(lookup func(ctx context.Context) (string, error)) {
 	a.numberProcessLookup = lookup
+}
+
+func (a *Aggregator) SetTimezoneProvider(provider calendarfilter.TimezoneProvider) {
+	a.timezone = provider
+}
+
+func (a *Aggregator) withCalendarTimezone(ctx context.Context, q QueryRequest) QueryRequest {
+	if q.CalendarTimezone == "" {
+		q.CalendarTimezone = calendarfilter.ProviderName(ctx, a.timezone)
+	} else {
+		q.CalendarTimezone = calendarfilter.NormalizeName(q.CalendarTimezone)
+	}
+	return q
 }
 
 func (a *Aggregator) numberProcess(ctx context.Context) (string, error) {

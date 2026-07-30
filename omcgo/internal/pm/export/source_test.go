@@ -16,13 +16,36 @@ import (
 )
 
 func TestDiscoverMetricColumns_UsesRequestedMetricPaths(t *testing.T) {
-	keys, err := discoverMetricColumns(context.Background(), nil, "pm_metrics", []string{"K002", "C001", "K002", ""}, zeroTime(), zeroTime())
+	keys, err := discoverMetricColumns(context.Background(), nil, "pm_metrics", aggregator.QueryRequest{
+		MetricPaths: []string{"K002", "C001", "K002", ""},
+	})
 	require.NoError(t, err)
 
 	assert.Equal(t, []colKey{
 		{code: "K002", mtype: "kpi"},
 		{code: "C001", mtype: "counter"},
 	}, keys)
+}
+
+func TestDiscoverAdhocColumns_EmptyConfiguredMetricPathsFallsBackToDistinct(t *testing.T) {
+	for _, metricPaths := range [][]string{nil, {}, {"", "  "}} {
+		db := &recordingExportQuerier{results: []pgx.Rows{
+			&adhocFakeRows{rows: [][]any{{"K_STORED", "kpi"}}},
+		}}
+
+		keys, err := discoverAdhocColumns(
+			context.Background(),
+			db,
+			uuid.New(),
+			metricPaths,
+			adhocExportFilter{},
+		)
+
+		require.NoError(t, err)
+		assert.Equal(t, []colKey{{code: "K_STORED", mtype: "kpi"}}, keys)
+		require.Len(t, db.queries, 1)
+		assert.Contains(t, db.queries[0].sql, "SELECT DISTINCT r.metric_path")
+	}
 }
 
 func TestNormalizeStoredResultExportRequest_ClearsMetricTypeForMixedMetricPaths(t *testing.T) {

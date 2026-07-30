@@ -48,6 +48,8 @@ export interface AdhocTask {
   isBuiltin: boolean;
   // 非持续型过期天数（T-0182，默认 60）
   expireDays: number;
+  // 自建 continuous 任务计划结束时间；老任务/内置任务可能为空。
+  plannedEndAt?: string | null;
   visibility: AdhocVisibility;
   status: AdhocStatus;
   progress: number;
@@ -74,13 +76,14 @@ export interface CreateAdhocTaskInput {
   technology?: string;
   isBuiltin?: boolean;
   expireDays?: number;
+  plannedEndAt?: string | null;
   visibility?: AdhocVisibility;
   // T-0193 小区/PLMN 白名单（完整 object_ldn 字符串数组）。空/缺 = 不传 → 全小区（现状语义）。
   objectLdns?: string[];
 }
 
 /**
- * 编辑任务入参（T-0194，PATCH /pm/adhoc/tasks/:id）。
+ * 编辑任务入参（T-0194/#211，PUT /pm/adhoc/tasks/:id；后端保留 PATCH 兼容）。
  *   - 自建任务：传 name/deviceSns/metricPaths/granularities/objectLdns/window。
  *   - 内置任务：只需传 metricPaths（其余字段后端忽略）。
  * mode/technology/dimension/isBuiltin 不可改，不在本结构体内。
@@ -92,6 +95,7 @@ export interface UpdateAdhocTaskInput {
   granularities?: string[];
   visibility?: AdhocVisibility;
   objectLdns?: string[];
+  plannedEndAt?: string | null;
   windowStart?: string;
   windowEnd?: string;
 }
@@ -137,6 +141,16 @@ export interface AdhocResultRow {
   taskVersionId?: string;
   complete?: boolean;
   missingSlots?: number;
+  revision?: number;
+  versionEffectiveFrom?: string;
+  versionEffectiveTo?: string;
+  receivedSlots?: number;
+  expectedSlots?: number;
+  versionExpectedSlots?: number;
+  naturalExpectedSlots?: number;
+  versionSliceComplete?: boolean;
+  periodComplete?: boolean;
+  partial?: boolean;
 }
 
 /**
@@ -188,6 +202,7 @@ export interface BackendAdhocTask {
   technology?: string;
   is_builtin?: boolean;
   expire_days?: number;
+  planned_end_at?: string;
   visibility?: string;
   status: string;
   progress: number;
@@ -222,6 +237,16 @@ export interface BackendAdhocResultRow {
   task_version_id?: string;
   complete?: boolean;
   missing_slots?: number;
+  revision?: number;
+  version_effective_from?: string;
+  version_effective_to?: string;
+  received_slots?: number;
+  expected_slots?: number;
+  version_expected_slots?: number;
+  natural_expected_slots?: number;
+  version_slice_complete?: boolean;
+  period_complete?: boolean;
+  partial?: boolean;
 }
 
 export interface BackendAdhocTaskRun {
@@ -275,6 +300,7 @@ export function mapBackendAdhocTask(b: BackendAdhocTask): AdhocTask {
     technology: b.technology,
     isBuiltin: b.is_builtin ?? false,
     expireDays: b.expire_days ?? 60,
+    plannedEndAt: b.planned_end_at || undefined,
     visibility: b.visibility === 'public' ? 'public' : 'private',
     status: b.status as AdhocStatus,
     progress: b.progress,
@@ -308,5 +334,15 @@ export function mapBackendAdhocResult(b: BackendAdhocResultRow): AdhocResultRow 
     taskVersionId: b.task_version_id || undefined,
     complete: b.complete ?? false,
     missingSlots: b.missing_slots ?? 0,
+    revision: b.revision ?? 1,
+    versionEffectiveFrom: b.version_effective_from || undefined,
+    versionEffectiveTo: b.version_effective_to || undefined,
+    receivedSlots: b.received_slots ?? 0,
+    expectedSlots: b.expected_slots ?? 0,
+    versionExpectedSlots: b.version_expected_slots ?? b.expected_slots ?? 0,
+    naturalExpectedSlots: b.natural_expected_slots ?? b.expected_slots ?? 0,
+    versionSliceComplete: b.version_slice_complete ?? false,
+    periodComplete: b.period_complete ?? b.complete ?? false,
+    partial: b.partial ?? false,
   };
 }

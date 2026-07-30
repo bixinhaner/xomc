@@ -92,3 +92,62 @@ func TestRecoveredUnresolvableTaskConservativelyMarksAllCoverageIncomplete(t *te
 
 	require.Equal(t, []int{0, 1}, indexes)
 }
+
+func TestProjectRecoveredMLNDCRFUnknownRequiresExactIsolatedLeaf(t *testing.T) {
+	coverage := []CoverageScope{{
+		Mappings: []FrozenMapping{{
+			StandardPath: mlnDCRFStatusStandardPath,
+			PrivatePath:  mlnDCRFStatusPrivatePath,
+			IsStorable:   true,
+		}},
+	}}
+	privatePath := "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.AdminCellState"
+
+	value, ok := projectRecoveredMLNDCRFUnknown(storedTaskResult{
+		Recovered:      true,
+		FaultCode:      9005,
+		BadPath:        privatePath,
+		RequestedNames: []string{privatePath},
+	}, coverage)
+
+	require.True(t, ok)
+	assert.Equal(t, "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus", value.ParameterPath)
+	assert.Equal(t, privatePath, value.PrivatePath)
+	assert.Equal(t, "unknown", value.Value)
+}
+
+func TestProjectRecoveredMLNDCRFUnknownRejectsAmbiguousRecovery(t *testing.T) {
+	coverage := []CoverageScope{{
+		Mappings: []FrozenMapping{{
+			StandardPath: mlnDCRFStatusStandardPath,
+			PrivatePath:  mlnDCRFStatusPrivatePath,
+			IsStorable:   true,
+		}},
+	}}
+	privatePath := "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.AdminCellState"
+
+	tests := []storedTaskResult{
+		{
+			Recovered:      true,
+			FaultCode:      9005,
+			BadPath:        privatePath,
+			RequestedNames: []string{privatePath, "Device.Other"},
+		},
+		{
+			Recovered:      true,
+			FaultCode:      9005,
+			BadPath:        "Device.Other",
+			RequestedNames: []string{privatePath},
+		},
+		{
+			Recovered:      true,
+			FaultCode:      9007,
+			BadPath:        privatePath,
+			RequestedNames: []string{privatePath},
+		},
+	}
+	for _, stored := range tests {
+		_, ok := projectRecoveredMLNDCRFUnknown(stored, coverage)
+		assert.False(t, ok)
+	}
+}

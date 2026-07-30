@@ -1727,6 +1727,8 @@ C000060091
 C000060101
 C000060196
 C000060197
+C000060216
+C000060273
 C000080002
 C000080003
 C000080004
@@ -2035,6 +2037,7 @@ C010120022
 C010120023
 C010120024
 C010120025
+C010120026
 KGNB0101
 KGNB0102
 KGNB0103
@@ -2506,7 +2509,7 @@ INSERT INTO public.menus VALUES
 	('aaaa0098-1000-0000-0000-000000000004', '告警库', 'menu', 'product:alarm-library', 'aaaa0098-0000-0000-0000-000000000001', 3, '/product/alarm-library', NULL, 'BookOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.896653+08', NULL, '2026-05-31 11:28:48.210268+08', '{"en-US": "Alarm Library", "zh-CN": "告警库"}'),
 	('aaaa0011-1000-0000-0000-000000000002', '告警库', 'menu', 'alarm:library', '11111111-1111-1111-1111-111111111105', 4, '/alarm/library', 'alarm/AlarmSupportLibrary', 'BookOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:47.900133+08', '{"en-US": "Alarm Library", "zh-CN": "告警库"}'),
 	('aaaa0011-1000-0000-0000-000000000001', '告警规则', 'menu', 'alarm:rules', '11111111-1111-1111-1111-111111111105', 3, '/alarm/rules', 'alarm/AlarmRules', 'FieldNumberOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:47.81669+08', '{"en-US": "Alarm Rules", "zh-CN": "告警规则"}'),
-	('aaaa0098-1000-0000-0000-000000000003', 'KPI 指标库', 'menu', 'product:kpi-library', 'aaaa0098-0000-0000-0000-000000000001', 2, '/product/kpi-library', NULL, 'BarChartOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.896653+08', NULL, '2026-05-31 11:28:48.210268+08', '{"en-US": "KPI Indicator Library", "zh-CN": "KPI 指标库"}'),
+	('aaaa0098-1000-0000-0000-000000000003', 'PM 指标库', 'menu', 'product:kpi-library', 'aaaa0098-0000-0000-0000-000000000001', 2, '/product/kpi-library', NULL, 'BarChartOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.896653+08', NULL, '2026-05-31 11:28:48.210268+08', '{"en-US": "PM Indicator Library", "zh-CN": "PM 指标库"}'),
 	('fc0d270c-dca6-4e0d-b392-4a806cfed4d5', '添加', 'button', 'alarm:library:add', 'aaaa0011-1000-0000-0000-000000000002', 2, NULL, NULL, NULL, 'hide', 'normal', NULL, '2026-05-31 11:28:47.827035+08', NULL, '2026-05-31 11:28:47.900133+08', '{"en-US": "Add", "zh-CN": "添加"}'),
 	('0e71f2b9-2f35-4da9-af1e-5127e35754a1', '修改', 'button', 'alarm:library:edit', 'aaaa0011-1000-0000-0000-000000000002', 3, NULL, NULL, NULL, 'hide', 'normal', NULL, '2026-05-31 11:28:47.827035+08', NULL, '2026-05-31 11:28:47.900133+08', '{"en-US": "Edit", "zh-CN": "修改"}'),
 	('fcb1465f-6cb3-4c7c-989d-97c284ecf6c6', '删除', 'button', 'alarm:library:delete', 'aaaa0011-1000-0000-0000-000000000002', 4, NULL, NULL, NULL, 'hide', 'normal', NULL, '2026-05-31 11:28:47.827035+08', NULL, '2026-05-31 11:28:47.900133+08', '{"en-US": "Delete", "zh-CN": "删除"}'),
@@ -8410,16 +8413,16 @@ INSERT INTO public.pm_tasks (
 	creator, created_at, updated_at, task_subtype, mode, cron_expr, metric_paths, granularities,
 	window_start, window_end, last_fire_at, dimension, technology, is_builtin, expire_days, object_ldns
 ) VALUES
-	('0184dddd-0001-4000-8000-000000000001', '内置-全网-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,C000060216,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'network', 'lte', true, 60, NULL),
+	('0184dddd-0001-4000-8000-000000000001', '内置-全网-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,K900010076,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'network', 'lte', true, 60, NULL),
 	('0184dddd-0001-4000-8000-000000000002', '内置-全网-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'network', 'nr', true, 60, NULL),
 	('0184dddd-0001-4000-8000-000000000003', '内置-全网-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGSM0102,KGSM0103,KGSM0101}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'network', 'gsm', true, 60, NULL),
-	('0184dddd-0002-4000-8000-000000000001', '内置-设备组-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,C000060216,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'device_group', 'lte', true, 60, NULL),
+	('0184dddd-0002-4000-8000-000000000001', '内置-设备组-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,K900010076,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'device_group', 'lte', true, 60, NULL),
 	('0184dddd-0002-4000-8000-000000000002', '内置-设备组-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'device_group', 'nr', true, 60, NULL),
 	('0184dddd-0002-4000-8000-000000000003', '内置-设备组-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGSM0102,KGSM0103,KGSM0101}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'device_group', 'gsm', true, 60, NULL),
-	('0184dddd-0003-4000-8000-000000000001', '内置-产品-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,C000060216,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'product', 'lte', true, 60, NULL),
+	('0184dddd-0003-4000-8000-000000000001', '内置-产品-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,K900010076,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'product', 'lte', true, 60, NULL),
 	('0184dddd-0003-4000-8000-000000000002', '内置-产品-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'product', 'nr', true, 60, NULL),
 	('0184dddd-0003-4000-8000-000000000003', '内置-产品-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGSM0102,KGSM0103,KGSM0101}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'product', 'gsm', true, 60, NULL),
-	('0184dddd-0004-4000-8000-000000000001', '内置-频段-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,C000060216,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'band', 'lte', true, 60, NULL),
+	('0184dddd-0004-4000-8000-000000000001', '内置-频段-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,K900010076,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'band', 'lte', true, 60, NULL),
 	('0184dddd-0004-4000-8000-000000000002', '内置-频段-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'band', 'nr', true, 60, NULL),
 	('0184dddd-0004-4000-8000-000000000003', '内置-频段-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGSM0102,KGSM0103,KGSM0101}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'band', 'gsm', true, 60, NULL) ON CONFLICT DO NOTHING;
 
@@ -11063,11 +11066,11 @@ INSERT INTO public.ufte_task_types VALUES
 	('CONFIG_BACKUP_NV', 'config_backup', '配置文件备份', '配置文件备份（NV）', 'NV 平台（MLQ/MLN_SC 等）配置文件备份，TR-069 Upload FileType=12 {OUI} Configuration File。', 'UPLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_CONFIG_BACKUP', '["MLQ", "MLN_SC"]', '12 {OUI} Configuration File', '12 {OUI} Configuration File', false, '', 'backup-{task_id8}-{sn}.nv', 'backup-{task_id8}-{sn}.nv', '', '', '', 0, '/smallcell/FileUploadService?fileType=CONFIGBACKUP_NV&sn={sn}&taskId={taskId}&filename=', 'system', '2026-05-31 11:28:48.208523+08', '2026-06-12 18:16:52.42469+08', NULL, 45, '[]'),
 	('CONFIG_RESTORE', 'config_restore', '配置文件恢复', '配置文件恢复', '复用现网配置恢复 Download 链路，提供 UFTE 内置的配置文件恢复模板。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_CONFIG_RESTORE', '["4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"]', '10 <OUI> Configuration File', '10 <OUI> Configuration File', false, 'config_backup/{object_path}', '{file_name}', '{file_name}', '', '', '', 0, '/smallcell/FileDownloadService/config_backup/{object_path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 50, '[]'),
 	('LICENSE_UPGRADE', 'license_upgrade', '设备License升级', '设备License升级', '从 license 库取目标设备的最新一份 license 文件，通过 TR-069 Download RPC 下发到设备。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_LICENSE_UPGRADE', '["4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"]', 'License File', 'License File', false, 'device-licenses/{object_path}', '{file_name}', '{file_name}', '', '', '', 0, '/smallcell/FileDownloadService/device-licenses/{object_path}', 'system', '2026-05-31 11:28:48.860497+08', '2026-06-12 18:16:52.42469+08', NULL, 55, '[]'),
-	('ENB_IMG_UPGRADE', 'enb_upgrade', '4G升级', '4G 基站软件升级', '复用现网软件升级链路，统一承载 4G 基站镜像升级任务。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_ENB_UPGRADE_IMAGE', '["4G eNB", "QAFA", "QAFB"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{minio_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/img/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 10, '[]'),
-	('GNB_IMG_UPGRADE', 'gnb_upgrade', '5G升级', '5G 基站软件升级', '复用现网 5G 升级调测通过的下载与升级完成事件链路。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE", "WAIT_INFORM_EVENT"]', '102 UPGRADE FINISH', 'CODE_GNB_UPGRADE_IMAGE', '["5G gNB", "BBU-XSS", "BBU-QSS"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{minio_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/img/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 10, '[]'),
-	('ENB_PATCH_UPGRADE', 'enb_upgrade', '4G升级', '4G Patch 增量升级', '复用软件管理补丁升级任务链路，统一收口到 UFTE 任务入口。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_ENB_UPGRADE_PATCH', '["4G eNB", "QAFA", "QAFB", "PATCH"]', 'X {OUI} Software Upgrade Patch', 'X {OUI} Software Upgrade Patch', true, 'firmware/{patch_path}', '{patch_name}', '{patch_name}', 'firmware.fileSize', 'firmware.md5', 'true', 0, '/smallcell/FileDownloadService/firmware/patch/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 15, '[]'),
-	('ENB_FPGA_UPGRADE', 'enb_upgrade', '4G升级', '4G FPGA 升级', '复用 4G 侧 FPGA 升级任务链路，统一到 UFTE 任务中心。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_ENB_UPGRADE_FPGA', '["4G eNB", "QAFA", "QAFB", "FPGA"]', 'Firmware Upgrade Fpga', 'Firmware Upgrade Fpga', true, 'firmware/{fpga_path}', '{fpga_name}', '{fpga_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/fpga/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 18, '[]'),
-	('GSM_IMG_UPGRADE', 'gsm_upgrade', '2G升级', '2G 基站软件升级', '复用现网软件升级链路，统一承载 2G(GSM) 基站镜像升级任务。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_GSM_UPGRADE_IMAGE', '["2G BSC", "2G BTS", "BSC", "BTS", "PGSM"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{minio_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/img/{path}', 'system', '2026-06-17 20:08:35.602533+08', '2026-06-17 20:08:35.602533+08', NULL, 19, '[]') ON CONFLICT DO NOTHING;
+	('ENB_IMG_UPGRADE', 'enb_upgrade', '4G升级', '4G 基站软件升级', '复用现网软件升级链路，统一承载 4G 基站镜像升级任务。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_ENB_UPGRADE_IMAGE', '["4G eNB", "QAFA", "QAFB"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{minio_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/img/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 10, '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'),
+	('GNB_IMG_UPGRADE', 'gnb_upgrade', '5G升级', '5G 基站软件升级', '复用现网 5G 升级调测通过的下载与升级完成事件链路。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE", "WAIT_INFORM_EVENT"]', '102 UPGRADE FINISH', 'CODE_GNB_UPGRADE_IMAGE', '["5G gNB", "BBU-XSS", "BBU-QSS"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{minio_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/img/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 10, '["BNQ"]'),
+	('ENB_PATCH_UPGRADE', 'enb_upgrade', '4G升级', '4G Patch 增量升级', '复用软件管理补丁升级任务链路，统一收口到 UFTE 任务入口。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_ENB_UPGRADE_PATCH', '["4G eNB", "QAFA", "QAFB", "PATCH"]', 'X {OUI} Software Upgrade Patch', 'X {OUI} Software Upgrade Patch', true, 'firmware/{patch_path}', '{patch_name}', '{patch_name}', 'firmware.fileSize', 'firmware.md5', 'true', 0, '/smallcell/FileDownloadService/firmware/patch/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 15, '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'),
+	('ENB_FPGA_UPGRADE', 'enb_upgrade', '4G升级', '4G FPGA 升级', '复用 4G 侧 FPGA 升级任务链路，统一到 UFTE 任务中心。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_ENB_UPGRADE_FPGA', '["4G eNB", "QAFA", "QAFB", "FPGA"]', 'Firmware Upgrade Fpga', 'Firmware Upgrade Fpga', true, 'firmware/{fpga_path}', '{fpga_name}', '{fpga_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/fpga/{path}', 'system', '2026-05-31 11:28:47.906664+08', '2026-06-12 18:16:52.42469+08', NULL, 18, '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'),
+	('GSM_IMG_UPGRADE', 'gsm_upgrade', '2G升级', '2G 基站软件升级', '复用现网软件升级链路，统一承载 2G(GSM) 基站镜像升级任务。', 'DOWNLOAD', true, true, '["CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"]', '', 'CODE_GSM_UPGRADE_IMAGE', '["2G BSC", "2G BTS", "BSC", "BTS", "PGSM"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true, 'firmware/{minio_path}', '{firmware_name}', '{firmware_name}', 'firmware.fileSize', 'firmware.md5', 'false', 0, '/smallcell/FileDownloadService/firmware/img/{path}', 'system', '2026-06-17 20:08:35.602533+08', '2026-06-17 20:08:35.602533+08', NULL, 19, '["BSC", "BTS"]') ON CONFLICT DO NOTHING;
 
 
 ALTER TABLE public.ufte_task_types ENABLE TRIGGER ALL;
@@ -26142,6 +26145,386 @@ UPDATE sys_configs
 UPDATE sys_configs
    SET value='60', updated_at=now()
  WHERE category='acs.backpressure' AND key='disk_low_pct' AND value='75';
+
+
+-- Consolidated from pre-release baseline-only migrations: main data 000003-000004 and seed 000002-000005
+
+-- MML 全局“基站网管参数管理-查询基站网关连接”补充 SSL 状态只读参数。
+-- +goose StatementBegin
+DO $$
+DECLARE
+    lst_command_id uuid;
+    end_date_id uuid;
+    start_date_id uuid;
+BEGIN
+    INSERT INTO public.standard_params (
+        id, standard_path, entry_type, access, data_type, change_applies
+    ) VALUES (
+        gen_random_uuid(),
+        'Device.ManagementServer.sslStatus.endDate',
+        'parameter', 'READ_ONLY', 'STRING', 'Immediate'
+    )
+    ON CONFLICT (standard_path) DO NOTHING;
+
+    INSERT INTO public.standard_params (
+        id, standard_path, entry_type, access, data_type, change_applies
+    ) VALUES (
+        gen_random_uuid(),
+        'Device.ManagementServer.sslStatus.startDate',
+        'parameter', 'READ_ONLY', 'STRING', 'Immediate'
+    )
+    ON CONFLICT (standard_path) DO NOTHING;
+
+    SELECT id
+      INTO end_date_id
+      FROM public.standard_params
+     WHERE standard_path = 'Device.ManagementServer.sslStatus.endDate';
+
+    SELECT id
+      INTO start_date_id
+      FROM public.standard_params
+     WHERE standard_path = 'Device.ManagementServer.sslStatus.startDate';
+
+    SELECT id
+      INTO lst_command_id
+      FROM public.mml_commands
+     WHERE command_code = 'LST MANAGEMENT_SERVER'
+       AND deprecated_at IS NULL
+     ORDER BY created_at
+     LIMIT 1;
+
+    IF lst_command_id IS NULL THEN
+        RAISE EXCEPTION 'MML command LST MANAGEMENT_SERVER is missing';
+    END IF;
+
+    INSERT INTO public.mml_command_sub_fields (
+        id, command_id, mml_code, label_i18n,
+        default_selected, is_required, sort_order,
+        standard_path_id, access_type, is_supported
+    ) VALUES (
+        gen_random_uuid(),
+        lst_command_id,
+        'END_DATE',
+        '{"zh-CN":"SSL状态结束时间","en-US":"End Date"}'::jsonb,
+        true, false, 10006,
+        end_date_id, 'RO', true
+    )
+    ON CONFLICT (command_id, standard_path_id) DO UPDATE
+       SET mml_code = EXCLUDED.mml_code,
+           label_i18n = EXCLUDED.label_i18n,
+           default_selected = EXCLUDED.default_selected,
+           is_required = EXCLUDED.is_required,
+           sort_order = EXCLUDED.sort_order,
+           access_type = EXCLUDED.access_type,
+           is_supported = EXCLUDED.is_supported,
+           deprecated_at = NULL,
+           updated_at = NOW();
+
+    INSERT INTO public.mml_command_sub_fields (
+        id, command_id, mml_code, label_i18n,
+        default_selected, is_required, sort_order,
+        standard_path_id, access_type, is_supported
+    ) VALUES (
+        gen_random_uuid(),
+        lst_command_id,
+        'START_DATE',
+        '{"zh-CN":"SSL状态开始时间","en-US":"Start Date"}'::jsonb,
+        true, false, 10007,
+        start_date_id, 'RO', true
+    )
+    ON CONFLICT (command_id, standard_path_id) DO UPDATE
+       SET mml_code = EXCLUDED.mml_code,
+           label_i18n = EXCLUDED.label_i18n,
+           default_selected = EXCLUDED.default_selected,
+           is_required = EXCLUDED.is_required,
+           sort_order = EXCLUDED.sort_order,
+           access_type = EXCLUDED.access_type,
+           is_supported = EXCLUDED.is_supported,
+           deprecated_at = NULL,
+           updated_at = NOW();
+
+    UPDATE public.param_mappings
+       SET is_supported = true,
+           updated_at = NOW()
+     WHERE standard_path IN (
+               'Device.ManagementServer.sslStatus.endDate',
+               'Device.ManagementServer.sslStatus.startDate'
+           )
+       AND is_active = true;
+
+    UPDATE public.mml_command_sub_fields AS csf
+       SET deprecated_at = NOW(),
+           updated_at = NOW()
+      FROM public.mml_commands AS command,
+           public.standard_params AS sp
+     WHERE csf.command_id = command.id
+       AND sp.id = csf.standard_path_id
+       AND command.command_code = 'MOD MANAGEMENT_SERVER'
+       AND command.deprecated_at IS NULL
+       AND sp.standard_path IN (
+               'Device.ManagementServer.sslStatus.endDate',
+               'Device.ManagementServer.sslStatus.startDate'
+           )
+       AND csf.deprecated_at IS NULL;
+
+    UPDATE public.mml_commands AS command
+       SET target_paths = COALESCE((
+               SELECT jsonb_agg(sp.standard_path ORDER BY csf.sort_order)
+                 FROM public.mml_command_sub_fields AS csf
+                 JOIN public.standard_params AS sp
+                   ON sp.id = csf.standard_path_id
+                WHERE csf.command_id = command.id
+                  AND csf.deprecated_at IS NULL
+           ), '[]'::jsonb),
+           tree_node_refs = COALESCE((
+               SELECT jsonb_agg(sp.standard_path ORDER BY csf.sort_order)
+                 FROM public.mml_command_sub_fields AS csf
+                 JOIN public.standard_params AS sp
+                   ON sp.id = csf.standard_path_id
+                WHERE csf.command_id = command.id
+                  AND csf.deprecated_at IS NULL
+           ), '[]'::jsonb),
+           updated_at = NOW()
+     WHERE command.command_code IN (
+               'LST MANAGEMENT_SERVER',
+               'MOD MANAGEMENT_SERVER'
+           )
+       AND command.deprecated_at IS NULL;
+END;
+$$;
+-- +goose StatementEnd
+
+UPDATE public.rela_platform_indicator_formula_enb AS route
+SET report_key = indicator.report_key
+FROM public.perf_indicators_enb AS indicator
+WHERE indicator.id = route.indicator_id;
+UPDATE public.rela_platform_indicator_formula_gsm AS route
+SET report_key = indicator.report_key
+FROM public.perf_indicators_gsm AS indicator
+WHERE indicator.id = route.indicator_id;
+UPDATE public.rela_platform_indicator_formula_gnb AS route
+SET report_key = indicator.report_key
+FROM public.perf_indicators_gnb AS indicator
+WHERE indicator.id = route.indicator_id;
+
+UPDATE public.rela_platform_indicator_formula_enb
+SET report_key = CASE indicator_id
+        WHEN 'C000010070' THEN 'ERAB.EstabInitAttNbr.Sum'
+        WHEN 'C000010080' THEN 'ERAB.EstabInitSuccNbr.Sum'
+    END,
+    updated_at = now()
+WHERE platform_name = 'BLQ'
+  AND indicator_id IN ('C000010070', 'C000010080');
+
+-- Repair every persisted enabled-indicator set, including operator-specific sets
+-- changed before dependency-closure validation was introduced.
+WITH RECURSIVE dependency_closure(operator_code, indicator_id) AS (
+    SELECT operator_code, indicator_id
+    FROM public.enabled_pm_indicators_enb
+    UNION
+    SELECT closure.operator_code, dependency.id
+    FROM dependency_closure AS closure
+    JOIN public.perf_indicators_enb AS parent ON parent.id = closure.indicator_id
+    CROSS JOIN LATERAL regexp_matches(
+        COALESCE(parent.arithmetic, ''),
+        '([CK][A-Za-z0-9_.]+)',
+        'g'
+    ) AS parsed(dependency_id)
+    JOIN public.perf_indicators_enb AS dependency
+      ON lower(dependency.id) = lower(parsed.dependency_id[1])
+)
+INSERT INTO public.enabled_pm_indicators_enb (operator_code, indicator_id)
+SELECT operator_code, indicator_id
+FROM dependency_closure
+ON CONFLICT (operator_code, indicator_id) DO NOTHING;
+
+WITH RECURSIVE dependency_closure(operator_code, indicator_id) AS (
+    SELECT operator_code, indicator_id
+    FROM public.enabled_pm_indicators_gnb
+    UNION
+    SELECT closure.operator_code, dependency.id
+    FROM dependency_closure AS closure
+    JOIN public.perf_indicators_gnb AS parent ON parent.id = closure.indicator_id
+    CROSS JOIN LATERAL regexp_matches(
+        COALESCE(parent.arithmetic, ''),
+        '([CK][A-Za-z0-9_.]+)',
+        'g'
+    ) AS parsed(dependency_id)
+    JOIN public.perf_indicators_gnb AS dependency
+      ON lower(dependency.id) = lower(parsed.dependency_id[1])
+)
+INSERT INTO public.enabled_pm_indicators_gnb (operator_code, indicator_id)
+SELECT operator_code, indicator_id
+FROM dependency_closure
+ON CONFLICT (operator_code, indicator_id) DO NOTHING;
+
+WITH RECURSIVE dependency_closure(operator_code, indicator_id) AS (
+    SELECT operator_code, indicator_id
+    FROM public.enabled_pm_indicators_gsm
+    UNION
+    SELECT closure.operator_code, dependency.id
+    FROM dependency_closure AS closure
+    JOIN public.perf_indicators_gsm AS parent ON parent.id = closure.indicator_id
+    CROSS JOIN LATERAL regexp_matches(
+        COALESCE(parent.arithmetic, ''),
+        '([CK][A-Za-z0-9_.]+)',
+        'g'
+    ) AS parsed(dependency_id)
+    JOIN public.perf_indicators_gsm AS dependency
+      ON lower(dependency.id) = lower(parsed.dependency_id[1])
+)
+INSERT INTO public.enabled_pm_indicators_gsm (operator_code, indicator_id)
+SELECT operator_code, indicator_id
+FROM dependency_closure
+ON CONFLICT (operator_code, indicator_id) DO NOTHING;
+
+-- K900010076 is the dashboard output. C000060216 and C000060273 are formula
+-- inputs and are retained by the closure above, but must not replace the KPI.
+UPDATE public.pm_tasks
+SET metric_paths = array_replace(metric_paths, 'C000060216', 'K900010076'),
+    updated_at = now()
+WHERE id IN (
+    '0184dddd-0001-4000-8000-000000000001',
+    '0184dddd-0002-4000-8000-000000000001',
+    '0184dddd-0003-4000-8000-000000000001',
+    '0184dddd-0004-4000-8000-000000000001'
+)
+  AND metric_paths @> ARRAY['C000060216']::text[]
+  AND NOT metric_paths @> ARRAY['K900010076']::text[];
+
+UPDATE public.pm_tasks
+SET metric_paths = array_remove(metric_paths, 'C000060216'),
+    updated_at = now()
+WHERE id IN (
+    '0184dddd-0001-4000-8000-000000000001',
+    '0184dddd-0002-4000-8000-000000000001',
+    '0184dddd-0003-4000-8000-000000000001',
+    '0184dddd-0004-4000-8000-000000000001'
+)
+  AND metric_paths @> ARRAY['C000060216', 'K900010076']::text[];
+
+INSERT INTO public.sys_configs (
+    id, category, key, value, value_type, description, is_public,
+    created_at, updated_at, description_i18n
+) VALUES (
+    'ef07a965-4e50-4a27-af18-e14dca393d7e',
+    'minio.retention',
+    'cleanup_mode',
+    'shadow',
+    'string',
+    '原始对象精确清理阶段：shadow/fallback/exclusive',
+    false,
+    now(),
+    now(),
+    '{}'::jsonb
+)
+ON CONFLICT DO NOTHING;
+
+WITH mapping(old_name, new_name, new_vendor, new_description) AS (
+    VALUES
+        ('BAIBLQ 产品', 'BAIBLQ', 'Baicells', 'Baicells BAIBLQ'),
+        ('BLX 产品', 'BLX', 'Baicells', 'Baicells BLX'),
+        ('QRTB 系列', 'QRTB Series', 'Baicells', 'Baicells QRTB; supports SC/CA/DC radio modes'),
+        ('MLQ 产品', 'MLQ', 'Baicells', 'Baicells MLQ'),
+        ('MLN 系列', 'MLN Series', 'Baicells', 'Baicells MLN; supports SC/CA/DC radio modes'),
+        ('BM 产品', 'BM', 'Baicells', 'Baicells BM'),
+        ('BSC 产品', 'BSC', 'Baicells', 'Baicells BSC'),
+        ('BTS 产品', 'BTS', 'Baicells', 'Baicells BTS; 2G base station; KPIs are reported by BSC'),
+        ('BaiBNQ 5G 产品', 'BaiBNQ 5G', 'Baicells', 'Baicells BaiBNQ; 5G NR base station; TR-069 parameters and KPI formulas use BaiBNQ'),
+        ('CICT SC3400(L1821) 产品', 'CICT SC3400(L1821)', 'CICT', 'CICT SC3400(L1821)'),
+        ('大唐 fBS3251 系列', 'Datang fBS3251 Series', 'Datang', 'Datang fBS3251; includes 2 model variants'),
+        ('第三方 FDD-LTE-Enterprise', 'Third-party FDD-LTE-Enterprise', 'Third-party', 'Third-party FDD-LTE-Enterprise'),
+        ('华为 TCELL 系列', 'Huawei TCELL Series', 'Huawei', 'Huawei TCELL; includes 6 model variants'),
+        ('京信 LTE-FDD_N 系列', 'Comba LTE-FDD_N Series', 'Comba', 'Comba LTE-FDD_N; includes 4 model variants'),
+        ('京信 femto_au 产品', 'Comba femto_au', 'Comba', 'Comba femto_au')
+)
+UPDATE public.products AS p
+SET product_name = mapping.new_name,
+    vendor = mapping.new_vendor,
+    description = mapping.new_description,
+    updated_at = now()
+FROM mapping
+WHERE p.product_name = mapping.old_name;
+
+WITH mapping(old_name, new_name) AS (
+    VALUES
+        ('BAIBLQ 产品', 'BAIBLQ'),
+        ('BLX 产品', 'BLX'),
+        ('QRTB 系列', 'QRTB Series'),
+        ('MLQ 产品', 'MLQ'),
+        ('MLN 系列', 'MLN Series'),
+        ('BM 产品', 'BM'),
+        ('BSC 产品', 'BSC'),
+        ('BTS 产品', 'BTS'),
+        ('BaiBNQ 5G 产品', 'BaiBNQ 5G'),
+        ('CICT SC3400(L1821) 产品', 'CICT SC3400(L1821)'),
+        ('大唐 fBS3251 系列', 'Datang fBS3251 Series'),
+        ('第三方 FDD-LTE-Enterprise', 'Third-party FDD-LTE-Enterprise'),
+        ('华为 TCELL 系列', 'Huawei TCELL Series'),
+        ('京信 LTE-FDD_N 系列', 'Comba LTE-FDD_N Series'),
+        ('京信 femto_au 产品', 'Comba femto_au')
+)
+UPDATE public.ufte_task_types AS tt
+SET product_scope = (
+        SELECT COALESCE(jsonb_agg(to_jsonb(COALESCE(mapping.new_name, entry.value)) ORDER BY entry.ord), '[]'::jsonb)
+        FROM jsonb_array_elements_text(tt.product_scope) WITH ORDINALITY AS entry(value, ord)
+        LEFT JOIN mapping ON mapping.old_name = entry.value
+    ),
+    updated_at = now()
+WHERE EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(tt.product_scope) AS entry(value)
+    JOIN mapping ON mapping.old_name = entry.value
+);
+
+WITH mapping(old_name, new_name, new_vendor, new_description) AS (
+    VALUES
+        ('BAIBLQ', 'BLQ', 'Baicells', 'Baicells BLQ'),
+        ('QRTB Series', 'QRTB', 'Baicells', 'Baicells QRTB; supports SC/CA/DC radio modes'),
+        ('MLN Series', 'MLN', 'Baicells', 'Baicells MLN; supports SC/CA/DC radio modes'),
+        ('BaiBNQ 5G', 'BNQ', 'Baicells', 'Baicells BNQ; 5G NR base station; TR-069 parameters and KPI formulas use BaiBNQ')
+)
+UPDATE public.products AS p
+SET product_name = mapping.new_name,
+    vendor = mapping.new_vendor,
+    description = mapping.new_description,
+    updated_at = now()
+FROM mapping
+WHERE p.product_name = mapping.old_name;
+
+WITH mapping(old_name, new_name) AS (
+    VALUES
+        ('BAIBLQ', 'BLQ'),
+        ('QRTB Series', 'QRTB'),
+        ('MLN Series', 'MLN'),
+        ('BaiBNQ 5G', 'BNQ')
+)
+UPDATE public.ufte_task_types AS tt
+SET product_scope = (
+        SELECT COALESCE(jsonb_agg(to_jsonb(COALESCE(mapping.new_name, entry.value)) ORDER BY entry.ord), '[]'::jsonb)
+        FROM jsonb_array_elements_text(tt.product_scope) WITH ORDINALITY AS entry(value, ord)
+        LEFT JOIN mapping ON mapping.old_name = entry.value
+    ),
+    updated_at = now()
+WHERE EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(tt.product_scope) AS entry(value)
+    JOIN mapping ON mapping.old_name = entry.value
+);
+
+WITH scope(type_code, product_scope) AS (
+    VALUES
+        ('ENB_IMG_UPGRADE', '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'::jsonb),
+        ('ENB_PATCH_UPGRADE', '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'::jsonb),
+        ('ENB_FPGA_UPGRADE', '["BLQ", "BLX", "QRTB", "MLQ", "MLN", "BM", "CICT SC3400(L1821)", "Datang fBS3251 Series", "Third-party FDD-LTE-Enterprise", "Huawei TCELL Series", "Comba LTE-FDD_N Series", "Comba femto_au"]'::jsonb),
+        ('GNB_IMG_UPGRADE', '["BNQ"]'::jsonb),
+        ('GSM_IMG_UPGRADE', '["BSC", "BTS"]'::jsonb)
+)
+UPDATE public.ufte_task_types AS tt
+SET product_scope = scope.product_scope,
+    updated_at = now()
+FROM scope
+WHERE tt.type_code = scope.type_code;
 
 
 COMMIT;

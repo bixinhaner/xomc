@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
@@ -94,6 +95,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	h.clearWriteDeadline(w)
 
 	// Validate Basic Auth if configured (constant-time comparison to prevent timing attacks)
 	runtimeCfg := h.currentSettings(r.Context())
@@ -286,6 +288,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err),
 			zap.String("bucket", bucket),
 			zap.String("path", objectPath))
+	}
+}
+
+func (h *Handler) clearWriteDeadline(w http.ResponseWriter) {
+	err := http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	if err != nil && !errors.Is(err, http.ErrNotSupported) {
+		h.logger.Warn("clear file download write deadline", zap.Error(err))
 	}
 }
 

@@ -23,6 +23,7 @@ import {
 import { SearchOutlined, CopyOutlined, ClearOutlined } from '@ant-design/icons';
 import { fetchDeviceList, useDeviceList } from '@core/hooks/api/useDevices';
 import type { Device } from '@core/types/device';
+import { useTechnologyDictionary } from '@core/hooks/api/useTechnologyDictionary';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -51,6 +52,7 @@ export default function DevicePickerModal({
 }: DevicePickerModalProps) {
   const intl = useIntl();
   const { message } = App.useApp();
+  const { labelForRadioMode } = useTechnologyDictionary();
   const [search, setSearch] = useState('');
   const [searchDraft, setSearchDraft] = useState('');
   const [page, setPage] = useState(1);
@@ -82,7 +84,13 @@ export default function DevicePickerModal({
     () => [
       { title: intl.formatMessage({ id: 'perf.picker.colSn' }), dataIndex: 'sn', key: 'sn', width: 200, ellipsis: true },
       { title: intl.formatMessage({ id: 'perf.picker.colHostName' }), dataIndex: 'hostName', key: 'host', width: 180, ellipsis: true },
-      { title: intl.formatMessage({ id: 'perf.picker.colTech' }), dataIndex: 'networkType', key: 'tech', width: 90 },
+      {
+        title: intl.formatMessage({ id: 'perf.picker.colTech' }),
+        dataIndex: 'networkType',
+        key: 'tech',
+        width: 120,
+        render: (networkType: string) => labelForRadioMode(networkType),
+      },
       {
         title: intl.formatMessage({ id: 'perf.picker.colOnline' }),
         dataIndex: 'isOnline',
@@ -96,7 +104,7 @@ export default function DevicePickerModal({
           ),
       },
     ],
-    [intl],
+    [intl, labelForRadioMode],
   );
 
   const handleSearch = () => {

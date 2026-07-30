@@ -11,147 +11,456 @@
     {
       "title": "Nginx 活跃连接（并发）",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
-        {"expr": "sum(nginx_connections_active)", "legendFormat": "active"}
+        {
+          "expr": "sum(nginx_connections_active)",
+          "legendFormat": "active"
+        }
       ]
     },
     {
       "title": "Nginx QPS（每秒请求）",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
       "targets": [
-        {"expr": "sum(rate(nginx_http_requests_total[1m]))", "legendFormat": "qps"}
+        {
+          "expr": "sum(rate(nginx_http_requests_total[1m]))",
+          "legendFormat": "qps"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "reqps"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      }
     },
     {
       "title": "主机 CPU 使用率",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
-        {"expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)", "legendFormat": "cpu"}
+        {
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
+          "legendFormat": "cpu"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      }
     },
     {
       "title": "主机内存使用率",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
       "targets": [
-        {"expr": "(1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)) * 100", "legendFormat": "mem"}
+        {
+          "expr": "(1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)) * 100",
+          "legendFormat": "mem"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      }
     },
     {
       "title": "Nginx 连接状态",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
       "targets": [
-        {"expr": "sum(nginx_connections_active)", "legendFormat": "active"},
-        {"expr": "sum(nginx_connections_reading)", "legendFormat": "reading"},
-        {"expr": "sum(nginx_connections_writing)", "legendFormat": "writing"},
-        {"expr": "sum(nginx_connections_waiting)", "legendFormat": "waiting"}
+        {
+          "expr": "sum(nginx_connections_active)",
+          "legendFormat": "active"
+        },
+        {
+          "expr": "sum(nginx_connections_reading)",
+          "legendFormat": "reading"
+        },
+        {
+          "expr": "sum(nginx_connections_writing)",
+          "legendFormat": "writing"
+        },
+        {
+          "expr": "sum(nginx_connections_waiting)",
+          "legendFormat": "waiting"
+        }
       ]
     },
     {
       "title": "Nginx 请求速率 QPS / 新建连接速率",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
       "targets": [
-        {"expr": "sum(rate(nginx_http_requests_total[1m]))", "legendFormat": "requests/s (QPS)"},
-        {"expr": "sum(rate(nginx_connections_accepted[1m]))", "legendFormat": "accepted/s"},
-        {"expr": "sum(rate(nginx_connections_handled[1m]))", "legendFormat": "handled/s"}
+        {
+          "expr": "sum(rate(nginx_http_requests_total[1m]))",
+          "legendFormat": "requests/s (QPS)"
+        },
+        {
+          "expr": "sum(rate(nginx_connections_accepted[1m]))",
+          "legendFormat": "accepted/s"
+        },
+        {
+          "expr": "sum(rate(nginx_connections_handled[1m]))",
+          "legendFormat": "handled/s"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "reqps"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      }
     },
     {
       "title": "主机 CPU 使用率",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
       "targets": [
-        {"expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)", "legendFormat": "cpu used %"}
+        {
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
+          "legendFormat": "cpu used %"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      }
     },
     {
       "title": "主机内存（已用 / 总量）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
       "targets": [
-        {"expr": "sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)", "legendFormat": "used"},
-        {"expr": "sum(node_memory_MemTotal_bytes)", "legendFormat": "total"}
+        {
+          "expr": "sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)",
+          "legendFormat": "used"
+        },
+        {
+          "expr": "sum(node_memory_MemTotal_bytes)",
+          "legendFormat": "total"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "bytes"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
     },
     {
       "title": "主机磁盘使用率（按挂载点）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
       "targets": [
-        {"expr": "100 - (node_filesystem_avail_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"} / node_filesystem_size_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"} * 100)", "legendFormat": "{{mountpoint}}"}
+        {
+          "expr": "100 - (node_filesystem_avail_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"} / node_filesystem_size_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"} * 100)",
+          "legendFormat": "{{mountpoint}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      }
     },
     {
       "title": "容器 CPU（按容器 ID）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
       "targets": [
-        {"expr": "sum by (container_id) (rate(container_cpu_usage_seconds_total{container_id=~\".*/docker-[^/]+\\\\.scope\"}[1m]))", "legendFormat": "{{container_id}}"}
+        {
+          "expr": "sum by (container_id) (rate(container_cpu_usage_seconds_total{container_id=~\".*/docker-[^/]+\\\\.scope\"}[1m]))",
+          "legendFormat": "{{container_id}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "cores"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores"
+        }
+      }
     },
     {
       "title": "容器内存（按容器 ID）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
       "targets": [
-        {"expr": "sum by (container_id) (container_memory_working_set_bytes{container_id=~\".*/docker-[^/]+\\\\.scope\"})", "legendFormat": "{{container_id}}"}
+        {
+          "expr": "sum by (container_id) (container_memory_working_set_bytes{container_id=~\".*/docker-[^/]+\\\\.scope\"})",
+          "legendFormat": "{{container_id}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "bytes"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
     },
     {
       "title": "主机系统负载（1m / 5m / 15m）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
       "targets": [
-        {"expr": "node_load1", "legendFormat": "load1"},
-        {"expr": "node_load5", "legendFormat": "load5"},
-        {"expr": "node_load15", "legendFormat": "load15"}
+        {
+          "expr": "node_load1",
+          "legendFormat": "load1"
+        },
+        {
+          "expr": "node_load5",
+          "legendFormat": "load5"
+        },
+        {
+          "expr": "node_load15",
+          "legendFormat": "load15"
+        }
       ]
     },
     {
       "title": "主机磁盘 inode 使用率（按挂载点）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
       "targets": [
-        {"expr": "100 - (node_filesystem_files_free{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"} / node_filesystem_files{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"} * 100)", "legendFormat": "{{mountpoint}}"}
+        {
+          "expr": "100 - (node_filesystem_files_free{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"} / node_filesystem_files{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"} * 100)",
+          "legendFormat": "{{mountpoint}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      }
     },
     {
       "title": "主机磁盘可用空间减少速率（按挂载点）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
       "targets": [
-        {"expr": "-deriv(node_filesystem_avail_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"}[1h])", "legendFormat": "{{mountpoint}}"}
+        {
+          "expr": "-deriv(node_filesystem_avail_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"}[1h])",
+          "legendFormat": "{{mountpoint}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "Bps", "noValue": "No data"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "noValue": "No data"
+        }
+      }
     },
     {
       "title": "主机磁盘预计耗尽时间（按挂载点）",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 44},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
       "targets": [
-        {"expr": "(predict_linear(node_filesystem_avail_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"}[1h], 0) / -deriv(node_filesystem_avail_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"}[1h])) and on (instance, device, mountpoint) (deriv(node_filesystem_avail_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"}[1h]) < 0)", "legendFormat": "{{mountpoint}}"}
+        {
+          "expr": "(predict_linear(node_filesystem_avail_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"}[1h], 0) / -deriv(node_filesystem_avail_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"}[1h])) and on (instance, device, mountpoint) (deriv(node_filesystem_avail_bytes{mountpoint=~\"$mountpoint\",device!~\"rootfs\",fstype!~\"tmpfs|overlay|squashfs|nsfs|proc|sysfs|cgroup2\"}[1h]) < 0)",
+          "legendFormat": "{{mountpoint}}"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "s", "min": 0, "noValue": "No data"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "noValue": "No data"
+        }
+      }
+    },
+    {
+      "title": "磁盘 I/O 活动时钟占比（不是饱和度）",
+      "description": "Linux 5.x 的 io_time 表示采样时钟内发生过 I/O 完成/启动的时间占比；小对象连续 I/O 可接近 100%，必须结合 await 与平均队列判断是否饱和。",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 52
+      },
+      "targets": [
+        {
+          "expr": "clamp_max(rate(node_disk_io_time_seconds_total{device!~\"loop.*|ram.*\"}[5m]) * 100, 100)",
+          "legendFormat": "{{device}} activity"
+        },
+        {
+          "expr": "avg(rate(node_cpu_seconds_total{mode=\"iowait\"}[5m])) * 100",
+          "legendFormat": "host iowait"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      }
+    },
+    {
+      "title": "磁盘吞吐量与 IOPS",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 60
+      },
+      "targets": [
+        {
+          "expr": "rate(node_disk_read_bytes_total{device!~\"loop.*|ram.*\"}[5m])",
+          "legendFormat": "{{device}} read bytes/s"
+        },
+        {
+          "expr": "rate(node_disk_written_bytes_total{device!~\"loop.*|ram.*\"}[5m])",
+          "legendFormat": "{{device}} write bytes/s"
+        },
+        {
+          "expr": "rate(node_disk_reads_completed_total{device!~\"loop.*|ram.*\"}[5m])",
+          "legendFormat": "{{device}} read IOPS"
+        },
+        {
+          "expr": "rate(node_disk_writes_completed_total{device!~\"loop.*|ram.*\"}[5m])",
+          "legendFormat": "{{device}} write IOPS"
+        }
+      ]
+    },
+    {
+      "title": "磁盘平均等待与队列深度",
+      "description": "await 按完成操作数计算；平均队列来自 weighted io time。活动时间高但 await/队列低时，磁盘仍有余量。",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 68
+      },
+      "targets": [
+        {
+          "expr": "1000 * (rate(node_disk_read_time_seconds_total{device!~\"loop.*|ram.*\"}[5m]) + rate(node_disk_write_time_seconds_total{device!~\"loop.*|ram.*\"}[5m])) / clamp_min(rate(node_disk_reads_completed_total{device!~\"loop.*|ram.*\"}[5m]) + rate(node_disk_writes_completed_total{device!~\"loop.*|ram.*\"}[5m]), 0.001)",
+          "legendFormat": "{{device}} await ms"
+        },
+        {
+          "expr": "rate(node_disk_io_time_weighted_seconds_total{device!~\"loop.*|ram.*\"}[5m])",
+          "legendFormat": "{{device}} avg queue"
+        }
+      ]
+    },
+    {
+      "title": "MinIO Scanner 扫描速率",
+      "description": "持续小对象扫描会消耗随机读 IOPS；与磁盘 read IOPS 同步升高时可用于确认 scanner 影响。",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 76
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(minio_node_scanner_objects_scanned[5m]))",
+          "legendFormat": "objects/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      }
     }
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["omcgo", "nginx", "host", "container"],
+  "tags": [
+    "omcgo",
+    "nginx",
+    "host",
+    "container"
+  ],
   "templating": {
     "list": [
       {

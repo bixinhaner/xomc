@@ -1,18 +1,19 @@
-import { Card, Radio, Space, Tooltip, Spin } from 'antd';
+import { Card, Radio, Select, Space, Tooltip, Spin } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { dashboardApi } from '@core/services/api/dashboardApi';
 import { useT } from '@/hooks/useT';
 import { useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
+import type { CallbackDataParams } from 'echarts/types/dist/shared';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import EmptyState from '@/components/common/EmptyState';
+import {
+  HEATMAP_COLORS_BY_SEVERITY,
+  loadAlarmHeatmap,
+  type HeatmapSeverity,
+} from './alarmHeatmapModel';
 
-// 星期标签
-const DAY_LABELS_ZH = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-const HOUR_LABELS = Array.from({ length: 24 }, (_, i) => `${i}:00`);
-
-// 颜色主题 - 告警密度从低到高
-const HEATMAP_COLORS = ['#e0f3f8', '#abd9e9', '#74add1', '#4575b4', '#313695'];
+const HOUR_LABELS = Array.from({ length: 24 }, (_, index) => `${index}:00`);
 
 type HeatmapDay = {
   day: number;
@@ -45,15 +46,27 @@ function normalizeHeatmap(payload?: HeatmapPayload) {
 export default function AlarmHeatmap() {
   const t = useT();
   const [days, setDays] = useState(30);
+  const [severity, setSeverity] = useState<HeatmapSeverity>('all');
 
   const { data: heatmapData, isLoading } = useQuery({
-    queryKey: ['dashboard', 'alarm-heatmap', days],
-    queryFn: () => dashboardApi.getAlarmHeatmap({ days }),
+    queryKey: ['dashboard', 'alarm-heatmap', days, severity],
+    queryFn: () => loadAlarmHeatmap(dashboardApi, days, severity),
     refetchInterval: 300000, // 5分钟刷新
     staleTime: 60000,
   });
 
-  const dayLabels = DAY_LABELS_ZH; // 使用中文标签
+  const dayLabels = useMemo(() => [
+    t('alarm.stats.heatmapMonday'),
+    t('alarm.stats.heatmapTuesday'),
+    t('alarm.stats.heatmapWednesday'),
+    t('alarm.stats.heatmapThursday'),
+    t('alarm.stats.heatmapFriday'),
+    t('alarm.stats.heatmapSaturday'),
+    t('alarm.stats.heatmapSunday'),
+  ], [t]);
+  const severityLabel = t(
+    severity === 'all' ? 'alarm.statistics.all' : `alarm.severity.${severity}`,
+  );
   const normalizedHeatmap = useMemo(() => normalizeHeatmap(heatmapData), [heatmapData]);
 
   const option = useMemo(() => {
@@ -74,27 +87,30 @@ export default function AlarmHeatmap() {
         backgroundColor: 'rgba(0, 0, 0, 0.85)',
         borderColor: '#333',
         textStyle: { color: '#fff', fontSize: 12 },
-        formatter: (params: any) => {
-          const [hour, day, count] = params.data;
-          const dayLabel = dayLabels[day] || `Day ${day}`;
+        formatter: (params: CallbackDataParams) => {
+          const [hour, day, count] = params.data as [number, number, number];
+          const dayLabel = dayLabels[day] || t('alarm.stats.heatmapDayFallback', { day: day + 1 });
           return `
             <div style="padding: 8px; line-height: 1.6;">
               <div style="font-weight: 600; margin-bottom: 6px; font-size: 13px;">
                 ${dayLabel} ${HOUR_LABELS[hour]}
               </div>
-              <div style="color: '#bbb'; font-size: 12px;">
-                告警数量: <strong style="color: '#fff'; font-size: 14px;">${count}</strong>
+              <div style="color: #bbb; font-size: 12px;">
+                ${t('alarm.severity.filter')}: <strong style="color: #fff;">${severityLabel}</strong>
+              </div>
+              <div style="color: #bbb; font-size: 12px;">
+                ${t('alarm.stats.alarmCount')}: <strong style="color: #fff; font-size: 14px;">${count}</strong>
               </div>
             </div>
           `;
         },
       },
       grid: {
-        height: '72%',
-        top: '10%',
+        height: '62%',
+        top: '6%',
         left: '6%',
         right: '4%',
-        bottom: '12%',
+        bottom: '24%',
       },
       xAxis: {
         type: 'category',
@@ -121,16 +137,28 @@ export default function AlarmHeatmap() {
         axisLine: { lineStyle: { color: '#e8e8e8' } },
       },
       visualMap: {
-        show: false,
+        show: true,
         min: 0,
         max: maxCount,
+        calculable: true,
+        orient: 'horizontal',
+        left: 'center',
+        bottom: 0,
+        itemWidth: 10,
+        itemHeight: 100,
+        precision: 0,
+        text: [String(maxCount), '0'],
+        textStyle: {
+          color: '#8c8c8c',
+          fontSize: 10,
+        },
         inRange: {
-          color: HEATMAP_COLORS,
+          color: HEATMAP_COLORS_BY_SEVERITY[severity],
         },
       },
       series: [
         {
-          name: '告警数量',
+          name: t('alarm.stats.alarmCount'),
           type: 'heatmap',
           data: data,
           label: {
@@ -152,7 +180,7 @@ export default function AlarmHeatmap() {
         },
       ],
     };
-  }, [normalizedHeatmap, dayLabels]);
+  }, [normalizedHeatmap, dayLabels, severity, severityLabel, t]);
 
   return (
     <Card
@@ -167,15 +195,30 @@ export default function AlarmHeatmap() {
       size="small"
       styles={{ body: { padding: '12px 16px', height: '280px' } }}
       extra={
-        <Radio.Group
-          value={days}
-          onChange={(e) => setDays(e.target.value)}
-          optionType="button"
-          size="small"
-        >
-          <Radio.Button value={7}>7天</Radio.Button>
-          <Radio.Button value={30}>30天</Radio.Button>
-        </Radio.Group>
+        <Space size={4}>
+          <Select<HeatmapSeverity>
+            value={severity}
+            onChange={setSeverity}
+            size="small"
+            style={{ width: 88 }}
+            options={[
+              { value: 'all', label: t('alarm.statistics.all') },
+              { value: 'critical', label: t('alarm.severity.critical') },
+              { value: 'major', label: t('alarm.severity.major') },
+              { value: 'minor', label: t('alarm.severity.minor') },
+              { value: 'warning', label: t('alarm.severity.warning') },
+            ]}
+          />
+          <Radio.Group
+            value={days}
+            onChange={(event) => setDays(event.target.value)}
+            optionType="button"
+            size="small"
+          >
+            <Radio.Button value={7}>{t('alarm.stats.heatmap7Days')}</Radio.Button>
+            <Radio.Button value={30}>{t('alarm.stats.heatmap30Days')}</Radio.Button>
+          </Radio.Group>
+        </Space>
       }
     >
       {isLoading ? (

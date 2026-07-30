@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { TabItem } from '../types/common';
+import { performancePageKeyFromPath, usePmPageStateStore } from './pmPageStateStore';
 
 export type { TabItem };
 
@@ -22,6 +23,26 @@ function dedupeTabsByExactPath(tabs: TabItem[]) {
   }
 
   return { deduped, removedKeyToKeptKey };
+}
+
+function clearClosedPerformanceTabStates(closedTabs: TabItem[]) {
+  const pageKeys = closedTabs
+    .map((tab) => performancePageKeyFromPath(tab.path))
+    .filter((pageKey): pageKey is string => Boolean(pageKey));
+  if (pageKeys.length === 0) return;
+  usePmPageStateStore.getState().clearPageStates(pageKeys);
+}
+
+function basePathOf(path: string): string {
+  return path.split('?')[0].replace(/\/+$/, '') || path;
+}
+
+function tabRouteGroup(path: string): string {
+  const basePath = basePathOf(path);
+  if (basePath === '/performance/pm-adhoc/new' || /^\/performance\/pm-adhoc\/[^/]+\/edit$/.test(basePath)) {
+    return '/performance/pm-adhoc';
+  }
+  return basePath;
 }
 
 // 仪表板 tab 的稳定标识。使用 'dashboard'（与 navConfig 中其他菜单项的 key 命名风格一致）。
@@ -75,11 +96,11 @@ export const useTabStore = create<TabState>()(
         // 静态菜单使用 'dashboard' 作为 key。通过 path 匹配确保两者指向同一个 tab。
         // 注意：syncActiveTabPath 会把 search params 写进 tab.path（如 /alarm/current?severity=2），
         // 因此这里用 basename（去掉 ?...）做匹配，避免同一路由因 search params 不同而重复建 tab。
-        const tabBasePath = tab.path.split('?')[0];
+        const tabBasePath = tabRouteGroup(tab.path);
         const existsIdx = tabs.findIndex(
           (t) =>
             t.key === tab.key ||
-            t.path.split('?')[0] === tabBasePath,
+            tabRouteGroup(t.path) === tabBasePath,
         );
         if (existsIdx !== -1) {
           // 命中同 key（或同 path 的 /dashboard）时，同步 path/label/labelRaw/closable，
@@ -105,7 +126,10 @@ export const useTabStore = create<TabState>()(
             (t) => t.key !== DASHBOARD_TAB_KEY && t.key !== get().activeTabKey
           );
           if (removeIdx !== -1) {
-            newTabs.splice(removeIdx, 1);
+            const [closedTab] = newTabs.splice(removeIdx, 1);
+            if (closedTab) {
+              clearClosedPerformanceTabStates([closedTab]);
+            }
           }
         }
         set({ tabs: newTabs, activeTabKey: tab.key });
@@ -115,6 +139,7 @@ export const useTabStore = create<TabState>()(
         const { tabs, activeTabKey } = get();
         if (key === DASHBOARD_TAB_KEY) return;
         const index = tabs.findIndex((t) => t.key === key);
+        const closedTab = tabs[index];
         const newTabs = tabs.filter((t) => t.key !== key);
         let newActiveKey = activeTabKey;
         if (activeTabKey === key) {
@@ -122,24 +147,34 @@ export const useTabStore = create<TabState>()(
           const next = newTabs[index];
           newActiveKey = (next ?? prev)?.key ?? DASHBOARD_TAB_KEY;
         }
+        if (closedTab) {
+          clearClosedPerformanceTabStates([closedTab]);
+        }
         set({ tabs: newTabs, activeTabKey: newActiveKey });
       },
 
       closeOtherTabs: (key) => {
         const { tabs } = get();
         const newTabs = tabs.filter((t) => !t.closable || t.key === key);
+        const closedTabs = tabs.filter((tab) => !newTabs.includes(tab));
+        clearClosedPerformanceTabStates(closedTabs);
         set({ tabs: newTabs, activeTabKey: key });
       },
 
       closeAllTabs: () => {
+        const { tabs } = get();
+        clearClosedPerformanceTabStates(tabs.filter((tab) => tab.closable));
         set({ tabs: [DASHBOARD_TAB], activeTabKey: DASHBOARD_TAB_KEY });
       },
 
       closeTabsToRight: (key) => {
         const { tabs, activeTabKey } = get();
         const index = tabs.findIndex((t) => t.key === key);
+        if (index === -1) return;
         const newTabs = tabs.slice(0, index + 1);
+        const closedTabs = tabs.slice(index + 1);
         const stillActive = newTabs.find((t) => t.key === activeTabKey);
+        clearClosedPerformanceTabStates(closedTabs);
         set({ tabs: newTabs, activeTabKey: stillActive ? activeTabKey : key });
       },
 
@@ -151,8 +186,8 @@ export const useTabStore = create<TabState>()(
         const idx = tabs.findIndex((t) => t.key === activeTabKey);
         if (idx === -1) return;
         const cur = tabs[idx];
-        // 仅在同一基础路由（pathname 相同）内同步 search/二级状态，避免把别的路由 URL 写进当前 tab。
-        if (cur.path.split('?')[0] !== fullPath.split('?')[0]) return;
+        // 仅在同一 tab 路由组内同步 search/二级状态，避免把别的路由 URL 误写进当前 tab。
+        if (tabRouteGroup(cur.path) !== tabRouteGroup(fullPath)) return;
         if (cur.path === fullPath) return;
         const next = tabs.slice();
         next[idx] = { ...cur, path: fullPath };
@@ -161,8 +196,8 @@ export const useTabStore = create<TabState>()(
 
       activateByPath: (pathname) => {
         const { tabs, activeTabKey } = get();
-        // 查找 path 的 pathname 部分与传入 pathname 匹配的 tab
-        const matchedTab = tabs.find((t) => t.path.split('?')[0] === pathname);
+        // 查找与传入 pathname 同一 tab 路由组的 tab。
+        const matchedTab = tabs.find((t) => tabRouteGroup(t.path) === tabRouteGroup(pathname));
         if (!matchedTab) return false;
         // 如果已经是激活状态，不需要更新
         if (matchedTab.key === activeTabKey) return true;

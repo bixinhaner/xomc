@@ -211,7 +211,7 @@ func TestToModel(t *testing.T) {
 	assert.Equal(t, "slot=1", alarm.AdditionalInfo["additional_information"])
 	assert.Equal(t, "Critical temperature alert", alarm.AdditionalInfo["additional_text"])
 	assert.Equal(t, "Device.Radio.1", alarm.AdditionalInfo["managed_object_instance"])
-	assert.True(t, alarm.RaisedAt.IsZero())
+	assert.Equal(t, raisedTime, alarm.RaisedAt)
 	assert.True(t, alarm.LastUpdatedAt.IsZero())
 }
 
@@ -248,7 +248,7 @@ func TestComputeDiff(t *testing.T) {
 		assert.Len(t, diff.ToAdd, 0)
 		assert.Len(t, diff.ToUpdate, 0)
 		assert.Len(t, diff.ToClear, 1)
-		assert.Equal(t, "ALM-001", diff.ToClear[0])
+		assert.Equal(t, "ALM-001", diff.ToClear[0].AlarmIdentifier)
 	})
 
 	t.Run("updated alarm", func(t *testing.T) {
@@ -285,8 +285,8 @@ func TestComputeDiff(t *testing.T) {
 		assert.Len(t, diff.ToUpdate, 1)
 		assert.Len(t, diff.ToClear, 1)
 		assert.Equal(t, "ALM-003", diff.ToAdd[0].AlarmIdentifier)
-		assert.Contains(t, diff.ToUpdate, "ALM-002")
-		assert.Equal(t, "ALM-999", diff.ToClear[0])
+		assert.Equal(t, "ALM-002", diff.ToUpdate[0].Remote.AlarmIdentifier)
+		assert.Equal(t, "ALM-999", diff.ToClear[0].AlarmIdentifier)
 	})
 }
 

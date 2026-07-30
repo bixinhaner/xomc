@@ -136,6 +136,9 @@ func (w *Worker) terminalStatus(task *Task, err error) Status {
 		return StatusFailed
 	}
 	if task.Mode == ModeContinuous {
+		if task.PlannedEndAt != nil && !task.PlannedEndAt.After(time.Now()) {
+			return StatusCanceled
+		}
 		return StatusScheduled
 	}
 	return StatusSucceeded
@@ -412,4 +415,59 @@ func schedulerGranularity(grans []string) metrics.Granularity {
 		return ""
 	}
 	return metrics.Granularity(grans[0])
+}
+
+// PlannedEndRepository 是 planned_end_at 到期停止任务所需的最小契约。
+type PlannedEndRepository interface {
+	StopExpiredPlannedContinuous(ctx context.Context, now time.Time, limit int) (int, error)
+}
+
+// PlannedEndScheduler 周期性停止已到 planned_end_at 的自建 continuous 任务。
+type PlannedEndScheduler struct {
+	repo      PlannedEndRepository
+	tickEvery time.Duration
+	limit     int
+	logger    *zap.Logger
+}
+
+func NewPlannedEndScheduler(repo PlannedEndRepository, tickEvery time.Duration, logger *zap.Logger) *PlannedEndScheduler {
+	if tickEvery <= 0 {
+		tickEvery = time.Minute
+	}
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &PlannedEndScheduler{
+		repo:      repo,
+		tickEvery: tickEvery,
+		limit:     1000,
+		logger:    logger.Named("pm.adhoc.planned-end-scheduler"),
+	}
+}
+
+func (s *PlannedEndScheduler) Run(ctx context.Context) {
+	ticker := time.NewTicker(s.tickEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			s.sweepOnce(ctx, now)
+		}
+	}
+}
+
+func (s *PlannedEndScheduler) sweepOnce(ctx context.Context, now time.Time) {
+	if s.repo == nil {
+		return
+	}
+	n, err := s.repo.StopExpiredPlannedContinuous(ctx, now, s.limit)
+	if err != nil {
+		s.logger.Warn("stop expired planned continuous tasks failed", zap.Error(err))
+		return
+	}
+	if n > 0 {
+		s.logger.Info("stopped expired planned continuous tasks", zap.Int("count", n))
+	}
 }

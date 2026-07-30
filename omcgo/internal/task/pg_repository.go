@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -773,6 +774,36 @@ func (r *PgTaskRepository) ListOpenByDeviceAndMethods(ctx context.Context, devic
 		tasks = append(tasks, t)
 	}
 	return tasks, nil
+}
+
+// LatestOpenByDeviceMethodDescription 精确查询某类未完成任务，避免调用方先加载设备
+// 的全部同方法任务再在内存中过滤。
+func (r *PgTaskRepository) LatestOpenByDeviceMethodDescription(
+	ctx context.Context,
+	deviceSN, method, description string,
+) (*Task, error) {
+	query, args, err := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.Eq{
+			"device_sn":   deviceSN,
+			"method":      method,
+			"description": description,
+			"status":      []TaskStatus{TaskStatusPending, TaskStatusSent},
+		}).
+		OrderBy("created_at DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build latest open task query: %w", err)
+	}
+	taskItem, err := r.scanTaskRow(r.pool.QueryRow(ctx, query, args...))
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query latest open task: %w", err)
+	}
+	return taskItem, nil
 }
 
 // defaultPendingBatchLimit 是 ListPendingAllDevices 在调用方未给上界（limit<=0）时

@@ -459,17 +459,7 @@ func (s *TaskService) LatestOpenTaskByDeviceAndMethod(ctx context.Context, devic
 	if s.repo == nil {
 		return nil, nil
 	}
-	openTasks, err := s.repo.ListOpenByDeviceAndMethods(ctx, deviceSN, []string{method})
-	if err != nil {
-		return nil, err
-	}
-	for idx := len(openTasks) - 1; idx >= 0; idx-- {
-		openTask := openTasks[idx]
-		if description == "" || openTask.Description == description {
-			return openTask, nil
-		}
-	}
-	return nil, nil
+	return s.repo.LatestOpenByDeviceMethodDescription(ctx, deviceSN, method, description)
 }
 
 func (s *TaskService) LatestSyncGPVSummaryByDevice(ctx context.Context, deviceSN string) (*SyncGPVSummary, error) {

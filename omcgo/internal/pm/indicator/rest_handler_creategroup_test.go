@@ -49,7 +49,7 @@ func (s *stubGroupRepo) Update(_ context.Context, _ DeviceType, _ string, _ *Upd
 func (s *stubGroupRepo) Delete(_ context.Context, _ DeviceType, _ string, _ pgx.Tx) error {
 	return nil
 }
-func (s *stubGroupRepo) CountIndicatorsByGroup(_ context.Context, _ DeviceType) (map[string]int64, error) {
+func (s *stubGroupRepo) CountIndicatorsByGroup(_ context.Context, _ DeviceType, _ string) (map[string]int64, error) {
 	return nil, nil
 }
 

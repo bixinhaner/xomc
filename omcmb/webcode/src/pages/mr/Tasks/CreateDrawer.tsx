@@ -208,7 +208,7 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
 
   // 设备列表（取后端 items；字段按 device 类型推断）
   const deviceRows = useMemo(() => {
-    type DRow = { sn: string; name?: string; productClass?: string };
+    type DRow = { sn: string; name?: string; productClass?: string; productName?: string };
     const items = (deviceData?.items ?? []) as DRow[];
     return items.filter((d) => Boolean(d.sn));
   }, [deviceData]);
@@ -400,8 +400,13 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
                 { title: t('mrTask.field.deviceSn'), dataIndex: 'sn', key: 'sn', width: 200 },
                 { title: t('mrTask.field.deviceName'), dataIndex: 'name', key: 'name', ellipsis: true,
                   render: (v?: string) => v ?? '-' },
-                { title: t('mrTask.field.productClass'), dataIndex: 'productClass', key: 'productClass', width: 140,
-                  render: (v?: string) => v ?? '-' },
+                {
+                  title: t('mrTask.field.productClass'),
+                  key: 'productName',
+                  width: 160,
+                  render: (_v: unknown, record: { sn: string; productName?: string; productClass?: string }) =>
+                    record.productName || record.productClass || '-',
+                },
                 {
                   // 冲突列：显示该 SN 当前所在的活跃任务名（无则空）
                   title: t('mrTask.create.conflictColumn'),

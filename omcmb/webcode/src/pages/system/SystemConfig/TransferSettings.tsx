@@ -1,6 +1,11 @@
 import { Card, Form, Input, Space, Typography } from 'antd';
-import { AddonInputNumber } from '@/components/common/InputAddon';
+import { AddonInput, AddonInputNumber } from '@/components/common/InputAddon';
 import { useT } from '@/hooks/useT';
+import {
+	buildStandardBaseURL,
+	isValidTransferHost,
+	parseTransferAddress,
+} from './transferAddress';
 
 interface TransferSettingsProps {
 	form: ReturnType<typeof Form.useForm>[0];
@@ -9,31 +14,16 @@ interface TransferSettingsProps {
 const DEFAULT_MAX_FILE_SIZE = 1073741824; // 1 GiB
 // 系统级（跨任务）升级设备并发上限默认值，与后端 software.DefaultGlobalUpgradeConcurrency 一致
 const DEFAULT_MAX_GLOBAL_UPGRADE_CONCURRENCY = 100;
-const BASE_URL_PLACEHOLDER = 'https://acs.example.com:7557';
-const UPLOAD_PATH_PLACEHOLDER = '/smallcell/FileUploadService';
-const DOWNLOAD_PATH_PLACEHOLDER = '/smallcell/FileDownloadService';
+const FIXED_PROTOCOL = 'http://';
+const FIXED_PORT = '8080';
+const DEFAULT_UPLOAD_PATH = '/smallcell/FileUploadService';
+const DEFAULT_DOWNLOAD_PATH = '/smallcell/FileDownloadService';
+const STANDARD_ADDRESS_MAX_WIDTH = 520;
 
 const cardTitleStyle: React.CSSProperties = {
 	fontSize: 14,
 	fontWeight: 600,
 };
-
-function isValidHTTPURL(value: string): boolean {
-	try {
-		if (value !== value.trim()) return false;
-		const url = new URL(value);
-		return (
-			(url.protocol === 'http:' || url.protocol === 'https:')
-			&& Boolean(url.hostname)
-			&& !url.username
-			&& !url.password
-			&& !url.search
-			&& !url.hash
-		);
-	} catch {
-		return false;
-	}
-}
 
 function isValidServicePath(value: string): boolean {
 	if (!value || value !== value.trim() || !value.startsWith('/') || value.startsWith('//')) return false;
@@ -48,6 +38,69 @@ function isValidServicePath(value: string): boolean {
 	}
 }
 
+function validateTransferAddress(
+	value: unknown,
+	hostError: string,
+	baseURLError: string,
+): Promise<void> {
+	const raw = typeof value === 'string' ? value : '';
+	const result = parseTransferAddress(raw);
+	if (result.kind !== 'invalid') return Promise.resolve();
+	return Promise.reject(new Error(/^https?:/i.test(raw) ? baseURLError : hostError));
+}
+
+interface TransferAddressInputProps extends Omit<
+	React.ComponentProps<typeof Input>,
+	'value' | 'onChange'
+> {
+	value?: string;
+	onChange?: (value: string) => void;
+}
+
+function TransferAddressInput({
+	value,
+	onChange,
+	...inputProps
+}: TransferAddressInputProps) {
+	const parsed = parseTransferAddress(value);
+	// 标准部署只填写 IP；存量或主动粘贴的完整 URL 原样展示，避免把
+	// HTTPS、自定义端口、反向代理前缀静默改写为 HTTP:8080。
+	if (parsed.mode === 'full') {
+		return (
+			<Input
+				{...inputProps}
+				value={parsed.raw}
+				onChange={(event) => {
+					const input = event.target.value;
+					onChange?.(!input || isValidTransferHost(input) ? buildStandardBaseURL(input) : input);
+				}}
+			/>
+		);
+	}
+
+	return (
+		<AddonInput
+			{...inputProps}
+			addonBefore={FIXED_PROTOCOL}
+			addonAfter={`:${FIXED_PORT}`}
+			compactStyle={{ width: '100%', maxWidth: STANDARD_ADDRESS_MAX_WIDTH }}
+			value={parsed.host}
+			onChange={(event) => {
+				const input = event.target.value;
+				const isFullURL = /^https?:/i.test(input);
+				const hasURLSyntax = /[/\\?#@]/.test(input);
+				const hasInvalidWhitespace = input !== input.trim();
+				const isInvalidColonInput = input.includes(':') && !isValidTransferHost(input);
+				onChange?.(
+					isFullURL || hasURLSyntax || hasInvalidWhitespace || isInvalidColonInput
+						? input
+						: buildStandardBaseURL(input),
+				);
+			}}
+		/>
+	);
+}
+
 export default function TransferSettings({ form }: TransferSettingsProps) {
 	const t = useT();
 
@@ -57,6 +110,8 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 			layout="vertical"
 			size="small"
 			initialValues={{
+				uploadPath: DEFAULT_UPLOAD_PATH,
+				downloadPath: DEFAULT_DOWNLOAD_PATH,
 				uploadMaxFileSize: DEFAULT_MAX_FILE_SIZE,
 				maxGlobalUpgradeConcurrency: DEFAULT_MAX_GLOBAL_UPGRADE_CONCURRENCY,
 			}}
@@ -72,26 +127,25 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 			>
 				<Form.Item
 					name="uploadBaseURL"
-					label={t('system.transfer.uploadBaseURL')}
-					extra={t('system.transfer.baseURLHelp')}
+					label={t('system.transfer.uploadServerIP')}
+					extra={t('system.transfer.serverIPHelp')}
 					rules={[
 						{
-							validator: (_, value) => {
-								if (!value) return Promise.resolve();
-								return isValidHTTPURL(value as string)
-									? Promise.resolve()
-									: Promise.reject(new Error(t('system.transfer.baseURLInvalid')));
-							},
+							validator: (_, value) => validateTransferAddress(
+								value,
+								t('system.transfer.serverIPInvalid'),
+								t('system.transfer.baseURLInvalid'),
+							),
 						},
 					]}
 				>
-					<Input placeholder={BASE_URL_PLACEHOLDER} />
+					<TransferAddressInput placeholder={t('system.transfer.serverIPPlaceholder')} />
 				</Form.Item>
 				<Space orientation="vertical" style={{ width: '100%' }} size={12}>
 					<Form.Item
 						name="uploadPath"
 						label={t('system.transfer.uploadPath')}
-						extra={t('system.transfer.pathHelp')}
+						extra={t('system.transfer.uploadPathHelp')}
 						rules={[{
 							validator: (_, value) => {
 								if (!value) return Promise.resolve();
@@ -101,7 +155,7 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 							},
 						}]}
 					>
-						<Input placeholder={UPLOAD_PATH_PLACEHOLDER} />
+						<Input placeholder={DEFAULT_UPLOAD_PATH} />
 					</Form.Item>
 					<Form.Item
 						name="uploadMaxFileSize"
@@ -114,32 +168,30 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 				</Space>
 			</Card>
 
-			{/* 下发服务：路径写死 */}
 			<Card
 				size="small"
 				title={<span style={cardTitleStyle}>{t('system.transfer.downloadSection')}</span>}
 			>
 				<Form.Item
 					name="downloadBaseURL"
-					label={t('system.transfer.downloadBaseURL')}
-					extra={t('system.transfer.baseURLHelp')}
+					label={t('system.transfer.downloadServerIP')}
+					extra={t('system.transfer.serverIPHelp')}
 					rules={[
 						{
-							validator: (_, value) => {
-								if (!value) return Promise.resolve();
-								return isValidHTTPURL(value as string)
-									? Promise.resolve()
-									: Promise.reject(new Error(t('system.transfer.baseURLInvalid')));
-							},
+							validator: (_, value) => validateTransferAddress(
+								value,
+								t('system.transfer.serverIPInvalid'),
+								t('system.transfer.baseURLInvalid'),
+							),
 						},
 					]}
 				>
-					<Input placeholder={BASE_URL_PLACEHOLDER} />
+					<TransferAddressInput placeholder={t('system.transfer.serverIPPlaceholder')} />
 				</Form.Item>
 				<Form.Item
 					name="downloadPath"
 					label={t('system.transfer.downloadPath')}
-					extra={t('system.transfer.pathHelp')}
+					extra={t('system.transfer.downloadPathHelp')}
 					rules={[{
 						validator: (_, value) => {
 							if (!value) return Promise.resolve();
@@ -149,7 +201,7 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 						},
 					}]}
 				>
-					<Input placeholder={DOWNLOAD_PATH_PLACEHOLDER} />
+					<Input placeholder={DEFAULT_DOWNLOAD_PATH} />
 				</Form.Item>
 				<Form.Item
 					name="maxGlobalUpgradeConcurrency"

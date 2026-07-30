@@ -6582,6 +6582,12 @@ claim "T-0164 G7: GET /pm/adhoc/tasks/:id 不存在返回 404/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/pm/adhoc/tasks/$T0164_BAD_UUID" -H "$W2D_AUTH")
 check_status_in "T-0164 G7-5: GET /pm/adhoc/tasks/<bad>" "404 401" "$HTTP_CODE"
 
+claim "#211: PUT /pm/adhoc/tasks/:id 保存任务定义接口形状"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$API/pm/adhoc/tasks/$T0164_BAD_UUID" \
+    -H "Content-Type: application/json" -H "$W2D_AUTH" \
+    -d '{"metric_paths":["test.counter"]}')
+check_status_in "#211: PUT /pm/adhoc/tasks/<bad> shape" "400 401 403 404 422" "$HTTP_CODE"
+
 claim "T-0164 G7: DELETE /pm/adhoc/tasks/:id 不存在 404/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/pm/adhoc/tasks/$T0164_BAD_UUID" -H "$W2D_AUTH")
 check_status_in "T-0164 G7-6: DELETE /pm/adhoc/tasks/<bad>" "200 401 404" "$HTTP_CODE"

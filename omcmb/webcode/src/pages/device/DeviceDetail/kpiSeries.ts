@@ -21,7 +21,7 @@ import { normalizePmMetricValue } from '@core/utils/pmMetricValue';
 /** 设备级筛选哨兵：objectLdn 为该值或 null/undefined 时只取设备级行。 */
 export const DEVICE_LEVEL = null;
 
-/** 设备级行的空 ldn 哨兵序列名（多对象 series 中区别「设备级」与「有 ldn 对象」，留空串为​ machine-readable 哨兵。 */
+/** 设备级行的空 ldn 哨兵序列名（多对象 series 中区别「设备级」与「有 ldn 对象」，留空串为 machine-readable 哨兵。 */
 export const DEVICE_LEVEL_LDN = '';
 
 /** 多对象：一个 metricPath 下按 objectLdn 拆出的一条 series。 */

@@ -14,6 +14,8 @@ type finalizedMetric struct {
 	Operation   AggregationOp
 	Value       float64
 	SampleCount int64
+	// FormulaComplete is independent from window data completeness.
+	FormulaComplete bool
 }
 
 type counterGroup struct {
@@ -55,7 +57,7 @@ func buildFinalizedMetrics(
 			out = append(out, finalizedMetric{
 				Definition: definition, MetricID: output.MetricID,
 				MetricType: "counter", Operation: definition.Operation,
-				Value: value, SampleCount: accumulator.Count,
+				Value: value, SampleCount: accumulator.Count, FormulaComplete: true,
 			})
 		}
 	}
@@ -96,7 +98,7 @@ func buildFinalizedMetrics(
 			out = append(out, finalizedMetric{
 				Definition: definition, MetricID: output.MetricID,
 				MetricType: "kpi", Operation: AggregationFormula,
-				Value: value, SampleCount: sampleCount,
+				Value: value, SampleCount: sampleCount, FormulaComplete: true,
 			})
 		}
 	}

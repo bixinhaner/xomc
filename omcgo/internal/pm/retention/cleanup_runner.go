@@ -12,9 +12,31 @@ import (
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 )
 
-// CleanupRunner applies the five pm.retention settings to ordinary metadata,
-// compact Counter snapshots and the mixed-granularity result hypertable.
-// Raw sparse hypertables use TimescaleDB drop-chunk policies because both
+type cleanupTableSpec struct {
+	name       string
+	policyKey  PolicyKey
+	resultKey  string
+	timeColumn string
+	whereExtra string
+}
+
+func cleanupTableSpecs() []cleanupTableSpec {
+	// pm_files / pm_ingest_batches are intentionally absent. The precise raw
+	// object cleaner owns those rows so their exact MinIO paths cannot disappear
+	// before raw_object_days, and deletes metadata only after dependencies vanish.
+	return []cleanupTableSpec{
+		{name: "pm_aggregation_counter_rollups", resultKey: "counter_rollups_hourly", policyKey: KeyHourlyDays, timeColumn: "window_end", whereExtra: "granularity='hourly'"},
+		{name: "pm_aggregation_counter_rollups", resultKey: "counter_rollups_daily", policyKey: KeyDailyDays, timeColumn: "window_end", whereExtra: "granularity='daily'"},
+		{name: "pm_aggregation_results", resultKey: "results_hourly", policyKey: KeyHourlyDays, timeColumn: "window_end", whereExtra: "granularity='hourly'"},
+		{name: "pm_aggregation_results", resultKey: "results_daily", policyKey: KeyDailyDays, timeColumn: "window_end", whereExtra: "granularity='daily'"},
+		{name: "pm_aggregation_results", resultKey: "results_weekly", policyKey: KeyWeeklyDays, timeColumn: "window_end", whereExtra: "granularity='weekly'"},
+		{name: "pm_aggregation_results", resultKey: "results_monthly", policyKey: KeyMonthlyDays, timeColumn: "window_end", whereExtra: "granularity='monthly'"},
+	}
+}
+
+// CleanupRunner applies aggregate pm.retention settings to compact Counter
+// snapshots and the mixed-granularity result hypertable. Raw file metadata is
+// owned by rawcleanup; sparse hypertables use drop-chunk policies because both
 // tables share one raw_15min_days lifetime.
 type CleanupRunner struct {
 	pool    *pgxpool.Pool
@@ -44,27 +66,9 @@ func (r *CleanupRunner) Run(ctx context.Context, _ *asyncjob.Job) (json.RawMessa
 		r.logger.Warn("retention reload failed; continue with cached values", zap.Error(err))
 	}
 
-	type tableSpec struct {
-		name       string
-		policyKey  PolicyKey
-		resultKey  string
-		timeColumn string
-		whereExtra string
-	}
-	tables := []tableSpec{
-		{name: "pm_files", resultKey: "pm_files", policyKey: KeyRaw15MinDays, timeColumn: "created_at"},
-		{name: "pm_ingest_batches", resultKey: "pm_ingest_batches", policyKey: KeyRaw15MinDays, timeColumn: "started_at"},
-		{name: "pm_aggregation_counter_rollups", resultKey: "counter_rollups_hourly", policyKey: KeyHourlyDays, timeColumn: "window_end", whereExtra: "granularity='hourly'"},
-		{name: "pm_aggregation_counter_rollups", resultKey: "counter_rollups_daily", policyKey: KeyDailyDays, timeColumn: "window_end", whereExtra: "granularity='daily'"},
-		{name: "pm_aggregation_results", resultKey: "results_hourly", policyKey: KeyHourlyDays, timeColumn: "window_end", whereExtra: "granularity='hourly'"},
-		{name: "pm_aggregation_results", resultKey: "results_daily", policyKey: KeyDailyDays, timeColumn: "window_end", whereExtra: "granularity='daily'"},
-		{name: "pm_aggregation_results", resultKey: "results_weekly", policyKey: KeyWeeklyDays, timeColumn: "window_end", whereExtra: "granularity='weekly'"},
-		{name: "pm_aggregation_results", resultKey: "results_monthly", policyKey: KeyMonthlyDays, timeColumn: "window_end", whereExtra: "granularity='monthly'"},
-	}
-
 	result := make(map[string]any)
 	totalDeleted := int64(0)
-	for _, t := range tables {
+	for _, t := range cleanupTableSpecs() {
 		days := r.service.Get(ctx, t.policyKey)
 		if days < MinRetentionDays {
 			r.logger.Warn("retention days too small; skip table",

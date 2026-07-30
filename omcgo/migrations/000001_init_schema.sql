@@ -345,7 +345,7 @@ CREATE TABLE public.alarm_definitions (
 -- Name: TABLE alarm_definitions; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.alarm_definitions IS 'T-0098 告警定义主表（设计 §3.2.2）；442 行典型规模，由 7 个 ne_type XML 文件载入';
+COMMENT ON TABLE public.alarm_definitions IS 'T-0098 告警定义主表（设计 §3.2.2）；442 行典型规模，由 8 个 ne_type XML 文件载入';
 
 
 --
@@ -359,7 +359,7 @@ COMMENT ON COLUMN public.alarm_definitions.identifier IS '告警全局唯一标�
 -- Name: COLUMN alarm_definitions.ne_type; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.alarm_definitions.ne_type IS '网元类型：ENB / GNB / OMC / EPC / EGW / CPE / UPS';
+COMMENT ON COLUMN public.alarm_definitions.ne_type IS '网元类型：ENB / GSM / GNB / OMC / EPC / EGW / CPE / UPS';
 
 
 --
@@ -1289,7 +1289,7 @@ CREATE TABLE public.device_info (
     bandwidth numeric(8,2),
     transmit_power numeric(8,2),
     plmn character varying(40),
-    rf_status character varying(20),
+    rf_status character varying(64),
     cell_status character varying(20),
     mme_status character varying(20),
     sync_status character varying(32),
@@ -1440,7 +1440,7 @@ COMMENT ON COLUMN public.device_info.plmn IS '公共陆地移动网络号（MCC+
 -- Name: COLUMN device_info.rf_status; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_info.rf_status IS 'RF 状态聚合:on/off,多小区时可逗号分隔;由 InfoSyncer.CalcRFStatus 从参数派生。';
+COMMENT ON COLUMN public.device_info.rf_status IS 'RF 状态聚合:on/off,多小区时可逗号分隔;支持最多 9 个小区状态;由 InfoSyncer.CalcRFStatus 从参数派生。';
 
 
 --
@@ -19528,6 +19528,32 @@ ALTER TABLE public.pm_aggregation_task_versions
 
 CREATE INDEX idx_pm_aggregation_task_versions_content_hash
     ON public.pm_aggregation_task_versions (task_id, content_hash);
+
+
+-- Consolidated from pre-release baseline-only migrations: main schema 000002-000005
+
+ALTER TABLE public.pm_tasks
+    ADD COLUMN IF NOT EXISTS planned_end_at timestamp with time zone;
+
+COMMENT ON COLUMN public.pm_tasks.planned_end_at IS
+    'PM adhoc 自建 continuous 任务计划结束时间；NULL 表示老任务或内置任务不设置计划结束。';
+
+ALTER TABLE public.pm_aggregation_tasks
+    ADD COLUMN IF NOT EXISTS planned_end_at timestamp with time zone;
+
+COMMENT ON COLUMN public.pm_aggregation_tasks.planned_end_at IS
+    '流式聚合任务计划结束时间；NULL 表示不设置计划结束。';
+
+ALTER TABLE public.rela_platform_indicator_formula_enb
+    ADD COLUMN IF NOT EXISTS report_key text;
+ALTER TABLE public.rela_platform_indicator_formula_gsm
+    ADD COLUMN IF NOT EXISTS report_key text;
+ALTER TABLE public.rela_platform_indicator_formula_gnb
+    ADD COLUMN IF NOT EXISTS report_key text;
+
+CREATE INDEX IF NOT EXISTS idx_device_tasks_open_method_description
+    ON public.device_tasks (device_sn, method, description, created_at DESC)
+    WHERE status IN ('pending', 'sent');
 
 
 -- +goose Down

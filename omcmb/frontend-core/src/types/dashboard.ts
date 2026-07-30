@@ -136,9 +136,11 @@ export interface RegionDeviceStats {
 export interface TopAlarmDevice {
   deviceSN: string;
   technology: string;
-  deviceName: string;
   alarmCount: number;
-  severity: string;
+  critical: number;
+  major: number;
+  minor: number;
+  warning: number;
 }
 
 /**
@@ -457,7 +459,7 @@ export interface KPITimeSeriesParams {
   granularity?: DashboardKPIGranularity;
 }
 
-export type DashboardKPIGranularity = 'hourly' | 'daily';
+export type DashboardKPIGranularity = 'hourly' | 'daily' | 'weekly';
 
 /**
  * 时间范围计算结果（内部使用）

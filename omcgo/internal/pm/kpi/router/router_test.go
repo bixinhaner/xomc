@@ -249,6 +249,28 @@ func sampleFormulas() []*indicator.PlatformFormula {
 	}
 }
 
+func TestApplyPlatformReportKeysKeepsVendorMappingsIsolated(t *testing.T) {
+	base := "ERAB.EstabInitAttNbr.sum"
+	blq := "ERAB.EstabInitAttNbr.Sum"
+	newRoute := func() *KPIRoute {
+		return &KPIRoute{Counters: []CounterDef{{
+			IndicatorID: "C000010070", ReportKey: base,
+		}}}
+	}
+
+	blqRoute := newRoute()
+	applyPlatformReportKeys(blqRoute, []*indicator.PlatformFormula{{
+		PlatformName: "BLQ", IndicatorID: "C000010070", ReportKey: &blq,
+	}})
+	require.Equal(t, blq, blqRoute.Counters[0].ReportKey)
+
+	blxRoute := newRoute()
+	applyPlatformReportKeys(blxRoute, []*indicator.PlatformFormula{{
+		PlatformName: "BLX", IndicatorID: "C000010070", ReportKey: &base,
+	}})
+	require.Equal(t, base, blxRoute.Counters[0].ReportKey)
+}
+
 func expandedFormulas() []*indicator.PlatformFormula {
 	return append(sampleFormulas(),
 		&indicator.PlatformFormula{IndicatorID: "K-002", PlatformName: "BLQ-LTE-V1", Formula: "TCH_Success/TCH_Request"},

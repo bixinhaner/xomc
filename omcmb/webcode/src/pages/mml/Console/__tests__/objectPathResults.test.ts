@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyFrameToRow, buildDeviceRows, expandObjectPathColumns } from '../adapters';
+import { applyFrameToRow, buildDeviceRows, expandObjectPathColumns, MAX_OBJECT_PATH_COLUMNS } from '../adapters';
 import type { ResultColumn, ResultRow } from '../types';
 import type { DeviceTaskResultItem } from '@core/types/mml';
 
@@ -110,5 +110,22 @@ describe('GPV 对象路径结果展示', () => {
     expect(keyAndPath(expandObjectPathColumns([objectColumn, leafColumn], [row]))).toEqual([
       { key: 'object:child:0', path: leafColumn.path },
     ]);
+  });
+
+  it('大对象路径最多展开 80 个动态列，避免刷新历史结果时卡住页面', () => {
+    const row = {
+      ...pendingRow,
+      cells: Object.fromEntries(
+        Array.from({ length: MAX_OBJECT_PATH_COLUMNS + 20 }, (_v, i) => [
+          `${OBJECT_PATH}Param${i}`,
+          String(i),
+        ]),
+      ),
+    };
+
+    const result = expandObjectPathColumns(columns, [row]);
+    expect(result).toHaveLength(MAX_OBJECT_PATH_COLUMNS);
+    expect(result[0].path).toBe(`${OBJECT_PATH}Param0`);
+    expect(result[MAX_OBJECT_PATH_COLUMNS - 1].path).toBe(`${OBJECT_PATH}Param${MAX_OBJECT_PATH_COLUMNS - 1}`);
   });
 });

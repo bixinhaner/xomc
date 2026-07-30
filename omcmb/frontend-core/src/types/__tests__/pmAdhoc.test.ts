@@ -61,6 +61,13 @@ describe('mapBackendAdhocTask — device_sns 健壮性（产品/频段/全网维
     const t = mapBackendAdhocTask({ ...baseBackendTask(), visibility: 'public' });
     expect(t.visibility).toBe('public');
   });
+
+  it('planned_end_at 映射为 plannedEndAt，缺失时保持兼容', () => {
+    const plannedEndAt = '2026-07-01T00:00:00Z';
+    expect(mapBackendAdhocTask({ ...baseBackendTask(), planned_end_at: plannedEndAt }).plannedEndAt)
+      .toBe(plannedEndAt);
+    expect(mapBackendAdhocTask(baseBackendTask()).plannedEndAt).toBeUndefined();
+  });
 });
 
 function baseBackendResult(): BackendAdhocResultRow {

@@ -189,26 +189,36 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	response.OK(c, result)
 }
 
+const failureCodeOperatorTerminated = "OPERATOR_TERMINATED"
+
 // failureReasonZH 把 sub_task.failure_reason 翻成 UI 同款中文（与前端 i18n
-// software.failureCode.* + 'task terminated by operator' 特例对齐）。
+// software.failureCode.* + 终止任务历史兜底值对齐）。
 // 后端不维护多语言资源；只针对当前已知 code 给出 zh-CN 显示。前端 i18n bundle
 // 仍是真值源，本表只在 CSV 导出场景"近似还原"显示文本。
 var failureReasonZH = map[string]string{
-	"DEVICE_NOT_FOUND":    "任务无法启动，设备不存在",
-	"DEVICE_LOCKED":       "任务无法启动，设备已在其他任务中运行",
-	"DEVICE_OFFLINE":      "任务无法启动，设备离线",
-	"COMMAND_PUSH_FAILED": "任务无法启动，下发命令失败",
-	"DOWNLOAD_TIMEOUT":    "下载未启动，未收到设备 DownloadResponse",
-	"DOWNLOAD_FILE_ERROR": "下载失败，找不到目标文件",
-	"DOWNLOAD_FAULT":      "下载失败，设备拒绝 Download 请求",
-	"UPLOAD_FAULT":        "上传失败，设备拒绝 Upload / SetParameterValues 请求",
-	"TC_FAULT":            "文件传输失败，设备 TransferComplete 异常",
-	"UPGRADE_5G_FAILED":   "升级失败，5G 升级状态异常",
-	"TASK_TIMEOUT":        "任务超时，未收到设备 TransferComplete",
-	"FIRMWARE_NOT_FOUND":  "任务无法启动，固件文件不存在",
-	"INTERNAL_ERROR":      "系统内部错误",
+	"DEVICE_NOT_FOUND":              "任务无法启动，设备不存在",
+	"DEVICE_LOCKED":                 "任务无法启动，设备已在其他任务中运行",
+	"DEVICE_OFFLINE":                "任务无法启动，设备离线",
+	"COMMAND_PUSH_FAILED":           "任务无法启动，下发命令失败",
+	"DOWNLOAD_TIMEOUT":              "下载响应超时，未收到设备 DownloadResponse",
+	"DOWNLOAD_FILE_ERROR":           "下载失败，找不到目标文件",
+	"DOWNLOAD_FAULT":                "下载失败，设备拒绝 Download 请求",
+	"UPLOAD_FAULT":                  "上传失败，设备拒绝 Upload / SetParameterValues 请求",
+	"ROLLBACK_ENABLE_CHECK_TIMEOUT": "回退能力检查超时，未收到设备 GetParameterValuesResponse",
+	"ROLLBACK_APPLY_TIMEOUT":        "回退执行超时，下发 SetParameterValues 后未收到设备重启完成上报",
+	"ROLLBACK_ENABLE_CHECK_FAULT":   "回退能力检查失败，设备拒绝 GetParameterValues 请求",
+	"ROLLBACK_SET_FAULT":            "回退失败，设备拒绝 SetParameterValues 请求",
+	"ROLLBACK_NOT_SUPPORTED":        "回退失败，设备不支持回退",
+	"TC_FAULT":                      "文件传输失败，设备 TransferComplete 异常",
+	"UPGRADE_5G_FAILED":             "升级失败，5G 升级状态异常",
+	"TASK_TIMEOUT":                  "任务超时，未收到设备 TransferComplete",
+	"FIRMWARE_NOT_FOUND":            "任务无法启动，固件文件不存在",
+	"INTERNAL_ERROR":                "系统内部错误",
+	failureCodeOperatorTerminated:   "被操作者终止",
 	// SoftwareService.TerminateUpgrade 给被终止 sub_task 写的固定字符串
 	"task terminated by operator": "被操作者终止",
+	// 旧版 UFTE 设备列表曾在 failure_reason 为空时补中文短标，导出侧保留兼容。
+	"终止": "被操作者终止",
 }
 
 func translateFailureReason(raw string) string {
@@ -231,6 +241,10 @@ func translateDeviceStatus(s string) string {
 		return "上传中"
 	case "awaiting_tc":
 		return "等待 TransferComplete"
+	case "rollback_checking":
+		return "回退能力检查中"
+	case "rolling_back":
+		return "回退中"
 	case "verifying":
 		return "校验中"
 	case "suspended":

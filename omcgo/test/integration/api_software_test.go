@@ -123,21 +123,21 @@ func TestUpgradeSubTaskJSONFields(t *testing.T) {
 	taskID := uuid.New()
 	fwID := uuid.New()
 	subTask := software.UpgradeSubTask{
-		ID:              uuid.New(),
-		TaskID:          taskID,
-		DeviceID:        uuid.New(),
-		FirmwareID:      &fwID,
-		Status:          software.UpgradeDownloading,
-		DeviceSN:        "ENB00001",
-		OriVersion:      "V1.0.0",
-		DestVersion:     "V1.1.0",
-		CommandKey:      "cmd-123",
-		FailureReason:  "none",
+		ID:               uuid.New(),
+		TaskID:           taskID,
+		DeviceID:         uuid.New(),
+		FirmwareID:       &fwID,
+		Status:           software.UpgradeDownloading,
+		DeviceSN:         "ENB00001",
+		OriVersion:       "V1.0.0",
+		DestVersion:      "V1.1.0",
+		CommandKey:       "cmd-123",
+		FailureReason:    "none",
 		PreSuspendStatus: "downloading",
-		RetryCount:      0,
-		MaxRetries:      3,
-		CreatedAt:       software.JSONTime(time.Now()),
-		UpdatedAt:       software.JSONTime(time.Now()),
+		RetryCount:       0,
+		MaxRetries:       3,
+		CreatedAt:        software.JSONTime(time.Now()),
+		UpdatedAt:        software.JSONTime(time.Now()),
 	}
 
 	data, err := json.Marshal(subTask)
@@ -366,8 +366,8 @@ func (s *swHSubTaskRepoStub) BatchCreate(_ context.Context, tasks []*software.Up
 	}
 	return nil
 }
-func (s *swHSubTaskRepoStub) FailStale(_ context.Context, _ software.StaleTimeouts) (map[uuid.UUID]int64, error) {
-	return nil, nil
+func (s *swHSubTaskRepoStub) FailStale(_ context.Context, _ software.StaleTimeouts) (software.StaleFailures, error) {
+	return software.StaleFailures{}, nil
 }
 func (s *swHSubTaskRepoStub) DeleteByTaskID(_ context.Context, _ uuid.UUID) error { return nil }
 func (s *swHSubTaskRepoStub) ListAll(_ context.Context, _ software.AllSubTaskFilter) (*model.ListResponse[software.UpgradeSubTaskWithTaskName], error) {
@@ -388,12 +388,16 @@ func (s *swHSubTaskRepoStub) UpdateDestVersionByID(_ context.Context, _ uuid.UUI
 
 type swHFirmwareRepoStub struct{}
 
-func (s *swHFirmwareRepoStub) Create(_ context.Context, _ *software.FirmwareVersion) error { return nil }
+func (s *swHFirmwareRepoStub) Create(_ context.Context, _ *software.FirmwareVersion) error {
+	return nil
+}
 func (s *swHFirmwareRepoStub) GetByID(_ context.Context, _ uuid.UUID) (*software.FirmwareVersion, error) {
 	return nil, nil
 }
 func (s *swHFirmwareRepoStub) List(_ context.Context, _ software.FirmwareFilter) (*model.ListResponse[software.FirmwareVersion], error) {
 	return model.NewListResponse([]software.FirmwareVersion{}, 0, 1, 20), nil
 }
-func (s *swHFirmwareRepoStub) Update(_ context.Context, _ *software.FirmwareVersion) error { return nil }
-func (s *swHFirmwareRepoStub) Delete(_ context.Context, _ uuid.UUID) error                 { return nil }
+func (s *swHFirmwareRepoStub) Update(_ context.Context, _ *software.FirmwareVersion) error {
+	return nil
+}
+func (s *swHFirmwareRepoStub) Delete(_ context.Context, _ uuid.UUID) error { return nil }

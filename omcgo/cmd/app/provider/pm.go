@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
@@ -85,15 +86,40 @@ func initPMModule(c *Container) error {
 	// #532 P2：双池注入——聚合源 + perf_indicators_* 在时序库（TsPool），
 	// 启用集表 enabled_pm_indicators_* 只在主库（PgPool）。落库侧全存已启用需读启用集走主库。
 	pmAggregator := aggregator.NewWithPools(c.TsPool, c.PgPool, kpiRouter, logger.Named("aggregator"))
+	pmAggregator.SetTimezoneProvider(c.SystemTimezone)
 
 	// T-0164 收尾 G5-Gap-2：手动重算入口需 asyncjob.Repository
 	pmAsyncJobRepo := asyncjob.NewPgRepository(c.PgPool)
 
 	// T-0164-P7 / G7：adhoc 任务 REST 入口（worker 端跑实际执行）。
 	pmAdhocRepo := buildPMAdhocRepo(c.PgPool, c.TsPool, c.EventBus, logger)
+	pmAdhocRepo.SetTimezoneProvider(c.SystemTimezone)
 	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
 	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, nil, logger.Named("adhoc")).
-		WithEnabledMetricSelectionService(adhoc.NewEnabledMetricSelectionService(enabledRepo))
+		WithEnabledMetricSelectionService(adhoc.NewEnabledMetricSelectionService(enabledRepo)).
+		WithTimezoneProvider(c.SystemTimezone)
+	if c.Redis != nil {
+		streamCfg := pmstream.ConfigFromEnv()
+		progressStore := pmstream.NewRedisWindowStore(c.Redis, streamCfg.WindowTTL)
+		progressTasks := pmstream.NewPgTaskRepository(c.PgPool, c.EventBus)
+		backfillCtx, backfillCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		progressVersions, loadErr := progressTasks.LoadMatchable(backfillCtx, time.Now().UTC())
+		backfilled := false
+		if loadErr == nil {
+			backfilled, loadErr = pmstream.NewWindowRepository(c.TsPool).
+				TryBackfillVersionMetadata(backfillCtx, pmstream.BuildTaskSnapshot(progressVersions))
+		}
+		backfillCancel()
+		if loadErr != nil {
+			logger.Warn("backfill PM progress version metadata; worker will retry",
+				zap.Error(loadErr))
+		} else if !backfilled {
+			logger.Info("PM progress version metadata backfill already owned by worker")
+		}
+		pmAdhocHandler.WithProgressService(
+			pmstream.NewProgressService(c.TsPool, progressStore, progressTasks),
+		)
+	}
 
 	// T-0174 阶段 1：指标查询页"查询模板"REST 入口（5 CRUD：list/get/create/update/delete）。
 	pmQueryTemplateRepo := querytemplate.NewPgRepository(c.PgPool)

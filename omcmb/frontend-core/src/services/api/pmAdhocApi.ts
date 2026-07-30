@@ -30,6 +30,20 @@ interface ListResponse {
 interface ResultsResponse {
   items: BackendAdhocResultRow[];
   total: number;
+  progress_items?: BackendAdhocResultRow[];
+  progress_total?: number;
+  period_progress?: Array<{
+    granularity: string;
+    window_start: string;
+    window_end: string;
+    entity_key: string;
+    revision: number;
+    version_effective_from: string;
+    version_effective_to?: string;
+    received_slots: number;
+    expected_slots: number;
+  }>;
+  progress_state?: 'available' | 'unavailable' | 'not_applicable';
 }
 
 interface RunsResponse {
@@ -90,6 +104,7 @@ export const pmAdhocApi = {
       expire_days: input.expireDays,
       visibility: input.visibility,
     };
+    if (input.plannedEndAt !== undefined) payload.planned_end_at = input.plannedEndAt;
     if (input.windowStart) payload.window_start = input.windowStart;
     if (input.windowEnd) payload.window_end = input.windowEnd;
     // T-0193：小区/PLMN 白名单——非空才透传（空=不过滤，保持现状语义）。
@@ -110,12 +125,13 @@ export const pmAdhocApi = {
       payload.granularities = ['hourly', 'daily', 'weekly', 'monthly'];
     }
     if (input.visibility !== undefined) payload.visibility = input.visibility;
+    if (input.plannedEndAt !== undefined) payload.planned_end_at = input.plannedEndAt;
     if (input.windowStart) payload.window_start = input.windowStart;
     if (input.windowEnd) payload.window_end = input.windowEnd;
     if (input.objectLdns && input.objectLdns.length > 0) {
       payload.object_ldns = input.objectLdns;
     }
-    const { data } = await http.patch<{ id: string }>(`/pm/adhoc/tasks/${id}`, payload);
+    const { data } = await http.put<{ id: string }>(`/pm/adhoc/tasks/${id}`, payload);
     return data;
   },
   async cancel(id: string): Promise<void> {
@@ -141,7 +157,25 @@ export const pmAdhocApi = {
     objectLdns?: string[],
     weekdays?: number[],
     hours?: number[],
-  ): Promise<{ rows: AdhocResultRow[]; total: number }> {
+    includePartial = false,
+  ): Promise<{
+    rows: AdhocResultRow[];
+    total: number;
+    progressRows: AdhocResultRow[];
+    progressTotal: number;
+    periodProgress: Array<{
+      granularity: string;
+      windowStart: string;
+      windowEnd: string;
+      entityKey: string;
+      revision: number;
+      versionEffectiveFrom: string;
+      versionEffectiveTo?: string;
+      receivedSlots: number;
+      expectedSlots: number;
+    }>;
+    progressState: 'available' | 'unavailable' | 'not_applicable';
+  }> {
     // 大时间段（页签1 仪表盘）：startTime/endTime 为 RFC3339，透传为 start_time/end_time query 参数。
     // PM-DASH-DIMFILTER：维度子集过滤——本端点 query 是手动 snake_case 构造（不靠 Axios 自动转换），故新参数手写 snake_case。
     //
@@ -160,14 +194,33 @@ export const pmAdhocApi = {
     // #599：星期/小时段后端过滤（逗号分隔 int，全选/空不传 = 不过滤，向后兼容）。
     if (weekdays?.length && weekdays.length < 7) params.weekdays = weekdays.join(',');
     if (hours?.length && hours.length < 24) params.hours = hours.join(',');
+    if (includePartial) params.include_partial = true;
     const { data } = await http.get<ResultsResponse>(`/pm/adhoc/tasks/${id}/results`, {
       params,
       // 数组按重复键序列化（object_ldns=a&object_ldns=b），标量原样拼接——不引第三方 qs 依赖。
       paramsSerializer: (p: Record<string, unknown>) => serializeRepeatedParams(p),
     });
     const rows = (data.items ?? []).map(mapBackendAdhocResult);
+    const progressRows = (data.progress_items ?? []).map(mapBackendAdhocResult);
     // T-0194：total 是后端真实 COUNT(*)，rows.length<total 即被 limit 截断（前端据此提示）。
-    return { rows, total: data.total ?? rows.length };
+    return {
+      rows,
+      total: data.total ?? rows.length,
+      progressRows,
+      progressTotal: data.progress_total ?? progressRows.length,
+      periodProgress: (data.period_progress ?? []).map((progress) => ({
+        granularity: progress.granularity,
+        windowStart: progress.window_start,
+        windowEnd: progress.window_end,
+        entityKey: progress.entity_key,
+        revision: progress.revision,
+        versionEffectiveFrom: progress.version_effective_from,
+        versionEffectiveTo: progress.version_effective_to,
+        receivedSlots: progress.received_slots,
+        expectedSlots: progress.expected_slots,
+      })),
+      progressState: data.progress_state ?? 'not_applicable',
+    };
   },
   async filterOptions(id: string): Promise<AdhocFilterOptions> {
     // PM-DASH-DIMFILTER：列出本任务实际聚合到的子集选项（后端 SELECT DISTINCT，不被结果上限截断）。
@@ -200,6 +253,7 @@ const mockTasks: AdhocTask[] = [
     technology: 'lte',
     isBuiltin: false,
     expireDays: 60,
+    plannedEndAt: '2026-06-22T01:00:00Z',
     visibility: 'private',
     status: 'succeeded',
     progress: 100,
@@ -237,6 +291,7 @@ export const pmAdhocMock: typeof pmAdhocApi = {
       technology: input.technology,
       isBuiltin: input.isBuiltin ?? false,
       expireDays: input.expireDays ?? 60,
+      plannedEndAt: input.plannedEndAt,
       visibility: input.visibility ?? 'private',
       objectLdns: input.objectLdns && input.objectLdns.length > 0 ? input.objectLdns : undefined,
       status: 'pending',
@@ -256,6 +311,7 @@ export const pmAdhocMock: typeof pmAdhocApi = {
       if (input.deviceSns !== undefined) t.deviceSns = input.deviceSns;
       if (input.granularities !== undefined) t.granularities = input.granularities;
       if (input.visibility !== undefined) t.visibility = input.visibility;
+      if (input.plannedEndAt !== undefined) t.plannedEndAt = input.plannedEndAt;
       if (input.windowStart !== undefined) t.windowStart = input.windowStart;
       if (input.windowEnd !== undefined) t.windowEnd = input.windowEnd;
       t.objectLdns = input.objectLdns && input.objectLdns.length > 0 ? input.objectLdns : undefined;
@@ -278,7 +334,10 @@ export const pmAdhocMock: typeof pmAdhocApi = {
     if (i >= 0) mockTasks.splice(i, 1);
   },
   async results() {
-    return { rows: [], total: 0 };
+    return {
+      rows: [], total: 0, progressRows: [], progressTotal: 0, periodProgress: [],
+      progressState: 'not_applicable' as const,
+    };
   },
   async filterOptions() {
     return { dimension: 'device' as AdhocDimension, options: [] };

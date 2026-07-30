@@ -41,7 +41,7 @@ import (
 // 失败兜底：
 //   - SOAP Fault（CPE 拒收 SPV/GPV）→ HandleSetParamsResponse / HandleGetParamsResponseForRollback
 //     按 command_key 反查后立即标 failed
-//   - 30min 等不到 reboot → reaper（TransferComplete 30min cutoff）
+//   - 30min 等不到 reboot → reaper（rebooting 长超时窗口）
 type RollbackExecutor struct {
 	taskRepo       TaskRepository
 	subTaskRepo    SubTaskRepository
@@ -104,7 +104,7 @@ func (e *RollbackExecutor) RollbackOne(ctx context.Context, subTask *UpgradeSubT
 		return
 	}
 	if dev.Status != model.DeviceActive {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, device is %s. Please retry when device is online.", dev.Status), FailureDeviceOffline)
 		return
 	}
@@ -134,18 +134,18 @@ func (e *RollbackExecutor) RollbackOne(ctx context.Context, subTask *UpgradeSubT
 }
 
 // pushEnableCheckGPV 推送 ROLLBACK_ENABLE GPV 命令，状态翻 Downloading
-// （借用 5min RPCResponse 超时分支让 reaper 兜底）。CommandKey 形如
+// （借用短 RPCResponse 超时分支让 reaper 兜底）。CommandKey 形如
 // "rollback-enable-check-{sub_task_id}"，方便后续 GPV response 反查。
 func (e *RollbackExecutor) pushEnableCheckGPV(ctx context.Context, subTask *UpgradeSubTask, dev *model.Device, standardEnablePath string) {
 	enablePath := e.translatePath(ctx, dev, standardEnablePath)
 	cmdKey := rollbackEnableCmdKeyPrefix + subTask.ID.String()
 
 	paramsJSON, err := json.Marshal(map[string]interface{}{
-		"parameter_names": []string{enablePath},
-		"command_key":     cmdKey,
+		"names":       []string{enablePath},
+		"command_key": cmdKey,
 	})
 	if err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, internal error: %v", err), FailureInternalError)
 		return
 	}
@@ -156,7 +156,7 @@ func (e *RollbackExecutor) pushEnableCheckGPV(ctx context.Context, subTask *Upgr
 		Source:     devtask.TaskSourceSystem,
 		CommandKey: cmdKey,
 	}); err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, failed to push enable-check command: %v", err), FailureCommandPush)
 		return
 	}
@@ -167,8 +167,8 @@ func (e *RollbackExecutor) pushEnableCheckGPV(ctx context.Context, subTask *Upgr
 		e.logger.Error("update rollback sub-task command_key (stage 1)", zap.Error(err))
 	}
 
-	// 状态翻 Downloading：reaper 配置里 'downloading' 走 RPCResponse 5min 超时，
-	// 跟"等 CPE 回 GPV"的预期一致；rebooting/uploading 走 30min 太长。
+	// 状态翻 Downloading：DB 状态保持兼容，UFTE 展示层会按回退任务映射为
+	// rollback_checking；reaper 也会按 task_type + command_key 输出回退专用超时原因。
 	if err := e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeDownloading, ""); err != nil {
 		e.logger.Error("update rollback sub-task to downloading (stage 1)", zap.Error(err))
 	}
@@ -214,7 +214,7 @@ func (e *RollbackExecutor) dispatchRollbackSPV(ctx context.Context, subTask *Upg
 		"command_key": subTask.ID.String(),
 	})
 	if err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, internal error: %v", err), FailureInternalError)
 		return
 	}
@@ -225,7 +225,7 @@ func (e *RollbackExecutor) dispatchRollbackSPV(ctx context.Context, subTask *Upg
 		Source:     devtask.TaskSourceSystem,
 		CommandKey: subTask.ID.String(),
 	}); err != nil {
-		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
 		e.FailRollbackSubTask(ctx, subTask, fmt.Sprintf("Rollback can not be started, failed to send set params command to device: %v", err), FailureCommandPush)
 		return
 	}
@@ -314,7 +314,7 @@ func (e *RollbackExecutor) HandleEnableCheckResponse(ctx context.Context, device
 		e.FailRollbackSubTask(ctx, subTask,
 			fmt.Sprintf("Rollback can not be started, enable check rejected by device. FaultCode: %d, FaultString: %s",
 				faultCode, faultStr),
-			FailureInternalError)
+			FailureRollbackEnableCheckFault)
 		return
 	}
 
@@ -331,7 +331,7 @@ func (e *RollbackExecutor) HandleEnableCheckResponse(ctx context.Context, device
 	if !isRollbackEnabled(enableValue) {
 		e.FailRollbackSubTask(ctx, subTask,
 			fmt.Sprintf("Rollback can not be started, device does not support rollback (ROLLBACK_ENABLE=%q).", enableValue),
-			FailureInternalError)
+			FailureRollbackNotSupported)
 		return
 	}
 
@@ -373,7 +373,7 @@ func isRollbackEnabled(v string) bool {
 }
 
 func (e *RollbackExecutor) acquireDeviceLock(ctx context.Context, deviceSN string, taskID interface{ String() string }) (bool, error) {
-	key := fmt.Sprintf("software:upgrade:active:%s", deviceSN)
+	key := upgradeDeviceLockKey(deviceSN)
 	ok, err := e.redis.SetNX(ctx, key, taskID.String(), time.Hour).Result()
 	if err != nil {
 		return false, fmt.Errorf("acquire device lock: %w", err)
@@ -381,9 +381,13 @@ func (e *RollbackExecutor) acquireDeviceLock(ctx context.Context, deviceSN strin
 	return ok, nil
 }
 
-func (e *RollbackExecutor) releaseDeviceLock(ctx context.Context, deviceSN string) {
-	key := fmt.Sprintf("software:upgrade:active:%s", deviceSN)
-	e.redis.Del(ctx, key)
+func (e *RollbackExecutor) releaseDeviceLock(ctx context.Context, deviceSN string, subTaskID uuid.UUID) {
+	if err := releaseOwnedDeviceLock(ctx, e.redis, deviceSN, subTaskID); err != nil {
+		e.logger.Warn("release rollback device lock",
+			zap.String("sub_task_id", subTaskID.String()),
+			zap.String("device_sn", deviceSN),
+			zap.Error(err))
+	}
 }
 
 // FailRollbackSubTask marks a sub-task as failed and finalizes the parent task.
@@ -392,7 +396,7 @@ func (e *RollbackExecutor) FailRollbackSubTask(ctx context.Context, subTask *Upg
 		e.logger.Error("fail rollback sub-task", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
 	}
 	if subTask.DeviceSN != "" {
-		e.releaseDeviceLock(ctx, subTask.DeviceSN)
+		e.releaseDeviceLock(ctx, subTask.DeviceSN, subTask.ID)
 	}
 	if err := e.taskRepo.IncrementCounts(ctx, subTask.TaskID, 0, 1); err != nil {
 		e.logger.Error("increment rollback fail count", zap.Error(err))

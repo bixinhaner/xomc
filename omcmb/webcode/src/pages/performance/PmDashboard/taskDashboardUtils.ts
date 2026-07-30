@@ -50,6 +50,157 @@ export interface MetricChart {
   compareBucketEnds?: string[];
 }
 
+export type MetricDisplayNameMap = ReadonlyMap<string, string>;
+
+export interface MetricSeriesIdentity {
+  key: string;
+  name: string;
+}
+
+export interface TrustedSeriesSources {
+  deviceSns?: string[];
+  objectLdns?: string[];
+  filterOptions?: Array<{ value: string; label: string }>;
+  selectedKeys?: string[];
+}
+
+export interface SeriesLabelPrefixes {
+  network: string;
+  band: string;
+  deviceGroup: string;
+  product: string;
+  aggregateGroup: string;
+}
+
+export function formatMetricChartDisplayName(
+  metricPath: string,
+  displayName?: string,
+): string {
+  const name = displayName?.trim();
+  if (!name || name === metricPath) return metricPath;
+  return `${name}（${metricPath}）`;
+}
+
+function metricChartDisplayNameOf(
+  metricPath: string,
+  displayName: string | undefined,
+  metricDisplayNames?: MetricDisplayNameMap,
+): string {
+  const name = displayName?.trim();
+  if (name && name !== metricPath) return formatMetricChartDisplayName(metricPath, name);
+  return formatMetricChartDisplayName(metricPath, metricDisplayNames?.get(metricPath));
+}
+
+function trustedSeriesLabelOf(
+  key: string,
+  dimension: AdhocDimension,
+  labels: SeriesLabelPrefixes,
+  name?: string,
+): string {
+  switch (dimension) {
+    case 'network':
+      return labels.network;
+    case 'device':
+      return key;
+    case 'band': {
+      const value = key.startsWith('Band=') ? key.slice('Band='.length) : key;
+      return `${labels.band} ${value}`;
+    }
+    case 'device_group': {
+      if (name) return `${labels.deviceGroup} ${name}`;
+      const value = key.startsWith('DeviceGroup=')
+        ? key.slice('DeviceGroup='.length)
+        : key;
+      return `${labels.deviceGroup} ${value.slice(0, 8)}`;
+    }
+    case 'product':
+      if (name) {
+        return name.startsWith(`${labels.product} `) ? name : `${labels.product} ${name}`;
+      }
+      return `${labels.product} ${key.slice(0, 8)}`;
+    case 'aggregate_group':
+      return `${labels.aggregateGroup} ${key}`;
+    default:
+      return key;
+  }
+}
+
+/**
+ * #198：为“完全无结果”的图卡派生系列身份。
+ *
+ * 仅使用任务配置或 filter-options 这类可信骨架；无法确定身份时返回空数组，
+ * 禁止用 __unknown__ 之类的假系列冒充真实对象。
+ */
+export function buildTrustedSeriesIdentities(
+  dimension: AdhocDimension,
+  sources: TrustedSeriesSources,
+  labels: SeriesLabelPrefixes,
+): MetricSeriesIdentity[] {
+  if (dimension === 'network') {
+    return [{
+      key: '__network__',
+      name: trustedSeriesLabelOf('__network__', dimension, labels),
+    }];
+  }
+
+  let entries: Array<{ key: string; label?: string }>;
+  if (dimension === 'device') {
+    entries = (sources.deviceSns ?? []).map((key) => ({ key }));
+  } else if (dimension === 'aggregate_group') {
+    entries = (sources.objectLdns ?? []).map((key) => ({ key }));
+  } else {
+    const selected = new Set(sources.selectedKeys ?? []);
+    entries = (sources.filterOptions ?? [])
+      .filter((option) => selected.size === 0 || selected.has(option.value))
+      .map((option) => ({ key: option.value, label: option.label }));
+  }
+
+  const seen = new Set<string>();
+  return entries.flatMap(({ key, label }) => {
+    if (!key || seen.has(key)) return [];
+    seen.add(key);
+    return [{
+      key,
+      name: trustedSeriesLabelOf(key, dimension, labels, label),
+    }];
+  });
+}
+
+/**
+ * #198：任务配置是图卡全集的可信骨架，结果行只负责提供真实点。
+ *
+ * 某个 metric_path 在当前筛选/粒度完全没有结果行时，仍按任务配置生成空图卡；
+ * series 只保留身份且 values 为空，后续扩轴统一补 '-'，这里绝不制造 0 或结果行。
+ */
+export function ensureConfiguredMetricCharts(
+  charts: MetricChart[],
+  metricPaths: string[] | undefined,
+  seriesIdentities: MetricSeriesIdentity[],
+  metricDisplayNames?: MetricDisplayNameMap,
+): MetricChart[] {
+  if (!metricPaths || metricPaths.length === 0) return charts;
+  const byMetric = new Map(charts.map((chart) => [chart.metricPath, chart]));
+  const seen = new Set<string>();
+  const out: MetricChart[] = [];
+  metricPaths.forEach((metricPath) => {
+    if (seen.has(metricPath)) return;
+    seen.add(metricPath);
+    const chart = byMetric.get(metricPath);
+    if (chart) {
+      out.push(chart);
+      return;
+    }
+    out.push({
+      metricPath,
+      displayName: formatMetricChartDisplayName(metricPath, metricDisplayNames?.get(metricPath)),
+      buckets: [],
+      bucketEnds: [],
+      series: seriesIdentities.map(({ key, name }) => ({ key, name, values: [] })),
+    });
+  });
+  return out;
+}
+
 /**
  * 派生系列键：图内据此分多条线。维度决定取哪个字段。
  * network 维度恒为单线，返回固定键 '__network__'。
@@ -126,8 +277,29 @@ export function filterChartsByMetricPaths(
   metricPaths: string[] | undefined,
 ): MetricChart[] {
   if (!metricPaths || metricPaths.length === 0) return charts;
+  const byMetric = new Map(charts.map((c) => [c.metricPath, c]));
+  const out: MetricChart[] = [];
+  const seen = new Set<string>();
+  metricPaths.forEach((metricPath) => {
+    if (seen.has(metricPath)) return;
+    seen.add(metricPath);
+    const chart = byMetric.get(metricPath);
+    if (chart) out.push(chart);
+  });
+  return out;
+}
+
+/**
+ * #192：按任务 metric_paths 过滤原始结果行。必须在 buildMetricCharts 前执行，
+ * 防止配置外指标参与 device_group/product 等维度的固定 legend 全集。
+ */
+export function filterRowsByMetricPaths(
+  rows: AdhocResultRow[],
+  metricPaths: string[] | undefined,
+): AdhocResultRow[] {
+  if (!metricPaths || metricPaths.length === 0) return rows;
   const set = new Set(metricPaths);
-  return charts.filter((c) => set.has(c.metricPath));
+  return rows.filter((row) => set.has(row.metricPath));
 }
 
 /**
@@ -141,6 +313,7 @@ export function buildMetricCharts(
   dimension: AdhocDimension,
   granularity: string,
   locale: Locale = 'zh-CN',
+  metricDisplayNames?: MetricDisplayNameMap,
 ): MetricChart[] {
   const filtered = rows.filter((r) => r.granularity === granularity);
   if (filtered.length === 0) return [];
@@ -167,7 +340,7 @@ export function buildMetricCharts(
     let m = byMetric.get(r.metricPath);
     if (!m) {
       m = {
-        displayName: r.displayName || r.metricPath,
+        displayName: metricChartDisplayNameOf(r.metricPath, r.displayName, metricDisplayNames),
         unit: undefined,
         unitConflict: false,
         buckets: new Set(),

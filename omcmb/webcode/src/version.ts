@@ -2,8 +2,9 @@
 //
 // 构建期由 Vite 环境变量 VITE_APP_VERSION 注入,链路为:
 //   build-release.sh -v <X.Y.Z>
-//     → VERSION=<X.Y.Z>-<YYYYMMDD-HHMM>（追加时间戳,保证每次发布都唯一变化）
-//     → docker build --build-arg APP_VERSION=$VERSION
+//     → VERSION=<X.Y.Z>-<YYYYMMDD-HHMM>（交付包和镜像 tag 使用完整版本）
+//     → release 渠道的 APP_VERSION=<X.Y.Z>；test 渠道的 APP_VERSION 使用完整版本
+//     → docker build --build-arg APP_VERSION=$APP_VERSION
 //     → Dockerfile.web: ENV VITE_APP_VERSION=$APP_VERSION
 //     → vite build 把它内联进产物
 //

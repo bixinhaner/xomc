@@ -702,29 +702,62 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// CalcUECount 从 device_parameters 读取当前接入 UE 数。
+var indexedUECountPathPattern = regexp.MustCompile(`^Device\.DeviceInfo\.(\d+)\.UE_Count$`)
+
+// CalcUECount 从 device_parameters 汇总当前接入 UE 数。
 //
-// 读取优先级：
-//  1. Device.DeviceInfo.UE_Count          （通用标准路径，param_models 已收录）
-//  2. Device.Services.FAPService.1.X_COM_ConnectedUECount  （LTE 厂商扩展路径）
-//  3. 返回 0                              （参数缺失或解析失败）
+// 标准路径按物理小区聚合：根路径表示小区 1，数字实例路径表示对应小区。
+// 若根路径与 ".1" 同时存在，根路径优先，避免重复计数。仅当不存在任何合法
+// 标准路径值时，才回退 LTE 厂商扩展路径。
 //
-// 返回值保证 >= 0；非数字字符串或负数均视为 0。
+// 返回值保证 >= 0；空值、非数字字符串或负数不参与聚合。
 func CalcUECount(params map[string]string) int {
-	candidates := []string{
-		"Device.DeviceInfo.UE_Count",
-		"Device.Services.FAPService.1.X_COM_ConnectedUECount",
+	const (
+		rootPath     = "Device.DeviceInfo.UE_Count"
+		fallbackPath = "Device.Services.FAPService.1.X_COM_ConnectedUECount"
+	)
+
+	countsByCell := make(map[int]int)
+	if n, ok := parseNonNegativeInt(params[rootPath]); ok {
+		countsByCell[1] = n
 	}
-	for _, path := range candidates {
-		v, ok := params[path]
-		if !ok || v == "" {
+
+	for path, value := range params {
+		matches := indexedUECountPathPattern.FindStringSubmatch(path)
+		if len(matches) != 2 {
 			continue
 		}
-		n, err := strconv.Atoi(strings.TrimSpace(v))
-		if err != nil || n < 0 {
+		cellIndex, err := strconv.Atoi(matches[1])
+		if err != nil || cellIndex <= 0 {
 			continue
 		}
+		if cellIndex == 1 {
+			if _, rootExists := countsByCell[1]; rootExists {
+				continue
+			}
+		}
+		if n, ok := parseNonNegativeInt(value); ok {
+			countsByCell[cellIndex] = n
+		}
+	}
+
+	if len(countsByCell) > 0 {
+		total := 0
+		for _, count := range countsByCell {
+			total += count
+		}
+		return total
+	}
+	if n, ok := parseNonNegativeInt(params[fallbackPath]); ok {
 		return n
 	}
 	return 0
+}
+
+func parseNonNegativeInt(value string) (int, bool) {
+	if strings.TrimSpace(value) == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	return n, err == nil && n >= 0
 }

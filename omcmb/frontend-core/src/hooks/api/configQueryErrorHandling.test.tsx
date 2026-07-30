@@ -7,7 +7,8 @@ import { useAppStore } from '../../store/appStore';
 import { useUserStore } from '../../store/userStore';
 import { usePublicOmcName } from './useOmcName';
 import { usePublicSecuritySettings } from './useSecuritySettings';
-import { useSystemTimezone } from './useSystemTimezone';
+import { useBatchUpdateSysConfigs } from './useSystem';
+import { SYSTEM_TIMEZONE_QUERY_KEY, useSystemTimezone } from './useSystemTimezone';
 import { UI_CUSTOM_DEFAULTS, usePublicUICustom } from './useUICustom';
 
 function createQueryClient() {
@@ -109,5 +110,49 @@ describe('config query error handling', () => {
     expect(queryClient.getQueryState(['sysConfig', 'basic', 'timezone'])?.error).toBe(failure);
     expect(result.current.systemTimezone).toBe('Asia/Shanghai');
     expect(consoleOutput(consoleError)).not.toContain('Query data cannot be undefined');
+  });
+
+  it('保存 basic.timezoneCode 成功后立即同步全局系统时区', async () => {
+    vi.spyOn(adminApi, 'batchUpdateSysConfigs').mockResolvedValue({
+      updated: 1,
+      batch: {
+        id: 'batch-timezone',
+        category: 'basic',
+        configVersion: 2,
+        status: 'applied',
+        createdAt: '',
+        updatedAt: '',
+        targets: [],
+      },
+    });
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(SYSTEM_TIMEZONE_QUERY_KEY, [
+      {
+        id: 'tz',
+        category: 'basic',
+        key: 'timezoneCode',
+        value: 'UTC',
+        valueType: 'string',
+      },
+    ]);
+    act(() => {
+      useAppStore.setState({ systemTimezone: 'UTC' });
+    });
+
+    const { result } = renderHook(() => useBatchUpdateSysConfigs(), {
+      wrapper: createWrapper(queryClient),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        category: 'basic',
+        items: [{ key: 'timezoneCode', value: 'Asia/Shanghai', value_type: 'string' }],
+      });
+    });
+
+    expect(useAppStore.getState().systemTimezone).toBe('Asia/Shanghai');
+    expect(queryClient.getQueryData(SYSTEM_TIMEZONE_QUERY_KEY)).toMatchObject([
+      { key: 'timezoneCode', value: 'Asia/Shanghai' },
+    ]);
   });
 });

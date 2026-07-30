@@ -18,10 +18,52 @@ func TestCalcUECount(t *testing.T) {
 			want:   5,
 		},
 		{
+			name: "汇总多个物理小区",
+			params: map[string]string{
+				"Device.DeviceInfo.UE_Count":   "5",
+				"Device.DeviceInfo.2.UE_Count": "3",
+				"Device.DeviceInfo.3.UE_Count": "2",
+			},
+			want: 10,
+		},
+		{
+			name: "根路径与实例1表示同一小区时根路径优先",
+			params: map[string]string{
+				"Device.DeviceInfo.UE_Count":   "4",
+				"Device.DeviceInfo.1.UE_Count": "9",
+				"Device.DeviceInfo.2.UE_Count": "1",
+			},
+			want: 5,
+		},
+		{
+			name: "只有第二小区时仍返回其UE数",
+			params: map[string]string{
+				"Device.DeviceInfo.2.UE_Count": "6",
+			},
+			want: 6,
+		},
+		{
 			name: "优先使用标准路径，忽略厂商扩展",
 			params: map[string]string{
-				"Device.DeviceInfo.UE_Count":                              "3",
+				"Device.DeviceInfo.UE_Count":                          "3",
 				"Device.Services.FAPService.1.X_COM_ConnectedUECount": "7",
+			},
+			want: 3,
+		},
+		{
+			name: "标准路径合法零值时不使用厂商扩展",
+			params: map[string]string{
+				"Device.DeviceInfo.UE_Count":                          "0",
+				"Device.Services.FAPService.1.X_COM_ConnectedUECount": "7",
+			},
+			want: 0,
+		},
+		{
+			name: "无效标准值不妨碍汇总其他小区",
+			params: map[string]string{
+				"Device.DeviceInfo.UE_Count":   "N/A",
+				"Device.DeviceInfo.2.UE_Count": "3",
+				"Device.DeviceInfo.3.UE_Count": "-1",
 			},
 			want: 3,
 		},

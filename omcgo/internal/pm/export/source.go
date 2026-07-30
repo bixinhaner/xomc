@@ -384,8 +384,7 @@ type adhocSource struct {
 	db          PgQuerier
 	taskID      uuid.UUID
 	metricPaths []string
-	startTime   time.Time
-	endTime     time.Time
+	filter      adhocExportFilter
 	dimension   string
 	deviceCount int
 	locale      appcontext.Locale
@@ -396,19 +395,19 @@ type adhocSource struct {
 	done    bool
 }
 
-func newAdhocSource(db PgQuerier, taskID uuid.UUID, metricPaths []string, startTime, endTime time.Time, dimension string, deviceCount int, locs ...appcontext.Locale) *adhocSource {
+func newAdhocSource(db PgQuerier, taskID uuid.UUID, metricPaths []string, filter adhocExportFilter, dimension string, deviceCount int, locs ...appcontext.Locale) *adhocSource {
 	loc := appcontext.LocaleZH
 	if len(locs) > 0 {
 		loc = locs[0]
 	}
-	return &adhocSource{db: db, taskID: taskID, metricPaths: metricPaths, startTime: startTime, endTime: endTime, dimension: dimension, deviceCount: deviceCount, locale: loc}
+	return &adhocSource{db: db, taskID: taskID, metricPaths: metricPaths, filter: filter, dimension: dimension, deviceCount: deviceCount, locale: loc}
 }
 
 func (s *adhocSource) Next(ctx context.Context) ([]ExportRow, bool, error) {
 	if s.done {
 		return nil, true, nil
 	}
-	sqlStr, args := buildAdhocKeysetSQL(s.taskID, s.metricPaths, s.startTime, s.endTime, s.started, s.curTime, s.curID, batchSize)
+	sqlStr, args := buildAdhocKeysetSQL(s.taskID, s.metricPaths, s.filter, s.started, s.curTime, s.curID, batchSize)
 	rows, err := s.db.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("export adhoc query: %w", err)
@@ -486,11 +485,11 @@ type colKey struct {
 // discoverMetricColumns 发现 dashboard 源（device / aggregate 维度）的指标列集。
 // 前端明确传 metric_paths 时，导出列必须按请求全集保留：页面 fill_empty 会让“窗口内无真实行但已选择”的指标仍显示为占位列。
 // 未传 metric_paths（全量导出）才回退到数据侧 DISTINCT 发现。
-func discoverMetricColumns(ctx context.Context, db PgQuerier, table string, metricPaths []string, start, end time.Time) ([]colKey, error) {
-	if len(metricPaths) > 0 {
-		return requestedMetricColumns(metricPaths), nil
+func discoverMetricColumns(ctx context.Context, db PgQuerier, table string, req aggregator.QueryRequest) ([]colKey, error) {
+	if len(req.MetricPaths) > 0 {
+		return requestedMetricColumns(req.MetricPaths), nil
 	}
-	sqlStr, args := buildDistinctMetricsSQL(table, metricPaths, start, end)
+	sqlStr, args := buildDistinctMetricsSQLForRequest(table, req)
 	rows, err := db.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("export discover columns %s: %w", table, err)
@@ -500,7 +499,16 @@ func discoverMetricColumns(ctx context.Context, db PgQuerier, table string, metr
 }
 
 func requestedMetricColumns(metricPaths []string) []colKey {
-	out := make([]colKey, 0, len(metricPaths))
+	normalized := normalizeMetricPaths(metricPaths)
+	out := make([]colKey, 0, len(normalized))
+	for _, code := range normalized {
+		out = append(out, colKey{code: code, mtype: metricColumnType(code)})
+	}
+	return out
+}
+
+func normalizeMetricPaths(metricPaths []string) []string {
+	var out []string
 	seen := make(map[string]struct{}, len(metricPaths))
 	for _, raw := range metricPaths {
 		code := strings.TrimSpace(raw)
@@ -511,7 +519,7 @@ func requestedMetricColumns(metricPaths []string) []colKey {
 			continue
 		}
 		seen[code] = struct{}{}
-		out = append(out, colKey{code: code, mtype: metricColumnType(code)})
+		out = append(out, code)
 	}
 	return out
 }
@@ -527,9 +535,14 @@ func metricTypeFromPath(code string) metrics.MetricType {
 	return metrics.MetricTypeKPI
 }
 
-// discoverAdhocColumns 发现 adhoc 源的指标列集，按编号升序。
-func discoverAdhocColumns(ctx context.Context, db PgQuerier, taskID uuid.UUID, metricPaths []string, start, end time.Time) ([]colKey, error) {
-	sqlStr, args := buildAdhocDistinctMetricsSQL(taskID, metricPaths, start, end)
+// discoverAdhocColumns 发现 adhoc/性能仪表盘源的指标列集。
+// 任务 meta.metricPaths 有有效值时，它是列全集的真值源：保序去重，当前筛选零行也保留列。
+// nil/空/全空白仅用于兼容历史任务，回退结果表 DISTINCT 发现。
+func discoverAdhocColumns(ctx context.Context, db PgQuerier, taskID uuid.UUID, metricPaths []string, filter adhocExportFilter) ([]colKey, error) {
+	if configured := requestedMetricColumns(metricPaths); len(configured) > 0 {
+		return configured, nil
+	}
+	sqlStr, args := buildAdhocDistinctMetricsSQL(taskID, metricPaths, filter)
 	rows, err := db.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("export discover adhoc columns: %w", err)

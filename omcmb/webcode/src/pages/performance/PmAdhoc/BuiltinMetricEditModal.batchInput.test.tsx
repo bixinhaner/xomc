@@ -5,8 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import zhCN from '@core/i18n/zh-CN';
+import { usePmPageStateStore } from '@core/store/pmPageStateStore';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import BuiltinMetricEditModal from './BuiltinMetricEditModal';
+import { getBuiltinMetricDraft, saveBuiltinMetricDraft } from './pmAdhocDraftState';
 
 const updateMutateAsync = vi.fn();
 const useIndicatorCandidatesSpy = vi.fn();
@@ -30,9 +32,30 @@ vi.mock('@core/hooks/api/usePerformance', () => ({
   },
 }));
 
+vi.mock('@core/hooks/api/useTechnologyDictionary', () => ({
+  isKnownTechnology: (value: unknown) => value === 'lte' || value === 'nr' || value === 'gsm',
+  technologyToDeviceType: (tech: string) => ({ lte: 'ENB', nr: 'GNB', gsm: 'GSM' })[tech],
+  useTechnologyDictionary: () => ({
+    options: [
+      { label: 'eNB(LTE)', value: 'lte', sort: 1 },
+      { label: 'gNB(NR)', value: 'nr', sort: 2 },
+      { label: 'GSM', value: 'gsm', sort: 3 },
+    ],
+    deviceTypeOptions: [
+      { label: 'eNB(LTE)', value: 'ENB', sort: 1, technology: 'lte' },
+      { label: 'gNB(NR)', value: 'GNB', sort: 2, technology: 'nr' },
+      { label: 'GSM', value: 'GSM', sort: 3, technology: 'gsm' },
+    ],
+    labelForTechnology: (tech?: string | null) =>
+      ({ lte: 'eNB(LTE)', nr: 'gNB(NR)', gsm: 'GSM' })[tech ?? ''] ?? (tech ? tech.toUpperCase() : '—'),
+    labelForRadioMode: (radioMode?: string | null) => (radioMode ? radioMode : '—'),
+    isLoading: false,
+  }),
+}));
+
 const task: AdhocTask = {
   id: 'builtin-1',
-  name: '内置聚合任务',
+  name: '内置-全网-LTE',
   mode: 'oneshot',
   deviceSns: [],
   metricPaths: ['K0001'],
@@ -64,6 +87,8 @@ describe('BuiltinMetricEditModal batch metric input', () => {
   beforeEach(() => {
     updateMutateAsync.mockReset();
     useIndicatorCandidatesSpy.mockClear();
+    usePmPageStateStore.setState({ pages: {} });
+    sessionStorage.clear();
     indicatorCandidates = [
       { id: 'K0001', name: 'availability', cnName: '可用率', enName: 'Availability', isCounter: false },
       { id: 'C0001', name: 'rrc_att', cnName: 'RRC请求次数', enName: 'RRC Attempts', isCounter: true },
@@ -72,6 +97,7 @@ describe('BuiltinMetricEditModal batch metric input', () => {
 
   it('adds valid metric IDs from batch input and ignores missing IDs before saving', async () => {
     renderModal();
+    expect(screen.getByText('编辑指标：内置-全网-eNB(LTE)')).toBeInTheDocument();
     expect(useIndicatorCandidatesSpy).toHaveBeenCalledWith(
       'ENB',
       expect.objectContaining({ includeCounters: true, enabledOnly: true }),
@@ -82,7 +108,7 @@ describe('BuiltinMetricEditModal batch metric input', () => {
       target: { value: 'C0001, C404, C0001' },
     });
     fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
 
     await waitFor(() => {
       expect(updateMutateAsync).toHaveBeenCalledWith({
@@ -104,7 +130,7 @@ describe('BuiltinMetricEditModal batch metric input', () => {
       target: { value: indicatorCandidates.map((item) => item.id).join('\n') },
     });
     fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
 
     await waitFor(() => {
       expect(updateMutateAsync).toHaveBeenCalledWith({
@@ -121,8 +147,52 @@ describe('BuiltinMetricEditModal batch metric input', () => {
     );
     renderModal({ ...task, metricPaths: overLimitMetricPaths });
 
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
 
     expect(updateMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('restores unsaved builtin metric selections after the edit layer is reopened', async () => {
+    const { unmount } = renderModal();
+
+    fireEvent.click(screen.getByRole('button', { name: /批量输入指标 ID/ }));
+    fireEvent.change(screen.getByPlaceholderText(/K000000001/), {
+      target: { value: 'C0001' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加入已选/ }));
+    expect(screen.getByText('已选 2 个指标')).toBeInTheDocument();
+
+    unmount();
+    renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith({
+        id: 'builtin-1',
+        input: { metricPaths: ['K0001', 'C0001'] },
+      });
+    });
+  });
+
+  it('drops invisible restored builtin metric selections before saving again', async () => {
+    saveBuiltinMetricDraft({
+      taskId: 'builtin-1',
+      metricPaths: ['K0001', 'K-HIDDEN'],
+      metricTypeFilter: 'kpi',
+    });
+
+    renderModal();
+
+    await waitFor(() => {
+      expect(getBuiltinMetricDraft('builtin-1')?.metricPaths).toEqual(['K0001']);
+    });
+    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith({
+        id: 'builtin-1',
+        input: { metricPaths: ['K0001'] },
+      });
+    });
   });
 });

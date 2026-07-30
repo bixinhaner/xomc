@@ -18,7 +18,9 @@ type UpgradeState string
 
 const (
 	UpgradePending UpgradeState = "pending"
-	// UpgradeDownloading 仅给 Download RPC（固件升级 / 回滚）使用——CPE 正在从 ACS 拉文件。
+	// UpgradeDownloading 表示"短 RPC 响应窗口"：
+	// 普通升级为 Download RPC 等 DownloadResponse；回退阶段一复用该状态等 GPV 响应，
+	// 展示层与 reaper 会按 task_type/command_key 改写为回退语义。
 	UpgradeDownloading UpgradeState = "downloading"
 	// UpgradeUploading 给 Upload RPC（备份 / 日志采集 / 配置恢复）使用——Upload 命令已派发，
 	// 涵盖：等 CPE 回 UploadResponse + CPE HTTP PUT 文件到 ACS + 等 CPE 主动发 TransferComplete。
@@ -65,6 +67,13 @@ const (
 	FailureDownloadFile    FailureCode = "DOWNLOAD_FILE_ERROR" // system — firmware file not found
 	FailureDownloadFault   FailureCode = "DOWNLOAD_FAULT"      // device — CPE rejected Download RPC
 	FailureUploadFault     FailureCode = "UPLOAD_FAULT"        // device — CPE rejected Upload RPC
+
+	// Stage: version rollback
+	FailureRollbackEnableCheckTimeout FailureCode = "ROLLBACK_ENABLE_CHECK_TIMEOUT" // timeout — no GPV response for rollback enable check
+	FailureRollbackApplyTimeout       FailureCode = "ROLLBACK_APPLY_TIMEOUT"        // timeout — no reboot completion after rollback SPV
+	FailureRollbackEnableCheckFault   FailureCode = "ROLLBACK_ENABLE_CHECK_FAULT"   // device — CPE rejected rollback enable GPV
+	FailureRollbackSetFault           FailureCode = "ROLLBACK_SET_FAULT"            // device — CPE rejected rollback SPV
+	FailureRollbackNotSupported       FailureCode = "ROLLBACK_NOT_SUPPORTED"        // device — rollback enable value is false/empty
 
 	// Stage: transfer complete
 	FailureTCFault FailureCode = "TC_FAULT" // device — CPE returned TransferComplete with fault
@@ -144,13 +153,13 @@ type FirmwareVersion struct {
 	// 按产品过滤命中条件 :pid = ANY(product_ids)。写入时由 service 同步 ProductID = ProductIDs[0]。
 	ProductIDs    []uuid.UUID `json:"product_ids,omitempty"`
 	ProductClass  string      `json:"product_class"`
-	Version       string     `json:"version"`
-	FileName      string     `json:"file_name"`
-	FileSize      int64      `json:"file_size"`
-	FileType      FileType  `json:"file_type"`
-	MinIOPath     string    `json:"minio_path"`
-	CompatibleOUI []string  `json:"compatible_oui"`
-	MD5Val        string    `json:"md5_val"`
+	Version       string      `json:"version"`
+	FileName      string      `json:"file_name"`
+	FileSize      int64       `json:"file_size"`
+	FileType      FileType    `json:"file_type"`
+	MinIOPath     string      `json:"minio_path"`
+	CompatibleOUI []string    `json:"compatible_oui"`
+	MD5Val        string      `json:"md5_val"`
 	// SHA256Val 是上传时计算的 SHA-256 完整性摘要（hex）。新上传必填；存量旧行为空，
 	// 校验时回退到 MD5Val（见 verifier.go HashOnlyVerifier）。
 	SHA256Val string `json:"sha256_val,omitempty"`
@@ -240,7 +249,7 @@ type UpgradeSubTaskWithTaskName struct {
 
 // FirmwareFilter specifies criteria for listing firmware versions.
 type FirmwareFilter struct {
-	ProductClass *string   `form:"product_class"`
+	ProductClass *string `form:"product_class"`
 	// ProductID #492：按产品过滤固件（升级抽屉选产品名 → 传 product_id）。用 string 而非
 	// *uuid.UUID —— gin 的 query 绑定不支持 uuid（会 400），仓储层再 uuid.Parse。
 	ProductID string    `form:"product_id"`
@@ -256,8 +265,8 @@ type UpgradeTaskFilter struct {
 	// ProductID #638：按产品名过滤升级任务。任务本身不存 product_id（来自 firmware），
 	// repository 用 JOIN firmware_versions 命中 :pid = ANY(fv.product_ids)；用 string 而非
 	// *uuid.UUID —— gin query 绑定不支持 uuid，repository 层再 uuid.Parse，解析失败跳过。
-	ProductID    string      `form:"product_id"`
-	CreateUser   *string     `form:"create_user"`
+	ProductID  string  `form:"product_id"`
+	CreateUser *string `form:"create_user"`
 	model.ListRequest
 }
 
@@ -300,6 +309,7 @@ type BatchUpgradeRequest struct {
 	TaskType         TaskType    `json:"task_type"`
 	DownloadFileType string      `json:"download_file_type,omitempty"`
 	IsKeepConfig     bool        `json:"is_keep_config"`
+	CreateUser       string      `json:"-"`
 	CreateSuspended  bool        `json:"create_suspended"`
 	// ScheduledAt 指定执行时间。非 nil 且晚于当前时间 → 定时模式（CreateSuspended 被忽略）。
 	// 时间已过 / 为 nil → 按 CreateSuspended 走老语义。
