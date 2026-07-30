@@ -73,6 +73,7 @@ func TestRedisTaskQueue_FirstTransitionWinnerFencesRetryCancelAndExpire(t *testi
 	_, changed, err = q.prepareTransition(ctx, sent, retry, false)
 	require.NoError(t, err)
 	require.False(t, changed, "retry must not revive a terminal winner")
+	require.Error(t, q.Update(ctx, retry), "Update must surface transition CAS conflicts")
 
 	cancelled := cloneTransitionTask(sent)
 	now := time.Now()
@@ -310,6 +311,141 @@ func TestReconciler_PGRecoveryPublishesStableEventOnce(t *testing.T) {
 	_, err = reconciler.ReconcileOnce(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, attempts)
+}
+
+func TestRedisTaskQueue_SentCleanupFailureRollbackRestoresPending(t *testing.T) {
+	q, _ := newRedisQueueWithTerminalTTL(t, 15*time.Minute)
+	ctx := context.Background()
+	task := newTaskForQueue("sent-cleanup-rollback", "SN-ROLLBACK", "Reboot")
+	require.NoError(t, q.Push(ctx, task))
+	q.cleanupTransition = func(context.Context, *Task, string) error {
+		return errors.New("cluster slot unavailable")
+	}
+
+	err := q.MarkTaskSent(ctx, task.ID, "cwmp-rollback")
+	var transitionErr *taskTransitionError
+	require.ErrorAs(t, err, &transitionErr)
+	stuck, getErr := q.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, TaskStatusSent, stuck.Status,
+		"regression: PG rollback used to leave Redis permanently sent")
+
+	pending := cloneTransitionTask(stuck)
+	pending.Status = TaskStatusPending
+	pending.CWMPID = ""
+	pending.SentAt = nil
+	q.cleanupTransition = nil
+	require.NoError(t, q.rollbackSentTransition(
+		ctx, pending, "cwmp-rollback", transitionErr.token,
+	))
+	got, getErr := q.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, TaskStatusPending, got.Status)
+	require.Equal(t, int64(1), mustQueueLen(t, q, ctx, task.DeviceSN))
+}
+
+func TestReconciler_RetryCleanupAfterSentRollback(t *testing.T) {
+	q, _ := newRedisQueueWithTerminalTTL(t, 15*time.Minute)
+	ctx := context.Background()
+	task := newTaskForQueue("sent-rollback-reconcile", "SN-ROLLBACK-REC", "Reboot")
+	require.NoError(t, q.Push(ctx, task))
+	q.cleanupTransition = func(context.Context, *Task, string) error {
+		return errors.New("cluster slot unavailable")
+	}
+	err := q.MarkTaskSent(ctx, task.ID, "cwmp-rollback-rec")
+	var transitionErr *taskTransitionError
+	require.ErrorAs(t, err, &transitionErr)
+
+	sent, getErr := q.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	pending := cloneTransitionTask(sent)
+	pending.Status = TaskStatusPending
+	pending.CWMPID = ""
+	pending.SentAt = nil
+	require.Error(t, q.rollbackSentTransition(
+		ctx, pending, "cwmp-rollback-rec", transitionErr.token,
+	))
+
+	repairer := &compensationRepairer{task: cloneTransitionTask(pending)}
+	reconciler := NewReconciler(
+		&fakeActiveLister{}, q, repairer, nil,
+		time.Second, time.Minute, 10, nil,
+	)
+	stats, err := reconciler.ReconcileOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.RepairFailed)
+	q.cleanupTransition = nil
+	stats, err = reconciler.ReconcileOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Repaired)
+	got, getErr := q.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, TaskStatusPending, got.Status)
+	require.Equal(t, int64(1), mustQueueLen(t, q, ctx, task.DeviceSN))
+}
+
+func TestReconciler_PGRollbackWinsWhenSentTransitionStillNeedsPGSync(t *testing.T) {
+	q, _ := newRedisQueueWithTerminalTTL(t, 15*time.Minute)
+	ctx := context.Background()
+	pending := newTaskForQueue("sent-pg-rollback", "SN-PG-ROLLBACK", "Reboot")
+	require.NoError(t, q.Push(ctx, pending))
+	sent := cloneTransitionTask(pending)
+	sent.MarkSent("cwmp-pg-rollback")
+	_, changed, err := q.prepareTransition(ctx, pending, sent, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	repairer := &compensationRepairer{task: cloneTransitionTask(pending)}
+	reconciler := NewReconciler(
+		&fakeActiveLister{}, q, repairer, nil,
+		time.Second, time.Minute, 10, nil,
+	)
+	stats, err := reconciler.ReconcileOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Repaired)
+	require.Equal(t, TaskStatusPending, repairer.task.Status,
+		"reconciler must not revive PG pending back to sent after rollback")
+	got, err := q.GetByID(ctx, pending.ID)
+	require.NoError(t, err)
+	require.Equal(t, TaskStatusPending, got.Status)
+	require.Equal(t, int64(1), mustQueueLen(t, q, ctx, pending.DeviceSN))
+}
+
+func TestRedisTaskQueue_OldSentRollbackCannotOverwriteNewTransition(t *testing.T) {
+	q, _ := newRedisQueueWithTerminalTTL(t, 15*time.Minute)
+	ctx := context.Background()
+	task := newTaskForQueue("old-sent-rollback", "SN-OLD-ROLLBACK", "Reboot")
+	require.NoError(t, q.Push(ctx, task))
+	current, err := q.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	sent := cloneTransitionTask(current)
+	sent.MarkSent("cwmp-old")
+	oldToken, changed, err := q.prepareTransition(ctx, current, sent, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, q.acknowledgeTransition(ctx, task.ID, oldToken))
+
+	pending := cloneTransitionTask(sent)
+	pending.Status = TaskStatusPending
+	pending.CWMPID = ""
+	pending.SentAt = nil
+	tokenPending, changed, err := q.prepareTransition(ctx, sent, pending, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, q.acknowledgeTransition(ctx, task.ID, tokenPending))
+
+	sentAgain := cloneTransitionTask(pending)
+	sentAgain.MarkSent("cwmp-new")
+	newToken, changed, err := q.prepareTransition(ctx, pending, sentAgain, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Error(t, q.rollbackSentTransition(ctx, pending, "cwmp-old", oldToken))
+	values, err := q.client.HMGet(
+		ctx, q.taskKey(task.ID), "status", "transition_token",
+	).Result()
+	require.NoError(t, err)
+	require.Equal(t, string(TaskStatusSent), values[0])
+	require.Equal(t, newToken, values[1])
 }
 
 func mustPendingTransitionIDs(

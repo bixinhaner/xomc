@@ -104,6 +104,31 @@ redis.call("PERSIST", KEYS[1])
 return 1
 `)
 
+var rollbackSentTransitionScript = redis.NewScript(`
+if redis.call("EXISTS", KEYS[1]) == 0 then return -1 end
+if redis.call("HGET", KEYS[1], "transition_token") ~= ARGV[1] then return -2 end
+if redis.call("HGET", KEYS[1], "status") ~= "sent" then return -3 end
+redis.call("HSET", KEYS[1],
+	"data", ARGV[2],
+	"status", "pending",
+	"transition_from", "sent",
+	"transition_old_cwmp", ARGV[3],
+	"transition_ttl_ms", ARGV[4],
+	"pg_sync_pending", "0",
+	"cleanup_pending", "1",
+	"event_pending", "0")
+redis.call("PERSIST", KEYS[1])
+return 1
+`)
+
+type taskTransitionError struct {
+	token string
+	err   error
+}
+
+func (e *taskTransitionError) Error() string { return e.err.Error() }
+func (e *taskTransitionError) Unwrap() error { return e.err }
+
 // PurgeBySourceResult summarizes a source-scoped Redis queue purge.
 // Matched counts tasks whose source matched; Deleted is only incremented after
 // all apply operations for a task succeed. Skipped includes non-matching and
@@ -358,8 +383,11 @@ func (q *RedisTaskQueue) Update(ctx context.Context, task *Task) error {
 			current = task
 		}
 		token, changed, transitionErr := q.prepareTransition(ctx, current, task, true)
-		if transitionErr != nil || !changed {
+		if transitionErr != nil {
 			return transitionErr
+		}
+		if !changed {
+			return fmt.Errorf("task %s: %w", task.ID, ErrTaskNotPending)
 		}
 		return q.acknowledgeTransition(ctx, task.ID, token)
 	}
@@ -370,8 +398,11 @@ func (q *RedisTaskQueue) Update(ctx context.Context, task *Task) error {
 	}
 	if current != nil && current.Status != task.Status {
 		token, changed, transitionErr := q.prepareTransition(ctx, current, task, false)
-		if transitionErr != nil || !changed {
+		if transitionErr != nil {
 			return transitionErr
+		}
+		if !changed {
+			return fmt.Errorf("task %s: %w", task.ID, ErrTaskNotPending)
 		}
 		return q.acknowledgeTransition(ctx, task.ID, token)
 	}
@@ -611,7 +642,10 @@ func (q *RedisTaskQueue) MarkTaskSent(ctx context.Context, taskID, cwmpID string
 	if !changed {
 		return ErrTaskNotPending
 	}
-	return q.acknowledgeTransition(ctx, taskID, token)
+	if err := q.acknowledgeTransition(ctx, taskID, token); err != nil {
+		return &taskTransitionError{token: token, err: err}
+	}
+	return nil
 }
 
 // MarkTaskCompleted 标记任务完成
@@ -949,6 +983,34 @@ func (q *RedisTaskQueue) acknowledgeTransitionEvent(ctx context.Context, taskID,
 		return q.removePendingTransition(ctx, taskID, token)
 	}
 	return nil
+}
+
+// rollbackSentTransition compensates a PG sent→pending rollback while retaining
+// the original transition token. A stale rollback can never overwrite a newer
+// transition; cleanup failure remains in the durable pending index.
+func (q *RedisTaskQueue) rollbackSentTransition(
+	ctx context.Context,
+	pending *Task,
+	oldCWMPID, token string,
+) error {
+	if pending == nil || pending.Status != TaskStatusPending || token == "" {
+		return fmt.Errorf("pending task and transition token are required")
+	}
+	data, err := json.Marshal(pending)
+	if err != nil {
+		return fmt.Errorf("marshal sent transition rollback: %w", err)
+	}
+	result, err := rollbackSentTransitionScript.Run(
+		ctx, q.client, []string{q.taskKey(pending.ID)},
+		token, data, oldCWMPID, taskDetailTTL.Milliseconds(),
+	).Int64()
+	if err != nil {
+		return fmt.Errorf("rollback sent task transition: %w", err)
+	}
+	if result < 0 {
+		return fmt.Errorf("rollback sent task transition CAS conflict: %w", ErrTaskNotPending)
+	}
+	return q.acknowledgeTransition(ctx, pending.ID, token)
 }
 
 // GetQueueLengths 获取所有设备的队列长度（用于监控）

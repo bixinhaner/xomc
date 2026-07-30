@@ -543,7 +543,13 @@ func (s *TaskService) releaseUnwrittenSendClaim(ctx context.Context, taskID, cwm
 	if err != nil {
 		repairErrs = append(repairErrs, fmt.Errorf("load released task send claim: %w", err))
 	} else if pending != nil {
-		if err := s.queue.Update(ctx, pending); err != nil {
+		var transitionErr *taskTransitionError
+		if errors.As(cause, &transitionErr) {
+			err = s.queue.rollbackSentTransition(ctx, pending, cwmpID, transitionErr.token)
+		} else {
+			err = s.queue.Update(ctx, pending)
+		}
+		if err != nil {
 			repairErrs = append(repairErrs, fmt.Errorf("restore released task queue entry: %w", err))
 		}
 	}

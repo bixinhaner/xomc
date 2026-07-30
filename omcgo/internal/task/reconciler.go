@@ -68,6 +68,7 @@ type pendingTransitionStore interface {
 	deferPendingTransition(ctx context.Context, taskID, token string) error
 	removePendingTransition(ctx context.Context, taskID, token string) error
 	resolvePendingTransition(ctx context.Context, durable *Task, token string) error
+	rollbackSentTransition(ctx context.Context, pending *Task, oldCWMPID, token string) error
 }
 
 func (r *Reconciler) WithTransitionPublisher(
@@ -282,6 +283,25 @@ func (r *Reconciler) reconcilePendingTransitions(ctx context.Context) ReconcileS
 			continue
 		}
 		if prepared.PGSyncPending {
+			if prepared.Task.Status == TaskStatusSent {
+				durable, loadErr := repairer.GetByID(ctx, id)
+				if loadErr != nil {
+					stats.RepairFailed++
+					_ = store.deferPendingTransition(ctx, id, token)
+					continue
+				}
+				if durable != nil && durable.Status == TaskStatusPending {
+					if err := store.rollbackSentTransition(
+						ctx, durable, prepared.Task.CWMPID, token,
+					); err != nil {
+						stats.RepairFailed++
+						_ = store.deferPendingTransition(ctx, id, token)
+						continue
+					}
+					stats.Repaired++
+					continue
+				}
+			}
 			changed, transitionErr := repairer.TransitionIfStatus(
 				ctx, prepared.Task, prepared.From,
 			)
