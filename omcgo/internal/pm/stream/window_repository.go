@@ -243,7 +243,9 @@ func finalizationClaimUpdateForOwner(
 ) sq.UpdateBuilder {
 	builder := finalizationClaimUpdate(key, reason, state, coverage, version)
 	if leaseOwner != nil {
-		builder = builder.Where(sq.Eq{"finalize_lease_owner": *leaseOwner})
+		builder = builder.
+			Where(sq.Eq{"finalize_lease_owner": *leaseOwner}).
+			Where(sq.Expr("finalize_lease_until > CURRENT_TIMESTAMP"))
 	}
 	return builder
 }
@@ -452,6 +454,48 @@ func (r *WindowRepository) CompleteClaim(
 	leaseOwner uuid.UUID,
 ) error {
 	return r.clearFinalizeClaim(ctx, key, leaseOwner, "complete")
+}
+
+func (r *WindowRepository) RenewClaim(
+	ctx context.Context,
+	key WindowKey,
+	leaseOwner uuid.UUID,
+	leaseUntil time.Time,
+) error {
+	leaseFor := time.Until(leaseUntil)
+	if leaseFor <= 0 {
+		return fmt.Errorf("renew PM aggregation finalize claim: lease must expire in the future")
+	}
+	query, args, err := renewFinalizeClaimUpdate(key, leaseOwner, leaseFor).ToSql()
+	if err != nil {
+		return fmt.Errorf("build renew PM aggregation finalize claim SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("renew PM aggregation finalize claim: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf(
+			"%w: renew affected %d rows",
+			ErrFinalizeClaimLost,
+			tag.RowsAffected(),
+		)
+	}
+	return nil
+}
+
+func renewFinalizeClaimUpdate(
+	key WindowKey,
+	leaseOwner uuid.UUID,
+	leaseFor time.Duration,
+) sq.UpdateBuilder {
+	return storage.Psql.Update("pm_aggregation_windows").
+		Set("finalize_lease_until", sq.Expr(
+			"CURRENT_TIMESTAMP + (? * INTERVAL '1 second')", leaseFor.Seconds(),
+		)).
+		Set("updated_at", sq.Expr("CURRENT_TIMESTAMP")).
+		Where(windowKeyPredicate(key)).
+		Where(sq.Eq{"finalize_lease_owner": leaseOwner})
 }
 
 func (r *WindowRepository) ReleaseClaim(

@@ -167,6 +167,32 @@ func TestCompleteAndReleaseClaimCannotClearAnotherScannerLease(t *testing.T) {
 	}
 }
 
+func TestRenewFinalizeClaimUsesDatabaseClockAndClaimToken(t *testing.T) {
+	key := WindowKey{
+		TaskVersionID: uuid.MustParse("12121212-1212-4212-8212-121212121212"),
+		EntityKey:     "device-1",
+		Granularity:   GranularityHourly,
+		Start:         time.Date(2026, 7, 30, 8, 0, 0, 0, time.UTC),
+	}
+	token := uuid.MustParse("34343434-3434-4434-8434-343434343434")
+	query, args, err := renewFinalizeClaimUpdate(key, token, 2*time.Minute).ToSql()
+	if err != nil {
+		t.Fatalf("build renew finalize claim SQL: %v", err)
+	}
+	for _, fragment := range []string{
+		"finalize_lease_until = CURRENT_TIMESTAMP + ($",
+		"updated_at = CURRENT_TIMESTAMP",
+		"finalize_lease_owner = $",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("renew finalize claim SQL %q missing %q", query, fragment)
+		}
+	}
+	if !containsSQLArg(args, token) {
+		t.Fatalf("renew finalize claim args %v missing token %s", args, token)
+	}
+}
+
 func containsSQLArg(args []any, want any) bool {
 	for _, arg := range args {
 		if fmt.Sprint(arg) == fmt.Sprint(want) {
@@ -314,6 +340,7 @@ func TestFinalizationClaimedWindowFencesStateTransitionByLeaseOwner(t *testing.T
 		t.Fatalf("build owner-fenced finalization claim: %v", err)
 	}
 	if !strings.Contains(query, "finalize_lease_owner = $") ||
+		!strings.Contains(query, "finalize_lease_until > CURRENT_TIMESTAMP") ||
 		!containsSQLArg(args, owner) {
 		t.Fatalf("finalization claim must fence state transition by owner: %q %v", query, args)
 	}

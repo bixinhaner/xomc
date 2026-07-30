@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -291,6 +292,76 @@ func TestFinalizeSchedulerMetricsDistinguishLeaseConflictFromEmptyQueue(t *testi
 	}
 }
 
+func TestFinalizeSchedulerSameScannerReclaimUsesNewTokenAndRejectsStaleCompletion(t *testing.T) {
+	deviceVersion := uuid.MustParse("60000000-0000-4000-8000-000000000006")
+	repo := newMemoryFinalizeRepository(
+		finalizeTestWindows(deviceVersion, GranularityHourly, 1)...,
+	)
+	scanner := newTestTimeoutScanner(
+		repo, deviceVersion, 1,
+		func(context.Context, WindowKey, CloseReason, uuid.UUID) error { return nil },
+	)
+	scanner.claimLease = 5 * time.Millisecond
+
+	first, err := scanner.claimNext(context.Background(), time.Now(), finalizeHourlyDevice)
+	if err != nil || first.window == nil {
+		t.Fatalf("first claim = %+v, %v", first, err)
+	}
+	time.Sleep(8 * time.Millisecond)
+	second, err := scanner.claimNext(context.Background(), time.Now(), finalizeHourlyDevice)
+	if err != nil || second.window == nil {
+		t.Fatalf("second claim = %+v, %v", second, err)
+	}
+	if first.token == second.token {
+		t.Fatalf("reclaimed window reused token %s", first.token)
+	}
+	if err := repo.CompleteClaim(context.Background(), first.window.Key, first.token); !errors.Is(err, ErrFinalizeClaimLost) {
+		t.Fatalf("stale completion error = %v, want ErrFinalizeClaimLost", err)
+	}
+	if err := repo.ReleaseClaim(context.Background(), first.window.Key, first.token); !errors.Is(err, ErrFinalizeClaimLost) {
+		t.Fatalf("stale release error = %v, want ErrFinalizeClaimLost", err)
+	}
+	if err := repo.CompleteClaim(context.Background(), second.window.Key, second.token); err != nil {
+		t.Fatalf("current token completion: %v", err)
+	}
+}
+
+func TestFinalizeSchedulerRenewsShortLeaseDuringSlowFinalize(t *testing.T) {
+	deviceVersion := uuid.MustParse("70000000-0000-4000-8000-000000000007")
+	repo := newMemoryFinalizeRepository(
+		finalizeTestWindows(deviceVersion, GranularityHourly, 1)...,
+	)
+	started := make(chan struct{})
+	scanner := newTestTimeoutScanner(repo, deviceVersion, 1, func(
+		context.Context, WindowKey, CloseReason, uuid.UUID,
+	) error {
+		close(started)
+		time.Sleep(40 * time.Millisecond)
+		return nil
+	})
+	scanner.claimLease = 12 * time.Millisecond
+	scanner.renewInterval = 3 * time.Millisecond
+	runDone := make(chan error, 1)
+	go func() { runDone <- scanner.runOnce(context.Background()) }()
+	<-started
+	time.Sleep(20 * time.Millisecond)
+
+	reclaimed, err := repo.claimDue(
+		context.Background(), GranularityHourly, time.Now(), 1,
+		uuid.New(), time.Now().Add(time.Minute),
+		claimVersionFilter{versionIDs: []uuid.UUID{deviceVersion}}, claimOldestFirst,
+	)
+	if err != nil {
+		t.Fatalf("try reclaim during slow finalize: %v", err)
+	}
+	if len(reclaimed) != 0 {
+		t.Fatalf("slow finalize lease expired despite renewal: reclaimed=%v", reclaimed)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatalf("slow finalize scheduler: %v", err)
+	}
+}
+
 type memoryFinalizeWindow struct {
 	record     WindowRecord
 	leaseOwner uuid.UUID
@@ -429,6 +500,28 @@ func (r *memoryFinalizeRepository) ReleaseClaim(
 	return fmt.Errorf("release unknown finalize test window")
 }
 
+func (r *memoryFinalizeRepository) RenewClaim(
+	_ context.Context,
+	key WindowKey,
+	leaseOwner uuid.UUID,
+	leaseUntil time.Time,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	for index := range r.windows {
+		window := &r.windows[index]
+		if sameFinalizeTestWindow(window.record.Key, key) {
+			if window.leaseOwner != leaseOwner || !window.leaseUntil.After(now) {
+				return ErrFinalizeClaimLost
+			}
+			window.leaseUntil = leaseUntil
+			return nil
+		}
+	}
+	return fmt.Errorf("renew unknown finalize test window")
+}
+
 func newTestTimeoutScanner(
 	repo finalizeWindowRepository,
 	deviceVersion uuid.UUID,
@@ -449,7 +542,8 @@ func newTestTimeoutScanner(
 			GranularityHourly: time.Nanosecond, GranularityDaily: time.Nanosecond,
 			GranularityWeekly: time.Nanosecond, GranularityMonthly: time.Nanosecond,
 		},
-		logger: zap.NewNop(), leaseOwner: uuid.New(), selector: newFinalizeClaimSelector(),
+		logger: zap.NewNop(), claimLease: finalizeClaimLease,
+		renewInterval: finalizeClaimLease / 3, selector: newFinalizeClaimSelector(),
 	}
 }
 

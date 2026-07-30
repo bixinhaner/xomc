@@ -239,7 +239,8 @@ type TimeoutScanner struct {
 	graceByGranularity map[Granularity]time.Duration
 	logger             *zap.Logger
 	metrics            *Metrics
-	leaseOwner         uuid.UUID
+	claimLease         time.Duration
+	renewInterval      time.Duration
 	selector           *finalizeClaimSelector
 	deviceVersionsFor  *TaskSnapshot
 	deviceVersionIDs   []uuid.UUID
@@ -269,6 +270,7 @@ type finalizeWindowRepository interface {
 		claimVersionFilter,
 		uuid.UUID,
 	) (bool, error)
+	RenewClaim(context.Context, WindowKey, uuid.UUID, time.Time) error
 	CompleteClaim(context.Context, WindowKey, uuid.UUID) error
 	ReleaseClaim(context.Context, WindowKey, uuid.UUID) error
 }
@@ -325,10 +327,12 @@ func (s *finalizeClaimSelector) nextOrder(queue finalizeQueue) claimOrder {
 
 type finalizeJob struct {
 	window WindowRecord
+	token  uuid.UUID
 }
 
 type finalizeClaimAttempt struct {
 	window   *WindowRecord
+	token    uuid.UUID
 	order    claimOrder
 	conflict bool
 }
@@ -351,7 +355,8 @@ func NewTimeoutScanner(
 		windows: windows, finalizeWindow: finalizer.FinalizeClaimed,
 		snapshot: finalizer.snapshot, workerCount: workerCount,
 		grace: grace, logger: logger,
-		leaseOwner: uuid.New(), selector: newFinalizeClaimSelector(),
+		claimLease: finalizeClaimLease, renewInterval: finalizeClaimLease / 3,
+		selector: newFinalizeClaimSelector(),
 		graceByGranularity: map[Granularity]time.Duration{
 			GranularityHourly:  grace,
 			GranularityDaily:   15 * time.Minute,
@@ -468,10 +473,13 @@ func (s *TimeoutScanner) runCycle(
 				continue
 			}
 			if attempt.window == nil {
-				if attempt.conflict && s.metrics != nil {
+				// Per-job tokens make an in-flight local claim indistinguishable
+				// from a foreign claim in the aggregate conflict probe.
+				reportedConflict := attempt.conflict && inflight == 0
+				if reportedConflict && s.metrics != nil {
 					s.metrics.FinalizeClaimConflictsTotal.Inc()
 				}
-				if !attempt.conflict {
+				if !reportedConflict {
 					oldestDueByQueue[queue] = 0
 					s.updateOldestDueMetric(oldestDueByQueue)
 				}
@@ -497,14 +505,14 @@ func (s *TimeoutScanner) runCycle(
 				}
 			}
 			select {
-			case jobs <- finalizeJob{window: *window}:
+			case jobs <- finalizeJob{window: *window, token: attempt.token}:
 				inflight++
 				if s.metrics != nil {
 					s.metrics.FinalizeInflight.Inc()
 				}
 			case <-ctx.Done():
 				clearCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				releaseErr := s.windows.ReleaseClaim(clearCtx, window.Key, s.leaseOwner)
+				releaseErr := s.windows.ReleaseClaim(clearCtx, window.Key, attempt.token)
 				cancel()
 				return errors.Join(append(finalizeErrors, ctx.Err(), releaseErr)...)
 			}
@@ -538,7 +546,8 @@ func (s *TimeoutScanner) claimNext(
 	now time.Time,
 	queue finalizeQueue,
 ) (finalizeClaimAttempt, error) {
-	leaseUntil := now.Add(finalizeClaimLease)
+	token := uuid.New()
+	leaseUntil := now.Add(s.claimLeaseDuration())
 	switch queue {
 	case finalizeHourlyDevice, finalizeHourlyOther:
 		filter := claimVersionFilter{
@@ -549,18 +558,20 @@ func (s *TimeoutScanner) claimNext(
 		dueBefore := now.Add(-s.graceFor(GranularityHourly))
 		windows, err := s.windows.claimDue(
 			ctx, GranularityHourly, dueBefore, 1,
-			s.leaseOwner, leaseUntil, filter, order,
+			token, leaseUntil, filter, order,
 		)
 		if err != nil {
 			return finalizeClaimAttempt{}, err
 		}
 		if len(windows) == 0 {
 			conflict, conflictErr := s.windows.hasClaimConflict(
-				ctx, GranularityHourly, dueBefore, filter, s.leaseOwner,
+				ctx, GranularityHourly, dueBefore, filter, token,
 			)
 			return finalizeClaimAttempt{order: order, conflict: conflict}, conflictErr
 		}
-		return finalizeClaimAttempt{window: &windows[0], order: order}, nil
+		return finalizeClaimAttempt{
+			window: &windows[0], token: token, order: order,
+		}, nil
 	case finalizeLongPeriod:
 		granularities := [...]Granularity{
 			GranularityDaily, GranularityWeekly, GranularityMonthly,
@@ -572,18 +583,18 @@ func (s *TimeoutScanner) claimNext(
 			dueBefore := now.Add(-s.graceFor(granularity))
 			windows, err := s.windows.claimDue(
 				ctx, granularity, dueBefore, 1,
-				s.leaseOwner, leaseUntil, claimVersionFilter{}, claimOldestFirst,
+				token, leaseUntil, claimVersionFilter{}, claimOldestFirst,
 			)
 			if err != nil {
 				return finalizeClaimAttempt{}, err
 			}
 			if len(windows) > 0 {
 				return finalizeClaimAttempt{
-					window: &windows[0], order: claimOldestFirst,
+					window: &windows[0], token: token, order: claimOldestFirst,
 				}, nil
 			}
 			granularityConflict, conflictErr := s.windows.hasClaimConflict(
-				ctx, granularity, dueBefore, claimVersionFilter{}, s.leaseOwner,
+				ctx, granularity, dueBefore, claimVersionFilter{}, token,
 			)
 			if conflictErr != nil {
 				return finalizeClaimAttempt{}, conflictErr
@@ -594,6 +605,20 @@ func (s *TimeoutScanner) claimNext(
 	default:
 		return finalizeClaimAttempt{}, fmt.Errorf("unsupported PM finalize queue %d", queue)
 	}
+}
+
+func (s *TimeoutScanner) claimLeaseDuration() time.Duration {
+	if s.claimLease > 0 {
+		return s.claimLease
+	}
+	return finalizeClaimLease
+}
+
+func (s *TimeoutScanner) claimRenewInterval() time.Duration {
+	if s.renewInterval > 0 {
+		return s.renewInterval
+	}
+	return s.claimLeaseDuration() / 3
 }
 
 func (s *TimeoutScanner) updateOldestDueMetric(
@@ -651,7 +676,18 @@ func (s *TimeoutScanner) finalizeWorker(
 		if window.ExpectedSlots > 0 && window.ReceivedSlots >= window.ExpectedSlots {
 			reason = CloseComplete
 		}
-		err := s.finalizeWindow(ctx, window.Key, reason, s.leaseOwner)
+		finalizeCtx, cancelFinalize := context.WithCancel(ctx)
+		renewDone := make(chan error, 1)
+		go func() {
+			renewErr := s.renewFinalizeClaim(finalizeCtx, job)
+			if renewErr != nil {
+				cancelFinalize()
+			}
+			renewDone <- renewErr
+		}()
+		err := s.finalizeWindow(finalizeCtx, window.Key, reason, job.token)
+		cancelFinalize()
+		err = errors.Join(err, <-renewDone)
 		clearCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err != nil {
 			s.logger.Warn("finalize timed out PM aggregation window",
@@ -659,15 +695,39 @@ func (s *TimeoutScanner) finalizeWorker(
 				zap.String("entity_key", window.Key.EntityKey),
 				zap.Time("window_start", window.Key.Start),
 				zap.Error(err))
-			clearErr := s.windows.ReleaseClaim(clearCtx, window.Key, s.leaseOwner)
+			clearErr := s.windows.ReleaseClaim(clearCtx, window.Key, job.token)
 			err = errors.Join(err, clearErr)
 		} else {
-			err = s.windows.CompleteClaim(clearCtx, window.Key, s.leaseOwner)
+			err = s.windows.CompleteClaim(clearCtx, window.Key, job.token)
 		}
 		cancel()
 		if s.metrics != nil {
 			s.metrics.FinalizeInflight.Dec()
 		}
 		results <- finalizeResult{err: err}
+	}
+}
+
+func (s *TimeoutScanner) renewFinalizeClaim(
+	ctx context.Context,
+	job finalizeJob,
+) error {
+	ticker := time.NewTicker(s.claimRenewInterval())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case now := <-ticker.C:
+			err := s.windows.RenewClaim(
+				ctx, job.window.Key, job.token, now.Add(s.claimLeaseDuration()),
+			)
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return fmt.Errorf("renew PM aggregation finalize claim: %w", err)
+			}
+		}
 	}
 }
