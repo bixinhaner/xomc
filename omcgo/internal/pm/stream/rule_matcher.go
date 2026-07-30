@@ -107,6 +107,9 @@ func matchDeviceHourVersion(
 			value.Dimension = version.Dimension
 			value.DimensionKey = representative.DimensionKey
 			value.DimensionName = representative.DimensionName
+			if objectLDN, ok := rollupObjectLDN(version.Dimension, representative); ok {
+				value.ObjectLDN = objectLDN
+			}
 			value.DeviceOUI = ""
 			value.DeviceSN = ""
 			value.Operation = rule.Aggregation
@@ -141,6 +144,17 @@ func matchDeviceHourVersion(
 		})
 	}
 	return out
+}
+
+func rollupObjectLDN(dimension Dimension, representative TaskMember) (string, bool) {
+	switch dimension {
+	case DimensionNetwork, DimensionProduct, DimensionDeviceGroup, DimensionAggregateGroup:
+		return "", true
+	case DimensionBand:
+		return representative.DimensionKey, true
+	default:
+		return "", false
+	}
 }
 
 func matchesAnyRuleMember(objectLDN string, members []TaskMember) bool {
