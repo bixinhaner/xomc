@@ -64,9 +64,8 @@ func TestRunFreshInstallBootstrapsEmptyJetStream(t *testing.T) {
 	t.Cleanup(nc.Close)
 	js, err := nc.JetStream()
 	require.NoError(t, err)
-	for name := range js.StreamNames() {
-		require.NoError(t, js.DeleteStream(name))
-	}
+	_, err = js.StreamNameBySubject("command.get_parameters.response")
+	require.ErrorIs(t, err, nats.ErrNoMatchingStream)
 
 	path := filepath.Join(t.TempDir(), "app.prod.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(`
