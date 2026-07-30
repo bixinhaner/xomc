@@ -2040,22 +2040,7 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 // stale (timed-out) upgrade sub-tasks and marks them as failed.
 func (s *SoftwareService) StartTaskReaper() {
 	interval := 2 * time.Minute
-	// DeviceOnline: 设备 inform_interval 默认 300s（5 min），offline detector
-	// 留 2× 缓冲（10 min）才标 offline。
-	//   · 历史：原 10 min 在 2026-05-20 改 60 min（避免 inform 延迟一次就错杀）；
-	//   · 现在改回 10 min —— 运维诉求"挂起一小时太久不可接受"，且设备实际 inform
-	//     周期普遍 60s（远低于 inform_interval=300s 配置默认值），10 min 足够容错 5+
-	//     个心跳周期，再上不来就 failed 让用户重试更直观。
-	//   · executor 端 Redis wait key TTL 同步保持 10 min，避免 Redis 已过期不会
-	//     自动唤醒、reaper 又没兜底失败的中间态。
-	timeouts := StaleTimeouts{
-		RPCResponse:      5 * time.Minute,
-		DeviceOnline:     10 * time.Minute,
-		TransferComplete: 30 * time.Minute,
-		// FAULT_LOG_COLLECT 走 SPV → CPE 主动 PUT 故障日志，秒～分钟级即可。15min 充裕，
-		// 比 30min TC 通用值短一半，配合"文件落地即成功"语义快速失败更直观。
-		FaultLogUpload: 15 * time.Minute,
-	}
+	timeouts := defaultUpgradeTaskReaperTimeouts()
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -2091,6 +2076,25 @@ func (s *SoftwareService) StartTaskReaper() {
 		zap.Duration("device_online_timeout", timeouts.DeviceOnline),
 		zap.Duration("transfer_complete_timeout", timeouts.TransferComplete),
 		zap.Duration("fault_log_upload_timeout", timeouts.FaultLogUpload))
+}
+
+func defaultUpgradeTaskReaperTimeouts() StaleTimeouts {
+	// DeviceOnline: 设备 inform_interval 默认 300s（5 min），offline detector
+	// 留 2× 缓冲（10 min）才标 offline。
+	//   · 历史：原 10 min 在 2026-05-20 改 60 min（避免 inform 延迟一次就错杀）；
+	//   · 现在改回 10 min —— 运维诉求"挂起一小时太久不可接受"，且设备实际 inform
+	//     周期普遍 60s（远低于 inform_interval=300s 配置默认值），10 min 足够容错 5+
+	//     个心跳周期，再上不来就 failed 让用户重试更直观。
+	//   · executor 端 Redis wait key TTL 同步保持 10 min，避免 Redis 已过期不会
+	//     自动唤醒、reaper 又没兜底失败的中间态。
+	return StaleTimeouts{
+		RPCResponse:      10 * time.Minute,
+		DeviceOnline:     10 * time.Minute,
+		TransferComplete: 30 * time.Minute,
+		// FAULT_LOG_COLLECT 走 SPV → CPE 主动 PUT 故障日志，秒～分钟级即可。15min 充裕，
+		// 比 30min TC 通用值短一半，配合"文件落地即成功"语义快速失败更直观。
+		FaultLogUpload: 15 * time.Minute,
+	}
 }
 
 // RestorePendingUpgrades recovers upgrade tasks that were in-progress when

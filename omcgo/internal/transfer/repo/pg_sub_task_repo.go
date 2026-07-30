@@ -42,9 +42,9 @@ func nullableStr(s string) interface{} {
 // PgSubTaskRepo 是 SubTaskRepo 接口的 PostgreSQL 实现。
 // 持有两张物理表名：subTaskTable（本表）+ mainTable（List 的 JOIN 目标 / FailStale 关联用）。
 type PgSubTaskRepo struct {
-	pool          *pgxpool.Pool
-	subTaskTable  string
-	mainTable     string
+	pool         *pgxpool.Pool
+	subTaskTable string
+	mainTable    string
 }
 
 // NewPgSubTaskRepo 创建 sub_task 仓储。
@@ -515,9 +515,11 @@ func (r *PgSubTaskRepo) UpdateDestVersionByID(ctx context.Context, id uuid.UUID,
 	return nil
 }
 
+// UpdateFailureReasonByTask fills blank failure_reason values without overwriting
+// more specific codes already written by a repo-level timeout branch.
 func (r *PgSubTaskRepo) UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code software.FailureCode) error {
 	query, args, err := storage.Psql.Update(r.subTaskTable).
-		Set("failure_reason", string(code)).
+		Set("failure_reason", sq.Expr("COALESCE(NULLIF(failure_reason, ''), ?)", string(code))).
 		Where(sq.And{
 			sq.Eq{"task_id": taskID},
 			sq.Eq{"status": software.UpgradeFailed},
