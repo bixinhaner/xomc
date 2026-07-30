@@ -82,6 +82,11 @@ if [ -f "$DEPLOY_DIR/resource-env-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/resource-env-lib.sh（完整资源规划契约库）" 1
 fi
+if [ -f "$DEPLOY_DIR/resource-plan-metrics.sh" ]; then
+  . "$DEPLOY_DIR/resource-plan-metrics.sh"
+else
+  die "缺 $DEPLOY_DIR/resource-plan-metrics.sh（资源计划 Prometheus 指标生成器）" 1
+fi
 if [ -f "$DEPLOY_DIR/monitoring-profile-lib.sh" ]; then
   . "$DEPLOY_DIR/monitoring-profile-lib.sh"
 else
@@ -692,9 +697,12 @@ ENV_FILES=()
 if [ -f resources.env ]; then
   resource_env_validate resources.env ||
     die "resources.env 不是完整资源规划；请重新运行 plan-resources.sh，禁止缺失项静默回退 Compose 默认值"
+  resource_plan_metrics_write resources.env ||
+    die "无法生成 resources.env 对应的 Prometheus 资源计划指标"
   ENV_FILES+=( --env-file resources.env )
   log "已检出 resources.env → 按其资源限额部署（plan-resources.sh 生成）"
 else
+  resource_plan_metrics_remove
   log "未检出 resources.env → 用 compose 内置默认限额（如需按主机空闲资源规划，部署前先跑：bash plan-resources.sh）"
 fi
 

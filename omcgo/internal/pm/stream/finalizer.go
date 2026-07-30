@@ -276,7 +276,7 @@ func (f *Finalizer) writeFinal(
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit PM aggregation window: %w", err)
 	}
-	if f.metrics != nil && coverage.DailyVersionExpectedSlotsMismatch {
+	if f.metrics != nil && shouldRecordDailyVersionExpectedSlotsMismatch(revision, coverage) {
 		f.metrics.DailyVersionExpectedSlotsMismatchTotal.Inc()
 	}
 	return nil
@@ -320,6 +320,10 @@ func dailyVersionExpectedSlotsMismatch(
 ) bool {
 	return key.Granularity == GranularityDaily && version != nil && !version.DevicePipeline &&
 		versionExpectedSlots != naturalSlots
+}
+
+func shouldRecordDailyVersionExpectedSlotsMismatch(revision int, coverage finalizationCoverage) bool {
+	return revision == 1 && coverage.DailyVersionExpectedSlotsMismatch
 }
 
 func (f *Finalizer) finalizationLocation() *time.Location {

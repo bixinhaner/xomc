@@ -279,37 +279,70 @@ groups:
         labels: {severity: warning, domain: omc, service: postgres-tsdb}
         annotations: {summary: "postgres-tsdb 内存持续超过限额 85%：{{ $labels.name }}"}
 
+      - alert: OMCResourcePlanCAdvisorAbsent
+        # 资源漂移规则的实际值完全依赖 cAdvisor；即使 node-exporter 正常，cAdvisor
+        # 不可达也不能让 OMCResourcePlanDrift 静默。与普通采集 warning 分开升级为 critical。
+        expr: up{job="cadvisor"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          service: resource-plan
+        annotations:
+          summary: "资源计划实际 limit 采集 cAdvisor 不可达"
+          description: "cAdvisor 连续 2 分钟不可抓取，资源漂移检查失效。禁止在未恢复实际容器指标前继续发布。"
+
+      - alert: OMCResourcePlanBaselineAbsent
+        # resources.env 由 Task 1 契约验证后生成 node-exporter textfile；缺失时不能
+        # 用硬编码默认值替代，否则运行期会与真实部署方案失联。
+        expr: absent_over_time(omc_resource_plan_cpu_cores[5m]) == 1
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          service: resource-plan
+        annotations:
+          summary: "资源计划声明指标缺失"
+          description: "未收到由完整 resources.env 渲染的资源计划指标，无法与实际 cgroup limit 比对。"
+
+      - alert: OMCResourcePlanContainerSeriesAbsent
+        expr: |
+          omc_resource_plan_cpu_cores
+          unless on (service)
+          label_replace(
+            count by (container_label_com_docker_compose_service) (
+              container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+            ),
+            "service", "$1", "container_label_com_docker_compose_service", "(.*)"
+          )
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          service: resource-plan
+        annotations:
+          summary: "资源计划服务缺少 cAdvisor 实际 limit 序列：{{ $labels.service }}"
+          description: "已声明资源计划的服务没有对应 cAdvisor container_spec 序列。Task 8 必须核验 Docker 29/overlayfs；若持续缺失，接入 Docker API 资源 exporter 后才可上线。"
+
       - alert: OMCResourcePlanDrift
-        # 期望基线来自本次根治发布的完整 resources.env（Task 8），而不是主机容量：
-        # app 2/1536MiB, acs 5/4096MiB, worker 8/2048MiB,
-        # postgres 10/7168MiB, postgres-tsdb 16/7168MiB, redis 2/8192MiB,
-        # nats 1/1024MiB, minio 4/4096MiB, web 1/512MiB。
-        # cAdvisor 的 container_spec_* 是 Docker 实际 cgroup limit；与以上声明不等
-        # 即代表 resources.env → compose → inspect 三层之一漂移。Task 8 healthcheck
-        # 仍是部署时的逐项硬校验，此规则用于运行期持续发现后续漂移。
+        # 声明值来自 Task 1 完整 resources.env → node-exporter textfile，实际值来自
+        # cAdvisor 的 Docker cgroup。按 compose service 标签一一比对，不把计划写死在规则中。
         expr: |
           (
-            sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-app-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-app-.*"}) != 2
-            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-acs-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-acs-.*"}) != 5
-            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-worker-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-worker-.*"}) != 8
-            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-postgres-[0-9]+$"} / container_spec_cpu_period{name=~"(omcgo|docker)-postgres-[0-9]+$"}) != 10
-            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-postgres-tsdb-[0-9]+$"} / container_spec_cpu_period{name=~"(omcgo|docker)-postgres-tsdb-[0-9]+$"}) != 16
-            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-redis-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-redis-.*"}) != 2
-            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-nats-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-nats-.*"}) != 1
-            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-minio-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-minio-.*"}) != 4
-            or sum by (name) (container_spec_cpu_quota{name=~"(omcgo|docker)-web-.*"} / container_spec_cpu_period{name=~"(omcgo|docker)-web-.*"}) != 1
+            sum by (container_label_com_docker_compose_service) (
+              container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+              / container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+            )
+            != on (container_label_com_docker_compose_service)
+            label_replace(omc_resource_plan_cpu_cores, "container_label_com_docker_compose_service", "$1", "service", "(.*)")
           )
           or
           (
-            sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-app-.*"}) != 1610612736
-            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-acs-.*"}) != 4294967296
-            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-worker-.*"}) != 2147483648
-            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-postgres-[0-9]+$"}) != 7516192768
-            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-postgres-tsdb-[0-9]+$"}) != 7516192768
-            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-redis-.*"}) != 8589934592
-            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-nats-.*"}) != 1073741824
-            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-minio-.*"}) != 4294967296
-            or sum by (name) (container_spec_memory_limit_bytes{name=~"(omcgo|docker)-web-.*"}) != 536870912
+            sum by (container_label_com_docker_compose_service) (
+              container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+            )
+            != on (container_label_com_docker_compose_service)
+            label_replace(omc_resource_plan_memory_limit_bytes, "container_label_com_docker_compose_service", "$1", "service", "(.*)")
           )
         for: 3m
         labels:
@@ -317,9 +350,9 @@ groups:
           domain: omc
           service: resource-plan
         annotations:
-          summary: "OMC 声明资源基线与容器实际 limit 不一致：{{ $labels.name }}"
+          summary: "OMC 声明资源计划与容器实际 limit 不一致：{{ $labels.container_label_com_docker_compose_service }}"
           description: |
-            cAdvisor 报告的实际 cgroup CPU 或内存限额已偏离本次完整 resources.env 的生产基线。
+            cAdvisor 报告的实际 cgroup CPU 或内存限额已偏离同源 resources.env 声明值。
             Action: 先运行 release healthcheck.sh 定位 resources.env、Compose 渲染或 Docker inspect
                     的哪一层漂移；禁止只改单层或用容器重启掩盖问题。
 

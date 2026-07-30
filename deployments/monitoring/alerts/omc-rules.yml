@@ -286,7 +286,9 @@ groups:
       - alert: PMFinalizeOldestDueHigh
         # warning > 30m。仅由有界关闭调度器维护；无 due 窗口时不会输出序列，
         # 因此不会空窗误报。
-        expr: omc_pm_aggregation_finalize_oldest_due_seconds > 1800
+        expr: |
+          (omc_pm_aggregation_finalize_oldest_due_seconds > 1800)
+          and (omc_pm_aggregation_finalize_oldest_due_seconds <= 3600)
         for: 5m
         labels:
           severity: warning

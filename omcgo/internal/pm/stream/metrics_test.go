@@ -52,7 +52,7 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 		names[family.GetName()] = struct{}{}
 	}
 	for _, name := range []string{
-		"omc_pm_aggregation_finalize_claims",
+		"omc_pm_aggregation_finalize_claims_total",
 		"omc_pm_aggregation_finalize_inflight",
 		"omc_pm_aggregation_finalize_oldest_due_seconds",
 		"omc_pm_aggregation_finalize_claim_conflicts_total",
@@ -66,4 +66,26 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 	} {
 		require.Contains(t, names, name)
 	}
+}
+
+func TestRebuildSnapshotScanHistogramCoversOperationalThresholds(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	NewMetrics(registry)
+
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		if family.GetName() != "omc_pm_aggregation_rebuild_snapshot_scan_seconds" {
+			continue
+		}
+		bounds := make([]float64, 0, len(family.Metric[0].Histogram.Bucket))
+		for _, bucket := range family.Metric[0].Histogram.Bucket {
+			bounds = append(bounds, bucket.GetUpperBound())
+		}
+		require.Contains(t, bounds, float64(15))
+		require.Contains(t, bounds, float64(30))
+		require.Contains(t, bounds, float64(60))
+		return
+	}
+	t.Fatal("rebuild snapshot scan histogram not registered")
 }

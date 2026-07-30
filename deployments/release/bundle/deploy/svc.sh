@@ -91,6 +91,11 @@ if [ -f "$SCRIPT_DIR/resource-env-lib.sh" ]; then
 else
   die "缺 $SCRIPT_DIR/resource-env-lib.sh（完整资源规划契约库）"
 fi
+if [ -f "$SCRIPT_DIR/resource-plan-metrics.sh" ]; then
+  . "$SCRIPT_DIR/resource-plan-metrics.sh"
+else
+  die "缺 $SCRIPT_DIR/resource-plan-metrics.sh（资源计划 Prometheus 指标生成器）"
+fi
 if [ -f "$SCRIPT_DIR/monitoring-profile-lib.sh" ]; then
   . "$SCRIPT_DIR/monitoring-profile-lib.sh"
 else
@@ -124,6 +129,15 @@ if [ -f resources.env ]; then
   ENV_FILES+=( --env-file resources.env )
 fi
 
+refresh_resource_plan_metrics() {
+  if [ -f resources.env ]; then
+    resource_plan_metrics_write resources.env ||
+      die "无法生成 resources.env 对应的 Prometheus 资源计划指标"
+  else
+    resource_plan_metrics_remove
+  fi
+}
+
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 
 # 行为分派
@@ -136,6 +150,7 @@ case "$ACTION" in
   start|up)
     storage_prepare_configured_env_paths ".env" ||
       die "有状态服务数据路径校验/创建失败；请检查 .env 中五个 *_DATA_PATH"
+    refresh_resource_plan_metrics
     if [ ${#TARGETS[@]} -gt 0 ]; then
       log "启动服务：${TARGETS[*]}"
       "${DC[@]}" up -d "${TARGETS[@]}"
@@ -158,6 +173,7 @@ case "$ACTION" in
   restart)
     storage_prepare_configured_env_paths ".env" ||
       die "有状态服务数据路径校验/创建失败；请检查 .env 中五个 *_DATA_PATH"
+    refresh_resource_plan_metrics
     # 一次性迁移 job（run-once，跑完即 Exited）。对已退出容器执行 docker compose
     # restart 语义不对，且会脱离 depends_on 健康门控在错误时机被强行拉起。
     ONESHOT_RE='^(migrate-schema|migrate-seed-sql|migrate-seed)$'

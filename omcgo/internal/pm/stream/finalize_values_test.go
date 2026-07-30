@@ -44,6 +44,13 @@ func TestFinalizationCoverageDoesNotFlagNaturalDailyVersion(t *testing.T) {
 	require.False(t, coverage.DailyVersionExpectedSlotsMismatch)
 }
 
+func TestDailyVersionExpectedSlotsMismatchOnlyCountsInitialPublication(t *testing.T) {
+	coverage := finalizationCoverage{DailyVersionExpectedSlotsMismatch: true}
+	require.True(t, shouldRecordDailyVersionExpectedSlotsMismatch(1, coverage))
+	require.False(t, shouldRecordDailyVersionExpectedSlotsMismatch(2, coverage))
+	require.False(t, shouldRecordDailyVersionExpectedSlotsMismatch(1, finalizationCoverage{}))
+}
+
 func TestFinalizerUsesConfiguredLocationForDSTVersionBoundary(t *testing.T) {
 	location, err := time.LoadLocation("America/New_York")
 	require.NoError(t, err)

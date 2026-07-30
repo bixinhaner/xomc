@@ -103,7 +103,10 @@ groups:
         # redis_memory_max_bytes=0（或缺失）表示未设 maxmemory ——
         # 用 and 守卫避免除零 / 缺失误报。聚合状态与普通缓存共享 Redis，
         # 因此这里监控实际 Redis 水位而非不完整的抽样估算。
-        expr: (redis_memory_used_bytes / redis_memory_max_bytes >= 0.80) and (redis_memory_max_bytes > 0)
+        expr: |
+          (redis_memory_used_bytes / redis_memory_max_bytes >= 0.80)
+          and (redis_memory_used_bytes / redis_memory_max_bytes < 0.90)
+          and (redis_memory_max_bytes > 0)
         for: 5m
         labels:
           severity: warning

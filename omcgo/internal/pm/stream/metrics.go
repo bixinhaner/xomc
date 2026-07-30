@@ -109,7 +109,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		RebuildSnapshotScanSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "omc_pm_aggregation_rebuild_snapshot_scan_seconds",
 			Help:    "Time spent sequentially scanning compact rollup snapshots for a rebuild batch.",
-			Buckets: prometheus.DefBuckets,
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 15, 30, 60},
 		}),
 		RebuildCoalescedTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_rebuild_coalesced_total",
@@ -129,7 +129,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Buckets: prometheus.DefBuckets,
 		}),
 		FinalizeClaims: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "omc_pm_aggregation_finalize_claims",
+			Name: "omc_pm_aggregation_finalize_claims_total",
 			Help: "Aggregation windows leased by the bounded finalization scheduler.",
 		}),
 		FinalizeInflight: prometheus.NewGauge(prometheus.GaugeOpts{
