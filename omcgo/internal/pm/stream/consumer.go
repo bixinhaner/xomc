@@ -292,6 +292,7 @@ const (
 	finalizeRetryBase              = 30 * time.Second
 	finalizeRetryMax               = 30 * time.Minute
 	finalizeOldestDueQueryInterval = 30 * time.Second
+	finalizeClaimBatchSize         = 8
 )
 
 var finalizeQuotaWheel = [...]finalizeQueue{
@@ -343,6 +344,13 @@ type finalizeJob struct {
 
 type finalizeClaimAttempt struct {
 	window   *WindowRecord
+	token    uuid.UUID
+	order    claimOrder
+	conflict bool
+}
+
+type finalizeBatchClaim struct {
+	windows  []WindowRecord
 	token    uuid.UUID
 	order    claimOrder
 	conflict bool
@@ -479,16 +487,23 @@ func (s *TimeoutScanner) runCycle(
 	claimsSinceRefresh := 0
 	var finalizeErrors []error
 	for {
-		for inflight < workerCount && anyFinalizeQueueAvailable(available) {
+		openSlots := workerCount - inflight
+		refillThreshold := min(finalizeClaimBatchSize, workerCount)
+		// Claiming one window per transaction made a 20k-device hour spend most
+		// of its time in serialized claim SQL (~133ms per round trip). Refill in
+		// bounded waves so one SKIP LOCKED transaction leases up to eight
+		// windows, while retaining a fixed worker ceiling and queue fairness.
+		for openSlots >= refillThreshold && anyFinalizeQueueAvailable(available) {
 			queue := s.selector.nextQueue(available)
 			claimAt := time.Now().UTC()
-			attempt, claimErr := s.claimNext(ctx, claimAt, queue)
+			batchLimit := min(finalizeClaimBatchSize, openSlots)
+			attempt, claimErr := s.claimBatch(ctx, claimAt, queue, uint64(batchLimit))
 			if claimErr != nil {
 				finalizeErrors = append(finalizeErrors, claimErr)
 				available[queue] = false
 				continue
 			}
-			if attempt.window == nil {
+			if len(attempt.windows) == 0 {
 				// Per-job tokens make an in-flight local claim indistinguishable
 				// from a foreign claim in the aggregate conflict probe.
 				reportedConflict := attempt.conflict && inflight == 0
@@ -498,28 +513,39 @@ func (s *TimeoutScanner) runCycle(
 				available[queue] = false
 				continue
 			}
-			window := attempt.window
-			claimsSinceRefresh++
-			if claimsSinceRefresh == len(finalizeQuotaWheel) {
+			claimsSinceRefresh += len(attempt.windows)
+			if claimsSinceRefresh >= len(finalizeQuotaWheel) {
 				available[finalizeHourlyDevice] = true
 				available[finalizeHourlyOther] = true
 				available[finalizeLongPeriod] = true
-				claimsSinceRefresh = 0
+				claimsSinceRefresh %= len(finalizeQuotaWheel)
 			}
 			if s.metrics != nil {
-				s.metrics.FinalizeClaims.Inc()
+				s.metrics.FinalizeClaims.Add(float64(len(attempt.windows)))
 			}
-			select {
-			case jobs <- finalizeJob{window: *window, token: attempt.token, queue: queue}:
-				inflight++
-				if s.metrics != nil {
-					s.metrics.FinalizeInflight.Inc()
+			for index := range attempt.windows {
+				window := attempt.windows[index]
+				select {
+				case jobs <- finalizeJob{window: window, token: attempt.token, queue: queue}:
+					inflight++
+					openSlots--
+					if s.metrics != nil {
+						s.metrics.FinalizeInflight.Inc()
+					}
+				case <-ctx.Done():
+					clearCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					var releaseErrors []error
+					for pending := index; pending < len(attempt.windows); pending++ {
+						releaseErrors = append(
+							releaseErrors,
+							s.windows.ReleaseClaim(
+								clearCtx, attempt.windows[pending].Key, attempt.token,
+							),
+						)
+					}
+					cancel()
+					return errors.Join(append(finalizeErrors, ctx.Err(), errors.Join(releaseErrors...))...)
 				}
-			case <-ctx.Done():
-				clearCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				releaseErr := s.windows.ReleaseClaim(clearCtx, window.Key, attempt.token)
-				cancel()
-				return errors.Join(append(finalizeErrors, ctx.Err(), releaseErr)...)
 			}
 		}
 		if inflight == 0 {
@@ -555,6 +581,25 @@ func (s *TimeoutScanner) claimNext(
 	now time.Time,
 	queue finalizeQueue,
 ) (finalizeClaimAttempt, error) {
+	batch, err := s.claimBatch(ctx, now, queue, 1)
+	if err != nil {
+		return finalizeClaimAttempt{}, err
+	}
+	var window *WindowRecord
+	if len(batch.windows) > 0 {
+		window = &batch.windows[0]
+	}
+	return finalizeClaimAttempt{
+		window: window, token: batch.token, order: batch.order, conflict: batch.conflict,
+	}, nil
+}
+
+func (s *TimeoutScanner) claimBatch(
+	ctx context.Context,
+	now time.Time,
+	queue finalizeQueue,
+	limit uint64,
+) (finalizeBatchClaim, error) {
 	token := uuid.New()
 	leaseUntil := now.Add(s.claimLeaseDuration())
 	switch queue {
@@ -566,20 +611,20 @@ func (s *TimeoutScanner) claimNext(
 		order := s.selector.nextOrder(queue)
 		dueBefore := now.Add(-s.graceFor(GranularityHourly))
 		windows, err := s.windows.claimDue(
-			ctx, GranularityHourly, dueBefore, 1,
+			ctx, GranularityHourly, dueBefore, limit,
 			token, leaseUntil, filter, order,
 		)
 		if err != nil {
-			return finalizeClaimAttempt{}, err
+			return finalizeBatchClaim{}, err
 		}
 		if len(windows) == 0 {
 			conflict, conflictErr := s.windows.hasClaimConflict(
 				ctx, GranularityHourly, dueBefore, filter, token,
 			)
-			return finalizeClaimAttempt{order: order, conflict: conflict}, conflictErr
+			return finalizeBatchClaim{order: order, conflict: conflict}, conflictErr
 		}
-		return finalizeClaimAttempt{
-			window: &windows[0], token: token, order: order,
+		return finalizeBatchClaim{
+			windows: windows, token: token, order: order,
 		}, nil
 	case finalizeLongPeriod:
 		granularities := [...]Granularity{
@@ -591,28 +636,28 @@ func (s *TimeoutScanner) claimNext(
 			s.selector.longTermCursor++
 			dueBefore := now.Add(-s.graceFor(granularity))
 			windows, err := s.windows.claimDue(
-				ctx, granularity, dueBefore, 1,
+				ctx, granularity, dueBefore, limit,
 				token, leaseUntil, claimVersionFilter{}, claimOldestFirst,
 			)
 			if err != nil {
-				return finalizeClaimAttempt{}, err
+				return finalizeBatchClaim{}, err
 			}
 			if len(windows) > 0 {
-				return finalizeClaimAttempt{
-					window: &windows[0], token: token, order: claimOldestFirst,
+				return finalizeBatchClaim{
+					windows: windows, token: token, order: claimOldestFirst,
 				}, nil
 			}
 			granularityConflict, conflictErr := s.windows.hasClaimConflict(
 				ctx, granularity, dueBefore, claimVersionFilter{}, token,
 			)
 			if conflictErr != nil {
-				return finalizeClaimAttempt{}, conflictErr
+				return finalizeBatchClaim{}, conflictErr
 			}
 			conflict = conflict || granularityConflict
 		}
-		return finalizeClaimAttempt{order: claimOldestFirst, conflict: conflict}, nil
+		return finalizeBatchClaim{order: claimOldestFirst, conflict: conflict}, nil
 	default:
-		return finalizeClaimAttempt{}, fmt.Errorf("unsupported PM finalize queue %d", queue)
+		return finalizeBatchClaim{}, fmt.Errorf("unsupported PM finalize queue %d", queue)
 	}
 }
 
