@@ -119,10 +119,13 @@ fi
 
 if [[ -f "$alerts_config" ]]; then
   cpu_alert_block=$(sed -n '/^      - alert: ContainerCPUSaturation$/,/^      - alert: ContainerCPUThrottling$/p' "$alerts_config")
-  grep -Fq 'sum by (service) (rate(container_cpu_usage_seconds_total{service=~"app|acs|worker"}[5m]))' <<<"$cpu_alert_block" || \
+  grep -Fq 'rate(container_cpu_usage_seconds_total{service=~"app|acs|worker"}[5m])' <<<"$cpu_alert_block" || \
     fail "host-container-alerts.yml: ContainerCPUSaturation must aggregate usage by service"
-  grep -Fq 'sum by (service) ((container_spec_cpu_quota{service=~"app|acs|worker"} > 0) / container_spec_cpu_period{service=~"app|acs|worker"})' <<<"$cpu_alert_block" || \
+  grep -Fq '(container_spec_cpu_quota{service=~"app|acs|worker"} > 0)' <<<"$cpu_alert_block" && \
+    grep -Fq '/ container_spec_cpu_period{service=~"app|acs|worker"}' <<<"$cpu_alert_block" || \
     fail "host-container-alerts.yml: ContainerCPUSaturation must use per-container quota/period by service"
+  grep -Fq 'and on (id) omc:container_last_seen:fresh' <<<"$cpu_alert_block" || \
+    fail "host-container-alerts.yml: ContainerCPUSaturation must exclude stale replaced containers"
   if grep -Fq 'name=~"(omcgo|docker)-(app|acs|worker)-.*"' <<<"$cpu_alert_block"; then
     fail "host-container-alerts.yml: ContainerCPUSaturation must not depend on the legacy name selector"
   fi

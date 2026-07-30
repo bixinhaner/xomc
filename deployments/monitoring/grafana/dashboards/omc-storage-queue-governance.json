@@ -61,7 +61,7 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
       "targets": [
-        {"expr": "sum by (queue, status) (omc_persistent_queue_pending)", "legendFormat": "{{queue}}/{{status}}"},
+        {"expr": "max by (queue, status) (omc_persistent_queue_pending)", "legendFormat": "{{queue}}/{{status}}"},
         {"expr": "omc_persistent_queue_dead_letter_total", "legendFormat": "{{queue}} dead letter"}
       ],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0}}

@@ -38,7 +38,9 @@ groups:
           description: "Redis 队列业务快照已停止更新，面板中的数值不能解释为空队列；检查 Redis 连接、SCAN 上限和观测失败计数。"
 
       - alert: PersistentQueueBacklogHigh
-        expr: sum by (queue) (omc_persistent_queue_pending{status=~"pending|sent|running"}) > 1000
+        # app 与 worker 都会采集同一 PostgreSQL 快照。先按 queue/status 取最大值
+        # 去重采集副本，再跨活动状态求和，避免同一积压被按进程数放大。
+        expr: sum by (queue) (max by (queue, status) (omc_persistent_queue_pending{status=~"pending|sent|running"})) > 1000
         for: 10m
         labels:
           severity: warning
