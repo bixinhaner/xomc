@@ -17,6 +17,11 @@ func TestNewACSMetrics(t *testing.T) {
 	assert.NotNil(t, m.RPCDuration)
 	assert.NotNil(t, m.RPCErrorsTotal)
 	assert.NotNil(t, m.SessionDuration)
+	assert.NotNil(t, m.UECountQueueDepth)
+	assert.NotNil(t, m.UECountQueueCapacity)
+	assert.NotNil(t, m.UECountEnqueueTotal)
+	assert.NotNil(t, m.UECountProcessTotal)
+	assert.NotNil(t, m.UECountProcessDuration)
 }
 
 func TestNewACSMetrics_Operations(t *testing.T) {
@@ -38,6 +43,11 @@ func TestNewACSMetrics_Operations(t *testing.T) {
 		m.RPCDuration.WithLabelValues("GetParameterValues").Observe(0.123)
 		m.RPCErrorsTotal.WithLabelValues("Download").Inc()
 		m.SessionDuration.Observe(2.5)
+		m.UECountQueueDepth.Set(12)
+		m.UECountQueueCapacity.Set(4096)
+		m.UECountEnqueueTotal.WithLabelValues("accepted").Inc()
+		m.UECountProcessTotal.WithLabelValues("success").Inc()
+		m.UECountProcessDuration.Observe(0.02)
 	})
 }
 

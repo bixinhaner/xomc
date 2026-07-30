@@ -4,14 +4,19 @@ import "github.com/prometheus/client_golang/prometheus"
 
 // ACSMetrics holds all Prometheus metrics for the ACS engine.
 type ACSMetrics struct {
-	ActiveSessions       prometheus.Gauge
-	InformTotal          *prometheus.CounterVec
-	RPCDuration          *prometheus.HistogramVec
-	RPCErrorsTotal       *prometheus.CounterVec
-	SessionDuration      prometheus.Histogram
-	RateLimitRejected    prometheus.Counter
-	RateLimitDeviceCount prometheus.Gauge
-	PostSessionWakeTotal prometheus.Counter
+	ActiveSessions         prometheus.Gauge
+	InformTotal            *prometheus.CounterVec
+	RPCDuration            *prometheus.HistogramVec
+	RPCErrorsTotal         *prometheus.CounterVec
+	SessionDuration        prometheus.Histogram
+	RateLimitRejected      prometheus.Counter
+	RateLimitDeviceCount   prometheus.Gauge
+	PostSessionWakeTotal   prometheus.Counter
+	UECountQueueDepth      prometheus.Gauge
+	UECountQueueCapacity   prometheus.Gauge
+	UECountEnqueueTotal    *prometheus.CounterVec
+	UECountProcessTotal    *prometheus.CounterVec
+	UECountProcessDuration prometheus.Histogram
 }
 
 // NewACSMetrics creates and registers ACS metrics.
@@ -51,6 +56,27 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 			Name: "acs_post_session_wake_total",
 			Help: "Total number of post-session Connection Requests sent to wake devices with remaining commands",
 		}),
+		UECountQueueDepth: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "acs_ue_count_queue_depth",
+			Help: "Current number of devices waiting for asynchronous UE count scheduling",
+		}),
+		UECountQueueCapacity: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "acs_ue_count_queue_capacity",
+			Help: "Maximum number of devices accepted by the asynchronous UE count scheduler",
+		}),
+		UECountEnqueueTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "acs_ue_count_enqueue_total",
+			Help: "Total UE count scheduling requests by admission result",
+		}, []string{"result"}),
+		UECountProcessTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "acs_ue_count_process_total",
+			Help: "Total asynchronous UE count scheduling attempts by result",
+		}, []string{"result"}),
+		UECountProcessDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "acs_ue_count_process_duration_seconds",
+			Help:    "Duration of asynchronous UE count scheduling attempts",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 3},
+		}),
 	}
 
 	reg.MustRegister(
@@ -62,6 +88,11 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 		m.RateLimitRejected,
 		m.RateLimitDeviceCount,
 		m.PostSessionWakeTotal,
+		m.UECountQueueDepth,
+		m.UECountQueueCapacity,
+		m.UECountEnqueueTotal,
+		m.UECountProcessTotal,
+		m.UECountProcessDuration,
 	)
 
 	return m

@@ -3,8 +3,10 @@ package acs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -18,11 +20,15 @@ import (
 const ueCountGPVDescription = "UECountPolicy:GPV"
 
 const (
-	defaultUECountProbeTimeout  = 500 * time.Millisecond
+	defaultUECountProbeTimeout  = 3 * time.Second
 	defaultUECountProbeLeaseTTL = time.Hour
 	defaultUECountProbeRetry    = 5 * time.Minute
 	ueCountProbeSpreadSlot      = 5 * time.Minute
+	defaultUECountQueueSize     = 4096
+	defaultUECountWorkerCount   = 32
 )
+
+var ErrUECountPolicyQueueFull = errors.New("UE count policy queue is full")
 
 // UECountPathResolver resolves concrete, product-supported standard paths for
 // the current device. PathTranslationService satisfies this interface.
@@ -153,6 +159,12 @@ type UECountPolicy struct {
 	gate     UECountProbeGate
 	timeout  time.Duration
 	logger   *zap.Logger
+	metrics  *ACSMetrics
+
+	queue       chan string
+	pendingMu   sync.Mutex
+	pending     map[string]struct{}
+	workerCount int
 }
 
 func NewUECountPolicy(
@@ -165,16 +177,30 @@ func NewUECountPolicy(
 		logger = zap.NewNop()
 	}
 	return &UECountPolicy{
-		resolver: resolver,
-		tasks:    tasks,
-		gate:     gate,
-		timeout:  defaultUECountProbeTimeout,
-		logger:   logger.Named("ue-count-policy"),
+		resolver:    resolver,
+		tasks:       tasks,
+		gate:        gate,
+		timeout:     defaultUECountProbeTimeout,
+		logger:      logger.Named("ue-count-policy"),
+		queue:       make(chan string, defaultUECountQueueSize),
+		pending:     make(map[string]struct{}, defaultUECountQueueSize),
+		workerCount: defaultUECountWorkerCount,
 	}
 }
 
 func (p *UECountPolicy) Enabled() bool {
 	return p != nil && p.resolver != nil && p.tasks != nil && p.gate != nil
+}
+
+func (p *UECountPolicy) SetMetrics(metrics *ACSMetrics) {
+	if p == nil {
+		return
+	}
+	p.metrics = metrics
+	if metrics != nil {
+		metrics.UECountQueueCapacity.Set(float64(cap(p.queue)))
+		metrics.UECountQueueDepth.Set(float64(len(p.queue)))
+	}
 }
 
 func (p *UECountPolicy) ShouldTrigger(eventCodes []string) bool {
@@ -189,9 +215,102 @@ func (p *UECountPolicy) ShouldTrigger(eventCodes []string) bool {
 	return false
 }
 
-// Enqueue creates a normal (non sync-gpv) system task so the existing GPV
+// Enqueue only admits the device into a bounded, process-local work queue. It
+// deliberately performs no Redis, PostgreSQL, or path-translation calls so a
+// slow dependency can never extend the Inform request latency.
+//
+// A full queue does not consume the distributed probe lease. The next periodic
+// Inform can therefore retry instead of silently losing the probe for one hour.
+func (p *UECountPolicy) Enqueue(_ context.Context, deviceSN string) error {
+	if !p.Enabled() {
+		return nil
+	}
+	p.pendingMu.Lock()
+	if _, exists := p.pending[deviceSN]; exists {
+		p.pendingMu.Unlock()
+		p.recordEnqueue("coalesced")
+		return nil
+	}
+	p.pending[deviceSN] = struct{}{}
+	select {
+	case p.queue <- deviceSN:
+		p.pendingMu.Unlock()
+		p.recordEnqueue("accepted")
+		p.observeQueueDepth()
+		return nil
+	default:
+		delete(p.pending, deviceSN)
+		p.pendingMu.Unlock()
+		p.recordEnqueue("rejected")
+		return ErrUECountPolicyQueueFull
+	}
+}
+
+// Run processes queued UE count probes until ctx is cancelled. Callers should
+// start exactly one Run goroutine and tie its context to the ACS lifecycle.
+func (p *UECountPolicy) Run(ctx context.Context) {
+	if !p.Enabled() {
+		return
+	}
+	workers := p.workerCount
+	if workers <= 0 {
+		workers = defaultUECountWorkerCount
+	}
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			p.runWorker(ctx)
+		}()
+	}
+	wg.Wait()
+}
+
+func (p *UECountPolicy) runWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case deviceSN := <-p.queue:
+			p.observeQueueDepth()
+			started := time.Now()
+			err := p.process(ctx, deviceSN)
+			if p.metrics != nil {
+				p.metrics.UECountProcessDuration.Observe(time.Since(started).Seconds())
+				result := "success"
+				if err != nil {
+					result = "error"
+				}
+				p.metrics.UECountProcessTotal.WithLabelValues(result).Inc()
+			}
+			if err != nil {
+				p.logger.Warn("process UE count query failed",
+					zap.String("device_sn", deviceSN),
+					zap.Error(err))
+			}
+			p.pendingMu.Lock()
+			delete(p.pending, deviceSN)
+			p.pendingMu.Unlock()
+		}
+	}
+}
+
+func (p *UECountPolicy) recordEnqueue(result string) {
+	if p.metrics != nil {
+		p.metrics.UECountEnqueueTotal.WithLabelValues(result).Inc()
+	}
+}
+
+func (p *UECountPolicy) observeQueueDepth() {
+	if p.metrics != nil {
+		p.metrics.UECountQueueDepth.Set(float64(len(p.queue)))
+	}
+}
+
+// process creates a normal (non sync-gpv) system task so the existing GPV
 // response subscriber persists device_parameters and refreshes device_info.
-func (p *UECountPolicy) Enqueue(ctx context.Context, deviceSN string) (retErr error) {
+func (p *UECountPolicy) process(ctx context.Context, deviceSN string) (retErr error) {
 	if !p.Enabled() {
 		return nil
 	}

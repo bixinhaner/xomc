@@ -562,13 +562,22 @@ func TestServeHTTP_Inform_Periodic_EnqueuesUECountQuery(t *testing.T) {
 		stubUECountProbeGate{acquired: true},
 		zap.NewNop(),
 	)
+	runCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go h.ueCountPolicy.Run(runCtx)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
 	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	require.Len(t, taskSvc.tasks, 1)
+	require.Eventually(t, func() bool {
+		taskSvc.mu.Lock()
+		defer taskSvc.mu.Unlock()
+		return len(taskSvc.tasks) == 1
+	}, time.Second, time.Millisecond)
+	taskSvc.mu.Lock()
+	defer taskSvc.mu.Unlock()
 	assert.Equal(t, ueCountGPVDescription, taskSvc.tasks[0].Description)
 }
 
