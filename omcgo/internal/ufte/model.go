@@ -238,6 +238,7 @@ func builtInTaskTypes() []TaskType {
 	lte := coremodel.TechLTE
 	nr := coremodel.TechNR
 	gsm := coremodel.TechGSM
+	enbProducts := builtInENBProductScope()
 	return []TaskType{
 		{
 			TypeCode:               "ENB_IMG_UPGRADE",
@@ -252,6 +253,7 @@ func builtInTaskTypes() []TaskType {
 			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"},
 			PermissionCode:         "CODE_ENB_UPGRADE_IMAGE",
 			PlatformScope:          []string{"4G eNB", "QAFA", "QAFB"},
+			Products:               enbProducts,
 			FileType:               "1 Firmware Upgrade Image",
 			FileTypeLabel:          "1 Firmware Upgrade Image",
 			FileTypeEditable:       true,
@@ -281,6 +283,7 @@ func builtInTaskTypes() []TaskType {
 			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"},
 			PermissionCode:         "CODE_ENB_UPGRADE_PATCH",
 			PlatformScope:          []string{"4G eNB", "QAFA", "QAFB", "PATCH"},
+			Products:               enbProducts,
 			FileType:               "X {OUI} Software Upgrade Patch",
 			FileTypeLabel:          "X {OUI} Software Upgrade Patch",
 			FileTypeEditable:       true,
@@ -310,6 +313,7 @@ func builtInTaskTypes() []TaskType {
 			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"},
 			PermissionCode:         "CODE_ENB_UPGRADE_FPGA",
 			PlatformScope:          []string{"4G eNB", "QAFA", "QAFB", "FPGA"},
+			Products:               enbProducts,
 			FileType:               "Firmware Upgrade Fpga",
 			FileTypeLabel:          "Firmware Upgrade Fpga",
 			FileTypeEditable:       true,
@@ -340,6 +344,7 @@ func builtInTaskTypes() []TaskType {
 			PostTCEventCode:        "102 UPGRADE FINISH",
 			PermissionCode:         "CODE_GNB_UPGRADE_IMAGE",
 			PlatformScope:          []string{"5G gNB", "BBU-XSS", "BBU-QSS"},
+			Products:               []string{"BNQ"},
 			FileType:               "1 Firmware Upgrade Image",
 			FileTypeLabel:          "1 Firmware Upgrade Image",
 			FileTypeEditable:       true,
@@ -370,6 +375,7 @@ func builtInTaskTypes() []TaskType {
 			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"},
 			PermissionCode:         "CODE_GSM_UPGRADE_IMAGE",
 			PlatformScope:          []string{"2G BSC", "2G BTS", "BSC", "BTS", "PGSM"},
+			Products:               []string{"BSC", "BTS"},
 			FileType:               "1 Firmware Upgrade Image",
 			FileTypeLabel:          "1 Firmware Upgrade Image",
 			FileTypeEditable:       true,
@@ -576,6 +582,23 @@ func builtInTaskTypes() []TaskType {
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypeLogCollect, // 同上
 		},
+	}
+}
+
+func builtInENBProductScope() []string {
+	return []string{
+		"BLQ",
+		"BLX",
+		"QRTB",
+		"MLQ",
+		"MLN",
+		"BM",
+		"CICT SC3400(L1821)",
+		"Datang fBS3251 Series",
+		"Third-party FDD-LTE-Enterprise",
+		"Huawei TCELL Series",
+		"Comba LTE-FDD_N Series",
+		"Comba femto_au",
 	}
 }
 
