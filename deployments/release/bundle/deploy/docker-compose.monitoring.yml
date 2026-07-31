@@ -223,6 +223,8 @@ services:
     restart: unless-stopped
     environment:
       TZ: "Asia/Shanghai"
+      # 块压缩峰值受 Go 软限约束；硬限额另留 mmap、栈和内核记账余量。
+      GOMEMLIMIT: "768MiB"
     volumes:
       - ./monitoring/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
       - tempodata:/var/tempo
@@ -234,7 +236,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: 512m
+          memory: 1g
         reservations:
           cpus: "0.25"
           memory: 256m
