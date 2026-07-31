@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -38,11 +39,23 @@ type Reconciler struct {
 	batchSize         int
 	logger            *zap.Logger
 	publishTransition func(context.Context, *Task, string) error
+
+	scanMu sync.Mutex
+	cursor *ActiveTaskCursor
 }
 
 // ActiveTaskLister 抽象 repo.ListActiveTasks，便于单测。
 type ActiveTaskLister interface {
 	ListActiveTasks(ctx context.Context, olderThan time.Time, limit int) ([]*Task, error)
+}
+
+type activeTaskPageLister interface {
+	ListActiveTasksAfter(
+		ctx context.Context,
+		olderThan time.Time,
+		after *ActiveTaskCursor,
+		limit int,
+	) ([]*Task, error)
 }
 
 // QueueStateReader 抽象 queue.GetByID（读 Redis 真相），便于单测。
@@ -162,7 +175,7 @@ func (r *Reconciler) Run(ctx context.Context) {
 func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) {
 	pendingStats := r.reconcilePendingTransitions(ctx)
 	olderThan := time.Now().Add(-r.grace)
-	tasks, err := r.lister.ListActiveTasks(ctx, olderThan, r.batchSize)
+	tasks, err := r.listActivePage(ctx, olderThan)
 	if err != nil {
 		return pendingStats, err
 	}
@@ -251,6 +264,28 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (ReconcileStats, error) 
 			zap.Int("repair_failed", stats.RepairFailed))
 	}
 	return stats, nil
+}
+
+func (r *Reconciler) listActivePage(ctx context.Context, olderThan time.Time) ([]*Task, error) {
+	paged, ok := r.lister.(activeTaskPageLister)
+	if !ok {
+		return r.lister.ListActiveTasks(ctx, olderThan, r.batchSize)
+	}
+
+	r.scanMu.Lock()
+	defer r.scanMu.Unlock()
+
+	tasks, err := paged.ListActiveTasksAfter(ctx, olderThan, r.cursor, r.batchSize)
+	if err != nil {
+		return nil, err
+	}
+	if len(tasks) == 0 {
+		r.cursor = nil
+		return tasks, nil
+	}
+	last := tasks[len(tasks)-1]
+	r.cursor = &ActiveTaskCursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	return tasks, nil
 }
 
 // reconcilePendingTransitions consumes the durable Redis compensation index
