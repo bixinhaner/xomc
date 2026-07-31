@@ -85,6 +85,7 @@ type durableDeliveryPolicy uint8
 
 const (
 	durableDeliveryBindExisting durableDeliveryPolicy = iota
+	durableDeliveryAll
 	durableDeliveryNew
 	durableDeliveryFromSequence
 )
@@ -508,9 +509,15 @@ func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscrip
 
 func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler EventHandler) (Subscription, error) {
 	tuning := b.ensureQueueConsumerTuning(subject, queue)
+	stream, err := b.ensureBoundQueueConsumer(subject, queue, tuning, durableDelivery{
+		policy: durableDeliveryAll,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	sub, err := b.js.QueueSubscribe(subject, queue, b.wrapHandler(handler, tuning.MaxDeliver),
-		nats.Durable(queue),
+		nats.Bind(stream, queue),
 		nats.AckExplicit(),
 		nats.AckWait(tuning.AckWait),
 		nats.MaxDeliver(tuning.MaxDeliver),
@@ -537,6 +544,63 @@ func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler Even
 	b.mu.Unlock()
 
 	return &natsSubscription{sub: sub}, nil
+}
+
+// ensureBoundQueueConsumer creates the durable explicitly before subscribing.
+//
+// nats.go marks a consumer created implicitly by QueueSubscribe for deletion
+// when Subscription.Unsubscribe/Drain runs. During an application rolling
+// restart, deleting many durable consumers serializes JetStream metadata work
+// and can stall unrelated publish acknowledgements. Creating first and binding
+// makes shutdown detach only the client subscription while preserving both the
+// durable position and NATS availability for concurrent ACS publishers.
+func (b *NATSEventBus) ensureBoundQueueConsumer(
+	subject, durable string,
+	tuning QueueTuning,
+	delivery durableDelivery,
+) (string, error) {
+	stream, err := b.js.StreamNameBySubject(subject)
+	if err != nil {
+		return "", fmt.Errorf("resolve queue stream for %s: %w", subject, err)
+	}
+	if _, err = b.js.ConsumerInfo(stream, durable); err == nil {
+		return stream, nil
+	} else if !errors.Is(err, nats.ErrConsumerNotFound) {
+		return "", fmt.Errorf("load queue consumer %s/%s: %w", stream, durable, err)
+	}
+
+	config := &nats.ConsumerConfig{
+		Durable:        durable,
+		DeliverSubject: nats.NewInbox(),
+		DeliverGroup:   durable,
+		AckPolicy:      nats.AckExplicitPolicy,
+		AckWait:        tuning.AckWait,
+		MaxDeliver:     tuning.MaxDeliver,
+		MaxAckPending:  tuning.MaxAckPending,
+		ReplayPolicy:   nats.ReplayInstantPolicy,
+		FilterSubject:  subject,
+	}
+	switch delivery.policy {
+	case durableDeliveryNew:
+		config.DeliverPolicy = nats.DeliverNewPolicy
+	case durableDeliveryFromSequence:
+		config.DeliverPolicy = nats.DeliverByStartSequencePolicy
+		config.OptStartSeq = delivery.startSequence
+	default:
+		config.DeliverPolicy = nats.DeliverAllPolicy
+	}
+	_, err = b.js.AddConsumer(stream, config)
+	if err == nil {
+		return stream, nil
+	}
+
+	// Multiple service instances may race to create the shared queue durable.
+	// Treat a concurrently visible compatible consumer as success; the bind
+	// below remains the final compatibility check.
+	if _, lookupErr := b.js.ConsumerInfo(stream, durable); lookupErr == nil {
+		return stream, nil
+	}
+	return "", fmt.Errorf("create queue consumer %s/%s: %w", stream, durable, err)
 }
 
 // KeyedQueueSubscribe creates or binds a fixed push durable and dispatches its
@@ -614,15 +678,20 @@ func (b *NATSEventBus) KeyedQueueSubscribe(
 		MaxDeliver:    config.MaxDeliver,
 		MaxAckPending: config.MaxAckPending,
 	})
+	plan := durableDeliveryPlan(info, config.StartSequence)
+	stream, err = b.ensureBoundQueueConsumer(subject, config.Durable, tuning, plan)
+	if err != nil {
+		return nil, err
+	}
 	options := []nats.SubOpt{
-		nats.Durable(config.Durable),
+		nats.Bind(stream, config.Durable),
 		nats.AckExplicit(),
 		nats.ManualAck(),
 		nats.AckWait(tuning.AckWait),
 		nats.MaxDeliver(tuning.MaxDeliver),
 		nats.MaxAckPending(tuning.MaxAckPending),
 	}
-	switch plan := durableDeliveryPlan(info, config.StartSequence); plan.policy {
+	switch plan.policy {
 	case durableDeliveryNew:
 		options = append(options, nats.DeliverNew())
 	case durableDeliveryFromSequence:
@@ -707,7 +776,11 @@ func (b *NATSEventBus) PullSubscribe(subject string, queue string, handler Event
 	}
 	tuning := b.pullTuningForSubject(subject)
 	tuning = b.ensurePullTuningForDurable(subject, durable, tuning)
+	if err := b.ensureBoundPullConsumer(stream, subject, durable, tuning, durableDeliveryPlan(info, 0)); err != nil {
+		return nil, err
+	}
 	options := []nats.SubOpt{
+		nats.Bind(stream, durable),
 		nats.AckExplicit(),
 		nats.AckWait(tuning.AckWait),
 		nats.MaxAckPending(tuning.MaxAckPending),
@@ -795,7 +868,11 @@ func (b *NATSEventBus) KeyedPullSubscribe(
 		tuning.MaxAckPending,
 	)
 	tuning = b.ensurePullTuningForDurable(subject, durable, tuning)
+	if err := b.ensureBoundPullConsumer(stream, subject, durable, tuning, durableDeliveryPlan(info, 0)); err != nil {
+		return nil, err
+	}
 	options := []nats.SubOpt{
+		nats.Bind(stream, durable),
 		nats.AckExplicit(),
 		nats.AckWait(tuning.AckWait),
 		nats.MaxAckPending(tuning.MaxAckPending),
@@ -843,6 +920,42 @@ func (b *NATSEventBus) KeyedPullSubscribe(
 		b.cleanupLegacyPushConsumer(subject, queue)
 	}
 	return ps, nil
+}
+
+func (b *NATSEventBus) ensureBoundPullConsumer(
+	stream, subject, durable string,
+	tuning PullTuning,
+	delivery durableDelivery,
+) error {
+	if _, err := b.js.ConsumerInfo(stream, durable); err == nil {
+		return nil
+	} else if !errors.Is(err, nats.ErrConsumerNotFound) {
+		return fmt.Errorf("load pull consumer %s/%s: %w", stream, durable, err)
+	}
+
+	config := &nats.ConsumerConfig{
+		Durable:       durable,
+		AckPolicy:     nats.AckExplicitPolicy,
+		AckWait:       tuning.AckWait,
+		MaxDeliver:    tuning.MaxDeliver,
+		MaxAckPending: tuning.MaxAckPending,
+		ReplayPolicy:  nats.ReplayInstantPolicy,
+		FilterSubject: subject,
+	}
+	switch delivery.policy {
+	case durableDeliveryFromSequence:
+		config.DeliverPolicy = nats.DeliverByStartSequencePolicy
+		config.OptStartSeq = delivery.startSequence
+	default:
+		config.DeliverPolicy = nats.DeliverNewPolicy
+	}
+	if _, err := b.js.AddConsumer(stream, config); err == nil {
+		return nil
+	} else if _, lookupErr := b.js.ConsumerInfo(stream, durable); lookupErr == nil {
+		return nil
+	} else {
+		return fmt.Errorf("create pull consumer %s/%s: %w", stream, durable, err)
+	}
 }
 
 func (b *NATSEventBus) ensurePullTuningForDurable(subject, durable string, desired PullTuning) PullTuning {
