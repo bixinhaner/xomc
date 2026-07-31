@@ -58,11 +58,17 @@ type stubPMSetupAdmissionGate struct {
 	released int
 }
 
-func (g *stubPMSetupAdmissionGate) Acquire(context.Context, string) (bool, error) {
-	return g.acquired, g.err
+func (g *stubPMSetupAdmissionGate) Acquire(
+	context.Context,
+	string,
+) (string, bool, error) {
+	if !g.acquired {
+		return "", false, g.err
+	}
+	return "lease-token", true, g.err
 }
 
-func (g *stubPMSetupAdmissionGate) Release(context.Context, string) error {
+func (g *stubPMSetupAdmissionGate) Release(context.Context, string, string) error {
 	g.released++
 	return nil
 }
@@ -368,17 +374,39 @@ func TestRedisPMSetupAdmissionGate_CoalescesAndReleases(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 	gate := NewRedisPMSetupAdmissionGate(client, time.Minute)
 
-	acquired, err := gate.Acquire(context.Background(), "SN-001")
+	token, acquired, err := gate.Acquire(context.Background(), "SN-001")
 	require.NoError(t, err)
 	require.True(t, acquired)
-	acquired, err = gate.Acquire(context.Background(), "SN-001")
+	_, acquired, err = gate.Acquire(context.Background(), "SN-001")
 	require.NoError(t, err)
 	require.False(t, acquired)
 
-	require.NoError(t, gate.Release(context.Background(), "SN-001"))
-	acquired, err = gate.Acquire(context.Background(), "SN-001")
+	require.NoError(t, gate.Release(context.Background(), "SN-001", token))
+	_, acquired, err = gate.Acquire(context.Background(), "SN-001")
 	require.NoError(t, err)
 	require.True(t, acquired)
+}
+
+func TestRedisPMSetupAdmissionGate_StaleOwnerCannotReleaseNewLease(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	gate := NewRedisPMSetupAdmissionGate(client, time.Minute)
+
+	staleToken, acquired, err := gate.Acquire(context.Background(), "SN-001")
+	require.NoError(t, err)
+	require.True(t, acquired)
+	server.FastForward(2 * time.Minute)
+
+	currentToken, acquired, err := gate.Acquire(context.Background(), "SN-001")
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.NoError(t, gate.Release(context.Background(), "SN-001", staleToken))
+
+	_, acquired, err = gate.Acquire(context.Background(), "SN-001")
+	require.NoError(t, err)
+	require.False(t, acquired, "stale release must not delete the current owner's lease")
+	require.NoError(t, gate.Release(context.Background(), "SN-001", currentToken))
 }
 
 func Test_expandEnv_DefaultSyntax(t *testing.T) {

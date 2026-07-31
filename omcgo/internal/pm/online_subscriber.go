@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/components/redisx"
@@ -75,14 +76,21 @@ type TaskCreator interface {
 // PMSetupAdmissionGate coalesces registered/online events across worker
 // instances while one handler checks durable state and creates a task.
 type PMSetupAdmissionGate interface {
-	Acquire(ctx context.Context, deviceSN string) (bool, error)
-	Release(ctx context.Context, deviceSN string) error
+	Acquire(ctx context.Context, deviceSN string) (leaseToken string, acquired bool, err error)
+	Release(ctx context.Context, deviceSN, leaseToken string) error
 }
 
 type redisPMSetupAdmissionGate struct {
 	client redis.Cmdable
 	ttl    time.Duration
 }
+
+var releasePMSetupAdmissionScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+	return redis.call("DEL", KEYS[1])
+end
+return 0
+`)
 
 func NewRedisPMSetupAdmissionGate(
 	client redis.Cmdable,
@@ -100,26 +108,37 @@ func NewRedisPMSetupAdmissionGate(
 func (g *redisPMSetupAdmissionGate) Acquire(
 	ctx context.Context,
 	deviceSN string,
-) (bool, error) {
+) (string, bool, error) {
+	leaseToken := uuid.NewString()
 	acquired, err := g.client.SetNX(
 		ctx,
 		redisx.Keys.PMUploadSetupAdmission(deviceSN),
-		"1",
+		leaseToken,
 		g.ttl,
 	).Result()
 	if err != nil {
-		return false, fmt.Errorf("acquire PM setup admission: %w", err)
+		return "", false, fmt.Errorf("acquire PM setup admission: %w", err)
 	}
-	return acquired, nil
+	if !acquired {
+		return "", false, nil
+	}
+	return leaseToken, true, nil
 }
 
 func (g *redisPMSetupAdmissionGate) Release(
 	ctx context.Context,
-	deviceSN string,
+	deviceSN, leaseToken string,
 ) error {
-	if err := g.client.Del(
+	if leaseToken == "" {
+		return nil
+	}
+	if err := releasePMSetupAdmissionScript.Run(
 		ctx,
-		redisx.Keys.PMUploadSetupAdmission(deviceSN),
+		g.client,
+		[]string{
+			redisx.Keys.PMUploadSetupAdmission(deviceSN),
+		},
+		leaseToken,
 	).Err(); err != nil {
 		return fmt.Errorf("release PM setup admission: %w", err)
 	}
@@ -245,8 +264,11 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 		return nil
 	}
 
+	var leaseToken string
 	if s.admissionGate != nil {
-		acquired, gateErr := s.admissionGate.Acquire(ctx, serialNumber)
+		var acquired bool
+		var gateErr error
+		leaseToken, acquired, gateErr = s.admissionGate.Acquire(ctx, serialNumber)
 		if gateErr != nil {
 			s.logger.Warn("acquire PM upload setup admission failed",
 				zap.String("device_sn", serialNumber), zap.Error(gateErr))
@@ -267,7 +289,9 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 			3*time.Second,
 		)
 		defer cancel()
-		if releaseErr := s.admissionGate.Release(releaseCtx, serialNumber); releaseErr != nil {
+		if releaseErr := s.admissionGate.Release(
+			releaseCtx, serialNumber, leaseToken,
+		); releaseErr != nil {
 			s.logger.Warn("release PM upload setup admission failed",
 				zap.String("device_sn", serialNumber), zap.Error(releaseErr))
 		}
