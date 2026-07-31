@@ -1497,8 +1497,8 @@ type ackDecision struct {
 
 // decideAck 决定对已投递 deliveries 次的消息采取何种动作：
 //   - handler 无错 → Ack
-//   - handler 错误包装了 reliability.ErrPermanent（业务确定性失败，如设备未注册，
-//     重试无法改变结果）→ 无视 deliveries，立即 Term，避免无意义的多次重投
+//   - handler 错误包装了 reliability.ErrPermanent（明确不可恢复的业务失败）
+//     → 无视 deliveries，立即 Term，避免无意义的多次重投
 //   - handler 出错且未达 maxDelivery → Nak with exponential backoff
 //   - handler 出错且达到 maxDelivery → Term（避免无限重试）
 //

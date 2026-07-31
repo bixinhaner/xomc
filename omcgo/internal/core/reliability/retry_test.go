@@ -66,6 +66,21 @@ func TestRetry_PermanentErrorShortCircuits(t *testing.T) {
 	assert.NotContains(t, err.Error(), "exhausted", "short-circuit path must not use the exhausted-attempts wrapping")
 }
 
+func TestRetry_DeferredErrorShortCircuitsInnerRetry(t *testing.T) {
+	attempts := 0
+	err := Retry(context.Background(), RetryConfig{
+		MaxAttempts: 5,
+		BaseDelay:   time.Millisecond,
+		MaxDelay:    time.Millisecond,
+	}, func(context.Context) error {
+		attempts++
+		return fmt.Errorf("waiting for device registration: %w", ErrDeferred)
+	})
+
+	require.ErrorIs(t, err, ErrDeferred)
+	assert.Equal(t, 1, attempts, "durable event redelivery owns deferred retries")
+}
+
 func TestRetry_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := RetryConfig{MaxAttempts: 5, BaseDelay: 1 * time.Second, MaxDelay: 10 * time.Second}

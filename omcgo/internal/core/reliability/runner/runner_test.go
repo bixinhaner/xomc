@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -246,6 +247,26 @@ func TestWrap_AllAttemptsFail_DLQAndMetrics(t *testing.T) {
 	assert.Equal(t, 1.0, counterValue(t, reg, "worker_dlq_entries_total", map[string]string{
 		"module": "pm", "subject": "pm.file.received",
 	}))
+}
+
+func TestWrap_DeferredFailureReturnsWithoutDLQ(t *testing.T) {
+	repo := newMemDLQ()
+	metrics, _ := newMetrics(t)
+	r := newRunner(t, repo, nil, metrics)
+
+	attempts := atomic.Int32{}
+	wrapped := r.Wrap("pm.file.received", func(context.Context, event.Event) error {
+		attempts.Add(1)
+		return fmt.Errorf("device registration pending: %w", reliability.ErrDeferred)
+	})
+
+	err := wrapped(context.Background(), event.Event{
+		Subject:   "pm.file.received",
+		Timestamp: time.Now(),
+	})
+	require.ErrorIs(t, err, reliability.ErrDeferred)
+	assert.Equal(t, int32(1), attempts.Load())
+	assert.Empty(t, repo.entries, "deferred failures must remain in JetStream instead of DLQ")
 }
 
 // V6: Wrap_ContextCancelStopsImmediately — ctx 取消立即停 + 不入 DLQ

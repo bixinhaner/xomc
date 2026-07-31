@@ -30,6 +30,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const deviceRegistrationGrace = 30 * time.Minute
+
 // isMinIONotFound 判定 MinIO 错误是否为对象/桶不存在（沿用 internal/core/rawarchive、
 // internal/backup/restore_service.go 已有的同款判定：minio-go 的 GetObject 不立即发
 // 请求，对象不存在的错误在首次 Read 时才暴露，故调用点在 MaybeGunzip/Parse 读取失败
@@ -359,6 +361,15 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	)
 
 	if err := c.resolveDevice(ctx, &payload); err != nil {
+		if errors.Is(err, reliability.ErrDeferred) &&
+			(evt.Timestamp.IsZero() || time.Since(evt.Timestamp) >= deviceRegistrationGrace) {
+			return fmt.Errorf(
+				"device registration grace exceeded (%s): %v: %w",
+				deviceRegistrationGrace,
+				err,
+				reliability.ErrPermanent,
+			)
+		}
 		return err
 	}
 
@@ -734,17 +745,12 @@ func filterAllowByEnabled(allow map[string]CounterMeta, enabled map[string]struc
 // acs.upload.Handler 发的瘦 payload）。transfer.Bridge 发的胖 payload device_id
 // 已填，函数直接 no-op 返回。
 //
-// 错误分类（2026-07-21 修订，产品决策：设备不在注册表就拒绝入库，不重试）：
+// 错误分类：
 //   - lookup 本身出错（DB 连接等基础设施问题）→ 普通错误，触发 retry+DLQ，通常瞬时问题。
-//   - lookup 成功但 dev==nil（设备不在 device_info 注册表）→ 包装
-//     reliability.ErrPermanent，Runner/EventBus 会立即短路终止，不再重试、不落库。
-//     此前的设计（重试 5 次 + 指数退避 ~15s）是为了兜住"设备刚 Inform、注册尚未
-//     落库"的竞态窗口；实测 omc78 压测环境里触发该错误的绝大多数是从未注册/早已
-//     从回收站清理、但固件仍在自主上传 PM 文件的设备——重试 5 次全部落空，只是
-//     徒增 5 条 Error 日志和 5 条 DLQ 记录，最终结果依然是丢弃、不会真正入库。
-//     现改为首次即终止：代价是如果真的撞上"刚注册、尚未提交"的极短竞态，这台
-//     设备当次的 PM 文件会被直接丢弃而不是重试后捞回来；下一个上报周期（通常
-//     15 分钟）注册必然已完成，届时会正常入库，不会影响该设备后续所有数据。
+//   - lookup 成功但 dev==nil → ErrDeferred。清洁部署或设备批量重连时，PM 文件可能
+//     早于 Inform 注册落库；由 JetStream 持久化退避重投，避免直接 DLQ 形成 KPI 缺口。
+//     handleFileReceived 超过 deviceRegistrationGrace 后会转成 ErrPermanent，确保真正
+//     未注册设备最终只产生一条可运维处理的死信，不无限占用队列。
 func (c *PMCollector) resolveDevice(ctx context.Context, payload *FileReceivedPayload) error {
 	if payload.DeviceID != "" {
 		return nil
@@ -760,7 +766,7 @@ func (c *PMCollector) resolveDevice(ctx context.Context, payload *FileReceivedPa
 		return fmt.Errorf("lookup device by sn %s: %w", payload.DeviceSN, err)
 	}
 	if dev == nil {
-		return fmt.Errorf("pm.file.received: device not found for sn=%s: %w", payload.DeviceSN, reliability.ErrPermanent)
+		return fmt.Errorf("pm.file.received: device not found for sn=%s: %w", payload.DeviceSN, reliability.ErrDeferred)
 	}
 	payload.DeviceID = dev.ID.String()
 	payload.DeviceOUI = dev.OUI

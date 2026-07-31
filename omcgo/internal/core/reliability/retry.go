@@ -15,6 +15,11 @@ import (
 // 停止重试并原样返回该错误，不等 MaxAttempts 耗尽，调用方可继续用 errors.Is 判断。
 var ErrPermanent = errors.New("reliability: permanent error, do not retry")
 
+// ErrDeferred 标记“当前不可处理，但应由持久化事件总线延迟重投”的错误。
+// Retry 遇到它时不做进程内快速重试，避免在外部状态尚未就绪时放大数据库压力；
+// 上层 runner 也不会写 DLQ，由 EventBus 保留原消息并按投递退避重试。
+var ErrDeferred = errors.New("reliability: deferred error, retry via durable delivery")
+
 // RetryConfig 定义指数退退重试的参数。
 // MaxAttempts：最大尝试次数（包括第一次）。
 // BaseDelay：第一次重试前的基础延迟，每次指数翻倍：1s, 2s, 4s, 8s...
@@ -61,10 +66,10 @@ func Retry(ctx context.Context, cfg RetryConfig, fn RetryableFunc) error {
 
 		if err := fn(ctx); err != nil {
 			lastErr = err
-			if errors.Is(err, ErrPermanent) {
-				// 永久性错误：重试无意义（如目标实体确定不存在），立即短路返回，
+			if errors.Is(err, ErrPermanent) || errors.Is(err, ErrDeferred) {
+				// 永久性或需交给持久队列延迟重投的错误，都不应在进程内快速重试。
 				// 不再等待剩余 attempts，也不用 "exhausted N attempts" 包一层
-				// 掩盖原始错误链，保证上层 errors.Is(err, ErrPermanent) 仍然成立。
+				// 掩盖原始错误链，保证上层 errors.Is 仍然成立。
 				return lastErr
 			}
 			continue
