@@ -39,6 +39,14 @@ grep -Fq 'Server is ready' "$LOG" || {
 
 cd "$REPO_ROOT/omcgo"
 GPV_NATS_TEST_URL="nats://127.0.0.1:$PORT" \
-  go test ./internal/core/event ./cmd/gpv-handoff \
-    -run 'TestQueueSubscribe|TestKeyedQueue|TestKeyedPull|TestPrepareGPVHandoff|TestRunFreshInstall' \
+  go test ./internal/core/event \
+    -run 'TestQueueSubscribe|TestKeyedQueue|TestKeyedPull|TestPrepareGPVHandoff' \
+    -count=1 -v
+
+# The handoff command's fresh-install tests reset the fixed production stream
+# names. Run the packages sequentially so those resets cannot race the event
+# package's live consumer tests against the shared temporary NATS process.
+GPV_NATS_TEST_URL="nats://127.0.0.1:$PORT" \
+  go test ./cmd/gpv-handoff \
+    -run 'TestRunFreshInstall|TestRunBootstrapIfMissing' \
     -count=1 -v

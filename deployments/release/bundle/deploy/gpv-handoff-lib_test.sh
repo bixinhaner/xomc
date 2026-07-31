@@ -32,30 +32,16 @@ grep -Fxq 'run --rm --no-deps gpv-handoff --config /etc/omcgo/app.prod.yaml --fr
   exit 1
 }
 
+gpv_handoff_prepare --bootstrap-if-missing
+grep -Fxq 'run --rm --no-deps gpv-handoff --config /etc/omcgo/app.prod.yaml --bootstrap-if-missing' "$CALLS" || {
+  echo "FAIL: safe bootstrap-if-missing marker must reach the management container" >&2
+  exit 1
+}
+
 GPV_HANDOFF_TEST_EXIT=17
 export GPV_HANDOFF_TEST_EXIT
 if gpv_handoff_prepare; then
   echo "FAIL: handoff failure must propagate before app restart" >&2
-  exit 1
-fi
-
-FRESH_ROOT="$TMP/fresh-root"
-mkdir -p "$FRESH_ROOT"
-gpv_handoff_is_fresh_install "$FRESH_ROOT" || {
-  echo "FAIL: root without current or saved environment must be explicitly fresh" >&2
-  exit 1
-}
-mkdir -p "$FRESH_ROOT/etc"
-: >"$FRESH_ROOT/etc/.env.saved"
-if gpv_handoff_is_fresh_install "$FRESH_ROOT"; then
-  echo "FAIL: saved environment means reinstall, not fresh install" >&2
-  exit 1
-fi
-rm -f "$FRESH_ROOT/etc/.env.saved"
-mkdir -p "$FRESH_ROOT/current/deploy"
-: >"$FRESH_ROOT/current/deploy/.env"
-if gpv_handoff_is_fresh_install "$FRESH_ROOT"; then
-  echo "FAIL: current environment means upgrade, not fresh install" >&2
   exit 1
 fi
 

@@ -409,10 +409,6 @@ mkdir -p "$OMC_ROOT/releases" "$OMC_ROOT/etc" "$OMC_ROOT/packages" \
 # 必须在可能 mv/覆盖旧版本目录之前抓取 —— current 软链此刻仍指向上一版;首次部署无 current → 空。
 # 兼容 uninstall.sh：若 current 已被卸载移除,退而读卸载时保存的凭据 $OMC_ROOT/etc/.env.saved。
 PREV_ENV_SNAPSHOT=""
-FRESH_INSTALL=0
-if gpv_handoff_is_fresh_install "$OMC_ROOT"; then
-  FRESH_INSTALL=1
-fi
 if [ -f "$OMC_ROOT/current/deploy/.env" ]; then
   PREV_ENV_SNAPSHOT="$(mktemp)" || PREV_ENV_SNAPSHOT=""
   [ -n "$PREV_ENV_SNAPSHOT" ] && { cp "$OMC_ROOT/current/deploy/.env" "$PREV_ENV_SNAPSHOT" 2>/dev/null || PREV_ENV_SNAPSHOT=""; }
@@ -761,9 +757,6 @@ APP_RUNNING=0
 NATS_RUNNING=0
 [ -n "$APP_CID" ] && [ "$(docker inspect -f '{{.State.Running}}' "$APP_CID" 2>/dev/null || true)" = "true" ] && APP_RUNNING=1
 [ -n "$NATS_CID" ] && [ "$(docker inspect -f '{{.State.Running}}' "$NATS_CID" 2>/dev/null || true)" = "true" ] && NATS_RUNNING=1
-if [ -n "$APP_CID" ] || [ -n "$NATS_CID" ]; then
-  FRESH_INSTALL=0
-fi
 if [ "$APP_RUNNING" = 1 ] && [ "$NATS_RUNNING" != 1 ]; then
   die "旧 app 仍在运行但 NATS 不可用，无法读取 GPV consumer AckFloor；未停止旧 app" 2
 fi
@@ -822,10 +815,8 @@ fi
 log "基础设施已就绪 (PG / TSDB / Redis / NATS)"
 
 if [ "$HANDOFF_PREPARED" != 1 ]; then
-  log "首次部署/原 NATS 未运行：在 app 首次启动前创建 GPV RPC 固定 durable ..."
-  HANDOFF_ARGS=()
-  [ "$FRESH_INSTALL" = 1 ] && HANDOFF_ARGS+=(--fresh-install)
-  gpv_handoff_prepare "${HANDOFF_ARGS[@]}" ||
+  log "首次部署/原 NATS 未运行：按实际流状态安全初始化 GPV RPC 固定 durable ..."
+  gpv_handoff_prepare --bootstrap-if-missing ||
     die "GPV consumer handoff 失败；尚未启动 app，修复 NATS/consumer 配置后重试" 2
   HANDOFF_PREPARED=1
 fi

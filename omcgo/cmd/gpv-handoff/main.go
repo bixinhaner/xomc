@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -21,6 +22,7 @@ func main() {
 	var configPath string
 	var sourceConsumer string
 	var freshInstall bool
+	var bootstrapIfMissing bool
 	flag.StringVar(&configPath, "config", "/etc/omcgo/app.prod.yaml", "app configuration path")
 	flag.StringVar(
 		&sourceConsumer,
@@ -34,9 +36,21 @@ func main() {
 		false,
 		"explicitly allow DeliverNew when initializing a fresh environment",
 	)
+	flag.BoolVar(
+		&bootstrapIfMissing,
+		"bootstrap-if-missing",
+		false,
+		"bootstrap streams only when the GPV subject has no stream; preserve strict handoff when it exists",
+	)
 	flag.Parse()
 
-	if err := run(context.Background(), configPath, sourceConsumer, freshInstall); err != nil {
+	if err := runWithOptions(
+		context.Background(),
+		configPath,
+		sourceConsumer,
+		freshInstall,
+		bootstrapIfMissing,
+	); err != nil {
 		fmt.Fprintf(os.Stderr, "GPV handoff failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -64,19 +78,44 @@ func loadHandoffConfig(path string) (handoffConfig, error) {
 }
 
 func run(ctx context.Context, configPath, sourceConsumer string, freshInstall bool) error {
+	return runWithOptions(ctx, configPath, sourceConsumer, freshInstall, false)
+}
+
+func runWithOptions(
+	ctx context.Context,
+	configPath string,
+	sourceConsumer string,
+	freshInstall bool,
+	bootstrapIfMissing bool,
+) error {
 	config, err := loadHandoffConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("load app config: %w", err)
 	}
 	gpv := config.Provision.GPVResponse.Defaults()
-	if freshInstall {
+	if freshInstall || bootstrapIfMissing {
 		client, bootstrapErr := natscomponent.NewNATSClient(config.NATS, zap.NewNop())
 		if bootstrapErr != nil {
-			return fmt.Errorf("connect NATS for fresh install stream bootstrap: %w", bootstrapErr)
+			return fmt.Errorf("connect NATS for stream bootstrap check: %w", bootstrapErr)
 		}
 		defer client.Conn.Close()
-		if bootstrapErr := client.EnsureStreams(ctx, false); bootstrapErr != nil {
-			return fmt.Errorf("bootstrap fresh install streams: %w", bootstrapErr)
+		if bootstrapIfMissing && !freshInstall {
+			_, lookupErr := client.JS.StreamNameBySubject(
+				event.SubjectCommandGetParamsResponse,
+				nats.Context(ctx),
+			)
+			switch {
+			case lookupErr == nil:
+			case errors.Is(lookupErr, nats.ErrNoMatchingStream):
+				freshInstall = true
+			default:
+				return fmt.Errorf("check GPV stream before bootstrap: %w", lookupErr)
+			}
+		}
+		if freshInstall {
+			if bootstrapErr := client.EnsureStreams(ctx, false); bootstrapErr != nil {
+				return fmt.Errorf("bootstrap fresh install streams: %w", bootstrapErr)
+			}
 		}
 	}
 	nc, err := nats.Connect(
