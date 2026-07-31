@@ -23,6 +23,11 @@ import (
 	"github.com/omcgo/omcgo/internal/task"
 )
 
+const (
+	paramSyncOutboxWorkers = 8
+	paramSyncQueuedWorkers = 8
+)
+
 // paramSyncCompletionHandled is registered with CompletionRouter because the
 // dedicated TaskTerminalBridge is the business consumer for PARAM_SYNC. The
 // no-op registration documents that ownership and avoids false "no handler"
@@ -689,54 +694,59 @@ func initParamSyncModule(c *Container) error {
 		logger.Warn("parameter sync maintenance disabled: graceful shutdown manager is unavailable")
 	}
 	if c.GS != nil {
-		go func() {
-			ticker := time.NewTicker(time.Second)
-			reconcileTicker := time.NewTicker(30 * time.Second)
-			defer ticker.Stop()
-			defer reconcileTicker.Stop()
-			for {
-				select {
-				case <-maintenanceCtx.Done():
-					return
-				case <-ticker.C:
-					ctx, cancel := context.WithTimeout(maintenanceCtx, 10*time.Second)
-					_, err := outbox.RequeueStaleDeliveries(ctx, time.Now().Add(-time.Minute))
-					cancel()
-					if err != nil && !errors.Is(err, context.Canceled) {
-						logger.Warn("parameter sync stale outbox requeue failed", zap.Error(err))
-					}
-
-					ctx, cancel = context.WithTimeout(maintenanceCtx, 15*time.Second)
-					_, err = outbox.DispatchPendingConcurrent(ctx, 16, 25)
-					cancel()
-					if err != nil && !errors.Is(err, context.Canceled) {
-						logger.Warn("parameter sync outbox delivery failed", zap.Error(err))
-					}
-
-					ctx, cancel = context.WithTimeout(maintenanceCtx, 30*time.Second)
-					_, err = service.DispatchQueuedConcurrent(ctx, 100, 16)
-					cancel()
-					if err != nil && !errors.Is(err, context.Canceled) {
-						logger.Warn("queued parameter sync request dispatch failed", zap.Error(err))
-					}
-				case <-reconcileTicker.C:
-					err := runParamSyncReconciliation(maintenanceCtx, reconciler, projector, time.Now(), maintenanceCfg)
-					if registeredSyncReconciler != nil {
-						_, registeredErr := registeredSyncReconciler.Reconcile(maintenanceCtx, 100)
-						err = errors.Join(err, registeredErr)
-					}
-					if err != nil && !errors.Is(err, context.Canceled) {
-						logger.Warn("parameter sync reconciliation failed", zap.Error(err))
-					}
-				}
+		go runPeriodicMaintenance(maintenanceCtx, time.Second, func(context.Context) {
+			ctx, cancel := context.WithTimeout(maintenanceCtx, 10*time.Second)
+			_, err := outbox.RequeueStaleDeliveries(ctx, time.Now().Add(-time.Minute))
+			cancel()
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("parameter sync stale outbox requeue failed", zap.Error(err))
 			}
-		}()
+
+			ctx, cancel = context.WithTimeout(maintenanceCtx, 15*time.Second)
+			_, err = outbox.DispatchPendingConcurrent(ctx, paramSyncOutboxWorkers, 25)
+			cancel()
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("parameter sync outbox delivery failed", zap.Error(err))
+			}
+		})
+		go runPeriodicMaintenance(maintenanceCtx, time.Second, func(context.Context) {
+			ctx, cancel := context.WithTimeout(maintenanceCtx, 30*time.Second)
+			_, err := service.DispatchQueuedConcurrent(ctx, 100, paramSyncQueuedWorkers)
+			cancel()
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("queued parameter sync request dispatch failed", zap.Error(err))
+			}
+		})
+		go runPeriodicMaintenance(maintenanceCtx, 30*time.Second, func(context.Context) {
+			err := runParamSyncReconciliation(maintenanceCtx, reconciler, projector, time.Now(), maintenanceCfg)
+			if registeredSyncReconciler != nil {
+				_, registeredErr := registeredSyncReconciler.Reconcile(maintenanceCtx, 100)
+				err = errors.Join(err, registeredErr)
+			}
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("parameter sync reconciliation failed", zap.Error(err))
+			}
+		})
 	}
 	logger.Info("reliable parameter sync module initialized",
 		zap.Bool("run_enabled", flags.RunEnabled), zap.Int("canary_percent", flags.CanaryPercent),
 		zap.Bool("result_consumer_enabled", flags.ResultConsumerEnabled), zap.Bool("staging_enabled", flags.StagingEnabled))
 	initialized = true
 	return nil
+}
+
+func runPeriodicMaintenance(ctx context.Context, interval time.Duration, task func(context.Context)) {
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			task(ctx)
+			timer.Reset(interval)
+		}
+	}
 }
 
 var _ device.ParamSyncStarter = (*paramSyncStarter)(nil)
