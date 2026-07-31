@@ -1720,10 +1720,11 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     });
   }, [group.params, specialColumns]);
 
+  const neighborEnbTypeLeaf = group.params.find(
+    (param) => param.name === 'NeighborCellEnbType',
+  )?.leaf;
   const usesSplitNeighborCellIdentity = group.id === NEIGHBOR_CELL_GROUP_ID
-    && groupParamLeafSet.has(NEIGHBOR_CELL_ECI_LEAF)
-    && groupParamLeafSet.has('NeighCellEnbType')
-    && groupParamLeafSet.has('X2Flag');
+    && groupParamLeafSet.has(NEIGHBOR_CELL_ECI_LEAF);
 
   const addModalColumns = useMemo<SpecialColumnSpec[]>(() => {
     if (!usesSplitNeighborCellIdentity) return displayColumns;
@@ -1753,10 +1754,10 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       byLeaf.get('QOffset'),
       byLeaf.get('CIO'),
       byLeaf.get(group.params.find((param) => param.name === 'TAC')?.leaf),
-      byLeaf.get('NeighCellEnbType'),
+      neighborEnbTypeLeaf ? byLeaf.get(neighborEnbTypeLeaf) : undefined,
       byLeaf.get('X2Flag'),
     ].filter((column): column is SpecialColumnSpec => Boolean(column));
-  }, [displayColumns, group.params, usesSplitNeighborCellIdentity]);
+  }, [displayColumns, group.params, neighborEnbTypeLeaf, usesSplitNeighborCellIdentity]);
 
   const openEditModal = useCallback((row: TableRow) => {
     if (!row.instanceId) return;

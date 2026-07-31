@@ -251,7 +251,16 @@ const neighborGroup: QuickSettingsGroup = {
   ],
 };
 
-function renderTable() {
+const bmNeighborGroup: QuickSettingsGroup = {
+  ...neighborGroup,
+  params: neighborGroup.params.map((param) => (
+    param.name === 'NeighborCellEnbType'
+      ? { ...param, leaf: 'NeighCellTypeContainer' }
+      : param
+  )),
+};
+
+function renderTable(group: QuickSettingsGroup = neighborGroup) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -265,7 +274,7 @@ function renderTable() {
   return render(
     <MultiInstanceTable
       deviceId="device-1"
-      group={neighborGroup}
+      group={group}
       instanceContext={{ networkType: 'lte', fapInstance: 1 }}
       locale="zh-CN"
     />,
@@ -302,6 +311,17 @@ describe('LTE neighbor cell add', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'device.multi.confirmAdd' }));
 
     expect(await screen.findByText('268435455')).toBeInTheDocument();
+  });
+
+  it('shows the complete BM add form with its vendor eNodeB type leaf', async () => {
+    renderTable(bmNeighborGroup);
+
+    fireEvent.click(screen.getByRole('button', { name: /common\.add/ }));
+    const dialog = await screen.findByRole('dialog');
+
+    for (const label of ['eNB ID', 'Cell ID', 'EARFCN', 'PCI', 'QOffset', 'CIO', 'TAC', 'eNodeB Type', 'X2 Flag']) {
+      expect(within(dialog).getByText(label)).toBeInTheDocument();
+    }
   });
 
   it('shows the vendor TAC leaf and requires a value', async () => {
