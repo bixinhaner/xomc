@@ -14,7 +14,68 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/omcgo/omcgo/internal/core/reliability"
 )
+
+func TestQueueSubscribeHonorsConfiguredMaxDeliver(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("QUEUE_MAX_DELIVER_%d", suffix)
+	subject := fmt.Sprintf("test.queue.max-deliver.%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name:      stream,
+		Subjects:  []string{subject},
+		Storage:   nats.MemoryStorage,
+		Retention: nats.LimitsPolicy,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	core, observed := observer.New(zap.ErrorLevel)
+	bus := NewNATSEventBus(nc, js, zap.New(core))
+	t.Cleanup(func() { _ = bus.Close() })
+	bus.SetQueueTuning(subject, QueueTuning{
+		AckWait:       2 * time.Second,
+		MaxDeliver:    2,
+		MaxAckPending: 16,
+	})
+
+	var attempts atomic.Int64
+	_, err = bus.QueueSubscribe(subject, fmt.Sprintf("queue-max-deliver-%d", suffix),
+		func(context.Context, Event) error {
+			attempts.Add(1)
+			return fmt.Errorf("registration pending: %w", reliability.ErrDeferred)
+		})
+	require.NoError(t, err)
+
+	evt, err := NewEvent(subject, map[string]string{"device_sn": "SN-DEFERRED"})
+	require.NoError(t, err)
+	data, err := json.Marshal(evt)
+	require.NoError(t, err)
+	_, err = js.Publish(subject, data)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return attempts.Load() == 2
+	}, 5*time.Second, 20*time.Millisecond)
+	require.Eventually(t, func() bool {
+		return observed.FilterMessage("handle event (terminating)").Len() == 1
+	}, 2*time.Second, 20*time.Millisecond,
+		"QueueSubscribe settlement must use the durable consumer MaxDeliver")
+	require.Zero(t, observed.FilterMessage("handle event (retrying)").Len(),
+		"expected deferred redelivery must not emit error stacktraces")
+}
 
 func TestKeyedQueueDurableHandoffDoesNotSkipOrReplay(t *testing.T) {
 	url := os.Getenv("GPV_NATS_TEST_URL")

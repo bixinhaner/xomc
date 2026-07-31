@@ -491,7 +491,7 @@ func (b *NATSEventBus) Publish(ctx context.Context, subject string, evt Event) e
 }
 
 func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscription, error) {
-	sub, err := b.js.Subscribe(subject, b.wrapHandler(handler),
+	sub, err := b.js.Subscribe(subject, b.wrapHandler(handler, maxDeliveries),
 		nats.DeliverAll(),
 		nats.AckExplicit(),
 	)
@@ -509,7 +509,7 @@ func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscrip
 func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler EventHandler) (Subscription, error) {
 	tuning := b.ensureQueueConsumerTuning(subject, queue)
 
-	sub, err := b.js.QueueSubscribe(subject, queue, b.wrapHandler(handler),
+	sub, err := b.js.QueueSubscribe(subject, queue, b.wrapHandler(handler, tuning.MaxDeliver),
 		nats.Durable(queue),
 		nats.AckExplicit(),
 		nats.AckWait(tuning.AckWait),
@@ -1208,7 +1208,7 @@ func (b *NATSEventBus) runPullSubscription(ctx context.Context, ps *pullSubscrip
 			go func(msg *nats.Msg) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				b.processMsg(handler, msg)
+				b.processMsg(handler, msg, tuning.MaxDeliver)
 			}(msg)
 		}
 	}
@@ -1332,13 +1332,13 @@ func (b *NATSEventBus) Close() error {
 	return nil
 }
 
-func (b *NATSEventBus) wrapHandler(handler EventHandler) nats.MsgHandler {
+func (b *NATSEventBus) wrapHandler(handler EventHandler, maxDelivery int) nats.MsgHandler {
 	return func(msg *nats.Msg) {
-		b.processMsg(handler, msg)
+		b.processMsg(handler, msg, maxDelivery)
 	}
 }
 
-func (b *NATSEventBus) processMsg(handler EventHandler, msg *nats.Msg) {
+func (b *NATSEventBus) processMsg(handler EventHandler, msg *nats.Msg, maxDelivery int) {
 	evt, parseErr := decodeEventBytes(msg.Data)
 	if parseErr != nil {
 		b.dropMalformedMsg(msg, parseErr)
@@ -1346,7 +1346,7 @@ func (b *NATSEventBus) processMsg(handler EventHandler, msg *nats.Msg) {
 	}
 
 	handlerErr := handler(b.ctx, evt)
-	b.settleDecodedMsg(evt, msg, handlerErr, maxDeliveries)
+	b.settleDecodedMsg(evt, msg, handlerErr, maxDelivery)
 }
 
 func (b *NATSEventBus) dropMalformedMsg(msg *nats.Msg, parseErr error) {
@@ -1397,11 +1397,20 @@ func (b *NATSEventBus) settleDecodedMsgAtDelivery(
 		_ = msg.Term()
 	case ackActionNak:
 		b.metrics.inc(evt.Subject, deliveryOutcomeNak)
-		b.logger.Error("handle event (retrying)",
+		fields := []zap.Field{
 			zap.String("subject", evt.Subject),
 			zap.Uint64("delivery", deliveries),
 			zap.Duration("backoff", decision.backoff),
-			zap.Error(handlerErr))
+			zap.Error(handlerErr),
+		}
+		if errors.Is(handlerErr, reliability.ErrDeferred) {
+			// 注册竞态等延迟条件是预期控制流；每次都打 Error 会附带堆栈，
+			// 20k 设备清洁启动时形成日志与磁盘 I/O 放大。交付结果由 NAK
+			// 指标观测，详细单条记录仅在 Debug 级别保留。
+			b.logger.Debug("handle event (deferred)", fields...)
+		} else {
+			b.logger.Error("handle event (retrying)", fields...)
+		}
 		_ = msg.NakWithDelay(decision.backoff)
 	}
 }
