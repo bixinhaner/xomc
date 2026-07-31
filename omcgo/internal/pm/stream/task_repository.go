@@ -411,6 +411,36 @@ func insertTaskMembers(ctx context.Context, tx pgx.Tx, versionID uuid.UUID, memb
 	return nil
 }
 
+func buildLoadMatchableRevisionSQL() (string, []interface{}, error) {
+	return storage.Psql.Select(
+		"COUNT(*)",
+		"COALESCE(MAX(updated_at), to_timestamp(0))",
+		"COALESCE(md5(string_agg(row_to_json(t)::text, ',' ORDER BY t.id)), md5(''))",
+	).From("pm_aggregation_tasks t").ToSql()
+}
+
+func (r *PgTaskRepository) LoadMatchableRevision(
+	ctx context.Context,
+) (MatchableRevision, error) {
+	query, args, err := buildLoadMatchableRevisionSQL()
+	if err != nil {
+		return MatchableRevision{}, fmt.Errorf(
+			"build load PM aggregation task revision SQL: %w", err,
+		)
+	}
+	var revision MatchableRevision
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(
+		&revision.TaskCount,
+		&revision.UpdatedAt,
+		&revision.Fingerprint,
+	); err != nil {
+		return MatchableRevision{}, fmt.Errorf(
+			"query PM aggregation task revision: %w", err,
+		)
+	}
+	return revision, nil
+}
+
 func (r *PgTaskRepository) LoadMatchable(ctx context.Context, at time.Time) ([]*TaskVersionSnapshot, error) {
 	query, args, err := storage.Psql.Select(
 		"t.id", "v.id", "v.version_no", "t.name", "v.enabled",
