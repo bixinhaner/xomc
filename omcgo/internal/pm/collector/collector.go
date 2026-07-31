@@ -30,7 +30,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const deviceRegistrationGrace = 30 * time.Minute
+// DeviceRegistrationGrace is how long a PM event may wait for the matching
+// device registration before it becomes a permanent, replayable failure.
+// Queue retry budgets must cover this duration.
+const DeviceRegistrationGrace = 30 * time.Minute
 
 // isMinIONotFound 判定 MinIO 错误是否为对象/桶不存在（沿用 internal/core/rawarchive、
 // internal/backup/restore_service.go 已有的同款判定：minio-go 的 GetObject 不立即发
@@ -362,10 +365,10 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 
 	if err := c.resolveDevice(ctx, &payload); err != nil {
 		if errors.Is(err, reliability.ErrDeferred) &&
-			(evt.Timestamp.IsZero() || time.Since(evt.Timestamp) >= deviceRegistrationGrace) {
+			(evt.Timestamp.IsZero() || time.Since(evt.Timestamp) >= DeviceRegistrationGrace) {
 			return fmt.Errorf(
 				"device registration grace exceeded (%s): %v: %w",
-				deviceRegistrationGrace,
+				DeviceRegistrationGrace,
 				err,
 				reliability.ErrPermanent,
 			)
@@ -749,7 +752,7 @@ func filterAllowByEnabled(allow map[string]CounterMeta, enabled map[string]struc
 //   - lookup 本身出错（DB 连接等基础设施问题）→ 普通错误，触发 retry+DLQ，通常瞬时问题。
 //   - lookup 成功但 dev==nil → ErrDeferred。清洁部署或设备批量重连时，PM 文件可能
 //     早于 Inform 注册落库；由 JetStream 持久化退避重投，避免直接 DLQ 形成 KPI 缺口。
-//     handleFileReceived 超过 deviceRegistrationGrace 后会转成 ErrPermanent，确保真正
+//     handleFileReceived 超过 DeviceRegistrationGrace 后会转成 ErrPermanent，确保真正
 //     未注册设备最终只产生一条可运维处理的死信，不无限占用队列。
 func (c *PMCollector) resolveDevice(ctx context.Context, payload *FileReceivedPayload) error {
 	if payload.DeviceID != "" {

@@ -1523,6 +1523,13 @@ func decideAck(handlerErr error, deliveries, maxDelivery uint64) ackDecision {
 	if deliveries >= maxDelivery {
 		return ackDecision{action: ackActionTerm}
 	}
+	return ackDecision{
+		action:  ackActionNak,
+		backoff: retryBackoff(deliveries),
+	}
+}
+
+func retryBackoff(deliveries uint64) time.Duration {
 	if deliveries == 0 {
 		deliveries = 1
 	}
@@ -1531,9 +1538,26 @@ func decideAck(handlerErr error, deliveries, maxDelivery uint64) ackDecision {
 	if shift > 30 {
 		shift = 30
 	}
-	return ackDecision{
-		action:  ackActionNak,
-		backoff: time.Duration(1<<shift) * time.Second,
+	return time.Duration(1<<shift) * time.Second
+}
+
+// MaxDeliveriesForRetryHorizon returns the smallest MaxDeliver value whose
+// exponential NAK delays guarantee another delivery at or after horizon.
+// Keeping this calculation beside retryBackoff prevents business grace windows
+// from silently outgrowing the queue retry budget when either side is tuned.
+func MaxDeliveriesForRetryHorizon(horizon time.Duration) int {
+	if horizon <= 0 {
+		return 1
+	}
+	deliveries := 1
+	remaining := horizon
+	for {
+		delay := retryBackoff(uint64(deliveries))
+		deliveries++
+		if delay >= remaining {
+			return deliveries
+		}
+		remaining -= delay
 	}
 }
 

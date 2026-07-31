@@ -112,7 +112,7 @@ func TestHandleFileReceived_deviceNotFoundExpiresAfterRegistrationWindow(t *test
 	assert.False(t, errors.Is(err, reliability.ErrPermanent))
 
 	expired := fresh
-	expired.Timestamp = time.Now().Add(-deviceRegistrationGrace - time.Second)
+	expired.Timestamp = time.Now().Add(-DeviceRegistrationGrace - time.Second)
 	err = c.handleFileReceived(context.Background(), expired)
 	require.ErrorIs(t, err, reliability.ErrPermanent)
 	assert.False(t, errors.Is(err, reliability.ErrDeferred))

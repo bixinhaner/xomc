@@ -567,6 +567,23 @@ func TestDecideAck_ZeroDelivery_TreatedAsOne(t *testing.T) {
 	assert.Equal(t, 1*time.Second, d.backoff)
 }
 
+func TestMaxDeliveriesForRetryHorizon(t *testing.T) {
+	tests := []struct {
+		name    string
+		horizon time.Duration
+		want    int
+	}{
+		{name: "no wait", horizon: 0, want: 1},
+		{name: "first retry", horizon: time.Second, want: 2},
+		{name: "thirty minute registration grace", horizon: 30 * time.Minute, want: 12},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, MaxDeliveriesForRetryHorizon(tt.horizon))
+		})
+	}
+}
+
 func TestDecideAck_ExtremeDeliveries_BackoffCapped(t *testing.T) {
 	// 极端 deliveries 不应触发位移溢出（shift cap=30）
 	d := decideAck(errors.New("handler failed"), 100, 1000)
