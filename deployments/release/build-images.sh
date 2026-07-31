@@ -148,6 +148,14 @@ prepare_image() {
     log "✓ 复用本地缓存: $SAVED_TAG"
     return 0
   fi
+  # The exact configured reference may already have been loaded from an
+  # earlier package or a registry mirror. Add the cache tag without pulling;
+  # never substitute a different repository or version implicitly.
+  if docker image inspect "$IMG" >/dev/null 2>&1; then
+    docker tag "$IMG" "$SAVED_TAG"
+    log "✓ 复用本地镜像并补缓存标签: $IMG → $SAVED_TAG"
+    return 0
+  fi
   docker pull --platform "linux/$ARCH" "$IMG"
   docker tag "$IMG" "$SAVED_TAG"
   log "✓ 已拉取并打标: $IMG → $SAVED_TAG"

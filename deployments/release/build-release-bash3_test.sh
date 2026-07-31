@@ -20,6 +20,13 @@ if grep -q 'date -Is' "$BUILD_SCRIPT"; then
 fi
 echo "PASS: build-release timestamp is BSD/GNU date compatible"
 
+if grep -Fq "stamp=\"\$(date '+%Y-%m-%dT%H:%M:%S%z')\"" "$BUILD_SCRIPT"; then
+  echo "PASS: build-release timestamp uses local timezone"
+else
+  echo "FAIL: build-release timestamp is not local-timezone based" >&2
+  exit 1
+fi
+
 if LC_ALL=C grep -Eq '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' "$BUILD_SCRIPT"; then
   echo "FAIL: unbraced variable directly precedes non-ASCII punctuation" >&2
   exit 1

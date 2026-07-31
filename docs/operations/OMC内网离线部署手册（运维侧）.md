@@ -14,6 +14,11 @@
 >
 > ⚠️ **架构**：当前发布仅有 **amd64（x86_64）** 包。目标机 `uname -m` 应返回
 > `x86_64`；若是 `aarch64`/`arm64` 等其它架构，请联系构建侧（不在本期发布范围）。
+>
+> **严格离线约束**：安装脚本会在启动前校验本次 Compose 的全部镜像，并使用
+> `docker compose up --pull never`。缺少任一镜像（包括 `cadvisor`、各 exporter）都会直接失败，
+> 不会联网拉取。首次部署必须先导入基础设施包；`--skip-infra` 仅适用于基础设施和监控镜像已经
+> 在本机完成 `docker load` 的后续项目升级。
 
 ---
 
@@ -416,6 +421,9 @@ docker images                                         # 对照 images.manifest �
 
 > 实操中**推荐直接用 `deploy.sh`**（§5.10）完成镜像 load——脚本会 `docker image inspect`
 > 判断镜像是否已存在，已存在则跳过 load 并重启容器，缺失才 load，幂等安全。
+> 启动前还会再次校验全部镜像；缺少任一镜像会失败并提示导入基础设施包，不会让 Compose 隐式
+> pull。特别是启用监控时，必须确认 `monitoring-images-amd64.tar` 已导入，其中包含 `cadvisor`
+> 和各 exporter。
 
 ### 步骤 4 — 规划与修改配置（**安全关键，必做**）
 

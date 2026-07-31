@@ -223,8 +223,9 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 # ---------------------------------------------------------------------------
 # 3. 组件 floor/ceiling 表 + floor-first 分配（需求 ③）
 # ---------------------------------------------------------------------------
-# 单位 MiB。floor = 100k 基线下限（绝不低于）；ceil = 单机纵向上限（再大走横向扩展）。
-# 数据来源：资源规划分析 + 对抗评审修正（floor-clamp / 全量记账 / PG按连接数定容）。
+# 单位 MiB。下面是 32 GiB 基线机型的参考画像，不是最终申请值；最终 floor/ceiling
+# 会按本机实际业务内存预算动态缩放。数据来源：资源规划分析 + 对抗评审修正
+#（floor-clamp / 全量记账 / PG 按连接数定容）。
 #
 #   组件          floor   ceil    surplus权重(%)   说明
 #   app           1536    3072        10           非设备量驱动，最先让出预算；线上巡检发现 995MiB 配额下常驻内存已到 88%，floor/ceil 一并调大留余量
@@ -238,20 +239,50 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 #   web            512     512         0           静态+反代，固定
 # 监控栈（固定块，不纵向伸缩，但计入预算）：~4224 MiB
 COMP_NAMES=(app acs worker postgres postgres-tsdb redis nats minio web)
-COMP_FLOOR=(1536 4096 1024 7168 4096 5120 1024 3072 512)
-COMP_CEIL=(3072 6144 2048 16384 12288 8192 2048 4096 512)
+BASE_COMP_FLOOR=(1536 4096 1024 7168 4096 5120 1024 3072 512)
+BASE_COMP_CEIL=(3072 6144 2048 16384 12288 8192 2048 4096 512)
+# 低配机仍须保证能启动一套有意义的 OMC；这些是按组件职责定义的最低比例
+# 约束，不是固定的最终申请值。双 ACS 接力副本在后续总账中再计一次。
+COMP_MIN=(512 1024 512 2048 1536 2048 256 512 128)
 COMP_WEIGHT=(10 18 25 25 22 15 5 8 0)
 
 MON_FIXED_MIB=4224   # prometheus1024+loki512+tempo512+otelcol512+grafana512+alertmgr512+exporters(128*3+256)
 [ "$SKIP_MONITORING" = 1 ] && MON_FIXED_MIB=0
 
+# 32 GiB 基线只用于计算比例；业务总预算来自当前主机的实际可用内存，且先扣掉
+# 监控固定成本。这样同一套交付包在 16/32/64 GiB 主机上不会申请同样的内存。
+BASE_BUSINESS_FLOOR_SUM=0
+for f in "${BASE_COMP_FLOOR[@]}"; do BASE_BUSINESS_FLOOR_SUM=$(( BASE_BUSINESS_FLOOR_SUM + f )); done
+BASE_BUSINESS_FLOOR_SUM=$(( BASE_BUSINESS_FLOOR_SUM + BASE_COMP_FLOOR[1] ))
+MIN_BUSINESS_FLOOR_SUM=0
+for m in "${COMP_MIN[@]}"; do MIN_BUSINESS_FLOOR_SUM=$(( MIN_BUSINESS_FLOOR_SUM + m )); done
+MIN_BUSINESS_FLOOR_SUM=$(( MIN_BUSINESS_FLOOR_SUM + COMP_MIN[1] ))
+BUSINESS_BUDGET_MIB=$(( IDLE_MEM_MIB - MON_FIXED_MIB ))
+[ "$BUSINESS_BUDGET_MIB" -ge "$MIN_BUSINESS_FLOOR_SUM" ] || \
+  die "扣除监控固定成本后业务内存预算仅 $(to_gib "$BUSINESS_BUDGET_MIB") GiB，低于最低可运行预算 $(to_gib "$MIN_BUSINESS_FLOOR_SUM") GiB；请释放内存、跳过监控或扩容主机。" 1
+
+# floor 先占业务预算的 70%，剩余 30% 按组件权重向上分配；低配机若按比例
+# 得到的 floor 低于组件最低可运行值，则优先抬到该最低值，并继续做总账校验。
+FLOOR_BUDGET_MIB=$(( BUSINESS_BUDGET_MIB * 70 / 100 ))
+[ "$FLOOR_BUDGET_MIB" -lt "$MIN_BUSINESS_FLOOR_SUM" ] && FLOOR_BUDGET_MIB="$MIN_BUSINESS_FLOOR_SUM"
+COMP_FLOOR=(); COMP_CEIL=()
+for i in "${!COMP_NAMES[@]}"; do
+  floor=$(( BASE_COMP_FLOOR[$i] * FLOOR_BUDGET_MIB / BASE_BUSINESS_FLOOR_SUM ))
+  ceil=$(( BASE_COMP_CEIL[$i] * BUSINESS_BUDGET_MIB / BASE_BUSINESS_FLOOR_SUM ))
+  [ "$floor" -lt "${COMP_MIN[$i]}" ] && floor="${COMP_MIN[$i]}"
+  [ "$ceil" -lt "$floor" ] && ceil="$floor"
+  COMP_FLOOR[$i]="$floor"
+  COMP_CEIL[$i]="$ceil"
+done
+
 # 下限之和（最低门槛）。ACS 无损发布常驻 primary + candidate 两个同规格实例；
 # COMP_NAMES 中的 acs 负责计算单副本规格，这里把第二副本完整计入预算。
 FLOOR_SUM=0; for f in "${COMP_FLOOR[@]}"; do FLOOR_SUM=$(( FLOOR_SUM + f )); done
-FLOOR_SUM=$(( FLOOR_SUM + 4096 + MON_FIXED_MIB ))
+FLOOR_SUM=$(( FLOOR_SUM + COMP_FLOOR[1] + MON_FIXED_MIB ))
 
 sep "3/4 floor-first 资源分配"
 log "  组件下限之和  : $(to_gib "$FLOOR_SUM") GiB$([ "$SKIP_MONITORING" = 1 ] && echo '（不含监控）' || echo '（含监控 '"$(to_gib "$MON_FIXED_MIB")"' GiB）')"
+log "  业务内存预算  : $(to_gib "$BUSINESS_BUDGET_MIB") GiB（实际空闲预算扣除监控固定成本，按本机预算动态缩放）"
 
 # 最低配置门禁（需求 ②：缺口超过容忍度才 fail + 给建议；容忍度内降级为 WARN 按下限分配）
 FLOOR_MIN_REQUIRED=$(mul_pct "$FLOOR_SUM" $((100 - FLOOR_TOLERANCE_PCT)))
@@ -312,6 +343,9 @@ CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis"
 # 只有「明明分了 SURPLUS>0 却还超预算」才是真正的分配逻辑 bug。
 ALLOC_SUM=0; for m in "${COMP_MEM[@]}"; do ALLOC_SUM=$(( ALLOC_SUM + m )); done
 ALLOC_SUM=$(( ALLOC_SUM + ACS_MEM + MON_FIXED_MIB ))
+if [ "$ALLOC_SUM" -gt "$MEM_TOTAL_MIB" ]; then
+  die "资源计划总内存 $(to_gib "$ALLOC_SUM") GiB 超过主机物理内存 $(to_gib "$MEM_TOTAL_MIB") GiB；即使提高 --floor-tolerance-pct 也禁止生成可能导致 OOM 的 resources.env。请释放内存、跳过监控或扩容主机。" 1
+fi
 if [ "$ALLOC_SUM" -gt "$IDLE_MEM_MIB" ] && [ "$SURPLUS" -gt 0 ]; then
   die "内部错误：分配后 Σ限额 $(to_gib "$ALLOC_SUM") GiB > 空闲预算 $(to_gib "$IDLE_MEM_MIB") GiB。请反馈此 bug。" 1
 fi
