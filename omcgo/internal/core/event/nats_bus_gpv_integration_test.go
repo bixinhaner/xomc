@@ -77,6 +77,88 @@ func TestQueueSubscribeHonorsConfiguredMaxDeliver(t *testing.T) {
 		"expected deferred redelivery must not emit error stacktraces")
 }
 
+func TestQueueSubscribeDeferredLaneDoesNotBlockMainConsumer(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("PM_DEFERRED_LANE_%d", suffix)
+	mainSubject := fmt.Sprintf("test.pm.received.%d", suffix)
+	deferredSubject := fmt.Sprintf("test.pm.deferred.%d", suffix)
+	mainDurable := fmt.Sprintf("pm-main-%d", suffix)
+	deferredDurable := fmt.Sprintf("pm-wait-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name:      stream,
+		Subjects:  []string{mainSubject, deferredSubject},
+		Storage:   nats.MemoryStorage,
+		Retention: nats.WorkQueuePolicy,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	t.Cleanup(func() { _ = bus.Close() })
+	tuning := QueueTuning{
+		AckWait:       2 * time.Second,
+		MaxDeliver:    3,
+		MaxAckPending: 1,
+	}
+	bus.SetQueueTuning(mainSubject, tuning)
+	bus.SetQueueTuning(deferredSubject, tuning)
+
+	var deferredAttempts atomic.Int64
+	_, err = bus.QueueSubscribe(deferredSubject, deferredDurable,
+		func(context.Context, Event) error {
+			deferredAttempts.Add(1)
+			return fmt.Errorf("registration pending: %w", reliability.ErrDeferred)
+		})
+	require.NoError(t, err)
+
+	var healthyProcessed atomic.Int64
+	_, err = bus.QueueSubscribe(mainSubject, mainDurable,
+		func(ctx context.Context, evt Event) error {
+			var payload struct {
+				WaitForRegistration bool `json:"wait_for_registration"`
+			}
+			if decodeErr := evt.DecodePayload(&payload); decodeErr != nil {
+				return decodeErr
+			}
+			if payload.WaitForRegistration {
+				return bus.Publish(ctx, deferredSubject, evt)
+			}
+			healthyProcessed.Add(1)
+			return nil
+		})
+	require.NoError(t, err)
+
+	for _, wait := range []bool{true, false} {
+		evt, eventErr := NewEvent(mainSubject, map[string]bool{
+			"wait_for_registration": wait,
+		})
+		require.NoError(t, eventErr)
+		require.NoError(t, bus.Publish(context.Background(), mainSubject, evt))
+	}
+
+	require.Eventually(t, func() bool {
+		return healthyProcessed.Load() == 1 && deferredAttempts.Load() >= 1
+	}, 3*time.Second, 20*time.Millisecond,
+		"the deferred event may fill its wait consumer but must not block the next main event")
+	require.Eventually(t, func() bool {
+		mainInfo, infoErr := js.ConsumerInfo(stream, mainDurable)
+		return infoErr == nil && mainInfo.NumPending == 0 && mainInfo.NumAckPending == 0
+	}, 2*time.Second, 20*time.Millisecond)
+	deferredInfo, err := js.ConsumerInfo(stream, deferredDurable)
+	require.NoError(t, err)
+	require.Equal(t, 1, deferredInfo.NumAckPending)
+}
+
 func TestKeyedQueueDurableHandoffDoesNotSkipOrReplay(t *testing.T) {
 	url := os.Getenv("GPV_NATS_TEST_URL")
 	if url == "" {

@@ -99,6 +99,17 @@ groups:
           summary: "NATS {{ $labels.stream }}/{{ $labels.durable }} 观测不可用"
           description: "NATS backlog 的业务快照已过期；检查 JetStream API、连接和固定 consumer 配置。"
 
+      - alert: PMRegistrationWaitStale
+        expr: max by (stream, durable) (omc_nats_consumer_oldest_age_seconds{stream="PM",durable="pm-registration-wait"} and on (stream, durable) (omc_nats_consumer_up == 1) and on (stream, durable) (time() - omc_nats_consumer_sample_timestamp_seconds < 120)) > 2100
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 注册等待事件已超过 35 分钟"
+          description: "设备注册等待事件超过 30 分钟业务宽限和 5 分钟调度余量仍未进入 DLQ；检查 pm-registration-wait consumer、设备注册链路和重投状态。"
+
       - alert: StorageCapacityWarning
         expr: omc_storage_used_ratio{target_type="filesystem",target_id="root"} > 0.8
         for: 10m
