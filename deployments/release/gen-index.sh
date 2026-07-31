@@ -45,6 +45,19 @@ scan_rows() {
     [ -f "$rel" ] || continue
     local bt links="" f bn sz
     bt="$(grep -E '^build_time=' "$rel" | cut -d= -f2- || true)"
+    # 历史项目包曾写入 UTC 的 Z；索引统一按构建机当地时区展示，避免项目与
+    # 基础设施列表出现一列两种时区格式。新包已直接写入带 %z 的本地时间。
+    if [[ "$bt" == *Z ]]; then
+      bt_epoch=""
+      bt_local=""
+      if bt_epoch="$(date -d "$bt" +%s 2>/dev/null)" ||
+         bt_epoch="$(date -j -f '%Y-%m-%dT%H:%M:%SZ' "$bt" +%s 2>/dev/null)"; then
+        if bt_local="$(date -d "@$bt_epoch" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)" ||
+           bt_local="$(date -r "$bt_epoch" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)"; then
+          bt="${bt_local:0:19}${bt_local:19:3}:${bt_local:22:2}"
+        fi
+      fi
+    fi
     # 仅显示 amd64 包（release 工具链 amd64-only；历史 *-arm64.tar.* 物理保留但不进列表）
     # RELEASE.txt 仅作为构建系统内部元数据，不进下载列表
     for f in "$d"omc-*-amd64.tar.*; do

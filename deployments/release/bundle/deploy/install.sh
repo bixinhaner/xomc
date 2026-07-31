@@ -19,6 +19,8 @@
 #   sudo bash deploy/install.sh --skip-migrate           # 不跑 migrate / seed
 #   sudo bash deploy/install.sh --skip-web               # 不起 web 容器
 #   sudo bash deploy/install.sh --skip-monitoring        # 不起监控栈
+#   sudo bash deploy/install.sh --fresh-install --yes --public-host 172.24.224.78
+#                                                        # 清理旧数据后全新安装
 #   sudo bash deploy/install.sh --check-only             # 仅检查环境，不做修改
 #   sudo bash deploy/install.sh --infra-dir /opt/omc/infra   # 自定义 infra 目录
 #   sudo bash deploy/install.sh --overwrite-etc          # 用新包模板覆盖 /opt/omc/etc
@@ -34,6 +36,8 @@
 #                     基础设施包 omc-infra-*.tar.xz 需提前解压到此目录。
 #   --omc-root <p>    OMC 安装根（默认 /opt/omc）
 #   --overwrite-etc   用新包 etc/ 模板覆盖 /opt/omc/etc/（旧 etc 自动备份）
+#   --fresh-install   停止旧栈并删除 OMC 数据/配置/项目 volumes 后全新安装（危险）
+#   --public-host <h> 全新安装时写入基站可达的 OMC_PUBLIC_HOST
 #   --yes             所有交互式提示直接默认（适合 CI / 批处理）
 #   -h | --help       本帮助
 #
@@ -165,6 +169,8 @@ SKIP_MONITORING=0
 CHECK_ONLY=0
 ASSUME_YES=0
 OVERWRITE_ETC=0
+FRESH_INSTALL=0
+PUBLIC_HOST_OVERRIDE="${OMC_PUBLIC_HOST:-}"
 INFRA_DIR="/opt/omc/infra"
 OMC_ROOT="/opt/omc"
 COMPOSE_PROJECT="omcgo"
@@ -179,6 +185,8 @@ while [ $# -gt 0 ]; do
     --infra-dir)       INFRA_DIR="$2"; shift 2 ;;
     --omc-root)        OMC_ROOT="$2"; shift 2 ;;
     --overwrite-etc)   OVERWRITE_ETC=1; shift ;;
+    --fresh-install)   FRESH_INSTALL=1; shift ;;
+    --public-host)     PUBLIC_HOST_OVERRIDE="${2:?--public-host 需要 IP 或域名}"; shift 2 ;;
     --yes)             ASSUME_YES=1; shift ;;
     -h|--help)         sed -n '3,52p' "$0"; exit 0 ;;
     --uninstall)       die "卸载请用 uninstall.sh：sudo bash $DEPLOY_DIR/uninstall.sh -h" ;;
@@ -194,6 +202,101 @@ confirm() {
   read -rp "$1 [Y/n] " yn
   case "${yn:-Y}" in [Yy]*|"") return 0 ;; *) return 1 ;; esac
 }
+
+set_env_value() { # set_env_value <file> <key> <value>
+  local file="$1" key="$2" value="$3" tmp
+  tmp="$(mktemp)" || return 1
+  if awk -v key="$key" -v value="$value" '
+      BEGIN { replaced=0 }
+      $0 ~ "^" key "=" {
+        if (!replaced) print key "=" value
+        replaced=1
+        next
+      }
+      { print }
+      END { if (!replaced) print key "=" value }
+    ' "$file" > "$tmp"; then
+    cat "$tmp" > "$file"
+    rm -f "$tmp"
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
+fresh_install_reset() {
+  local package_env="$PKG_ROOT/deploy/.env"
+  local old_deploy="$OMC_ROOT/current/deploy"
+  local old_env_args=()
+  local old_compose_files=()
+  local data_key path volumes volume
+
+  [ "$CHECK_ONLY" = 0 ] || die "--fresh-install 不能与 --check-only 同时使用" 1
+  [ -f "$package_env" ] || die "全新安装缺少 $package_env" 1
+  [ -f "$PKG_ROOT/deploy/plan-resources.sh" ] || die "全新安装缺少 plan-resources.sh" 1
+  command -v docker >/dev/null 2>&1 || die "缺少 docker，无法执行全新安装清理" 1
+  docker compose version >/dev/null 2>&1 || die "缺少 docker compose v2，无法执行全新安装清理" 1
+
+  if [ -f "$old_deploy/docker-compose.infra.yml" ]; then
+    [ -f "$old_deploy/.env" ] && old_env_args+=( --env-file "$old_deploy/.env" )
+    [ -f "$old_deploy/resources.env" ] && old_env_args+=( --env-file "$old_deploy/resources.env" )
+    for file in docker-compose.infra.yml docker-compose.app.yml docker-compose.web.yml docker-compose.monitoring.yml; do
+      [ -f "$old_deploy/$file" ] && old_compose_files+=( -f "$old_deploy/$file" )
+    done
+    log "全新安装：停止旧 OMC 栈 ..."
+    ( cd "$old_deploy" && docker compose -p "$COMPOSE_PROJECT" "${old_env_args[@]}" \
+        "${old_compose_files[@]}" down --remove-orphans ) || warn "旧 OMC 栈停止返回非零，继续执行数据清理"
+  fi
+
+  [ -n "$PUBLIC_HOST_OVERRIDE" ] ||
+    PUBLIC_HOST_OVERRIDE="$(deploy_env_file_value OMC_PUBLIC_HOST "$package_env" 2>/dev/null || true)"
+  deploy_env_public_host_valid "$PUBLIC_HOST_OVERRIDE" ||
+    die "全新安装必须提供有效的 --public-host（例如 172.24.224.78）" 1
+  set_env_value "$package_env" OMC_PUBLIC_HOST "$PUBLIC_HOST_OVERRIDE" ||
+    die "无法写入 $package_env 的 OMC_PUBLIC_HOST" 1
+
+  log "全新安装：按目标主机重新规划资源（floor tolerance 60%）..."
+  fresh_plan_args=( --floor-tolerance-pct 60 )
+  [ "$SKIP_MONITORING" = 1 ] && fresh_plan_args+=( --skip-monitoring )
+  ( cd "$PKG_ROOT" && OMC_STORAGE_ENV_FILE="$package_env" \
+      bash "$PKG_ROOT/deploy/plan-resources.sh" "${fresh_plan_args[@]}" ) ||
+    die "全新安装资源规划失败，未删除任何 OMC 数据" 1
+
+  log "全新安装将清理以下数据目录："
+  for data_key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
+    path="$(storage_env_get "$package_env" "$data_key")"
+    case "$path" in
+      /*) ;;
+      *) die "全新安装数据路径无效：$data_key=$path" 1 ;;
+    esac
+    case "$path" in
+      /|/home|/opt|/opt/omc|/var|/tmp)
+        die "全新安装拒绝清理危险数据路径：$data_key=$path" 1 ;;
+    esac
+    log "  $data_key=$path"
+  done
+
+  confirm "全新安装将永久删除 OMC 数据、配置、日志和项目 Docker volumes，继续吗？" ||
+    die "用户取消全新安装，未删除任何 OMC 数据" 1
+
+  log "全新安装：删除 bind-mount 数据目录 ..."
+  for data_key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
+    path="$(storage_env_get "$package_env" "$data_key")"
+    rm -rf -- "$path"
+  done
+  rm -rf -- "$OMC_ROOT/data" "$OMC_ROOT/etc" "$OMC_ROOT/current" "$OMC_ROOT/run/logs"
+
+  volumes="$(docker volume ls -q --filter label=com.docker.compose.project="$COMPOSE_PROJECT")"
+  for volume in $volumes; do
+    docker volume rm "$volume" >/dev/null ||
+      die "无法删除 Docker volume：$volume；请确认旧 OMC 容器已停止" 1
+  done
+  log "全新安装：旧 OMC 数据已删除"
+}
+
+if [ "$FRESH_INSTALL" = 1 ]; then
+  fresh_install_reset
+fi
 
 # resolve_resource_env_candidate —— 安装前资源契约候选优先级：
 #   1) 新交付包内由 plan-resources.sh 生成的文件；
@@ -1071,20 +1174,34 @@ if [ "$SKIP_MONITORING" = 0 ]; then
     nats-exporter nginx-exporter node-exporter cadvisor
 fi
 
-log "等待业务容器启动（最多 90s，健康检查每 5s 重试）..."
-HEALTHCHECK_TIMEOUT=90
 HEALTHCHECK_INTERVAL=5
+HEALTHCHECK_TIMEOUT="${OMC_HEALTHCHECK_TIMEOUT:-90}"
+HEALTHCHECK_FINAL_GRACE="${OMC_HEALTHCHECK_FINAL_GRACE:-0}"
+HEALTHCHECK_PROBE_TIMEOUT="${OMC_HEALTHCHECK_PROBE_TIMEOUT:-30}"
+case "$HEALTHCHECK_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_TIMEOUT 必须是正整数" 1 ;; esac
+case "$HEALTHCHECK_FINAL_GRACE" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_FINAL_GRACE 必须是非负整数" 1 ;; esac
+case "$HEALTHCHECK_PROBE_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_PROBE_TIMEOUT 必须是正整数" 1 ;; esac
+[ "$HEALTHCHECK_TIMEOUT" -gt 0 ] || die "OMC_HEALTHCHECK_TIMEOUT 必须大于 0" 1
+[ "$HEALTHCHECK_PROBE_TIMEOUT" -gt 0 ] || die "OMC_HEALTHCHECK_PROBE_TIMEOUT 必须大于 0" 1
+log "动态等待业务容器启动（最长 ${HEALTHCHECK_TIMEOUT}s，单轮探针最多 ${HEALTHCHECK_PROBE_TIMEOUT}s，每 ${HEALTHCHECK_INTERVAL}s 重试；通过后立即继续）..."
 HEALTHCHECK_LOG="$(mktemp)"
 HEALTH_OK=0
+HEALTHCHECK_PROBE_TIMEOUTS=0
 HEALTHCHECK_DEADLINE=$(( $(date +%s) + HEALTHCHECK_TIMEOUT ))
 while :; do
   HEALTHCHECK_REMAINING=$(( HEALTHCHECK_DEADLINE - $(date +%s) ))
   [ "$HEALTHCHECK_REMAINING" -gt 0 ] || break
-  # healthcheck 本身包含多次 docker compose/inspect；高负载下单轮可能较慢。
-  # 用真实剩余秒数约束单轮，避免“每轮只累计 5 秒”把 90 秒放大成数分钟。
-  if timeout "${HEALTHCHECK_REMAINING}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" >"$HEALTHCHECK_LOG" 2>&1; then
+  # 单轮探针必须有独立上限；某个 docker exec/网络探针卡住时，仍要回到循环
+  # 继续重试，而不能独占整个总等待窗口。
+  HEALTHCHECK_PROBE_REMAINING="$HEALTHCHECK_PROBE_TIMEOUT"
+  [ "$HEALTHCHECK_REMAINING" -lt "$HEALTHCHECK_PROBE_REMAINING" ] &&
+    HEALTHCHECK_PROBE_REMAINING="$HEALTHCHECK_REMAINING"
+  if timeout "${HEALTHCHECK_PROBE_REMAINING}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" --startup >"$HEALTHCHECK_LOG" 2>&1; then
     HEALTH_OK=1
     break
+  elif [ "$?" -eq 124 ]; then
+    HEALTHCHECK_PROBE_TIMEOUTS=$((HEALTHCHECK_PROBE_TIMEOUTS + 1))
+    log "健康检查单轮超过 ${HEALTHCHECK_PROBE_REMAINING}s，继续第 ${HEALTHCHECK_PROBE_TIMEOUTS} 次重试 ..."
   fi
   HEALTHCHECK_REMAINING=$(( HEALTHCHECK_DEADLINE - $(date +%s) ))
   [ "$HEALTHCHECK_REMAINING" -gt 0 ] || break
@@ -1092,6 +1209,18 @@ while :; do
   [ "$HEALTHCHECK_REMAINING" -lt "$HEALTHCHECK_SLEEP" ] && HEALTHCHECK_SLEEP="$HEALTHCHECK_REMAINING"
   sleep "$HEALTHCHECK_SLEEP"
 done
+
+# 初始化期间监控/字典/业务端点可能恰好跨过主窗口；再给一次短复核，避免把
+# “容器已稳定、端点刚完成启动”误报为安装失败。最终仍以完整 healthcheck 为准。
+if [ "$HEALTH_OK" -eq 0 ] && [ "$HEALTHCHECK_FINAL_GRACE" -gt 0 ]; then
+  log "主健康等待窗口结束，进行 ${HEALTHCHECK_FINAL_GRACE}s 最终复核 ..."
+  HEALTHCHECK_FINAL_PROBE_TIMEOUT="$HEALTHCHECK_FINAL_GRACE"
+  [ "$HEALTHCHECK_FINAL_PROBE_TIMEOUT" -gt "$HEALTHCHECK_PROBE_TIMEOUT" ] &&
+    HEALTHCHECK_FINAL_PROBE_TIMEOUT="$HEALTHCHECK_PROBE_TIMEOUT"
+  if timeout "${HEALTHCHECK_FINAL_PROBE_TIMEOUT}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" >"$HEALTHCHECK_LOG" 2>&1; then
+    HEALTH_OK=1
+  fi
+fi
 
 # =============================================================================
 # Step 9. healthcheck
@@ -1101,13 +1230,19 @@ sep "9/9 健康检查"
 if [ "$HEALTH_OK" -eq 1 ]; then
   cat "$HEALTHCHECK_LOG"
 else
-  cat "$HEALTHCHECK_LOG"
-  warn "健康检查在 ${HEALTHCHECK_TIMEOUT}s 内未通过"
-  log "业务容器失败诊断（状态 / OOM / 退出码 / 重启次数 + 最近日志）..."
+  warn "健康检查在 ${HEALTHCHECK_TIMEOUT}s 主窗口 + ${HEALTHCHECK_FINAL_GRACE}s 最终复核内未通过"
+  [ "$HEALTHCHECK_PROBE_TIMEOUTS" -gt 0 ] &&
+    warn "其中 ${HEALTHCHECK_PROBE_TIMEOUTS} 轮健康检查因单轮超时结束；这不等同于业务容器异常"
+  log "健康检查失败摘要（仅显示失败项）："
+  if ! awk '/  \[FAIL\]/ || /^结果：/ || /^存在失败项/ { print; found=1 } END { exit(found ? 0 : 1) }' "$HEALTHCHECK_LOG"; then
+    log "  （健康检查未返回结构化失败项，可能在单轮超时中断）"
+  fi
+
+  unstable_services=()
   for service in app acs acs-candidate worker; do
     service_cid="$("${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
     if [ -z "$service_cid" ]; then
-      log "  $service：未找到容器"
+      unstable_services+=("$service:missing")
       continue
     fi
     service_state="$(docker inspect -f '{{.State.Status}}' "$service_cid" 2>/dev/null || echo unknown)"
@@ -1115,9 +1250,20 @@ else
     service_exit="$(docker inspect -f '{{.State.ExitCode}}' "$service_cid" 2>/dev/null || echo unknown)"
     service_restarts="$(docker inspect -f '{{.RestartCount}}' "$service_cid" 2>/dev/null || echo unknown)"
     log "  $service：state=$service_state oom=$service_oom exit=$service_exit restarts=$service_restarts"
-    log "  $service 最近日志（最多 40 行）："
-    "${DC[@]}" logs --tail=40 "$service" 2>&1 || true
+    if [ "$service_state" != running ] || [ "$service_oom" = true ] || [ "$service_exit" != 0 ] || [ "$service_restarts" != 0 ]; then
+      unstable_services+=("$service")
+    fi
   done
+  if [ "${#unstable_services[@]}" -gt 0 ]; then
+    log "异常业务容器最近日志（每个最多 20 行）："
+    for service in "${unstable_services[@]}"; do
+      service="${service%%:*}"
+      log "  $service："
+      "${DC[@]}" logs --tail=20 "$service" 2>&1 || true
+    done
+  else
+    log "业务容器均稳定运行，跳过正常运行日志；请稍后重试 healthcheck.sh 获取完整状态。"
+  fi
 fi
 rm -f "$HEALTHCHECK_LOG"
 

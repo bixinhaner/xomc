@@ -74,10 +74,19 @@ done
 echo "── release 安装严格离线镜像契约 ──"
 contains "install 检查完整监控镜像清单" '"${IMAGE_NGINX_EXPORTER:-}" "${IMAGE_NODE_EXPORTER:-}" "${IMAGE_CADVISOR:-}"' "$INSTALL"
 contains "install 缺镜像时禁止隐式联网拉取" '离线安装缺少本地镜像' "$INSTALL"
+contains "install 提供显式全新安装模式" '--fresh-install' "$INSTALL"
+contains "全新安装要求显式基站地址" '--public-host' "$INSTALL"
+contains "全新安装先规划资源再清理数据" '资源规划失败，未删除任何 OMC 数据' "$INSTALL"
+contains "全新安装清理项目 volumes" 'label=com.docker.compose.project="$COMPOSE_PROJECT"' "$INSTALL"
 contains "infra 启动禁止 pull" '"${DC[@]}" up --pull never -d postgres postgres-tsdb redis nats minio' "$INSTALL"
 contains "业务启动禁止 pull" '"${DC[@]}" up --pull never -d' "$INSTALL"
 contains "候选 ACS 启动禁止 pull" '"${DC[@]}" up --pull never -d --no-deps acs-candidate' "$INSTALL"
 contains "安装在升级写操作前校验基站地址" 'OMC_PUBLIC_HOST 预检通过' "$INSTALL"
+contains "安装健康检查支持最终复核" 'HEALTHCHECK_FINAL_GRACE' "$INSTALL"
+contains "安装健康检查默认动态等待 90 秒" 'OMC_HEALTHCHECK_TIMEOUT:-90' "$INSTALL"
+contains "安装健康检查默认总窗口不额外延长" 'OMC_HEALTHCHECK_FINAL_GRACE:-0' "$INSTALL"
+contains "安装失败只输出健康检查失败摘要" '健康检查失败摘要（仅显示失败项）' "$INSTALL"
+contains "安装稳定业务容器跳过正常日志" '业务容器均稳定运行，跳过正常运行日志' "$INSTALL"
 for key in GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH \
   GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH \
   GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING; do
@@ -109,7 +118,12 @@ contains "install 在 systemd 停服前执行迁移门禁" 'gpv_handoff_migrate_
 contains "svc 在重启前准备 durable" 'gpv_handoff_prepare' "$SVC"
 contains "真实 NATS 验证脚本强制注入地址" 'GPV_NATS_TEST_URL=' "$RELEASE_NATS_VERIFY"
 contains "install 健康等待使用真实截止时间" 'HEALTHCHECK_DEADLINE=' "$INSTALL"
-contains "单次 healthcheck 不得越过剩余预算" 'timeout "${HEALTHCHECK_REMAINING}s" bash' "$INSTALL"
+contains "单轮 healthcheck 有独立探针超时" 'HEALTHCHECK_PROBE_TIMEOUT' "$INSTALL"
+contains "单轮 healthcheck 超时后继续重试" 'HEALTHCHECK_PROBE_REMAINING' "$INSTALL"
+contains "安装记录单轮 healthcheck 超时" 'HEALTHCHECK_PROBE_TIMEOUTS' "$INSTALL"
+contains "安装使用轻量启动检查" 'healthcheck.sh" --startup' "$INSTALL"
+contains "启动检查跳过重型审计" 'STARTUP_CHECK=0' "$RELEASE_HEALTHCHECK"
+contains "启动 HTTP 探针有单次超时" 'curl -fsS --max-time 3' "$RELEASE_HEALTHCHECK"
 not_contains "健康等待不得按固定步长伪计时" 'HEALTHCHECK_WAIT=$((HEALTHCHECK_WAIT + HEALTHCHECK_INTERVAL))' "$INSTALL"
 if bash "$RELEASE_DEPLOY/gpv-handoff-lib_test.sh"; then
   ok
@@ -225,7 +239,7 @@ contains "业务容器 tracing 尊重配置与显式覆盖" 'OMCGO_TRACER_ENABLE
 contains "健康检查读取持久化监控 profile" 'monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING"' "$RELEASE_HEALTHCHECK"
 contains "collector 启用 health_check extension" 'extensions: [health_check, zpages]' "$OTELCOL_CONFIG"
 contains "collector health 仅绑定宿主回环" '127.0.0.1:13133:13133' "$RELEASE_MONITORING_COMPOSE"
-contains "healthcheck 从 collector 外部探测" 'curl -fsS http://127.0.0.1:13133/' "$RELEASE_HEALTHCHECK"
+contains "healthcheck 从 collector 外部探测" 'curl -fsS --max-time 3 http://127.0.0.1:13133/' "$RELEASE_HEALTHCHECK"
 contains "healthcheck 覆盖 NATS exporter" 'nats-exporter' "$RELEASE_HEALTHCHECK"
 contains "healthcheck 覆盖 nginx exporter" 'nginx-exporter' "$RELEASE_HEALTHCHECK"
 contains "healthcheck 覆盖 node exporter" 'node-exporter' "$RELEASE_HEALTHCHECK"
