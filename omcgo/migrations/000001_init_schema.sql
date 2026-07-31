@@ -19555,9 +19555,9 @@ CREATE INDEX IF NOT EXISTS idx_device_tasks_open_method_description
     ON public.device_tasks (device_sn, method, description, created_at DESC)
     WHERE status IN ('pending', 'sent');
 
-CREATE INDEX IF NOT EXISTS idx_device_tasks_pm_setup_completed_lookup
+CREATE INDEX IF NOT EXISTS idx_device_tasks_completed_command_lookup
     ON public.device_tasks (device_sn, command_key, completed_at DESC, created_at DESC)
-    WHERE status = 'completed' AND command_key = 'pm_upload_setup_on_online';
+    WHERE status = 'completed';
 
 CREATE INDEX IF NOT EXISTS idx_device_tasks_active_created_id
     ON public.device_tasks (created_at, id)

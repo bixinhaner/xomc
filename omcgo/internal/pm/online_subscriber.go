@@ -36,9 +36,8 @@ var _ = device.DeviceOnlineEvent{}
 // 节流：device.online 事件在 provision 模块已有 60s Redis token bucket 防抖，
 // 本订阅器不重复实现（多 worker 实例共享节流由 QueueSubscribe 配合 token bucket 完成）。
 //
-// 失败处理：失败仅 log warn，不进重试 / 不写消息中心（PM 配置下发是后台系统行为，
-// 系统级任务无 user_id，与 task_subscriber.go §upsertFromTask CreatorID 跳过规则一致）。
-// 下次设备 offline→online 自然重发。
+// 失败处理：临时 Redis / PostgreSQL / 入队失败返回 error，由 EventBus 受控重投；
+// payload 或 URL 配置永久错误仅记录告警。系统级任务无 user_id，不写消息中心。
 type OnlineSubscriber struct {
 	taskSvc     TaskCreator
 	urlTemplate string
@@ -77,6 +76,7 @@ type TaskCreator interface {
 // instances while one handler checks durable state and creates a task.
 type PMSetupAdmissionGate interface {
 	Acquire(ctx context.Context, deviceSN string) (leaseToken string, acquired bool, err error)
+	Renew(ctx context.Context, deviceSN, leaseToken string) (renewed bool, err error)
 	Release(ctx context.Context, deviceSN, leaseToken string) error
 }
 
@@ -85,9 +85,20 @@ type redisPMSetupAdmissionGate struct {
 	ttl    time.Duration
 }
 
+type admissionRenewalIntervalProvider interface {
+	RenewalInterval() time.Duration
+}
+
 var releasePMSetupAdmissionScript = redis.NewScript(`
 if redis.call("GET", KEYS[1]) == ARGV[1] then
 	return redis.call("DEL", KEYS[1])
+end
+return 0
+`)
+
+var renewPMSetupAdmissionScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+	return redis.call("PEXPIRE", KEYS[1], ARGV[2])
 end
 return 0
 `)
@@ -143,6 +154,30 @@ func (g *redisPMSetupAdmissionGate) Release(
 		return fmt.Errorf("release PM setup admission: %w", err)
 	}
 	return nil
+}
+
+func (g *redisPMSetupAdmissionGate) Renew(
+	ctx context.Context,
+	deviceSN, leaseToken string,
+) (bool, error) {
+	if leaseToken == "" {
+		return false, nil
+	}
+	result, err := renewPMSetupAdmissionScript.Run(
+		ctx,
+		g.client,
+		[]string{redisx.Keys.PMUploadSetupAdmission(deviceSN)},
+		leaseToken,
+		g.ttl.Milliseconds(),
+	).Int64()
+	if err != nil {
+		return false, fmt.Errorf("renew PM setup admission: %w", err)
+	}
+	return result == 1, nil
+}
+
+func (g *redisPMSetupAdmissionGate) RenewalInterval() time.Duration {
+	return g.ttl / 3
 }
 
 // NewOnlineSubscriber 构造订阅器。urlTemplate 支持 ${VAR} 与 ${VAR:-default} 插值。
@@ -265,6 +300,7 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 	}
 
 	var leaseToken string
+	var stopRenewal context.CancelFunc
 	if s.admissionGate != nil {
 		var acquired bool
 		var gateErr error
@@ -272,13 +308,19 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 		if gateErr != nil {
 			s.logger.Warn("acquire PM upload setup admission failed",
 				zap.String("device_sn", serialNumber), zap.Error(gateErr))
-			return nil
+			return fmt.Errorf("acquire PM upload setup admission: %w", gateErr)
 		}
 		if !acquired {
 			s.logger.Debug("skip coalesced PM upload setup event",
 				zap.String("device_sn", serialNumber))
-			return nil
+			return fmt.Errorf("PM upload setup admission busy for %s", serialNumber)
 		}
+		var renewalCtx context.Context
+		renewalCtx, stopRenewal = context.WithCancel(context.WithoutCancel(ctx))
+		go s.renewAdmission(renewalCtx, serialNumber, leaseToken)
+	}
+	if stopRenewal != nil {
+		defer stopRenewal()
 	}
 	releaseAdmission := func() {
 		if s.admissionGate == nil {
@@ -307,30 +349,58 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 		releaseAdmission()
 		s.logger.Warn("query open PM upload setup task failed",
 			zap.String("device_sn", serialNumber), zap.Error(err))
-		return nil
+		return fmt.Errorf("query open PM upload setup task: %w", err)
 	}
-	if open != nil {
+	if open != nil && jsonSemanticallyEqual(open.Params, paramsJSON) {
 		s.logger.Debug("skip duplicate open PM upload setup task",
 			zap.String("device_sn", serialNumber),
 			zap.String("task_id", open.ID))
 		return nil
 	}
 
-	if !newRegistration {
-		completed, lookupErr := s.taskSvc.LatestCompletedTaskByDeviceAndCommandKey(
+	commandKey := pmSetupCommandKey
+	if deviceID != "" {
+		commandKey += ":" + deviceID
+	}
+	completed, lookupErr := s.taskSvc.LatestCompletedTaskByDeviceAndCommandKey(
+		ctx, serialNumber, commandKey,
+	)
+	if lookupErr != nil {
+		releaseAdmission()
+		s.logger.Warn("query completed PM upload setup task failed",
+			zap.String("device_sn", serialNumber), zap.Error(lookupErr))
+		return fmt.Errorf("query completed PM upload setup task: %w", lookupErr)
+	}
+	// Before device-scoped command keys were introduced, reconnect tasks used
+	// the shared legacy key. Existing devices may trust that durable state;
+	// a genuinely new registration must not, because the serial number may
+	// have been reused for a different device identity.
+	if completed == nil && !newRegistration && commandKey != pmSetupCommandKey {
+		completed, lookupErr = s.taskSvc.LatestCompletedTaskByDeviceAndCommandKey(
 			ctx, serialNumber, pmSetupCommandKey,
 		)
 		if lookupErr != nil {
 			releaseAdmission()
 			s.logger.Warn("query completed PM upload setup task failed",
 				zap.String("device_sn", serialNumber), zap.Error(lookupErr))
-			return nil
+			return fmt.Errorf("query legacy completed PM upload setup task: %w", lookupErr)
 		}
-		if completed != nil && jsonSemanticallyEqual(completed.Params, paramsJSON) {
-			s.logger.Debug("skip already applied PM upload setup",
-				zap.String("device_sn", serialNumber),
-				zap.String("task_id", completed.ID))
-			return nil
+	}
+	if completed != nil && jsonSemanticallyEqual(completed.Params, paramsJSON) {
+		s.logger.Debug("skip already applied PM upload setup",
+			zap.String("device_sn", serialNumber),
+			zap.String("task_id", completed.ID))
+		return nil
+	}
+
+	if s.admissionGate != nil {
+		renewed, renewErr := s.admissionGate.Renew(ctx, serialNumber, leaseToken)
+		if renewErr != nil || !renewed {
+			releaseAdmission()
+			if renewErr != nil {
+				return fmt.Errorf("renew PM upload setup admission before create: %w", renewErr)
+			}
+			return fmt.Errorf("PM upload setup admission lost before create for %s", serialNumber)
 		}
 	}
 
@@ -343,7 +413,7 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 		Source:               task.TaskSourceSystem,
 		CreatorID:            "", // 系统任务，不进消息中心
 		Description:          "Auto-setup PM file upload on device onboard/online",
-		CommandKey:           pmSetupCommandKey,
+		CommandKey:           commandKey,
 		ExpiresIn:            3600, // 1 小时不下发则视为过期（避免设备长时间离线后积压）
 		MaxRetries:           &maxRetries,
 		RetryIntervalSeconds: automatedPMTaskRetryIntervalSeconds,
@@ -352,12 +422,12 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 	tsk, err := s.taskSvc.CreateTask(ctx, req)
 	if err != nil {
 		releaseAdmission()
-		// 失败 log only，下次设备 onboard/online 时自动重发
+		// 返回 error 交给 EventBus 受控重投，不能 ACK 后等待下一次上下线。
 		s.logger.Warn("enqueue PM upload SPV task failed",
 			zap.String("device_sn", serialNumber),
 			zap.String("device_id", deviceID),
 			zap.Error(err))
-		return nil
+		return fmt.Errorf("enqueue PM upload SPV task: %w", err)
 	}
 
 	s.logger.Info("PM upload SPV task enqueued",
@@ -367,6 +437,39 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 		zap.String("enable", s.enableValue),
 		zap.Int("interval", s.intervalSec))
 	return nil
+}
+
+func (s *OnlineSubscriber) renewAdmission(
+	ctx context.Context,
+	serialNumber, leaseToken string,
+) {
+	interval := pmSetupAdmissionTTL / 3
+	if provider, ok := s.admissionGate.(admissionRenewalIntervalProvider); ok {
+		if configured := provider.RenewalInterval(); configured > 0 {
+			interval = configured
+		}
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			renewCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			renewed, err := s.admissionGate.Renew(
+				renewCtx, serialNumber, leaseToken,
+			)
+			cancel()
+			if err != nil || !renewed {
+				s.logger.Warn("renew PM upload setup admission failed",
+					zap.String("device_sn", serialNumber),
+					zap.Bool("renewed", renewed),
+					zap.Error(err))
+				return
+			}
+		}
+	}
 }
 
 func jsonSemanticallyEqual(left, right json.RawMessage) bool {

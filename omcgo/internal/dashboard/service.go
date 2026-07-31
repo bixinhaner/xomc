@@ -1626,7 +1626,24 @@ func (s *Service) fetchNetworkKCodeSeries(
 	}
 	requested := kcodes
 	if !observeMissing {
-		requested = nil
+		// Snapshot queries append an in-progress value for the current natural
+		// day/week. The absence of that one final row is expected, but closed
+		// periods in the same range still need missing-result monitoring.
+		cutoff := currentNaturalPeriodStart(granularity, time.Now().UTC())
+		if !startTime.Before(cutoff) {
+			requested = nil
+		} else {
+			closedRows := make([]NetworkRollupPoint, 0, len(rows))
+			for _, row := range rows {
+				if row.WindowStart.Before(cutoff) {
+					closedRows = append(closedRows, row)
+				}
+			}
+			s.observeNetworkMissing(
+				closedRows, requested, technology, granularity,
+			)
+			requested = nil
+		}
 	}
 	s.observeNetworkRollups(rows, requested, technology, granularity, time.Now())
 
@@ -1640,6 +1657,47 @@ func (s *Service) fetchNetworkKCodeSeries(
 		})
 	}
 	return sortAndDedupeNetworkSeriesPoints(points), nil
+}
+
+func (s *Service) observeNetworkMissing(
+	points []NetworkRollupPoint,
+	requested []string,
+	technology model.Technology,
+	granularity metrics.Granularity,
+) {
+	if s.metrics == nil || technology == "" || len(requested) == 0 {
+		return
+	}
+	present := make(map[string]struct{})
+	for _, point := range points {
+		if point.Technology == technology {
+			present[point.MetricPath] = struct{}{}
+		}
+	}
+	missing := 0
+	for _, path := range normalizeMetricPaths(requested) {
+		if _, ok := present[path]; !ok {
+			missing++
+		}
+	}
+	s.metrics.ObserveMissing(
+		string(technology), string(granularity), float64(missing),
+	)
+}
+
+func currentNaturalPeriodStart(
+	granularity metrics.Granularity,
+	now time.Time,
+) time.Time {
+	now = now.UTC()
+	dayStart := time.Date(
+		now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC,
+	)
+	if granularity != metrics.GranularityWeekly {
+		return dayStart
+	}
+	daysSinceMonday := (int(dayStart.Weekday()) + 6) % 7
+	return dayStart.AddDate(0, 0, -daysSinceMonday)
 }
 
 func sortAndDedupeNetworkSeriesPoints(points []networkSeriesPoint) []networkSeriesPoint {
