@@ -203,10 +203,10 @@ COMP_FLOOR=(512 512 768 1024 1024 5120 384 512 192)
 COMP_CEIL=(1536 2048 2560 6144 8192 8192 1024 2048 512)
 COMP_WEIGHT=(8 12 20 14 22 8 6 6 0)
 
-# 监控栈（固定块，不纵向伸缩）：prometheus1024+grafana512+loki512+tempo512+otelcol512
-#   +alertmgr512+exporters(128*3)+cadvisor256 ≈ 4224 MiB。dev 本地默认不起，故默认不计入。
+# 监控栈（固定块，不纵向伸缩）：prometheus1024+grafana512+loki512+tempo1024+otelcol512
+#   +alertmgr512+exporters(128*3)+cadvisor256 ≈ 4736 MiB。dev 本地默认不起，故默认不计入。
 MON_FIXED_MIB=0
-[ "$WITH_MONITORING" = 1 ] && MON_FIXED_MIB=4224
+[ "$WITH_MONITORING" = 1 ] && MON_FIXED_MIB=4736
 
 FLOOR_SUM=0; for f in "${COMP_FLOOR[@]}"; do FLOOR_SUM=$(( FLOOR_SUM + f )); done
 
