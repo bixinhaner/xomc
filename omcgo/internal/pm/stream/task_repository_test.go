@@ -54,6 +54,18 @@ func TestBuildPurgeObsoleteBuiltinDeviceTasksSQLTargetsOnlyLegacyIDs(t *testing.
 	}, args)
 }
 
+func TestBuildLoadMatchableRevisionSQLIncludesDeletedTasks(t *testing.T) {
+	query, args, err := buildLoadMatchableRevisionSQL()
+
+	require.NoError(t, err)
+	require.Equal(
+		t,
+		"SELECT COUNT(*), COALESCE(MAX(updated_at), to_timestamp(0)) FROM pm_aggregation_tasks",
+		query,
+	)
+	require.Empty(t, args)
+}
+
 func TestTaskMemberBatchesStayBelowPostgresParameterLimit(t *testing.T) {
 	members := make([]TaskMember, 2501)
 

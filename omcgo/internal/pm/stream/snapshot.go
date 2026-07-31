@@ -78,7 +78,7 @@ func (s *SnapshotStore) Refresh(ctx context.Context) error {
 		return fmt.Errorf("load PM aggregation task revision: %w", err)
 	}
 	now := s.now()
-	if s.initialized && revision == s.revision {
+	if s.initialized && sameMatchableRevision(revision, s.revision) {
 		if s.nextBoundary.IsZero() || now.Before(s.nextBoundary) {
 			return nil
 		}
@@ -86,6 +86,10 @@ func (s *SnapshotStore) Refresh(ctx context.Context) error {
 		return nil
 	}
 	return s.reloadLocked(ctx, &revision)
+}
+
+func sameMatchableRevision(left, right MatchableRevision) bool {
+	return left.TaskCount == right.TaskCount && left.UpdatedAt.Equal(right.UpdatedAt)
 }
 
 func (s *SnapshotStore) reloadLocked(
