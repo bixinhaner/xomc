@@ -391,6 +391,55 @@ func TestBuiltinMLQ_IncludesIndependentPLMNList(t *testing.T) {
 	assert.Equal(t, "PLMNID", plmnGroup.Params[0].Leaf)
 }
 
+func TestBuiltinBLN_QuickSettingsReferenceParamModel(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "BLN.xml"))
+	require.NoError(t, err)
+
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+	assert.Equal(t, "BLN", doc.ParamModel)
+
+	groupIDs := make([]string, 0, len(doc.Groups))
+	for _, group := range doc.Groups {
+		groupIDs = append(groupIDs, group.ID)
+	}
+	assert.Equal(t, []string{"enb-cell", "enb-plmn", "device-ipsec", "enb-neighbor-freq", "enb-neighbor-cell"}, groupIDs)
+
+	paramModelData, err := os.ReadFile(filepath.Join("..", "..", "data", "param-mappings", "BLN.xml"))
+	require.NoError(t, err)
+
+	var paramModel struct {
+		Objects []struct {
+			StandardPath string `xml:"standardPath,attr"`
+		} `xml:"objects>object"`
+		Params []struct {
+			StandardPath string `xml:"standardPath,attr"`
+		} `xml:"parameters>param"`
+	}
+	require.NoError(t, xml.Unmarshal(paramModelData, &paramModel))
+
+	standardPaths := make(map[string]struct{}, len(paramModel.Objects)+len(paramModel.Params))
+	for _, object := range paramModel.Objects {
+		standardPaths[object.StandardPath] = struct{}{}
+	}
+	for _, param := range paramModel.Params {
+		standardPaths[param.StandardPath] = struct{}{}
+	}
+
+	checked := 0
+	for _, group := range doc.Groups {
+		for _, param := range group.Params {
+			standardPath := param.StandardPath
+			if standardPath == "" {
+				standardPath = group.ObjectPath + param.Leaf
+			}
+			checked++
+			assert.Containsf(t, standardPaths, standardPath, "quicksettings group %s param %s must reference BLN param model", group.ID, param.Name)
+		}
+	}
+	assert.Equal(t, 54, checked)
+}
+
 func TestBuiltinLTENeighborCellIncludesRequiredTACAndNumericConstraints(t *testing.T) {
 	for _, model := range []string{"BM", "BLQ", "MLN", "MLQ", "ENB_DEFAULT_181"} {
 		t.Run(model, func(t *testing.T) {

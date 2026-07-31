@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<products totalProducts="15" totalPatterns="52" generatedAt="2026-05-06">
+<products totalProducts="16" totalPatterns="60" generatedAt="2026-07-31">
   <!-- ============ 1. BLQ 产品 ============ -->
   <product name="BLQ" vendor="Baicells" tech="4G" radioModes="SC">
     <description>Baicells BLQ</description>
@@ -77,7 +77,26 @@
       <pattern globalOrder="7">^FAP/BU1810$</pattern>
     </patterns>
   </product>
-  <!-- ============ 7. BSC 产品 ============ -->
+  <!-- ============ 7. BLN 产品 ============ -->
+  <product name="BLN" vendor="Baicells" tech="4G" radioModes="SC,CA,DC,TC">
+    <description>Baicells BLN; supports SC/CA/DC/TC radio modes</description>
+    <paramModel>BLN</paramModel>
+    <enableFileType11>true</enableFileType11>
+    <deviceAttrsOverride access="false" min_value="false" max_value="false" change_applies="false" data_type="false" />
+    <indicator deviceType="enb" platform="BLN" />
+    <alarm neType="ENB" />
+    <patterns>
+      <pattern globalOrder="53">^FAP/\w+CRB\w+/SC$</pattern>
+      <pattern globalOrder="54">^FAP/\w+CRB\w+/CA$</pattern>
+      <pattern globalOrder="55">^FAP/\w+CRB\w+/DC$</pattern>
+      <pattern globalOrder="56">^FAP/\w+CRB\w+/TC$</pattern>
+      <pattern globalOrder="57">^FAP/CR-B4860/SC$</pattern>
+      <pattern globalOrder="58">^FAP/CR-B4860/CA$</pattern>
+      <pattern globalOrder="59">^FAP/CR-B4860/DC$</pattern>
+      <pattern globalOrder="60">^FAP/CR-B4860/TC$</pattern>
+    </patterns>
+  </product>
+  <!-- ============ 8. BSC 产品 ============ -->
   <product name="BSC" vendor="Baicells" tech="2G" radioModes="">
     <description>Baicells BSC</description>
     <paramModel>BSC</paramModel>
@@ -89,7 +108,7 @@
       <pattern globalOrder="8">^FAP/PGSM$</pattern>
     </patterns>
   </product>
-  <!-- ============ 8. BTS 产品 ============ -->
+  <!-- ============ 9. BTS 产品 ============ -->
   <product name="BTS" vendor="Baicells" tech="2G" radioModes="">
     <description>Baicells BTS; 2G base station; KPIs are reported by BSC</description>
     <paramModel>BTS</paramModel>
@@ -101,7 +120,7 @@
       <pattern globalOrder="9">^FAP/BTS$</pattern>
     </patterns>
   </product>
-  <!-- ============ 9. BNQ 产品 ============ -->
+  <!-- ============ 10. BNQ 产品 ============ -->
   <product name="BNQ" vendor="Baicells" tech="5G" radioModes="">
     <description>Baicells BNQ; 5G NR base station; TR-069 parameters and KPI formulas use BaiBNQ</description>
     <paramModel>BaiBNQ</paramModel>
@@ -136,7 +155,7 @@
       <pattern globalOrder="52">FAP/xBU211300</pattern>
     </patterns>
   </product>
-  <!-- ============ 10. CICT SC3400(L1821) 产品 ============ -->
+  <!-- ============ 11. CICT SC3400(L1821) 产品 ============ -->
   <product name="CICT SC3400(L1821)" vendor="CICT" tech="4G" radioModes="">
     <description>CICT SC3400(L1821)</description>
     <paramModel>ENB_DEFAULT_181</paramModel>
@@ -148,7 +167,7 @@
       <pattern globalOrder="15">SC3400(L1821)</pattern>
     </patterns>
   </product>
-  <!-- ============ 11. 大唐 fBS3251 系列 ============ -->
+  <!-- ============ 12. 大唐 fBS3251 系列 ============ -->
   <product name="Datang fBS3251 Series" vendor="Datang" tech="4G" radioModes="">
     <description>Datang fBS3251; includes 2 model variants</description>
     <paramModel>ENB_DEFAULT_181</paramModel>
@@ -161,7 +180,7 @@
       <pattern globalOrder="23">fBS3251-Q01</pattern>
     </patterns>
   </product>
-  <!-- ============ 12. 第三方 FDD-LTE-Enterprise ============ -->
+  <!-- ============ 13. 第三方 FDD-LTE-Enterprise ============ -->
   <product name="Third-party FDD-LTE-Enterprise" vendor="Third-party" tech="4G" radioModes="">
     <description>Third-party FDD-LTE-Enterprise</description>
     <paramModel>ENB_DEFAULT_098</paramModel>
@@ -173,7 +192,7 @@
       <pattern globalOrder="16">FDD-LTE-Enterprise</pattern>
     </patterns>
   </product>
-  <!-- ============ 13. 华为 TCELL 系列 ============ -->
+  <!-- ============ 14. Huawei TCELL Series 产品 ============ -->
   <product name="Huawei TCELL Series" vendor="Huawei" tech="4G" radioModes="">
     <description>Huawei TCELL; includes 6 model variants</description>
     <paramModel>ENB_DEFAULT_098</paramModel>
@@ -190,7 +209,7 @@
       <pattern globalOrder="22">HM-TCELL-2100</pattern>
     </patterns>
   </product>
-  <!-- ============ 14. 京信 LTE-FDD_N 系列 ============ -->
+  <!-- ============ 15. Comba LTE-FDD_N Series 产品 ============ -->
   <product name="Comba LTE-FDD_N Series" vendor="Comba" tech="4G" radioModes="">
     <description>Comba LTE-FDD_N; includes 4 model variants</description>
     <paramModel>ENB_DEFAULT_098</paramModel>
@@ -205,7 +224,7 @@
       <pattern globalOrder="28">LTE-FDD_N4</pattern>
     </patterns>
   </product>
-  <!-- ============ 15. 京信 femto_au 产品 ============ -->
+  <!-- ============ 16. Comba femto_au 产品 ============ -->
   <product name="Comba femto_au" vendor="Comba" tech="4G" radioModes="">
     <description>Comba femto_au</description>
     <paramModel>ENB_DEFAULT_098</paramModel>
