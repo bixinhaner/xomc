@@ -541,3 +541,28 @@ func TestLowerProgressCoverageIncludesWindowWithoutMetricRows(t *testing.T) {
 		t.Fatal("zero-coverage window without metrics must become task-level minimum")
 	}
 }
+
+func TestCurrentMetricVersionIntervalsUseCatalogVersionNotRollupLineage(t *testing.T) {
+	taskID := uuid.New()
+	lineageStart := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	currentStart := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	version := &TaskVersionSnapshot{
+		TaskID: taskID, VersionID: uuid.New(), VersionNo: 2, Enabled: true,
+		EffectiveFrom: currentStart, LineageEffectiveFrom: lineageStart,
+		Metrics: map[string]MetricRule{
+			"K1": {MetricID: "K1", MetricPath: "K1", MetricType: "kpi"},
+		},
+	}
+
+	intervals := currentMetricVersionIntervals(
+		[]*TaskVersionSnapshot{version}, taskID, currentStart.Add(time.Hour),
+	)
+
+	if len(intervals) != 1 {
+		t.Fatalf("expected one current metric interval, got %d", len(intervals))
+	}
+	if intervals[0].MetricPath != "K1" ||
+		!intervals[0].EffectiveFrom.Equal(currentStart) {
+		t.Fatalf("unexpected catalog metric interval: %+v", intervals[0])
+	}
+}

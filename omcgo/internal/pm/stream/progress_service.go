@@ -63,9 +63,16 @@ type PeriodProgress struct {
 	State                string      `json:"state"`
 }
 
+type MetricVersionInterval struct {
+	MetricPath    string     `json:"metric_path"`
+	EffectiveFrom time.Time  `json:"effective_from"`
+	EffectiveTo   *time.Time `json:"effective_to"`
+}
+
 type ProgressQueryResult struct {
-	Rows    []ProgressResult
-	Periods []PeriodProgress
+	Rows            []ProgressResult
+	Periods         []PeriodProgress
+	MetricIntervals []MetricVersionInterval
 }
 
 type ProgressService struct {
@@ -121,10 +128,12 @@ func (s *ProgressService) Query(
 	queryCtx, cancel := context.WithTimeout(ctx, progressQueryTimeout)
 	defer cancel()
 	ctx = queryCtx
-	versions, err := s.loader.LoadMatchable(ctx, time.Now().UTC())
+	now := time.Now().UTC()
+	versions, err := s.loader.LoadMatchable(ctx, now)
 	if err != nil {
 		return ProgressQueryResult{}, fmt.Errorf("load PM aggregation versions for progress: %w", err)
 	}
+	metricIntervals := currentMetricVersionIntervals(versions, taskID, now)
 	snapshot := BuildTaskSnapshot(versions)
 	builder := storage.Psql.Select(
 		"task_id", "task_version_id", "entity_key", "granularity",
@@ -198,7 +207,48 @@ func (s *ProgressService) Query(
 			location = configured
 		}
 	}
-	return buildProgressQueryResult(activeCandidates, states, snapshot, location)
+	result, err := buildProgressQueryResult(
+		activeCandidates, states, snapshot, location,
+	)
+	if err != nil {
+		return ProgressQueryResult{}, err
+	}
+	result.MetricIntervals = metricIntervals
+	return result, nil
+}
+
+func currentMetricVersionIntervals(
+	versions []*TaskVersionSnapshot,
+	taskID uuid.UUID,
+	at time.Time,
+) []MetricVersionInterval {
+	var current *TaskVersionSnapshot
+	for _, version := range versions {
+		if version == nil || version.TaskID != taskID || !version.Enabled ||
+			version.EffectiveFrom.After(at) ||
+			(version.EffectiveTo != nil && !at.Before(*version.EffectiveTo)) {
+			continue
+		}
+		if current == nil || version.VersionNo > current.VersionNo ||
+			(version.VersionNo == current.VersionNo &&
+				version.EffectiveFrom.After(current.EffectiveFrom)) {
+			current = version
+		}
+	}
+	if current == nil {
+		return nil
+	}
+	out := make([]MetricVersionInterval, 0, len(current.Metrics))
+	for metricPath := range current.Metrics {
+		out = append(out, MetricVersionInterval{
+			MetricPath: metricPath, EffectiveFrom: current.EffectiveFrom,
+			EffectiveTo: current.EffectiveTo,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].MetricPath < out[j].MetricPath
+	})
+	return out
 }
 
 func (s *ProgressService) revalidateOpenDailyCandidates(
