@@ -169,6 +169,12 @@ const (
 	// 订阅者：pm.Collector（解析 XML、入库计数器、计算 KPI）
 	SubjectPMFileReceived = "pm.file.received"
 
+	// SubjectPMFileDeferred 隔离“文件已到、设备注册尚未可见”的 PM 事件。
+	// 主 pm-workers consumer 在持久化接力成功后立即 ACK，避免注册竞态事件占满
+	// MaxAckPending 并阻塞已注册设备；pm-registration-wait consumer 保留原事件
+	// Timestamp，继续执行注册宽限期重投和最终 DLQ。
+	SubjectPMFileDeferred = "pm.file.deferred"
+
 	// SubjectPMFileParsed 是 PM XML 解析完成后发布。
 	// 发布者：pm.Collector，订阅者：暂无（可用于选择性后续处理）
 	SubjectPMFileParsed = "pm.file.parsed"

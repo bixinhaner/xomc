@@ -579,6 +579,26 @@ func TestPgRepo_MarkSentIfPendingRejectsExpiredTask(t *testing.T) {
 	assert.Nil(t, got.SentAt)
 }
 
+func TestPgRepo_ListActiveTasksAfterBuildsStableKeysetQuery(t *testing.T) {
+	olderThan := time.Date(2026, 7, 31, 2, 0, 0, 0, time.UTC)
+	after := &ActiveTaskCursor{
+		CreatedAt: time.Date(2026, 7, 31, 1, 0, 0, 0, time.UTC),
+		ID:        "00000000-0000-4000-8000-000000000123",
+	}
+
+	query, args, err := buildListActiveTasksSQL(olderThan, after, 100)
+	require.NoError(t, err)
+
+	assert.Contains(t, query, "status IN")
+	assert.Contains(t, query, "created_at <")
+	assert.Contains(t, query, "(created_at, id) >")
+	assert.Contains(t, query, "ORDER BY created_at ASC, id ASC")
+	assert.Contains(t, query, "LIMIT 100")
+	require.Contains(t, args, olderThan)
+	require.Contains(t, args, after.CreatedAt)
+	require.Contains(t, args, after.ID)
+}
+
 func TestPgRepo_ListExpiredCandidatesProtectsFreshInFlightTask(t *testing.T) {
 	pool := newTestPool(t)
 	if pool == nil {

@@ -145,11 +145,12 @@ func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 		defer ticker.Stop()
 		for range ticker.C {
 			now := time.Now()
+			h.reapLocalActiveSessions(now, maxAge)
 			h.connSessions.Range(func(key, value interface{}) bool {
 				entry := value.(connSessionEntry)
 				if now.Sub(entry.CreatedAt) > maxAge {
 					h.connSessions.Delete(key)
-					h.metrics.ActiveSessions.Dec()
+					h.untrackActiveSession(key.(string))
 					h.metrics.SessionDuration.Observe(now.Sub(entry.CreatedAt).Seconds())
 					h.logger.Warn("reaped stale conn session",
 						zap.String("device_sn", entry.DeviceSN),
@@ -160,6 +161,32 @@ func (h *Handler) startSessionReaper(interval, maxAge time.Duration) {
 			})
 		}
 	}()
+}
+
+func (h *Handler) startGlobalAdmissionMetrics(interval time.Duration) {
+	if h == nil || h.admission == nil || h.metrics == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	h.refreshGlobalActiveSessions(context.Background())
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			ctx, cancel := context.WithTimeout(context.Background(), interval)
+			h.refreshGlobalActiveSessions(ctx)
+			cancel()
+		}
+	}()
+}
+
+func (h *Handler) refreshGlobalActiveSessions(ctx context.Context) {
+	if h == nil || h.admission == nil || h.metrics == nil {
+		return
+	}
+	h.metrics.GlobalActiveSessions.Set(float64(h.admission.Current(ctx)))
 }
 
 // reapOrphanedSession 清理孤儿设备会话（跨实例）：从共享 SessionStore 加载会话，
@@ -1097,12 +1124,35 @@ func (h *Handler) completeSession(ctx context.Context, session *Session) {
 }
 
 func (h *Handler) trackActiveSession(sessionID string) {
+	h.trackActiveSessionAt(sessionID, time.Now())
+}
+
+func (h *Handler) trackActiveSessionAt(sessionID string, trackedAt time.Time) {
 	if h == nil || h.metrics == nil || sessionID == "" {
 		return
 	}
-	if _, loaded := h.localActiveSessions.LoadOrStore(sessionID, struct{}{}); !loaded {
+	if _, loaded := h.localActiveSessions.LoadOrStore(sessionID, trackedAt); !loaded {
 		h.metrics.ActiveSessions.Inc()
 	}
+}
+
+// reapLocalActiveSessions bounds the process-local tracking set. A session can
+// be completed by the other ACS instance through the shared Redis store; that
+// instance cannot delete this process's sync.Map entry or decrement its gauge.
+// The shared session/admission TTL is maxAge, so entries older than it are no
+// longer active even when cross-instance cleanup prevented a local callback.
+func (h *Handler) reapLocalActiveSessions(now time.Time, maxAge time.Duration) {
+	if h == nil || maxAge <= 0 {
+		return
+	}
+	h.localActiveSessions.Range(func(key, value any) bool {
+		trackedAt, ok := value.(time.Time)
+		if !ok || now.Sub(trackedAt) > maxAge {
+			sessionID, _ := key.(string)
+			h.untrackActiveSession(sessionID)
+		}
+		return true
+	})
 }
 
 func (h *Handler) untrackActiveSession(sessionID string) {

@@ -56,9 +56,14 @@ func (r *GPVFaultRecoverer) Recover(ctx context.Context, original *task.Task, re
 	if err != nil {
 		return nil, fmt.Errorf("marshal parameter sync recovery paths: %w", err)
 	}
+	maxRetries := task.RetryBudgetCoveringExpiry(
+		parameterSyncTaskExpiresIn,
+		parameterSyncTaskRetryIntervalSeconds,
+	)
 	replacement := task.NewTask(&task.CreateTaskRequest{
 		DeviceSN: original.DeviceSN, Method: "GetParameterValues", Params: params,
 		Priority: original.Priority, ExpiresIn: parameterSyncTaskExpiresIn,
+		MaxRetries: &maxRetries, RetryIntervalSeconds: parameterSyncTaskRetryIntervalSeconds,
 		CommandKey: original.CommandKey + "-r", Source: task.TaskSourceParamSync,
 		SourceID: original.SourceID, CreatorID: original.CreatorID,
 		CommandIndex: original.CommandIndex, Description: original.Description,

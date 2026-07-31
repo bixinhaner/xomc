@@ -64,6 +64,29 @@ func TestBMNeighborListHasPrivateArfcnAlias(t *testing.T) {
 	t.Fatalf("expected BM.xml to define alias %s -> %s", privatePath, standardPath)
 }
 
+func TestBMNeighborListHasWritableX2Flag(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const path = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X2Flag"
+	for _, param := range doc.Params {
+		if param.Name == path {
+			assert.Equal(t, path, param.StandardPath)
+			assert.Equal(t, "READ_WRITE", param.Access)
+			assert.Equal(t, "U_INT", param.DataType)
+			assert.Equal(t, "0,1", param.EnumValues)
+			assert.Equal(t, "SON,Manual", param.EnumLabels)
+			return
+		}
+	}
+
+	t.Fatalf("expected BM.xml to define writable X2Flag mapping at %s", path)
+}
+
 func TestMLQPLMNListObjectIsWritable(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "MLQ.xml")
 	body, err := os.ReadFile(xmlPath)

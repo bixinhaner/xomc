@@ -64,6 +64,7 @@ func TestRunFreshInstallBootstrapsEmptyJetStream(t *testing.T) {
 	t.Cleanup(nc.Close)
 	js, err := nc.JetStream()
 	require.NoError(t, err)
+	resetJetStream(t, js)
 	_, err = js.StreamNameBySubject("command.get_parameters.response")
 	require.ErrorIs(t, err, nats.ErrNoMatchingStream)
 
@@ -86,4 +87,82 @@ provision:
 	consumer, err := js.ConsumerInfo(stream, "rpc-fresh-install")
 	require.NoError(t, err)
 	require.Equal(t, nats.DeliverNewPolicy, consumer.Config.DeliverPolicy)
+}
+
+func TestRunBootstrapIfMissingBootstrapsEmptyJetStream(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+	resetJetStream(t, js)
+
+	path := filepath.Join(t.TempDir(), "app.prod.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(`
+nats:
+  url: %s
+provision:
+  gpv_response:
+    rpc_durable: rpc-bootstrap-if-missing
+`, url)), 0o600))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, runWithOptions(ctx, path, "", false, true))
+
+	stream, err := js.StreamNameBySubject("command.get_parameters.response")
+	require.NoError(t, err)
+	consumer, err := js.ConsumerInfo(stream, "rpc-bootstrap-if-missing")
+	require.NoError(t, err)
+	require.Equal(t, nats.DeliverNewPolicy, consumer.Config.DeliverPolicy)
+}
+
+func TestRunBootstrapIfMissingDoesNotSkipExistingMessages(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+	resetJetStream(t, js)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name:      "COMMAND",
+		Subjects:  []string{"command.>"},
+		Retention: nats.LimitsPolicy,
+	})
+	require.NoError(t, err)
+	_, err = js.Publish("command.get_parameters.response", []byte("retained"))
+	require.NoError(t, err)
+
+	path := filepath.Join(t.TempDir(), "app.prod.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(`
+nats:
+  url: %s
+provision:
+  gpv_response:
+    rpc_durable: rpc-must-not-skip
+`, url)), 0o600))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = runWithOptions(ctx, path, "", false, true)
+	require.ErrorContains(t, err, "refusing DeliverNew")
+	_, consumerErr := js.ConsumerInfo("COMMAND", "rpc-must-not-skip")
+	require.ErrorIs(t, consumerErr, nats.ErrConsumerNotFound)
+}
+
+func resetJetStream(t *testing.T, js nats.JetStreamContext) {
+	t.Helper()
+	for name := range js.StreamNames() {
+		require.NoError(t, js.DeleteStream(name))
+	}
 }

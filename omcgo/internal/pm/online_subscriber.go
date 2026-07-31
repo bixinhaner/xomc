@@ -49,6 +49,7 @@ type OnlineSubscriber struct {
 // defaultPMUploadPathQuery 是 urlTemplate 不可解析时回退用的 PM 上传 path+query，
 // 与 config.*.yaml 的 pm.upload_url_template 末段保持一致。
 const defaultPMUploadPathQuery = "/smallcell/FileUploadService?fileType=PM&filename="
+const automatedPMTaskRetryIntervalSeconds = 30
 
 // TaskCreator 是 OnlineSubscriber 入队 SPV task 的最小依赖。
 // 真实实现是 *task.TaskService。
@@ -166,16 +167,19 @@ func (s *OnlineSubscriber) enqueuePMSetup(ctx context.Context, serialNumber, dev
 		return nil
 	}
 
+	maxRetries := task.RetryBudgetCoveringExpiry(3600, automatedPMTaskRetryIntervalSeconds)
 	req := &task.CreateTaskRequest{
-		DeviceSN:    serialNumber,
-		Method:      "SetParameterValues",
-		Params:      paramsJSON,
-		Priority:    20, // 低于业务关键命令（默认 10），但高于纯监控类
-		Source:      task.TaskSourceSystem,
-		CreatorID:   "", // 系统任务，不进消息中心
-		Description: "Auto-setup PM file upload on device onboard/online",
-		CommandKey:  "pm_upload_setup_on_online",
-		ExpiresIn:   3600, // 1 小时不下发则视为过期（避免设备长时间离线后积压）
+		DeviceSN:             serialNumber,
+		Method:               "SetParameterValues",
+		Params:               paramsJSON,
+		Priority:             20, // 低于业务关键命令（默认 10），但高于纯监控类
+		Source:               task.TaskSourceSystem,
+		CreatorID:            "", // 系统任务，不进消息中心
+		Description:          "Auto-setup PM file upload on device onboard/online",
+		CommandKey:           "pm_upload_setup_on_online",
+		ExpiresIn:            3600, // 1 小时不下发则视为过期（避免设备长时间离线后积压）
+		MaxRetries:           &maxRetries,
+		RetryIntervalSeconds: automatedPMTaskRetryIntervalSeconds,
 	}
 
 	tsk, err := s.taskSvc.CreateTask(ctx, req)

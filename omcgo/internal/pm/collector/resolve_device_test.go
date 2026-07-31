@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 )
@@ -87,18 +89,33 @@ func TestResolveDevice_emptySNErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "both device_id and device_sn empty")
 }
 
-func TestResolveDevice_deviceNotFoundErrors(t *testing.T) {
-	// 2026-07-21 产品决策：设备不在注册表就直接拒绝、不重试（不是竞态兜底）。
-	// 断言错误包装了 reliability.ErrPermanent，使 Runner/EventBus 立即终止而不是
-	// 重试 5 次后再丢弃。
+func TestResolveDevice_deviceNotFoundIsDeferred(t *testing.T) {
 	c := &PMCollector{logger: zap.NewNop(), deviceLookup: &fakeDeviceLookup{dev: nil}}
 	payload := &FileReceivedPayload{DeviceSN: "UnknownSN"}
 
 	err := c.resolveDevice(context.Background(), payload)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "device not found")
-	assert.True(t, errors.Is(err, reliability.ErrPermanent),
-		"device-not-found must be permanent so the runner/event bus stop retrying immediately")
+	assert.True(t, errors.Is(err, reliability.ErrDeferred),
+		"device-not-found must stay in durable redelivery during the registration window")
+	assert.False(t, errors.Is(err, reliability.ErrPermanent))
+}
+
+func TestHandleFileReceived_deviceNotFoundExpiresAfterRegistrationWindow(t *testing.T) {
+	c := &PMCollector{logger: zap.NewNop(), deviceLookup: &fakeDeviceLookup{dev: nil}}
+	payload := FileReceivedPayload{DeviceSN: "UnknownSN"}
+
+	fresh, err := event.NewEvent(event.SubjectPMFileReceived, payload)
+	require.NoError(t, err)
+	err = c.handleFileReceived(context.Background(), fresh)
+	require.ErrorIs(t, err, reliability.ErrDeferred)
+	assert.False(t, errors.Is(err, reliability.ErrPermanent))
+
+	expired := fresh
+	expired.Timestamp = time.Now().Add(-DeviceRegistrationGrace - time.Second)
+	err = c.handleFileReceived(context.Background(), expired)
+	require.ErrorIs(t, err, reliability.ErrPermanent)
+	assert.False(t, errors.Is(err, reliability.ErrDeferred))
 }
 
 func TestResolveDevice_lookupErrorPropagates(t *testing.T) {

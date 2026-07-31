@@ -66,6 +66,10 @@ func Test_OnlineSubscriber_EnqueuesSingleSPVWith3Params(t *testing.T) {
 	assert.Equal(t, task.TaskSourceSystem, req.Source)
 	assert.Equal(t, "", req.CreatorID, "system task should not have CreatorID (skip notification)")
 	assert.Equal(t, "pm_upload_setup_on_online", req.CommandKey)
+	require.NotNil(t, req.MaxRetries)
+	assert.Equal(t, req.ExpiresIn/req.RetryIntervalSeconds, *req.MaxRetries,
+		"自动 PM 配置任务的重试预算必须覆盖完整 TTL")
+	assert.Equal(t, 30, req.RetryIntervalSeconds)
 
 	var params spvParams
 	require.NoError(t, json.Unmarshal(req.Params, &params))

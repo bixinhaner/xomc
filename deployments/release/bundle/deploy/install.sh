@@ -82,6 +82,11 @@ if [ -f "$DEPLOY_DIR/resource-env-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/resource-env-lib.sh（完整资源规划契约库）" 1
 fi
+if [ -f "$DEPLOY_DIR/compose-env-lib.sh" ]; then
+  . "$DEPLOY_DIR/compose-env-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/compose-env-lib.sh（Compose 环境优先级加载库）" 1
+fi
 if [ -f "$DEPLOY_DIR/resource-plan-metrics.sh" ]; then
   . "$DEPLOY_DIR/resource-plan-metrics.sh"
 else
@@ -404,10 +409,6 @@ mkdir -p "$OMC_ROOT/releases" "$OMC_ROOT/etc" "$OMC_ROOT/packages" \
 # 必须在可能 mv/覆盖旧版本目录之前抓取 —— current 软链此刻仍指向上一版;首次部署无 current → 空。
 # 兼容 uninstall.sh：若 current 已被卸载移除,退而读卸载时保存的凭据 $OMC_ROOT/etc/.env.saved。
 PREV_ENV_SNAPSHOT=""
-FRESH_INSTALL=0
-if gpv_handoff_is_fresh_install "$OMC_ROOT"; then
-  FRESH_INSTALL=1
-fi
 if [ -f "$OMC_ROOT/current/deploy/.env" ]; then
   PREV_ENV_SNAPSHOT="$(mktemp)" || PREV_ENV_SNAPSHOT=""
   [ -n "$PREV_ENV_SNAPSHOT" ] && { cp "$OMC_ROOT/current/deploy/.env" "$PREV_ENV_SNAPSHOT" 2>/dev/null || PREV_ENV_SNAPSHOT=""; }
@@ -657,10 +658,14 @@ images_exist() {
 # =============================================================================
 sep "4/9 load 镜像"
 
-# 提前加载 .env 获取镜像名（IMAGE_* 变量），供 images_exist 判定使用
+# 提前加载 .env 获取镜像名（IMAGE_* 变量），供 images_exist 判定使用。
+# 必须随后按 --env-file 的相同顺序加载 resources.env：调用进程环境优先级高于
+# --env-file，若只 source .env，会导致 resources.env 的同名调优值永远不生效。
 ENV_FILE="$OMC_ROOT/current/deploy/.env"
-if [ -f "$ENV_FILE" ]; then
-  set -a; source "$ENV_FILE"; set +a
+RESOURCE_ENV_FILE="$OMC_ROOT/current/deploy/resources.env"
+deploy_env_load "$ENV_FILE" "$RESOURCE_ENV_FILE"
+if ! deploy_env_public_host_valid "${OMC_PUBLIC_HOST:-}"; then
+  die "OMC_PUBLIC_HOST 未配置为基站可达主机（当前: ${OMC_PUBLIC_HOST:-<空>}）；请在 deploy/.env 中配置后重试" 1
 fi
 # 必须在 source .env 之后应用：旧 .env 可能显式写了 tracer=true。
 # 同时把安装 profile 持久化，供后续独立运行的 svc/healthcheck 使用。
@@ -770,9 +775,6 @@ APP_RUNNING=0
 NATS_RUNNING=0
 [ -n "$APP_CID" ] && [ "$(docker inspect -f '{{.State.Running}}' "$APP_CID" 2>/dev/null || true)" = "true" ] && APP_RUNNING=1
 [ -n "$NATS_CID" ] && [ "$(docker inspect -f '{{.State.Running}}' "$NATS_CID" 2>/dev/null || true)" = "true" ] && NATS_RUNNING=1
-if [ -n "$APP_CID" ] || [ -n "$NATS_CID" ]; then
-  FRESH_INSTALL=0
-fi
 if [ "$APP_RUNNING" = 1 ] && [ "$NATS_RUNNING" != 1 ]; then
   die "旧 app 仍在运行但 NATS 不可用，无法读取 GPV consumer AckFloor；未停止旧 app" 2
 fi
@@ -831,10 +833,8 @@ fi
 log "基础设施已就绪 (PG / TSDB / Redis / NATS)"
 
 if [ "$HANDOFF_PREPARED" != 1 ]; then
-  log "首次部署/原 NATS 未运行：在 app 首次启动前创建 GPV RPC 固定 durable ..."
-  HANDOFF_ARGS=()
-  [ "$FRESH_INSTALL" = 1 ] && HANDOFF_ARGS+=(--fresh-install)
-  gpv_handoff_prepare "${HANDOFF_ARGS[@]}" ||
+  log "首次部署/原 NATS 未运行：按实际流状态安全初始化 GPV RPC 固定 durable ..."
+  gpv_handoff_prepare --bootstrap-if-missing ||
     die "GPV consumer handoff 失败；尚未启动 app，修复 NATS/consumer 配置后重试" 2
   HANDOFF_PREPARED=1
 fi
@@ -1045,16 +1045,23 @@ fi
 log "等待业务容器启动（最多 90s，健康检查每 5s 重试）..."
 HEALTHCHECK_TIMEOUT=90
 HEALTHCHECK_INTERVAL=5
-HEALTHCHECK_WAIT=0
 HEALTHCHECK_LOG="$(mktemp)"
 HEALTH_OK=0
-while [ "$HEALTHCHECK_WAIT" -lt "$HEALTHCHECK_TIMEOUT" ]; do
-  if bash "$OMC_ROOT/current/deploy/healthcheck.sh" >"$HEALTHCHECK_LOG" 2>&1; then
+HEALTHCHECK_DEADLINE=$(( $(date +%s) + HEALTHCHECK_TIMEOUT ))
+while :; do
+  HEALTHCHECK_REMAINING=$(( HEALTHCHECK_DEADLINE - $(date +%s) ))
+  [ "$HEALTHCHECK_REMAINING" -gt 0 ] || break
+  # healthcheck 本身包含多次 docker compose/inspect；高负载下单轮可能较慢。
+  # 用真实剩余秒数约束单轮，避免“每轮只累计 5 秒”把 90 秒放大成数分钟。
+  if timeout "${HEALTHCHECK_REMAINING}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" >"$HEALTHCHECK_LOG" 2>&1; then
     HEALTH_OK=1
     break
   fi
-  sleep "$HEALTHCHECK_INTERVAL"
-  HEALTHCHECK_WAIT=$((HEALTHCHECK_WAIT + HEALTHCHECK_INTERVAL))
+  HEALTHCHECK_REMAINING=$(( HEALTHCHECK_DEADLINE - $(date +%s) ))
+  [ "$HEALTHCHECK_REMAINING" -gt 0 ] || break
+  HEALTHCHECK_SLEEP="$HEALTHCHECK_INTERVAL"
+  [ "$HEALTHCHECK_REMAINING" -lt "$HEALTHCHECK_SLEEP" ] && HEALTHCHECK_SLEEP="$HEALTHCHECK_REMAINING"
+  sleep "$HEALTHCHECK_SLEEP"
 done
 
 # =============================================================================

@@ -1029,15 +1029,47 @@ func (r *PgTaskRepository) ListSentByDeviceBefore(ctx context.Context, deviceSN 
 // （CreateTask / MarkTaskCompleted 等的 PG sync 可能尚未落地），从而不误判正常时序差为分叉。
 // limit > 0 时限制单批数量防 worker 长查询；剩余项下一轮处理。
 func (r *PgTaskRepository) ListActiveTasks(ctx context.Context, olderThan time.Time, limit int) ([]*Task, error) {
+	return r.ListActiveTasksAfter(ctx, olderThan, nil, limit)
+}
+
+// ActiveTaskCursor 是活跃任务对账的稳定键集游标。created_at 可能相同，必须以 id
+// 作为第二排序键，避免跨轮重复或遗漏。
+type ActiveTaskCursor struct {
+	CreatedAt time.Time
+	ID        string
+}
+
+func buildListActiveTasksSQL(
+	olderThan time.Time,
+	after *ActiveTaskCursor,
+	limit int,
+) (string, []any, error) {
 	q := storage.Psql.Select(taskColumns()...).
 		From("device_tasks").
 		Where(sq.Eq{"status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
 		Where(sq.Lt{"created_at": olderThan}).
-		OrderBy("created_at ASC")
+		OrderBy("created_at ASC", "id ASC")
+	if after != nil {
+		q = q.Where(sq.Expr(
+			"(created_at, id) > (?, ?)",
+			after.CreatedAt,
+			after.ID,
+		))
+	}
 	if limit > 0 {
 		q = q.Limit(uint64(limit))
 	}
-	query, args, err := q.ToSql()
+	return q.ToSql()
+}
+
+// ListActiveTasksAfter 返回游标之后的一个有界活跃任务批次。
+func (r *PgTaskRepository) ListActiveTasksAfter(
+	ctx context.Context,
+	olderThan time.Time,
+	after *ActiveTaskCursor,
+	limit int,
+) ([]*Task, error) {
+	query, args, err := buildListActiveTasksSQL(olderThan, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("build list active query: %w", err)
 	}

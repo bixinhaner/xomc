@@ -340,6 +340,109 @@ func TestBuiltinMLQ_IncludesIndependentPLMNList(t *testing.T) {
 	assert.Equal(t, "PLMNID", plmnGroup.Params[0].Leaf)
 }
 
+func TestBuiltinLTENeighborCellIncludesRequiredTACAndNumericConstraints(t *testing.T) {
+	for _, model := range []string{"BM", "BLQ", "MLN", "MLQ", "ENB_DEFAULT_181"} {
+		t.Run(model, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", model+".xml"))
+			require.NoError(t, err)
+
+			var doc xmlQuickSettings
+			require.NoError(t, xml.Unmarshal(data, &doc))
+
+			var neighborGroup *xmlGroup
+			for i := range doc.Groups {
+				if doc.Groups[i].ID == "enb-neighbor-cell" {
+					neighborGroup = &doc.Groups[i]
+					break
+				}
+			}
+			require.NotNil(t, neighborGroup)
+
+			params := make(map[string]xmlParam, len(neighborGroup.Params))
+			for _, param := range neighborGroup.Params {
+				params[param.Name] = param
+			}
+
+			tac, ok := params["TAC"]
+			require.True(t, ok)
+			assert.Equal(t, "true", tac.Required)
+			assert.Equal(t, "unsignedInt", tac.Type)
+			assert.Equal(t, "0", tac.MinValue)
+			assert.Equal(t, "65535", tac.MaxValue)
+
+			for name, want := range map[string]struct {
+				typ string
+				min string
+				max string
+			}{
+				"EARFCN":  {typ: "unsignedInt", min: "0", max: "65535"},
+				"PCI":     {typ: "unsignedInt", min: "0", max: "503"},
+				"QOffset": {typ: "int", min: "-24", max: "24"},
+				"CIO":     {typ: "int", min: "-24", max: "24"},
+			} {
+				param, exists := params[name]
+				require.True(t, exists, "%s metadata missing", name)
+				assert.Equal(t, want.typ, param.Type, "%s type", name)
+				assert.Equal(t, want.min, param.MinValue, "%s minValue", name)
+				assert.Equal(t, want.max, param.MaxValue, "%s maxValue", name)
+			}
+
+			if model == "BLQ" {
+				cellID := params["CellID"]
+				assert.Equal(t, "true", cellID.Required)
+				assert.Equal(t, "unsignedInt", cellID.Type)
+				assert.Equal(t, "0", cellID.MinValue)
+				assert.Equal(t, "268435455", cellID.MaxValue)
+				assert.Equal(t, "true", params["PCI"].Required)
+				assert.Equal(t, "0", params["QOffset"].DefaultValue)
+				assert.Equal(t, "0", params["CIO"].DefaultValue)
+
+				enbType := params["NeighborCellEnbType"]
+				assert.Equal(t, "NeighCellEnbType", enbType.Leaf)
+				assert.Equal(t, "1", enbType.DefaultValue)
+				assert.Equal(t, []xmlEnumOption{
+					{Value: "1", Label: "Home"},
+					{Value: "0", Label: "Macro"},
+				}, enbType.EnumOptions)
+
+				x2Flag := params["X2Flag"]
+				assert.Equal(t, "0", x2Flag.DefaultValue)
+				assert.Equal(t, []xmlEnumOption{
+					{Value: "0", Label: "SON"},
+					{Value: "1", Label: "Manual"},
+				}, x2Flag.EnumOptions)
+			}
+
+			if model == "BM" {
+				cellID := params["CellID"]
+				assert.Equal(t, "true", cellID.Required)
+				assert.Equal(t, "unsignedInt", cellID.Type)
+				assert.Equal(t, "0", cellID.MinValue)
+				assert.Equal(t, "268435455", cellID.MaxValue)
+				assert.Equal(t, "true", params["PCI"].Required)
+				assert.Equal(t, "0", params["QOffset"].DefaultValue)
+				assert.Equal(t, "0", params["CIO"].DefaultValue)
+
+				enbType := params["NeighborCellEnbType"]
+				assert.Equal(t, "NeighCellTypeContainer", enbType.Leaf)
+				assert.Equal(t, "1", enbType.DefaultValue)
+				assert.Equal(t, []xmlEnumOption{
+					{Value: "1", Label: "Home"},
+					{Value: "0", Label: "Macro"},
+				}, enbType.EnumOptions)
+
+				x2Flag := params["X2Flag"]
+				assert.Equal(t, "X2Flag", x2Flag.Leaf)
+				assert.Equal(t, "0", x2Flag.DefaultValue)
+				assert.Equal(t, []xmlEnumOption{
+					{Value: "0", Label: "SON"},
+					{Value: "1", Label: "Manual"},
+				}, x2Flag.EnumOptions)
+			}
+		})
+	}
+}
+
 func TestRegistry_GetByParamModel_IsCopy(t *testing.T) {
 	reg := NewRegistry()
 	reg.Replace("BLQ", []Group{{ID: "g1"}})

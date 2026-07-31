@@ -1299,6 +1299,8 @@ const messages: Record<string, string> = {
   'device.multi.editValidationFailed':    'Validation failed; please fix before saving',
   'device.multi.interFreqDuplicate':      'EARFCN {value} already exists; duplicates are not allowed',
   'device.multi.neighborCellDuplicate':   'The same neighbor cell already exists; duplicates are not allowed',
+  'device.multi.neighborEnbId':           'eNB ID',
+  'device.multi.neighborCellId':          'Cell ID',
   'device.multi.nrInterFreqLoading':      'NR inter-frequency data is still loading; please save again shortly',
   'device.multi.nrInterFreqMissing':      'SSB frequency {value} is not configured in NR inter-frequency carriers; add it first',
   'device.multi.nrInterFreqDisabled':     'SSB frequency {value} is disabled in NR inter-frequency carriers; enable it first',

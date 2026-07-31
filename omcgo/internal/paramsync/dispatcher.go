@@ -15,7 +15,10 @@ import (
 	"github.com/omcgo/omcgo/internal/task"
 )
 
-const parameterSyncTaskExpiresIn = 30 * 60
+const (
+	parameterSyncTaskExpiresIn            = 30 * 60
+	parameterSyncTaskRetryIntervalSeconds = 30
+)
 
 type PlannedTaskDispatcher interface {
 	Dispatch(ctx context.Context, run *SyncRun, plan *Plan) ([]*task.Task, error)
@@ -121,6 +124,10 @@ func (d *PGTaskDispatcher) Dispatch(ctx context.Context, run *SyncRun, plan *Pla
 
 func buildPlannedTasks(run *SyncRun, plan *Plan) ([]*task.Task, error) {
 	tasks := make([]*task.Task, 0, len(plan.Batches))
+	maxRetries := task.RetryBudgetCoveringExpiry(
+		parameterSyncTaskExpiresIn,
+		parameterSyncTaskRetryIntervalSeconds,
+	)
 	for i, batch := range plan.Batches {
 		params, err := json.Marshal(map[string]any{"names": batch.Paths})
 		if err != nil {
@@ -133,6 +140,7 @@ func buildPlannedTasks(run *SyncRun, plan *Plan) ([]*task.Task, error) {
 		planned := task.NewTask(&task.CreateTaskRequest{
 			DeviceSN: run.DeviceSN, Method: "GetParameterValues", Params: params, Priority: priority + i,
 			ExpiresIn: parameterSyncTaskExpiresIn, CommandKey: fmt.Sprintf("param-sync-%s-%d", run.ID, i),
+			MaxRetries: &maxRetries, RetryIntervalSeconds: parameterSyncTaskRetryIntervalSeconds,
 			Source: task.TaskSourceParamSync, SourceID: run.ID.String(), CreatorID: run.RequestID.String(),
 			CommandIndex: i, Description: plannedTaskDescription(plan, i),
 		})

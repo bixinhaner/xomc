@@ -6,12 +6,6 @@
 #
 # The caller owns DC=(docker compose ...). Any non-zero result is a hard gate:
 # callers must return before stopping or recreating the old app.
-gpv_handoff_is_fresh_install() {
-  local omc_root="$1"
-  [ ! -f "$omc_root/current/deploy/.env" ] &&
-    [ ! -f "$omc_root/etc/.env.saved" ]
-}
-
 gpv_handoff_action_touches_app() {
   local action="$1"
   shift
@@ -121,8 +115,9 @@ gpv_handoff_migrate_legacy_systemd() {
 
 gpv_handoff_prepare() {
   local args=(--config /etc/omcgo/app.prod.yaml)
-  if [ "${1:-}" = "--fresh-install" ]; then
-    args+=(--fresh-install)
+  if [ "${1:-}" = "--fresh-install" ] ||
+     [ "${1:-}" = "--bootstrap-if-missing" ]; then
+    args+=("$1")
   elif [ $# -gt 0 ]; then
     echo "unsupported gpv_handoff_prepare argument: $1" >&2
     return 2

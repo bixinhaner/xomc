@@ -491,7 +491,7 @@ func (b *NATSEventBus) Publish(ctx context.Context, subject string, evt Event) e
 }
 
 func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscription, error) {
-	sub, err := b.js.Subscribe(subject, b.wrapHandler(handler),
+	sub, err := b.js.Subscribe(subject, b.wrapHandler(handler, maxDeliveries),
 		nats.DeliverAll(),
 		nats.AckExplicit(),
 	)
@@ -509,7 +509,7 @@ func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscrip
 func (b *NATSEventBus) QueueSubscribe(subject string, queue string, handler EventHandler) (Subscription, error) {
 	tuning := b.ensureQueueConsumerTuning(subject, queue)
 
-	sub, err := b.js.QueueSubscribe(subject, queue, b.wrapHandler(handler),
+	sub, err := b.js.QueueSubscribe(subject, queue, b.wrapHandler(handler, tuning.MaxDeliver),
 		nats.Durable(queue),
 		nats.AckExplicit(),
 		nats.AckWait(tuning.AckWait),
@@ -1208,7 +1208,7 @@ func (b *NATSEventBus) runPullSubscription(ctx context.Context, ps *pullSubscrip
 			go func(msg *nats.Msg) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				b.processMsg(handler, msg)
+				b.processMsg(handler, msg, tuning.MaxDeliver)
 			}(msg)
 		}
 	}
@@ -1332,13 +1332,13 @@ func (b *NATSEventBus) Close() error {
 	return nil
 }
 
-func (b *NATSEventBus) wrapHandler(handler EventHandler) nats.MsgHandler {
+func (b *NATSEventBus) wrapHandler(handler EventHandler, maxDelivery int) nats.MsgHandler {
 	return func(msg *nats.Msg) {
-		b.processMsg(handler, msg)
+		b.processMsg(handler, msg, maxDelivery)
 	}
 }
 
-func (b *NATSEventBus) processMsg(handler EventHandler, msg *nats.Msg) {
+func (b *NATSEventBus) processMsg(handler EventHandler, msg *nats.Msg, maxDelivery int) {
 	evt, parseErr := decodeEventBytes(msg.Data)
 	if parseErr != nil {
 		b.dropMalformedMsg(msg, parseErr)
@@ -1346,7 +1346,7 @@ func (b *NATSEventBus) processMsg(handler EventHandler, msg *nats.Msg) {
 	}
 
 	handlerErr := handler(b.ctx, evt)
-	b.settleDecodedMsg(evt, msg, handlerErr, maxDeliveries)
+	b.settleDecodedMsg(evt, msg, handlerErr, maxDelivery)
 }
 
 func (b *NATSEventBus) dropMalformedMsg(msg *nats.Msg, parseErr error) {
@@ -1397,11 +1397,20 @@ func (b *NATSEventBus) settleDecodedMsgAtDelivery(
 		_ = msg.Term()
 	case ackActionNak:
 		b.metrics.inc(evt.Subject, deliveryOutcomeNak)
-		b.logger.Error("handle event (retrying)",
+		fields := []zap.Field{
 			zap.String("subject", evt.Subject),
 			zap.Uint64("delivery", deliveries),
 			zap.Duration("backoff", decision.backoff),
-			zap.Error(handlerErr))
+			zap.Error(handlerErr),
+		}
+		if errors.Is(handlerErr, reliability.ErrDeferred) {
+			// 注册竞态等延迟条件是预期控制流；每次都打 Error 会附带堆栈，
+			// 20k 设备清洁启动时形成日志与磁盘 I/O 放大。交付结果由 NAK
+			// 指标观测，详细单条记录仅在 Debug 级别保留。
+			b.logger.Debug("handle event (deferred)", fields...)
+		} else {
+			b.logger.Error("handle event (retrying)", fields...)
+		}
 		_ = msg.NakWithDelay(decision.backoff)
 	}
 }
@@ -1497,8 +1506,8 @@ type ackDecision struct {
 
 // decideAck 决定对已投递 deliveries 次的消息采取何种动作：
 //   - handler 无错 → Ack
-//   - handler 错误包装了 reliability.ErrPermanent（业务确定性失败，如设备未注册，
-//     重试无法改变结果）→ 无视 deliveries，立即 Term，避免无意义的多次重投
+//   - handler 错误包装了 reliability.ErrPermanent（明确不可恢复的业务失败）
+//     → 无视 deliveries，立即 Term，避免无意义的多次重投
 //   - handler 出错且未达 maxDelivery → Nak with exponential backoff
 //   - handler 出错且达到 maxDelivery → Term（避免无限重试）
 //
@@ -1514,6 +1523,13 @@ func decideAck(handlerErr error, deliveries, maxDelivery uint64) ackDecision {
 	if deliveries >= maxDelivery {
 		return ackDecision{action: ackActionTerm}
 	}
+	return ackDecision{
+		action:  ackActionNak,
+		backoff: retryBackoff(deliveries),
+	}
+}
+
+func retryBackoff(deliveries uint64) time.Duration {
 	if deliveries == 0 {
 		deliveries = 1
 	}
@@ -1522,9 +1538,26 @@ func decideAck(handlerErr error, deliveries, maxDelivery uint64) ackDecision {
 	if shift > 30 {
 		shift = 30
 	}
-	return ackDecision{
-		action:  ackActionNak,
-		backoff: time.Duration(1<<shift) * time.Second,
+	return time.Duration(1<<shift) * time.Second
+}
+
+// MaxDeliveriesForRetryHorizon returns the smallest MaxDeliver value whose
+// exponential NAK delays guarantee another delivery at or after horizon.
+// Keeping this calculation beside retryBackoff prevents business grace windows
+// from silently outgrowing the queue retry budget when either side is tuned.
+func MaxDeliveriesForRetryHorizon(horizon time.Duration) int {
+	if horizon <= 0 {
+		return 1
+	}
+	deliveries := 1
+	remaining := horizon
+	for {
+		delay := retryBackoff(uint64(deliveries))
+		deliveries++
+		if delay >= remaining {
+			return deliveries
+		}
+		remaining -= delay
 	}
 }
 
