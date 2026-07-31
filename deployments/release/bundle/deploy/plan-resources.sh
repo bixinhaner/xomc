@@ -236,13 +236,13 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 #   nats          1024    2048         5           JetStream backlog + client buffers，避免 512MiB cgroup 临界
 #   minio         3072    4096         8           对象存储；压测发现按可见CPU配额自动估算的并发上限过于保守，且线上巡检 2.5GiB 配额下已到 88%，floor/ceil 一并调大留余量
 #   web            512     512         0           静态+反代，固定
-# 监控栈（固定块，不纵向伸缩，但计入预算）：~4224 MiB
+# 监控栈（固定块，不纵向伸缩，但计入预算）：~4736 MiB
 COMP_NAMES=(app acs worker postgres postgres-tsdb redis nats minio web)
 COMP_FLOOR=(1536 4096 1024 7168 4096 5120 1024 3072 512)
 COMP_CEIL=(3072 6144 2048 16384 12288 8192 2048 4096 512)
 COMP_WEIGHT=(10 18 25 25 22 15 5 8 0)
 
-MON_FIXED_MIB=4224   # prometheus1024+loki512+tempo512+otelcol512+grafana512+alertmgr512+exporters(128*3+256)
+MON_FIXED_MIB=4736   # prometheus1024+loki512+tempo1024+otelcol512+grafana512+alertmgr512+exporters(128*3+256)
 [ "$SKIP_MONITORING" = 1 ] && MON_FIXED_MIB=0
 
 # 下限之和（最低门槛）。ACS 无损发布常驻 primary + candidate 两个同规格实例；

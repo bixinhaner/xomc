@@ -69,11 +69,16 @@ for _a in $ARCHES; do
         改 ARCHES + 移除本脚本的校验后自行验证。"
 done
 
-RELEASE_VERIFY_SCRIPT="$SCRIPT_DIR/bundle/deploy/storage-compose_test.sh"
 log "运行发布前回归门禁 ..."
-if ! bash "$RELEASE_VERIFY_SCRIPT"; then
-  die "发布前回归门禁失败：$RELEASE_VERIFY_SCRIPT"
-fi
+RELEASE_VERIFY_SCRIPTS=(
+  "$SCRIPT_DIR/bundle/deploy/storage-compose_test.sh"
+  "$REPO_ROOT/deployments/monitoring/tests/validate-tempo-memory-budget.sh"
+)
+for release_verify_script in "${RELEASE_VERIFY_SCRIPTS[@]}"; do
+  if ! bash "$release_verify_script"; then
+    die "发布前回归门禁失败：$release_verify_script"
+  fi
+done
 [ "$VERIFY_ONLY" = 1 ] && exit 0
 
 # ── 前置检查 ────────────────────────────────────────────────────────────
