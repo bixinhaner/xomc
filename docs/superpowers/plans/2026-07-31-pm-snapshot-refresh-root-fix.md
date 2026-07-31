@@ -89,6 +89,9 @@ func (s *SnapshotStore) Refresh(ctx context.Context) error {
         return fmt.Errorf("load PM aggregation task revision: %w", err)
     }
     if s.initialized && revision == s.revision {
+        if s.nextBoundary.IsZero() || time.Now().UTC().Before(s.nextBoundary) {
+            return nil
+        }
         s.publishCached(time.Now().UTC())
         return nil
     }
@@ -96,11 +99,11 @@ func (s *SnapshotStore) Refresh(ctx context.Context) error {
 }
 ```
 
-`Reload` must take the same mutex and force `reloadLocked`. `reloadLocked` reads the revision before loading when the caller did not provide one, stores source versions only after successful load, and publishes `BuildTaskSnapshot(matchableVersionsAt(versions, now))`. `matchableVersionsAt` excludes versions whose non-nil `EffectiveTo` is before `now-45d`.
+`Reload` must take the same mutex and force `reloadLocked`. `reloadLocked` reads the revision before loading when the caller did not provide one, stores source versions only after successful load, and publishes `BuildTaskSnapshot(snapshotVersionsAt(versions, now))`. `snapshotVersionsAt` excludes versions whose non-nil `EffectiveTo` is before `now-45d` and returns shallow copies so `BuildTaskSnapshot` never mutates cached source objects. Store the earliest future `EffectiveFrom`, `EffectiveTo`, or `EffectiveTo+45d` as `nextBoundary`; unchanged refreshes before that instant return without rebuilding.
 
 - [ ] **Step 4: Add failure, legacy-loader, and concurrent-first-load tests**
 
-Tests must prove revision errors preserve `Current()`, a loader without the optional interface loads on every refresh, and 16 concurrent first refreshes result in one `LoadMatchable` call.
+Tests must prove revision errors preserve `Current()`, a loader without the optional interface loads on every refresh, 16 concurrent first refreshes result in one `LoadMatchable` call, and an unchanged revision rebuilds exactly once after a controlled version time boundary without calling `LoadMatchable`.
 
 - [ ] **Step 5: Run focused tests and verify GREEN**
 
