@@ -82,6 +82,11 @@ if [ -f "$DEPLOY_DIR/resource-env-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/resource-env-lib.sh（完整资源规划契约库）" 1
 fi
+if [ -f "$DEPLOY_DIR/compose-env-lib.sh" ]; then
+  . "$DEPLOY_DIR/compose-env-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/compose-env-lib.sh（Compose 环境优先级加载库）" 1
+fi
 if [ -f "$DEPLOY_DIR/resource-plan-metrics.sh" ]; then
   . "$DEPLOY_DIR/resource-plan-metrics.sh"
 else
@@ -657,10 +662,14 @@ images_exist() {
 # =============================================================================
 sep "4/9 load 镜像"
 
-# 提前加载 .env 获取镜像名（IMAGE_* 变量），供 images_exist 判定使用
+# 提前加载 .env 获取镜像名（IMAGE_* 变量），供 images_exist 判定使用。
+# 必须随后按 --env-file 的相同顺序加载 resources.env：调用进程环境优先级高于
+# --env-file，若只 source .env，会导致 resources.env 的同名调优值永远不生效。
 ENV_FILE="$OMC_ROOT/current/deploy/.env"
-if [ -f "$ENV_FILE" ]; then
-  set -a; source "$ENV_FILE"; set +a
+RESOURCE_ENV_FILE="$OMC_ROOT/current/deploy/resources.env"
+deploy_env_load "$ENV_FILE" "$RESOURCE_ENV_FILE"
+if ! deploy_env_public_host_valid "${OMC_PUBLIC_HOST:-}"; then
+  die "OMC_PUBLIC_HOST 未配置为基站可达主机（当前: ${OMC_PUBLIC_HOST:-<空>}）；请在 deploy/.env 中配置后重试" 1
 fi
 # 必须在 source .env 之后应用：旧 .env 可能显式写了 tracer=true。
 # 同时把安装 profile 持久化，供后续独立运行的 svc/healthcheck 使用。

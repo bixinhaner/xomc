@@ -39,6 +39,12 @@ else
   echo "  [FAIL] 缺 $DEPLOY_DIR/resource-env-lib.sh"
   exit 1
 fi
+if [ -f "$DEPLOY_DIR/compose-env-lib.sh" ]; then
+  . "$DEPLOY_DIR/compose-env-lib.sh"
+else
+  echo "  [FAIL] 缺 $DEPLOY_DIR/compose-env-lib.sh"
+  exit 1
+fi
 monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING" || {
   echo "  [FAIL] 无法读取 monitoring profile"
   exit 1
@@ -163,6 +169,24 @@ check "worker /healthz (:9092)"  curl -fsS http://127.0.0.1:9092/healthz
 check "app    /metrics (:9091)"  curl -fsS http://127.0.0.1:9091/metrics
 # 前端 SPA：web 容器 nginx :8081 served（:8080 是 ACS CWMP 反代，GET / 不响应，不检）。
 check "前端 SPA (:8081)"          curl -fsS http://127.0.0.1:8081/ -o /dev/null
+
+echo "== 基站可达地址实际值核对 =="
+effective_public_host="$(deploy_env_effective_value OMC_PUBLIC_HOST "$DEPLOY_DIR/.env" "$DEPLOY_DIR/resources.env" 2>/dev/null || true)"
+if deploy_env_public_host_valid "$effective_public_host"; then
+  echo "  [OK]   OMC_PUBLIC_HOST 有效"; ok=$((ok+1))
+else
+  echo "  [FAIL] OMC_PUBLIC_HOST 必须配置为基站可达主机（当前: ${effective_public_host:-<空>}）"; fail=$((fail+1))
+fi
+container_env_value() { # container_env_value <service> <key>
+  local svc="$1" key="$2" cid
+  cid="$("${DC[@]}" ps -q "$svc" 2>/dev/null | head -n1)"
+  [ -n "$cid" ] || return 1
+  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null |
+    awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); exit }'
+}
+for svc in app acs acs-candidate worker; do
+  check_value "$svc 容器 OMC_PUBLIC_HOST" "$effective_public_host" "$(container_env_value "$svc" OMC_PUBLIC_HOST)"
+done
 
 # resources.env 存在时，必须同时证明「文件 → compose 渲染 → 容器/进程实际值」没有漂移。
 # 未使用规划器的历史部署仍允许使用 compose 默认值；但一旦有该文件，残缺或不一致绝不静默通过。
