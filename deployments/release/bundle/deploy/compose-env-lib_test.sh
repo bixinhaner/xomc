@@ -41,6 +41,16 @@ effective="$(deploy_env_effective_value OMC_PUBLIC_HOST "$TMP/.env" "$TMP/resour
 [ "$effective" = "172.24.224.197" ] && ok ||
   bad "effective value 应遵循 Compose env-file 顺序，实际=$effective"
 
+cat >"$TMP/host.env" <<'EOF'
+OMC_PUBLIC_HOST=172.24.224.197
+EOF
+cat >"$TMP/no-host.env" <<'EOF'
+PM_AGGREGATION_FINALIZE_CONCURRENCY=32
+EOF
+effective="$(deploy_env_effective_value OMC_PUBLIC_HOST "$TMP/host.env" "$TMP/no-host.env")"
+[ "$effective" = "172.24.224.197" ] && ok ||
+  bad "后置 env 不含目标键时必须保留前置值，实际=$effective"
+
 if deploy_env_public_host_valid "$effective"; then
   ok
 else

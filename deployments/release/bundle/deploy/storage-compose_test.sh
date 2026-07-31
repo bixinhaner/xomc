@@ -100,6 +100,9 @@ contains "install 在业务 up 前准备 durable" 'gpv_handoff_prepare' "$INSTAL
 contains "install 在 systemd 停服前执行迁移门禁" 'gpv_handoff_migrate_legacy_systemd' "$INSTALL"
 contains "svc 在重启前准备 durable" 'gpv_handoff_prepare' "$SVC"
 contains "真实 NATS 验证脚本强制注入地址" 'GPV_NATS_TEST_URL=' "$RELEASE_NATS_VERIFY"
+contains "install 健康等待使用真实截止时间" 'HEALTHCHECK_DEADLINE=' "$INSTALL"
+contains "单次 healthcheck 不得越过剩余预算" 'timeout "${HEALTHCHECK_REMAINING}s" bash' "$INSTALL"
+not_contains "健康等待不得按固定步长伪计时" 'HEALTHCHECK_WAIT=$((HEALTHCHECK_WAIT + HEALTHCHECK_INTERVAL))' "$INSTALL"
 if bash "$RELEASE_DEPLOY/gpv-handoff-lib_test.sh"; then
   ok
 else
