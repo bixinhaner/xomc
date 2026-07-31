@@ -33,7 +33,7 @@ type minioObjectClient interface {
 
 // Service 基站日志采集服务，负责：
 //  1. 订阅 SubjectLogFileReceived 事件，将运行日志写入 station_running_logs
-//  2. 记录 1 BOOT + HaltReason 识别出的异常重启事实
+//  2. 记录满足设备类型异常重启规则的重启事实
 //  3. 对外提供日志文件查询和预签名下载 URL
 //
 // runningRepo 对应 station_running_logs（运行日志）；

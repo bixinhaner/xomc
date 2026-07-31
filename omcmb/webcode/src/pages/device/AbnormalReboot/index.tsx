@@ -12,7 +12,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { ExportOutlined, BarChartOutlined } from '@ant-design/icons';
+import { ExportOutlined, BarChartOutlined, ReloadOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -38,6 +38,8 @@ import { rebootRecordDeviceTypeOptions } from './filterOptions';
 // 普通重启(event_logs) 与 异常重启(station_fault_logs) 两张互斥表由后端
 // /reboot-records UNION 合成一份列表：「类型」列标记正常/异常，可按重启类型过滤，
 // 右上角「统计」按设备聚合（总次数/异常次数，跟随筛选），可导出。
+
+const REBOOT_RECORD_AUTO_REFRESH_MS = 30_000;
 
 const exportTimestamp = (): string => {
   const d = new Date();
@@ -118,7 +120,12 @@ export default function AbnormalReboot() {
     return p;
   }, [filters, page, pageSize]);
 
-  const { data, isLoading } = useRebootRecordList(queryParams);
+  const {
+    data,
+    isLoading,
+    isFetching,
+    refetch: refetchRebootRecords,
+  } = useRebootRecordList(queryParams, { refetchInterval: REBOOT_RECORD_AUTO_REFRESH_MS });
   const dataSource = data?.items ?? [];
   const total = data?.total ?? 0;
 
@@ -360,6 +367,15 @@ export default function AbnormalReboot() {
       />
 
       <Space style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
+        <Button
+          icon={<ReloadOutlined />}
+          onClick={() => {
+            void refetchRebootRecords();
+          }}
+          loading={isFetching && !isLoading}
+        >
+          {t('common.refresh')}
+        </Button>
         <Button icon={<BarChartOutlined />} onClick={() => setStatVisible(true)}>
           {t('log.event.statistics')}
         </Button>
