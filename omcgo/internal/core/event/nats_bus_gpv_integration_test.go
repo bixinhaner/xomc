@@ -162,6 +162,9 @@ func TestKeyedQueueDurableHandoffDoesNotSkipOrReplay(t *testing.T) {
 		return infoErr == nil && info.AckFloor.Stream == 4
 	}, 5*time.Second, 10*time.Millisecond)
 	require.NoError(t, firstSub.Unsubscribe())
+	// Unsubscribe 只把协议命令写入客户端缓冲；复用同一 durable 前必须等待服务端
+	// 确认，否则新消息可能仍被投递到旧 inbox，直到 AckWait 后才重投，造成测试竞态。
+	require.NoError(t, nc.Flush())
 	firstMu.Lock()
 	require.ElementsMatch(t, []int{2, 3, 4}, firstGot)
 	firstMu.Unlock()
@@ -199,6 +202,9 @@ func TestKeyedQueueDurableHandoffDoesNotSkipOrReplay(t *testing.T) {
 		},
 	)
 	require.NoError(t, err)
+	// QueueSubscribe 创建本地 inbox 订阅后再绑定既有 durable；发布切换窗口探针前
+	// 等待服务端确认新 inbox 已生效，避免发布与订阅命令竞争。
+	require.NoError(t, nc.Flush())
 	evt, err := NewEvent(subject, map[string]any{"device_sn": "SN-5", "sequence": 5})
 	require.NoError(t, err)
 	data, err := json.Marshal(evt)
