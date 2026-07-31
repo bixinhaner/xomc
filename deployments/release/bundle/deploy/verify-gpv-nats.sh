@@ -31,7 +31,7 @@ fi
 GO_BIN="${GO_BIN:-$(command -v go || true)}"
 if [ -z "$GO_BIN" ]; then
   for candidate in \
-    "$HOME/.local/go/bin/go" "$HOME/.opencode/bin/go" "$HOME/.g/go/bin/go" \
+    "$HOME/.local/go/bin/go" "$HOME/.opencode/bin/go" "$HOME/.opencode/go/bin/go" "$HOME/.g/go/bin/go" \
     /root/.local/go/bin/go /root/.opencode/bin/go /root/.g/go/bin/go \
     /usr/local/go/bin/go /opt/go/bin/go; do
     if [ -x "$candidate" ]; then
