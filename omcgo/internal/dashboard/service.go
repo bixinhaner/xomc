@@ -1424,6 +1424,9 @@ func (s *Service) GetKPITimeSeriesSnapshotWithMetadata(
 			}
 		}
 		sortKPITimeSeriesSnapshot(&snapshot)
+		s.observeSnapshotMissing(
+			loadCtx, snapshot, kpiNames, technology, granularity, startTime,
+		)
 		return snapshot, nil
 	}
 
@@ -1626,25 +1629,10 @@ func (s *Service) fetchNetworkKCodeSeries(
 	}
 	requested := kcodes
 	if !observeMissing {
-		// Snapshot queries append an in-progress value for the current natural
-		// day/week. The absence of that one final row is expected, but closed
-		// periods in the same range still need missing-result monitoring.
-		businessNow := response.TimeInCurrentLocation(ctx, time.Now())
-		cutoff := currentNaturalPeriodStart(granularity, businessNow)
-		if !startTime.Before(cutoff) {
-			requested = nil
-		} else {
-			closedRows := make([]NetworkRollupPoint, 0, len(rows))
-			for _, row := range rows {
-				if row.WindowStart.Before(cutoff) {
-					closedRows = append(closedRows, row)
-				}
-			}
-			s.observeNetworkMissing(
-				closedRows, requested, technology, granularity,
-			)
-			requested = nil
-		}
+		// Snapshot queries can only decide whether a published result is
+		// expected after the progress reader supplies the task-version
+		// effective interval.
+		requested = nil
 	}
 	s.observeNetworkRollups(rows, requested, technology, granularity, time.Now())
 
@@ -1660,24 +1648,59 @@ func (s *Service) fetchNetworkKCodeSeries(
 	return sortAndDedupeNetworkSeriesPoints(points), nil
 }
 
-func (s *Service) observeNetworkMissing(
-	points []NetworkRollupPoint,
+func (s *Service) observeSnapshotMissing(
+	ctx context.Context,
+	snapshot KPITimeSeriesSnapshot,
 	requested []string,
 	technology model.Technology,
 	granularity metrics.Granularity,
+	queryStart time.Time,
 ) {
-	if s.metrics == nil || technology == "" || len(requested) == 0 {
+	if s.metrics == nil || technology == "" || len(requested) == 0 ||
+		snapshot.ProgressState != "available" {
 		return
 	}
+	businessNow := response.TimeInCurrentLocation(ctx, time.Now())
+	cutoff := currentNaturalPeriodStart(granularity, businessNow)
+
+	var effectiveFrom time.Time
+	for _, period := range snapshot.PeriodProgress {
+		if period.VersionEffectiveFrom.IsZero() ||
+			!period.VersionEffectiveFrom.Before(cutoff) {
+			continue
+		}
+		if effectiveFrom.IsZero() ||
+			period.VersionEffectiveFrom.Before(effectiveFrom) {
+			effectiveFrom = period.VersionEffectiveFrom
+		}
+	}
+	if effectiveFrom.IsZero() {
+		return
+	}
+	relevantStart := currentNaturalPeriodStart(
+		granularity, effectiveFrom.In(businessNow.Location()),
+	)
+	if queryStart.After(relevantStart) {
+		relevantStart = queryStart
+	}
+	if !relevantStart.Before(cutoff) {
+		return
+	}
+
 	present := make(map[string]struct{})
-	for _, point := range points {
-		if point.Technology == technology {
-			present[point.MetricPath] = struct{}{}
+	for metricPath, entries := range snapshot.Series {
+		for _, entry := range entries {
+			if !entry.Partial &&
+				!entry.Time.Before(relevantStart) &&
+				entry.Time.Before(cutoff) {
+				present[metricPath] = struct{}{}
+				break
+			}
 		}
 	}
 	missing := 0
-	for _, path := range normalizeMetricPaths(requested) {
-		if _, ok := present[path]; !ok {
+	for _, metricPath := range normalizeMetricPaths(requested) {
+		if _, ok := present[metricPath]; !ok {
 			missing++
 		}
 	}

@@ -211,6 +211,12 @@ func TestGetKPITimeSeriesSnapshotStillReportsMissingClosedPeriod(t *testing.T) {
 				Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
 				MetricPath: "K1", MetricType: "kpi", Value: 42, Partial: true,
 			}},
+			Periods: []pmstream.PeriodProgress{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: currentDay, WindowEnd: currentDay.Add(24 * time.Hour),
+				EntityKey:            "network",
+				VersionEffectiveFrom: start,
+			}},
 		},
 	})
 
@@ -232,6 +238,50 @@ func TestGetKPITimeSeriesSnapshotStillReportsMissingClosedPeriod(t *testing.T) {
 	}
 	require.Equal(t, float64(1), missing,
 		"current partial must not hide a missing final result from a closed period")
+}
+
+func TestGetKPITimeSeriesSnapshotDoesNotReportPeriodsBeforeVersionEffectiveFrom(t *testing.T) {
+	now := time.Now().UTC()
+	currentDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	start := currentDay.Add(-7 * 24 * time.Hour)
+	end := now.Add(time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	registry := prometheus.NewRegistry()
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+		metrics:        NewMetrics(registry),
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			Rows: []pmstream.ProgressResult{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: currentDay, WindowEnd: currentDay.Add(24 * time.Hour),
+				Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
+				MetricPath: "K1", MetricType: "kpi", Value: 42, Partial: true,
+			}},
+			Periods: []pmstream.PeriodProgress{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: currentDay, WindowEnd: currentDay.Add(24 * time.Hour),
+				EntityKey:            "network",
+				VersionEffectiveFrom: currentDay.Add(time.Hour),
+			}},
+		},
+	})
+
+	_, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, start, end,
+	)
+	require.NoError(t, err)
+
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		require.NotEqual(t, "dashboard_kpi_missing_result_total", family.GetName(),
+			"periods before the task version became effective must not be reported as missing")
+	}
 }
 
 func TestGetKPITimeSeriesSnapshotUsesBusinessTimezoneForOpenPeriod(t *testing.T) {
