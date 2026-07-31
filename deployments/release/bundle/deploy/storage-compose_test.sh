@@ -135,6 +135,7 @@ contains "install 在业务 up 前准备 durable" 'gpv_handoff_prepare' "$INSTAL
 contains "install 在 systemd 停服前执行迁移门禁" 'gpv_handoff_migrate_legacy_systemd' "$INSTALL"
 contains "svc 在重启前准备 durable" 'gpv_handoff_prepare' "$SVC"
 contains "真实 NATS 验证脚本强制注入地址" 'GPV_NATS_TEST_URL=' "$RELEASE_NATS_VERIFY"
+contains "真实 NATS 验证支持本地 Docker fallback" 'NATS_SERVER_IMAGE' "$RELEASE_NATS_VERIFY"
 contains "install 健康等待使用真实截止时间" 'HEALTHCHECK_DEADLINE=' "$INSTALL"
 contains "单轮 healthcheck 有独立探针超时" 'HEALTHCHECK_PROBE_TIMEOUT' "$INSTALL"
 contains "单轮 healthcheck 超时后继续重试" 'HEALTHCHECK_PROBE_REMAINING' "$INSTALL"
@@ -304,7 +305,7 @@ contains "存储队列 Dashboard 去重多进程快照" 'max by (queue, status) 
 contains "基础设施 Dashboard 去重多进程快照" 'max by (queue, status) (omc_persistent_queue_pending)' "$REPO_ROOT/deployments/monitoring/grafana/dashboards/omc-infra.json"
 contains "node exporter 读取资源计划 textfile" '--collector.textfile.directory=/textfile' "$RELEASE_MONITORING_COMPOSE"
 contains "node exporter 挂载资源计划 textfile" '/opt/omc/run/monitoring:/textfile:ro' "$RELEASE_MONITORING_COMPOSE"
-contains "cAdvisor 使用 Docker 29/overlayfs 支持版本" 'ghcr.io/google/cadvisor:0.55.1' "$REPO_ROOT/deployments/release/release.conf"
+contains "cAdvisor 使用 Docker 29/overlayfs 支持版本" 'gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1' "$REPO_ROOT/deployments/release/release.conf"
 contains "安装生成资源计划指标" 'resource_plan_metrics_write' "$INSTALL"
 contains "服务控制生成资源计划指标" 'resource_plan_metrics_write' "$SVC"
 if bash "$RELEASE_DEPLOY/resource-plan-metrics_test.sh"; then
