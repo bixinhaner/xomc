@@ -2,9 +2,35 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-NATS_SERVER_BIN="${NATS_SERVER_BIN:-$(command -v nats-server || true)}"
+if [ -z "${NATS_SERVER_BIN:-}" ]; then
+  NATS_SERVER_BIN="$(command -v nats-server || true)"
+  if [ -z "$NATS_SERVER_BIN" ]; then
+    for candidate in "$HOME/.local/bin/nats-server" "$HOME/.opencode/bin/nats-server" /usr/local/bin/nats-server; do
+      if [ -x "$candidate" ]; then
+        NATS_SERVER_BIN="$candidate"
+        break
+      fi
+    done
+  fi
+fi
 [ -n "$NATS_SERVER_BIN" ] || {
   echo "nats-server is required for GPV JetStream verification" >&2
+  exit 1
+}
+GO_BIN="${GO_BIN:-$(command -v go || true)}"
+if [ -z "$GO_BIN" ]; then
+  for candidate in "$HOME/.local/go/bin/go" "$HOME/.opencode/bin/go" "$HOME/.g/go/bin/go" /usr/local/go/bin/go; do
+    if [ -x "$candidate" ]; then
+      GO_BIN="$candidate"
+      case "$candidate" in
+        */go/bin/go) export GOROOT="${candidate%/bin/go}" ;;
+      esac
+      break
+    fi
+  done
+fi
+[ -n "$GO_BIN" ] || {
+  echo "go is required for GPV JetStream verification" >&2
   exit 1
 }
 
@@ -39,6 +65,6 @@ grep -Fq 'Server is ready' "$LOG" || {
 
 cd "$REPO_ROOT/omcgo"
 GPV_NATS_TEST_URL="nats://127.0.0.1:$PORT" \
-  go test ./internal/core/event ./cmd/gpv-handoff \
+  "$GO_BIN" test ./internal/core/event ./cmd/gpv-handoff \
     -run 'TestKeyedQueue|TestKeyedPull|TestPrepareGPVHandoff|TestRunFreshInstall' \
     -count=1 -v
