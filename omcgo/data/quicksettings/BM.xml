@@ -179,11 +179,18 @@
          multiInstance="true" maxInstances="32"
          objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.">
     <param name="CellID" titleZh="小区ID" titleEn="Cell ID" leaf="CID"/>
-    <param name="PLMN" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
-    <param name="EARFCN" titleZh="频点" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
-    <param name="PCI" titleZh="PCI" titleEn="PCI" leaf="PhyCellID"/>
-    <param name="QOffset" titleZh="QOffset" titleEn="QOffset" leaf="QOffset"/>
-    <param name="CIO" titleZh="CIO" titleEn="CIO" leaf="CIO"/>
+    <param name="PLMN" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"
+           type="string" minValue="5" maxValue="6"/>
+    <param name="EARFCN" titleZh="频点" titleEn="EARFCN" leaf="EUTRACarrierARFCN"
+           type="unsignedInt" minValue="0" maxValue="65535"/>
+    <param name="PCI" titleZh="PCI" titleEn="PCI" leaf="PhyCellID"
+           type="unsignedInt" minValue="0" maxValue="503"/>
+    <param name="QOffset" titleZh="QOffset" titleEn="QOffset" leaf="QOffset"
+           type="int" minValue="-24" maxValue="24"/>
+    <param name="CIO" titleZh="CIO" titleEn="CIO" leaf="CIO"
+           type="int" minValue="-24" maxValue="24"/>
+    <param name="TAC" titleZh="TAC" titleEn="TAC" leaf="X_COM_TAC"
+           type="unsignedInt" required="true" minValue="0" maxValue="65535"/>
   </group>
   <!--
     GSM 小区参数（BM 制式切换 GSM 时显示）。
