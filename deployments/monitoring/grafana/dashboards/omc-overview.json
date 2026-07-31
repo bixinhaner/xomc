@@ -13,7 +13,7 @@
       "type": "stat",
       "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
       "targets": [
-        {"expr": "sum(acs_active_sessions)", "legendFormat": "Active Sessions"}
+        {"expr": "max(acs_global_active_sessions)", "legendFormat": "Global Active Sessions"}
       ]
     },
     {

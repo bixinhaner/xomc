@@ -149,6 +149,9 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 	// Start background session reaper to clean up stale connSessions entries
 	// from dropped TCP connections. Scans every 30s, cleans entries older than 5min.
 	h.startSessionReaper(30*time.Second, 5*time.Minute)
+	// 全局准入槽位是多 ACS 实例共同的真实会话数；单实例本地 gauge 在跨实例
+	// 孤儿清理时只能最终一致，不能用于 30000 全局上限监控。
+	h.startGlobalAdmissionMetrics(5 * time.Second)
 
 	// Start rate limiter background cleanup based on config.
 	// Defaults: scan every 5 min, evict devices inactive for 10 min.

@@ -19,6 +19,8 @@ func TestBuildPlannedTasksCarriesStructuredRunIdentity(t *testing.T) {
 	require.Len(t, tasks, 1)
 	assert.Equal(t, task.TaskSourceParamSync, tasks[0].Source)
 	assert.Equal(t, run.ID.String(), tasks[0].SourceID)
+	assert.Equal(t, parameterSyncTaskRetryIntervalSeconds, tasks[0].RetryIntervalSeconds)
+	assert.Equal(t, parameterSyncTaskExpiresIn/parameterSyncTaskRetryIntervalSeconds, tasks[0].MaxRetries)
 	assert.NotContains(t, tasks[0].CommandKey, "full")
 	var params map[string][]string
 	require.NoError(t, json.Unmarshal(tasks[0].Params, &params))

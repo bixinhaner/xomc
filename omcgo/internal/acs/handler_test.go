@@ -919,6 +919,36 @@ func TestCompleteSessionOnlyDecrementsSessionsTrackedByThisProcess(t *testing.T)
 	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.ActiveSessions))
 }
 
+func TestReapLocalActiveSessionsRemovesCrossInstanceOrphans(t *testing.T) {
+	metrics := NewACSMetrics(prometheus.NewRegistry())
+	h := &Handler{metrics: metrics, logger: zap.NewNop()}
+	now := time.Now()
+
+	h.trackActiveSessionAt("expired-on-another-instance", now.Add(-6*time.Minute))
+	h.trackActiveSessionAt("still-active", now.Add(-time.Minute))
+	require.Equal(t, float64(2), testutil.ToFloat64(metrics.ActiveSessions))
+
+	h.reapLocalActiveSessions(now, 5*time.Minute)
+
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.ActiveSessions))
+	_, expiredStillTracked := h.localActiveSessions.Load("expired-on-another-instance")
+	_, activeStillTracked := h.localActiveSessions.Load("still-active")
+	assert.False(t, expiredStillTracked)
+	assert.True(t, activeStillTracked)
+}
+
+func TestRefreshGlobalActiveSessionsUsesAdmissionSourceOfTruth(t *testing.T) {
+	metrics := NewACSMetrics(prometheus.NewRegistry())
+	admission := NewAdmissionController(100)
+	h := &Handler{metrics: metrics, admission: admission, logger: zap.NewNop()}
+	require.True(t, admission.Acquire(context.Background(), "one"))
+	require.True(t, admission.Acquire(context.Background(), "two"))
+
+	h.refreshGlobalActiveSessions(context.Background())
+
+	assert.Equal(t, float64(2), testutil.ToFloat64(metrics.GlobalActiveSessions))
+}
+
 // ---------------------------------------------------------------------------
 // Tests: Full Inform → Empty → Complete lifecycle
 // ---------------------------------------------------------------------------

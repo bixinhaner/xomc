@@ -13,6 +13,7 @@ func TestNewACSMetrics(t *testing.T) {
 
 	assert.NotNil(t, m)
 	assert.NotNil(t, m.ActiveSessions)
+	assert.NotNil(t, m.GlobalActiveSessions)
 	assert.NotNil(t, m.InformTotal)
 	assert.NotNil(t, m.RPCDuration)
 	assert.NotNil(t, m.RPCErrorsTotal)
@@ -33,6 +34,7 @@ func TestNewACSMetrics_Operations(t *testing.T) {
 		m.ActiveSessions.Inc()
 		m.ActiveSessions.Dec()
 		m.ActiveSessions.Set(42)
+		m.GlobalActiveSessions.Set(42)
 	})
 
 	assert.NotPanics(t, func() {
