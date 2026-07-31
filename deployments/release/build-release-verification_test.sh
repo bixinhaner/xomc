@@ -10,6 +10,11 @@ if ! grep -Fq 'validate-tempo-memory-budget.sh' "$SCRIPT_DIR/build-release.sh"; 
   exit 1
 fi
 
+if ! grep -Fq -- '--no-xattrs' "$SCRIPT_DIR/build-release.sh"; then
+  echo "FAIL: release archives must omit host extended attributes for portable Linux extraction" >&2
+  exit 1
+fi
+
 if ! bash "$SCRIPT_DIR/build-release.sh" --verify-only >/dev/null 2>&1; then
   echo "FAIL: --verify-only must execute the default release verification gate" >&2
   exit 1
