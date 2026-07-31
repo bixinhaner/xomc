@@ -78,6 +78,7 @@ log "运行发布前回归门禁 ..."
 RELEASE_VERIFY_SCRIPTS=(
   "$SCRIPT_DIR/bundle/deploy/storage-compose_test.sh"
   "$REPO_ROOT/deployments/monitoring/tests/validate-tempo-memory-budget.sh"
+  "$SCRIPT_DIR/validate-release-archive-portability.sh"
 )
 for release_verify_script in "${RELEASE_VERIFY_SCRIPTS[@]}"; do
   if ! bash "$release_verify_script"; then

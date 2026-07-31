@@ -10,8 +10,8 @@ if ! grep -Fq 'validate-tempo-memory-budget.sh' "$SCRIPT_DIR/build-release.sh"; 
   exit 1
 fi
 
-if ! grep -Fq -- '--no-xattrs' "$SCRIPT_DIR/build-release.sh"; then
-  echo "FAIL: release archives must omit host extended attributes for portable Linux extraction" >&2
+if ! grep -Fq 'validate-release-archive-portability.sh' "$SCRIPT_DIR/build-release.sh"; then
+  echo "FAIL: release verification gate must enforce archive portability" >&2
   exit 1
 fi
 
