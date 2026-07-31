@@ -436,7 +436,7 @@ func TestWrapHandler_ReturnsNonNilMsgHandler(t *testing.T) {
 	bus := NewNATSEventBus(nil, nil, zap.NewNop())
 	handler := func(ctx context.Context, evt Event) error { return nil }
 
-	msgHandler := bus.wrapHandler(handler)
+	msgHandler := bus.wrapHandler(handler, maxDeliveries)
 	assert.NotNil(t, msgHandler)
 }
 
