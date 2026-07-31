@@ -1990,6 +1990,19 @@ func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID u
 			zap.Error(err))
 		return result, nil
 	}
+	if device.Technology == model.TechLTE {
+		paramValues := make(map[string]string, len(allParams))
+		for _, param := range allParams {
+			paramValues[param.ParameterPath] = param.ParameterValue
+		}
+		if mmeStatus := CalcMMEStatus(paramValues); mmeStatus != "" {
+			if result.Info == nil {
+				result.Info = &DeviceInfo{DeviceID: deviceID}
+			}
+			// 详情页以当前参数真值覆盖可能尚未回填的 device_info 快照。
+			result.Info.MMEStatus = mmeStatus
+		}
+	}
 	if device.Technology == model.TechNR {
 		if result.Info == nil {
 			result.Info = &DeviceInfo{DeviceID: deviceID}

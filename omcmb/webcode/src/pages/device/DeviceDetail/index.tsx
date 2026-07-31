@@ -63,6 +63,7 @@ import { formatObjectLdn } from '@core/types/pmObject';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@core/types/alarm';
 import type { Device } from '@core/types/device';
+import { connectionStatusMessageId } from '@core/utils/connectionStatus';
 import { buildKpiCharts, buildKpiCompareData } from './kpiSeries';
 import { runDeviceAlarmRefresh } from './alarmRefresh';
 import ParameterTreeTab from './ParameterTreeTab';
@@ -787,7 +788,14 @@ const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): Field
   // eNB 独有字段
   if (networkType === 'eNB') {
     fields.push(
-      { key: 'mmeStatus', label: t('device.mmeStatus'), render: (d) => d.mmeStatus ?? '-' },
+      {
+        key: 'mmeStatus',
+        label: t('device.mmeStatus'),
+        render: (d) => {
+          const messageId = connectionStatusMessageId(d.mmeStatus, true);
+          return messageId ? t(messageId) : '-';
+        },
+      },
       { key: 'lockStatus', label: t('device.lockStatus'), render: (d) => renderStatusTag(d.lockStatus, { locked: { label: t('status.locked'), color: 'warning' }, unlocked: { label: t('status.unlocked'), color: 'success' } }) },
       { key: 'wanSpeed', label: t('device.wanSpeed'), render: (d) => d.wanSpeed ?? '-' },
     );
@@ -796,7 +804,14 @@ const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): Field
   // gNB 独有字段
   if (networkType === 'gNB') {
     fields.push(
-      { key: 'mmeStatus', label: t('device.amfStatus'), render: (d) => d.mmeStatus ?? d.amfStatus ?? '-' },
+      {
+        key: 'mmeStatus',
+        label: t('device.amfStatus'),
+        render: (d) => {
+          const messageId = connectionStatusMessageId(d.mmeStatus ?? d.amfStatus);
+          return messageId ? t(messageId) : '-';
+        },
+      },
       { key: 'wanSpeed', label: t('device.wanSpeed'), render: (d) => d.wanSpeed ?? '-' },
       { key: 'multiPlmnEnable', label: 'Multi PLMN', render: (d) => renderStatusTag(d.multiPlmnEnable, { enabled: { label: t('status.enabled'), color: 'success' }, disabled: { label: t('status.disabled'), color: 'default' } }) },
     );

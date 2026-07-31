@@ -58,7 +58,11 @@ import dayjs from 'dayjs';
 import { buildBatchTaskTypeMap, batchActionHasDetail, removeParamSyncOptimisticDeviceId } from './deviceBatchTask';
 import { getDeviceListParamSyncPaths } from './deviceListParamSync';
 import { formatDeviceRadioField, formatDeviceRFStatus } from './deviceRadioFieldSupport';
-import { amfStatusForDevice, bscLinkStatusForDevice, mmeStatusForDevice } from './deviceCoreNetworkStatus';
+import {
+  amfStatusMessageIdForDevice,
+  bscLinkStatusMessageIdForDevice,
+  mmeStatusMessageIdForDevice,
+} from './deviceCoreNetworkStatus';
 import { shouldShowLocationSyncIndicator } from './deviceGpsSyncIndicator';
 import GpsSyncConfirmModal from './GpsSyncConfirmModal';
 import GpsSyncTrigger from './GpsSyncTrigger';
@@ -1935,7 +1939,10 @@ export default function DeviceList() {
         dataIndex: 'mmeStatus',
         width: 130,
         group: 'common',
-        render: (_val, record) => mmeStatusForDevice(record) || '-',
+        render: (_val, record) => {
+          const messageId = mmeStatusMessageIdForDevice(record);
+          return messageId ? t(messageId) : '-';
+        },
       },
       {
         key: 'amfStatus',
@@ -1943,7 +1950,10 @@ export default function DeviceList() {
         dataIndex: 'amfStatus',
         width: 130,
         group: 'common',
-        render: (_val, record) => amfStatusForDevice(record) || '-',
+        render: (_val, record) => {
+          const messageId = amfStatusMessageIdForDevice(record);
+          return messageId ? t(messageId) : '-';
+        },
       },
       {
         key: 'bscLinkStatus',
@@ -1951,7 +1961,10 @@ export default function DeviceList() {
         dataIndex: 'bscLinkStatus',
         width: 140,
         group: 'common',
-        render: (_val, record) => bscLinkStatusForDevice(record) || '-',
+        render: (_val, record) => {
+          const messageId = bscLinkStatusMessageIdForDevice(record);
+          return messageId ? t(messageId) : '-';
+        },
       },
       {
         key: 'ueCount',
