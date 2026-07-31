@@ -74,11 +74,17 @@ for _a in $ARCHES; do
         改 ARCHES + 移除本脚本的校验后自行验证。"
 done
 
-RELEASE_VERIFY_SCRIPT="$SCRIPT_DIR/bundle/deploy/storage-compose_test.sh"
 log "运行发布前回归门禁 ..."
-if ! bash "$RELEASE_VERIFY_SCRIPT"; then
-  die "发布前回归门禁失败：$RELEASE_VERIFY_SCRIPT"
-fi
+RELEASE_VERIFY_SCRIPTS=(
+  "$SCRIPT_DIR/bundle/deploy/storage-compose_test.sh"
+  "$REPO_ROOT/deployments/monitoring/tests/validate-tempo-memory-budget.sh"
+  "$SCRIPT_DIR/validate-release-archive-portability.sh"
+)
+for release_verify_script in "${RELEASE_VERIFY_SCRIPTS[@]}"; do
+  if ! bash "$release_verify_script"; then
+    die "发布前回归门禁失败：$release_verify_script"
+  fi
+done
 [ "$VERIFY_ONLY" = 1 ] && exit 0
 
 # ── 前置检查 ────────────────────────────────────────────────────────────
@@ -329,7 +335,9 @@ EOF
   # 1.7 压缩打包 → archive/project/<版本>/
   log "[$ARCH] 压缩打包（${PKG_COMPRESS}）..."
   # shellcheck disable=SC2086
-  ( cd "$WORK" && tar $TAR_OPT "$OUT/$PKG_NAME.$EXT" "$PKG_NAME" )
+  # GNU tar 与 bsdtar 都支持 --no-xattrs；避免 macOS provenance 等主机元数据
+  # 进入 pax header，导致 Linux 解包产生大量未知扩展属性警告。
+  ( cd "$WORK" && tar --no-xattrs $TAR_OPT "$OUT/$PKG_NAME.$EXT" "$PKG_NAME" )
   ( cd "$OUT" && sha256sum "$PKG_NAME.$EXT" > "$PKG_NAME.$EXT.sha256" )
   log "[$ARCH] 产出：archive/project/$VERSION/$PKG_NAME.$EXT"
 done

@@ -797,6 +797,9 @@ services:
     image: grafana/tempo:2.5.0
     environment:
       TZ: "Asia/Shanghai"
+      # Tempo 2.5 的块压缩会让 Go heap_sys 短时超过 600MiB。软上限给
+      # compactor 留出可控堆空间，同时为 mmap、栈和内核记账保留余量。
+      GOMEMLIMIT: "768MiB"
     # http 3200 是查询入口；Grafana 通过 docker network 内部访问，不需要对外
     volumes:
       - ../monitoring/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
@@ -809,7 +812,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: 512m
+          memory: 1g
         reservations:
           cpus: "0.25"
           memory: 256m

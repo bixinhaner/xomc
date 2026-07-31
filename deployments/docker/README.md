@@ -707,7 +707,8 @@ sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 | web (nginx) | 1 | 512m | 0.25 | 128m | 静态资源 + 反代 |
 | prometheus | 1 | 1g | 0.25 | 256m | TSDB 15d 保留 |
 | grafana | 1 | 512m | 0.25 | 256m | 可视化 |
-| loki / tempo / otelcol | 1 | 512m | 0.25 | 256m | 日志 / trace 存储与转发 |
+| loki / otelcol | 1 | 512m | 0.25 | 256m | 日志 / trace 转发 |
+| tempo | 1 | 1g | 0.25 | 256m | trace 存储；`GOMEMLIMIT=768MiB` 约束块压缩峰值 |
 | alertmanager | 0.5 | 512m | 0.25 | 256m | 告警路由 |
 | migrate-schema / migrate-seed | 1 | 512m | 0.25 | 128m | 一次性任务，限额防失控 |
 | nats/nginx-exporter · node-exporter | 0.25 | 128m | 0.05 | 32m | 轻量 exporter |
