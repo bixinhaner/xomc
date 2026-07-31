@@ -650,6 +650,7 @@ func initProvisionModule(c *Container) error {
 	provisionEngine.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
 	if c.miscDeps.paramSyncStarter != nil {
 		provisionEngine.SetRegisteredDeviceSyncStarter(c.miscDeps.paramSyncStarter)
+		provisionEngine.SetDeviceOnlineFullSyncSubmitter(c.miscDeps.paramSyncStarter)
 	}
 	// HIGH-27 / MEDIUM-19：provisioning 指标（discovery_log 状态写库失败、Redis 节流失败）。
 	provisionMetrics := provision.NewMetrics(c.MetricsReg)

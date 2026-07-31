@@ -140,6 +140,103 @@ func TestParamSyncStarter_RegisteredDeviceBypassesDeviceCanary(t *testing.T) {
 	assert.Equal(t, paramsync.TriggerDeviceRegistered, submitter.command.TriggerReason)
 }
 
+func TestParamSyncStarter_DeviceOnlineUsesDirectDurableFullRequest(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "online-device"}
+	requestID := uuid.New()
+	runID := uuid.New()
+	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
+		RequestID: requestID,
+		RunID:     &runID,
+		Status:    paramsync.RequestStatusRunning,
+		TaskCount: 13,
+	}}
+	starter := &paramSyncStarter{
+		service: submitter,
+		flags: paramsync.FeatureFlags{
+			RunEnabled:            true,
+			ResultConsumerEnabled: true,
+			StagingEnabled:        true,
+			CanaryPercent:         100,
+		},
+	}
+
+	result, err := starter.SubmitDeviceOnlineFullSync(
+		context.Background(),
+		dev,
+		"device_online:event-1",
+		"event-1",
+		"device.online",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, requestID, result.RequestID)
+	assert.Equal(t, &runID, result.RunID)
+	assert.Equal(t, "running", result.Status)
+	assert.Equal(t, 13, result.TaskCount)
+	assert.Equal(t, "provision", submitter.command.CallerType)
+	assert.Equal(t, paramsync.TriggerDeviceOnline, submitter.command.TriggerReason)
+	assert.Equal(t, paramsync.SyncScopeFull, submitter.command.Scope)
+	assert.Empty(t, submitter.command.RequestedPaths)
+	assert.Equal(t, "device_online:event-1", submitter.command.IdempotencyKey)
+	assert.Equal(t, "event-1", submitter.command.SourceEventID)
+	assert.Equal(t, "device.online", submitter.command.OriginEventType)
+}
+
+func TestParamSyncStarter_DeviceOnlinePreservesQueuedAutomaticBackoffResult(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "online-device"}
+	requestID := uuid.New()
+	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
+		RequestID:  requestID,
+		Status:     paramsync.RequestStatusQueued,
+		ResultCode: paramsync.ResultCodeAutomaticBackoff,
+	}}
+	starter := &paramSyncStarter{
+		service: submitter,
+		flags: paramsync.FeatureFlags{
+			RunEnabled:            true,
+			ResultConsumerEnabled: true,
+			StagingEnabled:        true,
+			CanaryPercent:         100,
+		},
+	}
+
+	result, err := starter.SubmitDeviceOnlineFullSync(
+		context.Background(),
+		dev,
+		"device_online:event-backoff",
+		"event-backoff",
+		"device.online",
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, requestID, result.RequestID)
+	assert.Equal(t, "queued", result.Status)
+	assert.Equal(t, "AUTOMATIC_BACKOFF", result.ResultCode)
+	assert.Zero(t, result.TaskCount)
+}
+
+func TestParamSyncStarter_DeviceOnlineNeverFallsBackWhenDurableDisabled(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "online-device"}
+	starter := &paramSyncStarter{
+		flags:  paramsync.FeatureFlags{RunEnabled: false},
+		legacy: fakeLegacyManualSyncStarter{used: true, count: 3},
+	}
+
+	result, err := starter.SubmitDeviceOnlineFullSync(
+		context.Background(),
+		dev,
+		"device_online:event-disabled",
+		"event-disabled",
+		"device.online",
+	)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "durable device-online parameter sync is disabled")
+}
+
 func TestSubmitReleaseSync_UsesCampaignAndAttemptMetadata(t *testing.T) {
 	dev := &model.Device{ID: uuid.New(), SerialNumber: "release-device"}
 	campaignID := uuid.New()

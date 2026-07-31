@@ -224,9 +224,8 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 // 可按保守字节估算合批以降低 BSC 256 BTS 场景的串行往返数，同时把估算 NATS payload
 // 控制在 5MB 以下。
 //
-// commandKey 默认使用 "sync-gpv-{sn}-{i}"；issue #219 的新设备 MAC 定向查询
-// 使用 "sync-gpv-partial-{sn}-{i}"。两者都保留 sync-gpv- 前缀供 ACS Fault
-// 自愈和 Path B 结果翻译识别，partial 子前缀则明确禁止全量差异对账。
+// commandKey 使用 "sync-gpv-{sn}-{i}"，保留 sync-gpv- 前缀供 ACS Fault
+// 自愈和 Path B 结果翻译识别。
 //
 // ExpiresIn=syncGPVTaskExpiresIn（1800s）：保留给慢设备/异常大对象的多批兜底窗口。
 // 常规 BSC BTS 对象在 5MB 预算内会一次整对象同步，不再产生 200+ 个实例 task。
@@ -234,15 +233,6 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 // 返回入队成功的 task ID 列表，调用方可用于追溯/北向返回。
 func (s *SyncService) EnqueueGPVBatches(ctx context.Context, deviceSN string, paramPaths []string, sourceID string) ([]string, error) {
 	return s.enqueueGPVBatches(ctx, deviceSN, paramPaths, sourceID, "sync-gpv-")
-}
-
-func (s *SyncService) enqueuePartialGPVBatches(
-	ctx context.Context,
-	deviceSN string,
-	paramPaths []string,
-	sourceID string,
-) ([]string, error) {
-	return s.enqueueGPVBatches(ctx, deviceSN, paramPaths, sourceID, partialSyncGPVCommandKeyPrefix)
 }
 
 func (s *SyncService) enqueueGPVBatches(
@@ -341,18 +331,12 @@ func (s *SyncService) enqueueGPVPrefixes(
 	dev *model.Device,
 	prefixes []string,
 	sourceID string,
-	partial bool,
 ) error {
 	log, _ := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
 	if log != nil {
 		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoverySyncing, "")
 	}
-	var err error
-	if partial {
-		_, err = s.enqueuePartialGPVBatches(ctx, dev.SerialNumber, prefixes, sourceID)
-	} else {
-		_, err = s.EnqueueGPVBatches(ctx, dev.SerialNumber, prefixes, sourceID)
-	}
+	_, err := s.EnqueueGPVBatches(ctx, dev.SerialNumber, prefixes, sourceID)
 	return err
 }
 
