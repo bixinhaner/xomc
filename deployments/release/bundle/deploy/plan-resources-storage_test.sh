@@ -18,10 +18,10 @@ check_eq() {
   if [ "$got" = "$want" ]; then ok; else bad "$name: got=[$got] want=[$want]"; fi
 }
 file_inode() {
-  stat -f '%i' "$1" 2>/dev/null || stat -c '%i' "$1"
+  stat -c '%i' "$1" 2>/dev/null || stat -f '%i' "$1"
 }
 file_mtime() {
-  stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1"
+  stat -c '%Y' "$1" 2>/dev/null || stat -f '%m' "$1"
 }
 
 MOUNTS='107374182400|/
@@ -116,6 +116,62 @@ for mem_mib in 40000 45000 50000; do
     bad "${mem_mib}MiB 独占主机的双 ACS 规划不应因内部重复分配超预算"
   fi
 done
+
+echo "── 实际内存驱动动态资源分配 ──"
+DYNAMIC_ENV="$TMP/dynamic.env"
+printf 'OMC_PUBLIC_HOST=10.0.0.6\n' > "$DYNAMIC_ENV"
+if env \
+  OMC_PROBE_CPU=32 \
+  OMC_PROBE_MEM_TOTAL_MIB=31763 \
+  OMC_PROBE_MEM_AVAIL_MIB=23756 \
+  OMC_PROBE_LOAD15=0 \
+  OMC_PROBE_STORAGE_MOUNTS="$MOUNTS" \
+  OMC_STORAGE_ENV_FILE="$DYNAMIC_ENV" \
+  bash "$PLANNER" --floor-tolerance-pct 50 --output "$TMP/dynamic-resources.env" \
+    >"$TMP/dynamic-output" 2>&1; then
+  if resource_env_validate "$TMP/dynamic-resources.env"; then
+    ok
+  else
+    bad "实际内存驱动的资源计划必须满足完整资源契约"
+  fi
+  dynamic_acs_mib="$(resource_env_memory_mib "$(resource_env_get "$TMP/dynamic-resources.env" ACS_MEM)" | awk '{printf "%d", $1}')"
+  dynamic_pg_mib="$(resource_env_memory_mib "$(resource_env_get "$TMP/dynamic-resources.env" POSTGRES_MEM)" | awk '{printf "%d", $1}')"
+  dynamic_redis_mib="$(resource_env_memory_mib "$(resource_env_get "$TMP/dynamic-resources.env" REDIS_MEM)" | awk '{printf "%d", $1}')"
+  if [ "$dynamic_acs_mib" -lt 4096 ] && [ "$dynamic_pg_mib" -lt 7168 ] && [ "$dynamic_redis_mib" -lt 5120 ]; then
+    ok
+  else
+    bad "31 GiB 主机的 ACS/PG/Redis 资源未按实际预算缩放"
+  fi
+else
+  bad "31 GiB 主机应能生成按实际预算缩放的资源计划"
+fi
+
+echo "── 过低内存仍必须拒绝部署 ──"
+LOW_ENV="$TMP/low-memory.env"
+printf 'OMC_PUBLIC_HOST=10.0.0.7\n' > "$LOW_ENV"
+if env \
+  OMC_PROBE_CPU=16 \
+  OMC_PROBE_MEM_TOTAL_MIB=16384 \
+  OMC_PROBE_MEM_AVAIL_MIB=16384 \
+  OMC_PROBE_LOAD15=0 \
+  OMC_PROBE_STORAGE_MOUNTS="$MOUNTS" \
+  OMC_STORAGE_ENV_FILE="$LOW_ENV" \
+  bash "$PLANNER" --floor-tolerance-pct 50 --output "$TMP/low-resources.env" \
+    >"$TMP/low-output" 2>&1; then
+  bad "过低内存主机不得生成资源计划"
+else
+  ok
+fi
+if [ -e "$TMP/low-resources.env" ]; then
+  bad "过低内存主机不得写入 resources.env"
+else
+  ok
+fi
+if [ -e "$TMP/overcommitted-resources.env" ]; then
+  bad "物理内存不足时不得写入 resources.env"
+else
+  ok
+fi
 
 echo "── 不覆盖人工路径 ──"
 CUSTOM_ENV="$TMP/custom.env"
