@@ -210,10 +210,7 @@ func (d *OutboxDispatcher) claim(ctx context.Context, limit int) ([]outboxTask, 
 		return nil, fmt.Errorf("begin claim parameter sync outbox: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	query, args, err := storage.Psql.Select("id", "event_type", "payload", "attempt_count").From("parameter_sync_outbox").
-		Where(sq.Eq{"status": []string{"pending", "failed"}}).
-		Where(sq.LtOrEq{"next_attempt_at": d.now()}).OrderBy("created_at ASC").Limit(uint64(limit)).
-		Suffix("FOR UPDATE SKIP LOCKED").ToSql()
+	query, args, err := buildClaimOutboxSQL(d.now(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("build claim parameter sync outbox: %w", err)
 	}
@@ -251,6 +248,22 @@ func (d *OutboxDispatcher) claim(ctx context.Context, limit int) ([]outboxTask, 
 		return nil, fmt.Errorf("commit claim parameter sync outbox: %w", err)
 	}
 	return items, nil
+}
+
+func buildClaimOutboxSQL(now time.Time, limit int) (string, []interface{}, error) {
+	// Keep the immutable status predicate literal. PostgreSQL cannot prove that
+	// parameterized status values imply idx_parameter_sync_outbox_ready_created's
+	// partial-index predicate when pgx selects a generic prepared plan. Under a
+	// cold-start backlog that turns this LIMIT query into a full scan and an
+	// external sort of every payload row.
+	return storage.Psql.Select("id", "event_type", "payload", "attempt_count").
+		From("parameter_sync_outbox").
+		Where("status IN ('pending', 'failed')").
+		Where(sq.LtOrEq{"next_attempt_at": now}).
+		OrderBy("created_at ASC").
+		Limit(uint64(limit)).
+		Suffix("FOR UPDATE SKIP LOCKED").
+		ToSql()
 }
 
 func (d *OutboxDispatcher) markDelivered(ctx context.Context, id uuid.UUID) error {

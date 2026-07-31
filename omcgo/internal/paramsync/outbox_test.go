@@ -2,10 +2,31 @@ package paramsync
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/omcgo/omcgo/internal/task"
 )
+
+func TestBuildClaimOutboxSQLKeepsPartialIndexPredicateLiteral(t *testing.T) {
+	now := time.Date(2026, 8, 1, 2, 30, 0, 0, time.UTC)
+
+	query, args, err := buildClaimOutboxSQL(now, 100)
+
+	if err != nil {
+		t.Fatalf("build claim SQL: %v", err)
+	}
+	if want := "status IN ('pending', 'failed')"; !strings.Contains(query, want) {
+		t.Fatalf("query = %q, want literal partial-index predicate %q", query, want)
+	}
+	if strings.Contains(query, "status IN ($1,$2)") {
+		t.Fatalf("query = %q, status values must not be parameters", query)
+	}
+	if len(args) != 1 || args[0] != now {
+		t.Fatalf("args = %#v, want only next_attempt_at=%v", args, now)
+	}
+}
 
 type recordingPlannedTaskLifecycle struct {
 	released         int
