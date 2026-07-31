@@ -29,6 +29,17 @@ secrets_get_val() {
   awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,"");print;exit}' "$2" 2>/dev/null
 }
 
+# secrets_bind_data_exists <env_file> —— 检测 plan-resources.sh 配置的 bind-mount
+# PostgreSQL 数据目录是否已经初始化。Docker volume inspect 无法覆盖这种部署方式。
+secrets_bind_data_exists() {
+  local env_file="$1" key path
+  for key in POSTGRES_DATA_PATH TSDB_DATA_PATH; do
+    path="$(secrets_get_val "$key" "$env_file")"
+    [ -f "$path/PG_VERSION" ] && return 0
+  done
+  return 1
+}
+
 # secrets_is_default_value <key> <value> —— value 是否为已知默认 / 占位 / 空。
 # 用于「是否需新生成 / 该 .env 能否当迁移源」判定。返回 0=是默认（不可信），1=非默认（可信）。
 secrets_is_default_value() {
@@ -95,7 +106,7 @@ secrets_import_to() {
 # 其它行与原顺序；secrets 有而 target 没有的键追加到末尾。成功 0 / 失败 1。
 secrets_apply_to_env() {
   local secrets="$1" target="$2" tmp
-  [ -f "$secrets" ] && [ -f "$target" ] || return 0
+  [ -f "$secrets" ] && [ -f "$target" ] || return 1
   tmp="$(mktemp)" || return 1
   if awk -v keys="$SECRET_KEYS" '
       BEGIN { n=split(keys,A," "); for(i=1;i<=n;i++) want[A[i]]=1 }
@@ -137,15 +148,24 @@ ensure_secrets() {
   if [ -f "$SECRETS_FILE" ]; then
     log "secrets：复用已存在 ${SECRETS_FILE}（幂等，绝不重生成）"
   else
-    local have_vol=0 src="" f pw
+    local have_vol=0 have_bind_data=0 src="" f pw
     docker volume inspect "${COMPOSE_PROJECT}_pgdata"    >/dev/null 2>&1 && have_vol=1
     docker volume inspect "${COMPOSE_PROJECT}_miniodata" >/dev/null 2>&1 && have_vol=1
+    if secrets_bind_data_exists "$target_env"; then
+      have_bind_data=1
+      have_vol=1
+    fi
     # 现行有效凭证源：current .env 优先，退 etc/.env.saved；取「PG 口令非默认」者
     for f in "$target_env" "$OMC_ROOT/etc/.env.saved"; do
       [ -f "$f" ] || continue
       pw="$(secrets_get_val POSTGRES_PASSWORD "$f")"
       if ! secrets_is_default_value POSTGRES_PASSWORD "$pw"; then src="$f"; break; fi
     done
+    if [ "$have_bind_data" = 1 ] && [ -z "$src" ]; then
+      warn "secrets：检测到已初始化的 PostgreSQL bind-mount 数据目录，但没有可继承的非默认口令"
+      warn "secrets：为避免新口令与现有数据不一致，已停止部署；请恢复旧 .env/secrets.env，或确认测试数据后清空数据目录再重试"
+      return 1
+    fi
     if [ "$have_vol" = 1 ] || [ -n "$src" ]; then
       [ -n "$src" ] || src="$target_env"   # 卷在但没找到非默认源：用现值（绝不瞎生成，否则连不上旧卷）
       log "secrets：检测到存量数据卷/现行凭证，从现行凭证导入 → ${SECRETS_FILE}（不新生成，保证与旧卷一致）"

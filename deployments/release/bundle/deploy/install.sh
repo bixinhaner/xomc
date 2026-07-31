@@ -1103,6 +1103,21 @@ if [ "$HEALTH_OK" -eq 1 ]; then
 else
   cat "$HEALTHCHECK_LOG"
   warn "健康检查在 ${HEALTHCHECK_TIMEOUT}s 内未通过"
+  log "业务容器失败诊断（状态 / OOM / 退出码 / 重启次数 + 最近日志）..."
+  for service in app acs acs-candidate worker; do
+    service_cid="$("${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
+    if [ -z "$service_cid" ]; then
+      log "  $service：未找到容器"
+      continue
+    fi
+    service_state="$(docker inspect -f '{{.State.Status}}' "$service_cid" 2>/dev/null || echo unknown)"
+    service_oom="$(docker inspect -f '{{.State.OOMKilled}}' "$service_cid" 2>/dev/null || echo unknown)"
+    service_exit="$(docker inspect -f '{{.State.ExitCode}}' "$service_cid" 2>/dev/null || echo unknown)"
+    service_restarts="$(docker inspect -f '{{.RestartCount}}' "$service_cid" 2>/dev/null || echo unknown)"
+    log "  $service：state=$service_state oom=$service_oom exit=$service_exit restarts=$service_restarts"
+    log "  $service 最近日志（最多 40 行）："
+    "${DC[@]}" logs --tail=40 "$service" 2>&1 || true
+  done
 fi
 rm -f "$HEALTHCHECK_LOG"
 

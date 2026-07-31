@@ -27,7 +27,7 @@ secrets_is_default_value POSTGRES_PASSWORD "a1b2c3d4e5f6strongrand" && bad "强�
 echo "── secrets_generate_to（强随机 + 权限 600 + 非默认）──"
 secrets_generate_to "$TMP/sec"
 chk "MINIO_ROOT_USER 固定 omcadmin" "$(secrets_get_val MINIO_ROOT_USER "$TMP/sec")" "omcadmin"
-chk "文件权限 600" "$(stat -f '%Lp' "$TMP/sec" 2>/dev/null || stat -c '%a' "$TMP/sec" 2>/dev/null)" "600"
+chk "文件权限 600" "$(stat -c '%a' "$TMP/sec" 2>/dev/null || stat -f '%Lp' "$TMP/sec" 2>/dev/null)" "600"
 PW="$(secrets_get_val POSTGRES_PASSWORD "$TMP/sec")"
 [ -n "$PW" ] && ! secrets_is_default_value POSTGRES_PASSWORD "$PW" && ok || bad "生成的 PG 口令应非空非默认"
 JWT="$(secrets_get_val OMCGO_JWT_SECRET "$TMP/sec")"
@@ -52,6 +52,7 @@ chk "apply 保留非密钥 IMAGE_APP" "$(secrets_get_val IMAGE_APP "$TMP/env")" 
 chk "apply 保留 OMC_PUBLIC_HOST" "$(secrets_get_val OMC_PUBLIC_HOST "$TMP/env")" "10.0.0.1"
 # secrets 有但 env 没有的键应追加
 chk "apply 追加缺失的 OMC_SHARED_SECRET" "$(secrets_get_val OMC_SHARED_SECRET "$TMP/env")" "oldshared"
+secrets_apply_to_env "$TMP/missing-secrets" "$TMP/env" && bad "缺失 secrets 文件应失败" || ok
 
 echo '── apply 特殊字符口令(含 = 和 美元符 & )安全 ──'
 printf 'POSTGRES_PASSWORD=a=b$c&d\nMINIO_ROOT_USER=u\nMINIO_ROOT_PASSWORD=m\nOMCGO_JWT_SECRET=j\nOMC_SHARED_SECRET=s\nGRAFANA_ADMIN_PASSWORD=g\n' > "$TMP/sp"
@@ -72,6 +73,20 @@ setup_omc() {  # $1 = 写到 current/deploy/.env 的内容；清空 secrets.env 
   OMC_ROOT="$TMP/omc.$$.$RANDOM"; mkdir -p "$OMC_ROOT/current/deploy" "$OMC_ROOT/etc"
   printf '%s' "$1" > "$OMC_ROOT/current/deploy/.env"
 }
+
+echo "── bind-mount 数据目录检测 ──"
+mkdir -p "$TMP/pg-bind"
+printf '16\n' > "$TMP/pg-bind/PG_VERSION"
+printf 'POSTGRES_DATA_PATH=%s\n' "$TMP/pg-bind" > "$TMP/bind-env"
+secrets_bind_data_exists "$TMP/bind-env" && ok || bad "已初始化 bind-mount PG 目录应被识别"
+printf 'POSTGRES_DATA_PATH=%s-empty\n' "$TMP" > "$TMP/bind-empty-env"
+secrets_bind_data_exists "$TMP/bind-empty-env" && bad "空 bind-mount 目录不应被识别" || ok
+
+mkdir -p "$TMP/omc-bind/current/deploy" "$TMP/omc-bind/etc"
+printf 'POSTGRES_PASSWORD=REPLACE_ME\nPOSTGRES_DATA_PATH=%s\n' "$TMP/pg-bind" > "$TMP/omc-bind/current/deploy/.env"
+OMC_ROOT="$TMP/omc-bind"
+DOCKER_VOL_EXISTS=0
+ensure_secrets && bad "已初始化 bind-mount 且无可信旧口令时应拒绝生成凭证" || ok
 
 # A. 全新装：无 secrets.env、无卷、.env=REPLACE_ME → 生成强随机
 DOCKER_VOL_EXISTS=0
