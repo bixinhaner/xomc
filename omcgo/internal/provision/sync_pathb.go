@@ -50,30 +50,6 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 	return s.startPathBSync(ctx, dev, sourceID, true, opts...)
 }
 
-var registeredDeviceMACStandardPaths = []string{
-	"Device.Ethernet.Interface.MACAddress",
-	"Device.Ethernet.Interface.{i}.MACAddress",
-}
-
-// StartRegisteredDeviceMACSync is the narrow Issue #219 registration path.
-// Production keeps routing_mode=closed, so this path deliberately uses the
-// established Path B mapping/result projection without entering durable full
-// sync or its registration/release reconcilers.
-func (s *SyncService) StartRegisteredDeviceMACSync(
-	ctx context.Context,
-	dev *model.Device,
-	sourceID string,
-) (bool, int, error) {
-	return s.startPathBSync(
-		ctx,
-		dev,
-		sourceID,
-		false,
-		WithReason("device_registered_mac"),
-		WithParameterPaths(registeredDeviceMACStandardPaths),
-	)
-}
-
 func (s *SyncService) startPathBSync(
 	ctx context.Context,
 	dev *model.Device,
@@ -178,8 +154,7 @@ func (s *SyncService) startPathBSync(
 	}
 
 	gpvTaskCount := len(buildGPVBatches(prefixes, s.batchSize))
-	macRegistrationPartial := pbOpts.reason == "device_registered_mac"
-	if err := s.enqueueGPVPrefixes(ctx, dev, prefixes, sourceID, macRegistrationPartial); err != nil {
+	if err := s.enqueueGPVPrefixes(ctx, dev, prefixes, sourceID); err != nil {
 		return true, gpvTaskCount, fmt.Errorf("enqueue path-b GPV: %w", err)
 	}
 	s.recordPathBSyncPendingBatches(ctx, dev.ID, gpvTaskCount)

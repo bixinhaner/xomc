@@ -101,15 +101,16 @@ const (
 
 	// SubjectDeviceOnline 是已存在设备从 offline 状态恢复 active 时发布（T-0123）。
 	// 发布者：device.DeviceService.UpdateFromInform；
-	// 订阅者：provision.Engine.HandleDeviceOnline — 触发 Path B 全量同步检测离线期间参数漂移。
+	// 订阅者：provision.Engine.HandleDeviceOnline — 触发 durable 全量同步检测离线期间参数漂移。
 	// 与 SubjectDeviceFirmwareChanged 二选一：同一 Inform 若 swVersion 也变化则只发 firmware.changed
 	// 不发 online（避免两路 Path B 重复同步）。
 	SubjectDeviceOnline = "device.online"
 
 	// SubjectDeviceFirmwareChanged 是设备固件版本变化时发布（T-0125）。
 	// 发布者：device.DeviceService.UpdateFromInform — 比对 oldVersion vs newVersion 不同时触发；
-	// 订阅者：provision.Engine.HandleFirmwareChanged — Redis 串行锁 + RequestModelUpload 重新交集 + Path B 同步。
-	// 与 SubjectDeviceOnline 二选一：firmware 变化时优先，避免两路 Path B 重复同步。
+	// 订阅者：provision.Engine.HandleFirmwareChanged — Redis 串行锁 + RequestModelUpload；
+	// 若同时发生 offline→active，则补交一次 durable 全量同步。
+	// 与 SubjectDeviceOnline 二选一：firmware 变化时优先，避免两路全量同步重复触发。
 	SubjectDeviceFirmwareChanged = "device.firmware.changed"
 
 	// SubjectDeviceRebootAbnormal 是检测到设备异常重启时发布。

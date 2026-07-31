@@ -350,6 +350,45 @@ func (s *paramSyncStarter) StartRegisteredDeviceSync(
 	return submitRegisteredDeviceSync(ctx, s.service, dev, sourceID)
 }
 
+func (s *paramSyncStarter) SubmitDeviceOnlineFullSync(
+	ctx context.Context,
+	dev *model.Device,
+	idempotencyKey string,
+	sourceEventID string,
+	originEventType string,
+) (*provision.DeviceOnlineFullSyncResult, error) {
+	if dev == nil {
+		return nil, fmt.Errorf("durable device-online parameter sync requires a device")
+	}
+	if !s.flags.EnabledForDevice(dev.ID.String()) {
+		return nil, fmt.Errorf("durable device-online parameter sync is disabled for device %s", dev.ID)
+	}
+	result, err := s.service.Submit(ctx, paramsync.SubmitCommand{
+		DeviceID:        dev.ID,
+		DeviceSN:        dev.SerialNumber,
+		CallerType:      "provision",
+		TriggerReason:   paramsync.TriggerDeviceOnline,
+		Scope:           paramsync.SyncScopeFull,
+		IdempotencyKey:  idempotencyKey,
+		SourceEventID:   sourceEventID,
+		OriginEventType: originEventType,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("submit durable device-online parameter sync: %w", err)
+	}
+	runID := result.RunID
+	if runID == nil {
+		runID = result.ActiveRunID
+	}
+	return &provision.DeviceOnlineFullSyncResult{
+		RequestID:  result.RequestID,
+		RunID:      runID,
+		Status:     string(result.Status),
+		ResultCode: string(result.ResultCode),
+		TaskCount:  result.TaskCount,
+	}, nil
+}
+
 func (s *paramSyncStarter) StartReleaseSync(
 	ctx context.Context,
 	dev *model.Device,

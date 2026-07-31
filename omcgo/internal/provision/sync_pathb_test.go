@@ -2,7 +2,6 @@ package provision
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sort"
 	"sync"
@@ -21,7 +20,6 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/mml"
 	"github.com/omcgo/omcgo/internal/product"
-	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
@@ -76,21 +74,6 @@ func (f *fakeProductRepoForPathB) FetchAlarmNeTypes(context.Context) (map[string
 type fakeParamModelRepoForPathB struct {
 	defaultByModel map[uuid.UUID][]parammodel.ParamMapping
 	discovered     map[string][]parammodel.ParamMapping
-}
-
-type failingDurableStarter struct {
-	calls int
-}
-
-func (f *failingDurableStarter) StartDurableSync(
-	context.Context,
-	*model.Device,
-	string,
-	string,
-	[]string,
-) (bool, int, error) {
-	f.calls++
-	return true, 0, errors.New("durable starter must not be called")
 }
 
 func (f *fakeParamModelRepoForPathB) IsParamModelActive(_ context.Context, _ uuid.UUID) (bool, error) {
@@ -270,102 +253,6 @@ func TestExtractStorablePrefixesForStandardPaths_GPSTranslatesStandardTargets(t 
 	assert.Empty(t, extractStorablePrefixesForStandardPaths(mappings, []string{
 		"Device.FAP.GPS.LockedLongitude",
 	}))
-}
-
-func TestRegisteredDeviceMACPathsResolveToOneGPVBatchPerProductMapping(t *testing.T) {
-	tests := []struct {
-		name    string
-		mapping parammodel.ParamMapping
-		want    []string
-	}{
-		{
-			name: "unit mac vendor leaf",
-			mapping: parammodel.ParamMapping{
-				PrivatePath:  "Device.DeviceInfo.X_COM_MACAddress",
-				StandardPath: "Device.Ethernet.Interface.MACAddress",
-				IsStorable:   true,
-				IsSupported:  true,
-			},
-			want: []string{"Device.DeviceInfo.X_COM_MACAddress"},
-		},
-		{
-			name: "tr181 ethernet interfaces",
-			mapping: parammodel.ParamMapping{
-				PrivatePath:  "Device.Ethernet.Interface.{i}.MACAddress",
-				StandardPath: "Device.Ethernet.Interface.{i}.MACAddress",
-				IsStorable:   true,
-				IsSupported:  true,
-			},
-			want: []string{"Device.Ethernet.Interface."},
-		},
-		{
-			name: "tr098 wan interfaces",
-			mapping: parammodel.ParamMapping{
-				PrivatePath:  "InternetGatewayDevice.WANDevice.{i}.WANEthernetInterfaceConfig.MACAddress",
-				StandardPath: "Device.Ethernet.Interface.{i}.MACAddress",
-				IsStorable:   true,
-				IsSupported:  true,
-			},
-			want: []string{"InternetGatewayDevice.WANDevice."},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			paths := extractStorablePrefixesForStandardPaths(
-				[]parammodel.ParamMapping{tt.mapping},
-				registeredDeviceMACStandardPaths,
-			)
-			assert.Equal(t, tt.want, paths)
-			assert.Len(t, buildGPVBatches(paths, 50), 1)
-		})
-	}
-}
-
-func TestStartRegisteredDeviceMACSyncBypassesDurableStarter(t *testing.T) {
-	durable := &failingDurableStarter{}
-	var captured []*task.CreateTaskRequest
-	queue := &mockCommandQueue{CreateFn: func(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
-		captured = append(captured, req)
-		return task.NewTask(req), nil
-	}}
-	svc := &SyncService{
-		durableStarter: durable,
-		paramRepo:      deviceParameterRepoStub{},
-		discoveryRepo:  &stubDiscoveryRepo{},
-		taskSvc:        queue,
-		batchSize:      50,
-		logger:         zap.NewNop(),
-	}
-	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-MAC", ProductClass: "FAP/MLQ/SC"}
-	enablePathBRegistryForTest(t, svc, dev.ProductClass, []parammodel.ParamMapping{{
-		PrivatePath:  "Device.DeviceInfo.X_COM_MACAddress",
-		StandardPath: "Device.Ethernet.Interface.MACAddress",
-		IsStorable:   true,
-		IsSupported:  true,
-	}})
-
-	used, taskCount, err := svc.StartRegisteredDeviceMACSync(
-		context.Background(),
-		dev,
-		dev.ID.String(),
-	)
-
-	require.NoError(t, err)
-	assert.True(t, used)
-	assert.Equal(t, 1, taskCount)
-	assert.Zero(t, durable.calls)
-	require.Len(t, captured, 1)
-	var params struct {
-		Names []string `json:"names"`
-	}
-	require.NoError(t, json.Unmarshal(captured[0].Params, &params))
-	assert.Equal(t, []string{"Device.DeviceInfo.X_COM_MACAddress"}, params.Names)
-	assert.Equal(t, "sync-gpv-partial-SN-MAC-0", captured[0].CommandKey)
-	assert.False(t, isFullSyncTrigger(captured[0].CommandKey))
-	assert.Equal(t, dev.ID.String(), captured[0].SourceID)
-	_, err = uuid.Parse(captured[0].SourceID)
-	assert.NoError(t, err, "device_tasks.source_id is a UUID column")
 }
 
 func TestExtractStorablePrefixes_AllUnsupported_Empty(t *testing.T) {

@@ -380,7 +380,7 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 	// 4. T-0123/T-0125: PG + cache 写入成功后发 transition 事件。
 	// 与 UpdateFromInform 非 batch 路径行为对齐（device_service.go §UpdateFromInform 末尾）。
 	// 同一 Inform 满足两者时优先发 firmware.changed（不发 device.online），由
-	// HandleFirmwareChanged 触发的重新交集 + Path B 覆盖 online 的能力，避免双 Path B。
+	// HandleFirmwareChanged 触发模型刷新 + durable 全量同步覆盖 online 语义，避免双触发。
 	if p.transitionPublisher != nil {
 		for _, u := range hit {
 			p.publishTransitionEvents(ctx, u)
