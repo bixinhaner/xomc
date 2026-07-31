@@ -98,6 +98,7 @@ func initPMModule(c *Container) error {
 	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, nil, logger.Named("adhoc")).
 		WithEnabledMetricSelectionService(adhoc.NewEnabledMetricSelectionService(enabledRepo)).
 		WithTimezoneProvider(c.SystemTimezone)
+	var progressService *pmstream.ProgressService
 	if c.Redis != nil {
 		streamCfg := pmstream.ConfigFromEnv()
 		progressStore := pmstream.NewRedisWindowStore(c.Redis, streamCfg.WindowTTL)
@@ -116,9 +117,10 @@ func initPMModule(c *Container) error {
 		} else if !backfilled {
 			logger.Info("PM progress version metadata backfill already owned by worker")
 		}
-		pmAdhocHandler.WithProgressService(
-			pmstream.NewProgressService(c.TsPool, progressStore, progressTasks),
-		)
+		progressService = pmstream.NewProgressService(
+			c.TsPool, progressStore, progressTasks,
+		).SetTimezoneProvider(c.SystemTimezone)
+		pmAdhocHandler.WithProgressService(progressService)
 	}
 
 	// T-0174 阶段 1：指标查询页"查询模板"REST 入口（5 CRUD：list/get/create/update/delete）。
@@ -206,6 +208,7 @@ func initPMModule(c *Container) error {
 		pmIndicatorRepo:        indicatorRepo,
 		pmAggregator:           pmAggregator,
 		pmAsyncJobRepo:         pmAsyncJobRepo,
+		pmProgressService:      progressService,
 		pmAdhocHandler:         pmAdhocHandler,
 		pmQueryTemplateHandler: pmQueryTemplateHandler,
 		pmExportHandler:        pmExportHandler,
@@ -252,6 +255,7 @@ type pmHandlerDeps struct {
 	pmIndicatorRepo        indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
 	pmAggregator           *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
 	pmAsyncJobRepo         asyncjob.Repository           // T-0164 收尾 G5-Gap-2 手动重算端点
+	pmProgressService      *pmstream.ProgressService     // 当前日/周只读预览，adhoc 与首页共用
 	pmAdhocHandler         *adhoc.Handler                // T-0164-P7 自定义聚合任务 REST 入口
 	pmQueryTemplateHandler *querytemplate.Handler        // T-0174 指标查询模板 REST 入口
 	pmExportHandler        *pmexport.Handler             // KPI-EXPORT T1 KPI 导出 REST 入口

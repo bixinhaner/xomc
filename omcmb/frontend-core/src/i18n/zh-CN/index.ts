@@ -8438,6 +8438,15 @@ const messages: Record<string, string> = {
   'dashboard.kpiPanel.empty.hint':       '全网指标每小时整点更新；刚灌入的数据将在下个整点后或回退原始明细后显示。',
   'dashboard.kpiPanel.empty.lastWeekHint': '所选对比周期暂无历史聚合数据；请联系运维确认上周数据是否已完成跑批。',
   'dashboard.kpiPanel.empty.rollupHint': '当前小时、天或周聚合窗口暂无数据，请联系运维检查聚合任务状态。',
+  'dashboard.kpiPanel.progress.partial': '进行中 {received}/{expected}（{coverage}%）',
+  'dashboard.kpiPanel.progress.detail': '活动任务版本 {version}，有效区间 {from} 至 {to}，当前修订版 {revision}。',
+  'dashboard.kpiPanel.progress.versionSlice': '版本片段 {received}/{expected}：{status}',
+  'dashboard.kpiPanel.progress.naturalPeriod': '自然周期 {received}/{expected}：{status}',
+  'dashboard.kpiPanel.progress.complete': '完整',
+  'dashboard.kpiPanel.progress.incomplete': '未完整',
+  'dashboard.kpiPanel.progress.effectiveOngoing': '持续生效',
+  'dashboard.kpiPanel.progress.unavailable': '进行中状态暂不可用',
+  'dashboard.kpiPanel.progress.unavailableDetail': '当前日/周状态读取超时或状态存储不可用；已发布历史曲线仍保留，下次 5 分钟定时刷新将重试。',
 
   // qa-614 c5 — software 固件/升级（#369 / #371 / #379）
   'software.firmware.selectOrInputProductClass': '请选择或输入产品类型',

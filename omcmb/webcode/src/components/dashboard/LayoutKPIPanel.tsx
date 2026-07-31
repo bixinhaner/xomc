@@ -29,6 +29,10 @@ import { useT } from '@/hooks/useT';
 import { useIntl } from 'react-intl';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import type { DashboardKPIGranularity, KPILayoutPanel } from '@core/types/dashboard';
+import type {
+  DashboardPeriodProgress,
+  DashboardProgressState,
+} from '@core/types/dashboard';
 import type { MultiTrendComparisonData } from '@core/types/dashboard';
 import type { TechnologyType } from '@/pages/dashboard/kpi-config';
 import { useMetricMetadata, resolveMetricMeta } from './useMetricMetadata';
@@ -51,6 +55,10 @@ export interface LayoutKPIPanelProps {
   onGranularityChange: (granularity: DashboardKPIGranularity) => void;
   /** 后端聚合桶对应的固定横轴键。 */
   bucketKeys?: string[];
+  /** 当前日/周自然周期覆盖率。 */
+  periodProgress?: DashboardPeriodProgress[];
+  /** 当前周期状态源是否可用。 */
+  progressState?: DashboardProgressState;
   /** 图表高度。 */
   height?: number;
 }
@@ -63,6 +71,8 @@ export function LayoutKPIPanel({
   granularity,
   onGranularityChange,
   bucketKeys = [],
+  periodProgress = [],
+  progressState = 'not_applicable',
   height = 280,
 }: LayoutKPIPanelProps) {
   const t = useT();
@@ -136,6 +146,58 @@ export function LayoutKPIPanel({
 
   const chartXData = weekXData ?? [];
   const chartXDataFull = weekXDataFull ?? [];
+  const activeProgress = useMemo(
+    () => periodProgress
+      .filter((item) => item.granularity === granularity)
+      .sort((left, right) => right.windowStart.localeCompare(left.windowStart))[0],
+    [granularity, periodProgress],
+  );
+  const progressLabel = useMemo(() => {
+    if (granularity === 'hourly' || progressState === 'not_applicable') return undefined;
+    if (progressState === 'unavailable') {
+      return {
+        color: 'warning',
+        text: t('dashboard.kpiPanel.progress.unavailable'),
+        detail: t('dashboard.kpiPanel.progress.unavailableDetail'),
+      };
+    }
+    if (!activeProgress || activeProgress.expectedSlots <= 0) return undefined;
+    const coverage = Math.min(
+      100,
+      (activeProgress.receivedSlots / activeProgress.expectedSlots) * 100,
+    ).toFixed(1);
+    const complete = t('dashboard.kpiPanel.progress.complete');
+    const incomplete = t('dashboard.kpiPanel.progress.incomplete');
+    return {
+      color: 'processing',
+      text: t('dashboard.kpiPanel.progress.partial', {
+        received: activeProgress.receivedSlots,
+        expected: activeProgress.expectedSlots,
+        coverage,
+      }),
+      detail: (
+        <div>
+          <div>{t('dashboard.kpiPanel.progress.detail', {
+            version: activeProgress.taskVersionId,
+            from: activeProgress.versionEffectiveFrom,
+            to: activeProgress.versionEffectiveTo
+              ?? t('dashboard.kpiPanel.progress.effectiveOngoing'),
+            revision: activeProgress.revision,
+          })}</div>
+          <div>{t('dashboard.kpiPanel.progress.versionSlice', {
+            received: activeProgress.receivedSlots,
+            expected: activeProgress.versionExpectedSlots,
+            status: activeProgress.versionSliceComplete ? complete : incomplete,
+          })}</div>
+          <div>{t('dashboard.kpiPanel.progress.naturalPeriod', {
+            received: activeProgress.receivedSlots,
+            expected: activeProgress.expectedSlots,
+            status: activeProgress.periodComplete ? complete : incomplete,
+          })}</div>
+        </div>
+      ),
+    };
+  }, [activeProgress, granularity, progressState, t]);
 
   // 至少一条 series 有真实数据点？无任何点时给"暂无聚合数据"提示（issue #359 保留）。
   const hasSeriesData = useMemo(
@@ -214,6 +276,11 @@ export function LayoutKPIPanel({
                 { label: t('dashboard.viewMode.week'), value: 'weekly' },
               ]}
             />
+            {progressLabel && (
+              <Tooltip title={progressLabel.detail}>
+                <Tag color={progressLabel.color}>{progressLabel.text}</Tag>
+              </Tooltip>
+            )}
           </div>
           {/*
            * 宽度分档 + responsive tag：

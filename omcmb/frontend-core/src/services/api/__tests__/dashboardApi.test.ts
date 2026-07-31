@@ -151,6 +151,80 @@ describe('dashboardApi.getAlarmTrend', () => {
   });
 });
 
+describe('dashboardApi.getKPITimeSeriesWithProgress', () => {
+  it('显式请求 partial 并映射当前周期覆盖率', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        series: {
+          K900010006: [
+            { time: '2026-07-31T00:00:00+08:00', value: 98.5, partial: true },
+          ],
+        },
+        period_progress: [{
+          task_id: '0184dddd-0001-4000-8000-000000000001',
+          task_version_id: '11111111-1111-4111-8111-111111111111',
+          granularity: 'daily',
+          window_start: '2026-07-31T00:00:00+08:00',
+          window_end: '2026-08-01T00:00:00+08:00',
+          entity_key: 'network',
+          revision: 2,
+          version_effective_from: '2026-07-31T06:00:00+08:00',
+          version_effective_to: null,
+          received_slots: 4,
+          expected_slots: 24,
+          version_expected_slots: 18,
+          coverage_ratio: 1 / 6,
+          version_slice_complete: false,
+          period_complete: false,
+          state: 'partial',
+        }],
+        progress_state: 'available',
+      },
+    });
+
+    const result = await dashboardApi.getKPITimeSeriesWithProgress(
+      ['K900010006'],
+      '2026-07-01T00:00:00+08:00',
+      '2026-08-01T00:00:00+08:00',
+      'daily',
+      'lte',
+    );
+
+    expect(getMock).toHaveBeenCalledWith('/dashboard/kpi-time-series', {
+      params: {
+        kpi_names: 'K900010006',
+        start_time: '2026-07-01T00:00:00+08:00',
+        end_time: '2026-08-01T00:00:00+08:00',
+        granularity: 'daily',
+        technology: 'lte',
+        include_partial: true,
+      },
+    });
+    expect(result.series.K900010006).toEqual([
+      ['2026-07-31T00:00:00+08:00', 98.5],
+    ]);
+    expect(result.progressState).toBe('available');
+    expect(result.periodProgress).toEqual([{
+      taskId: '0184dddd-0001-4000-8000-000000000001',
+      taskVersionId: '11111111-1111-4111-8111-111111111111',
+      granularity: 'daily',
+      windowStart: '2026-07-31T00:00:00+08:00',
+      windowEnd: '2026-08-01T00:00:00+08:00',
+      entityKey: 'network',
+      revision: 2,
+      versionEffectiveFrom: '2026-07-31T06:00:00+08:00',
+      versionEffectiveTo: null,
+      receivedSlots: 4,
+      expectedSlots: 24,
+      versionExpectedSlots: 18,
+      coverageRatio: 1 / 6,
+      versionSliceComplete: false,
+      periodComplete: false,
+      state: 'partial',
+    }]);
+  });
+});
+
 describe('dashboardApi — 告警热力图集成（Dashboard heatmap）', () => {
   it('getAlarmHeatmap 打 /dashboard/alarm-heatmap 带 days，回 7×24 矩阵 + max_count', async () => {
     const heatmap = buildHeatmap(42);

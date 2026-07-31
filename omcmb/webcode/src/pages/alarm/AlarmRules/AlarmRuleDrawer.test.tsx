@@ -159,9 +159,9 @@ describe('AlarmRuleDrawer 规则名必填 (#236)', () => {
 
     renderDrawer();
 
-    expect(screen.getByText('批量勾选当前页（3 台）')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '已选设备（0 台）' })).toBeInTheDocument();
-    expect(screen.getByText('设备总数 12 台，当前页 3 台，已选 0 台')).toBeInTheDocument();
+    expect(screen.getByText('批量勾选当前页')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '已选 0 台' })).toBeInTheDocument();
+    expect(screen.getByText('共 12 台')).toBeInTheDocument();
   }, 10000);
 
   it('已选设备弹窗显示当前页外的已选设备明细', () => {
@@ -187,9 +187,10 @@ describe('AlarmRuleDrawer 规则名必填 (#236)', () => {
       rule: makeRule(['visible-device', 'missing-device']),
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '已选设备（2 台）' }));
+    fireEvent.click(screen.getByRole('button', { name: '已选 2 台' }));
 
     expect(screen.getByText('SN-missing-device')).toBeInTheDocument();
-    expect(screen.getByText('设备总数 2 台，当前页 1 台，已选 2 台')).toBeInTheDocument();
+    expect(screen.getAllByText('已选 2 台')).toHaveLength(2);
+    expect(screen.getAllByText('共 2 台')).not.toHaveLength(0);
   }, 12000);
 });
