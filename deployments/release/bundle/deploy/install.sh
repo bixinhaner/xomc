@@ -129,8 +129,9 @@ merge_env_preserve() {
       BEGIN { n=split(keys, A, " "); for (i=1;i<=n;i++) want[A[i]]=1 }
       FNR==NR {                                    # 第一份 = 上一版(prev)
         if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
-          p=index($0,"="); k=substr($0,1,p-1)
-          if (k in want) { val[k]=substr($0,p+1); have[k]=1 }
+          p=index($0,"="); k=substr($0,1,p-1); candidate=substr($0,p+1)
+          # 空的旧值不能覆盖新包有效值（尤其 OMC_PUBLIC_HOST 和数据路径）。
+          if ((k in want) && candidate != "") { val[k]=candidate; have[k]=1 }
         }
         next
       }
@@ -335,6 +336,25 @@ docker info >/dev/null 2>&1 || die "docker 服务不可用，请先 systemctl st
 [ -f "$PKG_ROOT/deploy/docker-compose.app.yml" ]       || die "缺 deploy/docker-compose.app.yml" 1
 [ "$SKIP_WEB" = 1 ]        || [ -f "$PKG_ROOT/deploy/docker-compose.web.yml" ]        || die "缺 deploy/docker-compose.web.yml（或加 --skip-web）" 1
 [ "$SKIP_MONITORING" = 1 ] || [ -f "$PKG_ROOT/deploy/docker-compose.monitoring.yml" ] || die "缺 deploy/docker-compose.monitoring.yml（或加 --skip-monitoring）" 1
+
+# OMC_PUBLIC_HOST 是基站回传 PM/MR 文件所需的运维地址，不能等到复制包、
+# 切换 current 或覆盖 etc 后才校验。新包显式配置优先；新包留空时继承现行
+# release 或 uninstall 保存的 .env。这样地址缺失只会阻断 precheck，不会留下半升级状态。
+PUBLIC_HOST_CANDIDATE=""
+if [ -f "$PKG_ROOT/deploy/.env" ]; then
+  PUBLIC_HOST_CANDIDATE="$(deploy_env_file_value OMC_PUBLIC_HOST "$PKG_ROOT/deploy/.env" 2>/dev/null || true)"
+fi
+if [ -z "$PUBLIC_HOST_CANDIDATE" ]; then
+  for previous_env in "$OMC_ROOT/current/deploy/.env" "$OMC_ROOT/etc/.env.saved"; do
+    if [ -f "$previous_env" ]; then
+      PUBLIC_HOST_CANDIDATE="$(deploy_env_file_value OMC_PUBLIC_HOST "$previous_env" 2>/dev/null || true)"
+      [ -n "$PUBLIC_HOST_CANDIDATE" ] && break
+    fi
+  done
+fi
+deploy_env_public_host_valid "$PUBLIC_HOST_CANDIDATE" ||
+  die "OMC_PUBLIC_HOST 未配置为基站可达主机（当前: ${PUBLIC_HOST_CANDIDATE:-<空>}）；请先在 $PKG_ROOT/deploy/.env 配置服务器对基站可达的 IP/域名后重试" 1
+log "OMC_PUBLIC_HOST 预检通过：$PUBLIC_HOST_CANDIDATE"
 
 # 资源契约是部署必需输入。必须在 --check-only 退出、current 切换和任何容器重启之前
 # 校验真正会被本次安装采用的候选，不能等到 Step 6 组装 Compose 才发现旧三行文件。

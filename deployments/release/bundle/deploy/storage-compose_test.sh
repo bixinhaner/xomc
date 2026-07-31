@@ -77,6 +77,7 @@ contains "install 缺镜像时禁止隐式联网拉取" '离线安装缺少本�
 contains "infra 启动禁止 pull" '"${DC[@]}" up --pull never -d postgres postgres-tsdb redis nats minio' "$INSTALL"
 contains "业务启动禁止 pull" '"${DC[@]}" up --pull never -d' "$INSTALL"
 contains "候选 ACS 启动禁止 pull" '"${DC[@]}" up --pull never -d --no-deps acs-candidate' "$INSTALL"
+contains "安装在升级写操作前校验基站地址" 'OMC_PUBLIC_HOST 预检通过' "$INSTALL"
 for key in GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH \
   GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH \
   GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING; do
