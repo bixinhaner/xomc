@@ -315,6 +315,36 @@ resolve_resource_env_candidate() {
   fi
 }
 
+# precheck_skipped_infra_images —— --skip-infra 表示目标机已具备本次版本要求的
+# 基础设施/监控镜像。必须在复制 release、改写 data 和切换 current 前验证该前提；
+# 否则镜像仓库名或版本升级时会在 Step 4 才失败，留下“软链已切但业务仍跑旧镜像”的
+# 半升级状态。业务镜像由项目包在 Step 4 负责加载，不属于这里的前置条件。
+precheck_skipped_infra_images() {
+  local image_keys=(
+    IMAGE_POSTGRES IMAGE_POSTGRES_TSDB IMAGE_REDIS IMAGE_NATS IMAGE_MINIO
+  )
+  if [ "$SKIP_MONITORING" = 0 ]; then
+    image_keys+=(
+      IMAGE_PROMETHEUS IMAGE_ALERTMANAGER IMAGE_GRAFANA IMAGE_LOKI IMAGE_TEMPO
+      IMAGE_OTELCOL IMAGE_NATS_EXPORTER IMAGE_NGINX_EXPORTER IMAGE_NODE_EXPORTER
+      IMAGE_CADVISOR
+    )
+  fi
+
+  local key image
+  local missing_images=()
+  for key in "${image_keys[@]}"; do
+    image="$(deploy_env_file_value "$key" "$PKG_ROOT/deploy/.env" 2>/dev/null || true)"
+    [ -z "$image" ] && continue
+    docker image inspect "$image" >/dev/null 2>&1 || missing_images+=("$image")
+  done
+
+  if [ "${#missing_images[@]}" -gt 0 ]; then
+    die "--skip-infra 前置条件不满足，缺少本地基础设施/监控镜像：${missing_images[*]}。未复制 release、未切换 current、未改写业务数据；请先解压匹配架构的基础设施包到 ${INFRA_DIR}，并去掉 --skip-infra 重试。" 1
+  fi
+  log "--skip-infra 镜像预检通过：本次基础设施/监控镜像均已在本机"
+}
+
 # heal_main_pg_timescaledb_downgrade —— 升级自愈（#347 主库 timescaledb → 纯 PG 降级）
 # 旧版 release 主库用 timescaledb 镜像初始化，卷内 postgresql.conf 写死
 # shared_preload_libraries='timescaledb'；本版主库降级 postgres:16-alpine（无该库），旧卷
@@ -497,6 +527,8 @@ if [ "$SKIP_INFRA" = 0 ]; then
   · 首次部署需先：cd $INFRA_DIR && tar -xJf omc-infra-<版本>-<架构>.tar.xz --strip-components=1
   · 或加 --skip-infra 跳过基础设施镜像 load" 1
   [ -d "$INFRA_DIR/images" ] || die "基础设施目录缺 images/：$INFRA_DIR/images" 1
+else
+  precheck_skipped_infra_images
 fi
 
 log "precheck 通过"

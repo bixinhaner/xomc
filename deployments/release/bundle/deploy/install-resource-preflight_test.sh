@@ -91,6 +91,10 @@ EOF
 printf '%s\n' "$*" >>"${DOCKER_LOG:?}"
 case "${1:-} ${2:-}" in
   "compose version") exit 0 ;;
+  "image inspect")
+    [ -n "${MISSING_IMAGE:-}" ] && [ "${3:-}" = "$MISSING_IMAGE" ] && exit 1
+    exit 0
+    ;;
   "info ") exit 0 ;;
 esac
 exit 0
@@ -214,6 +218,57 @@ fi
 [ "$(readlink "$ROOT_COPY/current")" = "$before_link" ] && ok || bad "复制后复验失败不得切换 current"
 if grep -Eq '(^| )(restart|up)( |$)' "$TMP/docker.log"; then
   bad "资源复验失败不得重启或启动容器"
+else
+  ok
+fi
+
+echo "── skip-infra 在切换 current 前校验基础设施/监控镜像 ──"
+PKG_IMAGE="$TMP/pkg-image"
+ROOT_IMAGE="$TMP/root-image"
+BIN_IMAGE="$TMP/bin-image"
+prepare_package "$PKG_IMAGE"
+prepare_stubs "$BIN_IMAGE"
+: >"$PKG_IMAGE/deploy/docker-compose.monitoring.yml"
+cat >>"$PKG_IMAGE/deploy/.env" <<'EOF'
+IMAGE_POSTGRES=postgres:test
+IMAGE_POSTGRES_TSDB=timescaledb:test
+IMAGE_REDIS=redis:test
+IMAGE_NATS=nats:test
+IMAGE_MINIO=minio:test
+IMAGE_PROMETHEUS=prometheus:test
+IMAGE_ALERTMANAGER=alertmanager:test
+IMAGE_GRAFANA=grafana:test
+IMAGE_LOKI=loki:test
+IMAGE_TEMPO=tempo:test
+IMAGE_OTELCOL=otelcol:test
+IMAGE_NATS_EXPORTER=nats-exporter:test
+IMAGE_NGINX_EXPORTER=nginx-exporter:test
+IMAGE_NODE_EXPORTER=node-exporter:test
+IMAGE_CADVISOR=mirror/cadvisor:v1
+EOF
+mkdir -p "$ROOT_IMAGE/releases/old/deploy" "$ROOT_IMAGE/etc"
+ln -s "$ROOT_IMAGE/releases/old" "$ROOT_IMAGE/current"
+write_complete_env "$ROOT_IMAGE/releases/old/deploy/resources.env"
+: >"$TMP/docker.log"
+: >"$TMP/systemctl.log"
+before_link="$(readlink "$ROOT_IMAGE/current")"
+if env \
+  PATH="$BIN_IMAGE:$PATH" \
+  DOCKER_LOG="$TMP/docker.log" \
+  SYSTEMCTL_LOG="$TMP/systemctl.log" \
+  MISSING_IMAGE="mirror/cadvisor:v1" \
+  bash "$PKG_IMAGE/deploy/install.sh" \
+    --skip-infra --skip-web --yes --check-only \
+    --omc-root "$ROOT_IMAGE" >"$TMP/image-missing.out" 2>&1; then
+  bad "skip-infra check-only 不得接受缺失的基础设施/监控镜像"
+elif grep -Fq 'mirror/cadvisor:v1' "$TMP/image-missing.out"; then
+  ok
+else
+  bad "缺失镜像预检应明确列出镜像名: $(tail -5 "$TMP/image-missing.out")"
+fi
+[ "$(readlink "$ROOT_IMAGE/current")" = "$before_link" ] && ok || bad "缺失镜像预检失败不得切换 current"
+if grep -Eq '(^| )(restart|up)( |$)' "$TMP/docker.log"; then
+  bad "缺失镜像预检失败不得重启或启动容器"
 else
   ok
 fi
