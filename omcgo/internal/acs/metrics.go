@@ -5,6 +5,7 @@ import "github.com/prometheus/client_golang/prometheus"
 // ACSMetrics holds all Prometheus metrics for the ACS engine.
 type ACSMetrics struct {
 	ActiveSessions         prometheus.Gauge
+	GlobalActiveSessions   prometheus.Gauge
 	InformTotal            *prometheus.CounterVec
 	RPCDuration            *prometheus.HistogramVec
 	RPCErrorsTotal         *prometheus.CounterVec
@@ -25,7 +26,11 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 	m := &ACSMetrics{
 		ActiveSessions: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "acs_active_sessions",
-			Help: "Current number of active TR069 sessions",
+			Help: "Current number of TR069 sessions tracked by this ACS process",
+		}),
+		GlobalActiveSessions: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "acs_global_active_sessions",
+			Help: "Current number of globally admitted TR069 sessions from the shared admission controller",
 		}),
 		InformTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "acs_inform_total",
@@ -86,6 +91,7 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 
 	reg.MustRegister(
 		m.ActiveSessions,
+		m.GlobalActiveSessions,
 		m.InformTotal,
 		m.RPCDuration,
 		m.RPCErrorsTotal,

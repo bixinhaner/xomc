@@ -31,8 +31,9 @@ import (
 //
 // 沿用 120s 时后半批 task 会被 ExpiredSweeper 抢先标 expired，导致部分 BTS
 // 实例无法落库（前端临区/TRX 表显示不全），与首次同步语义不符。1800s 留出
-// 5~10 次 inform 机会，配合 ACS handler 单 task 1s 处理上限完全够 250 task 收尾。
+// 完整 TTL 内的 inform 机会，配合 ACS handler 单 task 1s 处理上限完成批量收尾。
 const syncGPVTaskExpiresIn = 1800
+const syncGPVTaskRetryIntervalSeconds = 30
 
 // SyncService handles batch parameter value synchronization from devices.
 //
@@ -259,6 +260,7 @@ func (s *SyncService) enqueueGPVBatches(
 	}
 	batches := buildGPVBatches(paramPaths, s.batchSize)
 	taskIDs := make([]string, 0, len(batches))
+	maxRetries := task.RetryBudgetCoveringExpiry(syncGPVTaskExpiresIn, syncGPVTaskRetryIntervalSeconds)
 	for i, batch := range batches {
 		gpvParams, err := json.Marshal(map[string]interface{}{
 			"names": batch,
@@ -267,14 +269,16 @@ func (s *SyncService) enqueueGPVBatches(
 			return taskIDs, fmt.Errorf("marshal GPV batch %d: %w", i, err)
 		}
 		t, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
-			DeviceSN:   deviceSN,
-			Method:     MethodGetParameterValues,
-			Params:     gpvParams,
-			Priority:   10 + i,
-			ExpiresIn:  syncGPVTaskExpiresIn,
-			CommandKey: fmt.Sprintf("%s%s-%d", commandKeyPrefix, deviceSN, i),
-			Source:     task.TaskSourceSystem,
-			SourceID:   sourceID,
+			DeviceSN:             deviceSN,
+			Method:               MethodGetParameterValues,
+			Params:               gpvParams,
+			Priority:             10 + i,
+			ExpiresIn:            syncGPVTaskExpiresIn,
+			MaxRetries:           &maxRetries,
+			RetryIntervalSeconds: syncGPVTaskRetryIntervalSeconds,
+			CommandKey:           fmt.Sprintf("%s%s-%d", commandKeyPrefix, deviceSN, i),
+			Source:               task.TaskSourceSystem,
+			SourceID:             sourceID,
 		})
 		if err != nil {
 			return taskIDs, fmt.Errorf("enqueue GPV batch %d: %w", i, err)

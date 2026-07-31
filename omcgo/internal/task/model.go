@@ -158,6 +158,17 @@ type SyncGPVFailure struct {
 	Status     string `json:"status,omitempty"`
 }
 
+// RetryBudgetCoveringExpiry returns a retry budget that cannot be exhausted
+// before a task's TTL solely because successive CWMP sessions recover a sent
+// task. Invalid/unscheduled inputs retain the historical default.
+func RetryBudgetCoveringExpiry(expiresInSeconds, retryIntervalSeconds int) int {
+	const defaultMaxRetries = 3
+	if expiresInSeconds <= 0 || retryIntervalSeconds <= 0 {
+		return defaultMaxRetries
+	}
+	return (expiresInSeconds + retryIntervalSeconds - 1) / retryIntervalSeconds
+}
+
 // NewTask 创建新任务
 func NewTask(req *CreateTaskRequest) *Task {
 	now := time.Now()
