@@ -196,6 +196,7 @@ type PMCollector struct {
 const (
 	maxWhitelistMissSample   = 8
 	whitelistMissLogInterval = time.Minute
+	pmRegistrationWaitQueue  = "pm-registration-wait"
 )
 
 // NewPMCollector creates a new PM collector.
@@ -321,24 +322,54 @@ func (c *PMCollector) SetConcurrency(n int) {
 
 // Subscribe registers the collector to listen for PM file received events.
 func (c *PMCollector) Subscribe(bus event.EventBus) error {
-	handler := c.handleFileReceived
+	mainHandler := c.handleFileReceived
+	deferredHandler := c.handleFileReceived
 	if c.runner != nil {
-		handler = c.runner.Wrap(event.SubjectPMFileReceived, c.handleFileReceived)
+		mainHandler = c.runner.Wrap(event.SubjectPMFileReceived, c.handleFileReceived)
+		deferredHandler = c.runner.Wrap(event.SubjectPMFileDeferred, c.handleFileReceived)
 	}
+	mainHandler = c.handoffDeferredDevice(bus, mainHandler)
 	n := c.concurrency
 	if n < 1 {
 		n = 1
 	}
 	for i := 0; i < n; i++ {
-		if _, err := bus.QueueSubscribe(event.SubjectPMFileReceived, "pm-workers", handler); err != nil {
+		if _, err := bus.QueueSubscribe(event.SubjectPMFileDeferred, pmRegistrationWaitQueue, deferredHandler); err != nil {
+			return fmt.Errorf("subscribe pm.file.deferred (sub %d/%d): %w", i+1, n, err)
+		}
+	}
+	for i := 0; i < n; i++ {
+		if _, err := bus.QueueSubscribe(event.SubjectPMFileReceived, "pm-workers", mainHandler); err != nil {
 			return fmt.Errorf("subscribe pm.file.received (sub %d/%d): %w", i+1, n, err)
 		}
 	}
 	c.logger.Info("PM collector subscribed to pm.file.received",
 		zap.Bool("retry_dlq_wrapped", c.runner != nil),
 		zap.Int("concurrency", n),
+		zap.String("registration_wait_queue", pmRegistrationWaitQueue),
 	)
 	return nil
+}
+
+// handoffDeferredDevice moves registration-race events out of the main PM
+// durable before acknowledging them. The separate durable may wait for the
+// full registration grace without consuming every pm-workers ack-pending slot.
+// Publish failure is returned so JetStream keeps the original message.
+func (c *PMCollector) handoffDeferredDevice(bus event.EventBus, handler event.EventHandler) event.EventHandler {
+	return func(ctx context.Context, evt event.Event) error {
+		err := handler(ctx, evt)
+		if !errors.Is(err, reliability.ErrDeferred) {
+			return err
+		}
+		if publishErr := bus.Publish(ctx, event.SubjectPMFileDeferred, evt); publishErr != nil {
+			return fmt.Errorf("handoff deferred PM event: %w", publishErr)
+		}
+		c.logger.Debug("PM event handed off to registration wait queue",
+			zap.String("event_id", evt.ID),
+			zap.Time("event_timestamp", evt.Timestamp),
+		)
+		return nil
+	}
 }
 
 func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) error {

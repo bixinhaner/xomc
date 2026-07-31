@@ -28,6 +28,7 @@ type QueueMetricTarget struct {
 
 var defaultQueueMetricTargets = []QueueMetricTarget{
 	{Stream: "PM", Durable: "pm-workers", Subject: "pm.file.received"},
+	{Stream: "PM", Durable: "pm-registration-wait", Subject: "pm.file.deferred"},
 	{Stream: "MR", Durable: "mr-workers", Subject: "mr.file.received"},
 	{Stream: "TRACE_MSG", Durable: "trace-capture", Subject: "trace.message.captured"},
 	{Stream: "TRACE_EXPORT", Durable: "trace-export", Subject: "trace.export.requested"},

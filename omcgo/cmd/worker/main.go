@@ -289,7 +289,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	if setter, ok := w.EventBus.(interface {
 		SetQueueTuning(string, event.QueueTuning)
 	}); ok {
-		setter.SetQueueTuning(event.SubjectPMFileReceived, pmQueueTuning(pmConcurrency))
+		tuning := pmQueueTuning(pmConcurrency)
+		setter.SetQueueTuning(event.SubjectPMFileReceived, tuning)
+		setter.SetQueueTuning(event.SubjectPMFileDeferred, tuning)
 	}
 
 	// PM 指标大批量写异步提交（synchronous_commit=off）：PM 数据可从 MinIO 重建，换写吞吐。

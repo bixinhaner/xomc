@@ -158,6 +158,9 @@ func TestQueueMetricsFailurePreservesLastBusinessValues(t *testing.T) {
 func TestQueueMetricsRejectsUnregisteredTargetLabels(t *testing.T) {
 	targets := DefaultQueueMetricTargets()
 	require.NotEmpty(t, targets)
+	assert.Contains(t, targets, QueueMetricTarget{
+		Stream: "PM", Durable: "pm-registration-wait", Subject: "pm.file.deferred",
+	})
 	for _, target := range targets {
 		assert.NotContains(t, target.Stream, "device")
 		assert.NotContains(t, target.Durable, "SN")

@@ -65,6 +65,13 @@ if grep -Fq 'omc_tasks_pending_total' "$legacy_alerts"; then
   fail "legacy process-local task gauge still drives an alert instead of the persistent queue observer"
 fi
 
+if ! grep -Fq 'alert: PMRegistrationWaitStale' "$alerts" \
+  || ! grep -Fq 'durable="pm-registration-wait"' "$alerts" \
+  || ! grep -Fq 'omc_nats_consumer_up == 1' "$alerts" \
+  || ! grep -Fq 'time() - omc_nats_consumer_sample_timestamp_seconds < 120' "$alerts"; then
+  fail "PM registration wait queue lacks a fresh-observer-gated stale-event alert"
+fi
+
 if (( failures > 0 )); then
   printf 'Redis queue governance validation failed: %d issue(s).\n' "$failures" >&2
   exit 1

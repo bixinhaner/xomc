@@ -504,6 +504,7 @@ func TestSubjectConstants_NotEmpty(t *testing.T) {
 		SubjectTaskCompleted,
 		SubjectTaskFailed,
 		SubjectPMFileReceived,
+		SubjectPMFileDeferred,
 		SubjectPMFileParsed,
 		SubjectAlarmRaised,
 		SubjectAlarmCleared,
