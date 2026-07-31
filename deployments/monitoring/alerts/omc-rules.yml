@@ -30,7 +30,7 @@ groups:
       - alert: OMCACSDown
         # ACS 采用 primary + candidate 双实例接力。单副本失效仍可承载南向流量，
         # 只有两个静态抓取目标都不可达时才判定主链路中断。
-        expr: sum(up{job="omc-acs"}) < 1
+        expr: sum(up{job="omc-acs", instance=~"acs-primary:9090|acs-candidate:9090"}) < 1
         for: 2m
         labels:
           severity: critical
@@ -44,7 +44,7 @@ groups:
             Action: 查看 run/logs/acs/acs.log，确认 :7547 / :7557 监听是否正常。
 
       - alert: OMCACSReplicaDown
-        expr: up{job="omc-acs"} == 0
+        expr: up{job="omc-acs", instance=~"acs-primary:9090|acs-candidate:9090"} == 0
         for: 2m
         labels:
           severity: warning

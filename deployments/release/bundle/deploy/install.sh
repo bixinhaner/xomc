@@ -893,20 +893,12 @@ fi
 sep "8/9 启动业务 + web + 监控"
 
 acs_ha_wait_ready() {
-  local service="$1" web_cid service_cid service_ip wait_seconds=0
-  web_cid="$("${DC[@]}" ps -q web 2>/dev/null | head -n1)"
+  local service="$1" service_cid service_ip wait_seconds=0
   while [ "$wait_seconds" -lt 90 ]; do
-    if [ -n "$web_cid" ]; then
-      if docker exec "$web_cid" wget -q -T 3 -O /dev/null \
-        "http://${service}:7557/readyz" >/dev/null 2>&1; then
-        return 0
-      fi
-    else
-      service_cid="$("${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
-      service_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$service_cid" 2>/dev/null || true)"
-      if [ -n "$service_ip" ] && curl -fsS --max-time 3 "http://${service_ip}:7557/readyz" >/dev/null 2>&1; then
-        return 0
-      fi
+    service_cid="$("${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
+    service_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$service_cid" 2>/dev/null || true)"
+    if [ -n "$service_ip" ] && curl -fsS --max-time 3 "http://${service_ip}:7557/readyz" >/dev/null 2>&1; then
+      return 0
     fi
     sleep 2
     wait_seconds=$((wait_seconds + 2))
@@ -921,12 +913,14 @@ web_acs_dynamic_upstream_loaded() {
   printf '%s\n' "$rendered" | grep -Fq 'zone acs_backend' || return 1
 }
 
+ACS_HA_EXISTING=0
 acs_ha_prepare_candidate() {
   local old_acs old_web wait_seconds
   old_acs="$("${DC[@]}" ps -q acs 2>/dev/null | head -n1)"
   old_web="$("${DC[@]}" ps -q web 2>/dev/null | head -n1)"
   # 首次安装没有旧流量入口，由下面的完整 up 同时创建双实例即可。
   [ -n "$old_acs" ] || return 0
+  ACS_HA_EXISTING=1
   if [ "$SKIP_WEB" = 1 ]; then
     die "--skip-web 不支持存量 ACS 无损升级；请启用 web 网关，或由外部负载均衡完成双实例切换" 2
   fi
@@ -967,8 +961,30 @@ acs_ha_prepare_candidate() {
 
 acs_ha_prepare_candidate
 
-log "${DC[*]} up -d"
-"${DC[@]}" up -d
+if [ "$ACS_HA_EXISTING" = 1 ]; then
+  # 不再调用无服务范围的 compose up：实测 Compose 会把刚预热的 candidate
+  # 与 primary 同时重建，破坏接力不变量。正式实例必须单独替换、直连业务端口
+  # 验证就绪，再覆盖一轮 Nginx DNS 缓存；其余业务显式 --no-deps 排除两个 ACS。
+  log "接力实例持续承载流量，单独替换正式 ACS ..."
+  "${DC[@]}" up -d --no-deps acs
+  if ! acs_ha_wait_ready acs; then
+    die "正式 ACS 90s 内未就绪；接力实例仍在服务，已中止其余业务更新" 2
+  fi
+  log "正式 ACS 已就绪，等待 Nginx 动态 DNS 完成一轮刷新 ..."
+  sleep 12
+  if ! acs_ha_wait_ready acs || ! acs_ha_wait_ready acs-candidate; then
+    die "ACS 双实例在 DNS 刷新后未全部就绪，已中止其余业务更新" 2
+  fi
+
+  remaining_services=(app worker)
+  [ "$SKIP_WEB" = 1 ] || remaining_services+=(web)
+  log "双 ACS 均已就绪，更新其余业务（显式排除 ACS 依赖）..."
+  "${DC[@]}" up -d --no-deps "${remaining_services[@]}"
+else
+  # 首次安装没有存量南向流量，可一次创建完整拓扑。
+  log "${DC[*]} up -d"
+  "${DC[@]}" up -d
+fi
 
 # Compose records the resolved bind-mount source inode when a container is
 # created. OMC_ROOT/current is switched to the new immutable release above,
@@ -978,7 +994,8 @@ log "${DC[*]} up -d"
 # named volumes remain attached.
 if [ "$SKIP_MONITORING" = 0 ]; then
   log "刷新版本目录 bind mount（仅监控无状态容器，保留数据卷）..."
-  "${DC[@]}" up -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo
+  "${DC[@]}" up -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo \
+    nats-exporter nginx-exporter node-exporter cadvisor
 fi
 
 log "等待业务容器启动（最多 90s，健康检查每 5s 重试）..."
