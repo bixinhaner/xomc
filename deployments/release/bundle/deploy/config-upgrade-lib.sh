@@ -97,6 +97,63 @@ upgrade_acs_session_limit() {
   ACS_SESSION_LIMIT_UPGRADE_RESULT="migrated"
 }
 
+# upgrade_prod_database_dsns <现网配置> <新包模板>
+#
+# 旧版实例配置可能把数据库密码写成了旧的字面量。生产模板已统一使用
+# ${POSTGRES_*} 环境变量，安装升级时只同步 db/tsdb 的 dsn 行，避免 ACS
+# 使用旧密码连接存量数据库；其它运维配置保持不变，操作幂等。
+upgrade_prod_database_dsns() {
+  local live_config="$1" template_config="$2" tmp
+  [ -f "$live_config" ] || return 0
+  [ -f "$template_config" ] || return 0
+
+  tmp="$(mktemp "${live_config}.dsn.tmp.XXXXXX")" || return 1
+  if ! awk -v template_file="$template_config" '
+      BEGIN {
+        section = ""
+        while ((getline line < template_file) > 0) {
+          if (line ~ /^[^[:space:]#][^:]*:/) {
+            section = line
+            sub(/:.*/, "", section)
+          }
+          if ((section == "db" || section == "tsdb") && line ~ /^[[:space:]]+dsn:[[:space:]]*/) {
+            dsn[section] = line
+          }
+        }
+        close(template_file)
+        live_section = ""
+      }
+      /^[^[:space:]#][^:]*:/ {
+        live_section = $0
+        sub(/:.*/, "", live_section)
+      }
+      /^[[:space:]]+dsn:[[:space:]]*/ && (live_section == "db" || live_section == "tsdb") {
+        if (dsn[live_section] != "") {
+          print dsn[live_section]
+          changed[live_section] = 1
+          next
+        }
+      }
+      { print }
+      END {
+        if (dsn["db"] != "" && changed["db"] != 1) exit 42
+        if (dsn["tsdb"] != "" && changed["tsdb"] != 1) exit 42
+      }
+    ' "$live_config" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+
+  if ! cmp -s "$live_config" "$tmp"; then
+    if ! mv -f "$tmp" "$live_config"; then
+      rm -f "$tmp"
+      return 1
+    fi
+  else
+    rm -f "$tmp"
+  fi
+}
+
 app_has_gpv_response_config() {
   local config="$1"
   [ -f "$config" ] || return 1

@@ -99,6 +99,37 @@ unset -f mv
 
 echo "PASS: ACS session limit upgrade preserves operator configuration"
 
+cat > "$tmp/dsn-template.yaml" <<'YAML'
+db:
+  dsn: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+tsdb:
+  dsn: "postgres://${POSTGRES_TSDB_USER}:${POSTGRES_TSDB_PASSWORD}@${TSDB_HOST}:5432/${POSTGRES_TSDB_DB}?sslmode=disable"
+YAML
+cat > "$tmp/dsn-legacy.yaml" <<'YAML'
+db:
+  dsn: "postgres://omcgo:old-password@postgres:5432/omcgo?sslmode=disable"
+  max_connections: 180
+tsdb:
+  dsn: "postgres://omcgo:old-tsdb-password@postgres-tsdb:5432/omcgo?sslmode=disable"
+server:
+  port: 7557
+YAML
+upgrade_prod_database_dsns "$tmp/dsn-legacy.yaml" "$tmp/dsn-template.yaml"
+grep -Fq 'postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable' "$tmp/dsn-legacy.yaml" || {
+  echo "FAIL: legacy primary database DSN was not synchronized" >&2
+  exit 1
+}
+grep -Fq 'postgres://${POSTGRES_TSDB_USER}:${POSTGRES_TSDB_PASSWORD}@${TSDB_HOST}:5432/${POSTGRES_TSDB_DB}?sslmode=disable' "$tmp/dsn-legacy.yaml" || {
+  echo "FAIL: legacy TSDB DSN was not synchronized" >&2
+  exit 1
+}
+grep -q '^  max_connections: 180$' "$tmp/dsn-legacy.yaml" || {
+  echo "FAIL: operator database settings were changed" >&2
+  exit 1
+}
+
+echo "PASS: production database DSN upgrade uses environment credentials"
+
 cat > "$tmp/app-template.yaml" <<'YAML'
 provision:
   auto_configure: true

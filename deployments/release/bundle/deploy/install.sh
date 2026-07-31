@@ -637,6 +637,15 @@ else
     else
       warn "ACS session.max_concurrent 自动迁移失败，保留现网配置；请人工核对新包模板"
     fi
+    for service_config in acs.prod.yaml app.prod.yaml worker.prod.yaml; do
+      if upgrade_prod_database_dsns \
+        "$OMC_ROOT/etc/$service_config" \
+        "$RELEASE_DIR/etc/$service_config"; then
+        log "升级 $service_config：已同步生产数据库 DSN 模板，使用当前 .env 凭证"
+      else
+        die "$service_config 数据库 DSN 自动同步失败；未切换 current" 1
+      fi
+    done
     upgrade_app_gpv_response_config \
       "$OMC_ROOT/etc/app.prod.yaml" \
       "$RELEASE_DIR/etc/app.prod.yaml" ||
