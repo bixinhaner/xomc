@@ -3,7 +3,9 @@ package paramsync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -36,6 +38,7 @@ type coalescedWakePlannedTaskLifecycle interface {
 type plannedTaskReleaseBatch struct {
 	lifecycle   PlannedTaskLifecycle
 	coalesced   coalescedWakePlannedTaskLifecycle
+	mu          sync.Mutex
 	wakeDevices map[string]struct{}
 }
 
@@ -54,7 +57,9 @@ func (b *plannedTaskReleaseBatch) Release(ctx context.Context, planned *task.Tas
 	}
 	released, err := b.coalesced.ReleasePlannedTaskWithoutWake(ctx, planned)
 	if err == nil && released && planned != nil && planned.DeviceSN != "" {
+		b.mu.Lock()
 		b.wakeDevices[planned.DeviceSN] = struct{}{}
+		b.mu.Unlock()
 	}
 	return released, err
 }
@@ -63,7 +68,13 @@ func (b *plannedTaskReleaseBatch) WakeDevices() {
 	if b.coalesced == nil {
 		return
 	}
+	b.mu.Lock()
+	devices := make([]string, 0, len(b.wakeDevices))
 	for deviceSN := range b.wakeDevices {
+		devices = append(devices, deviceSN)
+	}
+	b.mu.Unlock()
+	for _, deviceSN := range devices {
 		b.coalesced.WakePlannedDevice(deviceSN)
 	}
 }
@@ -88,6 +99,66 @@ func NewOutboxDispatcher(pool *pgxpool.Pool, lifecycle PlannedTaskLifecycle, max
 }
 
 func (d *OutboxDispatcher) DispatchPending(ctx context.Context, limit int) (int, error) {
+	releaseBatch := newPlannedTaskReleaseBatch(d.lifecycle)
+	defer releaseBatch.WakeDevices()
+	return d.dispatchPending(ctx, limit, releaseBatch)
+}
+
+func (d *OutboxDispatcher) DispatchPendingConcurrent(
+	ctx context.Context,
+	workers int,
+	batchSize int,
+) (int, error) {
+	if workers <= 1 {
+		return d.DispatchPending(ctx, batchSize)
+	}
+	releaseBatch := newPlannedTaskReleaseBatch(d.lifecycle)
+	if releaseBatch.coalesced == nil {
+		return d.DispatchPending(ctx, workers*batchSize)
+	}
+	defer releaseBatch.WakeDevices()
+	return runConcurrentOutboxBatches(workers, func() (int, error) {
+		return d.dispatchPending(ctx, batchSize, releaseBatch)
+	})
+}
+
+func runConcurrentOutboxBatches(workers int, dispatch func() (int, error)) (int, error) {
+	if workers < 1 {
+		workers = 1
+	}
+	type result struct {
+		delivered int
+		err       error
+	}
+	results := make(chan result, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			delivered, err := dispatch()
+			results <- result{delivered: delivered, err: err}
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	var delivered int
+	var errs []error
+	for item := range results {
+		delivered += item.delivered
+		if item.err != nil {
+			errs = append(errs, item.err)
+		}
+	}
+	return delivered, errors.Join(errs...)
+}
+
+func (d *OutboxDispatcher) dispatchPending(
+	ctx context.Context,
+	limit int,
+	releaseBatch *plannedTaskReleaseBatch,
+) (int, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -95,8 +166,6 @@ func (d *OutboxDispatcher) DispatchPending(ctx context.Context, limit int) (int,
 	if err != nil {
 		return 0, err
 	}
-	releaseBatch := newPlannedTaskReleaseBatch(d.lifecycle)
-	defer releaseBatch.WakeDevices()
 	delivered := 0
 	for _, item := range claimed {
 		if item.EventType != "param_sync.task.enqueue" && item.EventType != "param_sync.task.cancel" {

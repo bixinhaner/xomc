@@ -3,11 +3,90 @@ package paramsync
 import (
 	"context"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/task"
 )
+
+func TestRunConcurrentOutboxBatchesRunsBoundedWorkers(t *testing.T) {
+	var calls atomic.Int32
+	var inFlight atomic.Int32
+	var maxFlight atomic.Int32
+
+	delivered, err := runConcurrentOutboxBatches(8, func() (int, error) {
+		calls.Add(1)
+		current := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		for {
+			max := maxFlight.Load()
+			if current <= max || maxFlight.CompareAndSwap(max, current) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		return 1, nil
+	})
+
+	if err != nil {
+		t.Fatalf("dispatch batches: %v", err)
+	}
+	if delivered != 8 || calls.Load() != 8 {
+		t.Fatalf("delivered=%d calls=%d, want 8/8", delivered, calls.Load())
+	}
+	if maxFlight.Load() <= 1 {
+		t.Fatalf("max concurrent workers=%d, want >1", maxFlight.Load())
+	}
+}
+
+type concurrentWakeLifecycle struct {
+	releases atomic.Int32
+	wakes    atomic.Int32
+}
+
+func (l *concurrentWakeLifecycle) ReleasePlannedTask(context.Context, *task.Task) (bool, error) {
+	return true, nil
+}
+
+func (l *concurrentWakeLifecycle) ReleasePlannedTaskWithoutWake(context.Context, *task.Task) (bool, error) {
+	l.releases.Add(1)
+	return true, nil
+}
+
+func (l *concurrentWakeLifecycle) WakePlannedDevice(string) {
+	l.wakes.Add(1)
+}
+
+func (l *concurrentWakeLifecycle) EvictPlannedTask(context.Context, *task.Task) error {
+	return nil
+}
+
+func TestPlannedTaskReleaseBatchCoalescesConcurrentWakeByDevice(t *testing.T) {
+	lifecycle := &concurrentWakeLifecycle{}
+	batch := newPlannedTaskReleaseBatch(lifecycle)
+	var wg sync.WaitGroup
+
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := batch.Release(context.Background(), &task.Task{DeviceSN: "same-device"}); err != nil {
+				t.Errorf("release: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	batch.WakeDevices()
+
+	if lifecycle.releases.Load() != 32 {
+		t.Fatalf("releases=%d, want 32", lifecycle.releases.Load())
+	}
+	if lifecycle.wakes.Load() != 1 {
+		t.Fatalf("wakes=%d, want one coalesced wake", lifecycle.wakes.Load())
+	}
+}
 
 func TestBuildClaimOutboxSQLKeepsPartialIndexPredicateLiteral(t *testing.T) {
 	now := time.Date(2026, 8, 1, 2, 30, 0, 0, time.UTC)

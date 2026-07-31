@@ -701,13 +701,17 @@ func initParamSyncModule(c *Container) error {
 				case <-ticker.C:
 					ctx, cancel := context.WithTimeout(maintenanceCtx, 10*time.Second)
 					_, err := outbox.RequeueStaleDeliveries(ctx, time.Now().Add(-time.Minute))
-					if err == nil {
-						_, err = outbox.DispatchPending(ctx, 100)
-					}
-					if err == nil {
-						_, err = service.DispatchQueued(ctx, 100)
-					}
 					cancel()
+					if err == nil {
+						ctx, cancel = context.WithTimeout(maintenanceCtx, 10*time.Second)
+						_, err = outbox.DispatchPendingConcurrent(ctx, 16, 25)
+						cancel()
+					}
+					if err == nil {
+						ctx, cancel = context.WithTimeout(maintenanceCtx, 10*time.Second)
+						_, err = service.DispatchQueued(ctx, 100)
+						cancel()
+					}
 					if err != nil && !errors.Is(err, context.Canceled) {
 						logger.Warn("parameter sync outbox dispatch failed", zap.Error(err))
 					}
