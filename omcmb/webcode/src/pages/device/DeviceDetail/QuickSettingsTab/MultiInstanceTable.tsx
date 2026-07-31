@@ -30,6 +30,7 @@ import {
   formatEnumDisplayValue,
   getEffectiveEnumMeta,
   getFeedbackScopeContext,
+  resolveQuickSettingsParameterType,
   serializeQuickSettingsMultiCheckboxValue,
   validateLteQOffsetValue,
   validateValue,
@@ -218,7 +219,7 @@ const BM_SPECIAL_COLUMNS: Record<string, SpecialColumnSpec[]> = {
     { key: 'PhyCellID', leaf: 'PhyCellID', titleEn: 'PCI', width: 100 },
     { key: 'QOffset', leaf: 'QOffset', titleEn: 'QOffset', width: 110 },
     { key: 'CIO', leaf: 'CIO', titleEn: 'CIO', width: 100 },
-    { key: 'TAC', leaf: 'TAC', titleEn: 'TAC', width: 110, readOnly: true },
+    { key: 'TAC', leaf: 'TAC', titleEn: 'TAC', width: 110 },
     { key: 'PLMNID', leaf: 'PLMNID', titleEn: 'PLMN', width: 140 },
     { key: 'CID', leaf: 'CID', titleEn: 'ECI', width: 130, readOnly: true },
     { key: 'EnbType', leaf: 'EnbType', titleEn: 'eNodeB Type', width: 140, readOnly: true, formatValue: formatEnbTypeDisplay },
@@ -343,7 +344,10 @@ function quickParamConstraints(param: QuickSettingsParam | undefined): Parameter
 }
 
 function effectiveParamType(item: ParameterSchemaItem | undefined, param: QuickSettingsParam | undefined): ParameterType {
-  return (item?.type as ParameterType | undefined) ?? quickParamType(param);
+  return resolveQuickSettingsParameterType(
+    param?.type,
+    item?.type,
+  );
 }
 
 function effectiveParamConstraints(
@@ -1694,7 +1698,13 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         titleEn: param.titleEn,
       }));
     }
-    return specialColumns;
+    return specialColumns.map((column) => {
+      const directParam = group.params.find((param) => (param.leaf || param.name) === column.leaf);
+      const semanticParam = group.params.find((param) => param.name === column.key);
+      const param = directParam ?? semanticParam;
+      if (!param?.leaf || param.leaf === column.leaf) return column;
+      return { ...column, leaf: param.leaf };
+    });
   }, [group.params, specialColumns]);
 
   const openEditModal = useCallback((row: TableRow) => {
@@ -2692,7 +2702,12 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
               <div key={column.key} style={{ minWidth: 0 }}>
                 <div style={{ marginBottom: 6, fontWeight: 500 }}>
                   <Space size={4} wrap>
-                    <span>{label}</span>
+                    <span>
+                      {param?.required && isEditable && (
+                        <span style={{ color: '#ff4d4f', marginRight: 2 }}>*</span>
+                      )}
+                      {label}
+                    </span>
                     {rangeHint && <Text type="secondary" style={{ fontSize: 12 }}>{rangeHint}</Text>}
                   </Space>
                 </div>
