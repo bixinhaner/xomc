@@ -63,9 +63,16 @@ type PeriodProgress struct {
 	State                string      `json:"state"`
 }
 
+type MetricVersionInterval struct {
+	MetricPath    string     `json:"metric_path"`
+	EffectiveFrom time.Time  `json:"effective_from"`
+	EffectiveTo   *time.Time `json:"effective_to"`
+}
+
 type ProgressQueryResult struct {
-	Rows    []ProgressResult
-	Periods []PeriodProgress
+	Rows            []ProgressResult
+	Periods         []PeriodProgress
+	MetricIntervals []MetricVersionInterval
 }
 
 type ProgressService struct {
@@ -121,10 +128,12 @@ func (s *ProgressService) Query(
 	queryCtx, cancel := context.WithTimeout(ctx, progressQueryTimeout)
 	defer cancel()
 	ctx = queryCtx
-	versions, err := s.loader.LoadMatchable(ctx, time.Now().UTC())
+	now := time.Now().UTC()
+	versions, err := s.loader.LoadMatchable(ctx, now)
 	if err != nil {
 		return ProgressQueryResult{}, fmt.Errorf("load PM aggregation versions for progress: %w", err)
 	}
+	metricIntervals := metricVersionIntervals(versions, taskID)
 	snapshot := BuildTaskSnapshot(versions)
 	builder := storage.Psql.Select(
 		"task_id", "task_version_id", "entity_key", "granularity",
@@ -198,7 +207,39 @@ func (s *ProgressService) Query(
 			location = configured
 		}
 	}
-	return buildProgressQueryResult(activeCandidates, states, snapshot, location)
+	result, err := buildProgressQueryResult(
+		activeCandidates, states, snapshot, location,
+	)
+	if err != nil {
+		return ProgressQueryResult{}, err
+	}
+	result.MetricIntervals = metricIntervals
+	return result, nil
+}
+
+func metricVersionIntervals(
+	versions []*TaskVersionSnapshot,
+	taskID uuid.UUID,
+) []MetricVersionInterval {
+	out := make([]MetricVersionInterval, 0)
+	for _, version := range versions {
+		if version == nil || version.TaskID != taskID || !version.Enabled {
+			continue
+		}
+		for metricPath := range version.Metrics {
+			out = append(out, MetricVersionInterval{
+				MetricPath: metricPath, EffectiveFrom: version.EffectiveFrom,
+				EffectiveTo: version.EffectiveTo,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].MetricPath != out[j].MetricPath {
+			return out[i].MetricPath < out[j].MetricPath
+		}
+		return out[i].EffectiveFrom.Before(out[j].EffectiveFrom)
+	})
+	return out
 }
 
 func (s *ProgressService) revalidateOpenDailyCandidates(

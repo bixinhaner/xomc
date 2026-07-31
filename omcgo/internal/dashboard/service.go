@@ -1388,6 +1388,7 @@ func (s *Service) GetKPITimeSeriesSnapshotWithMetadata(
 		for _, name := range normalizeMetricPaths(kpiNames) {
 			requested[name] = struct{}{}
 		}
+		metricIntervals := make([]pmstream.MetricVersionInterval, 0)
 		for _, taskID := range taskIDs {
 			progress, err := s.networkProgress.Query(loadCtx, taskID, startTime, endTime)
 			if err != nil {
@@ -1422,8 +1423,13 @@ func (s *Service) GetKPITimeSeriesSnapshotWithMetadata(
 				}
 				snapshot.PeriodProgress = append(snapshot.PeriodProgress, period)
 			}
+			metricIntervals = append(metricIntervals, progress.MetricIntervals...)
 		}
 		sortKPITimeSeriesSnapshot(&snapshot)
+		s.observeSnapshotMissing(
+			loadCtx, snapshot, metricIntervals, kpiNames, technology,
+			granularity, startTime, endTime,
+		)
 		return snapshot, nil
 	}
 
@@ -1626,25 +1632,10 @@ func (s *Service) fetchNetworkKCodeSeries(
 	}
 	requested := kcodes
 	if !observeMissing {
-		// Snapshot queries append an in-progress value for the current natural
-		// day/week. The absence of that one final row is expected, but closed
-		// periods in the same range still need missing-result monitoring.
-		businessNow := response.TimeInCurrentLocation(ctx, time.Now())
-		cutoff := currentNaturalPeriodStart(granularity, businessNow)
-		if !startTime.Before(cutoff) {
-			requested = nil
-		} else {
-			closedRows := make([]NetworkRollupPoint, 0, len(rows))
-			for _, row := range rows {
-				if row.WindowStart.Before(cutoff) {
-					closedRows = append(closedRows, row)
-				}
-			}
-			s.observeNetworkMissing(
-				closedRows, requested, technology, granularity,
-			)
-			requested = nil
-		}
+		// Snapshot queries can only decide whether a published result is
+		// expected after the progress reader supplies the task-version
+		// effective interval.
+		requested = nil
 	}
 	s.observeNetworkRollups(rows, requested, technology, granularity, time.Now())
 
@@ -1660,30 +1651,81 @@ func (s *Service) fetchNetworkKCodeSeries(
 	return sortAndDedupeNetworkSeriesPoints(points), nil
 }
 
-func (s *Service) observeNetworkMissing(
-	points []NetworkRollupPoint,
+func (s *Service) observeSnapshotMissing(
+	ctx context.Context,
+	snapshot KPITimeSeriesSnapshot,
+	metricIntervals []pmstream.MetricVersionInterval,
 	requested []string,
 	technology model.Technology,
 	granularity metrics.Granularity,
+	queryStart, queryEnd time.Time,
 ) {
-	if s.metrics == nil || technology == "" || len(requested) == 0 {
+	if s.metrics == nil || technology == "" || len(requested) == 0 ||
+		snapshot.ProgressState != "available" {
 		return
 	}
-	present := make(map[string]struct{})
-	for _, point := range points {
-		if point.Technology == technology {
-			present[point.MetricPath] = struct{}{}
-		}
+	businessNow := response.TimeInCurrentLocation(ctx, time.Now())
+	cutoff := currentNaturalPeriodStart(granularity, businessNow)
+	latestClosedStart := previousNaturalPeriodStart(
+		granularity, cutoff, businessNow.Location(),
+	)
+	if latestClosedStart.Before(queryStart) ||
+		!latestClosedStart.Before(queryEnd) {
+		return
 	}
+
+	expected := make(map[string]struct{})
+	requestedSet := make(map[string]struct{}, len(requested))
+	for _, metricPath := range normalizeMetricPaths(requested) {
+		requestedSet[metricPath] = struct{}{}
+	}
+	for _, interval := range metricIntervals {
+		if _, ok := requestedSet[interval.MetricPath]; !ok ||
+			interval.EffectiveFrom.IsZero() ||
+			!interval.EffectiveFrom.Before(cutoff) ||
+			(interval.EffectiveTo != nil &&
+				!interval.EffectiveTo.After(latestClosedStart)) {
+			continue
+		}
+		expected[interval.MetricPath] = struct{}{}
+	}
+	if len(expected) == 0 {
+		return
+	}
+
 	missing := 0
-	for _, path := range normalizeMetricPaths(requested) {
-		if _, ok := present[path]; !ok {
+	for metricPath := range expected {
+		found := false
+		entries := snapshot.Series[metricPath]
+		for _, entry := range entries {
+			if !entry.Partial && entry.Time.Equal(latestClosedStart) {
+				found = true
+				break
+			}
+		}
+		if !found {
 			missing++
 		}
 	}
 	s.metrics.ObserveMissing(
 		string(technology), string(granularity), float64(missing),
 	)
+}
+
+func previousNaturalPeriodStart(
+	granularity metrics.Granularity,
+	currentStart time.Time,
+	location *time.Location,
+) time.Time {
+	if location == nil {
+		location = time.UTC
+	}
+	localStart := currentStart.In(location)
+	days := -1
+	if granularity == metrics.GranularityWeekly {
+		days = -7
+	}
+	return localStart.AddDate(0, 0, days).UTC()
 }
 
 func currentNaturalPeriodStart(

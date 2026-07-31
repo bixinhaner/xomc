@@ -191,6 +191,7 @@ func TestGetKPITimeSeriesSnapshotDoesNotReportCurrentPartialPeriodAsMissing(t *t
 }
 
 func TestGetKPITimeSeriesSnapshotStillReportsMissingClosedPeriod(t *testing.T) {
+	setDashboardTimezoneForTest(t, time.UTC)
 	now := time.Now().UTC()
 	currentDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	start := currentDay.Add(-24 * time.Hour)
@@ -210,6 +211,15 @@ func TestGetKPITimeSeriesSnapshotStillReportsMissingClosedPeriod(t *testing.T) {
 				WindowStart: currentDay, WindowEnd: currentDay.Add(24 * time.Hour),
 				Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
 				MetricPath: "K1", MetricType: "kpi", Value: 42, Partial: true,
+			}},
+			Periods: []pmstream.PeriodProgress{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: currentDay, WindowEnd: currentDay.Add(24 * time.Hour),
+				EntityKey:            "network",
+				VersionEffectiveFrom: start,
+			}},
+			MetricIntervals: []pmstream.MetricVersionInterval{{
+				MetricPath: "K1", EffectiveFrom: start,
 			}},
 		},
 	})
@@ -232,6 +242,177 @@ func TestGetKPITimeSeriesSnapshotStillReportsMissingClosedPeriod(t *testing.T) {
 	}
 	require.Equal(t, float64(1), missing,
 		"current partial must not hide a missing final result from a closed period")
+}
+
+func TestGetKPITimeSeriesSnapshotDoesNotReportPeriodsBeforeVersionEffectiveFrom(t *testing.T) {
+	setDashboardTimezoneForTest(t, time.UTC)
+	now := time.Now().UTC()
+	currentDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	start := currentDay.Add(-7 * 24 * time.Hour)
+	end := now.Add(time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	registry := prometheus.NewRegistry()
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+		metrics:        NewMetrics(registry),
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			Rows: []pmstream.ProgressResult{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: currentDay, WindowEnd: currentDay.Add(24 * time.Hour),
+				Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
+				MetricPath: "K1", MetricType: "kpi", Value: 42, Partial: true,
+			}},
+			Periods: []pmstream.PeriodProgress{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: currentDay, WindowEnd: currentDay.Add(24 * time.Hour),
+				EntityKey:            "network",
+				VersionEffectiveFrom: currentDay.Add(time.Hour),
+			}},
+			MetricIntervals: []pmstream.MetricVersionInterval{{
+				MetricPath: "K1", EffectiveFrom: currentDay.Add(time.Hour),
+			}},
+		},
+	})
+
+	_, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, start, end,
+	)
+	require.NoError(t, err)
+
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		require.NotEqual(t, "dashboard_kpi_missing_result_total", family.GetName(),
+			"periods before the task version became effective must not be reported as missing")
+	}
+}
+
+func TestGetKPITimeSeriesSnapshotReportsLatestClosedPeriodEvenWhenOlderPointExists(t *testing.T) {
+	setDashboardTimezoneForTest(t, time.UTC)
+	now := time.Now().UTC()
+	currentDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	start := currentDay.Add(-3 * 24 * time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	registry := prometheus.NewRegistry()
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{points: []NetworkRollupPoint{{
+			Technology: model.TechLTE, MetricPath: "K1",
+			Granularity: metrics.GranularityDaily,
+			WindowStart: start, WindowEnd: start.Add(24 * time.Hour),
+			Value: jsonx.Float(10), Complete: true,
+		}}},
+		metrics: NewMetrics(registry),
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			MetricIntervals: []pmstream.MetricVersionInterval{{
+				MetricPath: "K1", EffectiveFrom: start,
+			}},
+		},
+	})
+
+	_, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, start, now.Add(time.Hour),
+	)
+	require.NoError(t, err)
+	require.Equal(t, float64(1), gatheredMissingResultTotal(t, registry),
+		"an older final point must not hide a missing latest closed period")
+}
+
+func TestGetKPITimeSeriesSnapshotReportsMissingWithoutOpenProgressWindow(t *testing.T) {
+	setDashboardTimezoneForTest(t, time.UTC)
+	now := time.Now().UTC()
+	currentDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	start := currentDay.Add(-24 * time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	registry := prometheus.NewRegistry()
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+		metrics:        NewMetrics(registry),
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			Rows:    nil,
+			Periods: nil,
+			MetricIntervals: []pmstream.MetricVersionInterval{{
+				MetricPath: "K1", EffectiveFrom: start,
+			}},
+		},
+	})
+
+	_, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, start, now.Add(time.Hour),
+	)
+	require.NoError(t, err)
+	require.Equal(t, float64(1), gatheredMissingResultTotal(t, registry),
+		"catalog metadata must keep closed-period monitoring active without an open window")
+}
+
+func TestGetKPITimeSeriesSnapshotDoesNotObserveLatestPeriodOutsideQueryRange(t *testing.T) {
+	setDashboardTimezoneForTest(t, time.UTC)
+	now := time.Now().UTC()
+	currentDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	start := currentDay.Add(-7 * 24 * time.Hour)
+	end := currentDay.Add(-5 * 24 * time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	registry := prometheus.NewRegistry()
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+		metrics:        NewMetrics(registry),
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			MetricIntervals: []pmstream.MetricVersionInterval{{
+				MetricPath: "K1", EffectiveFrom: start,
+			}},
+		},
+	})
+
+	_, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, start, end,
+	)
+	require.NoError(t, err)
+	require.Zero(t, gatheredMissingResultTotal(t, registry),
+		"a historical query must not observe a period outside its end boundary")
+}
+
+func gatheredMissingResultTotal(
+	t *testing.T,
+	registry *prometheus.Registry,
+) float64 {
+	t.Helper()
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	var missing float64
+	for _, family := range families {
+		if family.GetName() != "dashboard_kpi_missing_result_total" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			missing += metric.GetCounter().GetValue()
+		}
+	}
+	return missing
+}
+
+func setDashboardTimezoneForTest(t *testing.T, location *time.Location) {
+	t.Helper()
+	response.SetTimezoneProvider(fixedDashboardTimezoneProvider{location: location})
+	t.Cleanup(func() { response.SetTimezoneProvider(nil) })
 }
 
 func TestGetKPITimeSeriesSnapshotUsesBusinessTimezoneForOpenPeriod(t *testing.T) {

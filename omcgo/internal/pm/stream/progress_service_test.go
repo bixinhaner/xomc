@@ -541,3 +541,71 @@ func TestLowerProgressCoverageIncludesWindowWithoutMetricRows(t *testing.T) {
 		t.Fatal("zero-coverage window without metrics must become task-level minimum")
 	}
 }
+
+func TestMetricVersionIntervalsUseAllCatalogVersionsNotRollupLineage(t *testing.T) {
+	taskID := uuid.New()
+	lineageStart := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	currentStart := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	oldStart := currentStart.Add(-24 * time.Hour)
+	oldEnd := currentStart
+	oldVersion := &TaskVersionSnapshot{
+		TaskID: taskID, VersionID: uuid.New(), VersionNo: 1, Enabled: true,
+		EffectiveFrom: oldStart, EffectiveTo: &oldEnd,
+		Metrics: map[string]MetricRule{
+			"K1": {MetricID: "K1", MetricPath: "K1", MetricType: "kpi"},
+		},
+	}
+	currentVersion := &TaskVersionSnapshot{
+		TaskID: taskID, VersionID: uuid.New(), VersionNo: 2, Enabled: true,
+		EffectiveFrom: currentStart, LineageEffectiveFrom: lineageStart,
+		Metrics: map[string]MetricRule{
+			"K1": {MetricID: "K1", MetricPath: "K1", MetricType: "kpi"},
+		},
+	}
+
+	intervals := metricVersionIntervals(
+		[]*TaskVersionSnapshot{currentVersion, oldVersion}, taskID,
+	)
+
+	if len(intervals) != 2 {
+		t.Fatalf("expected both catalog metric intervals, got %d", len(intervals))
+	}
+	if intervals[0].MetricPath != "K1" ||
+		!intervals[0].EffectiveFrom.Equal(oldStart) ||
+		intervals[0].EffectiveTo == nil ||
+		!intervals[0].EffectiveTo.Equal(oldEnd) {
+		t.Fatalf("unexpected old catalog metric interval: %+v", intervals[0])
+	}
+	if !intervals[1].EffectiveFrom.Equal(currentStart) {
+		t.Fatalf("unexpected current catalog metric interval: %+v", intervals[1])
+	}
+}
+
+func TestMetricVersionIntervalsRetainEnabledVersionBeforeDisable(t *testing.T) {
+	taskID := uuid.New()
+	disabledAt := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	oldStart := disabledAt.Add(-24 * time.Hour)
+	oldEnd := disabledAt
+	versions := []*TaskVersionSnapshot{
+		{
+			TaskID: taskID, VersionID: uuid.New(), VersionNo: 1, Enabled: true,
+			EffectiveFrom: oldStart, EffectiveTo: &oldEnd,
+			Metrics: map[string]MetricRule{
+				"K1": {MetricID: "K1", MetricPath: "K1", MetricType: "kpi"},
+			},
+		},
+		{
+			TaskID: taskID, VersionID: uuid.New(), VersionNo: 2, Enabled: false,
+			EffectiveFrom: disabledAt,
+			Metrics: map[string]MetricRule{
+				"K1": {MetricID: "K1", MetricPath: "K1", MetricType: "kpi"},
+			},
+		},
+	}
+
+	intervals := metricVersionIntervals(versions, taskID)
+
+	if len(intervals) != 1 || !intervals[0].EffectiveFrom.Equal(oldStart) {
+		t.Fatalf("expected pre-disable interval, got %+v", intervals)
+	}
+}
