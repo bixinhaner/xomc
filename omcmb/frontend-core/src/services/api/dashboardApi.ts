@@ -10,6 +10,8 @@ import type {
   KPILayout,
   KPILayoutPanel,
   DashboardKPIGranularity,
+  DashboardKPITimeSeriesSnapshot,
+  DashboardPeriodProgress,
 } from '../../types/dashboard';
 import type { DashboardChartData } from '../../mock/data/dashboard';
 
@@ -148,10 +150,36 @@ interface BackendAlarmTypePieItem {
 interface BackendKPITimeSeriesEntry {
   time: string;
   value: number;
+  partial?: boolean;
 }
 
 /** GET /dashboard/kpi-time-series returns { kpiName: [{ time, value }, ...], ... } */
 type BackendKPITimeSeriesResponse = Record<string, BackendKPITimeSeriesEntry[]>;
+
+interface BackendDashboardPeriodProgress {
+  task_id: string;
+  task_version_id: string;
+  granularity: DashboardKPIGranularity;
+  window_start: string;
+  window_end: string;
+  entity_key: string;
+  revision: number;
+  version_effective_from: string;
+  version_effective_to: string | null;
+  received_slots: number;
+  expected_slots: number;
+  version_expected_slots: number;
+  coverage_ratio: number;
+  version_slice_complete: boolean;
+  period_complete: boolean;
+  state: 'partial';
+}
+
+interface BackendKPITimeSeriesSnapshot {
+  series: BackendKPITimeSeriesResponse;
+  period_progress: BackendDashboardPeriodProgress[];
+  progress_state: DashboardKPITimeSeriesSnapshot['progressState'];
+}
 
 type ApiEnvelope<T> = {
   ret?: number;
@@ -273,6 +301,29 @@ function mapKPITimeSeries(
     result[kpiName] = entries.map((e) => [e.time, e.value]);
   }
   return result;
+}
+
+function mapDashboardPeriodProgress(
+  item: BackendDashboardPeriodProgress,
+): DashboardPeriodProgress {
+  return {
+    taskId: item.task_id,
+    taskVersionId: item.task_version_id,
+    granularity: item.granularity,
+    windowStart: item.window_start,
+    windowEnd: item.window_end,
+    entityKey: item.entity_key,
+    revision: item.revision,
+    versionEffectiveFrom: item.version_effective_from,
+    versionEffectiveTo: item.version_effective_to,
+    receivedSlots: item.received_slots,
+    expectedSlots: item.expected_slots,
+    versionExpectedSlots: item.version_expected_slots,
+    coverageRatio: item.coverage_ratio,
+    versionSliceComplete: item.version_slice_complete,
+    periodComplete: item.period_complete,
+    state: item.state,
+  };
 }
 
 function mapAlarmTypePie(
@@ -496,6 +547,34 @@ export const dashboardApi = {
       }
     );
     return mapKPITimeSeries(data);
+  },
+
+  async getKPITimeSeriesWithProgress(
+    kpiNames: string[],
+    startTime: string,
+    endTime: string,
+    granularity: DashboardKPIGranularity,
+    technology?: string,
+  ): Promise<DashboardKPITimeSeriesSnapshot> {
+    const { data } = await http.get<BackendKPITimeSeriesSnapshot>(
+      '/dashboard/kpi-time-series',
+      {
+        params: {
+          kpi_names: kpiNames.join(','),
+          start_time: startTime,
+          end_time: endTime,
+          granularity,
+          ...(technology ? { technology } : {}),
+          include_partial: true,
+        },
+      },
+    );
+    const payload = unwrapDashboardEnvelope(data);
+    return {
+      series: mapKPITimeSeries(payload.series),
+      periodProgress: (payload.period_progress ?? []).map(mapDashboardPeriodProgress),
+      progressState: payload.progress_state,
+    };
   },
 
   /**

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -319,7 +320,32 @@ func (h *Handler) GetKPITimeSeries(c *gin.Context) {
 		return
 	}
 
-	result, metadata, err := h.service.GetKPITimeSeriesWithMetadata(c.Request.Context(), kpiNames, technology, granularity, startTime, endTime)
+	includePartial := strings.EqualFold(
+		strings.TrimSpace(c.Query("include_partial")), "true",
+	) && (granularity == metrics.GranularityDaily ||
+		granularity == metrics.GranularityWeekly)
+	if includePartial {
+		result, metadata, err := h.service.GetKPITimeSeriesSnapshotWithMetadata(
+			c.Request.Context(), kpiNames, technology, granularity, startTime, endTime,
+		)
+		if err != nil {
+			status := commonerrors.HTTPStatusFromError(err)
+			if status == http.StatusServiceUnavailable {
+				c.Header("Retry-After", "1")
+			}
+			commonerrors.AbortWithError(c, status, err)
+			return
+		}
+		if metadata.Stale {
+			c.Header("X-OMC-Data-Stale", "true")
+		}
+		response.OK(c, result)
+		return
+	}
+
+	result, metadata, err := h.service.GetKPITimeSeriesWithMetadata(
+		c.Request.Context(), kpiNames, technology, granularity, startTime, endTime,
+	)
 	if err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
 		if status == http.StatusServiceUnavailable {

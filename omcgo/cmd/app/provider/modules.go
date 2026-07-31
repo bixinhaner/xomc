@@ -1396,6 +1396,9 @@ func initDashboardModule(c *Container) error {
 	dashboardService := dashboard.NewService(c.DeviceService, c.AlarmPgStore, c.PMKPIRepo, c.PgPool, c.TsPool, c.GroupRepo, dashIndicatorRepo, networkRollups, logger)
 	dashboardService.SetKPIQueryGuard(queryGuard)
 	dashboardService.SetMetrics(dashboardMetrics)
+	if c.pmHandlerDeps != nil && c.pmHandlerDeps.pmProgressService != nil {
+		dashboardService.SetNetworkProgressReader(c.pmHandlerDeps.pmProgressService)
+	}
 	// issue #213 S1：存全局布局接口在 handler 层再校验管理员身份，注入 RoleRepo 作 Casbin 权限检查器
 	// （super_admin 旁路 + 端点级权限点）。RoleRepo 实现 admin.PermissionChecker；为 nil 时只认 super_admin。
 	var dashPermChecker admin.PermissionChecker

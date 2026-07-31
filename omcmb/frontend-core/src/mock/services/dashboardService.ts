@@ -7,6 +7,7 @@ import type {
   KPILayout,
   KPILayoutPanel,
   DashboardKPIGranularity,
+  DashboardKPITimeSeriesSnapshot,
 } from '../../types/dashboard';
 import { delay } from '../utils';
 import { useAppStore } from '../../store/appStore';
@@ -283,6 +284,23 @@ export const dashboardService = {
     }
 
     return result;
+  },
+
+  async getKPITimeSeriesWithProgress(
+    kpiNames: string[],
+    startTime: string,
+    endTime: string,
+    granularity: DashboardKPIGranularity,
+    technology?: string,
+  ): Promise<DashboardKPITimeSeriesSnapshot> {
+    const series = await this.getKPITimeSeries(
+      kpiNames, startTime, endTime, granularity, technology,
+    );
+    return {
+      series,
+      periodProgress: [],
+      progressState: granularity === 'hourly' ? 'not_applicable' : 'available',
+    };
   },
 
   // issue #213 Phase1：Dashboard KPI 动态定义（Mock）。
