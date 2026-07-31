@@ -102,7 +102,7 @@ func initPMModule(c *Container) error {
 	if c.Redis != nil {
 		streamCfg := pmstream.ConfigFromEnv()
 		progressStore := pmstream.NewRedisWindowStore(c.Redis, streamCfg.WindowTTL)
-		progressTasks := pmstream.NewPgTaskRepository(c.PgPool, c.EventBus)
+		progressTasks := pmstream.NewPgProgressTaskLoader(c.PgPool)
 		progressSnapshot := pmstream.NewSnapshotStore(progressTasks, logger.Named("pm-progress-snapshot"))
 		backfillCtx, backfillCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		loadErr := progressSnapshot.Reload(backfillCtx)

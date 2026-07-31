@@ -77,7 +77,7 @@ func snapshotTestVersion() *TaskVersionSnapshot {
 
 func TestSnapshotRefreshSkipsFullLoadWhenRevisionIsUnchanged(t *testing.T) {
 	loader := &revisionMatchableLoader{
-		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		revision: MatchableRevision{TaskCount: 1, Fingerprint: "stable"},
 		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
 	}
 	store := NewSnapshotStore(loader, nil)
@@ -95,14 +95,14 @@ func TestSnapshotRefreshSkipsFullLoadWhenRevisionIsUnchanged(t *testing.T) {
 func TestSnapshotRefreshReloadsAfterRevisionChanges(t *testing.T) {
 	firstVersion := snapshotTestVersion()
 	loader := &revisionMatchableLoader{
-		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		revision: MatchableRevision{TaskCount: 1, Fingerprint: "before"},
 		versions: []*TaskVersionSnapshot{firstVersion},
 	}
 	store := NewSnapshotStore(loader, nil)
 	require.NoError(t, store.Refresh(context.Background()))
 
 	secondVersion := snapshotTestVersion()
-	loader.setRevision(MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(2, 0)})
+	loader.setRevision(MatchableRevision{TaskCount: 1, Fingerprint: "after"})
 	loader.setVersions([]*TaskVersionSnapshot{secondVersion})
 	require.NoError(t, store.Refresh(context.Background()))
 
@@ -113,10 +113,9 @@ func TestSnapshotRefreshReloadsAfterRevisionChanges(t *testing.T) {
 }
 
 func TestSnapshotRefreshReloadsWhenFingerprintChangesAtSameMaximumTimestamp(t *testing.T) {
-	updatedAt := time.Unix(2, 0)
 	loader := &revisionMatchableLoader{
 		revision: MatchableRevision{
-			TaskCount: 1, UpdatedAt: updatedAt, Fingerprint: "before",
+			TaskCount: 1, Fingerprint: "before",
 		},
 		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
 	}
@@ -124,7 +123,7 @@ func TestSnapshotRefreshReloadsWhenFingerprintChangesAtSameMaximumTimestamp(t *t
 	require.NoError(t, store.Refresh(context.Background()))
 
 	loader.setRevision(MatchableRevision{
-		TaskCount: 1, UpdatedAt: updatedAt, Fingerprint: "after",
+		TaskCount: 1, Fingerprint: "after",
 	})
 	require.NoError(t, store.Refresh(context.Background()))
 
@@ -134,7 +133,7 @@ func TestSnapshotRefreshReloadsWhenFingerprintChangesAtSameMaximumTimestamp(t *t
 
 func TestSnapshotRefreshRevisionFailurePreservesLastGoodSnapshot(t *testing.T) {
 	loader := &revisionMatchableLoader{
-		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		revision: MatchableRevision{TaskCount: 1, Fingerprint: "stable"},
 		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
 	}
 	store := NewSnapshotStore(loader, nil)
@@ -150,13 +149,13 @@ func TestSnapshotRefreshRevisionFailurePreservesLastGoodSnapshot(t *testing.T) {
 
 func TestSnapshotRefreshLoadFailureRetriesChangedRevision(t *testing.T) {
 	loader := &revisionMatchableLoader{
-		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		revision: MatchableRevision{TaskCount: 1, Fingerprint: "before"},
 		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
 	}
 	store := NewSnapshotStore(loader, nil)
 	require.NoError(t, store.Refresh(context.Background()))
 	lastGood := store.Current()
-	loader.setRevision(MatchableRevision{TaskCount: 2, UpdatedAt: time.Unix(2, 0)})
+	loader.setRevision(MatchableRevision{TaskCount: 2, Fingerprint: "after"})
 	loader.setErrors(errors.New("catalog unavailable"), nil)
 
 	err := store.Refresh(context.Background())
@@ -202,7 +201,7 @@ func TestSnapshotRefreshLegacyLoaderKeepsFullRefreshBehavior(t *testing.T) {
 
 func TestSnapshotRefreshConcurrentFirstLoadRunsOnce(t *testing.T) {
 	loader := &revisionMatchableLoader{
-		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		revision: MatchableRevision{TaskCount: 1, Fingerprint: "stable"},
 		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
 	}
 	store := NewSnapshotStore(loader, nil)
@@ -230,7 +229,7 @@ func TestSnapshotRefreshRebuildsCachedVersionsOnlyAtTimeBoundary(t *testing.T) {
 	version := snapshotTestVersion()
 	version.EffectiveFrom = boundary
 	loader := &revisionMatchableLoader{
-		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		revision: MatchableRevision{TaskCount: 1, Fingerprint: "stable"},
 		versions: []*TaskVersionSnapshot{version},
 	}
 	store := NewSnapshotStore(loader, nil)
@@ -257,7 +256,7 @@ func TestSnapshotRefreshDoesNotMutateCachedSourceVersions(t *testing.T) {
 		DeviceID: deviceID, DimensionKey: "network",
 	}}
 	loader := &revisionMatchableLoader{
-		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		revision: MatchableRevision{TaskCount: 1, Fingerprint: "stable"},
 		versions: []*TaskVersionSnapshot{version},
 	}
 	store := NewSnapshotStore(loader, nil)
@@ -284,7 +283,7 @@ func TestSnapshotVersionsAtExpiresVersionExactlyAtHistoryBoundary(t *testing.T) 
 
 func TestSnapshotRunRefreshPollsRevisionWithoutRepeatingFullLoad(t *testing.T) {
 	loader := &revisionMatchableLoader{
-		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		revision: MatchableRevision{TaskCount: 1, Fingerprint: "stable"},
 		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
 	}
 	store := NewSnapshotStore(loader, nil)

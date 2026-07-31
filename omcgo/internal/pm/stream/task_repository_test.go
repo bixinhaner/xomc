@@ -54,18 +54,47 @@ func TestBuildPurgeObsoleteBuiltinDeviceTasksSQLTargetsOnlyLegacyIDs(t *testing.
 	}, args)
 }
 
-func TestBuildLoadMatchableRevisionSQLIncludesDeletedTasks(t *testing.T) {
+func TestBuildUpdateTaskMetadataSQLSkipsIdenticalValues(t *testing.T) {
+	taskID := uuid.MustParse("10000000-0000-4000-8000-000000000001")
+	plannedEnd := time.Date(2026, 8, 2, 3, 4, 5, 0, time.UTC)
+	req := SaveTaskRequest{
+		Name: "LTE network", Enabled: true, Visibility: "public",
+		PlannedEndAt: &plannedEnd,
+	}
+
+	query, args, err := buildUpdateTaskMetadataSQL(taskID, req, &plannedEnd)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "name IS DISTINCT FROM $6")
+	require.Contains(t, query, "enabled IS DISTINCT FROM $7")
+	require.Contains(t, query, "visibility IS DISTINCT FROM $8")
+	require.Contains(t, query, "planned_end_at IS DISTINCT FROM $9")
+	require.Equal(t, []interface{}{
+		req.Name, req.Enabled, req.Visibility, &plannedEnd, taskID.String(),
+		req.Name, req.Enabled, req.Visibility, &plannedEnd,
+	}, args)
+}
+
+func TestBuildLoadMatchableRevisionSQLUsesSemanticFields(t *testing.T) {
 	query, args, err := buildLoadMatchableRevisionSQL()
 
 	require.NoError(t, err)
-	require.Equal(
-		t,
-		"SELECT COUNT(*), COALESCE(MAX(updated_at), to_timestamp(0)), "+
-			"COALESCE(md5(string_agg(row_to_json(t)::text, ',' ORDER BY t.id)), md5('')) "+
-			"FROM pm_aggregation_tasks t",
-		query,
-	)
+	require.NotContains(t, query, "updated_at")
+	require.NotContains(t, query, "row_to_json")
+	require.Contains(t, query, "current_version_id")
+	require.Contains(t, query, "planned_end_at")
+	require.Contains(t, query, "effective_from")
+	require.Contains(t, query, "effective_to")
+	require.Contains(t, query, "content_hash")
+	require.Contains(t, query, "LEFT JOIN pm_aggregation_task_versions")
 	require.Empty(t, args)
+}
+
+func TestPgProgressTaskLoaderExcludesVersionMembers(t *testing.T) {
+	loader := NewPgProgressTaskLoader(nil)
+
+	require.NotNil(t, loader)
+	require.False(t, loader.includeMembers)
 }
 
 func TestTaskMemberBatchesStayBelowPostgresParameterLimit(t *testing.T) {

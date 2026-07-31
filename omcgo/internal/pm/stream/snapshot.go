@@ -18,7 +18,6 @@ type MatchableLoader interface {
 
 type MatchableRevision struct {
 	TaskCount   int64
-	UpdatedAt   time.Time
 	Fingerprint string
 }
 
@@ -91,7 +90,6 @@ func (s *SnapshotStore) Refresh(ctx context.Context) error {
 
 func sameMatchableRevision(left, right MatchableRevision) bool {
 	return left.TaskCount == right.TaskCount &&
-		left.UpdatedAt.Equal(right.UpdatedAt) &&
 		left.Fingerprint == right.Fingerprint
 }
 
