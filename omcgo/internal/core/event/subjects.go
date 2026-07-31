@@ -50,7 +50,7 @@ const (
 	// 订阅者：
 	//   - device.InformHandler.handleRebootComplete：更新 last_inform_at / 状态 /
 	//     IP / ConnectionRequestURL，原子递增 boot_count 并写入 last_boot_at；
-	//     当事件不含 "M Reboot" 时发布 SubjectDeviceRebootAbnormal（异常重启）。
+	//     按 HaltReason 口径识别异常重启并发布 SubjectDeviceRebootAbnormal。
 	//   - task.RebootCloser：收到含 "M Reboot" 的 Inform 时，兜底收敛 device_tasks
 	//     里仍为 pending/sent 的 Reboot / FactoryReset 任务（覆盖 RebootResponse
 	//     丢包、CPE 跳 ACK 直接重启等边界）。
@@ -112,7 +112,9 @@ const (
 	// 与 SubjectDeviceOnline 二选一：firmware 变化时优先，避免两路 Path B 重复同步。
 	SubjectDeviceFirmwareChanged = "device.firmware.changed"
 
-	// SubjectDeviceRebootAbnormal 是检测到设备异常重启（"1 BOOT" 不伴随 "M Reboot"）时发布。
+	// SubjectDeviceRebootAbnormal 是检测到设备异常重启时发布。
+	// 识别口径：必须有 "1 BOOT"；5G gNB 还要求 HaltReason.MainReason=halt_reboot；
+	// 其它设备沿用 HaltReason.MainReason 非空（参数缺失时退回旧事件码组合）。
 	// 发布者：device.DeviceService.RecordBootFromInform；
 	// 订阅者：alarm.RebootMonitor — 滑动窗口内累计 >=阈值触发 FREQUENT_ABNORMAL_REBOOT 告警。
 	SubjectDeviceRebootAbnormal = "device.reboot.abnormal"
@@ -124,7 +126,7 @@ const (
 	SubjectDeviceExpeditedAlarm = "device.inform.expedited_alarm"
 
 	// SubjectDeviceFaultDetected 是 ACS 检测到设备异常重启并携带故障原因时发布。
-	// Inform 事件码包含 "1 BOOT" 且 HaltReason.MainReason 不为空；或 5G 软重启（"4 VALUE_CHANGE" + soft_reboot）。
+	// Inform 事件码包含 "1 BOOT" 且满足设备类型对应的 HaltReason 口径；或 5G 软重启（"4 VALUE_CHANGE" + soft_reboot）。
 	// 发布者：acs/handler.go publishInformEvents（当 IsBoot 且有故障原因参数时）。
 	// 订阅者：stationlog.FaultLogService（按收集模式决定是否自动下发 SetParam + FaultLogURL）。
 	SubjectDeviceFaultDetected = "device.fault.detected"

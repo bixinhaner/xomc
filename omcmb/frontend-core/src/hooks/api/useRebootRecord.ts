@@ -12,11 +12,23 @@ export const rebootRecordKeys = {
   stats: (params: RebootRecordStatParams) => [...rebootRecordKeys.all, 'stats', params] as const,
 };
 
-export function useRebootRecordList(params: RebootRecordListParams, enabled = true) {
+export interface UseRebootRecordListOptions {
+  enabled?: boolean;
+  refetchInterval?: number | false;
+}
+
+export function useRebootRecordList(
+  params: RebootRecordListParams,
+  options: boolean | UseRebootRecordListOptions = true,
+) {
+  const resolvedOptions =
+    typeof options === 'boolean' ? { enabled: options } : { enabled: true, ...options };
+
   return useQuery({
     queryKey: rebootRecordKeys.list(params),
     queryFn: () => rebootRecordApi.list(params),
-    enabled,
+    enabled: resolvedOptions.enabled,
+    refetchInterval: resolvedOptions.refetchInterval,
     staleTime: 15_000,
   });
 }

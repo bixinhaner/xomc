@@ -193,7 +193,8 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 //   - Update last_inform_at / status / IP / ConnectionRequestURL / firmware
 //     via UpdateFromInform;
 //   - Atomically increment boot_count and stamp last_boot_at;
-//   - Publish device.reboot.abnormal for watchdog/crash reboots (no M Reboot).
+//   - Publish device.reboot.abnormal when HaltReason matches the abnormal-reboot
+//     rule for the device type.
 //
 // Unlike bootstrap it does NOT re-trigger the provisioning engine: a rebooted
 // device keeps its previous configuration identity.

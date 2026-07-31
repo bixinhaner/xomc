@@ -649,7 +649,7 @@ func TestHandleRebootComplete_AbnormalReboot_PublishesAbnormalEvent(t *testing.T
 
 	payload := sampleInformPayload("SN-REBOOT-ABN-001")
 	payload.Events = []string{tr069.EventBoot} // only "1 BOOT", no "M Reboot"
-	// T-0158: 异常重启判断改为基于 HaltReason.MainReason 非空
+	// T-0158: 非 gNB 设备的异常重启判断基于 HaltReason.MainReason 非空
 	payload.ParameterList = append(payload.ParameterList,
 		tr069.ParameterValueStruct{Name: HaltReasonMainPath, Value: "halt_reboot"},
 		tr069.ParameterValueStruct{Name: HaltReasonDetailPath, Value: "watchdog_timeout"},
@@ -911,6 +911,95 @@ func TestRecordBootFromInform_GSMAbnormalSnapshotUsesGSMDeviceType(t *testing.T)
 	assert.Equal(t, "GSM", rec.calls[0].DeviceType)
 	assert.False(t, rec.calls[0].IsGNB)
 	assert.Equal(t, "172.21.172.109", rec.calls[0].OperateIP)
+}
+
+func TestRecordBootFromInform_GNBRequiresHaltRebootMainReason(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 8, nil
+		},
+	}
+	abnormalRec := &infMockAbnormalRebootRecorder{}
+	normalRec := &infMockBootEventRecorder{}
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, nil, zap.NewNop())
+	svc.SetAbnormalRebootRecorder(abnormalRec)
+	svc.SetBootEventRecorder(normalRec)
+
+	params := []tr069.ParameterValueStruct{
+		{Name: HaltReasonMainPath, Value: "power_lost"},
+	}
+	_, err := svc.RecordBootFromInform(context.Background(), &model.Device{
+		ID:           deviceID,
+		SerialNumber: "SN-GNB-NORMAL",
+		Technology:   model.TechNR,
+		DeviceName:   "GNB-1",
+		IPAddress:    "10.0.0.5",
+	}, []string{tr069.EventBoot}, params, 180)
+	require.NoError(t, err)
+
+	assert.Empty(t, abnormalRec.calls)
+	require.Len(t, normalRec.calls, 1)
+	assert.Equal(t, "gNB", normalRec.calls[0].DeviceType)
+	assert.True(t, normalRec.calls[0].IsGNB)
+}
+
+func TestRecordBootFromInform_GNBHaltRebootMainReasonIsAbnormal(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 9, nil
+		},
+	}
+	rec := &infMockAbnormalRebootRecorder{}
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, nil, zap.NewNop())
+	svc.SetAbnormalRebootRecorder(rec)
+
+	params := []tr069.ParameterValueStruct{
+		{Name: HaltReasonMainPath, Value: "halt_reboot"},
+	}
+	_, err := svc.RecordBootFromInform(context.Background(), &model.Device{
+		ID:           deviceID,
+		SerialNumber: "SN-GNB-ABNORMAL",
+		Technology:   model.TechNR,
+		DeviceName:   "GNB-2",
+		IPAddress:    "10.0.0.6",
+	}, []string{tr069.EventBoot}, params, 240)
+	require.NoError(t, err)
+
+	require.Len(t, rec.calls, 1)
+	assert.Equal(t, "gNB", rec.calls[0].DeviceType)
+	assert.True(t, rec.calls[0].IsGNB)
+	assert.Equal(t, "halt_reboot", rec.calls[0].HaltMainReason)
+}
+
+func TestRecordBootFromInform_LTENonEmptyMainReasonStillAbnormal(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 10, nil
+		},
+	}
+	rec := &infMockAbnormalRebootRecorder{}
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, nil, zap.NewNop())
+	svc.SetAbnormalRebootRecorder(rec)
+
+	params := []tr069.ParameterValueStruct{
+		{Name: HaltReasonMainPath, Value: "power_lost"},
+	}
+	_, err := svc.RecordBootFromInform(context.Background(), &model.Device{
+		ID:           deviceID,
+		SerialNumber: "SN-LTE-ABNORMAL",
+		Technology:   model.TechLTE,
+		DeviceName:   "ENB-1",
+		IPAddress:    "10.0.0.7",
+	}, []string{tr069.EventBoot}, params, 300)
+	require.NoError(t, err)
+
+	require.Len(t, rec.calls, 1)
+	assert.Equal(t, "eNB", rec.calls[0].DeviceType)
+	assert.False(t, rec.calls[0].IsGNB)
+	assert.Equal(t, "power_lost", rec.calls[0].HaltMainReason)
 }
 
 // infMockBootEventRecorder 记录 RecordBootEvent 被调用次数与最后一次快照，
