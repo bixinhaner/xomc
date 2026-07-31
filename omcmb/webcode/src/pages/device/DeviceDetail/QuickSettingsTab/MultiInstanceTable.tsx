@@ -42,6 +42,10 @@ import {
   executeIpsecSubmissionPlan,
   type IpsecSubmissionPhase,
 } from './ipsecSubmission';
+import {
+  applyDeviceParameterSearchReadback,
+  refreshDeviceParameterSearchQueries,
+} from './parameterSearchRefresh';
 
 import { useT } from '@/hooks/useT';
 
@@ -1569,6 +1573,26 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       if (!cancelled && !didRollbackAddedInstance) {
         try {
           const syncResult = await syncRelatedParameters();
+          if (lastTask.status === 'completed' && group.id === 'enb-plmn') {
+            const plmnParameters = (syncResult.schema?.parameters ?? [])
+              .filter(
+                (item) => item.path.startsWith(objectPath) && item.path.endsWith('.PLMNID'),
+              )
+              .map((item) => ({
+                parameterPath: item.path,
+                parameterValue: String(item.currentValue ?? ''),
+              }));
+            if (syncResult.schema && plmnParameters.length > 0) {
+              applyDeviceParameterSearchReadback(queryClient, {
+                deviceId,
+                searchQuery: 'PLMNList',
+                replacePathPrefix: objectPath,
+                parameters: plmnParameters,
+              });
+            } else {
+              await refreshDeviceParameterSearchQueries(queryClient, deviceId);
+            }
+          }
           if (!cancelled && lastAction?.taskId === lastTask.id) {
             if (isIpsecGroup && lastAction.ipsecTargetEnabled !== undefined) {
               const globalParams = await deviceParameterApi.searchParameters(
