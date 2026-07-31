@@ -112,6 +112,26 @@ func TestSnapshotRefreshReloadsAfterRevisionChanges(t *testing.T) {
 	require.Contains(t, store.Current().ByVersion, secondVersion.VersionID)
 }
 
+func TestSnapshotRefreshReloadsWhenFingerprintChangesAtSameMaximumTimestamp(t *testing.T) {
+	updatedAt := time.Unix(2, 0)
+	loader := &revisionMatchableLoader{
+		revision: MatchableRevision{
+			TaskCount: 1, UpdatedAt: updatedAt, Fingerprint: "before",
+		},
+		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
+	}
+	store := NewSnapshotStore(loader, nil)
+	require.NoError(t, store.Refresh(context.Background()))
+
+	loader.setRevision(MatchableRevision{
+		TaskCount: 1, UpdatedAt: updatedAt, Fingerprint: "after",
+	})
+	require.NoError(t, store.Refresh(context.Background()))
+
+	loadCount, _ := loader.counts()
+	require.Equal(t, 2, loadCount)
+}
+
 func TestSnapshotRefreshRevisionFailurePreservesLastGoodSnapshot(t *testing.T) {
 	loader := &revisionMatchableLoader{
 		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
@@ -246,6 +266,30 @@ func TestSnapshotRefreshDoesNotMutateCachedSourceVersions(t *testing.T) {
 
 	require.Nil(t, version.DimensionMemberCounts)
 	require.Equal(t, int64(1), store.Current().ByVersion[version.VersionID].DimensionMemberCounts["network"])
+}
+
+func TestSnapshotRunRefreshPollsRevisionWithoutRepeatingFullLoad(t *testing.T) {
+	loader := &revisionMatchableLoader{
+		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
+	}
+	store := NewSnapshotStore(loader, nil)
+	require.NoError(t, store.Refresh(context.Background()))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		store.RunRefresh(ctx, time.Millisecond)
+	}()
+	require.Eventually(t, func() bool {
+		_, revisionCount := loader.counts()
+		return revisionCount >= 3
+	}, time.Second, time.Millisecond)
+	cancel()
+	<-done
+
+	loadCount, _ := loader.counts()
+	require.Equal(t, 1, loadCount)
 }
 
 func TestBuildTaskSnapshotSynthesizesDevicePipelineFromNetworkCatalog(t *testing.T) {

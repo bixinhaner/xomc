@@ -103,12 +103,13 @@ func initPMModule(c *Container) error {
 		streamCfg := pmstream.ConfigFromEnv()
 		progressStore := pmstream.NewRedisWindowStore(c.Redis, streamCfg.WindowTTL)
 		progressTasks := pmstream.NewPgTaskRepository(c.PgPool, c.EventBus)
+		progressSnapshot := pmstream.NewSnapshotStore(progressTasks, logger.Named("pm-progress-snapshot"))
 		backfillCtx, backfillCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		progressVersions, loadErr := progressTasks.LoadMatchable(backfillCtx, time.Now().UTC())
+		loadErr := progressSnapshot.Reload(backfillCtx)
 		backfilled := false
 		if loadErr == nil {
 			backfilled, loadErr = pmstream.NewWindowRepository(c.TsPool).
-				TryBackfillVersionMetadata(backfillCtx, pmstream.BuildTaskSnapshot(progressVersions))
+				TryBackfillVersionMetadata(backfillCtx, progressSnapshot.Current())
 		}
 		backfillCancel()
 		if loadErr != nil {
@@ -117,8 +118,8 @@ func initPMModule(c *Container) error {
 		} else if !backfilled {
 			logger.Info("PM progress version metadata backfill already owned by worker")
 		}
-		progressService = pmstream.NewProgressService(
-			c.TsPool, progressStore, progressTasks,
+		progressService = pmstream.NewProgressServiceWithSnapshot(
+			c.TsPool, progressStore, progressSnapshot,
 		).SetTimezoneProvider(c.SystemTimezone)
 		pmAdhocHandler.WithProgressService(progressService)
 	}

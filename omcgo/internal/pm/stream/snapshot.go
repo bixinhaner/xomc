@@ -17,8 +17,9 @@ type MatchableLoader interface {
 }
 
 type MatchableRevision struct {
-	TaskCount int64
-	UpdatedAt time.Time
+	TaskCount   int64
+	UpdatedAt   time.Time
+	Fingerprint string
 }
 
 type MatchableRevisionLoader interface {
@@ -89,7 +90,9 @@ func (s *SnapshotStore) Refresh(ctx context.Context) error {
 }
 
 func sameMatchableRevision(left, right MatchableRevision) bool {
-	return left.TaskCount == right.TaskCount && left.UpdatedAt.Equal(right.UpdatedAt)
+	return left.TaskCount == right.TaskCount &&
+		left.UpdatedAt.Equal(right.UpdatedAt) &&
+		left.Fingerprint == right.Fingerprint
 }
 
 func (s *SnapshotStore) reloadLocked(
@@ -250,7 +253,7 @@ func (s *SnapshotStore) RunRefresh(ctx context.Context, interval time.Duration) 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := s.Reload(ctx); err != nil {
+			if err := s.Refresh(ctx); err != nil {
 				s.logger.Warn("reload PM aggregation task snapshot", zap.Error(err))
 			}
 		}

@@ -69,8 +69,9 @@ Add the optional interface and mutex-protected cache:
 
 ```go
 type MatchableRevision struct {
-    TaskCount int64
-    UpdatedAt time.Time
+    TaskCount   int64
+    UpdatedAt   time.Time
+    Fingerprint string
 }
 
 type MatchableRevisionLoader interface {
@@ -151,7 +152,7 @@ Expected: compilation fails because the builder is undefined.
 
 - [ ] **Step 3: Implement the revision query with Squirrel + pgx**
 
-Use `storage.Psql.Select("COUNT(*)", "COALESCE(MAX(updated_at), to_timestamp(0))").From("pm_aggregation_tasks")`; scan into `TaskCount` and `UpdatedAt`, and wrap builder/query errors with PM aggregation revision context.
+Use `storage.Psql.Select("COUNT(*)", "COALESCE(MAX(updated_at), to_timestamp(0))", "COALESCE(md5(string_agg(row_to_json(t)::text, ',' ORDER BY t.id)), md5(''))").From("pm_aggregation_tasks t")`; scan into `TaskCount`, `UpdatedAt`, and `Fingerprint`, and wrap builder/query errors with PM aggregation revision context. The fingerprint is required so an older long transaction that commits after the current maximum timestamp cannot evade change detection.
 
 - [ ] **Step 4: Run repository and package tests**
 
@@ -202,7 +203,7 @@ Expected: compilation fails because `loadSnapshot` does not exist.
 
 - [ ] **Step 3: Wire ProgressService to one shared SnapshotStore**
 
-Construct `snapshot: NewSnapshotStore(loader, nil)` in `NewProgressService`. Replace direct `LoadMatchable` and `BuildTaskSnapshot` in `Query` with `loadSnapshot`, and compute metric intervals by iterating `snapshot.ByVersion` while filtering the requested real task ID.
+Construct `snapshot: NewSnapshotStore(loader, nil)` in `NewProgressService`. Add `NewProgressServiceWithSnapshot` for app startup to inject the already loaded metadata-backfill snapshot. Replace direct `LoadMatchable` and `BuildTaskSnapshot` in `Query` with `loadSnapshot`, and compute metric intervals by iterating `snapshot.ByVersion` while filtering the requested real task ID. Update `cmd/app/provider/pm.go` so startup backfill and Dashboard progress share one store.
 
 - [ ] **Step 4: Change worker polling to conditional refresh**
 

@@ -41,9 +41,11 @@
 
 ### 方案 C：轻量修订指纹 + 进程内快照缓存
 
-在主库通过 `pm_aggregation_tasks` 的行数和最大 `updated_at` 形成低成本、可比较的
-修订值。任务保存、当前版本切换、计划结束和软删除都会更新该表；版本规则和成员在同一事务内
-不可变写入，因此任务表提交点可以作为完整目录的发布水位。
+在主库通过 `pm_aggregation_tasks` 的行数、最大 `updated_at` 和全部任务行的稳定 MD5
+指纹形成低成本、可比较的修订值。指纹避免“较早开始但较晚提交的事务写入较小时间戳”时
+仅看最大时间会漏变更。任务保存、当前版本切换、计划结束和软删除都会更新该表；版本规则和成员
+在同一事务内不可变写入，因此任务表提交点可以作为完整目录的发布水位。生产只读
+`EXPLAIN ANALYZE` 显示 12 条任务行的修订查询执行约 0.6ms、26kB 排序内存。
 
 worker 和 app 共用 `SnapshotStore` 的缓存语义：首次或修订变化时才调用 `LoadMatchable`；
 未变化且没有跨越版本时间边界时直接复用已发布快照。采用此方案。
@@ -56,8 +58,9 @@ worker 和 app 共用 `SnapshotStore` 的缓存语义：首次或修订变化时
 
 ```go
 type MatchableRevision struct {
-    TaskCount int64
-    UpdatedAt time.Time
+    TaskCount   int64
+    UpdatedAt   time.Time
+    Fingerprint string
 }
 
 type MatchableRevisionLoader interface {
@@ -65,8 +68,8 @@ type MatchableRevisionLoader interface {
 }
 ```
 
-`PgTaskRepository` 实现该接口，使用 Squirrel + pgx 查询全部任务的 `COUNT(*)` 和
-`MAX(updated_at)`。包含已删除任务，确保软删除也改变修订。
+`PgTaskRepository` 实现该接口，使用 Squirrel + pgx 查询全部任务的 `COUNT(*)`、
+`MAX(updated_at)` 和按任务 ID 排序的整行指纹。包含已删除任务，确保软删除也改变修订。
 
 ### SnapshotStore 状态机
 
@@ -95,7 +98,9 @@ type MatchableRevisionLoader interface {
 
 `ProgressService` 持有一个共享 `SnapshotStore`。每次 `Query` 调用 `Refresh` 后读取
 `Current()`；同一 app 进程中的多个 Dashboard 请求共享缓存和并发锁。指标版本有效区间
-从快照的真实任务版本生成，不再单独全量加载。
+从快照的真实任务版本生成，不再单独全量加载。app 启动时版本元数据回填使用的
+`SnapshotStore` 直接注入 `ProgressService`，避免启动已全量加载后首个 Dashboard 请求
+再重复一次。
 
 ## 错误处理
 

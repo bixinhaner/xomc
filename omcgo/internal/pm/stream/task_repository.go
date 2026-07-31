@@ -415,7 +415,8 @@ func buildLoadMatchableRevisionSQL() (string, []interface{}, error) {
 	return storage.Psql.Select(
 		"COUNT(*)",
 		"COALESCE(MAX(updated_at), to_timestamp(0))",
-	).From("pm_aggregation_tasks").ToSql()
+		"COALESCE(md5(string_agg(row_to_json(t)::text, ',' ORDER BY t.id)), md5(''))",
+	).From("pm_aggregation_tasks t").ToSql()
 }
 
 func (r *PgTaskRepository) LoadMatchableRevision(
@@ -431,6 +432,7 @@ func (r *PgTaskRepository) LoadMatchableRevision(
 	if err := r.pool.QueryRow(ctx, query, args...).Scan(
 		&revision.TaskCount,
 		&revision.UpdatedAt,
+		&revision.Fingerprint,
 	); err != nil {
 		return MatchableRevision{}, fmt.Errorf(
 			"query PM aggregation task revision: %w", err,

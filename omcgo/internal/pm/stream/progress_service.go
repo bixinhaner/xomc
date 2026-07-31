@@ -78,7 +78,7 @@ type ProgressQueryResult struct {
 type ProgressService struct {
 	pool     *pgxpool.Pool
 	store    *RedisWindowStore
-	loader   MatchableLoader
+	snapshot *SnapshotStore
 	timezone calendarfilter.TimezoneProvider
 }
 
@@ -110,7 +110,19 @@ func NewProgressService(
 	store *RedisWindowStore,
 	loader MatchableLoader,
 ) *ProgressService {
-	return &ProgressService{pool: pool, store: store, loader: loader}
+	return NewProgressServiceWithSnapshot(
+		pool, store, NewSnapshotStore(loader, nil),
+	)
+}
+
+func NewProgressServiceWithSnapshot(
+	pool *pgxpool.Pool,
+	store *RedisWindowStore,
+	snapshot *SnapshotStore,
+) *ProgressService {
+	return &ProgressService{
+		pool: pool, store: store, snapshot: snapshot,
+	}
 }
 
 func (s *ProgressService) SetTimezoneProvider(
@@ -128,13 +140,11 @@ func (s *ProgressService) Query(
 	queryCtx, cancel := context.WithTimeout(ctx, progressQueryTimeout)
 	defer cancel()
 	ctx = queryCtx
-	now := time.Now().UTC()
-	versions, err := s.loader.LoadMatchable(ctx, now)
+	snapshot, err := s.loadSnapshot(ctx)
 	if err != nil {
-		return ProgressQueryResult{}, fmt.Errorf("load PM aggregation versions for progress: %w", err)
+		return ProgressQueryResult{}, err
 	}
-	metricIntervals := metricVersionIntervals(versions, taskID)
-	snapshot := BuildTaskSnapshot(versions)
+	metricIntervals := metricVersionIntervalsFromSnapshot(snapshot, taskID)
 	builder := storage.Psql.Select(
 		"task_id", "task_version_id", "entity_key", "granularity",
 		"window_start", "window_end", "revision", "status",
@@ -215,6 +225,30 @@ func (s *ProgressService) Query(
 	}
 	result.MetricIntervals = metricIntervals
 	return result, nil
+}
+
+func (s *ProgressService) loadSnapshot(ctx context.Context) (*TaskSnapshot, error) {
+	if s.snapshot == nil {
+		return nil, fmt.Errorf("PM aggregation progress snapshot is not configured")
+	}
+	if err := s.snapshot.Refresh(ctx); err != nil {
+		return nil, fmt.Errorf("load PM aggregation versions for progress: %w", err)
+	}
+	return s.snapshot.Current(), nil
+}
+
+func metricVersionIntervalsFromSnapshot(
+	snapshot *TaskSnapshot,
+	taskID uuid.UUID,
+) []MetricVersionInterval {
+	if snapshot == nil {
+		return nil
+	}
+	versions := make([]*TaskVersionSnapshot, 0, len(snapshot.ByVersion))
+	for _, version := range snapshot.ByVersion {
+		versions = append(versions, version)
+	}
+	return metricVersionIntervals(versions, taskID)
 }
 
 func metricVersionIntervals(

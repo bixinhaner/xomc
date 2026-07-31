@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -8,6 +9,55 @@ import (
 
 	"github.com/google/uuid"
 )
+
+func TestProgressServiceLoadSnapshotReusesUnchangedCatalog(t *testing.T) {
+	loader := &revisionMatchableLoader{
+		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
+	}
+	service := NewProgressService(nil, nil, loader)
+
+	first, err := service.loadSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("first loadSnapshot returned error: %v", err)
+	}
+	second, err := service.loadSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("second loadSnapshot returned error: %v", err)
+	}
+	loadCount, _ := loader.counts()
+	if loadCount != 1 {
+		t.Fatalf("full catalog loads = %d, want 1", loadCount)
+	}
+	if first != second {
+		t.Fatal("unchanged progress catalog did not reuse the published snapshot")
+	}
+}
+
+func TestProgressServiceUsesPrimedStartupSnapshot(t *testing.T) {
+	loader := &revisionMatchableLoader{
+		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
+	}
+	snapshot := NewSnapshotStore(loader, nil)
+	if err := snapshot.Refresh(context.Background()); err != nil {
+		t.Fatalf("prime startup snapshot: %v", err)
+	}
+	service := NewProgressServiceWithSnapshot(nil, nil, snapshot)
+
+	got, err := service.loadSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("load primed progress snapshot: %v", err)
+	}
+
+	loadCount, _ := loader.counts()
+	if loadCount != 1 {
+		t.Fatalf("full catalog loads = %d, want startup load only", loadCount)
+	}
+	if got != snapshot.Current() {
+		t.Fatal("progress service did not retain the primed startup snapshot")
+	}
+}
 
 func TestBuildCurrentWeeklyPreviewIncludesOpenDailyWithoutPersistedWeeklyWindow(t *testing.T) {
 	location, err := time.LoadLocation("Asia/Shanghai")
