@@ -61,6 +61,11 @@ func (KeyBuilder) ACSUECountProbe(deviceSN string) string {
 	return acsUECountProbePrefix + deviceSN
 }
 
+// PMUploadSetupAdmission 设备上线自动下发 PM 配置的跨实例短租约。
+func (KeyBuilder) PMUploadSetupAdmission(deviceSN string) string {
+	return pmUploadSetupAdmissionPrefix + deviceSN
+}
+
 // ACSSTUN 按设备 SN 维护 UDP Connection Request 的 STUN 地址。
 func (KeyBuilder) ACSSTUN(deviceSN string) string { return acsSTUNPrefix + deviceSN }
 
@@ -344,6 +349,9 @@ const (
 	acsDeviceSessionPrefix = "acs:device:session:"
 	acsConnReqURLPrefix    = "acs:connreq:url:"
 	acsAuthNoncePrefix     = "acs:auth:nonce:"
+
+	// pm
+	pmUploadSetupAdmissionPrefix = "pm:upload_setup:admission:"
 
 	// datamodel
 	datamodelCacheVersionKey = "datamodel:cache_version"

@@ -481,6 +481,16 @@ func (s *TaskService) LatestOpenTaskByDeviceAndMethod(ctx context.Context, devic
 	return s.repo.LatestOpenByDeviceMethodDescription(ctx, deviceSN, method, description)
 }
 
+func (s *TaskService) LatestCompletedTaskByDeviceAndCommandKey(
+	ctx context.Context,
+	deviceSN, commandKey string,
+) (*Task, error) {
+	if s.repo == nil {
+		return nil, nil
+	}
+	return s.repo.LatestCompletedByDeviceCommandKey(ctx, deviceSN, commandKey)
+}
+
 func (s *TaskService) LatestSyncGPVSummaryByDevice(ctx context.Context, deviceSN string) (*SyncGPVSummary, error) {
 	if s.repo == nil {
 		return nil, nil
