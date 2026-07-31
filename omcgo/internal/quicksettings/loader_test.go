@@ -314,6 +314,57 @@ func TestBuiltinMLN_IncludesIndependentPLMNList(t *testing.T) {
 	assert.Equal(t, "6", plmnGroup.Params[0].MaxValue)
 }
 
+func TestBuiltinBM_IncludesIndependentPLMNList(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "BM.xml"))
+	require.NoError(t, err)
+
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+
+	var plmnGroup *xmlGroup
+	for i := range doc.Groups {
+		if doc.Groups[i].ID == "enb-plmn" {
+			plmnGroup = &doc.Groups[i]
+			break
+		}
+	}
+	require.NotNil(t, plmnGroup)
+	require.False(t, plmnGroup.MultiInstance == "true")
+	require.Len(t, plmnGroup.Params, 1)
+	assert.Equal(t, "ExistPlmnidList", plmnGroup.Params[0].Name)
+	assert.Equal(t,
+		"Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.ExistPlmnidList",
+		plmnGroup.Params[0].StandardPath,
+	)
+	assert.Equal(t, "6", plmnGroup.Params[0].MaxValue)
+}
+
+func TestBuiltinBLQ_IncludesIndependentPLMNList(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "BLQ.xml"))
+	require.NoError(t, err)
+
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+
+	var plmnGroup *xmlGroup
+	for i := range doc.Groups {
+		if doc.Groups[i].ID == "enb-plmn" {
+			plmnGroup = &doc.Groups[i]
+			break
+		}
+	}
+	require.NotNil(t, plmnGroup)
+	assert.Equal(t, "true", plmnGroup.MultiInstance)
+	assert.Equal(t, 6, plmnGroup.MaxInstances)
+	assert.Equal(t,
+		"Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.",
+		plmnGroup.ObjectPath,
+	)
+	require.Len(t, plmnGroup.Params, 1)
+	assert.Equal(t, "PLMNID", plmnGroup.Params[0].Name)
+	assert.Equal(t, "PLMNID", plmnGroup.Params[0].Leaf)
+}
+
 func TestBuiltinMLQ_IncludesIndependentPLMNList(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "MLQ.xml"))
 	require.NoError(t, err)
