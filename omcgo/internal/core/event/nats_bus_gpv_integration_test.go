@@ -77,6 +77,126 @@ func TestQueueSubscribeHonorsConfiguredMaxDeliver(t *testing.T) {
 		"expected deferred redelivery must not emit error stacktraces")
 }
 
+func TestQueueSubscribeClosePreservesDurableConsumer(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("QUEUE_RESTART_%d", suffix)
+	subject := fmt.Sprintf("test.queue.restart.%d", suffix)
+	durable := fmt.Sprintf("queue-restart-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name:      stream,
+		Subjects:  []string{subject},
+		Storage:   nats.MemoryStorage,
+		Retention: nats.LimitsPolicy,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	_, err = bus.QueueSubscribe(subject, durable, func(context.Context, Event) error {
+		return nil
+	})
+	require.NoError(t, err)
+	_, err = js.ConsumerInfo(stream, durable)
+	require.NoError(t, err)
+
+	require.NoError(t, bus.Close())
+	_, err = js.ConsumerInfo(stream, durable)
+	require.NoError(t, err,
+		"graceful service shutdown must detach from, rather than delete, a durable consumer")
+}
+
+func TestKeyedQueueSubscribeClosePreservesDurableConsumer(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("KEYED_QUEUE_RESTART_%d", suffix)
+	subject := fmt.Sprintf("test.keyed-queue.restart.%d", suffix)
+	durable := fmt.Sprintf("keyed-queue-restart-%d", suffix)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name:      stream,
+		Subjects:  []string{subject},
+		Storage:   nats.MemoryStorage,
+		Retention: nats.LimitsPolicy,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	_, err = bus.KeyedQueueSubscribe(subject, KeyedQueueConfig{
+		Durable:       durable,
+		Concurrency:   1,
+		QueueDepth:    1,
+		AckWait:       time.Second,
+		MaxDeliver:    3,
+		MaxAckPending: 2,
+	}, func(evt Event) (string, error) {
+		return evt.ID, nil
+	}, func(context.Context, Event) error {
+		return nil
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, bus.Close())
+	_, err = js.ConsumerInfo(stream, durable)
+	require.NoError(t, err,
+		"graceful service shutdown must preserve a keyed durable consumer")
+}
+
+func TestPullSubscribeClosePreservesDurableConsumer(t *testing.T) {
+	url := os.Getenv("GPV_NATS_TEST_URL")
+	if url == "" {
+		t.Skip("set GPV_NATS_TEST_URL to run the JetStream integration test")
+	}
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := nc.JetStream()
+	require.NoError(t, err)
+
+	suffix := time.Now().UnixNano()
+	stream := fmt.Sprintf("PULL_RESTART_%d", suffix)
+	subject := fmt.Sprintf("test.pull.restart.%d", suffix)
+	queue := fmt.Sprintf("pull-restart-%d", suffix)
+	durable := pullDurableName(queue)
+	_, err = js.AddStream(&nats.StreamConfig{
+		Name:      stream,
+		Subjects:  []string{subject},
+		Storage:   nats.MemoryStorage,
+		Retention: nats.LimitsPolicy,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = js.DeleteStream(stream) })
+
+	bus := NewNATSEventBus(nc, js, zap.NewNop())
+	_, err = bus.PullSubscribe(subject, queue, func(context.Context, Event) error {
+		return nil
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, bus.Close())
+	_, err = js.ConsumerInfo(stream, durable)
+	require.NoError(t, err,
+		"graceful service shutdown must preserve a pull durable consumer")
+}
+
 func TestQueueSubscribeDeferredLaneDoesNotBlockMainConsumer(t *testing.T) {
 	url := os.Getenv("GPV_NATS_TEST_URL")
 	if url == "" {
