@@ -298,6 +298,10 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 			zap.String("device_sn", serialNumber), zap.Error(err))
 		return nil
 	}
+	commandKey := pmSetupCommandKey
+	if deviceID != "" {
+		commandKey += ":" + deviceID
+	}
 
 	var leaseToken string
 	var stopRenewal context.CancelFunc
@@ -351,17 +355,17 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 			zap.String("device_sn", serialNumber), zap.Error(err))
 		return fmt.Errorf("query open PM upload setup task: %w", err)
 	}
-	if open != nil && jsonSemanticallyEqual(open.Params, paramsJSON) {
+	openBelongsToCurrentDevice := open != nil &&
+		(open.CommandKey == commandKey ||
+			(!newRegistration && open.CommandKey == pmSetupCommandKey))
+	if openBelongsToCurrentDevice &&
+		jsonSemanticallyEqual(open.Params, paramsJSON) {
 		s.logger.Debug("skip duplicate open PM upload setup task",
 			zap.String("device_sn", serialNumber),
 			zap.String("task_id", open.ID))
 		return nil
 	}
 
-	commandKey := pmSetupCommandKey
-	if deviceID != "" {
-		commandKey += ":" + deviceID
-	}
 	completed, lookupErr := s.taskSvc.LatestCompletedTaskByDeviceAndCommandKey(
 		ctx, serialNumber, commandKey,
 	)

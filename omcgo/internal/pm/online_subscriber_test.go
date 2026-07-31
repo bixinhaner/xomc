@@ -317,10 +317,15 @@ func Test_OnlineSubscriber_SkipsExistingOpenPMSetup(t *testing.T) {
 	const uploadURL = "http://1.2.3.4:8080/smallcell/FileUploadService?fileType=PM&filename="
 	params, err := json.Marshal(buildSPVParams("1", uploadURL, 900))
 	require.NoError(t, err)
-	stub := &stubTaskCreator{open: &task.Task{ID: "already-open", Params: params}}
+	payload := samplePayload()
+	stub := &stubTaskCreator{open: &task.Task{
+		ID:         "already-open",
+		Params:     params,
+		CommandKey: pmSetupCommandKey + ":" + payload.DeviceID.String(),
+	}}
 	s := NewOnlineSubscriber(stub, uploadURL, "1", 900, nil)
 
-	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, payload)))
 	require.Empty(t, stub.captured)
 }
 
@@ -369,6 +374,27 @@ func Test_OnlineSubscriber_NewRegistrationDoesNotTrustOldCompletedState(t *testi
 
 	require.NoError(t, s.handleRegistered(context.Background(), evt))
 	require.Len(t, stub.captured, 1)
+}
+
+func Test_OnlineSubscriber_NewRegistrationDoesNotTrustOldOpenDevice(t *testing.T) {
+	const uploadURL = "http://1.2.3.4:8080/smallcell/FileUploadService?fileType=PM&filename="
+	params, err := json.Marshal(buildSPVParams("1", uploadURL, 900))
+	require.NoError(t, err)
+	newDeviceID := uuid.New().String()
+	stub := &stubTaskCreator{open: &task.Task{
+		ID:         "old-device-open",
+		Params:     params,
+		CommandKey: pmSetupCommandKey + ":" + uuid.New().String(),
+	}}
+	s := NewOnlineSubscriber(stub, uploadURL, "1", 900, nil)
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]interface{}{
+		"device_id": newDeviceID, "serial_number": "REG-REUSED-SN", "created": true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.handleRegistered(context.Background(), evt))
+	require.Len(t, stub.captured, 1)
+	require.Equal(t, pmSetupCommandKey+":"+newDeviceID, stub.captured[0].CommandKey)
 }
 
 func Test_OnlineSubscriber_NewRegistrationReplayUsesDeviceIdentity(t *testing.T) {

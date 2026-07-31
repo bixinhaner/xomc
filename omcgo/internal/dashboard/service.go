@@ -1629,7 +1629,8 @@ func (s *Service) fetchNetworkKCodeSeries(
 		// Snapshot queries append an in-progress value for the current natural
 		// day/week. The absence of that one final row is expected, but closed
 		// periods in the same range still need missing-result monitoring.
-		cutoff := currentNaturalPeriodStart(granularity, time.Now().UTC())
+		businessNow := response.TimeInCurrentLocation(ctx, time.Now())
+		cutoff := currentNaturalPeriodStart(granularity, businessNow)
 		if !startTime.Before(cutoff) {
 			requested = nil
 		} else {
@@ -1689,15 +1690,14 @@ func currentNaturalPeriodStart(
 	granularity metrics.Granularity,
 	now time.Time,
 ) time.Time {
-	now = now.UTC()
 	dayStart := time.Date(
-		now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC,
+		now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location(),
 	)
 	if granularity != metrics.GranularityWeekly {
-		return dayStart
+		return dayStart.UTC()
 	}
 	daysSinceMonday := (int(dayStart.Weekday()) + 6) % 7
-	return dayStart.AddDate(0, 0, -daysSinceMonday)
+	return dayStart.AddDate(0, 0, -daysSinceMonday).UTC()
 }
 
 func sortAndDedupeNetworkSeriesPoints(points []networkSeriesPoint) []networkSeriesPoint {

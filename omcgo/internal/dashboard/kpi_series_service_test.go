@@ -9,11 +9,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 )
+
+type fixedDashboardTimezoneProvider struct {
+	location *time.Location
+}
+
+func (p fixedDashboardTimezoneProvider) Location(context.Context) *time.Location {
+	return p.location
+}
 
 type recordingNetworkRollupReader struct {
 	queries []NetworkRollupQuery
@@ -223,6 +232,63 @@ func TestGetKPITimeSeriesSnapshotStillReportsMissingClosedPeriod(t *testing.T) {
 	}
 	require.Equal(t, float64(1), missing,
 		"current partial must not hide a missing final result from a closed period")
+}
+
+func TestGetKPITimeSeriesSnapshotUsesBusinessTimezoneForOpenPeriod(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	response.SetTimezoneProvider(fixedDashboardTimezoneProvider{location: location})
+	t.Cleanup(func() { response.SetTimezoneProvider(nil) })
+	now := time.Now().In(location)
+	currentDay := time.Date(
+		now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location,
+	)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	registry := prometheus.NewRegistry()
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+		metrics:        NewMetrics(registry),
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			Rows: []pmstream.ProgressResult{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: currentDay.UTC(),
+				WindowEnd:   currentDay.Add(24 * time.Hour).UTC(),
+				Dimension:   pmstream.DimensionNetwork, DimensionKey: "network",
+				MetricPath: "K1", MetricType: "kpi", Value: 42, Partial: true,
+			}},
+		},
+	})
+
+	_, _, err = service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, currentDay.UTC(), now.Add(time.Hour).UTC(),
+	)
+	require.NoError(t, err)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		require.NotEqual(t, "dashboard_kpi_missing_result_total", family.GetName(),
+			"the current business-timezone day must not be reported as a missing final period")
+	}
+}
+
+func TestCurrentNaturalPeriodStartUsesBusinessTimezone(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	now := time.Date(2026, 7, 31, 18, 0, 0, 0, location)
+
+	require.Equal(t,
+		time.Date(2026, 7, 30, 16, 0, 0, 0, time.UTC),
+		currentNaturalPeriodStart(metrics.GranularityDaily, now),
+	)
+	require.Equal(t,
+		time.Date(2026, 7, 26, 16, 0, 0, 0, time.UTC),
+		currentNaturalPeriodStart(metrics.GranularityWeekly, now),
+	)
 }
 
 func TestGetKPITimeSeries_RoutesRequestedGranularity(t *testing.T) {
