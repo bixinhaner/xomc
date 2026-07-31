@@ -784,7 +784,7 @@ func pmQueueTuning(concurrency int) event.QueueTuning {
 	}
 	return event.QueueTuning{
 		AckWait:       2 * time.Minute,
-		MaxDeliver:    12,
+		MaxDeliver:    event.MaxDeliveriesForRetryHorizon(collector.DeviceRegistrationGrace),
 		MaxAckPending: maxAckPending,
 	}
 }
