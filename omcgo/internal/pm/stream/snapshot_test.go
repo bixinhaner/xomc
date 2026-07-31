@@ -268,6 +268,20 @@ func TestSnapshotRefreshDoesNotMutateCachedSourceVersions(t *testing.T) {
 	require.Equal(t, int64(1), store.Current().ByVersion[version.VersionID].DimensionMemberCounts["network"])
 }
 
+func TestSnapshotVersionsAtExpiresVersionExactlyAtHistoryBoundary(t *testing.T) {
+	now := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	effectiveTo := now.Add(-matchableVersionHistory)
+	version := snapshotTestVersion()
+	version.EffectiveTo = &effectiveTo
+
+	versions, nextBoundary := snapshotVersionsAt(
+		[]*TaskVersionSnapshot{version}, now,
+	)
+
+	require.Empty(t, versions)
+	require.True(t, nextBoundary.IsZero())
+}
+
 func TestSnapshotRunRefreshPollsRevisionWithoutRepeatingFullLoad(t *testing.T) {
 	loader := &revisionMatchableLoader{
 		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},

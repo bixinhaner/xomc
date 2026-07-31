@@ -152,7 +152,7 @@ func snapshotVersionsAt(
 		if source == nil {
 			continue
 		}
-		if source.EffectiveTo != nil && source.EffectiveTo.Before(cutoff) {
+		if source.EffectiveTo != nil && !source.EffectiveTo.After(cutoff) {
 			continue
 		}
 		clone := *source
