@@ -142,8 +142,8 @@ func TestACSConfig_Validate(t *testing.T) {
 
 func TestBackpressureConfigDefaults(t *testing.T) {
 	cfg := (BackpressureConfig{}).Defaults()
-	assert.Equal(t, 2000, cfg.QueuePendingHigh)
-	assert.Equal(t, 500, cfg.QueuePendingLow)
+	assert.Equal(t, 5000, cfg.QueuePendingHigh)
+	assert.Equal(t, 1000, cfg.QueuePendingLow)
 	assert.Equal(t, 10*time.Minute, cfg.QueueOldestHigh)
 	assert.Equal(t, 2*time.Minute, cfg.QueueOldestLow)
 	assert.Equal(t, 5*time.Minute, cfg.QueueSlopeWindow)

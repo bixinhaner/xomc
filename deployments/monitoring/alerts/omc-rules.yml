@@ -28,19 +28,34 @@ groups:
             Action: 查看 run/logs/app/app.log，确认进程是否退出或端口被占用。
 
       - alert: OMCACSDown
-        expr: up{job="omc-acs"} == 0
+        # ACS 采用 primary + candidate 双实例接力。单副本失效仍可承载南向流量，
+        # 只有两个静态抓取目标都不可达时才判定主链路中断。
+        expr: sum(up{job="omc-acs"}) < 1
         for: 2m
         labels:
           severity: critical
           domain: omc
           deployment_unit: acs
         annotations:
-          summary: "omcgo-acs instance {{ $labels.instance }} is down"
+          summary: "全部 omcgo-acs 实例均不可达"
           description: |
-            omcgo-acs metrics endpoint has been unreachable for 2 minutes.
-            Affected instance: {{ $labels.instance }}.
+            primary 与 candidate 两个 omcgo-acs metrics endpoint 已同时不可达 2 分钟。
             Impact: TR-069 南向断开，CPE 无法 Inform / 接收命令。
             Action: 查看 run/logs/acs/acs.log，确认 :7547 / :7557 监听是否正常。
+
+      - alert: OMCACSReplicaDown
+        expr: up{job="omc-acs"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          domain: omc
+          deployment_unit: acs
+        annotations:
+          summary: "omcgo-acs 单副本不可达（{{ $labels.instance }}）"
+          description: |
+            ACS 剩余副本仍可承载南向请求，但发布接力冗余已经降级。
+            Affected instance: {{ $labels.instance }}.
+            Action: 立即检查对应容器与 /readyz，恢复双副本后再执行下一次发布。
 
       - alert: OMCWorkerDown
         expr: up{job="omc-worker"} == 0

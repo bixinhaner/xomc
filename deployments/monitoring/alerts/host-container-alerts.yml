@@ -352,7 +352,7 @@ groups:
           label_replace(
             count by (container_label_com_docker_compose_service) (
               (
-                container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+                container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
               )
               and on (id) omc:container_last_seen:fresh
             ),
@@ -374,7 +374,7 @@ groups:
           label_replace(
             count by (container_label_com_docker_compose_service) (
               (
-                container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+                container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
               )
               and on (id) omc:container_last_seen:fresh
             ),
@@ -396,7 +396,7 @@ groups:
           label_replace(
             count by (container_label_com_docker_compose_service) (
               (
-                container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+                container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
               )
               and on (id) omc:container_last_seen:fresh
             ),
@@ -419,8 +419,8 @@ groups:
             label_replace(
               sum by (container_label_com_docker_compose_service) (
                 (
-                  container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
-                  / container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+                  container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+                  / container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
                 )
                 and on (id) omc:container_last_seen:fresh
               ),
@@ -433,7 +433,7 @@ groups:
           (
             label_replace(
               sum by (container_label_com_docker_compose_service) (
-                container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+                container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
                 and on (id) omc:container_last_seen:fresh
               ),
               "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"

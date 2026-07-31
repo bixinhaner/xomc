@@ -49,15 +49,18 @@ const (
 	bpKeyQueueOldestLow   = "queue_oldest_low_sec"
 	bpKeyQueueSlopeWindow = "queue_slope_window_sec"
 
-	bpDefaultEnabled          = true
-	bpDefaultDiskHighPct      = 70.0
-	bpDefaultDiskLowPct       = 60.0
-	bpDefaultIOSomeHigh       = 70.0
-	bpDefaultIOSomeLow        = 20.0
-	bpDefaultMaxInflight      = 2000
-	bpDefaultIntervalSec      = 30
-	bpDefaultQueuePendingHigh = 2000
-	bpDefaultQueuePendingLow  = 500
+	bpDefaultEnabled     = true
+	bpDefaultDiskHighPct = 70.0
+	bpDefaultDiskLowPct  = 60.0
+	bpDefaultIOSomeHigh  = 70.0
+	bpDefaultIOSomeLow   = 20.0
+	bpDefaultMaxInflight = 2000
+	bpDefaultIntervalSec = 30
+	// 20k devices report PM files in a synchronized quarter-hour burst. Production
+	// observations show a healthy, fast-draining peak around 2.7k pending with low
+	// I/O pressure; the old 2k threshold returned avoidable 503s every hour.
+	bpDefaultQueuePendingHigh = 5000
+	bpDefaultQueuePendingLow  = 1000
 	bpDefaultQueueOldestHigh  = 10 * time.Minute
 	bpDefaultQueueOldestLow   = 2 * time.Minute
 	bpDefaultQueueSlopeWindow = 5 * time.Minute

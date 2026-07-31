@@ -56,8 +56,9 @@ mode="$(stat -f '%Lp' "$TMP/resource-plan.prom" 2>/dev/null || stat -c '%a' "$TM
 grep -Fx 'omc_resource_plan_cpu_cores{compose_service="worker"} 8' "$TMP/resource-plan.prom"
 grep -Fx 'omc_resource_plan_memory_limit_bytes{compose_service="redis"} 8589934592' "$TMP/resource-plan.prom"
 grep -Fx 'omc_resource_plan_memory_limit_bytes{compose_service="app"} 1610612736' "$TMP/resource-plan.prom"
-[ "$(grep -c '^omc_resource_plan_cpu_cores{compose_service=' "$TMP/resource-plan.prom")" = 9 ]
-[ "$(grep -c '^omc_resource_plan_memory_limit_bytes{compose_service=' "$TMP/resource-plan.prom")" = 9 ]
+grep -Fx 'omc_resource_plan_memory_limit_bytes{compose_service="acs-candidate"} 4294967296' "$TMP/resource-plan.prom"
+[ "$(grep -c '^omc_resource_plan_cpu_cores{compose_service=' "$TMP/resource-plan.prom")" = 10 ]
+[ "$(grep -c '^omc_resource_plan_memory_limit_bytes{compose_service=' "$TMP/resource-plan.prom")" = 10 ]
 ! grep -q '{service=' "$TMP/resource-plan.prom"
 
 printf 'resource plan metrics: PASS\n'

@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/auth"
+	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/acs/rpclog"
 	"github.com/omcgo/omcgo/internal/acs/stun"
@@ -1208,10 +1209,13 @@ func (h *Handler) postSessionWake(deviceSN string) {
 	}
 
 	if err := h.connReqSender.Send(crCtx, deviceSN, httpURL); err != nil {
-		h.logger.Warn("post-session wake: CR failed",
-			zap.String("device_sn", deviceSN),
-			zap.Int64("remaining", remaining),
-			zap.Error(err))
+		if checked := h.logger.Check(postSessionWakeFailureLogLevel(err), "post-session wake: CR failed"); checked != nil {
+			checked.Write(
+				zap.String("device_sn", deviceSN),
+				zap.Int64("remaining", remaining),
+				zap.Error(err),
+			)
+		}
 	} else {
 		h.logger.Info("post-session wake: CR sent",
 			zap.String("device_sn", deviceSN),
@@ -1219,6 +1223,13 @@ func (h *Handler) postSessionWake(deviceSN string) {
 			zap.Int64("continuous_count", count))
 		h.metrics.PostSessionWakeTotal.Inc()
 	}
+}
+
+func postSessionWakeFailureLogLevel(err error) zapcore.Level {
+	if errors.Is(err, connreq.ErrNoConnectionMethod) {
+		return zap.DebugLevel
+	}
+	return zap.WarnLevel
 }
 
 // resetContinuousWake 在设备发送 Inform 时重置连续唤醒计数器。

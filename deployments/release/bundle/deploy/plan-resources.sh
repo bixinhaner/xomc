@@ -245,9 +245,10 @@ COMP_WEIGHT=(10 18 25 25 22 15 5 8 0)
 MON_FIXED_MIB=4224   # prometheus1024+loki512+tempo512+otelcol512+grafana512+alertmgr512+exporters(128*3+256)
 [ "$SKIP_MONITORING" = 1 ] && MON_FIXED_MIB=0
 
-# 下限之和（最低门槛）
+# 下限之和（最低门槛）。ACS 无损发布常驻 primary + candidate 两个同规格实例；
+# COMP_NAMES 中的 acs 负责计算单副本规格，这里把第二副本完整计入预算。
 FLOOR_SUM=0; for f in "${COMP_FLOOR[@]}"; do FLOOR_SUM=$(( FLOOR_SUM + f )); done
-FLOOR_SUM=$(( FLOOR_SUM + MON_FIXED_MIB ))
+FLOOR_SUM=$(( FLOOR_SUM + 4096 + MON_FIXED_MIB ))
 
 sep "3/4 floor-first 资源分配"
 log "  组件下限之和  : $(to_gib "$FLOOR_SUM") GiB$([ "$SKIP_MONITORING" = 1 ] && echo '（不含监控）' || echo '（含监控 '"$(to_gib "$MON_FIXED_MIB")"' GiB）')"
@@ -268,6 +269,10 @@ fi
 # 剩余空闲按权重分配（floor..ceil 之间向上伸缩）
 SURPLUS=$(( IDLE_MEM_MIB - FLOOR_SUM )); [ "$SURPLUS" -lt 0 ] && SURPLUS=0
 WEIGHT_SUM=0; for w in "${COMP_WEIGHT[@]}"; do WEIGHT_SUM=$(( WEIGHT_SUM + w )); done
+# 发布期间 primary/candidate 两个 ACS 会同时驻留。COMP_NAMES 只保留一份 ACS
+# 配置用于生成环境变量，因此余量分母必须显式计入第二个 ACS 的权重；
+# 否则 ACS 获得的一份余量会在总分配中被重复计算，导致规划超过主机预算。
+WEIGHT_SUM=$(( WEIGHT_SUM + COMP_WEIGHT[1] ))
 
 declare -a COMP_MEM
 for i in "${!COMP_NAMES[@]}"; do
@@ -279,6 +284,8 @@ for i in "${!COMP_NAMES[@]}"; do
   mem=$(( floor + add )); [ "$mem" -gt "$ceil" ] && mem=$ceil
   COMP_MEM[$i]=$mem
 done
+# acs 固定为 COMP_NAMES 第 2 项；提前取值，供双副本总预算核算。
+ACS_MEM=${COMP_MEM[1]}
 
 # 档位判定（按空闲内存）：仅用于 CPU 取档与提示
 if [ -n "$TIER_OVERRIDE" ]; then TIER="$TIER_OVERRIDE"
@@ -304,7 +311,7 @@ CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis"
 # 若此时仍 > IDLE_MEM_MIB 属于上面已经 warn 过的「容忍度内下限缺口」，是预期行为，不重复 die；
 # 只有「明明分了 SURPLUS>0 却还超预算」才是真正的分配逻辑 bug。
 ALLOC_SUM=0; for m in "${COMP_MEM[@]}"; do ALLOC_SUM=$(( ALLOC_SUM + m )); done
-ALLOC_SUM=$(( ALLOC_SUM + MON_FIXED_MIB ))
+ALLOC_SUM=$(( ALLOC_SUM + ACS_MEM + MON_FIXED_MIB ))
 if [ "$ALLOC_SUM" -gt "$IDLE_MEM_MIB" ] && [ "$SURPLUS" -gt 0 ]; then
   die "内部错误：分配后 Σ限额 $(to_gib "$ALLOC_SUM") GiB > 空闲预算 $(to_gib "$IDLE_MEM_MIB") GiB。请反馈此 bug。" 1
 fi
@@ -364,6 +371,7 @@ sep "4/4 资源规划结果（档位：${TIER}）"
 printf '%b\n' "${C_B}  组件        内存限额        GOMEMLIMIT/关键联动${C_0}"
 printf '  %-10s  %8s MiB\n' "app"    "$APP_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' "$APP_GOMEM" "$APP_GOMAXPROCS"
 printf '  %-10s  %8s MiB\n' "acs"    "$ACS_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' "$ACS_GOMEM" "$ACS_GOMAXPROCS"
+printf '  %-13s  %8s MiB\n' "acs-candidate" "$ACS_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s（无损发布接力副本）\n' "$ACS_GOMEM" "$ACS_GOMAXPROCS"
 printf '  %-10s  %8s MiB\n' "worker" "$WORKER_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' "$WORKER_GOMEM" "$WORKER_GOMAXPROCS"
 printf '  %-10s  %8s MiB\n' "postgres" "$PG_MEM" ; printf '              ↳ shared_buffers=%sMB effective_cache=%sMB max_connections=%s work_mem=%sMB\n' "$PG_SHARED_BUFFERS" "$PG_EFFECTIVE_CACHE" "$PG_MAXCONN" "$PG_WORK_MEM"
 printf '  %-13s  %8s MiB\n' "postgres-tsdb" "$TSDB_MEM" ; printf '              ↳ shared_buffers=%sMB effective_cache=%sMB max_connections=%s work_mem=%sMB（时序库 #347）\n' "$TSDB_SHARED_BUFFERS" "$TSDB_EFFECTIVE_CACHE" "$TSDB_MAXCONN" "$TSDB_WORK_MEM"

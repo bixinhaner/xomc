@@ -137,6 +137,7 @@ func (d *Dispatcher) Send(ctx context.Context, deviceSN, httpURL, serverAddr str
 	// No method available — device will connect on next periodic Inform
 	d.logger.Debug("no connection request method available, waiting for periodic inform",
 		zap.String("device_sn", deviceSN))
+	d.recordMetrics("none", "unavailable", 0)
 	return ErrNoConnectionMethod
 }
 

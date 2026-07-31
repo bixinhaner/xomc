@@ -10796,6 +10796,8 @@ INSERT INTO public.sys_configs VALUES
 	('6d78f75d-acde-4445-a4bb-ef49fe75aa64', 'acs.backpressure', 'io_some_low_pct', '20', 'int', 'IO PSI some avg10 低水位%，回落后恢复 PM 上传', false, '2026-07-18 08:00:00+08', '2026-07-18 08:00:00+08', '{}'),
 	('81ff70e2-5608-4bf9-9264-bd31bd14935d', 'acs.backpressure', 'max_inflight', '2000', 'int', 'PM 上传最大在途数，达到后快速返回 503', false, '2026-07-18 08:00:00+08', '2026-07-18 08:00:00+08', '{}'),
 	('e0d8e6c6-9379-4991-ae95-3723793e3356', 'acs.backpressure', 'check_interval_sec', '30', 'int', 'PM 上传背压 watchdog 采样周期（秒）（#318）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
+	('4b570b2c-67be-47b4-90b9-d30e7ddd81b2', 'acs.backpressure', 'queue_pending_high', '5000', 'int', 'PM 队列待处理高水位；按 2 万设备同步上报实测峰值留出正常突发余量', false, '2026-07-31 09:00:00+08', '2026-07-31 09:00:00+08', '{}'),
+	('4685e6ca-970a-42c5-a7c5-889ceee390d7', 'acs.backpressure', 'queue_pending_low', '1000', 'int', 'PM 队列待处理低水位；回落到此后解除上传背压', false, '2026-07-31 09:00:00+08', '2026-07-31 09:00:00+08', '{}'),
 	('31dfba25-7163-471b-bdce-1f922ab61c0c', 'log.retention', 'enabled', 'true', 'bool', '日志保留清理总开关（关则跳过整轮清理）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('18a85906-0037-48e5-bb64-14a3726e0e9b', 'log.retention', 'audit_days', '180', 'int', '审计日志(audit_logs)保留天数', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('b85f513a-25b1-41ef-91f2-c71097bdb635', 'log.retention', 'ops_audit_days', '180', 'int', '运维审计日志(ops_audit_logs)保留天数', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
