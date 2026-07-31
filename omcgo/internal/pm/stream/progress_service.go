@@ -133,7 +133,7 @@ func (s *ProgressService) Query(
 	if err != nil {
 		return ProgressQueryResult{}, fmt.Errorf("load PM aggregation versions for progress: %w", err)
 	}
-	metricIntervals := currentMetricVersionIntervals(versions, taskID, now)
+	metricIntervals := metricVersionIntervals(versions, taskID)
 	snapshot := BuildTaskSnapshot(versions)
 	builder := storage.Psql.Select(
 		"task_id", "task_version_id", "entity_key", "granularity",
@@ -217,36 +217,27 @@ func (s *ProgressService) Query(
 	return result, nil
 }
 
-func currentMetricVersionIntervals(
+func metricVersionIntervals(
 	versions []*TaskVersionSnapshot,
 	taskID uuid.UUID,
-	at time.Time,
 ) []MetricVersionInterval {
-	var current *TaskVersionSnapshot
+	out := make([]MetricVersionInterval, 0)
 	for _, version := range versions {
-		if version == nil || version.TaskID != taskID || !version.Enabled ||
-			version.EffectiveFrom.After(at) ||
-			(version.EffectiveTo != nil && !at.Before(*version.EffectiveTo)) {
+		if version == nil || version.TaskID != taskID || !version.Enabled {
 			continue
 		}
-		if current == nil || version.VersionNo > current.VersionNo ||
-			(version.VersionNo == current.VersionNo &&
-				version.EffectiveFrom.After(current.EffectiveFrom)) {
-			current = version
+		for metricPath := range version.Metrics {
+			out = append(out, MetricVersionInterval{
+				MetricPath: metricPath, EffectiveFrom: version.EffectiveFrom,
+				EffectiveTo: version.EffectiveTo,
+			})
 		}
 	}
-	if current == nil {
-		return nil
-	}
-	out := make([]MetricVersionInterval, 0, len(current.Metrics))
-	for metricPath := range current.Metrics {
-		out = append(out, MetricVersionInterval{
-			MetricPath: metricPath, EffectiveFrom: current.EffectiveFrom,
-			EffectiveTo: current.EffectiveTo,
-		})
-	}
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].MetricPath < out[j].MetricPath
+		if out[i].MetricPath != out[j].MetricPath {
+			return out[i].MetricPath < out[j].MetricPath
+		}
+		return out[i].EffectiveFrom.Before(out[j].EffectiveFrom)
 	})
 	return out
 }

@@ -1428,7 +1428,7 @@ func (s *Service) GetKPITimeSeriesSnapshotWithMetadata(
 		sortKPITimeSeriesSnapshot(&snapshot)
 		s.observeSnapshotMissing(
 			loadCtx, snapshot, metricIntervals, kpiNames, technology,
-			granularity, startTime,
+			granularity, startTime, endTime,
 		)
 		return snapshot, nil
 	}
@@ -1658,7 +1658,7 @@ func (s *Service) observeSnapshotMissing(
 	requested []string,
 	technology model.Technology,
 	granularity metrics.Granularity,
-	queryStart time.Time,
+	queryStart, queryEnd time.Time,
 ) {
 	if s.metrics == nil || technology == "" || len(requested) == 0 ||
 		snapshot.ProgressState != "available" {
@@ -1669,7 +1669,8 @@ func (s *Service) observeSnapshotMissing(
 	latestClosedStart := previousNaturalPeriodStart(
 		granularity, cutoff, businessNow.Location(),
 	)
-	if latestClosedStart.Before(queryStart) {
+	if latestClosedStart.Before(queryStart) ||
+		!latestClosedStart.Before(queryEnd) {
 		return
 	}
 

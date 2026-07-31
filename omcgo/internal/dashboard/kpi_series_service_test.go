@@ -359,6 +359,37 @@ func TestGetKPITimeSeriesSnapshotReportsMissingWithoutOpenProgressWindow(t *test
 		"catalog metadata must keep closed-period monitoring active without an open window")
 }
 
+func TestGetKPITimeSeriesSnapshotDoesNotObserveLatestPeriodOutsideQueryRange(t *testing.T) {
+	setDashboardTimezoneForTest(t, time.UTC)
+	now := time.Now().UTC()
+	currentDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	start := currentDay.Add(-7 * 24 * time.Hour)
+	end := currentDay.Add(-5 * 24 * time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	registry := prometheus.NewRegistry()
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+		metrics:        NewMetrics(registry),
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			MetricIntervals: []pmstream.MetricVersionInterval{{
+				MetricPath: "K1", EffectiveFrom: start,
+			}},
+		},
+	})
+
+	_, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, start, end,
+	)
+	require.NoError(t, err)
+	require.Zero(t, gatheredMissingResultTotal(t, registry),
+		"a historical query must not observe a period outside its end boundary")
+}
+
 func gatheredMissingResultTotal(
 	t *testing.T,
 	registry *prometheus.Registry,
