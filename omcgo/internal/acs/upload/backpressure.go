@@ -281,11 +281,15 @@ func decideBackpressureWithQueue(
 			return BackpressureDecision{Active: true, Reason: pressureReasonIO}
 		}
 		if queue.Configured && queue.Available {
-			if queue.Stats.Pending >= uint64(cfg.QueuePendingHigh) {
-				return BackpressureDecision{Active: true, Reason: pressureReasonQueuePending}
-			}
 			if queue.Stats.OldestPendingAge >= cfg.QueueOldestHigh {
 				return BackpressureDecision{Active: true, Reason: pressureReasonQueueOldest}
+			}
+			// 2 万设备会在槽位边界形成短时同步突发。pending 只是 durable queue
+			// 正在吸收流量，单独越线不能证明 worker 已失速；至少持续到最老消息超过
+			// 低年龄水位后才启动 503 背压。磁盘、IO 和最大在途数仍独立保护资源。
+			if queue.Stats.Pending >= uint64(cfg.QueuePendingHigh) &&
+				queue.Stats.OldestPendingAge >= cfg.QueueOldestLow {
+				return BackpressureDecision{Active: true, Reason: pressureReasonQueuePending}
 			}
 		}
 		return BackpressureDecision{}
@@ -368,12 +372,13 @@ func decideBackpressureState(
 		}
 	} else if queue.Available {
 		switch {
-		case queue.Stats.Pending >= uint64(cfg.QueuePendingHigh):
-			next |= pressureQueue
-			queueReason = pressureReasonQueuePending
 		case queue.Stats.OldestPendingAge >= cfg.QueueOldestHigh:
 			next |= pressureQueue
 			queueReason = pressureReasonQueueOldest
+		case queue.Stats.Pending >= uint64(cfg.QueuePendingHigh) &&
+			queue.Stats.OldestPendingAge >= cfg.QueueOldestLow:
+			next |= pressureQueue
+			queueReason = pressureReasonQueuePending
 		}
 	}
 

@@ -158,6 +158,24 @@ func TestBackpressureConfigDefaults(t *testing.T) {
 	assert.Equal(t, time.Minute, clamped.QueueOldestLow)
 }
 
+func TestACSDeploymentBackpressureFallbacksMatchDefaults(t *testing.T) {
+	defaults := (BackpressureConfig{}).Defaults()
+	for _, path := range []string{
+		"../../../cmd/acs/etc/config.dev.yaml",
+		"../../../cmd/acs/etc/config.prod.yaml",
+	} {
+		t.Run(path, func(t *testing.T) {
+			var cfg ACSConfig
+			require.NoError(t, Load(path, &cfg))
+			fallback := cfg.Backpressure.Defaults()
+			assert.Equal(t, defaults.QueuePendingHigh, fallback.QueuePendingHigh)
+			assert.Equal(t, defaults.QueuePendingLow, fallback.QueuePendingLow)
+			assert.Equal(t, defaults.QueueOldestHigh, fallback.QueueOldestHigh)
+			assert.Equal(t, defaults.QueueOldestLow, fallback.QueueOldestLow)
+		})
+	}
+}
+
 func TestDashboardConfigDefaults(t *testing.T) {
 	cfg := (DashboardConfig{}).Defaults()
 	assert.Equal(t, 3*time.Second, cfg.QueryTimeout)

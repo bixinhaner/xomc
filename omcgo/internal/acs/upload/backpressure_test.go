@@ -120,7 +120,7 @@ func TestDecideBackpressure_UnknownSignalsFailOpen(t *testing.T) {
 	assert.True(t, decideBackpressure(true, -1, 30, cfg))
 }
 
-func TestDecideBackpressureQueueSignal_HighWatermarksActivate(t *testing.T) {
+func TestDecideBackpressureQueueSignal_SustainedHighWatermarksActivate(t *testing.T) {
 	cfg := BackpressureConfig{
 		Enabled: true, DiskHighPct: 85, DiskLowPct: 75,
 		IOSomeHighPct: 40, IOSomeLowPct: 20,
@@ -128,10 +128,34 @@ func TestDecideBackpressureQueueSignal_HighWatermarksActivate(t *testing.T) {
 		QueueOldestHigh: 10 * time.Minute, QueueOldestLow: 2 * time.Minute,
 	}
 
+	youngBurst := decideBackpressureWithQueue(false, 50, 10, QueueSignal{
+		Configured: true,
+		Available:  true,
+		Stats: event.QueueStats{
+			Pending:          2000,
+			OldestPendingAge: time.Minute,
+		},
+	}, cfg)
+	assert.False(t, youngBurst.Active,
+		"a synchronized PM burst younger than the low age watermark must use the durable queue instead of returning 503")
+	youngState, youngDecision := decideBackpressureState(0, 50, 10, QueueSignal{
+		Configured: true,
+		Available:  true,
+		Stats: event.QueueStats{
+			Pending:          2000,
+			OldestPendingAge: time.Minute,
+		},
+	}, cfg)
+	assert.Zero(t, youngState)
+	assert.False(t, youngDecision.Active)
+
 	pending := decideBackpressureWithQueue(false, 50, 10, QueueSignal{
 		Configured: true,
 		Available:  true,
-		Stats:      event.QueueStats{Pending: 2000},
+		Stats: event.QueueStats{
+			Pending:          2000,
+			OldestPendingAge: 2 * time.Minute,
+		},
 	}, cfg)
 	assert.True(t, pending.Active)
 	assert.Equal(t, pressureReasonQueuePending, pending.Reason)
@@ -156,7 +180,10 @@ func TestBackpressureStateQueueRecoveryIgnoresUnlatchedDiskNeutralBand(t *testin
 		Configured:     true,
 		Available:      true,
 		RatesAvailable: true,
-		Stats:          event.QueueStats{Pending: 2000},
+		Stats: event.QueueStats{
+			Pending:          2000,
+			OldestPendingAge: 2 * time.Minute,
+		},
 	}, cfg)
 	require.True(t, engaged.has(pressureQueue))
 	require.False(t, engaged.has(pressureDisk),
@@ -319,8 +346,9 @@ func TestQueueSignalWatchdog_UsesSamplerCacheAndFailureCannotReleasePressure(t *
 	source := &queueStatsSourceStub{
 		ok: true,
 		stats: event.QueueStats{
-			Pending:   bpDefaultQueuePendingHigh,
-			SampledAt: time.Now(),
+			Pending:          bpDefaultQueuePendingHigh,
+			OldestPendingAge: bpDefaultQueueOldestLow,
+			SampledAt:        time.Now(),
 		},
 	}
 	w.SetQueueStatsSource(source)
@@ -374,6 +402,7 @@ func TestQueueSignalWatchdog_DisableDoesNotForgetObservedPressure(t *testing.T) 
 		ok: true,
 		stats: event.QueueStats{
 			Pending:             bpDefaultQueuePendingHigh,
+			OldestPendingAge:    bpDefaultQueueOldestLow,
 			DeliverySequence:    100,
 			AckConsumerSequence: 90,
 			SampledAt:           base,
@@ -526,6 +555,8 @@ func TestQueueSaturationAlertRequiresFreshSamplerData(t *testing.T) {
 	require.NoError(t, err)
 	alerts := string(raw)
 	require.Contains(t, alerts, "alert: OMCPMQueueAckRateBelowDelivery")
+	require.Contains(t, alerts,
+		`omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"} >= 5000`)
 	require.Contains(t, alerts, "and max without (subject, durable) (")
 	require.Contains(t, alerts,
 		`time() - omc_pm_queue_sample_timestamp_seconds{deployment_unit="acs",subject="pm.file.received",durable="pm-workers"}`)

@@ -12,7 +12,8 @@ db:
 tsdb:
   # KPI/时序库物理分离：指向独立时序库实例 postgres-tsdb（不再与主库 postgres 同实例）。
   dsn: "postgres://omcgo:omcgo123@postgres-tsdb:5432/omcgo?sslmode=disable"
-  max_conns: 20
+  # 4 路 PM 入库 + 4 路 finalize + 三路各 8 个聚合消费者 + 8 路余量。
+  max_conns: 40
   min_conns: 5
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m
@@ -60,7 +61,7 @@ minio:
 # PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。
 # NATS push 订阅 async 回调单 goroutine 串行（单订阅只用 ~1 核）；N 个订阅共享 durable
 # consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。<=0 回退 GOMAXPROCS（容器
-# CPU 配额），上限 16。worker 容器配 4 核，故设 4。
+# CPU 配额），上限 32。worker 容器配 4 核，故设 4。
 pm_consumer_concurrency: 4
 
 raw_cleanup:
