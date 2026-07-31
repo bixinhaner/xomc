@@ -198,6 +198,11 @@ interface SpecialColumnSpec {
   titleEn: string;
   width?: number;
   readOnly?: boolean;
+  virtual?: {
+    type: ParameterType;
+    constraints: ParameterConstraints;
+    required?: boolean;
+  };
   getValue?: (row: TableRow, ctx: QuickSettingsInstanceContext) => string;
   formatValue?: (value: string) => string;
 }
@@ -222,18 +227,26 @@ const BM_SPECIAL_COLUMNS: Record<string, SpecialColumnSpec[]> = {
     { key: 'TAC', leaf: 'TAC', titleEn: 'TAC', width: 110 },
     { key: 'PLMNID', leaf: 'PLMNID', titleEn: 'PLMN', width: 140 },
     { key: 'CID', leaf: 'CID', titleEn: 'ECI', width: 130, readOnly: true },
-    { key: 'EnbType', leaf: 'EnbType', titleEn: 'eNodeB Type', width: 140, readOnly: true, formatValue: formatEnbTypeDisplay },
+    { key: 'NeighborCellEnbType', leaf: 'NeighCellEnbType', titleEn: 'eNodeB Type', width: 140, formatValue: formatEnbTypeDisplay },
+    { key: 'X2Flag', leaf: 'X2Flag', titleEn: 'X2 Flag', width: 120 },
   ],
 };
 
 const INTER_FREQ_GROUP_ID = 'enb-neighbor-freq';
 const INTER_FREQ_EARFCN_LEAF = 'EUTRACarrierARFCN';
 const NEIGHBOR_CELL_GROUP_ID = 'enb-neighbor-cell';
+const NEIGHBOR_CELL_ECI_LEAF = 'CID';
+const NEIGHBOR_ENB_ID_FIELD = '__neighborEnbId';
+const NEIGHBOR_LOCAL_CELL_ID_FIELD = '__neighborCellId';
 const NEIGHBOR_CELL_DUPLICATE_LEAVES = ['EUTRACarrierARFCN', 'PhyCellID', 'PLMNID'] as const;
 const GNB_NR_NEIGHBOR_CELL_GROUP_ID = 'gnb-nr-neighbor-cell';
 const GNB_NR_NEIGHBOR_SSB_LEAF = 'ssbFrequency';
 const GNB_NR_INTER_FREQ_SSB_LEAF = 'SSBFrequency';
 const GNB_NR_INTER_FREQ_ENABLE_LEAF = 'Enable';
+
+export function composeLteEci(enbId: string, cellId: string): string {
+  return String(Number(enbId) * 256 + Number(cellId));
+}
 
 function multiTableScroll(hasRows: boolean): { x?: 'max-content'; y: number } {
   return hasRows ? { x: 'max-content', y: 240 } : { y: 240 };
@@ -1707,6 +1720,44 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     });
   }, [group.params, specialColumns]);
 
+  const usesSplitNeighborCellIdentity = group.id === NEIGHBOR_CELL_GROUP_ID
+    && groupParamLeafSet.has(NEIGHBOR_CELL_ECI_LEAF)
+    && groupParamLeafSet.has('NeighCellEnbType')
+    && groupParamLeafSet.has('X2Flag');
+
+  const addModalColumns = useMemo<SpecialColumnSpec[]>(() => {
+    if (!usesSplitNeighborCellIdentity) return displayColumns;
+    const byLeaf = new Map(displayColumns.map((column) => [column.leaf, column]));
+    const requiredUnsigned = (maxValue: number): SpecialColumnSpec['virtual'] => ({
+      type: 'unsignedInt',
+      constraints: { minValue: 0, maxValue },
+      required: true,
+    });
+    return [
+      {
+        key: NEIGHBOR_ENB_ID_FIELD,
+        leaf: NEIGHBOR_ENB_ID_FIELD,
+        titleKey: 'device.multi.neighborEnbId',
+        titleEn: 'eNB ID',
+        virtual: requiredUnsigned(1048575),
+      },
+      {
+        key: NEIGHBOR_LOCAL_CELL_ID_FIELD,
+        leaf: NEIGHBOR_LOCAL_CELL_ID_FIELD,
+        titleKey: 'device.multi.neighborCellId',
+        titleEn: 'Cell ID',
+        virtual: requiredUnsigned(255),
+      },
+      byLeaf.get('EUTRACarrierARFCN'),
+      byLeaf.get('PhyCellID'),
+      byLeaf.get('QOffset'),
+      byLeaf.get('CIO'),
+      byLeaf.get(group.params.find((param) => param.name === 'TAC')?.leaf),
+      byLeaf.get('NeighCellEnbType'),
+      byLeaf.get('X2Flag'),
+    ].filter((column): column is SpecialColumnSpec => Boolean(column));
+  }, [displayColumns, group.params, usesSplitNeighborCellIdentity]);
+
   const openEditModal = useCallback((row: TableRow) => {
     if (!row.instanceId) return;
     const values: Record<string, string> = {};
@@ -1721,15 +1772,22 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
 
   const openAddModal = useCallback(() => {
     const initialValues = buildInitialEditValues();
+    if (usesSplitNeighborCellIdentity) {
+      initialValues[NEIGHBOR_ENB_ID_FIELD] = '';
+      initialValues[NEIGHBOR_LOCAL_CELL_ID_FIELD] = '';
+    }
     if (isIpsecGroup) {
       initialValues[IPSEC_ENABLE_LEAF] = normalizeIpsecEnableValue(initialValues[IPSEC_ENABLE_LEAF]);
     }
     setEditModal({ mode: 'add', values: initialValues, errors: {} });
-  }, [buildInitialEditValues, isIpsecGroup]);
+  }, [buildInitialEditValues, isIpsecGroup, usesSplitNeighborCellIdentity]);
 
   const setEditModalValue = useCallback((leaf: string, value: string) => {
     setEditModal((prev) => {
       if (!prev) return prev;
+      const virtual = prev.mode === 'add'
+        ? addModalColumns.find((column) => column.leaf === leaf)?.virtual
+        : undefined;
       const item = prev.instanceId
         ? (schemaByPath.get(`${objectPath}${prev.instanceId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf))
         : leafSchemaByLeaf.get(leaf);
@@ -1737,14 +1795,16 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       const normalizedValue = isIpsecGroup && leaf === IPSEC_ENABLE_LEAF
         ? toDeviceIpsecEnableValue(value)
         : value;
-      const err = validateQuickSettingsCellValue(leaf, normalizedValue, effectiveParamType(item, param), effectiveParamConstraints(item, param)) ?? '';
+      const err = virtual
+        ? validateQuickSettingsCellValue(leaf, normalizedValue, virtual.type, virtual.constraints) ?? ''
+        : validateQuickSettingsCellValue(leaf, normalizedValue, effectiveParamType(item, param), effectiveParamConstraints(item, param)) ?? '';
       return {
         ...prev,
         values: { ...prev.values, [leaf]: value },
         errors: { ...prev.errors, [leaf]: err },
       };
     });
-  }, [groupParamByLeaf, isIpsecGroup, leafSchemaByLeaf, objectPath, schemaByPath]);
+  }, [addModalColumns, groupParamByLeaf, isIpsecGroup, leafSchemaByLeaf, objectPath, schemaByPath]);
 
   const closeEditModal = useCallback(() => {
     if (updateMutation.isPending || isSubmitting) return;
@@ -1758,6 +1818,8 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     const errors: Record<string, string> = {};
     const updates: ParameterUpdateRequest[] = [];
     const pendingEdits: Record<string, string> = {};
+    const modalColumns = modal.mode === 'add' ? addModalColumns : displayColumns;
+    let composedNeighborEci = '';
     const comparableInstIds = tableRows
       .map((row) => row.instanceId)
       .filter((instId): instId is string => Boolean(instId) && instId !== modal.instanceId);
@@ -1770,14 +1832,28 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     }
 
     if (modal.mode === 'add' && group.id === NEIGHBOR_CELL_GROUP_ID) {
-      const duplicateValues = NEIGHBOR_CELL_DUPLICATE_LEAVES.map((leaf) => String(modal.values[leaf] ?? '').trim());
+      let duplicateLeaves: readonly string[] = NEIGHBOR_CELL_DUPLICATE_LEAVES;
+      let duplicateValues = duplicateLeaves.map((leaf) => String(modal.values[leaf] ?? '').trim());
+      if (usesSplitNeighborCellIdentity) {
+        const enbId = String(modal.values[NEIGHBOR_ENB_ID_FIELD] ?? '').trim();
+        const cellId = String(modal.values[NEIGHBOR_LOCAL_CELL_ID_FIELD] ?? '').trim();
+        if (enbId && cellId) composedNeighborEci = composeLteEci(enbId, cellId);
+        duplicateLeaves = [NEIGHBOR_CELL_ECI_LEAF, 'EUTRACarrierARFCN', 'PhyCellID'];
+        duplicateValues = [
+          composedNeighborEci,
+          String(modal.values.EUTRACarrierARFCN ?? '').trim(),
+          String(modal.values.PhyCellID ?? '').trim(),
+        ];
+      }
       const hasIdentity = duplicateValues.every(Boolean);
       const duplicated = hasIdentity && comparableInstIds.some((instId) =>
-        NEIGHBOR_CELL_DUPLICATE_LEAVES.every((leaf, idx) => cellValue(instId, leaf).trim() === duplicateValues[idx]),
+        duplicateLeaves.every((leaf, idx) => cellValue(instId, leaf).trim() === duplicateValues[idx]),
       );
       if (duplicated) {
         const msg = t('device.multi.neighborCellDuplicate');
-        for (const leaf of NEIGHBOR_CELL_DUPLICATE_LEAVES) {
+        for (const leaf of usesSplitNeighborCellIdentity
+          ? [NEIGHBOR_ENB_ID_FIELD, NEIGHBOR_LOCAL_CELL_ID_FIELD, 'EUTRACarrierARFCN', 'PhyCellID']
+          : NEIGHBOR_CELL_DUPLICATE_LEAVES) {
           errors[leaf] = errors[leaf] ?? msg;
         }
       }
@@ -1796,11 +1872,28 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       }
     }
 
-    for (const column of displayColumns) {
+    for (const column of modalColumns) {
       const leaf = column.leaf || '';
-      if (!leaf || !groupParamLeafSet.has(leaf) || column.readOnly) continue;
+      if (!leaf || column.readOnly) continue;
 
       const rawValue = modal.values[leaf] ?? '';
+      if (column.virtual) {
+        if (String(rawValue).trim() === '') {
+          if (column.virtual.required) {
+            errors[leaf] = errors[leaf] ?? t('device.multi.packed.fieldRequired');
+          }
+          continue;
+        }
+        const err = validateQuickSettingsCellValue(
+          leaf,
+          rawValue,
+          column.virtual.type,
+          column.virtual.constraints,
+        );
+        if (err) errors[leaf] = errors[leaf] ?? err;
+        continue;
+      }
+      if (!groupParamLeafSet.has(leaf)) continue;
       const param = groupParamByLeaf.get(leaf);
       if (modal.mode === 'add' && String(rawValue).trim() === '') {
         if (param?.required) {
@@ -1839,8 +1932,18 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       });
     }
 
+    if (
+      modal.mode === 'add'
+      && usesSplitNeighborCellIdentity
+      && composedNeighborEci
+      && !errors[NEIGHBOR_ENB_ID_FIELD]
+      && !errors[NEIGHBOR_LOCAL_CELL_ID_FIELD]
+    ) {
+      pendingEdits[NEIGHBOR_CELL_ECI_LEAF] = composedNeighborEci;
+    }
+
     return { errors, updates, pendingEdits };
-  }, [cellValue, displayColumns, group.id, groupParamByLeaf, groupParamLeafSet, isIpsecGroup, leafSchemaByLeaf, nrInterFreqLoading, nrInterFreqSchemaResp, nrInterFreqSsbState.enabled, nrInterFreqSsbState.known, objectPath, schemaByPath, tableRows, t]);
+  }, [addModalColumns, cellValue, displayColumns, group.id, groupParamByLeaf, groupParamLeafSet, isIpsecGroup, leafSchemaByLeaf, nrInterFreqLoading, nrInterFreqSchemaResp, nrInterFreqSsbState.enabled, nrInterFreqSsbState.known, objectPath, schemaByPath, tableRows, t, usesSplitNeighborCellIdentity]);
 
   const rollbackAddedInstance = useCallback(async (instId: string | undefined, reason: string) => {
     if (!instId || !/^\d+$/.test(instId)) return;
@@ -2665,9 +2768,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
             width: '100%',
           }}
         >
-          {editModal && displayColumns.map((column) => {
+          {editModal && (editModal.mode === 'add' ? addModalColumns : displayColumns).map((column) => {
             const leaf = column.leaf || '';
-            if (editModal.mode === 'add' && (!leaf || column.readOnly || !groupParamLeafSet.has(leaf))) {
+            if (editModal.mode === 'add' && (!leaf || column.readOnly || (!column.virtual && !groupParamLeafSet.has(leaf)))) {
               return null;
             }
             const value = leaf
@@ -2679,7 +2782,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
             const isIpsecToggleField = isIpsecGroup && leaf === IPSEC_ENABLE_LEAF;
             const canEditByToggle = !isIpsecGroup || isIpsecToggleField || editModalIpsecEnabled;
             const isEditable = Boolean(leaf)
-              && groupParamLeafSet.has(leaf)
+              && (Boolean(column.virtual) || groupParamLeafSet.has(leaf))
               && !column.readOnly
               && canEditByToggle
               && (editModal.mode === 'add' ? true : ((item?.writable ?? true)));
@@ -2692,7 +2795,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
               : enumMeta;
             const error = leaf ? editModal.errors[leaf] : '';
             const label = column.titleKey ? t(column.titleKey) : (locale === 'zh-CN' ? (column.titleZh ?? column.titleEn) : column.titleEn);
-            const rangeHint = leaf ? formatEffectiveConstraintHint(item, param, t) : '';
+            const rangeHint = column.virtual
+              ? `[${column.virtual.constraints.minValue ?? '-∞'} ~ ${column.virtual.constraints.maxValue ?? '∞'}]`
+              : (leaf ? formatEffectiveConstraintHint(item, param, t) : '');
             // 同列渲染：column.formatValue 收原始值；未提供则退到 enum 兜底。
             const displayValue = column.formatValue
               ? column.formatValue(value)
@@ -2703,7 +2808,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
                 <div style={{ marginBottom: 6, fontWeight: 500 }}>
                   <Space size={4} wrap>
                     <span>
-                      {param?.required && isEditable && (
+                      {(param?.required || column.virtual?.required) && isEditable && (
                         <span style={{ color: '#ff4d4f', marginRight: 2 }}>*</span>
                       )}
                       {label}
@@ -2713,6 +2818,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
                 </div>
                 {isEditable && effectiveEnumOptions && effectiveEnumOptions.values.length > 0 ? (
                   <Select
+                    aria-label={label}
                     value={(isIpsecToggleField ? normalizeIpsecEnableValue(value) : value) || undefined}
                     onChange={(next) => leaf && setEditModalValue(leaf, String(next))}
                     style={{ width: '100%' }}
@@ -2721,14 +2827,15 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
                   />
                 ) : isEditable ? (
                   <Input
+                    aria-label={label}
                     value={value}
                     onChange={(e) => leaf && setEditModalValue(leaf, e.target.value)}
                     status={error ? 'error' : undefined}
                   />
                 ) : (
-                  <Input value={displayValue} disabled />
+                  <Input aria-label={label} value={displayValue} disabled />
                 )}
-                {column.formatValue && displayValue && displayValue !== value && isEditable && (
+                {column.formatValue && !effectiveEnumOptions && displayValue && displayValue !== value && isEditable && (
                   <div style={{ color: '#8c8c8c', fontSize: 12, marginTop: 4 }}>{displayValue}</div>
                 )}
                 {error && (

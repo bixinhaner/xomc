@@ -386,6 +386,32 @@ func TestBuiltinLTENeighborCellIncludesRequiredTACAndNumericConstraints(t *testi
 				assert.Equal(t, want.min, param.MinValue, "%s minValue", name)
 				assert.Equal(t, want.max, param.MaxValue, "%s maxValue", name)
 			}
+
+			if model == "BLQ" {
+				cellID := params["CellID"]
+				assert.Equal(t, "true", cellID.Required)
+				assert.Equal(t, "unsignedInt", cellID.Type)
+				assert.Equal(t, "0", cellID.MinValue)
+				assert.Equal(t, "268435455", cellID.MaxValue)
+				assert.Equal(t, "true", params["PCI"].Required)
+				assert.Equal(t, "0", params["QOffset"].DefaultValue)
+				assert.Equal(t, "0", params["CIO"].DefaultValue)
+
+				enbType := params["NeighborCellEnbType"]
+				assert.Equal(t, "NeighCellEnbType", enbType.Leaf)
+				assert.Equal(t, "1", enbType.DefaultValue)
+				assert.Equal(t, []xmlEnumOption{
+					{Value: "1", Label: "Home"},
+					{Value: "0", Label: "Macro"},
+				}, enbType.EnumOptions)
+
+				x2Flag := params["X2Flag"]
+				assert.Equal(t, "0", x2Flag.DefaultValue)
+				assert.Equal(t, []xmlEnumOption{
+					{Value: "0", Label: "SON"},
+					{Value: "1", Label: "Manual"},
+				}, x2Flag.EnumOptions)
+			}
 		})
 	}
 }

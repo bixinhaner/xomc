@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
-import MultiInstanceTable from '../MultiInstanceTable';
+import MultiInstanceTable, { composeLteEci } from '../MultiInstanceTable';
 
 const mocks = vi.hoisted(() => ({
   updateParameters: vi.fn(),
@@ -17,6 +17,12 @@ const objectPath =
 
 const schema = {
   parameters: [
+    {
+      path: `${objectPath}1.CID`,
+      type: 'unsignedInt',
+      writable: true,
+      currentValue: '2561',
+    },
     {
       path: `${objectPath}1.EUTRACarrierARFCN`,
       type: 'string',
@@ -52,6 +58,26 @@ const schema = {
       type: 'string',
       writable: true,
       currentValue: '46000',
+    },
+    {
+      path: `${objectPath}1.NeighCellEnbType`,
+      type: 'int',
+      writable: true,
+      currentValue: '1',
+      constraints: {
+        enumValues: ['1', '0'],
+        enumLabels: ['Home', 'Macro'],
+      },
+    },
+    {
+      path: `${objectPath}1.X2Flag`,
+      type: 'string',
+      writable: true,
+      currentValue: '0',
+      constraints: {
+        enumValues: ['1', '0'],
+        enumLabels: ['Manual', 'SON'],
+      },
     },
   ],
   objects: [
@@ -113,8 +139,15 @@ vi.mock('@core/services/api/configSyncApi', () => ({
 }));
 
 vi.mock('@/hooks/useT', () => ({
-  useT: () => (id: string, values?: Record<string, string | number>) =>
-    values?.count === undefined ? id : `${id}:${values.count}`,
+  useT: () => (id: string, values?: Record<string, string | number>) => {
+    const labels: Record<string, string> = {
+      'device.multi.neighborEnbId': 'eNB ID',
+      'device.multi.neighborCellId': 'Cell ID',
+      'device.multi.col.frequency': 'EARFCN',
+    };
+    if (labels[id]) return labels[id];
+    return values?.count === undefined ? id : `${id}:${values.count}`;
+  },
 }));
 
 const neighborGroup: QuickSettingsGroup = {
@@ -126,6 +159,16 @@ const neighborGroup: QuickSettingsGroup = {
   objectPath:
     'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.',
   params: [
+    {
+      name: 'CellID',
+      titleZh: '小区ID',
+      titleEn: 'Cell ID',
+      leaf: 'CID',
+      type: 'unsignedInt',
+      required: true,
+      minValue: 0,
+      maxValue: 268435455,
+    },
     {
       name: 'EARFCN',
       titleZh: '频点',
@@ -181,6 +224,30 @@ const neighborGroup: QuickSettingsGroup = {
       minValue: 5,
       maxValue: 6,
     },
+    {
+      name: 'NeighborCellEnbType',
+      titleZh: '邻区基站类型',
+      titleEn: 'eNodeB Type',
+      leaf: 'NeighCellEnbType',
+      type: 'int',
+      defaultValue: '1',
+      enumOptions: [
+        { value: '1', label: 'Home' },
+        { value: '0', label: 'Macro' },
+      ],
+    },
+    {
+      name: 'X2Flag',
+      titleZh: 'X2 标记',
+      titleEn: 'X2 Flag',
+      leaf: 'X2Flag',
+      type: 'string',
+      defaultValue: '0',
+      enumOptions: [
+        { value: '0', label: 'SON' },
+        { value: '1', label: 'Manual' },
+      ],
+    },
   ],
 };
 
@@ -218,6 +285,27 @@ describe('LTE neighbor cell add', () => {
     });
   });
 
+  it('shows the complete BLQ add form and composes eNB ID plus Cell ID into ECI', async () => {
+    renderTable();
+
+    fireEvent.click(screen.getByRole('button', { name: /common\.add/ }));
+    const dialog = await screen.findByRole('dialog');
+
+    for (const label of ['eNB ID', 'Cell ID', 'EARFCN', 'PCI', 'QOffset', 'CIO', 'TAC', 'eNodeB Type', 'X2 Flag']) {
+      expect(within(dialog).getByText(label)).toBeInTheDocument();
+    }
+    expect(composeLteEci('1048575', '255')).toBe('268435455');
+
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'eNB ID' }), { target: { value: '1048575' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Cell ID' }), { target: { value: '255' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'EARFCN' }), { target: { value: '39751' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'PCI' }), { target: { value: '10' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'TAC' }), { target: { value: '1' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'device.multi.confirmAdd' }));
+
+    expect(await screen.findByText('268435455')).toBeInTheDocument();
+  });
+
   it('shows the vendor TAC leaf and requires a value', async () => {
     renderTable();
 
@@ -232,8 +320,8 @@ describe('LTE neighbor cell add', () => {
     );
 
     expect(
-      await within(dialog).findByText('device.multi.packed.fieldRequired'),
-    ).toBeInTheDocument();
+      (await within(dialog).findAllByText('device.multi.packed.fieldRequired')).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('uses quick-settings numeric constraints when schema type is stale', async () => {
@@ -241,10 +329,11 @@ describe('LTE neighbor cell add', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /common\.add/ }));
     const dialog = await screen.findByRole('dialog');
-    const inputs = within(dialog).getAllByRole('textbox');
-    fireEvent.change(inputs[0], { target: { value: '-1' } });
-    fireEvent.change(inputs[1], { target: { value: '504' } });
-    fireEvent.change(inputs[4], { target: { value: '1' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'eNB ID' }), { target: { value: '10' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Cell ID' }), { target: { value: '1' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'EARFCN' }), { target: { value: '-1' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'PCI' }), { target: { value: '504' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'TAC' }), { target: { value: '1' } });
     fireEvent.click(
       within(dialog).getByRole('button', {
         name: 'device.multi.confirmAdd',

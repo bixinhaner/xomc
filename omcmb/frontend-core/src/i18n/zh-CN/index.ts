@@ -1301,6 +1301,8 @@ const messages: Record<string, string> = {
   'device.multi.editValidationFailed':    '编辑页校验失败,请修正后再保存',
   'device.multi.interFreqDuplicate':      '频点 {value} 已存在,不能重复添加',
   'device.multi.neighborCellDuplicate':   '相同邻区已存在,不能重复添加',
+  'device.multi.neighborEnbId':           'eNB ID',
+  'device.multi.neighborCellId':          '小区 ID',
   'device.multi.nrInterFreqLoading':       '正在加载 NR 异频邻频数据,请稍后再保存',
   'device.multi.nrInterFreqMissing':       'SSB 频点 {value} 未配置到 NR 异频邻频,请先新增该频点',
   'device.multi.nrInterFreqDisabled':      'SSB 频点 {value} 在 NR 异频邻频中未启用,请先启用该频点',
