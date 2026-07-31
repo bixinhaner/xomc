@@ -244,7 +244,7 @@ const GNB_NR_NEIGHBOR_SSB_LEAF = 'ssbFrequency';
 const GNB_NR_INTER_FREQ_SSB_LEAF = 'SSBFrequency';
 const GNB_NR_INTER_FREQ_ENABLE_LEAF = 'Enable';
 
-export function composeLteEci(enbId: string, cellId: string): string {
+function composeLteEci(enbId: string, cellId: string): string {
   return String(Number(enbId) * 256 + Number(cellId));
 }
 

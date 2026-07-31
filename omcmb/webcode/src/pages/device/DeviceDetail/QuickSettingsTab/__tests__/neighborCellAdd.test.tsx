@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
-import MultiInstanceTable, { composeLteEci } from '../MultiInstanceTable';
+import MultiInstanceTable from '../MultiInstanceTable';
 
 const mocks = vi.hoisted(() => ({
   updateParameters: vi.fn(),
@@ -294,8 +294,6 @@ describe('LTE neighbor cell add', () => {
     for (const label of ['eNB ID', 'Cell ID', 'EARFCN', 'PCI', 'QOffset', 'CIO', 'TAC', 'eNodeB Type', 'X2 Flag']) {
       expect(within(dialog).getByText(label)).toBeInTheDocument();
     }
-    expect(composeLteEci('1048575', '255')).toBe('268435455');
-
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'eNB ID' }), { target: { value: '1048575' } });
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Cell ID' }), { target: { value: '255' } });
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'EARFCN' }), { target: { value: '39751' } });
