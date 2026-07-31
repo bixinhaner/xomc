@@ -522,10 +522,9 @@ docker compose -p omcgo exec postgres psql -U omcgo -d omcgo</pre>
 <li>停止全栈：<code>cd /opt/omc/current/deploy && docker compose -p omcgo -f docker-compose.infra.yml -f docker-compose.app.yml -f docker-compose.web.yml -f docker-compose.monitoring.yml down</code></li>
 <li>查看脚本帮助：<code>bash &lt;脚本&gt; -h</code>（install-docker.sh / setup-mirrors.sh / install.sh / uninstall.sh / healthcheck.sh 均支持）</li>
 <li>Docker 装好却起不来报 <code>iptables not found</code>：最小化系统漏装 iptables，跑 <code>sudo apt install -y iptables nftables bridge-utils</code>（Ubuntu/Debian）或 <code>sudo yum install -y iptables nftables bridge-utils</code>（RHEL 系），再 <code>sudo systemctl start docker</code>。</li>
-<li>打包机 <code>build-images.sh</code> 拉 <code>gcr.io/cadvisor/cadvisor</code> 超时（或本机 <code>docker compose up</code> 同样卡 cadvisor）：<code>daemon.json</code> 的 <code>registry-mirrors</code> <b>仅代理 Docker Hub（docker.io）</b>，对 <code>gcr.io</code>（Google）无效，直连超时。<b>首选</b>用环境变量覆盖为国内 gcr 代理（<code>build-images.sh</code> / <code>build-release.sh</code> / 本机 compose 均支持）：<pre>export IMAGE_CADVISOR=gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1   # 或 gcr.nju.edu.cn/...
-bash build-images.sh        # 打包；本机起栈则 docker compose ... up -d --build</pre>旧版（release.conf 未支持覆盖）退而预拉好打成缓存 tag 让其跳过 pull：<pre>docker pull --platform linux/amd64 gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1
-docker tag gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1 gcr.io/cadvisor/cadvisor:v0.55.1-amd64-saved  # build-images.sh 命中缓存跳 pull
-docker tag gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1 gcr.io/cadvisor/cadvisor:v0.55.1              # 本机 compose 直接用</pre></li>
+<li>cAdvisor 默认使用 DaoCloud 镜像站：<pre>export IMAGE_CADVISOR=gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1
+bash build-images.sh        # 打包；本机起栈则 docker compose ... up -d --build</pre>如需手工预拉缓存：<pre>docker pull --platform linux/amd64 gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1
+docker tag gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1 gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1-amd64-saved</pre></li>
 <li>完整运维手册：见随项目包附带 <code>docs/OMC内网离线部署手册（运维侧）.md</code></li>
 </ul>
 </div>
