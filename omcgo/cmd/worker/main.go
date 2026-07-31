@@ -289,15 +289,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	if setter, ok := w.EventBus.(interface {
 		SetQueueTuning(string, event.QueueTuning)
 	}); ok {
-		maxAckPending := pmConcurrency * 4
-		if maxAckPending < 16 {
-			maxAckPending = 16
-		}
-		setter.SetQueueTuning(event.SubjectPMFileReceived, event.QueueTuning{
-			AckWait:       2 * time.Minute,
-			MaxDeliver:    5,
-			MaxAckPending: maxAckPending,
-		})
+		setter.SetQueueTuning(event.SubjectPMFileReceived, pmQueueTuning(pmConcurrency))
 	}
 
 	// PM 指标大批量写异步提交（synchronous_commit=off）：PM 数据可从 MinIO 重建，换写吞吐。
@@ -782,6 +774,18 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 			zap.Duration("interval", tsdbsync.DefaultInterval))
 	} else {
 		logger.Warn("tsdb shadow-dim sync disabled: TsPool not connected")
+	}
+}
+
+func pmQueueTuning(concurrency int) event.QueueTuning {
+	maxAckPending := concurrency * 4
+	if maxAckPending < 16 {
+		maxAckPending = 16
+	}
+	return event.QueueTuning{
+		AckWait:       2 * time.Minute,
+		MaxDeliver:    12,
+		MaxAckPending: maxAckPending,
 	}
 }
 

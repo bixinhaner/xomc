@@ -105,6 +105,13 @@ func (r *Runner) Wrap(subject string, fn event.EventHandler) event.EventHandler 
 			return nil
 		}
 
+		// 延迟错误的重试权归持久化 EventBus：不在当前进程内继续轮询，也不提前写
+		// DLQ。EventBus 会 NakWithDelay 并保留原消息；业务方超过恢复窗口后应把错误
+		// 转成 ErrPermanent，届时才会落一条最终死信。
+		if errors.Is(err, reliability.ErrDeferred) {
+			return err
+		}
+
 		// ctx 取消视作非 DLQ 场景：Worker 收到 SIGTERM 不该把
 		// 残余任务全部沉淀到 DLQ；让 EventBus 协议自身决定 Nak 重投。
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
