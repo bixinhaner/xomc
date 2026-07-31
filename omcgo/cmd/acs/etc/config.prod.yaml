@@ -118,8 +118,8 @@ upload:
   pm_dedup_ttl: 4h           # 覆盖短时重投，降低 Redis 历史键数量
 
 backpressure:
-  queue_pending_high: 2000
-  queue_pending_low: 500
+  queue_pending_high: 5000
+  queue_pending_low: 1000
   queue_oldest_high: 10m
   queue_oldest_low: 2m
   queue_slope_window: 5m

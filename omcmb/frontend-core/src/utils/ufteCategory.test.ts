@@ -31,10 +31,10 @@ describe('isDeviceUpgradeMember', () => {
     expect(isDeviceUpgradeMember('gsm_upgrade')).toBe(true);
   });
 
-  it('非升级分类与空值不算成员', () => {
+  it('虚拟升级分类和后端成员都算成员，非升级分类与空值不算成员', () => {
     expect(isDeviceUpgradeMember('version_rollback')).toBe(false);
     expect(isDeviceUpgradeMember('station_log')).toBe(false);
-    expect(isDeviceUpgradeMember('device_upgrade')).toBe(false);
+    expect(isDeviceUpgradeMember('device_upgrade')).toBe(true);
     expect(isDeviceUpgradeMember(undefined)).toBe(false);
   });
 });

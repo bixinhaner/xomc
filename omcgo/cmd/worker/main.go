@@ -44,6 +44,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	pmmetrics "github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/omcgo/omcgo/internal/pm/resultnorm"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/task"
@@ -76,6 +77,37 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	var cfg appconfig.WorkerConfig
 	if err := appconfig.Load(cfgPath, &cfg); err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	aggregationCfg := pmstream.ConfigFromEnv()
+	pmConcurrency := effectivePMConsumerConcurrency(cfg.PMConsumerConcurrency)
+	finalizeConcurrency := 0
+	aggregationConsumerConcurrency := 0
+	if aggregationCfg.Enabled {
+		if aggregationCfg.FinalizeConcurrency <= 0 ||
+			aggregationCfg.ConsumerConcurrency <= 0 ||
+			aggregationCfg.FinalizeConcurrency > pmMaxAggregationConcurrency ||
+			aggregationCfg.ConsumerConcurrency > pmMaxAggregationConcurrency {
+			return fmt.Errorf(
+				"PM aggregation concurrency must be within 1..%d (consumer=%d finalize=%d)",
+				pmMaxAggregationConcurrency,
+				aggregationCfg.ConsumerConcurrency, aggregationCfg.FinalizeConcurrency,
+			)
+		}
+		finalizeConcurrency = aggregationCfg.FinalizeConcurrency
+		aggregationConsumerConcurrency = aggregationCfg.ConsumerConcurrency
+	}
+	requiredTSDBConns := pmTSDBConnectionBudget(
+		pmConcurrency,
+		finalizeConcurrency,
+		aggregationConsumerConcurrency,
+	)
+	if cfg.TSDB.MaxConns < requiredTSDBConns {
+		return fmt.Errorf(
+			"tsdb.max_conns=%d is below concurrent PM budget=%d (ingest=%d finalize=%d aggregation=%d*%d reserve=%d)",
+			cfg.TSDB.MaxConns, requiredTSDBConns, pmConcurrency, finalizeConcurrency,
+			pmAggregationTSDBWriteConsumers, aggregationConsumerConcurrency,
+			pmTSDBConnectionReserve,
+		)
 	}
 
 	// Handle LOG_OUTPUT_PATHS environment variable (comma-separated)
@@ -275,14 +307,8 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// 配 N 个订阅共享 durable consumer 吃满 worker 多核。<=0 回退 GOMAXPROCS（容器 CPU 配额）。
 	// 上限 32（2026-07-21 压测实测：20000 设备规模下旧上限 16 把并发顶死，worker CPU 却只用了
 	// ~30%（远未跑满）；提到 32 后隔离测量消费吞吐从约10/s提升到约20-27/s，稳定验证有效。
-	// 已同步把 tsdb 连接池上限从 25 提到 40，避免瓶颈从「并发数」转移到「DB 连接池耗尽」。
-	pmConcurrency := cfg.PMConsumerConcurrency
-	if pmConcurrency <= 0 {
-		pmConcurrency = runtime.GOMAXPROCS(0)
-	}
-	if pmConcurrency > 32 {
-		pmConcurrency = 32
-	}
+	// tsdb 连接池按入库并发 + 小时结算并发 + 后台余量核定，避免两个波峰重叠时池耗尽。
+	pmConcurrency := effectivePMConsumerConcurrency(cfg.PMConsumerConcurrency)
 	pmCollector.SetConcurrency(pmConcurrency)
 	// 服务端 durable consumer 的 MaxAckPending 必须与实际处理能力绑定。默认 1000 会在
 	// 机械盘过载时把大量消息同时推到 worker，形成重投和内存/IO 放大。
@@ -664,6 +690,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 			cfg.PM.PeriodicUploadInterval,
 			logger,
 		)
+		pmOnlineSub.SetAdmissionGate(pm.NewRedisPMSetupAdmissionGate(w.Redis, 0))
 		// PM 上传 URL 基址与「系统配置→ACS 传输」同源：运行时读 sys_configs
 		// acs_transfer.uploadBaseURL，非空则覆盖 ${OMC_PUBLIC_HOST} 模板的 host
 		// （修「URL 渲染成 localhost 不可达」+ 统一真值源，改 IP 即时生效无需重建）。
@@ -789,6 +816,58 @@ func pmQueueTuning(concurrency int) event.QueueTuning {
 		MaxDeliver:    event.MaxDeliveriesForRetryHorizon(collector.DeviceRegistrationGrace),
 		MaxAckPending: maxAckPending,
 	}
+}
+
+const pmTSDBConnectionReserve = 8
+const pmAggregationTSDBWriteConsumers = 3
+const pmMaxAggregationConcurrency = 256
+const pmMaxTSDBConnectionBudget = int64(1<<31 - 1)
+
+func effectivePMConsumerConcurrency(configured int) int {
+	if configured <= 0 {
+		configured = runtime.GOMAXPROCS(0)
+	}
+	if configured > 32 {
+		return 32
+	}
+	return configured
+}
+
+// pmTSDBConnectionBudget reserves independent capacity for synchronized PM
+// ingestion and hourly finalization. Both paths write TimescaleDB and overlap
+// after the 12-minute close grace; sizing only for either path starves the
+// other and turns a normal device burst into upload 503s.
+func pmTSDBConnectionBudget(
+	ingestConcurrency,
+	finalizeConcurrency,
+	aggregationConsumerConcurrency int,
+) int32 {
+	if ingestConcurrency < 0 {
+		ingestConcurrency = 0
+	}
+	if finalizeConcurrency < 0 {
+		finalizeConcurrency = 0
+	}
+	if aggregationConsumerConcurrency < 0 {
+		aggregationConsumerConcurrency = 0
+	}
+	for _, concurrency := range []int{
+		ingestConcurrency,
+		finalizeConcurrency,
+		aggregationConsumerConcurrency,
+	} {
+		if int64(concurrency) > pmMaxTSDBConnectionBudget {
+			return int32(pmMaxTSDBConnectionBudget)
+		}
+	}
+	total := int64(ingestConcurrency) +
+		int64(finalizeConcurrency) +
+		int64(pmAggregationTSDBWriteConsumers)*int64(aggregationConsumerConcurrency) +
+		int64(pmTSDBConnectionReserve)
+	if total > pmMaxTSDBConnectionBudget {
+		return int32(pmMaxTSDBConnectionBudget)
+	}
+	return int32(total)
 }
 
 // startAutoRecycleCron 启动 #779 回收站自动移入 cron（每天 00:10）。

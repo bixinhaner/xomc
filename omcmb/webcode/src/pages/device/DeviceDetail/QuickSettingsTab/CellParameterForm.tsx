@@ -50,6 +50,22 @@ import {
   ParameterReadbackTimeoutError,
   waitForExpectedParameterValues,
 } from './parameterReadback';
+import {
+  buildMlnMmePoolUpdates,
+  isMlnIndexedMmePoolModel,
+  MLN_MME_POOL_STANDARD_PREFIX,
+  parseMlnMmePoolRows,
+} from './mmeIpPlmnIndexed';
+import {
+  findMmePlmnOutsideServingList,
+  getServingPlmnOptionsForModel,
+  getServingPlmnSearchQuery,
+  isServingPlmnRestrictedModel,
+} from './mmePlmnSelection';
+import {
+  applyDeviceParameterSearchReadback,
+  refreshDeviceParameterSearchQueries,
+} from './parameterSearchRefresh';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
@@ -713,6 +729,7 @@ function formatTimeZoneDisplay(value: string): string {
 
 interface CellParameterFormProps {
   deviceId: string;
+  paramModel?: string;
   active?: boolean;
   group: QuickSettingsGroup;
   instanceContext: QuickSettingsInstanceContext;
@@ -752,6 +769,8 @@ interface MmeIpPlmnTableProps {
   disabled?: boolean;
   locale: 'zh-CN' | 'en-US';
   maxRows?: number;
+  plmnOptions?: string[];
+  restrictPlmnSelection?: boolean;
 }
 
 interface PlmnListTableProps {
@@ -907,7 +926,15 @@ function toMmeIpPlmnRows(value: unknown): MmeIpPlmnRow[] {
   return parseMmeIpPlmnList(value);
 }
 
-function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale, maxRows }: MmeIpPlmnTableProps) {
+function MmeIpPlmnTable({
+  value = [],
+  onChange,
+  disabled = false,
+  locale,
+  maxRows,
+  plmnOptions = [],
+  restrictPlmnSelection = false,
+}: MmeIpPlmnTableProps) {
   void locale;
   const t = useT();
   const rows = isMmeIpPlmnRows(value) ? value : [];
@@ -957,17 +984,44 @@ function MmeIpPlmnTable({ value = [], onChange, disabled = false, locale, maxRow
       title: locale === 'zh-CN' ? 'PLMN' : 'PLMN',
       dataIndex: 'plmn',
       key: 'plmn',
-      render: (_: unknown, row: MmeIpPlmnRow) => (
-        <Tooltip title={validatePlmn(row.plmn) ?? ''}>
-          <Input
-            value={row.plmn}
-            disabled={disabled}
-            status={validatePlmn(row.plmn) ? 'error' : undefined}
-            placeholder="46000"
-            onChange={(e) => updateCell(row.key, 'plmn', e.target.value)}
-          />
-        </Tooltip>
-      ),
+      render: (_: unknown, row: MmeIpPlmnRow) => {
+        const formatError = validatePlmn(row.plmn);
+        const membershipError = restrictPlmnSelection
+          && row.plmn
+          && !plmnOptions.includes(row.plmn)
+          ? t('device.cell.mmePlmnNotServing', {
+            row: rows.findIndex((item) => item.key === row.key) + 1,
+            plmn: row.plmn,
+          })
+          : null;
+        const error = formatError ?? membershipError;
+        return (
+          <Tooltip title={error ?? ''}>
+            {restrictPlmnSelection ? (
+              <Select
+                value={row.plmn || undefined}
+                disabled={disabled}
+                status={error ? 'error' : undefined}
+                style={{ width: '100%' }}
+                placeholder={t('device.cell.mmePlmnSelectPlaceholder')}
+                notFoundContent={t('device.cell.mmePlmnNoOptions')}
+                showSearch
+                optionFilterProp="label"
+                options={plmnOptions.map((plmn) => ({ value: plmn, label: plmn }))}
+                onChange={(nextValue) => updateCell(row.key, 'plmn', nextValue)}
+              />
+            ) : (
+              <Input
+                value={row.plmn}
+                disabled={disabled}
+                status={error ? 'error' : undefined}
+                placeholder="46000"
+                onChange={(e) => updateCell(row.key, 'plmn', e.target.value)}
+              />
+            )}
+          </Tooltip>
+        );
+      },
     },
     {
       title: t('table.operation'),
@@ -1136,6 +1190,7 @@ function findRawValueBySuffix(parameters: DeviceParameter[] | undefined, suffix:
  */
 export default function CellParameterForm({
   deviceId,
+  paramModel,
   active = true,
   group,
   instanceContext,
@@ -1176,6 +1231,9 @@ export default function CellParameterForm({
   const isDeviceTimeGroup = group.id === 'device-time';
   const isBmSyncSourceGroup = group.id === 'bm-sync-source';
   const isGnbSyncSourceGroup = group.id === 'gnb-sync-source';
+  const isMlnIndexedMmePool = group.id === 'enb-mme' && isMlnIndexedMmePoolModel(paramModel);
+  const restrictMmePlmnSelection = group.id === 'enb-mme'
+    && isServingPlmnRestrictedModel(paramModel);
   const preferSchemaCurrentValue = isDeviceTimeGroup
     || isGnbSyncSourceGroup
     || group.id === 'device-ipsec-control'
@@ -1222,8 +1280,14 @@ export default function CellParameterForm({
   // 注：useParameterSchema 接受 pathPrefix，前缀匹配即可；这里以分组共用前缀粗查再过滤
   // 为简化，取 group 中 standardPath 的公共前缀作 pathPrefix
   const commonPrefix = useMemo(
-    () => (isDeviceTimeGroup || isGnbSyncSourceGroup ? '' : commonPathPrefix(effectiveParams.map((p) => resolveReadPath(p.standardPath || '')))),
-    [isDeviceTimeGroup, isGnbSyncSourceGroup, effectiveParams, resolveReadPath],
+    () => (
+      isDeviceTimeGroup || isGnbSyncSourceGroup
+        ? ''
+        : isMlnIndexedMmePool
+        ? MLN_MME_POOL_STANDARD_PREFIX
+        : commonPathPrefix(effectiveParams.map((p) => resolveReadPath(p.standardPath || '')))
+    ),
+    [isDeviceTimeGroup, isGnbSyncSourceGroup, isMlnIndexedMmePool, effectiveParams, resolveReadPath],
   );
   const { data: schemaResp, isLoading: isCommonSchemaLoading, refetch: refetchCommonSchema } = useParameterSchema(
     deviceId,
@@ -1251,9 +1315,17 @@ export default function CellParameterForm({
   );
   const { data: mmeIpPlmnParams } = useSearchParameters(
     deviceId,
-    group.id === 'enb-mme' ? 'MmeIpPlmnList' : '',
-    50,
+    group.id === 'enb-mme'
+      ? (isMlnIndexedMmePool ? 'MmePoolConfigParam' : 'MmeIpPlmnList')
+      : '',
+    isMlnIndexedMmePool ? 100 : 50,
     active && group.id === 'enb-mme',
+  );
+  const { data: servingPlmnParams, isLoading: isServingPlmnLoading } = useSearchParameters(
+    deviceId,
+    restrictMmePlmnSelection ? getServingPlmnSearchQuery(paramModel) : '',
+    50,
+    active && restrictMmePlmnSelection,
   );
   const { data: nrCommonParams } = useSearchParameters(
     deviceId,
@@ -1491,6 +1563,25 @@ export default function CellParameterForm({
     effectiveSchemaParameters.forEach((p) => map.set(p.path, p));
     return map;
   }, [effectiveSchemaParameters]);
+  const mlnMmePoolCurrentValues = useMemo(() => [
+    ...(mmeIpPlmnParams ?? []).map((item) => ({
+      parameterPath: item.parameterPath,
+      parameterValue: item.parameterValue,
+    })),
+    ...effectiveSchemaParameters
+      .filter((item) => item.currentValue !== undefined && item.currentValue !== null)
+      .map((item) => ({
+        parameterPath: item.path,
+        parameterValue: String(item.currentValue),
+      })),
+  ], [effectiveSchemaParameters, mmeIpPlmnParams]);
+  const servingPlmnOptions = useMemo(() => {
+    return getServingPlmnOptionsForModel(
+      paramModel,
+      instanceContext.fapInstance,
+      servingPlmnParams ?? [],
+    );
+  }, [instanceContext.fapInstance, paramModel, servingPlmnParams]);
   const rawParameterByPath = useMemo(() => {
     const map = new Map<string, DeviceParameter>();
     for (const item of [
@@ -1672,10 +1763,14 @@ export default function CellParameterForm({
             ? findRawValueBySuffix(nrNguParams, '.BindInterface') ?? findRawValueBySuffix(nrNguFallbackParams, '.NguLocalIpAddrList')
             : undefined);
       if (special?.kind === 'mme-ip-plmn-table') {
-        const raw = preferSchemaCurrentValue
-          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
-          : (rawItem?.parameterValue ?? item?.currentValue ?? '');
-        form.setFieldValue(p.name, toMmeIpPlmnRows(raw));
+        if (isMlnIndexedMmePool) {
+          form.setFieldValue(p.name, parseMlnMmePoolRows(mlnMmePoolCurrentValues));
+        } else {
+          const raw = preferSchemaCurrentValue
+            ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+            : (rawItem?.parameterValue ?? item?.currentValue ?? '');
+          form.setFieldValue(p.name, toMmeIpPlmnRows(raw));
+        }
       } else if (special?.kind === 'plmn-list-table') {
         const raw = preferSchemaCurrentValue
           ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
@@ -1729,7 +1824,7 @@ export default function CellParameterForm({
         }
       }
     });
-  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, resolveRuntimeSpecialConfig, mmeIpPlmnParams, nrNguParams, nrNguFallbackParams, preferSchemaCurrentValue, isDeviceTimeGroup, deviceTimeModeOptionsKey, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath]);
+  }, [hasSchemaData, visibleParams, instanceContext, form, schemaByPath, rawParameterByPath, draft, resolveRuntimeSpecialConfig, mmeIpPlmnParams, nrNguParams, nrNguFallbackParams, preferSchemaCurrentValue, isDeviceTimeGroup, deviceTimeModeOptionsKey, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath, isMlnIndexedMmePool, mlnMmePoolCurrentValues]);
 
   const handleSave = async () => {
     const values = form.getFieldsValue() as Record<string, unknown>;
@@ -1757,8 +1852,21 @@ export default function CellParameterForm({
         values[p.name] = normalizedRows;
         const rowsErr = validateMmeIpPlmnRows(normalizedRows);
         const limitErr = validateMmeIpPlmnLimit(normalizedRows, p.maxValue);
-        if (rowsErr || limitErr) {
-          errors[p.name] = rowsErr ?? limitErr ?? '';
+        const membershipIssue = restrictMmePlmnSelection
+          ? findMmePlmnOutsideServingList(normalizedRows, servingPlmnOptions)
+          : null;
+        const membershipErr = membershipIssue
+          ? t('device.cell.mmePlmnNotServing', {
+            row: membershipIssue.row,
+            plmn: membershipIssue.plmn,
+          })
+          : null;
+        if (rowsErr || limitErr || membershipErr) {
+          errors[p.name] = rowsErr ?? limitErr ?? membershipErr ?? '';
+          continue;
+        }
+        if (isMlnIndexedMmePool) {
+          updates.push(...buildMlnMmePoolUpdates(normalizedRows, mlnMmePoolCurrentValues));
           continue;
         }
       }
@@ -1926,6 +2034,21 @@ export default function CellParameterForm({
       submittedDraftRevision: lastSubmit?.submittedDraftRevision,
       currentDraftRevision: draftRevision,
     })) return;
+    if (group.id === 'enb-plmn') {
+      const submittedPlmn = Object.entries(lastSubmit?.expectedReadback ?? {})
+        .find(([path]) => path.endsWith('.ExistPlmnidList'));
+      if (submittedPlmn) {
+        applyDeviceParameterSearchReadback(queryClient, {
+          deviceId,
+          searchQuery: getServingPlmnSearchQuery(paramModel),
+          replacePathPrefix: submittedPlmn[0],
+          parameters: [{
+            parameterPath: submittedPlmn[0],
+            parameterValue: submittedPlmn[1],
+          }],
+        });
+      }
+    }
     let cancelled = false;
     const abortController = new AbortController();
     void (async () => {
@@ -2024,13 +2147,21 @@ export default function CellParameterForm({
         currentDraftRevision,
       })) return;
       const nextValues: Record<string, unknown> = {};
+      const refreshedMlnMmePoolValues = Array.from(refreshedSchemaByPath.values())
+        .filter((item) => item.currentValue !== undefined && item.currentValue !== null)
+        .map((item) => ({
+          parameterPath: item.path,
+          parameterValue: String(item.currentValue),
+        }));
       for (const p of effectiveParams) {
         const special = resolveRuntimeSpecialConfig(p.name);
         const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
         const refreshedValue = refreshedSchemaByPath.get(path)?.currentValue ?? '';
         const allowedEnumValues = p.enumOptions?.map((option) => option.value) ?? refreshedSchemaByPath.get(path)?.constraints?.enumValues ?? [];
         nextValues[p.name] = special?.kind === 'mme-ip-plmn-table'
-          ? toMmeIpPlmnRows(refreshedValue)
+          ? (isMlnIndexedMmePool
+            ? parseMlnMmePoolRows(refreshedMlnMmePoolValues)
+            : toMmeIpPlmnRows(refreshedValue))
           : special?.kind === 'plmn-list-table'
           ? toPlmnRows(refreshedValue)
           : isConstrainedGnssSyncSourceSelectPath(path)
@@ -2060,6 +2191,31 @@ export default function CellParameterForm({
       if (Object.keys(changedValues).length > 0) {
         form.setFieldsValue(changedValues);
       }
+      if (group.id === 'enb-plmn') {
+        const plmnParam = effectiveParams.find(
+          (param) => resolveRuntimeSpecialConfig(param.name)?.kind === 'plmn-list-table',
+        );
+        const plmnPath = plmnParam
+          ? resolveRuntimeSpecialConfig(plmnParam.name)?.configPath
+            ?? resolveReadPath(plmnParam.standardPath || '')
+          : '';
+        const plmnValue = plmnPath
+          ? refreshedSchemaByPath.get(plmnPath)?.currentValue
+          : undefined;
+        if (plmnPath && plmnValue !== undefined) {
+          applyDeviceParameterSearchReadback(queryClient, {
+            deviceId,
+            searchQuery: getServingPlmnSearchQuery(paramModel),
+            replacePathPrefix: plmnPath,
+            parameters: [{
+              parameterPath: plmnPath,
+              parameterValue: String(plmnValue),
+            }],
+          });
+        } else {
+          await refreshDeviceParameterSearchQueries(queryClient, deviceId);
+        }
+      }
       const syncSourceValue = nextValues.SyncSource;
       if (Array.isArray(syncSourceValue)) {
         gnssSyncSourceRef.current = syncSourceValue.map(String);
@@ -2072,7 +2228,7 @@ export default function CellParameterForm({
       cancelled = true;
       abortController.abort();
     };
-  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, lastSubmit?.expectedReadback, lastSubmit?.submittedDraftRevision, lastSubmit?.syncedForTaskId, draftRevision, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, refetchGnbSyncFapSchema, refetchGnbSyncDeviceInfoSchema, effectiveParams, instanceContext, form, clearDraft, patchFeedback, fbKey, group.id, group.titleZh, resolveRuntimeSpecialConfig, t, isDeviceTimeGroup, isGnbSyncSourceGroup, deviceTimeModeOptionsKey, queryClient, deviceId, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath]);
+  }, [active, lastTask?.id, lastTask?.status, lastSubmit?.at, lastSubmit?.expectedReadback, lastSubmit?.submittedDraftRevision, lastSubmit?.syncedForTaskId, draftRevision, refetchCommonSchema, refetchDeviceTimeSchema, refetchManagementServerSchema, refetchGnbSyncFapSchema, refetchGnbSyncDeviceInfoSchema, effectiveParams, instanceContext, form, clearDraft, patchFeedback, fbKey, group.id, group.titleZh, resolveRuntimeSpecialConfig, t, isDeviceTimeGroup, isGnbSyncSourceGroup, deviceTimeModeOptionsKey, queryClient, deviceId, paramModel, isEffectiveBitmaskPath, isConstrainedGnssSyncSourceSelectPath, isMlnIndexedMmePool]);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
@@ -2130,7 +2286,12 @@ export default function CellParameterForm({
               </Tooltip>
             ) : tag;
           })()}
-          <Button type="primary" onClick={handleSave} loading={updateMutation.isPending}>
+          <Button
+            type="primary"
+            onClick={handleSave}
+            loading={updateMutation.isPending || isServingPlmnLoading}
+            disabled={isServingPlmnLoading}
+          >
             {updateMutation.isPending ? t('device.cell.dispatching') : t('common.save')}
           </Button>
         </Space>
@@ -2268,6 +2429,16 @@ export default function CellParameterForm({
               const mmeRowsErr = special?.kind === 'mme-ip-plmn-table'
                 ? validateMmeIpPlmnRows(toMmeIpPlmnRows(value))
                 : null;
+              const mmeMembershipIssue = special?.kind === 'mme-ip-plmn-table'
+                && restrictMmePlmnSelection
+                ? findMmePlmnOutsideServingList(toMmeIpPlmnRows(value), servingPlmnOptions)
+                : null;
+              const mmeMembershipErr = mmeMembershipIssue
+                ? t('device.cell.mmePlmnNotServing', {
+                  row: mmeMembershipIssue.row,
+                  plmn: mmeMembershipIssue.plmn,
+                })
+                : null;
               const plmnRowsErr = special?.kind === 'plmn-list-table'
                 ? plmnValidationMessage(
                   validatePlmnList(toPlmnRows(value), p.maxValue ?? 6),
@@ -2281,7 +2452,7 @@ export default function CellParameterForm({
               const rangeErr = !err && !mmeRowsErr && !mmeLimitErr && !plmnRowsErr && extraBounds
                 ? validateExtraInfoBounds(normalizedValue, extraBounds)
                 : null;
-              const finalErr = err ?? mmeRowsErr ?? mmeLimitErr ?? plmnRowsErr ?? rangeErr;
+              const finalErr = err ?? mmeRowsErr ?? mmeLimitErr ?? mmeMembershipErr ?? plmnRowsErr ?? rangeErr;
               if (finalErr) next[name] = finalErr;
               else delete next[name];
               // 镜像字段同时清/重新校验（值刚被程序性写入，旧 error 应失效）
@@ -2496,7 +2667,9 @@ export default function CellParameterForm({
               ? appendCurrentEnumOption(baseEnumOptions, currentRawValue, p.enumOptions)
               : baseEnumOptions;
             const extra = special?.kind === 'mme-ip-plmn-table'
-              ? t('device.cell.mmeIpPlmnExtra')
+              ? t(restrictMmePlmnSelection
+                ? 'device.cell.mmeIpPlmnServingExtra'
+                : 'device.cell.mmeIpPlmnExtra')
               : special?.kind === 'plmn-list-table'
               ? t('device.cell.plmnListExtra')
               : undefined;
@@ -2538,6 +2711,8 @@ export default function CellParameterForm({
                       disabled={!finalWritable}
                       locale={locale}
                       maxRows={p.maxValue}
+                      plmnOptions={servingPlmnOptions}
+                      restrictPlmnSelection={restrictMmePlmnSelection}
                     />
                   ) : special?.kind === 'plmn-list-table' ? (
                     <PlmnListTable

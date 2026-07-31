@@ -15,11 +15,11 @@ db:
 tsdb:
   # KPI/时序库物理分离：指向独立时序库实例 postgres-tsdb（凭据/主机由 deploy/.env 经 compose 注入 ${POSTGRES_TSDB_*}/${TSDB_HOST}）。
   dsn: "postgres://${POSTGRES_TSDB_USER}:${POSTGRES_TSDB_PASSWORD}@${TSDB_HOST}:5432/${POSTGRES_TSDB_DB}?sslmode=disable"
-  # 连接池核定（#24）：KPI 聚合写时序，TS 池温和上调 20→25。
-  # 2026-07-21 压测实测：pm_consumer_concurrency 从16上调到32后，同批最多32个PM
-  # COPY 事务并发占用连接，25 conns 会成为新瓶颈，同步上调 25→40（其余聚合/告警
-  # /MR 等 worker 后台任务共享同一池，40 仍留有余量，不是 PM 独占）。
-  max_conns: 40
+  # 连接池核定（#24）：KPI 聚合和 PM 原始入库共享本池。
+  # 2 万设备槽位上报会与 12 分钟后的小时结算重叠：32 路 PM COPY + 32 路
+  # finalize + normalized/hourly/daily 三路各 8 个聚合写消费者 + 8 路后台余量，
+  # 共需 96 连接。低于此预算会让结算抢占入库连接并放大 pm-workers pending。
+  max_conns: 96
   min_conns: 5
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m
@@ -68,8 +68,8 @@ minio:
 # <=0 回退 GOMAXPROCS（容器 CPU 配额），上限 32。
 # 2026-07-21 压测实测（20000 设备规模）：初次显式设为 16（旧上限）验证消费吞吐翻倍
 # （~10/s→~20/s）且 worker CPU 仍有余量（~30%），随即代码上限从 16 上调到 32
-# （见 cmd/worker/main.go 注释），这里同步跟上；tsdb.max_conns 已同步从 25 提到 40
-# 避免连接池变成新瓶颈。
+# （见 cmd/worker/main.go 注释）；tsdb.max_conns 按 PM 入库与小时结算并发相加核定，
+# 避免两个正常波峰重叠时连接池成为瓶颈。
 pm_consumer_concurrency: 32
 
 raw_cleanup:

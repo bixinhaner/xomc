@@ -314,6 +314,57 @@ func TestBuiltinMLN_IncludesIndependentPLMNList(t *testing.T) {
 	assert.Equal(t, "6", plmnGroup.Params[0].MaxValue)
 }
 
+func TestBuiltinBM_IncludesIndependentPLMNList(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "BM.xml"))
+	require.NoError(t, err)
+
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+
+	var plmnGroup *xmlGroup
+	for i := range doc.Groups {
+		if doc.Groups[i].ID == "enb-plmn" {
+			plmnGroup = &doc.Groups[i]
+			break
+		}
+	}
+	require.NotNil(t, plmnGroup)
+	require.False(t, plmnGroup.MultiInstance == "true")
+	require.Len(t, plmnGroup.Params, 1)
+	assert.Equal(t, "ExistPlmnidList", plmnGroup.Params[0].Name)
+	assert.Equal(t,
+		"Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.ExistPlmnidList",
+		plmnGroup.Params[0].StandardPath,
+	)
+	assert.Equal(t, "6", plmnGroup.Params[0].MaxValue)
+}
+
+func TestBuiltinBLQ_IncludesIndependentPLMNList(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "BLQ.xml"))
+	require.NoError(t, err)
+
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+
+	var plmnGroup *xmlGroup
+	for i := range doc.Groups {
+		if doc.Groups[i].ID == "enb-plmn" {
+			plmnGroup = &doc.Groups[i]
+			break
+		}
+	}
+	require.NotNil(t, plmnGroup)
+	assert.Equal(t, "true", plmnGroup.MultiInstance)
+	assert.Equal(t, 6, plmnGroup.MaxInstances)
+	assert.Equal(t,
+		"Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.",
+		plmnGroup.ObjectPath,
+	)
+	require.Len(t, plmnGroup.Params, 1)
+	assert.Equal(t, "PLMNID", plmnGroup.Params[0].Name)
+	assert.Equal(t, "PLMNID", plmnGroup.Params[0].Leaf)
+}
+
 func TestBuiltinMLQ_IncludesIndependentPLMNList(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "MLQ.xml"))
 	require.NoError(t, err)
@@ -338,6 +389,55 @@ func TestBuiltinMLQ_IncludesIndependentPLMNList(t *testing.T) {
 	require.Len(t, plmnGroup.Params, 1)
 	assert.Equal(t, "PLMNID", plmnGroup.Params[0].Name)
 	assert.Equal(t, "PLMNID", plmnGroup.Params[0].Leaf)
+}
+
+func TestBuiltinBLN_QuickSettingsReferenceParamModel(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "BLN.xml"))
+	require.NoError(t, err)
+
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+	assert.Equal(t, "BLN", doc.ParamModel)
+
+	groupIDs := make([]string, 0, len(doc.Groups))
+	for _, group := range doc.Groups {
+		groupIDs = append(groupIDs, group.ID)
+	}
+	assert.Equal(t, []string{"enb-cell", "enb-plmn", "device-ipsec", "enb-neighbor-freq", "enb-neighbor-cell"}, groupIDs)
+
+	paramModelData, err := os.ReadFile(filepath.Join("..", "..", "data", "param-mappings", "BLN.xml"))
+	require.NoError(t, err)
+
+	var paramModel struct {
+		Objects []struct {
+			StandardPath string `xml:"standardPath,attr"`
+		} `xml:"objects>object"`
+		Params []struct {
+			StandardPath string `xml:"standardPath,attr"`
+		} `xml:"parameters>param"`
+	}
+	require.NoError(t, xml.Unmarshal(paramModelData, &paramModel))
+
+	standardPaths := make(map[string]struct{}, len(paramModel.Objects)+len(paramModel.Params))
+	for _, object := range paramModel.Objects {
+		standardPaths[object.StandardPath] = struct{}{}
+	}
+	for _, param := range paramModel.Params {
+		standardPaths[param.StandardPath] = struct{}{}
+	}
+
+	checked := 0
+	for _, group := range doc.Groups {
+		for _, param := range group.Params {
+			standardPath := param.StandardPath
+			if standardPath == "" {
+				standardPath = group.ObjectPath + param.Leaf
+			}
+			checked++
+			assert.Containsf(t, standardPaths, standardPath, "quicksettings group %s param %s must reference BLN param model", group.ID, param.Name)
+		}
+	}
+	assert.Equal(t, 54, checked)
 }
 
 func TestBuiltinLTENeighborCellIncludesRequiredTACAndNumericConstraints(t *testing.T) {
@@ -439,6 +539,49 @@ func TestBuiltinLTENeighborCellIncludesRequiredTACAndNumericConstraints(t *testi
 					{Value: "1", Label: "Manual"},
 				}, x2Flag.EnumOptions)
 			}
+		})
+	}
+}
+
+func TestBuiltinLTEInterFrequencyQRxLevMinUsesNumericConstraints(t *testing.T) {
+	reg := NewRegistry()
+	loader := NewLoader(
+		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
+		filepath.Join("..", "..", "data"),
+		reg,
+		nil,
+	)
+
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+
+	for _, model := range []string{"BLQ", "MLN", "MLQ", "BM", "BLN"} {
+		t.Run(model, func(t *testing.T) {
+			groups := reg.GetByParamModel(model)
+			var interFrequencyGroup *Group
+			for i := range groups {
+				group := &groups[i]
+				if group.ID == "enb-neighbor-freq" {
+					interFrequencyGroup = group
+					break
+				}
+			}
+			require.NotNil(t, interFrequencyGroup)
+
+			var qRxLevMin *Param
+			for i := range interFrequencyGroup.Params {
+				param := &interFrequencyGroup.Params[i]
+				if param.Leaf == "QRxLevMinSIB5" {
+					qRxLevMin = param
+					break
+				}
+			}
+			require.NotNil(t, qRxLevMin)
+			assert.Equal(t, "int", qRxLevMin.Type)
+			require.NotNil(t, qRxLevMin.MinValue)
+			require.NotNil(t, qRxLevMin.MaxValue)
+			assert.EqualValues(t, -70, *qRxLevMin.MinValue)
+			assert.EqualValues(t, -22, *qRxLevMin.MaxValue)
 		})
 	}
 }

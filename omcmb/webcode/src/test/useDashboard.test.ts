@@ -250,7 +250,7 @@ describe('useDashboard 工具函数', () => {
 });
 
 describe('dashboard KPI 系统时区窗口', () => {
-  it('小时、天、周窗口直接对应现有聚合粒度和固定历史长度', () => {
+  it('小时只取已发布桶，天和周窗口包含当前进行中自然周期', () => {
     const now = new Date('2026-07-13T01:30:00Z');
 
     const hourly = buildDashboardKPIWindow(now, 'hourly', 'Asia/Shanghai');
@@ -259,14 +259,16 @@ describe('dashboard KPI 系统时区窗口', () => {
     expect(hourly.bucketKeys).toHaveLength(24);
 
     const daily = buildDashboardKPIWindow(now, 'daily', 'Asia/Shanghai');
-    expect(daily.start_time).toBe('2026-06-13T00:00:00+08:00');
-    expect(daily.end_time).toBe('2026-07-13T00:00:00+08:00');
+    expect(daily.start_time).toBe('2026-06-14T00:00:00+08:00');
+    expect(daily.end_time).toBe('2026-07-13T09:30:00+08:00');
     expect(daily.bucketKeys).toHaveLength(30);
+    expect(daily.bucketKeys.at(-1)).toBe('2026-07-13');
 
     const weekly = buildDashboardKPIWindow(now, 'weekly', 'Asia/Shanghai');
-    expect(weekly.start_time).toBe('2026-04-20T00:00:00+08:00');
-    expect(weekly.end_time).toBe('2026-07-13T00:00:00+08:00');
+    expect(weekly.start_time).toBe('2026-04-27T00:00:00+08:00');
+    expect(weekly.end_time).toBe('2026-07-13T09:30:00+08:00');
     expect(weekly.bucketKeys).toHaveLength(12);
+    expect(weekly.bucketKeys.at(-1)).toBe('2026-07-13');
   });
 
   it('周查询必须等待系统业务时区就绪，禁止静默回落 UTC', () => {

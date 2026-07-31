@@ -247,3 +247,151 @@ upgrade_app_gpv_response_config() {
   fi
   app_has_gpv_response_config "$live_config"
 }
+
+# 读取 YAML 顶层 tsdb 段内的 max_conns，避免误读 db.max_conns。
+worker_tsdb_max_conns() {
+  local config="$1"
+  [ -f "$config" ] || return 1
+  awk '
+    /^[^[:space:]#][^:]*:/ {
+      in_tsdb = ($0 ~ /^tsdb:[[:space:]]*(#.*)?$/)
+      direct_indent = -1
+    }
+    in_tsdb && $0 ~ /^[[:space:]]+/ && $0 !~ /^[[:space:]]*(#|$)/ {
+      match($0, /[^[:space:]]/)
+      indent = RSTART - 1
+      if (direct_indent < 0) direct_indent = indent
+    }
+    in_tsdb && indent == direct_indent &&
+      /^[[:space:]]+max_conns:[[:space:]]*/ {
+      value = $0
+      sub(/^[^:]*:[[:space:]]*/, "", value)
+      sub(/[[:space:]]*#.*/, "", value)
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      if (value ~ /^"[0-9]+"$/ || value ~ /^\047[0-9]+\047$/) {
+        value = substr(value, 2, length(value) - 2)
+      }
+      # YAML 1.1/Viper 会把 040 解释成八进制 32。只接受规范十进制，
+      # 避免 Shell 数值比较、迁移器和应用运行时对同一文本得出不同结果。
+      if (value !~ /^(0|[1-9][0-9]*)$/) exit 2
+      print value
+      found = 1
+      exit
+    }
+    END { if (!found) exit 1 }
+  ' "$config"
+}
+
+WORKER_TSDB_SAFE_POOL=96
+
+# validate_worker_tsdb_pool_precheck <现网 Worker 配置> <新包 Worker 模板>
+#
+# 纯只读门禁，供安装器 Step 1 在任何停服、数据迁移或配置改写前调用。
+# 首次部署尚无现网配置时放行；存量配置只允许历史默认 40（稍后自动迁移）
+# 或已经达到安全预算的值。
+validate_worker_tsdb_pool_precheck() {
+  local live_config="$1" template_config="$2"
+  local live_limit template_limit
+
+  [ -f "$template_config" ] || return 1
+  template_limit="$(worker_tsdb_max_conns "$template_config")" || return 1
+  [ "$template_limit" -eq "$WORKER_TSDB_SAFE_POOL" ] || return 1
+
+  [ -f "$live_config" ] || return 0
+  live_limit="$(worker_tsdb_max_conns "$live_config")" || return 1
+  [ "$live_limit" -eq 40 ] || [ "$live_limit" -ge "$WORKER_TSDB_SAFE_POOL" ]
+}
+
+# upgrade_worker_tsdb_pool <现网 Worker 配置> <新包 Worker 模板>
+#
+# 仅把项目历史默认值 40 迁移到新模板值。足够大的运维自定义值保持不变；
+# 小于新模板安全预算的自定义值不自动覆盖，而是返回 insufficient 让安装器在
+# 切换 current 和重启服务前明确阻断。结果通过
+# WORKER_TSDB_POOL_UPGRADE_RESULT 返回。
+upgrade_worker_tsdb_pool() {
+  local live_config="$1" template_config="$2"
+  local live_limit template_limit tmp
+
+  WORKER_TSDB_POOL_UPGRADE_RESULT="invalid"
+  [ -f "$live_config" ] || return 1
+  [ -f "$template_config" ] || return 1
+
+  live_limit="$(worker_tsdb_max_conns "$live_config")" || return 1
+  template_limit="$(worker_tsdb_max_conns "$template_config")" || return 1
+  [ "$template_limit" -eq "$WORKER_TSDB_SAFE_POOL" ] || return 1
+
+  if [ "$live_limit" -eq "$WORKER_TSDB_SAFE_POOL" ]; then
+    WORKER_TSDB_POOL_UPGRADE_RESULT="noop"
+    return 0
+  fi
+  if [ "$live_limit" -gt "$WORKER_TSDB_SAFE_POOL" ]; then
+    WORKER_TSDB_POOL_UPGRADE_RESULT="preserved"
+    return 0
+  fi
+  if [ "$live_limit" -ne 40 ]; then
+    WORKER_TSDB_POOL_UPGRADE_RESULT="insufficient"
+    return 0
+  fi
+
+  tmp="$(mktemp "${live_config}.tmp.XXXXXX")" || return 1
+  if ! cp -p "$live_config" "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! awk -v target="$WORKER_TSDB_SAFE_POOL" '
+      BEGIN { in_tsdb = 0; direct_indent = -1; changed = 0 }
+      /^[^[:space:]#][^:]*:/ {
+        in_tsdb = ($0 ~ /^tsdb:[[:space:]]*(#.*)?$/)
+        direct_indent = -1
+      }
+      in_tsdb && $0 ~ /^[[:space:]]+/ && $0 !~ /^[[:space:]]*(#|$)/ {
+        match($0, /[^[:space:]]/)
+        indent = RSTART - 1
+        if (direct_indent < 0) direct_indent = indent
+      }
+      in_tsdb && indent == direct_indent && !changed &&
+        /^[[:space:]]+max_conns:[[:space:]]*/ {
+        body = $0
+        comment = ""
+        if (index(body, "#") > 0) {
+          comment = " " substr(body, index(body, "#"))
+          body = substr(body, 1, index(body, "#") - 1)
+        }
+        scalar = body
+        sub(/^[^:]*:[[:space:]]*/, "", scalar)
+        sub(/^[[:space:]]+/, "", scalar)
+        sub(/[[:space:]]+$/, "", scalar)
+        quote = ""
+        if (scalar ~ /^"[0-9]+"$/) {
+          quote = "\""
+          scalar = substr(scalar, 2, length(scalar) - 2)
+        } else if (scalar ~ /^\047[0-9]+\047$/) {
+          quote = sprintf("%c", 39)
+          scalar = substr(scalar, 2, length(scalar) - 2)
+        }
+        if (scalar != "40") {
+          print
+          next
+        }
+        prefix = body
+        sub(/max_conns:.*/, "", prefix)
+        print prefix "max_conns: " quote target quote comment
+        changed = 1
+        next
+      }
+      { print }
+      END { if (changed != 1) exit 42 }
+    ' "$live_config" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+
+  if ! mv -f "$tmp" "$live_config"; then
+    rm -f "$tmp"
+    return 1
+  fi
+
+  [ "$(worker_tsdb_max_conns "$live_config")" -eq "$WORKER_TSDB_SAFE_POOL" ] || return 1
+  WORKER_TSDB_POOL_UPGRADE_RESULT="migrated"
+}

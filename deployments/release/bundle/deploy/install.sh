@@ -467,6 +467,19 @@ resource_env_validate "$RESOURCE_ENV_CANDIDATE" ||
   die "resources.env 不是完整资源规划：${RESOURCE_ENV_CANDIDATE}；请重新运行 plan-resources.sh" 1
 log "资源规划预检通过：$RESOURCE_ENV_CANDIDATE"
 
+# Worker 新版本会在启动时按真实并发核验 TSDB 连接池。这个只读门禁必须在
+# Step 2 旧 systemd 停服以及任何数据/配置改写之前执行，避免配置不足时把
+# 原服务停掉后才发现新 Worker 无法启动。历史默认 40 会在 Step 3 自动迁移；
+# 其他低于 96 的运维自定义值要求先显式调整。
+if ! validate_worker_tsdb_pool_precheck \
+  "$OMC_ROOT/etc/worker.prod.yaml" \
+  "$PKG_ROOT/etc/worker.prod.yaml"; then
+  live_worker_tsdb_pool="$(worker_tsdb_max_conns "$OMC_ROOT/etc/worker.prod.yaml" 2>/dev/null || echo 未安装/无法读取)"
+  package_worker_tsdb_pool="$(worker_tsdb_max_conns "$PKG_ROOT/etc/worker.prod.yaml" 2>/dev/null || echo 无法读取)"
+  die "Worker TSDB 连接池部署前门禁失败：现网=${live_worker_tsdb_pool}，新包=${package_worker_tsdb_pool}，安全预算=${WORKER_TSDB_SAFE_POOL}；未停止旧服务、未迁移数据、未改配置" 1
+fi
+log "Worker TSDB 连接池预检通过"
+
 # 兜底：旧版 build-release.sh 在 umask=027 机器上构建时 monitoring/ 配置会落 0640，
 # prometheus/loki/tempo/alertmanager 等非 root 容器读不动直接 fail。
 # 新版 build-release.sh 已 baked chmod a+rX 到 tar；这里再 defensive 兜一遍。
@@ -753,6 +766,26 @@ else
       "$OMC_ROOT/etc/app.prod.yaml" \
       "$RELEASE_DIR/etc/app.prod.yaml" ||
       die "app.prod.yaml 缺少 provision.gpv_response 且自动补齐失败；未切换 current" 1
+    upgrade_worker_tsdb_pool \
+      "$OMC_ROOT/etc/worker.prod.yaml" \
+      "$RELEASE_DIR/etc/worker.prod.yaml" ||
+      die "worker.prod.yaml 的 tsdb.max_conns 无法读取或安全迁移；未切换 current" 1
+    case "${WORKER_TSDB_POOL_UPGRADE_RESULT:-invalid}" in
+      migrated)
+        log "升级 Worker TSDB 连接池：tsdb.max_conns 40 → $(worker_tsdb_max_conns "$RELEASE_DIR/etc/worker.prod.yaml")（其他实例配置保持不变）"
+        ;;
+      preserved)
+        log "Worker tsdb.max_conns 为满足新预算的运维自定义值，升级时保持不变"
+        ;;
+      insufficient)
+        die "worker.prod.yaml 的 tsdb.max_conns=$(worker_tsdb_max_conns "$OMC_ROOT/etc/worker.prod.yaml") 低于新版本安全预算 $(worker_tsdb_max_conns "$RELEASE_DIR/etc/worker.prod.yaml")；请提升该值后重试，未切换 current" 1
+        ;;
+      noop)
+        ;;
+      *)
+        die "worker.prod.yaml 的 tsdb.max_conns 升级结果异常；未切换 current" 1
+        ;;
+    esac
     log "$OMC_ROOT/etc/ 已有实例配置，保留不覆盖（如需覆盖加 --overwrite-etc）"
   fi
 fi

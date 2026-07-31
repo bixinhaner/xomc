@@ -71,58 +71,49 @@ func CalcOpState(params map[string]string) string {
 //
 // Priority:
 //  1. LTE strict path `Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus`
-//  2. For each pool instance, prefer the EPC path and fall back to the legacy
-//     LTE path `...MmePoolConfigParam.{1-16}.MME1Status` when EPC is empty.
+//  2. For each pool instance, prefer the EPC path and fall back across legacy
+//     LTE/MLN variants (`MME1Status` or `MMEStatus`) when EPC is empty.
 //
-// Returns:
-//
-//	""             — no MME status observed
-//	"disconnected" — observed MME statuses are all inactive
-//	"partial"      — 1 active MME
-//	"connected"    — 2+ active MMEs / gateway indicates connected
+// Returns only device-level states: any active MME means connected; all observed
+// MMEs inactive means disconnected. The ambiguous "partial" state is normalized
+// to connected because the device still has a usable core-network connection.
 func CalcMMEStatus(params map[string]string) string {
 	if gatewayStatus := strings.TrimSpace(params["Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus"]); gatewayStatus != "" {
-		switch strings.ToLower(gatewayStatus) {
-		case "1", "true", "connected", "active", "up", "on":
+		if isConnectedMMEStatus(gatewayStatus) || strings.EqualFold(gatewayStatus, "partial") {
 			return "connected"
-		case "partial":
-			return "partial"
-		case "0", "false", "disconnected", "inactive", "down", "off":
-			return "disconnected"
-		default:
-			// Unknown non-empty value: be conservative for UI state.
-			return "disconnected"
 		}
+		return "disconnected"
 	}
 
-	activeCount := 0
 	hasStatus := false
 	for i := 1; i <= 16; i++ {
-		epCPrefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.%d.", i)
-		status := strings.TrimSpace(params[epCPrefix+"MME1Status"])
-		if status == "" {
-			legacyPrefix := fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.%d.", i)
-			status = strings.TrimSpace(params[legacyPrefix+"MME1Status"])
-		}
+		status := firstNonEmpty(
+			params[fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.%d.MME1Status", i)],
+			params[fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.%d.MME1Status", i)],
+			params[fmt.Sprintf("Device.Services.FAPService.CellConfig.LTE.MmePoolConfigParam.%d.MME1Status", i)],
+			params[fmt.Sprintf("Device.Services.FAPService.MmePoolConfigParam.%d.MMEStatus", i)],
+		)
 		if status == "" {
 			continue
 		}
 
 		hasStatus = true
-		if status == "1" {
-			activeCount++
+		if isConnectedMMEStatus(status) {
+			return "connected"
 		}
 	}
-	if !hasStatus {
-		return ""
-	}
-	switch {
-	case activeCount == 0:
+	if hasStatus {
 		return "disconnected"
-	case activeCount < 2:
-		return "partial"
+	}
+	return ""
+}
+
+func isConnectedMMEStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "1", "true", "connected", "active", "up", "on":
+		return true
 	default:
-		return "connected"
+		return false
 	}
 }
 

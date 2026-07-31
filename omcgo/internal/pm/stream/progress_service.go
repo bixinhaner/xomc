@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -44,6 +45,8 @@ type ProgressResult struct {
 }
 
 type PeriodProgress struct {
+	TaskID               uuid.UUID   `json:"task_id"`
+	TaskVersionID        uuid.UUID   `json:"task_version_id"`
 	Granularity          Granularity `json:"granularity"`
 	WindowStart          time.Time   `json:"window_start"`
 	WindowEnd            time.Time   `json:"window_end"`
@@ -53,17 +56,30 @@ type PeriodProgress struct {
 	VersionEffectiveTo   *time.Time  `json:"version_effective_to"`
 	ReceivedSlots        int64       `json:"received_slots"`
 	ExpectedSlots        int64       `json:"expected_slots"`
+	VersionExpectedSlots int64       `json:"version_expected_slots"`
+	CoverageRatio        float64     `json:"coverage_ratio"`
+	VersionSliceComplete bool        `json:"version_slice_complete"`
+	PeriodComplete       bool        `json:"period_complete"`
+	State                string      `json:"state"`
+}
+
+type MetricVersionInterval struct {
+	MetricPath    string     `json:"metric_path"`
+	EffectiveFrom time.Time  `json:"effective_from"`
+	EffectiveTo   *time.Time `json:"effective_to"`
 }
 
 type ProgressQueryResult struct {
-	Rows    []ProgressResult
-	Periods []PeriodProgress
+	Rows            []ProgressResult
+	Periods         []PeriodProgress
+	MetricIntervals []MetricVersionInterval
 }
 
 type ProgressService struct {
-	pool   *pgxpool.Pool
-	store  *RedisWindowStore
-	loader MatchableLoader
+	pool     *pgxpool.Pool
+	store    *RedisWindowStore
+	loader   MatchableLoader
+	timezone calendarfilter.TimezoneProvider
 }
 
 type progressCandidate struct {
@@ -74,6 +90,12 @@ type progressCandidate struct {
 	openedAt  time.Time
 	received  int64
 	expected  int64
+}
+
+type weeklyPreviewCoverage struct {
+	received        int64
+	naturalExpected int64
+	versionExpected int64
 }
 
 const (
@@ -91,6 +113,13 @@ func NewProgressService(
 	return &ProgressService{pool: pool, store: store, loader: loader}
 }
 
+func (s *ProgressService) SetTimezoneProvider(
+	timezone calendarfilter.TimezoneProvider,
+) *ProgressService {
+	s.timezone = timezone
+	return s
+}
+
 func (s *ProgressService) Query(
 	ctx context.Context,
 	taskID uuid.UUID,
@@ -99,10 +128,12 @@ func (s *ProgressService) Query(
 	queryCtx, cancel := context.WithTimeout(ctx, progressQueryTimeout)
 	defer cancel()
 	ctx = queryCtx
-	versions, err := s.loader.LoadMatchable(ctx, time.Now().UTC())
+	now := time.Now().UTC()
+	versions, err := s.loader.LoadMatchable(ctx, now)
 	if err != nil {
 		return ProgressQueryResult{}, fmt.Errorf("load PM aggregation versions for progress: %w", err)
 	}
+	metricIntervals := metricVersionIntervals(versions, taskID)
 	snapshot := BuildTaskSnapshot(versions)
 	builder := storage.Psql.Select(
 		"task_id", "task_version_id", "entity_key", "granularity",
@@ -146,50 +177,14 @@ func (s *ProgressService) Query(
 	if err := rows.Err(); err != nil {
 		return ProgressQueryResult{}, fmt.Errorf("iterate PM progress windows: %w", err)
 	}
-	activeVersions := make(map[string]progressCandidate)
-	for _, item := range candidates {
-		group := progressVersionGroup(item.key)
-		current, exists := activeVersions[group]
-		if !exists || progressVersionAfter(item, current, snapshot) {
-			activeVersions[group] = item
-		}
-	}
-	var out []ProgressResult
-	periods := make(map[string]PeriodProgress)
-	for _, item := range candidates {
-		active := activeVersions[progressVersionGroup(item.key)]
-		if item.key.TaskVersionID != active.key.TaskVersionID {
-			continue
-		}
+	activeCandidates := selectActiveProgressCandidates(candidates, snapshot)
+	states := make(map[WindowKey]WindowState, len(activeCandidates))
+	for _, item := range activeCandidates {
 		if progressStatusUnavailable(item.status) {
 			return ProgressQueryResult{}, fmt.Errorf(
 				"%w: window %s/%s is failed",
 				ErrProgressUnavailable, item.key.Granularity, item.key.Start,
 			)
-		}
-		version := snapshot.ByVersion[item.key.TaskVersionID]
-		expected := naturalExpectedSlots(
-			version, item.key, WindowState{ExpectedSlots: item.expected},
-		)
-		period := PeriodProgress{
-			Granularity: item.key.Granularity,
-			WindowStart: item.key.Start, WindowEnd: item.key.End,
-			EntityKey: item.key.EntityKey, Revision: item.revision,
-			ReceivedSlots: item.received, ExpectedSlots: expected,
-		}
-		if version != nil {
-			period.VersionEffectiveFrom = version.EffectiveFrom
-			period.VersionEffectiveTo = version.EffectiveTo
-		}
-		group := progressVersionGroup(item.key)
-		if current, ok := periods[group]; !ok || lowerProgressCoverage(period, current) {
-			periods[group] = period
-		}
-	}
-	for _, item := range candidates {
-		active := activeVersions[progressVersionGroup(item.key)]
-		if item.key.TaskVersionID != active.key.TaskVersionID {
-			continue
 		}
 		state, err := s.store.Read(ctx, item.key)
 		if err != nil {
@@ -201,22 +196,362 @@ func (s *ProgressService) Query(
 			}
 			return ProgressQueryResult{}, fmt.Errorf("read PM progress window: %w", err)
 		}
+		states[item.key] = state
+	}
+	if err := s.revalidateOpenDailyCandidates(ctx, taskID, activeCandidates); err != nil {
+		return ProgressQueryResult{}, err
+	}
+	location := time.UTC
+	if s.timezone != nil {
+		if configured := s.timezone.Location(ctx); configured != nil {
+			location = configured
+		}
+	}
+	result, err := buildProgressQueryResult(
+		activeCandidates, states, snapshot, location,
+	)
+	if err != nil {
+		return ProgressQueryResult{}, err
+	}
+	result.MetricIntervals = metricIntervals
+	return result, nil
+}
+
+func metricVersionIntervals(
+	versions []*TaskVersionSnapshot,
+	taskID uuid.UUID,
+) []MetricVersionInterval {
+	out := make([]MetricVersionInterval, 0)
+	for _, version := range versions {
+		if version == nil || version.TaskID != taskID || !version.Enabled {
+			continue
+		}
+		for metricPath := range version.Metrics {
+			out = append(out, MetricVersionInterval{
+				MetricPath: metricPath, EffectiveFrom: version.EffectiveFrom,
+				EffectiveTo: version.EffectiveTo,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].MetricPath != out[j].MetricPath {
+			return out[i].MetricPath < out[j].MetricPath
+		}
+		return out[i].EffectiveFrom.Before(out[j].EffectiveFrom)
+	})
+	return out
+}
+
+func (s *ProgressService) revalidateOpenDailyCandidates(
+	ctx context.Context,
+	taskID uuid.UUID,
+	candidates []progressCandidate,
+) error {
+	versionSet := make(map[uuid.UUID]struct{})
+	var minStart, maxEnd time.Time
+	for _, item := range candidates {
+		if item.key.Granularity != GranularityDaily || item.status != "open" {
+			continue
+		}
+		versionSet[item.key.TaskVersionID] = struct{}{}
+		if minStart.IsZero() || item.key.Start.Before(minStart) {
+			minStart = item.key.Start
+		}
+		if maxEnd.IsZero() || item.key.End.After(maxEnd) {
+			maxEnd = item.key.End
+		}
+	}
+	if len(versionSet) == 0 {
+		return nil
+	}
+	versionIDs := make([]uuid.UUID, 0, len(versionSet))
+	for versionID := range versionSet {
+		versionIDs = append(versionIDs, versionID)
+	}
+	query, args, err := storage.Psql.Select(
+		"task_id", "task_version_id", "entity_key", "window_start", "status",
+	).From("pm_aggregation_windows").
+		Where(sq.Eq{
+			"task_id":         taskID,
+			"task_version_id": versionIDs,
+			"granularity":     string(GranularityDaily),
+		}).
+		Where(sq.GtOrEq{"window_start": minStart}).
+		Where(sq.Lt{"window_start": maxEnd}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build PM progress status recheck: %w", err)
+	}
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf(
+			"%w: recheck PM progress window status: %v",
+			ErrProgressUnavailable, err,
+		)
+	}
+	defer rows.Close()
+	statuses := make(map[string]string)
+	for rows.Next() {
+		var key WindowKey
+		var status string
+		if err := rows.Scan(
+			&key.TaskID, &key.TaskVersionID, &key.EntityKey, &key.Start, &status,
+		); err != nil {
+			return fmt.Errorf(
+				"%w: scan PM progress status recheck: %v",
+				ErrProgressUnavailable, err,
+			)
+		}
+		key.Granularity = GranularityDaily
+		statuses[progressCandidateIdentity(key)] = status
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf(
+			"%w: iterate PM progress status recheck: %v",
+			ErrProgressUnavailable, err,
+		)
+	}
+	return validateOpenDailyCandidateStatuses(candidates, statuses)
+}
+
+func progressCandidateIdentity(key WindowKey) string {
+	return fmt.Sprintf(
+		"%s|%s|%s|%d",
+		key.TaskVersionID, key.EntityKey, key.Granularity,
+		key.Start.UTC().UnixNano(),
+	)
+}
+
+func validateOpenDailyCandidateStatuses(
+	candidates []progressCandidate,
+	statuses map[string]string,
+) error {
+	for _, item := range candidates {
+		if item.key.Granularity != GranularityDaily || item.status != "open" {
+			continue
+		}
+		status, ok := statuses[progressCandidateIdentity(item.key)]
+		if !ok || status != "open" {
+			return fmt.Errorf(
+				"%w: daily window changed from open to %q during progress read",
+				ErrProgressUnavailable, status,
+			)
+		}
+	}
+	return nil
+}
+
+func selectActiveProgressCandidates(
+	candidates []progressCandidate,
+	snapshot *TaskSnapshot,
+) []progressCandidate {
+	activeVersions := make(map[string]progressCandidate)
+	for _, item := range candidates {
+		group := progressVersionGroup(item.key)
+		current, exists := activeVersions[group]
+		if !exists || progressVersionAfter(item, current, snapshot) {
+			activeVersions[group] = item
+		}
+	}
+	active := make([]progressCandidate, 0, len(candidates))
+	for _, item := range candidates {
+		selected := activeVersions[progressVersionGroup(item.key)]
+		if item.key.TaskVersionID == selected.key.TaskVersionID {
+			active = append(active, item)
+		}
+	}
+	return active
+}
+
+type weeklyPreviewGroup struct {
+	key       WindowKey
+	dailies   []progressCandidate
+	persisted *progressCandidate
+}
+
+func buildProgressQueryResult(
+	candidates []progressCandidate,
+	states map[WindowKey]WindowState,
+	snapshot *TaskSnapshot,
+	location *time.Location,
+) (ProgressQueryResult, error) {
+	if location == nil {
+		location = time.UTC
+	}
+	candidates = selectActiveProgressCandidates(candidates, snapshot)
+	weeklyGroups := make(map[string]*weeklyPreviewGroup)
+	for index := range candidates {
+		item := candidates[index]
 		version := snapshot.ByVersion[item.key.TaskVersionID]
-		results, err := BuildProgressResults(
-			version, item.key, item.revision, state,
+		if version == nil || !containsGranularity(version.Granularities, GranularityWeekly) {
+			continue
+		}
+		switch item.key.Granularity {
+		case GranularityDaily:
+			// A finalizing daily window may have committed its rollup after this
+			// query read the old status but before Redis states are read. Only
+			// open windows are guaranteed not to exist in the weekly state yet.
+			if item.status != "open" {
+				continue
+			}
+			window, err := WindowFor(item.key.Start, GranularityWeekly, location)
+			if err != nil {
+				return ProgressQueryResult{}, err
+			}
+			weeklyKey := item.key
+			weeklyKey.Granularity, weeklyKey.Start, weeklyKey.End =
+				GranularityWeekly, window.Start, window.End
+			groupKey := progressEntityWindowGroup(weeklyKey)
+			group := weeklyGroups[groupKey]
+			if group == nil {
+				group = &weeklyPreviewGroup{key: weeklyKey}
+				weeklyGroups[groupKey] = group
+			}
+			group.dailies = append(group.dailies, item)
+		case GranularityWeekly:
+			groupKey := progressEntityWindowGroup(item.key)
+			group := weeklyGroups[groupKey]
+			if group == nil {
+				group = &weeklyPreviewGroup{key: item.key}
+				weeklyGroups[groupKey] = group
+			}
+			copy := item
+			group.persisted = &copy
+		}
+	}
+
+	replacedWeekly := make(map[string]struct{})
+	var out []ProgressResult
+	periods := make(map[string]PeriodProgress)
+	weeklyGroupKeys := make([]string, 0, len(weeklyGroups))
+	for key := range weeklyGroups {
+		weeklyGroupKeys = append(weeklyGroupKeys, key)
+	}
+	sort.Strings(weeklyGroupKeys)
+	for _, groupKey := range weeklyGroupKeys {
+		group := weeklyGroups[groupKey]
+		if len(group.dailies) == 0 {
+			continue
+		}
+		version := snapshot.ByVersion[group.key.TaskVersionID]
+		dailyStates := make([]WindowState, 0, len(group.dailies))
+		revision := 0
+		for _, daily := range group.dailies {
+			state, ok := states[daily.key]
+			if !ok {
+				return ProgressQueryResult{}, fmt.Errorf(
+					"%w: state missing for %s/%s",
+					ErrProgressUnavailable, daily.key.Granularity, daily.key.Start,
+				)
+			}
+			dailyStates = append(dailyStates, state)
+			revision = max(revision, daily.revision)
+		}
+		var persistedState WindowState
+		if group.persisted != nil {
+			state, ok := states[group.persisted.key]
+			if !ok {
+				return ProgressQueryResult{}, fmt.Errorf(
+					"%w: state missing for %s/%s",
+					ErrProgressUnavailable,
+					group.persisted.key.Granularity,
+					group.persisted.key.Start,
+				)
+			}
+			persistedState = state
+			revision = max(revision, group.persisted.revision)
+		}
+		key, preview, coverage, err := buildCurrentWeeklyPreviewFromDailies(
+			version, group.dailies[0].key, dailyStates, persistedState, location,
 		)
 		if err != nil {
 			return ProgressQueryResult{}, err
 		}
-		remaining := maxProgressResults - len(out)
-		if remaining <= 0 {
-			break
+		results, err := BuildProgressResults(version, key, revision, preview)
+		if err != nil {
+			return ProgressQueryResult{}, err
 		}
-		if len(results) > remaining {
-			results = results[:remaining]
+		for index := range results {
+			results[index].ReceivedSlots = coverage.received
+			results[index].ExpectedSlots = coverage.naturalExpected
+			results[index].NaturalExpectedSlots = coverage.naturalExpected
+			results[index].VersionExpectedSlots = coverage.versionExpected
 		}
-		out = append(out, results...)
+		out = appendProgressResults(out, results)
+		addProgressPeriod(periods, PeriodProgress{
+			TaskID: key.TaskID, TaskVersionID: key.TaskVersionID,
+			Granularity: GranularityWeekly,
+			WindowStart: key.Start, WindowEnd: key.End,
+			EntityKey: key.EntityKey, Revision: revision,
+			VersionEffectiveFrom: version.EffectiveFrom,
+			VersionEffectiveTo:   version.EffectiveTo,
+			ReceivedSlots:        coverage.received,
+			ExpectedSlots:        coverage.naturalExpected,
+			VersionExpectedSlots: coverage.versionExpected,
+			CoverageRatio: progressCoverageRatio(
+				coverage.received, coverage.naturalExpected,
+			),
+			VersionSliceComplete: coverage.versionExpected > 0 &&
+				coverage.received >= coverage.versionExpected,
+			PeriodComplete: false,
+			State:          "partial",
+		})
+		replacedWeekly[groupKey] = struct{}{}
 	}
+
+	for _, item := range candidates {
+		if item.key.Granularity == GranularityWeekly {
+			if _, replaced := replacedWeekly[progressEntityWindowGroup(item.key)]; replaced {
+				continue
+			}
+		}
+		state, ok := states[item.key]
+		if !ok {
+			return ProgressQueryResult{}, fmt.Errorf(
+				"%w: state missing for %s/%s",
+				ErrProgressUnavailable, item.key.Granularity, item.key.Start,
+			)
+		}
+		version := snapshot.ByVersion[item.key.TaskVersionID]
+		results, err := BuildProgressResults(version, item.key, item.revision, state)
+		if err != nil {
+			return ProgressQueryResult{}, err
+		}
+		out = appendProgressResults(out, results)
+		expected := naturalExpectedSlots(
+			version, item.key, WindowState{ExpectedSlots: item.expected},
+		)
+		period := PeriodProgress{
+			TaskID: item.key.TaskID, TaskVersionID: item.key.TaskVersionID,
+			Granularity: item.key.Granularity,
+			WindowStart: item.key.Start, WindowEnd: item.key.End,
+			EntityKey: item.key.EntityKey, Revision: item.revision,
+			ReceivedSlots: item.received, ExpectedSlots: expected,
+			VersionExpectedSlots: item.expected,
+			CoverageRatio:        progressCoverageRatio(item.received, expected),
+			VersionSliceComplete: item.expected > 0 && item.received >= item.expected,
+			PeriodComplete:       false,
+			State:                "partial",
+		}
+		if version != nil {
+			period.VersionEffectiveFrom = version.EffectiveFrom
+			period.VersionEffectiveTo = version.EffectiveTo
+		}
+		addProgressPeriod(periods, period)
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Granularity != out[j].Granularity {
+			return out[i].Granularity < out[j].Granularity
+		}
+		if !out[i].WindowStart.Equal(out[j].WindowStart) {
+			return out[i].WindowStart.Before(out[j].WindowStart)
+		}
+		if out[i].DimensionKey != out[j].DimensionKey {
+			return out[i].DimensionKey < out[j].DimensionKey
+		}
+		return out[i].MetricPath < out[j].MetricPath
+	})
 	periodList := make([]PeriodProgress, 0, len(periods))
 	for _, period := range periods {
 		periodList = append(periodList, period)
@@ -228,6 +563,45 @@ func (s *ProgressService) Query(
 		return periodList[i].WindowStart.Before(periodList[j].WindowStart)
 	})
 	return ProgressQueryResult{Rows: out, Periods: periodList}, nil
+}
+
+func progressCoverageRatio(received, expected int64) float64 {
+	if expected <= 0 {
+		return 0
+	}
+	return min(1, float64(received)/float64(expected))
+}
+
+func appendProgressResults(
+	current []ProgressResult,
+	incoming []ProgressResult,
+) []ProgressResult {
+	remaining := maxProgressResults - len(current)
+	if remaining <= 0 {
+		return current
+	}
+	if len(incoming) > remaining {
+		incoming = incoming[:remaining]
+	}
+	return append(current, incoming...)
+}
+
+func addProgressPeriod(
+	periods map[string]PeriodProgress,
+	period PeriodProgress,
+) {
+	group := fmt.Sprintf("%s|%d", period.Granularity, period.WindowStart.UTC().UnixNano())
+	if current, ok := periods[group]; !ok || lowerProgressCoverage(period, current) {
+		periods[group] = period
+	}
+}
+
+func progressEntityWindowGroup(key WindowKey) string {
+	return fmt.Sprintf(
+		"%s|%s|%s|%s|%d",
+		key.TaskID, key.TaskVersionID, key.EntityKey,
+		key.Granularity, key.Start.UTC().UnixNano(),
+	)
 }
 
 func lowerProgressCoverage(left, right PeriodProgress) bool {
@@ -271,6 +645,108 @@ func candidateEffectiveFrom(item progressCandidate, snapshot *TaskSnapshot) time
 		}
 	}
 	return item.openedAt
+}
+
+func buildCurrentWeeklyPreview(
+	version *TaskVersionSnapshot,
+	dailyKey WindowKey,
+	dailyState WindowState,
+	weeklyState WindowState,
+	location *time.Location,
+) (WindowKey, WindowState, weeklyPreviewCoverage, error) {
+	return buildCurrentWeeklyPreviewFromDailies(
+		version, dailyKey, []WindowState{dailyState}, weeklyState, location,
+	)
+}
+
+func buildCurrentWeeklyPreviewFromDailies(
+	version *TaskVersionSnapshot,
+	dailyKey WindowKey,
+	dailyStates []WindowState,
+	weeklyState WindowState,
+	location *time.Location,
+) (WindowKey, WindowState, weeklyPreviewCoverage, error) {
+	if version == nil {
+		return WindowKey{}, WindowState{}, weeklyPreviewCoverage{},
+			fmt.Errorf("PM aggregation task version snapshot missing")
+	}
+	if location == nil {
+		location = time.UTC
+	}
+	window, err := WindowFor(dailyKey.Start, GranularityWeekly, location)
+	if err != nil {
+		return WindowKey{}, WindowState{}, weeklyPreviewCoverage{}, err
+	}
+	key := WindowKey{
+		TaskID: dailyKey.TaskID, TaskVersionID: dailyKey.TaskVersionID,
+		EntityKey: dailyKey.EntityKey, Granularity: GranularityWeekly,
+		Start: window.Start, End: window.End,
+	}
+
+	accumulatorCapacity := len(weeklyState.Accumulators)
+	for _, dailyState := range dailyStates {
+		accumulatorCapacity += len(dailyState.Accumulators)
+	}
+	accumulators := make(map[string]*Accumulator, accumulatorCapacity)
+	merge := func(items []Accumulator) error {
+		for _, incoming := range items {
+			id, err := accumulatorDefinitionID(incoming.Definition)
+			if err != nil {
+				return fmt.Errorf("identify PM weekly preview accumulator: %w", err)
+			}
+			current := accumulators[id]
+			if current == nil {
+				copy := incoming
+				accumulators[id] = &copy
+				continue
+			}
+			if incoming.Count <= 0 {
+				continue
+			}
+			if current.Count <= 0 {
+				current.Min, current.Max = incoming.Min, incoming.Max
+			} else {
+				current.Min = min(current.Min, incoming.Min)
+				current.Max = max(current.Max, incoming.Max)
+			}
+			current.Sum += incoming.Sum
+			current.Count += incoming.Count
+		}
+		return nil
+	}
+	if err := merge(weeklyState.Accumulators); err != nil {
+		return WindowKey{}, WindowState{}, weeklyPreviewCoverage{}, err
+	}
+	var dailyReceived int64
+	for _, dailyState := range dailyStates {
+		if err := merge(dailyState.Accumulators); err != nil {
+			return WindowKey{}, WindowState{}, weeklyPreviewCoverage{}, err
+		}
+		dailyReceived += dailyState.ReceivedSlots
+	}
+
+	ids := make([]string, 0, len(accumulators))
+	for id := range accumulators {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	preview := WindowState{
+		Accumulators: make([]Accumulator, 0, len(ids)),
+	}
+	for _, id := range ids {
+		preview.Accumulators = append(preview.Accumulators, *accumulators[id])
+	}
+
+	coverage := weeklyPreviewCoverage{
+		received:        weeklyState.ReceivedSlots*24 + dailyReceived,
+		naturalExpected: 7 * 24,
+		versionExpected: expectedVersionChildWindows(
+			window, GranularityHourly, version, location,
+		),
+	}
+	preview.ReceivedSlots = coverage.received
+	preview.ExpectedSlots = coverage.versionExpected
+	return key, preview, coverage, nil
 }
 
 func BuildProgressResults(

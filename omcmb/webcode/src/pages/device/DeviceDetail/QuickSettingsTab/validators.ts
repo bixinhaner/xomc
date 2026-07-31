@@ -268,19 +268,27 @@ export function serializeBscCodecSupportValue(value: unknown): string {
 }
 
 function toParameterType(type?: string | null): ParameterType | null {
-  if (String(type ?? '').trim() === 'multiCheckbox') {
+  const normalized = String(type ?? '').trim();
+  if (normalized === 'multiCheckbox') {
     return 'string';
   }
-  switch (String(type ?? '').trim()) {
+  switch (normalized.toLowerCase()) {
     case 'string':
+      return 'string';
     case 'int':
-    case 'unsignedInt':
+      return 'int';
+    case 'unsignedint':
+      return 'unsignedInt';
     case 'boolean':
-    case 'dateTime':
+      return 'boolean';
+    case 'datetime':
+      return 'dateTime';
     case 'base64':
-    case 'hexBinary':
+      return 'base64';
+    case 'hexbinary':
+      return 'hexBinary';
     case 'object':
-      return String(type).trim() as ParameterType;
+      return 'object';
     default:
       return null;
   }

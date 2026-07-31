@@ -41,12 +41,13 @@ func AssembleMMEPool(params []model.DeviceParameter) []MMEEntry {
 			grouped[idx] = &mmeRaw{}
 		}
 		switch {
-		case strings.HasSuffix(field, "MME1Status"):
+		case strings.HasSuffix(field, "MME1Status") || strings.HasSuffix(field, "MMEStatus"):
 			grouped[idx].status = p.ParameterValue
 		// MMEIp1 / MMEIp2: Baicells BaiBLQ 等设备实际上报路径
 		//   Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.{N}.MMEIp1
 		// MME1Address / MME1IP: 部分设备/早期固件使用的路径（保留向后兼容）
 		case strings.HasSuffix(field, "MMEIp1") ||
+			strings.HasSuffix(field, "MMEIp") ||
 			strings.HasSuffix(field, "MME1Address") ||
 			strings.HasSuffix(field, "MME1IP"):
 			grouped[idx].ip = p.ParameterValue

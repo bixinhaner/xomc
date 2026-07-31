@@ -130,24 +130,30 @@ export function buildDashboardKPIWindow(
 ): DashboardKPIWindow {
   const current = dashboardNow(now, systemTimezone);
   let end;
+  let bucketEnd;
   let count;
   let unit: 'hour' | 'day' | 'week';
 
   if (granularity === 'hourly') {
     end = current.startOf('hour');
+    bucketEnd = end;
     count = 24;
     unit = 'hour';
   } else if (granularity === 'daily') {
-    end = current.startOf('day');
+    bucketEnd = current.startOf('day');
+    end = current;
     count = 30;
     unit = 'day';
   } else {
     const weekday = current.day() || 7;
-    end = current.subtract(weekday - 1, 'day').startOf('day');
+    bucketEnd = current.subtract(weekday - 1, 'day').startOf('day');
+    end = current;
     count = 12;
     unit = 'week';
   }
-  const start = end.subtract(count, unit);
+  const start = granularity === 'hourly'
+    ? bucketEnd.subtract(count, unit)
+    : bucketEnd.subtract(count - 1, unit);
 
   return {
     start_time: start.format(),
@@ -344,14 +350,32 @@ export function useDashboardKPIWindowSeries(
     queryKey: ['dashboard', 'kpi-window-series', kpiNames, granularity, technology, systemTimezone],
     queryFn: async () => {
       const window = buildDashboardKPIWindow(new Date(), granularity, systemTimezone);
-      const raw = await api.getKPITimeSeries(
+      if (granularity === 'hourly') {
+        const raw = await api.getKPITimeSeries(
+          kpiNames,
+          window.start_time,
+          window.end_time,
+          granularity,
+          technology,
+        );
+        return {
+          raw, window, periodProgress: [],
+          progressState: 'not_applicable' as const,
+        };
+      }
+      const snapshot = await api.getKPITimeSeriesWithProgress(
         kpiNames,
         window.start_time,
         window.end_time,
         granularity,
         technology,
       );
-      return { raw, window };
+      return {
+        raw: snapshot.series,
+        window,
+        periodProgress: snapshot.periodProgress,
+        progressState: snapshot.progressState,
+      };
     },
     enabled: enabled
       && kpiNames.length > 0
@@ -375,6 +399,8 @@ export function useDashboardKPIWindowSeries(
   return {
     data,
     window: query.data?.window,
+    periodProgress: query.data?.periodProgress,
+    progressState: query.data?.progressState,
     isLoading: query.isLoading,
     error: query.error,
   };

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BLN paramModel 快速设置。
+  以 BM 快速设置为初始模板，仅保留 BLN.xml 字典中实际存在的 standardPath。
+-->
+<quickSettings paramModel="BLN">
+  <group id="enb-cell" titleZh="小区参数" titleEn="Cell Parameters">
+    <param name="BandIndicator" titleZh="频段标识" titleEn="Band"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator"/>
+    <param name="DLBandWidth" titleZh="带宽" titleEn="Bandwidth"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"/>
+    <param name="DLEarfcn" titleZh="频点" titleEn="EARFCN"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL"/>
+    <param name="ULEarfcn" titleZh="频点(UL)" titleEn="EARFCN UL"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL"/>
+    <param name="PCI" titleZh="PCI" titleEn="PCI"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID"/>
+    <param name="ECI" titleZh="ECI" titleEn="ECI(ECI=eNB_ID*256+Cell_ID)"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity"/>
+    <param name="CellName" titleZh="小区名称" titleEn="Cell Name"
+           standardPath="Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName"/>
+    <param name="TAC" titleZh="TAC" titleEn="TAC"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC"/>
+    <param name="AntennaPortsCount" titleZh="天线端口数" titleEn="Antenna Ports"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount"/>
+    <param name="MaxTxPower" titleZh="最大发射功率" titleEn="Max Tx Power"
+           standardPath="Device.Services.FAPService.{i}.Capabilities.MaxTxPower"/>
+    <param name="PowerClass" titleZh="发射功率(dBm)" titleEn="Transmission Power(dBm)"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded"/>
+    <param name="ReferenceSignalPower" titleZh="参考信号功率" titleEn="Reference Signal Power"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower"/>
+    <param name="BandSupport" titleZh="频段支持" titleEn="Band Support"
+           standardPath="Device.Services.FAPService.{i}.Capabilities.LTE.BandsSupported"/>
+    <param name="SubFrameAssignment" titleZh="子帧配比" titleEn="SubFrame Assignment"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment"/>
+    <param name="SpecialSubFramePatterns" titleZh="特殊子帧配置" titleEn="Special SubFrame Patterns"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns"/>
+    <param name="RootSequenceIndex" titleZh="根序列索引" titleEn="Root Sequence Index"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex"/>
+  </group>
+  <group id="enb-plmn" titleZh="服务 PLMN 列表" titleEn="Serving PLMN List">
+    <param name="ExistPlmnidList" titleZh="服务 PLMN 列表" titleEn="Serving PLMN List"
+           standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.ExistPlmnidList"
+           maxValue="6"/>
+  </group>
+  <group id="device-ipsec" titleZh="IPSec 参数" titleEn="IPSec Settings"
+         multiInstance="true" maxInstances="4"
+         objectPath="Device.FAP.Ipsec.{i}.">
+    <param name="TUNNEL_ENABLE" titleZh="TunnelEnable" titleEn="Tunnel Enable" leaf="TUNNEL_ENABLE"/>
+    <param name="TUNNEL_GATEWAY" titleZh="网关地址" titleEn="Gateway" leaf="TUNNEL_GATEWAY"/>
+    <param name="LEFT_AUTH" titleZh="leftAuth" titleEn="Left Auth" leaf="LEFT_AUTH"/>
+    <param name="RIGHT_AUTH" titleZh="rightAuth" titleEn="Right Auth" leaf="RIGHT_AUTH"/>
+    <param name="LEFT_IDENTIFIER" titleZh="leftId" titleEn="Left ID" leaf="LEFT_IDENTIFIER"/>
+    <param name="RIGHT_IDENTIFIER" titleZh="rightId" titleEn="Right ID" leaf="RIGHT_IDENTIFIER"/>
+    <param name="LEFTSOURCEIP" titleZh="leftSourceIp" titleEn="Left Source IP" leaf="LEFTSOURCEIP"/>
+    <param name="LEFT_SUBNET" titleZh="leftSubnet" titleEn="Left Subnet" leaf="LEFT_SUBNET"/>
+    <param name="RIGHT_SUBNET" titleZh="Right Subnet" titleEn="Right Subnet" leaf="RIGHT_SUBNET"/>
+    <param name="FRAGMENTATION" titleZh="fragmentation" titleEn="Fragmentation" leaf="FRAGMENTATION"/>
+    <param name="IKE_ENCRYPTION" titleZh="IKE Encryption" titleEn="IKE Encryption" leaf="IKE_ENCRYPTION"/>
+    <param name="IKE_DH_GROUP" titleZh="IKE DH Group" titleEn="IKE DH Group" leaf="IKE_DH_GROUP"/>
+    <param name="IKE_AUTHENTICATION" titleZh="IKE Authentication" titleEn="IKE Authentication" leaf="IKE_AUTHENTICATION"/>
+    <param name="ESP_ENCRYPTION" titleZh="ESP Encryption" titleEn="ESP Encryption" leaf="ESP_ENCRYPTION"/>
+    <param name="ESP_DH_GROUP" titleZh="ESP DH Group" titleEn="ESP DH Group" leaf="ESP_DH_GROUP"/>
+    <param name="ESP_AUTHENTICATION" titleZh="ESP Authentication" titleEn="ESP Authentication" leaf="ESP_AUTHENTICATION"/>
+    <param name="KEYLIFE" titleZh="KeyLife" titleEn="Key Life" leaf="KEYLIFE"/>
+    <param name="IKELIFETIME" titleZh="IKELifeTime" titleEn="IKE Lifetime" leaf="IKELIFETIME"/>
+    <param name="REKEYMARGIN" titleZh="RekeyMargin" titleEn="Rekey Margin" leaf="REKEYMARGIN"/>
+    <param name="DPDACTION" titleZh="Dpdaction" titleEn="DPD Action" leaf="DPDACTION"/>
+    <param name="DPDDELAY" titleZh="Dpddelay" titleEn="DPD Delay" leaf="DPDDELAY"/>
+  </group>
+  <group id="enb-neighbor-freq" titleZh="异频载波列表" titleEn="Inter-Frequency Carrier List"
+         multiInstance="true" maxInstances="8"
+         objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.">
+    <param name="EARFCN" titleZh="频点" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
+    <param name="QOffsetRange" titleZh="频点偏移" titleEn="Q-OffsetRange" leaf="QOffsetFreq"/>
+    <param name="qRxLevMinSib5" titleZh="最小接收电平" titleEn="qRxLevMinSIB5" leaf="QRxLevMinSIB5"
+           type="int" minValue="-70" maxValue="-22"/>
+    <param name="PMax" titleZh="最大发射功率" titleEn="PMax" leaf="PMax"/>
+    <param name="tReselectionEutra" titleZh="重选定时器" titleEn="tReselectionEutra" leaf="TReselectionEUTRA"/>
+    <param name="ReselThreshHigh" titleZh="重选高门限" titleEn="Resel Thresh High" leaf="ThreshXHigh"/>
+    <param name="ReselThreshLow" titleZh="重选低门限" titleEn="Resel Thresh Low" leaf="ThreshXLow"/>
+    <param name="ReselectionPriority" titleZh="重选优先级" titleEn="Reselection Priority" leaf="CellReselectionPriority"/>
+  </group>
+  <group id="enb-neighbor-cell" titleZh="邻区列表" titleEn="Neighbor Cell List"
+         multiInstance="true" maxInstances="32"
+         objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.">
+    <param name="CellID" titleZh="小区ID" titleEn="Cell ID" leaf="CID"/>
+    <param name="PLMN" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
+    <param name="EARFCN" titleZh="频点" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
+    <param name="PCI" titleZh="PCI" titleEn="PCI" leaf="PhyCellID"/>
+    <param name="QOffset" titleZh="QOffset" titleEn="QOffset" leaf="QOffset"/>
+    <param name="CIO" titleZh="CIO" titleEn="CIO" leaf="CIO"/>
+    <param name="TAC" titleZh="TAC" titleEn="TAC" leaf="TAC"/>
+    <param name="EnbType" titleZh="基站类型" titleEn="ENB Type" leaf="EnbType"/>
+  </group>
+</quickSettings>

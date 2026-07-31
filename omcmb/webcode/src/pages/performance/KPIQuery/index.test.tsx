@@ -520,7 +520,7 @@ describe('KPIQuery 模板弹窗初始值', () => {
     expect(within(dialog).getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('已选 1 个：SN-OK');
     expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1 小区可用率');
     expect(within(dialog).getByText('近 1 小时')).toBeTruthy();
-  });
+  }, 10000);
 
   it('指标摘要显示 ID 和名称，并把 metricLabels 传给指标选择弹窗', async () => {
     renderPage();

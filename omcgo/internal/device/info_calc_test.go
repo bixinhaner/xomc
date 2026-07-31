@@ -256,11 +256,11 @@ func TestCalcMMEStatus(t *testing.T) {
 			want:   "",
 		},
 		{
-			name: "BLQ legacy LTE path returns partial",
+			name: "BLQ legacy LTE path with all observed MME active returns connected",
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status": "1",
 			},
-			want: "partial",
+			want: "connected",
 		},
 		{
 			name: "EPC and legacy paths for one instance count once",
@@ -268,7 +268,7 @@ func TestCalcMMEStatus(t *testing.T) {
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
 				"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status":     "1",
 			},
-			want: "partial",
+			want: "connected",
 		},
 		{
 			name: "empty EPC placeholder falls back to legacy LTE path",
@@ -276,14 +276,14 @@ func TestCalcMMEStatus(t *testing.T) {
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": " ",
 				"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status":     "1",
 			},
-			want: "partial",
+			want: "connected",
 		},
 		{
-			name: "fallback one active MME",
+			name: "fallback one configured active MME",
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
 			},
-			want: "partial",
+			want: "connected",
 		},
 		{
 			name: "fallback two active MMEs",
@@ -294,7 +294,7 @@ func TestCalcMMEStatus(t *testing.T) {
 			want: "connected",
 		},
 		{
-			name: "fallback mixed active and inactive",
+			name: "fallback mixed active and inactive is connected when any MME is active",
 			params: map[string]string{
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
 				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.2.MME1Status": "0",
@@ -302,12 +302,36 @@ func TestCalcMMEStatus(t *testing.T) {
 			},
 			want: "connected",
 		},
+		{
+			name: "MLN pool path is connected when any MME is active",
+			params: map[string]string{
+				"Device.Services.FAPService.MmePoolConfigParam.1.MMEStatus": "0",
+				"Device.Services.FAPService.MmePoolConfigParam.2.MMEStatus": "1",
+			},
+			want: "connected",
+		},
+		{
+			name: "MLN pool path is disconnected when all MMEs are inactive",
+			params: map[string]string{
+				"Device.Services.FAPService.MmePoolConfigParam.1.MMEStatus": "0",
+				"Device.Services.FAPService.MmePoolConfigParam.2.MMEStatus": "0",
+			},
+			want: "disconnected",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, CalcMMEStatus(tt.params))
 		})
 	}
+}
+
+func TestCalcMMEStatus_GatewayPartialNormalizesToConnected(t *testing.T) {
+	params := map[string]string{
+		"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "partial",
+	}
+
+	assert.Equal(t, "connected", CalcMMEStatus(params))
 }
 
 func TestCalcCoreNetworkStatusByTechnology(t *testing.T) {

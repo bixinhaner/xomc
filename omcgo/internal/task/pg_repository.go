@@ -854,6 +854,36 @@ func (r *PgTaskRepository) LatestOpenByDeviceMethodDescription(
 	return taskItem, nil
 }
 
+// LatestCompletedByDeviceCommandKey returns the newest successful execution of
+// one idempotent system command. PM online setup uses it to avoid re-applying an
+// unchanged configuration after every rolling deployment or transient reconnect.
+func (r *PgTaskRepository) LatestCompletedByDeviceCommandKey(
+	ctx context.Context,
+	deviceSN, commandKey string,
+) (*Task, error) {
+	query, args, err := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.Eq{
+			"device_sn":   deviceSN,
+			"command_key": commandKey,
+			"status":      TaskStatusCompleted,
+		}).
+		OrderBy("completed_at DESC", "created_at DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build latest completed task query: %w", err)
+	}
+	taskItem, err := r.scanTaskRow(r.pool.QueryRow(ctx, query, args...))
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query latest completed task: %w", err)
+	}
+	return taskItem, nil
+}
+
 // defaultPendingBatchLimit 是 ListPendingAllDevices 在调用方未给上界（limit<=0）时
 // 的兜底批大小。百万设备下 device_tasks 的 pending 行可能极多，一次性 SELECT 全量
 // 入内存会 OOM（#11）。RestorePendingQueues 走 ListPendingPage 流式分批恢复，本兜底

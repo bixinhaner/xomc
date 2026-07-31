@@ -45,7 +45,13 @@ export function DashboardKPIModules({
 
   // 汇总当前制式所有图要画的指标，整页每次只发一个对应粒度的批量请求。
   const metrics = useMemo(() => collectMetrics(layout.panels), [layout.panels]);
-  const { data: trendData, isLoading, window } = useDashboardKPIWindowSeries(
+  const {
+    data: trendData,
+    isLoading,
+    window,
+    periodProgress,
+    progressState,
+  } = useDashboardKPIWindowSeries(
     metrics,
     granularity,
     metrics.length > 0,
@@ -90,6 +96,8 @@ export function DashboardKPIModules({
               isLoading={isLoading}
               granularity={granularity}
               bucketKeys={window?.bucketKeys ?? []}
+              periodProgress={periodProgress}
+              progressState={progressState}
               onGranularityChange={setGranularity}
               height={280}
             />

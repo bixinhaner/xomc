@@ -58,6 +58,19 @@ func TestAssembleMMEPool_MMEIp1Path(t *testing.T) {
 	assert.Equal(t, "46068", entries[0].PLMNID)
 }
 
+func TestAssembleMMEPool_MLNPath(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.MmePoolConfigParam.1.MMEStatus", ParameterValue: "1"},
+		{ParameterPath: "Device.Services.FAPService.MmePoolConfigParam.1.MMEIp", ParameterValue: "172.24.224.88"},
+	}
+
+	entries := AssembleMMEPool(params)
+
+	assert.Len(t, entries, 1)
+	assert.Equal(t, "active", entries[0].Status)
+	assert.Equal(t, "172.24.224.88", entries[0].IP)
+}
+
 func TestAssembleLicenseDetail(t *testing.T) {
 	params := []model.DeviceParameter{
 		{ParameterPath: "Device.DeviceInfo.X_COM_LICENSE.LicenseCode", ParameterValue: "ABC-123"},

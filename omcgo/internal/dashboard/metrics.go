@@ -51,7 +51,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}, []string{"endpoint"}),
 		missing: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "dashboard_kpi_missing_result_total",
-			Help: "Missing Dashboard network rollup results.",
+			Help: "Missing Dashboard final published network rollup results.",
 		}, []string{"technology", "granularity"}),
 		incomplete: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "dashboard_kpi_incomplete_window_total",

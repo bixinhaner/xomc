@@ -461,6 +461,33 @@ export interface KPITimeSeriesParams {
 
 export type DashboardKPIGranularity = 'hourly' | 'daily' | 'weekly';
 
+export type DashboardProgressState = 'available' | 'unavailable' | 'not_applicable';
+
+export interface DashboardPeriodProgress {
+  taskId: string;
+  taskVersionId: string;
+  granularity: DashboardKPIGranularity;
+  windowStart: string;
+  windowEnd: string;
+  entityKey: string;
+  revision: number;
+  versionEffectiveFrom: string;
+  versionEffectiveTo: string | null;
+  receivedSlots: number;
+  expectedSlots: number;
+  versionExpectedSlots: number;
+  coverageRatio: number;
+  versionSliceComplete: boolean;
+  periodComplete: boolean;
+  state: 'partial';
+}
+
+export interface DashboardKPITimeSeriesSnapshot {
+  series: Record<string, Array<[string, number]>>;
+  periodProgress: DashboardPeriodProgress[];
+  progressState: DashboardProgressState;
+}
+
 /**
  * 时间范围计算结果（内部使用）
  */

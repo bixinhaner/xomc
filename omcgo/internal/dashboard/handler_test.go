@@ -2,15 +2,18 @@ package dashboard
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -210,6 +213,63 @@ func TestDashHandler_KPITimeSeries_RejectsNonIncreasingWindow(t *testing.T) {
 	w := dashHDoRequest(router, http.MethodGet,
 		"/api/v1/dashboard/kpi-time-series?kpi_names=rrc&start_time=2026-07-13T00:00:00Z&end_time=2026-07-13T00:00:00Z")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDashHandler_KPITimeSeriesPartialIsExplicitlyOptIn(t *testing.T) {
+	start := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			Rows: []pmstream.ProgressResult{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: start, WindowEnd: end,
+				Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
+				MetricPath: "K1", MetricType: "kpi", Value: 42, Partial: true,
+			}},
+			Periods: []pmstream.PeriodProgress{{
+				Granularity: pmstream.GranularityDaily,
+				WindowStart: start, WindowEnd: end, EntityKey: "network",
+				ReceivedSlots: 4, ExpectedSlots: 24,
+			}},
+		},
+	})
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	NewHandler(service, nil).RegisterRoutes(router.Group("/api/v1"))
+	basePath := "/api/v1/dashboard/kpi-time-series" +
+		"?kpi_names=K1&technology=lte&granularity=daily" +
+		"&start_time=2026-07-31T00:00:00Z&end_time=2026-08-01T00:00:00Z"
+
+	partial := dashHDoRequest(router, http.MethodGet, basePath+"&include_partial=true")
+	require.Equal(t, http.StatusOK, partial.Code)
+	var partialEnvelope struct {
+		Data struct {
+			Series         map[string][]KPITimeSeriesEntry `json:"series"`
+			PeriodProgress []pmstream.PeriodProgress       `json:"period_progress"`
+			ProgressState  string                          `json:"progress_state"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(partial.Body.Bytes(), &partialEnvelope))
+	require.Equal(t, "available", partialEnvelope.Data.ProgressState)
+	require.Len(t, partialEnvelope.Data.Series["K1"], 1)
+	require.True(t, partialEnvelope.Data.Series["K1"][0].Partial)
+	require.Len(t, partialEnvelope.Data.PeriodProgress, 1)
+
+	legacy := dashHDoRequest(router, http.MethodGet, basePath)
+	require.Equal(t, http.StatusOK, legacy.Code)
+	var legacyEnvelope struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(legacy.Body.Bytes(), &legacyEnvelope))
+	require.Contains(t, legacyEnvelope.Data, "K1")
+	require.NotContains(t, legacyEnvelope.Data, "series")
+	require.NotContains(t, legacyEnvelope.Data, "progress_state")
 }
 
 func TestParseDashboardKPIGranularity(t *testing.T) {

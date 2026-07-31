@@ -403,7 +403,7 @@ export const useMmlConsoleStore = create<MmlConsoleState>((set, get) => ({
           // 注意：syncSource 保持 'text'，让 UI 订阅者据此重渲染 sub-field 控件
           syncSource: 'text',
         });
-      } catch (e) {
+      } catch {
         // 网络错误：保留旧 statements，清 pending；UI 层 React Query mutation
         // onError 路径已 toast 提示
         set({ parsePending: false, parseDebounceTimer: null });
