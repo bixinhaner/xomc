@@ -2,7 +2,9 @@ package stream
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -12,6 +14,15 @@ import (
 
 type MatchableLoader interface {
 	LoadMatchable(ctx context.Context, at time.Time) ([]*TaskVersionSnapshot, error)
+}
+
+type MatchableRevision struct {
+	TaskCount int64
+	UpdatedAt time.Time
+}
+
+type MatchableRevisionLoader interface {
+	LoadMatchableRevision(ctx context.Context) (MatchableRevision, error)
 }
 
 type TaskSnapshot struct {
@@ -24,13 +35,23 @@ type SnapshotStore struct {
 	loader MatchableLoader
 	value  atomic.Pointer[TaskSnapshot]
 	logger *zap.Logger
+	now    func() time.Time
+
+	reloadMu     sync.Mutex
+	versions     []*TaskVersionSnapshot
+	revision     MatchableRevision
+	initialized  bool
+	nextBoundary time.Time
 }
 
 func NewSnapshotStore(loader MatchableLoader, logger *zap.Logger) *SnapshotStore {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	store := &SnapshotStore{loader: loader, logger: logger}
+	store := &SnapshotStore{
+		loader: loader, logger: logger,
+		now: func() time.Time { return time.Now().UTC() },
+	}
 	store.value.Store(&TaskSnapshot{
 		LoadedAt:  time.Now().UTC(),
 		ByDevice:  map[uuid.UUID][]*TaskVersionSnapshot{},
@@ -40,15 +61,102 @@ func NewSnapshotStore(loader MatchableLoader, logger *zap.Logger) *SnapshotStore
 }
 
 func (s *SnapshotStore) Reload(ctx context.Context) error {
-	now := time.Now().UTC()
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	return s.reloadLocked(ctx, nil)
+}
+
+func (s *SnapshotStore) Refresh(ctx context.Context) error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	revisionLoader, ok := s.loader.(MatchableRevisionLoader)
+	if !ok {
+		return s.reloadLocked(ctx, nil)
+	}
+	revision, err := revisionLoader.LoadMatchableRevision(ctx)
+	if err != nil {
+		return fmt.Errorf("load PM aggregation task revision: %w", err)
+	}
+	now := s.now()
+	if s.initialized && revision == s.revision {
+		if s.nextBoundary.IsZero() || now.Before(s.nextBoundary) {
+			return nil
+		}
+		s.publishCached(now)
+		return nil
+	}
+	return s.reloadLocked(ctx, &revision)
+}
+
+func (s *SnapshotStore) reloadLocked(
+	ctx context.Context,
+	knownRevision *MatchableRevision,
+) error {
+	var revision MatchableRevision
+	if revisionLoader, ok := s.loader.(MatchableRevisionLoader); ok {
+		if knownRevision != nil {
+			revision = *knownRevision
+		} else {
+			loaded, err := revisionLoader.LoadMatchableRevision(ctx)
+			if err != nil {
+				return fmt.Errorf("load PM aggregation task revision: %w", err)
+			}
+			revision = loaded
+		}
+	}
+	now := s.now()
 	versions, err := s.loader.LoadMatchable(ctx, now)
 	if err != nil {
-		return err
+		return fmt.Errorf("load matchable PM aggregation tasks: %w", err)
 	}
+	s.versions = versions
+	s.revision = revision
+	s.initialized = true
+	s.publishCached(now)
+	return nil
+}
+
+func (s *SnapshotStore) publishCached(now time.Time) {
+	versions, nextBoundary := snapshotVersionsAt(s.versions, now)
 	next := BuildTaskSnapshot(versions)
 	next.LoadedAt = now
 	s.value.Store(next)
-	return nil
+	s.nextBoundary = nextBoundary
+}
+
+const matchableVersionHistory = 45 * 24 * time.Hour
+
+func snapshotVersionsAt(
+	versions []*TaskVersionSnapshot,
+	now time.Time,
+) ([]*TaskVersionSnapshot, time.Time) {
+	cutoff := now.Add(-matchableVersionHistory)
+	filtered := make([]*TaskVersionSnapshot, 0, len(versions))
+	var nextBoundary time.Time
+	addBoundary := func(candidate time.Time) {
+		if !candidate.After(now) {
+			return
+		}
+		if nextBoundary.IsZero() || candidate.Before(nextBoundary) {
+			nextBoundary = candidate
+		}
+	}
+	for _, source := range versions {
+		if source == nil {
+			continue
+		}
+		if source.EffectiveTo != nil && source.EffectiveTo.Before(cutoff) {
+			continue
+		}
+		clone := *source
+		filtered = append(filtered, &clone)
+		addBoundary(source.EffectiveFrom)
+		if source.EffectiveTo != nil {
+			addBoundary(*source.EffectiveTo)
+			addBoundary(source.EffectiveTo.Add(matchableVersionHistory))
+		}
+	}
+	return filtered, nextBoundary
 }
 
 func BuildTaskSnapshot(versions []*TaskVersionSnapshot) *TaskSnapshot {

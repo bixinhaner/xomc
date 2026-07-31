@@ -1,12 +1,252 @@
 package stream
 
 import (
+	"context"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
+
+type revisionMatchableLoader struct {
+	mu            sync.Mutex
+	revision      MatchableRevision
+	versions      []*TaskVersionSnapshot
+	loadCount     int
+	revisionCount int
+	loadErr       error
+	revisionErr   error
+}
+
+func (l *revisionMatchableLoader) LoadMatchable(
+	context.Context,
+	time.Time,
+) ([]*TaskVersionSnapshot, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.loadCount++
+	return l.versions, l.loadErr
+}
+
+func (l *revisionMatchableLoader) LoadMatchableRevision(
+	context.Context,
+) (MatchableRevision, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.revisionCount++
+	return l.revision, l.revisionErr
+}
+
+func (l *revisionMatchableLoader) setRevision(revision MatchableRevision) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.revision = revision
+}
+
+func (l *revisionMatchableLoader) setVersions(versions []*TaskVersionSnapshot) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.versions = versions
+}
+
+func (l *revisionMatchableLoader) setErrors(loadErr, revisionErr error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.loadErr = loadErr
+	l.revisionErr = revisionErr
+}
+
+func (l *revisionMatchableLoader) counts() (int, int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.loadCount, l.revisionCount
+}
+
+func snapshotTestVersion() *TaskVersionSnapshot {
+	return &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		EffectiveFrom: time.Now().UTC().Add(-time.Hour),
+		Metrics:       map[string]MetricRule{},
+		Counters:      map[string]CounterRule{},
+		Members:       map[uuid.UUID][]TaskMember{},
+	}
+}
+
+func TestSnapshotRefreshSkipsFullLoadWhenRevisionIsUnchanged(t *testing.T) {
+	loader := &revisionMatchableLoader{
+		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
+	}
+	store := NewSnapshotStore(loader, nil)
+
+	require.NoError(t, store.Refresh(context.Background()))
+	first := store.Current()
+	require.NoError(t, store.Refresh(context.Background()))
+
+	loadCount, revisionCount := loader.counts()
+	require.Equal(t, 1, loadCount)
+	require.Equal(t, 2, revisionCount)
+	require.Same(t, first, store.Current(), "unchanged refresh must reuse the published snapshot")
+}
+
+func TestSnapshotRefreshReloadsAfterRevisionChanges(t *testing.T) {
+	firstVersion := snapshotTestVersion()
+	loader := &revisionMatchableLoader{
+		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		versions: []*TaskVersionSnapshot{firstVersion},
+	}
+	store := NewSnapshotStore(loader, nil)
+	require.NoError(t, store.Refresh(context.Background()))
+
+	secondVersion := snapshotTestVersion()
+	loader.setRevision(MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(2, 0)})
+	loader.setVersions([]*TaskVersionSnapshot{secondVersion})
+	require.NoError(t, store.Refresh(context.Background()))
+
+	loadCount, _ := loader.counts()
+	require.Equal(t, 2, loadCount)
+	require.NotContains(t, store.Current().ByVersion, firstVersion.VersionID)
+	require.Contains(t, store.Current().ByVersion, secondVersion.VersionID)
+}
+
+func TestSnapshotRefreshRevisionFailurePreservesLastGoodSnapshot(t *testing.T) {
+	loader := &revisionMatchableLoader{
+		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
+	}
+	store := NewSnapshotStore(loader, nil)
+	require.NoError(t, store.Refresh(context.Background()))
+	lastGood := store.Current()
+	loader.setErrors(nil, errors.New("revision unavailable"))
+
+	err := store.Refresh(context.Background())
+
+	require.ErrorContains(t, err, "revision unavailable")
+	require.Same(t, lastGood, store.Current())
+}
+
+func TestSnapshotRefreshLoadFailureRetriesChangedRevision(t *testing.T) {
+	loader := &revisionMatchableLoader{
+		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
+	}
+	store := NewSnapshotStore(loader, nil)
+	require.NoError(t, store.Refresh(context.Background()))
+	lastGood := store.Current()
+	loader.setRevision(MatchableRevision{TaskCount: 2, UpdatedAt: time.Unix(2, 0)})
+	loader.setErrors(errors.New("catalog unavailable"), nil)
+
+	err := store.Refresh(context.Background())
+	require.ErrorContains(t, err, "catalog unavailable")
+	require.Same(t, lastGood, store.Current())
+
+	loader.setErrors(nil, nil)
+	require.NoError(t, store.Refresh(context.Background()))
+	loadCount, _ := loader.counts()
+	require.Equal(t, 3, loadCount, "failed changed revision must be retried")
+}
+
+type legacyMatchableLoader struct {
+	mu        sync.Mutex
+	loadCount int
+	versions  []*TaskVersionSnapshot
+}
+
+func (l *legacyMatchableLoader) LoadMatchable(
+	context.Context,
+	time.Time,
+) ([]*TaskVersionSnapshot, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.loadCount++
+	return l.versions, nil
+}
+
+func TestSnapshotRefreshLegacyLoaderKeepsFullRefreshBehavior(t *testing.T) {
+	loader := &legacyMatchableLoader{versions: []*TaskVersionSnapshot{snapshotTestVersion()}}
+	store := NewSnapshotStore(loader, nil)
+
+	require.NoError(t, store.Refresh(context.Background()))
+	first := store.Current()
+	require.NoError(t, store.Refresh(context.Background()))
+
+	loader.mu.Lock()
+	loadCount := loader.loadCount
+	loader.mu.Unlock()
+	require.Equal(t, 2, loadCount)
+	require.NotSame(t, first, store.Current())
+}
+
+func TestSnapshotRefreshConcurrentFirstLoadRunsOnce(t *testing.T) {
+	loader := &revisionMatchableLoader{
+		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
+	}
+	store := NewSnapshotStore(loader, nil)
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- store.Refresh(context.Background())
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	loadCount, revisionCount := loader.counts()
+	require.Equal(t, 1, loadCount)
+	require.Equal(t, 16, revisionCount)
+}
+
+func TestSnapshotRefreshRebuildsCachedVersionsOnlyAtTimeBoundary(t *testing.T) {
+	boundary := time.Date(2026, 8, 1, 1, 0, 0, 0, time.UTC)
+	version := snapshotTestVersion()
+	version.EffectiveFrom = boundary
+	loader := &revisionMatchableLoader{
+		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		versions: []*TaskVersionSnapshot{version},
+	}
+	store := NewSnapshotStore(loader, nil)
+	now := boundary.Add(-time.Minute)
+	store.now = func() time.Time { return now }
+	require.NoError(t, store.Refresh(context.Background()))
+	beforeBoundary := store.Current()
+
+	now = boundary.Add(-time.Second)
+	require.NoError(t, store.Refresh(context.Background()))
+	require.Same(t, beforeBoundary, store.Current())
+
+	now = boundary
+	require.NoError(t, store.Refresh(context.Background()))
+	require.NotSame(t, beforeBoundary, store.Current())
+	loadCount, _ := loader.counts()
+	require.Equal(t, 1, loadCount, "time boundary rebuild must use cached source versions")
+}
+
+func TestSnapshotRefreshDoesNotMutateCachedSourceVersions(t *testing.T) {
+	version := snapshotTestVersion()
+	deviceID := uuid.New()
+	version.Members[deviceID] = []TaskMember{{
+		DeviceID: deviceID, DimensionKey: "network",
+	}}
+	loader := &revisionMatchableLoader{
+		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		versions: []*TaskVersionSnapshot{version},
+	}
+	store := NewSnapshotStore(loader, nil)
+
+	require.NoError(t, store.Refresh(context.Background()))
+
+	require.Nil(t, version.DimensionMemberCounts)
+	require.Equal(t, int64(1), store.Current().ByVersion[version.VersionID].DimensionMemberCounts["network"])
+}
 
 func TestBuildTaskSnapshotSynthesizesDevicePipelineFromNetworkCatalog(t *testing.T) {
 	deviceID := uuid.MustParse("10000000-0000-4000-8000-000000000001")
