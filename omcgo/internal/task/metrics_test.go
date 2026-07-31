@@ -106,6 +106,7 @@ func TestTaskMetrics_PersistentQueueMetricContract(t *testing.T) {
 	}, PersistentQueueNames())
 	assert.Equal(t, "pending", PersistentQueueMetricPending)
 	assert.Equal(t, "oldest_age_seconds", PersistentQueueMetricOldestAgeSeconds)
+	assert.Equal(t, "overdue_oldest_age_seconds", PersistentQueueMetricOverdueOldestAgeSeconds)
 	assert.Equal(t, "failed_total", PersistentQueueMetricFailedTotal)
 	assert.Equal(t, "dead_letter_total", PersistentQueueMetricDeadLetterTotal)
 	assert.Equal(t, "processed_total", PersistentQueueMetricProcessedTotal)

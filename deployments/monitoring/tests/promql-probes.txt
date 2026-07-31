@@ -160,6 +160,14 @@ Expected: fixed queue/status backlog. ZERO means a real empty queue; NO-DATA mea
 increase(omc_persistent_queue_observer_failures_total{queue=~"device_tasks|async_jobs|parameter_sync_outbox|northbound_outbox|pm_kpi_export|trace_export|backup_tasks|dead_letters"}[5m])
 Expected: observation failures by fixed queue. ZERO means successful observation; NO-DATA means the observer metric is unavailable.
 
+## PostgreSQL persistent queue backlog alert safety (MUST-HAVE after the observer starts)
+(sum by (queue) (max by (queue,status) (omc_persistent_queue_pending{status=~"pending|running"} and on (deployment_unit,service,instance,job,queue) (omc_persistent_queue_up == 1) and on (deployment_unit,service,instance,job,queue) (time() - omc_persistent_queue_sample_timestamp_seconds < 120))) and on (queue) (min by (queue) (omc_persistent_queue_up * on (deployment_unit,service,instance,job,queue) (time() - omc_persistent_queue_sample_timestamp_seconds < bool 120)) == 1)) > 1000
+Expected: only pending/running work counts as backlog after duplicate app/worker observers are collapsed. Sent device tasks are in flight and must not inflate this alert. Any unavailable or stale observer suppresses the queue-family value.
+
+## PostgreSQL device-task in-flight expiry alert safety (MUST-HAVE after the observer starts)
+(max by (queue) (omc_persistent_queue_overdue_oldest_age_seconds{queue="device_tasks",status="sent"} and on (deployment_unit,service,instance,job,queue) (omc_persistent_queue_up{queue="device_tasks"} == 1) and on (deployment_unit,service,instance,job,queue) (time() - omc_persistent_queue_sample_timestamp_seconds{queue="device_tasks"} < 120)) and on (queue) (min by (queue) (omc_persistent_queue_up{queue="device_tasks"} * on (deployment_unit,service,instance,job,queue) (time() - omc_persistent_queue_sample_timestamp_seconds{queue="device_tasks"} < bool 120)) == 1)) > 300
+Expected: sent device tasks alert only after each row's own expires_at has passed by five minutes, with all duplicate observers healthy and fresh. Legitimate long-TTL tasks stay quiet before their own expiry.
+
 ## PM durable queue (MUST-HAVE after Worker starts)
 omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"}
 Expected: PM consumer pending count. ZERO means Worker observed an empty durable queue; NO-DATA means sampling is unavailable and must remain visible as No data.

@@ -47,14 +47,15 @@ var persistentQueueStatuses = []string{
 // PostgreSQL-backed queues. Queue names and statuses are fixed constants; no
 // device identity, row ID, object path, or job payload is emitted as a label.
 type PersistentQueueMetrics struct {
-	Pending               *prometheus.GaugeVec
-	OldestAgeSeconds      *prometheus.GaugeVec
-	FailedTotal           *prometheus.GaugeVec
-	DeadLetterTotal       *prometheus.GaugeVec
-	ProcessedTotal        *prometheus.GaugeVec
-	ObserverFailuresTotal *prometheus.CounterVec
-	Up                    *prometheus.GaugeVec
-	SampleTimestamp       *prometheus.GaugeVec
+	Pending                 *prometheus.GaugeVec
+	OldestAgeSeconds        *prometheus.GaugeVec
+	OverdueOldestAgeSeconds *prometheus.GaugeVec
+	FailedTotal             *prometheus.GaugeVec
+	DeadLetterTotal         *prometheus.GaugeVec
+	ProcessedTotal          *prometheus.GaugeVec
+	ObserverFailuresTotal   *prometheus.CounterVec
+	Up                      *prometheus.GaugeVec
+	SampleTimestamp         *prometheus.GaugeVec
 }
 
 // NewPersistentQueueMetrics registers and primes the persistent queue metric
@@ -68,6 +69,10 @@ func NewPersistentQueueMetrics(reg prometheus.Registerer) *PersistentQueueMetric
 		OldestAgeSeconds: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "omc_persistent_queue_oldest_age_seconds",
 			Help: "Age in seconds of the oldest PostgreSQL-backed queue entry by bounded queue and status.",
+		}, []string{"queue", "status"}),
+		OverdueOldestAgeSeconds: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_persistent_queue_overdue_oldest_age_seconds",
+			Help: "Seconds past the row-specific expiry of the most overdue PostgreSQL-backed queue entry by bounded queue and status.",
 		}, []string{"queue", "status"}),
 		FailedTotal: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "omc_persistent_queue_failed_total",
@@ -98,6 +103,7 @@ func NewPersistentQueueMetrics(reg prometheus.Registerer) *PersistentQueueMetric
 		for _, status := range persistentQueueStatuses {
 			m.Pending.WithLabelValues(queue, status).Set(0)
 			m.OldestAgeSeconds.WithLabelValues(queue, status).Set(0)
+			m.OverdueOldestAgeSeconds.WithLabelValues(queue, status).Set(0)
 		}
 		m.FailedTotal.WithLabelValues(queue).Set(0)
 		m.DeadLetterTotal.WithLabelValues(queue).Set(0)
@@ -108,7 +114,7 @@ func NewPersistentQueueMetrics(reg prometheus.Registerer) *PersistentQueueMetric
 	}
 	if reg != nil {
 		reg.MustRegister(
-			m.Pending, m.OldestAgeSeconds, m.FailedTotal, m.DeadLetterTotal,
+			m.Pending, m.OldestAgeSeconds, m.OverdueOldestAgeSeconds, m.FailedTotal, m.DeadLetterTotal,
 			m.ProcessedTotal, m.ObserverFailuresTotal, m.Up, m.SampleTimestamp,
 		)
 	}
@@ -123,14 +129,14 @@ type persistentQueueQuery struct {
 // All statements are fixed at compile time. This avoids treating table names
 // or statuses as SQL input and keeps the observer safe from identifier injection.
 var persistentQueueQueries = []persistentQueueQuery{
-	{name: "device_tasks", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision FROM device_tasks GROUP BY status`},
-	{name: "async_jobs", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision FROM async_jobs GROUP BY status`},
-	{name: "parameter_sync_outbox", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision FROM parameter_sync_outbox GROUP BY status`},
-	{name: "northbound_outbox", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision FROM northbound_outbox GROUP BY status`},
-	{name: "pm_kpi_export", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision FROM pm_kpi_export_tasks GROUP BY status`},
-	{name: "trace_export", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision FROM trace_export_jobs GROUP BY status`},
-	{name: "backup_tasks", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision FROM backup_tasks GROUP BY status`},
-	{name: "dead_letters", query: `SELECT 'dead_letter', COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision FROM dead_letters`},
+	{name: "device_tasks", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks GROUP BY status`},
+	{name: "async_jobs", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM async_jobs GROUP BY status`},
+	{name: "parameter_sync_outbox", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox GROUP BY status`},
+	{name: "northbound_outbox", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM northbound_outbox GROUP BY status`},
+	{name: "pm_kpi_export", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM pm_kpi_export_tasks GROUP BY status`},
+	{name: "trace_export", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM trace_export_jobs GROUP BY status`},
+	{name: "backup_tasks", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM backup_tasks GROUP BY status`},
+	{name: "dead_letters", query: `SELECT 'dead_letter', COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM dead_letters`},
 }
 
 // PersistentQueueObserver periodically samples fixed PostgreSQL queue tables.
@@ -216,11 +222,12 @@ func (o *PersistentQueueObserver) Collect(ctx context.Context) {
 }
 
 type persistentQueueSnapshot struct {
-	pending    map[string]float64
-	oldestAge  map[string]float64
-	failed     float64
-	deadLetter float64
-	succeeded  float64
+	pending          map[string]float64
+	oldestAge        map[string]float64
+	overdueOldestAge map[string]float64
+	failed           float64
+	deadLetter       float64
+	succeeded        float64
 }
 
 func (o *PersistentQueueObserver) collectQueue(ctx context.Context, descriptor persistentQueueQuery) {
@@ -230,13 +237,18 @@ func (o *PersistentQueueObserver) collectQueue(ctx context.Context, descriptor p
 	if err == nil {
 		defer rows.Close()
 	}
-	snapshot := persistentQueueSnapshot{pending: make(map[string]float64), oldestAge: make(map[string]float64)}
+	snapshot := persistentQueueSnapshot{
+		pending:          make(map[string]float64),
+		oldestAge:        make(map[string]float64),
+		overdueOldestAge: make(map[string]float64),
+	}
 	if err == nil {
 		for rows.Next() {
 			var rawStatus string
 			var count int64
 			var oldestAge float64
-			if scanErr := rows.Scan(&rawStatus, &count, &oldestAge); scanErr != nil {
+			var overdueOldestAge float64
+			if scanErr := rows.Scan(&rawStatus, &count, &oldestAge, &overdueOldestAge); scanErr != nil {
 				err = fmt.Errorf("scan %s queue row: %w", descriptor.name, scanErr)
 				break
 			}
@@ -248,6 +260,9 @@ func (o *PersistentQueueObserver) collectQueue(ctx context.Context, descriptor p
 			snapshot.pending[status] += float64(count)
 			if oldestAge > snapshot.oldestAge[status] {
 				snapshot.oldestAge[status] = oldestAge
+			}
+			if overdueOldestAge > snapshot.overdueOldestAge[status] {
+				snapshot.overdueOldestAge[status] = overdueOldestAge
 			}
 		}
 		if rowsErr := rows.Err(); err == nil && rowsErr != nil {
@@ -264,6 +279,7 @@ func (o *PersistentQueueObserver) collectQueue(ctx context.Context, descriptor p
 	for _, status := range persistentQueueStatuses {
 		o.metrics.Pending.WithLabelValues(descriptor.name, status).Set(snapshot.pending[status])
 		o.metrics.OldestAgeSeconds.WithLabelValues(descriptor.name, status).Set(snapshot.oldestAge[status])
+		o.metrics.OverdueOldestAgeSeconds.WithLabelValues(descriptor.name, status).Set(snapshot.overdueOldestAge[status])
 	}
 	snapshot.failed = snapshot.pending[persistentQueueStatusFailed]
 	snapshot.deadLetter = snapshot.pending[persistentQueueStatusDeadLetter]
