@@ -289,15 +289,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	if setter, ok := w.EventBus.(interface {
 		SetQueueTuning(string, event.QueueTuning)
 	}); ok {
-		maxAckPending := pmConcurrency * 4
-		if maxAckPending < 16 {
-			maxAckPending = 16
-		}
-		setter.SetQueueTuning(event.SubjectPMFileReceived, event.QueueTuning{
-			AckWait:       2 * time.Minute,
-			MaxDeliver:    5,
-			MaxAckPending: maxAckPending,
-		})
+		tuning := pmQueueTuning(pmConcurrency)
+		setter.SetQueueTuning(event.SubjectPMFileReceived, tuning)
+		setter.SetQueueTuning(event.SubjectPMFileDeferred, tuning)
 	}
 
 	// PM 指标大批量写异步提交（synchronous_commit=off）：PM 数据可从 MinIO 重建，换写吞吐。
@@ -670,6 +664,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 			cfg.PM.PeriodicUploadInterval,
 			logger,
 		)
+		pmOnlineSub.SetAdmissionGate(pm.NewRedisPMSetupAdmissionGate(w.Redis, 0))
 		// PM 上传 URL 基址与「系统配置→ACS 传输」同源：运行时读 sys_configs
 		// acs_transfer.uploadBaseURL，非空则覆盖 ${OMC_PUBLIC_HOST} 模板的 host
 		// （修「URL 渲染成 localhost 不可达」+ 统一真值源，改 IP 即时生效无需重建）。
@@ -782,6 +777,18 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 			zap.Duration("interval", tsdbsync.DefaultInterval))
 	} else {
 		logger.Warn("tsdb shadow-dim sync disabled: TsPool not connected")
+	}
+}
+
+func pmQueueTuning(concurrency int) event.QueueTuning {
+	maxAckPending := concurrency * 4
+	if maxAckPending < 16 {
+		maxAckPending = 16
+	}
+	return event.QueueTuning{
+		AckWait:       2 * time.Minute,
+		MaxDeliver:    event.MaxDeliveriesForRetryHorizon(collector.DeviceRegistrationGrace),
+		MaxAckPending: maxAckPending,
 	}
 }
 

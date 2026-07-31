@@ -18,7 +18,7 @@ const (
 const FaultLogMaxCount = 20
 
 // 故障日志记录生命周期（station_fault_logs.record_status）：
-//   - detected           1 BOOT 携带 HaltReason 即落库的占位记录（无文件）
+//   - detected           满足异常重启规则即落库的占位记录（无文件）
 //   - file_received      设备已上传文件并完成持久化
 //   - collection_failed  收集失败（如手动收集超时、磁盘满）
 const (
@@ -32,9 +32,9 @@ const (
 //   - "1"  收集中
 //   - "2"  失败
 const (
-	ManualCollectionIdle     = "0"
-	ManualCollectionRunning  = "1"
-	ManualCollectionFailed   = "2"
+	ManualCollectionIdle    = "0"
+	ManualCollectionRunning = "1"
+	ManualCollectionFailed  = "2"
 )
 
 // LogFile 代表一条日志采集文件记录。
@@ -46,9 +46,9 @@ type LogFile struct {
 	DeviceID    *uuid.UUID `json:"device_id,omitempty"`
 	DeviceSN    string     `json:"device_sn"`
 	LogType     LogType    `json:"log_type"`
-	FileName    string     `json:"file_name,omitempty"`    // detected 状态下为空
-	ObjectPath  string     `json:"object_path,omitempty"`  // detected 状态下为空
-	Bucket      string     `json:"bucket,omitempty"`       // detected 状态下为空
+	FileName    string     `json:"file_name,omitempty"`   // detected 状态下为空
+	ObjectPath  string     `json:"object_path,omitempty"` // detected 状态下为空
+	Bucket      string     `json:"bucket,omitempty"`      // detected 状态下为空
 	FileSize    int64      `json:"file_size"`
 	FaultReason string     `json:"fault_reason,omitempty"` // HaltReason.MainReason
 	FaultDetail string     `json:"fault_detail,omitempty"` // HaltReason.DetailReason

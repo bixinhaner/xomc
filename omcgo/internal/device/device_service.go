@@ -1056,8 +1056,8 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 
 	// T-0123/T-0125: 检测 firmware 变化与 offline→active 二选一发布事件。
 	// 同一 Inform 满足两者时优先发 firmware.changed（不发 device.online），
-	// 由 provision.HandleFirmwareChanged 触发的重新交集 + Path B 同步覆盖 online 的能力，
-	// 避免两路 Path B 重复同步。
+	// 由 provision.HandleFirmwareChanged 触发模型刷新 + durable 全量同步覆盖 online 语义，
+	// 避免两路全量同步重复触发。
 	newVersion := device.FirmwareVersion
 	firmwareChanged := oldVersion != "" && newVersion != "" && oldVersion != newVersion
 	becameOnline := oldStatus == model.DeviceOffline && device.Status == model.DeviceActive
@@ -1615,8 +1615,9 @@ func (s *DeviceService) PublishDeviceRegistered(
 // reaching this layer; private-path resolution itself is therefore left to
 // upstream code and not duplicated here.
 const (
-	HaltReasonMainPath   = "Device.HaltReason.MainReason"
-	HaltReasonDetailPath = "Device.HaltReason.DetailReason"
+	HaltReasonMainPath    = "Device.HaltReason.MainReason"
+	HaltReasonDetailPath  = "Device.HaltReason.DetailReason"
+	gnbAbnormalMainReason = "halt_reboot"
 )
 
 // extractParam looks up a parameter value by exact path. Returns "" when absent.
@@ -1647,8 +1648,8 @@ func (s *DeviceService) GetDevicePreRebootRunTime(ctx context.Context, deviceID 
 // Inform (event codes "1 BOOT" or "M Reboot"). It:
 //   - atomically increments devices.boot_count and stamps last_boot_at;
 //   - refreshes the Redis device cache so the incremented counter is visible;
-//   - publishes SubjectDeviceRebootAbnormal when the reboot was not initiated by
-//     the ACS (i.e. "1 BOOT" without "M Reboot"), so downstream listeners
+//   - publishes SubjectDeviceRebootAbnormal when HaltReason matches the
+//     abnormal-reboot rule for the device type, so downstream listeners
 //     (alarm engine, audit log) can react.
 //
 // preRebootRunTime 是调用方在 UpdateFromInform 覆盖 device_info.run_time 之前
@@ -1686,27 +1687,19 @@ func (s *DeviceService) recordBootFromInform(ctx context.Context, device *model.
 	s.cacheDevice(ctx, device)
 
 	// Abnormal reboot 判断（T-0158）：
-	//   1 BOOT 事件 + Device.HaltReason.MainReason 非空 → 异常重启
-	//
-	// 比"1 BOOT && !M Reboot"更准确：受控的看门狗 / 软重启 CPE 不会带 M Reboot
-	// 但也不算异常；只有 CPE 明确上报故障主原因（崩溃/死机/异常断电）才算。
-	// 当 ParameterList 为空（极少数兼容场景）退回旧的事件码组合规则，保留漏判
-	// 优先于误判。
-	haltMainReason := extractParam(params, HaltReasonMainPath)
-	haltDetailReason := extractParam(params, HaltReasonDetailPath)
+	//   - 所有设备都必须带 1 BOOT；
+	//   - 5G gNB 设备必须明确上报 MainReason=halt_reboot 才算异常；
+	//   - 其它设备沿用既有口径：ParameterList 有值时 MainReason 非空即异常；
+	//     ParameterList 为空时退回旧事件码组合规则，保留兼容性。
+	haltMainReason := strings.TrimSpace(extractParam(params, HaltReasonMainPath))
+	haltDetailReason := strings.TrimSpace(extractParam(params, HaltReasonDetailPath))
 	// runtimeBeforeReboot 来自调用方在 UpdateFromInform 覆盖 device_info.run_time 之前
 	// 快照的旧值，即设备本次重启前的运行时长（秒）。
 	runtimeBeforeReboot := preRebootRunTime
 
 	hasBoot := hasEventCode(events, tr069.EventBoot)
-	var abnormal bool
-	switch {
-	case len(params) == 0:
-		// Fallback: 没有参数列表时退回旧规则（保 backward-compatible）
-		abnormal = hasBoot && !hasEventCode(events, tr069.EventMReboot)
-	default:
-		abnormal = hasBoot && haltMainReason != ""
-	}
+	isGNB := snapshotDevice.Technology == model.TechNR
+	abnormal := isAbnormalRebootInform(isGNB, hasBoot, events, params, haltMainReason)
 
 	s.logger.Info("device boot recorded",
 		zap.String("device_id", device.ID.String()),
@@ -1735,7 +1728,7 @@ func (s *DeviceService) recordBootFromInform(ctx context.Context, device *model.
 				HaltMainReason:      haltMainReason,
 				HaltDetailReason:    haltDetailReason,
 				RuntimeBeforeReboot: runtimeBeforeReboot,
-				IsGNB:               snapshotDevice.Technology == model.TechNR,
+				IsGNB:               isGNB,
 				DetectedAt:          now,
 			}
 			if recErr := s.abnormalRecorder.RecordAbnormalReboot(ctx, snap); recErr != nil {
@@ -1775,7 +1768,7 @@ func (s *DeviceService) recordBootFromInform(ctx context.Context, device *model.
 			OperateIP:           snapshotDevice.IPAddress,
 			SoftwareVersion:     snapshotDevice.FirmwareVersion,
 			RuntimeBeforeReboot: runtimeBeforeReboot,
-			IsGNB:               snapshotDevice.Technology == model.TechNR,
+			IsGNB:               isGNB,
 			BootCount:           bootCount,
 			Events:              events,
 			OccurredAt:          now,
@@ -1789,6 +1782,19 @@ func (s *DeviceService) recordBootFromInform(ctx context.Context, device *model.
 	}
 
 	return bootCount, nil
+}
+
+func isAbnormalRebootInform(isGNB, hasBoot bool, events []string, params []tr069.ParameterValueStruct, haltMainReason string) bool {
+	if !hasBoot {
+		return false
+	}
+	if isGNB {
+		return haltMainReason == gnbAbnormalMainReason
+	}
+	if len(params) == 0 {
+		return !hasEventCode(events, tr069.EventMReboot)
+	}
+	return haltMainReason != ""
 }
 
 func hasEventCode(events []string, target string) bool {

@@ -62,14 +62,29 @@ type RegisteredDeviceSyncStarter interface {
 	) error
 }
 
-// RegisteredDeviceMACSyncStarter submits the Issue #219 narrow MAC read
-// without enabling the Issue #148 durable full-sync route.
-type RegisteredDeviceMACSyncStarter interface {
-	StartRegisteredDeviceMACSync(
+// DeviceOnlineFullSyncResult preserves the durable request outcome at the
+// lifecycle-event boundary. The provision package deliberately keeps these
+// fields transport-neutral to avoid depending on the paramsync package, whose
+// planner already reuses provision's path-selection helpers.
+type DeviceOnlineFullSyncResult struct {
+	RequestID  uuid.UUID
+	RunID      *uuid.UUID
+	Status     string
+	ResultCode string
+	TaskCount  int
+}
+
+// DeviceOnlineFullSyncSubmitter sends an online recovery directly into the
+// durable parameter_sync request/run lifecycle. It must not fall back to the
+// legacy sync-gpv Path B task materializer.
+type DeviceOnlineFullSyncSubmitter interface {
+	SubmitDeviceOnlineFullSync(
 		ctx context.Context,
 		dev *model.Device,
-		sourceID string,
-	) (used bool, taskCount int, err error)
+		idempotencyKey string,
+		sourceEventID string,
+		originEventType string,
+	) (*DeviceOnlineFullSyncResult, error)
 }
 
 type ProvisioningEngine struct {
@@ -83,7 +98,7 @@ type ProvisioningEngine struct {
 	modelUploadService *ModelUploadService
 	syncService        *SyncService
 	registeredSync     RegisteredDeviceSyncStarter
-	registeredMACSync  RegisteredDeviceMACSyncStarter
+	deviceOnlineSync   DeviceOnlineFullSyncSubmitter
 	productRegistry    productClassMatcher
 	productRepo        productBinder
 	// deviceCache 在 lazy bind 写库成功后失效 SN 缓存。
@@ -131,11 +146,14 @@ func (e *ProvisioningEngine) SetModelUploadService(svc *ModelUploadService) {
 // SetSyncService sets the sync service for parameter synchronization.
 func (e *ProvisioningEngine) SetSyncService(svc *SyncService) {
 	e.syncService = svc
-	e.registeredMACSync = svc
 }
 
 func (e *ProvisioningEngine) SetRegisteredDeviceSyncStarter(starter RegisteredDeviceSyncStarter) {
 	e.registeredSync = starter
+}
+
+func (e *ProvisioningEngine) SetDeviceOnlineFullSyncSubmitter(submitter DeviceOnlineFullSyncSubmitter) {
+	e.deviceOnlineSync = submitter
 }
 
 // SetParamSyncRoutingMode configures the P0 routing gate. Empty keeps the
@@ -426,7 +444,7 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 
 	// T-0098 P5-01：GPN response 订阅删除（two-phase sync 已移除）。
 
-	// T-0123: 订阅 device.online — 已存在设备从 offline 恢复时触发 Path B 全量同步。
+	// 订阅 device.online — 已存在设备从 offline 恢复时触发 durable 全量参数同步。
 	onlineHandler := func(ctx context.Context, evt event.Event) error {
 		var onlineEvt device.DeviceOnlineEvent
 		if err := evt.DecodePayload(&onlineEvt); err != nil {
@@ -434,10 +452,7 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 				zap.String("event_id", evt.ID))
 			return err
 		}
-		return e.HandleDeviceOnline(ctx, onlineEvt)
-	}
-	if e.deduper != nil {
-		onlineHandler = e.deduper.Wrap("provision-online-sync", onlineHandler)
+		return e.handleDeviceOnline(ctx, onlineEvt, evt.ID)
 	}
 	if _, err := bus.QueueSubscribe(event.SubjectDeviceOnline, "provision-online-sync", onlineHandler); err != nil {
 		e.logger.Warn("failed to subscribe to device.online", zap.Error(err))
@@ -445,7 +460,7 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 		e.logger.Info("provisioning engine subscribed to device.online events")
 	}
 
-	// T-0125: 订阅 device.firmware.changed — 固件升级后重新交集 + Path B 同步。
+	// 订阅 device.firmware.changed — 固件升级后刷新模型；若同时上线则补交 durable 全量同步。
 	firmwareHandler := func(ctx context.Context, evt event.Event) error {
 		var fwEvt device.DeviceFirmwareChangedEvent
 		if err := evt.DecodePayload(&fwEvt); err != nil {
@@ -453,10 +468,7 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 				zap.String("event_id", evt.ID))
 			return err
 		}
-		return e.HandleFirmwareChanged(ctx, fwEvt)
-	}
-	if e.deduper != nil {
-		firmwareHandler = e.deduper.Wrap("provision-firmware-changed", firmwareHandler)
+		return e.handleFirmwareChanged(ctx, fwEvt, evt.ID)
 	}
 	if _, err := bus.QueueSubscribe(event.SubjectDeviceFirmwareChanged, "provision-firmware-changed", firmwareHandler); err != nil {
 		e.logger.Warn("failed to subscribe to device.firmware.changed", zap.Error(err))
@@ -467,25 +479,43 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 	return nil
 }
 
-// HandleDeviceOnline 处理已存在设备从 offline 恢复 active 的事件（T-0123）。
-//
-// 与 HandleBootstrap 的差异：不重跑 FileType=11 上传与产品路由（首次工作已完成），
-// 直接调 syncService.StartPathBSync 拉一遍参数检测离线期间漂移。
+// HandleDeviceOnline 处理已存在设备从 offline 恢复 active 的事件。
 //
 // 节流：Redis token bucket key=provision:online_sync:{deviceID} TTL=60s，
 // 60s 内同一设备的重复 device.online 事件直接跳过（防 ACS 抖动/multiple Inform 触发）。
+// 仅 durable 模式提交 scope=full、reason=device_online 的可靠参数同步；其他模式
+// fail-closed，不再回退到 legacy sync-gpv Path B。
 func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.DeviceOnlineEvent) error {
+	return e.handleDeviceOnline(ctx, evt, "")
+}
+
+func (e *ProvisioningEngine) handleDeviceOnline(
+	ctx context.Context,
+	evt device.DeviceOnlineEvent,
+	sourceEventID string,
+) error {
 	ctx, span := tracing.StartSpan(ctx, tracing.ProvisionTracerName, "Provision HandleDeviceOnline",
 		attribute.String("provision.device_sn", evt.SerialNumber),
 		attribute.String("provision.device_id", evt.DeviceID.String()),
 	)
 	defer span.End()
 
+	if e.paramSyncRoutingMode != "durable" {
+		e.logger.Debug("device.online parameter sync blocked by routing mode",
+			zap.String("device_id", evt.DeviceID.String()),
+			zap.String("routing_mode", e.paramSyncRoutingMode))
+		return nil
+	}
+	if e.deviceOnlineSync == nil {
+		return fmt.Errorf("device.online durable parameter sync submitter unavailable")
+	}
+
 	// Token bucket 节流：60s 内重复 device.online 跳过。
 	// MEDIUM-19：SetNX 带短重试抹平 Redis 抖动；重试耗尽仍 fail-open（放行+打点）。
+	var throttleKey string
 	if e.redisClient != nil {
-		key := fmt.Sprintf("provision:online_sync:%s", evt.DeviceID.String())
-		acquired, _ := e.throttleSetNX(ctx, key, "device_online", 60*time.Second)
+		throttleKey = fmt.Sprintf("provision:online_sync:%s", evt.DeviceID.String())
+		acquired, _ := e.throttleSetNX(ctx, throttleKey, "device_online", 60*time.Second)
 		if !acquired {
 			e.logger.Debug("device.online throttled by token bucket",
 				zap.String("device_id", evt.DeviceID.String()),
@@ -494,22 +524,12 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 		}
 	}
 
-	if e.paramSyncRoutingMode == "closed" {
-		if !e.closedMACSyncEnabled() {
-			return nil
-		}
-	} else if e.syncService == nil {
-		e.logger.Debug("device.online received but syncService unavailable, skipping",
-			zap.String("device_id", evt.DeviceID.String()))
-		return nil
-	}
-
 	dev, err := e.deviceService.GetDevice(ctx, evt.DeviceID)
 	if err != nil {
-		e.logger.Warn("device.online: lookup device failed",
-			zap.String("device_id", evt.DeviceID.String()),
-			zap.Error(err))
-		return nil
+		if e.redisClient != nil && throttleKey != "" {
+			_ = e.redisClient.Del(ctx, throttleKey).Err()
+		}
+		return fmt.Errorf("device.online: lookup device %s: %w", evt.DeviceID, err)
 	}
 	if dev == nil {
 		e.logger.Warn("device.online: device not found, skipping",
@@ -518,58 +538,119 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 	}
 
 	// T-0176-PR-D 懒补 product 绑定（首次 Bootstrap 错过 / 历史孤儿设备恢复在线场景）。
-	// silent skip 任何 err，不阻塞 Path B 同步主流程。
+	// silent skip 任何 err，不阻塞 durable 参数同步主流程。
 	e.bindDeviceProductIfNeeded(ctx, dev)
 
-	// Empty sourceID lets SyncService allocate a per-run UUID. Do not reuse
-	// device_id here, otherwise multiple automatic sync rounds share one
-	// source_id and their open tasks contaminate each other.
-	if e.paramSyncRoutingMode == "closed" {
-		if err := e.startDeviceMACSync(ctx, dev); err != nil {
-			e.logger.Warn("device.online: start MAC sync failed",
-				zap.String("device_id", evt.DeviceID.String()),
-				zap.Error(err))
+	if err := e.startDeviceOnlineFullSync(
+		ctx,
+		dev,
+		sourceEventID,
+		event.SubjectDeviceOnline,
+	); err != nil {
+		// Submit 未落到 durable request 前不能保留短时防抖键，否则 NATS
+		// 重投会被当成重复上线吞掉。
+		if e.redisClient != nil && throttleKey != "" {
+			_ = e.redisClient.Del(ctx, throttleKey).Err()
 		}
+		return err
+	}
+	return nil
+}
+
+func (e *ProvisioningEngine) startDeviceOnlineFullSync(
+	ctx context.Context,
+	dev *model.Device,
+	sourceEventID string,
+	originEventType string,
+) error {
+	if dev == nil {
 		return nil
 	}
-	if e.blocksLegacyParamSync("device_online") {
-		return nil
+	if e.deviceOnlineSync == nil {
+		return fmt.Errorf("device.online durable parameter sync unavailable for device %s", dev.ID)
 	}
-	used, gpvTaskCount, err := e.syncService.StartPathBSync(ctx, dev, "", WithReason("device_online"))
+	if strings.TrimSpace(sourceEventID) == "" {
+		sourceEventID = uuid.NewString()
+	}
+	idempotencyKey := "device_online:" + sourceEventID
+	if originEventType == event.SubjectDeviceFirmwareChanged {
+		idempotencyKey = "device_online:firmware_changed:" + sourceEventID
+	}
+	result, err := e.deviceOnlineSync.SubmitDeviceOnlineFullSync(
+		ctx,
+		dev,
+		idempotencyKey,
+		sourceEventID,
+		originEventType,
+	)
 	if err != nil {
-		e.logger.Warn("device.online: StartPathBSync failed",
-			zap.String("device_id", evt.DeviceID.String()),
-			zap.Error(err))
-		return nil
+		return fmt.Errorf("submit device.online durable full sync for device %s: %w", dev.ID, err)
 	}
-	if !used {
-		e.logger.Debug("device.online: Path B unavailable (no MappingSet), skipping",
-			zap.String("device_id", evt.DeviceID.String()))
-		return nil
-	}
-	if gpvTaskCount == 0 {
-		e.logger.Info("device.online: Path B sync skipped (already running or no GPV task)",
-			zap.String("device_id", evt.DeviceID.String()),
-			zap.String("serial_number", evt.SerialNumber))
-		return nil
+	if result == nil {
+		return fmt.Errorf("submit device.online durable full sync for device %s: empty result", dev.ID)
 	}
 
-	e.logger.Info("device.online: Path B sync initiated",
-		zap.String("device_id", evt.DeviceID.String()),
-		zap.String("serial_number", evt.SerialNumber),
-		zap.Int("gpv_tasks", gpvTaskCount),
-	)
+	fields := []zap.Field{
+		zap.String("device_id", dev.ID.String()),
+		zap.String("serial_number", dev.SerialNumber),
+		zap.String("idempotency_key", idempotencyKey),
+		zap.String("source_event_id", sourceEventID),
+		zap.String("origin_event_type", originEventType),
+		zap.String("request_id", result.RequestID.String()),
+		zap.String("status", result.Status),
+		zap.String("result_code", result.ResultCode),
+		zap.Int("task_count", result.TaskCount),
+	}
+	if result.RunID != nil {
+		fields = append(fields, zap.String("run_id", result.RunID.String()))
+	}
+
+	switch result.Status {
+	case "rejected":
+		switch result.ResultCode {
+		case "ACTIVE_SYNC_EXISTS":
+			e.logger.Info("device.online: durable full sync skipped", fields...)
+			return nil
+		default:
+			return fmt.Errorf(
+				"device.online durable full sync rejected for device %s: %s",
+				dev.ID,
+				result.ResultCode,
+			)
+		}
+	case "failed", "timed_out", "cancelled":
+		return fmt.Errorf(
+			"device.online durable full sync terminal failure for device %s: status=%s code=%s",
+			dev.ID,
+			result.Status,
+			result.ResultCode,
+		)
+	case "deduplicated":
+		e.logger.Info("device.online: durable full sync deduplicated", fields...)
+	default:
+		e.logger.Info("device.online: durable full sync accepted", fields...)
+	}
 	return nil
 }
 
 // HandleFirmwareChanged 处理设备固件版本变化事件（T-0125）。
 //
 // 流程（设计方案 §3.2）：
-//  1. Redis 串行锁 SetNX provision:firmware_handling:{deviceID} TTL=10min — 防设备升级期间
-//     不稳定 swVersion 多次 Inform 引发并发交集。锁不主动释放，TTL 自然过期。
-//  2. 调 modelUploadService.RequestModelUploadWithParamSync(syncOnTerminal=false)
-//     仅刷新模型/设备元数据；FirmwareChanged 不创建参数同步 request/run/task。
+//  1. 若同一 Inform 同时完成 offline→active，提交一次 reason=device_online 的 durable
+//     全量同步，补足 device.online 被二选一抑制的上线语义。
+//  2. Redis 串行锁 SetNX provision:firmware_handling:{deviceID} TTL=10min，仅防设备升级期间
+//     不稳定 swVersion 多次 Inform 引发重复模型上传。锁不主动释放，TTL 自然过期。
+//  3. 调 modelUploadService.RequestModelUploadWithParamSync(syncOnTerminal=false)
+//     刷新模型/设备元数据。
 func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt device.DeviceFirmwareChangedEvent) error {
+	return e.handleFirmwareChanged(ctx, evt, "")
+}
+
+func (e *ProvisioningEngine) handleFirmwareChanged(
+	ctx context.Context,
+	evt device.DeviceFirmwareChangedEvent,
+	sourceEventID string,
+) error {
 	ctx, span := tracing.StartSpan(ctx, tracing.ProvisionTracerName, "Provision HandleFirmwareChanged",
 		attribute.String("provision.device_sn", evt.SerialNumber),
 		attribute.String("provision.device_id", evt.DeviceID.String()),
@@ -578,26 +659,10 @@ func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt devi
 	)
 	defer span.End()
 
-	// 1. Redis 串行锁：防短时间内重复 firmware Inform 引发并发交集。
-	// MEDIUM-19：SetNX 带短重试抹平 Redis 抖动；重试耗尽仍 fail-open（放行+打点）。
-	if e.redisClient != nil {
-		lockKey := fmt.Sprintf("provision:firmware_handling:%s", evt.DeviceID.String())
-		acquired, _ := e.throttleSetNX(ctx, lockKey, "firmware_changed", 10*time.Minute)
-		if !acquired {
-			e.logger.Debug("firmware handling already in progress, skip",
-				zap.String("device_id", evt.DeviceID.String()),
-				zap.String("serial_number", evt.SerialNumber))
-			return nil
-		}
-	}
-
-	// 2. 查 device
+	// 1. 查 device。查询失败必须交给消息系统重投，不能确认并吞掉该事件。
 	dev, err := e.deviceService.GetDevice(ctx, evt.DeviceID)
 	if err != nil {
-		e.logger.Warn("firmware.changed: lookup device failed",
-			zap.String("device_id", evt.DeviceID.String()),
-			zap.Error(err))
-		return nil
+		return fmt.Errorf("firmware.changed: lookup device %s: %w", evt.DeviceID, err)
 	}
 	if dev == nil {
 		e.logger.Warn("firmware.changed: device not found, skipping",
@@ -608,17 +673,39 @@ func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt devi
 	// T-0176-PR-D 懒补 product 绑定（设备升级后 productClass 不变但历史 orphan 此刻有机会路由）。
 	e.bindDeviceProductIfNeeded(ctx, dev)
 
-	// FirmwareChanged 与 device.online 二选一发布；升级 Inform 同时完成
-	// offline→active 时，需要在 closed 路由下补上同样的 MAC 刷新。
-	if evt.BecameOnline && e.closedMACSyncEnabled() {
-		if err := e.startDeviceMACSync(ctx, dev); err != nil {
-			e.logger.Warn("firmware.changed: start MAC sync failed",
-				zap.String("device_id", evt.DeviceID.String()),
-				zap.Error(err))
+	// 2. FirmwareChanged 与 device.online 二选一发布；升级 Inform 同时完成
+	// offline→active 时，仍需提交一次 durable 全量同步。
+	//
+	// 这一步必须位于 model-upload 的 10 分钟锁之外：较早的固件变化可能已经
+	// 获取模型上传锁，但随后真正的 BecameOnline 仍必须触发恢复同步。
+	if evt.BecameOnline && e.paramSyncRoutingMode == "durable" {
+		if err := e.startDeviceOnlineFullSync(
+			ctx,
+			dev,
+			sourceEventID,
+			event.SubjectDeviceFirmwareChanged,
+		); err != nil {
+			return fmt.Errorf("firmware.changed online full sync: %w", err)
 		}
 	}
 
-	sourceID := uuid.NewString()
+	// 3. Redis 串行锁只保护模型上传，不能抑制上面的在线恢复同步。
+	// MEDIUM-19：SetNX 带短重试抹平 Redis 抖动；重试耗尽仍 fail-open（放行+打点）。
+	if e.redisClient != nil {
+		firmwareLockKey := fmt.Sprintf("provision:firmware_handling:%s", evt.DeviceID.String())
+		acquired, _ := e.throttleSetNX(ctx, firmwareLockKey, "firmware_changed", 10*time.Minute)
+		if !acquired {
+			e.logger.Debug("firmware model upload already in progress, skip",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.String("serial_number", evt.SerialNumber))
+			return nil
+		}
+	}
+
+	sourceID := strings.TrimSpace(sourceEventID)
+	if sourceID == "" {
+		sourceID = uuid.NewString()
+	}
 	if e.modelUploadService != nil {
 		log, uploadErr := e.modelUploadService.RequestModelUploadWithParamSync(ctx, dev, sourceID, false)
 		if uploadErr != nil {
@@ -754,12 +841,6 @@ func (e *ProvisioningEngine) handleRegisteredDeviceSyncEvent(ctx context.Context
 		if !registered.Created || e.registeredSync == nil {
 			return nil
 		}
-	case "closed":
-		if !e.config.AutoSync.Enabled ||
-			!e.config.AutoSync.SyncOnBootstrap ||
-			e.registeredMACSync == nil {
-			return nil
-		}
 	default:
 		return nil
 	}
@@ -789,41 +870,11 @@ func (e *ProvisioningEngine) startRegisteredDeviceSync(
 			dev,
 			"device_registered:"+dev.ID.String(),
 		)
-	case "closed":
-		return e.startDeviceMACSync(ctx, dev)
 	default:
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("start registered-device parameter sync: %w", err)
-	}
-	return nil
-}
-
-func (e *ProvisioningEngine) closedMACSyncEnabled() bool {
-	return e.paramSyncRoutingMode == "closed" &&
-		e.config.AutoSync.Enabled &&
-		e.config.AutoSync.SyncOnBootstrap &&
-		e.registeredMACSync != nil
-}
-
-// startDeviceMACSync is the narrow Issue #219 compensation path. It refreshes
-// MAC once per registration/reconnect event so a hardware change is detected;
-// it never enters the durable/full parameter-sync route.
-func (e *ProvisioningEngine) startDeviceMACSync(
-	ctx context.Context,
-	dev *model.Device,
-) error {
-	if dev == nil || !e.closedMACSyncEnabled() {
-		return nil
-	}
-	_, _, err := e.registeredMACSync.StartRegisteredDeviceMACSync(
-		ctx,
-		dev,
-		uuid.NewString(),
-	)
-	if err != nil {
-		return fmt.Errorf("start device MAC sync: %w", err)
 	}
 	return nil
 }

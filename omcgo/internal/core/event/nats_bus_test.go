@@ -436,7 +436,7 @@ func TestWrapHandler_ReturnsNonNilMsgHandler(t *testing.T) {
 	bus := NewNATSEventBus(nil, nil, zap.NewNop())
 	handler := func(ctx context.Context, evt Event) error { return nil }
 
-	msgHandler := bus.wrapHandler(handler)
+	msgHandler := bus.wrapHandler(handler, maxDeliveries)
 	assert.NotNil(t, msgHandler)
 }
 
@@ -504,6 +504,7 @@ func TestSubjectConstants_NotEmpty(t *testing.T) {
 		SubjectTaskCompleted,
 		SubjectTaskFailed,
 		SubjectPMFileReceived,
+		SubjectPMFileDeferred,
 		SubjectPMFileParsed,
 		SubjectAlarmRaised,
 		SubjectAlarmCleared,
@@ -567,6 +568,23 @@ func TestDecideAck_ZeroDelivery_TreatedAsOne(t *testing.T) {
 	assert.Equal(t, 1*time.Second, d.backoff)
 }
 
+func TestMaxDeliveriesForRetryHorizon(t *testing.T) {
+	tests := []struct {
+		name    string
+		horizon time.Duration
+		want    int
+	}{
+		{name: "no wait", horizon: 0, want: 1},
+		{name: "first retry", horizon: time.Second, want: 2},
+		{name: "thirty minute registration grace", horizon: 30 * time.Minute, want: 12},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, MaxDeliveriesForRetryHorizon(tt.horizon))
+		})
+	}
+}
+
 func TestDecideAck_ExtremeDeliveries_BackoffCapped(t *testing.T) {
 	// 极端 deliveries 不应触发位移溢出（shift cap=30）
 	d := decideAck(errors.New("handler failed"), 100, 1000)
@@ -576,7 +594,7 @@ func TestDecideAck_ExtremeDeliveries_BackoffCapped(t *testing.T) {
 }
 
 func TestDecideAck_PermanentError_ReturnsTermRegardlessOfDeliveries(t *testing.T) {
-	// 包装了 reliability.ErrPermanent 的错误（如设备未注册）无论 deliveries 多少，
+	// 包装了 reliability.ErrPermanent 的明确不可恢复错误无论 deliveries 多少，
 	// 都应立即 Term，不走正常的指数退避 Nak 重投。
 	err := fmt.Errorf("device not found: %w", reliability.ErrPermanent)
 	d := decideAck(err, 1, 5)

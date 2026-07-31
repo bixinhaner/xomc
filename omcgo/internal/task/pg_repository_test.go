@@ -579,6 +579,26 @@ func TestPgRepo_MarkSentIfPendingRejectsExpiredTask(t *testing.T) {
 	assert.Nil(t, got.SentAt)
 }
 
+func TestPgRepo_ListActiveTasksAfterBuildsStableKeysetQuery(t *testing.T) {
+	olderThan := time.Date(2026, 7, 31, 2, 0, 0, 0, time.UTC)
+	after := &ActiveTaskCursor{
+		CreatedAt: time.Date(2026, 7, 31, 1, 0, 0, 0, time.UTC),
+		ID:        "00000000-0000-4000-8000-000000000123",
+	}
+
+	query, args, err := buildListActiveTasksSQL(olderThan, after, 100)
+	require.NoError(t, err)
+
+	assert.Contains(t, query, "status IN")
+	assert.Contains(t, query, "created_at <")
+	assert.Contains(t, query, "(created_at, id) >")
+	assert.Contains(t, query, "ORDER BY created_at ASC, id ASC")
+	assert.Contains(t, query, "LIMIT 100")
+	require.Contains(t, args, olderThan)
+	require.Contains(t, args, after.CreatedAt)
+	require.Contains(t, args, after.ID)
+}
+
 func TestPgRepo_ListExpiredCandidatesProtectsFreshInFlightTask(t *testing.T) {
 	pool := newTestPool(t)
 	if pool == nil {
@@ -818,6 +838,39 @@ func TestPgRepo_Integration_BatchCreate(t *testing.T) {
 
 	// 空批量
 	require.NoError(t, repo.BatchCreate(ctx, nil))
+}
+
+func TestPgRepo_Integration_LatestCompletedByDeviceCommandKey(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	older := freshTaskForPG("completed-old", "completed-key")
+	older.CommandKey = "pm_upload_setup_on_online"
+	older.Status = TaskStatusCompleted
+	olderCompletedAt := time.Now().Add(-time.Minute)
+	older.CompletedAt = &olderCompletedAt
+	require.NoError(t, repo.Create(ctx, older))
+
+	newer := freshTaskForPG("completed-new", "completed-key")
+	newer.CommandKey = older.CommandKey
+	newer.Status = TaskStatusCompleted
+	newer.Params = json.RawMessage(`{"version":"new"}`)
+	newerCompletedAt := time.Now()
+	newer.CompletedAt = &newerCompletedAt
+	require.NoError(t, repo.Create(ctx, newer))
+
+	got, err := repo.LatestCompletedByDeviceCommandKey(
+		ctx, newer.DeviceSN, newer.CommandKey,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, newer.ID, got.ID)
+	require.JSONEq(t, string(newer.Params), string(got.Params))
 }
 
 func TestPgRepo_Integration_PurgeOldTasks(t *testing.T) {

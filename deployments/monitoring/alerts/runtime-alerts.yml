@@ -72,4 +72,4 @@ groups:
           description: |
             ACS 全局会话上限导致 Inform 返回 HTTP 503，持续至少 1 分钟。
             Impact: 设备需要重试 Inform，任务下发和 PM 上报可能延迟。
-            Action: 检查 acs_active_sessions、会话时延和 Redis 准入槽位；确认会话上限与 CPU/内存配置匹配。
+            Action: 检查 acs_global_active_sessions、会话时延和 Redis 准入槽位；确认会话上限与 CPU/内存配置匹配。

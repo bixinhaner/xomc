@@ -30,7 +30,7 @@ groups:
       - alert: OMCACSDown
         # ACS 采用 primary + candidate 双实例接力。单副本失效仍可承载南向流量，
         # 只有两个静态抓取目标都不可达时才判定主链路中断。
-        expr: sum(up{job="omc-acs"}) < 1
+        expr: sum(up{job="omc-acs", instance=~"acs-primary:9090|acs-candidate:9090"}) < 1
         for: 2m
         labels:
           severity: critical
@@ -44,7 +44,7 @@ groups:
             Action: 查看 run/logs/acs/acs.log，确认 :7547 / :7557 监听是否正常。
 
       - alert: OMCACSReplicaDown
-        expr: up{job="omc-acs"} == 0
+        expr: up{job="omc-acs", instance=~"acs-primary:9090|acs-candidate:9090"} == 0
         for: 2m
         labels:
           severity: warning
@@ -404,23 +404,6 @@ groups:
             omc_device_batch_flush_failed_total 持续增长，批量写库重试后仍失败。
             Impact: 部分设备状态更新未落库。
             Action: 检查 PostgreSQL 可用性与写入延迟（见 infra-alerts.yml）。
-
-      - alert: OMCTaskQueueBacklog
-        # omc_tasks_pending_total：统一任务队列当前待执行任务数（Gauge）。
-        # 阈值 2000 为初始经验值，须按实际设备规模与下发节奏调整。
-        expr: omc_tasks_pending_total > 2000
-        for: 10m
-        labels:
-          severity: warning
-          domain: omc
-          subsystem: task
-        annotations:
-          summary: "任务队列积压（待执行 > 2000）"
-          description: |
-            待执行任务数已持续 10 分钟超过 2000。
-            Impact: MML / 固件 / 配置下发等指令派发延迟变大。
-            Action: 看 worker 是否健康、设备是否大面积离线导致任务无法送达；
-                    评估是否存在批量操作引发的任务风暴。
 
       - alert: OMCPMProcessingSlow
         # omc_pm_processing_duration_seconds 是 Histogram，按 le 桶统计 p95。

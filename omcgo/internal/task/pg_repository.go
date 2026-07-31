@@ -854,6 +854,36 @@ func (r *PgTaskRepository) LatestOpenByDeviceMethodDescription(
 	return taskItem, nil
 }
 
+// LatestCompletedByDeviceCommandKey returns the newest successful execution of
+// one idempotent system command. PM online setup uses it to avoid re-applying an
+// unchanged configuration after every rolling deployment or transient reconnect.
+func (r *PgTaskRepository) LatestCompletedByDeviceCommandKey(
+	ctx context.Context,
+	deviceSN, commandKey string,
+) (*Task, error) {
+	query, args, err := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.Eq{
+			"device_sn":   deviceSN,
+			"command_key": commandKey,
+			"status":      TaskStatusCompleted,
+		}).
+		OrderBy("completed_at DESC", "created_at DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build latest completed task query: %w", err)
+	}
+	taskItem, err := r.scanTaskRow(r.pool.QueryRow(ctx, query, args...))
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query latest completed task: %w", err)
+	}
+	return taskItem, nil
+}
+
 // defaultPendingBatchLimit 是 ListPendingAllDevices 在调用方未给上界（limit<=0）时
 // 的兜底批大小。百万设备下 device_tasks 的 pending 行可能极多，一次性 SELECT 全量
 // 入内存会 OOM（#11）。RestorePendingQueues 走 ListPendingPage 流式分批恢复，本兜底
@@ -1029,15 +1059,47 @@ func (r *PgTaskRepository) ListSentByDeviceBefore(ctx context.Context, deviceSN 
 // （CreateTask / MarkTaskCompleted 等的 PG sync 可能尚未落地），从而不误判正常时序差为分叉。
 // limit > 0 时限制单批数量防 worker 长查询；剩余项下一轮处理。
 func (r *PgTaskRepository) ListActiveTasks(ctx context.Context, olderThan time.Time, limit int) ([]*Task, error) {
+	return r.ListActiveTasksAfter(ctx, olderThan, nil, limit)
+}
+
+// ActiveTaskCursor 是活跃任务对账的稳定键集游标。created_at 可能相同，必须以 id
+// 作为第二排序键，避免跨轮重复或遗漏。
+type ActiveTaskCursor struct {
+	CreatedAt time.Time
+	ID        string
+}
+
+func buildListActiveTasksSQL(
+	olderThan time.Time,
+	after *ActiveTaskCursor,
+	limit int,
+) (string, []any, error) {
 	q := storage.Psql.Select(taskColumns()...).
 		From("device_tasks").
 		Where(sq.Eq{"status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
 		Where(sq.Lt{"created_at": olderThan}).
-		OrderBy("created_at ASC")
+		OrderBy("created_at ASC", "id ASC")
+	if after != nil {
+		q = q.Where(sq.Expr(
+			"(created_at, id) > (?, ?)",
+			after.CreatedAt,
+			after.ID,
+		))
+	}
 	if limit > 0 {
 		q = q.Limit(uint64(limit))
 	}
-	query, args, err := q.ToSql()
+	return q.ToSql()
+}
+
+// ListActiveTasksAfter 返回游标之后的一个有界活跃任务批次。
+func (r *PgTaskRepository) ListActiveTasksAfter(
+	ctx context.Context,
+	olderThan time.Time,
+	after *ActiveTaskCursor,
+	limit int,
+) ([]*Task, error) {
+	query, args, err := buildListActiveTasksSQL(olderThan, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("build list active query: %w", err)
 	}

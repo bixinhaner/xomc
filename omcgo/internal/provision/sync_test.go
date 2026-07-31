@@ -39,6 +39,10 @@ func TestEnqueueGPVBatches_UsesSyncGPVExpiresIn(t *testing.T) {
 	for i, req := range captured {
 		assert.Equalf(t, syncGPVTaskExpiresIn, req.ExpiresIn,
 			"batch %d ExpiresIn 期望使用 syncGPVTaskExpiresIn=%d 而非默认 0", i, syncGPVTaskExpiresIn)
+		require.NotNilf(t, req.MaxRetries, "batch %d 必须显式配置重试预算", i)
+		assert.Equalf(t, req.ExpiresIn/req.RetryIntervalSeconds, *req.MaxRetries,
+			"batch %d 的重试预算必须覆盖完整 TTL", i)
+		assert.Equal(t, 30, req.RetryIntervalSeconds)
 	}
 	assert.Equal(t, 1800, syncGPVTaskExpiresIn, "syncGPVTaskExpiresIn 常量值不应被悄悄改小")
 }

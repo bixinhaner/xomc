@@ -9,6 +9,7 @@ set -uo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 dashboard="$repo_root/deployments/monitoring/grafana/dashboards/omc-storage-queue-governance.json"
 alerts="$repo_root/deployments/monitoring/alerts/storage-queue-alerts.yml"
+legacy_alerts="$repo_root/deployments/monitoring/alerts/omc-rules.yml"
 failures=0
 
 fail() {
@@ -58,6 +59,17 @@ if ! grep -Fq 'expr: (max by (queue_family) (omc_redis_task_queue_oldest_age_sec
   || ! grep -Fq 'min by (queue_family)' "$alerts" \
   || ! grep -Fq 'time() - omc_redis_task_queue_sample_timestamp_seconds < bool 120' "$alerts"; then
   fail "Redis oldest-age alert is not gated by all-observer health and freshness"
+fi
+
+if grep -Fq 'omc_tasks_pending_total' "$legacy_alerts"; then
+  fail "legacy process-local task gauge still drives an alert instead of the persistent queue observer"
+fi
+
+if ! grep -Fq 'alert: PMRegistrationWaitStale' "$alerts" \
+  || ! grep -Fq 'durable="pm-registration-wait"' "$alerts" \
+  || ! grep -Fq 'omc_nats_consumer_up == 1' "$alerts" \
+  || ! grep -Fq 'time() - omc_nats_consumer_sample_timestamp_seconds < 120' "$alerts"; then
+  fail "PM registration wait queue lacks a fresh-observer-gated stale-event alert"
 fi
 
 if (( failures > 0 )); then

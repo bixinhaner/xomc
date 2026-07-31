@@ -16,6 +16,7 @@ import MultiInstanceTable, { formatDeviceFaultBrief, formatTime, statusTagSpec }
 import BscBtsAddModal from './BscBtsAddModal';
 import { BSC_BTS_FEEDBACK_GROUP_ID } from './bscBtsFeedback';
 import { applyInstanceContext, type QuickSettingsInstanceContext } from './validators';
+import { getMlnMmePoolSyncPaths, isMlnIndexedMmePoolModel } from './mmeIpPlmnIndexed';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
@@ -382,6 +383,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
             <CellParameterForm
               key={`${group.id}::${refreshTick}::${keySuffix}`}
               deviceId={deviceId}
+              paramModel={paramModel}
               active={childActive}
               group={group}
               instanceContext={instanceContext}
@@ -402,6 +404,14 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
         paths.add(applyInstanceContext(group.objectPath, instanceContext, { preserveTrailingInstance: true }));
       }
       for (const param of group.params) {
+        if (
+          group.id === 'enb-mme'
+          && param.name === 'MmeIpPlmnList'
+          && isMlnIndexedMmePoolModel(paramModel)
+        ) {
+          getMlnMmePoolSyncPaths().forEach((path) => paths.add(path));
+          continue;
+        }
         if (param.standardPath) {
           paths.add(applyInstanceContext(param.standardPath, instanceContext));
         }
@@ -422,7 +432,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
       }
     }
     return Array.from(paths).filter(Boolean).sort();
-  }, [visibleGroups, instanceContext]);
+  }, [visibleGroups, instanceContext, paramModel]);
 
   useEffect(() => {
     onSyncTargetPathsChange?.(syncTargetPaths);

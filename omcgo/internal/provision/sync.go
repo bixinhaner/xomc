@@ -31,8 +31,9 @@ import (
 //
 // 沿用 120s 时后半批 task 会被 ExpiredSweeper 抢先标 expired，导致部分 BTS
 // 实例无法落库（前端临区/TRX 表显示不全），与首次同步语义不符。1800s 留出
-// 5~10 次 inform 机会，配合 ACS handler 单 task 1s 处理上限完全够 250 task 收尾。
+// 完整 TTL 内的 inform 机会，配合 ACS handler 单 task 1s 处理上限完成批量收尾。
 const syncGPVTaskExpiresIn = 1800
+const syncGPVTaskRetryIntervalSeconds = 30
 
 // SyncService handles batch parameter value synchronization from devices.
 //
@@ -223,9 +224,8 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 // 可按保守字节估算合批以降低 BSC 256 BTS 场景的串行往返数，同时把估算 NATS payload
 // 控制在 5MB 以下。
 //
-// commandKey 默认使用 "sync-gpv-{sn}-{i}"；issue #219 的新设备 MAC 定向查询
-// 使用 "sync-gpv-partial-{sn}-{i}"。两者都保留 sync-gpv- 前缀供 ACS Fault
-// 自愈和 Path B 结果翻译识别，partial 子前缀则明确禁止全量差异对账。
+// commandKey 使用 "sync-gpv-{sn}-{i}"，保留 sync-gpv- 前缀供 ACS Fault
+// 自愈和 Path B 结果翻译识别。
 //
 // ExpiresIn=syncGPVTaskExpiresIn（1800s）：保留给慢设备/异常大对象的多批兜底窗口。
 // 常规 BSC BTS 对象在 5MB 预算内会一次整对象同步，不再产生 200+ 个实例 task。
@@ -233,15 +233,6 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 // 返回入队成功的 task ID 列表，调用方可用于追溯/北向返回。
 func (s *SyncService) EnqueueGPVBatches(ctx context.Context, deviceSN string, paramPaths []string, sourceID string) ([]string, error) {
 	return s.enqueueGPVBatches(ctx, deviceSN, paramPaths, sourceID, "sync-gpv-")
-}
-
-func (s *SyncService) enqueuePartialGPVBatches(
-	ctx context.Context,
-	deviceSN string,
-	paramPaths []string,
-	sourceID string,
-) ([]string, error) {
-	return s.enqueueGPVBatches(ctx, deviceSN, paramPaths, sourceID, partialSyncGPVCommandKeyPrefix)
 }
 
 func (s *SyncService) enqueueGPVBatches(
@@ -259,6 +250,7 @@ func (s *SyncService) enqueueGPVBatches(
 	}
 	batches := buildGPVBatches(paramPaths, s.batchSize)
 	taskIDs := make([]string, 0, len(batches))
+	maxRetries := task.RetryBudgetCoveringExpiry(syncGPVTaskExpiresIn, syncGPVTaskRetryIntervalSeconds)
 	for i, batch := range batches {
 		gpvParams, err := json.Marshal(map[string]interface{}{
 			"names": batch,
@@ -267,14 +259,16 @@ func (s *SyncService) enqueueGPVBatches(
 			return taskIDs, fmt.Errorf("marshal GPV batch %d: %w", i, err)
 		}
 		t, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
-			DeviceSN:   deviceSN,
-			Method:     MethodGetParameterValues,
-			Params:     gpvParams,
-			Priority:   10 + i,
-			ExpiresIn:  syncGPVTaskExpiresIn,
-			CommandKey: fmt.Sprintf("%s%s-%d", commandKeyPrefix, deviceSN, i),
-			Source:     task.TaskSourceSystem,
-			SourceID:   sourceID,
+			DeviceSN:             deviceSN,
+			Method:               MethodGetParameterValues,
+			Params:               gpvParams,
+			Priority:             10 + i,
+			ExpiresIn:            syncGPVTaskExpiresIn,
+			MaxRetries:           &maxRetries,
+			RetryIntervalSeconds: syncGPVTaskRetryIntervalSeconds,
+			CommandKey:           fmt.Sprintf("%s%s-%d", commandKeyPrefix, deviceSN, i),
+			Source:               task.TaskSourceSystem,
+			SourceID:             sourceID,
 		})
 		if err != nil {
 			return taskIDs, fmt.Errorf("enqueue GPV batch %d: %w", i, err)
@@ -337,18 +331,12 @@ func (s *SyncService) enqueueGPVPrefixes(
 	dev *model.Device,
 	prefixes []string,
 	sourceID string,
-	partial bool,
 ) error {
 	log, _ := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
 	if log != nil {
 		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoverySyncing, "")
 	}
-	var err error
-	if partial {
-		_, err = s.enqueuePartialGPVBatches(ctx, dev.SerialNumber, prefixes, sourceID)
-	} else {
-		_, err = s.EnqueueGPVBatches(ctx, dev.SerialNumber, prefixes, sourceID)
-	}
+	_, err := s.EnqueueGPVBatches(ctx, dev.SerialNumber, prefixes, sourceID)
 	return err
 }
 

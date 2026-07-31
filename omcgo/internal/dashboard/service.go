@@ -22,6 +22,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"github.com/omcgo/omcgo/internal/topology"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -133,12 +134,28 @@ type AlarmTypePieEntry struct {
 
 // KPITimeSeriesEntry represents a single data point within a named KPI series.
 type KPITimeSeriesEntry struct {
-	Time  time.Time   `json:"time"`
-	Value jsonx.Float `json:"value"`
+	Time    time.Time   `json:"time"`
+	Value   jsonx.Float `json:"value"`
+	Partial bool        `json:"partial,omitempty"`
 }
 
 // KPITimeSeriesResponse maps KPI names to their time-series data.
 type KPITimeSeriesResponse map[string][]KPITimeSeriesEntry
+
+type KPITimeSeriesSnapshot struct {
+	Series         KPITimeSeriesResponse     `json:"series"`
+	PeriodProgress []pmstream.PeriodProgress `json:"period_progress"`
+	ProgressState  string                    `json:"progress_state"`
+}
+
+type NetworkProgressReader interface {
+	Query(
+		context.Context,
+		uuid.UUID,
+		time.Time,
+		time.Time,
+	) (pmstream.ProgressQueryResult, error)
+}
 
 // Service aggregates data from multiple modules for the dashboard.
 //
@@ -161,9 +178,10 @@ type Service struct {
 	enabledIndicatorRepo indicator.EnabledIndicatorRepository
 	// networkRollups 只读现有内置任务发布的 network 维度全网结果。
 	// Dashboard 不得回退原始 PM 明细或调用在线聚合。
-	networkRollups NetworkRollupReader
-	kpiQueryGuard  *KPIQueryGuard
-	metrics        *Metrics
+	networkRollups  NetworkRollupReader
+	networkProgress NetworkProgressReader
+	kpiQueryGuard   *KPIQueryGuard
+	metrics         *Metrics
 	// layoutRepo 是 issue #213 S1 全局 KPI 首页布局（dashboard_kpi_layouts）读写仓库。
 	// 可能为 nil（部分测试场景）：此时 GetKPILayout 回退内置默认，SaveKPILayout 报错。
 	layoutRepo KPILayoutRepository
@@ -207,6 +225,10 @@ func (s *Service) SetKPIQueryGuard(guard *KPIQueryGuard) {
 
 func (s *Service) SetMetrics(metrics *Metrics) {
 	s.metrics = metrics
+}
+
+func (s *Service) SetNetworkProgressReader(reader NetworkProgressReader) {
+	s.networkProgress = reader
 }
 
 // GetSummary aggregates dashboard data from multiple sources in parallel.
@@ -1330,7 +1352,147 @@ func (s *Service) GetKPITimeSeriesWithMetadata(ctx context.Context, kpiNames []s
 	return cloneKPITimeSeriesResponse(result), metadata, nil
 }
 
+func (s *Service) GetKPITimeSeriesSnapshotWithMetadata(
+	ctx context.Context,
+	kpiNames []string,
+	technology model.Technology,
+	granularity metrics.Granularity,
+	startTime, endTime time.Time,
+) (KPITimeSeriesSnapshot, KPIQueryMetadata, error) {
+	load := func(loadCtx context.Context) (KPITimeSeriesSnapshot, error) {
+		// The snapshot explicitly supplies the current open day/week from the
+		// progress reader. Absence of a final published row for that natural
+		// period is expected, so it must not feed the final-result-missing alarm.
+		series, err := s.getKPITimeSeriesUnprotectedWithObservation(
+			loadCtx, kpiNames, technology, granularity, startTime, endTime,
+			false,
+		)
+		if err != nil {
+			return KPITimeSeriesSnapshot{}, err
+		}
+		snapshot := KPITimeSeriesSnapshot{
+			Series: series, PeriodProgress: []pmstream.PeriodProgress{},
+			ProgressState: "not_applicable",
+		}
+		if granularity != metrics.GranularityDaily &&
+			granularity != metrics.GranularityWeekly {
+			return snapshot, nil
+		}
+		snapshot.ProgressState = "available"
+		if s.networkProgress == nil {
+			snapshot.ProgressState = "unavailable"
+			return snapshot, nil
+		}
+		taskIDs := networkTaskIDs(technology)
+		requested := make(map[string]struct{}, len(kpiNames))
+		for _, name := range normalizeMetricPaths(kpiNames) {
+			requested[name] = struct{}{}
+		}
+		for _, taskID := range taskIDs {
+			progress, err := s.networkProgress.Query(loadCtx, taskID, startTime, endTime)
+			if err != nil {
+				snapshot.ProgressState = "unavailable"
+				snapshot.PeriodProgress = []pmstream.PeriodProgress{}
+				return snapshot, nil
+			}
+			for _, row := range progress.Rows {
+				if row.Dimension != pmstream.DimensionNetwork ||
+					string(row.Granularity) != string(granularity) ||
+					row.MetricType != "kpi" ||
+					row.WindowStart.Before(startTime) ||
+					!row.WindowStart.Before(endTime) {
+					continue
+				}
+				if _, ok := requested[row.MetricPath]; !ok {
+					continue
+				}
+				snapshot.Series[row.MetricPath] = append(
+					snapshot.Series[row.MetricPath],
+					KPITimeSeriesEntry{
+						Time: row.WindowStart, Value: jsonx.Float(row.Value), Partial: true,
+					},
+				)
+			}
+			for _, period := range progress.Periods {
+				if string(period.Granularity) != string(granularity) ||
+					!strings.EqualFold(period.EntityKey, "network") ||
+					period.WindowStart.Before(startTime) ||
+					!period.WindowStart.Before(endTime) {
+					continue
+				}
+				snapshot.PeriodProgress = append(snapshot.PeriodProgress, period)
+			}
+		}
+		sortKPITimeSeriesSnapshot(&snapshot)
+		return snapshot, nil
+	}
+
+	if s.kpiQueryGuard == nil || len(kpiNames) == 0 {
+		snapshot, err := load(ctx)
+		return snapshot, KPIQueryMetadata{}, err
+	}
+	key := "series-progress:" + dashboardSeriesCacheKey(
+		kpiNames, technology, granularity, startTime, endTime,
+	)
+	value, metadata, err := s.kpiQueryGuard.Do(ctx, key, func(loadCtx context.Context) (any, error) {
+		return load(loadCtx)
+	})
+	if err != nil {
+		return KPITimeSeriesSnapshot{}, KPIQueryMetadata{}, err
+	}
+	snapshot, ok := value.(KPITimeSeriesSnapshot)
+	if !ok {
+		return KPITimeSeriesSnapshot{}, KPIQueryMetadata{},
+			fmt.Errorf("dashboard KPI progress cache type mismatch")
+	}
+	snapshot.Series = cloneKPITimeSeriesResponse(snapshot.Series)
+	snapshot.PeriodProgress = append(
+		[]pmstream.PeriodProgress(nil), snapshot.PeriodProgress...,
+	)
+	return snapshot, metadata, nil
+}
+
+func sortKPITimeSeriesSnapshot(snapshot *KPITimeSeriesSnapshot) {
+	for name, entries := range snapshot.Series {
+		sort.SliceStable(entries, func(i, j int) bool {
+			return entries[i].Time.Before(entries[j].Time)
+		})
+		out := entries[:0]
+		for _, entry := range entries {
+			if len(out) > 0 && out[len(out)-1].Time.Equal(entry.Time) {
+				if entry.Partial {
+					out[len(out)-1] = entry
+				}
+				continue
+			}
+			out = append(out, entry)
+		}
+		snapshot.Series[name] = out
+	}
+	sort.Slice(snapshot.PeriodProgress, func(i, j int) bool {
+		if snapshot.PeriodProgress[i].Granularity != snapshot.PeriodProgress[j].Granularity {
+			return snapshot.PeriodProgress[i].Granularity < snapshot.PeriodProgress[j].Granularity
+		}
+		return snapshot.PeriodProgress[i].WindowStart.Before(
+			snapshot.PeriodProgress[j].WindowStart,
+		)
+	})
+}
+
 func (s *Service) getKPITimeSeriesUnprotected(ctx context.Context, kpiNames []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
+	return s.getKPITimeSeriesUnprotectedWithObservation(
+		ctx, kpiNames, technology, granularity, startTime, endTime, true,
+	)
+}
+
+func (s *Service) getKPITimeSeriesUnprotectedWithObservation(
+	ctx context.Context,
+	kpiNames []string,
+	technology model.Technology,
+	granularity metrics.Granularity,
+	startTime, endTime time.Time,
+	observeMissing bool,
+) (KPITimeSeriesResponse, error) {
 	result := make(KPITimeSeriesResponse, len(kpiNames))
 
 	if len(kpiNames) == 0 {
@@ -1352,7 +1514,9 @@ func (s *Service) getKPITimeSeriesUnprotected(ctx context.Context, kpiNames []st
 		}
 	}
 
-	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, technology, granularity, startTime, endTime)
+	points, err := s.fetchNetworkKCodeSeries(
+		ctx, kcodes, technology, granularity, startTime, endTime, observeMissing,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1441,7 +1605,14 @@ type networkSeriesPoint struct {
 }
 
 // fetchNetworkKCodeSeries 直接读取多个指标编号的首页全网发布结果。
-func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
+func (s *Service) fetchNetworkKCodeSeries(
+	ctx context.Context,
+	kcodes []string,
+	technology model.Technology,
+	granularity metrics.Granularity,
+	startTime, endTime time.Time,
+	observeMissing bool,
+) ([]networkSeriesPoint, error) {
 	if s.networkRollups == nil {
 		return nil, fmt.Errorf("dashboard network rollup reader not configured")
 	}
@@ -1453,7 +1624,29 @@ func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, 
 	if err != nil {
 		return nil, fmt.Errorf("query dashboard network %s kpi series: %w", granularity, err)
 	}
-	s.observeNetworkRollups(rows, kcodes, technology, granularity, time.Now())
+	requested := kcodes
+	if !observeMissing {
+		// Snapshot queries append an in-progress value for the current natural
+		// day/week. The absence of that one final row is expected, but closed
+		// periods in the same range still need missing-result monitoring.
+		businessNow := response.TimeInCurrentLocation(ctx, time.Now())
+		cutoff := currentNaturalPeriodStart(granularity, businessNow)
+		if !startTime.Before(cutoff) {
+			requested = nil
+		} else {
+			closedRows := make([]NetworkRollupPoint, 0, len(rows))
+			for _, row := range rows {
+				if row.WindowStart.Before(cutoff) {
+					closedRows = append(closedRows, row)
+				}
+			}
+			s.observeNetworkMissing(
+				closedRows, requested, technology, granularity,
+			)
+			requested = nil
+		}
+	}
+	s.observeNetworkRollups(rows, requested, technology, granularity, time.Now())
 
 	points := make([]networkSeriesPoint, 0, len(rows))
 	for _, row := range rows {
@@ -1465,6 +1658,46 @@ func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, 
 		})
 	}
 	return sortAndDedupeNetworkSeriesPoints(points), nil
+}
+
+func (s *Service) observeNetworkMissing(
+	points []NetworkRollupPoint,
+	requested []string,
+	technology model.Technology,
+	granularity metrics.Granularity,
+) {
+	if s.metrics == nil || technology == "" || len(requested) == 0 {
+		return
+	}
+	present := make(map[string]struct{})
+	for _, point := range points {
+		if point.Technology == technology {
+			present[point.MetricPath] = struct{}{}
+		}
+	}
+	missing := 0
+	for _, path := range normalizeMetricPaths(requested) {
+		if _, ok := present[path]; !ok {
+			missing++
+		}
+	}
+	s.metrics.ObserveMissing(
+		string(technology), string(granularity), float64(missing),
+	)
+}
+
+func currentNaturalPeriodStart(
+	granularity metrics.Granularity,
+	now time.Time,
+) time.Time {
+	dayStart := time.Date(
+		now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location(),
+	)
+	if granularity != metrics.GranularityWeekly {
+		return dayStart.UTC()
+	}
+	daysSinceMonday := (int(dayStart.Weekday()) + 6) % 7
+	return dayStart.AddDate(0, 0, -daysSinceMonday).UTC()
 }
 
 func sortAndDedupeNetworkSeriesPoints(points []networkSeriesPoint) []networkSeriesPoint {
@@ -1494,7 +1727,9 @@ func sortAndDedupeNetworkSeriesPoints(points []networkSeriesPoint) []networkSeri
 func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, startTime, endTime time.Time) ([]KPITrendEntry, error) {
 	kcodes := []string{kpiName}
 
-	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, "", metrics.GranularityHourly, startTime, endTime)
+	points, err := s.fetchNetworkKCodeSeries(
+		ctx, kcodes, "", metrics.GranularityHourly, startTime, endTime, true,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("query network kpi series: %w", err)
 	}

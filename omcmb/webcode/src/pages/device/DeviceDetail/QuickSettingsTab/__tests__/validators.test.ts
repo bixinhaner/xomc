@@ -96,6 +96,13 @@ describe('quick settings parameter type resolution', () => {
     expect(type).toBe('unsignedInt');
     expect(validateValue('26', type, { minValue: 22, maxValue: 32 })).toBeNull();
   });
+
+  it('normalizes schema type casing without losing canonical parameter types', () => {
+    expect(resolveQuickSettingsParameterType(undefined, 'BOOLEAN')).toBe('boolean');
+    expect(resolveQuickSettingsParameterType(undefined, 'UNSIGNEDINT')).toBe('unsignedInt');
+    expect(resolveQuickSettingsParameterType(undefined, 'DATETIME')).toBe('dateTime');
+    expect(resolveQuickSettingsParameterType(undefined, 'HEXBINARY')).toBe('hexBinary');
+  });
 });
 
 describe('MME IP + PLMN validation', () => {

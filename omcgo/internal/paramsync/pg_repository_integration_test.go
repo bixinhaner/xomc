@@ -87,6 +87,65 @@ func TestPGRepositoryCompleteRequestRejectsTerminalState(t *testing.T) {
 	assert.Equal(t, RequestStatusCancelled, stored.Status)
 }
 
+func TestPGRepositoryCreateAutomaticDeviceOnlineRequestQueuesDuringBackoff(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	repo := NewPGRepository(pool)
+	now := time.Now().UTC()
+	nextAttemptAt := now.Add(5 * time.Minute)
+	deviceID := uuid.New()
+	request := &SyncRequest{
+		ID:            uuid.New(),
+		DeviceID:      deviceID,
+		DeviceSN:      "TEST-DEVICE-ONLINE-BACKOFF-" + uuid.NewString(),
+		CallerType:    "provision",
+		TriggerReason: TriggerDeviceOnline,
+		SyncScope:     SyncScopeFull,
+		Status:        RequestStatusAccepted,
+		Priority:      10,
+		NextAttemptAt: now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	_, err := pool.Exec(context.Background(), `
+INSERT INTO parameter_sync_device_state
+  (device_id, consecutive_failures, next_auto_sync_at, updated_at)
+VALUES ($1, 1, $2, $3)`, deviceID, nextAttemptAt, now)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM parameter_sync_requests WHERE id=$1`, request.ID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM parameter_sync_device_state WHERE device_id=$1`, deviceID)
+	})
+
+	allowed, err := repo.CreateAutomaticRequest(context.Background(), request, now)
+
+	require.NoError(t, err)
+	assert.False(t, allowed)
+	assert.Equal(t, RequestStatusQueued, request.Status)
+	assert.Equal(t, ResultCodeAutomaticBackoff, request.ResultCode)
+	assert.Nil(t, request.CompletedAt)
+	assert.WithinDuration(t, nextAttemptAt, request.NextAttemptAt, time.Second)
+	stored, err := repo.GetRequest(context.Background(), request.ID)
+	require.NoError(t, err)
+	assert.Equal(t, RequestStatusQueued, stored.Status)
+	assert.Nil(t, stored.CompletedAt)
+	assert.WithinDuration(t, nextAttemptAt, stored.NextAttemptAt, time.Second)
+
+	service := NewService(repo, stubPlanner{plan: &Plan{
+		Batches: []TaskBatch{{Paths: []string{"Device.DeviceInfo."}}},
+	}})
+	service.now = func() time.Time { return nextAttemptAt.Add(time.Second) }
+	dispatched, err := service.DispatchQueued(context.Background(), 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, dispatched)
+
+	stored, err = repo.GetRequest(context.Background(), request.ID)
+	require.NoError(t, err)
+	assert.Equal(t, RequestStatusRunning, stored.Status)
+	assert.NotNil(t, stored.RunID)
+	assert.Empty(t, stored.ResultCode)
+	assert.Empty(t, stored.ErrorMessage)
+}
+
 func TestPGRepositoryCreateRunDoesNotResurrectCancelledRequest(t *testing.T) {
 	pool := newParamSyncTestPool(t)
 	req := insertParamSyncRequestForTest(t, pool, RequestStatusCancelled)

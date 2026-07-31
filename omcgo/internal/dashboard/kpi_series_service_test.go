@@ -2,14 +2,27 @@ package dashboard
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/jsonx"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 )
+
+type fixedDashboardTimezoneProvider struct {
+	location *time.Location
+}
+
+func (p fixedDashboardTimezoneProvider) Location(context.Context) *time.Location {
+	return p.location
+}
 
 type recordingNetworkRollupReader struct {
 	queries []NetworkRollupQuery
@@ -24,6 +37,258 @@ func (r *recordingNetworkRollupReader) ListSeries(_ context.Context, query Netwo
 
 func (r *recordingNetworkRollupReader) ListLatestHourly(context.Context, time.Time, time.Time) ([]NetworkRollupPoint, error) {
 	return r.points, r.err
+}
+
+type fixedNetworkProgressReader struct {
+	expectedTaskID uuid.UUID
+	result         pmstream.ProgressQueryResult
+	err            error
+}
+
+func (r *fixedNetworkProgressReader) Query(
+	_ context.Context,
+	taskID uuid.UUID,
+	_, _ time.Time,
+) (pmstream.ProgressQueryResult, error) {
+	if taskID != r.expectedTaskID {
+		return pmstream.ProgressQueryResult{}, errors.New("unexpected network progress task")
+	}
+	return r.result, r.err
+}
+
+func TestGetKPITimeSeriesSnapshotAppendsOnlyRequestedNetworkPartial(t *testing.T) {
+	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(31 * 24 * time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	reader := &recordingNetworkRollupReader{points: []NetworkRollupPoint{{
+		Technology: model.TechLTE, MetricPath: "K1",
+		Granularity: metrics.GranularityDaily,
+		WindowStart: start, WindowEnd: start.Add(24 * time.Hour),
+		Value: jsonx.Float(10), Complete: true,
+	}}}
+	progress := &fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			Rows: []pmstream.ProgressResult{
+				{
+					TaskID: taskID, Granularity: pmstream.GranularityDaily,
+					WindowStart: start.Add(30 * 24 * time.Hour),
+					WindowEnd:   end,
+					Dimension:   pmstream.DimensionNetwork, DimensionKey: "network",
+					MetricPath: "K1", MetricType: "kpi", Value: 42, Partial: true,
+					ReceivedSlots: 4, ExpectedSlots: 24,
+				},
+				{
+					TaskID: taskID, Granularity: pmstream.GranularityDaily,
+					WindowStart: start.Add(30 * 24 * time.Hour),
+					WindowEnd:   end,
+					Dimension:   pmstream.DimensionDevice, DimensionKey: "device-1",
+					MetricPath: "K1", MetricType: "kpi", Value: 999, Partial: true,
+				},
+				{
+					TaskID: taskID, Granularity: pmstream.GranularityDaily,
+					WindowStart: start.Add(30 * 24 * time.Hour),
+					WindowEnd:   end,
+					Dimension:   pmstream.DimensionNetwork, DimensionKey: "network",
+					MetricPath: "K2", MetricType: "kpi", Value: 888, Partial: true,
+				},
+			},
+			Periods: []pmstream.PeriodProgress{{
+				Granularity: pmstream.GranularityDaily,
+				WindowStart: start.Add(30 * 24 * time.Hour), WindowEnd: end,
+				EntityKey: "network", ReceivedSlots: 4, ExpectedSlots: 24,
+			}},
+		},
+	}
+	service := &Service{networkRollups: reader}
+	service.SetNetworkProgressReader(progress)
+
+	snapshot, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, start, end,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "available", snapshot.ProgressState)
+	require.Len(t, snapshot.Series["K1"], 2)
+	require.Equal(t, jsonx.Float(10), snapshot.Series["K1"][0].Value)
+	require.False(t, snapshot.Series["K1"][0].Partial)
+	require.Equal(t, jsonx.Float(42), snapshot.Series["K1"][1].Value)
+	require.True(t, snapshot.Series["K1"][1].Partial)
+	require.Len(t, snapshot.PeriodProgress, 1)
+	require.EqualValues(t, 4, snapshot.PeriodProgress[0].ReceivedSlots)
+	require.EqualValues(t, 24, snapshot.PeriodProgress[0].ExpectedSlots)
+	require.NotContains(t, snapshot.Series, "K2")
+}
+
+func TestGetKPITimeSeriesSnapshotKeepsPublishedSeriesWhenProgressUnavailable(t *testing.T) {
+	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(31 * 24 * time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	reader := &recordingNetworkRollupReader{points: []NetworkRollupPoint{{
+		Technology: model.TechLTE, MetricPath: "K1",
+		Granularity: metrics.GranularityDaily,
+		WindowStart: start, WindowEnd: start.Add(24 * time.Hour),
+		Value: jsonx.Float(10), Complete: true,
+	}}}
+	service := &Service{networkRollups: reader}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		err:            errors.New("redis timeout"),
+	})
+
+	snapshot, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, start, end,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "unavailable", snapshot.ProgressState)
+	require.Len(t, snapshot.Series["K1"], 1)
+	require.Equal(t, jsonx.Float(10), snapshot.Series["K1"][0].Value)
+	require.Empty(t, snapshot.PeriodProgress)
+}
+
+func TestGetKPITimeSeriesSnapshotDoesNotReportCurrentPartialPeriodAsMissing(t *testing.T) {
+	start := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	end := start.Add(12 * time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	registry := prometheus.NewRegistry()
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+		metrics:        NewMetrics(registry),
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			Rows: []pmstream.ProgressResult{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: start, WindowEnd: start.Add(24 * time.Hour),
+				Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
+				MetricPath: "K1", MetricType: "kpi", Value: 42, Partial: true,
+				ReceivedSlots: 2, ExpectedSlots: 24,
+			}},
+		},
+	})
+
+	snapshot, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, start, end,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "available", snapshot.ProgressState)
+	require.Len(t, snapshot.Series["K1"], 1)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		require.NotEqual(t, "dashboard_kpi_missing_result_total", family.GetName(),
+			"a valid current partial period must not increment the published-result-missing counter")
+	}
+}
+
+func TestGetKPITimeSeriesSnapshotStillReportsMissingClosedPeriod(t *testing.T) {
+	now := time.Now().UTC()
+	currentDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	start := currentDay.Add(-24 * time.Hour)
+	end := now.Add(time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	registry := prometheus.NewRegistry()
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+		metrics:        NewMetrics(registry),
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			Rows: []pmstream.ProgressResult{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: currentDay, WindowEnd: currentDay.Add(24 * time.Hour),
+				Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
+				MetricPath: "K1", MetricType: "kpi", Value: 42, Partial: true,
+			}},
+		},
+	})
+
+	_, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, start, end,
+	)
+	require.NoError(t, err)
+
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	var missing float64
+	for _, family := range families {
+		if family.GetName() == "dashboard_kpi_missing_result_total" {
+			for _, metric := range family.GetMetric() {
+				missing += metric.GetCounter().GetValue()
+			}
+		}
+	}
+	require.Equal(t, float64(1), missing,
+		"current partial must not hide a missing final result from a closed period")
+}
+
+func TestGetKPITimeSeriesSnapshotUsesBusinessTimezoneForOpenPeriod(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	response.SetTimezoneProvider(fixedDashboardTimezoneProvider{location: location})
+	t.Cleanup(func() { response.SetTimezoneProvider(nil) })
+	now := time.Now().In(location)
+	currentDay := time.Date(
+		now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location,
+	)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	registry := prometheus.NewRegistry()
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+		metrics:        NewMetrics(registry),
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			Rows: []pmstream.ProgressResult{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: currentDay.UTC(),
+				WindowEnd:   currentDay.Add(24 * time.Hour).UTC(),
+				Dimension:   pmstream.DimensionNetwork, DimensionKey: "network",
+				MetricPath: "K1", MetricType: "kpi", Value: 42, Partial: true,
+			}},
+		},
+	})
+
+	_, _, err = service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, currentDay.UTC(), now.Add(time.Hour).UTC(),
+	)
+	require.NoError(t, err)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		require.NotEqual(t, "dashboard_kpi_missing_result_total", family.GetName(),
+			"the current business-timezone day must not be reported as a missing final period")
+	}
+}
+
+func TestCurrentNaturalPeriodStartUsesBusinessTimezone(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	now := time.Date(2026, 7, 31, 18, 0, 0, 0, location)
+
+	require.Equal(t,
+		time.Date(2026, 7, 30, 16, 0, 0, 0, time.UTC),
+		currentNaturalPeriodStart(metrics.GranularityDaily, now),
+	)
+	require.Equal(t,
+		time.Date(2026, 7, 26, 16, 0, 0, 0, time.UTC),
+		currentNaturalPeriodStart(metrics.GranularityWeekly, now),
+	)
 }
 
 func TestGetKPITimeSeries_RoutesRequestedGranularity(t *testing.T) {

@@ -37,8 +37,12 @@ contains "动态 ACS server 校验失败必须阻断" "grep -Fq 'server acs:7557
 contains "动态 ACS zone 校验失败必须阻断" "grep -Fq 'zone acs_backend' || return 1" "$INSTALL"
 contains "旧 web 不支持动态 upstream 时先刷新入口" "先刷新 web 动态 ACS upstream" "$INSTALL"
 contains "候选 ACS 就绪后才允许替换正式实例" "acs_ha_wait_ready acs-candidate" "$INSTALL"
+contains "存量发布单独替换正式 ACS" '"${DC[@]}" up -d --no-deps acs' "$INSTALL"
+contains "正式 ACS 就绪后才更新其余服务" "acs_ha_wait_ready acs" "$INSTALL"
+contains "存量发布的其余服务显式排除 ACS 依赖" '"${DC[@]}" up -d --no-deps "${remaining_services[@]}"' "$INSTALL"
+contains "存量发布覆盖全部监控 exporter" "nats-exporter nginx-exporter node-exporter cadvisor" "$INSTALL"
 contains "等待 Nginx 动态 DNS 纳入候选实例" "sleep 12" "$INSTALL"
-contains "候选探针直达 CWMP 业务端口" '"http://${service}:7557/readyz"' "$INSTALL"
+contains "候选探针直达容器 IP 的 CWMP 业务端口" '"http://${service_ip}:7557/readyz"' "$INSTALL"
 if [ "$(grep -Fc 'acs_ha_wait_ready acs-candidate' "$INSTALL")" -ge 2 ]; then
   pass=$((pass + 1))
 else
@@ -51,7 +55,8 @@ contains "健康检查验证候选 ACS readiness" 'acs_service_ready acs-candida
 contains "Prometheus 独立抓取候选 ACS" '"acs-candidate:9090"' "$PROMETHEUS"
 contains "Prometheus 独立抓取正式 ACS" '"acs-primary:9090"' "$PROMETHEUS"
 contains "单 ACS 副本失效仅告警降级" "alert: OMCACSReplicaDown" "$ALERTS"
-contains "全部 ACS 副本失效才判主链路中断" 'sum(up{job="omc-acs"}) < 1' "$ALERTS"
+contains "全部 ACS 副本失效才判主链路中断" 'sum(up{job="omc-acs", instance=~"acs-primary:9090|acs-candidate:9090"}) < 1' "$ALERTS"
+contains "副本告警忽略旧抓取目标残留" 'up{job="omc-acs", instance=~"acs-primary:9090|acs-candidate:9090"} == 0' "$ALERTS"
 contains "资源计划指标覆盖候选 ACS" "'acs-candidate ACS'" "$RESOURCE_METRICS"
 contains "资源规划总额计入候选 ACS" "ALLOC_SUM + ACS_MEM" "$RESOURCE_PLANNER"
 contains "OTel 日志标记 primary 实例" 'value: primary' "$OTELCOL"

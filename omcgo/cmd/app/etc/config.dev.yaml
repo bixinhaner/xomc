@@ -52,7 +52,7 @@ redis:
 # Reliable parameter-sync data plane. Enabled by default in development so the
 # durable request/run/result/finalize path is exercised by local testing.
 param_sync:
-  routing_mode: legacy
+  routing_mode: durable
   manual_offline_mode: reject
   run_enabled: true
   result_consumer_enabled: true

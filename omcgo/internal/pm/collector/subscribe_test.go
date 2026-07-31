@@ -2,35 +2,64 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
-// countingBus 是只统计 QueueSubscribe 调用次数的最小 EventBus 假实现。
-type countingBus struct {
-	queueSubs int
-	lastQueue string
+type queueSubscriptionCall struct {
+	subject string
+	queue   string
+	handler event.EventHandler
 }
 
-func (b *countingBus) Publish(context.Context, string, event.Event) error { return nil }
+type publishCall struct {
+	subject string
+	event   event.Event
+}
+
+// countingBus 记录 PM 主队列和注册等待队列的订阅、接力行为。
+type countingBus struct {
+	queueSubs  []queueSubscriptionCall
+	publishes  []publishCall
+	publishErr error
+}
+
+func (b *countingBus) Publish(_ context.Context, subject string, evt event.Event) error {
+	b.publishes = append(b.publishes, publishCall{subject: subject, event: evt})
+	return b.publishErr
+}
 func (b *countingBus) Subscribe(string, event.EventHandler) (event.Subscription, error) {
 	return noopSub{}, nil
 }
-func (b *countingBus) QueueSubscribe(_ string, queue string, _ event.EventHandler) (event.Subscription, error) {
-	b.queueSubs++
-	b.lastQueue = queue
+func (b *countingBus) QueueSubscribe(subject string, queue string, handler event.EventHandler) (event.Subscription, error) {
+	b.queueSubs = append(b.queueSubs, queueSubscriptionCall{
+		subject: subject,
+		queue:   queue,
+		handler: handler,
+	})
 	return noopSub{}, nil
 }
 func (b *countingBus) PullSubscribe(_ string, queue string, _ event.EventHandler) (event.Subscription, error) {
-	b.queueSubs++
-	b.lastQueue = queue
+	b.queueSubs = append(b.queueSubs, queueSubscriptionCall{queue: queue})
 	return noopSub{}, nil
 }
 func (b *countingBus) Close() error { return nil }
+
+func (b *countingBus) handler(subject string) event.EventHandler {
+	for _, sub := range b.queueSubs {
+		if sub.subject == subject {
+			return sub.handler
+		}
+	}
+	return nil
+}
 
 type noopSub struct{}
 
@@ -44,18 +73,28 @@ func newTestCollector() *PMCollector {
 func TestPMCollector_Subscribe_DefaultSingleSubscription(t *testing.T) {
 	bus := &countingBus{}
 	require.NoError(t, newTestCollector().Subscribe(bus))
-	assert.Equal(t, 1, bus.queueSubs)
-	assert.Equal(t, "pm-workers", bus.lastQueue, "所有订阅共享同一 durable queue 组")
+	require.Len(t, bus.queueSubs, 2)
+	assert.Equal(t, event.SubjectPMFileDeferred, bus.queueSubs[0].subject)
+	assert.Equal(t, "pm-registration-wait", bus.queueSubs[0].queue)
+	assert.Equal(t, event.SubjectPMFileReceived, bus.queueSubs[1].subject)
+	assert.Equal(t, "pm-workers", bus.queueSubs[1].queue)
 }
 
-// SetConcurrency(N) → N 个 QueueSubscribe，全部落在同一 pm-workers 组（JetStream 负载均衡）。
+// SetConcurrency(N) → 主队列和注册等待队列各 N 个订阅，分别使用独立 durable。
 func TestPMCollector_Subscribe_NConcurrency(t *testing.T) {
 	bus := &countingBus{}
 	c := newTestCollector()
 	c.SetConcurrency(4)
 	require.NoError(t, c.Subscribe(bus))
-	assert.Equal(t, 4, bus.queueSubs)
-	assert.Equal(t, "pm-workers", bus.lastQueue)
+	require.Len(t, bus.queueSubs, 8)
+	for i := 0; i < 4; i++ {
+		assert.Equal(t, event.SubjectPMFileDeferred, bus.queueSubs[i].subject)
+		assert.Equal(t, "pm-registration-wait", bus.queueSubs[i].queue)
+	}
+	for i := 4; i < 8; i++ {
+		assert.Equal(t, event.SubjectPMFileReceived, bus.queueSubs[i].subject)
+		assert.Equal(t, "pm-workers", bus.queueSubs[i].queue)
+	}
 }
 
 // 并发数 <=0 兜底为 1，避免零订阅静默吞消息。
@@ -65,6 +104,72 @@ func TestPMCollector_Subscribe_NonPositiveFallsBackToOne(t *testing.T) {
 		c := newTestCollector()
 		c.SetConcurrency(n)
 		require.NoError(t, c.Subscribe(bus))
-		assert.Equal(t, 1, bus.queueSubs, "n=%d 应兜底为单订阅", n)
+		assert.Len(t, bus.queueSubs, 2, "n=%d 应让两个 durable 各兜底为单订阅", n)
 	}
+}
+
+func TestPMCollector_Subscribe_DeferredDeviceDoesNotOccupyMainConsumer(t *testing.T) {
+	bus := &countingBus{}
+	c := newTestCollector()
+	c.SetDeviceLookup(&fakeDeviceLookup{})
+	require.NoError(t, c.Subscribe(bus))
+
+	evt, err := event.NewEvent(event.SubjectPMFileReceived, FileReceivedPayload{
+		DeviceSN:  "registration-lag",
+		MinIOPath: "registration-lag.xml",
+	})
+	require.NoError(t, err)
+	originalTimestamp := evt.Timestamp
+
+	mainHandler := bus.handler(event.SubjectPMFileReceived)
+	require.NotNil(t, mainHandler)
+	require.NoError(t, mainHandler(context.Background(), evt),
+		"main consumer must ACK after durable handoff instead of retaining an ack-pending slot")
+	require.Len(t, bus.publishes, 1)
+	assert.Equal(t, event.SubjectPMFileDeferred, bus.publishes[0].subject)
+	assert.Equal(t, evt.ID, bus.publishes[0].event.ID)
+	assert.Equal(t, originalTimestamp, bus.publishes[0].event.Timestamp,
+		"registration grace must remain anchored to the original upload event")
+
+	deferredHandler := bus.handler(event.SubjectPMFileDeferred)
+	require.NotNil(t, deferredHandler)
+	err = deferredHandler(context.Background(), bus.publishes[0].event)
+	require.ErrorIs(t, err, reliability.ErrDeferred)
+	assert.Len(t, bus.publishes, 1,
+		"the wait consumer must use NATS delayed redelivery, not recursively republish")
+}
+
+func TestPMCollector_Subscribe_HandoffFailureKeepsOriginalRetryable(t *testing.T) {
+	bus := &countingBus{publishErr: errors.New("NATS unavailable")}
+	c := newTestCollector()
+	c.SetDeviceLookup(&fakeDeviceLookup{})
+	require.NoError(t, c.Subscribe(bus))
+
+	evt, err := event.NewEvent(event.SubjectPMFileReceived, FileReceivedPayload{
+		DeviceSN:  "registration-lag",
+		MinIOPath: "registration-lag.xml",
+	})
+	require.NoError(t, err)
+
+	err = bus.handler(event.SubjectPMFileReceived)(context.Background(), evt)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "handoff deferred PM event")
+}
+
+func TestPMCollector_Subscribe_ExpiredRegistrationDoesNotReenterWaitLane(t *testing.T) {
+	bus := &countingBus{}
+	c := newTestCollector()
+	c.SetDeviceLookup(&fakeDeviceLookup{})
+	require.NoError(t, c.Subscribe(bus))
+
+	evt, err := event.NewEvent(event.SubjectPMFileReceived, FileReceivedPayload{
+		DeviceSN:  "never-registered",
+		MinIOPath: "never-registered.xml",
+	})
+	require.NoError(t, err)
+	evt.Timestamp = time.Now().Add(-DeviceRegistrationGrace - time.Second)
+
+	err = bus.handler(event.SubjectPMFileReceived)(context.Background(), evt)
+	require.ErrorIs(t, err, reliability.ErrPermanent)
+	assert.Empty(t, bus.publishes)
 }

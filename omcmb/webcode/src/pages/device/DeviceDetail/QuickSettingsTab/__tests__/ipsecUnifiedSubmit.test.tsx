@@ -281,7 +281,7 @@ describe('IPSec unified submit actions', () => {
     expect(mocks.updateParameters.mock.calls[1][0].parameters).toEqual([{
       parameterPath: 'Device.FAP.Ipsec.1.TUNNEL_ENABLE',
       parameterValue: 'false',
-      parameterType: 'BOOLEAN',
+      parameterType: 'boolean',
     }]);
     expect(mocks.getTask).toHaveBeenCalledWith('task-1');
     await waitFor(() => {

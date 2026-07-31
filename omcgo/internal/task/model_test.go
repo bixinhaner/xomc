@@ -191,6 +191,14 @@ func Test_NewTask_MaxRetries(t *testing.T) {
 	}
 }
 
+func TestRetryBudgetCoveringExpiry(t *testing.T) {
+	assert.Equal(t, 120, RetryBudgetCoveringExpiry(3600, 30))
+	assert.Equal(t, 60, RetryBudgetCoveringExpiry(1800, 30))
+	assert.Equal(t, 3, RetryBudgetCoveringExpiry(0, 30))
+	assert.Equal(t, 3, RetryBudgetCoveringExpiry(1800, 0))
+	assert.Equal(t, 3, RetryBudgetCoveringExpiry(-1, -1))
+}
+
 // Test_NewTask_ExplicitZeroMaxRetries_NoRetry 端到端验证：显式 max_retries=0
 // 建出的任务在 failed 终态下也不能再被主动 retry（预算为 0）。
 func Test_NewTask_ExplicitZeroMaxRetries_NoRetry(t *testing.T) {

@@ -43,7 +43,7 @@ grep -qx 'OMCGO_SKIP_MONITORING=0' "$tmp_env"
 
 # The install integration must call the shared profile function after sourcing
 # the release .env, otherwise tracer=true can still overwrite the skip flag.
-source_line="$(grep -n 'source "$ENV_FILE"' "$DEPLOY_DIR/install.sh" | tail -n1 | cut -d: -f1)"
+source_line="$(grep -n 'deploy_env_load "$ENV_FILE" "$RESOURCE_ENV_FILE"' "$DEPLOY_DIR/install.sh" | tail -n1 | cut -d: -f1)"
 apply_line="$(grep -n 'monitoring_profile_apply_install "$ENV_FILE" "$SKIP_MONITORING"' "$DEPLOY_DIR/install.sh" | tail -n1 | cut -d: -f1)"
 [ -n "$source_line" ] && [ -n "$apply_line" ] && [ "$apply_line" -gt "$source_line" ]
 
