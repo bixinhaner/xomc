@@ -446,6 +446,7 @@ func (r *PGRepository) CreateOrDeduplicateRun(ctx context.Context, req *SyncRequ
 	}
 	update, updateArgs, err := storage.Psql.Update("parameter_sync_requests").
 		Set("run_id", run.ID).Set("active_run_id", run.ID).Set("status", RequestStatusRunning).
+		Set("result_code", nil).Set("error_message", nil).Set("completed_at", nil).
 		Set("started_at", run.StartedAt).Set("updated_at", run.StartedAt).
 		Where(sq.Eq{"id": req.ID, "status": []RequestStatus{RequestStatusAccepted, RequestStatusQueued}, "run_id": nil}).ToSql()
 	if err != nil {
@@ -524,10 +525,19 @@ RETURNING next_auto_sync_at`
 	}
 	if !allowed {
 		message := fmt.Sprintf("automatic parameter sync backed off until %s", next.Format(time.RFC3339))
-		req.Status = RequestStatusRejected
 		req.ResultCode = ResultCodeAutomaticBackoff
 		req.ErrorMessage = message
-		req.CompletedAt = &now
+		if req.TriggerReason == TriggerDeviceOnline {
+			// DeviceOnline/BOOT may be the device's only reliable recovery signal.
+			// Persist it for delayed dispatch instead of requiring another Inform
+			// after the automatic gate opens.
+			req.Status = RequestStatusQueued
+			req.NextAttemptAt = next
+			req.CompletedAt = nil
+		} else {
+			req.Status = RequestStatusRejected
+			req.CompletedAt = &now
+		}
 	}
 	query, args, err := buildCreateRequest(req)
 	if err != nil {

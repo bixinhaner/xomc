@@ -107,6 +107,7 @@ func (r *memoryRequestRepo) CreateOrDeduplicateRun(_ context.Context, req *SyncR
 	}
 	run := &SyncRun{ID: uuid.New(), RequestID: req.ID, DeviceID: req.DeviceID, SyncScope: req.SyncScope, Status: RunStatusPlanning}
 	req.RunID, req.ActiveRunID, req.Status = &run.ID, &run.ID, RequestStatusRunning
+	req.ResultCode, req.ErrorMessage, req.CompletedAt = "", "", nil
 	r.active = run
 	return &StartResult{Request: req, Run: run}, nil
 }
@@ -141,10 +142,15 @@ func (r *memoryRequestRepo) CreateAutomaticRequest(ctx context.Context, req *Syn
 		return false, r.gateErr
 	}
 	if !r.backoff.IsZero() {
-		req.Status = RequestStatusRejected
 		req.ResultCode = ResultCodeAutomaticBackoff
 		req.ErrorMessage = "automatic parameter sync backed off"
-		req.CompletedAt = &now
+		if req.TriggerReason == TriggerDeviceOnline {
+			req.Status = RequestStatusQueued
+			req.NextAttemptAt = r.backoff
+		} else {
+			req.Status = RequestStatusRejected
+			req.CompletedAt = &now
+		}
 		return false, r.CreateRequest(ctx, req)
 	}
 	return true, r.CreateRequest(ctx, req)
@@ -274,23 +280,48 @@ func TestService_SubmitAutomaticGateFailureDoesNotLeakAcceptedRequest(t *testing
 }
 
 func TestService_SubmitAutomaticBackoffIsPersistedAsRejected(t *testing.T) {
-	for _, reason := range []TriggerReason{TriggerModelUpload, TriggerDeviceOnline} {
-		t.Run(string(reason), func(t *testing.T) {
-			repo := newMemoryRequestRepo()
-			repo.backoff = time.Now().Add(time.Hour)
-			service := NewService(repo, stubPlanner{plan: &Plan{Batches: []TaskBatch{{Paths: []string{"Device."}}}}})
+	repo := newMemoryRequestRepo()
+	repo.backoff = time.Now().Add(time.Hour)
+	service := NewService(repo, stubPlanner{plan: &Plan{Batches: []TaskBatch{{Paths: []string{"Device."}}}}})
 
-			got, err := service.Submit(context.Background(), submitCommand(reason))
+	got, err := service.Submit(context.Background(), submitCommand(TriggerModelUpload))
 
-			require.NoError(t, err)
-			assert.Equal(t, RequestStatusRejected, got.Status)
-			assert.Equal(t, ResultCodeAutomaticBackoff, got.ResultCode)
-			require.Len(t, repo.requests, 1)
-			for _, req := range repo.requests {
-				assert.Equal(t, RequestStatusRejected, req.Status)
-				assert.NotNil(t, req.CompletedAt)
-			}
-		})
+	require.NoError(t, err)
+	assert.Equal(t, RequestStatusRejected, got.Status)
+	assert.Equal(t, ResultCodeAutomaticBackoff, got.ResultCode)
+	require.Len(t, repo.requests, 1)
+	for _, req := range repo.requests {
+		assert.Equal(t, RequestStatusRejected, req.Status)
+		assert.NotNil(t, req.CompletedAt)
+	}
+}
+
+func TestService_SubmitDeviceOnlineBackoffIsPersistedForDelayedDispatch(t *testing.T) {
+	repo := newMemoryRequestRepo()
+	nextAttemptAt := time.Now().Add(time.Hour)
+	repo.backoff = nextAttemptAt
+	service := NewService(repo, stubPlanner{plan: &Plan{Batches: []TaskBatch{{Paths: []string{"Device."}}}}})
+
+	got, err := service.Submit(context.Background(), submitCommand(TriggerDeviceOnline))
+
+	require.NoError(t, err)
+	assert.Equal(t, RequestStatusQueued, got.Status)
+	assert.Equal(t, ResultCodeAutomaticBackoff, got.ResultCode)
+	require.Len(t, repo.requests, 1)
+	for _, req := range repo.requests {
+		assert.Equal(t, RequestStatusQueued, req.Status)
+		assert.Nil(t, req.CompletedAt)
+		assert.Equal(t, nextAttemptAt, req.NextAttemptAt)
+	}
+
+	service.now = func() time.Time { return nextAttemptAt.Add(time.Second) }
+	dispatched, err := service.DispatchQueued(context.Background(), 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, dispatched)
+	for _, req := range repo.requests {
+		assert.Equal(t, RequestStatusRunning, req.Status)
+		assert.NotNil(t, req.RunID)
+		assert.Empty(t, req.ResultCode)
 	}
 }
 

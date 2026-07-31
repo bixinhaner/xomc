@@ -1056,8 +1056,8 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 
 	// T-0123/T-0125: 检测 firmware 变化与 offline→active 二选一发布事件。
 	// 同一 Inform 满足两者时优先发 firmware.changed（不发 device.online），
-	// 由 provision.HandleFirmwareChanged 触发的重新交集 + Path B 同步覆盖 online 的能力，
-	// 避免两路 Path B 重复同步。
+	// 由 provision.HandleFirmwareChanged 触发模型刷新 + durable 全量同步覆盖 online 语义，
+	// 避免两路全量同步重复触发。
 	newVersion := device.FirmwareVersion
 	firmwareChanged := oldVersion != "" && newVersion != "" && oldVersion != newVersion
 	becameOnline := oldStatus == model.DeviceOffline && device.Status == model.DeviceActive

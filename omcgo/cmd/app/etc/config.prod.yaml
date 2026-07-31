@@ -60,7 +60,7 @@ redis:
 
 # Reliable parameter-sync data plane. Production requires migration 000021.
 param_sync:
-  routing_mode: closed
+  routing_mode: durable
   manual_offline_mode: reject
   run_enabled: true
   result_consumer_enabled: true

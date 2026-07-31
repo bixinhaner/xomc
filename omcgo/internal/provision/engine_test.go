@@ -778,18 +778,40 @@ func (f *fakeRegisteredDeviceSyncStarter) StartRegisteredDeviceSync(
 	return nil
 }
 
-type fakeRegisteredDeviceMACSyncStarter struct {
-	calls []registeredDeviceSyncCall
-	err   error
+type deviceOnlineFullSyncCall struct {
+	deviceID        uuid.UUID
+	idempotencyKey  string
+	sourceEventID   string
+	originEventType string
 }
 
-func (f *fakeRegisteredDeviceMACSyncStarter) StartRegisteredDeviceMACSync(
+type recordingDeviceOnlineFullSyncSubmitter struct {
+	calls  []deviceOnlineFullSyncCall
+	result *DeviceOnlineFullSyncResult
+	err    error
+}
+
+func (f *recordingDeviceOnlineFullSyncSubmitter) SubmitDeviceOnlineFullSync(
 	_ context.Context,
 	dev *model.Device,
-	sourceID string,
-) (bool, int, error) {
-	f.calls = append(f.calls, registeredDeviceSyncCall{deviceID: dev.ID, sourceID: sourceID})
-	return true, 1, f.err
+	idempotencyKey string,
+	sourceEventID string,
+	originEventType string,
+) (*DeviceOnlineFullSyncResult, error) {
+	f.calls = append(f.calls, deviceOnlineFullSyncCall{
+		deviceID:        dev.ID,
+		idempotencyKey:  idempotencyKey,
+		sourceEventID:   sourceEventID,
+		originEventType: originEventType,
+	})
+	if f.result == nil && f.err == nil {
+		return &DeviceOnlineFullSyncResult{
+			RequestID: uuid.New(),
+			Status:    "running",
+			TaskCount: 1,
+		}, nil
+	}
+	return f.result, f.err
 }
 
 func TestProvisioningEngine_Subscribe_RegisteredSyncRetriesSubmitFailure(t *testing.T) {
@@ -893,85 +915,6 @@ func TestHandleRegisteredDeviceSyncEvent_ExistingDeviceDoesNotStartSync(t *testi
 	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
 	require.NoError(t, err)
 	assert.Empty(t, starter.calls)
-}
-
-func TestHandleRegisteredDeviceSyncEvent_CreatedDeviceClosedModeStartsMACOnlySync(t *testing.T) {
-	h := newFullEngineHarness()
-	deviceID := uuid.New()
-	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
-		return &model.Device{ID: deviceID, SerialNumber: "SN-CLOSED"}, nil
-	}
-	fullStarter := &fakeRegisteredDeviceSyncStarter{}
-	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
-	h.engine.config.AutoSync.Enabled = true
-	h.engine.config.AutoSync.SyncOnBootstrap = true
-	h.engine.SetParamSyncRoutingMode("closed")
-	h.engine.SetRegisteredDeviceSyncStarter(fullStarter)
-	h.engine.registeredMACSync = macStarter
-
-	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
-		DeviceID: deviceID, SerialNumber: "SN-CLOSED", Created: true,
-	})
-	require.NoError(t, err)
-
-	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
-	require.NoError(t, err)
-	assert.Empty(t, fullStarter.calls)
-	require.Len(t, macStarter.calls, 1)
-	assert.Equal(t, deviceID, macStarter.calls[0].deviceID)
-	assert.NotEqual(t, deviceID.String(), macStarter.calls[0].sourceID)
-	_, err = uuid.Parse(macStarter.calls[0].sourceID)
-	assert.NoError(t, err, "device_tasks.source_id is a UUID column")
-}
-
-func TestHandleRegisteredDeviceSyncEvent_ExistingDeviceClosedModeStartsMACRefresh(t *testing.T) {
-	h := newFullEngineHarness()
-	deviceID := uuid.New()
-	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
-		return &model.Device{ID: deviceID, SerialNumber: "SN-CLOSED-EXISTING"}, nil
-	}
-	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
-	h.engine.config.AutoSync.Enabled = true
-	h.engine.config.AutoSync.SyncOnBootstrap = true
-	h.engine.SetParamSyncRoutingMode("closed")
-	h.engine.registeredMACSync = macStarter
-
-	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
-		DeviceID: deviceID, SerialNumber: "SN-CLOSED-EXISTING", Created: false,
-	})
-	require.NoError(t, err)
-
-	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
-	require.NoError(t, err)
-	require.Len(t, macStarter.calls, 1)
-	assert.NotEqual(t, deviceID.String(), macStarter.calls[0].sourceID)
-	_, err = uuid.Parse(macStarter.calls[0].sourceID)
-	assert.NoError(t, err)
-}
-
-func TestHandleRegisteredDeviceSyncEvent_ClosedModeAlwaysRefreshesMACOnRegistration(t *testing.T) {
-	h := newFullEngineHarness()
-	deviceID := uuid.New()
-	h.devRepo.GetByIDFn = func(context.Context, uuid.UUID) (*model.Device, error) {
-		return &model.Device{ID: deviceID, SerialNumber: "SN-CLOSED-HAS-MAC"}, nil
-	}
-	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
-	h.engine.config.AutoSync.Enabled = true
-	h.engine.config.AutoSync.SyncOnBootstrap = true
-	h.engine.SetParamSyncRoutingMode("closed")
-	h.engine.registeredMACSync = macStarter
-
-	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
-		DeviceID: deviceID, SerialNumber: "SN-CLOSED-HAS-MAC", Created: true,
-	})
-	require.NoError(t, err)
-
-	err = h.engine.handleRegisteredDeviceSyncEvent(context.Background(), evt)
-	require.NoError(t, err)
-	require.Len(t, macStarter.calls, 1)
-	assert.NotEqual(t, deviceID.String(), macStarter.calls[0].sourceID)
-	_, err = uuid.Parse(macStarter.calls[0].sourceID)
-	assert.NoError(t, err)
 }
 
 func TestHandleBootstrap_CreateTaskError(t *testing.T) {
@@ -1452,6 +1395,8 @@ func TestHandleDeviceOnline_RedisTokenBucketSkipsRepeat(t *testing.T) {
 		},
 	}
 	engine, _ := newOnlineHarness(t, deviceRepo)
+	engine.SetParamSyncRoutingMode("durable")
+	engine.SetDeviceOnlineFullSyncSubmitter(&recordingDeviceOnlineFullSyncSubmitter{})
 
 	evt := device.DeviceOnlineEvent{
 		DeviceID:     deviceID,
@@ -1460,7 +1405,7 @@ func TestHandleDeviceOnline_RedisTokenBucketSkipsRepeat(t *testing.T) {
 		SwVersion:    "1.0.0",
 	}
 
-	// 第一次：拿到 token，进入 device lookup（syncService nil 早返，但 lookup 已发生）
+	// 第一次：拿到 token，进入 device lookup 并提交 durable request。
 	err := engine.HandleDeviceOnline(context.Background(), evt)
 	require.NoError(t, err)
 	firstLookup := lookupCount
@@ -1478,16 +1423,15 @@ func TestHandleDeviceOnline_DeviceNotFound_NoOp(t *testing.T) {
 			return nil, nil // not found
 		},
 	}
-	// 需要先 SetSyncService 才能跑到 GetByID — 没 syncService 时函数早返
-	// 此处直接验证 lookup 被跳过 (nil syncService 早返 → 不调 GetByID)
 	engine, _ := newOnlineHarness(t, deviceRepo)
-	// 测：nil syncService + device-not-found 路径都不应 panic
+	engine.SetParamSyncRoutingMode("durable")
+	engine.SetDeviceOnlineFullSyncSubmitter(&recordingDeviceOnlineFullSyncSubmitter{})
 	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-GONE"}
 	err := engine.HandleDeviceOnline(context.Background(), evt)
 	assert.NoError(t, err)
 }
 
-func TestHandleDeviceOnline_NilSyncService_NoOp(t *testing.T) {
+func TestHandleDeviceOnline_NonDurableModeDoesNotUseLegacyPath(t *testing.T) {
 	deviceID := uuid.New()
 	lookupCount := 0
 	deviceRepo := &mockDeviceRepo{
@@ -1497,12 +1441,12 @@ func TestHandleDeviceOnline_NilSyncService_NoOp(t *testing.T) {
 		},
 	}
 	engine, _ := newOnlineHarness(t, deviceRepo)
-	// engine.syncService 默认为 nil（newOnlineHarness 未设置）
+	engine.SetParamSyncRoutingMode("legacy")
 
 	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-NOSYNC"}
 	err := engine.HandleDeviceOnline(context.Background(), evt)
 	assert.NoError(t, err)
-	assert.Equal(t, 0, lookupCount, "nil syncService 应早返不调 GetByID")
+	assert.Equal(t, 0, lookupCount, "non-durable mode must not enter the legacy Path B route")
 }
 
 func TestHandleDeviceOnline_RedisDown_StillProceeds(t *testing.T) {
@@ -1513,6 +1457,8 @@ func TestHandleDeviceOnline_RedisDown_StillProceeds(t *testing.T) {
 		},
 	}
 	engine, mr := newOnlineHarness(t, deviceRepo)
+	engine.SetParamSyncRoutingMode("durable")
+	engine.SetDeviceOnlineFullSyncSubmitter(&recordingDeviceOnlineFullSyncSubmitter{})
 	mr.Close() // 模拟 Redis 不可达 — SetNX 返 err；HandleDeviceOnline 应继续推进不阻塞
 
 	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-REDIS-DOWN"}
@@ -1520,29 +1466,144 @@ func TestHandleDeviceOnline_RedisDown_StillProceeds(t *testing.T) {
 	assert.NoError(t, err, "Redis 失败应不阻塞主流程（容忍 Redis 抖动）")
 }
 
-func TestHandleDeviceOnline_ClosedModeStartsMACRefresh(t *testing.T) {
+func TestHandleDeviceOnline_DurableModeStartsFullSyncAndThrottlesRepeat(t *testing.T) {
 	deviceID := uuid.New()
 	deviceRepo := &mockDeviceRepo{
 		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
-			return &model.Device{ID: deviceID, SerialNumber: "SN-ONLINE-MISSING-MAC"}, nil
+			return &model.Device{ID: deviceID, SerialNumber: "SN-ONLINE-FULL"}, nil
 		},
 	}
 	engine, _ := newOnlineHarness(t, deviceRepo)
-	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
-	engine.config.AutoSync.Enabled = true
-	engine.config.AutoSync.SyncOnBootstrap = true
-	engine.SetParamSyncRoutingMode("closed")
-	engine.registeredMACSync = macStarter
+	submitter := &recordingDeviceOnlineFullSyncSubmitter{
+		result: &DeviceOnlineFullSyncResult{
+			RequestID: uuid.New(),
+			Status:    "running",
+			TaskCount: 13,
+		},
+	}
+	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
+	engine.SetParamSyncRoutingMode("durable")
 
-	err := engine.HandleDeviceOnline(context.Background(), device.DeviceOnlineEvent{
-		DeviceID: deviceID, SerialNumber: "SN-ONLINE-MISSING-MAC",
+	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-ONLINE-FULL"}
+	require.NoError(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-full"))
+	require.NoError(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-full"))
+
+	require.Len(t, submitter.calls, 1)
+	call := submitter.calls[0]
+	assert.Equal(t, deviceID, call.deviceID)
+	assert.Equal(t, "device_online:evt-online-full", call.idempotencyKey)
+	assert.Equal(t, "evt-online-full", call.sourceEventID)
+	assert.Equal(t, event.SubjectDeviceOnline, call.originEventType)
+}
+
+func TestHandleDeviceOnline_DurableAutomaticBackoffIsQueuedWithoutRetry(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{ID: deviceID, SerialNumber: "SN-ONLINE-BACKOFF"}, nil
+		},
+	}
+	engine, _ := newOnlineHarness(t, deviceRepo)
+	submitter := &recordingDeviceOnlineFullSyncSubmitter{
+		result: &DeviceOnlineFullSyncResult{
+			RequestID:  uuid.New(),
+			Status:     "queued",
+			ResultCode: "AUTOMATIC_BACKOFF",
+		},
+	}
+	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
+	engine.SetParamSyncRoutingMode("durable")
+
+	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-ONLINE-BACKOFF"}
+	require.NoError(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-backoff"))
+	require.NoError(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-backoff"))
+
+	require.Len(t, submitter.calls, 1, "durably queued backoff must keep the Redis throttle")
+}
+
+func TestHandleDeviceOnline_DurableSubmitFailureReleasesThrottleForRetry(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{ID: deviceID, SerialNumber: "SN-ONLINE-RETRY"}, nil
+		},
+	}
+	engine, _ := newOnlineHarness(t, deviceRepo)
+	submitter := &recordingDeviceOnlineFullSyncSubmitter{err: errors.New("database unavailable")}
+	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
+	engine.SetParamSyncRoutingMode("durable")
+
+	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-ONLINE-RETRY"}
+	require.Error(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-retry"))
+	require.Error(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-retry"))
+
+	require.Len(t, submitter.calls, 2, "failed submit must release the Redis throttle for NATS redelivery")
+	assert.Equal(t, submitter.calls[0].idempotencyKey, submitter.calls[1].idempotencyKey)
+}
+
+func TestProvisioningEngine_Subscribe_DeviceOnlineRetriesSubmitFailure(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{ID: deviceID, SerialNumber: "SN-ONLINE-SUBSCRIBE-RETRY"}, nil
+		},
+	}
+	engine, mr := newOnlineHarness(t, deviceRepo)
+	submitter := &recordingDeviceOnlineFullSyncSubmitter{
+		err: errors.New("temporary durable submit failure"),
+	}
+	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
+	engine.SetParamSyncRoutingMode("durable")
+	engine.SetDeduper(event.NewDeduper(
+		redis.NewClient(&redis.Options{Addr: mr.Addr()}),
+		time.Hour,
+		zap.NewNop(),
+	))
+
+	var onlineHandler event.EventHandler
+	bus := &mockEventBus{
+		QueueSubscribeFn: func(subject, queue string, handler event.EventHandler) (event.Subscription, error) {
+			if subject == event.SubjectDeviceOnline && queue == "provision-online-sync" {
+				onlineHandler = handler
+			}
+			return &mockSubscription{}, nil
+		},
+	}
+	require.NoError(t, engine.Subscribe(bus))
+	require.NotNil(t, onlineHandler)
+	evt, err := event.NewEvent(event.SubjectDeviceOnline, device.DeviceOnlineEvent{
+		DeviceID: deviceID, SerialNumber: "SN-ONLINE-SUBSCRIBE-RETRY",
 	})
-
 	require.NoError(t, err)
-	require.Len(t, macStarter.calls, 1)
-	assert.NotEqual(t, deviceID.String(), macStarter.calls[0].sourceID)
-	_, err = uuid.Parse(macStarter.calls[0].sourceID)
-	assert.NoError(t, err)
+
+	require.Error(t, onlineHandler(context.Background(), evt))
+	require.Error(t, onlineHandler(context.Background(), evt))
+	require.Len(t, submitter.calls, 2, "NATS redelivery must reach the durable submitter")
+	assert.Equal(t, submitter.calls[0].idempotencyKey, submitter.calls[1].idempotencyKey)
+}
+
+func TestHandleDeviceOnline_LookupFailureReleasesThrottleForRetry(t *testing.T) {
+	deviceID := uuid.New()
+	lookupCount := 0
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			lookupCount++
+			if lookupCount == 1 {
+				return nil, errors.New("temporary device lookup failure")
+			}
+			return &model.Device{ID: deviceID, SerialNumber: "SN-ONLINE-LOOKUP-RETRY"}, nil
+		},
+	}
+	engine, _ := newOnlineHarness(t, deviceRepo)
+	submitter := &recordingDeviceOnlineFullSyncSubmitter{}
+	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
+	engine.SetParamSyncRoutingMode("durable")
+
+	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-ONLINE-LOOKUP-RETRY"}
+	require.Error(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-lookup-retry"))
+	require.NoError(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-lookup-retry"))
+	require.Len(t, submitter.calls, 1)
+	assert.Equal(t, 2, lookupCount)
 }
 
 func TestHandleGPVResponse_EmptySyncGPVStillFinalizesPathB(t *testing.T) {
@@ -1677,7 +1738,7 @@ func TestOnTaskCompleted_RecoveredSyncGPVWithRemaining_DoesNotFinalize(t *testin
 // Tests: T-0125 HandleFirmwareChanged — Redis 串行锁 + model refresh without parameter sync
 // ---------------------------------------------------------------------------
 
-func TestHandleFirmwareChanged_RedisSerialLockSkipsConcurrent(t *testing.T) {
+func TestHandleFirmwareChanged_RedisModelUploadLockStillAllowsDeviceLookup(t *testing.T) {
 	deviceID := uuid.New()
 	lookupCount := 0
 	deviceRepo := &mockDeviceRepo{
@@ -1701,15 +1762,16 @@ func TestHandleFirmwareChanged_RedisSerialLockSkipsConcurrent(t *testing.T) {
 		NewVersion:   "1.0.0",
 	}
 
-	// 第一次：拿到锁，进入 device lookup（modelUploadService=nil 不影响锁逻辑）
+	// 第一次：查设备后拿到模型上传锁（modelUploadService=nil 不影响锁逻辑）。
 	err := engine.HandleFirmwareChanged(context.Background(), evt)
 	require.NoError(t, err)
 	firstLookup := lookupCount
 
-	// 10min 内第二次：被串行锁拦截，不进 device lookup
+	// 10min 内第二次仍需查设备，确保 BecameOnline 恢复语义不会被模型上传锁吞掉；
+	// 设备查询后的重复模型上传仍由锁拦截。
 	err = engine.HandleFirmwareChanged(context.Background(), evt)
 	require.NoError(t, err)
-	assert.Equal(t, firstLookup, lookupCount, "second call within 10min should be skipped by serial lock")
+	assert.Equal(t, firstLookup+1, lookupCount, "model-upload lock must not suppress online recovery lookup")
 }
 
 func TestHandleFirmwareChanged_DoesNotWriteParamSyncReasonHint(t *testing.T) {
@@ -1800,59 +1862,57 @@ func TestHandleFirmwareChanged_RedisDown_StillProceeds(t *testing.T) {
 	assert.Equal(t, 1, lookupCount, "Redis 失败仍应推进到 device lookup")
 }
 
-func TestHandleFirmwareChanged_ClosedModeBecameOnlineStartsMACRefresh(t *testing.T) {
+func TestHandleFirmwareChanged_BecameOnlineStartsDurableFullSync(t *testing.T) {
 	deviceID := uuid.New()
 	deviceRepo := &mockDeviceRepo{
 		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
-			return &model.Device{ID: deviceID, SerialNumber: "SN-FW-MISSING-MAC"}, nil
+			return &model.Device{ID: deviceID, SerialNumber: "SN-FW-ONLINE"}, nil
 		},
 	}
 	engine, _ := newOnlineHarness(t, deviceRepo)
-	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
-	engine.config.AutoSync.Enabled = true
-	engine.config.AutoSync.SyncOnBootstrap = true
-	engine.SetParamSyncRoutingMode("closed")
-	engine.registeredMACSync = macStarter
+	submitter := &recordingDeviceOnlineFullSyncSubmitter{}
+	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
+	engine.SetParamSyncRoutingMode("durable")
 
-	err := engine.HandleFirmwareChanged(context.Background(), device.DeviceFirmwareChangedEvent{
+	err := engine.handleFirmwareChanged(context.Background(), device.DeviceFirmwareChangedEvent{
 		DeviceID:     deviceID,
-		SerialNumber: "SN-FW-MISSING-MAC",
+		SerialNumber: "SN-FW-ONLINE",
 		OldVersion:   "0.9.0",
 		NewVersion:   "1.0.0",
 		BecameOnline: true,
-	})
+	}, "evt-firmware-online")
 
 	require.NoError(t, err)
-	require.Len(t, macStarter.calls, 1)
-	assert.NotEqual(t, deviceID.String(), macStarter.calls[0].sourceID)
-	_, err = uuid.Parse(macStarter.calls[0].sourceID)
-	assert.NoError(t, err)
+	require.Len(t, submitter.calls, 1)
+	call := submitter.calls[0]
+	assert.Equal(t, "device_online:firmware_changed:evt-firmware-online", call.idempotencyKey)
+	assert.Equal(t, "evt-firmware-online", call.sourceEventID)
+	assert.Equal(t, event.SubjectDeviceFirmwareChanged, call.originEventType)
 }
 
-func TestHandleFirmwareChanged_ClosedModeWithoutOnlineTransitionDoesNotStartMACSync(t *testing.T) {
+func TestHandleFirmwareChanged_ModelUploadLockDoesNotSuppressLaterOnlineSync(t *testing.T) {
 	deviceID := uuid.New()
 	deviceRepo := &mockDeviceRepo{
 		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
-			return &model.Device{ID: deviceID, SerialNumber: "SN-FW-STILL-ONLINE"}, nil
+			return &model.Device{ID: deviceID, SerialNumber: "SN-FW-LATER-ONLINE"}, nil
 		},
 	}
 	engine, _ := newOnlineHarness(t, deviceRepo)
-	macStarter := &fakeRegisteredDeviceMACSyncStarter{}
-	engine.config.AutoSync.Enabled = true
-	engine.config.AutoSync.SyncOnBootstrap = true
-	engine.SetParamSyncRoutingMode("closed")
-	engine.registeredMACSync = macStarter
+	submitter := &recordingDeviceOnlineFullSyncSubmitter{}
+	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
+	engine.SetParamSyncRoutingMode("durable")
 
-	err := engine.HandleFirmwareChanged(context.Background(), device.DeviceFirmwareChangedEvent{
-		DeviceID:     deviceID,
-		SerialNumber: "SN-FW-STILL-ONLINE",
-		OldVersion:   "0.9.0",
-		NewVersion:   "1.0.0",
-		BecameOnline: false,
-	})
+	require.NoError(t, engine.handleFirmwareChanged(context.Background(), device.DeviceFirmwareChangedEvent{
+		DeviceID: deviceID, SerialNumber: "SN-FW-LATER-ONLINE",
+		OldVersion: "0.8.0", NewVersion: "0.9.0", BecameOnline: false,
+	}, "evt-firmware-model-only"))
+	require.NoError(t, engine.handleFirmwareChanged(context.Background(), device.DeviceFirmwareChangedEvent{
+		DeviceID: deviceID, SerialNumber: "SN-FW-LATER-ONLINE",
+		OldVersion: "0.9.0", NewVersion: "1.0.0", BecameOnline: true,
+	}, "evt-firmware-later-online"))
 
-	require.NoError(t, err)
-	assert.Empty(t, macStarter.calls)
+	require.Len(t, submitter.calls, 1, "model-upload throttling must not suppress online recovery")
+	assert.Equal(t, "evt-firmware-later-online", submitter.calls[0].sourceEventID)
 }
 
 // ---------------------------------------------------------------------------

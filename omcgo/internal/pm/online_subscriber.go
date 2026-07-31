@@ -25,7 +25,7 @@ var _ = device.DeviceOnlineEvent{}
 // 触发时机（由 device.DeviceService 决定）：
 //   - 非批量路径：UpdateFromInform 检测到 oldStatus=offline && device.Status=active
 //   - 批量路径：BatchInformProcessor.doFlush 同条件
-//   - firmware 变化时不发 device.online（发 firmware.changed，由 provision 处理 Path B 同步）—
+//   - firmware 变化时不发 device.online（发 firmware.changed，由 provision 补交 durable 全量同步）—
 //     本订阅器不订阅 firmware.changed，避免与 provision 的 GPN/GPV 同步抢资源
 //
 // 节流：device.online 事件在 provision 模块已有 60s Redis token bucket 防抖，
