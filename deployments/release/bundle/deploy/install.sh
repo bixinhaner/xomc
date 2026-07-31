@@ -1010,16 +1010,23 @@ fi
 log "等待业务容器启动（最多 90s，健康检查每 5s 重试）..."
 HEALTHCHECK_TIMEOUT=90
 HEALTHCHECK_INTERVAL=5
-HEALTHCHECK_WAIT=0
 HEALTHCHECK_LOG="$(mktemp)"
 HEALTH_OK=0
-while [ "$HEALTHCHECK_WAIT" -lt "$HEALTHCHECK_TIMEOUT" ]; do
-  if bash "$OMC_ROOT/current/deploy/healthcheck.sh" >"$HEALTHCHECK_LOG" 2>&1; then
+HEALTHCHECK_DEADLINE=$(( $(date +%s) + HEALTHCHECK_TIMEOUT ))
+while :; do
+  HEALTHCHECK_REMAINING=$(( HEALTHCHECK_DEADLINE - $(date +%s) ))
+  [ "$HEALTHCHECK_REMAINING" -gt 0 ] || break
+  # healthcheck 本身包含多次 docker compose/inspect；高负载下单轮可能较慢。
+  # 用真实剩余秒数约束单轮，避免“每轮只累计 5 秒”把 90 秒放大成数分钟。
+  if timeout "${HEALTHCHECK_REMAINING}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" >"$HEALTHCHECK_LOG" 2>&1; then
     HEALTH_OK=1
     break
   fi
-  sleep "$HEALTHCHECK_INTERVAL"
-  HEALTHCHECK_WAIT=$((HEALTHCHECK_WAIT + HEALTHCHECK_INTERVAL))
+  HEALTHCHECK_REMAINING=$(( HEALTHCHECK_DEADLINE - $(date +%s) ))
+  [ "$HEALTHCHECK_REMAINING" -gt 0 ] || break
+  HEALTHCHECK_SLEEP="$HEALTHCHECK_INTERVAL"
+  [ "$HEALTHCHECK_REMAINING" -lt "$HEALTHCHECK_SLEEP" ] && HEALTHCHECK_SLEEP="$HEALTHCHECK_REMAINING"
+  sleep "$HEALTHCHECK_SLEEP"
 done
 
 # =============================================================================

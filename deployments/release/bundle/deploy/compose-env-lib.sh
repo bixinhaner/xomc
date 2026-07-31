@@ -33,10 +33,11 @@ deploy_env_file_value() { # deploy_env_file_value <key> <file>
 }
 
 deploy_env_effective_value() { # deploy_env_effective_value <key> <env-file ...>
-  local key="$1" file value="" found=1
+  local key="$1" file value="" candidate found=1
   shift
   for file in "$@"; do
-    if value="$(deploy_env_file_value "$key" "$file" 2>/dev/null)"; then
+    if candidate="$(deploy_env_file_value "$key" "$file" 2>/dev/null)"; then
+      value="$candidate"
       found=0
     fi
   done
