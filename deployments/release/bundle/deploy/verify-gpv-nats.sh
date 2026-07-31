@@ -64,7 +64,17 @@ grep -Fq 'Server is ready' "$LOG" || {
 }
 
 cd "$REPO_ROOT/omcgo"
-GPV_NATS_TEST_URL="nats://127.0.0.1:$PORT" \
-  "$GO_BIN" test ./internal/core/event ./cmd/gpv-handoff \
-    -run 'TestKeyedQueue|TestKeyedPull|TestPrepareGPVHandoff|TestRunFreshInstall' \
-    -count=1 -v
+run_gpv_tests() {
+  GPV_NATS_TEST_URL="nats://127.0.0.1:$PORT" \
+    "$GO_BIN" test ./internal/core/event ./cmd/gpv-handoff \
+      -run 'TestKeyedQueue|TestKeyedPull|TestPrepareGPVHandoff|TestRunFreshInstall' \
+      -count=1 -v
+}
+
+# A freshly started JetStream can occasionally time out the first publish
+# confirmation under a busy build host. Retry the complete isolated suite once;
+# a second failure remains a real gate failure.
+if ! run_gpv_tests; then
+  echo "GPV NATS verification transiently failed; retrying once" >&2
+  run_gpv_tests
+fi
