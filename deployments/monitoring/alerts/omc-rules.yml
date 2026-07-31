@@ -421,7 +421,7 @@ groups:
             Action: 看 worker CPU / TimescaleDB 写入压力；评估 PM 文件体积与并发。
 
       - alert: OMCPMQueuePendingHigh
-        expr: omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"} >= 2000
+        expr: omc_pm_queue_pending{subject="pm.file.received",durable="pm-workers"} >= 5000
         for: 10m
         labels:
           severity: warning
@@ -430,8 +430,9 @@ groups:
         annotations:
           summary: "PM 队列 pending 持续达到背压高水位"
           description: |
-            PM durable consumer 的待投递消息持续 10 分钟不少于 2000，
-            ACS 上传背压应已启动。检查 worker 吞吐、NATS durable 状态和 TimescaleDB 写入。
+            PM durable consumer 的待投递消息持续 10 分钟不少于 5000。
+            瞬时同步上报由 durable queue 吸收；若同时最老消息超过 2 分钟，
+            ACS 上传背压会启动。检查 worker 吞吐、NATS durable 状态和 TimescaleDB 写入。
 
       - alert: OMCPMQueueOldestAgeHigh
         expr: omc_pm_queue_oldest_age_seconds{subject="pm.file.received",durable="pm-workers"} >= 600

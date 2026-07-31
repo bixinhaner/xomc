@@ -26,8 +26,9 @@ func (s *integrationQueueStatsSource) LatestStats() (event.QueueStats, bool) {
 
 func TestIntegrationQueueBackpressureConsumesSamplerSnapshot(t *testing.T) {
 	source := &integrationQueueStatsSource{stats: event.QueueStats{
-		Pending:   bpDefaultQueuePendingHigh,
-		SampledAt: time.Now(),
+		Pending:          bpDefaultQueuePendingHigh,
+		OldestPendingAge: bpDefaultQueueOldestLow,
+		SampledAt:        time.Now(),
 	}}
 	watchdog := NewWatchdog(nil, nil, NewBackpressureMetrics(nil), nil)
 	watchdog.ioPressure = nil
@@ -38,6 +39,23 @@ func TestIntegrationQueueBackpressureConsumesSamplerSnapshot(t *testing.T) {
 
 	require.True(t, watchdog.active.Load())
 	require.Equal(t, 1, source.calls, "one watchdog pass must consume one cached snapshot")
+}
+
+func TestIntegrationQueueBackpressureAllowsYoungSynchronizedBurst(t *testing.T) {
+	source := &integrationQueueStatsSource{stats: event.QueueStats{
+		Pending:          bpDefaultQueuePendingHigh,
+		OldestPendingAge: bpDefaultQueueOldestLow - time.Second,
+		SampledAt:        time.Now(),
+	}}
+	watchdog := NewWatchdog(nil, nil, NewBackpressureMetrics(nil), nil)
+	watchdog.ioPressure = nil
+	watchdog.loadFn = nil
+	watchdog.SetQueueStatsSource(source)
+
+	watchdog.sample(context.Background())
+
+	require.False(t, watchdog.active.Load())
+	require.Equal(t, 1, source.calls, "young burst must be decided from one cached snapshot")
 }
 
 func TestIntegrationDatabasePendingProjectionIncludesAcceptedWork(t *testing.T) {

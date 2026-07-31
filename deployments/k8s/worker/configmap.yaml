@@ -22,7 +22,8 @@ data:
 
     tsdb:
       dsn: "postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}?sslmode=disable"
-      max_conns: 20
+      # 每副本：4 路 PM 入库 + 4 路 finalize + 三路各 8 个聚合消费者 + 8 路余量。
+      max_conns: 40
       min_conns: 5
       max_conn_lifetime: 30m
       max_conn_idle_time: 5m
@@ -59,6 +60,9 @@ data:
         logs: "logs"
         reports: "reports"
         exchange: "omc-exchange"
+
+    # 显式固定，避免随 Pod CPU/GOMAXPROCS 漂移后突破 TSDB 连接预算。
+    pm_consumer_concurrency: 4
 
     metrics:
       port: 9092
