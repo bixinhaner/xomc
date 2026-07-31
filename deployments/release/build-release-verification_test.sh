@@ -10,6 +10,11 @@ if ! grep -Fq 'validate-tempo-memory-budget.sh' "$SCRIPT_DIR/build-release.sh"; 
   exit 1
 fi
 
+if ! grep -Fq 'validate-release-archive-portability.sh' "$SCRIPT_DIR/build-release.sh"; then
+  echo "FAIL: release verification gate must enforce archive portability" >&2
+  exit 1
+fi
+
 if ! bash "$SCRIPT_DIR/build-release.sh" --verify-only >/dev/null 2>&1; then
   echo "FAIL: --verify-only must execute the default release verification gate" >&2
   exit 1
