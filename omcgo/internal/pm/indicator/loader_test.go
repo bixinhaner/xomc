@@ -63,10 +63,12 @@ func TestSeedBaselineGNBDefaultEnabledMatchesGNBXML(t *testing.T) {
 
 func TestENBReleaseCounterRegisteredAcrossRuntimeAndDeliveryCopies(t *testing.T) {
 	for _, file := range []string{
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BLN.xml"),
 		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BM.xml"),
 		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "MLN.xml"),
 		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_098.xml"),
 		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_181.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BLN.xml"),
 		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BM.xml"),
 		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "MLN.xml"),
 		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "ENB_DEFAULT_098.xml"),
@@ -93,6 +95,7 @@ func TestENBReleaseCounterRegisteredAcrossRuntimeAndDeliveryCopies(t *testing.T)
 
 func TestENBERABSetupCountersUsePMReportKeyCase(t *testing.T) {
 	files := []string{
+		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BLN.xml"),
 		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BLQ.xml"),
 		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_181.xml"),
 		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "MLN.xml"),
@@ -100,6 +103,7 @@ func TestENBERABSetupCountersUsePMReportKeyCase(t *testing.T) {
 		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BM.xml"),
 		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "BLX.xml"),
 		filepath.Join("..", "..", "..", "data", "indicator-library", "enb", "ENB_DEFAULT_098.xml"),
+		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BLN.xml"),
 		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "BLQ.xml"),
 		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "ENB_DEFAULT_181.xml"),
 		filepath.Join("..", "..", "..", "docs", "param-model-delivery", "xml", "kpi-indicators", "enb", "MLN.xml"),
