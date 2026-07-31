@@ -30,18 +30,29 @@ else
 fi
 GO_BIN="${GO_BIN:-$(command -v go || true)}"
 if [ -z "$GO_BIN" ]; then
-  for candidate in "$HOME/.local/go/bin/go" "$HOME/.opencode/bin/go" "$HOME/.g/go/bin/go" /usr/local/go/bin/go; do
+  for candidate in \
+    "$HOME/.local/go/bin/go" "$HOME/.opencode/bin/go" "$HOME/.g/go/bin/go" \
+    /root/.local/go/bin/go /root/.opencode/bin/go /root/.g/go/bin/go \
+    /usr/local/go/bin/go /opt/go/bin/go; do
     if [ -x "$candidate" ]; then
       GO_BIN="$candidate"
-      case "$candidate" in
-        */go/bin/go) export GOROOT="${candidate%/bin/go}" ;;
-      esac
       break
     fi
   done
 fi
+
+if [ -n "$GO_BIN" ]; then
+  case "$GO_BIN" in
+    */go/bin/go) export GOROOT="${GO_BIN%/bin/go}" ;;
+  esac
+fi
+
 [ -n "$GO_BIN" ] || {
-  echo "go is required for GPV JetStream verification" >&2
+  echo "go is required for GPV JetStream verification (set GO_BIN=/path/to/go to override)" >&2
+  exit 1
+}
+"$GO_BIN" version >/dev/null 2>&1 || {
+  echo "Go executable is not usable: $GO_BIN (check GOROOT or set GO_BIN)" >&2
   exit 1
 }
 

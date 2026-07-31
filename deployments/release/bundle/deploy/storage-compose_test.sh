@@ -136,6 +136,7 @@ contains "install 在 systemd 停服前执行迁移门禁" 'gpv_handoff_migrate_
 contains "svc 在重启前准备 durable" 'gpv_handoff_prepare' "$SVC"
 contains "真实 NATS 验证脚本强制注入地址" 'GPV_NATS_TEST_URL=' "$RELEASE_NATS_VERIFY"
 contains "真实 NATS 验证支持本地 Docker fallback" 'NATS_SERVER_IMAGE' "$RELEASE_NATS_VERIFY"
+contains "真实 NATS 验证支持固定 Go 路径兜底" '/root/.local/go/bin/go' "$RELEASE_NATS_VERIFY"
 contains "install 健康等待使用真实截止时间" 'HEALTHCHECK_DEADLINE=' "$INSTALL"
 contains "单轮 healthcheck 有独立探针超时" 'HEALTHCHECK_PROBE_TIMEOUT' "$INSTALL"
 contains "单轮 healthcheck 超时后继续重试" 'HEALTHCHECK_PROBE_REMAINING' "$INSTALL"
