@@ -40,7 +40,9 @@ NATS JetStream 和多类事务 Outbox 基础，但邮件短信通知尚未形成
 - “告警模板”是告警范围与邮件策略的混合配置，不是单纯的消息正文模板。
 - 模板同时配置网元类型、设备或设备组、告警定义、严重级别和邮件开关。
 - `Interval` 支持实时、10、30、60 分钟。
-- `Tolerance Duration` 支持实时、10、30、60 分钟，用于告警持续时间门槛。
+- `Tolerance Duration` 支持实时、10、30、60 分钟。字段名、页面位置和调度方式表明它
+  高概率用于告警持续时间门槛，但由于老后端方法体不可读，该语义仍需通过现场运行日志
+  或业务方确认；迁移时不能把推断当成已验证事实。
 - 收件人支持分号分隔的固定邮箱和系统默认收件人。
 - 模板列表用邮件图标表示邮件已启用。
 - 发送历史字段包括邮件主题、收件人集合、发送时间、结果和失败原因。
@@ -71,7 +73,7 @@ NATS JetStream 和多类事务 Outbox 基础，但邮件短信通知尚未形成
 - ITU-T X.733：<https://www.itu.int/rec/T-REC-X.733>
 
 系统继续使用 Critical、Major、Minor、Warning、Cleared 语义，并把告警产生、升级、
-确认和清除视为同一告警 occurrence 的生命周期变化。
+确认、取消确认和清除视为同一告警 occurrence 的生命周期变化。
 
 ## 目标
 
@@ -98,30 +100,55 @@ NATS JetStream 和多类事务 Outbox 基础，但邮件短信通知尚未形成
 
 ## 选定架构
 
-采用“统一异步通知中心 + 事务 Outbox + 当前 PostgreSQL/NATS 基础”的方案。
+采用“统一异步通知中心 + 告警领域 Outbox + 当前 PostgreSQL/NATS 基础”的方案。
 
 ```text
 TR-069/CWMP、系统任务或人工操作
   → AlarmEngine
-  → 同一数据库事务：
-       更新活动/历史告警
-       写 notification_event_outbox
-  → Outbox Relay
-  → NATS JetStream alarm.raised / alarm.updated / alarm.cleared
-  → Notification Orchestrator
+  → 主 PostgreSQL 同一事务：
+       新增/更新/删除活动告警
+       写 alarm_event_outbox（完整生命周期快照）
+  → Alarm Event Relay（生命周期事件唯一发布者）
+  → NATS JetStream
+       domain.alarm.lifecycle.raised / domain.alarm.lifecycle.updated
+       domain.alarm.lifecycle.acknowledged / domain.alarm.lifecycle.unacknowledged
+       domain.alarm.lifecycle.cleared
+       ├─ Alarm History Projector → TimescaleDB alarms_history
+       ├─ 北向接口
+       └─ Notification Orchestrator
+  → Notification Orchestrator：
        事件幂等入库
+       occurrence 顺序投影
        规则匹配
        收件人与数据权限解析
        持续时间、抑制、聚合、恢复配对
        模板渲染
        创建逐收件人投递
-  → Email / SMS Direct / SMS Kafka Worker
+  → Email Worker /（接口冻结后）SMS Direct 或 SMS Kafka Worker
   → 服务商回执或 Kafka Ack
   → 投递状态、尝试记录、渠道健康和指标
 ```
 
-PostgreSQL 是通知事实与审计源，NATS 是可靠分发通道。告警模块只产生稳定领域事件，
-不直接调用邮件或短信适配器。
+主 PostgreSQL 中的告警变更和 `alarm_event_outbox` 是告警生命周期的原子事实；
+TimescaleDB `alarms_history` 是可重放的幂等历史投影，不参与主库事务。PostgreSQL
+通知表是通知事实与审计源，NATS JetStream 是可靠分发通道。告警模块只产生稳定领域
+事件，不直接调用邮件或短信适配器。
+
+当前清除流程先写 TimescaleDB、再删除主库活动告警，无法与 Outbox 组成跨库事务。
+改造后，清除在主库单一事务中删除活动告警并写入包含完整清除快照的 Outbox；历史投影
+失败时由 JetStream 重放恢复。不得使用分布式事务，也不得继续把两个独立数据库操作
+描述成原子操作。
+
+当前 `ALARM` JetStream 捕获 `alarm.>` 且使用 `WorkQueuePolicy`，只适合单一任务消费，
+不能承载历史投影、北向和通知中心的独立 fan-out。新增 `DOMAIN_ALARM` 流捕获
+`domain.alarm.>`，使用 `LimitsPolicy`、S2 压缩、默认 7 天 MaxAge 和 1 GiB MaxBytes；
+每个消费者使用独立 durable。采用不同顶级前缀是为了避免与现有 `alarm.>` 流 Subject
+重叠，也避免生产环境重建现有 ALARM 流。
+
+Relay 默认关闭。上线时先创建 DOMAIN_ALARM 流，记录切换起始 stream sequence，再以该
+sequence 创建历史投影、北向和通知 Shadow durable，最后启用 Relay。新增消费者不得依赖
+“从当前尾部开始”的隐式默认；需要回放超过 7 天的事件时，从保留 30 天的 Outbox 按
+`event_id` 或 sequence 范围受控重放。
 
 不选择独立通知微服务，是因为当前系统仍是同一部署单元，拆服务会提前引入跨服务事务、
 鉴权、运维和版本兼容成本。内部模块边界和事件契约保持独立，未来出现明确容量或团队
@@ -132,20 +159,37 @@ PostgreSQL 是通知事实与审计源，NATS 是可靠分发通道。告警模�
 ### AlarmEngine
 
 - 继续负责告警产生、变更、确认、清除和持久化。
-- 为每次告警生命周期生成稳定 `occurrence_id`。
-- 在告警数据库事务内写通知 Outbox。
+- 当前 `Alarm.ID` 直接作为稳定 `occurrence_id`，同一生命周期不再生成第二套标识。
+- 在主 PostgreSQL 告警事务内写 `alarm_event_outbox`。
+- 为同一 occurrence 的每次生命周期变化递增持久化 `alarm_version`。
+- 清除 Outbox 保存归档所需的完整快照，使 TimescaleDB 投影不依赖已删除活动行。
+- 单条、批量、自动确认、自动清除、同步对账和 Expedited Event 等所有活动告警写路径
+  必须经过相同生命周期事务；REST Handler 不得再绕过 AlarmEngine 直接批量改表。
 - 不解析通知规则，不读取收件人，不发送消息。
 
-### Notification Event Relay
+### Alarm Event Relay
 
 - 使用 `FOR UPDATE SKIP LOCKED` 批量领取待发布事件。
 - 发布稳定 `event_id` 和版本化事件载荷。
 - NATS 发布失败进入退避，不能删除 Outbox 记录。
-- 发布成功后记录时间；按可配置保留期清理已发布数据。
+- 发布成功后记录时间；已发布记录默认保留 30 天，管理员可按 `event_id` 审计并重放，
+  清理周期可配置。
+- 是持久化后 `domain.alarm.lifecycle.*` 标准 Subject 的唯一发布者。
+- 新 Subject 与现有载荷不统一的 `alarm.*` 隔离，支持 Shadow 并行验证；标准消费者
+  切换完成后移除 AlarmEngine 中现有直接 `eventBus.Publish`。
+
+### Alarm History Projector
+
+- 持久订阅标准告警生命周期事件。
+- 在 `domain.alarm.lifecycle.cleared` 时按 `alarm_id` 幂等写入 TimescaleDB
+  `alarms_history`。
+- 重复事件不得产生重复历史；暂时失败依赖 JetStream 重投。
+- 投影延迟和失败需要独立指标与告警，不能阻塞主库告警清除。
 
 ### Notification Orchestrator
 
 - 以 `event_id` 幂等接收事件。
+- 按 `occurrence_id + alarm_version` 顺序推进 occurrence 投影。
 - 匹配规则和不可变规则版本。
 - 解析用户、角色、固定联系人和默认联系组。
 - 执行设备数据范围求交集。
@@ -170,13 +214,24 @@ PostgreSQL 是通知事实与审计源，NATS 是可靠分发通道。告警模�
 
 第一阶段消费：
 
-- `alarm.raised`
-- `alarm.updated`
-- `alarm.cleared`
+- `domain.alarm.lifecycle.raised`
+- `domain.alarm.lifecycle.updated`
+- `domain.alarm.lifecycle.acknowledged`
+- `domain.alarm.lifecycle.unacknowledged`
+- `domain.alarm.lifecycle.cleared`
 
-`alarm.updated` 的 `change_mask` 至少区分严重级别变化、确认状态变化和普通字段更新。
-严重级别跨越规则阈值时触发升级通知；确认状态变化用于停止后续提醒，普通描述更新不
-重复发送首次通知。
+`domain.alarm.lifecycle.updated` 的 `change_mask` 至少区分严重级别变化和普通字段更新。
+严重级别跨越规则阈值时触发升级通知，普通描述更新不重复发送首次通知。确认使用现有独立
+`domain.alarm.lifecycle.acknowledged` Subject，用于停止后续提醒，不再伪装为 updated。
+取消确认使用 `domain.alarm.lifecycle.unacknowledged`，用于在告警仍活跃且重复策略未到
+上限时恢复未来提醒，不重新发送首次通知。
+
+以上新 Subject 只允许发布 AlarmEngine 已持久化的标准生命周期事件。现有
+`alarm.raised`、`alarm.updated`、`alarm.acknowledged`、`alarm.cleared` 视为 legacy
+Subject，其载荷不统一，通知中心不得消费。备份任务、磁盘阈值等系统模块应调用
+AlarmEngine，或发布到独立、版本化的告警命令 Subject，由适配器完成校验和持久化。
+命令事件不是告警事实，通知中心和北向接口不得订阅。自定义载荷中的 `alert_email` 等
+收件人提示不进入生命周期契约，收件人统一由通知规则解析。
 
 事件载荷至少包括：
 
@@ -212,6 +267,18 @@ additional_information
 载荷是事件发生时的不可变业务快照，通知中心不得在重放时用当前告警内容悄悄改写历史。
 敏感或超大 AdditionalInformation 必须按模板允许列表使用，不能原样泄露到短信。
 
+`alarm_version` 从 1 开始，每次产生、属性变更、确认、取消确认和清除严格递增。通知
+Inbox 先以 `event_id` 去重，再按 occurrence 应用版本：
+
+- `version <= last_applied_version`：视为重复或旧事件，记录后忽略。
+- `version == last_applied_version + 1`：应用并推进状态。
+- `version > last_applied_version + 1`：进入等待，不跨版本执行通知策略；缺失事件到达后
+  继续处理，超过等待上限则产生运维告警。
+
+Worker 在外部调用前必须重新检查 occurrence 当前状态、版本和 schedule generation。
+已确认或已清除后领取到的旧首次通知和重复提醒必须取消；已经进入外部调用的请求则按
+真实服务商结果结束，不能伪装成取消。
+
 ## 通知规则
 
 ### 匹配条件
@@ -241,7 +308,7 @@ additional_information
 规则分别配置：
 
 - `minimum_active_duration`：告警持续达到该时间后才允许首次通知，对应老系统
-  Tolerance Duration。
+  Tolerance Duration 的候选语义；未完成现场确认前，迁移规则不得自动启用。
 - `delivery_mode`：实时或摘要。
 - `aggregation_window`：摘要窗口。
 - `repeat_interval`、`max_repeat_count`、`max_repeat_duration`：Critical 提醒。
@@ -318,16 +385,18 @@ recipients”业务。
 - 失败回执按错误类别重试或终止。
 - 回执超时记录 `unknown`，先查询状态，不盲目重发。
 
-第一阶段可以先上线邮件和 Kafka 短信。直连短信必须在供应商协议、鉴权、回执、幂等和
-测试环境冻结后再开放。
+第一阶段只上线邮件。当前项目没有 Kafka 客户端、Broker 配置或运行依赖，不能仅因老 OMC
+使用过 Kafka 就在新架构中默认引入。Kafka 短信必须先确认外部平台确实要求 Kafka，并冻结
+Broker 安全协议、Topic、消息 Schema、Ack 和幂等契约；直连短信必须冻结供应商协议、
+鉴权、回执、幂等和测试环境。两种 SMS Adapter 都复用统一通知模型，但分别独立上线。
 
 ## 数据模型
 
 所有新增结构折回 `omcgo/migrations/000001_init_schema.sql`，不创建 `000002+`。
 
-### `notification_event_outbox`
+### `alarm_event_outbox`
 
-告警事务内写入的可靠事件：
+主 PostgreSQL 告警事务内写入的领域事件：
 
 - `id/event_id`
 - `aggregate_type`
@@ -345,6 +414,10 @@ recipients”业务。
 
 `event_id` 唯一，错误信息必须脱敏。
 
+该表属于告警领域，北向接口、历史投影和通知中心消费同一标准事件。它不是通知专属
+队列。`domain.alarm.lifecycle.*` 不得存在第二个直接发布者；Shadow 期间可以与不同
+命名空间的 legacy `alarm.*` 并存，但消费者不得同时把两者当成同一事实处理。
+
 ### `notification_events`
 
 通知中心事件 Inbox 与不可变快照：
@@ -354,9 +427,23 @@ recipients”业务。
 - 版本化标准载荷。
 - 首次接收和处理完成时间。
 
+### `notification_occurrences`
+
+保存通知中心对告警生命周期的顺序投影：
+
+- `occurrence_id` 主键，同时等于当前 `alarm_id`。
+- `last_applied_version`。
+- 当前 `schedule_generation`。
+- 当前状态、严重级别和关键生命周期时间。
+- 最近事件 ID 和更新时间。
+- 版本缺口状态及首次发现时间。
+
+该表只用于通知编排和发送前栅栏，不成为告警事实源。
+
 ### `notification_rules` 与 `notification_rule_versions`
 
-`notification_rules` 保存稳定身份、名称、当前版本、启用、优先级、归档状态。
+`notification_rules` 保存稳定身份、名称、revision、当前草稿版本、当前已发布版本、
+当前已启用版本、优先级和归档状态。
 `notification_rule_versions` 保存不可变的匹配条件和策略快照，并记录创建人、创建时间和
 变更原因。
 
@@ -419,6 +506,9 @@ recipients”业务。
 - 加密地址快照
 - HMAC 地址指纹
 - 流程状态和投递结果
+- `available_at`、`next_attempt_at`
+- `locked_by`、`locked_at`、`lease_expires_at`
+- 创建时的 occurrence 版本和 schedule generation
 - `provider_message_id`
 - 原产生投递 ID，用于恢复配对
 - 各阶段时间
@@ -429,6 +519,10 @@ recipients”业务。
 ```text
 event_id + dispatch_kind + sequence_no + channel + recipient_fingerprint
 ```
+
+领取使用 `FOR UPDATE SKIP LOCKED` 和有期限租约。Worker 崩溃后只有租约到期的任务可被
+重新领取；外部请求必须携带稳定幂等键。重试只修改 `next_attempt_at`，不创建新的业务
+投递。
 
 ### `notification_delivery_attempts`
 
@@ -446,6 +540,21 @@ event_id + dispatch_kind + sequence_no + channel + recipient_fingerprint
 
 按规则、渠道、收件人、设备范围、严重级别和时间窗口聚合事件，并记录窗口状态、
 包含事件数和最终投递。
+
+### `notification_schedules`
+
+保存可重启、可取消的生命周期定时任务：
+
+- `occurrence_id`、`rule_version_id`、渠道和收件人指纹。
+- `schedule_kind=initial_gate|repeat|digest_flush|quiet_hours_release`。
+- `sequence_no`、`due_at`。
+- `generation`、`state=pending|claimed|completed|cancelled`。
+- `locked_by`、`locked_at`、`lease_expires_at`、`cancelled_at`。
+- 创建事件版本和完成后产生的 delivery ID。
+
+唯一键至少包含 occurrence、规则版本、渠道、收件人、kind、sequence 和 generation。
+确认、清除或规则切换通过递增 generation 并取消旧任务；领取后、外呼前仍必须执行
+occurrence 状态与 generation 栅栏检查。
 
 ### 既有表处理
 
@@ -500,7 +609,7 @@ handoff_only
 ### 首次产生
 
 - 创建稳定 occurrence。
-- 满足最小持续时间后才创建首次投递。
+- 创建持久化 `initial_gate` schedule，满足最小持续时间后才创建首次投递。
 - 在门槛到达前清除的瞬时告警记录为 suppressed，不发送产生或清除消息。
 
 ### 重复上报
@@ -515,12 +624,19 @@ handoff_only
 
 ### 确认
 
-- 确认立即停止尚未发送的后续提醒。
+- 确认事件按版本推进 occurrence，递增 generation，并停止尚未发送的后续提醒。
 - 已进入外部调用的投递不能伪装取消；按真实结果结束。
+
+### 取消确认
+
+- 取消确认事件按版本推进 occurrence 并递增 generation，不重新发送首次通知。
+- 告警仍活跃、规则允许重复且未超过最大次数或最长提醒时间时，从
+  `max(now, last_accepted_at + repeat_interval)` 安排下一次提醒，sequence 延续原值。
 
 ### 清除
 
-- 取消尚未发送的首次门槛任务和重复提醒。
+- 清除事件按版本推进 occurrence，递增 generation，并取消尚未发送的首次门槛任务和
+  重复提醒。
 - 只给已经成功受理产生或升级通知的“收件人 + 渠道”组合发送恢复。
 - 原产生通知被抑制或最终失败时，不发送容易误解的孤立恢复消息。
 - 摘要窗口内产生后又清除的低级别告警可以在摘要中表现为“窗口内发生并恢复”，不发送
@@ -562,14 +678,22 @@ Critical 默认绕过普通摘要，但仍受幂等、收件人级速率限制�
 
 - `GET/POST /api/v1/notification-rules`
 - `GET/PATCH /api/v1/notification-rules/{id}`
+- `POST /api/v1/notification-rules/{id}/publish`
 - `POST /api/v1/notification-rules/{id}/enable`
 - `POST /api/v1/notification-rules/{id}/archive`
 - `POST /api/v1/notification-rules/{id}/preview`
 - `GET/POST /api/v1/notification-templates`
 - `GET/PATCH /api/v1/notification-templates/{id}`
+- `POST /api/v1/notification-templates/{id}/publish`
 - `POST /api/v1/notification-templates/{id}/preview`
 
 预览只返回命中告警、设备范围、规则解释、收件人数和渲染预览，不发送消息。
+
+规则和模板修改产生 draft 版本，发布后版本不可变。所有 `PATCH`、`publish`、`enable`、
+`archive` 请求必须带 `If-Match` 或等价 revision 前置条件；缺少前置条件返回 428，
+revision 不匹配返回 412。启用请求必须指定准确的已发布 `rule_version_id`；规则渠道绑定
+准确的已发布模板版本。新模板发布后不会自动改变已启用规则，管理员需要发布并启用新的
+规则版本，前端必须明确提示该语义。
 
 ### 联系组与渠道
 
@@ -680,12 +804,22 @@ occurrence_id
 
 ### 当前项目迁移
 
-- 将 `alarm_filters.notify_email` 和 `email_recipients` 转换成独立通知规则。
-- `alarm_filters` 恢复为 ignore、auto_ack、auto_clear 等告警处理职责。
+- 将 `alarm_filters.notify_email` 和 `email_recipients` 转换成默认禁用的独立通知规则，
+  先输出命中范围和收件人预览。
+- 迁移工具必须按当前优先级和首条命中语义扫描重叠规则，列出原 `notify_email` 下方可能
+  被释放的 `ignore`、`auto_ack`、`auto_clear` 等规则；存在冲突时禁止自动切换。
+- Shadow 阶段保留原 `notify_email` 行为。按设备范围切换新通知规则后，原位置保留不
+  发送邮件的兼容 barrier，继续阻止低优先级规则意外生效。只有业务方处理完冲突并确认
+  行为一致后，才能移除 barrier，让 `alarm_filters` 恢复告警处理职责。
+- `notify_webhook` 不在第一阶段自动迁移；未来迁移必须复用同样的首条命中兼容流程。
 - 告警模块和通知模块的 SMTP 配置收敛为一个默认邮件渠道。
 - 现有模板转换成带不可变版本的模板。
 - 现有通知历史标记为 legacy，只读展示原始批次语义。
-- 删除告警持久化前的同步邮件调用，切换到 Outbox 事件。
+- 删除告警持久化前的同步邮件调用。
+- 北向接口和其他标准消费者切换到 `domain.alarm.lifecycle.*` 后，删除 AlarmEngine 对
+  legacy
+  `alarm.raised`、`alarm.updated`、`alarm.acknowledged`、`alarm.cleared` 的直接发布。
+- 备份和其他系统模块的自定义 `alarm.*` 发布改为 AlarmEngine 调用或独立告警命令事件。
 
 ### 老 OMC 配置迁移
 
@@ -694,7 +828,8 @@ occurrence_id
 - 老告警视图模板转换为通知规则。
 - 网元、设备组、告警列表、严重级别映射为匹配条件。
 - Interval 映射实时或摘要周期。
-- Tolerance Duration 映射 `minimum_active_duration`。
+- Tolerance Duration 暂按候选 `minimum_active_duration` 展示；只有现场日志或业务确认
+  语义一致后才正式映射。无法确认的迁移规则保持禁用并标记不兼容项。
 - 固定邮箱映射固定联系人。
 - Notify Default Recipients 映射默认 NOC 联系组。
 - 邮件图标状态映射规则邮件渠道启用状态。
@@ -706,9 +841,15 @@ occurrence_id
 
 ### 阶段 0：Shadow
 
-- 只消费事件、匹配规则、解析收件人和生成预览。
+- 在保留 legacy `alarm.*` 行为期间写 Outbox 并发布独立的
+  `domain.alarm.lifecycle.*`，
+  验证主库告警事务、Outbox 和生命周期顺序。
+- Alarm History Projector 先只对比 legacy 历史，不写 TimescaleDB；完成核对后，在同一
+  受控开关中停止原同步归档并启用幂等投影写入，避免双写历史。
+- 通知中心只消费事件、匹配规则、解析收件人和生成预览。
 - 不创建真实外部发送。
 - 对比告警数量、命中规则、收件人和老系统结果。
+- 输出 `notify_email` 首条命中兼容差异，存在未确认差异时禁止进入试点。
 
 ### 阶段 1：邮件试点
 
@@ -722,6 +863,7 @@ occurrence_id
 
 ### 阶段 3：Kafka 短信
 
+- 仅在外部短信平台接口确认必须使用 Kafka 后实施；否则不引入 Kafka 运行依赖。
 - 只对 Critical 和明确授权规则启用。
 - 页面和 API 只显示 handoff。
 
@@ -747,9 +889,13 @@ occurrence_id
 
 ### 集成测试
 
-- PostgreSQL 告警事务与 Outbox 原子性。
+- 主 PostgreSQL 告警变更与 `alarm_event_outbox` 原子性。
+- 清除后 TimescaleDB 历史投影失败、重试和幂等恢复。
 - Outbox 锁竞争、NATS 失败、恢复和重放。
+- 生命周期事件乱序、版本缺口、重复和旧版本忽略。
 - 重复事件不产生重复投递。
+- 服务重启后最小持续时间、重复提醒和安静时段任务仍可恢复。
+- 确认或清除与 Worker 领取并发时，外呼前栅栏阻止旧任务发送。
 - SMTP 受理、鉴权失败和部分收件人失败。
 - Kafka Ack 只产生 handoff。
 - 直连短信受理、回执成功、失败和未知。
@@ -785,6 +931,9 @@ occurrence_id
 - SMTP 受理不显示为最终送达。
 - 每个收件人、渠道和尝试均可审计。
 - Critical 提醒在确认或清除后停止。
+- 取消确认不重发首次通知，只能在既有规则次数和时长上限内恢复未来提醒。
+- 生命周期事件乱序或重复不能导致状态回退，也不能在确认或清除后产生迟到通知。
+- TimescaleDB 暂时不可用不阻塞主库告警清除，恢复后历史投影完整且不重复。
 - 瞬时和风暴告警按策略抑制或聚合，不能静默丢失审计事实。
 - 配置错误触发熔断，不持续产生相同失败记录。
 - 权限范围外的设备、投递和完整联系地址不可见。
