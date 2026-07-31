@@ -6,14 +6,18 @@ import (
 	"fmt"
 	neturl "net/url"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/redis/go-redis/v9"
 )
 
 // 编译时引用 device 包确保 DeviceOnlineEvent 类型存在（payload decode 用）。
@@ -43,6 +47,7 @@ type OnlineSubscriber struct {
 	// acs_transfer.uploadBaseURL，与「系统配置→ACS 传输」页同源）。非空合法时
 	// 覆盖 urlTemplate 的 scheme/host（path+query 仍取自 urlTemplate）；为空回退 urlTemplate。
 	resolveBaseURL func(ctx context.Context) string
+	admissionGate  PMSetupAdmissionGate
 	logger         *zap.Logger
 }
 
@@ -50,11 +55,75 @@ type OnlineSubscriber struct {
 // 与 config.*.yaml 的 pm.upload_url_template 末段保持一致。
 const defaultPMUploadPathQuery = "/smallcell/FileUploadService?fileType=PM&filename="
 const automatedPMTaskRetryIntervalSeconds = 30
+const pmSetupAdmissionTTL = 30 * time.Second
+const pmSetupCommandKey = "pm_upload_setup_on_online"
 
 // TaskCreator 是 OnlineSubscriber 入队 SPV task 的最小依赖。
 // 真实实现是 *task.TaskService。
 type TaskCreator interface {
 	CreateTask(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error)
+	LatestOpenTaskByDeviceAndMethod(
+		ctx context.Context,
+		deviceSN, method, description string,
+	) (*task.Task, error)
+	LatestCompletedTaskByDeviceAndCommandKey(
+		ctx context.Context,
+		deviceSN, commandKey string,
+	) (*task.Task, error)
+}
+
+// PMSetupAdmissionGate coalesces registered/online events across worker
+// instances while one handler checks durable state and creates a task.
+type PMSetupAdmissionGate interface {
+	Acquire(ctx context.Context, deviceSN string) (bool, error)
+	Release(ctx context.Context, deviceSN string) error
+}
+
+type redisPMSetupAdmissionGate struct {
+	client redis.Cmdable
+	ttl    time.Duration
+}
+
+func NewRedisPMSetupAdmissionGate(
+	client redis.Cmdable,
+	ttl time.Duration,
+) PMSetupAdmissionGate {
+	if client == nil {
+		return nil
+	}
+	if ttl <= 0 {
+		ttl = pmSetupAdmissionTTL
+	}
+	return &redisPMSetupAdmissionGate{client: client, ttl: ttl}
+}
+
+func (g *redisPMSetupAdmissionGate) Acquire(
+	ctx context.Context,
+	deviceSN string,
+) (bool, error) {
+	acquired, err := g.client.SetNX(
+		ctx,
+		redisx.Keys.PMUploadSetupAdmission(deviceSN),
+		"1",
+		g.ttl,
+	).Result()
+	if err != nil {
+		return false, fmt.Errorf("acquire PM setup admission: %w", err)
+	}
+	return acquired, nil
+}
+
+func (g *redisPMSetupAdmissionGate) Release(
+	ctx context.Context,
+	deviceSN string,
+) error {
+	if err := g.client.Del(
+		ctx,
+		redisx.Keys.PMUploadSetupAdmission(deviceSN),
+	).Err(); err != nil {
+		return fmt.Errorf("release PM setup admission: %w", err)
+	}
+	return nil
 }
 
 // NewOnlineSubscriber 构造订阅器。urlTemplate 支持 ${VAR} 与 ${VAR:-default} 插值。
@@ -91,6 +160,10 @@ func (s *OnlineSubscriber) SetUploadBaseURLResolver(fn func(ctx context.Context)
 	s.resolveBaseURL = fn
 }
 
+func (s *OnlineSubscriber) SetAdmissionGate(gate PMSetupAdmissionGate) {
+	s.admissionGate = gate
+}
+
 // Subscribe 把 OnlineSubscriber 挂到 EventBus。使用 QueueSubscribe 让多 worker 实例
 // 同时启动时只有一个实例处理同一事件（避免重复入队 SPV task）。
 //
@@ -124,7 +197,7 @@ func (s *OnlineSubscriber) handleOnline(ctx context.Context, evt event.Event) er
 			zap.String("event_id", evt.ID), zap.Error(err))
 		return nil // payload 损坏，重试无意义
 	}
-	return s.enqueuePMSetup(ctx, payload.SerialNumber, payload.DeviceID.String())
+	return s.enqueuePMSetup(ctx, payload.SerialNumber, payload.DeviceID.String(), false)
 }
 
 // handleRegistered 处理 device.registered（首次 onboard）。payload 是 map 结构
@@ -133,17 +206,22 @@ func (s *OnlineSubscriber) handleRegistered(ctx context.Context, evt event.Event
 	var payload struct {
 		SerialNumber string `json:"serial_number"`
 		DeviceID     string `json:"device_id"`
+		Created      bool   `json:"created"`
 	}
 	if err := evt.DecodePayload(&payload); err != nil {
 		s.logger.Warn("decode device.registered payload failed",
 			zap.String("event_id", evt.ID), zap.Error(err))
 		return nil
 	}
-	return s.enqueuePMSetup(ctx, payload.SerialNumber, payload.DeviceID)
+	return s.enqueuePMSetup(ctx, payload.SerialNumber, payload.DeviceID, payload.Created)
 }
 
 // enqueuePMSetup 解析上传 URL → host 守卫 → 入队 1 个 SPV task 带 3 个 PM 参数。
-func (s *OnlineSubscriber) enqueuePMSetup(ctx context.Context, serialNumber, deviceID string) error {
+func (s *OnlineSubscriber) enqueuePMSetup(
+	ctx context.Context,
+	serialNumber, deviceID string,
+	newRegistration bool,
+) error {
 	if serialNumber == "" {
 		s.logger.Warn("PM upload setup skipped: missing serial_number")
 		return nil
@@ -167,6 +245,71 @@ func (s *OnlineSubscriber) enqueuePMSetup(ctx context.Context, serialNumber, dev
 		return nil
 	}
 
+	if s.admissionGate != nil {
+		acquired, gateErr := s.admissionGate.Acquire(ctx, serialNumber)
+		if gateErr != nil {
+			s.logger.Warn("acquire PM upload setup admission failed",
+				zap.String("device_sn", serialNumber), zap.Error(gateErr))
+			return nil
+		}
+		if !acquired {
+			s.logger.Debug("skip coalesced PM upload setup event",
+				zap.String("device_sn", serialNumber))
+			return nil
+		}
+	}
+	releaseAdmission := func() {
+		if s.admissionGate == nil {
+			return
+		}
+		releaseCtx, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx),
+			3*time.Second,
+		)
+		defer cancel()
+		if releaseErr := s.admissionGate.Release(releaseCtx, serialNumber); releaseErr != nil {
+			s.logger.Warn("release PM upload setup admission failed",
+				zap.String("device_sn", serialNumber), zap.Error(releaseErr))
+		}
+	}
+
+	open, err := s.taskSvc.LatestOpenTaskByDeviceAndMethod(
+		ctx,
+		serialNumber,
+		"SetParameterValues",
+		"Auto-setup PM file upload on device onboard/online",
+	)
+	if err != nil {
+		releaseAdmission()
+		s.logger.Warn("query open PM upload setup task failed",
+			zap.String("device_sn", serialNumber), zap.Error(err))
+		return nil
+	}
+	if open != nil {
+		s.logger.Debug("skip duplicate open PM upload setup task",
+			zap.String("device_sn", serialNumber),
+			zap.String("task_id", open.ID))
+		return nil
+	}
+
+	if !newRegistration {
+		completed, lookupErr := s.taskSvc.LatestCompletedTaskByDeviceAndCommandKey(
+			ctx, serialNumber, pmSetupCommandKey,
+		)
+		if lookupErr != nil {
+			releaseAdmission()
+			s.logger.Warn("query completed PM upload setup task failed",
+				zap.String("device_sn", serialNumber), zap.Error(lookupErr))
+			return nil
+		}
+		if completed != nil && jsonSemanticallyEqual(completed.Params, paramsJSON) {
+			s.logger.Debug("skip already applied PM upload setup",
+				zap.String("device_sn", serialNumber),
+				zap.String("task_id", completed.ID))
+			return nil
+		}
+	}
+
 	maxRetries := task.RetryBudgetCoveringExpiry(3600, automatedPMTaskRetryIntervalSeconds)
 	req := &task.CreateTaskRequest{
 		DeviceSN:             serialNumber,
@@ -176,7 +319,7 @@ func (s *OnlineSubscriber) enqueuePMSetup(ctx context.Context, serialNumber, dev
 		Source:               task.TaskSourceSystem,
 		CreatorID:            "", // 系统任务，不进消息中心
 		Description:          "Auto-setup PM file upload on device onboard/online",
-		CommandKey:           "pm_upload_setup_on_online",
+		CommandKey:           pmSetupCommandKey,
 		ExpiresIn:            3600, // 1 小时不下发则视为过期（避免设备长时间离线后积压）
 		MaxRetries:           &maxRetries,
 		RetryIntervalSeconds: automatedPMTaskRetryIntervalSeconds,
@@ -184,6 +327,7 @@ func (s *OnlineSubscriber) enqueuePMSetup(ctx context.Context, serialNumber, dev
 
 	tsk, err := s.taskSvc.CreateTask(ctx, req)
 	if err != nil {
+		releaseAdmission()
 		// 失败 log only，下次设备 onboard/online 时自动重发
 		s.logger.Warn("enqueue PM upload SPV task failed",
 			zap.String("device_sn", serialNumber),
@@ -199,6 +343,14 @@ func (s *OnlineSubscriber) enqueuePMSetup(ctx context.Context, serialNumber, dev
 		zap.String("enable", s.enableValue),
 		zap.Int("interval", s.intervalSec))
 	return nil
+}
+
+func jsonSemanticallyEqual(left, right json.RawMessage) bool {
+	var leftValue, rightValue any
+	if json.Unmarshal(left, &leftValue) != nil || json.Unmarshal(right, &rightValue) != nil {
+		return false
+	}
+	return reflect.DeepEqual(leftValue, rightValue)
 }
 
 // resolveUploadURL 计算 PM 上传 URL：

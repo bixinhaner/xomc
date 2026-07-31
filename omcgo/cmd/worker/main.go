@@ -664,6 +664,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 			cfg.PM.PeriodicUploadInterval,
 			logger,
 		)
+		pmOnlineSub.SetAdmissionGate(pm.NewRedisPMSetupAdmissionGate(w.Redis, 0))
 		// PM 上传 URL 基址与「系统配置→ACS 传输」同源：运行时读 sys_configs
 		// acs_transfer.uploadBaseURL，非空则覆盖 ${OMC_PUBLIC_HOST} 模板的 host
 		// （修「URL 渲染成 localhost 不可达」+ 统一真值源，改 IP 即时生效无需重建）。

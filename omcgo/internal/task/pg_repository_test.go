@@ -840,6 +840,39 @@ func TestPgRepo_Integration_BatchCreate(t *testing.T) {
 	require.NoError(t, repo.BatchCreate(ctx, nil))
 }
 
+func TestPgRepo_Integration_LatestCompletedByDeviceCommandKey(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	defer cleanupTestTasks(t, pool)
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+
+	older := freshTaskForPG("completed-old", "completed-key")
+	older.CommandKey = "pm_upload_setup_on_online"
+	older.Status = TaskStatusCompleted
+	olderCompletedAt := time.Now().Add(-time.Minute)
+	older.CompletedAt = &olderCompletedAt
+	require.NoError(t, repo.Create(ctx, older))
+
+	newer := freshTaskForPG("completed-new", "completed-key")
+	newer.CommandKey = older.CommandKey
+	newer.Status = TaskStatusCompleted
+	newer.Params = json.RawMessage(`{"version":"new"}`)
+	newerCompletedAt := time.Now()
+	newer.CompletedAt = &newerCompletedAt
+	require.NoError(t, repo.Create(ctx, newer))
+
+	got, err := repo.LatestCompletedByDeviceCommandKey(
+		ctx, newer.DeviceSN, newer.CommandKey,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, newer.ID, got.ID)
+	require.JSONEq(t, string(newer.Params), string(got.Params))
+}
+
 func TestPgRepo_Integration_PurgeOldTasks(t *testing.T) {
 	pool := newTestPool(t)
 	if pool == nil {

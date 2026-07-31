@@ -11,6 +11,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 )
 
@@ -139,6 +140,45 @@ func TestGetKPITimeSeriesSnapshotKeepsPublishedSeriesWhenProgressUnavailable(t *
 	require.Len(t, snapshot.Series["K1"], 1)
 	require.Equal(t, jsonx.Float(10), snapshot.Series["K1"][0].Value)
 	require.Empty(t, snapshot.PeriodProgress)
+}
+
+func TestGetKPITimeSeriesSnapshotDoesNotReportCurrentPartialPeriodAsMissing(t *testing.T) {
+	start := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	end := start.Add(12 * time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("lte")
+	require.True(t, ok)
+	registry := prometheus.NewRegistry()
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+		metrics:        NewMetrics(registry),
+	}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{
+			Rows: []pmstream.ProgressResult{{
+				TaskID: taskID, Granularity: pmstream.GranularityDaily,
+				WindowStart: start, WindowEnd: start.Add(24 * time.Hour),
+				Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
+				MetricPath: "K1", MetricType: "kpi", Value: 42, Partial: true,
+				ReceivedSlots: 2, ExpectedSlots: 24,
+			}},
+		},
+	})
+
+	snapshot, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"K1"}, model.TechLTE,
+		metrics.GranularityDaily, start, end,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "available", snapshot.ProgressState)
+	require.Len(t, snapshot.Series["K1"], 1)
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		require.NotEqual(t, "dashboard_kpi_missing_result_total", family.GetName(),
+			"a valid current partial period must not increment the published-result-missing counter")
+	}
 }
 
 func TestGetKPITimeSeries_RoutesRequestedGranularity(t *testing.T) {

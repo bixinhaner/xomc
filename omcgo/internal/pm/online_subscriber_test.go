@@ -7,7 +7,9 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,13 +17,17 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/redis/go-redis/v9"
 )
 
 // stubTaskCreator 抓取 CreateTask 入参，断言 OnlineSubscriber 发出的 SPV 是否符合预期。
 type stubTaskCreator struct {
-	mu       sync.Mutex
-	captured []*task.CreateTaskRequest
-	err      error
+	mu        sync.Mutex
+	captured  []*task.CreateTaskRequest
+	err       error
+	open      *task.Task
+	completed *task.Task
+	lookupErr error
 }
 
 func (s *stubTaskCreator) CreateTask(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
@@ -32,6 +38,33 @@ func (s *stubTaskCreator) CreateTask(_ context.Context, req *task.CreateTaskRequ
 		return nil, s.err
 	}
 	return &task.Task{ID: "stub-task-" + req.DeviceSN}, nil
+}
+
+func (s *stubTaskCreator) LatestOpenTaskByDeviceAndMethod(
+	_ context.Context, _, _, _ string,
+) (*task.Task, error) {
+	return s.open, s.lookupErr
+}
+
+func (s *stubTaskCreator) LatestCompletedTaskByDeviceAndCommandKey(
+	_ context.Context, _, _ string,
+) (*task.Task, error) {
+	return s.completed, s.lookupErr
+}
+
+type stubPMSetupAdmissionGate struct {
+	acquired bool
+	err      error
+	released int
+}
+
+func (g *stubPMSetupAdmissionGate) Acquire(context.Context, string) (bool, error) {
+	return g.acquired, g.err
+}
+
+func (g *stubPMSetupAdmissionGate) Release(context.Context, string) error {
+	g.released++
+	return nil
 }
 
 func mustEvent(t *testing.T, payload device.DeviceOnlineEvent) event.Event {
@@ -252,6 +285,100 @@ func Test_OnlineSubscriber_RegisteredTriggersSPV(t *testing.T) {
 	require.Len(t, stub.captured, 1)
 	assert.Equal(t, "REG-TEST-001", stub.captured[0].DeviceSN)
 	assert.Equal(t, "pm_upload_setup_on_online", stub.captured[0].CommandKey)
+}
+
+func Test_OnlineSubscriber_SkipsExistingOpenPMSetup(t *testing.T) {
+	stub := &stubTaskCreator{open: &task.Task{ID: "already-open"}}
+	s := NewOnlineSubscriber(stub, "http://1.2.3.4:8080/smallcell/FileUploadService?fileType=PM&filename=", "1", 900, nil)
+
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
+	require.Empty(t, stub.captured)
+}
+
+func Test_OnlineSubscriber_SkipsCompletedMatchingPMSetupOnReconnect(t *testing.T) {
+	stub := &stubTaskCreator{}
+	s := NewOnlineSubscriber(stub, "http://1.2.3.4:8080/smallcell/FileUploadService?fileType=PM&filename=", "1", 900, nil)
+	params, err := json.Marshal(buildSPVParams(
+		"1",
+		"http://1.2.3.4:8080/smallcell/FileUploadService?fileType=PM&filename=",
+		900,
+	))
+	require.NoError(t, err)
+	stub.completed = &task.Task{ID: "already-applied", Params: params}
+
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
+	require.Empty(t, stub.captured)
+}
+
+func Test_OnlineSubscriber_NewRegistrationDoesNotTrustOldCompletedState(t *testing.T) {
+	const uploadURL = "http://1.2.3.4:8080/smallcell/FileUploadService?fileType=PM&filename="
+	params, err := json.Marshal(buildSPVParams("1", uploadURL, 900))
+	require.NoError(t, err)
+	stub := &stubTaskCreator{completed: &task.Task{
+		ID:     "old-device-state",
+		Params: params,
+	}}
+	s := NewOnlineSubscriber(stub, uploadURL, "1", 900, nil)
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]interface{}{
+		"device_id":     uuid.New().String(),
+		"serial_number": "REG-NEW-001",
+		"created":       true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.handleRegistered(context.Background(), evt))
+	require.Len(t, stub.captured, 1)
+}
+
+func Test_OnlineSubscriber_ReappliesChangedDesiredConfiguration(t *testing.T) {
+	stub := &stubTaskCreator{completed: &task.Task{
+		ID:     "old-config",
+		Params: json.RawMessage(`{"values":[]}`),
+	}}
+	s := NewOnlineSubscriber(stub, "http://1.2.3.4:8080/smallcell/FileUploadService?fileType=PM&filename=", "1", 900, nil)
+
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
+	require.Len(t, stub.captured, 1)
+}
+
+func Test_OnlineSubscriber_DistributedAdmissionCoalescesConcurrentEvents(t *testing.T) {
+	stub := &stubTaskCreator{}
+	gate := &stubPMSetupAdmissionGate{acquired: false}
+	s := NewOnlineSubscriber(stub, "http://1.2.3.4:8080/smallcell/FileUploadService?fileType=PM&filename=", "1", 900, nil)
+	s.SetAdmissionGate(gate)
+
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
+	require.Empty(t, stub.captured)
+	require.Zero(t, gate.released)
+}
+
+func Test_OnlineSubscriber_ReleasesAdmissionWhenCreateFails(t *testing.T) {
+	stub := &stubTaskCreator{err: errors.New("insert failed")}
+	gate := &stubPMSetupAdmissionGate{acquired: true}
+	s := NewOnlineSubscriber(stub, "http://1.2.3.4:8080/smallcell/FileUploadService?fileType=PM&filename=", "1", 900, nil)
+	s.SetAdmissionGate(gate)
+
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
+	require.Equal(t, 1, gate.released)
+}
+
+func TestRedisPMSetupAdmissionGate_CoalescesAndReleases(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	gate := NewRedisPMSetupAdmissionGate(client, time.Minute)
+
+	acquired, err := gate.Acquire(context.Background(), "SN-001")
+	require.NoError(t, err)
+	require.True(t, acquired)
+	acquired, err = gate.Acquire(context.Background(), "SN-001")
+	require.NoError(t, err)
+	require.False(t, acquired)
+
+	require.NoError(t, gate.Release(context.Background(), "SN-001"))
+	acquired, err = gate.Acquire(context.Background(), "SN-001")
+	require.NoError(t, err)
+	require.True(t, acquired)
 }
 
 func Test_expandEnv_DefaultSyntax(t *testing.T) {

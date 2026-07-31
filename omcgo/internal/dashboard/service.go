@@ -1360,8 +1360,12 @@ func (s *Service) GetKPITimeSeriesSnapshotWithMetadata(
 	startTime, endTime time.Time,
 ) (KPITimeSeriesSnapshot, KPIQueryMetadata, error) {
 	load := func(loadCtx context.Context) (KPITimeSeriesSnapshot, error) {
-		series, err := s.getKPITimeSeriesUnprotected(
+		// The snapshot explicitly supplies the current open day/week from the
+		// progress reader. Absence of a final published row for that natural
+		// period is expected, so it must not feed the final-result-missing alarm.
+		series, err := s.getKPITimeSeriesUnprotectedWithObservation(
 			loadCtx, kpiNames, technology, granularity, startTime, endTime,
+			false,
 		)
 		if err != nil {
 			return KPITimeSeriesSnapshot{}, err
@@ -1476,6 +1480,19 @@ func sortKPITimeSeriesSnapshot(snapshot *KPITimeSeriesSnapshot) {
 }
 
 func (s *Service) getKPITimeSeriesUnprotected(ctx context.Context, kpiNames []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) (KPITimeSeriesResponse, error) {
+	return s.getKPITimeSeriesUnprotectedWithObservation(
+		ctx, kpiNames, technology, granularity, startTime, endTime, true,
+	)
+}
+
+func (s *Service) getKPITimeSeriesUnprotectedWithObservation(
+	ctx context.Context,
+	kpiNames []string,
+	technology model.Technology,
+	granularity metrics.Granularity,
+	startTime, endTime time.Time,
+	observeMissing bool,
+) (KPITimeSeriesResponse, error) {
 	result := make(KPITimeSeriesResponse, len(kpiNames))
 
 	if len(kpiNames) == 0 {
@@ -1497,7 +1514,9 @@ func (s *Service) getKPITimeSeriesUnprotected(ctx context.Context, kpiNames []st
 		}
 	}
 
-	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, technology, granularity, startTime, endTime)
+	points, err := s.fetchNetworkKCodeSeries(
+		ctx, kcodes, technology, granularity, startTime, endTime, observeMissing,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1586,7 +1605,14 @@ type networkSeriesPoint struct {
 }
 
 // fetchNetworkKCodeSeries 直接读取多个指标编号的首页全网发布结果。
-func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, technology model.Technology, granularity metrics.Granularity, startTime, endTime time.Time) ([]networkSeriesPoint, error) {
+func (s *Service) fetchNetworkKCodeSeries(
+	ctx context.Context,
+	kcodes []string,
+	technology model.Technology,
+	granularity metrics.Granularity,
+	startTime, endTime time.Time,
+	observeMissing bool,
+) ([]networkSeriesPoint, error) {
 	if s.networkRollups == nil {
 		return nil, fmt.Errorf("dashboard network rollup reader not configured")
 	}
@@ -1598,7 +1624,11 @@ func (s *Service) fetchNetworkKCodeSeries(ctx context.Context, kcodes []string, 
 	if err != nil {
 		return nil, fmt.Errorf("query dashboard network %s kpi series: %w", granularity, err)
 	}
-	s.observeNetworkRollups(rows, kcodes, technology, granularity, time.Now())
+	requested := kcodes
+	if !observeMissing {
+		requested = nil
+	}
+	s.observeNetworkRollups(rows, requested, technology, granularity, time.Now())
 
 	points := make([]networkSeriesPoint, 0, len(rows))
 	for _, row := range rows {
@@ -1639,7 +1669,9 @@ func sortAndDedupeNetworkSeriesPoints(points []networkSeriesPoint) []networkSeri
 func (s *Service) queryNetworkKPISeries(ctx context.Context, kpiName string, startTime, endTime time.Time) ([]KPITrendEntry, error) {
 	kcodes := []string{kpiName}
 
-	points, err := s.fetchNetworkKCodeSeries(ctx, kcodes, "", metrics.GranularityHourly, startTime, endTime)
+	points, err := s.fetchNetworkKCodeSeries(
+		ctx, kcodes, "", metrics.GranularityHourly, startTime, endTime, true,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("query network kpi series: %w", err)
 	}
