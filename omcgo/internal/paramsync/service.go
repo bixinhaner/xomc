@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -179,6 +180,14 @@ func (s *Service) startRequest(ctx context.Context, req *SyncRequest) (*SubmitRe
 // run gate. Claiming advances next_attempt_at before planning so multiple APP
 // instances cannot hot-loop the same request.
 func (s *Service) DispatchQueued(ctx context.Context, limit int) (int, error) {
+	return s.DispatchQueuedConcurrent(ctx, limit, 1)
+}
+
+// DispatchQueuedConcurrent retries claimed durable requests with bounded
+// concurrency. Planning one full parameter-sync request may touch the model
+// library and create many durable tasks; processing a cold-start claim
+// sequentially makes the maintenance deadline cancel the unvisited tail.
+func (s *Service) DispatchQueuedConcurrent(ctx context.Context, limit, workers int) (int, error) {
 	repo, ok := s.repo.(queuedRequestRepository)
 	if !ok {
 		return 0, nil
@@ -187,16 +196,61 @@ func (s *Service) DispatchQueued(ctx context.Context, limit int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	dispatched := 0
-	var errs []error
-	for _, req := range requests {
+	return runConcurrentQueuedRequests(requests, workers, func(req *SyncRequest) (bool, error) {
 		result, dispatchErr := s.startRequest(ctx, req)
 		if dispatchErr != nil {
-			errs = append(errs, dispatchErr)
-			continue
+			return false, dispatchErr
 		}
-		if result.Status == RequestStatusRunning || result.Status.Terminal() {
+		return result.Status == RequestStatusRunning || result.Status.Terminal(), nil
+	})
+}
+
+func runConcurrentQueuedRequests(
+	requests []*SyncRequest,
+	workers int,
+	dispatch func(*SyncRequest) (bool, error),
+) (int, error) {
+	if len(requests) == 0 {
+		return 0, nil
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > len(requests) {
+		workers = len(requests)
+	}
+	type result struct {
+		dispatched bool
+		err        error
+	}
+	jobs := make(chan *SyncRequest)
+	results := make(chan result, len(requests))
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for req := range jobs {
+				dispatched, err := dispatch(req)
+				results <- result{dispatched: dispatched, err: err}
+			}
+		}()
+	}
+	for _, req := range requests {
+		jobs <- req
+	}
+	close(jobs)
+	wg.Wait()
+	close(results)
+
+	dispatched := 0
+	var errs []error
+	for item := range results {
+		if item.dispatched {
 			dispatched++
+		}
+		if item.err != nil {
+			errs = append(errs, item.err)
 		}
 	}
 	return dispatched, errors.Join(errs...)

@@ -702,18 +702,22 @@ func initParamSyncModule(c *Container) error {
 					ctx, cancel := context.WithTimeout(maintenanceCtx, 10*time.Second)
 					_, err := outbox.RequeueStaleDeliveries(ctx, time.Now().Add(-time.Minute))
 					cancel()
-					if err == nil {
-						ctx, cancel = context.WithTimeout(maintenanceCtx, 10*time.Second)
-						_, err = outbox.DispatchPendingConcurrent(ctx, 16, 25)
-						cancel()
-					}
-					if err == nil {
-						ctx, cancel = context.WithTimeout(maintenanceCtx, 10*time.Second)
-						_, err = service.DispatchQueued(ctx, 100)
-						cancel()
-					}
 					if err != nil && !errors.Is(err, context.Canceled) {
-						logger.Warn("parameter sync outbox dispatch failed", zap.Error(err))
+						logger.Warn("parameter sync stale outbox requeue failed", zap.Error(err))
+					}
+
+					ctx, cancel = context.WithTimeout(maintenanceCtx, 15*time.Second)
+					_, err = outbox.DispatchPendingConcurrent(ctx, 16, 25)
+					cancel()
+					if err != nil && !errors.Is(err, context.Canceled) {
+						logger.Warn("parameter sync outbox delivery failed", zap.Error(err))
+					}
+
+					ctx, cancel = context.WithTimeout(maintenanceCtx, 30*time.Second)
+					_, err = service.DispatchQueuedConcurrent(ctx, 100, 16)
+					cancel()
+					if err != nil && !errors.Is(err, context.Canceled) {
+						logger.Warn("queued parameter sync request dispatch failed", zap.Error(err))
 					}
 				case <-reconcileTicker.C:
 					err := runParamSyncReconciliation(maintenanceCtx, reconciler, projector, time.Now(), maintenanceCfg)

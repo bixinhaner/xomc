@@ -3,6 +3,7 @@ package paramsync
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +13,33 @@ import (
 
 	"github.com/omcgo/omcgo/internal/task"
 )
+
+func TestRunConcurrentQueuedRequestsUsesBoundedWorkers(t *testing.T) {
+	requests := make([]*SyncRequest, 100)
+	for i := range requests {
+		requests[i] = &SyncRequest{ID: uuid.New()}
+	}
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+
+	dispatched, err := runConcurrentQueuedRequests(requests, 16, func(*SyncRequest) (bool, error) {
+		current := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		for {
+			max := maxInFlight.Load()
+			if current <= max || maxInFlight.CompareAndSwap(max, current) {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+		return true, nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 100, dispatched)
+	assert.Greater(t, maxInFlight.Load(), int32(1))
+	assert.LessOrEqual(t, maxInFlight.Load(), int32(16))
+}
 
 type stubPlanner struct {
 	plan *Plan
