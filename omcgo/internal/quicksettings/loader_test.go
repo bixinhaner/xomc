@@ -543,6 +543,49 @@ func TestBuiltinLTENeighborCellIncludesRequiredTACAndNumericConstraints(t *testi
 	}
 }
 
+func TestBuiltinLTEInterFrequencyQRxLevMinUsesNumericConstraints(t *testing.T) {
+	reg := NewRegistry()
+	loader := NewLoader(
+		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
+		filepath.Join("..", "..", "data"),
+		reg,
+		nil,
+	)
+
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+
+	for _, model := range []string{"BLQ", "MLN", "MLQ", "BM", "BLN"} {
+		t.Run(model, func(t *testing.T) {
+			groups := reg.GetByParamModel(model)
+			var interFrequencyGroup *Group
+			for i := range groups {
+				group := &groups[i]
+				if group.ID == "enb-neighbor-freq" {
+					interFrequencyGroup = group
+					break
+				}
+			}
+			require.NotNil(t, interFrequencyGroup)
+
+			var qRxLevMin *Param
+			for i := range interFrequencyGroup.Params {
+				param := &interFrequencyGroup.Params[i]
+				if param.Leaf == "QRxLevMinSIB5" {
+					qRxLevMin = param
+					break
+				}
+			}
+			require.NotNil(t, qRxLevMin)
+			assert.Equal(t, "int", qRxLevMin.Type)
+			require.NotNil(t, qRxLevMin.MinValue)
+			require.NotNil(t, qRxLevMin.MaxValue)
+			assert.EqualValues(t, -70, *qRxLevMin.MinValue)
+			assert.EqualValues(t, -22, *qRxLevMin.MaxValue)
+		})
+	}
+}
+
 func TestRegistry_GetByParamModel_IsCopy(t *testing.T) {
 	reg := NewRegistry()
 	reg.Replace("BLQ", []Group{{ID: "g1"}})

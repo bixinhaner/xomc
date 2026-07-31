@@ -99,7 +99,8 @@
          objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.">
     <param name="EARFCN" titleZh="频点" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
     <param name="QOffsetRange" titleZh="频点偏移" titleEn="Q-OffsetRange" leaf="QOffsetFreq"/>
-    <param name="qRxLevMinSib5" titleZh="最小接收电平" titleEn="qRxLevMinSib5" leaf="QRxLevMinSIB5"/>
+    <param name="qRxLevMinSib5" titleZh="最小接收电平" titleEn="qRxLevMinSib5" leaf="QRxLevMinSIB5"
+           type="int" minValue="-70" maxValue="-22"/>
     <param name="PMax" titleZh="最大发射功率" titleEn="PMax" leaf="PMax"/>
     <param name="tReselectionEutra" titleZh="重选定时器" titleEn="tReselectionEutra" leaf="TReselectionEUTRA"/>
     <param name="ReselThreshHigh" titleZh="重选高门限" titleEn="Resel Thresh High" leaf="ThreshXHigh"/>
