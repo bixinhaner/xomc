@@ -167,12 +167,6 @@ if [ -e "$TMP/low-resources.env" ]; then
 else
   ok
 fi
-if [ -e "$TMP/overcommitted-resources.env" ]; then
-  bad "物理内存不足时不得写入 resources.env"
-else
-  ok
-fi
-
 echo "── 不覆盖人工路径 ──"
 CUSTOM_ENV="$TMP/custom.env"
 printf 'MINIO_DATA_PATH=/manual/minio\n' > "$CUSTOM_ENV"

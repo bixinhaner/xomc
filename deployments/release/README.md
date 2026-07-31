@@ -246,5 +246,6 @@ sudo firewall-cmd --reload
 - **Docker 版本**：`release.conf` 的 `DOCKER_VERSION` / `DOCKER_URL_TEMPLATE` 控制下载。
 - **压缩方式**：`release.conf` 的 `PKG_COMPRESS` 控制交付包压缩（默认 `xz`，体积最小）。
 - **首次部署**需基础设施包 + 项目包**两个都下载**（同架构），先装 Docker、导基础镜像，再部署项目包。
+- **安装严格离线**：项目包安装会在启动前校验本次 Compose 使用的全部基础设施、监控和业务镜像，并以 `--pull never` 启动；缺少 `cadvisor` 等任一镜像会直接失败，不会联网补拉。首次部署或基础设施包尚未导入时不要使用 `--skip-infra`，应先解压并导入包含 `monitoring-images-*.tar` 的基础设施包。
 - **镜像缓存策略**：`build-images.sh` 通过 `<image>:<tag>-<arch>-saved` 后缀 tag 实现跨架构镜像**命名隔离**；本机原 tag 始终指向本机架构镜像，**可与同主机的 `docker compose` 并存**，互不干扰。构建结束**不再 `docker rmi` 清理**：`*-saved` tag 作为本地缓存，下次构建命中即跳 `docker pull`。打出的 tar 同时包含 `*-saved` 与原 tag（**双 tag tar**），运维侧 `docker load` 后直接用原 tag 即可。详见《构建手册》§6.3。
 - `docker-cache/`、`images-cache/`、`dist/`、`archive/` 为构建产物，已被 `.gitignore` 忽略。

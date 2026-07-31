@@ -671,7 +671,7 @@ storage_prepare_configured_env_paths "$ENV_FILE" ||
 
 if [ "$SKIP_INFRA" = 0 ]; then
   INFRA_IMAGES=("$IMAGE_POSTGRES" "${IMAGE_POSTGRES_TSDB:-}" "$IMAGE_REDIS" "$IMAGE_NATS" "$IMAGE_MINIO" "${IMAGE_NGINX:-}")
-  MON_IMAGES=("${IMAGE_PROMETHEUS:-}" "${IMAGE_ALERTMANAGER:-}" "${IMAGE_GRAFANA:-}" "${IMAGE_LOKI:-}" "${IMAGE_TEMPO:-}" "${IMAGE_OTELCOL:-}" "${IMAGE_NATS_EXPORTER:-}")
+  MON_IMAGES=("${IMAGE_PROMETHEUS:-}" "${IMAGE_ALERTMANAGER:-}" "${IMAGE_GRAFANA:-}" "${IMAGE_LOKI:-}" "${IMAGE_TEMPO:-}" "${IMAGE_OTELCOL:-}" "${IMAGE_NATS_EXPORTER:-}" "${IMAGE_NGINX_EXPORTER:-}" "${IMAGE_NODE_EXPORTER:-}" "${IMAGE_CADVISOR:-}")
 
   if images_exist "${INFRA_IMAGES[@]}" "${MON_IMAGES[@]}"; then
     log "基础设施 + 监控镜像已存在，跳过 load；handoff 完成前保持现有容器不动"
@@ -703,6 +703,24 @@ else
   done
   [ "$biz_loaded" = 1 ] || die "$RELEASE_DIR/images/ 下无业务镜像 tar，无法继续" 1
 fi
+
+# 项目包与基础设施包分离交付，但运行时必须完全离线：所有本次 Compose
+# 会使用的镜像都必须已经存在于本机。禁止让 Compose 在启动阶段隐式 pull，
+# 否则内网安装会变成部分成功、部分联网拉取的不可复现状态。
+REQUIRED_IMAGES=("$IMAGE_POSTGRES" "${IMAGE_POSTGRES_TSDB:-}" "$IMAGE_REDIS" "$IMAGE_NATS" "$IMAGE_MINIO" "$IMAGE_APP" "$IMAGE_ACS" "$IMAGE_WORKER")
+[ "$SKIP_WEB" = 1 ] || REQUIRED_IMAGES+=("$IMAGE_WEB")
+if [ "$SKIP_MONITORING" = 0 ]; then
+  REQUIRED_IMAGES+=("${IMAGE_PROMETHEUS:-}" "${IMAGE_ALERTMANAGER:-}" "${IMAGE_GRAFANA:-}" "${IMAGE_LOKI:-}" "${IMAGE_TEMPO:-}" "${IMAGE_OTELCOL:-}" "${IMAGE_NATS_EXPORTER:-}" "${IMAGE_NGINX_EXPORTER:-}" "${IMAGE_NODE_EXPORTER:-}" "${IMAGE_CADVISOR:-}")
+fi
+missing_images=()
+for image in "${REQUIRED_IMAGES[@]}"; do
+  [ -z "$image" ] && continue
+  docker image inspect "$image" >/dev/null 2>&1 || missing_images+=("$image")
+done
+if [ "${#missing_images[@]}" -gt 0 ]; then
+  die "离线安装缺少本地镜像：${missing_images[*]}。请先解压匹配架构的基础设施包到 $INFRA_DIR，并重新执行安装（不要使用 --skip-infra）；项目包业务镜像由本步骤负责 load。" 1
+fi
+log "离线镜像校验通过：本次 Compose 所需镜像均已在本机"
 
 # =============================================================================
 # Step 5. 默认口令检查（PostgreSQL / MinIO / Grafana）
@@ -777,7 +795,7 @@ heal_main_pg_timescaledb_downgrade
 
 # 7.1 起基础设施（postgres / postgres-tsdb / redis / nats / minio）
 log "启动基础设施容器 ..."
-"${DC[@]}" up -d postgres postgres-tsdb redis nats minio
+"${DC[@]}" up --pull never -d postgres postgres-tsdb redis nats minio
 
 log "等待基础设施 ready（最多 90s）..."
 WAIT=0
@@ -835,7 +853,7 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
   log "执行 db migrate（容器：migrate-schema）..."
   MIGRATE_OK=0
   for attempt in 1 2 3; do
-    if "${DC[@]}" up --exit-code-from migrate-schema migrate-schema; then
+    if "${DC[@]}" up --pull never --exit-code-from migrate-schema migrate-schema; then
       MIGRATE_OK=1
       break
     fi
@@ -854,7 +872,7 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
   # 7.4 seed（goose 单链路 migrations/seed/，每次部署都跑 —— goose 用
   #     goose_db_version_seed 版本表自动追踪已应用项，新加 seed 自动 catch up）
   log "执行 db seed（容器：migrate-seed-sql，goose 幂等）..."
-  if "${DC[@]}" up --exit-code-from migrate-seed-sql migrate-seed-sql; then
+  if "${DC[@]}" up --pull never --exit-code-from migrate-seed-sql migrate-seed-sql; then
     log "seed 成功"
   else
     die "seed 失败：${DC[*]} up --exit-code-from migrate-seed-sql migrate-seed-sql" 3
@@ -868,7 +886,7 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
   log "执行时序库 migrate（容器：migrate-tsdb-schema，goose 幂等）..."
   TSDB_MIGRATE_OK=0
   for attempt in 1 2 3; do
-    if "${DC[@]}" up --exit-code-from migrate-tsdb-schema migrate-tsdb-schema; then
+    if "${DC[@]}" up --pull never --exit-code-from migrate-tsdb-schema migrate-tsdb-schema; then
       TSDB_MIGRATE_OK=1
       break
     fi
@@ -906,6 +924,27 @@ acs_ha_wait_ready() {
   return 1
 }
 
+acs_ha_report_not_ready() {
+  local service="$1" service_cid service_ip state oom exit_code restart_count ready_response
+  service_cid="$("${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
+  if [ -z "$service_cid" ]; then
+    log "ACS readiness 诊断：$service 没有容器 ID"
+    return 0
+  fi
+  state="$(docker inspect -f '{{.State.Status}}' "$service_cid" 2>/dev/null || echo unknown)"
+  oom="$(docker inspect -f '{{.State.OOMKilled}}' "$service_cid" 2>/dev/null || echo unknown)"
+  exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$service_cid" 2>/dev/null || echo unknown)"
+  restart_count="$(docker inspect -f '{{.RestartCount}}' "$service_cid" 2>/dev/null || echo unknown)"
+  log "ACS readiness 诊断：$service state=$state oom=$oom exit=$exit_code restarts=$restart_count"
+  service_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$service_cid" 2>/dev/null || true)"
+  if [ -n "$service_ip" ]; then
+    ready_response="$(curl -sS --max-time 5 "http://${service_ip}:7557/readyz" 2>&1 || true)"
+    log "ACS readiness 响应：${ready_response:-<无响应>}"
+  fi
+  log "ACS 最近日志（$service，最多 80 行）："
+  "${DC[@]}" logs --tail=80 "$service" 2>&1 || true
+}
+
 web_acs_dynamic_upstream_loaded() {
   local web_cid="$1" rendered
   rendered="$(docker exec "$web_cid" nginx -T 2>&1)" || return 1
@@ -930,7 +969,7 @@ acs_ha_prepare_candidate() {
   # 就绪也不会被纳入路由。先在旧 ACS 仍服务时只刷新 web，再继续接力。
   if ! web_acs_dynamic_upstream_loaded "$old_web"; then
     log "旧 web 尚未加载动态 ACS upstream，先刷新 web 动态 ACS upstream ..."
-    "${DC[@]}" up -d --no-deps web
+    "${DC[@]}" up --pull never -d --no-deps web
     wait_seconds=0
     while [ "$wait_seconds" -lt 30 ]; do
       old_web="$("${DC[@]}" ps -q web 2>/dev/null | head -n1)"
@@ -945,8 +984,9 @@ acs_ha_prepare_candidate() {
   fi
 
   log "先更新 ACS 接力实例，正式 ACS 继续承载现有流量 ..."
-  "${DC[@]}" up -d --no-deps acs-candidate
+  "${DC[@]}" up --pull never -d --no-deps acs-candidate
   if ! acs_ha_wait_ready acs-candidate; then
+    acs_ha_report_not_ready acs-candidate
     die "ACS 接力实例 90s 内未就绪；正式 ACS 未替换，已中止发布" 2
   fi
   # nginx.conf 的 Docker DNS valid=10s。候选实例刚加入共享别名 `acs` 时，
@@ -954,6 +994,7 @@ acs_ha_prepare_candidate() {
   log "ACS 接力实例已就绪，等待 Nginx 动态 DNS 完成一轮刷新 ..."
   sleep 12
   if ! acs_ha_wait_ready acs-candidate; then
+    acs_ha_report_not_ready acs-candidate
     die "DNS 刷新后 ACS 接力实例已不就绪；正式 ACS 未替换，已中止发布" 2
   fi
   log "Nginx 已具备接力上游，允许替换正式 ACS"
@@ -966,24 +1007,27 @@ if [ "$ACS_HA_EXISTING" = 1 ]; then
   # 与 primary 同时重建，破坏接力不变量。正式实例必须单独替换、直连业务端口
   # 验证就绪，再覆盖一轮 Nginx DNS 缓存；其余业务显式 --no-deps 排除两个 ACS。
   log "接力实例持续承载流量，单独替换正式 ACS ..."
-  "${DC[@]}" up -d --no-deps acs
+  "${DC[@]}" up --pull never -d --no-deps acs
   if ! acs_ha_wait_ready acs; then
+    acs_ha_report_not_ready acs
     die "正式 ACS 90s 内未就绪；接力实例仍在服务，已中止其余业务更新" 2
   fi
   log "正式 ACS 已就绪，等待 Nginx 动态 DNS 完成一轮刷新 ..."
   sleep 12
   if ! acs_ha_wait_ready acs || ! acs_ha_wait_ready acs-candidate; then
+    acs_ha_report_not_ready acs
+    acs_ha_report_not_ready acs-candidate
     die "ACS 双实例在 DNS 刷新后未全部就绪，已中止其余业务更新" 2
   fi
 
   remaining_services=(app worker)
   [ "$SKIP_WEB" = 1 ] || remaining_services+=(web)
   log "双 ACS 均已就绪，更新其余业务（显式排除 ACS 依赖）..."
-  "${DC[@]}" up -d --no-deps "${remaining_services[@]}"
+  "${DC[@]}" up --pull never -d --no-deps "${remaining_services[@]}"
 else
   # 首次安装没有存量南向流量，可一次创建完整拓扑。
   log "${DC[*]} up -d"
-  "${DC[@]}" up -d
+  "${DC[@]}" up --pull never -d
 fi
 
 # Compose records the resolved bind-mount source inode when a container is
@@ -994,7 +1038,7 @@ fi
 # named volumes remain attached.
 if [ "$SKIP_MONITORING" = 0 ]; then
   log "刷新版本目录 bind mount（仅监控无状态容器，保留数据卷）..."
-  "${DC[@]}" up -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo \
+  "${DC[@]}" up --pull never -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo \
     nats-exporter nginx-exporter node-exporter cadvisor
 fi
 

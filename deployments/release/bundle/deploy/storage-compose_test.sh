@@ -70,6 +70,13 @@ for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINI
   contains "$key 模板" "$key=" "$BUILD"
   contains "$key 升级继承" "$key" "$INSTALL"
 done
+
+echo "── release 安装严格离线镜像契约 ──"
+contains "install 检查完整监控镜像清单" '"${IMAGE_NGINX_EXPORTER:-}" "${IMAGE_NODE_EXPORTER:-}" "${IMAGE_CADVISOR:-}"' "$INSTALL"
+contains "install 缺镜像时禁止隐式联网拉取" '离线安装缺少本地镜像' "$INSTALL"
+contains "infra 启动禁止 pull" '"${DC[@]}" up --pull never -d postgres postgres-tsdb redis nats minio' "$INSTALL"
+contains "业务启动禁止 pull" '"${DC[@]}" up --pull never -d' "$INSTALL"
+contains "候选 ACS 启动禁止 pull" '"${DC[@]}" up --pull never -d --no-deps acs-candidate' "$INSTALL"
 for key in GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH \
   GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH \
   GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING; do
@@ -206,8 +213,8 @@ for config in "$APP_PROD_CONFIG" "$ACS_PROD_CONFIG" "$WORKER_PROD_CONFIG"; do
 done
 contains "默认安装包含完整监控 compose" '[ "$SKIP_MONITORING" = 0 ] && COMPOSE_FILES+=( -f docker-compose.monitoring.yml )' "$INSTALL"
 contains "install 在 source 后应用监控 profile" 'monitoring_profile_apply_install "$ENV_FILE" "$SKIP_MONITORING"' "$INSTALL"
-contains "升级统一刷新完整 compose stack" '"${DC[@]}" up -d' "$INSTALL"
-contains "升级强制刷新版本目录 bind mount" '"${DC[@]}" up -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo' "$INSTALL"
+contains "升级统一刷新完整 compose stack" '"${DC[@]}" up --pull never -d' "$INSTALL"
+contains "升级强制刷新版本目录 bind mount" '"${DC[@]}" up --pull never -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo' "$INSTALL"
 contains "服务控制读取持久化监控 profile" 'monitoring_profile_apply_runtime ".env" "$SKIP_MONITORING"' "$SVC"
 contains "监控 profile 关闭 tracing" 'export OMCGO_TRACER_ENABLED=false' "$MONITORING_PROFILE_LIB"
 contains "业务容器 tracing 尊重配置与显式覆盖" 'OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"' "$RELEASE_APP_COMPOSE"
