@@ -154,3 +154,162 @@ upgrade_app_gpv_response_config "$tmp/app-custom.yaml" "$tmp/app-template.yaml"
 }
 
 echo "PASS: app GPV response config upgrade is additive and idempotent"
+
+cat > "$tmp/worker-template.yaml" <<'YAML'
+db:
+  max_conns: 25
+tsdb:
+  max_conns: 96
+redis:
+  pool_size: 100
+YAML
+
+cat > "$tmp/worker-legacy.yaml" <<'YAML'
+db:
+  max_conns: 25
+tsdb:
+  max_conns: 40 # old project default
+redis:
+  pool_size: 100
+YAML
+upgrade_worker_tsdb_pool "$tmp/worker-legacy.yaml" "$tmp/worker-template.yaml"
+[ "${WORKER_TSDB_POOL_UPGRADE_RESULT:-}" = "migrated" ] || {
+  echo "FAIL: legacy Worker TSDB pool must be reported as migrated" >&2
+  exit 1
+}
+grep -q '^  max_conns: 96 # old project default$' "$tmp/worker-legacy.yaml" || {
+  echo "FAIL: legacy Worker TSDB pool was not upgraded from 40 to 96" >&2
+  exit 1
+}
+grep -q '^  max_conns: 25$' "$tmp/worker-legacy.yaml" || {
+  echo "FAIL: Worker DB pool was changed with the TSDB pool" >&2
+  exit 1
+}
+
+before_worker_current="$(cksum < "$tmp/worker-legacy.yaml")"
+upgrade_worker_tsdb_pool "$tmp/worker-legacy.yaml" "$tmp/worker-template.yaml"
+[ "${WORKER_TSDB_POOL_UPGRADE_RESULT:-}" = "noop" ] || {
+  echo "FAIL: current Worker TSDB pool must be a no-op" >&2
+  exit 1
+}
+[ "$(cksum < "$tmp/worker-legacy.yaml")" = "$before_worker_current" ] || {
+  echo "FAIL: Worker TSDB pool migration must be idempotent" >&2
+  exit 1
+}
+
+cat > "$tmp/worker-custom-sufficient.yaml" <<'YAML'
+tsdb:
+  max_conns: 128
+YAML
+before_worker_custom="$(cksum < "$tmp/worker-custom-sufficient.yaml")"
+upgrade_worker_tsdb_pool "$tmp/worker-custom-sufficient.yaml" "$tmp/worker-template.yaml"
+[ "${WORKER_TSDB_POOL_UPGRADE_RESULT:-}" = "preserved" ] || {
+  echo "FAIL: sufficient operator Worker TSDB pool must be preserved" >&2
+  exit 1
+}
+[ "$(cksum < "$tmp/worker-custom-sufficient.yaml")" = "$before_worker_custom" ] || {
+  echo "FAIL: sufficient operator Worker TSDB pool was overwritten" >&2
+  exit 1
+}
+
+cat > "$tmp/worker-custom-insufficient.yaml" <<'YAML'
+tsdb:
+  max_conns: 64
+YAML
+before_worker_insufficient="$(cksum < "$tmp/worker-custom-insufficient.yaml")"
+upgrade_worker_tsdb_pool "$tmp/worker-custom-insufficient.yaml" "$tmp/worker-template.yaml"
+[ "${WORKER_TSDB_POOL_UPGRADE_RESULT:-}" = "insufficient" ] || {
+  echo "FAIL: insufficient operator Worker TSDB pool must block deployment" >&2
+  exit 1
+}
+[ "$(cksum < "$tmp/worker-custom-insufficient.yaml")" = "$before_worker_insufficient" ] || {
+  echo "FAIL: insufficient operator Worker TSDB pool must not be overwritten" >&2
+  exit 1
+}
+
+cat > "$tmp/worker-quoted-legacy.yaml" <<'YAML'
+tsdb:
+  max_conns: "40" # quoted old project default
+YAML
+upgrade_worker_tsdb_pool "$tmp/worker-quoted-legacy.yaml" "$tmp/worker-template.yaml"
+grep -q '^  max_conns: "96" # quoted old project default$' "$tmp/worker-quoted-legacy.yaml" || {
+  echo "FAIL: quoted legacy Worker TSDB pool was not migrated with its scalar style preserved" >&2
+  exit 1
+}
+
+cat > "$tmp/worker-quoted-sufficient.yaml" <<'YAML'
+tsdb:
+  max_conns: '128'
+YAML
+before_worker_quoted_sufficient="$(cksum < "$tmp/worker-quoted-sufficient.yaml")"
+upgrade_worker_tsdb_pool "$tmp/worker-quoted-sufficient.yaml" "$tmp/worker-template.yaml"
+[ "${WORKER_TSDB_POOL_UPGRADE_RESULT:-}" = "preserved" ] || {
+  echo "FAIL: quoted sufficient Worker TSDB pool must be preserved" >&2
+  exit 1
+}
+[ "$(cksum < "$tmp/worker-quoted-sufficient.yaml")" = "$before_worker_quoted_sufficient" ] || {
+  echo "FAIL: quoted sufficient Worker TSDB pool was overwritten" >&2
+  exit 1
+}
+
+cat > "$tmp/worker-quoted-insufficient.yaml" <<'YAML'
+tsdb:
+  max_conns: "64"
+YAML
+upgrade_worker_tsdb_pool "$tmp/worker-quoted-insufficient.yaml" "$tmp/worker-template.yaml"
+[ "${WORKER_TSDB_POOL_UPGRADE_RESULT:-}" = "insufficient" ] || {
+  echo "FAIL: quoted insufficient Worker TSDB pool must block deployment" >&2
+  exit 1
+}
+
+cat > "$tmp/worker-bad-template.yaml" <<'YAML'
+tsdb:
+  max_conns: 64
+YAML
+cat > "$tmp/worker-template-guard-live.yaml" <<'YAML'
+tsdb:
+  max_conns: 40
+YAML
+before_worker_bad_template="$(cksum < "$tmp/worker-template-guard-live.yaml")"
+if upgrade_worker_tsdb_pool "$tmp/worker-template-guard-live.yaml" "$tmp/worker-bad-template.yaml"; then
+  echo "FAIL: Worker TSDB migration must reject a template whose safe budget is not 96" >&2
+  exit 1
+fi
+[ "$(cksum < "$tmp/worker-template-guard-live.yaml")" = "$before_worker_bad_template" ] || {
+  echo "FAIL: invalid Worker template must not modify the live config" >&2
+  exit 1
+}
+
+validate_worker_tsdb_pool_precheck "$tmp/worker-legacy.yaml" "$tmp/worker-template.yaml"
+validate_worker_tsdb_pool_precheck "$tmp/worker-custom-sufficient.yaml" "$tmp/worker-template.yaml"
+if validate_worker_tsdb_pool_precheck "$tmp/worker-custom-insufficient.yaml" "$tmp/worker-template.yaml"; then
+  echo "FAIL: precheck must reject an insufficient Worker TSDB operator override" >&2
+  exit 1
+fi
+if validate_worker_tsdb_pool_precheck "$tmp/worker-template-guard-live.yaml" "$tmp/worker-bad-template.yaml"; then
+  echo "FAIL: precheck must reject an invalid Worker template budget" >&2
+  exit 1
+fi
+validate_worker_tsdb_pool_precheck "$tmp/not-installed-worker.yaml" "$tmp/worker-template.yaml"
+
+for leading_zero_value in 040 '"040"'; do
+  cat > "$tmp/worker-leading-zero.yaml" <<YAML
+tsdb:
+  max_conns: $leading_zero_value
+YAML
+  before_worker_leading_zero="$(cksum < "$tmp/worker-leading-zero.yaml")"
+  if validate_worker_tsdb_pool_precheck "$tmp/worker-leading-zero.yaml" "$tmp/worker-template.yaml"; then
+    echo "FAIL: precheck must reject non-canonical Worker TSDB scalar $leading_zero_value" >&2
+    exit 1
+  fi
+  if upgrade_worker_tsdb_pool "$tmp/worker-leading-zero.yaml" "$tmp/worker-template.yaml"; then
+    echo "FAIL: migration must reject non-canonical Worker TSDB scalar $leading_zero_value" >&2
+    exit 1
+  fi
+  [ "$(cksum < "$tmp/worker-leading-zero.yaml")" = "$before_worker_leading_zero" ] || {
+    echo "FAIL: rejected non-canonical Worker TSDB scalar must not modify live config" >&2
+    exit 1
+  }
+done
+
+echo "PASS: Worker TSDB pool upgrade is safe, idempotent, and detects insufficient overrides"

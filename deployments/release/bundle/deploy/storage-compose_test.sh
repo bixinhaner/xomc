@@ -45,6 +45,17 @@ not_contains() {
   local name="$1" pattern="$2" file="$3"
   if grep -Fq -- "$pattern" "$file"; then bad "$name: $file 不应包含 [$pattern]"; else ok; fi
 }
+appears_before() {
+  local name="$1" first="$2" second="$3" file="$4"
+  local first_line second_line
+  first_line="$(grep -nF -- "$first" "$file" | head -1 | cut -d: -f1)"
+  second_line="$(grep -nF -- "$second" "$file" | head -1 | cut -d: -f1)"
+  if [ -n "$first_line" ] && [ -n "$second_line" ] && [ "$first_line" -lt "$second_line" ]; then
+    ok
+  else
+    bad "$name: [$first] 必须出现在 [$second] 之前"
+  fi
+}
 
 echo "── release compose 五个 bind mount ──"
 contains "PostgreSQL 可配置挂载" '${POSTGRES_DATA_PATH:-pgdata}:/var/lib/postgresql/data' "$RELEASE_COMPOSE"
@@ -81,6 +92,13 @@ echo "── 实例配置安全升级 ──"
 contains "install 加载实例配置升级库" 'config-upgrade-lib.sh' "$INSTALL"
 contains "普通升级迁移 ACS 历史默认值" 'upgrade_acs_session_limit' "$INSTALL"
 contains "普通升级补齐 GPV 消费配置" 'upgrade_app_gpv_response_config' "$INSTALL"
+contains "普通升级迁移 Worker TSDB 历史默认值" 'upgrade_worker_tsdb_pool' "$INSTALL"
+contains "Worker TSDB 自定义值不足时阻断升级" 'WORKER_TSDB_POOL_UPGRADE_RESULT:-invalid' "$INSTALL"
+contains "安装预检校验 Worker TSDB 安全预算" 'validate_worker_tsdb_pool_precheck' "$INSTALL"
+appears_before "Worker TSDB 门禁先于旧服务停机" \
+  'validate_worker_tsdb_pool_precheck' \
+  'gpv_handoff_migrate_legacy_systemd' \
+  "$INSTALL"
 if bash "$RELEASE_DEPLOY/config-upgrade-lib_test.sh"; then
   ok
 else

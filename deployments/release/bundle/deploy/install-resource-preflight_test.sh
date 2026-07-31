@@ -71,6 +71,10 @@ prepare_package() {
   : >"$pkg/deploy/.env"
   : >"$pkg/deploy/docker-compose.infra.yml"
   : >"$pkg/deploy/docker-compose.app.yml"
+  cat >"$pkg/etc/worker.prod.yaml" <<'EOF'
+tsdb:
+  max_conns: 96
+EOF
   printf 'project_version=preflight-test\n' >"$pkg/VERSION"
 }
 
