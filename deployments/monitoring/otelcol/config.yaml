@@ -170,7 +170,7 @@ receivers:
         field: resource["deployment_unit"]
         value: app
 
-  filelog/acs:
+  filelog/acs-primary:
     include: [/run/logs/acs/acs.log]
     exclude: [/run/logs/acs/*.log.gz, "/run/logs/acs/*.log.[0-9]*"]
     start_at: end
@@ -190,6 +190,39 @@ receivers:
       - type: add
         field: resource["deployment_unit"]
         value: acs
+      - type: add
+        field: resource["instance"]
+        value: primary
+      - type: add
+        field: resource["loki.resource.labels"]
+        value: service.name,deployment_unit,instance
+
+  filelog/acs-candidate:
+    include: [/run/logs/acs-candidate/acs.log]
+    exclude: [/run/logs/acs-candidate/*.log.gz, "/run/logs/acs-candidate/*.log.[0-9]*"]
+    start_at: end
+    include_file_name: false
+    include_file_path: false
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: '2006-01-02T15:04:05.999-0700'
+          layout_type: gotime
+        severity:
+          parse_from: attributes.level
+      - type: add
+        field: resource["service.name"]
+        value: omcgo-acs
+      - type: add
+        field: resource["deployment_unit"]
+        value: acs
+      - type: add
+        field: resource["instance"]
+        value: candidate
+      - type: add
+        field: resource["loki.resource.labels"]
+        value: service.name,deployment_unit,instance
 
   filelog/worker:
     include: [/run/logs/worker/worker.log]
@@ -450,7 +483,7 @@ service:
 
     # Logs pipeline（Phase 3 — Promtail 下线后由本管道承担）
     logs:
-      receivers: [filelog/app, filelog/acs, filelog/worker, filelog/nginx]
+      receivers: [filelog/app, filelog/acs-primary, filelog/acs-candidate, filelog/worker, filelog/nginx]
       processors: [memory_limiter, batch]
       exporters: [loki]
 

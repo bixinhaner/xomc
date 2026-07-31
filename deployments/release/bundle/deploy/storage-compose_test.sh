@@ -105,6 +105,11 @@ if bash "$RELEASE_DEPLOY/gpv-handoff-lib_test.sh"; then
 else
   bad "systemd 到 container 的 GPV handoff 顺序回归"
 fi
+if bash "$RELEASE_DEPLOY/acs-ha-rollout-test.sh"; then
+  ok
+else
+  bad "ACS 双实例无损发布契约回归"
+fi
 if bash "$RELEASE_NATS_VERIFY"; then
   ok
 else

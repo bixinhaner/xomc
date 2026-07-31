@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
@@ -37,8 +39,13 @@ func TestDispatcher_Send_UDPOnly_NoSTUNAddress(t *testing.T) {
 func TestDispatcher_Send_NoMethodAvailable(t *testing.T) {
 	// No UDP sender, no HTTP client → ErrNoConnectionMethod
 	d := NewDispatcher(nil, nil, zap.NewNop())
+	metrics := NewDispatcherMetrics(prometheus.NewRegistry())
+	d.SetMetrics(metrics)
 	err := d.Send(context.Background(), "TEST-SN-001", "", "", false)
 	assert.ErrorIs(t, err, ErrNoConnectionMethod)
+	assert.Equal(t, float64(1), testutil.ToFloat64(
+		metrics.SentTotal.WithLabelValues("none", "unavailable"),
+	), "periodic-Inform fallback must stay observable without warning-log amplification")
 }
 
 func TestDispatcher_Send_NoMethodAvailable_EmptyURL(t *testing.T) {

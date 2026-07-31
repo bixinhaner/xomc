@@ -109,10 +109,21 @@ web_acs_upstream_pool_loaded() {
   printf '%s\n' "$rendered" | grep -Fq 'proxy_pass http://acs_backend;'
 }
 
+acs_service_ready() {
+  local service="$1" cid ip
+  cid="$("${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
+  [ -n "$cid" ] || return 1
+  ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$cid" 2>/dev/null)"
+  [ -n "$ip" ] || return 1
+  curl -fsS --max-time 3 "http://${ip}:7557/readyz"
+}
+
 echo "== docker compose 业务容器 =="
 for svc in app acs worker; do
   check "$svc 容器 running" container_running "$svc"
 done
+check "acs-candidate 容器 running" container_running acs-candidate
+check "acs-candidate /readyz" acs_service_ready acs-candidate
 
 echo "== docker compose 基础设施容器 =="
 for svc in postgres postgres-tsdb redis nats minio; do
@@ -129,6 +140,8 @@ fi
 echo "== ACS 高并发网络参数 =="
 check "ACS accept backlog" container_sysctl_equals acs net.core.somaxconn "32768"
 check "ACS SYN backlog" container_sysctl_equals acs net.ipv4.tcp_max_syn_backlog "32768"
+check "ACS candidate accept backlog" container_sysctl_equals acs-candidate net.core.somaxconn "32768"
+check "ACS candidate SYN backlog" container_sysctl_equals acs-candidate net.ipv4.tcp_max_syn_backlog "32768"
 
 if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "$SKIP_MONITORING" = 0 ]; then
   echo "== docker compose 监控容器 =="
@@ -206,7 +219,7 @@ EOF
       check_value "$svc docker inspect NanoCpus" "$expected_nano" "$actual_nano"
       check_value "$svc docker inspect Memory" "$expected_bytes" "$actual_bytes"
     }
-    for spec in 'app APP' 'acs ACS' 'worker WORKER' 'postgres POSTGRES' 'postgres-tsdb TSDB' 'redis REDIS' 'nats NATS' 'minio MINIO'; do
+    for spec in 'app APP' 'acs ACS' 'acs-candidate ACS' 'worker WORKER' 'postgres POSTGRES' 'postgres-tsdb TSDB' 'redis REDIS' 'nats NATS' 'minio MINIO'; do
       check_service_limits ${spec}
     done
     [ -f "$DEPLOY_DIR/docker-compose.web.yml" ] && check_service_limits web WEB

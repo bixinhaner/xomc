@@ -394,6 +394,7 @@ sep "3/9 建立目录结构 + current 软链"
 
 mkdir -p "$OMC_ROOT/releases" "$OMC_ROOT/etc" "$OMC_ROOT/packages" \
          "$OMC_ROOT/run/logs/app"   "$OMC_ROOT/run/logs/acs" \
+         "$OMC_ROOT/run/logs/acs-candidate" \
          "$OMC_ROOT/run/logs/worker" "$OMC_ROOT/run/logs/nginx"
 
 # 注:三库导入XML重构 Phase 2 后,custom XML 不再用独立 *-custom 目录(单目录 + sidecar)。
@@ -890,6 +891,81 @@ fi
 # Step 8. up 业务 + web + 监控
 # =============================================================================
 sep "8/9 启动业务 + web + 监控"
+
+acs_ha_wait_ready() {
+  local service="$1" web_cid service_cid service_ip wait_seconds=0
+  web_cid="$("${DC[@]}" ps -q web 2>/dev/null | head -n1)"
+  while [ "$wait_seconds" -lt 90 ]; do
+    if [ -n "$web_cid" ]; then
+      if docker exec "$web_cid" wget -q -T 3 -O /dev/null \
+        "http://${service}:7557/readyz" >/dev/null 2>&1; then
+        return 0
+      fi
+    else
+      service_cid="$("${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
+      service_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$service_cid" 2>/dev/null || true)"
+      if [ -n "$service_ip" ] && curl -fsS --max-time 3 "http://${service_ip}:7557/readyz" >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    sleep 2
+    wait_seconds=$((wait_seconds + 2))
+  done
+  return 1
+}
+
+web_acs_dynamic_upstream_loaded() {
+  local web_cid="$1" rendered
+  rendered="$(docker exec "$web_cid" nginx -T 2>&1)" || return 1
+  printf '%s\n' "$rendered" | grep -Fq 'server acs:7557 resolve;' || return 1
+  printf '%s\n' "$rendered" | grep -Fq 'zone acs_backend' || return 1
+}
+
+acs_ha_prepare_candidate() {
+  local old_acs old_web wait_seconds
+  old_acs="$("${DC[@]}" ps -q acs 2>/dev/null | head -n1)"
+  old_web="$("${DC[@]}" ps -q web 2>/dev/null | head -n1)"
+  # 首次安装没有旧流量入口，由下面的完整 up 同时创建双实例即可。
+  [ -n "$old_acs" ] || return 0
+  if [ "$SKIP_WEB" = 1 ]; then
+    die "--skip-web 不支持存量 ACS 无损升级；请启用 web 网关，或由外部负载均衡完成双实例切换" 2
+  fi
+  [ -n "$old_web" ] || die "存量 ACS 正在运行但 web 网关不存在，无法执行无损发布" 2
+
+  # 兼容首轮从旧拓扑升级：旧 web 若尚未使用动态 DNS upstream，候选实例即使
+  # 就绪也不会被纳入路由。先在旧 ACS 仍服务时只刷新 web，再继续接力。
+  if ! web_acs_dynamic_upstream_loaded "$old_web"; then
+    log "旧 web 尚未加载动态 ACS upstream，先刷新 web 动态 ACS upstream ..."
+    "${DC[@]}" up -d --no-deps web
+    wait_seconds=0
+    while [ "$wait_seconds" -lt 30 ]; do
+      old_web="$("${DC[@]}" ps -q web 2>/dev/null | head -n1)"
+      if [ -n "$old_web" ] && web_acs_dynamic_upstream_loaded "$old_web"; then
+        break
+      fi
+      sleep 2
+      wait_seconds=$((wait_seconds + 2))
+    done
+    web_acs_dynamic_upstream_loaded "$old_web" ||
+      die "web 30s 内未加载动态 ACS upstream；正式 ACS 未替换，已中止发布" 2
+  fi
+
+  log "先更新 ACS 接力实例，正式 ACS 继续承载现有流量 ..."
+  "${DC[@]}" up -d --no-deps acs-candidate
+  if ! acs_ha_wait_ready acs-candidate; then
+    die "ACS 接力实例 90s 内未就绪；正式 ACS 未替换，已中止发布" 2
+  fi
+  # nginx.conf 的 Docker DNS valid=10s。候选实例刚加入共享别名 `acs` 时，
+  # 必须覆盖完整缓存周期后再停止正式实例，否则旧 worker 仍可能只持有旧 IP。
+  log "ACS 接力实例已就绪，等待 Nginx 动态 DNS 完成一轮刷新 ..."
+  sleep 12
+  if ! acs_ha_wait_ready acs-candidate; then
+    die "DNS 刷新后 ACS 接力实例已不就绪；正式 ACS 未替换，已中止发布" 2
+  fi
+  log "Nginx 已具备接力上游，允许替换正式 ACS"
+}
+
+acs_ha_prepare_candidate
 
 log "${DC[*]} up -d"
 "${DC[@]}" up -d

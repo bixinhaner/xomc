@@ -109,10 +109,10 @@ type BackpressureConfig struct {
 // not yet contain a backpressure section.
 func (c BackpressureConfig) Defaults() BackpressureConfig {
 	if c.QueuePendingHigh <= 0 {
-		c.QueuePendingHigh = 2000
+		c.QueuePendingHigh = 5000
 	}
 	if c.QueuePendingLow <= 0 {
-		c.QueuePendingLow = 500
+		c.QueuePendingLow = 1000
 	}
 	if c.QueuePendingLow > c.QueuePendingHigh {
 		c.QueuePendingLow = c.QueuePendingHigh

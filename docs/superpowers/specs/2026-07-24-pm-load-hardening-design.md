@@ -156,8 +156,8 @@ watchdog 保存连续样本，计算：
 默认阈值：
 
 ```text
-pending_high = 2000
-pending_low = 500
+pending_high = 5000
+pending_low = 1000
 oldest_age_high = 10m
 oldest_age_low = 2m
 ```

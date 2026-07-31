@@ -97,6 +97,26 @@ else
   bad "large planner 应成功运行"
 fi
 
+echo "── 双 ACS 余量分配不得超出自身预算 ──"
+for mem_mib in 40000 45000 50000; do
+  sized_env="$TMP/ha-${mem_mib}.env"
+  sized_out="$TMP/ha-${mem_mib}-resources.env"
+  printf 'OMC_PUBLIC_HOST=10.0.0.5\n' >"$sized_env"
+  if env \
+    OMC_PROBE_CPU=32 \
+    OMC_PROBE_MEM_TOTAL_MIB="$mem_mib" \
+    OMC_PROBE_MEM_AVAIL_MIB="$mem_mib" \
+    OMC_PROBE_LOAD15=0 \
+    OMC_PROBE_STORAGE_MOUNTS="$MOUNTS" \
+    OMC_STORAGE_ENV_FILE="$sized_env" \
+    bash "$PLANNER" --assume-dedicated --skip-monitoring \
+      -o "$sized_out" >"$TMP/ha-${mem_mib}-output" 2>&1; then
+    ok
+  else
+    bad "${mem_mib}MiB 独占主机的双 ACS 规划不应因内部重复分配超预算"
+  fi
+done
+
 echo "── 不覆盖人工路径 ──"
 CUSTOM_ENV="$TMP/custom.env"
 printf 'MINIO_DATA_PATH=/manual/minio\n' > "$CUSTOM_ENV"

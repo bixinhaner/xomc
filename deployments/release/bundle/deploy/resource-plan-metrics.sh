@@ -17,7 +17,7 @@ resource_plan_metrics_render() { # <resources.env>
 # TYPE omc_resource_plan_memory_limit_bytes gauge
 EOF
   for service_prefix in \
-    'app APP' 'acs ACS' 'worker WORKER' 'postgres POSTGRES' \
+    'app APP' 'acs ACS' 'acs-candidate ACS' 'worker WORKER' 'postgres POSTGRES' \
     'postgres-tsdb TSDB' 'redis REDIS' 'nats NATS' 'minio MINIO' 'web WEB'; do
     read -r service prefix <<<"$service_prefix"
     cpu="$(resource_env_get "$resource_env" "${prefix}_CPUS")"

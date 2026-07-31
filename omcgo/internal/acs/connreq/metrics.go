@@ -13,7 +13,7 @@ func NewDispatcherMetrics(reg prometheus.Registerer) *DispatcherMetrics {
 	m := &DispatcherMetrics{
 		SentTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "acs_connection_request_sent_total",
-			Help: "Total number of Connection Requests sent",
+			Help: "Total Connection Request dispatch outcomes; method=none,result=unavailable means the device will use its next periodic Inform",
 		}, []string{"method", "result"}),
 		DurationSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "acs_connection_request_duration_seconds",

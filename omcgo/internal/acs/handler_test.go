@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/auth"
+	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/task"
@@ -24,6 +25,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+func TestPostSessionWakeFailureLogLevel_NoConnectionMethodIsDebug(t *testing.T) {
+	assert.Equal(t, zap.DebugLevel, postSessionWakeFailureLogLevel(connreq.ErrNoConnectionMethod))
+	assert.Equal(t, zap.WarnLevel, postSessionWakeFailureLogLevel(errors.New("connection refused")))
+}
 
 // ---------------------------------------------------------------------------
 // Mocks (acsH prefix to avoid conflicts with other _test.go files)
