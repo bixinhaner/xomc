@@ -36,6 +36,68 @@ func (f *fakeActiveLister) ListActiveTasks(_ context.Context, olderThan time.Tim
 	return f.active, nil
 }
 
+type fakeCursorActiveLister struct {
+	mu          sync.Mutex
+	first       []*Task
+	second      []*Task
+	afterCalls  []*ActiveTaskCursor
+	failAfterID string
+	failOnce    bool
+	legacyCalls int
+}
+
+func (f *fakeCursorActiveLister) ListActiveTasks(
+	_ context.Context,
+	_ time.Time,
+	_ int,
+) ([]*Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.legacyCalls++
+	return f.first, nil
+}
+
+func (f *fakeCursorActiveLister) ListActiveTasksAfter(
+	_ context.Context,
+	_ time.Time,
+	after *ActiveTaskCursor,
+	_ int,
+) ([]*Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var copied *ActiveTaskCursor
+	if after != nil {
+		value := *after
+		copied = &value
+	}
+	f.afterCalls = append(f.afterCalls, copied)
+	if after == nil {
+		return f.first, nil
+	}
+	if after.ID == f.failAfterID && f.failOnce {
+		f.failOnce = false
+		return nil, errors.New("list active page failed")
+	}
+	if len(f.first) > 0 && after.ID == f.first[len(f.first)-1].ID {
+		return f.second, nil
+	}
+	return nil, nil
+}
+
+func (f *fakeCursorActiveLister) observedAfterIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.afterCalls))
+	for _, after := range f.afterCalls {
+		if after == nil {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, after.ID)
+	}
+	return out
+}
+
 // fakeQueueReader 按 taskID 返回 Redis 真相；可注入读错误。
 type fakeQueueReader struct {
 	mu      sync.Mutex
@@ -90,6 +152,67 @@ func pgActiveTask(id, sn string, status TaskStatus) *Task {
 func redisTerminalTask(id, sn string, status TaskStatus) *Task {
 	now := time.Now()
 	return &Task{ID: id, DeviceSN: sn, Method: "SetParameterValues", Status: status, CompletedAt: &now}
+}
+
+func Test_Reconciler_CursorAdvancesAndWrapsAcrossRounds(t *testing.T) {
+	first := pgActiveTask("t1", "SN1", TaskStatusPending)
+	first.CreatedAt = time.Date(2026, 7, 31, 1, 0, 0, 0, time.UTC)
+	second := pgActiveTask("t2", "SN2", TaskStatusSent)
+	second.CreatedAt = first.CreatedAt.Add(time.Second)
+	lister := &fakeCursorActiveLister{
+		first:  []*Task{first},
+		second: []*Task{second},
+	}
+	rc := NewReconciler(
+		lister,
+		&fakeQueueReader{byID: map[string]*Task{}},
+		&fakeRepairer{},
+		nil,
+		0,
+		0,
+		1,
+		zap.NewNop(),
+	)
+
+	for range 4 {
+		_, err := rc.ReconcileOnce(context.Background())
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, []string{"", "t1", "t2", ""}, lister.observedAfterIDs())
+	assert.Zero(t, lister.legacyCalls, "cursor-capable lister must not use the legacy first page")
+}
+
+func Test_Reconciler_CursorDoesNotAdvanceWhenPageQueryFails(t *testing.T) {
+	first := pgActiveTask("t1", "SN1", TaskStatusPending)
+	first.CreatedAt = time.Date(2026, 7, 31, 1, 0, 0, 0, time.UTC)
+	second := pgActiveTask("t2", "SN2", TaskStatusSent)
+	second.CreatedAt = first.CreatedAt.Add(time.Second)
+	lister := &fakeCursorActiveLister{
+		first:       []*Task{first},
+		second:      []*Task{second},
+		failAfterID: first.ID,
+		failOnce:    true,
+	}
+	rc := NewReconciler(
+		lister,
+		&fakeQueueReader{byID: map[string]*Task{}},
+		&fakeRepairer{},
+		nil,
+		0,
+		0,
+		1,
+		zap.NewNop(),
+	)
+
+	_, err := rc.ReconcileOnce(context.Background())
+	require.NoError(t, err)
+	_, err = rc.ReconcileOnce(context.Background())
+	require.ErrorContains(t, err, "list active page failed")
+	_, err = rc.ReconcileOnce(context.Background())
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"", "t1", "t1"}, lister.observedAfterIDs())
 }
 
 // counterValue 读出某 outcome 标签下的 counter 当前值（测试断言用）。

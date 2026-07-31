@@ -19555,6 +19555,10 @@ CREATE INDEX IF NOT EXISTS idx_device_tasks_open_method_description
     ON public.device_tasks (device_sn, method, description, created_at DESC)
     WHERE status IN ('pending', 'sent');
 
+CREATE INDEX IF NOT EXISTS idx_device_tasks_active_created_id
+    ON public.device_tasks (created_at, id)
+    WHERE status IN ('pending', 'sent');
+
 -- Consolidated from pre-release storage protection migrations. The current
 -- deployment has one physical filesystem target; logical components share it.
 CREATE TABLE IF NOT EXISTS public.storage_protection_policies (
