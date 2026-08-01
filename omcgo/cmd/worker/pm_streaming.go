@@ -22,9 +22,9 @@ import (
 const pmBuiltinInitialRetryInterval = 2 * time.Second
 const pmBuiltinInitialRetryTimeout = time.Minute
 const pmRuleCatalogRefreshInterval = 5 * time.Minute
-const pmRedisSweepInterval = 5 * time.Minute
+const pmRedisSweepInterval = 30 * time.Second
 const pmRedisSweepSafetyThreshold = 30 * time.Minute
-const pmRedisSweepScanLimit = 64
+const pmRedisSweepScanLimit = 512
 const pmRedisSweepUnlinkBatch = 128
 const pmPublishedVersionRepairInterval = time.Minute
 

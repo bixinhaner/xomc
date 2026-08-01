@@ -17,8 +17,16 @@ func TestDefaultConfigUsesTwelveMinuteHourlyCloseGrace(t *testing.T) {
 	require.Equal(t, 32, cfg.FinalizeConcurrency)
 	require.Equal(t, 24*time.Hour, cfg.OutboxRetention)
 	require.Equal(t, 45*24*time.Hour, cfg.ReplayRetention)
-	require.False(t, cfg.RedisV2WriteEnabled,
-		"v2 writes require an explicit post-drain rollout gate")
+	require.True(t, cfg.RedisV2WriteEnabled,
+		"new releases must use compact v2 Redis state by default")
+}
+
+func TestConfigFromEnvCanDisableRedisV2WritesForRollback(t *testing.T) {
+	t.Setenv("PM_AGGREGATION_REDIS_V2_WRITE_ENABLED", "false")
+
+	cfg := ConfigFromEnv()
+
+	require.False(t, cfg.RedisV2WriteEnabled)
 }
 
 func TestConfigFromEnv(t *testing.T) {

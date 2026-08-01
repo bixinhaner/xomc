@@ -38,7 +38,7 @@ func DefaultConfig() Config {
 		WindowTTL:           45 * 24 * time.Hour,
 		OutboxRetention:     24 * time.Hour,
 		ReplayRetention:     45 * 24 * time.Hour,
-		RedisV2WriteEnabled: false,
+		RedisV2WriteEnabled: true,
 	}
 }
 
