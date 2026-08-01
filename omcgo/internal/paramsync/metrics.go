@@ -37,7 +37,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		ResultCountMode:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "param_sync_result_count_total", Help: "Parameter sync result counter updates by incremental or authoritative mode."}, []string{"mode"}),
 		FinalizeTotal:         prometheus.NewCounterVec(prometheus.CounterOpts{Name: "param_sync_finalize_total", Help: "Parameter sync finalizations by result."}, []string{"result"}),
 		OutboxBacklog:         prometheus.NewGauge(prometheus.GaugeOpts{Name: "param_sync_outbox_backlog", Help: "Pending/failed parameter sync outbox rows."}),
-		StagingRows:           prometheus.NewGauge(prometheus.GaugeOpts{Name: "param_sync_staging_rows", Help: "Current parameter sync staging rows."}),
+		StagingRows:           prometheus.NewGauge(prometheus.GaugeOpts{Name: "param_sync_staging_rows", Help: "Estimated current parameter sync staging rows from PostgreSQL planner statistics."}),
 		ReconcileRepairs:      prometheus.NewCounterVec(prometheus.CounterOpts{Name: "param_sync_reconcile_repairs_total", Help: "Parameter sync reconciliation repairs by kind."}, []string{"kind"}),
 		ResultShardQueueDepth: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "param_sync_result_shard_queue_depth", Help: "Queued parameter sync result work items by shard."}, []string{"shard"}),
 		ResultShardQueueFull:  prometheus.NewCounterVec(prometheus.CounterOpts{Name: "param_sync_result_shard_queue_full_total", Help: "Parameter sync result shard queue-full events."}, []string{"shard"}),

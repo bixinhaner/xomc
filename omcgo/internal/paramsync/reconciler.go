@@ -26,9 +26,75 @@ type Reconciler struct {
 
 	runCountMu     sync.Mutex
 	runCountCursor *uuid.UUID
+
+	stagingCleanupMu     sync.Mutex
+	stagingCleanupCursor *stagingCursor
 }
 
-const runCountReconcileBatchSize = 100
+const runCountReconcileBatchSize = 20
+
+type stagingCursor struct {
+	runID         uuid.UUID
+	parameterPath string
+}
+
+const historicalResultNormalizationSQL = `
+UPDATE parameter_sync_task_results res SET
+  status=CASE WHEN res.success THEN 'processed' ELSE 'failed' END,
+  processed_at=COALESCE(res.processed_at, $1)
+FROM parameter_sync_runs run, device_tasks t
+WHERE res.status='received' AND run.id=res.run_id AND run.id=ANY($2)
+  AND run.status IN ('succeeded','failed','cancelled')
+  AND t.id=res.task_id AND t.source='param_sync' AND t.source_id=run.id
+  AND t.status IN ('completed','failed','expired','cancelled')`
+
+const stagingCleanupSQL = `
+WITH page AS MATERIALIZED (
+  SELECT run_id, parameter_path
+  FROM parameter_sync_staging_values
+  WHERE (run_id, parameter_path) > ($1, $2)
+  ORDER BY run_id, parameter_path
+  LIMIT $3
+), deleted AS (
+  DELETE FROM parameter_sync_staging_values s USING page, parameter_sync_runs run
+  WHERE s.run_id=page.run_id AND s.parameter_path=page.parameter_path
+    AND run.id=page.run_id
+    AND (run.status IN ('failed','cancelled')
+      OR (run.status='succeeded' AND COALESCE(run.completed_at, run.started_at) < $4))
+  RETURNING 1
+), tail AS (
+  SELECT run_id, parameter_path FROM page ORDER BY run_id DESC, parameter_path DESC LIMIT 1
+)
+SELECT tail.run_id, tail.parameter_path, (SELECT count(*) FROM deleted)
+FROM tail`
+
+const stagingCleanupInitialSQL = `
+WITH page AS MATERIALIZED (
+  SELECT run_id, parameter_path
+  FROM parameter_sync_staging_values
+  ORDER BY run_id, parameter_path
+  LIMIT $1
+), deleted AS (
+  DELETE FROM parameter_sync_staging_values s USING page, parameter_sync_runs run
+  WHERE s.run_id=page.run_id AND s.parameter_path=page.parameter_path
+    AND run.id=page.run_id
+    AND (run.status IN ('failed','cancelled')
+      OR (run.status='succeeded' AND COALESCE(run.completed_at, run.started_at) < $2))
+  RETURNING 1
+), tail AS (
+  SELECT run_id, parameter_path FROM page ORDER BY run_id DESC, parameter_path DESC LIMIT 1
+)
+SELECT tail.run_id, tail.parameter_path, (SELECT count(*) FROM deleted)
+FROM tail`
+
+const outboxBacklogMetricSQL = `
+SELECT
+  (SELECT count(*) FROM parameter_sync_outbox WHERE status IN ('pending','failed')) +
+  (SELECT count(*) FROM parameter_sync_outbox WHERE status='delivering')`
+
+const stagingRowsMetricSQL = `
+SELECT GREATEST(reltuples, 0)::bigint
+FROM pg_class WHERE oid='parameter_sync_staging_values'::regclass`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -381,16 +447,7 @@ func (r *Reconciler) ReconcileRunCounts(ctx context.Context) (int64, error) {
 	// A previous implementation could commit a result in "received" before its
 	// processing state was finalized. Terminal runs cannot be processed again, so
 	// normalize those durable historical rows from their success bit first.
-	const normalizeResults = `
-UPDATE parameter_sync_task_results res SET
-  status=CASE WHEN res.success THEN 'processed' ELSE 'failed' END,
-  processed_at=COALESCE(res.processed_at, $1)
-FROM parameter_sync_runs run, device_tasks t
-WHERE res.status='received' AND run.id=res.run_id
-  AND run.status IN ('succeeded','failed','cancelled')
-  AND t.id=res.task_id AND t.source='param_sync' AND t.source_id=run.id
-  AND t.status IN ('completed','failed','expired','cancelled')`
-	normalized, err := tx.Exec(ctx, normalizeResults, r.now())
+	normalized, err := tx.Exec(ctx, historicalResultNormalizationSQL, r.now(), runIDs)
 	if err != nil {
 		return 0, fmt.Errorf("normalize historical parameter sync results: %w", err)
 	}
@@ -667,22 +724,38 @@ LIMIT $2`
 }
 
 func (r *Reconciler) CleanStaging(ctx context.Context, olderThan time.Time, limit int) (int64, error) {
+	r.stagingCleanupMu.Lock()
+	defer r.stagingCleanupMu.Unlock()
+
 	if limit <= 0 {
 		limit = 10000
 	}
-	const query = `
-DELETE FROM parameter_sync_staging_values s WHERE (s.run_id, s.parameter_path) IN (
-  SELECT s2.run_id, s2.parameter_path FROM parameter_sync_staging_values s2
-  JOIN parameter_sync_runs run ON run.id=s2.run_id
-  WHERE (run.status IN ('failed','cancelled')
-    OR (run.status='succeeded' AND COALESCE(run.completed_at, run.started_at) < $1))
-  LIMIT $2
-)`
-	tag, err := r.pool.Exec(ctx, query, olderThan, limit)
+	var runID uuid.UUID
+	var parameterPath string
+	initialPage := r.stagingCleanupCursor == nil
+	if !initialPage {
+		runID = r.stagingCleanupCursor.runID
+		parameterPath = r.stagingCleanupCursor.parameterPath
+	}
+	var deleted int64
+	var row pgx.Row
+	if initialPage {
+		row = r.pool.QueryRow(ctx, stagingCleanupInitialSQL, limit, olderThan)
+	} else {
+		row = r.pool.QueryRow(ctx, stagingCleanupSQL, runID, parameterPath, limit, olderThan)
+	}
+	err := row.Scan(&runID, &parameterPath, &deleted)
+	if err == pgx.ErrNoRows {
+		// Start a new bounded sweep on the next maintenance tick. Newly inserted
+		// or newly eligible rows behind the cursor are picked up in that cycle.
+		r.stagingCleanupCursor = nil
+		return 0, nil
+	}
 	if err != nil {
 		return 0, fmt.Errorf("clean parameter sync staging: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	r.stagingCleanupCursor = &stagingCursor{runID: runID, parameterPath: parameterPath}
+	return deleted, nil
 }
 
 // CollectMetrics refreshes gauges from durable PostgreSQL state. Gauges are
@@ -735,10 +808,13 @@ WHERE status IN ('planning','enqueuing','waiting_device','executing','processing
 	r.metrics.TasksFailed.Set(float64(failed))
 
 	var outbox, staging int64
-	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM parameter_sync_outbox WHERE status IN ('pending','failed','delivering')`).Scan(&outbox); err != nil {
+	if err := r.pool.QueryRow(ctx, outboxBacklogMetricSQL).Scan(&outbox); err != nil {
 		return fmt.Errorf("collect parameter sync outbox backlog: %w", err)
 	}
-	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM parameter_sync_staging_values`).Scan(&staging); err != nil {
+	// Staging cardinality is an operational gauge, not a correctness boundary.
+	// pg_class is refreshed by autovacuum/ANALYZE and avoids reading millions of
+	// hot staging rows every 30 seconds solely for observability.
+	if err := r.pool.QueryRow(ctx, stagingRowsMetricSQL).Scan(&staging); err != nil {
 		return fmt.Errorf("collect parameter sync staging rows: %w", err)
 	}
 	r.metrics.OutboxBacklog.Set(float64(outbox))

@@ -83,6 +83,36 @@ func TestRunCountReconciliationRestrictsAggregationToCandidateBatch(t *testing.T
 	require.Equal(t, []uuid.UUID{first, second}, args[0])
 }
 
+func TestHistoricalResultNormalizationRestrictsWorkToCandidateBatch(t *testing.T) {
+	query := historicalResultNormalizationSQL
+
+	require.Contains(t, query, "run.id=ANY($2)")
+	require.NotContains(t, query, "FROM parameter_sync_runs run, device_tasks t\nWHERE res.status='received' AND run.id=res.run_id\n  AND run.status")
+}
+
+func TestRunCountSweepUsesSmallBoundedPages(t *testing.T) {
+	require.LessOrEqual(t, runCountReconcileBatchSize, 20)
+}
+
+func TestStagingCleanupScansABoundedKeysetPage(t *testing.T) {
+	query := stagingCleanupSQL
+
+	require.Contains(t, query, "ORDER BY run_id, parameter_path")
+	require.Contains(t, query, "LIMIT $3")
+	require.Contains(t, query, "(run_id, parameter_path) > ($1, $2)")
+	require.Contains(t, query, "DELETE FROM parameter_sync_staging_values s USING page, parameter_sync_runs run")
+	require.NotContains(t, query, "$4::boolean OR")
+	require.NotContains(t, query, "DELETE FROM parameter_sync_staging_values s WHERE (s.run_id, s.parameter_path) IN")
+	require.NotContains(t, stagingCleanupInitialSQL, "WHERE $4::boolean OR")
+}
+
+func TestParamSyncMetricsAvoidUnboundedExactCounts(t *testing.T) {
+	require.Contains(t, outboxBacklogMetricSQL, "status IN ('pending','failed')")
+	require.Contains(t, outboxBacklogMetricSQL, "status='delivering'")
+	require.Contains(t, stagingRowsMetricSQL, "reltuples")
+	require.NotContains(t, stagingRowsMetricSQL, "count(*)")
+}
+
 func TestRunCountCandidateSelectionUsesBoundedKeyset(t *testing.T) {
 	cursor := uuid.New()
 
@@ -101,6 +131,6 @@ func TestRunCountCandidateSelectionDefaultsToBoundedSweepPage(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Contains(t, query, "ORDER BY id")
-	require.Contains(t, query, "LIMIT 100")
+	require.Contains(t, query, fmt.Sprintf("LIMIT %d", runCountReconcileBatchSize))
 	require.Empty(t, args)
 }
