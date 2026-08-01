@@ -69,3 +69,26 @@ func TestOrderedDeviceParameterWriteIDsAreUniqueAndStable(t *testing.T) {
 
 	assert.Equal(t, []uuid.UUID{first, second}, orderedDeviceParameterWriteIDs(rows))
 }
+
+func TestPartitionDeviceParameterRowsDefersOnlyContendedDevices(t *testing.T) {
+	readyID := uuid.New()
+	contendedID := uuid.New()
+	rows := []deviceParameterUpsertRow{
+		{deviceID: readyID, parameter: model.DeviceParameter{ParameterPath: "Device.Ready.1"}},
+		{deviceID: contendedID, parameter: model.DeviceParameter{ParameterPath: "Device.Busy.1"}},
+		{deviceID: readyID, parameter: model.DeviceParameter{ParameterPath: "Device.Ready.2"}},
+		{deviceID: contendedID, parameter: model.DeviceParameter{ParameterPath: "Device.Busy.2"}},
+	}
+
+	ready, deferred := partitionDeviceParameterRows(rows, map[uuid.UUID]struct{}{readyID: {}})
+
+	require.Len(t, ready, 2)
+	assert.Equal(t, []string{"Device.Ready.1", "Device.Ready.2"}, []string{
+		ready[0].parameter.ParameterPath,
+		ready[1].parameter.ParameterPath,
+	})
+	require.Len(t, deferred, 1)
+	require.Len(t, deferred[contendedID], 2)
+	assert.Equal(t, "Device.Busy.1", deferred[contendedID][0].parameter.ParameterPath)
+	assert.Equal(t, "Device.Busy.2", deferred[contendedID][1].parameter.ParameterPath)
+}

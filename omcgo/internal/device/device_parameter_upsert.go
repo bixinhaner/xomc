@@ -76,6 +76,56 @@ func AcquireParameterWriteLocks(ctx context.Context, tx pgx.Tx, deviceIDs ...uui
 	return nil
 }
 
+func tryAcquireParameterWriteLocks(
+	ctx context.Context,
+	tx pgx.Tx,
+	deviceIDs []uuid.UUID,
+) (map[uuid.UUID]struct{}, error) {
+	acquired := make(map[uuid.UUID]struct{}, len(deviceIDs))
+	if len(deviceIDs) == 0 {
+		return acquired, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT device_id,
+		       pg_try_advisory_xact_lock(hashtextextended('device_parameters:' || device_id::text, 0))
+		FROM unnest($1::uuid[]) AS locked_devices(device_id)
+	`, deviceIDs)
+	if err != nil {
+		return nil, fmt.Errorf("try device parameter write locks: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var deviceID uuid.UUID
+		var locked bool
+		if err := rows.Scan(&deviceID, &locked); err != nil {
+			return nil, fmt.Errorf("scan device parameter try-lock: %w", err)
+		}
+		if locked {
+			acquired[deviceID] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device parameter try-locks: %w", err)
+	}
+	return acquired, nil
+}
+
+func partitionDeviceParameterRows(
+	rows []deviceParameterUpsertRow,
+	acquired map[uuid.UUID]struct{},
+) ([]deviceParameterUpsertRow, map[uuid.UUID][]deviceParameterUpsertRow) {
+	ready := make([]deviceParameterUpsertRow, 0, len(rows))
+	deferred := make(map[uuid.UUID][]deviceParameterUpsertRow)
+	for _, row := range rows {
+		if _, ok := acquired[row.deviceID]; ok {
+			ready = append(ready, row)
+			continue
+		}
+		deferred[row.deviceID] = append(deferred[row.deviceID], row)
+	}
+	return ready, deferred
+}
+
 func dedupeDeviceParameterRows(rows []deviceParameterUpsertRow) []deviceParameterUpsertRow {
 	if len(rows) < 2 {
 		return rows
@@ -132,6 +182,66 @@ func buildDeviceParameterUpsert(
 	).ToSql()
 }
 
+func upsertDeviceParameterRows(
+	ctx context.Context,
+	tx pgx.Tx,
+	rows []deviceParameterUpsertRow,
+	updatedAt time.Time,
+	result *deviceParameterUpsertResult,
+) error {
+	for start := 0; start < len(rows); start += deviceParameterUpsertBatchSize {
+		end := min(start+deviceParameterUpsertBatchSize, len(rows))
+		query, args, err := buildDeviceParameterUpsert(rows[start:end], updatedAt)
+		if err != nil {
+			return fmt.Errorf("build device parameter upsert batch: %w", err)
+		}
+		returned, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("execute device parameter upsert batch: %w", err)
+		}
+		for returned.Next() {
+			var deviceID uuid.UUID
+			if err := returned.Scan(&deviceID); err != nil {
+				returned.Close()
+				return fmt.Errorf("scan changed device parameter: %w", err)
+			}
+			result.changed++
+			result.changedDevices[deviceID] = struct{}{}
+		}
+		if err := returned.Err(); err != nil {
+			returned.Close()
+			return fmt.Errorf("iterate changed device parameters: %w", err)
+		}
+		returned.Close()
+	}
+	return nil
+}
+
+func upsertContendedDeviceParameterRows(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	deviceID uuid.UUID,
+	rows []deviceParameterUpsertRow,
+	updatedAt time.Time,
+	result *deviceParameterUpsertResult,
+) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin contended device parameter upsert for %s: %w", deviceID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := AcquireParameterWriteLocks(ctx, tx, deviceID); err != nil {
+		return err
+	}
+	if err := upsertDeviceParameterRows(ctx, tx, rows, updatedAt, result); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit contended device parameter upsert for %s: %w", deviceID, err)
+	}
+	return nil
+}
+
 func bulkUpsertDeviceParameters(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -150,39 +260,36 @@ func bulkUpsertDeviceParameters(
 	if err != nil {
 		return result, fmt.Errorf("begin device parameter upsert: %w", err)
 	}
+	updatedAt := time.Now()
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := AcquireParameterWriteLocks(ctx, tx, orderedDeviceParameterWriteIDs(rows)...); err != nil {
+	acquired, err := tryAcquireParameterWriteLocks(ctx, tx, orderedDeviceParameterWriteIDs(rows))
+	if err != nil {
 		return result, err
 	}
-
-	updatedAt := time.Now()
-	for start := 0; start < len(rows); start += deviceParameterUpsertBatchSize {
-		end := min(start+deviceParameterUpsertBatchSize, len(rows))
-		query, args, err := buildDeviceParameterUpsert(rows[start:end], updatedAt)
-		if err != nil {
-			return result, fmt.Errorf("build device parameter upsert batch: %w", err)
-		}
-		returned, err := tx.Query(ctx, query, args...)
-		if err != nil {
-			return result, fmt.Errorf("execute device parameter upsert batch: %w", err)
-		}
-		for returned.Next() {
-			var deviceID uuid.UUID
-			if err := returned.Scan(&deviceID); err != nil {
-				returned.Close()
-				return result, fmt.Errorf("scan changed device parameter: %w", err)
-			}
-			result.changed++
-			result.changedDevices[deviceID] = struct{}{}
-		}
-		if err := returned.Err(); err != nil {
-			returned.Close()
-			return result, fmt.Errorf("iterate changed device parameters: %w", err)
-		}
-		returned.Close()
+	ready, deferred := partitionDeviceParameterRows(rows, acquired)
+	if err := upsertDeviceParameterRows(ctx, tx, ready, updatedAt, &result); err != nil {
+		return result, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return result, fmt.Errorf("commit device parameter upsert: %w", err)
+	}
+
+	// A busy device must not hold back unrelated devices from the same Inform
+	// batch. The uncontended rows are committed above; each contended device is
+	// then serialized and written in its own short transaction.
+	deferredIDs := make([]uuid.UUID, 0, len(deferred))
+	for deviceID := range deferred {
+		deferredIDs = append(deferredIDs, deviceID)
+	}
+	sort.Slice(deferredIDs, func(i, j int) bool {
+		return deferredIDs[i].String() < deferredIDs[j].String()
+	})
+	for _, deviceID := range deferredIDs {
+		if err := upsertContendedDeviceParameterRows(
+			ctx, pool, deviceID, deferred[deviceID], updatedAt, &result,
+		); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
 }
