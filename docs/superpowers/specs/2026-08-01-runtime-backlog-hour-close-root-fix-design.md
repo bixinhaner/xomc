@@ -143,18 +143,23 @@ error 包含 device registration grace exceeded
 
 - 窗口数据仍随每个 15 分钟槽持续写 Redis 聚合状态；
 - 小时结束后进入 `preparing`，结算器按批领取实体窗口并生成不可见的目标 revision；
+- 聚合结果业务唯一键包含 revision，使 preparing revision 与当前 published revision
+  可同时存在，预结算不会覆盖线上正在读取的结果；
 - 迟到槽在 12 分钟宽限期内更新状态并把受影响实体标记为 dirty，只重算受影响实体；
 - 到水位时先完成最后一轮 dirty entity，再在一个短事务中把 publication revision 从
   `preparing` 切换为 `published`；
 - Dashboard 和下级 rollup 只读取 publication 指向的 revision，因此不会看到逐实体
   发布长尾；
-- 水位后合法迟到事件创建下一 revision，增量修正完成后再次原子切换。
+- 水位后合法迟到事件创建下一 revision，增量修正完成后再次原子切换；
+- rollup outbox 同样携带 publication revision，只有该 revision 原子发布后才允许向
+  日窗口和其他维度传播，避免下级聚合提前消费半成品。
 
 结算领取使用现有 lease/SKIP LOCKED；单次最多 32 个实体，计算并发先从 4 提升到 32，
 TSDB 连接预算保持 96。并发是预结算吞吐保护，publication 水位才是消除页面长尾的
 正确性边界。
 
-日、周进行中结果继续消费已发布小时/日 revision；publication 记录明确保存版本有效
+日、周、月同样登记 publication；它们保持现有 grace，并在到期周期内完成 prepare +
+publish，从而所有粒度共用同一读取契约。日、周进行中结果继续消费已发布小时/日 revision；publication 记录明确保存版本有效
 区间、应有槽位、已收到槽位、自然周期是否完整，避免把旧 revision 当作当前完整结果。
 
 ## 5. 失败处理与回滚
