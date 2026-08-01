@@ -1,11 +1,35 @@
 package paramsync
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBuildFullSyncReconcileDeleteCombinesCompleteCoverageIntoOneStatement(t *testing.T) {
+	deviceID := uuid.New()
+	runID := uuid.New()
+	coverage := []CoverageScope{
+		{Path: "Device.Info.Serial", Complete: true, Mappings: []FrozenMapping{{StandardPath: "Device.Info.Serial", IsStorable: true}}},
+		{Path: "Device.Radio.", Complete: true, Mappings: []FrozenMapping{{StandardPath: "Device.Radio.{i}.Enable", IsStorable: true}}},
+		{Path: "Device.Incomplete", Complete: false, Mappings: []FrozenMapping{{StandardPath: "Device.Incomplete", IsStorable: true}}},
+	}
+
+	sql, args, ok, err := buildFullSyncReconcileDelete(deviceID, runID, coverage)
+
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, 1, strings.Count(sql, "DELETE FROM device_parameters"))
+	require.Contains(t, sql, "(parameter_path = $2) OR")
+	require.Contains(t, sql, "parameter_path LIKE $3")
+	require.Contains(t, sql, "parameter_path ~ $4")
+	require.NotContains(t, args, "Device.Incomplete")
+	require.Contains(t, args, deviceID.String())
+	require.Contains(t, args, runID)
+}
 
 func TestFrozenCoveragePathPredicateUsesExactMappedLeaf(t *testing.T) {
 	sql, args, err := frozenCoveragePathPredicate(CoverageScope{Mappings: []FrozenMapping{{StandardPath: "Device.Info.Serial", IsStorable: true}}}).ToSql()

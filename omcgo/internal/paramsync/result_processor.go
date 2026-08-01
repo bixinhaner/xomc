@@ -898,23 +898,14 @@ WHERE ` + deviceParameterUnchangedGuard
 		}
 		// A tolerated 9005 marks the affected frozen coverage incomplete. Merge
 		// values from successful batches, but never delete older values for a
-		// coverage point the device did not return completely.
-		for _, coverage := range run.Coverage {
-			if !coverage.Complete || coverage.Path == "" {
-				continue
-			}
-			mappingPredicate := frozenCoveragePathPredicate(coverage)
-			if mappingPredicate == nil {
-				continue
-			}
-			query, args, err := storage.Psql.Delete("device_parameters").
-				Where(sq.Eq{"device_id": run.DeviceID}).
-				Where(mappingPredicate).
-				Where("NOT EXISTS (SELECT 1 FROM parameter_sync_staging_values s WHERE s.run_id = ? AND s.parameter_path = device_parameters.parameter_path)", run.ID).
-				ToSql()
-			if err != nil {
-				return fmt.Errorf("build reconcile full parameter sync: %w", err)
-			}
+		// coverage point the device did not return completely. All complete
+		// coverage is reconciled in one indexed DELETE to avoid one statement and
+		// one repeated device-parameter index walk per mapping group.
+		query, args, ok, err := buildFullSyncReconcileDelete(run.DeviceID, run.ID, run.Coverage)
+		if err != nil {
+			return err
+		}
+		if ok {
 			if _, err := tx.Exec(ctx, query, args...); err != nil {
 				return fmt.Errorf("reconcile full parameter sync: %w", err)
 			}
@@ -946,6 +937,30 @@ WHERE ` + deviceParameterUnchangedGuard
 		return fmt.Errorf("clean parameter sync staging: %w", err)
 	}
 	return nil
+}
+
+func buildFullSyncReconcileDelete(deviceID, runID uuid.UUID, coverage []CoverageScope) (string, []any, bool, error) {
+	completePredicates := sq.Or{}
+	for _, scope := range coverage {
+		if !scope.Complete || scope.Path == "" {
+			continue
+		}
+		if predicate := frozenCoveragePathPredicate(scope); predicate != nil {
+			completePredicates = append(completePredicates, predicate)
+		}
+	}
+	if len(completePredicates) == 0 {
+		return "", nil, false, nil
+	}
+	query, args, err := storage.Psql.Delete("device_parameters").
+		Where(sq.Eq{"device_id": deviceID}).
+		Where(completePredicates).
+		Where("NOT EXISTS (SELECT 1 FROM parameter_sync_staging_values s WHERE s.run_id = ? AND s.parameter_path = device_parameters.parameter_path)", runID).
+		ToSql()
+	if err != nil {
+		return "", nil, false, fmt.Errorf("build reconcile full parameter sync: %w", err)
+	}
+	return query, args, true, nil
 }
 
 func frozenCoveragePathPredicate(coverage CoverageScope) sq.Sqlizer {
