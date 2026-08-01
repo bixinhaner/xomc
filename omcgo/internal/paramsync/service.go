@@ -13,7 +13,10 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
-var ErrInvalidSubmitCommand = errors.New("invalid parameter sync submit command")
+var (
+	ErrInvalidSubmitCommand       = errors.New("invalid parameter sync submit command")
+	ErrRequestIdempotencyConflict = errors.New("parameter sync request idempotency conflict")
+)
 
 type RequestPlanner interface {
 	Plan(ctx context.Context, cmd PlanCommand) (*Plan, error)
