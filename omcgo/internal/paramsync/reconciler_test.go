@@ -3,6 +3,7 @@ package paramsync
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -65,4 +66,37 @@ func TestRecoverMissingResultsWithoutProcessorOrBusReturnsError(t *testing.T) {
 	_, err := NewReconciler(nil, nil, nil).RecoverMissingResults(context.Background(), 20, 200, 200)
 
 	require.ErrorContains(t, err, "requires result processor or event bus")
+}
+
+func TestRunCountReconciliationRestrictsAggregationToCandidateBatch(t *testing.T) {
+	first, second := uuid.New(), uuid.New()
+
+	query, args, err := buildRunCountReconciliationSQL([]uuid.UUID{first, second})
+
+	require.NoError(t, err)
+	require.Contains(t, query, "WHERE run.id = ANY($1)")
+	require.Len(t, args, 1)
+	require.Equal(t, []uuid.UUID{first, second}, args[0])
+}
+
+func TestRunCountCandidateSelectionUsesBoundedKeyset(t *testing.T) {
+	cursor := uuid.New()
+
+	query, args, err := buildRunCountCandidateSelectSQL(&cursor, 100)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "WHERE id > $1")
+	require.Contains(t, query, "ORDER BY id")
+	require.Contains(t, query, "LIMIT 100")
+	require.NotContains(t, strings.ToUpper(query), "OFFSET")
+	require.Equal(t, []interface{}{cursor.String()}, args)
+}
+
+func TestRunCountCandidateSelectionDefaultsToBoundedSweepPage(t *testing.T) {
+	query, args, err := buildRunCountCandidateSelectSQL(nil, 0)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "ORDER BY id")
+	require.Contains(t, query, "LIMIT 500")
+	require.Empty(t, args)
 }

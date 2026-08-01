@@ -17,6 +17,46 @@ type recordingRollupDeleteTx struct {
 	queries []string
 }
 
+type rollupIndexStateRow struct {
+	exists bool
+	valid  bool
+}
+
+func (row rollupIndexStateRow) Scan(dest ...any) error {
+	*(dest[0].(*bool)) = row.exists
+	*(dest[1].(*bool)) = row.valid
+	return nil
+}
+
+type recordingRollupIndexDB struct {
+	exists bool
+	valid  bool
+	execs  []string
+}
+
+func (db *recordingRollupIndexDB) QueryRow(context.Context, string, ...any) pgx.Row {
+	return rollupIndexStateRow{exists: db.exists, valid: db.valid}
+}
+
+func (db *recordingRollupIndexDB) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
+	db.execs = append(db.execs, query)
+	return pgconn.NewCommandTag("CREATE INDEX"), nil
+}
+
+func TestEnsurePeriodRebuildIndexDropsInvalidArtifactBeforeCreate(t *testing.T) {
+	db := &recordingRollupIndexDB{exists: true, valid: false}
+
+	err := ensurePeriodRebuildIndex(context.Background(), db)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(db.execs) != 2 || !strings.HasPrefix(db.execs[0], "DROP INDEX") ||
+		!strings.Contains(db.execs[1], "CREATE INDEX") {
+		t.Fatalf("index repair statements = %v, want DROP invalid then CREATE", db.execs)
+	}
+}
+
 func (tx *recordingRollupDeleteTx) Exec(
 	_ context.Context,
 	query string,
@@ -84,11 +124,13 @@ func TestVisitSnapshotsForRebuildBatchScansSharedPeriodOnce(t *testing.T) {
 
 func TestCounterRollupPeriodSelectRestrictsSourceVersions(t *testing.T) {
 	first, second := uuid.New(), uuid.New()
-	query, args, err := counterRollupPeriodSelect(
+	query, args, err := counterRollupPeriodPageSelect(
 		[]uuid.UUID{first, second},
 		GranularityHourly,
 		time.Date(2026, 7, 29, 19, 0, 0, 0, time.UTC),
 		time.Date(2026, 7, 29, 20, 0, 0, 0, time.UTC),
+		nil,
+		256,
 	).ToSql()
 	if err != nil {
 		t.Fatal(err)
@@ -102,6 +144,12 @@ func TestCounterRollupPeriodSelectRestrictsSourceVersions(t *testing.T) {
 	if !strings.Contains(query, "published_window.published_revision = rollup.revision") ||
 		!strings.Contains(query, "published_window.entity_key = rollup.entity_key") {
 		t.Fatalf("period replay query is not pinned to the entity's published revision: %s", query)
+	}
+	if !strings.Contains(query, "LIMIT 256") {
+		t.Fatalf("period replay query is not bounded: %s", query)
+	}
+	if !strings.Contains(query, "rollup.event_id") {
+		t.Fatalf("period replay query lacks a unique keyset tie-breaker: %s", query)
 	}
 	joinedArgs := fmt.Sprint(args)
 	if !strings.Contains(joinedArgs, first.String()) ||
@@ -117,6 +165,56 @@ func TestPeriodRebuildIndexMatchesPeriodQueryPrefix(t *testing.T) {
 	}
 	if !strings.Contains(periodRebuildIndexSQL, "WHERE publication_eligible") {
 		t.Fatalf("period rebuild index must match the eligible snapshot predicate: %s", periodRebuildIndexSQL)
+	}
+	if !strings.Contains(periodRebuildIndexSQL, "event_id") {
+		t.Fatalf("period rebuild index must cover the unique page cursor: %s", periodRebuildIndexSQL)
+	}
+}
+
+func TestVisitRollupSnapshotPagesClosesEachBoundedPageBeforeContinuing(t *testing.T) {
+	first := rollupSnapshotPageRow{
+		cursor:  rollupSnapshotCursor{EventID: uuid.MustParse("00000000-0000-0000-0000-000000000001")},
+		payload: RollupPayload{EventID: uuid.MustParse("10000000-0000-0000-0000-000000000001")},
+	}
+	second := rollupSnapshotPageRow{
+		cursor:  rollupSnapshotCursor{EventID: uuid.MustParse("00000000-0000-0000-0000-000000000002")},
+		payload: RollupPayload{EventID: uuid.MustParse("10000000-0000-0000-0000-000000000002")},
+	}
+	third := rollupSnapshotPageRow{
+		cursor:  rollupSnapshotCursor{EventID: uuid.MustParse("00000000-0000-0000-0000-000000000003")},
+		payload: RollupPayload{EventID: uuid.MustParse("10000000-0000-0000-0000-000000000003")},
+	}
+	var fetchCursors []*rollupSnapshotCursor
+	fetch := func(cursor *rollupSnapshotCursor) ([]rollupSnapshotPageRow, error) {
+		if cursor == nil {
+			fetchCursors = append(fetchCursors, nil)
+			return []rollupSnapshotPageRow{first, second}, nil
+		}
+		copyOfCursor := *cursor
+		fetchCursors = append(fetchCursors, &copyOfCursor)
+		if cursor.EventID == second.cursor.EventID {
+			return []rollupSnapshotPageRow{third}, nil
+		}
+		return nil, nil
+	}
+	var visited []uuid.UUID
+
+	err := visitRollupSnapshotPages(fetch, func(payload RollupPayload) error {
+		visited = append(visited, payload.EventID)
+		return nil
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fetchCursors) != 3 || fetchCursors[0] != nil ||
+		fetchCursors[1].EventID != second.cursor.EventID ||
+		fetchCursors[2].EventID != third.cursor.EventID {
+		t.Fatalf("page cursors = %#v, want nil -> second -> third", fetchCursors)
+	}
+	wantVisited := []uuid.UUID{first.payload.EventID, second.payload.EventID, third.payload.EventID}
+	if fmt.Sprint(visited) != fmt.Sprint(wantVisited) {
+		t.Fatalf("visited = %v, want %v", visited, wantVisited)
 	}
 }
 

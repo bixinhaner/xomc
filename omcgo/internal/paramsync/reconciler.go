@@ -3,14 +3,17 @@ package paramsync
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/task"
 )
 
@@ -20,7 +23,12 @@ type Reconciler struct {
 	processor ResultProcessor
 	metrics   *Metrics
 	now       func() time.Time
+
+	runCountMu     sync.Mutex
+	runCountCursor *uuid.UUID
 }
+
+const runCountReconcileBatchSize = 500
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -330,6 +338,40 @@ WHERE status='cancelling' ORDER BY started_at LIMIT $1 FOR UPDATE SKIP LOCKED`, 
 }
 
 func (r *Reconciler) ReconcileRunCounts(ctx context.Context) (int64, error) {
+	r.runCountMu.Lock()
+	defer r.runCountMu.Unlock()
+
+	candidateQuery, candidateArgs, err := buildRunCountCandidateSelectSQL(
+		r.runCountCursor, runCountReconcileBatchSize,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("build parameter sync run count candidates: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, candidateQuery, candidateArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("list parameter sync run count candidates: %w", err)
+	}
+	var runIDs []uuid.UUID
+	for rows.Next() {
+		var runID uuid.UUID
+		if err := rows.Scan(&runID); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan parameter sync run count candidate: %w", err)
+		}
+		runIDs = append(runIDs, runID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("iterate parameter sync run count candidates: %w", err)
+	}
+	rows.Close()
+	if len(runIDs) == 0 {
+		// The next maintenance tick starts a new bounded sweep. Avoid wrapping
+		// inside this call, which would process the first page twice at the tail.
+		r.runCountCursor = nil
+		return 0, nil
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("begin parameter sync run count reconciliation: %w", err)
@@ -353,6 +395,43 @@ WHERE res.status='received' AND run.id=res.run_id
 		return 0, fmt.Errorf("normalize historical parameter sync results: %w", err)
 	}
 
+	query, queryArgs, err := buildRunCountReconciliationSQL(runIDs)
+	if err != nil {
+		return 0, fmt.Errorf("build parameter sync run count reconciliation: %w", err)
+	}
+	tag, err := tx.Exec(ctx, query, queryArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("reconcile parameter sync run counts: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit parameter sync run count reconciliation: %w", err)
+	}
+	lastRunID := runIDs[len(runIDs)-1]
+	r.runCountCursor = &lastRunID
+	if r.metrics != nil && normalized.RowsAffected() > 0 {
+		r.metrics.ReconcileRepairs.WithLabelValues("historical_results").Add(float64(normalized.RowsAffected()))
+	}
+	if r.metrics != nil && tag.RowsAffected() > 0 {
+		r.metrics.ReconcileRepairs.WithLabelValues("run_counts").Add(float64(tag.RowsAffected()))
+	}
+	return tag.RowsAffected(), nil
+}
+
+func buildRunCountCandidateSelectSQL(cursor *uuid.UUID, limit uint64) (string, []interface{}, error) {
+	if limit == 0 {
+		limit = runCountReconcileBatchSize
+	}
+	builder := storage.Psql.Select("id").From("parameter_sync_runs").OrderBy("id").Limit(limit)
+	if cursor != nil {
+		builder = builder.Where(sq.Gt{"id": *cursor})
+	}
+	return builder.ToSql()
+}
+
+func buildRunCountReconciliationSQL(runIDs []uuid.UUID) (string, []interface{}, error) {
+	if len(runIDs) == 0 {
+		return "", nil, fmt.Errorf("parameter sync run count candidate batch is empty")
+	}
 	const query = `
 WITH actual AS (
   SELECT run.id,
@@ -370,6 +449,7 @@ WITH actual AS (
   FROM parameter_sync_runs run
   LEFT JOIN device_tasks t ON t.source='param_sync' AND t.source_id=run.id
   LEFT JOIN parameter_sync_task_results res ON res.run_id=run.id AND res.task_id=t.id
+  WHERE run.id = ANY($1)
   GROUP BY run.id
 )
 UPDATE parameter_sync_runs run SET
@@ -379,20 +459,7 @@ FROM actual WHERE run.id=actual.id AND (
   run.expected_task_count<>actual.expected OR run.terminal_task_count<>actual.terminal OR
   run.processed_task_count<>actual.processed OR run.failed_task_count<>actual.failed
 )`
-	tag, err := tx.Exec(ctx, query)
-	if err != nil {
-		return 0, fmt.Errorf("reconcile parameter sync run counts: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit parameter sync run count reconciliation: %w", err)
-	}
-	if r.metrics != nil && normalized.RowsAffected() > 0 {
-		r.metrics.ReconcileRepairs.WithLabelValues("historical_results").Add(float64(normalized.RowsAffected()))
-	}
-	if r.metrics != nil && tag.RowsAffected() > 0 {
-		r.metrics.ReconcileRepairs.WithLabelValues("run_counts").Add(float64(tag.RowsAffected()))
-	}
-	return tag.RowsAffected(), nil
+	return query, []interface{}{runIDs}, nil
 }
 
 // ReconcileTerminalBindings closes the database feedback loop when a terminal
