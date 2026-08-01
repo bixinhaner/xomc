@@ -305,6 +305,10 @@ func TestInformHandlerSubscribeUsesKeyedPeriodicConsumer(t *testing.T) {
 	assert.Equal(t, "device-mgr-periodic", bus.keyedCalls[0].config.Durable)
 	assert.Equal(t, periodicConsumerConcurrency, bus.keyedCalls[0].config.Concurrency)
 	assert.Equal(t, periodicConsumerQueueDepth, bus.keyedCalls[0].config.QueueDepth)
+	assert.GreaterOrEqual(t, bus.keyedCalls[0].config.Concurrency, 64,
+		"20k devices reporting every minute require enough parallel handlers to sustain the production rate")
+	assert.GreaterOrEqual(t, bus.keyedCalls[0].config.QueueDepth, 64,
+		"64 shards x 64 entries absorb short reconnect bursts without an unbounded in-process buffer")
 	for _, call := range bus.queueCalls {
 		assert.NotEqual(t, event.SubjectDevicePeriodic, call.subject)
 	}

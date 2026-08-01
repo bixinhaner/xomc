@@ -16,7 +16,11 @@ import (
 )
 
 const (
-	periodicConsumerConcurrency = 8
+	// A 20k-device deployment reporting every minute produces about 333 events/s.
+	// Production measurements put one cached lookup + batch submission at roughly
+	// 8 events/s per shard, so 64 ordered shards retain headroom while preserving
+	// serialization for repeated events from the same device.
+	periodicConsumerConcurrency = 64
 	periodicConsumerQueueDepth  = 64
 )
 
