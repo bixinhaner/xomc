@@ -294,6 +294,41 @@ func TestNewInformHandler(t *testing.T) {
 	assert.Equal(t, model.CarrierCMCC, h.defaultCarrier)
 }
 
+func TestInformHandlerSubscribeUsesKeyedPeriodicConsumer(t *testing.T) {
+	bus := &rpcRespRecordingBus{}
+	h := NewInformHandler(nil, nil, model.CarrierCMCC, zap.NewNop())
+
+	require.NoError(t, h.Subscribe(bus))
+
+	require.Len(t, bus.keyedCalls, 1)
+	assert.Equal(t, event.SubjectDevicePeriodic, bus.keyedCalls[0].subject)
+	assert.Equal(t, "device-mgr-periodic", bus.keyedCalls[0].config.Durable)
+	assert.Equal(t, periodicConsumerConcurrency, bus.keyedCalls[0].config.Concurrency)
+	assert.Equal(t, periodicConsumerQueueDepth, bus.keyedCalls[0].config.QueueDepth)
+	for _, call := range bus.queueCalls {
+		assert.NotEqual(t, event.SubjectDevicePeriodic, call.subject)
+	}
+}
+
+func TestPeriodicDeviceKeyUsesSerialNumber(t *testing.T) {
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, sampleInformPayload(" SN-KEYED-001 "))
+	require.NoError(t, err)
+
+	key, err := periodicDeviceKey(evt)
+
+	require.NoError(t, err)
+	assert.Equal(t, "SN-KEYED-001", key)
+}
+
+func TestPeriodicDeviceKeyRejectsMissingSerialNumber(t *testing.T) {
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, sampleInformPayload(""))
+	require.NoError(t, err)
+
+	_, err = periodicDeviceKey(evt)
+
+	require.Error(t, err)
+}
+
 func TestPayloadToInform(t *testing.T) {
 	payload := InformEventPayload{
 		DeviceId: tr069.DeviceId{

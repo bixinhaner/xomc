@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/carrier"
@@ -12,6 +13,11 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
+)
+
+const (
+	periodicConsumerConcurrency = 8
+	periodicConsumerQueueDepth  = 64
 )
 
 // HeartbeatGroupAssigner 是 inform_handler 的"匹配 + 自动分组"消费侧接口。
@@ -89,7 +95,20 @@ func (h *InformHandler) Subscribe(bus event.EventBus) error {
 	}
 	h.logger.Info("subscribed to bootstrap events", zap.String("subject", event.SubjectDeviceBootstrap))
 
-	if _, err := bus.QueueSubscribe(event.SubjectDevicePeriodic, "device-mgr-periodic", h.handlePeriodic); err != nil {
+	if keyedBus, ok := bus.(keyedQueueEventBus); ok {
+		if _, err := keyedBus.KeyedQueueSubscribe(
+			event.SubjectDevicePeriodic,
+			event.KeyedQueueConfig{
+				Durable:     "device-mgr-periodic",
+				Concurrency: periodicConsumerConcurrency,
+				QueueDepth:  periodicConsumerQueueDepth,
+			},
+			periodicDeviceKey,
+			h.handlePeriodic,
+		); err != nil {
+			return fmt.Errorf("subscribe keyed periodic: %w", err)
+		}
+	} else if _, err := bus.QueueSubscribe(event.SubjectDevicePeriodic, "device-mgr-periodic", h.handlePeriodic); err != nil {
 		return fmt.Errorf("subscribe periodic: %w", err)
 	}
 	h.logger.Info("subscribed to periodic events", zap.String("subject", event.SubjectDevicePeriodic))
@@ -106,6 +125,20 @@ func (h *InformHandler) Subscribe(bus event.EventBus) error {
 
 	h.logger.Info("inform handler subscribed to device events successfully")
 	return nil
+}
+
+func periodicDeviceKey(evt event.Event) (string, error) {
+	var payload struct {
+		DeviceID tr069.DeviceId `json:"device_id"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil {
+		return "", fmt.Errorf("decode periodic device key: %w", err)
+	}
+	serialNumber := strings.TrimSpace(payload.DeviceID.SerialNumber)
+	if serialNumber == "" {
+		return "", errors.New("periodic device key has empty serial number")
+	}
+	return serialNumber, nil
 }
 
 func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) error {
