@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,7 +14,10 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
-const deviceParameterUpsertBatchSize = 500
+const (
+	deviceParameterUpsertBatchSize          = 500
+	deviceParameterDeferredWriteConcurrency = 4
+)
 
 const deviceParameterUnchangedPredicate = `(device_parameters.parameter_value IS DISTINCT FROM EXCLUDED.parameter_value
 	OR device_parameters.parameter_type IS DISTINCT FROM EXCLUDED.parameter_type
@@ -242,6 +246,55 @@ func upsertContendedDeviceParameterRows(
 	return nil
 }
 
+type deferredDeviceParameterWriteFunc func(uuid.UUID) (deviceParameterUpsertResult, error)
+
+func runDeferredDeviceParameterWrites(
+	deviceIDs []uuid.UUID,
+	concurrency int,
+	write deferredDeviceParameterWriteFunc,
+) (deviceParameterUpsertResult, error) {
+	result := deviceParameterUpsertResult{changedDevices: make(map[uuid.UUID]struct{})}
+	if len(deviceIDs) == 0 {
+		return result, nil
+	}
+	workerCount := min(max(concurrency, 1), len(deviceIDs))
+	type writeOutcome struct {
+		result deviceParameterUpsertResult
+		err    error
+	}
+	jobs := make(chan uuid.UUID, len(deviceIDs))
+	outcomes := make(chan writeOutcome, len(deviceIDs))
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for deviceID := range jobs {
+				writeResult, err := write(deviceID)
+				outcomes <- writeOutcome{result: writeResult, err: err}
+			}
+		}()
+	}
+	for _, deviceID := range deviceIDs {
+		jobs <- deviceID
+	}
+	close(jobs)
+	workers.Wait()
+	close(outcomes)
+
+	var firstErr error
+	for outcome := range outcomes {
+		result.changed += outcome.result.changed
+		for deviceID := range outcome.result.changedDevices {
+			result.changedDevices[deviceID] = struct{}{}
+		}
+		if firstErr == nil && outcome.err != nil {
+			firstErr = outcome.err
+		}
+	}
+	return result, firstErr
+}
+
 func bulkUpsertDeviceParameters(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -276,7 +329,8 @@ func bulkUpsertDeviceParameters(
 
 	// A busy device must not hold back unrelated devices from the same Inform
 	// batch. The uncontended rows are committed above; each contended device is
-	// then serialized and written in its own short transaction.
+	// then serialized independently with bounded concurrency and its own short
+	// transaction.
 	deferredIDs := make([]uuid.UUID, 0, len(deferred))
 	for deviceID := range deferred {
 		deferredIDs = append(deferredIDs, deviceID)
@@ -284,12 +338,23 @@ func bulkUpsertDeviceParameters(
 	sort.Slice(deferredIDs, func(i, j int) bool {
 		return deferredIDs[i].String() < deferredIDs[j].String()
 	})
-	for _, deviceID := range deferredIDs {
-		if err := upsertContendedDeviceParameterRows(
-			ctx, pool, deviceID, deferred[deviceID], updatedAt, &result,
-		); err != nil {
-			return result, err
-		}
+	deferredResult, err := runDeferredDeviceParameterWrites(
+		deferredIDs,
+		deviceParameterDeferredWriteConcurrency,
+		func(deviceID uuid.UUID) (deviceParameterUpsertResult, error) {
+			writeResult := deviceParameterUpsertResult{changedDevices: make(map[uuid.UUID]struct{})}
+			err := upsertContendedDeviceParameterRows(
+				ctx, pool, deviceID, deferred[deviceID], updatedAt, &writeResult,
+			)
+			return writeResult, err
+		},
+	)
+	result.changed += deferredResult.changed
+	for deviceID := range deferredResult.changedDevices {
+		result.changedDevices[deviceID] = struct{}{}
+	}
+	if err != nil {
+		return result, err
 	}
 	return result, nil
 }

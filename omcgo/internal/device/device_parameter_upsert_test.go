@@ -1,6 +1,7 @@
 package device
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -91,4 +92,68 @@ func TestPartitionDeviceParameterRowsDefersOnlyContendedDevices(t *testing.T) {
 	require.Len(t, deferred[contendedID], 2)
 	assert.Equal(t, "Device.Busy.1", deferred[contendedID][0].parameter.ParameterPath)
 	assert.Equal(t, "Device.Busy.2", deferred[contendedID][1].parameter.ParameterPath)
+}
+
+func TestRunDeferredDeviceParameterWritesDoesNotHeadOfLineBlock(t *testing.T) {
+	firstID := uuid.MustParse("10000000-0000-0000-0000-000000000001")
+	secondID := uuid.MustParse("20000000-0000-0000-0000-000000000002")
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondDone := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseFirst:
+		default:
+			close(releaseFirst)
+		}
+	})
+
+	resultCh := make(chan struct {
+		result deviceParameterUpsertResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := runDeferredDeviceParameterWrites(
+			[]uuid.UUID{firstID, secondID},
+			2,
+			func(deviceID uuid.UUID) (deviceParameterUpsertResult, error) {
+				writeResult := deviceParameterUpsertResult{changedDevices: map[uuid.UUID]struct{}{deviceID: {}}}
+				if deviceID == firstID {
+					close(firstStarted)
+					<-releaseFirst
+					return writeResult, errors.New("first failed")
+				}
+				close(secondDone)
+				writeResult.changed = 1
+				return writeResult, nil
+			},
+		)
+		resultCh <- struct {
+			result deviceParameterUpsertResult
+			err    error
+		}{result: result, err: err}
+	}()
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-firstStarted:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		select {
+		case <-secondDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond, "a later device must finish while the first device waits")
+	close(releaseFirst)
+	outcome := <-resultCh
+	require.EqualError(t, outcome.err, "first failed")
+	assert.Equal(t, 1, outcome.result.changed)
+	assert.Contains(t, outcome.result.changedDevices, firstID)
+	assert.Contains(t, outcome.result.changedDevices, secondID)
 }
