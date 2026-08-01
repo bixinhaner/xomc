@@ -30,6 +30,7 @@ const (
 // accidentally add a blocking KEYS call while retaining a small test seam.
 type redisQueueObserverClient interface {
 	Scan(ctx context.Context, cursor uint64, match string, count int64) *redis.ScanCmd
+	Pipelined(ctx context.Context, fn func(redis.Pipeliner) error) ([]redis.Cmder, error)
 	Type(ctx context.Context, key string) *redis.StatusCmd
 	ZCard(ctx context.Context, key string) *redis.IntCmd
 	ZRangeWithScores(ctx context.Context, key string, start, stop int64) *redis.ZSliceCmd
@@ -44,6 +45,16 @@ type redisQueueFamilySnapshot struct {
 	maxLength   int64
 	oldestAge   float64
 	oldestKnown bool
+}
+
+type redisQueueProbe struct {
+	family    string
+	key       string
+	typeCmd   *redis.StatusCmd
+	lengthCmd *redis.IntCmd
+	zrangeCmd *redis.ZSliceCmd
+	listCmd   *redis.StringCmd
+	details   []*redis.StringCmd
 }
 
 // RedisQueueObserver exports bounded aggregate metrics for the legacy command
@@ -165,7 +176,7 @@ func (o *RedisQueueObserver) scanAllFamilies(ctx context.Context) (map[string]re
 	commandPrefix := strings.TrimSuffix(redisx.Keys.ACSCommandQueuePattern(), "*")
 	taskPrefix := strings.TrimSuffix(redisx.Keys.ACSTaskQueuePattern(), "*")
 	var cursor uint64
-	now := time.Now()
+	var probes []*redisQueueProbe
 	for {
 		keys, next, err := o.client.Scan(ctx, cursor, combinedQueueScanMatch, o.scanCount).Result()
 		if err != nil {
@@ -181,29 +192,144 @@ func (o *RedisQueueObserver) scanAllFamilies(ctx context.Context) (map[string]re
 			default:
 				continue
 			}
-			snapshot := snapshots[family]
-			length, oldest, known, err := o.inspectQueue(ctx, family, key, now)
-			if err != nil {
-				return nil, fmt.Errorf("inspect %s: %w", key, err)
-			}
-			snapshot.length += length
-			if length > 0 {
-				snapshot.active++
-			}
-			if length > snapshot.maxLength {
-				snapshot.maxLength = length
-			}
-			if known && (!snapshot.oldestKnown || oldest > snapshot.oldestAge) {
-				snapshot.oldestAge = oldest
-				snapshot.oldestKnown = true
-			}
-			snapshots[family] = snapshot
+			probes = append(probes, &redisQueueProbe{family: family, key: key})
 		}
 		if next == 0 {
-			return snapshots, nil
+			break
 		}
 		cursor = next
 	}
+	if err := o.inspectQueuesPipelined(ctx, probes); err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	for _, probe := range probes {
+		length, oldest, known, err := queueProbeResult(probe, now)
+		if err != nil {
+			return nil, fmt.Errorf("inspect %s: %w", probe.key, err)
+		}
+		snapshot := snapshots[probe.family]
+		snapshot.length += length
+		if length > 0 {
+			snapshot.active++
+		}
+		if length > snapshot.maxLength {
+			snapshot.maxLength = length
+		}
+		if known && (!snapshot.oldestKnown || oldest > snapshot.oldestAge) {
+			snapshot.oldestAge, snapshot.oldestKnown = oldest, true
+		}
+		snapshots[probe.family] = snapshot
+	}
+	return snapshots, nil
+}
+
+func (o *RedisQueueObserver) inspectQueuesPipelined(ctx context.Context, probes []*redisQueueProbe) error {
+	if len(probes) == 0 {
+		return nil
+	}
+	if _, err := o.client.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		for _, probe := range probes {
+			probe.typeCmd = pipe.Type(ctx, probe.key)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("pipeline queue types: %w", err)
+	}
+	if _, err := o.client.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		for _, probe := range probes {
+			switch probe.typeCmd.Val() {
+			case "none":
+				continue
+			case "zset":
+				probe.lengthCmd = pipe.ZCard(ctx, probe.key)
+				probe.zrangeCmd = pipe.ZRangeWithScores(ctx, probe.key, 0, queueAgeSampleSize-1)
+			case "list":
+				probe.lengthCmd = pipe.LLen(ctx, probe.key)
+				probe.listCmd = pipe.LIndex(ctx, probe.key, 0)
+			default:
+				return fmt.Errorf("unsupported redis type %q for %s", probe.typeCmd.Val(), probe.key)
+			}
+		}
+		return nil
+	}); err != nil && err != redis.Nil {
+		return fmt.Errorf("pipeline queue metadata: %w", err)
+	}
+	if _, err := o.client.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		for _, probe := range probes {
+			if probe.family != redisQueueFamilyTask || probe.zrangeCmd == nil {
+				continue
+			}
+			for _, entry := range probe.zrangeCmd.Val() {
+				member, ok := entry.Member.(string)
+				if ok {
+					probe.details = append(probe.details, pipe.HGet(ctx, redisx.Keys.ACSTaskDetail(member), "data"))
+				} else {
+					probe.details = append(probe.details, nil)
+				}
+			}
+		}
+		return nil
+	}); err != nil && err != redis.Nil {
+		return fmt.Errorf("pipeline task queue details: %w", err)
+	}
+	return nil
+}
+
+func queueProbeResult(probe *redisQueueProbe, now time.Time) (int64, float64, bool, error) {
+	if probe.typeCmd == nil || probe.typeCmd.Val() == "none" {
+		return 0, 0, false, nil
+	}
+	if probe.lengthCmd == nil {
+		return 0, 0, false, fmt.Errorf("missing queue length result")
+	}
+	length, err := probe.lengthCmd.Result()
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("cardinality: %w", err)
+	}
+	if length == 0 {
+		return 0, 0, false, nil
+	}
+	if probe.listCmd != nil {
+		member, err := probe.listCmd.Result()
+		if err != nil && err != redis.Nil {
+			return 0, 0, false, fmt.Errorf("list head: %w", err)
+		}
+		age, known := queueMemberAge(member, now)
+		return length, age, known, nil
+	}
+	entries := probe.zrangeCmd.Val()
+	var oldest float64
+	known := false
+	for index, entry := range entries {
+		member, ok := entry.Member.(string)
+		if !ok {
+			continue
+		}
+		var age float64
+		var memberKnown bool
+		if probe.family == redisQueueFamilyTask {
+			if index < len(probe.details) && probe.details[index] != nil {
+				if data, err := probe.details[index].Result(); err == nil {
+					var queued Task
+					if json.Unmarshal([]byte(data), &queued) == nil && !queued.QueueTime().IsZero() {
+						age, memberKnown = ageSeconds(queued.QueueTime(), now), true
+					}
+				} else if err != redis.Nil {
+					return 0, 0, false, fmt.Errorf("task detail: %w", err)
+				}
+			}
+			if !memberKnown {
+				age, memberKnown = queueScoreAge(entry.Score, now)
+			}
+		} else {
+			age, memberKnown = queueMemberAge(member, now)
+		}
+		if memberKnown && (!known || age > oldest) {
+			oldest, known = age, true
+		}
+	}
+	return length, oldest, known, nil
 }
 
 func (o *RedisQueueObserver) publishSnapshot(family string, snapshot redisQueueFamilySnapshot) {

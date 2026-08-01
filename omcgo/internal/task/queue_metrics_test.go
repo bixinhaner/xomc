@@ -18,12 +18,18 @@ import (
 
 type scanCountingRedisClient struct {
 	redis.UniversalClient
-	scans int
+	scans       int
+	directTypes int
 }
 
 func (c *scanCountingRedisClient) Scan(ctx context.Context, cursor uint64, match string, count int64) *redis.ScanCmd {
 	c.scans++
 	return c.UniversalClient.Scan(ctx, cursor, match, count)
+}
+
+func (c *scanCountingRedisClient) Type(ctx context.Context, key string) *redis.StatusCmd {
+	c.directTypes++
+	return c.UniversalClient.Type(ctx, key)
 }
 
 func TestRedisQueueObserverCollectsBoundedBacklog(t *testing.T) {
@@ -71,6 +77,7 @@ func TestRedisQueueObserverScansBothFamiliesInOneKeyspacePass(t *testing.T) {
 	observer.Collect(context.Background())
 
 	require.Equal(t, 1, client.scans, "a small keyspace should require one combined SCAN call, not one pass per family")
+	require.Zero(t, client.directTypes, "queue metadata must be pipelined instead of fetched one key per round trip")
 	require.GreaterOrEqual(t, observer.scanCount, int64(10_000))
 }
 
