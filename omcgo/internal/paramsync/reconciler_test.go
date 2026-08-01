@@ -74,7 +74,11 @@ func TestRunCountReconciliationRestrictsAggregationToCandidateBatch(t *testing.T
 	query, args, err := buildRunCountReconciliationSQL([]uuid.UUID{first, second})
 
 	require.NoError(t, err)
-	require.Contains(t, query, "WHERE run.id = ANY($1)")
+	require.Contains(t, query, "source_id=ANY($1)")
+	require.Contains(t, query, "WITH batch AS")
+	require.Contains(t, query, "task_rows AS MATERIALIZED")
+	require.Contains(t, query, "JOIN parameter_sync_task_results res ON res.run_id=t.run_id AND res.task_id=t.id")
+	require.NotContains(t, query, "FROM parameter_sync_runs run")
 	require.Len(t, args, 1)
 	require.Equal(t, []uuid.UUID{first, second}, args[0])
 }
@@ -97,6 +101,6 @@ func TestRunCountCandidateSelectionDefaultsToBoundedSweepPage(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Contains(t, query, "ORDER BY id")
-	require.Contains(t, query, "LIMIT 500")
+	require.Contains(t, query, "LIMIT 100")
 	require.Empty(t, args)
 }

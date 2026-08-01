@@ -28,7 +28,7 @@ type Reconciler struct {
 	runCountCursor *uuid.UUID
 }
 
-const runCountReconcileBatchSize = 500
+const runCountReconcileBatchSize = 100
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -433,10 +433,20 @@ func buildRunCountReconciliationSQL(runIDs []uuid.UUID) (string, []interface{}, 
 		return "", nil, fmt.Errorf("parameter sync run count candidate batch is empty")
 	}
 	const query = `
-WITH actual AS (
-  SELECT run.id,
-    count(t.id)::int AS expected,
-    count(t.id) FILTER (WHERE t.status IN ('completed','failed','expired','cancelled'))::int AS terminal,
+WITH batch AS (
+  SELECT unnest($1::uuid[]) AS id
+), task_rows AS MATERIALIZED (
+  SELECT id, source_id AS run_id, status
+  FROM device_tasks
+  WHERE source='param_sync' AND source_id=ANY($1)
+), task_actual AS (
+  SELECT run_id,
+    count(*)::int AS expected,
+    count(*) FILTER (WHERE status IN ('completed','failed','expired','cancelled'))::int AS terminal
+  FROM task_rows
+  GROUP BY run_id
+), result_actual AS (
+  SELECT t.run_id,
     count(res.task_id) FILTER (
       WHERE t.status IN ('completed','failed','expired','cancelled')
         AND res.status IN ('processed','failed')
@@ -446,11 +456,18 @@ WITH actual AS (
         AND res.status IN ('processed','failed')
         AND (res.status='failed' OR NOT res.success)
     )::int AS failed
-  FROM parameter_sync_runs run
-  LEFT JOIN device_tasks t ON t.source='param_sync' AND t.source_id=run.id
-  LEFT JOIN parameter_sync_task_results res ON res.run_id=run.id AND res.task_id=t.id
-  WHERE run.id = ANY($1)
-  GROUP BY run.id
+  FROM task_rows t
+  JOIN parameter_sync_task_results res ON res.run_id=t.run_id AND res.task_id=t.id
+  GROUP BY t.run_id
+), actual AS (
+  SELECT batch.id,
+    COALESCE(t.expected, 0) AS expected,
+    COALESCE(t.terminal, 0) AS terminal,
+    COALESCE(res.processed, 0) AS processed,
+    COALESCE(res.failed, 0) AS failed
+  FROM batch
+  LEFT JOIN task_actual t ON t.run_id=batch.id
+  LEFT JOIN result_actual res ON res.run_id=batch.id
 )
 UPDATE parameter_sync_runs run SET
   expected_task_count=actual.expected, terminal_task_count=actual.terminal,
