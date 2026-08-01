@@ -3,12 +3,63 @@ package provider
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRunPeriodicMaintenanceLoopsDoNotStarveEachOther(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	slowStarted := make(chan struct{}, 1)
+	releaseSlow := make(chan struct{})
+	var fastCalls atomic.Int32
+
+	go runPeriodicMaintenance(ctx, time.Millisecond, func(context.Context) {
+		select {
+		case slowStarted <- struct{}{}:
+		default:
+		}
+		select {
+		case <-releaseSlow:
+		case <-ctx.Done():
+		}
+	})
+	go runPeriodicMaintenance(ctx, time.Millisecond, func(context.Context) {
+		fastCalls.Add(1)
+	})
+
+	select {
+	case <-slowStarted:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("slow maintenance loop did not start")
+	}
+	require.Eventually(t, func() bool { return fastCalls.Load() >= 3 }, 100*time.Millisecond, time.Millisecond)
+	close(releaseSlow)
+}
+
+func TestRunPeriodicMaintenanceSchedulesNextRunAfterCompletion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	starts := make(chan time.Time, 2)
+
+	go runPeriodicMaintenance(ctx, 10*time.Millisecond, func(context.Context) {
+		starts <- time.Now()
+		time.Sleep(15 * time.Millisecond)
+	})
+
+	first := <-starts
+	second := <-starts
+	assert.GreaterOrEqual(t, second.Sub(first), 23*time.Millisecond,
+		"a slow task must not trigger an immediate catch-up run")
+}
+
+func TestParamSyncMaintenanceWorkerBudgetRemainsBounded(t *testing.T) {
+	assert.LessOrEqual(t, paramSyncOutboxWorkers+paramSyncQueuedWorkers, 16)
+}
 
 type failingParamSyncMaintainer struct {
 	calls []string

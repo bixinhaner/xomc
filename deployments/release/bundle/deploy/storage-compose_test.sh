@@ -71,10 +71,12 @@ contains "worker 默认 8 核" 'cpus: "${WORKER_CPUS:-8}"' "$RELEASE_APP_COMPOSE
 
 echo "── PM 流式聚合生产旋钮 ──"
 contains "release worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"' "$RELEASE_APP_COMPOSE"
+contains "release worker 聚合并发满足两万设备十二分钟关闭" 'PM_AGGREGATION_CONSUMER_CONCURRENCY: "${PM_AGGREGATION_CONSUMER_CONCURRENCY:-16}"' "$RELEASE_APP_COMPOSE"
+contains "release worker 收口并发与生产默认预算一致" 'PM_AGGREGATION_FINALIZE_CONCURRENCY: "${PM_AGGREGATION_FINALIZE_CONCURRENCY:-32}"' "$RELEASE_APP_COMPOSE"
 contains "release worker 透传窗口状态 TTL" 'PM_AGGREGATION_WINDOW_TTL: "${PM_AGGREGATION_WINDOW_TTL:-1080h}"' "$RELEASE_APP_COMPOSE"
-contains "release worker 默认关闭 Redis v2 写入" 'PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-false}"' "$RELEASE_APP_COMPOSE"
+contains "release worker 默认开启 Redis v2 紧凑写入" 'PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-true}"' "$RELEASE_APP_COMPOSE"
 contains "开发 worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"' "$DEV_COMPOSE"
-contains "开发 worker 默认关闭 Redis v2 写入" 'PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-false}"' "$DEV_COMPOSE"
+contains "开发 worker 默认开启 Redis v2 紧凑写入" 'PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-true}"' "$DEV_COMPOSE"
 
 echo "── release .env 模板和升级继承 ──"
 for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
@@ -136,6 +138,10 @@ contains "install 在 systemd 停服前执行迁移门禁" 'gpv_handoff_migrate_
 contains "svc 在重启前准备 durable" 'gpv_handoff_prepare' "$SVC"
 contains "真实 NATS 验证脚本强制注入地址" 'GPV_NATS_TEST_URL=' "$RELEASE_NATS_VERIFY"
 contains "真实 NATS 验证支持本地 Docker fallback" 'NATS_SERVER_IMAGE' "$RELEASE_NATS_VERIFY"
+appears_before "会清空 stream 的 fresh-install 测试晚于队列测试" \
+  '"$GO_BIN" test ./internal/core/event' \
+  '"$GO_BIN" test ./cmd/gpv-handoff' \
+  "$RELEASE_NATS_VERIFY"
 contains "真实 NATS 验证支持固定 Go 路径兜底" '/root/.local/go/bin/go' "$RELEASE_NATS_VERIFY"
 contains "真实 NATS 验证支持标准用户态 Go 解压路径" '$HOME/.opencode/go/bin/go' "$RELEASE_NATS_VERIFY"
 contains "install 健康等待使用真实截止时间" 'HEALTHCHECK_DEADLINE=' "$INSTALL"

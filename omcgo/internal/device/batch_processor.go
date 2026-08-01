@@ -348,34 +348,12 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 
 	// 2. 批量更新参数表（仅 hit，避免 device_id 外键悬空）
 	paramResult, err := p.batchUpsertParams(ctx, hit)
-	if err != nil {
+	if err = p.handleParameterUpsertOutcome(hit, paramResult, err); err != nil {
 		return fmt.Errorf("batch upsert params: %w", err)
 	}
 
 	// 3. 批量 Redis 操作（仅 hit，避免把 stale device 写回 cache）
 	p.batchRedisOps(ctx, hit)
-
-	// Phase 3 (设计文档 §4.2 Layer C): batch path 补完 — 异步触发 InfoSyncer
-	// 把 device_parameters 投影到 device_info 的 tac/band/mac/transmit_power 等
-	// 11 个 Phase 2 新列。异步执行（不阻塞 flush 主路径），失败仅 WARN，下次
-	// Inform 周期会重试。
-	if p.infoSyncer != nil {
-		changed := make([]*informUpdate, 0, len(paramResult.changedDevices))
-		for _, update := range hit {
-			_, parameterChanged := paramResult.changedDevices[update.device.ID]
-			_, retryPending := p.infoProjectionRetry.Load(update.device.ID)
-			if parameterChanged || retryPending {
-				changed = append(changed, update)
-			}
-		}
-		if p.metrics != nil {
-			p.metrics.BatchInfoProjection.WithLabelValues("queued").Add(float64(len(changed)))
-			p.metrics.BatchInfoProjection.WithLabelValues("skipped").Add(float64(len(hit) - len(changed)))
-		}
-		if len(changed) > 0 {
-			go p.asyncSyncDeviceInfo(changed)
-		}
-	}
 
 	// 4. T-0123/T-0125: PG + cache 写入成功后发 transition 事件。
 	// 与 UpdateFromInform 非 batch 路径行为对齐（device_service.go §UpdateFromInform 末尾）。
@@ -388,6 +366,41 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 	}
 
 	return nil
+}
+
+// handleParameterUpsertOutcome queues device_info projection for every device
+// whose parameter transaction committed, even when a later contended-device
+// transaction failed. The retry marker is installed before the asynchronous
+// projection starts, so an unchanged retry cannot permanently skip the
+// already-committed device.
+func (p *BatchInformProcessor) handleParameterUpsertOutcome(
+	hit []*informUpdate,
+	result deviceParameterUpsertResult,
+	upsertErr error,
+) error {
+	if p.infoSyncer == nil {
+		return upsertErr
+	}
+	changed := make([]*informUpdate, 0, len(result.changedDevices))
+	for _, update := range hit {
+		_, parameterChanged := result.changedDevices[update.device.ID]
+		_, retryPending := p.infoProjectionRetry.Load(update.device.ID)
+		if !parameterChanged && !retryPending {
+			continue
+		}
+		// Mark before launching the goroutine. asyncSyncDeviceInfo removes the
+		// marker only after a successful, idempotent full-device projection.
+		p.infoProjectionRetry.Store(update.device.ID, struct{}{})
+		changed = append(changed, update)
+	}
+	if p.metrics != nil {
+		p.metrics.BatchInfoProjection.WithLabelValues("queued").Add(float64(len(changed)))
+		p.metrics.BatchInfoProjection.WithLabelValues("skipped").Add(float64(len(hit) - len(changed)))
+	}
+	if len(changed) > 0 {
+		go p.asyncSyncDeviceInfo(changed)
+	}
+	return upsertErr
 }
 
 func (p *BatchInformProcessor) publishTransitionEvents(ctx context.Context, u *informUpdate) {

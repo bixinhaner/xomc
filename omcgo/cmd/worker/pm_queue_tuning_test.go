@@ -27,7 +27,7 @@ func TestPMQueueTuningCoversDeviceRegistrationWindow(t *testing.T) {
 }
 
 func TestPMTSDBConnectionBudgetCoversIngestAndHourlyFinalization(t *testing.T) {
-	assert.Equal(t, int32(96), pmTSDBConnectionBudget(32, 32, 8))
+	assert.Equal(t, int32(120), pmTSDBConnectionBudget(32, 32, 16))
 	assert.Equal(t, int32(40), pmTSDBConnectionBudget(4, 4, 8))
 	assert.Equal(t, int32(40), pmTSDBConnectionBudget(32, 0, 0),
 		"disabled aggregation excludes finalizer and three aggregation consumers")
@@ -45,8 +45,8 @@ func TestWorkerTSDBPoolsCoverOverlappingPMWorkloads(t *testing.T) {
 		{name: "dev", path: "etc/config.dev.yaml", finalizeConcurrency: 4, consumerConcurrency: 8},
 		{name: "local", path: "etc/config.local.yaml", finalizeConcurrency: 4, consumerConcurrency: 8},
 		{name: "test", path: "etc/config.test.yaml", finalizeConcurrency: 4, consumerConcurrency: 8},
-		// 生产池既覆盖 Compose 默认 finalize=4，也覆盖当前 32 核部署保留的 finalize=32。
-		{name: "prod-tuned", path: "etc/config.prod.yaml", finalizeConcurrency: 32, consumerConcurrency: 8},
+		// 生产池覆盖 32 路 finalize 与三类各 16 路聚合消费者同时工作的峰值。
+		{name: "prod-tuned", path: "etc/config.prod.yaml", finalizeConcurrency: 32, consumerConcurrency: 16},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

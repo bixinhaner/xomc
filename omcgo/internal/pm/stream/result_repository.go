@@ -155,7 +155,7 @@ SELECT
 FROM pm_aggregation_results_staging
 ON CONFLICT (
   task_version_id, granularity, window_start, dimension_key,
-  object_ldn, technology, metric_id
+  object_ldn, technology, metric_id, revision
 ) DO UPDATE SET
   window_end = EXCLUDED.window_end,
   task_id = EXCLUDED.task_id,
@@ -170,7 +170,6 @@ ON CONFLICT (
   sample_count = EXCLUDED.sample_count,
   complete = EXCLUDED.complete,
   missing_slots = EXCLUDED.missing_slots,
-  revision = EXCLUDED.revision,
   version_effective_from = EXCLUDED.version_effective_from,
   version_effective_to = EXCLUDED.version_effective_to,
   received_slots = EXCLUDED.received_slots,
@@ -191,6 +190,7 @@ WHERE existing.task_version_id = $1
   AND existing.granularity = $2
   AND existing.window_start = $3
   AND existing.dimension_key = $4
+  AND existing.revision = $5
   AND NOT EXISTS (
     SELECT 1
     FROM pm_aggregation_results_staging AS staged
@@ -201,11 +201,13 @@ WHERE existing.task_version_id = $1
       AND staged.object_ldn = existing.object_ldn
       AND staged.technology = existing.technology
       AND staged.metric_id = existing.metric_id
+      AND staged.revision = existing.revision
   )`,
 			key.TaskVersionID,
 			string(key.Granularity),
 			key.Start,
 			key.EntityKey,
+			revision,
 		); err != nil {
 			return 0, fmt.Errorf("delete stale PM aggregation results: %w", err)
 		}

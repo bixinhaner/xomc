@@ -375,7 +375,12 @@ func (m *svcMockCmdQueue) GetQueueLength(_ context.Context, _ string) (int64, er
 }
 
 type svcMockEventBus struct {
-	publishFn func(ctx context.Context, subject string, evt event.Event) error
+	publishFn  func(ctx context.Context, subject string, evt event.Event) error
+	keyedCalls []struct {
+		subject string
+		config  event.KeyedQueueConfig
+		keyFn   event.EventKeyFunc
+	}
 }
 
 func (m *svcMockEventBus) Publish(ctx context.Context, subject string, evt event.Event) error {
@@ -390,6 +395,19 @@ func (m *svcMockEventBus) Subscribe(_ string, _ event.EventHandler) (event.Subsc
 func (m *svcMockEventBus) QueueSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
 	return &svcMockSub{}, nil
 }
+func (m *svcMockEventBus) KeyedQueueSubscribe(
+	subject string,
+	config event.KeyedQueueConfig,
+	keyFn event.EventKeyFunc,
+	_ event.EventHandler,
+) (event.Subscription, error) {
+	m.keyedCalls = append(m.keyedCalls, struct {
+		subject string
+		config  event.KeyedQueueConfig
+		keyFn   event.EventKeyFunc
+	}{subject: subject, config: config, keyFn: keyFn})
+	return &svcMockSub{}, nil
+}
 func (m *svcMockEventBus) PullSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
 	return &svcMockSub{}, nil
 }
@@ -398,6 +416,27 @@ func (m *svcMockEventBus) Close() error { return nil }
 type svcMockSub struct{}
 
 func (s *svcMockSub) Unsubscribe() error { return nil }
+
+func TestSoftwareSubscribeUsesKeyedPeriodicConsumer(t *testing.T) {
+	bus := &svcMockEventBus{}
+	service := &SoftwareService{logger: zap.NewNop()}
+
+	require.NoError(t, service.Subscribe(bus))
+
+	require.Len(t, bus.keyedCalls, 1)
+	call := bus.keyedCalls[0]
+	assert.Equal(t, event.SubjectDevicePeriodic, call.subject)
+	assert.Equal(t, "software-upgrade-periodic", call.config.Durable)
+	assert.Equal(t, softwarePeriodicConsumerConcurrency, call.config.Concurrency)
+	assert.Equal(t, softwarePeriodicConsumerQueueDepth, call.config.QueueDepth)
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, map[string]any{
+		"device_id": map[string]any{"serial_number": " SW-PERIODIC-001 "},
+	})
+	require.NoError(t, err)
+	key, err := call.keyFn(evt)
+	require.NoError(t, err)
+	assert.Equal(t, "SW-PERIODIC-001", key)
+}
 
 // ---------------------------------------------------------------------------
 // Tests

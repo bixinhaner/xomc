@@ -24,6 +24,9 @@ type Metrics struct {
 	RebuildSnapshotScanSeconds             prometheus.Histogram
 	RebuildCoalescedTotal                  prometheus.Counter
 	WindowsFinalizedTotal                  *prometheus.CounterVec
+	WindowsPreparedTotal                   prometheus.Counter
+	WindowsPublishedTotal                  prometheus.Counter
+	PublicationDuration                    prometheus.Histogram
 	FinalizeErrorsTotal                    prometheus.Counter
 	FinalizeDuration                       prometheus.Histogram
 	FinalizeClaims                         prometheus.Counter
@@ -119,6 +122,19 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "omc_pm_aggregation_windows_finalized_total",
 			Help: "Aggregation windows finalized by close reason.",
 		}, []string{"reason"}),
+		WindowsPreparedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_windows_prepared_total",
+			Help: "Initial hourly aggregation windows prepared before the publication watermark.",
+		}),
+		WindowsPublishedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_windows_published_total",
+			Help: "Prepared hourly aggregation windows made visible by an atomic publication switch.",
+		}),
+		PublicationDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "omc_pm_aggregation_publication_duration_seconds",
+			Help:    "Time spent atomically publishing ready hourly revisions.",
+			Buckets: prometheus.DefBuckets,
+		}),
 		FinalizeErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_finalize_errors_total",
 			Help: "Aggregation window finalization failures.",
@@ -209,6 +225,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.RebuildSnapshotScanSeconds,
 		m.RebuildCoalescedTotal,
 		m.WindowsFinalizedTotal,
+		m.WindowsPreparedTotal,
+		m.WindowsPublishedTotal,
+		m.PublicationDuration,
 		m.FinalizeErrorsTotal,
 		m.FinalizeDuration,
 		m.FinalizeClaims,

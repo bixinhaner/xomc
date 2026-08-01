@@ -379,6 +379,43 @@ func (r *PgRepository) resolveStreamingMembers(
 	return members, nil
 }
 
+// resolveStreamingDeviceBaseline captures the eligible device population once
+// per technology. Built-in dimensions are reconciled sequentially, so using
+// this shared baseline prevents devices registering mid-reconcile from making
+// downstream dimensions expect events that the upstream network snapshot can
+// never publish.
+func (r *PgRepository) resolveStreamingDeviceBaseline(
+	ctx context.Context,
+	technology string,
+) ([]uuid.UUID, error) {
+	builder := storage.Psql.Select("id").From("devices").
+		Where("deleted_at IS NULL")
+	if technology != "" {
+		builder = builder.Where(sq.Eq{"technology": technology})
+	}
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build PM aggregation device baseline SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query PM aggregation device baseline: %w", err)
+	}
+	defer rows.Close()
+	deviceIDs := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var deviceID uuid.UUID
+		if err := rows.Scan(&deviceID); err != nil {
+			return nil, fmt.Errorf("scan PM aggregation device baseline: %w", err)
+		}
+		deviceIDs = append(deviceIDs, deviceID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate PM aggregation device baseline: %w", err)
+	}
+	return deviceIDs, nil
+}
+
 func streamingDimensionKey(
 	task *Task,
 	deviceID uuid.UUID,

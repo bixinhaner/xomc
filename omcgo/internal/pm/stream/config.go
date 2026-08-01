@@ -33,12 +33,12 @@ func DefaultConfig() Config {
 		MonthlyCloseGrace:   30 * time.Minute,
 		OutboxBatch:         100,
 		ConsumerConcurrency: 8,
-		FinalizeConcurrency: 4,
+		FinalizeConcurrency: 32,
 		MaxEventBytes:       8 << 20,
 		WindowTTL:           45 * 24 * time.Hour,
 		OutboxRetention:     24 * time.Hour,
 		ReplayRetention:     45 * 24 * time.Hour,
-		RedisV2WriteEnabled: false,
+		RedisV2WriteEnabled: true,
 	}
 }
 

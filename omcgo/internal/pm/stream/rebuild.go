@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -36,6 +37,8 @@ const (
 	rebuildLeaseDuration = 2 * time.Minute
 	rebuildLockDuration  = 15 * time.Minute
 	rebuildQuietPeriod   = 2 * time.Minute
+	hourlyPublishGrace   = 12 * time.Minute
+	rebuildDeadlineLead  = 30 * time.Second
 	rebuildBatchSize     = 100
 )
 
@@ -54,10 +57,19 @@ func rebuildClaimBatchSelect(quietPeriod time.Duration, limit uint64) sq.SelectB
 		"window_start", "window_end", "source_event_id",
 		"attempts", "request_generation",
 	).From("pm_aggregation_rebuilds").
-		Where(sq.Expr(
-			"requested_at <= now() - (? * interval '1 microsecond')",
-			quietPeriod.Microseconds(),
-		)).
+		Where(sq.Or{
+			sq.Expr(
+				"requested_at <= now() - (? * interval '1 microsecond')",
+				quietPeriod.Microseconds(),
+			),
+			sq.And{
+				sq.Eq{"granularity": string(GranularityHourly)},
+				sq.Expr(
+					"now() >= window_end + (? * interval '1 microsecond')",
+					(hourlyPublishGrace - rebuildDeadlineLead).Microseconds(),
+				),
+			},
+		}).
 		Where(sq.Or{
 			sq.And{
 				sq.Eq{"status": []string{"pending", "failed"}},
@@ -68,6 +80,14 @@ func rebuildClaimBatchSelect(quietPeriod time.Duration, limit uint64) sq.SelectB
 				sq.Expr("lease_expires_at < now()"),
 			},
 		}).
+		OrderByClause(`CASE
+  WHEN granularity = 'hourly'
+   AND now() >= window_end + (`+fmt.Sprint((hourlyPublishGrace-rebuildDeadlineLead).Microseconds())+` * interval '1 microsecond')
+  THEN 0 ELSE 1 END`).
+		OrderByClause(`CASE
+  WHEN granularity = 'hourly'
+   AND now() >= window_end + (`+fmt.Sprint((hourlyPublishGrace-rebuildDeadlineLead).Microseconds())+` * interval '1 microsecond')
+  THEN window_end END DESC`).
 		OrderBy("next_attempt_at", "requested_at", "id").
 		Limit(limit).
 		Suffix("FOR UPDATE SKIP LOCKED")
@@ -123,11 +143,35 @@ func NewRebuildRepository(pool *pgxpool.Pool) *RebuildRepository {
 	return &RebuildRepository{pool: pool}
 }
 
+func lockPublicationForRebuild(ctx context.Context, tx pgx.Tx, key WindowKey) error {
+	var marker int
+	err := tx.QueryRow(ctx, `
+SELECT 1
+FROM pm_aggregation_publications
+WHERE task_version_id = $1 AND granularity = $2 AND window_start = $3
+FOR UPDATE`, key.TaskVersionID, string(key.Granularity), key.Start).Scan(&marker)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lock PM publication before rebuild: %w", err)
+	}
+	return nil
+}
+
 func (r *RebuildRepository) Enqueue(
 	ctx context.Context,
 	key WindowKey,
 	sourceEventID string,
 ) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin enqueue PM aggregation rebuild: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockPublicationForRebuild(ctx, tx, key); err != nil {
+		return err
+	}
 	query, args, err := storage.Psql.Insert("pm_aggregation_rebuilds").
 		Columns(
 			"task_id", "task_version_id", "entity_key", "granularity",
@@ -155,23 +199,48 @@ RETURNING request_generation`).
 		return fmt.Errorf("build enqueue PM aggregation rebuild: %w", err)
 	}
 	var generation int64
-	if err := r.pool.QueryRow(ctx, query, args...).Scan(&generation); err != nil {
+	if err := tx.QueryRow(ctx, query, args...).Scan(&generation); err != nil {
 		return fmt.Errorf("enqueue PM aggregation rebuild: %w", err)
+	}
+	markSQL, markArgs, err := rebuildMarkRequestedUpdate(key).ToSql()
+	if err != nil {
+		return fmt.Errorf("build mark PM aggregation rebuild requested: %w", err)
+	}
+	if _, err := tx.Exec(ctx, markSQL, markArgs...); err != nil {
+		return fmt.Errorf("mark PM aggregation rebuild requested: %w", err)
+	}
+	dirtySQL, dirtyArgs, err := storage.Psql.Update("pm_aggregation_publications").
+		Set("dirty_entities", sq.Expr("dirty_entities + 1")).
+		Set("updated_at", time.Now().UTC()).
+		Where(sq.Eq{
+			"task_version_id": key.TaskVersionID,
+			"granularity":     string(key.Granularity),
+			"window_start":    key.Start,
+		}).Where(sq.Or{
+		sq.Eq{"status": "preparing"},
+		sq.Expr("preparing_revision IS NOT NULL"),
+	}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build mark PM publication dirty: %w", err)
+	}
+	if _, err := tx.Exec(ctx, dirtySQL, dirtyArgs...); err != nil {
+		return fmt.Errorf("mark PM publication dirty: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit enqueue PM aggregation rebuild: %w", err)
 	}
 	if generation > 1 && r.metrics != nil {
 		r.metrics.RebuildCoalescedTotal.Inc()
 	}
-	markSQL, markArgs, err := storage.Psql.Update("pm_aggregation_windows").
-		Set("rebuild_requested_at", time.Now().UTC()).
-		Where(windowKeyPredicate(key)).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build mark PM aggregation rebuild requested: %w", err)
-	}
-	if _, err := r.pool.Exec(ctx, markSQL, markArgs...); err != nil {
-		return fmt.Errorf("mark PM aggregation rebuild requested: %w", err)
-	}
 	return nil
+}
+
+func rebuildMarkRequestedUpdate(key WindowKey) sq.UpdateBuilder {
+	return storage.Psql.Update("pm_aggregation_windows").
+		Set("rebuild_requested_at", time.Now().UTC()).
+		Set("status", sq.Expr("CASE WHEN status = 'prepared' THEN 'rebuilding' ELSE status END")).
+		Set("updated_at", time.Now().UTC()).
+		Where(windowKeyPredicate(key))
 }
 
 func (r *RebuildRepository) claimNext(ctx context.Context) (*RebuildJob, error) {
@@ -360,6 +429,9 @@ func (r *RebuildRepository) resetWindow(ctx context.Context, key WindowKey) (Reb
 		return RebuildWindowState{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockPublicationForRebuild(ctx, tx, key); err != nil {
+		return RebuildWindowState{}, err
+	}
 	selectSQL, selectArgs, err := storage.Psql.Select("received_slots", "published_at IS NOT NULL").
 		From("pm_aggregation_windows").
 		Where(windowKeyPredicate(key)).
@@ -376,12 +448,22 @@ func (r *RebuildRepository) resetWindow(ctx context.Context, key WindowKey) (Reb
 	}
 	updateSQL, updateArgs, err := storage.Psql.Update("pm_aggregation_windows").
 		Set("status", "rebuilding").
-		Set("revision", sq.Expr("CASE WHEN status = 'published' THEN revision + 1 ELSE revision END")).
+		Set("revision", sq.Expr(`CASE WHEN status = 'published' THEN GREATEST(
+  revision,
+  COALESCE((
+    SELECT publication.revision
+    FROM pm_aggregation_publications publication
+    WHERE publication.task_version_id = pm_aggregation_windows.task_version_id
+      AND publication.granularity = pm_aggregation_windows.granularity
+      AND publication.window_start = pm_aggregation_windows.window_start
+      AND publication.status = 'published'
+  ), revision)
+) + 1 ELSE revision END`)).
 		Set("close_reason", nil).
 		Set("last_error", nil).
 		Set("updated_at", time.Now().UTC()).
 		Where(windowKeyPredicate(key)).
-		Where(sq.Eq{"status": []string{"open", "published", "rebuilding", "failed"}}).
+		Where(sq.Eq{"status": []string{"open", "prepared", "published", "rebuilding", "failed"}}).
 		ToSql()
 	if err != nil {
 		return RebuildWindowState{}, err
@@ -585,7 +667,7 @@ func publishedParentsSelect(
 	).From("pm_aggregation_windows").
 		Column("?", sourceID).
 		Where(sq.Eq{
-			"status":          []string{"open", "published", "rebuilding", "finalizing", "failed"},
+			"status":          []string{"open", "prepared", "published", "rebuilding", "finalizing", "failed"},
 			"task_id":         parentTaskID,
 			"task_version_id": parentVersionID,
 			"entity_key":      job.Key.EntityKey,
@@ -762,8 +844,29 @@ func (r *Rebuilder) rebuildClaimedBatch(
 	results := make(map[int64]error, len(jobs))
 	snapshot := r.recovery.snapshot.Current()
 	groups, ungrouped := groupRollupRebuildJobs(jobs, snapshot)
-	for _, job := range ungrouped {
-		results[job.ID] = r.rebuild(ctx, job)
+	const ungroupedConcurrency = 8
+	if len(ungrouped) > 0 {
+		work := make(chan RebuildJob)
+		var mu sync.Mutex
+		var workers sync.WaitGroup
+		workerCount := min(ungroupedConcurrency, len(ungrouped))
+		for range workerCount {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				for job := range work {
+					err := r.rebuild(ctx, job)
+					mu.Lock()
+					results[job.ID] = err
+					mu.Unlock()
+				}
+			}()
+		}
+		for _, job := range ungrouped {
+			work <- job
+		}
+		close(work)
+		workers.Wait()
 	}
 	for _, group := range groups {
 		for id, err := range r.rebuildRollupGroup(ctx, group, snapshot) {
@@ -890,12 +993,9 @@ func (r *Rebuilder) rebuildRollupGroup(
 		if scanErr != nil {
 			item.err = errors.Join(item.err, scanErr)
 		}
-		if item.err == nil && !item.matched {
-			item.err = fmt.Errorf("no durable rollup source matched PM rebuild window")
-		}
 		if item.err == nil {
 			item.err = r.completeRebuildUnderLock(
-				workCtx, item.job.Key, item.previous,
+				workCtx, item.job.Key, item.previous, item.lock,
 			)
 		}
 		results[item.job.ID] = item.err
@@ -944,12 +1044,23 @@ func (r *Rebuilder) completeRebuildUnderLock(
 	ctx context.Context,
 	key WindowKey,
 	previous RebuildWindowState,
+	lock *Lock,
 ) error {
-	state, err := r.store.Read(ctx, key)
+	state, readErr := r.store.Read(ctx, key)
+	usesRawSources := rebuildUsesRawSources(
+		key, r.recovery.snapshot.Current(),
+	)
+	state, missing, err := rebuiltWindowState(state, readErr, usesRawSources)
 	if err != nil {
 		return fmt.Errorf("read rebuilt PM aggregation window: %w", err)
 	}
-	if state.ReceivedSlots < previous.PreviousReceived {
+	if missing {
+		if err := r.store.InitializeEmptyWithLock(ctx, key, lock); err != nil {
+			return err
+		}
+	}
+	if state.ReceivedSlots < previous.PreviousReceived &&
+		usesRawSources {
 		return fmt.Errorf(
 			"durable PM rebuild source incomplete: recovered %d slots, previously published %d",
 			state.ReceivedSlots, previous.PreviousReceived,
@@ -963,6 +1074,24 @@ func (r *Rebuilder) completeRebuildUnderLock(
 		reason = CloseComplete
 	}
 	return r.finalizer.finalizeUnderLock(ctx, key, reason)
+}
+
+func rebuiltWindowState(
+	state WindowState,
+	err error,
+	usesRawSources bool,
+) (WindowState, bool, error) {
+	if err == nil {
+		return state, false, nil
+	}
+	if errors.Is(err, redis.Nil) && !usesRawSources {
+		// Rollup snapshots are the authoritative materialized source for parent
+		// windows. An empty scan is therefore a real zero-valued replacement,
+		// not missing durable data. Finalization will delete the prior revision's
+		// result and rollup rows in the same publication transaction.
+		return WindowState{}, true, nil
+	}
+	return WindowState{}, false, err
 }
 
 func (r *Rebuilder) rebuild(ctx context.Context, job RebuildJob) (rebuildErr error) {
@@ -1008,7 +1137,7 @@ func (r *Rebuilder) rebuild(ctx context.Context, job RebuildJob) (rebuildErr err
 	if err := r.replaySources(ctx, job.Key, lock); err != nil {
 		return err
 	}
-	return r.completeRebuildUnderLock(ctx, job.Key, previous)
+	return r.completeRebuildUnderLock(ctx, job.Key, previous, lock)
 }
 
 func rebuildUsesRawSources(key WindowKey, snapshot *TaskSnapshot) bool {
@@ -1154,7 +1283,6 @@ func (r *Rebuilder) replaySources(ctx context.Context, key WindowKey, lock *Lock
 			snapshot, snapshot.ByVersion[key.TaskVersionID],
 		)
 	}
-	matched := false
 	err := r.rollups.VisitSnapshotsForPeriod(
 		ctx, sourceVersionIDs, sourceGranularity, key.Start, key.End,
 		func(payload RollupPayload) error {
@@ -1186,16 +1314,12 @@ func (r *Rebuilder) replaySources(ctx context.Context, key WindowKey, lock *Lock
 				if _, err := r.store.accumulateWithLock(ctx, contribution, lock); err != nil {
 					return err
 				}
-				matched = true
 			}
 			return nil
 		},
 	)
 	if err != nil {
 		return err
-	}
-	if !matched {
-		return fmt.Errorf("no durable rollup source matched PM rebuild window")
 	}
 	return nil
 }

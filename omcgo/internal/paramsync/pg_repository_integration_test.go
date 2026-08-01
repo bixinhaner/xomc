@@ -73,6 +73,77 @@ func insertParamSyncRequestForTest(t *testing.T, pool *pgxpool.Pool, status Requ
 	return req
 }
 
+func TestPGRepositoryCreateRequestSilentlyDeduplicatesIdempotencyKey(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	repo := NewPGRepository(pool)
+	now := time.Now().UTC()
+	key := "integration-idempotency:" + uuid.NewString()
+	first := &SyncRequest{
+		ID: uuid.New(), DeviceID: uuid.New(), DeviceSN: "TEST-IDEMPOTENCY-FIRST",
+		CallerType: "integration", TriggerReason: TriggerManual, SyncScope: SyncScopeFull,
+		Status: RequestStatusAccepted, Priority: 10, NextAttemptAt: now,
+		IdempotencyKey: &key, CreatedAt: now, UpdatedAt: now,
+	}
+	second := *first
+	second.ID = uuid.New()
+	second.DeviceID = uuid.New()
+	second.DeviceSN = "TEST-IDEMPOTENCY-SECOND"
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM parameter_sync_requests WHERE caller_type=$1 AND idempotency_key=$2`,
+			first.CallerType, key,
+		)
+	})
+
+	require.NoError(t, repo.CreateRequest(context.Background(), first))
+	err := repo.CreateRequest(context.Background(), &second)
+
+	require.ErrorIs(t, err, ErrRequestIdempotencyConflict)
+	existing, findErr := repo.FindRequestByIdempotency(context.Background(), first.CallerType, key)
+	require.NoError(t, findErr)
+	assert.Equal(t, first.ID, existing.ID)
+}
+
+func TestPGRepositoryAutomaticIdempotencyConflictRollsBackDeviceGate(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	repo := NewPGRepository(pool)
+	now := time.Now().UTC()
+	key := "integration-automatic-idempotency:" + uuid.NewString()
+	first := &SyncRequest{
+		ID: uuid.New(), DeviceID: uuid.New(), DeviceSN: "TEST-AUTOMATIC-FIRST",
+		CallerType: "provision", TriggerReason: TriggerDeviceOnline, SyncScope: SyncScopeFull,
+		Status: RequestStatusAccepted, Priority: 10, NextAttemptAt: now,
+		IdempotencyKey: &key, CreatedAt: now, UpdatedAt: now,
+	}
+	second := *first
+	second.ID = uuid.New()
+	second.DeviceID = uuid.New()
+	second.DeviceSN = "TEST-AUTOMATIC-SECOND"
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM parameter_sync_requests WHERE caller_type=$1 AND idempotency_key=$2`,
+			first.CallerType, key,
+		)
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM parameter_sync_device_state WHERE device_id=ANY($1)`,
+			[]uuid.UUID{first.DeviceID, second.DeviceID},
+		)
+	})
+
+	allowed, err := repo.CreateAutomaticRequest(context.Background(), first, now)
+	require.NoError(t, err)
+	assert.True(t, allowed)
+	_, err = repo.CreateAutomaticRequest(context.Background(), &second, now)
+	require.ErrorIs(t, err, ErrRequestIdempotencyConflict)
+
+	var secondGateCount int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM parameter_sync_device_state WHERE device_id=$1`,
+		second.DeviceID,
+	).Scan(&secondGateCount))
+	assert.Zero(t, secondGateCount)
+}
+
 func TestPGRepositoryCompleteRequestRejectsTerminalState(t *testing.T) {
 	pool := newParamSyncTestPool(t)
 	req := insertParamSyncRequestForTest(t, pool, RequestStatusCancelled)

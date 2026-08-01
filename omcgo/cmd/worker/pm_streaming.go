@@ -22,9 +22,9 @@ import (
 const pmBuiltinInitialRetryInterval = 2 * time.Second
 const pmBuiltinInitialRetryTimeout = time.Minute
 const pmRuleCatalogRefreshInterval = 5 * time.Minute
-const pmRedisSweepInterval = 5 * time.Minute
+const pmRedisSweepInterval = 30 * time.Second
 const pmRedisSweepSafetyThreshold = 30 * time.Minute
-const pmRedisSweepScanLimit = 64
+const pmRedisSweepScanLimit = 512
 const pmRedisSweepUnlinkBatch = 128
 const pmPublishedVersionRepairInterval = time.Minute
 
@@ -127,6 +127,10 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	}
 	outboxRepo := pmstream.NewOutboxRepository(w.TsPool)
 	rollupOutboxRepo := pmstream.NewRollupOutboxRepository(w.TsPool)
+	if err := rollupOutboxRepo.EnsurePeriodRebuildIndex(ctx); err != nil {
+		logger.Error("ensure PM rollup period rebuild index", zap.Error(err))
+		return
+	}
 	rebuildRepo := pmstream.NewRebuildRepository(w.TsPool)
 	consumer := pmstream.NewConsumer(
 		w.EventBus, snapshot, matcher, windowRepo, store, finalizer, logger,

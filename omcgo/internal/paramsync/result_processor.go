@@ -59,6 +59,19 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		return ResultProcessOutcome{}, fmt.Errorf("begin parameter sync result: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
+	duplicate, err := resultEventExists(ctx, tx, result)
+	if err != nil {
+		return ResultProcessOutcome{}, err
+	}
+	if duplicate {
+		if err := tx.Commit(ctx); err != nil {
+			return ResultProcessOutcome{}, fmt.Errorf("commit duplicate parameter sync result: %w", err)
+		}
+		if p.metrics != nil {
+			p.metrics.ResultRedelivery.Inc()
+		}
+		return ResultProcessOutcome{Duplicate: true}, nil
+	}
 
 	run, err := loadRunForUpdate(ctx, tx, result.RunID)
 	if err != nil {
@@ -132,6 +145,9 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		}
 	}
 
+	if failed || taskStatus != task.TaskStatusCompleted {
+		failed = true
+	}
 	processedStatus := "processed"
 	if failed {
 		processedStatus = "failed"
@@ -146,9 +162,6 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		return ResultProcessOutcome{}, fmt.Errorf("mark parameter sync result processed: %w", err)
 	}
 
-	if failed || taskStatus != task.TaskStatusCompleted {
-		failed = true
-	}
 	if failed && run.Status != RunStatusCancelling {
 		if err := beginCancellingRun(ctx, tx, run, errorMessage, p.now()); err != nil {
 			return ResultProcessOutcome{}, err
@@ -158,11 +171,22 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		}
 	}
 
-	counts, err := loadAuthoritativeRunCounts(ctx, tx, run.ID)
+	authoritative, err := reconcileRunCountsForInsertedResult(
+		ctx, tx, run, failed,
+		func(ctx context.Context, tx pgx.Tx, run SyncRun) (authoritativeRunCounts, error) {
+			return loadAuthoritativeRunCounts(ctx, tx, run.ID)
+		},
+	)
 	if err != nil {
 		return ResultProcessOutcome{}, err
 	}
-	applyAuthoritativeRunCounts(run, counts)
+	if p.metrics != nil {
+		mode := "incremental"
+		if authoritative {
+			mode = "authoritative"
+		}
+		p.metrics.ResultCountMode.WithLabelValues(mode).Inc()
+	}
 	if run.Status == RunStatusCancelling {
 		finalized := run.ReadyToFinalize()
 		if finalized {
@@ -202,12 +226,6 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		}
 		return ResultProcessOutcome{Finalized: true}, nil
 	}
-	// Upgrade compatibility: runs planned by the previous release only have an
-	// enqueue outbox for their first batch. New runs already have one for every
-	// batch, so this statement is a no-op for the continuous-session design.
-	if err := ensureLegacyNextPlannedTaskOutbox(ctx, tx, run.ID, result.TaskID); err != nil {
-		return ResultProcessOutcome{}, err
-	}
 	if err := updateRunProgress(ctx, tx, run, RunStatusExecuting); err != nil {
 		return ResultProcessOutcome{}, err
 	}
@@ -215,6 +233,21 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		return ResultProcessOutcome{}, fmt.Errorf("commit parameter sync result: %w", err)
 	}
 	return ResultProcessOutcome{}, nil
+}
+
+func resultEventExists(
+	ctx context.Context,
+	tx pgx.Tx,
+	result event.ParamSyncTaskResultPayload,
+) (bool, error) {
+	var exists bool
+	if err := tx.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM parameter_sync_task_results WHERE run_id=$1 AND task_id=$2
+)`, result.RunID, result.TaskID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check duplicate parameter sync result: %w", err)
+	}
+	return exists, nil
 }
 
 func markRunProcessing(ctx context.Context, tx pgx.Tx, run *SyncRun) error {
@@ -228,29 +261,6 @@ func markRunProcessing(ctx context.Context, tx pgx.Tx, run *SyncRun) error {
 		return fmt.Errorf("mark parameter sync run processing: %w", err)
 	}
 	run.Status = RunStatusProcessing
-	return nil
-}
-
-func ensureLegacyNextPlannedTaskOutbox(ctx context.Context, tx pgx.Tx, runID uuid.UUID, completedTaskID string) error {
-	const query = `
-INSERT INTO parameter_sync_outbox (event_type, aggregate_type, aggregate_id, dedupe_key, payload)
-SELECT 'param_sync.task.enqueue', 'task', candidate.id, 'task:' || candidate.id::text, to_jsonb(candidate)
-FROM (
-  SELECT t.* FROM device_tasks t
-  JOIN device_tasks completed ON completed.id=$2
-  WHERE t.source='param_sync' AND t.source_id=$1 AND t.status='pending'
-    AND t.command_index > completed.command_index
-    AND NOT EXISTS (
-      SELECT 1 FROM parameter_sync_outbox o
-      WHERE o.event_type='param_sync.task.enqueue' AND o.aggregate_id=t.id
-    )
-  ORDER BY t.command_index, t.created_at, t.id
-  LIMIT 1
-) candidate
-ON CONFLICT (dedupe_key) DO NOTHING`
-	if _, err := tx.Exec(ctx, query, runID, completedTaskID); err != nil {
-		return fmt.Errorf("ensure legacy next parameter sync task outbox: %w", err)
-	}
 	return nil
 }
 
@@ -277,9 +287,46 @@ type authoritativeRunCounts struct {
 	failed    int
 }
 
+type authoritativeRunCountLoader func(context.Context, pgx.Tx, SyncRun) (authoritativeRunCounts, error)
+
+// reconcileRunCountsForInsertedResult advances counters exactly once for the
+// result row that was just inserted. The run row is locked by Process, while
+// duplicate result events return before this function. A full durable-state
+// count is therefore needed only at a failure/terminal boundary or to repair
+// invalid persisted counters, instead of once per task result.
+func reconcileRunCountsForInsertedResult(
+	ctx context.Context,
+	tx pgx.Tx,
+	run *SyncRun,
+	failed bool,
+	load authoritativeRunCountLoader,
+) (bool, error) {
+	run.TerminalTaskCount++
+	run.ProcessedTaskCount++
+	if failed {
+		run.FailedTaskCount++
+	}
+
+	invalid := run.ExpectedTaskCount < 0 ||
+		run.TerminalTaskCount < 0 || run.ProcessedTaskCount < 0 || run.FailedTaskCount < 0 ||
+		run.TerminalTaskCount > run.ExpectedTaskCount ||
+		run.ProcessedTaskCount > run.TerminalTaskCount ||
+		run.FailedTaskCount > run.ProcessedTaskCount
+	if !failed && !invalid && !run.ReadyToFinalize() {
+		return false, nil
+	}
+
+	counts, err := load(ctx, tx, *run)
+	if err != nil {
+		return false, err
+	}
+	applyAuthoritativeRunCounts(run, counts)
+	return true, nil
+}
+
 // loadAuthoritativeRunCounts derives counters from durable task/result state.
-// Result events are deliberately replayable, so incrementing counters from an
-// event would double-count after reconciliation or redelivery.
+// The caller uses it only at failure/final boundaries or to repair invalid
+// counters; duplicate events are rejected before incremental counting.
 func loadAuthoritativeRunCounts(ctx context.Context, tx pgx.Tx, runID uuid.UUID) (authoritativeRunCounts, error) {
 	const query = `
 SELECT
@@ -811,6 +858,9 @@ func writeStagingValues(ctx context.Context, tx pgx.Tx, run *SyncRun, taskID str
 
 func upsertOfficialValues(ctx context.Context, tx pgx.Tx, deviceID uuid.UUID, values []projectedValue, now time.Time) error {
 	values = dedupeProjectedValuesByPath(values)
+	if err := device.AcquireParameterWriteLocks(ctx, tx, deviceID); err != nil {
+		return err
+	}
 	for start := 0; start < len(values); start += paramSyncUpsertBatchSize {
 		end := min(start+paramSyncUpsertBatchSize, len(values))
 		builder := storage.Psql.Insert("device_parameters").
@@ -833,6 +883,9 @@ func upsertOfficialValues(ctx context.Context, tx pgx.Tx, deviceID uuid.UUID, va
 
 func finalizeSuccessfulRun(ctx context.Context, tx pgx.Tx, run *SyncRun, now time.Time) error {
 	if run.SyncScope.IsFull() {
+		if err := device.AcquireParameterWriteLocks(ctx, tx, run.DeviceID); err != nil {
+			return err
+		}
 		const mergeSQL = `
 INSERT INTO device_parameters (device_id, parameter_path, parameter_value, parameter_type, writable, last_updated_at, fap_instance, param_group)
 SELECT $1, parameter_path, value #>> '{}', value_type, writable, $2, fap_instance, param_group
@@ -850,23 +903,14 @@ WHERE ` + deviceParameterUnchangedGuard
 		}
 		// A tolerated 9005 marks the affected frozen coverage incomplete. Merge
 		// values from successful batches, but never delete older values for a
-		// coverage point the device did not return completely.
-		for _, coverage := range run.Coverage {
-			if !coverage.Complete || coverage.Path == "" {
-				continue
-			}
-			mappingPredicate := frozenCoveragePathPredicate(coverage)
-			if mappingPredicate == nil {
-				continue
-			}
-			query, args, err := storage.Psql.Delete("device_parameters").
-				Where(sq.Eq{"device_id": run.DeviceID}).
-				Where(mappingPredicate).
-				Where("NOT EXISTS (SELECT 1 FROM parameter_sync_staging_values s WHERE s.run_id = ? AND s.parameter_path = device_parameters.parameter_path)", run.ID).
-				ToSql()
-			if err != nil {
-				return fmt.Errorf("build reconcile full parameter sync: %w", err)
-			}
+		// coverage point the device did not return completely. All complete
+		// coverage is reconciled in one indexed DELETE to avoid one statement and
+		// one repeated device-parameter index walk per mapping group.
+		query, args, ok, err := buildFullSyncReconcileDelete(run.DeviceID, run.ID, run.Coverage)
+		if err != nil {
+			return err
+		}
+		if ok {
 			if _, err := tx.Exec(ctx, query, args...); err != nil {
 				return fmt.Errorf("reconcile full parameter sync: %w", err)
 			}
@@ -900,28 +944,70 @@ WHERE ` + deviceParameterUnchangedGuard
 	return nil
 }
 
+func buildFullSyncReconcileDelete(deviceID, runID uuid.UUID, coverage []CoverageScope) (string, []any, bool, error) {
+	completeMappings := make([]FrozenMapping, 0)
+	for _, scope := range coverage {
+		if !scope.Complete || scope.Path == "" {
+			continue
+		}
+		completeMappings = append(completeMappings, scope.Mappings...)
+	}
+	completePredicate := frozenCoverageMappingsPredicate(completeMappings)
+	if completePredicate == nil {
+		return "", nil, false, nil
+	}
+	query, args, err := storage.Psql.Delete("device_parameters").
+		Where(sq.Eq{"device_id": deviceID}).
+		Where(completePredicate).
+		Where("NOT EXISTS (SELECT 1 FROM parameter_sync_staging_values s WHERE s.run_id = ? AND s.parameter_path = device_parameters.parameter_path)", runID).
+		ToSql()
+	if err != nil {
+		return "", nil, false, fmt.Errorf("build reconcile full parameter sync: %w", err)
+	}
+	return query, args, true, nil
+}
+
 func frozenCoveragePathPredicate(coverage CoverageScope) sq.Sqlizer {
+	return frozenCoverageMappingsPredicate(coverage.Mappings)
+}
+
+func frozenCoverageMappingsPredicate(mappings []FrozenMapping) sq.Sqlizer {
 	predicates := sq.Or{}
-	for _, mapping := range coverage.Mappings {
+	exactPaths := make([]string, 0, len(mappings))
+	exactSeen := make(map[string]struct{}, len(mappings))
+	runtimePatterns := make([]string, 0, len(mappings))
+	runtimeSeen := make(map[string]struct{}, len(mappings))
+	for _, mapping := range mappings {
 		if !mapping.IsStorable || mapping.StandardPath == "" {
 			continue
 		}
 		if idx := strings.Index(mapping.StandardPath, "{i}"); idx >= 0 {
-			pattern := "^" + regexp.QuoteMeta(mapping.StandardPath) + "$"
+			pattern := regexp.QuoteMeta(mapping.StandardPath)
 			pattern = strings.ReplaceAll(pattern, regexp.QuoteMeta("{i}"), `[0-9]+`)
-			// device_parameters 只有 (device_id, parameter_path varchar_pattern_ops)
-			// 这一个前缀索引，加速 LIKE，不加速下面的 POSIX 正则 `~`。任何满足正则的
-			// 值必然以 {i} 之前的字面前缀开头，所以先加一个等价的 LIKE 前缀条件让
-			// planner 走索引缩小候选行，再用正则精确核对——不改变匹配结果，只是让
-			// 这条本该走索引的收尾清理不再退化成整表逐行扫描（线上巡检实测单次
-			// DELETE 20~32 秒，根因就是这里全靠内存正则过滤）。
-			predicates = append(predicates, sq.And{
-				sq.Expr("parameter_path LIKE ?", mapping.StandardPath[:idx]+"%"),
-				sq.Expr("parameter_path ~ ?", pattern),
-			})
+			if _, exists := runtimeSeen[pattern]; !exists {
+				runtimeSeen[pattern] = struct{}{}
+				runtimePatterns = append(runtimePatterns, pattern)
+			}
 		} else {
-			predicates = append(predicates, sq.Eq{"parameter_path": mapping.StandardPath})
+			if _, exists := exactSeen[mapping.StandardPath]; !exists {
+				exactSeen[mapping.StandardPath] = struct{}{}
+				exactPaths = append(exactPaths, mapping.StandardPath)
+			}
 		}
+	}
+	if len(exactPaths) > 0 {
+		predicates = append(predicates, sq.Expr("parameter_path = ANY(?::text[])", exactPaths))
+	}
+	if len(runtimePatterns) > 0 {
+		// device_id is the leading key of the PK, so PostgreSQL first narrows the
+		// candidate set to this one device. A compact alternation avoids
+		// hundreds of OR branches, parameters and bitmap scans. One anchored
+		// alternation also compiles once per candidate row instead of compiling
+		// every individual pattern through regex ANY.
+		predicates = append(predicates, sq.Expr(
+			"parameter_path ~ ?",
+			"^("+strings.Join(runtimePatterns, "|")+")$",
+		))
 	}
 	if len(predicates) == 0 {
 		return nil

@@ -269,6 +269,31 @@ func TestRedisWindowStoreFencesNormalWritesDuringRebuild(t *testing.T) {
 	require.False(t, server.Exists(redisKeys(key, 1).lock))
 }
 
+func TestRedisWindowStoreInitializesEmptyRebuildStateUnderOwnedLock(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	store := NewRedisWindowStore(client, time.Hour)
+	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	key := WindowKey{
+		TaskID: uuid.New(), TaskVersionID: uuid.New(),
+		Granularity: GranularityDaily, EntityKey: "Network",
+		Start: start, End: start.Add(24 * time.Hour),
+	}
+	lock, err := store.TryFinalizeLock(context.Background(), key, time.Minute)
+	require.NoError(t, err)
+	require.NotNil(t, lock)
+
+	require.NoError(t, store.InitializeEmptyWithLock(context.Background(), key, lock))
+	state, err := store.Read(context.Background(), key)
+	require.NoError(t, err)
+	require.Zero(t, state.ExpectedSlots)
+	require.Zero(t, state.ReceivedSlots)
+	require.Empty(t, state.Accumulators)
+	require.True(t, server.TTL(redisKeys(key, 1).meta) > 0)
+
+	require.NoError(t, lock.Release(context.Background()))
+}
+
 func TestRedisWindowStoreUsesOneCompactHashFieldPerMetric(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})

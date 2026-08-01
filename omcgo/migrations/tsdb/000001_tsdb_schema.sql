@@ -951,6 +951,7 @@ CREATE TABLE public.pm_aggregation_counter_rollups (
     event_id uuid PRIMARY KEY,
     task_id uuid NOT NULL,
     task_version_id uuid NOT NULL,
+    publication_task_version_id uuid NOT NULL,
     entity_key text NOT NULL,
     granularity varchar(16) NOT NULL,
     window_start timestamptz NOT NULL,
@@ -958,6 +959,8 @@ CREATE TABLE public.pm_aggregation_counter_rollups (
     chunk_index integer NOT NULL,
     chunk_count integer NOT NULL,
     complete boolean NOT NULL,
+    revision integer NOT NULL DEFAULT 1,
+    publication_eligible boolean NOT NULL DEFAULT true,
     payload jsonb NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT chk_pm_aggregation_counter_rollups_granularity
@@ -969,16 +972,26 @@ CREATE TABLE public.pm_aggregation_counter_rollups (
 );
 CREATE INDEX idx_pm_aggregation_counter_rollups_recovery
     ON public.pm_aggregation_counter_rollups (
-        task_version_id, entity_key, granularity, window_start, chunk_index
+        task_version_id, publication_task_version_id, entity_key,
+        granularity, window_start, revision, chunk_index
     );
 CREATE INDEX idx_pm_aggregation_counter_rollups_retention
     ON public.pm_aggregation_counter_rollups (granularity, window_start);
+CREATE INDEX idx_pm_counter_rollups_period_rebuild_page
+    ON public.pm_aggregation_counter_rollups (
+        task_version_id, granularity, window_start, entity_key, chunk_index,
+        publication_task_version_id, revision, event_id
+    );
 
 CREATE TABLE public.pm_aggregation_rollup_outbox (
     event_id uuid PRIMARY KEY,
     subject text NOT NULL,
+    task_version_id uuid NOT NULL,
+    publication_task_version_id uuid NOT NULL,
+    entity_key text NOT NULL,
     granularity varchar(16) NOT NULL,
     window_start timestamptz NOT NULL,
+    revision integer NOT NULL DEFAULT 1,
     payload jsonb NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     published_at timestamptz,
@@ -1031,6 +1044,32 @@ CREATE INDEX idx_pm_aggregation_windows_due
 CREATE INDEX idx_pm_aggregation_windows_task_time
     ON public.pm_aggregation_windows (task_id, window_start DESC);
 
+CREATE TABLE public.pm_aggregation_publications (
+    task_id uuid NOT NULL,
+    task_version_id uuid NOT NULL,
+    granularity varchar(16) NOT NULL,
+    window_start timestamptz NOT NULL,
+    window_end timestamptz NOT NULL,
+    revision integer NOT NULL DEFAULT 0,
+    preparing_revision integer,
+    status varchar(16) NOT NULL DEFAULT 'preparing',
+    expected_entities integer NOT NULL DEFAULT 0,
+    prepared_entities integer NOT NULL DEFAULT 0,
+    dirty_entities integer NOT NULL DEFAULT 0,
+    watermark_at timestamptz,
+    published_at timestamptz,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (task_version_id, granularity, window_start),
+    CONSTRAINT chk_pm_aggregation_publications_granularity
+        CHECK (granularity IN ('hourly', 'daily', 'weekly', 'monthly')),
+    CONSTRAINT chk_pm_aggregation_publications_status
+        CHECK (status IN ('preparing', 'published')),
+    CONSTRAINT chk_pm_aggregation_publications_time CHECK (window_end > window_start)
+);
+CREATE INDEX idx_pm_aggregation_publications_due
+    ON public.pm_aggregation_publications (window_end, task_version_id, window_start)
+    WHERE status = 'preparing' OR preparing_revision IS NOT NULL;
+
 CREATE TABLE public.pm_aggregation_results (
     id uuid NOT NULL DEFAULT gen_random_uuid(),
     window_start timestamptz NOT NULL,
@@ -1053,6 +1092,7 @@ CREATE TABLE public.pm_aggregation_results (
     sample_count bigint NOT NULL,
     complete boolean NOT NULL,
     missing_slots bigint NOT NULL DEFAULT 0,
+    revision integer NOT NULL DEFAULT 1,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT chk_pm_aggregation_results_granularity
         CHECK (granularity IN ('hourly', 'daily', 'weekly', 'monthly')),
@@ -1074,7 +1114,7 @@ SELECT create_hypertable(
 CREATE UNIQUE INDEX uq_pm_aggregation_results_business
     ON public.pm_aggregation_results (
         task_version_id, granularity, window_start,
-        dimension_key, object_ldn, technology, metric_id
+        dimension_key, object_ldn, technology, metric_id, revision
     );
 CREATE INDEX idx_pm_aggregation_results_task_time
     ON public.pm_aggregation_results (task_id, window_start DESC);
@@ -1124,7 +1164,13 @@ SELECT
         'missing_slots', r.missing_slots,
         'dimension', r.dimension
     ) AS extra
-FROM public.pm_aggregation_results r;
+FROM public.pm_aggregation_results r
+JOIN public.pm_aggregation_publications published_window
+  ON published_window.task_version_id = r.task_version_id
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+ AND published_window.revision = r.revision;
 
 -- 旧报表查询名称改为统一结果表的只读投影。投影不扫描原始 PM 表；当多个逻辑任务
 -- 覆盖同一设备/指标/窗口时，仅暴露最新写入的一份，避免报表重复计数。
@@ -1137,6 +1183,12 @@ SELECT DISTINCT ON (r.dimension_key, r.metric_id, r.window_start, r.object_ldn)
     jsonb_build_object('task_id', r.task_id, 'task_version_id', r.task_version_id,
                        'complete', r.complete, 'missing_slots', r.missing_slots) AS extra
 FROM public.pm_aggregation_results r
+JOIN public.pm_aggregation_publications published_window
+  ON published_window.task_version_id = r.task_version_id
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 WHERE r.dimension = 'device' AND r.granularity = 'hourly'
 ORDER BY r.dimension_key, r.metric_id, r.window_start, r.object_ldn, r.created_at DESC;
 
@@ -1149,6 +1201,12 @@ SELECT DISTINCT ON (r.dimension_key, r.metric_id, r.window_start, r.object_ldn)
     jsonb_build_object('task_id', r.task_id, 'task_version_id', r.task_version_id,
                        'complete', r.complete, 'missing_slots', r.missing_slots) AS extra
 FROM public.pm_aggregation_results r
+JOIN public.pm_aggregation_publications published_window
+  ON published_window.task_version_id = r.task_version_id
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 WHERE r.dimension = 'device' AND r.granularity = 'daily'
 ORDER BY r.dimension_key, r.metric_id, r.window_start, r.object_ldn, r.created_at DESC;
 
@@ -1161,6 +1219,12 @@ SELECT DISTINCT ON (r.dimension_key, r.metric_id, r.window_start, r.object_ldn)
     jsonb_build_object('task_id', r.task_id, 'task_version_id', r.task_version_id,
                        'complete', r.complete, 'missing_slots', r.missing_slots) AS extra
 FROM public.pm_aggregation_results r
+JOIN public.pm_aggregation_publications published_window
+  ON published_window.task_version_id = r.task_version_id
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 WHERE r.dimension = 'device' AND r.granularity = 'weekly'
 ORDER BY r.dimension_key, r.metric_id, r.window_start, r.object_ldn, r.created_at DESC;
 
@@ -1173,6 +1237,12 @@ SELECT DISTINCT ON (r.dimension_key, r.metric_id, r.window_start, r.object_ldn)
     jsonb_build_object('task_id', r.task_id, 'task_version_id', r.task_version_id,
                        'complete', r.complete, 'missing_slots', r.missing_slots) AS extra
 FROM public.pm_aggregation_results r
+JOIN public.pm_aggregation_publications published_window
+  ON published_window.task_version_id = r.task_version_id
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 WHERE r.dimension = 'device' AND r.granularity = 'monthly'
 ORDER BY r.dimension_key, r.metric_id, r.window_start, r.object_ldn, r.created_at DESC;
 
@@ -1187,6 +1257,12 @@ SELECT DISTINCT ON (r.dimension_key, r.metric_id, r.window_start, r.technology)
                        'complete', r.complete, 'missing_slots', r.missing_slots) AS extra,
     r.technology
 FROM public.pm_aggregation_results r
+JOIN public.pm_aggregation_publications published_window
+  ON published_window.task_version_id = r.task_version_id
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 WHERE r.dimension = 'device_group' AND r.granularity = 'hourly'
 ORDER BY r.dimension_key, r.metric_id, r.window_start, r.technology, r.created_at DESC;
 
@@ -1200,6 +1276,12 @@ SELECT DISTINCT ON (r.dimension_key, r.metric_id, r.window_start, r.technology)
                        'complete', r.complete, 'missing_slots', r.missing_slots) AS extra,
     r.technology
 FROM public.pm_aggregation_results r
+JOIN public.pm_aggregation_publications published_window
+  ON published_window.task_version_id = r.task_version_id
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 WHERE r.dimension = 'device_group' AND r.granularity = 'daily'
 ORDER BY r.dimension_key, r.metric_id, r.window_start, r.technology, r.created_at DESC;
 
@@ -1213,6 +1295,12 @@ SELECT DISTINCT ON (r.dimension_key, r.metric_id, r.window_start, r.technology)
                        'complete', r.complete, 'missing_slots', r.missing_slots) AS extra,
     r.technology
 FROM public.pm_aggregation_results r
+JOIN public.pm_aggregation_publications published_window
+  ON published_window.task_version_id = r.task_version_id
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 WHERE r.dimension = 'device_group' AND r.granularity = 'weekly'
 ORDER BY r.dimension_key, r.metric_id, r.window_start, r.technology, r.created_at DESC;
 
@@ -1226,6 +1314,12 @@ SELECT DISTINCT ON (r.dimension_key, r.metric_id, r.window_start, r.technology)
                        'complete', r.complete, 'missing_slots', r.missing_slots) AS extra,
     r.technology
 FROM public.pm_aggregation_results r
+JOIN public.pm_aggregation_publications published_window
+  ON published_window.task_version_id = r.task_version_id
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 WHERE r.dimension = 'device_group' AND r.granularity = 'monthly'
 ORDER BY r.dimension_key, r.metric_id, r.window_start, r.technology, r.created_at DESC;
 
@@ -1390,12 +1484,18 @@ ALTER TABLE public.pm_aggregation_rollup_outbox
     ALTER COLUMN barrier_eligible SET DEFAULT false,
     ALTER COLUMN barrier_eligible SET NOT NULL;
 
+CREATE INDEX idx_pm_rollup_outbox_publication
+    ON public.pm_aggregation_rollup_outbox (
+        publication_task_version_id, granularity, window_start, revision
+    ) WHERE NOT barrier_eligible;
+
 CREATE INDEX idx_pm_aggregation_rollup_consume_barrier
     ON public.pm_aggregation_rollup_outbox (subject, window_start)
     WHERE consumed_at IS NULL AND barrier_eligible;
 
 ALTER TABLE public.pm_aggregation_windows
     ADD COLUMN revision integer NOT NULL DEFAULT 1,
+    ADD COLUMN published_revision integer NOT NULL DEFAULT 0,
     ADD COLUMN rebuild_requested_at timestamptz,
     ADD COLUMN version_effective_from timestamptz,
     ADD COLUMN version_effective_to timestamptz,
@@ -1413,7 +1513,7 @@ CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_active_version_guard
         version_effective_from DESC,
         task_version_id
     )
-    WHERE status IN ('open', 'finalizing', 'rebuilding', 'failed')
+    WHERE status IN ('open', 'finalizing', 'prepared', 'rebuilding', 'failed')
       AND version_effective_from IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_pm_aggregation_windows_dashboard_published
@@ -1434,7 +1534,22 @@ ALTER TABLE public.pm_aggregation_windows
     DROP CONSTRAINT chk_pm_aggregation_windows_status;
 ALTER TABLE public.pm_aggregation_windows
     ADD CONSTRAINT chk_pm_aggregation_windows_status
-        CHECK (status IN ('open', 'finalizing', 'published', 'failed', 'rebuilding'));
+        CHECK (status IN ('open', 'finalizing', 'prepared', 'published', 'failed', 'rebuilding'));
+
+CREATE INDEX idx_pm_windows_prepared_publication
+    ON public.pm_aggregation_windows (
+        task_version_id, granularity, window_start, revision, entity_key
+    ) WHERE status = 'prepared';
+
+CREATE INDEX idx_pm_windows_unready_publication
+    ON public.pm_aggregation_windows (
+        task_version_id, granularity, window_start, status
+    ) WHERE status NOT IN ('prepared', 'published');
+
+CREATE INDEX idx_pm_counter_rollups_publication
+    ON public.pm_aggregation_counter_rollups (
+        task_version_id, granularity, window_start, revision
+    ) WHERE NOT publication_eligible;
 
 CREATE INDEX idx_pm_windows_due_claim
     ON public.pm_aggregation_windows (
@@ -1471,7 +1586,6 @@ CREATE INDEX idx_pm_windows_version_audit
       AND granularity IN ('daily', 'weekly', 'monthly');
 
 ALTER TABLE public.pm_aggregation_results
-    ADD COLUMN revision integer NOT NULL DEFAULT 1,
     ADD COLUMN version_effective_from timestamptz,
     ADD COLUMN version_effective_to timestamptz,
     ADD COLUMN received_slots bigint NOT NULL DEFAULT 0,
@@ -1592,7 +1706,7 @@ SELECT
               AND active_window.granularity = r.granularity
               AND active_window.window_start = r.window_start
               AND active_window.task_version_id <> r.task_version_id
-              AND active_window.status IN ('open', 'finalizing', 'rebuilding', 'failed')
+              AND active_window.status IN ('open', 'finalizing', 'prepared', 'rebuilding', 'failed')
               AND active_window.version_effective_from IS NOT NULL
               AND (
                   r.version_effective_from IS NULL
@@ -1601,7 +1715,13 @@ SELECT
         ),
         'partial', false
     ) AS extra
-FROM public.pm_aggregation_results r;
+FROM public.pm_aggregation_results r
+JOIN public.pm_aggregation_publications published_window
+  ON published_window.task_version_id = r.task_version_id
+ AND published_window.granularity = r.granularity
+ AND published_window.window_start = r.window_start
+ AND published_window.status = 'published'
+ AND published_window.revision = r.revision;
 
 CREATE INDEX IF NOT EXISTS idx_pm_aggregation_outbox_unacknowledged
     ON public.pm_aggregation_outbox (published_at, event_id)
@@ -1667,6 +1787,7 @@ DROP TABLE IF EXISTS public.pm_hourly_rollup_batches;
 DROP TABLE IF EXISTS public.pm_hourly_bucket_versions;
 DROP TABLE IF EXISTS public.pm_aggregation_replay_sources;
 DROP TABLE IF EXISTS public.pm_aggregation_rebuilds;
+DROP TABLE IF EXISTS public.pm_aggregation_publications;
 DROP TABLE IF EXISTS public.pm_file_quarantines;
 DROP TABLE IF EXISTS public.pm_aggregation_rollup_outbox;
 DROP TABLE IF EXISTS public.pm_aggregation_counter_rollups;

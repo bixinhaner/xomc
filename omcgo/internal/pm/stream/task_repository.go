@@ -19,6 +19,13 @@ type PgTaskRepository struct {
 	bus  event.EventBus
 }
 
+// PgProgressTaskLoader serves read-only progress consumers. Progress results
+// need version definitions and metric rules, but never device membership.
+type PgProgressTaskLoader struct {
+	repository     *PgTaskRepository
+	includeMembers bool
+}
+
 var obsoleteBuiltinDeviceTaskIDs = []uuid.UUID{
 	uuid.MustParse("0184dddd-0005-4000-8000-000000000001"),
 	uuid.MustParse("0184dddd-0005-4000-8000-000000000002"),
@@ -27,6 +34,12 @@ var obsoleteBuiltinDeviceTaskIDs = []uuid.UUID{
 
 func NewPgTaskRepository(pool *pgxpool.Pool, bus event.EventBus) *PgTaskRepository {
 	return &PgTaskRepository{pool: pool, bus: bus}
+}
+
+func NewPgProgressTaskLoader(pool *pgxpool.Pool) *PgProgressTaskLoader {
+	return &PgProgressTaskLoader{
+		repository: NewPgTaskRepository(pool, nil), includeMembers: false,
+	}
 }
 
 func buildPurgeObsoleteBuiltinDeviceTasksSQL() (string, []interface{}, error) {
@@ -100,13 +113,10 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 		}
 		return nil, fmt.Errorf("lock PM aggregation task: %w", err)
 	}
-	updateSQL, updateArgs, buildErr := storage.Psql.Update("pm_aggregation_tasks").
-		Set("name", req.Name).
-		Set("enabled", req.Enabled).
-		Set("visibility", req.Visibility).
-		Set("planned_end_at", plannedEndAt).
-		Where(sq.Eq{"id": taskID}).
-		ToSql()
+
+	updateSQL, updateArgs, buildErr := buildUpdateTaskMetadataSQL(
+		taskID, req, plannedEndAt,
+	)
 	if buildErr != nil {
 		return nil, fmt.Errorf("build update PM aggregation task SQL: %w", buildErr)
 	}
@@ -233,6 +243,25 @@ func (r *PgTaskRepository) Save(ctx context.Context, req SaveTaskRequest) (*Task
 	snapshot.NewVersion = true
 	r.publishTaskVersionChanged(ctx, taskID, versionID, effectiveFrom)
 	return snapshot, nil
+}
+
+func buildUpdateTaskMetadataSQL(
+	taskID uuid.UUID,
+	req SaveTaskRequest,
+	plannedEndAt any,
+) (string, []interface{}, error) {
+	return storage.Psql.Update("pm_aggregation_tasks").
+		Set("name", req.Name).
+		Set("enabled", req.Enabled).
+		Set("visibility", req.Visibility).
+		Set("planned_end_at", plannedEndAt).
+		Where(sq.Eq{"id": taskID}).
+		Where(
+			"(name IS DISTINCT FROM ? OR enabled IS DISTINCT FROM ? OR "+
+				"visibility IS DISTINCT FROM ? OR planned_end_at IS DISTINCT FROM ?)",
+			req.Name, req.Enabled, req.Visibility, plannedEndAt,
+		).
+		ToSql()
 }
 
 func (r *PgTaskRepository) publishTaskVersionChanged(ctx context.Context, taskID, versionID uuid.UUID, effectiveFrom time.Time) {
@@ -412,11 +441,24 @@ func insertTaskMembers(ctx context.Context, tx pgx.Tx, versionID uuid.UUID, memb
 }
 
 func buildLoadMatchableRevisionSQL() (string, []interface{}, error) {
+	semanticRow := `jsonb_build_array(
+  t.id::text,
+  t.name,
+  t.enabled::text,
+  t.visibility,
+  COALESCE(t.current_version_id::text, ''),
+  COALESCE(EXTRACT(EPOCH FROM t.planned_end_at)::text, ''),
+  COALESCE(EXTRACT(EPOCH FROM t.deleted_at)::text, ''),
+  COALESCE(EXTRACT(EPOCH FROM v.effective_from)::text, ''),
+  COALESCE(EXTRACT(EPOCH FROM v.effective_to)::text, ''),
+  COALESCE(encode(v.content_hash, 'hex'), '')
+)::text`
 	return storage.Psql.Select(
 		"COUNT(*)",
-		"COALESCE(MAX(updated_at), to_timestamp(0))",
-		"COALESCE(md5(string_agg(row_to_json(t)::text, ',' ORDER BY t.id)), md5(''))",
-	).From("pm_aggregation_tasks t").ToSql()
+		"COALESCE(md5(string_agg("+semanticRow+", ',' ORDER BY t.id)), md5(''))",
+	).From("pm_aggregation_tasks t").
+		LeftJoin("pm_aggregation_task_versions v ON v.id = t.current_version_id").
+		ToSql()
 }
 
 func (r *PgTaskRepository) LoadMatchableRevision(
@@ -431,7 +473,6 @@ func (r *PgTaskRepository) LoadMatchableRevision(
 	var revision MatchableRevision
 	if err := r.pool.QueryRow(ctx, query, args...).Scan(
 		&revision.TaskCount,
-		&revision.UpdatedAt,
 		&revision.Fingerprint,
 	); err != nil {
 		return MatchableRevision{}, fmt.Errorf(
@@ -442,6 +483,27 @@ func (r *PgTaskRepository) LoadMatchableRevision(
 }
 
 func (r *PgTaskRepository) LoadMatchable(ctx context.Context, at time.Time) ([]*TaskVersionSnapshot, error) {
+	return r.loadMatchable(ctx, at, true)
+}
+
+func (r *PgProgressTaskLoader) LoadMatchable(
+	ctx context.Context,
+	at time.Time,
+) ([]*TaskVersionSnapshot, error) {
+	return r.repository.loadMatchable(ctx, at, r.includeMembers)
+}
+
+func (r *PgProgressTaskLoader) LoadMatchableRevision(
+	ctx context.Context,
+) (MatchableRevision, error) {
+	return r.repository.LoadMatchableRevision(ctx)
+}
+
+func (r *PgTaskRepository) loadMatchable(
+	ctx context.Context,
+	at time.Time,
+	includeMembers bool,
+) ([]*TaskVersionSnapshot, error) {
 	query, args, err := storage.Psql.Select(
 		"t.id", "v.id", "v.version_no", "t.name", "v.enabled",
 		"COALESCE(v.technology, '')", "v.dimension", "v.granularities",
@@ -493,7 +555,7 @@ func (r *PgTaskRepository) LoadMatchable(ctx context.Context, at time.Time) ([]*
 		return nil, fmt.Errorf("iterate matchable PM aggregation task versions: %w", err)
 	}
 	rows.Close()
-	if err := r.loadDetails(ctx, versions); err != nil {
+	if err := r.loadDetails(ctx, versions, includeMembers); err != nil {
 		return nil, err
 	}
 	return versions, nil
@@ -502,6 +564,7 @@ func (r *PgTaskRepository) LoadMatchable(ctx context.Context, at time.Time) ([]*
 func (r *PgTaskRepository) loadDetails(
 	ctx context.Context,
 	versions []*TaskVersionSnapshot,
+	includeMembers bool,
 ) error {
 	if len(versions) == 0 {
 		return nil
@@ -573,6 +636,9 @@ func (r *PgTaskRepository) loadDetails(
 		return fmt.Errorf("iterate PM aggregation counter rules: %w", err)
 	}
 	counterRows.Close()
+	if !includeMembers {
+		return nil
+	}
 
 	memberSQL, memberArgs, err := storage.Psql.Select(
 		"task_version_id", "device_id", "device_sn",

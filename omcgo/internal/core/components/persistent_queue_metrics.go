@@ -84,7 +84,7 @@ func NewPersistentQueueMetrics(reg prometheus.Registerer) *PersistentQueueMetric
 		}, []string{"queue"}),
 		ProcessedTotal: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "omc_persistent_queue_processed_total",
-			Help: "Current terminal PostgreSQL-backed queue entries by bounded queue and result.",
+			Help: "Current terminal PostgreSQL-backed queue entries by bounded queue and result; high-volume success states use PostgreSQL planner estimates.",
 		}, []string{"queue", "result"}),
 		ObserverFailuresTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omc_persistent_queue_observer_failures_total",
@@ -129,9 +129,41 @@ type persistentQueueQuery struct {
 // All statements are fixed at compile time. This avoids treating table names
 // or statuses as SQL input and keeps the observer safe from identifier injection.
 var persistentQueueQueries = []persistentQueueQuery{
-	{name: "device_tasks", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks GROUP BY status`},
+	{name: "device_tasks", query: `
+SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks WHERE status = 'pending' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks WHERE status = 'sent' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks WHERE status = 'failed' GROUP BY status
+-- Historical terminal states dominate this partitioned table. Exact COUNT/MIN/MAX
+-- walks millions of index entries every 30 seconds. PostgreSQL already maintains
+-- a status histogram and row estimate for each child, so use those constant-cost
+-- planner statistics for terminal gauges. Live pending/sent/failed states above
+-- remain exact. An unexpected writer status is still surfaced to normalization.
+UNION ALL SELECT estimated.status, estimated.estimate, 0::double precision, 0::double precision
+FROM (
+    SELECT v.value AS status, COALESCE(SUM(c.reltuples * f.freq), 0)::bigint AS estimate
+    FROM pg_inherits i
+    JOIN pg_class p ON p.oid = i.inhparent
+    JOIN pg_class c ON c.oid = i.inhrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_stats s ON s.schemaname = n.nspname AND s.tablename = c.relname AND s.attname = 'status'
+    CROSS JOIN LATERAL jsonb_array_elements_text(to_jsonb(s.most_common_vals)) WITH ORDINALITY v(value, ord)
+    JOIN LATERAL unnest(s.most_common_freqs) WITH ORDINALITY f(freq, ord) USING (ord)
+    WHERE p.oid = 'device_tasks'::regclass
+    GROUP BY v.value
+) estimated
+WHERE estimated.status IN ('completed', 'expired', 'cancelled')
+   OR estimated.status NOT IN ('pending', 'sent', 'completed', 'failed', 'expired', 'cancelled')`},
 	{name: "async_jobs", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM async_jobs GROUP BY status`},
-	{name: "parameter_sync_outbox", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox GROUP BY status`},
+	{name: "parameter_sync_outbox", query: `
+SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox WHERE status = 'pending' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox WHERE status = 'failed' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox WHERE status = 'delivering' GROUP BY status
+-- delivered is likewise historical and dominates this table.  The terminal
+-- partial index estimate avoids a multi-million-row index walk; subtract the
+-- exact (normally tiny) dead count because the index covers both states.
+UNION ALL SELECT 'delivered', GREATEST(c.reltuples::bigint - (SELECT COUNT(*) FROM parameter_sync_outbox WHERE status = 'dead'), 0), 0::double precision, 0::double precision
+FROM pg_class c WHERE c.oid = 'idx_parameter_sync_outbox_terminal_status'::regclass
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox WHERE status = 'dead' GROUP BY status`},
 	{name: "northbound_outbox", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM northbound_outbox GROUP BY status`},
 	{name: "pm_kpi_export", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM pm_kpi_export_tasks GROUP BY status`},
 	{name: "trace_export", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM trace_export_jobs GROUP BY status`},

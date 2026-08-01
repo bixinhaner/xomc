@@ -9831,6 +9831,17 @@ CREATE INDEX device_parameters_p00_device_id_parameter_path_idx ON public.device
 
 CREATE INDEX idx_device_params_swver ON ONLY public.device_parameters USING btree (parameter_value, device_id) WHERE ((parameter_path)::text = 'Device.DeviceInfo.SoftwareVersion'::text);
 
+-- cell_band_dim 每分钟只读取这六类参数；部分覆盖索引避免对全部参数分区做后缀全扫。
+CREATE INDEX idx_device_params_cell_band_dim ON public.device_parameters USING btree (device_id, fap_instance, parameter_path) INCLUDE (parameter_value)
+WHERE parameter_value IS NOT NULL
+  AND parameter_value <> ''
+  AND (parameter_path LIKE '%.CellConfig.LTE.RAN.Common.CellIdentity'
+       OR parameter_path LIKE '%.NrcellIdentity'
+       OR parameter_path LIKE '%IpaUnitId'
+       OR parameter_path LIKE '%.CellConfig.LTE.RAN.RF.FreqBandIndicator'
+       OR parameter_path LIKE '%.FreqBandIndicatorNR'
+       OR parameter_path LIKE 'DeviceGSM.Bts.%.Band');
+
 
 --
 -- Name: device_parameters_p00_parameter_value_device_id_idx; Type: INDEX; Schema: public; Owner: -
@@ -14170,6 +14181,10 @@ CREATE INDEX idx_parameter_sync_outbox_dispatch ON public.parameter_sync_outbox 
 --
 
 CREATE INDEX idx_parameter_sync_outbox_ready_created ON public.parameter_sync_outbox USING btree (created_at, id) WHERE ((status)::text = ANY ((ARRAY['pending'::character varying, 'failed'::character varying])::text[]));
+
+CREATE INDEX idx_parameter_sync_outbox_delivering_updated ON public.parameter_sync_outbox USING btree (updated_at) WHERE ((status)::text = 'delivering'::text);
+
+CREATE INDEX idx_parameter_sync_outbox_terminal_status ON public.parameter_sync_outbox USING btree (status) WHERE ((status)::text = ANY ((ARRAY['delivered'::character varying, 'dead'::character varying])::text[]));
 
 
 --

@@ -163,8 +163,12 @@ func (r *PGRepository) CreateRequest(ctx context.Context, req *SyncRequest) erro
 	if err != nil {
 		return err
 	}
-	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
 		return fmt.Errorf("create parameter sync request: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrRequestIdempotencyConflict
 	}
 	return nil
 }
@@ -201,6 +205,8 @@ func buildCreateRequest(req *SyncRequest) (string, []any, error) {
 			req.ResultCode, req.ErrorMessage, req.CampaignID, req.SourceEventID, req.OriginEventType,
 			req.ModelUploadIntentID, req.ModelUploadStatus, req.AdmissionClass, req.AdmissionReason,
 			req.AdmissionSnapshot, req.DeduplicatedToRequestID, req.CreatedAt, req.CompletedAt, req.UpdatedAt).
+		Suffix(`ON CONFLICT (caller_type, idempotency_key)
+			WHERE idempotency_key IS NOT NULL DO NOTHING`).
 		ToSql()
 	if err != nil {
 		return "", nil, fmt.Errorf("build create parameter sync request: %w", err)
@@ -543,8 +549,12 @@ RETURNING next_auto_sync_at`
 	if err != nil {
 		return false, err
 	}
-	if _, err := tx.Exec(ctx, query, args...); err != nil {
+	tag, err := tx.Exec(ctx, query, args...)
+	if err != nil {
 		return false, fmt.Errorf("create automatic parameter sync request: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, ErrRequestIdempotencyConflict
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit automatic parameter sync request: %w", err)

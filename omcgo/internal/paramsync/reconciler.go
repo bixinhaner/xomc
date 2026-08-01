@@ -3,14 +3,17 @@ package paramsync
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/task"
 )
 
@@ -20,7 +23,78 @@ type Reconciler struct {
 	processor ResultProcessor
 	metrics   *Metrics
 	now       func() time.Time
+
+	runCountMu     sync.Mutex
+	runCountCursor *uuid.UUID
+
+	stagingCleanupMu     sync.Mutex
+	stagingCleanupCursor *stagingCursor
 }
+
+const runCountReconcileBatchSize = 20
+
+type stagingCursor struct {
+	runID         uuid.UUID
+	parameterPath string
+}
+
+const historicalResultNormalizationSQL = `
+UPDATE parameter_sync_task_results res SET
+  status=CASE WHEN res.success THEN 'processed' ELSE 'failed' END,
+  processed_at=COALESCE(res.processed_at, $1)
+FROM parameter_sync_runs run, device_tasks t
+WHERE res.status='received' AND run.id=res.run_id AND run.id=ANY($2)
+  AND run.status IN ('succeeded','failed','cancelled')
+  AND t.id=res.task_id AND t.source='param_sync' AND t.source_id=run.id
+  AND t.status IN ('completed','failed','expired','cancelled')`
+
+const stagingCleanupSQL = `
+WITH page AS MATERIALIZED (
+  SELECT run_id, parameter_path
+  FROM parameter_sync_staging_values
+  WHERE (run_id, parameter_path) > ($1, $2)
+  ORDER BY run_id, parameter_path
+  LIMIT $3
+), deleted AS (
+  DELETE FROM parameter_sync_staging_values s USING page, parameter_sync_runs run
+  WHERE s.run_id=page.run_id AND s.parameter_path=page.parameter_path
+    AND run.id=page.run_id
+    AND (run.status IN ('failed','cancelled')
+      OR (run.status='succeeded' AND COALESCE(run.completed_at, run.started_at) < $4))
+  RETURNING 1
+), tail AS (
+  SELECT run_id, parameter_path FROM page ORDER BY run_id DESC, parameter_path DESC LIMIT 1
+)
+SELECT tail.run_id, tail.parameter_path, (SELECT count(*) FROM deleted)
+FROM tail`
+
+const stagingCleanupInitialSQL = `
+WITH page AS MATERIALIZED (
+  SELECT run_id, parameter_path
+  FROM parameter_sync_staging_values
+  ORDER BY run_id, parameter_path
+  LIMIT $1
+), deleted AS (
+  DELETE FROM parameter_sync_staging_values s USING page, parameter_sync_runs run
+  WHERE s.run_id=page.run_id AND s.parameter_path=page.parameter_path
+    AND run.id=page.run_id
+    AND (run.status IN ('failed','cancelled')
+      OR (run.status='succeeded' AND COALESCE(run.completed_at, run.started_at) < $2))
+  RETURNING 1
+), tail AS (
+  SELECT run_id, parameter_path FROM page ORDER BY run_id DESC, parameter_path DESC LIMIT 1
+)
+SELECT tail.run_id, tail.parameter_path, (SELECT count(*) FROM deleted)
+FROM tail`
+
+const outboxBacklogMetricSQL = `
+SELECT
+  (SELECT count(*) FROM parameter_sync_outbox WHERE status IN ('pending','failed')) +
+  (SELECT count(*) FROM parameter_sync_outbox WHERE status='delivering')`
+
+const stagingRowsMetricSQL = `
+SELECT GREATEST(reltuples, 0)::bigint
+FROM pg_class WHERE oid='parameter_sync_staging_values'::regclass`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -330,6 +404,40 @@ WHERE status='cancelling' ORDER BY started_at LIMIT $1 FOR UPDATE SKIP LOCKED`, 
 }
 
 func (r *Reconciler) ReconcileRunCounts(ctx context.Context) (int64, error) {
+	r.runCountMu.Lock()
+	defer r.runCountMu.Unlock()
+
+	candidateQuery, candidateArgs, err := buildRunCountCandidateSelectSQL(
+		r.runCountCursor, runCountReconcileBatchSize,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("build parameter sync run count candidates: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, candidateQuery, candidateArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("list parameter sync run count candidates: %w", err)
+	}
+	var runIDs []uuid.UUID
+	for rows.Next() {
+		var runID uuid.UUID
+		if err := rows.Scan(&runID); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan parameter sync run count candidate: %w", err)
+		}
+		runIDs = append(runIDs, runID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("iterate parameter sync run count candidates: %w", err)
+	}
+	rows.Close()
+	if len(runIDs) == 0 {
+		// The next maintenance tick starts a new bounded sweep. Avoid wrapping
+		// inside this call, which would process the first page twice at the tail.
+		r.runCountCursor = nil
+		return 0, nil
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("begin parameter sync run count reconciliation: %w", err)
@@ -339,25 +447,63 @@ func (r *Reconciler) ReconcileRunCounts(ctx context.Context) (int64, error) {
 	// A previous implementation could commit a result in "received" before its
 	// processing state was finalized. Terminal runs cannot be processed again, so
 	// normalize those durable historical rows from their success bit first.
-	const normalizeResults = `
-UPDATE parameter_sync_task_results res SET
-  status=CASE WHEN res.success THEN 'processed' ELSE 'failed' END,
-  processed_at=COALESCE(res.processed_at, $1)
-FROM parameter_sync_runs run, device_tasks t
-WHERE res.status='received' AND run.id=res.run_id
-  AND run.status IN ('succeeded','failed','cancelled')
-  AND t.id=res.task_id AND t.source='param_sync' AND t.source_id=run.id
-  AND t.status IN ('completed','failed','expired','cancelled')`
-	normalized, err := tx.Exec(ctx, normalizeResults, r.now())
+	normalized, err := tx.Exec(ctx, historicalResultNormalizationSQL, r.now(), runIDs)
 	if err != nil {
 		return 0, fmt.Errorf("normalize historical parameter sync results: %w", err)
 	}
 
+	query, queryArgs, err := buildRunCountReconciliationSQL(runIDs)
+	if err != nil {
+		return 0, fmt.Errorf("build parameter sync run count reconciliation: %w", err)
+	}
+	tag, err := tx.Exec(ctx, query, queryArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("reconcile parameter sync run counts: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit parameter sync run count reconciliation: %w", err)
+	}
+	lastRunID := runIDs[len(runIDs)-1]
+	r.runCountCursor = &lastRunID
+	if r.metrics != nil && normalized.RowsAffected() > 0 {
+		r.metrics.ReconcileRepairs.WithLabelValues("historical_results").Add(float64(normalized.RowsAffected()))
+	}
+	if r.metrics != nil && tag.RowsAffected() > 0 {
+		r.metrics.ReconcileRepairs.WithLabelValues("run_counts").Add(float64(tag.RowsAffected()))
+	}
+	return tag.RowsAffected(), nil
+}
+
+func buildRunCountCandidateSelectSQL(cursor *uuid.UUID, limit uint64) (string, []interface{}, error) {
+	if limit == 0 {
+		limit = runCountReconcileBatchSize
+	}
+	builder := storage.Psql.Select("id").From("parameter_sync_runs").OrderBy("id").Limit(limit)
+	if cursor != nil {
+		builder = builder.Where(sq.Gt{"id": *cursor})
+	}
+	return builder.ToSql()
+}
+
+func buildRunCountReconciliationSQL(runIDs []uuid.UUID) (string, []interface{}, error) {
+	if len(runIDs) == 0 {
+		return "", nil, fmt.Errorf("parameter sync run count candidate batch is empty")
+	}
 	const query = `
-WITH actual AS (
-  SELECT run.id,
-    count(t.id)::int AS expected,
-    count(t.id) FILTER (WHERE t.status IN ('completed','failed','expired','cancelled'))::int AS terminal,
+WITH batch AS (
+  SELECT unnest($1::uuid[]) AS id
+), task_rows AS MATERIALIZED (
+  SELECT id, source_id AS run_id, status
+  FROM device_tasks
+  WHERE source='param_sync' AND source_id=ANY($1)
+), task_actual AS (
+  SELECT run_id,
+    count(*)::int AS expected,
+    count(*) FILTER (WHERE status IN ('completed','failed','expired','cancelled'))::int AS terminal
+  FROM task_rows
+  GROUP BY run_id
+), result_actual AS (
+  SELECT t.run_id,
     count(res.task_id) FILTER (
       WHERE t.status IN ('completed','failed','expired','cancelled')
         AND res.status IN ('processed','failed')
@@ -367,10 +513,18 @@ WITH actual AS (
         AND res.status IN ('processed','failed')
         AND (res.status='failed' OR NOT res.success)
     )::int AS failed
-  FROM parameter_sync_runs run
-  LEFT JOIN device_tasks t ON t.source='param_sync' AND t.source_id=run.id
-  LEFT JOIN parameter_sync_task_results res ON res.run_id=run.id AND res.task_id=t.id
-  GROUP BY run.id
+  FROM task_rows t
+  JOIN parameter_sync_task_results res ON res.run_id=t.run_id AND res.task_id=t.id
+  GROUP BY t.run_id
+), actual AS (
+  SELECT batch.id,
+    COALESCE(t.expected, 0) AS expected,
+    COALESCE(t.terminal, 0) AS terminal,
+    COALESCE(res.processed, 0) AS processed,
+    COALESCE(res.failed, 0) AS failed
+  FROM batch
+  LEFT JOIN task_actual t ON t.run_id=batch.id
+  LEFT JOIN result_actual res ON res.run_id=batch.id
 )
 UPDATE parameter_sync_runs run SET
   expected_task_count=actual.expected, terminal_task_count=actual.terminal,
@@ -379,20 +533,7 @@ FROM actual WHERE run.id=actual.id AND (
   run.expected_task_count<>actual.expected OR run.terminal_task_count<>actual.terminal OR
   run.processed_task_count<>actual.processed OR run.failed_task_count<>actual.failed
 )`
-	tag, err := tx.Exec(ctx, query)
-	if err != nil {
-		return 0, fmt.Errorf("reconcile parameter sync run counts: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit parameter sync run count reconciliation: %w", err)
-	}
-	if r.metrics != nil && normalized.RowsAffected() > 0 {
-		r.metrics.ReconcileRepairs.WithLabelValues("historical_results").Add(float64(normalized.RowsAffected()))
-	}
-	if r.metrics != nil && tag.RowsAffected() > 0 {
-		r.metrics.ReconcileRepairs.WithLabelValues("run_counts").Add(float64(tag.RowsAffected()))
-	}
-	return tag.RowsAffected(), nil
+	return query, []interface{}{runIDs}, nil
 }
 
 // ReconcileTerminalBindings closes the database feedback loop when a terminal
@@ -583,22 +724,38 @@ LIMIT $2`
 }
 
 func (r *Reconciler) CleanStaging(ctx context.Context, olderThan time.Time, limit int) (int64, error) {
+	r.stagingCleanupMu.Lock()
+	defer r.stagingCleanupMu.Unlock()
+
 	if limit <= 0 {
 		limit = 10000
 	}
-	const query = `
-DELETE FROM parameter_sync_staging_values s WHERE (s.run_id, s.parameter_path) IN (
-  SELECT s2.run_id, s2.parameter_path FROM parameter_sync_staging_values s2
-  JOIN parameter_sync_runs run ON run.id=s2.run_id
-  WHERE (run.status IN ('failed','cancelled')
-    OR (run.status='succeeded' AND COALESCE(run.completed_at, run.started_at) < $1))
-  LIMIT $2
-)`
-	tag, err := r.pool.Exec(ctx, query, olderThan, limit)
+	var runID uuid.UUID
+	var parameterPath string
+	initialPage := r.stagingCleanupCursor == nil
+	if !initialPage {
+		runID = r.stagingCleanupCursor.runID
+		parameterPath = r.stagingCleanupCursor.parameterPath
+	}
+	var deleted int64
+	var row pgx.Row
+	if initialPage {
+		row = r.pool.QueryRow(ctx, stagingCleanupInitialSQL, limit, olderThan)
+	} else {
+		row = r.pool.QueryRow(ctx, stagingCleanupSQL, runID, parameterPath, limit, olderThan)
+	}
+	err := row.Scan(&runID, &parameterPath, &deleted)
+	if err == pgx.ErrNoRows {
+		// Start a new bounded sweep on the next maintenance tick. Newly inserted
+		// or newly eligible rows behind the cursor are picked up in that cycle.
+		r.stagingCleanupCursor = nil
+		return 0, nil
+	}
 	if err != nil {
 		return 0, fmt.Errorf("clean parameter sync staging: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	r.stagingCleanupCursor = &stagingCursor{runID: runID, parameterPath: parameterPath}
+	return deleted, nil
 }
 
 // CollectMetrics refreshes gauges from durable PostgreSQL state. Gauges are
@@ -651,10 +808,13 @@ WHERE status IN ('planning','enqueuing','waiting_device','executing','processing
 	r.metrics.TasksFailed.Set(float64(failed))
 
 	var outbox, staging int64
-	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM parameter_sync_outbox WHERE status IN ('pending','failed','delivering')`).Scan(&outbox); err != nil {
+	if err := r.pool.QueryRow(ctx, outboxBacklogMetricSQL).Scan(&outbox); err != nil {
 		return fmt.Errorf("collect parameter sync outbox backlog: %w", err)
 	}
-	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM parameter_sync_staging_values`).Scan(&staging); err != nil {
+	// Staging cardinality is an operational gauge, not a correctness boundary.
+	// pg_class is refreshed by autovacuum/ANALYZE and avoids reading millions of
+	// hot staging rows every 30 seconds solely for observability.
+	if err := r.pool.QueryRow(ctx, stagingRowsMetricSQL).Scan(&staging); err != nil {
 		return fmt.Errorf("collect parameter sync staging rows: %w", err)
 	}
 	r.metrics.OutboxBacklog.Set(float64(outbox))

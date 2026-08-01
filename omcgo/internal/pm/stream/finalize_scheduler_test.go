@@ -23,6 +23,17 @@ func TestFinalizeSchedulerUsesConfiguredFinalizerConcurrency(t *testing.T) {
 	}
 }
 
+func TestHourlyPreparationStartsAtWindowEndWhileLongPeriodsKeepGrace(t *testing.T) {
+	now := time.Date(2026, 8, 1, 15, 0, 30, 0, time.UTC)
+
+	if got := preparationDueBefore(now, GranularityHourly, 12*time.Minute); !got.Equal(now) {
+		t.Fatalf("hourly prepare due before = %v, want window end cutoff %v", got, now)
+	}
+	if got := preparationDueBefore(now, GranularityDaily, 15*time.Minute); !got.Equal(now.Add(-15 * time.Minute)) {
+		t.Fatalf("daily prepare due before = %v, want grace cutoff", got)
+	}
+}
+
 func TestFinalizeSchedulerGivesNewHourShareWhileOldHourIsBacklogged(t *testing.T) {
 	selector := newFinalizeClaimSelector()
 	oldest := time.Date(2026, 7, 30, 8, 0, 0, 0, time.UTC)

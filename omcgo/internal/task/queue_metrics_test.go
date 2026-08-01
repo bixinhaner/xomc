@@ -16,6 +16,22 @@ import (
 	"go.uber.org/zap"
 )
 
+type scanCountingRedisClient struct {
+	redis.UniversalClient
+	scans       int
+	directTypes int
+}
+
+func (c *scanCountingRedisClient) Scan(ctx context.Context, cursor uint64, match string, count int64) *redis.ScanCmd {
+	c.scans++
+	return c.UniversalClient.Scan(ctx, cursor, match, count)
+}
+
+func (c *scanCountingRedisClient) Type(ctx context.Context, key string) *redis.StatusCmd {
+	c.directTypes++
+	return c.UniversalClient.Type(ctx, key)
+}
+
 func TestRedisQueueObserverCollectsBoundedBacklog(t *testing.T) {
 	mini := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
@@ -47,6 +63,22 @@ func TestRedisQueueObserverCollectsBoundedBacklog(t *testing.T) {
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueLengthTotal.WithLabelValues(redisQueueFamilyCommand)))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueActiveDevices.WithLabelValues(redisQueueFamilyCommand)))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueUp.WithLabelValues(redisQueueFamilyCommand)))
+}
+
+func TestRedisQueueObserverScansBothFamiliesInOneKeyspacePass(t *testing.T) {
+	mini := miniredis.RunT(t)
+	base := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer base.Close()
+	client := &scanCountingRedisClient{UniversalClient: base}
+	require.NoError(t, base.ZAdd(context.Background(), redisx.Keys.ACSTaskQueue("device-1"), redis.Z{Score: 1, Member: "task-1"}).Err())
+	require.NoError(t, base.ZAdd(context.Background(), redisx.Keys.ACSCommandQueue("device-2"), redis.Z{Score: 1, Member: `{}`}).Err())
+
+	observer := NewRedisQueueObserver(client, NewTaskMetrics(prometheus.NewRegistry()), time.Hour, zap.NewNop())
+	observer.Collect(context.Background())
+
+	require.Equal(t, 1, client.scans, "a small keyspace should require one combined SCAN call, not one pass per family")
+	require.Zero(t, client.directTypes, "queue metadata must be pipelined instead of fetched one key per round trip")
+	require.GreaterOrEqual(t, observer.scanCount, int64(10_000))
 }
 
 func TestRedisQueueObserverUsesQueueScoreWhenTaskDetailExpired(t *testing.T) {
@@ -98,6 +130,20 @@ func TestRedisQueueObserverFailurePreservesBusinessGauges(t *testing.T) {
 	require.Equal(t, before, testutil.ToFloat64(metrics.RedisTaskQueueLengthTotal.WithLabelValues(redisQueueFamilyTask)))
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.RedisTaskQueueUp.WithLabelValues(redisQueueFamilyTask)))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RedisTaskQueueScanFailuresTotal.WithLabelValues(redisQueueFamilyTask)))
+}
+
+func TestDisableRedisQueueObservationRemovesPrimedWorkerSeries(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewTaskMetrics(reg)
+
+	metrics.DisableRedisQueueObservation()
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		require.NotContains(t, family.GetName(), "omc_redis_task_queue_",
+			"a process that does not own observation must not export false up=0 series")
+	}
 }
 
 func TestRedisQueueObserverScansMoreThanLegacyTenThousandKeyLimit(t *testing.T) {

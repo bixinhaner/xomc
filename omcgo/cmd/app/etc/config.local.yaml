@@ -58,7 +58,7 @@ param_sync:
   staging_enabled: false
   canary_percent: 0
   legacy_fallback_enabled: true
-  result_consumer_shard_count: 8
+  result_consumer_shard_count: 16
   result_consumer_queue_depth: 64
   result_consumer_pull_batch_size: 64
   result_consumer_pull_concurrency: 64
@@ -142,6 +142,7 @@ provision:
     sync_on_bootstrap: true
     sync_on_firmware_change: true
     max_concurrent: 20
+    gpv_batch_size: 100
 
 datamodel_expiry:
   auto_max_idle_days: 15    # 自动发现模板最大空闲天数

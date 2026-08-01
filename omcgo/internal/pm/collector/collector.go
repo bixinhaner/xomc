@@ -102,6 +102,10 @@ type rawArchiver interface {
 	RemoveOld(ctx context.Context, bucket, object string)
 }
 
+type rawObjectDiscarder interface {
+	RemoveObject(context.Context, string, string, minio.RemoveObjectOptions) error
+}
+
 // CounterMeta 是 CounterWhitelist 命中后回填给 PMCounter 的元数据（PM-P2）。
 //   - IndicatorID：指标编号（perf_indicators_*.id，如 C000060216），落库即编号化的目标。
 //   - StatisType：'sum' / 'avg' / 'max' / 'pct'，或空串（indicator 元数据未填），驱动 G5 自然桶聚合。
@@ -187,6 +191,7 @@ type PMCollector struct {
 	numberProcessLookup  NumberProcessLookup
 	copyIngestor         CopyIngestor
 	archiver             rawArchiver
+	rawDiscarder         rawObjectDiscarder
 	concurrency          int
 	logger               *zap.Logger
 	diagnosticMu         sync.Mutex
@@ -206,12 +211,16 @@ func NewPMCollector(
 	fileStore pm.PMFileStore,
 	eventBus event.EventBus, logger *zap.Logger,
 ) *PMCollector {
-	return &PMCollector{
+	collector := &PMCollector{
 		minioClient: minioClient, bucket: bucket, parser: parser,
 		kpiEngine: kpiEngine,
 		fileStore: fileStore,
 		eventBus:  eventBus, logger: logger,
 	}
+	if minioClient != nil {
+		collector.rawDiscarder = minioClient
+	}
+	return collector
 }
 
 // SetMetrics attaches Prometheus metrics to the collector.
@@ -286,6 +295,10 @@ func (c *PMCollector) SetCopyIngestor(ci CopyIngestor) {
 // MinIO 省盘（已是 gzip 的真机文件零成本跳过）。Nil-safe — 未注入时不做压缩回写。
 func (c *PMCollector) SetArchiver(a *rawarchive.Archiver) {
 	c.archiver = a
+}
+
+func (c *PMCollector) SetRawObjectDiscarder(discarder rawObjectDiscarder) {
+	c.rawDiscarder = discarder
 }
 
 // markRawCompressed 把已压缩回写的 PM 原始对象在 pm_files 标记 raw_compressed=true 并把 minio_path
@@ -390,19 +403,14 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		attribute.String("pm.minio_path", payload.MinIOPath),
 	)
 	c.logger.Info("processing PM file",
-		zap.String("path", payload.MinIOPath),
-		zap.String("device_sn", payload.DeviceSN),
+		zap.String("object_hash", shortPMIdentityHash(payload.MinIOPath)),
+		zap.String("device_hash", shortPMIdentityHash(payload.DeviceSN)),
 	)
 
 	if err := c.resolveDevice(ctx, &payload); err != nil {
 		if errors.Is(err, reliability.ErrDeferred) &&
 			(evt.Timestamp.IsZero() || time.Since(evt.Timestamp) >= DeviceRegistrationGrace) {
-			return fmt.Errorf(
-				"device registration grace exceeded (%s): %v: %w",
-				DeviceRegistrationGrace,
-				err,
-				reliability.ErrPermanent,
-			)
+			return c.discardUnregisteredRaw(ctx, payload)
 		}
 		return err
 	}
@@ -546,6 +554,47 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	)
 }
 
+func (c *PMCollector) discardUnregisteredRaw(
+	ctx context.Context,
+	payload FileReceivedPayload,
+) error {
+	if c.rawDiscarder == nil {
+		return fmt.Errorf("discard unregistered PM raw object: discarder unavailable: %w", reliability.ErrDeferred)
+	}
+	bucket := payload.Bucket
+	if bucket == "" {
+		bucket = c.bucket
+	}
+	err := c.rawDiscarder.RemoveObject(
+		ctx,
+		bucket,
+		payload.MinIOPath,
+		minio.RemoveObjectOptions{},
+	)
+	if err != nil && !isMinIOObjectNotFound(err) {
+		return fmt.Errorf("discard unregistered PM raw object: %v: %w", err, reliability.ErrDeferred)
+	}
+	if c.metrics != nil {
+		c.metrics.FilesDiscardedTotal.WithLabelValues("device_not_registered").Inc()
+	}
+	c.logger.Warn("discarded PM file for unregistered device",
+		zap.String("reason", "device_not_registered"),
+		zap.String("object_hash", shortPMIdentityHash(payload.MinIOPath)),
+		zap.String("device_hash", shortPMIdentityHash(payload.DeviceSN)),
+	)
+	return nil
+}
+
+func isMinIOObjectNotFound(err error) bool {
+	var response minio.ErrorResponse
+	return errors.As(err, &response) && response.Code == "NoSuchKey"
+}
+
+func shortPMIdentityHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%x", sum[:6])
+}
+
 func (c *PMCollector) checkTechnologyConsistency(
 	ctx context.Context,
 	payload *FileReceivedPayload,
@@ -659,6 +708,16 @@ func (c *PMCollector) ingestViaCopy(
 	}
 	ingested, err := c.copyIngestor.CopyIngest(ctx, marker, content.Counters, kpis)
 	if err != nil {
+		// 同一设备、同一文件名已经存在，但上传内容摘要不同，说明上游复用了
+		// 已完成窗口的源身份。这类数据无法安全覆盖既有幂等锚点，也不可能通过
+		// 重试恢复；删除当前非法对象并 ACK，避免重复投递持续占用主队列和 DLQ。
+		if errors.Is(err, metrics.ErrSourceContentChanged) {
+			if discardErr := c.discardChangedSourceRaw(ctx, *payload); discardErr != nil {
+				return discardErr
+			}
+			span.SetAttributes(attribute.String("pm.outcome", "source_content_changed"))
+			return nil
+		}
 		// 迟到补传命中压缩 chunk：与默认路径一致降级（log WARN + 记 metric + 跳过 ack），
 		// 不让历史补传反复重试灌 DLQ 阻塞实时 PM。
 		if errors.Is(err, metrics.ErrLateArrival) {
@@ -726,6 +785,37 @@ func (c *PMCollector) ingestViaCopy(
 	if perr == nil {
 		_ = c.eventBus.Publish(ctx, event.SubjectPMFileParsed, parsedEvt)
 	}
+	return nil
+}
+
+func (c *PMCollector) discardChangedSourceRaw(
+	ctx context.Context,
+	payload FileReceivedPayload,
+) error {
+	if c.rawDiscarder == nil {
+		return fmt.Errorf("discard changed-source PM raw object: discarder unavailable: %w", reliability.ErrDeferred)
+	}
+	bucket := payload.Bucket
+	if bucket == "" {
+		bucket = c.bucket
+	}
+	err := c.rawDiscarder.RemoveObject(
+		ctx,
+		bucket,
+		payload.MinIOPath,
+		minio.RemoveObjectOptions{},
+	)
+	if err != nil && !isMinIOObjectNotFound(err) {
+		return fmt.Errorf("discard changed-source PM raw object: %v: %w", err, reliability.ErrDeferred)
+	}
+	if c.metrics != nil {
+		c.metrics.FilesDiscardedTotal.WithLabelValues("source_content_changed").Inc()
+	}
+	c.logger.Warn("discarded PM file with reused source identity",
+		zap.String("reason", "source_content_changed"),
+		zap.String("object_hash", shortPMIdentityHash(payload.MinIOPath)),
+		zap.String("device_hash", shortPMIdentityHash(payload.DeviceSN)),
+	)
 	return nil
 }
 

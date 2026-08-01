@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -23,13 +24,14 @@ const (
 var ErrFinalizeClaimLost = errors.New("PM aggregation finalize claim ownership lost")
 
 type Finalizer struct {
-	windows  *WindowRepository
-	store    *RedisWindowStore
-	logger   *zap.Logger
-	metrics  *Metrics
-	slots    chan struct{}
-	snapshot *SnapshotStore
-	location *time.Location
+	windows             *WindowRepository
+	store               *RedisWindowStore
+	logger              *zap.Logger
+	metrics             *Metrics
+	slots               chan struct{}
+	snapshot            *SnapshotStore
+	location            *time.Location
+	initialPublications sync.Map
 }
 
 type finalizationCoverage struct {
@@ -142,11 +144,11 @@ func (f *Finalizer) finalizeUnderLockWithClaim(
 	reason CloseReason,
 	leaseOwner *uuid.UUID,
 ) error {
-	published, err := f.windows.IsPublished(ctx, key)
+	status, revisionHint, err := f.windows.StatusRevision(ctx, key)
 	if err != nil {
 		return err
 	}
-	if published {
+	if status == "published" {
 		return f.store.DeleteState(ctx, key)
 	}
 	state, err := f.store.Read(ctx, key)
@@ -156,7 +158,7 @@ func (f *Finalizer) finalizeUnderLockWithClaim(
 		}
 		return err
 	}
-	if err := f.writeFinal(ctx, key, reason, state, leaseOwner); err != nil {
+	if err := f.writeFinal(ctx, key, reason, state, leaseOwner, revisionHint); err != nil {
 		if errors.Is(err, ErrFinalizeClaimLost) {
 			return err
 		}
@@ -169,11 +171,57 @@ func (f *Finalizer) finalizeUnderLockWithClaim(
 	if f.metrics != nil {
 		f.metrics.WindowsFinalizedTotal.WithLabelValues(string(reason)).Inc()
 	}
-	if err := f.store.DeleteState(ctx, key); err != nil {
-		f.logger.Warn("delete published PM aggregation Redis window",
-			zap.String("task_version_id", key.TaskVersionID.String()),
-			zap.Time("window_start", key.Start),
-			zap.Error(err))
+	published, err := f.windows.IsPublished(ctx, key)
+	if err != nil {
+		return err
+	}
+	if published {
+		if err := f.store.DeleteState(ctx, key); err != nil {
+			f.logger.Warn("delete published PM aggregation Redis window",
+				zap.String("task_version_id", key.TaskVersionID.String()),
+				zap.Time("window_start", key.Start),
+				zap.Error(err))
+		}
+	} else if f.metrics != nil && key.Granularity == GranularityHourly {
+		f.metrics.WindowsPreparedTotal.Inc()
+	}
+	return nil
+}
+
+func (f *Finalizer) PublishHourlyReady(
+	ctx context.Context,
+	now time.Time,
+	grace time.Duration,
+	limit uint64,
+) error {
+	started := time.Now()
+	if f.metrics != nil {
+		defer func() { f.metrics.PublicationDuration.Observe(time.Since(started).Seconds()) }()
+	}
+	if limit == 0 {
+		limit = 1
+	}
+	const maxPublicationDrainBatches = 64
+	for batch := 0; batch < maxPublicationDrainBatches; batch++ {
+		keys, err := f.windows.PublishHourlyReady(ctx, now, grace, limit)
+		if err != nil {
+			return err
+		}
+		if f.metrics != nil {
+			f.metrics.WindowsPublishedTotal.Add(float64(len(keys)))
+		}
+		for _, key := range keys {
+			if err := f.store.DeleteState(ctx, key); err != nil {
+				f.logger.Warn("delete watermarked PM aggregation Redis window",
+					zap.String("task_version_id", key.TaskVersionID.String()),
+					zap.String("entity_key", key.EntityKey),
+					zap.Time("window_start", key.Start),
+					zap.Error(err))
+			}
+		}
+		if uint64(len(keys)) < limit {
+			return nil
+		}
 	}
 	return nil
 }
@@ -184,12 +232,23 @@ func (f *Finalizer) writeFinal(
 	reason CloseReason,
 	state WindowState,
 	leaseOwner *uuid.UUID,
+	revisionHint int,
 ) error {
+	if !requiresPublicationLock(revisionHint) {
+		if err := f.ensureInitialPublication(ctx, key); err != nil {
+			return err
+		}
+	}
 	tx, err := f.windows.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin finalize PM aggregation window: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if requiresPublicationLock(revisionHint) {
+		if err := lockPublicationForRebuild(ctx, tx, key); err != nil {
+			return err
+		}
+	}
 	var revision int
 	revisionSQL, revisionArgs, err := storage.Psql.Select("revision").
 		From("pm_aggregation_windows").
@@ -201,6 +260,9 @@ func (f *Finalizer) writeFinal(
 	}
 	if err := tx.QueryRow(ctx, revisionSQL, revisionArgs...).Scan(&revision); err != nil {
 		return fmt.Errorf("query PM aggregation revision: %w", err)
+	}
+	if requiresPublicationLock(revision) != requiresPublicationLock(revisionHint) {
+		return fmt.Errorf("PM aggregation revision changed while finalizing: hint=%d current=%d", revisionHint, revision)
 	}
 	var version *TaskVersionSnapshot
 	if f.snapshot != nil && f.snapshot.Current() != nil {
@@ -234,10 +296,25 @@ func (f *Finalizer) writeFinal(
 		}
 		return nil
 	}
+	status := finalWindowStatus(key.Granularity, revision)
+	if requiresPublicationLock(revision) {
+		if err := preparePublicationRevision(ctx, tx, key, revision); err != nil {
+			return err
+		}
+	}
 	for _, payload := range rollups {
-		if err := insertRollupTx(ctx, tx, payload); err != nil {
+		if err := insertRollupTxWithEligibility(
+			ctx, tx, payload, key.TaskVersionID, status == "published", revision,
+		); err != nil {
 			return fmt.Errorf("persist compact PM Counter rollup: %w", err)
 		}
+	}
+	rollupEventIDs := make([]uuid.UUID, 0, len(rollups))
+	for _, payload := range rollups {
+		rollupEventIDs = append(rollupEventIDs, rollupEventIDForRevision(payload.EventID, revision))
+	}
+	if err := deleteStaleRollupRevisionTx(ctx, tx, key, revision, rollupEventIDs); err != nil {
+		return err
 	}
 	resultReplaceStarted := time.Now()
 	resultCount, err := ReplaceWindowResults(
@@ -258,26 +335,66 @@ func (f *Finalizer) writeFinal(
 	if f.metrics != nil {
 		f.metrics.ResultReplaceSeconds.Observe(time.Since(resultReplaceStarted).Seconds())
 	}
-	publishSQL, publishArgs, err := storage.Psql.Update("pm_aggregation_windows").
-		Set("status", "published").
+	publishBuilder := storage.Psql.Update("pm_aggregation_windows").
+		Set("status", status).
 		Set("result_count", resultCount).
-		Set("published_at", time.Now().UTC()).
 		Set("updated_at", time.Now().UTC()).
 		Set("last_error", nil).
 		Where(windowKeyPredicate(key)).
-		Where(sq.Eq{"status": "finalizing"}).
-		ToSql()
+		Where(sq.Eq{"status": "finalizing"})
+	if status == "published" {
+		publishBuilder = publishBuilder.Set("published_at", time.Now().UTC())
+	} else {
+		publishBuilder = publishBuilder.Set("published_at", nil)
+	}
+	publishSQL, publishArgs, err := publishBuilder.ToSql()
 	if err != nil {
 		return fmt.Errorf("build publish PM aggregation window SQL: %w", err)
 	}
 	if _, err := tx.Exec(ctx, publishSQL, publishArgs...); err != nil {
 		return fmt.Errorf("publish PM aggregation window: %w", err)
 	}
+	if status == "prepared" && requiresPublicationLock(revision) {
+		preparedSQL, preparedArgs, err := markPublicationPreparedQuery(key, revision).ToSql()
+		if err != nil {
+			return fmt.Errorf("build mark PM publication prepared: %w", err)
+		}
+		if _, err := tx.Exec(ctx, preparedSQL, preparedArgs...); err != nil {
+			return fmt.Errorf("mark PM publication prepared: %w", err)
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit PM aggregation window: %w", err)
 	}
 	if f.metrics != nil && shouldRecordDailyVersionExpectedSlotsMismatch(revision, coverage) {
 		f.metrics.DailyVersionExpectedSlotsMismatchTotal.Inc()
+	}
+	return nil
+}
+
+type initialPublicationKey struct {
+	TaskVersionID uuid.UUID
+	Granularity   Granularity
+	WindowStart   time.Time
+}
+
+func (f *Finalizer) ensureInitialPublication(ctx context.Context, key WindowKey) error {
+	cacheKey := initialPublicationKey{
+		TaskVersionID: key.TaskVersionID,
+		Granularity:   key.Granularity,
+		WindowStart:   key.Start,
+	}
+	if _, loaded := f.initialPublications.LoadOrStore(cacheKey, struct{}{}); loaded {
+		return nil
+	}
+	query, args, err := ensureInitialPublicationQuery(key).ToSql()
+	if err != nil {
+		f.initialPublications.Delete(cacheKey)
+		return fmt.Errorf("build initial PM publication SQL: %w", err)
+	}
+	if _, err := f.windows.pool.Exec(ctx, query, args...); err != nil {
+		f.initialPublications.Delete(cacheKey)
+		return fmt.Errorf("ensure initial PM publication: %w", err)
 	}
 	return nil
 }

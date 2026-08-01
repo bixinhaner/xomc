@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/carrier"
@@ -13,6 +13,15 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.uber.org/zap"
+)
+
+const (
+	// A 20k-device deployment reporting every minute produces about 333 events/s.
+	// Production measurements put one cached lookup + batch submission at roughly
+	// 8 events/s per shard, so 64 ordered shards retain headroom while preserving
+	// serialization for repeated events from the same device.
+	periodicConsumerConcurrency = 64
+	periodicConsumerQueueDepth  = 64
 )
 
 // HeartbeatGroupAssigner 是 inform_handler 的"匹配 + 自动分组"消费侧接口。
@@ -51,7 +60,7 @@ type InformHandler struct {
 	batchProcessor  *BatchInformProcessor
 	carrierRegistry *carrier.CarrierRegistry
 	defaultCarrier  model.CarrierCode
-	groupAssigner   HeartbeatGroupAssigner // 心跳路径自动分组钩子（nil = 禁用）
+	groupAssigner   HeartbeatGroupAssigner // 兼容注入点；Periodic 不再触发，归组由领域事件负责
 	logger          *zap.Logger
 }
 
@@ -75,8 +84,8 @@ func (h *InformHandler) SetBatchProcessor(bp *BatchInformProcessor) {
 	h.batchProcessor = bp
 }
 
-// SetGroupAssigner 注入"心跳后自动分组"钩子（migration 000124+ / SN 规则匹配）。
-// nil 等价于禁用（保持向后兼容；测试 / 不需要自动分组的部署可跳过 wiring）。
+// SetGroupAssigner 保留旧 wiring 的源码兼容。Periodic Inform 不再调用该依赖；
+// 首次注册和属性变化分别由 device.registered / device.attributes.changed 驱动归组。
 func (h *InformHandler) SetGroupAssigner(ga HeartbeatGroupAssigner) {
 	h.groupAssigner = ga
 }
@@ -90,7 +99,20 @@ func (h *InformHandler) Subscribe(bus event.EventBus) error {
 	}
 	h.logger.Info("subscribed to bootstrap events", zap.String("subject", event.SubjectDeviceBootstrap))
 
-	if _, err := bus.QueueSubscribe(event.SubjectDevicePeriodic, "device-mgr-periodic", h.handlePeriodic); err != nil {
+	if keyedBus, ok := bus.(keyedQueueEventBus); ok {
+		if _, err := keyedBus.KeyedQueueSubscribe(
+			event.SubjectDevicePeriodic,
+			event.KeyedQueueConfig{
+				Durable:     "device-mgr-periodic",
+				Concurrency: periodicConsumerConcurrency,
+				QueueDepth:  periodicConsumerQueueDepth,
+			},
+			periodicDeviceKey,
+			h.handlePeriodic,
+		); err != nil {
+			return fmt.Errorf("subscribe keyed periodic: %w", err)
+		}
+	} else if _, err := bus.QueueSubscribe(event.SubjectDevicePeriodic, "device-mgr-periodic", h.handlePeriodic); err != nil {
 		return fmt.Errorf("subscribe periodic: %w", err)
 	}
 	h.logger.Info("subscribed to periodic events", zap.String("subject", event.SubjectDevicePeriodic))
@@ -107,6 +129,20 @@ func (h *InformHandler) Subscribe(bus event.EventBus) error {
 
 	h.logger.Info("inform handler subscribed to device events successfully")
 	return nil
+}
+
+func periodicDeviceKey(evt event.Event) (string, error) {
+	var payload struct {
+		DeviceID tr069.DeviceId `json:"device_id"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil {
+		return "", fmt.Errorf("decode periodic device key: %w", err)
+	}
+	serialNumber := strings.TrimSpace(payload.DeviceID.SerialNumber)
+	if serialNumber == "" {
+		return "", errors.New("periodic device key has empty serial number")
+	}
+	return serialNumber, nil
 }
 
 func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) error {
@@ -352,9 +388,6 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 		oldVersion := device.FirmwareVersion
 		params, _ := prepareDeviceUpdate(device, inform)
 		h.batchProcessor.Submit(device, inform, params, oldStatus, oldVersion)
-		// 心跳后自动分组（与非 batch 路径行为一致）。device.SN / DeviceName 跨心跳
-		// 稳定，用 pre-update 快照触发即可，无需等待 batch flush。
-		h.triggerGroupAssign(device)
 		h.logger.Debug("handlePeriodic: submitted to batch processor",
 			zap.String("device_id", device.ID.String()),
 			zap.String("serial_number", device.SerialNumber))
@@ -398,45 +431,10 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 		return nil
 	}
 
-	// 心跳后自动分组（migration 000124：device_groups.matching_mode='serialNumber'
-	// 等规则）。fire-and-forget goroutine 不阻塞心跳热路径；nil-safe。
-	h.triggerGroupAssign(updated)
-
 	h.logger.Debug("handlePeriodic: device updated",
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber))
 	return nil
-}
-
-// triggerGroupAssign 异步触发设备分组匹配。
-//
-// 设计要点：
-//   - fire-and-forget goroutine：不阻塞 inform 处理，匹配失败不影响心跳成功
-//   - 独立 ctx + 5s 超时：脱离 NATS handler ctx 避免随消息生命周期取消
-//   - nil-safe：groupAssigner 未注入时直接返回（dev/test 友好）
-//   - 幂等：matcher.AssignDeviceToGroup 用 AddDevice upsert，已在同组重复调用无副作用
-func (h *InformHandler) triggerGroupAssign(device *model.Device) {
-	if h.groupAssigner == nil || device == nil {
-		return
-	}
-	req := GroupAssignRequest{
-		DeviceID:     device.ID,
-		DeviceName:   device.DeviceName, // 与现有 matcher 约定 deviceName 字段对齐；若空则用 SN 兜底
-		SerialNumber: device.SerialNumber,
-	}
-	if req.DeviceName == "" {
-		req.DeviceName = device.SerialNumber
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := h.groupAssigner.AssignDeviceToGroup(ctx, req); err != nil {
-			h.logger.Warn("auto group-assign failed (heartbeat path)",
-				zap.String("device_id", device.ID.String()),
-				zap.String("serial_number", device.SerialNumber),
-				zap.Error(err))
-		}
-	}()
 }
 
 // resolveCarrier resolves the carrier from the complete TR-069 device

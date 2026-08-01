@@ -12,7 +12,7 @@ import (
 
 func TestProgressServiceLoadSnapshotReusesUnchangedCatalog(t *testing.T) {
 	loader := &revisionMatchableLoader{
-		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		revision: MatchableRevision{TaskCount: 1, Fingerprint: "stable"},
 		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
 	}
 	service := NewProgressService(nil, nil, loader)
@@ -36,7 +36,7 @@ func TestProgressServiceLoadSnapshotReusesUnchangedCatalog(t *testing.T) {
 
 func TestProgressServiceUsesPrimedStartupSnapshot(t *testing.T) {
 	loader := &revisionMatchableLoader{
-		revision: MatchableRevision{TaskCount: 1, UpdatedAt: time.Unix(1, 0)},
+		revision: MatchableRevision{TaskCount: 1, Fingerprint: "stable"},
 		versions: []*TaskVersionSnapshot{snapshotTestVersion()},
 	}
 	snapshot := NewSnapshotStore(loader, nil)

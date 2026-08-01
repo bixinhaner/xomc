@@ -153,10 +153,14 @@ run_gpv_tests() {
   sleep 0.2
   cd "$REPO_ROOT/omcgo"
   local test_status
+  # cmd/gpv-handoff 的 fresh-install 用例会先删除 JetStream 中的全部 stream。
+  # Go 默认并行执行命令行中的多个 package；合并成一个 go test 命令会让它删掉
+  # internal/core/event 正在验证的临时 stream，造成随机 stream-not-found 假失败。
   if GPV_NATS_TEST_URL="nats://127.0.0.1:$PORT" \
-    "$GO_BIN" test ./internal/core/event ./cmd/gpv-handoff \
-      -run 'TestKeyedQueue|TestKeyedPull|TestPrepareGPVHandoff|TestRunFreshInstall' \
-      -count=1 -v; then
+      "$GO_BIN" test ./internal/core/event \
+        -run 'TestKeyedQueue|TestKeyedPull|TestPrepareGPVHandoff' -count=1 -v &&
+    GPV_NATS_TEST_URL="nats://127.0.0.1:$PORT" \
+      "$GO_BIN" test ./cmd/gpv-handoff -run 'TestRunFreshInstall' -count=1 -v; then
     test_status=0
   else
     test_status=$?

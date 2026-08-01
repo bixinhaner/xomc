@@ -227,7 +227,7 @@ func finalizationClaimUpdate(
 		Set("data_complete", coverage.DataComplete).
 		Set("updated_at", time.Now().UTC()).
 		Where(windowKeyPredicate(key)).
-		Where(sq.Eq{"status": []string{"open", "failed", "finalizing", "rebuilding"}})
+		Where(sq.Eq{"status": []string{"open", "failed", "finalizing", "prepared", "rebuilding"}})
 	if version != nil {
 		builder = builder.
 			Set("version_effective_from", version.EffectiveFrom).
@@ -254,21 +254,27 @@ func finalizationClaimUpdateForOwner(
 }
 
 func (r *WindowRepository) Status(ctx context.Context, key WindowKey) (string, error) {
-	query, args, err := storage.Psql.Select("status").
+	status, _, err := r.StatusRevision(ctx, key)
+	return status, err
+}
+
+func (r *WindowRepository) StatusRevision(ctx context.Context, key WindowKey) (string, int, error) {
+	query, args, err := storage.Psql.Select("status", "revision").
 		From("pm_aggregation_windows").
 		Where(windowKeyPredicate(key)).
 		ToSql()
 	if err != nil {
-		return "", fmt.Errorf("build PM aggregation window status SQL: %w", err)
+		return "", 0, fmt.Errorf("build PM aggregation window status SQL: %w", err)
 	}
 	var status string
-	if err := r.pool.QueryRow(ctx, query, args...).Scan(&status); err != nil {
+	var revision int
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&status, &revision); err != nil {
 		if err == pgx.ErrNoRows {
-			return "", nil
+			return "", 0, nil
 		}
-		return "", fmt.Errorf("query PM aggregation window status: %w", err)
+		return "", 0, fmt.Errorf("query PM aggregation window status: %w", err)
 	}
-	return status, nil
+	return status, revision, nil
 }
 
 func (r *WindowRepository) IsPublished(ctx context.Context, key WindowKey) (bool, error) {
@@ -435,6 +441,14 @@ AND NOT EXISTS (
       AND source_rollup.barrier_eligible
       AND source_rollup.subject = ?
       AND source_rollup.window_start = w.window_start
+      AND EXISTS (
+          SELECT 1 FROM pm_aggregation_windows rollup_window
+          WHERE rollup_window.task_version_id = source_rollup.publication_task_version_id
+            AND rollup_window.entity_key = source_rollup.entity_key
+            AND rollup_window.granularity = source_rollup.granularity
+            AND rollup_window.window_start = source_rollup.window_start
+            AND rollup_window.published_revision = source_rollup.revision
+      )
 )`,
 		filter.versionIDs,
 		"pmaggregation.hourly.rollup",
@@ -724,6 +738,14 @@ AND NOT EXISTS (
       AND source_rollup.barrier_eligible
       AND source_rollup.window_start >= w.window_start
       AND source_rollup.window_start < w.window_end
+      AND EXISTS (
+          SELECT 1 FROM pm_aggregation_windows rollup_window
+          WHERE rollup_window.task_version_id = source_rollup.publication_task_version_id
+            AND rollup_window.entity_key = source_rollup.entity_key
+            AND rollup_window.granularity = source_rollup.granularity
+            AND rollup_window.window_start = source_rollup.window_start
+            AND rollup_window.published_revision = source_rollup.revision
+      )
       AND (
           (w.granularity = 'daily' AND source_rollup.subject = ?)
           OR
@@ -880,6 +902,14 @@ OR EXISTS (
       AND source_rollup.barrier_eligible
       AND source_rollup.window_start >= due_windows.window_start
       AND source_rollup.window_start < due_windows.window_end
+      AND EXISTS (
+          SELECT 1 FROM pm_aggregation_windows rollup_window
+          WHERE rollup_window.task_version_id = source_rollup.publication_task_version_id
+            AND rollup_window.entity_key = source_rollup.entity_key
+            AND rollup_window.granularity = source_rollup.granularity
+            AND rollup_window.window_start = source_rollup.window_start
+            AND rollup_window.published_revision = source_rollup.revision
+      )
       AND (
           (due_windows.granularity = 'daily' AND source_rollup.subject = ?)
           OR

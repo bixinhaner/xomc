@@ -152,7 +152,7 @@ func (s *ProgressService) Query(
 	).From("pm_aggregation_windows").
 		Where(sq.Eq{
 			"task_id":     taskID,
-			"status":      []string{"open", "finalizing", "failed", "rebuilding"},
+			"status":      []string{"open", "finalizing", "prepared", "failed", "rebuilding"},
 			"granularity": []string{string(GranularityDaily), string(GranularityWeekly)},
 		})
 	if !start.IsZero() {

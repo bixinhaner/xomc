@@ -807,13 +807,13 @@ curl -fsS http://localhost:8081/healthz
 - `PM_AGGREGATION_CLOSE_GRACE`：小时缺数据窗口的最小关闭宽限，默认 `12m`。到期后仍需等待聚合事件水位满足关闭条件。
 - `PM_AGGREGATION_OUTBOX_BATCH`：发布/拉取批量，默认 `100`。
 - `PM_AGGREGATION_CONSUMER_CONCURRENCY`：标准事件消费并发，默认 `8`。
-- `PM_AGGREGATION_FINALIZE_CONCURRENCY`：窗口落库并发预算，默认 `4`。
+- `PM_AGGREGATION_FINALIZE_CONCURRENCY`：窗口落库并发预算，默认 `32`；用于保证 2 万设备窗口在水位到达后及时收口。
 - `PM_AGGREGATION_MAX_EVENT_BYTES`：单个标准事件上限，默认 `8MiB`，必须小于 NATS `max_payload`。
 - `PM_AGGREGATION_WINDOW_TTL`：未知粒度的 Redis 窗口兜底 TTL；小时/日/周/月分别固定为
   `4h`、`72h`、`14d`、`45d`。
-- `PM_AGGREGATION_REDIS_V2_WRITE_ENABLED`：Redis v2 紧凑写入门禁，默认 `false`。升级时先保持
-  v1 写入和 v1/v2 双读；确认所有旧 Worker 实例为 0 后才能改为 `true`。如需回退，只能回退到
-  已具备 v1/v2 双读能力的版本并重新设为 `false`，禁止回退到不识别 v2 的旧二进制。
+- `PM_AGGREGATION_REDIS_V2_WRITE_ENABLED`：Redis v2 紧凑写入门禁，默认 `true`。当前版本支持
+  v1/v2 双读并会在后续事件到达时迁移旧窗口；仅在回退到仍具备 v1/v2 双读能力的版本时显式设为
+  `false`，禁止回退到不识别 v2 的旧二进制。
 
 JetStream 按计算层级拆分，均使用 LimitsPolicy、S2 压缩、10GiB 硬容量上限和
 `DiscardOld`：`PM_AGG_15M` 保留 2 小时，`PM_AGG_HOURLY` 保留 48 小时，

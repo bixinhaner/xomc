@@ -294,6 +294,45 @@ func TestNewInformHandler(t *testing.T) {
 	assert.Equal(t, model.CarrierCMCC, h.defaultCarrier)
 }
 
+func TestInformHandlerSubscribeUsesKeyedPeriodicConsumer(t *testing.T) {
+	bus := &rpcRespRecordingBus{}
+	h := NewInformHandler(nil, nil, model.CarrierCMCC, zap.NewNop())
+
+	require.NoError(t, h.Subscribe(bus))
+
+	require.Len(t, bus.keyedCalls, 1)
+	assert.Equal(t, event.SubjectDevicePeriodic, bus.keyedCalls[0].subject)
+	assert.Equal(t, "device-mgr-periodic", bus.keyedCalls[0].config.Durable)
+	assert.Equal(t, periodicConsumerConcurrency, bus.keyedCalls[0].config.Concurrency)
+	assert.Equal(t, periodicConsumerQueueDepth, bus.keyedCalls[0].config.QueueDepth)
+	assert.GreaterOrEqual(t, bus.keyedCalls[0].config.Concurrency, 64,
+		"20k devices reporting every minute require enough parallel handlers to sustain the production rate")
+	assert.GreaterOrEqual(t, bus.keyedCalls[0].config.QueueDepth, 64,
+		"64 shards x 64 entries absorb short reconnect bursts without an unbounded in-process buffer")
+	for _, call := range bus.queueCalls {
+		assert.NotEqual(t, event.SubjectDevicePeriodic, call.subject)
+	}
+}
+
+func TestPeriodicDeviceKeyUsesSerialNumber(t *testing.T) {
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, sampleInformPayload(" SN-KEYED-001 "))
+	require.NoError(t, err)
+
+	key, err := periodicDeviceKey(evt)
+
+	require.NoError(t, err)
+	assert.Equal(t, "SN-KEYED-001", key)
+}
+
+func TestPeriodicDeviceKeyRejectsMissingSerialNumber(t *testing.T) {
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, sampleInformPayload(""))
+	require.NoError(t, err)
+
+	_, err = periodicDeviceKey(evt)
+
+	require.Error(t, err)
+}
+
 func TestPayloadToInform(t *testing.T) {
 	payload := InformEventPayload{
 		DeviceId: tr069.DeviceId{
@@ -1310,4 +1349,45 @@ func TestHandlePeriodic_Success(t *testing.T) {
 	require.NotNil(t, updatedDevice)
 	assert.Equal(t, deviceID, updatedDevice.ID)
 	assert.NotNil(t, updatedDevice.LastInformAt)
+}
+
+type recordingHeartbeatGroupAssigner struct {
+	calls chan GroupAssignRequest
+}
+
+func (a *recordingHeartbeatGroupAssigner) AssignDeviceToGroup(
+	_ context.Context,
+	req GroupAssignRequest,
+) error {
+	a.calls <- req
+	return nil
+}
+
+func TestHandlePeriodic_StableDeviceDoesNotRunGroupMatching(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID: deviceID, SerialNumber: sn, OUI: "AABBCC",
+				Status: model.DeviceActive, InformInterval: 300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error { return nil },
+	}
+	svc := newInfTestDeviceService(deviceRepo, &infMockParamRepo{})
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	assigner := &recordingHeartbeatGroupAssigner{calls: make(chan GroupAssignRequest, 1)}
+	h.SetGroupAssigner(assigner)
+
+	payload := sampleInformPayload("SN-PER-NO-GROUP")
+	payload.Events = []string{"2 PERIODIC"}
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, payload)
+	require.NoError(t, err)
+	require.NoError(t, h.handlePeriodic(context.Background(), evt))
+
+	select {
+	case req := <-assigner.calls:
+		t.Fatalf("stable Periodic Inform must not run group matching: %+v", req)
+	case <-time.After(50 * time.Millisecond):
+	}
 }

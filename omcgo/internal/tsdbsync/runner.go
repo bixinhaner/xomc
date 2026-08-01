@@ -52,6 +52,11 @@ func NewSyncRunner(src, dst *pgxpool.Pool, interval time.Duration, logger *zap.L
 // Run 启动同步循环：先同步一次，再按 interval tick 循环，ctx.Done 退出。
 func (r *SyncRunner) Run(ctx context.Context) {
 	r.logger.Info("tsdb shadow-dim sync runner started", zap.Duration("interval", r.interval))
+	indexCtx, cancelIndex := context.WithTimeout(ctx, 10*time.Minute)
+	if err := r.ensureCellBandIndex(indexCtx); err != nil {
+		r.logger.Warn("ensure cell-band source index failed; sync will use the single-scan fallback", zap.Error(err))
+	}
+	cancelIndex()
 
 	// 启动先同步一次（让影子表立即可用，不等第一个 tick）。
 	if err := r.Sync(ctx); err != nil {
@@ -304,6 +309,158 @@ func (r *SyncRunner) syncDeviceGroupDim(ctx context.Context) (int64, error) {
 	return r.truncateAndCopy(ctx, "device_group_dim", cols, data)
 }
 
+const cellBandRelevantPredicate = `parameter_value IS NOT NULL
+      AND parameter_value <> ''
+      AND (parameter_path LIKE '%.CellConfig.LTE.RAN.Common.CellIdentity'
+           OR parameter_path LIKE '%.NrcellIdentity'
+           OR parameter_path LIKE '%IpaUnitId'
+           OR parameter_path LIKE '%.CellConfig.LTE.RAN.RF.FreqBandIndicator'
+           OR parameter_path LIKE '%.FreqBandIndicatorNR'
+           OR parameter_path LIKE 'DeviceGSM.Bts.%.Band')`
+
+const cellBandParentIndexSQL = `CREATE INDEX IF NOT EXISTS idx_device_params_cell_band_dim
+ON ONLY device_parameters (device_id, fap_instance, parameter_path) INCLUDE (parameter_value)
+WHERE ` + cellBandRelevantPredicate
+
+func buildCellBandChildIndexSQL(schema, partition string) (string, string) {
+	indexName := partition + "_cell_band_dim_idx"
+	sql := fmt.Sprintf(
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON %s (device_id, fap_instance, parameter_path) INCLUDE (parameter_value) WHERE %s",
+		pgx.Identifier{indexName}.Sanitize(),
+		pgx.Identifier{schema, partition}.Sanitize(),
+		cellBandRelevantPredicate,
+	)
+	return indexName, sql
+}
+
+// ensureCellBandIndex 给既有的预发布基线库在线补齐部分覆盖索引。PostgreSQL 不支持在
+// 分区父表上 CONCURRENTLY 建索引，因此先建空父索引，再逐分区并发建索引并挂接；这样
+// 参数同步写入只承受并发建索引的短暂锁阶段，不会被 830 万行的普通 CREATE INDEX 阻塞。
+func (r *SyncRunner) ensureCellBandIndex(ctx context.Context) error {
+	const parentIndex = "public.idx_device_params_cell_band_dim"
+	valid, err := r.indexValid(ctx, parentIndex)
+	if err != nil {
+		return fmt.Errorf("inspect parent cell-band index: %w", err)
+	}
+	if valid {
+		return nil
+	}
+	if _, err := r.src.Exec(ctx, cellBandParentIndexSQL); err != nil {
+		return fmt.Errorf("create parent cell-band index: %w", err)
+	}
+
+	rows, err := r.src.Query(ctx, `
+SELECT child_ns.nspname, child.relname
+  FROM pg_inherits inheritance
+  JOIN pg_class parent ON parent.oid = inheritance.inhparent
+  JOIN pg_class child ON child.oid = inheritance.inhrelid
+  JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+ WHERE parent.oid = 'public.device_parameters'::regclass
+ ORDER BY child.relname`)
+	if err != nil {
+		return fmt.Errorf("list device parameter partitions: %w", err)
+	}
+	type partitionRef struct{ schema, table string }
+	partitions := make([]partitionRef, 0, 32)
+	for rows.Next() {
+		var partition partitionRef
+		if err := rows.Scan(&partition.schema, &partition.table); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan device parameter partition: %w", err)
+		}
+		partitions = append(partitions, partition)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate device parameter partitions: %w", err)
+	}
+	rows.Close()
+
+	for _, partition := range partitions {
+		indexName, createSQL := buildCellBandChildIndexSQL(partition.schema, partition.table)
+		qualifiedChildIndex := partition.schema + "." + indexName
+		childValid, err := r.indexValid(ctx, qualifiedChildIndex)
+		if err != nil {
+			return fmt.Errorf("inspect child cell-band index %s: %w", qualifiedChildIndex, err)
+		}
+		if !childValid {
+			if _, err := r.src.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+pgx.Identifier{partition.schema, indexName}.Sanitize()); err != nil {
+				return fmt.Errorf("drop invalid child cell-band index %s: %w", qualifiedChildIndex, err)
+			}
+			if _, err := r.src.Exec(ctx, createSQL); err != nil {
+				return fmt.Errorf("create child cell-band index %s: %w", qualifiedChildIndex, err)
+			}
+		}
+
+		var attached bool
+		if err := r.src.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM pg_inherits
+   WHERE inhparent = to_regclass($1)
+     AND inhrelid = to_regclass($2)
+)`, parentIndex, qualifiedChildIndex).Scan(&attached); err != nil {
+			return fmt.Errorf("inspect child index attachment %s: %w", qualifiedChildIndex, err)
+		}
+		if !attached {
+			attachSQL := fmt.Sprintf("ALTER INDEX %s ATTACH PARTITION %s",
+				pgx.Identifier{"public", "idx_device_params_cell_band_dim"}.Sanitize(),
+				pgx.Identifier{partition.schema, indexName}.Sanitize())
+			if _, err := r.src.Exec(ctx, attachSQL); err != nil {
+				return fmt.Errorf("attach child cell-band index %s: %w", qualifiedChildIndex, err)
+			}
+		}
+	}
+
+	valid, err = r.indexValid(ctx, parentIndex)
+	if err != nil {
+		return fmt.Errorf("verify parent cell-band index: %w", err)
+	}
+	if !valid {
+		return fmt.Errorf("parent cell-band index remains invalid after attaching %d partitions", len(partitions))
+	}
+	return nil
+}
+
+func (r *SyncRunner) indexValid(ctx context.Context, qualifiedName string) (bool, error) {
+	var valid bool
+	err := r.src.QueryRow(ctx, `
+SELECT COALESCE((
+  SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass($1)
+), false)`, qualifiedName).Scan(&valid)
+	return valid, err
+}
+
+const cellBandSyncSQL = `
+WITH relevant AS (
+    SELECT device_id, fap_instance, parameter_value,
+           CASE
+             WHEN parameter_path LIKE '%.CellConfig.LTE.RAN.Common.CellIdentity'
+               OR parameter_path LIKE '%.CellConfig.LTE.RAN.RF.FreqBandIndicator' THEN 'LTE'
+             WHEN parameter_path LIKE '%.NrcellIdentity'
+               OR parameter_path LIKE '%.FreqBandIndicatorNR' THEN 'NR'
+             ELSE 'GSM'
+           END AS technology,
+           CASE
+             WHEN parameter_path LIKE '%.CellConfig.LTE.RAN.Common.CellIdentity'
+               OR parameter_path LIKE '%.NrcellIdentity'
+               OR parameter_path LIKE '%IpaUnitId' THEN 'cell'
+             ELSE 'band'
+           END AS value_kind
+      FROM device_parameters
+     WHERE ` + cellBandRelevantPredicate + `
+), paired AS (
+    SELECT device_id, fap_instance, technology,
+           MAX(parameter_value) FILTER (WHERE value_kind = 'cell') AS cell_id,
+           MAX(parameter_value) FILTER (WHERE value_kind = 'band') AS band
+      FROM relevant
+     GROUP BY device_id, fap_instance, technology
+)
+SELECT DISTINCT ON (device_id, cell_id)
+       device_id, cell_id, band
+  FROM paired
+ WHERE cell_id IS NOT NULL AND band IS NOT NULL
+ ORDER BY device_id, cell_id, fap_instance`
+
 // syncCellBandDim 派生 cell_band_dim（device_id, cell_id, band）。
 //
 // 主库无 cell_band 表：从 device_parameters 按参数路径后缀提取，
@@ -318,48 +475,8 @@ func (r *SyncRunner) syncDeviceGroupDim(ctx context.Context) (int64, error) {
 // cell_band_dim 主键 (device_id, cell_id)：同一设备同一小区号若有多 fap_instance 取任一
 // （DISTINCT ON 去重，正常一个小区号对一个 band）。
 func (r *SyncRunner) syncCellBandDim(ctx context.Context) (int64, error) {
-	// LIKE 后缀匹配（{i} 实例号在路径中已实例化为具体数字，故用 '%suffix'）。
-	const q = `
-WITH cell_id AS (
-    -- LTE
-    SELECT device_id, fap_instance, parameter_value AS cell_id
-    FROM device_parameters
-    WHERE parameter_path LIKE '%.CellConfig.LTE.RAN.Common.CellIdentity'
-      AND parameter_value IS NOT NULL
-      AND parameter_value <> ''
-    UNION ALL
-    -- NR
-    SELECT device_id, fap_instance, parameter_value AS cell_id
-    FROM device_parameters
-    WHERE parameter_path LIKE '%.NrcellIdentity'
-      AND parameter_value IS NOT NULL
-      AND parameter_value <> ''
-    UNION ALL
-    -- GSM (PM Uid= corresponds to IpaUnitId)
-    SELECT device_id, fap_instance, parameter_value AS cell_id
-    FROM device_parameters
-    WHERE parameter_path LIKE '%IpaUnitId'
-      AND parameter_value IS NOT NULL
-      AND parameter_value <> ''
-),
-band AS (
-    SELECT device_id, fap_instance, parameter_value AS band
-    FROM device_parameters
-    WHERE (parameter_path LIKE '%.CellConfig.LTE.RAN.RF.FreqBandIndicator'
-           OR parameter_path LIKE '%.FreqBandIndicatorNR'
-           OR parameter_path LIKE 'DeviceGSM.Bts.%.Band')
-      AND parameter_value IS NOT NULL
-      AND parameter_value <> ''
-)
-SELECT DISTINCT ON (c.device_id, c.cell_id)
-       c.device_id, c.cell_id, b.band
-FROM cell_id c
-JOIN band b
-  ON b.device_id = c.device_id AND b.fap_instance = c.fap_instance
-ORDER BY c.device_id, c.cell_id, c.fap_instance`
-
 	cols := []string{"device_id", "cell_id", "band"}
-	data, err := r.collectRows(ctx, q, len(cols))
+	data, err := r.collectRows(ctx, cellBandSyncSQL, len(cols))
 	if err != nil {
 		return 0, err
 	}

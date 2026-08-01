@@ -102,8 +102,12 @@ func TestResolveDevice_deviceNotFoundIsDeferred(t *testing.T) {
 }
 
 func TestHandleFileReceived_deviceNotFoundExpiresAfterRegistrationWindow(t *testing.T) {
-	c := &PMCollector{logger: zap.NewNop(), deviceLookup: &fakeDeviceLookup{dev: nil}}
-	payload := FileReceivedPayload{DeviceSN: "UnknownSN"}
+	discarder := &recordingRawDiscarder{}
+	c := &PMCollector{
+		logger: zap.NewNop(), deviceLookup: &fakeDeviceLookup{dev: nil},
+		rawDiscarder: discarder, bucket: "pm-files",
+	}
+	payload := FileReceivedPayload{DeviceSN: "UnknownSN", MinIOPath: "unknown.xml"}
 
 	fresh, err := event.NewEvent(event.SubjectPMFileReceived, payload)
 	require.NoError(t, err)
@@ -113,9 +117,8 @@ func TestHandleFileReceived_deviceNotFoundExpiresAfterRegistrationWindow(t *test
 
 	expired := fresh
 	expired.Timestamp = time.Now().Add(-DeviceRegistrationGrace - time.Second)
-	err = c.handleFileReceived(context.Background(), expired)
-	require.ErrorIs(t, err, reliability.ErrPermanent)
-	assert.False(t, errors.Is(err, reliability.ErrDeferred))
+	require.NoError(t, c.handleFileReceived(context.Background(), expired))
+	require.Equal(t, []discardCall{{bucket: "pm-files", object: "unknown.xml"}}, discarder.calls)
 }
 
 func TestResolveDevice_lookupErrorPropagates(t *testing.T) {

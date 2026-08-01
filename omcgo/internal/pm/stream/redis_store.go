@@ -36,6 +36,28 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
   return redis.call("PEXPIRE", KEYS[1], ARGV[2])
 end
 return 0`)
+	initializeEmptyScript = redis.NewScript(`
+if redis.call("GET", KEYS[2]) ~= ARGV[1] then
+  return 0
+end
+if redis.call("EXISTS", KEYS[1]) == 0 then
+  redis.call("HSET", KEYS[1],
+    "expected_slots", 0,
+    "received_slots", 0,
+    "source_expected_slots", 0,
+    "source_received_slots", 0,
+    "source_incomplete_slots", 0,
+    "shard_count", 1,
+    "task_id", ARGV[3],
+    "task_version_id", ARGV[4],
+    "entity_key", ARGV[5],
+    "granularity", ARGV[6],
+    "window_start", ARGV[7],
+    "window_end", ARGV[8],
+    "updated_at_unix", ARGV[9])
+end
+redis.call("EXPIRE", KEYS[1], ARGV[2])
+return 1`)
 )
 
 type AccumulateResult struct {
@@ -185,6 +207,45 @@ func (s *RedisWindowStore) accumulateWithLock(
 		return AccumulateResult{}, errors.New("PM aggregation rebuild lock is nil")
 	}
 	return s.accumulate(ctx, contribution, lock.token)
+}
+
+// InitializeEmptyWithLock persists an authoritative zero-valued rebuild so
+// open windows can continue receiving future rollups and published windows can
+// be finalized through the same atomic replacement path as non-empty rebuilds.
+func (s *RedisWindowStore) InitializeEmptyWithLock(
+	ctx context.Context,
+	key WindowKey,
+	lock *Lock,
+) error {
+	if lock == nil {
+		return errors.New("PM aggregation rebuild lock is nil")
+	}
+	keys := redisKeys(key, 1)
+	if lock.key != keys.lock {
+		return errors.New("PM aggregation rebuild lock belongs to another window")
+	}
+	result, err := initializeEmptyScript.Run(
+		ctx,
+		s.client,
+		[]string{keys.meta, keys.lock},
+		lock.token,
+		int64(s.windowTTL(key.Granularity).Seconds()),
+		key.TaskID.String(),
+		key.TaskVersionID.String(),
+		key.EntityKey,
+		string(key.Granularity),
+		key.Start.UTC().Format(time.RFC3339Nano),
+		key.End.UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Unix(),
+	).Int64()
+	if err != nil {
+		s.recordRedisWriteError()
+		return fmt.Errorf("initialize empty PM aggregation rebuild window: %w", err)
+	}
+	if result != 1 {
+		return errors.New("PM aggregation rebuild lock ownership lost")
+	}
+	return nil
 }
 
 func (s *RedisWindowStore) accumulate(

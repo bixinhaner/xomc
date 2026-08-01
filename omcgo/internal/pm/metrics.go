@@ -5,6 +5,7 @@ import "github.com/prometheus/client_golang/prometheus"
 // PMMetrics holds Prometheus metrics for the PM collection module.
 type PMMetrics struct {
 	FilesProcessedTotal    *prometheus.CounterVec
+	FilesDiscardedTotal    *prometheus.CounterVec
 	ProcessingDurationSecs prometheus.Histogram
 
 	// G4-Gap-1: 上报延迟 ingest_time - end_time（秒）。
@@ -34,6 +35,10 @@ func NewPMMetrics(reg prometheus.Registerer) *PMMetrics {
 			Name: "omc_pm_files_processed_total",
 			Help: "Total number of PM files processed by status",
 		}, []string{"status"}),
+		FilesDiscardedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_pm_files_discarded_total",
+			Help: "PM files intentionally discarded before parsing, classified by bounded reason.",
+		}, []string{"reason"}),
 		ProcessingDurationSecs: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "omc_pm_processing_duration_seconds",
 			Help:    "Duration of PM file processing in seconds",
@@ -64,6 +69,7 @@ func NewPMMetrics(reg prometheus.Registerer) *PMMetrics {
 
 	reg.MustRegister(
 		m.FilesProcessedTotal,
+		m.FilesDiscardedTotal,
 		m.ProcessingDurationSecs,
 		m.ReportDelaySeconds,
 		m.LateArrivalFilesTotal,

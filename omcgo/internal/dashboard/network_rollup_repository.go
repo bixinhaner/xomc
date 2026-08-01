@@ -141,6 +141,12 @@ func buildNetworkRollupSeriesSQL(query NetworkRollupQuery) (string, []any, error
 		"r.created_at",
 	).
 		From("pm_aggregation_results r").
+		Join(`pm_aggregation_publications published_revision
+  ON published_revision.task_version_id = r.task_version_id
+ AND published_revision.granularity = r.granularity
+ AND published_revision.window_start = r.window_start
+ AND published_revision.status = 'published'
+ AND published_revision.revision = r.revision`).
 		Where(sq.Eq{
 			"r.dimension":   "network",
 			"r.metric_type": string(metrics.MetricTypeKPI),
@@ -173,6 +179,12 @@ func buildLatestNetworkHourlySQL(start, end time.Time) (string, []any, error) {
 		"r.created_at",
 	).
 		From("pm_aggregation_results r").
+		Join(`pm_aggregation_publications published_revision
+  ON published_revision.task_version_id = r.task_version_id
+ AND published_revision.granularity = r.granularity
+ AND published_revision.window_start = r.window_start
+ AND published_revision.status = 'published'
+ AND published_revision.revision = r.revision`).
 		Where(sq.Eq{
 			"r.dimension":   "network",
 			"r.metric_type": string(metrics.MetricTypeKPI),
