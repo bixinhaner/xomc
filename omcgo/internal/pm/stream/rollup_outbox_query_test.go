@@ -138,12 +138,11 @@ func TestCounterRollupPeriodSelectRestrictsSourceVersions(t *testing.T) {
 	if !strings.Contains(query, "task_version_id IN") {
 		t.Fatalf("period replay query lacks source-version predicate: %s", query)
 	}
-	if !strings.Contains(query, "publication_eligible =") {
-		t.Fatalf("period replay query can read prepared snapshots: %s", query)
+	if strings.Contains(query, "publication_eligible") {
+		t.Fatalf("period replay query must retain the captured revision after eligibility flips: %s", query)
 	}
-	if !strings.Contains(query, "published_window.published_revision = rollup.revision") ||
-		!strings.Contains(query, "published_window.entity_key = rollup.entity_key") {
-		t.Fatalf("period replay query is not pinned to the entity's published revision: %s", query)
+	if !strings.Contains(query, "FROM pm_rebuild_source_snapshot rollup") {
+		t.Fatalf("period replay query does not page the materialized source rows: %s", query)
 	}
 	if !strings.Contains(query, "LIMIT 256") {
 		t.Fatalf("period replay query is not bounded: %s", query)
@@ -163,11 +162,40 @@ func TestPeriodRebuildIndexMatchesPeriodQueryPrefix(t *testing.T) {
 	if !strings.Contains(strings.Join(strings.Fields(periodRebuildIndexSQL), " "), want) {
 		t.Fatalf("period rebuild index does not lead with %q: %s", want, periodRebuildIndexSQL)
 	}
-	if !strings.Contains(periodRebuildIndexSQL, "WHERE publication_eligible") {
-		t.Fatalf("period rebuild index must match the eligible snapshot predicate: %s", periodRebuildIndexSQL)
+	if !strings.Contains(periodRebuildIndexSQL, "CREATE INDEX CONCURRENTLY") ||
+		!strings.Contains(periodRebuildIndexDropSQL, "DROP INDEX CONCURRENTLY") {
+		t.Fatalf("period rebuild index maintenance must not block hot writers: create=%s drop=%s",
+			periodRebuildIndexSQL, periodRebuildIndexDropSQL)
+	}
+	if !strings.Contains(periodRebuildIndexLockSQL, "pg_advisory_lock") ||
+		!strings.Contains(periodRebuildIndexUnlockSQL, "pg_advisory_unlock") {
+		t.Fatal("period rebuild index maintenance must serialize worker replicas")
 	}
 	if !strings.Contains(periodRebuildIndexSQL, "event_id") {
 		t.Fatalf("period rebuild index must cover the unique page cursor: %s", periodRebuildIndexSQL)
+	}
+}
+
+func TestPeriodRebuildSnapshotMapsSourceVersionToPublicationVersion(t *testing.T) {
+	query := strings.Join(strings.Fields(periodRebuildSnapshotSQL), " ")
+	if !strings.Contains(query, "rollup.task_version_id = ANY($1)") {
+		t.Fatalf("snapshot must filter the source rollup version IDs: %s", query)
+	}
+	if !strings.Contains(query,
+		"published_window.task_version_id = rollup.publication_task_version_id") {
+		t.Fatalf("snapshot must map source rollup versions to publication window versions: %s", query)
+	}
+	if !strings.Contains(query, "published_window.published_revision = rollup.revision") {
+		t.Fatalf("snapshot must materialize only the currently published revision: %s", query)
+	}
+	if strings.Contains(query, "published_window.task_version_id = ANY($1)") {
+		t.Fatalf("snapshot incorrectly treats source IDs as publication window IDs: %s", query)
+	}
+	for _, column := range []string{"rollup.event_id", "rollup.payload", "rollup.revision"} {
+		if !strings.Contains(query, column) {
+			t.Fatalf("snapshot must materialize %s so retention cannot remove a later page: %s",
+				column, query)
+		}
 	}
 }
 

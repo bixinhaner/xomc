@@ -41,13 +41,34 @@ type periodRebuildIndexDB interface {
 }
 
 const periodRebuildIndexSQL = `
-CREATE INDEX IF NOT EXISTS idx_pm_counter_rollups_period_rebuild_page
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pm_counter_rollups_period_rebuild_page
 ON public.pm_aggregation_counter_rollups (
   task_version_id, granularity, window_start, entity_key, chunk_index,
   publication_task_version_id, revision, event_id
-) WHERE publication_eligible`
+)`
+
+const periodRebuildIndexDropSQL = `DROP INDEX CONCURRENTLY IF EXISTS public.idx_pm_counter_rollups_period_rebuild_page`
+const periodRebuildIndexLockSQL = `SELECT pg_advisory_lock(hashtextextended('omc.pm.rollup.period_rebuild_index', 0))`
+const periodRebuildIndexUnlockSQL = `SELECT pg_advisory_unlock(hashtextextended('omc.pm.rollup.period_rebuild_index', 0))`
 
 const rollupSnapshotPageSize uint64 = 256
+
+const periodRebuildSnapshotSQL = `
+CREATE TEMP TABLE pm_rebuild_source_snapshot ON COMMIT PRESERVE ROWS AS
+SELECT rollup.task_version_id, rollup.granularity, rollup.window_start, rollup.entity_key,
+       rollup.chunk_index, rollup.publication_task_version_id, rollup.revision,
+       rollup.event_id, rollup.payload
+FROM pm_aggregation_counter_rollups rollup
+JOIN pm_aggregation_windows published_window
+  ON published_window.task_version_id = rollup.publication_task_version_id
+ AND published_window.entity_key = rollup.entity_key
+ AND published_window.granularity = rollup.granularity
+ AND published_window.window_start = rollup.window_start
+ AND published_window.published_revision = rollup.revision
+WHERE rollup.task_version_id = ANY($1)
+  AND rollup.granularity = $2
+  AND rollup.window_start >= $3 AND rollup.window_start < $4
+  AND published_window.published_revision IS NOT NULL`
 
 type rollupSnapshotCursor struct {
 	TaskVersionID            uuid.UUID
@@ -75,11 +96,50 @@ func NewRollupOutboxRepository(pool *pgxpool.Pool) *RollupOutboxRepository {
 	return &RollupOutboxRepository{pool: pool}
 }
 
-// EnsurePeriodRebuildIndex upgrades pre-release baseline databases in place.
-// The worker calls it before starting PM consumers, so the non-concurrent DDL
-// cannot race this process's rollup writes or rebuild scans.
-func (r *RollupOutboxRepository) EnsurePeriodRebuildIndex(ctx context.Context) error {
-	return ensurePeriodRebuildIndex(ctx, r.pool)
+// EnsurePeriodRebuildIndex upgrades older databases without blocking hot rollup
+// writers. The session lock serializes rolling worker replicas.
+func (r *RollupOutboxRepository) EnsurePeriodRebuildIndex(ctx context.Context) (returnErr error) {
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire PM rollup period rebuild index connection: %w", err)
+	}
+	locked := false
+	lockStateUncertain := false
+	defer func() {
+		if !locked {
+			if lockStateUncertain {
+				rawConn := conn.Hijack()
+				closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = rawConn.Close(closeCtx)
+				return
+			}
+			conn.Release()
+			return
+		}
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var unlocked bool
+		if err := conn.QueryRow(unlockCtx, periodRebuildIndexUnlockSQL).Scan(&unlocked); err == nil && unlocked {
+			conn.Release()
+			return
+		} else if returnErr == nil {
+			if err != nil {
+				returnErr = fmt.Errorf("release PM rollup period rebuild index advisory lock: %w", err)
+			} else {
+				returnErr = errors.New("release PM rollup period rebuild index advisory lock: lock was not held")
+			}
+		}
+		rawConn := conn.Hijack()
+		_ = rawConn.Close(unlockCtx)
+	}()
+	lockStateUncertain = true
+	if _, err := conn.Exec(ctx, periodRebuildIndexLockSQL); err != nil {
+		return fmt.Errorf("acquire PM rollup period rebuild index advisory lock: %w", err)
+	}
+	lockStateUncertain = false
+	locked = true
+	return ensurePeriodRebuildIndex(ctx, conn)
 }
 
 func ensurePeriodRebuildIndex(ctx context.Context, db periodRebuildIndexDB) error {
@@ -87,7 +147,8 @@ func ensurePeriodRebuildIndex(ctx context.Context, db periodRebuildIndexDB) erro
 	var exists, valid bool
 	if err := db.QueryRow(ctx, `
 SELECT to_regclass($1) IS NOT NULL,
-       COALESCE((SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass($1)), false)`,
+       COALESCE((SELECT indisvalid AND indpred IS NULL
+                 FROM pg_index WHERE indexrelid = to_regclass($1)), false)`,
 		qualifiedName,
 	).Scan(&exists, &valid); err != nil {
 		return fmt.Errorf("inspect PM rollup period rebuild index: %w", err)
@@ -96,7 +157,7 @@ SELECT to_regclass($1) IS NOT NULL,
 		return nil
 	}
 	if exists {
-		if _, err := db.Exec(ctx, "DROP INDEX IF EXISTS "+qualifiedName); err != nil {
+		if _, err := db.Exec(ctx, periodRebuildIndexDropSQL); err != nil {
 			return fmt.Errorf("drop invalid PM rollup period rebuild index: %w", err)
 		}
 	}
@@ -379,10 +440,9 @@ func (r *RollupOutboxRepository) ListSnapshots(
  AND published_window.window_start = rollup.window_start
  AND published_window.published_revision = rollup.revision`).
 		Where(sq.Eq{
-			"rollup.task_version_id":      taskVersionID,
-			"rollup.entity_key":           entityKey,
-			"rollup.granularity":          string(granularity),
-			"rollup.publication_eligible": true,
+			"rollup.task_version_id": taskVersionID,
+			"rollup.entity_key":      entityKey,
+			"rollup.granularity":     string(granularity),
 		}).
 		Where(sq.GtOrEq{"rollup.window_start": start}).
 		Where(sq.Lt{"rollup.window_start": end}).
@@ -425,17 +485,10 @@ func counterRollupPeriodPageSelect(
 		"rollup.task_version_id", "rollup.window_start", "rollup.entity_key", "rollup.chunk_index",
 		"rollup.publication_task_version_id", "rollup.revision", "rollup.event_id", "rollup.payload",
 	).
-		From("pm_aggregation_counter_rollups rollup").
-		Join(`pm_aggregation_windows published_window
-  ON published_window.task_version_id = rollup.publication_task_version_id
- AND published_window.entity_key = rollup.entity_key
- AND published_window.granularity = rollup.granularity
- AND published_window.window_start = rollup.window_start
- AND published_window.published_revision = rollup.revision`).
+		From("pm_rebuild_source_snapshot rollup").
 		Where(sq.Eq{
-			"rollup.task_version_id":      taskVersionIDs,
-			"rollup.granularity":          string(granularity),
-			"rollup.publication_eligible": true,
+			"rollup.task_version_id": taskVersionIDs,
+			"rollup.granularity":     string(granularity),
 		}).
 		Where(sq.GtOrEq{"rollup.window_start": start}).
 		Where(sq.Lt{"rollup.window_start": end})
@@ -463,6 +516,32 @@ func (r *RollupOutboxRepository) VisitSnapshotsForPeriod(
 	if len(taskVersionIDs) == 0 {
 		return fmt.Errorf("PM Counter rollup replay task versions are empty")
 	}
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire PM Counter rollup replay connection: %w", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `DROP TABLE IF EXISTS pg_temp.pm_rebuild_source_snapshot`); err != nil {
+		return fmt.Errorf("reset PM Counter rollup replay snapshot: %w", err)
+	}
+	if _, err := conn.Exec(ctx, periodRebuildSnapshotSQL,
+		taskVersionIDs, string(granularity), start, end); err != nil {
+		return fmt.Errorf("capture PM Counter rollup replay publication snapshot: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `
+CREATE INDEX ON pg_temp.pm_rebuild_source_snapshot
+  (task_version_id, window_start, entity_key, chunk_index,
+   publication_task_version_id, revision, event_id)`); err != nil {
+		return fmt.Errorf("index PM Counter rollup replay publication snapshot: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `ANALYZE pg_temp.pm_rebuild_source_snapshot`); err != nil {
+		return fmt.Errorf("analyze PM Counter rollup replay publication snapshot: %w", err)
+	}
+	defer func() {
+		dropCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = conn.Exec(dropCtx, `DROP TABLE IF EXISTS pg_temp.pm_rebuild_source_snapshot`)
+	}()
 	return visitRollupSnapshotPages(
 		func(cursor *rollupSnapshotCursor) ([]rollupSnapshotPageRow, error) {
 			query, args, err := counterRollupPeriodPageSelect(
@@ -471,7 +550,7 @@ func (r *RollupOutboxRepository) VisitSnapshotsForPeriod(
 			if err != nil {
 				return nil, err
 			}
-			rows, err := r.pool.Query(ctx, query, args...)
+			rows, err := conn.Query(ctx, query, args...)
 			if err != nil {
 				return nil, fmt.Errorf("query PM Counter rollup period snapshot page: %w", err)
 			}
