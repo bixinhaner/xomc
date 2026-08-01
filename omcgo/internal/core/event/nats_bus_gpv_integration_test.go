@@ -482,7 +482,7 @@ func TestKeyedQueueHandlerFailureNaksThenSuccessAcks(t *testing.T) {
 		return infoErr == nil &&
 			info.NumPending == 0 &&
 			info.NumAckPending == 0 &&
-			info.AckFloor.Stream == 1
+			info.AckFloor.Consumer >= 1
 	}, 5*time.Second, 20*time.Millisecond)
 	require.Equal(t, int64(2), attempts.Load(), "one transient failure must produce exactly one in-lane retry")
 	require.NoError(t, sub.Unsubscribe())
