@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -22,6 +23,36 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 )
+
+func TestIngestViaCopy_DiscardsChangedSourceIdentityWithoutRetry(t *testing.T) {
+	ctx := context.Background()
+	registry := prometheus.NewRegistry()
+	discards := &recordingRawDiscarder{}
+	c := &PMCollector{
+		bucket: "pm-files", rawDiscarder: discards,
+		copyIngestor: &recordingCopyIngestor{
+			err: fmt.Errorf("conflicting PM marker: %w", metrics.ErrSourceContentChanged),
+		},
+		eventBus: noopEventBus{}, logger: zap.NewNop(), metrics: pmroot.NewPMMetrics(registry),
+	}
+	payload := &FileReceivedPayload{
+		Bucket: "incoming-pm", MinIOPath: "illegal/A20260802.0230.xml",
+		DeviceSN: "SN-1", Carrier: "cmcc", Technology: "lte",
+	}
+
+	err := c.ingestViaCopy(
+		ctx, trace.SpanFromContext(ctx), time.Now(), time.Now(), 1, uuid.New(),
+		payload, &PMFileContent{CollectTime: time.Now()}, nil, false, make([]byte, 32),
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []discardCall{{
+		bucket: "incoming-pm", object: "illegal/A20260802.0230.xml",
+	}}, discards.calls)
+	require.Equal(t, float64(1), testutil.ToFloat64(
+		c.metrics.FilesDiscardedTotal.WithLabelValues("source_content_changed"),
+	))
+}
 
 func TestIngestViaCopy_IncrementsDiscoveryMetricsOnlyForNewMarker(t *testing.T) {
 	ctx := context.Background()
@@ -322,6 +353,7 @@ func TestNormalizeResults_PreservesUnknownCounterWithoutMetadata(t *testing.T) {
 type recordingCopyIngestor struct {
 	called   bool
 	ingested bool
+	err      error
 	marker   metrics.FileMarker
 	counters []model.PMCounter
 	kpis     []model.KPIValue
@@ -332,7 +364,7 @@ func (r *recordingCopyIngestor) CopyIngest(_ context.Context, marker metrics.Fil
 	r.marker = marker
 	r.counters = append([]model.PMCounter(nil), counters...)
 	r.kpis = append([]model.KPIValue(nil), kpis...)
-	return r.ingested, nil
+	return r.ingested, r.err
 }
 
 type noopEventBus struct{}

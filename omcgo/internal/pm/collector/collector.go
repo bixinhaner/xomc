@@ -708,6 +708,16 @@ func (c *PMCollector) ingestViaCopy(
 	}
 	ingested, err := c.copyIngestor.CopyIngest(ctx, marker, content.Counters, kpis)
 	if err != nil {
+		// 同一设备、同一文件名已经存在，但上传内容摘要不同，说明上游复用了
+		// 已完成窗口的源身份。这类数据无法安全覆盖既有幂等锚点，也不可能通过
+		// 重试恢复；删除当前非法对象并 ACK，避免重复投递持续占用主队列和 DLQ。
+		if errors.Is(err, metrics.ErrSourceContentChanged) {
+			if discardErr := c.discardChangedSourceRaw(ctx, *payload); discardErr != nil {
+				return discardErr
+			}
+			span.SetAttributes(attribute.String("pm.outcome", "source_content_changed"))
+			return nil
+		}
 		// 迟到补传命中压缩 chunk：与默认路径一致降级（log WARN + 记 metric + 跳过 ack），
 		// 不让历史补传反复重试灌 DLQ 阻塞实时 PM。
 		if errors.Is(err, metrics.ErrLateArrival) {
@@ -775,6 +785,37 @@ func (c *PMCollector) ingestViaCopy(
 	if perr == nil {
 		_ = c.eventBus.Publish(ctx, event.SubjectPMFileParsed, parsedEvt)
 	}
+	return nil
+}
+
+func (c *PMCollector) discardChangedSourceRaw(
+	ctx context.Context,
+	payload FileReceivedPayload,
+) error {
+	if c.rawDiscarder == nil {
+		return fmt.Errorf("discard changed-source PM raw object: discarder unavailable: %w", reliability.ErrDeferred)
+	}
+	bucket := payload.Bucket
+	if bucket == "" {
+		bucket = c.bucket
+	}
+	err := c.rawDiscarder.RemoveObject(
+		ctx,
+		bucket,
+		payload.MinIOPath,
+		minio.RemoveObjectOptions{},
+	)
+	if err != nil && !isMinIOObjectNotFound(err) {
+		return fmt.Errorf("discard changed-source PM raw object: %v: %w", err, reliability.ErrDeferred)
+	}
+	if c.metrics != nil {
+		c.metrics.FilesDiscardedTotal.WithLabelValues("source_content_changed").Inc()
+	}
+	c.logger.Warn("discarded PM file with reused source identity",
+		zap.String("reason", "source_content_changed"),
+		zap.String("object_hash", shortPMIdentityHash(payload.MinIOPath)),
+		zap.String("device_hash", shortPMIdentityHash(payload.DeviceSN)),
+	)
 	return nil
 }
 
