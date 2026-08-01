@@ -222,6 +222,7 @@ provision:
     sync_on_bootstrap: true
     sync_on_firmware_change: true
     max_concurrent: 20
+    gpv_batch_size: 100
   # T-0124 周期性参数同步：配置已迁移到 sys_configs (category='device')，
   # 由 FE 系统配置 → 设备设置 → 设备参数同步设置面板维护，运行时动态生效。
   # 参 internal/provision/periodic_sync_policy.go 默认值。

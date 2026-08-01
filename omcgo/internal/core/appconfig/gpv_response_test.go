@@ -62,4 +62,5 @@ func TestProductionConfigLoadsGPVDurableHandoffFromEnvironment(t *testing.T) {
 	require.Equal(t, uint64(416825), config.Provision.GPVResponse.RPCStartSequence)
 	require.Equal(t, 3, config.Provision.GPVResponse.RPCConcurrency)
 	require.Equal(t, 4, config.Provision.GPVResponse.ProvisionConcurrency)
+	require.Equal(t, 100, config.Provision.AutoSync.GPVBatchSize)
 }

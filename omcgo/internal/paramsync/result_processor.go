@@ -132,6 +132,9 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		}
 	}
 
+	if failed || taskStatus != task.TaskStatusCompleted {
+		failed = true
+	}
 	processedStatus := "processed"
 	if failed {
 		processedStatus = "failed"
@@ -146,9 +149,6 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		return ResultProcessOutcome{}, fmt.Errorf("mark parameter sync result processed: %w", err)
 	}
 
-	if failed || taskStatus != task.TaskStatusCompleted {
-		failed = true
-	}
 	if failed && run.Status != RunStatusCancelling {
 		if err := beginCancellingRun(ctx, tx, run, errorMessage, p.now()); err != nil {
 			return ResultProcessOutcome{}, err
@@ -158,11 +158,22 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		}
 	}
 
-	counts, err := loadAuthoritativeRunCounts(ctx, tx, run.ID)
+	authoritative, err := reconcileRunCountsForInsertedResult(
+		ctx, tx, run, failed,
+		func(ctx context.Context, tx pgx.Tx, run SyncRun) (authoritativeRunCounts, error) {
+			return loadAuthoritativeRunCounts(ctx, tx, run.ID)
+		},
+	)
 	if err != nil {
 		return ResultProcessOutcome{}, err
 	}
-	applyAuthoritativeRunCounts(run, counts)
+	if p.metrics != nil {
+		mode := "incremental"
+		if authoritative {
+			mode = "authoritative"
+		}
+		p.metrics.ResultCountMode.WithLabelValues(mode).Inc()
+	}
 	if run.Status == RunStatusCancelling {
 		finalized := run.ReadyToFinalize()
 		if finalized {
@@ -277,9 +288,46 @@ type authoritativeRunCounts struct {
 	failed    int
 }
 
+type authoritativeRunCountLoader func(context.Context, pgx.Tx, SyncRun) (authoritativeRunCounts, error)
+
+// reconcileRunCountsForInsertedResult advances counters exactly once for the
+// result row that was just inserted. The run row is locked by Process, while
+// duplicate result events return before this function. A full durable-state
+// count is therefore needed only at a failure/terminal boundary or to repair
+// invalid persisted counters, instead of once per task result.
+func reconcileRunCountsForInsertedResult(
+	ctx context.Context,
+	tx pgx.Tx,
+	run *SyncRun,
+	failed bool,
+	load authoritativeRunCountLoader,
+) (bool, error) {
+	run.TerminalTaskCount++
+	run.ProcessedTaskCount++
+	if failed {
+		run.FailedTaskCount++
+	}
+
+	invalid := run.ExpectedTaskCount < 0 ||
+		run.TerminalTaskCount < 0 || run.ProcessedTaskCount < 0 || run.FailedTaskCount < 0 ||
+		run.TerminalTaskCount > run.ExpectedTaskCount ||
+		run.ProcessedTaskCount > run.TerminalTaskCount ||
+		run.FailedTaskCount > run.ProcessedTaskCount
+	if !failed && !invalid && !run.ReadyToFinalize() {
+		return false, nil
+	}
+
+	counts, err := load(ctx, tx, *run)
+	if err != nil {
+		return false, err
+	}
+	applyAuthoritativeRunCounts(run, counts)
+	return true, nil
+}
+
 // loadAuthoritativeRunCounts derives counters from durable task/result state.
-// Result events are deliberately replayable, so incrementing counters from an
-// event would double-count after reconciliation or redelivery.
+// The caller uses it only at failure/final boundaries or to repair invalid
+// counters; duplicate events are rejected before incremental counting.
 func loadAuthoritativeRunCounts(ctx context.Context, tx pgx.Tx, runID uuid.UUID) (authoritativeRunCounts, error) {
 	const query = `
 SELECT

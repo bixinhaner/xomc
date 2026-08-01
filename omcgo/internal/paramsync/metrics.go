@@ -12,6 +12,7 @@ type Metrics struct {
 	TasksProcessed        prometheus.Gauge
 	TasksFailed           prometheus.Gauge
 	ResultRedelivery      prometheus.Counter
+	ResultCountMode       *prometheus.CounterVec
 	FinalizeTotal         *prometheus.CounterVec
 	OutboxBacklog         prometheus.Gauge
 	StagingRows           prometheus.Gauge
@@ -33,6 +34,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		TasksProcessed:        prometheus.NewGauge(prometheus.GaugeOpts{Name: "param_sync_tasks_processed", Help: "Processed task results in active parameter sync runs."}),
 		TasksFailed:           prometheus.NewGauge(prometheus.GaugeOpts{Name: "param_sync_tasks_failed", Help: "Failed task results in active parameter sync runs."}),
 		ResultRedelivery:      prometheus.NewCounter(prometheus.CounterOpts{Name: "param_sync_result_redelivery_total", Help: "Duplicate/redelivered parameter sync results."}),
+		ResultCountMode:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "param_sync_result_count_total", Help: "Parameter sync result counter updates by incremental or authoritative mode."}, []string{"mode"}),
 		FinalizeTotal:         prometheus.NewCounterVec(prometheus.CounterOpts{Name: "param_sync_finalize_total", Help: "Parameter sync finalizations by result."}, []string{"result"}),
 		OutboxBacklog:         prometheus.NewGauge(prometheus.GaugeOpts{Name: "param_sync_outbox_backlog", Help: "Pending/failed parameter sync outbox rows."}),
 		StagingRows:           prometheus.NewGauge(prometheus.GaugeOpts{Name: "param_sync_staging_rows", Help: "Current parameter sync staging rows."}),
@@ -45,7 +47,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	if reg != nil {
 		reg.MustRegister(m.RequestsTotal, m.RunsActive, m.RequestDuration, m.RunDuration,
 			m.TasksExpected, m.TasksTerminal, m.TasksProcessed, m.TasksFailed,
-			m.ResultRedelivery, m.FinalizeTotal, m.OutboxBacklog, m.StagingRows, m.ReconcileRepairs,
+			m.ResultRedelivery, m.ResultCountMode, m.FinalizeTotal, m.OutboxBacklog, m.StagingRows, m.ReconcileRepairs,
 			m.ResultShardQueueDepth, m.ResultShardQueueFull, m.ResultShardInflight, m.ResultProcessDuration)
 	}
 	return m

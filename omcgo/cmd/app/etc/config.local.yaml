@@ -142,6 +142,7 @@ provision:
     sync_on_bootstrap: true
     sync_on_firmware_change: true
     max_concurrent: 20
+    gpv_batch_size: 100
 
 datamodel_expiry:
   auto_max_idle_days: 15    # 自动发现模板最大空闲天数
