@@ -111,6 +111,52 @@ func TestBuiltinReconcilerSavesEditedRuleWithoutHiddenDeviceTask(t *testing.T) {
 	require.Equal(t, builtinCountersForTest(), captured[0].Counters)
 }
 
+func TestBuiltinReconcilerUsesOneDeviceBaselineAcrossDimensions(t *testing.T) {
+	baselineDeviceID := uuid.MustParse("10000000-0000-4000-8000-000000000001")
+	lateDeviceID := uuid.MustParse("10000000-0000-4000-8000-000000000002")
+	network := builtinTaskForTest()
+	group := builtinTaskForTest()
+	group.ID = uuid.MustParse("0184dddd-0002-4000-8000-000000000001")
+	group.Name = "内置-设备组-LTE"
+	group.Dimension = DimensionDeviceGroup
+	var captured []pmstream.SaveTaskRequest
+	reconciler := &BuiltinReconciler{
+		list: func(context.Context) ([]Task, error) {
+			return []Task{network, group}, nil
+		},
+		resolveDeviceBaseline: func(_ context.Context, technology string) ([]uuid.UUID, error) {
+			require.Equal(t, "lte", technology)
+			return []uuid.UUID{baselineDeviceID}, nil
+		},
+		resolveRules: func(context.Context, string, []string) ([]pmstream.MetricRule, error) {
+			return builtinRulesForTest(), nil
+		},
+		resolveCounters: func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error) {
+			return builtinCountersForTest(), nil
+		},
+		resolveMembers: func(_ context.Context, task *Task) ([]pmstream.TaskMember, error) {
+			return []pmstream.TaskMember{
+				{DeviceID: baselineDeviceID, DeviceSN: "SN-BASE", DimensionKey: string(task.Dimension)},
+				{DeviceID: lateDeviceID, DeviceSN: "SN-LATE", DimensionKey: string(task.Dimension)},
+			}, nil
+		},
+		save: func(_ context.Context, req pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error) {
+			captured = append(captured, req)
+			return &pmstream.TaskVersionSnapshot{NewVersion: true}, nil
+		},
+	}
+
+	result, err := reconciler.Reconcile(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Saved)
+	require.Len(t, captured, 2)
+	for _, req := range captured {
+		require.Len(t, req.Members, 1)
+		require.Equal(t, baselineDeviceID, req.Members[0].DeviceID)
+	}
+}
+
 func TestBuiltinReconcilerContinuesAfterOneDefinitionFails(t *testing.T) {
 	first := builtinTaskForTest()
 	second := builtinTaskForTest()

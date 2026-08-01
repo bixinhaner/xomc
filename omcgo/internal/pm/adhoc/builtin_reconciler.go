@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
 
@@ -22,6 +23,7 @@ type BuiltinReconciler struct {
 	resolveEnabledMetricPaths func(context.Context, string) ([]string, error)
 	resolveRules              func(context.Context, string, []string) ([]pmstream.MetricRule, error)
 	resolveCounters           func(context.Context, string, []pmstream.MetricRule) ([]pmstream.CounterRule, error)
+	resolveDeviceBaseline     func(context.Context, string) ([]uuid.UUID, error)
 	resolveMembers            func(context.Context, *Task) ([]pmstream.TaskMember, error)
 	save                      func(context.Context, pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error)
 	purgeObsolete             func(context.Context) (int, error)
@@ -36,6 +38,7 @@ func NewBuiltinReconciler(repo *PgRepository) *BuiltinReconciler {
 		resolveEnabledMetricPaths: repo.resolveEnabledStreamingMetricPaths,
 		resolveRules:              repo.resolveStreamingRules,
 		resolveCounters:           repo.resolveStreamingCounters,
+		resolveDeviceBaseline:     repo.resolveStreamingDeviceBaseline,
 		resolveMembers:            repo.resolveStreamingMembers,
 		save: func(ctx context.Context, req pmstream.SaveTaskRequest) (*pmstream.TaskVersionSnapshot, error) {
 			if repo.streamRepo == nil {
@@ -65,6 +68,10 @@ func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResu
 	if err != nil {
 		return result, fmt.Errorf("list builtin PM aggregation tasks: %w", err)
 	}
+	baselines, baselineErr := r.loadDeviceBaselines(ctx, tasks)
+	if baselineErr != nil {
+		return result, baselineErr
+	}
 	var reconcileErrors []error
 	for i := range tasks {
 		task := &tasks[i]
@@ -72,7 +79,9 @@ func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResu
 			continue
 		}
 		result.Definitions++
-		empty, changed, saveErr := r.saveStreamingDefinition(ctx, task, time.Time{})
+		empty, changed, saveErr := r.saveStreamingDefinition(
+			ctx, task, time.Time{}, baselines[task.Technology],
+		)
 		if saveErr != nil {
 			result.Failed++
 			reconcileErrors = append(reconcileErrors, builtinReconcileError(task, saveErr))
@@ -89,11 +98,48 @@ func (r *BuiltinReconciler) Reconcile(ctx context.Context) (BuiltinReconcileResu
 	return result, errors.Join(reconcileErrors...)
 }
 
+func (r *BuiltinReconciler) loadDeviceBaselines(
+	ctx context.Context,
+	tasks []Task,
+) (map[string]map[uuid.UUID]struct{}, error) {
+	if r.resolveDeviceBaseline == nil {
+		return nil, nil
+	}
+	baselines := make(map[string]map[uuid.UUID]struct{})
+	for i := range tasks {
+		task := &tasks[i]
+		if !task.IsBuiltin || task.Mode != ModeContinuous {
+			continue
+		}
+		if _, exists := baselines[task.Technology]; exists {
+			continue
+		}
+		deviceIDs, err := r.resolveDeviceBaseline(ctx, task.Technology)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"resolve built-in PM device baseline for %s: %w",
+				task.Technology, err,
+			)
+		}
+		baseline := make(map[uuid.UUID]struct{}, len(deviceIDs))
+		for _, deviceID := range deviceIDs {
+			baseline[deviceID] = struct{}{}
+		}
+		baselines[task.Technology] = baseline
+	}
+	return baselines, nil
+}
+
 func builtinReconcileError(task *Task, err error) error {
 	return fmt.Errorf("reconcile builtin PM aggregation task %s (%s): %w", task.ID, task.Name, err)
 }
 
-func (r *BuiltinReconciler) saveStreamingDefinition(ctx context.Context, task *Task, effectiveFrom time.Time) (bool, bool, error) {
+func (r *BuiltinReconciler) saveStreamingDefinition(
+	ctx context.Context,
+	task *Task,
+	effectiveFrom time.Time,
+	deviceBaseline map[uuid.UUID]struct{},
+) (bool, bool, error) {
 	outputMetricPaths := task.MetricPaths
 	if r.resolveEnabledMetricPaths != nil {
 		enabledPaths, resolveErr := r.resolveEnabledMetricPaths(ctx, task.Technology)
@@ -114,6 +160,9 @@ func (r *BuiltinReconciler) saveStreamingDefinition(ctx context.Context, task *T
 	if resolveErr != nil {
 		return false, false, resolveErr
 	}
+	if deviceBaseline != nil {
+		members = filterMembersByDeviceBaseline(members, deviceBaseline)
+	}
 	creator := task.Creator
 	if creator == "" {
 		creator = "system"
@@ -129,4 +178,17 @@ func (r *BuiltinReconciler) saveStreamingDefinition(ctx context.Context, task *T
 		return false, false, saveErr
 	}
 	return len(members) == 0, snapshot != nil && snapshot.NewVersion, nil
+}
+
+func filterMembersByDeviceBaseline(
+	members []pmstream.TaskMember,
+	baseline map[uuid.UUID]struct{},
+) []pmstream.TaskMember {
+	filtered := make([]pmstream.TaskMember, 0, len(members))
+	for _, member := range members {
+		if _, ok := baseline[member.DeviceID]; ok {
+			filtered = append(filtered, member)
+		}
+	}
+	return filtered
 }
