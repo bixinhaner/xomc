@@ -17,9 +17,9 @@ tsdb:
   dsn: "postgres://${POSTGRES_TSDB_USER}:${POSTGRES_TSDB_PASSWORD}@${TSDB_HOST}:5432/${POSTGRES_TSDB_DB}?sslmode=disable"
   # 连接池核定（#24）：KPI 聚合和 PM 原始入库共享本池。
   # 2 万设备槽位上报会与 12 分钟后的小时结算重叠：32 路 PM COPY + 32 路
-  # finalize + normalized/hourly/daily 三路各 8 个聚合写消费者 + 8 路后台余量，
-  # 共需 96 连接。低于此预算会让结算抢占入库连接并放大 pm-workers pending。
-  max_conns: 96
+  # finalize + normalized/hourly/daily 三路各 16 个聚合写消费者 + 8 路后台余量，
+  # 共需 120 连接；按 2 的幂次上取整为 128。低于此预算会让结算抢占入库连接并放大 pm-workers pending。
+  max_conns: 128
   min_conns: 5
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m

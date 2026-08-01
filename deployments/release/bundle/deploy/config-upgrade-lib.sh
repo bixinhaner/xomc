@@ -283,12 +283,12 @@ worker_tsdb_max_conns() {
   ' "$config"
 }
 
-WORKER_TSDB_SAFE_POOL=96
+WORKER_TSDB_SAFE_POOL=128
 
 # validate_worker_tsdb_pool_precheck <现网 Worker 配置> <新包 Worker 模板>
 #
 # 纯只读门禁，供安装器 Step 1 在任何停服、数据迁移或配置改写前调用。
-# 首次部署尚无现网配置时放行；存量配置只允许历史默认 40（稍后自动迁移）
+# 首次部署尚无现网配置时放行；存量配置只允许历史默认 40/96（稍后自动迁移）
 # 或已经达到安全预算的值。
 validate_worker_tsdb_pool_precheck() {
   local live_config="$1" template_config="$2"
@@ -300,12 +300,12 @@ validate_worker_tsdb_pool_precheck() {
 
   [ -f "$live_config" ] || return 0
   live_limit="$(worker_tsdb_max_conns "$live_config")" || return 1
-  [ "$live_limit" -eq 40 ] || [ "$live_limit" -ge "$WORKER_TSDB_SAFE_POOL" ]
+  [ "$live_limit" -eq 40 ] || [ "$live_limit" -eq 96 ] || [ "$live_limit" -ge "$WORKER_TSDB_SAFE_POOL" ]
 }
 
 # upgrade_worker_tsdb_pool <现网 Worker 配置> <新包 Worker 模板>
 #
-# 仅把项目历史默认值 40 迁移到新模板值。足够大的运维自定义值保持不变；
+# 仅把项目历史默认值 40/96 迁移到新模板值。足够大的运维自定义值保持不变；
 # 小于新模板安全预算的自定义值不自动覆盖，而是返回 insufficient 让安装器在
 # 切换 current 和重启服务前明确阻断。结果通过
 # WORKER_TSDB_POOL_UPGRADE_RESULT 返回。
@@ -329,7 +329,7 @@ upgrade_worker_tsdb_pool() {
     WORKER_TSDB_POOL_UPGRADE_RESULT="preserved"
     return 0
   fi
-  if [ "$live_limit" -ne 40 ]; then
+  if [ "$live_limit" -ne 40 ] && [ "$live_limit" -ne 96 ]; then
     WORKER_TSDB_POOL_UPGRADE_RESULT="insufficient"
     return 0
   fi
@@ -370,7 +370,7 @@ upgrade_worker_tsdb_pool() {
           quote = sprintf("%c", 39)
           scalar = substr(scalar, 2, length(scalar) - 2)
         }
-        if (scalar != "40") {
+        if (scalar != "40" && scalar != "96") {
           print
           next
         }

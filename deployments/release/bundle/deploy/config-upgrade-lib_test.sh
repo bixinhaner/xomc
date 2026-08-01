@@ -190,7 +190,7 @@ cat > "$tmp/worker-template.yaml" <<'YAML'
 db:
   max_conns: 25
 tsdb:
-  max_conns: 96
+  max_conns: 128
 redis:
   pool_size: 100
 YAML
@@ -208,12 +208,30 @@ upgrade_worker_tsdb_pool "$tmp/worker-legacy.yaml" "$tmp/worker-template.yaml"
   echo "FAIL: legacy Worker TSDB pool must be reported as migrated" >&2
   exit 1
 }
-grep -q '^  max_conns: 96 # old project default$' "$tmp/worker-legacy.yaml" || {
-  echo "FAIL: legacy Worker TSDB pool was not upgraded from 40 to 96" >&2
+grep -q '^  max_conns: 128 # old project default$' "$tmp/worker-legacy.yaml" || {
+  echo "FAIL: legacy Worker TSDB pool was not upgraded from 40 to 128" >&2
   exit 1
 }
 grep -q '^  max_conns: 25$' "$tmp/worker-legacy.yaml" || {
   echo "FAIL: Worker DB pool was changed with the TSDB pool" >&2
+  exit 1
+}
+
+cat > "$tmp/worker-previous-default.yaml" <<'YAML'
+tsdb:
+  max_conns: 96 # previous production default
+YAML
+validate_worker_tsdb_pool_precheck "$tmp/worker-previous-default.yaml" "$tmp/worker-template.yaml" || {
+  echo "FAIL: precheck must allow the previous 96-connection project default for migration" >&2
+  exit 1
+}
+upgrade_worker_tsdb_pool "$tmp/worker-previous-default.yaml" "$tmp/worker-template.yaml"
+[ "${WORKER_TSDB_POOL_UPGRADE_RESULT:-}" = "migrated" ] || {
+  echo "FAIL: previous 96-connection Worker TSDB default must be migrated" >&2
+  exit 1
+}
+grep -q '^  max_conns: 128 # previous production default$' "$tmp/worker-previous-default.yaml" || {
+  echo "FAIL: previous Worker TSDB pool was not upgraded from 96 to 128" >&2
   exit 1
 }
 
@@ -230,7 +248,7 @@ upgrade_worker_tsdb_pool "$tmp/worker-legacy.yaml" "$tmp/worker-template.yaml"
 
 cat > "$tmp/worker-custom-sufficient.yaml" <<'YAML'
 tsdb:
-  max_conns: 128
+  max_conns: 160
 YAML
 before_worker_custom="$(cksum < "$tmp/worker-custom-sufficient.yaml")"
 upgrade_worker_tsdb_pool "$tmp/worker-custom-sufficient.yaml" "$tmp/worker-template.yaml"
@@ -263,14 +281,14 @@ tsdb:
   max_conns: "40" # quoted old project default
 YAML
 upgrade_worker_tsdb_pool "$tmp/worker-quoted-legacy.yaml" "$tmp/worker-template.yaml"
-grep -q '^  max_conns: "96" # quoted old project default$' "$tmp/worker-quoted-legacy.yaml" || {
+grep -q '^  max_conns: "128" # quoted old project default$' "$tmp/worker-quoted-legacy.yaml" || {
   echo "FAIL: quoted legacy Worker TSDB pool was not migrated with its scalar style preserved" >&2
   exit 1
 }
 
 cat > "$tmp/worker-quoted-sufficient.yaml" <<'YAML'
 tsdb:
-  max_conns: '128'
+  max_conns: '160'
 YAML
 before_worker_quoted_sufficient="$(cksum < "$tmp/worker-quoted-sufficient.yaml")"
 upgrade_worker_tsdb_pool "$tmp/worker-quoted-sufficient.yaml" "$tmp/worker-template.yaml"
@@ -303,7 +321,7 @@ tsdb:
 YAML
 before_worker_bad_template="$(cksum < "$tmp/worker-template-guard-live.yaml")"
 if upgrade_worker_tsdb_pool "$tmp/worker-template-guard-live.yaml" "$tmp/worker-bad-template.yaml"; then
-  echo "FAIL: Worker TSDB migration must reject a template whose safe budget is not 96" >&2
+  echo "FAIL: Worker TSDB migration must reject a template whose safe budget is not 128" >&2
   exit 1
 fi
 [ "$(cksum < "$tmp/worker-template-guard-live.yaml")" = "$before_worker_bad_template" ] || {

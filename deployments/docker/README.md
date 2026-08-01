@@ -807,7 +807,7 @@ curl -fsS http://localhost:8081/healthz
 - `PM_AGGREGATION_CLOSE_GRACE`：小时缺数据窗口的最小关闭宽限，默认 `12m`。到期后仍需等待聚合事件水位满足关闭条件。
 - `PM_AGGREGATION_OUTBOX_BATCH`：发布/拉取批量，默认 `100`。
 - `PM_AGGREGATION_CONSUMER_CONCURRENCY`：标准事件消费并发，默认 `8`。
-- `PM_AGGREGATION_FINALIZE_CONCURRENCY`：窗口落库并发预算，默认 `4`。
+- `PM_AGGREGATION_FINALIZE_CONCURRENCY`：窗口落库并发预算，默认 `32`；用于保证 2 万设备窗口在水位到达后及时收口。
 - `PM_AGGREGATION_MAX_EVENT_BYTES`：单个标准事件上限，默认 `8MiB`，必须小于 NATS `max_payload`。
 - `PM_AGGREGATION_WINDOW_TTL`：未知粒度的 Redis 窗口兜底 TTL；小时/日/周/月分别固定为
   `4h`、`72h`、`14d`、`45d`。

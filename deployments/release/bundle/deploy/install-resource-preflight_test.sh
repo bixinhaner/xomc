@@ -73,7 +73,7 @@ prepare_package() {
   : >"$pkg/deploy/docker-compose.app.yml"
   cat >"$pkg/etc/worker.prod.yaml" <<'EOF'
 tsdb:
-  max_conns: 96
+  max_conns: 128
 EOF
   printf 'project_version=preflight-test\n' >"$pkg/VERSION"
 }
