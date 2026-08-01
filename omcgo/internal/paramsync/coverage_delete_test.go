@@ -23,7 +23,7 @@ func TestBuildFullSyncReconcileDeleteCombinesCompleteCoverageIntoOneStatement(t 
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, 1, strings.Count(sql, "DELETE FROM device_parameters"))
-	require.Contains(t, sql, "(parameter_path = $2) OR")
+	require.Contains(t, sql, "parameter_path = $2 OR")
 	require.Contains(t, sql, "parameter_path LIKE $3")
 	require.Contains(t, sql, "parameter_path ~ $4")
 	require.NotContains(t, args, "Device.Incomplete")
@@ -36,6 +36,20 @@ func TestFrozenCoveragePathPredicateUsesExactMappedLeaf(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, sql, "parameter_path = ?")
 	assert.Equal(t, []any{"Device.Info.Serial"}, args)
+}
+
+func TestFrozenCoveragePathPredicateCollapsesExactLeavesIntoOneIndexedSet(t *testing.T) {
+	sql, args, err := frozenCoveragePathPredicate(CoverageScope{Mappings: []FrozenMapping{
+		{StandardPath: "Device.Info.Serial", IsStorable: true},
+		{StandardPath: "Device.Info.Model", IsStorable: true},
+		{StandardPath: "Device.Info.Software", IsStorable: true},
+	}}).ToSql()
+	require.NoError(t, err)
+	require.Contains(t, sql, "parameter_path IN (?,?,?)")
+	require.NotContains(t, sql, " OR ")
+	require.Equal(t, []any{
+		"Device.Info.Serial", "Device.Info.Model", "Device.Info.Software",
+	}, args)
 }
 
 func TestFrozenCoveragePathPredicateOnlyMatchesMappedRuntimeInstances(t *testing.T) {

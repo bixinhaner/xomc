@@ -940,21 +940,20 @@ WHERE ` + deviceParameterUnchangedGuard
 }
 
 func buildFullSyncReconcileDelete(deviceID, runID uuid.UUID, coverage []CoverageScope) (string, []any, bool, error) {
-	completePredicates := sq.Or{}
+	completeMappings := make([]FrozenMapping, 0)
 	for _, scope := range coverage {
 		if !scope.Complete || scope.Path == "" {
 			continue
 		}
-		if predicate := frozenCoveragePathPredicate(scope); predicate != nil {
-			completePredicates = append(completePredicates, predicate)
-		}
+		completeMappings = append(completeMappings, scope.Mappings...)
 	}
-	if len(completePredicates) == 0 {
+	completePredicate := frozenCoverageMappingsPredicate(completeMappings)
+	if completePredicate == nil {
 		return "", nil, false, nil
 	}
 	query, args, err := storage.Psql.Delete("device_parameters").
 		Where(sq.Eq{"device_id": deviceID}).
-		Where(completePredicates).
+		Where(completePredicate).
 		Where("NOT EXISTS (SELECT 1 FROM parameter_sync_staging_values s WHERE s.run_id = ? AND s.parameter_path = device_parameters.parameter_path)", runID).
 		ToSql()
 	if err != nil {
@@ -964,8 +963,14 @@ func buildFullSyncReconcileDelete(deviceID, runID uuid.UUID, coverage []Coverage
 }
 
 func frozenCoveragePathPredicate(coverage CoverageScope) sq.Sqlizer {
+	return frozenCoverageMappingsPredicate(coverage.Mappings)
+}
+
+func frozenCoverageMappingsPredicate(mappings []FrozenMapping) sq.Sqlizer {
 	predicates := sq.Or{}
-	for _, mapping := range coverage.Mappings {
+	exactPaths := make([]string, 0, len(mappings))
+	exactSeen := make(map[string]struct{}, len(mappings))
+	for _, mapping := range mappings {
 		if !mapping.IsStorable || mapping.StandardPath == "" {
 			continue
 		}
@@ -983,8 +988,16 @@ func frozenCoveragePathPredicate(coverage CoverageScope) sq.Sqlizer {
 				sq.Expr("parameter_path ~ ?", pattern),
 			})
 		} else {
-			predicates = append(predicates, sq.Eq{"parameter_path": mapping.StandardPath})
+			if _, exists := exactSeen[mapping.StandardPath]; !exists {
+				exactSeen[mapping.StandardPath] = struct{}{}
+				exactPaths = append(exactPaths, mapping.StandardPath)
+			}
 		}
+	}
+	if len(exactPaths) == 1 {
+		predicates = append([]sq.Sqlizer{sq.Eq{"parameter_path": exactPaths[0]}}, predicates...)
+	} else if len(exactPaths) > 1 {
+		predicates = append([]sq.Sqlizer{sq.Eq{"parameter_path": exactPaths}}, predicates...)
 	}
 	if len(predicates) == 0 {
 		return nil
