@@ -127,6 +127,10 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	}
 	outboxRepo := pmstream.NewOutboxRepository(w.TsPool)
 	rollupOutboxRepo := pmstream.NewRollupOutboxRepository(w.TsPool)
+	if err := rollupOutboxRepo.EnsurePeriodRebuildIndex(ctx); err != nil {
+		logger.Error("ensure PM rollup period rebuild index", zap.Error(err))
+		return
+	}
 	rebuildRepo := pmstream.NewRebuildRepository(w.TsPool)
 	consumer := pmstream.NewConsumer(
 		w.EventBus, snapshot, matcher, windowRepo, store, finalizer, logger,

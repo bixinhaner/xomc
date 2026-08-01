@@ -34,6 +34,13 @@ type RollupOutboxRepository struct {
 	pool *pgxpool.Pool
 }
 
+const periodRebuildIndexSQL = `
+CREATE INDEX IF NOT EXISTS idx_pm_counter_rollups_period_rebuild
+ON public.pm_aggregation_counter_rollups (
+  task_version_id, granularity, window_start, entity_key, chunk_index,
+  publication_task_version_id, revision
+) WHERE publication_eligible`
+
 func rollupEventIDForRevision(eventID uuid.UUID, revision int) uuid.UUID {
 	if revision <= 1 {
 		return eventID
@@ -43,6 +50,16 @@ func rollupEventIDForRevision(eventID uuid.UUID, revision int) uuid.UUID {
 
 func NewRollupOutboxRepository(pool *pgxpool.Pool) *RollupOutboxRepository {
 	return &RollupOutboxRepository{pool: pool}
+}
+
+// EnsurePeriodRebuildIndex upgrades pre-release baseline databases in place.
+// The worker calls it before starting PM consumers, so the non-concurrent DDL
+// cannot race this process's rollup writes or rebuild scans.
+func (r *RollupOutboxRepository) EnsurePeriodRebuildIndex(ctx context.Context) error {
+	if _, err := r.pool.Exec(ctx, periodRebuildIndexSQL); err != nil {
+		return fmt.Errorf("ensure PM rollup period rebuild index: %w", err)
+	}
+	return nil
 }
 
 func insertRollupTx(ctx context.Context, tx pgx.Tx, payload RollupPayload) error {

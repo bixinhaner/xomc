@@ -977,6 +977,11 @@ CREATE INDEX idx_pm_aggregation_counter_rollups_recovery
     );
 CREATE INDEX idx_pm_aggregation_counter_rollups_retention
     ON public.pm_aggregation_counter_rollups (granularity, window_start);
+CREATE INDEX idx_pm_counter_rollups_period_rebuild
+    ON public.pm_aggregation_counter_rollups (
+        task_version_id, granularity, window_start, entity_key, chunk_index,
+        publication_task_version_id, revision
+    ) WHERE publication_eligible;
 
 CREATE TABLE public.pm_aggregation_rollup_outbox (
     event_id uuid PRIMARY KEY,

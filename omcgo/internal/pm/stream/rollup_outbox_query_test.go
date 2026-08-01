@@ -110,6 +110,16 @@ func TestCounterRollupPeriodSelectRestrictsSourceVersions(t *testing.T) {
 	}
 }
 
+func TestPeriodRebuildIndexMatchesPeriodQueryPrefix(t *testing.T) {
+	want := "task_version_id, granularity, window_start"
+	if !strings.Contains(strings.Join(strings.Fields(periodRebuildIndexSQL), " "), want) {
+		t.Fatalf("period rebuild index does not lead with %q: %s", want, periodRebuildIndexSQL)
+	}
+	if !strings.Contains(periodRebuildIndexSQL, "WHERE publication_eligible") {
+		t.Fatalf("period rebuild index must match the eligible snapshot predicate: %s", periodRebuildIndexSQL)
+	}
+}
+
 func TestPendingRollupOutboxRequiresPublishedRevisionEligibility(t *testing.T) {
 	query, _, err := pendingRollupOutboxSelect("event_id", "subject", "payload").ToSql()
 	if err != nil {
