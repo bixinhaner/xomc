@@ -29,6 +29,20 @@ import (
 	devtask "github.com/omcgo/omcgo/internal/task"
 )
 
+const (
+	softwarePeriodicConsumerConcurrency = 16
+	softwarePeriodicConsumerQueueDepth  = 64
+)
+
+type softwareKeyedQueueEventBus interface {
+	KeyedQueueSubscribe(
+		subject string,
+		config event.KeyedQueueConfig,
+		keyFunc event.EventKeyFunc,
+		handler event.EventHandler,
+	) (event.Subscription, error)
+}
+
 // finalizeSubTaskFailure 是 BatchCollect / BatchUpgrade / RollbackDevices 共用的"sub_task
 // 创建失败后的兜底"。这里只清理已经 commit 的 mainTask，并把 PG unique violation
 // 翻译成业务层 ErrAlreadyExists 让 handler 自动映射到 HTTP 409。
@@ -1987,9 +2001,27 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 
 	// Device periodic — check for pending upgrades on reconnect.
 	// 每次心跳都触发；payload 含 device_id 嵌套对象（ACS publish）。
-	_, err = eventBus.QueueSubscribe(event.SubjectDevicePeriodic, "software-upgrade-periodic", func(ctx context.Context, evt event.Event) error {
+	periodicHandler := func(ctx context.Context, evt event.Event) error {
 		return s.executor.HandleDeviceOnline(ctx, evt)
-	})
+	}
+	if keyedBus, ok := eventBus.(softwareKeyedQueueEventBus); ok {
+		_, err = keyedBus.KeyedQueueSubscribe(
+			event.SubjectDevicePeriodic,
+			event.KeyedQueueConfig{
+				Durable:     "software-upgrade-periodic",
+				Concurrency: softwarePeriodicConsumerConcurrency,
+				QueueDepth:  softwarePeriodicConsumerQueueDepth,
+			},
+			softwarePeriodicDeviceKey,
+			periodicHandler,
+		)
+	} else {
+		_, err = eventBus.QueueSubscribe(
+			event.SubjectDevicePeriodic,
+			"software-upgrade-periodic",
+			periodicHandler,
+		)
+	}
 	if err != nil {
 		s.logger.Warn("subscribe device periodic", zap.Error(err))
 	}
@@ -2033,6 +2065,22 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 	// LogCollect sub_task 到 Completed。
 
 	return nil
+}
+
+func softwarePeriodicDeviceKey(evt event.Event) (string, error) {
+	var payload struct {
+		DeviceID struct {
+			SerialNumber string `json:"serial_number"`
+		} `json:"device_id"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil {
+		return "", fmt.Errorf("decode software periodic device key: %w", err)
+	}
+	serialNumber := strings.TrimSpace(payload.DeviceID.SerialNumber)
+	if serialNumber == "" {
+		return "", stderrors.New("software periodic device key has empty serial number")
+	}
+	return serialNumber, nil
 }
 
 // StartTaskReaper starts a background goroutine that periodically scans for
