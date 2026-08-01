@@ -322,6 +322,25 @@ func NewTaskMetrics(reg prometheus.Registerer) *TaskMetrics {
 	return m
 }
 
+// DisableRedisQueueObservation removes the primed Redis queue series from a
+// process that does not own the expensive keyspace observation. This prevents
+// an intentional non-owner from exporting false up=0 samples while keeping the
+// remaining task metrics available in that process.
+func (m *TaskMetrics) DisableRedisQueueObservation() {
+	if m == nil {
+		return
+	}
+	for _, family := range []string{redisQueueFamilyCommand, redisQueueFamilyTask} {
+		m.RedisTaskQueueLengthTotal.DeleteLabelValues(family)
+		m.RedisTaskQueueActiveDevices.DeleteLabelValues(family)
+		m.RedisTaskQueueMaxLength.DeleteLabelValues(family)
+		m.RedisTaskQueueOldestAgeSeconds.DeleteLabelValues(family)
+		m.RedisTaskQueueScanDuration.DeleteLabelValues(family)
+		m.RedisTaskQueueUp.DeleteLabelValues(family)
+		m.RedisTaskQueueSampleTimestamp.DeleteLabelValues(family)
+	}
+}
+
 // Recovery action 标签常量，避免散落字符串。
 const (
 	RecoveryActionRestorePending  = "restore_pending"

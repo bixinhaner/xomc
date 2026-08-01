@@ -13,7 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/components"
 	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/internal/task"
-	"github.com/redis/go-redis/v9"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
@@ -79,9 +79,8 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	// issue #20：任务指标在这里就构造并注入 —— 必须早于 runWorker 里的
 	// RestorePendingQueues，否则启动期 recovery 动作（restore_pending）打点时
 	// metrics 还是 nil。reconciler / 双写中断指标复用同一实例。
-	taskMetrics := task.NewTaskMetrics(inf.MetricsReg)
+	taskMetrics := newWorkerTaskMetrics(inf.MetricsReg)
 	taskSvc.SetMetrics(taskMetrics)
-	startRedisQueueObserver(inf.Redis, taskMetrics, inf.GS, inf.Logger)
 	persistentQueueMetrics := components.NewPersistentQueueMetrics(inf.MetricsReg)
 	persistentQueueObserver := components.NewPersistentQueueObserver(inf.PgPool, persistentQueueMetrics, 30*time.Second, inf.Logger)
 	persistentQueueObserver.Start(context.Background())
@@ -115,25 +114,13 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	return w, nil
 }
 
-// startRedisQueueObserver wires the Redis backlog observer into the worker's
-// lifecycle. Worker and app share the same Redis database, so both processes
-// must sample the queue; otherwise the worker's pre-initialized up=0 gauges
-// look like an outage even when the queue is readable.
-func startRedisQueueObserver(
-	client redis.UniversalClient,
-	metrics *task.TaskMetrics,
-	gs *components.GracefulShutdown,
-	logger *zap.Logger,
-) *task.RedisQueueObserver {
-	observer := task.NewRedisQueueObserver(client, metrics, 30*time.Second, logger)
-	observer.Start(context.Background())
-	if gs != nil {
-		gs.Register("redis-task-queue-observer", 1, func(context.Context) error {
-			observer.Stop()
-			return nil
-		})
-	}
-	return observer
+func newWorkerTaskMetrics(reg prometheus.Registerer) *task.TaskMetrics {
+	metrics := task.NewTaskMetrics(reg)
+	// The app process owns the Redis keyspace observation. Running the same
+	// multi-million-key scan in worker doubles Redis CPU/IO and creates false
+	// up=0 series while a long initial scan is still in progress.
+	metrics.DisableRedisQueueObservation()
+	return metrics
 }
 
 func (w *workerInfra) registerCarriers() {

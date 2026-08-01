@@ -17,8 +17,12 @@ import (
 const (
 	redisQueueFamilyCommand = "cmdq"
 	redisQueueFamilyTask    = "taskq"
-	defaultQueueScanCount   = int64(100)
-	queueAgeSampleSize      = int64(32)
+	// Production Redis holds millions of short-lived task detail keys. A small
+	// COUNT turns a complete keyspace walk into tens of thousands of network
+	// round trips even when only a few thousand queue keys exist.
+	defaultQueueScanCount  = int64(10_000)
+	combinedQueueScanMatch = "acs:*q:*"
+	queueAgeSampleSize     = int64(32)
 )
 
 // redisQueueObserverClient is intentionally narrower than redis.UniversalClient.
@@ -132,8 +136,89 @@ func (o *RedisQueueObserver) Collect(ctx context.Context) {
 	if o == nil || o.client == nil || o.metrics == nil {
 		return
 	}
-	o.collectFamily(ctx, redisQueueFamilyCommand, redisx.Keys.ACSCommandQueuePattern())
-	o.collectFamily(ctx, redisQueueFamilyTask, redisx.Keys.ACSTaskQueuePattern())
+	started := time.Now()
+	snapshots, err := o.scanAllFamilies(ctx)
+	duration := time.Since(started).Seconds()
+	for _, family := range []string{redisQueueFamilyCommand, redisQueueFamilyTask} {
+		o.metrics.RedisTaskQueueScanDuration.WithLabelValues(family).Set(duration)
+		if err != nil {
+			o.metrics.RedisTaskQueueScanFailuresTotal.WithLabelValues(family).Inc()
+			o.metrics.RedisTaskQueueUp.WithLabelValues(family).Set(0)
+			continue
+		}
+		o.publishSnapshot(family, snapshots[family])
+	}
+	if err != nil {
+		o.logger.Warn("redis queue observation failed", zap.Error(err))
+	}
+}
+
+// scanAllFamilies walks the Redis keyspace once and classifies the two queue
+// prefixes client-side. SCAN MATCH still traverses the whole keyspace, so doing
+// a separate pass for cmdq and taskq doubles Redis work without improving the
+// snapshot.
+func (o *RedisQueueObserver) scanAllFamilies(ctx context.Context) (map[string]redisQueueFamilySnapshot, error) {
+	snapshots := map[string]redisQueueFamilySnapshot{
+		redisQueueFamilyCommand: {},
+		redisQueueFamilyTask:    {},
+	}
+	commandPrefix := strings.TrimSuffix(redisx.Keys.ACSCommandQueuePattern(), "*")
+	taskPrefix := strings.TrimSuffix(redisx.Keys.ACSTaskQueuePattern(), "*")
+	var cursor uint64
+	now := time.Now()
+	for {
+		keys, next, err := o.client.Scan(ctx, cursor, combinedQueueScanMatch, o.scanCount).Result()
+		if err != nil {
+			return nil, fmt.Errorf("scan redis queues: %w", err)
+		}
+		for _, key := range keys {
+			family := ""
+			switch {
+			case strings.HasPrefix(key, commandPrefix):
+				family = redisQueueFamilyCommand
+			case strings.HasPrefix(key, taskPrefix):
+				family = redisQueueFamilyTask
+			default:
+				continue
+			}
+			snapshot := snapshots[family]
+			length, oldest, known, err := o.inspectQueue(ctx, family, key, now)
+			if err != nil {
+				return nil, fmt.Errorf("inspect %s: %w", key, err)
+			}
+			snapshot.length += length
+			if length > 0 {
+				snapshot.active++
+			}
+			if length > snapshot.maxLength {
+				snapshot.maxLength = length
+			}
+			if known && (!snapshot.oldestKnown || oldest > snapshot.oldestAge) {
+				snapshot.oldestAge = oldest
+				snapshot.oldestKnown = true
+			}
+			snapshots[family] = snapshot
+		}
+		if next == 0 {
+			return snapshots, nil
+		}
+		cursor = next
+	}
+}
+
+func (o *RedisQueueObserver) publishSnapshot(family string, snapshot redisQueueFamilySnapshot) {
+	queue := o.metrics.RedisTaskQueueLengthTotal.WithLabelValues(family)
+	active := o.metrics.RedisTaskQueueActiveDevices.WithLabelValues(family)
+	maxLength := o.metrics.RedisTaskQueueMaxLength.WithLabelValues(family)
+	oldestAge := o.metrics.RedisTaskQueueOldestAgeSeconds.WithLabelValues(family)
+	queue.Set(float64(snapshot.length))
+	active.Set(float64(snapshot.active))
+	maxLength.Set(float64(snapshot.maxLength))
+	if snapshot.length == 0 || snapshot.oldestKnown {
+		oldestAge.Set(snapshot.oldestAge)
+	}
+	o.metrics.RedisTaskQueueUp.WithLabelValues(family).Set(1)
+	o.metrics.RedisTaskQueueSampleTimestamp.WithLabelValues(family).Set(float64(time.Now().Unix()))
 }
 
 func (o *RedisQueueObserver) collectFamily(ctx context.Context, family, pattern string) {
@@ -148,18 +233,7 @@ func (o *RedisQueueObserver) collectFamily(ctx context.Context, family, pattern 
 		return
 	}
 
-	queue := o.metrics.RedisTaskQueueLengthTotal.WithLabelValues(family)
-	active := o.metrics.RedisTaskQueueActiveDevices.WithLabelValues(family)
-	maxLength := o.metrics.RedisTaskQueueMaxLength.WithLabelValues(family)
-	oldestAge := o.metrics.RedisTaskQueueOldestAgeSeconds.WithLabelValues(family)
-	queue.Set(float64(snapshot.length))
-	active.Set(float64(snapshot.active))
-	maxLength.Set(float64(snapshot.maxLength))
-	if snapshot.length == 0 || snapshot.oldestKnown {
-		oldestAge.Set(snapshot.oldestAge)
-	}
-	o.metrics.RedisTaskQueueUp.WithLabelValues(family).Set(1)
-	o.metrics.RedisTaskQueueSampleTimestamp.WithLabelValues(family).Set(float64(time.Now().Unix()))
+	o.publishSnapshot(family, snapshot)
 }
 
 func (o *RedisQueueObserver) scanFamily(ctx context.Context, family, pattern string) (redisQueueFamilySnapshot, error) {
