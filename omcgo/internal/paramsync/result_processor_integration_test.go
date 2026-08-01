@@ -84,6 +84,77 @@ INSERT INTO parameter_sync_task_results (
 	assert.True(t, outcome.Duplicate)
 }
 
+func TestResultProcessingDoesNotBackfillLegacyTaskOutbox(t *testing.T) {
+	ctx := context.Background()
+	pool := newParamSyncTestPool(t)
+	request := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
+	runID := uuid.New()
+	_, err := pool.Exec(ctx, `
+INSERT INTO parameter_sync_runs (
+  id, request_id, device_id, device_sn, trigger_reason, sync_scope,
+  status, expected_task_count, terminal_task_count, processed_task_count,
+  failed_task_count
+) VALUES ($1,$2,$3,$4,'manual','readback','waiting_device',2,0,0,0)`,
+		runID, request.ID, request.DeviceID, request.DeviceSN,
+	)
+	require.NoError(t, err)
+
+	first := task.NewTask(&task.CreateTaskRequest{
+		DeviceSN: request.DeviceSN, Method: "GetParameterValues",
+		Params: []byte(`{"names":[]}`), CommandKey: "result-hot-path-first",
+		Source: task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: request.ID.String(),
+		CommandIndex: 0,
+	})
+	second := task.NewTask(&task.CreateTaskRequest{
+		DeviceSN: request.DeviceSN, Method: "GetParameterValues",
+		Params: []byte(`{"names":[]}`), CommandKey: "result-hot-path-second",
+		Source: task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: request.ID.String(),
+		CommandIndex: 1,
+	})
+	repo := task.NewPgTaskRepository(pool)
+	require.NoError(t, repo.Create(ctx, first))
+	require.NoError(t, repo.Create(ctx, second))
+	_, err = pool.Exec(ctx, `UPDATE device_tasks SET status='pending', command_index=1 WHERE id=$1`, second.ID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+UPDATE device_tasks
+SET status='completed', completed_at=now(), result='{}'::jsonb
+WHERE id=$1`, first.ID)
+	require.NoError(t, err)
+	var candidates int
+	require.NoError(t, pool.QueryRow(ctx, `
+SELECT count(*) FROM device_tasks t
+JOIN device_tasks completed ON completed.id=$2
+WHERE t.source='param_sync' AND t.source_id=$1 AND t.status='pending'
+  AND t.command_index > completed.command_index`, runID, first.ID).Scan(&candidates))
+	require.Equal(t, 1, candidates)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM parameter_sync_runs WHERE id=$1`, runID)
+	})
+
+	locker, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = locker.Rollback(context.Background()) }()
+	_, err = locker.Exec(ctx, `LOCK TABLE parameter_sync_outbox IN ACCESS EXCLUSIVE MODE`)
+	require.NoError(t, err)
+	processCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+	defer cancel()
+
+	_, err = NewPGResultProcessor(pool).Process(processCtx, event.ParamSyncTaskResultPayload{
+		RunID: runID, RequestID: request.ID, TaskID: first.ID,
+		DeviceID: request.DeviceID, DeviceSN: request.DeviceSN,
+		EventID: uuid.NewString(), Success: true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, locker.Rollback(ctx))
+
+	var count int
+	require.NoError(t, pool.QueryRow(ctx, `
+SELECT count(*) FROM parameter_sync_outbox
+WHERE event_type='param_sync.task.enqueue' AND aggregate_id=$1`, second.ID).Scan(&count))
+	assert.Zero(t, count, "result processing must not run legacy outbox discovery on every task")
+}
+
 func TestMappedMLNRFStateCannotBeOverwrittenByLaterRawShadow(t *testing.T) {
 	ctx := context.Background()
 	pool := newParamSyncTestPool(t)

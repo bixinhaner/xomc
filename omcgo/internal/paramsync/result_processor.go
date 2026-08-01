@@ -226,12 +226,6 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		}
 		return ResultProcessOutcome{Finalized: true}, nil
 	}
-	// Upgrade compatibility: runs planned by the previous release only have an
-	// enqueue outbox for their first batch. New runs already have one for every
-	// batch, so this statement is a no-op for the continuous-session design.
-	if err := ensureLegacyNextPlannedTaskOutbox(ctx, tx, run.ID, result.TaskID); err != nil {
-		return ResultProcessOutcome{}, err
-	}
 	if err := updateRunProgress(ctx, tx, run, RunStatusExecuting); err != nil {
 		return ResultProcessOutcome{}, err
 	}
@@ -267,29 +261,6 @@ func markRunProcessing(ctx context.Context, tx pgx.Tx, run *SyncRun) error {
 		return fmt.Errorf("mark parameter sync run processing: %w", err)
 	}
 	run.Status = RunStatusProcessing
-	return nil
-}
-
-func ensureLegacyNextPlannedTaskOutbox(ctx context.Context, tx pgx.Tx, runID uuid.UUID, completedTaskID string) error {
-	const query = `
-INSERT INTO parameter_sync_outbox (event_type, aggregate_type, aggregate_id, dedupe_key, payload)
-SELECT 'param_sync.task.enqueue', 'task', candidate.id, 'task:' || candidate.id::text, to_jsonb(candidate)
-FROM (
-  SELECT t.* FROM device_tasks t
-  JOIN device_tasks completed ON completed.id=$2
-  WHERE t.source='param_sync' AND t.source_id=$1 AND t.status='pending'
-    AND t.command_index > completed.command_index
-    AND NOT EXISTS (
-      SELECT 1 FROM parameter_sync_outbox o
-      WHERE o.event_type='param_sync.task.enqueue' AND o.aggregate_id=t.id
-    )
-  ORDER BY t.command_index, t.created_at, t.id
-  LIMIT 1
-) candidate
-ON CONFLICT (dedupe_key) DO NOTHING`
-	if _, err := tx.Exec(ctx, query, runID, completedTaskID); err != nil {
-		return fmt.Errorf("ensure legacy next parameter sync task outbox: %w", err)
-	}
 	return nil
 }
 

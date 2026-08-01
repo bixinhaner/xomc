@@ -67,7 +67,7 @@ param_sync:
   staging_enabled: true
   canary_percent: 100
   legacy_fallback_enabled: false
-  result_consumer_shard_count: 8
+  result_consumer_shard_count: 16
   result_consumer_queue_depth: 64
   result_consumer_pull_batch_size: 64
   result_consumer_pull_concurrency: 64
