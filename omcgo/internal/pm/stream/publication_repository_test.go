@@ -49,6 +49,30 @@ func TestEveryGranularityAndRevisionIsPreparedBeforePublication(t *testing.T) {
 	require.Equal(t, "prepared", finalWindowStatus(GranularityWeekly, 3))
 }
 
+func TestInitialRevisionDoesNotSerializeIndependentEntitiesOnPublicationLock(t *testing.T) {
+	require.False(t, requiresPublicationLock(1),
+		"the first revision has no visible generation to protect and must finalize entities concurrently")
+	require.True(t, requiresPublicationLock(2),
+		"late rebuild revisions must remain serialized with the visible publication generation")
+}
+
+func TestEnsureInitialPublicationIsIdempotent(t *testing.T) {
+	key := WindowKey{
+		TaskID: uuid.New(), TaskVersionID: uuid.New(), EntityKey: "SN-1",
+		Granularity: GranularityHourly,
+		Start:       time.Date(2026, 8, 1, 14, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 8, 1, 15, 0, 0, 0, time.UTC),
+	}
+
+	query, args, err := ensureInitialPublicationQuery(key).ToSql()
+
+	require.NoError(t, err)
+	require.Contains(t, query, "INSERT INTO pm_aggregation_publications")
+	require.Contains(t, query, "ON CONFLICT (task_version_id, granularity, window_start) DO NOTHING")
+	require.Contains(t, args, key.TaskVersionID)
+	require.Contains(t, args, 1)
+}
+
 func TestPublishReadyAcceptsPublishedEntitiesFromPreviousRevision(t *testing.T) {
 	query, _, err := publishReadyCandidatesQuery(time.Now().UTC(), 12*time.Minute, 32).ToSql()
 	require.NoError(t, err)

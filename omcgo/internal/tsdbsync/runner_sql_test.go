@@ -58,3 +58,28 @@ func TestMetricDictionarySyncDoesNotRewriteStableRowsOrPromoteKPIReportKeys(t *t
 	assert.GreaterOrEqual(t, strings.Count(metricDictionarySyncSQL, "IS DISTINCT FROM"), 2,
 		"both configured-path upserts and unknown-path enrichment must skip unchanged rows")
 }
+
+func TestCellBandSyncReadsParametersOnceAndKeepsTechnologyPairsSeparate(t *testing.T) {
+	normalized := strings.Join(strings.Fields(cellBandSyncSQL), " ")
+	assert.Equal(t, 1, strings.Count(normalized, "FROM device_parameters"),
+		"cell/band dimension sync must not rescan the full parameter table for every path family")
+	assert.Contains(t, normalized, "technology")
+	assert.Contains(t, normalized, "GROUP BY device_id, fap_instance, technology")
+}
+
+func TestCellBandPartialIndexCoversTheSyncPredicate(t *testing.T) {
+	normalized := strings.Join(strings.Fields(cellBandRelevantPredicate), " ")
+	assert.Contains(t, cellBandParentIndexSQL, "WHERE "+cellBandRelevantPredicate)
+	assert.Contains(t, normalized, "CellIdentity")
+	assert.Contains(t, normalized, "FreqBandIndicator")
+	assert.Contains(t, normalized, "IpaUnitId")
+}
+
+func TestBuildCellBandChildIndexSQLUsesConcurrentPartialCoveringIndex(t *testing.T) {
+	indexName, sql := buildCellBandChildIndexSQL("public", "device_parameters_p07")
+	assert.Equal(t, "device_parameters_p07_cell_band_dim_idx", indexName)
+	assert.Contains(t, sql, `CREATE INDEX CONCURRENTLY IF NOT EXISTS "device_parameters_p07_cell_band_dim_idx"`)
+	assert.Contains(t, sql, `ON "public"."device_parameters_p07" (device_id, fap_instance, parameter_path)`)
+	assert.Contains(t, sql, `INCLUDE (parameter_value)`)
+	assert.Contains(t, sql, "WHERE "+cellBandRelevantPredicate)
+}

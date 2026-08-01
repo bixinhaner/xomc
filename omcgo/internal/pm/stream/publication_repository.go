@@ -24,6 +24,23 @@ func finalWindowStatus(granularity Granularity, revision int) string {
 	return "prepared"
 }
 
+func requiresPublicationLock(revision int) bool {
+	return revision > 1
+}
+
+func ensureInitialPublicationQuery(key WindowKey) sq.InsertBuilder {
+	return storage.Psql.Insert("pm_aggregation_publications").
+		Columns(
+			"task_id", "task_version_id", "granularity", "window_start", "window_end",
+			"revision", "preparing_revision", "status", "expected_entities", "prepared_entities", "updated_at",
+		).
+		Values(
+			key.TaskID, key.TaskVersionID, string(key.Granularity), key.Start, key.End,
+			0, 1, "preparing", 0, 0, time.Now().UTC(),
+		).
+		Suffix("ON CONFLICT (task_version_id, granularity, window_start) DO NOTHING")
+}
+
 func markPublicationPreparedQuery(key WindowKey, revision int) sq.InsertBuilder {
 	return storage.Psql.Insert("pm_aggregation_publications").
 		Columns(

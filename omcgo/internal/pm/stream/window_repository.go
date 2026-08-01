@@ -254,21 +254,27 @@ func finalizationClaimUpdateForOwner(
 }
 
 func (r *WindowRepository) Status(ctx context.Context, key WindowKey) (string, error) {
-	query, args, err := storage.Psql.Select("status").
+	status, _, err := r.StatusRevision(ctx, key)
+	return status, err
+}
+
+func (r *WindowRepository) StatusRevision(ctx context.Context, key WindowKey) (string, int, error) {
+	query, args, err := storage.Psql.Select("status", "revision").
 		From("pm_aggregation_windows").
 		Where(windowKeyPredicate(key)).
 		ToSql()
 	if err != nil {
-		return "", fmt.Errorf("build PM aggregation window status SQL: %w", err)
+		return "", 0, fmt.Errorf("build PM aggregation window status SQL: %w", err)
 	}
 	var status string
-	if err := r.pool.QueryRow(ctx, query, args...).Scan(&status); err != nil {
+	var revision int
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&status, &revision); err != nil {
 		if err == pgx.ErrNoRows {
-			return "", nil
+			return "", 0, nil
 		}
-		return "", fmt.Errorf("query PM aggregation window status: %w", err)
+		return "", 0, fmt.Errorf("query PM aggregation window status: %w", err)
 	}
-	return status, nil
+	return status, revision, nil
 }
 
 func (r *WindowRepository) IsPublished(ctx context.Context, key WindowKey) (bool, error) {
