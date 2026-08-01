@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/minio/minio-go/v7"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/stretchr/testify/assert"
@@ -64,6 +65,26 @@ func (b *countingBus) handler(subject string) event.EventHandler {
 type noopSub struct{}
 
 func (noopSub) Unsubscribe() error { return nil }
+
+type discardCall struct {
+	bucket string
+	object string
+}
+
+type recordingRawDiscarder struct {
+	calls []discardCall
+	err   error
+}
+
+func (d *recordingRawDiscarder) RemoveObject(
+	_ context.Context,
+	bucket string,
+	object string,
+	_ minio.RemoveObjectOptions,
+) error {
+	d.calls = append(d.calls, discardCall{bucket: bucket, object: object})
+	return d.err
+}
 
 func newTestCollector() *PMCollector {
 	return NewPMCollector(nil, "", nil, nil, nil, nil, zap.NewNop())
@@ -156,10 +177,12 @@ func TestPMCollector_Subscribe_HandoffFailureKeepsOriginalRetryable(t *testing.T
 	assert.Contains(t, err.Error(), "handoff deferred PM event")
 }
 
-func TestPMCollector_Subscribe_ExpiredRegistrationDoesNotReenterWaitLane(t *testing.T) {
+func TestPMCollector_Subscribe_ExpiredRegistrationDeletesRawAndACKs(t *testing.T) {
 	bus := &countingBus{}
-	c := newTestCollector()
+	c := NewPMCollector(nil, "pm-files", nil, nil, nil, nil, zap.NewNop())
+	discarder := &recordingRawDiscarder{}
 	c.SetDeviceLookup(&fakeDeviceLookup{})
+	c.SetRawObjectDiscarder(discarder)
 	require.NoError(t, c.Subscribe(bus))
 
 	evt, err := event.NewEvent(event.SubjectPMFileReceived, FileReceivedPayload{
@@ -170,6 +193,48 @@ func TestPMCollector_Subscribe_ExpiredRegistrationDoesNotReenterWaitLane(t *test
 	evt.Timestamp = time.Now().Add(-DeviceRegistrationGrace - time.Second)
 
 	err = bus.handler(event.SubjectPMFileReceived)(context.Background(), evt)
-	require.ErrorIs(t, err, reliability.ErrPermanent)
+	require.NoError(t, err)
 	assert.Empty(t, bus.publishes)
+	require.Equal(t, []discardCall{{bucket: "pm-files", object: "never-registered.xml"}}, discarder.calls)
+}
+
+func TestPMCollector_Subscribe_ExpiredRegistrationMissingRawACKs(t *testing.T) {
+	bus := &countingBus{}
+	c := NewPMCollector(nil, "pm-files", nil, nil, nil, nil, zap.NewNop())
+	discarder := &recordingRawDiscarder{err: minio.ErrorResponse{Code: "NoSuchKey"}}
+	c.SetDeviceLookup(&fakeDeviceLookup{})
+	c.SetRawObjectDiscarder(discarder)
+	require.NoError(t, c.Subscribe(bus))
+
+	evt, err := event.NewEvent(event.SubjectPMFileDeferred, FileReceivedPayload{
+		Bucket:    "custom-pm",
+		DeviceSN:  "never-registered",
+		MinIOPath: "missing.xml",
+	})
+	require.NoError(t, err)
+	evt.Timestamp = time.Now().Add(-DeviceRegistrationGrace - time.Second)
+
+	require.NoError(t, bus.handler(event.SubjectPMFileDeferred)(context.Background(), evt))
+	require.Equal(t, []discardCall{{bucket: "custom-pm", object: "missing.xml"}}, discarder.calls)
+}
+
+func TestPMCollector_Subscribe_ExpiredRegistrationDeleteFailureDefersWithoutHandoff(t *testing.T) {
+	bus := &countingBus{}
+	c := NewPMCollector(nil, "pm-files", nil, nil, nil, nil, zap.NewNop())
+	discarder := &recordingRawDiscarder{err: errors.New("MinIO unavailable")}
+	c.SetDeviceLookup(&fakeDeviceLookup{})
+	c.SetRawObjectDiscarder(discarder)
+	require.NoError(t, c.Subscribe(bus))
+
+	evt, err := event.NewEvent(event.SubjectPMFileDeferred, FileReceivedPayload{
+		DeviceSN:  "never-registered",
+		MinIOPath: "retry-delete.xml",
+	})
+	require.NoError(t, err)
+	evt.Timestamp = time.Now().Add(-DeviceRegistrationGrace - time.Second)
+
+	err = bus.handler(event.SubjectPMFileDeferred)(context.Background(), evt)
+	require.ErrorIs(t, err, reliability.ErrDeferred)
+	assert.Empty(t, bus.publishes, "deferred lane must NAK instead of recursively handing off")
+	require.Len(t, discarder.calls, 1)
 }

@@ -37,6 +37,24 @@ omc_pm_whitelist_miss_values_total{carrier="cmcc",technology="lte"} 2
 	))
 }
 
+func TestPMMetrics_DiscardedFilesUsesReasonOnly(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewPMMetrics(reg)
+
+	m.FilesDiscardedTotal.WithLabelValues("device_not_registered").Inc()
+
+	expected := `
+# HELP omc_pm_files_discarded_total PM files intentionally discarded before parsing, classified by bounded reason.
+# TYPE omc_pm_files_discarded_total counter
+omc_pm_files_discarded_total{reason="device_not_registered"} 1
+`
+	require.NoError(t, testutil.GatherAndCompare(
+		reg,
+		strings.NewReader(expected),
+		"omc_pm_files_discarded_total",
+	))
+}
+
 // G4-Gap-1: 验证 ReportDelaySeconds histogram 注册成功且能按 carrier×technology 维度记录。
 func TestPMMetrics_ReportDelaySeconds(t *testing.T) {
 	t.Parallel()
