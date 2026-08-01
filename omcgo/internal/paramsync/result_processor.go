@@ -59,6 +59,19 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		return ResultProcessOutcome{}, fmt.Errorf("begin parameter sync result: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
+	duplicate, err := resultEventExists(ctx, tx, result)
+	if err != nil {
+		return ResultProcessOutcome{}, err
+	}
+	if duplicate {
+		if err := tx.Commit(ctx); err != nil {
+			return ResultProcessOutcome{}, fmt.Errorf("commit duplicate parameter sync result: %w", err)
+		}
+		if p.metrics != nil {
+			p.metrics.ResultRedelivery.Inc()
+		}
+		return ResultProcessOutcome{Duplicate: true}, nil
+	}
 
 	run, err := loadRunForUpdate(ctx, tx, result.RunID)
 	if err != nil {
@@ -226,6 +239,21 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		return ResultProcessOutcome{}, fmt.Errorf("commit parameter sync result: %w", err)
 	}
 	return ResultProcessOutcome{}, nil
+}
+
+func resultEventExists(
+	ctx context.Context,
+	tx pgx.Tx,
+	result event.ParamSyncTaskResultPayload,
+) (bool, error) {
+	var exists bool
+	if err := tx.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM parameter_sync_task_results WHERE run_id=$1 AND task_id=$2
+)`, result.RunID, result.TaskID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check duplicate parameter sync result: %w", err)
+	}
+	return exists, nil
 }
 
 func markRunProcessing(ctx context.Context, tx pgx.Tx, run *SyncRun) error {

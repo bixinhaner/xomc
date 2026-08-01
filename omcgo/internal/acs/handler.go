@@ -17,7 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
@@ -900,8 +899,6 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 			if !h.tryRecoverGPVFault(r.Context(), taskItem, badPath, faultCode, log) {
 				if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedMsg); markErr != nil {
 					log.Error("mark task failed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
-				} else {
-					h.publishParamSyncTaskResult(r.Context(), taskItem, false, strconv.Itoa(faultCode), combinedMsg, log)
 				}
 				log.Warn("task failed with SOAP fault",
 					zap.String("task_id", taskItem.ID),
@@ -946,8 +943,6 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 			resultJSON, _ := json.Marshal(resultMap)
 			if markErr := h.taskService.MarkTaskCompleted(r.Context(), taskItem.ID, resultJSON); markErr != nil {
 				log.Error("mark task completed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
-			} else {
-				h.publishParamSyncTaskResult(r.Context(), taskItem, true, "", "", log)
 			}
 			log.Info("task completed", zap.String("task_id", taskItem.ID), zap.String("method", taskItem.Method))
 
@@ -2059,37 +2054,6 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 	}
 	if err := h.eventBus.Publish(ctx, subject, evt); err != nil {
 		log.Error("publish RPC response event", zap.Error(err), zap.String("subject", subject))
-	}
-}
-
-func (h *Handler) publishParamSyncTaskResult(ctx context.Context, taskItem *task.Task, success bool, errorCode, errorMessage string, log *zap.Logger) {
-	if taskItem == nil || taskItem.Source != task.TaskSourceParamSync || h.eventBus == nil {
-		return
-	}
-	runID, err := uuid.Parse(taskItem.SourceID)
-	if err != nil {
-		log.Error("publish parameter sync result: invalid run id", zap.String("run_id", taskItem.SourceID), zap.Error(err))
-		return
-	}
-	requestID, err := uuid.Parse(taskItem.CreatorID)
-	if err != nil {
-		log.Error("publish parameter sync result: invalid request id", zap.String("request_id", taskItem.CreatorID), zap.Error(err))
-		return
-	}
-	payload := event.ParamSyncTaskResultPayload{
-		EventID: uuid.NewString(), RequestID: requestID, RunID: runID, TaskID: taskItem.ID,
-		DeviceSN: taskItem.DeviceSN, Success: success, ResultRef: "device_tasks:" + taskItem.ID,
-		ErrorCode: errorCode, ErrorMessage: errorMessage,
-	}
-	evt, err := event.NewEvent(event.SubjectParamSyncTaskResult, payload)
-	if err != nil {
-		log.Error("create parameter sync task result event", zap.Error(err))
-		return
-	}
-	if err := h.eventBus.Publish(ctx, event.SubjectParamSyncTaskResult, evt); err != nil {
-		// The durable device_tasks result is authoritative; ResultReconciler will
-		// republish if NATS is temporarily unavailable.
-		log.Error("publish parameter sync task result event", zap.Error(err), zap.String("task_id", taskItem.ID))
 	}
 }
 

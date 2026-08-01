@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/auth"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
@@ -707,6 +708,42 @@ func TestServeHTTP_RPCResponse_CompletesSessionWhenNoMoreCommands(t *testing.T) 
 	defer bus.mu.Unlock()
 	require.GreaterOrEqual(t, len(bus.published), 1)
 	assert.Equal(t, event.SubjectCommandGetParamsResponse, bus.published[0].Subject)
+}
+
+func TestServeHTTP_ParamSyncRPCResponseDoesNotPublishDuplicateCanonicalResult(t *testing.T) {
+	store := newAcsHSessionStore()
+	bus := &acsHEventBus{}
+	taskSvc := newAcsHTaskService()
+	h := newTestACSHandlerWithDeps(store, bus)
+	h.taskService = taskSvc
+
+	taskItem := &task.Task{
+		ID: "param-sync-task-001", DeviceSN: "TEST-SN-001",
+		Method: "GetParameterValues", Status: task.TaskStatusSent,
+		Source: task.TaskSourceParamSync, SourceID: uuid.NewString(), CreatorID: uuid.NewString(),
+		CreatedAt: time.Now(),
+	}
+	taskSvc.addTask(taskItem)
+	sessionID := "param-sync-session-001"
+	require.NoError(t, store.CreateWithID(context.Background(), sessionID, &Session{
+		ID: sessionID, DeviceSN: taskItem.DeviceSN, State: StateRPCPending,
+		LastRPC: taskItem.Method, LastTaskID: taskItem.ID, LastTaskCWMPID: "100001",
+		StartedAt: time.Now().Add(-time.Second), UpdatedAt: time.Now(), CWMPId: "100001",
+	}))
+	h.admission.Acquire(context.Background(), sessionID)
+	h.trackActiveSession(sessionID)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHGetParamRespXML))
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionID})
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, task.TaskStatusCompleted, taskItem.Status)
+	for _, published := range bus.published {
+		assert.NotEqual(t, event.SubjectParamSyncTaskResult, published.Subject,
+			"TaskTerminalBridge owns the single canonical parameter-sync result")
+	}
 }
 
 func TestServeHTTP_RPCResponse_ChainsNextCommand(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omcgo/omcgo/internal/core/event"
 	devicepkg "github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
@@ -39,6 +40,48 @@ func TestDeviceParameterWriteLockSerializesConcurrentWriters(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = third.Rollback(context.Background()) }()
 	require.NoError(t, devicepkg.AcquireParameterWriteLocks(ctx, third, deviceID))
+}
+
+func TestDuplicateResultDoesNotWaitForRunWriteLock(t *testing.T) {
+	ctx := context.Background()
+	pool := newParamSyncTestPool(t)
+	request := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
+	runID := uuid.New()
+	taskID := uuid.NewString()
+	_, err := pool.Exec(ctx, `
+INSERT INTO parameter_sync_runs (
+  id, request_id, device_id, device_sn, trigger_reason, sync_scope,
+  status, expected_task_count, terminal_task_count, processed_task_count,
+  failed_task_count
+) VALUES ($1,$2,$3,$4,'manual','full','executing',1,1,1,0)`,
+		runID, request.ID, request.DeviceID, request.DeviceSN,
+	)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+INSERT INTO parameter_sync_task_results (
+  run_id, task_id, event_id, success, result_ref, status, created_at
+) VALUES ($1,$2,$3,true,$4,'processed',now())`,
+		runID, taskID, uuid.NewString(), "device_tasks:"+taskID,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM parameter_sync_runs WHERE id=$1`, runID)
+	})
+
+	locker, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = locker.Rollback(context.Background()) }()
+	_, err = locker.Exec(ctx, `SELECT 1 FROM parameter_sync_runs WHERE id=$1 FOR UPDATE`, runID)
+	require.NoError(t, err)
+	processCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+	defer cancel()
+	outcome, err := NewPGResultProcessor(pool).Process(processCtx, event.ParamSyncTaskResultPayload{
+		RunID: runID, RequestID: request.ID, TaskID: taskID, DeviceID: request.DeviceID,
+		DeviceSN: request.DeviceSN, EventID: uuid.NewString(), Success: true,
+	})
+
+	require.NoError(t, err)
+	assert.True(t, outcome.Duplicate)
 }
 
 func TestMappedMLNRFStateCannotBeOverwrittenByLaterRawShadow(t *testing.T) {
