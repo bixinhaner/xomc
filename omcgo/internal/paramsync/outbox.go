@@ -25,6 +25,34 @@ type OutboxDispatcher struct {
 	now         func() time.Time
 }
 
+const parameterSyncOutboxDeliveringIndexSQL = `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_parameter_sync_outbox_delivering_updated
+ON parameter_sync_outbox (updated_at) WHERE status = 'delivering'`
+
+const parameterSyncOutboxStatusIndexSQL = `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_parameter_sync_outbox_terminal_status
+ON parameter_sync_outbox (status) WHERE status IN ('delivered', 'dead')`
+
+const parameterSyncOutboxIndexLockSQL = `SELECT pg_advisory_lock(hashtextextended('omc.paramsync.outbox.performance_indexes', 0))`
+const parameterSyncOutboxIndexUnlockSQL = `SELECT pg_advisory_unlock(hashtextextended('omc.paramsync.outbox.performance_indexes', 0))`
+
+type outboxRuntimeIndex struct {
+	qualifiedName string
+	createSQL     string
+	dropSQL       string
+}
+
+var parameterSyncOutboxRuntimeIndexes = []outboxRuntimeIndex{
+	{
+		qualifiedName: "public.idx_parameter_sync_outbox_delivering_updated",
+		createSQL:     parameterSyncOutboxDeliveringIndexSQL,
+		dropSQL:       "DROP INDEX CONCURRENTLY IF EXISTS public.idx_parameter_sync_outbox_delivering_updated",
+	},
+	{
+		qualifiedName: "public.idx_parameter_sync_outbox_terminal_status",
+		createSQL:     parameterSyncOutboxStatusIndexSQL,
+		dropSQL:       "DROP INDEX CONCURRENTLY IF EXISTS public.idx_parameter_sync_outbox_terminal_status",
+	},
+}
+
 type PlannedTaskLifecycle interface {
 	ReleasePlannedTask(ctx context.Context, planned *task.Task) (bool, error)
 	EvictPlannedTask(ctx context.Context, planned *task.Task) error
@@ -335,6 +363,78 @@ func buildClaimOutboxSQL(now time.Time, limit int) (string, []interface{}, error
 		ToSql()
 }
 
+// EnsurePerformanceIndexes online-upgrades databases created from an older
+// consolidated baseline. CREATE INDEX CONCURRENTLY avoids blocking the hot
+// outbox writers while a large existing queue is being indexed.
+func (d *OutboxDispatcher) EnsurePerformanceIndexes(ctx context.Context) (returnErr error) {
+	conn, err := d.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire parameter sync outbox index connection: %w", err)
+	}
+	locked := false
+	lockStateUncertain := false
+	defer func() {
+		if !locked {
+			if lockStateUncertain {
+				// A cancelled lock call may have succeeded server-side before the
+				// client observed the error. Close the session so a possible lock
+				// cannot leak back into the pool.
+				rawConn := conn.Hijack()
+				closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = rawConn.Close(closeCtx)
+				return
+			}
+			conn.Release()
+			return
+		}
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var unlocked bool
+		if err := conn.QueryRow(unlockCtx, parameterSyncOutboxIndexUnlockSQL).Scan(&unlocked); err == nil && unlocked {
+			conn.Release()
+			return
+		} else if returnErr == nil {
+			if err != nil {
+				returnErr = fmt.Errorf("release parameter sync outbox index advisory lock: %w", err)
+			} else {
+				returnErr = errors.New("release parameter sync outbox index advisory lock: lock was not held")
+			}
+		}
+		// Never return a session with a possibly-held advisory lock to the pool.
+		rawConn := conn.Hijack()
+		_ = rawConn.Close(unlockCtx)
+	}()
+
+	lockStateUncertain = true
+	if _, err := conn.Exec(ctx, parameterSyncOutboxIndexLockSQL); err != nil {
+		return fmt.Errorf("acquire parameter sync outbox index advisory lock: %w", err)
+	}
+	lockStateUncertain = false
+	locked = true
+	for _, index := range parameterSyncOutboxRuntimeIndexes {
+		var exists, valid bool
+		if err := conn.QueryRow(ctx, `
+SELECT to_regclass($1) IS NOT NULL,
+       COALESCE((SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass($1)), false)`,
+			index.qualifiedName).Scan(&exists, &valid); err != nil {
+			return fmt.Errorf("inspect parameter sync outbox index %s: %w", index.qualifiedName, err)
+		}
+		if valid {
+			continue
+		}
+		if exists {
+			if _, err := conn.Exec(ctx, index.dropSQL); err != nil {
+				return fmt.Errorf("drop invalid parameter sync outbox index %s: %w", index.qualifiedName, err)
+			}
+		}
+		if _, err := conn.Exec(ctx, index.createSQL); err != nil {
+			return fmt.Errorf("create parameter sync outbox index %s: %w", index.qualifiedName, err)
+		}
+	}
+	return nil
+}
+
 func (d *OutboxDispatcher) markDelivered(ctx context.Context, id uuid.UUID) error {
 	now := d.now()
 	query, args, err := storage.Psql.Update("parameter_sync_outbox").Set("status", "delivered").
@@ -380,9 +480,7 @@ func outboxBackoff(attempt int) time.Duration {
 }
 
 func (d *OutboxDispatcher) RequeueStaleDeliveries(ctx context.Context, staleBefore time.Time) (int64, error) {
-	query, args, err := storage.Psql.Update("parameter_sync_outbox").Set("status", "failed").
-		Set("next_attempt_at", d.now()).Set("last_error", "stale delivery claim recovered").
-		Set("updated_at", d.now()).Where(sq.Eq{"status": "delivering"}).Where(sq.Lt{"updated_at": staleBefore}).ToSql()
+	query, args, err := buildRequeueStaleOutboxSQL(d.now(), staleBefore)
 	if err != nil {
 		return 0, fmt.Errorf("build requeue stale parameter sync outbox: %w", err)
 	}
@@ -391,4 +489,13 @@ func (d *OutboxDispatcher) RequeueStaleDeliveries(ctx context.Context, staleBefo
 		return 0, fmt.Errorf("requeue stale parameter sync outbox: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+func buildRequeueStaleOutboxSQL(now, staleBefore time.Time) (string, []interface{}, error) {
+	// Keep the status literal so PostgreSQL can use the partial
+	// idx_parameter_sync_outbox_delivering_updated index with generic plans.
+	return `UPDATE parameter_sync_outbox
+SET status = 'failed', next_attempt_at = $1,
+    last_error = 'stale delivery claim recovered', updated_at = $1
+WHERE status = 'delivering' AND updated_at < $2`, []interface{}{now, staleBefore}, nil
 }

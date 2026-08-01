@@ -129,9 +129,21 @@ type persistentQueueQuery struct {
 // All statements are fixed at compile time. This avoids treating table names
 // or statuses as SQL input and keeps the observer safe from identifier injection.
 var persistentQueueQueries = []persistentQueueQuery{
-	{name: "device_tasks", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks GROUP BY status`},
+	{name: "device_tasks", query: `
+SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks WHERE status = 'pending' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks WHERE status = 'sent' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, 0::double precision, 0::double precision FROM device_tasks WHERE status = 'completed' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks WHERE status = 'failed' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks WHERE status = 'expired' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, COALESCE(MAX(EXTRACT(EPOCH FROM (now() - expires_at))) FILTER (WHERE expires_at < now()), 0)::double precision FROM device_tasks WHERE status = 'cancelled' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, 0::double precision, 0::double precision FROM device_tasks WHERE status NOT IN ('pending', 'sent', 'completed', 'failed', 'expired', 'cancelled') GROUP BY status`},
 	{name: "async_jobs", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM async_jobs GROUP BY status`},
-	{name: "parameter_sync_outbox", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox GROUP BY status`},
+	{name: "parameter_sync_outbox", query: `
+SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox WHERE status = 'pending' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox WHERE status = 'failed' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox WHERE status = 'delivering' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, 0::double precision, 0::double precision FROM parameter_sync_outbox WHERE status = 'delivered' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox WHERE status = 'dead' GROUP BY status`},
 	{name: "northbound_outbox", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM northbound_outbox GROUP BY status`},
 	{name: "pm_kpi_export", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM pm_kpi_export_tasks GROUP BY status`},
 	{name: "trace_export", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM trace_export_jobs GROUP BY status`},

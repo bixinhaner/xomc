@@ -694,6 +694,13 @@ func initParamSyncModule(c *Container) error {
 		logger.Warn("parameter sync maintenance disabled: graceful shutdown manager is unavailable")
 	}
 	if c.GS != nil {
+		go func() {
+			indexCtx, cancel := context.WithTimeout(maintenanceCtx, 30*time.Minute)
+			defer cancel()
+			if err := outbox.EnsurePerformanceIndexes(indexCtx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("ensure parameter sync outbox indexes failed", zap.Error(err))
+			}
+		}()
 		go runPeriodicMaintenance(maintenanceCtx, time.Second, func(context.Context) {
 			ctx, cancel := context.WithTimeout(maintenanceCtx, 10*time.Second)
 			_, err := outbox.RequeueStaleDeliveries(ctx, time.Now().Add(-time.Minute))

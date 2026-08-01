@@ -46,6 +46,22 @@ func TestPersistentQueueQueriesUseRowExpiryOnlyForDeviceTasks(t *testing.T) {
 	}
 }
 
+func TestHotPersistentQueueQueriesSplitStatusesToUseIndexes(t *testing.T) {
+	for _, descriptor := range persistentQueueQueries {
+		switch descriptor.name {
+		case "device_tasks":
+			require.Contains(t, descriptor.query, "WHERE status = 'pending'")
+			require.Contains(t, descriptor.query, "WHERE status = 'completed'")
+			require.Contains(t, descriptor.query, "WHERE status NOT IN ('pending', 'sent', 'completed', 'failed', 'expired', 'cancelled')")
+			require.NotContains(t, descriptor.query, "FROM device_tasks GROUP BY status")
+		case "parameter_sync_outbox":
+			require.Contains(t, descriptor.query, "WHERE status = 'pending'")
+			require.Contains(t, descriptor.query, "WHERE status = 'delivered'")
+			require.NotContains(t, descriptor.query, "FROM parameter_sync_outbox GROUP BY status")
+		}
+	}
+}
+
 func TestDeviceTaskOverdueQueryUsesEachRowsExpiry(t *testing.T) {
 	dsn := os.Getenv("TEST_PG_URL")
 	if dsn == "" {

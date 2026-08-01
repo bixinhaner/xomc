@@ -14182,6 +14182,10 @@ CREATE INDEX idx_parameter_sync_outbox_dispatch ON public.parameter_sync_outbox 
 
 CREATE INDEX idx_parameter_sync_outbox_ready_created ON public.parameter_sync_outbox USING btree (created_at, id) WHERE ((status)::text = ANY ((ARRAY['pending'::character varying, 'failed'::character varying])::text[]));
 
+CREATE INDEX idx_parameter_sync_outbox_delivering_updated ON public.parameter_sync_outbox USING btree (updated_at) WHERE ((status)::text = 'delivering'::text);
+
+CREATE INDEX idx_parameter_sync_outbox_terminal_status ON public.parameter_sync_outbox USING btree (status) WHERE ((status)::text = ANY ((ARRAY['delivered'::character varying, 'dead'::character varying])::text[]));
+
 
 --
 -- Name: idx_parameter_sync_recovery_claim; Type: INDEX; Schema: public; Owner: -
