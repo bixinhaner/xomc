@@ -859,6 +859,9 @@ func writeStagingValues(ctx context.Context, tx pgx.Tx, run *SyncRun, taskID str
 
 func upsertOfficialValues(ctx context.Context, tx pgx.Tx, deviceID uuid.UUID, values []projectedValue, now time.Time) error {
 	values = dedupeProjectedValuesByPath(values)
+	if err := device.AcquireParameterWriteLocks(ctx, tx, deviceID); err != nil {
+		return err
+	}
 	for start := 0; start < len(values); start += paramSyncUpsertBatchSize {
 		end := min(start+paramSyncUpsertBatchSize, len(values))
 		builder := storage.Psql.Insert("device_parameters").
@@ -881,6 +884,9 @@ func upsertOfficialValues(ctx context.Context, tx pgx.Tx, deviceID uuid.UUID, va
 
 func finalizeSuccessfulRun(ctx context.Context, tx pgx.Tx, run *SyncRun, now time.Time) error {
 	if run.SyncScope.IsFull() {
+		if err := device.AcquireParameterWriteLocks(ctx, tx, run.DeviceID); err != nil {
+			return err
+		}
 		const mergeSQL = `
 INSERT INTO device_parameters (device_id, parameter_path, parameter_value, parameter_type, writable, last_updated_at, fap_instance, param_group)
 SELECT $1, parameter_path, value #>> '{}', value_type, writable, $2, fap_instance, param_group
@@ -970,23 +976,19 @@ func frozenCoverageMappingsPredicate(mappings []FrozenMapping) sq.Sqlizer {
 	predicates := sq.Or{}
 	exactPaths := make([]string, 0, len(mappings))
 	exactSeen := make(map[string]struct{}, len(mappings))
+	runtimePatterns := make([]string, 0, len(mappings))
+	runtimeSeen := make(map[string]struct{}, len(mappings))
 	for _, mapping := range mappings {
 		if !mapping.IsStorable || mapping.StandardPath == "" {
 			continue
 		}
 		if idx := strings.Index(mapping.StandardPath, "{i}"); idx >= 0 {
-			pattern := "^" + regexp.QuoteMeta(mapping.StandardPath) + "$"
+			pattern := regexp.QuoteMeta(mapping.StandardPath)
 			pattern = strings.ReplaceAll(pattern, regexp.QuoteMeta("{i}"), `[0-9]+`)
-			// device_parameters 只有 (device_id, parameter_path varchar_pattern_ops)
-			// 这一个前缀索引，加速 LIKE，不加速下面的 POSIX 正则 `~`。任何满足正则的
-			// 值必然以 {i} 之前的字面前缀开头，所以先加一个等价的 LIKE 前缀条件让
-			// planner 走索引缩小候选行，再用正则精确核对——不改变匹配结果，只是让
-			// 这条本该走索引的收尾清理不再退化成整表逐行扫描（线上巡检实测单次
-			// DELETE 20~32 秒，根因就是这里全靠内存正则过滤）。
-			predicates = append(predicates, sq.And{
-				sq.Expr("parameter_path LIKE ?", mapping.StandardPath[:idx]+"%"),
-				sq.Expr("parameter_path ~ ?", pattern),
-			})
+			if _, exists := runtimeSeen[pattern]; !exists {
+				runtimeSeen[pattern] = struct{}{}
+				runtimePatterns = append(runtimePatterns, pattern)
+			}
 		} else {
 			if _, exists := exactSeen[mapping.StandardPath]; !exists {
 				exactSeen[mapping.StandardPath] = struct{}{}
@@ -994,10 +996,19 @@ func frozenCoverageMappingsPredicate(mappings []FrozenMapping) sq.Sqlizer {
 			}
 		}
 	}
-	if len(exactPaths) == 1 {
-		predicates = append([]sq.Sqlizer{sq.Eq{"parameter_path": exactPaths[0]}}, predicates...)
-	} else if len(exactPaths) > 1 {
-		predicates = append([]sq.Sqlizer{sq.Eq{"parameter_path": exactPaths}}, predicates...)
+	if len(exactPaths) > 0 {
+		predicates = append(predicates, sq.Expr("parameter_path = ANY(?::text[])", exactPaths))
+	}
+	if len(runtimePatterns) > 0 {
+		// device_id is the leading key of the PK, so PostgreSQL first narrows the
+		// candidate set to this one device. A compact alternation avoids
+		// hundreds of OR branches, parameters and bitmap scans. One anchored
+		// alternation also compiles once per candidate row instead of compiling
+		// every individual pattern through regex ANY.
+		predicates = append(predicates, sq.Expr(
+			"parameter_path ~ ?",
+			"^("+strings.Join(runtimePatterns, "|")+")$",
+		))
 	}
 	if len(predicates) == 0 {
 		return nil

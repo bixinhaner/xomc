@@ -57,3 +57,15 @@ func TestBuildDeviceParameterUpsertUsesOneConditionalMultiRowStatement(t *testin
 	assert.Equal(t, 2, args[6])
 	assert.Equal(t, "radio", args[7])
 }
+
+func TestOrderedDeviceParameterWriteIDsAreUniqueAndStable(t *testing.T) {
+	first := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	second := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	rows := []deviceParameterUpsertRow{
+		{deviceID: second},
+		{deviceID: first},
+		{deviceID: second},
+	}
+
+	assert.Equal(t, []uuid.UUID{first, second}, orderedDeviceParameterWriteIDs(rows))
+}

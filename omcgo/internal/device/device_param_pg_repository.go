@@ -106,9 +106,19 @@ func (r *PgDeviceParameterRepository) GetByPath(ctx context.Context, deviceID uu
 
 func (r *PgDeviceParameterRepository) DeleteByDevice(ctx context.Context, deviceID uuid.UUID) error {
 	query, args, _ := storage.Psql.Delete("device_parameters").Where(sq.Eq{"device_id": deviceID}).ToSql()
-	_, err := r.pool.Exec(ctx, query, args...)
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
+		return fmt.Errorf("begin delete device parameters: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if err := AcquireParameterWriteLocks(ctx, tx, deviceID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, query, args...); err != nil {
 		return fmt.Errorf("delete device parameters: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit delete device parameters: %w", err)
 	}
 	return nil
 }
@@ -121,9 +131,20 @@ func (r *PgDeviceParameterRepository) DeleteByPathPrefix(ctx context.Context, de
 		Where(sq.Eq{"device_id": deviceID}).
 		Where(sq.Like{"parameter_path": prefix + "%"}).
 		ToSql()
-	tag, err := r.pool.Exec(ctx, query, args...)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin delete device parameters by prefix: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if err := AcquireParameterWriteLocks(ctx, tx, deviceID); err != nil {
+		return 0, err
+	}
+	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("delete device parameters by prefix: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit delete device parameters by prefix: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }

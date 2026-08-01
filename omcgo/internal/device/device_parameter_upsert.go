@@ -3,9 +3,11 @@ package device
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
@@ -33,6 +35,45 @@ type deviceParameterUpsertResult struct {
 type deviceParameterKey struct {
 	deviceID uuid.UUID
 	path     string
+}
+
+func orderedDeviceParameterWriteIDs(rows []deviceParameterUpsertRow) []uuid.UUID {
+	unique := make(map[uuid.UUID]struct{}, len(rows))
+	for _, row := range rows {
+		if row.deviceID != uuid.Nil {
+			unique[row.deviceID] = struct{}{}
+		}
+	}
+	ids := make([]uuid.UUID, 0, len(unique))
+	for id := range unique {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		return ids[i].String() < ids[j].String()
+	})
+	return ids
+}
+
+// AcquireParameterWriteLocks serializes every official device_parameters
+// mutation for the same device. A full-sync finalize both upserts and deletes
+// rows, while Inform projection concurrently upserts them; without one shared
+// lock the two statements can lock parameter rows in opposite order and
+// deadlock. Multiple devices are always acquired in UUID order so batch Inform
+// transactions cannot create a lock-order cycle with each other.
+func AcquireParameterWriteLocks(ctx context.Context, tx pgx.Tx, deviceIDs ...uuid.UUID) error {
+	uniqueRows := make([]deviceParameterUpsertRow, 0, len(deviceIDs))
+	for _, deviceID := range deviceIDs {
+		uniqueRows = append(uniqueRows, deviceParameterUpsertRow{deviceID: deviceID})
+	}
+	for _, deviceID := range orderedDeviceParameterWriteIDs(uniqueRows) {
+		if _, err := tx.Exec(ctx,
+			"SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+			"device_parameters:"+deviceID.String(),
+		); err != nil {
+			return fmt.Errorf("acquire device parameter write lock for %s: %w", deviceID, err)
+		}
+	}
+	return nil
 }
 
 func dedupeDeviceParameterRows(rows []deviceParameterUpsertRow) []deviceParameterUpsertRow {
@@ -110,6 +151,9 @@ func bulkUpsertDeviceParameters(
 		return result, fmt.Errorf("begin device parameter upsert: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := AcquireParameterWriteLocks(ctx, tx, orderedDeviceParameterWriteIDs(rows)...); err != nil {
+		return result, err
+	}
 
 	updatedAt := time.Now()
 	for start := 0; start < len(rows); start += deviceParameterUpsertBatchSize {

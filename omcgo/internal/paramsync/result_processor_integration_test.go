@@ -10,9 +10,36 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	devicepkg "github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
 )
+
+func TestDeviceParameterWriteLockSerializesConcurrentWriters(t *testing.T) {
+	ctx := context.Background()
+	pool := newParamSyncTestPool(t)
+	deviceID := uuid.New()
+
+	first, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = first.Rollback(context.Background()) }()
+	require.NoError(t, devicepkg.AcquireParameterWriteLocks(ctx, first, deviceID))
+
+	second, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = second.Rollback(context.Background()) }()
+	waitCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+	defer cancel()
+	err = devicepkg.AcquireParameterWriteLocks(waitCtx, second, deviceID)
+	require.Error(t, err, "a concurrent writer for the same device must wait")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	require.NoError(t, first.Rollback(ctx))
+	third, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = third.Rollback(context.Background()) }()
+	require.NoError(t, devicepkg.AcquireParameterWriteLocks(ctx, third, deviceID))
+}
 
 func TestMappedMLNRFStateCannotBeOverwrittenByLaterRawShadow(t *testing.T) {
 	ctx := context.Background()

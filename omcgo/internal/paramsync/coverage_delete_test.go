@@ -1,6 +1,7 @@
 package paramsync
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -23,9 +24,8 @@ func TestBuildFullSyncReconcileDeleteCombinesCompleteCoverageIntoOneStatement(t 
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, 1, strings.Count(sql, "DELETE FROM device_parameters"))
-	require.Contains(t, sql, "parameter_path = $2 OR")
-	require.Contains(t, sql, "parameter_path LIKE $3")
-	require.Contains(t, sql, "parameter_path ~ $4")
+	require.Contains(t, sql, "parameter_path = ANY($2::text[])")
+	require.Contains(t, sql, "parameter_path ~ $3")
 	require.NotContains(t, args, "Device.Incomplete")
 	require.Contains(t, args, deviceID.String())
 	require.Contains(t, args, runID)
@@ -34,8 +34,8 @@ func TestBuildFullSyncReconcileDeleteCombinesCompleteCoverageIntoOneStatement(t 
 func TestFrozenCoveragePathPredicateUsesExactMappedLeaf(t *testing.T) {
 	sql, args, err := frozenCoveragePathPredicate(CoverageScope{Mappings: []FrozenMapping{{StandardPath: "Device.Info.Serial", IsStorable: true}}}).ToSql()
 	require.NoError(t, err)
-	assert.Contains(t, sql, "parameter_path = ?")
-	assert.Equal(t, []any{"Device.Info.Serial"}, args)
+	assert.Contains(t, sql, "parameter_path = ANY(?::text[])")
+	assert.Equal(t, []any{[]string{"Device.Info.Serial"}}, args)
 }
 
 func TestFrozenCoveragePathPredicateCollapsesExactLeavesIntoOneIndexedSet(t *testing.T) {
@@ -45,11 +45,11 @@ func TestFrozenCoveragePathPredicateCollapsesExactLeavesIntoOneIndexedSet(t *tes
 		{StandardPath: "Device.Info.Software", IsStorable: true},
 	}}).ToSql()
 	require.NoError(t, err)
-	require.Contains(t, sql, "parameter_path IN (?,?,?)")
+	require.Contains(t, sql, "parameter_path = ANY(?::text[])")
 	require.NotContains(t, sql, " OR ")
-	require.Equal(t, []any{
+	require.Equal(t, []any{[]string{
 		"Device.Info.Serial", "Device.Info.Model", "Device.Info.Software",
-	}, args)
+	}}, args)
 }
 
 func TestFrozenCoveragePathPredicateOnlyMatchesMappedRuntimeInstances(t *testing.T) {
@@ -58,11 +58,47 @@ func TestFrozenCoveragePathPredicateOnlyMatchesMappedRuntimeInstances(t *testing
 		{StandardPath: "Device.Radio.{i}.Secret", IsStorable: false},
 	}}).ToSql()
 	require.NoError(t, err)
-	// {i} 分支要同时带一个可走 (device_id, parameter_path varchar_pattern_ops)
-	// 索引的 LIKE 前缀条件，避免整表逐行做正则匹配（线上巡检发现的性能问题）。
-	assert.Contains(t, sql, "parameter_path LIKE ?")
+	// device_id 先把候选集收敛到单设备；所有实例模式合成一个正则参数，
+	// 避免数百个 LIKE/regex OR 的规划开销与不稳定锁行顺序。
 	assert.Contains(t, sql, "parameter_path ~ ?")
-	assert.Equal(t, []any{"Device.Radio.%", `^Device\.Radio\.[0-9]+\.Enable$`}, args)
+	assert.Equal(t, []any{`^(Device\.Radio\.[0-9]+\.Enable)$`}, args)
+}
+
+func TestFrozenCoveragePathPredicateCollapsesRuntimePatternsIntoOneRegex(t *testing.T) {
+	sql, args, err := frozenCoveragePathPredicate(CoverageScope{Mappings: []FrozenMapping{
+		{StandardPath: "Device.Radio.{i}.Enable", IsStorable: true},
+		{StandardPath: "Device.Radio.{i}.Status", IsStorable: true},
+	}}).ToSql()
+	require.NoError(t, err)
+	require.Contains(t, sql, "parameter_path ~ ?")
+	require.Len(t, args, 1)
+	require.Equal(t,
+		`^(Device\.Radio\.[0-9]+\.Enable|Device\.Radio\.[0-9]+\.Status)$`,
+		args[0],
+	)
+}
+
+func TestBuildFullSyncReconcileDeleteKeepsSQLAndBindCountBounded(t *testing.T) {
+	mappings := make([]FrozenMapping, 0, 700)
+	for i := 0; i < 400; i++ {
+		mappings = append(mappings, FrozenMapping{
+			StandardPath: fmt.Sprintf("Device.Exact.P%d", i), IsStorable: true,
+		})
+	}
+	for i := 0; i < 300; i++ {
+		mappings = append(mappings, FrozenMapping{
+			StandardPath: fmt.Sprintf("Device.Table.{i}.P%d", i), IsStorable: true,
+		})
+	}
+
+	sql, args, ok, err := buildFullSyncReconcileDelete(uuid.New(), uuid.New(), []CoverageScope{{
+		Path: "Device.", Complete: true, Mappings: mappings,
+	}})
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Less(t, len(sql), 500, "mapping cardinality must not expand SQL text")
+	require.Len(t, args, 4, "device, exact array, runtime regex, and run are the only binds")
+	require.Len(t, args[1], 400)
 }
 
 func TestRecoveredPrivateLeafMarksOnlyItsFrozenStandardCoverageIncomplete(t *testing.T) {
