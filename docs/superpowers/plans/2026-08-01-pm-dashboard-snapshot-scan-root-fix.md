@@ -63,4 +63,3 @@
 - [ ] Verify services, ACS, queues, dead letters, PM/KPI freshness, K900010006/K900010076, PostgreSQL/TSDB locks and slow queries, CPU/memory/disk I/O, and hourly/daily/weekly coverage.
 - [ ] Cross a 5-minute reconcile boundary, query Dashboard daily/weekly repeatedly, and prove no app/worker member-table full scan occurs.
 - [ ] Commit, push, create MR, wait for pipeline, merge, and confirm merged main contains the fix.
-
