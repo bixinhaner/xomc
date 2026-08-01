@@ -196,20 +196,29 @@ func (f *Finalizer) PublishHourlyReady(
 	if f.metrics != nil {
 		defer func() { f.metrics.PublicationDuration.Observe(time.Since(started).Seconds()) }()
 	}
-	keys, err := f.windows.PublishHourlyReady(ctx, now, grace, limit)
-	if err != nil {
-		return err
+	if limit == 0 {
+		limit = 1
 	}
-	if f.metrics != nil {
-		f.metrics.WindowsPublishedTotal.Add(float64(len(keys)))
-	}
-	for _, key := range keys {
-		if err := f.store.DeleteState(ctx, key); err != nil {
-			f.logger.Warn("delete watermarked PM aggregation Redis window",
-				zap.String("task_version_id", key.TaskVersionID.String()),
-				zap.String("entity_key", key.EntityKey),
-				zap.Time("window_start", key.Start),
-				zap.Error(err))
+	const maxPublicationDrainBatches = 64
+	for batch := 0; batch < maxPublicationDrainBatches; batch++ {
+		keys, err := f.windows.PublishHourlyReady(ctx, now, grace, limit)
+		if err != nil {
+			return err
+		}
+		if f.metrics != nil {
+			f.metrics.WindowsPublishedTotal.Add(float64(len(keys)))
+		}
+		for _, key := range keys {
+			if err := f.store.DeleteState(ctx, key); err != nil {
+				f.logger.Warn("delete watermarked PM aggregation Redis window",
+					zap.String("task_version_id", key.TaskVersionID.String()),
+					zap.String("entity_key", key.EntityKey),
+					zap.Time("window_start", key.Start),
+					zap.Error(err))
+			}
+		}
+		if uint64(len(keys)) < limit {
+			return nil
 		}
 	}
 	return nil
@@ -227,6 +236,9 @@ func (f *Finalizer) writeFinal(
 		return fmt.Errorf("begin finalize PM aggregation window: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockPublicationForRebuild(ctx, tx, key); err != nil {
+		return err
+	}
 	var revision int
 	revisionSQL, revisionArgs, err := storage.Psql.Select("revision").
 		From("pm_aggregation_windows").
@@ -276,9 +288,18 @@ func (f *Finalizer) writeFinal(
 		return err
 	}
 	for _, payload := range rollups {
-		if err := insertRollupTxWithEligibility(ctx, tx, payload, status == "published", revision); err != nil {
+		if err := insertRollupTxWithEligibility(
+			ctx, tx, payload, key.TaskVersionID, status == "published", revision,
+		); err != nil {
 			return fmt.Errorf("persist compact PM Counter rollup: %w", err)
 		}
+	}
+	rollupEventIDs := make([]uuid.UUID, 0, len(rollups))
+	for _, payload := range rollups {
+		rollupEventIDs = append(rollupEventIDs, rollupEventIDForRevision(payload.EventID, revision))
+	}
+	if err := deleteStaleRollupRevisionTx(ctx, tx, key, revision, rollupEventIDs); err != nil {
+		return err
 	}
 	resultReplaceStarted := time.Now()
 	resultCount, err := ReplaceWindowResults(

@@ -25,6 +25,9 @@ func TestBuildNetworkRollupSeriesSQLUsesOnlyPublishedNetworkResults(t *testing.T
 	require.NoError(t, err)
 
 	assert.Contains(t, query, "FROM pm_aggregation_results r")
+	assert.Contains(t, query, "JOIN pm_aggregation_publications published_revision")
+	assert.Contains(t, query, "published_revision.status = 'published'")
+	assert.Contains(t, query, "published_revision.revision = r.revision")
 	assert.Contains(t, query, "DISTINCT ON (r.technology, r.metric_path, r.window_start)")
 	assert.Contains(t, query, "r.dimension =")
 	assert.Contains(t, query, "r.metric_type =")
@@ -80,6 +83,7 @@ func TestBuildLatestNetworkHourlySQLSelectsLatestPerTechnologyAndMetric(t *testi
 	require.NoError(t, err)
 
 	assert.Contains(t, query, "FROM pm_aggregation_results r")
+	assert.Contains(t, query, "published_revision.revision = r.revision")
 	assert.Contains(t, query, "DISTINCT ON (r.technology, r.metric_path)")
 	assert.Contains(t, query, "r.dimension =")
 	assert.Contains(t, query, "r.metric_type =")

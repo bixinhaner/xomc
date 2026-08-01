@@ -224,9 +224,10 @@ func publishPreparedRevision(
 		"window_start":    publication.WindowStart,
 	}
 	windowQuery, windowArgs, err := storage.Psql.Update("pm_aggregation_windows").
-		Set("status", "published").Set("revision", publication.Revision).
+		Set("status", "published").Set("published_revision", publication.Revision).
 		Set("published_at", now).Set("updated_at", now).
-		Where(publicationWhere).Where(sq.Eq{"status": []string{"prepared", "published"}}).
+		Where(publicationWhere).
+		Where(sq.Eq{"status": "prepared", "revision": publication.Revision}).
 		Suffix("RETURNING task_id, task_version_id, entity_key, granularity, window_start, window_end").
 		ToSql()
 	if err != nil {
@@ -256,7 +257,12 @@ func publishPreparedRevision(
 
 	outboxQuery, outboxArgs, err := storage.Psql.Update("pm_aggregation_rollup_outbox").
 		Set("barrier_eligible", true).
-		Where(publicationWhere).Where(sq.Eq{"revision": publication.Revision}).
+		Where(sq.Eq{
+			"publication_task_version_id": publication.TaskVersionID,
+			"granularity":                 string(publication.Granularity),
+			"window_start":                publication.WindowStart,
+			"revision":                    publication.Revision,
+		}).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build release prepared PM rollups: %w", err)
@@ -266,7 +272,12 @@ func publishPreparedRevision(
 	}
 	snapshotQuery, snapshotArgs, err := storage.Psql.Update("pm_aggregation_counter_rollups").
 		Set("publication_eligible", true).
-		Where(publicationWhere).Where(sq.Eq{"revision": publication.Revision}).
+		Where(sq.Eq{
+			"publication_task_version_id": publication.TaskVersionID,
+			"granularity":                 string(publication.Granularity),
+			"window_start":                publication.WindowStart,
+			"revision":                    publication.Revision,
+		}).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build release prepared PM rollup snapshots: %w", err)
@@ -274,11 +285,46 @@ func publishPreparedRevision(
 	if _, err := tx.Exec(ctx, snapshotQuery, snapshotArgs...); err != nil {
 		return nil, fmt.Errorf("release prepared PM rollup snapshots: %w", err)
 	}
+	retireQuery, retireArgs, err := storage.Psql.Update("pm_aggregation_rollup_outbox").
+		Set("barrier_eligible", false).
+		Set("consumed_at", sq.Expr("COALESCE(consumed_at, ?)", now)).
+		Where(sq.Eq{
+			"publication_task_version_id": publication.TaskVersionID,
+			"granularity":                 string(publication.Granularity),
+			"window_start":                publication.WindowStart,
+		}).Where(sq.Lt{"revision": publication.Revision}).
+		Where(sq.Expr(`EXISTS (
+  SELECT 1 FROM pm_aggregation_windows advanced_window
+  WHERE advanced_window.task_version_id = pm_aggregation_rollup_outbox.publication_task_version_id
+    AND advanced_window.entity_key = pm_aggregation_rollup_outbox.entity_key
+    AND advanced_window.granularity = pm_aggregation_rollup_outbox.granularity
+    AND advanced_window.window_start = pm_aggregation_rollup_outbox.window_start
+    AND advanced_window.published_revision = ?
+)`, publication.Revision)).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build retire superseded PM rollups: %w", err)
+	}
+	if _, err := tx.Exec(ctx, retireQuery, retireArgs...); err != nil {
+		return nil, fmt.Errorf("retire superseded PM rollups: %w", err)
+	}
 
 	publicationQuery, publicationArgs, err := storage.Psql.Update("pm_aggregation_publications").
 		Set("status", "published").Set("watermark_at", now).Set("published_at", now).
 		Set("revision", publication.Revision).Set("preparing_revision", nil).
-		Set("expected_entities", len(keys)).Set("prepared_entities", len(keys)).
+		Set("expected_entities", sq.Expr(`(
+  SELECT COUNT(*) FROM pm_aggregation_windows counted
+  WHERE counted.task_version_id = pm_aggregation_publications.task_version_id
+    AND counted.granularity = pm_aggregation_publications.granularity
+    AND counted.window_start = pm_aggregation_publications.window_start
+    AND counted.status = 'published'
+)`)).
+		Set("prepared_entities", sq.Expr(`(
+  SELECT COUNT(*) FROM pm_aggregation_windows counted
+  WHERE counted.task_version_id = pm_aggregation_publications.task_version_id
+    AND counted.granularity = pm_aggregation_publications.granularity
+    AND counted.window_start = pm_aggregation_publications.window_start
+    AND counted.status = 'published'
+)`)).
 		Set("dirty_entities", 0).Set("updated_at", now).
 		Where(publicationWhere).Where(sq.Eq{"preparing_revision": publication.Revision}).
 		ToSql()

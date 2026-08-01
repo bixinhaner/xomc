@@ -475,7 +475,8 @@ func TestKeyedQueueHandlerFailureNaksThenSuccessAcks(t *testing.T) {
 		},
 	)
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return attempts.Load() == 2 }, 5*time.Second, 20*time.Millisecond)
+	require.Eventuallyf(t, func() bool { return attempts.Load() >= 2 }, 5*time.Second, 20*time.Millisecond,
+		"handler attempts never reached the successful retry; attempts=%d", attempts.Load())
 	require.Eventually(t, func() bool {
 		info, infoErr := js.ConsumerInfo(stream, durable)
 		return infoErr == nil &&
@@ -483,6 +484,7 @@ func TestKeyedQueueHandlerFailureNaksThenSuccessAcks(t *testing.T) {
 			info.NumAckPending == 0 &&
 			info.AckFloor.Stream == 1
 	}, 5*time.Second, 20*time.Millisecond)
+	require.Equal(t, int64(2), attempts.Load(), "one transient failure must produce exactly one in-lane retry")
 	require.NoError(t, sub.Unsubscribe())
 }
 

@@ -90,6 +90,25 @@ func TestReplaceWindowResultsRevisionDeletesOnlyMetricsAbsentFromStaging(t *test
 	}
 }
 
+func TestReplaceWindowResultsEmptyRevisionDeletesAllPriorMetrics(t *testing.T) {
+	tx := &recordingResultTx{captureRows: true}
+
+	count, err := ReplaceWindowResults(
+		context.Background(), tx, resultRepositoryTestKey(), 2, nil,
+		resultCompleteness{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 || tx.copiedCount != 0 {
+		t.Fatalf("empty replacement count = %d copied = %d, want zero", count, tx.copiedCount)
+	}
+	deleteSQL := findSQLContaining(t, tx.sqls, "DELETE FROM pm_aggregation_results")
+	if !strings.Contains(deleteSQL, "NOT EXISTS") {
+		t.Fatalf("empty replacement does not remove the prior generation: %s", deleteSQL)
+	}
+}
+
 func TestReplaceWindowResultsUpsertRefreshesRevisionValueAndCompleteness(t *testing.T) {
 	tx := &recordingResultTx{captureRows: true}
 	metric := resultRepositoryTestMetric("K900010076", 91.25)

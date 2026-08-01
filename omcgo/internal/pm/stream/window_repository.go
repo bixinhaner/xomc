@@ -435,6 +435,14 @@ AND NOT EXISTS (
       AND source_rollup.barrier_eligible
       AND source_rollup.subject = ?
       AND source_rollup.window_start = w.window_start
+      AND EXISTS (
+          SELECT 1 FROM pm_aggregation_windows rollup_window
+          WHERE rollup_window.task_version_id = source_rollup.publication_task_version_id
+            AND rollup_window.entity_key = source_rollup.entity_key
+            AND rollup_window.granularity = source_rollup.granularity
+            AND rollup_window.window_start = source_rollup.window_start
+            AND rollup_window.published_revision = source_rollup.revision
+      )
 )`,
 		filter.versionIDs,
 		"pmaggregation.hourly.rollup",
@@ -724,6 +732,14 @@ AND NOT EXISTS (
       AND source_rollup.barrier_eligible
       AND source_rollup.window_start >= w.window_start
       AND source_rollup.window_start < w.window_end
+      AND EXISTS (
+          SELECT 1 FROM pm_aggregation_windows rollup_window
+          WHERE rollup_window.task_version_id = source_rollup.publication_task_version_id
+            AND rollup_window.entity_key = source_rollup.entity_key
+            AND rollup_window.granularity = source_rollup.granularity
+            AND rollup_window.window_start = source_rollup.window_start
+            AND rollup_window.published_revision = source_rollup.revision
+      )
       AND (
           (w.granularity = 'daily' AND source_rollup.subject = ?)
           OR
@@ -880,6 +896,14 @@ OR EXISTS (
       AND source_rollup.barrier_eligible
       AND source_rollup.window_start >= due_windows.window_start
       AND source_rollup.window_start < due_windows.window_end
+      AND EXISTS (
+          SELECT 1 FROM pm_aggregation_windows rollup_window
+          WHERE rollup_window.task_version_id = source_rollup.publication_task_version_id
+            AND rollup_window.entity_key = source_rollup.entity_key
+            AND rollup_window.granularity = source_rollup.granularity
+            AND rollup_window.window_start = source_rollup.window_start
+            AND rollup_window.published_revision = source_rollup.revision
+      )
       AND (
           (due_windows.granularity = 'daily' AND source_rollup.subject = ?)
           OR

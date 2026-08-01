@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/redis/go-redis/v9"
 )
 
 func TestRebuildLeaseBatchRenewalUsesDatabaseClockAndRejectsExpired(t *testing.T) {
@@ -331,6 +332,10 @@ func TestHourlyRebuildQuietPeriodYieldsBeforePublicationDeadline(t *testing.T) {
 		!strings.Contains(query, "window_end +") {
 		t.Fatalf("claim query is not publication-deadline aware: %s", query)
 	}
+	if !strings.Contains(query, "THEN 0 ELSE 1 END") ||
+		!strings.Contains(query, "THEN window_end END DESC") {
+		t.Fatalf("deadline rebuilds do not preempt historical backlog: %s", query)
+	}
 	if !strings.Contains(fmt.Sprint(args), "690000000") {
 		t.Fatalf("claim query does not reserve 30 seconds before the 12-minute deadline: %v", args)
 	}
@@ -555,6 +560,26 @@ func TestRebuildSourceRoutingUsesRawOnlyForDevicePipelineHours(t *testing.T) {
 		TaskVersionID: pipelineID, Granularity: GranularityDaily,
 	}, snapshot) {
 		t.Fatal("daily rebuild must use compact hourly rollups")
+	}
+}
+
+func TestRebuiltWindowStateTreatsEmptyRollupReplayAsAuthoritativeZero(t *testing.T) {
+	state, missing, err := rebuiltWindowState(WindowState{}, redis.Nil, false)
+	if err != nil {
+		t.Fatalf("empty rollup rebuild state = %v, want authoritative zero", err)
+	}
+	if !missing {
+		t.Fatal("empty rollup rebuild must request durable zero-state initialization")
+	}
+	if state.ReceivedSlots != 0 || state.ExpectedSlots != 0 || len(state.Accumulators) != 0 {
+		t.Fatalf("empty rollup rebuild state = %#v, want zero state", state)
+	}
+}
+
+func TestRebuiltWindowStateRejectsEmptyRawReplay(t *testing.T) {
+	_, _, err := rebuiltWindowState(WindowState{}, redis.Nil, true)
+	if err == nil {
+		t.Fatal("empty raw rebuild must remain an incomplete durable-source error")
 	}
 }
 

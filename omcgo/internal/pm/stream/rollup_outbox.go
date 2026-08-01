@@ -34,24 +34,33 @@ type RollupOutboxRepository struct {
 	pool *pgxpool.Pool
 }
 
+func rollupEventIDForRevision(eventID uuid.UUID, revision int) uuid.UUID {
+	if revision <= 1 {
+		return eventID
+	}
+	return uuid.NewSHA1(eventID, []byte(fmt.Sprintf("revision:%d", revision)))
+}
+
 func NewRollupOutboxRepository(pool *pgxpool.Pool) *RollupOutboxRepository {
 	return &RollupOutboxRepository{pool: pool}
 }
 
 func insertRollupTx(ctx context.Context, tx pgx.Tx, payload RollupPayload) error {
-	return insertRollupTxWithEligibility(ctx, tx, payload, true, 1)
+	return insertRollupTxWithEligibility(ctx, tx, payload, payload.TaskVersionID, true, 1)
 }
 
 func insertRollupTxWithEligibility(
 	ctx context.Context,
 	tx pgx.Tx,
 	payload RollupPayload,
+	publicationTaskVersionID uuid.UUID,
 	eligible bool,
 	revision int,
 ) error {
 	if err := payload.Validate(); err != nil {
 		return err
 	}
+	payload.EventID = rollupEventIDForRevision(payload.EventID, revision)
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal PM compact rollup: %w", err)
@@ -68,17 +77,26 @@ func insertRollupTxWithEligibility(
 	}
 	snapshotSQL, snapshotArgs, err := storage.Psql.Insert("pm_aggregation_counter_rollups").
 		Columns(
-			"event_id", "task_id", "task_version_id", "entity_key", "granularity",
+			"event_id", "task_id", "task_version_id", "publication_task_version_id", "entity_key", "granularity",
 			"window_start", "window_end", "chunk_index", "chunk_count",
 			"complete", "revision", "publication_eligible", "payload",
 		).
 		Values(
-			payload.EventID, payload.TaskID, payload.TaskVersionID, payload.EntityKey,
+			payload.EventID, payload.TaskID, payload.TaskVersionID, publicationTaskVersionID, payload.EntityKey,
 			string(payload.SourceGranularity), payload.WindowStart, payload.WindowEnd,
 			payload.ChunkIndex, payload.ChunkCount, payload.Complete, revision, eligible, json.RawMessage(data),
 		).
 		Suffix(`ON CONFLICT (event_id) DO UPDATE SET
 			payload = EXCLUDED.payload,
+			task_id = EXCLUDED.task_id,
+			task_version_id = EXCLUDED.task_version_id,
+			publication_task_version_id = EXCLUDED.publication_task_version_id,
+			entity_key = EXCLUDED.entity_key,
+			granularity = EXCLUDED.granularity,
+			window_start = EXCLUDED.window_start,
+			window_end = EXCLUDED.window_end,
+			chunk_index = EXCLUDED.chunk_index,
+			chunk_count = EXCLUDED.chunk_count,
 			complete = EXCLUDED.complete,
 			revision = EXCLUDED.revision,
 			publication_eligible = EXCLUDED.publication_eligible,
@@ -92,15 +110,21 @@ func insertRollupTxWithEligibility(
 	}
 	outboxSQL, outboxArgs, err := storage.Psql.Insert("pm_aggregation_rollup_outbox").
 		Columns(
-			"event_id", "subject", "task_version_id", "granularity", "window_start",
+			"event_id", "subject", "task_version_id", "publication_task_version_id", "entity_key", "granularity", "window_start",
 			"revision", "payload", "barrier_eligible",
 		).
 		Values(
-			payload.EventID, subject, payload.TaskVersionID, string(payload.SourceGranularity),
+			payload.EventID, subject, payload.TaskVersionID, publicationTaskVersionID, payload.EntityKey, string(payload.SourceGranularity),
 			payload.WindowStart, revision, json.RawMessage(data), eligible,
 		).
 		Suffix(`ON CONFLICT (event_id) DO UPDATE SET
 			payload = EXCLUDED.payload,
+			subject = EXCLUDED.subject,
+			task_version_id = EXCLUDED.task_version_id,
+			publication_task_version_id = EXCLUDED.publication_task_version_id,
+			entity_key = EXCLUDED.entity_key,
+			granularity = EXCLUDED.granularity,
+			window_start = EXCLUDED.window_start,
 			published_at = NULL,
 			consumed_at = NULL,
 			barrier_eligible = EXCLUDED.barrier_eligible,
@@ -114,6 +138,42 @@ func insertRollupTxWithEligibility(
 	}
 	if _, err := tx.Exec(ctx, outboxSQL, outboxArgs...); err != nil {
 		return fmt.Errorf("insert PM rollup outbox: %w", err)
+	}
+	return nil
+}
+
+func deleteStaleRollupRevisionTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	key WindowKey,
+	revision int,
+	keep []uuid.UUID,
+) error {
+	deleteRows := func(table string) error {
+		builder := storage.Psql.Delete(table).Where(sq.Eq{
+			"publication_task_version_id": key.TaskVersionID,
+			"entity_key":                  key.EntityKey,
+			"granularity":                 string(key.Granularity),
+			"window_start":                key.Start,
+			"revision":                    revision,
+		})
+		if len(keep) > 0 {
+			builder = builder.Where(sq.NotEq{"event_id": keep})
+		}
+		query, args, err := builder.ToSql()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, query, args...); err != nil {
+			return err
+		}
+		return nil
+	}
+	if err := deleteRows("pm_aggregation_counter_rollups"); err != nil {
+		return fmt.Errorf("delete stale PM Counter rollup snapshots: %w", err)
+	}
+	if err := deleteRows("pm_aggregation_rollup_outbox"); err != nil {
+		return fmt.Errorf("delete stale PM Counter rollup outbox rows: %w", err)
 	}
 	return nil
 }
@@ -158,7 +218,7 @@ func (r *RollupOutboxRepository) lockBatch(
 		limit = 1
 	}
 	query, args, err := pendingRollupOutboxSelect("event_id", "subject", "payload").
-		OrderBy("created_at", "event_id").
+		OrderBy("rollup.created_at", "rollup.event_id").
 		Limit(limit).
 		Suffix("FOR UPDATE SKIP LOCKED").
 		ToSql()
@@ -186,8 +246,21 @@ func (r *RollupOutboxRepository) lockBatch(
 }
 
 func pendingRollupOutboxSelect(columns ...string) sq.SelectBuilder {
-	return pendingOutboxSelect("pm_aggregation_rollup_outbox", columns...).
-		Where(sq.Eq{"barrier_eligible": true})
+	prefixed := make([]string, 0, len(columns))
+	for _, column := range columns {
+		prefixed = append(prefixed, "rollup."+column)
+	}
+	return storage.Psql.Select(prefixed...).
+		From("pm_aggregation_rollup_outbox rollup").
+		Join(`pm_aggregation_windows published_window
+  ON published_window.task_version_id = rollup.publication_task_version_id
+ AND published_window.entity_key = rollup.entity_key
+ AND published_window.granularity = rollup.granularity
+ AND published_window.window_start = rollup.window_start
+ AND published_window.published_revision = rollup.revision`).
+		Where("rollup.published_at IS NULL").
+		Where("rollup.consumed_at IS NULL").
+		Where(sq.Eq{"rollup.barrier_eligible": true})
 }
 
 func markRollupPublished(ctx context.Context, tx pgx.Tx, eventID uuid.UUID) error {
@@ -237,16 +310,22 @@ func (r *RollupOutboxRepository) ListSnapshots(
 	start, end time.Time,
 ) ([]RollupPayload, error) {
 	query, args, err := storage.Psql.Select("payload").
-		From("pm_aggregation_counter_rollups").
+		From("pm_aggregation_counter_rollups rollup").
+		Join(`pm_aggregation_windows published_window
+  ON published_window.task_version_id = rollup.publication_task_version_id
+ AND published_window.entity_key = rollup.entity_key
+ AND published_window.granularity = rollup.granularity
+ AND published_window.window_start = rollup.window_start
+ AND published_window.published_revision = rollup.revision`).
 		Where(sq.Eq{
-			"task_version_id":      taskVersionID,
-			"entity_key":           entityKey,
-			"granularity":          string(granularity),
-			"publication_eligible": true,
+			"rollup.task_version_id":      taskVersionID,
+			"rollup.entity_key":           entityKey,
+			"rollup.granularity":          string(granularity),
+			"rollup.publication_eligible": true,
 		}).
-		Where(sq.GtOrEq{"window_start": start}).
-		Where(sq.Lt{"window_start": end}).
-		OrderBy("window_start", "chunk_index").
+		Where(sq.GtOrEq{"rollup.window_start": start}).
+		Where(sq.Lt{"rollup.window_start": end}).
+		OrderBy("rollup.window_start", "rollup.chunk_index").
 		ToSql()
 	if err != nil {
 		return nil, err
@@ -276,16 +355,22 @@ func counterRollupPeriodSelect(
 	granularity Granularity,
 	start, end time.Time,
 ) sq.SelectBuilder {
-	return storage.Psql.Select("payload").
-		From("pm_aggregation_counter_rollups").
+	return storage.Psql.Select("rollup.payload").
+		From("pm_aggregation_counter_rollups rollup").
+		Join(`pm_aggregation_windows published_window
+  ON published_window.task_version_id = rollup.publication_task_version_id
+ AND published_window.entity_key = rollup.entity_key
+ AND published_window.granularity = rollup.granularity
+ AND published_window.window_start = rollup.window_start
+ AND published_window.published_revision = rollup.revision`).
 		Where(sq.Eq{
-			"task_version_id":      taskVersionIDs,
-			"granularity":          string(granularity),
-			"publication_eligible": true,
+			"rollup.task_version_id":      taskVersionIDs,
+			"rollup.granularity":          string(granularity),
+			"rollup.publication_eligible": true,
 		}).
-		Where(sq.GtOrEq{"window_start": start}).
-		Where(sq.Lt{"window_start": end}).
-		OrderBy("window_start", "task_version_id", "entity_key", "chunk_index")
+		Where(sq.GtOrEq{"rollup.window_start": start}).
+		Where(sq.Lt{"rollup.window_start": end}).
+		OrderBy("rollup.window_start", "rollup.task_version_id", "rollup.entity_key", "rollup.chunk_index")
 }
 
 func (r *RollupOutboxRepository) VisitSnapshotsForPeriod(

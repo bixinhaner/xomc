@@ -8,7 +8,23 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+type recordingRollupDeleteTx struct {
+	pgx.Tx
+	queries []string
+}
+
+func (tx *recordingRollupDeleteTx) Exec(
+	_ context.Context,
+	query string,
+	_ ...any,
+) (pgconn.CommandTag, error) {
+	tx.queries = append(tx.queries, query)
+	return pgconn.NewCommandTag("DELETE 1"), nil
+}
 
 type countingRebuildSnapshotSource struct {
 	calls    int
@@ -83,6 +99,10 @@ func TestCounterRollupPeriodSelectRestrictsSourceVersions(t *testing.T) {
 	if !strings.Contains(query, "publication_eligible =") {
 		t.Fatalf("period replay query can read prepared snapshots: %s", query)
 	}
+	if !strings.Contains(query, "published_window.published_revision = rollup.revision") ||
+		!strings.Contains(query, "published_window.entity_key = rollup.entity_key") {
+		t.Fatalf("period replay query is not pinned to the entity's published revision: %s", query)
+	}
 	joinedArgs := fmt.Sprint(args)
 	if !strings.Contains(joinedArgs, first.String()) ||
 		!strings.Contains(joinedArgs, second.String()) {
@@ -97,5 +117,33 @@ func TestPendingRollupOutboxRequiresPublishedRevisionEligibility(t *testing.T) {
 	}
 	if !strings.Contains(query, "barrier_eligible =") {
 		t.Fatalf("pending rollup query can expose prepared revision: %s", query)
+	}
+	if !strings.Contains(query, "published_window.published_revision = rollup.revision") ||
+		!strings.Contains(query, "published_window.entity_key = rollup.entity_key") {
+		t.Fatalf("pending rollup query is not pinned to the entity's published revision: %s", query)
+	}
+}
+
+func TestDeleteStaleRollupRevisionWithEmptyReplacementDeletesAllRows(t *testing.T) {
+	tx := &recordingRollupDeleteTx{}
+	key := WindowKey{
+		TaskVersionID: uuid.New(), EntityKey: "Network",
+		Granularity: GranularityDaily,
+		Start:       time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	if err := deleteStaleRollupRevisionTx(
+		context.Background(), tx, key, 2, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(tx.queries) != 2 {
+		t.Fatalf("empty replacement delete statements = %d, want snapshot and outbox", len(tx.queries))
+	}
+	for _, query := range tx.queries {
+		if strings.Contains(strings.ToUpper(query), "EVENT_ID <>") ||
+			strings.Contains(strings.ToUpper(query), "EVENT_ID NOT IN") {
+			t.Fatalf("empty replacement unexpectedly preserves old rollup rows: %s", query)
+		}
 	}
 }

@@ -951,6 +951,7 @@ CREATE TABLE public.pm_aggregation_counter_rollups (
     event_id uuid PRIMARY KEY,
     task_id uuid NOT NULL,
     task_version_id uuid NOT NULL,
+    publication_task_version_id uuid NOT NULL,
     entity_key text NOT NULL,
     granularity varchar(16) NOT NULL,
     window_start timestamptz NOT NULL,
@@ -971,7 +972,8 @@ CREATE TABLE public.pm_aggregation_counter_rollups (
 );
 CREATE INDEX idx_pm_aggregation_counter_rollups_recovery
     ON public.pm_aggregation_counter_rollups (
-        task_version_id, entity_key, granularity, window_start, chunk_index
+        task_version_id, publication_task_version_id, entity_key,
+        granularity, window_start, revision, chunk_index
     );
 CREATE INDEX idx_pm_aggregation_counter_rollups_retention
     ON public.pm_aggregation_counter_rollups (granularity, window_start);
@@ -980,6 +982,8 @@ CREATE TABLE public.pm_aggregation_rollup_outbox (
     event_id uuid PRIMARY KEY,
     subject text NOT NULL,
     task_version_id uuid NOT NULL,
+    publication_task_version_id uuid NOT NULL,
+    entity_key text NOT NULL,
     granularity varchar(16) NOT NULL,
     window_start timestamptz NOT NULL,
     revision integer NOT NULL DEFAULT 1,
@@ -1477,7 +1481,7 @@ ALTER TABLE public.pm_aggregation_rollup_outbox
 
 CREATE INDEX idx_pm_rollup_outbox_publication
     ON public.pm_aggregation_rollup_outbox (
-        task_version_id, granularity, window_start, revision
+        publication_task_version_id, granularity, window_start, revision
     ) WHERE NOT barrier_eligible;
 
 CREATE INDEX idx_pm_aggregation_rollup_consume_barrier
@@ -1486,6 +1490,7 @@ CREATE INDEX idx_pm_aggregation_rollup_consume_barrier
 
 ALTER TABLE public.pm_aggregation_windows
     ADD COLUMN revision integer NOT NULL DEFAULT 1,
+    ADD COLUMN published_revision integer NOT NULL DEFAULT 0,
     ADD COLUMN rebuild_requested_at timestamptz,
     ADD COLUMN version_effective_from timestamptz,
     ADD COLUMN version_effective_to timestamptz,

@@ -37,6 +37,8 @@ func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 	require.Contains(t, tsdbSQL, "idx_pm_aggregation_publications_due")
 	require.Contains(t, tsdbSQL, "idx_pm_windows_prepared_publication")
 	require.Contains(t, tsdbSQL, "idx_pm_rollup_outbox_publication")
+	require.Contains(t, tsdbSQL, "publication_task_version_id uuid NOT NULL")
+	require.Contains(t, tsdbSQL, "ADD COLUMN published_revision integer NOT NULL DEFAULT 0")
 	require.Contains(t, tsdbSQL, "publication_eligible boolean NOT NULL DEFAULT true")
 	require.GreaterOrEqual(t, strings.Count(tsdbSQL, "JOIN public.pm_aggregation_publications published_window"), 10,
 		"every compatibility result view must pin the atomically published revision")
