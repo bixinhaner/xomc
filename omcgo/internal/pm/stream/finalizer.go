@@ -272,6 +272,9 @@ func (f *Finalizer) writeFinal(
 		return nil
 	}
 	status := finalWindowStatus(key.Granularity, revision)
+	if err := preparePublicationRevision(ctx, tx, key, revision); err != nil {
+		return err
+	}
 	for _, payload := range rollups {
 		if err := insertRollupTxWithEligibility(ctx, tx, payload, status == "published", revision); err != nil {
 			return fmt.Errorf("persist compact PM Counter rollup: %w", err)

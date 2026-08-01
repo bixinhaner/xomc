@@ -36,6 +36,8 @@ const (
 	rebuildLeaseDuration = 2 * time.Minute
 	rebuildLockDuration  = 15 * time.Minute
 	rebuildQuietPeriod   = 2 * time.Minute
+	hourlyPublishGrace   = 12 * time.Minute
+	rebuildDeadlineLead  = 30 * time.Second
 	rebuildBatchSize     = 100
 )
 
@@ -54,10 +56,19 @@ func rebuildClaimBatchSelect(quietPeriod time.Duration, limit uint64) sq.SelectB
 		"window_start", "window_end", "source_event_id",
 		"attempts", "request_generation",
 	).From("pm_aggregation_rebuilds").
-		Where(sq.Expr(
-			"requested_at <= now() - (? * interval '1 microsecond')",
-			quietPeriod.Microseconds(),
-		)).
+		Where(sq.Or{
+			sq.Expr(
+				"requested_at <= now() - (? * interval '1 microsecond')",
+				quietPeriod.Microseconds(),
+			),
+			sq.And{
+				sq.Eq{"granularity": string(GranularityHourly)},
+				sq.Expr(
+					"now() >= window_end + (? * interval '1 microsecond')",
+					(hourlyPublishGrace - rebuildDeadlineLead).Microseconds(),
+				),
+			},
+		}).
 		Where(sq.Or{
 			sq.And{
 				sq.Eq{"status": []string{"pending", "failed"}},
@@ -177,8 +188,10 @@ RETURNING request_generation`).
 			"task_version_id": key.TaskVersionID,
 			"granularity":     string(key.Granularity),
 			"window_start":    key.Start,
-			"status":          "preparing",
-		}).ToSql()
+		}).Where(sq.Or{
+		sq.Eq{"status": "preparing"},
+		sq.Expr("preparing_revision IS NOT NULL"),
+	}).ToSql()
 	if err != nil {
 		return fmt.Errorf("build mark PM publication dirty: %w", err)
 	}

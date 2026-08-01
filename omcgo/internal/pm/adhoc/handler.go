@@ -1179,13 +1179,13 @@ JOIN current_versions cv
  AND cv.granularity = r.granularity
  AND cv.window_start = r.window_start
  AND cv.task_version_id = r.task_version_id
-JOIN pm_aggregation_windows published_window
+JOIN pm_aggregation_publications published_window
   ON published_window.task_id = r.task_id
  AND published_window.task_version_id = r.task_version_id
- AND published_window.entity_key = r.dimension_key
  AND published_window.granularity = r.granularity
  AND published_window.window_start = r.window_start
  AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 LEFT JOIN product_dim p ON p.id::text = r.dimension_key
 WHERE r.task_id = $1
   AND r.dimension = 'product'
@@ -1202,13 +1202,13 @@ JOIN current_versions cv
  AND cv.granularity = r.granularity
  AND cv.window_start = r.window_start
  AND cv.task_version_id = r.task_version_id
-JOIN pm_aggregation_windows published_window
+JOIN pm_aggregation_publications published_window
   ON published_window.task_id = r.task_id
  AND published_window.task_version_id = r.task_version_id
- AND published_window.entity_key = r.dimension_key
  AND published_window.granularity = r.granularity
  AND published_window.window_start = r.window_start
  AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 LEFT JOIN device_group_dim g ON ('DeviceGroup=' || g.id::text) = split_part(r.dimension_key, ',', 1)
 WHERE r.task_id = $1
   AND r.dimension = 'device_group'
@@ -1224,13 +1224,13 @@ JOIN current_versions cv
  AND cv.granularity = r.granularity
  AND cv.window_start = r.window_start
  AND cv.task_version_id = r.task_version_id
-JOIN pm_aggregation_windows published_window
+JOIN pm_aggregation_publications published_window
   ON published_window.task_id = r.task_id
  AND published_window.task_version_id = r.task_version_id
- AND published_window.entity_key = r.dimension_key
  AND published_window.granularity = r.granularity
  AND published_window.window_start = r.window_start
  AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 WHERE r.task_id = $1
   AND r.dimension = 'band'
   AND r.dimension_key LIKE 'Band=%'

@@ -389,6 +389,12 @@ func newDeviceObjectSource(builder sq.StatementBuilderType, q QueryRequest) sq.S
 			"r.window_start AS start_time",
 		).
 			From("pm_aggregation_results r").
+			Join(`pm_aggregation_publications published_revision
+  ON published_revision.task_version_id = r.task_version_id
+ AND published_revision.granularity = r.granularity
+ AND published_revision.window_start = r.window_start
+ AND published_revision.status = 'published'
+ AND published_revision.revision = r.revision`).
 			Where(sq.Eq{
 				"r.dimension":   string(DimensionDevice),
 				"r.granularity": string(q.Granularity),
@@ -703,6 +709,12 @@ func newRolledUpDeviceSelect(
 			'complete',r.complete,'missing_slots',r.missing_slots) AS extra`,
 	).
 		From("pm_aggregation_results r").
+		Join(`pm_aggregation_publications published_revision
+  ON published_revision.task_version_id = r.task_version_id
+ AND published_revision.granularity = r.granularity
+ AND published_revision.window_start = r.window_start
+ AND published_revision.status = 'published'
+ AND published_revision.revision = r.revision`).
 		Where(sq.Eq{
 			"r.dimension":   string(DimensionDevice),
 			"r.granularity": string(granularity),

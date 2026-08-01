@@ -182,13 +182,13 @@ JOIN current_versions cv
  AND cv.granularity = r.granularity
  AND cv.window_start = r.window_start
  AND cv.task_version_id = r.task_version_id
-JOIN pm_aggregation_windows published_window
+JOIN pm_aggregation_publications published_window
   ON published_window.task_id = r.task_id
  AND published_window.task_version_id = r.task_version_id
- AND published_window.entity_key = r.dimension_key
  AND published_window.granularity = r.granularity
  AND published_window.window_start = r.window_start
  AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 WHERE r.task_id = $1` + where + `
 ORDER BY r.metric_path`
 	return q, args, nil
@@ -283,14 +283,18 @@ func adhocCurrentVersionsCTE(cteWhere string) string {
         candidate.window_start,
         candidate.task_version_id
     FROM (
-        SELECT task_id, granularity, window_start, task_version_id, version_effective_from,
-               MAX(revision) AS max_revision,
-               MAX(published_at) AS max_published_at,
-               MAX(updated_at) AS max_updated_at
-        FROM pm_aggregation_windows
-        WHERE task_id = $1
-          AND status = 'published'` + cteWhere + `
-        GROUP BY task_id, granularity, window_start, task_version_id, version_effective_from
+        SELECT p.task_id, p.granularity, p.window_start, p.task_version_id,
+               (SELECT MAX(w.version_effective_from)
+                  FROM pm_aggregation_windows w
+                 WHERE w.task_version_id = p.task_version_id
+                   AND w.granularity = p.granularity
+                   AND w.window_start = p.window_start) AS version_effective_from,
+               p.revision AS max_revision,
+               p.published_at AS max_published_at,
+               p.updated_at AS max_updated_at
+        FROM pm_aggregation_publications p
+        WHERE p.task_id = $1
+          AND p.status = 'published'` + cteWhere + `
     ) candidate
     WHERE NOT EXISTS (
         SELECT 1
@@ -356,13 +360,13 @@ JOIN current_versions cv
  AND cv.granularity = r.granularity
  AND cv.window_start = r.window_start
  AND cv.task_version_id = r.task_version_id
-JOIN pm_aggregation_windows published_window
+JOIN pm_aggregation_publications published_window
   ON published_window.task_id = r.task_id
  AND published_window.task_version_id = r.task_version_id
- AND published_window.entity_key = r.dimension_key
  AND published_window.granularity = r.granularity
  AND published_window.window_start = r.window_start
  AND published_window.status = 'published'
+ AND published_window.revision = r.revision
 LEFT JOIN product_dim p ON r.dimension = 'product' AND p.id::text = r.dimension_key
 LEFT JOIN device_group_dim g ON r.dimension = 'device_group' AND ('DeviceGroup=' || g.id::text) = split_part(r.dimension_key, ',', 1)
 WHERE r.task_id = $1` + where

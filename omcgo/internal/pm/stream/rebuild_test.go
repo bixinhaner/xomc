@@ -322,6 +322,20 @@ func TestRebuildClaimBatchCoalescesUntilDatabaseQuietPeriod(t *testing.T) {
 	}
 }
 
+func TestHourlyRebuildQuietPeriodYieldsBeforePublicationDeadline(t *testing.T) {
+	query, args, err := rebuildClaimBatchSelect(2*time.Minute, 8).ToSql()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(query, "granularity =") ||
+		!strings.Contains(query, "window_end +") {
+		t.Fatalf("claim query is not publication-deadline aware: %s", query)
+	}
+	if !strings.Contains(fmt.Sprint(args), "690000000") {
+		t.Fatalf("claim query does not reserve 30 seconds before the 12-minute deadline: %v", args)
+	}
+}
+
 func TestRebuildCoalesceGenerationRunsAtMostOneFollowUp(t *testing.T) {
 	if got := rebuildCompletionStatus(100, 100); got != "completed" {
 		t.Fatalf("stable generation status = %q, want completed", got)

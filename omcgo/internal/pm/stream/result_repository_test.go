@@ -128,13 +128,15 @@ func TestReplaceWindowResultsUpsertRefreshesRevisionValueAndCompleteness(t *test
 	upsertSQL := findSQLContaining(t, tx.sqls, "ON CONFLICT")
 	for _, assignment := range []string{
 		"metric_value = EXCLUDED.metric_value",
-		"revision = EXCLUDED.revision",
 		"complete = EXCLUDED.complete",
 		"period_complete = EXCLUDED.period_complete",
 	} {
 		if !strings.Contains(upsertSQL, assignment) {
 			t.Fatalf("upsert does not refresh %q: %s", assignment, upsertSQL)
 		}
+	}
+	if !strings.Contains(upsertSQL, "object_ldn, technology, metric_id, revision") {
+		t.Fatalf("upsert conflict key does not preserve revisions: %s", upsertSQL)
 	}
 }
 

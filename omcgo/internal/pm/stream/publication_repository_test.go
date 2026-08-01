@@ -36,14 +36,23 @@ func TestPublishReadyQueryWaitsForWatermarkAndAllPreparedEntities(t *testing.T) 
 	require.Contains(t, query, "window_end <=")
 	require.Contains(t, query, "NOT EXISTS")
 	require.Contains(t, query, "pm_aggregation_windows")
-	require.Contains(t, query, "status <>")
+	require.Contains(t, query, "status NOT IN")
 	require.Contains(t, query, "FOR UPDATE SKIP LOCKED")
 	require.True(t, strings.Contains(query, "LIMIT 32") || strings.Contains(query, "LIMIT $"))
 	require.Contains(t, args, now.Add(-12*time.Minute))
 }
 
-func TestInitialHourlyRevisionPreparesButRebuildAndLongPeriodsPublishDirectly(t *testing.T) {
+func TestEveryGranularityAndRevisionIsPreparedBeforePublication(t *testing.T) {
 	require.Equal(t, "prepared", finalWindowStatus(GranularityHourly, 1))
-	require.Equal(t, "published", finalWindowStatus(GranularityHourly, 2))
-	require.Equal(t, "published", finalWindowStatus(GranularityDaily, 1))
+	require.Equal(t, "prepared", finalWindowStatus(GranularityHourly, 2))
+	require.Equal(t, "prepared", finalWindowStatus(GranularityDaily, 1))
+	require.Equal(t, "prepared", finalWindowStatus(GranularityWeekly, 3))
+}
+
+func TestPublishReadyAcceptsPublishedEntitiesFromPreviousRevision(t *testing.T) {
+	query, _, err := publishReadyCandidatesQuery(time.Now().UTC(), 12*time.Minute, 32).ToSql()
+	require.NoError(t, err)
+	require.Contains(t, query, "status NOT IN")
+	require.Contains(t, query, "prepared")
+	require.Contains(t, query, "published")
 }

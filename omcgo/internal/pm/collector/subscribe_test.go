@@ -90,6 +90,12 @@ func newTestCollector() *PMCollector {
 	return NewPMCollector(nil, "", nil, nil, nil, nil, zap.NewNop())
 }
 
+func TestNewPMCollectorWiresMinIOAsIllegalRawObjectDiscarder(t *testing.T) {
+	client := &minio.Client{}
+	collector := NewPMCollector(client, "pm-files", nil, nil, nil, nil, zap.NewNop())
+	require.NotNil(t, collector.rawDiscarder)
+}
+
 // 默认（未设并发）退化为单订阅，沿用旧行为。
 func TestPMCollector_Subscribe_DefaultSingleSubscription(t *testing.T) {
 	bus := &countingBus{}

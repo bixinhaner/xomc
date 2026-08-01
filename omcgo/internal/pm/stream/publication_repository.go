@@ -21,29 +21,28 @@ type PublicationRecord struct {
 }
 
 func finalWindowStatus(granularity Granularity, revision int) string {
-	if granularity == GranularityHourly && revision == 1 {
-		return "prepared"
-	}
-	return "published"
+	return "prepared"
 }
 
 func markPublicationPreparedQuery(key WindowKey, revision int) sq.InsertBuilder {
 	return storage.Psql.Insert("pm_aggregation_publications").
 		Columns(
 			"task_id", "task_version_id", "granularity", "window_start", "window_end",
-			"revision", "status", "expected_entities", "prepared_entities", "updated_at",
+			"revision", "preparing_revision", "status", "expected_entities", "prepared_entities", "updated_at",
 		).
 		Values(
 			key.TaskID, key.TaskVersionID, string(key.Granularity), key.Start, key.End,
-			revision, "preparing", 1, 1, time.Now().UTC(),
+			0, revision, "preparing", 1, 1, time.Now().UTC(),
 		).
 		Suffix(`ON CONFLICT (task_version_id, granularity, window_start) DO UPDATE SET
   task_id = EXCLUDED.task_id,
   window_end = EXCLUDED.window_end,
-  revision = GREATEST(pm_aggregation_publications.revision, EXCLUDED.revision),
-  status = 'preparing',
-  expected_entities = pm_aggregation_publications.expected_entities + 1,
-  prepared_entities = pm_aggregation_publications.prepared_entities + 1,
+  preparing_revision = GREATEST(
+    COALESCE(pm_aggregation_publications.preparing_revision, 0),
+    EXCLUDED.preparing_revision
+  ),
+  status = CASE WHEN pm_aggregation_publications.revision = 0 THEN 'preparing'
+                ELSE pm_aggregation_publications.status END,
   updated_at = EXCLUDED.updated_at`)
 }
 
@@ -57,16 +56,21 @@ func publishReadyCandidatesQuery(
 	}
 	return storage.Psql.Select(
 		"p.task_id", "p.task_version_id", "p.granularity", "p.window_start",
-		"p.window_end", "p.revision",
+		"p.window_end", "COALESCE(p.preparing_revision, p.revision)",
 	).From("pm_aggregation_publications p").
-		Where(sq.Eq{"p.status": "preparing", "p.granularity": string(GranularityHourly)}).
-		Where(sq.LtOrEq{"p.window_end": now.Add(-grace)}).
+		Where(sq.Or{sq.Eq{"p.status": "preparing"}, sq.Expr("p.preparing_revision IS NOT NULL")}).
+		Where(sq.Or{
+			sq.And{sq.Eq{"p.granularity": string(GranularityHourly)}, sq.LtOrEq{"p.window_end": now.Add(-grace)}},
+			sq.And{sq.Eq{"p.granularity": string(GranularityDaily)}, sq.LtOrEq{"p.window_end": now.Add(-15 * time.Minute)}},
+			sq.And{sq.Eq{"p.granularity": string(GranularityWeekly)}, sq.LtOrEq{"p.window_end": now.Add(-30 * time.Minute)}},
+			sq.And{sq.Eq{"p.granularity": string(GranularityMonthly)}, sq.LtOrEq{"p.window_end": now.Add(-30 * time.Minute)}},
+		}).
 		Where(sq.Expr(`NOT EXISTS (
   SELECT 1 FROM pm_aggregation_windows w
   WHERE w.task_version_id = p.task_version_id
     AND w.granularity = p.granularity
     AND w.window_start = p.window_start
-    AND w.status <> 'prepared'
+    AND w.status NOT IN ('prepared', 'published')
 )`)).
 		Where(sq.Expr(`NOT EXISTS (
   SELECT 1 FROM pm_aggregation_outbox source_event
@@ -78,6 +82,82 @@ func publishReadyCandidatesQuery(
 		OrderBy("p.window_end", "p.task_version_id", "p.window_start").
 		Limit(limit).
 		Suffix("FOR UPDATE SKIP LOCKED")
+}
+
+// preparePublicationRevision preserves the currently visible generation while
+// a late rebuild is computed. The first entity entering a new revision clones
+// the complete previous generation in the same transaction; entity-specific
+// replacement can then overwrite/delete only its rows. Readers continue to
+// join the publication's old revision until the final atomic switch.
+func preparePublicationRevision(
+	ctx context.Context,
+	tx pgx.Tx,
+	key WindowKey,
+	revision int,
+) error {
+	var currentRevision int
+	var preparingRevision *int
+	err := tx.QueryRow(ctx, `
+SELECT revision, preparing_revision
+FROM pm_aggregation_publications
+WHERE task_version_id = $1 AND granularity = $2 AND window_start = $3
+FOR UPDATE`, key.TaskVersionID, string(key.Granularity), key.Start).Scan(&currentRevision, &preparingRevision)
+	if err != nil && err != pgx.ErrNoRows {
+		return fmt.Errorf("lock PM aggregation publication: %w", err)
+	}
+	if err == pgx.ErrNoRows {
+		_, err = tx.Exec(ctx, `
+INSERT INTO pm_aggregation_publications (
+  task_id, task_version_id, granularity, window_start, window_end,
+  revision, preparing_revision, status, updated_at
+) VALUES ($1, $2, $3, $4, $5, 0, $6, 'preparing', now())
+ON CONFLICT (task_version_id, granularity, window_start) DO NOTHING`,
+			key.TaskID, key.TaskVersionID, string(key.Granularity), key.Start, key.End, revision)
+		if err != nil {
+			return fmt.Errorf("create PM aggregation publication: %w", err)
+		}
+		return nil
+	}
+	if currentRevision >= revision || (preparingRevision != nil && *preparingRevision >= revision) {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+INSERT INTO pm_aggregation_results (
+  window_start, window_end, task_id, task_version_id,
+  granularity, dimension, dimension_key, dimension_name,
+  object_ldn, device_oui, device_sn, technology,
+  metric_id, metric_path, metric_type, aggregation_op, metric_value,
+  sample_count, complete, missing_slots, revision,
+  version_effective_from, version_effective_to, received_slots,
+  expected_slots, version_expected_slots, natural_expected_slots,
+  version_slice_complete, period_complete
+)
+SELECT
+  window_start, window_end, task_id, task_version_id,
+  granularity, dimension, dimension_key, dimension_name,
+  object_ldn, device_oui, device_sn, technology,
+  metric_id, metric_path, metric_type, aggregation_op, metric_value,
+  sample_count, complete, missing_slots, $4,
+  version_effective_from, version_effective_to, received_slots,
+  expected_slots, version_expected_slots, natural_expected_slots,
+  version_slice_complete, period_complete
+FROM pm_aggregation_results
+WHERE task_version_id = $1 AND granularity = $2
+  AND window_start = $3 AND revision = $5
+ON CONFLICT (
+  task_version_id, granularity, window_start, dimension_key,
+  object_ldn, technology, metric_id, revision
+) DO NOTHING`, key.TaskVersionID, string(key.Granularity), key.Start, revision, currentRevision); err != nil {
+		return fmt.Errorf("clone PM aggregation publication revision: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE pm_aggregation_publications
+SET preparing_revision = $4, dirty_entities = 0, updated_at = now()
+WHERE task_version_id = $1 AND granularity = $2 AND window_start = $3`,
+		key.TaskVersionID, string(key.Granularity), key.Start, revision); err != nil {
+		return fmt.Errorf("advance PM aggregation publication revision: %w", err)
+	}
+	return nil
 }
 
 func (r *WindowRepository) PublishHourlyReady(
@@ -144,8 +224,9 @@ func publishPreparedRevision(
 		"window_start":    publication.WindowStart,
 	}
 	windowQuery, windowArgs, err := storage.Psql.Update("pm_aggregation_windows").
-		Set("status", "published").Set("published_at", now).Set("updated_at", now).
-		Where(publicationWhere).Where(sq.Eq{"status": "prepared", "revision": publication.Revision}).
+		Set("status", "published").Set("revision", publication.Revision).
+		Set("published_at", now).Set("updated_at", now).
+		Where(publicationWhere).Where(sq.Eq{"status": []string{"prepared", "published"}}).
 		Suffix("RETURNING task_id, task_version_id, entity_key, granularity, window_start, window_end").
 		ToSql()
 	if err != nil {
@@ -196,9 +277,10 @@ func publishPreparedRevision(
 
 	publicationQuery, publicationArgs, err := storage.Psql.Update("pm_aggregation_publications").
 		Set("status", "published").Set("watermark_at", now).Set("published_at", now).
+		Set("revision", publication.Revision).Set("preparing_revision", nil).
 		Set("expected_entities", len(keys)).Set("prepared_entities", len(keys)).
 		Set("dirty_entities", 0).Set("updated_at", now).
-		Where(publicationWhere).Where(sq.Eq{"status": "preparing", "revision": publication.Revision}).
+		Where(publicationWhere).Where(sq.Eq{"preparing_revision": publication.Revision}).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build switch PM publication watermark: %w", err)

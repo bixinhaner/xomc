@@ -20,7 +20,7 @@ func Test_buildFilterOptionsQuery_Product(t *testing.T) {
 	assert.Contains(t, q, "FROM pm_aggregation_results r")
 	assert.NotContains(t, q, "pm_adhoc_aggregation_results")
 	assert.Contains(t, q, "JOIN current_versions cv")
-	assert.Contains(t, q, "JOIN pm_aggregation_windows published_window")
+	assert.Contains(t, q, "JOIN pm_aggregation_publications published_window")
 	assert.Contains(t, q, "published_window.status = 'published'")
 	assert.Contains(t, q, "LEFT JOIN product_dim p ON p.id::text = r.dimension_key")
 	assert.Contains(t, q, "WHERE r.task_id = $1")

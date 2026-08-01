@@ -38,8 +38,10 @@ func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 	require.Contains(t, tsdbSQL, "idx_pm_windows_prepared_publication")
 	require.Contains(t, tsdbSQL, "idx_pm_rollup_outbox_publication")
 	require.Contains(t, tsdbSQL, "publication_eligible boolean NOT NULL DEFAULT true")
-	require.GreaterOrEqual(t, strings.Count(tsdbSQL, "JOIN public.pm_aggregation_windows published_window"), 10,
-		"every compatibility result view must hide prepared hourly rows")
+	require.GreaterOrEqual(t, strings.Count(tsdbSQL, "JOIN public.pm_aggregation_publications published_window"), 10,
+		"every compatibility result view must pin the atomically published revision")
+	require.GreaterOrEqual(t, strings.Count(tsdbSQL, "published_window.revision = r.revision"), 10,
+		"every compatibility result view must hide preparing revisions")
 	require.Contains(t, tsdbSQL, "'prepared'")
 	for _, fragment := range []string{
 		"ADD COLUMN finalize_lease_owner uuid",
