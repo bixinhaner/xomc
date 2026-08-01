@@ -2416,22 +2416,12 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 		}
 	}
 
-	// 设备自动归组的两条路径都用同一个 DeviceMatcher：
-	//   - 心跳异步路径：device.InformHandler 收到 Inform 后调 matcher
-	//   - 分组规则路径：GroupMatchEngine 周期/事件触发时调 matcher
+	// 设备自动归组统一使用 GroupMatchEngine：
+	//   - 新设备注册和分组属性变化由领域事件触发
+	//   - 规则变化和每小时全量重评估负责兜底
 	// （历史的 device_rules 独立引擎已彻底下线，相关表/handler/seed 一并删除）
 	matcher := topology.NewDeviceMatcher(c.GroupRepo, c.PgPool, logger)
 	deviceLister := topology.NewPgDeviceLister(c.PgPool, logger)
-
-	// migration 000124 / SN 规则：把 matcher 注入到 device.InformHandler，
-	// 让心跳异步路径在更新设备信息后自动跑分组匹配。
-	// 用 closure 包装避免 device 包反向依赖 topology — closure 实现
-	// device.GroupAssigner 接口的 1 个方法。
-	if c.InformHandler != nil {
-		hbAssigner := topology.NewHeartbeatAssigner(matcher, deviceLister)
-		c.InformHandler.SetGroupAssigner(groupAssignerAdapter{a: hbAssigner})
-		logger.Info("device inform handler wired with topology heartbeat group assigner")
-	}
 
 	// 设备分组自动匹配引擎（GroupMatchEngine）：消费 L2 分组自带的匹配规则，
 	// 触发时机 = 分组新增/编辑 + 新设备注册 + 心跳 inform + cron @hourly。
@@ -2794,25 +2784,4 @@ func (a *mmlDeviceTaskResultAdapter) ListResultsBySourceID(
 		})
 	}
 	return out, total, nil
-}
-
-// groupAssignerAdapter — 实现 device.GroupAssigner 接口的 1 行适配器。
-//
-// 作用：让 device 包不直接 import topology（否则形成 device → topology 循环依赖
-// — topology 包已经直接 import device 类型用于规则匹配）。device 包定义自己的
-// GroupAssigner 接口和 GroupAssignRequest DTO，wiring 时把 topology.HeartbeatAssigner
-// 包装成符合该接口的本地 struct。
-type groupAssignerAdapter struct {
-	a *topology.HeartbeatAssigner
-}
-
-// AssignDeviceToGroup 转发到 topology 适配器；字段一一映射。
-func (g groupAssignerAdapter) AssignDeviceToGroup(ctx context.Context, req device.GroupAssignRequest) error {
-	return g.a.AssignByHeartbeat(ctx, topology.HeartbeatRequest{
-		DeviceID:     req.DeviceID,
-		DeviceName:   req.DeviceName,
-		SerialNumber: req.SerialNumber,
-		LAC:          req.LAC,
-		TAC:          req.TAC,
-	})
 }

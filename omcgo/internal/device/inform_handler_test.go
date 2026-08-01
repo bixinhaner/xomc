@@ -1311,3 +1311,44 @@ func TestHandlePeriodic_Success(t *testing.T) {
 	assert.Equal(t, deviceID, updatedDevice.ID)
 	assert.NotNil(t, updatedDevice.LastInformAt)
 }
+
+type recordingHeartbeatGroupAssigner struct {
+	calls chan GroupAssignRequest
+}
+
+func (a *recordingHeartbeatGroupAssigner) AssignDeviceToGroup(
+	_ context.Context,
+	req GroupAssignRequest,
+) error {
+	a.calls <- req
+	return nil
+}
+
+func TestHandlePeriodic_StableDeviceDoesNotRunGroupMatching(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID: deviceID, SerialNumber: sn, OUI: "AABBCC",
+				Status: model.DeviceActive, InformInterval: 300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error { return nil },
+	}
+	svc := newInfTestDeviceService(deviceRepo, &infMockParamRepo{})
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	assigner := &recordingHeartbeatGroupAssigner{calls: make(chan GroupAssignRequest, 1)}
+	h.SetGroupAssigner(assigner)
+
+	payload := sampleInformPayload("SN-PER-NO-GROUP")
+	payload.Events = []string{"2 PERIODIC"}
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, payload)
+	require.NoError(t, err)
+	require.NoError(t, h.handlePeriodic(context.Background(), evt))
+
+	select {
+	case req := <-assigner.calls:
+		t.Fatalf("stable Periodic Inform must not run group matching: %+v", req)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
