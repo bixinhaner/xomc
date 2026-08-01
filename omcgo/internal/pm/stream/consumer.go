@@ -197,7 +197,7 @@ func (c *Consumer) processContributions(ctx context.Context, contributions []Con
 		if err != nil {
 			return err
 		}
-		if status == "published" || status == "finalizing" || status == "rebuilding" {
+		if status == "prepared" || status == "published" || status == "finalizing" || status == "rebuilding" {
 			if c.metrics != nil {
 				c.metrics.LateEventsTotal.Inc()
 			}
@@ -233,6 +233,7 @@ func (c *Consumer) processContributions(ctx context.Context, contributions []Con
 type TimeoutScanner struct {
 	windows            finalizeWindowRepository
 	finalizeWindow     func(context.Context, WindowKey, CloseReason, uuid.UUID) error
+	publishReady       func(context.Context, time.Time, time.Duration, uint64) error
 	snapshot           *SnapshotStore
 	workerCount        int
 	grace              time.Duration
@@ -374,7 +375,8 @@ func NewTimeoutScanner(
 	workerCount := finalizer.Concurrency()
 	return &TimeoutScanner{
 		windows: windows, finalizeWindow: finalizer.FinalizeClaimed,
-		snapshot: finalizer.snapshot, workerCount: workerCount,
+		publishReady: finalizer.PublishHourlyReady,
+		snapshot:     finalizer.snapshot, workerCount: workerCount,
 		grace: grace, logger: logger,
 		claimLease: finalizeClaimLease, renewInterval: finalizeClaimLease / 3,
 		oldestDueInterval: finalizeOldestDueQueryInterval,
@@ -469,6 +471,11 @@ func (s *TimeoutScanner) runCycle(
 	workerCount int,
 ) error {
 	now := time.Now().UTC()
+	if s.publishReady != nil {
+		if err := s.publishReady(ctx, now, s.graceFor(GranularityHourly), finalizeClaimBatchSize); err != nil {
+			return err
+		}
+	}
 	blocked, err := s.windows.CountWatermarkBlocked(
 		ctx, now, s.graceByGranularity, s.grace,
 	)
@@ -609,7 +616,7 @@ func (s *TimeoutScanner) claimBatch(
 			exclude:    queue == finalizeHourlyOther,
 		}
 		order := s.selector.nextOrder(queue)
-		dueBefore := now.Add(-s.graceFor(GranularityHourly))
+		dueBefore := preparationDueBefore(now, GranularityHourly, s.graceFor(GranularityHourly))
 		windows, err := s.windows.claimDue(
 			ctx, GranularityHourly, dueBefore, limit,
 			token, leaseUntil, filter, order,
@@ -634,7 +641,7 @@ func (s *TimeoutScanner) claimBatch(
 		for range len(granularities) {
 			granularity := granularities[s.selector.longTermCursor%len(granularities)]
 			s.selector.longTermCursor++
-			dueBefore := now.Add(-s.graceFor(granularity))
+			dueBefore := preparationDueBefore(now, granularity, s.graceFor(granularity))
 			windows, err := s.windows.claimDue(
 				ctx, granularity, dueBefore, limit,
 				token, leaseUntil, claimVersionFilter{}, claimOldestFirst,
@@ -659,6 +666,13 @@ func (s *TimeoutScanner) claimBatch(
 	default:
 		return finalizeBatchClaim{}, fmt.Errorf("unsupported PM finalize queue %d", queue)
 	}
+}
+
+func preparationDueBefore(now time.Time, granularity Granularity, grace time.Duration) time.Time {
+	if granularity == GranularityHourly {
+		return now
+	}
+	return now.Add(-grace)
 }
 
 func (s *TimeoutScanner) claimLeaseDuration() time.Duration {

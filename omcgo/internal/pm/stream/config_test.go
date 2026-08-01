@@ -14,6 +14,7 @@ func TestDefaultConfigUsesTwelveMinuteHourlyCloseGrace(t *testing.T) {
 	require.Equal(t, 15*time.Minute, cfg.DailyCloseGrace)
 	require.Equal(t, 30*time.Minute, cfg.WeeklyCloseGrace)
 	require.Equal(t, 30*time.Minute, cfg.MonthlyCloseGrace)
+	require.Equal(t, 32, cfg.FinalizeConcurrency)
 	require.Equal(t, 24*time.Hour, cfg.OutboxRetention)
 	require.Equal(t, 45*24*time.Hour, cfg.ReplayRetention)
 	require.False(t, cfg.RedisV2WriteEnabled,

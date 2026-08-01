@@ -36,7 +36,7 @@ func Test_buildResultsQuery_FiltersInactiveVersionSlices(t *testing.T) {
 	assert.Contains(t, q, "SELECT DISTINCT ON (candidate.task_id, candidate.granularity, candidate.window_start)")
 	assert.Contains(t, q, "FROM pm_aggregation_windows")
 	assert.Contains(t, q, "AND status = 'published'")
-	assert.Contains(t, q, "active_window.status IN ('open', 'finalizing', 'rebuilding', 'failed')")
+	assert.Contains(t, q, "active_window.status IN ('open', 'finalizing', 'prepared', 'rebuilding', 'failed')")
 	assert.Contains(t, q, "active_window.version_effective_from > candidate.version_effective_from")
 	assert.Contains(t, q, "published_window.status = 'published'")
 	assert.NotContains(t, q, "extra->>'active_version'")

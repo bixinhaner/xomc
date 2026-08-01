@@ -26,11 +26,21 @@ func TestPMStreamingAggregationMigrationContract(t *testing.T) {
 		"pm_aggregation_rollup_outbox",
 		"pm_aggregation_counter_rollups",
 		"pm_aggregation_windows",
+		"pm_aggregation_publications",
 		"pm_aggregation_results",
 	} {
 		require.Contains(t, tsdbSQL, "CREATE TABLE public."+table)
 	}
 	require.Contains(t, tsdbSQL, "CREATE UNIQUE INDEX uq_pm_aggregation_results_business")
+	require.Contains(t, tsdbSQL, "PRIMARY KEY (task_version_id, granularity, window_start)")
+	require.Contains(t, tsdbSQL, "status IN ('preparing', 'published')")
+	require.Contains(t, tsdbSQL, "idx_pm_aggregation_publications_due")
+	require.Contains(t, tsdbSQL, "idx_pm_windows_prepared_publication")
+	require.Contains(t, tsdbSQL, "idx_pm_rollup_outbox_publication")
+	require.Contains(t, tsdbSQL, "publication_eligible boolean NOT NULL DEFAULT true")
+	require.GreaterOrEqual(t, strings.Count(tsdbSQL, "JOIN public.pm_aggregation_windows published_window"), 10,
+		"every compatibility result view must hide prepared hourly rows")
+	require.Contains(t, tsdbSQL, "'prepared'")
 	for _, fragment := range []string{
 		"ADD COLUMN finalize_lease_owner uuid",
 		"ADD COLUMN finalize_lease_until timestamptz",

@@ -334,6 +334,21 @@ func TestRebuildCoalesceGenerationRunsAtMostOneFollowUp(t *testing.T) {
 	}
 }
 
+func TestLateEventMarksPreparedWindowDirtyBeforePublication(t *testing.T) {
+	key := WindowKey{
+		TaskVersionID: uuid.New(), EntityKey: "SN-dirty", Granularity: GranularityHourly,
+		Start: time.Date(2026, 8, 1, 14, 0, 0, 0, time.UTC),
+	}
+
+	query, _, err := rebuildMarkRequestedUpdate(key).ToSql()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(query, "CASE WHEN status = 'prepared' THEN 'rebuilding' ELSE status END") {
+		t.Fatalf("prepared window can publish before its late event is replayed: %s", query)
+	}
+}
+
 func TestRebuildCoalesceDefersParentUntilChildGenerationStable(t *testing.T) {
 	if rebuildGenerationStable(RebuildJob{RequestGeneration: 7}, 8) {
 		t.Fatal("parent rebuild must not be enqueued while the child generation changed")

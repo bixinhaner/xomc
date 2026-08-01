@@ -227,7 +227,7 @@ func finalizationClaimUpdate(
 		Set("data_complete", coverage.DataComplete).
 		Set("updated_at", time.Now().UTC()).
 		Where(windowKeyPredicate(key)).
-		Where(sq.Eq{"status": []string{"open", "failed", "finalizing", "rebuilding"}})
+		Where(sq.Eq{"status": []string{"open", "failed", "finalizing", "prepared", "rebuilding"}})
 	if version != nil {
 		builder = builder.
 			Set("version_effective_from", version.EffectiveFrom).

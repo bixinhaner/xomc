@@ -80,9 +80,22 @@ func TestCounterRollupPeriodSelectRestrictsSourceVersions(t *testing.T) {
 	if !strings.Contains(query, "task_version_id IN") {
 		t.Fatalf("period replay query lacks source-version predicate: %s", query)
 	}
+	if !strings.Contains(query, "publication_eligible =") {
+		t.Fatalf("period replay query can read prepared snapshots: %s", query)
+	}
 	joinedArgs := fmt.Sprint(args)
 	if !strings.Contains(joinedArgs, first.String()) ||
 		!strings.Contains(joinedArgs, second.String()) {
 		t.Fatalf("period replay args lack source versions: %v", args)
+	}
+}
+
+func TestPendingRollupOutboxRequiresPublishedRevisionEligibility(t *testing.T) {
+	query, _, err := pendingRollupOutboxSelect("event_id", "subject", "payload").ToSql()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(query, "barrier_eligible =") {
+		t.Fatalf("pending rollup query can expose prepared revision: %s", query)
 	}
 }

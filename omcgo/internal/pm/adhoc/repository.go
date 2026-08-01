@@ -299,7 +299,7 @@ func adhocCurrentVersionsCTE(cteWhere string) string {
           AND active_window.granularity = candidate.granularity
           AND active_window.window_start = candidate.window_start
           AND active_window.task_version_id <> candidate.task_version_id
-          AND active_window.status IN ('open', 'finalizing', 'rebuilding', 'failed')
+          AND active_window.status IN ('open', 'finalizing', 'prepared', 'rebuilding', 'failed')
           AND active_window.version_effective_from IS NOT NULL
           AND (
               candidate.version_effective_from IS NULL

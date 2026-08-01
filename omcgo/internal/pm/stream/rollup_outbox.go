@@ -39,6 +39,16 @@ func NewRollupOutboxRepository(pool *pgxpool.Pool) *RollupOutboxRepository {
 }
 
 func insertRollupTx(ctx context.Context, tx pgx.Tx, payload RollupPayload) error {
+	return insertRollupTxWithEligibility(ctx, tx, payload, true, 1)
+}
+
+func insertRollupTxWithEligibility(
+	ctx context.Context,
+	tx pgx.Tx,
+	payload RollupPayload,
+	eligible bool,
+	revision int,
+) error {
 	if err := payload.Validate(); err != nil {
 		return err
 	}
@@ -60,16 +70,18 @@ func insertRollupTx(ctx context.Context, tx pgx.Tx, payload RollupPayload) error
 		Columns(
 			"event_id", "task_id", "task_version_id", "entity_key", "granularity",
 			"window_start", "window_end", "chunk_index", "chunk_count",
-			"complete", "payload",
+			"complete", "revision", "publication_eligible", "payload",
 		).
 		Values(
 			payload.EventID, payload.TaskID, payload.TaskVersionID, payload.EntityKey,
 			string(payload.SourceGranularity), payload.WindowStart, payload.WindowEnd,
-			payload.ChunkIndex, payload.ChunkCount, payload.Complete, json.RawMessage(data),
+			payload.ChunkIndex, payload.ChunkCount, payload.Complete, revision, eligible, json.RawMessage(data),
 		).
 		Suffix(`ON CONFLICT (event_id) DO UPDATE SET
 			payload = EXCLUDED.payload,
 			complete = EXCLUDED.complete,
+			revision = EXCLUDED.revision,
+			publication_eligible = EXCLUDED.publication_eligible,
 			created_at = now()`).
 		ToSql()
 	if err != nil {
@@ -80,18 +92,19 @@ func insertRollupTx(ctx context.Context, tx pgx.Tx, payload RollupPayload) error
 	}
 	outboxSQL, outboxArgs, err := storage.Psql.Insert("pm_aggregation_rollup_outbox").
 		Columns(
-			"event_id", "subject", "granularity", "window_start", "payload",
-			"barrier_eligible",
+			"event_id", "subject", "task_version_id", "granularity", "window_start",
+			"revision", "payload", "barrier_eligible",
 		).
 		Values(
-			payload.EventID, subject, string(payload.SourceGranularity),
-			payload.WindowStart, json.RawMessage(data), true,
+			payload.EventID, subject, payload.TaskVersionID, string(payload.SourceGranularity),
+			payload.WindowStart, revision, json.RawMessage(data), eligible,
 		).
 		Suffix(`ON CONFLICT (event_id) DO UPDATE SET
 			payload = EXCLUDED.payload,
 			published_at = NULL,
 			consumed_at = NULL,
-			barrier_eligible = true,
+			barrier_eligible = EXCLUDED.barrier_eligible,
+			revision = EXCLUDED.revision,
 			publish_attempts = 0,
 			last_error = NULL,
 			created_at = now()`).
@@ -144,9 +157,7 @@ func (r *RollupOutboxRepository) lockBatch(
 	if limit == 0 {
 		limit = 1
 	}
-	query, args, err := pendingOutboxSelect(
-		"pm_aggregation_rollup_outbox", "event_id", "subject", "payload",
-	).
+	query, args, err := pendingRollupOutboxSelect("event_id", "subject", "payload").
 		OrderBy("created_at", "event_id").
 		Limit(limit).
 		Suffix("FOR UPDATE SKIP LOCKED").
@@ -172,6 +183,11 @@ func (r *RollupOutboxRepository) lockBatch(
 		out = append(out, record)
 	}
 	return out, rows.Err()
+}
+
+func pendingRollupOutboxSelect(columns ...string) sq.SelectBuilder {
+	return pendingOutboxSelect("pm_aggregation_rollup_outbox", columns...).
+		Where(sq.Eq{"barrier_eligible": true})
 }
 
 func markRollupPublished(ctx context.Context, tx pgx.Tx, eventID uuid.UUID) error {
@@ -223,9 +239,10 @@ func (r *RollupOutboxRepository) ListSnapshots(
 	query, args, err := storage.Psql.Select("payload").
 		From("pm_aggregation_counter_rollups").
 		Where(sq.Eq{
-			"task_version_id": taskVersionID,
-			"entity_key":      entityKey,
-			"granularity":     string(granularity),
+			"task_version_id":      taskVersionID,
+			"entity_key":           entityKey,
+			"granularity":          string(granularity),
+			"publication_eligible": true,
 		}).
 		Where(sq.GtOrEq{"window_start": start}).
 		Where(sq.Lt{"window_start": end}).
@@ -262,8 +279,9 @@ func counterRollupPeriodSelect(
 	return storage.Psql.Select("payload").
 		From("pm_aggregation_counter_rollups").
 		Where(sq.Eq{
-			"task_version_id": taskVersionIDs,
-			"granularity":     string(granularity),
+			"task_version_id":      taskVersionIDs,
+			"granularity":          string(granularity),
+			"publication_eligible": true,
 		}).
 		Where(sq.GtOrEq{"window_start": start}).
 		Where(sq.Lt{"window_start": end}).

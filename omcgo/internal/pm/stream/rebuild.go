@@ -128,6 +128,11 @@ func (r *RebuildRepository) Enqueue(
 	key WindowKey,
 	sourceEventID string,
 ) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin enqueue PM aggregation rebuild: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	query, args, err := storage.Psql.Insert("pm_aggregation_rebuilds").
 		Columns(
 			"task_id", "task_version_id", "entity_key", "granularity",
@@ -155,23 +160,46 @@ RETURNING request_generation`).
 		return fmt.Errorf("build enqueue PM aggregation rebuild: %w", err)
 	}
 	var generation int64
-	if err := r.pool.QueryRow(ctx, query, args...).Scan(&generation); err != nil {
+	if err := tx.QueryRow(ctx, query, args...).Scan(&generation); err != nil {
 		return fmt.Errorf("enqueue PM aggregation rebuild: %w", err)
+	}
+	markSQL, markArgs, err := rebuildMarkRequestedUpdate(key).ToSql()
+	if err != nil {
+		return fmt.Errorf("build mark PM aggregation rebuild requested: %w", err)
+	}
+	if _, err := tx.Exec(ctx, markSQL, markArgs...); err != nil {
+		return fmt.Errorf("mark PM aggregation rebuild requested: %w", err)
+	}
+	dirtySQL, dirtyArgs, err := storage.Psql.Update("pm_aggregation_publications").
+		Set("dirty_entities", sq.Expr("dirty_entities + 1")).
+		Set("updated_at", time.Now().UTC()).
+		Where(sq.Eq{
+			"task_version_id": key.TaskVersionID,
+			"granularity":     string(key.Granularity),
+			"window_start":    key.Start,
+			"status":          "preparing",
+		}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build mark PM publication dirty: %w", err)
+	}
+	if _, err := tx.Exec(ctx, dirtySQL, dirtyArgs...); err != nil {
+		return fmt.Errorf("mark PM publication dirty: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit enqueue PM aggregation rebuild: %w", err)
 	}
 	if generation > 1 && r.metrics != nil {
 		r.metrics.RebuildCoalescedTotal.Inc()
 	}
-	markSQL, markArgs, err := storage.Psql.Update("pm_aggregation_windows").
-		Set("rebuild_requested_at", time.Now().UTC()).
-		Where(windowKeyPredicate(key)).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build mark PM aggregation rebuild requested: %w", err)
-	}
-	if _, err := r.pool.Exec(ctx, markSQL, markArgs...); err != nil {
-		return fmt.Errorf("mark PM aggregation rebuild requested: %w", err)
-	}
 	return nil
+}
+
+func rebuildMarkRequestedUpdate(key WindowKey) sq.UpdateBuilder {
+	return storage.Psql.Update("pm_aggregation_windows").
+		Set("rebuild_requested_at", time.Now().UTC()).
+		Set("status", sq.Expr("CASE WHEN status = 'prepared' THEN 'rebuilding' ELSE status END")).
+		Set("updated_at", time.Now().UTC()).
+		Where(windowKeyPredicate(key))
 }
 
 func (r *RebuildRepository) claimNext(ctx context.Context) (*RebuildJob, error) {
@@ -381,7 +409,7 @@ func (r *RebuildRepository) resetWindow(ctx context.Context, key WindowKey) (Reb
 		Set("last_error", nil).
 		Set("updated_at", time.Now().UTC()).
 		Where(windowKeyPredicate(key)).
-		Where(sq.Eq{"status": []string{"open", "published", "rebuilding", "failed"}}).
+		Where(sq.Eq{"status": []string{"open", "prepared", "published", "rebuilding", "failed"}}).
 		ToSql()
 	if err != nil {
 		return RebuildWindowState{}, err
@@ -585,7 +613,7 @@ func publishedParentsSelect(
 	).From("pm_aggregation_windows").
 		Column("?", sourceID).
 		Where(sq.Eq{
-			"status":          []string{"open", "published", "rebuilding", "finalizing", "failed"},
+			"status":          []string{"open", "prepared", "published", "rebuilding", "finalizing", "failed"},
 			"task_id":         parentTaskID,
 			"task_version_id": parentVersionID,
 			"entity_key":      job.Key.EntityKey,

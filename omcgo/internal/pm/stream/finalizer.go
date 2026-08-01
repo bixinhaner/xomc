@@ -169,11 +169,48 @@ func (f *Finalizer) finalizeUnderLockWithClaim(
 	if f.metrics != nil {
 		f.metrics.WindowsFinalizedTotal.WithLabelValues(string(reason)).Inc()
 	}
-	if err := f.store.DeleteState(ctx, key); err != nil {
-		f.logger.Warn("delete published PM aggregation Redis window",
-			zap.String("task_version_id", key.TaskVersionID.String()),
-			zap.Time("window_start", key.Start),
-			zap.Error(err))
+	published, err = f.windows.IsPublished(ctx, key)
+	if err != nil {
+		return err
+	}
+	if published {
+		if err := f.store.DeleteState(ctx, key); err != nil {
+			f.logger.Warn("delete published PM aggregation Redis window",
+				zap.String("task_version_id", key.TaskVersionID.String()),
+				zap.Time("window_start", key.Start),
+				zap.Error(err))
+		}
+	} else if f.metrics != nil && key.Granularity == GranularityHourly {
+		f.metrics.WindowsPreparedTotal.Inc()
+	}
+	return nil
+}
+
+func (f *Finalizer) PublishHourlyReady(
+	ctx context.Context,
+	now time.Time,
+	grace time.Duration,
+	limit uint64,
+) error {
+	started := time.Now()
+	if f.metrics != nil {
+		defer func() { f.metrics.PublicationDuration.Observe(time.Since(started).Seconds()) }()
+	}
+	keys, err := f.windows.PublishHourlyReady(ctx, now, grace, limit)
+	if err != nil {
+		return err
+	}
+	if f.metrics != nil {
+		f.metrics.WindowsPublishedTotal.Add(float64(len(keys)))
+	}
+	for _, key := range keys {
+		if err := f.store.DeleteState(ctx, key); err != nil {
+			f.logger.Warn("delete watermarked PM aggregation Redis window",
+				zap.String("task_version_id", key.TaskVersionID.String()),
+				zap.String("entity_key", key.EntityKey),
+				zap.Time("window_start", key.Start),
+				zap.Error(err))
+		}
 	}
 	return nil
 }
@@ -234,8 +271,9 @@ func (f *Finalizer) writeFinal(
 		}
 		return nil
 	}
+	status := finalWindowStatus(key.Granularity, revision)
 	for _, payload := range rollups {
-		if err := insertRollupTx(ctx, tx, payload); err != nil {
+		if err := insertRollupTxWithEligibility(ctx, tx, payload, status == "published", revision); err != nil {
 			return fmt.Errorf("persist compact PM Counter rollup: %w", err)
 		}
 	}
@@ -258,20 +296,33 @@ func (f *Finalizer) writeFinal(
 	if f.metrics != nil {
 		f.metrics.ResultReplaceSeconds.Observe(time.Since(resultReplaceStarted).Seconds())
 	}
-	publishSQL, publishArgs, err := storage.Psql.Update("pm_aggregation_windows").
-		Set("status", "published").
+	publishBuilder := storage.Psql.Update("pm_aggregation_windows").
+		Set("status", status).
 		Set("result_count", resultCount).
-		Set("published_at", time.Now().UTC()).
 		Set("updated_at", time.Now().UTC()).
 		Set("last_error", nil).
 		Where(windowKeyPredicate(key)).
-		Where(sq.Eq{"status": "finalizing"}).
-		ToSql()
+		Where(sq.Eq{"status": "finalizing"})
+	if status == "published" {
+		publishBuilder = publishBuilder.Set("published_at", time.Now().UTC())
+	} else {
+		publishBuilder = publishBuilder.Set("published_at", nil)
+	}
+	publishSQL, publishArgs, err := publishBuilder.ToSql()
 	if err != nil {
 		return fmt.Errorf("build publish PM aggregation window SQL: %w", err)
 	}
 	if _, err := tx.Exec(ctx, publishSQL, publishArgs...); err != nil {
 		return fmt.Errorf("publish PM aggregation window: %w", err)
+	}
+	if status == "prepared" {
+		preparedSQL, preparedArgs, err := markPublicationPreparedQuery(key, revision).ToSql()
+		if err != nil {
+			return fmt.Errorf("build mark PM publication prepared: %w", err)
+		}
+		if _, err := tx.Exec(ctx, preparedSQL, preparedArgs...); err != nil {
+			return fmt.Errorf("mark PM publication prepared: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit PM aggregation window: %w", err)
