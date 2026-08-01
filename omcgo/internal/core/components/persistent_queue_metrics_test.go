@@ -51,12 +51,18 @@ func TestHotPersistentQueueQueriesSplitStatusesToUseIndexes(t *testing.T) {
 		switch descriptor.name {
 		case "device_tasks":
 			require.Contains(t, descriptor.query, "WHERE status = 'pending'")
-			require.Contains(t, descriptor.query, "WHERE status = 'completed'")
-			require.Contains(t, descriptor.query, "WHERE status NOT IN ('pending', 'sent', 'completed', 'failed', 'expired', 'cancelled')")
+			require.NotContains(t, descriptor.query, "FROM device_tasks WHERE status = 'completed'")
+			require.NotContains(t, descriptor.query, "FROM device_tasks WHERE status = 'expired'")
+			require.NotContains(t, descriptor.query, "FROM device_tasks WHERE status = 'cancelled'")
+			require.Contains(t, descriptor.query, "pg_inherits")
+			require.Contains(t, descriptor.query, "pg_stats")
+			require.NotContains(t, descriptor.query, "FROM device_tasks WHERE status NOT IN")
 			require.NotContains(t, descriptor.query, "FROM device_tasks GROUP BY status")
 		case "parameter_sync_outbox":
 			require.Contains(t, descriptor.query, "WHERE status = 'pending'")
-			require.Contains(t, descriptor.query, "WHERE status = 'delivered'")
+			require.NotContains(t, descriptor.query, "FROM parameter_sync_outbox WHERE status = 'delivered'")
+			require.Contains(t, descriptor.query, "idx_parameter_sync_outbox_terminal_status")
+			require.Contains(t, descriptor.query, "reltuples")
 			require.NotContains(t, descriptor.query, "FROM parameter_sync_outbox GROUP BY status")
 		}
 	}
