@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -106,4 +107,62 @@ func TestAsyncSyncDeviceInfoRecordsRetryAfterFailure(t *testing.T) {
 
 	_, pending := processor.infoProjectionRetry.Load(deviceID)
 	assert.True(t, pending)
+}
+
+type blockingRecordingInfoSyncer struct {
+	started chan uuid.UUID
+	release chan struct{}
+}
+
+func (s *blockingRecordingInfoSyncer) SyncFromParameters(
+	ctx context.Context,
+	deviceID uuid.UUID,
+	_ model.CarrierCode,
+	_ model.Technology,
+	_ string,
+) ([]string, error) {
+	s.started <- deviceID
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.release:
+		return nil, nil
+	}
+}
+
+func TestHandleParameterUpsertOutcomeQueuesCommittedSubsetBeforeReturningError(t *testing.T) {
+	committedID := uuid.New()
+	failedID := uuid.New()
+	syncer := &blockingRecordingInfoSyncer{
+		started: make(chan uuid.UUID, 2),
+		release: make(chan struct{}),
+	}
+	processor := &BatchInformProcessor{
+		infoSyncer: syncer, logger: zap.NewNop(),
+		infoProjectionSlots: make(chan struct{}, 8),
+	}
+	updates := []*informUpdate{
+		{device: &model.Device{ID: committedID, SerialNumber: "committed"}},
+		{device: &model.Device{ID: failedID, SerialNumber: "failed"}},
+	}
+	partialErr := errors.New("contended device write failed")
+
+	err := processor.handleParameterUpsertOutcome(updates, deviceParameterUpsertResult{
+		changedDevices: map[uuid.UUID]struct{}{committedID: {}},
+	}, partialErr)
+
+	assert.ErrorIs(t, err, partialErr)
+	_, retryPending := processor.infoProjectionRetry.Load(committedID)
+	assert.True(t, retryPending, "committed parameters need a recoverable projection marker")
+	require.Equal(t, committedID, <-syncer.started)
+	select {
+	case unexpected := <-syncer.started:
+		t.Fatalf("uncommitted device %s must not be projected", unexpected)
+	default:
+	}
+	close(syncer.release)
+	require.Eventually(t, func() bool {
+		_, pending := processor.infoProjectionRetry.Load(committedID)
+		return !pending
+	}, time.Second, time.Millisecond)
 }
