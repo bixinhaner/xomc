@@ -54,6 +54,16 @@ func TestDecideRunConvergence(t *testing.T) {
 			want: convergenceDecision{},
 		},
 		{
+			name: "undispatched zero task plan remains active",
+			run: SyncRun{
+				Status:             RunStatusPlanning,
+				ExpectedTaskCount:  0,
+				TerminalTaskCount:  0,
+				ProcessedTaskCount: 0,
+			},
+			want: convergenceDecision{},
+		},
+		{
 			name: "terminal run is idempotent no-op",
 			run: SyncRun{
 				Status:             RunStatusSucceeded,
@@ -68,6 +78,57 @@ func TestDecideRunConvergence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, decideRunConvergence(tt.run))
+		})
+	}
+}
+
+func TestClassifyRunBlockReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		run    SyncRun
+		counts authoritativeRunCounts
+		want   convergenceBlockReason
+	}{
+		{
+			name: "plan not dispatched",
+			run: SyncRun{
+				Status:            RunStatusEnqueuing,
+				ExpectedTaskCount: 20,
+			},
+			counts: authoritativeRunCounts{},
+			want:   convergenceBlockPlanNotDispatched,
+		},
+		{
+			name: "terminal task missing durable result",
+			run: SyncRun{
+				Status:            RunStatusExecuting,
+				ExpectedTaskCount: 20,
+			},
+			counts: authoritativeRunCounts{expected: 20, terminal: 20, processed: 19},
+			want:   convergenceBlockTerminalResultMissing,
+		},
+		{
+			name: "device task remains active",
+			run: SyncRun{
+				Status:            RunStatusExecuting,
+				ExpectedTaskCount: 20,
+			},
+			counts: authoritativeRunCounts{expected: 20, terminal: 19, processed: 19},
+			want:   convergenceBlockDeviceTaskActive,
+		},
+		{
+			name: "ready run is not blocked",
+			run: SyncRun{
+				Status:            RunStatusExecuting,
+				ExpectedTaskCount: 20,
+			},
+			counts: authoritativeRunCounts{expected: 20, terminal: 20, processed: 20},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, classifyRunBlockReason(tt.run, tt.counts))
 		})
 	}
 }

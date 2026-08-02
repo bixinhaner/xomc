@@ -145,7 +145,7 @@
 - Modify: `deployments/monitoring/tests/promql-probes.txt`
 - Modify: `deployments/monitoring/grafana/dashboards/omc-overview.json`
 
-- [ ] **Step 1: 写 active-only、oldest-first、skip-locked 的失败 SQL 测试**
+- [x] **Step 1: 写 active-only、oldest-first、skip-locked 的失败 SQL 测试**
 
   ```go
   func TestBuildRunConvergenceCandidateSelectSQL(t *testing.T) {
@@ -161,13 +161,13 @@
 
   同时增加用 UUID 顺序构造“历史旧记录永远占满前 20 条”的回归测试，证明新查询优先拿最老活跃运行。
 
-- [ ] **Step 2: 运行测试确认旧的全历史/20 条扫描失败**
+- [x] **Step 2: 运行测试确认旧的全历史/20 条扫描失败**
 
   Run: `cd omcgo && go test ./internal/paramsync -run 'TestBuildRunConvergenceCandidateSelectSQL|TestReconcileRunCounts' -count=1`
 
   Expected: FAIL，旧 SQL 没有 active 过滤、时间排序、行锁，批量仍为 20。
 
-- [ ] **Step 3: 用统一收敛器重写维护扫描**
+- [x] **Step 3: 用统一收敛器重写维护扫描**
 
   将批量改为 200。候选状态仅包含 active 状态；优先级为：
 
@@ -177,7 +177,7 @@
 
   每条候选在事务内调用 `convergeRunTx(..., convergenceMaintenance)`，单条失败不阻塞下一轮；维护函数返回扫描数、漂移数、完成数和最老 active age。
 
-- [ ] **Step 4: 区分三类真正未收敛原因**
+- [x] **Step 4: 区分三类真正未收敛原因**
 
   在 authoritative 查询中明确输出并记录：
 
@@ -187,11 +187,11 @@
 
   不通过修改 expected 数“修好”缺任务；前两类进入告警和补偿路径，第三类继续等待现有设备超时/取消机制。
 
-- [ ] **Step 5: 接入维护周期并扩展 20 秒预算测试**
+- [x] **Step 5: 接入维护周期并扩展 20 秒预算测试**
 
   `runParamSyncMaintenance` 继续每 30 秒执行，但 convergence 扫描必须先于低优先级统计维护。测试确保 context deadline 仍为 20 秒、一次调用 batch=200、维护错误只记录不杀 app。
 
-- [ ] **Step 6: 增加指标并写注册测试**
+- [x] **Step 6: 增加指标并写注册测试**
 
   指标采用项目现有前缀风格：
 
@@ -206,11 +206,11 @@
 
   `metrics_test.go` 必须 gather registry 并断言名称、label 和一次观测值，避免只定义未注册。
 
-- [ ] **Step 7: 增加告警和 Dashboard 运维面板**
+- [x] **Step 7: 增加告警和 Dashboard 运维面板**
 
   告警阈值：ready 未 finalize 持续 2 分钟为 critical；最老 active >5 分钟且 `reason!="device_task_active"` 为 warning；counter drift >0 持续 2 分钟为 warning。Dashboard 只增加运维指标，不改变首页业务数据查询。
 
-- [ ] **Step 8: 运行测试并提交**
+- [x] **Step 8: 运行测试并提交**
 
   Run:
 

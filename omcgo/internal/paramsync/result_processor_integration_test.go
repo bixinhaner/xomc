@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -51,8 +52,8 @@ func TestConvergeRunTxRepairsAuthoritativeCountsAndFinalizes(t *testing.T) {
 INSERT INTO parameter_sync_runs (
   id, request_id, device_id, device_sn, trigger_reason, sync_scope,
   status, expected_task_count, terminal_task_count, processed_task_count,
-  failed_task_count
-) VALUES ($1,$2,$3,$4,'manual','readback','executing',0,0,0,0)`,
+  failed_task_count, started_at
+) VALUES ($1,$2,$3,$4,'manual','readback','executing',0,0,0,0,now()-interval '2 minutes')`,
 		runID, request.ID, request.DeviceID, request.DeviceSN,
 	)
 	require.NoError(t, err)
@@ -150,6 +151,61 @@ INSERT INTO parameter_sync_task_results (
 	).Scan(&requestStatus))
 	require.Equal(t, RunStatusFailed, runStatus)
 	require.Equal(t, RequestStatusFailed, requestStatus)
+}
+
+func TestReconcileRunCountsFinalizesReadyActiveRun(t *testing.T) {
+	ctx := context.Background()
+	pool := newParamSyncTestPool(t)
+	request := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
+	runID := uuid.New()
+	_, err := pool.Exec(ctx, `
+INSERT INTO parameter_sync_runs (
+  id, request_id, device_id, device_sn, trigger_reason, sync_scope,
+  status, expected_task_count, terminal_task_count, processed_task_count,
+  failed_task_count, started_at
+) VALUES ($1,$2,$3,$4,'manual','readback','executing',0,0,0,0,now()-interval '2 minutes')`,
+		runID, request.ID, request.DeviceID, request.DeviceSN,
+	)
+	require.NoError(t, err)
+
+	taskRow := task.NewTask(&task.CreateTaskRequest{
+		DeviceSN: request.DeviceSN, Method: "GetParameterValues",
+		Params: []byte(`{"names":[]}`), CommandKey: "maintenance-converges-ready-run",
+		Source: task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: request.ID.String(),
+	})
+	require.NoError(t, task.NewPgTaskRepository(pool).Create(ctx, taskRow))
+	_, err = pool.Exec(ctx, `
+UPDATE device_tasks SET status='completed', completed_at=now(), result='{}'::jsonb
+WHERE id=$1`, taskRow.ID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+INSERT INTO parameter_sync_task_results (
+  run_id, task_id, event_id, success, result_ref, status, processed_at, created_at
+) VALUES ($1,$2,$3,true,$4,'processed',now(),now())`,
+		runID, taskRow.ID, uuid.NewString(), "device_tasks:"+taskRow.ID,
+	)
+	require.NoError(t, err)
+
+	metrics := NewMetrics(nil)
+	reconciler := NewReconciler(pool, nil, metrics)
+	require.NoError(t, reconciler.CollectMetrics(ctx))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RunsReadyButNotFinalized))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RunCounterDrift))
+	require.GreaterOrEqual(t, testutil.ToFloat64(metrics.ActiveRunOldestAge), float64(100))
+
+	finalized, err := reconciler.ReconcileRunCounts(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, finalized)
+	require.Equal(t, float64(1), testutil.ToFloat64(
+		metrics.ReconcileFinalized.WithLabelValues("succeeded"),
+	))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RunCounterDrift))
+
+	var status RunStatus
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT status FROM parameter_sync_runs WHERE id=$1`, runID,
+	).Scan(&status))
+	require.Equal(t, RunStatusSucceeded, status)
 }
 
 func TestDuplicateResultDoesNotWaitForRunWriteLock(t *testing.T) {

@@ -418,6 +418,18 @@
         {"expr": "sum by (granularity) (omc_pm_aggregation_redis_sampled_active_windows)", "legendFormat": "pmagg active {{granularity}} windows"}
       ],
       "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "title": "参数同步状态收敛",
+      "description": "ready 应在下一轮 30 秒维护内归零；blocked 按未派发、缺结果和真实设备任务区分。",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 148},
+      "targets": [
+        {"expr": "param_sync_runs_ready_but_not_finalized", "legendFormat": "ready not finalized"},
+        {"expr": "param_sync_run_counter_drift", "legendFormat": "counter drift"},
+        {"expr": "param_sync_runs_blocked", "legendFormat": "blocked {{reason}}"},
+        {"expr": "param_sync_active_run_oldest_age_seconds", "legendFormat": "oldest active age"}
+      ]
     }
   ],
   "refresh": "30s",

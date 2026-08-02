@@ -13,15 +13,43 @@ type convergenceDecision struct {
 	Status RunStatus
 }
 
+type convergenceBlockReason string
+
+const (
+	convergenceBlockPlanNotDispatched     convergenceBlockReason = "plan_not_dispatched"
+	convergenceBlockTerminalResultMissing convergenceBlockReason = "terminal_task_missing_result"
+	convergenceBlockDeviceTaskActive      convergenceBlockReason = "device_task_active"
+)
+
 type convergenceResult struct {
-	Finalized bool
-	Failed    bool
-	Drift     bool
-	Status    RunStatus
+	Finalized     bool
+	Failed        bool
+	Drift         bool
+	Status        RunStatus
+	BlockedReason convergenceBlockReason
+}
+
+func classifyRunBlockReason(
+	run SyncRun,
+	counts authoritativeRunCounts,
+) convergenceBlockReason {
+	if (run.Status == RunStatusPlanning || run.Status == RunStatusEnqueuing) &&
+		(counts.expected == 0 || run.ExpectedTaskCount > counts.expected) {
+		return convergenceBlockPlanNotDispatched
+	}
+	if counts.terminal > counts.processed {
+		return convergenceBlockTerminalResultMissing
+	}
+	if counts.terminal < counts.expected {
+		return convergenceBlockDeviceTaskActive
+	}
+	return ""
 }
 
 func decideRunConvergence(run SyncRun) convergenceDecision {
-	if run.Status.Terminal() || !run.ReadyToFinalize() {
+	undispatched := run.ExpectedTaskCount == 0 &&
+		(run.Status == RunStatusPlanning || run.Status == RunStatusEnqueuing)
+	if run.Status.Terminal() || undispatched || !run.ReadyToFinalize() {
 		return convergenceDecision{}
 	}
 	if run.Status == RunStatusCancelling || run.FailedTaskCount > 0 {
@@ -48,9 +76,11 @@ func convergeRunTx(
 		run.TerminalTaskCount != counts.terminal ||
 		run.ProcessedTaskCount != counts.processed ||
 		run.FailedTaskCount != counts.failed
+	blockedReason := classifyRunBlockReason(*run, counts)
 	applyAuthoritativeRunCounts(run, counts)
 	result, err := convergeLoadedRunTx(ctx, tx, run, run.Status, drift, now)
 	result.Drift = drift
+	result.BlockedReason = blockedReason
 	return result, err
 }
 

@@ -187,3 +187,19 @@ Expected: rejected writes in the last five minutes. ZERO means no rejected write
 ## ACS global session admission rejects (MUST-HAVE after ACS starts)
 increase(acs_admission_rejected_total[5m])
 Expected: HTTP 503 responses caused by the global ACS session limit. ZERO means no admission rejects; NO-DATA means ACS telemetry is unavailable.
+
+## Parameter sync ready but not finalized (MUST-HAVE after App starts)
+param_sync_runs_ready_but_not_finalized
+Expected: ZERO in steady state. A positive value must converge within the next 30-second maintenance pass.
+
+## Parameter sync counter drift (MUST-HAVE after App starts)
+param_sync_run_counter_drift
+Expected: ZERO after reconciliation. A sustained positive value indicates durable task/result state is not converging into the run row.
+
+## Parameter sync blocked reasons (MUST-HAVE after App starts)
+param_sync_runs_blocked
+Expected: fixed reason labels plan_not_dispatched, terminal_task_missing_result and device_task_active. Non-device reasons must not persist for five minutes.
+
+## Parameter sync maintenance finalization rate (MUST-HAVE after App starts)
+increase(param_sync_reconcile_finalized_total[5m])
+Expected: positive only while maintenance repairs missed event-path finalizations; normally ZERO without being NO-DATA.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -90,8 +91,8 @@ func TestHistoricalResultNormalizationRestrictsWorkToCandidateBatch(t *testing.T
 	require.NotContains(t, query, "FROM parameter_sync_runs run, device_tasks t\nWHERE res.status='received' AND run.id=res.run_id\n  AND run.status")
 }
 
-func TestRunCountSweepUsesSmallBoundedPages(t *testing.T) {
-	require.LessOrEqual(t, runCountReconcileBatchSize, 20)
+func TestRunCountSweepUsesActiveRecoveryBatch(t *testing.T) {
+	require.Equal(t, 200, runCountReconcileBatchSize)
 }
 
 func TestStagingCleanupScansABoundedKeysetPage(t *testing.T) {
@@ -113,24 +114,29 @@ func TestParamSyncMetricsAvoidUnboundedExactCounts(t *testing.T) {
 	require.NotContains(t, stagingRowsMetricSQL, "count(*)")
 }
 
-func TestRunCountCandidateSelectionUsesBoundedKeyset(t *testing.T) {
-	cursor := uuid.New()
+func TestRunConvergenceCandidateSelectionUsesOldestActiveKeyset(t *testing.T) {
+	startedAt := time.Date(2026, time.August, 2, 12, 0, 0, 0, time.UTC)
+	cursor := runConvergenceCursor{StartedAt: startedAt, ID: uuid.New()}
 
-	query, args, err := buildRunCountCandidateSelectSQL(&cursor, 100)
+	query, args, err := buildRunConvergenceCandidateSelectSQL(&cursor, 100)
 
 	require.NoError(t, err)
-	require.Contains(t, query, "WHERE id > $1")
-	require.Contains(t, query, "ORDER BY id")
+	require.Contains(t, query, "status IN")
+	require.Contains(t, query, "(started_at, id) >")
+	require.Contains(t, query, "ORDER BY started_at, id")
 	require.Contains(t, query, "LIMIT 100")
+	require.Contains(t, query, "FOR UPDATE SKIP LOCKED")
 	require.NotContains(t, strings.ToUpper(query), "OFFSET")
-	require.Equal(t, []interface{}{cursor.String()}, args)
+	require.Equal(t, []interface{}{startedAt, cursor.ID.String()}, args)
 }
 
-func TestRunCountCandidateSelectionDefaultsToBoundedSweepPage(t *testing.T) {
-	query, args, err := buildRunCountCandidateSelectSQL(nil, 0)
+func TestRunConvergenceCandidateSelectionDefaultsToActiveRecoveryBatch(t *testing.T) {
+	query, args, err := buildRunConvergenceCandidateSelectSQL(nil, 0)
 
 	require.NoError(t, err)
-	require.Contains(t, query, "ORDER BY id")
+	require.Contains(t, query, "status IN")
+	require.Contains(t, query, "ORDER BY started_at, id")
 	require.Contains(t, query, fmt.Sprintf("LIMIT %d", runCountReconcileBatchSize))
+	require.Contains(t, query, "FOR UPDATE SKIP LOCKED")
 	require.Empty(t, args)
 }
