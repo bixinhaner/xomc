@@ -269,14 +269,16 @@ groups:
             Action: 按 reason 检查 dispatcher、terminal bridge、result consumer 和 outbox。
 
       - alert: ParamSyncActiveRunOldestAgeHigh
-        expr: param_sync_active_run_oldest_age_seconds > 900
-        for: 5m
+        expr: |
+          (param_sync_active_run_oldest_age_seconds > 300)
+          and on() (sum(param_sync_runs_blocked{reason=~"plan_not_dispatched|terminal_task_missing_result"}) > 0)
+        for: 2m
         labels:
           severity: warning
           domain: omc
           subsystem: param_sync
         annotations:
-          summary: "最老参数同步活跃运行超过 15 分钟"
+          summary: "非设备执行原因导致参数同步活跃运行超过 5 分钟"
           description: |
             最老活跃运行已超过正常设备任务与维护收敛窗口。
             Action: 结合 param_sync_runs_blocked 区分真实设备执行、未派发和缺结果。

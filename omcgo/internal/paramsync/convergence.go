@@ -33,8 +33,8 @@ func classifyRunBlockReason(
 	run SyncRun,
 	counts authoritativeRunCounts,
 ) convergenceBlockReason {
-	if (run.Status == RunStatusPlanning || run.Status == RunStatusEnqueuing) &&
-		(counts.expected == 0 || run.ExpectedTaskCount > counts.expected) {
+	if run.ExpectedTaskCount > counts.expected ||
+		(run.ExpectedTaskCount == 0 && counts.expected == 0) {
 		return convergenceBlockPlanNotDispatched
 	}
 	if counts.terminal > counts.processed {
@@ -47,8 +47,7 @@ func classifyRunBlockReason(
 }
 
 func decideRunConvergence(run SyncRun) convergenceDecision {
-	undispatched := run.ExpectedTaskCount == 0 &&
-		(run.Status == RunStatusPlanning || run.Status == RunStatusEnqueuing)
+	undispatched := run.ExpectedTaskCount == 0 && run.Status != RunStatusCancelling
 	if run.Status.Terminal() || undispatched || !run.ReadyToFinalize() {
 		return convergenceDecision{}
 	}
@@ -78,10 +77,55 @@ func convergeRunTx(
 		run.FailedTaskCount != counts.failed
 	blockedReason := classifyRunBlockReason(*run, counts)
 	applyAuthoritativeRunCounts(run, counts)
+	if blockedReason == convergenceBlockPlanNotDispatched &&
+		!run.Status.Terminal() && run.Status != RunStatusPlanning && run.Status != RunStatusEnqueuing {
+		result, convergeErr := failIncompleteDispatchTx(ctx, tx, run, counts, now)
+		result.Drift = drift
+		result.BlockedReason = blockedReason
+		return result, convergeErr
+	}
 	result, err := convergeLoadedRunTx(ctx, tx, run, run.Status, drift, now)
 	result.Drift = drift
 	result.BlockedReason = blockedReason
 	return result, err
+}
+
+func failIncompleteDispatchTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	run *SyncRun,
+	counts authoritativeRunCounts,
+	now time.Time,
+) (convergenceResult, error) {
+	const message = "parameter sync task plan was only partially dispatched"
+	if run.Status != RunStatusCancelling {
+		if err := beginCancellingRun(ctx, tx, run, message, now); err != nil {
+			return convergenceResult{}, err
+		}
+	}
+	if err := cancelUnsentRunTasks(ctx, tx, run, now); err != nil {
+		return convergenceResult{}, err
+	}
+	var err error
+	counts, err = loadAuthoritativeRunCounts(ctx, tx, run.ID)
+	if err != nil {
+		return convergenceResult{}, err
+	}
+	applyAuthoritativeRunCounts(run, counts)
+	// The planned cardinality remains larger than durable task rows by design.
+	// Once every row that actually exists has a durable terminal result, fail
+	// the run with truthful planned/actual counters instead of waiting forever
+	// for task rows that were never created.
+	if counts.terminal == counts.expected && counts.processed == counts.expected {
+		if err := finalizeConvergedFailedRun(ctx, tx, run, now); err != nil {
+			return convergenceResult{}, err
+		}
+		return convergenceResult{Finalized: true, Failed: true, Status: RunStatusFailed}, nil
+	}
+	if err := updateRunProgress(ctx, tx, run, RunStatusCancelling); err != nil {
+		return convergenceResult{}, err
+	}
+	return convergenceResult{Failed: true, Status: RunStatusCancelling}, nil
 }
 
 func convergeLoadedRunTx(

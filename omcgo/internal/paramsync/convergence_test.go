@@ -64,6 +64,16 @@ func TestDecideRunConvergence(t *testing.T) {
 			want: convergenceDecision{},
 		},
 		{
+			name: "executing zero task plan remains active",
+			run: SyncRun{
+				Status:             RunStatusExecuting,
+				ExpectedTaskCount:  0,
+				TerminalTaskCount:  0,
+				ProcessedTaskCount: 0,
+			},
+			want: convergenceDecision{},
+		},
+		{
 			name: "terminal run is idempotent no-op",
 			run: SyncRun{
 				Status:             RunStatusSucceeded,
@@ -94,6 +104,23 @@ func TestClassifyRunBlockReason(t *testing.T) {
 			run: SyncRun{
 				Status:            RunStatusEnqueuing,
 				ExpectedTaskCount: 20,
+			},
+			counts: authoritativeRunCounts{},
+			want:   convergenceBlockPlanNotDispatched,
+		},
+		{
+			name: "executing plan only partially dispatched",
+			run: SyncRun{
+				Status:            RunStatusExecuting,
+				ExpectedTaskCount: 20,
+			},
+			counts: authoritativeRunCounts{expected: 10, terminal: 10, processed: 10},
+			want:   convergenceBlockPlanNotDispatched,
+		},
+		{
+			name: "executing zero task plan not dispatched",
+			run: SyncRun{
+				Status: RunStatusExecuting,
 			},
 			counts: authoritativeRunCounts{},
 			want:   convergenceBlockPlanNotDispatched,

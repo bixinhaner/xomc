@@ -126,11 +126,21 @@ func TestProductionRejectsExplicitSharedPMRedis(t *testing.T) {
 	require.ErrorContains(t, workerCfg.Validate(), "pm_redis must be physically isolated")
 }
 
-func TestProductionAllowsMissingPMRedisForCompatibilityFallback(t *testing.T) {
+func TestProductionRejectsMissingPMRedisCompatibilityFallback(t *testing.T) {
 	t.Setenv("OMCGO_ENV", "prod")
 	t.Setenv("GIN_MODE", "release")
 	cfg := validWorkerConfig()
-	require.NoError(t, cfg.Validate())
+	require.ErrorContains(t, cfg.Validate(), "pm_redis.addrs must not be empty in production")
+}
+
+func TestProductionRejectsAnyPMRedisAddressOverlap(t *testing.T) {
+	t.Setenv("OMCGO_ENV", "prod")
+	t.Setenv("GIN_MODE", "release")
+	cfg := validWorkerConfig()
+	cfg.Redis.Addrs = []string{"redis-core-a:6379", "redis-shared:6379"}
+	cfg.PMRedis = RedisConfig{Addrs: []string{"redis-pm-a:6379", " REDIS-SHARED:6379 "}}
+
+	require.ErrorContains(t, cfg.Validate(), "pm_redis must be physically isolated")
 }
 
 func TestAppAndWorkerConfigExamplesUseDedicatedPMRedis(t *testing.T) {
@@ -143,13 +153,13 @@ func TestAppAndWorkerConfigExamplesUseDedicatedPMRedis(t *testing.T) {
 					var cfg AppConfig
 					require.NoError(t, Load(path, &cfg))
 					require.NotEmpty(t, cfg.PMRedis.Addrs)
-					require.False(t, sameRedisAddressSet(cfg.Redis.Addrs, cfg.PMRedis.Addrs))
+					require.False(t, redisAddressSetsOverlap(cfg.Redis.Addrs, cfg.PMRedis.Addrs))
 					return
 				}
 				var cfg WorkerConfig
 				require.NoError(t, Load(path, &cfg))
 				require.NotEmpty(t, cfg.PMRedis.Addrs)
-				require.False(t, sameRedisAddressSet(cfg.Redis.Addrs, cfg.PMRedis.Addrs))
+				require.False(t, redisAddressSetsOverlap(cfg.Redis.Addrs, cfg.PMRedis.Addrs))
 			})
 		}
 	}

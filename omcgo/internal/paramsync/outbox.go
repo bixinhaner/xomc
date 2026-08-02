@@ -31,6 +31,10 @@ ON parameter_sync_outbox (updated_at) WHERE status = 'delivering'`
 const parameterSyncOutboxStatusIndexSQL = `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_parameter_sync_outbox_terminal_status
 ON parameter_sync_outbox (status) WHERE status IN ('delivered', 'dead')`
 
+const parameterSyncActiveRunConvergenceIndexSQL = `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_parameter_sync_runs_active_convergence
+ON parameter_sync_runs (started_at, id)
+WHERE status IN ('planning','enqueuing','waiting_device','executing','processing','cancelling')`
+
 const parameterSyncOutboxIndexLockSQL = `SELECT pg_advisory_lock(hashtextextended('omc.paramsync.outbox.performance_indexes', 0))`
 const parameterSyncOutboxIndexUnlockSQL = `SELECT pg_advisory_unlock(hashtextextended('omc.paramsync.outbox.performance_indexes', 0))`
 
@@ -50,6 +54,11 @@ var parameterSyncOutboxRuntimeIndexes = []outboxRuntimeIndex{
 		qualifiedName: "public.idx_parameter_sync_outbox_terminal_status",
 		createSQL:     parameterSyncOutboxStatusIndexSQL,
 		dropSQL:       "DROP INDEX CONCURRENTLY IF EXISTS public.idx_parameter_sync_outbox_terminal_status",
+	},
+	{
+		qualifiedName: "public.idx_parameter_sync_runs_active_convergence",
+		createSQL:     parameterSyncActiveRunConvergenceIndexSQL,
+		dropSQL:       "DROP INDEX CONCURRENTLY IF EXISTS public.idx_parameter_sync_runs_active_convergence",
 	},
 }
 

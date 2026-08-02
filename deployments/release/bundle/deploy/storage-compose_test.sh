@@ -140,6 +140,10 @@ contains "svc 准备目录" 'storage_prepare_configured_env_paths ".env"' "$SVC"
 contains "app 镜像构建 GPV handoff 工具" 'omcgo-gpv-handoff ./cmd/gpv-handoff' "$APP_DOCKERFILE"
 contains "release compose 提供 handoff 一次性服务" 'gpv-handoff:' "$RELEASE_APP_COMPOSE"
 contains "install 加载 handoff 库" 'gpv-handoff-lib.sh' "$INSTALL"
+contains "install 加载 Redis 切换库" 'redis-cutover-lib.sh' "$INSTALL"
+contains "旧 Redis 切换先停止写入方" 'prepare_legacy_redis_cutover' "$INSTALL"
+contains "旧 Redis 切换校验数据连续性" 'verify_legacy_redis_cutover' "$INSTALL"
+contains "旧 Redis 切换迁移 PM 状态" 'migrate_legacy_pm_redis' "$INSTALL"
 contains "svc 加载 handoff 库" 'gpv-handoff-lib.sh' "$SVC"
 contains "install 在业务 up 前准备 durable" 'gpv_handoff_prepare' "$INSTALL"
 contains "install 在 systemd 停服前执行迁移门禁" 'gpv_handoff_migrate_legacy_systemd' "$INSTALL"
@@ -157,6 +161,8 @@ contains "单轮 healthcheck 有独立探针超时" 'HEALTHCHECK_PROBE_TIMEOUT' 
 contains "单轮 healthcheck 超时后继续重试" 'HEALTHCHECK_PROBE_REMAINING' "$INSTALL"
 contains "安装记录单轮 healthcheck 超时" 'HEALTHCHECK_PROBE_TIMEOUTS' "$INSTALL"
 contains "安装使用轻量启动检查" 'healthcheck.sh" --startup' "$INSTALL"
+contains "启动检查核对 PM Redis 配置" 'PM Redis 指向 redis-pm' "$RELEASE_HEALTHCHECK"
+contains "启动检查核对 Redis 实例身份" 'redis-core / redis-pm 运行实例身份不同' "$RELEASE_HEALTHCHECK"
 contains "启动检查跳过重型审计" 'STARTUP_CHECK=0' "$RELEASE_HEALTHCHECK"
 contains "启动 HTTP 探针有单次超时" 'curl -fsS --max-time 3' "$RELEASE_HEALTHCHECK"
 not_contains "健康等待不得按固定步长伪计时" 'HEALTHCHECK_WAIT=$((HEALTHCHECK_WAIT + HEALTHCHECK_INTERVAL))' "$INSTALL"
@@ -169,6 +175,11 @@ if bash "$RELEASE_DEPLOY/acs-ha-rollout-test.sh"; then
   ok
 else
   bad "ACS 双实例无损发布契约回归"
+fi
+if bash "$RELEASE_DEPLOY/redis-cutover-lib_test.sh"; then
+  ok
+else
+  bad "旧单 Redis 到双实例切换顺序回归"
 fi
 if bash "$RELEASE_NATS_VERIFY"; then
   ok

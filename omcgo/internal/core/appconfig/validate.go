@@ -199,33 +199,32 @@ func (c RedisConfig) validate() error {
 
 func validatePMRedis(core, pm RedisConfig) error {
 	if !pm.configured() {
+		if IsProductionEnv() {
+			return fmt.Errorf("pm_redis.addrs must not be empty in production")
+		}
 		return nil
 	}
 	if len(pm.Addrs) == 0 {
 		return fmt.Errorf("pm_redis.addrs must not be empty")
 	}
-	if IsProductionEnv() && sameRedisAddressSet(core.Addrs, pm.Addrs) {
+	if IsProductionEnv() && redisAddressSetsOverlap(core.Addrs, pm.Addrs) {
 		return fmt.Errorf("pm_redis must be physically isolated from redis; a different DB index is not isolation")
 	}
 	return nil
 }
 
-func sameRedisAddressSet(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	counts := make(map[string]int, len(left))
+func redisAddressSetsOverlap(left, right []string) bool {
+	addresses := make(map[string]struct{}, len(left))
 	for _, addr := range left {
-		counts[strings.ToLower(strings.TrimSpace(addr))]++
+		addresses[strings.ToLower(strings.TrimSpace(addr))] = struct{}{}
 	}
 	for _, addr := range right {
 		key := strings.ToLower(strings.TrimSpace(addr))
-		if counts[key] == 0 {
-			return false
+		if _, exists := addresses[key]; exists {
+			return true
 		}
-		counts[key]--
 	}
-	return true
+	return false
 }
 
 func (c JWTConfig) validate() error {

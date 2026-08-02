@@ -8,6 +8,42 @@ source "$SCRIPT_DIR/config-upgrade-lib.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+cat > "$tmp/pm-template.yaml" <<'YAML'
+redis:
+  addrs:
+    - "redis-core:6379"
+pm_redis:
+  addrs:
+    - "redis-pm:6379"
+  pool_size: 200
+nats:
+  url: "nats://nats:4222"
+YAML
+cat > "$tmp/pm-legacy.yaml" <<'YAML'
+redis:
+  addrs:
+    - "operator-core:6379"
+nats:
+  url: "nats://operator-nats:4222"
+YAML
+upgrade_pm_redis_config "$tmp/pm-legacy.yaml" "$tmp/pm-template.yaml"
+grep -Fq '    - "redis-pm:6379"' "$tmp/pm-legacy.yaml" || {
+  echo "FAIL: legacy config did not receive dedicated pm_redis" >&2
+  exit 1
+}
+grep -Fq '    - "operator-core:6379"' "$tmp/pm-legacy.yaml" || {
+  echo "FAIL: pm_redis upgrade changed operator core Redis" >&2
+  exit 1
+}
+before_pm_current="$(cksum < "$tmp/pm-legacy.yaml")"
+upgrade_pm_redis_config "$tmp/pm-legacy.yaml" "$tmp/pm-template.yaml"
+[ "$(cksum < "$tmp/pm-legacy.yaml")" = "$before_pm_current" ] || {
+  echo "FAIL: pm_redis config upgrade must be idempotent" >&2
+  exit 1
+}
+
+echo "PASS: production config upgrade adds dedicated PM Redis"
+
 cat > "$tmp/template.yaml" <<'YAML'
 session:
   timeout: 5m

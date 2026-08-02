@@ -127,6 +127,27 @@ acs_service_ready() {
   curl -fsS --max-time 3 "http://${ip}:7557/readyz"
 }
 
+redis_instance_run_id() {
+  local service="$1"
+  "${DC[@]}" exec -T "$service" redis-cli --raw INFO server 2>/dev/null |
+    awk -F: '$1 == "run_id" { gsub(/\r/, "", $2); print $2; exit }'
+}
+
+redis_instances_distinct() {
+  local core_id pm_id
+  core_id="$(redis_instance_run_id redis-core)" || return 1
+  pm_id="$(redis_instance_run_id redis-pm)" || return 1
+  [ -n "$core_id" ] && [ -n "$pm_id" ] && [ "$core_id" != "$pm_id" ]
+}
+
+check_redis_routing_config() {
+  local config_file
+  for config_file in app.prod.yaml worker.prod.yaml; do
+    grep -Fq 'redis-core:6379' "/opt/omc/etc/$config_file" || return 1
+    grep -Fq 'redis-pm:6379' "/opt/omc/etc/$config_file" || return 1
+  done
+}
+
 # 安装阶段的启动就绪检查必须在完整审计之前结束。完整检查中的 nginx -T、
 # 容器 sysctl、Compose config、资源限额和数据库参数可能因初始化负载变慢，
 # 不应阻塞“服务是否已经能接收请求”的判定。
@@ -140,6 +161,8 @@ if [ "$STARTUP_CHECK" = 1 ]; then
   for svc in postgres postgres-tsdb redis-core redis-pm nats minio; do
     check "$svc 容器 running" container_running "$svc"
   done
+  check "app/worker 核心与 PM Redis 路由配置完整" check_redis_routing_config
+  check "redis-core / redis-pm 运行实例身份不同" redis_instances_distinct
   if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
     check "web 容器 running" container_running web
   fi
@@ -172,6 +195,7 @@ for config_file in app.prod.yaml worker.prod.yaml; do
   check "$config_file 核心 Redis 指向 redis-core" grep -Fq 'redis-core:6379' "/opt/omc/etc/$config_file"
   check "$config_file PM Redis 指向 redis-pm" grep -Fq 'redis-pm:6379' "/opt/omc/etc/$config_file"
 done
+check "redis-core / redis-pm 运行实例身份不同" redis_instances_distinct
 
 if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
   echo "== docker compose web 容器 =="

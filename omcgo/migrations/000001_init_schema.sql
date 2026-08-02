@@ -14230,6 +14230,13 @@ CREATE INDEX idx_parameter_sync_runs_device_status ON public.parameter_sync_runs
 
 
 --
+-- Name: idx_parameter_sync_runs_active_convergence; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_parameter_sync_runs_active_convergence ON public.parameter_sync_runs USING btree (started_at, id) WHERE ((status)::text = ANY ((ARRAY['planning'::character varying, 'enqueuing'::character varying, 'waiting_device'::character varying, 'executing'::character varying, 'processing'::character varying, 'cancelling'::character varying])::text[]));
+
+
+--
 -- Name: idx_parameter_sync_runs_projection_due; Type: INDEX; Schema: public; Owner: -
 --
 

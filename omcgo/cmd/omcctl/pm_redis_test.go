@@ -118,6 +118,28 @@ func TestPMRedisMigratorConflictIsSafeAndReplaceIsExplicit(t *testing.T) {
 	require.Equal(t, []byte("authoritative"), target.values["pmagg:hour:a"].payload)
 }
 
+func TestPMRedisRollbackReverseCopyReplacesStaleCoreState(t *testing.T) {
+	pm := newFakePMRedisStore(map[string]fakePMRedisValue{
+		"pmagg:hour:a": {payload: []byte("new-pm-state"), ttl: 45 * time.Minute},
+	})
+	core := newFakePMRedisStore(map[string]fakePMRedisValue{
+		"pmagg:hour:a": {payload: []byte("stale-pre-cutover-state"), ttl: 20 * time.Minute},
+	})
+
+	result, err := (&pmRedisMigrator{source: pm, target: core}).Migrate(
+		context.Background(),
+		pmRedisMigrationOptions{
+			Pattern: "pmagg:*", ScanCount: 10, PipelineSize: 10,
+			Replace: true, TTLEpsilon: time.Second,
+		},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Copied)
+	require.Equal(t, []byte("new-pm-state"), core.values["pmagg:hour:a"].payload)
+	require.Equal(t, 45*time.Minute, core.values["pmagg:hour:a"].ttl)
+}
+
 func TestPMRedisMigratorIsIdempotentAndSkipsDisappearedKeys(t *testing.T) {
 	value := fakePMRedisValue{payload: []byte("same"), ttl: -1}
 	source := newFakePMRedisStore(map[string]fakePMRedisValue{

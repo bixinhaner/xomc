@@ -61,8 +61,11 @@ Run from `/opt/omc/current/deploy`. The migration service is in the optional
 `operations` profile and defaults to `--dry-run`, so a normal install never
 starts it.
 
-1. Wait until the preceding hourly window is published, stop Worker with
-   `bash svc.sh stop worker`, and confirm the PM consumers no longer advance.
+1. Wait until the preceding hourly window is published, stop both App and
+   Worker with `bash svc.sh stop app worker`, and confirm no PM Redis writer or
+   consumer advances. App and Worker form one Redis routing compatibility unit:
+   never run versions/configurations that point their PM clients at different
+   endpoints.
 2. Start and check the target with `bash svc.sh start redis-pm` and
    `docker compose -p omcgo --env-file .env --env-file resources.env -f docker-compose.infra.yml exec -T redis-pm redis-cli ping`.
 3. Run the safe preview:
@@ -87,12 +90,31 @@ starts it.
    A differing destination key fails closed. Use `--replace` only after
    confirming Worker remains stopped and the destination value is stale.
 5. Require `failed=0`, `conflicts=0`, equal source/target key counts, and every
-   key verified by DUMP payload plus TTL tolerance. Start Worker and then
-   rolling-restart App. Keep the old core keys until their TTL expires.
-6. If PM health fails, stop Worker and roll back to the previous dual-reader
-   release/config that uses core Redis. Do not point both explicit production
-   endpoints at the same address: the configuration guard rejects that unsafe
-   topology.
+   key verified by DUMP payload plus TTL tolerance. Start App and Worker from
+   the same release/config only after verification. Keep the old core keys
+   until their TTL expires.
+6. If PM health fails, stop both App and Worker. Because PM may contain events
+   newer than the retained core copy, reverse-copy authoritative `pmagg:*`
+   state before changing endpoints (dry-run first, then explicit replace):
+
+   ```bash
+   docker compose -p omcgo --env-file .env --env-file resources.env \
+     -f docker-compose.infra.yml -f docker-compose.app.yml \
+     --profile operations run --rm pm-redis-migrate \
+     --source redis-pm:6379 --target redis-core:6379 \
+     --pattern 'pmagg:*' --scan-count 500 --pipeline-size 100 --dry-run --output json
+
+   docker compose -p omcgo --env-file .env --env-file resources.env \
+     -f docker-compose.infra.yml -f docker-compose.app.yml \
+     --profile operations run --rm pm-redis-migrate \
+     --source redis-pm:6379 --target redis-core:6379 \
+     --pattern 'pmagg:*' --scan-count 500 --pipeline-size 100 --replace --output json
+   ```
+
+   Require full DUMP/TTL verification and zero failures, then start the prior
+   dual-reader App and Worker together against core Redis. Do not point both
+   explicit production endpoints at the same address: the configuration guard
+   rejects that unsafe topology.
 
 ## Redis aggregation v2 rollout gate
 

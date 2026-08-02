@@ -106,6 +106,11 @@ if [ -f "$DEPLOY_DIR/gpv-handoff-lib.sh" ]; then
 else
   die "缺 $DEPLOY_DIR/gpv-handoff-lib.sh（GPV 无损升级接力库，由 build-release.sh 随包发布）" 1
 fi
+if [ -f "$DEPLOY_DIR/redis-cutover-lib.sh" ]; then
+  . "$DEPLOY_DIR/redis-cutover-lib.sh"
+else
+  die "缺 $DEPLOY_DIR/redis-cutover-lib.sh（旧单 Redis 安全切换库）" 1
+fi
 
 # 升级时 deploy/.env 里【运维自定义】的键 —— 跨版本继承,不被新包默认值覆盖。
 # 注：6 个密钥键虽仍在此列（升级时把上一版有效凭证带进新 .env，供 ensure_secrets 首迁导入），
@@ -798,6 +803,12 @@ else
       "$OMC_ROOT/etc/app.prod.yaml" \
       "$RELEASE_DIR/etc/app.prod.yaml" ||
       die "app.prod.yaml 缺少 provision.gpv_response 且自动补齐失败；未切换 current" 1
+    for service_config in app.prod.yaml worker.prod.yaml; do
+      upgrade_pm_redis_config \
+        "$OMC_ROOT/etc/$service_config" \
+        "$RELEASE_DIR/etc/$service_config" ||
+        die "$service_config 缺少 pm_redis 且自动补齐失败；未切换 current" 1
+    done
     upgrade_worker_tsdb_pool \
       "$OMC_ROOT/etc/worker.prod.yaml" \
       "$RELEASE_DIR/etc/worker.prod.yaml" ||
@@ -992,6 +1003,10 @@ sep "7/9 启动基础设施 + 执行 migrate / seed"
 #     幂等：全新装 / 已剥离 / 目标镜像仍 timescaledb 时自动跳过。
 heal_main_pg_timescaledb_downgrade
 
+if ! prepare_legacy_redis_cutover; then
+  die "旧单 Redis 切换准备失败；已拒绝并行挂载或无校验升级" 2
+fi
+
 # 7.1 起基础设施（postgres / postgres-tsdb / redis-core / redis-pm / nats / minio）
 log "启动基础设施容器 ..."
 "${DC[@]}" up --pull never -d postgres postgres-tsdb redis-core redis-pm nats minio
@@ -1032,6 +1047,12 @@ if [ "$PG_OK" != 1 ] || [ "$TS_OK" != 1 ] || [ "$RD_CORE_OK" != 1 ] || [ "$RD_PM
             ${DC[*]} logs postgres postgres-tsdb redis-core redis-pm" 2
 fi
 log "基础设施已就绪 (PG / TSDB / Redis Core / Redis PM / NATS)"
+if ! verify_legacy_redis_cutover; then
+  die "redis-core 未继承旧 Redis 的同一数据目录和完整键数；业务写入方保持停止" 2
+fi
+if ! migrate_legacy_pm_redis; then
+  die "旧 Redis 的 PM 聚合状态迁移到 redis-pm 失败；App/Worker 保持停止" 2
+fi
 
 if [ "$HANDOFF_PREPARED" != 1 ]; then
   log "首次部署/原 NATS 未运行：按实际流状态安全初始化 GPV RPC 固定 durable ..."

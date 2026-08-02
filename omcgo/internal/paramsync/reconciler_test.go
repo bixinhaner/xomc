@@ -63,6 +63,18 @@ func TestApplyAuthoritativeRunCountsDoesNotDoubleCountReconciledTerminalTask(t *
 	assert.Equal(t, 1, run.FailedTaskCount)
 }
 
+func TestApplyAuthoritativeRunCountsNeverShrinksPlannedTaskCount(t *testing.T) {
+	run := &SyncRun{ExpectedTaskCount: 20}
+
+	applyAuthoritativeRunCounts(run, authoritativeRunCounts{
+		expected: 10, terminal: 10, processed: 10,
+	})
+
+	assert.Equal(t, 20, run.ExpectedTaskCount)
+	assert.Equal(t, 10, run.TerminalTaskCount)
+	assert.Equal(t, 10, run.ProcessedTaskCount)
+}
+
 func TestRecoverMissingResultsWithoutProcessorOrBusReturnsError(t *testing.T) {
 	_, err := NewReconciler(nil, nil, nil).RecoverMissingResults(context.Background(), 20, 200, 200)
 
@@ -80,6 +92,7 @@ func TestRunCountReconciliationRestrictsAggregationToCandidateBatch(t *testing.T
 	require.Contains(t, query, "task_rows AS MATERIALIZED")
 	require.Contains(t, query, "JOIN parameter_sync_task_results res ON res.run_id=t.run_id AND res.task_id=t.id")
 	require.NotContains(t, query, "FROM parameter_sync_runs run")
+	require.Contains(t, query, "GREATEST(run.expected_task_count, actual.expected)")
 	require.Len(t, args, 1)
 	require.Equal(t, []uuid.UUID{first, second}, args[0])
 }
@@ -122,12 +135,13 @@ func TestRunConvergenceCandidateSelectionUsesOldestActiveKeyset(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Contains(t, query, "status IN")
-	require.Contains(t, query, "(started_at, id) >")
-	require.Contains(t, query, "ORDER BY started_at, id")
+	require.Contains(t, query, "(run.started_at, run.id) >")
+	require.Contains(t, query, "stored_ready DESC, counter_drift DESC")
+	require.Contains(t, query, "actual_expected")
 	require.Contains(t, query, "LIMIT 100")
-	require.Contains(t, query, "FOR UPDATE SKIP LOCKED")
+	require.Contains(t, query, "FOR UPDATE OF run SKIP LOCKED")
 	require.NotContains(t, strings.ToUpper(query), "OFFSET")
-	require.Equal(t, []interface{}{startedAt, cursor.ID.String()}, args)
+	require.Equal(t, []interface{}{startedAt, cursor.ID}, args)
 }
 
 func TestRunConvergenceCandidateSelectionDefaultsToActiveRecoveryBatch(t *testing.T) {
@@ -135,8 +149,8 @@ func TestRunConvergenceCandidateSelectionDefaultsToActiveRecoveryBatch(t *testin
 
 	require.NoError(t, err)
 	require.Contains(t, query, "status IN")
-	require.Contains(t, query, "ORDER BY started_at, id")
+	require.Contains(t, query, "stored_ready DESC, counter_drift DESC")
 	require.Contains(t, query, fmt.Sprintf("LIMIT %d", runCountReconcileBatchSize))
-	require.Contains(t, query, "FOR UPDATE SKIP LOCKED")
+	require.Contains(t, query, "FOR UPDATE OF run SKIP LOCKED")
 	require.Empty(t, args)
 }

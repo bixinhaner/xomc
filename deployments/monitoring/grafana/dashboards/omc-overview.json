@@ -347,8 +347,8 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 116},
       "targets": [
-        {"expr": "redis_memory_used_bytes", "legendFormat": "Redis dataset bytes"},
-        {"expr": "redis_memory_max_bytes", "legendFormat": "Redis maxmemory"},
+        {"expr": "redis_memory_used_bytes", "legendFormat": "{{instance}} dataset bytes"},
+        {"expr": "redis_memory_max_bytes", "legendFormat": "{{instance}} maxmemory"},
         {"expr": "sum by (granularity) (omc_pm_aggregation_redis_sampled_estimated_bytes)", "legendFormat": "pmagg estimated {{granularity}} bytes"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes"}}

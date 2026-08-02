@@ -336,7 +336,13 @@ WHERE t.source='param_sync' AND t.source_id=$1`
 }
 
 func applyAuthoritativeRunCounts(run *SyncRun, counts authoritativeRunCounts) {
-	run.ExpectedTaskCount = counts.expected
+	// ExpectedTaskCount records the dispatch plan cardinality. Durable task rows
+	// can repair it upward after a crash between task creation and run update,
+	// but must never shrink it: a partial dispatch is an incomplete plan, not a
+	// smaller successful run.
+	if counts.expected > run.ExpectedTaskCount {
+		run.ExpectedTaskCount = counts.expected
+	}
 	run.TerminalTaskCount = counts.terminal
 	run.ProcessedTaskCount = counts.processed
 	run.FailedTaskCount = counts.failed
