@@ -61,12 +61,13 @@ if run_planner "$ENV_FILE" "$TMP/resources.env" > "$TMP/output" 2>&1; then
   else
     bad "planner 输出必须满足完整资源契约"
   fi
-  check_eq "资源契约版本" "$(storage_env_get "$TMP/resources.env" OMC_RESOURCE_SCHEMA_VERSION)" "2"
+  check_eq "资源契约版本" "$(storage_env_get "$TMP/resources.env" OMC_RESOURCE_SCHEMA_VERSION)" "3"
   check_eq "规划主机 CPU 元数据" "$(storage_env_get "$TMP/resources.env" OMC_RESOURCE_PLAN_HOST_CPU)" "32"
   check_eq "规划主机内存元数据" "$(storage_env_get "$TMP/resources.env" OMC_RESOURCE_PLAN_HOST_MEM_MIB)" "32768"
   check_eq "PostgreSQL 默认路径" "$(storage_env_get "$ENV_FILE" POSTGRES_DATA_PATH)" "/data-large/omc-data/postgres"
   check_eq "TimescaleDB 默认路径" "$(storage_env_get "$ENV_FILE" TSDB_DATA_PATH)" "/data-large/omc-data/timescaledb"
   check_eq "Redis 默认路径" "$(storage_env_get "$ENV_FILE" REDIS_DATA_PATH)" "/data-large/omc-data/redis"
+  check_eq "PM Redis 默认路径" "$(storage_env_get "$ENV_FILE" REDIS_PM_DATA_PATH)" "/data-large/omc-data/redis-pm"
   check_eq "NATS 默认路径" "$(storage_env_get "$ENV_FILE" NATS_DATA_PATH)" "/data-large/omc-data/nats"
   check_eq "MinIO 默认路径" "$(storage_env_get "$ENV_FILE" MINIO_DATA_PATH)" "/data-large/omc-data/minio"
   if grep -q '^NATS_MAX_MEMORY_STORE=[0-9][0-9]*$' "$TMP/resources.env"; then
@@ -127,7 +128,7 @@ if env \
   OMC_PROBE_LOAD15=0 \
   OMC_PROBE_STORAGE_MOUNTS="$MOUNTS" \
   OMC_STORAGE_ENV_FILE="$DYNAMIC_ENV" \
-  bash "$PLANNER" --floor-tolerance-pct 50 --output "$TMP/dynamic-resources.env" \
+  bash "$PLANNER" --assume-dedicated --floor-tolerance-pct 50 --output "$TMP/dynamic-resources.env" \
     >"$TMP/dynamic-output" 2>&1; then
   if resource_env_validate "$TMP/dynamic-resources.env"; then
     ok
@@ -136,8 +137,8 @@ if env \
   fi
   dynamic_acs_mib="$(resource_env_memory_mib "$(resource_env_get "$TMP/dynamic-resources.env" ACS_MEM)" | awk '{printf "%d", $1}')"
   dynamic_pg_mib="$(resource_env_memory_mib "$(resource_env_get "$TMP/dynamic-resources.env" POSTGRES_MEM)" | awk '{printf "%d", $1}')"
-  dynamic_redis_mib="$(resource_env_memory_mib "$(resource_env_get "$TMP/dynamic-resources.env" REDIS_MEM)" | awk '{printf "%d", $1}')"
-  if [ "$dynamic_acs_mib" -lt 4096 ] && [ "$dynamic_pg_mib" -lt 7168 ] && [ "$dynamic_redis_mib" -lt 5120 ]; then
+  dynamic_redis_mib="$(resource_env_memory_mib "$(resource_env_get "$TMP/dynamic-resources.env" REDIS_PM_MEM)" | awk '{printf "%d", $1}')"
+  if [ "$dynamic_acs_mib" -lt 4096 ] && [ "$dynamic_pg_mib" -lt 7168 ] && [ "$dynamic_redis_mib" -lt 8192 ]; then
     ok
   else
     bad "31 GiB 主机的 ACS/PG/Redis 资源未按实际预算缩放"
@@ -156,7 +157,7 @@ if env \
   OMC_PROBE_LOAD15=0 \
   OMC_PROBE_STORAGE_MOUNTS="$MOUNTS" \
   OMC_STORAGE_ENV_FILE="$LOW_ENV" \
-  bash "$PLANNER" --floor-tolerance-pct 50 --output "$TMP/low-resources.env" \
+  bash "$PLANNER" --assume-dedicated --floor-tolerance-pct 50 --output "$TMP/low-resources.env" \
     >"$TMP/low-output" 2>&1; then
   bad "过低内存主机不得生成资源计划"
 else

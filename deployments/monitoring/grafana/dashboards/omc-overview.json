@@ -347,8 +347,8 @@
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 116},
       "targets": [
-        {"expr": "redis_memory_used_bytes", "legendFormat": "Redis dataset bytes"},
-        {"expr": "redis_memory_max_bytes", "legendFormat": "Redis maxmemory"},
+        {"expr": "redis_memory_used_bytes", "legendFormat": "{{instance}} dataset bytes"},
+        {"expr": "redis_memory_max_bytes", "legendFormat": "{{instance}} maxmemory"},
         {"expr": "sum by (granularity) (omc_pm_aggregation_redis_sampled_estimated_bytes)", "legendFormat": "pmagg estimated {{granularity}} bytes"}
       ],
       "fieldConfig": {"defaults": {"unit": "bytes"}}
@@ -379,6 +379,7 @@
       "targets": [
         {"expr": "histogram_quantile(0.95, sum by (le) (rate(omc_pm_aggregation_rebuild_jobs_per_batch_bucket[$__rate_interval])))", "legendFormat": "rebuild batch p95 jobs"},
         {"expr": "sum(rate(omc_pm_aggregation_rebuild_snapshot_rows_total[$__rate_interval]))", "legendFormat": "snapshot rows/s"},
+        {"expr": "sum(rate(omc_pm_aggregation_rebuild_snapshot_pages_total[$__rate_interval]))", "legendFormat": "snapshot pages/s"},
         {"expr": "sum(rate(omc_pm_aggregation_rebuild_coalesced_total[$__rate_interval]))", "legendFormat": "coalesced generations/s"}
       ]
     },
@@ -411,6 +412,16 @@
       "fieldConfig": {"defaults": {"unit": "ops"}}
     },
     {
+      "title": "PM 重算期间 TSDB 临时写入",
+      "description": "周期重算已改为只读 repeatable-read keyset 分页；该值持续上升时应排查其他排序或哈希溢写。",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 140},
+      "targets": [
+        {"expr": "rate(pg_stat_database_temp_bytes{instance=\"postgres-tsdb\"}[$__rate_interval])", "legendFormat": "TSDB temp bytes/s"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps"}}
+    },
+    {
       "title": "Redis 聚合活动窗口数",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 148},
@@ -418,6 +429,18 @@
         {"expr": "sum by (granularity) (omc_pm_aggregation_redis_sampled_active_windows)", "legendFormat": "pmagg active {{granularity}} windows"}
       ],
       "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "title": "参数同步状态收敛",
+      "description": "ready 应在下一轮 30 秒维护内归零；blocked 按未派发、缺结果和真实设备任务区分。",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 148},
+      "targets": [
+        {"expr": "param_sync_runs_ready_but_not_finalized", "legendFormat": "ready not finalized"},
+        {"expr": "param_sync_run_counter_drift", "legendFormat": "counter drift"},
+        {"expr": "param_sync_runs_blocked", "legendFormat": "blocked {{reason}}"},
+        {"expr": "param_sync_active_run_oldest_age_seconds", "legendFormat": "oldest active age"}
+      ]
     }
   ],
   "refresh": "30s",

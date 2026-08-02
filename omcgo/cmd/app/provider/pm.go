@@ -57,8 +57,8 @@ func initPMModule(c *Container) error {
 	// T-0164-P1：构造 KPI Router 替代旧 carrier-based 公式路由。
 	// 依赖：ProductRegistry / DeviceRepo / IndicatorRepository / PlatformFormulaRepository。
 	var l2Cache router.L2Cache
-	if c.Redis != nil {
-		l2Cache = router.NewRedisCache(c.Redis)
+	if cache := c.kpiRouteRedisCache(); cache != nil {
+		l2Cache = cache
 	}
 	kpiRouter, err := router.New(
 		c.DeviceRepo,
@@ -99,9 +99,9 @@ func initPMModule(c *Container) error {
 		WithEnabledMetricSelectionService(adhoc.NewEnabledMetricSelectionService(enabledRepo)).
 		WithTimezoneProvider(c.SystemTimezone)
 	var progressService *pmstream.ProgressService
-	if c.Redis != nil {
+	if c.PMRedis != nil {
 		streamCfg := pmstream.ConfigFromEnv()
-		progressStore := pmstream.NewRedisWindowStore(c.Redis, streamCfg.WindowTTL)
+		progressStore := pmstream.NewRedisWindowStore(c.PMRedis, streamCfg.WindowTTL)
 		progressTasks := pmstream.NewPgProgressTaskLoader(c.PgPool)
 		progressSnapshot := pmstream.NewSnapshotStore(progressTasks, logger.Named("pm-progress-snapshot"))
 		backfillCtx, backfillCancel := context.WithTimeout(context.Background(), 5*time.Second)

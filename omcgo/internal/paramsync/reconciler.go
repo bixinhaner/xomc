@@ -2,6 +2,7 @@ package paramsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -25,13 +26,18 @@ type Reconciler struct {
 	now       func() time.Time
 
 	runCountMu     sync.Mutex
-	runCountCursor *uuid.UUID
+	runCountCursor *runConvergenceCursor
 
 	stagingCleanupMu     sync.Mutex
 	stagingCleanupCursor *stagingCursor
 }
 
-const runCountReconcileBatchSize = 20
+const runCountReconcileBatchSize = 200
+
+type runConvergenceCursor struct {
+	StartedAt time.Time
+	ID        uuid.UUID
+}
 
 type stagingCursor struct {
 	runID         uuid.UUID
@@ -95,6 +101,69 @@ SELECT
 const stagingRowsMetricSQL = `
 SELECT GREATEST(reltuples, 0)::bigint
 FROM pg_class WHERE oid='parameter_sync_staging_values'::regclass`
+
+const convergenceMetricsSQL = `
+WITH active AS (
+  SELECT id, status, started_at, expected_task_count, terminal_task_count,
+         processed_task_count, failed_task_count
+  FROM parameter_sync_runs
+  WHERE status IN ('planning','enqueuing','waiting_device','executing','processing','cancelling')
+), counts AS (
+  SELECT a.id, a.status, a.started_at,
+         a.expected_task_count AS stored_expected,
+         a.terminal_task_count AS stored_terminal,
+         a.processed_task_count AS stored_processed,
+         a.failed_task_count AS stored_failed,
+         count(t.id)::bigint AS actual_expected,
+         count(t.id) FILTER (
+           WHERE t.status IN ('completed','failed','expired','cancelled')
+         )::bigint AS actual_terminal,
+         count(res.task_id) FILTER (
+           WHERE t.status IN ('completed','failed','expired','cancelled')
+             AND res.status IN ('processed','failed')
+         )::bigint AS actual_processed,
+         count(res.task_id) FILTER (
+           WHERE t.status IN ('completed','failed','expired','cancelled')
+             AND res.status IN ('processed','failed')
+             AND (res.status='failed' OR NOT res.success)
+         )::bigint AS actual_failed
+  FROM active a
+  LEFT JOIN device_tasks t
+    ON t.source='param_sync' AND t.source_id=a.id
+  LEFT JOIN parameter_sync_task_results res
+    ON res.run_id=a.id AND res.task_id=t.id
+  GROUP BY a.id, a.status, a.started_at, a.expected_task_count,
+           a.terminal_task_count, a.processed_task_count, a.failed_task_count
+), classified AS (
+  SELECT *,
+		 status<>'cancelling'
+		   AND (stored_expected>actual_expected
+		     OR (stored_expected=0 AND actual_expected=0)) AS plan_blocked
+  FROM counts
+)
+SELECT
+  count(*) FILTER (
+    WHERE actual_expected>0
+      AND actual_expected=actual_terminal
+      AND actual_expected=actual_processed
+  )::bigint,
+  count(*) FILTER (
+    WHERE stored_expected<>actual_expected
+       OR stored_terminal<>actual_terminal
+       OR stored_processed<>actual_processed
+       OR stored_failed<>actual_failed
+  )::bigint,
+  COALESCE(max(EXTRACT(EPOCH FROM (now()-started_at))),0)::double precision,
+  count(*) FILTER (WHERE plan_blocked)::bigint,
+  count(*) FILTER (
+    WHERE NOT plan_blocked AND actual_terminal>actual_processed
+  )::bigint,
+  count(*) FILTER (
+    WHERE NOT plan_blocked
+      AND actual_terminal=actual_processed
+      AND actual_terminal<actual_expected
+  )::bigint
+FROM classified`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -406,72 +475,119 @@ WHERE status='cancelling' ORDER BY started_at LIMIT $1 FOR UPDATE SKIP LOCKED`, 
 func (r *Reconciler) ReconcileRunCounts(ctx context.Context) (int64, error) {
 	r.runCountMu.Lock()
 	defer r.runCountMu.Unlock()
+	started := time.Now()
+	if r.metrics != nil {
+		defer func() { r.metrics.ReconcileDuration.Observe(time.Since(started).Seconds()) }()
+	}
 
-	candidateQuery, candidateArgs, err := buildRunCountCandidateSelectSQL(
+	claimTx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin parameter sync run convergence claim: %w", err)
+	}
+	defer func() { _ = claimTx.Rollback(context.Background()) }()
+	candidateQuery, candidateArgs, err := buildRunConvergenceCandidateSelectSQL(
 		r.runCountCursor, runCountReconcileBatchSize,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("build parameter sync run count candidates: %w", err)
+		return 0, fmt.Errorf("build parameter sync run convergence candidates: %w", err)
 	}
-	rows, err := r.pool.Query(ctx, candidateQuery, candidateArgs...)
+	rows, err := claimTx.Query(ctx, candidateQuery, candidateArgs...)
 	if err != nil {
-		return 0, fmt.Errorf("list parameter sync run count candidates: %w", err)
+		return 0, fmt.Errorf("list parameter sync run convergence candidates: %w", err)
 	}
-	var runIDs []uuid.UUID
+	type candidate struct {
+		id        uuid.UUID
+		startedAt time.Time
+	}
+	candidates := make([]candidate, 0, runCountReconcileBatchSize)
 	for rows.Next() {
-		var runID uuid.UUID
-		if err := rows.Scan(&runID); err != nil {
+		var item candidate
+		if err := rows.Scan(&item.id, &item.startedAt); err != nil {
 			rows.Close()
-			return 0, fmt.Errorf("scan parameter sync run count candidate: %w", err)
+			return 0, fmt.Errorf("scan parameter sync run convergence candidate: %w", err)
 		}
-		runIDs = append(runIDs, runID)
+		candidates = append(candidates, item)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return 0, fmt.Errorf("iterate parameter sync run count candidates: %w", err)
+		return 0, fmt.Errorf("iterate parameter sync run convergence candidates: %w", err)
 	}
 	rows.Close()
-	if len(runIDs) == 0 {
+	if len(candidates) == 0 {
+		if err := claimTx.Commit(ctx); err != nil {
+			return 0, fmt.Errorf("commit empty parameter sync run convergence claim: %w", err)
+		}
 		// The next maintenance tick starts a new bounded sweep. Avoid wrapping
 		// inside this call, which would process the first page twice at the tail.
 		r.runCountCursor = nil
 		return 0, nil
 	}
 
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("begin parameter sync run count reconciliation: %w", err)
+	var finalized int64
+	var drifted int64
+	blocked := map[convergenceBlockReason]int64{}
+	var reconcileErr error
+	for _, item := range candidates {
+		// A nested pgx transaction is a savepoint. The outer transaction keeps
+		// every candidate row locked until all convergence writes commit, while
+		// a single broken run can roll back to its savepoint without aborting the
+		// rest of the bounded batch.
+		tx, beginErr := claimTx.Begin(ctx)
+		if beginErr != nil {
+			reconcileErr = errors.Join(reconcileErr,
+				fmt.Errorf("begin parameter sync run convergence %s: %w", item.id, beginErr))
+			continue
+		}
+		result, convergeErr := convergeRunTx(ctx, tx, item.id, r.now())
+		if convergeErr != nil {
+			_ = tx.Rollback(context.Background())
+			reconcileErr = errors.Join(reconcileErr,
+				fmt.Errorf("converge parameter sync run %s: %w", item.id, convergeErr))
+			continue
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			reconcileErr = errors.Join(reconcileErr,
+				fmt.Errorf("commit parameter sync run convergence %s: %w", item.id, commitErr))
+			continue
+		}
+		if result.Finalized {
+			finalized++
+			if r.metrics != nil {
+				r.metrics.ReconcileRepairs.WithLabelValues("ready_runs").Inc()
+				status := "succeeded"
+				if result.Failed {
+					status = "failed"
+				}
+				r.metrics.ReconcileFinalized.WithLabelValues(status).Inc()
+			}
+		}
+		if result.Drift {
+			drifted++
+			if r.metrics != nil {
+				r.metrics.ReconcileRepairs.WithLabelValues("run_counts").Inc()
+			}
+		}
+		if result.BlockedReason != "" {
+			blocked[result.BlockedReason]++
+		}
 	}
-	defer func() { _ = tx.Rollback(context.Background()) }()
-
-	// A previous implementation could commit a result in "received" before its
-	// processing state was finalized. Terminal runs cannot be processed again, so
-	// normalize those durable historical rows from their success bit first.
-	normalized, err := tx.Exec(ctx, historicalResultNormalizationSQL, r.now(), runIDs)
-	if err != nil {
-		return 0, fmt.Errorf("normalize historical parameter sync results: %w", err)
+	if err := claimTx.Commit(ctx); err != nil {
+		return 0, errors.Join(reconcileErr,
+			fmt.Errorf("commit parameter sync run convergence batch: %w", err))
 	}
-
-	query, queryArgs, err := buildRunCountReconciliationSQL(runIDs)
-	if err != nil {
-		return 0, fmt.Errorf("build parameter sync run count reconciliation: %w", err)
+	last := candidates[len(candidates)-1]
+	r.runCountCursor = &runConvergenceCursor{StartedAt: last.startedAt, ID: last.id}
+	if r.metrics != nil {
+		r.metrics.RunCounterDrift.Set(float64(drifted))
+		for _, reason := range []convergenceBlockReason{
+			convergenceBlockPlanNotDispatched,
+			convergenceBlockTerminalResultMissing,
+			convergenceBlockDeviceTaskActive,
+		} {
+			r.metrics.RunsBlocked.WithLabelValues(string(reason)).Set(float64(blocked[reason]))
+		}
 	}
-	tag, err := tx.Exec(ctx, query, queryArgs...)
-	if err != nil {
-		return 0, fmt.Errorf("reconcile parameter sync run counts: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit parameter sync run count reconciliation: %w", err)
-	}
-	lastRunID := runIDs[len(runIDs)-1]
-	r.runCountCursor = &lastRunID
-	if r.metrics != nil && normalized.RowsAffected() > 0 {
-		r.metrics.ReconcileRepairs.WithLabelValues("historical_results").Add(float64(normalized.RowsAffected()))
-	}
-	if r.metrics != nil && tag.RowsAffected() > 0 {
-		r.metrics.ReconcileRepairs.WithLabelValues("run_counts").Add(float64(tag.RowsAffected()))
-	}
-	return tag.RowsAffected(), nil
+	return finalized, reconcileErr
 }
 
 func buildRunCountCandidateSelectSQL(cursor *uuid.UUID, limit uint64) (string, []interface{}, error) {
@@ -483,6 +599,63 @@ func buildRunCountCandidateSelectSQL(cursor *uuid.UUID, limit uint64) (string, [
 		builder = builder.Where(sq.Gt{"id": *cursor})
 	}
 	return builder.ToSql()
+}
+
+func buildRunConvergenceCandidateSelectSQL(
+	cursor *runConvergenceCursor,
+	limit uint64,
+) (string, []interface{}, error) {
+	if limit == 0 {
+		limit = runCountReconcileBatchSize
+	}
+	const activePredicate = "run.status IN ('planning','enqueuing','waiting_device','executing','processing','cancelling')"
+	query := `
+SELECT run.id, run.started_at
+FROM parameter_sync_runs run
+LEFT JOIN LATERAL (
+  SELECT
+    count(t.id)::int AS actual_expected,
+    count(t.id) FILTER (
+      WHERE t.status IN ('completed','failed','expired','cancelled')
+    )::int AS actual_terminal,
+    count(res.task_id) FILTER (
+      WHERE t.status IN ('completed','failed','expired','cancelled')
+        AND res.status IN ('processed','failed')
+    )::int AS actual_processed,
+    count(res.task_id) FILTER (
+      WHERE t.status IN ('completed','failed','expired','cancelled')
+        AND res.status IN ('processed','failed')
+        AND (res.status='failed' OR NOT res.success)
+    )::int AS actual_failed
+  FROM device_tasks t
+  LEFT JOIN parameter_sync_task_results res
+    ON res.run_id=run.id AND res.task_id=t.id
+  WHERE t.source='param_sync' AND t.source_id=run.id
+) actual ON true
+CROSS JOIN LATERAL (
+  SELECT
+    run.expected_task_count>0
+      AND run.terminal_task_count=run.expected_task_count
+      AND run.processed_task_count=run.expected_task_count AS stored_ready,
+    run.expected_task_count<>actual.actual_expected
+      OR run.terminal_task_count<>actual.actual_terminal
+      OR run.processed_task_count<>actual.actual_processed
+      OR run.failed_task_count<>actual.actual_failed AS counter_drift
+) priority
+WHERE ` + activePredicate
+	var args []interface{}
+	if cursor != nil {
+		query += ` AND (
+  priority.stored_ready OR priority.counter_drift
+  OR (run.started_at, run.id) > ($1, $2)
+)`
+		args = []interface{}{cursor.StartedAt, cursor.ID}
+	}
+	query += fmt.Sprintf(`
+ORDER BY stored_ready DESC, counter_drift DESC, run.started_at, run.id
+LIMIT %d
+FOR UPDATE OF run SKIP LOCKED`, limit)
+	return query, args, nil
 }
 
 func buildRunCountReconciliationSQL(runIDs []uuid.UUID) (string, []interface{}, error) {
@@ -527,7 +700,7 @@ WITH batch AS (
   LEFT JOIN result_actual res ON res.run_id=batch.id
 )
 UPDATE parameter_sync_runs run SET
-  expected_task_count=actual.expected, terminal_task_count=actual.terminal,
+  expected_task_count=GREATEST(run.expected_task_count, actual.expected), terminal_task_count=actual.terminal,
   processed_task_count=actual.processed, failed_task_count=actual.failed, version=version+1
 FROM actual WHERE run.id=actual.id AND (
   run.expected_task_count<>actual.expected OR run.terminal_task_count<>actual.terminal OR
@@ -806,6 +979,20 @@ WHERE status IN ('planning','enqueuing','waiting_device','executing','processing
 	r.metrics.TasksTerminal.Set(float64(terminal))
 	r.metrics.TasksProcessed.Set(float64(processed))
 	r.metrics.TasksFailed.Set(float64(failed))
+
+	var ready, drift, planBlocked, resultMissing, deviceActive int64
+	var oldestAge float64
+	if err := r.pool.QueryRow(ctx, convergenceMetricsSQL).Scan(
+		&ready, &drift, &oldestAge, &planBlocked, &resultMissing, &deviceActive,
+	); err != nil {
+		return fmt.Errorf("collect parameter sync convergence gauges: %w", err)
+	}
+	r.metrics.RunsReadyButNotFinalized.Set(float64(ready))
+	r.metrics.RunCounterDrift.Set(float64(drift))
+	r.metrics.ActiveRunOldestAge.Set(oldestAge)
+	r.metrics.RunsBlocked.WithLabelValues(string(convergenceBlockPlanNotDispatched)).Set(float64(planBlocked))
+	r.metrics.RunsBlocked.WithLabelValues(string(convergenceBlockTerminalResultMissing)).Set(float64(resultMissing))
+	r.metrics.RunsBlocked.WithLabelValues(string(convergenceBlockDeviceTaskActive)).Set(float64(deviceActive))
 
 	var outbox, staging int64
 	if err := r.pool.QueryRow(ctx, outboxBacklogMetricSQL).Scan(&outbox); err != nil {

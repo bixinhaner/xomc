@@ -89,7 +89,8 @@ compose 项目名（默认 `omc omcgo`）。
 | app | 512 | 1536 | 8 | 运维 UI + OSS 轮询，非设备量驱动 |
 | nats | 384 | 1024 | 6 | JetStream + PM 突发 in-flight |
 | minio | 512 | 2048 | 6 | 对象存储，瓶颈在磁盘非内存 |
-| redis | 5120 | 8192 | 8 | 12 分钟关窗会短时并存相邻两个小时窗口；20k 基站实测需 4GiB `maxmemory`，另留 1GiB AOF COW 余量 |
+| redis-core | 2048 | 6144 | 6 | ACS 会话、任务和告警等核心状态，独立保留 1GiB AOF COW 余量 |
+| redis-pm | 8192 | 12288 | 10 | 12 分钟关窗会短时并存相邻小时窗口，独立保留 2GiB AOF COW 余量 |
 | web | 192 | 512 | 0 | nginx 静态+反代，近似固定 |
 
 监控栈默认**不计入**（dev 本地通常不起）；`--with-monitoring` 把约 4.1 GiB 固定块计入预算。
@@ -105,7 +106,8 @@ compose 项目名（默认 `omc omcgo`）。
 | PG `shared_buffers` | `0.25 × 该实例 MEM`（留 OS page cache 给 Timescale 解压） |
 | PG `effective_cache_size` | `0.60 × 该实例 MEM` |
 | PG `max_connections` | `300`（覆盖 Go 端 ~180 池 + exporter + psql + 余量） |
-| Redis `maxmemory` | `REDIS_MEM − 1GiB`，`REDIS_MEM` 下限 5GiB；策略固定 `noeviction` |
+| Core Redis `maxmemory` | `REDIS_CORE_MEM − 1GiB`；策略固定 `noeviction` |
+| PM Redis `maxmemory` | `REDIS_PM_MEM − 2GiB`，`REDIS_PM_MEM` 下限 8GiB；策略固定 `noeviction` |
 
 ### 3.5 双 PG 合计实占 OOM 自检（关键）
 
@@ -122,7 +124,8 @@ compose 项目名（默认 `omc omcgo`）。
 （已加 `.gitignore`）。可手改，约束写在文件头：
 
 - `*_GOMEMLIMIT` 必须 < 对应 `*_MEM`（建议 0.90×）
-- `REDIS_MEM` 必须 ≥ `REDIS_MAXMEMORY + 1GiB`
+- `REDIS_CORE_MEM` 必须至少比 `REDIS_CORE_MAXMEMORY` 多 1GiB
+- `REDIS_PM_MEM` 必须至少比 `REDIS_PM_MAXMEMORY` 多 2GiB
 - 两 PG 的 `shared_buffers` 之和 + maintenance + backends 余量 须 < VM 内存
 - `PG/TSDB_MAX_CONNECTIONS` 必须 ≥ Go 端连接池总和（当前 ~180）
 

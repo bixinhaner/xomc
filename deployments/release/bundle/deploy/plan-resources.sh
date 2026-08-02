@@ -233,18 +233,19 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 #   worker        1024    2048        25           PM/MR 解析最吃内存；1M 走横向
 #   postgres      7168   16384        25           业务主库；须容 max_connections=300(池+exporter+余,与 main #131 对齐)
 #   postgres-tsdb 4096   12288        22           时序库(#347)：PM COPY 入库 + KPI 聚合，写压力主要在此；独立实例，计入预算防双 PG 超分 OOM
-#   redis         5120    8192        15           12分钟关窗双小时重叠；4GiB窗口 + 1GiB AOF COW
+#   redis-core    4096    6144         8           会话/任务/告警；与 PM 状态物理隔离，保留 1GiB AOF COW
+#   redis-pm      8192   12288        15           12分钟关窗双小时重叠；保留 2GiB AOF COW
 #   nats          1024    2048         5           JetStream backlog + client buffers，避免 512MiB cgroup 临界
 #   minio         3072    4096         8           对象存储；压测发现按可见CPU配额自动估算的并发上限过于保守，且线上巡检 2.5GiB 配额下已到 88%，floor/ceil 一并调大留余量
 #   web            512     512         0           静态+反代，固定
 # 监控栈（固定块，不纵向伸缩，但计入预算）：~4736 MiB
-COMP_NAMES=(app acs worker postgres postgres-tsdb redis nats minio web)
-BASE_COMP_FLOOR=(1536 4096 1024 7168 4096 5120 1024 3072 512)
-BASE_COMP_CEIL=(3072 6144 2048 16384 12288 8192 2048 4096 512)
+COMP_NAMES=(app acs worker postgres postgres-tsdb redis-core redis-pm nats minio web)
+BASE_COMP_FLOOR=(1536 4096 1024 7168 4096 4096 8192 1024 3072 512)
+BASE_COMP_CEIL=(3072 6144 2048 16384 12288 6144 12288 2048 4096 512)
 # 低配机仍须保证能启动一套有意义的 OMC；这些是按组件职责定义的最低比例
 # 约束，不是固定的最终申请值。双 ACS 接力副本在后续总账中再计一次。
-COMP_MIN=(512 1024 512 2048 1536 2048 256 512 128)
-COMP_WEIGHT=(10 18 25 25 22 15 5 8 0)
+COMP_MIN=(512 1024 512 2048 1536 2048 4096 256 512 128)
+COMP_WEIGHT=(10 18 25 25 22 8 15 5 8 0)
 
 MON_FIXED_MIB=4736   # prometheus1024+loki512+tempo1024+otelcol512+grafana512+alertmgr512+exporters(128*3+256)
 [ "$SKIP_MONITORING" = 1 ] && MON_FIXED_MIB=0
@@ -331,12 +332,12 @@ CPU_DB_THIRD=$(( HOST_CPU / 3 )); [ "$CPU_DB_THIRD" -lt 2 ] && CPU_DB_THIRD=2
 CPU_TSDB_HALF=$(( HOST_CPU / 2 )); [ "$CPU_TSDB_HALF" -lt 2 ] && CPU_TSDB_HALF=2
 CPU_WORKER_QUARTER=$(( HOST_CPU / 4 )); [ "$CPU_WORKER_QUARTER" -lt 2 ] && CPU_WORKER_QUARTER=2
 case "$TIER" in
-  small)  CPU_app=1;   CPU_acs=2; CPU_worker=2; CPU_pg=2; CPU_tsdb=2; CPU_redis=1; CPU_nats=1; CPU_minio=1; CPU_web=1 ;;
+  small)  CPU_app=1;   CPU_acs=2; CPU_worker=2; CPU_pg=2; CPU_tsdb=2; CPU_redis_core=1; CPU_redis_pm=1; CPU_nats=1; CPU_minio=1; CPU_web=1 ;;
   # 32核/32GiB medium 实测 10/16/8：worker/TSDB 吞吐被充分利用，PM 无重投/OOM。
-  medium) CPU_app="1.5"; CPU_acs=5; CPU_worker=$CPU_WORKER_QUARTER; CPU_pg=$CPU_DB_THIRD; CPU_tsdb=$CPU_TSDB_HALF; CPU_redis=2; CPU_nats=1; CPU_minio=4; CPU_web=1 ;;
-  large)  CPU_app=2;   CPU_acs=8; CPU_worker=$CPU_WORKER_QUARTER; CPU_pg=$CPU_DB_THIRD; CPU_tsdb=$CPU_TSDB_HALF; CPU_redis=2; CPU_nats=2; CPU_minio=6; CPU_web=1 ;;
+  medium) CPU_app="1.5"; CPU_acs=5; CPU_worker=$CPU_WORKER_QUARTER; CPU_pg=$CPU_DB_THIRD; CPU_tsdb=$CPU_TSDB_HALF; CPU_redis_core=2; CPU_redis_pm=2; CPU_nats=1; CPU_minio=4; CPU_web=1 ;;
+  large)  CPU_app=2;   CPU_acs=8; CPU_worker=$CPU_WORKER_QUARTER; CPU_pg=$CPU_DB_THIRD; CPU_tsdb=$CPU_TSDB_HALF; CPU_redis_core=2; CPU_redis_pm=2; CPU_nats=2; CPU_minio=6; CPU_web=1 ;;
 esac
-CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis" "$CPU_nats" "$CPU_minio" "$CPU_web")
+CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis_core" "$CPU_redis_pm" "$CPU_nats" "$CPU_minio" "$CPU_web")
 
 # 校验：Σ内存限额 ≤ 空闲预算（全量记账，含监控）。SURPLUS=0 时 ALLOC_SUM==FLOOR_SUM，
 # 若此时仍 > IDLE_MEM_MIB 属于上面已经 warn 过的「容忍度内下限缺口」，是预期行为，不重复 die；
@@ -357,7 +358,8 @@ idx() { local n="$1"; for i in "${!COMP_NAMES[@]}"; do [ "${COMP_NAMES[$i]}" = "
 APP_MEM=${COMP_MEM[$(idx app)]};     ACS_MEM=${COMP_MEM[$(idx acs)]}
 WORKER_MEM=${COMP_MEM[$(idx worker)]}; PG_MEM=${COMP_MEM[$(idx postgres)]}
 TSDB_MEM=${COMP_MEM[$(idx postgres-tsdb)]}
-REDIS_MEM=${COMP_MEM[$(idx redis)]};   NATS_MEM=${COMP_MEM[$(idx nats)]}
+REDIS_CORE_MEM=${COMP_MEM[$(idx redis-core)]}; REDIS_PM_MEM=${COMP_MEM[$(idx redis-pm)]}
+NATS_MEM=${COMP_MEM[$(idx nats)]}
 NATS_MAX_MEMORY_STORE=$(( NATS_MEM * 1024 * 1024 / 4 ))
 MINIO_MEM=${COMP_MEM[$(idx minio)]};   WEB_MEM=${COMP_MEM[$(idx web)]}
 
@@ -392,11 +394,12 @@ TSDB_SAT=$(( TSDB_SHARED_BUFFERS + TSDB_MAINT_WORK_MEM + TSDB_MAXCONN * (10 + TS
 [ "$TSDB_SAT" -gt "$(mul_pct "$TSDB_MEM" 92)" ] && \
   warn "Postgres-tsdb 饱和估算 $(to_gib "$TSDB_SAT") GiB 接近限额 $(to_gib "$TSDB_MEM") GiB；建议增大内存或下调 TSDB_MAX_CONNECTIONS（时序库连接池仅 ~65）。"
 
-# Redis：20k 基站在 12 分钟关窗下会短时并存相邻两个小时的窗口。实测 2GiB
-# 单小时档在积压恢复时 OOM；下限 5GiB，其中 maxmemory 4GiB，并始终保留
-# 1GiB 给 AOF rewrite 的 fork COW。
-REDIS_MAXMEM=$(( REDIS_MEM - 1024 ))
-REDIS_POLICY=noeviction                            # PM 聚合窗口是权威状态，内存不足必须告警扩容
+# Redis：核心状态与 PM 聚合窗口使用两个物理实例，避免 PM 关窗/重算的内存和
+# AOF 写放大挤压 ACS 会话、设备任务与告警。核心实例保留 1GiB、PM 实例保留
+# 2GiB 给 AOF rewrite 的 fork COW。
+REDIS_CORE_MAXMEM=$(( REDIS_CORE_MEM - 1024 ))
+REDIS_PM_MAXMEM=$(( REDIS_PM_MEM - 2048 ))
+REDIS_POLICY=noeviction
 
 # ---------------------------------------------------------------------------
 # 4. 输出规划表 + 写 resources.env（需求 ③④）
@@ -409,7 +412,8 @@ printf '  %-13s  %8s MiB\n' "acs-candidate" "$ACS_MEM" ; printf '              �
 printf '  %-10s  %8s MiB\n' "worker" "$WORKER_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' "$WORKER_GOMEM" "$WORKER_GOMAXPROCS"
 printf '  %-10s  %8s MiB\n' "postgres" "$PG_MEM" ; printf '              ↳ shared_buffers=%sMB effective_cache=%sMB max_connections=%s work_mem=%sMB\n' "$PG_SHARED_BUFFERS" "$PG_EFFECTIVE_CACHE" "$PG_MAXCONN" "$PG_WORK_MEM"
 printf '  %-13s  %8s MiB\n' "postgres-tsdb" "$TSDB_MEM" ; printf '              ↳ shared_buffers=%sMB effective_cache=%sMB max_connections=%s work_mem=%sMB（时序库 #347）\n' "$TSDB_SHARED_BUFFERS" "$TSDB_EFFECTIVE_CACHE" "$TSDB_MAXCONN" "$TSDB_WORK_MEM"
-printf '  %-10s  %8s MiB\n' "redis"  "$REDIS_MEM" ; printf '              ↳ maxmemory=%sMB policy=%s（限额−maxmemory=%sMiB COW 余量）\n' "$REDIS_MAXMEM" "$REDIS_POLICY" "$(( REDIS_MEM - REDIS_MAXMEM ))"
+printf '  %-13s  %8s MiB\n' "redis-core" "$REDIS_CORE_MEM" ; printf '              ↳ maxmemory=%sMB policy=%s（COW 余量=%sMiB）\n' "$REDIS_CORE_MAXMEM" "$REDIS_POLICY" "$(( REDIS_CORE_MEM - REDIS_CORE_MAXMEM ))"
+printf '  %-13s  %8s MiB\n' "redis-pm" "$REDIS_PM_MEM" ; printf '              ↳ maxmemory=%sMB policy=%s（COW 余量=%sMiB）\n' "$REDIS_PM_MAXMEM" "$REDIS_POLICY" "$(( REDIS_PM_MEM - REDIS_PM_MAXMEM ))"
 printf '  %-10s  %8s MiB\n' "nats"   "$NATS_MEM"
 printf '  %-10s  %8s MiB\n' "minio"  "$MINIO_MEM"
 printf '  %-10s  %8s MiB\n' "web"    "$WEB_MEM"
@@ -420,7 +424,7 @@ log "  Σ内存限额    : ${C_B}$(to_gib "$ALLOC_SUM") GiB${C_0} / 空闲预算
 
 sep "数据路径建议"
 log "  默认根目录    : ${RECOMMENDED_STORAGE_MOUNT%/}/omc-data"
-log "  ${C_Y}请人工检查并按物理 SSD/NVMe 修改 ${STORAGE_ENV_FILE} 中五个 *_DATA_PATH。${C_0}"
+log "  ${C_Y}请人工检查并按物理 SSD/NVMe 修改 ${STORAGE_ENV_FILE} 中六个 *_DATA_PATH。${C_0}"
 log "  ${C_Y}本脚本只生成启动路径，不会迁移已有 Docker volume 或目录中的数据。${C_0}"
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -454,7 +458,7 @@ trap cleanup_resource_output_tmp EXIT
   echo "#   # 或手工：docker compose -p omcgo --env-file .env --env-file resources.env -f ... up -d"
   echo "# 约束（改值时务必遵守，否则重演 OOM 事故）："
   echo "#   · GOMEMLIMIT 必须 < 对应 *_MEM（软限，建议 0.90×）；ACS 还须配合准入控制+SOAP体上限"
-  echo "#   · REDIS_MEM 必须 ≥ REDIS_MAXMEMORY + 1GiB（AOF rewrite 的 fork COW 余量）"
+  echo "#   · REDIS_CORE_MEM 必须 ≥ REDIS_CORE_MAXMEMORY + 1GiB；REDIS_PM_MEM 须保留 2GiB AOF COW 余量"
   echo "#   · PG_MAX_CONNECTIONS 必须 ≥ Go 端连接池总和(当前 180)；增大须同步增大 POSTGRES_MEM"
   echo "#   · 时序库(#347)：TSDB_* 同理；TSDB_MEM 变则 TSDB_SHARED_BUFFERS 联动；两 PG 内存合计须 ≤ 空闲预算"
   echo "# =============================================================================="
@@ -476,9 +480,11 @@ trap cleanup_resource_output_tmp EXIT
   echo "TSDB_MAX_CONNECTIONS=$TSDB_MAXCONN"; echo "TSDB_WORK_MEM=${TSDB_WORK_MEM}MB"
   echo "TSDB_MAINTENANCE_WORK_MEM=${TSDB_MAINT_WORK_MEM}MB"; echo "TSDB_MAX_WAL_SIZE=$TSDB_MAX_WAL"
   echo ""
-  echo "# ── Redis ── 限额 ≥ maxmemory + 1GiB"
-  echo "REDIS_CPUS=$CPU_redis";   echo "REDIS_MEM=${REDIS_MEM}m"
-  echo "REDIS_MAXMEMORY=${REDIS_MAXMEM}mb"; echo "REDIS_MAXMEMORY_POLICY=$REDIS_POLICY"
+  echo "# ── Redis Core / PM ── 两个物理实例，PM 关窗与重算不再争抢核心业务资源"
+  echo "REDIS_CORE_CPUS=$CPU_redis_core"; echo "REDIS_CORE_MEM=${REDIS_CORE_MEM}m"
+  echo "REDIS_CORE_MAXMEMORY=${REDIS_CORE_MAXMEM}mb"; echo "REDIS_CORE_MAXMEMORY_POLICY=$REDIS_POLICY"
+  echo "REDIS_PM_CPUS=$CPU_redis_pm"; echo "REDIS_PM_MEM=${REDIS_PM_MEM}m"
+  echo "REDIS_PM_MAXMEMORY=${REDIS_PM_MAXMEM}mb"; echo "REDIS_PM_MAXMEMORY_POLICY=$REDIS_POLICY"
   echo ""
   echo "# ── NATS / MinIO / Web ──"
   echo "NATS_CPUS=$CPU_nats";     echo "NATS_MEM=${NATS_MEM}m"; echo "NATS_MAX_MEMORY_STORE=$NATS_MAX_MEMORY_STORE"
@@ -486,7 +492,7 @@ trap cleanup_resource_output_tmp EXIT
   echo "WEB_CPUS=$CPU_web";       echo "WEB_MEM=${WEB_MEM}m"
   echo ""
   echo "# ── 规划元信息（仅记录，compose 不读取）──"
-  echo "OMC_RESOURCE_SCHEMA_VERSION=2"
+  echo "OMC_RESOURCE_SCHEMA_VERSION=3"
   echo "OMC_RESOURCE_PLAN_HOST_CPU=$HOST_CPU"
   echo "OMC_RESOURCE_PLAN_HOST_MEM_MIB=$MEM_TOTAL_MIB"
   echo "OMC_PLAN_TIER=$TIER"

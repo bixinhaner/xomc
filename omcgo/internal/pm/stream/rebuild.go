@@ -985,6 +985,7 @@ func (r *Rebuilder) rebuildRollupGroup(
 	)
 	if r.metrics != nil {
 		r.metrics.RebuildSnapshotRowsTotal.Add(float64(rows))
+		r.metrics.RebuildSnapshotPagesTotal.Add(float64(rollupSnapshotDataPages(rows)))
 		r.metrics.RebuildSnapshotScanSeconds.Observe(
 			time.Since(scanStarted).Seconds(),
 		)
@@ -1009,6 +1010,13 @@ func (r *Rebuilder) rebuildRollupGroup(
 		}
 	}
 	return results
+}
+
+func rollupSnapshotDataPages(rows int) int {
+	if rows <= 0 {
+		return 0
+	}
+	return (rows + int(rollupSnapshotPageSize) - 1) / int(rollupSnapshotPageSize)
 }
 
 func rebuildWindowIdentity(key WindowKey) string {

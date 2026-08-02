@@ -31,9 +31,12 @@ TSDB_MAX_CONNECTIONS
 TSDB_WORK_MEM
 TSDB_MAINTENANCE_WORK_MEM
 TSDB_MAX_WAL_SIZE
-REDIS_CPUS
-REDIS_MEM
-REDIS_MAXMEMORY
+REDIS_CORE_CPUS
+REDIS_CORE_MEM
+REDIS_CORE_MAXMEMORY
+REDIS_PM_CPUS
+REDIS_PM_MEM
+REDIS_PM_MAXMEMORY
 NATS_CPUS
 NATS_MEM
 NATS_MAX_MEMORY_STORE
@@ -104,7 +107,7 @@ resource_env_at_most() {
 
 resource_env_validate() {
   local file="$1" key value invalid=0
-  local app_mem acs_mem worker_mem redis_mem redis_max
+  local app_mem acs_mem worker_mem redis_core_mem redis_core_max redis_pm_mem redis_pm_max
   [ -f "$file" ] || { echo "[resource-env] 文件不存在: $file" >&2; return 1; }
 
   while IFS= read -r key; do
@@ -120,13 +123,13 @@ resource_env_validate() {
   done < <(resource_env_required_keys)
   [ "$invalid" -eq 0 ] || return 1
 
-  for key in APP_CPUS ACS_CPUS WORKER_CPUS POSTGRES_CPUS TSDB_CPUS REDIS_CPUS NATS_CPUS MINIO_CPUS WEB_CPUS; do
+  for key in APP_CPUS ACS_CPUS WORKER_CPUS POSTGRES_CPUS TSDB_CPUS REDIS_CORE_CPUS REDIS_PM_CPUS NATS_CPUS MINIO_CPUS WEB_CPUS; do
     value="$(resource_env_get "$file" "$key")"
     if ! resource_env_positive_cpu "$value"; then
       echo "[resource-env] $key 必须是正数 CPU 值: $value" >&2; invalid=1
     fi
   done
-  for key in APP_MEM APP_GOMEMLIMIT ACS_MEM ACS_GOMEMLIMIT WORKER_MEM WORKER_GOMEMLIMIT POSTGRES_MEM PG_SHARED_BUFFERS PG_EFFECTIVE_CACHE_SIZE PG_WORK_MEM PG_MAINTENANCE_WORK_MEM PG_MAX_WAL_SIZE TSDB_MEM TSDB_SHARED_BUFFERS TSDB_EFFECTIVE_CACHE_SIZE TSDB_WORK_MEM TSDB_MAINTENANCE_WORK_MEM TSDB_MAX_WAL_SIZE REDIS_MEM REDIS_MAXMEMORY NATS_MEM MINIO_MEM WEB_MEM; do
+  for key in APP_MEM APP_GOMEMLIMIT ACS_MEM ACS_GOMEMLIMIT WORKER_MEM WORKER_GOMEMLIMIT POSTGRES_MEM PG_SHARED_BUFFERS PG_EFFECTIVE_CACHE_SIZE PG_WORK_MEM PG_MAINTENANCE_WORK_MEM PG_MAX_WAL_SIZE TSDB_MEM TSDB_SHARED_BUFFERS TSDB_EFFECTIVE_CACHE_SIZE TSDB_WORK_MEM TSDB_MAINTENANCE_WORK_MEM TSDB_MAX_WAL_SIZE REDIS_CORE_MEM REDIS_CORE_MAXMEMORY REDIS_PM_MEM REDIS_PM_MAXMEMORY NATS_MEM MINIO_MEM WEB_MEM; do
     value="$(resource_env_get "$file" "$key")"
     if ! resource_env_memory_is_positive "$value"; then
       echo "[resource-env] $key 必须是带可解析单位的正内存值: $value" >&2; invalid=1
@@ -139,16 +142,17 @@ resource_env_validate() {
     fi
   done
   value="$(resource_env_get "$file" OMC_RESOURCE_SCHEMA_VERSION)"
-  if [ "$value" != "2" ]; then
-    echo "[resource-env] OMC_RESOURCE_SCHEMA_VERSION 必须为 2: $value" >&2; invalid=1
+  if [ "$value" != "3" ]; then
+    echo "[resource-env] OMC_RESOURCE_SCHEMA_VERSION 必须为 3: ${value}；请重新运行 plan-resources.sh" >&2; invalid=1
   fi
-  [ "$invalid" -eq 0 ] || return 1
 
   app_mem="$(resource_env_memory_mib "$(resource_env_get "$file" APP_MEM)")"
   acs_mem="$(resource_env_memory_mib "$(resource_env_get "$file" ACS_MEM)")"
   worker_mem="$(resource_env_memory_mib "$(resource_env_get "$file" WORKER_MEM)")"
-  redis_mem="$(resource_env_memory_mib "$(resource_env_get "$file" REDIS_MEM)")"
-  redis_max="$(resource_env_memory_mib "$(resource_env_get "$file" REDIS_MAXMEMORY)")"
+  redis_core_mem="$(resource_env_memory_mib "$(resource_env_get "$file" REDIS_CORE_MEM)")"
+  redis_core_max="$(resource_env_memory_mib "$(resource_env_get "$file" REDIS_CORE_MAXMEMORY)")"
+  redis_pm_mem="$(resource_env_memory_mib "$(resource_env_get "$file" REDIS_PM_MEM)")"
+  redis_pm_max="$(resource_env_memory_mib "$(resource_env_get "$file" REDIS_PM_MAXMEMORY)")"
   if ! resource_env_less_than "$(resource_env_memory_mib "$(resource_env_get "$file" APP_GOMEMLIMIT)")" "$app_mem"; then
     echo "[resource-env] APP_GOMEMLIMIT 必须 < APP_MEM" >&2; invalid=1
   fi
@@ -158,8 +162,11 @@ resource_env_validate() {
   if ! resource_env_less_than "$(resource_env_memory_mib "$(resource_env_get "$file" WORKER_GOMEMLIMIT)")" "$worker_mem"; then
     echo "[resource-env] WORKER_GOMEMLIMIT 必须 < WORKER_MEM" >&2; invalid=1
   fi
-  if ! resource_env_at_most "$redis_max" "$(awk -v value="$redis_mem" 'BEGIN { printf "%.6f", value - 1024 }')"; then
-    echo "[resource-env] REDIS_MAXMEMORY 必须 <= REDIS_MEM - 1GiB" >&2; invalid=1
+  if ! resource_env_at_most "$redis_core_max" "$(awk -v value="$redis_core_mem" 'BEGIN { printf "%.6f", value - 1024 }')"; then
+    echo "[resource-env] REDIS_CORE_MAXMEMORY 必须 <= REDIS_CORE_MEM - 1GiB" >&2; invalid=1
+  fi
+  if ! resource_env_at_most "$redis_pm_max" "$(awk -v value="$redis_pm_mem" 'BEGIN { printf "%.6f", value - 2048 }')"; then
+    echo "[resource-env] REDIS_PM_MAXMEMORY 必须 <= REDIS_PM_MEM - 2GiB" >&2; invalid=1
   fi
   if [ "$(resource_env_get "$file" PG_MAX_CONNECTIONS)" -lt 180 ]; then
     echo "[resource-env] PG_MAX_CONNECTIONS 必须 >= 180" >&2; invalid=1

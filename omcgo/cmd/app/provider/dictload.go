@@ -54,8 +54,8 @@ func initDictLoadModule(c *Container) error {
 	// 通过 SetLocalTarget 反向绑定同一个失效器。
 	c.KPIRouteMetrics = router.NewMetrics(c.MetricsReg)
 	var kpiRouteBumper router.VersionBumper
-	if c.Redis != nil {
-		kpiRouteBumper = router.NewRedisCache(c.Redis)
+	if cache := c.kpiRouteRedisCache(); cache != nil {
+		kpiRouteBumper = cache
 	}
 	c.KPIRouteInvalidator = router.NewInvalidator(nil, kpiRouteBumper, router.InvalidatorOptions{
 		Metrics: c.KPIRouteMetrics,

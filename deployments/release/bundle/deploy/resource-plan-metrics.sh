@@ -18,7 +18,7 @@ resource_plan_metrics_render() { # <resources.env>
 EOF
   for service_prefix in \
     'app APP' 'acs ACS' 'acs-candidate ACS' 'worker WORKER' 'postgres POSTGRES' \
-    'postgres-tsdb TSDB' 'redis REDIS' 'nats NATS' 'minio MINIO' 'web WEB'; do
+    'postgres-tsdb TSDB' 'redis-core REDIS_CORE' 'redis-pm REDIS_PM' 'nats NATS' 'minio MINIO' 'web WEB'; do
     read -r service prefix <<<"$service_prefix"
     cpu="$(resource_env_get "$resource_env" "${prefix}_CPUS")"
     mem_mib="$(resource_env_memory_mib "$(resource_env_get "$resource_env" "${prefix}_MEM")")" || return 1

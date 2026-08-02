@@ -101,7 +101,7 @@
       "targets": [
         {
           "expr": "sum(redis_memory_used_bytes)",
-          "legendFormat": "used"
+          "legendFormat": "{{instance}} used"
         }
       ],
       "fieldConfig": {
@@ -226,7 +226,7 @@
         },
         {
           "expr": "redis_memory_max_bytes > 0",
-          "legendFormat": "max"
+          "legendFormat": "{{instance}} max"
         }
       ],
       "fieldConfig": {

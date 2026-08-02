@@ -32,6 +32,7 @@ storage_apply_recommended_paths "$ENV_FILE" "/data"
 check_eq "保留人工 PostgreSQL 路径" "$(storage_env_get "$ENV_FILE" POSTGRES_DATA_PATH)" "/custom/pg"
 check_eq "补 TimescaleDB 路径" "$(storage_env_get "$ENV_FILE" TSDB_DATA_PATH)" "/data/omc-data/timescaledb"
 check_eq "补 Redis 路径" "$(storage_env_get "$ENV_FILE" REDIS_DATA_PATH)" "/data/omc-data/redis"
+check_eq "补 PM Redis 路径" "$(storage_env_get "$ENV_FILE" REDIS_PM_DATA_PATH)" "/data/omc-data/redis-pm"
 check_eq "补 NATS 路径" "$(storage_env_get "$ENV_FILE" NATS_DATA_PATH)" "/data/omc-data/nats"
 check_eq "补 MinIO 路径" "$(storage_env_get "$ENV_FILE" MINIO_DATA_PATH)" "/data/omc-data/minio"
 check_eq "保留无关配置" "$(storage_env_get "$ENV_FILE" OMC_PUBLIC_HOST)" "10.0.0.1"
@@ -42,6 +43,7 @@ printf '%s\n' \
   'POSTGRES_DATA_PATH=/data/pg' \
   'TSDB_DATA_PATH=relative/tsdb' \
   'REDIS_DATA_PATH=/data/redis' \
+  'REDIS_PM_DATA_PATH=/data/redis-pm' \
   'NATS_DATA_PATH=/data/nats' \
   'MINIO_DATA_PATH=/data/minio' > "$BAD_ENV"
 if storage_validate_env_paths "$BAD_ENV" >/dev/null 2>&1; then
@@ -60,7 +62,7 @@ else
   ok
 fi
 
-echo "── 创建五个可写目录 ──"
+echo "── 创建六个可写目录 ──"
 PREPARE_ENV="$TMP/prepare.env"
 storage_apply_recommended_paths "$PREPARE_ENV" "$TMP/disk"
 if storage_prepare_env_paths "$PREPARE_ENV"; then

@@ -154,6 +154,61 @@ upgrade_prod_database_dsns() {
   fi
 }
 
+config_has_top_level_section() {
+  local config="$1" section="$2"
+  [ -f "$config" ] || return 1
+  awk -v wanted="$section" '
+    $0 ~ "^" wanted ":[[:space:]]*(#.*)?$" { found=1; exit }
+    END { if (!found) exit 1 }
+  ' "$config"
+}
+
+# upgrade_pm_redis_config <现网配置> <新包模板>
+#
+# 旧版本保留的 app/worker 配置没有 pm_redis。只追加新模板中的完整顶层段，
+# 不改写现有 redis 或其它运维配置；已有 pm_redis 时保持原样，由应用校验负责
+# 拒绝空地址或与核心 Redis 交叉的错误配置。
+upgrade_pm_redis_config() {
+  local live_config="$1" template_config="$2" block tmp
+  [ -f "$live_config" ] || return 1
+  [ -f "$template_config" ] || return 1
+  config_has_top_level_section "$live_config" pm_redis && return 0
+
+  block="$(mktemp "${live_config}.pm-redis-block.XXXXXX")" || return 1
+  if ! awk '
+      /^pm_redis:[[:space:]]*(#.*)?$/ { capture=1 }
+      capture && printed && /^[^[:space:]#][^:]*:[[:space:]]*/ { exit }
+      capture { print; printed=1 }
+      END { if (!printed) exit 42 }
+    ' "$template_config" > "$block"; then
+    rm -f "$block"
+    return 1
+  fi
+
+  tmp="$(mktemp "${live_config}.tmp.XXXXXX")" || {
+    rm -f "$block"
+    return 1
+  }
+  if ! cp -p "$live_config" "$tmp"; then
+    rm -f "$block" "$tmp"
+    return 1
+  fi
+  printf '\n' >> "$tmp" || {
+    rm -f "$block" "$tmp"
+    return 1
+  }
+  if ! command cat "$block" >> "$tmp"; then
+    rm -f "$block" "$tmp"
+    return 1
+  fi
+  rm -f "$block"
+  if ! mv -f "$tmp" "$live_config"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  config_has_top_level_section "$live_config" pm_redis
+}
+
 app_has_gpv_response_config() {
   local config="$1"
   [ -f "$config" ] || return 1

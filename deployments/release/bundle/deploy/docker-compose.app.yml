@@ -217,7 +217,9 @@ services:
       # app 连时序库（TsPool）读影子维度 / PM 聚合表；等时序库 schema 就绪。
       migrate-tsdb-schema:
         condition: service_completed_successfully
-      redis:
+      redis-core:
+        condition: service_healthy
+      redis-pm:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -286,7 +288,7 @@ services:
       # acs 写 trace_messages → 时序库；等时序库 schema 就绪后再起。
       migrate-tsdb-schema:
         condition: service_completed_successfully
-      redis:
+      redis-core:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -382,11 +384,35 @@ services:
       # retention / trace 写入，等时序库 schema 就绪。
       migrate-tsdb-schema:
         condition: service_completed_successfully
-      redis:
+      redis-core:
+        condition: service_healthy
+      redis-pm:
         condition: service_healthy
       nats:
         condition: service_healthy
       minio:
+        condition: service_healthy
+    networks:
+      - omcgo-net
+
+  # 一次性运维入口。默认 dry-run；仅在停 worker 并核对报告后显式用
+  # `docker compose --profile operations run --rm pm-redis-migrate --replace`
+  # 执行冲突覆盖。profile 防止正常 install/up 自动启动。
+  pm-redis-migrate:
+    image: ${IMAGE_WORKER}
+    profiles: ["operations"]
+    restart: "no"
+    entrypoint: ["omcctl", "pm-redis", "migrate"]
+    command: ["--dry-run"]
+    deploy:
+      resources:
+        limits:
+          cpus: "${WORKER_CPUS:-8}"
+          memory: "${WORKER_MEM:-1024m}"
+    depends_on:
+      redis-core:
+        condition: service_healthy
+      redis-pm:
         condition: service_healthy
     networks:
       - omcgo-net

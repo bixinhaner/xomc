@@ -140,18 +140,13 @@ services:
       retries: 20
       start_period: 30s
 
-  redis:
+  redis-core:
     image: redis:7-alpine
     environment:
       TZ: "Asia/Shanghai"
     ports:
       - "6379:6379"
-    # PM 在线聚合窗口是运行期权威状态，禁止淘汰；AOF everysec 保证进程重启可恢复。
-    # 内存不足必须告警和扩容，不能通过 LRU 静默损坏窗口。
-    # 提高 rewrite 阈值，避免高频聚合写入下小 AOF 约每分钟重写一次。
-    # 12 分钟关窗会让相邻两个小时的设备窗口短时并存，默认容量覆盖 20k
-    # 基站的双窗口重叠，并为 AOF rewrite 另留 1GiB COW 余量。
-    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-4gb} --maxmemory-policy noeviction --auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_CORE_MAXMEMORY:-3gb} --maxmemory-policy noeviction --auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500
     volumes:
       - ${REDIS_DATA_PATH:-redisdata}:/data
       - /etc/localtime:/etc/localtime:ro
@@ -160,11 +155,39 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${REDIS_CPUS:-1}"
-          memory: ${REDIS_MEM:-5g}
+          cpus: "${REDIS_CORE_CPUS:-2}"
+          memory: ${REDIS_CORE_MEM:-4g}
         reservations:
           cpus: "0.25"
           memory: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      default:
+        aliases:
+          - redis
+          - redis-core
+
+  redis-pm:
+    image: redis:7-alpine
+    environment:
+      TZ: "Asia/Shanghai"
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_PM_MAXMEMORY:-6gb} --maxmemory-policy noeviction --auto-aof-rewrite-min-size 2gb --auto-aof-rewrite-percentage 500
+    volumes:
+      - ${REDIS_PM_DATA_PATH:-redispmdata}:/data
+      - /etc/localtime:/etc/localtime:ro
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "${REDIS_PM_CPUS:-2}"
+          memory: ${REDIS_PM_MEM:-8g}
+        reservations:
+          cpus: "0.25"
+          memory: 512m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -380,7 +403,7 @@ services:
       # （若 wiring 最终确认 trace 不在 acs 进程写，可去掉本依赖——无害的完成门）
       migrate-tsdb-schema:
         condition: service_completed_successfully
-      redis:
+      redis-core:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -444,7 +467,9 @@ services:
       # app 连时序库（TsPool）读影子维度 / PM 聚合表；等时序库 schema 就绪。
       migrate-tsdb-schema:
         condition: service_completed_successfully
-      redis:
+      redis-core:
+        condition: service_healthy
+      redis-pm:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -517,7 +542,9 @@ services:
       app:
         # 等 app 起来 — app 启动期签发 .api-key,worker(omcctl) 才能读到
         condition: service_started
-      redis:
+      redis-core:
+        condition: service_healthy
+      redis-pm:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -784,7 +811,7 @@ services:
       # T-0155 Phase 2b: metrics pipeline 需要 pg/redis 已可连
       postgres:
         condition: service_healthy
-      redis:
+      redis-core:
         condition: service_healthy
       # prometheus 必须先起，否则 prometheusremotewrite 启动时连不上
       prometheus:
@@ -933,6 +960,7 @@ volumes:
   # tsdbdata：postgres-tsdb（第二个 TimescaleDB 实例 / 时序库 TsPool）数据卷。
   tsdbdata:
   redisdata:
+  redispmdata:
   natsdata:
   miniodata:
   prometheusdata:

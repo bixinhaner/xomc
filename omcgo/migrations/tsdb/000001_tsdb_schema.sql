@@ -982,6 +982,11 @@ CREATE INDEX idx_pm_counter_rollups_period_rebuild_page
         task_version_id, granularity, window_start, entity_key, chunk_index,
         publication_task_version_id, revision, event_id
     );
+CREATE INDEX idx_pm_counter_rollups_revision_cleanup
+    ON public.pm_aggregation_counter_rollups (
+        publication_task_version_id, entity_key, granularity, window_start,
+        revision, event_id
+    );
 
 CREATE TABLE public.pm_aggregation_rollup_outbox (
     event_id uuid PRIMARY KEY,
@@ -1003,6 +1008,11 @@ CREATE TABLE public.pm_aggregation_rollup_outbox (
 CREATE INDEX idx_pm_aggregation_rollup_outbox_pending
     ON public.pm_aggregation_rollup_outbox (created_at, event_id)
     WHERE published_at IS NULL;
+CREATE INDEX idx_pm_rollup_outbox_revision_cleanup
+    ON public.pm_aggregation_rollup_outbox (
+        publication_task_version_id, entity_key, granularity, window_start,
+        revision, event_id
+    );
 CREATE INDEX idx_pm_aggregation_rollup_outbox_retention
     ON public.pm_aggregation_rollup_outbox (published_at)
     WHERE published_at IS NOT NULL;

@@ -78,8 +78,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	}
 	logger := w.Logger.Named("pm-streaming-aggregation")
 	streamMetrics := pmstream.NewMetrics(w.MetricsReg)
-	store := pmstream.NewRedisWindowStore(w.Redis, cfg.WindowTTL).
-		SetMetrics(streamMetrics).
+	store := newWorkerPMWindowStore(w, cfg.WindowTTL, streamMetrics).
 		SetV2WriteEnabled(cfg.RedisV2WriteEnabled)
 	if err := store.ValidateConfiguration(ctx); err != nil {
 		streamMetrics.Ready.Set(0)
@@ -129,6 +128,10 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	rollupOutboxRepo := pmstream.NewRollupOutboxRepository(w.TsPool)
 	if err := rollupOutboxRepo.EnsurePeriodRebuildIndex(ctx); err != nil {
 		logger.Error("ensure PM rollup period rebuild index", zap.Error(err))
+		return
+	}
+	if err := rollupOutboxRepo.EnsureRevisionCleanupIndexes(ctx); err != nil {
+		logger.Error("ensure PM rollup revision cleanup indexes", zap.Error(err))
 		return
 	}
 	rebuildRepo := pmstream.NewRebuildRepository(w.TsPool)
@@ -209,6 +212,14 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 		zap.Duration("close_grace", cfg.CloseGrace),
 		zap.Duration("window_ttl", cfg.WindowTTL),
 		zap.Bool("redis_v2_write_enabled", cfg.RedisV2WriteEnabled))
+}
+
+func newWorkerPMWindowStore(
+	w *workerInfra,
+	windowTTL time.Duration,
+	metrics *pmstream.Metrics,
+) *pmstream.RedisWindowStore {
+	return pmstream.NewRedisWindowStore(w.PMRedis, windowTTL).SetMetrics(metrics)
 }
 
 // runPMRuleCatalogRefreshLoop refreshes immutable membership definitions only.

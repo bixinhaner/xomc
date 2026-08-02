@@ -57,10 +57,18 @@ appears_before() {
   fi
 }
 
-echo "── release compose 五个 bind mount ──"
+echo "── release compose 六个 bind mount ──"
 contains "PostgreSQL 可配置挂载" '${POSTGRES_DATA_PATH:-pgdata}:/var/lib/postgresql/data' "$RELEASE_COMPOSE"
 contains "TimescaleDB 可配置挂载" '${TSDB_DATA_PATH:-tsdbdata}:/var/lib/postgresql/data' "$RELEASE_COMPOSE"
 contains "Redis 可配置挂载" '${REDIS_DATA_PATH:-redisdata}:/data' "$RELEASE_COMPOSE"
+contains "PM Redis 可配置挂载" '${REDIS_PM_DATA_PATH:-redispmdata}:/data' "$RELEASE_COMPOSE"
+contains "核心 Redis 独立服务" 'redis-core:' "$RELEASE_COMPOSE"
+contains "PM Redis 独立服务" 'redis-pm:' "$RELEASE_COMPOSE"
+contains "PM Redis 迁移运维入口" 'pm-redis-migrate:' "$RELEASE_APP_COMPOSE"
+contains "迁移入口默认 dry-run" 'entrypoint: ["omcctl", "pm-redis", "migrate"]' "$RELEASE_APP_COMPOSE"
+contains "核心 Redis 资源键" '${REDIS_CORE_MAXMEMORY:-3gb}' "$RELEASE_COMPOSE"
+contains "PM Redis 资源键" '${REDIS_PM_MAXMEMORY:-6gb}' "$RELEASE_COMPOSE"
+not_contains "PM Redis 不发布宿主端口" '6381:6379' "$RELEASE_COMPOSE"
 contains "NATS 可配置挂载" '${NATS_DATA_PATH:-natsdata}:/data' "$RELEASE_COMPOSE"
 contains "MinIO 可配置挂载" '${MINIO_DATA_PATH:-miniodata}:/data' "$RELEASE_COMPOSE"
 
@@ -79,7 +87,7 @@ contains "开发 worker 启用流式聚合" 'PM_AGGREGATION_ENABLED: "${PM_AGGRE
 contains "开发 worker 默认开启 Redis v2 紧凑写入" 'PM_AGGREGATION_REDIS_V2_WRITE_ENABLED: "${PM_AGGREGATION_REDIS_V2_WRITE_ENABLED:-true}"' "$DEV_COMPOSE"
 
 echo "── release .env 模板和升级继承 ──"
-for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
+for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
   contains "$key 模板" "$key=" "$BUILD"
   contains "$key 升级继承" "$key" "$INSTALL"
 done
@@ -91,7 +99,7 @@ contains "install 提供显式全新安装模式" '--fresh-install' "$INSTALL"
 contains "全新安装要求显式基站地址" '--public-host' "$INSTALL"
 contains "全新安装先规划资源再清理数据" '资源规划失败，未删除任何 OMC 数据' "$INSTALL"
 contains "全新安装清理项目 volumes" 'label=com.docker.compose.project="$COMPOSE_PROJECT"' "$INSTALL"
-contains "infra 启动禁止 pull" '"${DC[@]}" up --pull never -d postgres postgres-tsdb redis nats minio' "$INSTALL"
+contains "infra 启动禁止 pull" '"${DC[@]}" up --pull never -d postgres postgres-tsdb redis-core redis-pm nats minio' "$INSTALL"
 contains "业务启动禁止 pull" '"${DC[@]}" up --pull never -d' "$INSTALL"
 contains "候选 ACS 启动禁止 pull" '"${DC[@]}" up --pull never -d --no-deps acs-candidate' "$INSTALL"
 contains "安装在升级写操作前校验基站地址" 'OMC_PUBLIC_HOST 预检通过' "$INSTALL"
@@ -132,6 +140,10 @@ contains "svc 准备目录" 'storage_prepare_configured_env_paths ".env"' "$SVC"
 contains "app 镜像构建 GPV handoff 工具" 'omcgo-gpv-handoff ./cmd/gpv-handoff' "$APP_DOCKERFILE"
 contains "release compose 提供 handoff 一次性服务" 'gpv-handoff:' "$RELEASE_APP_COMPOSE"
 contains "install 加载 handoff 库" 'gpv-handoff-lib.sh' "$INSTALL"
+contains "install 加载 Redis 切换库" 'redis-cutover-lib.sh' "$INSTALL"
+contains "旧 Redis 切换先停止写入方" 'prepare_legacy_redis_cutover' "$INSTALL"
+contains "旧 Redis 切换校验数据连续性" 'verify_legacy_redis_cutover' "$INSTALL"
+contains "旧 Redis 切换迁移 PM 状态" 'migrate_legacy_pm_redis' "$INSTALL"
 contains "svc 加载 handoff 库" 'gpv-handoff-lib.sh' "$SVC"
 contains "install 在业务 up 前准备 durable" 'gpv_handoff_prepare' "$INSTALL"
 contains "install 在 systemd 停服前执行迁移门禁" 'gpv_handoff_migrate_legacy_systemd' "$INSTALL"
@@ -149,6 +161,9 @@ contains "单轮 healthcheck 有独立探针超时" 'HEALTHCHECK_PROBE_TIMEOUT' 
 contains "单轮 healthcheck 超时后继续重试" 'HEALTHCHECK_PROBE_REMAINING' "$INSTALL"
 contains "安装记录单轮 healthcheck 超时" 'HEALTHCHECK_PROBE_TIMEOUTS' "$INSTALL"
 contains "安装使用轻量启动检查" 'healthcheck.sh" --startup' "$INSTALL"
+contains "启动检查核对 PM Redis 配置" 'PM Redis 指向 redis-pm' "$RELEASE_HEALTHCHECK"
+contains "启动检查核对 Redis 实例身份" 'redis-core / redis-pm 运行实例身份不同' "$RELEASE_HEALTHCHECK"
+contains "启动检查按 YAML 角色解析" 'redis-routing-check-lib.sh' "$RELEASE_HEALTHCHECK"
 contains "启动检查跳过重型审计" 'STARTUP_CHECK=0' "$RELEASE_HEALTHCHECK"
 contains "启动 HTTP 探针有单次超时" 'curl -fsS --max-time 3' "$RELEASE_HEALTHCHECK"
 not_contains "健康等待不得按固定步长伪计时" 'HEALTHCHECK_WAIT=$((HEALTHCHECK_WAIT + HEALTHCHECK_INTERVAL))' "$INSTALL"
@@ -161,6 +176,16 @@ if bash "$RELEASE_DEPLOY/acs-ha-rollout-test.sh"; then
   ok
 else
   bad "ACS 双实例无损发布契约回归"
+fi
+if bash "$RELEASE_DEPLOY/redis-cutover-lib_test.sh"; then
+  ok
+else
+  bad "旧单 Redis 到双实例切换顺序回归"
+fi
+if bash "$RELEASE_DEPLOY/redis-routing-check-lib_test.sh"; then
+  ok
+else
+  bad "Redis YAML 角色解析回归"
 fi
 if bash "$RELEASE_NATS_VERIFY"; then
   ok
@@ -178,6 +203,7 @@ echo "── 开发 compose 保留命名卷默认值 ──"
 contains "开发 PostgreSQL 默认命名卷" '${POSTGRES_DATA_PATH:-pgdata}:/var/lib/postgresql/data' "$DEV_COMPOSE"
 contains "开发 TimescaleDB 默认命名卷" '${TSDB_DATA_PATH:-tsdbdata}:/var/lib/postgresql/data' "$DEV_COMPOSE"
 contains "开发 Redis 默认命名卷" '${REDIS_DATA_PATH:-redisdata}:/data' "$DEV_COMPOSE"
+contains "开发 PM Redis 默认命名卷" '${REDIS_PM_DATA_PATH:-redispmdata}:/data' "$DEV_COMPOSE"
 contains "开发 NATS 默认命名卷" '${NATS_DATA_PATH:-natsdata}:/data' "$DEV_COMPOSE"
 contains "开发 MinIO 默认命名卷" '${MINIO_DATA_PATH:-miniodata}:/data' "$DEV_COMPOSE"
 
@@ -208,21 +234,30 @@ contains "开发 ACS 扩大 accept backlog" 'net.core.somaxconn: "32768"' "$DEV_
 contains "开发 ACS 扩大 SYN backlog" 'net.ipv4.tcp_max_syn_backlog: "32768"' "$DEV_COMPOSE"
 contains "release MinIO scanner 最低速" 'MINIO_SCANNER_SPEED: "slowest"' "$RELEASE_COMPOSE"
 contains "开发 MinIO scanner 最低速" 'MINIO_SCANNER_SPEED: "slowest"' "$DEV_COMPOSE"
-contains "release Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$RELEASE_COMPOSE"
-contains "开发 Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$DEV_COMPOSE"
+contains "release 核心 Redis AOF 基线" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$RELEASE_COMPOSE"
+contains "release PM Redis AOF 基线" '--auto-aof-rewrite-min-size 2gb --auto-aof-rewrite-percentage 500' "$RELEASE_COMPOSE"
+contains "开发核心 Redis AOF 基线" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$DEV_COMPOSE"
+contains "开发 PM Redis AOF 基线" '--auto-aof-rewrite-min-size 2gb --auto-aof-rewrite-percentage 500' "$DEV_COMPOSE"
 contains "测试 Redis AOF 基线增大" '--auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500' "$TEST_COMPOSE"
 contains "release Redis 禁止淘汰聚合状态" '--maxmemory-policy noeviction' "$RELEASE_COMPOSE"
 contains "开发 Redis 禁止淘汰聚合状态" '--maxmemory-policy noeviction' "$DEV_COMPOSE"
-contains "release Redis 默认容纳双小时重叠窗口" '--maxmemory ${REDIS_MAXMEMORY:-4gb}' "$RELEASE_COMPOSE"
-contains "release Redis 默认保留 AOF COW 余量" 'memory: "${REDIS_MEM:-5g}"' "$RELEASE_COMPOSE"
-contains "开发 Redis 默认容纳双小时重叠窗口" '--maxmemory ${REDIS_MAXMEMORY:-4gb}' "$DEV_COMPOSE"
-contains "开发 Redis 默认保留 AOF COW 余量" 'memory: ${REDIS_MEM:-5g}' "$DEV_COMPOSE"
-contains "release 资源规划 Redis 双窗口下限" 'redis         5120    8192' "$RELEASE_DEPLOY/plan-resources.sh"
-contains "release 资源规划 Redis 保留 1GiB COW" 'REDIS_MAXMEM=$(( REDIS_MEM - 1024 ))' "$RELEASE_DEPLOY/plan-resources.sh"
-contains "开发资源规划 Redis 双窗口下限" 'redis        5120  8192' "$DEV_PLANNER"
-contains "开发资源规划 Redis 保留 1GiB COW" 'REDIS_MAXMEM=$(( REDIS_MEM - 1024 ))' "$DEV_PLANNER"
+contains "release PM Redis 默认容纳双小时重叠窗口" '--maxmemory ${REDIS_PM_MAXMEMORY:-6gb}' "$RELEASE_COMPOSE"
+contains "release PM Redis 默认保留 2GiB COW" 'memory: "${REDIS_PM_MEM:-8g}"' "$RELEASE_COMPOSE"
+contains "release 核心 Redis 默认隔离预算" '--maxmemory ${REDIS_CORE_MAXMEMORY:-3gb}' "$RELEASE_COMPOSE"
+contains "开发 PM Redis 默认容纳双小时重叠窗口" '--maxmemory ${REDIS_PM_MAXMEMORY:-6gb}' "$DEV_COMPOSE"
+contains "开发 PM Redis 默认保留 2GiB COW" 'memory: ${REDIS_PM_MEM:-8g}' "$DEV_COMPOSE"
+contains "release 资源规划 PM Redis 双窗口下限" 'redis-pm      8192' "$RELEASE_DEPLOY/plan-resources.sh"
+contains "release 资源规划 PM Redis 保留 2GiB COW" 'REDIS_PM_MAXMEM=$(( REDIS_PM_MEM - 2048 ))' "$RELEASE_DEPLOY/plan-resources.sh"
+contains "开发资源规划 PM Redis 双窗口下限" 'redis-pm     8192' "$DEV_PLANNER"
+contains "开发资源规划 PM Redis 保留 2GiB COW" 'REDIS_PM_MAXMEM=$(( REDIS_PM_MEM - 2048 ))' "$DEV_PLANNER"
 contains "release 资源规划禁止淘汰聚合状态" 'REDIS_POLICY=noeviction' "$RELEASE_DEPLOY/plan-resources.sh"
 contains "开发资源规划禁止淘汰聚合状态" 'REDIS_POLICY=noeviction' "$DEV_PLANNER"
+contains "监控采集核心 Redis" 'endpoint: redis-core:6379' "$OTELCOL_CONFIG"
+contains "监控采集 PM Redis" 'endpoint: redis-pm:6379' "$OTELCOL_CONFIG"
+contains "Redis 指标区分核心实例" 'set(attributes["instance"], "redis-core")' "$OTELCOL_CONFIG"
+contains "Redis 指标区分 PM 实例" 'set(attributes["instance"], "redis-pm")' "$OTELCOL_CONFIG"
+contains "核心 Redis 独立断流告警" 'alert: RedisCoreMetricsAbsent' "$INFRA_ALERTS"
+contains "PM Redis 独立断流告警" 'alert: RedisPMMetricsAbsent' "$INFRA_ALERTS"
 contains "队列样本陈旧只检查 ACS" 'omc_pm_queue_sample_timestamp_seconds{deployment_unit="acs",subject="pm.file.received",durable="pm-workers"}' "$OMC_ALERTS"
 contains "Redis 上限告警说明 noeviction" 'noeviction 会拒绝新写入' "$INFRA_ALERTS"
 contains "PM 聚合事件失败告警" 'alert: OMCPMStreamingAggregationEventFailures' "$OMC_ALERTS"

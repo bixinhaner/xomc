@@ -119,6 +119,9 @@ func paramSyncPullTuningFromApp(cfg appconfig.ParamSyncConfig) event.PullTuning 
 
 func runParamSyncMaintenance(ctx context.Context, maintainer paramSyncMaintainer, now time.Time, cfg paramSyncMaintenanceConfig) error {
 	var errs []error
+	if _, err := maintainer.ReconcileRunCounts(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("reconcile run counts: %w", err))
+	}
 	if _, err := maintainer.SweepExpiredRequests(ctx, 100); err != nil {
 		errs = append(errs, fmt.Errorf("sweep expired requests: %w", err))
 	}
@@ -130,9 +133,6 @@ func runParamSyncMaintenance(ctx context.Context, maintainer paramSyncMaintainer
 	}
 	if _, err := maintainer.ReconcileCancellingRuns(ctx, 100); err != nil {
 		errs = append(errs, fmt.Errorf("reconcile cancelling runs: %w", err))
-	}
-	if _, err := maintainer.ReconcileRunCounts(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("reconcile run counts: %w", err))
 	}
 	if _, err := maintainer.RecoverMissingResults(ctx, cfg.recoveryRunLimit, cfg.recoveryTaskLimit, cfg.recoveryTaskBudget); err != nil {
 		errs = append(errs, fmt.Errorf("recover missing results: %w", err))

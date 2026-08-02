@@ -209,7 +209,9 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-      redis:
+      redis-core:
+        condition: service_healthy
+      redis-pm:
         condition: service_healthy
       prometheus:
         condition: service_healthy

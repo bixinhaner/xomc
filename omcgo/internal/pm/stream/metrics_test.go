@@ -68,6 +68,7 @@ func TestMetricsExposeStreamingHealthWithoutHighCardinalityLabels(t *testing.T) 
 		"omc_pm_aggregation_redis_write_errors_total",
 		"omc_pm_aggregation_daily_version_expected_slots_mismatch_total",
 		"omc_pm_aggregation_result_replace_seconds",
+		"omc_pm_aggregation_rebuild_snapshot_pages_total",
 		"omc_pm_aggregation_windows_prepared_total",
 		"omc_pm_aggregation_windows_published_total",
 		"omc_pm_aggregation_publication_duration_seconds",

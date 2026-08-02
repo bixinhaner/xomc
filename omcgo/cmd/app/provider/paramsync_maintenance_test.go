@@ -120,7 +120,7 @@ func TestRunParamSyncMaintenanceDoesNotShortCircuitIndependentRepairs(t *testing
 	err := runParamSyncMaintenance(context.Background(), maintainer, time.Now(), defaultParamSyncMaintenanceConfig())
 
 	require.ErrorContains(t, err, "historical row invalid")
-	assert.Equal(t, []string{"sweep", "stalled", "stalled-runs", "cancelling-runs", "counts", "recover", "bindings", "staging", "metrics"}, maintainer.calls)
+	assert.Equal(t, []string{"counts", "sweep", "stalled", "stalled-runs", "cancelling-runs", "recover", "bindings", "staging", "metrics"}, maintainer.calls)
 }
 
 func TestRunParamSyncReconciliationProjectsEvenWhenMaintenanceFails(t *testing.T) {

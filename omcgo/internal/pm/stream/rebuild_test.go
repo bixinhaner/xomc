@@ -426,6 +426,7 @@ func TestRebuildCoalesceMetricsAreRegistered(t *testing.T) {
 	metrics.RebuildBatchesTotal.Inc()
 	metrics.RebuildJobsPerBatch.Observe(2)
 	metrics.RebuildSnapshotRowsTotal.Add(3)
+	metrics.RebuildSnapshotPagesTotal.Add(1)
 	metrics.RebuildSnapshotScanSeconds.Observe(0.01)
 	metrics.RebuildCoalescedTotal.Add(4)
 
@@ -441,11 +442,28 @@ func TestRebuildCoalesceMetricsAreRegistered(t *testing.T) {
 		"omc_pm_aggregation_rebuild_batches_total",
 		"omc_pm_aggregation_rebuild_jobs_per_batch",
 		"omc_pm_aggregation_rebuild_snapshot_rows_total",
+		"omc_pm_aggregation_rebuild_snapshot_pages_total",
 		"omc_pm_aggregation_rebuild_snapshot_scan_seconds",
 		"omc_pm_aggregation_rebuild_coalesced_total",
 	} {
 		if !got[name] {
 			t.Errorf("metric %s is not registered", name)
+		}
+	}
+}
+
+func TestRollupSnapshotDataPages(t *testing.T) {
+	for _, tc := range []struct {
+		rows int
+		want int
+	}{
+		{rows: 0, want: 0},
+		{rows: 1, want: 1},
+		{rows: 256, want: 1},
+		{rows: 257, want: 2},
+	} {
+		if got := rollupSnapshotDataPages(tc.rows); got != tc.want {
+			t.Fatalf("rollupSnapshotDataPages(%d) = %d, want %d", tc.rows, got, tc.want)
 		}
 	}
 }

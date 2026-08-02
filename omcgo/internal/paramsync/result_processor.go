@@ -187,52 +187,31 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 		}
 		p.metrics.ResultCountMode.WithLabelValues(mode).Inc()
 	}
+	progressStatus := RunStatusExecuting
 	if run.Status == RunStatusCancelling {
-		finalized := run.ReadyToFinalize()
-		if finalized {
-			if err := finalizeConvergedFailedRun(ctx, tx, run, p.now()); err != nil {
-				return ResultProcessOutcome{}, err
-			}
-		} else if err := updateRunProgress(ctx, tx, run, RunStatusCancelling); err != nil {
-			return ResultProcessOutcome{}, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return ResultProcessOutcome{}, fmt.Errorf("commit cancelling parameter sync result: %w", err)
-		}
-		if p.metrics != nil && finalized {
-			p.metrics.FinalizeTotal.WithLabelValues("failed").Inc()
-			duration := p.now().Sub(run.StartedAt).Seconds()
-			p.metrics.RunDuration.Observe(duration)
-			p.metrics.RequestDuration.Observe(duration)
-		}
-		return ResultProcessOutcome{Finalized: finalized, Failed: true}, nil
+		progressStatus = RunStatusCancelling
 	}
-
-	if run.TerminalTaskCount == run.ExpectedTaskCount && run.ProcessedTaskCount == run.ExpectedTaskCount {
-		if err := markRunProcessing(ctx, tx, run); err != nil {
-			return ResultProcessOutcome{}, err
-		}
-		if err := finalizeSuccessfulRun(ctx, tx, run, p.now()); err != nil {
-			return ResultProcessOutcome{}, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return ResultProcessOutcome{}, fmt.Errorf("commit successful parameter sync result: %w", err)
-		}
-		if p.metrics != nil {
-			p.metrics.FinalizeTotal.WithLabelValues("succeeded").Inc()
-			duration := p.now().Sub(run.StartedAt).Seconds()
-			p.metrics.RunDuration.Observe(duration)
-			p.metrics.RequestDuration.Observe(duration)
-		}
-		return ResultProcessOutcome{Finalized: true}, nil
-	}
-	if err := updateRunProgress(ctx, tx, run, RunStatusExecuting); err != nil {
+	convergence, err := convergeLoadedRunTx(ctx, tx, run, progressStatus, true, p.now())
+	if err != nil {
 		return ResultProcessOutcome{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return ResultProcessOutcome{}, fmt.Errorf("commit parameter sync result: %w", err)
 	}
-	return ResultProcessOutcome{}, nil
+	if p.metrics != nil && convergence.Finalized {
+		result := "succeeded"
+		if convergence.Failed {
+			result = "failed"
+		}
+		p.metrics.FinalizeTotal.WithLabelValues(result).Inc()
+		duration := p.now().Sub(run.StartedAt).Seconds()
+		p.metrics.RunDuration.Observe(duration)
+		p.metrics.RequestDuration.Observe(duration)
+	}
+	return ResultProcessOutcome{
+		Finalized: convergence.Finalized,
+		Failed:    convergence.Failed,
+	}, nil
 }
 
 func resultEventExists(
@@ -357,7 +336,13 @@ WHERE t.source='param_sync' AND t.source_id=$1`
 }
 
 func applyAuthoritativeRunCounts(run *SyncRun, counts authoritativeRunCounts) {
-	run.ExpectedTaskCount = counts.expected
+	// ExpectedTaskCount records the dispatch plan cardinality. Durable task rows
+	// can repair it upward after a crash between task creation and run update,
+	// but must never shrink it: a partial dispatch is an incomplete plan, not a
+	// smaller successful run.
+	if counts.expected > run.ExpectedTaskCount {
+		run.ExpectedTaskCount = counts.expected
+	}
 	run.TerminalTaskCount = counts.terminal
 	run.ProcessedTaskCount = counts.processed
 	run.FailedTaskCount = counts.failed

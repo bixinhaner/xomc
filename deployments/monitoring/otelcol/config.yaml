@@ -6,7 +6,7 @@
 #
 #   ─── Metrics（Phase 2b：替换 pg/redis exporter）─────────────────
 #   postgres :5432 (内置协议) → otelcol postgresqlreceiver
-#   redis :6379  (RESP)       → otelcol redisreceiver       ┐
+#   redis-core / redis-pm     → otelcol redisreceiver ×2    ┐
 #                                                            ├→ metricstransform (重命名)
 #                                                            │  pg_* / redis_* 保兼容
 #                                                            ↓
@@ -134,9 +134,15 @@ receivers:
             attribute_columns: [database]
             value_type: int
 
-  # ─── Metrics: Redis ───────────────────────────────────────────────
-  redis:
-    endpoint: redis:6379
+  # ─── Metrics: Redis Core / PM ─────────────────────────────────────
+  redis/core:
+    endpoint: redis-core:6379
+    collection_interval: 30s
+    tls:
+      insecure: true
+
+  redis/pm:
+    endpoint: redis-pm:6379
     collection_interval: 30s
     tls:
       insecure: true
@@ -315,6 +321,18 @@ processors:
         statements:
           - set(attributes["instance"], "postgres-tsdb")
 
+  transform/redis_instance_core:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["instance"], "redis-core")
+
+  transform/redis_instance_pm:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["instance"], "redis-pm")
+
   # transform/promote_resource：把 receiver 设置在 RESOURCE 维度的 PG 维度
   # 属性（database / table / index）下沉为 DATAPOINT 属性。
   # 原因：prometheusremotewriteexporter 默认只把 service.name /
@@ -462,10 +480,15 @@ service:
       processors: [memory_limiter, batch, resource/traces]
       exporters: [otlp/tempo]
 
-    # Redis 指标：单独管道，不打 pg instance label。
-    metrics:
-      receivers: [redis]
-      processors: [memory_limiter, metricstransform, resource/metrics, batch]
+    # 两个 Redis 分管道补 instance 标签，防同名序列碰撞并支持分别告警。
+    metrics/redis-core:
+      receivers: [redis/core]
+      processors: [memory_limiter, transform/redis_instance_core, metricstransform, resource/metrics, batch]
+      exporters: [prometheusremotewrite]
+
+    metrics/redis-pm:
+      receivers: [redis/pm]
+      processors: [memory_limiter, transform/redis_instance_pm, metricstransform, resource/metrics, batch]
       exporters: [prometheusremotewrite]
 
     # 主库 postgres 指标：promote pg resource → datapoint，补 instance=postgres。

@@ -48,6 +48,12 @@ else
   echo "  [FAIL] 缺 $DEPLOY_DIR/compose-env-lib.sh"
   exit 1
 fi
+if [ -f "$DEPLOY_DIR/redis-routing-check-lib.sh" ]; then
+  . "$DEPLOY_DIR/redis-routing-check-lib.sh"
+else
+  echo "  [FAIL] 缺 $DEPLOY_DIR/redis-routing-check-lib.sh"
+  exit 1
+fi
 monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING" || {
   echo "  [FAIL] 无法读取 monitoring profile"
   exit 1
@@ -127,6 +133,23 @@ acs_service_ready() {
   curl -fsS --max-time 3 "http://${ip}:7557/readyz"
 }
 
+redis_instance_run_id() {
+  local service="$1"
+  "${DC[@]}" exec -T "$service" redis-cli --raw INFO server 2>/dev/null |
+    awk -F: '$1 == "run_id" { gsub(/\r/, "", $2); print $2; exit }'
+}
+
+redis_instances_distinct() {
+  local core_id pm_id
+  core_id="$(redis_instance_run_id redis-core)" || return 1
+  pm_id="$(redis_instance_run_id redis-pm)" || return 1
+  [ -n "$core_id" ] && [ -n "$pm_id" ] && [ "$core_id" != "$pm_id" ]
+}
+
+check_redis_routing_config() {
+  redis_routing_configs_valid /opt/omc/etc
+}
+
 # 安装阶段的启动就绪检查必须在完整审计之前结束。完整检查中的 nginx -T、
 # 容器 sysctl、Compose config、资源限额和数据库参数可能因初始化负载变慢，
 # 不应阻塞“服务是否已经能接收请求”的判定。
@@ -137,9 +160,11 @@ if [ "$STARTUP_CHECK" = 1 ]; then
   done
   check "acs-candidate 容器 running" container_running acs-candidate
   check "acs-candidate /readyz" acs_service_ready acs-candidate
-  for svc in postgres postgres-tsdb redis nats minio; do
+  for svc in postgres postgres-tsdb redis-core redis-pm nats minio; do
     check "$svc 容器 running" container_running "$svc"
   done
+  check "app/worker 核心与 PM Redis 路由配置完整" check_redis_routing_config
+  check "redis-core / redis-pm 运行实例身份不同" redis_instances_distinct
   if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
     check "web 容器 running" container_running web
   fi
@@ -163,9 +188,16 @@ check "acs-candidate 容器 running" container_running acs-candidate
 check "acs-candidate /readyz" acs_service_ready acs-candidate
 
 echo "== docker compose 基础设施容器 =="
-for svc in postgres postgres-tsdb redis nats minio; do
+for svc in postgres postgres-tsdb redis-core redis-pm nats minio; do
   check "$svc 容器 running" container_running "$svc"
 done
+
+echo "== Redis 业务路由隔离 =="
+for config_file in app.prod.yaml worker.prod.yaml; do
+  check "$config_file 核心 Redis 指向 redis-core" yaml_top_level_section_has_address "/opt/omc/etc/$config_file" redis redis-core:6379
+  check "$config_file PM Redis 指向 redis-pm" yaml_top_level_section_has_address "/opt/omc/etc/$config_file" pm_redis redis-pm:6379
+done
+check "redis-core / redis-pm 运行实例身份不同" redis_instances_distinct
 
 if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
   echo "== docker compose web 容器 =="
@@ -274,7 +306,7 @@ EOF
       check_value "$svc docker inspect NanoCpus" "$expected_nano" "$actual_nano"
       check_value "$svc docker inspect Memory" "$expected_bytes" "$actual_bytes"
     }
-    for spec in 'app APP' 'acs ACS' 'acs-candidate ACS' 'worker WORKER' 'postgres POSTGRES' 'postgres-tsdb TSDB' 'redis REDIS' 'nats NATS' 'minio MINIO'; do
+    for spec in 'app APP' 'acs ACS' 'acs-candidate ACS' 'worker WORKER' 'postgres POSTGRES' 'postgres-tsdb TSDB' 'redis-core REDIS_CORE' 'redis-pm REDIS_PM' 'nats NATS' 'minio MINIO'; do
       check_service_limits ${spec}
     done
     [ -f "$DEPLOY_DIR/docker-compose.web.yml" ] && check_service_limits web WEB
@@ -289,11 +321,16 @@ EOF
     check_gomaxprocs acs 9095 ACS_GOMAXPROCS
     check_gomaxprocs worker 9092 WORKER_GOMAXPROCS
 
-    redis_expected="$(resource_bytes "$(resource_env_get "$DEPLOY_DIR/resources.env" REDIS_MAXMEMORY)")"
-    redis_actual="$("${DC[@]}" exec -T redis redis-cli CONFIG GET maxmemory 2>/dev/null | tail -n1)"
-    redis_policy="$("${DC[@]}" exec -T redis redis-cli CONFIG GET maxmemory-policy 2>/dev/null | tail -n1)"
-    check_value "redis CONFIG GET maxmemory" "$redis_expected" "$redis_actual"
-    check_value "redis CONFIG GET maxmemory-policy" "noeviction" "$redis_policy"
+    for redis_spec in 'redis-core REDIS_CORE' 'redis-pm REDIS_PM'; do
+      read -r redis_svc redis_prefix <<<"$redis_spec"
+      redis_expected="$(resource_bytes "$(resource_env_get "$DEPLOY_DIR/resources.env" "${redis_prefix}_MAXMEMORY")")"
+      redis_actual="$("${DC[@]}" exec -T "$redis_svc" redis-cli CONFIG GET maxmemory 2>/dev/null | tail -n1)"
+      redis_policy="$("${DC[@]}" exec -T "$redis_svc" redis-cli CONFIG GET maxmemory-policy 2>/dev/null | tail -n1)"
+      redis_aof="$("${DC[@]}" exec -T "$redis_svc" redis-cli CONFIG GET appendonly 2>/dev/null | tail -n1)"
+      check_value "$redis_svc CONFIG GET maxmemory" "$redis_expected" "$redis_actual"
+      check_value "$redis_svc CONFIG GET maxmemory-policy" "noeviction" "$redis_policy"
+      check_value "$redis_svc CONFIG GET appendonly" "yes" "$redis_aof"
+    done
 
     deploy_env_get() { awk -F= -v key="$2" '$1 == key { print substr($0, length(key)+2); exit }' "$1"; }
     pg_user="$(deploy_env_get "$DEPLOY_DIR/.env" POSTGRES_USER)"

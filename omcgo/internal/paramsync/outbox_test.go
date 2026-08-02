@@ -138,6 +138,12 @@ func TestParameterSyncOutboxRuntimeIndexesCoverRecoveryAndObservation(t *testing
 		!strings.Contains(parameterSyncOutboxStatusIndexSQL, "WHERE status IN ('delivered', 'dead')") {
 		t.Fatalf("status index does not cover queue observation: %s", parameterSyncOutboxStatusIndexSQL)
 	}
+	if !strings.Contains(parameterSyncActiveRunConvergenceIndexSQL, "CREATE INDEX CONCURRENTLY") ||
+		!strings.Contains(parameterSyncActiveRunConvergenceIndexSQL, "(started_at, id)") ||
+		!strings.Contains(parameterSyncActiveRunConvergenceIndexSQL, "planning") ||
+		!strings.Contains(parameterSyncActiveRunConvergenceIndexSQL, "cancelling") {
+		t.Fatalf("active run index does not cover bounded convergence: %s", parameterSyncActiveRunConvergenceIndexSQL)
+	}
 }
 
 func TestParameterSyncOutboxRuntimeIndexMaintenanceUsesSessionAdvisoryLock(t *testing.T) {

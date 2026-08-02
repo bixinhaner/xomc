@@ -61,24 +61,33 @@ groups:
                     检查 PG 磁盘、连接数、是否 OOM；
                     若 PG 正常确认 otelcol 容器状态与 postgresqlreceiver 错误。
 
-      - alert: RedisMetricsAbsent
-        # 同上，redis_uptime_in_seconds 是 P2b 重命名后的 redis.uptime 别名，
-        # Redis 存活时永远在涨；2 分钟无数据点等价于 Redis 不可达。
-        expr: absent_over_time(redis_uptime_in_seconds[2m]) == 1
+      - alert: RedisCoreMetricsAbsent
+        expr: absent_over_time(redis_uptime_in_seconds{instance="redis-core"}[2m]) == 1
         for: 1m
         labels:
           severity: critical
           domain: omc
-          service: redis
+          service: redis-core
         annotations:
-          summary: "Redis 指标流中断"
+          summary: "核心 Redis 指标流中断"
           description: |
-            过去 2 分钟未收到任何 redis_uptime_in_seconds 数据点。
-            等价于 otelcol redisreceiver 连不上 Redis ≥ 2 分钟。
+            过去 2 分钟未收到核心 Redis 的存活指标。
             Impact: TR-069 会话、命令队列、缓存全停，ACS 南向受影响。
-            Action: docker compose logs redis；docker compose logs otelcol；
-                    检查 Redis 内存与持久化；
-                    若 Redis 正常确认 otelcol 容器状态与 redisreceiver 错误。
+            Action: 检查 redis-core 容器、内存、AOF 与 otelcol redis/core receiver。
+
+      - alert: RedisPMMetricsAbsent
+        expr: absent_over_time(redis_uptime_in_seconds{instance="redis-pm"}[2m]) == 1
+        for: 1m
+        labels:
+          severity: critical
+          domain: omc
+          service: redis-pm
+        annotations:
+          summary: "PM Redis 指标流中断"
+          description: |
+            过去 2 分钟未收到 PM Redis 的存活指标。
+            Impact: PM 小时窗口累加、关窗和迟到重算会失败或重投。
+            Action: 检查 redis-pm 容器、内存、AOF 与 otelcol redis/pm receiver。
 
   - name: omc.infra_capacity
     interval: 30s
@@ -99,14 +108,27 @@ groups:
             Impact: 新连接可能被拒，应用侧 pgxpool 取连接排队、p99 抖动。
             Action: 查连接泄漏 / 慢查询占用连接；评估调大 max_connections 或连接池配额。
 
+      - alert: RedisCoreMemoryHigh
+        expr: (redis_memory_used_bytes{instance="redis-core"} / redis_memory_max_bytes{instance="redis-core"} >= 0.80) and (redis_memory_max_bytes{instance="redis-core"} > 0)
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          service: redis-core
+        annotations:
+          summary: "核心 Redis 内存使用接近 maxmemory（>= 80%）"
+          description: |
+            核心 Redis 内存持续偏高。noeviction 会优先暴露容量不足，避免静默淘汰会话和任务状态。
+            Action: 检查 ACS 会话、设备任务、告警缓存和 AOF rewrite，再按独立预算扩容。
+
       - alert: RedisAggregationMemoryHigh
         # redis_memory_max_bytes=0（或缺失）表示未设 maxmemory ——
         # 用 and 守卫避免除零 / 缺失误报。聚合状态与普通缓存共享 Redis，
         # 因此这里监控实际 Redis 水位而非不完整的抽样估算。
         expr: |
-          (redis_memory_used_bytes / redis_memory_max_bytes >= 0.80)
-          and (redis_memory_used_bytes / redis_memory_max_bytes < 0.90)
-          and (redis_memory_max_bytes > 0)
+          (redis_memory_used_bytes{instance="redis-pm"} / redis_memory_max_bytes{instance="redis-pm"} >= 0.80)
+          and (redis_memory_used_bytes{instance="redis-pm"} / redis_memory_max_bytes{instance="redis-pm"} < 0.90)
+          and (redis_memory_max_bytes{instance="redis-pm"} > 0)
         for: 5m
         labels:
           severity: warning
@@ -121,7 +143,7 @@ groups:
                     按资源预算扩容或降低状态开销。
 
       - alert: RedisAggregationMemoryCritical
-        expr: (redis_memory_used_bytes / redis_memory_max_bytes >= 0.90) and (redis_memory_max_bytes > 0)
+        expr: (redis_memory_used_bytes{instance="redis-pm"} / redis_memory_max_bytes{instance="redis-pm"} >= 0.90) and (redis_memory_max_bytes{instance="redis-pm"} > 0)
         for: 2m
         labels:
           severity: critical

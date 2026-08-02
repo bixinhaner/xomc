@@ -27,6 +27,9 @@ func (c *AppConfig) Validate() error {
 	if err := c.Redis.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := validatePMRedis(c.Redis, c.PMRedis); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.JWT.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -145,6 +148,9 @@ func (c *WorkerConfig) Validate() error {
 	if err := c.Redis.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := validatePMRedis(c.Redis, c.PMRedis); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.Log.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -189,6 +195,36 @@ func (c RedisConfig) validate() error {
 		return fmt.Errorf("redis.addrs must not be empty")
 	}
 	return nil
+}
+
+func validatePMRedis(core, pm RedisConfig) error {
+	if !pm.configured() {
+		if IsProductionEnv() {
+			return fmt.Errorf("pm_redis.addrs must not be empty in production")
+		}
+		return nil
+	}
+	if len(pm.Addrs) == 0 {
+		return fmt.Errorf("pm_redis.addrs must not be empty")
+	}
+	if IsProductionEnv() && redisAddressSetsOverlap(core.Addrs, pm.Addrs) {
+		return fmt.Errorf("pm_redis must be physically isolated from redis; a different DB index is not isolation")
+	}
+	return nil
+}
+
+func redisAddressSetsOverlap(left, right []string) bool {
+	addresses := make(map[string]struct{}, len(left))
+	for _, addr := range left {
+		addresses[strings.ToLower(strings.TrimSpace(addr))] = struct{}{}
+	}
+	for _, addr := range right {
+		key := strings.ToLower(strings.TrimSpace(addr))
+		if _, exists := addresses[key]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 func (c JWTConfig) validate() error {

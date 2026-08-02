@@ -194,14 +194,15 @@ log "  内存空闲预算  : ${C_G}${C_B}$(to_gib "$IDLE_MEM_MIB") GiB${C_0}  = 
 #   worker        768  2560   20     PM/MR XML 解析最吃内存
 #   postgres     1024  6144   14     业务主库；KPI/时序已分离到 tsdb，本库写量较小
 #   postgres-tsdb 1024 8192   22     时序库：承载 PM COPY 入库 + KPI 聚合，写压力主要在此
-#   redis        5120  8192    8     12分钟关窗双小时重叠；4GiB窗口 + 1GiB AOF COW
+#   redis-core   2048  6144    6     ACS 会话/任务/告警，保留 1GiB AOF COW
+#   redis-pm     8192 12288   10     PM 双小时窗口/重算，保留 2GiB AOF COW
 #   nats          384  1024    6     JetStream file store + PM 突发 in-flight
 #   minio         512  2048    6     对象存储，瓶颈在磁盘非内存
 #   web           192   512    0     nginx 静态+反代，近似固定
-COMP_NAMES=(app acs worker postgres postgres-tsdb redis nats minio web)
-COMP_FLOOR=(512 512 768 1024 1024 5120 384 512 192)
-COMP_CEIL=(1536 2048 2560 6144 8192 8192 1024 2048 512)
-COMP_WEIGHT=(8 12 20 14 22 8 6 6 0)
+COMP_NAMES=(app acs worker postgres postgres-tsdb redis-core redis-pm nats minio web)
+COMP_FLOOR=(512 512 768 1024 1024 2048 8192 384 512 192)
+COMP_CEIL=(1536 2048 2560 6144 8192 6144 12288 1024 2048 512)
+COMP_WEIGHT=(8 12 20 14 22 6 10 6 6 0)
 
 # 监控栈（固定块，不纵向伸缩）：prometheus1024+grafana512+loki512+tempo1024+otelcol512
 #   +alertmgr512+exporters(128*3)+cadvisor256 ≈ 4736 MiB。dev 本地默认不起，故默认不计入。
@@ -214,7 +215,7 @@ if [ "$MAXIMIZE" = 1 ]; then
   sep "3/4 maximize 分配（独占生产机，最大化吃硬件）"
   # CPU：所有服务限额 = 全部逻辑核 = 实际不限（谁抢到是谁的，不按进程切）。
   CPU_pg=$VM_CPU; CPU_tsdb=$VM_CPU; CPU_worker=$VM_CPU; CPU_acs=$VM_CPU; CPU_app=$VM_CPU
-  CPU_redis=$VM_CPU; CPU_nats=$VM_CPU; CPU_minio=$VM_CPU; CPU_web=$VM_CPU
+  CPU_redis_core=$VM_CPU; CPU_redis_pm=$VM_CPU; CPU_nats=$VM_CPU; CPU_minio=$VM_CPU; CPU_web=$VM_CPU
   # 内存：PG 最佳实践 —— shared_buffers 总量 ≈ 25% 物理内存（其余留 OS page cache，
   # TimescaleDB 列存解压/读全靠页缓存，故不把内存全塞进 cap）；两库按时序库偏重切
   # （tsdb 60% / 主库 40%）。各 PG cap = 该库 shared_buffers ÷ 0.4（SB 占 cap 40%，
@@ -230,7 +231,8 @@ if [ "$MAXIMIZE" = 1 ]; then
   APP_MEM=$(clampm 3 2048 8192)
   MINIO_MEM=$(clampm 5 4096 8192)      # 对象存储；压测实测高并发 PM/MR 上传下内存可占满 1-2GiB，下限对齐 ACS/worker（2026-07-21）
   NATS_MEM=$(clampm 3 1024 4096)
-  REDIS_MEM=$(clampm 8 5120 8192)      # 12分钟关窗需同时容纳相邻两个小时窗口
+  REDIS_CORE_MEM=$(clampm 4 4096 6144)
+  REDIS_PM_MEM=$(clampm 8 8192 12288)  # 12分钟关窗需同时容纳相邻两个小时窗口
   WEB_MEM=512
   log "  物理内存      : $(to_gib "$VM_MEM_MIB") GiB；shared_buffers 总量 $(to_gib "$SB_TOTAL") GiB(25%)，余量留 OS page cache"
   log "  CPU 限额      : 各服务 = 全部 ${VM_CPU} 逻辑核（谁抢到是谁的，不按进程切）"
@@ -257,7 +259,8 @@ done
 idx() { local n="$1"; for i in "${!COMP_NAMES[@]}"; do [ "${COMP_NAMES[$i]}" = "$n" ] && { echo "$i"; return; }; done; }
 APP_MEM=${COMP_MEM[$(idx app)]};            ACS_MEM=${COMP_MEM[$(idx acs)]}
 WORKER_MEM=${COMP_MEM[$(idx worker)]};      PG_MEM=${COMP_MEM[$(idx postgres)]}
-TSDB_MEM=${COMP_MEM[$(idx postgres-tsdb)]}; REDIS_MEM=${COMP_MEM[$(idx redis)]}
+TSDB_MEM=${COMP_MEM[$(idx postgres-tsdb)]}
+REDIS_CORE_MEM=${COMP_MEM[$(idx redis-core)]}; REDIS_PM_MEM=${COMP_MEM[$(idx redis-pm)]}
 NATS_MEM=${COMP_MEM[$(idx nats)]};          MINIO_MEM=${COMP_MEM[$(idx minio)]}
 WEB_MEM=${COMP_MEM[$(idx web)]}
 
@@ -266,7 +269,7 @@ cpu_share() { local frac="$1" minv="$2"; awk -v c="$VM_CPU" -v f="$frac" -v m="$
   'BEGIN{v=int(c*f+0.5); if(v<m)v=m; if(v>c)v=c; if(v<1)v=1; printf "%d", v}'; }
 CPU_pg=$(cpu_share 1.0 2);   CPU_tsdb=$(cpu_share 1.0 2)   # 两 PG 可突发到全核
 CPU_worker=$(cpu_share 0.6 2); CPU_acs=$(cpu_share 0.35 2); CPU_app=$(cpu_share 0.35 2)
-CPU_redis=$(cpu_share 0.15 1); CPU_nats=$(cpu_share 0.15 1)
+CPU_redis_core=$(cpu_share 0.15 1); CPU_redis_pm=$(cpu_share 0.15 1); CPU_nats=$(cpu_share 0.15 1)
 CPU_minio=$(cpu_share 0.15 1); CPU_web=$(cpu_share 0.1 1)
 fi
 
@@ -312,9 +315,10 @@ PG_ALLOW=$(pg_allow "$PG_WORK"); TSDB_ALLOW=$(pg_allow "$TSDB_WORK")
 # PG 真正吃满的是 shared_buffers + maintenance + 每实例 backends/work/temp 余量。
 # 非 PG 服务实测只用几十~几百 MB（按实占估，非 cap）；据此留给两 PG 的安全预算 = PG_AVAIL。
 NONPG_ACTUAL_EST=$(( 400 + 350 + 600 + 200 + 350 + 60 ))  # app/acs/worker/nats/minio/web 实占估
-REDIS_MAXMEM=$(( REDIS_MEM - 1024 ))
+REDIS_CORE_MAXMEM=$(( REDIS_CORE_MEM - 1024 ))
+REDIS_PM_MAXMEM=$(( REDIS_PM_MEM - 2048 ))
 REDIS_POLICY=noeviction
-NONPG_ACTUAL_EST=$(( NONPG_ACTUAL_EST + REDIS_MAXMEM ))
+NONPG_ACTUAL_EST=$(( NONPG_ACTUAL_EST + REDIS_CORE_MAXMEM + REDIS_PM_MAXMEM ))
 [ "$WITH_MONITORING" = 1 ] && NONPG_ACTUAL_EST=$(( NONPG_ACTUAL_EST + 2000 ))  # 监控实占估
 PG_AVAIL=$(( VM_MEM_MIB - OS_RESERVE_MIB - OTHER_RESERVE_MIB - NONPG_ACTUAL_EST ))
 
@@ -346,7 +350,7 @@ TSDB_FOOT1=$(( TSDB_SB + TSDB_MAINT + TSDB_ALLOW )); [ "$TSDB_MEM" -lt "$TSDB_FO
 # ---------------------------------------------------------------------------
 # 4. 打印 + 写 resources.env
 # ---------------------------------------------------------------------------
-ALLOC_SUM=$(( APP_MEM + ACS_MEM + WORKER_MEM + PG_MEM + TSDB_MEM + REDIS_MEM + NATS_MEM + MINIO_MEM + WEB_MEM + MON_FIXED_MIB ))
+ALLOC_SUM=$(( APP_MEM + ACS_MEM + WORKER_MEM + PG_MEM + TSDB_MEM + REDIS_CORE_MEM + REDIS_PM_MEM + NATS_MEM + MINIO_MEM + WEB_MEM + MON_FIXED_MIB ))
 sep "4/4 规划结果"
 printf '%b\n' "${C_B}  组件            内存cap   CPUcap   关键联动${C_0}"
 printf '  %-14s %6sMiB  %5s   GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' app    "$APP_MEM"    "$CPU_app"    "$APP_GOMEM"    "$APP_GOMAXPROCS"
@@ -354,7 +358,8 @@ printf '  %-14s %6sMiB  %5s   GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' acs    "$ACS_MEM
 printf '  %-14s %6sMiB  %5s   GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' worker "$WORKER_MEM" "$CPU_worker" "$WORKER_GOMEM" "$WORKER_GOMAXPROCS"
 printf '  %-14s %6sMiB  %5s   shared_buffers=%sMB effective_cache=%sMB work_mem=%sMB maint=%sMB\n' postgres      "$PG_MEM"   "$CPU_pg"   "$PG_SB"   "$PG_EFF"   "$PG_WORK"  "$PG_MAINT"
 printf '  %-14s %6sMiB  %5s   shared_buffers=%sMB effective_cache=%sMB work_mem=%sMB maint=%sMB\n' postgres-tsdb "$TSDB_MEM" "$CPU_tsdb" "$TSDB_SB" "$TSDB_EFF" "$TSDB_WORK" "$TSDB_MAINT"
-printf '  %-14s %6sMiB  %5s   maxmemory=%sMB policy=%s（cap−maxmemory=%sMiB COW余量）\n' redis "$REDIS_MEM" "$CPU_redis" "$REDIS_MAXMEM" "$REDIS_POLICY" "$(( REDIS_MEM - REDIS_MAXMEM ))"
+printf '  %-14s %6sMiB  %5s   maxmemory=%sMB policy=%s（COW余量=%sMiB）\n' redis-core "$REDIS_CORE_MEM" "$CPU_redis_core" "$REDIS_CORE_MAXMEM" "$REDIS_POLICY" "$(( REDIS_CORE_MEM - REDIS_CORE_MAXMEM ))"
+printf '  %-14s %6sMiB  %5s   maxmemory=%sMB policy=%s（COW余量=%sMiB）\n' redis-pm "$REDIS_PM_MEM" "$CPU_redis_pm" "$REDIS_PM_MAXMEM" "$REDIS_POLICY" "$(( REDIS_PM_MEM - REDIS_PM_MAXMEM ))"
 printf '  %-14s %6sMiB  %5s\n' nats  "$NATS_MEM"  "$CPU_nats"
 printf '  %-14s %6sMiB  %5s\n' minio "$MINIO_MEM" "$CPU_minio"
 printf '  %-14s %6sMiB  %5s\n' web   "$WEB_MEM"   "$CPU_web"
@@ -431,7 +436,7 @@ fi
   echo "# 不传 env-file 时取 compose 内 :- 默认（= 历史 PM 写吞吐档），行为不变。"
   echo "# 约束（手改时务必遵守，否则重演 OOM 事故）："
   echo "#   · *_GOMEMLIMIT 必须 < 对应 *_MEM（软限，建议 0.90×）"
-  echo "#   · REDIS_MEM 必须 ≥ REDIS_MAXMEMORY + 1GiB（AOF rewrite 的 fork COW 余量）"
+  echo "#   · REDIS_CORE_MEM 须保留 1GiB、REDIS_PM_MEM 须保留 2GiB AOF rewrite COW 余量"
   echo "#   · 两 PG 的 shared_buffers 之和 + maintenance + backends 余量 须 < VM 内存（防双库 OOM）"
   echo "#   · PG/TSDB_MAX_CONNECTIONS 必须 ≥ Go 端连接池总和（当前 ~180）"
   echo "# =============================================================================="
@@ -453,9 +458,11 @@ fi
   echo "TSDB_MAX_CONNECTIONS=$TSDB_MAXCONN"; echo "TSDB_WORK_MEM=${TSDB_WORK}MB"
   echo "TSDB_MAINTENANCE_WORK_MEM=${TSDB_MAINT}MB"; echo "TSDB_MAX_WAL_SIZE=$TSDB_WAL"
   echo ""
-  echo "# ── Redis ── PM 多粒度聚合窗口权威状态；禁止淘汰（cap ≥ maxmemory+256MiB）"
-  echo "REDIS_CPUS=$CPU_redis";   echo "REDIS_MEM=${REDIS_MEM}m"
-  echo "REDIS_MAXMEMORY=${REDIS_MAXMEM}mb"; echo "REDIS_MAXMEMORY_POLICY=$REDIS_POLICY"
+  echo "# ── Redis Core / PM ── 物理隔离，均禁止淘汰"
+  echo "REDIS_CORE_CPUS=$CPU_redis_core"; echo "REDIS_CORE_MEM=${REDIS_CORE_MEM}m"
+  echo "REDIS_CORE_MAXMEMORY=${REDIS_CORE_MAXMEM}mb"; echo "REDIS_CORE_MAXMEMORY_POLICY=$REDIS_POLICY"
+  echo "REDIS_PM_CPUS=$CPU_redis_pm"; echo "REDIS_PM_MEM=${REDIS_PM_MEM}m"
+  echo "REDIS_PM_MAXMEMORY=${REDIS_PM_MAXMEM}mb"; echo "REDIS_PM_MAXMEMORY_POLICY=$REDIS_POLICY"
   echo ""
   echo "# ── NATS / MinIO / Web ──"
   echo "NATS_CPUS=$CPU_nats";     echo "NATS_MEM=${NATS_MEM}m"; echo "NATS_MAX_MEMORY_STORE=$NATS_MAX_MEMORY_STORE"
@@ -463,6 +470,7 @@ fi
   echo "WEB_CPUS=$CPU_web";       echo "WEB_MEM=${WEB_MEM}m"
   echo ""
   echo "# ── 规划元信息（compose 不读取，仅记录）──"
+  echo "OMC_RESOURCE_SCHEMA_VERSION=3"
   echo "OMC_PLAN_MODE=$([ "$MAXIMIZE" = 1 ] && echo maximize || echo dev)"
   echo "OMC_PLAN_VM_CPU=$VM_CPU"
   echo "OMC_PLAN_VM_MEM_MIB=$VM_MEM_MIB"

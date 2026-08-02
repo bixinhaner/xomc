@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -135,14 +136,21 @@ func TestCounterRollupPeriodSelectRestrictsSourceVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(query, "task_version_id IN") {
+	if !strings.Contains(query, "rollup.task_version_id = ANY") {
 		t.Fatalf("period replay query lacks source-version predicate: %s", query)
 	}
 	if strings.Contains(query, "publication_eligible") {
 		t.Fatalf("period replay query must retain the captured revision after eligibility flips: %s", query)
 	}
-	if !strings.Contains(query, "FROM pm_rebuild_source_snapshot rollup") {
-		t.Fatalf("period replay query does not page the materialized source rows: %s", query)
+	if !strings.Contains(query, "FROM pm_aggregation_counter_rollups rollup") {
+		t.Fatalf("period replay query does not page the durable rollup table directly: %s", query)
+	}
+	if !strings.Contains(query, "JOIN pm_aggregation_windows published_window") ||
+		!strings.Contains(query, "published_window.published_revision = rollup.revision") {
+		t.Fatalf("period replay query is not pinned to the published revision: %s", query)
+	}
+	if strings.Contains(query, "pm_rebuild_source_snapshot") {
+		t.Fatalf("period replay query still materializes a temporary snapshot: %s", query)
 	}
 	if !strings.Contains(query, "LIMIT 256") {
 		t.Fatalf("period replay query is not bounded: %s", query)
@@ -176,24 +184,74 @@ func TestPeriodRebuildIndexMatchesPeriodQueryPrefix(t *testing.T) {
 	}
 }
 
-func TestPeriodRebuildSnapshotMapsSourceVersionToPublicationVersion(t *testing.T) {
-	query := strings.Join(strings.Fields(periodRebuildSnapshotSQL), " ")
+func TestRevisionCleanupIndexesMatchDeletePredicate(t *testing.T) {
+	wantColumns := "publication_task_version_id, entity_key, granularity, window_start, revision, event_id"
+	for name, query := range map[string]string{
+		"counter rollups": revisionCleanupCounterRollupsIndexSQL,
+		"rollup outbox":   revisionCleanupOutboxIndexSQL,
+	} {
+		normalized := strings.Join(strings.Fields(query), " ")
+		if !strings.Contains(normalized, wantColumns) {
+			t.Fatalf("%s cleanup index does not match DELETE predicate: %s", name, query)
+		}
+		if !strings.Contains(query, "CREATE INDEX CONCURRENTLY") {
+			t.Fatalf("%s cleanup index can block hot writers: %s", name, query)
+		}
+	}
+	if !strings.Contains(revisionCleanupIndexLockSQL, "pg_advisory_lock") ||
+		!strings.Contains(revisionCleanupIndexUnlockSQL, "pg_advisory_unlock") {
+		t.Fatal("revision cleanup online index maintenance must serialize worker replicas")
+	}
+}
+
+func TestEnsureRevisionCleanupIndexesRepairsBothInvalidArtifacts(t *testing.T) {
+	db := &recordingRollupIndexDB{exists: true, valid: false}
+
+	err := ensureRevisionCleanupIndexes(context.Background(), db)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(db.execs) != 4 {
+		t.Fatalf("revision cleanup index repair statements = %d, want DROP+CREATE for two indexes: %v", len(db.execs), db.execs)
+	}
+	for i := 0; i < len(db.execs); i += 2 {
+		if !strings.HasPrefix(db.execs[i], "DROP INDEX CONCURRENTLY") ||
+			!strings.Contains(db.execs[i+1], "CREATE INDEX CONCURRENTLY") {
+			t.Fatalf("revision cleanup repair pair %d is not online DROP+CREATE: %v", i/2, db.execs[i:i+2])
+		}
+	}
+}
+
+func TestPeriodRebuildPageMapsSourceVersionToPublicationVersion(t *testing.T) {
+	querySQL, _, err := counterRollupPeriodPageSelect(
+		[]uuid.UUID{uuid.New()},
+		GranularityHourly,
+		time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC),
+		nil,
+		256,
+	).ToSql()
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := strings.Join(strings.Fields(querySQL), " ")
 	if !strings.Contains(query, "rollup.task_version_id = ANY($1)") {
-		t.Fatalf("snapshot must filter the source rollup version IDs: %s", query)
+		t.Fatalf("page must filter the source rollup version IDs: %s", query)
 	}
 	if !strings.Contains(query,
 		"published_window.task_version_id = rollup.publication_task_version_id") {
-		t.Fatalf("snapshot must map source rollup versions to publication window versions: %s", query)
+		t.Fatalf("page must map source rollup versions to publication window versions: %s", query)
 	}
 	if !strings.Contains(query, "published_window.published_revision = rollup.revision") {
-		t.Fatalf("snapshot must materialize only the currently published revision: %s", query)
+		t.Fatalf("page must read only the snapshot-visible published revision: %s", query)
 	}
 	if strings.Contains(query, "published_window.task_version_id = ANY($1)") {
-		t.Fatalf("snapshot incorrectly treats source IDs as publication window IDs: %s", query)
+		t.Fatalf("page incorrectly treats source IDs as publication window IDs: %s", query)
 	}
 	for _, column := range []string{"rollup.event_id", "rollup.payload", "rollup.revision"} {
 		if !strings.Contains(query, column) {
-			t.Fatalf("snapshot must materialize %s so retention cannot remove a later page: %s",
+			t.Fatalf("page must read %s inside the repeatable-read snapshot: %s",
 				column, query)
 		}
 	}
@@ -246,6 +304,44 @@ func TestVisitRollupSnapshotPagesClosesEachBoundedPageBeforeContinuing(t *testin
 	}
 }
 
+func TestVisitRollupSnapshotPagesStopsAfterCallbackError(t *testing.T) {
+	wantErr := errors.New("visit failed")
+	fetches := 0
+	err := visitRollupSnapshotPages(
+		func(*rollupSnapshotCursor) ([]rollupSnapshotPageRow, error) {
+			fetches++
+			return []rollupSnapshotPageRow{{payload: RollupPayload{EventID: uuid.New()}}}, nil
+		},
+		func(RollupPayload) error { return wantErr },
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("visit error = %v, want %v", err, wantErr)
+	}
+	if fetches != 1 {
+		t.Fatalf("fetches after callback error = %d, want 1", fetches)
+	}
+}
+
+func TestVisitRollupSnapshotPagesStopsAfterEmptyFirstPage(t *testing.T) {
+	fetches := 0
+	err := visitRollupSnapshotPages(
+		func(*rollupSnapshotCursor) ([]rollupSnapshotPageRow, error) {
+			fetches++
+			return nil, nil
+		},
+		func(RollupPayload) error {
+			t.Fatal("empty page must not invoke visitor")
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetches != 1 {
+		t.Fatalf("empty result fetches = %d, want 1", fetches)
+	}
+}
+
 func TestPendingRollupOutboxRequiresPublishedRevisionEligibility(t *testing.T) {
 	query, _, err := pendingRollupOutboxSelect("event_id", "subject", "payload").ToSql()
 	if err != nil {
@@ -281,5 +377,23 @@ func TestDeleteStaleRollupRevisionWithEmptyReplacementDeletesAllRows(t *testing.
 			strings.Contains(strings.ToUpper(query), "EVENT_ID NOT IN") {
 			t.Fatalf("empty replacement unexpectedly preserves old rollup rows: %s", query)
 		}
+	}
+}
+
+func TestDeleteStaleRollupRevisionSkipsInitialPublication(t *testing.T) {
+	tx := &recordingRollupDeleteTx{}
+	key := WindowKey{
+		TaskVersionID: uuid.New(), EntityKey: "Network",
+		Granularity: GranularityHourly,
+		Start:       time.Date(2026, 8, 2, 14, 0, 0, 0, time.UTC),
+	}
+
+	if err := deleteStaleRollupRevisionTx(
+		context.Background(), tx, key, 1, []uuid.UUID{uuid.New()},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(tx.queries) != 0 {
+		t.Fatalf("initial publication executed %d stale DELETE statements, want 0: %v", len(tx.queries), tx.queries)
 	}
 }

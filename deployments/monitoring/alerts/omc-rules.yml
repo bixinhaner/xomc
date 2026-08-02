@@ -225,6 +225,64 @@ groups:
             Action: 检查 Redis 连通性与 kpi.router 日志；恢复后确认
                     omc_kpi_router_stale_evictions_total 增长且本告警自动解除。
 
+  - name: omc.param_sync
+    interval: 30s
+    rules:
+      - alert: ParamSyncReadyRunNotFinalized
+        expr: param_sync_runs_ready_but_not_finalized > 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: param_sync
+        annotations:
+          summary: "参数同步运行已具备完成条件但未收敛"
+          description: |
+            durable device task 与 result 数量均已完整，但运行仍停留在活跃状态。
+            Action: 检查 param_sync_reconcile_duration_seconds、数据库锁和 app 日志；
+                    维护收敛器正常时该值应在下一轮 30 秒扫描内恢复为 0。
+
+      - alert: ParamSyncRunCounterDrift
+        expr: param_sync_run_counter_drift > 0
+        for: 2m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: param_sync
+        annotations:
+          summary: "参数同步运行计数与持久任务状态漂移"
+          description: |
+            parameter_sync_runs 的计数与 device_tasks/result 权威状态不一致。
+            Action: 检查维护扫描错误和数据库写入；禁止人工修改计数或清理运行记录。
+
+      - alert: ParamSyncRunBlockedWithoutActiveDeviceTask
+        expr: sum(param_sync_runs_blocked{reason=~"plan_not_dispatched|terminal_task_missing_result"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: param_sync
+        annotations:
+          summary: "参数同步运行被非设备执行原因阻塞"
+          description: |
+            存在任务计划未派发或终态任务缺少 durable result；这不是设备仍在执行。
+            Action: 按 reason 检查 dispatcher、terminal bridge、result consumer 和 outbox。
+
+      - alert: ParamSyncActiveRunOldestAgeHigh
+        expr: |
+          (param_sync_active_run_oldest_age_seconds > 300)
+          and on() (sum(param_sync_runs_blocked{reason=~"plan_not_dispatched|terminal_task_missing_result"}) > 0)
+        for: 2m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: param_sync
+        annotations:
+          summary: "非设备执行原因导致参数同步活跃运行超过 5 分钟"
+          description: |
+            最老活跃运行已超过正常设备任务与维护收敛窗口。
+            Action: 结合 param_sync_runs_blocked 区分真实设备执行、未派发和缺结果。
+
   - name: omc.pm_ingest
     interval: 30s
     rules:
@@ -325,10 +383,10 @@ groups:
           domain: omc
           subsystem: pm
         annotations:
-          summary: "PM 迟到重算紧凑快照扫描 P95 持续超过 10 秒"
+          summary: "PM 迟到重算只读快照扫描 P95 持续超过 10 秒"
           description: |
-            共享 rollup 快照扫描的 P95 超过 10 秒，说明重算数据库读取成本偏高。
-            Action: 对照 rebuild batch 大小、扫描行数、coalesced 数和 TSDB CPU/I/O；
+            repeatable-read keyset 快照扫描的 P95 超过 10 秒，说明重算数据库读取成本偏高。
+            Action: 对照 rebuild batch 大小、扫描行数、分页数、coalesced 数和 TSDB CPU/I/O/temp bytes；
                     禁止恢复按 network/product/group 重复扫描的旧路径。
 
       - alert: PMDailyVersionExpectedSlotsMismatch
