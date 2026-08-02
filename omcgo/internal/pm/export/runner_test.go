@@ -455,7 +455,7 @@ func TestRunner_BuildSource_DeviceDailyKPIExportUsesStoredOffsetSource(t *testin
 	require.True(t, ok)
 }
 
-func TestRunner_BuildSource_DeviceViewUsesDashboardLikeDeviceExport(t *testing.T) {
+func TestRunner_BuildSource_DeviceViewUsesMeasurementObjectOnlyLayout(t *testing.T) {
 	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
 	end := start.Add(30 * time.Minute)
 	params, err := json.Marshal(DashboardParams{
@@ -482,9 +482,119 @@ func TestRunner_BuildSource_DeviceViewUsesDashboardLikeDeviceExport(t *testing.T
 
 	_, ok := src.(*dashboardDeviceSource)
 	require.True(t, ok)
-	assert.True(t, layout.IncludeCell)
-	assert.False(t, layout.IncludeMeasurementObject)
+	assert.False(t, layout.IncludeCell)
+	assert.True(t, layout.IncludeMeasurementObject)
 	assert.Equal(t, "设备 SN", layout.FirstColHeader)
+}
+
+func TestRunner_BuildSource_DeviceViewCSVIncludesMeasurementObjectOriginalLDN(t *testing.T) {
+	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
+	end := start.Add(15 * time.Minute)
+	params, err := json.Marshal(DashboardParams{
+		Granularity: "15min",
+		Dimension:   "device",
+		DeviceSNs:   []string{"NR-SN"},
+		MetricPaths: []string{"C001"},
+		StartTime:   start.Format(time.RFC3339),
+		EndTime:     end.Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{}, // 指标名解析无命中，列名回退指标编号。
+	}}
+	runner := NewRunner(RunnerDeps{MetricDB: metricDB})
+	_, _, layout, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceDeviceView,
+		Params:     params,
+	})
+	require.NoError(t, err)
+
+	objectLDN := "Type=Cell,Mode=SA,gNBID=123,NrCGI=46068123456"
+	up := &stubUploader{}
+	_, err = streamCSVToObject(
+		context.Background(),
+		up,
+		"reports",
+		"device-view.csv",
+		&sliceSource{batches: [][]ExportRow{{
+			{
+				Device:     "NR-SN",
+				CellPLMN:   objectLDN,
+				Time:       start,
+				StartTime:  start,
+				EndTime:    end,
+				MetricCode: "C001",
+				Value:      42,
+			},
+		}}},
+		[]WideColumn{{Code: "C001", Type: "counter", Name: "下行包数"}},
+		layout,
+		nil,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"开始时间", "结束时间", "设备 SN", "测量对象", "下行包数"}, nthCSVRow(t, up.gotBody, 0))
+	row := nthCSVRow(t, up.gotBody, 1)
+	require.Len(t, row, 5)
+	assert.Equal(t, objectLDN, row[3])
+	assert.Equal(t, "42", row[4])
+}
+
+func TestRunner_BuildSource_DeviceViewEnglishCSVIncludesMeasurementObjectOriginalLDN(t *testing.T) {
+	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
+	end := start.Add(15 * time.Minute)
+	params := []byte(fmt.Sprintf(`{
+		"granularity": "15min",
+		"dimension": "device",
+		"device_sns": ["NR-SN"],
+		"metric_paths": ["C001"],
+		"start_time": %q,
+		"end_time": %q,
+		"locale": "en-US"
+	}`, start.Format(time.RFC3339), end.Format(time.RFC3339)))
+
+	metricDB := &recordingExportQuerier{results: []pgx.Rows{
+		&adhocFakeRows{}, // 指标名解析无命中，列名回退指标编号。
+	}}
+	runner := NewRunner(RunnerDeps{MetricDB: metricDB})
+	_, _, layout, err := runner.buildSource(context.Background(), &Task{
+		ID:         uuid.New(),
+		SourceType: SourceDeviceView,
+		Params:     params,
+	})
+	require.NoError(t, err)
+
+	objectLDN := "Type=Cell,Mode=SA,gNBID=123,NrCGI=46068123456"
+	up := &stubUploader{}
+	_, err = streamCSVToObject(
+		context.Background(),
+		up,
+		"reports",
+		"device-view-en.csv",
+		&sliceSource{batches: [][]ExportRow{{
+			{
+				Device:     "NR-SN",
+				CellPLMN:   objectLDN,
+				Time:       start,
+				StartTime:  start,
+				EndTime:    end,
+				MetricCode: "C001",
+				Value:      42,
+			},
+		}}},
+		[]WideColumn{{Code: "C001", Type: "counter", Name: "Downlink Packets"}},
+		layout,
+		nil,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"Start Time", "End Time", "Device SN", "Measurement Object", "Downlink Packets"}, nthCSVRow(t, up.gotBody, 0))
+	row := nthCSVRow(t, up.gotBody, 1)
+	require.Len(t, row, 5)
+	assert.Equal(t, objectLDN, row[3])
+	assert.Equal(t, "42", row[4])
 }
 
 // ── 预 running 守门：payload 坏 / 缺 task_id 直接返 error，不动任务 ─────────────

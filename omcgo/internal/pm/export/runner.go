@@ -215,7 +215,12 @@ func (r *Runner) buildSource(ctx context.Context, task *Task) (RowSource, []Wide
 		IncludeCell:                   true,
 		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
 	}
-	deviceViewLayout := dashboardLayout
+	deviceViewLayout := csvLayout{
+		FirstColHeader:                deviceHeader,
+		Locale:                        loc,
+		IncludeMeasurementObject:      true,
+		MissingMetricValuePlaceholder: missingMetricValuePlaceholder,
+	}
 	kpiQueryLayout := csvLayout{
 		FirstColHeader:                deviceHeader,
 		Locale:                        loc,
