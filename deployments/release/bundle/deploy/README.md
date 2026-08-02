@@ -22,7 +22,7 @@ on `127.0.0.1`, and `healthcheck.sh` probes it externally from the host.
 
 `resources.env` is a required, complete deployment contract rather than a
 best-effort override file. Generate it with `plan-resources.sh`; it records
-schema version `2` and the probed host CPU and memory. The planner writes and
+schema version `3` and the probed host CPU and memory. The planner writes and
 validates a temporary file in the destination directory, then atomically
 replaces `resources.env`; generation or validation failure preserves the
 previous last-good file.
@@ -40,6 +40,20 @@ After deployment, `healthcheck.sh` validates a present contract against the
 rendered Compose limits, Docker `NanoCpus`/`Memory`, Go GOMAXPROCS metrics,
 Redis runtime settings, and PostgreSQL/TimescaleDB runtime settings. Any
 mismatch names the service with its expected and actual values.
+
+## Physical Redis isolation
+
+Production runs `redis-core` and `redis-pm` as separate containers, persistence
+paths, memory budgets, and AOF rewrite domains. `redis-core` keeps host port
+6379 and the compatibility DNS alias `redis`; `redis-pm` is reachable only on
+the Compose network. App and Worker use both endpoints, while ACS and other
+core services use only `redis-core`.
+
+Before upgrading, re-run `plan-resources.sh`; schema-v2 single-Redis plans are
+rejected intentionally. Core Redis reserves at least 1 GiB and PM Redis at
+least 2 GiB above `maxmemory` for AOF copy-on-write. During migration and the
+rollback acceptance window, retain legacy `pmagg:*` keys in core Redis until
+their TTL expires; do not delete them merely because PM traffic has switched.
 
 ## Redis aggregation v2 rollout gate
 

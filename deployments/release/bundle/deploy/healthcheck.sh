@@ -137,7 +137,7 @@ if [ "$STARTUP_CHECK" = 1 ]; then
   done
   check "acs-candidate 容器 running" container_running acs-candidate
   check "acs-candidate /readyz" acs_service_ready acs-candidate
-  for svc in postgres postgres-tsdb redis nats minio; do
+  for svc in postgres postgres-tsdb redis-core redis-pm nats minio; do
     check "$svc 容器 running" container_running "$svc"
   done
   if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
@@ -163,8 +163,14 @@ check "acs-candidate 容器 running" container_running acs-candidate
 check "acs-candidate /readyz" acs_service_ready acs-candidate
 
 echo "== docker compose 基础设施容器 =="
-for svc in postgres postgres-tsdb redis nats minio; do
+for svc in postgres postgres-tsdb redis-core redis-pm nats minio; do
   check "$svc 容器 running" container_running "$svc"
+done
+
+echo "== Redis 业务路由隔离 =="
+for config_file in app.prod.yaml worker.prod.yaml; do
+  check "$config_file 核心 Redis 指向 redis-core" grep -Fq 'redis-core:6379' "/opt/omc/etc/$config_file"
+  check "$config_file PM Redis 指向 redis-pm" grep -Fq 'redis-pm:6379' "/opt/omc/etc/$config_file"
 done
 
 if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
@@ -274,7 +280,7 @@ EOF
       check_value "$svc docker inspect NanoCpus" "$expected_nano" "$actual_nano"
       check_value "$svc docker inspect Memory" "$expected_bytes" "$actual_bytes"
     }
-    for spec in 'app APP' 'acs ACS' 'acs-candidate ACS' 'worker WORKER' 'postgres POSTGRES' 'postgres-tsdb TSDB' 'redis REDIS' 'nats NATS' 'minio MINIO'; do
+    for spec in 'app APP' 'acs ACS' 'acs-candidate ACS' 'worker WORKER' 'postgres POSTGRES' 'postgres-tsdb TSDB' 'redis-core REDIS_CORE' 'redis-pm REDIS_PM' 'nats NATS' 'minio MINIO'; do
       check_service_limits ${spec}
     done
     [ -f "$DEPLOY_DIR/docker-compose.web.yml" ] && check_service_limits web WEB
@@ -289,11 +295,16 @@ EOF
     check_gomaxprocs acs 9095 ACS_GOMAXPROCS
     check_gomaxprocs worker 9092 WORKER_GOMAXPROCS
 
-    redis_expected="$(resource_bytes "$(resource_env_get "$DEPLOY_DIR/resources.env" REDIS_MAXMEMORY)")"
-    redis_actual="$("${DC[@]}" exec -T redis redis-cli CONFIG GET maxmemory 2>/dev/null | tail -n1)"
-    redis_policy="$("${DC[@]}" exec -T redis redis-cli CONFIG GET maxmemory-policy 2>/dev/null | tail -n1)"
-    check_value "redis CONFIG GET maxmemory" "$redis_expected" "$redis_actual"
-    check_value "redis CONFIG GET maxmemory-policy" "noeviction" "$redis_policy"
+    for redis_spec in 'redis-core REDIS_CORE' 'redis-pm REDIS_PM'; do
+      read -r redis_svc redis_prefix <<<"$redis_spec"
+      redis_expected="$(resource_bytes "$(resource_env_get "$DEPLOY_DIR/resources.env" "${redis_prefix}_MAXMEMORY")")"
+      redis_actual="$("${DC[@]}" exec -T "$redis_svc" redis-cli CONFIG GET maxmemory 2>/dev/null | tail -n1)"
+      redis_policy="$("${DC[@]}" exec -T "$redis_svc" redis-cli CONFIG GET maxmemory-policy 2>/dev/null | tail -n1)"
+      redis_aof="$("${DC[@]}" exec -T "$redis_svc" redis-cli CONFIG GET appendonly 2>/dev/null | tail -n1)"
+      check_value "$redis_svc CONFIG GET maxmemory" "$redis_expected" "$redis_actual"
+      check_value "$redis_svc CONFIG GET maxmemory-policy" "noeviction" "$redis_policy"
+      check_value "$redis_svc CONFIG GET appendonly" "yes" "$redis_aof"
+    done
 
     deploy_env_get() { awk -F= -v key="$2" '$1 == key { print substr($0, length(key)+2); exit }' "$1"; }
     pg_user="$(deploy_env_get "$DEPLOY_DIR/.env" POSTGRES_USER)"

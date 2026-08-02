@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OMC 有状态服务宿主机路径：探测、.env 更新、校验与目录准备。
 
-STORAGE_PATH_KEYS="POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH"
+STORAGE_PATH_KEYS="POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH"
 
 storage_env_get() {
   local env_file="$1" key="$2"
@@ -65,6 +65,7 @@ storage_apply_recommended_paths() {
       POSTGRES_DATA_PATH) suffix="postgres" ;;
       TSDB_DATA_PATH)     suffix="timescaledb" ;;
       REDIS_DATA_PATH)    suffix="redis" ;;
+      REDIS_PM_DATA_PATH) suffix="redis-pm" ;;
       NATS_DATA_PATH)     suffix="nats" ;;
       MINIO_DATA_PATH)    suffix="minio" ;;
       *) return 1 ;;

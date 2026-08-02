@@ -36,7 +36,8 @@
 | 服务名       | 镜像 / Dockerfile        | 对外端口                    | 作用                                     |
 |-------------|--------------------------|----------------------------|------------------------------------------|
 | `postgres`  | timescale/timescaledb:latest-pg16 | `5432:5432`   | 主数据库（含 TimescaleDB 时序扩展）        |
-| `redis`     | redis:7-alpine           | `6379:6379`                | 缓存 / Session / 分布式锁                 |
+| `redis-core` | redis:7-alpine          | `6379:6379`                | ACS 会话 / 任务 / 告警 / 核心缓存         |
+| `redis-pm` | redis:7-alpine            | 仅容器网络                 | PM 窗口 / KPI 聚合状态                    |
 | `nats`      | nats:2.10-alpine         | `4222:4222`, `8222:8222`   | 消息队列（JetStream 模式），8222 为监控端口 |
 | `minio`     | `minio/minio:RELEASE.2024-06-13T22-53-53Z` | `9000:9000`, `9001:9001`   | 对象存储，9001 为 Web 控制台              |
 | `migrate`   | Dockerfile.app           | —（一次性任务）             | 启动时执行数据库迁移，成功后退出            |
@@ -193,13 +194,14 @@ OMCGO_JWT_SECRET=your-strong-secret-here
 - **时区**：通过启动参数 `timezone=Asia/Shanghai` 强制设置
 - **健康检查**：`pg_isready -U omcgo`，间隔 5s，最多重试 5 次
 
-### 6.2 redis（缓存）
+### 6.2 redis-core / redis-pm（物理隔离）
 
-- **镜像**：`redis:7-alpine`
+- **镜像**：两个实例均为 `redis:7-alpine`
 - **端口**：`6379`
 - **持久化**：启用 AOF（`--appendonly yes`）
 - **数据卷**：`redisdata:/data`
-- **健康检查**：`redis-cli ping`，间隔 5s
+- **健康检查**：两个实例分别执行 `redis-cli ping`，间隔 5s
+- **隔离原则**：ACS 与普通业务只使用 `redis-core`；PM 窗口和 KPI 路由使用 `redis-pm`，避免关窗、重算及 AOF rewrite 与核心业务争抢内存和磁盘 I/O
 
 ### 6.3 nats（消息队列）
 
@@ -231,21 +233,21 @@ OMCGO_JWT_SECRET=your-strong-secret-here
 - **端口**：`9090`（管理/监控），`7557`（TR-069 CWMP 设备接入）
 - **配置文件**：`/etc/omcgo/acs.${OMCGO_ENV}.yaml`
 - **日志挂载**：`run/logs/acs/` → 容器 `/run/logs/acs`
-- **依赖**：migrate 成功 + redis/nats/minio 健康
+- **依赖**：migrate 成功 + redis-core/nats/minio 健康
 
 ### 6.7 app（REST API 服务）
 
 - **端口**：不对外暴露，仅在 Docker 内部网络中监听 `8081`，由 Nginx `app_backend` upstream 代理
 - **配置文件**：`/etc/omcgo/app.${OMCGO_ENV}.yaml`
 - **日志挂载**：`run/logs/app/` → 容器 `/run/logs/app`
-- **依赖**：migrate 成功 + redis/nats/minio 健康
+- **依赖**：migrate 成功 + redis-core/redis-pm/nats/minio 健康
 
 ### 6.8 worker（后台任务服务）
 
 - **端口**：`9092`
 - **配置文件**：`/etc/omcgo/worker.${OMCGO_ENV}.yaml`
 - **日志挂载**：`run/logs/worker/` → 容器 `/run/logs/worker`
-- **依赖**：migrate 成功 + redis/nats/minio 健康
+- **依赖**：migrate 成功 + redis-core/redis-pm/nats/minio 健康
 
 ### 6.9 web（Nginx 网关）
 
@@ -390,7 +392,8 @@ SERVICE = ${OMCGO_SERVICE:-app}    # 由 Dockerfile ENV 预设
 |-------------|----------------------------------|----------------------|
 | `pgdata`    | postgres:/var/lib/postgresql/data | PostgreSQL 数据文件   |
 | `tsdbdata`  | postgres-tsdb:/var/lib/postgresql/data | TimescaleDB 时序数据 |
-| `redisdata` | redis:/data                      | Redis AOF 持久化文件  |
+| `redisdata` | redis-core:/data                 | 核心 Redis AOF 持久化文件 |
+| `redispmdata` | redis-pm:/data                 | PM Redis AOF 持久化文件 |
 | `natsdata`  | nats:/data                       | NATS JetStream 消息  |
 | `miniodata` | minio:/data                      | MinIO 对象文件        |
 
@@ -698,7 +701,8 @@ sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 | 服务 | CPU limit | mem limit | CPU reserve | mem reserve | 说明 |
 |------|-----------|-----------|-------------|-------------|------|
 | postgres | 2 | 2g | 0.5 | 512m | 数据面主库，TimescaleDB 聚合 / WAL 缓冲需较大内存 |
-| redis | 1 | 512m | 0.25 | 256m | 会话 / 队列 / 缓存，纯内存 |
+| redis-core | 2 | 4g | 0.25 | 256m | 会话 / 任务 / 告警 / 核心缓存 |
+| redis-pm | 2 | 8g | 0.25 | 512m | PM 双小时窗口与 KPI 状态 |
 | nats | 1 | 512m | 0.25 | 256m | JetStream 消息，store 落盘 |
 | minio | 1 | 1g | 0.25 | 512m | 对象存储，multipart 缓冲 |
 | app | 2 | 1g | 0.5 | 512m | REST + gRPC 主进程 |

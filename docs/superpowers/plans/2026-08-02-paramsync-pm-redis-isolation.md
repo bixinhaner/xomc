@@ -504,7 +504,7 @@
 - Modify: `deployments/release/bundle/deploy/install-resource-preflight_test.sh`
 - Modify: `deployments/release/bundle/deploy/resource-plan-metrics_test.sh`
 
-- [ ] **Step 1: 先更新 shell/compose 契约测试**
+- [x] **Step 1: 先更新 shell/compose 契约测试**
 
   测试必须要求存在独立 service、volume 和资源键：
 
@@ -519,7 +519,7 @@
 
   断言 `redis-core` 可保留既有宿主 6379 兼容口，`redis-pm` 不发布宿主端口；app/worker 同时 depends_on 两个 healthy Redis，其他服务只依赖 core。
 
-- [ ] **Step 2: 运行部署测试确认单 Redis 契约失败**
+- [x] **Step 2: 运行部署测试确认单 Redis 契约失败**
 
   Run:
 
@@ -531,7 +531,7 @@
 
   Expected: FAIL，缺少双实例、schema v3 和 PM 资源键。
 
-- [ ] **Step 3: 修改 Compose**
+- [x] **Step 3: 修改 Compose**
 
   生产默认：
 
@@ -542,7 +542,7 @@
   - core AOF rewrite 仍留至少 1 GiB；PM 留 2 GiB 以吸收双窗口和 rewrite COW；
   - app/worker 配置环境能解析 `redis-core:6379` / `redis-pm:6379`。
 
-- [ ] **Step 4: 修改资源规划算法和完整性门禁**
+- [x] **Step 4: 修改资源规划算法和完整性门禁**
 
   把原 `redis` 组件拆成 `redis-core` 与 `redis-pm`，两者分别进入 floor/ceiling/weight、CPU 列表、总内存预算和输出表。`resource-env-lib.sh` schema 升到 3，分别校验：
 
@@ -550,15 +550,15 @@
   - PM maxmemory <= PM mem - 2 GiB；
   - 所有键唯一、正数、继承旧 resources.env 时旧 schema 明确拒绝并提示重跑 planner。
 
-- [ ] **Step 5: 更新健康检查和资源计划指标**
+- [x] **Step 5: 更新健康检查和资源计划指标**
 
   `healthcheck.sh` 分别核对两个实例的 `PING`、AOF、policy、实际 maxmemory、Docker CPU/memory limit，并验证 app/worker 配置的两个 endpoint 不同。资源计划 Prometheus 指标为两个 component 输出，不继续把总量记成一个 Redis。
 
-- [ ] **Step 6: 更新部署文档和升级提示**
+- [x] **Step 6: 更新部署文档和升级提示**
 
   文档明确：这是物理隔离，不是 Redis DB index；升级前必须重新运行 planner；PM Redis 无宿主端口；回滚时旧 core `pmagg:*` 暂时保留直到窗口 TTL/验收期结束。
 
-- [ ] **Step 7: 跑全部部署脚本测试并提交**
+- [x] **Step 7: 跑全部部署脚本测试并提交**
 
   Run:
 

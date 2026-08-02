@@ -171,35 +171,56 @@ services:
       timeout: 5s
       retries: 10
 
-  redis:
+  redis-core:
     image: ${IMAGE_REDIS}
     restart: unless-stopped
     environment:
       TZ: "Asia/Shanghai"
     ports:
       - "6379:6379"                        # 内网开放(0.0.0.0),供其它服务器直连
-    # PM 在线聚合窗口是运行期权威状态，必须 AOF everysec + noeviction。
-    # 内存不足时显式失败并告警，不能以 LRU 静默破坏窗口完整性。
-    # 约束：limits.memory 须 ≥ maxmemory + 1GiB（AOF rewrite 的 fork COW 余量）。
-    # --no-appendfsync-on-rewrite：rewrite 期不 fsync，削峰；--save ""：AOF 已开，关 RDB save
-    # 点避免双 fork COW（重启恢复走 AOF）。
-    # 1GiB + 500% 避免在线聚合高写入下频繁重写，AOF everysec 与 noeviction 保持不变。
-    # 12 分钟关窗会让相邻两个小时的约 4 万设备窗口短时并存；20k 基站实测
-    # 2GiB 在积压恢复时会拒绝写入，因此生产默认按双窗口容量取 4GiB。
-    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-4gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save "" --auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_CORE_MAXMEMORY:-3gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save "" --auto-aof-rewrite-min-size 1gb --auto-aof-rewrite-percentage 500
     # AOF rewrite/fsync 落盘窗口
     stop_grace_period: 30s
     deploy:
       resources:
         limits:
           # CPU 1→2核对齐 plan-resources.sh medium 档（32核/32G 目标机型）。
-          cpus: "${REDIS_CPUS:-2}"
-          memory: "${REDIS_MEM:-5g}"
+          cpus: "${REDIS_CORE_CPUS:-2}"
+          memory: "${REDIS_CORE_MEM:-4g}"
         reservations:
           cpus: "0.25"
           memory: 256m
     volumes:
       - ${REDIS_DATA_PATH:-redisdata}:/data
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      omcgo-net:
+        aliases:
+          - redis
+          - redis-core
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis-pm:
+    image: ${IMAGE_REDIS}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_PM_MAXMEMORY:-6gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save "" --auto-aof-rewrite-min-size 2gb --auto-aof-rewrite-percentage 500
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "${REDIS_PM_CPUS:-2}"
+          memory: "${REDIS_PM_MEM:-8g}"
+        reservations:
+          cpus: "0.25"
+          memory: 512m
+    volumes:
+      - ${REDIS_PM_DATA_PATH:-redispmdata}:/data
       - /etc/localtime:/etc/localtime:ro
     networks:
       - omcgo-net
@@ -309,5 +330,6 @@ volumes:
   pgdata:
   tsdbdata:
   redisdata:
+  redispmdata:
   natsdata:
   miniodata:

@@ -217,7 +217,9 @@ services:
       # app 连时序库（TsPool）读影子维度 / PM 聚合表；等时序库 schema 就绪。
       migrate-tsdb-schema:
         condition: service_completed_successfully
-      redis:
+      redis-core:
+        condition: service_healthy
+      redis-pm:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -286,7 +288,7 @@ services:
       # acs 写 trace_messages → 时序库；等时序库 schema 就绪后再起。
       migrate-tsdb-schema:
         condition: service_completed_successfully
-      redis:
+      redis-core:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -382,7 +384,9 @@ services:
       # retention / trace 写入，等时序库 schema 就绪。
       migrate-tsdb-schema:
         condition: service_completed_successfully
-      redis:
+      redis-core:
+        condition: service_healthy
+      redis-pm:
         condition: service_healthy
       nats:
         condition: service_healthy

@@ -93,7 +93,8 @@ CPU 空闲预算 = nproc − 主机CPU保留 − max(其它容器CPU, ⌈load15�
 | worker | 1024 | 2048 | 25% | PM/MR XML 解析最吃内存（111→1111 文件/s）；1M 走横向 |
 | **postgres** | **7168** | 16384 | 25% | **须容 `max_connections=300`**（180池+余量）：shared_buffers+maint+300×(10+work_mem) 须舒适放进限额 |
 | **postgres-tsdb** | **4096** | 12288 | 22% | **时序库（#347）独立 TimescaleDB 实例**：PM COPY 入库 + KPI 聚合写主要在此；与主库分别计入预算，防双 PG 同机超分 OOM。同源派生 `TSDB_*`（shared_buffers 25% 等），`max_connections=300` 与主库对齐（实际池仅 ~65，余量充足） |
-| redis | 5120 | 8192 | 15% | 12 分钟关窗会短时并存相邻两个小时的约 4 万设备窗口；20k 基站实测需 4GiB `maxmemory`，另留 1GiB AOF rewrite COW 余量 |
+| redis-core | 4096 | 6144 | 8% | ACS 会话、设备任务和告警等核心状态；与 PM 物理隔离，保留 1GiB AOF COW 余量 |
+| redis-pm | 8192 | 12288 | 15% | 12 分钟关窗会短时并存相邻小时窗口；保留 2GiB AOF COW 余量 |
 | nats | 1024 | 2048 | 5% | JetStream file store |
 | minio | 3072 | 4096 | 8% | 对象存储；压测发现按可见CPU配额自动估算的并发上限过于保守，且线上巡检 2.5GiB 配额下已到 88%，floor/ceil 上调留余量 |
 | web | 512 | 512 | 0% | nginx 静态+反代，固定 |
@@ -111,7 +112,8 @@ CPU 空闲预算 = nproc − 主机CPU保留 − max(其它容器CPU, ⌈load15�
 | PG `shared_buffers` | `0.25 × PG_MEM` | 取 25% 非 40%——留 OS page cache 给 Timescale 列存解压 |
 | PG `effective_cache_size` | `0.70 × PG_MEM` | 规划器提示（当前 4GB 默认对 2g 容器说谎） |
 | PG `max_connections` | `200`（固定） | 覆盖 Go 端 180 池 + 余量；自检饱和估算逼近限额时告警建议 pgbouncer |
-| Redis `maxmemory` | `REDIS_MEM − 1GiB`；`REDIS_MEM` 下限 5GiB | 覆盖 12 分钟关窗造成的双小时窗口重叠，并保留 1GiB COW 余量；策略固定 `noeviction` |
+| Core Redis `maxmemory` | `REDIS_CORE_MEM − 1GiB` | 核心业务状态独立预算；策略固定 `noeviction` |
+| PM Redis `maxmemory` | `REDIS_PM_MEM − 2GiB`；下限 8GiB | 覆盖 12 分钟关窗的双小时窗口并保留 2GiB COW 余量；策略固定 `noeviction` |
 | `TSDB_*`（时序库 #347） | 同各 PG 公式 | 独立实例 postgres-tsdb 同源派生 `shared_buffers`/`effective_cache_size`/`work_mem`/`maint`/`max_wal`；`max_connections=300` 与主库对齐 |
 
 ---
@@ -165,10 +167,10 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
 
 部署人员检视/微调 `resources.env` 后，运行 `install.sh`（Phase 2 后将自动消费该文件）。
 
-### 完整资源契约（schema v2）
+### 完整资源契约（schema v3）
 
 `resources.env` 不是可随意截取的 Compose 覆盖片段。规划器写入
-`OMC_RESOURCE_SCHEMA_VERSION=2`、`OMC_RESOURCE_PLAN_HOST_CPU` 与
+`OMC_RESOURCE_SCHEMA_VERSION=3`、`OMC_RESOURCE_PLAN_HOST_CPU` 与
 `OMC_RESOURCE_PLAN_HOST_MEM_MIB`。规划器先在目标目录写临时候选并校验全部资源键和
 联动约束，成功后才原子替换正式文件；生成或校验失败时保留上一份 last-good 文件。
 
@@ -177,7 +179,7 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
 顺序校验候选。正常安装在切换 `current` 和任何容器重启前完成第一次校验，继承复制到
 新 release 后再校验实际文件。`install.sh`、`svc.sh` 和部署后 `healthcheck.sh` 使用
 同一验证库：
-缺任何服务的键、单位不可解析、Go 堆上限不低于容器内存、Redis 未保留 1 GiB COW
+缺任何服务的键、单位不可解析、Go 堆上限不低于容器内存、核心 Redis 未保留 1 GiB 或 PM Redis 未保留 2 GiB COW
 余量或任一数据库连接数低于 180，都会失败。尤其是仅含三行 Redis 的历史文件会被
 拒绝；失败不会切换 `current` 或启动/重启容器。需要重新规划时运行
 `bash plan-resources.sh`，不要手工删键。
@@ -203,10 +205,13 @@ OMC_PROBE_CPU=32 OMC_PROBE_MEM_TOTAL_MIB=65536 OMC_PROBE_MEM_AVAIL_MIB=61440 \
        GOMEMLIMIT: "${APP_GOMEMLIMIT:-900MiB}"
        GOMAXPROCS: "${APP_GOMAXPROCS:-2}"
    # 例：docker-compose.infra.yml
-   redis:
-     command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-4gb}
+   redis-core:
+     command: redis-server --appendonly yes --maxmemory ${REDIS_CORE_MAXMEMORY:-3gb}
               --maxmemory-policy noeviction
               --no-appendfsync-on-rewrite yes --save ""
+   redis-pm:
+     command: redis-server --appendonly yes --maxmemory ${REDIS_PM_MAXMEMORY:-6gb}
+              --maxmemory-policy noeviction
    postgres:
      command: ["postgres","-c","max_connections=${PG_MAX_CONNECTIONS:-200}",
                "-c","shared_buffers=${PG_SHARED_BUFFERS:-512MB}",

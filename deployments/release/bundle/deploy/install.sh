@@ -114,7 +114,7 @@ fi
 # 【版本相关】键(PROJECT_VERSION / IMAGE_*)不在此列,始终用新包值。
 # 注：POSTGRES_TSDB_USER/PASSWORD/DB（时序库凭据，#347）跨版本继承；TSDB_HOST 是 compose 服务名
 # （随包固定值），故【不】列入继承白名单，始终用新包值。
-ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH PM_AGGREGATION_FINALIZE_CONCURRENCY GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING"
+ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH PM_AGGREGATION_FINALIZE_CONCURRENCY GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING"
 
 # merge_env_preserve <prev_env> <new_env>
 # 升级继承:以新包 .env 为基底(拿到新镜像 tag),把上一版 .env 中白名单键的值
@@ -263,7 +263,7 @@ fresh_install_reset() {
     die "全新安装资源规划失败，未删除任何 OMC 数据" 1
 
   log "全新安装将清理以下数据目录："
-  for data_key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
+  for data_key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
     path="$(storage_env_get "$package_env" "$data_key")"
     case "$path" in
       /*) ;;
@@ -280,7 +280,7 @@ fresh_install_reset() {
     die "用户取消全新安装，未删除任何 OMC 数据" 1
 
   log "全新安装：删除 bind-mount 数据目录 ..."
-  for data_key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
+  for data_key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
     path="$(storage_env_get "$package_env" "$data_key")"
     rm -rf -- "$path"
   done
@@ -992,18 +992,19 @@ sep "7/9 启动基础设施 + 执行 migrate / seed"
 #     幂等：全新装 / 已剥离 / 目标镜像仍 timescaledb 时自动跳过。
 heal_main_pg_timescaledb_downgrade
 
-# 7.1 起基础设施（postgres / postgres-tsdb / redis / nats / minio）
+# 7.1 起基础设施（postgres / postgres-tsdb / redis-core / redis-pm / nats / minio）
 log "启动基础设施容器 ..."
-"${DC[@]}" up --pull never -d postgres postgres-tsdb redis nats minio
+"${DC[@]}" up --pull never -d postgres postgres-tsdb redis-core redis-pm nats minio
 
 log "等待基础设施 ready（最多 90s）..."
 WAIT=0
-PG_OK=0; TS_OK=0; RD_OK=0; NATS_OK=0
+PG_OK=0; TS_OK=0; RD_CORE_OK=0; RD_PM_OK=0; NATS_OK=0
 while [ $WAIT -lt 90 ]; do
   sleep 3; WAIT=$((WAIT+3))
   PG_CID="$("${DC[@]}" ps -q postgres 2>/dev/null || true)"
   TS_CID="$("${DC[@]}" ps -q postgres-tsdb 2>/dev/null || true)"
-  RD_CID="$("${DC[@]}" ps -q redis 2>/dev/null || true)"
+  RD_CORE_CID="$("${DC[@]}" ps -q redis-core 2>/dev/null || true)"
+  RD_PM_CID="$("${DC[@]}" ps -q redis-pm 2>/dev/null || true)"
   NATS_CID="$("${DC[@]}" ps -q nats 2>/dev/null || true)"
   if [ -n "$PG_CID" ]; then
     docker exec "$PG_CID" pg_isready -U "${POSTGRES_USER:-omcgo}" >/dev/null 2>&1 && PG_OK=1 || PG_OK=0
@@ -1012,22 +1013,25 @@ while [ $WAIT -lt 90 ]; do
   if [ -n "$TS_CID" ]; then
     docker exec "$TS_CID" pg_isready -U "${POSTGRES_TSDB_USER:-omcgo}" >/dev/null 2>&1 && TS_OK=1 || TS_OK=0
   fi
-  if [ -n "$RD_CID" ]; then
-    docker exec "$RD_CID" redis-cli ping >/dev/null 2>&1 && RD_OK=1 || RD_OK=0
+  if [ -n "$RD_CORE_CID" ]; then
+    docker exec "$RD_CORE_CID" redis-cli ping >/dev/null 2>&1 && RD_CORE_OK=1 || RD_CORE_OK=0
+  fi
+  if [ -n "$RD_PM_CID" ]; then
+    docker exec "$RD_PM_CID" redis-cli ping >/dev/null 2>&1 && RD_PM_OK=1 || RD_PM_OK=0
   fi
   if [ -n "$NATS_CID" ]; then
     [ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$NATS_CID" 2>/dev/null || true)" = "healthy" ] &&
       NATS_OK=1 || NATS_OK=0
   fi
-  [ "$PG_OK" = 1 ] && [ "$TS_OK" = 1 ] && [ "$RD_OK" = 1 ] && [ "$NATS_OK" = 1 ] && break
-  echo "  ... ${WAIT}s (PG=$PG_OK TSDB=$TS_OK RD=$RD_OK NATS=$NATS_OK)"
+  [ "$PG_OK" = 1 ] && [ "$TS_OK" = 1 ] && [ "$RD_CORE_OK" = 1 ] && [ "$RD_PM_OK" = 1 ] && [ "$NATS_OK" = 1 ] && break
+  echo "  ... ${WAIT}s (PG=$PG_OK TSDB=$TS_OK RedisCore=$RD_CORE_OK RedisPM=$RD_PM_OK NATS=$NATS_OK)"
 done
-if [ "$PG_OK" != 1 ] || [ "$TS_OK" != 1 ] || [ "$RD_OK" != 1 ] || [ "$NATS_OK" != 1 ]; then
-  die "基础设施 90s 内未就绪：PG=$PG_OK TSDB=$TS_OK RD=$RD_OK NATS=$NATS_OK
+if [ "$PG_OK" != 1 ] || [ "$TS_OK" != 1 ] || [ "$RD_CORE_OK" != 1 ] || [ "$RD_PM_OK" != 1 ] || [ "$NATS_OK" != 1 ]; then
+  die "基础设施 90s 内未就绪：PG=$PG_OK TSDB=$TS_OK RedisCore=$RD_CORE_OK RedisPM=$RD_PM_OK NATS=$NATS_OK
   手动检查：${DC[*]} ps
-            ${DC[*]} logs postgres postgres-tsdb redis" 2
+            ${DC[*]} logs postgres postgres-tsdb redis-core redis-pm" 2
 fi
-log "基础设施已就绪 (PG / TSDB / Redis / NATS)"
+log "基础设施已就绪 (PG / TSDB / Redis Core / Redis PM / NATS)"
 
 if [ "$HANDOFF_PREPARED" != 1 ]; then
   log "首次部署/原 NATS 未运行：按实际流状态安全初始化 GPV RPC 固定 durable ..."

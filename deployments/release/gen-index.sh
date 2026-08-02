@@ -266,7 +266,7 @@ bash deploy/plan-resources.sh -h                  # 全部参数</pre>
 <p class="tip">随后 <code>sudo bash deploy/install.sh</code> 会把包内 <code>deploy/resources.env</code> 一并带入部署（拷进 <code>current/deploy/</code>）。首次安装缺少该文件会直接失败，不再回退 compose 内置默认限额。</p>
 <p><b>⬆️ 升级部署</b>：<code>resources.env</code> 由 install.sh <b>自动从上一版继承</b>（<code>current/deploy/resources.env</code> 或 <code>etc/resources.env.saved</code>），<b>通常无需重跑</b>。仅当目标主机资源变化需<b>重新规划</b>时，在<b>新版本包目录</b>跑 <code>bash deploy/plan-resources.sh</code>（会覆盖继承值）。</p>
 <p class="tip">脚本做三件事：① 探测 CPU / 内存 / 负载 / 其它容器占用；② 算「空闲预算」；③ <b>floor-first</b> 分配（每组件先发 100k 基线下限，剩余按权重分到上限）并<b>联动派生</b> <code>GOMEMLIMIT</code> / Postgres <code>shared_buffers·max_connections</code> / Redis <code>maxmemory</code>，写入带注释的 <code>resources.env</code>。主机低于最低配会<b>清晰报错并给建议最低配</b>（全栈约 ≥24 GiB，<code>--skip-monitoring</code> 约 16 GiB）。算法与档位详见交付包内 <code>deploy/RESOURCE-PLANNING.md</code>。</p>
-<div class="tip">生成后请<b>检视 / 按需微调</b> <code>resources.env</code>，务必遵守文件头注释的约束：<code>GOMEMLIMIT &lt; *_MEM</code>、<code>REDIS_MEM ≥ REDIS_MAXMEMORY + 1GiB</code>、<code>PG_MAX_CONNECTIONS ≥ Go 端连接池总和（当前 180）</code>。<br>
+<div class="tip">生成后请<b>检视 / 按需微调</b> <code>resources.env</code>，务必遵守文件头注释的约束：<code>GOMEMLIMIT &lt; *_MEM</code>、核心 Redis 保留 1GiB / PM Redis 保留 2GiB AOF COW 余量、<code>PG_MAX_CONNECTIONS ≥ Go 端连接池总和（当前 180）</code>。<br>
 下游消费：<code>install.sh</code> 与 <code>svc.sh</code> 均以 <code>--env-file resources.env</code> 读取本文件，compose 用 <code>${VAR:-默认}</code> 套入限额。改完 <code>resources.env</code> 后跑 <code>bash svc.sh restart</code> 即按新限额有序重建生效。</div>
 
 <h2>🚚 5. 一键部署 OMC</h2>
