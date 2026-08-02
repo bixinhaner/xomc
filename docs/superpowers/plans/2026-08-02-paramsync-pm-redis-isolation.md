@@ -34,7 +34,7 @@
 - Modify: `omcgo/internal/paramsync/pg_repository.go`
 - Modify: `omcgo/internal/paramsync/pg_repository_integration_test.go`
 
-- [ ] **Step 1: 为统一收敛判定写失败单元测试**
+- [x] **Step 1: 为统一收敛判定写失败单元测试**
 
   在 `convergence_test.go` 建表驱动测试，至少覆盖：
 
@@ -68,13 +68,13 @@
   }
   ```
 
-- [ ] **Step 2: 运行测试确认因收敛器尚不存在而失败**
+- [x] **Step 2: 运行测试确认因收敛器尚不存在而失败**
 
   Run: `cd omcgo && go test ./internal/paramsync -run 'TestRunConvergenceDecision' -count=1`
 
   Expected: FAIL，缺少 `convergenceDecision` / `decideRunConvergence`。
 
-- [ ] **Step 3: 定义事务级收敛接口和结果**
+- [x] **Step 3: 定义事务级收敛接口和结果**
 
   在 `convergence.go` 定义：
 
@@ -104,11 +104,11 @@
 
   函数必须在同一事务中：锁定运行、加载 authoritative task/result counts、修正计数、判断 ready、调用现有成功/失败 finalize 逻辑。终态运行幂等返回，不重复记完成指标。
 
-- [ ] **Step 4: 将事件处理路径改为调用统一收敛器**
+- [x] **Step 4: 将事件处理路径改为调用统一收敛器**
 
   删除 `Process` 中重复的 `ReadyToFinalize` 分支组合，保留事件落库与幂等判断，然后调用 package-level `convergeRunTx(..., p.now(), p.metrics, convergenceEvent)`。该函数不挂在 `PGResultProcessor` receiver 上，确保 Reconciler 可复用同一实现而不形成接口反向依赖。重投结果不得重复 finalize、不得重复增加 processed 数。
 
-- [ ] **Step 5: 为事务与重投行为补集成测试**
+- [x] **Step 5: 为事务与重投行为补集成测试**
 
   测试至少断言：
 
@@ -118,13 +118,13 @@
   - 同一 result redelivery 不重复完成；
   - 两个并发收敛调用只有一个返回 `Finalized=true`。
 
-- [ ] **Step 6: 运行参数同步聚焦测试**
+- [x] **Step 6: 运行参数同步聚焦测试**
 
   Run: `cd omcgo && go test ./internal/paramsync -run 'Test(RunConvergence|ResultProcessor|ClaimRunForFinalize)' -count=1`
 
   Expected: PASS。
 
-- [ ] **Step 7: 提交统一收敛器**
+- [x] **Step 7: 提交统一收敛器**
 
   ```bash
   git add omcgo/internal/paramsync

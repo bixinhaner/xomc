@@ -42,6 +42,116 @@ func TestDeviceParameterWriteLockSerializesConcurrentWriters(t *testing.T) {
 	require.NoError(t, devicepkg.AcquireParameterWriteLocks(ctx, third, deviceID))
 }
 
+func TestConvergeRunTxRepairsAuthoritativeCountsAndFinalizes(t *testing.T) {
+	ctx := context.Background()
+	pool := newParamSyncTestPool(t)
+	request := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
+	runID := uuid.New()
+	_, err := pool.Exec(ctx, `
+INSERT INTO parameter_sync_runs (
+  id, request_id, device_id, device_sn, trigger_reason, sync_scope,
+  status, expected_task_count, terminal_task_count, processed_task_count,
+  failed_task_count
+) VALUES ($1,$2,$3,$4,'manual','readback','executing',0,0,0,0)`,
+		runID, request.ID, request.DeviceID, request.DeviceSN,
+	)
+	require.NoError(t, err)
+
+	taskRow := task.NewTask(&task.CreateTaskRequest{
+		DeviceSN: request.DeviceSN, Method: "GetParameterValues",
+		Params: []byte(`{"names":[]}`), CommandKey: "converge-authoritative-counts",
+		Source: task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: request.ID.String(),
+	})
+	require.NoError(t, task.NewPgTaskRepository(pool).Create(ctx, taskRow))
+	_, err = pool.Exec(ctx, `
+UPDATE device_tasks SET status='completed', completed_at=now(), result='{}'::jsonb
+WHERE id=$1`, taskRow.ID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+INSERT INTO parameter_sync_task_results (
+  run_id, task_id, event_id, success, result_ref, status, processed_at, created_at
+) VALUES ($1,$2,$3,true,$4,'processed',now(),now())`,
+		runID, taskRow.ID, uuid.NewString(), "device_tasks:"+taskRow.ID,
+	)
+	require.NoError(t, err)
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	result, err := convergeRunTx(ctx, tx, runID, time.Now().UTC())
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(ctx))
+	require.True(t, result.Finalized)
+	require.True(t, result.Drift)
+	require.Equal(t, RunStatusSucceeded, result.Status)
+
+	var status RunStatus
+	var expected, terminal, processed int
+	require.NoError(t, pool.QueryRow(ctx, `
+SELECT status, expected_task_count, terminal_task_count, processed_task_count
+FROM parameter_sync_runs WHERE id=$1`, runID).Scan(
+		&status, &expected, &terminal, &processed,
+	))
+	require.Equal(t, RunStatusSucceeded, status)
+	require.Equal(t, []int{1, 1, 1}, []int{expected, terminal, processed})
+}
+
+func TestConvergeRunTxFinalizesFailedAuthoritativeResult(t *testing.T) {
+	ctx := context.Background()
+	pool := newParamSyncTestPool(t)
+	request := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
+	runID := uuid.New()
+	_, err := pool.Exec(ctx, `
+INSERT INTO parameter_sync_runs (
+  id, request_id, device_id, device_sn, trigger_reason, sync_scope,
+  status, expected_task_count, terminal_task_count, processed_task_count,
+  failed_task_count, error_message
+) VALUES ($1,$2,$3,$4,'manual','readback','executing',0,0,0,0,'device task failed')`,
+		runID, request.ID, request.DeviceID, request.DeviceSN,
+	)
+	require.NoError(t, err)
+
+	taskRow := task.NewTask(&task.CreateTaskRequest{
+		DeviceSN: request.DeviceSN, Method: "GetParameterValues",
+		Params: []byte(`{"names":[]}`), CommandKey: "converge-failed-counts",
+		Source: task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: request.ID.String(),
+	})
+	require.NoError(t, task.NewPgTaskRepository(pool).Create(ctx, taskRow))
+	_, err = pool.Exec(ctx, `
+UPDATE device_tasks
+SET status='failed', completed_at=now(), error_message='device task failed'
+WHERE id=$1`, taskRow.ID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+INSERT INTO parameter_sync_task_results (
+  run_id, task_id, event_id, success, result_ref, status, error_message,
+  processed_at, created_at
+) VALUES ($1,$2,$3,false,$4,'failed','device task failed',now(),now())`,
+		runID, taskRow.ID, uuid.NewString(), "device_tasks:"+taskRow.ID,
+	)
+	require.NoError(t, err)
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	result, err := convergeRunTx(ctx, tx, runID, time.Now().UTC())
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(ctx))
+	require.True(t, result.Finalized)
+	require.True(t, result.Failed)
+	require.True(t, result.Drift)
+	require.Equal(t, RunStatusFailed, result.Status)
+
+	var runStatus RunStatus
+	var requestStatus RequestStatus
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT status FROM parameter_sync_runs WHERE id=$1`, runID,
+	).Scan(&runStatus))
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT status FROM parameter_sync_requests WHERE id=$1`, request.ID,
+	).Scan(&requestStatus))
+	require.Equal(t, RunStatusFailed, runStatus)
+	require.Equal(t, RequestStatusFailed, requestStatus)
+}
+
 func TestDuplicateResultDoesNotWaitForRunWriteLock(t *testing.T) {
 	ctx := context.Background()
 	pool := newParamSyncTestPool(t)
