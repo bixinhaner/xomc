@@ -12,18 +12,44 @@ tests:
         values: '5 5 5 5'
       - series: 'omc_resource_plan_cpu_cores{compose_service="worker",service="node"}'
         values: '8 8 8 8'
+      - series: 'omc_resource_plan_cpu_cores{compose_service="redis-core",service="node"}'
+        values: '2 2 2 2'
+      - series: 'omc_resource_plan_cpu_cores{compose_service="redis-pm",service="node"}'
+        values: '2 2 2 2'
       - series: 'omc_resource_plan_memory_limit_bytes{compose_service="app",service="node"}'
         values: '1610612736 1610612736 1610612736 1610612736'
       - series: 'omc_resource_plan_memory_limit_bytes{compose_service="acs",service="node"}'
         values: '4294967296 4294967296 4294967296 4294967296'
       - series: 'omc_resource_plan_memory_limit_bytes{compose_service="worker",service="node"}'
         values: '2147483648 2147483648 2147483648 2147483648'
-      - series: 'container_spec_cpu_quota{container_label_com_docker_compose_service="worker"}'
+      - series: 'omc_resource_plan_memory_limit_bytes{compose_service="redis-core",service="node"}'
+        values: '3221225472 3221225472 3221225472 3221225472'
+      - series: 'omc_resource_plan_memory_limit_bytes{compose_service="redis-pm",service="node"}'
+        values: '8589934592 8589934592 8589934592 8589934592'
+      - series: 'container_spec_cpu_quota{id="worker-id",container_label_com_docker_compose_service="worker"}'
         values: '800000 800000 800000 800000'
-      - series: 'container_spec_cpu_period{container_label_com_docker_compose_service="worker"}'
+      - series: 'container_spec_cpu_period{id="worker-id",container_label_com_docker_compose_service="worker"}'
         values: '100000 100000 100000 100000'
-      - series: 'container_spec_memory_limit_bytes{container_label_com_docker_compose_service="worker"}'
+      - series: 'container_spec_memory_limit_bytes{id="worker-id",container_label_com_docker_compose_service="worker"}'
         values: '2147483648 2147483648 2147483648 2147483648'
+      - series: 'container_last_seen{id="worker-id",name="omcgo-worker-1"}'
+        values: '0 60 120 180'
+      - series: 'container_spec_cpu_quota{id="redis-core-id",container_label_com_docker_compose_service="redis-core"}'
+        values: '200000 200000 200000 200000'
+      - series: 'container_spec_cpu_period{id="redis-core-id",container_label_com_docker_compose_service="redis-core"}'
+        values: '100000 100000 100000 100000'
+      - series: 'container_spec_memory_limit_bytes{id="redis-core-id",container_label_com_docker_compose_service="redis-core"}'
+        values: '3221225472 3221225472 3221225472 3221225472'
+      - series: 'container_last_seen{id="redis-core-id",name="omcgo-redis-core-1"}'
+        values: '0 60 120 180'
+      - series: 'container_spec_cpu_quota{id="redis-pm-id",container_label_com_docker_compose_service="redis-pm"}'
+        values: '200000 200000 200000 200000'
+      - series: 'container_spec_cpu_period{id="redis-pm-id",container_label_com_docker_compose_service="redis-pm"}'
+        values: '100000 100000 100000 100000'
+      - series: 'container_spec_memory_limit_bytes{id="redis-pm-id",container_label_com_docker_compose_service="redis-pm"}'
+        values: '8589934592 8589934592 8589934592 8589934592'
+      - series: 'container_last_seen{id="redis-pm-id",name="omcgo-redis-pm-1"}'
+        values: '0 60 120 180'
     alert_rule_test:
       - eval_time: 3m
         alertname: OMCResourcePlanCPUQuotaSeriesAbsent
@@ -88,3 +114,33 @@ tests:
             exp_annotations:
               summary: "资源计划服务缺少 cAdvisor 内存 limit 序列：acs"
               description: "已声明资源计划的服务没有对应 cAdvisor container_spec_memory_limit_bytes 序列。"
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_resource_plan_cpu_cores{compose_service="redis-core",service="node"}'
+        values: '2 2 2 2 2'
+      - series: 'omc_resource_plan_memory_limit_bytes{compose_service="redis-core",service="node"}'
+        values: '3221225472 3221225472 3221225472 3221225472 3221225472'
+      - series: 'container_spec_cpu_quota{id="redis-core-id",container_label_com_docker_compose_service="redis-core"}'
+        values: '300000 300000 300000 300000 300000'
+      - series: 'container_spec_cpu_period{id="redis-core-id",container_label_com_docker_compose_service="redis-core"}'
+        values: '100000 100000 100000 100000 100000'
+      - series: 'container_spec_memory_limit_bytes{id="redis-core-id",container_label_com_docker_compose_service="redis-core"}'
+        values: '3221225472 3221225472 3221225472 3221225472 3221225472'
+      - series: 'container_last_seen{id="redis-core-id",name="omcgo-redis-core-1"}'
+        values: '0 60 120 180 240'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: OMCResourcePlanDrift
+        exp_alerts:
+          - exp_labels:
+              compose_service: redis-core
+              service: resource-plan
+              severity: critical
+              domain: omc
+            exp_annotations:
+              summary: "OMC 声明资源计划与容器实际 limit 不一致：redis-core"
+              description: |
+                cAdvisor 报告的实际 cgroup CPU 或内存限额已偏离同源 resources.env 声明值。
+                Action: 先运行 release healthcheck.sh 定位 resources.env、Compose 渲染或 Docker inspect
+                        的哪一层漂移；禁止只改单层或用容器重启掩盖问题。

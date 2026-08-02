@@ -352,7 +352,7 @@ groups:
           label_replace(
             count by (container_label_com_docker_compose_service) (
               (
-                container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+                container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis-core|redis-pm|nats|minio|web"} > 0
               )
               and on (id) omc:container_last_seen:fresh
             ),
@@ -374,7 +374,7 @@ groups:
           label_replace(
             count by (container_label_com_docker_compose_service) (
               (
-                container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+                container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis-core|redis-pm|nats|minio|web"} > 0
               )
               and on (id) omc:container_last_seen:fresh
             ),
@@ -396,7 +396,7 @@ groups:
           label_replace(
             count by (container_label_com_docker_compose_service) (
               (
-                container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"} > 0
+                container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis-core|redis-pm|nats|minio|web"} > 0
               )
               and on (id) omc:container_last_seen:fresh
             ),
@@ -419,8 +419,8 @@ groups:
             label_replace(
               sum by (container_label_com_docker_compose_service) (
                 (
-                  container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
-                  / container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+                  container_spec_cpu_quota{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis-core|redis-pm|nats|minio|web"}
+                  / container_spec_cpu_period{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis-core|redis-pm|nats|minio|web"}
                 )
                 and on (id) omc:container_last_seen:fresh
               ),
@@ -433,7 +433,7 @@ groups:
           (
             label_replace(
               sum by (container_label_com_docker_compose_service) (
-                container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis|nats|minio|web"}
+                container_spec_memory_limit_bytes{container_label_com_docker_compose_service=~"app|acs|acs-candidate|worker|postgres|postgres-tsdb|redis-core|redis-pm|nats|minio|web"}
                 and on (id) omc:container_last_seen:fresh
               ),
               "compose_service", "$1", "container_label_com_docker_compose_service", "(.*)"
@@ -447,7 +447,7 @@ groups:
           domain: omc
           service: resource-plan
         annotations:
-          summary: "OMC 声明资源计划与容器实际 limit 不一致：{{ $labels.container_label_com_docker_compose_service }}"
+          summary: "OMC 声明资源计划与容器实际 limit 不一致：{{ $labels.compose_service }}"
           description: |
             cAdvisor 报告的实际 cgroup CPU 或内存限额已偏离同源 resources.env 声明值。
             Action: 先运行 release healthcheck.sh 定位 resources.env、Compose 渲染或 Docker inspect
