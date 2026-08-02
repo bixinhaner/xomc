@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -135,14 +136,21 @@ func TestCounterRollupPeriodSelectRestrictsSourceVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(query, "task_version_id IN") {
+	if !strings.Contains(query, "rollup.task_version_id = ANY") {
 		t.Fatalf("period replay query lacks source-version predicate: %s", query)
 	}
 	if strings.Contains(query, "publication_eligible") {
 		t.Fatalf("period replay query must retain the captured revision after eligibility flips: %s", query)
 	}
-	if !strings.Contains(query, "FROM pm_rebuild_source_snapshot rollup") {
-		t.Fatalf("period replay query does not page the materialized source rows: %s", query)
+	if !strings.Contains(query, "FROM pm_aggregation_counter_rollups rollup") {
+		t.Fatalf("period replay query does not page the durable rollup table directly: %s", query)
+	}
+	if !strings.Contains(query, "JOIN pm_aggregation_windows published_window") ||
+		!strings.Contains(query, "published_window.published_revision = rollup.revision") {
+		t.Fatalf("period replay query is not pinned to the published revision: %s", query)
+	}
+	if strings.Contains(query, "pm_rebuild_source_snapshot") {
+		t.Fatalf("period replay query still materializes a temporary snapshot: %s", query)
 	}
 	if !strings.Contains(query, "LIMIT 256") {
 		t.Fatalf("period replay query is not bounded: %s", query)
@@ -215,24 +223,35 @@ func TestEnsureRevisionCleanupIndexesRepairsBothInvalidArtifacts(t *testing.T) {
 	}
 }
 
-func TestPeriodRebuildSnapshotMapsSourceVersionToPublicationVersion(t *testing.T) {
-	query := strings.Join(strings.Fields(periodRebuildSnapshotSQL), " ")
+func TestPeriodRebuildPageMapsSourceVersionToPublicationVersion(t *testing.T) {
+	querySQL, _, err := counterRollupPeriodPageSelect(
+		[]uuid.UUID{uuid.New()},
+		GranularityHourly,
+		time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC),
+		nil,
+		256,
+	).ToSql()
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := strings.Join(strings.Fields(querySQL), " ")
 	if !strings.Contains(query, "rollup.task_version_id = ANY($1)") {
-		t.Fatalf("snapshot must filter the source rollup version IDs: %s", query)
+		t.Fatalf("page must filter the source rollup version IDs: %s", query)
 	}
 	if !strings.Contains(query,
 		"published_window.task_version_id = rollup.publication_task_version_id") {
-		t.Fatalf("snapshot must map source rollup versions to publication window versions: %s", query)
+		t.Fatalf("page must map source rollup versions to publication window versions: %s", query)
 	}
 	if !strings.Contains(query, "published_window.published_revision = rollup.revision") {
-		t.Fatalf("snapshot must materialize only the currently published revision: %s", query)
+		t.Fatalf("page must read only the snapshot-visible published revision: %s", query)
 	}
 	if strings.Contains(query, "published_window.task_version_id = ANY($1)") {
-		t.Fatalf("snapshot incorrectly treats source IDs as publication window IDs: %s", query)
+		t.Fatalf("page incorrectly treats source IDs as publication window IDs: %s", query)
 	}
 	for _, column := range []string{"rollup.event_id", "rollup.payload", "rollup.revision"} {
 		if !strings.Contains(query, column) {
-			t.Fatalf("snapshot must materialize %s so retention cannot remove a later page: %s",
+			t.Fatalf("page must read %s inside the repeatable-read snapshot: %s",
 				column, query)
 		}
 	}
@@ -282,6 +301,44 @@ func TestVisitRollupSnapshotPagesClosesEachBoundedPageBeforeContinuing(t *testin
 	wantVisited := []uuid.UUID{first.payload.EventID, second.payload.EventID, third.payload.EventID}
 	if fmt.Sprint(visited) != fmt.Sprint(wantVisited) {
 		t.Fatalf("visited = %v, want %v", visited, wantVisited)
+	}
+}
+
+func TestVisitRollupSnapshotPagesStopsAfterCallbackError(t *testing.T) {
+	wantErr := errors.New("visit failed")
+	fetches := 0
+	err := visitRollupSnapshotPages(
+		func(*rollupSnapshotCursor) ([]rollupSnapshotPageRow, error) {
+			fetches++
+			return []rollupSnapshotPageRow{{payload: RollupPayload{EventID: uuid.New()}}}, nil
+		},
+		func(RollupPayload) error { return wantErr },
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("visit error = %v, want %v", err, wantErr)
+	}
+	if fetches != 1 {
+		t.Fatalf("fetches after callback error = %d, want 1", fetches)
+	}
+}
+
+func TestVisitRollupSnapshotPagesStopsAfterEmptyFirstPage(t *testing.T) {
+	fetches := 0
+	err := visitRollupSnapshotPages(
+		func(*rollupSnapshotCursor) ([]rollupSnapshotPageRow, error) {
+			fetches++
+			return nil, nil
+		},
+		func(RollupPayload) error {
+			t.Fatal("empty page must not invoke visitor")
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetches != 1 {
+		t.Fatalf("empty result fetches = %d, want 1", fetches)
 	}
 }
 

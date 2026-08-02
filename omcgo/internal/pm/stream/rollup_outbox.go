@@ -68,23 +68,6 @@ const revisionCleanupIndexUnlockSQL = `SELECT pg_advisory_unlock(hashtextextende
 
 const rollupSnapshotPageSize uint64 = 256
 
-const periodRebuildSnapshotSQL = `
-CREATE TEMP TABLE pm_rebuild_source_snapshot ON COMMIT PRESERVE ROWS AS
-SELECT rollup.task_version_id, rollup.granularity, rollup.window_start, rollup.entity_key,
-       rollup.chunk_index, rollup.publication_task_version_id, rollup.revision,
-       rollup.event_id, rollup.payload
-FROM pm_aggregation_counter_rollups rollup
-JOIN pm_aggregation_windows published_window
-  ON published_window.task_version_id = rollup.publication_task_version_id
- AND published_window.entity_key = rollup.entity_key
- AND published_window.granularity = rollup.granularity
- AND published_window.window_start = rollup.window_start
- AND published_window.published_revision = rollup.revision
-WHERE rollup.task_version_id = ANY($1)
-  AND rollup.granularity = $2
-  AND rollup.window_start >= $3 AND rollup.window_start < $4
-  AND published_window.published_revision IS NOT NULL`
-
 type rollupSnapshotCursor struct {
 	TaskVersionID            uuid.UUID
 	WindowStart              time.Time
@@ -586,13 +569,18 @@ func counterRollupPeriodPageSelect(
 		"rollup.task_version_id", "rollup.window_start", "rollup.entity_key", "rollup.chunk_index",
 		"rollup.publication_task_version_id", "rollup.revision", "rollup.event_id", "rollup.payload",
 	).
-		From("pm_rebuild_source_snapshot rollup").
-		Where(sq.Eq{
-			"rollup.task_version_id": taskVersionIDs,
-			"rollup.granularity":     string(granularity),
-		}).
+		From("pm_aggregation_counter_rollups rollup").
+		Join(`pm_aggregation_windows published_window
+  ON published_window.task_version_id = rollup.publication_task_version_id
+ AND published_window.entity_key = rollup.entity_key
+ AND published_window.granularity = rollup.granularity
+ AND published_window.window_start = rollup.window_start
+ AND published_window.published_revision = rollup.revision`).
+		Where("rollup.task_version_id = ANY(?)", taskVersionIDs).
+		Where(sq.Eq{"rollup.granularity": string(granularity)}).
 		Where(sq.GtOrEq{"rollup.window_start": start}).
-		Where(sq.Lt{"rollup.window_start": end})
+		Where(sq.Lt{"rollup.window_start": end}).
+		Where("published_window.published_revision IS NOT NULL")
 	if cursor != nil {
 		builder = builder.Where(`
 (rollup.task_version_id, rollup.window_start, rollup.entity_key, rollup.chunk_index,
@@ -617,33 +605,15 @@ func (r *RollupOutboxRepository) VisitSnapshotsForPeriod(
 	if len(taskVersionIDs) == 0 {
 		return fmt.Errorf("PM Counter rollup replay task versions are empty")
 	}
-	conn, err := r.pool.Acquire(ctx)
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.RepeatableRead,
+		AccessMode: pgx.ReadOnly,
+	})
 	if err != nil {
-		return fmt.Errorf("acquire PM Counter rollup replay connection: %w", err)
+		return fmt.Errorf("begin PM Counter rollup repeatable-read snapshot: %w", err)
 	}
-	defer conn.Release()
-	if _, err := conn.Exec(ctx, `DROP TABLE IF EXISTS pg_temp.pm_rebuild_source_snapshot`); err != nil {
-		return fmt.Errorf("reset PM Counter rollup replay snapshot: %w", err)
-	}
-	if _, err := conn.Exec(ctx, periodRebuildSnapshotSQL,
-		taskVersionIDs, string(granularity), start, end); err != nil {
-		return fmt.Errorf("capture PM Counter rollup replay publication snapshot: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `
-CREATE INDEX ON pg_temp.pm_rebuild_source_snapshot
-  (task_version_id, window_start, entity_key, chunk_index,
-   publication_task_version_id, revision, event_id)`); err != nil {
-		return fmt.Errorf("index PM Counter rollup replay publication snapshot: %w", err)
-	}
-	if _, err := conn.Exec(ctx, `ANALYZE pg_temp.pm_rebuild_source_snapshot`); err != nil {
-		return fmt.Errorf("analyze PM Counter rollup replay publication snapshot: %w", err)
-	}
-	defer func() {
-		dropCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = conn.Exec(dropCtx, `DROP TABLE IF EXISTS pg_temp.pm_rebuild_source_snapshot`)
-	}()
-	return visitRollupSnapshotPages(
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if err := visitRollupSnapshotPages(
 		func(cursor *rollupSnapshotCursor) ([]rollupSnapshotPageRow, error) {
 			query, args, err := counterRollupPeriodPageSelect(
 				taskVersionIDs, granularity, start, end, cursor, rollupSnapshotPageSize,
@@ -651,7 +621,7 @@ CREATE INDEX ON pg_temp.pm_rebuild_source_snapshot
 			if err != nil {
 				return nil, err
 			}
-			rows, err := conn.Query(ctx, query, args...)
+			rows, err := tx.Query(ctx, query, args...)
 			if err != nil {
 				return nil, fmt.Errorf("query PM Counter rollup period snapshot page: %w", err)
 			}
@@ -677,7 +647,13 @@ CREATE INDEX ON pg_temp.pm_rebuild_source_snapshot
 			return page, nil
 		},
 		visit,
-	)
+	); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit PM Counter rollup repeatable-read snapshot: %w", err)
+	}
+	return nil
 }
 
 func visitRollupSnapshotPages(

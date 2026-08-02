@@ -21,6 +21,7 @@ type Metrics struct {
 	RebuildBatchesTotal                    prometheus.Counter
 	RebuildJobsPerBatch                    prometheus.Histogram
 	RebuildSnapshotRowsTotal               prometheus.Counter
+	RebuildSnapshotPagesTotal              prometheus.Counter
 	RebuildSnapshotScanSeconds             prometheus.Histogram
 	RebuildCoalescedTotal                  prometheus.Counter
 	WindowsFinalizedTotal                  *prometheus.CounterVec
@@ -107,11 +108,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}),
 		RebuildSnapshotRowsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "omc_pm_aggregation_rebuild_snapshot_rows_total",
-			Help: "Compact rollup snapshot rows read by rebuild batch scans.",
+			Help: "Published rollup rows read by repeatable-read rebuild scans.",
+		}),
+		RebuildSnapshotPagesTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_pm_aggregation_rebuild_snapshot_pages_total",
+			Help: "Keyset pages containing published rollups read by repeatable-read rebuild scans.",
 		}),
 		RebuildSnapshotScanSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "omc_pm_aggregation_rebuild_snapshot_scan_seconds",
-			Help:    "Time spent sequentially scanning compact rollup snapshots for a rebuild batch.",
+			Help:    "Time spent scanning published rollups with repeatable-read keyset pagination for a rebuild batch.",
 			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 15, 30, 60},
 		}),
 		RebuildCoalescedTotal: prometheus.NewCounter(prometheus.CounterOpts{
@@ -222,6 +227,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.RebuildBatchesTotal,
 		m.RebuildJobsPerBatch,
 		m.RebuildSnapshotRowsTotal,
+		m.RebuildSnapshotPagesTotal,
 		m.RebuildSnapshotScanSeconds,
 		m.RebuildCoalescedTotal,
 		m.WindowsFinalizedTotal,

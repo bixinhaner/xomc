@@ -379,6 +379,7 @@
       "targets": [
         {"expr": "histogram_quantile(0.95, sum by (le) (rate(omc_pm_aggregation_rebuild_jobs_per_batch_bucket[$__rate_interval])))", "legendFormat": "rebuild batch p95 jobs"},
         {"expr": "sum(rate(omc_pm_aggregation_rebuild_snapshot_rows_total[$__rate_interval]))", "legendFormat": "snapshot rows/s"},
+        {"expr": "sum(rate(omc_pm_aggregation_rebuild_snapshot_pages_total[$__rate_interval]))", "legendFormat": "snapshot pages/s"},
         {"expr": "sum(rate(omc_pm_aggregation_rebuild_coalesced_total[$__rate_interval]))", "legendFormat": "coalesced generations/s"}
       ]
     },
@@ -409,6 +410,16 @@
         {"expr": "sum(rate(omc_pm_aggregation_rollup_outbox_published_total[$__rate_interval]))", "legendFormat": "rollup snapshots published/s"}
       ],
       "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "title": "PM 重算期间 TSDB 临时写入",
+      "description": "周期重算已改为只读 repeatable-read keyset 分页；该值持续上升时应排查其他排序或哈希溢写。",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 140},
+      "targets": [
+        {"expr": "rate(pg_stat_database_temp_bytes{instance=\"postgres-tsdb\"}[$__rate_interval])", "legendFormat": "TSDB temp bytes/s"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps"}}
     },
     {
       "title": "Redis 聚合活动窗口数",

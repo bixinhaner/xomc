@@ -381,10 +381,10 @@ groups:
           domain: omc
           subsystem: pm
         annotations:
-          summary: "PM 迟到重算紧凑快照扫描 P95 持续超过 10 秒"
+          summary: "PM 迟到重算只读快照扫描 P95 持续超过 10 秒"
           description: |
-            共享 rollup 快照扫描的 P95 超过 10 秒，说明重算数据库读取成本偏高。
-            Action: 对照 rebuild batch 大小、扫描行数、coalesced 数和 TSDB CPU/I/O；
+            repeatable-read keyset 快照扫描的 P95 超过 10 秒，说明重算数据库读取成本偏高。
+            Action: 对照 rebuild batch 大小、扫描行数、分页数、coalesced 数和 TSDB CPU/I/O/temp bytes；
                     禁止恢复按 network/product/group 重复扫描的旧路径。
 
       - alert: PMDailyVersionExpectedSlotsMismatch

@@ -308,7 +308,7 @@
 - Modify: `deployments/monitoring/alerts/omc-rules.yml`
 - Modify: `deployments/monitoring/grafana/dashboards/omc-overview.json`
 
-- [ ] **Step 1: 写“不物化临时表”的失败测试**
+- [x] **Step 1: 写“不物化临时表”的失败测试**
 
   新测试要求分页 SQL 直接查询 `pm_aggregation_counter_rollups` 并 join published window，禁止：
 
@@ -322,13 +322,13 @@
 
   分页 cursor 仍必须覆盖 `(task_version_id, window_start, entity_key, chunk_index, publication_task_version_id, revision, event_id)`。
 
-- [ ] **Step 2: 运行测试确认当前整周期临时表方案失败**
+- [x] **Step 2: 运行测试确认当前整周期临时表方案失败**
 
   Run: `cd omcgo && go test ./internal/pm/stream -run 'Test.*Period.*Page|TestVisitSnapshotsForPeriod' -count=1`
 
   Expected: FAIL，当前 SQL 来源为 `pm_rebuild_source_snapshot` 且执行 TEMP/INDEX/ANALYZE。
 
-- [ ] **Step 3: 在只读 Repeatable Read 快照中直接分页**
+- [x] **Step 3: 在只读 Repeatable Read 快照中直接分页**
 
   `VisitSnapshotsForPeriod` 在专用连接上开启：
 
@@ -341,7 +341,7 @@
 
   所有页面通过该事务查询基表和 `pm_aggregation_windows`。Repeatable Read 的同一 MVCC snapshot 保证分页过程中 `published_revision` 视图不漂移；只读事务不使用 `FOR UPDATE/FOR SHARE`。正常结束 commit，回调/查询失败 rollback。删除 TEMP TABLE、CREATE INDEX、ANALYZE 与 defer DROP。
 
-- [ ] **Step 4: 增加一致性、分页和取消测试**
+- [x] **Step 4: 增加一致性、分页和取消测试**
 
   至少覆盖：
 
@@ -352,11 +352,11 @@
   - context cancel 释放连接；
   - 空结果不产生后续 page query。
 
-- [ ] **Step 5: 调整观测指标**
+- [x] **Step 5: 调整观测指标**
 
   保留 `omc_pm_aggregation_rebuild_snapshot_scan_seconds` 以兼容告警，新增 `omc_pm_aggregation_rebuild_snapshot_pages_total`；将 help 文案从“temporary snapshot scan”改成“repeatable-read keyset snapshot scan”。Dashboard 同时显示 rows/s、pages/s、scan p95 和 TSDB temp bytes，方便确认写放大消失。
 
-- [ ] **Step 6: 跑 PM 全包测试并提交**
+- [x] **Step 6: 跑 PM 全包测试并提交**
 
   Run: `cd omcgo && go test ./internal/pm/stream -count=1`
 
