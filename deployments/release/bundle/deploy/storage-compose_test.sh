@@ -163,6 +163,7 @@ contains "安装记录单轮 healthcheck 超时" 'HEALTHCHECK_PROBE_TIMEOUTS' "$
 contains "安装使用轻量启动检查" 'healthcheck.sh" --startup' "$INSTALL"
 contains "启动检查核对 PM Redis 配置" 'PM Redis 指向 redis-pm' "$RELEASE_HEALTHCHECK"
 contains "启动检查核对 Redis 实例身份" 'redis-core / redis-pm 运行实例身份不同' "$RELEASE_HEALTHCHECK"
+contains "启动检查按 YAML 角色解析" 'redis-routing-check-lib.sh' "$RELEASE_HEALTHCHECK"
 contains "启动检查跳过重型审计" 'STARTUP_CHECK=0' "$RELEASE_HEALTHCHECK"
 contains "启动 HTTP 探针有单次超时" 'curl -fsS --max-time 3' "$RELEASE_HEALTHCHECK"
 not_contains "健康等待不得按固定步长伪计时" 'HEALTHCHECK_WAIT=$((HEALTHCHECK_WAIT + HEALTHCHECK_INTERVAL))' "$INSTALL"
@@ -180,6 +181,11 @@ if bash "$RELEASE_DEPLOY/redis-cutover-lib_test.sh"; then
   ok
 else
   bad "旧单 Redis 到双实例切换顺序回归"
+fi
+if bash "$RELEASE_DEPLOY/redis-routing-check-lib_test.sh"; then
+  ok
+else
+  bad "Redis YAML 角色解析回归"
 fi
 if bash "$RELEASE_NATS_VERIFY"; then
   ok

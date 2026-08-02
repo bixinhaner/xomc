@@ -48,6 +48,12 @@ else
   echo "  [FAIL] 缺 $DEPLOY_DIR/compose-env-lib.sh"
   exit 1
 fi
+if [ -f "$DEPLOY_DIR/redis-routing-check-lib.sh" ]; then
+  . "$DEPLOY_DIR/redis-routing-check-lib.sh"
+else
+  echo "  [FAIL] 缺 $DEPLOY_DIR/redis-routing-check-lib.sh"
+  exit 1
+fi
 monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING" || {
   echo "  [FAIL] 无法读取 monitoring profile"
   exit 1
@@ -141,11 +147,7 @@ redis_instances_distinct() {
 }
 
 check_redis_routing_config() {
-  local config_file
-  for config_file in app.prod.yaml worker.prod.yaml; do
-    grep -Fq 'redis-core:6379' "/opt/omc/etc/$config_file" || return 1
-    grep -Fq 'redis-pm:6379' "/opt/omc/etc/$config_file" || return 1
-  done
+  redis_routing_configs_valid /opt/omc/etc
 }
 
 # 安装阶段的启动就绪检查必须在完整审计之前结束。完整检查中的 nginx -T、
@@ -192,8 +194,8 @@ done
 
 echo "== Redis 业务路由隔离 =="
 for config_file in app.prod.yaml worker.prod.yaml; do
-  check "$config_file 核心 Redis 指向 redis-core" grep -Fq 'redis-core:6379' "/opt/omc/etc/$config_file"
-  check "$config_file PM Redis 指向 redis-pm" grep -Fq 'redis-pm:6379' "/opt/omc/etc/$config_file"
+  check "$config_file 核心 Redis 指向 redis-core" yaml_top_level_section_has_address "/opt/omc/etc/$config_file" redis redis-core:6379
+  check "$config_file PM Redis 指向 redis-pm" yaml_top_level_section_has_address "/opt/omc/etc/$config_file" pm_redis redis-pm:6379
 done
 check "redis-core / redis-pm 运行实例身份不同" redis_instances_distinct
 

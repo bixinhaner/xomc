@@ -54,6 +54,11 @@ rejected intentionally. Core Redis reserves at least 1 GiB and PM Redis at
 least 2 GiB above `maxmemory` for AOF copy-on-write. During migration and the
 rollback acceptance window, retain legacy `pmagg:*` keys in core Redis until
 their TTL expires; do not delete them merely because PM traffic has switched.
+The installer persists `/opt/omc/data/.redis-cutover-state` before removing a
+legacy single-Redis container. `pending` evidence forces every retry to repeat
+the core mount/key-count check and resume the idempotent PM copy; only a fully
+verified copy changes the marker to `completed`. Never delete a pending marker
+to bypass a failed upgrade.
 
 ### PM Redis migration runbook
 
