@@ -52,7 +52,7 @@
 
 ## 总体架构
 
-系统新增第二个 Redis 实例和 Worker 内的第二个 Redis client：
+系统新增第二个 Redis 实例，以及 App/Worker 内各自的第二个 Redis client：
 
 ```text
 redis-core
@@ -67,10 +67,10 @@ redis-pm
 ├── PM aggregation locks and watermarks
 ├── late-event correction state
 ├── PM Redis sweeper state
-└── KPI router L2 cache
+└── KPI router L2 cache / cache version invalidation
 ```
 
-`workerInfra.Redis` 保持为核心业务 Redis；新增 `workerInfra.PMRedis`。PM 聚合组件和 KPI Router 明确依赖 `PMRedis`，其他 worker 模块继续依赖 `Redis`。如果 `pm_redis` 未配置，`PMRedis` 回退到 `Redis`，保证旧配置可启动和滚动升级。
+`appInfra.Redis` / `workerInfra.Redis` 保持为核心业务 Redis；两者新增 `PMRedis`。PM 聚合组件、App/Worker KPI Router 以及 App 指标库变更触发的 cache version 失效通知明确依赖 `PMRedis`，其他模块继续依赖 `Redis`。如果 `pm_redis` 未配置，`PMRedis` 回退到 `Redis`，保证旧配置可启动和滚动升级。只切 Worker 会使 `kpi-route:cache_version` 分裂，属于禁止上线的错误路由。
 
 ## 参数同步状态收敛
 
@@ -117,7 +117,7 @@ status IN ('planning','enqueuing','waiting_device','executing','processing','can
 
 ### 配置契约
 
-WorkerConfig 新增：
+AppConfig 和 WorkerConfig 新增：
 
 ```yaml
 pm_redis:
@@ -141,7 +141,8 @@ pm_redis:
 
 - `pmstream.NewRedisWindowStore`
 - PM aggregation recovery/finalizer/sweeper 使用的窗口 store
-- KPI Router L2 cache
+- App/Worker KPI Router L2 cache
+- App DictLoader/指标管理触发的 KPI Router cache version 失效通知
 
 保留在 `Redis`：
 
@@ -181,7 +182,7 @@ pm_redis:
 3. 在上一小时结果完成发布后停止 Worker；NATS 和 TSDB outbox 继续持久保存新 PM 事件。
 4. 以 SCAN + pipeline DUMP/RESTORE 复制 `pmagg:*` 活动窗口键并保留 TTL；复制期间 Worker 不写聚合窗口。
 5. 对比源/目标键数、抽样哈希内容和 TTL，执行窗口状态一致性检查。
-6. 修改 Worker `pm_redis` 指向 `redis-pm` 并启动。
+6. 修改 App/Worker `pm_redis` 指向 `redis-pm` 并启动。
 7. 验证恢复活动窗口、NATS backlog 排空和前一/当前小时覆盖率。
 8. core Redis 中旧 `pmagg:*` 键保留一个完整窗口 TTL 安全期后，再由有界清理任务删除。
 
@@ -299,7 +300,7 @@ revision 大于 1 时保留定点清理，并为以下两表增加覆盖其完�
 1. 参数同步收敛代码、Redis 双 client 支持、SQL/索引优化和监控。
 2. 完整单元测试、集成测试、race、build、vet 和前端 typecheck。
 3. 构建发布包并先以兼容模式部署，确认没有行为回归。
-4. 启动 redis-pm，执行无损活动窗口迁移后切换 Worker。
+4. 启动 redis-pm，执行无损活动窗口迁移后切换 App/Worker。
 5. 验证 20,000 设备至少一个完整小时周期，以及当前日/周进行中结果。
 
 最终验收条件：
