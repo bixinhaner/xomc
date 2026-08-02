@@ -176,6 +176,45 @@ func TestPeriodRebuildIndexMatchesPeriodQueryPrefix(t *testing.T) {
 	}
 }
 
+func TestRevisionCleanupIndexesMatchDeletePredicate(t *testing.T) {
+	wantColumns := "publication_task_version_id, entity_key, granularity, window_start, revision, event_id"
+	for name, query := range map[string]string{
+		"counter rollups": revisionCleanupCounterRollupsIndexSQL,
+		"rollup outbox":   revisionCleanupOutboxIndexSQL,
+	} {
+		normalized := strings.Join(strings.Fields(query), " ")
+		if !strings.Contains(normalized, wantColumns) {
+			t.Fatalf("%s cleanup index does not match DELETE predicate: %s", name, query)
+		}
+		if !strings.Contains(query, "CREATE INDEX CONCURRENTLY") {
+			t.Fatalf("%s cleanup index can block hot writers: %s", name, query)
+		}
+	}
+	if !strings.Contains(revisionCleanupIndexLockSQL, "pg_advisory_lock") ||
+		!strings.Contains(revisionCleanupIndexUnlockSQL, "pg_advisory_unlock") {
+		t.Fatal("revision cleanup online index maintenance must serialize worker replicas")
+	}
+}
+
+func TestEnsureRevisionCleanupIndexesRepairsBothInvalidArtifacts(t *testing.T) {
+	db := &recordingRollupIndexDB{exists: true, valid: false}
+
+	err := ensureRevisionCleanupIndexes(context.Background(), db)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(db.execs) != 4 {
+		t.Fatalf("revision cleanup index repair statements = %d, want DROP+CREATE for two indexes: %v", len(db.execs), db.execs)
+	}
+	for i := 0; i < len(db.execs); i += 2 {
+		if !strings.HasPrefix(db.execs[i], "DROP INDEX CONCURRENTLY") ||
+			!strings.Contains(db.execs[i+1], "CREATE INDEX CONCURRENTLY") {
+			t.Fatalf("revision cleanup repair pair %d is not online DROP+CREATE: %v", i/2, db.execs[i:i+2])
+		}
+	}
+}
+
 func TestPeriodRebuildSnapshotMapsSourceVersionToPublicationVersion(t *testing.T) {
 	query := strings.Join(strings.Fields(periodRebuildSnapshotSQL), " ")
 	if !strings.Contains(query, "rollup.task_version_id = ANY($1)") {
@@ -281,5 +320,23 @@ func TestDeleteStaleRollupRevisionWithEmptyReplacementDeletesAllRows(t *testing.
 			strings.Contains(strings.ToUpper(query), "EVENT_ID NOT IN") {
 			t.Fatalf("empty replacement unexpectedly preserves old rollup rows: %s", query)
 		}
+	}
+}
+
+func TestDeleteStaleRollupRevisionSkipsInitialPublication(t *testing.T) {
+	tx := &recordingRollupDeleteTx{}
+	key := WindowKey{
+		TaskVersionID: uuid.New(), EntityKey: "Network",
+		Granularity: GranularityHourly,
+		Start:       time.Date(2026, 8, 2, 14, 0, 0, 0, time.UTC),
+	}
+
+	if err := deleteStaleRollupRevisionTx(
+		context.Background(), tx, key, 1, []uuid.UUID{uuid.New()},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(tx.queries) != 0 {
+		t.Fatalf("initial publication executed %d stale DELETE statements, want 0: %v", len(tx.queries), tx.queries)
 	}
 }

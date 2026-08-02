@@ -239,7 +239,7 @@
 - Modify: `omcgo/migrations/tsdb/000001_tsdb_schema.sql`
 - Modify: `omcgo/cmd/worker/pm_streaming.go`
 
-- [ ] **Step 1: 写 revision=1 不执行 DELETE 的失败测试**
+- [x] **Step 1: 写 revision=1 不执行 DELETE 的失败测试**
 
   使用现有 fake tx 记录执行 SQL：
 
@@ -254,17 +254,17 @@
 
   保留 revision=2 的断言，要求两个表都 DELETE 且含完整谓词。
 
-- [ ] **Step 2: 运行测试确认 revision=1 当前仍执行两次 DELETE**
+- [x] **Step 2: 运行测试确认 revision=1 当前仍执行两次 DELETE**
 
   Run: `cd omcgo && go test ./internal/pm/stream -run 'TestDeleteStaleRollupRevisionTx' -count=1`
 
   Expected: FAIL，记录到两个 DELETE。
 
-- [ ] **Step 3: 最小实现首次发布快速返回**
+- [x] **Step 3: 最小实现首次发布快速返回**
 
   `revision <= 1` 直接返回 nil；`revision > 1` 保持 stale cleanup，不改变迟到重算语义。
 
-- [ ] **Step 4: 为两个删除谓词增加精确索引**
+- [x] **Step 4: 为两个删除谓词增加精确索引**
 
   在 baseline TSDB schema 增加：
 
@@ -280,11 +280,11 @@
 
   与 `EnsurePeriodRebuildIndex` 同样增加在线升级的 `CREATE INDEX CONCURRENTLY IF NOT EXISTS` 守护；使用独立 advisory lock，不能把 `CONCURRENTLY` 放入事务。
 
-- [ ] **Step 5: 增加 SQL 结构和在线升级测试**
+- [x] **Step 5: 增加 SQL 结构和在线升级测试**
 
   断言索引列顺序完全匹配删除等值前缀、最后覆盖 `event_id`，创建/删除都为 CONCURRENTLY，副本间有 advisory lock。
 
-- [ ] **Step 6: 跑 PM 聚焦测试并提交**
+- [x] **Step 6: 跑 PM 聚焦测试并提交**
 
   Run: `cd omcgo && go test ./internal/pm/stream ./cmd/worker -run 'Rollup|Revision|Index|Streaming' -count=1`
 
