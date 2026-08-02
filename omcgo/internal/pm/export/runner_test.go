@@ -455,7 +455,7 @@ func TestRunner_BuildSource_DeviceDailyKPIExportUsesStoredOffsetSource(t *testin
 	require.True(t, ok)
 }
 
-func TestRunner_BuildSource_DeviceViewUsesDashboardLikeDeviceExport(t *testing.T) {
+func TestRunner_BuildSource_DeviceViewUsesMeasurementObjectOnlyLayout(t *testing.T) {
 	start := time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)
 	end := start.Add(30 * time.Minute)
 	params, err := json.Marshal(DashboardParams{
@@ -482,7 +482,7 @@ func TestRunner_BuildSource_DeviceViewUsesDashboardLikeDeviceExport(t *testing.T
 
 	_, ok := src.(*dashboardDeviceSource)
 	require.True(t, ok)
-	assert.True(t, layout.IncludeCell)
+	assert.False(t, layout.IncludeCell)
 	assert.True(t, layout.IncludeMeasurementObject)
 	assert.Equal(t, "设备 SN", layout.FirstColHeader)
 }
@@ -535,11 +535,11 @@ func TestRunner_BuildSource_DeviceViewCSVIncludesMeasurementObjectOriginalLDN(t 
 	)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"开始时间", "结束时间", "设备 SN", "Cell ID", "PLMN", "测量对象", "下行包数"}, nthCSVRow(t, up.gotBody, 0))
+	assert.Equal(t, []string{"开始时间", "结束时间", "设备 SN", "测量对象", "下行包数"}, nthCSVRow(t, up.gotBody, 0))
 	row := nthCSVRow(t, up.gotBody, 1)
-	require.Len(t, row, 7)
-	assert.Equal(t, objectLDN, row[5])
-	assert.Equal(t, "42", row[6])
+	require.Len(t, row, 5)
+	assert.Equal(t, objectLDN, row[3])
+	assert.Equal(t, "42", row[4])
 }
 
 func TestRunner_BuildSource_DeviceViewEnglishCSVIncludesMeasurementObjectOriginalLDN(t *testing.T) {
@@ -590,11 +590,11 @@ func TestRunner_BuildSource_DeviceViewEnglishCSVIncludesMeasurementObjectOrigina
 	)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"Start Time", "End Time", "Device SN", "Cell ID", "PLMN", "Measurement Object", "Downlink Packets"}, nthCSVRow(t, up.gotBody, 0))
+	assert.Equal(t, []string{"Start Time", "End Time", "Device SN", "Measurement Object", "Downlink Packets"}, nthCSVRow(t, up.gotBody, 0))
 	row := nthCSVRow(t, up.gotBody, 1)
-	require.Len(t, row, 7)
-	assert.Equal(t, objectLDN, row[5])
-	assert.Equal(t, "42", row[6])
+	require.Len(t, row, 5)
+	assert.Equal(t, objectLDN, row[3])
+	assert.Equal(t, "42", row[4])
 }
 
 // ── 预 running 守门：payload 坏 / 缺 task_id 直接返 error，不动任务 ─────────────
