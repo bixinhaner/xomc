@@ -64,6 +64,8 @@ contains "Redis 可配置挂载" '${REDIS_DATA_PATH:-redisdata}:/data' "$RELEASE
 contains "PM Redis 可配置挂载" '${REDIS_PM_DATA_PATH:-redispmdata}:/data' "$RELEASE_COMPOSE"
 contains "核心 Redis 独立服务" 'redis-core:' "$RELEASE_COMPOSE"
 contains "PM Redis 独立服务" 'redis-pm:' "$RELEASE_COMPOSE"
+contains "PM Redis 迁移运维入口" 'pm-redis-migrate:' "$RELEASE_APP_COMPOSE"
+contains "迁移入口默认 dry-run" 'entrypoint: ["omcctl", "pm-redis", "migrate"]' "$RELEASE_APP_COMPOSE"
 contains "核心 Redis 资源键" '${REDIS_CORE_MAXMEMORY:-3gb}' "$RELEASE_COMPOSE"
 contains "PM Redis 资源键" '${REDIS_PM_MAXMEMORY:-6gb}' "$RELEASE_COMPOSE"
 not_contains "PM Redis 不发布宿主端口" '6381:6379' "$RELEASE_COMPOSE"

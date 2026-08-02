@@ -55,6 +55,45 @@ least 2 GiB above `maxmemory` for AOF copy-on-write. During migration and the
 rollback acceptance window, retain legacy `pmagg:*` keys in core Redis until
 their TTL expires; do not delete them merely because PM traffic has switched.
 
+### PM Redis migration runbook
+
+Run from `/opt/omc/current/deploy`. The migration service is in the optional
+`operations` profile and defaults to `--dry-run`, so a normal install never
+starts it.
+
+1. Wait until the preceding hourly window is published, stop Worker with
+   `bash svc.sh stop worker`, and confirm the PM consumers no longer advance.
+2. Start and check the target with `bash svc.sh start redis-pm` and
+   `docker compose -p omcgo --env-file .env --env-file resources.env -f docker-compose.infra.yml exec -T redis-pm redis-cli ping`.
+3. Run the safe preview:
+
+   ```bash
+   docker compose -p omcgo --env-file .env --env-file resources.env \
+     -f docker-compose.infra.yml -f docker-compose.app.yml \
+     --profile operations run --rm pm-redis-migrate
+   ```
+
+4. If the preview reports no unexplained conflict, run the copy by overriding
+   the default command. The command copies only `pmagg:*`; `kpi-route:*` is
+   intentionally rebuilt on cache miss:
+
+   ```bash
+   docker compose -p omcgo --env-file .env --env-file resources.env \
+     -f docker-compose.infra.yml -f docker-compose.app.yml \
+     --profile operations run --rm pm-redis-migrate \
+     --pattern 'pmagg:*' --scan-count 500 --pipeline-size 100 --output json
+   ```
+
+   A differing destination key fails closed. Use `--replace` only after
+   confirming Worker remains stopped and the destination value is stale.
+5. Require `failed=0`, `conflicts=0`, equal source/target key counts, and every
+   key verified by DUMP payload plus TTL tolerance. Start Worker and then
+   rolling-restart App. Keep the old core keys until their TTL expires.
+6. If PM health fails, stop Worker and roll back to the previous dual-reader
+   release/config that uses core Redis. Do not point both explicit production
+   endpoints at the same address: the configuration guard rejects that unsafe
+   topology.
+
 ## Redis aggregation v2 rollout gate
 
 `PM_AGGREGATION_REDIS_V2_WRITE_ENABLED` defaults to `true`. This release reads

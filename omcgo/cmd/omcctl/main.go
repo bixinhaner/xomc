@@ -60,6 +60,7 @@ func main() {
 		newDeviceCmd(),
 		newAlarmCmd(),
 		newPMCmd(),
+		newPMRedisCmd(),
 		newSystemCmd(),
 		newMMLCmd(),
 	)

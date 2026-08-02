@@ -585,7 +585,7 @@
 - Modify: `deployments/release/bundle/deploy/docker-compose.app.yml`
 - Modify: `deployments/release/bundle/deploy/README.md`
 
-- [ ] **Step 1: 写迁移算法失败测试**
+- [x] **Step 1: 写迁移算法失败测试**
 
   用可注入的 Redis command fake 覆盖任意二进制 DUMP/RESTORE、冲突和批处理语义；再用两个 miniredis 对 string key 做端到端覆盖。miniredis 只完整支持 string 的 DUMP/RESTORE，因此 hash/set/zset/list/stream 必须在 Task 8 的真实 Redis Compose 集成烟测中验证，不能伪称单测已覆盖：
 
@@ -598,13 +598,13 @@
   - `--dry-run` 不写目标；
   - 扫描结果输出 scanned/copied/skipped/conflict/failed 和源/目标 key 数。
 
-- [ ] **Step 2: 运行测试确认命令不存在**
+- [x] **Step 2: 运行测试确认命令不存在**
 
   Run: `cd omcgo && go test ./cmd/omcctl -run 'TestPMRedis' -count=1`
 
   Expected: FAIL，缺少 `newPMRedisCmd` / migrator。
 
-- [ ] **Step 3: 实现 `omcctl pm-redis migrate`**
+- [x] **Step 3: 实现 `omcctl pm-redis migrate`**
 
   命令参数：
 
@@ -620,7 +620,7 @@
 
   使用 Redis `SCAN` + pipelined `PTTL`/`DUMP` + target `RESTORE`；TTL 小于等于 0 时按 Redis 语义区分永久 key 与已消失 key。日志不得输出 value、密码或 DUMP 内容。迁移结束再次 SCAN 比较 key count，并随机/全量（规模允许时）比较 `DUMP` hash 与 TTL 容差。
 
-- [ ] **Step 4: 将 omcctl 放进 worker 运维入口并写 runbook**
+- [x] **Step 4: 将 omcctl 放进 worker 运维入口并写 runbook**
 
   升级步骤固定为：
 
@@ -634,7 +634,7 @@
   8. 保留 core 中旧 key，不立即删除；
   9. 若 PM 健康失败，停 worker、切回 fallback core、重启。
 
-- [ ] **Step 5: 跑命令测试并提交**
+- [x] **Step 5: 跑命令测试并提交**
 
   Run: `cd omcgo && go test ./cmd/omcctl -count=1`
 
