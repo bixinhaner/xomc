@@ -12,6 +12,7 @@
 
 - Match `redis-core` and `redis-pm` explicitly; do not use a broad `redis.*` matcher.
 - Cover CPU quota, CPU period, memory limit, and CPU/memory drift expressions.
+- Render drift summaries from the normalized `compose_service` label.
 - Do not change alert duration, severity, labels, or unrelated dashboards.
 
 ---
@@ -19,7 +20,7 @@
 ### Task 1: Protect dual Redis resource-plan selectors
 
 **Files:**
-- Modify: `deployments/monitoring/tests/validate-cadvisor-service-labels.sh`
+- Modify: `deployments/monitoring/alerts/resource-plan-alerts.test`
 - Modify: `deployments/monitoring/alerts/host-container-alerts.yml`
 
 **Interfaces:**
@@ -28,17 +29,19 @@
 
 - [ ] **Step 1: Write the failing test**
 
-Extract the `OMCResourcePlanCPUQuotaSeriesAbsent` through `OMCResourcePlanDrift` rules and assert that their selectors contain `redis-core|redis-pm` and do not contain the legacy `|redis|` alternative.
+Add live `redis-core` and `redis-pm` quota, period, memory-limit, and `container_last_seen` input series. Declare matching schema-v3 resource-plan values and require that neither service produces a missing-series alert. Add the required freshness input to the existing Worker fixture so the test exercises the real `and on (id)` boundary.
+
+Add a second fixture whose Redis Core actual CPU quota is 3 cores while the plan declares 2 cores. Require `OMCResourcePlanDrift` with summary naming `redis-core`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `bash deployments/monitoring/tests/validate-cadvisor-service-labels.sh`
+Run: `docker run --rm -v "$PWD/deployments/monitoring/alerts:/rules:ro" --entrypoint promtool prom/prometheus:v2.51.0 test rules /rules/resource-plan-alerts.test`
 
-Expected: FAIL identifying that the resource-plan rules omit the dual Redis services.
+Expected: FAIL with unexpected `redis-core` and `redis-pm` missing-series alerts for CPU quota, CPU period, and memory limit.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Replace only the four affected bounded selectors in `host-container-alerts.yml`, changing `redis` to `redis-core|redis-pm`.
+Replace only the four affected bounded selectors in `host-container-alerts.yml`, changing `redis` to `redis-core|redis-pm`, and render the drift summary from `$labels.compose_service`.
 
 - [ ] **Step 4: Run focused and release verification**
 
@@ -58,4 +61,3 @@ Run promtool against every monitoring rule file and require success.
 - [ ] **Step 6: Commit**
 
 Commit the test and rule change with a Conventional Commit message.
-

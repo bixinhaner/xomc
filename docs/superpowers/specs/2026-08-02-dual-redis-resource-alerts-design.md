@@ -10,9 +10,10 @@ Use the explicit bounded dependency selector `postgres|postgres-tsdb|redis-core|
 
 Add an executable monitoring contract test that extracts every resource-plan alert block and requires both physical Redis services while rejecting the legacy standalone `redis` alternative. The same test validates CPU quota, CPU period, memory limit, and drift expressions.
 
+The drift alert summary must use the normalized `compose_service` label produced by `label_replace`; the original cAdvisor label is not preserved across the vector comparison.
+
 ## Acceptance
 
 - The regression test fails against `5ea2b31b3` because both physical Redis names are absent.
 - The monitoring validation suite and Prometheus rule validation pass after the minimal selector change.
 - After deployment, Prometheus sees quota/period/memory series for both Redis services and no `OMCResourcePlan*SeriesAbsent` or `OMCResourcePlanDrift` alert remains active.
-
