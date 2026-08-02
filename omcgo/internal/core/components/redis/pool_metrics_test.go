@@ -35,6 +35,41 @@ func TestPoolMetrics_RegistersAllRedisMetricNames(t *testing.T) {
 	}
 }
 
+func TestPoolMetricsCanRegisterCoreAndPMRolesTogether(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	sampler := func() poolSnapshot { return poolSnapshot{InUse: 1, Idle: 2, Max: 3} }
+	core := registerPoolMetricsWithSampler(
+		sampler, prometheus.WrapRegistererWith(prometheus.Labels{"role": "core"}, reg),
+		WithPoolMetricsInterval(time.Hour),
+	)
+	defer core.Stop()
+	pm := registerPoolMetricsWithSampler(
+		sampler, prometheus.WrapRegistererWith(prometheus.Labels{"role": "pm"}, reg),
+		WithPoolMetricsInterval(time.Hour),
+	)
+	defer pm.Stop()
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		if family.GetName() != "redis_pool_in_use" {
+			continue
+		}
+		require.Len(t, family.Metric, 2)
+		roles := map[string]bool{}
+		for _, metric := range family.Metric {
+			for _, label := range metric.Label {
+				if label.GetName() == "role" {
+					roles[label.GetValue()] = true
+				}
+			}
+		}
+		require.Equal(t, map[string]bool{"core": true, "pm": true}, roles)
+		return
+	}
+	t.Fatal("redis_pool_in_use metric family not registered")
+}
+
 func TestPoolMetrics_SamplerUpdatesGauges(t *testing.T) {
 	t.Parallel()
 

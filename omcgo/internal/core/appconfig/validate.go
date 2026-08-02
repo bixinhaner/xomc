@@ -27,6 +27,9 @@ func (c *AppConfig) Validate() error {
 	if err := c.Redis.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := validatePMRedis(c.Redis, c.PMRedis); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.JWT.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -145,6 +148,9 @@ func (c *WorkerConfig) Validate() error {
 	if err := c.Redis.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := validatePMRedis(c.Redis, c.PMRedis); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.Log.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -189,6 +195,37 @@ func (c RedisConfig) validate() error {
 		return fmt.Errorf("redis.addrs must not be empty")
 	}
 	return nil
+}
+
+func validatePMRedis(core, pm RedisConfig) error {
+	if !pm.configured() {
+		return nil
+	}
+	if len(pm.Addrs) == 0 {
+		return fmt.Errorf("pm_redis.addrs must not be empty")
+	}
+	if IsProductionEnv() && sameRedisAddressSet(core.Addrs, pm.Addrs) {
+		return fmt.Errorf("pm_redis must be physically isolated from redis; a different DB index is not isolation")
+	}
+	return nil
+}
+
+func sameRedisAddressSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	counts := make(map[string]int, len(left))
+	for _, addr := range left {
+		counts[strings.ToLower(strings.TrimSpace(addr))]++
+	}
+	for _, addr := range right {
+		key := strings.ToLower(strings.TrimSpace(addr))
+		if counts[key] == 0 {
+			return false
+		}
+		counts[key]--
+	}
+	return true
 }
 
 func (c JWTConfig) validate() error {

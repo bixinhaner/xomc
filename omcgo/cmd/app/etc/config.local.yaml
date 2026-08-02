@@ -49,6 +49,13 @@ redis:
   db: 0
   pool_size: 200
 
+pm_redis:
+  addrs:
+    - "localhost:6381"
+  password: ""
+  db: 0
+  pool_size: 200
+
 # Reliable parameter-sync data plane. Keep disabled until migration 000021 is applied.
 param_sync:
   routing_mode: legacy

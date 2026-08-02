@@ -90,6 +90,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		PgPool:     app.PgPool,
 		TsPool:     app.TsPool,
 		Redis:      app.Redis,
+		PMRedis:    app.PMRedis,
 		MinIO:      app.MinIO,
 		EventBus:   app.EventBus,
 		Realtime:   realtime.NewCoreNATS(app.NATS.Conn),

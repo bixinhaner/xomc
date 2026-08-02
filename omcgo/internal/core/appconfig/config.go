@@ -323,6 +323,7 @@ type AppConfig struct {
 	DB              PostgresConfig        `mapstructure:"db"`
 	TSDB            PostgresConfig        `mapstructure:"tsdb"`
 	Redis           RedisConfig           `mapstructure:"redis"`
+	PMRedis         RedisConfig           `mapstructure:"pm_redis"`
 	NATS            NATSConfig            `mapstructure:"nats"`
 	MinIO           MinIOConfig           `mapstructure:"minio"`
 	JWT             JWTConfig             `mapstructure:"jwt"`
@@ -809,6 +810,7 @@ type WorkerConfig struct {
 	DB                  PostgresConfig            `mapstructure:"db"`
 	TSDB                PostgresConfig            `mapstructure:"tsdb"`
 	Redis               RedisConfig               `mapstructure:"redis"`
+	PMRedis             RedisConfig               `mapstructure:"pm_redis"`
 	NATS                NATSConfig                `mapstructure:"nats"`
 	MinIO               MinIOConfig               `mapstructure:"minio"`
 	Task                TaskConfig                `mapstructure:"task"` // T-0157 C2: 任务过期扫描器配置
@@ -1032,6 +1034,27 @@ type RedisConfig struct {
 	Password string   `mapstructure:"password"`
 	DB       int      `mapstructure:"db"`
 	PoolSize int      `mapstructure:"pool_size"`
+}
+
+func (c RedisConfig) configured() bool {
+	return len(c.Addrs) > 0 || c.Password != "" || c.DB != 0 || c.PoolSize != 0
+}
+
+// EffectivePMRedis keeps old configurations deployable during the rolling
+// migration. Once pm_redis contains any setting it is treated as an explicit,
+// independently validated Redis endpoint rather than silently falling back.
+func (c AppConfig) EffectivePMRedis() RedisConfig {
+	if c.PMRedis.configured() {
+		return c.PMRedis
+	}
+	return c.Redis
+}
+
+func (c WorkerConfig) EffectivePMRedis() RedisConfig {
+	if c.PMRedis.configured() {
+		return c.PMRedis
+	}
+	return c.Redis
 }
 
 // NATSConfig 配置 NATS JetStream 连接。

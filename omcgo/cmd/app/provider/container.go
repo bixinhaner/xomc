@@ -49,6 +49,7 @@ type Container struct {
 	PgPool                   *pgxpool.Pool
 	TsPool                   *pgxpool.Pool
 	Redis                    redis.UniversalClient
+	PMRedis                  redis.UniversalClient
 	MinIO                    *minio.Client
 	EventBus                 event.EventBus
 	Realtime                 *realtime.CoreNATS
@@ -171,4 +172,11 @@ type Container struct {
 	alarmHandlerDeps    *alarmHandlerDeps
 	pmHandlerDeps       *pmHandlerDeps
 	miscDeps            miscDeps
+}
+
+func (c *Container) kpiRouteRedisCache() *kpirouter.RedisCache {
+	if c == nil || c.PMRedis == nil {
+		return nil
+	}
+	return kpirouter.NewRedisCache(c.PMRedis)
 }

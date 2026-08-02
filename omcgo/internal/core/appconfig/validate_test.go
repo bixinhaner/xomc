@@ -102,6 +102,59 @@ func TestAppConfig_Validate(t *testing.T) {
 	}
 }
 
+func TestPMRedisFallbackUsesCoreConfiguration(t *testing.T) {
+	core := RedisConfig{Addrs: []string{"redis-core:6379"}, Password: "secret", DB: 3, PoolSize: 40}
+	appCfg := AppConfig{Redis: core}
+	workerCfg := WorkerConfig{Redis: core}
+
+	require.Equal(t, core, appCfg.EffectivePMRedis())
+	require.Equal(t, core, workerCfg.EffectivePMRedis())
+}
+
+func TestProductionRejectsExplicitSharedPMRedis(t *testing.T) {
+	t.Setenv("OMCGO_ENV", "prod")
+	t.Setenv("GIN_MODE", "release")
+
+	appCfg := validAppConfig()
+	appCfg.Redis = RedisConfig{Addrs: []string{"redis-b:6379", "redis-a:6379"}, DB: 0}
+	appCfg.PMRedis = RedisConfig{Addrs: []string{"redis-a:6379", "redis-b:6379"}, DB: 9}
+	require.ErrorContains(t, appCfg.Validate(), "pm_redis must be physically isolated")
+
+	workerCfg := validWorkerConfig()
+	workerCfg.Redis = RedisConfig{Addrs: []string{"redis-core:6379"}, DB: 0}
+	workerCfg.PMRedis = RedisConfig{Addrs: []string{"redis-core:6379"}, DB: 12}
+	require.ErrorContains(t, workerCfg.Validate(), "pm_redis must be physically isolated")
+}
+
+func TestProductionAllowsMissingPMRedisForCompatibilityFallback(t *testing.T) {
+	t.Setenv("OMCGO_ENV", "prod")
+	t.Setenv("GIN_MODE", "release")
+	cfg := validWorkerConfig()
+	require.NoError(t, cfg.Validate())
+}
+
+func TestAppAndWorkerConfigExamplesUseDedicatedPMRedis(t *testing.T) {
+	for _, service := range []string{"app", "worker"} {
+		for _, env := range []string{"dev", "test", "local", "prod"} {
+			path := "../../../cmd/" + service + "/etc/config." + env + ".yaml"
+			t.Run(service+"/"+env, func(t *testing.T) {
+				if service == "app" {
+					t.Setenv("OMCGO_JWT_SECRET", "test-only-dedicated-redis-config-secret")
+					var cfg AppConfig
+					require.NoError(t, Load(path, &cfg))
+					require.NotEmpty(t, cfg.PMRedis.Addrs)
+					require.False(t, sameRedisAddressSet(cfg.Redis.Addrs, cfg.PMRedis.Addrs))
+					return
+				}
+				var cfg WorkerConfig
+				require.NoError(t, Load(path, &cfg))
+				require.NotEmpty(t, cfg.PMRedis.Addrs)
+				require.False(t, sameRedisAddressSet(cfg.Redis.Addrs, cfg.PMRedis.Addrs))
+			})
+		}
+	}
+}
+
 func TestACSConfig_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -233,5 +286,15 @@ func validACSConfig() ACSConfig {
 		Redis:   RedisConfig{Addrs: []string{"localhost:6379"}},
 		Log:     LogConfig{Level: "info", Format: "json"},
 		Metrics: MetricsConfig{Port: 9091},
+	}
+}
+
+func validWorkerConfig() WorkerConfig {
+	return WorkerConfig{
+		DB:      PostgresConfig{DSN: "postgres://user:pass@localhost:5432/omcgo", MaxConns: 10},
+		TSDB:    PostgresConfig{DSN: "postgres://user:pass@localhost:5433/omcgo_ts", MaxConns: 5},
+		Redis:   RedisConfig{Addrs: []string{"localhost:6379"}},
+		Log:     LogConfig{Level: "info", Format: "json"},
+		Metrics: MetricsConfig{Port: 9092},
 	}
 }

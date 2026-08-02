@@ -30,7 +30,14 @@ tsdb:
 
 redis:
   addrs:
-    - "redis:6379"
+    - "redis-core:6379"
+  password: ""
+  db: 0
+  pool_size: 100
+
+pm_redis:
+  addrs:
+    - "redis-pm:6379"
   password: ""
   db: 0
   pool_size: 100

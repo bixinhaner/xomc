@@ -54,6 +54,12 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	if err := inf.ConnectRedis(cfg.Redis); err != nil {
 		return nil, err
 	}
+	if len(cfg.PMRedis.Addrs) == 0 {
+		inf.PMRedis = inf.Redis
+		inf.Logger.Warn("pm_redis not configured; using compatibility fallback to redis-core")
+	} else if err := inf.ConnectPMRedis(cfg.EffectivePMRedis()); err != nil {
+		return nil, err
+	}
 	if err := inf.ConnectNATS(ctx, cfg.NATS); err != nil {
 		return nil, err
 	}

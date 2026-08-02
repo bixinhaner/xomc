@@ -44,6 +44,7 @@ type Infra struct {
 	PgPool     *pgxpool.Pool
 	TsPool     *pgxpool.Pool
 	Redis      redis.UniversalClient
+	PMRedis    redis.UniversalClient
 	MinIO      *minio.Client
 	NATS       *natscomp.NATSClient
 	EventBus   event.EventBus
@@ -163,19 +164,40 @@ func (inf *Infra) ConnectTimescale(ctx context.Context, cfg appconfig.PostgresCo
 // ConnectRedis 初始化 Redis 客户端，并注册健康检查和优雅关机回调。
 // 结果存入 Infra.Redis，封装为 redis.UniversalClient，支持单机和集群模式。
 func (inf *Infra) ConnectRedis(cfg appconfig.RedisConfig) error {
-	client, err := redisx.NewClient(cfg)
+	client, err := inf.connectRedis(cfg, "core")
 	if err != nil {
-		return fmt.Errorf("connect to Redis: %w", err)
+		return err
 	}
 	inf.Redis = client
-	inf.GS.Register("redis", 3, func(ctx context.Context) error { return client.Close() })
-	inf.Health.Register("redis", func(ctx context.Context) error {
+	return nil
+}
+
+// ConnectPMRedis initializes the physically isolated PM/KPI Redis client.
+// Callers that intentionally use the compatibility fallback should assign
+// Infra.PMRedis = Infra.Redis instead of opening a duplicate pool.
+func (inf *Infra) ConnectPMRedis(cfg appconfig.RedisConfig) error {
+	client, err := inf.connectRedis(cfg, "pm")
+	if err != nil {
+		return err
+	}
+	inf.PMRedis = client
+	return nil
+}
+
+func (inf *Infra) connectRedis(cfg appconfig.RedisConfig, role string) (redis.UniversalClient, error) {
+	client, err := redisx.NewClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("connect to Redis role %s: %w", role, err)
+	}
+	component := "redis-" + role
+	inf.GS.Register(component, 3, func(ctx context.Context) error { return client.Close() })
+	inf.Health.Register(component, func(ctx context.Context) error {
 		return client.Ping(ctx).Err()
 	})
-	// 连接池资源指标（redis_pool_in_use/idle/max）。
-	redisPoolMetrics := redismetrics.RegisterPoolMetrics(client, cfg.PoolSize, inf.MetricsReg)
-	inf.GS.Register("redis-pool-metrics", 1, func(context.Context) error { redisPoolMetrics.Stop(); return nil })
-	return nil
+	registerer := prometheus.WrapRegistererWith(prometheus.Labels{"role": role}, inf.MetricsReg)
+	redisPoolMetrics := redismetrics.RegisterPoolMetrics(client, cfg.PoolSize, registerer)
+	inf.GS.Register(component+"-pool-metrics", 1, func(context.Context) error { redisPoolMetrics.Stop(); return nil })
+	return client, nil
 }
 
 // ConnectNATS 初始化 NATS JetStream 客户端，并确保流存在。

@@ -395,7 +395,7 @@
 - Modify: `omcgo/cmd/worker/etc/config.prod.yaml`
 - Create: `omcgo/cmd/worker/redis_routing_test.go`
 
-- [ ] **Step 1: 写配置 fallback 和生产隔离失败测试**
+- [x] **Step 1: 写配置 fallback 和生产隔离失败测试**
 
   ```go
   func TestWorkerPMRedisFallback(t *testing.T) {
@@ -414,17 +414,17 @@
 
   dev/test/local 允许 PMRedis 空配置 fallback，生产显式配置时必须与 core 地址集合不同；不得用不同 DB index 冒充物理隔离。
 
-- [ ] **Step 2: 写组件路由失败测试**
+- [x] **Step 2: 写组件路由失败测试**
 
   使用两个 miniredis 实例：向 PM streaming 写入一条窗口后只允许 `pmagg:*` 出现在 PM Redis；app 和 worker 初始化 KPI Router L2、执行一次版本失效后，只允许 `kpi-route:*` 出现在 PM Redis，且 app 的 version bump 可使 worker 的条目失效；task queue、alarm、product/parammodel、device cache 测试仍只在 core Redis。
 
-- [ ] **Step 3: 运行测试确认 AppConfig/WorkerConfig 的 PMRedis 尚不存在**
+- [x] **Step 3: 运行测试确认 AppConfig/WorkerConfig 的 PMRedis 尚不存在**
 
   Run: `cd omcgo && go test ./internal/core/appconfig ./cmd/worker -run 'PMRedis|RedisRouting' -count=1`
 
   Expected: FAIL，缺少 `PMRedis`、fallback 和路由。
 
-- [ ] **Step 4: 增加配置和第二客户端生命周期**
+- [x] **Step 4: 增加配置和第二客户端生命周期**
 
   在 `AppConfig` 和 `WorkerConfig` 增加：
 
@@ -434,7 +434,7 @@
 
   增加 `EffectivePMRedis()`；`appInfra` 和 `workerInfra` 均增加 `PMRedis redis.UniversalClient`。连接、health registration、shutdown hook 与 pool metrics 均复用 core components，但健康检查名称和指标带 `role="core|pm"`，避免第二次注册冲突。
 
-- [ ] **Step 5: 精确切换 PM/KPI 调用点**
+- [x] **Step 5: 精确切换 PM/KPI 调用点**
 
   改为 `PMRedis`：
 
@@ -449,7 +449,7 @@
   - device/common cache；
   - alarm、connection request、在线状态等非 PM 业务。
 
-- [ ] **Step 6: 更新 app/worker 配置样例**
+- [x] **Step 6: 更新 app/worker 配置样例**
 
   app/worker prod:
 
@@ -462,7 +462,7 @@
 
   dev/local/test 可显式配置两个地址以覆盖真实路径；兼容旧配置的 fallback 只作为滚动升级过渡。
 
-- [ ] **Step 7: 跑配置、组件、app、worker 测试并提交**
+- [x] **Step 7: 跑配置、组件、app、worker 测试并提交**
 
   Run:
 

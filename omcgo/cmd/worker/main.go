@@ -212,10 +212,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
 	pmIndicatorRepo := indicator.NewPgIndicatorRepository(w.PgPool)
 	pmFormulaRepo := indicator.NewPgPlatformFormulaRepository(w.PgPool)
-	var pmL2Cache router.L2Cache
-	if w.Redis != nil {
-		pmL2Cache = router.NewRedisCache(w.Redis)
-	}
+	pmL2Cache := newWorkerKPIRouteL2(w)
 	pmKPIRouter, err := router.New(
 		pmDeviceRepo, pmProductRegistry, pmIndicatorRepo, pmFormulaRepo,
 		router.Options{
@@ -804,6 +801,13 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	} else {
 		logger.Warn("tsdb shadow-dim sync disabled: TsPool not connected")
 	}
+}
+
+func newWorkerKPIRouteL2(w *workerInfra) router.L2Cache {
+	if w == nil || w.PMRedis == nil {
+		return nil
+	}
+	return router.NewRedisCache(w.PMRedis)
 }
 
 func pmQueueTuning(concurrency int) event.QueueTuning {
