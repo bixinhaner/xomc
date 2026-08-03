@@ -13,6 +13,13 @@ const createTemplateSpy = vi.fn();
 const createExportSpy = vi.fn();
 const metricPickerRenderSpy = vi.hoisted(() => vi.fn());
 const aggregatedQuerySpy = vi.hoisted(() => vi.fn());
+const aggregatedQueryState = vi.hoisted(() => ({
+  current: {
+    data: [] as unknown[],
+    total: 0,
+    truncated: false,
+  },
+}));
 const technologyDictionaryState = vi.hoisted(() => {
   const defaultDictionary = {
     options: [
@@ -82,9 +89,9 @@ vi.mock('@core/hooks/api/usePmQuery', () => ({
   ) => {
     aggregatedQuerySpy(baseParams, deviceSns, enabled);
     return {
-      data: [],
-      total: 0,
-      truncated: false,
+      data: aggregatedQueryState.current.data,
+      total: aggregatedQueryState.current.total,
+      truncated: aggregatedQueryState.current.truncated,
       isLoading: false,
       isFetching: false,
       errors: [],
@@ -191,6 +198,7 @@ describe('KPIQuery 顶部 tab 现场保持', () => {
     sessionStorage.clear();
     refetchAggSpy.mockClear();
     aggregatedQuerySpy.mockClear();
+    aggregatedQueryState.current = { data: [], total: 0, truncated: false };
     createTemplateSpy.mockReset();
     createExportSpy.mockReset();
     technologyDictionaryState.current = technologyDictionaryState.defaultDictionary;
@@ -336,6 +344,32 @@ describe('KPIQuery 顶部 tab 现场保持', () => {
     });
     expect(screen.getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('');
     expect(screen.getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('');
+  });
+
+  it('查询结果支持最大化和还原，不卸载结果表格和截断提示', () => {
+    aggregatedQueryState.current = {
+      data: Array.from({ length: 50 }, (_, index) => ({ time: `2026-01-01T00:${index}:00Z` })),
+      total: 120,
+      truncated: true,
+    };
+    renderPage();
+
+    expect(screen.getByText('查询条件')).toBeTruthy();
+    expect(screen.getByTestId('pivot-table')).toBeTruthy();
+    expect(screen.getByText('结果已截断：仅显示最新 50 行，请缩小时间范围、减少指标数或使用导出')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '最大化查询结果' }));
+
+    expect(screen.queryByText('查询条件')).toBeNull();
+    expect(screen.getByTestId('pivot-table')).toBeTruthy();
+    expect(screen.getByText('结果已截断：仅显示最新 50 行，请缩小时间范围、减少指标数或使用导出')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '还原查询结果' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '还原查询结果' }));
+
+    expect(screen.getByText('查询条件')).toBeTruthy();
+    expect(screen.getByTestId('pivot-table')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '最大化查询结果' })).toBeTruthy();
   });
 });
 

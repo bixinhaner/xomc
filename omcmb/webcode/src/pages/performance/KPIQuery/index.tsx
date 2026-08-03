@@ -42,6 +42,8 @@ import {
   ExportOutlined,
   TableOutlined,
   ClockCircleOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
@@ -236,6 +238,7 @@ export default function KPIQuery() {
   const [submitted, setSubmitted] = useState<KpiQuerySubmittedQuery | null>(restoredState.submitted);
   const [pivotPage, setPivotPage] = useState(restoredState.pivotPage);
   const [pivotPageSize, setPivotPageSize] = useState(restoredState.pivotPageSize);
+  const [resultsMaximized, setResultsMaximized] = useState(false);
   const initialRestoredQueryDelayMs = restoredState.shouldRestoreQuery
     ? restoredKpiQueryDelayMs(restoredState.savedAt, Date.now())
     : 0;
@@ -674,6 +677,10 @@ export default function KPIQuery() {
       </div>
     );
 
+  const resultsFullscreenLabel = resultsMaximized
+    ? t('perf.kpiQuery.restoreResults')
+    : t('perf.kpiQuery.maximizeResults');
+
   // ── 渲染辅助 ─────────────────────────────────────────────────────
   const renderTemplateItem = (tpl: QueryTemplate) => {
     const canEdit = isSuperAdmin || tpl.creatorId === currentUser?.id;
@@ -838,8 +845,8 @@ export default function KPIQuery() {
   return (
     // 内联两栏布局（替代公共 TreeListPageLayout，仅本页）：左栏可折叠成瘦条，右栏被挤宽。
     // 视觉对齐原公共组件（bg/圆角6/边框/gap15），不动公共组件、其它页零影响。
-    <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden', gap: 15 }}>
-      {sidebarCollapsed ? (
+    <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden', gap: resultsMaximized ? 0 : 15 }}>
+      {!resultsMaximized && (sidebarCollapsed ? (
         // 折叠态：整条可点的瘦竖条 + 展开图标 + 竖排标题（与性能仪表盘任务栏收起样式统一）。
         <Tooltip title={t('perf.kpiQuery.expandSidebar')} placement="right">
           <div
@@ -886,7 +893,7 @@ export default function KPIQuery() {
         >
           {sidebar}
         </div>
-      )}
+      ))}
       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div
         style={{
@@ -896,9 +903,10 @@ export default function KPIQuery() {
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          gap: 12,
+          gap: resultsMaximized ? 0 : 12,
         }}
       >
+        {!resultsMaximized && (
         <Card
           size="small"
           style={{
@@ -1094,6 +1102,7 @@ export default function KPIQuery() {
             </div>
           </Form>
         </Card>
+        )}
 
         {!restoreQueryPending && aggTruncated ? (
           <Alert
@@ -1110,6 +1119,17 @@ export default function KPIQuery() {
         <Card
           size="small"
           title={<span><TableOutlined /> {t('perf.kpiQuery.queryResults')}</span>}
+          extra={
+            <Tooltip title={resultsFullscreenLabel}>
+              <Button
+                type="text"
+                size="small"
+                icon={resultsMaximized ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                aria-label={resultsFullscreenLabel}
+                onClick={() => setResultsMaximized((current) => !current)}
+              />
+            </Tooltip>
+          }
           style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
           styles={{
             body: {
