@@ -49,6 +49,7 @@ describe('kpiQueryState', () => {
       templateTab: 'private',
       activeTemplateId: 'tpl-1',
       sidebarCollapsed: true,
+      resultsMaximized: true,
     }));
 
     expect(restored.payload.deviceSns).toEqual(['GNB00002']);
@@ -60,6 +61,7 @@ describe('kpiQueryState', () => {
     expect(restored.templateTab).toBe('private');
     expect(restored.activeTemplateId).toBe('tpl-1');
     expect(restored.sidebarCollapsed).toBe(true);
+    expect(restored.resultsMaximized).toBe(true);
     expect(restored.shouldRestoreQuery).toBe(true);
   });
 
@@ -80,6 +82,7 @@ describe('kpiQueryState', () => {
       pivotPageSize: 50,
       templateTab: 'public',
       sidebarCollapsed: false,
+      resultsMaximized: false,
     }));
 
     expect(restored.submitted).toBeNull();
@@ -103,9 +106,11 @@ describe('kpiQueryState', () => {
       pivotPageSize: 50,
       templateTab: 'public',
       sidebarCollapsed: false,
+      resultsMaximized: true,
     });
 
     expect(PM_KPI_QUERY_PAGE_KEY).toBe('/performance/query');
+    expect(state.view.resultsMaximized).toBe(true);
     expect(JSON.stringify(state)).not.toContain('rows');
     expect(JSON.stringify(state)).not.toContain('exportData');
     expect(kpiQuerySignature(null)).toBeNull();
