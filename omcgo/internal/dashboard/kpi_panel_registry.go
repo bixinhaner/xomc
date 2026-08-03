@@ -23,11 +23,11 @@ type kpiPanelEntry struct {
 // dashboardKPIAliases 保持变量名兼容 kpi_definitions.go 的遍历逻辑，
 // 内容已由 symbolic key 切换为直接用 K/C 编号。
 var dashboardKPIAliases = []struct {
-	Symbolic    string
-	KCode       string
-	Tech        string
-	DeviceType  indicator.DeviceType
-	Panel       string
+	Symbolic   string
+	KCode      string
+	Tech       string
+	DeviceType indicator.DeviceType
+	Panel      string
 	NeedsReview bool
 }{
 	// ── LTE / Traffic ────────────────────────────────────────────────────────
@@ -57,7 +57,6 @@ var dashboardKPIAliases = []struct {
 	{Symbolic: "KGNB0510", KCode: "KGNB0510", Tech: "nr", DeviceType: indicator.DeviceTypeGNB, Panel: "traffic"},
 	{Symbolic: "KGNB0517", KCode: "KGNB0517", Tech: "nr", DeviceType: indicator.DeviceTypeGNB, Panel: "traffic"},
 	{Symbolic: "KGNB0516", KCode: "KGNB0516", Tech: "nr", DeviceType: indicator.DeviceTypeGNB, Panel: "traffic"},
-	{Symbolic: "C010070004", KCode: "C010070004", Tech: "nr", DeviceType: indicator.DeviceTypeGNB, Panel: "traffic"},
 	// ── NR / Utilization ─────────────────────────────────────────────────────
 	{Symbolic: "KGNB0506", KCode: "KGNB0506", Tech: "nr", DeviceType: indicator.DeviceTypeGNB, Panel: "utilization"},
 	{Symbolic: "KGNB0505", KCode: "KGNB0505", Tech: "nr", DeviceType: indicator.DeviceTypeGNB, Panel: "utilization"},
