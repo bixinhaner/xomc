@@ -56,6 +56,13 @@ appears_before() {
     bad "$name: [$first] 必须出现在 [$second] 之前"
   fi
 }
+valid_bash() {
+  local name="$1" file="$2"
+  if bash -n "$file"; then ok; else bad "$name: $file 存在 Bash 语法错误"; fi
+}
+
+echo "── release 运维脚本语法 ──"
+valid_bash "healthcheck 可完整解析" "$RELEASE_HEALTHCHECK"
 
 echo "── release compose 六个 bind mount ──"
 contains "PostgreSQL 可配置挂载" '${POSTGRES_DATA_PATH:-pgdata}:/var/lib/postgresql/data' "$RELEASE_COMPOSE"

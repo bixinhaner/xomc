@@ -392,5 +392,5 @@ echo "$(health_text 'compose ps 详情：' 'Compose ps details:')"
 
 echo
 echo "$(health_text "结果：通过 $ok 项，失败 $fail 项" "Result: $ok passed, $fail failed")"
-[ "$fail" -eq 0 ] || { echo "$(health_text '存在失败项，参见部署方案故障排查章节。' 'Failures found; see the deployment troubleshooting section.'); exit 1; }
+[ "$fail" -eq 0 ] || { echo "$(health_text '存在失败项，参见部署方案故障排查章节。' 'Failures found; see the deployment troubleshooting section.')"; exit 1; }
 echo "$(health_text '校验通过。' 'Healthcheck passed.')"
