@@ -93,6 +93,10 @@ for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH 
 done
 
 echo "── release 安装严格离线镜像契约 ──"
+contains "install 默认英文语言" 'OMC_LANG="${OMC_LANG:-en}"' "$INSTALL"
+contains "install 支持中英文参数" '--lang|--language' "$INSTALL"
+contains "install 提供英文帮助" 'OMC installation / upgrade script' "$INSTALL"
+contains "install 阶段提供英文文案" '1/9 Precheck' "$INSTALL"
 contains "install 检查完整监控镜像清单" '"${IMAGE_NGINX_EXPORTER:-}" "${IMAGE_NODE_EXPORTER:-}" "${IMAGE_CADVISOR:-}"' "$INSTALL"
 contains "install 缺镜像时禁止隐式联网拉取" '离线安装缺少本地镜像' "$INSTALL"
 contains "install 提供显式全新安装模式" '--fresh-install' "$INSTALL"
