@@ -8154,6 +8154,8 @@ const messages: Record<string, string> = {
   'perf.kpiQuery.saveAsTemplate':        '存为模板',
   'perf.kpiQuery.exportCsv':             '导出 CSV',
   'perf.kpiQuery.queryResults':          '查询结果',
+  'perf.kpiQuery.maximizeResults':       '最大化查询结果',
+  'perf.kpiQuery.restoreResults':        '还原查询结果',
   'perf.kpiQuery.gnbEmptyHint':          '该设备暂无可用 KPI 数据，请确认厂商指标库已注册（5G/gNB 指标依赖对应厂商指标库）',
   'perf.kpiQuery.newTemplate':           '新建查询模板',
   'perf.kpiQuery.editTemplate':          '编辑查询模板',

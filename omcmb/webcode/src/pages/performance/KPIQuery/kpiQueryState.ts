@@ -29,6 +29,7 @@ export interface KpiQuerySaveInput {
   templateTab: 'public' | 'private';
   activeTemplateId?: string;
   sidebarCollapsed: boolean;
+  resultsMaximized: boolean;
 }
 
 export interface RestoredKpiQueryState {
@@ -42,6 +43,7 @@ export interface RestoredKpiQueryState {
   templateTab: 'public' | 'private';
   activeTemplateId?: string;
   sidebarCollapsed: boolean;
+  resultsMaximized: boolean;
   shouldRestoreQuery: boolean;
   savedAt?: string;
 }
@@ -235,6 +237,7 @@ export function buildKpiQueryStateSnapshot(input: KpiQuerySaveInput): {
       templateTab: input.templateTab,
       activeTemplateId: input.activeTemplateId ?? null,
       sidebarCollapsed: input.sidebarCollapsed,
+      resultsMaximized: input.resultsMaximized,
     },
     lastAction: {
       submittedQuery: Boolean(input.submitted),
@@ -260,6 +263,7 @@ export function restoreKpiQueryState(snapshot: PmPageStateSnapshot | null): Rest
     templateTab,
     activeTemplateId: asString(view.activeTemplateId),
     sidebarCollapsed: asBoolean(view.sidebarCollapsed),
+    resultsMaximized: asBoolean(view.resultsMaximized),
     shouldRestoreQuery: Boolean(
       submitted &&
       (snapshot?.lastAction.submittedQuery || snapshot?.lastAction.renderedChart || snapshot?.lastAction.refreshed),

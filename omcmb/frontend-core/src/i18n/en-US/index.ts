@@ -8119,6 +8119,8 @@ const messages: Record<string, string> = {
   'perf.kpiQuery.saveAsTemplate':        'Save as Template',
   'perf.kpiQuery.exportCsv':             'Export CSV',
   'perf.kpiQuery.queryResults':          'Query Results',
+  'perf.kpiQuery.maximizeResults':       'Maximize Query Results',
+  'perf.kpiQuery.restoreResults':        'Restore Query Results',
   'perf.kpiQuery.gnbEmptyHint':          'No available KPI data for this device. Please confirm the vendor indicator library is registered (5G/gNB metrics depend on the corresponding vendor library).',
   'perf.kpiQuery.newTemplate':           'New Query Template',
   'perf.kpiQuery.editTemplate':          'Edit Query Template',
