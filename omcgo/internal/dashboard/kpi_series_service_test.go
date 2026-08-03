@@ -83,6 +83,13 @@ func TestGetKPITimeSeriesSnapshotAppendsOnlyRequestedNetworkPartial(t *testing.T
 					TaskID: taskID, Granularity: pmstream.GranularityDaily,
 					WindowStart: start.Add(30 * 24 * time.Hour),
 					WindowEnd:   end,
+					Dimension:   pmstream.DimensionNetwork, DimensionKey: "network",
+					MetricPath: "C010070004", MetricType: "counter", Value: 12.5, Partial: true,
+				},
+				{
+					TaskID: taskID, Granularity: pmstream.GranularityDaily,
+					WindowStart: start.Add(30 * 24 * time.Hour),
+					WindowEnd:   end,
 					Dimension:   pmstream.DimensionDevice, DimensionKey: "device-1",
 					MetricPath: "K1", MetricType: "kpi", Value: 999, Partial: true,
 				},
@@ -105,13 +112,15 @@ func TestGetKPITimeSeriesSnapshotAppendsOnlyRequestedNetworkPartial(t *testing.T
 	service.SetNetworkProgressReader(progress)
 
 	snapshot, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
-		context.Background(), []string{"K1"}, model.TechLTE,
+		context.Background(), []string{"K1", "C010070004"}, model.TechLTE,
 		metrics.GranularityDaily, start, end,
 	)
 
 	require.NoError(t, err)
 	require.Equal(t, "available", snapshot.ProgressState)
 	require.Len(t, snapshot.Series["K1"], 2)
+	require.Len(t, snapshot.Series["C010070004"], 1)
+	require.Equal(t, jsonx.Float(12.5), snapshot.Series["C010070004"][0].Value)
 	require.Equal(t, jsonx.Float(10), snapshot.Series["K1"][0].Value)
 	require.False(t, snapshot.Series["K1"][0].Partial)
 	require.Equal(t, jsonx.Float(42), snapshot.Series["K1"][1].Value)

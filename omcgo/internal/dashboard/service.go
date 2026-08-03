@@ -1399,7 +1399,7 @@ func (s *Service) GetKPITimeSeriesSnapshotWithMetadata(
 			for _, row := range progress.Rows {
 				if row.Dimension != pmstream.DimensionNetwork ||
 					string(row.Granularity) != string(granularity) ||
-					row.MetricType != "kpi" ||
+					(row.MetricType != "kpi" && row.MetricType != "counter") ||
 					row.WindowStart.Before(startTime) ||
 					!row.WindowStart.Before(endTime) {
 					continue
@@ -1456,8 +1456,8 @@ func (s *Service) GetKPITimeSeriesSnapshotWithMetadata(
 		snapshot.PeriodProgress = []pmstream.PeriodProgress{}
 	} else {
 		snapshot.PeriodProgress = append(
-		[]pmstream.PeriodProgress{}, snapshot.PeriodProgress...,
-	)
+			[]pmstream.PeriodProgress{}, snapshot.PeriodProgress...,
+		)
 	}
 	return snapshot, metadata, nil
 }
