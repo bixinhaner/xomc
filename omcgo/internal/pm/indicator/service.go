@@ -35,6 +35,12 @@ type transactionBeginner interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
+type enabledDependencyReconcileRepository interface {
+	EnabledIndicatorRepository
+	ListOperatorCodes(context.Context, DeviceType) ([]string, error)
+	ListTx(context.Context, DeviceType, string, pgx.Tx) ([]string, error)
+}
+
 // DashboardLayoutReferenceChecker checks whether dashboard KPI layouts reference PM indicators.
 type DashboardLayoutReferenceChecker interface {
 	ReferencedIndicators(ctx context.Context, dt DeviceType, indicatorIDs []string) ([]string, error)
@@ -564,6 +570,61 @@ func (s *IndicatorManagementService) EnableIndicators(ctx context.Context, req *
 		return fmt.Errorf("commit enable indicators: %w", err)
 	}
 	s.refreshRedisCache(ctx, dt)
+	s.invalidateRouteCache(ctx, RouteInvalidationTriggerIndicatorWrite)
+	return nil
+}
+
+// ReconcileEnabledDependencies repairs persisted enabled KPI sets created by
+// old releases or baseline data. API writes already maintain this invariant;
+// startup reconciliation makes the same invariant true before PM collection
+// begins, preventing required Counters from being filtered out permanently.
+func (s *IndicatorManagementService) ReconcileEnabledDependencies(ctx context.Context) error {
+	repo, ok := s.enabledRepo.(enabledDependencyReconcileRepository)
+	if !ok {
+		return fmt.Errorf("enabled indicator repository does not support dependency reconciliation")
+	}
+	for _, dt := range []DeviceType{DeviceTypeENB, DeviceTypeGNB, DeviceTypeGSM} {
+		operators, err := repo.ListOperatorCodes(ctx, dt)
+		if err != nil {
+			return fmt.Errorf("list %s enabled indicator scopes: %w", dt, err)
+		}
+		if len(operators) == 0 {
+			continue
+		}
+		arithmetic, counters, err := s.indicatorDependencyMetadata(ctx, dt)
+		if err != nil {
+			return fmt.Errorf("load %s indicator dependencies: %w", dt, err)
+		}
+		for _, operatorCode := range operators {
+			tx, err := s.pool.Begin(ctx)
+			if err != nil {
+				return fmt.Errorf("begin %s dependency reconciliation for %s: %w", dt, operatorCode, err)
+			}
+			if err := lockEnabledIndicatorSet(ctx, tx, dt, operatorCode); err != nil {
+				tx.Rollback(ctx)
+				return err
+			}
+			enabledIDs, err := repo.ListTx(ctx, dt, operatorCode, tx)
+			if err != nil {
+				tx.Rollback(ctx)
+				return fmt.Errorf("list %s enabled indicators for %s: %w", dt, operatorCode, err)
+			}
+			closure, err := ResolveDependencyClosure(enabledIDs, arithmetic, counters)
+			if err != nil {
+				tx.Rollback(ctx)
+				return fmt.Errorf("resolve %s enabled dependency closure for %s: %w", dt, operatorCode, err)
+			}
+			indicatorIDs := sortedUnique(append(append([]string(nil), closure.KPIs...), closure.Counters...))
+			if err := repo.BatchCreate(ctx, dt, operatorCode, indicatorIDs, tx); err != nil {
+				tx.Rollback(ctx)
+				return fmt.Errorf("repair %s enabled dependency closure for %s: %w", dt, operatorCode, err)
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return fmt.Errorf("commit %s enabled dependency closure for %s: %w", dt, operatorCode, err)
+			}
+		}
+		s.refreshRedisCache(ctx, dt)
+	}
 	s.invalidateRouteCache(ctx, RouteInvalidationTriggerIndicatorWrite)
 	return nil
 }

@@ -81,6 +81,7 @@ func (f *fakeIndicatorRepo) ListByIDs(ctx context.Context, dt DeviceType, ids []
 
 type fakeEnabledRepo struct {
 	enabledIDs  []string
+	operators   map[DeviceType][]string
 	createCalls int
 	createdIDs  []string
 	createTx    pgx.Tx
@@ -91,6 +92,14 @@ type fakeEnabledRepo struct {
 
 func (f *fakeEnabledRepo) List(context.Context, DeviceType, string) ([]string, error) {
 	return append([]string(nil), f.enabledIDs...), nil
+}
+
+func (f *fakeEnabledRepo) ListTx(context.Context, DeviceType, string, pgx.Tx) ([]string, error) {
+	return append([]string(nil), f.enabledIDs...), nil
+}
+
+func (f *fakeEnabledRepo) ListOperatorCodes(_ context.Context, dt DeviceType) ([]string, error) {
+	return append([]string(nil), f.operators[dt]...), nil
 }
 
 func (f *fakeEnabledRepo) BatchCreate(_ context.Context, _ DeviceType, _ string, indicatorIDs []string, tx pgx.Tx) error {
@@ -267,6 +276,39 @@ func TestEnableIndicators_AutomaticallyEnablesDependencyClosure(t *testing.T) {
 	}
 	if enabledRepo.createTx == nil {
 		t.Fatal("dependency closure must be enabled in one transaction")
+	}
+	if beginner.tx.commits != 1 {
+		t.Fatalf("transaction commits = %d, want 1", beginner.tx.commits)
+	}
+}
+
+func TestReconcileEnabledDependencies_RepairsPersistedKPIClosure(t *testing.T) {
+	enabledRepo := &fakeEnabledRepo{
+		enabledIDs: []string{"K900010040"},
+		operators:  map[DeviceType][]string{DeviceTypeENB: {"default"}},
+	}
+	beginner := &fakeBeginner{tx: &fakeTx{}}
+	svc := &IndicatorManagementService{
+		indicatorRepo: &fakeIndicatorRepo{items: []IndicatorListItem{
+			dependencyItem("K900010040", "(C000190005-C000190009)*8/C000190007", "0"),
+			dependencyItem("C000190005", "C000190005", "1"),
+			dependencyItem("C000190009", "C000190009", "1"),
+			dependencyItem("C000190007", "C000190007", "1"),
+		}},
+		enabledRepo: enabledRepo,
+		pool:        beginner,
+	}
+
+	err := svc.ReconcileEnabledDependencies(context.Background())
+	if err != nil {
+		t.Fatalf("ReconcileEnabledDependencies returned error: %v", err)
+	}
+	want := []string{"C000190005", "C000190007", "C000190009", "K900010040"}
+	if got := enabledRepo.createdIDs; !equalStrings(got, want) {
+		t.Fatalf("created IDs = %v, want %v", got, want)
+	}
+	if enabledRepo.createTx == nil {
+		t.Fatal("persisted dependency closure must be repaired in one transaction")
 	}
 	if beginner.tx.commits != 1 {
 		t.Fatalf("transaction commits = %d, want 1", beginner.tx.commits)
