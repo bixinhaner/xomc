@@ -93,6 +93,11 @@ for key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH 
 done
 
 echo "── release 安装严格离线镜像契约 ──"
+contains "install 默认英文语言" 'OMC_LANG="${OMC_LANG:-en}"' "$INSTALL"
+contains "install 导出语言给 healthcheck" 'export OMC_LANG=' "$INSTALL"
+contains "install 支持中英文参数" '--lang|--language' "$INSTALL"
+contains "install 提供英文帮助" 'OMC installation / upgrade script' "$INSTALL"
+contains "install 阶段提供英文文案" '1/9 Precheck' "$INSTALL"
 contains "install 检查完整监控镜像清单" '"${IMAGE_NGINX_EXPORTER:-}" "${IMAGE_NODE_EXPORTER:-}" "${IMAGE_CADVISOR:-}"' "$INSTALL"
 contains "install 缺镜像时禁止隐式联网拉取" '离线安装缺少本地镜像' "$INSTALL"
 contains "install 提供显式全新安装模式" '--fresh-install' "$INSTALL"
@@ -175,6 +180,8 @@ contains "启动检查说明跳过深审计" '完整 healthcheck 将在部署后
 contains "启动检查直接使用 Docker 容器标签" 'label=com.docker.compose.service=$svc' "$RELEASE_HEALTHCHECK"
 contains "启动检查按 YAML 角色解析" 'redis-routing-check-lib.sh' "$RELEASE_HEALTHCHECK"
 contains "启动检查跳过重型审计" 'STARTUP_CHECK=0' "$RELEASE_HEALTHCHECK"
+contains "healthcheck 默认英文语言" 'OMC_LANG="${OMC_LANG:-en}"' "$RELEASE_HEALTHCHECK"
+contains "healthcheck 英文启动结果" 'Startup check result' "$RELEASE_HEALTHCHECK"
 contains "启动 HTTP 探针有单次超时" 'curl -fsS --max-time 3' "$RELEASE_HEALTHCHECK"
 not_contains "健康等待不得按固定步长伪计时" 'HEALTHCHECK_WAIT=$((HEALTHCHECK_WAIT + HEALTHCHECK_INTERVAL))' "$INSTALL"
 if bash "$RELEASE_DEPLOY/gpv-handoff-lib_test.sh"; then

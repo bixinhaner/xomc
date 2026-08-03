@@ -27,6 +27,30 @@ esac
 
 set -u
 
+OMC_LANG="${OMC_LANG:-en}"
+health_text() {
+  local zh="$1" en="${2:-$1}"
+  if [ "$OMC_LANG" = en ] && [ "$en" = "$zh" ]; then
+    case "$zh" in
+      *"容器 running") en="${zh% 容器 running} container running" ;;
+      *"核心 Redis 指向 redis-core") en="${zh%% 核心 Redis*} core Redis points to redis-core" ;;
+      *"PM Redis 指向 redis-pm") en="${zh%% PM Redis*} PM Redis points to redis-pm" ;;
+      *"容器 OMC_PUBLIC_HOST") en="${zh%% 容器 OMC_PUBLIC_HOST} container OMC_PUBLIC_HOST" ;;
+      "redis-core / redis-pm 运行实例身份不同") en="redis-core / redis-pm have distinct runtime identities" ;;
+      "web ACS upstream 连接池已加载") en="web ACS upstream connection pool loaded" ;;
+      "web 临时端口范围") en="web ephemeral port range" ;;
+      *"不就绪"*) en="Service is not ready" ;;
+      "前端 SPA"*) en="Frontend SPA${zh#前端 SPA}" ;;
+      "ACS candidate"*) en="ACS candidate${zh#ACS candidate}" ;;
+    esac
+  fi
+  if [ "$OMC_LANG" = en ]; then
+    printf '%s' "$en"
+  else
+    printf '%s' "$zh"
+  fi
+}
+
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-omcgo}"
 SKIP_MONITORING=0
@@ -86,18 +110,23 @@ ok=0; fail=0
 check() {  # check <描述> <命令...>
   local desc="$1"; shift
   if "$@" >/dev/null 2>&1; then
-    echo "  [OK]   $desc"; ok=$((ok+1))
+    echo "  [OK]   $(health_text "$desc")"; ok=$((ok+1))
   else
-    echo "  [FAIL] $desc"; fail=$((fail+1))
+    echo "  [FAIL] $(health_text "$desc")"; fail=$((fail+1))
   fi
 }
 
 check_value() { # check_value <描述> <期望> <实际>
   local desc="$1" expected="$2" actual="$3"
   if [ "$expected" = "$actual" ]; then
-    echo "  [OK]   $desc"; ok=$((ok+1))
+    echo "  [OK]   $(health_text "$desc")"; ok=$((ok+1))
   else
-    echo "  [FAIL] $desc（期望: $expected；实际: $actual）"; fail=$((fail+1))
+    if [ "$OMC_LANG" = en ]; then
+      echo "  [FAIL] $(health_text "$desc") (expected: $expected; actual: $actual)"
+    else
+      echo "  [FAIL] $(health_text "$desc")（期望: $expected；实际: $actual）"
+    fi
+    fail=$((fail+1))
   fi
 }
 
@@ -155,31 +184,31 @@ check_redis_routing_config() {
 # 容器 sysctl、Compose config、资源限额和数据库参数可能因初始化负载变慢，
 # 不应阻塞“服务是否已经能接收请求”的判定。
 if [ "$STARTUP_CHECK" = 1 ]; then
-  echo "== 启动核心服务检查 =="
+  echo "== $(health_text '启动核心服务检查' 'Core service startup check') =="
   for svc in app acs worker; do
-    check "$svc 容器 running" container_running "$svc"
+    check "$(health_text "$svc 容器 running" "$svc container running")" container_running "$svc"
   done
-  check "acs-candidate 容器 running" container_running acs-candidate
+  check "$(health_text 'acs-candidate 容器 running' 'acs-candidate container running')" container_running acs-candidate
   for svc in postgres postgres-tsdb redis-core redis-pm nats minio; do
-    check "$svc 容器 running" container_running "$svc"
+    check "$(health_text "$svc 容器 running" "$svc container running")" container_running "$svc"
   done
   if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
-    check "web 容器 running" container_running web
+    check "$(health_text 'web 容器 running' 'web container running')" container_running web
   fi
   check "app /healthz (:9091)" curl -fsS --max-time 3 http://127.0.0.1:9091/healthz
   check "acs /healthz (:9095)" curl -fsS --max-time 3 http://127.0.0.1:9095/healthz
   check "worker /healthz (:9092)" curl -fsS --max-time 3 http://127.0.0.1:9092/healthz
   check "app /metrics (:9091)" curl -fsS --max-time 3 http://127.0.0.1:9091/metrics
-  check "前端 SPA (:8081)" curl -fsS --max-time 3 http://127.0.0.1:8081/ -o /dev/null
+  check "$(health_text '前端 SPA (:8081)' 'Frontend SPA (:8081)')" curl -fsS --max-time 3 http://127.0.0.1:8081/ -o /dev/null
   echo
-  echo "启动检查已跳过 Redis 路由、实例身份和 ACS candidate /readyz 深审计；完整 healthcheck 将在部署后执行。"
-  echo "启动检查结果：通过 $ok 项，失败 $fail 项"
-  [ "$fail" -eq 0 ] || { echo "启动核心服务尚未就绪。"; exit 1; }
-  echo "启动核心服务已就绪。"
+  echo "$(health_text '启动检查已跳过 Redis 路由、实例身份和 ACS candidate /readyz 深审计；完整 healthcheck 将在部署后执行。' 'Startup check skips deep Redis routing, instance identity, and ACS candidate /readyz audits; the full healthcheck runs after deployment.')"
+  echo "$(health_text "启动检查结果：通过 $ok 项，失败 $fail 项" "Startup check result: $ok passed, $fail failed")"
+  [ "$fail" -eq 0 ] || { echo "$(health_text '启动核心服务尚未就绪。' 'Core services are not ready.')"; exit 1; }
+  echo "$(health_text '启动核心服务已就绪。' 'Core services are ready.')"
   exit 0
 fi
 
-echo "== docker compose 业务容器 =="
+echo "== $(health_text 'docker compose 业务容器' 'Docker Compose business containers') =="
 for svc in app acs worker; do
   check "$svc 容器 running" container_running "$svc"
 done
@@ -191,7 +220,7 @@ for svc in postgres postgres-tsdb redis-core redis-pm nats minio; do
   check "$svc 容器 running" container_running "$svc"
 done
 
-echo "== Redis 业务路由隔离 =="
+echo "== $(health_text 'Redis 业务路由隔离' 'Redis business routing isolation') =="
 for config_file in app.prod.yaml worker.prod.yaml; do
   check "$config_file 核心 Redis 指向 redis-core" yaml_top_level_section_has_address "/opt/omc/etc/$config_file" redis redis-core:6379
   check "$config_file PM Redis 指向 redis-pm" yaml_top_level_section_has_address "/opt/omc/etc/$config_file" pm_redis redis-pm:6379
@@ -199,20 +228,20 @@ done
 check "redis-core / redis-pm 运行实例身份不同" redis_instances_distinct
 
 if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
-  echo "== docker compose web 容器 =="
+  echo "== $(health_text 'docker compose web 容器' 'Docker Compose web container') =="
   check "web 容器 running" container_running web
   check "web ACS upstream 连接池已加载" web_acs_upstream_pool_loaded
   check "web 临时端口范围" container_sysctl_equals web net.ipv4.ip_local_port_range "10240 65535"
 fi
 
-echo "== ACS 高并发网络参数 =="
+echo "== $(health_text 'ACS 高并发网络参数' 'ACS high-concurrency network parameters') =="
 check "ACS accept backlog" container_sysctl_equals acs net.core.somaxconn "32768"
 check "ACS SYN backlog" container_sysctl_equals acs net.ipv4.tcp_max_syn_backlog "32768"
 check "ACS candidate accept backlog" container_sysctl_equals acs-candidate net.core.somaxconn "32768"
 check "ACS candidate SYN backlog" container_sysctl_equals acs-candidate net.ipv4.tcp_max_syn_backlog "32768"
 
 if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "$SKIP_MONITORING" = 0 ]; then
-  echo "== docker compose 监控容器 =="
+  echo "== $(health_text 'docker compose 监控容器' 'Docker Compose monitoring containers') =="
   for svc in prometheus alertmanager grafana loki tempo otelcol nats-exporter nginx-exporter node-exporter cadvisor; do
     check "$svc 容器 running" container_running "$svc"
   done
@@ -221,7 +250,7 @@ if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "$SKIP_MONITORING" = 
   check "otelcol health extension (:13133)" curl -fsS --max-time 3 http://127.0.0.1:13133/
 fi
 
-echo "== 服务健康端点 =="
+echo "== $(health_text '服务健康端点' 'Service health endpoints') =="
 # /healthz + /metrics 都在 metrics 端口上注册（internal/core/components/monitor/metrics.go）。
 # 业务进程主 HTTP（app:8081 / acs SOAP:7547）不直接暴露 /healthz —— 用 metrics 端口检健康。
 # 端口与 compose port mapping 对齐：app/worker 容器 == 宿主；acs 容器 9090 → 宿主 9095。
@@ -232,12 +261,12 @@ check "app    /metrics (:9091)"  curl -fsS --max-time 3 http://127.0.0.1:9091/me
 # 前端 SPA：web 容器 nginx :8081 served（:8080 是 ACS CWMP 反代，GET / 不响应，不检）。
 check "前端 SPA (:8081)"          curl -fsS --max-time 3 http://127.0.0.1:8081/ -o /dev/null
 
-echo "== 基站可达地址实际值核对 =="
+echo "== $(health_text '基站可达地址实际值核对' 'Verify effective base-station reachable address') =="
 effective_public_host="$(deploy_env_effective_value OMC_PUBLIC_HOST "$DEPLOY_DIR/.env" "$DEPLOY_DIR/resources.env" 2>/dev/null || true)"
 if deploy_env_public_host_valid "$effective_public_host"; then
-  echo "  [OK]   OMC_PUBLIC_HOST 有效"; ok=$((ok+1))
+  echo "  [OK]   $(health_text 'OMC_PUBLIC_HOST 有效' 'OMC_PUBLIC_HOST is valid')"; ok=$((ok+1))
 else
-  echo "  [FAIL] OMC_PUBLIC_HOST 必须配置为基站可达主机（当前: ${effective_public_host:-<空>}）"; fail=$((fail+1))
+  echo "  [FAIL] $(health_text "OMC_PUBLIC_HOST 必须配置为基站可达主机（当前: ${effective_public_host:-<空>}）" "OMC_PUBLIC_HOST must be reachable by base stations (current: ${effective_public_host:-<empty>})")"; fail=$((fail+1))
 fi
 container_env_value() { # container_env_value <service> <key>
   local svc="$1" key="$2" cid
@@ -253,11 +282,11 @@ done
 # resources.env 存在时，必须同时证明「文件 → compose 渲染 → 容器/进程实际值」没有漂移。
 # 未使用规划器的历史部署仍允许使用 compose 默认值；但一旦有该文件，残缺或不一致绝不静默通过。
 if [ -f "$DEPLOY_DIR/resources.env" ]; then
-  echo "== resources.env 实际值核对 =="
+  echo "== $(health_text 'resources.env 实际值核对' 'Verify effective resources.env values') =="
   if ! resource_env_validate "$DEPLOY_DIR/resources.env"; then
-    echo "  [FAIL] resources.env 完整资源契约"; fail=$((fail+1))
+    echo "  [FAIL] $(health_text 'resources.env 完整资源契约' 'Complete resources.env contract')"; fail=$((fail+1))
   else
-    echo "  [OK]   resources.env 完整资源契约"; ok=$((ok+1))
+    echo "  [OK]   $(health_text 'resources.env 完整资源契约' 'Complete resources.env contract')"; ok=$((ok+1))
     COMPOSE_RENDERED="$("${DC[@]}" config 2>/dev/null || true)"
 
     compose_limit() { # compose_limit <服务> <cpus|memory>
@@ -296,7 +325,7 @@ if [ -f "$DEPLOY_DIR/resources.env" ]; then
       check_value "$svc compose memory (bytes)" "$expected_bytes" "$rendered_bytes"
       cid="$("${DC[@]}" ps -q "$svc" 2>/dev/null | head -n1)"
       if [ -z "$cid" ]; then
-        echo "  [FAIL] $svc docker inspect（未找到容器）"; fail=$((fail+1)); return
+        echo "  [FAIL] $(health_text "$svc docker inspect（未找到容器）" "$svc docker inspect (container not found)")"; fail=$((fail+1)); return
       fi
       read -r actual_nano actual_bytes <<EOF
 $(docker inspect -f '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}' "$cid" 2>/dev/null)
@@ -358,10 +387,10 @@ EOF
 fi
 
 echo
-echo "compose ps 详情："
+echo "$(health_text 'compose ps 详情：' 'Compose ps details:')"
 "${DC[@]}" ps 2>/dev/null || echo "  (无法读取 compose 状态)"
 
 echo
-echo "结果：通过 $ok 项，失败 $fail 项"
-[ "$fail" -eq 0 ] || { echo "存在失败项，参见部署方案故障排查章节。"; exit 1; }
-echo "校验通过。"
+echo "$(health_text "结果：通过 $ok 项，失败 $fail 项" "Result: $ok passed, $fail failed")"
+[ "$fail" -eq 0 ] || { echo "$(health_text '存在失败项，参见部署方案故障排查章节。' 'Failures found; see the deployment troubleshooting section.'); exit 1; }
+echo "$(health_text '校验通过。' 'Healthcheck passed.')"

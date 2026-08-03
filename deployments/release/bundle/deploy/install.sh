@@ -23,6 +23,7 @@
 #                                                        # 清理旧数据后全新安装
 #   sudo bash deploy/install.sh --fresh-install --floor-tolerance-pct 80 ...
 #                                                        # 自定义资源下限缺口容忍度（0-99）
+#   sudo bash deploy/install.sh --lang en --check-only # English installation output
 #   sudo bash deploy/install.sh --check-only             # 仅检查环境，不做修改
 #   sudo bash deploy/install.sh --infra-dir /opt/omc/infra   # 自定义 infra 目录
 #   sudo bash deploy/install.sh --overwrite-etc          # 用新包模板覆盖 /opt/omc/etc
@@ -42,6 +43,7 @@
 #   --public-host <h> 全新安装时写入基站可达的 OMC_PUBLIC_HOST
 #   --floor-tolerance-pct <N>
 #                     全新安装资源规划的组件下限缺口容忍度（0-99，默认 60）
+#   --lang <zh|en>    安装提示语言（默认 en，也可用 OMC_LANG=zh 切换中文）
 #   --yes             所有交互式提示直接默认（适合 CI / 批处理）
 #   -h | --help       本帮助
 #
@@ -57,10 +59,55 @@ set -euo pipefail
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 PKG_ROOT="$(cd "$DEPLOY_DIR/.." && pwd)"   # 项目包根（deploy/ etc/ images/ 上一级）
 
-log()  { echo -e "\033[1;32m[install]\033[0m $*"; }
-warn() { echo -e "\033[1;33m[install][警告]\033[0m $*" >&2; }
-die()  { echo -e "\033[1;31m[install][错误]\033[0m $*" >&2; exit "${2:-1}"; }
-sep()  { echo -e "\033[1;34m──────────────── $* ────────────────\033[0m"; }
+export OMC_LANG="${OMC_LANG:-en}"
+
+install_message() {
+  if [ "$OMC_LANG" = en ]; then
+    printf '%s' "${2:-$1}"
+  else
+    printf '%s' "$1"
+  fi
+}
+log()  { echo -e "\033[1;32m[install]\033[0m $(install_message "$1" "${2:-}")"; }
+warn() { echo -e "\033[1;33m[install][$( [ "$OMC_LANG" = en ] && echo Warning || echo 警告 )]\033[0m $(install_message "$1" "${2:-}")" >&2; }
+die()  {
+  local zh="$1" en="$1" code=1
+  if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
+    code="$2"
+  else
+    en="${2:-$1}"
+    code="${3:-1}"
+  fi
+  echo -e "\033[1;31m[install][$( [ "$OMC_LANG" = en ] && echo Error || echo 错误 )]\033[0m $(install_message "$zh" "$en")" >&2
+  exit "$code"
+}
+sep()  { echo -e "\033[1;34m──────────────── $(install_message "$1" "${2:-}") ────────────────\033[0m"; }
+
+show_help() {
+  if [ "$OMC_LANG" = en ]; then
+    cat <<'EOF'
+OMC installation / upgrade script
+
+Usage:
+  sudo bash deploy/install.sh [options]
+
+Options:
+  --skip-infra                 Skip loading infrastructure images
+  --skip-migrate               Skip migrate and seed containers
+  --skip-web                   Do not start the web container
+  --skip-monitoring            Do not start the monitoring stack
+  --check-only                 Run prechecks only; do not modify the system
+  --fresh-install              Remove OMC data and Docker volumes before install
+  --public-host <host>         Set the host reachable by base stations
+  --floor-tolerance-pct <N>    Resource floor-gap tolerance, 0-99 (default 60)
+  --lang <zh|en>               Installation output language (default en)
+  --yes                        Accept interactive confirmations
+  -h, --help                   Show this help
+EOF
+  else
+    sed -n '3,55p' "$0"
+  fi
+}
 
 # 凭证治本（#175）纯函数库（rand_hex / secrets_get_val / secrets_is_default_value /
 # secrets_generate_to / secrets_import_to / secrets_apply_to_env），随包同目录交付。
@@ -160,7 +207,7 @@ merge_env_preserve() {
     ' "$prev" "$new" > "$tmp"; then
     cat "$tmp" > "$new"        # 覆写内容,保留 new 原 inode / 权限
     rm -f "$tmp"
-    log ".env:已从上一版继承运维自定义值(口令 / JWT / OMC_PUBLIC_HOST);镜像 tag 用新包。如需改值,编辑 $new 后重启业务容器"
+    log ".env:已从上一版继承运维自定义值(口令 / JWT / OMC_PUBLIC_HOST);镜像 tag 用新包。如需改值,编辑 $new 后重启业务容器" ".env: inherited operator values (credentials / JWT / OMC_PUBLIC_HOST) from the previous release; image tags use the new package. Edit $new and restart services to change them"
   else
     rm -f "$tmp"
     warn ".env 合并失败,沿用交付包默认值;请手动核对 $new 的 OMC_PUBLIC_HOST 与口令"
@@ -199,12 +246,19 @@ while [ $# -gt 0 ]; do
     --public-host)     PUBLIC_HOST_OVERRIDE="${2:?--public-host 需要 IP 或域名}"; shift 2 ;;
     --floor-tolerance-pct) FLOOR_TOLERANCE_PCT="${2:?--floor-tolerance-pct 需要 0-99 的整数}"; shift 2 ;;
     --floor-tolerance-pct=*) FLOOR_TOLERANCE_PCT="${1#*=}"; shift ;;
+    --lang|--language) OMC_LANG="${2:?--lang 需要 zh 或 en}"; shift 2 ;;
+    --lang=*|--language=*) OMC_LANG="${1#*=}"; shift ;;
     --yes)             ASSUME_YES=1; shift ;;
-    -h|--help)         sed -n '3,52p' "$0"; exit 0 ;;
+    -h|--help)         show_help; exit 0 ;;
     --uninstall)       die "卸载请用 uninstall.sh：sudo bash $DEPLOY_DIR/uninstall.sh -h" ;;
     *)                 die "未知参数：$1（-h 查看用法）" ;;
   esac
 done
+
+case "$OMC_LANG" in
+  zh|en) ;;
+  *) die "--lang 仅支持 zh 或 en，收到：$OMC_LANG" "--lang accepts only zh or en, got: $OMC_LANG" 1 ;;
+esac
 
 case "$FLOOR_TOLERANCE_PCT" in
   ''|*[!0-9]*) die "--floor-tolerance-pct 仅支持 0-99 的整数，收到：$FLOOR_TOLERANCE_PCT" 1 ;;
@@ -216,8 +270,9 @@ esac
 
 confirm() {
   [ "$ASSUME_YES" = 1 ] && return 0
-  local yn
-  read -rp "$1 [Y/n] " yn
+  local yn prompt
+  prompt="$(install_message "$1" "${2:-}")"
+  read -rp "$prompt [Y/n] " yn
   case "${yn:-Y}" in [Yy]*|"") return 0 ;; *) return 1 ;; esac
 }
 
@@ -261,7 +316,7 @@ fresh_install_reset() {
     for file in docker-compose.infra.yml docker-compose.app.yml docker-compose.web.yml docker-compose.monitoring.yml; do
       [ -f "$old_deploy/$file" ] && old_compose_files+=( -f "$old_deploy/$file" )
     done
-    log "全新安装：停止旧 OMC 栈 ..."
+    log "全新安装：停止旧 OMC 栈 ..." "Fresh install: stopping the existing OMC stack ..."
     ( cd "$old_deploy" && docker compose -p "$COMPOSE_PROJECT" "${old_env_args[@]}" \
         "${old_compose_files[@]}" down --remove-orphans ) || warn "旧 OMC 栈停止返回非零，继续执行数据清理"
   fi
@@ -273,14 +328,14 @@ fresh_install_reset() {
   set_env_value "$package_env" OMC_PUBLIC_HOST "$PUBLIC_HOST_OVERRIDE" ||
     die "无法写入 $package_env 的 OMC_PUBLIC_HOST" 1
 
-  log "全新安装：按目标主机重新规划资源（组件下限缺口容忍度 ${FLOOR_TOLERANCE_PCT}%，最低运行预算仍为硬门禁）..."
+  log "全新安装：按目标主机重新规划资源（组件下限缺口容忍度 ${FLOOR_TOLERANCE_PCT}%，最低运行预算仍为硬门禁）..." "Fresh install: planning resources for this host (floor-gap tolerance ${FLOOR_TOLERANCE_PCT}%; minimum runtime budget remains enforced) ..."
   fresh_plan_args=( --floor-tolerance-pct "$FLOOR_TOLERANCE_PCT" )
   [ "$SKIP_MONITORING" = 1 ] && fresh_plan_args+=( --skip-monitoring )
   ( cd "$PKG_ROOT" && OMC_STORAGE_ENV_FILE="$package_env" \
       bash "$PKG_ROOT/deploy/plan-resources.sh" "${fresh_plan_args[@]}" ) ||
-    die "全新安装资源规划失败；请查看上方资源规划提示。最低运行预算不能通过 --floor-tolerance-pct 绕过；低内存主机可使用 --skip-monitoring 重试。" 1
+    die "全新安装资源规划失败；请查看上方资源规划提示。最低运行预算不能通过 --floor-tolerance-pct 绕过；低内存主机可使用 --skip-monitoring 重试。" "Fresh-install resource planning failed; see the message above. The minimum runtime budget cannot be bypassed with --floor-tolerance-pct; retry with --skip-monitoring on a low-memory host." 1
 
-  log "全新安装将清理以下数据目录："
+  log "全新安装将清理以下数据目录：" "Fresh install will remove the following data directories:"
   for data_key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
     path="$(storage_env_get "$package_env" "$data_key")"
     case "$path" in
@@ -291,13 +346,13 @@ fresh_install_reset() {
       /|/home|/opt|/opt/omc|/var|/tmp)
         die "全新安装拒绝清理危险数据路径：$data_key=$path" 1 ;;
     esac
-    log "  $data_key=$path"
+    log "  $data_key=$path" "  $data_key=$path"
   done
 
-  confirm "全新安装将永久删除 OMC 数据、配置、日志和项目 Docker volumes，继续吗？" ||
-    die "用户取消全新安装，未删除任何 OMC 数据" 1
+  confirm "全新安装将永久删除 OMC 数据、配置、日志和项目 Docker volumes，继续吗？" "Fresh install will permanently delete OMC data, configuration, logs, and project Docker volumes. Continue?" ||
+    die "用户取消全新安装，未删除任何 OMC 数据" "Fresh install cancelled; no OMC data was deleted." 1
 
-  log "全新安装：删除 bind-mount 数据目录 ..."
+  log "全新安装：删除 bind-mount 数据目录 ..." "Fresh install: removing bind-mount data directories ..."
   for data_key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
     path="$(storage_env_get "$package_env" "$data_key")"
     rm -rf -- "$path"
@@ -309,7 +364,7 @@ fresh_install_reset() {
     docker volume rm "$volume" >/dev/null ||
       die "无法删除 Docker volume：$volume；请确认旧 OMC 容器已停止" 1
   done
-  log "全新安装：旧 OMC 数据已删除"
+  log "全新安装：旧 OMC 数据已删除" "Fresh install: old OMC data has been deleted"
 }
 
 if [ "$FRESH_INSTALL" = 1 ]; then
@@ -360,7 +415,7 @@ precheck_skipped_infra_images() {
   if [ "${#missing_images[@]}" -gt 0 ]; then
     die "--skip-infra 前置条件不满足，缺少本地基础设施/监控镜像：${missing_images[*]}。未复制 release、未切换 current、未改写业务数据；请先解压匹配架构的基础设施包到 ${INFRA_DIR}，并去掉 --skip-infra 重试。" 1
   fi
-  log "--skip-infra 镜像预检通过：本次基础设施/监控镜像均已在本机"
+  log "--skip-infra 镜像预检通过：本次基础设施/监控镜像均已在本机" "--skip-infra image precheck passed: all infrastructure and monitoring images are available locally"
 }
 
 # heal_main_pg_timescaledb_downgrade —— 升级自愈（#347 主库 timescaledb → 纯 PG 降级）
@@ -387,8 +442,8 @@ heal_main_pg_timescaledb_downgrade() {
   warn "  直接启动会 FATAL: could not access file \"timescaledb\"。"
   warn "  自愈将剥离 timescaledb：DROP EXTENSION ... CASCADE（删主库残留时序超表——这些时序数据"
   warn "  已物理分离到 postgres-tsdb 实例）+ 注释 postgresql.conf 预加载行。业务表（普通表）不受影响。"
-  confirm "确认对主库卷 $vol 执行 timescaledb 剥离自愈？" || \
-    die "用户取消自愈。如需保数据，可临时把 deploy/.env 的 IMAGE_POSTGRES 改回 timescaledb 镜像后重装。" 1
+  confirm "确认对主库卷 $vol 执行 timescaledb 剥离自愈？" "Confirm TimescaleDB detach recovery for volume $vol?" || \
+    die "用户取消自愈。如需保数据，可临时把 deploy/.env 的 IMAGE_POSTGRES 改回 timescaledb 镜像后重装。" "Recovery cancelled. To preserve data, temporarily set IMAGE_POSTGRES back to the TimescaleDB image in deploy/.env and reinstall." 1
 
   local cname="${COMPOSE_PROJECT}-pgheal" db="${POSTGRES_DB:-omcgo}" usr="${POSTGRES_USER:-omcgo}"
   docker rm -f "$cname" >/dev/null 2>&1 || true
@@ -420,7 +475,7 @@ heal_main_pg_timescaledb_downgrade() {
 # =============================================================================
 # Step 1. precheck
 # =============================================================================
-sep "1/9 precheck"
+sep "1/9 precheck" "1/9 Precheck"
 
 # 工具齐全
 for tool in docker tar sha256sum; do
@@ -473,7 +528,7 @@ elif command -v docker-compose >/dev/null 2>&1; then
 else
   die "未检测到 docker compose v2 / docker-compose v1（请先 install-docker.sh）" 1
 fi
-log "docker compose 命令：$COMPOSE"
+log "docker compose 命令：$COMPOSE" "Docker Compose command: $COMPOSE"
 
 # docker 服务可用
 docker info >/dev/null 2>&1 || die "docker 服务不可用，请先 systemctl start docker" 1
@@ -505,7 +560,7 @@ if [ -z "$PUBLIC_HOST_CANDIDATE" ]; then
 fi
 deploy_env_public_host_valid "$PUBLIC_HOST_CANDIDATE" ||
   die "OMC_PUBLIC_HOST 未配置为基站可达主机（当前: ${PUBLIC_HOST_CANDIDATE:-<空>}）；请先在 $PKG_ROOT/deploy/.env 配置服务器对基站可达的 IP/域名后重试" 1
-log "OMC_PUBLIC_HOST 预检通过：$PUBLIC_HOST_CANDIDATE"
+log "OMC_PUBLIC_HOST 预检通过：$PUBLIC_HOST_CANDIDATE" "OMC_PUBLIC_HOST precheck passed: $PUBLIC_HOST_CANDIDATE"
 
 # 资源契约是部署必需输入。必须在 --check-only 退出、current 切换和任何容器重启之前
 # 校验真正会被本次安装采用的候选，不能等到 Step 6 组装 Compose 才发现旧三行文件。
@@ -513,7 +568,7 @@ RESOURCE_ENV_CANDIDATE="$(resolve_resource_env_candidate)" ||
   die "未找到 resources.env；请先运行 bash $PKG_ROOT/deploy/plan-resources.sh，禁止静默回退 Compose 默认限额" 1
 resource_env_validate "$RESOURCE_ENV_CANDIDATE" ||
   die "resources.env 不是完整资源规划：${RESOURCE_ENV_CANDIDATE}；请重新运行 plan-resources.sh" 1
-log "资源规划预检通过：$RESOURCE_ENV_CANDIDATE"
+log "资源规划预检通过：$RESOURCE_ENV_CANDIDATE" "Resource plan precheck passed: $RESOURCE_ENV_CANDIDATE"
 
 # Worker 新版本会在启动时按真实并发核验 TSDB 连接池。这个只读门禁必须在
 # Step 2 旧 systemd 停服以及任何数据/配置改写之前执行，避免配置不足时把
@@ -526,7 +581,7 @@ if ! validate_worker_tsdb_pool_precheck \
   package_worker_tsdb_pool="$(worker_tsdb_max_conns "$PKG_ROOT/etc/worker.prod.yaml" 2>/dev/null || echo 无法读取)"
   die "Worker TSDB 连接池部署前门禁失败：现网=${live_worker_tsdb_pool}，新包=${package_worker_tsdb_pool}，安全预算=${WORKER_TSDB_SAFE_POOL}；未停止旧服务、未迁移数据、未改配置" 1
 fi
-log "Worker TSDB 连接池预检通过"
+log "Worker TSDB 连接池预检通过" "Worker TSDB connection pool precheck passed"
 
 # 兜底：旧版 build-release.sh 在 umask=027 机器上构建时 monitoring/ 配置会落 0640，
 # prometheus/loki/tempo/alertmanager 等非 root 容器读不动直接 fail。
@@ -537,7 +592,7 @@ fi
 
 # 项目版本号
 VERSION="$(awk -F= '/^project_version=/{print $2}' "$PKG_ROOT/VERSION" 2>/dev/null || echo unknown)"
-log "项目版本：$VERSION"
+log "项目版本：$VERSION" "Project version: $VERSION"
 
 # infra 目录（除非 --skip-infra）
 if [ "$SKIP_INFRA" = 0 ]; then
@@ -549,7 +604,7 @@ else
   precheck_skipped_infra_images
 fi
 
-log "precheck 通过"
+log "precheck 通过" "Precheck passed"
 
 if [ "$CHECK_ONLY" = 1 ]; then
   log "--check-only：不做任何修改，退出"
@@ -561,7 +616,7 @@ fi
 #   旧版本曾用 systemd 跑 omcgo-{app,acs,worker} 二进制；本版本改为容器，
 #   必须先停掉并禁用旧 systemd 单元，否则会与容器抢 9091/7547 等端口。
 # =============================================================================
-sep "2/9 旧 systemd 单元自动迁移"
+sep "2/9 旧 systemd 单元自动迁移" "2/9 Migrate legacy systemd units"
 
 HANDOFF_PREPARED=0
 GPV_SYSTEMD_HANDOFF_PREPARED=0
@@ -581,7 +636,7 @@ fi
 # =============================================================================
 # Step 3. 建立 OMC 目录布局 + current 软链
 # =============================================================================
-sep "3/9 建立目录结构 + current 软链"
+sep "3/9 建立目录结构 + current 软链" "3/9 Prepare directories and current symlink"
 
 mkdir -p "$OMC_ROOT/releases" "$OMC_ROOT/etc" "$OMC_ROOT/packages" \
          "$OMC_ROOT/run/logs/app"   "$OMC_ROOT/run/logs/acs" \
@@ -635,13 +690,13 @@ fi
 RELEASE_DIR="$OMC_ROOT/releases/$VERSION"
 if [ -d "$RELEASE_DIR" ] && [ "$(readlink -f "$PKG_ROOT" 2>/dev/null)" != "$(readlink -f "$RELEASE_DIR" 2>/dev/null)" ]; then
   warn "已存在版本目录 $RELEASE_DIR，将覆盖（旧文件 → .bak.<时间戳>）"
-  confirm "继续吗？" || die "用户取消" 1
+  confirm "继续吗？" "Continue?" || die "用户取消" "Operation cancelled" 1
   mv "$RELEASE_DIR" "$RELEASE_DIR.bak.$(date +%Y%m%d%H%M%S)"
 fi
 
 # 如果不是直接在版本目录里跑，复制到版本目录
 if [ "$(readlink -f "$PKG_ROOT")" != "$(readlink -f "$RELEASE_DIR")" ]; then
-  log "复制项目包到 $RELEASE_DIR ..."
+  log "复制项目包到 $RELEASE_DIR ..." "Copying release package to $RELEASE_DIR ..."
   mkdir -p "$RELEASE_DIR"
   cp -a "$PKG_ROOT/." "$RELEASE_DIR/"
 fi
@@ -655,7 +710,7 @@ merge_env_preserve "$PREV_ENV_SNAPSHOT" "$RELEASE_DIR/deploy/.env"
 if [ -n "$PREV_RESOURCES_SNAPSHOT" ] && [ ! -f "$RELEASE_DIR/deploy/resources.env" ]; then
   cp "$PREV_RESOURCES_SNAPSHOT" "$RELEASE_DIR/deploy/resources.env" 2>/dev/null ||
     die "resources.env 继承复制失败，未切换 current：$RELEASE_DIR/deploy/resources.env" 1
-  log "resources.env:已从上一版继承资源限额(plan-resources.sh 调优值不丢)"
+  log "resources.env:已从上一版继承资源限额(plan-resources.sh 调优值不丢)" "resources.env: inherited resource limits from the previous release"
 fi
 [ -n "$PREV_RESOURCES_SNAPSHOT" ] && rm -f "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || true
 
@@ -677,14 +732,14 @@ if [ ! -d "$NEW_DATA" ]; then
   die "交付包缺少 data/ 目录($NEW_DATA);模型 B 硬依赖字典播种,无法继续" 4
 fi
 if [ ! -d "$OMC_ROOT/data" ] || [ -z "$(ls -A "$OMC_ROOT/data" 2>/dev/null)" ]; then
-  log "首次部署：播种 data 基线 → $OMC_ROOT/data"
+  log "首次部署：播种 data 基线 → $OMC_ROOT/data" "Fresh install: seeding data baseline -> $OMC_ROOT/data"
   mkdir -p "$OMC_ROOT/data"
   cp -a "$NEW_DATA/." "$OMC_ROOT/data/" || die "播种 data 失败;字典将为空,中止部署" 4
 else
   DATA_SNAP="$OMC_ROOT/data.bak.$(date +%Y%m%d%H%M%S)"
-  log "升级：快照现网 data → $DATA_SNAP(回滚用)"
+  log "升级：快照现网 data → $DATA_SNAP(回滚用)" "Upgrade: snapshot live data -> $DATA_SNAP (rollback copy)"
   cp -a "$OMC_ROOT/data" "$DATA_SNAP" || warn "快照 data 失败(磁盘满?);继续合并但无回滚点"
-  log "升级：反向合并(现网赢、新版补充)新版 builtin → $OMC_ROOT/data"
+  log "升级：反向合并(现网赢、新版补充)新版 builtin → $OMC_ROOT/data" "Upgrade: merge new built-in data into $OMC_ROOT/data (live data wins)"
   cp -an "$NEW_DATA/." "$OMC_ROOT/data/" || warn "反向合并 data 出现错误;请人工核对 $OMC_ROOT/data"
   # builtin 刷新(#154):cp -an 只补缺失、不更新已存在文件 → 内置字典(如 BSC 网关→BSC 产品
   # 改名)升级不生效,且 dictloader 会用过时 host XML 把旧值 UPSERT 回来。这里对新包 builtin
@@ -766,17 +821,17 @@ etc_is_empty=0
 [ -z "$(ls -A "$OMC_ROOT/etc" 2>/dev/null)" ] && etc_is_empty=1
 
 if [ "$etc_is_empty" = 1 ]; then
-  log "首次部署：复制配置模板到 $OMC_ROOT/etc/（首次必修改默认口令！）"
+  log "首次部署：复制配置模板到 $OMC_ROOT/etc/（首次必修改默认口令！）" "Fresh install: copying configuration templates to $OMC_ROOT/etc/ (change default credentials before production use)"
   cp -rn "$RELEASE_DIR/etc/." "$OMC_ROOT/etc/"
 else
   do_overwrite=0
   if [ "$OVERWRITE_ETC" = 1 ]; then
     do_overwrite=1
   elif [ "$ASSUME_YES" = 0 ]; then
-    warn "$OMC_ROOT/etc/ 已有实例配置（包含可能已改好的强口令 / JWT 密钥 / TLS 证书路径等）"
-    warn "  选 y 将覆盖为新包模板（原 etc 自动备份到 etc.bak.<时间戳>）"
-    warn "  选 N 保留现有配置不动（默认）"
-    read -rp "是否用新包模板覆盖 $OMC_ROOT/etc/？ [y/N] " yn
+    warn "$OMC_ROOT/etc/ 已有实例配置（包含可能已改好的强口令 / JWT 密钥 / TLS 证书路径等）" "$OMC_ROOT/etc/ contains instance configuration (possibly including custom credentials, JWT keys, and TLS certificate paths)"
+    warn "  选 y 将覆盖为新包模板（原 etc 自动备份到 etc.bak.<时间戳>）" "  Enter y to replace it with the package template (the old etc is backed up automatically)"
+    warn "  选 N 保留现有配置不动（默认）" "  Enter N to keep the current configuration (default)"
+    read -rp "$(install_message "是否用新包模板覆盖 $OMC_ROOT/etc/？" "Replace $OMC_ROOT/etc/ with the package template?") [y/N] " yn
     case "${yn:-N}" in [Yy]*) do_overwrite=1 ;; esac
   fi
 
@@ -807,7 +862,7 @@ else
       if upgrade_prod_database_dsns \
         "$OMC_ROOT/etc/$service_config" \
         "$RELEASE_DIR/etc/$service_config"; then
-        log "升级 $service_config：已同步生产数据库 DSN 模板，使用当前 .env 凭证"
+        log "升级 $service_config：已同步生产数据库 DSN 模板，使用当前 .env 凭证" "Upgrade $service_config: synchronized production database DSN template using current .env credentials"
       else
         die "$service_config 数据库 DSN 自动同步失败；未切换 current" 1
       fi
@@ -842,13 +897,13 @@ else
         die "worker.prod.yaml 的 tsdb.max_conns 升级结果异常；未切换 current" 1
         ;;
     esac
-    log "$OMC_ROOT/etc/ 已有实例配置，保留不覆盖（如需覆盖加 --overwrite-etc）"
+    log "$OMC_ROOT/etc/ 已有实例配置，保留不覆盖（如需覆盖加 --overwrite-etc）" "$OMC_ROOT/etc/ contains instance configuration; keeping it unchanged (use --overwrite-etc to replace it)"
   fi
 fi
 
 # 切 current 软链（原子）
 ln -sfn "$RELEASE_DIR" "$OMC_ROOT/current"
-log "current → $RELEASE_DIR"
+log "current → $RELEASE_DIR" "current -> $RELEASE_DIR"
 
 # 凭据落点 $OMC_ROOT/etc/.env.saved：留给 uninstall.sh 删 release 后、下次 install 继承用。
 # 始终用当前生效 .env 刷新,保证与正在使用的数据卷口令一致。
@@ -877,7 +932,7 @@ images_exist() {
 # =============================================================================
 # Step 4. load 镜像（基础设施 + 监控 + 业务）
 # =============================================================================
-sep "4/9 load 镜像"
+sep "4/9 load 镜像" "4/9 Load images"
 
 # 提前加载 .env 获取镜像名（IMAGE_* 变量），供 images_exist 判定使用。
 # 必须随后按 --env-file 的相同顺序加载 resources.env：调用进程环境优先级高于
@@ -910,13 +965,13 @@ if [ "$SKIP_INFRA" = 0 ]; then
     done
   fi
 else
-  log "--skip-infra：跳过基础设施 / 监控镜像 load"
+  log "--skip-infra：跳过基础设施 / 监控镜像 load" "--skip-infra: skipping infrastructure / monitoring image loading"
 fi
 
 BIZ_IMAGES=("$IMAGE_APP" "$IMAGE_ACS" "$IMAGE_WORKER" "$IMAGE_WEB")
 
 if images_exist "${BIZ_IMAGES[@]}"; then
-  log "业务镜像已存在，跳过 load；handoff 完成前保持现有 app 不动"
+  log "业务镜像已存在，跳过 load；handoff 完成前保持现有 app 不动" "Business images already exist; skipping load and keeping the current App unchanged until handoff completes"
   biz_loaded=1
 else
   log "load 业务镜像（$RELEASE_DIR/images/）"
@@ -946,12 +1001,12 @@ done
 if [ "${#missing_images[@]}" -gt 0 ]; then
   die "离线安装缺少本地镜像：${missing_images[*]}。请先解压匹配架构的基础设施包到 $INFRA_DIR，并重新执行安装（不要使用 --skip-infra）；项目包业务镜像由本步骤负责 load。" 1
 fi
-log "离线镜像校验通过：本次 Compose 所需镜像均已在本机"
+log "离线镜像校验通过：本次 Compose 所需镜像均已在本机" "Offline image check passed: all required images are available locally"
 
 # =============================================================================
 # Step 5. 默认口令检查（PostgreSQL / MinIO / Grafana）
 # =============================================================================
-sep "5/9 默认口令安全检查"
+sep "5/9 默认口令安全检查" "5/9 Check default credentials"
 
 # ENV_FILE 已在 Step 4 定义并 source，这里仅做存在性兜底
 [ -f "$ENV_FILE" ] || die "缺 $ENV_FILE（由 build-release.sh 生成）" 1
@@ -960,13 +1015,13 @@ if grep -qE '^(POSTGRES_PASSWORD=omcgo123|MINIO_ROOT_PASSWORD=minioadmin|GRAFANA
   warn "检测到 deploy/.env 含默认口令（POSTGRES_PASSWORD=omcgo123 / MINIO_ROOT_PASSWORD=minioadmin / GRAFANA_ADMIN_PASSWORD=admin / OMC_SHARED_SECRET=dps）"
   warn "  → 生产环境务必改强口令：vi $ENV_FILE"
   warn "  → etc/*.prod.yaml 用 \${VAR} 引用 .env，无需手改；生产凭证校验(GuardProductionSecrets)会拒绝默认值启动"
-  confirm "已知风险，继续部署？" || die "用户取消，请先改口令" 1
+  confirm "已知风险，继续部署？" "Known risk detected. Continue deployment?" || die "用户取消，请先改口令" "Operation cancelled. Change the credentials first." 1
 fi
 
 # =============================================================================
 # Step 6. 组装 docker compose 命令（全栈一次 up）
 # =============================================================================
-sep "6/9 组装 docker compose 命令"
+sep "6/9 组装 docker compose 命令" "6/9 Assemble Docker Compose command"
 
 cd "$OMC_ROOT/current/deploy"
 
@@ -981,14 +1036,14 @@ resource_env_validate resources.env ||
 resource_plan_metrics_write resources.env ||
   die "无法生成 resources.env 对应的 Prometheus 资源计划指标"
 ENV_FILES+=( --env-file resources.env )
-log "已检出完整 resources.env → 按其资源限额部署（plan-resources.sh 生成）"
+log "已检出完整 resources.env → 按其资源限额部署（plan-resources.sh 生成）" "Complete resources.env found -> deploying with its limits"
 
 COMPOSE_FILES=( -f docker-compose.infra.yml -f docker-compose.app.yml )
 [ "$SKIP_WEB" = 0 ]        && COMPOSE_FILES+=( -f docker-compose.web.yml )
 [ "$SKIP_MONITORING" = 0 ] && COMPOSE_FILES+=( -f docker-compose.monitoring.yml )
 
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
-log "compose 命令：${DC[*]}"
+log "compose 命令：${DC[*]}" "Compose command: ${DC[*]}"
 
 APP_CID="$("${DC[@]}" ps -q app 2>/dev/null || true)"
 NATS_CID="$("${DC[@]}" ps -q nats 2>/dev/null || true)"
@@ -1000,7 +1055,7 @@ if [ "$APP_RUNNING" = 1 ] && [ "$NATS_RUNNING" != 1 ]; then
   die "旧 app 仍在运行但 NATS 不可用，无法读取 GPV consumer AckFloor；未停止旧 app" 2
 fi
 if [ "$HANDOFF_PREPARED" != 1 ] && [ "$NATS_RUNNING" = 1 ]; then
-  log "在停止/重建旧 app 前预创建 GPV RPC 固定 durable ..."
+  log "在停止/重建旧 app 前预创建 GPV RPC 固定 durable ..." "Pre-creating the fixed GPV RPC durable before stopping/recreating the old App ..."
   gpv_handoff_prepare ||
     die "GPV consumer handoff 失败；未停止旧 app，修复 NATS/consumer 配置后重试" 2
   HANDOFF_PREPARED=1
@@ -1009,7 +1064,7 @@ fi
 # =============================================================================
 # Step 7. 启动基础设施 + 等就绪 → 跑 migrate / seed（一次性容器）
 # =============================================================================
-sep "7/9 启动基础设施 + 执行 migrate / seed"
+sep "7/9 启动基础设施 + 执行 migrate / seed" "7/9 Start infrastructure and run migrations / seed"
 
 # 7.0 升级自愈（#347）：存量主库卷若被 timescaledb 初始化过，先剥离再起纯 PG，
 #     否则 postgres:16-alpine 读到卷内 shared_preload_libraries='timescaledb' 会 FATAL。
@@ -1021,10 +1076,10 @@ if ! prepare_legacy_redis_cutover; then
 fi
 
 # 7.1 起基础设施（postgres / postgres-tsdb / redis-core / redis-pm / nats / minio）
-log "启动基础设施容器 ..."
+log "启动基础设施容器 ..." "Starting infrastructure containers ..."
 "${DC[@]}" up --pull never -d postgres postgres-tsdb redis-core redis-pm nats minio
 
-log "等待基础设施 ready（最多 90s）..."
+log "等待基础设施 ready（最多 90s）..." "Waiting for infrastructure readiness (up to 90s) ..."
 WAIT=0
 PG_OK=0; TS_OK=0; RD_CORE_OK=0; RD_PM_OK=0; NATS_OK=0
 while [ $WAIT -lt 90 ]; do
@@ -1059,7 +1114,7 @@ if [ "$PG_OK" != 1 ] || [ "$TS_OK" != 1 ] || [ "$RD_CORE_OK" != 1 ] || [ "$RD_PM
   手动检查：${DC[*]} ps
             ${DC[*]} logs postgres postgres-tsdb redis-core redis-pm" 2
 fi
-log "基础设施已就绪 (PG / TSDB / Redis Core / Redis PM / NATS)"
+log "基础设施已就绪 (PG / TSDB / Redis Core / Redis PM / NATS)" "Infrastructure is ready (PG / TSDB / Redis Core / Redis PM / NATS)"
 if ! verify_legacy_redis_cutover; then
   die "redis-core 未继承旧 Redis 的同一数据目录和完整键数；业务写入方保持停止" 2
 fi
@@ -1068,14 +1123,14 @@ if ! migrate_legacy_pm_redis; then
 fi
 
 if [ "$HANDOFF_PREPARED" != 1 ]; then
-  log "首次部署/原 NATS 未运行：按实际流状态安全初始化 GPV RPC 固定 durable ..."
+  log "首次部署/原 NATS 未运行：按实际流状态安全初始化 GPV RPC 固定 durable ..." "Fresh install or inactive NATS: safely initializing the fixed GPV RPC durable from the current stream state ..."
   gpv_handoff_prepare --bootstrap-if-missing ||
     die "GPV consumer handoff 失败；尚未启动 app，修复 NATS/consumer 配置后重试" 2
   HANDOFF_PREPARED=1
 fi
 
 # 7.2 验证 omcgo-net 网络已创建
-log "验证 omcgo-net 网络 ..."
+log "验证 omcgo-net 网络 ..." "Verifying omcgo-net network ..."
 if ! docker network inspect omcgo-net >/dev/null 2>&1; then
   die "omcgo-net 网络未创建，请检查 docker-compose.infra.yml" 2
 fi
@@ -1096,7 +1151,7 @@ run_oneshot_migration() {
 }
 
 if [ "$SKIP_MIGRATE" = 0 ]; then
-  log "执行 db migrate（容器：migrate-schema）..."
+  log "执行 db migrate（容器：migrate-schema）..." "Running database migration (container: migrate-schema) ..."
   MIGRATE_OK=0
   for attempt in 1 2 3; do
     if run_oneshot_migration migrate-schema; then
@@ -1104,24 +1159,24 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
       break
     fi
     if [ $attempt -lt 3 ]; then
-      warn "migrate 第 ${attempt} 次失败，等待 5s 重试..."
+      warn "migrate 第 ${attempt} 次失败，等待 5s 重试..." "Migrate attempt ${attempt} failed; retrying in 5s ..."
       sleep 5
     fi
   done
   "${DC[@]}" rm -f migrate-schema 2>/dev/null || true
   if [ "$MIGRATE_OK" = 1 ]; then
-    log "migrate 成功"
+    log "migrate 成功" "Migrate completed successfully"
   else
-    die "migrate 失败（已重试 3 次）：${DC[*]} up --exit-code-from migrate-schema migrate-schema" 3
+    die "migrate 失败（已重试 3 次）：${DC[*]} up --exit-code-from migrate-schema migrate-schema" "Migrate failed after 3 attempts: ${DC[*]} up --exit-code-from migrate-schema migrate-schema" 3
   fi
 
   # 7.4 seed（goose 单链路 migrations/seed/，每次部署都跑 —— goose 用
   #     goose_db_version_seed 版本表自动追踪已应用项，新加 seed 自动 catch up）
-  log "执行 db seed（容器：migrate-seed-sql，goose 幂等）..."
+  log "执行 db seed（容器：migrate-seed-sql，goose 幂等）..." "Running database seed (container: migrate-seed-sql, idempotent) ..."
   if run_oneshot_migration migrate-seed-sql; then
-    log "seed 成功"
+    log "seed 成功" "Database seed completed successfully"
   else
-    die "seed 失败：${DC[*]} up --exit-code-from migrate-seed-sql migrate-seed-sql" 3
+    die "seed 失败：${DC[*]} up --exit-code-from migrate-seed-sql migrate-seed-sql" "Seed failed: ${DC[*]} up --exit-code-from migrate-seed-sql migrate-seed-sql" 3
   fi
   "${DC[@]}" rm -f migrate-seed-sql 2>/dev/null || true
 
@@ -1129,7 +1184,7 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
   #     实例 postgres-tsdb，goose 版本表 goose_db_version_tsdb，与主库 migrate 互不影响。
   #     与 7.3 同样用 `up --exit-code-from` + 3 次重试，显式捕获失败（优于仅靠 Step 8
   #     up -d 的隐式 depends_on——后者失败时诊断信息差、无重试）。goose 幂等，升级重跑安全。
-  log "执行时序库 migrate（容器：migrate-tsdb-schema，goose 幂等）..."
+  log "执行时序库 migrate（容器：migrate-tsdb-schema，goose 幂等）..." "Running TSDB migration (container: migrate-tsdb-schema, idempotent) ..."
   TSDB_MIGRATE_OK=0
   for attempt in 1 2 3; do
     if run_oneshot_migration migrate-tsdb-schema; then
@@ -1137,24 +1192,24 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
       break
     fi
     if [ $attempt -lt 3 ]; then
-      warn "时序库 migrate 第 ${attempt} 次失败，等待 5s 重试..."
+      warn "时序库 migrate 第 ${attempt} 次失败，等待 5s 重试..." "TSDB migration attempt ${attempt} failed; retrying in 5s ..."
       sleep 5
     fi
   done
   "${DC[@]}" rm -f migrate-tsdb-schema 2>/dev/null || true
   if [ "$TSDB_MIGRATE_OK" = 1 ]; then
-    log "时序库 migrate 成功"
+    log "时序库 migrate 成功" "TSDB migration completed successfully"
   else
-    die "时序库 migrate 失败（已重试 3 次）：${DC[*]} up --exit-code-from migrate-tsdb-schema migrate-tsdb-schema" 3
+    die "时序库 migrate 失败（已重试 3 次）：${DC[*]} up --exit-code-from migrate-tsdb-schema migrate-tsdb-schema" "TSDB migration failed after 3 attempts: ${DC[*]} up --exit-code-from migrate-tsdb-schema migrate-tsdb-schema" 3
   fi
 else
-  log "--skip-migrate：跳过 migrate / seed"
+  log "--skip-migrate：跳过 migrate / seed" "--skip-migrate: skipping migrations and seed"
 fi
 
 # =============================================================================
 # Step 8. up 业务 + web + 监控
 # =============================================================================
-sep "8/9 启动业务 + web + 监控"
+sep "8/9 启动业务 + web + 监控" "8/9 Start business services, web, and monitoring"
 
 acs_ha_wait_ready() {
   local service="$1" service_cid service_ip wait_seconds=0
@@ -1174,31 +1229,31 @@ acs_ha_report_not_ready() {
   local service="$1" service_cid service_ip state oom exit_code restart_count ready_response
   service_cid="$("${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
   if [ -z "$service_cid" ]; then
-    log "ACS readiness 诊断：$service 没有容器 ID"
+    log "ACS readiness 诊断：$service 没有容器 ID" "ACS readiness diagnosis: no container ID for $service"
     return 0
   fi
   state="$(docker inspect -f '{{.State.Status}}' "$service_cid" 2>/dev/null || echo unknown)"
   oom="$(docker inspect -f '{{.State.OOMKilled}}' "$service_cid" 2>/dev/null || echo unknown)"
   exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$service_cid" 2>/dev/null || echo unknown)"
   restart_count="$(docker inspect -f '{{.RestartCount}}' "$service_cid" 2>/dev/null || echo unknown)"
-  log "ACS readiness 诊断：$service state=$state oom=$oom exit=$exit_code restarts=$restart_count"
+  log "ACS readiness 诊断：$service state=$state oom=$oom exit=$exit_code restarts=$restart_count" "ACS readiness diagnosis: $service state=$state oom=$oom exit=$exit_code restarts=$restart_count"
   service_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$service_cid" 2>/dev/null || true)"
   if [ -n "$service_ip" ]; then
     ready_response="$(curl -sS --max-time 5 "http://${service_ip}:7557/readyz" 2>&1 || true)"
-    log "ACS readiness 响应：${ready_response:-<无响应>}"
+    log "ACS readiness 响应：${ready_response:-<无响应>}" "ACS readiness response: ${ready_response:-<no response>}"
   fi
-  log "ACS 最近日志（$service，最多 80 行）："
+  log "ACS 最近日志（$service，最多 80 行）：" "Recent ACS logs ($service, up to 80 lines):"
   "${DC[@]}" logs --tail=80 "$service" 2>&1 || true
 }
 
 app_wait_ready() {
   local app_cid state oom exit_code restart_count wait_seconds=0
-  log "先启动 App，等待 metrics /healthz（最长 ${APP_START_TIMEOUT}s）..."
+  log "先启动 App，等待 metrics /healthz（最长 ${APP_START_TIMEOUT}s）..." "Starting App first; waiting for metrics /healthz (up to ${APP_START_TIMEOUT}s) ..."
   "${DC[@]}" up --pull never -d --no-deps app
   while [ "$wait_seconds" -lt "$APP_START_TIMEOUT" ]; do
     app_cid="$("${DC[@]}" ps -q app 2>/dev/null | head -n1)"
     if [ -n "$app_cid" ] && curl -fsS --max-time 3 http://127.0.0.1:9091/healthz >/dev/null 2>&1; then
-      log "App 已就绪（${wait_seconds}s）"
+      log "App 已就绪（${wait_seconds}s）" "App is ready (${wait_seconds}s)"
       return 0
     fi
     sleep 3
@@ -1210,8 +1265,8 @@ app_wait_ready() {
   oom="$(docker inspect -f '{{.State.OOMKilled}}' "$app_cid" 2>/dev/null || echo unknown)"
   exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$app_cid" 2>/dev/null || echo unknown)"
   restart_count="$(docker inspect -f '{{.RestartCount}}' "$app_cid" 2>/dev/null || echo unknown)"
-  log "App 启动就绪超时：state=$state oom=$oom exit=$exit_code restarts=$restart_count"
-  log "App 最近日志（最多 80 行）："
+  log "App 启动就绪超时：state=$state oom=$oom exit=$exit_code restarts=$restart_count" "App readiness timed out: state=$state oom=$oom exit=$exit_code restarts=$restart_count"
+  log "App 最近日志（最多 80 行）：" "Recent App logs (up to 80 lines):"
   "${DC[@]}" logs --tail=80 app 2>&1 || true
   return 1
 }
@@ -1222,9 +1277,9 @@ stop_existing_worker() {
   [ -n "$worker_cid" ] || return 0
   worker_state="$(docker inspect -f '{{.State.Status}}' "$worker_cid" 2>/dev/null || echo unknown)"
   [ "$worker_state" = running ] || return 0
-  log "停止现有 Worker，避免 App 启动期争抢数据库连接 ..."
+  log "停止现有 Worker，避免 App 启动期争抢数据库连接 ..." "Stopping the existing Worker to avoid database contention during App startup ..."
   "${DC[@]}" stop worker ||
-    die "现有 Worker 停止失败；为避免 App 启动期数据库争抢，已中止升级" 2
+    die "现有 Worker 停止失败；为避免 App 启动期数据库争抢，已中止升级" "Could not stop the existing Worker; upgrade aborted to avoid database contention during App startup" 2
 }
 
 web_acs_dynamic_upstream_loaded() {
@@ -1256,7 +1311,7 @@ acs_ha_prepare_candidate() {
   # 兼容首轮从旧拓扑升级：旧 web 若尚未使用动态 DNS upstream，候选实例即使
   # 就绪也不会被纳入路由。先在旧 ACS 仍服务时只刷新 web，再继续接力。
   if ! web_acs_dynamic_upstream_loaded "$old_web"; then
-    log "旧 web 尚未加载动态 ACS upstream，先刷新 web 动态 ACS upstream ..."
+    log "旧 web 尚未加载动态 ACS upstream，先刷新 web 动态 ACS upstream ..." "The existing web has no dynamic ACS upstream; refreshing web first ..."
     "${DC[@]}" up --pull never -d --no-deps web
     wait_seconds=0
     while [ "$wait_seconds" -lt 30 ]; do
@@ -1271,7 +1326,7 @@ acs_ha_prepare_candidate() {
       die "web 30s 内未加载动态 ACS upstream；正式 ACS 未替换，已中止发布" 2
   fi
 
-  log "先更新 ACS 接力实例，正式 ACS 继续承载现有流量 ..."
+  log "先更新 ACS 接力实例，正式 ACS 继续承载现有流量 ..." "Updating the ACS candidate first; the primary ACS continues serving traffic ..."
   "${DC[@]}" up --pull never -d --no-deps acs-candidate
   if ! acs_ha_wait_ready acs-candidate; then
     acs_ha_report_not_ready acs-candidate
@@ -1279,13 +1334,13 @@ acs_ha_prepare_candidate() {
   fi
   # nginx.conf 的 Docker DNS valid=10s。候选实例刚加入共享别名 `acs` 时，
   # 必须覆盖完整缓存周期后再停止正式实例，否则旧 worker 仍可能只持有旧 IP。
-  log "ACS 接力实例已就绪，等待 Nginx 动态 DNS 完成一轮刷新 ..."
+  log "ACS 接力实例已就绪，等待 Nginx 动态 DNS 完成一轮刷新 ..." "ACS candidate is ready; waiting for one Nginx dynamic DNS refresh cycle ..."
   sleep 12
   if ! acs_ha_wait_ready acs-candidate; then
     acs_ha_report_not_ready acs-candidate
     die "DNS 刷新后 ACS 接力实例已不就绪；正式 ACS 未替换，已中止发布" 2
   fi
-  log "Nginx 已具备接力上游，允许替换正式 ACS"
+  log "Nginx 已具备接力上游，允许替换正式 ACS" "Nginx has the failover upstream; primary ACS replacement is allowed"
 }
 
 acs_ha_prepare_candidate
@@ -1294,13 +1349,13 @@ if [ "$ACS_HA_EXISTING" = 1 ]; then
   # 不再调用无服务范围的 compose up：实测 Compose 会把刚预热的 candidate
   # 与 primary 同时重建，破坏接力不变量。正式实例必须单独替换、直连业务端口
   # 验证就绪，再覆盖一轮 Nginx DNS 缓存；其余业务显式 --no-deps 排除两个 ACS。
-  log "接力实例持续承载流量，单独替换正式 ACS ..."
+  log "接力实例持续承载流量，单独替换正式 ACS ..." "The candidate continues serving traffic; replacing the primary ACS separately ..."
   "${DC[@]}" up --pull never -d --no-deps acs
   if ! acs_ha_wait_ready acs; then
     acs_ha_report_not_ready acs
     die "正式 ACS 90s 内未就绪；接力实例仍在服务，已中止其余业务更新" 2
   fi
-  log "正式 ACS 已就绪，等待 Nginx 动态 DNS 完成一轮刷新 ..."
+  log "正式 ACS 已就绪，等待 Nginx 动态 DNS 完成一轮刷新 ..." "Primary ACS is ready; waiting for one Nginx dynamic DNS refresh cycle ..."
   sleep 12
   if ! acs_ha_wait_ready acs || ! acs_ha_wait_ready acs-candidate; then
     acs_ha_report_not_ready acs
@@ -1314,11 +1369,11 @@ if [ "$ACS_HA_EXISTING" = 1 ]; then
   fi
   remaining_services=(worker)
   [ "$SKIP_WEB" = 1 ] || remaining_services+=(web)
-  log "App 已就绪，启动 Worker/Web（显式排除 ACS 依赖）..."
+  log "App 已就绪，启动 Worker/Web（显式排除 ACS 依赖）..." "App is ready; starting Worker/Web (excluding ACS dependencies) ..."
   "${DC[@]}" up --pull never -d --no-deps "${remaining_services[@]}"
 else
   # 首次安装没有存量南向流量，但仍先让 App 完成启动期数据库同步，避免 Worker 并发抢占连接。
-  log "首次安装：先启动 ACS 双实例 ..."
+  log "首次安装：先启动 ACS 双实例 ..." "Fresh install: starting both ACS instances first ..."
   "${DC[@]}" up --pull never -d --no-deps acs acs-candidate
   if ! acs_ha_wait_ready acs || ! acs_ha_wait_ready acs-candidate; then
     acs_ha_report_not_ready acs
@@ -1330,7 +1385,7 @@ else
   fi
   remaining_services=(worker)
   [ "$SKIP_WEB" = 1 ] || remaining_services+=(web)
-  log "App 已就绪，启动 Worker/Web ..."
+  log "App 已就绪，启动 Worker/Web ..." "App is ready; starting Worker/Web ..."
   "${DC[@]}" up --pull never -d --no-deps "${remaining_services[@]}"
 fi
 
@@ -1341,7 +1396,7 @@ fi
 # mount release-local configuration; --no-deps protects all data services and
 # named volumes remain attached.
 if [ "$SKIP_MONITORING" = 0 ]; then
-  log "刷新版本目录 bind mount（仅监控无状态容器，保留数据卷）..."
+  log "刷新版本目录 bind mount（仅监控无状态容器，保留数据卷）..." "Refreshing release bind mounts (monitoring stateless containers only; data volumes preserved) ..."
   "${DC[@]}" up --pull never -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo \
     nats-exporter nginx-exporter node-exporter cadvisor
 fi
@@ -1355,7 +1410,7 @@ case "$HEALTHCHECK_FINAL_GRACE" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_FINAL_GRACE
 case "$HEALTHCHECK_PROBE_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_PROBE_TIMEOUT 必须是正整数" 1 ;; esac
 [ "$HEALTHCHECK_TIMEOUT" -gt 0 ] || die "OMC_HEALTHCHECK_TIMEOUT 必须大于 0" 1
 [ "$HEALTHCHECK_PROBE_TIMEOUT" -gt 0 ] || die "OMC_HEALTHCHECK_PROBE_TIMEOUT 必须大于 0" 1
-log "动态等待业务容器启动（最长 ${HEALTHCHECK_TIMEOUT}s，单轮探针最多 ${HEALTHCHECK_PROBE_TIMEOUT}s，每 ${HEALTHCHECK_INTERVAL}s 重试；通过后立即继续）..."
+log "动态等待业务容器启动（最长 ${HEALTHCHECK_TIMEOUT}s，单轮探针最多 ${HEALTHCHECK_PROBE_TIMEOUT}s，每 ${HEALTHCHECK_INTERVAL}s 重试；通过后立即继续）..." "Waiting for business containers (up to ${HEALTHCHECK_TIMEOUT}s, retry every ${HEALTHCHECK_INTERVAL}s) ..."
 HEALTHCHECK_LOG="$(mktemp)"
 HEALTH_OK=0
 HEALTHCHECK_PROBE_TIMEOUTS=0
@@ -1397,7 +1452,7 @@ fi
 # =============================================================================
 # Step 9. healthcheck
 # =============================================================================
-sep "9/9 健康检查"
+sep "9/9 健康检查" "9/9 Health check"
 
 if [ "$HEALTH_OK" -eq 1 ]; then
   cat "$HEALTHCHECK_LOG"
@@ -1440,34 +1495,34 @@ fi
 rm -f "$HEALTHCHECK_LOG"
 
 echo
-sep "部署完成"
-log "项目版本：$VERSION"
-log "OMC 根目录：$OMC_ROOT"
-log "  current → $(readlink -f "$OMC_ROOT/current")"
-log "  实例配置：$OMC_ROOT/etc/"
-log "  运行日志：$OMC_ROOT/run/logs/{app,acs,worker,nginx}"
+sep "部署完成" "Installation complete"
+log "项目版本：$VERSION" "Project version: $VERSION"
+log "OMC 根目录：$OMC_ROOT" "OMC root: $OMC_ROOT"
+log "  current → $(readlink -f "$OMC_ROOT/current")" "  current -> $(readlink -f "$OMC_ROOT/current")"
+log "  实例配置：$OMC_ROOT/etc/" "  Instance configuration: $OMC_ROOT/etc/"
+log "  运行日志：$OMC_ROOT/run/logs/{app,acs,worker,nginx}" "  Runtime logs: $OMC_ROOT/run/logs/{app,acs,worker,nginx}"
 echo
-log "compose 控制命令："
-log "  · 查看状态：  cd $OMC_ROOT/current/deploy && ${DC[*]} ps"
-log "  · 查看日志：  cd $OMC_ROOT/current/deploy && ${DC[*]} logs -f <service>"
-log "  · 停止全栈：  cd $OMC_ROOT/current/deploy && ${DC[*]} down"
-log "  · 卸载(保留数据)：sudo bash $OMC_ROOT/current/deploy/uninstall.sh --force"
+log "compose 控制命令：" "Compose control commands:"
+log "  · 查看状态：  cd $OMC_ROOT/current/deploy && ${DC[*]} ps" "  · Status: cd $OMC_ROOT/current/deploy && ${DC[*]} ps"
+log "  · 查看日志：  cd $OMC_ROOT/current/deploy && ${DC[*]} logs -f <service>" "  · Logs: cd $OMC_ROOT/current/deploy && ${DC[*]} logs -f <service>"
+log "  · 停止全栈：  cd $OMC_ROOT/current/deploy && ${DC[*]} down" "  · Stop stack: cd $OMC_ROOT/current/deploy && ${DC[*]} down"
+log "  · 卸载(保留数据)：sudo bash $OMC_ROOT/current/deploy/uninstall.sh --force" "  · Uninstall (keep data): sudo bash $OMC_ROOT/current/deploy/uninstall.sh --force"
 echo
-log "访问地址："
-log "  · Web 管理界面：  http://<服务器IP>:8081   （运维浏览器登录）"
-log "  · 基站 ACS URL：  http://<服务器IP>:8080   （TR-069，基站设备侧填，人不浏览）"
-log "  · MinIO Console：http://<服务器IP>:9001"
-[ "$SKIP_MONITORING" = 0 ] && log "  · Grafana：       http://<服务器IP>:3030   （宿主 3030 → 容器 3000）"
-log "  · 健康检查：       bash $OMC_ROOT/current/deploy/healthcheck.sh"
+log "访问地址：" "Access URLs:"
+log "  · Web 管理界面：  http://<服务器IP>:8081   （运维浏览器登录）" "  · Web console: http://<server-ip>:8081 (operator login)"
+log "  · 基站 ACS URL：  http://<服务器IP>:8080   （TR-069，基站设备侧填，人不浏览）" "  · ACS URL for devices: http://<server-ip>:8080 (TR-069)"
+log "  · MinIO Console：http://<服务器IP>:9001" "  · MinIO Console: http://<server-ip>:9001"
+[ "$SKIP_MONITORING" = 0 ] && log "  · Grafana：       http://<服务器IP>:3030   （宿主 3030 → 容器 3000）" "  · Grafana: http://<server-ip>:3030"
+log "  · 健康检查：       bash $OMC_ROOT/current/deploy/healthcheck.sh" "  · Health check: bash $OMC_ROOT/current/deploy/healthcheck.sh"
 echo
-log "初始账号（首次登录强制改）："
-log "  · Web UI：    admin / admin123"
-log "  · MinIO：     minioadmin / minioadmin"
-log "  · PostgreSQL：omcgo / omcgo123"
-[ "$SKIP_MONITORING" = 0 ] && log "  · Grafana：    admin / admin"
+log "初始账号（首次登录强制改）：" "Initial accounts (change on first login):"
+log "  · Web UI：    admin / admin123" "  · Web UI: admin / admin123"
+log "  · MinIO：     minioadmin / minioadmin" "  · MinIO: minioadmin / minioadmin"
+log "  · PostgreSQL：omcgo / omcgo123" "  · PostgreSQL: omcgo / omcgo123"
+[ "$SKIP_MONITORING" = 0 ] && log "  · Grafana：    admin / admin" "  · Grafana: admin / admin"
 echo
 
 if [ "$HEALTH_OK" != 1 ]; then
   die "健康检查未全通过（部分服务异常），请按上面 healthcheck 输出排查" 4
 fi
-log "全部 OK 🎉"
+log "全部 OK 🎉" "All checks passed."
