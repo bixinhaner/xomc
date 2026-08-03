@@ -115,6 +115,7 @@ gpv_handoff_migrate_legacy_systemd() {
 
 gpv_handoff_prepare() {
   local args=(--config /etc/omcgo/app.prod.yaml)
+  local output status
   if [ "${1:-}" = "--fresh-install" ] ||
      [ "${1:-}" = "--bootstrap-if-missing" ]; then
     args+=("$1")
@@ -122,5 +123,11 @@ gpv_handoff_prepare() {
     echo "unsupported gpv_handoff_prepare argument: $1" >&2
     return 2
   fi
-  "${DC[@]}" run --rm --no-deps gpv-handoff "${args[@]}"
+  if output="$("${DC[@]}" run --rm --no-deps gpv-handoff "${args[@]}" 2>&1)"; then
+    return 0
+  else
+    status=$?
+    printf '%s\n' "$output" >&2
+    return "$status"
+  fi
 }

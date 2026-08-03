@@ -1084,11 +1084,22 @@ fi
 #     使用 `up --exit-code-from` 而非 `run`，因为 `run` 创建的一次性容器
 #     存在 DNS 解析缺陷（无法解析服务名），而 `up` 作为正式服务启动时
 #     网络集成完整，DNS 解析正常。保留重试逻辑作为兆底。
+run_oneshot_migration() {
+  local service="$1" output status
+  if output="$("${DC[@]}" up --pull never --exit-code-from "$service" "$service" 2>&1)"; then
+    return 0
+  else
+    status=$?
+    printf '%s\n' "$output" >&2
+    return "$status"
+  fi
+}
+
 if [ "$SKIP_MIGRATE" = 0 ]; then
   log "执行 db migrate（容器：migrate-schema）..."
   MIGRATE_OK=0
   for attempt in 1 2 3; do
-    if "${DC[@]}" up --pull never --exit-code-from migrate-schema migrate-schema; then
+    if run_oneshot_migration migrate-schema; then
       MIGRATE_OK=1
       break
     fi
@@ -1107,7 +1118,7 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
   # 7.4 seed（goose 单链路 migrations/seed/，每次部署都跑 —— goose 用
   #     goose_db_version_seed 版本表自动追踪已应用项，新加 seed 自动 catch up）
   log "执行 db seed（容器：migrate-seed-sql，goose 幂等）..."
-  if "${DC[@]}" up --pull never --exit-code-from migrate-seed-sql migrate-seed-sql; then
+  if run_oneshot_migration migrate-seed-sql; then
     log "seed 成功"
   else
     die "seed 失败：${DC[*]} up --exit-code-from migrate-seed-sql migrate-seed-sql" 3
@@ -1121,7 +1132,7 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
   log "执行时序库 migrate（容器：migrate-tsdb-schema，goose 幂等）..."
   TSDB_MIGRATE_OK=0
   for attempt in 1 2 3; do
-    if "${DC[@]}" up --pull never --exit-code-from migrate-tsdb-schema migrate-tsdb-schema; then
+    if run_oneshot_migration migrate-tsdb-schema; then
       TSDB_MIGRATE_OK=1
       break
     fi

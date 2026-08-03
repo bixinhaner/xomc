@@ -11,6 +11,7 @@ CALLS="$TMP/calls"
 cat >"$TMP/compose" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GPV_HANDOFF_TEST_CALLS"
+printf '%s\n' '{"Created":false}'
 exit "${GPV_HANDOFF_TEST_EXIT:-0}"
 SH
 chmod +x "$TMP/compose"
@@ -20,7 +21,13 @@ export GPV_HANDOFF_TEST_CALLS="$CALLS"
 
 GPV_HANDOFF_TEST_EXIT=0
 export GPV_HANDOFF_TEST_EXIT
-gpv_handoff_prepare
+if gpv_handoff_prepare >"$TMP/success.out" 2>"$TMP/success.err"; then
+  [ ! -s "$TMP/success.out" ] || { echo "FAIL: successful handoff must hide command output" >&2; exit 1; }
+  [ ! -s "$TMP/success.err" ] || { echo "FAIL: successful handoff must not emit stderr" >&2; exit 1; }
+else
+  echo "FAIL: successful handoff returned failure" >&2
+  exit 1
+fi
 grep -Fxq 'run --rm --no-deps gpv-handoff --config /etc/omcgo/app.prod.yaml' "$CALLS" || {
   echo "FAIL: handoff must run the one-shot management container" >&2
   exit 1
@@ -40,10 +47,14 @@ grep -Fxq 'run --rm --no-deps gpv-handoff --config /etc/omcgo/app.prod.yaml --bo
 
 GPV_HANDOFF_TEST_EXIT=17
 export GPV_HANDOFF_TEST_EXIT
-if gpv_handoff_prepare; then
+if gpv_handoff_prepare >"$TMP/failure.out" 2>"$TMP/failure.err"; then
   echo "FAIL: handoff failure must propagate before app restart" >&2
   exit 1
 fi
+grep -Fxq '{"Created":false}' "$TMP/failure.err" || {
+  echo "FAIL: failed handoff must preserve command output" >&2
+  exit 1
+}
 
 for action in start up restart stop down; do
   gpv_handoff_action_touches_app "$action" || {

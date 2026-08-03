@@ -104,6 +104,8 @@ contains "全新安装清理项目 volumes" 'label=com.docker.compose.project="$
 contains "infra 启动禁止 pull" '"${DC[@]}" up --pull never -d postgres postgres-tsdb redis-core redis-pm nats minio' "$INSTALL"
 contains "业务启动禁止 pull" '"${DC[@]}" up --pull never -d' "$INSTALL"
 contains "候选 ACS 启动禁止 pull" '"${DC[@]}" up --pull never -d --no-deps acs-candidate' "$INSTALL"
+contains "一次性迁移成功隐藏 goose 输出" 'run_oneshot_migration()' "$INSTALL"
+contains "一次性迁移失败保留容器输出" 'printf '\''%s\n'\'' "$output" >&2' "$INSTALL"
 contains "安装先等待 App 就绪" 'app_wait_ready' "$INSTALL"
 contains "App 就绪后再启动 Worker" 'remaining_services=(worker)' "$INSTALL"
 contains "升级启动 App 前停止旧 Worker" '停止现有 Worker，避免 App 启动期争抢数据库连接' "$INSTALL"
