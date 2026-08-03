@@ -238,7 +238,7 @@ export default function KPIQuery() {
   const [submitted, setSubmitted] = useState<KpiQuerySubmittedQuery | null>(restoredState.submitted);
   const [pivotPage, setPivotPage] = useState(restoredState.pivotPage);
   const [pivotPageSize, setPivotPageSize] = useState(restoredState.pivotPageSize);
-  const [resultsMaximized, setResultsMaximized] = useState(false);
+  const [resultsMaximized, setResultsMaximized] = useState(restoredState.resultsMaximized);
   const initialRestoredQueryDelayMs = restoredState.shouldRestoreQuery
     ? restoredKpiQueryDelayMs(restoredState.savedAt, Date.now())
     : 0;
@@ -379,6 +379,7 @@ export default function KPIQuery() {
         templateTab,
         activeTemplateId,
         sidebarCollapsed,
+        resultsMaximized,
       }),
     );
   }, [
@@ -388,6 +389,7 @@ export default function KPIQuery() {
     payload,
     pivotPage,
     pivotPageSize,
+    resultsMaximized,
     sidebarCollapsed,
     submitted,
     templateTab,

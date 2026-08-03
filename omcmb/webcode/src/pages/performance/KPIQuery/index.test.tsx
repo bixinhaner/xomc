@@ -239,6 +239,7 @@ describe('KPIQuery 顶部 tab 现场保持', () => {
             templateTab: 'private',
             activeTemplateId: 'tpl-valid',
             sidebarCollapsed: false,
+            resultsMaximized: false,
           }),
           savedAt: '2026-07-29T00:00:00.000Z',
         },
@@ -283,6 +284,7 @@ describe('KPIQuery 顶部 tab 现场保持', () => {
             pivotPageSize: 100,
             templateTab: 'public',
             sidebarCollapsed: false,
+            resultsMaximized: false,
           }),
           savedAt: '2026-07-29T00:00:00.000Z',
         },
@@ -330,6 +332,7 @@ describe('KPIQuery 顶部 tab 现场保持', () => {
             pivotPageSize: 100,
             templateTab: 'private',
             sidebarCollapsed: true,
+            resultsMaximized: false,
           }),
           savedAt: '2026-07-29T00:00:00.000Z',
         },
@@ -344,6 +347,40 @@ describe('KPIQuery 顶部 tab 现场保持', () => {
     });
     expect(screen.getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('');
     expect(screen.getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('');
+  });
+
+  it('切回已最大化页面时恢复查询结果最大化状态', () => {
+    usePmPageStateStore.setState({
+      pages: {
+        [PM_KPI_QUERY_PAGE_KEY]: {
+          ...buildKpiQueryStateSnapshot({
+            payload: {
+              deviceType: 'ENB',
+              deviceSns: ['SN-EDITED'],
+              metricPaths: ['K-EDITED'],
+              granularity: '15min',
+              timeRangePreset: 'last_1h',
+            },
+            customRange: null,
+            timeRangeDirty: false,
+            cellSel: {},
+            submitted: null,
+            pivotPage: 1,
+            pivotPageSize: 50,
+            templateTab: 'public',
+            sidebarCollapsed: false,
+            resultsMaximized: true,
+          }),
+          savedAt: '2026-07-29T00:00:00.000Z',
+        },
+      },
+    });
+
+    renderPage();
+
+    expect(screen.queryByText('查询条件')).toBeNull();
+    expect(screen.getByTestId('pivot-table')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '还原查询结果' })).toBeTruthy();
   });
 
   it('查询结果支持最大化和还原，不卸载结果表格和截断提示', () => {
