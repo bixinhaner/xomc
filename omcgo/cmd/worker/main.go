@@ -1487,52 +1487,62 @@ func (l *enabledIndicatorLookup) LookupEnabledIndicators(ctx context.Context, te
 	if err != nil {
 		return nil, err
 	}
-	if err := l.ensureCacheVersion(ctx); err != nil {
-		return nil, err
-	}
-	now := l.nowTime()
-	if cached, ok := l.lookupCache(dt, now); ok {
-		return cached, nil
-	}
-
-	value, err, _ := l.loads.Do(string(dt), func() (interface{}, error) {
+	for {
+		version, err := l.ensureCacheVersion(ctx)
+		if err != nil {
+			return nil, err
+		}
 		now := l.nowTime()
-		if cached, ok := l.lookupCache(dt, now); ok {
+		if cached, ok := l.lookupCache(dt, now, version); ok {
 			return cached, nil
 		}
-		if l.repo == nil {
-			return nil, fmt.Errorf("enabled PM indicator repository is not configured")
-		}
-		ids, err := l.repo.ListAll(ctx, dt)
-		if err != nil {
-			return nil, fmt.Errorf("list enabled PM indicators (%s): %w", dt, err)
-		}
-		out := make(map[string]struct{})
-		for _, id := range ids {
-			if id != "" {
-				out[id] = struct{}{}
+
+		value, err, _ := l.loads.Do(string(dt)+"\x1f"+version, func() (interface{}, error) {
+			now := l.nowTime()
+			if cached, ok := l.lookupCache(dt, now, version); ok {
+				return cached, nil
 			}
+			if l.repo == nil {
+				return nil, fmt.Errorf("enabled PM indicator repository is not configured")
+			}
+			ids, err := l.repo.ListAll(ctx, dt)
+			if err != nil {
+				return nil, fmt.Errorf("list enabled PM indicators (%s): %w", dt, err)
+			}
+			out := make(map[string]struct{})
+			for _, id := range ids {
+				if id != "" {
+					out[id] = struct{}{}
+				}
+			}
+			if !l.storeCache(dt, out, now.Add(l.ttlDuration()), version) {
+				return nil, errEnabledIndicatorCacheVersionChanged
+			}
+			return cloneIndicatorSet(out), nil
+		})
+		if errors.Is(err, errEnabledIndicatorCacheVersionChanged) {
+			continue
 		}
-		l.storeCache(dt, out, now.Add(l.ttlDuration()))
-		return cloneIndicatorSet(out), nil
-	})
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
+		indicators, ok := value.(map[string]struct{})
+		if !ok {
+			return nil, fmt.Errorf("enabled PM indicator cache returned unexpected type %T", value)
+		}
+		return cloneIndicatorSet(indicators), nil
 	}
-	indicators, ok := value.(map[string]struct{})
-	if !ok {
-		return nil, fmt.Errorf("enabled PM indicator cache returned unexpected type %T", value)
-	}
-	return cloneIndicatorSet(indicators), nil
 }
 
-func (l *enabledIndicatorLookup) ensureCacheVersion(ctx context.Context) error {
+var errEnabledIndicatorCacheVersionChanged = errors.New("enabled PM indicator cache version changed")
+
+func (l *enabledIndicatorLookup) ensureCacheVersion(ctx context.Context) (string, error) {
 	if l.readCacheVersion == nil {
-		return nil
+		return "", nil
 	}
 	version, err := l.readCacheVersion(ctx)
 	if err != nil {
-		return fmt.Errorf("synchronize enabled PM indicator cache: %w", err)
+		return "", fmt.Errorf("synchronize enabled PM indicator cache: %w", err)
 	}
 	l.mu.Lock()
 	if version != l.cacheVersion {
@@ -1540,21 +1550,35 @@ func (l *enabledIndicatorLookup) ensureCacheVersion(ctx context.Context) error {
 		l.cacheVersion = version
 	}
 	l.mu.Unlock()
-	return nil
+	return version, nil
 }
 
-func (l *enabledIndicatorLookup) lookupCache(dt indicator.DeviceType, now time.Time) (map[string]struct{}, bool) {
+func (l *enabledIndicatorLookup) lookupCache(
+	dt indicator.DeviceType,
+	now time.Time,
+	version string,
+) (map[string]struct{}, bool) {
 	l.mu.RLock()
 	entry, ok := l.cache[dt]
+	versionMatches := version == l.cacheVersion
 	l.mu.RUnlock()
-	if !ok || now.After(entry.expiresAt) {
+	if !versionMatches || !ok || now.After(entry.expiresAt) {
 		return nil, false
 	}
 	return cloneIndicatorSet(entry.indicators), true
 }
 
-func (l *enabledIndicatorLookup) storeCache(dt indicator.DeviceType, indicators map[string]struct{}, expiresAt time.Time) {
+func (l *enabledIndicatorLookup) storeCache(
+	dt indicator.DeviceType,
+	indicators map[string]struct{},
+	expiresAt time.Time,
+	version string,
+) bool {
 	l.mu.Lock()
+	defer l.mu.Unlock()
+	if version != l.cacheVersion {
+		return false
+	}
 	if l.cache == nil {
 		l.cache = make(map[indicator.DeviceType]enabledIndicatorCacheEntry)
 	}
@@ -1562,7 +1586,7 @@ func (l *enabledIndicatorLookup) storeCache(dt indicator.DeviceType, indicators 
 		indicators: cloneIndicatorSet(indicators),
 		expiresAt:  expiresAt,
 	}
-	l.mu.Unlock()
+	return true
 }
 
 func (l *enabledIndicatorLookup) ttlDuration() time.Duration {
