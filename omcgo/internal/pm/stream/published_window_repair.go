@@ -357,7 +357,7 @@ type publishedVersionRepairBatchStore interface {
 type PublishedVersionRepairer struct {
 	windows           publishedVersionRepairBatchStore
 	snapshot          *SnapshotStore
-	location          *time.Location
+	location          LocationProvider
 	logger            *zap.Logger
 	versionQueryLimit int
 	cursor            uuid.UUID
@@ -370,11 +370,19 @@ func NewPublishedVersionRepairer(
 	location *time.Location,
 	logger *zap.Logger,
 ) *PublishedVersionRepairer {
+	return NewPublishedVersionRepairerWithLocationProvider(
+		windows, snapshot, fixedLocationProvider(location), logger,
+	)
+}
+
+func NewPublishedVersionRepairerWithLocationProvider(
+	windows publishedVersionRepairBatchStore,
+	snapshot *SnapshotStore,
+	location LocationProvider,
+	logger *zap.Logger,
+) *PublishedVersionRepairer {
 	if logger == nil {
 		logger = zap.NewNop()
-	}
-	if location == nil {
-		location = time.UTC
 	}
 	return &PublishedVersionRepairer{
 		windows: windows, snapshot: snapshot, location: location, logger: logger,
@@ -388,9 +396,10 @@ func (r *PublishedVersionRepairer) runOnce(
 ) (PublishedVersionRepairResult, error) {
 	snapshot := r.snapshot.Current()
 	r.pruneCompletedVersions(snapshot)
+	location := currentLocation(r.location)
 	versions := nextPublishedVersionRepairBatch(
 		snapshot,
-		r.location,
+		location,
 		r.completed,
 		r.cursor,
 		r.versionQueryLimit,
@@ -402,7 +411,7 @@ func (r *PublishedVersionRepairer) runOnce(
 	result, err := r.windows.RepairPublishedVersionBatch(
 		ctx,
 		versions,
-		r.location,
+		location,
 		publishedVersionRepairBatchSize,
 	)
 	if err != nil {

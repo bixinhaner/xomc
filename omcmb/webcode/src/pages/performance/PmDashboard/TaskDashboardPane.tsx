@@ -256,7 +256,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
       includePartial: true,
     },
   );
-  const rawRows = [...(rowsResp?.rows ?? []), ...(rowsResp?.progressRows ?? [])];
+  const rawRows = rowsResp?.rows ?? [];
   // 周期对比开关打开时再拉一次上一周期（同任务、上一周期窗口、同 weekdays/hours）。
   const { data: prevResp, isLoading: prevLoading } = usePmAdhocResults(
     submitted?.compare && resultsQueryReady ? taskId : undefined,

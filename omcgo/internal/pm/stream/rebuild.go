@@ -962,7 +962,7 @@ func (r *Rebuilder) rebuildRollupGroup(
 		func(payload RollupPayload) error {
 			contributions, err := rebuildBatchContributions(
 				payload, snapshot, group.TargetGranularity,
-				r.recovery.matcher.location,
+				r.recovery.matcher.Location(),
 			)
 			if err != nil {
 				return err
@@ -1309,7 +1309,7 @@ func (r *Rebuilder) replaySources(ctx context.Context, key WindowKey, lock *Lock
 				contributions, matchErr = rollupContributions(
 					payload,
 					snapshot.ByVersion[payload.TaskVersionID],
-					r.recovery.matcher.location,
+					r.recovery.matcher.Location(),
 				)
 			}
 			if matchErr != nil {

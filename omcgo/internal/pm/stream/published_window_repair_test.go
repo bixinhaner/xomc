@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPublishedVersionRepairerBoundsZeroHitQueriesAcrossManyVersions(t *testing.T) {
@@ -166,6 +167,7 @@ func TestPublishedVersionRepairEnqueuesClosedDailySliceWithoutLateEvent(t *testi
 
 type fakePublishedVersionRepairBatchStore struct {
 	batches    [][]uuid.UUID
+	locations  []string
 	queryCount int
 	leaveOpen  bool
 }
@@ -178,6 +180,9 @@ func (s *fakePublishedVersionRepairBatchStore) RepairPublishedVersionBatch(
 ) (PublishedVersionRepairResult, error) {
 	ids := make([]uuid.UUID, 0, len(versions))
 	completed := make(map[uuid.UUID]string)
+	if location != nil {
+		s.locations = append(s.locations, location.String())
+	}
 	for _, version := range versions {
 		ids = append(ids, version.VersionID)
 		if !s.leaveOpen {
@@ -202,6 +207,32 @@ func newTestPublishedVersionRepairer(
 	repairer := NewPublishedVersionRepairer(store, snapshots, time.UTC, nil)
 	repairer.versionQueryLimit = versionLimit
 	return repairer
+}
+
+func TestPublishedVersionRepairerUsesCurrentLocationProviderEachRun(t *testing.T) {
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	require.NoError(t, err)
+	newYork, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	current := tokyo
+	store := &fakePublishedVersionRepairBatchStore{leaveOpen: true}
+	snapshots := NewSnapshotStore(nil, nil)
+	snapshots.value.Store(publishedRepairTestSnapshot(1))
+	repairer := NewPublishedVersionRepairerWithLocationProvider(
+		store,
+		snapshots,
+		func() *time.Location { return current },
+		nil,
+	)
+
+	_, err = repairer.runOnce(context.Background())
+	require.NoError(t, err)
+
+	current = newYork
+	_, err = repairer.runOnce(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"Asia/Tokyo", "America/New_York"}, store.locations)
 }
 
 func publishedRepairTestSnapshot(count int) *TaskSnapshot {

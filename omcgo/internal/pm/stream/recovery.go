@@ -273,10 +273,10 @@ func (r *Recovery) recoveryContributions(
 		if !isDeviceHourPayload(payload, current) {
 			return nil, nil
 		}
-		return matchDeviceHourRules(payload, current, r.matcher.location)
+		return matchDeviceHourRules(payload, current, r.matcher.Location())
 	}
 	return rollupContributions(
-		payload, current.ByVersion[payload.TaskVersionID], r.matcher.location,
+		payload, current.ByVersion[payload.TaskVersionID], r.matcher.Location(),
 	)
 }
 

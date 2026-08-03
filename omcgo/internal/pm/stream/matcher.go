@@ -46,14 +46,44 @@ type Contribution struct {
 }
 
 type Matcher struct {
-	location *time.Location
+	location LocationProvider
 }
 
-func NewMatcher(location *time.Location) *Matcher {
+type LocationProvider func() *time.Location
+
+func fixedLocationProvider(location *time.Location) LocationProvider {
 	if location == nil {
 		location = time.UTC
 	}
+	return func() *time.Location {
+		return location
+	}
+}
+
+func currentLocation(provider LocationProvider) *time.Location {
+	if provider == nil {
+		return time.UTC
+	}
+	location := provider()
+	if location == nil {
+		return time.UTC
+	}
+	return location
+}
+
+func NewMatcher(location *time.Location) *Matcher {
+	return NewMatcherWithLocationProvider(fixedLocationProvider(location))
+}
+
+func NewMatcherWithLocationProvider(location LocationProvider) *Matcher {
 	return &Matcher{location: location}
+}
+
+func (m *Matcher) Location() *time.Location {
+	if m == nil {
+		return time.UTC
+	}
+	return currentLocation(m.location)
 }
 
 func (m *Matcher) Match(
@@ -90,7 +120,7 @@ func (m *Matcher) MatchGranularity(
 			if granularity != target {
 				continue
 			}
-			window, err := WindowFor(payload.WindowStart, target, m.location)
+			window, err := WindowFor(payload.WindowStart, target, m.Location())
 			if err != nil {
 				return nil, err
 			}
