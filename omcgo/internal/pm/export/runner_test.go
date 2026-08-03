@@ -539,7 +539,7 @@ func TestRunner_BuildSource_DeviceViewCSVIncludesMeasurementObjectOriginalLDN(t 
 	row := nthCSVRow(t, up.gotBody, 1)
 	require.Len(t, row, 5)
 	assert.Equal(t, objectLDN, row[3])
-	assert.Equal(t, "42", row[4])
+	assert.Equal(t, "42.00", row[4])
 }
 
 func TestRunner_BuildSource_DeviceViewEnglishCSVIncludesMeasurementObjectOriginalLDN(t *testing.T) {
@@ -594,7 +594,7 @@ func TestRunner_BuildSource_DeviceViewEnglishCSVIncludesMeasurementObjectOrigina
 	row := nthCSVRow(t, up.gotBody, 1)
 	require.Len(t, row, 5)
 	assert.Equal(t, objectLDN, row[3])
-	assert.Equal(t, "42", row[4])
+	assert.Equal(t, "42.00", row[4])
 }
 
 // ── 预 running 守门：payload 坏 / 缺 task_id 直接返 error，不动任务 ─────────────

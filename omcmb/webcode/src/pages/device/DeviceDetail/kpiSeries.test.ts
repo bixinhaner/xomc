@@ -27,9 +27,24 @@ function row(partial: Partial<AggregatedRow> & { metricPath: string; time: strin
 describe('buildKpiChartData', () => {
   it('正常分组：按时间升序排列，X 轴去重，值对齐', () => {
     const rows: AggregatedRow[] = [
-      row({ metricPath: 'K1', time: '2026-06-02T02:00:00Z', metricValue: 30 }),
-      row({ metricPath: 'K1', time: '2026-06-02T00:00:00Z', metricValue: 10 }),
-      row({ metricPath: 'K1', time: '2026-06-02T01:00:00Z', metricValue: 20 }),
+      row({
+        metricPath: 'K1',
+        time: '2026-06-02T02:00:00Z',
+        endTime: '2026-06-02T03:00:00Z',
+        metricValue: 30,
+      }),
+      row({
+        metricPath: 'K1',
+        time: '2026-06-02T00:00:00Z',
+        endTime: '2026-06-02T01:00:00Z',
+        metricValue: 10,
+      }),
+      row({
+        metricPath: 'K1',
+        time: '2026-06-02T01:00:00Z',
+        endTime: '2026-06-02T02:00:00Z',
+        metricValue: 20,
+      }),
       // 干扰：另一个指标，不应进入 K1 的结果
       row({ metricPath: 'K2', time: '2026-06-02T00:00:00Z', metricValue: 99 }),
     ];
@@ -40,6 +55,11 @@ describe('buildKpiChartData', () => {
       '2026-06-02T02:00:00Z',
     ]);
     expect(out.values).toEqual([10, 20, 30]);
+    expect(out.xEnds).toEqual([
+      '2026-06-02T01:00:00Z',
+      '2026-06-02T02:00:00Z',
+      '2026-06-02T03:00:00Z',
+    ]);
     expect(out.isEmpty).toBe(false);
     expect(out.hasSamples).toBe(true);
   });

@@ -140,7 +140,7 @@ describe('ChartCard 渲染隔离 (#444)', () => {
       { dataIndex: 0, seriesName: 'dev1', value: 12 },
       { dataIndex: 0, seriesName: 'dev2', value: '-' },
     ]);
-    expect(html).toContain('12 Mbps');
+    expect(html).toContain('12.00 Mbps');
     expect(html).not.toContain('- Mbps');
     expect(html).not.toContain('undefined');
     expect(html).not.toContain('null');
@@ -154,8 +154,8 @@ describe('ChartCard 渲染隔离 (#444)', () => {
       };
     };
     const noUnitHtml = noUnitOption.tooltip.formatter([{ dataIndex: 0, seriesName: 'dev1', value: 12 }]);
-    expect(noUnitHtml).toContain('12');
-    expect(noUnitHtml).not.toContain('12 Mbps');
+    expect(noUnitHtml).toContain('12.00');
+    expect(noUnitHtml).not.toContain('12.00 Mbps');
   });
 
   it('点击图表数据点后固定 tooltip，用户可关闭固定浮层', async () => {
@@ -176,10 +176,10 @@ describe('ChartCard 渲染隔离 (#444)', () => {
     expect(screen.getByText('已固定 · 可滚动查看全部对象')).toBeInTheDocument();
     expect(screen.getByText('dev-0')).toBeInTheDocument();
     expect(screen.getByText('dev-0')).toHaveStyle({ color: '#1f2937' });
-    expect(screen.getByText('100')).toBeInTheDocument();
-    expect(screen.getByText('100')).toHaveStyle({ color: '#111827' });
+    expect(screen.getByText('100.00')).toBeInTheDocument();
+    expect(screen.getByText('100.00')).toHaveStyle({ color: '#111827' });
     expect(screen.getByText('dev-15')).toBeInTheDocument();
-    expect(screen.getByText('115')).toBeInTheDocument();
+    expect(screen.getByText('115.00')).toBeInTheDocument();
 
     await user.click(screen.getByLabelText('关闭固定提示'));
 
@@ -199,7 +199,7 @@ describe('ChartCard 渲染隔离 (#444)', () => {
 
     await user.click(screen.getByText('mock-chart-click'));
 
-    expect(screen.getByText('2 %')).toBeInTheDocument();
+    expect(screen.getByText('2.00 %')).toBeInTheDocument();
     expect(screen.getByText('-')).toBeInTheDocument();
     expect(screen.queryByText('- %')).not.toBeInTheDocument();
   });

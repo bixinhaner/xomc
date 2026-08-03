@@ -5,6 +5,7 @@ import type { EChartsOption } from 'echarts';
 import { getBaseOption, getChartPalette } from './chartTheme';
 import { useIsDark } from '@/hooks/useThemeToken';
 import { useAppStore } from '@core/store/appStore';
+import { formatPmMetricDisplayValue } from '@core/utils/pmMetricValue';
 
 export interface LineSeries {
   name: string;
@@ -61,6 +62,10 @@ export interface LineChartProps {
    */
   integerValues?: boolean;
   /**
+   * PM/KPI 图表固定两位小数展示；用于 KPI 趋势图的 y 轴刻度。
+   */
+  pmMetricValueFormat?: boolean;
+  /**
    * #200 是否让曲线跨 null 续连（connectNulls）。
    * 默认 false（保持原行为：遇 null 即断线，不掩盖真实数据空洞）。
    * 仅 KPI 趋势这类「多设备并集时间轴稀疏导致大量 null」的场景显式传 true，
@@ -83,6 +88,7 @@ export interface BuildLineChartOptionParams {
   compareLabels?: (string | undefined)[];
   thresholdLines?: ThresholdLine[];
   integerValues?: boolean;
+  pmMetricValueFormat?: boolean;
   connectNulls?: boolean;
   isDark: boolean;
   appTheme: Parameters<typeof getBaseOption>[1];
@@ -106,12 +112,14 @@ export function buildLineChartOption({
   compareLabels,
   thresholdLines,
   integerValues = false,
+  pmMetricValueFormat = false,
   connectNulls = false,
   isDark,
   appTheme,
   palette,
 }: BuildLineChartOptionParams): EChartsOption {
   const base = getBaseOption(isDark, appTheme);
+  const baseYAxis = base.yAxis as { axisLabel?: object };
   const secondaryText = isDark ? '#8B949E' : '#8c8c8c';
   const titleColor = isDark ? '#E6EDF3' : '#262626';
 
@@ -192,18 +200,16 @@ export function buildLineChartOption({
         const items = params as Array<{ marker: string; seriesName: string; value: unknown; axisValue: string; dataIndex: number; seriesIndex: number }>;
         if (!Array.isArray(items) || items.length === 0) return '';
 
-        // 数值格式化函数：处理null/undefined，显示"-"，否则根据 integerValues 决定是否显示小数
         const formatTooltipValue = (val: unknown): string => {
+          if (integerValues) {
+            return typeof val === 'number' && Number.isFinite(val) ? val.toFixed(0) : '-';
+          }
+          if (pmMetricValueFormat) return formatPmMetricDisplayValue(val);
           if (val === null || val === undefined || Number.isNaN(val as number)) {
             return '-';
           }
-          // integerValues=true 时显示整数，否则保留2位小数
-          return integerValues ? (val as number).toFixed(0) : (val as number).toFixed(2);
+          return (val as number).toFixed(2);
         };
-
-        // 附加单位到数值后（如果单位不为空且不是"%"）
-        // const displayUnit = (unit && unit !== '%') ? `${unit}` : '';
-        // const unitSuffix = displayUnit ? ` ${displayUnit}` : '';
 
         const lines = items.map(item => {
           const s = series[item.seriesIndex];
@@ -212,7 +218,6 @@ export function buildLineChartOption({
           const unitSuffix = displayUnit ? ` ${displayUnit}` : '';
 
           const formattedVal = formatTooltipValue(item.value);
-          // 如果是空值显示"-"，则不附加单位
           const displayValue = formattedVal === '-' ? '-' : `${formattedVal}${unitSuffix}`;
           return `${item.marker} ${item.seriesName}: <strong>${displayValue}</strong>`;
         });
@@ -256,6 +261,14 @@ export function buildLineChartOption({
       min: 0,
       max: yMax,
       minInterval: maxVal === 0 || integerValues ? 1 : undefined,
+      ...(pmMetricValueFormat
+        ? {
+            axisLabel: {
+              ...(baseYAxis.axisLabel ?? {}),
+              formatter: (value: number) => formatPmMetricDisplayValue(value),
+            },
+          }
+        : {}),
       splitLine: {
         lineStyle: {
           type: 'dashed',
@@ -389,6 +402,7 @@ const LineChart: React.FC<LineChartProps> = ({
   compareLabels,
   thresholdLines,
   integerValues = false,
+  pmMetricValueFormat = false,
   connectNulls = false,
 }) => {
   const isDark = useIsDark();
@@ -410,6 +424,7 @@ const LineChart: React.FC<LineChartProps> = ({
         compareLabels,
         thresholdLines,
         integerValues,
+        pmMetricValueFormat,
         connectNulls,
         isDark,
         appTheme,
@@ -428,6 +443,7 @@ const LineChart: React.FC<LineChartProps> = ({
       compareLabels,
       thresholdLines,
       integerValues,
+      pmMetricValueFormat,
       connectNulls,
       isDark,
       appTheme,

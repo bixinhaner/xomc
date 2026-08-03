@@ -179,6 +179,13 @@ describe('pivotLongToWide', () => {
     expect(formatPivotNumber(Number.NaN)).toBe('-');
   });
 
+  it('指标查询表格数值固定保留两位小数', () => {
+    expect(formatPivotNumber(12.345678901234)).toBe('12.35');
+    expect(formatPivotNumber(12)).toBe('12.00');
+    expect(formatPivotNumber(null)).toBe('-');
+    expect(formatPivotNumber(undefined)).toBe('-');
+  });
+
   it('行按时间倒序 → SN 升序 → LDN 升序（最新数据在前）', () => {
     const r = pivotLongToWide([
       row({ deviceSn: 'B', time: '2026-05-26T10:30:00Z' }),

@@ -65,6 +65,13 @@ import type { Alarm } from '@core/types/alarm';
 import type { Device } from '@core/types/device';
 import { connectionStatusMessageId } from '@core/utils/connectionStatus';
 import { buildKpiCharts, buildKpiCompareData } from './kpiSeries';
+import {
+  buildKpiQueryWindow,
+  buildKpiTooltipRangeLabels,
+  formatKpiAxisLabel,
+  formatKpiBucketRangeLabel,
+  previousKpiQueryWindow,
+} from './kpiTime';
 import { runDeviceAlarmRefresh } from './alarmRefresh';
 import ParameterTreeTab from './ParameterTreeTab';
 import QuickSettingsTab from './QuickSettingsTab';
@@ -75,6 +82,7 @@ import AlarmDetail from '@/pages/alarm/AlarmDetail';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
 import ConfirmWithNoteModal from '@/pages/alarm/components/ConfirmWithNoteModal';
 import { formatSystemTime } from '@core/utils/systemTime';
+import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { useAppStore } from '@core/store/appStore';
 import { formatDeviceSyncStatus, getDeviceSyncStatusKind, normalizeDeviceSyncStatus } from '@core/utils/deviceSyncStatus';
 import { computeCumulativeOnlineDurationSeconds, computeCurrentOnlineDurationSeconds } from '@core/utils/onlineDuration';
@@ -176,61 +184,6 @@ const getKPIConfig = (networkType: string, t: (id: string) => string): KPIConfig
       return [];
   }
 };
-
-// 「按天/按周」→ 聚合查询粒度 + 时间窗（spec §4）。
-//   按天 = hourly 最近 24 小时；按周 = daily 最近 7 天。
-//   X 轴用返回行的真实 time（不再硬造标签）。
-function kpiQueryWindow(mode: 'day' | 'week'): {
-  granularity: 'hourly' | 'daily';
-  startTime: string;
-  endTime: string;
-} {
-  const now = new Date();
-  const end = now.toISOString();
-  if (mode === 'day') {
-    const start = new Date(now.getTime() - 24 * 3_600_000).toISOString();
-    return { granularity: 'hourly', startTime: start, endTime: end };
-  }
-  const start = new Date(now.getTime() - 7 * 86_400_000).toISOString();
-  return { granularity: 'daily', startTime: start, endTime: end };
-}
-
-// X 轴时间桶 → 人类可读标签：hourly 显示「MM-DD HH:00」，daily 显示「MM-DD」。
-function formatKpiAxisLabel(iso: string, granularity: 'hourly' | 'daily'): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  if (granularity === 'hourly') {
-    const hh = String(d.getHours()).padStart(2, '0');
-    return `${mm}-${dd} ${hh}:00`;
-  }
-  return `${mm}-${dd}`;
-}
-
-// 周期对比上一周期窗口（spec §11.1，长度守恒）：当前 [start,end]，L=end-start → 上周期 [start-L, start]。
-// 复刻 dashboardFilterUtils.previousWindow 语义，这里直接用 ISO 串/毫秒实现（不引入 dayjs）。
-function previousKpiWindow(startTime: string, endTime: string): { startTime: string; endTime: string } {
-  const startMs = Date.parse(startTime);
-  const endMs = Date.parse(endTime);
-  const lengthMs = endMs - startMs;
-  return {
-    startTime: new Date(startMs - lengthMs).toISOString(),
-    endTime: startTime,
-  };
-}
-
-// tooltip 上一周期文案：「真实起 ~ 止」；缺结束时间只显示起点。粒度决定时分显示与否。
-function formatCompareLabel(
-  startIso: string,
-  endIso: string,
-  granularity: 'hourly' | 'daily',
-): string | undefined {
-  if (!startIso) return undefined;
-  const start = formatKpiAxisLabel(startIso, granularity);
-  const end = endIso ? formatKpiAxisLabel(endIso, granularity) : '';
-  return end && end !== start ? `${start} ~ ${end}` : start;
-}
 
 // ─── 字段定义组件 ────────────────────────────────────────────────────────
 
@@ -1087,6 +1040,7 @@ interface KPITabContentProps {
 function KPITabContent({ device, t }: KPITabContentProps) {
   const [timeMode, setTimeMode] = useState<'day' | 'week'>('day');
   const appLocale = useAppStore((s) => s.locale);
+  const systemTimezone = useSystemTimezoneValue();
   // 下钻对象集（多选，默认全选）：'' = 设备级伪项 + metricObjects 返回的实实在在 ldn。
   // 设备级行 (object_ldn='') 不在后端 metricObjects 返回集里（SQL 有 `object_ldn <> ''`），
   // 但 5G KGNB05xx 这类 KPI 原生在设备级行，不带上会全选后什么都不出，所以手动在集首加个 '' 伪项。
@@ -1099,7 +1053,10 @@ function KPITabContent({ device, t }: KPITabContentProps) {
   const sn = device.sn;
   const technology = normalizeQuickSettingsNetworkType(networkType); // eNB→lte / gNB→nr / GSM→gsm
 
-  const queryWindow = useMemo(() => kpiQueryWindow(timeMode), [timeMode]);
+  const queryWindow = useMemo(
+    () => buildKpiQueryWindow(timeMode, systemTimezone),
+    [timeMode, systemTimezone],
+  );
   const metricPaths = useMemo(() => kpiConfig.map((c) => c.key), [kpiConfig]);
 
   // 下钻对象清单（该设备 PM 数据里实际出现过的小区/PLMN）。
@@ -1141,8 +1098,13 @@ function KPITabContent({ device, t }: KPITabContentProps) {
 
   // 周期对比（spec §11，常驻开启、无开关）：再发一个上一周期窗口查询，其余参数完全一致。
   const prevWindow = useMemo(
-    () => previousKpiWindow(queryWindow.startTime, queryWindow.endTime),
-    [queryWindow.startTime, queryWindow.endTime],
+    () => previousKpiQueryWindow(
+      queryWindow.startTime,
+      queryWindow.endTime,
+      systemTimezone,
+      queryWindow.granularity,
+    ),
+    [queryWindow.startTime, queryWindow.endTime, queryWindow.granularity, systemTimezone],
   );
   const prevParams = useMemo(
     () => ({ ...baseParams, startTime: prevWindow.startTime, endTime: prevWindow.endTime }),
@@ -1264,7 +1226,15 @@ function KPITabContent({ device, t }: KPITabContentProps) {
         {kpiConfig.map((kpi, idx) => {
           const chart = charts[idx];
           const compare = compareDatas[idx];
-          const xLabels = chart.xData.map((iso) => formatKpiAxisLabel(iso, queryWindow.granularity));
+          const xLabels = chart.xData.map((iso) =>
+            formatKpiAxisLabel(iso, queryWindow.granularity, systemTimezone),
+          );
+          const xDataFull = buildKpiTooltipRangeLabels(
+            chart.xData,
+            chart.xEnds,
+            queryWindow.granularity,
+            systemTimezone,
+          );
           // 多对象：过滤掉「该对象本图全 null」的索引，无数据对象不出线。
           const visibleIdx = chart.series
             .map((s, i) => (s.values.every((v) => v == null) ? -1 : i))
@@ -1280,10 +1250,11 @@ function KPITabContent({ device, t }: KPITabContentProps) {
           const compareLabels =
             firstCompareIdx != null
               ? compare.series[firstCompareIdx].compareBuckets.map((s, i) =>
-                  formatCompareLabel(
+                  formatKpiBucketRangeLabel(
                     s,
                     compare.series[firstCompareIdx].compareBucketEnds[i] ?? '',
                     queryWindow.granularity,
+                    systemTimezone,
                   ),
                 )
               : undefined;
@@ -1352,9 +1323,11 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                   <LineChart
                     title=""
                     xData={xLabels}
+                    xDataFull={xDataFull}
                     series={lineSeries}
                     compareLabels={compareLabels}
                     unit={kpi.unit || undefined}
+                    pmMetricValueFormat
                     height={220}
                     areaFill
                   />
