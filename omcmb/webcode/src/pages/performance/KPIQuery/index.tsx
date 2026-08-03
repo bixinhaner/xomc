@@ -81,7 +81,7 @@ import DevicePickerModal from './components/DevicePickerModal';
 import MetricPickerModal from '@/components/MetricPickerModal';
 import PivotTable from './components/PivotTable';
 import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
-import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
+import { getEffectiveLdnsWithNrRecommendedDefault, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
 import { synchronizeUpdatedTemplateState } from './templateUpdateState';
 import QueryTemplateDetailModal from './QueryTemplateDetailModal';
 import { resolveTemplateMetricPaths } from './templateMetricResolver';
@@ -296,6 +296,9 @@ export default function KPIQuery() {
     isAvailableDeviceType,
   ]);
 
+  const currentTechnology = payload.deviceType ? deviceTypeToTechnology(payload.deviceType) : undefined;
+  const { isLoading: currentObjectsLoading } = useMetricObjectsByDevices(payload.deviceSns, currentTechnology);
+
   // #619：计算已提交查询快照里的有效 object_ldn 白名单（全选/未选 = 空数组 = 不过滤）。
   // 不依赖实时编辑态，避免查询后继续改设备/小区时串改上次结果和导出条件。
   const { byDevice: submittedObjectsByDevice } = useMetricObjectsByDevices(
@@ -303,7 +306,7 @@ export default function KPIQuery() {
     submitted?.payload.deviceType ? deviceTypeToTechnology(submitted.payload.deviceType) : undefined,
   );
   const effectiveLdns = useMemo(
-    () => getEffectiveLdns(submitted?.cellSel ?? {}, submittedObjectsByDevice),
+    () => getEffectiveLdnsWithNrRecommendedDefault(submitted?.cellSel ?? {}, submittedObjectsByDevice),
     [submitted, submittedObjectsByDevice],
   );
 
@@ -420,6 +423,10 @@ export default function KPIQuery() {
     }
     if (payload.metricPaths.length === 0) {
       message.warning(t('perf.kpiQuery.selectMetricRequired'));
+      return;
+    }
+    if (currentObjectsLoading) {
+      message.warning(t('perf.drilldown.loadingObjects'));
       return;
     }
     if (warnIfSelectionExceedsLimit(payload)) {
@@ -1030,6 +1037,7 @@ export default function KPIQuery() {
                   <CellDrilldownSelector
                     deviceSns={payload.deviceSns}
                     technology={payload.deviceType ? deviceTypeToTechnology(payload.deviceType) : undefined}
+                    useNrRecommendedDefault
                     value={cellSel}
                     onChange={setCellSel}
                   />
@@ -1043,7 +1051,7 @@ export default function KPIQuery() {
                   type="primary"
                   icon={<TableOutlined />}
                   loading={aggFetching}
-                  disabled={!hasAvailableDeviceTypes}
+                  disabled={!hasAvailableDeviceTypes || currentObjectsLoading}
                   onClick={handleQuery}
                 >
                   {t('common.query')}

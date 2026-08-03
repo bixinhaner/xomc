@@ -7905,12 +7905,17 @@ const messages: Record<string, string> = {
   // T-0193 Cell / PLMN drill-down selector
   // -------------------------------------------------------------------------
   'perf.drilldown.label':                'Cell / PLMN (all by default)',
+  'perf.drilldown.recommendedLabel':     'Cell / PLMN (recommended by default)',
   'perf.drilldown.hint':                 'All cells/PLMNs of the device are selected by default; expand a device to pick a subset.',
+  'perf.drilldown.recommendedHint':      'For 5G, only device-level and Cell+PLMN objects are selected by default; expand a device and select all to include every job object.',
+  'perf.drilldown.loadingObjects':       'Measurement objects are still loading. Try again shortly.',
   'perf.drilldown.pickDeviceFirst':      'Select devices first, then drill down to cell/PLMN',
   'perf.drilldown.noCells':              'No cell/PLMN data for this device',
   'perf.drilldown.selectAll':            'Select All',
   'perf.drilldown.headerAll':            'All cells',
+  'perf.drilldown.headerAllObjects':     'All objects',
   'perf.drilldown.headerSubset':         '{count} cells selected',
+  'perf.drilldown.headerSubsetObjects':  '{count} objects selected',
   'perf.drilldown.confirmCells':         'Cell / PLMN',
   'perf.drilldown.confirmCellAll':       'All cells',
   'perf.drilldown.confirmCellSubset':    '{count} cells/PLMNs selected',

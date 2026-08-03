@@ -7940,12 +7940,17 @@ const messages: Record<string, string> = {
   // T-0193 小区/PLMN 下钻选择器
   // -------------------------------------------------------------------------
   'perf.drilldown.label':                '小区 / PLMN（默认全选）',
+  'perf.drilldown.recommendedLabel':     '小区 / PLMN（默认推荐）',
   'perf.drilldown.hint':                 '默认全选该设备所有小区/PLMN；如只看部分，展开设备勾选子集。',
+  'perf.drilldown.recommendedHint':      '5G 默认只选设备级和 Cell+PLMN 级对象；如需全部 job，展开设备后点“全选”。',
+  'perf.drilldown.loadingObjects':       '正在加载测量对象，请稍后再查询',
   'perf.drilldown.pickDeviceFirst':      '请先选择设备，再下钻小区/PLMN',
   'perf.drilldown.noCells':              '该设备暂无小区/PLMN 数据',
   'perf.drilldown.selectAll':            '全选',
   'perf.drilldown.headerAll':            '全部小区',
+  'perf.drilldown.headerAllObjects':     '全部对象',
   'perf.drilldown.headerSubset':         '已选 {count} 个小区',
+  'perf.drilldown.headerSubsetObjects':  '已选 {count} 个对象',
   'perf.drilldown.confirmCells':         '小区 / PLMN',
   'perf.drilldown.confirmCellAll':       '全部小区',
   'perf.drilldown.confirmCellSubset':    '已选 {count} 个小区/PLMN',
