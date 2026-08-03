@@ -272,9 +272,27 @@ func startTimedRotation(lj *lumberjack.Logger, path string, interval time.Durati
 //	acs-2026-05-15T03-55-16.790.log    → 捕获 "-16.790"
 //	acs-2026-05-15T03-55-16.790.log.gz → 同上（.gz 后缀走第二个正则）
 var (
-	lumberjackBackupTimeRe = regexp.MustCompile(`(-\d{4}-\d{2}-\d{2}T\d{2}-\d{2})-\d{2}\.\d{3}(\.log)$`)
-	lumberjackBackupTimeGz = regexp.MustCompile(`(-\d{4}-\d{2}-\d{2}T\d{2}-\d{2})-\d{2}\.\d{3}(\.log\.gz)$`)
+	lumberjackBackupTimeRe       = regexp.MustCompile(`(-\d{4}-\d{2}-\d{2}T\d{2}-\d{2})-\d{2}\.\d{3}(\.log)$`)
+	lumberjackBackupTimeGz       = regexp.MustCompile(`(-\d{4}-\d{2}-\d{2}T\d{2}-\d{2})-\d{2}\.\d{3}(\.log\.gz)$`)
+	lumberjackArchiveTimestampRe = regexp.MustCompile(`-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}(?:-\d{2}\.\d{3})?)(?:-\d+)?\.log(?:\.gz)?$`)
 )
+
+// archiveTimestamp extracts the local rotation timestamp from a lumberjack
+// archive name. Archive files can be copied/restored with a newer filesystem
+// mtime, so retention must prefer this timestamp and only fall back to mtime
+// when the filename is not in a recognized lumberjack format.
+func archiveTimestamp(path string) (time.Time, bool) {
+	matches := lumberjackArchiveTimestampRe.FindStringSubmatch(filepath.Base(path))
+	if len(matches) != 2 {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{"2006-01-02T15-04-05.000", "2006-01-02T15-04"} {
+		if parsed, err := time.ParseInLocation(layout, matches[1], time.Local); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
 
 // truncateToMinute 把 lumberjack 秒.毫秒精度的归档名截断到分钟精度。
 // 已是分钟精度的文件原样返回（regex 不匹配）。
@@ -289,7 +307,7 @@ func truncateToMinute(path string) string {
 }
 
 // startCompactor 启动后台归档维护 goroutine：每 1 分钟扫描一次。
-//   - 删除 mtime 早于 cutoff 的归档
+//   - 删除归档名轮转时间（无法解析时回退 mtime）早于 cutoff 的归档
 //   - 保留最新 keepUncompressed 个 .log 文件不压缩（rename 到分钟精度供 tail/less 直读）
 //   - 其余 .log 归档压缩为 .log.gz 并删除原文件
 //
@@ -314,9 +332,9 @@ func startCompactor(lj *lumberjack.Logger, path string, keepUncompressed int, ma
 }
 
 type backupEntry struct {
-	path  string
-	mtime time.Time
-	isGz  bool
+	path    string
+	ageTime time.Time
+	isGz    bool
 }
 
 // compactOnce 执行一次归档目录扫描 + 整理。
@@ -351,18 +369,26 @@ func compactOnceWithAdmissionGate(path string, keepUncompressed int, maxAge time
 		if err != nil {
 			continue
 		}
-		all = append(all, backupEntry{path: f, mtime: info.ModTime(), isGz: false})
+		ageTime := info.ModTime()
+		if parsed, ok := archiveTimestamp(f); ok {
+			ageTime = parsed
+		}
+		all = append(all, backupEntry{path: f, ageTime: ageTime, isGz: false})
 	}
 	for _, f := range gzs {
 		info, err := os.Stat(f)
 		if err != nil {
 			continue
 		}
-		all = append(all, backupEntry{path: f, mtime: info.ModTime(), isGz: true})
+		ageTime := info.ModTime()
+		if parsed, ok := archiveTimestamp(f); ok {
+			ageTime = parsed
+		}
+		all = append(all, backupEntry{path: f, ageTime: ageTime, isGz: true})
 	}
 
 	sort.Slice(all, func(i, j int) bool {
-		return all[i].mtime.After(all[j].mtime)
+		return all[i].ageTime.After(all[j].ageTime)
 	})
 
 	cutoff := time.Now().Add(-maxAge)
@@ -374,7 +400,7 @@ func compactOnceWithAdmissionGate(path string, keepUncompressed int, maxAge time
 		e := &all[i]
 
 		// 超龄整删（不管是否压缩）
-		if e.mtime.Before(cutoff) {
+		if e.ageTime.Before(cutoff) {
 			if err := os.Remove(e.path); err != nil {
 				if gate == nil || gate.Allow() {
 					stdlog.Printf("[logger compactor] remove expired %s: %v", e.path, err)

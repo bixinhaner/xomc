@@ -2,6 +2,7 @@ package logger
 
 import (
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -124,14 +125,16 @@ func TestCompactOnce_KeepUncompressedAndExpire(t *testing.T) {
 		ageBack time.Duration
 		gz      bool
 	}{
-		{"acs-2026-05-15T10-58-12.345.log", 2 * time.Minute, false},
-		{"acs-2026-05-15T10-55-30.111.log", 5 * time.Minute, false},
-		{"acs-2026-05-15T10-50-00.000.log", 10 * time.Minute, false},
-		{"acs-2026-05-15T10-00-00.000.log", 1 * time.Hour, false},
-		{"acs-2026-05-09T11-00-00.000.log", 6 * 24 * time.Hour, false},
-		{"acs-2026-05-07T11-00-00.000.log", 8 * 24 * time.Hour, false},
+		{"", 2 * time.Minute, false},
+		{"", 5 * time.Minute, false},
+		{"", 10 * time.Minute, false},
+		{"", 1 * time.Hour, false},
+		{"", 6 * 24 * time.Hour, false},
+		{"", 8 * 24 * time.Hour, false},
 	}
-	for _, f := range files {
+	for i := range files {
+		files[i].name = fmt.Sprintf("acs-%s.log", now.Add(-files[i].ageBack).Format("2006-01-02T15-04-05.000"))
+		f := files[i]
 		full := filepath.Join(dir, f.name)
 		require.NoError(t, os.WriteFile(full, []byte("logline\n"), 0o644))
 		mt := now.Add(-f.ageBack)
@@ -186,8 +189,26 @@ func TestCompactOnce_KeepUncompressedAndExpire(t *testing.T) {
 	}
 
 	// 验证超 7 天的文件确已删除（原名不应存在）
-	_, err = os.Stat(filepath.Join(dir, "acs-2026-05-07T11-00-00.000.log"))
+	_, err = os.Stat(filepath.Join(dir, files[5].name))
 	assert.True(t, os.IsNotExist(err), "8 天前的归档应被删")
+}
+
+// 归档文件可能在迁移/恢复时被重新写入，mtime 会晚于文件名中的轮转时间。
+// 有效期应以归档名时间为准，否则历史日志会因 mtime 被刷新而长期不删除。
+func TestCompactOnce_ExpiresByArchiveTimestampWhenMtimeIsRecent(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "app.log")
+	name := "app-2020-01-02T03-04.log.gz"
+	path := filepath.Join(dir, name)
+	require.NoError(t, os.WriteFile(path, []byte("old\n"), 0o644))
+	// 模拟归档文件被恢复到磁盘后 mtime 变新，但文件名仍保留原轮转时间。
+	recent := time.Now()
+	require.NoError(t, os.Chtimes(path, recent, recent))
+
+	compactOnce(logPath, 10, 20*24*time.Hour)
+
+	_, err := os.Stat(path)
+	assert.True(t, os.IsNotExist(err), "应按归档名中的轮转时间删除过期文件，而不是被刷新的 mtime")
 }
 
 // compactOnce 空目录场景：不 panic。
