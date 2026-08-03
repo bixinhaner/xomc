@@ -17,18 +17,19 @@ import (
 )
 
 type IndicatorManagementService struct {
-	groupRepo        GroupRepository
-	indicatorRepo    IndicatorRepository
-	platformRepo     PlatformFormulaRepository
-	enabledRepo      EnabledIndicatorRepository
-	templateRel      TemplateRelRepository
-	custNameRepo     CustNameRepository
-	thresholdRepo    IndicatorThresholdRepository
-	dashboardLayout  DashboardLayoutReferenceChecker
-	pool             transactionBeginner
-	redis            redis.UniversalClient
-	routeInvalidator RouteInvalidator
-	logger           *zap.Logger
+	groupRepo          GroupRepository
+	indicatorRepo      IndicatorRepository
+	platformRepo       PlatformFormulaRepository
+	enabledRepo        EnabledIndicatorRepository
+	templateRel        TemplateRelRepository
+	custNameRepo       CustNameRepository
+	thresholdRepo      IndicatorThresholdRepository
+	dashboardLayout    DashboardLayoutReferenceChecker
+	pool               transactionBeginner
+	redis              redis.UniversalClient
+	cacheVersionBumper func(context.Context) error
+	routeInvalidator   RouteInvalidator
+	logger             *zap.Logger
 }
 
 type transactionBeginner interface {
@@ -72,7 +73,7 @@ func NewIndicatorManagementService(
 	rdb redis.UniversalClient,
 	logger *zap.Logger,
 ) *IndicatorManagementService {
-	return &IndicatorManagementService{
+	service := &IndicatorManagementService{
 		groupRepo:     groupRepo,
 		indicatorRepo: indicatorRepo,
 		platformRepo:  platformRepo,
@@ -84,6 +85,15 @@ func NewIndicatorManagementService(
 		redis:         rdb,
 		logger:        logger,
 	}
+	if rdb != nil {
+		service.cacheVersionBumper = func(ctx context.Context) error {
+			if err := rdb.Incr(ctx, "indicator:cache_version").Err(); err != nil {
+				return fmt.Errorf("increment indicator cache version: %w", err)
+			}
+			return nil
+		}
+	}
+	return service
 }
 
 func (s *IndicatorManagementService) WithDashboardLayoutReferenceChecker(checker DashboardLayoutReferenceChecker) *IndicatorManagementService {
@@ -623,7 +633,9 @@ func (s *IndicatorManagementService) ReconcileEnabledDependencies(ctx context.Co
 				return fmt.Errorf("commit %s enabled dependency closure for %s: %w", dt, operatorCode, err)
 			}
 		}
-		s.refreshRedisCache(ctx, dt)
+	}
+	if err := s.bumpCacheVersion(ctx); err != nil {
+		return fmt.Errorf("publish enabled indicator dependency reconciliation: %w", err)
 	}
 	s.invalidateRouteCache(ctx, RouteInvalidationTriggerIndicatorWrite)
 	return nil
@@ -864,10 +876,20 @@ func (s *IndicatorManagementService) buildIDMap(ctx context.Context, dt DeviceTy
 // BumpCacheVersion 递增 indicator:cache_version（dictloader 标准协议 key），
 // 触发其他实例 30s 轮询感知缓存失效。供 upload-xml 端点(重载后刷新)+ 写路径调用。
 func (s *IndicatorManagementService) BumpCacheVersion(ctx context.Context) {
-	if s.redis == nil {
-		return
+	_ = s.bumpCacheVersion(ctx)
+}
+
+func (s *IndicatorManagementService) bumpCacheVersion(ctx context.Context) error {
+	if s.cacheVersionBumper != nil {
+		return s.cacheVersionBumper(ctx)
 	}
-	s.redis.Incr(ctx, "indicator:cache_version")
+	if s.redis == nil {
+		return nil
+	}
+	if err := s.redis.Incr(ctx, "indicator:cache_version").Err(); err != nil {
+		return fmt.Errorf("increment indicator cache version: %w", err)
+	}
+	return nil
 }
 
 func (s *IndicatorManagementService) InvalidateRouteCache(ctx context.Context, trigger RouteInvalidationTrigger) {

@@ -315,6 +315,34 @@ func TestReconcileEnabledDependencies_RepairsPersistedKPIClosure(t *testing.T) {
 	}
 }
 
+func TestReconcileEnabledDependencies_FailsWhenCacheVersionBumpFails(t *testing.T) {
+	enabledRepo := &fakeEnabledRepo{
+		enabledIDs: []string{"K900010040"},
+		operators:  map[DeviceType][]string{DeviceTypeENB: {"default"}},
+	}
+	beginner := &fakeBeginner{tx: &fakeTx{}}
+	bumpErr := errors.New("redis unavailable")
+	svc := &IndicatorManagementService{
+		indicatorRepo: &fakeIndicatorRepo{items: []IndicatorListItem{
+			dependencyItem("K900010040", "C000190005", "0"),
+			dependencyItem("C000190005", "C000190005", "1"),
+		}},
+		enabledRepo: enabledRepo,
+		pool:        beginner,
+		cacheVersionBumper: func(context.Context) error {
+			return bumpErr
+		},
+	}
+
+	err := svc.ReconcileEnabledDependencies(context.Background())
+	if !errors.Is(err, bumpErr) {
+		t.Fatalf("ReconcileEnabledDependencies error = %v, want %v", err, bumpErr)
+	}
+	if beginner.tx.commits != 1 {
+		t.Fatalf("transaction commits = %d, want 1", beginner.tx.commits)
+	}
+}
+
 func TestDisableIndicators_RejectsCounterRequiredByEnabledKPI(t *testing.T) {
 	enabledRepo := &fakeEnabledRepo{
 		enabledIDs: []string{"C000000216", "C000000273", "K900010076"},
