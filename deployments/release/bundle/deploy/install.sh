@@ -1180,12 +1180,43 @@ acs_ha_report_not_ready() {
   "${DC[@]}" logs --tail=80 "$service" 2>&1 || true
 }
 
+app_wait_ready() {
+  local app_cid state oom exit_code restart_count wait_seconds=0
+  log "先启动 App，等待 metrics /healthz（最长 ${APP_START_TIMEOUT}s）..."
+  "${DC[@]}" up --pull never -d --no-deps app
+  while [ "$wait_seconds" -lt "$APP_START_TIMEOUT" ]; do
+    app_cid="$("${DC[@]}" ps -q app 2>/dev/null | head -n1)"
+    if [ -n "$app_cid" ] && curl -fsS --max-time 3 http://127.0.0.1:9091/healthz >/dev/null 2>&1; then
+      log "App 已就绪（${wait_seconds}s）"
+      return 0
+    fi
+    sleep 3
+    wait_seconds=$((wait_seconds + 3))
+  done
+
+  app_cid="$("${DC[@]}" ps -q app 2>/dev/null | head -n1)"
+  state="$(docker inspect -f '{{.State.Status}}' "$app_cid" 2>/dev/null || echo missing)"
+  oom="$(docker inspect -f '{{.State.OOMKilled}}' "$app_cid" 2>/dev/null || echo unknown)"
+  exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$app_cid" 2>/dev/null || echo unknown)"
+  restart_count="$(docker inspect -f '{{.RestartCount}}' "$app_cid" 2>/dev/null || echo unknown)"
+  log "App 启动就绪超时：state=$state oom=$oom exit=$exit_code restarts=$restart_count"
+  log "App 最近日志（最多 80 行）："
+  "${DC[@]}" logs --tail=80 app 2>&1 || true
+  return 1
+}
+
 web_acs_dynamic_upstream_loaded() {
   local web_cid="$1" rendered
   rendered="$(docker exec "$web_cid" nginx -T 2>&1)" || return 1
   printf '%s\n' "$rendered" | grep -Fq 'server acs:7557 resolve;' || return 1
   printf '%s\n' "$rendered" | grep -Fq 'zone acs_backend' || return 1
 }
+
+APP_START_TIMEOUT="${OMC_APP_START_TIMEOUT:-180}"
+case "$APP_START_TIMEOUT" in
+  ''|*[!0-9]*) die "OMC_APP_START_TIMEOUT 必须是正整数" 2 ;;
+esac
+[ "$APP_START_TIMEOUT" -gt 0 ] || die "OMC_APP_START_TIMEOUT 必须大于 0" 2
 
 ACS_HA_EXISTING=0
 acs_ha_prepare_candidate() {
@@ -1255,14 +1286,29 @@ if [ "$ACS_HA_EXISTING" = 1 ]; then
     die "ACS 双实例在 DNS 刷新后未全部就绪，已中止其余业务更新" 2
   fi
 
-  remaining_services=(app worker)
+  if ! app_wait_ready; then
+    die "App ${APP_START_TIMEOUT}s 内未就绪；Worker/Web 尚未启动，请根据上方 App 日志排查数据库超时或资源不足" 4
+  fi
+  remaining_services=(worker)
   [ "$SKIP_WEB" = 1 ] || remaining_services+=(web)
-  log "双 ACS 均已就绪，更新其余业务（显式排除 ACS 依赖）..."
+  log "App 已就绪，启动 Worker/Web（显式排除 ACS 依赖）..."
   "${DC[@]}" up --pull never -d --no-deps "${remaining_services[@]}"
 else
-  # 首次安装没有存量南向流量，可一次创建完整拓扑。
-  log "${DC[*]} up -d"
-  "${DC[@]}" up --pull never -d
+  # 首次安装没有存量南向流量，但仍先让 App 完成启动期数据库同步，避免 Worker 并发抢占连接。
+  log "首次安装：先启动 ACS 双实例 ..."
+  "${DC[@]}" up --pull never -d --no-deps acs acs-candidate
+  if ! acs_ha_wait_ready acs || ! acs_ha_wait_ready acs-candidate; then
+    acs_ha_report_not_ready acs
+    acs_ha_report_not_ready acs-candidate
+    die "首次安装 ACS 双实例未就绪，未启动 App/Worker/Web" 2
+  fi
+  if ! app_wait_ready; then
+    die "App ${APP_START_TIMEOUT}s 内未就绪；Worker/Web 尚未启动，请根据上方 App 日志排查数据库超时或资源不足" 4
+  fi
+  remaining_services=(worker)
+  [ "$SKIP_WEB" = 1 ] || remaining_services+=(web)
+  log "App 已就绪，启动 Worker/Web ..."
+  "${DC[@]}" up --pull never -d --no-deps "${remaining_services[@]}"
 fi
 
 # Compose records the resolved bind-mount source inode when a container is
