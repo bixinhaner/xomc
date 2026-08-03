@@ -114,6 +114,39 @@ func TestEnabledIndicatorLookupFailureIsNotCached(t *testing.T) {
 	require.Equal(t, 2, repo.calls[indicator.DeviceTypeENB], "查询失败不应写入缓存")
 }
 
+func TestEnabledIndicatorLookupReloadsImmediatelyWhenCacheVersionChanges(t *testing.T) {
+	repo := &fakeEnabledIndicatorRepo{ids: map[indicator.DeviceType][]string{
+		indicator.DeviceTypeENB: {"K900010040"},
+	}}
+	version := "1"
+	lookup := &enabledIndicatorLookup{
+		repo: repo,
+		ttl:  5 * time.Minute,
+		now:  time.Now,
+		readCacheVersion: func(context.Context) (string, error) {
+			return version, nil
+		},
+		cache: make(map[indicator.DeviceType]enabledIndicatorCacheEntry),
+	}
+
+	first, err := lookup.LookupEnabledIndicators(context.Background(), "lte")
+	require.NoError(t, err)
+	require.Contains(t, first, "K900010040")
+	require.Equal(t, 1, repo.calls[indicator.DeviceTypeENB])
+
+	repo.ids[indicator.DeviceTypeENB] = []string{
+		"K900010040", "C000190005", "C000190007", "C000190009",
+	}
+	version = "2"
+	second, err := lookup.LookupEnabledIndicators(context.Background(), "lte")
+	require.NoError(t, err)
+	require.Contains(t, second, "C000190005")
+	require.Contains(t, second, "C000190007")
+	require.Contains(t, second, "C000190009")
+	require.Equal(t, 2, repo.calls[indicator.DeviceTypeENB],
+		"cross-process cache version bump must bypass the five-minute TTL")
+}
+
 type fakeEnabledIndicatorRepo struct {
 	ids   map[indicator.DeviceType][]string
 	err   error

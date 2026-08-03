@@ -52,6 +52,7 @@ import (
 	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/omcgo/omcgo/internal/transfer"
 	"github.com/omcgo/omcgo/internal/tsdbsync"
+	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -293,7 +294,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// 全局 report_key 目录与产品路由白名单分离：前者用于识别“指标库已知但当前
 	// 产品未绑定”，避免把这类配置状态误报为厂家新上报名。五分钟缓存避免按文件查库。
 	pmCollector.SetKnownReportKeyLookup(newKnownReportKeyLookup(pmIndicatorRepo))
-	pmCollector.SetEnabledIndicatorLookup(newEnabledIndicatorLookup(indicator.NewPgEnabledRepository(w.PgPool)))
+	pmCollector.SetEnabledIndicatorLookup(newEnabledIndicatorLookup(
+		indicator.NewPgEnabledRepository(w.PgPool), w.Redis,
+	))
 	pmCollector.SetQuarantineStore(collector.NewPgQuarantineStore(w.TsPool))
 	pmResultNormSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
 	pmCollector.SetNumberProcessLookup(func(ctx context.Context) (string, error) {
@@ -1333,13 +1336,15 @@ type enabledIndicatorCacheEntry struct {
 }
 
 type enabledIndicatorLookup struct {
-	repo enabledIndicatorRepository
-	ttl  time.Duration
-	now  func() time.Time
+	repo             enabledIndicatorRepository
+	ttl              time.Duration
+	now              func() time.Time
+	readCacheVersion func(context.Context) (string, error)
 
-	mu    sync.RWMutex
-	cache map[indicator.DeviceType]enabledIndicatorCacheEntry
-	loads singleflight.Group
+	mu           sync.RWMutex
+	cache        map[indicator.DeviceType]enabledIndicatorCacheEntry
+	cacheVersion string
+	loads        singleflight.Group
 }
 
 type knownReportKeyRepository interface {
@@ -1452,18 +1457,37 @@ func (l *knownReportKeyLookup) nowTime() time.Time {
 	return l.now()
 }
 
-func newEnabledIndicatorLookup(repo enabledIndicatorRepository) *enabledIndicatorLookup {
-	return &enabledIndicatorLookup{
+func newEnabledIndicatorLookup(
+	repo enabledIndicatorRepository,
+	rdb redis.UniversalClient,
+) *enabledIndicatorLookup {
+	lookup := &enabledIndicatorLookup{
 		repo:  repo,
 		ttl:   defaultEnabledIndicatorCacheTTL,
 		now:   time.Now,
 		cache: make(map[indicator.DeviceType]enabledIndicatorCacheEntry),
 	}
+	if rdb != nil {
+		lookup.readCacheVersion = func(ctx context.Context) (string, error) {
+			version, err := rdb.Get(ctx, "indicator:cache_version").Result()
+			if errors.Is(err, redis.Nil) {
+				return "0", nil
+			}
+			if err != nil {
+				return "", fmt.Errorf("read indicator cache version: %w", err)
+			}
+			return version, nil
+		}
+	}
+	return lookup
 }
 
 func (l *enabledIndicatorLookup) LookupEnabledIndicators(ctx context.Context, technology string) (map[string]struct{}, error) {
 	dt, err := indicatorDeviceTypeFromTechnology(technology)
 	if err != nil {
+		return nil, err
+	}
+	if err := l.ensureCacheVersion(ctx); err != nil {
 		return nil, err
 	}
 	now := l.nowTime()
@@ -1500,6 +1524,23 @@ func (l *enabledIndicatorLookup) LookupEnabledIndicators(ctx context.Context, te
 		return nil, fmt.Errorf("enabled PM indicator cache returned unexpected type %T", value)
 	}
 	return cloneIndicatorSet(indicators), nil
+}
+
+func (l *enabledIndicatorLookup) ensureCacheVersion(ctx context.Context) error {
+	if l.readCacheVersion == nil {
+		return nil
+	}
+	version, err := l.readCacheVersion(ctx)
+	if err != nil {
+		return fmt.Errorf("synchronize enabled PM indicator cache: %w", err)
+	}
+	l.mu.Lock()
+	if version != l.cacheVersion {
+		l.cache = make(map[indicator.DeviceType]enabledIndicatorCacheEntry)
+		l.cacheVersion = version
+	}
+	l.mu.Unlock()
+	return nil
 }
 
 func (l *enabledIndicatorLookup) lookupCache(dt indicator.DeviceType, now time.Time) (map[string]struct{}, bool) {
