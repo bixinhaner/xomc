@@ -21,6 +21,8 @@
 #   sudo bash deploy/install.sh --skip-monitoring        # 不起监控栈
 #   sudo bash deploy/install.sh --fresh-install --yes --public-host 172.24.224.78
 #                                                        # 清理旧数据后全新安装
+#   sudo bash deploy/install.sh --fresh-install --floor-tolerance-pct 80 ...
+#                                                        # 自定义资源下限缺口容忍度（0-99）
 #   sudo bash deploy/install.sh --check-only             # 仅检查环境，不做修改
 #   sudo bash deploy/install.sh --infra-dir /opt/omc/infra   # 自定义 infra 目录
 #   sudo bash deploy/install.sh --overwrite-etc          # 用新包模板覆盖 /opt/omc/etc
@@ -38,6 +40,8 @@
 #   --overwrite-etc   用新包 etc/ 模板覆盖 /opt/omc/etc/（旧 etc 自动备份）
 #   --fresh-install   停止旧栈并删除 OMC 数据/配置/项目 volumes 后全新安装（危险）
 #   --public-host <h> 全新安装时写入基站可达的 OMC_PUBLIC_HOST
+#   --floor-tolerance-pct <N>
+#                     全新安装资源规划的组件下限缺口容忍度（0-99，默认 60）
 #   --yes             所有交互式提示直接默认（适合 CI / 批处理）
 #   -h | --help       本帮助
 #
@@ -175,6 +179,7 @@ CHECK_ONLY=0
 ASSUME_YES=0
 OVERWRITE_ETC=0
 FRESH_INSTALL=0
+FLOOR_TOLERANCE_PCT=60
 PUBLIC_HOST_OVERRIDE="${OMC_PUBLIC_HOST:-}"
 INFRA_DIR="/opt/omc/infra"
 OMC_ROOT="/opt/omc"
@@ -192,12 +197,20 @@ while [ $# -gt 0 ]; do
     --overwrite-etc)   OVERWRITE_ETC=1; shift ;;
     --fresh-install)   FRESH_INSTALL=1; shift ;;
     --public-host)     PUBLIC_HOST_OVERRIDE="${2:?--public-host 需要 IP 或域名}"; shift 2 ;;
+    --floor-tolerance-pct) FLOOR_TOLERANCE_PCT="${2:?--floor-tolerance-pct 需要 0-99 的整数}"; shift 2 ;;
+    --floor-tolerance-pct=*) FLOOR_TOLERANCE_PCT="${1#*=}"; shift ;;
     --yes)             ASSUME_YES=1; shift ;;
     -h|--help)         sed -n '3,52p' "$0"; exit 0 ;;
     --uninstall)       die "卸载请用 uninstall.sh：sudo bash $DEPLOY_DIR/uninstall.sh -h" ;;
     *)                 die "未知参数：$1（-h 查看用法）" ;;
   esac
 done
+
+case "$FLOOR_TOLERANCE_PCT" in
+  ''|*[!0-9]*) die "--floor-tolerance-pct 仅支持 0-99 的整数，收到：$FLOOR_TOLERANCE_PCT" 1 ;;
+esac
+[ "$FLOOR_TOLERANCE_PCT" -lt 100 ] ||
+  die "--floor-tolerance-pct 必须小于 100，收到：$FLOOR_TOLERANCE_PCT" 1
 
 [ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）"
 
@@ -260,12 +273,12 @@ fresh_install_reset() {
   set_env_value "$package_env" OMC_PUBLIC_HOST "$PUBLIC_HOST_OVERRIDE" ||
     die "无法写入 $package_env 的 OMC_PUBLIC_HOST" 1
 
-  log "全新安装：按目标主机重新规划资源（floor tolerance 60%）..."
-  fresh_plan_args=( --floor-tolerance-pct 60 )
+  log "全新安装：按目标主机重新规划资源（组件下限缺口容忍度 ${FLOOR_TOLERANCE_PCT}%，最低运行预算仍为硬门禁）..."
+  fresh_plan_args=( --floor-tolerance-pct "$FLOOR_TOLERANCE_PCT" )
   [ "$SKIP_MONITORING" = 1 ] && fresh_plan_args+=( --skip-monitoring )
   ( cd "$PKG_ROOT" && OMC_STORAGE_ENV_FILE="$package_env" \
       bash "$PKG_ROOT/deploy/plan-resources.sh" "${fresh_plan_args[@]}" ) ||
-    die "全新安装资源规划失败，未删除任何 OMC 数据" 1
+    die "全新安装资源规划失败；请查看上方资源规划提示。最低运行预算不能通过 --floor-tolerance-pct 绕过；低内存主机可使用 --skip-monitoring 重试。" 1
 
   log "全新安装将清理以下数据目录："
   for data_key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do

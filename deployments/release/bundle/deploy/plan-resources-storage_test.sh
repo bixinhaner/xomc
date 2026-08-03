@@ -168,6 +168,12 @@ if [ -e "$TMP/low-resources.env" ]; then
 else
   ok
 fi
+if grep -q -- '--floor-tolerance-pct 只对后续组件下限缺口生效' "$TMP/low-output" &&
+  grep -q -- 'plan-resources.sh --skip-monitoring' "$TMP/low-output"; then
+  ok
+else
+  bad "过低内存提示应说明容忍度边界并给出跳过监控的可执行命令"
+fi
 echo "── 不覆盖人工路径 ──"
 CUSTOM_ENV="$TMP/custom.env"
 printf 'MINIO_DATA_PATH=/manual/minio\n' > "$CUSTOM_ENV"
