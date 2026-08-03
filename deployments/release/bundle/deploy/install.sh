@@ -59,7 +59,7 @@ set -euo pipefail
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 PKG_ROOT="$(cd "$DEPLOY_DIR/.." && pwd)"   # 项目包根（deploy/ etc/ images/ 上一级）
 
-OMC_LANG="${OMC_LANG:-en}"
+export OMC_LANG="${OMC_LANG:-en}"
 
 install_message() {
   if [ "$OMC_LANG" = en ]; then
@@ -207,7 +207,7 @@ merge_env_preserve() {
     ' "$prev" "$new" > "$tmp"; then
     cat "$tmp" > "$new"        # 覆写内容,保留 new 原 inode / 权限
     rm -f "$tmp"
-    log ".env:已从上一版继承运维自定义值(口令 / JWT / OMC_PUBLIC_HOST);镜像 tag 用新包。如需改值,编辑 $new 后重启业务容器"
+    log ".env:已从上一版继承运维自定义值(口令 / JWT / OMC_PUBLIC_HOST);镜像 tag 用新包。如需改值,编辑 $new 后重启业务容器" ".env: inherited operator values (credentials / JWT / OMC_PUBLIC_HOST) from the previous release; image tags use the new package. Edit $new and restart services to change them"
   else
     rm -f "$tmp"
     warn ".env 合并失败,沿用交付包默认值;请手动核对 $new 的 OMC_PUBLIC_HOST 与口令"
@@ -415,7 +415,7 @@ precheck_skipped_infra_images() {
   if [ "${#missing_images[@]}" -gt 0 ]; then
     die "--skip-infra 前置条件不满足，缺少本地基础设施/监控镜像：${missing_images[*]}。未复制 release、未切换 current、未改写业务数据；请先解压匹配架构的基础设施包到 ${INFRA_DIR}，并去掉 --skip-infra 重试。" 1
   fi
-  log "--skip-infra 镜像预检通过：本次基础设施/监控镜像均已在本机"
+  log "--skip-infra 镜像预检通过：本次基础设施/监控镜像均已在本机" "--skip-infra image precheck passed: all infrastructure and monitoring images are available locally"
 }
 
 # heal_main_pg_timescaledb_downgrade —— 升级自愈（#347 主库 timescaledb → 纯 PG 降级）
@@ -696,7 +696,7 @@ fi
 
 # 如果不是直接在版本目录里跑，复制到版本目录
 if [ "$(readlink -f "$PKG_ROOT")" != "$(readlink -f "$RELEASE_DIR")" ]; then
-  log "复制项目包到 $RELEASE_DIR ..."
+  log "复制项目包到 $RELEASE_DIR ..." "Copying release package to $RELEASE_DIR ..."
   mkdir -p "$RELEASE_DIR"
   cp -a "$PKG_ROOT/." "$RELEASE_DIR/"
 fi
@@ -710,7 +710,7 @@ merge_env_preserve "$PREV_ENV_SNAPSHOT" "$RELEASE_DIR/deploy/.env"
 if [ -n "$PREV_RESOURCES_SNAPSHOT" ] && [ ! -f "$RELEASE_DIR/deploy/resources.env" ]; then
   cp "$PREV_RESOURCES_SNAPSHOT" "$RELEASE_DIR/deploy/resources.env" 2>/dev/null ||
     die "resources.env 继承复制失败，未切换 current：$RELEASE_DIR/deploy/resources.env" 1
-  log "resources.env:已从上一版继承资源限额(plan-resources.sh 调优值不丢)"
+  log "resources.env:已从上一版继承资源限额(plan-resources.sh 调优值不丢)" "resources.env: inherited resource limits from the previous release"
 fi
 [ -n "$PREV_RESOURCES_SNAPSHOT" ] && rm -f "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || true
 
@@ -732,14 +732,14 @@ if [ ! -d "$NEW_DATA" ]; then
   die "交付包缺少 data/ 目录($NEW_DATA);模型 B 硬依赖字典播种,无法继续" 4
 fi
 if [ ! -d "$OMC_ROOT/data" ] || [ -z "$(ls -A "$OMC_ROOT/data" 2>/dev/null)" ]; then
-  log "首次部署：播种 data 基线 → $OMC_ROOT/data"
+  log "首次部署：播种 data 基线 → $OMC_ROOT/data" "Fresh install: seeding data baseline -> $OMC_ROOT/data"
   mkdir -p "$OMC_ROOT/data"
   cp -a "$NEW_DATA/." "$OMC_ROOT/data/" || die "播种 data 失败;字典将为空,中止部署" 4
 else
   DATA_SNAP="$OMC_ROOT/data.bak.$(date +%Y%m%d%H%M%S)"
-  log "升级：快照现网 data → $DATA_SNAP(回滚用)"
+  log "升级：快照现网 data → $DATA_SNAP(回滚用)" "Upgrade: snapshot live data -> $DATA_SNAP (rollback copy)"
   cp -a "$OMC_ROOT/data" "$DATA_SNAP" || warn "快照 data 失败(磁盘满?);继续合并但无回滚点"
-  log "升级：反向合并(现网赢、新版补充)新版 builtin → $OMC_ROOT/data"
+  log "升级：反向合并(现网赢、新版补充)新版 builtin → $OMC_ROOT/data" "Upgrade: merge new built-in data into $OMC_ROOT/data (live data wins)"
   cp -an "$NEW_DATA/." "$OMC_ROOT/data/" || warn "反向合并 data 出现错误;请人工核对 $OMC_ROOT/data"
   # builtin 刷新(#154):cp -an 只补缺失、不更新已存在文件 → 内置字典(如 BSC 网关→BSC 产品
   # 改名)升级不生效,且 dictloader 会用过时 host XML 把旧值 UPSERT 回来。这里对新包 builtin
@@ -821,17 +821,17 @@ etc_is_empty=0
 [ -z "$(ls -A "$OMC_ROOT/etc" 2>/dev/null)" ] && etc_is_empty=1
 
 if [ "$etc_is_empty" = 1 ]; then
-  log "首次部署：复制配置模板到 $OMC_ROOT/etc/（首次必修改默认口令！）"
+  log "首次部署：复制配置模板到 $OMC_ROOT/etc/（首次必修改默认口令！）" "Fresh install: copying configuration templates to $OMC_ROOT/etc/ (change default credentials before production use)"
   cp -rn "$RELEASE_DIR/etc/." "$OMC_ROOT/etc/"
 else
   do_overwrite=0
   if [ "$OVERWRITE_ETC" = 1 ]; then
     do_overwrite=1
   elif [ "$ASSUME_YES" = 0 ]; then
-    warn "$OMC_ROOT/etc/ 已有实例配置（包含可能已改好的强口令 / JWT 密钥 / TLS 证书路径等）"
-    warn "  选 y 将覆盖为新包模板（原 etc 自动备份到 etc.bak.<时间戳>）"
-    warn "  选 N 保留现有配置不动（默认）"
-    read -rp "是否用新包模板覆盖 $OMC_ROOT/etc/？ [y/N] " yn
+    warn "$OMC_ROOT/etc/ 已有实例配置（包含可能已改好的强口令 / JWT 密钥 / TLS 证书路径等）" "$OMC_ROOT/etc/ contains instance configuration (possibly including custom credentials, JWT keys, and TLS certificate paths)"
+    warn "  选 y 将覆盖为新包模板（原 etc 自动备份到 etc.bak.<时间戳>）" "  Enter y to replace it with the package template (the old etc is backed up automatically)"
+    warn "  选 N 保留现有配置不动（默认）" "  Enter N to keep the current configuration (default)"
+    read -rp "$(install_message "是否用新包模板覆盖 $OMC_ROOT/etc/？" "Replace $OMC_ROOT/etc/ with the package template?") [y/N] " yn
     case "${yn:-N}" in [Yy]*) do_overwrite=1 ;; esac
   fi
 
@@ -862,7 +862,7 @@ else
       if upgrade_prod_database_dsns \
         "$OMC_ROOT/etc/$service_config" \
         "$RELEASE_DIR/etc/$service_config"; then
-        log "升级 $service_config：已同步生产数据库 DSN 模板，使用当前 .env 凭证"
+        log "升级 $service_config：已同步生产数据库 DSN 模板，使用当前 .env 凭证" "Upgrade $service_config: synchronized production database DSN template using current .env credentials"
       else
         die "$service_config 数据库 DSN 自动同步失败；未切换 current" 1
       fi
@@ -897,7 +897,7 @@ else
         die "worker.prod.yaml 的 tsdb.max_conns 升级结果异常；未切换 current" 1
         ;;
     esac
-    log "$OMC_ROOT/etc/ 已有实例配置，保留不覆盖（如需覆盖加 --overwrite-etc）"
+    log "$OMC_ROOT/etc/ 已有实例配置，保留不覆盖（如需覆盖加 --overwrite-etc）" "$OMC_ROOT/etc/ contains instance configuration; keeping it unchanged (use --overwrite-etc to replace it)"
   fi
 fi
 
@@ -965,13 +965,13 @@ if [ "$SKIP_INFRA" = 0 ]; then
     done
   fi
 else
-  log "--skip-infra：跳过基础设施 / 监控镜像 load"
+  log "--skip-infra：跳过基础设施 / 监控镜像 load" "--skip-infra: skipping infrastructure / monitoring image loading"
 fi
 
 BIZ_IMAGES=("$IMAGE_APP" "$IMAGE_ACS" "$IMAGE_WORKER" "$IMAGE_WEB")
 
 if images_exist "${BIZ_IMAGES[@]}"; then
-  log "业务镜像已存在，跳过 load；handoff 完成前保持现有 app 不动"
+  log "业务镜像已存在，跳过 load；handoff 完成前保持现有 app 不动" "Business images already exist; skipping load and keeping the current App unchanged until handoff completes"
   biz_loaded=1
 else
   log "load 业务镜像（$RELEASE_DIR/images/）"
@@ -1055,7 +1055,7 @@ if [ "$APP_RUNNING" = 1 ] && [ "$NATS_RUNNING" != 1 ]; then
   die "旧 app 仍在运行但 NATS 不可用，无法读取 GPV consumer AckFloor；未停止旧 app" 2
 fi
 if [ "$HANDOFF_PREPARED" != 1 ] && [ "$NATS_RUNNING" = 1 ]; then
-  log "在停止/重建旧 app 前预创建 GPV RPC 固定 durable ..."
+  log "在停止/重建旧 app 前预创建 GPV RPC 固定 durable ..." "Pre-creating the fixed GPV RPC durable before stopping/recreating the old App ..."
   gpv_handoff_prepare ||
     die "GPV consumer handoff 失败；未停止旧 app，修复 NATS/consumer 配置后重试" 2
   HANDOFF_PREPARED=1
@@ -1123,7 +1123,7 @@ if ! migrate_legacy_pm_redis; then
 fi
 
 if [ "$HANDOFF_PREPARED" != 1 ]; then
-  log "首次部署/原 NATS 未运行：按实际流状态安全初始化 GPV RPC 固定 durable ..."
+  log "首次部署/原 NATS 未运行：按实际流状态安全初始化 GPV RPC 固定 durable ..." "Fresh install or inactive NATS: safely initializing the fixed GPV RPC durable from the current stream state ..."
   gpv_handoff_prepare --bootstrap-if-missing ||
     die "GPV consumer handoff 失败；尚未启动 app，修复 NATS/consumer 配置后重试" 2
   HANDOFF_PREPARED=1
@@ -1151,7 +1151,7 @@ run_oneshot_migration() {
 }
 
 if [ "$SKIP_MIGRATE" = 0 ]; then
-  log "执行 db migrate（容器：migrate-schema）..."
+  log "执行 db migrate（容器：migrate-schema）..." "Running database migration (container: migrate-schema) ..."
   MIGRATE_OK=0
   for attempt in 1 2 3; do
     if run_oneshot_migration migrate-schema; then

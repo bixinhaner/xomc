@@ -143,10 +143,10 @@ ensure_secrets() {
   local SECRETS_FILE="$OMC_ROOT/etc/secrets.env"
   local target_env="$OMC_ROOT/current/deploy/.env"
   mkdir -p "$OMC_ROOT/etc"
-  [ -f "$target_env" ] || { warn "secrets：$target_env 不存在，跳过凭证就位"; return 0; }
+  [ -f "$target_env" ] || { warn "secrets：$target_env 不存在，跳过凭证就位" "Secrets: $target_env does not exist; skipping credential setup"; return 0; }
 
   if [ -f "$SECRETS_FILE" ]; then
-    log "secrets：复用已存在 ${SECRETS_FILE}（幂等，绝不重生成）"
+    log "secrets：复用已存在 ${SECRETS_FILE}（幂等，绝不重生成）" "Secrets: reusing existing ${SECRETS_FILE} (idempotent; never regenerated)"
   else
     local have_vol=0 have_bind_data=0 src="" f pw
     docker volume inspect "${COMPOSE_PROJECT}_pgdata"    >/dev/null 2>&1 && have_vol=1
@@ -162,16 +162,16 @@ ensure_secrets() {
       if ! secrets_is_default_value POSTGRES_PASSWORD "$pw"; then src="$f"; break; fi
     done
     if [ "$have_bind_data" = 1 ] && [ -z "$src" ]; then
-      warn "secrets：检测到已初始化的 PostgreSQL bind-mount 数据目录，但没有可继承的非默认口令"
-      warn "secrets：为避免新口令与现有数据不一致，已停止部署；请恢复旧 .env/secrets.env，或确认测试数据后清空数据目录再重试"
+      warn "secrets：检测到已初始化的 PostgreSQL bind-mount 数据目录，但没有可继承的非默认口令" "Secrets: initialized PostgreSQL bind-mount data found, but no non-default credential can be inherited"
+      warn "secrets：为避免新口令与现有数据不一致，已停止部署；请恢复旧 .env/secrets.env，或确认测试数据后清空数据目录再重试" "Secrets: deployment stopped to avoid a credential mismatch; restore the old .env/secrets.env, or clear the data directory after confirming it is test data"
       return 1
     fi
     if [ "$have_vol" = 1 ] || [ -n "$src" ]; then
       [ -n "$src" ] || src="$target_env"   # 卷在但没找到非默认源：用现值（绝不瞎生成，否则连不上旧卷）
-      log "secrets：检测到存量数据卷/现行凭证，从现行凭证导入 → ${SECRETS_FILE}（不新生成，保证与旧卷一致）"
+      log "secrets：检测到存量数据卷/现行凭证，从现行凭证导入 → ${SECRETS_FILE}（不新生成，保证与旧卷一致）" "Secrets: existing data or credentials found; importing current credentials into ${SECRETS_FILE} (not generating new credentials)"
       secrets_import_to "$src" "$SECRETS_FILE"
     else
-      log "secrets：首次部署，生成强随机凭证 → ${SECRETS_FILE}（PG/MinIO/Grafana 登录所需，请妥善备份；值不打印）"
+      log "secrets：首次部署，生成强随机凭证 → ${SECRETS_FILE}（PG/MinIO/Grafana 登录所需，请妥善备份；值不打印）" "Secrets: fresh install; generating strong random credentials -> ${SECRETS_FILE} (required for PG/MinIO/Grafana login; values are never printed)"
       secrets_generate_to "$SECRETS_FILE"
     fi
   fi
@@ -182,7 +182,7 @@ ensure_secrets() {
 
   # secrets.env 为密钥键权威源 → 覆盖进 current/deploy/.env（取代 .env.saved 对密钥的脆弱继承）
   secrets_apply_to_env "$SECRETS_FILE" "$target_env" \
-    || warn "secrets：覆盖 $target_env 失败，请人工核对其 6 个密钥键"
+    || warn "secrets：覆盖 $target_env 失败，请人工核对其 6 个密钥键" "Secrets: failed to apply credentials to $target_env; verify its six secret keys"
   # .env.saved 同步刷新（供 uninstall→reinstall 一致；但密钥真权威是 secrets.env）
   cp -f "$target_env" "$OMC_ROOT/etc/.env.saved" 2>/dev/null || true
 }
