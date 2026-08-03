@@ -72,7 +72,7 @@ func TestStreamCSVToObject_MissingMetricCellUsesPlaceholder(t *testing.T) {
 	recs, err := csv.NewReader(strings.NewReader(body)).ReadAll()
 	require.NoError(t, err)
 	require.Len(t, recs, 2)
-	assert.Equal(t, "0", recs[1][5], "真实 0 必须保留，不能误判为缺值")
+	assert.Equal(t, "0.00", recs[1][5], "真实 0 必须保留，不能误判为缺值")
 	assert.Equal(t, "-", recs[1][6])
 }
 

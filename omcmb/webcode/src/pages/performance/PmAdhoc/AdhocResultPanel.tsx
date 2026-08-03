@@ -19,7 +19,7 @@ import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc'
 import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import type { AdhocResultRow, AdhocDimension } from '@core/types/pmAdhoc';
-import { isFinitePmMetricValue, normalizePmMetricValue } from '@core/utils/pmMetricValue';
+import { formatPmMetricDisplayValue, isFinitePmMetricValue, normalizePmMetricValue } from '@core/utils/pmMetricValue';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
 import { adhocIncludesCell, adhocObjectHeaderKey, adhocObjectName, adhocTechnology, objectKeyOf } from './adhocObjectColumn';
 import { formatSystemTime, nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
@@ -453,7 +453,7 @@ function GranularityView({
             width: 200,
             render: (_: unknown, r: WideResultRow) => {
               const v = r.values[c.metricPath];
-              return v === undefined || v === null ? '-' : v;
+              return formatPmMetricDisplayValue(v);
             },
           })),
         ]}

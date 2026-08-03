@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeTooltipPosition } from './LineChart';
+import { buildLineChartOption, computeTooltipPosition } from './LineChart';
 
 /**
  * issue #202：多设备性能图提示框遮挡曲线/图例/其它设备数据。
@@ -48,5 +48,60 @@ describe('computeTooltipPosition（提示框避让）', () => {
     const [x, y] = computeTooltipPosition([100, 50], size([200, 500]));
     expect(y).toBe(margin);
     expect(x).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('buildLineChartOption PM metric value formatting', () => {
+  const baseParams = {
+    title: '',
+    xData: ['T1'],
+    series: [{ name: 'KPI', data: [12.345678901234] }],
+    isDark: false,
+    appTheme: 'classic' as const,
+    palette: ['#1677ff'],
+  };
+
+  it('tooltip 数值固定保留两位并保留原有单位拼接规则', () => {
+    const option = buildLineChartOption({
+      ...baseParams,
+      unit: 'Mbps',
+      pmMetricValueFormat: true,
+    });
+    const formatter = (option.tooltip as {
+      formatter: (params: Array<{ marker: string; seriesName: string; value: unknown; axisValue: string; dataIndex: number; seriesIndex: number }>) => string;
+    }).formatter;
+
+    expect(formatter([{ marker: '', seriesName: 'KPI', value: 12.345678901234, axisValue: 'T1', dataIndex: 0, seriesIndex: 0 }]))
+      .toContain('12.35 Mbps');
+    expect(formatter([{ marker: '', seriesName: 'KPI', value: null, axisValue: 'T1', dataIndex: 0, seriesIndex: 0 }]))
+      .toContain('<strong>-</strong>');
+  });
+
+  it('PM y 轴刻度固定两位，整数图表仍按整数 tooltip 显示', () => {
+    const option = buildLineChartOption({
+      ...baseParams,
+      pmMetricValueFormat: true,
+    });
+    const yAxis = option.yAxis as { axisLabel: { formatter: (value: number) => string } };
+    expect(yAxis.axisLabel.formatter(12.345678901234)).toBe('12.35');
+    expect(yAxis.axisLabel.formatter(12)).toBe('12.00');
+
+    const integerOption = buildLineChartOption({
+      ...baseParams,
+      unit: 'count',
+      integerValues: true,
+    });
+    const formatter = (integerOption.tooltip as {
+      formatter: (params: Array<{ marker: string; seriesName: string; value: unknown; axisValue: string; dataIndex: number; seriesIndex: number }>) => string;
+    }).formatter;
+    expect(formatter([{ marker: '', seriesName: 'Count', value: 12.34, axisValue: 'T1', dataIndex: 0, seriesIndex: 0 }]))
+      .toContain('12 count');
+  });
+
+  it('默认不开启 PM y 轴两位小数格式，避免影响通用折线图', () => {
+    const option = buildLineChartOption(baseParams);
+    const yAxis = option.yAxis as { axisLabel?: { formatter?: (value: number) => string } };
+
+    expect(yAxis.axisLabel?.formatter).toBeUndefined();
   });
 });

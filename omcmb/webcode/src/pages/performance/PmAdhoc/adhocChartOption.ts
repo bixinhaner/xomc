@@ -1,3 +1,5 @@
+import { formatPmMetricDisplayValue } from '@core/utils/pmMetricValue';
+
 export interface AdhocMetricSeries {
   name: string;
   buckets: string[];
@@ -11,6 +13,17 @@ export interface AdhocMetricSeries {
  * 左右保留翻页控制空间，并把 grid 顶部下移，确保全部指标仍在同一图表可切换查看。
  */
 export function buildAdhocChartOption(series: AdhocMetricSeries[], buckets: string[]) {
+  const tooltipFormatter = (params: unknown) => {
+    const items = Array.isArray(params) ? params : [params];
+    if (items.length === 0) return '';
+    const first = items[0] as { axisValue?: string };
+    const lines = items.map((item) => {
+      const row = item as { marker?: string; seriesName?: string; value?: unknown };
+      return `${row.marker ?? ''} ${row.seriesName ?? ''}: <strong>${formatPmMetricDisplayValue(row.value)}</strong>`;
+    });
+    return [`<div>${first.axisValue ?? ''}</div>`, ...lines].join('<br/>');
+  };
+
   return {
     grid: { left: 50, right: 16, top: 58, bottom: 40 },
     xAxis: {
@@ -20,7 +33,12 @@ export function buildAdhocChartOption(series: AdhocMetricSeries[], buckets: stri
       nameLocation: 'middle' as const,
       nameGap: 24,
     },
-    yAxis: { type: 'value' as const },
+    yAxis: {
+      type: 'value' as const,
+      axisLabel: {
+        formatter: (value: number) => formatPmMetricDisplayValue(value),
+      },
+    },
     series: series.map((s) => ({
       name: s.name,
       type: 'line' as const,
@@ -30,7 +48,10 @@ export function buildAdhocChartOption(series: AdhocMetricSeries[], buckets: stri
       data: s.values,
       connectNulls: false,
     })),
-    tooltip: { trigger: 'axis' as const },
+    tooltip: {
+      trigger: 'axis' as const,
+      formatter: tooltipFormatter,
+    },
     legend: { type: 'scroll' as const, top: 0, left: 8, right: 8 },
   };
 }

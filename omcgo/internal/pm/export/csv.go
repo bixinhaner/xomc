@@ -2,10 +2,10 @@ package export
 
 import (
 	"encoding/csv"
+	"fmt"
 	"io"
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -201,13 +201,21 @@ func (c *WideCSVWriter) AddRow(r ExportRow) error {
 		c.order = append(c.order, k)
 	}
 	if idx, ok := c.colIdx[r.MetricCode]; ok {
-		if math.IsNaN(r.Value) {
+		if !isFiniteMetricCSVValue(r.Value) {
 			cells[idx] = c.missingMetricValuePlaceholder
 		} else {
-			cells[idx] = strconv.FormatFloat(r.Value, 'f', -1, 64)
+			cells[idx] = formatMetricCSVValue(r.Value)
 		}
 	}
 	return nil
+}
+
+func isFiniteMetricCSVValue(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func formatMetricCSVValue(value float64) string {
+	return fmt.Sprintf("%.2f", value)
 }
 
 // flushBucket 把当前时间桶的所有行键按 (设备,小区) 排序后逐行写出，然后清空桶。

@@ -16,6 +16,7 @@ import { CloseOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { useT } from '@/hooks/useT';
 import { formatSystemTime } from '@core/utils/systemTime';
+import { formatPmMetricDisplayValue, formatPmMetricDisplayValueWithUnit } from '@core/utils/pmMetricValue';
 import type { MetricChart, MetricSeries } from './taskDashboardUtils';
 
 // #459 子单 D：图表横轴时间标签按系统时区显示（与列表一致），不按浏览器本地转换。
@@ -58,10 +59,7 @@ function formatMetricValueWithUnit(
   value: number | string | null | undefined,
   unit: string | undefined,
 ): string {
-  if (value == null || value === '-') return '-';
-  const text = String(value);
-  const normalizedUnit = unit?.trim();
-  return normalizedUnit ? `${text} ${normalizedUnit}` : text;
+  return formatPmMetricDisplayValueWithUnit(value, unit);
 }
 
 function formatTooltipRowHtml(param: TooltipParam, unit: string | undefined): string {
@@ -214,7 +212,13 @@ function ChartCard({ chart }: { chart: MetricChart }) {
     return {
       grid: { left: 56, right: 16, top: 36, bottom: 40 },
       xAxis: { type: 'category', data: xLabels, boundaryGap: false },
-      yAxis: { type: 'value', scale: true },
+      yAxis: {
+        type: 'value',
+        scale: true,
+        axisLabel: {
+          formatter: (value: number) => formatPmMetricDisplayValue(value),
+        },
+      },
       series: [...currentSeries, ...compareSeries],
       // hover tooltip 只承担快速预览和提示；对象很多时，用户点击数据点后打开固定浮层再滚动查看。
       tooltip: {

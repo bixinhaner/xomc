@@ -77,8 +77,28 @@ func TestWideCSVWriter_PivotSameKey(t *testing.T) {
 	assert.Equal(t, "SN1", row[2])                 // 设备 SN（无 OUI 前缀）
 	assert.Equal(t, "111", row[3])                 // Cell ID（从 LDN 解析）
 	assert.Equal(t, "46068", row[4])               // PLMN（从 LDN 解析）
-	assert.Equal(t, "1.5", row[5])                 // K001 列
-	assert.Equal(t, "2.5", row[6])                 // C002 列
+	assert.Equal(t, "1.50", row[5])                // K001 列
+	assert.Equal(t, "2.50", row[6])                // C002 列
+}
+
+func TestWideCSVWriter_MetricValuesUseFixedTwoDecimals(t *testing.T) {
+	var buf bytes.Buffer
+	cw, err := newWideCSVWriter(&buf, "设备 SN", false, true, wideTestCols(), "-")
+	require.NoError(t, err)
+
+	tm := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	base := ExportRow{Device: "SN1", CellPLMN: "Cellid=111,PLMN=46068", Time: tm, StartTime: tm, EndTime: tm.Add(time.Hour)}
+	longDecimal := base
+	longDecimal.MetricCode, longDecimal.Value = "K001", 12.345678901234
+	integer := base
+	integer.MetricCode, integer.Value = "C002", 12
+	require.NoError(t, cw.AddRow(longDecimal))
+	require.NoError(t, cw.AddRow(integer))
+	require.NoError(t, cw.Flush())
+
+	row := nthCSVRow(t, buf.Bytes(), 1)
+	assert.Equal(t, "12.35", row[5])
+	assert.Equal(t, "12.00", row[6])
 }
 
 func TestWideCSVWriter_KpiQueryMeasurementObjectColumn(t *testing.T) {
@@ -194,8 +214,8 @@ func TestWideCSVWriter_MissingMetricDefaultEmptyCell(t *testing.T) {
 	require.NoError(t, err)
 	row := recs[1]
 	// 列序：开始时间 | 结束时间 | 设备 SN | Cell ID | PLMN | K001 | C002
-	assert.Equal(t, "9", row[5]) // K001 有值
-	assert.Equal(t, "", row[6])  // C002 缺值 → 空
+	assert.Equal(t, "9.00", row[5]) // K001 有值
+	assert.Equal(t, "", row[6])     // C002 缺值 → 空
 }
 
 // 配置占位符时，某指标在该行键缺值 → 与页面一致显示 "-"。
@@ -213,8 +233,8 @@ func TestWideCSVWriter_MissingMetricPlaceholder(t *testing.T) {
 	require.NoError(t, err)
 	row := recs[1]
 	// 列序：开始时间 | 结束时间 | 设备 SN | Cell ID | PLMN | K001 | C002
-	assert.Equal(t, "9", row[5]) // K001 有值
-	assert.Equal(t, "-", row[6]) // C002 缺值 → "-"
+	assert.Equal(t, "9.00", row[5]) // K001 有值
+	assert.Equal(t, "-", row[6])    // C002 缺值 → "-"
 }
 
 func TestWideCSVWriter_NullMetricValuePlaceholder(t *testing.T) {
@@ -301,7 +321,7 @@ func TestWideCSVWriter_AggregateNoCellColumn(t *testing.T) {
 	assert.Equal(t, "2026-06-04 10:00:00", row[0]) // 开始时间
 	assert.Equal(t, "2026-06-04 11:00:00", row[1]) // 结束时间
 	assert.Equal(t, "BLX", row[2])
-	assert.Equal(t, "7", row[3]) // C1 值
+	assert.Equal(t, "7.00", row[3]) // C1 值
 	assert.Len(t, row, 4)
 }
 
@@ -325,9 +345,9 @@ func TestWideCSVWriter_DeviceGroupTechnologyColumn(t *testing.T) {
 
 	// 排序后 LTE 先于 NR（同组按制式升序）。
 	rowLTE := nthCSVRow(t, buf.Bytes(), 1)
-	assert.Equal(t, []string{"2026-06-04 10:00:00", "2026-06-04 11:00:00", "华东A组", "LTE", "20"}, rowLTE)
+	assert.Equal(t, []string{"2026-06-04 10:00:00", "2026-06-04 11:00:00", "华东A组", "LTE", "20.00"}, rowLTE)
 	rowNR := nthCSVRow(t, buf.Bytes(), 2)
-	assert.Equal(t, []string{"2026-06-04 10:00:00", "2026-06-04 11:00:00", "华东A组", "NR", "50"}, rowNR)
+	assert.Equal(t, []string{"2026-06-04 10:00:00", "2026-06-04 11:00:00", "华东A组", "NR", "50.00"}, rowNR)
 	assert.Equal(t, int64(2), w.RowCount())
 }
 
