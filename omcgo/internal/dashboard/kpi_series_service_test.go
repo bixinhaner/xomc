@@ -81,12 +81,6 @@ func TestGetKPITimeSeriesSnapshotAppendsOnlyRequestedNetworkPartial(t *testing.T
 				},
 				{
 					TaskID: taskID, Granularity: pmstream.GranularityDaily,
-					WindowStart: start.Add(30 * 24 * time.Hour), WindowEnd: end,
-					Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
-					MetricPath: "C010070004", MetricType: "counter", Value: 12.5, Partial: true,
-				},
-				{
-					TaskID: taskID, Granularity: pmstream.GranularityDaily,
 					WindowStart: start.Add(30 * 24 * time.Hour),
 					WindowEnd:   end,
 					Dimension:   pmstream.DimensionDevice, DimensionKey: "device-1",
@@ -111,7 +105,7 @@ func TestGetKPITimeSeriesSnapshotAppendsOnlyRequestedNetworkPartial(t *testing.T
 	service.SetNetworkProgressReader(progress)
 
 	snapshot, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
-		context.Background(), []string{"K1", "C010070004"}, model.TechLTE,
+		context.Background(), []string{"K1"}, model.TechLTE,
 		metrics.GranularityDaily, start, end,
 	)
 
@@ -122,8 +116,6 @@ func TestGetKPITimeSeriesSnapshotAppendsOnlyRequestedNetworkPartial(t *testing.T
 	require.False(t, snapshot.Series["K1"][0].Partial)
 	require.Equal(t, jsonx.Float(42), snapshot.Series["K1"][1].Value)
 	require.True(t, snapshot.Series["K1"][1].Partial)
-	require.Len(t, snapshot.Series["C010070004"], 1)
-	require.Equal(t, jsonx.Float(12.5), snapshot.Series["C010070004"][0].Value)
 	require.Len(t, snapshot.PeriodProgress, 1)
 	require.EqualValues(t, 4, snapshot.PeriodProgress[0].ReceivedSlots)
 	require.EqualValues(t, 24, snapshot.PeriodProgress[0].ExpectedSlots)
