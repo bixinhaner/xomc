@@ -86,7 +86,12 @@ func TestRedisTaskQueue_TerminalTransitionsUseShortTTLAndCleanIndexes(t *testing
 			got, err := q.GetByID(ctx, task.ID)
 			require.NoError(t, err)
 			require.NotNil(t, got)
+			require.Equal(t, task.ID, got.ID)
 			require.Equal(t, tc.wantStatus, got.Status)
+			require.Empty(t, got.Params)
+			require.Empty(t, got.Result)
+			require.False(t, q.client.HExists(ctx, q.taskKey(task.ID), "data").Val(),
+				"fully acknowledged terminal tasks must retain only a small fence tombstone")
 			require.Equal(t, configuredTTL, m.TTL(q.taskKey(task.ID)))
 			require.Zero(t, mustQueueLen(t, q, ctx, task.DeviceSN))
 			require.False(t, m.Exists(q.cwmpKey("cwmp-"+tc.name)))
@@ -135,8 +140,8 @@ func TestRedisTaskQueue_TerminalTransitionIsIdempotentForLateDuplicate(t *testin
 	first, err := q.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.NotNil(t, first)
-	require.NotNil(t, first.CompletedAt)
-	firstCompletedAt := *first.CompletedAt
+	require.Equal(t, TaskStatusCompleted, first.Status)
+	require.False(t, q.client.HExists(ctx, q.taskKey(task.ID), "data").Val())
 	firstTTL := m.TTL(q.taskKey(task.ID))
 
 	m.FastForward(time.Minute)
@@ -146,8 +151,7 @@ func TestRedisTaskQueue_TerminalTransitionIsIdempotentForLateDuplicate(t *testin
 	require.NoError(t, err)
 	require.NotNil(t, afterDuplicate)
 	require.Equal(t, TaskStatusCompleted, afterDuplicate.Status)
-	require.JSONEq(t, `{"winner":"first"}`, string(afterDuplicate.Result))
-	require.Equal(t, firstCompletedAt, *afterDuplicate.CompletedAt)
+	require.Empty(t, afterDuplicate.Result)
 	require.Equal(t, firstTTL-time.Minute, m.TTL(q.taskKey(task.ID)),
 		"late duplicate must neither overwrite state nor extend retention")
 }
@@ -207,13 +211,10 @@ func TestRedisTaskQueue_ConcurrentTerminalTransitionsHaveSingleWinner(t *testing
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Contains(t, []TaskStatus{TaskStatusCompleted, TaskStatusFailed}, got.Status)
-	if got.Status == TaskStatusCompleted {
-		require.JSONEq(t, `{"winner":"success"}`, string(got.Result))
-		require.Empty(t, got.ErrorMessage)
-	} else {
-		require.Equal(t, "failure winner", got.ErrorMessage)
-		require.Empty(t, got.Result)
-	}
+	require.Empty(t, got.Params)
+	require.Empty(t, got.Result)
+	require.Empty(t, got.ErrorMessage)
+	require.False(t, q.client.HExists(ctx, q.taskKey(task.ID), "data").Val())
 	require.Equal(t, 15*time.Minute, m.TTL(q.taskKey(task.ID)))
 	require.False(t, m.Exists(q.cwmpKey("cwmp-race-terminal")))
 }

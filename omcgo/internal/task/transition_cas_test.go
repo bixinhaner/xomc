@@ -301,6 +301,8 @@ func TestReconciler_PGRecoveryPublishesStableEventOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, attempts)
 	require.Equal(t, []string{sent.ID}, mustPendingTransitionIDs(t, q, ctx))
+	require.True(t, q.client.HExists(ctx, q.taskKey(sent.ID), "data").Val(),
+		"recovery payload must remain intact until the terminal event is acknowledged")
 	_, err = reconciler.ReconcileOnce(ctx) // Same stable event id is retried.
 	require.NoError(t, err)
 	require.Equal(t, 2, attempts)
@@ -310,6 +312,11 @@ func TestReconciler_PGRecoveryPublishesStableEventOnce(t *testing.T) {
 		"task-transition-" + token,
 	}, eventIDs)
 	require.Empty(t, mustPendingTransitionIDs(t, q, ctx))
+	require.False(t, q.client.HExists(ctx, q.taskKey(sent.ID), "data").Val(),
+		"the final event acknowledgement must atomically compact the terminal payload")
+	tombstone, err := q.GetByID(ctx, sent.ID)
+	require.NoError(t, err)
+	require.Equal(t, &Task{ID: sent.ID, Status: TaskStatusCompleted}, tombstone)
 	_, err = reconciler.ReconcileOnce(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, attempts)

@@ -58,7 +58,8 @@ redis.call("HSET", KEYS[1],
 	"transition_ttl_ms", ARGV[8],
 	"pg_sync_pending", "1",
 	"cleanup_pending", "1",
-	"event_pending", ARGV[9])
+	"event_pending", ARGV[9],
+	"transition_terminal", ARGV[10])
 redis.call("PERSIST", KEYS[1])
 return 1
 `)
@@ -76,10 +77,14 @@ if redis.call("HGET", KEYS[1], "pg_sync_pending") ~= "0" or
 	return 0
 end
 local ttl = redis.call("HGET", KEYS[1], "transition_ttl_ms")
+if redis.call("HGET", KEYS[1], "transition_terminal") == "1" then
+	redis.call("HDEL", KEYS[1], "data")
+end
 redis.call("HDEL", KEYS[1],
 	"transition_from", "transition_old_cwmp",
 	"transition_token", "transition_ttl_ms",
-	"pg_sync_pending", "cleanup_pending", "event_pending")
+	"pg_sync_pending", "cleanup_pending", "event_pending",
+	"transition_terminal")
 redis.call("PEXPIRE", KEYS[1], ttl)
 return 1
 `)
@@ -333,7 +338,13 @@ func (q *RedisTaskQueue) GetByID(ctx context.Context, taskID string) (*Task, err
 		return nil, fmt.Errorf("get task: %w", err)
 	}
 	if len(values) < 1 || values[0] == nil {
-		return nil, nil // 任务不存在
+		if len(values) >= 2 && values[1] != nil {
+			status, ok := values[1].(string)
+			if ok && isTerminal(TaskStatus(status)) {
+				return &Task{ID: taskID, Status: TaskStatus(status)}, nil
+			}
+		}
+		return nil, nil // 任务不存在或非终态详情不完整
 	}
 	taskData, ok := values[0].(string)
 	if !ok {
@@ -736,12 +747,14 @@ func (q *RedisTaskQueue) prepareTransition(
 		return "", false, fmt.Errorf("index pending task transition: %w", err)
 	}
 	eventPending := "0"
+	terminalTransition := "0"
 	transitionTTL := taskDetailTTL
 	if isTerminal(candidate.Status) && (candidate.SourceID != "" || candidate.CreatorID != "") {
 		eventPending = "1"
 	}
 	if isTerminal(candidate.Status) {
 		transitionTTL = q.terminalTTL
+		terminalTransition = "1"
 	}
 	result, err := taskTransitionCASScript.Run(
 		ctx,
@@ -756,6 +769,7 @@ func (q *RedisTaskQueue) prepareTransition(
 		token,
 		transitionTTL.Milliseconds(),
 		eventPending,
+		terminalTransition,
 	).Int64()
 	if err != nil {
 		return "", false, fmt.Errorf("prepare task transition: %w", err)
