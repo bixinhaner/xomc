@@ -1,17 +1,25 @@
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import type { JsonObject, PmPageStateSnapshot } from '@core/store/pmPageStateStore';
+import type { Granularity } from '@core/types/pmDashboard';
+import {
+  buildAlignedPresetRange,
+  getDefaultTimeRangeForGranularity,
+} from '@core/utils/granularityTimeRange';
 import { nowInSystemTimezone, toSystemTimezoneRFC3339 } from '@core/utils/systemTime';
 import type { DashboardFilterValue } from './DashboardFilterBar';
 import { ALL_HOURS, ALL_WEEKDAYS, previousWindow } from './dashboardFilterUtils';
 
 export const PM_DASHBOARD_PAGE_KEY = '/performance';
 
+export type DashboardRelativeRangeMode = { kind: 'relative'; durationMs: number };
+
 export type DashboardRangeMode =
-  | { kind: 'relative'; durationMs: number }
+  | DashboardRelativeRangeMode
   | { kind: 'absolute' };
 
 export interface TaskDashboardSubmittedQuery {
+  granularity?: Granularity;
   startISO: string;
   endISO: string;
   productIds?: string[];
@@ -41,11 +49,13 @@ export interface TaskDashboardSaveInput {
   filter: DashboardFilterValue;
   dimSelected: string[];
   activeGran?: string;
+  effectiveGran?: string;
   rangeMode: DashboardRangeMode;
   submitted: TaskDashboardSubmittedQuery | null;
 }
 
 const DEFAULT_RELATIVE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_TASK_GRANULARITY: Granularity = 'daily';
 const DEFAULT_RANGE_MODE: DashboardRangeMode = {
   kind: 'relative',
   durationMs: DEFAULT_RELATIVE_DURATION_MS,
@@ -71,30 +81,144 @@ function asBoolean(value: unknown, fallback = false): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
-function buildDefaultRange(systemTimezone?: string | null): [Dayjs, Dayjs] {
-  const now = nowInSystemTimezone(systemTimezone);
-  return [now.subtract(DEFAULT_RELATIVE_DURATION_MS, 'millisecond'), now];
+function asGranularity(value: unknown): Granularity | undefined {
+  if (
+    value === '15min' ||
+    value === 'hourly' ||
+    value === 'daily' ||
+    value === 'weekly' ||
+    value === 'monthly'
+  ) {
+    return value;
+  }
+  return undefined;
 }
 
-export function buildDefaultTaskDashboardFilter(systemTimezone?: string | null): DashboardFilterValue {
+function parseRFC3339KeepingOffset(value: string): Dayjs {
+  const offsetMatch = value.match(/(Z|([+-])(\d{2}):?(\d{2}))$/i);
+  if (!offsetMatch) return dayjs(value);
+  const wall = dayjs(value.replace(/(Z|[+-]\d{2}:?\d{2})$/i, ''));
+  if (!wall.isValid()) return dayjs(value);
+  if (offsetMatch[1].toUpperCase() === 'Z') return wall.utcOffset(0, true);
+  const sign = offsetMatch[2] === '-' ? -1 : 1;
+  const hours = Number(offsetMatch[3]);
+  const minutes = Number(offsetMatch[4]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return dayjs(value);
+  return wall.utcOffset(sign * (hours * 60 + minutes), true);
+}
+
+function alignWeeklyStart(d: Dayjs): Dayjs {
+  const weekday = d.day();
+  const daysSinceMonday = (weekday + 6) % 7;
+  return d.subtract(daysSinceMonday, 'day').startOf('day');
+}
+
+function alignBucketStart(d: Dayjs, granularity: Granularity): Dayjs {
+  switch (granularity) {
+    case '15min': {
+      const minute = Math.floor(d.minute() / 15) * 15;
+      return d.minute(minute).second(0).millisecond(0);
+    }
+    case 'hourly':
+      return d.startOf('hour');
+    case 'daily':
+      return d.startOf('day');
+    case 'weekly':
+      return alignWeeklyStart(d);
+    case 'monthly':
+      return d.startOf('month');
+    default:
+      return d;
+  }
+}
+
+function addBucket(d: Dayjs, granularity: Granularity): Dayjs {
+  switch (granularity) {
+    case '15min':
+      return d.add(15, 'minute');
+    case 'hourly':
+      return d.add(1, 'hour');
+    case 'daily':
+      return d.add(1, 'day');
+    case 'weekly':
+      return d.add(1, 'week');
+    case 'monthly':
+      return d.add(1, 'month');
+    default:
+      return d;
+  }
+}
+
+function alignRangeToFullBuckets(range: [Dayjs, Dayjs], granularity: Granularity): [Dayjs, Dayjs] {
+  const [rawStart, rawEnd] = range;
+  let start = alignBucketStart(rawStart, granularity);
+  if (start.valueOf() < rawStart.valueOf()) {
+    start = addBucket(start, granularity);
+  }
+  const end = alignBucketStart(rawEnd, granularity);
+  if (end.valueOf() <= start.valueOf()) {
+    return [start, start];
+  }
+  return [start, end];
+}
+
+export function buildDefaultTaskDashboardRange(
+  systemTimezone?: string | null,
+  granularity: Granularity = DEFAULT_TASK_GRANULARITY,
+  now?: Date,
+): [Dayjs, Dayjs] {
+  const range = buildAlignedPresetRange({
+    granularity,
+    preset: getDefaultTimeRangeForGranularity(granularity),
+    systemTimezone,
+    now,
+  });
+  if (range) return [parseRFC3339KeepingOffset(range.start), parseRFC3339KeepingOffset(range.end)];
+
+  const fallbackNow = now ? dayjs(now) : nowInSystemTimezone(systemTimezone);
+  const end = fallbackNow.startOf('hour');
+  return [end.subtract(DEFAULT_RELATIVE_DURATION_MS, 'millisecond'), end];
+}
+
+export function defaultTaskDashboardRangeMode(
+  systemTimezone?: string | null,
+  granularity: Granularity = DEFAULT_TASK_GRANULARITY,
+  now?: Date,
+): DashboardRelativeRangeMode {
+  const [start, end] = buildDefaultTaskDashboardRange(systemTimezone, granularity, now);
   return {
-    range: buildDefaultRange(systemTimezone),
+    kind: 'relative',
+    durationMs: Math.max(1, end.valueOf() - start.valueOf()),
+  };
+}
+
+export function buildDefaultTaskDashboardFilter(
+  systemTimezone?: string | null,
+  granularity: Granularity = DEFAULT_TASK_GRANULARITY,
+  now?: Date,
+): DashboardFilterValue {
+  return {
+    range: buildDefaultTaskDashboardRange(systemTimezone, granularity, now),
     weekdays: [...ALL_WEEKDAYS],
     hours: [...ALL_HOURS],
     compare: false,
   };
 }
 
-export function buildTaskDashboardTaskSwitchReset(systemTimezone?: string | null): {
+export function buildTaskDashboardTaskSwitchReset(
+  systemTimezone?: string | null,
+  granularity: Granularity = DEFAULT_TASK_GRANULARITY,
+): {
   filter: DashboardFilterValue;
   rangeMode: DashboardRangeMode;
   dimSelected: string[];
   activeGran?: string;
   submitted: null;
 } {
+  const rangeMode = defaultTaskDashboardRangeMode(systemTimezone, granularity);
   return {
-    filter: buildDefaultTaskDashboardFilter(systemTimezone),
-    rangeMode: { ...DEFAULT_RANGE_MODE },
+    filter: buildDefaultTaskDashboardFilter(systemTimezone, granularity),
+    rangeMode,
     dimSelected: [],
     activeGran: undefined,
     submitted: null,
@@ -115,18 +239,21 @@ function restoreRange(
   filters: Record<string, unknown>,
   rangeMode: DashboardRangeMode,
   systemTimezone?: string | null,
+  activeGranularity?: Granularity,
 ): [Dayjs, Dayjs] {
   if (rangeMode.kind === 'relative') {
+    if (activeGranularity) return buildDefaultTaskDashboardRange(systemTimezone, activeGranularity);
     const now = nowInSystemTimezone(systemTimezone);
-    return [now.subtract(rangeMode.durationMs, 'millisecond'), now];
+    const end = now.startOf('hour');
+    return [end.subtract(rangeMode.durationMs, 'millisecond'), end];
   }
 
   const start = asString(filters.rangeStartISO);
   const end = asString(filters.rangeEndISO);
-  const parsedStart = start ? dayjs(start) : null;
-  const parsedEnd = end ? dayjs(end) : null;
+  const parsedStart = start ? parseRFC3339KeepingOffset(start) : null;
+  const parsedEnd = end ? parseRFC3339KeepingOffset(end) : null;
   if (parsedStart?.isValid() && parsedEnd?.isValid()) return [parsedStart, parsedEnd];
-  return buildDefaultRange(systemTimezone);
+  return buildDefaultTaskDashboardRange(systemTimezone, activeGranularity);
 }
 
 export function buildSubmittedTaskDashboardQuery(
@@ -135,13 +262,24 @@ export function buildSubmittedTaskDashboardQuery(
     productIds?: string[];
     objectLdns?: string[];
     systemTimezone?: string | null;
+    granularity?: string;
+    rangeMode?: DashboardRangeMode;
   },
 ): TaskDashboardSubmittedQuery {
-  const [s, e] = filter.range;
+  const submittedGranularity = asGranularity(params.granularity);
+  const baseRange =
+    params.rangeMode?.kind === 'relative' && submittedGranularity
+      ? buildDefaultTaskDashboardRange(params.systemTimezone, submittedGranularity)
+      : filter.range;
+  const submittedRange = submittedGranularity && params.rangeMode?.kind === 'absolute'
+    ? alignRangeToFullBuckets(baseRange, submittedGranularity)
+    : baseRange;
+  const [s, e] = submittedRange;
   const sISO = toSystemTimezoneRFC3339(s, params.systemTimezone) ?? s.toISOString();
   const eISO = toSystemTimezoneRFC3339(e, params.systemTimezone) ?? e.toISOString();
-  const [ps, pe] = previousWindow(filter.range);
+  const [ps, pe] = previousWindow(submittedRange);
   const submitted: TaskDashboardSubmittedQuery = {
+    ...(submittedGranularity ? { granularity: submittedGranularity } : {}),
     startISO: sISO,
     endISO: eISO,
     weekdays: [...filter.weekdays],
@@ -174,6 +312,7 @@ export function taskDashboardQuerySignature(
     weekdays: submitted.weekdays,
     hours: submitted.hours,
     compare: submitted.compare,
+    granularity: submitted.granularity,
     prevStartISO: submitted.prevStartISO,
     prevEndISO: submitted.prevEndISO,
   };
@@ -218,6 +357,7 @@ export function buildTaskDashboardStateSnapshot(input: TaskDashboardSaveInput): 
     } as JsonObject,
     view: {
       activeGran: input.activeGran ?? null,
+      effectiveGran: input.effectiveGran ?? input.activeGran ?? input.submitted?.granularity ?? null,
     },
     lastAction: {
       submittedQuery: Boolean(input.submitted),
@@ -234,21 +374,27 @@ export function restoreTaskDashboardState(
   const filters = (snapshot?.filters ?? {}) as Record<string, unknown>;
   const view = (snapshot?.view ?? {}) as Record<string, unknown>;
   const rangeMode = normalizeRangeMode(filters.rangeMode);
+  const savedSubmitted = snapshot?.lastAction.submittedQuery && filters.submitted && typeof filters.submitted === 'object'
+    ? (filters.submitted as unknown as TaskDashboardSubmittedQuery)
+    : null;
+  const activeGranularity =
+    asGranularity(view.activeGran) ??
+    asGranularity(view.effectiveGran) ??
+    asGranularity(savedSubmitted?.granularity);
   const filter: DashboardFilterValue = {
-    range: restoreRange(filters, rangeMode, systemTimezone),
+    range: restoreRange(filters, rangeMode, systemTimezone, activeGranularity),
     weekdays: asNumberArray(filters.weekdays, ALL_WEEKDAYS),
     hours: asNumberArray(filters.hours, ALL_HOURS),
     compare: asBoolean(filters.compare),
   };
 
-  const savedSubmitted = snapshot?.lastAction.submittedQuery && filters.submitted && typeof filters.submitted === 'object'
-    ? (filters.submitted as unknown as TaskDashboardSubmittedQuery)
-    : null;
-  const submitted = savedSubmitted && rangeMode.kind === 'relative'
+  const submitted = savedSubmitted && (activeGranularity || rangeMode.kind === 'relative')
     ? buildSubmittedTaskDashboardQuery(filter, {
         productIds: savedSubmitted.productIds,
         objectLdns: savedSubmitted.objectLdns,
         systemTimezone,
+        granularity: activeGranularity,
+        rangeMode,
       })
     : savedSubmitted;
 

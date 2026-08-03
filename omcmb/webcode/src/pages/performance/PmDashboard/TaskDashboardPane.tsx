@@ -24,6 +24,7 @@ import { useCreateKpiExport } from '@core/hooks/api/useKpiExport';
 import { useSystemTimezoneValue } from '@core/hooks/api/useSystemTimezone';
 import { buildAdhocExportParams, defaultExportTaskName } from '@core/utils/kpiExportParams';
 import { usePmPageStateStore } from '@core/store/pmPageStateStore';
+import type { Granularity } from '@core/types/pmDashboard';
 import {
   isKnownTechnology,
   technologyToDeviceType,
@@ -46,6 +47,7 @@ import {
 } from './dashboardFilterUtils';
 import {
   buildDefaultTaskDashboardFilter,
+  defaultTaskDashboardRangeMode,
   buildSubmittedTaskDashboardQuery,
   buildTaskDashboardStateSnapshot,
   buildTaskDashboardTaskSwitchReset,
@@ -124,15 +126,35 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const [submitted, setSubmitted] = useState<TaskDashboardSubmittedQuery | null>(() =>
     restoredAppliesToTask ? restoredState.submitted : null,
   );
+  const restoredSubmittedNeedsEffectiveGranularity =
+    restoredAppliesToTask &&
+    Boolean(restoredState.submitted) &&
+    !restoredState.submitted?.granularity &&
+    !restoredState.activeGran;
   const initialRestoredQueryDelayMs = restoredAppliesToTask && restoredState.submitted
     ? restoredQueryDelayMs(restoredState.savedAt, Date.now())
     : 0;
-  const [resultsQueryReady, setResultsQueryReady] = useState(initialRestoredQueryDelayMs === 0);
+  const [restoredQueryDelayElapsed, setRestoredQueryDelayElapsed] = useState(initialRestoredQueryDelayMs === 0);
+  const [resultsQueryReady, setResultsQueryReady] = useState(
+    initialRestoredQueryDelayMs === 0 && !restoredSubmittedNeedsEffectiveGranularity,
+  );
   useEffect(() => {
     if (initialRestoredQueryDelayMs <= 0) return undefined;
-    const timer = window.setTimeout(() => setResultsQueryReady(true), initialRestoredQueryDelayMs);
+    const timer = window.setTimeout(() => setRestoredQueryDelayElapsed(true), initialRestoredQueryDelayMs);
     return () => window.clearTimeout(timer);
   }, [initialRestoredQueryDelayMs]);
+  useEffect(() => {
+    if (!restoredAppliesToTask || !restoredState.submitted) return;
+    if (!restoredQueryDelayElapsed) return;
+    if (restoredSubmittedNeedsEffectiveGranularity && !submitted?.granularity) return;
+    setResultsQueryReady(true);
+  }, [
+    restoredAppliesToTask,
+    restoredQueryDelayElapsed,
+    restoredState.submitted,
+    restoredSubmittedNeedsEffectiveGranularity,
+    submitted?.granularity,
+  ]);
   const [prevTaskId, setPrevTaskId] = useState(taskId);
   if (taskId !== prevTaskId) {
     const reset = buildTaskDashboardTaskSwitchReset(systemTimezone);
@@ -147,12 +169,23 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const { data: filterOpts } = usePmAdhocFilterOptions(taskId, dimension);
   // 维度→入参映射（纯函数，便于单测）：product→productIds；device_group/band→objectLdns；空选不过滤。
   const { productIds, objectLdns } = dimSelectionToParams(dimension, dimSelected);
+  const granularities = useMemo(
+    () => taskQuery.data?.granularities ?? [],
+    [taskQuery.data?.granularities],
+  );
+  const effectiveGran = activeGran && granularities.includes(activeGran) ? activeGran : granularities[0];
 
   // #599：改为「点出图才查」模式——所有条件变化只更新本地暂存 state，
   // 点「出图」按钮时把暂存条件一次性提交（提交快照驱动 usePmAdhocResults）。
   const handleQuery = () => {
     setResultsQueryReady(true);
-    setSubmitted(buildSubmittedTaskDashboardQuery(filter, { productIds, objectLdns, systemTimezone }));
+    setSubmitted(buildSubmittedTaskDashboardQuery(filter, {
+      productIds,
+      objectLdns,
+      systemTimezone,
+      granularity: effectiveGran,
+      rangeMode,
+    }));
   };
 
   useEffect(() => {
@@ -167,6 +200,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
         filter,
         dimSelected,
         activeGran,
+        effectiveGran,
         rangeMode,
         submitted,
       }),
@@ -192,9 +226,14 @@ export default function TaskDashboardPane({ taskId }: Props) {
   };
 
   const handleReset = () => {
-    const nextFilter = buildDefaultTaskDashboardFilter(systemTimezone);
+    const resetGranularity = effectiveGran as Granularity | undefined;
+    const nextFilter = resetGranularity
+      ? buildDefaultTaskDashboardFilter(systemTimezone, resetGranularity)
+      : buildDefaultTaskDashboardFilter(systemTimezone);
     setFilter(nextFilter);
-    setRangeMode({ kind: 'relative', durationMs: 7 * 24 * 60 * 60 * 1000 });
+    setRangeMode(resetGranularity
+      ? defaultTaskDashboardRangeMode(systemTimezone, resetGranularity)
+      : { kind: 'relative', durationMs: 7 * 24 * 60 * 60 * 1000 });
     setDimSelected([]);
     setActiveGran(undefined);
     setSubmitted(null);
@@ -236,11 +275,47 @@ export default function TaskDashboardPane({ taskId }: Props) {
   // 触顶提示：后端用 limit+1 判断是否截断，前端直接信任 truncated 标记。
   const truncated = rowsResp?.truncated ?? false;
 
-  const granularities = useMemo(
-    () => taskQuery.data?.granularities ?? [],
-    [taskQuery.data?.granularities],
-  );
-  const effectiveGran = activeGran && granularities.includes(activeGran) ? activeGran : granularities[0];
+  useEffect(() => {
+    if (!effectiveGran) return;
+    const granularity = effectiveGran as Granularity;
+    const nextRangeMode = rangeMode.kind === 'relative'
+      ? defaultTaskDashboardRangeMode(systemTimezone, granularity)
+      : rangeMode;
+    if (rangeMode.kind === 'relative') {
+      const nextRelativeRangeMode = defaultTaskDashboardRangeMode(systemTimezone, granularity);
+      const nextRange = buildDefaultTaskDashboardFilter(systemTimezone, granularity).range;
+      setFilter((cur) => (
+        cur.range[0].valueOf() === nextRange[0].valueOf() && cur.range[1].valueOf() === nextRange[1].valueOf()
+          ? cur
+          : { ...cur, range: nextRange }
+      ));
+      setRangeMode((cur) => (
+        cur.kind === 'relative' && cur.durationMs === nextRelativeRangeMode.durationMs
+          ? cur
+          : nextRelativeRangeMode
+      ));
+    }
+    if (submitted) {
+      const rebuiltSubmitted = buildSubmittedTaskDashboardQuery(filter, {
+        productIds: submitted.productIds,
+        objectLdns: submitted.objectLdns,
+        systemTimezone,
+        granularity,
+        rangeMode: nextRangeMode,
+      });
+      if (
+        submitted.granularity !== rebuiltSubmitted.granularity ||
+        submitted.startISO !== rebuiltSubmitted.startISO ||
+        submitted.endISO !== rebuiltSubmitted.endISO ||
+        submitted.prevStartISO !== rebuiltSubmitted.prevStartISO ||
+        submitted.prevEndISO !== rebuiltSubmitted.prevEndISO ||
+        submitted.rangeStartMs !== rebuiltSubmitted.rangeStartMs ||
+        submitted.rangeEndMs !== rebuiltSubmitted.rangeEndMs
+      ) {
+        setSubmitted(rebuiltSubmitted);
+      }
+    }
+  }, [effectiveGran, filter, rangeMode, submitted, systemTimezone]);
   const activeProgress = useMemo(() => {
     if (effectiveGran !== 'daily' && effectiveGran !== 'weekly') return undefined;
     return (rowsResp?.periodProgress ?? [])
@@ -363,7 +438,13 @@ export default function TaskDashboardPane({ taskId }: Props) {
   const createExport = useCreateKpiExport();
   const handleExport = () => {
     // #599：导出与出图同口径——用提交态的筛选快照（未出图时用当前 filter）。
-    const exportSubmitted = submitted ?? buildSubmittedTaskDashboardQuery(filter, { productIds, objectLdns, systemTimezone });
+    const exportSubmitted = submitted ?? buildSubmittedTaskDashboardQuery(filter, {
+      productIds,
+      objectLdns,
+      systemTimezone,
+      granularity: effectiveGran,
+      rangeMode,
+    });
     const exportParams = buildAdhocExportParams({
       taskId,
       startTime: exportSubmitted.startISO,
@@ -420,6 +501,20 @@ export default function TaskDashboardPane({ taskId }: Props) {
   }
 
   const task = taskQuery.data;
+  const handleGranularityChange = (value: string | number) => {
+    const next = String(value);
+    const granularity = next as Granularity;
+    setActiveGran(next);
+    if (rangeMode.kind === 'relative') {
+      setFilter((cur) => ({
+        ...cur,
+        range: buildDefaultTaskDashboardFilter(systemTimezone, granularity).range,
+      }));
+      setRangeMode(defaultTaskDashboardRangeMode(systemTimezone, granularity));
+    }
+    setSubmitted(null);
+    setResultsQueryReady(true);
+  };
 
   return (
     <div>
@@ -441,7 +536,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
               <Segmented
                 size="small"
                 value={effectiveGran}
-                onChange={(v) => setActiveGran(v as string)}
+                onChange={handleGranularityChange}
                 options={granularities.map((g) => ({ label: granLabel(g), value: g }))}
               />
             )}
