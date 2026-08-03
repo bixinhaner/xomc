@@ -92,6 +92,7 @@ func TestRedisTaskQueue_TerminalTransitionsUseShortTTLAndCleanIndexes(t *testing
 			require.Empty(t, got.Result)
 			require.False(t, q.client.HExists(ctx, q.taskKey(task.ID), "data").Val(),
 				"fully acknowledged terminal tasks must retain only a small fence tombstone")
+			require.Equal(t, []string{"status"}, q.client.HKeys(ctx, q.taskKey(task.ID)).Val())
 			require.Equal(t, configuredTTL, m.TTL(q.taskKey(task.ID)))
 			require.Zero(t, mustQueueLen(t, q, ctx, task.DeviceSN))
 			require.False(t, m.Exists(q.cwmpKey("cwmp-"+tc.name)))

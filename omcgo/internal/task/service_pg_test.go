@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,8 +115,12 @@ func TestService_PG_GetTask_TerminalTombstoneReturnsDurableDetails(t *testing.T)
 	ctx := context.Background()
 
 	tk := freshTaskForPG("terminal-tombstone", "terminal-tombstone")
-	tk.Params = json.RawMessage(`{"names":["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth"]}`)
-	tk.MarkCompleted(json.RawMessage(`{"values":[{"name":"DLBandwidth","value":"n100"}]}`))
+	largeParams, err := json.Marshal(map[string]string{"payload": strings.Repeat("p", 8*1024)})
+	require.NoError(t, err)
+	largeResult, err := json.Marshal(map[string]string{"payload": strings.Repeat("r", 16*1024)})
+	require.NoError(t, err)
+	tk.Params = largeParams
+	tk.MarkCompleted(largeResult)
 	require.NoError(t, repo.Create(ctx, tk))
 	require.NoError(t, q.Update(ctx, tk))
 	require.False(t, q.client.HExists(ctx, q.taskKey(tk.ID), "data").Val())
