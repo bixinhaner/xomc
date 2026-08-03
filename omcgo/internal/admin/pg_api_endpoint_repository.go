@@ -259,6 +259,53 @@ RETURNING xmax = 0`
 	return created, nil
 }
 
+func (r *PgApiEndpointRepository) UpsertBatch(ctx context.Context, inputs []ApiEndpointUpsertInput) (created int, err error) {
+	if len(inputs) == 0 {
+		return 0, nil
+	}
+
+	query := sq.Insert("api_endpoints").
+		Columns("path", "method", "name", "description", "api_group", "is_auto")
+	for _, input := range inputs {
+		query = query.Values(input.Path, input.Method, input.Name, input.Description, input.ApiGroup, true)
+	}
+	query = query.Suffix(`
+ON CONFLICT (path, method)
+DO UPDATE SET
+    name = CASE WHEN api_endpoints.is_user_modified THEN api_endpoints.name ELSE EXCLUDED.name END,
+    description = CASE
+        WHEN api_endpoints.is_user_modified OR COALESCE(api_endpoints.description, '') <> '' THEN api_endpoints.description
+        ELSE EXCLUDED.description
+    END,
+    api_group = CASE WHEN api_endpoints.is_user_modified THEN api_endpoints.api_group ELSE EXCLUDED.api_group END,
+    updated_at = NOW()
+WHERE api_endpoints.is_auto = TRUE
+RETURNING xmax = 0`)
+
+	sql, args, err := query.PlaceholderFormat(sq.Dollar).ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build batch upsert api endpoints: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return 0, fmt.Errorf("batch upsert api endpoints: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var inserted bool
+		if err := rows.Scan(&inserted); err != nil {
+			return 0, fmt.Errorf("scan batch upsert api endpoints: %w", err)
+		}
+		if inserted {
+			created++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("read batch upsert api endpoints: %w", err)
+	}
+	return created, nil
+}
+
 // GetGroups returns a distinct sorted list of api_group values.
 func (r *PgApiEndpointRepository) GetGroups(ctx context.Context) ([]string, error) {
 	rows, err := r.pool.Query(ctx,

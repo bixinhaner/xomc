@@ -308,6 +308,7 @@ contains "升级强制刷新版本目录 bind mount" '"${DC[@]}" up --pull never
 contains "服务控制读取持久化监控 profile" 'monitoring_profile_apply_runtime ".env" "$SKIP_MONITORING"' "$SVC"
 contains "监控 profile 关闭 tracing" 'export OMCGO_TRACER_ENABLED=false' "$MONITORING_PROFILE_LIB"
 contains "业务容器 tracing 尊重配置与显式覆盖" 'OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"' "$RELEASE_APP_COMPOSE"
+contains "App API endpoint 同步超时可配置" 'OMCGO_API_ENDPOINT_SYNC_TIMEOUT_SECONDS: "${OMCGO_API_ENDPOINT_SYNC_TIMEOUT_SECONDS:-120}"' "$RELEASE_APP_COMPOSE"
 contains "健康检查读取持久化监控 profile" 'monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING"' "$RELEASE_HEALTHCHECK"
 contains "collector 启用 health_check extension" 'extensions: [health_check, zpages]' "$OTELCOL_CONFIG"
 contains "collector health 仅绑定宿主回环" '127.0.0.1:13133:13133' "$RELEASE_MONITORING_COMPOSE"
