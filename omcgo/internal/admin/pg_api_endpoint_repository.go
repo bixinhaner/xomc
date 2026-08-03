@@ -235,13 +235,6 @@ func (r *PgApiEndpointRepository) List(ctx context.Context, filter ApiEndpointFi
 //
 // is_auto=false（UI 手工新建）的行同样不被覆盖（WHERE 限定）。
 func (r *PgApiEndpointRepository) Upsert(ctx context.Context, path, method, name, description, apiGroup string) (created bool, err error) {
-	// Check existence first
-	checkSQL := `SELECT COUNT(*) FROM api_endpoints WHERE path = $1 AND method = $2`
-	var count int
-	if err := r.pool.QueryRow(ctx, checkSQL, path, method).Scan(&count); err != nil {
-		return false, fmt.Errorf("check api_endpoint existence: %w", err)
-	}
-
 	upsertSQL := `
 INSERT INTO api_endpoints (path, method, name, description, api_group, is_auto)
 VALUES ($1, $2, $3, $4, $5, TRUE)
@@ -254,13 +247,63 @@ DO UPDATE SET
 	END,
     api_group = CASE WHEN api_endpoints.is_user_modified THEN api_endpoints.api_group ELSE EXCLUDED.api_group END,
     updated_at = NOW()
-WHERE api_endpoints.is_auto = TRUE`
+WHERE api_endpoints.is_auto = TRUE
+RETURNING xmax = 0`
 
-	_, err = r.pool.Exec(ctx, upsertSQL, path, method, name, description, apiGroup)
-	if err != nil {
+	if err := r.pool.QueryRow(ctx, upsertSQL, path, method, name, description, apiGroup).Scan(&created); err != nil {
+		if err == pgx.ErrNoRows {
+			return false, nil
+		}
 		return false, fmt.Errorf("upsert api_endpoint: %w", err)
 	}
-	return count == 0, nil
+	return created, nil
+}
+
+func (r *PgApiEndpointRepository) UpsertBatch(ctx context.Context, inputs []ApiEndpointUpsertInput) (created int, err error) {
+	if len(inputs) == 0 {
+		return 0, nil
+	}
+
+	query := sq.Insert("api_endpoints").
+		Columns("path", "method", "name", "description", "api_group", "is_auto")
+	for _, input := range inputs {
+		query = query.Values(input.Path, input.Method, input.Name, input.Description, input.ApiGroup, true)
+	}
+	query = query.Suffix(`
+ON CONFLICT (path, method)
+DO UPDATE SET
+    name = CASE WHEN api_endpoints.is_user_modified THEN api_endpoints.name ELSE EXCLUDED.name END,
+    description = CASE
+        WHEN api_endpoints.is_user_modified OR COALESCE(api_endpoints.description, '') <> '' THEN api_endpoints.description
+        ELSE EXCLUDED.description
+    END,
+    api_group = CASE WHEN api_endpoints.is_user_modified THEN api_endpoints.api_group ELSE EXCLUDED.api_group END,
+    updated_at = NOW()
+WHERE api_endpoints.is_auto = TRUE
+RETURNING xmax = 0`)
+
+	sql, args, err := query.PlaceholderFormat(sq.Dollar).ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build batch upsert api endpoints: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return 0, fmt.Errorf("batch upsert api endpoints: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var inserted bool
+		if err := rows.Scan(&inserted); err != nil {
+			return 0, fmt.Errorf("scan batch upsert api endpoints: %w", err)
+		}
+		if inserted {
+			created++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("read batch upsert api endpoints: %w", err)
+	}
+	return created, nil
 }
 
 // GetGroups returns a distinct sorted list of api_group values.

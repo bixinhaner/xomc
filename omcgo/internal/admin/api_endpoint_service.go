@@ -25,6 +25,10 @@ type BuiltInAPIPermissionReconciler interface {
 	ReconcileBuiltInAPIPermissions(context.Context) (BuiltInAPIPermissionGrantResult, error)
 }
 
+type apiEndpointBatchUpserter interface {
+	UpsertBatch(context.Context, []ApiEndpointUpsertInput) (created int, err error)
+}
+
 // NewApiEndpointService creates a new ApiEndpointService.
 func NewApiEndpointService(repo ApiEndpointRepository, logger *zap.Logger) *ApiEndpointService {
 	return &ApiEndpointService{
@@ -103,20 +107,41 @@ func (s *ApiEndpointService) GetApiGroups(ctx context.Context) ([]string, error)
 func (s *ApiEndpointService) SyncApiEndpoints(ctx context.Context, routes gin.RoutesInfo) (SyncResult, error) {
 	var result SyncResult
 	result.Total = len(routes)
+	inputs := make([]ApiEndpointUpsertInput, 0, len(routes))
+	seen := make(map[string]struct{}, len(routes))
 
 	for _, route := range routes {
 		apiGroup := inferApiGroup(route.Path)
 		name := inferRouteName(route.Method, route.Path)
 		description := inferRouteDescription(route.Method, route.Path)
-
-		created, err := s.repo.Upsert(ctx, route.Path, route.Method, name, description, apiGroup)
-		if err != nil {
-			return result, fmt.Errorf("upsert API endpoint %s %s: %w", route.Method, route.Path, err)
+		key := route.Method + "\x00" + route.Path
+		if _, exists := seen[key]; exists {
+			continue
 		}
-		if created {
-			result.Created++
-		} else {
-			result.Updated++
+		seen[key] = struct{}{}
+		inputs = append(inputs, ApiEndpointUpsertInput{
+			Path: route.Path, Method: route.Method, Name: name, Description: description, ApiGroup: apiGroup,
+		})
+	}
+
+	if batchUpserter, ok := s.repo.(apiEndpointBatchUpserter); ok {
+		created, err := batchUpserter.UpsertBatch(ctx, inputs)
+		if err != nil {
+			return result, fmt.Errorf("batch upsert API endpoints: %w", err)
+		}
+		result.Created = created
+		result.Updated = result.Total - created
+	} else {
+		for _, input := range inputs {
+			created, err := s.repo.Upsert(ctx, input.Path, input.Method, input.Name, input.Description, input.ApiGroup)
+			if err != nil {
+				return result, fmt.Errorf("upsert API endpoint %s %s: %w", input.Method, input.Path, err)
+			}
+			if created {
+				result.Created++
+			} else {
+				result.Updated++
+			}
 		}
 	}
 

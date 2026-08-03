@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -789,7 +791,13 @@ type apiEndpointSyncer interface {
 }
 
 func syncApiEndpoints(c *Container, ad *adminHandlerDeps) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	timeout := 2 * time.Minute
+	if raw := os.Getenv("OMCGO_API_ENDPOINT_SYNC_TIMEOUT_SECONDS"); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+			timeout = time.Duration(seconds) * time.Second
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	routes := ad.adminHandler.GetGinRoutes()

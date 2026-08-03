@@ -105,7 +105,8 @@ check_value() { # check_value <描述> <期望> <实际>
 container_running() {
   local svc="$1"
   local cid
-  cid="$("${DC[@]}" ps -q "$svc" 2>/dev/null | head -n1)"
+  cid="$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter "label=com.docker.compose.service=$svc" --format '{{.ID}}' | head -n1)"
   [ -n "$cid" ] || return 1
   [ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "true" ]
 }
@@ -159,12 +160,9 @@ if [ "$STARTUP_CHECK" = 1 ]; then
     check "$svc 容器 running" container_running "$svc"
   done
   check "acs-candidate 容器 running" container_running acs-candidate
-  check "acs-candidate /readyz" acs_service_ready acs-candidate
   for svc in postgres postgres-tsdb redis-core redis-pm nats minio; do
     check "$svc 容器 running" container_running "$svc"
   done
-  check "app/worker 核心与 PM Redis 路由配置完整" check_redis_routing_config
-  check "redis-core / redis-pm 运行实例身份不同" redis_instances_distinct
   if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
     check "web 容器 running" container_running web
   fi
@@ -174,6 +172,7 @@ if [ "$STARTUP_CHECK" = 1 ]; then
   check "app /metrics (:9091)" curl -fsS --max-time 3 http://127.0.0.1:9091/metrics
   check "前端 SPA (:8081)" curl -fsS --max-time 3 http://127.0.0.1:8081/ -o /dev/null
   echo
+  echo "启动检查已跳过 Redis 路由、实例身份和 ACS candidate /readyz 深审计；完整 healthcheck 将在部署后执行。"
   echo "启动检查结果：通过 $ok 项，失败 $fail 项"
   [ "$fail" -eq 0 ] || { echo "启动核心服务尚未就绪。"; exit 1; }
   echo "启动核心服务已就绪。"

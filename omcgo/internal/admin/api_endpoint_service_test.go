@@ -17,6 +17,17 @@ type recordingBuiltInPermissionReconciler struct {
 	err    error
 }
 
+type recordingBatchApiEndpointRepository struct {
+	ApiEndpointRepository
+	inputs  []ApiEndpointUpsertInput
+	created int
+}
+
+func (r *recordingBatchApiEndpointRepository) UpsertBatch(_ context.Context, inputs []ApiEndpointUpsertInput) (int, error) {
+	r.inputs = inputs
+	return r.created, nil
+}
+
 func (r *recordingBuiltInPermissionReconciler) ReconcileBuiltInAPIPermissions(context.Context) (BuiltInAPIPermissionGrantResult, error) {
 	r.calls++
 	return r.result, r.err
@@ -220,6 +231,27 @@ func TestSyncApiEndpointsPassesReadableDescription(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result.Created != 1 || result.Updated != 0 || result.Total != 1 {
+		t.Fatalf("unexpected sync result: %+v", result)
+	}
+}
+
+func TestSyncApiEndpointsUsesBatchUpsertAndDeduplicatesRoutes(t *testing.T) {
+	repo := &recordingBatchApiEndpointRepository{created: 2}
+	svc := NewApiEndpointService(repo, zap.NewNop())
+
+	result, err := svc.SyncApiEndpoints(context.Background(), gin.RoutesInfo{
+		{Method: "GET", Path: "/api/v1/devices"},
+		{Method: "GET", Path: "/api/v1/devices"},
+		{Method: "POST", Path: "/api/v1/devices"},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(repo.inputs) != 2 {
+		t.Fatalf("batch inputs = %d, want 2", len(repo.inputs))
+	}
+	if result.Total != 3 || result.Created != 2 || result.Updated != 1 {
 		t.Fatalf("unexpected sync result: %+v", result)
 	}
 }

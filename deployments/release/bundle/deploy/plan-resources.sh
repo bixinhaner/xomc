@@ -259,8 +259,10 @@ MIN_BUSINESS_FLOOR_SUM=0
 for m in "${COMP_MIN[@]}"; do MIN_BUSINESS_FLOOR_SUM=$(( MIN_BUSINESS_FLOOR_SUM + m )); done
 MIN_BUSINESS_FLOOR_SUM=$(( MIN_BUSINESS_FLOOR_SUM + COMP_MIN[1] ))
 BUSINESS_BUDGET_MIB=$(( IDLE_MEM_MIB - MON_FIXED_MIB ))
-[ "$BUSINESS_BUDGET_MIB" -ge "$MIN_BUSINESS_FLOOR_SUM" ] || \
-  die "扣除监控固定成本后业务内存预算仅 $(to_gib "$BUSINESS_BUDGET_MIB") GiB，低于最低可运行预算 $(to_gib "$MIN_BUSINESS_FLOOR_SUM") GiB；请释放内存、跳过监控或扩容主机。" 1
+if [ "$BUSINESS_BUDGET_MIB" -lt "$MIN_BUSINESS_FLOOR_SUM" ]; then
+  MIN_AVAILABLE_WITH_MONITORING_MIB=$(( OS_RESERVE_MIB + MON_FIXED_MIB + MIN_BUSINESS_FLOOR_SUM ))
+  die "扣除监控固定成本后业务内存预算仅 $(to_gib "$BUSINESS_BUDGET_MIB") GiB，低于最低可运行预算 $(to_gib "$MIN_BUSINESS_FLOOR_SUM") GiB；全栈至少需要 MemAvailable 约 $(to_gib "$MIN_AVAILABLE_WITH_MONITORING_MIB") GiB。\n       --floor-tolerance-pct 只对后续组件下限缺口生效，不能绕过此最低运行预算。\n       需要保留监控：请释放内存后重试，或扩容主机。\n       可以不部署监控：bash $SCRIPT_DIR/plan-resources.sh --skip-monitoring，然后使用 install.sh --skip-monitoring。" 1
+fi
 
 # floor 先占业务预算的 70%，剩余 30% 按组件权重向上分配；低配机若按比例
 # 得到的 floor 低于组件最低可运行值，则优先抬到该最低值，并继续做总账校验。

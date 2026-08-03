@@ -168,6 +168,7 @@ services:
       # 默认完整生产栈启用 tracing；install/svc --skip-monitoring 会显式置 false，
       # 保证没有 otelcol 时回到 Go 端 no-op provider。
       OMCGO_TRACER_ENABLED: "${OMCGO_TRACER_ENABLED:-}"
+      OMCGO_API_ENDPOINT_SYNC_TIMEOUT_SECONDS: "${OMCGO_API_ENDPOINT_SYNC_TIMEOUT_SECONDS:-120}"
       # Go 运行时上限（resources.env 注入）。缺省：GOMEMLIMIT off→1382MiB(≈0.9×1536m 内存
       # 默认,软限须 < limits.memory)，把硬 OOM-kill 换成 GC 背压(纯安全网)。GOMAXPROCS 空则
       # Go 1.25 自动按 cgroup CPU 配额推导。

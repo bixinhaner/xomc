@@ -21,6 +21,8 @@
 #   sudo bash deploy/install.sh --skip-monitoring        # 不起监控栈
 #   sudo bash deploy/install.sh --fresh-install --yes --public-host 172.24.224.78
 #                                                        # 清理旧数据后全新安装
+#   sudo bash deploy/install.sh --fresh-install --floor-tolerance-pct 80 ...
+#                                                        # 自定义资源下限缺口容忍度（0-99）
 #   sudo bash deploy/install.sh --check-only             # 仅检查环境，不做修改
 #   sudo bash deploy/install.sh --infra-dir /opt/omc/infra   # 自定义 infra 目录
 #   sudo bash deploy/install.sh --overwrite-etc          # 用新包模板覆盖 /opt/omc/etc
@@ -38,6 +40,8 @@
 #   --overwrite-etc   用新包 etc/ 模板覆盖 /opt/omc/etc/（旧 etc 自动备份）
 #   --fresh-install   停止旧栈并删除 OMC 数据/配置/项目 volumes 后全新安装（危险）
 #   --public-host <h> 全新安装时写入基站可达的 OMC_PUBLIC_HOST
+#   --floor-tolerance-pct <N>
+#                     全新安装资源规划的组件下限缺口容忍度（0-99，默认 60）
 #   --yes             所有交互式提示直接默认（适合 CI / 批处理）
 #   -h | --help       本帮助
 #
@@ -175,6 +179,7 @@ CHECK_ONLY=0
 ASSUME_YES=0
 OVERWRITE_ETC=0
 FRESH_INSTALL=0
+FLOOR_TOLERANCE_PCT=60
 PUBLIC_HOST_OVERRIDE="${OMC_PUBLIC_HOST:-}"
 INFRA_DIR="/opt/omc/infra"
 OMC_ROOT="/opt/omc"
@@ -192,12 +197,20 @@ while [ $# -gt 0 ]; do
     --overwrite-etc)   OVERWRITE_ETC=1; shift ;;
     --fresh-install)   FRESH_INSTALL=1; shift ;;
     --public-host)     PUBLIC_HOST_OVERRIDE="${2:?--public-host 需要 IP 或域名}"; shift 2 ;;
+    --floor-tolerance-pct) FLOOR_TOLERANCE_PCT="${2:?--floor-tolerance-pct 需要 0-99 的整数}"; shift 2 ;;
+    --floor-tolerance-pct=*) FLOOR_TOLERANCE_PCT="${1#*=}"; shift ;;
     --yes)             ASSUME_YES=1; shift ;;
     -h|--help)         sed -n '3,52p' "$0"; exit 0 ;;
     --uninstall)       die "卸载请用 uninstall.sh：sudo bash $DEPLOY_DIR/uninstall.sh -h" ;;
     *)                 die "未知参数：$1（-h 查看用法）" ;;
   esac
 done
+
+case "$FLOOR_TOLERANCE_PCT" in
+  ''|*[!0-9]*) die "--floor-tolerance-pct 仅支持 0-99 的整数，收到：$FLOOR_TOLERANCE_PCT" 1 ;;
+esac
+[ "$FLOOR_TOLERANCE_PCT" -lt 100 ] ||
+  die "--floor-tolerance-pct 必须小于 100，收到：$FLOOR_TOLERANCE_PCT" 1
 
 [ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）"
 
@@ -260,12 +273,12 @@ fresh_install_reset() {
   set_env_value "$package_env" OMC_PUBLIC_HOST "$PUBLIC_HOST_OVERRIDE" ||
     die "无法写入 $package_env 的 OMC_PUBLIC_HOST" 1
 
-  log "全新安装：按目标主机重新规划资源（floor tolerance 60%）..."
-  fresh_plan_args=( --floor-tolerance-pct 60 )
+  log "全新安装：按目标主机重新规划资源（组件下限缺口容忍度 ${FLOOR_TOLERANCE_PCT}%，最低运行预算仍为硬门禁）..."
+  fresh_plan_args=( --floor-tolerance-pct "$FLOOR_TOLERANCE_PCT" )
   [ "$SKIP_MONITORING" = 1 ] && fresh_plan_args+=( --skip-monitoring )
   ( cd "$PKG_ROOT" && OMC_STORAGE_ENV_FILE="$package_env" \
       bash "$PKG_ROOT/deploy/plan-resources.sh" "${fresh_plan_args[@]}" ) ||
-    die "全新安装资源规划失败，未删除任何 OMC 数据" 1
+    die "全新安装资源规划失败；请查看上方资源规划提示。最低运行预算不能通过 --floor-tolerance-pct 绕过；低内存主机可使用 --skip-monitoring 重试。" 1
 
   log "全新安装将清理以下数据目录："
   for data_key in POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH; do
@@ -1071,11 +1084,22 @@ fi
 #     使用 `up --exit-code-from` 而非 `run`，因为 `run` 创建的一次性容器
 #     存在 DNS 解析缺陷（无法解析服务名），而 `up` 作为正式服务启动时
 #     网络集成完整，DNS 解析正常。保留重试逻辑作为兆底。
+run_oneshot_migration() {
+  local service="$1" output status
+  if output="$("${DC[@]}" up --pull never --exit-code-from "$service" "$service" 2>&1)"; then
+    return 0
+  else
+    status=$?
+    printf '%s\n' "$output" >&2
+    return "$status"
+  fi
+}
+
 if [ "$SKIP_MIGRATE" = 0 ]; then
   log "执行 db migrate（容器：migrate-schema）..."
   MIGRATE_OK=0
   for attempt in 1 2 3; do
-    if "${DC[@]}" up --pull never --exit-code-from migrate-schema migrate-schema; then
+    if run_oneshot_migration migrate-schema; then
       MIGRATE_OK=1
       break
     fi
@@ -1094,7 +1118,7 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
   # 7.4 seed（goose 单链路 migrations/seed/，每次部署都跑 —— goose 用
   #     goose_db_version_seed 版本表自动追踪已应用项，新加 seed 自动 catch up）
   log "执行 db seed（容器：migrate-seed-sql，goose 幂等）..."
-  if "${DC[@]}" up --pull never --exit-code-from migrate-seed-sql migrate-seed-sql; then
+  if run_oneshot_migration migrate-seed-sql; then
     log "seed 成功"
   else
     die "seed 失败：${DC[*]} up --exit-code-from migrate-seed-sql migrate-seed-sql" 3
@@ -1108,7 +1132,7 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
   log "执行时序库 migrate（容器：migrate-tsdb-schema，goose 幂等）..."
   TSDB_MIGRATE_OK=0
   for attempt in 1 2 3; do
-    if "${DC[@]}" up --pull never --exit-code-from migrate-tsdb-schema migrate-tsdb-schema; then
+    if run_oneshot_migration migrate-tsdb-schema; then
       TSDB_MIGRATE_OK=1
       break
     fi
@@ -1167,12 +1191,54 @@ acs_ha_report_not_ready() {
   "${DC[@]}" logs --tail=80 "$service" 2>&1 || true
 }
 
+app_wait_ready() {
+  local app_cid state oom exit_code restart_count wait_seconds=0
+  log "先启动 App，等待 metrics /healthz（最长 ${APP_START_TIMEOUT}s）..."
+  "${DC[@]}" up --pull never -d --no-deps app
+  while [ "$wait_seconds" -lt "$APP_START_TIMEOUT" ]; do
+    app_cid="$("${DC[@]}" ps -q app 2>/dev/null | head -n1)"
+    if [ -n "$app_cid" ] && curl -fsS --max-time 3 http://127.0.0.1:9091/healthz >/dev/null 2>&1; then
+      log "App 已就绪（${wait_seconds}s）"
+      return 0
+    fi
+    sleep 3
+    wait_seconds=$((wait_seconds + 3))
+  done
+
+  app_cid="$("${DC[@]}" ps -q app 2>/dev/null | head -n1)"
+  state="$(docker inspect -f '{{.State.Status}}' "$app_cid" 2>/dev/null || echo missing)"
+  oom="$(docker inspect -f '{{.State.OOMKilled}}' "$app_cid" 2>/dev/null || echo unknown)"
+  exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$app_cid" 2>/dev/null || echo unknown)"
+  restart_count="$(docker inspect -f '{{.RestartCount}}' "$app_cid" 2>/dev/null || echo unknown)"
+  log "App 启动就绪超时：state=$state oom=$oom exit=$exit_code restarts=$restart_count"
+  log "App 最近日志（最多 80 行）："
+  "${DC[@]}" logs --tail=80 app 2>&1 || true
+  return 1
+}
+
+stop_existing_worker() {
+  local worker_cid worker_state
+  worker_cid="$("${DC[@]}" ps -q worker 2>/dev/null | head -n1)"
+  [ -n "$worker_cid" ] || return 0
+  worker_state="$(docker inspect -f '{{.State.Status}}' "$worker_cid" 2>/dev/null || echo unknown)"
+  [ "$worker_state" = running ] || return 0
+  log "停止现有 Worker，避免 App 启动期争抢数据库连接 ..."
+  "${DC[@]}" stop worker ||
+    die "现有 Worker 停止失败；为避免 App 启动期数据库争抢，已中止升级" 2
+}
+
 web_acs_dynamic_upstream_loaded() {
   local web_cid="$1" rendered
   rendered="$(docker exec "$web_cid" nginx -T 2>&1)" || return 1
   printf '%s\n' "$rendered" | grep -Fq 'server acs:7557 resolve;' || return 1
   printf '%s\n' "$rendered" | grep -Fq 'zone acs_backend' || return 1
 }
+
+APP_START_TIMEOUT="${OMC_APP_START_TIMEOUT:-180}"
+case "$APP_START_TIMEOUT" in
+  ''|*[!0-9]*) die "OMC_APP_START_TIMEOUT 必须是正整数" 2 ;;
+esac
+[ "$APP_START_TIMEOUT" -gt 0 ] || die "OMC_APP_START_TIMEOUT 必须大于 0" 2
 
 ACS_HA_EXISTING=0
 acs_ha_prepare_candidate() {
@@ -1242,14 +1308,30 @@ if [ "$ACS_HA_EXISTING" = 1 ]; then
     die "ACS 双实例在 DNS 刷新后未全部就绪，已中止其余业务更新" 2
   fi
 
-  remaining_services=(app worker)
+  stop_existing_worker
+  if ! app_wait_ready; then
+    die "App ${APP_START_TIMEOUT}s 内未就绪；Worker/Web 尚未启动，请根据上方 App 日志排查数据库超时或资源不足" 4
+  fi
+  remaining_services=(worker)
   [ "$SKIP_WEB" = 1 ] || remaining_services+=(web)
-  log "双 ACS 均已就绪，更新其余业务（显式排除 ACS 依赖）..."
+  log "App 已就绪，启动 Worker/Web（显式排除 ACS 依赖）..."
   "${DC[@]}" up --pull never -d --no-deps "${remaining_services[@]}"
 else
-  # 首次安装没有存量南向流量，可一次创建完整拓扑。
-  log "${DC[*]} up -d"
-  "${DC[@]}" up --pull never -d
+  # 首次安装没有存量南向流量，但仍先让 App 完成启动期数据库同步，避免 Worker 并发抢占连接。
+  log "首次安装：先启动 ACS 双实例 ..."
+  "${DC[@]}" up --pull never -d --no-deps acs acs-candidate
+  if ! acs_ha_wait_ready acs || ! acs_ha_wait_ready acs-candidate; then
+    acs_ha_report_not_ready acs
+    acs_ha_report_not_ready acs-candidate
+    die "首次安装 ACS 双实例未就绪，未启动 App/Worker/Web" 2
+  fi
+  if ! app_wait_ready; then
+    die "App ${APP_START_TIMEOUT}s 内未就绪；Worker/Web 尚未启动，请根据上方 App 日志排查数据库超时或资源不足" 4
+  fi
+  remaining_services=(worker)
+  [ "$SKIP_WEB" = 1 ] || remaining_services+=(web)
+  log "App 已就绪，启动 Worker/Web ..."
+  "${DC[@]}" up --pull never -d --no-deps "${remaining_services[@]}"
 fi
 
 # Compose records the resolved bind-mount source inode when a container is
