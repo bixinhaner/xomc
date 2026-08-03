@@ -5055,7 +5055,7 @@ const messages: Record<string, string> = {
   'system.storageProtection.description':     'Set one capacity threshold on the host root filesystem and enforce admission protection at business write entry points.',
   'system.storageProtection.unifiedTarget':   'Unified physical storage',
   'system.storageProtection.unifiedTargetDescription': 'All OMC data in this deployment shares one physical filesystem (/). MinIO, database, and monitoring values are logical observations only; write scopes describe priority and audit classification, not separate disk quotas.',
-  'system.storageProtection.retentionPending': 'Retention and cleanup belong to the next capacity-governance phase; this page currently provides capacity observation and write protection only.',
+  'system.storageProtection.retentionDescription': 'Configure unified retention periods, rotation parameters, and expiry cleanup for database logs and OMC service-program logs.',
   'system.storageProtection.capacityOverview': 'Capacity Overview',
   'system.storageProtection.policyList':       'Protection Policies',
   'system.storageProtection.policySummary':   'Storage Protection Policy',
@@ -7467,26 +7467,19 @@ const messages: Record<string, string> = {
   'retentionBp.field.compress_after_ingest': 'Compress New Files After Ingest',
 
   // -------------------------------------------------------------------------
-  // Log Retention & Rotation (system config log_cfg tab): log.retention + log.rotation
+  // Log Retention & Rotation (Storage Protection > Retention and Cleanup): log.retention + log.rotation
   // -------------------------------------------------------------------------
   'logCfg.save':                        'Save',
   'logCfg.save.success':                'Saved; new config hot-reloaded and effective',
-  'logCfg.retention.title':             'Audit / Business Log Retention',
-  'logCfg.retention.desc':              'Time-based retention per log table; worker batch-deletes expired rows daily at 05:00. Keep security/audit logs longer, high-volume message logs shorter; disabling the master switch skips the whole cleanup.',
-  'logCfg.rotation.title':              'Log File Rotation',
-  'logCfg.rotation.desc':               'Per-service (app/acs/worker) runtime log file size/timed rotation interval/count/age. Hot-reloaded within ≤1 minute; missing values fall back to each service YAML startup default.',
+  'logCfg.retention.title':             'Unified Database Log Retention',
+  'logCfg.retention.desc':              'Set one retention period for database records such as operation, audit, login, task, system-event, and NE-message logs (audit_logs, sys_oper_logs, system_logs, etc.); worker removes expired rows. The master switch only controls database-log cleanup.',
+  'logCfg.rotation.title':              'Unified OMC Service-Log Retention & Rotation',
+  'logCfg.rotation.desc':               'Set one validity period for OMC service log files, including app.log, acs.log, worker.log, ACS protocol.log, and their rotated archives; expired archives are deleted automatically. You can also configure file size, rotation interval, and recent uncompressed archives; changes apply within ≤1 minute.',
   'logCfg.field.enabled':               'Enable Log Retention Cleanup',
-  'logCfg.field.audit_days':            'Audit Log Retention (days)',
-  'logCfg.field.ops_audit_days':        'Ops Audit Log Retention (days)',
-  'logCfg.field.login_days':            'Login Log Retention (days)',
-  'logCfg.field.oper_days':             'Operation Log Retention (days)',
-  'logCfg.field.task_days':             'Task Log Retention (days)',
-  'logCfg.field.system_days':           'System Log Retention (days)',
-  'logCfg.field.ne_message_days':       'NE Message Log Retention (days)',
-  'logCfg.field.event_days':            'Device Event Log Retention (days)',
+  'logCfg.field.database_days':         'Unified Database Log Retention (days)',
+  'logCfg.field.service_days':          'Unified OMC Service-Log Validity (days; expired archives auto-delete)',
   'logCfg.field.max_size_mb':           'Max File Size (MB, rotate above)',
   'logCfg.field.rotate_interval_minutes': 'Timed Rotation Interval (minutes)',
-  'logCfg.field.max_age_days':          'Archive Retention (days)',
   'logCfg.field.keep_files':            'Uncompressed Recent Archives to Keep',
 
   // -------------------------------------------------------------------------

@@ -75,6 +75,12 @@ func TestReadIntCfg(t *testing.T) {
 	assert.Equal(t, 0, readIntCfg(ctx, lookup, KeyKeepFiles))
 	assert.Equal(t, 15, readIntCfg(ctx, lookup, KeyRotateIntervalMinutes))
 	assert.Equal(t, 0, readIntCfg(ctx, lookup, "missing"))
+	assert.Equal(t, 14, readIntCfgInCategory(ctx, func(_ context.Context, category, key string) (string, bool) {
+		if category == RetentionCategory && key == KeyServiceDays {
+			return "14", true
+		}
+		return "", false
+	}, RetentionCategory, KeyServiceDays))
 }
 
 func TestStartRotationConfigWatcher_AppliesImmediately(t *testing.T) {
@@ -92,4 +98,53 @@ func TestStartRotationConfigWatcher_AppliesImmediately(t *testing.T) {
 	keep, _, _ := effectiveRotation(10, time.Hour)
 	assert.Equal(t, 7, keep)
 	resetOverride()
+}
+
+func TestStartRotationConfigWatcher_ServiceDaysOverridesLegacyArchiveAge(t *testing.T) {
+	resetOverride()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lookup := func(_ context.Context, category, key string) (string, bool) {
+		switch {
+		case category == RotationCategory && key == KeyMaxAgeDays:
+			return "7", true
+		case category == RotationCategory && key == KeyServiceDays:
+			return "14", true
+		case category == RetentionCategory && key == KeyServiceDays:
+			return "9", true
+		}
+		return "", false
+	}
+	StartRotationConfigWatcher(ctx, lookup, nil)
+
+	_, age, _ := effectiveRotation(10, 3*24*time.Hour)
+	assert.Equal(t, 14*24*time.Hour, age,
+		"log.rotation.service_days 应优先于旧 log.rotation.max_age_days 和旧分类 service_days")
+	resetOverride()
+}
+
+func TestStartRotationConfigWatcher_FallsBackToLegacyRetentionServiceDays(t *testing.T) {
+	resetOverride()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lookup := func(_ context.Context, category, key string) (string, bool) {
+		if category == RetentionCategory && key == KeyServiceDays {
+			return "9", true
+		}
+		return "", false
+	}
+	StartRotationConfigWatcher(ctx, lookup, nil)
+
+	_, age, _ := effectiveRotation(10, 3*24*time.Hour)
+	assert.Equal(t, 9*24*time.Hour, age)
+	resetOverride()
+}
+
+func TestValidateServiceLogDays(t *testing.T) {
+	assert.NoError(t, ValidateServiceLogDays("1"))
+	assert.NoError(t, ValidateServiceLogDays("3650"))
+	assert.Error(t, ValidateServiceLogDays("0"))
+	assert.Error(t, ValidateServiceLogDays("3651"))
+	assert.Error(t, ValidateServiceLogDays("not-a-number"))
+	assert.NoError(t, ValidateDatabaseLogDays("180"))
 }

@@ -20,7 +20,6 @@ import TransferSettings from './TransferSettings';
 import AgentSettings from './AgentSettings';
 import PmRetentionSection from './PmRetentionSection';
 import RetentionBackpressureSection from './RetentionBackpressureSection';
-import LogRetentionSection from './LogRetentionSection';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
@@ -36,7 +35,7 @@ import styles from './SystemConfig.module.css';
 // notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示，避免误导用户
 // omc tab 已隐藏（#802）：rsyslog/磁盘告警后端未实现，两个卡片均为空壳
 // northbound tab 已隐藏（#820）：北向功能未完成（用户管理 Mock 数据、服务信息无 DB 记录），待完成后恢复
-type SettingsTab = 'basic' | 'security' | 'device' | 'storage' | 'acs_transfer' | 'agent' | 'pm_retention' | 'retention_bp' | 'log_cfg';
+type SettingsTab = 'basic' | 'security' | 'device' | 'storage' | 'acs_transfer' | 'agent' | 'pm_retention' | 'retention_bp';
 
 // 设置子页签配置
 const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
@@ -51,8 +50,6 @@ const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'pm_retention', labelKey: 'system.config.pmRetention' },
   // #318-321：资源保留与上传背压（背压 / 原始件 ILM / 基站日志保留 / 压缩回写）
   { key: 'retention_bp', labelKey: 'system.config.retentionBp' },
-  // 审计/业务日志保留 + 运行期日志文件轮转（log.retention / log.rotation）
-  { key: 'log_cfg', labelKey: 'system.config.logCfg' },
 ];
 
 // ----- value <-> form value 编解码 -----
@@ -228,9 +225,6 @@ export default function SystemConfig() {
       case 'retention_bp':
         // #318-321：资源保留与上传背压，4 张分类卡片各自管 form + 保存
         return <RetentionBackpressureSection />;
-      case 'log_cfg':
-        // 审计/业务日志保留 + 日志文件轮转，2 张分类卡片各自管 form + 保存
-        return <LogRetentionSection />;
       default:
         return null;
     }

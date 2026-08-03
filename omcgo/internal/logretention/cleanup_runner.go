@@ -27,8 +27,8 @@ type execPool interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
-// CleanupRunner 是审计/业务日志按时间保留清理任务（asyncjob.JobRunner）。每日 cron 触发，
-// 对 Tables 中每张表批量删除 <时间列> 早于各自 cutoff 的行。单表失败只 warn、继续其它表。
+// CleanupRunner 是数据库日志统一按时间保留清理任务（asyncjob.JobRunner）。每日 cron 触发，
+// 对 Tables 中每张表批量删除早于同一个 cutoff 的行。单表失败只 warn、继续其它表。
 type CleanupRunner struct {
 	pool   execPool
 	policy *RetentionPolicy
@@ -50,7 +50,7 @@ func NewCleanupRunner(pool execPool, policy *RetentionPolicy, logger *zap.Logger
 // JobType 实现 asyncjob.JobRunner。
 func (r *CleanupRunner) JobType() string { return JobTypeLogRetentionCleanup }
 
-// Run 按各表保留天数清理过期日志行。
+// Run 按统一数据库日志保留天数清理所有受管日志表的过期行。
 func (r *CleanupRunner) Run(ctx context.Context, _ *asyncjob.Job) (json.RawMessage, error) {
 	if !r.policy.Enabled(ctx) {
 		r.logger.Info("log retention disabled by config; skip cleanup")
@@ -58,19 +58,17 @@ func (r *CleanupRunner) Run(ctx context.Context, _ *asyncjob.Job) (json.RawMessa
 	}
 
 	deleted := make(map[string]int, len(Tables))
-	now := time.Now()
+	days := r.policy.DatabaseDays(ctx)
+	if days < minDays {
+		r.logger.Warn("database retention days too small; skip cleanup", zap.Int("days", days))
+		return json.Marshal(map[string]any{"skipped": true, "reason": "invalid_days"})
+	}
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 	for _, t := range Tables {
-		days := r.policy.DaysFor(ctx, t.Key)
-		if days < minDays {
-			r.logger.Warn("retention days too small; skip table",
-				zap.String("table", t.Table), zap.Int("days", days))
-			continue
-		}
-		cutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
 		deleted[t.Name] = r.cleanupTable(ctx, t, cutoff)
 	}
 
-	r.logger.Info("log retention cleanup done", zap.Any("deleted", deleted))
+	r.logger.Info("log retention cleanup done", zap.Int("database_days", days), zap.Any("deleted", deleted))
 	return json.Marshal(map[string]any{"deleted": deleted})
 }
 

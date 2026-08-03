@@ -47,7 +47,6 @@ vi.mock('./TransferSettings', () => ({ default: () => <div /> }));
 vi.mock('./AgentSettings', () => ({ default: () => <div /> }));
 vi.mock('./PmRetentionSection', () => ({ default: () => <div /> }));
 vi.mock('./RetentionBackpressureSection', () => ({ default: () => <div /> }));
-vi.mock('./LogRetentionSection', () => ({ default: () => <div /> }));
 
 describe('SystemConfig load guard', () => {
   beforeEach(() => {

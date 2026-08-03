@@ -1,10 +1,10 @@
-// 日志保留与轮转配置（系统配置页 —— 一个 tab，2 张分类卡片）。
+// 日志保留与轮转配置（资源与存储保护页“有效期与清理”区域中的 2 张统一策略卡片）。
 //
-// 后端 sys_configs 分类（seed migrations/seed/000005，各模块热加载）：
-//   log.retention  审计/业务日志按时间保留（worker 每日 05:00 cron 批量删过期行）
-//                  enabled + 8 张表各自保留天数（audit/ops_audit/login/oper/task/system/ne_message/event）
-//   log.rotation   运行期日志文件轮转（app/acs/worker logger override watcher 读，≤1 分钟生效）
-//                  max_size_mb / max_age_days / keep_files / rotate_interval_minutes
+// 后端 sys_configs 分类（seed migrations/seed/000001，各模块热加载）：
+//   log.retention  数据库日志统一按时间保留（worker 每日 05:00 cron 批量删过期行）
+//                  enabled + database_days（覆盖全部受管数据库日志表）
+//   log.rotation   OMC 服务程序日志统一有效期 + 文件轮转（app/acs/worker watcher ≤1 分钟生效）
+//                  service_days / max_size_mb / keep_files / rotate_interval_minutes
 //
 // 接入方式与 RetentionBackpressureSection 一致：复用 useSysConfigsByCategory + useBatchUpdateSysConfigs，
 // 每张卡片自管 form + 保存（一次保存 = 该分类一次 batch upsert，触发后端热加载）。
@@ -24,6 +24,7 @@ interface FieldSpec {
   type: FieldType;
   min?: number;
   max?: number;
+  defaultValue?: number | boolean;
 }
 
 interface CardSpec {
@@ -33,7 +34,7 @@ interface CardSpec {
   fields: FieldSpec[];
 }
 
-// 字段定义与后端 sys_configs 键 + value_type 严格对齐（seed 000005）。
+// 字段定义与后端 sys_configs 键 + value_type 严格对齐（seed 000001）。
 const CARDS: CardSpec[] = [
   {
     category: 'log.retention',
@@ -41,14 +42,7 @@ const CARDS: CardSpec[] = [
     descKey: 'logCfg.retention.desc',
     fields: [
       { key: 'enabled', type: 'bool' },
-      { key: 'audit_days', type: 'int', min: 1, max: 3650 },
-      { key: 'ops_audit_days', type: 'int', min: 1, max: 3650 },
-      { key: 'login_days', type: 'int', min: 1, max: 3650 },
-      { key: 'oper_days', type: 'int', min: 1, max: 3650 },
-      { key: 'task_days', type: 'int', min: 1, max: 3650 },
-      { key: 'system_days', type: 'int', min: 1, max: 3650 },
-      { key: 'ne_message_days', type: 'int', min: 1, max: 3650 },
-      { key: 'event_days', type: 'int', min: 1, max: 3650 },
+      { key: 'database_days', type: 'int', min: 1, max: 3650, defaultValue: 180 },
     ],
   },
   {
@@ -56,9 +50,9 @@ const CARDS: CardSpec[] = [
     titleKey: 'logCfg.rotation.title',
     descKey: 'logCfg.rotation.desc',
     fields: [
+      { key: 'service_days', type: 'int', min: 1, max: 3650, defaultValue: 30 },
       { key: 'max_size_mb', type: 'int', min: 1, max: 10240 },
       { key: 'rotate_interval_minutes', type: 'int', min: 1, max: 1440 },
-      { key: 'max_age_days', type: 'int', min: 1, max: 3650 },
       { key: 'keep_files', type: 'int', min: 1, max: 1000 },
     ],
   },
@@ -102,7 +96,7 @@ function CategoryConfigCard({ spec }: { spec: CardSpec }) {
   const initialValues = useMemo<Record<string, number | boolean>>(() => {
     const out: Record<string, number | boolean> = {};
     for (const f of spec.fields) {
-      out[f.key] = f.type === 'bool' ? false : 0;
+      out[f.key] = f.defaultValue ?? (f.type === 'bool' ? false : 0);
     }
     if (configs) {
       for (const cfg of configs) {
