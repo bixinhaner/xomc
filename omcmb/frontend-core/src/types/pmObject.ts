@@ -19,6 +19,7 @@
 export interface ObjectLdnFields {
   /** 制式判定：'lte' / 'nr' / 'gsm' / 'unknown'。 */
   tech: 'lte' | 'nr' | 'gsm' | 'unknown';
+  objectType?: string;
   // 4G
   cellId?: string;
   plmn?: string;
@@ -105,6 +106,18 @@ export function parseUid(objectLdn: string | null | undefined): string | undefin
   return extractField(objectLdn, 'Uid');
 }
 
+/** 拆 object_ldn 的 Type 段（如 `Type=gNB` / `Type=Cell`）。 */
+export function parseObjectType(objectLdn: string | null | undefined): string | undefined {
+  return extractField(objectLdn, 'Type');
+}
+
+/** 判断 object_ldn 是否包含某个维度字段名；只看字段名，不要求字段值固定。 */
+export function hasObjectLdnField(objectLdn: string | null | undefined, key: string, ci = false): boolean {
+  if (!objectLdn) return false;
+  const flag = ci ? 'i' : '';
+  return new RegExp(`\\b${key}=`, flag).test(objectLdn);
+}
+
 /**
  * 解析 object_ldn 全字段 + 制式判定。
  * 与后端 ParseObjectLDN 单一真值源同步实现，制式判定优先级 gNBID/NrCGI > Uid > Cellid。
@@ -120,6 +133,7 @@ export function parseObjectLdn(objectLdn: string | null | undefined): ObjectLdnF
   const nssai = parseNssai(objectLdn);
   const sliceGroup = parseSliceGroup(objectLdn);
   const uid = parseUid(objectLdn);
+  const objectType = parseObjectType(objectLdn);
 
   let tech: ObjectLdnFields['tech'];
   if (gnbId || nrCgi) {
@@ -139,6 +153,7 @@ export function parseObjectLdn(objectLdn: string | null | undefined): ObjectLdnF
 
   return {
     tech,
+    objectType,
     cellId: safeCellId,
     plmn: safePlmn,
     gnbId,

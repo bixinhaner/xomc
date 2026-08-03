@@ -53,7 +53,7 @@ import MetricPickerModal from '@/components/MetricPickerModal';
 import ChartCard from './ChartCard';
 import { buildDeviceMetricCharts, filterRowsByObjectLdns } from './deviceListUtils';
 import CellDrilldownSelector from './CellDrilldownSelector';
-import { getEffectiveLdns, type CellSelection } from './cellDrilldownUtils';
+import { getEffectiveLdnsWithNrRecommendedDefault, type CellSelection } from './cellDrilldownUtils';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
 import {
   ALL_HOURS,
@@ -270,7 +270,7 @@ export default function DeviceListPane() {
   }, [cellSel, deviceSns, filter, granularity, metricPaths, metricsTouched, rangeTouched, refreshed, submitted, tech]);
 
   // 下钻选择器与有效白名单计算共用的「按设备小区清单」（react-query 与选择器内部同 key 去重，无额外请求）。
-  const { byDevice: objectsByDevice } = useMetricObjectsByDevices(deviceSns, tech);
+  const { byDevice: objectsByDevice, isLoading: objectsLoading } = useMetricObjectsByDevices(deviceSns, tech);
 
   const baseParams = useMemo(() => {
     if (!submitted) return null;
@@ -283,6 +283,8 @@ export default function DeviceListPane() {
       limit: 5000,
       countMode: 'n_plus_one' as const,
       fillEmpty: true,
+      // #241：设备性能查看默认推荐对象同样下推到后端查询；空 = 不过滤，手动全选查全部 job。
+      objectLdns: submitted.allowedLdns.length > 0 ? submitted.allowedLdns : undefined,
       // #599：星期/小时段后端过滤（全选不传 = 不过滤，向后兼容）。
       weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
       hours: submitted.hours.length < 24 ? submitted.hours : undefined,
@@ -321,6 +323,8 @@ export default function DeviceListPane() {
       limit: 5000,
       countMode: 'n_plus_one' as const,
       fillEmpty: true,
+      // 周期对比与主查询保持相同 object_ldn 口径。
+      objectLdns: submitted.allowedLdns.length > 0 ? submitted.allowedLdns : undefined,
       // #599：周期对比同口径传 weekdays/hours。
       weekdays: submitted.weekdays.length < 7 ? submitted.weekdays : undefined,
       hours: submitted.hours.length < 24 ? submitted.hours : undefined,
@@ -456,6 +460,10 @@ export default function DeviceListPane() {
       message.warning(intl.formatMessage({ id: 'perf.dashboard.selectAtLeastOneMetric' }));
       return;
     }
+    if (objectsLoading) {
+      message.warning(intl.formatMessage({ id: 'perf.drilldown.loadingObjects' }));
+      return;
+    }
     if (isDeviceViewMetricSelectionOverLimit(metricPaths)) {
       message.warning(intl.formatMessage(
         { id: 'perf.picker.metricLimitExceeded' },
@@ -472,7 +480,7 @@ export default function DeviceListPane() {
       granularity,
       filter,
       // 定格当前下钻白名单（空=全选不过滤）。
-      allowedLdns: getEffectiveLdns(cellSel, objectsByDevice),
+      allowedLdns: getEffectiveLdnsWithNrRecommendedDefault(cellSel, objectsByDevice),
       systemTimezone,
     }));
   };
@@ -597,12 +605,13 @@ export default function DeviceListPane() {
           {deviceSns.length > 0 && (
             <div style={{ marginTop: 16 }}>
               <Form.Item
-                label={intl.formatMessage({ id: 'perf.drilldown.label' })}
+                label={intl.formatMessage({ id: 'perf.drilldown.recommendedLabel' })}
                 style={{ marginBottom: 0 }}
               >
                 <CellDrilldownSelector
                   deviceSns={deviceSns}
                   technology={tech}
+                  useNrRecommendedDefault
                   value={cellSel}
                   onChange={handleCellSelectionChange}
                 />
@@ -620,7 +629,7 @@ export default function DeviceListPane() {
                 type="primary"
                 icon={<LineChartOutlined />}
                 loading={isFetching}
-                disabled={!hasAvailableTechOptions}
+                disabled={!hasAvailableTechOptions || objectsLoading}
                 onClick={handleQuery}
               >
                 {intl.formatMessage({ id: 'perf.dashboard.btnPlot' })}
