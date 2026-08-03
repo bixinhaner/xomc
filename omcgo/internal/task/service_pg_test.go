@@ -105,6 +105,30 @@ func TestService_PG_GetTask_FallbackToPG(t *testing.T) {
 	assert.Equal(t, tk.ID, got.ID)
 }
 
+func TestService_PG_GetTask_TerminalTombstoneReturnsDurableDetails(t *testing.T) {
+	svc, _, q, repo := newServiceWithPG(t)
+	if svc == nil {
+		return
+	}
+	defer cleanupTestTasks(t, repo.pool)
+	ctx := context.Background()
+
+	tk := freshTaskForPG("terminal-tombstone", "terminal-tombstone")
+	tk.Params = json.RawMessage(`{"names":["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth"]}`)
+	tk.MarkCompleted(json.RawMessage(`{"values":[{"name":"DLBandwidth","value":"n100"}]}`))
+	require.NoError(t, repo.Create(ctx, tk))
+	require.NoError(t, q.Update(ctx, tk))
+	require.False(t, q.client.HExists(ctx, q.taskKey(tk.ID), "data").Val())
+
+	got, err := svc.GetTask(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, tk.ID, got.ID)
+	require.Equal(t, TaskStatusCompleted, got.Status)
+	require.JSONEq(t, string(tk.Params), string(got.Params))
+	require.JSONEq(t, string(tk.Result), string(got.Result))
+}
+
 func TestService_PG_GetTask_NotFoundAnywhere(t *testing.T) {
 	svc, _, _, _ := newServiceWithPG(t)
 	if svc == nil {

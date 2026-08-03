@@ -244,12 +244,12 @@ func TestRedisTaskQueue_UpdateCanMaterializeTerminalTombstoneFromDurableTask(t *
 
 func TestTerminalTaskCapacityModelAtObservedRate(t *testing.T) {
 	const (
-		observedTasksPerMinute = int64(7410)
-		observedBytesPerTask   = int64(2770)
+		observedTasksPerMinute = int64(40000)
+		maxBytesPerTombstone   = int64(512)
 		maxSteadyStateBytes    = int64(512 * 1024 * 1024)
 	)
 	retainedTasks := observedTasksPerMinute * int64(defaultTerminalTaskTTL/time.Minute)
-	steadyStateBytes := retainedTasks * observedBytesPerTask
+	steadyStateBytes := retainedTasks * maxBytesPerTombstone
 	require.Less(t, steadyStateBytes, maxSteadyStateBytes,
-		"15-minute terminal retention must keep the observed ACS task working set below 0.5 GiB")
+		"15-minute terminal tombstones must keep the observed ACS burst below 0.5 GiB")
 }
