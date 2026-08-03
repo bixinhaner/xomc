@@ -14,6 +14,7 @@ import {
 const usePmAdhocResultsMock = vi.fn();
 let mockTaskGranularities = ['hourly'];
 let mockTaskDetailReady = true;
+let mockResultsData: Record<string, unknown> = { rows: [] };
 
 vi.mock('@core/hooks/api/usePmAdhoc', () => ({
   usePmAdhocDetail: () => ({
@@ -43,7 +44,7 @@ vi.mock('@core/hooks/api/usePmAdhoc', () => ({
   usePmAdhocFilterOptions: () => ({ data: undefined }),
   usePmAdhocResults: (...args: unknown[]) => {
     usePmAdhocResultsMock(...args);
-    return { data: { rows: [] }, isLoading: false };
+    return { data: mockResultsData, isLoading: false };
   },
 }));
 
@@ -70,7 +71,9 @@ vi.mock('./DashboardFilterBar', () => ({
 }));
 
 vi.mock('./ChartCard', () => ({
-  default: () => <div data-testid="chart-card" />,
+  default: ({ chart }: { chart: unknown }) => (
+    <div data-testid="chart-card">{JSON.stringify(chart)}</div>
+  ),
 }));
 
 import TaskDashboardPane from './TaskDashboardPane';
@@ -129,12 +132,41 @@ function resultParams(): Array<Record<string, unknown>> {
     .map((call) => call[1] as Record<string, unknown>);
 }
 
+function seedDailySubmittedState() {
+  const filter = {
+    range: [dayjs('2026-08-01T00:00:00Z'), dayjs('2026-08-04T00:00:00Z')] as [dayjs.Dayjs, dayjs.Dayjs],
+    weekdays: [0, 1, 2, 3, 4, 5, 6],
+    hours: Array.from({ length: 24 }, (_, index) => index),
+    compare: false,
+  };
+  const submitted = buildSubmittedTaskDashboardQuery(filter, {
+    systemTimezone: 'UTC',
+    granularity: 'daily',
+  });
+  usePmPageStateStore.setState({
+    pages: {
+      [PM_DASHBOARD_PAGE_KEY]: {
+        ...buildTaskDashboardStateSnapshot({
+          taskId: 'task-1',
+          filter,
+          dimSelected: [],
+          activeGran: 'daily',
+          rangeMode: { kind: 'absolute' },
+          submitted,
+        }),
+        savedAt: '2026-07-30T11:59:40.000Z',
+      },
+    },
+  });
+}
+
 describe('TaskDashboardPane page-state restore query behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-30T12:00:00Z'));
     mockTaskGranularities = ['hourly'];
     mockTaskDetailReady = true;
+    mockResultsData = { rows: [] };
     usePmAdhocResultsMock.mockClear();
     usePmPageStateStore.setState({ pages: {} });
     sessionStorage.clear();
@@ -351,5 +383,80 @@ describe('TaskDashboardPane page-state restore query behavior', () => {
     expect(resultParams()[0]?.endTime).toBe('2026-07-30T12:00:00Z');
     expect(String(resultParams()[0]?.startTime)).not.toContain(':23:12');
     expect(String(resultParams()[0]?.endTime)).not.toContain(':23:12');
+  });
+});
+
+describe('TaskDashboardPane chart result source', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-04T12:00:00Z'));
+    mockTaskGranularities = ['daily'];
+    mockTaskDetailReady = true;
+    mockResultsData = { rows: [] };
+    usePmAdhocResultsMock.mockClear();
+    usePmPageStateStore.setState({ pages: {} });
+    sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does not plot daily progressRows when formal rows are empty', () => {
+    seedDailySubmittedState();
+    mockResultsData = {
+      rows: [],
+      progressRows: [{
+        id: 'progress-1',
+        taskId: 'task-1',
+        deviceOui: '',
+        deviceSn: 'AGGREGATED',
+        metricPath: 'M1',
+        metricType: 'counter',
+        metricValue: 99,
+        granularity: 'daily',
+        time: '2026-08-03T08:00:00+08:00',
+        startTime: '2026-08-03T08:00:00+08:00',
+        endTime: '2026-08-04T08:00:00+08:00',
+        partial: true,
+        periodComplete: false,
+      }],
+    };
+
+    renderPane();
+
+    const chart = screen.getByTestId('chart-card').textContent ?? '';
+    expect(chart).toContain('"values":["-","-","-"]');
+    expect(chart).not.toContain('2026-08-03T08:00:00+08:00');
+    expect(chart).not.toContain('"values":[99]');
+  });
+
+  it('plots formal daily rows normally', () => {
+    seedDailySubmittedState();
+    mockResultsData = {
+      rows: [{
+        id: 'row-1',
+        taskId: 'task-1',
+        deviceOui: '',
+        deviceSn: 'AGGREGATED',
+        metricPath: 'M1',
+        metricType: 'counter',
+        metricValue: 42,
+        granularity: 'daily',
+        time: '2026-08-02T00:00:00+08:00',
+        startTime: '2026-08-02T00:00:00+08:00',
+        endTime: '2026-08-03T00:00:00+08:00',
+        partial: false,
+        periodComplete: true,
+      }],
+      progressRows: [],
+    };
+
+    renderPane();
+
+    const chart = screen.getByTestId('chart-card').textContent ?? '';
+    expect(chart).toContain('2026-08-02T00:00:00+08:00');
+    expect(chart).toContain('2026-08-03T00:00:00+08:00');
+    expect(chart).toContain('"values":[42,"-","-"]');
   });
 });

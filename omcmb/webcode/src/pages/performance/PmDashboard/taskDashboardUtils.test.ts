@@ -32,6 +32,7 @@ function row(p: Partial<AdhocResultRow>): AdhocResultRow {
     objectLdn: p.objectLdn,
     productName: p.productName,
     deviceGroupName: p.deviceGroupName,
+    periodComplete: p.periodComplete,
     partial: p.partial,
     receivedSlots: p.receivedSlots,
     expectedSlots: p.expectedSlots,
@@ -224,6 +225,51 @@ describe('buildMetricCharts — 转置', () => {
 
   it('空数据 → 空图列表', () => {
     expect(buildMetricCharts([], 'network', 'hourly')).toEqual([]);
+  });
+
+  it('daily/weekly 进行中行不会进入图表点、图例和 tooltip 桶', () => {
+    const rows = [
+      row({
+        metricPath: 'M1',
+        granularity: 'daily',
+        startTime: '2026-08-03T08:00:00+08:00',
+        endTime: '2026-08-04T08:00:00+08:00',
+        metricValue: 99,
+        partial: true,
+        periodComplete: false,
+      }),
+      row({
+        metricPath: 'M1',
+        granularity: 'weekly',
+        startTime: '2026-08-03T08:00:00+08:00',
+        endTime: '2026-08-10T08:00:00+08:00',
+        metricValue: 88,
+        partial: true,
+        periodComplete: false,
+      }),
+    ];
+
+    expect(buildMetricCharts(rows, 'network', 'daily')).toEqual([]);
+    expect(buildMetricCharts(rows, 'network', 'weekly')).toEqual([]);
+  });
+
+  it('正式 daily rows 可以正常出图', () => {
+    const charts = buildMetricCharts([
+      row({
+        metricPath: 'M1',
+        granularity: 'daily',
+        startTime: '2026-08-02T00:00:00+08:00',
+        endTime: '2026-08-03T00:00:00+08:00',
+        metricValue: 42,
+        partial: false,
+        periodComplete: true,
+      }),
+    ], 'network', 'daily');
+
+    expect(charts).toHaveLength(1);
+    expect(charts[0].buckets).toEqual(['2026-08-02T00:00:00+08:00']);
+    expect(charts[0].bucketEnds).toEqual(['2026-08-03T00:00:00+08:00']);
+    expect(charts[0].series[0].values).toEqual([42]);
   });
 
   it('bucketEnds 与 buckets 一一对应记录每桶结束时间', () => {

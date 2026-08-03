@@ -302,6 +302,10 @@ export function filterRowsByMetricPaths(
   return rows.filter((row) => set.has(row.metricPath));
 }
 
+function isFormalResultRow(row: AdhocResultRow): boolean {
+  return row.partial !== true && row.periodComplete !== false;
+}
+
 /**
  * 转置主函数：结果行 → 每指标一张图（图内按系列键分多条线，缺桶补 '-'）。
  * @param rows        任务结果行（多粒度混在一起，本函数内按 granularity 过滤）
@@ -315,7 +319,7 @@ export function buildMetricCharts(
   locale: Locale = 'zh-CN',
   metricDisplayNames?: MetricDisplayNameMap,
 ): MetricChart[] {
-  const filtered = rows.filter((r) => r.granularity === granularity);
+  const filtered = rows.filter((r) => r.granularity === granularity && isFormalResultRow(r));
   if (filtered.length === 0) return [];
 
   // 按 metricPath 分图，保留出现顺序。

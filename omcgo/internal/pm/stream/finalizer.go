@@ -30,7 +30,7 @@ type Finalizer struct {
 	metrics             *Metrics
 	slots               chan struct{}
 	snapshot            *SnapshotStore
-	location            *time.Location
+	location            LocationProvider
 	initialPublications sync.Map
 }
 
@@ -52,9 +52,12 @@ func (f *Finalizer) SetSnapshot(snapshot *SnapshotStore) *Finalizer {
 }
 
 func (f *Finalizer) SetLocation(location *time.Location) *Finalizer {
-	if location != nil {
-		f.location = location
-	}
+	f.location = fixedLocationProvider(location)
+	return f
+}
+
+func (f *Finalizer) SetLocationProvider(location LocationProvider) *Finalizer {
+	f.location = location
 	return f
 }
 
@@ -444,10 +447,7 @@ func shouldRecordDailyVersionExpectedSlotsMismatch(revision int, coverage finali
 }
 
 func (f *Finalizer) finalizationLocation() *time.Location {
-	if f.location != nil {
-		return f.location
-	}
-	return time.UTC
+	return currentLocation(f.location)
 }
 
 func (f *Finalizer) finalizationCoverageFor(

@@ -205,6 +205,75 @@ func TestRollupContributionsHourlyToDailyAndDailyToWeekMonth(t *testing.T) {
 	require.Equal(t, int64(31), parents[1].ExpectedSlots)
 }
 
+func TestRollupContributionsUseDynamicMatcherLocationForDailyAndWeeklyBoundaries(t *testing.T) {
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	require.NoError(t, err)
+	newYork, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+
+	current := tokyo
+	matcher := NewMatcherWithLocationProvider(func() *time.Location {
+		return current
+	})
+	version := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		EffectiveFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Granularities: []Granularity{GranularityHourly, GranularityDaily, GranularityWeekly},
+	}
+	value := ContributionValue{
+		Dimension: DimensionNetwork, DimensionKey: "network",
+		MetricPath: "C1", MetricType: "counter", Operation: AggregationSum,
+		Sum: 10, Count: 1, Min: 10, Max: 10, Composed: true,
+	}
+	hourly := RollupPayload{
+		SchemaVersion: SchemaVersion, EventID: uuid.New(),
+		TaskID: version.TaskID, TaskVersionID: version.VersionID,
+		SourceGranularity: GranularityHourly, EntityKey: "network",
+		WindowStart:         time.Date(2026, 7, 29, 16, 30, 0, 0, time.UTC),
+		WindowEnd:           time.Date(2026, 7, 29, 17, 30, 0, 0, time.UTC),
+		SourceExpectedSlots: 1, SourceReceivedSlots: 1, Complete: true,
+		ChunkCount: 1, Values: []ContributionValue{value},
+	}
+
+	dailyTokyo, err := rollupContributions(hourly, version, matcher.Location())
+	require.NoError(t, err)
+	require.Len(t, dailyTokyo, 1)
+	require.True(t, dailyTokyo[0].Key.Start.Equal(time.Date(2026, 7, 30, 0, 0, 0, 0, tokyo)))
+
+	current = newYork
+	dailyNewYork, err := rollupContributions(hourly, version, matcher.Location())
+	require.NoError(t, err)
+	require.Len(t, dailyNewYork, 1)
+	require.True(t, dailyNewYork[0].Key.Start.Equal(time.Date(2026, 7, 29, 0, 0, 0, 0, newYork)))
+	require.False(t, dailyNewYork[0].Key.Start.Equal(time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)))
+	require.False(t, dailyNewYork[0].Key.Start.Equal(time.Date(2026, 7, 30, 0, 0, 0, 0, shanghai)))
+	require.False(t, dailyTokyo[0].Key.Start.Equal(dailyNewYork[0].Key.Start))
+
+	dailyPayload := hourly
+	dailyPayload.EventID = uuid.New()
+	dailyPayload.SourceGranularity = GranularityDaily
+	dailyPayload.WindowStart = time.Date(2026, 7, 29, 15, 0, 0, 0, time.UTC)
+	dailyPayload.WindowEnd = dailyPayload.WindowStart.Add(24 * time.Hour)
+
+	current = tokyo
+	weeklyTokyo, err := rollupContributions(dailyPayload, version, matcher.Location())
+	require.NoError(t, err)
+	require.Len(t, weeklyTokyo, 1)
+	require.Equal(t, GranularityWeekly, weeklyTokyo[0].Key.Granularity)
+	require.True(t, weeklyTokyo[0].Key.Start.Equal(time.Date(2026, 7, 27, 0, 0, 0, 0, tokyo)))
+
+	current = newYork
+	weeklyNewYork, err := rollupContributions(dailyPayload, version, matcher.Location())
+	require.NoError(t, err)
+	require.Len(t, weeklyNewYork, 1)
+	require.True(t, weeklyNewYork[0].Key.Start.Equal(time.Date(2026, 7, 27, 0, 0, 0, 0, newYork)))
+	require.False(t, weeklyNewYork[0].Key.Start.Equal(time.Date(2026, 7, 27, 0, 0, 0, 0, time.UTC)))
+	require.False(t, weeklyNewYork[0].Key.Start.Equal(time.Date(2026, 7, 27, 0, 0, 0, 0, shanghai)))
+	require.False(t, weeklyTokyo[0].Key.Start.Equal(weeklyNewYork[0].Key.Start))
+}
+
 func TestRollupContributionsClipsRuleDayAtVersionBoundary(t *testing.T) {
 	day := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	change := day.Add(13 * time.Hour)

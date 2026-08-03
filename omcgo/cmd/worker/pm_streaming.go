@@ -109,7 +109,10 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 		return
 	}
 	store.SetSnapshot(snapshot)
-	matcher := pmstream.NewMatcher(tz.Current())
+	locationProvider := tz.Current
+	logger.Info("PM streaming aggregation timezone provider ready",
+		zap.String("timezone", locationProvider().String()))
+	matcher := pmstream.NewMatcherWithLocationProvider(locationProvider)
 	windowRepo := pmstream.NewWindowRepository(w.TsPool)
 	if err := windowRepo.BackfillVersionMetadata(ctx, snapshot.Current()); err != nil {
 		logger.Error("backfill PM aggregation window version metadata", zap.Error(err))
@@ -118,7 +121,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	finalizer := pmstream.NewFinalizer(windowRepo, store, logger).
 		SetConcurrency(cfg.FinalizeConcurrency).
 		SetSnapshot(snapshot).
-		SetLocation(tz.Current()).
+		SetLocationProvider(locationProvider).
 		SetMetrics(streamMetrics)
 	recovery := pmstream.NewRecovery(w.NATS.JS, windowRepo, store, snapshot, matcher, logger)
 	if err := recovery.RestoreActiveWindows(ctx); err != nil {
@@ -182,8 +185,8 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	redisSweeper := pmstream.NewRedisStateSweeper(
 		store, windowRepo, pmRedisSweepSafetyThreshold, streamMetrics, logger,
 	)
-	publishedVersionRepairer := pmstream.NewPublishedVersionRepairer(
-		windowRepo, snapshot, tz.Current(), logger,
+	publishedVersionRepairer := pmstream.NewPublishedVersionRepairerWithLocationProvider(
+		windowRepo, snapshot, locationProvider, logger,
 	)
 	go func() {
 		if err := relay.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -209,6 +212,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	)
 	streamMetrics.Ready.Set(1)
 	logger.Info("PM streaming aggregation ready",
+		zap.String("timezone", locationProvider().String()),
 		zap.Duration("close_grace", cfg.CloseGrace),
 		zap.Duration("window_ttl", cfg.WindowTTL),
 		zap.Bool("redis_v2_write_enabled", cfg.RedisV2WriteEnabled))

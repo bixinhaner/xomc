@@ -40,7 +40,7 @@ func TestBulkUpsertCommitsUncontendedDeviceBeforeWaitingForContendedDevice(t *te
 		_, err := pool.Exec(ctx, `
 			INSERT INTO devices (
 				id, serial_number, oui, carrier, technology, lifecycle_state, is_online
-			) VALUES ($1, $2, 'AABBCC', 'CMCC', 'LTE', 'commissioned', true)
+			) VALUES ($1, $2, 'AABBCC', 'cmcc', 'LTE', 'commissioned', true)
 		`, id, "TEST-PARAM-WRITE-"+id.String())
 		require.NoError(t, err)
 	}

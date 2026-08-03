@@ -71,6 +71,22 @@ func TestFinalizerUsesConfiguredLocationForDSTVersionBoundary(t *testing.T) {
 	require.EqualValues(t, 7, state.ExpectedSlots)
 }
 
+func TestFinalizerLocationProviderReflectsRuntimeChanges(t *testing.T) {
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	require.NoError(t, err)
+	newYork, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	current := tokyo
+	finalizer := NewFinalizer(nil, nil, nil).SetLocationProvider(func() *time.Location {
+		return current
+	})
+
+	require.Equal(t, "Asia/Tokyo", finalizer.finalizationLocation().String())
+
+	current = newYork
+	require.Equal(t, "America/New_York", finalizer.finalizationLocation().String())
+}
+
 func TestBuildFinalizedMetricsCalculatesKPIFromAggregatedRawCounters(t *testing.T) {
 	base := ContributionValue{
 		Dimension: DimensionNetwork, DimensionKey: "network", DimensionName: "Network",

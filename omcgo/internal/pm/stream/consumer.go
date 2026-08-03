@@ -125,13 +125,14 @@ func (c *Consumer) handleRollup(ctx context.Context, envelope event.Event) error
 		return fmt.Errorf("PM aggregation task snapshot missing")
 	}
 	version := current.ByVersion[payload.TaskVersionID]
-	contributions, err := rollupContributions(payload, version, c.matcher.location)
+	location := c.matcher.Location()
+	contributions, err := rollupContributions(payload, version, location)
 	if err != nil {
 		return fmt.Errorf("build PM parent rollup contributions: %w", err)
 	}
 	if isDeviceHourPayload(payload, current) {
 		ruleContributions, matchErr := matchDeviceHourRules(
-			payload, current, c.matcher.location,
+			payload, current, location,
 		)
 		if matchErr != nil {
 			return fmt.Errorf("match device-hour aggregation rules: %w", matchErr)
