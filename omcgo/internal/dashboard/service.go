@@ -547,14 +547,21 @@ func (s *Service) calculateKPIDeltas(
 	)
 
 	// 2. Active alarms trend (compare with yesterday)
-	prevTotalAlarms, err := s.countAlarmsAtTime(ctx, windows.AlarmCompareAt)
-	if err != nil {
-		logDashboardQueryFailure(s.logger, "dashboard: previous alarm count unavailable", err)
+	var prevTotalAlarms int64
+	var alarmErr error
+	previousAlarmDeviceCount, previousAlarmDeviceErr := s.countDevicesAtTime(ctx, windows.AlarmCompareAt)
+	if previousAlarmDeviceErr != nil {
+		logDashboardQueryFailure(s.logger, "dashboard: previous alarm device baseline unavailable", previousAlarmDeviceErr)
+	} else if hasPreviousAlarmBaseline(previousAlarmDeviceCount, previousAlarmDeviceErr) {
+		prevTotalAlarms, alarmErr = s.countAlarmsAtTime(ctx, windows.AlarmCompareAt)
+		if alarmErr != nil {
+			logDashboardQueryFailure(s.logger, "dashboard: previous alarm count unavailable", alarmErr)
+		}
 	}
 	deltas["active_alarms"] = computeKPIDelta(
 		float64(currentTotalAlarms),
 		float64(prevTotalAlarms),
-		err == nil,
+		alarmErr == nil && hasPreviousAlarmBaseline(previousAlarmDeviceCount, previousAlarmDeviceErr),
 		"yesterday",
 	)
 
@@ -586,6 +593,10 @@ func (s *Service) calculateKPIDeltas(
 	}
 
 	return deltas
+}
+
+func hasPreviousAlarmBaseline(deviceCount int64, err error) bool {
+	return err == nil && deviceCount > 0
 }
 
 type kpiDeltaWindows struct {
