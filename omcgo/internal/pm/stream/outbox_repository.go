@@ -239,10 +239,11 @@ func (r *OutboxRepository) DeletePublishedBefore(
 	return nil
 }
 
-func (r *OutboxRepository) ListPayloadsForPeriod(
+func (r *OutboxRepository) VisitPayloadsForPeriod(
 	ctx context.Context,
 	start, end time.Time,
-) ([]event.PMAggregationNormalizedPayload, error) {
+	visit func(event.PMAggregationNormalizedPayload) error,
+) error {
 	query := `
 SELECT payload
 FROM (
@@ -259,23 +260,31 @@ ORDER BY event_window_start, event_id`
 	args := []any{start, end}
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query durable PM source events: %w", err)
+		return fmt.Errorf("query durable PM source events: %w", err)
 	}
 	defer rows.Close()
-	var payloads []event.PMAggregationNormalizedPayload
+	return visitReplayPayloadRows(rows, visit)
+}
+
+func visitReplayPayloadRows(
+	rows pgx.Rows,
+	visit func(event.PMAggregationNormalizedPayload) error,
+) error {
 	for rows.Next() {
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
-			return nil, fmt.Errorf("scan durable PM source event: %w", err)
+			return fmt.Errorf("scan durable PM source event: %w", err)
 		}
 		var payload event.PMAggregationNormalizedPayload
 		if err := json.Unmarshal(raw, &payload); err != nil {
-			return nil, fmt.Errorf("decode durable PM source event: %w", err)
+			return fmt.Errorf("decode durable PM source event: %w", err)
 		}
-		payloads = append(payloads, payload)
+		if err := visit(payload); err != nil {
+			return fmt.Errorf("visit durable PM source event: %w", err)
+		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate durable PM source events: %w", err)
+		return fmt.Errorf("iterate durable PM source events: %w", err)
 	}
-	return payloads, nil
+	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -112,6 +113,121 @@ func TestEnabledIndicatorLookupFailureIsNotCached(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, got, "C0001")
 	require.Equal(t, 2, repo.calls[indicator.DeviceTypeENB], "查询失败不应写入缓存")
+}
+
+func TestEnabledIndicatorLookupReloadsImmediatelyWhenCacheVersionChanges(t *testing.T) {
+	repo := &fakeEnabledIndicatorRepo{ids: map[indicator.DeviceType][]string{
+		indicator.DeviceTypeENB: {"K900010040"},
+	}}
+	version := "1"
+	lookup := &enabledIndicatorLookup{
+		repo: repo,
+		ttl:  5 * time.Minute,
+		now:  time.Now,
+		readCacheVersion: func(context.Context) (string, error) {
+			return version, nil
+		},
+		cache: make(map[indicator.DeviceType]enabledIndicatorCacheEntry),
+	}
+
+	first, err := lookup.LookupEnabledIndicators(context.Background(), "lte")
+	require.NoError(t, err)
+	require.Contains(t, first, "K900010040")
+	require.Equal(t, 1, repo.calls[indicator.DeviceTypeENB])
+
+	repo.ids[indicator.DeviceTypeENB] = []string{
+		"K900010040", "C000190005", "C000190007", "C000190009",
+	}
+	version = "2"
+	second, err := lookup.LookupEnabledIndicators(context.Background(), "lte")
+	require.NoError(t, err)
+	require.Contains(t, second, "C000190005")
+	require.Contains(t, second, "C000190007")
+	require.Contains(t, second, "C000190009")
+	require.Equal(t, 2, repo.calls[indicator.DeviceTypeENB],
+		"cross-process cache version bump must bypass the five-minute TTL")
+}
+
+func TestEnabledIndicatorLookupDoesNotPublishLoadFromOlderCacheVersion(t *testing.T) {
+	repo := &blockingEnabledIndicatorRepo{
+		ids:     []string{"K900010040"},
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	var versionMu sync.RWMutex
+	version := "1"
+	v2Observed := make(chan struct{})
+	var v2Once sync.Once
+	lookup := &enabledIndicatorLookup{
+		repo: repo,
+		ttl:  5 * time.Minute,
+		now:  time.Now,
+		readCacheVersion: func(context.Context) (string, error) {
+			versionMu.RLock()
+			defer versionMu.RUnlock()
+			if version == "2" {
+				v2Once.Do(func() { close(v2Observed) })
+			}
+			return version, nil
+		},
+		cache: make(map[indicator.DeviceType]enabledIndicatorCacheEntry),
+	}
+
+	type result struct {
+		ids map[string]struct{}
+		err error
+	}
+	firstResult := make(chan result, 1)
+	go func() {
+		ids, err := lookup.LookupEnabledIndicators(context.Background(), "lte")
+		firstResult <- result{ids: ids, err: err}
+	}()
+	<-repo.started
+
+	repo.mu.Lock()
+	repo.ids = []string{"K900010040", "C000190005", "C000190007", "C000190009"}
+	repo.mu.Unlock()
+	versionMu.Lock()
+	version = "2"
+	versionMu.Unlock()
+
+	secondResult := make(chan result, 1)
+	go func() {
+		ids, err := lookup.LookupEnabledIndicators(context.Background(), "lte")
+		secondResult <- result{ids: ids, err: err}
+	}()
+	<-v2Observed
+	close(repo.release)
+
+	for _, got := range []result{<-firstResult, <-secondResult} {
+		require.NoError(t, got.err)
+		require.Contains(t, got.ids, "C000190005")
+		require.Contains(t, got.ids, "C000190007")
+		require.Contains(t, got.ids, "C000190009")
+	}
+}
+
+type blockingEnabledIndicatorRepo struct {
+	mu      sync.Mutex
+	ids     []string
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *blockingEnabledIndicatorRepo) ListAll(context.Context, indicator.DeviceType) ([]string, error) {
+	r.mu.Lock()
+	ids := append([]string(nil), r.ids...)
+	r.mu.Unlock()
+	blocked := false
+	r.once.Do(func() {
+		blocked = true
+		close(r.started)
+	})
+	if blocked {
+		<-r.release
+	}
+	return ids, nil
 }
 
 type fakeEnabledIndicatorRepo struct {

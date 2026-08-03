@@ -2,10 +2,10 @@
 
 ## 数据清理边界
 
-- 仅停止、删除并重建 Docker Compose project `omcgo` 的服务与数据。
-- 仅删除 `/home/omc-data/{postgres,timescaledb,redis,redis-pm,nats,minio}`、`/opt/omc/{data,etc,current,run/logs}` 及带 `com.docker.compose.project=omcgo` 标签的卷。
-- 未执行 Docker 全局 prune，未删除或迁移其他业务数据。
-- 最终清理于 19:16 完成；清理脚本在删除前逐个解析并校验六个绝对路径，同时拒绝 `/`、`/home`、`/opt`、`/opt/omc`、`/var`、`/tmp` 等宽路径。
+- 本轮最终清理严格限定为 OMC：仅停止 Docker Compose project `omcgo`，仅删除带 `com.docker.compose.project=omcgo` 标签的监控卷，并清空 `/home/omc-data/{postgres,timescaledb,redis,redis-pm,nats,minio}`、`/opt/omc/{data,run}`。
+- 删除前逐项校验上述绝对路径，删除后逐项确认目录条目数为 0；未使用未解析变量、通配符、Docker 全局 prune 或宽目录递归删除。
+- `/opt/omc/etc` 的凭据与资源配置保留；系统数据、其他 Compose project、其他容器、其他目录和其他业务数据均未触碰，也未进行数据迁移。
+- 清理后安装 `100.0.0-20260803-2353`，由基线迁移重新创建 OMC 主库、时序库和种子数据。
 
 ## PM 数据链路
 
@@ -57,3 +57,19 @@
 - 最终参数同步 run 为 succeeded=40,022、failed=49，executing/waiting 均为 0；device task pending=0、sent=155（正常在途周期任务），主库 active>5s=0、lock waiter=0，业务死信与告警 webhook 死信均为 0。所有核心容器 restart=0、OOM=false。
 - 20:00 小时窗口先于 21:05 完成不可见的 revision 预计算，但 `pm_aggregation_publications` 保持 revision=0/preparing；21:12:29 才原子切换 revision=1/published，严格没有在 12 分钟保护期前对 Dashboard 可见。
 - 发布窗口 received_slots=4、expected_slots=4、version_slice_complete=true、period_complete=true。20,000 条 hourly rollup 事件随后由 16 路消费者全部消费，pending=0、ack_pending=0、redelivered=0；当前日/周进行中结果分别为 1/24 和 1/168。
+
+## Redis 终态压缩与本轮干净部署复验
+
+- 根因是 `acs:task:*` 完成记录长期按完整参数和结果保存在 Redis Core；2 万设备启动洪峰下单条平均约 9.8KiB，最终把 `noeviction` 实例推到上限并造成 ACS `OOM command not allowed`。现在仅在 PostgreSQL 已同步且补偿标记全部清零后，原子压缩为只含 `status` 的终态墓碑；未完成或待补偿任务仍保留完整内容，任务详情对终态记录回源 PostgreSQL。
+- 单元、竞态、真实 Redis 容量测试均通过；32KiB 参数与结果的完成任务压缩后 `HLEN=1`、`MEMORY USAGE=232` 字节。完整 `GOCACHE=/tmp/omc-go-cache go test ./... -count=1` 通过，发布门禁 300/300 通过。
+- 最终包 `100.0.0-20260803-2353`，内嵌提交 `9090b9de17a00e8c1ca1ba4ceb3d2d1caf3f23db`，SHA-256 `dff742167c9433b7ca8f20f56265d9fa38d3003e13969b03ca659ea4b8f70b1d`；服务器校验与包内校验全部通过，独立健康检查 104/104。
+- 清理后 20,000/20,000 设备在线，ACS 两实例 503、会话拒绝和 Redis OOM 均为 0；真实负载随机抽样的完成任务均为一字段、232 字节，`task:transition:pending=0`，Redis Core 在约 40 万任务键时仅使用 176MiB/3GiB。
+- 00:15 槽位 20,000 个 PM 文件全部解析；00:00 槽位开始早于设备在 00:09–00:10 建立的新基线，按启动段隔离规则不生成健康记录。聚合任务版本统一从 01:00 生效，避免把新旧版本切在自然小时中间；这正是“不迁移旧数据、启动段不完整 PM 可丢弃”的预期行为。
+- 真实浏览器分别请求 hourly、daily、weekly 聚合接口，均返回 200，耗时约 1ms（缓存）、132ms、127ms；weekly 在 16:16:15 与 16:21:16 UTC 各请求一次，中间无事件即时刷新，证明仅按 5 分钟定时刷新且未扫描原始 PM 表。
+- 启动负载中 `parameter_sync_outbox` 从 17,007 降到数百，设备任务持续以约 6,000 条/分钟完成；死信和两库锁等待均为 0。主机 iowait 稳定约 1%，无 swap in/out，主库与应用的 CPU/累计写入是 2 万设备重注册和参数同步的有效启动负载，不是磁盘饱和。
+- 合入最新 `origin/main` 后重新完成全量验证与打包：最终版本 `100.0.0-20260804-0055`，内嵌提交 `3e8592f0cbdab380653d246ac627123e9f227a58`，SHA-256 `3887b6c489eaa4b723a75e21a9130bf7c92f5e32fed276cac70a92b3e3f620d2`。服务器外部校验、包内校验和独立健康检查均通过，健康检查为 104/104；所有 OMC 容器均无重启、无 OOM。
+- 最终普通升级保留了清理后新产生的 OMC 数据，没有再次清理，更没有触碰非 OMC 数据。升级后 20,000/20,000 设备在线，ACS/Web 近 15 分钟 503 为 0，PM 主队列、`pm-registration-wait` 和 15 分钟聚合队列 pending/ack_pending/redelivered 均为 0；死信、两库锁等待和超过 5 秒的活动 SQL 均为 0。
+- 01:00–01:15 是聚合任务版本生效后的首个合法槽位，01:15 后文件按设备持续到达并全部进入聚合流；版本生效前的启动段按既定规则隔离。因此部署验收时尚未到该小时窗口的 02:12 发布时点，数据库无 hourly/daily/weekly 结果是时间水位未到，而不是聚合丢失或 Dashboard 全表扫描。
+- 最终资源快照中主机 CPU idle 78–83%、iowait 0%、无 swap in/out；主库约 3.2 CPU、5.36/7GiB，TSDB 2.06/7GiB，Redis Core 193MiB/3GiB、Redis PM 1.34MiB/6GiB。设备任务 pending 18,102→16,437，参数同步 outbox 降至 1，终态计数漂移 1,045→971，表明清库后的 20,000 设备初始同步仍在受控收敛而非卡死。
+- 01:00–01:15 首个合法槽位在 01:26:59 的观察轮次尚未达到 12 分钟水位，因此没有提前关闭；下一轮于 01:28:59 正确生成 `complete` 健康记录，expected=20,000、received=20,000、coverage=1。K900010006 与 K900010076 各 105,829 行，最新时间均为 01:15；20,000 个 hourly 窗口保持 open，等待自然小时结束后的 02:12 发布水位。
+- 槽位关闭和下一批 PM 到达时出现短时计算峰值，随后主机 CPU idle 回升到 25–33%，iowait 维持 1–2%；可用内存约 19GiB，Redis Core 约 224MiB，完成任务现场抽样仍为 `HLEN=1`、232 字节。主库/时序库均无锁等待和超过 5 秒的活动 SQL，参数同步终态计数漂移继续从 971 降到 376，属于清库后初始同步的受控收敛。

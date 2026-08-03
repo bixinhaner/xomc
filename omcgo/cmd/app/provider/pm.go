@@ -171,6 +171,12 @@ func initPMModule(c *Container) error {
 		_, err := c.KPIRouteInvalidator.Invalidate(ctx, router.InvalidationTrigger(trigger))
 		return err
 	})
+	reconcileCtx, reconcileCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := indicatorSvc.ReconcileEnabledDependencies(reconcileCtx); err != nil {
+		reconcileCancel()
+		return fmt.Errorf("reconcile enabled PM indicator dependencies: %w", err)
+	}
+	reconcileCancel()
 
 	indicatorHandler := indicator.NewIndicatorHandler(indicatorSvc, logger.Named("indicator"))
 

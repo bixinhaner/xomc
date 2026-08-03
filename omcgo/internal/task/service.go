@@ -337,12 +337,33 @@ func (s *TaskService) GetTask(ctx context.Context, taskID string) (*Task, error)
 	if err != nil {
 		return nil, fmt.Errorf("get task from queue: %w", err)
 	}
-	if task != nil {
-		return task, nil
+	if task == nil {
+		// 从 PostgreSQL 获取
+		return s.repo.GetByID(ctx, taskID)
 	}
+	resolved, err := resolveTaskDetails(ctx, task, s.repo.GetByID)
+	if err != nil {
+		return nil, fmt.Errorf("get terminal task from repository: %w", err)
+	}
+	return resolved, nil
+}
 
-	// 从 PostgreSQL 获取
-	return s.repo.GetByID(ctx, taskID)
+func resolveTaskDetails(
+	ctx context.Context,
+	queueTask *Task,
+	loadDurable func(context.Context, string) (*Task, error),
+) (*Task, error) {
+	if queueTask == nil || !isTerminal(queueTask.Status) {
+		return queueTask, nil
+	}
+	durable, err := loadDurable(ctx, queueTask.ID)
+	if err != nil {
+		return nil, err
+	}
+	if durable != nil {
+		return durable, nil
+	}
+	return queueTask, nil
 }
 
 // GetTaskByCWMPID 根据 CWMP ID 获取任务

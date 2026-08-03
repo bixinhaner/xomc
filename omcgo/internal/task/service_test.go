@@ -259,6 +259,52 @@ func (ts *testableTaskService) GetTask(ctx context.Context, taskID string) (*Tas
 	return ts.repo.GetByID(ctx, taskID)
 }
 
+func TestResolveTaskDetails_TerminalTombstoneUsesDurableTask(t *testing.T) {
+	ctx := context.Background()
+	tombstone := &Task{ID: "task-terminal", Status: TaskStatusCompleted}
+	durable := &Task{
+		ID:     tombstone.ID,
+		Status: TaskStatusCompleted,
+		Params: json.RawMessage(`{"names":["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth"]}`),
+		Result: json.RawMessage(`{"values":[{"name":"DLBandwidth","value":"n100"}]}`),
+	}
+
+	got, err := resolveTaskDetails(ctx, tombstone, func(_ context.Context, id string) (*Task, error) {
+		require.Equal(t, tombstone.ID, id)
+		return durable, nil
+	})
+	require.NoError(t, err)
+	require.Same(t, durable, got)
+}
+
+func TestResolveTaskDetails_NonTerminalTaskStaysOnRedis(t *testing.T) {
+	pending := &Task{ID: "task-pending", Status: TaskStatusPending}
+	got, err := resolveTaskDetails(context.Background(), pending,
+		func(context.Context, string) (*Task, error) {
+			t.Fatal("non-terminal task must not query PostgreSQL")
+			return nil, nil
+		})
+	require.NoError(t, err)
+	require.Same(t, pending, got)
+}
+
+func TestResolveTaskDetails_MissingDurableRowKeepsTerminalFence(t *testing.T) {
+	tombstone := &Task{ID: "task-missing", Status: TaskStatusFailed}
+	got, err := resolveTaskDetails(context.Background(), tombstone,
+		func(context.Context, string) (*Task, error) { return nil, nil })
+	require.NoError(t, err)
+	require.Same(t, tombstone, got)
+}
+
+func TestResolveTaskDetails_DurableLoadErrorPropagates(t *testing.T) {
+	wantErr := fmt.Errorf("postgres unavailable")
+	got, err := resolveTaskDetails(context.Background(),
+		&Task{ID: "task-error", Status: TaskStatusExpired},
+		func(context.Context, string) (*Task, error) { return nil, wantErr })
+	require.ErrorIs(t, err, wantErr)
+	require.Nil(t, got)
+}
+
 func (ts *testableTaskService) GetTaskByCWMPID(ctx context.Context, cwmpID string) (*Task, error) {
 	task, err := ts.queue.GetByCWMPID(ctx, cwmpID)
 	if err != nil {

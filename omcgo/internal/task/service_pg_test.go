@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,6 +104,34 @@ func TestService_PG_GetTask_FallbackToPG(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, tk.ID, got.ID)
+}
+
+func TestService_PG_GetTask_TerminalTombstoneReturnsDurableDetails(t *testing.T) {
+	svc, _, q, repo := newServiceWithPG(t)
+	if svc == nil {
+		return
+	}
+	defer cleanupTestTasks(t, repo.pool)
+	ctx := context.Background()
+
+	tk := freshTaskForPG("terminal-tombstone", "terminal-tombstone")
+	largeParams, err := json.Marshal(map[string]string{"payload": strings.Repeat("p", 8*1024)})
+	require.NoError(t, err)
+	largeResult, err := json.Marshal(map[string]string{"payload": strings.Repeat("r", 16*1024)})
+	require.NoError(t, err)
+	tk.Params = largeParams
+	tk.MarkCompleted(largeResult)
+	require.NoError(t, repo.Create(ctx, tk))
+	require.NoError(t, q.Update(ctx, tk))
+	require.False(t, q.client.HExists(ctx, q.taskKey(tk.ID), "data").Val())
+
+	got, err := svc.GetTask(ctx, tk.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, tk.ID, got.ID)
+	require.Equal(t, TaskStatusCompleted, got.Status)
+	require.JSONEq(t, string(tk.Params), string(got.Params))
+	require.JSONEq(t, string(tk.Result), string(got.Result))
 }
 
 func TestService_PG_GetTask_NotFoundAnywhere(t *testing.T) {

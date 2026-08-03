@@ -99,6 +99,38 @@ func (r *PgEnabledRepository) ListAll(ctx context.Context, dt DeviceType) ([]str
 	return ids, nil
 }
 
+// ListOperatorCodes returns every persisted enabled-indicator scope. Startup
+// reconciliation uses the scopes instead of assuming that only "default"
+// exists, so operator-specific KPI selections receive the same closure repair.
+func (r *PgEnabledRepository) ListOperatorCodes(ctx context.Context, dt DeviceType) ([]string, error) {
+	table := dt.EnabledTable()
+	query, args, err := storage.Psql.Select("operator_code").
+		Distinct().
+		From(table).
+		OrderBy("operator_code").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list operator codes from %s: %w", table, err)
+	}
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list operator codes from %s: %w", table, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var operatorCode string
+		if err := rows.Scan(&operatorCode); err != nil {
+			return nil, fmt.Errorf("scan enabled indicator operator code: %w", err)
+		}
+		out = append(out, operatorCode)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate enabled indicator operator codes: %w", err)
+	}
+	return out, nil
+}
+
 func (r *PgEnabledRepository) BatchCreate(ctx context.Context, dt DeviceType, operatorCode string, indicatorIDs []string, tx pgx.Tx) error {
 	if len(indicatorIDs) == 0 {
 		return nil

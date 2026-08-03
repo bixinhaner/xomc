@@ -99,8 +99,14 @@ func TestPMBuiltinTaskMetricPathsMatchEnabledDefaults(t *testing.T) {
 	}
 
 	enbDefault := enabledDefaults["lte"]
-	require.Contains(t, enbDefault, "C000060216")
-	require.Contains(t, enbDefault, "C000060273")
+	for _, dependency := range []string{
+		"C000060216", "C000060273",
+		"C000190005", "C000190006", "C000190007",
+		"C000190008", "C000190009", "C000190010",
+	} {
+		require.Containsf(t, enbDefault, dependency,
+			"clean install must explicitly enable dashboard KPI dependency %s", dependency)
+	}
 	require.Contains(t, enbDefault, "K900010076")
 	require.Equal(t, 1, countDefaultEnabledIndicator(t, seedSQL, "enabled_pm_indicators_enb", "C000060216"))
 	require.Equal(t, 1, countDefaultEnabledIndicator(t, seedSQL, "enabled_pm_indicators_enb", "C000060273"))
