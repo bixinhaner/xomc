@@ -17,4 +17,34 @@ describe('buildAdhocChartOption', () => {
     expect(option.series).toHaveLength(20);
     expect(option.series.map((item) => item.name)).toEqual(series.map((item) => item.name));
   });
+
+  it('tooltip 和 y 轴数值固定保留两位，缺值显示占位符', () => {
+    const option = buildAdhocChartOption(
+      [
+        { name: 'long-decimal', buckets: ['T1'], values: [12.345678901234] },
+        { name: 'empty', buckets: ['T1'], values: ['-'] },
+      ],
+      ['T1'],
+    );
+
+    const tooltip = option.tooltip as {
+      formatter: (params: Array<{ axisValue: string; marker: string; seriesName: string; value: unknown }>) => string;
+    };
+    expect(
+      tooltip.formatter([
+        { axisValue: 'T1', marker: '', seriesName: 'long-decimal', value: 12.345678901234 },
+        { axisValue: 'T1', marker: '', seriesName: 'empty', value: '-' },
+      ]),
+    ).toContain('12.35');
+    expect(
+      tooltip.formatter([{ axisValue: 'T1', marker: '', seriesName: 'integer', value: 12 }]),
+    ).toContain('12.00');
+    expect(
+      tooltip.formatter([{ axisValue: 'T1', marker: '', seriesName: 'empty', value: '-' }]),
+    ).toContain('<strong>-</strong>');
+
+    const yAxis = option.yAxis as { axisLabel: { formatter: (value: number) => string } };
+    expect(yAxis.axisLabel.formatter(12.345678901234)).toBe('12.35');
+    expect(yAxis.axisLabel.formatter(12)).toBe('12.00');
+  });
 });

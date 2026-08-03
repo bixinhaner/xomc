@@ -14,7 +14,7 @@
  */
 
 import type { AggregatedRow } from '../types/pmDashboard';
-import { normalizePmMetricValue } from './pmMetricValue';
+import { formatPmMetricDisplayValue, normalizePmMetricValue } from './pmMetricValue';
 
 // ─── object_ldn 解析（对齐后端 metrics/object_ldn.go） ───
 
@@ -172,14 +172,11 @@ export function formatObjectLdn(ldn: string | null | undefined): string {
 }
 
 /**
- * 透视表数值显示格式：整数原样，小数保留 4 位去尾零，缺采显示 "-"。
+ * 透视表数值显示格式：有效数字固定保留两位，缺采显示 "-"。
  * 指标查询页表格与仪表盘普通 Panel 导出共用，保证两处数值格式一致。
  */
 export function formatPivotNumber(v: number | null | undefined): string {
-  const normalized = normalizePmMetricValue(v);
-  if (normalized === null) return '-';
-  if (Number.isInteger(normalized)) return String(normalized);
-  return normalized.toFixed(4).replace(/\.?0+$/, '');
+  return formatPmMetricDisplayValue(v);
 }
 
 /**

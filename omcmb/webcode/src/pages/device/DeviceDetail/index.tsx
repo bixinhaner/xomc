@@ -1327,6 +1327,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                     series={lineSeries}
                     compareLabels={compareLabels}
                     unit={kpi.unit || undefined}
+                    pmMetricValueFormat
                     height={220}
                     areaFill
                   />
