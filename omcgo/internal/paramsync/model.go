@@ -117,6 +117,7 @@ const (
 	ResultCodeDeadlineExceeded       ResultCode = "DEADLINE_EXCEEDED"
 	ResultCodeAutomaticBackoff       ResultCode = "AUTOMATIC_BACKOFF"
 	ResultCodeAutomaticBackpressure  ResultCode = "AUTOMATIC_BACKPRESSURE"
+	ResultCodeSupersededRelease      ResultCode = "SUPERSEDED_RELEASE_CAMPAIGN"
 )
 
 func (r TriggerReason) Automatic() bool {
@@ -155,6 +156,7 @@ type SyncRequest struct {
 	AdmissionClass          *string         `json:"admission_class,omitempty"`
 	AdmissionReason         string          `json:"admission_reason,omitempty"`
 	AdmissionSnapshot       json.RawMessage `json:"admission_snapshot,omitempty"`
+	AdmissionQueuedAt       *time.Time      `json:"admission_queued_at,omitempty"`
 	DeduplicatedToRequestID *uuid.UUID      `json:"deduplicated_to_request_id,omitempty"`
 	CreatedAt               time.Time       `json:"created_at"`
 	StartedAt               *time.Time      `json:"started_at,omitempty"`

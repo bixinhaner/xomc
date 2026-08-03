@@ -32,7 +32,7 @@ import (
 type Handler struct {
 	tokenManager *TokenManager
 	sessionStore *SessionStore
-	minioClient  *minio.Client
+	minioClient  objectStore
 	maxFileSize  int64
 	buckets      appconfig.BucketConfig
 	eventBus     event.EventBus
@@ -67,6 +67,10 @@ type Handler struct {
 	// "同一份文件被多次上传"，此时还没有 event，天然不能用 event ID 去重。
 	pmDedup          *event.Deduper
 	storageAdmission storageprotection.WriteAdmission
+}
+
+type objectStore interface {
+	PutObject(context.Context, string, string, io.Reader, int64, minio.PutObjectOptions) (minio.UploadInfo, error)
 }
 
 // NewHandler creates a new upload Handler.
@@ -552,6 +556,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//
 	// payload 走精简版（minio_path / bucket / device_sn / file_size / file_name），
 	// 设备 UUID / OUI / carrier / technology 由 collector 用 SN 查 device 表回填。
+	if ft == tr069.FileTypePM && h.backpressure != nil {
+		h.backpressure.RecordAccepted(time.Now())
+	}
 	if ft == tr069.FileTypePM && h.eventBus != nil {
 		deviceSN := r.URL.Query().Get("sn")
 		if deviceSN == "" {

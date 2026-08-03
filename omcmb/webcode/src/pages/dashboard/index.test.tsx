@@ -191,6 +191,25 @@ const successfulSummary: DashboardSummary = {
     success: 0,
     failed: 0,
   },
+	pmSlotHealth: [{
+	  slotEnd: '2026-08-03T15:00:00Z',
+	  technology: 'lte',
+	  carrier: 'cmcc',
+	  expectedDevices: 20_000,
+	  receivedDevices: 19_600,
+	  coverageRatio: 0.98,
+	  status: 'complete',
+	  evaluatedAt: '2026-08-03T15:12:00Z',
+	}, {
+	  slotEnd: '2026-08-03T15:00:00Z',
+	  technology: 'lte',
+	  carrier: 'cucc',
+	  expectedDevices: 1_000,
+	  receivedDevices: 980,
+	  coverageRatio: 0.98,
+	  status: 'complete',
+	  evaluatedAt: '2026-08-03T15:12:00Z',
+	}],
 };
 
 describe('DashboardPage card snapshot integration', () => {
@@ -253,6 +272,29 @@ describe('DashboardPage card snapshot integration', () => {
     expect(screen.queryByText('User A')).not.toBeInTheDocument();
     expect(screen.queryByText('dashboard.quickAccess')).not.toBeInTheDocument();
   });
+
+	it('shows the latest persisted PM slot coverage for the selected technology', () => {
+	  dashboardMocks.summaryResult = {
+		data: successfulSummary,
+		dataUpdatedAt: 200,
+		isLoading: false,
+		isPending: false,
+		isFetching: false,
+		refetch: vi.fn(),
+	  };
+	  const queryClient = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	  });
+
+	  render(
+		<QueryClientProvider client={queryClient}>
+		  <DashboardPage />
+		</QueryClientProvider>,
+	  );
+
+	  expect(screen.getByText('20580 / 21000 · 98.0%')).toBeInTheDocument();
+	  expect(screen.getByText('dashboard.pmSlotCoverage')).toBeInTheDocument();
+	});
 
   it('uses device-list stats for device cards without changing other Summary cards', () => {
     dashboardMocks.summaryResult = {

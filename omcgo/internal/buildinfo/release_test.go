@@ -24,6 +24,11 @@ func TestReleaseCampaignIDIsOpaqueAndStable(t *testing.T) {
 	assert.NotEqual(t, uuid.Nil, first)
 
 	ReleaseVersion = "2027Q1-GA"
+	repackaged, ok := ReleaseCampaignID()
+	require.True(t, ok)
+	assert.Equal(t, first, repackaged, "repackaging the same commit must not restart a full release campaign")
+
+	GitCommit = "fedcba654321"
 	changed, ok := ReleaseCampaignID()
 	require.True(t, ok)
 	assert.NotEqual(t, first, changed)

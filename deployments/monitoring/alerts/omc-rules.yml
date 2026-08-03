@@ -243,7 +243,9 @@ groups:
                     维护收敛器正常时该值应在下一轮 30 秒扫描内恢复为 0。
 
       - alert: ParamSyncRunCounterDrift
-        expr: param_sync_run_counter_drift > 0
+        expr: |
+          max(param_sync_run_counter_drift) > 0
+          and on() (max(param_sync_run_counter_drift_oldest_idle_seconds) > 300)
         for: 2m
         labels:
           severity: warning
@@ -256,7 +258,9 @@ groups:
             Action: 检查维护扫描错误和数据库写入；禁止人工修改计数或清理运行记录。
 
       - alert: ParamSyncRunBlockedWithoutActiveDeviceTask
-        expr: sum(param_sync_runs_blocked{reason=~"plan_not_dispatched|terminal_task_missing_result"}) > 0
+        expr: |
+          sum(max by (reason) (param_sync_runs_blocked{reason=~"plan_not_dispatched|terminal_task_missing_result"})) > 0
+          and on() (max(param_sync_runs_blocked_oldest_idle_seconds{reason=~"plan_not_dispatched|terminal_task_missing_result"}) > 300)
         for: 5m
         labels:
           severity: warning
@@ -270,8 +274,9 @@ groups:
 
       - alert: ParamSyncActiveRunOldestAgeHigh
         expr: |
-          (param_sync_active_run_oldest_age_seconds > 300)
-          and on() (sum(param_sync_runs_blocked{reason=~"plan_not_dispatched|terminal_task_missing_result"}) > 0)
+          (max(param_sync_active_run_oldest_age_seconds) > 300)
+          and on() (sum(max by (reason) (param_sync_runs_blocked{reason=~"plan_not_dispatched|terminal_task_missing_result"})) > 0)
+          and on() (max(param_sync_runs_blocked_oldest_idle_seconds{reason=~"plan_not_dispatched|terminal_task_missing_result"}) > 300)
         for: 2m
         labels:
           severity: warning
@@ -286,6 +291,112 @@ groups:
   - name: omc.pm_ingest
     interval: 30s
     rules:
+      - alert: PMUploadStalledWarning
+        expr: |
+          (time() - max(acs_pm_upload_last_accepted_timestamp_seconds) > 1500)
+          and (time() - max(acs_pm_upload_last_accepted_timestamp_seconds) <= 2400)
+          and on () (sum(omc_pm_slot_expected_devices) > 0)
+          and on () (time() - max(process_start_time_seconds{deployment_unit="acs"}) > 1500)
+        for: 3m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "ACS 已超过 25 分钟未接收 PM 文件"
+          description: "存在应上报 PM 的活动设备，但 ACS 最后一次成功持久化 PM 文件距今已超过 25 分钟；检查设备周期任务、ACS 会话/503、MinIO 和上传拒绝。"
+
+      - alert: PMUploadStalledCritical
+        expr: |
+          (time() - max(acs_pm_upload_last_accepted_timestamp_seconds) > 2400)
+          and on () (sum(omc_pm_slot_expected_devices) > 0)
+          and on () (time() - max(process_start_time_seconds{deployment_unit="acs"}) > 2400)
+        for: 3m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "ACS 已超过 40 分钟未接收 PM 文件"
+          description: "存在应上报 PM 的活动设备，但 ACS 最后一次成功持久化 PM 文件距今已超过 40 分钟；业务数据已连续缺槽，立即检查设备周期任务、ACS、MinIO 和网络入口。"
+
+      - alert: PMIngestLagBehindACS
+        expr: |
+          (max(acs_pm_upload_last_accepted_timestamp_seconds) > 0)
+          and on ()
+          (
+            max(acs_pm_upload_last_accepted_timestamp_seconds)
+            - (max(omc_pm_ingest_last_success_timestamp_seconds) or vector(0)) > 300
+          )
+          and on () (sum(omc_pm_slot_expected_devices) > 0)
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM Worker 入库落后 ACS 超过 5 分钟"
+          description: "ACS 已持久化新 PM 文件，但 Worker 最近成功入库时间落后超过 5 分钟；检查 PM 主队列、registration-wait、死信、worker 资源和 TSDB 写入。"
+
+      - alert: PMSlotObserverStalled
+        expr: |
+          (time() - omc_pm_slot_observer_last_success_timestamp_seconds{deployment_unit="worker"} > 180)
+          or
+          (
+            absent(omc_pm_slot_observer_last_success_timestamp_seconds{deployment_unit="worker"})
+            and on () (time() - max(process_start_time_seconds{deployment_unit="worker"}) > 180)
+          )
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 槽位健康观察器停止更新"
+          description: "PM 槽位健康快照已超过 3 分钟没有成功更新；首页覆盖率和槽位告警可能已经失真，检查 worker、主库和时序库。"
+
+      - alert: PMQuarterSlotMissing
+        expr: |
+          (omc_pm_slot_coverage_ratio == 0)
+          and on (carrier, technology) (omc_pm_slot_expected_devices > 0)
+          and on (carrier, technology) (omc_pm_slot_alert_eligible == 1)
+        for: 0m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 15 分钟槽位完全缺失（{{ $labels.carrier }}/{{ $labels.technology }}）"
+          description: "最近一个已到 12 分钟关闭宽限的 PM 槽位应收设备数大于 0，但实际收到 0；检查上报入口、ACS 会话/拒绝、对象存储和消费链路。"
+
+      - alert: PMQuarterSlotCoverageCritical
+        expr: |
+          (omc_pm_slot_coverage_ratio > 0 and omc_pm_slot_coverage_ratio < 0.95)
+          and on (carrier, technology) (omc_pm_slot_expected_devices > 0)
+          and on (carrier, technology) (omc_pm_slot_alert_eligible == 1)
+        for: 1m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 15 分钟槽位覆盖率严重不足（{{ $labels.carrier }}/{{ $labels.technology }}）"
+          description: "最近一个已到 12 分钟关闭宽限的 PM 槽位覆盖率低于 95%；检查 ACS 接收、MinIO、PM 主队列、registration-wait、worker 入库和设备上报状态。"
+
+      - alert: PMQuarterSlotCoverageWarning
+        expr: |
+          (omc_pm_slot_coverage_ratio >= 0.95 and omc_pm_slot_coverage_ratio < 0.98)
+          and on (carrier, technology) (omc_pm_slot_expected_devices > 0)
+          and on (carrier, technology) (omc_pm_slot_alert_eligible == 1)
+        for: 2m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 15 分钟槽位覆盖率偏低（{{ $labels.carrier }}/{{ $labels.technology }}）"
+          description: "最近一个已到 12 分钟关闭宽限的 PM 槽位覆盖率低于 98%；检查迟到设备、ACS 接收和 PM 消费延迟。"
+
       - alert: PMReportKeysMissingFromLibrary
         expr: sum by (carrier, technology) (increase(omc_pm_whitelist_miss_values_total[15m])) > 0
         for: 5m
@@ -590,3 +701,18 @@ groups:
           description: |
             Worker 在确认消息前持续处理失败，可能导致 NATS 重投和聚合窗口延迟。
             检查 Redis maxmemory/OOM、TimescaleDB 写入、窗口恢复日志和 consumer redelivery。
+
+      - alert: OMCParameterSyncAutomaticQueueStalled
+        expr: |
+          max(param_sync_automatic_admission_queued_requests) > 0
+          and max(param_sync_automatic_admission_oldest_queue_age_seconds) > 7200
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: parameter_sync
+        annotations:
+          summary: "自动参数同步排队超过两小时"
+          description: |
+            全局准入保护仍在工作，但最老的自动同步请求已排队超过两小时。
+            检查设备会话处理速率、参数同步任务完成率、PostgreSQL CPU 与自动准入占用量。

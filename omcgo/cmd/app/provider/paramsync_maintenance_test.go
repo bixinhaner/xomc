@@ -61,8 +61,25 @@ func TestParamSyncMaintenanceWorkerBudgetRemainsBounded(t *testing.T) {
 	assert.LessOrEqual(t, paramSyncOutboxWorkers+paramSyncQueuedWorkers, 16)
 }
 
+func TestParamSyncMaintenanceRecoveryCoversOneTaskPerRunBursts(t *testing.T) {
+	cfg := defaultParamSyncMaintenanceConfig()
+
+	assert.Equal(t, 200, cfg.recoveryRunLimit)
+	assert.Equal(t, 200, cfg.recoveryTaskBudget)
+}
+
 type failingParamSyncMaintainer struct {
 	calls []string
+}
+
+type blockingRecoveryParamSyncMaintainer struct {
+	failingParamSyncMaintainer
+}
+
+func (m *blockingRecoveryParamSyncMaintainer) RecoverMissingResults(ctx context.Context, _, _, _ int) (int, error) {
+	m.record("recover")
+	<-ctx.Done()
+	return 0, ctx.Err()
 }
 
 type recordingParamSyncProjector struct {
@@ -120,6 +137,18 @@ func TestRunParamSyncMaintenanceDoesNotShortCircuitIndependentRepairs(t *testing
 	err := runParamSyncMaintenance(context.Background(), maintainer, time.Now(), defaultParamSyncMaintenanceConfig())
 
 	require.ErrorContains(t, err, "historical row invalid")
+	assert.Equal(t, []string{"counts", "sweep", "stalled", "stalled-runs", "cancelling-runs", "recover", "bindings", "staging", "metrics"}, maintainer.calls)
+}
+
+func TestRunParamSyncMaintenanceRecoveryTimeoutDoesNotCancelLaterSteps(t *testing.T) {
+	maintainer := &blockingRecoveryParamSyncMaintainer{}
+	cfg := defaultParamSyncMaintenanceConfig()
+	cfg.stepTimeout = 50 * time.Millisecond
+	cfg.recoveryTimeout = time.Millisecond
+
+	err := runParamSyncMaintenance(context.Background(), maintainer, time.Now(), cfg)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Equal(t, []string{"counts", "sweep", "stalled", "stalled-runs", "cancelling-runs", "recover", "bindings", "staging", "metrics"}, maintainer.calls)
 }
 

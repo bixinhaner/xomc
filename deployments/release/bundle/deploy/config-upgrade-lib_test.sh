@@ -166,6 +166,53 @@ grep -q '^  max_connections: 180$' "$tmp/dsn-legacy.yaml" || {
 
 echo "PASS: production database DSN upgrade uses environment credentials"
 
+cat > "$tmp/paramsync-template.yaml" <<'YAML'
+param_sync:
+  recovery_run_limit: 200
+  recovery_task_limit_per_run: 200
+  recovery_task_budget: 200
+YAML
+cat > "$tmp/paramsync-legacy.yaml" <<'YAML'
+param_sync:
+  recovery_run_limit: 20
+  recovery_task_limit_per_run: 200
+  recovery_task_budget: 200
+server:
+  port: 18081
+YAML
+chmod 0640 "$tmp/paramsync-legacy.yaml"
+upgrade_app_param_sync_recovery_limit "$tmp/paramsync-legacy.yaml" "$tmp/paramsync-template.yaml"
+grep -q '^  recovery_run_limit: 200$' "$tmp/paramsync-legacy.yaml" || {
+  echo "FAIL: legacy parameter sync recovery limit was not upgraded" >&2
+  exit 1
+}
+grep -q '^  port: 18081$' "$tmp/paramsync-legacy.yaml" || {
+  echo "FAIL: parameter sync limit upgrade changed unrelated configuration" >&2
+  exit 1
+}
+[ "$(stat -f '%Lp' "$tmp/paramsync-legacy.yaml" 2>/dev/null || stat -c '%a' "$tmp/paramsync-legacy.yaml")" = "640" ] || {
+  echo "FAIL: parameter sync limit upgrade changed live config permissions" >&2
+  exit 1
+}
+before_paramsync_current="$(cksum < "$tmp/paramsync-legacy.yaml")"
+upgrade_app_param_sync_recovery_limit "$tmp/paramsync-legacy.yaml" "$tmp/paramsync-template.yaml"
+[ "$(cksum < "$tmp/paramsync-legacy.yaml")" = "$before_paramsync_current" ] || {
+  echo "FAIL: parameter sync recovery limit upgrade must be idempotent" >&2
+  exit 1
+}
+cat > "$tmp/paramsync-custom.yaml" <<'YAML'
+param_sync:
+  recovery_run_limit: 80 # operator override
+YAML
+before_paramsync_custom="$(cksum < "$tmp/paramsync-custom.yaml")"
+upgrade_app_param_sync_recovery_limit "$tmp/paramsync-custom.yaml" "$tmp/paramsync-template.yaml"
+[ "$(cksum < "$tmp/paramsync-custom.yaml")" = "$before_paramsync_custom" ] || {
+  echo "FAIL: operator parameter sync recovery limit must be preserved" >&2
+  exit 1
+}
+
+echo "PASS: parameter sync recovery limit upgrade preserves operator configuration"
+
 cat > "$tmp/app-template.yaml" <<'YAML'
 provision:
   auto_configure: true

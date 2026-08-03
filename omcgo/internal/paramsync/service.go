@@ -35,6 +35,18 @@ type queuedRequestRepository interface {
 	ClaimQueuedRequests(ctx context.Context, now time.Time, limit int) ([]*SyncRequest, error)
 }
 
+type automaticAdmissionRepository interface {
+	TryReserveAutomaticAdmission(ctx context.Context, req *SyncRequest, now time.Time) (bool, error)
+}
+
+type automaticAdmissionTaskRepository interface {
+	AdjustAutomaticAdmissionTasks(ctx context.Context, req *SyncRequest, plannedTasks int, now time.Time) (bool, error)
+}
+
+type automaticAdmissionQueueRepository interface {
+	QueueRequestAndReleaseAutomaticAdmission(ctx context.Context, req *SyncRequest, nextAttemptAt time.Time, now time.Time) error
+}
+
 func (s *Service) WithMetrics(metrics *Metrics) *Service {
 	s.metrics = metrics
 	return s
@@ -134,6 +146,18 @@ func (s *Service) startRequest(ctx context.Context, req *SyncRequest) (*SubmitRe
 		req.Status, req.ResultCode = RequestStatusSucceeded, ResultCodeNoStorablePath
 		return resultFromRequest(req, 0), nil
 	}
+	if req.TriggerReason.Automatic() {
+		admission, supported := s.repo.(automaticAdmissionTaskRepository)
+		if supported {
+			allowed, adjustErr := admission.AdjustAutomaticAdmissionTasks(ctx, req, len(plan.Batches), s.now())
+			if adjustErr != nil {
+				return nil, adjustErr
+			}
+			if !allowed {
+				return resultFromRequest(req, 0), nil
+			}
+		}
+	}
 
 	start, err := s.repo.CreateOrDeduplicateRun(ctx, req)
 	if err != nil {
@@ -148,7 +172,11 @@ func (s *Service) startRequest(ctx context.Context, req *SyncRequest) (*SubmitRe
 		if !compatible && req.TriggerReason != TriggerManual {
 			if queuedRepo, ok := s.repo.(queuedRequestRepository); ok && start.ActiveRunID != nil {
 				nextAttemptAt := s.now().Add(time.Second)
-				if err := queuedRepo.QueueRequest(ctx, req.ID, nextAttemptAt); err != nil {
+				if admission, supported := s.repo.(automaticAdmissionQueueRepository); supported && req.TriggerReason.Automatic() {
+					if err := admission.QueueRequestAndReleaseAutomaticAdmission(ctx, req, nextAttemptAt, s.now()); err != nil {
+						return nil, err
+					}
+				} else if err := queuedRepo.QueueRequest(ctx, req.ID, nextAttemptAt); err != nil {
 					return nil, err
 				}
 				req.Status, req.ResultCode, req.ActiveRunID, req.NextAttemptAt = RequestStatusQueued, ResultCodeActiveSyncExists, nil, nextAttemptAt
@@ -200,6 +228,18 @@ func (s *Service) DispatchQueuedConcurrent(ctx context.Context, limit, workers i
 		return 0, err
 	}
 	return runConcurrentQueuedRequests(requests, workers, func(req *SyncRequest) (bool, error) {
+		if req.TriggerReason.Automatic() {
+			admission, supported := s.repo.(automaticAdmissionRepository)
+			if supported {
+				allowed, reserveErr := admission.TryReserveAutomaticAdmission(ctx, req, s.now())
+				if reserveErr != nil {
+					return false, reserveErr
+				}
+				if !allowed {
+					return false, nil
+				}
+			}
+		}
 		result, dispatchErr := s.startRequest(ctx, req)
 		if dispatchErr != nil {
 			return false, dispatchErr

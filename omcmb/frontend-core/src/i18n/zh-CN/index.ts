@@ -2961,6 +2961,7 @@ const messages: Record<string, string> = {
   'dashboard.daysAgo':       '{count} 天前',
   'dashboard.refreshSuccess':'刷新成功',
   'dashboard.refreshFailed': '刷新失败',
+	'dashboard.pmSlotCoverage': '最新 PM 槽位覆盖率',
 
   // Dashboard trend chart labels
   'dashboard.throughputTrend':    '上下行速率趋势',

@@ -2954,6 +2954,7 @@ const messages: Record<string, string> = {
   'dashboard.daysAgo':       '{count} day{count, plural, one{} other{s}} ago',
   'dashboard.refreshSuccess':'Refresh successful',
   'dashboard.refreshFailed': 'Refresh failed',
+	'dashboard.pmSlotCoverage': 'Latest PM slot coverage',
 
   // Dashboard trend chart labels
   'dashboard.throughputTrend':    'Throughput Trend',

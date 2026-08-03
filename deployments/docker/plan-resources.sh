@@ -197,7 +197,7 @@ log "  内存空闲预算  : ${C_G}${C_B}$(to_gib "$IDLE_MEM_MIB") GiB${C_0}  = 
 #   redis-core   2048  6144    6     ACS 会话/任务/告警，保留 1GiB AOF COW
 #   redis-pm     8192 12288   10     PM 双小时窗口/重算，保留 2GiB AOF COW
 #   nats          384  1024    6     JetStream file store + PM 突发 in-flight
-#   minio         512  2048    6     对象存储，瓶颈在磁盘非内存
+#   minio         512  2048    6     小内存开发机保持弹性；32GiB 及以上档位在分配后重排到 6GiB
 #   web           192   512    0     nginx 静态+反代，近似固定
 COMP_NAMES=(app acs worker postgres postgres-tsdb redis-core redis-pm nats minio web)
 COMP_FLOOR=(512 512 768 1024 1024 2048 8192 384 512 192)
@@ -229,7 +229,7 @@ if [ "$MAXIMIZE" = 1 ]; then
   WORKER_MEM=$(clampm 10 4096 24576)   # PM/MR XML 解析最吃内存
   ACS_MEM=$(clampm 6 4096 16384)       # TR-069 长连接会话堆
   APP_MEM=$(clampm 3 2048 8192)
-  MINIO_MEM=$(clampm 5 4096 8192)      # 对象存储；压测实测高并发 PM/MR 上传下内存可占满 1-2GiB，下限对齐 ACS/worker（2026-07-21）
+  MINIO_MEM=$(clampm 5 6144 8192)      # 海量小对象的可回收 slab 在 4GiB cap 下持续触发 memory.max；32GiB 档至少 6GiB
   NATS_MEM=$(clampm 3 1024 4096)
   REDIS_CORE_MEM=$(clampm 4 4096 6144)
   REDIS_PM_MEM=$(clampm 8 8192 12288)  # 12分钟关窗需同时容纳相邻两个小时窗口
@@ -257,6 +257,27 @@ for i in "${!COMP_NAMES[@]}"; do
 done
 
 idx() { local n="$1"; for i in "${!COMP_NAMES[@]}"; do [ "${COMP_NAMES[$i]}" = "$n" ] && { echo "$i"; return; }; done; }
+
+# 32GiB 开发/压测档与发布规划保持一致：从其它组件 floor 以上的 cap 余量重排，
+# 给 MinIO 6GiB；小内存开发机继续使用原弹性 floor，避免本地环境被固定大 cap 挤占。
+if [ "$VM_MEM_MIB" -ge 32768 ]; then
+  MINIO_IDX=$(idx minio); MINIO_TARGET_MIB=6144
+  if [ "${COMP_MEM[$MINIO_IDX]}" -lt "$MINIO_TARGET_MIB" ]; then
+    MINIO_NEED=$(( MINIO_TARGET_MIB - COMP_MEM[$MINIO_IDX] ))
+    for reclaim_name in app nats web redis-core worker postgres postgres-tsdb redis-pm; do
+      [ "$MINIO_NEED" -gt 0 ] || break
+      reclaim_idx=$(idx "$reclaim_name")
+      reclaimable=$(( COMP_MEM[$reclaim_idx] - COMP_FLOOR[$reclaim_idx] ))
+      [ "$reclaimable" -gt 0 ] || continue
+      take="$reclaimable"; [ "$take" -gt "$MINIO_NEED" ] && take="$MINIO_NEED"
+      COMP_MEM[$reclaim_idx]=$(( COMP_MEM[$reclaim_idx] - take ))
+      MINIO_NEED=$(( MINIO_NEED - take ))
+    done
+    [ "$MINIO_NEED" -eq 0 ] || die "32GiB 档位无法在不削减组件 floor 的前提下为 MinIO 保留 6GiB" 1
+    COMP_MEM[$MINIO_IDX]="$MINIO_TARGET_MIB"
+  fi
+fi
+
 APP_MEM=${COMP_MEM[$(idx app)]};            ACS_MEM=${COMP_MEM[$(idx acs)]}
 WORKER_MEM=${COMP_MEM[$(idx worker)]};      PG_MEM=${COMP_MEM[$(idx postgres)]}
 TSDB_MEM=${COMP_MEM[$(idx postgres-tsdb)]}

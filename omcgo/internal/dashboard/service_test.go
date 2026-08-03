@@ -34,6 +34,19 @@ func TestAlarmTrendQueryIncludesLegacySeverityCodes(t *testing.T) {
 	}
 }
 
+func TestLatestPMSlotHealthQueryReadsOnlyPersistedSummaries(t *testing.T) {
+	query, args, err := latestPMSlotHealthQuery()
+
+	require.NoError(t, err)
+	assert.Contains(t, query, "FROM pm_slot_health")
+	assert.Contains(t, query, "SELECT MAX(latest.slot_end) FROM pm_slot_health latest")
+	assert.NotContains(t, query, "DISTINCT ON")
+	assert.NotContains(t, query, "pm_files")
+	assert.NotContains(t, query, "pm_measurement_anchors")
+	assert.NotContains(t, query, "pm_metric_values")
+	assert.Empty(t, args)
+}
+
 func TestAlarmTrendQueryHasTablePlaceholder(t *testing.T) {
 	assert.Contains(t, alarmTrendByDateQuery, "FROM %s")
 }

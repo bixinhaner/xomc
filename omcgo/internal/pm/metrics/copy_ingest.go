@@ -6,10 +6,12 @@ import (
 	"strings"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
 
@@ -30,18 +32,20 @@ var ErrSourceContentChanged = fmt.Errorf("PM source identity content changed")
 //   - 需要强制重灌某文件时，先删其 pm_files 标记行（device_sn+file_name）再重新 publish 事件。
 //   - 源文件仍留在 MinIO（入库后不删），故标记被清后总可重放重建。
 type FileMarker struct {
-	ID            uuid.UUID
-	DeviceID      uuid.UUID
-	DeviceSN      string
-	Carrier       string
-	Technology    string
-	FileName      string
-	FileSize      int64
-	CollectTime   time.Time
-	MinioPath     string
-	ContentSHA256 []byte
-	CounterCount  int
-	RawCompressed bool
+	ID               uuid.UUID
+	DeviceID         uuid.UUID
+	DeviceSN         string
+	Carrier          string
+	Technology       string
+	FileName         string
+	FileSize         int64
+	CollectTime      time.Time
+	MeasurementStart time.Time
+	MeasurementEnd   time.Time
+	MinioPath        string
+	ContentSHA256    []byte
+	CounterCount     int
+	RawCompressed    bool
 }
 
 // MetricFromCounter 把 model.PMCounter 转 PMMetric。
@@ -200,15 +204,11 @@ func (r *PgRepository) CopyIngest(ctx context.Context, marker FileMarker, counte
 	case findErr != pgx.ErrNoRows:
 		return false, fmt.Errorf("lookup pm_files marker: %w", findErr)
 	default:
-		ct, err := tx.Exec(ctx,
-			`INSERT INTO pm_files (id, device_id, device_sn, carrier, technology, file_name, file_size,
-			                       collect_time, minio_path, content_sha256, parsed, parsed_at,
-			                       counter_count, raw_compressed, created_at)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,now(),$11,$12,NOW())
-			 ON CONFLICT DO NOTHING`,
-			id, marker.DeviceID, marker.DeviceSN, marker.Carrier, marker.Technology, marker.FileName,
-			marker.FileSize, marker.CollectTime, marker.MinioPath, marker.ContentSHA256,
-			marker.CounterCount, marker.RawCompressed)
+		insertQuery, insertArgs, buildErr := insertFileMarkerQuery(id, marker)
+		if buildErr != nil {
+			return false, fmt.Errorf("build pm_files marker insert: %w", buildErr)
+		}
+		ct, err := tx.Exec(ctx, insertQuery, insertArgs...)
 		if err != nil {
 			return false, fmt.Errorf("insert pm_files marker: %w", err)
 		}
@@ -245,6 +245,19 @@ func (r *PgRepository) CopyIngest(ctx context.Context, marker FileMarker, counte
 		return false, classifyInsertError(err)
 	}
 	return true, nil
+}
+
+func insertFileMarkerQuery(id uuid.UUID, marker FileMarker) (string, []any, error) {
+	return storage.Psql.Insert("pm_files").Columns(
+		"id", "device_id", "device_sn", "carrier", "technology", "file_name", "file_size",
+		"collect_time", "measurement_start", "measurement_end", "minio_path", "content_sha256",
+		"parsed", "parsed_at", "counter_count", "raw_compressed", "created_at",
+	).Values(
+		id, marker.DeviceID, marker.DeviceSN, marker.Carrier, marker.Technology, marker.FileName,
+		marker.FileSize, marker.CollectTime, marker.MeasurementStart, marker.MeasurementEnd,
+		marker.MinioPath, marker.ContentSHA256, true, sq.Expr("NOW()"), marker.CounterCount,
+		marker.RawCompressed, sq.Expr("NOW()"),
+	).Suffix("ON CONFLICT DO NOTHING").ToSql()
 }
 
 func buildAggregationEvent(

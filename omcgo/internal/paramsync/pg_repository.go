@@ -21,17 +21,48 @@ type PGRepository struct {
 	pool *pgxpool.Pool
 }
 
+var (
+	_ automaticAdmissionRepository      = (*PGRepository)(nil)
+	_ automaticAdmissionTaskRepository  = (*PGRepository)(nil)
+	_ automaticAdmissionQueueRepository = (*PGRepository)(nil)
+)
+
+type AutomaticAdmissionStats struct {
+	ReservedRuns         int
+	QueuedRequests       int
+	OldestQueueAgeSecond float64
+}
+
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
 
-func (r *PGRepository) ListReleaseCandidates(
-	ctx context.Context,
-	campaignID uuid.UUID,
-	limit int,
-) ([]*model.Device, error) {
+const (
+	automaticAdmissionClass                 = "global"
+	automaticAdmissionBucketCount           = 64
+	automaticAdmissionRunsPerBucket         = 32
+	automaticAdmissionTasksPerBucket        = 864
+	automaticAdmissionLease                 = 2 * time.Hour
+	automaticAdmissionRetry                 = 30 * time.Second
+	automaticAdmissionMaintenanceLock int64 = 0x504152414d53594e
+	releaseCampaignCategoryPrefix           = "param_sync_release:"
+)
+
+func automaticAdmissionBucket(deviceID uuid.UUID) int16 {
+	value := uint16(deviceID[0])<<8 | uint16(deviceID[1])
+	return int16(value % automaticAdmissionBucketCount)
+}
+
+func releaseCampaignCategory(campaignID uuid.UUID) string {
+	return releaseCampaignCategoryPrefix + campaignID.String()
+}
+
+func listReleaseCandidatesQuery(campaignID uuid.UUID, limit int) (string, []any, error) {
 	if limit <= 0 {
 		limit = 200
 	}
-	completedOrActive := sq.
+	category := releaseCampaignCategory(campaignID)
+	// Nested Sqlizers must keep question-mark placeholders until the outer
+	// Dollar-format builder performs one global numbering pass.
+	completedOrActive := sq.StatementBuilder.PlaceholderFormat(sq.Question).
 		Select("1").
 		From("parameter_sync_requests req").
 		Where("req.device_id = d.id").
@@ -45,8 +76,38 @@ func (r *PGRepository) ListReleaseCandidates(
 				RequestStatusSucceeded,
 			},
 		})
-	query, args, err := storage.Psql.
+	return storage.Psql.
 		Select("d.id", "d.serial_number").
+		Prefix(`WITH inserted_campaign AS (
+  INSERT INTO config_apply_versions (category, config_version, updated_at)
+  VALUES (?, 0, now())
+  ON CONFLICT (category) DO NOTHING
+  RETURNING updated_at
+), campaign AS (
+  SELECT updated_at FROM inserted_campaign
+  UNION ALL
+  SELECT updated_at FROM config_apply_versions WHERE category = ?
+  LIMIT 1
+), superseded_requests AS (
+  UPDATE parameter_sync_requests req
+  SET status = 'cancelled',
+      result_code = ?,
+      completed_at = COALESCE(req.completed_at, now()),
+      updated_at = now()
+  FROM campaign current_campaign
+  WHERE req.trigger_reason = ?
+    AND req.campaign_id IS NOT NULL
+    AND req.campaign_id <> ?
+    AND NOT EXISTS (
+      SELECT 1
+      FROM config_apply_versions other_campaign
+      WHERE other_campaign.category = ? || req.campaign_id::text
+        AND other_campaign.updated_at >= current_campaign.updated_at
+    )
+    AND req.status IN (?, ?)
+  RETURNING req.id
+)`, category, category, ResultCodeSupersededRelease, TriggerOMCUpgrade,
+			campaignID, releaseCampaignCategoryPrefix, RequestStatusAccepted, RequestStatusQueued).
 		From("devices d").
 		LeftJoin("parameter_sync_device_state state ON state.device_id = d.id").
 		Where(sq.Eq{
@@ -54,11 +115,44 @@ func (r *PGRepository) ListReleaseCandidates(
 			"d.lifecycle_state": model.LifecycleCommissioned,
 			"d.is_online":       true,
 		}).
+		Where("d.created_at < (SELECT updated_at FROM campaign)").
 		Where("(state.next_auto_sync_at IS NULL OR state.next_auto_sync_at <= now())").
 		Where(sq.Expr("NOT EXISTS (?)", completedOrActive)).
 		OrderBy("state.last_attempt_at ASC NULLS FIRST", "d.id").
 		Limit(uint64(limit)).
 		ToSql()
+}
+
+func admissionReleaseCandidatesQuery(now time.Time, limit int) (string, []any, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	return storage.Psql.
+		Select("reservation.id", "reservation.request_id", "reservation.admission_class", "reservation.bucket_id",
+			"reservation.reserved_runs", "reservation.reserved_tasks",
+			"req.status").
+		From("parameter_sync_admission_reservations reservation").
+		Join("parameter_sync_requests req ON req.id = reservation.request_id").
+		Where(sq.Eq{"reservation.status": "reserved"}).
+		Where(sq.Or{
+			sq.Lt{"reservation.lease_until": now},
+			sq.Eq{"req.status": []RequestStatus{
+				RequestStatusSucceeded, RequestStatusFailed, RequestStatusTimedOut,
+				RequestStatusCancelled, RequestStatusDeduplicated, RequestStatusRejected,
+			}},
+		}).
+		OrderBy("reservation.updated_at", "reservation.id").
+		Limit(uint64(limit)).
+		Suffix("FOR UPDATE OF reservation SKIP LOCKED").
+		ToSql()
+}
+
+func (r *PGRepository) ListReleaseCandidates(
+	ctx context.Context,
+	campaignID uuid.UUID,
+	limit int,
+) ([]*model.Device, error) {
+	query, args, err := listReleaseCandidatesQuery(campaignID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("build list OMC release candidates: %w", err)
 	}
@@ -199,12 +293,12 @@ func buildCreateRequest(req *SyncRequest) (string, []any, error) {
 			"requested_paths", "status", "priority", "next_attempt_at", "deadline_at", "idempotency_key",
 			"result_code", "error_message", "campaign_id", "source_event_id", "origin_event_type",
 			"model_upload_intent_id", "model_upload_status", "admission_class", "admission_reason",
-			"admission_snapshot", "deduplicated_to_request_id", "created_at", "completed_at", "updated_at").
+			"admission_snapshot", "admission_queued_at", "deduplicated_to_request_id", "created_at", "completed_at", "updated_at").
 		Values(req.ID, req.DeviceID, req.DeviceSN, req.CallerType, req.TriggerReason, req.SyncScope,
 			paths, req.Status, req.Priority, req.NextAttemptAt, req.DeadlineAt, req.IdempotencyKey,
 			req.ResultCode, req.ErrorMessage, req.CampaignID, req.SourceEventID, req.OriginEventType,
 			req.ModelUploadIntentID, req.ModelUploadStatus, req.AdmissionClass, req.AdmissionReason,
-			req.AdmissionSnapshot, req.DeduplicatedToRequestID, req.CreatedAt, req.CompletedAt, req.UpdatedAt).
+			req.AdmissionSnapshot, req.AdmissionQueuedAt, req.DeduplicatedToRequestID, req.CreatedAt, req.CompletedAt, req.UpdatedAt).
 		Suffix(`ON CONFLICT (caller_type, idempotency_key)
 			WHERE idempotency_key IS NOT NULL DO NOTHING`).
 		ToSql()
@@ -221,7 +315,7 @@ func (r *PGRepository) GetRequest(ctx context.Context, id uuid.UUID) (*SyncReque
 		"deadline_at", "idempotency_key", "COALESCE(result_code, '')", "COALESCE(result_summary, 'null'::jsonb)", "COALESCE(error_message, '')",
 		"campaign_id", "source_event_id", "origin_event_type", "model_upload_intent_id", "model_upload_status",
 		"admission_class", "COALESCE(admission_reason, '')", "COALESCE(admission_snapshot, 'null'::jsonb)",
-		"deduplicated_to_request_id", "created_at", "started_at", "completed_at", "updated_at",
+		"admission_queued_at", "deduplicated_to_request_id", "created_at", "started_at", "completed_at", "updated_at",
 	).From("parameter_sync_requests").Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build get parameter sync request: %w", err)
@@ -233,7 +327,7 @@ func (r *PGRepository) GetRequest(ctx context.Context, id uuid.UUID) (*SyncReque
 		&paths, &req.Status, &req.RunID, &req.ActiveRunID, &req.Priority, &req.NextAttemptAt,
 		&req.DeadlineAt, &req.IdempotencyKey, &req.ResultCode, &req.ResultSummary, &req.ErrorMessage,
 		&req.CampaignID, &req.SourceEventID, &req.OriginEventType, &req.ModelUploadIntentID, &req.ModelUploadStatus,
-		&req.AdmissionClass, &req.AdmissionReason, &req.AdmissionSnapshot, &req.DeduplicatedToRequestID,
+		&req.AdmissionClass, &req.AdmissionReason, &req.AdmissionSnapshot, &req.AdmissionQueuedAt, &req.DeduplicatedToRequestID,
 		&req.CreatedAt, &req.StartedAt, &req.CompletedAt, &req.UpdatedAt,
 	)
 	if err != nil {
@@ -529,6 +623,8 @@ RETURNING next_auto_sync_at`
 	} else if err != nil {
 		return false, fmt.Errorf("reserve automatic parameter sync: %w", err)
 	}
+	class := automaticAdmissionClass
+	req.AdmissionClass = &class
 	if !allowed {
 		message := fmt.Sprintf("automatic parameter sync backed off until %s", next.Format(time.RFC3339))
 		req.ResultCode = ResultCodeAutomaticBackoff
@@ -556,10 +652,693 @@ RETURNING next_auto_sync_at`
 	if tag.RowsAffected() == 0 {
 		return false, ErrRequestIdempotencyConflict
 	}
+	if allowed {
+		allowed, err = reserveAutomaticAdmission(ctx, tx, req, now)
+		if err != nil {
+			return false, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit automatic parameter sync request: %w", err)
 	}
 	return allowed, nil
+}
+
+func reserveAutomaticAdmission(ctx context.Context, tx pgx.Tx, req *SyncRequest, now time.Time) (bool, error) {
+	bucketID := automaticAdmissionBucket(req.DeviceID)
+	var existingStatus string
+	var existingLease time.Time
+	existingQuery, existingArgs, err := storage.Psql.
+		Select("status", "lease_until").
+		From("parameter_sync_admission_reservations").
+		Where(sq.Eq{"request_id": req.ID, "admission_class": automaticAdmissionClass}).
+		Suffix("FOR UPDATE").ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build load automatic admission reservation: %w", err)
+	}
+	err = tx.QueryRow(ctx, existingQuery, existingArgs...).Scan(&existingStatus, &existingLease)
+	if err == nil && existingStatus == "reserved" {
+		req.ResultCode = ""
+		req.AdmissionReason = ""
+		req.UpdatedAt = now
+		query, args, buildErr := storage.Psql.Update("parameter_sync_requests").
+			Set("result_code", nil).
+			Set("admission_reason", nil).
+			Set("admission_queued_at", nil).
+			Set("updated_at", now).
+			Where(sq.Eq{"id": req.ID}).ToSql()
+		if buildErr != nil {
+			return false, fmt.Errorf("build reuse automatic admission reservation: %w", buildErr)
+		}
+		if _, updateErr := tx.Exec(ctx, query, args...); updateErr != nil {
+			return false, fmt.Errorf("reuse automatic admission reservation: %w", updateErr)
+		}
+		if !existingLease.After(now) {
+			leaseQuery, leaseArgs, buildErr := storage.Psql.Update("parameter_sync_admission_reservations").
+				Set("lease_until", now.Add(automaticAdmissionLease)).Set("updated_at", now).
+				Where(sq.Eq{"request_id": req.ID, "admission_class": automaticAdmissionClass, "status": "reserved"}).ToSql()
+			if buildErr != nil {
+				return false, fmt.Errorf("build renew automatic admission reservation: %w", buildErr)
+			}
+			if _, updateErr := tx.Exec(ctx, leaseQuery, leaseArgs...); updateErr != nil {
+				return false, fmt.Errorf("renew automatic admission reservation: %w", updateErr)
+			}
+		}
+		return true, nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return false, fmt.Errorf("load automatic admission reservation: %w", err)
+	}
+
+	stateQuery, stateArgs, err := storage.Psql.Insert("parameter_sync_admission_state").
+		Columns("admission_class", "bucket_id", "active_run_limit", "active_task_limit", "reserved_runs", "reserved_tasks", "version", "updated_at").
+		Values(automaticAdmissionClass, bucketID, automaticAdmissionRunsPerBucket, automaticAdmissionTasksPerBucket,
+			1, 0, 1, now).
+		Suffix(`ON CONFLICT (admission_class, bucket_id) DO UPDATE SET
+  active_run_limit = CASE WHEN parameter_sync_admission_state.active_run_limit <= 0 THEN EXCLUDED.active_run_limit ELSE parameter_sync_admission_state.active_run_limit END,
+  active_task_limit = CASE WHEN parameter_sync_admission_state.active_task_limit <= 0 THEN EXCLUDED.active_task_limit ELSE parameter_sync_admission_state.active_task_limit END,
+  reserved_runs = parameter_sync_admission_state.reserved_runs + EXCLUDED.reserved_runs,
+  reserved_tasks = parameter_sync_admission_state.reserved_tasks + EXCLUDED.reserved_tasks,
+  version = parameter_sync_admission_state.version + 1,
+  updated_at = EXCLUDED.updated_at
+WHERE parameter_sync_admission_state.reserved_runs + EXCLUDED.reserved_runs <=
+      CASE WHEN parameter_sync_admission_state.active_run_limit <= 0 THEN EXCLUDED.active_run_limit ELSE parameter_sync_admission_state.active_run_limit END
+  AND parameter_sync_admission_state.reserved_tasks + EXCLUDED.reserved_tasks <=
+      CASE WHEN parameter_sync_admission_state.active_task_limit <= 0 THEN EXCLUDED.active_task_limit ELSE parameter_sync_admission_state.active_task_limit END
+RETURNING reserved_runs, reserved_tasks`).
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build reserve automatic admission state: %w", err)
+	}
+	var reservedRuns, reservedTasks int
+	err = tx.QueryRow(ctx, stateQuery, stateArgs...).Scan(&reservedRuns, &reservedTasks)
+	if errors.Is(err, pgx.ErrNoRows) {
+		snapshot, marshalErr := json.Marshal(map[string]any{
+			"bucket_id":         bucketID,
+			"active_run_limit":  automaticAdmissionRunsPerBucket,
+			"active_task_limit": automaticAdmissionTasksPerBucket,
+		})
+		if marshalErr != nil {
+			return false, fmt.Errorf("marshal automatic admission backpressure snapshot: %w", marshalErr)
+		}
+		nextAttempt := now.Add(automaticAdmissionRetry)
+		req.Status = RequestStatusQueued
+		req.ResultCode = ResultCodeAutomaticBackpressure
+		req.AdmissionReason = "global automatic parameter sync capacity is full"
+		req.AdmissionSnapshot = snapshot
+		if req.AdmissionQueuedAt == nil {
+			queuedAt := now
+			req.AdmissionQueuedAt = &queuedAt
+		}
+		req.NextAttemptAt = nextAttempt
+		req.UpdatedAt = now
+		query, args, buildErr := storage.Psql.Update("parameter_sync_requests").
+			Set("status", req.Status).
+			Set("result_code", req.ResultCode).
+			Set("admission_class", automaticAdmissionClass).
+			Set("admission_reason", req.AdmissionReason).
+			Set("admission_snapshot", snapshot).
+			Set("admission_queued_at", sq.Expr("COALESCE(admission_queued_at, ?)", now)).
+			Set("next_attempt_at", nextAttempt).
+			Set("updated_at", now).
+			Where(sq.Eq{"id": req.ID}).ToSql()
+		if buildErr != nil {
+			return false, fmt.Errorf("build queue backpressured automatic request: %w", buildErr)
+		}
+		if _, updateErr := tx.Exec(ctx, query, args...); updateErr != nil {
+			return false, fmt.Errorf("queue backpressured automatic request: %w", updateErr)
+		}
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("reserve automatic admission state: %w", err)
+	}
+
+	leaseUntil := now.Add(automaticAdmissionLease)
+	reservationQuery, reservationArgs, err := storage.Psql.Insert("parameter_sync_admission_reservations").
+		Columns("request_id", "admission_class", "bucket_id", "reserved_runs", "reserved_tasks", "status", "lease_until", "created_at", "updated_at").
+		Values(req.ID, automaticAdmissionClass, bucketID, 1, 0, "reserved", leaseUntil, now, now).
+		Suffix(`ON CONFLICT (request_id, admission_class) DO UPDATE SET
+  bucket_id = EXCLUDED.bucket_id,
+  reserved_runs = EXCLUDED.reserved_runs,
+  reserved_tasks = EXCLUDED.reserved_tasks,
+  status = 'reserved',
+  lease_until = EXCLUDED.lease_until,
+  released_at = NULL,
+  updated_at = EXCLUDED.updated_at
+WHERE parameter_sync_admission_reservations.status IN ('released', 'expired')
+RETURNING id`).
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build automatic admission reservation: %w", err)
+	}
+	var reservationID uuid.UUID
+	if err := tx.QueryRow(ctx, reservationQuery, reservationArgs...).Scan(&reservationID); err != nil {
+		return false, fmt.Errorf("create automatic admission reservation: %w", err)
+	}
+	snapshot, err := json.Marshal(map[string]any{
+		"bucket_id":         bucketID,
+		"reserved_runs":     reservedRuns,
+		"reserved_tasks":    reservedTasks,
+		"active_run_limit":  automaticAdmissionRunsPerBucket,
+		"active_task_limit": automaticAdmissionTasksPerBucket,
+		"lease_until":       leaseUntil,
+	})
+	if err != nil {
+		return false, fmt.Errorf("marshal automatic admission snapshot: %w", err)
+	}
+	req.ResultCode = ""
+	req.AdmissionReason = ""
+	req.AdmissionSnapshot = snapshot
+	req.AdmissionQueuedAt = nil
+	req.UpdatedAt = now
+	query, args, err := storage.Psql.Update("parameter_sync_requests").
+		Set("result_code", nil).
+		Set("admission_class", automaticAdmissionClass).
+		Set("admission_reason", nil).
+		Set("admission_snapshot", snapshot).
+		Set("admission_queued_at", nil).
+		Set("updated_at", now).
+		Where(sq.Eq{"id": req.ID}).ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build record automatic admission: %w", err)
+	}
+	if _, err := tx.Exec(ctx, query, args...); err != nil {
+		return false, fmt.Errorf("record automatic admission: %w", err)
+	}
+	return true, nil
+}
+
+func (r *PGRepository) TryReserveAutomaticAdmission(ctx context.Context, req *SyncRequest, now time.Time) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin queued automatic admission: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	var status RequestStatus
+	requestQuery, requestArgs, err := storage.Psql.Select("status").From("parameter_sync_requests").
+		Where(sq.Eq{"id": req.ID}).Suffix("FOR UPDATE").ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build lock queued automatic request: %w", err)
+	}
+	if err := tx.QueryRow(ctx, requestQuery, requestArgs...).Scan(&status); err != nil {
+		return false, fmt.Errorf("lock queued automatic request: %w", err)
+	}
+	if status != RequestStatusQueued {
+		return false, nil
+	}
+	allowed, err := reserveAutomaticAdmission(ctx, tx, req, now)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit queued automatic admission: %w", err)
+	}
+	return allowed, nil
+}
+
+// AdjustAutomaticAdmissionTasks replaces the planning estimate with the exact
+// batch count before any run or device task is created. If the bucket has no
+// task capacity, the run slot is released and the durable request stays queued.
+func (r *PGRepository) AdjustAutomaticAdmissionTasks(
+	ctx context.Context,
+	req *SyncRequest,
+	plannedTasks int,
+	now time.Time,
+) (bool, error) {
+	if plannedTasks < 0 {
+		return false, fmt.Errorf("adjust automatic admission tasks: planned task count must not be negative")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin automatic admission task adjustment: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	requestLockQuery, requestLockArgs, err := storage.Psql.Select("status").From("parameter_sync_requests").
+		Where(sq.Eq{"id": req.ID}).Suffix("FOR UPDATE").ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build lock automatic request for task adjustment: %w", err)
+	}
+	var requestStatus RequestStatus
+	if err := tx.QueryRow(ctx, requestLockQuery, requestLockArgs...).Scan(&requestStatus); err != nil {
+		return false, fmt.Errorf("lock automatic request for task adjustment: %w", err)
+	}
+	if requestStatus != RequestStatusAccepted && requestStatus != RequestStatusQueued {
+		return false, fmt.Errorf("adjust automatic admission tasks: %w", ErrRequestStateConflict)
+	}
+	query, args, err := storage.Psql.Select("bucket_id", "reserved_tasks", "status").
+		From("parameter_sync_admission_reservations").
+		Where(sq.Eq{"request_id": req.ID, "admission_class": automaticAdmissionClass}).
+		Suffix("FOR UPDATE").ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build lock automatic admission task reservation: %w", err)
+	}
+	var bucketID int16
+	var currentTasks int
+	var reservationStatus string
+	if err := tx.QueryRow(ctx, query, args...).Scan(&bucketID, &currentTasks, &reservationStatus); err != nil {
+		return false, fmt.Errorf("lock automatic admission task reservation: %w", err)
+	}
+	if reservationStatus != "reserved" {
+		return false, fmt.Errorf("adjust automatic admission tasks: reservation status is %s", reservationStatus)
+	}
+	delta := plannedTasks - currentTasks
+	if delta > 0 {
+		stateQuery, stateArgs, buildErr := storage.Psql.Update("parameter_sync_admission_state").
+			Set("reserved_tasks", sq.Expr("reserved_tasks + ?", delta)).
+			Set("version", sq.Expr("version + 1")).Set("updated_at", now).
+			Where(sq.Eq{"admission_class": automaticAdmissionClass, "bucket_id": bucketID}).
+			Where("reserved_tasks + ? <= active_task_limit", delta).
+			Suffix("RETURNING reserved_tasks").ToSql()
+		if buildErr != nil {
+			return false, fmt.Errorf("build adjust automatic admission task state: %w", buildErr)
+		}
+		var totalTasks int
+		adjustErr := tx.QueryRow(ctx, stateQuery, stateArgs...).Scan(&totalTasks)
+		if errors.Is(adjustErr, pgx.ErrNoRows) {
+			nextAttempt := now.Add(automaticAdmissionRetry)
+			reservationQuery, reservationArgs, buildErr := storage.Psql.Update("parameter_sync_admission_reservations").
+				Set("status", "released").Set("released_at", now).Set("updated_at", now).
+				Where(sq.Eq{"request_id": req.ID, "admission_class": automaticAdmissionClass, "status": "reserved"}).ToSql()
+			if buildErr != nil {
+				return false, fmt.Errorf("build release task-backpressured reservation: %w", buildErr)
+			}
+			if _, updateErr := tx.Exec(ctx, reservationQuery, reservationArgs...); updateErr != nil {
+				return false, fmt.Errorf("release task-backpressured reservation: %w", updateErr)
+			}
+			stateReleaseQuery, stateReleaseArgs, buildErr := storage.Psql.Update("parameter_sync_admission_state").
+				Set("reserved_runs", sq.Expr("GREATEST(reserved_runs - 1, 0)")).
+				Set("reserved_tasks", sq.Expr("GREATEST(reserved_tasks - ?, 0)", currentTasks)).
+				Set("version", sq.Expr("version + 1")).Set("updated_at", now).
+				Where(sq.Eq{"admission_class": automaticAdmissionClass, "bucket_id": bucketID}).ToSql()
+			if buildErr != nil {
+				return false, fmt.Errorf("build release task-backpressured admission state: %w", buildErr)
+			}
+			if _, updateErr := tx.Exec(ctx, stateReleaseQuery, stateReleaseArgs...); updateErr != nil {
+				return false, fmt.Errorf("release task-backpressured admission state: %w", updateErr)
+			}
+			requestQuery, requestArgs, buildErr := storage.Psql.Update("parameter_sync_requests").
+				Set("status", RequestStatusQueued).Set("result_code", ResultCodeAutomaticBackpressure).
+				Set("admission_reason", "global automatic parameter sync task capacity is full").
+				Set("admission_queued_at", sq.Expr("COALESCE(admission_queued_at, ?)", now)).
+				Set("next_attempt_at", nextAttempt).Set("updated_at", now).
+				Where(sq.Eq{"id": req.ID, "status": []RequestStatus{RequestStatusAccepted, RequestStatusQueued}, "run_id": nil}).ToSql()
+			if buildErr != nil {
+				return false, fmt.Errorf("build queue task-backpressured request: %w", buildErr)
+			}
+			requestTag, updateErr := tx.Exec(ctx, requestQuery, requestArgs...)
+			if updateErr != nil {
+				return false, fmt.Errorf("queue task-backpressured request: %w", updateErr)
+			}
+			if requestTag.RowsAffected() != 1 {
+				return false, fmt.Errorf("queue task-backpressured request: %w", ErrRequestStateConflict)
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return false, fmt.Errorf("commit task-backpressured automatic request: %w", err)
+			}
+			queuedAt := now
+			req.Status = RequestStatusQueued
+			req.ResultCode = ResultCodeAutomaticBackpressure
+			req.AdmissionReason = "global automatic parameter sync task capacity is full"
+			req.AdmissionQueuedAt = &queuedAt
+			req.NextAttemptAt = nextAttempt
+			return false, nil
+		}
+		if adjustErr != nil {
+			return false, fmt.Errorf("adjust automatic admission task state: %w", adjustErr)
+		}
+	} else if delta < 0 {
+		stateQuery, stateArgs, buildErr := storage.Psql.Update("parameter_sync_admission_state").
+			Set("reserved_tasks", sq.Expr("GREATEST(reserved_tasks + ?, 0)", delta)).
+			Set("version", sq.Expr("version + 1")).Set("updated_at", now).
+			Where(sq.Eq{"admission_class": automaticAdmissionClass, "bucket_id": bucketID}).ToSql()
+		if buildErr != nil {
+			return false, fmt.Errorf("build reduce automatic admission task state: %w", buildErr)
+		}
+		if _, updateErr := tx.Exec(ctx, stateQuery, stateArgs...); updateErr != nil {
+			return false, fmt.Errorf("reduce automatic admission task state: %w", updateErr)
+		}
+	}
+	reservationQuery, reservationArgs, err := storage.Psql.Update("parameter_sync_admission_reservations").
+		Set("reserved_tasks", plannedTasks).Set("updated_at", now).
+		Where(sq.Eq{"request_id": req.ID, "admission_class": automaticAdmissionClass, "status": "reserved"}).ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build record exact automatic admission tasks: %w", err)
+	}
+	if _, err := tx.Exec(ctx, reservationQuery, reservationArgs...); err != nil {
+		return false, fmt.Errorf("record exact automatic admission tasks: %w", err)
+	}
+	requestQuery, requestArgs, err := storage.Psql.Update("parameter_sync_requests").
+		Set("result_code", nil).Set("admission_reason", nil).Set("admission_queued_at", nil).Set("updated_at", now).
+		Where(sq.Eq{"id": req.ID}).ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build clear automatic admission task backpressure: %w", err)
+	}
+	if _, err := tx.Exec(ctx, requestQuery, requestArgs...); err != nil {
+		return false, fmt.Errorf("clear automatic admission task backpressure: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit automatic admission task adjustment: %w", err)
+	}
+	req.ResultCode = ""
+	req.AdmissionReason = ""
+	req.AdmissionQueuedAt = nil
+	return true, nil
+}
+
+func (r *PGRepository) QueueRequestAndReleaseAutomaticAdmission(
+	ctx context.Context,
+	req *SyncRequest,
+	nextAttemptAt time.Time,
+	now time.Time,
+) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin queue and release automatic admission: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	requestLockQuery, requestLockArgs, err := storage.Psql.Select("status").From("parameter_sync_requests").
+		Where(sq.Eq{"id": req.ID}).Suffix("FOR UPDATE").ToSql()
+	if err != nil {
+		return fmt.Errorf("build lock automatic request for queue: %w", err)
+	}
+	var requestStatus RequestStatus
+	if err := tx.QueryRow(ctx, requestLockQuery, requestLockArgs...).Scan(&requestStatus); err != nil {
+		return fmt.Errorf("lock automatic request for queue: %w", err)
+	}
+	query, args, err := storage.Psql.Select("bucket_id", "reserved_runs", "reserved_tasks", "status").
+		From("parameter_sync_admission_reservations").
+		Where(sq.Eq{"request_id": req.ID, "admission_class": automaticAdmissionClass}).
+		Suffix("FOR UPDATE").ToSql()
+	if err != nil {
+		return fmt.Errorf("build lock automatic admission release: %w", err)
+	}
+	var bucketID int16
+	var reservedRuns, reservedTasks int
+	var status string
+	err = tx.QueryRow(ctx, query, args...).Scan(&bucketID, &reservedRuns, &reservedTasks, &status)
+	reservationExists := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("lock automatic admission release: %w", err)
+	}
+	if reservationExists && status == "reserved" {
+		reservationQuery, reservationArgs, buildErr := storage.Psql.Update("parameter_sync_admission_reservations").
+			Set("status", "released").Set("released_at", now).Set("updated_at", now).
+			Where(sq.Eq{"request_id": req.ID, "admission_class": automaticAdmissionClass, "status": "reserved"}).ToSql()
+		if buildErr != nil {
+			return fmt.Errorf("build release automatic admission reservation: %w", buildErr)
+		}
+		if _, updateErr := tx.Exec(ctx, reservationQuery, reservationArgs...); updateErr != nil {
+			return fmt.Errorf("release automatic admission reservation: %w", updateErr)
+		}
+		stateQuery, stateArgs, buildErr := storage.Psql.Update("parameter_sync_admission_state").
+			Set("reserved_runs", sq.Expr("GREATEST(reserved_runs - ?, 0)", reservedRuns)).
+			Set("reserved_tasks", sq.Expr("GREATEST(reserved_tasks - ?, 0)", reservedTasks)).
+			Set("version", sq.Expr("version + 1")).Set("updated_at", now).
+			Where(sq.Eq{"admission_class": automaticAdmissionClass, "bucket_id": bucketID}).ToSql()
+		if buildErr != nil {
+			return fmt.Errorf("build release automatic admission state: %w", buildErr)
+		}
+		if _, updateErr := tx.Exec(ctx, stateQuery, stateArgs...); updateErr != nil {
+			return fmt.Errorf("release automatic admission state: %w", updateErr)
+		}
+	}
+	requestQuery, requestArgs, err := storage.Psql.Update("parameter_sync_requests").
+		Set("status", RequestStatusQueued).Set("result_code", ResultCodeActiveSyncExists).
+		Set("active_run_id", nil).Set("next_attempt_at", nextAttemptAt).
+		Set("admission_queued_at", nil).Set("updated_at", now).
+		Where(sq.Eq{"id": req.ID, "status": []RequestStatus{RequestStatusAccepted, RequestStatusQueued}, "run_id": nil}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build queue released automatic request: %w", err)
+	}
+	requestTag, err := tx.Exec(ctx, requestQuery, requestArgs...)
+	if err != nil {
+		return fmt.Errorf("queue released automatic request: %w", err)
+	}
+	if requestTag.RowsAffected() != 1 {
+		return fmt.Errorf("queue released automatic request: %w", ErrRequestStateConflict)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit queue and release automatic admission: %w", err)
+	}
+	return nil
+}
+
+// ReconcileAutomaticAdmission releases capacity for terminal requests and
+// expires abandoned reservations whose owner did not finish before the lease.
+func (r *PGRepository) ReconcileAutomaticAdmission(ctx context.Context, now time.Time, limit int) (int, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin automatic admission reconciliation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	locked, err := tryAutomaticAdmissionMaintenanceLock(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if !locked {
+		return 0, nil
+	}
+	recovered, err := recoverAcceptedAutomaticAdmissions(ctx, tx, now, limit)
+	if err != nil {
+		return 0, err
+	}
+	query, args, err := admissionReleaseCandidatesQuery(now, limit)
+	if err != nil {
+		return 0, fmt.Errorf("build automatic admission reconciliation: %w", err)
+	}
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("list automatic admission releases: %w", err)
+	}
+	type release struct {
+		id             uuid.UUID
+		requestID      uuid.UUID
+		admissionClass string
+		bucketID       int16
+		reservedRuns   int
+		reservedTasks  int
+		requestStatus  RequestStatus
+	}
+	var releases []release
+	for rows.Next() {
+		var item release
+		if err := rows.Scan(&item.id, &item.requestID, &item.admissionClass, &item.bucketID,
+			&item.reservedRuns, &item.reservedTasks, &item.requestStatus); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan automatic admission release: %w", err)
+		}
+		releases = append(releases, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("iterate automatic admission releases: %w", err)
+	}
+	rows.Close()
+	for _, item := range releases {
+		if !item.requestStatus.Terminal() {
+			leaseQuery, leaseArgs, buildErr := storage.Psql.Update("parameter_sync_admission_reservations").
+				Set("lease_until", now.Add(automaticAdmissionLease)).Set("updated_at", now).
+				Where(sq.Eq{"id": item.id, "status": "reserved"}).ToSql()
+			if buildErr != nil {
+				return 0, fmt.Errorf("build renew automatic admission lease: %w", buildErr)
+			}
+			if _, updateErr := tx.Exec(ctx, leaseQuery, leaseArgs...); updateErr != nil {
+				return 0, fmt.Errorf("renew automatic admission lease: %w", updateErr)
+			}
+			continue
+		}
+		reservationQuery, reservationArgs, buildErr := storage.Psql.Update("parameter_sync_admission_reservations").
+			Set("status", "released").Set("released_at", now).Set("updated_at", now).
+			Where(sq.Eq{"id": item.id, "status": "reserved"}).ToSql()
+		if buildErr != nil {
+			return 0, fmt.Errorf("build release automatic admission reservation: %w", buildErr)
+		}
+		tag, updateErr := tx.Exec(ctx, reservationQuery, reservationArgs...)
+		if updateErr != nil {
+			return 0, fmt.Errorf("release automatic admission reservation: %w", updateErr)
+		}
+		if tag.RowsAffected() == 0 {
+			continue
+		}
+		stateQuery, stateArgs, buildErr := storage.Psql.Update("parameter_sync_admission_state").
+			Set("reserved_runs", sq.Expr("GREATEST(reserved_runs - ?, 0)", item.reservedRuns)).
+			Set("reserved_tasks", sq.Expr("GREATEST(reserved_tasks - ?, 0)", item.reservedTasks)).
+			Set("version", sq.Expr("version + 1")).Set("updated_at", now).
+			Where(sq.Eq{"admission_class": item.admissionClass, "bucket_id": item.bucketID}).ToSql()
+		if buildErr != nil {
+			return 0, fmt.Errorf("build release automatic admission state: %w", buildErr)
+		}
+		if _, updateErr := tx.Exec(ctx, stateQuery, stateArgs...); updateErr != nil {
+			return 0, fmt.Errorf("release automatic admission state: %w", updateErr)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit automatic admission reconciliation: %w", err)
+	}
+	return recovered + len(releases), nil
+}
+
+func recoverAcceptedAutomaticAdmissions(ctx context.Context, tx pgx.Tx, now time.Time, limit int) (int, error) {
+	query, args, err := storage.Psql.Select("req.id").From("parameter_sync_requests req").
+		Join("parameter_sync_admission_reservations reservation ON reservation.request_id = req.id").
+		Where(sq.Eq{"req.status": RequestStatusAccepted, "req.run_id": nil, "reservation.status": "reserved"}).
+		Where(sq.Lt{"reservation.lease_until": now}).
+		OrderBy("req.created_at", "req.id").Limit(uint64(limit)).
+		Suffix("FOR UPDATE OF req SKIP LOCKED").ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build recover accepted automatic admissions: %w", err)
+	}
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("list recoverable accepted automatic admissions: %w", err)
+	}
+	var requestIDs []uuid.UUID
+	for rows.Next() {
+		var requestID uuid.UUID
+		if err := rows.Scan(&requestID); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan recoverable accepted automatic admission: %w", err)
+		}
+		requestIDs = append(requestIDs, requestID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("iterate recoverable accepted automatic admissions: %w", err)
+	}
+	rows.Close()
+	for _, requestID := range requestIDs {
+		reservationQuery, reservationArgs, buildErr := storage.Psql.Update("parameter_sync_admission_reservations").
+			Set("lease_until", now.Add(automaticAdmissionLease)).Set("updated_at", now).
+			Where(sq.Eq{"request_id": requestID, "admission_class": automaticAdmissionClass, "status": "reserved"}).ToSql()
+		if buildErr != nil {
+			return 0, fmt.Errorf("build renew recovered automatic admission: %w", buildErr)
+		}
+		if _, updateErr := tx.Exec(ctx, reservationQuery, reservationArgs...); updateErr != nil {
+			return 0, fmt.Errorf("renew recovered automatic admission: %w", updateErr)
+		}
+		requestQuery, requestArgs, buildErr := storage.Psql.Update("parameter_sync_requests").
+			Set("status", RequestStatusQueued).Set("next_attempt_at", now).Set("updated_at", now).
+			Where(sq.Eq{"id": requestID, "status": RequestStatusAccepted, "run_id": nil}).ToSql()
+		if buildErr != nil {
+			return 0, fmt.Errorf("build recover admitted automatic request: %w", buildErr)
+		}
+		if _, updateErr := tx.Exec(ctx, requestQuery, requestArgs...); updateErr != nil {
+			return 0, fmt.Errorf("recover admitted automatic request: %w", updateErr)
+		}
+	}
+	return len(requestIDs), nil
+}
+
+// RepairAutomaticAdmissionCounters rebuilds the small sharded state table from
+// durable reservations. It writes only drifted buckets, so periodic retention
+// repair cannot create a steady stream of PostgreSQL WAL and disk I/O.
+func (r *PGRepository) RepairAutomaticAdmissionCounters(ctx context.Context, now time.Time) (int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin automatic admission counter repair: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	locked, err := tryAutomaticAdmissionMaintenanceLock(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if !locked {
+		return 0, nil
+	}
+	lockQuery, lockArgs, err := storage.Psql.Select("bucket_id").From("parameter_sync_admission_state").
+		Where(sq.Eq{"admission_class": automaticAdmissionClass}).OrderBy("bucket_id").Suffix("FOR UPDATE").ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build lock automatic admission counter state: %w", err)
+	}
+	rows, err := tx.Query(ctx, lockQuery, lockArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("lock automatic admission counter state: %w", err)
+	}
+	for rows.Next() {
+		var bucketID int16
+		if err := rows.Scan(&bucketID); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan automatic admission counter state: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("iterate automatic admission counter state: %w", err)
+	}
+	rows.Close()
+	repairQuery, repairArgs, err := storage.Psql.Update("parameter_sync_admission_state state").
+		Set("reserved_runs", sq.Expr(`COALESCE((
+  SELECT SUM(reservation.reserved_runs)
+  FROM parameter_sync_admission_reservations reservation
+  WHERE reservation.admission_class = state.admission_class
+    AND reservation.bucket_id = state.bucket_id
+    AND reservation.status = 'reserved'
+), 0)`)).
+		Set("reserved_tasks", sq.Expr(`COALESCE((
+  SELECT SUM(reservation.reserved_tasks)
+  FROM parameter_sync_admission_reservations reservation
+  WHERE reservation.admission_class = state.admission_class
+    AND reservation.bucket_id = state.bucket_id
+    AND reservation.status = 'reserved'
+), 0)`)).
+		Set("version", sq.Expr("version + 1")).Set("updated_at", now).
+		Where(sq.Eq{"state.admission_class": automaticAdmissionClass}).
+		Where(`(state.reserved_runs, state.reserved_tasks) IS DISTINCT FROM (
+  COALESCE((SELECT SUM(reservation.reserved_runs) FROM parameter_sync_admission_reservations reservation WHERE reservation.admission_class = state.admission_class AND reservation.bucket_id = state.bucket_id AND reservation.status = 'reserved'), 0),
+  COALESCE((SELECT SUM(reservation.reserved_tasks) FROM parameter_sync_admission_reservations reservation WHERE reservation.admission_class = state.admission_class AND reservation.bucket_id = state.bucket_id AND reservation.status = 'reserved'), 0)
+)`).ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build automatic admission counter repair: %w", err)
+	}
+	tag, err := tx.Exec(ctx, repairQuery, repairArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("repair automatic admission counters: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit automatic admission counter repair: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func tryAutomaticAdmissionMaintenanceLock(ctx context.Context, tx pgx.Tx) (bool, error) {
+	query, args, err := storage.Psql.Select().Column(
+		sq.Expr("pg_try_advisory_xact_lock(?)", automaticAdmissionMaintenanceLock),
+	).
+		From("(SELECT 1) admission_maintenance_lock").ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build automatic admission maintenance lock: %w", err)
+	}
+	var locked bool
+	if err := tx.QueryRow(ctx, query, args...).Scan(&locked); err != nil {
+		return false, fmt.Errorf("acquire automatic admission maintenance lock: %w", err)
+	}
+	return locked, nil
+}
+
+func (r *PGRepository) GetAutomaticAdmissionStats(ctx context.Context, now time.Time) (AutomaticAdmissionStats, error) {
+	query, args, err := storage.Psql.Select(
+		`COALESCE((SELECT SUM(reserved_runs) FROM parameter_sync_admission_state WHERE admission_class = 'global'), 0)`,
+		`COALESCE((SELECT COUNT(*) FROM parameter_sync_requests WHERE status = 'queued' AND result_code = 'AUTOMATIC_BACKPRESSURE'), 0)`,
+	).Column(sq.Expr(
+		`COALESCE((SELECT EXTRACT(EPOCH FROM (?::timestamptz - MIN(admission_queued_at))) FROM parameter_sync_requests WHERE status = 'queued' AND result_code = 'AUTOMATIC_BACKPRESSURE'), 0)`,
+		now,
+	)).From("(SELECT 1) admission_stats").ToSql()
+	if err != nil {
+		return AutomaticAdmissionStats{}, fmt.Errorf("build automatic admission stats: %w", err)
+	}
+	var stats AutomaticAdmissionStats
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(
+		&stats.ReservedRuns, &stats.QueuedRequests, &stats.OldestQueueAgeSecond,
+	); err != nil {
+		return AutomaticAdmissionStats{}, fmt.Errorf("load automatic admission stats: %w", err)
+	}
+	return stats, nil
 }
 
 func (r *PGRepository) GetActiveRunByDevice(ctx context.Context, deviceID uuid.UUID) (*SyncRun, error) {

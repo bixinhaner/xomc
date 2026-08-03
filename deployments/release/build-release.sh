@@ -145,7 +145,7 @@ if [ "$CHANNEL" = "release" ]; then
 else
   DISPLAY_VERSION="$VERSION"
 fi
-GIT_COMMIT="$(cd "$REPO_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo n/a)"
+GIT_COMMIT="$(cd "$REPO_ROOT" && git rev-parse HEAD 2>/dev/null || echo n/a)"
 
 ARCHIVE="$SCRIPT_DIR/archive"
 OUT="$ARCHIVE/project/$VERSION"

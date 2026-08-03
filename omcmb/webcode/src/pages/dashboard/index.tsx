@@ -170,6 +170,36 @@ export default function DashboardPage() {
     return techOptions.some((o) => o.value === technology) ? technology : techOptions[0].value;
   }, [techOptions, technology]);
 
+	const latestPMSlotHealth = useMemo(() => {
+	  const rows = dashboardSummary?.pmSlotHealth?.filter(
+		(slot) => slot.technology.toLowerCase() === effectiveTechnology,
+	  ) ?? [];
+	  if (rows.length === 0) return undefined;
+	  const expectedDevices = rows.reduce((sum, row) => sum + row.expectedDevices, 0);
+	  const receivedDevices = rows.reduce((sum, row) => sum + row.receivedDevices, 0);
+	  const coverageRatio = expectedDevices > 0 ? receivedDevices / expectedDevices : 0;
+	  return {
+		...rows[0],
+		expectedDevices,
+		receivedDevices,
+		coverageRatio,
+		status: rows.some((row) => row.status === 'bootstrap_ignored')
+		  ? 'bootstrap_ignored' as const
+		  : coverageRatio >= 0.98
+			? 'complete' as const
+			: receivedDevices > 0
+			  ? 'partial' as const
+			  : 'missing' as const,
+	  };
+	}, [dashboardSummary?.pmSlotHealth, effectiveTechnology]);
+	const pmSlotBadgeStatus = latestPMSlotHealth?.status === 'complete'
+	  ? 'success'
+	  : latestPMSlotHealth?.status === 'bootstrap_ignored'
+		? 'processing'
+		: latestPMSlotHealth?.status === 'partial'
+		  ? 'warning'
+		  : 'error';
+
   // 刷新提示状态
   const lastUpdateTime = useMemo(
     () => {
@@ -486,6 +516,15 @@ export default function DashboardPage() {
               onChange={(value) => setTechnology(value as TechnologyType)}
               options={techOptions}
             />
+			{latestPMSlotHealth && (
+			  <Space size="small">
+				<Text type="secondary">{t('dashboard.pmSlotCoverage')}</Text>
+				<Badge
+				  status={pmSlotBadgeStatus}
+				  text={`${latestPMSlotHealth.receivedDevices} / ${latestPMSlotHealth.expectedDevices} · ${(latestPMSlotHealth.coverageRatio * 100).toFixed(1)}%`}
+				/>
+			  </Space>
+			)}
           </Space>
         </Col>
       </Row>

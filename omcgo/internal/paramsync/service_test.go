@@ -48,6 +48,16 @@ type stubPlanner struct {
 
 func (p stubPlanner) Plan(context.Context, PlanCommand) (*Plan, error) { return p.plan, p.err }
 
+type countingPlanner struct {
+	calls int
+	plan  *Plan
+}
+
+func (p *countingPlanner) Plan(context.Context, PlanCommand) (*Plan, error) {
+	p.calls++
+	return p.plan, nil
+}
+
 type failingDispatcher struct{ err error }
 
 func (d failingDispatcher) Dispatch(context.Context, *SyncRun, *Plan) ([]*task.Task, error) {
@@ -55,15 +65,41 @@ func (d failingDispatcher) Dispatch(context.Context, *SyncRun, *Plan) ([]*task.T
 }
 
 type memoryRequestRepo struct {
-	requests map[uuid.UUID]*SyncRequest
-	byKey    map[string]*SyncRequest
-	active   *SyncRun
-	gateErr  error
-	backoff  time.Time
+	requests             map[uuid.UUID]*SyncRequest
+	byKey                map[string]*SyncRequest
+	active               *SyncRun
+	gateErr              error
+	backoff              time.Time
+	admissionAllowed     bool
+	taskAdmissionAllowed bool
+	admissionReleased    bool
 }
 
 func newMemoryRequestRepo() *memoryRequestRepo {
-	return &memoryRequestRepo{requests: map[uuid.UUID]*SyncRequest{}, byKey: map[string]*SyncRequest{}}
+	return &memoryRequestRepo{
+		requests: map[uuid.UUID]*SyncRequest{}, byKey: map[string]*SyncRequest{},
+		admissionAllowed: true, taskAdmissionAllowed: true,
+	}
+}
+
+func (r *memoryRequestRepo) TryReserveAutomaticAdmission(context.Context, *SyncRequest, time.Time) (bool, error) {
+	return r.admissionAllowed, nil
+}
+
+func (r *memoryRequestRepo) AdjustAutomaticAdmissionTasks(_ context.Context, req *SyncRequest, _ int, now time.Time) (bool, error) {
+	if r.taskAdmissionAllowed {
+		return true, nil
+	}
+	req.Status = RequestStatusQueued
+	req.ResultCode = ResultCodeAutomaticBackpressure
+	req.NextAttemptAt = now.Add(automaticAdmissionRetry)
+	return false, nil
+}
+
+func (r *memoryRequestRepo) QueueRequestAndReleaseAutomaticAdmission(_ context.Context, req *SyncRequest, nextAttemptAt time.Time, _ time.Time) error {
+	r.admissionReleased = true
+	req.Status, req.ResultCode, req.ActiveRunID, req.NextAttemptAt = RequestStatusQueued, ResultCodeActiveSyncExists, nil, nextAttemptAt
+	return nil
 }
 
 func (r *memoryRequestRepo) CreateRequest(_ context.Context, req *SyncRequest) error {
@@ -117,6 +153,45 @@ func (r *memoryRequestRepo) ClaimQueuedRequests(_ context.Context, now time.Time
 		}
 	}
 	return queued, nil
+}
+
+func TestDispatchQueuedLeavesAutomaticRequestQueuedWhenGlobalAdmissionIsFull(t *testing.T) {
+	repo := newMemoryRequestRepo()
+	repo.admissionAllowed = false
+	now := time.Now().UTC()
+	req := &SyncRequest{
+		ID: uuid.New(), DeviceID: uuid.New(), DeviceSN: "SN-BACKPRESSURE",
+		CallerType: "provision", TriggerReason: TriggerDeviceRegistered, SyncScope: SyncScopeFull,
+		Status: RequestStatusQueued, Priority: 10, NextAttemptAt: now,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	repo.requests[req.ID] = req
+	planner := &countingPlanner{plan: &Plan{Batches: []TaskBatch{{Paths: []string{"Device.Info."}}}}}
+	service := NewService(repo, planner)
+	service.now = func() time.Time { return now }
+
+	dispatched, err := service.DispatchQueued(context.Background(), 10)
+
+	require.NoError(t, err)
+	assert.Zero(t, dispatched)
+	assert.Zero(t, planner.calls, "a globally backpressured request must not plan or create GPV tasks")
+	assert.Equal(t, RequestStatusQueued, req.Status)
+}
+
+func TestAutomaticRequestDoesNotCreateRunWhenActualTaskCapacityIsFull(t *testing.T) {
+	repo := newMemoryRequestRepo()
+	repo.taskAdmissionAllowed = false
+	service := NewService(repo, stubPlanner{plan: &Plan{Batches: []TaskBatch{
+		{Paths: []string{"Device.Info."}},
+		{Paths: []string{"Device.Radio."}},
+	}}})
+
+	result, err := service.Submit(context.Background(), submitCommand(TriggerDeviceRegistered))
+
+	require.NoError(t, err)
+	assert.Equal(t, RequestStatusQueued, result.Status)
+	assert.Equal(t, ResultCodeAutomaticBackpressure, result.ResultCode)
+	assert.Nil(t, repo.active)
 }
 
 func (r *memoryRequestRepo) FailRunAndRequest(_ context.Context, runID, requestID uuid.UUID, code ResultCode, message string) error {
@@ -263,6 +338,7 @@ func TestService_SubmitDoesNotDeduplicateOntoIncompatiblePartialRun(t *testing.T
 	assert.Equal(t, RequestStatusQueued, got.Status)
 	assert.Equal(t, ResultCodeActiveSyncExists, got.ResultCode)
 	assert.Nil(t, got.ActiveRunID, "queued request must not claim ownership of the incompatible active run")
+	assert.True(t, repo.admissionReleased, "incompatible active runs must not hold global automatic capacity")
 }
 
 func TestService_SubmitIdempotencyReturnsOriginalRequest(t *testing.T) {

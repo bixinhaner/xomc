@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/task"
 )
@@ -142,6 +143,202 @@ func TestPGRepositoryAutomaticIdempotencyConflictRollsBackDeviceGate(t *testing.
 		second.DeviceID,
 	).Scan(&secondGateCount))
 	assert.Zero(t, secondGateCount)
+}
+
+func TestPGRepositoryAutomaticAdmissionReservationIsReleasedAfterTerminalRequest(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	repo := NewPGRepository(pool)
+	now := time.Now().UTC()
+	request := &SyncRequest{
+		ID: uuid.New(), DeviceID: uuid.New(), DeviceSN: "TEST-AUTOMATIC-ADMISSION",
+		CallerType: "integration", TriggerReason: TriggerDeviceRegistered, SyncScope: SyncScopeFull,
+		Status: RequestStatusAccepted, Priority: 10, NextAttemptAt: now,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `UPDATE parameter_sync_requests SET status='cancelled', completed_at=now() WHERE id=$1 AND status NOT IN ('succeeded','failed','timed_out','cancelled','deduplicated','rejected')`, request.ID)
+		_, _ = repo.ReconcileAutomaticAdmission(context.Background(), time.Now().UTC(), 500)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM parameter_sync_requests WHERE id=$1`, request.ID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM parameter_sync_device_state WHERE device_id=$1`, request.DeviceID)
+		_, _ = repo.ReconcileAutomaticAdmission(context.Background(), time.Now().UTC(), 500)
+	})
+
+	allowed, err := repo.CreateAutomaticRequest(context.Background(), request, now)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	stats, err := repo.GetAutomaticAdmissionStats(context.Background(), now.Add(time.Second))
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, stats.ReservedRuns, 1)
+
+	var reservationStatus string
+	var reservedTasks int
+	require.NoError(t, pool.QueryRow(context.Background(), `
+SELECT status, reserved_tasks FROM parameter_sync_admission_reservations
+WHERE request_id=$1 AND admission_class=$2`, request.ID, automaticAdmissionClass).Scan(&reservationStatus, &reservedTasks))
+	assert.Equal(t, "reserved", reservationStatus)
+	assert.Zero(t, reservedTasks)
+	_, err = pool.Exec(context.Background(), `
+UPDATE parameter_sync_admission_reservations SET lease_until=$2::timestamptz - interval '1 second' WHERE request_id=$1`,
+		request.ID, now.Add(time.Second))
+	require.NoError(t, err)
+	recovered, err := repo.ReconcileAutomaticAdmission(context.Background(), now.Add(time.Second), 500)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, recovered, 1)
+	stored, err := repo.GetRequest(context.Background(), request.ID)
+	require.NoError(t, err)
+	assert.Equal(t, RequestStatusQueued, stored.Status, "accepted requests left by a crash must recover to durable dispatch")
+	request.Status = RequestStatusQueued
+
+	adjusted, err := repo.AdjustAutomaticAdmissionTasks(context.Background(), request, 37, now.Add(time.Second))
+	require.NoError(t, err)
+	require.True(t, adjusted)
+	require.NoError(t, pool.QueryRow(context.Background(), `
+SELECT reserved_tasks FROM parameter_sync_admission_reservations
+WHERE request_id=$1 AND admission_class=$2`, request.ID, automaticAdmissionClass).Scan(&reservedTasks))
+	assert.Equal(t, 37, reservedTasks)
+
+	_, err = pool.Exec(context.Background(), `
+UPDATE parameter_sync_requests SET status='running', updated_at=$2 WHERE id=$1`,
+		request.ID, now.Add(2*time.Second))
+	require.NoError(t, err)
+	_, err = pool.Exec(context.Background(), `
+UPDATE parameter_sync_admission_reservations SET lease_until=$2::timestamptz - interval '1 second' WHERE request_id=$1`,
+		request.ID, now.Add(2*time.Second))
+	require.NoError(t, err)
+	renewed, err := repo.ReconcileAutomaticAdmission(context.Background(), now.Add(2*time.Second), 500)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, renewed, 1)
+	var renewedLease time.Time
+	require.NoError(t, pool.QueryRow(context.Background(), `
+SELECT status, lease_until FROM parameter_sync_admission_reservations
+WHERE request_id=$1 AND admission_class=$2`, request.ID, automaticAdmissionClass).Scan(&reservationStatus, &renewedLease))
+	assert.Equal(t, "reserved", reservationStatus)
+	assert.True(t, renewedLease.After(now.Add(2*time.Second)), "active requests must renew rather than release capacity")
+
+	_, err = pool.Exec(context.Background(), `
+UPDATE parameter_sync_requests
+SET status='queued', result_code='AUTOMATIC_BACKPRESSURE', admission_reason='retry', updated_at=$2
+WHERE id=$1`, request.ID, now.Add(500*time.Millisecond))
+	require.NoError(t, err)
+	request.Status = RequestStatusQueued
+	request.ResultCode = ResultCodeAutomaticBackpressure
+	request.AdmissionReason = "retry"
+	reused, err := repo.TryReserveAutomaticAdmission(context.Background(), request, now.Add(time.Second))
+	require.NoError(t, err)
+	assert.True(t, reused)
+	stored, err = repo.GetRequest(context.Background(), request.ID)
+	require.NoError(t, err)
+	assert.Empty(t, stored.ResultCode)
+	assert.Empty(t, stored.AdmissionReason)
+
+	_, err = pool.Exec(context.Background(), `
+UPDATE parameter_sync_requests
+SET status='succeeded', completed_at=$2, updated_at=$2
+WHERE id=$1`, request.ID, now.Add(time.Second))
+	require.NoError(t, err)
+	released, err := repo.ReconcileAutomaticAdmission(context.Background(), now.Add(2*time.Second), 500)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, released, 1)
+
+	require.NoError(t, pool.QueryRow(context.Background(), `
+SELECT status FROM parameter_sync_admission_reservations
+WHERE request_id=$1 AND admission_class=$2`, request.ID, automaticAdmissionClass).Scan(&reservationStatus))
+	assert.Equal(t, "released", reservationStatus)
+}
+
+func TestPGRepositoryQueuesActiveRunConflictAndReleasesAdmissionAtomically(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	repo := NewPGRepository(pool)
+	now := time.Now().UTC()
+	request := &SyncRequest{
+		ID: uuid.New(), DeviceID: uuid.New(), DeviceSN: "TEST-AUTOMATIC-ACTIVE-CONFLICT",
+		CallerType: "integration", TriggerReason: TriggerPeriodic, SyncScope: SyncScopeFull,
+		Status: RequestStatusAccepted, Priority: 10, NextAttemptAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM parameter_sync_requests WHERE id=$1`, request.ID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM parameter_sync_device_state WHERE device_id=$1`, request.DeviceID)
+		_, _ = repo.RepairAutomaticAdmissionCounters(context.Background(), time.Now().UTC())
+	})
+	allowed, err := repo.CreateAutomaticRequest(context.Background(), request, now)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	adjusted, err := repo.AdjustAutomaticAdmissionTasks(context.Background(), request, 5, now.Add(time.Second))
+	require.NoError(t, err)
+	require.True(t, adjusted)
+
+	nextAttemptAt := now.Add(time.Minute)
+	require.NoError(t, repo.QueueRequestAndReleaseAutomaticAdmission(
+		context.Background(), request, nextAttemptAt, now.Add(2*time.Second),
+	))
+	stored, err := repo.GetRequest(context.Background(), request.ID)
+	require.NoError(t, err)
+	assert.Equal(t, RequestStatusQueued, stored.Status)
+	assert.Equal(t, ResultCodeActiveSyncExists, stored.ResultCode)
+	assert.WithinDuration(t, nextAttemptAt, stored.NextAttemptAt, time.Second)
+	var reservationStatus string
+	require.NoError(t, pool.QueryRow(context.Background(), `
+SELECT status FROM parameter_sync_admission_reservations
+WHERE request_id=$1 AND admission_class=$2`, request.ID, automaticAdmissionClass).Scan(&reservationStatus))
+	assert.Equal(t, "released", reservationStatus)
+}
+
+func TestPGRepositoryCounterRepairWaitsForReservationTransaction(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	repo := NewPGRepository(pool)
+	now := time.Now().UTC()
+	request := insertParamSyncRequestForTest(t, pool, RequestStatusAccepted)
+	bucketID := automaticAdmissionBucket(request.DeviceID)
+	_, err := pool.Exec(context.Background(), `
+INSERT INTO parameter_sync_admission_state
+  (admission_class, bucket_id, active_run_limit, active_task_limit, reserved_runs, reserved_tasks)
+VALUES ($1, $2, 32, 864, 0, 0)
+ON CONFLICT (admission_class, bucket_id) DO UPDATE SET reserved_runs=0, reserved_tasks=0`,
+		automaticAdmissionClass, bucketID)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = repo.RepairAutomaticAdmissionCounters(context.Background(), time.Now().UTC())
+	})
+
+	tx, err := pool.Begin(context.Background())
+	require.NoError(t, err)
+	_, err = tx.Exec(context.Background(), `
+UPDATE parameter_sync_admission_state
+SET reserved_runs=reserved_runs+1, reserved_tasks=reserved_tasks+7
+WHERE admission_class=$1 AND bucket_id=$2`, automaticAdmissionClass, bucketID)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		_, repairErr := repo.RepairAutomaticAdmissionCounters(context.Background(), now.Add(time.Second))
+		done <- repairErr
+	}()
+	select {
+	case repairErr := <-done:
+		require.Failf(t, "repair returned before reservation transaction committed", "error=%v", repairErr)
+	case <-time.After(100 * time.Millisecond):
+	}
+	_, err = tx.Exec(context.Background(), `
+INSERT INTO parameter_sync_admission_reservations
+  (request_id, admission_class, bucket_id, reserved_runs, reserved_tasks, status, lease_until)
+VALUES ($1, $2, $3, 1, 7, 'reserved', $4)`, request.ID, automaticAdmissionClass, bucketID, now.Add(time.Hour))
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(context.Background()))
+	require.NoError(t, <-done)
+
+	var stateRuns, stateTasks, truthRuns, truthTasks int
+	require.NoError(t, pool.QueryRow(context.Background(), `
+SELECT state.reserved_runs, state.reserved_tasks,
+       COALESCE(SUM(reservation.reserved_runs) FILTER (WHERE reservation.status='reserved'), 0),
+       COALESCE(SUM(reservation.reserved_tasks) FILTER (WHERE reservation.status='reserved'), 0)
+FROM parameter_sync_admission_state state
+LEFT JOIN parameter_sync_admission_reservations reservation
+  ON reservation.admission_class=state.admission_class AND reservation.bucket_id=state.bucket_id
+WHERE state.admission_class=$1 AND state.bucket_id=$2
+GROUP BY state.reserved_runs, state.reserved_tasks`, automaticAdmissionClass, bucketID).
+		Scan(&stateRuns, &stateTasks, &truthRuns, &truthTasks))
+	assert.Equal(t, truthRuns, stateRuns)
+	assert.Equal(t, truthTasks, stateTasks)
 }
 
 func TestPGRepositoryCompleteRequestRejectsTerminalState(t *testing.T) {
@@ -425,6 +622,65 @@ VALUES ($1, $2, $3, $4, 'manual', 'full', 'waiting_device', 1, 1, 0, 0)`,
 	assert.True(t, payload.Success)
 	assert.Equal(t, "device_tasks:"+completed.ID, payload.ResultRef)
 	assert.Contains(t, payload.EventID, "reconcile:"+runID.String()+":"+completed.ID)
+}
+
+type failFirstRecoveryProcessor struct {
+	calls    int
+	payloads []event.ParamSyncTaskResultPayload
+}
+
+func (p *failFirstRecoveryProcessor) Process(_ context.Context, payload event.ParamSyncTaskResultPayload) (ResultProcessOutcome, error) {
+	p.calls++
+	if p.calls == 1 {
+		return ResultProcessOutcome{}, errors.New("permanent malformed result")
+	}
+	p.payloads = append(p.payloads, payload)
+	return ResultProcessOutcome{}, nil
+}
+
+func TestRecoverMissingResultsContinuesAfterEarlierRunFails(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	type fixture struct {
+		runID uuid.UUID
+		task  *task.Task
+	}
+	createFixture := func(offset time.Duration) fixture {
+		req := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
+		runID := uuid.New()
+		_, err := pool.Exec(context.Background(), `INSERT INTO parameter_sync_runs
+(id, request_id, device_id, device_sn, trigger_reason, sync_scope, status,
+ expected_task_count, terminal_task_count, processed_task_count, failed_task_count, started_at)
+VALUES ($1, $2, $3, $4, 'manual', 'full', 'waiting_device', 1, 1, 0, 0, $5)`,
+			runID, req.ID, req.DeviceID, req.DeviceSN, time.Now().UTC().Add(offset))
+		require.NoError(t, err)
+		_, err = pool.Exec(context.Background(), `UPDATE parameter_sync_requests SET run_id=$2, active_run_id=$2 WHERE id=$1`, req.ID, runID)
+		require.NoError(t, err)
+
+		completed := task.NewTask(&task.CreateTaskRequest{
+			DeviceSN: req.DeviceSN, Method: "GetParameterValues",
+			Params: []byte(`{"names":["Device.Good"]}`), CommandKey: "param-sync-" + runID.String() + "-0",
+			Source: task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: req.ID.String(),
+		})
+		require.NoError(t, task.NewPgTaskRepository(pool).Create(context.Background(), completed))
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM device_tasks WHERE id=$1`, completed.ID) })
+		_, err = pool.Exec(context.Background(), `UPDATE device_tasks SET status='completed', completed_at=now() WHERE id=$1`, completed.ID)
+		require.NoError(t, err)
+		return fixture{runID: runID, task: completed}
+	}
+
+	first := createFixture(-time.Minute)
+	second := createFixture(0)
+	processor := &failFirstRecoveryProcessor{}
+	recovered, err := NewReconciler(pool, nil, nil).WithResultProcessor(processor).
+		RecoverMissingResults(context.Background(), 20, 200, 200)
+
+	require.ErrorContains(t, err, "permanent malformed result")
+	assert.Equal(t, 1, recovered)
+	assert.Equal(t, 2, processor.calls)
+	require.Len(t, processor.payloads, 1)
+	assert.Equal(t, second.runID, processor.payloads[0].RunID)
+	assert.Equal(t, second.task.ID, processor.payloads[0].TaskID)
+	assert.NotEqual(t, first.runID, processor.payloads[0].RunID)
 }
 
 func TestRecoverMissingResultsWithPGProcessorFinalizesSucceededRun(t *testing.T) {
@@ -717,6 +973,14 @@ func TestPGRepository_ListReleaseCandidatesFiltersState(t *testing.T) {
 	assert.False(t, ids[offlineID])
 	assert.False(t, ids[succeededID])
 	assert.False(t, ids[backedOffID])
+
+	postBoundaryID := uuid.New()
+	insertReleaseCandidateForTest(t, pool, postBoundaryID, true)
+	devices, err = NewPGRepository(pool).ListReleaseCandidates(context.Background(), campaignID, preexistingEligible+6)
+	require.NoError(t, err)
+	for _, dev := range devices {
+		assert.NotEqual(t, postBoundaryID, dev.ID, "devices registered after the persisted release boundary must be excluded")
+	}
 }
 
 func TestPGRepository_ListReleaseCandidatesPrioritizesUnattemptedDevices(t *testing.T) {
@@ -752,6 +1016,89 @@ func TestPGRepository_ListReleaseCandidatesPrioritizesUnattemptedDevices(t *test
 	require.NoError(t, err)
 	require.Len(t, devices, 1)
 	assert.Equal(t, unattemptedHighID, devices[0].ID)
+}
+
+func TestPGRepository_ListReleaseCandidatesSupersedesOlderQueuedCampaigns(t *testing.T) {
+	pool := newParamSyncTestPool(t)
+	oldCampaignID := uuid.New()
+	newCampaignID := uuid.New()
+	legacyCampaignID := uuid.New()
+	queuedDeviceID := uuid.New()
+	runningDeviceID := uuid.New()
+	newQueuedDeviceID := uuid.New()
+	legacyQueuedDeviceID := uuid.New()
+	insertReleaseCandidateForTest(t, pool, queuedDeviceID, true)
+	insertReleaseCandidateForTest(t, pool, runningDeviceID, true)
+	insertReleaseCandidateForTest(t, pool, newQueuedDeviceID, true)
+	insertReleaseCandidateForTest(t, pool, legacyQueuedDeviceID, true)
+	_, err := NewPGRepository(pool).ListReleaseCandidates(context.Background(), oldCampaignID, 1)
+	require.NoError(t, err)
+	insertReleaseRequestForPGRepoTest(t, pool, oldCampaignID, queuedDeviceID, RequestStatusQueued)
+	insertReleaseRequestForPGRepoTest(t, pool, oldCampaignID, runningDeviceID, RequestStatusRunning)
+	now := time.Now().UTC()
+	legacyRequest := &SyncRequest{
+		ID: uuid.New(), DeviceID: legacyQueuedDeviceID,
+		DeviceSN:   "TEST-RELEASE-" + legacyQueuedDeviceID.String(),
+		CallerType: "test", TriggerReason: TriggerOMCUpgrade, SyncScope: SyncScopeFull,
+		Status: RequestStatusAccepted, Priority: 10, NextAttemptAt: now,
+		CampaignID: &legacyCampaignID, CreatedAt: now, UpdatedAt: now,
+	}
+	repo := NewPGRepository(pool)
+	allowed, err := repo.CreateAutomaticRequest(context.Background(), legacyRequest, now)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `UPDATE parameter_sync_requests SET status='cancelled', completed_at=now() WHERE id=$1 AND status NOT IN ('succeeded','failed','timed_out','cancelled','deduplicated','rejected')`, legacyRequest.ID)
+		_, _ = repo.ReconcileAutomaticAdmission(context.Background(), time.Now().UTC(), 500)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM parameter_sync_requests WHERE id=$1`, legacyRequest.ID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM parameter_sync_device_state WHERE device_id=$1`, legacyRequest.DeviceID)
+	})
+
+	_, err = NewPGRepository(pool).ListReleaseCandidates(context.Background(), newCampaignID, 1)
+	require.NoError(t, err)
+
+	var cancelled, queued, running int
+	err = pool.QueryRow(context.Background(), `
+		SELECT
+			count(*) FILTER (WHERE status='cancelled'),
+			count(*) FILTER (WHERE status='queued'),
+			count(*) FILTER (WHERE status='running')
+		FROM parameter_sync_requests
+		WHERE campaign_id=$1
+	`, oldCampaignID).Scan(&cancelled, &queued, &running)
+	require.NoError(t, err)
+	assert.Equal(t, 1, cancelled)
+	assert.Zero(t, queued)
+	assert.Equal(t, 1, running, "already executing work must finish through the normal lifecycle")
+	var legacyStatus RequestStatus
+	var legacyResult ResultCode
+	var legacyCompletedAt *time.Time
+	require.NoError(t, pool.QueryRow(context.Background(), `
+		SELECT status, result_code, completed_at
+		FROM parameter_sync_requests
+		WHERE id=$1
+	`, legacyRequest.ID).Scan(&legacyStatus, &legacyResult, &legacyCompletedAt))
+	assert.Equal(t, RequestStatusCancelled, legacyStatus)
+	assert.Equal(t, ResultCodeSupersededRelease, legacyResult)
+	assert.NotNil(t, legacyCompletedAt, "legacy campaigns without a boundary must still be terminalized")
+	_, err = repo.ReconcileAutomaticAdmission(context.Background(), time.Now().UTC(), 500)
+	require.NoError(t, err)
+	var legacyReservationStatus string
+	require.NoError(t, pool.QueryRow(context.Background(), `
+		SELECT status FROM parameter_sync_admission_reservations
+		WHERE request_id=$1 AND admission_class=$2
+	`, legacyRequest.ID, automaticAdmissionClass).Scan(&legacyReservationStatus))
+	assert.Equal(t, "released", legacyReservationStatus)
+
+	insertReleaseRequestForPGRepoTest(t, pool, newCampaignID, newQueuedDeviceID, RequestStatusQueued)
+	_, err = NewPGRepository(pool).ListReleaseCandidates(context.Background(), oldCampaignID, 1)
+	require.NoError(t, err)
+	var newQueued int
+	require.NoError(t, pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM parameter_sync_requests
+		WHERE campaign_id=$1 AND status='queued'
+	`, newCampaignID).Scan(&newQueued))
+	assert.Equal(t, 1, newQueued, "an older rolling instance must not cancel the newer release campaign")
 }
 
 func insertRegisteredSyncCandidateForTest(t *testing.T, pool *pgxpool.Pool, deviceID uuid.UUID, deleted bool) string {

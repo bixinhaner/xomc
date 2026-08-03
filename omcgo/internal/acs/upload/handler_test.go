@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -22,6 +23,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/omcgo/omcgo/internal/backup"
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/pkg/tr069"
 )
@@ -630,8 +632,9 @@ func TestCheckPMUploadDuplicate_EmptySNNeverSkips(t *testing.T) {
 // fakeBackpressureGate 让测试可以精确控制 Acquire() 是否放行，不依赖真实
 // /proc/pressure/io 或磁盘水位。
 type fakeBackpressureGate struct {
-	allow  bool
-	reason string
+	allow    bool
+	reason   string
+	accepted []time.Time
 }
 
 func (f *fakeBackpressureGate) Acquire() (bool, string) {
@@ -642,6 +645,29 @@ func (f *fakeBackpressureGate) Acquire() (bool, string) {
 }
 func (f *fakeBackpressureGate) Release()              {}
 func (f *fakeBackpressureGate) RecordRejected(string) {}
+func (f *fakeBackpressureGate) RecordAccepted(at time.Time) {
+	f.accepted = append(f.accepted, at)
+}
+
+type fakeUploadObjectStore struct {
+	err  error
+	puts int
+}
+
+func (f *fakeUploadObjectStore) PutObject(
+	_ context.Context,
+	_, _ string,
+	body io.Reader,
+	size int64,
+	_ minio.PutObjectOptions,
+) (minio.UploadInfo, error) {
+	f.puts++
+	if f.err != nil {
+		return minio.UploadInfo{}, f.err
+	}
+	_, _ = io.Copy(io.Discard, body)
+	return minio.UploadInfo{Size: size}, nil
+}
 
 // TestServeHTTP_PMUpload_BackpressureRejectionDoesNotPoisonDedup 是 2026-07-20
 // omc78 压测环境实测复现的严重 bug 的回归测试：修复前 ServeHTTP 先做 PM 去重检查
@@ -670,6 +696,7 @@ func TestServeHTTP_PMUpload_BackpressureRejectionDoesNotPoisonDedup(t *testing.T
 	h.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code,
 		"backpressure must reject the PM upload with 503")
+	assert.Empty(t, gate.accepted)
 
 	// 关键断言：被背压拒收的这次请求，绝不能把去重键标记为"已见过"——
 	// 否则设备按 TR-069 语义重传时会被去重层错误地当成"已处理过的重复"直接吃掉。
@@ -677,4 +704,40 @@ func TestServeHTTP_PMUpload_BackpressureRejectionDoesNotPoisonDedup(t *testing.T
 	assert.False(t, skip,
 		"a request rejected by backpressure must never mark the dedup key; "+
 			"otherwise the device's retry gets silently swallowed and the PM file is lost for the 24h TTL")
+}
+
+func TestServeHTTP_RecordAcceptedOnlyAfterSuccessfulPMObjectWrite(t *testing.T) {
+	tests := []struct {
+		name         string
+		fileType     string
+		storeErr     error
+		wantStatus   int
+		wantAccepted int
+	}{
+		{name: "PM storage failure", fileType: "PM", storeErr: errors.New("minio unavailable"), wantStatus: http.StatusInternalServerError},
+		{name: "non PM success", fileType: "LOG", wantStatus: http.StatusOK},
+		{name: "PM success", fileType: "PM", wantStatus: http.StatusOK, wantAccepted: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gate := &fakeBackpressureGate{allow: true}
+			store := &fakeUploadObjectStore{err: tt.storeErr}
+			h := &Handler{
+				logger: zap.NewNop(), minioClient: store,
+				buckets:      appconfig.BucketConfig{PMFiles: "pm-files", Logs: "logs"},
+				backpressure: gate,
+			}
+			h.SetCompression(nil, backup.NewPolicyMetrics(nil))
+			req := httptest.NewRequest(http.MethodPost,
+				"/smallcell/FileUploadService?fileType="+tt.fileType+"&filename=report.xml&sn=SN1",
+				strings.NewReader("payload"))
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			require.Equal(t, tt.wantStatus, rec.Code)
+			assert.Equal(t, tt.wantAccepted, len(gate.accepted))
+			assert.Equal(t, 1, store.puts)
+		})
+	}
 }

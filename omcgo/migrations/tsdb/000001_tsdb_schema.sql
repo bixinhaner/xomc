@@ -101,6 +101,8 @@ CREATE TABLE public.pm_files (
     file_name character varying(512) NOT NULL,
     file_size bigint DEFAULT 0,
     collect_time timestamp with time zone,
+	measurement_start timestamp with time zone,
+	measurement_end timestamp with time zone,
     minio_path character varying(1024) NOT NULL,
     content_sha256 bytea,
     parsed boolean DEFAULT false,
@@ -114,9 +116,38 @@ CREATE TABLE public.pm_files (
 );
 CREATE INDEX idx_pm_files_created ON public.pm_files USING btree (created_at DESC);
 CREATE INDEX idx_pm_files_device ON public.pm_files USING btree (device_id);
+CREATE INDEX idx_pm_files_measurement_slot
+    ON public.pm_files (measurement_end, technology, carrier, device_id)
+    WHERE measurement_end IS NOT NULL AND parsed = true;
 -- 部分索引：只索引未压行，保留给 deprecated Sweeper/离线工具按 raw_compressed=false AND
 -- created_at<cutoff 查询。
 CREATE INDEX idx_pm_files_uncompressed ON public.pm_files USING btree (created_at) WHERE (raw_compressed = false);
+
+CREATE TABLE public.pm_slot_health (
+    slot_start timestamptz NOT NULL,
+    slot_end timestamptz NOT NULL,
+    technology varchar(16) NOT NULL,
+    carrier varchar(16) NOT NULL,
+    expected_devices bigint NOT NULL,
+    received_devices bigint NOT NULL,
+    coverage_ratio double precision NOT NULL,
+    expected_snapshot_version text NOT NULL DEFAULT '',
+    evaluated_at timestamptz NOT NULL,
+    status varchar(32) NOT NULL,
+    PRIMARY KEY (slot_end, technology, carrier),
+    CONSTRAINT chk_pm_slot_health_window CHECK (slot_end > slot_start),
+    CONSTRAINT chk_pm_slot_health_counts CHECK (
+        expected_devices >= 0 AND received_devices >= 0
+    ),
+    CONSTRAINT chk_pm_slot_health_coverage CHECK (
+        coverage_ratio >= 0 AND coverage_ratio <= 1
+    ),
+    CONSTRAINT chk_pm_slot_health_status CHECK (
+        status IN ('complete', 'partial', 'missing', 'bootstrap_ignored')
+    )
+);
+CREATE INDEX idx_pm_slot_health_latest
+    ON public.pm_slot_health (technology, carrier, slot_end DESC);
 
 -- ── mr_files（普通表；与 mr_records 同库 —— MR 文件元数据落时序库，不再放主库）────────────
 -- 原在主库（PgPool），随「MR 也记录到时序库」迁来 TsPool：与 pm_files / mr_records 一致。
@@ -1809,6 +1840,7 @@ DROP TABLE IF EXISTS public.pm_measurement_anchors;
 DROP TABLE IF EXISTS public.pm_ingest_batches;
 DROP TABLE IF EXISTS public.pm_metric_sets;
 DROP TABLE IF EXISTS public.pm_metric_dictionary;
+DROP TABLE IF EXISTS public.pm_slot_health;
 DROP TABLE IF EXISTS public.pm_files;
 DROP TABLE IF EXISTS public.mr_files;
 DROP TABLE IF EXISTS public.trace_messages;

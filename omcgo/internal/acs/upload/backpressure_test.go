@@ -84,6 +84,17 @@ func TestProjectedUsagePctIncludesAcceptedPendingBytes(t *testing.T) {
 	assert.Equal(t, 100.0, projectedUsagePct(1000, 950, 100))
 }
 
+func TestWatchdog_RecordAcceptedPublishesLastSuccessfulPMUploadTimestamp(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewBackpressureMetrics(reg)
+	watchdog := &Watchdog{metrics: metrics}
+	acceptedAt := time.Date(2026, 8, 3, 15, 1, 0, 0, time.UTC)
+
+	watchdog.RecordAccepted(acceptedAt)
+
+	require.Equal(t, float64(acceptedAt.Unix()), testutil.ToFloat64(metrics.lastAccepted))
+}
+
 func TestDecideBackpressure_Hysteresis(t *testing.T) {
 	cfg := BackpressureConfig{
 		Enabled: true, DiskHighPct: 85, DiskLowPct: 75,

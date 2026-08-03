@@ -74,6 +74,17 @@ export interface TaskStats {
   failed: number;
 }
 
+export interface PMSlotHealth {
+  slotEnd: string;
+  technology: string;
+  carrier: string;
+  expectedDevices: number;
+  receivedDevices: number;
+  coverageRatio: number;
+  status: 'complete' | 'partial' | 'missing' | 'bootstrap_ignored';
+  evaluatedAt: string;
+}
+
 /**
  * Dashboard 汇总数据
  */
@@ -83,6 +94,7 @@ export interface DashboardSummary {
   kpiSummary: KPIOverview;
   kpiDeltas: Record<string, KPIDelta>;  // KPI趋势数据（新增）
   taskSummary: TaskStats;
+  pmSlotHealth: PMSlotHealth[];
 }
 
 /**
@@ -207,7 +219,19 @@ export interface BackendDashboardSummary {
   kpi_overview: BackendKPIOverview;
   kpi_deltas: Record<string, BackendKPIDelta>;  // KPI趋势数据（新增）
   recent_alarms: BackendRecentAlarm[];
+	pm_slot_health: BackendPMSlotHealth[];
   timestamp: string;
+}
+
+export interface BackendPMSlotHealth {
+  slot_end: string;
+  technology: string;
+  carrier: string;
+  expected_devices: number;
+  received_devices: number;
+  coverage_ratio: number;
+  status: PMSlotHealth['status'];
+  evaluated_at: string;
 }
 
 /**
