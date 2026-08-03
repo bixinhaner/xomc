@@ -157,6 +157,10 @@ type NetworkProgressReader interface {
 	) (pmstream.ProgressQueryResult, error)
 }
 
+type CounterSeriesReader interface {
+	ListSeries(context.Context, NetworkRollupQuery) ([]NetworkRollupPoint, error)
+}
+
 // Service aggregates data from multiple modules for the dashboard.
 //
 // pgPool 指向主库（业务数据：alarms_active / devices / device_groups / dashboard_widgets）；
@@ -179,6 +183,7 @@ type Service struct {
 	// networkRollups 只读现有内置任务发布的 network 维度全网结果。
 	// Dashboard 不得回退原始 PM 明细或调用在线聚合。
 	networkRollups  NetworkRollupReader
+	counterSeries   CounterSeriesReader
 	networkProgress NetworkProgressReader
 	kpiQueryGuard   *KPIQueryGuard
 	metrics         *Metrics
@@ -225,6 +230,10 @@ func (s *Service) SetKPIQueryGuard(guard *KPIQueryGuard) {
 
 func (s *Service) SetMetrics(metrics *Metrics) {
 	s.metrics = metrics
+}
+
+func (s *Service) SetCounterSeriesReader(reader CounterSeriesReader) {
+	s.counterSeries = reader
 }
 
 func (s *Service) SetNetworkProgressReader(reader NetworkProgressReader) {
@@ -1410,12 +1419,15 @@ func (s *Service) GetKPITimeSeriesSnapshotWithMetadata(
 			for _, row := range progress.Rows {
 				if row.Dimension != pmstream.DimensionNetwork ||
 					string(row.Granularity) != string(granularity) ||
-					row.MetricType != "kpi" ||
 					row.WindowStart.Before(startTime) ||
 					!row.WindowStart.Before(endTime) {
 					continue
 				}
 				if _, ok := requested[row.MetricPath]; !ok {
+					continue
+				}
+				expectedType := dashboardMetricType(row.MetricPath)
+				if row.MetricType != string(expectedType) {
 					continue
 				}
 				snapshot.Series[row.MetricPath] = append(
@@ -1531,11 +1543,25 @@ func (s *Service) getKPITimeSeriesUnprotectedWithObservation(
 		}
 	}
 
-	points, err := s.fetchNetworkKCodeSeries(
-		ctx, kcodes, technology, granularity, startTime, endTime, observeMissing,
-	)
-	if err != nil {
-		return nil, err
+	kpiCodes, counterCodes := splitDashboardMetricPaths(kcodes)
+	points := make([]networkSeriesPoint, 0)
+	if len(kpiCodes) > 0 {
+		kpiPoints, err := s.fetchNetworkKCodeSeries(
+			ctx, kpiCodes, technology, granularity, startTime, endTime, observeMissing,
+		)
+		if err != nil {
+			return nil, err
+		}
+		points = append(points, kpiPoints...)
+	}
+	if len(counterCodes) > 0 {
+		counterPoints, err := s.fetchCounterSeries(
+			ctx, counterCodes, technology, granularity, startTime, endTime,
+		)
+		if err != nil {
+			return nil, err
+		}
+		points = append(points, counterPoints...)
 	}
 
 	for _, p := range points {
@@ -1548,6 +1574,53 @@ func (s *Service) getKPITimeSeriesUnprotectedWithObservation(
 	}
 
 	return result, nil
+}
+
+func splitDashboardMetricPaths(paths []string) (kpiCodes, counterCodes []string) {
+	for _, path := range paths {
+		if dashboardMetricType(path) == metrics.MetricTypeCounter {
+			counterCodes = append(counterCodes, path)
+			continue
+		}
+		kpiCodes = append(kpiCodes, path)
+	}
+	return kpiCodes, counterCodes
+}
+
+func dashboardMetricType(path string) metrics.MetricType {
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(path)), "C") {
+		return metrics.MetricTypeCounter
+	}
+	return metrics.MetricTypeKPI
+}
+
+func (s *Service) fetchCounterSeries(
+	ctx context.Context,
+	codes []string,
+	technology model.Technology,
+	granularity metrics.Granularity,
+	startTime, endTime time.Time,
+) ([]networkSeriesPoint, error) {
+	if s.counterSeries == nil {
+		return nil, fmt.Errorf("dashboard counter series reader not configured")
+	}
+	points, err := s.counterSeries.ListSeries(ctx, NetworkRollupQuery{
+		Technology: technology, Granularity: granularity, MetricPaths: codes,
+		StartTime: startTime, EndTime: endTime,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("query dashboard network counter series: %w", err)
+	}
+	result := make([]networkSeriesPoint, 0, len(points))
+	for _, point := range points {
+		if point.WindowStart.Before(startTime) || !point.WindowStart.Before(endTime) {
+			continue
+		}
+		result = append(result, networkSeriesPoint{
+			code: point.MetricPath, time: point.WindowStart, value: point.Value,
+		})
+	}
+	return sortAndDedupeNetworkSeriesPoints(result), nil
 }
 
 func (s *Service) observeNetworkRollups(points []NetworkRollupPoint, requested []string, technology model.Technology, granularity metrics.Granularity, now time.Time) {
