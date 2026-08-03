@@ -25,18 +25,31 @@ type Reconciler struct {
 	metrics   *Metrics
 	now       func() time.Time
 
-	runCountMu     sync.Mutex
-	runCountCursor *runConvergenceCursor
+	runCountMu       sync.Mutex
+	runCountCursor   *runConvergenceCursor
+	runCountSweepEnd *runConvergenceCursor
 
 	stagingCleanupMu     sync.Mutex
 	stagingCleanupCursor *stagingCursor
 }
 
-const runCountReconcileBatchSize = 200
+// Each candidate is reconciled under one outer transaction so that its row
+// lock and authoritative task/result counts stay consistent. Keep the page
+// small enough to commit within the maintenance step deadline under release
+// campaign load; a timed-out 200-row transaction rolled the entire page back
+// and retried it forever.
+const runCountReconcileBatchSize = 50
+const runCountReconcilePrioritySize = 10
 
 type runConvergenceCursor struct {
 	StartedAt time.Time
 	ID        uuid.UUID
+}
+
+type runConvergenceCandidate struct {
+	id             uuid.UUID
+	startedAt      time.Time
+	advancesCursor bool
 }
 
 type stagingCursor struct {
@@ -102,6 +115,22 @@ const stagingRowsMetricSQL = `
 SELECT GREATEST(reltuples, 0)::bigint
 FROM pg_class WHERE oid='parameter_sync_staging_values'::regclass`
 
+const missingResultRunCandidatesSQL = `
+SELECT run.id
+FROM parameter_sync_runs run
+WHERE run.status IN ('waiting_device','executing','processing','cancelling')
+  AND EXISTS (
+    SELECT 1
+    FROM device_tasks t
+    LEFT JOIN parameter_sync_task_results res
+      ON res.run_id=run.id AND res.task_id=t.id
+    WHERE t.source='param_sync' AND t.source_id=run.id
+      AND t.status IN ('completed','failed','expired','cancelled')
+      AND res.task_id IS NULL
+  )
+ORDER BY run.started_at ASC
+LIMIT $1`
+
 const convergenceMetricsSQL = `
 WITH active AS (
   SELECT id, status, started_at, expected_task_count, terminal_task_count,
@@ -126,7 +155,12 @@ WITH active AS (
            WHERE t.status IN ('completed','failed','expired','cancelled')
              AND res.status IN ('processed','failed')
              AND (res.status='failed' OR NOT res.success)
-         )::bigint AS actual_failed
+         )::bigint AS actual_failed,
+         COALESCE(
+           max(GREATEST(t.created_at, t.sent_at, t.completed_at,
+                        res.created_at, res.processed_at)),
+           a.started_at
+         ) AS last_progress_at
   FROM active a
   LEFT JOIN device_tasks t
     ON t.source='param_sync' AND t.source_id=a.id
@@ -153,16 +187,33 @@ SELECT
        OR stored_processed<>actual_processed
        OR stored_failed<>actual_failed
   )::bigint,
+  COALESCE(max(GREATEST(EXTRACT(EPOCH FROM (now()-last_progress_at)),0)) FILTER (
+    WHERE stored_expected<>actual_expected
+       OR stored_terminal<>actual_terminal
+       OR stored_processed<>actual_processed
+       OR stored_failed<>actual_failed
+  ),0)::double precision,
   COALESCE(max(EXTRACT(EPOCH FROM (now()-started_at))),0)::double precision,
   count(*) FILTER (WHERE plan_blocked)::bigint,
+  COALESCE(max(GREATEST(EXTRACT(EPOCH FROM (now()-last_progress_at)),0)) FILTER (
+    WHERE plan_blocked
+  ),0)::double precision,
   count(*) FILTER (
     WHERE NOT plan_blocked AND actual_terminal>actual_processed
   )::bigint,
+  COALESCE(max(GREATEST(EXTRACT(EPOCH FROM (now()-last_progress_at)),0)) FILTER (
+    WHERE NOT plan_blocked AND actual_terminal>actual_processed
+  ),0)::double precision,
   count(*) FILTER (
     WHERE NOT plan_blocked
       AND actual_terminal=actual_processed
       AND actual_terminal<actual_expected
-  )::bigint
+  )::bigint,
+  COALESCE(max(GREATEST(EXTRACT(EPOCH FROM (now()-last_progress_at)),0)) FILTER (
+    WHERE NOT plan_blocked
+      AND actual_terminal=actual_processed
+      AND actual_terminal<actual_expected
+  ),0)::double precision
 FROM classified`
 
 type rowScanner interface {
@@ -485,32 +536,74 @@ func (r *Reconciler) ReconcileRunCounts(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("begin parameter sync run convergence claim: %w", err)
 	}
 	defer func() { _ = claimTx.Rollback(context.Background()) }()
-	candidateQuery, candidateArgs, err := buildRunConvergenceCandidateSelectSQL(
-		r.runCountCursor, runCountReconcileBatchSize,
-	)
+	sweepEnd := r.runCountSweepEnd
+	if sweepEnd == nil {
+		sweepQuery, sweepArgs, buildErr := buildRunConvergenceSweepEndSQL()
+		if buildErr != nil {
+			return 0, fmt.Errorf("build parameter sync run convergence sweep end: %w", buildErr)
+		}
+		var loaded runConvergenceCursor
+		if scanErr := claimTx.QueryRow(ctx, sweepQuery, sweepArgs...).Scan(&loaded.StartedAt, &loaded.ID); scanErr != nil {
+			if errors.Is(scanErr, pgx.ErrNoRows) {
+				if commitErr := claimTx.Commit(ctx); commitErr != nil {
+					return 0, fmt.Errorf("commit empty parameter sync run convergence sweep: %w", commitErr)
+				}
+				r.runCountCursor = nil
+				r.runCountSweepEnd = nil
+				return 0, nil
+			}
+			return 0, fmt.Errorf("load parameter sync run convergence sweep end: %w", scanErr)
+		}
+		sweepEnd = &loaded
+	}
+
+	priorityQuery, priorityArgs, err := buildRunConvergencePrioritySelectSQL(runCountReconcilePrioritySize)
 	if err != nil {
-		return 0, fmt.Errorf("build parameter sync run convergence candidates: %w", err)
+		return 0, fmt.Errorf("build priority parameter sync run convergence candidates: %w", err)
 	}
-	rows, err := claimTx.Query(ctx, candidateQuery, candidateArgs...)
+	rows, err := claimTx.Query(ctx, priorityQuery, priorityArgs...)
 	if err != nil {
-		return 0, fmt.Errorf("list parameter sync run convergence candidates: %w", err)
+		return 0, fmt.Errorf("list priority parameter sync run convergence candidates: %w", err)
 	}
-	type candidate struct {
-		id        uuid.UUID
-		startedAt time.Time
-	}
-	candidates := make([]candidate, 0, runCountReconcileBatchSize)
+	candidates := make([]runConvergenceCandidate, 0, runCountReconcileBatchSize)
+	excluded := make([]uuid.UUID, 0, runCountReconcilePrioritySize)
 	for rows.Next() {
-		var item candidate
+		var item runConvergenceCandidate
 		if err := rows.Scan(&item.id, &item.startedAt); err != nil {
 			rows.Close()
-			return 0, fmt.Errorf("scan parameter sync run convergence candidate: %w", err)
+			return 0, fmt.Errorf("scan priority parameter sync run convergence candidate: %w", err)
+		}
+		candidates = append(candidates, item)
+		excluded = append(excluded, item.id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("iterate priority parameter sync run convergence candidates: %w", err)
+	}
+	rows.Close()
+
+	forwardQuery, forwardArgs, err := buildRunConvergenceForwardSelectSQL(
+		r.runCountCursor, sweepEnd, excluded,
+		runCountReconcileBatchSize-runCountReconcilePrioritySize,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("build forward parameter sync run convergence candidates: %w", err)
+	}
+	rows, err = claimTx.Query(ctx, forwardQuery, forwardArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("list forward parameter sync run convergence candidates: %w", err)
+	}
+	for rows.Next() {
+		item := runConvergenceCandidate{advancesCursor: true}
+		if err := rows.Scan(&item.id, &item.startedAt); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan forward parameter sync run convergence candidate: %w", err)
 		}
 		candidates = append(candidates, item)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return 0, fmt.Errorf("iterate parameter sync run convergence candidates: %w", err)
+		return 0, fmt.Errorf("iterate forward parameter sync run convergence candidates: %w", err)
 	}
 	rows.Close()
 	if len(candidates) == 0 {
@@ -520,6 +613,7 @@ func (r *Reconciler) ReconcileRunCounts(ctx context.Context) (int64, error) {
 		// The next maintenance tick starts a new bounded sweep. Avoid wrapping
 		// inside this call, which would process the first page twice at the tail.
 		r.runCountCursor = nil
+		r.runCountSweepEnd = nil
 		return 0, nil
 	}
 
@@ -575,17 +669,12 @@ func (r *Reconciler) ReconcileRunCounts(ctx context.Context) (int64, error) {
 		return 0, errors.Join(reconcileErr,
 			fmt.Errorf("commit parameter sync run convergence batch: %w", err))
 	}
-	last := candidates[len(candidates)-1]
-	r.runCountCursor = &runConvergenceCursor{StartedAt: last.startedAt, ID: last.id}
-	if r.metrics != nil {
-		r.metrics.RunCounterDrift.Set(float64(drifted))
-		for _, reason := range []convergenceBlockReason{
-			convergenceBlockPlanNotDispatched,
-			convergenceBlockTerminalResultMissing,
-			convergenceBlockDeviceTaskActive,
-		} {
-			r.metrics.RunsBlocked.WithLabelValues(string(reason)).Set(float64(blocked[reason]))
-		}
+	if cursor, hasForward := nextRunConvergenceCursor(candidates); hasForward {
+		r.runCountCursor = &cursor
+		r.runCountSweepEnd = sweepEnd
+	} else {
+		r.runCountCursor = nil
+		r.runCountSweepEnd = nil
 	}
 	return finalized, reconcileErr
 }
@@ -601,61 +690,75 @@ func buildRunCountCandidateSelectSQL(cursor *uuid.UUID, limit uint64) (string, [
 	return builder.ToSql()
 }
 
-func buildRunConvergenceCandidateSelectSQL(
-	cursor *runConvergenceCursor,
+const runConvergenceActivePredicate = "run.status IN ('planning','enqueuing','waiting_device','executing','processing','cancelling')"
+const runConvergenceStoredReadyPredicate = `(run.expected_task_count>0
+  AND run.terminal_task_count=run.expected_task_count
+  AND run.processed_task_count=run.expected_task_count)`
+
+func buildRunConvergenceSweepEndSQL() (string, []interface{}, error) {
+	return storage.Psql.Select("run.started_at", "run.id").
+		From("parameter_sync_runs run").
+		Where(sq.Expr(runConvergenceActivePredicate)).
+		OrderBy("run.started_at DESC", "run.id DESC").
+		Limit(1).
+		ToSql()
+}
+
+func buildRunConvergencePrioritySelectSQL(limit uint64) (string, []interface{}, error) {
+	if limit == 0 {
+		limit = runCountReconcilePrioritySize
+	}
+	return storage.Psql.Select("run.id", "run.started_at").
+		From("parameter_sync_runs run").
+		Where(sq.Expr(runConvergenceActivePredicate)).
+		Where(sq.Expr(runConvergenceStoredReadyPredicate)).
+		OrderBy("run.started_at", "run.id").
+		Limit(limit).
+		Suffix("FOR UPDATE SKIP LOCKED").
+		ToSql()
+}
+
+func buildRunConvergenceForwardSelectSQL(
+	cursor, sweepEnd *runConvergenceCursor,
+	excluded []uuid.UUID,
 	limit uint64,
 ) (string, []interface{}, error) {
+	if sweepEnd == nil {
+		return "", nil, fmt.Errorf("parameter sync convergence sweep end is required")
+	}
 	if limit == 0 {
-		limit = runCountReconcileBatchSize
+		limit = runCountReconcileBatchSize - runCountReconcilePrioritySize
 	}
-	const activePredicate = "run.status IN ('planning','enqueuing','waiting_device','executing','processing','cancelling')"
-	query := `
-SELECT run.id, run.started_at
-FROM parameter_sync_runs run
-LEFT JOIN LATERAL (
-  SELECT
-    count(t.id)::int AS actual_expected,
-    count(t.id) FILTER (
-      WHERE t.status IN ('completed','failed','expired','cancelled')
-    )::int AS actual_terminal,
-    count(res.task_id) FILTER (
-      WHERE t.status IN ('completed','failed','expired','cancelled')
-        AND res.status IN ('processed','failed')
-    )::int AS actual_processed,
-    count(res.task_id) FILTER (
-      WHERE t.status IN ('completed','failed','expired','cancelled')
-        AND res.status IN ('processed','failed')
-        AND (res.status='failed' OR NOT res.success)
-    )::int AS actual_failed
-  FROM device_tasks t
-  LEFT JOIN parameter_sync_task_results res
-    ON res.run_id=run.id AND res.task_id=t.id
-  WHERE t.source='param_sync' AND t.source_id=run.id
-) actual ON true
-CROSS JOIN LATERAL (
-  SELECT
-    run.expected_task_count>0
-      AND run.terminal_task_count=run.expected_task_count
-      AND run.processed_task_count=run.expected_task_count AS stored_ready,
-    run.expected_task_count<>actual.actual_expected
-      OR run.terminal_task_count<>actual.actual_terminal
-      OR run.processed_task_count<>actual.actual_processed
-      OR run.failed_task_count<>actual.actual_failed AS counter_drift
-) priority
-WHERE ` + activePredicate
-	var args []interface{}
+	builder := storage.Psql.Select("run.id", "run.started_at").
+		From("parameter_sync_runs run").
+		Where(sq.Expr(runConvergenceActivePredicate))
 	if cursor != nil {
-		query += ` AND (
-  priority.stored_ready OR priority.counter_drift
-  OR (run.started_at, run.id) > ($1, $2)
-)`
-		args = []interface{}{cursor.StartedAt, cursor.ID}
+		builder = builder.Where(sq.Expr("(run.started_at, run.id) > (?, ?)", cursor.StartedAt, cursor.ID))
 	}
-	query += fmt.Sprintf(`
-ORDER BY stored_ready DESC, counter_drift DESC, run.started_at, run.id
-LIMIT %d
-FOR UPDATE OF run SKIP LOCKED`, limit)
-	return query, args, nil
+	builder = builder.Where(sq.Expr("(run.started_at, run.id) <= (?, ?)", sweepEnd.StartedAt, sweepEnd.ID))
+	if len(excluded) > 0 {
+		builder = builder.Where(sq.Expr("run.id <> ALL(?::uuid[])", excluded))
+	}
+	return builder.OrderBy("run.started_at", "run.id").
+		Limit(limit).
+		Suffix("FOR UPDATE SKIP LOCKED").
+		ToSql()
+}
+
+func nextRunConvergenceCursor(candidates []runConvergenceCandidate) (runConvergenceCursor, bool) {
+	var cursor runConvergenceCursor
+	found := false
+	for _, candidate := range candidates {
+		if !candidate.advancesCursor {
+			continue
+		}
+		if !found || candidate.startedAt.After(cursor.StartedAt) ||
+			(candidate.startedAt.Equal(cursor.StartedAt) && candidate.id.String() > cursor.ID.String()) {
+			cursor = runConvergenceCursor{StartedAt: candidate.startedAt, ID: candidate.id}
+			found = true
+		}
+	}
+	return cursor, found
 }
 
 func buildRunCountReconciliationSQL(runIDs []uuid.UUID) (string, []interface{}, error) {
@@ -801,14 +904,11 @@ func (r *Reconciler) RecoverMissingResults(ctx context.Context, runLimit, taskLi
 	if taskBudget <= 0 || taskBudget > runLimit*taskLimit {
 		taskBudget = runLimit * taskLimit
 	}
-	rows, err := r.pool.Query(ctx, `
-SELECT id FROM parameter_sync_runs
-WHERE status IN ('waiting_device','executing','processing','cancelling')
-  AND expected_task_count > 0
-  AND terminal_task_count = expected_task_count
-  AND processed_task_count < expected_task_count
-ORDER BY started_at ASC
-LIMIT $1`, runLimit)
+	// Select from durable terminal task state directly. Stored run counters are
+	// repaired independently and may themselves be stale after an app restart;
+	// making recovery depend on those counters creates a circular wait where the
+	// missing result cannot be rebuilt until a separate count sweep reaches it.
+	rows, err := r.pool.Query(ctx, missingResultRunCandidatesSQL, runLimit)
 	if err != nil {
 		return 0, fmt.Errorf("find stalled parameter sync runs with missing results: %w", err)
 	}
@@ -828,28 +928,34 @@ LIMIT $1`, runLimit)
 	rows.Close()
 
 	recovered := 0
+	examined := 0
+	var recoveryErrs []error
 	for _, runID := range runIDs {
-		if recovered >= taskBudget {
+		if examined >= taskBudget {
 			break
 		}
-		remaining := taskBudget - recovered
+		remaining := taskBudget - examined
 		limit := taskLimit
 		if remaining < limit {
 			limit = remaining
 		}
-		n, err := r.recoverRunMissingResults(ctx, runID, limit)
+		n, attempted, err := r.recoverRunMissingResults(ctx, runID, limit)
 		recovered += n
+		examined += attempted
 		if err != nil {
-			return recovered, err
+			recoveryErrs = append(recoveryErrs, err)
+			if ctx.Err() != nil {
+				break
+			}
 		}
 	}
 	if r.metrics != nil && recovered > 0 {
 		r.metrics.ReconcileRepairs.WithLabelValues("missing_result_recovery").Add(float64(recovered))
 	}
-	return recovered, nil
+	return recovered, errors.Join(recoveryErrs...)
 }
 
-func (r *Reconciler) recoverRunMissingResults(ctx context.Context, runID uuid.UUID, limit int) (int, error) {
+func (r *Reconciler) recoverRunMissingResults(ctx context.Context, runID uuid.UUID, limit int) (int, int, error) {
 	const query = `
 SELECT t.id, t.device_sn, t.status, t.error_code, COALESCE(t.error_message,''), t.source_id, t.creator_id
 FROM device_tasks t
@@ -861,7 +967,7 @@ ORDER BY t.command_index ASC, t.created_at ASC, t.id ASC
 LIMIT $2`
 	rows, err := r.pool.Query(ctx, query, runID, limit)
 	if err != nil {
-		return 0, fmt.Errorf("find missing parameter sync results for run %s: %w", runID, err)
+		return 0, 0, fmt.Errorf("find missing parameter sync results for run %s: %w", runID, err)
 	}
 	defer rows.Close()
 
@@ -869,15 +975,20 @@ LIMIT $2`
 	for rows.Next() {
 		result, err := scanMissingTaskResult(rows)
 		if err != nil {
-			return len(results), fmt.Errorf("scan missing parameter sync result for run %s: %w", runID, err)
+			return 0, len(results), fmt.Errorf("scan missing parameter sync result for run %s: %w", runID, err)
 		}
 		results = append(results, result)
 	}
 	if err := rows.Err(); err != nil {
-		return len(results), fmt.Errorf("iterate missing parameter sync results for run %s: %w", runID, err)
+		return 0, len(results), fmt.Errorf("iterate missing parameter sync results for run %s: %w", runID, err)
 	}
+	processed, err := processMissingTaskResults(ctx, r.processor, results)
+	return processed, len(results), err
+}
 
+func processMissingTaskResults(ctx context.Context, processor ResultProcessor, results []missingTaskResult) (int, error) {
 	processed := 0
+	var processingErrs []error
 	for _, result := range results {
 		payload := event.ParamSyncTaskResultPayload{
 			EventID:   "reconcile:" + result.runID.String() + ":" + result.taskID + ":" + string(result.status),
@@ -885,15 +996,19 @@ LIMIT $2`
 			TaskID: result.taskID, DeviceSN: result.deviceSN, Success: result.status == task.TaskStatusCompleted,
 			ResultRef: "device_tasks:" + result.taskID, ErrorCode: result.errorCode, ErrorMessage: result.errorMessage,
 		}
-		outcome, err := r.processor.Process(ctx, payload)
+		outcome, err := processor.Process(ctx, payload)
 		if err != nil {
-			return processed, fmt.Errorf("recover missing parameter sync result %s for run %s: %w", result.taskID, result.runID, err)
+			processingErrs = append(processingErrs, fmt.Errorf("recover missing parameter sync result %s for run %s: %w", result.taskID, result.runID, err))
+			if ctx.Err() != nil {
+				break
+			}
+			continue
 		}
 		if !outcome.Duplicate {
 			processed++
 		}
 	}
-	return processed, nil
+	return processed, errors.Join(processingErrs...)
 }
 
 func (r *Reconciler) CleanStaging(ctx context.Context, olderThan time.Time, limit int) (int64, error) {
@@ -981,18 +1096,25 @@ WHERE status IN ('planning','enqueuing','waiting_device','executing','processing
 	r.metrics.TasksFailed.Set(float64(failed))
 
 	var ready, drift, planBlocked, resultMissing, deviceActive int64
-	var oldestAge float64
+	var driftOldestIdle, oldestAge, planOldestIdle, resultOldestIdle, deviceOldestIdle float64
 	if err := r.pool.QueryRow(ctx, convergenceMetricsSQL).Scan(
-		&ready, &drift, &oldestAge, &planBlocked, &resultMissing, &deviceActive,
+		&ready, &drift, &driftOldestIdle, &oldestAge,
+		&planBlocked, &planOldestIdle,
+		&resultMissing, &resultOldestIdle,
+		&deviceActive, &deviceOldestIdle,
 	); err != nil {
 		return fmt.Errorf("collect parameter sync convergence gauges: %w", err)
 	}
 	r.metrics.RunsReadyButNotFinalized.Set(float64(ready))
 	r.metrics.RunCounterDrift.Set(float64(drift))
+	r.metrics.RunCounterDriftOldestIdle.Set(driftOldestIdle)
 	r.metrics.ActiveRunOldestAge.Set(oldestAge)
 	r.metrics.RunsBlocked.WithLabelValues(string(convergenceBlockPlanNotDispatched)).Set(float64(planBlocked))
+	r.metrics.RunsBlockedOldestIdle.WithLabelValues(string(convergenceBlockPlanNotDispatched)).Set(planOldestIdle)
 	r.metrics.RunsBlocked.WithLabelValues(string(convergenceBlockTerminalResultMissing)).Set(float64(resultMissing))
+	r.metrics.RunsBlockedOldestIdle.WithLabelValues(string(convergenceBlockTerminalResultMissing)).Set(resultOldestIdle)
 	r.metrics.RunsBlocked.WithLabelValues(string(convergenceBlockDeviceTaskActive)).Set(float64(deviceActive))
+	r.metrics.RunsBlockedOldestIdle.WithLabelValues(string(convergenceBlockDeviceTaskActive)).Set(deviceOldestIdle)
 
 	var outbox, staging int64
 	if err := r.pool.QueryRow(ctx, outboxBacklogMetricSQL).Scan(&outbox); err != nil {

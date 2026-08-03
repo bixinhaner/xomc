@@ -1,0 +1,91 @@
+rule_files:
+  - omc-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'param_sync_automatic_admission_queued_requests'
+        values: '100x12'
+      - series: 'param_sync_automatic_admission_oldest_queue_age_seconds'
+        values: '8000x12'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: OMCParameterSyncAutomaticQueueStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              domain: omc
+              subsystem: parameter_sync
+            exp_annotations:
+              summary: "自动参数同步排队超过两小时"
+              description: |
+                全局准入保护仍在工作，但最老的自动同步请求已排队超过两小时。
+                检查设备会话处理速率、参数同步任务完成率、PostgreSQL CPU 与自动准入占用量。
+
+  - interval: 1m
+    input_series:
+      - series: 'param_sync_automatic_admission_queued_requests'
+        values: '100x12'
+      - series: 'param_sync_automatic_admission_oldest_queue_age_seconds'
+        values: '3600x12'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: OMCParameterSyncAutomaticQueueStalled
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'param_sync_run_counter_drift'
+        values: '5x6'
+      - series: 'param_sync_run_counter_drift_oldest_idle_seconds'
+        values: '360x6'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ParamSyncRunCounterDrift
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              domain: omc
+              subsystem: param_sync
+            exp_annotations:
+              summary: "参数同步运行计数与持久任务状态漂移"
+              description: |
+                parameter_sync_runs 的计数与 device_tasks/result 权威状态不一致。
+                Action: 检查维护扫描错误和数据库写入；禁止人工修改计数或清理运行记录。
+
+  - interval: 1m
+    input_series:
+      - series: 'param_sync_run_counter_drift'
+        values: '5x6'
+      - series: 'param_sync_run_counter_drift_oldest_idle_seconds'
+        values: '60x6'
+      - series: 'param_sync_result_count_total{mode="authoritative"}'
+        values: '0+100x5'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ParamSyncRunCounterDrift
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'param_sync_runs_blocked{reason="terminal_task_missing_result"}'
+        values: '1x10'
+      - series: 'param_sync_runs_blocked_oldest_idle_seconds{reason="terminal_task_missing_result"}'
+        values: '360x10'
+      - series: 'param_sync_result_count_total{mode="authoritative"}'
+        values: '0+100x9'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: ParamSyncRunBlockedWithoutActiveDeviceTask
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              domain: omc
+              subsystem: param_sync
+            exp_annotations:
+              summary: "参数同步运行被非设备执行原因阻塞"
+              description: |
+                存在任务计划未派发或终态任务缺少 durable result；这不是设备仍在执行。
+                Action: 按 reason 检查 dispatcher、terminal bridge、result consumer 和 outbox。

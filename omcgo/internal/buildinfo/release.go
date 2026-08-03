@@ -17,7 +17,10 @@ func ReleaseCampaignID() (uuid.UUID, bool) {
 		revision == "" || revision == "unknown" || revision == "n/a" {
 		return uuid.Nil, false
 	}
-	sum := sha256.Sum256([]byte(version + "\x00" + revision))
+	// ReleaseVersion contains the packaging timestamp. The immutable commit is
+	// the campaign identity: repackaging/redeploying identical code must resume
+	// the same durable campaign instead of scheduling another full-device sync.
+	sum := sha256.Sum256([]byte(revision))
 	var id uuid.UUID
 	copy(id[:], sum[:16])
 	id[6] = (id[6] & 0x0f) | 0x80

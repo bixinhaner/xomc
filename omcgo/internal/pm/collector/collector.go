@@ -693,18 +693,21 @@ func (c *PMCollector) ingestViaCopy(
 	}
 	content.Counters = fillMissingSupportedCounters(content.Counters, enabledAllow)
 
+	measurementStart, measurementEnd := pmMeasurementWindow(content)
 	marker := metrics.FileMarker{
-		DeviceID:      deviceID,
-		DeviceSN:      payload.DeviceSN,
-		Carrier:       payload.Carrier,
-		Technology:    payload.Technology,
-		FileName:      path.Base(payload.MinIOPath),
-		FileSize:      fileSize,
-		CollectTime:   now,
-		MinioPath:     payload.MinIOPath,
-		ContentSHA256: contentSHA256,
-		CounterCount:  len(content.Counters),
-		RawCompressed: rawCompressed,
+		DeviceID:         deviceID,
+		DeviceSN:         payload.DeviceSN,
+		Carrier:          payload.Carrier,
+		Technology:       payload.Technology,
+		FileName:         path.Base(payload.MinIOPath),
+		FileSize:         fileSize,
+		CollectTime:      now,
+		MeasurementStart: measurementStart,
+		MeasurementEnd:   measurementEnd,
+		MinioPath:        payload.MinIOPath,
+		ContentSHA256:    contentSHA256,
+		CounterCount:     len(content.Counters),
+		RawCompressed:    rawCompressed,
 	}
 	ingested, err := c.copyIngestor.CopyIngest(ctx, marker, content.Counters, kpis)
 	if err != nil {
@@ -758,6 +761,7 @@ func (c *PMCollector) ingestViaCopy(
 			zap.Strings("report_key_sample", content.whitelistMissSample))
 	}
 	if ingested && c.metrics != nil {
+		c.metrics.RecordIngestSuccess(payload.Carrier, payload.Technology, now)
 		if content.whitelistMissValues > 0 {
 			c.metrics.WhitelistMissValuesTotal.
 				WithLabelValues(payload.Carrier, payload.Technology).
@@ -786,6 +790,21 @@ func (c *PMCollector) ingestViaCopy(
 		_ = c.eventBus.Publish(ctx, event.SubjectPMFileParsed, parsedEvt)
 	}
 	return nil
+}
+
+func pmMeasurementWindow(content *PMFileContent) (time.Time, time.Time) {
+	if content == nil {
+		return time.Time{}, time.Time{}
+	}
+	end := content.FileEndTime
+	if end.IsZero() {
+		end = content.CollectTime
+	}
+	start := content.FileBeginTime
+	if start.IsZero() && !end.IsZero() && content.Granularity > 0 {
+		start = end.Add(-time.Duration(content.Granularity) * time.Minute)
+	}
+	return start, end
 }
 
 func (c *PMCollector) discardChangedSourceRaw(

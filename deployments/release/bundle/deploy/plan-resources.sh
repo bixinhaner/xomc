@@ -340,6 +340,30 @@ case "$TIER" in
   large)  CPU_app=2;   CPU_acs=8; CPU_worker=$CPU_WORKER_QUARTER; CPU_pg=$CPU_DB_THIRD; CPU_tsdb=$CPU_TSDB_HALF; CPU_redis_core=2; CPU_redis_pm=2; CPU_nats=2; CPU_minio=6; CPU_web=1 ;;
 esac
 CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis_core" "$CPU_redis_pm" "$CPU_nats" "$CPU_minio" "$CPU_web")
+idx() { local n="$1"; for i in "${!COMP_NAMES[@]}"; do [ "${COMP_NAMES[$i]}" = "$n" ] && { echo "$i"; return; }; done; }
+
+# 32GiB 及以上档位为 MinIO 固定保留 6GiB cap。线上海量小对象场景中，进程 RSS
+# 仅约 0.45GiB，但可回收文件系统 slab 会把 4GiB cgroup working set 推至上限，
+# 造成持续 memory.max 回收并放大磁盘 I/O。这里仅从其它组件 floor 以上的 cap 余量
+# 重分配，既不突破整机预算，也不削减任何组件的最低可运行内存。
+if [ "$TIER" != "small" ]; then
+  MINIO_IDX=$(idx minio)
+  MINIO_TARGET_MIB=6144
+  if [ "${COMP_MEM[$MINIO_IDX]}" -lt "$MINIO_TARGET_MIB" ]; then
+    MINIO_NEED=$(( MINIO_TARGET_MIB - COMP_MEM[$MINIO_IDX] ))
+    for reclaim_name in app nats web redis-core worker postgres postgres-tsdb redis-pm acs; do
+      [ "$MINIO_NEED" -gt 0 ] || break
+      reclaim_idx=$(idx "$reclaim_name")
+      reclaimable=$(( COMP_MEM[$reclaim_idx] - COMP_FLOOR[$reclaim_idx] ))
+      [ "$reclaimable" -gt 0 ] || continue
+      take="$reclaimable"; [ "$take" -gt "$MINIO_NEED" ] && take="$MINIO_NEED"
+      COMP_MEM[$reclaim_idx]=$(( COMP_MEM[$reclaim_idx] - take ))
+      MINIO_NEED=$(( MINIO_NEED - take ))
+    done
+    [ "$MINIO_NEED" -eq 0 ] || die "${TIER} 档位无法在不削减组件 floor 的前提下为 MinIO 保留 6GiB；请扩容或降低其它组件基线" 1
+    COMP_MEM[$MINIO_IDX]="$MINIO_TARGET_MIB"
+  fi
+fi
 
 # 校验：Σ内存限额 ≤ 空闲预算（全量记账，含监控）。SURPLUS=0 时 ALLOC_SUM==FLOOR_SUM，
 # 若此时仍 > IDLE_MEM_MIB 属于上面已经 warn 过的「容忍度内下限缺口」，是预期行为，不重复 die；
@@ -355,7 +379,6 @@ fi
 
 # ---- 联动派生（同一预算 → 限额 + 进程内上限，结构上锁死一致）----
 gomemlimit() { mul_pct "$1" 90; }                  # GOMEMLIMIT = 0.90 × 内存限额（软限，需配合准入控制）
-idx() { local n="$1"; for i in "${!COMP_NAMES[@]}"; do [ "${COMP_NAMES[$i]}" = "$n" ] && { echo "$i"; return; }; done; }
 
 APP_MEM=${COMP_MEM[$(idx app)]};     ACS_MEM=${COMP_MEM[$(idx acs)]}
 WORKER_MEM=${COMP_MEM[$(idx worker)]}; PG_MEM=${COMP_MEM[$(idx postgres)]}

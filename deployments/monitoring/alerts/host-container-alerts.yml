@@ -175,10 +175,10 @@ groups:
         # 此为一线生效规则。哨兵 < 64e9 排除未设限环境（cAdvisor 在无 limit 时把
         # spec_memory_limit_bytes 报成整机内存，会稀释饱和度 → 误判）。
         expr: |
-          (container_memory_working_set_bytes{name!=""}
-           / container_spec_memory_limit_bytes{name!=""} > 0.90)
-          and (container_spec_memory_limit_bytes{name!=""} > 0)
-          and (container_spec_memory_limit_bytes{name!=""} < 64e9)
+          (container_memory_working_set_bytes{name!="",name!~"(omcgo|docker)-minio-.*"}
+           / container_spec_memory_limit_bytes{name!="",name!~"(omcgo|docker)-minio-.*"} > 0.90)
+          and (container_spec_memory_limit_bytes{name!="",name!~"(omcgo|docker)-minio-.*"} > 0)
+          and (container_spec_memory_limit_bytes{name!="",name!~"(omcgo|docker)-minio-.*"} < 64e9)
           and on (id) omc:container_last_seen:fresh
         for: 10m
         labels:
@@ -191,6 +191,97 @@ groups:
             容器 {{ $labels.name }} 内存已用 > 其 mem limit 的 90%，持续 10 分钟。
             Impact: 触限将被 OOMKill 重启，丢失会话/进行中任务。
             Action: 查该容器内存泄漏；评估调大 limit 或优化内存占用。
+
+      - alert: MinIOWorkingSetPressure
+        # MinIO 海量小对象会产生大量可回收 dentry/inode slab；working set 高并不
+        # 等价于进程泄漏，但持续超过 80% 会触发 cgroup 回收并放大磁盘 I/O。
+        expr: |
+          (
+            container_memory_working_set_bytes{name=~"(omcgo|docker)-minio-.*"}
+            / container_spec_memory_limit_bytes{name=~"(omcgo|docker)-minio-.*"}
+          ) > 0.80
+          and
+          (
+            container_memory_working_set_bytes{name=~"(omcgo|docker)-minio-.*"}
+            / container_spec_memory_limit_bytes{name=~"(omcgo|docker)-minio-.*"}
+          ) <= 0.90
+          and on (id) omc:container_last_seen:fresh
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          service: minio
+        annotations:
+          summary: "MinIO working set 持续超过限额 80%：{{ $labels.name }}"
+          description: "优先对照 container_memory_rss 判断进程增长；若 RSS 低而 working set 高，通常是可回收文件系统元数据压力，应检查小对象数量、scanner 和磁盘 I/O。"
+
+      - alert: MinIOWorkingSetPressureCritical
+        expr: |
+          (
+            container_memory_working_set_bytes{name=~"(omcgo|docker)-minio-.*"}
+            / container_spec_memory_limit_bytes{name=~"(omcgo|docker)-minio-.*"}
+          ) > 0.90
+          and on (id) omc:container_last_seen:fresh
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          service: minio
+        annotations:
+          summary: "MinIO working set 持续超过限额 90%：{{ $labels.name }}"
+          description: "MinIO cgroup 已接近 memory.max，持续回收可能造成上传延迟和磁盘 I/O 抬升；检查 RSS、可回收 slab、memory.events、S3 错误和 OOM。"
+
+      - alert: MinIOProcessRSSHigh
+        # RSS 与 working set 分开判断：只有进程匿名内存本身持续增长，才按泄漏或
+        # 请求缓冲失控处理；文件缓存/slab 不应被误报成 MinIO 进程泄漏。
+        expr: |
+          (
+            container_memory_rss{name=~"(omcgo|docker)-minio-.*"}
+            / container_spec_memory_limit_bytes{name=~"(omcgo|docker)-minio-.*"}
+          ) > 0.50
+          and on (id) omc:container_last_seen:fresh
+        for: 10m
+        labels:
+          severity: critical
+          domain: omc
+          service: minio
+        annotations:
+          summary: "MinIO 进程 RSS 持续超过限额 50%：{{ $labels.name }}"
+          description: "这不是文件缓存假象；检查并发请求缓冲、multipart upload、goroutine/heap 增长和 MinIO 版本问题。"
+
+      - alert: MinIOProcessRSSGrowing
+        # 30 分钟线性增长斜率 > 512KiB/s（约 900MiB/30min），且 RSS 已超过
+        # limit 的 15%，可在触及 50% 绝对阈值前发现持续泄漏；容器重启形成的下降
+        # 会自然打断 for 窗口。
+        expr: |
+          (deriv(container_memory_rss{name=~"(omcgo|docker)-minio-.*"}[30m]) > 524288)
+          and
+          (
+            container_memory_rss{name=~"(omcgo|docker)-minio-.*"}
+            / container_spec_memory_limit_bytes{name=~"(omcgo|docker)-minio-.*"}
+          ) > 0.15
+          and on (id) omc:container_last_seen:fresh
+        for: 15m
+        labels:
+          severity: warning
+          domain: omc
+          service: minio
+        annotations:
+          summary: "MinIO 进程 RSS 持续快速增长：{{ $labels.name }}"
+          description: "MinIO RSS 在 30 分钟窗口内持续增长，预计增幅超过约 900MiB；检查请求缓冲、multipart upload、goroutine/heap 和版本缺陷。"
+
+      - alert: MinIOS3RequestErrors
+        # errors_total 同时累计预期的 bucket 探测 4xx（例如首次启动时
+        # NoSuchBucket/NoSuchLifecycle），只有专用 5xx 指标代表服务端失败。
+        expr: sum(increase(minio_s3_requests_5xx_errors_total[5m])) > 0
+        for: 1m
+        labels:
+          severity: critical
+          domain: omc
+          service: minio
+        annotations:
+          summary: "MinIO 出现 S3 服务端请求失败"
+          description: "最近 5 分钟 MinIO S3 服务端错误计数增加；检查 503/请求限流、磁盘 I/O、memory.max、对象写入失败和 ACS 上传日志。"
 
       - alert: ContainerOOMKilled
         # container_oom_events_total 在容器被 OOMKill 时自增；任何一次都需关注。

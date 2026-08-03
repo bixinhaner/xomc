@@ -867,6 +867,18 @@ else
         die "$service_config 数据库 DSN 自动同步失败；未切换 current" 1
       fi
     done
+    upgrade_app_param_sync_recovery_limit \
+      "$OMC_ROOT/etc/app.prod.yaml" \
+      "$RELEASE_DIR/etc/app.prod.yaml" ||
+      die "app.prod.yaml 的 param_sync.recovery_run_limit 自动迁移失败；未切换 current" 1
+    case "${PARAM_SYNC_RECOVERY_LIMIT_UPGRADE_RESULT:-noop}" in
+      migrated)
+        log "升级参数同步恢复容量：recovery_run_limit 20 → 200（其他实例配置保持不变）"
+        ;;
+      preserved)
+        log "参数同步 recovery_run_limit 为运维自定义值，升级时保持不变"
+        ;;
+    esac
     upgrade_app_gpv_response_config \
       "$OMC_ROOT/etc/app.prod.yaml" \
       "$RELEASE_DIR/etc/app.prod.yaml" ||
@@ -1201,6 +1213,21 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
     log "时序库 migrate 成功" "TSDB migration completed successfully"
   else
     die "时序库 migrate 失败（已重试 3 次）：${DC[*]} up --exit-code-from migrate-tsdb-schema migrate-tsdb-schema" "TSDB migration failed after 3 attempts: ${DC[*]} up --exit-code-from migrate-tsdb-schema migrate-tsdb-schema" 3
+  fi
+
+  # 当前软件尚未封版，只允许维护 000001 基线；Goose 对已经标记 version=1 的库
+  # 不会重跑更新后的基线。显式执行一份只含 ADD IF NOT EXISTS / CREATE IF NOT EXISTS
+  # 的兼容桥，确保已有环境先补齐新列和摘要表，再启动会写这些字段的 worker。
+  # 新装环境也安全：基线已创建对象，本步骤为空操作。
+  TSDB_RECONCILE_SQL="$DEPLOY_DIR/tsdb-schema-reconcile.sql"
+  [ -r "$TSDB_RECONCILE_SQL" ] || die "缺少时序库兼容协调脚本：$TSDB_RECONCILE_SQL" 3
+  log "执行时序库基线兼容协调（幂等）..."
+  if "${DC[@]}" exec -T postgres-tsdb \
+      psql -v ON_ERROR_STOP=1 -U "$POSTGRES_TSDB_USER" -d "$POSTGRES_TSDB_DB" \
+      -f - < "$TSDB_RECONCILE_SQL"; then
+    log "时序库基线兼容协调成功"
+  else
+    die "时序库基线兼容协调失败；未启动新业务容器" 3
   fi
 else
   log "--skip-migrate：跳过 migrate / seed" "--skip-migrate: skipping migrations and seed"

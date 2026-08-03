@@ -275,6 +275,7 @@ INSERT INTO parameter_sync_task_results (
 	require.NoError(t, reconciler.CollectMetrics(ctx))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RunsReadyButNotFinalized))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RunCounterDrift))
+	require.Less(t, testutil.ToFloat64(metrics.RunCounterDriftOldestIdle), float64(10))
 	require.GreaterOrEqual(t, testutil.ToFloat64(metrics.ActiveRunOldestAge), float64(100))
 
 	finalized, err := reconciler.ReconcileRunCounts(ctx)
@@ -290,6 +291,45 @@ INSERT INTO parameter_sync_task_results (
 		`SELECT status FROM parameter_sync_runs WHERE id=$1`, runID,
 	).Scan(&status))
 	require.Equal(t, RunStatusSucceeded, status)
+}
+
+func TestCollectMetricsReportsPerRunBlockedIdleAge(t *testing.T) {
+	ctx := context.Background()
+	pool := newParamSyncTestPool(t)
+	request := insertParamSyncRequestForTest(t, pool, RequestStatusRunning)
+	runID := uuid.New()
+	_, err := pool.Exec(ctx, `
+INSERT INTO parameter_sync_runs (
+  id, request_id, device_id, device_sn, trigger_reason, sync_scope,
+  status, expected_task_count, terminal_task_count, processed_task_count,
+  failed_task_count, started_at
+) VALUES ($1,$2,$3,$4,'manual','readback','executing',1,0,0,0,now()-interval '10 minutes')`,
+		runID, request.ID, request.DeviceID, request.DeviceSN,
+	)
+	require.NoError(t, err)
+
+	taskRow := task.NewTask(&task.CreateTaskRequest{
+		DeviceSN: request.DeviceSN, Method: "GetParameterValues",
+		Params: []byte(`{"names":[]}`), CommandKey: "aged-terminal-result-missing",
+		Source: task.TaskSourceParamSync, SourceID: runID.String(), CreatorID: request.ID.String(),
+	})
+	require.NoError(t, task.NewPgTaskRepository(pool).Create(ctx, taskRow))
+	_, err = pool.Exec(ctx, `
+UPDATE device_tasks
+SET status='completed', created_at=now()-interval '8 minutes',
+    sent_at=now()-interval '8 minutes', completed_at=now()-interval '8 minutes', result='{}'::jsonb
+WHERE id=$1`, taskRow.ID)
+	require.NoError(t, err)
+
+	metrics := NewMetrics(nil)
+	reconciler := NewReconciler(pool, nil, metrics)
+	require.NoError(t, reconciler.CollectMetrics(ctx))
+	require.Equal(t, float64(1), testutil.ToFloat64(
+		metrics.RunsBlocked.WithLabelValues(string(convergenceBlockTerminalResultMissing)),
+	))
+	require.GreaterOrEqual(t, testutil.ToFloat64(
+		metrics.RunsBlockedOldestIdle.WithLabelValues(string(convergenceBlockTerminalResultMissing)),
+	), float64(470))
 }
 
 func TestDuplicateResultDoesNotWaitForRunWriteLock(t *testing.T) {

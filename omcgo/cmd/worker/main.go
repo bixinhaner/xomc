@@ -44,6 +44,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	pmmetrics "github.com/omcgo/omcgo/internal/pm/metrics"
 	"github.com/omcgo/omcgo/internal/pm/resultnorm"
+	"github.com/omcgo/omcgo/internal/pm/slothealth"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/report"
@@ -261,6 +262,20 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmCollector := collector.NewPMCollector(w.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, kpiEngine, pmFileStore, w.EventBus, logger)
 	pmMetrics := pm.NewPMMetrics(w.MetricsReg)
 	pmCollector.SetMetrics(pmMetrics)
+	pmSlotCtx, pmSlotCancel := context.WithCancel(context.Background())
+	pmSlotObserver := slothealth.NewObserver(
+		slothealth.NewRepository(w.PgPool, w.TsPool),
+		pmMetrics,
+		time.Now(),
+		pmstream.ConfigFromEnv().CloseGrace,
+		time.Minute,
+		logger.Named("pm-slot-health"),
+	)
+	go pmSlotObserver.Run(pmSlotCtx)
+	w.GS.Register("pm-slot-health-observer", 2, func(context.Context) error {
+		pmSlotCancel()
+		return nil
+	})
 	// T-0164 G1 真机闭环：acs.upload.Handler 发的瘦 payload 只带 device_sn，
 	// 由 collector 用同一个 deviceRepo 反查补齐 UUID / OUI / carrier / technology。
 	pmCollector.SetDeviceLookup(pmDeviceRepo)

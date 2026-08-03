@@ -1,0 +1,138 @@
+rule_files:
+  - omc-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'acs_pm_upload_last_accepted_timestamp_seconds{deployment_unit="acs",instance="acs-primary:9090"}'
+        values: '0x31'
+      - series: 'process_start_time_seconds{deployment_unit="acs",instance="acs-primary:9090"}'
+        values: '0x31'
+      - series: 'omc_pm_slot_expected_devices{carrier="blq",technology="lte"}'
+        values: '20000x31'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PMUploadStalledWarning
+        exp_alerts: []
+      - eval_time: 29m
+        alertname: PMUploadStalledWarning
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              domain: omc
+              subsystem: pm
+            exp_annotations:
+              summary: "ACS 已超过 25 分钟未接收 PM 文件"
+              description: "存在应上报 PM 的活动设备，但 ACS 最后一次成功持久化 PM 文件距今已超过 25 分钟；检查设备周期任务、ACS 会话/503、MinIO 和上传拒绝。"
+
+  - interval: 1m
+    input_series:
+      - series: 'acs_pm_upload_last_accepted_timestamp_seconds{deployment_unit="acs",instance="acs-primary:9090"}'
+        values: '600x8'
+      - series: 'omc_pm_slot_expected_devices{carrier="blq",technology="lte"}'
+        values: '20000x8'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PMIngestLagBehindACS
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              domain: omc
+              subsystem: pm
+            exp_annotations:
+              summary: "PM Worker 入库落后 ACS 超过 5 分钟"
+              description: "ACS 已持久化新 PM 文件，但 Worker 最近成功入库时间落后超过 5 分钟；检查 PM 主队列、registration-wait、死信、worker 资源和 TSDB 写入。"
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_pm_slot_coverage_ratio{carrier="blq",technology="lte"}'
+        values: '0.94x4'
+      - series: 'omc_pm_slot_expected_devices{carrier="blq",technology="lte"}'
+        values: '20000x4'
+      - series: 'omc_pm_slot_alert_eligible{carrier="blq",technology="lte"}'
+        values: '1x4'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: PMQuarterSlotCoverageCritical
+        exp_alerts:
+          - exp_labels:
+              carrier: blq
+              technology: lte
+              severity: critical
+              domain: omc
+              subsystem: pm
+            exp_annotations:
+              summary: "PM 15 分钟槽位覆盖率严重不足（blq/lte）"
+              description: "最近一个已到 12 分钟关闭宽限的 PM 槽位覆盖率低于 95%；检查 ACS 接收、MinIO、PM 主队列、registration-wait、worker 入库和设备上报状态。"
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_pm_slot_coverage_ratio{carrier="blq",technology="gsm"}'
+        values: '0x4'
+      - series: 'omc_pm_slot_expected_devices{carrier="blq",technology="gsm"}'
+        values: '20000x4'
+      - series: 'omc_pm_slot_alert_eligible{carrier="blq",technology="gsm"}'
+        values: '1x4'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: PMQuarterSlotMissing
+        exp_alerts:
+          - exp_labels:
+              carrier: blq
+              technology: gsm
+              severity: critical
+              domain: omc
+              subsystem: pm
+            exp_annotations:
+              summary: "PM 15 分钟槽位完全缺失（blq/gsm）"
+              description: "最近一个已到 12 分钟关闭宽限的 PM 槽位应收设备数大于 0，但实际收到 0；检查上报入口、ACS 会话/拒绝、对象存储和消费链路。"
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_pm_slot_observer_last_success_timestamp_seconds{deployment_unit="worker",instance="worker:9092"}'
+        values: '0x8'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PMSlotObserverStalled
+        exp_alerts:
+          - exp_labels:
+              deployment_unit: worker
+              instance: worker:9092
+              severity: critical
+              domain: omc
+              subsystem: pm
+            exp_annotations:
+              summary: "PM 槽位健康观察器停止更新"
+              description: "PM 槽位健康快照已超过 3 分钟没有成功更新；首页覆盖率和槽位告警可能已经失真，检查 worker、主库和时序库。"
+
+  - interval: 1m
+    input_series:
+      - series: 'omc_pm_slot_observer_last_success_timestamp_seconds{deployment_unit="worker",instance="worker:9092",service="omcgo-worker"}'
+        values: '0 60 120 180 240 300 360 420'
+      - series: 'omc_pm_slot_observer_last_success_timestamp_seconds{deployment_unit="app",instance="app:9091",service="omcgo-app"}'
+        values: '0x8'
+      - series: 'process_start_time_seconds{deployment_unit="worker",instance="worker:9092"}'
+        values: '0x8'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PMSlotObserverStalled
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{deployment_unit="worker",instance="worker:9092"}'
+        values: '0x8'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PMSlotObserverStalled
+        exp_alerts:
+          - exp_labels:
+              deployment_unit: worker
+              severity: critical
+              domain: omc
+              subsystem: pm
+            exp_annotations:
+              summary: "PM 槽位健康观察器停止更新"
+              description: "PM 槽位健康快照已超过 3 分钟没有成功更新；首页覆盖率和槽位告警可能已经失真，检查 worker、主库和时序库。"

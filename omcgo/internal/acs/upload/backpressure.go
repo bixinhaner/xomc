@@ -89,6 +89,8 @@ type BackpressureGate interface {
 	Release()
 	// RecordRejected 记录一次因背压拒收（metric）。
 	RecordRejected(reason string)
+	// RecordAccepted 记录一次已经成功写入对象存储的 PM 上传。
+	RecordAccepted(at time.Time)
 }
 
 // BackpressureConfig 是背压判定阈值，来自 sys_configs，可热刷新。
@@ -425,6 +427,7 @@ type BackpressureMetrics struct {
 	queueDeliveryRate prometheus.Gauge
 	queueAckRate      prometheus.Gauge
 	queueBacklogSlope prometheus.Gauge
+	lastAccepted      prometheus.Gauge
 }
 
 // NewBackpressureMetrics 注册并返回背压指标。reg 为 nil 时不注册（测试用）。
@@ -474,6 +477,10 @@ func NewBackpressureMetrics(reg prometheus.Registerer) *BackpressureMetrics {
 			Name: "acs_pm_queue_backlog_slope",
 			Help: "PM pending backlog change per second across fresh monotonic samples.",
 		}),
+		lastAccepted: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "acs_pm_upload_last_accepted_timestamp_seconds",
+			Help: "Unix timestamp of the latest PM upload successfully accepted into object storage.",
+		}),
 	}
 	for _, label := range [][2]string{
 		{"engaged", pressureReasonDisk},
@@ -490,6 +497,7 @@ func NewBackpressureMetrics(reg prometheus.Registerer) *BackpressureMetrics {
 			m.active, m.transitions, m.rejected, m.rejectedByReason,
 			m.diskPct, m.ioSomePct, m.inflight, m.loadPerCore,
 			m.queueDeliveryRate, m.queueAckRate, m.queueBacklogSlope,
+			m.lastAccepted,
 		)
 	}
 	return m
@@ -634,6 +642,12 @@ func (w *Watchdog) RecordRejected(reason string) {
 			reason = rejectReasonResourcePressure
 		}
 		w.metrics.rejectedByReason.WithLabelValues(reason).Inc()
+	}
+}
+
+func (w *Watchdog) RecordAccepted(at time.Time) {
+	if w != nil && w.metrics != nil {
+		w.metrics.lastAccepted.Set(float64(at.Unix()))
 	}
 }
 

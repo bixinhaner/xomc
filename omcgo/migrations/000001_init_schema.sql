@@ -5384,6 +5384,7 @@ CREATE TABLE public.parameter_sync_requests (
     admission_class character varying(32),
     admission_reason text,
     admission_snapshot jsonb,
+    admission_queued_at timestamp with time zone,
     deduplicated_to_request_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     started_at timestamp with time zone,
@@ -14206,6 +14207,8 @@ CREATE INDEX idx_parameter_sync_requests_device_history ON public.parameter_sync
 --
 
 CREATE INDEX idx_parameter_sync_requests_schedule ON public.parameter_sync_requests USING btree (status, priority, next_attempt_at, created_at);
+
+CREATE INDEX idx_parameter_sync_requests_auto_backpressure ON public.parameter_sync_requests USING btree (admission_queued_at) WHERE (((status)::text = 'queued'::text) AND ((result_code)::text = 'AUTOMATIC_BACKPRESSURE'::text));
 
 
 --

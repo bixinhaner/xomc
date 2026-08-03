@@ -1,0 +1,103 @@
+rule_files:
+  - host-container-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'container_memory_working_set_bytes{id="minio-id",name="omcgo-minio-1"}'
+        values: '5583457485x12'
+      - series: 'container_memory_rss{id="minio-id",name="omcgo-minio-1"}'
+        values: '536870912x12'
+      - series: 'container_spec_memory_limit_bytes{id="minio-id",name="omcgo-minio-1"}'
+        values: '6442450944x12'
+      - series: 'container_last_seen{id="minio-id",name="omcgo-minio-1"}'
+        values: '0+60x11'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: MinIOWorkingSetPressure
+        exp_alerts:
+          - exp_labels:
+              id: minio-id
+              name: omcgo-minio-1
+              severity: warning
+              domain: omc
+              service: minio
+            exp_annotations:
+              summary: "MinIO working set 持续超过限额 80%：omcgo-minio-1"
+              description: "优先对照 container_memory_rss 判断进程增长；若 RSS 低而 working set 高，通常是可回收文件系统元数据压力，应检查小对象数量、scanner 和磁盘 I/O。"
+      - eval_time: 11m
+        alertname: MinIOProcessRSSHigh
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'container_memory_working_set_bytes{id="minio-id",name="omcgo-minio-1"}'
+        values: '3221225472x12'
+      - series: 'container_memory_rss{id="minio-id",name="omcgo-minio-1"}'
+        values: '3758096384x12'
+      - series: 'container_spec_memory_limit_bytes{id="minio-id",name="omcgo-minio-1"}'
+        values: '6442450944x12'
+      - series: 'container_last_seen{id="minio-id",name="omcgo-minio-1"}'
+        values: '0+60x11'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: MinIOProcessRSSHigh
+        exp_alerts:
+          - exp_labels:
+              id: minio-id
+              name: omcgo-minio-1
+              severity: critical
+              domain: omc
+              service: minio
+            exp_annotations:
+              summary: "MinIO 进程 RSS 持续超过限额 50%：omcgo-minio-1"
+              description: "这不是文件缓存假象；检查并发请求缓冲、multipart upload、goroutine/heap 增长和 MinIO 版本问题。"
+
+  - interval: 1m
+    input_series:
+      - series: 'minio_s3_requests_4xx_errors_total{api="getbucketlifecycle",service="minio"}'
+        values: '0 0 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MinIOS3RequestErrors
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'minio_s3_requests_5xx_errors_total{api="putobject",service="minio"}'
+        values: '0 0 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MinIOS3RequestErrors
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              domain: omc
+              service: minio
+            exp_annotations:
+              summary: "MinIO 出现 S3 服务端请求失败"
+              description: "最近 5 分钟 MinIO S3 服务端错误计数增加；检查 503/请求限流、磁盘 I/O、memory.max、对象写入失败和 ACS 上传日志。"
+
+  - interval: 1m
+    input_series:
+      - series: 'container_memory_rss{id="minio-id",name="omcgo-minio-1"}'
+        values: '1073741824+41943040x50'
+      - series: 'container_spec_memory_limit_bytes{id="minio-id",name="omcgo-minio-1"}'
+        values: '6442450944x51'
+      - series: 'container_last_seen{id="minio-id",name="omcgo-minio-1"}'
+        values: '0+60x50'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: MinIOProcessRSSGrowing
+        exp_alerts:
+          - exp_labels:
+              id: minio-id
+              name: omcgo-minio-1
+              severity: warning
+              domain: omc
+              service: minio
+            exp_annotations:
+              summary: "MinIO 进程 RSS 持续快速增长：omcgo-minio-1"
+              description: "MinIO RSS 在 30 分钟窗口内持续增长，预计增幅超过约 900MiB；检查请求缓冲、multipart upload、goroutine/heap 和版本缺陷。"

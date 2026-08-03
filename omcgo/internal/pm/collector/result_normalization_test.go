@@ -165,6 +165,52 @@ func TestIngestViaCopy_NormalizesCounterValuesBeforeCopyIngest(t *testing.T) {
 	assert.True(t, math.IsNaN(copyIngestor.counters[2].CounterValue), "缺值补齐应发生在真实值规范化之后")
 }
 
+func TestIngestViaCopy_PreservesXMLMeasurementWindowSeparatelyFromUploadTime(t *testing.T) {
+	ctx := context.Background()
+	windowEnd := time.Date(2026, 8, 3, 11, 0, 0, 0, time.UTC)
+	windowStart := windowEnd.Add(-15 * time.Minute)
+	uploadedAt := windowEnd.Add(2 * time.Minute)
+	copyIngestor := &recordingCopyIngestor{ingested: true}
+	registry := prometheus.NewRegistry()
+	c := &PMCollector{
+		copyIngestor: copyIngestor,
+		eventBus:     noopEventBus{},
+		logger:       zap.NewNop(),
+		metrics:      pmroot.NewPMMetrics(registry),
+	}
+	content := &PMFileContent{
+		CollectTime:   windowEnd,
+		FileBeginTime: windowStart,
+		FileEndTime:   windowEnd,
+	}
+	payload := &FileReceivedPayload{
+		MinIOPath: "pm/A20260803.1045.xml.gz", DeviceSN: "SN-1",
+		Carrier: "cmcc", Technology: "lte",
+	}
+
+	err := c.ingestViaCopy(
+		ctx, trace.SpanFromContext(ctx), uploadedAt, uploadedAt, 123, uuid.New(),
+		payload, content, nil, true, make([]byte, 32),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, uploadedAt, copyIngestor.marker.CollectTime)
+	assert.Equal(t, windowStart, copyIngestor.marker.MeasurementStart)
+	assert.Equal(t, windowEnd, copyIngestor.marker.MeasurementEnd)
+	assert.Equal(t, float64(uploadedAt.Unix()), testutil.ToFloat64(
+		c.metrics.IngestLastSuccessTimestamp.WithLabelValues("cmcc", "lte"),
+	))
+}
+
+func TestPMMeasurementWindow_FallsBackToCollectTimeAndGranularity(t *testing.T) {
+	end := time.Date(2026, 8, 3, 11, 0, 0, 0, time.UTC)
+
+	start, gotEnd := pmMeasurementWindow(&PMFileContent{CollectTime: end, Granularity: 15})
+
+	assert.Equal(t, end.Add(-15*time.Minute), start)
+	assert.Equal(t, end, gotEnd)
+}
+
 func TestIngestViaCopy_Filters15MinRowsByEnabledIndicatorsAfterKPICalculation(t *testing.T) {
 	ctx := context.Background()
 	end := time.Date(2026, 7, 6, 14, 15, 0, 0, time.UTC)

@@ -62,7 +62,19 @@ interface BackendDashboardSummary {
   kpi_overview: BackendKPIOverview;
   kpi_deltas: Record<string, BackendKPIDelta>;
   recent_alarms: BackendRecentAlarm[];
+  pm_slot_health: BackendPMSlotHealth[];
   timestamp: string;
+}
+
+interface BackendPMSlotHealth {
+  slot_end: string;
+  technology: string;
+  carrier: string;
+  expected_devices: number;
+  received_devices: number;
+  coverage_ratio: number;
+  status: 'complete' | 'partial' | 'missing' | 'bootstrap_ignored';
+  evaluated_at: string;
 }
 
 /** 后端 KPI 趋势增量数据 */
@@ -235,6 +247,16 @@ function mapBackendSummary(b: BackendDashboardSummary): DashboardSummary {
       success: 0,
       failed: 0,
     },
+    pmSlotHealth: (b.pm_slot_health ?? []).map((slot) => ({
+      slotEnd: slot.slot_end,
+      technology: slot.technology,
+      carrier: slot.carrier,
+      expectedDevices: slot.expected_devices,
+      receivedDevices: slot.received_devices,
+      coverageRatio: slot.coverage_ratio,
+      status: slot.status,
+      evaluatedAt: slot.evaluated_at,
+    })),
   };
 }
 

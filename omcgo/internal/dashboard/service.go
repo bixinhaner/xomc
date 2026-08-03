@@ -77,7 +77,19 @@ type DashboardSummary struct {
 	KPIOverview  map[string]float64    `json:"kpi_overview"`
 	KPIDeltas    map[string]KPIDelta   `json:"kpi_deltas"` // KPI趋势数据（新增）
 	RecentAlarms []FrontendRecentAlarm `json:"recent_alarms"`
+	PMSlotHealth []PMSlotHealthSummary `json:"pm_slot_health"`
 	Timestamp    time.Time             `json:"timestamp"`
+}
+
+type PMSlotHealthSummary struct {
+	SlotEnd         time.Time `json:"slot_end"`
+	Technology      string    `json:"technology"`
+	Carrier         string    `json:"carrier"`
+	ExpectedDevices int64     `json:"expected_devices"`
+	ReceivedDevices int64     `json:"received_devices"`
+	CoverageRatio   float64   `json:"coverage_ratio"`
+	Status          string    `json:"status"`
+	EvaluatedAt     time.Time `json:"evaluated_at"`
 }
 
 // AlarmTrendEntry represents alarm counts for a single day, broken down by severity.
@@ -240,6 +252,49 @@ func (s *Service) SetNetworkProgressReader(reader NetworkProgressReader) {
 	s.networkProgress = reader
 }
 
+func latestPMSlotHealthQuery() (string, []any, error) {
+	return storage.Psql.Select(
+		"slot_end",
+		"technology", "carrier", "expected_devices", "received_devices",
+		"coverage_ratio", "status", "evaluated_at",
+	).
+		From("pm_slot_health").
+		Where("slot_end = (SELECT MAX(latest.slot_end) FROM pm_slot_health latest)").
+		OrderBy("technology", "carrier").
+		ToSql()
+}
+
+func (s *Service) listLatestPMSlotHealth(ctx context.Context) ([]PMSlotHealthSummary, error) {
+	if s.tsPool == nil {
+		return nil, nil
+	}
+	query, args, err := latestPMSlotHealthQuery()
+	if err != nil {
+		return nil, fmt.Errorf("build latest PM slot health query: %w", err)
+	}
+	rows, err := s.tsPool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query latest PM slot health: %w", err)
+	}
+	defer rows.Close()
+	var result []PMSlotHealthSummary
+	for rows.Next() {
+		var row PMSlotHealthSummary
+		if err := rows.Scan(
+			&row.SlotEnd, &row.Technology, &row.Carrier,
+			&row.ExpectedDevices, &row.ReceivedDevices, &row.CoverageRatio,
+			&row.Status, &row.EvaluatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan latest PM slot health: %w", err)
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate latest PM slot health: %w", err)
+	}
+	return result, nil
+}
+
 // GetSummary aggregates dashboard data from multiple sources in parallel.
 func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	summary := &DashboardSummary{
@@ -254,6 +309,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		rawKPIValues     []NetworkRollupPoint
 		rawAlarms        []model.Alarm
 		alarmDeviceCount int64
+		rawPMSlotHealth  []PMSlotHealthSummary
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -268,6 +324,18 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 			totalDevices = 0
 			onlineDevices = 0
 		}
+		return nil
+	})
+
+	// 6. Latest persisted PM slot health. This reads only the bounded summary
+	// table maintained by the worker; the homepage must never aggregate raw PM.
+	g.Go(func() error {
+		rows, err := s.listLatestPMSlotHealth(gctx)
+		if err != nil {
+			logDashboardQueryFailure(s.logger, "dashboard: PM slot health query failed", err)
+			return nil
+		}
+		rawPMSlotHealth = rows
 		return nil
 	})
 
@@ -361,6 +429,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		Offline: totalDevices - onlineDevices,
 		Alarm:   alarmDeviceCount,
 	}
+	summary.PMSlotHealth = rawPMSlotHealth
 
 	// Map alarm stats to frontend format
 	if rawAlarmStats != nil {

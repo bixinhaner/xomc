@@ -62,6 +62,16 @@ describe('dashboardApi.getSummary — Backend → DashboardSummary 映射', () =
           },
         },
         recent_alarms: [],
+		pm_slot_health: [{
+		  slot_end: '2026-08-03T15:00:00Z',
+		  technology: 'lte',
+		  carrier: 'cmcc',
+		  expected_devices: 20000,
+		  received_devices: 19600,
+		  coverage_ratio: 0.98,
+		  status: 'complete',
+		  evaluated_at: '2026-08-03T15:12:00Z',
+		}],
         timestamp: '2026-06-10T00:00:00Z',
       },
     });
@@ -81,6 +91,16 @@ describe('dashboardApi.getSummary — Backend → DashboardSummary 映射', () =
     expect(s.kpiDeltas.RRC_CONN_SETUP_SR.currentValue).toBe(99.5);
     expect(s.kpiDeltas.RRC_CONN_SETUP_SR.previousValue).toBe(99.0);
     expect(s.kpiDeltas.RRC_CONN_SETUP_SR.hasComparison).toBe(true);
+	expect(s.pmSlotHealth).toEqual([{
+	  slotEnd: '2026-08-03T15:00:00Z',
+	  technology: 'lte',
+	  carrier: 'cmcc',
+	  expectedDevices: 20000,
+	  receivedDevices: 19600,
+	  coverageRatio: 0.98,
+	  status: 'complete',
+	  evaluatedAt: '2026-08-03T15:12:00Z',
+	}]);
   });
 
   it('kpi_deltas 缺省（null）时不崩，返空对象', async () => {

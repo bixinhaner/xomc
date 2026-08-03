@@ -311,7 +311,7 @@ services:
         limits:
           # CPU 1→4核对齐 plan-resources.sh medium 档（32核/32G 目标机型）。
           cpus: "${MINIO_CPUS:-4}"
-          memory: "${MINIO_MEM:-4g}"
+          memory: "${MINIO_MEM:-6g}"
         reservations:
           cpus: "0.25"
           memory: 1g

@@ -81,6 +81,31 @@ func TestRecoverMissingResultsWithoutProcessorOrBusReturnsError(t *testing.T) {
 	require.ErrorContains(t, err, "requires result processor or event bus")
 }
 
+func TestMissingResultRecoverySelectsDurableTerminalTasksDirectly(t *testing.T) {
+	query := missingResultRunCandidatesSQL
+
+	require.Contains(t, query, "EXISTS")
+	require.Contains(t, query, "t.status IN ('completed','failed','expired','cancelled')")
+	require.Contains(t, query, "res.task_id IS NULL")
+	require.NotContains(t, query, "terminal_task_count = expected_task_count")
+	require.NotContains(t, query, "processed_task_count < expected_task_count")
+}
+
+func TestProcessMissingTaskResultsContinuesAfterOneMalformedResult(t *testing.T) {
+	processor := &failFirstRecoveryProcessor{}
+	firstRun, secondRun := uuid.New(), uuid.New()
+	processed, err := processMissingTaskResults(context.Background(), processor, []missingTaskResult{
+		{taskID: uuid.NewString(), runID: firstRun, requestID: uuid.New(), status: task.TaskStatusCompleted},
+		{taskID: uuid.NewString(), runID: secondRun, requestID: uuid.New(), status: task.TaskStatusCompleted},
+	})
+
+	require.ErrorContains(t, err, "permanent malformed result")
+	assert.Equal(t, 1, processed)
+	assert.Equal(t, 2, processor.calls)
+	require.Len(t, processor.payloads, 1)
+	assert.Equal(t, secondRun, processor.payloads[0].RunID)
+}
+
 func TestRunCountReconciliationRestrictsAggregationToCandidateBatch(t *testing.T) {
 	first, second := uuid.New(), uuid.New()
 
@@ -104,8 +129,8 @@ func TestHistoricalResultNormalizationRestrictsWorkToCandidateBatch(t *testing.T
 	require.NotContains(t, query, "FROM parameter_sync_runs run, device_tasks t\nWHERE res.status='received' AND run.id=res.run_id\n  AND run.status")
 }
 
-func TestRunCountSweepUsesActiveRecoveryBatch(t *testing.T) {
-	require.Equal(t, 200, runCountReconcileBatchSize)
+func TestRunCountSweepFitsWithinIndependentMaintenanceDeadline(t *testing.T) {
+	require.Equal(t, 50, runCountReconcileBatchSize)
 }
 
 func TestStagingCleanupScansABoundedKeysetPage(t *testing.T) {
@@ -127,30 +152,50 @@ func TestParamSyncMetricsAvoidUnboundedExactCounts(t *testing.T) {
 	require.NotContains(t, stagingRowsMetricSQL, "count(*)")
 }
 
-func TestRunConvergenceCandidateSelectionUsesOldestActiveKeyset(t *testing.T) {
+func TestRunConvergenceForwardSelectionUsesBoundedSweepKeyset(t *testing.T) {
 	startedAt := time.Date(2026, time.August, 2, 12, 0, 0, 0, time.UTC)
 	cursor := runConvergenceCursor{StartedAt: startedAt, ID: uuid.New()}
+	sweepEnd := runConvergenceCursor{StartedAt: startedAt.Add(time.Hour), ID: uuid.New()}
+	excluded := []uuid.UUID{uuid.New()}
 
-	query, args, err := buildRunConvergenceCandidateSelectSQL(&cursor, 100)
+	query, args, err := buildRunConvergenceForwardSelectSQL(&cursor, &sweepEnd, excluded, 40)
 
 	require.NoError(t, err)
 	require.Contains(t, query, "status IN")
 	require.Contains(t, query, "(run.started_at, run.id) >")
-	require.Contains(t, query, "stored_ready DESC, counter_drift DESC")
-	require.Contains(t, query, "actual_expected")
-	require.Contains(t, query, "LIMIT 100")
-	require.Contains(t, query, "FOR UPDATE OF run SKIP LOCKED")
+	require.Contains(t, query, "(run.started_at, run.id) <=")
+	require.NotContains(t, query, "device_tasks")
+	require.NotContains(t, query, "parameter_sync_task_results")
+	require.NotContains(t, strings.ToUpper(query), "LATERAL")
+	require.Contains(t, query, "LIMIT 40")
+	require.Contains(t, query, "FOR UPDATE SKIP LOCKED")
 	require.NotContains(t, strings.ToUpper(query), "OFFSET")
-	require.Equal(t, []interface{}{startedAt, cursor.ID}, args)
+	require.Equal(t, []interface{}{startedAt, cursor.ID, sweepEnd.StartedAt, sweepEnd.ID, excluded}, args)
 }
 
-func TestRunConvergenceCandidateSelectionDefaultsToActiveRecoveryBatch(t *testing.T) {
-	query, args, err := buildRunConvergenceCandidateSelectSQL(nil, 0)
+func TestRunConvergencePrioritySelectionHasIndependentQuota(t *testing.T) {
+	query, args, err := buildRunConvergencePrioritySelectSQL(10)
 
 	require.NoError(t, err)
 	require.Contains(t, query, "status IN")
-	require.Contains(t, query, "stored_ready DESC, counter_drift DESC")
-	require.Contains(t, query, fmt.Sprintf("LIMIT %d", runCountReconcileBatchSize))
-	require.Contains(t, query, "FOR UPDATE OF run SKIP LOCKED")
+	require.Contains(t, query, "run.expected_task_count>0")
+	require.NotContains(t, query, "device_tasks")
+	require.Contains(t, query, "LIMIT 10")
+	require.Contains(t, query, "FOR UPDATE SKIP LOCKED")
 	require.Empty(t, args)
+}
+
+func TestRunConvergenceCursorAdvancesOnlyFromForwardCandidates(t *testing.T) {
+	base := time.Date(2026, time.August, 2, 12, 0, 0, 0, time.UTC)
+	priority := runConvergenceCandidate{id: uuid.New(), startedAt: base.Add(3 * time.Hour)}
+	first := runConvergenceCandidate{id: uuid.New(), startedAt: base.Add(time.Hour), advancesCursor: true}
+	last := runConvergenceCandidate{id: uuid.New(), startedAt: base.Add(2 * time.Hour), advancesCursor: true}
+
+	cursor, hasForward := nextRunConvergenceCursor([]runConvergenceCandidate{priority, first, last})
+
+	require.True(t, hasForward)
+	require.Equal(t, last.startedAt, cursor.StartedAt)
+	require.Equal(t, last.id, cursor.ID)
+	_, hasForward = nextRunConvergenceCursor([]runConvergenceCandidate{priority})
+	require.False(t, hasForward)
 }

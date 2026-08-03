@@ -78,6 +78,7 @@ if run_planner "$ENV_FILE" "$TMP/resources.env" > "$TMP/output" 2>&1; then
   check_eq "32核 medium 主库 CPU" "$(storage_env_get "$TMP/resources.env" POSTGRES_CPUS)" "10"
   check_eq "32核 medium TimescaleDB CPU" "$(storage_env_get "$TMP/resources.env" TSDB_CPUS)" "16"
   check_eq "32核 medium worker CPU" "$(storage_env_get "$TMP/resources.env" WORKER_CPUS)" "8"
+  check_eq "32GiB medium MinIO 内存余量" "$(storage_env_get "$TMP/resources.env" MINIO_MEM)" "6144m"
   if [ "$(file_inode "$TMP/resources.env")" != "$BEFORE_INODE" ]; then
     ok
   else

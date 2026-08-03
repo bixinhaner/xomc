@@ -88,10 +88,15 @@ type paramSyncMaintenanceConfig struct {
 	recoveryRunLimit   int
 	recoveryTaskLimit  int
 	recoveryTaskBudget int
+	stepTimeout        time.Duration
+	recoveryTimeout    time.Duration
 }
 
 func defaultParamSyncMaintenanceConfig() paramSyncMaintenanceConfig {
-	return paramSyncMaintenanceConfig{recoveryRunLimit: 20, recoveryTaskLimit: 200, recoveryTaskBudget: 200}
+	return paramSyncMaintenanceConfig{
+		recoveryRunLimit: 200, recoveryTaskLimit: 200, recoveryTaskBudget: 200,
+		stepTimeout: 10 * time.Second, recoveryTimeout: 20 * time.Second,
+	}
 }
 
 func paramSyncMaintenanceConfigFromApp(cfg appconfig.ParamSyncConfig) paramSyncMaintenanceConfig {
@@ -119,31 +124,60 @@ func paramSyncPullTuningFromApp(cfg appconfig.ParamSyncConfig) event.PullTuning 
 
 func runParamSyncMaintenance(ctx context.Context, maintainer paramSyncMaintainer, now time.Time, cfg paramSyncMaintenanceConfig) error {
 	var errs []error
-	if _, err := maintainer.ReconcileRunCounts(ctx); err != nil {
+	step := func(timeout time.Duration, run func(context.Context) error) error {
+		stepCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		return run(stepCtx)
+	}
+	if err := step(cfg.stepTimeout, func(stepCtx context.Context) error {
+		_, err := maintainer.ReconcileRunCounts(stepCtx)
+		return err
+	}); err != nil {
 		errs = append(errs, fmt.Errorf("reconcile run counts: %w", err))
 	}
-	if _, err := maintainer.SweepExpiredRequests(ctx, 100); err != nil {
+	if err := step(cfg.stepTimeout, func(stepCtx context.Context) error {
+		_, err := maintainer.SweepExpiredRequests(stepCtx, 100)
+		return err
+	}); err != nil {
 		errs = append(errs, fmt.Errorf("sweep expired requests: %w", err))
 	}
-	if _, err := maintainer.ReconcileStalledRequests(ctx, now.Add(-5*time.Minute), 100); err != nil {
+	if err := step(cfg.stepTimeout, func(stepCtx context.Context) error {
+		_, err := maintainer.ReconcileStalledRequests(stepCtx, now.Add(-5*time.Minute), 100)
+		return err
+	}); err != nil {
 		errs = append(errs, fmt.Errorf("reconcile stalled requests: %w", err))
 	}
-	if _, err := maintainer.ReconcileStalledRuns(ctx, now.Add(-5*time.Minute), 100); err != nil {
+	if err := step(cfg.stepTimeout, func(stepCtx context.Context) error {
+		_, err := maintainer.ReconcileStalledRuns(stepCtx, now.Add(-5*time.Minute), 100)
+		return err
+	}); err != nil {
 		errs = append(errs, fmt.Errorf("reconcile stalled runs: %w", err))
 	}
-	if _, err := maintainer.ReconcileCancellingRuns(ctx, 100); err != nil {
+	if err := step(cfg.stepTimeout, func(stepCtx context.Context) error {
+		_, err := maintainer.ReconcileCancellingRuns(stepCtx, 100)
+		return err
+	}); err != nil {
 		errs = append(errs, fmt.Errorf("reconcile cancelling runs: %w", err))
 	}
-	if _, err := maintainer.RecoverMissingResults(ctx, cfg.recoveryRunLimit, cfg.recoveryTaskLimit, cfg.recoveryTaskBudget); err != nil {
+	if err := step(cfg.recoveryTimeout, func(stepCtx context.Context) error {
+		_, err := maintainer.RecoverMissingResults(stepCtx, cfg.recoveryRunLimit, cfg.recoveryTaskLimit, cfg.recoveryTaskBudget)
+		return err
+	}); err != nil {
 		errs = append(errs, fmt.Errorf("recover missing results: %w", err))
 	}
-	if _, err := maintainer.ReconcileTerminalBindings(ctx); err != nil {
+	if err := step(cfg.stepTimeout, func(stepCtx context.Context) error {
+		_, err := maintainer.ReconcileTerminalBindings(stepCtx)
+		return err
+	}); err != nil {
 		errs = append(errs, fmt.Errorf("reconcile terminal bindings: %w", err))
 	}
-	if _, err := maintainer.CleanStaging(ctx, now.Add(-24*time.Hour), 10000); err != nil {
+	if err := step(cfg.stepTimeout, func(stepCtx context.Context) error {
+		_, err := maintainer.CleanStaging(stepCtx, now.Add(-24*time.Hour), 10000)
+		return err
+	}); err != nil {
 		errs = append(errs, fmt.Errorf("clean staging: %w", err))
 	}
-	if err := maintainer.CollectMetrics(ctx); err != nil {
+	if err := step(cfg.stepTimeout, maintainer.CollectMetrics); err != nil {
 		errs = append(errs, fmt.Errorf("collect metrics: %w", err))
 	}
 	return errors.Join(errs...)
@@ -151,11 +185,9 @@ func runParamSyncMaintenance(ctx context.Context, maintainer paramSyncMaintainer
 
 func runParamSyncReconciliation(ctx context.Context, maintainer paramSyncMaintainer, projector paramSyncProjector, now time.Time, cfg paramSyncMaintenanceConfig) error {
 	var errs []error
-	maintenanceCtx, cancelMaintenance := context.WithTimeout(ctx, 20*time.Second)
-	if err := runParamSyncMaintenance(maintenanceCtx, maintainer, now, cfg); err != nil {
+	if err := runParamSyncMaintenance(ctx, maintainer, now, cfg); err != nil {
 		errs = append(errs, err)
 	}
-	cancelMaintenance()
 	projectionCtx, cancelProjection := context.WithTimeout(ctx, 20*time.Second)
 	defer cancelProjection()
 	if _, err := projector.ReconcilePending(projectionCtx, 100); err != nil {
@@ -717,12 +749,38 @@ func initParamSyncModule(c *Container) error {
 			}
 		})
 		go runPeriodicMaintenance(maintenanceCtx, time.Second, func(context.Context) {
-			ctx, cancel := context.WithTimeout(maintenanceCtx, 30*time.Second)
-			_, err := service.DispatchQueuedConcurrent(ctx, 100, paramSyncQueuedWorkers)
+			ctx, cancel := context.WithTimeout(maintenanceCtx, 10*time.Second)
+			_, err := repo.ReconcileAutomaticAdmission(ctx, time.Now().UTC(), 500)
+			cancel()
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("automatic parameter sync admission reconciliation failed", zap.Error(err))
+				return
+			}
+
+			ctx, cancel = context.WithTimeout(maintenanceCtx, 30*time.Second)
+			_, err = service.DispatchQueuedConcurrent(ctx, 100, paramSyncQueuedWorkers)
 			cancel()
 			if err != nil && !errors.Is(err, context.Canceled) {
 				logger.Warn("queued parameter sync request dispatch failed", zap.Error(err))
 			}
+		})
+		go runPeriodicMaintenance(maintenanceCtx, 15*time.Second, func(context.Context) {
+			ctx, cancel := context.WithTimeout(maintenanceCtx, 10*time.Second)
+			_, err := repo.RepairAutomaticAdmissionCounters(ctx, time.Now().UTC())
+			if err != nil && !errors.Is(err, context.Canceled) {
+				cancel()
+				logger.Warn("automatic parameter sync admission counter repair failed", zap.Error(err))
+				return
+			}
+			stats, err := repo.GetAutomaticAdmissionStats(ctx, time.Now().UTC())
+			cancel()
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("automatic parameter sync admission metrics failed", zap.Error(err))
+				return
+			}
+			metrics.AutomaticReservedRuns.Set(float64(stats.ReservedRuns))
+			metrics.AutomaticQueuedRequests.Set(float64(stats.QueuedRequests))
+			metrics.AutomaticOldestQueueAge.Set(stats.OldestQueueAgeSecond)
 		})
 		go runPeriodicMaintenance(maintenanceCtx, 30*time.Second, func(context.Context) {
 			err := runParamSyncReconciliation(maintenanceCtx, reconciler, projector, time.Now(), maintenanceCfg)

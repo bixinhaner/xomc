@@ -3,10 +3,13 @@ package pm
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omcgo/omcgo/internal/pm/slothealth"
 )
 
 func TestPMMetrics_FilteringReasonsUseIndependentCounters(t *testing.T) {
@@ -34,6 +37,55 @@ omc_pm_whitelist_miss_values_total{carrier="cmcc",technology="lte"} 2
 		"omc_pm_whitelist_miss_values_total",
 		"omc_pm_known_disabled_values_total",
 		"omc_pm_technology_mismatch_files_total",
+	))
+}
+
+func TestPMMetrics_PublishesLowCardinalityIngestAndSlotHealth(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewPMMetrics(reg)
+	ingestedAt := time.Date(2026, 8, 3, 15, 2, 0, 0, time.UTC)
+	slotEnd := time.Date(2026, 8, 3, 15, 0, 0, 0, time.UTC)
+	evaluatedAt := slotEnd.Add(12 * time.Minute)
+
+	m.RecordIngestSuccess("CMCC", "LTE", ingestedAt)
+	m.PublishSlotHealth([]slothealth.Snapshot{{
+		SlotEnd: slotEnd, Technology: "lte", Carrier: "cmcc",
+		ExpectedDevices: 20000, ReceivedDevices: 19600, CoverageRatio: 0.98,
+		EvaluatedAt: evaluatedAt, Status: slothealth.StatusComplete,
+	}})
+
+	expected := `
+# HELP omc_pm_ingest_last_success_timestamp_seconds Unix timestamp of the latest successfully ingested PM file.
+# TYPE omc_pm_ingest_last_success_timestamp_seconds gauge
+omc_pm_ingest_last_success_timestamp_seconds{carrier="cmcc",technology="lte"} 1.78576932e+09
+# HELP omc_pm_slot_alert_eligible Whether the latest evaluated PM slot is eligible for coverage alerts.
+# TYPE omc_pm_slot_alert_eligible gauge
+omc_pm_slot_alert_eligible{carrier="cmcc",technology="lte"} 1
+# HELP omc_pm_slot_coverage_ratio Received divided by expected devices for the latest evaluated PM slot.
+# TYPE omc_pm_slot_coverage_ratio gauge
+omc_pm_slot_coverage_ratio{carrier="cmcc",technology="lte"} 0.98
+# HELP omc_pm_slot_end_timestamp_seconds Unix timestamp of the latest evaluated PM slot end.
+# TYPE omc_pm_slot_end_timestamp_seconds gauge
+omc_pm_slot_end_timestamp_seconds{carrier="cmcc",technology="lte"} 1.7857692e+09
+# HELP omc_pm_slot_expected_devices Expected devices for the latest evaluated PM slot.
+# TYPE omc_pm_slot_expected_devices gauge
+omc_pm_slot_expected_devices{carrier="cmcc",technology="lte"} 20000
+# HELP omc_pm_slot_observer_last_success_timestamp_seconds Unix timestamp of the latest successful PM slot observation.
+# TYPE omc_pm_slot_observer_last_success_timestamp_seconds gauge
+omc_pm_slot_observer_last_success_timestamp_seconds 1.78576992e+09
+# HELP omc_pm_slot_received_devices Devices successfully ingested for the latest evaluated PM slot.
+# TYPE omc_pm_slot_received_devices gauge
+omc_pm_slot_received_devices{carrier="cmcc",technology="lte"} 19600
+`
+	require.NoError(t, testutil.GatherAndCompare(
+		reg, strings.NewReader(expected),
+		"omc_pm_ingest_last_success_timestamp_seconds",
+		"omc_pm_slot_alert_eligible",
+		"omc_pm_slot_coverage_ratio",
+		"omc_pm_slot_end_timestamp_seconds",
+		"omc_pm_slot_expected_devices",
+		"omc_pm_slot_observer_last_success_timestamp_seconds",
+		"omc_pm_slot_received_devices",
 	))
 }
 

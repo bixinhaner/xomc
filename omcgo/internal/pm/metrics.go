@@ -1,6 +1,12 @@
 package pm
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"strings"
+	"time"
+
+	"github.com/omcgo/omcgo/internal/pm/slothealth"
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 // PMMetrics holds Prometheus metrics for the PM collection module.
 type PMMetrics struct {
@@ -26,6 +32,14 @@ type PMMetrics struct {
 
 	// XML 内容制式与设备元数据不一致、在指标路由前隔离的文件数。
 	TechnologyMismatchFilesTotal *prometheus.CounterVec
+
+	IngestLastSuccessTimestamp *prometheus.GaugeVec
+	SlotEndTimestamp           *prometheus.GaugeVec
+	SlotExpectedDevices        *prometheus.GaugeVec
+	SlotReceivedDevices        *prometheus.GaugeVec
+	SlotCoverageRatio          *prometheus.GaugeVec
+	SlotAlertEligible          *prometheus.GaugeVec
+	SlotObserverLastSuccess    prometheus.Gauge
 }
 
 // NewPMMetrics creates and registers PM metrics.
@@ -65,6 +79,34 @@ func NewPMMetrics(reg prometheus.Registerer) *PMMetrics {
 			Name: "omc_pm_technology_mismatch_files_total",
 			Help: "PM files quarantined because XML evidence conflicts with the declared device technology.",
 		}, []string{"declared_technology", "detected_technology"}),
+		IngestLastSuccessTimestamp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_ingest_last_success_timestamp_seconds",
+			Help: "Unix timestamp of the latest successfully ingested PM file.",
+		}, []string{"carrier", "technology"}),
+		SlotEndTimestamp: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_slot_end_timestamp_seconds",
+			Help: "Unix timestamp of the latest evaluated PM slot end.",
+		}, []string{"carrier", "technology"}),
+		SlotExpectedDevices: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_slot_expected_devices",
+			Help: "Expected devices for the latest evaluated PM slot.",
+		}, []string{"carrier", "technology"}),
+		SlotReceivedDevices: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_slot_received_devices",
+			Help: "Devices successfully ingested for the latest evaluated PM slot.",
+		}, []string{"carrier", "technology"}),
+		SlotCoverageRatio: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_slot_coverage_ratio",
+			Help: "Received divided by expected devices for the latest evaluated PM slot.",
+		}, []string{"carrier", "technology"}),
+		SlotAlertEligible: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "omc_pm_slot_alert_eligible",
+			Help: "Whether the latest evaluated PM slot is eligible for coverage alerts.",
+		}, []string{"carrier", "technology"}),
+		SlotObserverLastSuccess: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "omc_pm_slot_observer_last_success_timestamp_seconds",
+			Help: "Unix timestamp of the latest successful PM slot observation.",
+		}),
 	}
 
 	reg.MustRegister(
@@ -76,6 +118,54 @@ func NewPMMetrics(reg prometheus.Registerer) *PMMetrics {
 		m.WhitelistMissValuesTotal,
 		m.KnownDisabledValuesTotal,
 		m.TechnologyMismatchFilesTotal,
+		m.IngestLastSuccessTimestamp,
+		m.SlotEndTimestamp,
+		m.SlotExpectedDevices,
+		m.SlotReceivedDevices,
+		m.SlotCoverageRatio,
+		m.SlotAlertEligible,
+		m.SlotObserverLastSuccess,
 	)
 	return m
+}
+
+func (m *PMMetrics) RecordIngestSuccess(carrier, technology string, at time.Time) {
+	if m == nil {
+		return
+	}
+	m.IngestLastSuccessTimestamp.WithLabelValues(
+		strings.ToLower(strings.TrimSpace(carrier)),
+		strings.ToLower(strings.TrimSpace(technology)),
+	).Set(float64(at.Unix()))
+}
+
+func (m *PMMetrics) PublishSlotHealth(snapshots []slothealth.Snapshot) {
+	if m == nil {
+		return
+	}
+	m.SlotEndTimestamp.Reset()
+	m.SlotExpectedDevices.Reset()
+	m.SlotReceivedDevices.Reset()
+	m.SlotCoverageRatio.Reset()
+	m.SlotAlertEligible.Reset()
+	observedAt := time.Now().UTC()
+	if len(snapshots) > 0 {
+		observedAt = snapshots[0].EvaluatedAt
+	}
+	for _, snapshot := range snapshots {
+		labels := []string{snapshot.Carrier, snapshot.Technology}
+		m.SlotEndTimestamp.WithLabelValues(labels...).Set(float64(snapshot.SlotEnd.Unix()))
+		m.SlotExpectedDevices.WithLabelValues(labels...).Set(float64(snapshot.ExpectedDevices))
+		m.SlotReceivedDevices.WithLabelValues(labels...).Set(float64(snapshot.ReceivedDevices))
+		m.SlotCoverageRatio.WithLabelValues(labels...).Set(snapshot.CoverageRatio)
+		eligible := 1.0
+		if snapshot.Status == slothealth.StatusBootstrapIgnored {
+			eligible = 0
+		}
+		m.SlotAlertEligible.WithLabelValues(labels...).Set(eligible)
+		if snapshot.EvaluatedAt.After(observedAt) {
+			observedAt = snapshot.EvaluatedAt
+		}
+	}
+	m.SlotObserverLastSuccess.Set(float64(observedAt.Unix()))
 }

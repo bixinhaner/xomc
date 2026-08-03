@@ -154,6 +154,76 @@ upgrade_prod_database_dsns() {
   fi
 }
 
+app_param_sync_recovery_run_limit() {
+  local config="$1"
+  [ -f "$config" ] || return 1
+  awk '
+    /^[^[:space:]#][^:]*:/ {
+      in_param_sync = ($0 ~ /^param_sync:[[:space:]]*(#.*)?$/)
+    }
+    in_param_sync && /^[[:space:]]+recovery_run_limit:[[:space:]]*[0-9]+/ {
+      value = $0
+      sub(/^[^:]*:[[:space:]]*/, "", value)
+      sub(/[[:space:]#].*$/, "", value)
+      print value
+      found = 1
+      exit
+    }
+    END { if (!found) exit 1 }
+  ' "$config"
+}
+
+# Upgrade only the historical project default. An operator-selected value is a
+# capacity decision and must survive package upgrades unchanged.
+upgrade_app_param_sync_recovery_limit() {
+  local live_config="$1" template_config="$2"
+  local live_limit template_limit tmp
+
+  PARAM_SYNC_RECOVERY_LIMIT_UPGRADE_RESULT="noop"
+  [ -f "$live_config" ] || return 0
+  [ -f "$template_config" ] || return 1
+  live_limit="$(app_param_sync_recovery_run_limit "$live_config")" || return 0
+  template_limit="$(app_param_sync_recovery_run_limit "$template_config")" || return 1
+  [ "$template_limit" = "200" ] || return 0
+  [ "$live_limit" = "200" ] && return 0
+  if [ "$live_limit" != "20" ]; then
+    PARAM_SYNC_RECOVERY_LIMIT_UPGRADE_RESULT="preserved"
+    return 0
+  fi
+
+  tmp="$(mktemp "${live_config}.param-sync.tmp.XXXXXX")" || return 1
+  if ! cp -p "$live_config" "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! awk '
+      /^[^[:space:]#][^:]*:/ {
+        in_param_sync = ($0 ~ /^param_sync:[[:space:]]*(#.*)?$/)
+      }
+      in_param_sync && !changed &&
+        /^[[:space:]]+recovery_run_limit:[[:space:]]*20([[:space:]]*(#.*)?)?$/ {
+        prefix = $0
+        sub(/recovery_run_limit:.*/, "", prefix)
+        comment = ""
+        if (index($0, "#") > 0) comment = " " substr($0, index($0, "#"))
+        print prefix "recovery_run_limit: 200" comment
+        changed = 1
+        next
+      }
+      { print }
+      END { if (changed != 1) exit 42 }
+    ' "$live_config" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! mv -f "$tmp" "$live_config"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  [ "$(app_param_sync_recovery_run_limit "$live_config")" = "200" ] || return 1
+  PARAM_SYNC_RECOVERY_LIMIT_UPGRADE_RESULT="migrated"
+}
+
 config_has_top_level_section() {
   local config="$1" section="$2"
   [ -f "$config" ] || return 1
