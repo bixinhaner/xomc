@@ -2,6 +2,7 @@ package logger
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// 运行期日志轮转可配（sys_configs category=log.rotation）。
+// 运行期日志轮转和 OMC 服务程序日志有效期均可配（sys_configs category=log.rotation）。
 //
 // 背景：日志文件的「大小/个数/过期」此前仅能在各服务 YAML 的 log.rotation 块里配置，运营商
 // 无法在系统配置页里调。本文件提供一个进程级原子 override：compactor goroutine 每分钟读取它来
@@ -28,6 +29,20 @@ import (
 
 // RotationCategory 是 sys_configs 中日志轮转配置的 category。
 const RotationCategory = "log.rotation"
+
+// RetentionCategory 是旧版本 sys_configs 中服务日志有效期所在的 category，仅用于兼容回退。
+// 新配置的 service_days 位于 RotationCategory。
+const RetentionCategory = "log.retention"
+
+// KeyServiceDays 是 OMC 服务日志归档的统一保留天数配置键。
+const KeyServiceDays = "service_days"
+
+const (
+	// DefaultServiceLogDays 是新环境 OMC 服务日志归档的默认有效期。
+	DefaultServiceLogDays = 30
+	minServiceLogDays     = 1
+	maxServiceLogDays     = 3650
+)
 
 // DefaultRotateInterval 是 sys_configs.rotate_interval_minutes 缺失/非法时的定时轮转兜底。
 // 该值故意不再放 YAML，避免「页面可配」与「启动配置」出现双默认源。
@@ -107,8 +122,10 @@ func enforceMaxSize(lj *lumberjack.Logger, path string, maxBytes int64) {
 // ConfigLookup 读 sys_configs 单值（value, found）。各进程注入自己的 sys_configs 读适配器。
 type ConfigLookup func(ctx context.Context, category, key string) (value string, found bool)
 
-// StartRotationConfigWatcher 启动一个轮询 goroutine，每 60s 从 sys_configs 读 log.rotation 配置
-// 并更新进程级 override（后台轮转检查据此在 ≤1 分钟内生效）。lookup 为 nil 直接返回（保持启动期行为）。
+// StartRotationConfigWatcher 启动一个轮询 goroutine，每 60s 从 sys_configs 读 log.rotation，并
+// 更新进程级 override（后台轮转/归档清理据此在 ≤1 分钟内生效）。旧环境的
+// log.retention.service_days 仍作为兼容回退。
+// lookup 为 nil 直接返回（保持启动期行为）。
 // 立即先读一次再进入轮询。
 func StartRotationConfigWatcher(ctx context.Context, lookup ConfigLookup, logger *zap.Logger) {
 	if lookup == nil {
@@ -118,9 +135,17 @@ func StartRotationConfigWatcher(ctx context.Context, lookup ConfigLookup, logger
 		logger = zap.NewNop()
 	}
 	apply := func() {
+		maxAgeDays := readIntCfg(ctx, lookup, KeyMaxAgeDays)
+		// 新配置放在 log.rotation；旧 log.retention.service_days 和
+		// log.rotation.max_age_days 作为兼容回退，确保已有环境升级后仍保持原有效期。
+		if serviceDays := readIntCfg(ctx, lookup, KeyServiceDays); serviceDays > 0 {
+			maxAgeDays = serviceDays
+		} else if serviceDays := readIntCfgInCategory(ctx, lookup, RetentionCategory, KeyServiceDays); serviceDays > 0 {
+			maxAgeDays = serviceDays
+		}
 		SetRotationOverride(RotationOverride{
 			MaxSizeMB:             readIntCfg(ctx, lookup, KeyMaxSizeMB),
-			MaxAgeDays:            readIntCfg(ctx, lookup, KeyMaxAgeDays),
+			MaxAgeDays:            maxAgeDays,
 			KeepUncompressed:      readIntCfg(ctx, lookup, KeyKeepFiles),
 			RotateIntervalMinutes: readIntCfg(ctx, lookup, KeyRotateIntervalMinutes),
 		})
@@ -139,12 +164,18 @@ func StartRotationConfigWatcher(ctx context.Context, lookup ConfigLookup, logger
 		}
 	}()
 	logger.Info("log rotation config watcher started",
-		zap.String("category", RotationCategory), zap.Duration("poll", 60*time.Second))
+		zap.String("category", RotationCategory),
+		zap.String("legacy_service_retention_category", RetentionCategory),
+		zap.Duration("poll", 60*time.Second))
 }
 
 // readIntCfg 读一个非负整数配置；缺失/非法/≤0 返回 0（= 该维度不覆盖）。
 func readIntCfg(ctx context.Context, lookup ConfigLookup, key string) int {
-	v, found := lookup(ctx, RotationCategory, key)
+	return readIntCfgInCategory(ctx, lookup, RotationCategory, key)
+}
+
+func readIntCfgInCategory(ctx context.Context, lookup ConfigLookup, category, key string) int {
+	v, found := lookup(ctx, category, key)
 	if !found {
 		return 0
 	}
@@ -154,3 +185,19 @@ func readIntCfg(ctx context.Context, lookup ConfigLookup, key string) int {
 	}
 	return n
 }
+
+// ValidateLogRetentionDays 校验管理页面写入的统一日志有效期。
+// 轮转 watcher/数据库清理策略仍会对非法值 fail-safe 回退，因此这里是 API 入口的早期反馈。
+func ValidateLogRetentionDays(value string) error {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n < minServiceLogDays || n > maxServiceLogDays {
+		return fmt.Errorf("log retention days must be between %d and %d", minServiceLogDays, maxServiceLogDays)
+	}
+	return nil
+}
+
+// ValidateServiceLogDays 保留服务程序日志配置的显式校验入口。
+func ValidateServiceLogDays(value string) error { return ValidateLogRetentionDays(value) }
+
+// ValidateDatabaseLogDays 保留数据库日志配置的显式校验入口。
+func ValidateDatabaseLogDays(value string) error { return ValidateLogRetentionDays(value) }

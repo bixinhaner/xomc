@@ -58,27 +58,23 @@ func staticLookup(values map[string]string) ConfigLookup {
 }
 
 func TestRetentionPolicy_Defaults(t *testing.T) {
-	// nil lookup → 所有默认值；enabled 默认 true。
+	// nil lookup → 统一数据库日志默认值；enabled 默认 true。
 	p := NewRetentionPolicy(nil, nil)
 	assert.True(t, p.Enabled(context.Background()))
-	for _, tbl := range Tables {
-		assert.Equal(t, tbl.DefaultDays, p.DaysFor(context.Background(), tbl.Key), tbl.Key)
-	}
+	assert.Equal(t, DefaultDatabaseLogDays, p.DatabaseDays(context.Background()))
 }
 
 func TestRetentionPolicy_ReadAndValidate(t *testing.T) {
 	p := NewRetentionPolicy(staticLookup(map[string]string{
-		"audit_days":  "365",
-		"oper_days":   "-5",       // 非法（< min）→ 回退默认
-		"system_days": "notanint", // 非法 → 回退默认
-		KeyEnabled:    "false",
+		KeyDatabaseDays: "365",
+		KeyEnabled:      "false",
 	}), nil)
 	ctx := context.Background()
 	assert.False(t, p.Enabled(ctx))
-	assert.Equal(t, 365, p.DaysFor(ctx, "audit_days"))
-	assert.Equal(t, 180, p.DaysFor(ctx, "oper_days"))      // 默认
-	assert.Equal(t, 90, p.DaysFor(ctx, "system_days"))     // 默认
-	assert.Equal(t, 30, p.DaysFor(ctx, "ne_message_days")) // 未配 → 默认
+	assert.Equal(t, 365, p.DatabaseDays(ctx))
+
+	invalid := NewRetentionPolicy(staticLookup(map[string]string{KeyDatabaseDays: "notanint"}), nil)
+	assert.Equal(t, DefaultDatabaseLogDays, invalid.DatabaseDays(ctx))
 }
 
 func TestCleanupRunner_DisabledSkips(t *testing.T) {

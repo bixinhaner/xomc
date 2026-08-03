@@ -5078,7 +5078,7 @@ const messages: Record<string, string> = {
   'system.storageProtection.description':     '统一按宿主机根文件系统设置容量阈值，并在业务写入入口执行准入保护。',
   'system.storageProtection.unifiedTarget':   '统一物理存储',
   'system.storageProtection.unifiedTargetDescription': '当前部署所有 OMC 数据共用同一物理文件系统（/）。MinIO、数据库和监控数据仅作逻辑观测；写入范围只用于优先级和审计，不单独分配磁盘配额。',
-  'system.storageProtection.retentionPending': '有效期与清理策略属于后续容量治理阶段，当前页面仅提供容量观测和写入保护。',
+  'system.storageProtection.retentionDescription': '统一配置数据库日志和 OMC 服务程序日志的保留期限、轮转参数及过期清理策略。',
   'system.storageProtection.capacityOverview': '容量总览',
   'system.storageProtection.policyList':       '保护策略',
   'system.storageProtection.policySummary':   '存储保护策略',
@@ -7488,26 +7488,19 @@ const messages: Record<string, string> = {
   'retentionBp.field.compress_after_ingest': '新文件入库后压缩',
 
   // -------------------------------------------------------------------------
-  // 日志保留与轮转（系统配置页 log_cfg 页签）：log.retention + log.rotation
+  // 日志保留与轮转（资源与存储保护页“有效期与清理”区域）：log.retention + log.rotation
   // -------------------------------------------------------------------------
   'logCfg.save':                        '保存',
   'logCfg.save.success':                '保存成功，新配置已热加载生效',
-  'logCfg.retention.title':             '审计/业务日志保留',
-  'logCfg.retention.desc':              '各类日志表按时间保留，worker 每日 05:00 批量删除过期行。安全/审计类建议久留、高频报文类可短留；总开关关闭则跳过整轮清理。',
-  'logCfg.rotation.title':              '日志文件轮转',
-  'logCfg.rotation.desc':               'app/acs/worker 各自运行日志文件的大小/定时切割间隔/个数/过期。改完热加载，≤1 分钟生效（未配置时以各服务 YAML 为启动默认值）。',
+  'logCfg.retention.title':             '数据库日志统一保留',
+  'logCfg.retention.desc':              '统一设置数据库日志保留天数；包括操作、审计、登录、任务、系统事件、网元报文等数据库记录（audit_logs、sys_oper_logs、system_logs 等），到期由 worker 清理。总开关仅控制数据库日志清理。',
+  'logCfg.rotation.title':              'OMC 服务程序日志统一保留与轮转',
+  'logCfg.rotation.desc':               '统一设置 OMC 服务程序日志文件有效期；包括 app.log、acs.log、worker.log、ACS protocol.log 及其轮转归档，过期自动删除。另可配置单文件大小、轮转间隔和近期未压缩归档数，改完 ≤1 分钟生效。',
   'logCfg.field.enabled':               '启用日志保留清理',
-  'logCfg.field.audit_days':            '审计日志保留天数',
-  'logCfg.field.ops_audit_days':        '运维审计日志保留天数',
-  'logCfg.field.login_days':            '登录日志保留天数',
-  'logCfg.field.oper_days':             '操作日志保留天数',
-  'logCfg.field.task_days':             '任务日志保留天数',
-  'logCfg.field.system_days':           '系统日志保留天数',
-  'logCfg.field.ne_message_days':       '网元报文日志保留天数',
-  'logCfg.field.event_days':            '设备事件日志保留天数',
+  'logCfg.field.database_days':         '数据库日志统一保留天数（天）',
+  'logCfg.field.service_days':          'OMC 服务程序日志统一有效期（天，过期归档自动删除）',
   'logCfg.field.max_size_mb':           '单文件最大大小（MB，超过切割）',
   'logCfg.field.rotate_interval_minutes': '定时轮转间隔（分钟）',
-  'logCfg.field.max_age_days':          '日志归档保留天数',
   'logCfg.field.keep_files':            '保持不压缩的最新归档个数',
 
   // -------------------------------------------------------------------------

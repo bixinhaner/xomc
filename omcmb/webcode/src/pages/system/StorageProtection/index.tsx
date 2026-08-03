@@ -31,6 +31,7 @@ import {
   useStorageProtectionPolicies,
   useUpdateStorageProtectionPolicy,
 } from '@core/hooks/api/useStorageProtection';
+import LogRetentionSection from '../SystemConfig/LogRetentionSection';
 import { UNIFIED_STORAGE_TARGET } from '@core/services/api/storageProtectionApi';
 import type {
   StorageProtectionPolicy,
@@ -301,7 +302,13 @@ export default function StorageProtection() {
       </Drawer>
 
       <Card title={t('system.storageProtection.retentionTitle')}>
-        <Alert type="warning" showIcon message={t('system.storageProtection.retentionPending')} />
+        <Alert
+          type="info"
+          showIcon
+          message={t('system.storageProtection.retentionDescription')}
+          style={{ marginBottom: 16 }}
+        />
+        <LogRetentionSection />
       </Card>
 
     </div>

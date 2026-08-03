@@ -208,19 +208,12 @@ describe('self-managed system config load guard', () => {
       const values = category === 'log.retention'
         ? {
             enabled: 'true',
-            audit_days: '30',
-            ops_audit_days: '30',
-            login_days: '30',
-            oper_days: '30',
-            task_days: '30',
-            system_days: '30',
-            ne_message_days: '30',
-            event_days: '30',
-          }
+            database_days: '180',
+        }
         : {
+            service_days: '30',
             max_size_mb: '100',
             rotate_interval_minutes: '60',
-            max_age_days: '30',
             keep_files: '10',
           };
       return {
@@ -246,18 +239,35 @@ describe('self-managed system config load guard', () => {
 
     const card = screen.getByText('logCfg.retention.title').closest('.ant-card');
     expect(card).not.toBeNull();
-    const auditInput = within(card as HTMLElement).getByRole('spinbutton', {
-      name: 'logCfg.field.audit_days',
+    const databaseInput = within(card as HTMLElement).getByRole('spinbutton', {
+      name: 'logCfg.field.database_days',
     });
-    await waitFor(() => expect(auditInput).toHaveValue('30'));
-    await user.clear(auditInput);
-    await user.type(auditInput, '31');
+    await waitFor(() => expect(databaseInput).toHaveValue('180'));
+    await user.clear(databaseInput);
+    await user.type(databaseInput, '365');
     await user.click(within(card as HTMLElement).getByRole('button', { name: 'logCfg.save' }));
 
     await waitFor(() => {
       expect(hookMocks.mutateAsync).toHaveBeenCalledWith({
         category: 'log.retention',
-        items: [{ key: 'audit_days', value: '31', value_type: 'int' }],
+        items: [{ key: 'database_days', value: '365', value_type: 'int' }],
+      });
+    });
+
+    const rotationCard = screen.getByText('logCfg.rotation.title').closest('.ant-card');
+    expect(rotationCard).not.toBeNull();
+    const serviceInput = within(rotationCard as HTMLElement).getByRole('spinbutton', {
+      name: 'logCfg.field.service_days',
+    });
+    await waitFor(() => expect(serviceInput).toHaveValue('30'));
+    await user.clear(serviceInput);
+    await user.type(serviceInput, '45');
+    await user.click(within(rotationCard as HTMLElement).getByRole('button', { name: 'logCfg.save' }));
+
+    await waitFor(() => {
+      expect(hookMocks.mutateAsync).toHaveBeenLastCalledWith({
+        category: 'log.rotation',
+        items: [{ key: 'service_days', value: '45', value_type: 'int' }],
       });
     });
   });
