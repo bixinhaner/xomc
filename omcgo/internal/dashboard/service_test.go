@@ -332,6 +332,12 @@ func TestComputeKPIDeltaRequiresComparableBaseline(t *testing.T) {
 	})
 }
 
+func TestAlarmComparisonRequiresPreviousDeviceBaseline(t *testing.T) {
+	assert.False(t, hasPreviousAlarmBaseline(0, nil))
+	assert.True(t, hasPreviousAlarmBaseline(11, nil))
+	assert.False(t, hasPreviousAlarmBaseline(11, assert.AnError))
+}
+
 func TestAverageKPITrendEntries(t *testing.T) {
 	avg, ok := averageKPITrendEntries([]KPITrendEntry{{Value: 8}, {Value: 12}})
 	assert.True(t, ok)
