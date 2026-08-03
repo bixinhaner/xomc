@@ -19,7 +19,7 @@ var defaultLayoutJSON = map[string]string{
 		{"title":"dashboard.panel.mobility","metrics":["K900010017","K900010022","K900010021","K900010026"],"x":6,"y":16,"w":6,"h":8,"chartType":"line"}
 	]}`,
 	techNR: `{"panels":[
-		{"title":"dashboard.panel.traffic","metrics":["KGNB0511","KGNB0510","KGNB0517","KGNB0516","C010070004"],"x":0,"y":0,"w":6,"h":8,"chartType":"line"},
+		{"title":"dashboard.panel.traffic","metrics":["KGNB0511","KGNB0510","KGNB0517","KGNB0516"],"x":0,"y":0,"w":6,"h":8,"chartType":"line"},
 		{"title":"dashboard.panel.utilization","metrics":["KGNB0506","KGNB0505"],"x":6,"y":0,"w":6,"h":8,"chartType":"line"}
 	]}`,
 	techGSM: `{"panels":[

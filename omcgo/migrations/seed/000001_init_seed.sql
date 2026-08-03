@@ -4,6 +4,8 @@
 --
 -- PostgreSQL database dump
 --
+
+
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 16.14
 
@@ -48,10 +50,13 @@ $$;
 -- +goose StatementEnd
 
 --
+-- Data for Name: alarm_severity_levels; Type: TABLE DATA; Schema: public; Owner: -
+--
 
 SET SESSION AUTHORIZATION DEFAULT;
 
 ALTER TABLE public.alarm_severity_levels DISABLE TRIGGER ALL;
+
 INSERT INTO public.alarm_severity_levels VALUES
 	('361e3cdb-a8fc-4d9f-b339-8940e49f7ea5', 31001, 'Critical', 1, '2026-05-31 11:28:44.576592+08'),
 	('22d75435-0ef0-481d-841c-5b7764bf73dc', 31002, 'Major', 2, '2026-05-31 11:28:44.576592+08'),
@@ -993,7 +998,7 @@ ALTER TABLE public.dashboard_kpi_layouts DISABLE TRIGGER ALL;
 
 INSERT INTO public.dashboard_kpi_layouts VALUES
 	('lte', '{"panels": [{"h": 8, "w": 6, "x": 0, "y": 0, "title": "dashboard.panel.traffic", "metrics": ["K900010015", "K900010016", "K900010040", "K900010041"], "chartType": "line"}, {"h": 8, "w": 6, "x": 6, "y": 0, "title": "dashboard.panel.availability", "metrics": ["K900010076"], "chartType": "line"}, {"h": 8, "w": 6, "x": 0, "y": 8, "title": "dashboard.panel.utilization", "metrics": ["K900010014", "K900010013"], "chartType": "line"}, {"h": 8, "w": 6, "x": 6, "y": 8, "title": "dashboard.panel.accessibility", "metrics": ["K900010006", "K900010002", "K900010005", "K900010029"], "chartType": "line"}, {"h": 8, "w": 6, "x": 0, "y": 16, "title": "dashboard.panel.retainability", "metrics": ["K900010027"], "chartType": "line"}, {"h": 8, "w": 6, "x": 6, "y": 16, "title": "dashboard.panel.mobility", "metrics": ["K900010017", "K900010022", "K900010021", "K900010026"], "chartType": "line"}]}', '2026-06-17 20:08:35.34786+08', NULL),
-	('nr', '{"panels": [{"h": 8, "w": 6, "x": 0, "y": 0, "title": "dashboard.panel.traffic", "metrics": ["KGNB0511", "KGNB0510", "KGNB0517", "KGNB0516", "C010070004"], "chartType": "line"}, {"h": 8, "w": 6, "x": 6, "y": 0, "title": "dashboard.panel.utilization", "metrics": ["KGNB0506", "KGNB0505"], "chartType": "line"}]}', '2026-06-17 20:08:35.34786+08', NULL),
+	('nr', '{"panels": [{"h": 8, "w": 6, "x": 0, "y": 0, "title": "dashboard.panel.traffic", "metrics": ["KGNB0511", "KGNB0510", "KGNB0517", "KGNB0516"], "chartType": "line"}, {"h": 8, "w": 6, "x": 6, "y": 0, "title": "dashboard.panel.utilization", "metrics": ["KGNB0506", "KGNB0505"], "chartType": "line"}]}', '2026-06-17 20:08:35.34786+08', NULL),
 	('gsm', '{"panels": [{"h": 8, "w": 6, "x": 0, "y": 0, "title": "dashboard.panel.accessibility", "metrics": ["KGSM0102"], "chartType": "line"}, {"h": 8, "w": 6, "x": 6, "y": 0, "title": "dashboard.panel.retainability", "metrics": ["KGSM0103"], "chartType": "line"}, {"h": 8, "w": 12, "x": 0, "y": 8, "title": "dashboard.panel.mobility", "metrics": ["KGSM0101"], "chartType": "line"}]}', '2026-06-17 20:08:35.34786+08', NULL) ON CONFLICT DO NOTHING;
 
 
@@ -8409,7 +8414,7 @@ INSERT INTO public.pm_tasks (
 	window_start, window_end, last_fire_at, dimension, technology, is_builtin, expire_days, object_ldns
 ) VALUES
 	('0184dddd-0001-4000-8000-000000000001', '内置-全网-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,K900010076,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'network', 'lte', true, 60, NULL),
-	('0184dddd-0001-4000-8000-000000000002', '内置-全网-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505,C010070004}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'network', 'nr', true, 60, NULL),
+	('0184dddd-0001-4000-8000-000000000002', '内置-全网-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'network', 'nr', true, 60, NULL),
 	('0184dddd-0001-4000-8000-000000000003', '内置-全网-GSM', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGSM0102,KGSM0103,KGSM0101}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'network', 'gsm', true, 60, NULL),
 	('0184dddd-0002-4000-8000-000000000001', '内置-设备组-LTE', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{K900010015,K900010016,K900010076,K900010014,K900010013,K900010006,K900010002,K900010005,K900010029,K900010027,K900010017,K900010022,K900010021,K900010026}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'device_group', 'lte', true, 60, NULL),
 	('0184dddd-0002-4000-8000-000000000002', '内置-设备组-NR', 'extraction', '[]', '[]', 'hourly', NULL, 'scheduled', 0, NULL, '2026-06-12 18:16:52.409282+08', '2026-06-12 18:16:52.409282+08', 'adhoc_aggregation', 'continuous', '5 * * * *', '{KGNB0511,KGNB0510,KGNB0506,KGNB0505}', '{hourly,daily,weekly,monthly}', NULL, NULL, NULL, 'device_group', 'nr', true, 60, NULL),

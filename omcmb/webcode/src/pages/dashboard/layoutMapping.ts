@@ -32,7 +32,7 @@ const DEFAULT_METRICS: Readonly<Partial<Record<TechnologyType, Partial<Record<Pa
     mobility:      ['K900010017', 'K900010022', 'K900010021', 'K900010026'],
   },
   nr: {
-    traffic:     ['KGNB0511', 'KGNB0510', 'KGNB0517', 'KGNB0516', 'C010070004'],
+    traffic:     ['KGNB0511', 'KGNB0510', 'KGNB0517', 'KGNB0516'],
     utilization: ['KGNB0506', 'KGNB0505'],
   },
   gsm: {

@@ -1395,6 +1395,11 @@ func initDashboardModule(c *Container) error {
 		StaleTTL:      dashboardCfg.StaleTTL,
 	}, dashboardMetrics)
 	dashboardService := dashboard.NewService(c.DeviceService, c.AlarmPgStore, c.PMKPIRepo, c.PgPool, c.TsPool, c.GroupRepo, dashIndicatorRepo, networkRollups, logger)
+	if c.pmHandlerDeps != nil && c.pmHandlerDeps.pmAggregator != nil {
+		dashboardService.SetCounterSeriesReader(
+			dashboard.NewAggregatorCounterSeriesReader(c.pmHandlerDeps.pmAggregator),
+		)
+	}
 	dashboardService.SetKPIQueryGuard(queryGuard)
 	dashboardService.SetMetrics(dashboardMetrics)
 	if c.pmHandlerDeps != nil && c.pmHandlerDeps.pmProgressService != nil {

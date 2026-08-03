@@ -149,7 +149,7 @@ func buildNetworkRollupSeriesSQL(query NetworkRollupQuery) (string, []any, error
  AND published_revision.revision = r.revision`).
 		Where(sq.Eq{
 			"r.dimension":   "network",
-			"r.metric_type": []string{string(metrics.MetricTypeKPI), string(metrics.MetricTypeCounter)},
+			"r.metric_type": string(metrics.MetricTypeKPI),
 			"r.task_id":     networkTaskIDs(query.Technology),
 			"r.granularity": query.Granularity,
 			"r.metric_path": metricPaths,
@@ -187,7 +187,7 @@ func buildLatestNetworkHourlySQL(start, end time.Time) (string, []any, error) {
  AND published_revision.revision = r.revision`).
 		Where(sq.Eq{
 			"r.dimension":   "network",
-			"r.metric_type": []string{string(metrics.MetricTypeKPI), string(metrics.MetricTypeCounter)},
+			"r.metric_type": string(metrics.MetricTypeKPI),
 			"r.task_id":     networkTaskIDs(""),
 			"r.granularity": metrics.GranularityHourly,
 		}).

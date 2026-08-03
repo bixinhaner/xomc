@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,6 +38,73 @@ func (r *recordingNetworkRollupReader) ListSeries(_ context.Context, query Netwo
 
 func (r *recordingNetworkRollupReader) ListLatestHourly(context.Context, time.Time, time.Time) ([]NetworkRollupPoint, error) {
 	return r.points, r.err
+}
+
+type recordingCounterSeriesReader struct {
+	queries []NetworkRollupQuery
+	points  []NetworkRollupPoint
+}
+
+func (r *recordingCounterSeriesReader) ListSeries(_ context.Context, query NetworkRollupQuery) ([]NetworkRollupPoint, error) {
+	r.queries = append(r.queries, query)
+	return r.points, nil
+}
+
+func TestGetKPITimeSeriesReadsCounterSeriesForDashboard(t *testing.T) {
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	start := now.Add(-2 * time.Hour)
+	counterReader := &recordingCounterSeriesReader{points: []NetworkRollupPoint{{
+		Technology:  model.TechNR,
+		MetricPath:  "C010070004",
+		Granularity: metrics.GranularityHourly,
+		WindowStart: start,
+		WindowEnd:   start.Add(time.Hour),
+		Value:       jsonx.Float(1.25),
+	}}}
+	service := &Service{
+		networkRollups: &recordingNetworkRollupReader{},
+		counterSeries:  counterReader,
+	}
+
+	result, err := service.GetKPITimeSeries(
+		context.Background(), []string{"C010070004"}, model.TechNR,
+		metrics.GranularityHourly, start.Add(-time.Hour), now,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, result["C010070004"], 1)
+	assert.Equal(t, jsonx.Float(1.25), result["C010070004"][0].Value)
+	require.Len(t, counterReader.queries, 1)
+	assert.Equal(t, []string{"C010070004"}, counterReader.queries[0].MetricPaths)
+}
+
+func TestGetKPITimeSeriesKeepsKPIAndCounterReadersSeparate(t *testing.T) {
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	start := now.Add(-time.Hour)
+	kpiReader := &recordingNetworkRollupReader{points: []NetworkRollupPoint{{
+		Technology: model.TechNR, MetricPath: "KGNB0517",
+		Granularity: metrics.GranularityHourly, WindowStart: start,
+		WindowEnd: start.Add(time.Hour), Value: jsonx.Float(2.5), Complete: true,
+	}}}
+	counterReader := &recordingCounterSeriesReader{points: []NetworkRollupPoint{{
+		Technology: model.TechNR, MetricPath: "C010070004",
+		Granularity: metrics.GranularityHourly, WindowStart: start,
+		WindowEnd: start.Add(time.Hour), Value: jsonx.Float(1.25),
+	}}}
+	service := &Service{networkRollups: kpiReader, counterSeries: counterReader}
+
+	result, err := service.GetKPITimeSeries(
+		context.Background(), []string{"KGNB0517", "C010070004"}, model.TechNR,
+		metrics.GranularityHourly, start, now.Add(time.Hour),
+	)
+
+	require.NoError(t, err)
+	assert.Len(t, result["KGNB0517"], 1)
+	assert.Len(t, result["C010070004"], 1)
+	require.Len(t, kpiReader.queries, 1)
+	assert.Equal(t, []string{"KGNB0517"}, kpiReader.queries[0].MetricPaths)
+	require.Len(t, counterReader.queries, 1)
+	assert.Equal(t, []string{"C010070004"}, counterReader.queries[0].MetricPaths)
 }
 
 type fixedNetworkProgressReader struct {
@@ -81,12 +149,6 @@ func TestGetKPITimeSeriesSnapshotAppendsOnlyRequestedNetworkPartial(t *testing.T
 				},
 				{
 					TaskID: taskID, Granularity: pmstream.GranularityDaily,
-					WindowStart: start.Add(30 * 24 * time.Hour), WindowEnd: end,
-					Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
-					MetricPath: "C010070004", MetricType: "counter", Value: 12.5, Partial: true,
-				},
-				{
-					TaskID: taskID, Granularity: pmstream.GranularityDaily,
 					WindowStart: start.Add(30 * 24 * time.Hour),
 					WindowEnd:   end,
 					Dimension:   pmstream.DimensionDevice, DimensionKey: "device-1",
@@ -111,7 +173,7 @@ func TestGetKPITimeSeriesSnapshotAppendsOnlyRequestedNetworkPartial(t *testing.T
 	service.SetNetworkProgressReader(progress)
 
 	snapshot, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
-		context.Background(), []string{"K1", "C010070004"}, model.TechLTE,
+		context.Background(), []string{"K1"}, model.TechLTE,
 		metrics.GranularityDaily, start, end,
 	)
 
@@ -122,12 +184,44 @@ func TestGetKPITimeSeriesSnapshotAppendsOnlyRequestedNetworkPartial(t *testing.T
 	require.False(t, snapshot.Series["K1"][0].Partial)
 	require.Equal(t, jsonx.Float(42), snapshot.Series["K1"][1].Value)
 	require.True(t, snapshot.Series["K1"][1].Partial)
-	require.Len(t, snapshot.Series["C010070004"], 1)
-	require.Equal(t, jsonx.Float(12.5), snapshot.Series["C010070004"][0].Value)
 	require.Len(t, snapshot.PeriodProgress, 1)
 	require.EqualValues(t, 4, snapshot.PeriodProgress[0].ReceivedSlots)
 	require.EqualValues(t, 24, snapshot.PeriodProgress[0].ExpectedSlots)
 	require.NotContains(t, snapshot.Series, "K2")
+}
+
+func TestGetKPITimeSeriesSnapshotAppendsCounterNetworkPartial(t *testing.T) {
+	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(31 * 24 * time.Hour)
+	taskID, ok := pmstream.BuiltinNetworkTaskID("nr")
+	require.True(t, ok)
+	windowStart := start.Add(30 * 24 * time.Hour)
+	reader := &recordingCounterSeriesReader{points: []NetworkRollupPoint{{
+		Technology: model.TechNR, MetricPath: "C010070004",
+		Granularity: metrics.GranularityDaily, WindowStart: start,
+		WindowEnd: start.Add(24 * time.Hour), Value: jsonx.Float(1.1),
+	}}}
+	service := &Service{counterSeries: reader}
+	service.SetNetworkProgressReader(&fixedNetworkProgressReader{
+		expectedTaskID: taskID,
+		result: pmstream.ProgressQueryResult{Rows: []pmstream.ProgressResult{{
+			TaskID: taskID, Granularity: pmstream.GranularityDaily,
+			WindowStart: windowStart, WindowEnd: end,
+			Dimension: pmstream.DimensionNetwork, DimensionKey: "network",
+			MetricPath: "C010070004", MetricType: "counter", Value: 1.2,
+			Partial: true,
+		}}},
+	})
+
+	snapshot, _, err := service.GetKPITimeSeriesSnapshotWithMetadata(
+		context.Background(), []string{"C010070004"}, model.TechNR,
+		metrics.GranularityDaily, start, end,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, snapshot.Series["C010070004"], 2)
+	assert.Equal(t, jsonx.Float(1.2), snapshot.Series["C010070004"][1].Value)
+	assert.True(t, snapshot.Series["C010070004"][1].Partial)
 }
 
 func TestGetKPITimeSeriesSnapshotKeepsPublishedSeriesWhenProgressUnavailable(t *testing.T) {
