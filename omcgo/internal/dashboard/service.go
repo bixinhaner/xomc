@@ -1452,9 +1452,13 @@ func (s *Service) GetKPITimeSeriesSnapshotWithMetadata(
 			fmt.Errorf("dashboard KPI progress cache type mismatch")
 	}
 	snapshot.Series = cloneKPITimeSeriesResponse(snapshot.Series)
-	snapshot.PeriodProgress = append(
-		[]pmstream.PeriodProgress(nil), snapshot.PeriodProgress...,
+	if snapshot.PeriodProgress == nil {
+		snapshot.PeriodProgress = []pmstream.PeriodProgress{}
+	} else {
+		snapshot.PeriodProgress = append(
+		[]pmstream.PeriodProgress{}, snapshot.PeriodProgress...,
 	)
+	}
 	return snapshot, metadata, nil
 }
 

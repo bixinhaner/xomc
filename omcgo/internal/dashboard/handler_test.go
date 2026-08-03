@@ -261,6 +261,20 @@ func TestDashHandler_KPITimeSeriesPartialIsExplicitlyOptIn(t *testing.T) {
 	require.True(t, partialEnvelope.Data.Series["K1"][0].Partial)
 	require.Len(t, partialEnvelope.Data.PeriodProgress, 1)
 
+	service.SetNetworkProgressReader(nil)
+	unavailable := dashHDoRequest(router, http.MethodGet, basePath+"&include_partial=true")
+	require.Equal(t, http.StatusOK, unavailable.Code)
+	var unavailableEnvelope struct {
+		Data struct {
+			PeriodProgress []pmstream.PeriodProgress `json:"period_progress"`
+			ProgressState  string                    `json:"progress_state"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(unavailable.Body.Bytes(), &unavailableEnvelope))
+	require.Equal(t, "unavailable", unavailableEnvelope.Data.ProgressState)
+	require.NotNil(t, unavailableEnvelope.Data.PeriodProgress)
+	require.Empty(t, unavailableEnvelope.Data.PeriodProgress)
+
 	legacy := dashHDoRequest(router, http.MethodGet, basePath)
 	require.Equal(t, http.StatusOK, legacy.Code)
 	var legacyEnvelope struct {
