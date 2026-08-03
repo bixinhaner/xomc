@@ -1205,6 +1205,17 @@ app_wait_ready() {
   return 1
 }
 
+stop_existing_worker() {
+  local worker_cid worker_state
+  worker_cid="$("${DC[@]}" ps -q worker 2>/dev/null | head -n1)"
+  [ -n "$worker_cid" ] || return 0
+  worker_state="$(docker inspect -f '{{.State.Status}}' "$worker_cid" 2>/dev/null || echo unknown)"
+  [ "$worker_state" = running ] || return 0
+  log "停止现有 Worker，避免 App 启动期争抢数据库连接 ..."
+  "${DC[@]}" stop worker ||
+    die "现有 Worker 停止失败；为避免 App 启动期数据库争抢，已中止升级" 2
+}
+
 web_acs_dynamic_upstream_loaded() {
   local web_cid="$1" rendered
   rendered="$(docker exec "$web_cid" nginx -T 2>&1)" || return 1
@@ -1286,6 +1297,7 @@ if [ "$ACS_HA_EXISTING" = 1 ]; then
     die "ACS 双实例在 DNS 刷新后未全部就绪，已中止其余业务更新" 2
   fi
 
+  stop_existing_worker
   if ! app_wait_ready; then
     die "App ${APP_START_TIMEOUT}s 内未就绪；Worker/Web 尚未启动，请根据上方 App 日志排查数据库超时或资源不足" 4
   fi
