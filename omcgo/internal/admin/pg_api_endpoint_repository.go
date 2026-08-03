@@ -235,13 +235,6 @@ func (r *PgApiEndpointRepository) List(ctx context.Context, filter ApiEndpointFi
 //
 // is_auto=false（UI 手工新建）的行同样不被覆盖（WHERE 限定）。
 func (r *PgApiEndpointRepository) Upsert(ctx context.Context, path, method, name, description, apiGroup string) (created bool, err error) {
-	// Check existence first
-	checkSQL := `SELECT COUNT(*) FROM api_endpoints WHERE path = $1 AND method = $2`
-	var count int
-	if err := r.pool.QueryRow(ctx, checkSQL, path, method).Scan(&count); err != nil {
-		return false, fmt.Errorf("check api_endpoint existence: %w", err)
-	}
-
 	upsertSQL := `
 INSERT INTO api_endpoints (path, method, name, description, api_group, is_auto)
 VALUES ($1, $2, $3, $4, $5, TRUE)
@@ -254,13 +247,16 @@ DO UPDATE SET
 	END,
     api_group = CASE WHEN api_endpoints.is_user_modified THEN api_endpoints.api_group ELSE EXCLUDED.api_group END,
     updated_at = NOW()
-WHERE api_endpoints.is_auto = TRUE`
+WHERE api_endpoints.is_auto = TRUE
+RETURNING xmax = 0`
 
-	_, err = r.pool.Exec(ctx, upsertSQL, path, method, name, description, apiGroup)
-	if err != nil {
+	if err := r.pool.QueryRow(ctx, upsertSQL, path, method, name, description, apiGroup).Scan(&created); err != nil {
+		if err == pgx.ErrNoRows {
+			return false, nil
+		}
 		return false, fmt.Errorf("upsert api_endpoint: %w", err)
 	}
-	return count == 0, nil
+	return created, nil
 }
 
 // GetGroups returns a distinct sorted list of api_group values.
