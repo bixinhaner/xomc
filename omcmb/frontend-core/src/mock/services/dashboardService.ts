@@ -32,7 +32,7 @@ const MOCK_KPI_LAYOUTS: Record<string, KPILayoutPanel[]> = {
     { title: 'dashboard.panel.mobility', metrics: ['K900010017', 'K900010022', 'K900010021', 'K900010026'], x: 6, y: 16, w: 6, h: 8, chartType: 'line' },
   ],
   nr: [
-    { title: 'dashboard.panel.traffic', metrics: ['KGNB0511', 'KGNB0510', 'KGNB0517', 'KGNB0516', 'C010070004'], x: 0, y: 0, w: 6, h: 8, chartType: 'line' },
+    { title: 'dashboard.panel.traffic', metrics: ['KGNB0511', 'KGNB0510', 'KGNB0517', 'KGNB0516'], x: 0, y: 0, w: 6, h: 8, chartType: 'line' },
     { title: 'dashboard.panel.utilization', metrics: ['KGNB0506', 'KGNB0505'], x: 6, y: 0, w: 6, h: 8, chartType: 'line' },
   ],
   gsm: [
@@ -70,7 +70,6 @@ const KPI_DEF_TUPLES: Record<string, KpiDefTuple[]> = {
     ['KGNB0510', 'KGNB0510', 'PDCP上行业务字节数', 'MByte', 'traffic', false, true],
     ['KGNB0517', 'KGNB0517', '下行用户平均速率', 'Mbps', 'traffic', false, true],
     ['KGNB0516', 'KGNB0516', '上行用户平均速率', 'Mbps', 'traffic', false, true],
-    ['C010070004', 'C010070004', 'RRC连接平均数', 'number', 'traffic', false, true],
     ['KGNB0506', 'KGNB0506', '下行PRB平均利用率', '%', 'utilization', false, true],
     ['KGNB0505', 'KGNB0505', '上行PRB平均利用率', '%', 'utilization', false, true],
   ],
