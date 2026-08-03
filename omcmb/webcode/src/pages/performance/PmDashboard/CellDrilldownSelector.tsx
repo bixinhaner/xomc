@@ -4,8 +4,9 @@
  * 语义：
  *   - 每台设备一个折叠面板，展开后列出该设备实际出现过的「小区+PLMN」（来自列小区接口）。
  *   - 默认全勾 = 该设备全部小区（= 不过滤，向后兼容）。
+ *     #241 后 5G 默认只勾 Type=gNB 与 Type=Cell+PLMNID；用户仍可手动全选查全部 job。
  *   - value 是 Record<deviceSn, objectLdn[]>：承载用户在某设备下的显式勾选。
- *     某设备缺席 = 该设备未动过（默认全选，不过滤）。
+ *     某设备缺席 = 该设备未动过（使用共享默认勾选规则）。
  *   - label 直接显示原始 object_ldn，避免格式化后 CU/DU/NBRCID 等字段丢失导致重名。
  *
  * 输出最终白名单走 cellDrilldownUtils.getEffectiveLdns（拍平+去重，全选设备不贡献过滤项）。
@@ -15,11 +16,12 @@
 import { useIntl } from 'react-intl';
 import { Alert, Checkbox, Collapse, Empty, Space, Spin, Tag, Typography } from 'antd';
 import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
-import type { CellSelection } from './cellDrilldownUtils';
+import { getNrRecommendedDefaultSelectedObjectLdns, type CellSelection } from './cellDrilldownUtils';
 
 interface CellDrilldownSelectorProps {
   deviceSns: string[];
   technology?: string;
+  useNrRecommendedDefault?: boolean;
   value: CellSelection;
   onChange: (next: CellSelection) => void;
 }
@@ -27,6 +29,7 @@ interface CellDrilldownSelectorProps {
 export default function CellDrilldownSelector({
   deviceSns,
   technology,
+  useNrRecommendedDefault = false,
   value,
   onChange,
 }: CellDrilldownSelectorProps) {
@@ -47,15 +50,22 @@ export default function CellDrilldownSelector({
     const objects = byDevice[sn] ?? [];
     const allLdns = objects.map((o) => o.objectLdn);
     const sel = value[sn];
-    // sel===undefined → 默认全选；否则用显式数组。
-    const checkedLdns = sel ?? allLdns;
+    // sel===undefined → 默认全选；#241 指定入口的 5G 建议默认态使用推荐子集。
+    const checkedLdns = sel ?? (
+      useNrRecommendedDefault ? getNrRecommendedDefaultSelectedObjectLdns(objects) : allLdns
+    );
     const allChecked = allLdns.length > 0 && checkedLdns.length >= allLdns.length;
     const indeterminate = checkedLdns.length > 0 && !allChecked;
 
+    const allSummary = intl.formatMessage({
+      id: useNrRecommendedDefault ? 'perf.drilldown.headerAllObjects' : 'perf.drilldown.headerAll',
+    });
     const summary =
-      sel === undefined || sel.length === 0 || sel.length >= allLdns.length
-        ? intl.formatMessage({ id: 'perf.drilldown.headerAll' })
-        : intl.formatMessage({ id: 'perf.drilldown.headerSubset' }, { count: sel.length });
+      checkedLdns.length === 0 || checkedLdns.length >= allLdns.length
+        ? allSummary
+        : intl.formatMessage({
+          id: useNrRecommendedDefault ? 'perf.drilldown.headerSubsetObjects' : 'perf.drilldown.headerSubset',
+        }, { count: checkedLdns.length });
 
     const body =
       isLoading && objects.length === 0 ? (
@@ -93,7 +103,7 @@ export default function CellDrilldownSelector({
       label: (
         <Space>
           <Typography.Text>{sn}</Typography.Text>
-          <Tag color={summary === intl.formatMessage({ id: 'perf.drilldown.headerAll' }) ? 'default' : 'blue'}>
+          <Tag color={summary === allSummary ? 'default' : 'blue'}>
             {summary}
           </Tag>
         </Space>
@@ -104,7 +114,13 @@ export default function CellDrilldownSelector({
 
   return (
     <Space orientation="vertical" size="small" style={{ width: '100%' }}>
-      <Alert type="info" showIcon title={intl.formatMessage({ id: 'perf.drilldown.hint' })} />
+      <Alert
+        type="info"
+        showIcon
+        title={intl.formatMessage({
+          id: useNrRecommendedDefault ? 'perf.drilldown.recommendedHint' : 'perf.drilldown.hint',
+        })}
+      />
       <Collapse items={items} />
     </Space>
   );
