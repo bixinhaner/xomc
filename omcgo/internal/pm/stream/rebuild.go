@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -1254,27 +1255,29 @@ func (r *Rebuilder) replaySources(ctx context.Context, key WindowKey, lock *Lock
 	// Synthetic device-pipeline hours originate directly from normalized raw
 	// PM events. Ordinary rule hours originate from stable device-hour rollups.
 	if rebuildUsesRawSources(key, snapshot) {
-		payloads, err := r.recovery.outbox.ListPayloadsForPeriod(ctx, key.Start, key.End)
-		if err != nil {
-			return err
-		}
 		matched := false
-		for _, payload := range payloads {
-			contributions, err := r.recovery.matcher.MatchGranularity(
-				payload, snapshot, GranularityHourly,
-			)
-			if err != nil {
-				return err
-			}
-			for _, contribution := range contributions {
-				if !sameWindowKey(contribution.Key, key) {
-					continue
-				}
-				if _, err := r.store.accumulateWithLock(ctx, contribution, lock); err != nil {
+		err := r.recovery.outbox.VisitPayloadsForPeriod(
+			ctx, key.Start, key.End,
+			func(payload event.PMAggregationNormalizedPayload) error {
+				contributions, err := r.recovery.matcher.MatchGranularity(
+					payload, snapshot, GranularityHourly,
+				)
+				if err != nil {
 					return err
 				}
-				matched = true
-			}
+				for _, contribution := range contributions {
+					if !sameWindowKey(contribution.Key, key) {
+						continue
+					}
+					if _, err := r.store.accumulateWithLock(ctx, contribution, lock); err != nil {
+						return err
+					}
+					matched = true
+				}
+				return nil
+			})
+		if err != nil {
+			return err
 		}
 		if !matched {
 			return fmt.Errorf("no durable raw PM source matched rebuild window")
