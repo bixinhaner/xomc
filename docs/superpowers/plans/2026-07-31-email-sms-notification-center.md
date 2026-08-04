@@ -23,7 +23,7 @@ Playwright。
 | 3 | 已完成 | `2147c4133`、`6a3e8371b` |
 | 4 | 已完成 | `586a90099` |
 | 5 | 已完成 | `da50a3a63` |
-| 6 | 进行中 | 标准消费者及独立主库/TSDB/NATS E2E 已完成（`95dc3d054`、`3e1d4f1d1`）；Shadow、进程级故障和容量验收待执行 |
+| 6 | 进行中 | Shadow、canonical、北向真实报文及 NATS 进程级故障恢复已在隔离环境通过；现场 2 倍峰值容量和 Shadow 回退演练仍待执行，见[本地验证记录](../reviews/2026-08-04-email-sms-milestone-a-local-validation.md) |
 | 7–14 | 未开始 | 里程碑 A 通过前不得进入 |
 
 下文保留原始 RED/GREEN checkbox 作为实施步骤模板；是否完成以本表、提交和验证记录共同
@@ -516,9 +516,11 @@ Expected: PASS。
 
 - [ ] **Step 6: 里程碑 A 验收**
 
-验证 NATS 中每个 `event_id` 唯一、三个 durable 独立收到事件、TSDB 中清除历史不重复、
-NATS 中断不阻塞告警事务且恢复后 Relay 补发；验证 stream bytes、最老消息和 durable lag
-满足容量门禁，且系统事件未混入受管网元生命周期。
+验证 NATS 中每个 `event_id` 唯一、所有已启用 durable 独立收到事件、TSDB 中清除历史不
+重复、NATS 中断不阻塞告警事务且恢复后 Relay 补发；历史和北向两个 durable 在本 Task
+验收；通知 Shadow durable 在通知 Inbox 建立后补齐，属于后续生产 canonical 切换门禁，
+不反向阻塞 Task 7。三者全部通过前不得在生产切 canonical。同时验证 stream bytes、最老
+消息和 durable lag 满足容量门禁，且系统事件未混入受管网元生命周期。
 
 - [ ] **Step 7: 提交**
 
