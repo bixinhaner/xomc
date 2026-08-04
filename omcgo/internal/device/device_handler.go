@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -665,21 +666,7 @@ func (h *Handler) ListGeo(c *gin.Context) {
 	filter.Keyword = c.Query("keyword")
 
 	// Parse bounds (format: minLng,maxLng,minLat,maxLat)
-	if boundsStr := c.Query("bounds"); boundsStr != "" {
-		parts := strings.Split(boundsStr, ",")
-		if len(parts) == 4 {
-			minLng, _ := strconv.ParseFloat(parts[0], 64)
-			maxLng, _ := strconv.ParseFloat(parts[1], 64)
-			minLat, _ := strconv.ParseFloat(parts[2], 64)
-			maxLat, _ := strconv.ParseFloat(parts[3], 64)
-			filter.Bounds = &GeoBounds{
-				MinLng: minLng,
-				MaxLng: maxLng,
-				MinLat: minLat,
-				MaxLat: maxLat,
-			}
-		}
-	}
+	filter.Bounds = parseGeoBounds(c.Query("bounds"))
 
 	// Parse pagination
 	filter.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -714,15 +701,61 @@ func (h *Handler) ListGeo(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	hasMore := int64(filter.Page*filter.PageSize) < total
+	hasMore, complete := geoPaginationState(filter.Page, filter.PageSize, len(devices), total)
 
 	response.OK(c, gin.H{
 		"items":            devices,
 		"total":            total,
 		"has_more":         hasMore,
-		"complete":         !hasMore,
+		"complete":         complete,
 		"coordinate_count": total,
 	})
+}
+
+func parseGeoBounds(raw string) *GeoBounds {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) != 4 {
+		return nil
+	}
+
+	values := make([]float64, 4)
+	for i, part := range parts {
+		value, err := strconv.ParseFloat(strings.TrimSpace(part), 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil
+		}
+		values[i] = value
+	}
+
+	minLng, maxLng, minLat, maxLat := values[0], values[1], values[2], values[3]
+	if minLng < -180 || maxLng > 180 || minLat < -90 || maxLat > 90 ||
+		minLng > maxLng || minLat > maxLat {
+		return nil
+	}
+
+	return &GeoBounds{
+		MinLng: minLng,
+		MaxLng: maxLng,
+		MinLat: minLat,
+		MaxLat: maxLat,
+	}
+}
+
+// geoPaginationState 区分“当前页之后没有更多数据”和“本响应包含完整集合”。
+// 后者只可能发生在第一页，且返回条数必须与查询总数一致；尾页不能被误标为完整集合。
+func geoPaginationState(page, pageSize, itemCount int, total int64) (hasMore, complete bool) {
+	if page <= 0 || pageSize <= 0 || total < 0 || itemCount < 0 {
+		return false, false
+	}
+	if total > 0 {
+		// 避免 page*pageSize 在极端输入下溢出；等价于 page*pageSize < total。
+		hasMore = int64(page) <= (total-1)/int64(pageSize)
+	}
+	complete = page == 1 && int64(itemCount) == total
+	return hasMore, complete
 }
 
 // GetGeoStats handles GET /api/v1/devices/geo/stats.

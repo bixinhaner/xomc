@@ -148,6 +148,32 @@ func TestParseGeoStatusFilter(t *testing.T) {
 	}
 }
 
+func TestParseGeoBounds(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want *GeoBounds
+	}{
+		{
+			name: "合法视口",
+			raw:  "73.5,135.1,3.8,53.6",
+			want: &GeoBounds{MinLng: 73.5, MaxLng: 135.1, MinLat: 3.8, MaxLat: 53.6},
+		},
+		{name: "空串不施加过滤", raw: "", want: nil},
+		{name: "字段数量错误", raw: "73.5,135.1,3.8", want: nil},
+		{name: "非数字不能退化为零坐标", raw: "bad,135.1,3.8,53.6", want: nil},
+		{name: "拒绝非有限数", raw: "NaN,135.1,3.8,53.6", want: nil},
+		{name: "拒绝反向经度边界", raw: "135.1,73.5,3.8,53.6", want: nil},
+		{name: "拒绝越界纬度", raw: "73.5,135.1,-91,53.6", want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, parseGeoBounds(tt.raw))
+		})
+	}
+}
+
 // Issue #490 回归：applyGeoGroupFilter 必须按 (realIDs, includeUngrouped) 四象
 // 限拼出正确的 WHERE 子句。任何一个分支漏拼或 OR/AND 错位都会导致地图统计与列表
 // 不一致。直接断言生成的 SQL 字符串里包含/不包含关键片段。

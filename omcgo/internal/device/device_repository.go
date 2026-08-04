@@ -1212,6 +1212,20 @@ func applyGeoStatusFilter(builder sq.SelectBuilder, statuses []model.DeviceStatu
 	return builder.Where(orClauses)
 }
 
+// applyGeoBoundsFilter 将地图视口范围同时应用到列表与计数查询，保证分页完整性
+// 元数据描述的是当前视口内的设备集合，而不是未过滤的全局设备集合。
+func applyGeoBoundsFilter(builder sq.SelectBuilder, bounds *GeoBounds) sq.SelectBuilder {
+	if bounds == nil {
+		return builder
+	}
+
+	return builder.
+		Where(sq.GtOrEq{"d.longitude": bounds.MinLng}).
+		Where(sq.LtOrEq{"d.longitude": bounds.MaxLng}).
+		Where(sq.GtOrEq{"d.latitude": bounds.MinLat}).
+		Where(sq.LtOrEq{"d.latitude": bounds.MaxLat})
+}
+
 // ListGeo returns devices with geographic coordinates for map display.
 func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
 	// T-0162: SELECT 改用 lifecycle_state + is_online，scan 后派生 Status 给老
@@ -1236,6 +1250,7 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	builder = applyGeoGroupFilter(builder, filter.GroupIDs, filter.IncludeUngrouped)
 	// T-0162: filter.Status 翻译到 lifecycle + is_online（与 GetGeoStats 共享 applyGeoStatusFilter）。
 	builder = applyGeoStatusFilter(builder, filter.Status)
+	builder = applyGeoBoundsFilter(builder, filter.Bounds)
 	if filter.Keyword != "" {
 		// GIS 地图搜索字段（6 个）：SN / 名称 / IP / MAC / PCI / 设备名称
 		// 注意：d.ip_address 是 INET 类型，需要用 host() 转为 TEXT 后才能 ILIKE
@@ -1275,6 +1290,7 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	countBuilder = applyGeoGroupFilter(countBuilder, filter.GroupIDs, filter.IncludeUngrouped)
 	// T-0162: countBuilder 同样翻译 filter.Status
 	countBuilder = applyGeoStatusFilter(countBuilder, filter.Status)
+	countBuilder = applyGeoBoundsFilter(countBuilder, filter.Bounds)
 	if filter.Keyword != "" {
 		// GIS 地图搜索字段（6 个）：SN / 名称 / IP / MAC / PCI / 设备名称
 		// 注意：d.ip_address 是 INET 类型，需要用 host() 转为 TEXT 后才能 ILIKE

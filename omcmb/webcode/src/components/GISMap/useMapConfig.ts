@@ -392,7 +392,9 @@ export function useMapConfig() {
 
     if (!globalTileCheckPromise) {
       globalTileCheckPromise = checkTileAvailability(metadata).then((available) => {
-        globalTilesAvailable = available;
+        // 成功结果可跨组件复用；失败可能只是瞬时超时或部署切换，不能缓存到
+        // 整个前端会话，否则离开并重新进入 GIS 页面也不会再次探测。
+        globalTilesAvailable = available ? true : null;
         return available;
       }).finally(() => {
         globalTileCheckPromise = null;
