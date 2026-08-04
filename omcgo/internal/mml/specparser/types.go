@@ -41,6 +41,10 @@ type SpecGroup struct {
 	// 71 条互不相同（spec §R-2.4 唯一性禁令）。
 	CommandZhName string
 
+	// CommandEnName 是命令对象英文名。规范源暂未稳定提供时可为空；SQL 生成器会从
+	// LogicalCode 派生可读英文兜底，禁止继续把 CommandZhName 写入 en-US。
+	CommandEnName string
+
 	// HasInstance true 表示 GroupCode 含 {i} 占位符 → 候选 ADD/RMV 派生
 	// （是否真生成 ADD/RMV 还需叠加 Blacklist 判断）。
 	HasInstance bool
@@ -167,6 +171,7 @@ type SpecCommand struct {
 	CommandCode   string   // "<OP> <logical_code>"，如 "LST X2_IP_ADDR_MAP"
 	LogicalCode   string   // 从 group_code 派生，去前缀+去{i}+大写下划线
 	CommandZhName string   // 来源 SpecGroup.CommandZhName
+	CommandEnName string   // 来源 SpecGroup.CommandEnName；为空时由 LogicalCode 派生英文兜底
 	TargetPaths   []string // LST=全 path; MOD=仅 RW path; ADD/RMV=[object_name]
 	RPCMethod     string   // GetParameterValues / SetParameterValues / AddObject / DeleteObject
 	TargetObject  string   // ADD/RMV 用：group_code 去 "{i}.*" 后的父对象路径

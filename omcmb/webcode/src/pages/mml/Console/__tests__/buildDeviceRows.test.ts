@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeviceRows, buildRawExecutePayload, hasPlanRows, mapResultItemToRow } from '../adapters';
+import {
+  buildDeviceRows,
+  buildRawExecutePayload,
+  hasPlanRows,
+  mapResultItemToRow,
+  PARTIAL_PATH_FAILED_FALLBACK,
+  PATH_FAILED_CELL,
+  rawCommandName,
+} from '../adapters';
 import type { ResultColumn } from '../types';
 import type { DeviceTaskResultItem } from '@core/types/mml';
 
@@ -50,9 +58,16 @@ describe('buildDeviceRows (逐 PATH 合并)', () => {
     expect(payload.command_name).toBe('dxpTest');
   });
 
+  it('裸路径命名无语言上下文时使用操作码兜底，不硬编码中文操作词', () => {
+    expect(rawCommandName('LST', [SW])).toBe('LST SoftwareVersion');
+    expect(rawCommandName('LST', [SW], undefined, 'Query')).toBe('Query SoftwareVersion');
+    expect(rawCommandName('LST', [SW, HW], undefined, 'Query', ' and 2 items')).toBe('Query SoftwareVersion and 2 items');
+    expect(rawCommandName('LST', [SW, HW])).not.toMatch(/[\u4e00-\u9fff]/);
+  });
+
   // 注：成功 path 的读回值由 parseMmlDeviceTaskResult(GPV) 解析（需 DOM，已在 BUG-3 真机验证）；
   // 本单测聚焦 buildDeviceRows 的「合并」新逻辑：分组 / 失败标记 / 行状态 / pathTasks。
-  it('单设备多 path → 合并为一行，失败 path 标「✗ 失败」、行状态 failed、pathTasks 逐 path', () => {
+  it('单设备多 path → 合并为一行，失败 path 标内部 sentinel、行状态 failed、pathTasks 逐 path', () => {
     const items: DeviceTaskResultItem[] = [
       item({
         success: true,
@@ -64,9 +79,9 @@ describe('buildDeviceRows (逐 PATH 合并)', () => {
     const rows = buildDeviceRows(items, columns, true);
     expect(rows).toHaveLength(1);
     const r = rows[0];
-    expect(r.cells[HW]).toBe('✗ 失败');
+    expect(r.cells[HW]).toBe(PATH_FAILED_CELL);
     expect(r.status).toBe('failed');
-    expect(r.faultCode).toBe('部分 path 失败');
+    expect(r.faultCode).toBe(PARTIAL_PATH_FAILED_FALLBACK);
     expect(r.pathTasks).toHaveLength(2);
     expect(r.pathTasks?.map((p) => p.status)).toEqual(['success', 'failed']);
     expect(r.pathTasks?.[0].path).toBe(SW);
@@ -81,7 +96,7 @@ describe('buildDeviceRows (逐 PATH 合并)', () => {
     const rows = buildDeviceRows(items, columns, true);
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe('success');
-    expect(rows[0].cells[HW]).not.toBe('✗ 失败');
+    expect(rows[0].cells[HW]).not.toBe(PATH_FAILED_CELL);
   });
 
   it('整体下发（每设备 1 条结果）→ 退化为每设备一行', () => {
