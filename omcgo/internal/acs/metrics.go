@@ -6,6 +6,7 @@ import "github.com/prometheus/client_golang/prometheus"
 type ACSMetrics struct {
 	ActiveSessions         prometheus.Gauge
 	GlobalActiveSessions   prometheus.Gauge
+	LocalTrackedSessions   prometheus.Gauge
 	InformTotal            *prometheus.CounterVec
 	RPCDuration            *prometheus.HistogramVec
 	RPCErrorsTotal         *prometheus.CounterVec
@@ -26,11 +27,15 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 	m := &ACSMetrics{
 		ActiveSessions: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "acs_active_sessions",
-			Help: "Current number of TR069 sessions tracked by this ACS process",
+			Help: "Deprecated compatibility alias for acs_global_active_sessions; current number of globally admitted TR069 sessions",
 		}),
 		GlobalActiveSessions: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "acs_global_active_sessions",
 			Help: "Current number of globally admitted TR069 sessions from the shared admission controller",
+		}),
+		LocalTrackedSessions: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "acs_local_tracked_sessions",
+			Help: "Current number of session IDs retained by this ACS process for up to five minutes; not real-time concurrency",
 		}),
 		InformTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "acs_inform_total",
@@ -92,6 +97,7 @@ func NewACSMetrics(reg prometheus.Registerer) *ACSMetrics {
 	reg.MustRegister(
 		m.ActiveSessions,
 		m.GlobalActiveSessions,
+		m.LocalTrackedSessions,
 		m.InformTotal,
 		m.RPCDuration,
 		m.RPCErrorsTotal,

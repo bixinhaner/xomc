@@ -911,7 +911,7 @@ func TestCompleteSession_ReleasesResources(t *testing.T) {
 
 // issue #65（Option B）契约变更：completeSession(nil) 不再释放准入槽位 —— 没有
 // sessionID 无法配对释放，残留槽位由准入 sorted set 的 TTL 过期分自愈回收。这里验证
-// nil session 既不能释放 admission，也不能递减无法配对的 ActiveSessions。
+// nil session 既不能释放 admission，也不能递减无法配对的本地跟踪数。
 func TestCompleteSession_NilSession_DoesNotReleaseAdmissionSlot(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewACSMetrics(reg)
@@ -929,7 +929,7 @@ func TestCompleteSession_NilSession_DoesNotReleaseAdmissionSlot(t *testing.T) {
 
 	// 槽位不被 nil-session 释放（由 TTL 回收）。
 	assert.Equal(t, int64(1), h.admission.Current(context.Background()))
-	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.ActiveSessions))
+	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.LocalTrackedSessions))
 }
 
 func TestCompleteSessionOnlyDecrementsSessionsTrackedByThisProcess(t *testing.T) {
@@ -940,34 +940,44 @@ func TestCompleteSessionOnlyDecrementsSessionsTrackedByThisProcess(t *testing.T)
 		metrics:      metrics,
 		logger:       zap.NewNop(),
 	}
+	metrics.ActiveSessions.Set(41)
+	metrics.GlobalActiveSessions.Set(42)
 
 	h.trackActiveSession("local-session")
-	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.ActiveSessions))
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.LocalTrackedSessions))
+	assert.Equal(t, float64(41), testutil.ToFloat64(metrics.ActiveSessions))
+	assert.Equal(t, float64(42), testutil.ToFloat64(metrics.GlobalActiveSessions))
 
 	// 进程重启前遗留的共享会话不在本地集合中，不得把新进程 gauge 减成负数。
 	h.completeSession(context.Background(), &Session{ID: "old-process-session", StartedAt: time.Now()})
-	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.ActiveSessions))
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.LocalTrackedSessions))
 
 	h.completeSession(context.Background(), &Session{ID: "local-session", StartedAt: time.Now()})
-	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.ActiveSessions))
+	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.LocalTrackedSessions))
 
 	// 重复完成也只能递减一次。
 	h.completeSession(context.Background(), &Session{ID: "local-session", StartedAt: time.Now()})
-	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.ActiveSessions))
+	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.LocalTrackedSessions))
+	assert.Equal(t, float64(41), testutil.ToFloat64(metrics.ActiveSessions))
+	assert.Equal(t, float64(42), testutil.ToFloat64(metrics.GlobalActiveSessions))
 }
 
 func TestReapLocalActiveSessionsRemovesCrossInstanceOrphans(t *testing.T) {
 	metrics := NewACSMetrics(prometheus.NewRegistry())
 	h := &Handler{metrics: metrics, logger: zap.NewNop()}
 	now := time.Now()
+	metrics.ActiveSessions.Set(41)
+	metrics.GlobalActiveSessions.Set(42)
 
 	h.trackActiveSessionAt("expired-on-another-instance", now.Add(-6*time.Minute))
 	h.trackActiveSessionAt("still-active", now.Add(-time.Minute))
-	require.Equal(t, float64(2), testutil.ToFloat64(metrics.ActiveSessions))
+	require.Equal(t, float64(2), testutil.ToFloat64(metrics.LocalTrackedSessions))
 
 	h.reapLocalActiveSessions(now, 5*time.Minute)
 
-	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.ActiveSessions))
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.LocalTrackedSessions))
+	assert.Equal(t, float64(41), testutil.ToFloat64(metrics.ActiveSessions))
+	assert.Equal(t, float64(42), testutil.ToFloat64(metrics.GlobalActiveSessions))
 	_, expiredStillTracked := h.localActiveSessions.Load("expired-on-another-instance")
 	_, activeStillTracked := h.localActiveSessions.Load("still-active")
 	assert.False(t, expiredStillTracked)
@@ -980,10 +990,38 @@ func TestRefreshGlobalActiveSessionsUsesAdmissionSourceOfTruth(t *testing.T) {
 	h := &Handler{metrics: metrics, admission: admission, logger: zap.NewNop()}
 	require.True(t, admission.Acquire(context.Background(), "one"))
 	require.True(t, admission.Acquire(context.Background(), "two"))
+	metrics.ActiveSessions.Set(41)
+	metrics.GlobalActiveSessions.Set(42)
+	metrics.LocalTrackedSessions.Set(43)
 
 	h.refreshGlobalActiveSessions(context.Background())
 
+	assert.Equal(t, float64(2), testutil.ToFloat64(metrics.ActiveSessions))
 	assert.Equal(t, float64(2), testutil.ToFloat64(metrics.GlobalActiveSessions))
+	assert.Equal(t, float64(43), testutil.ToFloat64(metrics.LocalTrackedSessions))
+}
+
+type countingAdmissionController struct {
+	currentCalls int
+}
+
+func (c *countingAdmissionController) Acquire(context.Context, string) bool { return true }
+func (c *countingAdmissionController) Release(context.Context, string)      {}
+func (c *countingAdmissionController) Current(context.Context) int64 {
+	c.currentCalls++
+	return int64(c.currentCalls)
+}
+
+func TestRefreshGlobalActiveSessionsSamplesAdmissionOnce(t *testing.T) {
+	metrics := NewACSMetrics(prometheus.NewRegistry())
+	admission := &countingAdmissionController{}
+	h := &Handler{metrics: metrics, admission: admission, logger: zap.NewNop()}
+
+	h.refreshGlobalActiveSessions(context.Background())
+
+	assert.Equal(t, 1, admission.currentCalls)
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.ActiveSessions))
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.GlobalActiveSessions))
 }
 
 // ---------------------------------------------------------------------------
