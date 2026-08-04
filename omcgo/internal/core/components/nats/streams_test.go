@@ -57,6 +57,66 @@ func TestDefaultStreams_PMAggregationTieredRetention(t *testing.T) {
 	}
 }
 
+func TestDefaultStreams_DomainAlarmSupportsIndependentDurableConsumers(t *testing.T) {
+	streams := DefaultStreams()
+
+	var domainAlarm *StreamDef
+	for i := range streams {
+		if streams[i].Name == "DOMAIN_ALARM" {
+			domainAlarm = &streams[i]
+			break
+		}
+	}
+	if domainAlarm == nil {
+		t.Fatal("DOMAIN_ALARM stream is not registered")
+	}
+
+	if domainAlarm.Retention != gonats.LimitsPolicy {
+		t.Fatalf("DOMAIN_ALARM retention = %v, want LimitsPolicy", domainAlarm.Retention)
+	}
+	if !domainAlarm.AllowDirect {
+		t.Fatal("DOMAIN_ALARM must allow direct lookup for operational diagnosis")
+	}
+	if domainAlarm.MaxAge != 7*24*time.Hour {
+		t.Fatalf("DOMAIN_ALARM max age = %v, want 7 days", domainAlarm.MaxAge)
+	}
+	if domainAlarm.MaxBytes != alarmLifecycleStreamMaxBytes {
+		t.Fatalf("DOMAIN_ALARM max bytes = %d, want %d", domainAlarm.MaxBytes, alarmLifecycleStreamMaxBytes)
+	}
+	if domainAlarm.MaxBytes <= 0 {
+		t.Fatal("DOMAIN_ALARM must have a hard byte limit")
+	}
+	if domainAlarm.Compression != gonats.S2Compression {
+		t.Fatalf("DOMAIN_ALARM compression = %v, want S2", domainAlarm.Compression)
+	}
+	if !subjectCovered("domain.alarm.lifecycle.raised", []StreamDef{*domainAlarm}) {
+		t.Fatalf("DOMAIN_ALARM subjects = %v, want domain.alarm.> coverage", domainAlarm.Subjects)
+	}
+}
+
+func TestDefaultStreams_DomainAlarmDoesNotOverlapLegacyAlarm(t *testing.T) {
+	streams := DefaultStreams()
+	var legacy, domain *StreamDef
+	for i := range streams {
+		switch streams[i].Name {
+		case "ALARM":
+			legacy = &streams[i]
+		case "DOMAIN_ALARM":
+			domain = &streams[i]
+		}
+	}
+	if legacy == nil || domain == nil {
+		t.Fatalf("required streams missing: ALARM=%v DOMAIN_ALARM=%v", legacy != nil, domain != nil)
+	}
+
+	if subjectCovered("domain.alarm.lifecycle.raised", []StreamDef{*legacy}) {
+		t.Fatalf("legacy ALARM subjects %v overlap the canonical domain alarm namespace", legacy.Subjects)
+	}
+	if subjectCovered("alarm.raised", []StreamDef{*domain}) {
+		t.Fatalf("DOMAIN_ALARM subjects %v overlap the legacy alarm namespace", domain.Subjects)
+	}
+}
+
 func subjectCovered(subject string, streams []StreamDef) bool {
 	for _, s := range streams {
 		for _, p := range s.Subjects {

@@ -220,6 +220,14 @@ const (
 //
 // 告警生命周期事件，由告警引擎发布。
 const (
+	// SubjectDomainAlarmLifecycle* 是持久化后由告警 Outbox Relay 发布的标准事实。
+	// 与下方 legacy alarm.* 隔离，供历史、北向和通知 durable 独立消费。
+	SubjectDomainAlarmLifecycleRaised         = "domain.alarm.lifecycle.raised"
+	SubjectDomainAlarmLifecycleUpdated        = "domain.alarm.lifecycle.updated"
+	SubjectDomainAlarmLifecycleAcknowledged   = "domain.alarm.lifecycle.acknowledged"
+	SubjectDomainAlarmLifecycleUnacknowledged = "domain.alarm.lifecycle.unacknowledged"
+	SubjectDomainAlarmLifecycleCleared        = "domain.alarm.lifecycle.cleared"
+
 	// SubjectAlarmRaised 是新告警产生时发布。
 	// 发布者：alarm.AlarmEngine，订阅者：北向接口模块（告警推送）
 	SubjectAlarmRaised = "alarm.raised"

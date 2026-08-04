@@ -32,7 +32,10 @@ type StreamDef struct {
 	Compression nats.StoreCompression
 }
 
-const pmAggregationStreamMaxBytes int64 = 10 << 30
+const (
+	pmAggregationStreamMaxBytes  int64 = 10 << 30
+	alarmLifecycleStreamMaxBytes int64 = 10 << 30
+)
 
 // DefaultStreams 列出所有 JetStream 流。每条流以一个点分前缀吸纳一类事件，
 // 最大存活 72 小时。扩展新事件前缀时，务必在此注册对应 Stream，否则发布
@@ -93,6 +96,15 @@ func DefaultStreams() []StreamDef {
 		},
 		{Name: "MR", Subjects: []string{"mr.>"}, Retention: nats.WorkQueuePolicy, AllowDirect: true},
 		{Name: "ALARM", Subjects: []string{"alarm.>"}, Retention: nats.WorkQueuePolicy},
+		{
+			Name:        "DOMAIN_ALARM",
+			Subjects:    []string{"domain.alarm.>"},
+			Retention:   nats.LimitsPolicy,
+			AllowDirect: true,
+			MaxAge:      7 * 24 * time.Hour,
+			MaxBytes:    alarmLifecycleStreamMaxBytes,
+			Compression: nats.S2Compression,
+		},
 		{Name: "OSS", Subjects: []string{"oss.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "PROVISION", Subjects: []string{"provision.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "DATAMODEL", Subjects: []string{"datamodel.>"}, Retention: nats.WorkQueuePolicy},
