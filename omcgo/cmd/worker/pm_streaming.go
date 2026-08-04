@@ -308,6 +308,7 @@ func startPMExportOnly(
 		ctx, jobRepo, asyncMetrics, 30*time.Second, &queueDepthSamplerLogger{logger: logger},
 	)
 	cronStateRepo := asyncjob.NewPgCronStateRepository(w.PgPool)
+	startPMRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
 	startStationLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
 	startLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
 	logger.Info("PM KPI export worker ready", zap.String("bucket", exportBucket))
