@@ -334,6 +334,240 @@ func TestBuildProgressQueryResultSynthesizesCurrentWeekFromOpenDaily(t *testing.
 	}
 }
 
+func TestBuildProgressQueryResultDropsNonNaturalWeeklyDuplicate(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	monday := time.Date(2026, 8, 3, 0, 0, 0, 0, location)
+	tuesdayBusinessDay := time.Date(2026, 8, 4, 8, 0, 0, 0, location)
+	versionEffective := time.Date(2026, 8, 3, 17, 0, 0, 0, location)
+	version := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		EffectiveFrom: versionEffective,
+		Granularities: []Granularity{
+			GranularityHourly, GranularityDaily, GranularityWeekly,
+		},
+		Metrics: map[string]MetricRule{
+			"C1": {MetricID: "C1", MetricPath: "C1", MetricType: "counter"},
+		},
+		Counters: map[string]CounterRule{
+			"C1": {MetricPath: "C1", Aggregation: AggregationSum},
+		},
+	}
+	definition := ContributionValue{
+		Dimension: DimensionNetwork, DimensionKey: "network",
+		MetricPath: "C1", MetricType: "counter", Operation: AggregationSum,
+	}
+	dailyKey := WindowKey{
+		TaskID: version.TaskID, TaskVersionID: version.VersionID,
+		EntityKey: "network", Granularity: GranularityDaily,
+		Start: tuesdayBusinessDay.UTC(),
+		End:   tuesdayBusinessDay.AddDate(0, 0, 1).UTC(),
+	}
+	nonNaturalWeeklyKey := WindowKey{
+		TaskID: version.TaskID, TaskVersionID: version.VersionID,
+		EntityKey: "network", Granularity: GranularityWeekly,
+		Start: monday.Add(8 * time.Hour).UTC(),
+		End:   monday.AddDate(0, 0, 7).Add(8 * time.Hour).UTC(),
+	}
+	candidates := []progressCandidate{
+		{
+			key: dailyKey, revision: 2, status: "open",
+			received: 1, expected: 24,
+		},
+		{
+			key: nonNaturalWeeklyKey, revision: 2, status: "open",
+			received: 1, expected: 7,
+		},
+	}
+	states := map[WindowKey]WindowState{
+		dailyKey: {
+			ExpectedSlots: 24, ReceivedSlots: 1,
+			Accumulators: []Accumulator{{
+				Definition: definition, Sum: 10, Count: 1, Min: 10, Max: 10,
+			}},
+		},
+		nonNaturalWeeklyKey: {
+			ExpectedSlots: 7, ReceivedSlots: 1,
+			Accumulators: []Accumulator{{
+				Definition: definition, Sum: 90, Count: 24, Min: 1, Max: 8,
+			}},
+		},
+	}
+
+	result, err := buildProgressQueryResult(
+		candidates,
+		states,
+		BuildTaskSnapshot([]*TaskVersionSnapshot{version}),
+		location,
+	)
+	if err != nil {
+		t.Fatalf("buildProgressQueryResult returned error: %v", err)
+	}
+
+	var weeklyPeriods []PeriodProgress
+	for _, period := range result.Periods {
+		if period.Granularity == GranularityWeekly {
+			weeklyPeriods = append(weeklyPeriods, period)
+		}
+	}
+	if len(weeklyPeriods) != 1 {
+		t.Fatalf("weekly period count = %d, want 1: %+v", len(weeklyPeriods), weeklyPeriods)
+	}
+	weekly := weeklyPeriods[0]
+	if !weekly.WindowStart.Equal(monday.UTC()) ||
+		!weekly.WindowEnd.Equal(monday.AddDate(0, 0, 7).UTC()) {
+		t.Fatalf("weekly period used non-natural window: %+v", weekly)
+	}
+	if weekly.ReceivedSlots != 1 ||
+		weekly.ExpectedSlots != 168 ||
+		weekly.VersionExpectedSlots != 151 ||
+		weekly.CoverageRatio != float64(1)/168 {
+		t.Fatalf("unexpected weekly progress coverage: %+v", weekly)
+	}
+}
+
+func TestBuildProgressQueryResultReportsWeeklyNaturalHourlyCoverage(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	monday := time.Date(2026, 8, 3, 0, 0, 0, 0, location)
+	version := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		EffectiveFrom: monday.Add(2 * time.Hour),
+		Granularities: []Granularity{
+			GranularityHourly, GranularityDaily, GranularityWeekly,
+		},
+		Metrics: map[string]MetricRule{
+			"C1": {MetricID: "C1", MetricPath: "C1", MetricType: "counter"},
+		},
+		Counters: map[string]CounterRule{
+			"C1": {MetricPath: "C1", Aggregation: AggregationSum},
+		},
+	}
+	key := WindowKey{
+		TaskID: version.TaskID, TaskVersionID: version.VersionID,
+		EntityKey: "network", Granularity: GranularityWeekly,
+		Start: monday.UTC(), End: monday.AddDate(0, 0, 7).UTC(),
+	}
+	candidate := progressCandidate{
+		key: key, revision: 1, status: "open",
+		received: 1, expected: 7,
+	}
+	state := WindowState{
+		ExpectedSlots: 7, ReceivedSlots: 1,
+		Accumulators: []Accumulator{{
+			Definition: ContributionValue{
+				Dimension: DimensionNetwork, DimensionKey: "network",
+				MetricPath: "C1", MetricType: "counter", Operation: AggregationSum,
+			},
+			Sum: 10, Count: 1, Min: 10, Max: 10,
+		}},
+	}
+
+	result, err := buildProgressQueryResult(
+		[]progressCandidate{candidate},
+		map[WindowKey]WindowState{key: state},
+		BuildTaskSnapshot([]*TaskVersionSnapshot{version}),
+		location,
+	)
+	if err != nil {
+		t.Fatalf("buildProgressQueryResult returned error: %v", err)
+	}
+	if len(result.Periods) != 1 {
+		t.Fatalf("periods = %d, want 1: %+v", len(result.Periods), result.Periods)
+	}
+	period := result.Periods[0]
+	if period.ExpectedSlots != 168 ||
+		period.VersionExpectedSlots != 7 ||
+		period.CoverageRatio != float64(1)/168 {
+		t.Fatalf("unexpected weekly period coverage: %+v", period)
+	}
+}
+
+func TestBuildProgressQueryResultDropsNonNaturalWeeklyDuplicateWithoutDaily(t *testing.T) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	monday := time.Date(2026, 8, 3, 0, 0, 0, 0, location)
+	version := &TaskVersionSnapshot{
+		TaskID: uuid.New(), VersionID: uuid.New(), Enabled: true,
+		EffectiveFrom: monday.Add(2 * time.Hour),
+		Granularities: []Granularity{
+			GranularityHourly, GranularityDaily, GranularityWeekly,
+		},
+		Metrics: map[string]MetricRule{
+			"C1": {MetricID: "C1", MetricPath: "C1", MetricType: "counter"},
+		},
+		Counters: map[string]CounterRule{
+			"C1": {MetricPath: "C1", Aggregation: AggregationSum},
+		},
+	}
+	definition := ContributionValue{
+		Dimension: DimensionNetwork, DimensionKey: "network",
+		MetricPath: "C1", MetricType: "counter", Operation: AggregationSum,
+	}
+	naturalKey := WindowKey{
+		TaskID: version.TaskID, TaskVersionID: version.VersionID,
+		EntityKey: "network", Granularity: GranularityWeekly,
+		Start: monday.UTC(), End: monday.AddDate(0, 0, 7).UTC(),
+	}
+	boundaryKey := WindowKey{
+		TaskID: version.TaskID, TaskVersionID: version.VersionID,
+		EntityKey: "network", Granularity: GranularityWeekly,
+		Start: monday.Add(8 * time.Hour).UTC(),
+		End:   monday.AddDate(0, 0, 7).Add(8 * time.Hour).UTC(),
+	}
+	stateFor := func(value float64) WindowState {
+		return WindowState{
+			ExpectedSlots: 7, ReceivedSlots: 1,
+			Accumulators: []Accumulator{{
+				Definition: definition, Sum: value, Count: 1, Min: value, Max: value,
+			}},
+		}
+	}
+
+	result, err := buildProgressQueryResult(
+		[]progressCandidate{
+			{key: naturalKey, revision: 1, status: "open", received: 1, expected: 7},
+			{key: boundaryKey, revision: 1, status: "open", received: 1, expected: 7},
+		},
+		map[WindowKey]WindowState{
+			naturalKey:  stateFor(10),
+			boundaryKey: stateFor(20),
+		},
+		BuildTaskSnapshot([]*TaskVersionSnapshot{version}),
+		location,
+	)
+	if err != nil {
+		t.Fatalf("buildProgressQueryResult returned error: %v", err)
+	}
+
+	var weeklyPeriods []PeriodProgress
+	for _, period := range result.Periods {
+		if period.Granularity == GranularityWeekly {
+			weeklyPeriods = append(weeklyPeriods, period)
+		}
+	}
+	if len(weeklyPeriods) != 1 {
+		t.Fatalf("weekly period count = %d, want 1: %+v", len(weeklyPeriods), weeklyPeriods)
+	}
+	weekly := weeklyPeriods[0]
+	if !weekly.WindowStart.Equal(naturalKey.Start) ||
+		!weekly.WindowEnd.Equal(naturalKey.End) {
+		t.Fatalf("weekly period used non-natural window: %+v", weekly)
+	}
+	if weekly.ReceivedSlots != 1 ||
+		weekly.ExpectedSlots != 168 ||
+		weekly.VersionExpectedSlots != 7 ||
+		weekly.CoverageRatio != float64(1)/168 {
+		t.Fatalf("unexpected weekly progress coverage: %+v", weekly)
+	}
+}
+
 func TestBuildProgressQueryResultDoesNotDoubleCountFinalizingDailyIntoWeekly(t *testing.T) {
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -509,7 +743,7 @@ func TestNaturalExpectedSlotsUsesCalendarPeriods(t *testing.T) {
 	}{
 		{"hour", WindowKey{Granularity: GranularityHourly}, 4},
 		{"day", WindowKey{Granularity: GranularityDaily}, 24},
-		{"week", WindowKey{Granularity: GranularityWeekly}, 7},
+		{"week", WindowKey{Granularity: GranularityWeekly}, 168},
 		{
 			"calendar month",
 			WindowKey{Granularity: GranularityMonthly, Start: monthStart, End: monthStart.AddDate(0, 1, 0)},

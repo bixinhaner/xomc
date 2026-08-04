@@ -48,6 +48,39 @@ function toDirectBucketKey(time: string, granularity: DashboardKPIGranularity): 
   return `${date}T${formatSystemTimeOnly(time).slice(0, 2)}`;
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function addDaysToDateKey(dateKey: string, days: number): string {
+  const parts = dateKey.split('-').map((value) => Number.parseInt(value, 10));
+  if (parts.length !== 3 || parts.some((value) => Number.isNaN(value))) {
+    return dateKey;
+  }
+  const [year, month, day] = parts;
+  const next = new Date(Date.UTC(year, month - 1, day + days));
+  return `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}`;
+}
+
+function addHoursToHourKey(hourKey: string, hours: number): string {
+  const match = hourKey.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/);
+  if (!match) return hourKey;
+  const [, year, month, day, hour] = match;
+  const next = new Date(Date.UTC(
+    Number.parseInt(year, 10),
+    Number.parseInt(month, 10) - 1,
+    Number.parseInt(day, 10),
+    Number.parseInt(hour, 10) + hours,
+  ));
+  return `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}T${pad2(next.getUTCHours())}`;
+}
+
+function bucketEndKey(bucketKey: string, granularity: KPIChartWindow): string {
+  if (granularity === 'hourly') return addHoursToHourKey(bucketKey, 1);
+  if (granularity === 'weekly') return addDaysToDateKey(bucketKey, 7);
+  return addDaysToDateKey(bucketKey, 1);
+}
+
 /**
  * 把一组指标的 current/compare 序列折算成多条 line series。
  *
@@ -73,7 +106,7 @@ export function buildSeries(
   palette: readonly string[] = KPI_METRIC_PALETTE,
   compareWindow: KPIChartWindow = 'yesterday',
   weekDateKeys: string[] = [],
-): { series: LineSeries[]; weekXData?: string[]; weekXDataFull?: string[] } {
+): { series: LineSeries[]; weekXData?: string[]; weekXDataFull?: string[]; weekXDataEndFull?: string[] } {
   if (metricKeys.length === 0) return { series: [] };
 
   const showCompare = metricKeys.length === 1;
@@ -104,11 +137,17 @@ export function buildSeries(
         unit: meta.unit,
       });
     });
-    return { series: out, weekXData: axisLabels, weekXDataFull: weekDateKeys };
+    return {
+      series: out,
+      weekXData: axisLabels,
+      weekXDataFull: weekDateKeys,
+      weekXDataEndFull: weekDateKeys.map((key) => bucketEndKey(key, compareWindow)),
+    };
   }
 
   if (compareWindow === 'last_week') {
     const weekXDataFull = weekDateKeys;
+    const weekXDataEndFull = weekDateKeys.map((key) => bucketEndKey(key, compareWindow));
     const weekXData = weekDateKeys.map((d) => d.slice(5).replace('-', '/'));
     metricKeys.forEach((metricKey, idx) => {
       const comparison = trendData?.[metricKey];
@@ -128,7 +167,7 @@ export function buildSeries(
       out.push({ name: todayName, data: currentValues, color, unit: meta.unit });
     });
 
-    return { series: out, weekXData, weekXDataFull };
+    return { series: out, weekXData, weekXDataFull, weekXDataEndFull };
   }
 
   // --- 昨日对比：按小时映射到 24 时槽（原有逻辑）---
