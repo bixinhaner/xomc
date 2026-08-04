@@ -44,6 +44,7 @@ func TestAlarmOutboxSchema_TSDBBaseline(t *testing.T) {
 	tsdbSchema := readAlarmMigrationBaseline(t, "tsdb", "000001_tsdb_schema.sql")
 	historyBody := extractCreateTableBody(t, tsdbSchema, "alarms_history")
 	require.Regexp(t, `(?i)alarm_version\s+bigint\s+default\s+1\s+not\s+null`, historyBody)
+	require.Regexp(t, `(?i)unique\s*\(\s*"?time"?\s*,\s*alarm_id\s*,\s*alarm_version\s*\)`, historyBody)
 }
 
 func readAlarmMigrationBaseline(t *testing.T, parts ...string) string {

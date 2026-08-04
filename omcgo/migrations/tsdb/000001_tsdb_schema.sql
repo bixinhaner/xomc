@@ -62,7 +62,8 @@ CREATE TABLE public.alarms_history (
     probable_cause text DEFAULT ''::text NOT NULL,
     additional_info jsonb DEFAULT '{}'::jsonb,
     alarm_version bigint DEFAULT 1 NOT NULL,
-    CONSTRAINT alarms_history_alarm_version_check CHECK ((alarm_version > 0))
+    CONSTRAINT alarms_history_alarm_version_check CHECK ((alarm_version > 0)),
+    CONSTRAINT alarms_history_time_alarm_id_alarm_version_key UNIQUE ("time", alarm_id, alarm_version)
 );
 
 -- ── mr_records（超表：time 1d chunk，compress 7d，retention 90d）──────────────────────

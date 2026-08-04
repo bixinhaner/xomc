@@ -52,6 +52,7 @@ func TestEngineLifecycle_ShadowRoutesOccurrenceChangesThroughLifecycleStore(t *t
 	}, store.updateMask)
 	require.Empty(t, store.active)
 	require.Len(t, store.history, 1, "shadow must preserve synchronous legacy history")
+	require.Equal(t, int64(5), store.history[0].Version, "shadow history identity must match cleared lifecycle version")
 }
 
 func TestEngineLifecycle_ShadowNewAutoClearWritesPairedFacts(t *testing.T) {
@@ -68,6 +69,7 @@ func TestEngineLifecycle_ShadowNewAutoClearWritesPairedFacts(t *testing.T) {
 	require.Equal(t, int64(2), alarm.Version)
 	require.Empty(t, store.active)
 	require.Len(t, store.history, 1)
+	require.Equal(t, int64(2), store.history[0].Version)
 }
 
 func TestEngineLifecycle_ShadowNewAutoAcknowledgeWritesPairedFacts(t *testing.T) {
@@ -91,6 +93,22 @@ func TestEngineLifecycle_ShadowNewAutoAcknowledgeWritesPairedFacts(t *testing.T)
 func TestEngineLifecycle_RejectsCanonicalBeforeProjectorIsReady(t *testing.T) {
 	engine := NewAlarmEngine(newLifecycleRecordingStore(), nil, nil, nil, zap.NewNop())
 	require.ErrorIs(t, engine.SetLifecycleMode(LifecycleModeCanonical), ErrCanonicalLifecycleNotReady)
+}
+
+func TestEngineLifecycle_CanonicalUsesProjectorInsteadOfSynchronousArchive(t *testing.T) {
+	store := newLifecycleRecordingStore()
+	engine := NewAlarmEngine(store, nil, nil, nil, zap.NewNop())
+	engine.SetCanonicalLifecycleReady(true)
+	require.NoError(t, engine.SetLifecycleMode(LifecycleModeCanonical))
+	alarm := lifecycleEngineAlarm()
+
+	require.NoError(t, engine.Process(context.Background(), alarm))
+	require.NoError(t, engine.Clear(context.Background(), alarm.ID))
+	require.Empty(t, store.history, "canonical history has exactly one formal writer: the projector")
+	require.Equal(t, []event.AlarmLifecycleType{
+		event.AlarmLifecycleRaised,
+		event.AlarmLifecycleCleared,
+	}, store.lifecycleCalls)
 }
 
 func lifecycleEngineAlarm() *model.Alarm {

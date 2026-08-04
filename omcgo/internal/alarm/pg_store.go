@@ -15,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/authz"
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
@@ -224,29 +225,148 @@ func (s *PgAlarmStore) ListActive(ctx context.Context, filter AlarmFilter) (*mod
 }
 
 func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
-	ensureAlarmVersion(alarm)
-	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
-	archiveUpdatedAt := historyUpdatedAt(alarm)
-	if archiveUpdatedAt.IsZero() {
-		archiveUpdatedAt = time.Now()
+	if alarm == nil {
+		return fmt.Errorf("archive alarm history: alarm is required")
 	}
-	// alarms_history 在时序库（TsPool）。
-	_, err := s.tsPool.Exec(ctx,
-		`INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, cleared_at, device_name, technology, alarm_source, event_type, network_location, explicit_cause, ack_count, acknowledged_by, ack_note, additional_info, updated_at, cleared_by, clear_note, probable_cause, alarm_version)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`,
-		time.Now(), alarm.ID, alarm.DeviceID, alarm.DeviceSN, alarm.Carrier,
-		alarm.Severity, alarm.AlarmType, alarm.AlarmIdentifier, alarm.Description,
-		alarm.Status, alarm.RaisedAt, alarm.AcknowledgedAt, alarm.ClearedAt,
-		alarm.DeviceName, alarm.Technology, alarm.AlarmSource, alarm.EventType,
-		alarm.NetworkLocation, alarm.ExplicitCause, alarm.AckCount,
-		alarm.AcknowledgedBy, alarm.AckNote, additionalJSON, archiveUpdatedAt,
-		alarm.ClearedBy, alarm.ClearNote,
-		alarm.ProbableCause, alarm.Version,
-	)
+	ensureAlarmVersion(alarm)
+	historyTime, err := alarmHistoryTime(alarm)
+	if err != nil {
+		return err
+	}
+	query, args, err := buildAlarmHistoryInsert(alarm, historyTime)
+	if err != nil {
+		return fmt.Errorf("build archive alarm history insert: %w", err)
+	}
+	_, err = s.tsPool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("insert alarms_history: %w", err)
 	}
 	return nil
+}
+
+func alarmHistoryTime(alarm *model.Alarm) (time.Time, error) {
+	if alarm == nil || alarm.ClearedAt == nil || alarm.ClearedAt.IsZero() {
+		return time.Time{}, fmt.Errorf("archive alarm history: cleared_at is required")
+	}
+	return alarm.ClearedAt.UTC(), nil
+}
+
+func buildAlarmHistoryInsert(alarm *model.Alarm, historyTime time.Time) (string, []any, error) {
+	additionalJSON, err := json.Marshal(alarm.AdditionalInfo)
+	if err != nil {
+		return "", nil, fmt.Errorf("marshal alarm history additional info: %w", err)
+	}
+	updatedAt := historyUpdatedAt(alarm)
+	if updatedAt.IsZero() {
+		updatedAt = historyTime
+	}
+	probableCause := ""
+	if alarm.ProbableCause != nil {
+		probableCause = *alarm.ProbableCause
+	}
+	return storage.Psql.Insert("alarms_history").Columns(
+		"time", "alarm_id", "device_id", "device_sn", "carrier", "severity",
+		"alarm_type", "alarm_identifier", "description", "status", "raised_at",
+		"acknowledged_at", "cleared_at", "device_name", "technology", "alarm_source",
+		"event_type", "network_location", "explicit_cause", "ack_count", "acknowledged_by",
+		"ack_note", "additional_info", "updated_at", "cleared_by", "clear_note",
+		"probable_cause", "alarm_version",
+	).Values(
+		historyTime, alarm.ID, alarm.DeviceID, alarm.DeviceSN, alarm.Carrier, alarm.Severity,
+		alarm.AlarmType, alarm.AlarmIdentifier, alarm.Description, alarm.Status, alarm.RaisedAt,
+		alarm.AcknowledgedAt, alarm.ClearedAt, alarm.DeviceName, alarm.Technology, alarm.AlarmSource,
+		alarm.EventType, alarm.NetworkLocation, alarm.ExplicitCause, alarm.AckCount, alarm.AcknowledgedBy,
+		alarm.AckNote, additionalJSON, updatedAt, alarm.ClearedBy, alarm.ClearNote,
+		probableCause, alarm.Version,
+	).Suffix("ON CONFLICT (time, alarm_id, alarm_version) DO NOTHING").ToSql()
+}
+
+func buildAlarmHistoryProjectionInsert(payload event.AlarmLifecyclePayload) (string, []any, error) {
+	alarm, historyTime, err := alarmHistoryFromLifecycle(payload)
+	if err != nil {
+		return "", nil, err
+	}
+	return buildAlarmHistoryInsert(alarm, historyTime)
+}
+
+func alarmHistoryFromLifecycle(payload event.AlarmLifecyclePayload) (*model.Alarm, time.Time, error) {
+	if payload.LifecycleType != event.AlarmLifecycleCleared {
+		return nil, time.Time{}, fmt.Errorf("project alarm history: lifecycle type %q is not cleared", payload.LifecycleType)
+	}
+	if payload.AlarmVersion < 1 {
+		return nil, time.Time{}, fmt.Errorf("project alarm history: alarm version must be positive")
+	}
+	snapshot := payload.Snapshot
+	if payload.EventID == uuid.Nil || payload.OccurredAt.IsZero() {
+		return nil, time.Time{}, fmt.Errorf("project alarm history: event identity and occurred_at are required")
+	}
+	if payload.OccurrenceID == uuid.Nil || snapshot.AlarmID != payload.OccurrenceID {
+		return nil, time.Time{}, fmt.Errorf("project alarm history: occurrence identity mismatch")
+	}
+	if snapshot.DeviceID == uuid.Nil || snapshot.RaisedAt.IsZero() {
+		return nil, time.Time{}, fmt.Errorf("project alarm history: managed element and raised_at are required")
+	}
+	if snapshot.Status != model.AlarmCleared {
+		return nil, time.Time{}, fmt.Errorf("project alarm history: snapshot status %q is not cleared", snapshot.Status)
+	}
+	if snapshot.ClearedAt == nil || snapshot.ClearedAt.IsZero() {
+		return nil, time.Time{}, fmt.Errorf("project alarm history: cleared_at is required")
+	}
+	updatedAt := snapshot.LastUpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = payload.OccurredAt
+	}
+	return &model.Alarm{
+		ID: payload.OccurrenceID, Version: payload.AlarmVersion,
+		DeviceID: snapshot.DeviceID, DeviceSN: snapshot.DeviceSN, Carrier: snapshot.Carrier,
+		Severity: snapshot.Severity, AlarmType: snapshot.AlarmType,
+		AlarmIdentifier: snapshot.AlarmIdentifier, Description: snapshot.Description,
+		Status: snapshot.Status, RaisedAt: snapshot.RaisedAt,
+		AcknowledgedAt: snapshot.AcknowledgedAt, ClearedAt: snapshot.ClearedAt,
+		DeviceName: snapshot.DeviceName, Technology: snapshot.Technology,
+		AlarmSource: snapshot.AlarmSource, EventType: snapshot.AlarmEventType,
+		NetworkLocation: snapshot.NetworkLocation, ExplicitCause: snapshot.ExplicitCause,
+		AckCount: snapshot.AlarmCount, AcknowledgedBy: snapshot.AcknowledgedBy,
+		AckNote: snapshot.AcknowledgementNote, ClearedBy: snapshot.ClearedBy,
+		ClearNote: snapshot.ClearNote, ProbableCause: snapshot.ProbableCause,
+		AdditionalInfo: snapshot.Extensions, FirstRaisedAt: snapshot.FirstRaisedAt,
+		LastUpdatedAt: updatedAt, UpdatedAt: updatedAt, IsUnknown: snapshot.IsUnknown,
+	}, snapshot.ClearedAt.UTC(), nil
+}
+
+// ProjectAlarmHistory is the canonical idempotent TSDB writer.
+func (s *PgAlarmStore) ProjectAlarmHistory(ctx context.Context, payload event.AlarmLifecyclePayload) (bool, error) {
+	query, args, err := buildAlarmHistoryProjectionInsert(payload)
+	if err != nil {
+		return false, err
+	}
+	tag, err := s.tsPool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("project alarm history: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// CompareAlarmHistory checks the deterministic identity written by the legacy
+// path. Shadow deliberately avoids a second field-mapping model.
+func (s *PgAlarmStore) CompareAlarmHistory(ctx context.Context, payload event.AlarmLifecyclePayload) (bool, error) {
+	_, historyTime, err := alarmHistoryFromLifecycle(payload)
+	if err != nil {
+		return false, err
+	}
+	query, args, err := storage.Psql.Select("COUNT(*) > 0").
+		From("alarms_history").
+		Where(squirrel.Eq{
+			"time": historyTime, "alarm_id": payload.OccurrenceID, "alarm_version": payload.AlarmVersion,
+		}).ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build compare alarm history query: %w", err)
+	}
+	var exists bool
+	if err := s.tsPool.QueryRow(ctx, query, args...).Scan(&exists); err != nil {
+		return false, fmt.Errorf("compare alarm history: %w", err)
+	}
+	return exists, nil
 }
 
 func historyUpdatedAt(alarm *model.Alarm) time.Time {

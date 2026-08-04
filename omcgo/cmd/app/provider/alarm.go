@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/omcgo/omcgo/internal/alarm"
 	alarmdef "github.com/omcgo/omcgo/internal/alarm/definition"
@@ -29,9 +30,6 @@ func initAlarmModule(c *Container) error {
 	})
 
 	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, c.Carriers, c.EventBus, logger)
-	if err := alarmEngine.SetLifecycleMode(alarm.LifecycleMode(c.Cfg.Alarm.LifecycleMode)); err != nil {
-		return fmt.Errorf("configure alarm lifecycle mode: %w", err)
-	}
 	alarmMetrics := alarm.NewAlarmMetrics(c.MetricsReg)
 	alarmEngine.SetMetrics(alarmMetrics)
 	if c.Cfg.Alarm.LifecycleRelayEnabled() {
@@ -43,9 +41,35 @@ func initAlarmModule(c *Container) error {
 			outboxRelay.Stop()
 			return nil
 		})
-		logger.Info("alarm lifecycle Outbox relay started",
+
+		historyProjector := alarm.NewHistoryProjector(
+			alarmPgStore, c.EventBus, c.Cfg.Alarm.LifecycleStartSequence,
+		)
+		historyProjector.SetShadow(c.Cfg.Alarm.LifecycleMode == string(alarm.LifecycleModeShadow))
+		if err := historyProjector.Subscribe(); err != nil {
+			outboxRelay.Stop()
+			return fmt.Errorf("subscribe alarm history projector: %w", err)
+		}
+		c.GS.Register("alarm-history-projector", 1, func(context.Context) error {
+			return historyProjector.Close()
+		})
+		if c.Cfg.Alarm.LifecycleMode == string(alarm.LifecycleModeCanonical) {
+			readyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			readyErr := historyProjector.Ready(readyCtx)
+			cancel()
+			if readyErr != nil {
+				_ = historyProjector.Close()
+				outboxRelay.Stop()
+				return fmt.Errorf("enable canonical alarm lifecycle: %w", readyErr)
+			}
+			alarmEngine.SetCanonicalLifecycleReady(true)
+		}
+		logger.Info("alarm lifecycle Relay and history projector started",
 			zap.String("lifecycle_mode", c.Cfg.Alarm.LifecycleMode),
 			zap.Uint64("lifecycle_start_sequence", c.Cfg.Alarm.LifecycleStartSequence))
+	}
+	if err := alarmEngine.SetLifecycleMode(alarm.LifecycleMode(c.Cfg.Alarm.LifecycleMode)); err != nil {
+		return fmt.Errorf("configure alarm lifecycle mode: %w", err)
 	}
 
 	// 告警同步服务

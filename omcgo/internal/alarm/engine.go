@@ -20,15 +20,16 @@ import (
 
 // AlarmEngine implements alarm processing, deduplication, and lifecycle management.
 type AlarmEngine struct {
-	store           AlarmStore
-	redisStore      *RedisAlarmStore
-	carrierRegistry *carrier.CarrierRegistry
-	eventBus        event.EventBus
-	metrics         *AlarmMetrics
-	filterEngine    *FilterEngine // optional; nil 时跳过过滤逻辑（向后兼容）
-	lifecycleStore  LifecycleStore
-	lifecycleMode   LifecycleMode
-	logger          *zap.Logger
+	store                   AlarmStore
+	redisStore              *RedisAlarmStore
+	carrierRegistry         *carrier.CarrierRegistry
+	eventBus                event.EventBus
+	metrics                 *AlarmMetrics
+	filterEngine            *FilterEngine // optional; nil 时跳过过滤逻辑（向后兼容）
+	lifecycleStore          LifecycleStore
+	lifecycleMode           LifecycleMode
+	canonicalLifecycleReady bool
+	logger                  *zap.Logger
 }
 
 // NewAlarmEngine creates a new AlarmEngine.
@@ -54,8 +55,9 @@ func NewAlarmEngine(
 }
 
 // SetLifecycleMode controls the single alarm lifecycle migration switch.
-// Canonical remains fail-closed until the Relay and history projector add
-// their readiness gate; shadow preserves every legacy side effect.
+// Canonical is fail-closed unless process wiring has verified the Relay exists
+// and the fixed history durable is available and caught up. Shadow preserves
+// every legacy side effect.
 func (e *AlarmEngine) SetLifecycleMode(mode LifecycleMode) error {
 	if mode == "" {
 		mode = LifecycleModeLegacy
@@ -71,10 +73,20 @@ func (e *AlarmEngine) SetLifecycleMode(mode LifecycleMode) error {
 		e.lifecycleMode = mode
 		return nil
 	case LifecycleModeCanonical:
-		return ErrCanonicalLifecycleNotReady
+		if !e.canonicalLifecycleReady {
+			return ErrCanonicalLifecycleNotReady
+		}
+		e.lifecycleMode = mode
+		return nil
 	default:
 		return fmt.Errorf("unsupported alarm lifecycle mode %q", mode)
 	}
+}
+
+// SetCanonicalLifecycleReady is called only by process wiring after the Relay
+// exists and the fixed history durable reports no pending or in-flight events.
+func (e *AlarmEngine) SetCanonicalLifecycleReady(ready bool) {
+	e.canonicalLifecycleReady = ready
 }
 
 func (e *AlarmEngine) canonicalLifecycleEnabled() bool {
@@ -609,10 +621,16 @@ func (e *AlarmEngine) clearActiveAlarmWithLegacyPublish(
 	alarm.Status = model.AlarmCleared
 	alarm.ClearedAt = &now
 
-	// Legacy and shadow retain the synchronous history write. Canonical skips
-	// it only after the history projector readiness gate is implemented.
+	// Legacy and shadow retain the synchronous history write. Canonical has
+	// exactly one formal history writer: the ready durable projector.
 	if e.legacyLifecycleEnabled() {
 		archiveSnapshot := *alarm
+		if e.lifecycleMode == LifecycleModeShadow {
+			// PersistCleared allocates the next version from the locked active row.
+			// The synchronous shadow row must use the same deterministic identity
+			// that its eventual cleared event carries.
+			archiveSnapshot.Version++
+		}
 		if err := e.store.Archive(ctx, &archiveSnapshot); err != nil {
 			return fmt.Errorf("archive alarm: %w", err)
 		}
@@ -736,6 +754,9 @@ func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.
 		existing.ClearNote = &clearNote
 		if e.legacyLifecycleEnabled() {
 			archiveSnapshot := *existing
+			if e.lifecycleMode == LifecycleModeShadow {
+				archiveSnapshot.Version++
+			}
 			if err := e.store.Archive(ctx, &archiveSnapshot); err != nil {
 				return fmt.Errorf("archive existing auto-cleared alarm: %w", err)
 			}
@@ -778,6 +799,10 @@ func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.
 
 	if e.legacyLifecycleEnabled() {
 		archiveSnapshot := archived
+		if e.lifecycleMode == LifecycleModeShadow {
+			// PersistRaisedAndCleared always emits raised v1 then cleared v2.
+			archiveSnapshot.Version = 2
+		}
 		if err := e.store.Archive(ctx, &archiveSnapshot); err != nil {
 			return fmt.Errorf("archive new auto-cleared alarm: %w", err)
 		}
