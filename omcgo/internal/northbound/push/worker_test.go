@@ -247,8 +247,15 @@ func TestEnqueueEvent_FallbackWithoutOutbox(t *testing.T) {
 
 func TestOutboxWorker_ProcessEntry_Success(t *testing.T) {
 	var deliveryCount int32
+	var delivered struct {
+		EventID   string          `json:"event_id"`
+		Subject   string          `json:"subject"`
+		Payload   json.RawMessage `json:"payload"`
+		Timestamp time.Time       `json:"timestamp"`
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&deliveryCount, 1)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&delivered))
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -265,10 +272,13 @@ func TestOutboxWorker_ProcessEntry_Success(t *testing.T) {
 	})
 
 	entryID := uuid.New()
-	payload, _ := json.Marshal(map[string]interface{}{
-		"event_id": "evt-1",
-		"subject":  event.SubjectOSSAlarmForward,
-		"payload":  map[string]string{"alarm_id": "a1"},
+	eventTime := time.Date(2026, 8, 4, 9, 30, 0, 0, time.UTC)
+	alarmPayload, _ := json.Marshal(map[string]string{"alarm_id": "a1"})
+	payload, _ := json.Marshal(map[string]any{
+		"event_id":  "evt-1",
+		"subject":   event.SubjectOSSAlarmForward,
+		"payload":   json.RawMessage(alarmPayload),
+		"timestamp": eventTime,
 	})
 
 	entry := &OutboxEntry{
@@ -287,6 +297,12 @@ func TestOutboxWorker_ProcessEntry_Success(t *testing.T) {
 	worker.processEntry(context.Background(), *repo.getEntry(entryID))
 
 	assert.Equal(t, int32(1), atomic.LoadInt32(&deliveryCount))
+	assert.Equal(t, "evt-1", delivered.EventID)
+	assert.Equal(t, event.SubjectOSSAlarmForward, delivered.Subject)
+	assert.Equal(t, eventTime, delivered.Timestamp)
+	var deliveredAlarm map[string]string
+	require.NoError(t, json.Unmarshal(delivered.Payload, &deliveredAlarm))
+	assert.Equal(t, map[string]string{"alarm_id": "a1"}, deliveredAlarm)
 	e := repo.getEntry(entryID)
 	require.NotNil(t, e)
 	assert.Equal(t, OutboxStatusDelivered, e.Status)

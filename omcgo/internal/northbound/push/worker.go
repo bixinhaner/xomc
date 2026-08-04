@@ -111,9 +111,31 @@ func (w *OutboxWorker) processEntry(ctx context.Context, entry OutboxEntry) {
 	}
 
 	evt := event.Event{
-		ID:      entry.EventID,
-		Subject: entry.Subject,
-		Payload: entry.Payload,
+		ID:        entry.EventID,
+		Subject:   entry.Subject,
+		Payload:   entry.Payload,
+		Timestamp: entry.CreatedAt,
+	}
+	// EnqueueEvent persists the complete event envelope so the original
+	// business timestamp survives retries. Unwrap it before Engine.deliver;
+	// otherwise deliver would wrap the envelope a second time and emit a zero
+	// outer timestamp. Keep the raw-payload fallback for rows written by older
+	// or external producers.
+	var stored struct {
+		EventID   string          `json:"event_id"`
+		Subject   string          `json:"subject"`
+		Payload   json.RawMessage `json:"payload"`
+		Timestamp time.Time       `json:"timestamp"`
+	}
+	if err := json.Unmarshal(entry.Payload, &stored); err == nil &&
+		stored.EventID == entry.EventID && stored.Subject == entry.Subject && len(stored.Payload) > 0 {
+		if stored.Timestamp.IsZero() {
+			stored.Timestamp = entry.CreatedAt
+		}
+		evt = event.Event{
+			ID: stored.EventID, Subject: stored.Subject,
+			Payload: stored.Payload, Timestamp: stored.Timestamp,
+		}
 	}
 
 	deliverErr := w.engine.deliver(ctx, target, evt)

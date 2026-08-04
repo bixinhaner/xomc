@@ -478,6 +478,15 @@ func (b *NATSEventBus) SetPullTuning(subject string, tuning PullTuning) {
 }
 
 func (b *NATSEventBus) Publish(ctx context.Context, subject string, evt Event) error {
+	// A disconnected nats.Conn normally buffers publishes for replay after
+	// reconnect. That conflicts with the database Outbox retry state machine:
+	// a call that returned an error can later be flushed from the client buffer
+	// while the Outbox also republishes it, amplifying one lifecycle fact into
+	// several JetStream messages. Fail before enqueueing into that buffer; the
+	// durable Outbox remains the sole retry owner.
+	if b.conn == nil || !b.conn.IsConnected() {
+		return fmt.Errorf("publish to NATS: connection is not available")
+	}
 	evt.Subject = subject
 	data, err := json.Marshal(evt)
 	if err != nil {

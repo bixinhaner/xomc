@@ -372,20 +372,17 @@ func TestNATSEventBus_Close_NoSubscriptions(t *testing.T) {
 	assert.Nil(t, bus.subs)
 }
 
-// --- Publish with nil JetStream ---
+// --- Publish while disconnected ---
 
-func TestNATSEventBus_Publish_NilJS_ReturnsError(t *testing.T) {
+func TestNATSEventBus_Publish_DisconnectedReturnsError(t *testing.T) {
 	bus := NewNATSEventBus(nil, nil, zap.NewNop())
 
 	evt, err := NewEvent("test.subject", map[string]string{"key": "value"})
 	require.NoError(t, err)
 
-	// Publish should fail because js is nil — this will panic or error
-	// depending on implementation. Since js.Publish is called on nil,
-	// this verifies the bus doesn't silently swallow the issue.
-	assert.Panics(t, func() {
-		bus.Publish(context.Background(), "test.subject", evt)
-	})
+	err = bus.Publish(context.Background(), "test.subject", evt)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "connection is not available")
 }
 
 // --- Subscribe with nil JetStream ---
