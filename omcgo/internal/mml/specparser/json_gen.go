@@ -35,11 +35,7 @@ type CatalogJSONGroup struct {
 	Chapter       string            `json:"chapter"`
 	GroupCode     string            `json:"group_code"`
 	CommandZhName string            `json:"command_zh_name"`
-	// issue #67 §2（长期 TODO）：catalog 当前只有 command_zh_name（中文），命令英文名靠
-	// 派生（sql_gen.opEnPrefix + CommandZhName）。规范 MD 若提供独立英文命令名，应在此新增
-	// `command_en_name string json:"command_en_name"` 字段，由 specparser.parser 从 MD 抽取填充，
-	// 再在 sql_gen.writeCommandValueRow 写入 command_name_i18n['en-US']/logical_name_i18n['en-US']，
-	// 取代「英文=中文」的退化写法。届时同步删除 seed/000002 的命令叶子英文兜底。
+	CommandEnName string            `json:"command_en_name,omitempty"`
 	HasInstance   bool              `json:"has_instance"`
 	Paths         []CatalogJSONPath `json:"paths"`
 	Commands      []CatalogJSONCmd  `json:"commands"` // 派生的 LST/MOD/ADD/RMV
@@ -51,13 +47,13 @@ type CatalogJSONPath struct {
 	// issue #67 §2（长期 TODO）：部分规范行此列实际仍是中文，导致 en=中文。规范 MD 若提供
 	// 明确英文列（如 english_name），应在 CatalogJSONPath 增 `EnglishName string json:"english_name"`，
 	// parser 优先用它填 label_i18n['en-US']，缺失再退回 standard_path 叶子（与 seed/000038 一致）。
-	ParamName    string `json:"param_name"`
-	ChineseName  string `json:"chinese_name"`
-	Access       string `json:"access"`
-	DataType     string `json:"data_type"`
-	MinValue     *int64 `json:"min_value,omitempty"`
-	MaxValue     *int64 `json:"max_value,omitempty"`
-	MaxLength    *int   `json:"max_length,omitempty"`
+	ParamName   string `json:"param_name"`
+	ChineseName string `json:"chinese_name"`
+	Access      string `json:"access"`
+	DataType    string `json:"data_type"`
+	MinValue    *int64 `json:"min_value,omitempty"`
+	MaxValue    *int64 `json:"max_value,omitempty"`
+	MaxLength   *int   `json:"max_length,omitempty"`
 }
 
 // CatalogJSONCmd 一条派生命令的元数据。
@@ -102,6 +98,7 @@ func GenerateJSON(cat *SpecCatalog) ([]byte, error) {
 			Chapter:       g.Chapter,
 			GroupCode:     g.GroupCode,
 			CommandZhName: g.CommandZhName,
+			CommandEnName: g.CommandEnName,
 			HasInstance:   g.HasInstance,
 			Commands:      cmdsByGroup[g.GroupCode],
 		}

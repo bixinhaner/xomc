@@ -215,6 +215,8 @@ export interface ExecRecord {
   execMeta: ExecMeta;
   columns: ResultColumn[];
   rows: ResultRow[];
+  /** 该记录中命令名/结果行对应的界面语言；语言切换后需要重新拉结果。 */
+  locale?: string;
   /**
    * #196：MOD 下发值 path→value。MOD 命令后端自动追加回读 LST（compound）；跨刷新惰性补结果行时
    * 据此走 buildMODReadbackRows 关联「下发 vs 回读」（而非逐 PATH 合并）。非 MOD 复合为空。

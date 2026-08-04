@@ -56,6 +56,7 @@ func DeriveCommands(cat *SpecCatalog) []*SpecCommand {
 			CommandCode:   OpLST + " " + logical,
 			LogicalCode:   logical,
 			CommandZhName: g.CommandZhName,
+			CommandEnName: g.CommandEnName,
 			TargetPaths:   allPaths,
 			RPCMethod:     RPCGetParameterValues,
 		})
@@ -69,6 +70,7 @@ func DeriveCommands(cat *SpecCatalog) []*SpecCommand {
 				CommandCode:   OpMOD + " " + logical,
 				LogicalCode:   logical,
 				CommandZhName: g.CommandZhName,
+				CommandEnName: g.CommandEnName,
 				TargetPaths:   writablePaths,
 				RPCMethod:     RPCSetParameterValues,
 			})
@@ -85,6 +87,7 @@ func DeriveCommands(cat *SpecCatalog) []*SpecCommand {
 						CommandCode:   OpADD + " " + logical,
 						LogicalCode:   logical,
 						CommandZhName: g.CommandZhName,
+						CommandEnName: g.CommandEnName,
 						TargetPaths:   []string{objectName},
 						RPCMethod:     RPCAddObject,
 						TargetObject:  objectName,
@@ -96,6 +99,7 @@ func DeriveCommands(cat *SpecCatalog) []*SpecCommand {
 						CommandCode:   OpRMV + " " + logical,
 						LogicalCode:   logical,
 						CommandZhName: g.CommandZhName,
+						CommandEnName: g.CommandEnName,
 						TargetPaths:   []string{objectName},
 						RPCMethod:     RPCDeleteObject,
 						TargetObject:  objectName,

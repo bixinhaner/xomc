@@ -20,6 +20,7 @@ import {
   MML_CUSTOM_COMMAND_PATHS_QUERY_KEY,
   MML_CUSTOM_COMMANDS_QUERY_KEY,
 } from './mmlQueryKeys';
+import { useAppStore } from '../../store/appStore';
 
 const api = createApiSwitch(mmlService, mmlApi);
 
@@ -79,8 +80,9 @@ export function useMMLScriptById(id: string) {
 export function useMMLTasks(
   params: PageRequest & { status?: string; executeType?: string; result?: string; taskName?: string; scriptName?: string; taskOrigin?: string }
 ) {
+  const locale = useAppStore((s) => s.locale);
   return useQuery({
-    queryKey: ['mml', 'tasks', params],
+    queryKey: ['mml', 'tasks', params, locale],
     queryFn: () => api.getTasks(params),
     refetchInterval: (query) => getMMLTasksRefetchInterval(query.state.data),
     refetchIntervalInBackground: false,
@@ -88,8 +90,9 @@ export function useMMLTasks(
 }
 
 export function useMMLTaskById(id: string) {
+  const locale = useAppStore((s) => s.locale);
   return useQuery({
-    queryKey: ['mml', 'tasks', 'detail', id],
+    queryKey: ['mml', 'tasks', 'detail', id, locale],
     queryFn: () => api.getTaskById(id),
     enabled: Boolean(id),
   });
@@ -339,8 +342,9 @@ export function useMMLTaskResults(
   pageSize = 50,
   options?: { pollWhileTaskActive?: boolean },
 ) {
+  const locale = useAppStore((s) => s.locale);
   return useQuery({
-    queryKey: ['mml', 'tasks', taskId, 'results', page, pageSize],
+    queryKey: ['mml', 'tasks', taskId, 'results', page, pageSize, locale],
     queryFn: () => api.getTaskResults(taskId!, page, pageSize),
     enabled: Boolean(taskId),
     refetchInterval: (query) => getMMLTaskResultsRefetchInterval(

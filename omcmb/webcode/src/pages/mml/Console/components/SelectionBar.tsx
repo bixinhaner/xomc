@@ -6,7 +6,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons';
 import type { CommandItem } from '../types';
-import { opColor, opLabel } from '../constants';
+import { opColor, opLabelI18nKey } from '../constants';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
@@ -67,7 +67,7 @@ export default function SelectionBar({
             {command ? (
               <Space size={4}>
                 <Tag color={opColor(command.operationType)} style={{ marginInlineEnd: 0 }}>
-                  {command.operationType} {opLabel(command.operationType)}
+                  {command.operationType} {t(opLabelI18nKey(command.operationType) ?? '')}
                 </Tag>
                 <Text strong>{command.commandName}</Text>
               </Space>

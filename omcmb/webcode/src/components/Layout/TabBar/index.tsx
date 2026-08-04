@@ -61,7 +61,7 @@ export default function TabBar() {
       const index = tabs.findIndex((tk) => tk.key === key);
       const newTabs = tabs.filter((tk) => tk.key !== key);
       const next = newTabs[index] ?? newTabs[index - 1];
-      if (next) void navigate(next.path);
+      void navigate(next?.path ?? '/dashboard');
     }
     closeTab(key);
   };

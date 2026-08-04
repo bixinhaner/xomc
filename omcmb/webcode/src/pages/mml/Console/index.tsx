@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { message, Space } from 'antd';
-import { useT } from '@/hooks/useT';
+import { useT, type TranslateFn } from '@/hooks/useT';
 import { useExecuteStatementsStructured } from '@core/hooks/api/useMmlConsole';
 import { useExecuteMMLCommand } from '@core/hooks/api/useMML';
 import { mmlApi } from '@core/services/api/mmlApi';
@@ -19,7 +19,7 @@ import type {
   ResultRow,
 } from './types';
 import type { MMLTask } from '@core/types/mml';
-import { isReadOp, opLabel } from './constants';
+import { isReadOp, opLabel, opLabelI18nKey } from './constants';
 import { commandUsesPathSelection } from './pathSelection';
 import { useConsoleHistory } from './useConsoleHistory';
 import { useExecStream } from './useExecStream';
@@ -64,10 +64,10 @@ interface LiveExec {
   setValues?: Record<string, string>;
 }
 
-function buildTerminalFallbackRows(le: LiveExec, task: MMLTask): ResultRow[] {
+function buildTerminalFallbackRows(le: LiveExec, task: MMLTask, t: TranslateFn): ResultRow[] {
   const success = task.successCount ?? 0;
   const failed = task.failedCount ?? 0;
-  const fallbackFault = `任务已结束，结果详情暂不可用（成功 ${success} / 失败 ${failed}）`;
+  const fallbackFault = t('mml.consoleV2.result.terminalResultUnavailable', { success, failed });
   return le.rows.map((row) => {
     if (!['pending', 'running'].includes(row.status)) return row;
     return {
@@ -117,6 +117,14 @@ export default function MMLConsole() {
   const liveExecsRef = useRef<Map<string, LiveExec>>(liveExecs);
   // 已收口的 taskId（防 SSE 完成与轮询兜底双路径重复落记录）。
   const finalizedRef = useRef<Set<string>>(new Set());
+  const localizedOpLabel = useCallback(
+    (op: string | undefined) => {
+      const key = opLabelI18nKey(op);
+      return key ? t(key) : opLabel(op);
+    },
+    [t],
+  );
+
   useEffect(() => {
     liveExecsRef.current = liveExecs;
   }, [liveExecs]);
@@ -158,7 +166,7 @@ export default function MMLConsole() {
       status: 'done',
       commandId: le.taskId,
       time: le.startTime,
-      commandName: le.meta.commandName ?? t('mml.consoleV2.rawPathCommand', { op: opLabel(le.meta.operationType) }),
+      commandName: le.meta.commandName ?? t('mml.consoleV2.rawPathCommand', { op: localizedOpLabel(le.meta.operationType) }),
       operationType: le.meta.operationType,
       deviceCount: le.deviceCount,
       execMeta: le.meta,
@@ -202,7 +210,7 @@ export default function MMLConsole() {
       status: 'running',
       commandId: le.taskId,
       time: le.startTime,
-      commandName: le.meta.commandName ?? t('mml.consoleV2.rawPathCommand', { op: opLabel(le.meta.operationType) }),
+      commandName: le.meta.commandName ?? t('mml.consoleV2.rawPathCommand', { op: localizedOpLabel(le.meta.operationType) }),
       operationType: le.meta.operationType,
       deviceCount: le.deviceCount,
       execMeta: le.meta,
@@ -235,7 +243,7 @@ export default function MMLConsole() {
             if (cancelled || !task || !TERMINAL_TASK_STATUS.has(task.status)) return;
             // 与 SSE 完成路径共用收口（/results → buildDeviceRows），由 finalizedRef 去重。
             const le = liveExecsRef.current.get(taskId);
-            await finalizeFromResults(taskId, le ? buildTerminalFallbackRows(le, task) : undefined);
+            await finalizeFromResults(taskId, le ? buildTerminalFallbackRows(le, task, t) : undefined);
           } catch {
             /* 忽略，下个 tick 再试 */
           }
@@ -374,7 +382,16 @@ export default function MMLConsole() {
         }
         // 命令记录命名：用执行的 path → 设备模型 path 字典里的友好名（缺省回退叶子名）。
         const nameMap = await mmlApi.resolveParamNames(paths);
-        const cmdName = rawCommandName(req.operationType, paths, nameMap);
+        const multiPathSuffix = paths.length > 1
+          ? t('mml.consoleV2.rawPath.multiSuffix', { count: paths.length })
+          : undefined;
+        const cmdName = rawCommandName(
+          req.operationType,
+          paths,
+          nameMap,
+          localizedOpLabel(req.operationType),
+          multiPathSuffix,
+        );
         meta = {
           operationType: req.operationType,
           read: isReadOp(req.operationType),
@@ -411,7 +428,7 @@ export default function MMLConsole() {
       status: 'running',
       commandId: taskId,
       time: startTime,
-      commandName: meta.commandName ?? t('mml.consoleV2.rawPathCommand', { op: opLabel(meta.operationType) }),
+      commandName: meta.commandName ?? t('mml.consoleV2.rawPathCommand', { op: localizedOpLabel(meta.operationType) }),
       operationType: meta.operationType,
       deviceCount,
       execMeta: meta,

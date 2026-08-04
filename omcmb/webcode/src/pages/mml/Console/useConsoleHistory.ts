@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { mmlApi } from '@core/services/api/mmlApi';
+import { useAppStore } from '@core/store/appStore';
 import type { ExecRecord } from './types';
 import { buildDeviceRows, buildMODReadbackRows, mapTaskToRecord } from './adapters';
 
@@ -70,13 +71,14 @@ export function isMissingTaskError(error: unknown): boolean {
 export function useConsoleHistory(): ConsoleHistory {
   const [ids, setIds] = useState<string[]>(readIds);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const locale = useAppStore((s) => s.locale);
 
   // 跨刷新恢复（§3.12.4）：不在本会话 recordStore 的命令 ID 凭 GET /mml/tasks/:id 重建。
   // 解析不到（404/已清理）的 ID 在 records 合并阶段自动剔除。retry:false 避免删除任务反复重试。
   const missingIds = useMemo(() => ids.filter((id) => !recordStore.has(id)), [ids]);
   const queries = useQueries({
     queries: missingIds.map((id) => ({
-      queryKey: ['mml', 'console', 'task', id],
+      queryKey: ['mml', 'console', 'task', id, locale],
       queryFn: () => mmlApi.getTaskById(id),
       staleTime: 60 * 1000,
       retry: false,
@@ -84,7 +86,7 @@ export function useConsoleHistory(): ConsoleHistory {
   });
   const fetchedById = new Map<string, ExecRecord>();
   queries.forEach((q, i) => {
-    if (q.data) fetchedById.set(missingIds[i], mapTaskToRecord(q.data));
+    if (q.data) fetchedById.set(missingIds[i], { ...mapTaskToRecord(q.data), locale });
   });
   const missingErrorKey = queries
     .map((q, i) => (q.isError && isMissingTaskError(q.error) ? missingIds[i] : ''))
@@ -122,45 +124,54 @@ export function useConsoleHistory(): ConsoleHistory {
   const needResults = !!baseActiveRecord && baseActiveRecord.rows.length === 0;
   const activeCommandId = baseActiveRecord?.commandId ?? null;
   const resultsQuery = useQuery({
-    queryKey: ['mml', 'console', 'results', activeCommandId],
+    queryKey: ['mml', 'console', 'results', activeCommandId, locale],
     queryFn: () => mmlApi.getTaskResults(activeCommandId as string, 1, 200),
-    enabled: needResults && !!activeCommandId,
+    enabled: (needResults || (!!baseActiveRecord && baseActiveRecord.locale !== locale)) && !!activeCommandId,
     staleTime: 60 * 1000,
     retry: false,
   });
 
   const activeRecord = useMemo<ExecRecord | null>(() => {
     if (!baseActiveRecord) return null;
-    if (baseActiveRecord.rows.length > 0) return baseActiveRecord;
+    if (baseActiveRecord.rows.length > 0 && baseActiveRecord.locale === locale) return baseActiveRecord;
     const items = resultsQuery.data?.items;
-    if (!items || items.length === 0) return baseActiveRecord;
+    if (!items || items.length === 0) return { ...baseActiveRecord, locale };
     // #196：MOD 自动回读复合 → 走「下发 vs 回读」关联视图（操作类型 / 前后对比 / 双报文），
     // 与实时收口、历史摘要同一构建函数；其余命令按逐 PATH 合并。
     const rows =
       baseActiveRecord.execMeta.operationType === 'MOD' && baseActiveRecord.setValues
         ? buildMODReadbackRows(items, baseActiveRecord.setValues)
         : buildDeviceRows(items, baseActiveRecord.columns, baseActiveRecord.execMeta.read);
-    return { ...baseActiveRecord, rows };
-  }, [baseActiveRecord, resultsQuery.data]);
+    const localizedName = items.find((item) => item.commandName?.trim())?.commandName?.trim();
+    const commandName = localizedName ?? baseActiveRecord.commandName;
+    return {
+      ...baseActiveRecord,
+      commandName,
+      execMeta: { ...baseActiveRecord.execMeta, commandName },
+      rows,
+      locale,
+    };
+  }, [baseActiveRecord, locale, resultsQuery.data]);
 
   const append = useCallback((rec: ExecRecord) => {
-    recordStore.set(rec.commandId, rec);
+    const localizedRecord = { ...rec, locale: rec.locale ?? locale };
+    recordStore.set(localizedRecord.commandId, localizedRecord);
     setIds((prev) => {
-      const next = [rec.commandId, ...prev.filter((x) => x !== rec.commandId)].slice(0, MAX_IDS);
+      const next = [localizedRecord.commandId, ...prev.filter((x) => x !== localizedRecord.commandId)].slice(0, MAX_IDS);
       writeIds(next);
       return next;
     });
-    setActiveId(rec.id);
-  }, []);
+    setActiveId(localizedRecord.id);
+  }, [locale]);
 
   // #217：原地更新已 append 记录的内容（不改 activeId / 不重排）。SSE 帧回填各在途任务行时用，
   // 避免非选中任务的帧 setActiveId 抢占用户当前查看的记录。需触发渲染让选中记录的结果区刷新。
   const [, forceRerender] = useState(0);
   const update = useCallback((rec: ExecRecord) => {
     if (!recordStore.has(rec.commandId)) return;
-    recordStore.set(rec.commandId, rec);
+    recordStore.set(rec.commandId, { ...rec, locale: rec.locale ?? locale });
     forceRerender((n) => n + 1);
-  }, []);
+  }, [locale]);
 
   const select = useCallback((id: string) => setActiveId(id), []);
 
