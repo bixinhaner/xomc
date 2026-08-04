@@ -34,6 +34,7 @@ import (
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrcollector "github.com/omcgo/omcgo/internal/mr/collector"
+	"github.com/omcgo/omcgo/internal/northbound/push"
 	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
@@ -395,6 +396,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 		if cfg.Alarm.LifecycleMode == string(alarm.LifecycleModeCanonical) {
 			readyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			readyErr := historyProjector.Ready(readyCtx)
+			if readyErr == nil {
+				readyErr = push.AlarmLifecycleDurableReady(readyCtx, w.EventBus)
+			}
 			cancel()
 			if readyErr != nil {
 				_ = historyProjector.Close()

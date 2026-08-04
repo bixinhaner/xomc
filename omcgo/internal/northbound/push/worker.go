@@ -3,6 +3,8 @@ package push
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -194,9 +196,10 @@ func (e *Engine) EnqueueEvent(ctx context.Context, evt event.Event) error {
 		"timestamp": evt.Timestamp,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal northbound outbox event: %w", err)
 	}
 
+	var insertErrors []error
 	for _, t := range targets {
 		entry := &OutboxEntry{
 			EventID:     evt.ID,
@@ -213,8 +216,9 @@ func (e *Engine) EnqueueEvent(ctx context.Context, evt event.Event) error {
 			e.logger.Error("enqueue outbox entry",
 				zap.String("target_id", t.ID),
 				zap.Error(err))
+			insertErrors = append(insertErrors, fmt.Errorf("insert northbound outbox target %s: %w", t.ID, err))
 		}
 	}
 
-	return nil
+	return errors.Join(insertErrors...)
 }

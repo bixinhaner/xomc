@@ -62,13 +62,19 @@ func initAlarmModule(c *Container) error {
 				outboxRelay.Stop()
 				return fmt.Errorf("enable canonical alarm lifecycle: %w", readyErr)
 			}
-			alarmEngine.SetCanonicalLifecycleReady(true)
 		}
 		logger.Info("alarm lifecycle Relay and history projector started",
 			zap.String("lifecycle_mode", c.Cfg.Alarm.LifecycleMode),
 			zap.Uint64("lifecycle_start_sequence", c.Cfg.Alarm.LifecycleStartSequence))
 	}
-	if err := alarmEngine.SetLifecycleMode(alarm.LifecycleMode(c.Cfg.Alarm.LifecycleMode)); err != nil {
+	initialLifecycleMode := alarm.LifecycleMode(c.Cfg.Alarm.LifecycleMode)
+	if initialLifecycleMode == alarm.LifecycleModeCanonical {
+		// Canonical is activated by initNorthboundModule only after its fixed
+		// durable is subscribed and caught up. Remaining legacy during module
+		// bootstrap avoids a history/northbound partial cutover.
+		initialLifecycleMode = alarm.LifecycleModeLegacy
+	}
+	if err := alarmEngine.SetLifecycleMode(initialLifecycleMode); err != nil {
 		return fmt.Errorf("configure alarm lifecycle mode: %w", err)
 	}
 

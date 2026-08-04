@@ -84,7 +84,8 @@ func (e *AlarmEngine) SetLifecycleMode(mode LifecycleMode) error {
 }
 
 // SetCanonicalLifecycleReady is called only by process wiring after the Relay
-// exists and the fixed history durable reports no pending or in-flight events.
+// exists and the fixed history and northbound durables report no pending or
+// in-flight events.
 func (e *AlarmEngine) SetCanonicalLifecycleReady(ready bool) {
 	e.canonicalLifecycleReady = ready
 }

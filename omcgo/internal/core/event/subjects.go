@@ -227,17 +227,20 @@ const (
 	SubjectDomainAlarmLifecycleAcknowledged   = "domain.alarm.lifecycle.acknowledged"
 	SubjectDomainAlarmLifecycleUnacknowledged = "domain.alarm.lifecycle.unacknowledged"
 	SubjectDomainAlarmLifecycleCleared        = "domain.alarm.lifecycle.cleared"
+	SubjectDomainAlarmLifecycleAll            = "domain.alarm.lifecycle.*"
 
-	// SubjectAlarmRaised 是新告警产生时发布。
-	// 发布者：alarm.AlarmEngine，订阅者：北向接口模块（告警推送）
+	// SubjectAlarmRaised 是 legacy 混合告警主题。受管网元告警在 canonical
+	// 模式只发布 SubjectDomainAlarmLifecycle*；本主题暂为 legacy 模式和平台
+	// health 事件保留，canonical 消费者禁止订阅。
+	// Deprecated: managed-element consumers must use SubjectDomainAlarmLifecycle*.
 	SubjectAlarmRaised = "alarm.raised"
 
-	// SubjectAlarmCleared 是告警恢复（清除）时发布。
-	// 发布者：alarm.AlarmEngine，订阅者：北向接口模块
+	// SubjectAlarmCleared 是 legacy 混合告警恢复主题。
+	// Deprecated: managed-element consumers must use SubjectDomainAlarmLifecycleCleared.
 	SubjectAlarmCleared = "alarm.cleared"
 
-	// SubjectAlarmAcknowledged 是告警被确认时发布。
-	// 发布者：alarm.AlarmEngine，订阅者：暂无
+	// SubjectAlarmAcknowledged 是 legacy 网元告警确认主题。
+	// Deprecated: managed-element consumers must use SubjectDomainAlarmLifecycleAcknowledged.
 	SubjectAlarmAcknowledged = "alarm.acknowledged"
 
 	// SubjectAlarmSyncRequested 是请求同步设备告警时发布。
@@ -248,9 +251,8 @@ const (
 	// 发布者：alarm.AlarmSyncProcessor，订阅者：暂无
 	SubjectAlarmSyncCompleted = "alarm.sync.completed"
 
-	// SubjectAlarmUpdated 是告警属性变更（如严重程度）时发布。
-	// 发布者：alarm.AlarmEngine.UpdateByEvent（处理 ChangedAlarm 通知）。
-	// 订阅者：北向接口模块（告警推送）
+	// SubjectAlarmUpdated 是 legacy 网元告警属性变更主题。
+	// Deprecated: managed-element consumers must use SubjectDomainAlarmLifecycleUpdated.
 	SubjectAlarmUpdated = "alarm.updated"
 )
 

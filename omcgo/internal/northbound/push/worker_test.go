@@ -20,8 +20,9 @@ import (
 
 // mockOutboxRepo is an in-memory implementation of OutboxRepository for tests.
 type mockOutboxRepo struct {
-	mu      sync.Mutex
-	entries map[uuid.UUID]*OutboxEntry
+	mu        sync.Mutex
+	entries   map[uuid.UUID]*OutboxEntry
+	insertErr error
 }
 
 func newMockOutboxRepo() *mockOutboxRepo {
@@ -31,6 +32,9 @@ func newMockOutboxRepo() *mockOutboxRepo {
 func (m *mockOutboxRepo) Insert(_ context.Context, entry *OutboxEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.insertErr != nil {
+		return m.insertErr
+	}
 	if entry.ID == uuid.Nil {
 		entry.ID = uuid.New()
 	}

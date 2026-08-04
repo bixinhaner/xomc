@@ -16,6 +16,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/buildinfo"
 	"github.com/omcgo/omcgo/internal/bundle"
@@ -1432,6 +1433,37 @@ func initNorthboundModule(c *Container) error {
 		logger.Warn("subscribe push engine", zap.Error(err))
 	}
 	c.GS.Register("push-engine", 1, func(ctx context.Context) error { return pushEngine.Close() })
+
+	if c.Cfg.Alarm.LifecycleRelayEnabled() {
+		lifecycleConsumer := push.NewAlarmLifecycleConsumer(
+			pushEngine,
+			c.EventBus,
+			c.Cfg.Alarm.LifecycleStartSequence,
+		)
+		lifecycleConsumer.SetShadow(c.Cfg.Alarm.LifecycleMode == string(alarm.LifecycleModeShadow))
+		if err := lifecycleConsumer.Subscribe(); err != nil {
+			return fmt.Errorf("subscribe northbound alarm lifecycle consumer: %w", err)
+		}
+		c.GS.Register("northbound-alarm-lifecycle", 1, func(context.Context) error {
+			return lifecycleConsumer.Close()
+		})
+		if c.Cfg.Alarm.LifecycleMode == string(alarm.LifecycleModeCanonical) {
+			readyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			readyErr := lifecycleConsumer.Ready(readyCtx)
+			cancel()
+			if readyErr != nil {
+				_ = lifecycleConsumer.Close()
+				return fmt.Errorf("enable canonical northbound alarm lifecycle: %w", readyErr)
+			}
+			if c.AlarmEngine == nil {
+				return fmt.Errorf("enable canonical northbound alarm lifecycle: alarm engine is unavailable")
+			}
+			c.AlarmEngine.SetCanonicalLifecycleReady(true)
+			if err := c.AlarmEngine.SetLifecycleMode(alarm.LifecycleModeCanonical); err != nil {
+				return fmt.Errorf("activate canonical alarm lifecycle: %w", err)
+			}
+		}
+	}
 
 	// Outbox 后台投递 worker：轮询 northbound_outbox 待投递条目，按 target 重试，
 	// 耗尽重试落 dead 状态，供死信队列端点（GET/POST /push/deadletter*）消费。
