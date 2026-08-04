@@ -21,7 +21,7 @@ import type {
   MMLTaskCommandDetail,
 } from '@core/types/mml';
 import { parseMmlDeviceTaskResult } from '@core/utils/mmlResultParser';
-import { isReadOp, opLabel } from './constants';
+import { isReadOp } from './constants';
 import type {
   CommandItem,
   CommandParamPath,
@@ -36,11 +36,15 @@ import type {
 } from './types';
 
 /**
- * 逐 PATH 合并时失败单元格的 sentinel 显示值。
+ * 逐 PATH 合并时失败单元格/兜底故障的内部 sentinel。
  * 在 .ts 适配层定义（i18n guard 仅作用 .tsx），ResultTable 比对时复用此常量，
  * 避免在 .tsx 里硬编码中文字面量触发 guard。
  */
-export const PATH_FAILED_CELL = '✗ 失败';
+export const PATH_FAILED_CELL = '__MML_PATH_FAILED__';
+export const PATH_TASK_FAILED_FALLBACK = '__MML_PATH_TASK_FAILED__';
+export const PARTIAL_PATH_FAILED_FALLBACK = '__MML_PARTIAL_PATH_FAILED__';
+export const DISPATCH_FAILED_FALLBACK = '__MML_DISPATCH_FAILED__';
+export const READBACK_FAILED_FALLBACK = '__MML_READBACK_FAILED__';
 export const MAX_OBJECT_PATH_COLUMNS = 80;
 const CONSOLE_PARSE_OPTIONS = { maxParams: MAX_OBJECT_PATH_COLUMNS };
 
@@ -388,9 +392,7 @@ export function buildRawExecutePayload(
   // task_name 用与命令记录一致的名称（req4 对应关系）；调用方未传时回退默认。
   const name =
     taskName ??
-    `${operationType} ${paths[0] ?? ''}${
-      deviceSns.length === 1 ? ` ${deviceSns[0]}` : ` 等${deviceSns.length}台`
-    }`;
+    `${operationType} ${paths[0] ?? ''}${deviceSns.length === 1 ? ` ${deviceSns[0]}` : ''}`;
   return {
     device_sns: deviceSns,
     param_paths: paths,
@@ -495,17 +497,19 @@ export function expandObjectPathColumns(
 /**
  * 「指定参数」(裸路径)执行的命令记录命名：用执行的 path 命名，优先取设备模型 path 字典里的
  * 友好名（nameMap，来自 standard_params.description），缺省回退路径叶子名；前缀操作中文标签。
- * 例：LST `Device.DeviceInfo.SoftwareVersion` → 「查询 软件版本」（无字典命中时「查询 SoftwareVersion」）。
+ * 例：LST `Device.DeviceInfo.SoftwareVersion` → `Query SoftwareVersion`；无语言上下文时用 `LST` 兜底。
  */
 export function rawCommandName(
   op: MMLOperationType,
   paths: string[],
   nameMap?: Record<string, string>,
+  opText?: string,
+  multiPathSuffix?: string,
 ): string {
   const first = paths[0] ?? '';
   const friendly = (nameMap && nameMap[first]) || leafName(first) || first;
-  const suffix = paths.length > 1 ? ` 等${paths.length}项` : '';
-  return `${opLabel(op)} ${friendly}${suffix}`.trim();
+  const suffix = paths.length > 1 ? (multiPathSuffix ?? '') : '';
+  return `${opText || op} ${friendly}${suffix}`.trim();
 }
 
 function toClock(iso?: string): string | undefined {
@@ -618,7 +622,7 @@ export function hasPlanRows(rows: Pick<ResultRow, 'planLineNo'>[]): boolean {
  * 把后端逐条结果合并为「每设备一行」。
  * - 整体下发：每设备 1 条结果 → 直接 mapResultItemToRow。
  * - 逐 PATH：每设备 N 条结果（每 path 一条 device_task，command_index 定位 path）→
- *   合并为一行：成功 path 填读回值，失败 path 单元格标「✗ 失败」，行状态 = 全成功才 success，
+ *   合并为一行：成功 path 填读回值，失败 path 单元格标内部 sentinel，行状态 = 全成功才 success，
  *   否则 failed；并填 pathTasks 供「查看」详情展示 path 级成败。
  * columns 按 command_index 顺序（逐 PATH 时 columns[i] 即第 i 条 command 的 path）。
  */
@@ -660,7 +664,7 @@ export function buildDeviceRows(
         status: base[i].status,
         dispatchedAt: base[i].dispatchedAt ?? '',
         respondedAt: base[i].respondedAt ?? '',
-        value: base[i].status === 'success' ? (base[i].cells[path] ?? '') : (it.failReason ?? '失败'),
+        value: base[i].status === 'success' ? (base[i].cells[path] ?? '') : (it.failReason ?? PATH_TASK_FAILED_FALLBACK),
       });
     });
     pathTasks.sort((a, b) => a.pathIndex - b.pathIndex);
@@ -669,7 +673,7 @@ export function buildDeviceRows(
       ...base[0],
       status: allOk ? 'success' : 'failed',
       cells,
-      faultCode: allOk ? undefined : '部分 path 失败',
+      faultCode: allOk ? undefined : PARTIAL_PATH_FAILED_FALLBACK,
       pathTasks,
     });
   }
@@ -735,13 +739,13 @@ export function buildMODReadbackRows(
         status: modOk ? 'success' : 'failed',
         dispatchedAt: toClock(firstMod?.startedAt) ?? '',
         respondedAt: toClock(firstMod?.finishedAt) ?? '',
-        value: modOk ? (setValues[path] ?? '') : (firstMod?.failReason ?? '失败'),
+        value: modOk ? (setValues[path] ?? '') : (firstMod?.failReason ?? PATH_TASK_FAILED_FALLBACK),
       });
     }
     if (lstItem) {
       const lstRows = hasReadback
         ? readbackPairs
-        : Object.keys(setValues).map((path) => ({ path, value: lstOk ? '' : (lstItem.failReason ?? '回读失败') }));
+        : Object.keys(setValues).map((path) => ({ path, value: lstOk ? '' : (lstItem.failReason ?? READBACK_FAILED_FALLBACK) }));
       for (const { path, value } of lstRows) {
         pathTasks.push({
           pathIndex: 1,
@@ -772,7 +776,7 @@ export function buildMODReadbackRows(
       deviceTaskId: modTaskId,
       status,
       cells,
-      faultCode: modOk ? undefined : (firstMod?.failReason ?? '下发失败'),
+      faultCode: modOk ? undefined : (firstMod?.failReason ?? DISPATCH_FAILED_FALLBACK),
       unverifiedReason: status === 'unverified' ? 'query-failed' : undefined,
       pathTasks,
       dispatchedAt: toClock(firstMod?.startedAt),

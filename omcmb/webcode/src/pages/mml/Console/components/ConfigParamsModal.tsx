@@ -25,7 +25,7 @@ import type {
   OperationMode,
   RawPathPayload,
 } from '../types';
-import { CONFIG_TAB_HEIGHT, isReadOp, opColor, opLabel } from '../constants';
+import { CONFIG_TAB_HEIGHT, isReadOp, opColor, opLabelI18nKey } from '../constants';
 import RawPathPanel from './RawPathPanel';
 import { newRawPathRow } from '../rawPathRow';
 import { validateRawPath } from '../rawPathValidate';
@@ -312,7 +312,7 @@ export default function ConfigParamsModal({
         {/* 统一头部（所有操作类型同一布局，参考 LST）：操作类型 + 命令名称 + 操作提示。 */}
         <Space size={8} wrap style={{ width: '100%' }}>
           <Tag color={opColor(command.operationType)} style={{ marginInlineEnd: 0 }}>
-            {command.operationType} · {opLabel(command.operationType)}
+            {command.operationType} · {t(opLabelI18nKey(command.operationType) ?? '')}
           </Tag>
           <Text strong>
             {command.commandName}
