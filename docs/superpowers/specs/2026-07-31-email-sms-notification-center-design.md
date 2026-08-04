@@ -22,7 +22,7 @@ NATS JetStream 和多类事务 Outbox 基础，但邮件短信通知尚未形成
 ### 老 OMC 可确认实现
 
 老项目 Java 和部分文档被 Esafenet 加密，无法直接证明全部后端方法体；本设计只采用
-可读 JSP、现有说明文档和 2026-07-31 老 OMC 13.0.5 现场页面共同证明的行为。
+可读 JSP、现有说明文档和 2026-07-31、2026-08-04 老 OMC 13.0.5 现场页面共同证明的行为。
 
 老系统的告警邮件链路为：
 
@@ -45,6 +45,10 @@ NATS JetStream 和多类事务 Outbox 基础，但邮件短信通知尚未形成
   或业务方确认；迁移时不能把推断当成已验证事实。
 - 收件人支持分号分隔的固定邮箱和系统默认收件人。
 - 模板列表用邮件图标表示邮件已启用。
+- 活动告警支持确认、取消确认、清除、标记已读，重复告警在同一 occurrence 上累加
+  `Alarm Count` 并刷新更新时间；新实现必须保留这些生命周期语义。
+- 现场存在“基站经纬度变化”类告警，证明电子围栏/地理安全结果可以进入网元告警域，
+  但备份失败、通知渠道故障等没有网元身份的系统故障不能冒充基站告警。
 - 发送历史字段包括邮件主题、收件人集合、发送时间、结果和失败原因。
 - 发送结果只有成功、失败、部分成功的批次汇总，不能审计单个收件人。
 - SMTP 配置是系统级单例，包含启用、发件邮箱、密码、Host、Port 和连接测试。
@@ -141,9 +145,14 @@ TimescaleDB `alarms_history` 是可重放的幂等历史投影，不参与主库
 
 当前 `ALARM` JetStream 捕获 `alarm.>` 且使用 `WorkQueuePolicy`，只适合单一任务消费，
 不能承载历史投影、北向和通知中心的独立 fan-out。新增 `DOMAIN_ALARM` 流捕获
-`domain.alarm.>`，使用 `LimitsPolicy`、S2 压缩、默认 7 天 MaxAge 和 1 GiB MaxBytes；
+`domain.alarm.>`，使用 `LimitsPolicy`、S2 压缩、默认 7 天 MaxAge 和可配置的硬字节上限；
 每个消费者使用独立 durable。采用不同顶级前缀是为了避免与现有 `alarm.>` 流 Subject
 重叠，也避免生产环境重建现有 ALARM 流。
+
+`MaxAge=7d` 只是保留时间上界；达到 `MaxBytes` 时 JetStream 会更早淘汰消息。初始代码
+默认值按 10 GiB 提供安全硬上限，但生产值必须依据现场峰值、平均载荷、消费者最长中断
+窗口和磁盘预算计算后显式配置。上线门禁必须同时检查 stream bytes、最老消息、各 durable
+lag 和提前淘汰风险，不能用固定字节数宣称一定保留 7 天。
 
 Relay 默认关闭。上线时先创建 DOMAIN_ALARM 流，记录切换起始 stream sequence，再以该
 sequence 创建历史投影、北向和通知 Shadow durable，最后启用 Relay。新增消费者不得依赖
@@ -161,11 +170,16 @@ sequence 创建历史投影、北向和通知 Shadow durable，最后启用 Rela
 - 继续负责告警产生、变更、确认、清除和持久化。
 - 当前 `Alarm.ID` 直接作为稳定 `occurrence_id`，同一生命周期不再生成第二套标识。
 - 在主 PostgreSQL 告警事务内写 `alarm_event_outbox`。
-- 为同一 occurrence 的每次生命周期变化递增持久化 `alarm_version`。
+- 为同一 occurrence 的每次生命周期变化递增持久化 `alarm_version`。版本必须在持有活动行
+  锁或通过期望版本校验的主库事务内分配，禁止 AlarmEngine 在事务外预计算版本。
 - 清除 Outbox 保存归档所需的完整快照，使 TimescaleDB 投影不依赖已删除活动行。
+- 新到达事件若被 `auto_clear` 直接清除，仍须在同一主库事务内形成 `raised v1`、
+  `cleared v2` 两条有序事实，不能让 occurrence 从 cleared 开始。
 - 单条、批量、自动确认、自动清除、同步对账和 Expedited Event 等所有活动告警写路径
   必须经过相同生命周期事务；REST Handler 不得再绕过 AlarmEngine 直接批量改表。
 - 不解析通知规则，不读取收件人，不发送消息。
+- 切换由 `alarm.lifecycle_mode=legacy|shadow|canonical` 控制，默认 `legacy`；只有 Relay、
+  历史投影、北向和通知 Shadow 全部门禁通过后才能进入 `canonical`。
 
 ### Alarm Event Relay
 
@@ -228,17 +242,18 @@ sequence 创建历史投影、北向和通知 Shadow durable，最后启用 Rela
 
 以上新 Subject 只允许发布 AlarmEngine 已持久化的标准生命周期事件。现有
 `alarm.raised`、`alarm.updated`、`alarm.acknowledged`、`alarm.cleared` 视为 legacy
-Subject，其载荷不统一，通知中心不得消费。备份任务、磁盘阈值等系统模块应调用
-AlarmEngine，或发布到独立、版本化的告警命令 Subject，由适配器完成校验和持久化。
-命令事件不是告警事实，通知中心和北向接口不得订阅。自定义载荷中的 `alert_email` 等
-收件人提示不进入生命周期契约，收件人统一由通知规则解析。
+Subject，其载荷不统一，通知中心不得消费。备份失败、存储阈值、通知渠道故障等缺少
+`device_id` 的系统事件保持在独立 system incident/health 域；在系统告警域建模完成前，
+不得通过伪造设备身份塞入要求 `alarms_active.device_id NOT NULL` 的 AlarmEngine。命令事件
+不是告警事实，通知中心和北向接口不得订阅。自定义载荷中的 `alert_email` 等收件人提示
+不进入生命周期契约，收件人统一由通知规则解析。
 
 事件载荷至少包括：
 
 ```text
 schema_version
 event_id
-event_type
+lifecycle_type
 occurred_at
 occurrence_id
 alarm_id
@@ -252,7 +267,7 @@ severity
 previous_severity
 alarm_identifier
 alarm_name
-event_type_name
+alarm_event_type
 probable_cause
 specific_problem
 alarm_source
@@ -261,11 +276,18 @@ raised_at
 acknowledged_at
 cleared_at
 alarm_count
-additional_information
+extensions
 ```
 
+载荷使用显式、稳定的 `AlarmLifecycleSnapshot` 字段，禁止直接嵌套内部 `model.Alarm`；内部
+模型字段增加、数据库类型变化或 JSON tag 调整不得静默改变领域契约。`change_mask` 使用
+受控枚举，`previous_severity` 在严重级别变化时由事务锁定后的旧快照给出，`occurred_at`
+使用数据库事务中的实际变更时间，而不是 builder 任意取当前时间。
+
 载荷是事件发生时的不可变业务快照，通知中心不得在重放时用当前告警内容悄悄改写历史。
-敏感或超大 AdditionalInformation 必须按模板允许列表使用，不能原样泄露到短信。
+`extensions` 只允许从 `managed_object_instance`、`additional_information`、
+`additional_text`、`notification_type` 等审核后的键构造，并设置单值和总长度上限；模板层
+仍须再次按变量白名单选择和截断，不能把整个 AdditionalInformation 原样暴露给收件人。
 
 `alarm_version` 从 1 开始，每次产生、属性变更、确认、取消确认和清除严格递增。通知
 Inbox 先以 `event_id` 去重，再按 occurrence 应用版本：
@@ -273,7 +295,7 @@ Inbox 先以 `event_id` 去重，再按 occurrence 应用版本：
 - `version <= last_applied_version`：视为重复或旧事件，记录后忽略。
 - `version == last_applied_version + 1`：应用并推进状态。
 - `version > last_applied_version + 1`：进入等待，不跨版本执行通知策略；缺失事件到达后
-  继续处理，超过等待上限则产生运维告警。
+  继续处理，超过等待上限则产生 system incident/health signal、指标和站内通知。
 
 Worker 在外部调用前必须重新检查 occurrence 当前状态、版本和 schedule generation。
 已确认或已清除后领取到的旧首次通知和重复提醒必须取消；已经进入外部调用的请求则按
@@ -340,7 +362,9 @@ recipients”业务。
 
 - 只包含启用状态的用户。
 - 渠道地址不能为空且必须通过格式校验。
-- 告警设备必须位于用户可见设备组范围。
+- 告警设备必须同时满足用户角色授予的设备组和制式权限。实现统一调用
+  `PermissionService.GetUserVisibleDeviceGrants`，不能只判断设备组。
+- `carrier` 只作为规则匹配和告警快照属性，不作为用户身份、租户或数据权限来源。
 - 同一地址只保留一次。
 - 后续用户联系方式变化不改写既有历史。
 
@@ -412,7 +436,7 @@ Broker 安全协议、Topic、消息 Schema、Ack 和幂等契约；直连短信
 - `last_error`
 - `created_at`
 
-`event_id` 唯一，错误信息必须脱敏。
+`event_id` 唯一，`(aggregate_id, aggregate_version)` 也必须唯一，错误信息必须脱敏。
 
 该表属于告警领域，北向接口、历史投影和通知中心消费同一标准事件。它不是通知专属
 队列。`domain.alarm.lifecycle.*` 不得存在第二个直接发布者；Shadow 期间可以与不同
@@ -666,9 +690,9 @@ Critical 默认绕过普通摘要，但仍受幂等、收件人级速率限制�
 渠道熔断时，新任务保留为可审计的等待或失败状态，不能每几分钟重复制造相同错误。
 配置修复并验证成功后进入 half-open 探测，再恢复 closed。
 
-通知渠道故障产生 OMC 内部 `NOTIFICATION_CHANNEL_UNAVAILABLE` 系统告警，但必须设置
-`origin=notification` 递归保护：故障渠道不能通知自己的故障，只允许站内告警、其他
-健康渠道或北向接口处理。
+通知渠道故障产生 OMC 内部 `NOTIFICATION_CHANNEL_UNAVAILABLE` system incident/health
+event、指标和站内通知，不伪造成带设备身份的网元告警。若通过其他健康渠道或北向处理，
+必须设置 `origin=notification` 递归保护：故障渠道不能通知自己的故障。
 
 重试耗尽进入死信。具有权限的管理员在修复配置后可以单条或批量重试，操作原因写入审计。
 
@@ -819,7 +843,8 @@ occurrence_id
 - 北向接口和其他标准消费者切换到 `domain.alarm.lifecycle.*` 后，删除 AlarmEngine 对
   legacy
   `alarm.raised`、`alarm.updated`、`alarm.acknowledged`、`alarm.cleared` 的直接发布。
-- 备份和其他系统模块的自定义 `alarm.*` 发布改为 AlarmEngine 调用或独立告警命令事件。
+- 备份和其他系统模块的自定义 `alarm.*` 保持在 system incident/health 边界并列入后续
+  专项迁移；本轮不得迁入要求设备身份的 AlarmEngine，canonical 消费者也不得订阅。
 
 ### 老 OMC 配置迁移
 
@@ -957,9 +982,9 @@ Critical 实时但有上限；低级别默认聚合；所有渠道设置限流�
 
 事件发生时解析并快照，历史保持可解释；恢复通知使用原已受理投递，不重新扩大范围。
 
-### 渠道故障告警递归
+### 渠道故障事件递归
 
-通知来源系统告警带递归保护，只走站内或其他健康渠道。
+通知来源 system incident 带递归保护，只走站内、指标或其他健康渠道，不冒充网元告警。
 
 ## 被否决方案
 

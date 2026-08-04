@@ -8,7 +8,7 @@ Adapter 提供统一规则、调度、投递和审计基础。
 **Architecture:** 主 PostgreSQL 中的告警变更与 `alarm_event_outbox` 原子提交，由 Relay
 发布到独立的 `DOMAIN_ALARM` JetStream；历史投影、北向和通知中心使用各自 durable
 消费。通知中心以 Inbox、occurrence 顺序投影、持久化 schedule 和逐收件人 delivery
-驱动邮件及 Kafka Worker，TimescaleDB 仅作为可重放历史投影。
+驱动邮件 Worker，并为后续 SMS Adapter 保留窄接口；TimescaleDB 仅作为可重放历史投影。
 
 **Tech Stack:** Go 1.25、pgx、Squirrel、PostgreSQL、TimescaleDB、NATS JetStream、
 Gin、Prometheus、React 19、TypeScript、TanStack Query、Ant Design、Vitest、
@@ -22,15 +22,18 @@ Playwright。
 - 运营商差异只能进入 `internal/core/carrier/`。
 - 数据库变化只折回三个 `000001` 基线，不创建 `000002+`。
 - 当前前端只维护 V1；所有用户可见文案必须进入中英文 i18n。
-- 用户、角色和投递历史必须服从设备组数据权限。
+- 用户、角色和投递历史必须通过 `GetUserVisibleDeviceGrants` 同时服从设备组和制式权限；
+  `carrier` 不是租户或数据权限来源。
 - `domain.alarm.lifecycle.*` 是唯一标准生命周期事实；legacy `alarm.*` 不得被通知中心消费。
+- 备份、磁盘和渠道故障等无受管网元身份的事件属于 system incident/health 域，禁止伪造
+  `device_id` 迁入 AlarmEngine。
 - SMTP accepted 不等于 delivered；Kafka Ack 只能记为 handoff。
 - 直连短信不在本计划实施范围，必须在供应商协议和回执契约冻结后单独设计。
 - 每个任务先写失败测试，再写最小实现，并使用 Conventional Commits 中文提交。
 
 ## 交付边界与顺序
 
-本计划分为三个独立验收里程碑：
+本计划分为两个独立验收里程碑：
 
 1. **A：可靠告警事件基础**——不发送通知，可单独上线 Shadow。
 2. **B：通知核心与邮件试点**——完成规则、模板、调度、邮件、历史和迁移预览。
@@ -58,12 +61,22 @@ Playwright。
 
 ```go
 func TestAlarmLifecyclePayload_RoundTrip(t *testing.T) {
-    alarm := model.Alarm{ID: uuid.New(), DeviceID: uuid.New(), DeviceSN: "SN-1"}
-    payload := event.NewAlarmLifecyclePayload(
-        event.AlarmLifecycleRaised, alarm, 1, []string{"status"},
+    previous := model.Alarm{Severity: model.AlarmMajor}
+    alarm := model.Alarm{
+        ID: uuid.New(), DeviceID: uuid.New(), DeviceSN: "SN-1",
+        Severity: model.AlarmCritical,
+    }
+    occurredAt := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+    payload, err := event.NewAlarmLifecyclePayload(
+        event.AlarmLifecycleUpdated, alarm, &previous, 2, occurredAt,
+        []event.AlarmChangeField{event.AlarmChangeSeverity},
     )
+    require.NoError(t, err)
     require.Equal(t, alarm.ID, payload.OccurrenceID)
-    require.Equal(t, int64(1), payload.AlarmVersion)
+    require.Equal(t, alarm.ID, payload.Snapshot.AlarmID)
+    require.Equal(t, int64(2), payload.AlarmVersion)
+    require.Equal(t, model.AlarmMajor, *payload.PreviousSeverity)
+    require.Equal(t, occurredAt, payload.OccurredAt)
     require.Equal(t, 1, payload.SchemaVersion)
 }
 ```
@@ -86,19 +99,23 @@ const (
 )
 
 type AlarmLifecyclePayload struct {
-    SchemaVersion   int               `json:"schema_version"`
-    EventID         uuid.UUID         `json:"event_id"`
-    EventType       string            `json:"event_type"`
-    OccurredAt      time.Time         `json:"occurred_at"`
-    OccurrenceID    uuid.UUID         `json:"occurrence_id"`
-    AlarmID         uuid.UUID         `json:"alarm_id"`
-    AlarmVersion    int64             `json:"alarm_version"`
-    ChangeMask      []string          `json:"change_mask,omitempty"`
-    Alarm           model.Alarm       `json:"alarm"`
+    SchemaVersion    int                    `json:"schema_version"`
+    EventID          uuid.UUID              `json:"event_id"`
+    LifecycleType    AlarmLifecycleType     `json:"lifecycle_type"`
+    OccurredAt       time.Time              `json:"occurred_at"`
+    OccurrenceID     uuid.UUID              `json:"occurrence_id"`
+    AlarmVersion     int64                  `json:"alarm_version"`
+    ChangeMask       []AlarmChangeField     `json:"change_mask,omitempty"`
+    PreviousSeverity *model.AlarmSeverity   `json:"previous_severity,omitempty"`
+    Snapshot         AlarmLifecycleSnapshot `json:"snapshot"`
 }
 ```
 
-Builder 必须复制 `AdditionalInfo`，避免调用方后续修改 map 改写已构造快照。
+`AlarmLifecycleSnapshot` 显式声明设计文档列出的稳定字段，禁止嵌套 `model.Alarm`。
+Builder 只复制审核后的 extensions 键并执行长度限制，避免内部模型变化或调用方后续修改
+map 改写快照；`occurredAt` 必须由事务存储传入，builder 不自行取时间。构造器拒绝未知
+生命周期类型、零 occurrence/device ID、非正版本、零变更时间，以及缺旧快照的 severity
+变更。
 
 - [ ] **Step 4: 为标准事件新增独立 LimitsPolicy 流测试**
 
@@ -111,12 +128,14 @@ StreamDef{
     Retention: nats.LimitsPolicy,
     AllowDirect: true,
     MaxAge: 7 * 24 * time.Hour,
-    MaxBytes: 1 << 30,
+    MaxBytes: alarmLifecycleStreamMaxBytes,
     Compression: nats.S2Compression,
 }
 ```
 
-并验证它与 legacy `ALARM` 的 `alarm.>` 不重叠。
+初始 `alarmLifecycleStreamMaxBytes` 为 10 GiB 安全硬上限；测试还须验证该值大于零，并与
+legacy `ALARM` 的 `alarm.>` 不重叠。Task 4 接入部署配置覆盖。MaxAge 不是 7 天容量承诺，
+正式启用前必须完成 Task 14 容量计算和提前淘汰门禁。
 
 - [ ] **Step 5: 运行契约和流定义测试**
 
@@ -153,6 +172,7 @@ ALTER-compatible final schema:
 alarms_active.alarm_version bigint NOT NULL DEFAULT 1
 alarm_event_outbox.event_id uuid UNIQUE NOT NULL
 alarm_event_outbox.aggregate_version bigint NOT NULL
+alarm_event_outbox UNIQUE (aggregate_id, aggregate_version)
 alarm_event_outbox.payload jsonb NOT NULL
 alarm_event_outbox.status varchar(16) NOT NULL DEFAULT 'pending'
 ```
@@ -188,7 +208,8 @@ created_at timestamptz NOT NULL DEFAULT now(),
 updated_at timestamptz NOT NULL DEFAULT now()
 ```
 
-增加 `(status, next_attempt_at)`、`(aggregate_id, aggregate_version)` 索引；不新增迁移文件。
+增加 `(status, next_attempt_at)` 索引和 `(aggregate_id, aggregate_version)` 唯一约束；不新增
+迁移文件。
 
 - [ ] **Step 4: 将版本字段接入模型和行扫描**
 
@@ -232,6 +253,8 @@ git commit -m "feat(alarm): 增加生命周期版本和事件Outbox"
 活动行失败 => 不存在 Outbox
 清除成功 => 活动行删除且 cleared Outbox 含完整告警快照
 每次变化 => alarm_version 严格 +1
+并发更新 => 版本在事务锁内串行分配，不产生相同或跳跃版本
+新告警 auto_clear => 同一事务产生 raised v1 和 cleared v2
 ```
 
 - [ ] **Step 2: 运行测试并确认旧存储无法保证原子性**
@@ -244,22 +267,26 @@ Expected: FAIL。
 
 ```go
 type LifecycleStore interface {
-    PersistRaised(context.Context, *model.Alarm, event.AlarmLifecyclePayload) error
-    PersistUpdated(context.Context, *model.Alarm, event.AlarmLifecyclePayload) error
-    PersistAcknowledged(context.Context, *model.Alarm, event.AlarmLifecyclePayload) error
-    PersistUnacknowledged(context.Context, *model.Alarm, event.AlarmLifecyclePayload) error
-    PersistCleared(context.Context, *model.Alarm, event.AlarmLifecyclePayload) error
+    PersistRaised(context.Context, LifecycleMutation) (event.AlarmLifecyclePayload, error)
+    PersistUpdated(context.Context, LifecycleMutation) (event.AlarmLifecyclePayload, error)
+    PersistAcknowledged(context.Context, LifecycleMutation) (event.AlarmLifecyclePayload, error)
+    PersistUnacknowledged(context.Context, LifecycleMutation) (event.AlarmLifecyclePayload, error)
+    PersistCleared(context.Context, LifecycleMutation) (event.AlarmLifecyclePayload, error)
 }
 ```
 
 每个方法内部只使用 `s.pool.Begin(ctx)`；清除事务删除 `alarms_active` 并写 Outbox，不访问
-`s.tsPool`。
+`s.tsPool`。存储方法先 `SELECT ... FOR UPDATE`（或使用等价 expected-version 条件）取得旧
+快照，在事务内分配下一版本、确定变更时间、构造 payload 并写 Outbox。AlarmEngine 不得
+在事务外传入已计算的版本、previous severity 或最终 payload。
 
-- [ ] **Step 4: AlarmEngine 构造事件并调用原子方法**
+- [ ] **Step 4: AlarmEngine 发起变更并由存储事务构造事件**
 
 产生、重复更新、severity 更新、确认、取消确认、自动清除、人工清除和同步对账全部使用
 同一 builder。
-保留 legacy 发布只用于 Shadow 对比，并受明确 feature flag 控制。
+使用单一 `alarm.lifecycle_mode=legacy|shadow|canonical` 配置，默认 `legacy`。`shadow` 保留
+legacy 行为并生成 canonical 对比数据；`canonical` 只能在 Relay、历史投影和北向消费者
+全部就绪后启用。
 
 - [ ] **Step 5: 将批量活动告警操作改为经过 AlarmEngine**
 
@@ -325,6 +352,7 @@ Expected: FAIL。
 
 复用 `internal/pm/stream/outbox_relay.go` 的 claim/mark/requeue 结构，但保持 alarm 包独立。
 NATS `Event.ID` 必须等于 Outbox `event_id`，不能由 `event.NewEvent` 再生成新 ID。
+只有收到 JetStream PubAck 后才允许将 Outbox 标为 published。
 
 - [ ] **Step 4: 增加指标和 30 天保留清理**
 
@@ -336,11 +364,12 @@ NATS `Event.ID` 必须等于 Outbox `event_id`，不能由 `event.NewEvent` 再�
 保证同一进程只启动一个 Relay；多副本依赖 `SKIP LOCKED` 分担。健康检查只报告积压和
 最老延迟，不因短暂 NATS 故障阻止告警写入。
 
-- [ ] **Step 6: 增加显式启用和起始 sequence**
+- [ ] **Step 6: 接入单一模式、容量配置和起始 sequence**
 
-`alarm.lifecycle_relay_enabled` 默认 false。创建 DOMAIN_ALARM 流后记录
-`alarm.lifecycle_start_sequence`；历史、北向和通知 durable 必须显式使用该 sequence，
-不能依赖新 consumer 从尾部开始。超过流保留期时只能从已发布 Outbox 受控重放。
+`alarm.lifecycle_mode` 默认 `legacy`，只有 `shadow|canonical` 运行 Relay；
+`alarm.lifecycle_stream_max_bytes` 覆盖 Task 1 的 10 GiB 代码默认值。创建 DOMAIN_ALARM 流
+后记录 `alarm.lifecycle_start_sequence`；历史、北向和通知 durable 必须显式使用该
+sequence，不能依赖新 consumer 从尾部开始。超过流保留期时只能从已发布 Outbox 受控重放。
 
 - [ ] **Step 7: 运行测试**
 
@@ -397,14 +426,15 @@ durable 名称固定为 `alarm-history-projector-v1`。仅处理 cleared；schem
 
 - [ ] **Step 5: 实现单一受控切换**
 
-配置使用一个枚举：
+历史写路径服从全局生命周期模式：
 
 ```text
-alarm.history_projection_mode=shadow|projector
+alarm.lifecycle_mode=legacy|shadow|canonical
 ```
 
-`shadow` 保留原同步 Archive 并只比较；`projector` 禁止原同步 Archive，启用投影写。
-启动时发现两个写路径同时启用必须失败关闭投影，不能双写。
+`legacy` 保留原同步 Archive；`shadow` 保留原同步 Archive 并让 projector 只比较；
+`canonical` 禁止原同步 Archive，改由 projector 写入。启动时发现配置形成两个正式写路径
+必须失败关闭 canonical，不能双写。projector 未追平或不可用时不得切换 canonical。
 
 - [ ] **Step 6: 运行告警集成测试**
 
@@ -419,19 +449,14 @@ git add omcgo/internal/alarm omcgo/internal/core/appconfig omcgo/cmd omcgo/migra
 git commit -m "feat(alarm): 投影清除告警到TimescaleDB"
 ```
 
-### Task 6: 迁移 legacy 生产者和标准消费者
+### Task 6: 接入标准消费者并完成 legacy 受控切换
 
 **Files:**
-- Modify: `omcgo/internal/backup/policy_alarm_publisher.go`
-- Modify: `omcgo/internal/backup/policy_storage_alarm.go`
-- Modify: `omcgo/internal/backup/policy_monitor.go`
 - Create: `omcgo/internal/northbound/push/alarm_lifecycle_consumer.go`
 - Create: `omcgo/internal/northbound/push/alarm_lifecycle_consumer_test.go`
 - Modify: `omcgo/internal/northbound/push/engine.go`
 - Modify: `omcgo/internal/core/event/subjects.go`
 - Modify: `omcgo/internal/alarm/engine.go`
-- Modify: `omcgo/internal/backup/policy_alarm_publisher_test.go`
-- Modify: `omcgo/internal/backup/policy_storage_monitor_test.go`
 - Modify: `omcgo/internal/northbound/push/engine_test.go`
 - Modify: `omcgo/internal/alarm/engine_test.go`
 
@@ -439,27 +464,22 @@ git commit -m "feat(alarm): 投影清除告警到TimescaleDB"
 - Produces: 单一标准生命周期发布链
 - Consumes: Task 4 Relay、Task 5 Projector
 
-- [ ] **Step 1: 写生产者边界测试**
+- [ ] **Step 1: 写系统事件领域边界守卫测试**
 
-断言备份失败和存储阈值不再发布 `event.SubjectAlarmRaised/Cleared`，也不再把
-`alert_email` 放入领域事实；它们必须调用窄接口：
+盘点并断言备份失败、存储阈值和通知渠道故障没有被转换为要求受管网元 `device_id` 的
+`AlarmLifecyclePayload`。这些现有 legacy `alarm.*` 自定义载荷不属于本轮 canonical 事实，
+不得被历史投影、北向生命周期消费者或通知中心订阅。
 
-```go
-type SystemAlarmSink interface {
-    Raise(context.Context, SystemAlarmCommand) error
-    Clear(context.Context, SystemAlarmCommand) error
-}
-```
+- [ ] **Step 2: 保持系统事件独立并记录后续迁移边界**
 
-- [ ] **Step 2: 实现备份到 AlarmEngine 的适配器**
-
-命令必须映射稳定 identifier/source/severity，收件人交由通知规则；同一磁盘阈值 occurrence
-通过稳定去重键进入现有 AlarmEngine。
+备份、磁盘和渠道健康继续使用各自 system incident/health 路径及站内通知/指标；移除
+`alert_email` 等直连收件人提示应作为独立兼容任务处理。只有未来建立具备独立 identity、
+生命周期、权限和查询模型的 system alarm 域后，才允许迁移，不能伪造基站设备。
 
 - [ ] **Step 3: 将北向消费者接入标准 payload**
 
 北向使用独立 durable `northbound-alarm-lifecycle-v1` 和明确的 start sequence，映射
-`payload.Alarm` 后直接写现有 `northbound_outbox`，不能先 Ack 生命周期事件再依赖一次
+`payload.Snapshot` 后直接写现有 `northbound_outbox`，不能先 Ack 生命周期事件再依赖一次
 不可靠的二次 NATS 发布。consumer 不同时订阅 legacy 和标准 Subject。
 
 - [ ] **Step 4: 删除 AlarmEngine legacy 直接发布**
@@ -469,19 +489,20 @@ type SystemAlarmSink interface {
 
 - [ ] **Step 5: 运行受影响测试**
 
-Run: `cd omcgo && go test ./internal/alarm ./internal/backup ./internal/northbound/... ./internal/core/event -count=1`
+Run: `cd omcgo && go test ./internal/alarm ./internal/northbound/... ./internal/core/event -count=1`
 
 Expected: PASS。
 
 - [ ] **Step 6: 里程碑 A 验收**
 
 验证 NATS 中每个 `event_id` 唯一、三个 durable 独立收到事件、TSDB 中清除历史不重复、
-NATS 中断不阻塞告警事务且恢复后 Relay 补发。
+NATS 中断不阻塞告警事务且恢复后 Relay 补发；验证 stream bytes、最老消息和 durable lag
+满足容量门禁，且系统事件未混入受管网元生命周期。
 
 - [ ] **Step 7: 提交**
 
 ```bash
-git add omcgo/internal/alarm omcgo/internal/backup omcgo/internal/northbound omcgo/internal/core/event
+git add omcgo/internal/alarm omcgo/internal/northbound omcgo/internal/core/event
 git commit -m "refactor(alarm): 统一标准告警生命周期事件"
 ```
 
@@ -660,7 +681,9 @@ type ResolvedRecipient struct {
 }
 ```
 
-用户或角色的可见设备组必须包含告警设备；无权限结果记录排除原因。
+通过 `PermissionService.GetUserVisibleDeviceGrants` 取得用户或角色的授权，告警设备必须
+同时命中设备组和制式 grant；不能沿用已删除的 `users.carrier`，也不能只判断设备组。
+无权限结果记录排除原因。
 
 - [ ] **Step 5: 实现联系组、渠道配置与写审计**
 
@@ -728,8 +751,8 @@ func (s *Service) AuthorizeSend(
 
 - [ ] **Step 5: 实现投递、attempt、轨迹和人工重试 API**
 
-提供设计中的 delivery 列表/详情/attempt/retry API。查询必须按关联告警设备组过滤，地址
-默认脱敏；完整地址需要独立权限。批量重试最多 100 条、必须填写原因，只允许永久配置已
+提供设计中的 delivery 列表/详情/attempt/retry API。查询必须按关联告警的设备组 + 制式
+grant 过滤，地址默认脱敏；完整地址需要独立权限。批量重试最多 100 条、必须填写原因，只允许永久配置已
 修复后的 dead_letter，操作写审计。告警详情轨迹只返回当前用户可见 occurrence。
 
 - [ ] **Step 6: 运行测试**
@@ -781,10 +804,11 @@ Worker 流程固定为 claim → `AuthorizeSend` → attempt start → SMTP → 
 删除 `cmd/app/provider/alarm.go` 的 `OMC_SMTP_*` 告警 dispatcher 装配。默认邮件渠道复用
 当前 `c.Cfg.Notification.SMTP`，秘密只通过运行配置/Secret 引用进入 adapter。
 
-- [ ] **Step 5: 增加渠道故障系统告警**
+- [ ] **Step 5: 增加渠道故障系统事件与健康信号**
 
-产生 `NOTIFICATION_CHANNEL_UNAVAILABLE` 时设置 `origin=notification`；同一故障渠道必须
-被递归保护排除，只允许站内、其他健康渠道或北向处理。
+产生 `NOTIFICATION_CHANNEL_UNAVAILABLE` system incident/health event、指标和站内通知；
+不得伪造成带 `device_id` 的网元告警。若由其他健康渠道或北向转发，必须设置
+`origin=notification` 并递归排除故障渠道。
 
 - [ ] **Step 6: 实现连接验证与测试发送**
 
@@ -993,7 +1017,10 @@ ack/clear 后没有迟到提醒
 - [ ] **Step 4: 建立容量基线**
 
 以现场预估峰值至少 2 倍压测，记录事件处理 P50/P95/P99、Outbox oldest age、schedule
-延迟、SMTP 吞吐、数据库锁等待和最大积压。实时通知内部处理 P95 必须小于 30 秒。
+延迟、SMTP 吞吐、数据库锁等待和最大积压。实时通知内部处理 P95 必须小于 30 秒。根据
+平均/峰值事件大小、7 天目标窗口、最长消费者中断和磁盘预算计算 DOMAIN_ALARM
+`MaxBytes`；验证容量至少覆盖目标窗口，并对 stream bytes、最老消息、durable lag 和
+提前淘汰风险配置告警。容量门禁未通过不得启用 Relay/canonical。
 
 - [ ] **Step 5: 编写运行手册**
 
