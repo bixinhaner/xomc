@@ -43,7 +43,7 @@
 #   --public-host <h> 全新安装时写入基站可达的 OMC_PUBLIC_HOST
 #   --floor-tolerance-pct <N>
 #                     全新安装资源规划的组件下限缺口容忍度（0-99，默认 60）
-#   --lang <zh|en>    安装提示语言（默认 en，也可用 OMC_LANG=zh 切换中文）
+#   --lang <cn|en>    安装提示语言（默认 en，也可用 OMC_LANG=cn 切换中文）
 #   --yes             所有交互式提示直接默认（适合 CI / 批处理）
 #   -h | --help       本帮助
 #
@@ -71,14 +71,14 @@ install_message() {
 log()  { echo -e "\033[1;32m[install]\033[0m $(install_message "$1" "${2:-}")"; }
 warn() { echo -e "\033[1;33m[install][$( [ "$OMC_LANG" = en ] && echo Warning || echo 警告 )]\033[0m $(install_message "$1" "${2:-}")" >&2; }
 die()  {
-  local zh="$1" en="$1" code=1
+  local cn="$1" en="$1" code=1
   if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
     code="$2"
   else
     en="${2:-$1}"
     code="${3:-1}"
   fi
-  echo -e "\033[1;31m[install][$( [ "$OMC_LANG" = en ] && echo Error || echo 错误 )]\033[0m $(install_message "$zh" "$en")" >&2
+  echo -e "\033[1;31m[install][$( [ "$OMC_LANG" = en ] && echo Error || echo 错误 )]\033[0m $(install_message "$cn" "$en")" >&2
   exit "$code"
 }
 sep()  { echo -e "\033[1;34m──────────────── $(install_message "$1" "${2:-}") ────────────────\033[0m"; }
@@ -100,7 +100,7 @@ Options:
   --fresh-install              Remove OMC data and Docker volumes before install
   --public-host <host>         Set the host reachable by base stations
   --floor-tolerance-pct <N>    Resource floor-gap tolerance, 0-99 (default 60)
-  --lang <zh|en>               Installation output language (default en)
+  --lang <cn|en>               Installation output language (default en)
   --yes                        Accept interactive confirmations
   -h, --help                   Show this help
 EOF
@@ -246,7 +246,7 @@ while [ $# -gt 0 ]; do
     --public-host)     PUBLIC_HOST_OVERRIDE="${2:?--public-host 需要 IP 或域名}"; shift 2 ;;
     --floor-tolerance-pct) FLOOR_TOLERANCE_PCT="${2:?--floor-tolerance-pct 需要 0-99 的整数}"; shift 2 ;;
     --floor-tolerance-pct=*) FLOOR_TOLERANCE_PCT="${1#*=}"; shift ;;
-    --lang|--language) OMC_LANG="${2:?--lang 需要 zh 或 en}"; shift 2 ;;
+    --lang|--language) OMC_LANG="${2:?--lang 需要 cn 或 en}"; shift 2 ;;
     --lang=*|--language=*) OMC_LANG="${1#*=}"; shift ;;
     --yes)             ASSUME_YES=1; shift ;;
     -h|--help)         show_help; exit 0 ;;
@@ -256,8 +256,8 @@ while [ $# -gt 0 ]; do
 done
 
 case "$OMC_LANG" in
-  zh|en) ;;
-  *) die "--lang 仅支持 zh 或 en，收到：$OMC_LANG" "--lang accepts only zh or en, got: $OMC_LANG" 1 ;;
+  cn|en) ;;
+  *) die "--lang 仅支持 cn 或 en，收到：$OMC_LANG" "--lang accepts only cn or en, got: $OMC_LANG" 1 ;;
 esac
 
 case "$FLOOR_TOLERANCE_PCT" in
@@ -329,7 +329,7 @@ fresh_install_reset() {
     die "无法写入 $package_env 的 OMC_PUBLIC_HOST" 1
 
   log "全新安装：按目标主机重新规划资源（组件下限缺口容忍度 ${FLOOR_TOLERANCE_PCT}%，最低运行预算仍为硬门禁）..." "Fresh install: planning resources for this host (floor-gap tolerance ${FLOOR_TOLERANCE_PCT}%; minimum runtime budget remains enforced) ..."
-  fresh_plan_args=( --floor-tolerance-pct "$FLOOR_TOLERANCE_PCT" )
+  fresh_plan_args=( --floor-tolerance-pct "$FLOOR_TOLERANCE_PCT" --lang "$OMC_LANG" )
   [ "$SKIP_MONITORING" = 1 ] && fresh_plan_args+=( --skip-monitoring )
   ( cd "$PKG_ROOT" && OMC_STORAGE_ENV_FILE="$package_env" \
       bash "$PKG_ROOT/deploy/plan-resources.sh" "${fresh_plan_args[@]}" ) ||
@@ -1450,7 +1450,7 @@ while :; do
   HEALTHCHECK_PROBE_REMAINING="$HEALTHCHECK_PROBE_TIMEOUT"
   [ "$HEALTHCHECK_REMAINING" -lt "$HEALTHCHECK_PROBE_REMAINING" ] &&
     HEALTHCHECK_PROBE_REMAINING="$HEALTHCHECK_REMAINING"
-  if timeout "${HEALTHCHECK_PROBE_REMAINING}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" --startup >"$HEALTHCHECK_LOG" 2>&1; then
+  if timeout "${HEALTHCHECK_PROBE_REMAINING}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" --lang "$OMC_LANG" --startup >"$HEALTHCHECK_LOG" 2>&1; then
     HEALTH_OK=1
     break
   elif [ "$?" -eq 124 ]; then
@@ -1471,7 +1471,7 @@ if [ "$HEALTH_OK" -eq 0 ] && [ "$HEALTHCHECK_FINAL_GRACE" -gt 0 ]; then
   HEALTHCHECK_FINAL_PROBE_TIMEOUT="$HEALTHCHECK_FINAL_GRACE"
   [ "$HEALTHCHECK_FINAL_PROBE_TIMEOUT" -gt "$HEALTHCHECK_PROBE_TIMEOUT" ] &&
     HEALTHCHECK_FINAL_PROBE_TIMEOUT="$HEALTHCHECK_PROBE_TIMEOUT"
-  if timeout "${HEALTHCHECK_FINAL_PROBE_TIMEOUT}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" >"$HEALTHCHECK_LOG" 2>&1; then
+  if timeout "${HEALTHCHECK_FINAL_PROBE_TIMEOUT}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" --lang "$OMC_LANG" >"$HEALTHCHECK_LOG" 2>&1; then
     HEALTH_OK=1
   fi
 fi

@@ -8,6 +8,7 @@ PLANNER="$SCRIPT_DIR/plan-resources.sh"
 
 PASS=0
 FAIL=0
+export OMC_LANG=en
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -30,6 +31,7 @@ MOUNTS='107374182400|/
 
 run_planner() {
   env \
+    OMC_LANG=en \
     OMC_PROBE_CPU=32 \
     OMC_PROBE_MEM_TOTAL_MIB=32768 \
     OMC_PROBE_MEM_AVAIL_MIB=32768 \
@@ -41,6 +43,7 @@ run_planner() {
 
 run_large_planner() {
   env \
+    OMC_LANG=en \
     OMC_PROBE_CPU=64 \
     OMC_PROBE_MEM_TOTAL_MIB=131072 \
     OMC_PROBE_MEM_AVAIL_MIB=131072 \
@@ -169,7 +172,7 @@ if [ -e "$TMP/low-resources.env" ]; then
 else
   ok
 fi
-if grep -q -- '--floor-tolerance-pct 只对后续组件下限缺口生效' "$TMP/low-output" &&
+if grep -q -- '--floor-tolerance-pct applies only to later component-floor gaps' "$TMP/low-output" &&
   grep -q -- 'plan-resources.sh --skip-monitoring' "$TMP/low-output"; then
   ok
 else
@@ -187,7 +190,7 @@ printf 'OMC_PUBLIC_HOST=10.0.0.2\n' > "$DRY_ENV"
 BEFORE="$(cat "$DRY_ENV")"
 run_planner "$DRY_ENV" "$TMP/dry-resources.env" --dry-run > "$TMP/dry-output" 2>&1 || bad "dry-run 应成功"
 check_eq "dry-run 不修改 env" "$(cat "$DRY_ENV")" "$BEFORE"
-if grep -q '人工.*\.env' "$TMP/dry-output" && grep -q '不会.*迁移' "$TMP/dry-output"; then
+if grep -q 'Check and adjust.*\.env' "$TMP/dry-output" && grep -q 'does not migrate' "$TMP/dry-output"; then
   ok
 else
   bad "dry-run 输出应提示人工修改 .env 且不会迁移数据"
