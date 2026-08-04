@@ -14,6 +14,21 @@ Adapter 提供统一规则、调度、投递和审计基础。
 Gin、Prometheus、React 19、TypeScript、TanStack Query、Ant Design、Vitest、
 Playwright。
 
+## 执行状态（2026-08-04）
+
+| Task | 状态 | 证据 |
+| --- | --- | --- |
+| 1 | 已完成 | `f112d0529` |
+| 2 | 已完成 | `512a8aba1` |
+| 3 | 已完成 | `2147c4133`、`6a3e8371b` |
+| 4 | 已完成 | `586a90099` |
+| 5 | 已完成 | `da50a3a63` |
+| 6 | 进行中 | 标准北向消费者代码完成；Shadow、故障注入和容量验收待执行 |
+| 7–14 | 未开始 | 里程碑 A 通过前不得进入 |
+
+下文保留原始 RED/GREEN checkbox 作为实施步骤模板；是否完成以本表、提交和验证记录共同
+判断，不能只按 checkbox 推断。
+
 ## Global Constraints
 
 - OMC 面向小基站运维，按运营商级告警可靠性和可审计性处理。
@@ -29,6 +44,12 @@ Playwright。
   `device_id` 迁入 AlarmEngine。
 - SMTP accepted 不等于 delivered；Kafka Ack 只能记为 handoff。
 - 直连短信不在本计划实施范围，必须在供应商协议和回执契约冻结后单独设计。
+- 通知维护窗口复用 `ops_maintenance_windows`：不抑制告警事实，只为命中范围的外部投递
+  记录可审计的 suppressed 原因。
+- 事件、schedule 和 delivery 统一以 UTC 保存；quiet hours、摘要和周期提醒绑定 IANA
+  时区，禁止依赖进程本地时区。
+- 老 `operator_code` 与当前 `carrier` 不直接等价。运营商硬隔离如仍为独立业务边界，
+  必须由统一 PermissionService 承载，通知规则不能以 carrier 匹配替代权限。
 - 每个任务先写失败测试，再写最小实现，并使用 Conventional Commits 中文提交。
 
 ## 交付边界与顺序
@@ -732,6 +753,10 @@ git commit -m "feat(notification): 增加版本化通知规则和模板"
 
 Critical 绕过普通摘要但受最大次数和收件人速率限制；Minor/Warning 进入 bucket；超限必须
 产生 suppressed 或 digest 事实，不能静默丢弃。
+
+增加维护窗口场景：已审批且生效的窗口命中设备时保留 occurrence 和事件审计，但外部
+delivery 记录为 `suppressed` 并关联窗口；窗口不命中、未审批或已结束时不得抑制。规则
+预览同时展示业务时区、下一次实际执行时间以及夏令时边界下的唯一执行结果。
 
 - [ ] **Step 3: 实现纯规则决策与事务写入**
 
