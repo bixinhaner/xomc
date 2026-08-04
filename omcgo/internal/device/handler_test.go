@@ -228,6 +228,68 @@ func (m *fakeDeviceRepo) ListProductClasses(_ context.Context) ([]string, error)
 	return nil, nil
 }
 
+func TestGeoPaginationState(t *testing.T) {
+	tests := []struct {
+		name         string
+		page         int
+		pageSize     int
+		itemCount    int
+		total        int64
+		wantHasMore  bool
+		wantComplete bool
+	}{
+		{
+			name:         "第一页覆盖全部坐标",
+			page:         1,
+			pageSize:     500,
+			itemCount:    200,
+			total:        200,
+			wantComplete: true,
+		},
+		{
+			name:        "第一页仍有后续分页",
+			page:        1,
+			pageSize:    500,
+			itemCount:   500,
+			total:       750,
+			wantHasMore: true,
+		},
+		{
+			name:         "尾页不能冒充完整集合",
+			page:         2,
+			pageSize:     500,
+			itemCount:    250,
+			total:        750,
+			wantHasMore:  false,
+			wantComplete: false,
+		},
+		{
+			name:         "空第一页是完整空集合",
+			page:         1,
+			pageSize:     500,
+			itemCount:    0,
+			total:        0,
+			wantComplete: true,
+		},
+		{
+			name:         "仓库条数与总数不一致时保守标记不完整",
+			page:         1,
+			pageSize:     500,
+			itemCount:    199,
+			total:        200,
+			wantComplete: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hasMore, complete := geoPaginationState(tt.page, tt.pageSize, tt.itemCount, tt.total)
+			assert.Equal(t, tt.wantHasMore, hasMore)
+			assert.Equal(t, tt.wantComplete, complete)
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 
 type fakeParamRepo struct {
