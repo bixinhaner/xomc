@@ -82,6 +82,7 @@ if run_planner "$ENV_FILE" "$TMP/resources.env" > "$TMP/output" 2>&1; then
   check_eq "32核 medium TimescaleDB CPU" "$(storage_env_get "$TMP/resources.env" TSDB_CPUS)" "16"
   check_eq "32核 medium worker CPU" "$(storage_env_get "$TMP/resources.env" WORKER_CPUS)" "8"
   check_eq "32GiB medium MinIO 内存余量" "$(storage_env_get "$TMP/resources.env" MINIO_MEM)" "6144m"
+  check_eq "web 最低内存避免 nginx OOM" "$(storage_env_get "$TMP/resources.env" WEB_MEM)" "512m"
   if [ "$(file_inode "$TMP/resources.env")" != "$BEFORE_INODE" ]; then
     ok
   else
