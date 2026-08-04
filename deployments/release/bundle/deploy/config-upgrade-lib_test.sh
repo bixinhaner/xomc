@@ -5,6 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=config-upgrade-lib.sh
 source "$SCRIPT_DIR/config-upgrade-lib.sh"
 
+file_mode() {
+  local file="$1"
+  stat -c '%a' "$file" 2>/dev/null || stat -f '%Lp' "$file"
+}
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -190,7 +195,7 @@ grep -q '^  port: 18081$' "$tmp/paramsync-legacy.yaml" || {
   echo "FAIL: parameter sync limit upgrade changed unrelated configuration" >&2
   exit 1
 }
-[ "$(stat -f '%Lp' "$tmp/paramsync-legacy.yaml" 2>/dev/null || stat -c '%a' "$tmp/paramsync-legacy.yaml")" = "640" ] || {
+[ "$(file_mode "$tmp/paramsync-legacy.yaml")" = "640" ] || {
   echo "FAIL: parameter sync limit upgrade changed live config permissions" >&2
   exit 1
 }
