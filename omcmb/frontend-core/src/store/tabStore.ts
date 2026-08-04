@@ -54,6 +54,8 @@ interface TabState {
   activeTabKey: string;
 
   openTab: (tab: TabItem) => void;
+  /** 新窗口/地址栏首次直达时，用当前业务页替换尚未实际访问的默认仪表板占位。 */
+  openTabForDirectEntry: (tab: TabItem) => void;
   closeTab: (key: string) => void;
   closeOtherTabs: (key: string) => void;
   closeAllTabs: () => void;
@@ -120,7 +122,14 @@ export const useTabStore = create<TabState>()(
           return;
         }
         // Enforce max tabs — remove the oldest non-dashboard, non-active tab if at limit
-        const newTabs = [...tabs, { ...tab, closable: tab.closable ?? true }];
+        const normalizedTab = {
+          ...tab,
+          closable: tab.path === '/dashboard' ? false : (tab.closable ?? true),
+        };
+        // 直达业务页的会话可能暂时没有仪表板；用户随后进入首页时仍把固定页签放回首位。
+        const newTabs = tab.path === '/dashboard'
+          ? [normalizedTab, ...tabs]
+          : [...tabs, normalizedTab];
         if (newTabs.length > MAX_TABS) {
           const removeIdx = newTabs.findIndex(
             (t) => t.key !== DASHBOARD_TAB_KEY && t.key !== get().activeTabKey
@@ -135,12 +144,29 @@ export const useTabStore = create<TabState>()(
         set({ tabs: newTabs, activeTabKey: tab.key });
       },
 
+      openTabForDirectEntry: (tab) => {
+        const { tabs, activeTabKey } = get();
+        const hasOnlyDefaultDashboard =
+          tabs.length === 1 &&
+          tabs[0]?.key === DASHBOARD_TAB_KEY &&
+          activeTabKey === DASHBOARD_TAB_KEY;
+        if (!hasOnlyDefaultDashboard || tab.path === '/dashboard') {
+          get().openTab(tab);
+          return;
+        }
+        set({
+          tabs: [{ ...tab, closable: tab.closable ?? true }],
+          activeTabKey: tab.key,
+        });
+      },
+
       closeTab: (key) => {
         const { tabs, activeTabKey } = get();
         if (key === DASHBOARD_TAB_KEY) return;
         const index = tabs.findIndex((t) => t.key === key);
         const closedTab = tabs[index];
-        const newTabs = tabs.filter((t) => t.key !== key);
+        const remainingTabs = tabs.filter((t) => t.key !== key);
+        const newTabs = remainingTabs.length > 0 ? remainingTabs : [DASHBOARD_TAB];
         let newActiveKey = activeTabKey;
         if (activeTabKey === key) {
           const prev = newTabs[index - 1];
@@ -207,7 +233,10 @@ export const useTabStore = create<TabState>()(
 
       moveTab: (fromIndex, toIndex) => {
         const { tabs } = get();
-        if (fromIndex === 0 || toIndex === 0) return;
+        if (
+          tabs[fromIndex]?.key === DASHBOARD_TAB_KEY ||
+          tabs[toIndex]?.key === DASHBOARD_TAB_KEY
+        ) return;
         const newTabs = [...tabs];
         const [moved] = newTabs.splice(fromIndex, 1);
         newTabs.splice(toIndex, 0, moved);

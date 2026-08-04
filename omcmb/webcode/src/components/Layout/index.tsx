@@ -1,7 +1,9 @@
 import { useEffect, useCallback, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useAppStore } from '@core/store/appStore';
+import { useMenuStore } from '@core/store/menuStore';
 import { useTabStore } from '@core/store/tabStore';
+import { useUserStore } from '@core/store/userStore';
 import { useSecuritySettings } from '@core/hooks/api/useSecuritySettings';
 import { useSystemTimezone } from '@core/hooks/api/useSystemTimezone';
 import { useIdleLogout } from '@core/hooks/useIdleLogout';
@@ -14,6 +16,9 @@ import Sidebar from './Sidebar';
 import TabBar from './TabBar';
 import TaskPanel from './TaskPanel';
 import QuickSettingsSyncWatcher from './QuickSettingsSyncWatcher';
+import { isDynamicMenuEnabled } from '../MenuBootstrap/featureFlag';
+import { NAV_CONFIG } from './Sidebar/navConfig';
+import { resolveRouteTab } from './routeTabResolver';
 import { AgentPanel } from '@/components/AgentPanel/AgentPanel';
 import ParticleCanvas from '@/components/Effects/ParticleCanvas';
 import DynamicLightSource from '@/components/Effects/DynamicLightSource';
@@ -27,6 +32,8 @@ export default function AppShell() {
   const isMobileOverlayOpen = useAppStore((s) => s.isMobileOverlayOpen);
   const setMobileOverlayOpen = useAppStore((s) => s.setMobileOverlayOpen);
   const locale = useAppStore((s) => s.locale);
+  const dynamicMenus = useMenuStore((s) => s.flatMenus);
+  const currentUser = useUserStore((s) => s.currentUser);
   const [agentOpen, setAgentOpen] = useState(false);
   const agentVisibility = useAgentVisibilityConfig();
   const agentVisible = agentVisibility.data?.visible === true;
@@ -40,12 +47,38 @@ export default function AppShell() {
   const location = useLocation();
   const syncActiveTabPath = useTabStore((s) => s.syncActiveTabPath);
   const activateByPath = useTabStore((s) => s.activateByPath);
+  const openTabForDirectEntry = useTabStore((s) => s.openTabForDirectEntry);
   useEffect(() => {
-    // 先尝试激活已存在的 tab（侧边栏导航场景）
-    activateByPath(location.pathname);
-    // 然后同步 path 的 search 参数（二级状态保持）
-    syncActiveTabPath(location.pathname + location.search);
-  }, [location.pathname, location.search, syncActiveTabPath, activateByPath]);
+    const fullPath = location.pathname + location.search;
+    // 已有 tab：激活并同步 query；地址栏直达且 tab 不存在时，按当前可见菜单补建。
+    if (activateByPath(location.pathname)) {
+      syncActiveTabPath(fullPath);
+      return;
+    }
+
+    const directTab = resolveRouteTab({
+      pathname: location.pathname,
+      dynamicMenuEnabled: isDynamicMenuEnabled(),
+      dynamicMenus,
+      staticNav: NAV_CONFIG,
+      locale,
+      isAdmin: currentUser?.role === 'admin',
+      isSuperAdmin: currentUser?.isSuperAdmin === true,
+    });
+    if (directTab) {
+      openTabForDirectEntry({ ...directTab, path: fullPath });
+    }
+  }, [
+    location.pathname,
+    location.search,
+    dynamicMenus,
+    locale,
+    currentUser?.role,
+    currentUser?.isSuperAdmin,
+    syncActiveTabPath,
+    activateByPath,
+    openTabForDirectEntry,
+  ]);
 
   // P2-⑦ 屏幕锁定：监听 sys_configs.security.userSessionExpirationMin。
   // 0 = 禁用；非 0 表示 N 分钟无操作后强制登出。AppShell 仅在登录态渲染，
