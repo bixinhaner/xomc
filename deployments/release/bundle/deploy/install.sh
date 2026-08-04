@@ -181,7 +181,7 @@ merge_env_preserve() {
   local prev="$1" new="$2" tmp
   [ -f "$new" ] || return 0
   if [ -z "$prev" ] || [ ! -f "$prev" ]; then
-    log ".env:首次部署(无上一版),使用交付包默认值 —— 记得在 $new 填 OMC_PUBLIC_HOST 与强口令"
+    log ".env:首次部署(无上一版),使用交付包默认值 —— 记得在 $new 填 OMC_PUBLIC_HOST 与强口令" ".env: first deployment (no previous release); using delivery package defaults. Remember to set OMC_PUBLIC_HOST and strong credentials in $new"
     return 0
   fi
   tmp="$(mktemp)" || { warn ".env 合并:mktemp 失败,沿用新包默认值"; return 0; }
@@ -599,7 +599,7 @@ if [ "$SKIP_INFRA" = 0 ]; then
   [ -d "$INFRA_DIR" ] || die "基础设施目录不存在：$INFRA_DIR
   · 首次部署需先：cd $INFRA_DIR && tar -xJf omc-infra-<版本>-<架构>.tar.xz --strip-components=1
   · 或加 --skip-infra 跳过基础设施镜像 load" 1
-  [ -d "$INFRA_DIR/images" ] || die "基础设施目录缺 images/：$INFRA_DIR/images" 1
+  [ -d "$INFRA_DIR/images" ] || die "基础设施目录缺 images/：$INFRA_DIR/images" "Infrastructure image directory is missing: $INFRA_DIR/images" 1
 else
   precheck_skipped_infra_images
 fi
@@ -967,7 +967,7 @@ if [ "$SKIP_INFRA" = 0 ]; then
   MON_IMAGES=("${IMAGE_PROMETHEUS:-}" "${IMAGE_ALERTMANAGER:-}" "${IMAGE_GRAFANA:-}" "${IMAGE_LOKI:-}" "${IMAGE_TEMPO:-}" "${IMAGE_OTELCOL:-}" "${IMAGE_NATS_EXPORTER:-}" "${IMAGE_NGINX_EXPORTER:-}" "${IMAGE_NODE_EXPORTER:-}" "${IMAGE_CADVISOR:-}")
 
   if images_exist "${INFRA_IMAGES[@]}" "${MON_IMAGES[@]}"; then
-    log "基础设施 + 监控镜像已存在，跳过 load；handoff 完成前保持现有容器不动"
+    log "基础设施 + 监控镜像已存在，跳过 load；handoff 完成前保持现有容器不动" "Infrastructure and monitoring images already exist; skipping load and keeping existing containers unchanged until handoff completes"
   else
     log "load 基础设施 + 监控镜像（$INFRA_DIR/images/）"
     for tar in "$INFRA_DIR/images"/*.tar; do
@@ -1221,11 +1221,11 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
   # 新装环境也安全：基线已创建对象，本步骤为空操作。
   TSDB_RECONCILE_SQL="$DEPLOY_DIR/tsdb-schema-reconcile.sql"
   [ -r "$TSDB_RECONCILE_SQL" ] || die "缺少时序库兼容协调脚本：$TSDB_RECONCILE_SQL" 3
-  log "执行时序库基线兼容协调（幂等）..."
+  log "执行时序库基线兼容协调（幂等）..." "Running idempotent TSDB baseline compatibility reconciliation ..."
   if "${DC[@]}" exec -T postgres-tsdb \
       psql -v ON_ERROR_STOP=1 -U "$POSTGRES_TSDB_USER" -d "$POSTGRES_TSDB_DB" \
       -f - < "$TSDB_RECONCILE_SQL"; then
-    log "时序库基线兼容协调成功"
+    log "时序库基线兼容协调成功" "TSDB baseline compatibility reconciliation completed successfully"
   else
     die "时序库基线兼容协调失败；未启动新业务容器" 3
   fi
