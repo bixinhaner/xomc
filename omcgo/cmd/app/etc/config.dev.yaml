@@ -76,6 +76,10 @@ param_sync:
   recovery_task_limit_per_run: 200
   recovery_task_budget: 200
 
+# 告警生命周期迁移开关：默认 legacy；shadow 仅用于 Outbox 对比验证。
+alarm:
+  lifecycle_mode: legacy
+
 nats:
   url: "nats://nats:4222"
   max_reconnect: -1

@@ -137,7 +137,9 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	w.Logger.Info("omcgo-worker starting", zap.String("config", cfgPath))
 
 	// Register all event subscribers
-	registerSubscribers(w, &cfg)
+	if err := registerSubscribers(w, &cfg); err != nil {
+		return err
+	}
 
 	// 启动时把 device_tasks 里仍为 pending 的任务重灌进 Redis 设备队列。
 	// 大库冷启动时即使有专用索引，恢复也可能受机械盘或 autovacuum 影响；放到后台
@@ -182,7 +184,7 @@ func startPendingQueueRestore(
 	return done
 }
 
-func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
+func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	logger := w.Logger
 
 	// L-10：worker 端也注入 audit sink，让 Sweeper 自动 stop / Exporter 异步导出
@@ -367,6 +369,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	alarmPgStore := alarm.NewPgAlarmStore(w.PgPool, w.TsPool)
 	alarmRedisStore := alarm.NewRedisAlarmStore(w.Redis)
 	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, w.Carriers, w.EventBus, logger)
+	if err := alarmEngine.SetLifecycleMode(alarm.LifecycleMode(cfg.Alarm.LifecycleMode)); err != nil {
+		return fmt.Errorf("configure alarm lifecycle mode: %w", err)
+	}
 	alarmMetrics := alarm.NewAlarmMetrics(w.MetricsReg)
 	alarmEngine.SetMetrics(alarmMetrics)
 	alarmFilterRuleRepo := alarm.NewPgAlarmFilterRuleRepository(w.PgPool)
@@ -819,6 +824,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	} else {
 		logger.Warn("tsdb shadow-dim sync disabled: TsPool not connected")
 	}
+	return nil
 }
 
 func newWorkerKPIRouteL2(w *workerInfra) router.L2Cache {

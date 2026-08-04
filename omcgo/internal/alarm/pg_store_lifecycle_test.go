@@ -102,12 +102,13 @@ func TestLifecycleTx_UpdatedAllocatesVersionFromLockedRow(t *testing.T) {
 	payload, err := store.PersistUpdated(
 		context.Background(),
 		&desired,
-		[]event.AlarmChangeField{event.AlarmChangeSeverity},
+		nil,
 	)
 	require.NoError(t, err)
 	require.Equal(t, int64(5), desired.Version)
 	require.Equal(t, int64(5), payload.AlarmVersion)
 	require.Equal(t, model.AlarmMajor, *payload.PreviousSeverity)
+	require.Contains(t, payload.ChangeMask, event.AlarmChangeSeverity)
 	require.Equal(t, mutatedAt, payload.OccurredAt)
 	require.Contains(t, tx.querySQL, "FOR UPDATE OF alarms_active")
 	require.Contains(t, tx.execSQL[0], "UPDATE alarms_active")
@@ -149,6 +150,70 @@ func TestLifecycleTx_ClearedDeletesActiveAndWritesCompleteSnapshot(t *testing.T)
 	require.NotNil(t, payload.Snapshot.ClearedAt)
 	require.Contains(t, tx.execSQL[0], "DELETE FROM alarms_active")
 	require.Contains(t, tx.execSQL[1], "INSERT INTO alarm_event_outbox")
+}
+
+func TestLifecycleTx_NewAutoClearWritesRaisedAndClearedInOneTransaction(t *testing.T) {
+	mutatedAt := time.Date(2026, 8, 4, 12, 2, 0, 0, time.UTC)
+	tx := &fakeLifecycleTx{
+		execResults: []fakeExecResult{{rows: 1}, {rows: 1}, {rows: 1}, {rows: 1}},
+	}
+	store := newPgAlarmStoreWithDB(&fakeLifecycleDB{tx: tx}, nil, func() time.Time { return mutatedAt })
+	alarm := validLifecycleAlarm()
+	alarm.Status = model.AlarmCleared
+	alarm.ClearedAt = &mutatedAt
+	clearedBy := "system"
+	alarm.ClearedBy = &clearedBy
+
+	payloads, err := store.PersistRaisedAndCleared(context.Background(), alarm)
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+	require.Equal(t, int64(2), alarm.Version)
+	require.Len(t, payloads, 2)
+	require.Equal(t, event.AlarmLifecycleRaised, payloads[0].LifecycleType)
+	require.Equal(t, int64(1), payloads[0].AlarmVersion)
+	require.Equal(t, model.AlarmActive, payloads[0].Snapshot.Status)
+	require.Nil(t, payloads[0].Snapshot.ClearedAt)
+	require.Equal(t, event.AlarmLifecycleCleared, payloads[1].LifecycleType)
+	require.Equal(t, int64(2), payloads[1].AlarmVersion)
+	require.Equal(t, model.AlarmCleared, payloads[1].Snapshot.Status)
+	require.NotNil(t, payloads[1].Snapshot.ClearedAt)
+	require.Len(t, tx.execSQL, 4)
+	require.Contains(t, tx.execSQL[0], "INSERT INTO alarms_active")
+	require.Contains(t, tx.execSQL[1], "INSERT INTO alarm_event_outbox")
+	require.Contains(t, tx.execSQL[2], "DELETE FROM alarms_active")
+	require.Contains(t, tx.execSQL[3], "INSERT INTO alarm_event_outbox")
+}
+
+func TestLifecycleTx_NewAutoAcknowledgeWritesRaisedAndAcknowledgedInOneTransaction(t *testing.T) {
+	mutatedAt := time.Date(2026, 8, 4, 12, 3, 0, 0, time.UTC)
+	tx := &fakeLifecycleTx{
+		execResults: []fakeExecResult{{rows: 1}, {rows: 1}, {rows: 1}, {rows: 1}},
+	}
+	store := newPgAlarmStoreWithDB(&fakeLifecycleDB{tx: tx}, nil, func() time.Time { return mutatedAt })
+	alarm := validLifecycleAlarm()
+	alarm.Status = model.AlarmAcknowledged
+	alarm.AcknowledgedAt = &mutatedAt
+	acknowledgedBy := "system:auto_filter"
+	alarm.AcknowledgedBy = &acknowledgedBy
+
+	payloads, err := store.PersistRaisedAndAcknowledged(context.Background(), alarm)
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+	require.Equal(t, int64(2), alarm.Version)
+	require.Len(t, payloads, 2)
+	require.Equal(t, event.AlarmLifecycleRaised, payloads[0].LifecycleType)
+	require.Equal(t, int64(1), payloads[0].AlarmVersion)
+	require.Equal(t, model.AlarmActive, payloads[0].Snapshot.Status)
+	require.Nil(t, payloads[0].Snapshot.AcknowledgedAt)
+	require.Equal(t, event.AlarmLifecycleAcknowledged, payloads[1].LifecycleType)
+	require.Equal(t, int64(2), payloads[1].AlarmVersion)
+	require.Equal(t, model.AlarmAcknowledged, payloads[1].Snapshot.Status)
+	require.NotNil(t, payloads[1].Snapshot.AcknowledgedAt)
+	require.Len(t, tx.execSQL, 4)
+	require.Contains(t, tx.execSQL[0], "INSERT INTO alarms_active")
+	require.Contains(t, tx.execSQL[1], "INSERT INTO alarm_event_outbox")
+	require.Contains(t, tx.execSQL[2], "UPDATE alarms_active")
+	require.Contains(t, tx.execSQL[3], "INSERT INTO alarm_event_outbox")
 }
 
 func validLifecycleAlarm() *model.Alarm {

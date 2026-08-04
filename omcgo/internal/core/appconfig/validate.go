@@ -54,6 +54,9 @@ func (c *AppConfig) Validate() error {
 	if err := c.Notification.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.Alarm.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.Dashboard.Defaults().Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -160,6 +163,9 @@ func (c *WorkerConfig) Validate() error {
 	if err := c.ParamSync.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.Alarm.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.MinIO.Buckets.validateConfigBackup(); err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -168,6 +174,18 @@ func (c *WorkerConfig) Validate() error {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))
 	}
 	return nil
+}
+
+func (c AlarmConfig) validate() error {
+	switch c.LifecycleMode {
+	case "", "legacy", "shadow", "canonical":
+		return nil
+	default:
+		return fmt.Errorf(
+			"alarm.lifecycle_mode must be legacy, shadow, or canonical, got %q",
+			c.LifecycleMode,
+		)
+	}
 }
 
 func (c BucketConfig) validateConfigBackup() error {

@@ -45,6 +45,10 @@ param_sync:
   canary_percent: 0
   legacy_fallback_enabled: true
 
+# 告警生命周期迁移开关：默认 legacy；shadow 仅用于 Outbox 对比验证。
+alarm:
+  lifecycle_mode: legacy
+
 nats:
   url: "nats://172.19.1.73:4222"
   max_reconnect: -1

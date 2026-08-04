@@ -84,6 +84,11 @@ func TestAppConfig_Validate(t *testing.T) {
 			modify:  func(c *AppConfig) { c.MinIO.Buckets.ConfigBackup = "config_backup_invalid" },
 			wantErr: "minio.buckets.config_backup must be a valid S3 bucket name",
 		},
+		{
+			name:    "invalid alarm lifecycle mode",
+			modify:  func(c *AppConfig) { c.Alarm.LifecycleMode = "dual-write" },
+			wantErr: "alarm.lifecycle_mode must be legacy, shadow, or canonical",
+		},
 	}
 
 	for _, tt := range tests {
@@ -100,6 +105,12 @@ func TestAppConfig_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWorkerConfigRejectsInvalidAlarmLifecycleMode(t *testing.T) {
+	cfg := validWorkerConfig()
+	cfg.Alarm.LifecycleMode = "dual-write"
+	require.ErrorContains(t, cfg.Validate(), "alarm.lifecycle_mode must be legacy, shadow, or canonical")
 }
 
 func TestPMRedisFallbackUsesCoreConfiguration(t *testing.T) {
@@ -152,12 +163,14 @@ func TestAppAndWorkerConfigExamplesUseDedicatedPMRedis(t *testing.T) {
 					t.Setenv("OMCGO_JWT_SECRET", "test-only-dedicated-redis-config-secret")
 					var cfg AppConfig
 					require.NoError(t, Load(path, &cfg))
+					require.Equal(t, "legacy", cfg.Alarm.LifecycleMode)
 					require.NotEmpty(t, cfg.PMRedis.Addrs)
 					require.False(t, redisAddressSetsOverlap(cfg.Redis.Addrs, cfg.PMRedis.Addrs))
 					return
 				}
 				var cfg WorkerConfig
 				require.NoError(t, Load(path, &cfg))
+				require.Equal(t, "legacy", cfg.Alarm.LifecycleMode)
 				require.NotEmpty(t, cfg.PMRedis.Addrs)
 				require.False(t, redisAddressSetsOverlap(cfg.Redis.Addrs, cfg.PMRedis.Addrs))
 			})

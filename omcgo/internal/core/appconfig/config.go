@@ -344,11 +344,19 @@ type AppConfig struct {
 	Task            TaskConfig            `mapstructure:"task"`
 	MR              MRConfig              `mapstructure:"mr"`
 	Notification    NotificationConfig    `mapstructure:"notification"`
+	Alarm           AlarmConfig           `mapstructure:"alarm"`
 	Dashboard       DashboardConfig       `mapstructure:"dashboard"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
 	Tracer          TracerConfig          `mapstructure:"tracer"`
 	Log             LogConfig             `mapstructure:"log"`
 	RequestIDPrefix string                `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "app"
+}
+
+// AlarmConfig controls the staged managed-element alarm lifecycle migration.
+// Empty and legacy preserve current behavior; shadow adds canonical Outbox
+// facts while retaining legacy history and NATS publications.
+type AlarmConfig struct {
+	LifecycleMode string `mapstructure:"lifecycle_mode"`
 }
 
 type DashboardConfig struct {
@@ -815,6 +823,7 @@ type WorkerConfig struct {
 	MinIO               MinIOConfig               `mapstructure:"minio"`
 	Task                TaskConfig                `mapstructure:"task"` // T-0157 C2: 任务过期扫描器配置
 	ParamSync           ParamSyncConfig           `mapstructure:"param_sync"`
+	Alarm               AlarmConfig               `mapstructure:"alarm"`
 	OfflineAlarmCleanup OfflineAlarmCleanupConfig `mapstructure:"offline_alarm_cleanup"` // #358: 离线设备活动告警清理阈值/周期/批量可配
 	PM                  PMConfig                  `mapstructure:"pm"`                    // 设备上线时自动下发 PM 上传配置
 	RawCleanup          RawCleanupConfig          `mapstructure:"raw_cleanup"`           // PM/MR 原始对象精确分批清理

@@ -93,6 +93,170 @@ func (s *PgAlarmStore) PersistCleared(
 	return s.persistExistingLifecycle(ctx, event.AlarmLifecycleCleared, alarm, nil, true)
 }
 
+// PersistRaisedAndAcknowledged records a newly observed occurrence that an
+// automatic rule acknowledges immediately. Both ordered facts and the final
+// acknowledged active row commit together.
+func (s *PgAlarmStore) PersistRaisedAndAcknowledged(
+	ctx context.Context,
+	alarm *model.Alarm,
+) ([]event.AlarmLifecyclePayload, error) {
+	if alarm == nil {
+		return nil, fmt.Errorf("persist raised and acknowledged alarm: alarm is required")
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin raised and acknowledged alarm lifecycle tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	mutatedAt := s.lifecycleNow()
+	raised := *alarm
+	raised.Version = 1
+	raised.Status = model.AlarmActive
+	raised.AcknowledgedAt = nil
+	raised.AcknowledgedBy = nil
+	raised.AckNote = nil
+	if raised.CreatedAt.IsZero() {
+		raised.CreatedAt = mutatedAt
+	}
+	raised.UpdatedAt = mutatedAt
+	normalizeAlarmOccurrenceFields(&raised, mutatedAt)
+
+	raisedPayload, err := event.NewAlarmLifecyclePayload(
+		event.AlarmLifecycleRaised,
+		raised,
+		nil,
+		raised.Version,
+		mutatedAt,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build auto-acknowledged raised lifecycle payload: %w", err)
+	}
+
+	acknowledged := raised
+	acknowledged.Version = 2
+	acknowledged.Status = model.AlarmAcknowledged
+	acknowledged.AcknowledgedAt = alarm.AcknowledgedAt
+	if acknowledged.AcknowledgedAt == nil {
+		acknowledged.AcknowledgedAt = &mutatedAt
+	}
+	acknowledged.AcknowledgedBy = alarm.AcknowledgedBy
+	acknowledged.AckNote = alarm.AckNote
+	acknowledgedPayload, err := event.NewAlarmLifecyclePayload(
+		event.AlarmLifecycleAcknowledged,
+		acknowledged,
+		&raised,
+		acknowledged.Version,
+		mutatedAt,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build auto-acknowledged lifecycle payload: %w", err)
+	}
+
+	if err := insertActiveLifecycle(ctx, tx, &raised); err != nil {
+		return nil, err
+	}
+	if err := insertAlarmOutbox(ctx, tx, raisedPayload); err != nil {
+		return nil, err
+	}
+	if err := updateActiveLifecycle(ctx, tx, &acknowledged, raised.Version); err != nil {
+		return nil, err
+	}
+	if err := insertAlarmOutbox(ctx, tx, acknowledgedPayload); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit raised and acknowledged alarm lifecycle tx: %w", err)
+	}
+	*alarm = acknowledged
+	return []event.AlarmLifecyclePayload{raisedPayload, acknowledgedPayload}, nil
+}
+
+// PersistRaisedAndCleared records a newly observed alarm that an auto-clear
+// rule suppresses immediately. The occurrence must still have an ordered
+// raised v1 -> cleared v2 lifecycle even though no active row remains.
+func (s *PgAlarmStore) PersistRaisedAndCleared(
+	ctx context.Context,
+	alarm *model.Alarm,
+) ([]event.AlarmLifecyclePayload, error) {
+	if alarm == nil {
+		return nil, fmt.Errorf("persist raised and cleared alarm: alarm is required")
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin raised and cleared alarm lifecycle tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	mutatedAt := s.lifecycleNow()
+	raised := *alarm
+	raised.Version = 1
+	raised.Status = model.AlarmActive
+	raised.ClearedAt = nil
+	raised.ClearedBy = nil
+	raised.ClearNote = nil
+	if raised.CreatedAt.IsZero() {
+		raised.CreatedAt = mutatedAt
+	}
+	raised.UpdatedAt = mutatedAt
+	normalizeAlarmOccurrenceFields(&raised, mutatedAt)
+
+	raisedPayload, err := event.NewAlarmLifecyclePayload(
+		event.AlarmLifecycleRaised,
+		raised,
+		nil,
+		raised.Version,
+		mutatedAt,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build auto-cleared raised lifecycle payload: %w", err)
+	}
+
+	cleared := raised
+	cleared.Version = 2
+	cleared.Status = model.AlarmCleared
+	cleared.ClearedAt = alarm.ClearedAt
+	if cleared.ClearedAt == nil {
+		cleared.ClearedAt = &mutatedAt
+	}
+	cleared.ClearedBy = alarm.ClearedBy
+	cleared.ClearNote = alarm.ClearNote
+	clearedPayload, err := event.NewAlarmLifecyclePayload(
+		event.AlarmLifecycleCleared,
+		cleared,
+		&raised,
+		cleared.Version,
+		mutatedAt,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build auto-cleared cleared lifecycle payload: %w", err)
+	}
+
+	if err := insertActiveLifecycle(ctx, tx, &raised); err != nil {
+		return nil, err
+	}
+	if err := insertAlarmOutbox(ctx, tx, raisedPayload); err != nil {
+		return nil, err
+	}
+	if err := deleteActiveLifecycle(ctx, tx, raised.ID, raised.Version); err != nil {
+		return nil, err
+	}
+	if err := insertAlarmOutbox(ctx, tx, clearedPayload); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit raised and cleared alarm lifecycle tx: %w", err)
+	}
+	*alarm = cleared
+	return []event.AlarmLifecyclePayload{raisedPayload, clearedPayload}, nil
+}
+
 func (s *PgAlarmStore) persistExistingLifecycle(
 	ctx context.Context,
 	lifecycleType event.AlarmLifecycleType,
@@ -128,6 +292,13 @@ func (s *PgAlarmStore) persistExistingLifecycle(
 	mutatedAt := s.lifecycleNow()
 	persisted.Version = current.Version + 1
 	persisted.UpdatedAt = mutatedAt
+	if lifecycleType == event.AlarmLifecycleUpdated {
+		// The locked database snapshot is authoritative. Some callers (notably
+		// alarm sync) receive an object whose mutable fields were already merged
+		// before entering AlarmEngine, so an engine-side diff alone can miss a
+		// severity transition and its required previous_severity.
+		changeMask = alarmChangeMask(current, &persisted)
+	}
 	payload, err := event.NewAlarmLifecyclePayload(
 		lifecycleType,
 		persisted,

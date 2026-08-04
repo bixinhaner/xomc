@@ -38,17 +38,17 @@ func setupHandlerTest() (*Handler, *mockAlarmStore, *AlarmEngine, *gin.Engine) {
 func seedActiveAlarm(store *mockAlarmStore, opts ...func(*model.Alarm)) *model.Alarm {
 	now := time.Now()
 	alarm := &model.Alarm{
-		ID:        uuid.New(),
-		DeviceID:  uuid.New(),
-		DeviceSN:  "SN-TEST-001",
-		Carrier:   model.CarrierCMCC,
-		Severity:  model.AlarmMajor,
-		AlarmType: "equipment",
+		ID:              uuid.New(),
+		DeviceID:        uuid.New(),
+		DeviceSN:        "SN-TEST-001",
+		Carrier:         model.CarrierCMCC,
+		Severity:        model.AlarmMajor,
+		AlarmType:       "equipment",
 		AlarmIdentifier: "ALM001",
-		Status:    model.AlarmActive,
-		RaisedAt:  now,
-		CreatedAt: now,
-		UpdatedAt: now,
+		Status:          model.AlarmActive,
+		RaisedAt:        now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	for _, fn := range opts {
 		fn(alarm)
@@ -162,11 +162,11 @@ func TestHandler_ListHistory_OK(t *testing.T) {
 
 	now := time.Now()
 	cleared := &model.Alarm{
-		ID:        uuid.New(),
-		DeviceSN:  "SN-TEST-001",
+		ID:              uuid.New(),
+		DeviceSN:        "SN-TEST-001",
 		AlarmIdentifier: "ALM001",
-		Status:    model.AlarmCleared,
-		ClearedAt: &now,
+		Status:          model.AlarmCleared,
+		ClearedAt:       &now,
 	}
 	store.history = append(store.history, cleared)
 
@@ -457,6 +457,96 @@ func TestClear_NotFound_Returns404(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, w.Code,
 		"missing alarm should map ErrNotFound to 404, got body=%s", w.Body.String())
+}
+
+// ---------- Active batch lifecycle ----------
+
+func TestHandler_BatchAcknowledge_ReportsPartialFailure(t *testing.T) {
+	_, store, _, router := setupHandlerTest()
+	alarm := seedActiveAlarm(store)
+	missingID := uuid.New()
+	body := fmt.Sprintf(
+		`{"ids":[%q,%q],"acknowledged_by":"maintenance window"}`,
+		alarm.ID,
+		missingID,
+	)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/alarms/active/batch/acknowledge", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	data := decodeBatchMutationData(t, w)
+	require.Equal(t, 1, data.Count)
+	require.Equal(t, 1, data.FailedCount)
+	require.Equal(t, []uuid.UUID{alarm.ID}, data.Succeeded)
+	require.Contains(t, data.Failed, missingID.String())
+	require.Equal(t, "not_found", data.Failed[missingID.String()])
+	require.Equal(t, model.AlarmAcknowledged, store.active[alarm.ID].Status)
+	require.NotNil(t, store.active[alarm.ID].AckNote)
+}
+
+func TestHandler_BatchUnacknowledge_UsesEngineStateValidation(t *testing.T) {
+	_, store, _, router := setupHandlerTest()
+	acknowledged := seedActiveAlarm(store, func(alarm *model.Alarm) {
+		alarm.Status = model.AlarmAcknowledged
+	})
+	active := seedActiveAlarm(store)
+	body := fmt.Sprintf(`{"ids":[%q,%q]}`, acknowledged.ID, active.ID)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/alarms/active/batch/unacknowledge", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	data := decodeBatchMutationData(t, w)
+	require.Equal(t, 1, data.Count)
+	require.Equal(t, 1, data.FailedCount)
+	require.Contains(t, data.Failed, active.ID.String())
+	require.Equal(t, "invalid_state", data.Failed[active.ID.String()])
+	require.Equal(t, model.AlarmActive, store.active[acknowledged.ID].Status)
+}
+
+func TestHandler_BatchClear_ReportsArchivedSuccessAndMissingFailure(t *testing.T) {
+	_, store, _, router := setupHandlerTest()
+	alarm := seedActiveAlarm(store)
+	missingID := uuid.New()
+	body := fmt.Sprintf(
+		`{"ids":[%q,%q],"clear_note":"planned maintenance"}`,
+		alarm.ID,
+		missingID,
+	)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/alarms/active/batch/clear", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	data := decodeBatchMutationData(t, w)
+	require.Equal(t, 1, data.Count)
+	require.Equal(t, 1, data.FailedCount)
+	require.Contains(t, data.Failed, missingID.String())
+	require.Equal(t, "not_found", data.Failed[missingID.String()])
+	require.NotContains(t, store.active, alarm.ID)
+	require.Len(t, store.history, 1)
+	require.Equal(t, "planned maintenance", *store.history[0].ClearNote)
+}
+
+type batchMutationData struct {
+	Count       int               `json:"count"`
+	FailedCount int               `json:"failed_count"`
+	Succeeded   []uuid.UUID       `json:"succeeded"`
+	Failed      map[string]string `json:"failed"`
+}
+
+func decodeBatchMutationData(t *testing.T, recorder *httptest.ResponseRecorder) batchMutationData {
+	t.Helper()
+	var data batchMutationData
+	response.DecodeData(t, recorder.Body, &data)
+	return data
 }
 
 // ---------- parseSeverity ----------

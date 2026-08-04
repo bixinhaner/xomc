@@ -20,7 +20,7 @@ func initAlarmModule(c *Container) error {
 
 	alarmRedisStore := alarm.NewRedisAlarmStore(c.Redis)
 	alarmPgStore := alarm.NewPgAlarmStore(c.PgPool, c.TsPool)
-	
+
 	alarmReconciler := alarm.NewReconciler(c.PgPool, alarmRedisStore, logger)
 	alarmReconciler.Start()
 	c.GS.Register("alarm-reconciler", 2, func(ctx context.Context) error {
@@ -29,6 +29,9 @@ func initAlarmModule(c *Container) error {
 	})
 
 	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, c.Carriers, c.EventBus, logger)
+	if err := alarmEngine.SetLifecycleMode(alarm.LifecycleMode(c.Cfg.Alarm.LifecycleMode)); err != nil {
+		return fmt.Errorf("configure alarm lifecycle mode: %w", err)
+	}
 	alarmEngine.SetMetrics(alarm.NewAlarmMetrics(c.MetricsReg))
 
 	// 告警同步服务

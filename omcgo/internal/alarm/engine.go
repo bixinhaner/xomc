@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"time"
 
@@ -25,6 +26,8 @@ type AlarmEngine struct {
 	eventBus        event.EventBus
 	metrics         *AlarmMetrics
 	filterEngine    *FilterEngine // optional; nil 时跳过过滤逻辑（向后兼容）
+	lifecycleStore  LifecycleStore
+	lifecycleMode   LifecycleMode
 	logger          *zap.Logger
 }
 
@@ -36,13 +39,50 @@ func NewAlarmEngine(
 	eventBus event.EventBus,
 	logger *zap.Logger,
 ) *AlarmEngine {
-	return &AlarmEngine{
+	engine := &AlarmEngine{
 		store:           store,
 		redisStore:      redisStore,
 		carrierRegistry: carrierRegistry,
 		eventBus:        eventBus,
+		lifecycleMode:   LifecycleModeLegacy,
 		logger:          logger,
 	}
+	if lifecycleStore, ok := store.(LifecycleStore); ok {
+		engine.lifecycleStore = lifecycleStore
+	}
+	return engine
+}
+
+// SetLifecycleMode controls the single alarm lifecycle migration switch.
+// Canonical remains fail-closed until the Relay and history projector add
+// their readiness gate; shadow preserves every legacy side effect.
+func (e *AlarmEngine) SetLifecycleMode(mode LifecycleMode) error {
+	if mode == "" {
+		mode = LifecycleModeLegacy
+	}
+	switch mode {
+	case LifecycleModeLegacy:
+		e.lifecycleMode = mode
+		return nil
+	case LifecycleModeShadow:
+		if e.lifecycleStore == nil {
+			return fmt.Errorf("set alarm lifecycle mode %s: lifecycle store is unavailable", mode)
+		}
+		e.lifecycleMode = mode
+		return nil
+	case LifecycleModeCanonical:
+		return ErrCanonicalLifecycleNotReady
+	default:
+		return fmt.Errorf("unsupported alarm lifecycle mode %q", mode)
+	}
+}
+
+func (e *AlarmEngine) canonicalLifecycleEnabled() bool {
+	return e.lifecycleMode == LifecycleModeShadow || e.lifecycleMode == LifecycleModeCanonical
+}
+
+func (e *AlarmEngine) legacyLifecycleEnabled() bool {
+	return e.lifecycleMode != LifecycleModeCanonical
 }
 
 // SetMetrics attaches Prometheus metrics to the engine.
@@ -106,6 +146,133 @@ func applyIncomingAlarmState(target *model.Alarm, incoming *model.Alarm, fallbac
 		target.AcknowledgedBy = incoming.AcknowledgedBy
 		target.AckNote = incoming.AckNote
 	}
+}
+
+func alarmChangeMask(previous, current *model.Alarm) []event.AlarmChangeField {
+	if previous == nil || current == nil {
+		return nil
+	}
+	mask := make([]event.AlarmChangeField, 0, 5)
+	if previous.Severity != current.Severity {
+		mask = append(mask, event.AlarmChangeSeverity)
+	}
+	if previous.Status != current.Status {
+		mask = append(mask, event.AlarmChangeStatus)
+	}
+	if previous.Description != current.Description {
+		mask = append(mask, event.AlarmChangeDescription)
+	}
+	if previous.AckCount != current.AckCount {
+		mask = append(mask, event.AlarmChangeCount)
+	}
+	if !maps.Equal(previous.AdditionalInfo, current.AdditionalInfo) {
+		mask = append(mask, event.AlarmChangeExtensions)
+	}
+	return mask
+}
+
+func alarmChangeSnapshot(alarm *model.Alarm) model.Alarm {
+	snapshot := *alarm
+	snapshot.AdditionalInfo = maps.Clone(alarm.AdditionalInfo)
+	return snapshot
+}
+
+func alarmMaskContains(mask []event.AlarmChangeField, field event.AlarmChangeField) bool {
+	for _, candidate := range mask {
+		if candidate == field {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *AlarmEngine) persistRaised(ctx context.Context, alarm *model.Alarm) error {
+	if e.canonicalLifecycleEnabled() {
+		if alarm.Status == model.AlarmAcknowledged {
+			if _, err := e.lifecycleStore.PersistRaisedAndAcknowledged(ctx, alarm); err != nil {
+				return fmt.Errorf("persist raised and acknowledged alarm lifecycle: %w", err)
+			}
+			return nil
+		}
+		if _, err := e.lifecycleStore.PersistRaised(ctx, alarm); err != nil {
+			return fmt.Errorf("persist raised alarm lifecycle: %w", err)
+		}
+		return nil
+	}
+	if err := e.store.SaveActive(ctx, alarm); err != nil {
+		return fmt.Errorf("save active alarm: %w", err)
+	}
+	return nil
+}
+
+func (e *AlarmEngine) persistUpdated(
+	ctx context.Context,
+	alarm *model.Alarm,
+	changeMask []event.AlarmChangeField,
+) error {
+	if e.canonicalLifecycleEnabled() {
+		if alarmMaskContains(changeMask, event.AlarmChangeStatus) {
+			switch alarm.Status {
+			case model.AlarmAcknowledged:
+				if _, err := e.lifecycleStore.PersistAcknowledged(ctx, alarm); err != nil {
+					return fmt.Errorf("persist acknowledged alarm lifecycle: %w", err)
+				}
+				return nil
+			case model.AlarmActive:
+				if _, err := e.lifecycleStore.PersistUnacknowledged(ctx, alarm); err != nil {
+					return fmt.Errorf("persist unacknowledged alarm lifecycle: %w", err)
+				}
+				return nil
+			}
+		}
+		if _, err := e.lifecycleStore.PersistUpdated(ctx, alarm, changeMask); err != nil {
+			return fmt.Errorf("persist updated alarm lifecycle: %w", err)
+		}
+		return nil
+	}
+	if err := e.store.UpdateActive(ctx, alarm); err != nil {
+		return fmt.Errorf("update active alarm: %w", err)
+	}
+	return nil
+}
+
+func (e *AlarmEngine) persistAcknowledged(ctx context.Context, alarm *model.Alarm) error {
+	if e.canonicalLifecycleEnabled() {
+		if _, err := e.lifecycleStore.PersistAcknowledged(ctx, alarm); err != nil {
+			return fmt.Errorf("persist acknowledged alarm lifecycle: %w", err)
+		}
+		return nil
+	}
+	if err := e.store.UpdateActive(ctx, alarm); err != nil {
+		return fmt.Errorf("update acknowledged alarm: %w", err)
+	}
+	return nil
+}
+
+func (e *AlarmEngine) persistUnacknowledged(ctx context.Context, alarm *model.Alarm) error {
+	if e.canonicalLifecycleEnabled() {
+		if _, err := e.lifecycleStore.PersistUnacknowledged(ctx, alarm); err != nil {
+			return fmt.Errorf("persist unacknowledged alarm lifecycle: %w", err)
+		}
+		return nil
+	}
+	if err := e.store.UpdateActive(ctx, alarm); err != nil {
+		return fmt.Errorf("update unacknowledged alarm: %w", err)
+	}
+	return nil
+}
+
+func (e *AlarmEngine) persistCleared(ctx context.Context, alarm *model.Alarm) error {
+	if e.canonicalLifecycleEnabled() {
+		if _, err := e.lifecycleStore.PersistCleared(ctx, alarm); err != nil {
+			return fmt.Errorf("persist cleared alarm lifecycle: %w", err)
+		}
+		return nil
+	}
+	if err := e.store.RemoveActive(ctx, alarm.ID); err != nil {
+		return fmt.Errorf("remove active alarm: %w", err)
+	}
+	return nil
 }
 
 // Process handles an incoming alarm: maps severity, deduplicates, and persists.
@@ -184,8 +351,9 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 				if parseErr == nil {
 					existing, getErr := e.store.GetActiveByID(ctx, existingID)
 					if getErr == nil {
+						previous := alarmChangeSnapshot(existing)
 						applyIncomingAlarmState(existing, alarm, time.Now())
-						if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
+						if updateErr := e.persistUpdated(ctx, existing, alarmChangeMask(&previous, existing)); updateErr != nil {
 							return fmt.Errorf("update existing alarm: %w", updateErr)
 						}
 						e.syncDeviceSeverityStatsAsync(existing.DeviceID)
@@ -202,8 +370,9 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 	// 3. Also check DB in case Redis missed it
 	existing, err := loadMatchingActiveAlarm(ctx, e.store, alarm)
 	if err == nil && existing != nil {
+		previous := alarmChangeSnapshot(existing)
 		applyIncomingAlarmState(existing, alarm, time.Now())
-		if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
+		if updateErr := e.persistUpdated(ctx, existing, alarmChangeMask(&previous, existing)); updateErr != nil {
 			return fmt.Errorf("update existing alarm: %w", updateErr)
 		}
 		e.syncDeviceSeverityStatsAsync(existing.DeviceID)
@@ -225,8 +394,8 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 	alarm.CreatedAt = now
 	alarm.UpdatedAt = now
 
-	if err := e.store.SaveActive(ctx, alarm); err != nil {
-		return fmt.Errorf("save active alarm: %w", err)
+	if err := e.persistRaised(ctx, alarm); err != nil {
+		return err
 	}
 	if e.redisStore != nil && alarm.DeviceID.String() != "00000000-0000-0000-0000-000000000000" {
 		_ = e.redisStore.IncrementActiveAlarmCount(ctx, alarm.DeviceID.String())
@@ -246,7 +415,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 	}
 
 	// 5. Publish alarm.raised event
-	if e.eventBus != nil {
+	if e.eventBus != nil && e.legacyLifecycleEnabled() {
 		evt, err := event.NewEvent(event.SubjectAlarmRaised, alarm)
 		if err == nil {
 			if pubErr := e.eventBus.Publish(ctx, event.SubjectAlarmRaised, evt); pubErr != nil {
@@ -266,25 +435,37 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 
 // Acknowledge marks an alarm as acknowledged.
 func (e *AlarmEngine) Acknowledge(ctx context.Context, alarmID uuid.UUID, by string) error {
+	return e.acknowledge(ctx, alarmID, by, nil)
+}
+
+func (e *AlarmEngine) acknowledge(
+	ctx context.Context,
+	alarmID uuid.UUID,
+	by string,
+	note *string,
+) error {
 	alarm, err := e.store.GetActiveByID(ctx, alarmID)
 	if err != nil {
 		return fmt.Errorf("get alarm: %w", err)
 	}
 
 	if alarm.Status != model.AlarmActive {
-		return fmt.Errorf("alarm is not in active state, current: %s", alarm.Status)
+		return fmt.Errorf("%w: alarm is not in active state, current: %s", ErrAlarmInvalidState, alarm.Status)
 	}
 
 	now := time.Now()
 	alarm.Status = model.AlarmAcknowledged
 	alarm.AcknowledgedAt = &now
 	alarm.AcknowledgedBy = &by
-
-	if err := e.store.UpdateActive(ctx, alarm); err != nil {
-		return fmt.Errorf("update alarm: %w", err)
+	if note != nil {
+		alarm.AckNote = note
 	}
 
-	if e.eventBus != nil {
+	if err := e.persistAcknowledged(ctx, alarm); err != nil {
+		return err
+	}
+
+	if e.eventBus != nil && e.legacyLifecycleEnabled() {
 		evt, err := event.NewEvent(event.SubjectAlarmAcknowledged, alarm)
 		if err == nil {
 			if pubErr := e.eventBus.Publish(ctx, event.SubjectAlarmAcknowledged, evt); pubErr != nil {
@@ -300,33 +481,145 @@ func (e *AlarmEngine) Acknowledge(ctx context.Context, alarmID uuid.UUID, by str
 	return nil
 }
 
+// Unacknowledge returns an acknowledged active occurrence to active state.
+func (e *AlarmEngine) Unacknowledge(ctx context.Context, alarmID uuid.UUID) error {
+	alarm, err := e.store.GetActiveByID(ctx, alarmID)
+	if err != nil {
+		return fmt.Errorf("get alarm for unacknowledge: %w", err)
+	}
+	if alarm.Status != model.AlarmAcknowledged {
+		return fmt.Errorf("%w: unacknowledge requires acknowledged, current: %s", ErrAlarmInvalidState, alarm.Status)
+	}
+
+	alarm.Status = model.AlarmActive
+	alarm.AcknowledgedAt = nil
+	alarm.AcknowledgedBy = nil
+	alarm.AckNote = nil
+	if err := e.persistUnacknowledged(ctx, alarm); err != nil {
+		return err
+	}
+	e.logger.Info("alarm unacknowledged", zap.String("alarm_id", alarmID.String()))
+	return nil
+}
+
+// BatchMutationResult reports per-occurrence outcomes. Batch lifecycle
+// operations are intentionally sequential: each occurrence owns an independent
+// row-lock transaction and one failure must not hide successful mutations.
+type BatchMutationResult struct {
+	Succeeded []uuid.UUID          `json:"succeeded"`
+	Failed    map[uuid.UUID]string `json:"failed"`
+}
+
+func (e *AlarmEngine) BatchAcknowledge(
+	ctx context.Context,
+	ids []uuid.UUID,
+	by string,
+	note string,
+) BatchMutationResult {
+	return executeAlarmBatch(ids, func(id uuid.UUID) error {
+		return e.acknowledge(ctx, id, by, &note)
+	})
+}
+
+func (e *AlarmEngine) BatchUnacknowledge(ctx context.Context, ids []uuid.UUID) BatchMutationResult {
+	return executeAlarmBatch(ids, func(id uuid.UUID) error {
+		return e.Unacknowledge(ctx, id)
+	})
+}
+
+func (e *AlarmEngine) BatchClear(
+	ctx context.Context,
+	ids []uuid.UUID,
+	by string,
+	note string,
+) BatchMutationResult {
+	return executeAlarmBatch(ids, func(id uuid.UUID) error {
+		return e.clear(ctx, id, &by, &note)
+	})
+}
+
+func executeAlarmBatch(ids []uuid.UUID, mutate func(uuid.UUID) error) BatchMutationResult {
+	result := BatchMutationResult{
+		Succeeded: make([]uuid.UUID, 0, len(ids)),
+		Failed:    make(map[uuid.UUID]string),
+	}
+	seen := make(map[uuid.UUID]struct{}, len(ids))
+	for _, id := range ids {
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		if err := mutate(id); err != nil {
+			result.Failed[id] = batchMutationFailureCode(err)
+			continue
+		}
+		result.Succeeded = append(result.Succeeded, id)
+	}
+	return result
+}
+
+func batchMutationFailureCode(err error) string {
+	switch {
+	case errors.Is(err, commonerrors.ErrNotFound):
+		return "not_found"
+	case errors.Is(err, ErrAlarmVersionConflict):
+		return "version_conflict"
+	case errors.Is(err, ErrAlarmInvalidState):
+		return "invalid_state"
+	default:
+		return "mutation_failed"
+	}
+}
+
 // Clear marks an alarm as cleared, archives to history, and removes from active.
 func (e *AlarmEngine) Clear(ctx context.Context, alarmID uuid.UUID) error {
+	return e.clear(ctx, alarmID, nil, nil)
+}
+
+func (e *AlarmEngine) clear(
+	ctx context.Context,
+	alarmID uuid.UUID,
+	by *string,
+	note *string,
+) error {
 	alarm, err := e.store.GetActiveByID(ctx, alarmID)
 	if err != nil {
 		return fmt.Errorf("get alarm: %w", err)
 	}
 
 	if alarm.Status == model.AlarmCleared {
-		return fmt.Errorf("alarm is already cleared")
+		return fmt.Errorf("%w: alarm is already cleared", ErrAlarmInvalidState)
 	}
+	alarm.ClearedBy = by
+	alarm.ClearNote = note
 
 	return e.clearActiveAlarm(ctx, alarm)
 }
 
 func (e *AlarmEngine) clearActiveAlarm(ctx context.Context, alarm *model.Alarm) error {
+	return e.clearActiveAlarmWithLegacyPublish(ctx, alarm, true)
+}
+
+func (e *AlarmEngine) clearActiveAlarmWithLegacyPublish(
+	ctx context.Context,
+	alarm *model.Alarm,
+	publishLegacy bool,
+) error {
 	now := time.Now()
 	alarm.Status = model.AlarmCleared
 	alarm.ClearedAt = &now
 
-	// Archive to history
-	if err := e.store.Archive(ctx, alarm); err != nil {
-		return fmt.Errorf("archive alarm: %w", err)
+	// Legacy and shadow retain the synchronous history write. Canonical skips
+	// it only after the history projector readiness gate is implemented.
+	if e.legacyLifecycleEnabled() {
+		archiveSnapshot := *alarm
+		if err := e.store.Archive(ctx, &archiveSnapshot); err != nil {
+			return fmt.Errorf("archive alarm: %w", err)
+		}
 	}
 
-	// Remove from active
-	if err := e.store.RemoveActive(ctx, alarm.ID); err != nil {
-		return fmt.Errorf("remove active alarm: %w", err)
+	if err := e.persistCleared(ctx, alarm); err != nil {
+		return err
 	}
 	if e.redisStore != nil && alarm.DeviceID.String() != "00000000-0000-0000-0000-000000000000" {
 		_ = e.redisStore.DecrementActiveAlarmCount(ctx, alarm.DeviceID.String())
@@ -346,7 +639,7 @@ func (e *AlarmEngine) clearActiveAlarm(ctx context.Context, alarm *model.Alarm) 
 		}
 	}
 
-	if e.eventBus != nil {
+	if publishLegacy && e.eventBus != nil && e.legacyLifecycleEnabled() {
 		evt, err := event.NewEvent(event.SubjectAlarmCleared, alarm)
 		if err == nil {
 			if pubErr := e.eventBus.Publish(ctx, event.SubjectAlarmCleared, evt); pubErr != nil {
@@ -441,10 +734,13 @@ func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.
 		existing.ClearedAt = &now
 		existing.ClearedBy = &clearedBy
 		existing.ClearNote = &clearNote
-		if err := e.store.Archive(ctx, existing); err != nil {
-			return fmt.Errorf("archive existing auto-cleared alarm: %w", err)
+		if e.legacyLifecycleEnabled() {
+			archiveSnapshot := *existing
+			if err := e.store.Archive(ctx, &archiveSnapshot); err != nil {
+				return fmt.Errorf("archive existing auto-cleared alarm: %w", err)
+			}
 		}
-		if err := e.store.RemoveActive(ctx, existing.ID); err != nil {
+		if err := e.persistCleared(ctx, existing); err != nil {
 			return fmt.Errorf("remove existing auto-cleared alarm: %w", err)
 		}
 		if e.redisStore != nil {
@@ -480,8 +776,17 @@ func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.
 		archived.LastUpdatedAt = now
 	}
 
-	if err := e.store.Archive(ctx, &archived); err != nil {
-		return fmt.Errorf("archive new auto-cleared alarm: %w", err)
+	if e.legacyLifecycleEnabled() {
+		archiveSnapshot := archived
+		if err := e.store.Archive(ctx, &archiveSnapshot); err != nil {
+			return fmt.Errorf("archive new auto-cleared alarm: %w", err)
+		}
+	}
+	if e.canonicalLifecycleEnabled() {
+		if _, err := e.lifecycleStore.PersistRaisedAndCleared(ctx, &archived); err != nil {
+			return fmt.Errorf("persist new auto-cleared alarm lifecycle: %w", err)
+		}
+		*alarm = archived
 	}
 
 	return nil
@@ -490,9 +795,10 @@ func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.
 // UpdateFromSync updates an existing alarm's attributes during sync without publishing events.
 // Used by the sync processor when remote alarm properties have changed.
 func (e *AlarmEngine) UpdateFromSync(ctx context.Context, alarm *model.Alarm) error {
+	previous := alarmChangeSnapshot(alarm)
 	alarm.AckCount = max(alarm.AckCount, 1) + 1
 	alarm.LastUpdatedAt = resolveAlarmBusinessTime(alarm, time.Now())
-	if err := e.store.UpdateActive(ctx, alarm); err != nil {
+	if err := e.persistUpdated(ctx, alarm, alarmChangeMask(&previous, alarm)); err != nil {
 		return fmt.Errorf("sync update alarm: %w", err)
 	}
 	e.logger.Debug("alarm updated from sync",
@@ -515,25 +821,8 @@ func (e *AlarmEngine) ClearBySync(ctx context.Context, alarm *model.Alarm) (err 
 		span.End()
 	}()
 
-	now := time.Now()
-	alarm.Status = model.AlarmCleared
-	alarm.ClearedAt = &now
-	if err := e.store.Archive(ctx, alarm); err != nil {
-		return fmt.Errorf("sync archive alarm: %w", err)
-	}
-	if err := e.store.RemoveActive(ctx, alarm.ID); err != nil {
-		return fmt.Errorf("sync remove active alarm: %w", err)
-	}
-	if e.redisStore != nil && alarm.DeviceID.String() != "00000000-0000-0000-0000-000000000000" {
-		_ = e.redisStore.DecrementActiveAlarmCount(ctx, alarm.DeviceID.String())
-	}
-	if e.redisStore != nil {
-		if err := e.redisStore.Delete(ctx, alarm.DeviceSN, activeAlarmMatchKey(alarm)); err != nil {
-			e.logger.Warn("redis delete alarm on sync clear", zap.Error(err))
-		}
-	}
-	if e.metrics != nil {
-		e.metrics.ActiveTotal.WithLabelValues(severityLabel(alarm.Severity), string(alarm.Carrier)).Dec()
+	if err := e.clearActiveAlarmWithLegacyPublish(ctx, alarm, false); err != nil {
+		return fmt.Errorf("sync clear alarm: %w", err)
 	}
 	e.logger.Debug("alarm cleared from sync",
 		zap.String("alarm_id", alarm.ID.String()),
@@ -561,6 +850,7 @@ func (e *AlarmEngine) UpdateByEvent(ctx context.Context, alarm *model.Alarm) err
 	}
 
 	// Update mutable fields
+	previous := alarmChangeSnapshot(existing)
 	oldSeverity := existing.Severity
 	existing.Severity = alarm.Severity
 	existing.Description = alarm.Description
@@ -577,7 +867,7 @@ func (e *AlarmEngine) UpdateByEvent(ctx context.Context, alarm *model.Alarm) err
 		}
 	}
 
-	if err := e.store.UpdateActive(ctx, existing); err != nil {
+	if err := e.persistUpdated(ctx, existing, alarmChangeMask(&previous, existing)); err != nil {
 		return fmt.Errorf("update alarm by event: %w", err)
 	}
 	e.syncDeviceSeverityStatsAsync(existing.DeviceID)
@@ -589,7 +879,7 @@ func (e *AlarmEngine) UpdateByEvent(ctx context.Context, alarm *model.Alarm) err
 	}
 
 	// Publish alarm.updated event for northbound push
-	if e.eventBus != nil {
+	if e.eventBus != nil && e.legacyLifecycleEnabled() {
 		evt, err := event.NewEvent(event.SubjectAlarmUpdated, existing)
 		if err == nil {
 			if pubErr := e.eventBus.Publish(ctx, event.SubjectAlarmUpdated, evt); pubErr != nil {
