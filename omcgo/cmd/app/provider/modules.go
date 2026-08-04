@@ -1395,11 +1395,9 @@ func initDashboardModule(c *Container) error {
 		StaleTTL:      dashboardCfg.StaleTTL,
 	}, dashboardMetrics)
 	dashboardService := dashboard.NewService(c.DeviceService, c.AlarmPgStore, c.PMKPIRepo, c.PgPool, c.TsPool, c.GroupRepo, dashIndicatorRepo, networkRollups, logger)
-	if c.pmHandlerDeps != nil && c.pmHandlerDeps.pmAggregator != nil {
-		dashboardService.SetCounterSeriesReader(
-			dashboard.NewAggregatorCounterSeriesReader(c.pmHandlerDeps.pmAggregator),
-		)
-	}
+	// 首页 KPI 与 Counter 都只读内置全网任务已发布的 network 预聚合结果。
+	// Counter 不得回退通用 Aggregator 做全网现场汇总，否则 hourly 兼容视图会在大数据量下超时。
+	dashboardService.SetCounterSeriesReader(networkRollups)
 	dashboardService.SetKPIQueryGuard(queryGuard)
 	dashboardService.SetMetrics(dashboardMetrics)
 	if c.pmHandlerDeps != nil && c.pmHandlerDeps.pmProgressService != nil {

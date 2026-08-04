@@ -76,6 +76,7 @@ func TestGetKPITimeSeriesReadsCounterSeriesForDashboard(t *testing.T) {
 	assert.Equal(t, jsonx.Float(1.25), result["C010070004"][0].Value)
 	require.Len(t, counterReader.queries, 1)
 	assert.Equal(t, []string{"C010070004"}, counterReader.queries[0].MetricPaths)
+	assert.Equal(t, metrics.MetricTypeCounter, counterReader.queries[0].MetricType)
 }
 
 func TestGetKPITimeSeriesKeepsKPIAndCounterReadersSeparate(t *testing.T) {
@@ -103,8 +104,10 @@ func TestGetKPITimeSeriesKeepsKPIAndCounterReadersSeparate(t *testing.T) {
 	assert.Len(t, result["C010070004"], 1)
 	require.Len(t, kpiReader.queries, 1)
 	assert.Equal(t, []string{"KGNB0517"}, kpiReader.queries[0].MetricPaths)
+	assert.Equal(t, metrics.MetricTypeKPI, kpiReader.queries[0].MetricType)
 	require.Len(t, counterReader.queries, 1)
 	assert.Equal(t, []string{"C010070004"}, counterReader.queries[0].MetricPaths)
+	assert.Equal(t, metrics.MetricTypeCounter, counterReader.queries[0].MetricType)
 }
 
 type fixedNetworkProgressReader struct {

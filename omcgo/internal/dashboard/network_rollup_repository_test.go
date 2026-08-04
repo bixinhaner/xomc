@@ -44,9 +44,43 @@ func TestBuildNetworkRollupSeriesSQLUsesOnlyPublishedNetworkResults(t *testing.T
 
 	require.Contains(t, args, model.TechNR)
 	require.Contains(t, args, metrics.GranularityWeekly)
+	require.Contains(t, args, string(metrics.MetricTypeKPI))
 	require.Contains(t, args, "K1")
 	require.Contains(t, args, "K2")
 	assert.Equal(t, 0, strings.Count(query, "K1"), "metric values must remain parameters")
+}
+
+func TestBuildNetworkRollupSeriesSQLUsesPublishedCounterResults(t *testing.T) {
+	start := time.Date(2026, 8, 3, 13, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
+	end := start.Add(24 * time.Hour)
+
+	query, args, err := buildNetworkRollupSeriesSQL(NetworkRollupQuery{
+		Technology:  model.TechNR,
+		Granularity: metrics.GranularityHourly,
+		MetricType:  metrics.MetricTypeCounter,
+		MetricPaths: []string{"C010070004"},
+		StartTime:   start,
+		EndTime:     end,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, query, "FROM pm_aggregation_results r")
+	assert.Contains(t, query, "JOIN pm_aggregation_publications published_revision")
+	assert.NotContains(t, query, "pm_metrics_hourly")
+	require.Contains(t, args, string(metrics.MetricTypeCounter))
+	require.Contains(t, args, "C010070004")
+}
+
+func TestBuildNetworkRollupSeriesSQLRejectsInvalidMetricType(t *testing.T) {
+	start := time.Now().UTC().Add(-time.Hour)
+	end := time.Now().UTC()
+
+	_, _, err := buildNetworkRollupSeriesSQL(NetworkRollupQuery{
+		Technology: model.TechNR, Granularity: metrics.GranularityHourly,
+		MetricType: metrics.MetricType("unknown"), MetricPaths: []string{"C010070004"},
+		StartTime: start, EndTime: end,
+	})
+	require.ErrorContains(t, err, "metric type")
 }
 
 func TestBuildNetworkRollupSeriesSQLAcceptsOnlyDashboardGranularities(t *testing.T) {
