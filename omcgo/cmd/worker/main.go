@@ -374,6 +374,19 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	}
 	alarmMetrics := alarm.NewAlarmMetrics(w.MetricsReg)
 	alarmEngine.SetMetrics(alarmMetrics)
+	if cfg.Alarm.LifecycleRelayEnabled() {
+		outboxRelay := alarm.NewAlarmOutboxRelay(
+			alarm.NewAlarmOutboxRepository(w.PgPool), w.EventBus, logger,
+		).SetMetrics(alarmMetrics)
+		outboxRelay.Start(context.Background())
+		w.GS.Register("alarm-outbox-relay", 1, func(context.Context) error {
+			outboxRelay.Stop()
+			return nil
+		})
+		logger.Info("alarm lifecycle Outbox relay started",
+			zap.String("lifecycle_mode", cfg.Alarm.LifecycleMode),
+			zap.Uint64("lifecycle_start_sequence", cfg.Alarm.LifecycleStartSequence))
+	}
 	alarmFilterRuleRepo := alarm.NewPgAlarmFilterRuleRepository(w.PgPool)
 	webhookMetrics := alarm.NewWebhookMetrics(w.MetricsReg)
 	webhookDispatcher := alarm.NewHTTPWebhookDispatcher(logger.Named("webhook"), webhookMetrics)

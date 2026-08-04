@@ -94,6 +94,19 @@ func TestDefaultStreams_DomainAlarmSupportsIndependentDurableConsumers(t *testin
 	}
 }
 
+func TestDefaultStreams_DomainAlarmMaxBytesCanBeOverridden(t *testing.T) {
+	const configured int64 = 20 << 30
+	for _, stream := range DefaultStreamsWithAlarmLifecycleMaxBytes(configured) {
+		if stream.Name == "DOMAIN_ALARM" {
+			if stream.MaxBytes != configured {
+				t.Fatalf("DOMAIN_ALARM max bytes = %d, want configured %d", stream.MaxBytes, configured)
+			}
+			return
+		}
+	}
+	t.Fatal("DOMAIN_ALARM stream is not registered")
+}
+
 func TestDefaultStreams_DomainAlarmDoesNotOverlapLegacyAlarm(t *testing.T) {
 	streams := DefaultStreams()
 	var legacy, domain *StreamDef

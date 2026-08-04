@@ -356,7 +356,21 @@ type AppConfig struct {
 // Empty and legacy preserve current behavior; shadow adds canonical Outbox
 // facts while retaining legacy history and NATS publications.
 type AlarmConfig struct {
-	LifecycleMode string `mapstructure:"lifecycle_mode"`
+	LifecycleMode           string `mapstructure:"lifecycle_mode"`
+	LifecycleStreamMaxBytes int64  `mapstructure:"lifecycle_stream_max_bytes"`
+	LifecycleStartSequence  uint64 `mapstructure:"lifecycle_start_sequence"`
+}
+
+// EffectiveLifecycleStreamMaxBytes defaults DOMAIN_ALARM to a bounded 10 GiB.
+func (c AlarmConfig) EffectiveLifecycleStreamMaxBytes() int64 {
+	if c.LifecycleStreamMaxBytes <= 0 {
+		return 10 << 30
+	}
+	return c.LifecycleStreamMaxBytes
+}
+
+func (c AlarmConfig) LifecycleRelayEnabled() bool {
+	return c.LifecycleMode == "shadow" || c.LifecycleMode == "canonical"
 }
 
 type DashboardConfig struct {

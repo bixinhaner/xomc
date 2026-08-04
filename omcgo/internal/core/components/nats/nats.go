@@ -51,6 +51,15 @@ const (
 // 切换 Retention 需 EnsureStreams 删除重建（不可原地修改），由
 // NATSConfig.AllowStreamRebuild 控制（生产默认 false）。
 func DefaultStreams() []StreamDef {
+	return DefaultStreamsWithAlarmLifecycleMaxBytes(alarmLifecycleStreamMaxBytes)
+}
+
+// DefaultStreamsWithAlarmLifecycleMaxBytes preserves the bounded default but
+// permits deployment-specific sizing of the independent lifecycle stream.
+func DefaultStreamsWithAlarmLifecycleMaxBytes(maxBytes int64) []StreamDef {
+	if maxBytes <= 0 {
+		maxBytes = alarmLifecycleStreamMaxBytes
+	}
 	return []StreamDef{
 		{Name: "DEVICE", Subjects: []string{"device.>"}, Retention: nats.InterestPolicy},
 		{Name: "COMMAND", Subjects: []string{"command.>"}, Retention: nats.InterestPolicy},
@@ -102,7 +111,7 @@ func DefaultStreams() []StreamDef {
 			Retention:   nats.LimitsPolicy,
 			AllowDirect: true,
 			MaxAge:      7 * 24 * time.Hour,
-			MaxBytes:    alarmLifecycleStreamMaxBytes,
+			MaxBytes:    maxBytes,
 			Compression: nats.S2Compression,
 		},
 		{Name: "OSS", Subjects: []string{"oss.>"}, Retention: nats.WorkQueuePolicy},
@@ -170,7 +179,14 @@ func NewNATSClient(cfg appconfig.NATSConfig, logger *zap.Logger) (*NATSClient, e
 //   - allowRebuild=true：删除重建（in-flight 消息丢失，仅适合 dev/test）
 //   - allowRebuild=false：仅 WARN，不破坏现有 stream（生产默认）
 func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error {
-	for _, def := range DefaultStreams() {
+	return c.EnsureStreamsWithAlarmLifecycleMaxBytes(ctx, allowRebuild, alarmLifecycleStreamMaxBytes)
+}
+
+// EnsureStreamsWithAlarmLifecycleMaxBytes reconciles the configured DOMAIN_ALARM
+// capacity without changing stream names, subjects, retention, or other domains.
+func (c *NATSClient) EnsureStreamsWithAlarmLifecycleMaxBytes(ctx context.Context, allowRebuild bool, maxBytes int64) error {
+	streams := DefaultStreamsWithAlarmLifecycleMaxBytes(maxBytes)
+	for _, def := range streams {
 		info, err := c.JS.StreamInfo(def.Name)
 		if err == nats.ErrStreamNotFound {
 			if err := c.createStream(def); err != nil {
@@ -222,7 +238,7 @@ func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error
 	// stream rebuild 后消费者可能保留旧 stream 实例的位点（delivered.stream_seq
 	// 远大于新 stream 的 last_seq），导致 NATS 认为所有消息已处理、新消息被静默丢弃。
 	// 检测到错位消费者后删除，QueueSubscribe 会自动重建。
-	for _, def := range DefaultStreams() {
+	for _, def := range streams {
 		info, err := c.JS.StreamInfo(def.Name)
 		if err != nil {
 			c.logger.Warn("consumer health check: cannot get stream info, skipping",

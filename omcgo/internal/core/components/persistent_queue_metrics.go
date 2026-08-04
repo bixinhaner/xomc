@@ -27,6 +27,7 @@ var persistentQueueNames = []string{
 	"device_tasks",
 	"async_jobs",
 	"parameter_sync_outbox",
+	"alarm_event_outbox",
 	"northbound_outbox",
 	"pm_kpi_export",
 	"trace_export",
@@ -164,6 +165,16 @@ UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - 
 UNION ALL SELECT 'delivered', GREATEST(c.reltuples::bigint - (SELECT COUNT(*) FROM parameter_sync_outbox WHERE status = 'dead'), 0), 0::double precision, 0::double precision
 FROM pg_class c WHERE c.oid = 'idx_parameter_sync_outbox_terminal_status'::regclass
 UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM parameter_sync_outbox WHERE status = 'dead' GROUP BY status`},
+	{name: "alarm_event_outbox", query: `
+SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM alarm_event_outbox WHERE status = 'pending' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM alarm_event_outbox WHERE status = 'publishing' GROUP BY status
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM alarm_event_outbox WHERE status = 'failed' GROUP BY status
+-- Published rows dominate the 30-day retention window. The published_at partial
+-- index contains exactly terminal published rows, so its planner estimate avoids
+-- an exact index walk every 30 seconds while live and failure states stay exact.
+UNION ALL SELECT 'published', GREATEST(c.reltuples::bigint, 0), 0::double precision, 0::double precision
+FROM pg_class c WHERE c.oid = 'idx_alarm_event_outbox_published_at'::regclass
+UNION ALL SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM alarm_event_outbox WHERE status = 'dead' GROUP BY status`},
 	{name: "northbound_outbox", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM northbound_outbox GROUP BY status`},
 	{name: "pm_kpi_export", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM pm_kpi_export_tasks GROUP BY status`},
 	{name: "trace_export", query: `SELECT status, COUNT(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0)::double precision, 0::double precision FROM trace_export_jobs GROUP BY status`},
@@ -330,9 +341,9 @@ func normalizePersistentQueueStatus(raw string) (string, error) {
 		return persistentQueueStatusPending, nil
 	case "sent":
 		return persistentQueueStatusSent, nil
-	case "running", "processing", "delivering":
+	case "running", "processing", "delivering", "publishing":
 		return persistentQueueStatusRunning, nil
-	case "succeeded", "completed", "delivered", "done":
+	case "succeeded", "completed", "delivered", "done", "published":
 		return persistentQueueStatusSucceeded, nil
 	case "failed", "canceled", "cancelled", "expired":
 		return persistentQueueStatusFailed, nil

@@ -87,6 +87,8 @@ param_sync:
 # 告警生命周期迁移开关：默认 legacy；shadow 仅用于 Outbox 对比验证。
 alarm:
   lifecycle_mode: legacy
+  lifecycle_stream_max_bytes: 10737418240
+  lifecycle_start_sequence: 1
 
 nats:
   url: "nats://nats:4222"

@@ -113,6 +113,18 @@ func TestWorkerConfigRejectsInvalidAlarmLifecycleMode(t *testing.T) {
 	require.ErrorContains(t, cfg.Validate(), "alarm.lifecycle_mode must be legacy, shadow, or canonical")
 }
 
+func TestAlarmConfigRequiresRecordedStartSequenceBeforeRelayModes(t *testing.T) {
+	cfg := validAppConfig()
+	cfg.Alarm.LifecycleMode = "shadow"
+	cfg.Alarm.LifecycleStartSequence = 0
+	require.ErrorContains(t, cfg.Validate(), "alarm.lifecycle_start_sequence")
+
+	cfg.Alarm.LifecycleStartSequence = 1
+	require.NoError(t, cfg.Validate())
+	require.True(t, cfg.Alarm.LifecycleRelayEnabled())
+	require.False(t, (AlarmConfig{LifecycleMode: "legacy"}).LifecycleRelayEnabled())
+}
+
 func TestPMRedisFallbackUsesCoreConfiguration(t *testing.T) {
 	core := RedisConfig{Addrs: []string{"redis-core:6379"}, Password: "secret", DB: 3, PoolSize: 40}
 	appCfg := AppConfig{Redis: core}
@@ -164,6 +176,8 @@ func TestAppAndWorkerConfigExamplesUseDedicatedPMRedis(t *testing.T) {
 					var cfg AppConfig
 					require.NoError(t, Load(path, &cfg))
 					require.Equal(t, "legacy", cfg.Alarm.LifecycleMode)
+					require.Equal(t, int64(10<<30), cfg.Alarm.LifecycleStreamMaxBytes)
+					require.Equal(t, uint64(1), cfg.Alarm.LifecycleStartSequence)
 					require.NotEmpty(t, cfg.PMRedis.Addrs)
 					require.False(t, redisAddressSetsOverlap(cfg.Redis.Addrs, cfg.PMRedis.Addrs))
 					return
@@ -171,6 +185,8 @@ func TestAppAndWorkerConfigExamplesUseDedicatedPMRedis(t *testing.T) {
 				var cfg WorkerConfig
 				require.NoError(t, Load(path, &cfg))
 				require.Equal(t, "legacy", cfg.Alarm.LifecycleMode)
+				require.Equal(t, int64(10<<30), cfg.Alarm.LifecycleStreamMaxBytes)
+				require.Equal(t, uint64(1), cfg.Alarm.LifecycleStartSequence)
 				require.NotEmpty(t, cfg.PMRedis.Addrs)
 				require.False(t, redisAddressSetsOverlap(cfg.Redis.Addrs, cfg.PMRedis.Addrs))
 			})

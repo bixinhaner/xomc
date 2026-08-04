@@ -60,7 +60,9 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	} else if err := inf.ConnectPMRedis(cfg.EffectivePMRedis()); err != nil {
 		return nil, err
 	}
-	if err := inf.ConnectNATS(ctx, cfg.NATS); err != nil {
+	if err := inf.ConnectNATSWithAlarmLifecycleMaxBytes(
+		ctx, cfg.NATS, cfg.Alarm.EffectiveLifecycleStreamMaxBytes(),
+	); err != nil {
 		return nil, err
 	}
 	if err := inf.ConnectMinIO(ctx, cfg.MinIO); err != nil {

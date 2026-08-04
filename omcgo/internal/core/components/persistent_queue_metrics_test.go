@@ -21,6 +21,7 @@ func TestNewPersistentQueueMetricsPrimesAllBoundedSeries(t *testing.T) {
 	require.Equal(t, float64(0), testutil.ToFloat64(m.OldestAgeSeconds.WithLabelValues("dead_letters", persistentQueueStatusDeadLetter)))
 	require.Equal(t, float64(0), testutil.ToFloat64(m.OverdueOldestAgeSeconds.WithLabelValues("device_tasks", persistentQueueStatusSent)))
 	require.Equal(t, float64(0), testutil.ToFloat64(m.Up.WithLabelValues("async_jobs")))
+	require.Equal(t, float64(0), testutil.ToFloat64(m.Pending.WithLabelValues("alarm_event_outbox", persistentQueueStatusPending)))
 
 	families, err := reg.Gather()
 	require.NoError(t, err)
@@ -64,6 +65,15 @@ func TestHotPersistentQueueQueriesSplitStatusesToUseIndexes(t *testing.T) {
 			require.Contains(t, descriptor.query, "idx_parameter_sync_outbox_terminal_status")
 			require.Contains(t, descriptor.query, "reltuples")
 			require.NotContains(t, descriptor.query, "FROM parameter_sync_outbox GROUP BY status")
+		case "alarm_event_outbox":
+			require.Contains(t, descriptor.query, "WHERE status = 'pending'")
+			require.Contains(t, descriptor.query, "WHERE status = 'publishing'")
+			require.Contains(t, descriptor.query, "WHERE status = 'failed'")
+			require.Contains(t, descriptor.query, "idx_alarm_event_outbox_published_at")
+			require.Contains(t, descriptor.query, "reltuples")
+			require.NotContains(t, descriptor.query, "WHERE status = 'published'")
+			require.Contains(t, descriptor.query, "WHERE status = 'dead'")
+			require.NotContains(t, descriptor.query, "FROM alarm_event_outbox GROUP BY status")
 		}
 	}
 }
@@ -110,7 +120,9 @@ func TestNormalizePersistentQueueStatus(t *testing.T) {
 	tests := map[string]string{
 		"queued":     persistentQueueStatusPending,
 		"delivering": persistentQueueStatusRunning,
+		"publishing": persistentQueueStatusRunning,
 		"done":       persistentQueueStatusSucceeded,
+		"published":  persistentQueueStatusSucceeded,
 		"expired":    persistentQueueStatusFailed,
 		"zombie":     persistentQueueStatusDeadLetter,
 	}

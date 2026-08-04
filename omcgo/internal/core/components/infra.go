@@ -203,6 +203,16 @@ func (inf *Infra) connectRedis(cfg appconfig.RedisConfig, role string) (redis.Un
 // ConnectNATS 初始化 NATS JetStream 客户端，并确保流存在。
 // 结果存入 Infra.NATS，后续可调用 CreateEventBus 创建事件总线。
 func (inf *Infra) ConnectNATS(ctx context.Context, cfg appconfig.NATSConfig) error {
+	return inf.ConnectNATSWithAlarmLifecycleMaxBytes(ctx, cfg, 0)
+}
+
+// ConnectNATSWithAlarmLifecycleMaxBytes keeps the common infrastructure path
+// while allowing app/worker alarm lifecycle deployments to size DOMAIN_ALARM.
+func (inf *Infra) ConnectNATSWithAlarmLifecycleMaxBytes(
+	ctx context.Context,
+	cfg appconfig.NATSConfig,
+	maxBytes int64,
+) error {
 	client, err := natscomp.NewNATSClient(cfg, inf.Logger)
 	if err != nil {
 		return fmt.Errorf("connect to NATS: %w", err)
@@ -219,7 +229,7 @@ func (inf *Infra) ConnectNATS(ctx context.Context, cfg appconfig.NATSConfig) err
 	natsConnMetrics := client.RegisterMetrics(inf.MetricsReg)
 	inf.GS.Register("nats-conn-metrics", 1, func(context.Context) error { natsConnMetrics.Stop(); return nil })
 
-	if err := client.EnsureStreams(ctx, cfg.AllowStreamRebuild); err != nil {
+	if err := client.EnsureStreamsWithAlarmLifecycleMaxBytes(ctx, cfg.AllowStreamRebuild, maxBytes); err != nil {
 		inf.Logger.Warn("ensure NATS streams", zap.Error(err))
 	}
 	return nil

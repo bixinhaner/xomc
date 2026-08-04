@@ -177,15 +177,25 @@ func (c *WorkerConfig) Validate() error {
 }
 
 func (c AlarmConfig) validate() error {
+	var errs []string
 	switch c.LifecycleMode {
 	case "", "legacy", "shadow", "canonical":
-		return nil
 	default:
-		return fmt.Errorf(
+		errs = append(errs, fmt.Sprintf(
 			"alarm.lifecycle_mode must be legacy, shadow, or canonical, got %q",
 			c.LifecycleMode,
-		)
+		))
 	}
+	if c.LifecycleStreamMaxBytes < 0 {
+		errs = append(errs, "alarm.lifecycle_stream_max_bytes must be >= 0")
+	}
+	if (c.LifecycleMode == "shadow" || c.LifecycleMode == "canonical") && c.LifecycleStartSequence == 0 {
+		errs = append(errs, "alarm.lifecycle_start_sequence must be recorded before enabling shadow or canonical mode")
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 func (c BucketConfig) validateConfigBackup() error {

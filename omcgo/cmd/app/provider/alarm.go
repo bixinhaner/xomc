@@ -32,7 +32,21 @@ func initAlarmModule(c *Container) error {
 	if err := alarmEngine.SetLifecycleMode(alarm.LifecycleMode(c.Cfg.Alarm.LifecycleMode)); err != nil {
 		return fmt.Errorf("configure alarm lifecycle mode: %w", err)
 	}
-	alarmEngine.SetMetrics(alarm.NewAlarmMetrics(c.MetricsReg))
+	alarmMetrics := alarm.NewAlarmMetrics(c.MetricsReg)
+	alarmEngine.SetMetrics(alarmMetrics)
+	if c.Cfg.Alarm.LifecycleRelayEnabled() {
+		outboxRelay := alarm.NewAlarmOutboxRelay(
+			alarm.NewAlarmOutboxRepository(c.PgPool), c.EventBus, logger,
+		).SetMetrics(alarmMetrics)
+		outboxRelay.Start(context.Background())
+		c.GS.Register("alarm-outbox-relay", 1, func(context.Context) error {
+			outboxRelay.Stop()
+			return nil
+		})
+		logger.Info("alarm lifecycle Outbox relay started",
+			zap.String("lifecycle_mode", c.Cfg.Alarm.LifecycleMode),
+			zap.Uint64("lifecycle_start_sequence", c.Cfg.Alarm.LifecycleStartSequence))
+	}
 
 	// 告警同步服务
 	alarmSyncService := alarm.NewAlarmSyncService(c.TaskSvc, c.Redis, c.EventBus, logger)
