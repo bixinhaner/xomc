@@ -82,6 +82,7 @@ if run_planner "$ENV_FILE" "$TMP/resources.env" > "$TMP/output" 2>&1; then
   check_eq "32核 medium TimescaleDB CPU" "$(storage_env_get "$TMP/resources.env" TSDB_CPUS)" "16"
   check_eq "32核 medium worker CPU" "$(storage_env_get "$TMP/resources.env" WORKER_CPUS)" "8"
   check_eq "32GiB medium MinIO 内存余量" "$(storage_env_get "$TMP/resources.env" MINIO_MEM)" "6144m"
+  check_eq "web 最低内存避免 nginx OOM" "$(storage_env_get "$TMP/resources.env" WEB_MEM)" "512m"
   if [ "$(file_inode "$TMP/resources.env")" != "$BEFORE_INODE" ]; then
     ok
   else
@@ -89,6 +90,34 @@ if run_planner "$ENV_FILE" "$TMP/resources.env" > "$TMP/output" 2>&1; then
   fi
 else
   bad "planner 应成功运行"
+fi
+
+echo "── 低配 medium 档按可用预算降级 MinIO，不阻断安装 ──"
+FLEX_ENV="$TMP/flexible-medium.env"
+printf 'OMC_PUBLIC_HOST=10.0.0.8\n' > "$FLEX_ENV"
+if env \
+  OMC_PROBE_CPU=32 \
+  OMC_PROBE_MEM_TOTAL_MIB=31763 \
+  OMC_PROBE_MEM_AVAIL_MIB=29000 \
+  OMC_PROBE_LOAD15=0 \
+  OMC_PROBE_STORAGE_MOUNTS="$MOUNTS" \
+  OMC_STORAGE_ENV_FILE="$FLEX_ENV" \
+  bash "$PLANNER" --assume-dedicated --output "$TMP/flexible-medium-resources.env" \
+    >"$TMP/flexible-medium-output" 2>&1; then
+  if resource_env_validate "$TMP/flexible-medium-resources.env"; then
+    ok
+  else
+    bad "低配 medium 档资源计划必须满足完整资源契约"
+  fi
+  flexible_minio_mib="$(resource_env_memory_mib "$(resource_env_get "$TMP/flexible-medium-resources.env" MINIO_MEM)" | awk '{printf "%d", $1}')"
+  if [ "$flexible_minio_mib" -ge 512 ] && [ "$flexible_minio_mib" -lt 6144 ] &&
+    grep -q 'does not have enough idle budget' "$TMP/flexible-medium-output"; then
+    ok
+  else
+    bad "低配 medium 档应在不削减 floor 的前提下灵活降低 MinIO 内存"
+  fi
+else
+  bad "低配 medium 档不应因 MinIO 6GiB 目标不可达而失败"
 fi
 
 echo "── 大机型按主库1/3、时序库1/2、worker1/4分配 CPU ──"

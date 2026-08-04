@@ -297,7 +297,7 @@ BASE_COMP_FLOOR=(1536 4096 1024 7168 4096 4096 8192 1024 3072 512)
 BASE_COMP_CEIL=(3072 6144 2048 16384 12288 6144 12288 2048 4096 512)
 # 低配机仍须保证能启动一套有意义的 OMC；这些是按组件职责定义的最低比例
 # 约束，不是固定的最终申请值。双 ACS 接力副本在后续总账中再计一次。
-COMP_MIN=(512 1024 512 2048 1536 2048 4096 256 512 128)
+COMP_MIN=(512 1024 512 2048 1536 2048 4096 256 512 512)
 COMP_WEIGHT=(10 18 25 25 22 8 15 5 8 0)
 
 MON_FIXED_MIB=4736   # prometheus1024+loki512+tempo1024+otelcol512+grafana512+alertmgr512+exporters(128*3+256)
@@ -404,10 +404,10 @@ esac
 CPU_LIST=("$CPU_app" "$CPU_acs" "$CPU_worker" "$CPU_pg" "$CPU_tsdb" "$CPU_redis_core" "$CPU_redis_pm" "$CPU_nats" "$CPU_minio" "$CPU_web")
 idx() { local n="$1"; for i in "${!COMP_NAMES[@]}"; do [ "${COMP_NAMES[$i]}" = "$n" ] && { echo "$i"; return; }; done; }
 
-# 32GiB 及以上档位为 MinIO 固定保留 6GiB cap。线上海量小对象场景中，进程 RSS
+# 32GiB 及以上档位优先把 MinIO 提升到 6GiB cap。线上海量小对象场景中，进程 RSS
 # 仅约 0.45GiB，但可回收文件系统 slab 会把 4GiB cgroup working set 推至上限，
-# 造成持续 memory.max 回收并放大磁盘 I/O。这里仅从其它组件 floor 以上的 cap 余量
-# 重分配，既不突破整机预算，也不削减任何组件的最低可运行内存。
+# 造成持续 memory.max 回收并放大磁盘 I/O。低配主机若没有足够 surplus，则只提升到
+# 当前预算允许的值，不削减其它组件 floor，也不因 MinIO 目标值不可达而阻断安装。
 if [ "$TIER" != "small" ]; then
   MINIO_IDX=$(idx minio)
   MINIO_TARGET_MIB=6144
@@ -422,8 +422,11 @@ if [ "$TIER" != "small" ]; then
       COMP_MEM[$reclaim_idx]=$(( COMP_MEM[$reclaim_idx] - take ))
       MINIO_NEED=$(( MINIO_NEED - take ))
     done
-    [ "$MINIO_NEED" -eq 0 ] || die "${TIER} 档位无法在不削减组件 floor 的前提下为 MinIO 保留 6GiB；请扩容或降低其它组件基线" "The ${TIER} tier cannot reserve 6 GiB for MinIO without reducing component floors; resize the host or lower other component baselines." 1
-    COMP_MEM[$MINIO_IDX]="$MINIO_TARGET_MIB"
+    MINIO_ALLOCATED=$(( MINIO_TARGET_MIB - MINIO_NEED ))
+    COMP_MEM[$MINIO_IDX]="$MINIO_ALLOCATED"
+    if [ "$MINIO_NEED" -gt 0 ]; then
+      warn "${TIER} 档位空闲预算不足以为 MinIO 提升到 6GiB；按可用预算分配 $(to_gib "$MINIO_ALLOCATED") GiB，不削减其它组件 floor。" "The ${TIER} tier does not have enough idle budget to raise MinIO to 6 GiB; allocating $(to_gib "$MINIO_ALLOCATED") GiB within the available budget without reducing other component floors."
+    fi
   fi
 fi
 
