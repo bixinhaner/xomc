@@ -21,13 +21,18 @@ import (
 
 // PgAlarmStore implements AlarmStore using PostgreSQL and TimescaleDB.
 type PgAlarmStore struct {
-	pool   *pgxpool.Pool
-	tsPool *pgxpool.Pool
+	pool   storage.DB
+	tsPool storage.DB
+	now    func() time.Time
 }
 
 // NewPgAlarmStore creates a new PostgreSQL-backed alarm store.
 func NewPgAlarmStore(pool *pgxpool.Pool, tsPool *pgxpool.Pool) *PgAlarmStore {
-	return &PgAlarmStore{pool: pool, tsPool: tsPool}
+	return newPgAlarmStoreWithDB(pool, tsPool, time.Now)
+}
+
+func newPgAlarmStoreWithDB(pool storage.DB, tsPool storage.DB, now func() time.Time) *PgAlarmStore {
+	return &PgAlarmStore{pool: pool, tsPool: tsPool, now: now}
 }
 
 func (s *PgAlarmStore) SaveActive(ctx context.Context, alarm *model.Alarm) error {
