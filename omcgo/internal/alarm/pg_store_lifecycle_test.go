@@ -28,6 +28,7 @@ func TestLifecycleTx_RaisedCommitsActiveRowAndOutbox(t *testing.T) {
 	require.Len(t, tx.execSQL, 2)
 	require.Contains(t, tx.execSQL[0], "INSERT INTO alarms_active")
 	require.Contains(t, tx.execSQL[1], "INSERT INTO alarm_event_outbox")
+	require.Equal(t, "", tx.execArgs[0][26], "NOT NULL probable_cause must not receive nil")
 	require.Equal(t, int64(1), alarm.Version)
 	require.Equal(t, int64(1), payload.AlarmVersion)
 	require.Equal(t, mutatedAt, payload.OccurredAt)
@@ -261,6 +262,7 @@ type fakeLifecycleTx struct {
 	row         pgx.Row
 	execResults []fakeExecResult
 	execSQL     []string
+	execArgs    [][]any
 	querySQL    string
 	committed   bool
 	rolledBack  bool
@@ -278,8 +280,9 @@ func (tx *fakeLifecycleTx) Rollback(context.Context) error {
 	tx.rolledBack = true
 	return nil
 }
-func (tx *fakeLifecycleTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+func (tx *fakeLifecycleTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	tx.execSQL = append(tx.execSQL, sql)
+	tx.execArgs = append(tx.execArgs, args)
 	index := len(tx.execSQL) - 1
 	if index >= len(tx.execResults) {
 		return pgconn.CommandTag{}, errors.New("unexpected transaction Exec")

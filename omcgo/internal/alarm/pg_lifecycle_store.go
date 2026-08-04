@@ -368,7 +368,7 @@ func insertActiveLifecycle(ctx context.Context, tx pgx.Tx, alarm *model.Alarm) e
 		alarm.AcknowledgedBy, alarm.AckNote, additionalJSON, alarm.CreatedAt, alarm.UpdatedAt,
 		alarm.DeviceName, alarm.Technology, alarm.AlarmSource, alarm.EventType, alarm.NetworkLocation,
 		alarm.ExplicitCause, alarm.IsRead, alarm.AckCount, alarm.FirstRaisedAt, alarm.LastUpdatedAt,
-		alarm.ProbableCause, alarm.IsUnknown, alarm.Version,
+		alarmProbableCauseValue(alarm.ProbableCause), alarm.IsUnknown, alarm.Version,
 	).ToSql()
 	if err != nil {
 		return fmt.Errorf("build active alarm lifecycle insert: %w", err)
@@ -405,7 +405,7 @@ func updateActiveLifecycle(ctx context.Context, tx pgx.Tx, alarm *model.Alarm, e
 		Set("ack_count", alarm.AckCount).
 		Set("first_raised_at", alarm.FirstRaisedAt).
 		Set("last_updated_at", alarm.LastUpdatedAt).
-		Set("probable_cause", alarm.ProbableCause).
+		Set("probable_cause", alarmProbableCauseValue(alarm.ProbableCause)).
 		Set("is_unknown", alarm.IsUnknown).
 		Set("alarm_version", alarm.Version).
 		Where(squirrel.Eq{"id": alarm.ID, "alarm_version": expectedVersion}).
@@ -421,6 +421,13 @@ func updateActiveLifecycle(ctx context.Context, tx pgx.Tx, alarm *model.Alarm, e
 		return fmt.Errorf("%w: occurrence %s changed during update", ErrAlarmVersionConflict, alarm.ID)
 	}
 	return nil
+}
+
+func alarmProbableCauseValue(probableCause *string) string {
+	if probableCause == nil {
+		return ""
+	}
+	return *probableCause
 }
 
 func deleteActiveLifecycle(ctx context.Context, tx pgx.Tx, id uuid.UUID, expectedVersion int64) error {
