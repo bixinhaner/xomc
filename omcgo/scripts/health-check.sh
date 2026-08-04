@@ -72,7 +72,7 @@ if [ -n "$ACS_PID" ]; then
     METRICS=$(curl -sf http://localhost:9090/metrics 2>/dev/null || echo "")
     if [ -n "$METRICS" ]; then
         INFORM_TOTAL=$(echo "$METRICS" | grep "^acs_inform_total" | awk '{sum+=$2} END {printf "%d", sum}')
-        ACTIVE_SESSIONS=$(echo "$METRICS" | grep "^acs_active_sessions" | awk '{print $2}')
+        ACTIVE_SESSIONS=$(echo "$METRICS" | grep "^acs_global_active_sessions " | awk '{print $2}')
         echo "  累计 Inform 次数: ${INFORM_TOTAL:-0}"
         echo "  当前活跃会话: ${ACTIVE_SESSIONS:-0}"
     fi

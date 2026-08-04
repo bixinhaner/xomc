@@ -151,7 +151,9 @@ go run scripts/loadtest/main.go \
 
 | 指标 | 类型 | 含义 |
 |------|------|------|
-| `acs_active_sessions` | Gauge | 当前活跃会话数（应 ≤ 10000） |
+| `acs_global_active_sessions` | Gauge | 全部 ACS 实例共享的实时已准入会话数（应 ≤ 配置的全局上限 30000） |
+| `acs_active_sessions` | Gauge | 已弃用的兼容别名，数值与 `acs_global_active_sessions` 相同 |
+| `acs_local_tracked_sessions` | Gauge | 单进程最多保留五分钟的会话 ID 数，仅用于诊断，不代表实时并发 |
 | `acs_session_duration_seconds` | Histogram | 会话耗时分布 |
 | `acs_inform_total{event_type}` | Counter | Inform 消息计数 |
 | `acs_rpc_duration_seconds{method}` | Histogram | RPC 方法耗时 |
@@ -165,7 +167,7 @@ go run scripts/loadtest/main.go \
 
 修复后的 ACS 引擎在以下方面满足压测要求：
 
-1. **Admission 正确性** — 并发限制真正生效，`acs_active_sessions` 指标准确反映实际并发
+1. **Admission 正确性** — 并发限制真正生效，`acs_global_active_sessions` 指标准确反映实际并发
 2. **内存安全** — connSessions 有 TTL 清理，不会因长时间运行而泄漏
 3. **指标完备** — 5 个核心 Prometheus 指标全部生效，可用于分析瓶颈
 4. **测试覆盖** — 压测工具覆盖完整 TR069 会话生命周期，不再只测 Inform
@@ -176,4 +178,5 @@ go run scripts/loadtest/main.go \
 - 压测前确保 Redis 连接池 `pool_size` ≥ 预期并发数（建议 200+）
 - 使用 `pprof` 实时监控内存和 goroutine（`/debug/pprof/`）
 - 首轮压测建议 50 并发起步，逐步增加到目标值
-- 关注 `acs_active_sessions` 是否在测试结束后归零（验证泄漏修复）
+- 关注 `acs_global_active_sessions` 是否在测试结束后归零（验证准入槽位正确释放）
+- `acs_local_tracked_sessions` 可能在测试结束后继续保留最多五分钟，只用于诊断本地跟踪集合

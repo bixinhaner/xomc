@@ -68,7 +68,7 @@ type Handler struct {
 	rateLimiter   *DeviceRateLimiter
 	admission     AdmissionController
 	metrics       *ACSMetrics
-	// localActiveSessions 只记录本进程曾对 ActiveSessions 递增的 session ID。
+	// localActiveSessions 记录本进程最近五分钟跟踪过的 session ID，仅驱动本地诊断指标。
 	// 共享 SessionStore 可能包含重启前或其它实例的会话，清理它们时不能递减本进程 gauge。
 	localActiveSessions     sync.Map
 	logger                  *zap.Logger
@@ -185,7 +185,9 @@ func (h *Handler) refreshGlobalActiveSessions(ctx context.Context) {
 	if h == nil || h.admission == nil || h.metrics == nil {
 		return
 	}
-	h.metrics.GlobalActiveSessions.Set(float64(h.admission.Current(ctx)))
+	current := float64(h.admission.Current(ctx))
+	h.metrics.GlobalActiveSessions.Set(current)
+	h.metrics.ActiveSessions.Set(current)
 }
 
 // reapOrphanedSession 清理孤儿设备会话（跨实例）：从共享 SessionStore 加载会话，
@@ -1127,7 +1129,7 @@ func (h *Handler) trackActiveSessionAt(sessionID string, trackedAt time.Time) {
 		return
 	}
 	if _, loaded := h.localActiveSessions.LoadOrStore(sessionID, trackedAt); !loaded {
-		h.metrics.ActiveSessions.Inc()
+		h.metrics.LocalTrackedSessions.Inc()
 	}
 }
 
@@ -1155,7 +1157,7 @@ func (h *Handler) untrackActiveSession(sessionID string) {
 		return
 	}
 	if _, loaded := h.localActiveSessions.LoadAndDelete(sessionID); loaded {
-		h.metrics.ActiveSessions.Dec()
+		h.metrics.LocalTrackedSessions.Dec()
 	}
 }
 
