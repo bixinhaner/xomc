@@ -377,6 +377,33 @@ COMMENT ON COLUMN public.alarm_definitions.loaded_from IS 'Loader 来源 XML 相
 
 
 --
+-- Name: alarm_event_outbox; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.alarm_event_outbox (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    event_id uuid NOT NULL,
+    aggregate_type character varying(32) NOT NULL,
+    aggregate_id uuid NOT NULL,
+    aggregate_version bigint NOT NULL,
+    subject character varying(128) NOT NULL,
+    payload jsonb NOT NULL,
+    status character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    attempt_count integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    locked_by character varying(128),
+    locked_at timestamp with time zone,
+    published_at timestamp with time zone,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT alarm_event_outbox_aggregate_version_check CHECK ((aggregate_version > 0)),
+    CONSTRAINT alarm_event_outbox_attempt_count_check CHECK ((attempt_count >= 0)),
+    CONSTRAINT alarm_event_outbox_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'publishing'::character varying, 'published'::character varying, 'failed'::character varying, 'dead'::character varying])::text[])))
+);
+
+
+--
 -- Name: alarm_filters; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -499,7 +526,9 @@ CREATE TABLE public.alarms_active (
     first_raised_at timestamp with time zone DEFAULT now() NOT NULL,
     last_updated_at timestamp with time zone DEFAULT now() NOT NULL,
     ack_note text DEFAULT ''::text,
-    is_unknown boolean DEFAULT false NOT NULL
+    is_unknown boolean DEFAULT false NOT NULL,
+    alarm_version bigint DEFAULT 1 NOT NULL,
+    CONSTRAINT alarms_active_alarm_version_check CHECK ((alarm_version > 0))
 );
 
 
@@ -7783,6 +7812,30 @@ ALTER TABLE ONLY public.alarm_definitions
 
 
 --
+-- Name: alarm_event_outbox alarm_event_outbox_aggregate_version_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.alarm_event_outbox
+    ADD CONSTRAINT alarm_event_outbox_aggregate_version_key UNIQUE (aggregate_id, aggregate_version);
+
+
+--
+-- Name: alarm_event_outbox alarm_event_outbox_event_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.alarm_event_outbox
+    ADD CONSTRAINT alarm_event_outbox_event_id_key UNIQUE (event_id);
+
+
+--
+-- Name: alarm_event_outbox alarm_event_outbox_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.alarm_event_outbox
+    ADD CONSTRAINT alarm_event_outbox_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: alarm_filters alarm_filters_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -12173,6 +12226,27 @@ CREATE INDEX idx_alarm_filters_action ON public.alarm_filters USING btree (actio
 --
 
 CREATE INDEX idx_alarm_filters_alarm_identifiers ON public.alarm_filters USING gin (alarm_identifiers);
+
+
+--
+-- Name: idx_alarm_event_outbox_dispatch; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_alarm_event_outbox_dispatch ON public.alarm_event_outbox USING btree (status, next_attempt_at, created_at) WHERE ((status)::text = ANY ((ARRAY['pending'::character varying, 'failed'::character varying])::text[]));
+
+
+--
+-- Name: idx_alarm_event_outbox_locked_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_alarm_event_outbox_locked_at ON public.alarm_event_outbox USING btree (locked_at) WHERE ((status)::text = 'publishing'::text);
+
+
+--
+-- Name: idx_alarm_event_outbox_published_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_alarm_event_outbox_published_at ON public.alarm_event_outbox USING btree (published_at) WHERE (published_at IS NOT NULL);
 
 
 --

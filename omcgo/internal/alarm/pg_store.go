@@ -31,6 +31,7 @@ func NewPgAlarmStore(pool *pgxpool.Pool, tsPool *pgxpool.Pool) *PgAlarmStore {
 }
 
 func (s *PgAlarmStore) SaveActive(ctx context.Context, alarm *model.Alarm) error {
+	ensureAlarmVersion(alarm)
 	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -42,14 +43,14 @@ func (s *PgAlarmStore) SaveActive(ctx context.Context, alarm *model.Alarm) error
 
 	_, err = tx.Exec(ctx,
 		`INSERT INTO alarms_active (id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, acknowledged_by, ack_note, additional_info, created_at, updated_at,
-			 device_name, technology, alarm_source, event_type, network_location, explicit_cause, is_read, ack_count, first_raised_at, last_updated_at, probable_cause, is_unknown)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`,
+			 device_name, technology, alarm_source, event_type, network_location, explicit_cause, is_read, ack_count, first_raised_at, last_updated_at, probable_cause, is_unknown, alarm_version)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)`,
 		alarm.ID, alarm.DeviceID, alarm.DeviceSN, alarm.Carrier, alarm.Severity,
 		alarm.AlarmType, alarm.AlarmIdentifier, alarm.Description, alarm.Status,
 		alarm.RaisedAt, alarm.AcknowledgedAt, alarm.AcknowledgedBy, alarm.AckNote, additionalJSON, alarm.CreatedAt, alarm.UpdatedAt,
 		alarm.DeviceName, alarm.Technology, alarm.AlarmSource, alarm.EventType,
 		alarm.NetworkLocation, alarm.ExplicitCause, alarm.IsRead, alarm.AckCount,
-		alarm.FirstRaisedAt, alarm.LastUpdatedAt, alarm.ProbableCause, alarm.IsUnknown,
+		alarm.FirstRaisedAt, alarm.LastUpdatedAt, alarm.ProbableCause, alarm.IsUnknown, alarm.Version,
 	)
 	if err != nil {
 		return fmt.Errorf("insert alarms_active: %w", err)
@@ -122,19 +123,20 @@ func (s *PgAlarmStore) GetActiveByDeviceSN(ctx context.Context, deviceSN string)
 }
 
 func (s *PgAlarmStore) UpdateActive(ctx context.Context, alarm *model.Alarm) error {
+	ensureAlarmVersion(alarm)
 	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
 	_, err := s.pool.Exec(ctx,
 		`UPDATE alarms_active SET severity=$1, status=$2, raised_at=$3, acknowledged_at=$4,
 			 acknowledged_by=$5, ack_note=$6, additional_info=$7, updated_at=$8, device_name=$9, technology=$10,
 			 alarm_source=$11, event_type=$12, network_location=$13, explicit_cause=$14,
-			 is_read=$15, ack_count=$16, last_updated_at=$17, probable_cause=$18 WHERE id=$19`,
+			 is_read=$15, ack_count=$16, last_updated_at=$17, probable_cause=$18, alarm_version=$19 WHERE id=$20`,
 		alarm.Severity, alarm.Status, alarm.RaisedAt, alarm.AcknowledgedAt,
 		alarm.AcknowledgedBy, alarm.AckNote, additionalJSON, time.Now(),
 		alarm.DeviceName, alarm.Technology,
 		alarm.AlarmSource, alarm.EventType,
 		alarm.NetworkLocation, alarm.ExplicitCause,
 		alarm.IsRead, alarm.AckCount,
-		alarm.LastUpdatedAt, alarm.ProbableCause,
+		alarm.LastUpdatedAt, alarm.ProbableCause, alarm.Version,
 		alarm.ID,
 	)
 	if err != nil {
@@ -217,6 +219,7 @@ func (s *PgAlarmStore) ListActive(ctx context.Context, filter AlarmFilter) (*mod
 }
 
 func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
+	ensureAlarmVersion(alarm)
 	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
 	archiveUpdatedAt := historyUpdatedAt(alarm)
 	if archiveUpdatedAt.IsZero() {
@@ -224,8 +227,8 @@ func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
 	}
 	// alarms_history 在时序库（TsPool）。
 	_, err := s.tsPool.Exec(ctx,
-		`INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, cleared_at, device_name, technology, alarm_source, event_type, network_location, explicit_cause, ack_count, acknowledged_by, ack_note, additional_info, updated_at, cleared_by, clear_note, probable_cause)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)`,
+		`INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, cleared_at, device_name, technology, alarm_source, event_type, network_location, explicit_cause, ack_count, acknowledged_by, ack_note, additional_info, updated_at, cleared_by, clear_note, probable_cause, alarm_version)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`,
 		time.Now(), alarm.ID, alarm.DeviceID, alarm.DeviceSN, alarm.Carrier,
 		alarm.Severity, alarm.AlarmType, alarm.AlarmIdentifier, alarm.Description,
 		alarm.Status, alarm.RaisedAt, alarm.AcknowledgedAt, alarm.ClearedAt,
@@ -233,7 +236,7 @@ func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
 		alarm.NetworkLocation, alarm.ExplicitCause, alarm.AckCount,
 		alarm.AcknowledgedBy, alarm.AckNote, additionalJSON, archiveUpdatedAt,
 		alarm.ClearedBy, alarm.ClearNote,
-		alarm.ProbableCause,
+		alarm.ProbableCause, alarm.Version,
 	)
 	if err != nil {
 		return fmt.Errorf("insert alarms_history: %w", err)
@@ -246,6 +249,12 @@ func historyUpdatedAt(alarm *model.Alarm) time.Time {
 		return alarm.LastUpdatedAt
 	}
 	return alarm.UpdatedAt
+}
+
+func ensureAlarmVersion(alarm *model.Alarm) {
+	if alarm.Version < 1 {
+		alarm.Version = 1
+	}
 }
 
 func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
@@ -274,26 +283,11 @@ func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*mo
 
 	var items []model.Alarm
 	for rows.Next() {
-		var a model.Alarm
-		var timeVal time.Time
-		var additionalJSON []byte
-		if err := rows.Scan(
-			&timeVal,
-			&a.ID, &a.DeviceID, &a.DeviceSN, &a.Carrier, &a.Severity,
-			&a.AlarmType, &a.AlarmIdentifier, &a.Description, &a.Status, &a.RaisedAt,
-			&a.AcknowledgedAt, &a.ClearedAt, &a.AcknowledgedBy, &a.AckNote,
-			&additionalJSON,
-			&a.DeviceName, &a.Technology, &a.AlarmSource, &a.EventType,
-			&a.AckCount, &a.UpdatedAt,
-			&a.ClearedBy, &a.ClearNote,
-			&a.ProbableCause,
-		); err != nil {
+		a, err := scanHistoryAlarmRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan alarms_history: %w", err)
 		}
-		if len(additionalJSON) > 0 {
-			_ = json.Unmarshal(additionalJSON, &a.AdditionalInfo)
-		}
-		items = append(items, a)
+		items = append(items, *a)
 	}
 	if items == nil {
 		items = []model.Alarm{}
@@ -403,7 +397,7 @@ var activeColumns = []string{
 	"alarms_active.network_location", "alarms_active.explicit_cause", "alarms_active.is_read", "alarms_active.ack_count",
 	"alarms_active.first_raised_at", "alarms_active.last_updated_at", "alarms_active.probable_cause",
 	// T-0098 P2-10
-	"alarms_active.is_unknown",
+	"alarms_active.is_unknown", "alarms_active.alarm_version",
 }
 
 func activeAlarmSelect() squirrel.SelectBuilder {
@@ -483,6 +477,7 @@ func historyAlarmSelect(loc appcontext.Locale) squirrel.SelectBuilder {
 		"alarms_history.ack_count", "alarms_history.updated_at",
 		"alarms_history.cleared_by", "alarms_history.clear_note",
 		localizedProbableCauseExpr(loc, "alarms_history"),
+		"alarms_history.alarm_version",
 	).From("alarms_history").
 		LeftJoin("device_dim d ON d.id = alarms_history.device_id").
 		LeftJoin("alarm_definition_dim ad ON ad.identifier = alarms_history.alarm_identifier")
@@ -499,6 +494,7 @@ func historyAlarmRawSelect() squirrel.SelectBuilder {
 		"alarms_history.ack_count", "alarms_history.updated_at",
 		"alarms_history.cleared_by", "alarms_history.clear_note",
 		"alarms_history.probable_cause",
+		"alarms_history.alarm_version",
 	).From("alarms_history").
 		LeftJoin("device_dim d ON d.id = alarms_history.device_id")
 }
@@ -852,7 +848,7 @@ func scanAlarmRow(row scannable) (*model.Alarm, error) {
 		&a.AcknowledgedAt, &a.AcknowledgedBy, &a.AckNote, &additionalJSON, &a.CreatedAt, &a.UpdatedAt,
 		&a.DeviceName, &a.Technology, &a.AlarmSource, &a.EventType,
 		&a.NetworkLocation, &a.ExplicitCause, &a.IsRead, &a.AckCount,
-		&a.FirstRaisedAt, &a.LastUpdatedAt, &a.ProbableCause, &a.IsUnknown); err != nil {
+		&a.FirstRaisedAt, &a.LastUpdatedAt, &a.ProbableCause, &a.IsUnknown, &a.Version); err != nil {
 		if gerr.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("alarm not found: %w", commonerrors.ErrNotFound)
 		}
@@ -880,6 +876,17 @@ func (s *PgAlarmStore) scanHistoryAlarm(ctx context.Context, qb squirrel.SelectB
 	}
 	// alarms_history 在时序库（TsPool）；其 JOIN 的 devices→device_dim 影子表同库。
 	row := s.tsPool.QueryRow(ctx, sql, args...)
+	a, err := scanHistoryAlarmRow(row)
+	if gerr.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("history alarm not found: %w", commonerrors.ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scan history alarm: %w", err)
+	}
+	return a, nil
+}
+
+func scanHistoryAlarmRow(row scannable) (*model.Alarm, error) {
 	var a model.Alarm
 	var timeVal time.Time
 	var additionalJSON []byte
@@ -892,12 +899,9 @@ func (s *PgAlarmStore) scanHistoryAlarm(ctx context.Context, qb squirrel.SelectB
 		&a.DeviceName, &a.Technology, &a.AlarmSource, &a.EventType,
 		&a.AckCount, &a.UpdatedAt,
 		&a.ClearedBy, &a.ClearNote,
-		&a.ProbableCause,
+		&a.ProbableCause, &a.Version,
 	); err != nil {
-		if gerr.Is(err, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("history alarm not found: %w", commonerrors.ErrNotFound)
-		}
-		return nil, fmt.Errorf("scan history alarm: %w", err)
+		return nil, err
 	}
 	if len(additionalJSON) > 0 {
 		_ = json.Unmarshal(additionalJSON, &a.AdditionalInfo)

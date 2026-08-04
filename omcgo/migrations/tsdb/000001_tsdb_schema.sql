@@ -60,7 +60,9 @@ CREATE TABLE public.alarms_history (
     cleared_by character varying(128),
     clear_note text DEFAULT ''::text,
     probable_cause text DEFAULT ''::text NOT NULL,
-    additional_info jsonb DEFAULT '{}'::jsonb
+    additional_info jsonb DEFAULT '{}'::jsonb,
+    alarm_version bigint DEFAULT 1 NOT NULL,
+    CONSTRAINT alarms_history_alarm_version_check CHECK ((alarm_version > 0))
 );
 
 -- ── mr_records（超表：time 1d chunk，compress 7d，retention 90d）──────────────────────
