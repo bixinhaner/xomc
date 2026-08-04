@@ -33,6 +33,7 @@ type NetworkRollupPoint struct {
 type NetworkRollupQuery struct {
 	Technology  model.Technology
 	Granularity metrics.Granularity
+	MetricType  metrics.MetricType
 	MetricPaths []string
 	StartTime   time.Time
 	EndTime     time.Time
@@ -47,6 +48,9 @@ type NetworkRollupRepository struct {
 	pool             *pgxpool.Pool
 	statementTimeout time.Duration
 }
+
+var _ NetworkRollupReader = (*NetworkRollupRepository)(nil)
+var _ CounterSeriesReader = (*NetworkRollupRepository)(nil)
 
 func NewNetworkRollupRepository(pool *pgxpool.Pool, statementTimeout time.Duration) *NetworkRollupRepository {
 	return &NetworkRollupRepository{pool: pool, statementTimeout: statementTimeout}
@@ -128,6 +132,10 @@ func buildNetworkRollupSeriesSQL(query NetworkRollupQuery) (string, []any, error
 	if err := validateNetworkRollupQuery(query); err != nil {
 		return "", nil, err
 	}
+	metricType := query.MetricType
+	if metricType == "" {
+		metricType = metrics.MetricTypeKPI
+	}
 	metricPaths := normalizeMetricPaths(query.MetricPaths)
 	builder := storage.Psql.Select(
 		"DISTINCT ON (r.technology, r.metric_path, r.window_start) r.technology",
@@ -149,7 +157,7 @@ func buildNetworkRollupSeriesSQL(query NetworkRollupQuery) (string, []any, error
  AND published_revision.revision = r.revision`).
 		Where(sq.Eq{
 			"r.dimension":   "network",
-			"r.metric_type": string(metrics.MetricTypeKPI),
+			"r.metric_type": string(metricType),
 			"r.task_id":     networkTaskIDs(query.Technology),
 			"r.granularity": query.Granularity,
 			"r.metric_path": metricPaths,
@@ -211,6 +219,11 @@ func validateNetworkRollupQuery(query NetworkRollupQuery) error {
 	}
 	if len(normalizeMetricPaths(query.MetricPaths)) == 0 {
 		return fmt.Errorf("dashboard network rollup metric paths are required")
+	}
+	if query.MetricType != "" &&
+		query.MetricType != metrics.MetricTypeKPI &&
+		query.MetricType != metrics.MetricTypeCounter {
+		return fmt.Errorf("dashboard network rollup metric type %q is invalid", query.MetricType)
 	}
 	return nil
 }

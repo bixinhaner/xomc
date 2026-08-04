@@ -1674,7 +1674,8 @@ func (s *Service) fetchCounterSeries(
 		return nil, fmt.Errorf("dashboard counter series reader not configured")
 	}
 	points, err := s.counterSeries.ListSeries(ctx, NetworkRollupQuery{
-		Technology: technology, Granularity: granularity, MetricPaths: codes,
+		Technology: technology, Granularity: granularity,
+		MetricType: metrics.MetricTypeCounter, MetricPaths: codes,
 		StartTime: startTime, EndTime: endTime,
 	})
 	if err != nil {
@@ -1777,7 +1778,7 @@ func (s *Service) fetchNetworkKCodeSeries(
 	}
 
 	rows, err := s.networkRollups.ListSeries(ctx, NetworkRollupQuery{
-		Technology: technology, Granularity: granularity,
+		Technology: technology, Granularity: granularity, MetricType: metrics.MetricTypeKPI,
 		MetricPaths: kcodes, StartTime: startTime, EndTime: endTime,
 	})
 	if err != nil {

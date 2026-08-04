@@ -401,6 +401,7 @@ type weeklyPreviewGroup struct {
 	key       WindowKey
 	dailies   []progressCandidate
 	persisted *progressCandidate
+	duplicate []progressCandidate
 }
 
 func buildProgressQueryResult(
@@ -443,14 +444,23 @@ func buildProgressQueryResult(
 			}
 			group.dailies = append(group.dailies, item)
 		case GranularityWeekly:
-			groupKey := progressEntityWindowGroup(item.key)
+			normalized, err := normalizedWeeklyProgressKey(item.key, location)
+			if err != nil {
+				return ProgressQueryResult{}, err
+			}
+			groupKey := progressEntityWindowGroup(normalized)
 			group := weeklyGroups[groupKey]
 			if group == nil {
-				group = &weeklyPreviewGroup{key: item.key}
+				group = &weeklyPreviewGroup{key: normalized}
 				weeklyGroups[groupKey] = group
 			}
 			copy := item
-			group.persisted = &copy
+			if item.key.Start.Equal(normalized.Start) &&
+				item.key.End.Equal(normalized.End) {
+				group.persisted = &copy
+			} else {
+				group.duplicate = append(group.duplicate, copy)
+			}
 		}
 	}
 
@@ -465,6 +475,11 @@ func buildProgressQueryResult(
 	for _, groupKey := range weeklyGroupKeys {
 		group := weeklyGroups[groupKey]
 		if len(group.dailies) == 0 {
+			if group.persisted != nil {
+				for _, item := range group.duplicate {
+					replacedWeekly[progressEntityWindowGroup(item.key)] = struct{}{}
+				}
+			}
 			continue
 		}
 		version := snapshot.ByVersion[group.key.TaskVersionID]
@@ -530,7 +545,12 @@ func buildProgressQueryResult(
 			PeriodComplete: false,
 			State:          "partial",
 		})
-		replacedWeekly[groupKey] = struct{}{}
+		if group.persisted != nil {
+			replacedWeekly[progressEntityWindowGroup(group.persisted.key)] = struct{}{}
+		}
+		for _, item := range group.duplicate {
+			replacedWeekly[progressEntityWindowGroup(item.key)] = struct{}{}
+		}
 	}
 
 	for _, item := range candidates {
@@ -636,6 +656,21 @@ func progressEntityWindowGroup(key WindowKey) string {
 		key.TaskID, key.TaskVersionID, key.EntityKey,
 		key.Granularity, key.Start.UTC().UnixNano(),
 	)
+}
+
+func normalizedWeeklyProgressKey(
+	key WindowKey,
+	location *time.Location,
+) (WindowKey, error) {
+	if key.Granularity != GranularityWeekly {
+		return key, nil
+	}
+	window, err := WindowFor(key.Start, GranularityWeekly, location)
+	if err != nil {
+		return WindowKey{}, err
+	}
+	key.Start, key.End = window.Start, window.End
+	return key, nil
 }
 
 func lowerProgressCoverage(left, right PeriodProgress) bool {
@@ -837,7 +872,7 @@ func naturalExpectedSlots(
 	case GranularityDaily:
 		return 24
 	case GranularityWeekly:
-		return 7
+		return 7 * 24
 	case GranularityMonthly:
 		location := key.Start.Location()
 		start := key.Start.In(location)

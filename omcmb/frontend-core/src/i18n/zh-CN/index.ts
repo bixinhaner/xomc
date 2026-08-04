@@ -8444,6 +8444,8 @@ const messages: Record<string, string> = {
   'dashboard.kpiPanel.empty.lastWeekHint': '所选对比周期暂无历史聚合数据；请联系运维确认上周数据是否已完成跑批。',
   'dashboard.kpiPanel.empty.rollupHint': '当前小时、天或周聚合窗口暂无数据，请联系运维检查聚合任务状态。',
   'dashboard.kpiPanel.progress.partial': '进行中 {received}/{expected}（{coverage}%）',
+  'dashboard.kpiPanel.progress.windowStart': '统计开始时间：{time}',
+  'dashboard.kpiPanel.progress.windowEnd': '统计结束时间：{time}',
   'dashboard.kpiPanel.progress.detail': '活动任务版本 {version}，有效区间 {from} 至 {to}，当前修订版 {revision}。',
   'dashboard.kpiPanel.progress.versionSlice': '版本片段 {received}/{expected}：{status}',
   'dashboard.kpiPanel.progress.naturalPeriod': '自然周期 {received}/{expected}：{status}',

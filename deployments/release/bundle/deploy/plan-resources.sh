@@ -31,6 +31,7 @@
 #   ./plan-resources.sh --assume-dedicated  # 视整机为 OMC 独占，不扣其它容器预留
 #   ./plan-resources.sh --floor-tolerance-pct N  # 门禁容忍度（默认30，见下方说明）
 #   ./plan-resources.sh -o /path/resources.env   # 指定输出路径
+#   ./plan-resources.sh --lang cn|en          # 输出语言（默认 en）
 #
 # 退出码：0 成功；1 主机低于最低配置（含建议最低配）；2 参数错误。
 #
@@ -47,6 +48,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/resource-env-lib.sh"
 OUT_FILE="$SCRIPT_DIR/resources.env"
 STORAGE_ENV_FILE="${OMC_STORAGE_ENV_FILE:-$SCRIPT_DIR/.env}"
+OMC_LANG="${OMC_LANG:-en}"
 DRY_RUN=0
 SKIP_MONITORING=0
 ASSUME_DEDICATED=0
@@ -67,29 +69,80 @@ while [ $# -gt 0 ]; do
     --floor-tolerance-pct=*) FLOOR_TOLERANCE_PCT="${1#*=}" ;;
     -o|--output)        OUT_FILE="${2:?-o 需要路径}"; shift ;;
     -o=*|--output=*)    OUT_FILE="${1#*=}" ;;
+    --lang|--language)  OMC_LANG="${2:?--lang 需要 cn 或 en}"; shift ;;
+    --lang=*|--language=*) OMC_LANG="${1#*=}" ;;
     -h|--help)
-      sed -n '2,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "未知参数：$1（--help 查看用法）" >&2; exit 2 ;;
+      if [ "$OMC_LANG" = en ]; then
+        cat <<'EOF'
+plan-resources.sh - OMC dynamic resource planner
+
+Usage:
+  ./plan-resources.sh [options]
+
+Options:
+  --dry-run                    Print the plan without writing resources.env
+  --skip-monitoring            Exclude the monitoring stack from the budget
+  --assume-dedicated           Treat the host as dedicated to OMC
+  --tier small|medium|large    Override automatic host tier selection
+  --floor-tolerance-pct N      Allow a 0-99% floor budget gap (default 30)
+  -o, --output <path>          Write resources.env to a specific path
+  --lang, --language <cn|en>   Output language (default en)
+  -h, --help                   Show this help
+EOF
+      else
+        sed -n '2,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      fi
+      exit 0 ;;
+    *)
+      if [ "$OMC_LANG" = en ]; then echo "Unknown option: $1 (see --help for usage)" >&2
+      else echo "未知参数：$1（--help 查看用法）" >&2; fi
+      exit 2 ;;
   esac
   shift
 done
 
+case "$OMC_LANG" in
+  cn|en) ;;
+  *)
+    if [ "$OMC_LANG" = en ]; then echo "--lang accepts only cn or en, got: $OMC_LANG" >&2
+    else echo "--lang 仅支持 cn 或 en，收到：$OMC_LANG" >&2; fi
+    exit 2 ;;
+esac
+
 case "$TIER_OVERRIDE" in ""|small|medium|large) ;; *)
-  echo "--tier 仅支持 small|medium|large，收到：$TIER_OVERRIDE" >&2; exit 2 ;;
+  if [ "$OMC_LANG" = en ]; then echo "--tier accepts only small|medium|large, got: $TIER_OVERRIDE" >&2
+  else echo "--tier 仅支持 small|medium|large，收到：$TIER_OVERRIDE" >&2; fi
+  exit 2 ;;
 esac
 
 case "$FLOOR_TOLERANCE_PCT" in
-  ''|*[!0-9]*) echo "--floor-tolerance-pct 仅支持 0-99 的整数，收到：$FLOOR_TOLERANCE_PCT" >&2; exit 2 ;;
+  ''|*[!0-9]*)
+    if [ "$OMC_LANG" = en ]; then echo "--floor-tolerance-pct accepts an integer from 0 to 99, got: $FLOOR_TOLERANCE_PCT" >&2
+    else echo "--floor-tolerance-pct 仅支持 0-99 的整数，收到：$FLOOR_TOLERANCE_PCT" >&2; fi
+    exit 2 ;;
 esac
-[ "$FLOOR_TOLERANCE_PCT" -ge 100 ] && { echo "--floor-tolerance-pct 必须 < 100，收到：$FLOOR_TOLERANCE_PCT" >&2; exit 2; }
+[ "$FLOOR_TOLERANCE_PCT" -ge 100 ] && {
+  if [ "$OMC_LANG" = en ]; then echo "--floor-tolerance-pct must be less than 100, got: $FLOOR_TOLERANCE_PCT" >&2
+  else echo "--floor-tolerance-pct 必须 < 100，收到：$FLOOR_TOLERANCE_PCT" >&2; fi
+  exit 2
+}
 
 # 颜色与日志
 if [ -t 1 ]; then C_B='\033[1m'; C_G='\033[32m'; C_Y='\033[33m'; C_R='\033[31m'; C_0='\033[0m'
 else C_B=''; C_G=''; C_Y=''; C_R=''; C_0=''; fi
-log()  { printf '%b\n' "$*"; }
-sep()  { printf '%b\n' "${C_B}── $* ─────────────────────────────────────────${C_0}"; }
-warn() { printf '%b\n' "${C_Y}[warn] $*${C_0}" >&2; }
-die()  { printf '%b\n' "${C_R}[FATAL] $*${C_0}" >&2; exit "${2:-1}"; }
+localize() {
+  local cn="$1" en="${2:-$1}"
+  if [ "$OMC_LANG" = en ]; then printf '%s' "$en"; else printf '%s' "$cn"; fi
+}
+log()  { printf '%b\n' "$(localize "$1" "${2:-$1}")"; }
+sep()  { printf '%b\n' "${C_B}── $(localize "$1" "${2:-$1}") ─────────────────────────────────────────${C_0}"; }
+warn() { printf '%b\n' "${C_Y}[warn] $(localize "$1" "${2:-$1}")${C_0}" >&2; }
+die()  {
+  local cn="$1" en="$1" code=1
+  if [[ "${2:-}" =~ ^[0-9]+$ ]]; then code="$2"; else en="${2:-$1}"; code="${3:-1}"; fi
+  printf '%b\n' "${C_R}[FATAL] $(localize "$cn" "$en")${C_0}" >&2
+  exit "$code"
+}
 
 # 整数除法向下取整的 awk 助手（避免依赖 bc）
 mul_pct() { awk -v a="$1" -v p="$2" 'BEGIN{printf "%d", a*p/100}'; }   # a * p%
@@ -98,7 +151,7 @@ to_gib()  { awk -v m="$1" 'BEGIN{printf "%.1f", m/1024}'; }            # MiB→G
 # ---------------------------------------------------------------------------
 # 1. 探测主机硬件 + 当前负荷（需求 ①②）
 # ---------------------------------------------------------------------------
-sep "1/4 探测主机配置与当前负荷"
+sep "1/4 探测主机配置与当前负荷" "1/4 Probe host configuration and current load"
 OS="${OMC_PROBE_OS:-$(uname -s)}"
 HOST_CPU=0; MEM_TOTAL_MIB=0; MEM_AVAIL_MIB=0; LOAD1=0; LOAD5=0; LOAD15=0; DISK_FREE_GIB=0
 
@@ -131,9 +184,9 @@ elif [ "$OS" = "Darwin" ]; then
   MEM_AVAIL_MIB="$(awk -v fp="$FREE_PAGES" -v p="$PAGE" 'BEGIN{printf "%d", fp*p/1024/1024}')"
   read -r LOAD1 LOAD5 LOAD15 <<<"$(sysctl -n vm.loadavg | awk '{print $2, $3, $4}')"
   DISK_FREE_GIB="$(df -g / 2>/dev/null | awk 'NR==2{print $4}')"
-  warn "当前在 macOS 上运行——仅供 dry-run 预览；生产请在目标 Linux 服务器执行。"
+  warn "当前在 macOS 上运行——仅供 dry-run 预览；生产请在目标 Linux 服务器执行。" "Running on macOS; this is for dry-run preview only. Run on the target Linux server for production."
 else
-  die "不支持的操作系统：${OS}（需 Linux 生产 / macOS 预览）" 1
+  die "不支持的操作系统：${OS}（需 Linux 生产 / macOS 预览）" "Unsupported operating system: ${OS} (Linux is required for production; macOS is supported for preview)." 1
 fi
 [ "${DISK_FREE_GIB:-0}" -gt 0 ] 2>/dev/null || DISK_FREE_GIB=0
 
@@ -143,12 +196,12 @@ fi
 [ -n "${OMC_PROBE_MEM_AVAIL_MIB:-}" ] && MEM_AVAIL_MIB="$OMC_PROBE_MEM_AVAIL_MIB"
 [ -n "${OMC_PROBE_LOAD15:-}" ]        && LOAD15="$OMC_PROBE_LOAD15"
 
-log "  操作系统      : $OS"
-log "  CPU 核数      : ${C_B}${HOST_CPU}${C_0}"
-log "  内存总量      : ${C_B}$(to_gib "$MEM_TOTAL_MIB") GiB${C_0} (${MEM_TOTAL_MIB} MiB)"
-log "  当前可用内存  : ${C_B}$(to_gib "$MEM_AVAIL_MIB") GiB${C_0} (MemAvailable，已反映其它进程当前占用)"
-log "  负载(1/5/15)  : ${LOAD1} / ${LOAD5} / ${LOAD15}"
-log "  Docker 盘可用 : ${DISK_FREE_GIB} GiB"
+log "  操作系统      : $OS" "  Operating system: $OS"
+log "  CPU 核数      : ${C_B}${HOST_CPU}${C_0}" "  CPU cores      : ${C_B}${HOST_CPU}${C_0}"
+log "  内存总量      : ${C_B}$(to_gib "$MEM_TOTAL_MIB") GiB${C_0} (${MEM_TOTAL_MIB} MiB)" "  Total memory   : ${C_B}$(to_gib "$MEM_TOTAL_MIB") GiB${C_0} (${MEM_TOTAL_MIB} MiB)"
+log "  当前可用内存  : ${C_B}$(to_gib "$MEM_AVAIL_MIB") GiB${C_0} (MemAvailable，已反映其它进程当前占用)" "  Available mem. : ${C_B}$(to_gib "$MEM_AVAIL_MIB") GiB${C_0} (MemAvailable, reflects other process usage)"
+log "  负载(1/5/15)  : ${LOAD1} / ${LOAD5} / ${LOAD15}" "  Load (1/5/15) : ${LOAD1} / ${LOAD5} / ${LOAD15}"
+log "  Docker 盘可用 : ${DISK_FREE_GIB} GiB" "  Docker disk    : ${DISK_FREE_GIB} GiB available"
 
 if [ -n "${OMC_PROBE_STORAGE_MOUNTS:-}" ]; then
   STORAGE_MOUNTS="$OMC_PROBE_STORAGE_MOUNTS"
@@ -171,8 +224,8 @@ else
   )"
 fi
 RECOMMENDED_STORAGE_MOUNT="$(printf '%s\n' "$STORAGE_MOUNTS" | storage_select_largest_mount)" ||
-  die "未找到可用的本地持久文件系统；请检查磁盘挂载后重试。" 1
-log "  推荐数据盘    : ${C_B}${RECOMMENDED_STORAGE_MOUNT}${C_0}（按可用空间最大选择）"
+  die "未找到可用的本地持久文件系统；请检查磁盘挂载后重试。" "No local persistent filesystem was found; check the disk mounts and retry." 1
+log "  推荐数据盘    : ${C_B}${RECOMMENDED_STORAGE_MOUNT}${C_0}（按可用空间最大选择）" "  Recommended disk: ${C_B}${RECOMMENDED_STORAGE_MOUNT}${C_0} (largest available filesystem)"
 
 # 其它项目（非 omcgo）容器的「已声明但未用」预留 —— 共享主机要替它们留出余量
 OTHER_RESERVE_MIB=0; OTHER_CPU=0
@@ -197,13 +250,13 @@ if [ "$ASSUME_DEDICATED" = 0 ] && command -v docker >/dev/null 2>&1 && docker in
     fi
   done < <(docker ps --format '{{.Names}}\t{{.Label "com.docker.compose.project"}}' 2>/dev/null)
   [ "$OTHER_RESERVE_MIB" -gt 0 ] && \
-    log "  其它项目预留  : ${C_Y}$(to_gib "$OTHER_RESERVE_MIB") GiB${C_0}（非 omcgo 容器待用余量，已从空闲预算扣除）"
+    log "  其它项目预留  : ${C_Y}$(to_gib "$OTHER_RESERVE_MIB") GiB${C_0}（非 omcgo 容器待用余量，已从空闲预算扣除）" "  Other projects : ${C_Y}$(to_gib "$OTHER_RESERVE_MIB") GiB${C_0} reserved (unused capacity of non-omcgo containers deducted from the idle budget)"
 fi
 
 # ---------------------------------------------------------------------------
 # 2. 计算「空闲预算」（需求 ②③，空闲优先口径）
 # ---------------------------------------------------------------------------
-sep "2/4 计算空闲资源预算"
+sep "2/4 计算空闲资源预算" "2/4 Calculate idle resource budget"
 # OS / dockerd / 内核保留：随主机规模缩放 = 总量 / 8，下限 4 GiB，上限 16 GiB。
 # 例：32核/32GiB → 保留4GiB（业务28GiB）；64核/64GiB → 保留8GiB；≥128GiB 封顶16GiB。
 OS_RESERVE_MIB="$(awk -v t="$MEM_TOTAL_MIB" 'BEGIN{r=t/8; if(r<4096)r=4096; if(r>16384)r=16384; printf "%d", r}')"
@@ -217,8 +270,8 @@ CPU_RESERVE="$(awk -v c="$HOST_CPU" 'BEGIN{r=c/8; if(r<4)r=4; if(r>12)r=12; prin
 LOAD15_CEIL="$(awk -v l="$LOAD15" 'BEGIN{printf "%d", (l==int(l))?l:int(l)+1}')"
 IDLE_CPU=$(( HOST_CPU - CPU_RESERVE - LOAD15_CEIL )); [ "$IDLE_CPU" -lt 1 ] && IDLE_CPU=1
 
-log "  内存空闲预算  : ${C_G}${C_B}$(to_gib "$IDLE_MEM_MIB") GiB${C_0}  = MemAvailable $(to_gib "$MEM_AVAIL_MIB") − OS保留 $(to_gib "$OS_RESERVE_MIB") − 其它预留 $(to_gib "$OTHER_RESERVE_MIB")"
-log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 主机保留 ${CPU_RESERVE} − 负载占用 ${LOAD15_CEIL}（CPU 限额可突发超分，仅作下限参考）"
+log "  内存空闲预算  : ${C_G}${C_B}$(to_gib "$IDLE_MEM_MIB") GiB${C_0}  = MemAvailable $(to_gib "$MEM_AVAIL_MIB") − OS保留 $(to_gib "$OS_RESERVE_MIB") − 其它预留 $(to_gib "$OTHER_RESERVE_MIB")" "  Idle memory    : ${C_G}${C_B}$(to_gib "$IDLE_MEM_MIB") GiB${C_0} = MemAvailable $(to_gib "$MEM_AVAIL_MIB") - OS reserve $(to_gib "$OS_RESERVE_MIB") - other reserve $(to_gib "$OTHER_RESERVE_MIB")"
+log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 主机保留 ${CPU_RESERVE} − 负载占用 ${LOAD15_CEIL}（CPU 限额可突发超分，仅作下限参考）" "  Idle CPU      : ${C_G}${C_B}${IDLE_CPU} cores${C_0} = ${HOST_CPU} - host reserve ${CPU_RESERVE} - load ${LOAD15_CEIL} (CPU limits may burst; reference for floors only)"
 
 # ---------------------------------------------------------------------------
 # 3. 组件 floor/ceiling 表 + floor-first 分配（需求 ③）
@@ -261,7 +314,7 @@ MIN_BUSINESS_FLOOR_SUM=$(( MIN_BUSINESS_FLOOR_SUM + COMP_MIN[1] ))
 BUSINESS_BUDGET_MIB=$(( IDLE_MEM_MIB - MON_FIXED_MIB ))
 if [ "$BUSINESS_BUDGET_MIB" -lt "$MIN_BUSINESS_FLOOR_SUM" ]; then
   MIN_AVAILABLE_WITH_MONITORING_MIB=$(( OS_RESERVE_MIB + MON_FIXED_MIB + MIN_BUSINESS_FLOOR_SUM ))
-  die "扣除监控固定成本后业务内存预算仅 $(to_gib "$BUSINESS_BUDGET_MIB") GiB，低于最低可运行预算 $(to_gib "$MIN_BUSINESS_FLOOR_SUM") GiB；全栈至少需要 MemAvailable 约 $(to_gib "$MIN_AVAILABLE_WITH_MONITORING_MIB") GiB。\n       --floor-tolerance-pct 只对后续组件下限缺口生效，不能绕过此最低运行预算。\n       需要保留监控：请释放内存后重试，或扩容主机。\n       可以不部署监控：bash $SCRIPT_DIR/plan-resources.sh --skip-monitoring，然后使用 install.sh --skip-monitoring。" 1
+  die "扣除监控固定成本后业务内存预算仅 $(to_gib "$BUSINESS_BUDGET_MIB") GiB，低于最低可运行预算 $(to_gib "$MIN_BUSINESS_FLOOR_SUM") GiB；全栈至少需要 MemAvailable 约 $(to_gib "$MIN_AVAILABLE_WITH_MONITORING_MIB") GiB。\n       --floor-tolerance-pct 只对后续组件下限缺口生效，不能绕过此最低运行预算。\n       需要保留监控：请释放内存后重试，或扩容主机。\n       可以不部署监控：bash $SCRIPT_DIR/plan-resources.sh --skip-monitoring，然后使用 install.sh --skip-monitoring。" "Business memory budget after the fixed monitoring cost is only $(to_gib "$BUSINESS_BUDGET_MIB") GiB, below the minimum runnable budget of $(to_gib "$MIN_BUSINESS_FLOOR_SUM") GiB; the full stack needs about $(to_gib "$MIN_AVAILABLE_WITH_MONITORING_MIB") GiB of MemAvailable.\n       --floor-tolerance-pct applies only to later component-floor gaps and cannot bypass this minimum runtime budget.\n       To keep monitoring: release memory and retry, or resize the host.\n       To skip monitoring: bash $SCRIPT_DIR/plan-resources.sh --skip-monitoring, then use install.sh --skip-monitoring." 1
 fi
 
 # floor 先占业务预算的 70%，剩余 30% 按组件权重向上分配；低配机若按比例
@@ -283,21 +336,30 @@ done
 FLOOR_SUM=0; for f in "${COMP_FLOOR[@]}"; do FLOOR_SUM=$(( FLOOR_SUM + f )); done
 FLOOR_SUM=$(( FLOOR_SUM + COMP_FLOOR[1] + MON_FIXED_MIB ))
 
-sep "3/4 floor-first 资源分配"
-log "  组件下限之和  : $(to_gib "$FLOOR_SUM") GiB$([ "$SKIP_MONITORING" = 1 ] && echo '（不含监控）' || echo '（含监控 '"$(to_gib "$MON_FIXED_MIB")"' GiB）')"
-log "  业务内存预算  : $(to_gib "$BUSINESS_BUDGET_MIB") GiB（实际空闲预算扣除监控固定成本，按本机预算动态缩放）"
+sep "3/4 floor-first 资源分配" "3/4 Floor-first resource allocation"
+if [ "$SKIP_MONITORING" = 1 ]; then
+  FLOOR_MONITORING_NOTE="（不含监控）"
+  FLOOR_MONITORING_NOTE_EN="(monitoring excluded)"
+else
+  FLOOR_MONITORING_NOTE="（含监控 $(to_gib "$MON_FIXED_MIB") GiB）"
+  FLOOR_MONITORING_NOTE_EN="($(to_gib "$MON_FIXED_MIB") GiB monitoring included)"
+fi
+log "  组件下限之和  : $(to_gib "$FLOOR_SUM") GiB${FLOOR_MONITORING_NOTE}" "  Component floors: $(to_gib "$FLOOR_SUM") GiB ${FLOOR_MONITORING_NOTE_EN}"
+log "  业务内存预算  : $(to_gib "$BUSINESS_BUDGET_MIB") GiB（实际空闲预算扣除监控固定成本，按本机预算动态缩放）" "  Business budget : $(to_gib "$BUSINESS_BUDGET_MIB") GiB (idle budget minus fixed monitoring cost, scaled to this host)"
 
 # 最低配置门禁（需求 ②：缺口超过容忍度才 fail + 给建议；容忍度内降级为 WARN 按下限分配）
 FLOOR_MIN_REQUIRED=$(mul_pct "$FLOOR_SUM" $((100 - FLOOR_TOLERANCE_PCT)))
 if [ "$IDLE_MEM_MIB" -lt "$FLOOR_MIN_REQUIRED" ]; then
   REC_FULL=$(( (FLOOR_SUM + OS_RESERVE_MIB) / 1024 + 2 ))
-  die "空闲内存 $(to_gib "$IDLE_MEM_MIB") GiB < 组件下限之和 $(to_gib "$FLOOR_SUM") GiB 的 $((100 - FLOOR_TOLERANCE_PCT))%（容忍度 ${FLOOR_TOLERANCE_PCT}% 后仍不够）—— 无法安全部署。
-       建议最低配置：整机 ≥ ${REC_FULL} GiB 内存$([ "$SKIP_MONITORING" = 0 ] && echo '（或加 --skip-monitoring 降到约 20 GiB）')；
-       或释放本机其它项目占用后重试，或用 --assume-dedicated（确认本机 OMC 独占时），或调大 --floor-tolerance-pct（当前 ${FLOOR_TOLERANCE_PCT}%）。" 1
+    die "空闲内存 $(to_gib "$IDLE_MEM_MIB") GiB < 组件下限之和 $(to_gib "$FLOOR_SUM") GiB 的 $((100 - FLOOR_TOLERANCE_PCT))%（容忍度 ${FLOOR_TOLERANCE_PCT}% 后仍不够）—— 无法安全部署。
+      建议最低配置：整机 ≥ ${REC_FULL} GiB 内存$([ "$SKIP_MONITORING" = 0 ] && echo '（或加 --skip-monitoring 降到约 20 GiB）')；
+      或释放本机其它项目占用后重试，或用 --assume-dedicated（确认本机 OMC 独占时），或调大 --floor-tolerance-pct（当前 ${FLOOR_TOLERANCE_PCT}%）。" "Idle memory $(to_gib "$IDLE_MEM_MIB") GiB is below $((100 - FLOOR_TOLERANCE_PCT))% of the component floors $(to_gib "$FLOOR_SUM") GiB (still insufficient after ${FLOOR_TOLERANCE_PCT}% tolerance); deployment is unsafe.
+      Recommended minimum: host memory >= ${REC_FULL} GiB$([ "$SKIP_MONITORING" = 0 ] && echo ' (or about 20 GiB with --skip-monitoring)');
+      Release other projects and retry, use --assume-dedicated only when OMC owns the host, or increase --floor-tolerance-pct (currently ${FLOOR_TOLERANCE_PCT}%)." 1
 elif [ "$IDLE_MEM_MIB" -lt "$FLOOR_SUM" ]; then
   SHORT_MIB=$(( FLOOR_SUM - IDLE_MEM_MIB ))
   SHORT_PCT=$(( SHORT_MIB * 100 / FLOOR_SUM ))
-  warn "空闲内存 $(to_gib "$IDLE_MEM_MIB") GiB < 组件下限之和 $(to_gib "$FLOOR_SUM") GiB，缺口 ${SHORT_PCT}%（≤ 容忍度 ${FLOOR_TOLERANCE_PCT}%）：按下限分配，不再向上伸缩。各组件同时打满 limit 时仍有 OOM 风险，请尽快释放内存或调低 --floor-tolerance-pct 复核。"
+  warn "空闲内存 $(to_gib "$IDLE_MEM_MIB") GiB < 组件下限之和 $(to_gib "$FLOOR_SUM") GiB，缺口 ${SHORT_PCT}%（≤ 容忍度 ${FLOOR_TOLERANCE_PCT}%）：按下限分配，不再向上伸缩。各组件同时打满 limit 时仍有 OOM 风险，请尽快释放内存或调低 --floor-tolerance-pct 复核。" "Idle memory $(to_gib "$IDLE_MEM_MIB") GiB is below the component floors $(to_gib "$FLOOR_SUM") GiB by ${SHORT_PCT}% (within the ${FLOOR_TOLERANCE_PCT}% tolerance); allocating floors only, with no upward scaling. OOM remains possible if all components hit their limits; release memory or lower --floor-tolerance-pct and recheck."
 fi
 
 # 剩余空闲按权重分配（floor..ceil 之间向上伸缩）
@@ -360,7 +422,7 @@ if [ "$TIER" != "small" ]; then
       COMP_MEM[$reclaim_idx]=$(( COMP_MEM[$reclaim_idx] - take ))
       MINIO_NEED=$(( MINIO_NEED - take ))
     done
-    [ "$MINIO_NEED" -eq 0 ] || die "${TIER} 档位无法在不削减组件 floor 的前提下为 MinIO 保留 6GiB；请扩容或降低其它组件基线" 1
+    [ "$MINIO_NEED" -eq 0 ] || die "${TIER} 档位无法在不削减组件 floor 的前提下为 MinIO 保留 6GiB；请扩容或降低其它组件基线" "The ${TIER} tier cannot reserve 6 GiB for MinIO without reducing component floors; resize the host or lower other component baselines." 1
     COMP_MEM[$MINIO_IDX]="$MINIO_TARGET_MIB"
   fi
 fi
@@ -371,10 +433,10 @@ fi
 ALLOC_SUM=0; for m in "${COMP_MEM[@]}"; do ALLOC_SUM=$(( ALLOC_SUM + m )); done
 ALLOC_SUM=$(( ALLOC_SUM + ACS_MEM + MON_FIXED_MIB ))
 if [ "$ALLOC_SUM" -gt "$MEM_TOTAL_MIB" ]; then
-  die "资源计划总内存 $(to_gib "$ALLOC_SUM") GiB 超过主机物理内存 $(to_gib "$MEM_TOTAL_MIB") GiB；即使提高 --floor-tolerance-pct 也禁止生成可能导致 OOM 的 resources.env。请释放内存、跳过监控或扩容主机。" 1
+  die "资源计划总内存 $(to_gib "$ALLOC_SUM") GiB 超过主机物理内存 $(to_gib "$MEM_TOTAL_MIB") GiB；即使提高 --floor-tolerance-pct 也禁止生成可能导致 OOM 的 resources.env。请释放内存、跳过监控或扩容主机。" "The planned memory $(to_gib "$ALLOC_SUM") GiB exceeds physical host memory $(to_gib "$MEM_TOTAL_MIB") GiB; even a higher --floor-tolerance-pct cannot allow an OOM-prone resources.env. Release memory, skip monitoring, or resize the host." 1
 fi
 if [ "$ALLOC_SUM" -gt "$IDLE_MEM_MIB" ] && [ "$SURPLUS" -gt 0 ]; then
-  die "内部错误：分配后 Σ限额 $(to_gib "$ALLOC_SUM") GiB > 空闲预算 $(to_gib "$IDLE_MEM_MIB") GiB。请反馈此 bug。" 1
+  die "内部错误：分配后 Σ限额 $(to_gib "$ALLOC_SUM") GiB > 空闲预算 $(to_gib "$IDLE_MEM_MIB") GiB。请反馈此 bug。" "Internal error: allocated limits $(to_gib "$ALLOC_SUM") GiB exceed the idle budget $(to_gib "$IDLE_MEM_MIB") GiB. Please report this bug." 1
 fi
 
 # ---- 联动派生（同一预算 → 限额 + 进程内上限，结构上锁死一致）----
@@ -404,7 +466,7 @@ PG_MAX_WAL=$([ "$PG_MEM" -ge 8192 ] && echo 8GB || echo 4GB)
 # 自检：shared_buffers + maint + 连接基线 + work_mem 是否舒适放进 PG 限额
 PG_SAT=$(( PG_SHARED_BUFFERS + PG_MAINT_WORK_MEM + PG_MAXCONN * (10 + PG_WORK_MEM) + 512 ))
 [ "$PG_SAT" -gt "$(mul_pct "$PG_MEM" 92)" ] && \
-  warn "Postgres 饱和估算 $(to_gib "$PG_SAT") GiB 接近限额 $(to_gib "$PG_MEM") GiB；建议增大内存或上 pgbouncer 收敛连接。"
+  warn "Postgres 饱和估算 $(to_gib "$PG_SAT") GiB 接近限额 $(to_gib "$PG_MEM") GiB；建议增大内存或上 pgbouncer 收敛连接。" "Postgres saturation estimate $(to_gib "$PG_SAT") GiB is close to its $(to_gib "$PG_MEM") GiB limit; increase memory or use pgbouncer to consolidate connections."
 
 # Postgres-tsdb（#347 时序库）：与主库同源派生（shared_buffers 25% / effective_cache 70% /
 # work_mem / maint / max_wal）。写压力主要在此；连接池较小（app40+worker25=65 < 主库 115），
@@ -417,7 +479,7 @@ TSDB_MAINT_WORK_MEM=$(awk -v m="$TSDB_MEM" 'BEGIN{v=m*0.05; if(v>2048)v=2048; if
 TSDB_MAX_WAL=$([ "$TSDB_MEM" -ge 8192 ] && echo 8GB || echo 4GB)
 TSDB_SAT=$(( TSDB_SHARED_BUFFERS + TSDB_MAINT_WORK_MEM + TSDB_MAXCONN * (10 + TSDB_WORK_MEM) + 512 ))
 [ "$TSDB_SAT" -gt "$(mul_pct "$TSDB_MEM" 92)" ] && \
-  warn "Postgres-tsdb 饱和估算 $(to_gib "$TSDB_SAT") GiB 接近限额 $(to_gib "$TSDB_MEM") GiB；建议增大内存或下调 TSDB_MAX_CONNECTIONS（时序库连接池仅 ~65）。"
+  warn "Postgres-tsdb 饱和估算 $(to_gib "$TSDB_SAT") GiB 接近限额 $(to_gib "$TSDB_MEM") GiB；建议增大内存或下调 TSDB_MAX_CONNECTIONS（时序库连接池仅 ~65）。" "Postgres-tsdb saturation estimate $(to_gib "$TSDB_SAT") GiB is close to its $(to_gib "$TSDB_MEM") GiB limit; increase memory or lower TSDB_MAX_CONNECTIONS (the time-series connection pool is only about 65)."
 
 # Redis：核心状态与 PM 聚合窗口使用两个物理实例，避免 PM 关窗/重算的内存和
 # AOF 写放大挤压 ACS 会话、设备任务与告警。核心实例保留 1GiB、PM 实例保留
@@ -429,37 +491,49 @@ REDIS_POLICY=noeviction
 # ---------------------------------------------------------------------------
 # 4. 输出规划表 + 写 resources.env（需求 ③④）
 # ---------------------------------------------------------------------------
-sep "4/4 资源规划结果（档位：${TIER}）"
-printf '%b\n' "${C_B}  组件        内存限额        GOMEMLIMIT/关键联动${C_0}"
+sep "4/4 资源规划结果（档位：${TIER}）" "4/4 Resource plan result (tier: ${TIER})"
+if [ "$OMC_LANG" = en ]; then
+  printf '%b\n' "${C_B}  Component   Memory limit    GOMEMLIMIT/key links${C_0}"
+  CANDIDATE_NOTE="(zero-downtime release standby)"
+  TSDB_NOTE="(time-series database #347)"
+  COW_NOTE="(COW headroom=%sMiB)"
+  MONITORING_NOTE="(fixed block, not scaled)"
+else
+  printf '%b\n' "${C_B}  组件        内存限额        GOMEMLIMIT/关键联动${C_0}"
+  CANDIDATE_NOTE="（无损发布接力副本）"
+  TSDB_NOTE="（时序库 #347）"
+  COW_NOTE="（COW 余量=%sMiB）"
+  MONITORING_NOTE="（固定块，不纵向伸缩）"
+fi
 printf '  %-10s  %8s MiB\n' "app"    "$APP_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' "$APP_GOMEM" "$APP_GOMAXPROCS"
 printf '  %-10s  %8s MiB\n' "acs"    "$ACS_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' "$ACS_GOMEM" "$ACS_GOMAXPROCS"
-printf '  %-13s  %8s MiB\n' "acs-candidate" "$ACS_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s（无损发布接力副本）\n' "$ACS_GOMEM" "$ACS_GOMAXPROCS"
+printf '  %-13s  %8s MiB\n' "acs-candidate" "$ACS_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s%s\n' "$ACS_GOMEM" "$ACS_GOMAXPROCS" "$CANDIDATE_NOTE"
 printf '  %-10s  %8s MiB\n' "worker" "$WORKER_MEM" ; printf '              ↳ GOMEMLIMIT=%sMiB GOMAXPROCS=%s\n' "$WORKER_GOMEM" "$WORKER_GOMAXPROCS"
 printf '  %-10s  %8s MiB\n' "postgres" "$PG_MEM" ; printf '              ↳ shared_buffers=%sMB effective_cache=%sMB max_connections=%s work_mem=%sMB\n' "$PG_SHARED_BUFFERS" "$PG_EFFECTIVE_CACHE" "$PG_MAXCONN" "$PG_WORK_MEM"
-printf '  %-13s  %8s MiB\n' "postgres-tsdb" "$TSDB_MEM" ; printf '              ↳ shared_buffers=%sMB effective_cache=%sMB max_connections=%s work_mem=%sMB（时序库 #347）\n' "$TSDB_SHARED_BUFFERS" "$TSDB_EFFECTIVE_CACHE" "$TSDB_MAXCONN" "$TSDB_WORK_MEM"
-printf '  %-13s  %8s MiB\n' "redis-core" "$REDIS_CORE_MEM" ; printf '              ↳ maxmemory=%sMB policy=%s（COW 余量=%sMiB）\n' "$REDIS_CORE_MAXMEM" "$REDIS_POLICY" "$(( REDIS_CORE_MEM - REDIS_CORE_MAXMEM ))"
-printf '  %-13s  %8s MiB\n' "redis-pm" "$REDIS_PM_MEM" ; printf '              ↳ maxmemory=%sMB policy=%s（COW 余量=%sMiB）\n' "$REDIS_PM_MAXMEM" "$REDIS_POLICY" "$(( REDIS_PM_MEM - REDIS_PM_MAXMEM ))"
+printf '  %-13s  %8s MiB\n' "postgres-tsdb" "$TSDB_MEM" ; printf '              ↳ shared_buffers=%sMB effective_cache=%sMB max_connections=%s work_mem=%sMB%s\n' "$TSDB_SHARED_BUFFERS" "$TSDB_EFFECTIVE_CACHE" "$TSDB_MAXCONN" "$TSDB_WORK_MEM" "$TSDB_NOTE"
+printf '  %-13s  %8s MiB\n' "redis-core" "$REDIS_CORE_MEM" ; printf '              ↳ maxmemory=%sMB policy=%s' "$REDIS_CORE_MAXMEM" "$REDIS_POLICY"; printf "$COW_NOTE\n" "$(( REDIS_CORE_MEM - REDIS_CORE_MAXMEM ))"
+printf '  %-13s  %8s MiB\n' "redis-pm" "$REDIS_PM_MEM" ; printf '              ↳ maxmemory=%sMB policy=%s' "$REDIS_PM_MAXMEM" "$REDIS_POLICY"; printf "$COW_NOTE\n" "$(( REDIS_PM_MEM - REDIS_PM_MAXMEM ))"
 printf '  %-10s  %8s MiB\n' "nats"   "$NATS_MEM"
 printf '  %-10s  %8s MiB\n' "minio"  "$MINIO_MEM"
 printf '  %-10s  %8s MiB\n' "web"    "$WEB_MEM"
-[ "$SKIP_MONITORING" = 0 ] && printf '  %-10s  %8s MiB（固定块，不纵向伸缩）\n' "monitoring" "$MON_FIXED_MIB"
+[ "$SKIP_MONITORING" = 0 ] && printf '  %-10s  %8s MiB%s\n' "monitoring" "$MON_FIXED_MIB" "$MONITORING_NOTE"
 log "  ───────────────────────────────────"
-log "  Σ内存限额    : ${C_B}$(to_gib "$ALLOC_SUM") GiB${C_0} / 空闲预算 $(to_gib "$IDLE_MEM_MIB") GiB（余 $(to_gib $(( IDLE_MEM_MIB - ALLOC_SUM ))) GiB）"
-[ "$TIER" = large ] && warn "large 档：1M 规模须多机拓扑（acs/worker ×6-8 + pgbouncer + Redis 拆分），本脚本仅规划单机切片。"
+log "  Σ内存限额    : ${C_B}$(to_gib "$ALLOC_SUM") GiB${C_0} / 空闲预算 $(to_gib "$IDLE_MEM_MIB") GiB（余 $(to_gib $(( IDLE_MEM_MIB - ALLOC_SUM ))) GiB）" "  Total limits  : ${C_B}$(to_gib "$ALLOC_SUM") GiB${C_0} / idle budget $(to_gib "$IDLE_MEM_MIB") GiB ($(to_gib $(( IDLE_MEM_MIB - ALLOC_SUM ))) GiB remaining)"
+[ "$TIER" = large ] && warn "large 档：1M 规模须多机拓扑（acs/worker ×6-8 + pgbouncer + Redis 拆分），本脚本仅规划单机切片。" "large tier: 1M scale requires a multi-host topology (acs/worker x6-8 + pgbouncer + split Redis); this script plans one host slice only."
 
-sep "数据路径建议"
-log "  默认根目录    : ${RECOMMENDED_STORAGE_MOUNT%/}/omc-data"
-log "  ${C_Y}请人工检查并按物理 SSD/NVMe 修改 ${STORAGE_ENV_FILE} 中六个 *_DATA_PATH。${C_0}"
-log "  ${C_Y}本脚本只生成启动路径，不会迁移已有 Docker volume 或目录中的数据。${C_0}"
+sep "数据路径建议" "Data path recommendations"
+log "  默认根目录    : ${RECOMMENDED_STORAGE_MOUNT%/}/omc-data" "  Default root   : ${RECOMMENDED_STORAGE_MOUNT%/}/omc-data"
+log "  ${C_Y}请人工检查并按物理 SSD/NVMe 修改 ${STORAGE_ENV_FILE} 中六个 *_DATA_PATH。${C_0}" "  ${C_Y}Check and adjust the six *_DATA_PATH values in ${STORAGE_ENV_FILE} for the physical SSD/NVMe layout.${C_0}"
+log "  ${C_Y}本脚本只生成启动路径，不会迁移已有 Docker volume 或目录中的数据。${C_0}" "  ${C_Y}This script only prepares startup paths; it does not migrate existing Docker volumes or directory data.${C_0}"
 
 if [ "$DRY_RUN" = 1 ]; then
-  log "\n${C_Y}--dry-run：未写入文件。${C_0}去掉 --dry-run 即生成 $OUT_FILE"
+  log "\n${C_Y}--dry-run：未写入文件。${C_0}去掉 --dry-run 即生成 $OUT_FILE" "\n${C_Y}--dry-run: no file was written.${C_0} Remove --dry-run to generate $OUT_FILE"
   exit 0
 fi
 
 storage_apply_recommended_paths "$STORAGE_ENV_FILE" "$RECOMMENDED_STORAGE_MOUNT" ||
-  die "写入数据路径失败：$STORAGE_ENV_FILE" 1
-log "  已补齐空值    : ${STORAGE_ENV_FILE}（已有人工配置保持不变）"
+  die "写入数据路径失败：$STORAGE_ENV_FILE" "Failed to write data paths: $STORAGE_ENV_FILE" 1
+log "  已补齐空值    : ${STORAGE_ENV_FILE}（已有人工配置保持不变）" "  Filled empty values: ${STORAGE_ENV_FILE} (existing operator values were preserved)"
 for storage_key in $STORAGE_PATH_KEYS; do
   log "    $storage_key=$(storage_env_get "$STORAGE_ENV_FILE" "$storage_key")"
 done
@@ -467,7 +541,7 @@ done
 # 在目标文件同目录生成候选，校验成功后用 rename 原子替换。这样校验失败、磁盘写入失败
 # 或中断都不会截断/删除上一份 last-good resources.env。
 OUT_TMP="$(mktemp "${OUT_FILE}.tmp.XXXXXX")" ||
-  die "无法在 resources.env 同目录创建临时文件：${OUT_FILE}.tmp.XXXXXX" 1
+  die "无法在 resources.env 同目录创建临时文件：${OUT_FILE}.tmp.XXXXXX" "Unable to create a temporary file beside resources.env: ${OUT_FILE}.tmp.XXXXXX" 1
 cleanup_resource_output_tmp() {
   [ -z "${OUT_TMP:-}" ] || rm -f "$OUT_TMP"
 }
@@ -476,36 +550,36 @@ trap cleanup_resource_output_tmp EXIT
 # 写 resources.env 候选（带注释，可手改）
 {
   echo "# =============================================================================="
-  echo "# resources.env —— OMC 容器资源限额（由 plan-resources.sh 生成，可手动调整）"
-  echo "# 生成档位: $TIER   主机: ${HOST_CPU}核/$(to_gib "$MEM_TOTAL_MIB")GiB   空闲预算: $(to_gib "$IDLE_MEM_MIB")GiB"
-  echo "# compose 以 \${VAR:-默认} 读取本文件；改完任选其一即生效（需求 ⑥）："
-  echo "#   bash svc.sh restart       # 推荐：按 depends_on 有序重建，经健康门控"
-  echo "#   # 或手工：docker compose -p omcgo --env-file .env --env-file resources.env -f ... up -d"
-  echo "# 约束（改值时务必遵守，否则重演 OOM 事故）："
-  echo "#   · GOMEMLIMIT 必须 < 对应 *_MEM（软限，建议 0.90×）；ACS 还须配合准入控制+SOAP体上限"
-  echo "#   · REDIS_CORE_MEM 必须 ≥ REDIS_CORE_MAXMEMORY + 1GiB；REDIS_PM_MEM 须保留 2GiB AOF COW 余量"
-  echo "#   · PG_MAX_CONNECTIONS 必须 ≥ Go 端连接池总和(当前 180)；增大须同步增大 POSTGRES_MEM"
-  echo "#   · 时序库(#347)：TSDB_* 同理；TSDB_MEM 变则 TSDB_SHARED_BUFFERS 联动；两 PG 内存合计须 ≤ 空闲预算"
+  echo "# $(localize 'resources.env —— OMC 容器资源限额（由 plan-resources.sh 生成，可手动调整）' 'resources.env - OMC container resource limits (generated by plan-resources.sh; editable)')"
+  echo "# $(localize "生成档位: $TIER   主机: ${HOST_CPU}核/$(to_gib "$MEM_TOTAL_MIB")GiB   空闲预算: $(to_gib "$IDLE_MEM_MIB")GiB" "Tier: $TIER   Host: ${HOST_CPU} cores/$(to_gib "$MEM_TOTAL_MIB") GiB   Idle budget: $(to_gib "$IDLE_MEM_MIB") GiB")"
+  echo "# $(localize 'compose 以 \${VAR:-默认} 读取本文件；改完任选其一即生效（需求 ⑥）：' 'Compose reads this file with \${VAR:-default}; apply changes with either:')"
+  echo "#   bash svc.sh restart       # $(localize '推荐：按 depends_on 有序重建，经健康门控' 'recommended: ordered rebuild with depends_on health gates')"
+  echo "#   # $(localize '或手工：' 'or manually:') docker compose -p omcgo --env-file .env --env-file resources.env -f ... up -d"
+  echo "# $(localize '约束（改值时务必遵守，否则重演 OOM 事故）：' 'Constraints (must be followed when editing values to avoid OOM incidents):')"
+  echo "#   · GOMEMLIMIT $(localize '必须 < 对应 *_MEM（软限，建议 0.90×）；ACS 还须配合准入控制+SOAP体上限' 'must be < the corresponding *_MEM (soft limit, 0.90x recommended); ACS also requires admission control and a SOAP body limit')"
+  echo "#   · REDIS_CORE_MEM $(localize '必须 ≥ REDIS_CORE_MAXMEMORY + 1GiB；REDIS_PM_MEM 须保留 2GiB AOF COW 余量' 'must be >= REDIS_CORE_MAXMEMORY + 1GiB; REDIS_PM_MEM must retain 2 GiB AOF COW headroom')"
+  echo "#   · PG_MAX_CONNECTIONS $(localize '必须 ≥ Go 端连接池总和(当前 180)；增大须同步增大 POSTGRES_MEM' 'must be >= the Go connection-pool total (currently 180); increase POSTGRES_MEM when increasing it')"
+  echo "#   · $(localize '时序库(#347)：TSDB_* 同理；TSDB_MEM 变则 TSDB_SHARED_BUFFERS 联动；两 PG 内存合计须 ≤ 空闲预算' 'time-series database (#347): the same applies to TSDB_*; TSDB_SHARED_BUFFERS follows TSDB_MEM; both PG memory budgets must fit within the idle budget')"
   echo "# =============================================================================="
   echo ""
-  echo "# ── 业务（Go）── *_MEM 是 cgroup 硬限；*_GOMEMLIMIT 是 Go 堆软限（0.90×）"
+  echo "# ── $(localize '业务（Go）' 'Business (Go)') ── *_MEM $(localize '是 cgroup 硬限；*_GOMEMLIMIT 是 Go 堆软限（0.90×）' 'is the cgroup hard limit; *_GOMEMLIMIT is the Go heap soft limit (0.90x)')"
   echo "APP_CPUS=$CPU_app";       echo "APP_MEM=${APP_MEM}m";       echo "APP_GOMEMLIMIT=${APP_GOMEM}MiB";       echo "APP_GOMAXPROCS=$APP_GOMAXPROCS"
   echo "ACS_CPUS=$CPU_acs";       echo "ACS_MEM=${ACS_MEM}m";       echo "ACS_GOMEMLIMIT=${ACS_GOMEM}MiB";       echo "ACS_GOMAXPROCS=$ACS_GOMAXPROCS"
   echo "WORKER_CPUS=$CPU_worker"; echo "WORKER_MEM=${WORKER_MEM}m"; echo "WORKER_GOMEMLIMIT=${WORKER_GOMEM}MiB"; echo "WORKER_GOMAXPROCS=$WORKER_GOMAXPROCS"
   echo ""
-  echo "# ── Postgres 主库 ── 业务数据（时序已分离到 tsdb）；限额与 -c 调优参数同源派生"
+  echo "# ── Postgres $(localize '主库 ── 业务数据（时序已分离到 tsdb）；限额与 -c 调优参数同源派生' 'primary ── business data (time-series data is separated to tsdb); limits and -c tuning are derived from the same budget')"
   echo "POSTGRES_CPUS=$CPU_pg";   echo "POSTGRES_MEM=${PG_MEM}m"
   echo "PG_SHARED_BUFFERS=${PG_SHARED_BUFFERS}MB"; echo "PG_EFFECTIVE_CACHE_SIZE=${PG_EFFECTIVE_CACHE}MB"
   echo "PG_MAX_CONNECTIONS=$PG_MAXCONN"; echo "PG_WORK_MEM=${PG_WORK_MEM}MB"
   echo "PG_MAINTENANCE_WORK_MEM=${PG_MAINT_WORK_MEM}MB"; echo "PG_MAX_WAL_SIZE=$PG_MAX_WAL"
   echo ""
-  echo "# ── Postgres 时序库 postgres-tsdb（#347）── 独立 TimescaleDB 实例，PM COPY/KPI 聚合写主要在此"
+  echo "# ── Postgres postgres-tsdb (#347) ── $(localize '独立 TimescaleDB 实例，PM COPY/KPI 聚合写主要在此' 'independent TimescaleDB instance; PM COPY/KPI aggregation writes primarily land here')"
   echo "TSDB_CPUS=$CPU_tsdb";     echo "TSDB_MEM=${TSDB_MEM}m"
   echo "TSDB_SHARED_BUFFERS=${TSDB_SHARED_BUFFERS}MB"; echo "TSDB_EFFECTIVE_CACHE_SIZE=${TSDB_EFFECTIVE_CACHE}MB"
   echo "TSDB_MAX_CONNECTIONS=$TSDB_MAXCONN"; echo "TSDB_WORK_MEM=${TSDB_WORK_MEM}MB"
   echo "TSDB_MAINTENANCE_WORK_MEM=${TSDB_MAINT_WORK_MEM}MB"; echo "TSDB_MAX_WAL_SIZE=$TSDB_MAX_WAL"
   echo ""
-  echo "# ── Redis Core / PM ── 两个物理实例，PM 关窗与重算不再争抢核心业务资源"
+  echo "# ── Redis Core / PM ── $(localize '两个物理实例，PM 关窗与重算不再争抢核心业务资源' 'two physical instances; PM window closing and recomputation no longer compete with core business resources')"
   echo "REDIS_CORE_CPUS=$CPU_redis_core"; echo "REDIS_CORE_MEM=${REDIS_CORE_MEM}m"
   echo "REDIS_CORE_MAXMEMORY=${REDIS_CORE_MAXMEM}mb"; echo "REDIS_CORE_MAXMEMORY_POLICY=$REDIS_POLICY"
   echo "REDIS_PM_CPUS=$CPU_redis_pm"; echo "REDIS_PM_MEM=${REDIS_PM_MEM}m"
@@ -516,7 +590,7 @@ trap cleanup_resource_output_tmp EXIT
   echo "MINIO_CPUS=$CPU_minio";   echo "MINIO_MEM=${MINIO_MEM}m"
   echo "WEB_CPUS=$CPU_web";       echo "WEB_MEM=${WEB_MEM}m"
   echo ""
-  echo "# ── 规划元信息（仅记录，compose 不读取）──"
+  echo "# ── $(localize '规划元信息（仅记录，compose 不读取）' 'Plan metadata (record only; not read by Compose)') ──"
   echo "OMC_RESOURCE_SCHEMA_VERSION=3"
   echo "OMC_RESOURCE_PLAN_HOST_CPU=$HOST_CPU"
   echo "OMC_RESOURCE_PLAN_HOST_MEM_MIB=$MEM_TOTAL_MIB"
@@ -525,13 +599,13 @@ trap cleanup_resource_output_tmp EXIT
 } > "$OUT_TMP"
 
 if ! resource_env_validate "$OUT_TMP"; then
-  die "生成的 resources.env 候选未通过完整资源契约验证；已保留上一份有效文件" 1
+  die "生成的 resources.env 候选未通过完整资源契约验证；已保留上一份有效文件" "Generated resources.env candidate failed the complete resource contract validation; the previous valid file was preserved." 1
 fi
 chmod 0644 "$OUT_TMP" ||
-  die "无法设置 resources.env 候选权限；已保留上一份有效文件" 1
+  die "无法设置 resources.env 候选权限；已保留上一份有效文件" "Unable to set permissions on the resources.env candidate; the previous valid file was preserved." 1
 mv -f "$OUT_TMP" "$OUT_FILE" ||
-  die "无法原子替换 resources.env；已保留上一份有效文件" 1
+  die "无法原子替换 resources.env；已保留上一份有效文件" "Unable to atomically replace resources.env; the previous valid file was preserved." 1
 OUT_TMP=""
 
-log "\n${C_G}✓ 已写入：$OUT_FILE${C_0}"
-log "  下一步：检视/调整该文件 → 运行 install.sh（将以 --env-file resources.env 动态部署）。"
+log "\n${C_G}✓ 已写入：$OUT_FILE${C_0}" "\n${C_G}✓ Written: $OUT_FILE${C_0}"
+log "  下一步：检视/调整该文件 → 运行 install.sh（将以 --env-file resources.env 动态部署）。" "  Next: review/adjust this file, then run install.sh (it will deploy dynamically with --env-file resources.env)."

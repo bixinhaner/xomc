@@ -12,42 +12,53 @@
 # 用法：
 #   bash healthcheck.sh                # 默认完整检查
 #   bash healthcheck.sh --startup      # 安装阶段轻量启动就绪检查
+#   bash healthcheck.sh --lang en      # 指定输出语言（cn 或 en）
 #   bash healthcheck.sh -h | --help    # 本帮助
 #
 # 参数：
 #   -h, --help    本帮助
+#   --lang <cn|en> 输出语言（默认读取 OMC_LANG，未设置时为 en）
 #
 # 退出码：0 全部通过 / 1 存在失败项
 # =============================================================================
 STARTUP_CHECK=0
-case "${1:-}" in
-  -h|--help) sed -n '3,17p' "$0"; exit 0 ;;
-  --startup) STARTUP_CHECK=1 ;;
-esac
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) sed -n '3,17p' "$0"; exit 0 ;;
+    --startup) STARTUP_CHECK=1; shift ;;
+    --lang|--language) OMC_LANG="${2:?--lang 需要 cn 或 en}"; shift 2 ;;
+    --lang=*|--language=*) OMC_LANG="${1#*=}"; shift ;;
+    *) echo "  [FAIL] 未知参数：$1"; exit 1 ;;
+  esac
+done
 
 set -u
 
 OMC_LANG="${OMC_LANG:-en}"
+case "$OMC_LANG" in
+  cn|en) ;;
+  *) echo "  [FAIL] --lang 仅支持 cn 或 en，收到：$OMC_LANG"; exit 1 ;;
+esac
 health_text() {
-  local zh="$1" en="${2:-$1}"
-  if [ "$OMC_LANG" = en ] && [ "$en" = "$zh" ]; then
-    case "$zh" in
-      *"容器 running") en="${zh% 容器 running} container running" ;;
-      *"核心 Redis 指向 redis-core") en="${zh%% 核心 Redis*} core Redis points to redis-core" ;;
-      *"PM Redis 指向 redis-pm") en="${zh%% PM Redis*} PM Redis points to redis-pm" ;;
-      *"容器 OMC_PUBLIC_HOST") en="${zh%% 容器 OMC_PUBLIC_HOST} container OMC_PUBLIC_HOST" ;;
+  local cn="$1" en="${2:-$1}"
+  if [ "$OMC_LANG" = en ] && [ "$en" = "$cn" ]; then
+    case "$cn" in
+      *"容器 running") en="${cn% 容器 running} container running" ;;
+      *"核心 Redis 指向 redis-core") en="${cn%% 核心 Redis*} core Redis points to redis-core" ;;
+      *"PM Redis 指向 redis-pm") en="${cn%% PM Redis*} PM Redis points to redis-pm" ;;
+      *"容器 OMC_PUBLIC_HOST") en="${cn%% 容器 OMC_PUBLIC_HOST} container OMC_PUBLIC_HOST" ;;
       "redis-core / redis-pm 运行实例身份不同") en="redis-core / redis-pm have distinct runtime identities" ;;
       "web ACS upstream 连接池已加载") en="web ACS upstream connection pool loaded" ;;
       "web 临时端口范围") en="web ephemeral port range" ;;
       *"不就绪"*) en="Service is not ready" ;;
-      "前端 SPA"*) en="Frontend SPA${zh#前端 SPA}" ;;
-      "ACS candidate"*) en="ACS candidate${zh#ACS candidate}" ;;
+      "前端 SPA"*) en="Frontend SPA${cn#前端 SPA}" ;;
+      "ACS candidate"*) en="ACS candidate${cn#ACS candidate}" ;;
     esac
   fi
   if [ "$OMC_LANG" = en ]; then
     printf '%s' "$en"
   else
-    printf '%s' "$zh"
+    printf '%s' "$cn"
   fi
 }
 
@@ -215,7 +226,7 @@ done
 check "acs-candidate 容器 running" container_running acs-candidate
 check "acs-candidate /readyz" acs_service_ready acs-candidate
 
-echo "== docker compose 基础设施容器 =="
+echo "== $(health_text 'docker compose 基础设施容器' 'Docker Compose infrastructure containers') =="
 for svc in postgres postgres-tsdb redis-core redis-pm nats minio; do
   check "$svc 容器 running" container_running "$svc"
 done
