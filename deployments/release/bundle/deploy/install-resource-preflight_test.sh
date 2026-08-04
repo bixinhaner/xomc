@@ -213,7 +213,8 @@ chmod +x "$BIN_COPY/cp"
 before_link="$(readlink "$ROOT_COPY/current")"
 if REAL_CP="$REAL_CP" run_install "$PKG_COPY" "$ROOT_COPY" "$BIN_COPY" "$TMP/copy-invalid.out"; then
   bad "继承复制后被破坏的 resources.env 必须终止安装"
-elif grep -Fq '复制/继承后的 resources.env' "$TMP/copy-invalid.out"; then
+elif grep -Fq '复制/继承后的 resources.env' "$TMP/copy-invalid.out" ||
+  grep -Fq 'Copied/inherited resources.env failed complete resource-plan validation' "$TMP/copy-invalid.out"; then
   ok
 else
   bad "复制后复验失败应明确指出候选已损坏: $(tail -5 "$TMP/copy-invalid.out")"

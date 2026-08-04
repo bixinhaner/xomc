@@ -114,53 +114,53 @@ EOF
 if [ -f "$DEPLOY_DIR/secrets-lib.sh" ]; then
   . "$DEPLOY_DIR/secrets-lib.sh"
 else
-  die "缺 $DEPLOY_DIR/secrets-lib.sh（凭证生成库，由 build-release.sh 随包发布）" 1
+  die "缺 $DEPLOY_DIR/secrets-lib.sh（凭证生成库，由 build-release.sh 随包发布）" "Missing $DEPLOY_DIR/secrets-lib.sh (credential generation library, shipped by build-release.sh)." 1
 fi
 
 if [ -f "$DEPLOY_DIR/data-upgrade-lib.sh" ]; then
   . "$DEPLOY_DIR/data-upgrade-lib.sh"
 else
-  die "缺 $DEPLOY_DIR/data-upgrade-lib.sh（data 升级保护库，由 build-release.sh 随包发布）" 1
+  die "缺 $DEPLOY_DIR/data-upgrade-lib.sh（data 升级保护库，由 build-release.sh 随包发布）" "Missing $DEPLOY_DIR/data-upgrade-lib.sh (data upgrade protection library, shipped by build-release.sh)." 1
 fi
 if [ -f "$DEPLOY_DIR/config-upgrade-lib.sh" ]; then
   . "$DEPLOY_DIR/config-upgrade-lib.sh"
 else
-  die "缺 $DEPLOY_DIR/config-upgrade-lib.sh（实例配置升级库，由 build-release.sh 随包发布）" 1
+  die "缺 $DEPLOY_DIR/config-upgrade-lib.sh（实例配置升级库，由 build-release.sh 随包发布）" "Missing $DEPLOY_DIR/config-upgrade-lib.sh (instance configuration upgrade library, shipped by build-release.sh)." 1
 fi
 if [ -f "$DEPLOY_DIR/storage-paths-lib.sh" ]; then
   . "$DEPLOY_DIR/storage-paths-lib.sh"
 else
-  die "缺 $DEPLOY_DIR/storage-paths-lib.sh（有状态服务数据路径库，由 build-release.sh 随包发布）" 1
+  die "缺 $DEPLOY_DIR/storage-paths-lib.sh（有状态服务数据路径库，由 build-release.sh 随包发布）" "Missing $DEPLOY_DIR/storage-paths-lib.sh (stateful service data-path library, shipped by build-release.sh)." 1
 fi
 if [ -f "$DEPLOY_DIR/resource-env-lib.sh" ]; then
   . "$DEPLOY_DIR/resource-env-lib.sh"
 else
-  die "缺 $DEPLOY_DIR/resource-env-lib.sh（完整资源规划契约库）" 1
+  die "缺 $DEPLOY_DIR/resource-env-lib.sh（完整资源规划契约库）" "Missing $DEPLOY_DIR/resource-env-lib.sh (complete resource-plan contract library)." 1
 fi
 if [ -f "$DEPLOY_DIR/compose-env-lib.sh" ]; then
   . "$DEPLOY_DIR/compose-env-lib.sh"
 else
-  die "缺 $DEPLOY_DIR/compose-env-lib.sh（Compose 环境优先级加载库）" 1
+  die "缺 $DEPLOY_DIR/compose-env-lib.sh（Compose 环境优先级加载库）" "Missing $DEPLOY_DIR/compose-env-lib.sh (Compose environment precedence library)." 1
 fi
 if [ -f "$DEPLOY_DIR/resource-plan-metrics.sh" ]; then
   . "$DEPLOY_DIR/resource-plan-metrics.sh"
 else
-  die "缺 $DEPLOY_DIR/resource-plan-metrics.sh（资源计划 Prometheus 指标生成器）" 1
+  die "缺 $DEPLOY_DIR/resource-plan-metrics.sh（资源计划 Prometheus 指标生成器）" "Missing $DEPLOY_DIR/resource-plan-metrics.sh (resource-plan Prometheus metric generator)." 1
 fi
 if [ -f "$DEPLOY_DIR/monitoring-profile-lib.sh" ]; then
   . "$DEPLOY_DIR/monitoring-profile-lib.sh"
 else
-  die "缺 $DEPLOY_DIR/monitoring-profile-lib.sh（监控部署模式状态库，由 build-release.sh 随包发布）" 1
+  die "缺 $DEPLOY_DIR/monitoring-profile-lib.sh（监控部署模式状态库，由 build-release.sh 随包发布）" "Missing $DEPLOY_DIR/monitoring-profile-lib.sh (monitoring deployment profile library, shipped by build-release.sh)." 1
 fi
 if [ -f "$DEPLOY_DIR/gpv-handoff-lib.sh" ]; then
   . "$DEPLOY_DIR/gpv-handoff-lib.sh"
 else
-  die "缺 $DEPLOY_DIR/gpv-handoff-lib.sh（GPV 无损升级接力库，由 build-release.sh 随包发布）" 1
+  die "缺 $DEPLOY_DIR/gpv-handoff-lib.sh（GPV 无损升级接力库，由 build-release.sh 随包发布）" "Missing $DEPLOY_DIR/gpv-handoff-lib.sh (GPV zero-downtime handoff library, shipped by build-release.sh)." 1
 fi
 if [ -f "$DEPLOY_DIR/redis-cutover-lib.sh" ]; then
   . "$DEPLOY_DIR/redis-cutover-lib.sh"
 else
-  die "缺 $DEPLOY_DIR/redis-cutover-lib.sh（旧单 Redis 安全切换库）" 1
+  die "缺 $DEPLOY_DIR/redis-cutover-lib.sh（旧单 Redis 安全切换库）" "Missing $DEPLOY_DIR/redis-cutover-lib.sh (legacy single-Redis cutover library)." 1
 fi
 
 # 升级时 deploy/.env 里【运维自定义】的键 —— 跨版本继承,不被新包默认值覆盖。
@@ -184,7 +184,7 @@ merge_env_preserve() {
     log ".env:首次部署(无上一版),使用交付包默认值 —— 记得在 $new 填 OMC_PUBLIC_HOST 与强口令" ".env: first deployment (no previous release); using delivery package defaults. Remember to set OMC_PUBLIC_HOST and strong credentials in $new"
     return 0
   fi
-  tmp="$(mktemp)" || { warn ".env 合并:mktemp 失败,沿用新包默认值"; return 0; }
+  tmp="$(mktemp)" || { warn ".env 合并:mktemp 失败,沿用新包默认值" ".env merge: mktemp failed; using delivery package defaults"; return 0; }
   if awk -v keys="$ENV_PRESERVE_KEYS" '
       BEGIN { n=split(keys, A, " "); for (i=1;i<=n;i++) want[A[i]]=1 }
       FNR==NR {                                    # 第一份 = 上一版(prev)
@@ -210,7 +210,7 @@ merge_env_preserve() {
     log ".env:已从上一版继承运维自定义值(口令 / JWT / OMC_PUBLIC_HOST);镜像 tag 用新包。如需改值,编辑 $new 后重启业务容器" ".env: inherited operator values (credentials / JWT / OMC_PUBLIC_HOST) from the previous release; image tags use the new package. Edit $new and restart services to change them"
   else
     rm -f "$tmp"
-    warn ".env 合并失败,沿用交付包默认值;请手动核对 $new 的 OMC_PUBLIC_HOST 与口令"
+    warn ".env 合并失败,沿用交付包默认值;请手动核对 $new 的 OMC_PUBLIC_HOST 与口令" ".env merge failed; using delivery package defaults. Manually verify OMC_PUBLIC_HOST and credentials in $new"
   fi
 }
 
@@ -250,8 +250,8 @@ while [ $# -gt 0 ]; do
     --lang=*|--language=*) OMC_LANG="${1#*=}"; shift ;;
     --yes)             ASSUME_YES=1; shift ;;
     -h|--help)         show_help; exit 0 ;;
-    --uninstall)       die "卸载请用 uninstall.sh：sudo bash $DEPLOY_DIR/uninstall.sh -h" ;;
-    *)                 die "未知参数：$1（-h 查看用法）" ;;
+    --uninstall)       die "卸载请用 uninstall.sh：sudo bash $DEPLOY_DIR/uninstall.sh -h" "Use uninstall.sh for removal: sudo bash $DEPLOY_DIR/uninstall.sh -h" ;;
+    *)                 die "未知参数：$1（-h 查看用法）" "Unknown option: $1 (see -h for usage)" ;;
   esac
 done
 
@@ -261,12 +261,12 @@ case "$OMC_LANG" in
 esac
 
 case "$FLOOR_TOLERANCE_PCT" in
-  ''|*[!0-9]*) die "--floor-tolerance-pct 仅支持 0-99 的整数，收到：$FLOOR_TOLERANCE_PCT" 1 ;;
+  ''|*[!0-9]*) die "--floor-tolerance-pct 仅支持 0-99 的整数，收到：$FLOOR_TOLERANCE_PCT" "--floor-tolerance-pct accepts an integer from 0 to 99, got: $FLOOR_TOLERANCE_PCT" 1 ;;
 esac
 [ "$FLOOR_TOLERANCE_PCT" -lt 100 ] ||
-  die "--floor-tolerance-pct 必须小于 100，收到：$FLOOR_TOLERANCE_PCT" 1
+  die "--floor-tolerance-pct 必须小于 100，收到：$FLOOR_TOLERANCE_PCT" "--floor-tolerance-pct must be less than 100, got: $FLOOR_TOLERANCE_PCT" 1
 
-[ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）"
+[ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）" "Run as root (sudo bash $0 ...)." 1
 
 confirm() {
   [ "$ASSUME_YES" = 1 ] && return 0
@@ -304,11 +304,11 @@ fresh_install_reset() {
   local old_compose_files=()
   local data_key path volumes volume
 
-  [ "$CHECK_ONLY" = 0 ] || die "--fresh-install 不能与 --check-only 同时使用" 1
-  [ -f "$package_env" ] || die "全新安装缺少 $package_env" 1
-  [ -f "$PKG_ROOT/deploy/plan-resources.sh" ] || die "全新安装缺少 plan-resources.sh" 1
-  command -v docker >/dev/null 2>&1 || die "缺少 docker，无法执行全新安装清理" 1
-  docker compose version >/dev/null 2>&1 || die "缺少 docker compose v2，无法执行全新安装清理" 1
+  [ "$CHECK_ONLY" = 0 ] || die "--fresh-install 不能与 --check-only 同时使用" "--fresh-install cannot be combined with --check-only" 1
+  [ -f "$package_env" ] || die "全新安装缺少 $package_env" "Fresh install is missing $package_env" 1
+  [ -f "$PKG_ROOT/deploy/plan-resources.sh" ] || die "全新安装缺少 plan-resources.sh" "Fresh install is missing plan-resources.sh" 1
+  command -v docker >/dev/null 2>&1 || die "缺少 docker，无法执行全新安装清理" "Docker is required for fresh-install cleanup" 1
+  docker compose version >/dev/null 2>&1 || die "缺少 docker compose v2，无法执行全新安装清理" "Docker Compose v2 is required for fresh-install cleanup" 1
 
   if [ -f "$old_deploy/docker-compose.infra.yml" ]; then
     [ -f "$old_deploy/.env" ] && old_env_args+=( --env-file "$old_deploy/.env" )
@@ -318,15 +318,15 @@ fresh_install_reset() {
     done
     log "全新安装：停止旧 OMC 栈 ..." "Fresh install: stopping the existing OMC stack ..."
     ( cd "$old_deploy" && docker compose -p "$COMPOSE_PROJECT" "${old_env_args[@]}" \
-        "${old_compose_files[@]}" down --remove-orphans ) || warn "旧 OMC 栈停止返回非零，继续执行数据清理"
+        "${old_compose_files[@]}" down --remove-orphans ) || warn "旧 OMC 栈停止返回非零，继续执行数据清理" "Stopping the existing OMC stack returned a non-zero status; continuing data cleanup"
   fi
 
   [ -n "$PUBLIC_HOST_OVERRIDE" ] ||
     PUBLIC_HOST_OVERRIDE="$(deploy_env_file_value OMC_PUBLIC_HOST "$package_env" 2>/dev/null || true)"
   deploy_env_public_host_valid "$PUBLIC_HOST_OVERRIDE" ||
-    die "全新安装必须提供有效的 --public-host（例如 172.24.224.78）" 1
+    die "全新安装必须提供有效的 --public-host（例如 172.24.224.78）" "Fresh install requires a valid --public-host (for example, 172.24.224.78)" 1
   set_env_value "$package_env" OMC_PUBLIC_HOST "$PUBLIC_HOST_OVERRIDE" ||
-    die "无法写入 $package_env 的 OMC_PUBLIC_HOST" 1
+    die "无法写入 $package_env 的 OMC_PUBLIC_HOST" "Unable to write OMC_PUBLIC_HOST to $package_env" 1
 
   log "全新安装：按目标主机重新规划资源（组件下限缺口容忍度 ${FLOOR_TOLERANCE_PCT}%，最低运行预算仍为硬门禁）..." "Fresh install: planning resources for this host (floor-gap tolerance ${FLOOR_TOLERANCE_PCT}%; minimum runtime budget remains enforced) ..."
   fresh_plan_args=( --floor-tolerance-pct "$FLOOR_TOLERANCE_PCT" --lang "$OMC_LANG" )
@@ -340,11 +340,11 @@ fresh_install_reset() {
     path="$(storage_env_get "$package_env" "$data_key")"
     case "$path" in
       /*) ;;
-      *) die "全新安装数据路径无效：$data_key=$path" 1 ;;
+      *) die "全新安装数据路径无效：$data_key=$path" "Invalid fresh-install data path: $data_key=$path" 1 ;;
     esac
     case "$path" in
       /|/home|/opt|/opt/omc|/var|/tmp)
-        die "全新安装拒绝清理危险数据路径：$data_key=$path" 1 ;;
+        die "全新安装拒绝清理危险数据路径：$data_key=$path" "Fresh install refuses to remove the dangerous data path: $data_key=$path" 1 ;;
     esac
     log "  $data_key=$path" "  $data_key=$path"
   done
@@ -362,7 +362,7 @@ fresh_install_reset() {
   volumes="$(docker volume ls -q --filter label=com.docker.compose.project="$COMPOSE_PROJECT")"
   for volume in $volumes; do
     docker volume rm "$volume" >/dev/null ||
-      die "无法删除 Docker volume：$volume；请确认旧 OMC 容器已停止" 1
+      die "无法删除 Docker volume：$volume；请确认旧 OMC 容器已停止" "Unable to remove Docker volume $volume; confirm that old OMC containers are stopped" 1
   done
   log "全新安装：旧 OMC 数据已删除" "Fresh install: old OMC data has been deleted"
 }
@@ -413,7 +413,7 @@ precheck_skipped_infra_images() {
   done
 
   if [ "${#missing_images[@]}" -gt 0 ]; then
-    die "--skip-infra 前置条件不满足，缺少本地基础设施/监控镜像：${missing_images[*]}。未复制 release、未切换 current、未改写业务数据；请先解压匹配架构的基础设施包到 ${INFRA_DIR}，并去掉 --skip-infra 重试。" 1
+    die "--skip-infra 前置条件不满足，缺少本地基础设施/监控镜像：${missing_images[*]}。未复制 release、未切换 current、未改写业务数据；请先解压匹配架构的基础设施包到 ${INFRA_DIR}，并去掉 --skip-infra 重试。" "--skip-infra precondition failed; missing local infrastructure/monitoring images: ${missing_images[*]}. The release was not copied, current was not switched, and business data was not changed. Extract the matching infrastructure bundle into ${INFRA_DIR} and retry without --skip-infra." 1
   fi
   log "--skip-infra 镜像预检通过：本次基础设施/监控镜像均已在本机" "--skip-infra image precheck passed: all infrastructure and monitoring images are available locally"
 }
@@ -438,10 +438,10 @@ heal_main_pg_timescaledb_downgrade() {
     -c "grep -E '^[[:space:]]*shared_preload_libraries[[:space:]]*=.*timescaledb' /d/postgresql.conf 2>/dev/null" 2>/dev/null || true)"
   [ -n "$has_pre" ] || return 0                                        # 已剥离/本就纯 PG → 跳过
 
-  warn "检测到【存量主库卷被 timescaledb 初始化】，而本版主库已降级纯 PG（$IMAGE_POSTGRES）。"
-  warn "  直接启动会 FATAL: could not access file \"timescaledb\"。"
-  warn "  自愈将剥离 timescaledb：DROP EXTENSION ... CASCADE（删主库残留时序超表——这些时序数据"
-  warn "  已物理分离到 postgres-tsdb 实例）+ 注释 postgresql.conf 预加载行。业务表（普通表）不受影响。"
+  warn "检测到【存量主库卷被 timescaledb 初始化】，而本版主库已降级纯 PG（$IMAGE_POSTGRES）。" "Detected an existing primary database volume initialized by TimescaleDB, while this release uses plain PostgreSQL ($IMAGE_POSTGRES)."
+  warn "  直接启动会 FATAL: could not access file \"timescaledb\"。" "  Starting it directly would fail with: FATAL: could not access file \"timescaledb\"."
+  warn "  自愈将剥离 timescaledb：DROP EXTENSION ... CASCADE（删主库残留时序超表——这些时序数据" "  Recovery will detach TimescaleDB: DROP EXTENSION ... CASCADE (removing leftover time-series hypertables from the primary database; this data"
+  warn "  已物理分离到 postgres-tsdb 实例）+ 注释 postgresql.conf 预加载行。业务表（普通表）不受影响。" "  is already physically separated into postgres-tsdb) and comment out the postgresql.conf preload line. Ordinary business tables are unaffected."
   confirm "确认对主库卷 $vol 执行 timescaledb 剥离自愈？" "Confirm TimescaleDB detach recovery for volume $vol?" || \
     die "用户取消自愈。如需保数据，可临时把 deploy/.env 的 IMAGE_POSTGRES 改回 timescaledb 镜像后重装。" "Recovery cancelled. To preserve data, temporarily set IMAGE_POSTGRES back to the TimescaleDB image in deploy/.env and reinstall." 1
 
@@ -449,10 +449,10 @@ heal_main_pg_timescaledb_downgrade() {
   docker rm -f "$cname" >/dev/null 2>&1 || true
   # 重试场景下，上一轮 7.1 可能已建出 restart-loop 的 compose 主库容器在持卷，先移除释放卷（7.1 会重建）。
   docker rm -f "${COMPOSE_PROJECT}-postgres-1" >/dev/null 2>&1 || true
-  log "自愈：用 $heal_img 临时挂卷启动主库 ..."
+  log "自愈：用 $heal_img 临时挂卷启动主库 ..." "Recovery: starting the primary database with a temporary volume mount using $heal_img ..."
   docker run -d --name "$cname" -e POSTGRES_PASSWORD=heal \
     -v "$vol":/var/lib/postgresql/data "$heal_img" >/dev/null 2>&1 \
-    || die "自愈：临时容器启动失败（$cname）" 3
+    || die "自愈：临时容器启动失败（$cname）" "Recovery failed: temporary container $cname could not start" 3
   local ok=0 i
   for i in $(seq 1 30); do
     docker exec "$cname" pg_isready -U "$usr" >/dev/null 2>&1 && { ok=1; break; }
@@ -461,15 +461,15 @@ heal_main_pg_timescaledb_downgrade() {
   if [ "$ok" != 1 ]; then
     docker logs --tail 20 "$cname" 2>&1 || true
     docker rm -f "$cname" >/dev/null 2>&1 || true
-    die "自愈：临时库 30s 未就绪，无法剥离" 3
+    die "自愈：临时库 30s 未就绪，无法剥离" "Recovery failed: temporary database was not ready after 30s; cannot detach TimescaleDB" 3
   fi
   docker exec "$cname" psql -U "$usr" -d "$db" -c "DROP EXTENSION IF EXISTS timescaledb CASCADE;" >/dev/null 2>&1 \
-    || warn "自愈：DROP EXTENSION 返回非零（可能已无扩展），继续清理 conf"
+    || warn "自愈：DROP EXTENSION 返回非零（可能已无扩展），继续清理 conf" "Recovery: DROP EXTENSION returned non-zero (the extension may already be absent); continuing configuration cleanup"
   docker exec "$cname" sh -c "sed -i.bak-347 's/^[[:space:]]*shared_preload_libraries/#347 &/; s/^[[:space:]]*timescaledb\\./#347 &/' /var/lib/postgresql/data/postgresql.conf" 2>/dev/null || true
   docker exec "$cname" sh -c "test -f /var/lib/postgresql/data/postgresql.auto.conf && sed -i '/timescaledb/d' /var/lib/postgresql/data/postgresql.auto.conf || true" 2>/dev/null || true
   docker stop "$cname" >/dev/null 2>&1 || true
   docker rm -f "$cname" >/dev/null 2>&1 || true
-  log "自愈完成：主库卷已剥离 timescaledb，可在纯 PG（$IMAGE_POSTGRES）上启动。"
+  log "自愈完成：主库卷已剥离 timescaledb，可在纯 PG（$IMAGE_POSTGRES）上启动。" "Recovery completed: TimescaleDB was detached from the primary volume; it can start with plain PostgreSQL ($IMAGE_POSTGRES)."
 }
 
 # =============================================================================
@@ -479,7 +479,7 @@ sep "1/9 precheck" "1/9 Precheck"
 
 # 工具齐全
 for tool in docker tar sha256sum; do
-  command -v "$tool" >/dev/null 2>&1 || die "缺少工具：$tool（请先装 Docker 等基础工具）" 1
+  command -v "$tool" >/dev/null 2>&1 || die "缺少工具：$tool（请先装 Docker 等基础工具）" "Missing required tool: $tool (install Docker and other base tools first)" 1
 done
 
 # docker compose 命令选择
@@ -497,7 +497,7 @@ elif command -v docker-compose >/dev/null 2>&1; then
       COMPOSE="docker-compose"
       ;;
     1.*|"")
-      log "检测到 docker-compose V1 (Python: $COMPOSE_VER),不兼容 compose v3 文件,尝试自动安装 V2 插件 ..."
+      log "检测到 docker-compose V1 (Python: $COMPOSE_VER),不兼容 compose v3 文件,尝试自动安装 V2 插件 ..." "Detected docker-compose V1 (Python: $COMPOSE_VER), which cannot parse Compose v3 files; attempting to install the V2 plugin ..."
       BUNDLE_V2=""
       for cand in "$INFRA_DIR/docker/docker-compose" "$PKG_ROOT/../infra/docker/docker-compose"; do
         if [ -f "$cand" ]; then BUNDLE_V2="$cand"; break; fi
@@ -507,9 +507,9 @@ elif command -v docker-compose >/dev/null 2>&1; then
         install -m 0755 "$BUNDLE_V2" /usr/local/lib/docker/cli-plugins/docker-compose
         if docker compose version >/dev/null 2>&1; then
           COMPOSE="docker compose"
-          log "自动安装 V2 插件成功:$(docker compose version | head -1)"
+          log "自动安装 V2 插件成功:$(docker compose version | head -1)" "V2 plugin installed successfully: $(docker compose version | head -1)"
         else
-          die "V2 插件安装到 cli-plugins/ 后 \`docker compose version\` 仍失败,请手动排查 dockerd 状态" 1
+          die "V2 插件安装到 cli-plugins/ 后 \`docker compose version\` 仍失败,请手动排查 dockerd 状态" "docker compose version still fails after installing the V2 plugin into cli-plugins/; investigate the dockerd status manually" 1
         fi
       else
         die "docker-compose 是 V1 (Python),无法解析 compose v3 文件;
@@ -518,30 +518,36 @@ elif command -v docker-compose >/dev/null 2>&1; then
           1. 重跑 sudo bash /opt/omc/infra/docker/install-docker.sh
              (V2 plugin 会自动装到 /usr/local/lib/docker/cli-plugins/)
           2. 手动 apt install docker-compose-plugin
-                 (Ubuntu 22.04+ docker 官方源)" 1
+                  (Ubuntu 22.04+ docker 官方源)" "docker-compose is V1 (Python) and cannot parse Compose v3 files.
+            No V2 binary was found in the infrastructure bundle ($INFRA_DIR/docker/docker-compose does not exist).
+            Choose one repair method:
+             1. Run sudo bash /opt/omc/infra/docker/install-docker.sh again
+               (the V2 plugin will be installed into /usr/local/lib/docker/cli-plugins/)
+             2. Install docker-compose-plugin manually
+               (from the official Docker repository on Ubuntu 22.04+)" 1
       fi
       ;;
     *)
-      die "无法识别 docker-compose 版本:$COMPOSE_VER" 1
+      die "无法识别 docker-compose 版本:$COMPOSE_VER" "Unrecognized docker-compose version: $COMPOSE_VER" 1
       ;;
   esac
 else
-  die "未检测到 docker compose v2 / docker-compose v1（请先 install-docker.sh）" 1
+  die "未检测到 docker compose v2 / docker-compose v1（请先 install-docker.sh）" "Docker Compose v2 or docker-compose v1 was not found (run install-docker.sh first)" 1
 fi
 log "docker compose 命令：$COMPOSE" "Docker Compose command: $COMPOSE"
 
 # docker 服务可用
-docker info >/dev/null 2>&1 || die "docker 服务不可用，请先 systemctl start docker" 1
+docker info >/dev/null 2>&1 || die "docker 服务不可用，请先 systemctl start docker" "Docker is unavailable; run systemctl start docker first" 1
 
 # 项目包结构（全 compose 部署：不再要求 bin/，要求 images/ deploy/ etc/）
-[ -d "$PKG_ROOT/etc" ]    || die "项目包目录结构异常：缺 etc/" 1
-[ -d "$PKG_ROOT/deploy" ] || die "项目包目录结构异常：缺 deploy/" 1
-[ -d "$PKG_ROOT/images" ] || die "项目包目录结构异常：缺 images/（业务镜像 tar）" 1
-[ -f "$PKG_ROOT/deploy/.env" ]                         || die "缺 deploy/.env（由 build-release.sh 生成）" 1
-[ -f "$PKG_ROOT/deploy/docker-compose.infra.yml" ]     || die "缺 deploy/docker-compose.infra.yml" 1
-[ -f "$PKG_ROOT/deploy/docker-compose.app.yml" ]       || die "缺 deploy/docker-compose.app.yml" 1
-[ "$SKIP_WEB" = 1 ]        || [ -f "$PKG_ROOT/deploy/docker-compose.web.yml" ]        || die "缺 deploy/docker-compose.web.yml（或加 --skip-web）" 1
-[ "$SKIP_MONITORING" = 1 ] || [ -f "$PKG_ROOT/deploy/docker-compose.monitoring.yml" ] || die "缺 deploy/docker-compose.monitoring.yml（或加 --skip-monitoring）" 1
+[ -d "$PKG_ROOT/etc" ]    || die "项目包目录结构异常：缺 etc/" "Invalid package structure: etc/ is missing" 1
+[ -d "$PKG_ROOT/deploy" ] || die "项目包目录结构异常：缺 deploy/" "Invalid package structure: deploy/ is missing" 1
+[ -d "$PKG_ROOT/images" ] || die "项目包目录结构异常：缺 images/（业务镜像 tar）" "Invalid package structure: images/ is missing (business image tar files)" 1
+[ -f "$PKG_ROOT/deploy/.env" ]                         || die "缺 deploy/.env（由 build-release.sh 生成）" "Missing deploy/.env (generated by build-release.sh)" 1
+[ -f "$PKG_ROOT/deploy/docker-compose.infra.yml" ]     || die "缺 deploy/docker-compose.infra.yml" "Missing deploy/docker-compose.infra.yml" 1
+[ -f "$PKG_ROOT/deploy/docker-compose.app.yml" ]       || die "缺 deploy/docker-compose.app.yml" "Missing deploy/docker-compose.app.yml" 1
+[ "$SKIP_WEB" = 1 ]        || [ -f "$PKG_ROOT/deploy/docker-compose.web.yml" ]        || die "缺 deploy/docker-compose.web.yml（或加 --skip-web）" "Missing deploy/docker-compose.web.yml (or use --skip-web)" 1
+[ "$SKIP_MONITORING" = 1 ] || [ -f "$PKG_ROOT/deploy/docker-compose.monitoring.yml" ] || die "缺 deploy/docker-compose.monitoring.yml（或加 --skip-monitoring）" "Missing deploy/docker-compose.monitoring.yml (or use --skip-monitoring)" 1
 
 # OMC_PUBLIC_HOST 是基站回传 PM/MR 文件所需的运维地址，不能等到复制包、
 # 切换 current 或覆盖 etc 后才校验。新包显式配置优先；新包留空时继承现行
@@ -559,15 +565,15 @@ if [ -z "$PUBLIC_HOST_CANDIDATE" ]; then
   done
 fi
 deploy_env_public_host_valid "$PUBLIC_HOST_CANDIDATE" ||
-  die "OMC_PUBLIC_HOST 未配置为基站可达主机（当前: ${PUBLIC_HOST_CANDIDATE:-<空>}）；请先在 $PKG_ROOT/deploy/.env 配置服务器对基站可达的 IP/域名后重试" 1
+  die "OMC_PUBLIC_HOST 未配置为基站可达主机（当前: ${PUBLIC_HOST_CANDIDATE:-<空>}）；请先在 $PKG_ROOT/deploy/.env 配置服务器对基站可达的 IP/域名后重试" "OMC_PUBLIC_HOST is not configured as reachable by base stations (current: ${PUBLIC_HOST_CANDIDATE:-<empty>}); configure the server-reachable IP or hostname in $PKG_ROOT/deploy/.env and retry" 1
 log "OMC_PUBLIC_HOST 预检通过：$PUBLIC_HOST_CANDIDATE" "OMC_PUBLIC_HOST precheck passed: $PUBLIC_HOST_CANDIDATE"
 
 # 资源契约是部署必需输入。必须在 --check-only 退出、current 切换和任何容器重启之前
 # 校验真正会被本次安装采用的候选，不能等到 Step 6 组装 Compose 才发现旧三行文件。
 RESOURCE_ENV_CANDIDATE="$(resolve_resource_env_candidate)" ||
-  die "未找到 resources.env；请先运行 bash $PKG_ROOT/deploy/plan-resources.sh，禁止静默回退 Compose 默认限额" 1
+  die "未找到 resources.env；请先运行 bash $PKG_ROOT/deploy/plan-resources.sh，禁止静默回退 Compose 默认限额" "resources.env was not found; run bash $PKG_ROOT/deploy/plan-resources.sh first. Do not silently fall back to Compose defaults" 1
 resource_env_validate "$RESOURCE_ENV_CANDIDATE" ||
-  die "resources.env 不是完整资源规划：${RESOURCE_ENV_CANDIDATE}；请重新运行 plan-resources.sh" 1
+  die "resources.env 不是完整资源规划：${RESOURCE_ENV_CANDIDATE}；请重新运行 plan-resources.sh" "resources.env is not a complete resource plan: ${RESOURCE_ENV_CANDIDATE}; run plan-resources.sh again" 1
 log "资源规划预检通过：$RESOURCE_ENV_CANDIDATE" "Resource plan precheck passed: $RESOURCE_ENV_CANDIDATE"
 
 # Worker 新版本会在启动时按真实并发核验 TSDB 连接池。这个只读门禁必须在
@@ -579,7 +585,7 @@ if ! validate_worker_tsdb_pool_precheck \
   "$PKG_ROOT/etc/worker.prod.yaml"; then
   live_worker_tsdb_pool="$(worker_tsdb_max_conns "$OMC_ROOT/etc/worker.prod.yaml" 2>/dev/null || echo 未安装/无法读取)"
   package_worker_tsdb_pool="$(worker_tsdb_max_conns "$PKG_ROOT/etc/worker.prod.yaml" 2>/dev/null || echo 无法读取)"
-  die "Worker TSDB 连接池部署前门禁失败：现网=${live_worker_tsdb_pool}，新包=${package_worker_tsdb_pool}，安全预算=${WORKER_TSDB_SAFE_POOL}；未停止旧服务、未迁移数据、未改配置" 1
+  die "Worker TSDB 连接池部署前门禁失败：现网=${live_worker_tsdb_pool}，新包=${package_worker_tsdb_pool}，安全预算=${WORKER_TSDB_SAFE_POOL}；未停止旧服务、未迁移数据、未改配置" "Worker TSDB connection-pool precheck failed: live=${live_worker_tsdb_pool}, package=${package_worker_tsdb_pool}, safe budget=${WORKER_TSDB_SAFE_POOL}; old services, data, and configuration were not changed" 1
 fi
 log "Worker TSDB 连接池预检通过" "Worker TSDB connection pool precheck passed"
 
@@ -598,7 +604,9 @@ log "项目版本：$VERSION" "Project version: $VERSION"
 if [ "$SKIP_INFRA" = 0 ]; then
   [ -d "$INFRA_DIR" ] || die "基础设施目录不存在：$INFRA_DIR
   · 首次部署需先：cd $INFRA_DIR && tar -xJf omc-infra-<版本>-<架构>.tar.xz --strip-components=1
-  · 或加 --skip-infra 跳过基础设施镜像 load" 1
+  · 或加 --skip-infra 跳过基础设施镜像 load" "Infrastructure directory does not exist: $INFRA_DIR
+  · For a fresh install, first run: cd $INFRA_DIR && tar -xJf omc-infra-<version>-<arch>.tar.xz --strip-components=1
+  · Or use --skip-infra to skip infrastructure image loading" 1
   [ -d "$INFRA_DIR/images" ] || die "基础设施目录缺 images/：$INFRA_DIR/images" "Infrastructure image directory is missing: $INFRA_DIR/images" 1
 else
   precheck_skipped_infra_images
@@ -607,7 +615,7 @@ fi
 log "precheck 通过" "Precheck passed"
 
 if [ "$CHECK_ONLY" = 1 ]; then
-  log "--check-only：不做任何修改，退出"
+  log "--check-only：不做任何修改，退出" "--check-only: no changes will be made; exiting"
   exit 0
 fi
 
@@ -625,12 +633,12 @@ if ! gpv_handoff_migrate_legacy_systemd \
   "$SYSTEMD_HANDOFF_IMAGE" \
   "$PKG_ROOT/images" \
   "$OMC_ROOT/etc/app.prod.yaml"; then
-  die "旧 systemd app 的 GPV handoff 失败；未停止或禁用任何旧业务服务" 2
+  die "旧 systemd app 的 GPV handoff 失败；未停止或禁用任何旧业务服务" "GPV handoff for the legacy systemd App failed; no legacy services were stopped or disabled" 2
 fi
 if [ "$GPV_SYSTEMD_HANDOFF_PREPARED" = 1 ]; then
   HANDOFF_PREPARED=1
-  log "旧 systemd app 的 GPV durable 已预创建，并已按 ACS → worker → app 顺序停服"
-  warn "宿主机旧 OMC 二进制（如 /opt/omc/current/bin/）保留未删，请运维确认无残留进程后自行清理"
+  log "旧 systemd app 的 GPV durable 已预创建，并已按 ACS → worker → app 顺序停服" "The legacy systemd App GPV durable was pre-created; legacy services were stopped in ACS -> worker -> App order"
+  warn "宿主机旧 OMC 二进制（如 /opt/omc/current/bin/）保留未删，请运维确认无残留进程后自行清理" "Legacy OMC binaries on the host (for example, /opt/omc/current/bin/) were not removed; verify that no processes remain, then clean them up manually"
 fi
 
 # =============================================================================
@@ -654,7 +662,7 @@ if [ -f "$OMC_ROOT/current/deploy/.env" ]; then
   PREV_ENV_SNAPSHOT="$(mktemp)" || PREV_ENV_SNAPSHOT=""
   [ -n "$PREV_ENV_SNAPSHOT" ] && { cp "$OMC_ROOT/current/deploy/.env" "$PREV_ENV_SNAPSHOT" 2>/dev/null || PREV_ENV_SNAPSHOT=""; }
 elif [ -f "$OMC_ROOT/etc/.env.saved" ]; then
-  log ".env:未见 current/deploy/.env,改用 uninstall.sh 保存的凭据 $OMC_ROOT/etc/.env.saved 继承口令/JWT"
+  log ".env:未见 current/deploy/.env,改用 uninstall.sh 保存的凭据 $OMC_ROOT/etc/.env.saved 继承口令/JWT" ".env: current/deploy/.env not found; using credentials saved by uninstall.sh at $OMC_ROOT/etc/.env.saved for credential/JWT inheritance"
   PREV_ENV_SNAPSHOT="$(mktemp)" || PREV_ENV_SNAPSHOT=""
   [ -n "$PREV_ENV_SNAPSHOT" ] && { cp "$OMC_ROOT/etc/.env.saved" "$PREV_ENV_SNAPSHOT" 2>/dev/null || PREV_ENV_SNAPSHOT=""; }
 fi
@@ -673,7 +681,7 @@ elif [ "$RESOURCE_ENV_CANDIDATE" = "$OMC_ROOT/etc/resources.env.saved" ]; then
 fi
 [ "$RESOURCE_ENV_CANDIDATE" = "$PKG_ROOT/deploy/resources.env" ] ||
   [ -n "$PREV_RESOURCES_SNAPSHOT" ] ||
-  die "resources.env 快照失败，未切换 current；请检查临时目录空间与文件权限" 1
+  die "resources.env 快照失败，未切换 current；请检查临时目录空间与文件权限" "resources.env snapshot failed; current was not switched. Check temporary-directory space and permissions" 1
 
 # 保存上一版随包 builtin 基线，用于区分“未修改的旧 builtin”与“运维在原 builtin
 # 文件上做过的扩展”。仅看 .custom 不够：指标库 force 覆盖 GSM.xml/BSC 平台时为了
@@ -683,13 +691,13 @@ if [ -d "$OMC_ROOT/current/data" ]; then
   PREV_DATA_BASELINE="$(mktemp -d)" || PREV_DATA_BASELINE=""
   if [ -n "$PREV_DATA_BASELINE" ]; then
     cp -a "$OMC_ROOT/current/data/." "$PREV_DATA_BASELINE/" 2>/dev/null \
-      || { warn "上一版 builtin 基线快照失败;将沿用旧版刷新判定"; rm -rf "$PREV_DATA_BASELINE"; PREV_DATA_BASELINE=""; }
+      || { warn "上一版 builtin 基线快照失败;将沿用旧版刷新判定" "Previous built-in baseline snapshot failed; using the legacy refresh decision"; rm -rf "$PREV_DATA_BASELINE"; PREV_DATA_BASELINE=""; }
   fi
 fi
 
 RELEASE_DIR="$OMC_ROOT/releases/$VERSION"
 if [ -d "$RELEASE_DIR" ] && [ "$(readlink -f "$PKG_ROOT" 2>/dev/null)" != "$(readlink -f "$RELEASE_DIR" 2>/dev/null)" ]; then
-  warn "已存在版本目录 $RELEASE_DIR，将覆盖（旧文件 → .bak.<时间戳>）"
+  warn "已存在版本目录 $RELEASE_DIR，将覆盖（旧文件 → .bak.<时间戳>）" "Release directory $RELEASE_DIR already exists and will be replaced (old files -> .bak.<timestamp>)"
   confirm "继续吗？" "Continue?" || die "用户取消" "Operation cancelled" 1
   mv "$RELEASE_DIR" "$RELEASE_DIR.bak.$(date +%Y%m%d%H%M%S)"
 fi
@@ -709,16 +717,16 @@ merge_env_preserve "$PREV_ENV_SNAPSHOT" "$RELEASE_DIR/deploy/.env"
 # 资源限额 resources.env 整文件继承到新 release(交付包不含此文件,故仅在上一版存在时拷入)。
 if [ -n "$PREV_RESOURCES_SNAPSHOT" ] && [ ! -f "$RELEASE_DIR/deploy/resources.env" ]; then
   cp "$PREV_RESOURCES_SNAPSHOT" "$RELEASE_DIR/deploy/resources.env" 2>/dev/null ||
-    die "resources.env 继承复制失败，未切换 current：$RELEASE_DIR/deploy/resources.env" 1
+    die "resources.env 继承复制失败，未切换 current：$RELEASE_DIR/deploy/resources.env" "Failed to inherit resources.env; current was not switched: $RELEASE_DIR/deploy/resources.env" 1
   log "resources.env:已从上一版继承资源限额(plan-resources.sh 调优值不丢)" "resources.env: inherited resource limits from the previous release"
 fi
 [ -n "$PREV_RESOURCES_SNAPSHOT" ] && rm -f "$PREV_RESOURCES_SNAPSHOT" 2>/dev/null || true
 
 # 防 TOCTOU、复制故障和目标目录陈旧文件：对即将成为 current 的实际文件再校验一次。
 [ -f "$RELEASE_DIR/deploy/resources.env" ] ||
-  die "复制/继承后的 resources.env 缺失，未切换 current；请重新运行 plan-resources.sh" 1
+  die "复制/继承后的 resources.env 缺失，未切换 current；请重新运行 plan-resources.sh" "resources.env is missing after copy/inheritance; current was not switched. Run plan-resources.sh again" 1
 resource_env_validate "$RELEASE_DIR/deploy/resources.env" ||
-  die "复制/继承后的 resources.env 未通过完整资源规划校验，未切换 current：$RELEASE_DIR/deploy/resources.env" 1
+  die "复制/继承后的 resources.env 未通过完整资源规划校验，未切换 current：$RELEASE_DIR/deploy/resources.env" "Copied/inherited resources.env failed complete resource-plan validation; current was not switched: $RELEASE_DIR/deploy/resources.env" 1
 
 # ── data 外置 + 升级反向合并(三库导入XML重构 Phase 2,D1/D2)───────────────────
 # 模型 B:整个 data 目录外置到 $OMC_ROOT/data,bind-mount(RW)进 app/worker;
@@ -729,18 +737,18 @@ resource_env_validate "$RELEASE_DIR/deploy/resources.env" ||
 #               自定义 XML + .custom sidecar + 改过的文件一律保留)。
 NEW_DATA="$RELEASE_DIR/data"
 if [ ! -d "$NEW_DATA" ]; then
-  die "交付包缺少 data/ 目录($NEW_DATA);模型 B 硬依赖字典播种,无法继续" 4
+  die "交付包缺少 data/ 目录($NEW_DATA);模型 B 硬依赖字典播种,无法继续" "Delivery package is missing data/ ($NEW_DATA); model B requires dictionary seeding, so installation cannot continue" 4
 fi
 if [ ! -d "$OMC_ROOT/data" ] || [ -z "$(ls -A "$OMC_ROOT/data" 2>/dev/null)" ]; then
   log "首次部署：播种 data 基线 → $OMC_ROOT/data" "Fresh install: seeding data baseline -> $OMC_ROOT/data"
   mkdir -p "$OMC_ROOT/data"
-  cp -a "$NEW_DATA/." "$OMC_ROOT/data/" || die "播种 data 失败;字典将为空,中止部署" 4
+  cp -a "$NEW_DATA/." "$OMC_ROOT/data/" || die "播种 data 失败;字典将为空,中止部署" "Data seeding failed; dictionaries would be empty, so deployment is aborted" 4
 else
   DATA_SNAP="$OMC_ROOT/data.bak.$(date +%Y%m%d%H%M%S)"
   log "升级：快照现网 data → $DATA_SNAP(回滚用)" "Upgrade: snapshot live data -> $DATA_SNAP (rollback copy)"
-  cp -a "$OMC_ROOT/data" "$DATA_SNAP" || warn "快照 data 失败(磁盘满?);继续合并但无回滚点"
+  cp -a "$OMC_ROOT/data" "$DATA_SNAP" || warn "快照 data 失败(磁盘满?);继续合并但无回滚点" "Data snapshot failed (disk full?); continuing the merge without a rollback point"
   log "升级：反向合并(现网赢、新版补充)新版 builtin → $OMC_ROOT/data" "Upgrade: merge new built-in data into $OMC_ROOT/data (live data wins)"
-  cp -an "$NEW_DATA/." "$OMC_ROOT/data/" || warn "反向合并 data 出现错误;请人工核对 $OMC_ROOT/data"
+  cp -an "$NEW_DATA/." "$OMC_ROOT/data/" || warn "反向合并 data 出现错误;请人工核对 $OMC_ROOT/data" "Reverse data merge returned an error; manually verify $OMC_ROOT/data"
   # builtin 刷新(#154):cp -an 只补缺失、不更新已存在文件 → 内置字典(如 BSC 网关→BSC 产品
   # 改名)升级不生效,且 dictloader 会用过时 host XML 把旧值 UPSERT 回来。这里对新包 builtin
   # 文件做差异覆盖:host 无对应 .custom sidecar(=运维未自定义)且内容有变 → 用新版覆盖;
@@ -753,24 +761,24 @@ else
     _live="$OMC_ROOT/data/$_rel"
     _previous="${PREV_DATA_BASELINE:+$PREV_DATA_BASELINE/$_rel}"
     if [ -n "$_previous" ] && [ -f "$_previous" ] && ! cmp -s "$_live" "$_previous"; then
-      log "  · 保留运维修改的 builtin 字典:$_rel"
+      log "  · 保留运维修改的 builtin 字典:$_rel" "  · Keeping operator-modified built-in dictionary: $_rel"
       continue
     fi
     if should_refresh_builtin "$_nf" "$_live" "$_previous"; then
       if cp -a "$_nf" "$OMC_ROOT/data/$_rel"; then
-        log "  · 刷新 builtin 字典:$_rel"; _refreshed=$((_refreshed + 1))
+        log "  · 刷新 builtin 字典:$_rel" "  · Refreshed built-in dictionary: $_rel"; _refreshed=$((_refreshed + 1))
       else
-        warn "  · 刷新 builtin 失败:$_rel(请人工核对)"
+        warn "  · 刷新 builtin 失败:$_rel(请人工核对)" "  · Failed to refresh built-in dictionary: $_rel (manual verification required)"
       fi
     fi
   done < <(find "$NEW_DATA" -type f -print0)
-  [ "$_refreshed" -gt 0 ] && log "升级:刷新 $_refreshed 个 builtin 字典文件(运维自定义 .custom 已保留)"
+  [ "$_refreshed" -gt 0 ] && log "升级:刷新 $_refreshed 个 builtin 字典文件(运维自定义 .custom 已保留)" "Upgrade: refreshed $_refreshed built-in dictionary files (operator .custom files were preserved)"
 fi
 [ -n "$PREV_DATA_BASELINE" ] && rm -rf "$PREV_DATA_BASELINE" 2>/dev/null || true
 # 容器(UID 10001 = Dockerfile 内 omcgo 非 root 用户)需可写 data:
 # 上传/删除 XML、写 .custom sidecar、worker 清理过期备份与孤儿 sidecar。
 chown -R 10001:10001 "$OMC_ROOT/data" 2>/dev/null \
-  || warn "chown 10001:10001 $OMC_ROOT/data 失败(UID 不存在 host 上属正常);容器内仍以 10001 写入"
+  || warn "chown 10001:10001 $OMC_ROOT/data 失败(UID 不存在 host 上属正常);容器内仍以 10001 写入" "chown 10001:10001 $OMC_ROOT/data failed (a missing host UID can be normal); containers will still write as UID 10001"
 
 # 单目录 + sidecar 后不再使用独立 *-custom 目录。issue #206:旧版自定义 KPI 指标库 /
 # 告警定义 / 参数映射仍住在这些旧 *-custom 目录,直接 rm -rf 会丢用户数据(reload 找不到
@@ -801,18 +809,18 @@ for _pair in $_legacy_custom_map; do
     if [ -e "$_dst" ]; then
       # 单目录已有同名文件(现网赢),旧自定义副本丢弃即可,绝不补 sidecar。
       # 现网那份是否带 sidecar 由 builtin 刷新循环/上传流程维护,这里不干预。
-      log "  · 跳过(现网已有同名,no-clobber):$_cdir/$_crel"
+      log "  · 跳过(现网已有同名,no-clobber):$_cdir/$_crel" "  · Skipped (same file already exists in live data, no-clobber): $_cdir/$_crel"
     elif cp -p "$_cf" "$_dst" 2>/dev/null; then
       # 真正迁入了新文件 → 补 .custom sidecar 标记为运维自定义。
       touch "$_dst.custom" 2>/dev/null || true
-      log "  · 抢救自定义 XML:$_cdir/$_crel → $_target/$_crel(+.custom)"
+      log "  · 抢救自定义 XML:$_cdir/$_crel → $_target/$_crel(+.custom)" "  · Rescued custom XML: $_cdir/$_crel -> $_target/$_crel (+.custom)"
       _rescued=$((_rescued + 1))
     else
-      warn "  · 抢救自定义 XML 失败:$_cdir/$_crel(请从 data.bak.<ts> 人工核对)"
+      warn "  · 抢救自定义 XML 失败:$_cdir/$_crel(请从 data.bak.<ts> 人工核对)" "  · Failed to rescue custom XML: $_cdir/$_crel (verify it manually from data.bak.<ts>)"
     fi
   done < <(find "$_csrc" -type f -name '*.xml' -print0)
-  [ "$_rescued" -gt 0 ] && log "升级:从 $_cdir 抢救 $_rescued 个自定义 XML → $_target(单目录+sidecar)"
-  log "清理废弃 custom 目录:$_csrc(内容已迁移至 $_target)"
+  [ "$_rescued" -gt 0 ] && log "升级:从 $_cdir 抢救 $_rescued 个自定义 XML → $_target(单目录+sidecar)" "Upgrade: rescued $_rescued custom XML files from $_cdir -> $_target (single directory + sidecar)"
+  log "清理废弃 custom 目录:$_csrc(内容已迁移至 $_target)" "Removing obsolete custom directory: $_csrc (content was migrated to $_target)"
   rm -rf "$_csrc"
 done
 
@@ -837,26 +845,26 @@ else
 
   if [ "$do_overwrite" = 1 ]; then
     BAK="$OMC_ROOT/etc.bak.$(date +%Y%m%d%H%M%S)"
-    log "备份原 etc → $BAK"
+    log "备份原 etc → $BAK" "Backed up the previous etc directory -> $BAK"
     mv "$OMC_ROOT/etc" "$BAK"
     mkdir -p "$OMC_ROOT/etc"
     cp -r "$RELEASE_DIR/etc/." "$OMC_ROOT/etc/"
-    warn "etc 已重置为新包模板 —— 请从 $BAK 取回已改口令 / JWT / TLS / 自定义项"
-    warn "  参考 diff：diff -ru $BAK $OMC_ROOT/etc | less"
+    warn "etc 已重置为新包模板 —— 请从 $BAK 取回已改口令 / JWT / TLS / 自定义项" "etc was reset to the package template; restore customized credentials, JWT, TLS, and other settings from $BAK"
+    warn "  参考 diff：diff -ru $BAK $OMC_ROOT/etc | less" "  Compare changes with: diff -ru $BAK $OMC_ROOT/etc | less"
   else
     if upgrade_acs_session_limit \
       "$OMC_ROOT/etc/acs.prod.yaml" \
       "$RELEASE_DIR/etc/acs.prod.yaml"; then
       case "${ACS_SESSION_LIMIT_UPGRADE_RESULT:-noop}" in
         migrated)
-          log "升级 ACS 会话容量：session.max_concurrent 10000 → 30000（其他实例配置保持不变）"
+          log "升级 ACS 会话容量：session.max_concurrent 10000 → 30000（其他实例配置保持不变）" "Upgrade: ACS session capacity session.max_concurrent 10000 -> 30000 (other instance settings unchanged)"
           ;;
         preserved)
-          log "ACS session.max_concurrent 为运维自定义值，升级时保持不变"
+          log "ACS session.max_concurrent 为运维自定义值，升级时保持不变" "ACS session.max_concurrent is operator-customized and was preserved during the upgrade"
           ;;
       esac
     else
-      warn "ACS session.max_concurrent 自动迁移失败，保留现网配置；请人工核对新包模板"
+      warn "ACS session.max_concurrent 自动迁移失败，保留现网配置；请人工核对新包模板" "Automatic ACS session.max_concurrent migration failed; keeping the live configuration. Verify it against the new package template"
     fi
     for service_config in acs.prod.yaml app.prod.yaml worker.prod.yaml; do
       if upgrade_prod_database_dsns \
@@ -864,49 +872,49 @@ else
         "$RELEASE_DIR/etc/$service_config"; then
         log "升级 $service_config：已同步生产数据库 DSN 模板，使用当前 .env 凭证" "Upgrade $service_config: synchronized production database DSN template using current .env credentials"
       else
-        die "$service_config 数据库 DSN 自动同步失败；未切换 current" 1
+        die "$service_config 数据库 DSN 自动同步失败；未切换 current" "$service_config database DSN synchronization failed; current was not switched" 1
       fi
     done
     upgrade_app_param_sync_recovery_limit \
       "$OMC_ROOT/etc/app.prod.yaml" \
       "$RELEASE_DIR/etc/app.prod.yaml" ||
-      die "app.prod.yaml 的 param_sync.recovery_run_limit 自动迁移失败；未切换 current" 1
+      die "app.prod.yaml 的 param_sync.recovery_run_limit 自动迁移失败；未切换 current" "Automatic migration of app.prod.yaml param_sync.recovery_run_limit failed; current was not switched" 1
     case "${PARAM_SYNC_RECOVERY_LIMIT_UPGRADE_RESULT:-noop}" in
       migrated)
-        log "升级参数同步恢复容量：recovery_run_limit 20 → 200（其他实例配置保持不变）"
+        log "升级参数同步恢复容量：recovery_run_limit 20 → 200（其他实例配置保持不变）" "Upgrade: parameter-sync recovery capacity recovery_run_limit 20 -> 200 (other instance settings unchanged)"
         ;;
       preserved)
-        log "参数同步 recovery_run_limit 为运维自定义值，升级时保持不变"
+        log "参数同步 recovery_run_limit 为运维自定义值，升级时保持不变" "Parameter-sync recovery_run_limit is operator-customized and was preserved during the upgrade"
         ;;
     esac
     upgrade_app_gpv_response_config \
       "$OMC_ROOT/etc/app.prod.yaml" \
       "$RELEASE_DIR/etc/app.prod.yaml" ||
-      die "app.prod.yaml 缺少 provision.gpv_response 且自动补齐失败；未切换 current" 1
+      die "app.prod.yaml 缺少 provision.gpv_response 且自动补齐失败；未切换 current" "app.prod.yaml is missing provision.gpv_response and automatic completion failed; current was not switched" 1
     for service_config in app.prod.yaml worker.prod.yaml; do
       upgrade_pm_redis_config \
         "$OMC_ROOT/etc/$service_config" \
         "$RELEASE_DIR/etc/$service_config" ||
-        die "$service_config 缺少 pm_redis 且自动补齐失败；未切换 current" 1
+        die "$service_config 缺少 pm_redis 且自动补齐失败；未切换 current" "$service_config is missing pm_redis and automatic completion failed; current was not switched" 1
     done
     upgrade_worker_tsdb_pool \
       "$OMC_ROOT/etc/worker.prod.yaml" \
       "$RELEASE_DIR/etc/worker.prod.yaml" ||
-      die "worker.prod.yaml 的 tsdb.max_conns 无法读取或安全迁移；未切换 current" 1
+      die "worker.prod.yaml 的 tsdb.max_conns 无法读取或安全迁移；未切换 current" "worker.prod.yaml tsdb.max_conns could not be read or safely migrated; current was not switched" 1
     case "${WORKER_TSDB_POOL_UPGRADE_RESULT:-invalid}" in
       migrated)
-        log "升级 Worker TSDB 连接池：历史默认值 → $(worker_tsdb_max_conns "$RELEASE_DIR/etc/worker.prod.yaml")（其他实例配置保持不变）"
+        log "升级 Worker TSDB 连接池：历史默认值 → $(worker_tsdb_max_conns "$RELEASE_DIR/etc/worker.prod.yaml")（其他实例配置保持不变）" "Upgrade: Worker TSDB connection pool historical default -> $(worker_tsdb_max_conns "$RELEASE_DIR/etc/worker.prod.yaml") (other instance settings unchanged)"
         ;;
       preserved)
-        log "Worker tsdb.max_conns 为满足新预算的运维自定义值，升级时保持不变"
+        log "Worker tsdb.max_conns 为满足新预算的运维自定义值，升级时保持不变" "Worker tsdb.max_conns is an operator-customized value that meets the new budget and was preserved"
         ;;
       insufficient)
-        die "worker.prod.yaml 的 tsdb.max_conns=$(worker_tsdb_max_conns "$OMC_ROOT/etc/worker.prod.yaml") 低于新版本安全预算 $(worker_tsdb_max_conns "$RELEASE_DIR/etc/worker.prod.yaml")；请提升该值后重试，未切换 current" 1
+        die "worker.prod.yaml 的 tsdb.max_conns=$(worker_tsdb_max_conns "$OMC_ROOT/etc/worker.prod.yaml") 低于新版本安全预算 $(worker_tsdb_max_conns "$RELEASE_DIR/etc/worker.prod.yaml")；请提升该值后重试，未切换 current" "worker.prod.yaml tsdb.max_conns=$(worker_tsdb_max_conns "$OMC_ROOT/etc/worker.prod.yaml") is below the new safe budget $(worker_tsdb_max_conns "$RELEASE_DIR/etc/worker.prod.yaml"); increase it and retry. current was not switched" 1
         ;;
       noop)
         ;;
       *)
-        die "worker.prod.yaml 的 tsdb.max_conns 升级结果异常；未切换 current" 1
+        die "worker.prod.yaml 的 tsdb.max_conns 升级结果异常；未切换 current" "worker.prod.yaml tsdb.max_conns upgrade returned an unexpected result; current was not switched" 1
         ;;
     esac
     log "$OMC_ROOT/etc/ 已有实例配置，保留不覆盖（如需覆盖加 --overwrite-etc）" "$OMC_ROOT/etc/ contains instance configuration; keeping it unchanged (use --overwrite-etc to replace it)"
@@ -953,14 +961,14 @@ ENV_FILE="$OMC_ROOT/current/deploy/.env"
 RESOURCE_ENV_FILE="$OMC_ROOT/current/deploy/resources.env"
 deploy_env_load "$ENV_FILE" "$RESOURCE_ENV_FILE"
 if ! deploy_env_public_host_valid "${OMC_PUBLIC_HOST:-}"; then
-  die "OMC_PUBLIC_HOST 未配置为基站可达主机（当前: ${OMC_PUBLIC_HOST:-<空>}）；请在 deploy/.env 中配置后重试" 1
+  die "OMC_PUBLIC_HOST 未配置为基站可达主机（当前: ${OMC_PUBLIC_HOST:-<空>}）；请在 deploy/.env 中配置后重试" "OMC_PUBLIC_HOST is not configured as reachable by base stations (current: ${OMC_PUBLIC_HOST:-<empty>}); configure it in deploy/.env and retry" 1
 fi
 # 必须在 source .env 之后应用：旧 .env 可能显式写了 tracer=true。
 # 同时把安装 profile 持久化，供后续独立运行的 svc/healthcheck 使用。
 monitoring_profile_apply_install "$ENV_FILE" "$SKIP_MONITORING" ||
-  die "无法持久化 monitoring profile 到 $ENV_FILE" 1
+  die "无法持久化 monitoring profile 到 $ENV_FILE" "Unable to persist the monitoring profile to $ENV_FILE" 1
 storage_prepare_configured_env_paths "$ENV_FILE" ||
-  die "有状态服务数据路径校验/创建失败；请检查 $ENV_FILE 中五个 *_DATA_PATH" 1
+  die "有状态服务数据路径校验/创建失败；请检查 $ENV_FILE 中五个 *_DATA_PATH" "Stateful service data-path validation or creation failed; check the five *_DATA_PATH values in $ENV_FILE" 1
 
 if [ "$SKIP_INFRA" = 0 ]; then
   INFRA_IMAGES=("$IMAGE_POSTGRES" "${IMAGE_POSTGRES_TSDB:-}" "$IMAGE_REDIS" "$IMAGE_NATS" "$IMAGE_MINIO" "${IMAGE_NGINX:-}")
@@ -969,10 +977,10 @@ if [ "$SKIP_INFRA" = 0 ]; then
   if images_exist "${INFRA_IMAGES[@]}" "${MON_IMAGES[@]}"; then
     log "基础设施 + 监控镜像已存在，跳过 load；handoff 完成前保持现有容器不动" "Infrastructure and monitoring images already exist; skipping load and keeping existing containers unchanged until handoff completes"
   else
-    log "load 基础设施 + 监控镜像（$INFRA_DIR/images/）"
+    log "load 基础设施 + 监控镜像（$INFRA_DIR/images/）" "Loading infrastructure and monitoring images from $INFRA_DIR/images/"
     for tar in "$INFRA_DIR/images"/*.tar; do
       [ -f "$tar" ] || continue
-      log "  · docker load < $(basename "$tar")"
+      log "  · docker load < $(basename "$tar")" "  · docker load < $(basename "$tar")"
       docker load -i "$tar"
     done
   fi
@@ -986,15 +994,15 @@ if images_exist "${BIZ_IMAGES[@]}"; then
   log "业务镜像已存在，跳过 load；handoff 完成前保持现有 app 不动" "Business images already exist; skipping load and keeping the current App unchanged until handoff completes"
   biz_loaded=1
 else
-  log "load 业务镜像（$RELEASE_DIR/images/）"
+  log "load 业务镜像（$RELEASE_DIR/images/）" "Loading business images from $RELEASE_DIR/images/"
   biz_loaded=0
   for tar in "$RELEASE_DIR/images"/*.tar; do
     [ -f "$tar" ] || continue
-    log "  · docker load < $(basename "$tar")"
+    log "  · docker load < $(basename "$tar")" "  · docker load < $(basename "$tar")"
     docker load -i "$tar"
     biz_loaded=1
   done
-  [ "$biz_loaded" = 1 ] || die "$RELEASE_DIR/images/ 下无业务镜像 tar，无法继续" 1
+  [ "$biz_loaded" = 1 ] || die "$RELEASE_DIR/images/ 下无业务镜像 tar，无法继续" "No business image tar files were found under $RELEASE_DIR/images/; installation cannot continue" 1
 fi
 
 # 项目包与基础设施包分离交付，但运行时必须完全离线：所有本次 Compose
@@ -1011,7 +1019,7 @@ for image in "${REQUIRED_IMAGES[@]}"; do
   docker image inspect "$image" >/dev/null 2>&1 || missing_images+=("$image")
 done
 if [ "${#missing_images[@]}" -gt 0 ]; then
-  die "离线安装缺少本地镜像：${missing_images[*]}。请先解压匹配架构的基础设施包到 $INFRA_DIR，并重新执行安装（不要使用 --skip-infra）；项目包业务镜像由本步骤负责 load。" 1
+  die "离线安装缺少本地镜像：${missing_images[*]}。请先解压匹配架构的基础设施包到 $INFRA_DIR，并重新执行安装（不要使用 --skip-infra）；项目包业务镜像由本步骤负责 load。" "Offline installation is missing local images: ${missing_images[*]}. Extract the matching infrastructure bundle into $INFRA_DIR and retry without --skip-infra; business images from the package are loaded by this step." 1
 fi
 log "离线镜像校验通过：本次 Compose 所需镜像均已在本机" "Offline image check passed: all required images are available locally"
 
@@ -1021,12 +1029,12 @@ log "离线镜像校验通过：本次 Compose 所需镜像均已在本机" "Off
 sep "5/9 默认口令安全检查" "5/9 Check default credentials"
 
 # ENV_FILE 已在 Step 4 定义并 source，这里仅做存在性兜底
-[ -f "$ENV_FILE" ] || die "缺 $ENV_FILE（由 build-release.sh 生成）" 1
+[ -f "$ENV_FILE" ] || die "缺 $ENV_FILE（由 build-release.sh 生成）" "Missing $ENV_FILE (generated by build-release.sh)" 1
 
 if grep -qE '^(POSTGRES_PASSWORD=omcgo123|MINIO_ROOT_PASSWORD=minioadmin|GRAFANA_ADMIN_PASSWORD=admin|OMC_SHARED_SECRET=dps)$' "$ENV_FILE"; then
-  warn "检测到 deploy/.env 含默认口令（POSTGRES_PASSWORD=omcgo123 / MINIO_ROOT_PASSWORD=minioadmin / GRAFANA_ADMIN_PASSWORD=admin / OMC_SHARED_SECRET=dps）"
-  warn "  → 生产环境务必改强口令：vi $ENV_FILE"
-  warn "  → etc/*.prod.yaml 用 \${VAR} 引用 .env，无需手改；生产凭证校验(GuardProductionSecrets)会拒绝默认值启动"
+  warn "检测到 deploy/.env 含默认口令（POSTGRES_PASSWORD=omcgo123 / MINIO_ROOT_PASSWORD=minioadmin / GRAFANA_ADMIN_PASSWORD=admin / OMC_SHARED_SECRET=dps）" "Default credentials detected in deploy/.env (POSTGRES_PASSWORD=omcgo123 / MINIO_ROOT_PASSWORD=minioadmin / GRAFANA_ADMIN_PASSWORD=admin / OMC_SHARED_SECRET=dps)"
+  warn "  → 生产环境务必改强口令：vi $ENV_FILE" "  -> Change to strong production credentials: vi $ENV_FILE"
+  warn "  → etc/*.prod.yaml 用 \${VAR} 引用 .env，无需手改；生产凭证校验(GuardProductionSecrets)会拒绝默认值启动" "  -> etc/*.prod.yaml references .env through \${VAR}; no manual edit is needed. GuardProductionSecrets will reject default credentials at startup"
   confirm "已知风险，继续部署？" "Known risk detected. Continue deployment?" || die "用户取消，请先改口令" "Operation cancelled. Change the credentials first." 1
 fi
 
@@ -1042,11 +1050,11 @@ cd "$OMC_ROOT/current/deploy"
 ENV_FILES=()
 [ -f .env ] && ENV_FILES+=( --env-file .env )
 [ -f resources.env ] ||
-  die "current/deploy/resources.env 缺失；禁止静默回退 Compose 默认限额，请重新运行 plan-resources.sh"
+  die "current/deploy/resources.env 缺失；禁止静默回退 Compose 默认限额，请重新运行 plan-resources.sh" "current/deploy/resources.env is missing; do not silently fall back to Compose defaults. Run plan-resources.sh again" 1
 resource_env_validate resources.env ||
-  die "resources.env 不是完整资源规划；请重新运行 plan-resources.sh，禁止缺失项静默回退 Compose 默认值"
+  die "resources.env 不是完整资源规划；请重新运行 plan-resources.sh，禁止缺失项静默回退 Compose 默认值" "resources.env is not a complete resource plan; run plan-resources.sh again and do not silently fall back to Compose defaults" 1
 resource_plan_metrics_write resources.env ||
-  die "无法生成 resources.env 对应的 Prometheus 资源计划指标"
+  die "无法生成 resources.env 对应的 Prometheus 资源计划指标" "Unable to generate Prometheus resource-plan metrics for resources.env" 1
 ENV_FILES+=( --env-file resources.env )
 log "已检出完整 resources.env → 按其资源限额部署（plan-resources.sh 生成）" "Complete resources.env found -> deploying with its limits"
 
@@ -1064,12 +1072,12 @@ NATS_RUNNING=0
 [ -n "$APP_CID" ] && [ "$(docker inspect -f '{{.State.Running}}' "$APP_CID" 2>/dev/null || true)" = "true" ] && APP_RUNNING=1
 [ -n "$NATS_CID" ] && [ "$(docker inspect -f '{{.State.Running}}' "$NATS_CID" 2>/dev/null || true)" = "true" ] && NATS_RUNNING=1
 if [ "$APP_RUNNING" = 1 ] && [ "$NATS_RUNNING" != 1 ]; then
-  die "旧 app 仍在运行但 NATS 不可用，无法读取 GPV consumer AckFloor；未停止旧 app" 2
+  die "旧 app 仍在运行但 NATS 不可用，无法读取 GPV consumer AckFloor；未停止旧 app" "The old App is still running but NATS is unavailable; cannot read the GPV consumer AckFloor. The old App was not stopped" 2
 fi
 if [ "$HANDOFF_PREPARED" != 1 ] && [ "$NATS_RUNNING" = 1 ]; then
   log "在停止/重建旧 app 前预创建 GPV RPC 固定 durable ..." "Pre-creating the fixed GPV RPC durable before stopping/recreating the old App ..."
   gpv_handoff_prepare ||
-    die "GPV consumer handoff 失败；未停止旧 app，修复 NATS/consumer 配置后重试" 2
+    die "GPV consumer handoff 失败；未停止旧 app，修复 NATS/consumer 配置后重试" "GPV consumer handoff failed; the old App was not stopped. Fix the NATS/consumer configuration and retry" 2
   HANDOFF_PREPARED=1
 fi
 
@@ -1084,7 +1092,7 @@ sep "7/9 启动基础设施 + 执行 migrate / seed" "7/9 Start infrastructure a
 heal_main_pg_timescaledb_downgrade
 
 if ! prepare_legacy_redis_cutover; then
-  die "旧单 Redis 切换准备失败；已拒绝并行挂载或无校验升级" 2
+  die "旧单 Redis 切换准备失败；已拒绝并行挂载或无校验升级" "Legacy single-Redis cutover preparation failed; parallel mounting or an unverified upgrade was rejected" 2
 fi
 
 # 7.1 起基础设施（postgres / postgres-tsdb / redis-core / redis-pm / nats / minio）
@@ -1119,32 +1127,38 @@ while [ $WAIT -lt 90 ]; do
       NATS_OK=1 || NATS_OK=0
   fi
   [ "$PG_OK" = 1 ] && [ "$TS_OK" = 1 ] && [ "$RD_CORE_OK" = 1 ] && [ "$RD_PM_OK" = 1 ] && [ "$NATS_OK" = 1 ] && break
-  echo "  ... ${WAIT}s (PG=$PG_OK TSDB=$TS_OK RedisCore=$RD_CORE_OK RedisPM=$RD_PM_OK NATS=$NATS_OK)"
+  if [ "$OMC_LANG" = en ]; then
+    echo "  ... ${WAIT}s (PG=$PG_OK TSDB=$TS_OK RedisCore=$RD_CORE_OK RedisPM=$RD_PM_OK NATS=$NATS_OK)"
+  else
+    echo "  ... ${WAIT}s (PG=$PG_OK TSDB=$TS_OK RedisCore=$RD_CORE_OK RedisPM=$RD_PM_OK NATS=$NATS_OK)"
+  fi
 done
 if [ "$PG_OK" != 1 ] || [ "$TS_OK" != 1 ] || [ "$RD_CORE_OK" != 1 ] || [ "$RD_PM_OK" != 1 ] || [ "$NATS_OK" != 1 ]; then
   die "基础设施 90s 内未就绪：PG=$PG_OK TSDB=$TS_OK RedisCore=$RD_CORE_OK RedisPM=$RD_PM_OK NATS=$NATS_OK
   手动检查：${DC[*]} ps
-            ${DC[*]} logs postgres postgres-tsdb redis-core redis-pm" 2
+            ${DC[*]} logs postgres postgres-tsdb redis-core redis-pm" "Infrastructure was not ready within 90s: PG=$PG_OK TSDB=$TS_OK RedisCore=$RD_CORE_OK RedisPM=$RD_PM_OK NATS=$NATS_OK
+  Inspect manually: ${DC[*]} ps
+                  ${DC[*]} logs postgres postgres-tsdb redis-core redis-pm" 2
 fi
 log "基础设施已就绪 (PG / TSDB / Redis Core / Redis PM / NATS)" "Infrastructure is ready (PG / TSDB / Redis Core / Redis PM / NATS)"
 if ! verify_legacy_redis_cutover; then
-  die "redis-core 未继承旧 Redis 的同一数据目录和完整键数；业务写入方保持停止" 2
+  die "redis-core 未继承旧 Redis 的同一数据目录和完整键数；业务写入方保持停止" "redis-core did not inherit the legacy Redis data directory and complete key count; business writers remain stopped" 2
 fi
 if ! migrate_legacy_pm_redis; then
-  die "旧 Redis 的 PM 聚合状态迁移到 redis-pm 失败；App/Worker 保持停止" 2
+  die "旧 Redis 的 PM 聚合状态迁移到 redis-pm 失败；App/Worker 保持停止" "Migration of PM aggregation state from legacy Redis to redis-pm failed; App/Worker remain stopped" 2
 fi
 
 if [ "$HANDOFF_PREPARED" != 1 ]; then
   log "首次部署/原 NATS 未运行：按实际流状态安全初始化 GPV RPC 固定 durable ..." "Fresh install or inactive NATS: safely initializing the fixed GPV RPC durable from the current stream state ..."
   gpv_handoff_prepare --bootstrap-if-missing ||
-    die "GPV consumer handoff 失败；尚未启动 app，修复 NATS/consumer 配置后重试" 2
+    die "GPV consumer handoff 失败；尚未启动 app，修复 NATS/consumer 配置后重试" "GPV consumer handoff failed; App has not started. Fix the NATS/consumer configuration and retry" 2
   HANDOFF_PREPARED=1
 fi
 
 # 7.2 验证 omcgo-net 网络已创建
 log "验证 omcgo-net 网络 ..." "Verifying omcgo-net network ..."
 if ! docker network inspect omcgo-net >/dev/null 2>&1; then
-  die "omcgo-net 网络未创建，请检查 docker-compose.infra.yml" 2
+  die "omcgo-net 网络未创建，请检查 docker-compose.infra.yml" "omcgo-net was not created; check docker-compose.infra.yml" 2
 fi
 
 # 7.3 migrate-schema（一次性容器，跑完即退；用 .env 中的 dsn）
@@ -1220,14 +1234,14 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
   # 的兼容桥，确保已有环境先补齐新列和摘要表，再启动会写这些字段的 worker。
   # 新装环境也安全：基线已创建对象，本步骤为空操作。
   TSDB_RECONCILE_SQL="$DEPLOY_DIR/tsdb-schema-reconcile.sql"
-  [ -r "$TSDB_RECONCILE_SQL" ] || die "缺少时序库兼容协调脚本：$TSDB_RECONCILE_SQL" 3
+  [ -r "$TSDB_RECONCILE_SQL" ] || die "缺少时序库兼容协调脚本：$TSDB_RECONCILE_SQL" "Missing TSDB compatibility reconciliation script: $TSDB_RECONCILE_SQL" 3
   log "执行时序库基线兼容协调（幂等）..." "Running idempotent TSDB baseline compatibility reconciliation ..."
   if "${DC[@]}" exec -T postgres-tsdb \
       psql -v ON_ERROR_STOP=1 -U "$POSTGRES_TSDB_USER" -d "$POSTGRES_TSDB_DB" \
       -f - < "$TSDB_RECONCILE_SQL"; then
     log "时序库基线兼容协调成功" "TSDB baseline compatibility reconciliation completed successfully"
   else
-    die "时序库基线兼容协调失败；未启动新业务容器" 3
+    die "时序库基线兼容协调失败；未启动新业务容器" "TSDB baseline compatibility reconciliation failed; new business containers were not started" 3
   fi
 else
   log "--skip-migrate：跳过 migrate / seed" "--skip-migrate: skipping migrations and seed"
@@ -1318,9 +1332,9 @@ web_acs_dynamic_upstream_loaded() {
 
 APP_START_TIMEOUT="${OMC_APP_START_TIMEOUT:-180}"
 case "$APP_START_TIMEOUT" in
-  ''|*[!0-9]*) die "OMC_APP_START_TIMEOUT 必须是正整数" 2 ;;
+  ''|*[!0-9]*) die "OMC_APP_START_TIMEOUT 必须是正整数" "OMC_APP_START_TIMEOUT must be a positive integer" 2 ;;
 esac
-[ "$APP_START_TIMEOUT" -gt 0 ] || die "OMC_APP_START_TIMEOUT 必须大于 0" 2
+[ "$APP_START_TIMEOUT" -gt 0 ] || die "OMC_APP_START_TIMEOUT 必须大于 0" "OMC_APP_START_TIMEOUT must be greater than 0" 2
 
 ACS_HA_EXISTING=0
 acs_ha_prepare_candidate() {
@@ -1331,9 +1345,9 @@ acs_ha_prepare_candidate() {
   [ -n "$old_acs" ] || return 0
   ACS_HA_EXISTING=1
   if [ "$SKIP_WEB" = 1 ]; then
-    die "--skip-web 不支持存量 ACS 无损升级；请启用 web 网关，或由外部负载均衡完成双实例切换" 2
+    die "--skip-web 不支持存量 ACS 无损升级；请启用 web 网关，或由外部负载均衡完成双实例切换" "--skip-web is not supported for zero-downtime upgrades with an existing ACS; enable the web gateway or use an external load balancer for the two-instance switch" 2
   fi
-  [ -n "$old_web" ] || die "存量 ACS 正在运行但 web 网关不存在，无法执行无损发布" 2
+  [ -n "$old_web" ] || die "存量 ACS 正在运行但 web 网关不存在，无法执行无损发布" "An existing ACS is running but the web gateway is missing; zero-downtime release cannot proceed" 2
 
   # 兼容首轮从旧拓扑升级：旧 web 若尚未使用动态 DNS upstream，候选实例即使
   # 就绪也不会被纳入路由。先在旧 ACS 仍服务时只刷新 web，再继续接力。
@@ -1350,14 +1364,14 @@ acs_ha_prepare_candidate() {
       wait_seconds=$((wait_seconds + 2))
     done
     web_acs_dynamic_upstream_loaded "$old_web" ||
-      die "web 30s 内未加载动态 ACS upstream；正式 ACS 未替换，已中止发布" 2
+      die "web 30s 内未加载动态 ACS upstream；正式 ACS 未替换，已中止发布" "The web gateway did not load the dynamic ACS upstream within 30s; the primary ACS was not replaced and the release was aborted" 2
   fi
 
   log "先更新 ACS 接力实例，正式 ACS 继续承载现有流量 ..." "Updating the ACS candidate first; the primary ACS continues serving traffic ..."
   "${DC[@]}" up --pull never -d --no-deps acs-candidate
   if ! acs_ha_wait_ready acs-candidate; then
     acs_ha_report_not_ready acs-candidate
-    die "ACS 接力实例 90s 内未就绪；正式 ACS 未替换，已中止发布" 2
+    die "ACS 接力实例 90s 内未就绪；正式 ACS 未替换，已中止发布" "The ACS candidate was not ready within 90s; the primary ACS was not replaced and the release was aborted" 2
   fi
   # nginx.conf 的 Docker DNS valid=10s。候选实例刚加入共享别名 `acs` 时，
   # 必须覆盖完整缓存周期后再停止正式实例，否则旧 worker 仍可能只持有旧 IP。
@@ -1365,7 +1379,7 @@ acs_ha_prepare_candidate() {
   sleep 12
   if ! acs_ha_wait_ready acs-candidate; then
     acs_ha_report_not_ready acs-candidate
-    die "DNS 刷新后 ACS 接力实例已不就绪；正式 ACS 未替换，已中止发布" 2
+    die "DNS 刷新后 ACS 接力实例已不就绪；正式 ACS 未替换，已中止发布" "The ACS candidate was not ready after the DNS refresh; the primary ACS was not replaced and the release was aborted" 2
   fi
   log "Nginx 已具备接力上游，允许替换正式 ACS" "Nginx has the failover upstream; primary ACS replacement is allowed"
 }
@@ -1380,19 +1394,19 @@ if [ "$ACS_HA_EXISTING" = 1 ]; then
   "${DC[@]}" up --pull never -d --no-deps acs
   if ! acs_ha_wait_ready acs; then
     acs_ha_report_not_ready acs
-    die "正式 ACS 90s 内未就绪；接力实例仍在服务，已中止其余业务更新" 2
+    die "正式 ACS 90s 内未就绪；接力实例仍在服务，已中止其余业务更新" "The primary ACS was not ready within 90s; the candidate remains in service and the remaining business update was aborted" 2
   fi
   log "正式 ACS 已就绪，等待 Nginx 动态 DNS 完成一轮刷新 ..." "Primary ACS is ready; waiting for one Nginx dynamic DNS refresh cycle ..."
   sleep 12
   if ! acs_ha_wait_ready acs || ! acs_ha_wait_ready acs-candidate; then
     acs_ha_report_not_ready acs
     acs_ha_report_not_ready acs-candidate
-    die "ACS 双实例在 DNS 刷新后未全部就绪，已中止其余业务更新" 2
+    die "ACS 双实例在 DNS 刷新后未全部就绪，已中止其余业务更新" "Both ACS instances were not ready after the DNS refresh; the remaining business update was aborted" 2
   fi
 
   stop_existing_worker
   if ! app_wait_ready; then
-    die "App ${APP_START_TIMEOUT}s 内未就绪；Worker/Web 尚未启动，请根据上方 App 日志排查数据库超时或资源不足" 4
+    die "App ${APP_START_TIMEOUT}s 内未就绪；Worker/Web 尚未启动，请根据上方 App 日志排查数据库超时或资源不足" "App was not ready within ${APP_START_TIMEOUT}s; Worker/Web were not started. Review the App logs above for database timeouts or insufficient resources" 4
   fi
   remaining_services=(worker)
   [ "$SKIP_WEB" = 1 ] || remaining_services+=(web)
@@ -1405,10 +1419,10 @@ else
   if ! acs_ha_wait_ready acs || ! acs_ha_wait_ready acs-candidate; then
     acs_ha_report_not_ready acs
     acs_ha_report_not_ready acs-candidate
-    die "首次安装 ACS 双实例未就绪，未启动 App/Worker/Web" 2
+    die "首次安装 ACS 双实例未就绪，未启动 App/Worker/Web" "The two ACS instances were not ready during fresh install; App/Worker/Web were not started" 2
   fi
   if ! app_wait_ready; then
-    die "App ${APP_START_TIMEOUT}s 内未就绪；Worker/Web 尚未启动，请根据上方 App 日志排查数据库超时或资源不足" 4
+    die "App ${APP_START_TIMEOUT}s 内未就绪；Worker/Web 尚未启动，请根据上方 App 日志排查数据库超时或资源不足" "App was not ready within ${APP_START_TIMEOUT}s; Worker/Web were not started. Review the App logs above for database timeouts or insufficient resources" 4
   fi
   remaining_services=(worker)
   [ "$SKIP_WEB" = 1 ] || remaining_services+=(web)
@@ -1432,11 +1446,11 @@ HEALTHCHECK_INTERVAL=5
 HEALTHCHECK_TIMEOUT="${OMC_HEALTHCHECK_TIMEOUT:-90}"
 HEALTHCHECK_FINAL_GRACE="${OMC_HEALTHCHECK_FINAL_GRACE:-0}"
 HEALTHCHECK_PROBE_TIMEOUT="${OMC_HEALTHCHECK_PROBE_TIMEOUT:-30}"
-case "$HEALTHCHECK_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_TIMEOUT 必须是正整数" 1 ;; esac
-case "$HEALTHCHECK_FINAL_GRACE" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_FINAL_GRACE 必须是非负整数" 1 ;; esac
-case "$HEALTHCHECK_PROBE_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_PROBE_TIMEOUT 必须是正整数" 1 ;; esac
-[ "$HEALTHCHECK_TIMEOUT" -gt 0 ] || die "OMC_HEALTHCHECK_TIMEOUT 必须大于 0" 1
-[ "$HEALTHCHECK_PROBE_TIMEOUT" -gt 0 ] || die "OMC_HEALTHCHECK_PROBE_TIMEOUT 必须大于 0" 1
+case "$HEALTHCHECK_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_TIMEOUT 必须是正整数" "OMC_HEALTHCHECK_TIMEOUT must be a positive integer" 1 ;; esac
+case "$HEALTHCHECK_FINAL_GRACE" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_FINAL_GRACE 必须是非负整数" "OMC_HEALTHCHECK_FINAL_GRACE must be a non-negative integer" 1 ;; esac
+case "$HEALTHCHECK_PROBE_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_PROBE_TIMEOUT 必须是正整数" "OMC_HEALTHCHECK_PROBE_TIMEOUT must be a positive integer" 1 ;; esac
+[ "$HEALTHCHECK_TIMEOUT" -gt 0 ] || die "OMC_HEALTHCHECK_TIMEOUT 必须大于 0" "OMC_HEALTHCHECK_TIMEOUT must be greater than 0" 1
+[ "$HEALTHCHECK_PROBE_TIMEOUT" -gt 0 ] || die "OMC_HEALTHCHECK_PROBE_TIMEOUT 必须大于 0" "OMC_HEALTHCHECK_PROBE_TIMEOUT must be greater than 0" 1
 log "动态等待业务容器启动（最长 ${HEALTHCHECK_TIMEOUT}s，单轮探针最多 ${HEALTHCHECK_PROBE_TIMEOUT}s，每 ${HEALTHCHECK_INTERVAL}s 重试；通过后立即继续）..." "Waiting for business containers (up to ${HEALTHCHECK_TIMEOUT}s, retry every ${HEALTHCHECK_INTERVAL}s) ..."
 HEALTHCHECK_LOG="$(mktemp)"
 HEALTH_OK=0
@@ -1455,7 +1469,7 @@ while :; do
     break
   elif [ "$?" -eq 124 ]; then
     HEALTHCHECK_PROBE_TIMEOUTS=$((HEALTHCHECK_PROBE_TIMEOUTS + 1))
-    log "健康检查单轮超过 ${HEALTHCHECK_PROBE_REMAINING}s，继续第 ${HEALTHCHECK_PROBE_TIMEOUTS} 次重试 ..."
+    log "健康检查单轮超过 ${HEALTHCHECK_PROBE_REMAINING}s，继续第 ${HEALTHCHECK_PROBE_TIMEOUTS} 次重试 ..." "Health check probe exceeded ${HEALTHCHECK_PROBE_REMAINING}s; continuing with retry ${HEALTHCHECK_PROBE_TIMEOUTS} ..."
   fi
   HEALTHCHECK_REMAINING=$(( HEALTHCHECK_DEADLINE - $(date +%s) ))
   [ "$HEALTHCHECK_REMAINING" -gt 0 ] || break
@@ -1467,7 +1481,7 @@ done
 # 初始化期间监控/字典/业务端点可能恰好跨过主窗口；再给一次短复核，避免把
 # “容器已稳定、端点刚完成启动”误报为安装失败。最终仍以完整 healthcheck 为准。
 if [ "$HEALTH_OK" -eq 0 ] && [ "$HEALTHCHECK_FINAL_GRACE" -gt 0 ]; then
-  log "主健康等待窗口结束，进行 ${HEALTHCHECK_FINAL_GRACE}s 最终复核 ..."
+  log "主健康等待窗口结束，进行 ${HEALTHCHECK_FINAL_GRACE}s 最终复核 ..." "The primary health-check window ended; running the ${HEALTHCHECK_FINAL_GRACE}s final probe ..."
   HEALTHCHECK_FINAL_PROBE_TIMEOUT="$HEALTHCHECK_FINAL_GRACE"
   [ "$HEALTHCHECK_FINAL_PROBE_TIMEOUT" -gt "$HEALTHCHECK_PROBE_TIMEOUT" ] &&
     HEALTHCHECK_FINAL_PROBE_TIMEOUT="$HEALTHCHECK_PROBE_TIMEOUT"
@@ -1484,12 +1498,12 @@ sep "9/9 健康检查" "9/9 Health check"
 if [ "$HEALTH_OK" -eq 1 ]; then
   cat "$HEALTHCHECK_LOG"
 else
-  warn "健康检查在 ${HEALTHCHECK_TIMEOUT}s 主窗口 + ${HEALTHCHECK_FINAL_GRACE}s 最终复核内未通过"
+  warn "健康检查在 ${HEALTHCHECK_TIMEOUT}s 主窗口 + ${HEALTHCHECK_FINAL_GRACE}s 最终复核内未通过" "Health checks did not pass within the ${HEALTHCHECK_TIMEOUT}s primary window plus the ${HEALTHCHECK_FINAL_GRACE}s final probe"
   [ "$HEALTHCHECK_PROBE_TIMEOUTS" -gt 0 ] &&
-    warn "其中 ${HEALTHCHECK_PROBE_TIMEOUTS} 轮健康检查因单轮超时结束；这不等同于业务容器异常"
-  log "健康检查失败摘要（仅显示失败项）："
-  if ! awk '/  \[FAIL\]/ || /^结果：/ || /^存在失败项/ { print; found=1 } END { exit(found ? 0 : 1) }' "$HEALTHCHECK_LOG"; then
-    log "  （健康检查未返回结构化失败项，可能在单轮超时中断）"
+    warn "其中 ${HEALTHCHECK_PROBE_TIMEOUTS} 轮健康检查因单轮超时结束；这不等同于业务容器异常" "${HEALTHCHECK_PROBE_TIMEOUTS} health-check rounds ended due to probe timeouts; this does not necessarily indicate a business-container failure"
+  log "健康检查失败摘要（仅显示失败项）：" "Health-check failure summary (failed items only):"
+  if ! awk '/  \[FAIL\]/ || /^结果：/ || /^Result:/ || /^存在失败项/ || /^Failures found/ { print; found=1 } END { exit(found ? 0 : 1) }' "$HEALTHCHECK_LOG"; then
+    log "  （健康检查未返回结构化失败项，可能在单轮超时中断）" "  (The health check returned no structured failure items; it may have been interrupted by a probe timeout)"
   fi
 
   unstable_services=()
@@ -1503,20 +1517,20 @@ else
     service_oom="$(docker inspect -f '{{.State.OOMKilled}}' "$service_cid" 2>/dev/null || echo unknown)"
     service_exit="$(docker inspect -f '{{.State.ExitCode}}' "$service_cid" 2>/dev/null || echo unknown)"
     service_restarts="$(docker inspect -f '{{.RestartCount}}' "$service_cid" 2>/dev/null || echo unknown)"
-    log "  $service：state=$service_state oom=$service_oom exit=$service_exit restarts=$service_restarts"
+    log "  $service：state=$service_state oom=$service_oom exit=$service_exit restarts=$service_restarts" "  $service: state=$service_state oom=$service_oom exit=$service_exit restarts=$service_restarts"
     if [ "$service_state" != running ] || [ "$service_oom" = true ] || [ "$service_exit" != 0 ] || [ "$service_restarts" != 0 ]; then
       unstable_services+=("$service")
     fi
   done
   if [ "${#unstable_services[@]}" -gt 0 ]; then
-    log "异常业务容器最近日志（每个最多 20 行）："
+    log "异常业务容器最近日志（每个最多 20 行）：" "Recent logs for unstable business containers (up to 20 lines each):"
     for service in "${unstable_services[@]}"; do
       service="${service%%:*}"
-      log "  $service："
+      log "  $service：" "  $service:"
       "${DC[@]}" logs --tail=20 "$service" 2>&1 || true
     done
   else
-    log "业务容器均稳定运行，跳过正常运行日志；请稍后重试 healthcheck.sh 获取完整状态。"
+    log "业务容器均稳定运行，跳过正常运行日志；请稍后重试 healthcheck.sh 获取完整状态。" "All business containers are stable; skipping normal logs. Retry healthcheck.sh later for the complete status."
   fi
 fi
 rm -f "$HEALTHCHECK_LOG"
@@ -1550,6 +1564,6 @@ log "  · PostgreSQL：omcgo / omcgo123" "  · PostgreSQL: omcgo / omcgo123"
 echo
 
 if [ "$HEALTH_OK" != 1 ]; then
-  die "健康检查未全通过（部分服务异常），请按上面 healthcheck 输出排查" 4
+  die "健康检查未全通过（部分服务异常），请按上面 healthcheck 输出排查" "Health checks did not all pass (some services are unhealthy); investigate using the healthcheck output above" 4
 fi
 log "全部 OK 🎉" "All checks passed."
