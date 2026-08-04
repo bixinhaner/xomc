@@ -8409,6 +8409,8 @@ const messages: Record<string, string> = {
   'dashboard.kpiPanel.empty.lastWeekHint': 'No historical aggregated data for the selected comparison period; please check with ops to confirm last week\'s batch job completed.',
   'dashboard.kpiPanel.empty.rollupHint': 'No hourly, daily, or weekly rollup data is available in this window. Check the aggregation jobs.',
   'dashboard.kpiPanel.progress.partial': 'In progress {received}/{expected} ({coverage}%)',
+  'dashboard.kpiPanel.progress.windowStart': 'Statistics start time: {time}',
+  'dashboard.kpiPanel.progress.windowEnd': 'Statistics end time: {time}',
   'dashboard.kpiPanel.progress.detail': 'Active task version {version}; effective from {from} to {to}; current revision {revision}.',
   'dashboard.kpiPanel.progress.versionSlice': 'Version slice {received}/{expected}: {status}',
   'dashboard.kpiPanel.progress.naturalPeriod': 'Natural period {received}/{expected}: {status}',
