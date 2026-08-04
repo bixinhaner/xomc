@@ -1326,6 +1326,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                     xDataFull={xDataFull}
                     series={lineSeries}
                     compareLabels={compareLabels}
+                    formatCompareLabel={(label) => `${t('pm.chart.tooltipPrevPeriod')} ${label}`}
                     unit={kpi.unit || undefined}
                     pmMetricValueFormat
                     height={220}

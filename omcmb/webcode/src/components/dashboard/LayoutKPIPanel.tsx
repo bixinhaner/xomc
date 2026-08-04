@@ -63,6 +63,37 @@ export interface LayoutKPIPanelProps {
   height?: number;
 }
 
+function isLocalMonday(datePart: string): boolean {
+  const parts = datePart.split('-').map((value) => Number.parseInt(value, 10));
+  if (parts.length !== 3 || parts.some((value) => Number.isNaN(value))) {
+    return false;
+  }
+  const [year, month, day] = parts;
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay() === 1;
+}
+
+function isNaturalWeeklyProgress(item: DashboardPeriodProgress): boolean {
+  const start = item.windowStart.match(/^(\d{4}-\d{2}-\d{2})T00:00:00/);
+  const end = item.windowEnd.match(/^(\d{4}-\d{2}-\d{2})T00:00:00/);
+  return Boolean(start && end && isLocalMonday(start[1]) && isLocalMonday(end[1]));
+}
+
+function selectActivePeriodProgress(
+  periodProgress: DashboardPeriodProgress[],
+  granularity: DashboardKPIGranularity,
+): DashboardPeriodProgress | undefined {
+  const candidates = periodProgress.filter((item) => item.granularity === granularity);
+  const prioritized = granularity === 'weekly'
+    ? candidates.filter(isNaturalWeeklyProgress)
+    : candidates;
+  return (prioritized.length > 0 ? prioritized : candidates)
+    .sort((left, right) => {
+      const startOrder = right.windowStart.localeCompare(left.windowStart);
+      if (startOrder !== 0) return startOrder;
+      return right.expectedSlots - left.expectedSlots;
+    })[0];
+}
+
 export function LayoutKPIPanel({
   technology,
   panel,
@@ -129,7 +160,7 @@ export function LayoutKPIPanel({
   const titleFallbackKey = selectedMetrics[0] ?? panel.metrics[0] ?? '';
   const titleFallback = titleFallbackKey ? resolveOne(titleFallbackKey).name : '';
 
-  const { series, weekXData, weekXDataFull } = useMemo(
+  const { series, weekXData, weekXDataFull, weekXDataEndFull } = useMemo(
     () => buildSeries(
       selectedMetrics,
       trendData,
@@ -146,10 +177,9 @@ export function LayoutKPIPanel({
 
   const chartXData = weekXData ?? [];
   const chartXDataFull = weekXDataFull ?? [];
+  const chartXDataEndFull = weekXDataEndFull ?? [];
   const activeProgress = useMemo(
-    () => periodProgress
-      .filter((item) => item.granularity === granularity)
-      .sort((left, right) => right.windowStart.localeCompare(left.windowStart))[0],
+    () => selectActivePeriodProgress(periodProgress, granularity),
     [granularity, periodProgress],
   );
   const progressLabel = useMemo(() => {
@@ -177,6 +207,12 @@ export function LayoutKPIPanel({
       }),
       detail: (
         <div>
+          <div>{t('dashboard.kpiPanel.progress.windowStart', {
+            time: activeProgress.windowStart,
+          })}</div>
+          <div>{t('dashboard.kpiPanel.progress.windowEnd', {
+            time: activeProgress.windowEnd,
+          })}</div>
           <div>{t('dashboard.kpiPanel.progress.detail', {
             version: activeProgress.taskVersionId,
             from: activeProgress.versionEffectiveFrom,
@@ -348,6 +384,13 @@ export function LayoutKPIPanel({
             title=""
             xData={chartXData}
             xDataFull={chartXDataFull}
+            xDataEndFull={chartXDataEndFull}
+            formatTooltipStart={(time) => intl.formatMessage({
+              id: 'dashboard.kpiPanel.progress.windowStart',
+            }, { time })}
+            formatTooltipEnd={(time) => intl.formatMessage({
+              id: 'dashboard.kpiPanel.progress.windowEnd',
+            }, { time })}
             series={series}
             height={height - 70}
             smooth

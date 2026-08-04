@@ -39,6 +39,10 @@ export interface LineChartProps {
   xData: string[];
   /** 完整时间戳数组（用于 tooltip 显示），格式：年-月-日 小时:分钟:秒 */
   xDataFull?: string[];
+  /** 每个 xDataFull 对应时间桶的结束时间；存在时 tooltip 显示开始/结束两行。 */
+  xDataEndFull?: string[];
+  formatTooltipStart?: (time: string) => string;
+  formatTooltipEnd?: (time: string) => string;
   series: LineSeries[];
   height?: number | string;
   areaFill?: boolean;
@@ -48,10 +52,11 @@ export interface LineChartProps {
   showLegend?: boolean;
   /**
    * 周期对比 tooltip 补充行：与 xData 同长，每项为「上一周期真实起~止」文案。
-   * 存在且当前桶项非空时，在 tooltip 当前时间行下方补一行「上一周期 …」；缺项不显示。
+   * 存在且当前桶项非空时，在 tooltip 当前时间行下方补一行；缺项不显示。
    * 不传 = 原行为不变（向后兼容）。
    */
   compareLabels?: (string | undefined)[];
+  formatCompareLabel?: (label: string) => string;
   /**
    * 阈值线配置（如PRB利用率告警线）
    */
@@ -79,6 +84,9 @@ export interface BuildLineChartOptionParams {
   title?: string;
   xData: string[];
   xDataFull?: string[];
+  xDataEndFull?: string[];
+  formatTooltipStart?: (time: string) => string;
+  formatTooltipEnd?: (time: string) => string;
   series: LineSeries[];
   areaFill?: boolean;
   smooth?: boolean;
@@ -86,6 +94,7 @@ export interface BuildLineChartOptionParams {
   unit?: string;
   showLegend?: boolean;
   compareLabels?: (string | undefined)[];
+  formatCompareLabel?: (label: string) => string;
   thresholdLines?: ThresholdLine[];
   integerValues?: boolean;
   pmMetricValueFormat?: boolean;
@@ -103,6 +112,9 @@ export function buildLineChartOption({
   title,
   xData,
   xDataFull,
+  xDataEndFull,
+  formatTooltipStart,
+  formatTooltipEnd,
   series,
   areaFill = false,
   smooth = true,
@@ -110,6 +122,7 @@ export function buildLineChartOption({
   unit,
   showLegend = true,
   compareLabels,
+  formatCompareLabel,
   thresholdLines,
   integerValues = false,
   pmMetricValueFormat = false,
@@ -222,19 +235,25 @@ export function buildLineChartOption({
           return `${item.marker} ${item.seriesName}: <strong>${displayValue}</strong>`;
         });
 
-        // 周期对比：当前时间行下方补一行「上一周期 …」（缺项不显示）。
+        // 周期对比：当前时间行下方补一行（缺项不显示），业务前缀由调用方提供。
         const idx = items[0].dataIndex;
         const compareLabel = compareLabels?.[idx];
         const headerExtra = compareLabel
-          // eslint-disable-next-line no-restricted-syntax
-          ? `<div style="font-size: 11px; color: #8c8c8c; margin-bottom: 4px;">上一周期 ${compareLabel}</div>`
+          ? `<div style="font-size: 11px; color: #8c8c8c; margin-bottom: 4px;">${formatCompareLabel?.(compareLabel) ?? compareLabel}</div>`
           : '';
 
-        // 使用 xDataFull 显示完整时间戳，否则使用 axisValue
+        // 使用 xDataFull 显示完整时间戳，否则使用 axisValue。
         const displayTime = xDataFull?.[idx] ?? items[0].axisValue;
+        const displayEndTime = xDataEndFull?.[idx];
+        const timeHeader = displayEndTime && formatTooltipStart && formatTooltipEnd
+          ? `<div style="font-weight: 600; margin-bottom: 4px;">
+              <div>${formatTooltipStart(displayTime)}</div>
+              <div>${formatTooltipEnd(displayEndTime)}</div>
+            </div>`
+          : `<div style="font-weight: 600; margin-bottom: 4px;">${displayTime}</div>`;
 
         return `<div style="max-height: 200px; overflow-y: auto;">
-          <div style="font-weight: 600; margin-bottom: 4px;">${displayTime}</div>
+          ${timeHeader}
           ${headerExtra}
           ${lines.join('<br/>')}
         </div>`;
@@ -392,6 +411,9 @@ const LineChart: React.FC<LineChartProps> = ({
   title,
   xData,
   xDataFull,
+  xDataEndFull,
+  formatTooltipStart,
+  formatTooltipEnd,
   series,
   height = 280,
   areaFill = false,
@@ -400,6 +422,7 @@ const LineChart: React.FC<LineChartProps> = ({
   unit,
   showLegend = true,
   compareLabels,
+  formatCompareLabel,
   thresholdLines,
   integerValues = false,
   pmMetricValueFormat = false,
@@ -415,6 +438,9 @@ const LineChart: React.FC<LineChartProps> = ({
         title,
         xData,
         xDataFull,
+        xDataEndFull,
+        formatTooltipStart,
+        formatTooltipEnd,
         series,
         areaFill,
         smooth,
@@ -422,6 +448,7 @@ const LineChart: React.FC<LineChartProps> = ({
         unit,
         showLegend,
         compareLabels,
+        formatCompareLabel,
         thresholdLines,
         integerValues,
         pmMetricValueFormat,
@@ -434,6 +461,9 @@ const LineChart: React.FC<LineChartProps> = ({
       title,
       xData,
       xDataFull,
+      xDataEndFull,
+      formatTooltipStart,
+      formatTooltipEnd,
       series,
       areaFill,
       smooth,
@@ -441,6 +471,7 @@ const LineChart: React.FC<LineChartProps> = ({
       unit,
       showLegend,
       compareLabels,
+      formatCompareLabel,
       thresholdLines,
       integerValues,
       pmMetricValueFormat,

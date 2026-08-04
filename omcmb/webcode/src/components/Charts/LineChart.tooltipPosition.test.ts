@@ -104,4 +104,22 @@ describe('buildLineChartOption PM metric value formatting', () => {
 
     expect(yAxis.axisLabel?.formatter).toBeUndefined();
   });
+
+  it('传入时间桶结束时间时，tooltip 同时展示统计开始和结束时间', () => {
+    const option = buildLineChartOption({
+      ...baseParams,
+      xDataFull: ['2026-08-03T00:00:00Z'],
+      xDataEndFull: ['2026-08-10T00:00:00Z'],
+      formatTooltipStart: (time) => `Statistics start time: ${time}`,
+      formatTooltipEnd: (time) => `Statistics end time: ${time}`,
+    });
+    const formatter = (option.tooltip as {
+      formatter: (params: Array<{ marker: string; seriesName: string; value: unknown; axisValue: string; dataIndex: number; seriesIndex: number }>) => string;
+    }).formatter;
+
+    const html = formatter([{ marker: '', seriesName: 'KPI', value: 12.34, axisValue: '08/03', dataIndex: 0, seriesIndex: 0 }]);
+
+    expect(html).toContain('Statistics start time: 2026-08-03T00:00:00Z');
+    expect(html).toContain('Statistics end time: 2026-08-10T00:00:00Z');
+  });
 });

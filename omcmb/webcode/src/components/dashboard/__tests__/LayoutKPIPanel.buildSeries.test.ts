@@ -164,11 +164,15 @@ const weekTrendData: MultiTrendComparisonData = {
 
 describe('buildSeries — rolling week 模式', () => {
   it('固定七个完整日加今天日期轴，今天没有 daily 数据时保留空槽', () => {
-    const { series, weekXData, weekXDataFull } = buildSeries(
+    const { series, weekXData, weekXDataFull, weekXDataEndFull } = buildSeries(
       ['K900010015'], weekTrendData, X_DATA, '周', 'unused', fakeResolveMeta,
       undefined, 'last_week', WEEK_DATES,
     );
     expect(weekXDataFull).toEqual(WEEK_DATES);
+    expect(weekXDataEndFull).toEqual([
+      '2026-07-07', '2026-07-08', '2026-07-09', '2026-07-10',
+      '2026-07-11', '2026-07-12', '2026-07-13', '2026-07-14',
+    ]);
     expect(weekXData).toEqual(['07/06', '07/07', '07/08', '07/09', '07/10', '07/11', '07/12', '07/13']);
     expect(series).toHaveLength(1);
     expect(series[0].name).toBe('name:K900010015');
@@ -263,6 +267,8 @@ describe('buildSeries — direct rollup windows', () => {
 
     expect(direct.series[0].data[12]).toBe(61);
     expect(direct.series[0].data[17]).toBe(66);
+    expect(direct.weekXDataEndFull?.[12]).toBe('2026-07-28T05');
+    expect(direct.weekXDataEndFull?.[17]).toBe('2026-07-28T10');
   });
 
   it('小时、天、周都只展示后端对应粒度返回的当前序列', () => {
@@ -282,6 +288,7 @@ describe('buildSeries — direct rollup windows', () => {
     expect(direct.series).toHaveLength(1);
     expect(direct.series[0].data).toEqual([3.23, null]);
     expect(direct.weekXDataFull).toEqual(bucketKeys);
+    expect(direct.weekXDataEndFull).toEqual(['2026-07-13', '2026-07-20']);
     expect(shouldShowKPIChartLegend('weekly', 1)).toBe(false);
   });
 });
