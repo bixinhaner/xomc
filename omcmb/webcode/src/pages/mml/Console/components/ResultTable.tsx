@@ -232,9 +232,9 @@ export default function ResultTable({
       render: (_v, r) => {
         const val = r.cells[c.path];
         if (r.status === 'failed') {
-          // 逐 PATH：失败行仍含成功 path 的读回值与失败 path 的「✗ 失败」标记，逐格呈现；
+          // 逐 PATH：失败行仍含成功 path 的读回值与失败 path 的失败占位符，逐格呈现；
           // 整体下发失败（无单格值）回退「-」。
-          if (val === PATH_FAILED_CELL) return <Text type="danger">{val}</Text>;
+          if (val === PATH_FAILED_CELL) return <Text type="danger">{t('mml.consoleV2.result.pathFailed')}</Text>;
           return val ? <Text>{val}</Text> : <Text type="secondary">-</Text>;
         }
         // 未核实（只写/重启生效）：无读回值，灰显占位

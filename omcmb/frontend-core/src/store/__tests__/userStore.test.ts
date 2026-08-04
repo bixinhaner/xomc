@@ -88,12 +88,14 @@ describe('userStore', () => {
   })
 
   it('logout clears tabs for an explicit sign-out', () => {
-    useTabStore.getState().openTab({
-      key: 'device-list',
-      label: 'nav.device.list',
-      path: '/device/list',
+    useTabStore.getState().openTabForDirectEntry({
+      key: '/system/kpi-config',
+      label: '首页 KPI 配置',
+      path: '/system/kpi-config',
       closable: true,
     })
+
+    expect(useTabStore.getState().tabs.map((tab) => tab.key)).toEqual(['/system/kpi-config'])
 
     useUserStore.getState().logout()
 

@@ -825,7 +825,7 @@ export default function TaskRecord() {
         );
       },
     },
-    { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
+    { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', width: 240, ellipsis: true },
     {
       key: 'scriptName',
       title: t('mml.scriptName'),
@@ -986,7 +986,7 @@ export default function TaskRecord() {
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
         onRefresh={() => void refetch()}
         hideToolbar
-        scroll={{ x: 1380 }}
+        scroll={{ x: 1640 }}
       />
 
       <Modal

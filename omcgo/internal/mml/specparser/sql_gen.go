@@ -164,11 +164,12 @@ func writeSectionCommands(b *strings.Builder, rep *DiffReport) {
 
 func writeCommandValueRow(b *strings.Builder, c *SpecCommand) {
 	zhName := opZhPrefix(c.OperationType) + " " + c.CommandZhName
-	enName := opEnPrefix(c.OperationType) + " " + c.CommandZhName
+	enLogicalName := commandEnglishLogicalName(c)
+	enName := opEnPrefix(c.OperationType) + " " + enLogicalName
 	// issue #67 §5：i18n 键统一长码 zh-CN/en-US（与 seed/000039、pickI18n 对齐），
 	// 不再写短键 zh/en，避免 catalog 再导入时回灌短键。
 	cmdNameI18n, _ := json.Marshal(map[string]string{"en-US": enName, "zh-CN": zhName})
-	logicalI18n, _ := json.Marshal(map[string]string{"en-US": c.CommandZhName, "zh-CN": c.CommandZhName})
+	logicalI18n, _ := json.Marshal(map[string]string{"en-US": enLogicalName, "zh-CN": c.CommandZhName})
 
 	targetPathsJSON, _ := json.Marshal(c.TargetPaths)
 	targetObj := "NULL"
@@ -177,14 +178,14 @@ func writeCommandValueRow(b *strings.Builder, c *SpecCommand) {
 	}
 
 	fmt.Fprintf(b, "    (%s, %s, %s, %s, %s, %s, %s::jsonb, %s,\n",
-		sqlStr(zhName),                                                   // command_name
-		sqlStr(c.CommandCode),                                            // command_code
-		sqlStr(chapterCategory(c.Chapter)),                               // category
-		sqlStr(zhName),                                                   // description
-		sqlStr(c.RPCMethod),                                              // rpc_method
-		sqlStr(c.OperationType),                                          // operation_type
-		sqlStr(string(targetPathsJSON)),                                  // target_paths::jsonb
-		targetObj,                                                        // target_object
+		sqlStr(zhName),                     // command_name
+		sqlStr(c.CommandCode),              // command_code
+		sqlStr(chapterCategory(c.Chapter)), // category
+		sqlStr(zhName),                     // description
+		sqlStr(c.RPCMethod),                // rpc_method
+		sqlStr(c.OperationType),            // operation_type
+		sqlStr(string(targetPathsJSON)),    // target_paths::jsonb
+		targetObj,                          // target_object
 	)
 	fmt.Fprintf(b, "     (SELECT id FROM chapter_groups WHERE group_code = %s), %s::jsonb,\n",
 		sqlStr("chapter:"+c.Chapter),
@@ -333,6 +334,74 @@ func opEnPrefix(op string) string {
 		return "Remove"
 	}
 	return op
+}
+
+func commandEnglishLogicalName(c *SpecCommand) string {
+	if c == nil {
+		return "Command"
+	}
+	if name := strings.TrimSpace(c.CommandEnName); name != "" {
+		return name
+	}
+	if name := logicalCodeToEnglishName(c.LogicalCode); name != "" {
+		return name
+	}
+	if name := logicalCodeToEnglishName(deriveLogicalCodeFromCommandCode(c.CommandCode, c.OperationType)); name != "" {
+		return name
+	}
+	return "Command"
+}
+
+func logicalCodeToEnglishName(logicalCode string) string {
+	logicalCode = strings.Trim(logicalCode, "_ ")
+	if logicalCode == "" {
+		return ""
+	}
+	if logicalCode == "I_PSEC" {
+		return "IPsec"
+	}
+	parts := strings.Split(logicalCode, "_")
+	words := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		words = append(words, englishTokenTitle(part))
+	}
+	return strings.Join(words, " ")
+}
+
+func englishTokenTitle(token string) string {
+	switch token {
+	case "ASSOC":
+		return "Association"
+	case "CONFIG":
+		return "Configuration"
+	case "CONN":
+		return "Connection"
+	case "CTRL":
+		return "Control"
+	case "FREQ":
+		return "Frequency"
+	case "INFO":
+		return "Information"
+	case "MGMT":
+		return "Management"
+	case "PARAM":
+		return "Parameter"
+	case "SW":
+		return "Software"
+	case "SYNC":
+		return "Synchronization"
+	case "BTS", "DNS", "EPC", "EUTRA", "FAP", "GERAN", "GPS", "GSM", "HALOD",
+		"IP", "IRAT", "LTE", "LMT", "MAC", "MME", "MR", "NR", "NTP", "PHY",
+		"PLMN", "PM", "RAN", "S1U", "SCTP", "SON", "TR069", "UTRA", "VRRP", "X2":
+		return token
+	case "IPSEC", "PSEC":
+		return "IPsec"
+	}
+	lower := strings.ToLower(token)
+	return strings.ToUpper(lower[:1]) + lower[1:]
 }
 
 // chapterCategory 把 chapter 转为 mml_commands.category 数字字符串。

@@ -30,9 +30,27 @@ export const OP_LABELS: Record<string, string> = {
   UPG: '升级',
 };
 
+export const OP_LABEL_I18N_KEYS: Record<string, string> = {
+  LST: 'mml.console.taskName.opVerb.LST',
+  MOD: 'mml.console.taskName.opVerb.MOD',
+  ADD: 'mml.console.taskName.opVerb.ADD',
+  RMV: 'mml.console.taskName.opVerb.RMV',
+  DSP: 'mml.console.taskName.opVerb.DSP',
+  ACT: 'mml.console.taskName.opVerb.ACT',
+  DEA: 'mml.console.taskName.opVerb.DEA',
+  RST: 'mml.console.taskName.opVerb.RST',
+  CLR: 'mml.console.taskName.opVerb.CLR',
+  UPG: 'mml.console.taskName.opVerb.UPG',
+};
+
 export function opLabel(op: MMLOperationType | string | undefined): string {
   if (!op) return '-';
   return OP_LABELS[op] ?? op;
+}
+
+export function opLabelI18nKey(op: MMLOperationType | string | undefined): string | undefined {
+  if (!op) return undefined;
+  return OP_LABEL_I18N_KEYS[op];
 }
 
 export function opColor(op: MMLOperationType | string | undefined): string {

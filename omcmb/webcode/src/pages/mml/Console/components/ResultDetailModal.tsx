@@ -3,12 +3,33 @@ import { DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
 import type { ExecMeta, ExecStatus, PathTask, ResultColumn, ResultRow, VerifyItem } from '../types';
-import { STATUS_META, UNVERIFIED_REASON_TEXT, opColor, opLabel } from '../constants';
+import { STATUS_META, UNVERIFIED_REASON_TEXT, opColor, opLabelI18nKey } from '../constants';
 import { exportOne, saveBlob } from '../download';
 import { useExportTaskDeviceCSV } from '@core/hooks/api/useMmlConsole';
 import { usePermission } from '@core/hooks/usePermission';
+import {
+  DISPATCH_FAILED_FALLBACK,
+  PARTIAL_PATH_FAILED_FALLBACK,
+  PATH_TASK_FAILED_FALLBACK,
+  READBACK_FAILED_FALLBACK,
+} from '../adapters';
 
 const { Text } = Typography;
+
+function localizedFallback(value: string | undefined, t: (id: string) => string): string | undefined {
+  switch (value) {
+    case PATH_TASK_FAILED_FALLBACK:
+      return t('mml.consoleV2.result.pathFailed');
+    case PARTIAL_PATH_FAILED_FALLBACK:
+      return t('mml.consoleV2.result.partialPathFailed');
+    case DISPATCH_FAILED_FALLBACK:
+      return t('mml.consoleV2.detail.dispatchFailedFallback');
+    case READBACK_FAILED_FALLBACK:
+      return t('mml.consoleV2.detail.readbackFailedFallback');
+    default:
+      return value;
+  }
+}
 
 interface ResultDetailModalProps {
   open: boolean;
@@ -68,6 +89,7 @@ export default function ResultDetailModal({
 
   const read = execMeta?.read ?? true;
   const status = row?.status;
+  const opText = execMeta ? t(opLabelI18nKey(execMeta.operationType) ?? '') : '';
 
   const parsedParams: ParsedParam[] = row
     ? columns.map((c) => ({
@@ -212,18 +234,20 @@ export default function ResultDetailModal({
       dataIndex: 'value',
       key: 'value',
       width: 220,
-      render: (v: string) =>
-        v ? (
+      render: (v: string) => {
+        const text = localizedFallback(v, t);
+        return text ? (
           <Text
-            copyable={{ text: v, tooltips: [t('mml.consoleV2.detail.copy'), t('mml.consoleV2.detail.copied')] }}
-            ellipsis={{ tooltip: v }}
+            copyable={{ text, tooltips: [t('mml.consoleV2.detail.copy'), t('mml.consoleV2.detail.copied')] }}
+            ellipsis={{ tooltip: text }}
             style={{ fontSize: 11, maxWidth: 180 }}
           >
-            {v}
+            {text}
           </Text>
         ) : (
           <Text type="secondary">-</Text>
-        ),
+        );
+      },
     },
   ];
 
@@ -279,7 +303,7 @@ export default function ResultDetailModal({
                           Tag 只显示操作类型码（如 LST），避免「LST 查询 查询 设备基本信息」叠词 */}
                       <Tag color={opColor(execMeta.operationType)} style={{ marginInlineEnd: 0 }}>
                         {execMeta.operationType}
-                        {!(execMeta.commandName ?? execMeta.label)?.startsWith(opLabel(execMeta.operationType)) && ` ${opLabel(execMeta.operationType)}`}
+                        {opText && !(execMeta.commandName ?? execMeta.label)?.startsWith(opText) && ` ${opText}`}
                       </Tag>
                       <Text strong>{execMeta.commandName ?? execMeta.label}</Text>
                       {columns.length > 0 && (
@@ -341,7 +365,12 @@ export default function ResultDetailModal({
 
           {/* 状态提示：失败原因 / 未生效 / 未核实 */}
           {status === 'failed' && row.faultCode && (
-            <Alert type="error" showIcon title={t('mml.consoleV2.detail.alert.dispatchFailed')} description={row.faultCode} />
+            <Alert
+              type="error"
+              showIcon
+              title={t('mml.consoleV2.detail.alert.dispatchFailed')}
+              description={localizedFallback(row.faultCode, t)}
+            />
           )}
           {status === 'mismatch' && (
             <Alert
