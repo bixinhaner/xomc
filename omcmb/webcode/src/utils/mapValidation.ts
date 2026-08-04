@@ -8,6 +8,23 @@
 
 import type { MapMetadata } from '@/components/GISMap/useMapConfig';
 
+export type CenterPointSource = 'metadata' | 'device_data' | 'env_config' | 'default';
+
+export interface MapInitialView {
+  center: [number, number];
+  zoom: number;
+  source: CenterPointSource;
+}
+
+interface MapInitialViewOptions {
+  metadata: MapMetadata | null;
+  metadataAvailable: boolean;
+  devices: DeviceCoordinate[];
+  envCenter: { center: [number, number]; zoom: number } | null;
+  defaultCenter: [number, number];
+  defaultZoom: number;
+}
+
 /**
  * 验证地图元数据是否有效
  *
@@ -216,10 +233,59 @@ interface ValidDeviceCoordinate {
   latitude: number;
 }
 
+/**
+ * 按统一优先级解析地图初始视图。
+ *
+ * metadataAvailable 必须由调用方根据离线元数据和瓦片健康状态确认，
+ * 避免把请求失败时的兼容默认值误认为有效离线地图中心点。
+ */
+export function resolveMapInitialView(options: MapInitialViewOptions): MapInitialView {
+  const {
+    metadata,
+    metadataAvailable,
+    devices,
+    envCenter,
+    defaultCenter,
+    defaultZoom,
+  } = options;
+
+  if (metadataAvailable && isValidMapMetadata(metadata)) {
+    return {
+      center: [metadata.center.lon, metadata.center.lat],
+      zoom: metadata.center.zoom,
+      source: 'metadata',
+    };
+  }
+
+  const deviceView = calculateCenterFromDevices(devices);
+  if (deviceView.hasDevices) {
+    return {
+      center: deviceView.center,
+      zoom: deviceView.zoom,
+      source: 'device_data',
+    };
+  }
+
+  if (envCenter) {
+    return {
+      center: envCenter.center,
+      zoom: envCenter.zoom,
+      source: 'env_config',
+    };
+  }
+
+  return {
+    center: defaultCenter,
+    zoom: defaultZoom,
+    source: 'default',
+  };
+}
+
 export function calculateCenterFromDevices(devices: DeviceCoordinate[]): {
   center: [number, number];
   zoom: number;
   bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number };
+  hasDevices: boolean;
 } {
   const isValidCoordinate = (device: DeviceCoordinate): device is ValidDeviceCoordinate =>
     Number.isFinite(device.longitude) && Number.isFinite(device.latitude);
@@ -232,7 +298,8 @@ export function calculateCenterFromDevices(devices: DeviceCoordinate[]): {
     return {
       center: [0, 20],
       zoom: 2,
-      bounds: { minLng: -180, maxLng: 180, minLat: -90, maxLat: 90 }
+      bounds: { minLng: -180, maxLng: 180, minLat: -90, maxLat: 90 },
+      hasDevices: false,
     };
   }
 
@@ -274,7 +341,8 @@ export function calculateCenterFromDevices(devices: DeviceCoordinate[]): {
   return {
     center: [centerLng, centerLat],
     zoom,
-    bounds: { minLng, maxLng, minLat, maxLat }
+    bounds: { minLng, maxLng, minLat, maxLat },
+    hasDevices: true,
   };
 }
 

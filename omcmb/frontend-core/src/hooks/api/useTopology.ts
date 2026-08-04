@@ -239,7 +239,7 @@ export function useMapDevicesGeo(params: MapFilterParams) {
     queryKey: ['topology', 'map', 'geo', params],
     queryFn: ({ signal }) =>
       useMock
-        ? Promise.resolve({ items: [], total: 0 }) // Mock 实现
+        ? Promise.resolve({ items: [], total: 0, hasMore: false, complete: true, coordinateCount: 0 }) // Mock 实现
         : topologyApi.getDevicesGeo(params, signal),
     staleTime: 5 * 60 * 1000,
     enabled: params.enabled !== false,

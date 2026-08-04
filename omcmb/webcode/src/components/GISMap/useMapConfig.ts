@@ -5,23 +5,26 @@
  * 功能说明：
  * 1. 从服务端加载 Maperitive 生成的 tiles.json (TileJSON 格式)
  * 2. 自动转换为内部 MapMetadata 格式
- * 3. 异常场景自动降级到 DEFAULT_METADATA
+ * 3. 异常场景返回无元数据状态，由调用方继续走设备/环境变量兜底
  * 4. 全局缓存避免重复请求（React StrictMode 双重渲染）
  *
  * 异常场景处理：
- * - tiles.json 不存在（404）→ 降级到默认配置
- * - tiles.json 格式错误 → 降级到默认配置
- * - 网络请求失败 → 降级到默认配置
- * - Nginx 未配置 tiles 目录 → 降级到默认配置
+ * - tiles.json 不存在（404）→ 返回无元数据状态
+ * - tiles.json 格式错误 → 返回无元数据状态
+ * - 网络请求失败 → 返回无元数据状态
+ * - Nginx 未配置 tiles 目录 → 返回无元数据状态
  */
 
 import { useState, useEffect } from 'react';
+import { checkTileAvailability, isValidMapMetadata } from '@/utils/mapValidation';
 
 // 全局缓存状态，避免 React StrictMode 双重渲染导致重复请求
 let globalMetadataCache: MapMetadata | null = null;
 let globalFetchPromise: Promise<void> | null = null;
 let globalLastFetchFailed = false;
 let globalLastError: string | null = null;
+let globalTilesAvailable: boolean | null = null;
+let globalTileCheckPromise: Promise<boolean> | null = null;
 // 失败时间戳：用于在短时间内复用上次的错误结果，避免每次组件挂载都重新等满超时
 let globalLastFailedAt: number | null = null;
 
@@ -91,7 +94,10 @@ export interface MapMetadata {
 }
 
 /**
- * 默认元数据（兜底方案）
+ * 兼容保留的默认元数据。
+ *
+ * 中心点决策不再使用它作为失败兜底，避免离线地图不可用时误跳到某个
+ * 历史部署区域。实际失败状态由 metadata=null 表示。
  *
  * 使用场景：
  * 1. tiles.json 文件不存在（404）
@@ -100,16 +106,13 @@ export interface MapMetadata {
  * 4. 服务端未配置 tiles 目录
  */
 export const DEFAULT_METADATA: MapMetadata = {
-  name: 'Zambia Offline Map',
-  region: 'Zambia',
-  // 赞比亚中心点（所有设备经纬度平均值）
-  center: { lon: 28.221, lat: -14.607, zoom: 6 },
-  // 赞比亚区域边界
-  bounds: { minLon: 22.0, maxLon: 34.0, minLat: -18.0, maxLat: -8.0 },
-  // 常用缩放范围
-  zoom: { min: 6, max: 15, default: 6 },
+  name: 'No Offline Map Metadata',
+  region: 'default',
+  center: { lon: 104.0, lat: 35.0, zoom: 4 },
+  bounds: { minLon: -180, maxLon: 180, minLat: -85, maxLat: 85 },
+  zoom: { min: 1, max: 18, default: 4 },
   attribution: '© OpenStreetMap contributors',
-  description: '赞比亚区域离线地图，包含 6-15 级瓦片',
+  description: 'Offline map metadata unavailable',
 };
 
 /**
@@ -201,13 +204,13 @@ export type LoadStatus =
 export function useMapConfig() {
   // 三种初始情形：
   // a) 命中成功缓存 → 立即返回缓存的 metadata，不 loading
-  // b) 处在失败冷却窗 → 立即返回 DEFAULT_METADATA + error 信息，不 loading（避免再转 2.5s 圈）
+  // b) 处在失败冷却窗 → 立即返回无元数据状态，不 loading（避免再转 2.5s 圈）
   // c) 首次或冷却已过期 → metadata=null + loading=true，等 fetch
   const inCooldown = isInFailureCooldown();
 
   const [metadata, setMetadata] = useState<MapMetadata | null>(() => {
     if (globalMetadataCache) return globalMetadataCache;
-    if (inCooldown) return DEFAULT_METADATA;
+    if (inCooldown) return null;
     return null;
   });
   const [loading, setLoading] = useState(() => !globalMetadataCache && !inCooldown);
@@ -222,6 +225,7 @@ export function useMapConfig() {
     return 'idle';
   });
   const [isUsingDefault, setIsUsingDefault] = useState(() => inCooldown);
+  const [tilesAvailable, setTilesAvailable] = useState<boolean | null>(() => globalTilesAvailable);
 
   useEffect(() => {
     // a) 命中成功缓存 / b) 处在失败冷却窗：初始化器已置好所有状态，无需任何 setState
@@ -239,7 +243,7 @@ export function useMapConfig() {
           setIsUsingDefault(false);
           setError(null);
         } else if (globalLastFetchFailed) {
-          setMetadata(DEFAULT_METADATA);
+          setMetadata(null);
           setLoading(false);
           setStatus('error');
           setIsUsingDefault(true);
@@ -260,6 +264,8 @@ export function useMapConfig() {
       globalLastFetchFailed = false;
       globalLastError = null;
       globalLastFailedAt = null;
+      globalTilesAvailable = null;
+      setTilesAvailable(null);
 
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
       let timedOut = false;
@@ -287,7 +293,7 @@ export function useMapConfig() {
           } catch {
             const parseError = 'json_parse_error:invalid_tiles_metadata_json';
             console.warn('[MapConfig] ⚠', parseError);
-            setMetadata(DEFAULT_METADATA);
+            setMetadata(null);
             setStatus('error');
             setIsUsingDefault(true);
             setError(parseError);
@@ -306,7 +312,7 @@ export function useMapConfig() {
             setError(null);
           } else {
             // TileJSON 格式不完整，使用默认值
-            setMetadata(DEFAULT_METADATA);
+            setMetadata(null);
             setStatus('error');
             setIsUsingDefault(true);
             const parseError = 'json_parse_error:tilejson_format_incomplete';
@@ -317,7 +323,7 @@ export function useMapConfig() {
           }
         } else {
           // HTTP 错误（404/500 等），使用默认值
-          setMetadata(DEFAULT_METADATA);
+          setMetadata(null);
           setStatus('error');
           setIsUsingDefault(true);
           const httpError = `http_${response.status}:${response.statusText || 'unknown'}`;
@@ -345,7 +351,7 @@ export function useMapConfig() {
           console.warn('[MapConfig] ⚠', classifiedError);
         }
 
-        setMetadata(DEFAULT_METADATA);
+        setMetadata(null);
         setStatus('error');
         setIsUsingDefault(true);
         setError(classifiedError);
@@ -370,11 +376,38 @@ export function useMapConfig() {
     });
   }, []);
 
+  useEffect(() => {
+    if (loading) return;
+
+    if (!isValidMapMetadata(metadata)) {
+      globalTilesAvailable = false;
+      setTilesAvailable(false);
+      return;
+    }
+
+    if (globalTilesAvailable !== null) {
+      setTilesAvailable(globalTilesAvailable);
+      return;
+    }
+
+    if (!globalTileCheckPromise) {
+      globalTileCheckPromise = checkTileAvailability(metadata).then((available) => {
+        globalTilesAvailable = available;
+        return available;
+      }).finally(() => {
+        globalTileCheckPromise = null;
+      });
+    }
+
+    globalTileCheckPromise.then(setTilesAvailable);
+  }, [metadata, loading]);
+
   return {
     metadata,
     loading,
     error,
     status,
     isUsingDefault,
+    tilesAvailable,
   };
 }

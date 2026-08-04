@@ -11,6 +11,7 @@ import type {
   DeviceStatus,
   DeviceType,
   RawDeviceStatus,
+  MapGeoResponse,
   BackendDeviceGeo,
   BackendDeviceCluster,
   BackendMapStats,
@@ -454,8 +455,14 @@ export const topologyApi = {
   async getDevicesGeo(
     params?: MapFilterParams,
     signal?: AbortSignal,
-  ): Promise<{ items: DeviceGeo[]; total: number }> {
-    const { data } = await http.get<{ items: BackendDeviceGeo[]; total: number }>('/devices/geo', {
+  ): Promise<MapGeoResponse> {
+    const { data } = await http.get<{
+      items: BackendDeviceGeo[];
+      total: number;
+      has_more?: boolean;
+      complete?: boolean;
+      coordinate_count?: number;
+    }>('/devices/geo', {
       params: {
         group_ids: params?.groupIds?.join(','),
         status: params?.status?.join(','),
@@ -471,6 +478,9 @@ export const topologyApi = {
     return {
       items: (data.items || []).map(mapBackendDeviceGeo),
       total: data.total,
+      hasMore: data.has_more ?? false,
+      complete: data.complete ?? false,
+      coordinateCount: data.coordinate_count ?? data.total,
     };
   },
 

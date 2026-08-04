@@ -684,6 +684,9 @@ func (h *Handler) ListGeo(c *gin.Context) {
 	// Parse pagination
 	filter.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
 	filter.PageSize, _ = strconv.Atoi(c.DefaultQuery("page_size", "1000"))
+	if filter.Page <= 0 {
+		filter.Page = 1
+	}
 	if filter.PageSize <= 0 {
 		filter.PageSize = 1000
 	}
@@ -711,10 +714,14 @@ func (h *Handler) ListGeo(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	hasMore := int64(filter.Page*filter.PageSize) < total
 
 	response.OK(c, gin.H{
-		"items": devices,
-		"total": total,
+		"items":            devices,
+		"total":            total,
+		"has_more":         hasMore,
+		"complete":         !hasMore,
+		"coordinate_count": total,
 	})
 }
 

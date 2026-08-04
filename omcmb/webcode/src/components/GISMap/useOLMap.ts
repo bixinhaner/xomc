@@ -52,7 +52,6 @@ import { useMapConfig, type MapMetadata } from './useMapConfig';
 import {
   isValidMapMetadata,
   buildSafeConfig,
-  checkTileAvailability,
 } from '@/utils/mapValidation';
 
 // 用于 spiderfy 函数内部访问
@@ -183,39 +182,11 @@ interface UseOLMapReturn {
  */
 export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   // 加载地图元数据
-  const { metadata, loading: metadataLoading } = useMapConfig();
-  // 瓦片可用性检查状态
-  const [tilesAvailable, setTilesAvailable] = useState<boolean | null>(null);
-
-  // 检查瓦片文件是否实际可用（仅在 metadata 验证通过后执行）
-  useEffect(() => {
-    // metadata 未加载完成或无效，跳过检查
-    if (metadataLoading || !isValidMapMetadata(metadata)) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const checkAvailability = async () => {
-      try {
-        const available = await checkTileAvailability(metadata);
-        if (!cancelled) {
-          setTilesAvailable(available);
-        }
-      } catch {
-        // 检查失败，保守降级到在线地图
-        if (!cancelled) {
-          setTilesAvailable(false);
-        }
-      }
-    };
-
-    checkAvailability();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [metadata, metadataLoading]);
+  const {
+    metadata,
+    loading: metadataLoading,
+    tilesAvailable,
+  } = useMapConfig();
 
   // 根据元数据、瓦片可用性或传入的 options 获取配置
   const config = useMemo(() => {
