@@ -151,12 +151,17 @@ app / acs / worker  --(OTLP gRPC)-->  otelcol :4317  -->  Tempo :4317  -->  本�
 
 | 目的 | PromQL |
 |------|--------|
-| ACS 当前在线会话 | `omc_acs_active_sessions` |
+| ACS 全局实时在线会话 | `omc_acs_global_active_sessions` |
 | Inform 速率 | `rate(omc_acs_inform_total[5m])` |
 | API P99 延迟（RED，来自 Tempo） | `histogram_quantile(0.99, sum by(le)(rate(traces_spanmetrics_duration_seconds_bucket[5m])))` |
 | API 错误率（RED） | `sum(rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}[5m])) / sum(rate(traces_spanmetrics_calls_total[5m]))` |
 | PG 连接数占比 | `pg_stat_database_numbackends / pg_settings_max_connections` |
 | Redis 内存占比 | `redis_memory_used_bytes / redis_memory_max_bytes` |
+
+> `acs_global_active_sessions` 是并发、容量和准入判断的权威指标。
+> `acs_active_sessions` 仅为兼容旧查询而保留，已弃用且数值与全局指标一致；
+> `acs_local_tracked_sessions` 是单个 ACS 进程最多保留五分钟的会话 ID 数，仅用于诊断，
+> 可能高于实时并发，不能用于容量判断。
 
 ### 4.2 查日志（Logs）
 

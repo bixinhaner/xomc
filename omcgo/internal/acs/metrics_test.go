@@ -5,7 +5,22 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func metricHelp(t *testing.T, reg *prometheus.Registry, name string) string {
+	t.Helper()
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		if family.GetName() == name {
+			return family.GetHelp()
+		}
+	}
+	require.FailNow(t, "metric not registered", name)
+	return ""
+}
 
 func TestNewACSMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
@@ -14,6 +29,19 @@ func TestNewACSMetrics(t *testing.T) {
 	assert.NotNil(t, m)
 	assert.NotNil(t, m.ActiveSessions)
 	assert.NotNil(t, m.GlobalActiveSessions)
+	assert.NotNil(t, m.LocalTrackedSessions)
+	assert.Equal(t,
+		"Deprecated compatibility alias for acs_global_active_sessions; current number of globally admitted TR069 sessions",
+		metricHelp(t, reg, "acs_active_sessions"),
+	)
+	assert.Equal(t,
+		"Current number of globally admitted TR069 sessions from the shared admission controller",
+		metricHelp(t, reg, "acs_global_active_sessions"),
+	)
+	assert.Equal(t,
+		"Current number of session IDs retained by this ACS process for up to five minutes; not real-time concurrency",
+		metricHelp(t, reg, "acs_local_tracked_sessions"),
+	)
 	assert.NotNil(t, m.InformTotal)
 	assert.NotNil(t, m.RPCDuration)
 	assert.NotNil(t, m.RPCErrorsTotal)
@@ -35,6 +63,7 @@ func TestNewACSMetrics_Operations(t *testing.T) {
 		m.ActiveSessions.Dec()
 		m.ActiveSessions.Set(42)
 		m.GlobalActiveSessions.Set(42)
+		m.LocalTrackedSessions.Set(42)
 	})
 
 	assert.NotPanics(t, func() {

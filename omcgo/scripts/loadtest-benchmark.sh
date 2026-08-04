@@ -52,7 +52,7 @@ sys_snapshot() {
     echo "--- $label 系统快照 ---"
     echo "  Redis 内存: $(redis-cli info memory 2>/dev/null | grep used_memory_human | tr -d '\r' | cut -d: -f2)"
     echo "  Redis 连接: $(redis-cli info clients 2>/dev/null | grep connected_clients | tr -d '\r' | cut -d: -f2)"
-    local acs_sessions=$(curl -sf http://localhost:9090/metrics 2>/dev/null | grep "^acs_active_sessions " | awk '{print $2}')
+    local acs_sessions=$(curl -sf http://localhost:9090/metrics 2>/dev/null | grep "^acs_global_active_sessions " | awk '{print $2}')
     echo "  ACS 活跃会话: ${acs_sessions:-0}"
     echo ""
 }
