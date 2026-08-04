@@ -4984,7 +4984,7 @@ const messages: Record<string, string> = {
   // 均为部署期决策（docker compose / yaml），不进 UI。
   'system.storage.minioPublicEndpoint':      'MinIO 对外可达 endpoint',
   'system.storage.minioPublicEndpointDesc':  '浏览器 / 外部 SDK 访问 MinIO 用的 host[:port]。建议在此填写运维可达地址；留空仅演示 / 开发环境使用，会回退到启动配置中的内部 host',
-  'system.storage.minioPublicEndpointPlaceholder': '如 minio.example.com:9000 或 10.0.0.5:9100',
+  'system.storage.minioPublicEndpointPlaceholder': '如 minio.example.com:9000',
   'system.storage.minioPublicEndpointErrScheme':   '不要带 http:// 或 https:// 前缀',
   'system.storage.minioPublicEndpointErrPath':     '不要带路径 / 查询串 / fragment',
   'system.storage.minioPublicEndpointErrIpv6':     '暂不支持 IPv6 地址',
