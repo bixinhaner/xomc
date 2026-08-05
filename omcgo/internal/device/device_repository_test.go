@@ -216,6 +216,12 @@ func TestApplyGeoBoundsFilter_NilKeepsQueryUnbounded(t *testing.T) {
 	assert.Empty(t, args)
 }
 
+func TestDeviceColumnsIncludeProductParameterBindings(t *testing.T) {
+	columns := deviceColumns()
+	assert.Contains(t, columns, "d.product_id")
+	assert.Contains(t, columns, "d.param_model_id")
+}
+
 // ---------------------------------------------------------------------------
 // issue #203：FindStaleDevicesByClass 的 SQL 构建断言（DB-free）
 //

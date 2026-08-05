@@ -1,18 +1,17 @@
 /**
  * ImportDrawer (T-0165) — 设备 license 批量导入。结构镜像
- * ConfigSnapshotLibrary/ImportDrawer：拖拽+点击混合上传 + SN 后端校验 +
- * 命名校验 + 失败明细。文件名规范：<SN>_LIC.{lic|bin|dat}。
+ * ConfigSnapshotLibrary/ImportDrawer：拖拽+点击混合上传 +
+ * 命名校验 + 失败明细。文件名规范：<SN>.lic（兼容 .lic.json 等下载尾缀）。
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Button, Drawer, Empty, Space, Tag, Typography, Upload, message } from 'antd';
 import {
-  InboxOutlined, FileDoneOutlined, ExclamationCircleOutlined, DeleteOutlined, LoadingOutlined,
+  InboxOutlined, FileDoneOutlined, ExclamationCircleOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import { MetaList, MetaListItem } from '@/components/common/MetaListItem';
 import { useT } from '@/hooks/useT';
 import { useImportDeviceLicenses } from '@core/hooks/api/useDeviceLicense';
 import {
-  deviceLicenseApi,
   validateLicenseFileName,
   type LicenseImportResult,
 } from '@core/services/api/deviceLicenseApi';
@@ -30,7 +29,6 @@ interface ParsedFile {
   ext?: string;
   valid: boolean;
   reason?: string;
-  snKnown: 'unknown' | 'existing' | 'missing' | 'pending';
 }
 
 export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
@@ -39,12 +37,11 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
   const [submitResult, setSubmitResult] = useState<LicenseImportResult | null>(null);
   const importMutation = useImportDeviceLicenses();
 
-  const isFileOk = (f: ParsedFile) => f.valid && f.snKnown === 'existing';
-  const isFileBad = (f: ParsedFile) => !f.valid || f.snKnown === 'missing';
+  const isFileOk = (f: ParsedFile) => f.valid;
+  const isFileBad = (f: ParsedFile) => !f.valid;
   const validCount = useMemo(() => files.filter(isFileOk).length, [files]);
   const invalidCount = useMemo(() => files.filter(isFileBad).length, [files]);
-  const pendingCount = useMemo(() => files.filter((f) => f.snKnown === 'pending').length, [files]);
-  const canSubmit = validCount > 0 && invalidCount === 0 && pendingCount === 0;
+  const canSubmit = validCount > 0 && invalidCount === 0;
 
   function handleAdd(file: File): boolean {
     setFiles((prev) => {
@@ -62,43 +59,11 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
           ext: v.ext,
           valid: v.valid,
           reason: v.message,
-          snKnown: v.valid ? 'pending' : 'unknown',
         },
       ];
     });
     return false;
   }
-
-  useEffect(() => {
-    const pendingSNs = files
-      .filter((f) => f.snKnown === 'pending' && f.serialNumber)
-      .map((f) => f.serialNumber as string);
-    if (pendingSNs.length === 0) return;
-    let cancelled = false;
-    deviceLicenseApi
-      .validateSNs(pendingSNs)
-      .then((res) => {
-        if (cancelled) return;
-        const missingSet = new Set(res.missing);
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.snKnown === 'pending' && f.serialNumber
-              ? { ...f, snKnown: missingSet.has(f.serialNumber) ? 'missing' : 'existing' }
-              : f,
-          ),
-        );
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setFiles((prev) =>
-          prev.map((f) => (f.snKnown === 'pending' ? { ...f, snKnown: 'existing' } : f)),
-        );
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files.map((f) => `${f.fileName}|${f.snKnown}`).join(',')]);
 
   function handleRemove(name: string) {
     setFiles((prev) => prev.filter((f) => f.fileName !== name));
@@ -160,7 +125,7 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
           <>
             ① {t('transfer.fileLib.import.licenseRule1')}
             <br />
-            ② <strong>{t('transfer.fileLib.import.ruleSnExist')}</strong>
+            ② <strong>{t('transfer.fileLib.import.licenseRule2')}</strong>
             <br />
             ③ {t('transfer.fileLib.import.ruleSize')}
             <br />
@@ -208,7 +173,6 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
           <Typography.Title level={5} style={{ margin: 0 }}>
             {t('transfer.fileLib.import.pendingList', { count: files.length })}
             {invalidCount > 0 && <Tag color="red" style={{ marginLeft: 8 }}>{t('transfer.fileLib.import.tagInvalid', { count: invalidCount })}</Tag>}
-            {pendingCount > 0 && <Tag color="processing" style={{ marginLeft: 4 }}>{t('transfer.fileLib.import.tagChecking', { count: pendingCount })}</Tag>}
             {validCount > 0 && <Tag color="green" style={{ marginLeft: 4 }}>{t('transfer.fileLib.import.tagValid', { count: validCount })}</Tag>}
           </Typography.Title>
           {files.length > 0 && (
@@ -230,15 +194,13 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
             <MetaList style={{ background: '#fff' }}>
               {files.map((f, idx) => {
                 const bad = isFileBad(f);
-                const pending = f.snKnown === 'pending';
                 return (
                   <MetaListItem
                     key={f.fileName}
                     last={idx === files.length - 1}
                     style={bad ? { background: '#fff1f0' } : undefined}
                     avatar={
-                      pending ? <LoadingOutlined style={{ color: '#1677ff', fontSize: 18 }} />
-                        : bad ? <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />
+                      bad ? <ExclamationCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />
                         : <FileDoneOutlined style={{ color: '#52c41a', fontSize: 18 }} />
                     }
                     title={(
@@ -247,23 +209,17 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
                           {f.fileName}
                         </span>
                         {f.valid && f.serialNumber && (
-                          <Tag color={f.snKnown === 'missing' ? 'red' : 'blue'}>
+                          <Tag color="blue">
                             SN: {f.serialNumber}
                           </Tag>
                         )}
                         {f.valid && f.ext && <Tag color="geekblue">{f.ext.toUpperCase()}</Tag>}
-                        {f.snKnown === 'existing' && <Tag color="green">{t('transfer.fileLib.import.deviceRegistered')}</Tag>}
-                        {f.snKnown === 'missing' && <Tag color="red">{t('transfer.fileLib.import.deviceMissing')}</Tag>}
-                        {pending && <Tag color="processing">{t('transfer.fileLib.import.deviceChecking')}</Tag>}
+                        {f.valid && <Tag color="green">{t('transfer.fileLib.import.readyForPreinstall')}</Tag>}
                       </Space>
                     )}
                     description={(
                       !f.valid ? (
                         <Typography.Text type="danger">{f.reason}</Typography.Text>
-                      ) : f.snKnown === 'missing' ? (
-                        <Typography.Text type="danger">
-                          {t('transfer.fileLib.import.snNotFound', { sn: f.serialNumber ?? '' })}
-                        </Typography.Text>
                       ) : (
                         <Typography.Text type="secondary">
                           {(f.rawFile.size / 1024).toFixed(1)} KB

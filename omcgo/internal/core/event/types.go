@@ -14,6 +14,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// MetadataDeviceSN identifies the originating device without changing an
+// event's protocol payload. It is primarily used by device-originated RPC
+// events whose CWMP body does not contain the serial number.
+const MetadataDeviceSN = "device_sn"
+
 // Event 是所有事件的标准封装。
 // Payload 为 JSON 序列化的事件载荷，封装前后可通过 NewEvent 和 DecodePayload 操作。
 // Metadata 可附加平台信息（如 trace_id、来源服务）。

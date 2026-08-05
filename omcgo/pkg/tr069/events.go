@@ -4,16 +4,16 @@ import "strings"
 
 // TR069 Inform event codes per CWMP specification.
 const (
-	EventBootstrap                 = "0 BOOTSTRAP"
-	EventBoot                      = "1 BOOT"
-	EventPeriodic                  = "2 PERIODIC"
-	EventScheduled                 = "3 SCHEDULED"
-	EventValueChange               = "4 VALUE CHANGE"
-	EventKicked                    = "5 KICKED"
-	EventConnectionRequest         = "6 CONNECTION REQUEST"
-	EventTransferComplete          = "7 TRANSFER COMPLETE"
-	EventDiagnosticsComplete       = "8 DIAGNOSTICS COMPLETE"
-	EventRequestDownload           = "9 REQUEST DOWNLOAD"
+	EventBootstrap                  = "0 BOOTSTRAP"
+	EventBoot                       = "1 BOOT"
+	EventPeriodic                   = "2 PERIODIC"
+	EventScheduled                  = "3 SCHEDULED"
+	EventValueChange                = "4 VALUE CHANGE"
+	EventKicked                     = "5 KICKED"
+	EventConnectionRequest          = "6 CONNECTION REQUEST"
+	EventTransferComplete           = "7 TRANSFER COMPLETE"
+	EventDiagnosticsComplete        = "8 DIAGNOSTICS COMPLETE"
+	EventRequestDownload            = "9 REQUEST DOWNLOAD"
 	EventAutonomousTransferComplete = "10 AUTONOMOUS TRANSFER COMPLETE"
 )
 
@@ -31,8 +31,10 @@ const (
 
 // CMCC extended event codes.
 const (
-	EventAddObject    = "103 ADD OBJECT"
-	EventDeleteObject = "104 DELETE OBJECT"
+	EventAddObject           = "103 ADD OBJECT"
+	EventDeleteObject        = "104 DELETE OBJECT"
+	EventStartupStageReport  = "105 STARTUP STAGE REPORT"
+	EventStartupResultReport = "106 STARTUP RESULT REPORT"
 )
 
 // IsBootstrap returns true if the event list contains a BOOTSTRAP event.
@@ -104,6 +106,18 @@ func IsAutonomousTransferComplete(events []EventStruct) bool {
 // IsUpgradeFinish returns true if the event list contains a 102 UPGRADE FINISH event.
 func IsUpgradeFinish(events []EventStruct) bool {
 	return HasEvent(events, EventUpgradeFinish)
+}
+
+// IsStartupStageReport reports whether the device is notifying OMC that an
+// automatic-start stage (validation/configuration/cell activation) completed.
+func IsStartupStageReport(events []EventStruct) bool {
+	return HasEvent(events, EventStartupStageReport)
+}
+
+// IsStartupResultReport reports whether the device is publishing the terminal
+// result of one automatic-start execution.
+func IsStartupResultReport(events []EventStruct) bool {
+	return HasEvent(events, EventStartupResultReport)
 }
 
 // EventCodes extracts just the event codes from an event list.

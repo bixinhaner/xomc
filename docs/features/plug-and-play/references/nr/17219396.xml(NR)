@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<autoConfigFile generateTime="20231120025940" networkType="NR" serialNumber="120200050722JB0001" vendor="48BF74">
+    <dataModelSpecific version="v1.7">
+        <config name="Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBName" value="gNB"/>
+        <config name="Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBId" value="60"/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.Antenna.NumOfTxAntenna" value="2"/>
+        <config name="Device.ManagementServer.PeriodicInformInterval" value="30"/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.1.SCSSpecificCarrier.SubcarrierSpacing" value="1"/>
+        <config/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.DLBandwidth" value="100"/>
+        <config/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.SsbFrequency" value="633888"/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID" value="259"/>
+        <config name="Device.ManagementServer.PeriodicInformTime" value="2023-11-16 00:00:00"/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.1.FreqBandIndicatorNR" value="78"/>
+        <config name="Device.Services.FAPService.1.Capabilities.NR.DuplexMode" value="TDDMode"/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.ULBandwidth" value="100"/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.NRARFCNUL" value="636636"/>
+        <config name="Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBIdLength" value="32"/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.Antenna.NumOfRxAntenna" value="2"/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.NRARFCNDL" value="636636"/>
+        <config/>
+        <config/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity" value="961"/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC" value="81"/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.Ranac" value="1"/>
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.PLMNList.1.PLMNID" value="00101"/>
+        <config/>
+        <config/>
+        <config name="Device.Services.FAPService.1.FAPControl.NR.AMFPoolConfigParam.1.AmfIP1" value="192.168.12.183"/>
+        <config name="Device.Services.FAPService.1.FAPControl.NR.AMFPoolConfigParam.1.PLMNID" value="00101"/>
+        <config name="Device.Services.FAPService.1.FAPControl.NR.AMFPoolConfigParam.1.NR_AMF_IS_DEFAULT" value="1"/>
+        <config/>
+        <config/>
+    </dataModelSpecific>
+</autoConfigFile>

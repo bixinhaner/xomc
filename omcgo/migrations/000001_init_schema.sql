@@ -1739,6 +1739,7 @@ CREATE TABLE public.device_licenses (
     file_size bigint DEFAULT 0 NOT NULL,
     source character varying(16) DEFAULT 'manual_upload'::character varying NOT NULL,
     description text,
+    auto_dispatch_pending boolean DEFAULT true NOT NULL,
     update_by character varying(64),
     update_time timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -19553,6 +19554,55 @@ ALTER TABLE public.pm_aggregation_task_versions
 
 CREATE INDEX idx_pm_aggregation_task_versions_content_hash
     ON public.pm_aggregation_task_versions (task_id, content_hash);
+
+CREATE TABLE public.plug_and_play_policies (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    name varchar(100) NOT NULL,
+    enabled boolean NOT NULL DEFAULT false,
+    product_class varchar(128) NOT NULL,
+    product_classes varchar(128)[] NOT NULL DEFAULT '{}'::varchar[],
+    execute_type varchar(16) NOT NULL DEFAULT 'manual',
+    priority integer NOT NULL DEFAULT 100,
+    upgrade_enabled boolean NOT NULL DEFAULT false,
+    target_version varchar(128),
+    license_enabled boolean NOT NULL DEFAULT false,
+    self_config_enabled boolean NOT NULL DEFAULT false,
+    config jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    deleted_at timestamptz,
+    CONSTRAINT plug_and_play_policies_execute_type_check
+        CHECK (execute_type IN ('auto', 'manual'))
+);
+
+CREATE INDEX idx_plug_and_play_policies_match
+    ON public.plug_and_play_policies (enabled, product_class, priority, created_at);
+
+CREATE INDEX idx_plug_and_play_policies_product_classes
+    ON public.plug_and_play_policies USING gin (product_classes);
+
+CREATE TABLE public.provisioning_xml_files (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    policy_id uuid NOT NULL REFERENCES public.plug_and_play_policies(id),
+    device_id uuid NOT NULL,
+    file_name varchar(255) NOT NULL,
+    content text NOT NULL,
+    checksum varchar(64) NOT NULL,
+    download_token uuid NOT NULL DEFAULT gen_random_uuid(),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_provisioning_xml_files_device
+    ON public.provisioning_xml_files (device_id, created_at DESC);
+
+ALTER TABLE public.provisioning_tasks
+    ADD COLUMN policy_id uuid REFERENCES public.plug_and_play_policies(id),
+    ADD COLUMN xml_file_id uuid REFERENCES public.provisioning_xml_files(id),
+    ADD COLUMN device_task_id uuid,
+    ADD COLUMN current_step_name varchar(64);
+
+CREATE INDEX idx_provisioning_tasks_policy
+    ON public.provisioning_tasks (policy_id);
 
 
 -- Consolidated from pre-release baseline-only migrations: main schema 000002-000005

@@ -1222,7 +1222,10 @@ func updateTerminalState(ctx context.Context, tx pgx.Tx, run *SyncRun, requestSt
 }
 
 func insertRunTerminalOutbox(ctx context.Context, tx pgx.Tx, run *SyncRun, subject string, now time.Time) error {
-	payload, err := json.Marshal(map[string]any{"request_id": run.RequestID, "run_id": run.ID, "device_id": run.DeviceID, "status": run.Status})
+	payload, err := json.Marshal(map[string]any{
+		"request_id": run.RequestID, "run_id": run.ID, "device_id": run.DeviceID,
+		"status": run.Status, "trigger_reason": run.TriggerReason, "sync_scope": run.SyncScope,
+	})
 	if err != nil {
 		return fmt.Errorf("marshal parameter sync terminal event: %w", err)
 	}

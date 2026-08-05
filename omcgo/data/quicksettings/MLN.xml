@@ -47,7 +47,7 @@
            standardPath="Device.ManagementServer.tfcsManagerPrimsrc">
       <option value="1" label="NTP"/>
       <option value="2" label="PTP"/>
-      <option value="3" label="GPS"/>
+      <option value="3" label="GNSS"/>
       <option value="4" label="NL"/>
       <option value="5" label="EXT_CLK"/>
       <option value="6" label="EXT_PPS"/>

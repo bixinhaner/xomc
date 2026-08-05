@@ -24,19 +24,24 @@ const (
 
 // ProvisioningTask represents an auto-provisioning workflow for a device.
 type ProvisioningTask struct {
-	ID           uuid.UUID         `json:"id"`
-	DeviceID     uuid.UUID         `json:"device_id"`
-	TemplateID   *uuid.UUID        `json:"template_id,omitempty"`
-	Status       ProvisioningState `json:"status"`
-	CurrentStep  int               `json:"current_step"`
-	TotalSteps   int               `json:"total_steps"`
-	ErrorMessage string            `json:"error_message,omitempty"`
-	RetryCount   int               `json:"retry_count"`
-	MaxRetries   int               `json:"max_retries"`
-	StartedAt    *time.Time        `json:"started_at,omitempty"`
-	CompletedAt  *time.Time        `json:"completed_at,omitempty"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
+	ID              uuid.UUID         `json:"id"`
+	DeviceID        uuid.UUID         `json:"device_id"`
+	SerialNumber    string            `json:"serial_number,omitempty"`
+	TemplateID      *uuid.UUID        `json:"template_id,omitempty"`
+	PolicyID        *uuid.UUID        `json:"policy_id,omitempty"`
+	XMLFileID       *uuid.UUID        `json:"xml_file_id,omitempty"`
+	DeviceTaskID    *uuid.UUID        `json:"device_task_id,omitempty"`
+	Status          ProvisioningState `json:"status"`
+	CurrentStep     int               `json:"current_step"`
+	CurrentStepName string            `json:"current_step_name,omitempty"`
+	TotalSteps      int               `json:"total_steps"`
+	ErrorMessage    string            `json:"error_message,omitempty"`
+	RetryCount      int               `json:"retry_count"`
+	MaxRetries      int               `json:"max_retries"`
+	StartedAt       *time.Time        `json:"started_at,omitempty"`
+	CompletedAt     *time.Time        `json:"completed_at,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 // ProvisioningStep describes a single step in the provisioning sequence.
@@ -52,8 +57,11 @@ type ProvisioningStep struct {
 type ProvisioningTaskFilter struct {
 	DeviceID *uuid.UUID        `json:"device_id,omitempty"`
 	Status   ProvisioningState `json:"status,omitempty"`
-	Page     int               `form:"page"`
-	PageSize int               `form:"page_size"`
+	// PolicyOnly excludes bootstrap discovery/model-upload tasks and returns
+	// only tasks created by plug-and-play policy execution.
+	PolicyOnly bool `json:"policy_only,omitempty"`
+	Page       int  `form:"page"`
+	PageSize   int  `form:"page_size"`
 }
 
 // NewProvisioningTask creates a new task in discovered state.

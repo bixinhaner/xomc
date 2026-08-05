@@ -12,11 +12,13 @@ const api = createApiSwitch(softwareService, softwareApi);
 // ============================================================================
 
 export function useSoftwareVersions(
-  params: { deviceType?: string; productId?: string; status?: string; vendor?: string; fileType?: number } & PageRequest
+  params: { deviceType?: string; productId?: string; status?: string; vendor?: string; fileType?: number } & PageRequest,
+  options?: { enabled?: boolean },
 ) {
   return useQuery({
     queryKey: ['software', 'versions', params],
     queryFn: () => api.getVersions(params),
+    enabled: options?.enabled ?? true,
   });
 }
 
