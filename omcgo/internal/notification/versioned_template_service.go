@@ -19,6 +19,7 @@ var allowedNotificationTemplateVariables = map[string]struct{}{
 	"device_id": {}, "device_type": {}, "carrier": {}, "technology": {},
 	"raised_at": {}, "occurred_at": {}, "cleared_at": {}, "probable_cause": {},
 	"specific_problem": {}, "omc_url": {}, "status": {},
+	"event_count": {}, "window_started_at": {}, "window_ends_at": {},
 }
 
 type TemplateManagementService struct{ repository TemplateManagementRepository }

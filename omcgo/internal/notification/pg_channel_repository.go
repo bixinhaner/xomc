@@ -134,6 +134,54 @@ func (r *PgChannelConfigRepository) GetHealth(ctx context.Context, id uuid.UUID)
 	return &health, nil
 }
 
+func (r *PgChannelConfigRepository) RecordVerification(
+	ctx context.Context,
+	id uuid.UUID,
+	now time.Time,
+	errorCategory *string,
+	errorSummary *string,
+) error {
+	state, failures := "closed", 0
+	var successAt, failureAt, openedAt, nextProbe any = now, nil, nil, nil
+	if errorCategory != nil {
+		state, failures = "open", 1
+		successAt, failureAt, openedAt, nextProbe = nil, now, now, now.Add(5*time.Minute)
+	}
+	query, args, err := storage.Psql.Insert("notification_channel_health").Columns(
+		"channel_config_id", "circuit_state", "consecutive_successes", "consecutive_failures",
+		"last_success_at", "last_failure_at", "last_verified_at", "last_error_category",
+		"last_error_summary", "circuit_opened_at", "next_probe_at", "updated_at",
+	).Values(
+		id, state, boolInt(errorCategory == nil), failures, successAt, failureAt, now,
+		errorCategory, errorSummary, openedAt, nextProbe, now,
+	).Suffix(`ON CONFLICT (channel_config_id) DO UPDATE SET
+        circuit_state=EXCLUDED.circuit_state,
+        consecutive_successes=CASE WHEN EXCLUDED.circuit_state='closed' THEN notification_channel_health.consecutive_successes+1 ELSE 0 END,
+        consecutive_failures=EXCLUDED.consecutive_failures,
+        last_success_at=COALESCE(EXCLUDED.last_success_at, notification_channel_health.last_success_at),
+        last_failure_at=COALESCE(EXCLUDED.last_failure_at, notification_channel_health.last_failure_at),
+        last_verified_at=EXCLUDED.last_verified_at,
+        last_error_category=EXCLUDED.last_error_category,
+        last_error_summary=EXCLUDED.last_error_summary,
+        circuit_opened_at=EXCLUDED.circuit_opened_at,
+        next_probe_at=EXCLUDED.next_probe_at,
+        updated_at=EXCLUDED.updated_at`).ToSql()
+	if err != nil {
+		return fmt.Errorf("build notification channel verification health: %w", err)
+	}
+	if _, err := r.db.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("record notification channel verification health: %w", err)
+	}
+	return nil
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 func getChannelConfig(ctx context.Context, queryer ruleQueryer, id uuid.UUID, lock bool) (*ChannelConfig, error) {
 	builder := storage.Psql.Select(channelConfigColumns...).From("notification_channel_configs").Where(sq.Eq{"id": id})
 	if lock {

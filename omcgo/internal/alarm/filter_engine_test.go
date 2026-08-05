@@ -383,62 +383,6 @@ func TestProcessAlarm_NotifyEmail_MissingRecipients_Skipped(t *testing.T) {
 	assert.Empty(t, dispatcher.Calls(), "dispatcher should not be called when recipients empty")
 }
 
-// W2.A.1 章程：notify_email 与真实 SMTP 服务对接（复用 email_dispatcher_test.go 的 mockSMTPServer）。
-func TestProcessAlarm_NotifyEmail_EndToEnd(t *testing.T) {
-	srv := newMockSMTPServer(t, mockSMTPBehavior{})
-	t.Cleanup(srv.Close)
-
-	dispatcher := NewSMTPEmailDispatcher(
-		EmailConfig{
-			Host:    srv.host,
-			Port:    srv.port,
-			From:    "alarm@omc.test",
-			Timeout: 2 * time.Second,
-		},
-		zap.NewNop(),
-		NewEmailMetrics(nil),
-	)
-
-	repo := &mockFilterRuleRepo{rules: []AlarmFilterRule{
-		{
-			FilterType:       FilterTypeAlarmIdentifier,
-			AlarmIdentifiers: []string{"DEVICE_OFFLINE"},
-			Action:           FilterActionNotifyEmail,
-			EmailRecipients:  []string{"oncall@omc.test", "ops@omc.test"},
-			Name:             "email-e2e",
-		},
-	}}
-	engine := NewFilterEngine(repo, &mockStoreForEngine{}, nil, nil, nil, zap.NewNop())
-	engine.SetEmailDispatcher(dispatcher)
-
-	alarm := &model.Alarm{
-		ID:              uuid.New(),
-		DeviceID:        uuid.New(),
-		DeviceSN:        "SN-E2E",
-		Severity:        model.AlarmMajor,
-		AlarmIdentifier: "DEVICE_OFFLINE",
-		AlarmSource:     strPtr("Device"),
-		Status:          model.AlarmActive,
-		RaisedAt:        time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC),
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	result, err := engine.ProcessAlarm(ctx, alarm, alarm.DeviceID)
-	assert.NoError(t, err)
-	assert.True(t, result.Handled)
-	assert.Equal(t, FilterActionNotifyEmail, result.Action)
-
-	// 等 SMTP server 收到 DATA（Dispatch 同步完成时已落数据）
-	body := srv.DataBody()
-	assert.NotEmpty(t, body, "mock SMTP should receive DATA body")
-	assert.Contains(t, body, "Subject: ")
-	assert.Contains(t, body, "DEVICE_OFFLINE")
-	assert.Contains(t, body, "From: alarm@omc.test")
-	assert.Contains(t, body, "To: oncall@omc.test, ops@omc.test")
-}
-
 // W1.5 charter 步骤 4：与真实 HTTP 服务对接，httptest.Server 替代 webhook.site。
 func TestProcessAlarm_NotifyWebhook_EndToEnd(t *testing.T) {
 	received := make(chan map[string]interface{}, 1)

@@ -28,7 +28,8 @@ Playwright。
 | 8 | 已完成 | 固定 durable Inbox、版本补洞、代际围栏、反确认恢复未来 repeat、`SKIP LOCKED` lease 及专用 PostgreSQL 集成验证通过，见 [Task 8 本地验收](../reviews/2026-08-05-email-sms-task8-local-validation.md) |
 | 9 | 已完成 | `54c450f1b`；版本化规则、模板、联系组、渠道和不可变发布语义通过独立 PostgreSQL 验证 |
 | 10 | 后端编排核心已完成 | 生命周期编排、恢复配对、维护抑制、摘要/限流、外呼前栅栏和可见性受控的投递 API 已通过本地验证；真实 Worker、SMTP、quiet-hours release 和生产外发仍未启用，见 [Task 10 本地验收](../reviews/2026-08-05-email-sms-task10-local-validation.md) |
-| 11–14 | 未开始 | 生产外发与 canonical 继续受最终门禁约束 |
+| 11 | 邮件核心链路已完成 | schedule/digest、逐收件人 Worker、attempt/退避/unknown、熔断、SMTP verify 及双进程统一配置通过本地验证；quiet hours、system incident 和授权测试发送保留，见 [Task 11 核心验收](../reviews/2026-08-05-email-sms-task11-core-validation.md) |
+| 12–14 | 未开始 | legacy barrier、前端和生产外发继续受最终门禁约束 |
 
 下文保留原始 RED/GREEN checkbox 作为实施步骤模板；是否完成以本表、提交和验证记录共同
 判断，不能只按 checkbox 推断。
@@ -828,12 +829,12 @@ git commit -m "feat(notification): 编排告警通知和风暴控制"
 - Produces: Email delivery `completed+accepted`
 - Consumes: Task 10 authorized delivery
 
-- [ ] **Step 1: 写逐收件人、安全模板和状态测试**
+- [x] **Step 1: 写逐收件人、安全模板和状态测试**
 
 SMTP 每个信封只有一个目标地址；缺变量渲染失败；成功只记 accepted；鉴权/证书失败打开
 熔断；网络/5xx 临时错误退避；永久地址错误不重试。
 
-- [ ] **Step 2: 写未知结果和幂等测试**
+- [x] **Step 2: 写未知结果和幂等测试**
 
 每次 attempt 使用稳定 delivery ID 作为日志关联键；外呼超时但结果未知时不盲目立即重发，
 进入 `unknown` 或人工确认策略。
@@ -845,7 +846,7 @@ quiet hours 使用规则绑定的 IANA 时区并覆盖夏令时唯一 release。
 `AuthorizeSend` → attempt start → SMTP → attempt/result update。禁止在 AlarmEngine 或
 Orchestrator 中直接外呼。
 
-- [ ] **Step 4: 收敛两套 SMTP**
+- [x] **Step 4: 收敛两套 SMTP**
 
 删除 `cmd/app/provider/alarm.go` 的 `OMC_SMTP_*` 告警 dispatcher 装配。默认邮件渠道复用
 当前 `c.Cfg.Notification.SMTP`，秘密只通过运行配置/Secret 引用进入 adapter。
@@ -861,7 +862,7 @@ Orchestrator 中直接外呼。
 连接验证只检查配置和握手；测试发送必须使用有独立权限的明确测试地址，并经过
 `AuthorizeSend` 等价的渠道状态检查。两种操作都写审计，API 响应和日志不回显秘密。
 
-- [ ] **Step 7: 运行测试**
+- [x] **Step 7: 运行测试**
 
 Run: `cd omcgo && go test ./internal/notification ./internal/alarm -count=1`
 

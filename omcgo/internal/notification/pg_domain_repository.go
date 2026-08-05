@@ -218,8 +218,11 @@ func buildScheduleClaim(request ScheduleClaimRequest) (string, []any, error) {
 		Where(sq.Or{
 			sq.And{sq.Eq{"state": "pending"}, sq.LtOrEq{"due_at": request.Now}},
 			sq.And{sq.Eq{"state": "claimed"}, sq.LtOrEq{"lease_expires_at": request.Now}},
-		}).
-		OrderBy("due_at", "id").Limit(uint64(request.Limit)).Suffix("FOR UPDATE SKIP LOCKED")
+		})
+	if len(request.Kinds) > 0 {
+		due = due.Where(sq.Eq{"schedule_kind": request.Kinds})
+	}
+	due = due.OrderBy("due_at", "id").Limit(uint64(request.Limit)).Suffix("FOR UPDATE SKIP LOCKED")
 	return storage.Psql.Update("notification_schedules").
 		Set("state", "claimed").
 		Set("locked_by", request.WorkerID).

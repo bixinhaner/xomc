@@ -51,6 +51,17 @@ alarm:
   lifecycle_stream_max_bytes: 10737418240
   lifecycle_start_sequence: 1
 
+notification:
+  smtp:
+    enabled: false
+    host: ""
+    port: 25
+    username: ""
+    password: ""
+    from: "omc-alert@example.com"
+    starttls: false
+    timeout: 10s
+
 nats:
   url: "nats://172.19.1.73:4222"
   max_reconnect: -1

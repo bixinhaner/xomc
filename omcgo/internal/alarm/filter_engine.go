@@ -69,8 +69,8 @@ func NewFilterEngine(
 // SetEmailDispatcher 注入邮件派发器（W2.A.1/T-0007 整合）。
 //
 // 与 WebhookDispatcher 走构造函数参数不同，邮件 dispatcher 用 setter 是因为
-// SMTP 配置依赖运行时（OMC_SMTP_*  env），DI 装配晚于 NewFilterEngine 调用，
-// 也方便既有测试零改保持向后兼容。dispatcher == nil 时回退到 noopEmailDispatcher。
+// 兼容路径在 provider 层复用通知中心 transport，DI 装配晚于 NewFilterEngine 调用。
+// dispatcher == nil 时回退到 noopEmailDispatcher。
 func (e *FilterEngine) SetEmailDispatcher(dispatcher EmailDispatcher) {
 	if dispatcher == nil {
 		dispatcher = noopEmailDispatcher{}

@@ -61,6 +61,10 @@ type ChannelVerifier interface {
 	Verify(context.Context, ChannelConfig) error
 }
 
+type ChannelVerificationRecorder interface {
+	RecordVerification(context.Context, uuid.UUID, time.Time, *string, *string) error
+}
+
 type ChannelService struct {
 	repository ChannelConfigRepository
 	verifier   ChannelVerifier
@@ -115,8 +119,24 @@ func (s *ChannelService) Verify(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("get notification channel for verification: %w", err)
 	}
-	if err := s.verifier.Verify(ctx, *config); err != nil {
-		return fmt.Errorf("verify notification channel: %w", err)
+	verifyErr := s.verifier.Verify(ctx, *config)
+	if recorder, ok := s.repository.(ChannelVerificationRecorder); ok {
+		var category, summary *string
+		if verifyErr != nil {
+			value, _, _, _ := classifyEmailTransportFailure(verifyErr)
+			message := "smtp verification failed"
+			category, summary = &value, &message
+		}
+		if err := recorder.RecordVerification(ctx, id, time.Now().UTC(), category, summary); err != nil {
+			recordErr := fmt.Errorf("record notification channel verification: %w", err)
+			if verifyErr != nil {
+				return errors.Join(fmt.Errorf("verify notification channel: %w", verifyErr), recordErr)
+			}
+			return recordErr
+		}
+	}
+	if verifyErr != nil {
+		return fmt.Errorf("verify notification channel: %w", verifyErr)
 	}
 	return nil
 }

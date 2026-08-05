@@ -31,6 +31,9 @@ func (s *schedulerRepositoryStub) ClaimDue(_ context.Context, request ScheduleCl
 	s.mu.Lock()
 	claimed := make([]DomainSchedule, 0, request.Limit)
 	for id, schedule := range s.schedules {
+		if len(request.Kinds) > 0 && !containsScheduleKind(request.Kinds, schedule.ScheduleKind) {
+			continue
+		}
 		due := schedule.State == "pending" && !schedule.DueAt.After(request.Now)
 		expired := schedule.State == "claimed" && schedule.LeaseExpiresAt != nil && !schedule.LeaseExpiresAt.After(request.Now)
 		if (!due && !expired) || len(claimed) >= request.Limit {
@@ -47,6 +50,15 @@ func (s *schedulerRepositoryStub) ClaimDue(_ context.Context, request ScheduleCl
 		s.afterClaim()
 	}
 	return claimed, nil
+}
+
+func containsScheduleKind(kinds []string, want string) bool {
+	for _, kind := range kinds {
+		if kind == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *schedulerRepositoryStub) MarkCompleted(_ context.Context, id uuid.UUID, workerID string, now time.Time) error {
@@ -215,6 +227,30 @@ func TestScheduler_HandlesOnlyFourExplicitScheduleKinds(t *testing.T) {
 	for _, kind := range kinds {
 		require.Equal(t, 1, calls[kind])
 	}
+}
+
+func TestScheduler_LeavesUnregisteredScheduleKindsPending(t *testing.T) {
+	now := time.Date(2026, 8, 5, 11, 35, 0, 0, time.UTC)
+	initial := schedulerFixture(now, ScheduleKindInitialGate, 1)
+	digest := schedulerFixture(now, ScheduleKindDigestFlush, 1)
+	repository := &schedulerRepositoryStub{schedules: map[uuid.UUID]DomainSchedule{
+		initial.ID: initial, digest.ID: digest,
+	}}
+	occurrences := &schedulerOccurrenceStub{occurrences: map[uuid.UUID]*DomainOccurrence{
+		initial.OccurrenceID: {OccurrenceID: initial.OccurrenceID, ScheduleGeneration: 1, Status: "active"},
+		digest.OccurrenceID:  {OccurrenceID: digest.OccurrenceID, ScheduleGeneration: 1, Status: "active"},
+	}}
+	scheduler := NewScheduler(repository, occurrences, "worker", map[string]ScheduleHandler{
+		ScheduleKindInitialGate: func(context.Context, DomainSchedule) error { return nil },
+	})
+	scheduler.now = func() time.Time { return now }
+
+	processed, err := scheduler.RunOnce(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	require.Equal(t, "completed", repository.schedules[initial.ID].State)
+	require.Equal(t, "pending", repository.schedules[digest.ID].State)
 }
 
 func TestScheduler_HandlerFailureReleasesForBoundedRetry(t *testing.T) {

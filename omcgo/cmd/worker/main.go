@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -421,8 +420,13 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	filterEngine := alarm.NewFilterEngine(alarmFilterRuleRepo, alarmPgStore, webhookDispatcher, deadLetterRepo, webhookMetrics, logger)
 	filterEngine.SetDeviceGroupResolver(alarm.NewPgDeviceGroupResolver(w.PgPool))
 	emailMetrics := alarm.NewEmailMetrics(w.MetricsReg)
-	emailCfg := loadEmailConfigFromEnv()
-	emailDispatcher := alarm.NewSMTPEmailDispatcher(emailCfg, logger.Named("email"), emailMetrics)
+	emailSender := notification.NewEmailSender(notification.SMTPOptions{
+		Enabled: cfg.Notification.SMTP.Enabled, Host: cfg.Notification.SMTP.Host,
+		Port: cfg.Notification.SMTP.Port, Username: cfg.Notification.SMTP.Username,
+		Password: cfg.Notification.SMTP.Password, From: cfg.Notification.SMTP.From,
+		StartTLS: cfg.Notification.SMTP.StartTLS, Timeout: cfg.Notification.SMTP.Timeout,
+	}, logger)
+	emailDispatcher := alarm.NewSharedEmailDispatcher(emailSender, logger.Named("email"), emailMetrics)
 	filterEngine.SetEmailDispatcher(emailDispatcher)
 	alarmEngine.SetFilterEngine(filterEngine)
 
@@ -1683,17 +1687,4 @@ func parseStringSlice(s string) []string {
 		}
 	}
 	return result
-}
-
-func loadEmailConfigFromEnv() alarm.EmailConfig {
-	port, _ := strconv.Atoi(os.Getenv("OMC_SMTP_PORT"))
-	return alarm.EmailConfig{
-		Host:        os.Getenv("OMC_SMTP_HOST"),
-		Port:        port,
-		Username:    os.Getenv("OMC_SMTP_USERNAME"),
-		Password:    os.Getenv("OMC_SMTP_PASSWORD"),
-		From:        os.Getenv("OMC_SMTP_FROM"),
-		UseTLS:      os.Getenv("OMC_SMTP_USE_TLS") == "true",
-		UseSTARTTLS: os.Getenv("OMC_SMTP_USE_STARTTLS") == "true",
-	}
 }

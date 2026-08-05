@@ -56,6 +56,18 @@ alarm:
   lifecycle_stream_max_bytes: 10737418240
   lifecycle_start_sequence: 1
 
+# 与 app 共用同一套 SMTP 配置语义；密码由 Secret/部署配置注入。
+notification:
+  smtp:
+    enabled: false
+    host: ""
+    port: 25
+    username: ""
+    password: ""
+    from: "omc-alert@example.com"
+    starttls: false
+    timeout: 10s
+
 nats:
   url: "nats://nats:4222"
   max_reconnect: -1

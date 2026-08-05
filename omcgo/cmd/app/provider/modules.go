@@ -1692,10 +1692,8 @@ func initMiscModules(c *Container) error {
 		notification.NewTemplateManagementService(managedTemplateRepo),
 	)
 	channelRepo := notification.NewPgChannelConfigRepository(c.PgPool)
-	// Task 9 只装配管理面。真实 SMTP 验证与发送适配器在渠道 worker 阶段注入，
-	// 未注入时 verify 明确返回 503，不能把静态配置检查伪装成连接成功。
 	c.miscDeps.notifChannelHandler = notification.NewChannelHandler(
-		notification.NewChannelService(channelRepo, nil),
+		notification.NewChannelService(channelRepo, notification.NewEmailChannelVerifier(sharedNotificationEmailSender(c))),
 	)
 	deliveryRepo := notification.NewPgDeliveryRepository(c.PgPool)
 	deliveryService := notification.NewDeliveryService(deliveryRepo)
@@ -1709,21 +1707,45 @@ func initMiscModules(c *Container) error {
 
 	// T-0152: SMTP 邮件发送器 + Mailer（模板渲染→发送→历史）+ Alertmanager
 	// 告警 webhook 入口。SMTP 默认 disabled，配好邮件服务器后由配置启用。
-	emailSender := notification.NewEmailSender(notification.SMTPOptions{
-		Enabled:  c.Cfg.Notification.SMTP.Enabled,
-		Host:     c.Cfg.Notification.SMTP.Host,
-		Port:     c.Cfg.Notification.SMTP.Port,
-		Username: c.Cfg.Notification.SMTP.Username,
-		Password: c.Cfg.Notification.SMTP.Password,
-		From:     c.Cfg.Notification.SMTP.From,
-		StartTLS: c.Cfg.Notification.SMTP.StartTLS,
-		Timeout:  c.Cfg.Notification.SMTP.Timeout,
-	}, logger)
+	emailSender := sharedNotificationEmailSender(c)
 	mailer := notification.NewMailer(templateService, historyService, emailSender, logger)
 	c.miscDeps.alertWebhookHandler = notification.NewAlertWebhookHandler(mailer, notification.AlertWebhookOptions{
 		Token:      c.Cfg.Notification.AlertWebhook.Token,
 		Recipients: c.Cfg.Notification.AlertWebhook.Recipients,
 	}, logger)
+
+	if c.Cfg.Alarm.LifecycleMode == string(alarm.LifecycleModeCanonical) && c.Cfg.Notification.SMTP.Enabled {
+		recipientProtector, protectorErr := notification.NewEnvRecipientProtector()
+		if protectorErr == nil {
+			workerID := fmt.Sprintf("%s-notification-%d", c.Cfg.RequestIDPrefix, os.Getpid())
+			materializer := notification.NewScheduledDeliveryHandler(deliveryRepo, workerID)
+			deliveryScheduler := notification.NewScheduler(
+				notification.NewPgScheduleRepository(c.PgPool), notification.NewPgInboxRepository(c.PgPool), workerID,
+				map[string]notification.ScheduleHandler{
+					notification.ScheduleKindInitialGate: materializer.Handle,
+					notification.ScheduleKindRepeat:      materializer.Handle,
+					notification.ScheduleKindDigestFlush: materializer.Handle,
+				},
+			)
+			emailWorker := notification.NewEmailWorker(deliveryRepo, recipientProtector, emailSender, workerID, logger)
+			deliveryRuntime := notification.NewDeliveryRuntime(deliveryScheduler, emailWorker, logger)
+			if err := deliveryRuntime.Start(context.Background()); err != nil {
+				return fmt.Errorf("start notification delivery runtime: %w", err)
+			}
+			if c.GS != nil {
+				c.GS.Register("notification-delivery-runtime", 1, func(context.Context) error {
+					deliveryRuntime.Stop()
+					return nil
+				})
+			}
+			logger.Info("notification email delivery runtime started")
+		} else if errors.Is(protectorErr, notification.ErrRecipientKeyUnavailable) {
+			logger.Warn("notification email delivery runtime disabled: recipient encryption key is not configured",
+				zap.String("required_env", notification.EnvNotificationRecipientKey))
+		} else {
+			return fmt.Errorf("initialize notification email recipient protection: %w", protectorErr)
+		}
+	}
 
 	logger.Info("notification module initialized",
 		zap.Bool("smtp_enabled", c.Cfg.Notification.SMTP.Enabled))

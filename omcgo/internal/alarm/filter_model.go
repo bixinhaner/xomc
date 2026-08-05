@@ -16,7 +16,7 @@ const (
 	// W2.A.2/T-0011 已扩展 retry/dead-letter/HMAC + FilterEngine 接生产路径。
 	FilterActionNotifyWebhook = "notify_webhook"
 	// FilterActionNotifyEmail W2.A.1/T-0007 整合：匹配规则向 EmailRecipients 列表发邮件。
-	// SMTP 配置注入由 cmd/app/provider/alarm.go 从环境变量读取（OMC_SMTP_*）。
+	// 迁移期与通知中心共享 appconfig SMTP transport；Task 12 切换后移除旧入口。
 	FilterActionNotifyEmail = "notify_email"
 )
 

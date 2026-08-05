@@ -838,6 +838,7 @@ type WorkerConfig struct {
 	Task                TaskConfig                `mapstructure:"task"` // T-0157 C2: 任务过期扫描器配置
 	ParamSync           ParamSyncConfig           `mapstructure:"param_sync"`
 	Alarm               AlarmConfig               `mapstructure:"alarm"`
+	Notification        NotificationConfig        `mapstructure:"notification"`
 	OfflineAlarmCleanup OfflineAlarmCleanupConfig `mapstructure:"offline_alarm_cleanup"` // #358: 离线设备活动告警清理阈值/周期/批量可配
 	PM                  PMConfig                  `mapstructure:"pm"`                    // 设备上线时自动下发 PM 上传配置
 	RawCleanup          RawCleanupConfig          `mapstructure:"raw_cleanup"`           // PM/MR 原始对象精确分批清理

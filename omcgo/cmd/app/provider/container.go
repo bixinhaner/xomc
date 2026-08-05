@@ -24,6 +24,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/realtime"
 	"github.com/omcgo/omcgo/internal/core/systimezone"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	kpirouter "github.com/omcgo/omcgo/internal/pm/kpi/router"
@@ -147,6 +148,7 @@ type Container struct {
 	AlarmSyncProcessor       *alarm.AlarmSyncProcessor
 	AlarmFilterEngine        *alarm.FilterEngine
 	AlarmHistoryRetentionSvc *alarm.HistoryRetentionService
+	NotificationEmailSender  *notification.EmailSender
 
 	// PMModule 设置
 	PMCounterRepo *counter.PgCounterRepository

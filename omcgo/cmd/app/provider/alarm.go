@@ -3,13 +3,12 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
-	"strconv"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/alarm"
 	alarmdef "github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/notification"
 	"go.uber.org/zap"
 )
 
@@ -107,14 +106,10 @@ func initAlarmModule(c *Container) error {
 	filterEngine := alarm.NewFilterEngine(alarmFilterRuleRepo, alarmPgStore, webhookDispatcher, deadLetterRepo, webhookMetrics, logger.Named("filter"))
 	filterEngine.SetDeviceGroupResolver(alarm.NewPgDeviceGroupResolver(c.PgPool))
 
-	// W2.A.1 / T-0007 整合: SMTP 邮件派发器（实现 EmailDispatcher 接口）。
-	// 配置从环境变量读取（OMC_SMTP_HOST/PORT/USERNAME/PASSWORD/FROM/USE_TLS/USE_STARTTLS）。
-	// 配置缺失时仍创建 dispatcher（dispatch 时会因空 host 拨号失败，进 metric=failure），
-	// 这样 filter_engine 永远走 SMTPEmailDispatcher 而非 noop，保证生产可观测性。
-	// 后续 task 把 SMTP 配置接入 appconfig YAML（替换本处 env 读取）。
+	// 迁移期 legacy notify_email 复用通知中心的逐收件人 SMTP transport。
+	// Task 12 完成规则 barrier 切换后再删除这条兼容入口。
 	emailMetrics := alarm.NewEmailMetrics(c.MetricsReg)
-	emailCfg := loadEmailConfigFromEnv()
-	emailDispatcher := alarm.NewSMTPEmailDispatcher(emailCfg, logger.Named("email"), emailMetrics)
+	emailDispatcher := alarm.NewSharedEmailDispatcher(sharedNotificationEmailSender(c), logger.Named("email"), emailMetrics)
 	filterEngine.SetEmailDispatcher(emailDispatcher)
 
 	// issue #67：告警字典在 alarmdef 模块（Depends=dictload）才装配，晚于本模块。
@@ -162,18 +157,14 @@ type alarmHandlerDeps struct {
 	alarmSyncService      *alarm.AlarmSyncService
 }
 
-// loadEmailConfigFromEnv 从 OMC_SMTP_* 环境变量读 SMTP 配置（W2.A.1/T-0007）。
-// 未设置 → 返回零值 EmailConfig（拨号会失败但不 panic，便于 dev / test 环境）。
-// 后续把整段读取迁移到 appconfig.yaml 时替换本函数为 cfg.AppConfig.Email 即可。
-func loadEmailConfigFromEnv() alarm.EmailConfig {
-	port, _ := strconv.Atoi(os.Getenv("OMC_SMTP_PORT")) // 解析失败 → 0，dispatch 时返错
-	return alarm.EmailConfig{
-		Host:        os.Getenv("OMC_SMTP_HOST"),
-		Port:        port,
-		Username:    os.Getenv("OMC_SMTP_USERNAME"),
-		Password:    os.Getenv("OMC_SMTP_PASSWORD"),
-		From:        os.Getenv("OMC_SMTP_FROM"),
-		UseTLS:      os.Getenv("OMC_SMTP_USE_TLS") == "true",
-		UseSTARTTLS: os.Getenv("OMC_SMTP_USE_STARTTLS") == "true",
+func sharedNotificationEmailSender(c *Container) *notification.EmailSender {
+	if c.NotificationEmailSender == nil {
+		c.NotificationEmailSender = notification.NewEmailSender(notification.SMTPOptions{
+			Enabled: c.Cfg.Notification.SMTP.Enabled, Host: c.Cfg.Notification.SMTP.Host,
+			Port: c.Cfg.Notification.SMTP.Port, Username: c.Cfg.Notification.SMTP.Username,
+			Password: c.Cfg.Notification.SMTP.Password, From: c.Cfg.Notification.SMTP.From,
+			StartTLS: c.Cfg.Notification.SMTP.StartTLS, Timeout: c.Cfg.Notification.SMTP.Timeout,
+		}, c.Logger)
 	}
+	return c.NotificationEmailSender
 }

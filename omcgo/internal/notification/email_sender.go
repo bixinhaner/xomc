@@ -3,10 +3,13 @@ package notification
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"mime"
 	"net"
+	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +29,31 @@ type SMTPOptions struct {
 	StartTLS bool          // true 时在握手后升级 STARTTLS
 	Timeout  time.Duration // 连接超时（<=0 时取默认 10s）
 }
+
+const (
+	EmailErrorConfiguration  = "configuration_error"
+	EmailErrorAuthentication = "authentication_error"
+	EmailErrorTLS            = "tls_error"
+	EmailErrorConnection     = "connection_error"
+	EmailErrorTemporary      = "provider_temporary"
+	EmailErrorRecipient      = "recipient_rejected"
+	EmailErrorMessage        = "message_rejected"
+	EmailErrorUnknown        = "outcome_unknown"
+)
+
+type EmailSendError struct {
+	Category       string
+	Retryable      bool
+	OutcomeUnknown bool
+	Stage          string
+	Err            error
+}
+
+func (e *EmailSendError) Error() string {
+	return fmt.Sprintf("smtp %s: %v", e.Stage, e.Err)
+}
+
+func (e *EmailSendError) Unwrap() error { return e.Err }
 
 // EmailSender 通过 SMTP 发送纯文本（UTF-8）邮件。
 //
@@ -47,68 +75,154 @@ func NewEmailSender(opts SMTPOptions, logger *zap.Logger) *EmailSender {
 	return &EmailSender{opts: opts, logger: logger.Named("email-sender")}
 }
 
-// Send 向所有收件人发送一封纯文本邮件。任一环节失败即返回错误。
+// Send 为兼容既有调用逐个发送邮件。每个收件人使用独立 SMTP 信封，避免地址泄露和
+// 批量投递中无法区分单个结果；可靠 Worker 直接调用 SendOne。
 func (s *EmailSender) Send(ctx context.Context, to []string, subject, body string) error {
-	if !s.opts.Enabled {
-		return fmt.Errorf("email sender disabled (notification.smtp.enabled=false)")
-	}
-	if s.opts.Host == "" {
-		return fmt.Errorf("smtp host not configured")
-	}
 	if len(to) == 0 {
 		return fmt.Errorf("no recipients")
 	}
+	for _, recipient := range to {
+		if err := s.SendOne(ctx, recipient, subject, body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+// SendOne 在一个只含单个 RCPT TO 的 SMTP 信封中发送邮件。DATA 最终响应成功即视为
+// accepted；之后的 QUIT 失败不改变服务端已经受理的事实。
+func (s *EmailSender) SendOne(ctx context.Context, recipient, subject, body string) error {
+	if err := s.validateConnectionOptions(); err != nil {
+		return err
+	}
+	if s.opts.From == "" {
+		return emailSendError(EmailErrorConfiguration, false, false, "configuration", errors.New("from is required"))
+	}
+	if !plainEmailAddress(recipient) {
+		return emailSendError(EmailErrorRecipient, false, false, "recipient", errors.New("invalid recipient address"))
+	}
+	if !plainEmailAddress(s.opts.From) {
+		return emailSendError(EmailErrorConfiguration, false, false, "configuration", errors.New("invalid from address"))
+	}
+	if strings.ContainsAny(subject, "\r\n") {
+		return emailSendError(EmailErrorMessage, false, false, "message", errors.New("subject contains a line break"))
+	}
+	client, err := s.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	if err := client.Mail(s.opts.From); err != nil {
+		return classifySMTPError("mail_from", err, EmailErrorConfiguration)
+	}
+	if err := client.Rcpt(recipient); err != nil {
+		return classifySMTPError("recipient", err, EmailErrorRecipient)
+	}
+	w, err := client.Data()
+	if err != nil {
+		return classifySMTPError("data", err, EmailErrorMessage)
+	}
+	if _, err := w.Write([]byte(buildMessage(s.opts.From, []string{recipient}, subject, body))); err != nil {
+		_ = w.Close()
+		return emailSendError(EmailErrorConnection, true, false, "write_body", err)
+	}
+	if err := w.Close(); err != nil {
+		return emailSendError(EmailErrorUnknown, false, true, "finalize_data", err)
+	}
+	_ = client.Quit()
+	return nil
+}
+
+// Verify performs connection, greeting, optional STARTTLS and authentication
+// only. It intentionally sends no MAIL FROM, RCPT TO or DATA command.
+func (s *EmailSender) Verify(ctx context.Context) error {
+	if s.opts.From == "" || !plainEmailAddress(s.opts.From) {
+		return emailSendError(EmailErrorConfiguration, false, false, "configuration", errors.New("valid from address is required"))
+	}
+	client, err := s.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	_ = client.Quit()
+	return nil
+}
+
+func (s *EmailSender) connect(ctx context.Context) (*smtp.Client, error) {
+	if err := s.validateConnectionOptions(); err != nil {
+		return nil, err
+	}
 	addr := net.JoinHostPort(s.opts.Host, strconv.Itoa(s.opts.Port))
 	dialer := net.Dialer{Timeout: s.opts.Timeout}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return fmt.Errorf("dial smtp %s: %w", addr, err)
+		return nil, emailSendError(EmailErrorConnection, true, false, "connect", err)
 	}
 	// 兜底超时，防止某个 SMTP 阶段无限挂起。
-	_ = conn.SetDeadline(time.Now().Add(s.opts.Timeout))
+	deadline := time.Now().Add(s.opts.Timeout)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	_ = conn.SetDeadline(deadline)
 
 	client, err := smtp.NewClient(conn, s.opts.Host)
 	if err != nil {
 		_ = conn.Close()
-		return fmt.Errorf("smtp handshake: %w", err)
+		return nil, classifySMTPError("handshake", err, EmailErrorConnection)
 	}
-	defer client.Close()
 
 	if s.opts.StartTLS {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
-			return fmt.Errorf("starttls=true but smtp server does not advertise STARTTLS")
+			_ = client.Close()
+			return nil, emailSendError(EmailErrorTLS, false, false, "starttls", errors.New("server does not advertise STARTTLS"))
 		}
-		if err := client.StartTLS(&tls.Config{ServerName: s.opts.Host}); err != nil {
-			return fmt.Errorf("starttls: %w", err)
+		if err := client.StartTLS(&tls.Config{ServerName: s.opts.Host, MinVersion: tls.VersionTLS12}); err != nil {
+			_ = client.Close()
+			return nil, emailSendError(EmailErrorTLS, false, false, "starttls", err)
 		}
 	}
 	if s.opts.Username != "" {
 		auth := smtp.PlainAuth("", s.opts.Username, s.opts.Password, s.opts.Host)
 		if err := client.Auth(auth); err != nil {
-			return fmt.Errorf("smtp auth: %w", err)
+			_ = client.Close()
+			return nil, emailSendError(EmailErrorAuthentication, false, false, "auth", err)
 		}
 	}
-	if err := client.Mail(s.opts.From); err != nil {
-		return fmt.Errorf("smtp MAIL FROM <%s>: %w", s.opts.From, err)
+	return client, nil
+}
+
+func (s *EmailSender) validateConnectionOptions() error {
+	if !s.opts.Enabled {
+		return emailSendError(EmailErrorConfiguration, false, false, "configuration", errors.New("sender disabled"))
 	}
-	for _, rcpt := range to {
-		if err := client.Rcpt(rcpt); err != nil {
-			return fmt.Errorf("smtp RCPT TO <%s>: %w", rcpt, err)
+	if s.opts.Host == "" {
+		return emailSendError(EmailErrorConfiguration, false, false, "configuration", errors.New("host not configured"))
+	}
+	if s.opts.Port <= 0 {
+		return emailSendError(EmailErrorConfiguration, false, false, "configuration", errors.New("port is required"))
+	}
+	return nil
+}
+
+func plainEmailAddress(value string) bool {
+	parsed, err := mail.ParseAddress(value)
+	return err == nil && parsed.Address == value
+}
+
+func classifySMTPError(stage string, err error, permanentCategory string) error {
+	var protocolError *textproto.Error
+	if errors.As(err, &protocolError) {
+		if protocolError.Code >= 400 && protocolError.Code < 500 {
+			return emailSendError(EmailErrorTemporary, true, false, stage, err)
 		}
+		return emailSendError(permanentCategory, false, false, stage, err)
 	}
-	w, err := client.Data()
-	if err != nil {
-		return fmt.Errorf("smtp DATA: %w", err)
-	}
-	if _, err := w.Write([]byte(buildMessage(s.opts.From, to, subject, body))); err != nil {
-		_ = w.Close()
-		return fmt.Errorf("write message body: %w", err)
-	}
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("finalize message: %w", err)
-	}
-	return client.Quit()
+	return emailSendError(EmailErrorConnection, true, false, stage, err)
+}
+
+func emailSendError(category string, retryable, unknown bool, stage string, err error) error {
+	return &EmailSendError{Category: category, Retryable: retryable, OutcomeUnknown: unknown, Stage: stage, Err: err}
 }
 
 // buildMessage 组装 RFC 5322 纯文本邮件报文。

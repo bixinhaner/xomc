@@ -15,11 +15,13 @@ import (
 )
 
 var (
-	_ InboxRepository           = (*PgInboxRepository)(nil)
-	_ RuleVersionRepository     = (*PgRuleVersionRepository)(nil)
-	_ TemplateVersionRepository = (*PgTemplateVersionRepository)(nil)
-	_ ScheduleRepository        = (*PgScheduleRepository)(nil)
-	_ DeliveryRepository        = (*PgDeliveryRepository)(nil)
+	_ InboxRepository             = (*PgInboxRepository)(nil)
+	_ RuleVersionRepository       = (*PgRuleVersionRepository)(nil)
+	_ TemplateVersionRepository   = (*PgTemplateVersionRepository)(nil)
+	_ ScheduleRepository          = (*PgScheduleRepository)(nil)
+	_ DeliveryRepository          = (*PgDeliveryRepository)(nil)
+	_ ScheduledDeliveryRepository = (*PgDeliveryRepository)(nil)
+	_ EmailWorkerRepository       = (*PgDeliveryRepository)(nil)
 )
 
 type domainFakeDB struct {
@@ -133,6 +135,21 @@ func TestPgScheduleRepository_ClaimUsesSkipLockedAndExpiredLeaseRecovery(t *test
 	assert.Contains(t, normalized, "FOR UPDATE SKIP LOCKED")
 	assert.Contains(t, normalized, "STATE = $1")
 	assert.Contains(t, normalized, "LEASE_EXPIRES_AT <=")
+	assert.Contains(t, normalized, "RETURNING ID, EVENT_ID, OCCURRENCE_ID")
+	assert.NotEmpty(t, args)
+}
+
+func TestPgDeliveryRepository_EmailClaimUsesLeaseAndExcludesUnfinishedAttempts(t *testing.T) {
+	now := time.Date(2026, 8, 5, 12, 30, 0, 0, time.UTC)
+	query, args, err := buildEmailDeliveryClaim(EmailDeliveryClaimRequest{
+		WorkerID: "email-a", Now: now, LeaseDuration: time.Minute, Limit: 20,
+	})
+	require.NoError(t, err)
+	normalized := strings.ToUpper(query)
+	assert.Contains(t, normalized, "FOR UPDATE SKIP LOCKED")
+	assert.Contains(t, normalized, "NOT EXISTS (SELECT 1 FROM NOTIFICATION_DELIVERY_ATTEMPTS")
+	assert.Contains(t, normalized, "FLOW_STATE")
+	assert.Contains(t, normalized, "LEASE_EXPIRES_AT")
 	assert.Contains(t, normalized, "RETURNING ID, EVENT_ID, OCCURRENCE_ID")
 	assert.NotEmpty(t, args)
 }

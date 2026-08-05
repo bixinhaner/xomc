@@ -36,6 +36,7 @@ type ScheduleClaimRequest struct {
 	Now           time.Time
 	LeaseDuration time.Duration
 	Limit         int
+	Kinds         []string
 }
 
 type DeliveryRepository interface {

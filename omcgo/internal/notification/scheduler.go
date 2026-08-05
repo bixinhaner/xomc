@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,8 +53,18 @@ func (s *Scheduler) RunOnce(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("run notification scheduler: worker ID is required")
 	}
 	now := s.now()
+	kinds := make([]string, 0, len(s.handlers))
+	for kind, handler := range s.handlers {
+		if handler != nil {
+			kinds = append(kinds, kind)
+		}
+	}
+	sort.Strings(kinds)
+	if len(kinds) == 0 {
+		return 0, fmt.Errorf("run notification scheduler: at least one schedule handler is required")
+	}
 	schedules, err := s.repository.ClaimDue(ctx, ScheduleClaimRequest{
-		WorkerID: s.workerID, Now: now, LeaseDuration: s.lease, Limit: s.batchSize,
+		WorkerID: s.workerID, Now: now, LeaseDuration: s.lease, Limit: s.batchSize, Kinds: kinds,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("claim notification schedules: %w", err)
