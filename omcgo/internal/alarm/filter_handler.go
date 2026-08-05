@@ -1,6 +1,7 @@
 package alarm
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -167,10 +168,6 @@ func (h *FilterHandler) Update(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
-	if rule.Action == FilterActionLegacyNotificationBarrier {
-		commonerrors.AbortWithError(c, http.StatusConflict, ErrAlarmFilterBarrierManaged)
-		return
-	}
 	var req UpdateAlarmFilterRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
@@ -217,7 +214,7 @@ func (h *FilterHandler) Update(c *gin.Context) {
 	}
 
 	if err := h.repo.Update(c.Request.Context(), rule); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		abortFilterMutation(c, err)
 		return
 	}
 	response.OK(c, rule)
@@ -229,17 +226,8 @@ func (h *FilterHandler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
-	rule, err := h.repo.GetByID(c.Request.Context(), id)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
-		return
-	}
-	if rule.Action == FilterActionLegacyNotificationBarrier {
-		commonerrors.AbortWithError(c, http.StatusConflict, ErrAlarmFilterBarrierManaged)
-		return
-	}
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		abortFilterMutation(c, err)
 		return
 	}
 	response.OKWithMsg(c, nil, "filter rule deleted")
@@ -256,17 +244,24 @@ func (h *FilterHandler) Toggle(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
-	if rule.Action == FilterActionLegacyNotificationBarrier {
-		commonerrors.AbortWithError(c, http.StatusConflict, ErrAlarmFilterBarrierManaged)
-		return
-	}
 	rule.Enabled = !rule.Enabled
 	if operator := getOperator(c); operator != "" {
 		rule.UpdatedBy = operator
 	}
 	if err := h.repo.Update(c.Request.Context(), rule); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		abortFilterMutation(c, err)
 		return
 	}
 	response.OKWithMsg(c, nil, "filter rule toggled")
+}
+
+func abortFilterMutation(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrAlarmFilterBarrierManaged):
+		commonerrors.AbortWithError(c, http.StatusConflict, err)
+	case errors.Is(err, commonerrors.ErrNotFound):
+		commonerrors.AbortWithError(c, http.StatusNotFound, err)
+	default:
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+	}
 }

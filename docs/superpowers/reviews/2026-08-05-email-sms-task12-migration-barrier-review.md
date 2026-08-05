@@ -19,7 +19,8 @@ Task 12 的后端迁移门禁已完成，改动只覆盖当前项目 `alarm_filt
 
 因此本次没有假装把老 OMC 的 `alarm_view_template` 直接自动导入当前模型：
 
-- 当前 `alarm_filters` 没有 Tolerance Duration 字段，切换必须显式确认该语义；
+- 当前 `alarm_filters` 没有 Tolerance Duration 字段，本迁移服务不增加无来源、只能由调用方
+  机械传 `true` 的确认参数；未来导入老 OMC `alarm_view_template` 时再作为不兼容项处理；
 - 新规则模型尚不能无损表示 `alarm_sources` 和 `device_group_ids`，预览会列为不支持范围并硬阻断，
   不生成可能扩大命中面的候选规则；
 - `notify_webhook` 不参与迁移；
@@ -36,8 +37,8 @@ Task 12 的后端迁移门禁已完成，改动只覆盖当前项目 `alarm_filt
    正数的问题，同时保持旧邮件规则间的稳定顺序。
 3. 固定邮箱在写入候选规则前使用现有 recipient protector 加密；候选规则仅有 draft，默认不
    enabled。
-4. 切换要求重叠规则 ID 集合逐项相等、Tolerance 语义已确认、Shadow 有样本且命中数相等、
-   enabled 版本的范围/收件人数/邮件渠道/迁移标记仍与旧规则一致。
+4. 切换要求重叠规则 ID 集合逐项相等、Shadow 有样本且命中数相等、enabled 版本的范围、
+   收件人数、邮件渠道和迁移标记仍与旧规则一致。
 5. PG 切换更新同时校验旧规则未变化、仍为 enabled `notify_email`，并再次校验目标通知版本仍
    enabled；条件漂移时不写 barrier。
 6. barrier 返回 `Handled=true` 保持首条命中，但不发邮件、不修改告警；AlarmEngine 仍继续持久化
@@ -55,6 +56,11 @@ Task 12 的后端迁移门禁已完成，改动只覆盖当前项目 `alarm_filt
 - 没有顺带扩展短信、系统事件、测试发送、隐式 TLS 465 或告警规则通用重构；
 - 没有自动删除旧收件人，保留受控回退所需的原规则数据；
 - 没有把 `notify_webhook` 纳入第一阶段。
+
+第二轮瘦身 review 已删除三个无效或重复点：恒为 `false` 的候选启用预览字段、当前数据源不存在
+却要求调用方机械确认的 Tolerance 门禁，以及 Handler 与 PG 仓储重复的 barrier 预检查。PG
+条件保护继续保留，因为它负责解决并发竞态；Handler 只负责把仓储错误映射为正确的 HTTP 409。
+同时移除了候选规则名称必须保持不变的限制，名称不参与匹配或投递，不应阻止安全切换。
 
 ## 验证证据
 

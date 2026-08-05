@@ -16,13 +16,12 @@ import (
 )
 
 var (
-	ErrMigrationRuleNotFound         = errors.New("legacy email rule not found")
-	ErrMigrationScopeUnsupported     = errors.New("legacy email rule scope cannot be represented safely")
-	ErrMigrationOverlapUnconfirmed   = errors.New("legacy rule overlap findings are not confirmed")
-	ErrMigrationToleranceUnconfirmed = errors.New("legacy tolerance duration semantics are not confirmed")
-	ErrMigrationShadowMismatch       = errors.New("legacy and notification shadow results do not match")
-	ErrMigrationCandidateNotEnabled  = errors.New("notification migration candidate is not enabled")
-	ErrMigrationCandidateMismatch    = errors.New("notification migration candidate does not match the legacy rule")
+	ErrMigrationRuleNotFound        = errors.New("legacy email rule not found")
+	ErrMigrationScopeUnsupported    = errors.New("legacy email rule scope cannot be represented safely")
+	ErrMigrationOverlapUnconfirmed  = errors.New("legacy rule overlap findings are not confirmed")
+	ErrMigrationShadowMismatch      = errors.New("legacy and notification shadow results do not match")
+	ErrMigrationCandidateNotEnabled = errors.New("notification migration candidate is not enabled")
+	ErrMigrationCandidateMismatch   = errors.New("notification migration candidate does not match the legacy rule")
 )
 
 const migrationReasonPrefix = "legacy alarm filter migration:"
@@ -45,22 +44,20 @@ type MigrationOverlapFinding struct {
 }
 
 type LegacyEmailMigrationPreview struct {
-	LegacyRuleID               uuid.UUID                 `json:"legacy_rule_id"`
-	LegacyRuleName             string                    `json:"legacy_rule_name"`
-	LegacyRuleUpdatedAt        time.Time                 `json:"legacy_rule_updated_at"`
-	LegacyPriority             int                       `json:"legacy_priority"`
-	CandidatePriority          int                       `json:"candidate_priority"`
-	AlarmSources               []string                  `json:"alarm_sources"`
-	AlarmIdentifiers           []string                  `json:"alarm_identifiers"`
-	DeviceIDs                  []uuid.UUID               `json:"device_ids"`
-	DeviceGroupIDs             []uuid.UUID               `json:"device_group_ids"`
-	RecipientEmails            []string                  `json:"recipient_emails"`
-	CandidateName              string                    `json:"candidate_name"`
-	CandidateConditions        RuleMatchConditions       `json:"candidate_conditions"`
-	CandidateEnabled           bool                      `json:"candidate_enabled"`
-	OverlapFindings            []MigrationOverlapFinding `json:"overlap_findings"`
-	UnsupportedScopeFields     []string                  `json:"unsupported_scope_fields"`
-	ToleranceDurationConfirmed bool                      `json:"tolerance_duration_confirmed"`
+	LegacyRuleID           uuid.UUID                 `json:"legacy_rule_id"`
+	LegacyRuleName         string                    `json:"legacy_rule_name"`
+	LegacyRuleUpdatedAt    time.Time                 `json:"legacy_rule_updated_at"`
+	LegacyPriority         int                       `json:"legacy_priority"`
+	CandidatePriority      int                       `json:"candidate_priority"`
+	AlarmSources           []string                  `json:"alarm_sources"`
+	AlarmIdentifiers       []string                  `json:"alarm_identifiers"`
+	DeviceIDs              []uuid.UUID               `json:"device_ids"`
+	DeviceGroupIDs         []uuid.UUID               `json:"device_group_ids"`
+	RecipientEmails        []string                  `json:"recipient_emails"`
+	CandidateName          string                    `json:"candidate_name"`
+	CandidateConditions    RuleMatchConditions       `json:"candidate_conditions"`
+	OverlapFindings        []MigrationOverlapFinding `json:"overlap_findings"`
+	UnsupportedScopeFields []string                  `json:"unsupported_scope_fields"`
 }
 
 type MigrationCandidateBinding struct {
@@ -69,15 +66,14 @@ type MigrationCandidateBinding struct {
 }
 
 type MigrationCutoverInput struct {
-	LegacyRuleID               uuid.UUID
-	NotificationRuleID         uuid.UUID
-	ExpectedLegacyUpdatedAt    time.Time
-	ConfirmedOverlapRuleIDs    []uuid.UUID
-	ToleranceDurationConfirmed bool
-	ShadowComparedEvents       int64
-	LegacyShadowMatches        int64
-	NotificationShadowMatches  int64
-	Actor                      string
+	LegacyRuleID              uuid.UUID
+	NotificationRuleID        uuid.UUID
+	ExpectedLegacyUpdatedAt   time.Time
+	ConfirmedOverlapRuleIDs   []uuid.UUID
+	ShadowComparedEvents      int64
+	LegacyShadowMatches       int64
+	NotificationShadowMatches int64
+	Actor                     string
 }
 
 type MigrationService struct {
@@ -157,7 +153,7 @@ func (s *MigrationService) CreateDisabledCandidate(
 	if err != nil {
 		return nil, fmt.Errorf("create disabled notification migration candidate: %w", err)
 	}
-	if rule.CurrentEnabledVersionID != nil || rule.Enabled != nil {
+	if rule == nil || rule.CurrentEnabledVersionID != nil || rule.Enabled != nil {
 		return nil, fmt.Errorf("%w: newly migrated rule was unexpectedly enabled", ErrMigrationCandidateMismatch)
 	}
 	return rule, nil
@@ -173,9 +169,6 @@ func (s *MigrationService) Cutover(ctx context.Context, input MigrationCutoverIn
 	}
 	if !sameUUIDSet(overlapRuleIDs(preview.OverlapFindings), input.ConfirmedOverlapRuleIDs) {
 		return ErrMigrationOverlapUnconfirmed
-	}
-	if !input.ToleranceDurationConfirmed {
-		return ErrMigrationToleranceUnconfirmed
 	}
 	if input.ShadowComparedEvents <= 0 || input.LegacyShadowMatches < 0 ||
 		input.NotificationShadowMatches < 0 || input.LegacyShadowMatches != input.NotificationShadowMatches {
@@ -247,8 +240,8 @@ func buildLegacyEmailPreview(rules []alarm.AlarmFilterRule, index int) LegacyEma
 		CandidateConditions: RuleMatchConditions{
 			AlarmIdentifiers: cloneStrings(rule.AlarmIdentifiers), DeviceIDs: cloneUUIDs(rule.DeviceIDs),
 		},
-		CandidateEnabled: false, OverlapFindings: make([]MigrationOverlapFinding, 0),
-		UnsupportedScopeFields: make([]string, 0), ToleranceDurationConfirmed: false,
+		OverlapFindings:        make([]MigrationOverlapFinding, 0),
+		UnsupportedScopeFields: make([]string, 0),
 	}
 	if len(rule.AlarmSources) > 0 {
 		preview.UnsupportedScopeFields = append(preview.UnsupportedScopeFields, "alarm_sources")
@@ -307,18 +300,20 @@ func uuidDimensionsOverlap(left, right []uuid.UUID) bool {
 }
 
 func candidateMatchesPreview(candidate *NotificationRule, preview LegacyEmailMigrationPreview) bool {
-	if candidate == nil || candidate.Enabled == nil || candidate.Name != preview.CandidateName ||
+	if candidate == nil || candidate.Enabled == nil ||
 		candidate.Priority != preview.CandidatePriority || candidate.Enabled.ChangeReason != migrationReason(preview.LegacyRuleID) ||
 		!equalMatchConditions(candidate.Enabled.MatchConditions, preview.CandidateConditions) ||
-		len(candidate.Enabled.Recipients) != len(preview.RecipientEmails) {
+		len(candidate.Enabled.Recipients) != len(preview.RecipientEmails) || len(candidate.Enabled.Channels) != 1 ||
+		candidate.Enabled.Channels[0].Channel != TemplateChannelEmail {
 		return false
 	}
-	for _, channel := range candidate.Enabled.Channels {
-		if channel.Channel == TemplateChannelEmail {
-			return true
+	for _, recipient := range candidate.Enabled.Recipients {
+		if recipient.TargetType != RecipientTargetFixedContact ||
+			!sameStringSet(recipient.ChannelLimit, []string{TemplateChannelEmail}) {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func equalMatchConditions(left, right RuleMatchConditions) bool {

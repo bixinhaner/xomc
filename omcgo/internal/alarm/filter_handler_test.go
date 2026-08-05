@@ -192,7 +192,7 @@ func TestFilterHandlerToggle_SetsUpdatedByFromContext(t *testing.T) {
 	require.Equal(t, "alice", captured.UpdatedBy)
 }
 
-func TestFilterHandlerRejectsOrdinaryBarrierMutations(t *testing.T) {
+func TestFilterHandlerMapsBarrierMutationsToConflict(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	id := uuid.New()
 	writeCalls := 0
@@ -201,8 +201,14 @@ func TestFilterHandlerRejectsOrdinaryBarrierMutations(t *testing.T) {
 			require.Equal(t, id, gotID)
 			return &AlarmFilterRule{ID: id, Action: FilterActionLegacyNotificationBarrier}, nil
 		},
-		updateFn: func(context.Context, *AlarmFilterRule) error { writeCalls++; return nil },
-		deleteFn: func(context.Context, uuid.UUID) error { writeCalls++; return nil },
+		updateFn: func(context.Context, *AlarmFilterRule) error {
+			writeCalls++
+			return ErrAlarmFilterBarrierManaged
+		},
+		deleteFn: func(context.Context, uuid.UUID) error {
+			writeCalls++
+			return ErrAlarmFilterBarrierManaged
+		},
 	}
 	handler := NewFilterHandler(repo, zap.NewNop())
 	router := gin.New()
@@ -221,7 +227,7 @@ func TestFilterHandlerRejectsOrdinaryBarrierMutations(t *testing.T) {
 		router.ServeHTTP(resp, req)
 		require.Equal(t, http.StatusConflict, resp.Code)
 	}
-	require.Zero(t, writeCalls)
+	require.Equal(t, 3, writeCalls)
 }
 
 func TestFilterHandlerCreateDoesNotExposeBarrierAction(t *testing.T) {

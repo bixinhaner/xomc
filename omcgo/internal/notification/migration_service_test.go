@@ -89,8 +89,6 @@ func TestMigrationPreviewReportsFirstMatchOverlapAndCompatibility(t *testing.T) 
 	require.Equal(t, legacyID, preview.LegacyRuleID)
 	require.Equal(t, 10, preview.LegacyPriority)
 	require.Equal(t, 1, preview.CandidatePriority)
-	require.False(t, preview.CandidateEnabled)
-	require.False(t, preview.ToleranceDurationConfirmed)
 	require.Equal(t, []string{"noc@example.com"}, preview.RecipientEmails)
 	require.Equal(t, []string{"alarm_sources"}, preview.UnsupportedScopeFields)
 	require.Equal(t, []MigrationOverlapFinding{{
@@ -141,7 +139,9 @@ func TestMigrationCutoverRequiresEveryGate(t *testing.T) {
 	}}
 	enabledVersion := &NotificationRuleVersion{
 		ID: versionID, MatchConditions: RuleMatchConditions{AlarmIdentifiers: []string{"DEVICE_OFFLINE"}},
-		ChangeReason: migrationReason(legacyID), Recipients: []RuleRecipient{{}},
+		ChangeReason: migrationReason(legacyID), Recipients: []RuleRecipient{{
+			TargetType: RecipientTargetFixedContact, ChannelLimit: []string{TemplateChannelEmail},
+		}},
 		Channels: []RuleChannel{{Channel: TemplateChannelEmail}},
 	}
 	candidate := &NotificationRule{
@@ -153,8 +153,8 @@ func TestMigrationCutoverRequiresEveryGate(t *testing.T) {
 	valid := MigrationCutoverInput{
 		LegacyRuleID: legacyID, NotificationRuleID: notificationRuleID,
 		ExpectedLegacyUpdatedAt: updatedAt, ConfirmedOverlapRuleIDs: []uuid.UUID{overlapID},
-		ToleranceDurationConfirmed: true, ShadowComparedEvents: 20,
-		LegacyShadowMatches: 7, NotificationShadowMatches: 7, Actor: "operator",
+		ShadowComparedEvents: 20,
+		LegacyShadowMatches:  7, NotificationShadowMatches: 7, Actor: "operator",
 	}
 
 	tests := []struct {
@@ -163,7 +163,6 @@ func TestMigrationCutoverRequiresEveryGate(t *testing.T) {
 		err  error
 	}{
 		{"overlap", func(input *MigrationCutoverInput) { input.ConfirmedOverlapRuleIDs = nil }, ErrMigrationOverlapUnconfirmed},
-		{"tolerance", func(input *MigrationCutoverInput) { input.ToleranceDurationConfirmed = false }, ErrMigrationToleranceUnconfirmed},
 		{"shadow sample", func(input *MigrationCutoverInput) { input.ShadowComparedEvents = 0 }, ErrMigrationShadowMismatch},
 		{"shadow mismatch", func(input *MigrationCutoverInput) { input.NotificationShadowMatches++ }, ErrMigrationShadowMismatch},
 	}
@@ -198,7 +197,9 @@ func TestMigrationCutoverReplacesOnlyTheSelectedLegacyEmailRule(t *testing.T) {
 	}}}
 	enabledVersion := &NotificationRuleVersion{
 		ID: versionID, MatchConditions: RuleMatchConditions{AlarmIdentifiers: []string{"DEVICE_OFFLINE"}},
-		ChangeReason: migrationReason(legacyID), Recipients: []RuleRecipient{{}},
+		ChangeReason: migrationReason(legacyID), Recipients: []RuleRecipient{{
+			TargetType: RecipientTargetFixedContact, ChannelLimit: []string{TemplateChannelEmail},
+		}},
 		Channels: []RuleChannel{{Channel: TemplateChannelEmail}},
 	}
 	rules := &migrationRuleRepositoryStub{rule: &NotificationRule{
@@ -209,8 +210,8 @@ func TestMigrationCutoverReplacesOnlyTheSelectedLegacyEmailRule(t *testing.T) {
 
 	err := service.Cutover(context.Background(), MigrationCutoverInput{
 		LegacyRuleID: legacyID, NotificationRuleID: notificationRuleID,
-		ExpectedLegacyUpdatedAt: updatedAt, ToleranceDurationConfirmed: true,
-		ShadowComparedEvents: 10, LegacyShadowMatches: 3, NotificationShadowMatches: 3,
+		ExpectedLegacyUpdatedAt: updatedAt,
+		ShadowComparedEvents:    10, LegacyShadowMatches: 3, NotificationShadowMatches: 3,
 		Actor: "operator",
 	})
 

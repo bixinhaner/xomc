@@ -896,8 +896,9 @@ git commit -m "feat(notification): 增加可靠邮件投递Worker"
 
 - [x] **Step 2: 写迁移预览测试**
 
-预览输出命中范围、收件人、重叠低优先级规则、Tolerance Duration 未确认标志；生成的新
-通知规则必须默认 disabled。
+预览输出命中范围、收件人和重叠低优先级规则；生成的新通知规则必须默认 disabled。当前
+`alarm_filters` 没有 Tolerance Duration 字段，不在本迁移服务中增加无来源的确认参数；未来
+导入老 OMC `alarm_view_template` 时再按不兼容项处理。
 
 - [x] **Step 3: 实现显式 compatibility action**
 
