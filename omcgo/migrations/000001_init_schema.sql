@@ -4872,10 +4872,423 @@ CREATE TABLE public.notification_templates (
     body text NOT NULL,
     variables text[] DEFAULT '{}'::text[] NOT NULL,
     enabled boolean DEFAULT true NOT NULL,
+    revision bigint DEFAULT 1 NOT NULL,
+    current_draft_version_id uuid,
+    current_published_version_id uuid,
+    archived boolean DEFAULT false NOT NULL,
+    created_by character varying(128) DEFAULT 'system'::character varying NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT notification_templates_channel_check CHECK (((channel)::text = ANY (ARRAY[('email'::character varying)::text, ('sms'::character varying)::text, ('webhook'::character varying)::text])))
+    CONSTRAINT notification_templates_channel_check CHECK (((channel)::text = ANY (ARRAY[('email'::character varying)::text, ('sms'::character varying)::text, ('webhook'::character varying)::text]))),
+    CONSTRAINT notification_templates_revision_check CHECK ((revision > 0))
 );
+
+
+--
+-- Name: notification_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    event_id uuid NOT NULL,
+    event_type character varying(128) NOT NULL,
+    occurrence_id uuid NOT NULL,
+    alarm_version bigint NOT NULL,
+    schema_version integer NOT NULL,
+    occurred_at timestamp with time zone NOT NULL,
+    payload jsonb NOT NULL,
+    processing_state character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    received_at timestamp with time zone DEFAULT now() NOT NULL,
+    processed_at timestamp with time zone,
+    last_error text,
+    CONSTRAINT notification_events_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_events_event_id_key UNIQUE (event_id),
+    CONSTRAINT notification_events_alarm_version_check CHECK ((alarm_version > 0)),
+    CONSTRAINT notification_events_schema_version_check CHECK ((schema_version > 0)),
+    CONSTRAINT notification_events_processing_state_check CHECK (((processing_state)::text = ANY ((ARRAY['pending'::character varying, 'applied'::character varying, 'waiting'::character varying, 'ignored'::character varying, 'failed'::character varying])::text[])))
+);
+
+
+--
+-- Name: notification_occurrences; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_occurrences (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    occurrence_id uuid NOT NULL,
+    last_applied_version bigint DEFAULT 0 NOT NULL,
+    schedule_generation bigint DEFAULT 1 NOT NULL,
+    status character varying(16) DEFAULT 'active'::character varying NOT NULL,
+    severity smallint NOT NULL,
+    device_id uuid NOT NULL,
+    device_sn character varying(64) NOT NULL,
+    carrier character varying(16) NOT NULL,
+    technology character varying(16) NOT NULL,
+    alarm_identifier character varying(64) NOT NULL,
+    current_snapshot jsonb NOT NULL,
+    raised_at timestamp with time zone NOT NULL,
+    acknowledged_at timestamp with time zone,
+    cleared_at timestamp with time zone,
+    last_event_id uuid NOT NULL,
+    version_gap boolean DEFAULT false NOT NULL,
+    gap_first_seen_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_occurrences_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_occurrences_occurrence_id_key UNIQUE (occurrence_id),
+    CONSTRAINT notification_occurrences_last_version_check CHECK ((last_applied_version >= 0)),
+    CONSTRAINT notification_occurrences_generation_check CHECK ((schedule_generation > 0)),
+    CONSTRAINT notification_occurrences_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'acknowledged'::character varying, 'cleared'::character varying])::text[])))
+);
+
+
+--
+-- Name: notification_rules; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_rules (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name character varying(128) NOT NULL,
+    revision bigint DEFAULT 1 NOT NULL,
+    current_draft_version_id uuid,
+    current_published_version_id uuid,
+    current_enabled_version_id uuid,
+    priority integer DEFAULT 100 NOT NULL,
+    archived boolean DEFAULT false NOT NULL,
+    created_by character varying(128) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_rules_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_rules_name_key UNIQUE (name),
+    CONSTRAINT notification_rules_revision_check CHECK ((revision > 0))
+);
+
+
+--
+-- Name: notification_rule_versions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_rule_versions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    rule_id uuid NOT NULL,
+    version_no bigint NOT NULL,
+    match_conditions jsonb DEFAULT '{}'::jsonb NOT NULL,
+    policy jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_by character varying(128) NOT NULL,
+    change_reason text DEFAULT ''::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    published_at timestamp with time zone,
+    CONSTRAINT notification_rule_versions_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_rule_versions_rule_version_key UNIQUE (rule_id, version_no),
+    CONSTRAINT notification_rule_versions_version_check CHECK ((version_no > 0)),
+    CONSTRAINT notification_rule_versions_rule_id_fkey FOREIGN KEY (rule_id) REFERENCES public.notification_rules(id) ON DELETE CASCADE
+);
+
+
+--
+-- Name: notification_rule_recipients; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_rule_recipients (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    rule_version_id uuid NOT NULL,
+    target_type character varying(24) NOT NULL,
+    target_id character varying(128),
+    address_ciphertext bytea,
+    address_key_version integer,
+    recipient_fingerprint bytea,
+    channel_limit character varying(32)[] DEFAULT '{}'::character varying[] NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_rule_recipients_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_rule_recipients_target_type_check CHECK (((target_type)::text = ANY ((ARRAY['fixed_contact'::character varying, 'user'::character varying, 'role'::character varying, 'contact_group'::character varying])::text[]))),
+    CONSTRAINT notification_rule_recipients_address_key_check CHECK (((address_key_version IS NULL) OR (address_key_version > 0))),
+    CONSTRAINT notification_rule_recipients_rule_version_id_fkey FOREIGN KEY (rule_version_id) REFERENCES public.notification_rule_versions(id) ON DELETE CASCADE
+);
+
+
+--
+-- Name: notification_contact_groups; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_contact_groups (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name character varying(128) NOT NULL,
+    description text DEFAULT ''::text NOT NULL,
+    is_default boolean DEFAULT false NOT NULL,
+    revision bigint DEFAULT 1 NOT NULL,
+    archived boolean DEFAULT false NOT NULL,
+    created_by character varying(128) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_contact_groups_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_contact_groups_name_key UNIQUE (name),
+    CONSTRAINT notification_contact_groups_revision_check CHECK ((revision > 0))
+);
+
+
+--
+-- Name: notification_contact_group_members; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_contact_group_members (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    contact_group_id uuid NOT NULL,
+    target_type character varying(24) NOT NULL,
+    target_id character varying(128),
+    address_ciphertext bytea,
+    address_key_version integer,
+    recipient_fingerprint bytea,
+    channel_limit character varying(32)[] DEFAULT '{}'::character varying[] NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_contact_group_members_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_contact_group_members_target_type_check CHECK (((target_type)::text = ANY ((ARRAY['fixed_contact'::character varying, 'user'::character varying, 'role'::character varying])::text[]))),
+    CONSTRAINT notification_contact_group_members_address_key_check CHECK (((address_key_version IS NULL) OR (address_key_version > 0))),
+    CONSTRAINT notification_contact_group_members_group_id_fkey FOREIGN KEY (contact_group_id) REFERENCES public.notification_contact_groups(id) ON DELETE CASCADE
+);
+
+
+--
+-- Name: notification_template_versions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_template_versions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    template_id uuid NOT NULL,
+    version_no bigint NOT NULL,
+    channel character varying(32) NOT NULL,
+    language character varying(16) DEFAULT 'zh-CN'::character varying NOT NULL,
+    subject text DEFAULT ''::text NOT NULL,
+    text_body text NOT NULL,
+    html_body text,
+    variables text[] DEFAULT '{}'::text[] NOT NULL,
+    created_by character varying(128) NOT NULL,
+    change_reason text DEFAULT ''::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    published_at timestamp with time zone,
+    CONSTRAINT notification_template_versions_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_template_versions_template_version_key UNIQUE (template_id, version_no),
+    CONSTRAINT notification_template_versions_version_check CHECK ((version_no > 0)),
+    CONSTRAINT notification_template_versions_channel_check CHECK (((channel)::text = ANY ((ARRAY['email'::character varying, 'sms'::character varying])::text[])))
+);
+
+
+--
+-- Name: notification_channel_configs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_channel_configs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    channel character varying(32) NOT NULL,
+    name character varying(128) NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    parameters jsonb DEFAULT '{}'::jsonb NOT NULL,
+    secret_ref character varying(256),
+    revision bigint DEFAULT 1 NOT NULL,
+    created_by character varying(128) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_channel_configs_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_channel_configs_name_key UNIQUE (name),
+    CONSTRAINT notification_channel_configs_channel_check CHECK (((channel)::text = ANY ((ARRAY['email'::character varying, 'sms_kafka'::character varying, 'sms_direct'::character varying])::text[]))),
+    CONSTRAINT notification_channel_configs_revision_check CHECK ((revision > 0))
+);
+
+
+--
+-- Name: notification_channel_health; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_channel_health (
+    channel_config_id uuid NOT NULL,
+    circuit_state character varying(16) DEFAULT 'closed'::character varying NOT NULL,
+    consecutive_successes integer DEFAULT 0 NOT NULL,
+    consecutive_failures integer DEFAULT 0 NOT NULL,
+    last_success_at timestamp with time zone,
+    last_failure_at timestamp with time zone,
+    last_verified_at timestamp with time zone,
+    last_error_category character varying(32),
+    last_error_summary text,
+    circuit_opened_at timestamp with time zone,
+    next_probe_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_channel_health_pkey PRIMARY KEY (channel_config_id),
+    CONSTRAINT notification_channel_health_circuit_state_check CHECK (((circuit_state)::text = ANY ((ARRAY['closed'::character varying, 'open'::character varying, 'half_open'::character varying])::text[]))),
+    CONSTRAINT notification_channel_health_successes_check CHECK ((consecutive_successes >= 0)),
+    CONSTRAINT notification_channel_health_failures_check CHECK ((consecutive_failures >= 0)),
+    CONSTRAINT notification_channel_health_config_id_fkey FOREIGN KEY (channel_config_id) REFERENCES public.notification_channel_configs(id) ON DELETE CASCADE
+);
+
+
+--
+-- Name: notification_rule_channels; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_rule_channels (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    rule_version_id uuid NOT NULL,
+    channel character varying(32) NOT NULL,
+    channel_config_id uuid NOT NULL,
+    raised_template_version_id uuid,
+    escalated_template_version_id uuid,
+    cleared_template_version_id uuid,
+    policy jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_rule_channels_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_rule_channels_version_channel_key UNIQUE (rule_version_id, channel, channel_config_id),
+    CONSTRAINT notification_rule_channels_channel_check CHECK (((channel)::text = ANY ((ARRAY['email'::character varying, 'sms_kafka'::character varying, 'sms_direct'::character varying])::text[]))),
+    CONSTRAINT notification_rule_channels_rule_version_id_fkey FOREIGN KEY (rule_version_id) REFERENCES public.notification_rule_versions(id) ON DELETE CASCADE,
+    CONSTRAINT notification_rule_channels_config_id_fkey FOREIGN KEY (channel_config_id) REFERENCES public.notification_channel_configs(id) ON DELETE RESTRICT,
+    CONSTRAINT notification_rule_channels_raised_template_fkey FOREIGN KEY (raised_template_version_id) REFERENCES public.notification_template_versions(id) ON DELETE RESTRICT,
+    CONSTRAINT notification_rule_channels_escalated_template_fkey FOREIGN KEY (escalated_template_version_id) REFERENCES public.notification_template_versions(id) ON DELETE RESTRICT,
+    CONSTRAINT notification_rule_channels_cleared_template_fkey FOREIGN KEY (cleared_template_version_id) REFERENCES public.notification_template_versions(id) ON DELETE RESTRICT
+);
+
+
+--
+-- Name: notification_schedules; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_schedules (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    occurrence_id uuid NOT NULL,
+    rule_version_id uuid NOT NULL,
+    channel character varying(32) NOT NULL,
+    recipient_fingerprint bytea NOT NULL,
+    schedule_kind character varying(32) NOT NULL,
+    sequence_no integer DEFAULT 0 NOT NULL,
+    generation bigint NOT NULL,
+    due_at timestamp with time zone NOT NULL,
+    state character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    locked_by character varying(128),
+    locked_at timestamp with time zone,
+    lease_expires_at timestamp with time zone,
+    cancelled_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    created_event_version bigint NOT NULL,
+    delivery_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_schedules_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_schedules_dedup_key UNIQUE (occurrence_id, rule_version_id, channel, recipient_fingerprint, schedule_kind, sequence_no, generation),
+    CONSTRAINT notification_schedules_sequence_check CHECK ((sequence_no >= 0)),
+    CONSTRAINT notification_schedules_generation_check CHECK ((generation > 0)),
+    CONSTRAINT notification_schedules_event_version_check CHECK ((created_event_version > 0)),
+    CONSTRAINT notification_schedules_state_check CHECK (((state)::text = ANY ((ARRAY['pending'::character varying, 'claimed'::character varying, 'completed'::character varying, 'cancelled'::character varying])::text[]))),
+    CONSTRAINT notification_schedules_occurrence_id_fkey FOREIGN KEY (occurrence_id) REFERENCES public.notification_occurrences(occurrence_id) ON DELETE CASCADE,
+    CONSTRAINT notification_schedules_rule_version_id_fkey FOREIGN KEY (rule_version_id) REFERENCES public.notification_rule_versions(id) ON DELETE RESTRICT
+);
+
+
+--
+-- Name: notification_deliveries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_deliveries (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    event_id uuid NOT NULL,
+    occurrence_id uuid NOT NULL,
+    rule_version_id uuid NOT NULL,
+    template_version_id uuid NOT NULL,
+    channel_config_id uuid NOT NULL,
+    channel character varying(32) NOT NULL,
+    dispatch_kind character varying(16) NOT NULL,
+    sequence_no integer DEFAULT 0 NOT NULL,
+    recipient_type character varying(24) NOT NULL,
+    address_ciphertext bytea NOT NULL,
+    address_key_version integer NOT NULL,
+    recipient_fingerprint bytea NOT NULL,
+    flow_state character varying(24) DEFAULT 'queued'::character varying NOT NULL,
+    delivery_result character varying(24) DEFAULT 'none'::character varying NOT NULL,
+    available_at timestamp with time zone DEFAULT now() NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    locked_by character varying(128),
+    locked_at timestamp with time zone,
+    lease_expires_at timestamp with time zone,
+    occurrence_version bigint NOT NULL,
+    schedule_generation bigint NOT NULL,
+    provider_message_id character varying(256),
+    origin_delivery_id uuid,
+    suppression_reason character varying(64),
+    failure_reason character varying(64),
+    accepted_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_deliveries_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_deliveries_dedup_key UNIQUE (event_id, dispatch_kind, sequence_no, channel, recipient_fingerprint),
+    CONSTRAINT notification_deliveries_sequence_check CHECK ((sequence_no >= 0)),
+    CONSTRAINT notification_deliveries_address_key_check CHECK ((address_key_version > 0)),
+    CONSTRAINT notification_deliveries_occurrence_version_check CHECK ((occurrence_version > 0)),
+    CONSTRAINT notification_deliveries_generation_check CHECK ((schedule_generation > 0)),
+    CONSTRAINT notification_deliveries_dispatch_kind_check CHECK (((dispatch_kind)::text = ANY ((ARRAY['initial'::character varying, 'escalation'::character varying, 'repeat'::character varying, 'recovery'::character varying, 'digest'::character varying])::text[]))),
+    CONSTRAINT notification_deliveries_flow_state_check CHECK (((flow_state)::text = ANY ((ARRAY['queued'::character varying, 'sending'::character varying, 'retry_wait'::character varying, 'awaiting_receipt'::character varying, 'completed'::character varying, 'dead_letter'::character varying, 'suppressed'::character varying, 'cancelled'::character varying])::text[]))),
+    CONSTRAINT notification_deliveries_result_check CHECK (((delivery_result)::text = ANY ((ARRAY['none'::character varying, 'accepted'::character varying, 'delivered'::character varying, 'failed'::character varying, 'unknown'::character varying, 'handoff_only'::character varying])::text[]))),
+    CONSTRAINT notification_deliveries_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.notification_events(event_id) ON DELETE RESTRICT,
+    CONSTRAINT notification_deliveries_occurrence_id_fkey FOREIGN KEY (occurrence_id) REFERENCES public.notification_occurrences(occurrence_id) ON DELETE RESTRICT,
+    CONSTRAINT notification_deliveries_rule_version_id_fkey FOREIGN KEY (rule_version_id) REFERENCES public.notification_rule_versions(id) ON DELETE RESTRICT,
+    CONSTRAINT notification_deliveries_template_version_id_fkey FOREIGN KEY (template_version_id) REFERENCES public.notification_template_versions(id) ON DELETE RESTRICT,
+    CONSTRAINT notification_deliveries_channel_config_id_fkey FOREIGN KEY (channel_config_id) REFERENCES public.notification_channel_configs(id) ON DELETE RESTRICT,
+    CONSTRAINT notification_deliveries_origin_delivery_id_fkey FOREIGN KEY (origin_delivery_id) REFERENCES public.notification_deliveries(id) ON DELETE RESTRICT
+);
+
+
+--
+-- Name: notification_delivery_attempts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_delivery_attempts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    delivery_id uuid NOT NULL,
+    attempt_no integer NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    finished_at timestamp with time zone,
+    result character varying(24) NOT NULL,
+    error_category character varying(32),
+    status_summary character varying(256),
+    provider_request_id character varying(256),
+    next_retry_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_delivery_attempts_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_delivery_attempts_delivery_attempt_key UNIQUE (delivery_id, attempt_no),
+    CONSTRAINT notification_delivery_attempts_attempt_check CHECK ((attempt_no > 0)),
+    CONSTRAINT notification_delivery_attempts_delivery_id_fkey FOREIGN KEY (delivery_id) REFERENCES public.notification_deliveries(id) ON DELETE CASCADE
+);
+
+
+--
+-- Name: notification_aggregation_buckets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_aggregation_buckets (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    rule_version_id uuid NOT NULL,
+    channel character varying(32) NOT NULL,
+    recipient_fingerprint bytea NOT NULL,
+    scope_fingerprint bytea NOT NULL,
+    severity smallint NOT NULL,
+    window_started_at timestamp with time zone NOT NULL,
+    window_ends_at timestamp with time zone NOT NULL,
+    state character varying(16) DEFAULT 'open'::character varying NOT NULL,
+    event_count integer DEFAULT 0 NOT NULL,
+    delivery_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_aggregation_buckets_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_aggregation_buckets_window_key UNIQUE (rule_version_id, channel, recipient_fingerprint, scope_fingerprint, severity, window_started_at),
+    CONSTRAINT notification_aggregation_buckets_window_check CHECK ((window_ends_at > window_started_at)),
+    CONSTRAINT notification_aggregation_buckets_event_count_check CHECK ((event_count >= 0)),
+    CONSTRAINT notification_aggregation_buckets_state_check CHECK (((state)::text = ANY ((ARRAY['open'::character varying, 'flushing'::character varying, 'closed'::character varying])::text[]))),
+    CONSTRAINT notification_aggregation_buckets_rule_version_id_fkey FOREIGN KEY (rule_version_id) REFERENCES public.notification_rule_versions(id) ON DELETE RESTRICT,
+    CONSTRAINT notification_aggregation_buckets_delivery_id_fkey FOREIGN KEY (delivery_id) REFERENCES public.notification_deliveries(id) ON DELETE RESTRICT
+);
+
+
+CREATE INDEX idx_notification_events_process ON public.notification_events USING btree (processing_state, received_at) WHERE ((processing_state)::text = ANY ((ARRAY['pending'::character varying, 'waiting'::character varying, 'failed'::character varying])::text[]));
+CREATE INDEX idx_notification_events_occurrence_version ON public.notification_events USING btree (occurrence_id, alarm_version);
+CREATE INDEX idx_notification_schedules_claim ON public.notification_schedules USING btree (state, due_at, lease_expires_at) WHERE ((state)::text = ANY ((ARRAY['pending'::character varying, 'claimed'::character varying])::text[]));
+CREATE INDEX idx_notification_deliveries_claim ON public.notification_deliveries USING btree (flow_state, next_attempt_at, lease_expires_at) WHERE ((flow_state)::text = ANY ((ARRAY['queued'::character varying, 'retry_wait'::character varying, 'sending'::character varying])::text[]));
+CREATE INDEX idx_notification_deliveries_occurrence ON public.notification_deliveries USING btree (occurrence_id, created_at DESC);
+CREATE INDEX idx_notification_delivery_attempts_delivery ON public.notification_delivery_attempts USING btree (delivery_id, attempt_no);
 
 
 --
@@ -8913,6 +9326,14 @@ ALTER TABLE ONLY public.notification_templates
 
 ALTER TABLE ONLY public.notification_templates
     ADD CONSTRAINT notification_templates_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: notification_template_versions notification_template_versions_template_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_template_versions
+    ADD CONSTRAINT notification_template_versions_template_id_fkey FOREIGN KEY (template_id) REFERENCES public.notification_templates(id) ON DELETE CASCADE;
 
 
 --
