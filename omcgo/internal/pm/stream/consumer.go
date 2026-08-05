@@ -247,6 +247,7 @@ type TimeoutScanner struct {
 	selector           *finalizeClaimSelector
 	deviceVersionsFor  *TaskSnapshot
 	deviceVersionIDs   []uuid.UUID
+	replayDeviceHour   func(context.Context, WindowKey) (bool, error)
 }
 
 type finalizeWindowRepository interface {
@@ -403,6 +404,13 @@ func (s *TimeoutScanner) SetGranularityGrace(
 	if monthly > 0 {
 		s.graceByGranularity[GranularityMonthly] = monthly
 	}
+	return s
+}
+
+func (s *TimeoutScanner) SetIncompleteDeviceHourReplay(
+	replay func(context.Context, WindowKey) (bool, error),
+) *TimeoutScanner {
+	s.replayDeviceHour = replay
 	return s
 }
 
@@ -801,7 +809,18 @@ func (s *TimeoutScanner) finalizeWorker(
 			}
 			renewDone <- renewErr
 		}()
-		err := s.finalizeWindow(finalizeCtx, window.Key, reason, job.token)
+		var err error
+		if reason == CloseTimeout && job.queue == finalizeHourlyDevice &&
+			s.replayDeviceHour != nil {
+			var complete bool
+			complete, err = s.replayDeviceHour(finalizeCtx, window.Key)
+			if complete {
+				reason = CloseComplete
+			}
+		}
+		if err == nil {
+			err = s.finalizeWindow(finalizeCtx, window.Key, reason, job.token)
+		}
 		cancelFinalize()
 		err = errors.Join(err, <-renewDone)
 		clearCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

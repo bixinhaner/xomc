@@ -157,6 +157,99 @@ func (r *Recovery) ReplayWindow(ctx context.Context, key WindowKey) error {
 	return nil
 }
 
+// ReplayDurableDeviceHour idempotently replays retained normalized PM events
+// into an incomplete synthetic device hour immediately before publication.
+// Existing source_file_id values are ignored by Redis, so this can only fill
+// missing slots; it cannot double-count the slots that were already accepted.
+func (r *Recovery) ReplayDurableDeviceHour(
+	ctx context.Context,
+	key WindowKey,
+) (bool, error) {
+	if r == nil || r.outbox == nil || r.store == nil ||
+		r.snapshot == nil || r.matcher == nil {
+		return false, fmt.Errorf("durable PM device-hour replay is not configured")
+	}
+	snapshot := r.snapshot.Current()
+	var version *TaskVersionSnapshot
+	if snapshot != nil {
+		version = snapshot.ByVersion[key.TaskVersionID]
+	}
+	if version == nil || !version.DevicePipeline || key.Granularity != GranularityHourly {
+		return false, nil
+	}
+
+	_, complete, matched, err := replayDurableDeviceHourSources(
+		ctx,
+		key,
+		snapshot,
+		r.matcher,
+		r.outbox.VisitPayloadsForPeriod,
+		r.store.Accumulate,
+	)
+	if err != nil {
+		return false, err
+	}
+	if !matched {
+		return false, nil
+	}
+	return complete, nil
+}
+
+type durablePayloadVisitor func(
+	context.Context,
+	time.Time,
+	time.Time,
+	func(event.PMAggregationNormalizedPayload) error,
+) error
+
+type contributionAccumulatorFunc func(
+	context.Context,
+	Contribution,
+) (AccumulateResult, error)
+
+func replayDurableDeviceHourSources(
+	ctx context.Context,
+	key WindowKey,
+	snapshot *TaskSnapshot,
+	matcher *Matcher,
+	visit durablePayloadVisitor,
+	accumulate contributionAccumulatorFunc,
+) (received int64, complete bool, matched bool, err error) {
+	if snapshot == nil || matcher == nil || visit == nil || accumulate == nil {
+		return 0, false, false, fmt.Errorf("durable PM device-hour replay dependencies are incomplete")
+	}
+	err = visit(ctx, key.Start, key.End, func(payload event.PMAggregationNormalizedPayload) error {
+		if payload.DeviceID.String() != key.EntityKey {
+			return nil
+		}
+		contributions, matchErr := matcher.MatchGranularity(
+			payload, snapshot, GranularityHourly,
+		)
+		if matchErr != nil {
+			return fmt.Errorf("match durable PM device-hour source: %w", matchErr)
+		}
+		for _, contribution := range contributions {
+			if !sameWindowKey(contribution.Key, key) {
+				continue
+			}
+			result, accumulateErr := accumulate(ctx, contribution)
+			if accumulateErr != nil {
+				return fmt.Errorf("accumulate durable PM device-hour source: %w", accumulateErr)
+			}
+			matched = true
+			if result.ReceivedSlots > received {
+				received = result.ReceivedSlots
+			}
+			complete = complete || result.Complete
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, false, matched, fmt.Errorf("replay durable PM device-hour sources: %w", err)
+	}
+	return received, complete, matched, nil
+}
+
 func (r *Recovery) recoverySourceFor(key WindowKey) (recoverySource, error) {
 	current := r.snapshot.Current()
 	if current == nil {
