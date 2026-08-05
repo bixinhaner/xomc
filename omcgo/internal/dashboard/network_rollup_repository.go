@@ -19,15 +19,20 @@ import (
 )
 
 type NetworkRollupPoint struct {
-	Technology   model.Technology
-	MetricPath   string
-	Granularity  metrics.Granularity
-	WindowStart  time.Time
-	WindowEnd    time.Time
-	Value        jsonx.Float
-	Complete     bool
-	MissingSlots int64
-	CreatedAt    time.Time
+	Technology           model.Technology
+	MetricPath           string
+	Granularity          metrics.Granularity
+	WindowStart          time.Time
+	WindowEnd            time.Time
+	Value                jsonx.Float
+	Complete             bool
+	MissingSlots         int64
+	CreatedAt            time.Time
+	Aggregation          pmstream.AggregationOp
+	Formula              string
+	SampleCount          int64
+	VersionEffectiveFrom time.Time
+	StatisType           string
 }
 
 type NetworkRollupQuery struct {
@@ -61,7 +66,12 @@ func (r *NetworkRollupRepository) ListSeries(ctx context.Context, query NetworkR
 	if err != nil {
 		return nil, err
 	}
-	return r.query(ctx, sql, args...)
+	points, err := r.query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	mergeSums := query.MetricType == "" || query.MetricType == metrics.MetricTypeKPI
+	return mergeNetworkRollupVersionSlices(points, mergeSums), nil
 }
 
 func (r *NetworkRollupRepository) ListLatestHourly(ctx context.Context, start, end time.Time) ([]NetworkRollupPoint, error) {
@@ -112,6 +122,11 @@ func (r *NetworkRollupRepository) query(ctx context.Context, query string, args 
 			&point.Complete,
 			&point.MissingSlots,
 			&point.CreatedAt,
+			&point.Aggregation,
+			&point.Formula,
+			&point.SampleCount,
+			&point.VersionEffectiveFrom,
+			&point.StatisType,
 		); err != nil {
 			return nil, fmt.Errorf("scan dashboard network rollup: %w", err)
 		}
@@ -138,7 +153,7 @@ func buildNetworkRollupSeriesSQL(query NetworkRollupQuery) (string, []any, error
 	}
 	metricPaths := normalizeMetricPaths(query.MetricPaths)
 	builder := storage.Psql.Select(
-		"DISTINCT ON (r.technology, r.metric_path, r.window_start) r.technology",
+		"r.technology",
 		"r.metric_path",
 		"r.granularity",
 		"r.window_start",
@@ -147,8 +162,18 @@ func buildNetworkRollupSeriesSQL(query NetworkRollupQuery) (string, []any, error
 		"r.complete",
 		"r.missing_slots",
 		"r.created_at",
+		"r.aggregation_op",
+		"COALESCE(metric_rule.formula, '')",
+		"r.sample_count",
+		"r.version_effective_from",
+		"COALESCE(dictionary.statis_type, '')",
 	).
 		From("pm_aggregation_results r").
+		Join(`pm_aggregation_version_metrics metric_rule
+  ON metric_rule.task_version_id = r.task_version_id
+ AND metric_rule.metric_path = r.metric_path`).
+		LeftJoin(`pm_metric_dictionary dictionary
+  ON dictionary.metric_path = r.metric_path`).
 		Join(`pm_aggregation_publications published_revision
   ON published_revision.task_version_id = r.task_version_id
  AND published_revision.granularity = r.granularity
@@ -164,7 +189,7 @@ func buildNetworkRollupSeriesSQL(query NetworkRollupQuery) (string, []any, error
 		}).
 		Where(sq.GtOrEq{"r.window_start": query.StartTime}).
 		Where(sq.Lt{"r.window_start": query.EndTime}).
-		OrderBy("r.technology", "r.metric_path", "r.window_start", "r.created_at DESC")
+		OrderBy("r.technology", "r.metric_path", "r.window_start", "r.version_effective_from", "r.created_at")
 	if query.Technology != "" {
 		builder = builder.Where(sq.Eq{"r.technology": query.Technology})
 	}
@@ -185,6 +210,11 @@ func buildLatestNetworkHourlySQL(start, end time.Time) (string, []any, error) {
 		"r.complete",
 		"r.missing_slots",
 		"r.created_at",
+		"r.aggregation_op",
+		"''",
+		"r.sample_count",
+		"r.version_effective_from",
+		"''",
 	).
 		From("pm_aggregation_results r").
 		Join(`pm_aggregation_publications published_revision
@@ -203,6 +233,87 @@ func buildLatestNetworkHourlySQL(start, end time.Time) (string, []any, error) {
 		Where(sq.Lt{"r.window_start": end}).
 		OrderBy("r.technology", "r.metric_path", "r.window_start DESC", "r.created_at DESC").
 		ToSql()
+}
+
+type networkRollupWindowKey struct {
+	technology  model.Technology
+	metricPath  string
+	granularity metrics.Granularity
+	windowStart int64
+	windowEnd   int64
+}
+
+// mergeNetworkRollupVersionSlices is dashboard-only. PM task versions remain
+// immutable; when an unchanged metric spans multiple effective slices of the
+// same natural window, the homepage combines sum slices. A changed formula
+// keeps the latest slice, preserving the existing semantic-change boundary.
+func mergeNetworkRollupVersionSlices(
+	points []NetworkRollupPoint,
+	mergeSums bool,
+) []NetworkRollupPoint {
+	groups := make(map[networkRollupWindowKey][]NetworkRollupPoint)
+	keys := make([]networkRollupWindowKey, 0)
+	for _, point := range points {
+		key := networkRollupWindowKey{
+			technology: point.Technology, metricPath: point.MetricPath,
+			granularity: point.Granularity,
+			windowStart: point.WindowStart.UTC().UnixNano(),
+			windowEnd:   point.WindowEnd.UTC().UnixNano(),
+		}
+		if _, exists := groups[key]; !exists {
+			keys = append(keys, key)
+		}
+		groups[key] = append(groups[key], point)
+	}
+	out := make([]NetworkRollupPoint, 0, len(keys))
+	for _, key := range keys {
+		slices := groups[key]
+		latest := slices[0]
+		for _, point := range slices[1:] {
+			if point.VersionEffectiveFrom.After(latest.VersionEffectiveFrom) ||
+				(point.VersionEffectiveFrom.Equal(latest.VersionEffectiveFrom) &&
+					point.CreatedAt.After(latest.CreatedAt)) {
+				latest = point
+			}
+		}
+		operation := strings.ToLower(strings.TrimSpace(latest.StatisType))
+		if operation == "" && latest.MetricPath != "" &&
+			strings.HasPrefix(strings.ToUpper(latest.MetricPath), "C") {
+			operation = string(latest.Aggregation)
+		}
+		if !mergeSums || operation != "sum" {
+			out = append(out, latest)
+			continue
+		}
+		merged := latest
+		merged.Value = 0
+		merged.SampleCount = 0
+		merged.Complete = true
+		merged.MissingSlots = 0
+		for _, point := range slices {
+			if point.Aggregation != latest.Aggregation || point.Formula != latest.Formula {
+				continue
+			}
+			merged.Value = jsonx.Float(float64(merged.Value) + float64(point.Value))
+			merged.SampleCount += point.SampleCount
+			merged.Complete = merged.Complete && point.Complete
+			merged.MissingSlots += point.MissingSlots
+			if point.CreatedAt.After(merged.CreatedAt) {
+				merged.CreatedAt = point.CreatedAt
+			}
+		}
+		out = append(out, merged)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Technology != out[j].Technology {
+			return out[i].Technology < out[j].Technology
+		}
+		if out[i].MetricPath != out[j].MetricPath {
+			return out[i].MetricPath < out[j].MetricPath
+		}
+		return out[i].WindowStart.Before(out[j].WindowStart)
+	})
+	return out
 }
 
 func validateNetworkRollupQuery(query NetworkRollupQuery) error {
