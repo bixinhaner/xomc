@@ -1,9 +1,15 @@
 package alarm
 
 import (
+	"errors"
 	"time"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
+)
+
+var (
+	ErrAlarmFilterMigrationPrecondition = errors.New("alarm filter migration precondition changed")
+	ErrAlarmFilterBarrierManaged        = errors.New("legacy notification barrier is managed by migration service")
 )
 
 // 过滤动作常量
@@ -18,6 +24,9 @@ const (
 	// FilterActionNotifyEmail W2.A.1/T-0007 整合：匹配规则向 EmailRecipients 列表发邮件。
 	// 迁移期与通知中心共享 appconfig SMTP transport；Task 12 切换后移除旧入口。
 	FilterActionNotifyEmail = "notify_email"
+	// FilterActionLegacyNotificationBarrier 仅由通知迁移服务写入旧规则原位置。
+	// 它保持首条命中语义，但不再执行旧邮件发送或修改告警。
+	FilterActionLegacyNotificationBarrier = "legacy_notification_barrier"
 )
 
 // 过滤类型常量

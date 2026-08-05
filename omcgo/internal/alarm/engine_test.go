@@ -163,6 +163,38 @@ func TestProcessNewAlarm(t *testing.T) {
 	assert.Equal(t, raisedAt, alarm.LastUpdatedAt)
 }
 
+func TestProcessLegacyNotificationBarrierContinuesAlarmPersistence(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	engine.filterEngine = NewFilterEngine(&mockFilterRuleRepo{rules: []AlarmFilterRule{
+		{
+			Name:             "migrated-email-barrier",
+			AlarmIdentifiers: []string{"DEVICE_OFFLINE"},
+			Action:           FilterActionLegacyNotificationBarrier,
+			Priority:         10,
+		},
+		{
+			Name:             "lower-auto-clear",
+			AlarmIdentifiers: []string{"DEVICE_OFFLINE"},
+			Action:           FilterActionAutoClear,
+			Priority:         20,
+		},
+	}}, store, nil, nil, nil, zap.NewNop())
+	alarm := &model.Alarm{
+		DeviceID:        uuid.New(),
+		DeviceSN:        "SN-BARRIER",
+		AlarmIdentifier: "DEVICE_OFFLINE",
+		Severity:        model.AlarmMajor,
+		Status:          model.AlarmActive,
+	}
+
+	err := engine.Process(context.Background(), alarm)
+
+	require.NoError(t, err)
+	require.Len(t, store.active, 1)
+	require.Nil(t, alarm.ClearedBy)
+}
+
 func TestProcessPreservesSourceSeverityWhenCarrierMappingMissing(t *testing.T) {
 	store := newMockAlarmStore()
 	registry := carrierpkg.NewRegistry()

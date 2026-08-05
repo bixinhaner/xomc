@@ -889,27 +889,27 @@ git commit -m "feat(notification): 增加可靠邮件投递Worker"
 - Produces: legacy rule preview、overlap findings、compatibility barrier
 - Consumes: 当前 `alarm_filters.notify_email`
 
-- [ ] **Step 1: 写首条命中回归测试**
+- [x] **Step 1: 写首条命中回归测试**
 
 构造高优先级 notify_email 和低优先级 ignore/auto_clear，断言迁移后 barrier 仍阻止低优先级
 规则；无 barrier 的测试必须先展示行为回归。
 
-- [ ] **Step 2: 写迁移预览测试**
+- [x] **Step 2: 写迁移预览测试**
 
 预览输出命中范围、收件人、重叠低优先级规则、Tolerance Duration 未确认标志；生成的新
 通知规则必须默认 disabled。
 
-- [ ] **Step 3: 实现显式 compatibility action**
+- [x] **Step 3: 实现显式 compatibility action**
 
 使用 `legacy_notification_barrier`，只返回 Handled，不发邮件、不改变告警。该 action 只能由
 迁移服务创建，普通创建 API 不暴露。
 
-- [ ] **Step 4: 实现分范围切换**
+- [x] **Step 4: 实现分范围切换**
 
 只有 overlap findings 已确认、Shadow 数量一致、规则明确启用时，才把对应 notify_email
 切换成 barrier。`notify_webhook` 保持原状。
 
-- [ ] **Step 5: 运行测试**
+- [x] **Step 5: 运行测试**
 
 Run: `cd omcgo && go test ./internal/alarm ./internal/notification -run 'Migration|Barrier|FirstMatch' -count=1`
 
@@ -920,7 +920,10 @@ Expected: PASS。
 使用测试 SMTP 验证 raised、minimum duration、repeat、ack cancel、clear recovery、
 熔断和逐收件人历史；对比 legacy 命中结果。
 
-- [ ] **Step 7: 提交**
+Task 12 已完成代码级门禁、全新基线和真实 PostgreSQL barrier 切换验证；本步骤仍保留未完成，
+等待可控告警样本和测试 SMTP 执行完整 raised/ack/clear/熔断业务验收，不能用单元测试替代。
+
+- [x] **Step 7: 提交**
 
 ```bash
 git add omcgo/internal/alarm omcgo/internal/notification omcgo/migrations/000001_init_schema.sql

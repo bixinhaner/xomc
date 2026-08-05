@@ -426,6 +426,7 @@ CREATE TABLE public.alarm_filters (
     webhook_url text,
     webhook_secret text,
     email_recipients text[],
+    CONSTRAINT chk_alarm_filters_action CHECK (((action)::text = ANY ((ARRAY['default'::character varying, 'ignore'::character varying, 'auto_acknowledge'::character varying, 'auto_clear'::character varying, 'notify_webhook'::character varying, 'notify_email'::character varying, 'legacy_notification_barrier'::character varying])::text[]))),
     CONSTRAINT chk_alarm_filters_webhook_url_required CHECK ((((action)::text <> 'notify_webhook'::text) OR ((webhook_url IS NOT NULL) AND (webhook_url <> ''::text))))
 );
 

@@ -191,3 +191,55 @@ func TestFilterHandlerToggle_SetsUpdatedByFromContext(t *testing.T) {
 	require.False(t, captured.Enabled)
 	require.Equal(t, "alice", captured.UpdatedBy)
 }
+
+func TestFilterHandlerRejectsOrdinaryBarrierMutations(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	id := uuid.New()
+	writeCalls := 0
+	repo := &stubAlarmFilterRuleRepository{
+		getByIDFn: func(_ context.Context, gotID uuid.UUID) (*AlarmFilterRule, error) {
+			require.Equal(t, id, gotID)
+			return &AlarmFilterRule{ID: id, Action: FilterActionLegacyNotificationBarrier}, nil
+		},
+		updateFn: func(context.Context, *AlarmFilterRule) error { writeCalls++; return nil },
+		deleteFn: func(context.Context, uuid.UUID) error { writeCalls++; return nil },
+	}
+	handler := NewFilterHandler(repo, zap.NewNop())
+	router := gin.New()
+	router.PUT("/rules/:id", handler.Update)
+	router.DELETE("/rules/:id", handler.Delete)
+	router.POST("/rules/:id/toggle", handler.Toggle)
+
+	requests := []*http.Request{
+		httptest.NewRequest(http.MethodPut, "/rules/"+id.String(), strings.NewReader(`{"name":"changed"}`)),
+		httptest.NewRequest(http.MethodDelete, "/rules/"+id.String(), nil),
+		httptest.NewRequest(http.MethodPost, "/rules/"+id.String()+"/toggle", nil),
+	}
+	requests[0].Header.Set("Content-Type", "application/json")
+	for _, req := range requests {
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		require.Equal(t, http.StatusConflict, resp.Code)
+	}
+	require.Zero(t, writeCalls)
+}
+
+func TestFilterHandlerCreateDoesNotExposeBarrierAction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	createCalls := 0
+	handler := NewFilterHandler(&stubAlarmFilterRuleRepository{
+		createFn: func(context.Context, *AlarmFilterRule) error { createCalls++; return nil },
+	}, zap.NewNop())
+	router := gin.New()
+	router.POST("/rules", handler.Create)
+	req := httptest.NewRequest(http.MethodPost, "/rules", strings.NewReader(
+		`{"name":"forbidden-barrier","filter_type":"device","action":"legacy_notification_barrier"}`,
+	))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusBadRequest, resp.Code)
+	require.Zero(t, createCalls)
+}

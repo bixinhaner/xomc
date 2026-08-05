@@ -383,6 +383,38 @@ func TestProcessAlarm_NotifyEmail_MissingRecipients_Skipped(t *testing.T) {
 	assert.Empty(t, dispatcher.Calls(), "dispatcher should not be called when recipients empty")
 }
 
+func TestProcessAlarm_LegacyNotificationBarrierPreservesFirstMatch(t *testing.T) {
+	emailDispatcher := &mockEmailDispatcher{}
+	alarm := &model.Alarm{
+		AlarmIdentifier: "DEVICE_OFFLINE",
+		Status:          model.AlarmActive,
+	}
+	engine := newTestFilterEngine([]AlarmFilterRule{
+		{
+			Name:             "migrated-email-barrier",
+			AlarmIdentifiers: []string{"DEVICE_OFFLINE"},
+			Action:           FilterActionLegacyNotificationBarrier,
+			Priority:         10,
+		},
+		{
+			Name:             "lower-auto-clear",
+			AlarmIdentifiers: []string{"DEVICE_OFFLINE"},
+			Action:           FilterActionAutoClear,
+			Priority:         20,
+		},
+	}, nil)
+	engine.SetEmailDispatcher(emailDispatcher)
+
+	result, err := engine.ProcessAlarm(context.Background(), alarm, uuid.Nil)
+
+	require.NoError(t, err)
+	require.True(t, result.Handled)
+	require.Equal(t, FilterActionLegacyNotificationBarrier, result.Action)
+	require.Equal(t, model.AlarmActive, alarm.Status)
+	require.Nil(t, alarm.ClearedBy)
+	require.Empty(t, emailDispatcher.Calls())
+}
+
 // W1.5 charter 步骤 4：与真实 HTTP 服务对接，httptest.Server 替代 webhook.site。
 func TestProcessAlarm_NotifyWebhook_EndToEnd(t *testing.T) {
 	received := make(chan map[string]interface{}, 1)

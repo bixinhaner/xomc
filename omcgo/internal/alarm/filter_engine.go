@@ -248,6 +248,12 @@ func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, ru
 		// 与 webhook 一致：rule 命中即视为已处理，dispatch 失败仅在 emailDispatcher 内部记 metric
 		return &ProcessResult{Handled: true, Action: FilterActionNotifyEmail}, nil
 
+	case FilterActionLegacyNotificationBarrier:
+		e.logger.Debug("alarm handled by legacy notification compatibility barrier",
+			zap.String("alarm_identifier", alarm.AlarmIdentifier),
+			zap.String("rule_name", rule.Name))
+		return &ProcessResult{Handled: true, Action: FilterActionLegacyNotificationBarrier}, nil
+
 	default:
 		return &ProcessResult{Handled: false, Action: FilterActionDefault}, nil
 	}

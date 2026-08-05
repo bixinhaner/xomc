@@ -37,6 +37,8 @@ func TestDomainSchemaTables(t *testing.T) {
 
 func TestDomainSchemaIdentityAndEncryptionGuards(t *testing.T) {
 	schema := readNotificationMigrationBaseline(t)
+	alarmFilters := extractNotificationTableBody(t, schema, "alarm_filters")
+	require.Contains(t, alarmFilters, "legacy_notification_barrier")
 
 	events := extractNotificationTableBody(t, schema, "notification_events")
 	require.Regexp(t, `(?i)event_id\s+uuid\s+not\s+null`, events)

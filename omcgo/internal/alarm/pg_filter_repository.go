@@ -98,6 +98,9 @@ func NewPgAlarmFilterRuleRepository(db *pgxpool.Pool) *PgAlarmFilterRuleReposito
 }
 
 func (r *PgAlarmFilterRuleRepository) Create(ctx context.Context, rule *AlarmFilterRule) error {
+	if rule.Action == FilterActionLegacyNotificationBarrier {
+		return ErrAlarmFilterBarrierManaged
+	}
 	if rule.ID == uuid.Nil {
 		rule.ID = uuid.New()
 	}
@@ -162,6 +165,9 @@ func (r *PgAlarmFilterRuleRepository) GetByID(ctx context.Context, id uuid.UUID)
 }
 
 func (r *PgAlarmFilterRuleRepository) Update(ctx context.Context, rule *AlarmFilterRule) error {
+	if rule.Action == FilterActionLegacyNotificationBarrier {
+		return ErrAlarmFilterBarrierManaged
+	}
 	now := time.Now()
 	rule.UpdatedAt = now
 
@@ -182,7 +188,8 @@ func (r *PgAlarmFilterRuleRepository) Update(ctx context.Context, rule *AlarmFil
 		Set("enabled", rule.Enabled).
 		Set("updated_by", rule.UpdatedBy).
 		Set("updated_at", rule.UpdatedAt).
-		Where(squirrel.Eq{"id": rule.ID})
+		Where(squirrel.Eq{"id": rule.ID}).
+		Where(squirrel.NotEq{"action": FilterActionLegacyNotificationBarrier})
 
 	sql, args, err := query.ToSql()
 	if err != nil {
@@ -195,7 +202,7 @@ func (r *PgAlarmFilterRuleRepository) Update(ctx context.Context, rule *AlarmFil
 	}
 
 	if cmd.RowsAffected() == 0 {
-		return commonerrors.ErrNotFound
+		return r.alarmFilterMutationMiss(ctx, rule.ID)
 	}
 
 	return nil
@@ -204,7 +211,8 @@ func (r *PgAlarmFilterRuleRepository) Update(ctx context.Context, rule *AlarmFil
 func (r *PgAlarmFilterRuleRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query := storage.Psql.
 		Delete("alarm_filters").
-		Where(squirrel.Eq{"id": id})
+		Where(squirrel.Eq{"id": id}).
+		Where(squirrel.NotEq{"action": FilterActionLegacyNotificationBarrier})
 
 	sql, args, err := query.ToSql()
 	if err != nil {
@@ -217,7 +225,7 @@ func (r *PgAlarmFilterRuleRepository) Delete(ctx context.Context, id uuid.UUID) 
 	}
 
 	if cmd.RowsAffected() == 0 {
-		return commonerrors.ErrNotFound
+		return r.alarmFilterMutationMiss(ctx, id)
 	}
 
 	return nil
@@ -294,7 +302,8 @@ func (r *PgAlarmFilterRuleRepository) Toggle(ctx context.Context, id uuid.UUID) 
 		Update("alarm_filters").
 		Set("enabled", squirrel.Expr("NOT enabled")).
 		Set("updated_at", time.Now()).
-		Where(squirrel.Eq{"id": id})
+		Where(squirrel.Eq{"id": id}).
+		Where(squirrel.NotEq{"action": FilterActionLegacyNotificationBarrier})
 
 	sql, args, err := query.ToSql()
 	if err != nil {
@@ -307,10 +316,21 @@ func (r *PgAlarmFilterRuleRepository) Toggle(ctx context.Context, id uuid.UUID) 
 	}
 
 	if cmd.RowsAffected() == 0 {
-		return commonerrors.ErrNotFound
+		return r.alarmFilterMutationMiss(ctx, id)
 	}
 
 	return nil
+}
+
+func (r *PgAlarmFilterRuleRepository) alarmFilterMutationMiss(ctx context.Context, id uuid.UUID) error {
+	rule, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if rule.Action == FilterActionLegacyNotificationBarrier {
+		return ErrAlarmFilterBarrierManaged
+	}
+	return commonerrors.ErrNotFound
 }
 
 func (r *PgAlarmFilterRuleRepository) ListEnabled(ctx context.Context) ([]AlarmFilterRule, error) {
@@ -353,6 +373,49 @@ func (r *PgAlarmFilterRuleRepository) ListEnabled(ctx context.Context) ([]AlarmF
 	}
 
 	return rules, nil
+}
+
+// ReplaceNotifyEmailWithBarrier atomically replaces one unchanged legacy email
+// rule with the compatibility barrier. It is intentionally not part of the
+// ordinary AlarmFilterRuleRepository API and is only consumed by notification
+// migration code.
+func (r *PgAlarmFilterRuleRepository) ReplaceNotifyEmailWithBarrier(
+	ctx context.Context,
+	id uuid.UUID,
+	expectedUpdatedAt time.Time,
+	notificationRuleID uuid.UUID,
+	enabledVersionID uuid.UUID,
+	actor string,
+) error {
+	now := time.Now().UTC()
+	query, args, err := storage.Psql.Update("alarm_filters").
+		Set("action", FilterActionLegacyNotificationBarrier).
+		Set("updated_by", actor).
+		Set("updated_at", now).
+		Where(squirrel.Eq{
+			"id":         id,
+			"action":     FilterActionNotifyEmail,
+			"enabled":    true,
+			"updated_at": expectedUpdatedAt,
+		}).
+		Where(squirrel.Expr(
+			"EXISTS (SELECT 1 FROM notification_rules WHERE id = ? AND archived = false AND current_enabled_version_id = ?)",
+			notificationRuleID, enabledVersionID,
+		)).ToSql()
+	if err != nil {
+		return fmt.Errorf("build legacy email barrier update: %w", err)
+	}
+	result, err := r.db.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("replace legacy email rule with barrier: %w", err)
+	}
+	if result.RowsAffected() == 1 {
+		return nil
+	}
+	if _, err := r.GetByID(ctx, id); err != nil {
+		return fmt.Errorf("check legacy email rule after barrier conflict: %w", err)
+	}
+	return ErrAlarmFilterMigrationPrecondition
 }
 
 var _ AlarmFilterRuleRepository = (*PgAlarmFilterRuleRepository)(nil)

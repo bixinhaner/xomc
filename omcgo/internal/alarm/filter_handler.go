@@ -167,6 +167,10 @@ func (h *FilterHandler) Update(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
+	if rule.Action == FilterActionLegacyNotificationBarrier {
+		commonerrors.AbortWithError(c, http.StatusConflict, ErrAlarmFilterBarrierManaged)
+		return
+	}
 	var req UpdateAlarmFilterRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
@@ -225,6 +229,15 @@ func (h *FilterHandler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
+	rule, err := h.repo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return
+	}
+	if rule.Action == FilterActionLegacyNotificationBarrier {
+		commonerrors.AbortWithError(c, http.StatusConflict, ErrAlarmFilterBarrierManaged)
+		return
+	}
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
@@ -241,6 +254,10 @@ func (h *FilterHandler) Toggle(c *gin.Context) {
 	rule, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return
+	}
+	if rule.Action == FilterActionLegacyNotificationBarrier {
+		commonerrors.AbortWithError(c, http.StatusConflict, ErrAlarmFilterBarrierManaged)
 		return
 	}
 	rule.Enabled = !rule.Enabled
