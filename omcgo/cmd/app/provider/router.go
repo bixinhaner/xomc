@@ -692,6 +692,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	if md.notifChannelHandler != nil {
 		md.notifChannelHandler.RegisterRoutes(permGroup("alarms"))
 	}
+	if md.notifDeliveryHandler != nil {
+		md.notifDeliveryHandler.RegisterRoutes(permGroup("alarms"))
+	}
 
 	// ----- T-0152: Alertmanager 告警 webhook → publicV1（无 JWT）-----
 	// Alertmanager 无法携带 JWT，故挂在无鉴权的 publicV1 上；可选 Bearer token

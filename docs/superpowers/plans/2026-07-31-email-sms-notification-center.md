@@ -26,7 +26,9 @@ Playwright。
 | 6 | 本地开发门禁已完成 | Shadow、canonical、NATS 故障恢复、三档本机负载及模式回退均通过；生产容量门禁仍待现场数据，见[本地验证](../reviews/2026-08-04-email-sms-milestone-a-local-validation.md)与[容量回退记录](../reviews/2026-08-05-email-sms-milestone-a-capacity-rollback.md) |
 | 7 | 已完成 | Schema 守卫、领域模型、拆分仓储、幂等测试及专用 PostgreSQL 集成验证通过；claim 状态迁移随 Task 8/渠道 Worker 按实际消费者实现 |
 | 8 | 已完成 | 固定 durable Inbox、版本补洞、代际围栏、反确认恢复未来 repeat、`SKIP LOCKED` lease 及专用 PostgreSQL 集成验证通过，见 [Task 8 本地验收](../reviews/2026-08-05-email-sms-task8-local-validation.md) |
-| 9–14 | 未开始 | 生产外发与 canonical 继续受最终门禁约束 |
+| 9 | 已完成 | `54c450f1b`；版本化规则、模板、联系组、渠道和不可变发布语义通过独立 PostgreSQL 验证 |
+| 10 | 后端编排核心已完成 | 生命周期编排、恢复配对、维护抑制、摘要/限流、外呼前栅栏和可见性受控的投递 API 已通过本地验证；真实 Worker、SMTP、quiet-hours release 和生产外发仍未启用，见 [Task 10 本地验收](../reviews/2026-08-05-email-sms-task10-local-validation.md) |
+| 11–14 | 未开始 | 生产外发与 canonical 继续受最终门禁约束 |
 
 下文保留原始 RED/GREEN checkbox 作为实施步骤模板；是否完成以本表、提交和验证记录共同
 判断，不能只按 checkbox 推断。
@@ -755,7 +757,7 @@ git commit -m "feat(notification): 增加版本化通知规则和模板"
 - Produces: schedule 与 delivery
 - Consumes: Task 8 occurrence、Task 9 规则及收件人
 
-- [ ] **Step 1: 写产生、升级、确认、清除测试**
+- [x] **Step 1: 写产生、升级、确认、清除测试**
 
 覆盖瞬时告警 suppressed、首次门槛、普通重复不重发、跨阈值升级、确认停止 repeat、
 取消确认按原 sequence 恢复未来 repeat，以及仅为 accepted/handoff 的原收件人渠道发送恢复。
@@ -769,12 +771,12 @@ Critical 绕过普通摘要但受最大次数和收件人速率限制；Minor/Wa
 delivery 记录为 `suppressed` 并关联窗口；窗口不命中、未审批或已结束时不得抑制。规则
 预览同时展示业务时区、下一次实际执行时间以及夏令时边界下的唯一执行结果。
 
-- [ ] **Step 3: 实现纯规则决策与事务写入**
+- [x] **Step 3: 实现纯规则决策与事务写入**
 
 将 matcher、policy evaluator 设计为纯函数；Orchestrator 在一个主库事务中保存匹配解释、
 schedule、bucket 或 delivery。
 
-- [ ] **Step 4: 实现外呼前栅栏**
+- [x] **Step 4: 实现外呼前栅栏**
 
 ```go
 func (s *Service) AuthorizeSend(
@@ -785,19 +787,25 @@ func (s *Service) AuthorizeSend(
 该方法原子校验 occurrence 状态、事件版本、schedule generation、delivery lease 和渠道
 熔断状态。失败时写 cancelled/suppressed 原因。
 
-- [ ] **Step 5: 实现投递、attempt、轨迹和人工重试 API**
+- [x] **Step 5: 实现投递、attempt、轨迹和人工重试 API**
 
 提供设计中的 delivery 列表/详情/attempt/retry API。查询必须按关联告警的设备组 + 制式
 grant 过滤，地址默认脱敏；完整地址需要独立权限。批量重试最多 100 条、必须填写原因，只允许永久配置已
 修复后的 dead_letter，操作写审计。告警详情轨迹只返回当前用户可见 occurrence。
 
-- [ ] **Step 6: 运行测试**
+- [x] **Step 6: 运行测试**
 
 Run: `cd omcgo && go test ./internal/notification -run 'Orchestrator|Aggregation|RateLimit|AuthorizeSend' -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交**
+2026-08-05 验证：`internal/notification` 和 `cmd/app/provider` 全包测试通过；正式 Goose
+schema + seed 从零重建的独立 PostgreSQL 中，lifecycle 与 orchestration 集成测试通过，
+且事件重放未重复增加聚合计数。Task 10 未启动 SMTP/SMS 外呼。Step 2 中风暴、聚合、
+维护窗口和 Critical 限流已完成；quiet-hours 的 IANA 时区实际 release 与规则预览保留到
+Task 11 Worker/Task 13 页面一起闭环，避免在没有执行器时提前提供不可兑现的配置能力。
+
+- [x] **Step 7: 提交**
 
 ```bash
 git add omcgo/internal/notification omcgo/cmd/app/provider/router.go
@@ -830,10 +838,12 @@ SMTP 每个信封只有一个目标地址；缺变量渲染失败；成功只记
 每次 attempt 使用稳定 delivery ID 作为日志关联键；外呼超时但结果未知时不盲目立即重发，
 进入 `unknown` 或人工确认策略。
 
-- [ ] **Step 3: 实现 Worker**
+- [ ] **Step 3: 实现调度 Handler 与 Worker**
 
-Worker 流程固定为 claim → `AuthorizeSend` → attempt start → SMTP → attempt/result update。
-禁止在 AlarmEngine 或 Orchestrator 中直接外呼。
+先实现 initial gate、repeat、digest flush、quiet-hours release 四类持久化 schedule handler；
+quiet hours 使用规则绑定的 IANA 时区并覆盖夏令时唯一 release。Worker 流程固定为 claim →
+`AuthorizeSend` → attempt start → SMTP → attempt/result update。禁止在 AlarmEngine 或
+Orchestrator 中直接外呼。
 
 - [ ] **Step 4: 收敛两套 SMTP**
 

@@ -4898,13 +4898,17 @@ CREATE TABLE public.notification_events (
     occurred_at timestamp with time zone NOT NULL,
     payload jsonb NOT NULL,
     processing_state character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    orchestration_state character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    match_explanation jsonb DEFAULT '[]'::jsonb NOT NULL,
     received_at timestamp with time zone DEFAULT now() NOT NULL,
     processed_at timestamp with time zone,
+    orchestrated_at timestamp with time zone,
     last_error text,
     CONSTRAINT notification_events_pkey PRIMARY KEY (id),
     CONSTRAINT notification_events_event_id_key UNIQUE (event_id),
     CONSTRAINT notification_events_alarm_version_check CHECK ((alarm_version > 0)),
     CONSTRAINT notification_events_schema_version_check CHECK ((schema_version > 0)),
+    CONSTRAINT notification_events_orchestration_state_check CHECK (((orchestration_state)::text = ANY ((ARRAY['pending'::character varying, 'completed'::character varying, 'failed'::character varying])::text[]))),
     CONSTRAINT notification_events_processing_state_check CHECK (((processing_state)::text = ANY ((ARRAY['pending'::character varying, 'applied'::character varying, 'waiting'::character varying, 'ignored'::character varying, 'failed'::character varying])::text[])))
 );
 
@@ -5209,7 +5213,11 @@ CREATE TABLE public.notification_deliveries (
     provider_message_id character varying(256),
     origin_delivery_id uuid,
     suppression_reason character varying(64),
+    maintenance_window_id uuid,
     failure_reason character varying(64),
+    manual_retry_reason character varying(500),
+    manual_retry_by character varying(128),
+    manual_retry_at timestamp with time zone,
     accepted_at timestamp with time zone,
     completed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -9384,6 +9392,14 @@ ALTER TABLE ONLY public.ops_downloads
 
 ALTER TABLE ONLY public.ops_maintenance_windows
     ADD CONSTRAINT ops_maintenance_windows_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: notification_deliveries notification_deliveries_maintenance_window_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_deliveries
+    ADD CONSTRAINT notification_deliveries_maintenance_window_id_fkey FOREIGN KEY (maintenance_window_id) REFERENCES public.ops_maintenance_windows(id) ON DELETE RESTRICT;
 
 
 --

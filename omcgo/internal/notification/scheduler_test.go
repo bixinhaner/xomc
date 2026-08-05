@@ -238,6 +238,24 @@ func TestScheduler_HandlerFailureReleasesForBoundedRetry(t *testing.T) {
 	require.Equal(t, now.Add(5*time.Second), released.DueAt)
 }
 
+func TestScheduler_DigestSurvivesOccurrenceClearGenerationChange(t *testing.T) {
+	now := time.Now().UTC()
+	schedule := schedulerFixture(now, ScheduleKindDigestFlush, 1)
+	repository := &schedulerRepositoryStub{schedules: map[uuid.UUID]DomainSchedule{schedule.ID: schedule}}
+	occurrences := &schedulerOccurrenceStub{occurrences: map[uuid.UUID]*DomainOccurrence{
+		schedule.OccurrenceID: {OccurrenceID: schedule.OccurrenceID, ScheduleGeneration: 2, Status: "cleared"},
+	}}
+	called := false
+	scheduler := NewScheduler(repository, occurrences, "worker", map[string]ScheduleHandler{
+		ScheduleKindDigestFlush: func(context.Context, DomainSchedule) error { called = true; return nil },
+	})
+	scheduler.now = func() time.Time { return now }
+
+	_, err := scheduler.RunOnce(context.Background())
+	require.NoError(t, err)
+	require.True(t, called, "digest must retain raised-and-cleared facts in the same window")
+}
+
 func schedulerFixture(now time.Time, kind string, generation int64) DomainSchedule {
 	return DomainSchedule{
 		ID: uuid.New(), OccurrenceID: uuid.New(), RuleVersionID: uuid.New(), Channel: "email",

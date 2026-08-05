@@ -30,9 +30,14 @@ type LifecycleConsumer struct {
 	repository    LifecycleRepository
 	bus           event.EventBus
 	startSequence uint64
+	orchestrator  OccurrenceOrchestrator
 
 	mu           sync.Mutex
 	subscription event.Subscription
+}
+
+func (c *LifecycleConsumer) SetOrchestrator(orchestrator OccurrenceOrchestrator) {
+	c.orchestrator = orchestrator
 }
 
 func NewLifecycleConsumer(repository LifecycleRepository, bus event.EventBus, startSequence uint64) *LifecycleConsumer {
@@ -84,6 +89,11 @@ func (c *LifecycleConsumer) Handle(ctx context.Context, envelope event.Event) er
 	}
 	if _, err := c.repository.ApplyLifecycle(ctx, payload); err != nil {
 		return fmt.Errorf("apply notification lifecycle: %w", err)
+	}
+	if c.orchestrator != nil {
+		if err := c.orchestrator.ProcessOccurrence(ctx, payload.OccurrenceID); err != nil {
+			return fmt.Errorf("orchestrate notification lifecycle: %w", err)
+		}
 	}
 	return nil
 }

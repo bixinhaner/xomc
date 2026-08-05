@@ -26130,6 +26130,40 @@ UPDATE public.discovered_param_mappings d
    AND d.private_path = fixes.private_path;
 
 
+-- 通知中心版本化管理与逐投递审计 API。端点必须先于下方内置角色补权语句登记，
+-- 否则 RequireAPIPermission 会对非内置超管 fail closed。
+INSERT INTO public.api_endpoints (
+    id, path, method, name, description, api_group, is_auto, created_at, updated_at, is_user_modified
+) VALUES
+    ('50000000-0004-0000-0000-000000000001', '/api/v1/notification-rules', 'GET', 'GET /api/v1/notification-rules', '通知规则列表', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000002', '/api/v1/notification-rules', 'POST', 'POST /api/v1/notification-rules', '创建通知规则草稿', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000003', '/api/v1/notification-rules/:id', 'GET', 'GET /api/v1/notification-rules/:id', '通知规则详情', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000004', '/api/v1/notification-rules/:id', 'PATCH', 'PATCH /api/v1/notification-rules/:id', '更新通知规则草稿', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000005', '/api/v1/notification-rules/:id/publish', 'POST', 'POST /api/v1/notification-rules/:id/publish', '发布通知规则版本', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000006', '/api/v1/notification-rules/:id/enable', 'POST', 'POST /api/v1/notification-rules/:id/enable', '启用通知规则版本', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000007', '/api/v1/notification-rules/:id/archive', 'POST', 'POST /api/v1/notification-rules/:id/archive', '归档通知规则', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000008', '/api/v1/notification-rules/:id/preview', 'POST', 'POST /api/v1/notification-rules/:id/preview', '预览通知规则命中', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000009', '/api/v1/notification-contact-groups', 'GET', 'GET /api/v1/notification-contact-groups', '通知联系组列表', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000010', '/api/v1/notification-contact-groups', 'POST', 'POST /api/v1/notification-contact-groups', '创建通知联系组', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000011', '/api/v1/notification-contact-groups/:id', 'GET', 'GET /api/v1/notification-contact-groups/:id', '通知联系组详情', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000012', '/api/v1/notification-contact-groups/:id', 'PATCH', 'PATCH /api/v1/notification-contact-groups/:id', '更新通知联系组', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000013', '/api/v1/notification-templates', 'GET', 'GET /api/v1/notification-templates', '版本化通知模板列表', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000014', '/api/v1/notification-templates', 'POST', 'POST /api/v1/notification-templates', '创建通知模板草稿', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000015', '/api/v1/notification-templates/:id', 'GET', 'GET /api/v1/notification-templates/:id', '版本化通知模板详情', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000016', '/api/v1/notification-templates/:id', 'PATCH', 'PATCH /api/v1/notification-templates/:id', '更新通知模板草稿', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000017', '/api/v1/notification-templates/:id/publish', 'POST', 'POST /api/v1/notification-templates/:id/publish', '发布通知模板版本', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000018', '/api/v1/notification-templates/:id/preview', 'POST', 'POST /api/v1/notification-templates/:id/preview', '预览通知模板渲染', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000019', '/api/v1/notification-channels', 'GET', 'GET /api/v1/notification-channels', '通知渠道列表', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000020', '/api/v1/notification-channels/:id', 'PATCH', 'PATCH /api/v1/notification-channels/:id', '更新通知渠道', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000021', '/api/v1/notification-channels/:id/verify', 'POST', 'POST /api/v1/notification-channels/:id/verify', '验证通知渠道连接', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000022', '/api/v1/notification-channels/:id/health', 'GET', 'GET /api/v1/notification-channels/:id/health', '通知渠道健康状态', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000023', '/api/v1/notification-deliveries', 'GET', 'GET /api/v1/notification-deliveries', '通知逐投递列表', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000024', '/api/v1/notification-deliveries/retry', 'POST', 'POST /api/v1/notification-deliveries/retry', '批量重试通知死信', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000025', '/api/v1/notification-deliveries/:id', 'GET', 'GET /api/v1/notification-deliveries/:id', '通知逐投递详情', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000026', '/api/v1/notification-deliveries/:id/attempts', 'GET', 'GET /api/v1/notification-deliveries/:id/attempts', '通知投递尝试轨迹', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000027', '/api/v1/notification-deliveries/:id/retry', 'POST', 'POST /api/v1/notification-deliveries/:id/retry', '重试单条通知死信', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false)
+ON CONFLICT DO NOTHING;
+
 -- Consolidated from former incremental migrations: seed 000002-000003
 
 -- admin：沿用内置角色兼容基线，补齐全部已登记 API。

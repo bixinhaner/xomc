@@ -235,7 +235,10 @@ func updateDomainOccurrence(ctx context.Context, tx pgx.Tx, payload event.AlarmL
 	if generation != currentGeneration {
 		cancelQuery, cancelArgs, buildErr := storage.Psql.Update("notification_schedules").
 			Set("state", "cancelled").Set("cancelled_at", payload.OccurredAt).Set("updated_at", payload.OccurredAt).
-			Where(sq.Eq{"occurrence_id": payload.OccurrenceID, "state": []string{"pending", "claimed"}}).
+			Where(sq.Eq{
+				"occurrence_id": payload.OccurrenceID, "state": []string{"pending", "claimed"},
+				"schedule_kind": []string{ScheduleKindInitialGate, ScheduleKindRepeat, ScheduleKindQuietHoursRelease},
+			}).
 			Where(sq.Lt{"generation": generation}).ToSql()
 		if buildErr != nil {
 			return fmt.Errorf("build stale notification schedule cancellation: %w", buildErr)

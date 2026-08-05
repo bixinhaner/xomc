@@ -21,6 +21,16 @@ type lifecycleRepositoryStub struct {
 	calls   int
 }
 
+type occurrenceOrchestratorStub struct {
+	occurrenceID uuid.UUID
+	err          error
+}
+
+func (s *occurrenceOrchestratorStub) ProcessOccurrence(_ context.Context, id uuid.UUID) error {
+	s.occurrenceID = id
+	return s.err
+}
+
 func (s *lifecycleRepositoryStub) ApplyLifecycle(_ context.Context, payload event.AlarmLifecyclePayload) (LifecycleApplyResult, error) {
 	s.calls++
 	s.payload = payload
@@ -79,6 +89,30 @@ func TestLifecycleConsumer_HandleAppliesValidatedManagedElementEvent(t *testing.
 	require.NoError(t, consumer.Handle(context.Background(), envelope))
 	require.Equal(t, 1, repository.calls)
 	require.Equal(t, payload, repository.payload)
+}
+
+func TestLifecycleConsumer_HandleRunsOrchestrationBeforeAcknowledgement(t *testing.T) {
+	payload, envelope := notificationLifecycleFixture(t, event.AlarmLifecycleRaised, 1, model.AlarmActive)
+	repository := &lifecycleRepositoryStub{}
+	orchestrator := &occurrenceOrchestratorStub{}
+	consumer := NewLifecycleConsumer(repository, nil, 0)
+	consumer.SetOrchestrator(orchestrator)
+
+	require.NoError(t, consumer.Handle(context.Background(), envelope))
+	require.Equal(t, payload.OccurrenceID, orchestrator.occurrenceID)
+}
+
+func TestLifecycleConsumer_HandleReturnsOrchestrationErrorForDurableRetry(t *testing.T) {
+	payload, envelope := notificationLifecycleFixture(t, event.AlarmLifecycleRaised, 1, model.AlarmActive)
+	wantErr := errors.New("orchestration database unavailable")
+	orchestrator := &occurrenceOrchestratorStub{err: wantErr}
+	consumer := NewLifecycleConsumer(&lifecycleRepositoryStub{}, nil, 0)
+	consumer.SetOrchestrator(orchestrator)
+
+	err := consumer.Handle(context.Background(), envelope)
+	require.ErrorIs(t, err, wantErr)
+	require.ErrorContains(t, err, "orchestrate notification lifecycle")
+	require.Equal(t, payload.OccurrenceID, orchestrator.occurrenceID)
 }
 
 func TestLifecycleConsumer_HandleReturnsRepositoryErrorWithoutAcknowledging(t *testing.T) {

@@ -117,10 +117,23 @@ type DomainDelivery struct {
 	DeliveryResult       string
 	AvailableAt          time.Time
 	NextAttemptAt        time.Time
+	LockedBy             *string
+	LockedAt             *time.Time
+	LeaseExpiresAt       *time.Time
 	OccurrenceVersion    int64
 	ScheduleGeneration   int64
+	ProviderMessageID    *string
 	OriginDeliveryID     *uuid.UUID
+	SuppressionReason    *string
+	MaintenanceWindowID  *uuid.UUID
+	FailureReason        *string
+	ManualRetryReason    *string
+	ManualRetryBy        *string
+	ManualRetryAt        *time.Time
+	AcceptedAt           *time.Time
+	CompletedAt          *time.Time
 	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type DomainDeliveryAttempt struct {

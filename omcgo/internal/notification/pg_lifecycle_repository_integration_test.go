@@ -26,8 +26,7 @@ func TestPgLifecycleRepository_Integration(t *testing.T) {
 	t.Cleanup(pool.Close)
 	var databaseName string
 	require.NoError(t, pool.QueryRow(ctx, "SELECT current_database()").Scan(&databaseName))
-	require.Equal(t, "omcgo_notification_lifecycle", databaseName,
-		"refusing to run lifecycle integration test against a non-dedicated database")
+	requireDedicatedNotificationDatabase(t, databaseName)
 
 	repository := NewPgLifecycleRepository(pool)
 	now := time.Date(2026, 8, 5, 12, 30, 0, 0, time.UTC)

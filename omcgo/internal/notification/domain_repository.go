@@ -42,3 +42,7 @@ type DeliveryRepository interface {
 	InsertDelivery(context.Context, *DomainDelivery) (bool, error)
 	InsertAttempt(context.Context, *DomainDeliveryAttempt) (bool, error)
 }
+
+type OrchestrationRepository interface {
+	SaveDecision(context.Context, uuid.UUID, OrchestrationDecision) (bool, error)
+}

@@ -79,7 +79,7 @@ func (s *Scheduler) runClaimed(ctx context.Context, schedule DomainSchedule) err
 			s.release(ctx, schedule.ID),
 		)
 	}
-	if occurrence.ScheduleGeneration != schedule.Generation ||
+	if (scheduleUsesLifecycleFence(schedule.ScheduleKind) && occurrence.ScheduleGeneration != schedule.Generation) ||
 		((schedule.ScheduleKind == ScheduleKindInitialGate || schedule.ScheduleKind == ScheduleKindRepeat) && occurrence.Status != "active") {
 		if err := s.repository.MarkCancelled(ctx, schedule.ID, s.workerID, s.now()); err != nil {
 			return fmt.Errorf("cancel fenced notification schedule %s: %w", schedule.ID, err)
@@ -103,6 +103,10 @@ func (s *Scheduler) runClaimed(ctx context.Context, schedule DomainSchedule) err
 		return fmt.Errorf("complete notification schedule %s: %w", schedule.ID, err)
 	}
 	return nil
+}
+
+func scheduleUsesLifecycleFence(kind string) bool {
+	return kind != ScheduleKindDigestFlush
 }
 
 func (s *Scheduler) release(ctx context.Context, scheduleID uuid.UUID) error {

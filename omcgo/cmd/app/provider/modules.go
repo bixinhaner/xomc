@@ -1448,14 +1448,39 @@ func initNorthboundModule(c *Container) error {
 			return northboundLifecycleConsumer.Close()
 		})
 
-		// The notification consumer owns only its durable Inbox/occurrence
-		// projection. Shadow mode still writes this audit projection, but no rule
-		// matching, delivery creation, or external channel is activated here.
+		// Shadow mode writes only the durable audit projection. Canonical mode may
+		// additionally activate delivery orchestration, but only when the dedicated
+		// recipient key is present; plaintext fallback is forbidden.
 		notificationLifecycleConsumer := notification.NewLifecycleConsumer(
 			notification.NewPgLifecycleRepository(c.PgPool),
 			c.EventBus,
 			c.Cfg.Alarm.LifecycleStartSequence,
 		)
+		if c.Cfg.Alarm.LifecycleMode == string(alarm.LifecycleModeCanonical) {
+			recipientProtector, protectorErr := notification.NewEnvRecipientProtector()
+			if protectorErr == nil {
+				groupReader := device.NewPgDeviceGroupReader(c.PgPool)
+				recipientResolver := notification.NewRecipientResolver(
+					notification.NewAdminRecipientDirectory(c.UserRepo, c.RoleRepo),
+					c.PermService,
+					groupReader,
+					notification.NewPgContactGroupRepository(c.PgPool),
+					recipientProtector,
+				)
+				orchestrationRepo := notification.NewPgOrchestrationRepository(c.PgPool)
+				notificationLifecycleConsumer.SetOrchestrator(notification.NewOrchestrationCoordinator(
+					orchestrationRepo,
+					notification.NewPgOrchestrationInputBuilder(c.PgPool, recipientResolver, groupReader),
+				))
+				logger.Info("notification delivery orchestration enabled")
+			} else if errors.Is(protectorErr, notification.ErrRecipientKeyUnavailable) {
+				logger.Warn("notification delivery orchestration disabled: recipient encryption key is not configured",
+					zap.String("required_env", notification.EnvNotificationRecipientKey))
+			} else {
+				_ = northboundLifecycleConsumer.Close()
+				return fmt.Errorf("initialize notification recipient protection: %w", protectorErr)
+			}
+		}
 		if err := notificationLifecycleConsumer.Subscribe(); err != nil {
 			_ = northboundLifecycleConsumer.Close()
 			return fmt.Errorf("subscribe notification alarm lifecycle consumer: %w", err)
@@ -1672,6 +1697,11 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.notifChannelHandler = notification.NewChannelHandler(
 		notification.NewChannelService(channelRepo, nil),
 	)
+	deliveryRepo := notification.NewPgDeliveryRepository(c.PgPool)
+	deliveryService := notification.NewDeliveryService(deliveryRepo)
+	deliveryService.SetQueryRepository(deliveryRepo)
+	deliveryService.SetPermissionResolver(c.PermService)
+	c.miscDeps.notifDeliveryHandler = notification.NewDeliveryHandler(deliveryService)
 
 	historyRepo := notification.NewPgHistoryRepository(c.PgPool)
 	historyService := notification.NewHistoryService(historyRepo, logger)
@@ -2701,6 +2731,7 @@ type miscDeps struct {
 	notifContactGroupHandler    *notification.ContactGroupHandler
 	notifManagedTemplateHandler *notification.TemplateManagementHandler
 	notifChannelHandler         *notification.ChannelHandler
+	notifDeliveryHandler        *notification.DeliveryHandler
 
 	// T-0152: Alertmanager 告警 webhook 入口（SMTP 邮件发送链）
 	alertWebhookHandler *notification.AlertWebhookHandler

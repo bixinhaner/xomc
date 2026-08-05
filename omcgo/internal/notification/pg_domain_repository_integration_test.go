@@ -23,8 +23,7 @@ func TestPgDomainRepository_Integration(t *testing.T) {
 	t.Cleanup(pool.Close)
 	var databaseName string
 	require.NoError(t, pool.QueryRow(ctx, "SELECT current_database()").Scan(&databaseName))
-	require.Equal(t, "omcgo_notification_domain", databaseName,
-		"refusing to run notification repository integration test against a non-dedicated database")
+	requireDedicatedNotificationDatabase(t, databaseName)
 
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	event := &DomainEvent{

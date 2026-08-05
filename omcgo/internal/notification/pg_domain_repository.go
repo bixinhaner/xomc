@@ -337,13 +337,15 @@ func buildDomainDeliveryInsert(delivery *DomainDelivery) (string, []any, error) 
 			"channel", "dispatch_kind", "sequence_no", "recipient_type", "address_ciphertext",
 			"address_key_version", "recipient_fingerprint", "flow_state", "delivery_result", "available_at",
 			"next_attempt_at", "occurrence_version", "schedule_generation", "origin_delivery_id",
+			"suppression_reason", "maintenance_window_id", "failure_reason",
 		).
 		Values(
 			delivery.ID, delivery.EventID, delivery.OccurrenceID, delivery.RuleVersionID, delivery.TemplateVersionID,
 			delivery.ChannelConfigID, delivery.Channel, delivery.DispatchKind, delivery.SequenceNo, delivery.RecipientType,
 			delivery.AddressCiphertext, delivery.AddressKeyVersion, delivery.RecipientFingerprint, delivery.FlowState,
 			delivery.DeliveryResult, delivery.AvailableAt, delivery.NextAttemptAt, delivery.OccurrenceVersion,
-			delivery.ScheduleGeneration, delivery.OriginDeliveryID,
+			delivery.ScheduleGeneration, delivery.OriginDeliveryID, delivery.SuppressionReason,
+			delivery.MaintenanceWindowID, delivery.FailureReason,
 		).
 		Suffix("ON CONFLICT (event_id, dispatch_kind, sequence_no, channel, recipient_fingerprint) DO NOTHING").
 		ToSql()
