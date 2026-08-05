@@ -2,7 +2,9 @@ package notification
 
 import (
 	"context"
+	"net"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -153,6 +155,100 @@ WHERE event_id=$1 AND dispatch_kind=$2 AND sequence_no=$3 AND channel=$4 AND rec
 	require.NoError(t, pool.QueryRow(ctx, `SELECT circuit_state FROM notification_channel_health WHERE channel_config_id=$1`, channelConfigID).Scan(&circuitState))
 	require.Equal(t, "closed", circuitState)
 
+	workerNow := emailClaimedAt.Add(time.Second)
+	workerDelivery := &DomainDelivery{
+		EventID: event.EventID, OccurrenceID: event.OccurrenceID, RuleVersionID: ruleVersionID,
+		TemplateVersionID: templateVersionID, ChannelConfigID: channelConfigID, Channel: "email",
+		DispatchKind: DispatchKindRepeat, SequenceNo: 1, RecipientType: RecipientTargetUser,
+		AddressCiphertext: []byte("integration-worker-ciphertext"), AddressKeyVersion: 1,
+		RecipientFingerprint: []byte("integration-worker-fingerprint"), OccurrenceVersion: 1,
+		ScheduleGeneration: 1, AvailableAt: workerNow.Add(-time.Second), NextAttemptAt: workerNow.Add(-time.Second),
+	}
+	inserted, err = deliveries.InsertDelivery(ctx, workerDelivery)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	smtpAddr, getSMTPData := startFakeSMTP(t, fakeSMTPBehavior{connections: 1, finalDataReply: true, quitReply: true})
+	smtpHost, smtpPortText, err := net.SplitHostPort(smtpAddr)
+	require.NoError(t, err)
+	smtpPort, err := strconv.Atoi(smtpPortText)
+	require.NoError(t, err)
+	workerCalls := make([]string, 0, 1)
+	emailWorker := NewEmailWorker(
+		deliveries,
+		emailUnprotectorStub{address: "noc-acceptance@example.invalid", calls: &workerCalls},
+		NewEmailSender(SMTPOptions{Enabled: true, Host: smtpHost, Port: smtpPort, From: "omc@example.invalid"}, nil),
+		"integration-email-worker",
+		nil,
+	)
+	emailWorker.now = func() time.Time { return workerNow }
+	processed, err := emailWorker.RunOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	var attemptResult string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT flow_state,delivery_result FROM notification_deliveries WHERE id=$1`, workerDelivery.ID).Scan(&flowState, &deliveryResult))
+	require.Equal(t, "completed", flowState)
+	require.Equal(t, "accepted", deliveryResult)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT result FROM notification_delivery_attempts WHERE delivery_id=$1`, workerDelivery.ID).Scan(&attemptResult))
+	require.Equal(t, "accepted", attemptResult)
+	smtpMessages := getSMTPData()
+	require.Len(t, smtpMessages, 1)
+	require.Contains(t, smtpMessages[0], "To: noc-acceptance@example.invalid\r\n")
+	require.Contains(t, smtpMessages[0], "Subject: subject\r\n")
+
+	circuitNow := workerNow.Add(time.Second)
+	circuitDeliveries := make([]DomainDelivery, 3)
+	for index := range circuitDeliveries {
+		circuitDeliveries[index] = *workerDelivery
+		circuitDeliveries[index].ID = uuid.Nil
+		circuitDeliveries[index].SequenceNo = index + 2
+		circuitDeliveries[index].RecipientFingerprint = []byte(uuid.New().String())
+		circuitDeliveries[index].AvailableAt = circuitNow.Add(-time.Second)
+		circuitDeliveries[index].NextAttemptAt = circuitNow.Add(-time.Second)
+		inserted, err = deliveries.InsertDelivery(ctx, &circuitDeliveries[index])
+		require.NoError(t, err)
+		require.True(t, inserted)
+	}
+	failingSMTPAddr, _ := startFakeSMTP(t, fakeSMTPBehavior{
+		connections: 3, quitReply: true, recipientReply: "451 temporary recipient failure\r\n",
+	})
+	failingSMTPHost, failingSMTPPortText, err := net.SplitHostPort(failingSMTPAddr)
+	require.NoError(t, err)
+	failingSMTPPort, err := strconv.Atoi(failingSMTPPortText)
+	require.NoError(t, err)
+	circuitWorkerCalls := make([]string, 0, 3)
+	circuitWorker := NewEmailWorker(
+		deliveries,
+		emailUnprotectorStub{address: "noc-acceptance@example.invalid", calls: &circuitWorkerCalls},
+		NewEmailSender(SMTPOptions{
+			Enabled: true, Host: failingSMTPHost, Port: failingSMTPPort, From: "omc@example.invalid",
+		}, nil),
+		"integration-email-circuit",
+		nil,
+	)
+	circuitWorker.now = func() time.Time { return circuitNow }
+	processed, err = circuitWorker.RunOnce(ctx)
+	require.Error(t, err)
+	require.Equal(t, 3, processed)
+	for index := range circuitDeliveries {
+		var errorCategory string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT d.flow_state,d.delivery_result,a.result,a.error_category
+FROM notification_deliveries d JOIN notification_delivery_attempts a ON a.delivery_id=d.id
+WHERE d.id=$1`, circuitDeliveries[index].ID).Scan(&flowState, &deliveryResult, &attemptResult, &errorCategory))
+		require.Equal(t, "retry_wait", flowState)
+		require.Equal(t, "failed", deliveryResult)
+		require.Equal(t, "failed", attemptResult)
+		require.Equal(t, EmailErrorTemporary, errorCategory)
+	}
+	require.NoError(t, pool.QueryRow(ctx, `SELECT circuit_state FROM notification_channel_health WHERE channel_config_id=$1`, channelConfigID).Scan(&circuitState))
+	require.Equal(t, "open", circuitState)
+	channelRepository := NewPgChannelConfigRepository(pool)
+	verifiedAt := circuitNow.Add(time.Minute)
+	require.NoError(t, channelRepository.RecordVerification(ctx, channelConfigID, verifiedAt, nil, nil))
+	var lastVerifiedAt time.Time
+	require.NoError(t, pool.QueryRow(ctx, `SELECT circuit_state,last_verified_at FROM notification_channel_health WHERE channel_config_id=$1`, channelConfigID).Scan(&circuitState, &lastVerifiedAt))
+	require.Equal(t, "closed", circuitState)
+	require.WithinDuration(t, verifiedAt, lastVerifiedAt, time.Millisecond)
+
 	digestEnd := emailClaimedAt.Add(15 * time.Minute)
 	digestBucketID := uuid.New()
 	_, err = pool.Exec(ctx, `INSERT INTO notification_aggregation_buckets
@@ -237,45 +333,6 @@ VALUES ($1,$2,'email',$3,$4,3,$5,$6,4)`, digestBucketID, ruleVersionID, fingerpr
 	require.NoError(t, pool.QueryRow(ctx, `SELECT result FROM notification_delivery_attempts WHERE id=$1`, unknownAttempt.ID).Scan(&unknownAttemptResult))
 	require.Equal(t, "unknown", unknownAttemptResult)
 
-	circuitDeliveries := make([]DomainDelivery, 3)
-	for index := range circuitDeliveries {
-		circuitDeliveries[index] = *delivery
-		circuitDeliveries[index].ID = uuid.Nil
-		circuitDeliveries[index].RecipientFingerprint = []byte(uuid.New().String())
-		inserted, err = deliveries.InsertDelivery(ctx, &circuitDeliveries[index])
-		require.NoError(t, err)
-		require.True(t, inserted)
-	}
-	circuitNow := afterCrash.Add(time.Minute)
-	emailClaims, err = deliveries.ClaimEmailDeliveries(ctx, EmailDeliveryClaimRequest{
-		WorkerID: "integration-email-circuit", Now: circuitNow, LeaseDuration: time.Minute, Limit: 1000,
-	})
-	require.NoError(t, err)
-	claimedIDs := deliveryIDs(emailClaims)
-	for index := range circuitDeliveries {
-		require.Contains(t, claimedIDs, circuitDeliveries[index].ID)
-		_, err = deliveries.AuthorizeSend(ctx, circuitDeliveries[index].ID, circuitNow)
-		require.NoError(t, err)
-		circuitAttempt, startErr := deliveries.StartEmailAttempt(ctx, circuitDeliveries[index].ID, "integration-email-circuit", circuitNow)
-		require.NoError(t, startErr)
-		category, summary := EmailErrorTemporary, "smtp recipient failed"
-		nextRetry := circuitNow.Add(time.Minute)
-		require.NoError(t, deliveries.FinishEmailAttempt(ctx, EmailAttemptCompletion{
-			DeliveryID: circuitDeliveries[index].ID, AttemptID: circuitAttempt.ID,
-			WorkerID: "integration-email-circuit", FinishedAt: circuitNow,
-			AttemptResult: "failed", ErrorCategory: &category, StatusSummary: &summary,
-			NextRetryAt: &nextRetry, FlowState: "retry_wait", DeliveryResult: "failed",
-		}))
-	}
-	require.NoError(t, pool.QueryRow(ctx, `SELECT circuit_state FROM notification_channel_health WHERE channel_config_id=$1`, channelConfigID).Scan(&circuitState))
-	require.Equal(t, "open", circuitState)
-	channelRepository := NewPgChannelConfigRepository(pool)
-	verifiedAt := circuitNow.Add(time.Minute)
-	require.NoError(t, channelRepository.RecordVerification(ctx, channelConfigID, verifiedAt, nil, nil))
-	var lastVerifiedAt time.Time
-	require.NoError(t, pool.QueryRow(ctx, `SELECT circuit_state,last_verified_at FROM notification_channel_health WHERE channel_config_id=$1`, channelConfigID).Scan(&circuitState, &lastVerifiedAt))
-	require.Equal(t, "closed", circuitState)
-	require.WithinDuration(t, verifiedAt, lastVerifiedAt, time.Millisecond)
 	authCategory, verificationSummary := EmailErrorAuthentication, "smtp verification failed"
 	require.NoError(t, channelRepository.RecordVerification(ctx, channelConfigID, verifiedAt.Add(time.Minute), &authCategory, &verificationSummary))
 	require.NoError(t, pool.QueryRow(ctx, `SELECT circuit_state FROM notification_channel_health WHERE channel_config_id=$1`, channelConfigID).Scan(&circuitState))

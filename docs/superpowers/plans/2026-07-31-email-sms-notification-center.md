@@ -29,7 +29,8 @@ Playwright。
 | 9 | 已完成 | `54c450f1b`；版本化规则、模板、联系组、渠道和不可变发布语义通过独立 PostgreSQL 验证 |
 | 10 | 后端编排核心已完成 | 生命周期编排、恢复配对、维护抑制、摘要/限流、外呼前栅栏和可见性受控的投递 API 已通过本地验证；真实 Worker、SMTP、quiet-hours release 和生产外发仍未启用，见 [Task 10 本地验收](../reviews/2026-08-05-email-sms-task10-local-validation.md) |
 | 11 | 邮件核心链路已完成 | schedule/digest、逐收件人 Worker、attempt/退避/unknown、熔断、SMTP verify 及双进程统一配置通过本地验证；quiet hours、system incident 和授权测试发送保留，见 [Task 11 核心验收](../reviews/2026-08-05-email-sms-task11-core-validation.md) |
-| 12–14 | 未开始 | legacy barrier、前端和生产外发继续受最终门禁约束 |
+| 12 | 已完成 | legacy 迁移预览、首命中 barrier 和分范围切换门禁已完成；本地 PG + SMTP 验收通过，见 [里程碑 B 本地后端验收](../reviews/2026-08-05-email-sms-milestone-b-local-acceptance.md) |
+| 13–14 | 未开始 | V1 管理前端、短信 Adapter 和生产外发继续受最终门禁约束 |
 
 下文保留原始 RED/GREEN checkbox 作为实施步骤模板；是否完成以本表、提交和验证记录共同
 判断，不能只按 checkbox 推断。
@@ -916,13 +917,17 @@ Run: `cd omcgo && go test ./internal/alarm ./internal/notification -run 'Migrati
 
 Expected: PASS。
 
-- [ ] **Step 6: 里程碑 B 后端验收**
+- [x] **Step 6: 里程碑 B 本地后端验收**
 
 使用测试 SMTP 验证 raised、minimum duration、repeat、ack cancel、clear recovery、
 熔断和逐收件人历史；对比 legacy 命中结果。
 
-Task 12 已完成代码级门禁、全新基线和真实 PostgreSQL barrier 切换验证；本步骤仍保留未完成，
-等待可控告警样本和测试 SMTP 执行完整 raised/ack/clear/熔断业务验收，不能用单元测试替代。
+2026-08-05 已使用从当前基线新建的隔离 PostgreSQL、回环测试 SMTP 和 `.invalid` 收件人，
+完成真实 Worker SMTP 会话、`451 RCPT` 退避/熔断、unknown、生命周期和 PG barrier 验收，
+并保留数据库事实；不是用单元测试替代。结果见
+[里程碑 B 本地后端验收](../reviews/2026-08-05-email-sms-milestone-b-local-acceptance.md)。
+真实运营商测试环境的 SMTP/TLS、可控小基站样本、生产 Shadow 和浏览器验收仍是上线门禁，
+本地通过不代表允许生产外发。
 
 - [x] **Step 7: 提交**
 

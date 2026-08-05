@@ -142,6 +142,7 @@ type fakeSMTPBehavior struct {
 	connections    int
 	finalDataReply bool
 	quitReply      bool
+	recipientReply string
 }
 
 // startFakeSMTP starts a minimal SMTP server and returns one captured DATA body
@@ -213,6 +214,8 @@ func handleFakeSMTPConnection(conn net.Conn, behavior fakeSMTPBehavior, mu *sync
 		case strings.HasPrefix(command, "DATA"):
 			write("354 end with <CRLF>.<CRLF>\r\n")
 			inData = true
+		case strings.HasPrefix(command, "RCPT") && behavior.recipientReply != "":
+			write(behavior.recipientReply)
 		case strings.HasPrefix(command, "QUIT"):
 			if behavior.quitReply {
 				write("221 Bye\r\n")
