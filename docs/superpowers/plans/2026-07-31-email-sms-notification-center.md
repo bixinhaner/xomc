@@ -14,7 +14,7 @@ Adapter 提供统一规则、调度、投递和审计基础。
 Gin、Prometheus、React 19、TypeScript、TanStack Query、Ant Design、Vitest、
 Playwright。
 
-## 执行状态（2026-08-04）
+## 执行状态（2026-08-05）
 
 | Task | 状态 | 证据 |
 | --- | --- | --- |
@@ -25,7 +25,8 @@ Playwright。
 | 5 | 已完成 | `da50a3a63` |
 | 6 | 本地开发门禁已完成 | Shadow、canonical、NATS 故障恢复、三档本机负载及模式回退均通过；生产容量门禁仍待现场数据，见[本地验证](../reviews/2026-08-04-email-sms-milestone-a-local-validation.md)与[容量回退记录](../reviews/2026-08-05-email-sms-milestone-a-capacity-rollback.md) |
 | 7 | 已完成 | Schema 守卫、领域模型、拆分仓储、幂等测试及专用 PostgreSQL 集成验证通过；claim 状态迁移随 Task 8/渠道 Worker 按实际消费者实现 |
-| 8–14 | 未开始 | 生产外发与 canonical 继续受最终门禁约束 |
+| 8 | 已完成 | 固定 durable Inbox、版本补洞、代际围栏、反确认恢复未来 repeat、`SKIP LOCKED` lease 及专用 PostgreSQL 集成验证通过，见 [Task 8 本地验收](../reviews/2026-08-05-email-sms-task8-local-validation.md) |
+| 9–14 | 未开始 | 生产外发与 canonical 继续受最终门禁约束 |
 
 下文保留原始 RED/GREEN checkbox 作为实施步骤模板；是否完成以本表、提交和验证记录共同
 判断，不能只按 checkbox 推断。
@@ -605,7 +606,7 @@ git commit -m "feat(notification): 建立通知中心领域模型"
 - Produces: `LifecycleConsumer.Handle`, `Scheduler.RunOnce`
 - Consumes: Task 7 仓储、Task 1 标准事件
 
-- [ ] **Step 1: 写版本状态机测试**
+- [x] **Step 1: 写版本状态机测试**
 
 覆盖：
 
@@ -618,29 +619,29 @@ ack/clear 递增 schedule_generation 并取消旧 schedule
 unack 不重发 initial，只在规则上限内恢复未来 repeat
 ```
 
-- [ ] **Step 2: 写重启和领取竞争测试**
+- [x] **Step 2: 写重启和领取竞争测试**
 
 两个 Scheduler 实例只能领取一次 due schedule；lease 到期可恢复；claim 后 clear 导致
 generation fence 失败，不产生 delivery。
 
-- [ ] **Step 3: 实现 lifecycle durable**
+- [x] **Step 3: 实现 lifecycle durable**
 
 durable 固定为 `notification-lifecycle-v1`，按 `occurrence_id` 进行有界 hash 分片，保证同一
 occurrence 串行，不同基站可并发。首次创建 durable 时使用里程碑 A 记录的 start sequence；
 超过 DOMAIN_ALARM 保留期的缺口先从 Outbox 重放。
 
-- [ ] **Step 4: 实现 schedule worker**
+- [x] **Step 4: 实现 schedule worker**
 
 `initial_gate`、`repeat`、`digest_flush`、`quiet_hours_release` 分别由显式 handler 处理。
 领取和状态转换必须是条件更新；业务 handler 不直接 sleep。
 
-- [ ] **Step 5: 运行测试**
+- [x] **Step 5: 运行测试**
 
 Run: `cd omcgo && go test ./internal/notification -run 'LifecycleConsumer|Scheduler' -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add omcgo/internal/notification omcgo/cmd/app/provider/modules.go

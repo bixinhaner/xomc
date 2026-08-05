@@ -88,8 +88,15 @@ type DomainSchedule struct {
 	Generation           int64
 	DueAt                time.Time
 	State                string
+	LockedBy             *string
+	LockedAt             *time.Time
+	LeaseExpiresAt       *time.Time
+	CancelledAt          *time.Time
+	CompletedAt          *time.Time
 	CreatedEventVersion  int64
+	DeliveryID           *uuid.UUID
 	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type DomainDelivery struct {

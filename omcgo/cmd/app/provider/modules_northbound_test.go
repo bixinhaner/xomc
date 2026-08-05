@@ -16,7 +16,41 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/northbound/push"
+	"github.com/omcgo/omcgo/internal/notification"
 )
+
+type providerLifecycleSubscription struct{}
+
+func (providerLifecycleSubscription) Unsubscribe() error { return nil }
+
+type providerLifecycleBus struct {
+	configs map[string]event.KeyedQueueConfig
+}
+
+func (*providerLifecycleBus) Publish(context.Context, string, event.Event) error { return nil }
+func (*providerLifecycleBus) Subscribe(string, event.EventHandler) (event.Subscription, error) {
+	return providerLifecycleSubscription{}, nil
+}
+func (*providerLifecycleBus) QueueSubscribe(string, string, event.EventHandler) (event.Subscription, error) {
+	return providerLifecycleSubscription{}, nil
+}
+func (*providerLifecycleBus) PullSubscribe(string, string, event.EventHandler) (event.Subscription, error) {
+	return providerLifecycleSubscription{}, nil
+}
+func (*providerLifecycleBus) Close() error { return nil }
+func (b *providerLifecycleBus) KeyedQueueSubscribe(
+	_ string,
+	config event.KeyedQueueConfig,
+	_ event.EventKeyFunc,
+	_ event.EventHandler,
+) (event.Subscription, error) {
+	b.configs[config.Durable] = config
+	return providerLifecycleSubscription{}, nil
+}
+func (*providerLifecycleBus) QueueStats(context.Context, string, string) (event.QueueStats, error) {
+	return event.QueueStats{}, nil
+}
 
 // TestInitNorthboundModuleOutboxWired 回归 #121：北向死信队列端点恒 503。
 //
@@ -86,4 +120,25 @@ func TestInitNorthboundModuleOutboxWired(t *testing.T) {
 				"死信端点不应再返回 outbox not configured：%s", w.Body.String())
 		})
 	}
+}
+
+func TestInitNorthboundModuleWiresIndependentNotificationLifecycleDurable(t *testing.T) {
+	logger := zap.NewNop()
+	pool, err := pgxpool.New(context.Background(), "postgres://smoke:smoke@127.0.0.1:1/smoke?connect_timeout=1")
+	require.NoError(t, err)
+	defer pool.Close()
+	bus := &providerLifecycleBus{configs: make(map[string]event.KeyedQueueConfig)}
+	c := &Container{
+		PgPool: pool, EventBus: bus,
+		Cfg: &appconfig.AppConfig{Alarm: appconfig.AlarmConfig{
+			LifecycleMode: "shadow", LifecycleStartSequence: 42,
+		}},
+		Logger: logger, GS: components.NewGracefulShutdown(5*time.Second, logger),
+	}
+	require.NoError(t, initNorthboundModule(c))
+	defer func() { _ = c.GS.Shutdown(context.Background()) }()
+
+	require.Contains(t, bus.configs, push.AlarmLifecycleConsumerDurable)
+	require.Contains(t, bus.configs, notification.LifecycleConsumerDurable)
+	require.Equal(t, uint64(42), bus.configs[notification.LifecycleConsumerDurable].StartSequence)
 }

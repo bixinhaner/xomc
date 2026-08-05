@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -24,6 +25,17 @@ type TemplateVersionRepository interface {
 
 type ScheduleRepository interface {
 	InsertSchedule(context.Context, *DomainSchedule) (bool, error)
+	ClaimDue(context.Context, ScheduleClaimRequest) ([]DomainSchedule, error)
+	MarkCompleted(context.Context, uuid.UUID, string, time.Time) error
+	MarkCancelled(context.Context, uuid.UUID, string, time.Time) error
+	Release(context.Context, uuid.UUID, string, time.Time, time.Time) error
+}
+
+type ScheduleClaimRequest struct {
+	WorkerID      string
+	Now           time.Time
+	LeaseDuration time.Duration
+	Limit         int
 }
 
 type DeliveryRepository interface {

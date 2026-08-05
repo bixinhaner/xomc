@@ -120,6 +120,40 @@ func TestPgScheduleRepository_InsertSchedule_DedupSQL(t *testing.T) {
 	assert.Contains(t, strings.ToUpper(query), "ON CONFLICT (OCCURRENCE_ID, RULE_VERSION_ID, CHANNEL, RECIPIENT_FINGERPRINT, SCHEDULE_KIND, SEQUENCE_NO, GENERATION) DO NOTHING")
 }
 
+func TestPgScheduleRepository_ClaimUsesSkipLockedAndExpiredLeaseRecovery(t *testing.T) {
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	query, args, err := buildScheduleClaim(ScheduleClaimRequest{
+		WorkerID: "worker-a", Now: now, LeaseDuration: 30 * time.Second, Limit: 50,
+	})
+	require.NoError(t, err)
+	normalized := strings.ToUpper(query)
+	assert.Contains(t, normalized, "FOR UPDATE SKIP LOCKED")
+	assert.Contains(t, normalized, "STATE = $1")
+	assert.Contains(t, normalized, "LEASE_EXPIRES_AT <=")
+	assert.Contains(t, normalized, "RETURNING ID, OCCURRENCE_ID")
+	assert.NotEmpty(t, args)
+}
+
+func TestPgScheduleRepository_TransitionRequiresClaimOwner(t *testing.T) {
+	var queries []string
+	db := &domainFakeDB{execFn: func(query string, _ ...any) (pgconn.CommandTag, error) {
+		queries = append(queries, query)
+		return pgconn.NewCommandTag("UPDATE 0"), nil
+	}}
+	repository := newPgScheduleRepository(db)
+
+	err := repository.MarkCompleted(context.Background(), uuid.New(), "stale-worker", time.Now())
+	require.ErrorIs(t, err, ErrScheduleLeaseLost)
+	err = repository.MarkCancelled(context.Background(), uuid.New(), "stale-worker", time.Now())
+	require.ErrorIs(t, err, ErrScheduleLeaseLost)
+	err = repository.Release(context.Background(), uuid.New(), "stale-worker", time.Now(), time.Now())
+	require.ErrorIs(t, err, ErrScheduleLeaseLost)
+	require.Len(t, queries, 3)
+	for _, query := range queries {
+		assert.Contains(t, strings.ToUpper(query), "LEASE_EXPIRES_AT >")
+	}
+}
+
 func TestPgDeliveryRepository_UsesCiphertextAndStableDedup(t *testing.T) {
 	var queries []string
 	db := &domainFakeDB{execFn: func(q string, _ ...any) (pgconn.CommandTag, error) {

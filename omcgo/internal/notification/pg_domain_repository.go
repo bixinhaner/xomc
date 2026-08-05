@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -127,6 +128,8 @@ func (r *PgTemplateVersionRepository) GetTemplateVersion(ctx context.Context, id
 
 type PgScheduleRepository struct{ db storage.DB }
 
+var ErrScheduleLeaseLost = errors.New("notification schedule lease is no longer owned by worker")
+
 func NewPgScheduleRepository(pool *pgxpool.Pool) *PgScheduleRepository {
 	return &PgScheduleRepository{db: storage.NewPoolDB(pool)}
 }
@@ -159,6 +162,134 @@ func buildDomainScheduleInsert(schedule *DomainSchedule) (string, []any, error) 
 		Values(schedule.ID, schedule.OccurrenceID, schedule.RuleVersionID, schedule.Channel, schedule.RecipientFingerprint, schedule.ScheduleKind, schedule.SequenceNo, schedule.Generation, schedule.DueAt, schedule.State, schedule.CreatedEventVersion).
 		Suffix("ON CONFLICT (occurrence_id, rule_version_id, channel, recipient_fingerprint, schedule_kind, sequence_no, generation) DO NOTHING").
 		ToSql()
+}
+
+func (r *PgScheduleRepository) ClaimDue(ctx context.Context, request ScheduleClaimRequest) ([]DomainSchedule, error) {
+	if request.WorkerID == "" {
+		return nil, fmt.Errorf("claim notification schedules: worker ID is required")
+	}
+	if request.Now.IsZero() {
+		return nil, fmt.Errorf("claim notification schedules: current time is required")
+	}
+	if request.LeaseDuration <= 0 {
+		return nil, fmt.Errorf("claim notification schedules: lease duration must be positive")
+	}
+	if request.Limit <= 0 {
+		return nil, fmt.Errorf("claim notification schedules: limit must be positive")
+	}
+	query, args, err := buildScheduleClaim(request)
+	if err != nil {
+		return nil, fmt.Errorf("build notification schedule claim: %w", err)
+	}
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("claim due notification schedules: %w", err)
+	}
+	defer rows.Close()
+
+	schedules := make([]DomainSchedule, 0, request.Limit)
+	for rows.Next() {
+		var schedule DomainSchedule
+		if err := scanDomainSchedule(rows, &schedule); err != nil {
+			return nil, fmt.Errorf("scan claimed notification schedule: %w", err)
+		}
+		schedules = append(schedules, schedule)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate claimed notification schedules: %w", err)
+	}
+	return schedules, nil
+}
+
+func buildScheduleClaim(request ScheduleClaimRequest) (string, []any, error) {
+	// Keep the nested builder on question placeholders. The outer Psql builder
+	// performs the single final dollar-placeholder pass across both statements.
+	due := sq.Select("id").From("notification_schedules").
+		Where(sq.Or{
+			sq.And{sq.Eq{"state": "pending"}, sq.LtOrEq{"due_at": request.Now}},
+			sq.And{sq.Eq{"state": "claimed"}, sq.LtOrEq{"lease_expires_at": request.Now}},
+		}).
+		OrderBy("due_at", "id").Limit(uint64(request.Limit)).Suffix("FOR UPDATE SKIP LOCKED")
+	return storage.Psql.Update("notification_schedules").
+		Set("state", "claimed").
+		Set("locked_by", request.WorkerID).
+		Set("locked_at", request.Now).
+		Set("lease_expires_at", request.Now.Add(request.LeaseDuration)).
+		Set("updated_at", request.Now).
+		Where(sq.Expr("id IN (?)", due)).
+		Suffix(`RETURNING id, occurrence_id, rule_version_id, channel, recipient_fingerprint,
+            schedule_kind, sequence_no, generation, due_at, state, locked_by, locked_at,
+            lease_expires_at, cancelled_at, completed_at, created_event_version, delivery_id,
+            created_at, updated_at`).ToSql()
+}
+
+type scheduleScanner interface{ Scan(...any) error }
+
+func scanDomainSchedule(row scheduleScanner, schedule *DomainSchedule) error {
+	return row.Scan(
+		&schedule.ID, &schedule.OccurrenceID, &schedule.RuleVersionID, &schedule.Channel,
+		&schedule.RecipientFingerprint, &schedule.ScheduleKind, &schedule.SequenceNo,
+		&schedule.Generation, &schedule.DueAt, &schedule.State, &schedule.LockedBy,
+		&schedule.LockedAt, &schedule.LeaseExpiresAt, &schedule.CancelledAt,
+		&schedule.CompletedAt, &schedule.CreatedEventVersion, &schedule.DeliveryID,
+		&schedule.CreatedAt, &schedule.UpdatedAt,
+	)
+}
+
+func (r *PgScheduleRepository) MarkCompleted(ctx context.Context, id uuid.UUID, workerID string, now time.Time) error {
+	return r.transitionClaimed(ctx, id, workerID, "completed", now, now, nil)
+}
+
+func (r *PgScheduleRepository) MarkCancelled(ctx context.Context, id uuid.UUID, workerID string, now time.Time) error {
+	return r.transitionClaimed(ctx, id, workerID, "cancelled", now, nil, now)
+}
+
+func (r *PgScheduleRepository) Release(ctx context.Context, id uuid.UUID, workerID string, dueAt, now time.Time) error {
+	query, args, err := storage.Psql.Update("notification_schedules").
+		Set("state", "pending").Set("due_at", dueAt).
+		Set("locked_by", nil).Set("locked_at", nil).Set("lease_expires_at", nil).
+		Set("updated_at", now).
+		Where(sq.Eq{"id": id, "state": "claimed", "locked_by": workerID}).
+		Where(sq.Gt{"lease_expires_at": now}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build notification schedule release: %w", err)
+	}
+	tag, err := r.db.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("release notification schedule: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("release notification schedule: %w", ErrScheduleLeaseLost)
+	}
+	return nil
+}
+
+func (r *PgScheduleRepository) transitionClaimed(
+	ctx context.Context,
+	id uuid.UUID,
+	workerID string,
+	state string,
+	now time.Time,
+	completedAt any,
+	cancelledAt any,
+) error {
+	query, args, err := storage.Psql.Update("notification_schedules").
+		Set("state", state).Set("completed_at", completedAt).Set("cancelled_at", cancelledAt).
+		Set("locked_by", nil).Set("locked_at", nil).Set("lease_expires_at", nil).
+		Set("updated_at", now).
+		Where(sq.Eq{"id": id, "state": "claimed", "locked_by": workerID}).
+		Where(sq.Gt{"lease_expires_at": now}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build notification schedule %s transition: %w", state, err)
+	}
+	tag, err := r.db.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("mark notification schedule %s: %w", state, err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("mark notification schedule %s: %w", state, ErrScheduleLeaseLost)
+	}
+	return nil
 }
 
 type PgDeliveryRepository struct{ db storage.DB }
