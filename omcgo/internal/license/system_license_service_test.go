@@ -2,8 +2,11 @@ package license
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -78,29 +81,14 @@ func (m *mockSystemLicenseRepo) ExistsByLicenseID(ctx context.Context, id string
 	return false, nil
 }
 
-// validLicenseJSON 是一个最小可用的 license JSON 文件，覆盖必填字段。
-//
-// 不带 signature/signature_key_id —— service 不强制验签（除非 verifier strict=true）。
-func validLicenseJSON(t *testing.T, licenseID string) string {
+func configureRepositoryLegacyLicense(t *testing.T, svc *SystemLicenseService) string {
 	t.Helper()
-	doc := map[string]any{
-		"license_id":   licenseID,
-		"license_type": string(SystemLicenseTypeCommercial),
-		"issuer":       "Test OEM",
-		"licensee":     "Test Customer",
-		"issued_at":    "2026-05-18T00:00:00Z",
-		"expiry_date":  "2049-01-01T00:00:00Z",
-		"devices_support": map[string]int{
-			"eNB": 10000,
-			"gNB": 10000,
-		},
-		"feature_list": map[string]any{
-			"Dashboard": "All",
-		},
-	}
-	b, err := json.Marshal(doc)
+	raw, err := os.ReadFile(filepath.Join("testdata", "omc.lic"))
 	require.NoError(t, err)
-	return string(b)
+	keyStore, err := os.ReadFile(filepath.Join("..", "..", "..", "license-run-time", "keystore", "omcPublicKey.store"))
+	require.NoError(t, err)
+	svc.SetLegacyTrueLicenseConfig(keyStore, "bcb9omc6", "omcPublicKey", false)
+	return base64.StdEncoding.EncodeToString(raw)
 }
 
 func newTestSystemLicenseService(repo SystemLicenseRepository) *SystemLicenseService {
@@ -157,141 +145,102 @@ func TestSystemLicenseService_GetCurrent(t *testing.T) {
 	}
 }
 
+func TestSystemLicenseService_LegacyConfigTrimsLineEndings(t *testing.T) {
+	svc := newTestSystemLicenseService(&mockSystemLicenseRepo{})
+	svc.SetLegacyTrueLicenseConfig([]byte{1}, "bcb9omc6\r\n", "omcPublicKey", true)
+	assert.Equal(t, "bcb9omc6", svc.legacyStorePassword)
+}
+
+func TestSystemLicenseService_CheckFeature(t *testing.T) {
+	repo := &mockSystemLicenseRepo{current: &SystemLicense{
+		LicenseID:   "NO2026-05-001",
+		LicenseType: SystemLicenseTypeCommercial,
+		FeatureList: FeatureList(`{"eNB":{"Monitor":["Settings"]}}`),
+		IsCurrent:   true,
+	}}
+	svc := newTestSystemLicenseService(repo)
+
+	authorized, err := svc.CheckFeature(context.Background(), "eNB.Monitor.Settings")
+	require.NoError(t, err)
+	assert.True(t, authorized)
+
+	authorized, err = svc.CheckFeature(context.Background(), "eNB.Monitor.Active")
+	require.NoError(t, err)
+	assert.False(t, authorized)
+
+	_, err = svc.CheckFeature(context.Background(), "eNB..Settings")
+	require.Error(t, err)
+}
+
+func TestSystemLicenseService_GetCurrentEnrichesPersistedLegacyFeatures(t *testing.T) {
+	repo := &mockSystemLicenseRepo{current: &SystemLicense{
+		LicenseID:   "NO2022-03-14002",
+		LicenseType: SystemLicenseTypeCommercial,
+		FeatureList: FeatureList(`{"features":[{"name_zh":"旧名称"}],"legacy_feature_ids":["80"],"legacy_feature_codes":["CODE_TOOL_DHCP"]}`),
+		IsCurrent:   true,
+	}}
+	svc := newTestSystemLicenseService(repo)
+	mapping, err := LoadLegacyFeatureMapping(filepath.Join("..", "..", "data", "license-feature-mapping.json"))
+	require.NoError(t, err)
+	svc.SetLegacyFeatureMapping(mapping)
+
+	license, err := svc.GetCurrent(context.Background())
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(license.FeatureList, &payload))
+	features, ok := payload["features"].([]any)
+	require.True(t, ok)
+	require.Len(t, features, 1)
+	feature := features[0].(map[string]any)
+	assert.Equal(t, "DHCP", feature["name_zh"])
+	assert.Equal(t, "高级 / DHCP", feature["path"])
+}
+
 func TestSystemLicenseService_Update(t *testing.T) {
-	tests := []struct {
-		name             string
-		raw              func(t *testing.T) string
-		seedCurrent      *SystemLicense
-		seedExists       func(ctx context.Context, id string) (bool, error)
-		wantErrCode      int  // 0 = no BusinessError expected
-		wantReplacedNil  bool // first install should have nil Replaced
-		wantSigStatus    SignatureStatus
-		wantLicenseIDOut string
-	}{
-		{
-			name: "first install OK",
-			raw: func(t *testing.T) string {
-				return validLicenseJSON(t, "NO2026-05-001")
-			},
-			seedCurrent:      nil,
-			wantErrCode:      0,
-			wantReplacedNil:  true,
-			wantSigStatus:    SignatureUnverified,
-			wantLicenseIDOut: "NO2026-05-001",
-		},
-		{
-			name: "replace existing OK",
-			raw: func(t *testing.T) string {
-				return validLicenseJSON(t, "NO2026-05-002")
-			},
-			seedCurrent: &SystemLicense{
-				ID:          uuid.New(),
-				LicenseID:   "NO2026-05-001",
-				LicenseType: SystemLicenseTypeCommercial,
-				IsCurrent:   true,
-			},
-			wantErrCode:      0,
-			wantReplacedNil:  false,
-			wantSigStatus:    SignatureUnverified,
-			wantLicenseIDOut: "NO2026-05-002",
-		},
-		{
-			name: "empty raw_content rejected as InvalidFormat",
-			raw: func(t *testing.T) string {
-				return "   "
-			},
-			wantErrCode: global.ErrCodeSystemLicenseInvalidFormat,
-		},
-		{
-			name: "invalid JSON rejected as InvalidFormat",
-			raw: func(t *testing.T) string {
-				return `{"license_id":`
-			},
-			wantErrCode: global.ErrCodeSystemLicenseInvalidFormat,
-		},
-		{
-			name: "missing license_id rejected as InvalidFormat",
-			raw: func(t *testing.T) string {
-				return `{"license_type":"Commercial","issued_at":"2026-05-18T00:00:00Z"}`
-			},
-			wantErrCode: global.ErrCodeSystemLicenseInvalidFormat,
-		},
-		{
-			name: "invalid license_type rejected as InvalidFormat",
-			raw: func(t *testing.T) string {
-				return `{"license_id":"X","license_type":"Bogus","issued_at":"2026-05-18T00:00:00Z"}`
-			},
-			wantErrCode: global.ErrCodeSystemLicenseInvalidFormat,
-		},
-		{
-			name: "missing issued_at rejected as InvalidFormat",
-			raw: func(t *testing.T) string {
-				return `{"license_id":"X","license_type":"Commercial"}`
-			},
-			wantErrCode: global.ErrCodeSystemLicenseInvalidFormat,
-		},
-		{
-			name: "license_id already exists (pre-check) → 12110",
-			raw: func(t *testing.T) string {
-				return validLicenseJSON(t, "NO2022-03-14002")
-			},
-			seedExists: func(_ context.Context, _ string) (bool, error) {
-				return true, nil
-			},
-			wantErrCode: global.ErrCodeSystemLicenseIDExists,
-		},
-		{
-			name: "license_id exists raced from repo.Replace → 12110",
-			raw: func(t *testing.T) string {
-				return validLicenseJSON(t, "NO2026-05-XXX")
-			},
-			seedExists: func(_ context.Context, _ string) (bool, error) {
-				return false, nil // pre-check passes
-			},
-			// 模拟 pre-check 后并发上传：Replace 撞 UNIQUE。
-			wantErrCode: global.ErrCodeSystemLicenseIDExists,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			repo := &mockSystemLicenseRepo{
-				current:  tc.seedCurrent,
-				existsFn: tc.seedExists,
-			}
-			// 给"race"用例注入 Replace 错误。
-			if tc.name == "license_id exists raced from repo.Replace → 12110" {
-				repo.replaceFn = func(_ context.Context, _ *SystemLicense) (*SystemLicenseHistory, error) {
-					return nil, ErrSystemLicenseIDExists
-				}
-			}
+	t.Run("legacy lic first install", func(t *testing.T) {
+		repo := &mockSystemLicenseRepo{}
+		svc := newTestSystemLicenseService(repo)
+		raw := configureRepositoryLegacyLicense(t, svc)
 
-			svc := newTestSystemLicenseService(repo)
-			result, err := svc.Update(context.Background(), UpdateRequest{
-				RawContent: tc.raw(t),
-			})
-
-			if tc.wantErrCode != 0 {
-				require.Error(t, err)
-				var be *commonerrors.BusinessError
-				require.True(t, errors.As(err, &be), "expected BusinessError, got %T: %v", err, err)
-				assert.Equal(t, tc.wantErrCode, be.Code)
-				return
-			}
-
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			require.NotNil(t, result.Current)
-			assert.Equal(t, tc.wantLicenseIDOut, result.Current.LicenseID)
-			assert.Equal(t, tc.wantSigStatus, result.Current.SignatureStatus)
-			if tc.wantReplacedNil {
-				assert.Nil(t, result.Replaced)
-			} else {
-				assert.NotNil(t, result.Replaced)
-			}
-			// raw_content 完整存档
-			assert.NotEmpty(t, result.Current.RawContent)
+		result, err := svc.Update(context.Background(), UpdateRequest{
+			RawContent:         raw,
+			RawContentEncoding: "base64",
 		})
-	}
+		require.NoError(t, err)
+		assert.Equal(t, "NO2022-03-14002", result.Current.LicenseID)
+		assert.Equal(t, SignatureVerified, result.Current.SignatureStatus)
+		assert.Nil(t, result.Replaced)
+		assert.NotEmpty(t, result.Current.RawContent)
+	})
+
+	t.Run("json license is rejected", func(t *testing.T) {
+		svc := newTestSystemLicenseService(&mockSystemLicenseRepo{})
+		result, err := svc.Update(context.Background(), UpdateRequest{
+			RawContent: `{"license_id":"not-a-legacy-license"}`,
+		})
+		assert.Nil(t, result)
+		var businessErr *commonerrors.BusinessError
+		require.ErrorAs(t, err, &businessErr)
+		assert.Equal(t, global.ErrCodeSystemLicenseInvalidFormat, businessErr.Code)
+	})
+
+	t.Run("legacy feature payload includes normalized display objects", func(t *testing.T) {
+		repo := &mockSystemLicenseRepo{}
+		svc := newTestSystemLicenseService(repo)
+		mapping, mappingErr := LoadLegacyFeatureMapping(filepath.Join("..", "..", "data", "license-feature-mapping.json"))
+		require.NoError(t, mappingErr)
+		svc.SetLegacyFeatureMapping(mapping)
+		result, err := svc.Update(context.Background(), UpdateRequest{
+			RawContent:         configureRepositoryLegacyLicense(t, svc),
+			RawContentEncoding: "base64",
+		})
+		require.NoError(t, err)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(result.Current.FeatureList, &payload))
+		features, ok := payload["features"].([]any)
+		require.True(t, ok)
+		require.NotEmpty(t, features)
+	})
 }
 
 func TestSystemLicenseService_Update_StoresUploaderAndUploadedAt(t *testing.T) {
@@ -303,9 +252,11 @@ func TestSystemLicenseService_Update_StoresUploaderAndUploadedAt(t *testing.T) {
 	defer func() { nowFunc = orig }()
 	nowFunc = func() time.Time { return fixedNow }
 
+	raw := configureRepositoryLegacyLicense(t, svc)
 	result, err := svc.Update(context.Background(), UpdateRequest{
-		RawContent:       validLicenseJSON(t, "NO2026-05-099"),
-		UploadedByUserID: &uploader,
+		RawContent:         raw,
+		RawContentEncoding: "base64",
+		UploadedByUserID:   &uploader,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result.Current.UploadedByUserID)

@@ -2,9 +2,9 @@
  * UpdateModal — F06 System License 重构 Step 4。
  *
  * 流程（PRD §6 Update 操作）：
- *   1. 用户拖入 / 点击选择 license JSON 文件（.json / .lic）
- *   2. 前端 FileReader 读出文本，本地 JSON.parse 做预览（仅展示，不验签）
- *   3. 用户确认 → POST /system-license（raw_content）→ 后端 strict 验签 + 替换
+ *   1. 用户拖入 / 点击选择旧项目 TrueLicense 二进制 license 文件（.lic）
+ *   2. 前端 FileReader 读取二进制并转 Base64（仅作为 HTTP 传输编码）
+ *   3. 用户确认 → POST /system-license → 后端解密、验签、替换
  *   4. 成功 → message.success + 提示是否替换了旧 license
  *   5. 失败 → 按 biz_code 区分 12109/12110/12111 给针对性 toast
  */
@@ -30,39 +30,13 @@ interface UpdateModalProps {
 
 interface ParsedPreview {
   raw: string;
+  legacy: boolean;
   licenseId?: string;
   licenseType?: string;
   issuedAt?: string;
   expiryDate?: string;
   devicesSupport?: Record<string, number>;
   hasSignature: boolean;
-}
-
-function tryParse(raw: string): { ok: true; preview: ParsedPreview } | { ok: false; msg: string } {
-  try {
-    const obj = JSON.parse(raw);
-    if (!obj || typeof obj !== 'object') {
-      return { ok: false, msg: 'not a JSON object' };
-    }
-    const o = obj as Record<string, unknown>;
-    return {
-      ok: true,
-      preview: {
-        raw,
-        licenseId: typeof o.license_id === 'string' ? o.license_id : undefined,
-        licenseType: typeof o.license_type === 'string' ? o.license_type : undefined,
-        issuedAt: typeof o.issued_at === 'string' ? o.issued_at : undefined,
-        expiryDate: typeof o.expiry_date === 'string' ? o.expiry_date : undefined,
-        devicesSupport:
-          o.devices_support && typeof o.devices_support === 'object'
-            ? (o.devices_support as Record<string, number>)
-            : undefined,
-        hasSignature: typeof o.signature === 'string' && o.signature.length > 0,
-      },
-    };
-  } catch (err) {
-    return { ok: false, msg: (err as Error).message };
-  }
 }
 
 export default function UpdateModal({ open, onClose }: UpdateModalProps) {
@@ -86,25 +60,29 @@ export default function UpdateModal({ open, onClose }: UpdateModalProps) {
     [preview, parseError, updateMutation.isPending],
   );
 
-  // Dragger beforeUpload 钩子：本地 FileReader 读 + 预览（不真上传）
+  // Dragger beforeUpload 钩子：本地读取旧 .lic 二进制并转 Base64（不真上传）
   const beforeUpload = (file: File) => {
     const reader = new FileReader();
+    const isLegacy = file.name.toLowerCase().endsWith('.lic');
     reader.onload = () => {
-      const text = String(reader.result ?? '');
-      const result = tryParse(text);
-      if (result.ok) {
-        setPreview(result.preview);
-        setParseError(null);
-      } else {
+      if (!isLegacy) {
         setPreview(null);
-        setParseError(result.msg);
+        setParseError(t('systemLicense.update.licOnly'));
+        return;
       }
+      const bytes = new Uint8Array(reader.result as ArrayBuffer);
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      }
+      setPreview({ raw: btoa(binary), legacy: true, hasSignature: false });
+      setParseError(null);
     };
     reader.onerror = () => {
       setPreview(null);
       setParseError(reader.error?.message ?? 'FileReader error');
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
     // Antd Dragger 显示文件本身用，禁止自动上传
     setFileList([
       {
@@ -119,7 +97,7 @@ export default function UpdateModal({ open, onClose }: UpdateModalProps) {
 
   const handleSubmit = () => {
     if (!preview) return;
-    updateMutation.mutate(preview.raw, {
+    updateMutation.mutate({ rawContent: preview.raw }, {
       onSuccess: (data) => {
         message.success(t('systemLicense.update.success'));
         if (data.replaced) {
@@ -168,7 +146,7 @@ export default function UpdateModal({ open, onClose }: UpdateModalProps) {
       destroyOnHidden
     >
       <Dragger
-        accept=".json,.lic"
+        accept=".lic"
         multiple={false}
         showUploadList={{ showRemoveIcon: true }}
         fileList={fileList}
@@ -198,7 +176,9 @@ export default function UpdateModal({ open, onClose }: UpdateModalProps) {
 
       <div style={{ marginTop: 16 }}>
         <Text strong>{t('systemLicense.update.preview')}</Text>
-        {preview ? (
+        {preview?.legacy ? (
+          <Text type="secondary">{t('systemLicense.update.legacyPreview')}</Text>
+        ) : preview ? (
           <Descriptions
             size="small"
             column={2}
