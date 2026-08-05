@@ -16,10 +16,22 @@ import (
 )
 
 var taskColumns = []string{
-	"id", "device_id", "template_id", "status", "current_step", "total_steps",
+	"id", "device_id", "template_id", "policy_id", "xml_file_id", "device_task_id",
+	"status", "current_step", "current_step_name", "total_steps",
 	"error_message", "retry_count", "max_retries",
 	"started_at", "completed_at", "created_at", "updated_at",
 }
+
+var listTaskColumns = append(
+	func() []string {
+		columns := make([]string, len(taskColumns))
+		for i, column := range taskColumns {
+			columns[i] = "pt." + column
+		}
+		return columns
+	}(),
+	"COALESCE(d.serial_number, '')",
+)
 
 // PgProvisioningTaskRepository implements ProvisioningTaskRepository using PostgreSQL.
 type PgProvisioningTaskRepository struct {
@@ -42,8 +54,9 @@ func (r *PgProvisioningTaskRepository) Create(ctx context.Context, task *Provisi
 	query, args, err := storage.Psql.Insert("provisioning_tasks").
 		Columns(taskColumns...).
 		Values(
-			task.ID, task.DeviceID, nullableUUID(task.TemplateID), task.Status,
-			task.CurrentStep, task.TotalSteps, nullableString(task.ErrorMessage),
+			task.ID, task.DeviceID, nullableUUID(task.TemplateID), nullableUUID(task.PolicyID),
+			nullableUUID(task.XMLFileID), nullableUUID(task.DeviceTaskID), task.Status,
+			task.CurrentStep, nullableString(task.CurrentStepName), task.TotalSteps, nullableString(task.ErrorMessage),
 			task.RetryCount, task.MaxRetries,
 			nullableTime(task.StartedAt), nullableTime(task.CompletedAt),
 			task.CreatedAt, task.UpdatedAt,
@@ -94,13 +107,81 @@ func (r *PgProvisioningTaskRepository) GetByDeviceID(ctx context.Context, device
 	return task, nil
 }
 
+func (r *PgProvisioningTaskRepository) GetByDelegatedTaskID(
+	ctx context.Context,
+	delegatedTaskID uuid.UUID,
+	deviceID uuid.UUID,
+) (*ProvisioningTask, error) {
+	query, args, err := storage.Psql.Select(taskColumns...).
+		From("provisioning_tasks").
+		Where(sq.Eq{
+			"device_task_id": delegatedTaskID,
+			"device_id":      deviceID,
+		}).
+		OrderBy("created_at DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build select task by delegated task SQL: %w", err)
+	}
+	task, err := scanTask(r.pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		return nil, err
+	}
+	return task, nil
+}
+
+func (r *PgProvisioningTaskRepository) ListActivationChecksDue(
+	ctx context.Context,
+	before time.Time,
+	limit int,
+) ([]ProvisioningTask, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	query, args, err := storage.Psql.Select(taskColumns...).
+		From("provisioning_tasks").
+		Where(sq.Eq{
+			"status":            StateVerifying,
+			"current_step_name": "wait_activation_check",
+		}).
+		Where(sq.LtOrEq{"updated_at": before}).
+		OrderBy("updated_at ASC").
+		Limit(uint64(limit)).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build due activation checks SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query due activation checks: %w", err)
+	}
+	defer rows.Close()
+	items := make([]ProvisioningTask, 0)
+	for rows.Next() {
+		item, scanErr := scanTask(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		items = append(items, *item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate due activation checks: %w", err)
+	}
+	return items, nil
+}
+
 func (r *PgProvisioningTaskRepository) Update(ctx context.Context, task *ProvisioningTask) error {
 	task.UpdatedAt = time.Now()
 
 	query, args, err := storage.Psql.Update("provisioning_tasks").
 		Set("template_id", nullableUUID(task.TemplateID)).
+		Set("policy_id", nullableUUID(task.PolicyID)).
+		Set("xml_file_id", nullableUUID(task.XMLFileID)).
+		Set("device_task_id", nullableUUID(task.DeviceTaskID)).
 		Set("status", task.Status).
 		Set("current_step", task.CurrentStep).
+		Set("current_step_name", nullableString(task.CurrentStepName)).
 		Set("total_steps", task.TotalSteps).
 		Set("error_message", nullableString(task.ErrorMessage)).
 		Set("retry_count", task.RetryCount).
@@ -152,16 +233,10 @@ func (r *PgProvisioningTaskRepository) UpdateStatus(ctx context.Context, id uuid
 }
 
 func (r *PgProvisioningTaskRepository) List(ctx context.Context, filter ProvisioningTaskFilter) ([]ProvisioningTask, int64, error) {
-	pred := sq.And{}
-	if filter.DeviceID != nil {
-		pred = append(pred, sq.Eq{"device_id": *filter.DeviceID})
-	}
-	if filter.Status != "" {
-		pred = append(pred, sq.Eq{"status": filter.Status})
-	}
+	pred := buildProvisioningTaskPredicate(filter)
 
 	// Count.
-	countBuilder := storage.Psql.Select("COUNT(*)").From("provisioning_tasks")
+	countBuilder := storage.Psql.Select("COUNT(*)").From("provisioning_tasks pt")
 	if len(pred) > 0 {
 		countBuilder = countBuilder.Where(pred)
 	}
@@ -175,30 +250,7 @@ func (r *PgProvisioningTaskRepository) List(ctx context.Context, filter Provisio
 		return nil, 0, fmt.Errorf("count tasks: %w", err)
 	}
 
-	pageSize := filter.PageSize
-	if pageSize < 1 {
-		pageSize = 20
-	}
-	if pageSize > 100 {
-		pageSize = 100
-	}
-	page := filter.Page
-	if page < 1 {
-		page = 1
-	}
-	offset := (page - 1) * pageSize
-
-	queryBuilder := storage.Psql.Select(taskColumns...).
-		From("provisioning_tasks").
-		Limit(uint64(pageSize)).
-		Offset(uint64(offset)).
-		OrderBy("created_at DESC")
-
-	if len(pred) > 0 {
-		queryBuilder = queryBuilder.Where(pred)
-	}
-
-	querySQL, queryArgs, err := queryBuilder.ToSql()
+	querySQL, queryArgs, err := buildProvisioningTaskListSQL(filter)
 	if err != nil {
 		return nil, 0, fmt.Errorf("build list tasks SQL: %w", err)
 	}
@@ -215,6 +267,47 @@ func (r *PgProvisioningTaskRepository) List(ctx context.Context, filter Provisio
 	}
 
 	return items, total, nil
+}
+
+func buildProvisioningTaskListSQL(filter ProvisioningTaskFilter) (string, []interface{}, error) {
+	pred := buildProvisioningTaskPredicate(filter)
+
+	pageSize := filter.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+
+	queryBuilder := storage.Psql.Select(listTaskColumns...).
+		From("provisioning_tasks pt").
+		LeftJoin("devices d ON d.id = pt.device_id").
+		Limit(uint64(pageSize)).
+		Offset(uint64((page - 1) * pageSize)).
+		OrderBy("pt.created_at DESC")
+	if len(pred) > 0 {
+		queryBuilder = queryBuilder.Where(pred)
+	}
+	return queryBuilder.ToSql()
+}
+
+func buildProvisioningTaskPredicate(filter ProvisioningTaskFilter) sq.And {
+	pred := sq.And{}
+	if filter.DeviceID != nil {
+		pred = append(pred, sq.Eq{"pt.device_id": *filter.DeviceID})
+	}
+	if filter.Status != "" {
+		pred = append(pred, sq.Eq{"pt.status": filter.Status})
+	}
+	if filter.PolicyOnly {
+		pred = append(pred, sq.Expr("pt.policy_id IS NOT NULL"))
+	}
+	return pred
 }
 
 func (r *PgProvisioningTaskRepository) CountByStatus(ctx context.Context) (map[ProvisioningState]int64, error) {
@@ -254,6 +347,10 @@ func (r *PgProvisioningTaskRepository) FailStale(ctx context.Context, maxAge tim
 		Where(sq.And{
 			sq.NotEq{"status": string(StateCompleted)},
 			sq.NotEq{"status": string(StateFailed)},
+			// Activation verification owns three checks at T+5m/T+10m/T+15m,
+			// so the generic 15-minute stale-task timeout must
+			// not terminate it before its final observation.
+			sq.NotEq{"current_step_name": "wait_activation_check"},
 			sq.Lt{"updated_at": cutoff},
 		}).
 		ToSql()
@@ -295,14 +392,18 @@ func scanTask(row pgx.Row) (*ProvisioningTask, error) {
 	var task ProvisioningTask
 	var (
 		templateID   sql.NullString
+		policyID     sql.NullString
+		xmlFileID    sql.NullString
+		deviceTaskID sql.NullString
+		stepName     sql.NullString
 		errorMessage sql.NullString
 		startedAt    sql.NullTime
 		completedAt  sql.NullTime
 	)
 
 	err := row.Scan(
-		&task.ID, &task.DeviceID, &templateID, &task.Status,
-		&task.CurrentStep, &task.TotalSteps, &errorMessage,
+		&task.ID, &task.DeviceID, &templateID, &policyID, &xmlFileID, &deviceTaskID, &task.Status,
+		&task.CurrentStep, &stepName, &task.TotalSteps, &errorMessage,
 		&task.RetryCount, &task.MaxRetries,
 		&startedAt, &completedAt, &task.CreatedAt, &task.UpdatedAt,
 	)
@@ -316,6 +417,12 @@ func scanTask(row pgx.Row) (*ProvisioningTask, error) {
 	if templateID.Valid {
 		id, _ := uuid.Parse(templateID.String)
 		task.TemplateID = &id
+	}
+	setOptionalUUID(policyID, &task.PolicyID)
+	setOptionalUUID(xmlFileID, &task.XMLFileID)
+	setOptionalUUID(deviceTaskID, &task.DeviceTaskID)
+	if stepName.Valid {
+		task.CurrentStepName = stepName.String
 	}
 	if errorMessage.Valid {
 		task.ErrorMessage = errorMessage.String
@@ -336,16 +443,20 @@ func scanTasks(rows pgx.Rows) ([]ProvisioningTask, error) {
 		var task ProvisioningTask
 		var (
 			templateID   sql.NullString
+			policyID     sql.NullString
+			xmlFileID    sql.NullString
+			deviceTaskID sql.NullString
+			stepName     sql.NullString
 			errorMessage sql.NullString
 			startedAt    sql.NullTime
 			completedAt  sql.NullTime
 		)
 
 		err := rows.Scan(
-			&task.ID, &task.DeviceID, &templateID, &task.Status,
-			&task.CurrentStep, &task.TotalSteps, &errorMessage,
+			&task.ID, &task.DeviceID, &templateID, &policyID, &xmlFileID, &deviceTaskID, &task.Status,
+			&task.CurrentStep, &stepName, &task.TotalSteps, &errorMessage,
 			&task.RetryCount, &task.MaxRetries,
-			&startedAt, &completedAt, &task.CreatedAt, &task.UpdatedAt,
+			&startedAt, &completedAt, &task.CreatedAt, &task.UpdatedAt, &task.SerialNumber,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan task row: %w", err)
@@ -354,6 +465,12 @@ func scanTasks(rows pgx.Rows) ([]ProvisioningTask, error) {
 		if templateID.Valid {
 			id, _ := uuid.Parse(templateID.String)
 			task.TemplateID = &id
+		}
+		setOptionalUUID(policyID, &task.PolicyID)
+		setOptionalUUID(xmlFileID, &task.XMLFileID)
+		setOptionalUUID(deviceTaskID, &task.DeviceTaskID)
+		if stepName.Valid {
+			task.CurrentStepName = stepName.String
 		}
 		if errorMessage.Valid {
 			task.ErrorMessage = errorMessage.String
@@ -368,6 +485,15 @@ func scanTasks(rows pgx.Rows) ([]ProvisioningTask, error) {
 		items = append(items, task)
 	}
 	return items, rows.Err()
+}
+
+func setOptionalUUID(value sql.NullString, target **uuid.UUID) {
+	if !value.Valid {
+		return
+	}
+	if id, err := uuid.Parse(value.String); err == nil {
+		*target = &id
+	}
 }
 
 // Compile-time interface compliance check.

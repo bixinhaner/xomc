@@ -49,6 +49,7 @@ type GroupAssignRequest struct {
 type InformEventPayload struct {
 	DeviceId      tr069.DeviceId               `json:"device_id"`
 	Events        []string                     `json:"events"`
+	EventStructs  []tr069.EventStruct          `json:"event_structs,omitempty"`
 	ParameterList []tr069.ParameterValueStruct `json:"parameter_list"`
 	CurrentTime   string                       `json:"current_time"`
 	RetryCount    int                          `json:"retry_count"`

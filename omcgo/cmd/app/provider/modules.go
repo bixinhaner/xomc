@@ -641,6 +641,7 @@ func initProvisionModule(c *Container) error {
 	logger := c.Logger.Named("provision")
 
 	provisionRepo := provision.NewPgProvisioningTaskRepository(c.PgPool)
+	plugAndPlayRepo := provision.NewPgPlugAndPlayRepository(c.PgPool)
 	discoveryLogRepo := provision.NewPgParameterDiscoveryLogRepository(c.PgPool)
 	provisionEngine := provision.NewProvisioningEngine(
 		provisionRepo, c.DeviceService, c.TemplateService,
@@ -648,6 +649,15 @@ func initProvisionModule(c *Container) error {
 	)
 	provisionEngine.SetDeduper(c.Deduper)
 	provisionEngine.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
+	provisionEngine.SetActivationStateReader(c.DeviceInfoRepo)
+	provisionEngine.SetActivationStateRefresher(device.NewInfoSyncer(
+		c.DeviceInfoRepo,
+		c.ParamRepo,
+		device.NewPgDeviceRepository(c.PgPool),
+		c.Carriers,
+		logger,
+		device.NewPgLocationObservationRepository(c.PgPool),
+	))
 	if c.miscDeps.paramSyncStarter != nil {
 		provisionEngine.SetRegisteredDeviceSyncStarter(c.miscDeps.paramSyncStarter)
 		provisionEngine.SetDeviceOnlineFullSyncSubmitter(c.miscDeps.paramSyncStarter)
@@ -808,8 +818,39 @@ func initProvisionModule(c *Container) error {
 
 	c.miscDeps.provisionRepo = provisionRepo
 	c.miscDeps.provisionEngine = provisionEngine
+	c.miscDeps.plugAndPlayRepo = plugAndPlayRepo
+	registerProvisionCompletionHandler(
+		c.miscDeps.completionRouter, c.miscDeps.taskSvc, provisionEngine, logger,
+	)
 
 	return nil
+}
+
+// registerProvisionCompletionHandler wires terminal device-task results only
+// after ProvisioningEngine exists. The misc module creates CompletionRouter
+// before the provision module is initialized, so attempting this registration
+// from initMiscModules silently skips it and leaves PnP Download SOAP faults to
+// be reported later as generic provisioning timeouts.
+func registerProvisionCompletionHandler(
+	router *task.CompletionRouter,
+	taskSvc *task.TaskService,
+	handler task.TaskCompletionCallback,
+	logger *zap.Logger,
+) {
+	if handler == nil {
+		return
+	}
+	if router != nil {
+		router.Register(task.TaskSourceSystem, handler)
+		logger.Info("provision completion callback registered to TaskSourceSystem")
+		return
+	}
+	if taskSvc != nil {
+		taskSvc.AddCompletionCallback(handler)
+		logger.Info("provision completion callback registered to TaskService")
+		return
+	}
+	logger.Warn("task completion routing unavailable; provisioning device-task failures will not propagate")
 }
 
 // initTaskModule 初始化 F06 任务队列模块。
@@ -974,6 +1015,7 @@ func initBackupModule(c *Container) error {
 		snapshotRepo, c.MinIO, snapshotFileLookup, c.DeviceRepo,
 		backup.SnapshotBucketDefault, logger,
 	)
+	c.miscDeps.snapshotService = snapshotService
 	// #61: promote 解码管线 —— 读源备份对象 + AES-256-GCM 解密器，把(压缩/加密的)
 	// 备份还原成明文写快照（替代会产生不可用快照的 server-side CopyObject）。
 	// 源读取器在 MinIO 注入时才装；解密器仅在 KEK 可用时装（与上传加密算法一致），
@@ -1020,6 +1062,10 @@ func initBackupModule(c *Container) error {
 		c.miscDeps.taskSvc, backup.LicenseBucketDefault, logger,
 	)
 	backupHandler.SetLicenseService(licenseService)
+	licensePreinstallSubscriber := backup.NewLicensePreinstallSubscriber(licenseService, logger)
+	if err := licensePreinstallSubscriber.Subscribe(c.EventBus); err != nil {
+		logger.Warn("subscribe license preinstall dispatcher", zap.Error(err))
+	}
 	if c.miscDeps.ufteService != nil {
 		c.miscDeps.ufteService.SetLicenseUpgradeDispatcher(licenseService)
 	}
@@ -2234,11 +2280,6 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			// 聚合器随后判定"无在途"才不会在顺序链中途误判完成（见 finalizeIfComplete 注释）。
 			c.miscDeps.completionRouter.Register(task.TaskSourceMML, sequencer) // Sprint B Q-V3-3
 			c.miscDeps.completionRouter.Register(task.TaskSourceMML, aggregator)
-			// D2 修复：provision 创建的 device_task（GPV / Upload / SPV / Reboot）source=system，
-			// 失败时由 ProvisioningEngine 回查 source_id（=ProvisioningTask.id）联动 fail。
-			if c.miscDeps.provisionEngine != nil {
-				c.miscDeps.completionRouter.Register(task.TaskSourceSystem, c.miscDeps.provisionEngine)
-			}
 			// F05 MR 任务完成回调改由 initMRTaskModule 注册（依赖图 misc → mrtask，
 			// 这里 c.miscDeps.mrTaskRepo 还是 nil，原版 if 永远进不来）。CompletionRouter
 			// mutex-safe 支持后挂 handler。
@@ -2257,9 +2298,6 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			// 顺序同上：Sequencer 先注册，聚合器后注册（见 finalizeIfComplete 注释）。
 			c.miscDeps.taskSvc.AddCompletionCallback(sequencer) // Sprint B Q-V3-3
 			c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
-			if c.miscDeps.provisionEngine != nil {
-				c.miscDeps.taskSvc.AddCompletionCallback(c.miscDeps.provisionEngine)
-			}
 		}
 
 		logger.Info("MML fan-out bridge enabled")
@@ -2542,6 +2580,7 @@ type miscDeps struct {
 	// Provision
 	provisionRepo     *provision.PgProvisioningTaskRepository
 	provisionEngine   *provision.ProvisioningEngine
+	plugAndPlayRepo   *provision.PgPlugAndPlayRepository
 	paramSyncHandler  *paramsync.Handler
 	paramSyncStarter  *paramSyncStarter
 	paramSyncConsumer *paramsync.ResultConsumer
@@ -2554,6 +2593,7 @@ type miscDeps struct {
 	// Backup
 	backupHandler       *backup.Handler
 	backupPolicyMonitor *backup.PolicyMonitor // T-0073 Phase 1
+	snapshotService     *backup.SnapshotService
 
 	// StationLog
 	stationlogHandler *stationlog.Handler

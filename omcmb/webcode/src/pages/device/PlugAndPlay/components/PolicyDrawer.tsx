@@ -1,6 +1,10 @@
 import { useMemo } from 'react';
 import { Drawer, Form, Input, Select, Switch, Space, Button, Divider, App, Typography, Radio } from 'antd';
 import { useT } from '@/hooks/useT';
+import { useProductClasses } from '@core/hooks/api/useDevices';
+import { useProductList } from '@core/hooks/api/useProducts';
+import { toSupportedProductClassOptions } from '../productClassOptions';
+import ProductClassSelect from './ProductClassSelect';
 
 interface Policy {
   policyId: string;
@@ -24,14 +28,6 @@ interface Props {
   onSubmit: (values: Record<string, unknown>) => void;
 }
 
-const PRODUCT_TYPES = [
-  { label: 'QAFA', value: 'QAFA' },
-  { label: 'QAFB', value: 'QAFB' },
-  { label: 'QAFC', value: 'QAFC' },
-  { label: 'CPE-A100', value: 'CPE-A100' },
-  { label: 'CPE-B200', value: 'CPE-B200' },
-];
-
 const TARGET_VERSIONS = [
   { label: 'V2.2.0', value: 'V2.2.0' },
   { label: 'V2.1.0', value: 'V2.1.0' },
@@ -47,6 +43,12 @@ export default function PolicyDrawer({ open, mode, policy, onClose, onSubmit }: 
   const t = useT();
   const [form] = Form.useForm();
   void App.useApp();
+  const { data: supportedProductClasses, isLoading: productClassesLoading } = useProductClasses();
+  const { data: productCatalog, isLoading: productCatalogLoading } = useProductList();
+  const productClassOptions = useMemo(
+    () => toSupportedProductClassOptions(supportedProductClasses, productCatalog?.items),
+    [productCatalog?.items, supportedProductClasses],
+  );
 
   const isView = mode === 'view';
   const title = useMemo(() => {
@@ -138,7 +140,11 @@ export default function PolicyDrawer({ open, mode, policy, onClose, onSubmit }: 
           label={t('provision.productClass')}
           rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
-          <Select placeholder={t('common.pleaseSelect')} options={PRODUCT_TYPES} />
+          <ProductClassSelect
+            placeholder={t('common.pleaseSelect')}
+            options={productClassOptions}
+            loading={productClassesLoading || productCatalogLoading}
+          />
         </Form.Item>
 
         <Form.Item

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,25 +19,568 @@ import (
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
+func TestHandleXMLTransferCompleteWaitsForStartupStageReport(t *testing.T) {
+	taskID := uuid.New()
+	taskItem := &ProvisioningTask{
+		ID: taskID, DeviceID: uuid.New(), Status: StateConfiguring,
+		CurrentStep: 6, CurrentStepName: "wait_transfer_complete", TotalSteps: 8,
+	}
+	h := newEngineHarness(&mockDeviceRepo{GetByIDFn: func(_ context.Context, id uuid.UUID) (*model.Device, error) {
+		require.Equal(t, taskItem.DeviceID, id)
+		return &model.Device{ID: id, Technology: model.TechNR}, nil
+	}})
+	var updated bool
+	h.taskRepo.GetByIDFn = func(_ context.Context, id uuid.UUID) (*ProvisioningTask, error) {
+		require.Equal(t, taskID, id)
+		return taskItem, nil
+	}
+	h.taskRepo.UpdateFn = func(_ context.Context, _ *ProvisioningTask) error {
+		updated = true
+		return nil
+	}
+
+	err := h.engine.HandleXMLTransferComplete(context.Background(), tr069.TransferComplete{
+		CommandKey:  "PNPXML_" + taskID.String(),
+		FaultStruct: &tr069.Fault{FaultCode: 0},
+	})
+
+	require.NoError(t, err)
+	assert.True(t, updated)
+	assert.Equal(t, StateConfiguring, taskItem.Status)
+	assert.Equal(t, 6, taskItem.CurrentStep)
+	assert.Equal(t, "wait_startup_stage", taskItem.CurrentStepName)
+}
+
+func TestHandleXMLTransferCompleteRebootsLTEAndGSMBeforeActivationTimer(t *testing.T) {
+	for _, technology := range []model.Technology{model.TechLTE, model.TechGSM} {
+		t.Run(string(technology), func(t *testing.T) {
+			taskID := uuid.New()
+			deviceID := uuid.New()
+			taskItem := &ProvisioningTask{
+				ID: taskID, DeviceID: deviceID, Status: StateConfiguring,
+				CurrentStep: 6, CurrentStepName: "wait_transfer_complete", TotalSteps: 12,
+			}
+			h := newEngineHarness(&mockDeviceRepo{GetByIDFn: func(_ context.Context, id uuid.UUID) (*model.Device, error) {
+				require.Equal(t, deviceID, id)
+				return &model.Device{ID: id, SerialNumber: "SN-LEGACY", Technology: technology}, nil
+			}})
+			h.taskRepo.GetByIDFn = func(_ context.Context, id uuid.UUID) (*ProvisioningTask, error) {
+				require.Equal(t, taskID, id)
+				return taskItem, nil
+			}
+			var reboot *task.CreateTaskRequest
+			var rebootCalls int
+			h.cmdQueue.CreateFn = func(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+				rebootCalls++
+				reboot = req
+				return &task.Task{ID: uuid.NewString()}, nil
+			}
+
+			err := h.engine.HandleXMLTransferComplete(context.Background(), tr069.TransferComplete{
+				CommandKey: "PNPXML_" + taskID.String(), FaultStruct: &tr069.Fault{FaultCode: 0},
+			})
+
+			require.NoError(t, err)
+			require.NoError(t, h.engine.HandleXMLTransferComplete(context.Background(), tr069.TransferComplete{
+				CommandKey: "PNPXML_" + taskID.String(), FaultStruct: &tr069.Fault{FaultCode: 0},
+			}))
+			assert.Equal(t, 1, rebootCalls, "duplicate TransferComplete must not enqueue another Reboot")
+			require.NotNil(t, reboot)
+			assert.Equal(t, "Reboot", reboot.Method)
+			assert.Equal(t, "SN-LEGACY", reboot.DeviceSN)
+			assert.Equal(t, "PNPREBOOT_"+taskID.String(), reboot.CommandKey)
+			assert.Equal(t, taskID.String(), reboot.SourceID)
+			assert.Equal(t, StateConfiguring, taskItem.Status)
+			assert.Equal(t, "wait_device_online", taskItem.CurrentStepName)
+			assert.Zero(t, taskItem.RetryCount)
+		})
+	}
+}
+
+func TestHandleXMLTransferCompleteFailsMatchingProvisioningTask(t *testing.T) {
+	h := newEngineHarness(&mockDeviceRepo{})
+	taskID := uuid.New()
+	taskItem := &ProvisioningTask{
+		ID: taskID, DeviceID: uuid.New(), Status: StateConfiguring,
+		CurrentStep: 6, CurrentStepName: "wait_transfer_complete", TotalSteps: 8,
+	}
+	var updatedStatus ProvisioningState
+	var failureReason string
+	h.taskRepo.GetByIDFn = func(_ context.Context, _ uuid.UUID) (*ProvisioningTask, error) {
+		return taskItem, nil
+	}
+	h.taskRepo.UpdateStatusFn = func(_ context.Context, _ uuid.UUID, status ProvisioningState, reason string) error {
+		updatedStatus, failureReason = status, reason
+		return nil
+	}
+
+	err := h.engine.HandleXMLTransferComplete(context.Background(), tr069.TransferComplete{
+		CommandKey:  "PNPXML_" + taskID.String(),
+		FaultStruct: &tr069.Fault{FaultCode: 9010, FaultString: "Download failed"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, StateFailed, updatedStatus)
+	assert.Contains(t, failureReason, "9010")
+	assert.Contains(t, failureReason, "Download failed")
+}
+
+func TestHandleXMLTransferCompleteEventIgnoresUnrelatedGenericCommandKey(t *testing.T) {
+	h := newEngineHarness(&mockDeviceRepo{GetBySerialNumberFn: func(context.Context, string) (*model.Device, error) {
+		t.Fatal("generic TransferComplete must not use device-scoped fallback")
+		return nil, nil
+	}})
+	h.taskRepo.ListFn = func(context.Context, ProvisioningTaskFilter) ([]ProvisioningTask, int64, error) {
+		t.Fatal("generic TransferComplete must not inspect waiting plug-and-play tasks")
+		return nil, 0, nil
+	}
+
+	evt, err := event.NewEvent(event.SubjectDeviceTransferComplete, tr069.TransferComplete{
+		CommandKey:  "command_key",
+		FaultStruct: &tr069.Fault{FaultCode: 0, FaultString: "Download fail with exit status 4"},
+	})
+	require.NoError(t, err)
+	evt.Metadata = map[string]string{event.MetadataDeviceSN: "120200055922C8B0068"}
+
+	require.NoError(t, h.engine.handleXMLTransferCompleteEvent(context.Background(), evt))
+}
+
+func TestOnTaskCompletedFailsPnPTaskWithDownloadSOAPFault(t *testing.T) {
+	h := newEngineHarness(&mockDeviceRepo{})
+	provisioningTaskID := uuid.New()
+	provisioningTask := &ProvisioningTask{
+		ID: provisioningTaskID, DeviceID: uuid.New(), Status: StateConfiguring,
+		CurrentStep: 5, CurrentStepName: "download_xml", TotalSteps: 12,
+	}
+	h.taskRepo.GetByIDFn = func(_ context.Context, id uuid.UUID) (*ProvisioningTask, error) {
+		require.Equal(t, provisioningTaskID, id)
+		return provisioningTask, nil
+	}
+	var status ProvisioningState
+	var reason string
+	h.taskRepo.UpdateStatusFn = func(_ context.Context, id uuid.UUID, gotStatus ProvisioningState, gotReason string) error {
+		require.Equal(t, provisioningTaskID, id)
+		status, reason = gotStatus, gotReason
+		return nil
+	}
+
+	h.engine.OnTaskCompleted(context.Background(), &task.Task{
+		ID:           "download-task",
+		DeviceSN:     "120288069823C4B0060",
+		Method:       "Download",
+		CommandKey:   "PNPXML_" + provisioningTaskID.String(),
+		Status:       task.TaskStatusFailed,
+		Source:       task.TaskSourceSystem,
+		SourceID:     provisioningTaskID.String(),
+		ErrorMessage: "[Server.Internal] Unsupported FileType: 103 Base Station Startup File",
+	})
+
+	assert.Equal(t, StateFailed, status)
+	assert.Contains(t, reason, "Unsupported FileType: 103 Base Station Startup File")
+}
+
+func TestHandleDelegatedUpgradeResultMirrorsFailure(t *testing.T) {
+	h := newEngineHarness(&mockDeviceRepo{})
+	delegatedTaskID, deviceID := uuid.New(), uuid.New()
+	taskItem := &ProvisioningTask{
+		ID: uuid.New(), DeviceID: deviceID, DeviceTaskID: &delegatedTaskID,
+		Status: StateConfiguring, CurrentStepName: "software_upgrade_task_submitted", TotalSteps: 1,
+	}
+	h.taskRepo.GetByDelegatedTaskIDFn = func(_ context.Context, taskID uuid.UUID, gotDeviceID uuid.UUID) (*ProvisioningTask, error) {
+		assert.Equal(t, delegatedTaskID, taskID)
+		assert.Equal(t, deviceID, gotDeviceID)
+		return taskItem, nil
+	}
+	var status ProvisioningState
+	var reason string
+	h.taskRepo.UpdateStatusFn = func(_ context.Context, _ uuid.UUID, gotStatus ProvisioningState, gotReason string) error {
+		status, reason = gotStatus, gotReason
+		return nil
+	}
+
+	err := h.engine.HandleDelegatedUpgradeResult(context.Background(), delegatedUpgradeEvent{
+		TaskID: delegatedTaskID.String(), DeviceID: deviceID.String(), Reason: "Download fail with exit status 1",
+	}, true)
+
+	require.NoError(t, err)
+	assert.Equal(t, StateFailed, status)
+	assert.Equal(t, "Download fail with exit status 1", reason)
+}
+
+func TestHandleDelegatedUpgradeResultMirrorsCompletion(t *testing.T) {
+	h := newEngineHarness(&mockDeviceRepo{})
+	delegatedTaskID, deviceID, policyID := uuid.New(), uuid.New(), uuid.New()
+	taskItem := &ProvisioningTask{
+		ID: uuid.New(), DeviceID: deviceID, DeviceTaskID: &delegatedTaskID,
+		PolicyID: &policyID,
+		Status:   StateConfiguring, CurrentStepName: "software_upgrade_task_submitted", TotalSteps: 1,
+	}
+	h.taskRepo.GetByDelegatedTaskIDFn = func(_ context.Context, _, _ uuid.UUID) (*ProvisioningTask, error) {
+		return taskItem, nil
+	}
+	var status ProvisioningState
+	h.taskRepo.UpdateStatusFn = func(_ context.Context, _ uuid.UUID, gotStatus ProvisioningState, _ string) error {
+		status = gotStatus
+		return nil
+	}
+	continuation := &recordingPolicyContinuation{}
+	h.engine.SetPolicyContinuation(continuation)
+
+	err := h.engine.HandleDelegatedUpgradeResult(context.Background(), delegatedUpgradeEvent{
+		TaskID: delegatedTaskID.String(), DeviceID: deviceID.String(),
+	}, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, StateCompleted, status)
+	assert.Equal(t, 1, taskItem.CurrentStep)
+	assert.Equal(t, "software_upgrade_completed", taskItem.CurrentStepName)
+	assert.Equal(t, policyID, continuation.policyID)
+	assert.Equal(t, deviceID, continuation.deviceID)
+	assert.Equal(t, policyModuleUpgrade, continuation.completed)
+}
+
+func TestHandleDelegatedSelfConfigCompletionStartsActivationTimer(t *testing.T) {
+	h := newEngineHarness(&mockDeviceRepo{})
+	delegatedTaskID, deviceID := uuid.New(), uuid.New()
+	taskItem := &ProvisioningTask{
+		ID: uuid.New(), DeviceID: deviceID, DeviceTaskID: &delegatedTaskID,
+		Status: StateConfiguring, CurrentStepName: "self_config_task_submitted", TotalSteps: 12,
+	}
+	h.taskRepo.GetByDelegatedTaskIDFn = func(_ context.Context, _, _ uuid.UUID) (*ProvisioningTask, error) {
+		return taskItem, nil
+	}
+	var completed bool
+	h.taskRepo.UpdateStatusFn = func(_ context.Context, _ uuid.UUID, status ProvisioningState, _ string) error {
+		completed = status == StateCompleted
+		return nil
+	}
+
+	err := h.engine.HandleDelegatedUpgradeResult(context.Background(), delegatedUpgradeEvent{
+		TaskID: delegatedTaskID.String(), DeviceID: deviceID.String(),
+	}, false)
+
+	require.NoError(t, err)
+	assert.False(t, completed)
+	assert.Equal(t, StateVerifying, taskItem.Status)
+	assert.Equal(t, 11, taskItem.CurrentStep)
+	assert.Equal(t, "wait_activation_check", taskItem.CurrentStepName)
+}
+
+func TestHandleDeviceOnlineSchedulesActivationCheck(t *testing.T) {
+	deviceID := uuid.New()
+	h := newEngineHarness(&mockDeviceRepo{GetByIDFn: func(_ context.Context, id uuid.UUID) (*model.Device, error) {
+		return &model.Device{ID: id, SerialNumber: "SN-LTE", Technology: model.TechLTE}, nil
+	}})
+	taskItem := &ProvisioningTask{
+		ID: uuid.New(), DeviceID: deviceID, Status: StateConfiguring,
+		CurrentStepName: "wait_device_online", TotalSteps: 12,
+	}
+	h.taskRepo.GetByDeviceIDFn = func(_ context.Context, id uuid.UUID) (*ProvisioningTask, error) {
+		assert.Equal(t, deviceID, id)
+		return taskItem, nil
+	}
+	submitter := &recordingDeviceOnlineFullSyncSubmitter{}
+	h.engine.SetDeviceOnlineFullSyncSubmitter(submitter)
+	h.engine.SetActivationStateReader(stubActivationStateReader{})
+	h.engine.SetParamSyncRoutingMode("durable")
+
+	require.NoError(t, h.engine.HandleDeviceOnline(context.Background(), device.DeviceOnlineEvent{
+		DeviceID: deviceID, SerialNumber: "SN-LTE",
+	}))
+	assert.Equal(t, StateVerifying, taskItem.Status)
+	assert.Equal(t, "wait_activation_check", taskItem.CurrentStepName)
+	assert.Empty(t, submitter.calls, "PnP reboot online event must only start the five-minute timer")
+}
+
+type stubActivationStateReader struct {
+	info *device.DeviceInfo
+}
+
+func (s stubActivationStateReader) GetByDeviceID(context.Context, uuid.UUID) (*device.DeviceInfo, error) {
+	return s.info, nil
+}
+
+type recordingActivationStateRefresher struct{ calls int }
+
+func (r *recordingActivationStateRefresher) SyncFromParameters(
+	context.Context, uuid.UUID, model.CarrierCode, model.Technology, string,
+) ([]string, error) {
+	r.calls++
+	return nil, nil
+}
+
+func TestCheckDueActivationTasksStartsFreshSyncAfterFiveMinutes(t *testing.T) {
+	deviceID := uuid.New()
+	item := ProvisioningTask{ID: uuid.New(), DeviceID: deviceID, Status: StateVerifying, CurrentStepName: "wait_activation_check", MaxRetries: 3}
+	h := newEngineHarness(&mockDeviceRepo{GetByIDFn: func(_ context.Context, id uuid.UUID) (*model.Device, error) {
+		return &model.Device{ID: id, SerialNumber: "SN-ACTIVATION", Technology: model.TechLTE}, nil
+	}})
+	h.taskRepo.ListActivationChecksDueFn = func(context.Context, time.Time, int) ([]ProvisioningTask, error) {
+		return []ProvisioningTask{item}, nil
+	}
+	h.taskRepo.UpdateFn = func(_ context.Context, task *ProvisioningTask) error {
+		item = *task
+		return nil
+	}
+	submitter := &recordingDeviceOnlineFullSyncSubmitter{}
+	h.engine.SetDeviceOnlineFullSyncSubmitter(submitter)
+	h.engine.SetActivationStateReader(stubActivationStateReader{})
+
+	require.NoError(t, h.engine.CheckDueActivationTasks(context.Background(), time.Now()))
+	require.Len(t, submitter.calls, 1)
+	assert.Contains(t, submitter.calls[0].idempotencyKey, item.ID.String())
+	assert.Equal(t, "wait_activation_sync", item.CurrentStepName)
+}
+
+func TestActivationSyncCompletionUsesFreshCellStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		cellStatus string
+		retryCount int
+		wantStatus ProvisioningState
+		wantRetry  int
+	}{
+		{name: "active completes", cellStatus: string(device.CellStatusNormal), wantStatus: StateCompleted},
+		{name: "inactive retries", cellStatus: string(device.CellStatusInactive), wantRetry: 1},
+		{name: "third inactive fails", cellStatus: string(device.CellStatusInactive), retryCount: 2, wantStatus: StateFailed, wantRetry: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deviceID := uuid.New()
+			item := &ProvisioningTask{
+				ID: uuid.New(), DeviceID: deviceID, Status: StateVerifying,
+				CurrentStepName: "wait_activation_sync", RetryCount: tc.retryCount, MaxRetries: 3, TotalSteps: 12,
+			}
+			h := newEngineHarness(&mockDeviceRepo{GetByIDFn: func(_ context.Context, id uuid.UUID) (*model.Device, error) {
+				return &model.Device{ID: id, SerialNumber: "SN-ACTIVATION", Technology: model.TechLTE}, nil
+			}})
+			h.taskRepo.GetByDeviceIDFn = func(context.Context, uuid.UUID) (*ProvisioningTask, error) { return item, nil }
+			h.engine.SetActivationStateReader(stubActivationStateReader{info: &device.DeviceInfo{CellStatus: tc.cellStatus}})
+			refresher := &recordingActivationStateRefresher{}
+			h.engine.SetActivationStateRefresher(refresher)
+			var gotStatus ProvisioningState
+			h.taskRepo.UpdateStatusFn = func(_ context.Context, _ uuid.UUID, status ProvisioningState, _ string) error {
+				gotStatus = status
+				return nil
+			}
+
+			evt, err := event.NewEvent(event.SubjectParamSyncRunCompleted, paramSyncCompletedEvent{
+				DeviceID: deviceID, TriggerReason: "device_online", SyncScope: "full",
+			})
+			require.NoError(t, err)
+			require.NoError(t, h.engine.handleRegisteredParamSyncCompleted(context.Background(), evt))
+			assert.Equal(t, 1, refresher.calls)
+			assert.Equal(t, tc.wantStatus, gotStatus)
+			assert.Equal(t, tc.wantRetry, item.RetryCount)
+			if tc.wantRetry > 0 && tc.wantStatus == "" {
+				assert.Equal(t, "wait_activation_check", item.CurrentStepName)
+			}
+		})
+	}
+}
+
+func TestActivationSyncFailureSchedulesAnotherFiveMinuteCheck(t *testing.T) {
+	deviceID := uuid.New()
+	item := &ProvisioningTask{
+		ID: uuid.New(), DeviceID: deviceID, Status: StateVerifying,
+		CurrentStepName: "wait_activation_sync", MaxRetries: 3,
+	}
+	h := newEngineHarness(&mockDeviceRepo{})
+	h.taskRepo.GetByDeviceIDFn = func(context.Context, uuid.UUID) (*ProvisioningTask, error) { return item, nil }
+	evt, err := event.NewEvent(event.SubjectParamSyncRunFailed, paramSyncCompletedEvent{
+		DeviceID: deviceID, TriggerReason: "device_online", SyncScope: "full",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, h.engine.handleActivationSyncFailedEvent(context.Background(), evt))
+	assert.Equal(t, 1, item.RetryCount)
+	assert.Equal(t, "wait_activation_check", item.CurrentStepName)
+	assert.Contains(t, item.ErrorMessage, "activation parameter query failed")
+}
+
+type recordingAutomaticPolicyExecutor struct{ deviceIDs []uuid.UUID }
+
+func (r *recordingAutomaticPolicyExecutor) ExecuteAutomaticPolicy(_ context.Context, deviceID uuid.UUID) error {
+	r.deviceIDs = append(r.deviceIDs, deviceID)
+	return nil
+}
+
+func TestRegisteredFullParamSyncCompletionTriggersAutomaticPolicy(t *testing.T) {
+	h := newEngineHarness(&mockDeviceRepo{})
+	recorder := &recordingAutomaticPolicyExecutor{}
+	h.engine.SetAutomaticPolicyExecutor(recorder)
+	deviceID := uuid.New()
+	evt, err := event.NewEvent(event.SubjectParamSyncRunCompleted, map[string]any{
+		"device_id": deviceID, "trigger_reason": "device_registered", "sync_scope": "full",
+	})
+	require.NoError(t, err)
+	require.NoError(t, h.engine.handleRegisteredParamSyncCompleted(context.Background(), evt))
+	assert.Equal(t, []uuid.UUID{deviceID}, recorder.deviceIDs)
+}
+
+func TestNonRegisteredParamSyncCompletionDoesNotTriggerAutomaticPolicy(t *testing.T) {
+	h := newEngineHarness(&mockDeviceRepo{})
+	recorder := &recordingAutomaticPolicyExecutor{}
+	h.engine.SetAutomaticPolicyExecutor(recorder)
+	evt, err := event.NewEvent(event.SubjectParamSyncRunCompleted, map[string]any{
+		"device_id": uuid.New(), "trigger_reason": "periodic", "sync_scope": "full",
+	})
+	require.NoError(t, err)
+	require.NoError(t, h.engine.handleRegisteredParamSyncCompleted(context.Background(), evt))
+	assert.Empty(t, recorder.deviceIDs)
+}
+
+type recordingPolicyContinuation struct {
+	policyID  uuid.UUID
+	deviceID  uuid.UUID
+	completed policyModule
+}
+
+func (r *recordingPolicyContinuation) ContinuePolicy(
+	_ context.Context, policyID, deviceID uuid.UUID, completed policyModule,
+) error {
+	r.policyID, r.deviceID, r.completed = policyID, deviceID, completed
+	return nil
+}
+
+func TestHandleStartupStageAndResultReportsCompleteMatchingTask(t *testing.T) {
+	deviceID, policyID, xmlID := uuid.New(), uuid.New(), uuid.New()
+	devRepo := &mockDeviceRepo{GetBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+		require.Equal(t, "SN-PNP", sn)
+		return &model.Device{ID: deviceID, SerialNumber: sn}, nil
+	}}
+	h := newEngineHarness(devRepo)
+	taskItem := &ProvisioningTask{
+		ID: uuid.New(), DeviceID: deviceID, PolicyID: &policyID, XMLFileID: &xmlID,
+		Status: StateConfiguring, CurrentStep: 6, CurrentStepName: "wait_startup_stage", TotalSteps: 12,
+	}
+	h.taskRepo.GetByIDFn = func(_ context.Context, id uuid.UUID) (*ProvisioningTask, error) {
+		require.Equal(t, taskItem.ID, id)
+		return taskItem, nil
+	}
+	h.taskRepo.GetByDeviceIDFn = func(_ context.Context, id uuid.UUID) (*ProvisioningTask, error) {
+		return nil, fmt.Errorf("unexpected fallback lookup for device %s", id)
+	}
+	var updates []string
+	h.taskRepo.UpdateFn = func(_ context.Context, task *ProvisioningTask) error {
+		updates = append(updates, task.CurrentStepName)
+		return nil
+	}
+	var terminal ProvisioningState
+	h.taskRepo.UpdateStatusFn = func(_ context.Context, _ uuid.UUID, status ProvisioningState, _ string) error {
+		terminal = status
+		return nil
+	}
+
+	for _, stage := range []struct {
+		value string
+		step  int
+		name  string
+	}{
+		{"1", 7, "parameter_validation"},
+		{"2", 8, "parameter_configuration"},
+		{"3", 9, "cell_activation"},
+	} {
+		err := h.engine.HandleStartupStageReport(context.Background(), device.InformEventPayload{
+			DeviceId:      tr069.DeviceId{SerialNumber: "SN-PNP"},
+			EventStructs:  []tr069.EventStruct{{EventCode: tr069.EventStartupStageReport, CommandKey: "PNPXML_" + taskItem.ID.String()}},
+			ParameterList: []tr069.ParameterValueStruct{{Name: "Device.Startup.Stage", Value: stage.value}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, stage.step, taskItem.CurrentStep)
+		assert.Equal(t, stage.name, taskItem.CurrentStepName)
+	}
+
+	err := h.engine.HandleStartupResultReport(context.Background(), device.InformEventPayload{
+		DeviceId:      tr069.DeviceId{SerialNumber: "SN-PNP"},
+		EventStructs:  []tr069.EventStruct{{EventCode: tr069.EventStartupResultReport, CommandKey: "PNPXML_" + taskItem.ID.String()}},
+		ParameterList: []tr069.ParameterValueStruct{{Name: "Status", Value: "1"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, StateCompleted, terminal)
+	assert.Equal(t, 12, taskItem.CurrentStep)
+	assert.Equal(t, "completed", taskItem.CurrentStepName)
+	assert.Contains(t, updates, "cell_activation")
+}
+
+func TestHandleStartupResultReportPersistsFailureCause(t *testing.T) {
+	deviceID, policyID, xmlID := uuid.New(), uuid.New(), uuid.New()
+	h := newEngineHarness(&mockDeviceRepo{GetBySerialNumberFn: func(context.Context, string) (*model.Device, error) {
+		return &model.Device{ID: deviceID}, nil
+	}})
+	h.taskRepo.GetByDeviceIDFn = func(context.Context, uuid.UUID) (*ProvisioningTask, error) {
+		return &ProvisioningTask{
+			ID: uuid.New(), DeviceID: deviceID, PolicyID: &policyID, XMLFileID: &xmlID,
+			Status: StateConfiguring, TotalSteps: 12,
+		}, nil
+	}
+	var terminal ProvisioningState
+	var failure string
+	h.taskRepo.UpdateStatusFn = func(_ context.Context, _ uuid.UUID, status ProvisioningState, reason string) error {
+		terminal, failure = status, reason
+		return nil
+	}
+
+	err := h.engine.HandleStartupResultReport(context.Background(), device.InformEventPayload{
+		DeviceId: tr069.DeviceId{SerialNumber: "SN-PNP"},
+		ParameterList: []tr069.ParameterValueStruct{
+			{Name: "Status", Value: "2"},
+			{Name: "FailureCause", Value: "PCI validation failed"},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, StateFailed, terminal)
+	assert.Contains(t, failure, "PCI validation failed")
+}
+
+func TestStartTaskReaperChecksStaleTasksImmediately(t *testing.T) {
+	h := newEngineHarness(&mockDeviceRepo{})
+	h.engine.config.TaskTimeout = time.Hour
+	called := make(chan time.Duration, 1)
+	h.taskRepo.FailStaleFn = func(_ context.Context, maxAge time.Duration) (int64, error) {
+		called <- maxAge
+		return 0, nil
+	}
+
+	h.engine.StartTaskReaper()
+
+	select {
+	case maxAge := <-called:
+		assert.Equal(t, time.Hour, maxAge)
+	case <-time.After(time.Second):
+		t.Fatal("task reaper did not check stale tasks at startup")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Mock: ProvisioningTaskRepository (Pattern B — function fields)
 // ---------------------------------------------------------------------------
 
 type mockTaskRepo struct {
-	CreateFn        func(ctx context.Context, task *ProvisioningTask) error
-	GetByIDFn       func(ctx context.Context, id uuid.UUID) (*ProvisioningTask, error)
-	GetByDeviceIDFn func(ctx context.Context, deviceID uuid.UUID) (*ProvisioningTask, error)
-	UpdateFn        func(ctx context.Context, task *ProvisioningTask) error
-	UpdateStatusFn  func(ctx context.Context, id uuid.UUID, status ProvisioningState, errorMsg string) error
-	ListFn          func(ctx context.Context, filter ProvisioningTaskFilter) ([]ProvisioningTask, int64, error)
-	CountByStatusFn func(ctx context.Context) (map[ProvisioningState]int64, error)
-	FailStaleFn     func(ctx context.Context, maxAge time.Duration) (int64, error)
+	CreateFn                  func(ctx context.Context, task *ProvisioningTask) error
+	GetByIDFn                 func(ctx context.Context, id uuid.UUID) (*ProvisioningTask, error)
+	GetByDeviceIDFn           func(ctx context.Context, deviceID uuid.UUID) (*ProvisioningTask, error)
+	GetByDelegatedTaskIDFn    func(ctx context.Context, delegatedTaskID uuid.UUID, deviceID uuid.UUID) (*ProvisioningTask, error)
+	UpdateFn                  func(ctx context.Context, task *ProvisioningTask) error
+	UpdateStatusFn            func(ctx context.Context, id uuid.UUID, status ProvisioningState, errorMsg string) error
+	ListFn                    func(ctx context.Context, filter ProvisioningTaskFilter) ([]ProvisioningTask, int64, error)
+	CountByStatusFn           func(ctx context.Context) (map[ProvisioningState]int64, error)
+	FailStaleFn               func(ctx context.Context, maxAge time.Duration) (int64, error)
+	ListActivationChecksDueFn func(ctx context.Context, before time.Time, limit int) ([]ProvisioningTask, error)
+}
+
+func (m *mockTaskRepo) ListActivationChecksDue(ctx context.Context, before time.Time, limit int) ([]ProvisioningTask, error) {
+	if m.ListActivationChecksDueFn != nil {
+		return m.ListActivationChecksDueFn(ctx, before, limit)
+	}
+	return nil, nil
 }
 
 func (m *mockTaskRepo) Create(ctx context.Context, task *ProvisioningTask) error {
@@ -56,6 +600,13 @@ func (m *mockTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*Provisioning
 func (m *mockTaskRepo) GetByDeviceID(ctx context.Context, deviceID uuid.UUID) (*ProvisioningTask, error) {
 	if m.GetByDeviceIDFn != nil {
 		return m.GetByDeviceIDFn(ctx, deviceID)
+	}
+	return nil, nil
+}
+
+func (m *mockTaskRepo) GetByDelegatedTaskID(ctx context.Context, delegatedTaskID uuid.UUID, deviceID uuid.UUID) (*ProvisioningTask, error) {
+	if m.GetByDelegatedTaskIDFn != nil {
+		return m.GetByDelegatedTaskIDFn(ctx, delegatedTaskID, deviceID)
 	}
 	return nil, nil
 }

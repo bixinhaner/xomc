@@ -103,6 +103,7 @@ type svcMockSubTaskRepo struct {
 	batchCreateFn       func(ctx context.Context, tasks []*UpgradeSubTask) error
 	updateDestByIDFn    func(ctx context.Context, id uuid.UUID, destVersion string) error
 	failStaleFn         func(ctx context.Context, cutoffs StaleTimeouts) (StaleFailures, error)
+	failStaleDetailsFn  func(ctx context.Context, cutoffs StaleTimeouts) ([]UpgradeSubTask, error)
 }
 
 func (m *svcMockSubTaskRepo) Create(ctx context.Context, task *UpgradeSubTask) error {
@@ -225,6 +226,12 @@ func (m *svcMockSubTaskRepo) FailStale(ctx context.Context, cutoffs StaleTimeout
 	}
 	return StaleFailures{}, nil
 }
+func (m *svcMockSubTaskRepo) FailStaleWithDetails(ctx context.Context, cutoffs StaleTimeouts) ([]UpgradeSubTask, error) {
+	if m.failStaleDetailsFn != nil {
+		return m.failStaleDetailsFn(ctx, cutoffs)
+	}
+	return nil, nil
+}
 func (m *svcMockSubTaskRepo) DeleteByTaskID(_ context.Context, _ uuid.UUID) error { return nil }
 
 func TestReapStaleSubTasksOnceReleasesTimedOutDeviceLock(t *testing.T) {
@@ -240,14 +247,10 @@ func TestReapStaleSubTasksOnceReleasesTimedOutDeviceLock(t *testing.T) {
 	require.NoError(t, redisClient.Set(ctx, upgradeDeviceLockKey(deviceSN), subTaskID.String(), time.Hour).Err())
 
 	subRepo := &svcMockSubTaskRepo{
-		failStaleFn: func(_ context.Context, _ StaleTimeouts) (StaleFailures, error) {
-			return StaleFailures{
-				TaskCounts: map[uuid.UUID]int64{taskID: 1},
-				Locks: []StaleDeviceLock{{
-					DeviceSN:  deviceSN,
-					SubTaskID: subTaskID,
-				}},
-			}, nil
+		failStaleDetailsFn: func(_ context.Context, _ StaleTimeouts) ([]UpgradeSubTask, error) {
+			return []UpgradeSubTask{{
+				ID: subTaskID, TaskID: taskID, DeviceSN: deviceSN,
+			}}, nil
 		},
 	}
 	taskRepo := &svcMockTaskRepo{
@@ -436,6 +439,84 @@ func TestSoftwareSubscribeUsesKeyedPeriodicConsumer(t *testing.T) {
 	key, err := call.keyFn(evt)
 	require.NoError(t, err)
 	assert.Equal(t, "SW-PERIODIC-001", key)
+}
+
+func TestSoftwareService_ReapStaleUpgradeTasksPublishesFailedEvent(t *testing.T) {
+	taskID := uuid.New()
+	deviceID := uuid.New()
+	subTaskID := uuid.New()
+	reason := "Timed out waiting for device to come online."
+
+	subRepo := &svcMockSubTaskRepo{
+		failStaleDetailsFn: func(_ context.Context, _ StaleTimeouts) ([]UpgradeSubTask, error) {
+			return []UpgradeSubTask{{
+				ID: subTaskID, TaskID: taskID, DeviceID: deviceID,
+				DeviceSN: "SN-OFFLINE", Status: UpgradeFailed, ErrorMessage: reason,
+			}}, nil
+		},
+	}
+	taskRepo := &svcMockTaskRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*UpgradeTask, error) {
+			return &UpgradeTask{ID: id, Status: TaskInProgress, TotalCount: 1, FailCount: 1}, nil
+		},
+	}
+
+	var gotSubject string
+	var gotPayload struct {
+		SubTaskID string `json:"sub_task_id"`
+		TaskID    string `json:"task_id"`
+		DeviceID  string `json:"device_id"`
+		Reason    string `json:"reason"`
+	}
+	bus := &svcMockEventBus{publishFn: func(_ context.Context, subject string, evt event.Event) error {
+		gotSubject = subject
+		return evt.DecodePayload(&gotPayload)
+	}}
+	mr := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = redisClient.Close() })
+	lockKey := "software:upgrade:active:SN-OFFLINE"
+	require.NoError(t, redisClient.Set(context.Background(), lockKey, subTaskID.String(), time.Hour).Err())
+
+	svc := &SoftwareService{
+		taskRepo: taskRepo, subTaskRepo: subRepo, eventBus: bus, logger: zap.NewNop(),
+		executor: &UpgradeExecutor{redis: redisClient, logger: zap.NewNop()},
+	}
+	reaped, err := svc.reapStaleUpgradeTasks(context.Background(), StaleTimeouts{DeviceOnline: 10 * time.Minute})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, reaped)
+	assert.Equal(t, event.SubjectUpgradeFailed, gotSubject)
+	assert.Equal(t, subTaskID.String(), gotPayload.SubTaskID)
+	assert.Equal(t, taskID.String(), gotPayload.TaskID)
+	assert.Equal(t, deviceID.String(), gotPayload.DeviceID)
+	assert.Equal(t, reason, gotPayload.Reason)
+	assert.EqualValues(t, 0, redisClient.Exists(context.Background(), lockKey).Val(),
+		"reaper must release the Redis device lock owned by the timed-out sub-task")
+}
+
+func TestUpgradeExecutor_FailedLockContenderDoesNotDeleteOwnerLock(t *testing.T) {
+	mr := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = redisClient.Close() })
+
+	const deviceSN = "SN-LOCKED"
+	ownerID := uuid.New()
+	contenderID := uuid.New()
+	lockKey := "software:upgrade:active:" + deviceSN
+	require.NoError(t, redisClient.Set(context.Background(), lockKey, ownerID.String(), time.Hour).Err())
+
+	executor := &UpgradeExecutor{
+		redis:       redisClient,
+		subTaskRepo: &svcMockSubTaskRepo{},
+		taskRepo:    &svcMockTaskRepo{},
+		logger:      zap.NewNop(),
+	}
+	executor.failLockedSubTask(context.Background(), &UpgradeSubTask{
+		ID: contenderID, TaskID: uuid.New(), DeviceSN: deviceSN,
+	}, deviceSN)
+
+	assert.Equal(t, ownerID.String(), redisClient.Get(context.Background(), lockKey).Val(),
+		"a contender that never acquired the lock must not delete another sub-task's lock")
 }
 
 // ---------------------------------------------------------------------------

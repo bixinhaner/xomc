@@ -551,6 +551,43 @@ func (r *RoutingSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleT
 	return merged, nil
 }
 
+// FailStaleWithDetails preserves exact reaped device identities where the
+// physical repository supports them. Legacy split-table repositories still
+// contribute placeholder rows so parent task counts continue to finalize.
+func (r *RoutingSubTaskRepository) FailStaleWithDetails(ctx context.Context, cutoffs StaleTimeouts) ([]UpgradeSubTask, error) {
+	var failed []UpgradeSubTask
+	faultLogCuts := cutoffs
+	if cutoffs.FaultLogUpload > 0 {
+		faultLogCuts.TransferComplete = cutoffs.FaultLogUpload
+	}
+	for _, repo := range r.allSubTaskRepos() {
+		c := cutoffs
+		if r.router.FaultLogCollect.SubTask != nil && repo == r.router.FaultLogCollect.SubTask {
+			c = faultLogCuts
+		}
+		if detailed, ok := repo.(interface {
+			FailStaleWithDetails(context.Context, StaleTimeouts) ([]UpgradeSubTask, error)
+		}); ok {
+			items, err := detailed.FailStaleWithDetails(ctx, c)
+			if err != nil {
+				return nil, err
+			}
+			failed = append(failed, items...)
+			continue
+		}
+		failures, err := repo.FailStale(ctx, c)
+		if err != nil {
+			return nil, err
+		}
+		for taskID, count := range failures.TaskCounts {
+			for range count {
+				failed = append(failed, UpgradeSubTask{TaskID: taskID, Status: UpgradeFailed})
+			}
+		}
+	}
+	return failed, nil
+}
+
 func (r *RoutingSubTaskRepository) UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code FailureCode) error {
 	for _, repo := range r.allSubTaskRepos() {
 		if err := repo.UpdateFailureReasonByTask(ctx, taskID, code); err != nil {
