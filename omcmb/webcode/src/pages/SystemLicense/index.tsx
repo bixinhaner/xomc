@@ -19,6 +19,7 @@ import {
   Col,
   Descriptions,
   Empty,
+  Modal,
   Result,
   Row,
   Space,
@@ -29,6 +30,8 @@ import {
 } from 'antd';
 import {
   CloudUploadOutlined,
+  DownloadOutlined,
+  EyeOutlined,
   HistoryOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -42,6 +45,7 @@ import type {
   SystemLicenseSignatureStatus,
 } from '@core/services/api/systemLicenseApi';
 import {
+  decodeSystemLicenseRawContent,
   SystemLicenseErrorCodes,
   extractLicenseErrorCode,
 } from '@core/services/api/systemLicenseApi';
@@ -118,6 +122,7 @@ export default function SystemLicensePage() {
   const t = useT();
   const navigate = useNavigate();
   const [updateOpen, setUpdateOpen] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false);
 
   const { data: lic, isLoading, error, refetch } = useSystemLicense();
 
@@ -175,6 +180,16 @@ export default function SystemLicensePage() {
     return `${formatDateTime(lic.expiryDate)} · ${t('systemLicense.basicInfo.remainDays', { days: remain ?? 0 })}`;
   })();
 
+  const downloadRawLicense = () => {
+    const blob = new Blob([decodeSystemLicenseRawContent(lic.rawContent)], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${lic.licenseId}.lic`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div style={{ padding: 24 }}>
       {/* 顶部 toolbar */}
@@ -188,6 +203,12 @@ export default function SystemLicensePage() {
           </Button>
           <Button icon={<HistoryOutlined />} onClick={() => navigate('/license/history')}>
             {t('systemLicense.history.title')}
+          </Button>
+          <Button icon={<EyeOutlined />} onClick={() => setRawOpen(true)}>
+            {t('systemLicense.raw.view')}
+          </Button>
+          <Button icon={<DownloadOutlined />} onClick={downloadRawLicense}>
+            {t('systemLicense.raw.download')}
           </Button>
           <Button type="primary" icon={<CloudUploadOutlined />} onClick={() => setUpdateOpen(true)}>
             {t('systemLicense.update')}
@@ -244,6 +265,18 @@ export default function SystemLicensePage() {
 
       {/* "Update" 弹窗 */}
       <UpdateModal open={updateOpen} onClose={() => setUpdateOpen(false)} />
+
+      <Modal
+        title={t('systemLicense.raw.title')}
+        open={rawOpen}
+        onCancel={() => setRawOpen(false)}
+        footer={null}
+        width={860}
+      >
+        <pre style={{ maxHeight: 520, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap' }}>
+          {lic.rawContent}
+        </pre>
+      </Modal>
 
       {/* 友好提示：右下角微小 raw_content 摘要（可选） */}
       <Paragraph type="secondary" style={{ marginTop: 16, fontSize: 12 }}>

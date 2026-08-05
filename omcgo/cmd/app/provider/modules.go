@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -2286,37 +2287,41 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	deviceCounter := license.NewPgDeviceCounter(c.PgPool)
 	licenseMetrics := license.NewEnforcementMetrics(c.MetricsReg)
 	licenseEnforcer := license.NewEnforcer(systemLicenseRepo, deviceCounter, logger, licenseMetrics)
-	licenseMonitor := license.NewMonitor(systemLicenseRepo, deviceCounter, license.NoopAlertSink{}, licenseMetrics, logger)
-
-	// OEM 公钥加载 + 注入 SignatureVerifier。dev 默认 strict=false + 空
-	// PublicKeyDir → 退化为 unverified 放过；prod 推荐配置 OEM 公钥目录 +
-	// strict=true 收紧。
-	licenseVerifier := license.NewSignatureVerifier(c.Cfg.License.Signing.Strict)
-	if dir := c.Cfg.License.Signing.PublicKeyDir; dir != "" {
-		if loadErr := licenseVerifier.LoadKeysFromDir(dir); loadErr != nil {
-			logger.Warn("license OEM public key load reported errors (non-fatal)",
-				zap.String("dir", dir), zap.Error(loadErr))
-		}
-		logger.Info("license signature verifier loaded",
-			zap.String("dir", dir),
-			zap.Int("key_count", licenseVerifier.KeyCount()),
-			zap.Bool("strict", c.Cfg.License.Signing.Strict))
-	}
-	// strict=true 但实际 0 keys 启动是高风险静默失败 — 所有 Update 都会被拒，
-	// 运维不知原因。Fatal 阻止启动让运维立刻定位 license.signing.public_key_dir 误配。
-	if c.Cfg.License.Signing.Strict && licenseVerifier.KeyCount() == 0 {
-		logger.Fatal("license strict mode requires at least 1 OEM public key but none loaded; check license.signing.public_key_dir",
-			zap.String("dir", c.Cfg.License.Signing.PublicKeyDir))
-	}
+	licenseAlertSink := newSystemLicenseAlertSink(c.AlarmEngine, logger)
+	licenseMonitor := license.NewMonitor(systemLicenseRepo, deviceCounter, licenseAlertSink, licenseMetrics, logger)
 
 	c.miscDeps.licenseEnforcer = licenseEnforcer
 	c.miscDeps.licenseMonitor = licenseMonitor
 
-	// SystemLicense service/handler — 复用 verifier + enforcer（Update 后调
-	// Invalidate 让 enforcer 立即拉新 license，避开 5min cache TTL）。
+	// SystemLicense service/handler — 复刻旧项目 TrueLicense 导入、验签和
+	// 授权限制；Update 后调 Invalidate 让 enforcer 立即拉新 license。
 	systemLicenseSvc := license.NewSystemLicenseService(systemLicenseRepo, logger)
-	systemLicenseSvc.SetSignatureVerifier(licenseVerifier)
 	systemLicenseSvc.SetEnforcer(licenseEnforcer)
+	featureMappingPath := filepath.Join(c.Cfg.DictLoader.XMLBaseDir, "license-feature-mapping.json")
+	if mapping, mappingErr := license.LoadLegacyFeatureMapping(featureMappingPath); mappingErr != nil {
+		logger.Warn("License feature mapping unavailable", zap.String("path", featureMappingPath), zap.Error(mappingErr))
+	} else {
+		systemLicenseSvc.SetLegacyFeatureMapping(mapping)
+		logger.Info("License feature mapping loaded", zap.String("path", featureMappingPath), zap.Int("id_code_count", len(mapping.IDToCode)), zap.Int("feature_count", len(mapping.Features)))
+	}
+	if path := c.Cfg.License.Signing.LegacyKeyStorePath; path != "" {
+		keyStore, readErr := os.ReadFile(path)
+		if readErr != nil {
+			logger.Warn("legacy TrueLicense keystore could not be loaded",
+				zap.String("path", path), zap.Error(readErr))
+		} else {
+			systemLicenseSvc.SetLegacyTrueLicenseConfig(
+				keyStore,
+				c.Cfg.License.Signing.LegacyStorePassword,
+				c.Cfg.License.Signing.LegacyKeyAlias,
+				c.Cfg.License.Signing.LegacyVerifyIntegrity,
+			)
+			logger.Info("legacy TrueLicense decoder configured",
+				zap.String("path", path),
+				zap.String("alias", c.Cfg.License.Signing.LegacyKeyAlias),
+				zap.Bool("verify_integrity", c.Cfg.License.Signing.LegacyVerifyIntegrity))
+		}
+	}
 	c.miscDeps.systemLicenseHandler = license.NewSystemLicenseHandler(systemLicenseSvc, logger)
 
 	// Wire enforcer into DeviceService so device.create / future write ops

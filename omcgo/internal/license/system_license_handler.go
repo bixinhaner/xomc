@@ -1,9 +1,11 @@
 // system_license_handler.go — F06 System License 重构 P1 Step 2。
 //
 // 4 个 REST 端点（与 PRD §5 API 契约一致）：
-//   GET  /api/v1/system-license              GetCurrent
-//   POST /api/v1/system-license              Update（上传新文件）
-//   GET  /api/v1/system-license/history      ListHistory（分页）
+//
+//	GET  /api/v1/system-license              GetCurrent
+//	POST /api/v1/system-license              Update（上传新文件）
+//	GET  /api/v1/system-license/history      ListHistory（分页）
+//	GET  /api/v1/system-license/feature-check CheckFeature
 //
 // 老 /api/v1/licenses/* 路由完全保留（Step 5 才下线），两套并存便于灰度。
 //
@@ -60,6 +62,7 @@ func (h *SystemLicenseHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	g.GET("", h.GetCurrent)
 	g.POST("", h.Update)
 	g.GET("/history", h.ListHistory)
+	g.GET("/feature-check", h.CheckFeature)
 }
 
 // GetCurrent — GET /api/v1/system-license。
@@ -77,15 +80,14 @@ func (h *SystemLicenseHandler) GetCurrent(c *gin.Context) {
 
 // Update — POST /api/v1/system-license。
 //
-// Body：{"raw_content": "<license JSON 文件原文>"}
+// Body：{"raw_content": "<旧项目 .lic 二进制的 Base64>", "raw_content_encoding": "base64"}
 //
 // 成功：201 + UpdateResult{Current, Replaced}
 //   - Current  = 刚生效的 license
 //   - Replaced = 被替换的旧 license history 行（首次上传时为 null）
 //
 // 错误：
-//   - JSON 解析 / 必填缺失 → 400 + 12111
-//   - 签名校验失败（strict） → 400 + 12109
+//   - .lic 解密 / 字段 / 验签失败 → 400 + 12111
 //   - license_id 已存在     → 409 + 12110
 func (h *SystemLicenseHandler) Update(c *gin.Context) {
 	var req UpdateRequest
@@ -126,4 +128,15 @@ func (h *SystemLicenseHandler) ListHistory(c *gin.Context) {
 		return
 	}
 	response.OK(c, resp)
+}
+
+// CheckFeature — GET /api/v1/system-license/feature-check?path=eNB.Monitor.Settings.
+func (h *SystemLicenseHandler) CheckFeature(c *gin.Context) {
+	path := c.Query("path")
+	authorized, err := h.service.CheckFeature(c.Request.Context(), path)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OK(c, gin.H{"path": path, "authorized": authorized})
 }

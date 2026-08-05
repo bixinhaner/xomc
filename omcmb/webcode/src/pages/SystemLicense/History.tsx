@@ -7,12 +7,13 @@
  * 后端默认按 replaced_at DESC 排序。
  */
 import { useMemo, useState } from 'react';
-import { Button, Card, Empty, Space, Spin, Table, Tag, Typography } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
+import { Button, Card, Empty, Modal, Space, Spin, Table, Tag, Typography } from 'antd';
+import { ArrowLeftOutlined, DownloadOutlined, EyeOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 
 import { useT } from '@/hooks/useT';
 import { useSystemLicenseHistory } from '@core/hooks/api/useSystemLicense';
+import { decodeSystemLicenseRawContent } from '@core/services/api/systemLicenseApi';
 import type { SystemLicenseHistory } from '@core/services/api/systemLicenseApi';
 import { formatSystemTime } from '@core/utils/systemTime';
 
@@ -28,8 +29,19 @@ export default function SystemLicenseHistoryPage() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [selectedLicense, setSelectedLicense] = useState<SystemLicenseHistory | null>(null);
   const params = useMemo(() => ({ page, pageSize }), [page, pageSize]);
   const { data, isLoading, isFetching } = useSystemLicenseHistory(params);
+
+  const downloadRawLicense = (license: SystemLicenseHistory) => {
+    const blob = new Blob([decodeSystemLicenseRawContent(license.rawContent)], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${license.licenseId}.lic`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   const columns = [
     {
@@ -68,6 +80,24 @@ export default function SystemLicenseHistoryPage() {
       key: 'replacedAt',
       width: 180,
       render: formatDateTime,
+    },
+    {
+      title: t('systemLicense.history.actions'),
+      key: 'actions',
+      width: 180,
+      render: (_: unknown, record: SystemLicenseHistory) => (
+        <Space size="small">
+          <Button size="small" icon={<EyeOutlined />} onClick={() => setSelectedLicense(record)}>
+            {t('systemLicense.raw.view')}
+          </Button>
+          <Button
+            size="small"
+            icon={<DownloadOutlined />}
+            aria-label={t('systemLicense.raw.download')}
+            onClick={() => downloadRawLicense(record)}
+          />
+        </Space>
+      ),
     },
   ];
 
@@ -110,6 +140,18 @@ export default function SystemLicenseHistoryPage() {
           />
         )}
       </Card>
+
+      <Modal
+        title={selectedLicense ? `${t('systemLicense.raw.title')} · ${selectedLicense.licenseId}` : ''}
+        open={selectedLicense !== null}
+        onCancel={() => setSelectedLicense(null)}
+        footer={null}
+        width={860}
+      >
+        <pre style={{ maxHeight: 520, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap' }}>
+          {selectedLicense?.rawContent}
+        </pre>
+      </Modal>
     </div>
   );
 }

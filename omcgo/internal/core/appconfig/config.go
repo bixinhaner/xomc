@@ -530,10 +530,7 @@ type AlertWebhookConfig struct {
 	Recipients []string `mapstructure:"recipients"`
 }
 
-// LicenseConfig 配置 license 子系统的可调参数（T-0100 P4）。
-//
-// Signing：OEM 签名校验（P4-C）。dev 默认 strict=false + 空 PublicKeyDir，
-// 等价于 P3 stub 行为；prod 推荐 strict=true + 挂载 OEM 公钥目录。
+// LicenseConfig 配置旧项目 License 子系统的可调参数。
 //
 // LogArchive：审计日志归档 cron（P4-B）。空目录 / 0 月禁用归档；prod 推荐
 // retention_months=6（PRD §5.4.5 等保 2.0 三级 8.1.4.7 合规要求）。
@@ -542,17 +539,12 @@ type LicenseConfig struct {
 	LogArchive LicenseLogArchiveConfig `mapstructure:"log_archive"`
 }
 
-// LicenseSigningConfig — OEM license 数字签名校验配置（T-0100-P4-C）。
-//
-// PublicKeyDir：含 *.pem 公钥文件的目录（每个文件一/多个 PEM block，仅识别
-// PUBLIC KEY / RSA PUBLIC KEY 类型）。空 / 不存在 → 跳过校验，所有 license
-// 落 signature_status='unverified'。
-//
-// Strict：true 时未签名 / 公钥未配置 / 签名无效 三种情况 import 直接 400 拒绝；
-// false（默认 dev）放过仅记 warn。
+// LicenseSigningConfig 配置旧项目 TrueLicense 的 JKS/DSA 验签。
 type LicenseSigningConfig struct {
-	PublicKeyDir string `mapstructure:"public_key_dir"`
-	Strict       bool   `mapstructure:"strict"`
+	LegacyKeyStorePath    string `mapstructure:"legacy_keystore_path"`
+	LegacyStorePassword   string `mapstructure:"legacy_store_password"`
+	LegacyKeyAlias        string `mapstructure:"legacy_key_alias"`
+	LegacyVerifyIntegrity bool   `mapstructure:"legacy_verify_integrity"`
 }
 
 // LicenseLogArchiveConfig — license_logs 周级归档 cron 配置（T-0100-P4-B）。
