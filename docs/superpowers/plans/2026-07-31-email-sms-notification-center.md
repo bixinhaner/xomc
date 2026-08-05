@@ -24,7 +24,7 @@ Playwright。
 | 4 | 已完成 | `586a90099` |
 | 5 | 已完成 | `da50a3a63` |
 | 6 | 本地开发门禁已完成 | Shadow、canonical、NATS 故障恢复、三档本机负载及模式回退均通过；生产容量门禁仍待现场数据，见[本地验证](../reviews/2026-08-04-email-sms-milestone-a-local-validation.md)与[容量回退记录](../reviews/2026-08-05-email-sms-milestone-a-capacity-rollback.md) |
-| 7 | 进行中 | Schema 守卫与领域数据基线已完成，Go 仓储接口及实现待继续 |
+| 7 | 已完成 | Schema 守卫、领域模型、拆分仓储、幂等测试及专用 PostgreSQL 集成验证通过；claim 状态迁移随 Task 8/渠道 Worker 按实际消费者实现 |
 | 8–14 | 未开始 | 生产外发与 canonical 继续受最终门禁约束 |
 
 下文保留原始 RED/GREEN checkbox 作为实施步骤模板；是否完成以本表、提交和验证记录共同
