@@ -8041,6 +8041,21 @@ ALTER TABLE public.notification_templates DISABLE TRIGGER ALL;
 
 ALTER TABLE public.notification_templates ENABLE TRIGGER ALL;
 
+-- 通知中心第一阶段只预置一个禁用的邮件渠道。parameters 只保存非敏感项；
+-- SMTP 密码或证书由外部 secret provider 管理，业务表仅保存 secret_ref。
+INSERT INTO public.notification_channel_configs (
+    id, channel, name, enabled, parameters, secret_ref, revision, created_by
+) VALUES (
+    'aaaa000c-1000-0000-0000-000000000001',
+    'email',
+    'default-email',
+    false,
+    '{}'::jsonb,
+    NULL,
+    1,
+    'system'
+) ON CONFLICT DO NOTHING;
+
 --
 -- Data for Name: notification_history; Type: TABLE DATA; Schema: public; Owner: -
 --

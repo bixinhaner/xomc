@@ -1653,6 +1653,26 @@ func initMiscModules(c *Container) error {
 	templateService := notification.NewTemplateService(templateRepo, logger)
 	c.miscDeps.notifTemplateHandler = notification.NewTemplateHandler(templateService, logger)
 
+	ruleRepo := notification.NewPgRuleRepository(c.PgPool)
+	c.miscDeps.notifRuleHandler = notification.NewRuleHandler(notification.NewRuleService(ruleRepo))
+	c.miscDeps.notifRuleHandler.SetScopeAuthorizer(notification.NewRuleScopeAuthorizer(
+		c.PermService, device.NewPgDeviceGroupReader(c.PgPool),
+	))
+	contactGroupRepo := notification.NewPgContactGroupRepository(c.PgPool)
+	c.miscDeps.notifContactGroupHandler = notification.NewContactGroupHandler(
+		notification.NewContactGroupService(contactGroupRepo),
+	)
+	managedTemplateRepo := notification.NewPgTemplateManagementRepository(c.PgPool)
+	c.miscDeps.notifManagedTemplateHandler = notification.NewTemplateManagementHandler(
+		notification.NewTemplateManagementService(managedTemplateRepo),
+	)
+	channelRepo := notification.NewPgChannelConfigRepository(c.PgPool)
+	// Task 9 只装配管理面。真实 SMTP 验证与发送适配器在渠道 worker 阶段注入，
+	// 未注入时 verify 明确返回 503，不能把静态配置检查伪装成连接成功。
+	c.miscDeps.notifChannelHandler = notification.NewChannelHandler(
+		notification.NewChannelService(channelRepo, nil),
+	)
+
 	historyRepo := notification.NewPgHistoryRepository(c.PgPool)
 	historyService := notification.NewHistoryService(historyRepo, logger)
 	c.miscDeps.notifHistoryHandler = notification.NewHistoryHandler(historyService, logger)
@@ -2675,8 +2695,12 @@ type miscDeps struct {
 	messageHub          *events.MessageHub
 
 	// W2.A.4 / T-0043: Notification template + history
-	notifTemplateHandler *notification.TemplateHandler
-	notifHistoryHandler  *notification.HistoryHandler
+	notifTemplateHandler        *notification.TemplateHandler
+	notifHistoryHandler         *notification.HistoryHandler
+	notifRuleHandler            *notification.RuleHandler
+	notifContactGroupHandler    *notification.ContactGroupHandler
+	notifManagedTemplateHandler *notification.TemplateManagementHandler
+	notifChannelHandler         *notification.ChannelHandler
 
 	// T-0152: Alertmanager 告警 webhook 入口（SMTP 邮件发送链）
 	alertWebhookHandler *notification.AlertWebhookHandler

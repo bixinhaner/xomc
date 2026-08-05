@@ -71,6 +71,8 @@ func TestDomainSchemaIdempotencyAndClaimGuards(t *testing.T) {
 		"CREATE INDEX idx_notification_events_process",
 		"CREATE INDEX idx_notification_schedules_claim",
 		"CREATE INDEX idx_notification_deliveries_claim",
+		"CREATE UNIQUE INDEX notification_contact_groups_one_default_key",
+		"CREATE UNIQUE INDEX notification_channel_configs_one_enabled_email_key",
 	} {
 		require.Contains(t, schema, fragment)
 	}

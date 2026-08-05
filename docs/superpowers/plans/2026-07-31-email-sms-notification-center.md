@@ -676,22 +676,22 @@ git commit -m "feat(notification): 编排有序告警事件和持久化调度"
   enable
 - Consumes: Task 7 仓储、现有 authz 数据权限
 
-- [ ] **Step 1: 写规则匹配和冲突测试**
+- [x] **Step 1: 写规则匹配和冲突测试**
 
 测试字段内 OR、字段间 AND、优先级、具体度、稳定 ID 决胜，以及多规则合并同一地址时只
 产生一个候选投递。
 
-- [ ] **Step 2: 写乐观锁与版本测试**
+- [x] **Step 2: 写乐观锁与版本测试**
 
 覆盖缺少 `If-Match` 返回 428、旧 revision 返回 412、发布后不可变、启用必须绑定已发布
 rule version、模板新版本不自动改变启用规则。
 
-- [ ] **Step 3: 实现 draft/publish/enable 服务**
+- [x] **Step 3: 实现 draft/publish/enable 服务**
 
 Handler 只做绑定和鉴权，事务及版本不变量在 service/repository。继续使用现有
 `/notifications/templates` 时提供兼容只读响应；新写路径必须创建版本。
 
-- [ ] **Step 4: 实现收件人解析和权限求交**
+- [x] **Step 4: 实现收件人解析和权限求交**
 
 固定联系人、用户、角色、默认 NOC 组最终统一为：
 
@@ -710,19 +710,26 @@ type ResolvedRecipient struct {
 同时命中设备组和制式 grant；不能沿用已删除的 `users.carrier`，也不能只判断设备组。
 无权限结果记录排除原因。
 
-- [ ] **Step 5: 实现联系组、渠道配置与写审计**
+- [x] **Step 5: 实现联系组、渠道配置与写审计**
 
 联系组成员仍经过设备权限求交。渠道 API 只返回非敏感参数和 secret reference 状态，
 不回显密码、Token 或私钥。规则、模板、联系组和渠道的创建、发布、启停、归档及秘密
 变更全部写现有操作审计，敏感字段只记录“已变更”。
 
-- [ ] **Step 6: 运行 API 和服务测试**
+- [x] **Step 6: 运行 API 和服务测试**
 
 Run: `cd omcgo && go test ./internal/notification -run 'Rule|Template|Recipient' -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交**
+2026-08-05 验证：规则、模板、联系组和渠道 repository 在由正式 Goose schema + seed
+从零重建的 `omcgo_notification_task9_fresh` 独立库通过集成测试；`go test ./... -count=1`
+通过。生产路由上的旧 `/notifications/templates` 已收敛为只读，新写路径均创建不可变版本。
+现有统一 AuditLogger/OperLogger 覆盖所有管理写请求且不记录请求体；渠道响应只返回
+`secret_configured`。真实 SMTP verify、固定联系人明文加密入口和 SMS Adapter 仍是明确上线
+门禁：未注入适配器时 verify 返回 503，SMS 不允许启用，不伪造完成状态。
+
+- [x] **Step 7: 提交**
 
 ```bash
 git add omcgo/internal/notification omcgo/cmd/app/provider/router.go

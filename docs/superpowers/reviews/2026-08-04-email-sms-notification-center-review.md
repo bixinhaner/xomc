@@ -54,3 +54,35 @@ Adapter 边界，不在外部协议未确认时引入 Kafka 或供应商 SDK。
 - 任何涉及清除路径的代码在 projector 未就绪前必须保持 legacy 行为。
 - 未取得 Kafka Topic/Schema/Ack/鉴权或直连供应商回执契约前，不实现 SMS 发送器。
 - 所有页面和真实请求参数必须在 V1 前端用浏览器验证；老 OMC 始终只读。
+
+## Task 9 实施复核（2026-08-05）
+
+Task 9 已按“管理面闭环、发送面不提前扩展”的边界完成：
+
+- 规则按 draft / published / enabled 三个指针管理，不可变版本同时快照匹配条件、策略、
+  收件人和渠道；发布不自动启用，新模板草稿或发布也不自动改变已启用规则。
+- 匹配保持字段内 OR、字段间 AND，并按 priority、具体度和稳定 UUID 决胜；同一
+  channel + fingerprint 只保留最高优先级候选。
+- 非超管规则写入必须明确设备 ID，并使用同一 visibility grant 同时满足设备组和制式；
+  broad rule 仅超管可写。`carrier` 只参与匹配，没有被误用为用户或租户权限。
+- 用户、角色和联系组在事件时解析；禁用用户、空地址和无设备权限均输出排除原因。固定
+  联系人仅允许已保护的 ciphertext / key version / fingerprint，所有查询响应只显示
+  `address_configured`，不回显密文或地址。
+- 模板新写路径使用不可变版本和严格 `missingkey=error`；变量来自白名单，HTML 使用
+  `html/template`，SMS 预览返回预计分段数且不静默截断。旧模板 HTTP 写路由在生产装配中
+  已关闭，只保留兼容读；旧 Alertmanager webhook 内部链路暂不改写。
+- 渠道参数拒绝嵌套 password、token、secret、private key 等敏感键，响应只显示
+  `secret_configured`。数据库唯一索引保证至多一个启用邮件渠道、至多一个默认联系组。
+- 所有新管理路由继续经过现有 JWT、endpoint RBAC、AuditLogger 和 OperLogger。两类日志
+  都不读取请求体，秘密值不会进入审计。真实连接验证尚无适配器时返回 503，而非伪造成功。
+
+没有在本任务引入 Kafka、短信 SDK、后台发送 worker、模板 AB、可视化规则编辑器或新的
+权限/审计子系统。第一阶段仍只允许 Email；固定联系人明文录入必须等正式 key provider，
+SMS 必须等外部平台契约。规则 preview 当前负责命中解释，模板 preview 负责严格渲染；事件
+时的最终权限求交、收件人数和投递编排由 Task 10 复用本任务的 resolver 完成。
+
+验证证据：
+
+- `go test ./internal/notification -run 'TestPg(Rule|ContactGroup|TemplateManagement|ChannelConfig)Repository_Integration' -count=1 -v`：PASS。
+- `go run ./cmd/migrate ... --path migrations up` 与独立 seed 版本表：全新库 schema + seed PASS。
+- `go test ./... -count=1`：PASS。

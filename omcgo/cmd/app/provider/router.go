@@ -676,8 +676,22 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// 路径前缀 /notifications，handler 内部挂 /templates 和 /history 子路由：
 	//   final paths: /api/v1/notifications/templates[...] + /api/v1/notifications/history[...]
 	notifGroup := permGroup("alarms").Group("/notifications")
-	md.notifTemplateHandler.RegisterRoutes(notifGroup)
+	md.notifTemplateHandler.RegisterReadOnlyRoutes(notifGroup)
 	md.notifHistoryHandler.RegisterRoutes(notifGroup)
+	// 通知中心管理面使用根级版本化 API。所有写操作同时经过 endpoint RBAC、
+	// audit_logs 与 sys_oper_logs；handler 额外执行 If-Match 并发前置条件。
+	if md.notifRuleHandler != nil {
+		md.notifRuleHandler.RegisterRoutes(permGroup("alarms"))
+	}
+	if md.notifContactGroupHandler != nil {
+		md.notifContactGroupHandler.RegisterRoutes(permGroup("alarms"))
+	}
+	if md.notifManagedTemplateHandler != nil {
+		md.notifManagedTemplateHandler.RegisterRoutes(permGroup("alarms"))
+	}
+	if md.notifChannelHandler != nil {
+		md.notifChannelHandler.RegisterRoutes(permGroup("alarms"))
+	}
 
 	// ----- T-0152: Alertmanager 告警 webhook → publicV1（无 JWT）-----
 	// Alertmanager 无法携带 JWT，故挂在无鉴权的 publicV1 上；可选 Bearer token

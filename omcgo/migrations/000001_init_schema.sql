@@ -5288,6 +5288,8 @@ CREATE INDEX idx_notification_events_occurrence_version ON public.notification_e
 CREATE INDEX idx_notification_schedules_claim ON public.notification_schedules USING btree (state, due_at, lease_expires_at) WHERE ((state)::text = ANY ((ARRAY['pending'::character varying, 'claimed'::character varying])::text[]));
 CREATE INDEX idx_notification_deliveries_claim ON public.notification_deliveries USING btree (flow_state, next_attempt_at, lease_expires_at) WHERE ((flow_state)::text = ANY ((ARRAY['queued'::character varying, 'retry_wait'::character varying, 'sending'::character varying])::text[]));
 CREATE INDEX idx_notification_deliveries_occurrence ON public.notification_deliveries USING btree (occurrence_id, created_at DESC);
+CREATE UNIQUE INDEX notification_contact_groups_one_default_key ON public.notification_contact_groups USING btree (is_default) WHERE (is_default AND (NOT archived));
+CREATE UNIQUE INDEX notification_channel_configs_one_enabled_email_key ON public.notification_channel_configs USING btree (channel) WHERE (enabled AND ((channel)::text = 'email'::text));
 CREATE INDEX idx_notification_delivery_attempts_delivery ON public.notification_delivery_attempts USING btree (delivery_id, attempt_no);
 
 

@@ -41,6 +41,15 @@ func (h *TemplateHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	templates.DELETE("/:id", h.Delete)
 }
 
+// RegisterReadOnlyRoutes keeps the legacy template representation available to
+// the existing alert webhook without allowing new management writes to bypass
+// immutable template versions. New writes use /notification-templates.
+func (h *TemplateHandler) RegisterReadOnlyRoutes(rg *gin.RouterGroup) {
+	templates := rg.Group("/templates")
+	templates.GET("", h.List)
+	templates.GET("/:id", h.GetByID)
+}
+
 // templateListQuery is the binding struct for GET /templates query params.
 type templateListQuery struct {
 	Channel  string `form:"channel"`
