@@ -79,9 +79,16 @@ type DomainTemplateVersion struct {
 
 type DomainSchedule struct {
 	ID                   uuid.UUID
+	EventID              uuid.UUID
 	OccurrenceID         uuid.UUID
 	RuleVersionID        uuid.UUID
+	TemplateVersionID    uuid.UUID
+	ChannelConfigID      uuid.UUID
 	Channel              string
+	DispatchKind         string
+	RecipientType        string
+	AddressCiphertext    []byte
+	AddressKeyVersion    int
 	RecipientFingerprint []byte
 	ScheduleKind         string
 	SequenceNo           int

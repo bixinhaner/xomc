@@ -75,7 +75,10 @@ func TestPgDomainRepository_Integration(t *testing.T) {
 	require.NoError(t, err)
 	fingerprint := []byte("integration-fingerprint")
 	schedule := &DomainSchedule{
-		OccurrenceID: event.OccurrenceID, RuleVersionID: ruleVersionID, Channel: "email",
+		EventID: event.EventID, OccurrenceID: event.OccurrenceID, RuleVersionID: ruleVersionID,
+		TemplateVersionID: templateVersionID, ChannelConfigID: channelConfigID, Channel: "email",
+		DispatchKind: DispatchKindInitial, RecipientType: RecipientTargetUser,
+		AddressCiphertext: []byte("ciphertext"), AddressKeyVersion: 1,
 		RecipientFingerprint: fingerprint, ScheduleKind: "initial_gate", Generation: 1,
 		DueAt: now, CreatedEventVersion: 1,
 	}

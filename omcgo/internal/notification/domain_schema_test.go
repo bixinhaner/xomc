@@ -65,6 +65,14 @@ func TestDomainSchemaIdentityAndEncryptionGuards(t *testing.T) {
 	deliveries := extractNotificationTableBody(t, schema, "notification_deliveries")
 	require.Regexp(t, `(?i)maintenance_window_id\s+uuid`, deliveries)
 	require.Contains(t, schema, "notification_deliveries_maintenance_window_id_fkey")
+
+	schedules := extractNotificationTableBody(t, schema, "notification_schedules")
+	for _, field := range []string{
+		"event_id uuid", "template_version_id uuid", "channel_config_id uuid",
+		"recipient_type character varying", "address_ciphertext bytea", "address_key_version integer",
+	} {
+		require.Contains(t, schedules, field)
+	}
 }
 
 func TestDomainSchemaIdempotencyAndClaimGuards(t *testing.T) {

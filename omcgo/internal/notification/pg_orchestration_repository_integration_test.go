@@ -93,8 +93,11 @@ VALUES ($1,'sms_kafka',$2,$3,'{}')`, ruleVersionID, configID, templateVersionID)
 	reason := SuppressionMaintenanceWindow
 	decision := OrchestrationDecision{
 		Schedules: []DomainSchedule{{
-			ID: uuid.New(), OccurrenceID: occurrenceID, RuleVersionID: ruleVersionID,
-			Channel: "sms_kafka", RecipientFingerprint: fingerprint, ScheduleKind: ScheduleKindDigestFlush,
+			ID: uuid.New(), EventID: eventID, OccurrenceID: occurrenceID, RuleVersionID: ruleVersionID,
+			TemplateVersionID: templateVersionID, ChannelConfigID: configID, Channel: "sms_kafka",
+			DispatchKind: DispatchKindDigest, RecipientType: RecipientTargetFixedContact,
+			AddressCiphertext: []byte("encrypted"), AddressKeyVersion: 1,
+			RecipientFingerprint: fingerprint, ScheduleKind: ScheduleKindDigestFlush,
 			Generation: 1, DueAt: now.Add(15 * time.Minute), State: "pending", CreatedEventVersion: 1,
 		}},
 		Aggregations: []AggregationFact{{
@@ -140,8 +143,11 @@ VALUES ($1,1,1,'active',1,$2,'TASK10-INTEGRATION-2','cmcc','nr','POWER_FAIL','{}
 	require.NoError(t, err)
 	secondDecision := OrchestrationDecision{
 		Schedules: []DomainSchedule{{
-			ID: uuid.New(), OccurrenceID: secondOccurrenceID, RuleVersionID: ruleVersionID,
-			Channel: "sms_kafka", RecipientFingerprint: fingerprint, ScheduleKind: ScheduleKindDigestFlush,
+			ID: uuid.New(), EventID: secondEventID, OccurrenceID: secondOccurrenceID, RuleVersionID: ruleVersionID,
+			TemplateVersionID: templateVersionID, ChannelConfigID: configID, Channel: "sms_kafka",
+			DispatchKind: DispatchKindDigest, RecipientType: RecipientTargetFixedContact,
+			AddressCiphertext: []byte("encrypted"), AddressKeyVersion: 1,
+			RecipientFingerprint: fingerprint, ScheduleKind: ScheduleKindDigestFlush,
 			Generation: 1, DueAt: now.Add(15 * time.Minute), State: "pending", CreatedEventVersion: 1,
 		}},
 		Aggregations: decision.Aggregations,

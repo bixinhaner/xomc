@@ -230,8 +230,8 @@ func buildRaisedDecision(input OrchestrationInput) OrchestrationDecision {
 						Severity:             int16(input.Event.Snapshot.Severity), WindowStart: start, WindowEnd: end, EventCount: 1,
 					})
 					decision.Schedules = append(decision.Schedules, newSchedule(
-						input, rule.VersionID, channel.Channel, recipient.Fingerprint,
-						ScheduleKindDigestFlush, digestScheduleSequence(end), end,
+						input, rule.VersionID, channel, channel.RaisedTemplateVersionID, recipient,
+						ScheduleKindDigestFlush, DispatchKindDigest, digestScheduleSequence(end), end,
 					))
 					continue
 				}
@@ -242,8 +242,8 @@ func buildRaisedDecision(input OrchestrationInput) OrchestrationDecision {
 					gateDue = input.Now
 				}
 				decision.Schedules = append(decision.Schedules, newSchedule(
-					input, rule.VersionID, channel.Channel, recipient.Fingerprint,
-					ScheduleKindInitialGate, 0, gateDue,
+					input, rule.VersionID, channel, channel.RaisedTemplateVersionID, recipient,
+					ScheduleKindInitialGate, DispatchKindInitial, 0, gateDue,
 				))
 
 				interval := time.Duration(policy.RepeatIntervalSeconds) * time.Second
@@ -257,8 +257,8 @@ func buildRaisedDecision(input OrchestrationInput) OrchestrationDecision {
 						continue
 					}
 					decision.Schedules = append(decision.Schedules, newSchedule(
-						input, rule.VersionID, channel.Channel, recipient.Fingerprint,
-						ScheduleKindRepeat, sequence, dueAt,
+						input, rule.VersionID, channel, channel.RaisedTemplateVersionID, recipient,
+						ScheduleKindRepeat, DispatchKindRepeat, sequence, dueAt,
 					))
 				}
 			}
@@ -333,8 +333,8 @@ func buildUpdatedDecision(input OrchestrationInput) OrchestrationDecision {
 						Severity:             int16(input.Event.Snapshot.Severity), WindowStart: start, WindowEnd: end, EventCount: 1,
 					})
 					decision.Schedules = append(decision.Schedules, newSchedule(
-						input, rule.VersionID, channel.Channel, recipient.Fingerprint,
-						ScheduleKindDigestFlush, digestScheduleSequence(end), end,
+						input, rule.VersionID, channel, templateID, recipient,
+						ScheduleKindDigestFlush, DispatchKindDigest, digestScheduleSequence(end), end,
 					))
 					continue
 				}
@@ -394,11 +394,25 @@ func buildClearedDecision(input OrchestrationInput) OrchestrationDecision {
 	return decision
 }
 
-func newSchedule(input OrchestrationInput, ruleVersionID uuid.UUID, channel string, fingerprint []byte, kind string, sequence int, dueAt time.Time) DomainSchedule {
+func newSchedule(
+	input OrchestrationInput,
+	ruleVersionID uuid.UUID,
+	channel OrchestrationChannel,
+	templateVersionID uuid.UUID,
+	recipient OrchestrationRecipient,
+	scheduleKind string,
+	dispatchKind string,
+	sequence int,
+	dueAt time.Time,
+) DomainSchedule {
 	return DomainSchedule{
-		ID: uuid.New(), OccurrenceID: input.Event.OccurrenceID, RuleVersionID: ruleVersionID,
-		Channel: channel, RecipientFingerprint: cloneBytes(fingerprint), ScheduleKind: kind,
-		SequenceNo: sequence, Generation: input.Occurrence.ScheduleGeneration, DueAt: dueAt,
+		ID: uuid.New(), EventID: input.Event.EventID, OccurrenceID: input.Event.OccurrenceID,
+		RuleVersionID: ruleVersionID, TemplateVersionID: templateVersionID,
+		ChannelConfigID: channel.ChannelConfigID, Channel: channel.Channel, DispatchKind: dispatchKind,
+		RecipientType: recipient.RecipientType, AddressCiphertext: cloneBytes(recipient.Ciphertext),
+		AddressKeyVersion: recipient.KeyVersion, RecipientFingerprint: cloneBytes(recipient.Fingerprint),
+		ScheduleKind: scheduleKind,
+		SequenceNo:   sequence, Generation: input.Occurrence.ScheduleGeneration, DueAt: dueAt,
 		State: "pending", CreatedEventVersion: input.Event.AlarmVersion,
 		CreatedAt: input.Now, UpdatedAt: input.Now,
 	}

@@ -158,8 +158,18 @@ func (r *PgScheduleRepository) InsertSchedule(ctx context.Context, schedule *Dom
 
 func buildDomainScheduleInsert(schedule *DomainSchedule) (string, []any, error) {
 	return storage.Psql.Insert("notification_schedules").
-		Columns("id", "occurrence_id", "rule_version_id", "channel", "recipient_fingerprint", "schedule_kind", "sequence_no", "generation", "due_at", "state", "created_event_version").
-		Values(schedule.ID, schedule.OccurrenceID, schedule.RuleVersionID, schedule.Channel, schedule.RecipientFingerprint, schedule.ScheduleKind, schedule.SequenceNo, schedule.Generation, schedule.DueAt, schedule.State, schedule.CreatedEventVersion).
+		Columns(
+			"id", "event_id", "occurrence_id", "rule_version_id", "template_version_id", "channel_config_id",
+			"channel", "dispatch_kind", "recipient_type", "address_ciphertext", "address_key_version",
+			"recipient_fingerprint", "schedule_kind", "sequence_no", "generation", "due_at", "state", "created_event_version",
+		).
+		Values(
+			schedule.ID, schedule.EventID, schedule.OccurrenceID, schedule.RuleVersionID,
+			schedule.TemplateVersionID, schedule.ChannelConfigID, schedule.Channel, schedule.DispatchKind,
+			schedule.RecipientType, schedule.AddressCiphertext, schedule.AddressKeyVersion,
+			schedule.RecipientFingerprint, schedule.ScheduleKind, schedule.SequenceNo, schedule.Generation,
+			schedule.DueAt, schedule.State, schedule.CreatedEventVersion,
+		).
 		Suffix("ON CONFLICT (occurrence_id, rule_version_id, channel, recipient_fingerprint, schedule_kind, sequence_no, generation) DO NOTHING").
 		ToSql()
 }
@@ -217,7 +227,9 @@ func buildScheduleClaim(request ScheduleClaimRequest) (string, []any, error) {
 		Set("lease_expires_at", request.Now.Add(request.LeaseDuration)).
 		Set("updated_at", request.Now).
 		Where(sq.Expr("id IN (?)", due)).
-		Suffix(`RETURNING id, occurrence_id, rule_version_id, channel, recipient_fingerprint,
+		Suffix(`RETURNING id, event_id, occurrence_id, rule_version_id, template_version_id,
+            channel_config_id, channel, dispatch_kind, recipient_type, address_ciphertext,
+            address_key_version, recipient_fingerprint,
             schedule_kind, sequence_no, generation, due_at, state, locked_by, locked_at,
             lease_expires_at, cancelled_at, completed_at, created_event_version, delivery_id,
             created_at, updated_at`).ToSql()
@@ -227,8 +239,10 @@ type scheduleScanner interface{ Scan(...any) error }
 
 func scanDomainSchedule(row scheduleScanner, schedule *DomainSchedule) error {
 	return row.Scan(
-		&schedule.ID, &schedule.OccurrenceID, &schedule.RuleVersionID, &schedule.Channel,
-		&schedule.RecipientFingerprint, &schedule.ScheduleKind, &schedule.SequenceNo,
+		&schedule.ID, &schedule.EventID, &schedule.OccurrenceID, &schedule.RuleVersionID,
+		&schedule.TemplateVersionID, &schedule.ChannelConfigID, &schedule.Channel,
+		&schedule.DispatchKind, &schedule.RecipientType, &schedule.AddressCiphertext,
+		&schedule.AddressKeyVersion, &schedule.RecipientFingerprint, &schedule.ScheduleKind, &schedule.SequenceNo,
 		&schedule.Generation, &schedule.DueAt, &schedule.State, &schedule.LockedBy,
 		&schedule.LockedAt, &schedule.LeaseExpiresAt, &schedule.CancelledAt,
 		&schedule.CompletedAt, &schedule.CreatedEventVersion, &schedule.DeliveryID,

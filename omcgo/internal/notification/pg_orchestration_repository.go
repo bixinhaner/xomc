@@ -184,8 +184,10 @@ func applyOrchestrationFence(ctx context.Context, tx pgx.Tx, fence Orchestration
 		return nil
 	}
 	selectSchedules := sq.Select(
-		"DISTINCT ON (rule_version_id, channel, recipient_fingerprint, schedule_kind, sequence_no) occurrence_id",
-		"rule_version_id", "channel", "recipient_fingerprint", "schedule_kind", "sequence_no",
+		"DISTINCT ON (rule_version_id, channel, recipient_fingerprint, schedule_kind, sequence_no) event_id",
+		"occurrence_id", "rule_version_id", "template_version_id", "channel_config_id", "channel",
+		"dispatch_kind", "recipient_type", "address_ciphertext", "address_key_version",
+		"recipient_fingerprint", "schedule_kind", "sequence_no",
 	).Column(sq.Expr("?", fence.Generation)).Column("due_at").
 		Column(sq.Expr("?", "pending")).Column(sq.Expr("?", fence.EventVersion)).
 		From("notification_schedules").
@@ -193,7 +195,9 @@ func applyOrchestrationFence(ctx context.Context, tx pgx.Tx, fence Orchestration
 		Where(sq.Lt{"generation": fence.Generation}).Where(sq.Gt{"due_at": fence.OccurredAt}).
 		OrderBy("rule_version_id", "channel", "recipient_fingerprint", "schedule_kind", "sequence_no", "generation DESC")
 	query, args, err = storage.Psql.Insert("notification_schedules").Columns(
-		"occurrence_id", "rule_version_id", "channel", "recipient_fingerprint", "schedule_kind",
+		"event_id", "occurrence_id", "rule_version_id", "template_version_id", "channel_config_id",
+		"channel", "dispatch_kind", "recipient_type", "address_ciphertext", "address_key_version",
+		"recipient_fingerprint", "schedule_kind",
 		"sequence_no", "generation", "due_at", "state", "created_event_version",
 	).Select(selectSchedules).
 		Suffix("ON CONFLICT (occurrence_id, rule_version_id, channel, recipient_fingerprint, schedule_kind, sequence_no, generation) DO NOTHING").ToSql()

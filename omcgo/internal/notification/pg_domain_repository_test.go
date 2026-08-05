@@ -109,7 +109,10 @@ func TestPgScheduleRepository_InsertSchedule_DedupSQL(t *testing.T) {
 		return pgconn.NewCommandTag("INSERT 0 1"), nil
 	}}
 	schedule := &DomainSchedule{
-		OccurrenceID: uuid.New(), RuleVersionID: uuid.New(), Channel: "email",
+		EventID: uuid.New(), OccurrenceID: uuid.New(), RuleVersionID: uuid.New(),
+		TemplateVersionID: uuid.New(), ChannelConfigID: uuid.New(), Channel: "email",
+		DispatchKind: DispatchKindInitial, RecipientType: RecipientTargetUser,
+		AddressCiphertext: []byte("ciphertext"), AddressKeyVersion: 1,
 		RecipientFingerprint: []byte("fingerprint"), ScheduleKind: "initial_gate",
 		Generation: 1, DueAt: time.Now(), CreatedEventVersion: 1,
 	}
@@ -130,7 +133,7 @@ func TestPgScheduleRepository_ClaimUsesSkipLockedAndExpiredLeaseRecovery(t *test
 	assert.Contains(t, normalized, "FOR UPDATE SKIP LOCKED")
 	assert.Contains(t, normalized, "STATE = $1")
 	assert.Contains(t, normalized, "LEASE_EXPIRES_AT <=")
-	assert.Contains(t, normalized, "RETURNING ID, OCCURRENCE_ID")
+	assert.Contains(t, normalized, "RETURNING ID, EVENT_ID, OCCURRENCE_ID")
 	assert.NotEmpty(t, args)
 }
 

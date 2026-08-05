@@ -265,8 +265,10 @@ func resumeFutureRepeatSchedules(
 	// still in the future. initial_gate is deliberately excluded, and DISTINCT
 	// ON selects the latest prior generation without expanding the rule policy.
 	selectSchedules := sq.Select(
-		"DISTINCT ON (rule_version_id, channel, recipient_fingerprint, schedule_kind, sequence_no) occurrence_id",
-		"rule_version_id", "channel", "recipient_fingerprint", "schedule_kind", "sequence_no",
+		"DISTINCT ON (rule_version_id, channel, recipient_fingerprint, schedule_kind, sequence_no) event_id",
+		"occurrence_id", "rule_version_id", "template_version_id", "channel_config_id", "channel",
+		"dispatch_kind", "recipient_type", "address_ciphertext", "address_key_version",
+		"recipient_fingerprint", "schedule_kind", "sequence_no",
 	).Column(sq.Expr("?", newGeneration)).Column("due_at").
 		Column(sq.Expr("?", "pending")).Column(sq.Expr("?", payload.AlarmVersion)).
 		From("notification_schedules").
@@ -279,7 +281,9 @@ func resumeFutureRepeatSchedules(
 		Where(sq.Gt{"due_at": payload.OccurredAt}).
 		OrderBy("rule_version_id", "channel", "recipient_fingerprint", "schedule_kind", "sequence_no", "generation DESC")
 	query, args, err := storage.Psql.Insert("notification_schedules").Columns(
-		"occurrence_id", "rule_version_id", "channel", "recipient_fingerprint", "schedule_kind",
+		"event_id", "occurrence_id", "rule_version_id", "template_version_id", "channel_config_id",
+		"channel", "dispatch_kind", "recipient_type", "address_ciphertext", "address_key_version",
+		"recipient_fingerprint", "schedule_kind",
 		"sequence_no", "generation", "due_at", "state", "created_event_version",
 	).Select(selectSchedules).
 		Suffix("ON CONFLICT (occurrence_id, rule_version_id, channel, recipient_fingerprint, schedule_kind, sequence_no, generation) DO NOTHING").ToSql()

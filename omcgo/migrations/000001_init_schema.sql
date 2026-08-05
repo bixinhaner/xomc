@@ -5154,9 +5154,16 @@ CREATE TABLE public.notification_rule_channels (
 
 CREATE TABLE public.notification_schedules (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
+    event_id uuid NOT NULL,
     occurrence_id uuid NOT NULL,
     rule_version_id uuid NOT NULL,
+    template_version_id uuid NOT NULL,
+    channel_config_id uuid NOT NULL,
     channel character varying(32) NOT NULL,
+    dispatch_kind character varying(16) NOT NULL,
+    recipient_type character varying(24) NOT NULL,
+    address_ciphertext bytea NOT NULL,
+    address_key_version integer NOT NULL,
     recipient_fingerprint bytea NOT NULL,
     schedule_kind character varying(32) NOT NULL,
     sequence_no integer DEFAULT 0 NOT NULL,
@@ -5177,9 +5184,14 @@ CREATE TABLE public.notification_schedules (
     CONSTRAINT notification_schedules_sequence_check CHECK ((sequence_no >= 0)),
     CONSTRAINT notification_schedules_generation_check CHECK ((generation > 0)),
     CONSTRAINT notification_schedules_event_version_check CHECK ((created_event_version > 0)),
+    CONSTRAINT notification_schedules_address_key_check CHECK ((address_key_version > 0)),
+    CONSTRAINT notification_schedules_dispatch_kind_check CHECK (((dispatch_kind)::text = ANY ((ARRAY['initial'::character varying, 'escalation'::character varying, 'repeat'::character varying, 'recovery'::character varying, 'digest'::character varying])::text[]))),
     CONSTRAINT notification_schedules_state_check CHECK (((state)::text = ANY ((ARRAY['pending'::character varying, 'claimed'::character varying, 'completed'::character varying, 'cancelled'::character varying])::text[]))),
+    CONSTRAINT notification_schedules_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.notification_events(event_id) ON DELETE RESTRICT,
     CONSTRAINT notification_schedules_occurrence_id_fkey FOREIGN KEY (occurrence_id) REFERENCES public.notification_occurrences(occurrence_id) ON DELETE CASCADE,
-    CONSTRAINT notification_schedules_rule_version_id_fkey FOREIGN KEY (rule_version_id) REFERENCES public.notification_rule_versions(id) ON DELETE RESTRICT
+    CONSTRAINT notification_schedules_rule_version_id_fkey FOREIGN KEY (rule_version_id) REFERENCES public.notification_rule_versions(id) ON DELETE RESTRICT,
+    CONSTRAINT notification_schedules_template_version_id_fkey FOREIGN KEY (template_version_id) REFERENCES public.notification_template_versions(id) ON DELETE RESTRICT,
+    CONSTRAINT notification_schedules_channel_config_id_fkey FOREIGN KEY (channel_config_id) REFERENCES public.notification_channel_configs(id) ON DELETE RESTRICT
 );
 
 

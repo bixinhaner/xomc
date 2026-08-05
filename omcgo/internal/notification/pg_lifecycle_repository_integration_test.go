@@ -80,19 +80,42 @@ func TestPgLifecycleRepository_Integration(t *testing.T) {
 	_, err = pool.Exec(ctx, `INSERT INTO notification_rule_versions (id,rule_id,version_no,created_by,published_at) VALUES ($1,$2,1,'integration',$3)`,
 		ruleVersionID, ruleID, now)
 	require.NoError(t, err)
-	schedule := &DomainSchedule{
-		OccurrenceID: alarm.ID, RuleVersionID: ruleVersionID, Channel: "email",
-		RecipientFingerprint: []byte("recipient"), ScheduleKind: ScheduleKindRepeat,
-		Generation: 2, DueAt: now.Add(time.Hour), CreatedEventVersion: 3,
+	templateID, templateVersionID := uuid.New(), uuid.New()
+	_, err = pool.Exec(ctx, `INSERT INTO notification_templates (id,name,channel,subject,body,created_by) VALUES ($1,$2,'email','subject','body','integration')`,
+		templateID, "lifecycle-"+templateID.String())
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO notification_template_versions (id,template_id,version_no,channel,subject,text_body,created_by,published_at) VALUES ($1,$2,1,'email','subject','body','integration',$3)`,
+		templateVersionID, templateID, now)
+	require.NoError(t, err)
+	channelConfigID := uuid.New()
+	_, err = pool.Exec(ctx, `INSERT INTO notification_channel_configs (id,channel,name,created_by) VALUES ($1,'email',$2,'integration')`,
+		channelConfigID, "lifecycle-"+channelConfigID.String())
+	require.NoError(t, err)
+	snapshotSchedule := func(eventID uuid.UUID, dispatchKind string) DomainSchedule {
+		return DomainSchedule{
+			EventID: eventID, OccurrenceID: alarm.ID, RuleVersionID: ruleVersionID,
+			TemplateVersionID: templateVersionID, ChannelConfigID: channelConfigID, Channel: "email",
+			DispatchKind: dispatchKind, RecipientType: RecipientTargetUser,
+			AddressCiphertext: []byte("encrypted"), AddressKeyVersion: 1,
+		}
 	}
+	scheduleValue := snapshotSchedule(acknowledged.EventID, DispatchKindRepeat)
+	schedule := &scheduleValue
+	schedule.RecipientFingerprint = []byte("recipient")
+	schedule.ScheduleKind = ScheduleKindRepeat
+	schedule.Generation = 2
+	schedule.DueAt = now.Add(time.Hour)
+	schedule.CreatedEventVersion = 3
 	inserted, err := NewPgScheduleRepository(pool).InsertSchedule(ctx, schedule)
 	require.NoError(t, err)
 	require.True(t, inserted)
-	initialSchedule := &DomainSchedule{
-		OccurrenceID: alarm.ID, RuleVersionID: ruleVersionID, Channel: "email",
-		RecipientFingerprint: []byte("recipient"), ScheduleKind: ScheduleKindInitialGate,
-		Generation: 2, DueAt: now.Add(time.Hour), CreatedEventVersion: 3,
-	}
+	initialValue := snapshotSchedule(acknowledged.EventID, DispatchKindInitial)
+	initialSchedule := &initialValue
+	initialSchedule.RecipientFingerprint = []byte("recipient")
+	initialSchedule.ScheduleKind = ScheduleKindInitialGate
+	initialSchedule.Generation = 2
+	initialSchedule.DueAt = now.Add(time.Hour)
+	initialSchedule.CreatedEventVersion = 3
 	inserted, err = NewPgScheduleRepository(pool).InsertSchedule(ctx, initialSchedule)
 	require.NoError(t, err)
 	require.True(t, inserted)
@@ -123,11 +146,13 @@ func TestPgLifecycleRepository_Integration(t *testing.T) {
 	require.Equal(t, int64(4), occurrence.ScheduleGeneration)
 	require.Equal(t, "cleared", occurrence.Status)
 
-	claimable := &DomainSchedule{
-		OccurrenceID: alarm.ID, RuleVersionID: ruleVersionID, Channel: "email",
-		RecipientFingerprint: []byte("digest-recipient"), ScheduleKind: ScheduleKindDigestFlush,
-		Generation: 4, DueAt: now, CreatedEventVersion: 5,
-	}
+	claimableValue := snapshotSchedule(cleared.EventID, DispatchKindDigest)
+	claimable := &claimableValue
+	claimable.RecipientFingerprint = []byte("digest-recipient")
+	claimable.ScheduleKind = ScheduleKindDigestFlush
+	claimable.Generation = 4
+	claimable.DueAt = now
+	claimable.CreatedEventVersion = 5
 	schedules := NewPgScheduleRepository(pool)
 	inserted, err = schedules.InsertSchedule(ctx, claimable)
 	require.NoError(t, err)
