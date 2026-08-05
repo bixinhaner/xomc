@@ -23,8 +23,8 @@ Playwright。
 | 3 | 已完成 | `2147c4133`、`6a3e8371b` |
 | 4 | 已完成 | `586a90099` |
 | 5 | 已完成 | `da50a3a63` |
-| 6 | 进行中 | Shadow、canonical、北向真实报文及 NATS 进程级故障恢复已在隔离环境通过；现场 2 倍峰值容量和 Shadow 回退演练仍待执行，见[本地验证记录](../reviews/2026-08-04-email-sms-milestone-a-local-validation.md) |
-| 7–14 | 未开始 | 里程碑 A 通过前不得进入 |
+| 6 | 本地开发门禁已完成 | Shadow、canonical、NATS 故障恢复、三档本机负载及模式回退均通过；生产容量门禁仍待现场数据，见[本地验证](../reviews/2026-08-04-email-sms-milestone-a-local-validation.md)与[容量回退记录](../reviews/2026-08-05-email-sms-milestone-a-capacity-rollback.md) |
+| 7–14 | 未开始 | 允许隔离本地开发；生产外发与 canonical 继续受最终门禁约束 |
 
 下文保留原始 RED/GREEN checkbox 作为实施步骤模板；是否完成以本表、提交和验证记录共同
 判断，不能只按 checkbox 推断。
