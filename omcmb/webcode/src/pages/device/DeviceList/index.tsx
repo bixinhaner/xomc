@@ -1738,13 +1738,13 @@ export default function DeviceList() {
             // #361: 告警级别 Tag 旁拼接活动告警数（如「重要 · 3」）。
             const count = record.activeAlarmCount ?? 0;
             const display = count > 0 ? `${label} · ${count}` : label;
-            // 点击告警跳转到设备详情告警 tab
+            // 点击告警跳转到设备详情当前告警 tab
             return (
               <Tag
                 color={color}
                 style={{ cursor: 'pointer' }}
                 onMouseEnter={() => prefetchDeviceDetailEntry(record)}
-                onClick={() => openDeviceDetail(record, 'alarm')}
+                onClick={() => openDeviceDetail(record, 'alarms')}
               >
                 {display}
               </Tag>
