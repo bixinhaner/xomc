@@ -212,22 +212,30 @@ sudo tar -xJf omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;.tar.xz -C /
 <h3>3.1 install-docker.sh 用法</h3>
 <pre>cd /opt/omc/infra/docker
 sudo bash install-docker.sh                         # 交互式:装完引导选加速镜像;/var &lt; 15G 询问切到 /home
-sudo bash install-docker.sh --mirror daocloud       # 一气呵成:装完直接配 DaoCloud 加速
+sudo bash install-docker.sh --mirror daocloud       # 装完直接配 DaoCloud 加速(https://docker.m.daocloud.io)
+sudo bash install-docker.sh --mirror xuanyuan       # 装完直接配轩辕加速(https://docker.xuanyuan.me)
 sudo bash install-docker.sh --mirror official       # 装完不配镜像,回归 Docker Hub 官方
 sudo bash install-docker.sh --no-mirror             # 装完不动 daemon.json,跳过加速引导
 sudo bash install-docker.sh --skip-if-installed     # 已装 docker 时静默 0 退出(脚本里调用)
+sudo bash install-docker.sh --uninstall             # 卸载 docker 引擎(dry-run,仅列 9 步计划;不动 OMC 业务数据)
+sudo bash install-docker.sh --uninstall --force     # 真删:dockerd/二进制/systemd unit + apt/yum 系统包
+sudo bash install-docker.sh --uninstall --force --keep-data  # 真删但保留数据目录,日后重装可复用镜像
 sudo bash install-docker.sh -h                      # 查看所有参数</pre>
-<p class="tip">install-docker.sh 自动:解压二进制 → 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。<br>
-<b>已装 docker 时</b>:跳过 dockerd 安装,但**仍补装** docker compose V2 + buildx plugin 到 <code>/usr/local/lib/docker/cli-plugins/</code>,解决系统 apt 装的 V1 Python compose 不识别 v3.x 写法问题。</p>
+<p class="tip">install-docker.sh 自动:解压二进制 → 断言 docker0 网段(bip <code>173.17</code>/自动池 <code>173.19</code>,避开公司 <code>172</code> 内网)→ 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。<br>
+<b>已装 docker 时</b>:跳过 dockerd 安装,但**仍补装** docker compose V2 + buildx plugin 到 <code>/usr/local/lib/docker/cli-plugins/</code>,解决系统 apt 装的 V1 Python compose 不识别 v3.x 写法问题;网段断言照跑。<br>
+<b>卸载 docker 引擎</b>用 <code>--uninstall</code>(默认 dry-run,加 <code>--force</code> 真删,<code>--keep-data</code> 保留镜像数据);它只清 docker 本身,<b>不删</b> <code>/opt/omc</code> 等 OMC 业务数据 —— 先 <code>uninstall.sh</code> 再 <code>install-docker.sh --uninstall</code>。</p>
 
 <h3>3.2 卸载 OMC（uninstall.sh）</h3>
-<p class="lead"><code>uninstall.sh</code> 只负责卸载 OMC 业务栈，不卸载 Docker 引擎。默认是 dry-run，仅列出计划；加 <code>--force</code> 才会实际执行，并会进行确认。</p>
+<p class="lead"><code>uninstall.sh</code> 只负责卸载 OMC 业务栈，不卸载 Docker 引擎（如需卸引擎见 3.1 的 <code>install-docker.sh --uninstall</code>）。默认是 dry-run，仅列出计划；加 <code>--force</code> 才会实际执行，并会进行确认。</p>
 <pre>cd /opt/omc/current/deploy
 
-sudo bash uninstall.sh                              # dry-run：卸载 OMC，保留数据
-sudo bash uninstall.sh --force                      # 真卸载 OMC，保留数据和凭据
-sudo bash uninstall.sh --purge --force              # 真卸载并删除数据卷、/opt/omc
-sudo bash uninstall.sh --purge --force --keep-data  # 兼容旧命令；--purge 仍会删除数据</pre>
+sudo bash uninstall.sh                              # dry-run：列出"保留数据"卸载计划
+sudo bash uninstall.sh --force                      # 真卸载 OMC，保留数据卷 + 凭据（可重装复用）
+sudo bash uninstall.sh --force --keep-images        # 同上但保留 omcgo/* 业务镜像
+sudo bash uninstall.sh --purge                      # dry-run：列出"彻底清除"计划
+sudo bash uninstall.sh --purge --force              # 彻底清除：删数据卷 + 整个 /opt/omc，不可恢复
+sudo bash uninstall.sh --purge --force --yes        # 跳过二次确认（CI / 批处理）
+sudo bash uninstall.sh --purge --force --keep-data  # 兼容旧命令；--keep-data 为 no-op，--purge 仍删数据</pre>
 <p class="tip"><b>默认卸载：</b>删除 OMC 容器、网络、业务镜像和代码运行目录，保留数据库、MinIO、Redis、NATS、监控数据卷，以及 <code>/opt/omc/data</code>、<code>/opt/omc/etc</code> 和凭据，便于后续重新部署。<br>
 <b>彻底清除：</b><code>--purge</code> 会连同所有 OMC 数据卷和整个 <code>/opt/omc</code> 一并删除，数据不可恢复。<code>--keep-data</code> 仅为兼容旧调用保留，不能覆盖 <code>--purge</code> 的删除行为。</p>
 
