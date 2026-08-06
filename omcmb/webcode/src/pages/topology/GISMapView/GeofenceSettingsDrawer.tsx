@@ -47,7 +47,7 @@ export default function GeofenceSettingsDrawer({
 }: GeofenceSettingsDrawerProps) {
   const intl = useIntl();
   const appContext = App.useApp();
-  const message = appContext.message?.success
+  const message = typeof (appContext.message as { success?: unknown }).success === 'function'
     ? appContext.message
     : staticMessage;
   const [form] = Form.useForm<UpdateGeofenceSettingsInput>();

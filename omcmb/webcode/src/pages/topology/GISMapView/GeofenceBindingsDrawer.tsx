@@ -71,7 +71,7 @@ export default function GeofenceBindingsDrawer({
 }: GeofenceBindingsDrawerProps) {
   const intl = useIntl();
   const appContext = App.useApp();
-  const message = appContext.message?.success
+  const message = typeof (appContext.message as { success?: unknown }).success === 'function'
     ? appContext.message
     : staticMessage;
   const [inputText, setInputText] = useState('');

@@ -390,6 +390,7 @@ func (q *RedisTaskQueue) Update(ctx context.Context, task *Task) error {
 		if getErr != nil {
 			return getErr
 		}
+		materialized := current == nil
 		if current == nil {
 			current = task
 		}
@@ -400,7 +401,17 @@ func (q *RedisTaskQueue) Update(ctx context.Context, task *Task) error {
 		if !changed {
 			return fmt.Errorf("task %s: %w", task.ID, ErrTaskNotPending)
 		}
-		return q.acknowledgeTransition(ctx, task.ID, token)
+		if err := q.acknowledgeTransition(ctx, task.ID, token); err != nil {
+			return err
+		}
+		// A terminal task materialized from durable storage is a cache repair,
+		// not a new business transition. No event publisher participates in this
+		// path, so acknowledge the synthetic event marker immediately and compact
+		// the hash to a status-only tombstone.
+		if materialized && (task.SourceID != "" || task.CreatorID != "") {
+			return q.acknowledgeTransitionEvent(ctx, task.ID, token)
+		}
+		return nil
 	}
 
 	current, err := q.GetByID(ctx, task.ID)
