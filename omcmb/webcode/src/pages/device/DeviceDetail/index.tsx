@@ -1331,6 +1331,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                     pmMetricValueFormat
                     height={220}
                     areaFill
+                    connectNulls
                   />
                 )}
               </div>

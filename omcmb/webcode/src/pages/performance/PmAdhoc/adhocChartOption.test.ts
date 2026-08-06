@@ -16,6 +16,7 @@ describe('buildAdhocChartOption', () => {
     expect(option.grid).toMatchObject({ top: 58 });
     expect(option.series).toHaveLength(20);
     expect(option.series.map((item) => item.name)).toEqual(series.map((item) => item.name));
+    expect(option.series.every((item) => item.connectNulls === true)).toBe(true);
   });
 
   it('tooltip 和 y 轴数值固定保留两位，缺值显示占位符', () => {
