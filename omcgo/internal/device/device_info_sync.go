@@ -287,6 +287,57 @@ func aggregateInstanceFields(paramValues map[string]string, fields map[string]in
 	}
 }
 
+// projectValidCellIDs 使用详情页相同的小区组装口径，投影当前有效的小区标识。
+// 列表的 cell_id 是设备级快照，不能直接保留所有历史/无效实例的聚合值。
+func projectValidCellIDs(deviceID uuid.UUID, paramValues map[string]string, tech model.Technology, productClass string) string {
+	params := make([]model.DeviceParameter, 0, len(paramValues))
+	for path, value := range paramValues {
+		params = append(params, model.DeviceParameter{
+			DeviceID:       deviceID,
+			ParameterPath:  path,
+			ParameterValue: value,
+		})
+	}
+
+	var cells []CellInfo
+	if strings.EqualFold(string(tech), "gsm") {
+		cells = AssembleGSMCells(params)
+	} else {
+		cells = AssembleCells(params, CalcNumOfCells(paramValues), productClass)
+		configuredCellCountRaw := strings.TrimSpace(paramValues["Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells"])
+		if configuredCellCountRaw == "" {
+			configuredCellCountRaw = strings.TrimSpace(paramValues["Device.Services.FAPService.1.CellConfig.NR.RAN.CA.PARAMS.NumOfCells"])
+		}
+		// NumOfCells 未上报时，不能使用 CalcNumOfCells 的默认值 1；
+		// BM 等站型通过实际 FAPService 实例数量表达有效小区数。
+		if configuredCellCountRaw != "" {
+			configuredCellCount := CalcNumOfCells(paramValues)
+			filtered := cells[:0]
+			for _, cell := range cells {
+				if cell.Index <= configuredCellCount {
+					filtered = append(filtered, cell)
+				}
+			}
+			cells = filtered
+		}
+	}
+
+	ids := make([]string, 0, len(cells))
+	seen := make(map[string]struct{}, len(cells))
+	for _, cell := range cells {
+		id := strings.TrimSpace(cell.CellID)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return strings.Join(ids, ",")
+}
+
 func fitCSVWithinLimit(value string, maxLen int) string {
 	if utf8.RuneCountInString(value) <= maxLen {
 		return value
@@ -908,6 +959,9 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	// 必须在所有 carrier mapping + universalInformMapping 写入之后执行,
 	// 单实例设备聚合结果与之前单值等价,多实例设备 list 直接显示 csv 串。
 	aggregateInstanceFields(paramValues, fields)
+	if validCellIDs := projectValidCellIDs(deviceID, paramValues, tech, productClass); validCellIDs != "" {
+		fields["cell_id"] = validCellIDs
+	}
 	frequencyProjection := projectRadioFrequencyFields(paramValues, tech, productClass)
 	if frequencyProjection.dlObserved {
 		fields["freq_point"] = frequencyProjection.dlValue
