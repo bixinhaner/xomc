@@ -227,7 +227,7 @@ describe('buildMetricCharts — 转置', () => {
     expect(buildMetricCharts([], 'network', 'hourly')).toEqual([]);
   });
 
-  it('daily/weekly 进行中行不会进入图表点、图例和 tooltip 桶', () => {
+  it('daily/weekly 进行中行与首页一致进入图表点、图例和 tooltip 桶', () => {
     const rows = [
       row({
         metricPath: 'M1',
@@ -249,8 +249,13 @@ describe('buildMetricCharts — 转置', () => {
       }),
     ];
 
-    expect(buildMetricCharts(rows, 'network', 'daily')).toEqual([]);
-    expect(buildMetricCharts(rows, 'network', 'weekly')).toEqual([]);
+    const daily = buildMetricCharts(rows, 'network', 'daily');
+    const weekly = buildMetricCharts(rows, 'network', 'weekly');
+
+    expect(daily).toHaveLength(1);
+    expect(daily[0].series[0].values).toEqual([99]);
+    expect(weekly).toHaveLength(1);
+    expect(weekly[0].series[0].values).toEqual([88]);
   });
 
   it('正式 daily rows 可以正常出图', () => {
