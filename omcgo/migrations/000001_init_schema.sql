@@ -19565,7 +19565,11 @@ ALTER TABLE public.pm_aggregation_task_versions
 CREATE INDEX idx_pm_aggregation_task_versions_content_hash
     ON public.pm_aggregation_task_versions (task_id, content_hash);
 
-CREATE TABLE public.plug_and_play_policies (
+-- +omcgo MainReconcileBegin
+-- Existing pre-release databases may already record goose version 1 while
+-- missing this consolidated additive block. Keep it idempotent so migrate can
+-- replay it after the seed baseline without rebuilding the database.
+CREATE TABLE IF NOT EXISTS public.plug_and_play_policies (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     name varchar(100) NOT NULL,
     enabled boolean NOT NULL DEFAULT false,
@@ -19585,13 +19589,13 @@ CREATE TABLE public.plug_and_play_policies (
         CHECK (execute_type IN ('auto', 'manual'))
 );
 
-CREATE INDEX idx_plug_and_play_policies_match
+CREATE INDEX IF NOT EXISTS idx_plug_and_play_policies_match
     ON public.plug_and_play_policies (enabled, product_class, priority, created_at);
 
-CREATE INDEX idx_plug_and_play_policies_product_classes
+CREATE INDEX IF NOT EXISTS idx_plug_and_play_policies_product_classes
     ON public.plug_and_play_policies USING gin (product_classes);
 
-CREATE TABLE public.provisioning_xml_files (
+CREATE TABLE IF NOT EXISTS public.provisioning_xml_files (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     policy_id uuid NOT NULL REFERENCES public.plug_and_play_policies(id),
     device_id uuid NOT NULL,
@@ -19602,17 +19606,18 @@ CREATE TABLE public.provisioning_xml_files (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_provisioning_xml_files_device
+CREATE INDEX IF NOT EXISTS idx_provisioning_xml_files_device
     ON public.provisioning_xml_files (device_id, created_at DESC);
 
 ALTER TABLE public.provisioning_tasks
-    ADD COLUMN policy_id uuid REFERENCES public.plug_and_play_policies(id),
-    ADD COLUMN xml_file_id uuid REFERENCES public.provisioning_xml_files(id),
-    ADD COLUMN device_task_id uuid,
-    ADD COLUMN current_step_name varchar(64);
+    ADD COLUMN IF NOT EXISTS policy_id uuid REFERENCES public.plug_and_play_policies(id),
+    ADD COLUMN IF NOT EXISTS xml_file_id uuid REFERENCES public.provisioning_xml_files(id),
+    ADD COLUMN IF NOT EXISTS device_task_id uuid,
+    ADD COLUMN IF NOT EXISTS current_step_name varchar(64);
 
-CREATE INDEX idx_provisioning_tasks_policy
+CREATE INDEX IF NOT EXISTS idx_provisioning_tasks_policy
     ON public.provisioning_tasks (policy_id);
+-- +omcgo MainReconcileEnd
 
 
 -- Consolidated from pre-release baseline-only migrations: main schema 000002-000005
@@ -19709,7 +19714,29 @@ CREATE INDEX IF NOT EXISTS storage_protection_events_target_time_idx
     ON public.storage_protection_events (target_type, target_id, write_scope, created_at DESC);
 -- Consolidated pre-release geofence Observe schema.
 
-CREATE TABLE public.geofence_carrier_settings (
+-- +omcgo MainReconcileBegin
+ALTER TABLE public.devices
+    ADD COLUMN IF NOT EXISTS location_source_mode varchar(16)
+        NOT NULL DEFAULT 'tr069';
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.devices'::regclass
+          AND conname = 'devices_location_source_mode_check'
+    ) THEN
+        ALTER TABLE public.devices
+            ADD CONSTRAINT devices_location_source_mode_check
+            CHECK (location_source_mode IN ('tr069', 'external'));
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+CREATE TABLE IF NOT EXISTS public.geofence_carrier_settings (
     carrier varchar(16) PRIMARY KEY,
     mode varchar(16) NOT NULL DEFAULT 'off',
     default_baseline_radius_meters double precision NOT NULL DEFAULT 100,
@@ -19722,7 +19749,7 @@ CREATE TABLE public.geofence_carrier_settings (
             AND default_baseline_radius_meters <= 50000)
 );
 
-CREATE TABLE public.geofence_definitions (
+CREATE TABLE IF NOT EXISTS public.geofence_definitions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name varchar(128) NOT NULL,
     carrier varchar(16) NOT NULL,
@@ -19745,15 +19772,15 @@ CREATE TABLE public.geofence_definitions (
     )
 );
 
-CREATE UNIQUE INDEX uq_geofence_definitions_carrier_name
+CREATE UNIQUE INDEX IF NOT EXISTS uq_geofence_definitions_carrier_name
     ON public.geofence_definitions (carrier, lower(name))
     WHERE status <> 'archived';
 
-CREATE UNIQUE INDEX uq_geofence_definitions_baseline_owner
+CREATE UNIQUE INDEX IF NOT EXISTS uq_geofence_definitions_baseline_owner
     ON public.geofence_definitions (owner_device_id)
     WHERE rule_type = 'baseline_radius' AND status <> 'archived';
 
-CREATE TABLE public.geofence_versions (
+CREATE TABLE IF NOT EXISTS public.geofence_versions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     geofence_id uuid NOT NULL
         REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
@@ -19781,12 +19808,25 @@ CREATE TABLE public.geofence_versions (
     CONSTRAINT uq_geofence_versions_number UNIQUE (geofence_id, version)
 );
 
-ALTER TABLE public.geofence_definitions
-    ADD CONSTRAINT geofence_definitions_current_version_fk
-    FOREIGN KEY (current_version_id)
-    REFERENCES public.geofence_versions(id) ON DELETE RESTRICT;
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.geofence_definitions'::regclass
+          AND conname = 'geofence_definitions_current_version_fk'
+    ) THEN
+        ALTER TABLE public.geofence_definitions
+            ADD CONSTRAINT geofence_definitions_current_version_fk
+            FOREIGN KEY (current_version_id)
+            REFERENCES public.geofence_versions(id) ON DELETE RESTRICT;
+    END IF;
+END
+$$;
+-- +goose StatementEnd
 
-CREATE TABLE public.device_geofence_bindings (
+CREATE TABLE IF NOT EXISTS public.device_geofence_bindings (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     device_id uuid NOT NULL,
     geofence_id uuid NOT NULL
@@ -19807,14 +19847,14 @@ CREATE TABLE public.device_geofence_bindings (
         CHECK (bind_source IN ('manual', 'auto'))
 );
 
-CREATE UNIQUE INDEX uq_device_geofence_active_rule_type
+CREATE UNIQUE INDEX IF NOT EXISTS uq_device_geofence_active_rule_type
     ON public.device_geofence_bindings (device_id, rule_type)
     WHERE status = 'active';
 
-CREATE INDEX idx_device_geofence_bindings_geofence
+CREATE INDEX IF NOT EXISTS idx_device_geofence_bindings_geofence
     ON public.device_geofence_bindings (geofence_id, status);
 
-CREATE TABLE public.device_geofence_states (
+CREATE TABLE IF NOT EXISTS public.device_geofence_states (
     binding_id uuid PRIMARY KEY
         REFERENCES public.device_geofence_bindings(id) ON DELETE RESTRICT,
     device_id uuid NOT NULL,
@@ -19838,10 +19878,10 @@ CREATE TABLE public.device_geofence_states (
     CONSTRAINT device_geofence_states_version_check CHECK (state_version > 0)
 );
 
-CREATE INDEX idx_device_geofence_states_device
+CREATE INDEX IF NOT EXISTS idx_device_geofence_states_device
     ON public.device_geofence_states (device_id);
 
-CREATE TABLE public.device_geofence_effective_states (
+CREATE TABLE IF NOT EXISTS public.device_geofence_effective_states (
     device_id uuid PRIMARY KEY,
     effective_state varchar(16) NOT NULL DEFAULT 'unmanaged',
     required_action_level varchar(16) NOT NULL DEFAULT 'none',
@@ -19862,7 +19902,7 @@ CREATE TABLE public.device_geofence_effective_states (
     CONSTRAINT device_geofence_effective_version_check CHECK (state_version > 0)
 );
 
-CREATE TABLE public.geofence_control_actions (
+CREATE TABLE IF NOT EXISTS public.geofence_control_actions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     action_key varchar(255) NOT NULL UNIQUE,
     parent_action_id uuid
@@ -19899,19 +19939,19 @@ CREATE TABLE public.geofence_control_actions (
         CHECK (jsonb_typeof(verified_state) = 'array')
 );
 
-CREATE INDEX idx_geofence_control_actions_device_time
+CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_device_time
     ON public.geofence_control_actions (device_id, created_at DESC);
 
-CREATE INDEX idx_geofence_control_actions_status
+CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_status
     ON public.geofence_control_actions (status, updated_at)
     WHERE status IN ('pending', 'executing', 'verifying');
 
 ALTER TABLE public.device_location_observations
-    ADD COLUMN received_at timestamptz,
-    ADD COLUMN device_reported_at timestamptz,
-    ADD COLUMN gps_lock_status varchar(32),
-    ADD COLUMN satellite_count integer,
-    ADD COLUMN accuracy_meters double precision;
+    ADD COLUMN IF NOT EXISTS received_at timestamptz,
+    ADD COLUMN IF NOT EXISTS device_reported_at timestamptz,
+    ADD COLUMN IF NOT EXISTS gps_lock_status varchar(32),
+    ADD COLUMN IF NOT EXISTS satellite_count integer,
+    ADD COLUMN IF NOT EXISTS accuracy_meters double precision;
 
 UPDATE public.device_location_observations
 SET received_at = observed_at
@@ -19921,13 +19961,34 @@ ALTER TABLE public.device_location_observations
     ALTER COLUMN received_at SET DEFAULT now(),
     ALTER COLUMN received_at SET NOT NULL;
 
-ALTER TABLE public.device_location_observations
-    ADD CONSTRAINT device_location_observations_satellite_count_check
-        CHECK (satellite_count IS NULL OR satellite_count >= 0),
-    ADD CONSTRAINT device_location_observations_accuracy_check
-        CHECK (accuracy_meters IS NULL OR accuracy_meters >= 0);
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.device_location_observations'::regclass
+          AND conname = 'device_location_observations_satellite_count_check'
+    ) THEN
+        ALTER TABLE public.device_location_observations
+            ADD CONSTRAINT device_location_observations_satellite_count_check
+            CHECK (satellite_count IS NULL OR satellite_count >= 0);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.device_location_observations'::regclass
+          AND conname = 'device_location_observations_accuracy_check'
+    ) THEN
+        ALTER TABLE public.device_location_observations
+            ADD CONSTRAINT device_location_observations_accuracy_check
+            CHECK (accuracy_meters IS NULL OR accuracy_meters >= 0);
+    END IF;
+END
+$$;
+-- +goose StatementEnd
 
-CREATE TABLE public.event_outbox (
+CREATE TABLE IF NOT EXISTS public.event_outbox (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     aggregate_type varchar(64) NOT NULL,
     aggregate_id varchar(160) NOT NULL,
@@ -19954,11 +20015,11 @@ CREATE TABLE public.event_outbox (
     )
 );
 
-CREATE INDEX idx_event_outbox_claimable
+CREATE INDEX IF NOT EXISTS idx_event_outbox_claimable
     ON public.event_outbox (status, next_attempt_at, claim_expires_at, created_at)
     WHERE status IN ('pending', 'failed', 'publishing');
 
-CREATE TABLE public.geofence_evaluations (
+CREATE TABLE IF NOT EXISTS public.geofence_evaluations (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     binding_id uuid NOT NULL
         REFERENCES public.device_geofence_bindings(id) ON DELETE RESTRICT,
@@ -20027,18 +20088,31 @@ CREATE TABLE public.geofence_evaluations (
         UNIQUE (binding_id, geofence_version_id, observation_version)
 );
 
-CREATE INDEX idx_geofence_evaluations_device_time
+CREATE INDEX IF NOT EXISTS idx_geofence_evaluations_device_time
     ON public.geofence_evaluations (device_id, evaluated_at DESC);
 
-CREATE INDEX idx_geofence_evaluations_status_time
+CREATE INDEX IF NOT EXISTS idx_geofence_evaluations_status_time
     ON public.geofence_evaluations (status, evaluated_at DESC);
 
-ALTER TABLE public.device_geofence_states
-    ADD CONSTRAINT device_geofence_states_last_evaluation_fk
-    FOREIGN KEY (last_evaluation_id)
-    REFERENCES public.geofence_evaluations(id) ON DELETE RESTRICT;
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.device_geofence_states'::regclass
+          AND conname = 'device_geofence_states_last_evaluation_fk'
+    ) THEN
+        ALTER TABLE public.device_geofence_states
+            ADD CONSTRAINT device_geofence_states_last_evaluation_fk
+            FOREIGN KEY (last_evaluation_id)
+            REFERENCES public.geofence_evaluations(id) ON DELETE RESTRICT;
+    END IF;
+END
+$$;
+-- +goose StatementEnd
 
-CREATE TABLE public.geofence_batch_items (
+CREATE TABLE IF NOT EXISTS public.geofence_batch_items (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     job_id uuid NOT NULL
         REFERENCES public.async_jobs(id) ON DELETE RESTRICT,
@@ -20071,17 +20145,17 @@ CREATE TABLE public.geofence_batch_items (
     CONSTRAINT uq_geofence_batch_items_job_input UNIQUE (job_id, input_key)
 );
 
-CREATE UNIQUE INDEX uq_geofence_batch_items_job_device
+CREATE UNIQUE INDEX IF NOT EXISTS uq_geofence_batch_items_job_device
     ON public.geofence_batch_items (job_id, device_id)
     WHERE device_id IS NOT NULL;
 
-CREATE INDEX idx_geofence_batch_items_job_status
+CREATE INDEX IF NOT EXISTS idx_geofence_batch_items_job_status
     ON public.geofence_batch_items (job_id, status, created_at, id);
 
-CREATE INDEX idx_geofence_batch_items_geofence_status
+CREATE INDEX IF NOT EXISTS idx_geofence_batch_items_geofence_status
     ON public.geofence_batch_items (geofence_id, status);
 
-CREATE TABLE public.third_party_location_batches (
+CREATE TABLE IF NOT EXISTS public.third_party_location_batches (
     idempotency_key varchar(255) PRIMARY KEY,
     request_hash char(64) NOT NULL,
     status varchar(16) NOT NULL,
@@ -20095,10 +20169,10 @@ CREATE TABLE public.third_party_location_batches (
         CHECK (status <> 'completed' OR result IS NOT NULL)
 );
 
-CREATE INDEX idx_third_party_location_batches_created_at
+CREATE INDEX IF NOT EXISTS idx_third_party_location_batches_created_at
     ON public.third_party_location_batches (created_at);
 
-CREATE UNIQUE INDEX uq_async_jobs_geofence_manual_bind_request
+CREATE UNIQUE INDEX IF NOT EXISTS uq_async_jobs_geofence_manual_bind_request
     ON public.async_jobs (
         job_type,
         (payload->>'geofence_id'),
@@ -20107,6 +20181,55 @@ CREATE UNIQUE INDEX uq_async_jobs_geofence_manual_bind_request
     )
     WHERE job_type = 'geofence_manual_bind'
       AND status IN ('pending', 'running', 'succeeded');
+
+-- +goose StatementBegin
+DO $$
+DECLARE
+    required_relation text;
+BEGIN
+    FOREACH required_relation IN ARRAY ARRAY[
+        'public.geofence_carrier_settings',
+        'public.geofence_definitions',
+        'public.geofence_versions',
+        'public.device_geofence_bindings',
+        'public.device_geofence_states',
+        'public.device_geofence_effective_states',
+        'public.geofence_control_actions',
+        'public.event_outbox',
+        'public.geofence_evaluations',
+        'public.geofence_batch_items',
+        'public.third_party_location_batches'
+    ] LOOP
+        IF to_regclass(required_relation) IS NULL THEN
+            RAISE EXCEPTION 'main baseline reconcile missing relation %', required_relation;
+        END IF;
+    END LOOP;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'devices'
+          AND column_name = 'location_source_mode'
+    ) THEN
+        RAISE EXCEPTION 'main baseline reconcile missing devices.location_source_mode';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'provisioning_tasks'
+          AND column_name = 'policy_id'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'provisioning_tasks'
+          AND column_name = 'current_step_name'
+    ) THEN
+        RAISE EXCEPTION 'main baseline reconcile missing provisioning task columns';
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+-- +omcgo MainReconcileEnd
 
 
 -- +goose Down

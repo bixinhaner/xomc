@@ -26537,6 +26537,7 @@ WHERE tt.type_code = scope.type_code;
 
 -- Consolidated pre-release geofence defaults and administrator permissions.
 
+-- +omcgo MainReconcileBegin
 INSERT INTO public.sys_configs (
     id, category, key, value, value_type, description, is_public,
     created_at, updated_at, description_i18n
@@ -26888,6 +26889,7 @@ WHERE endpoint.id IN (
     '6d1f0b32-37ac-4e58-98e8-32a90c648ec7'::uuid
 )
 ON CONFLICT DO NOTHING;
+-- +omcgo MainReconcileEnd
 
 
 -- Consolidated from the pre-release storage protection menu seed migration.
@@ -26930,6 +26932,7 @@ ON CONFLICT (role_id, menu_id) DO NOTHING;
 
 -- GIS 电子围栏按钮权限。系统开关决定入口是否存在；这两个权限只决定
 -- 已开启时谁可以查看、谁可以执行配置变更。
+-- +omcgo MainReconcileBegin
 INSERT INTO public.menus (
     id, name, type, permission_key, parent_id, sort_order, route_path,
     component_path, icon, show_status, status, name_i18n
@@ -26983,6 +26986,7 @@ VALUES
         '6d1f0b32-37ac-4e58-98e8-32a90c648ed2'
     )
 ON CONFLICT (role_id, menu_id) DO NOTHING;
+-- +omcgo MainReconcileEnd
 
 COMMIT;
 

@@ -12,7 +12,7 @@ func TestGeofenceCoordinatorMigrationContract(t *testing.T) {
 	require.NoError(t, err)
 	sql := string(contents)
 
-	require.Contains(t, sql, "CREATE TABLE public.geofence_evaluations")
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS public.geofence_evaluations")
 	for _, column := range []string{
 		"binding_id",
 		"device_id",
@@ -70,7 +70,7 @@ func TestGeofenceControlSchemaKeepsOneMinimalOwnershipTable(t *testing.T) {
 	require.NoError(t, err)
 	sql := string(contents)
 
-	require.Contains(t, sql, "CREATE TABLE public.geofence_control_actions")
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS public.geofence_control_actions")
 	for _, evidenceColumn := range []string{
 		"action_key varchar(255)",
 		"parent_action_id uuid",

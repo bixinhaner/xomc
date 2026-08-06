@@ -20,7 +20,7 @@ func TestGeofenceBatchMigrationContract(t *testing.T) {
 	sql := string(contents)
 
 	require.Contains(t, sql, "-- +goose Up")
-	require.Contains(t, sql, "CREATE TABLE public.geofence_batch_items")
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS public.geofence_batch_items")
 	require.Contains(t, sql, "REFERENCES public.async_jobs(id) ON DELETE RESTRICT")
 	require.Contains(t, sql, "CHECK (status IN ('pending', 'succeeded', 'skipped', 'failed'))")
 	require.Contains(t, sql, "UNIQUE (job_id, input_key)")
@@ -157,6 +157,7 @@ ORDER BY ordinal_position`)
 		{"status", "character varying", "varchar", "NO", "'pending'::charactervarying"},
 		{"reason_code", "character varying", "varchar", "YES", ""},
 		{"error_message", "text", "text", "YES", ""},
+		{"expected_source_binding_id", "uuid", "uuid", "YES", ""},
 		{"binding_id", "uuid", "uuid", "YES", ""},
 		{"attempt", "integer", "int4", "NO", "0"},
 		{"started_at", "timestamp with time zone", "timestamptz", "YES", ""},
@@ -219,6 +220,7 @@ ORDER BY source_attribute.attname`)
 	require.NoError(t, rows.Err())
 	require.Equal(t, []geofenceBatchForeignKeySpec{
 		{"binding_id", "public", "device_geofence_bindings", "id", "r"},
+		{"expected_source_binding_id", "public", "device_geofence_bindings", "id", "r"},
 		{"geofence_id", "public", "geofence_definitions", "id", "r"},
 		{"job_id", "public", "async_jobs", "id", "r"},
 	}, actual)
