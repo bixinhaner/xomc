@@ -71,3 +71,13 @@ export function inferDeviceTimeMode(
   }
   return hasNtpServers ? '1' : '0';
 }
+
+export function shouldShowDeviceTimeNtpServerFields(
+  networkType: string | undefined,
+  modeValue: string | undefined,
+): boolean {
+  if (!isNrNetworkType(networkType)) return true;
+
+  const normalized = String(modeValue ?? '').trim().toLowerCase();
+  return normalized !== '0' && normalized !== 'server';
+}
