@@ -948,8 +948,9 @@ const renderCellAdminState = (
   t: ReturnType<typeof useT>,
 ) => {
   return renderStatusTag(value, {
-    '1': { label: t('status.locked'), color: 'warning' },
-    '0': { label: t('status.unlocked'), color: 'success' },
+    // CellEnable.AdminState: 1 = 未锁定，0 = 锁定。
+    '1': { label: t('status.unlocked'), color: 'success' },
+    '0': { label: t('status.locked'), color: 'warning' },
     '2': { label: t('status.unlocked'), color: 'success' },
     '3': { label: t('status.shuttingDown'), color: 'error' },
     true: { label: t('status.locked'), color: 'warning' },
