@@ -682,6 +682,13 @@ export function buildDeviceRows(
 
 const upperOp = (d?: MMLTaskCommandDetail): string => (d?.operationType ?? '').toString().toUpperCase();
 
+function comparableMODValue(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return '1';
+  if (normalized === 'false' || normalized === '0') return '0';
+  return value;
+}
+
 /**
  * #196：MOD 自动回读复合（SetParameterValues 下发 + GetParameterValues 回读）→ 每设备一行。
  * 把「下发值（命令 paramValues）」与「回读值（回读 LST 结果）」按 path 关联成 verify 对比，
@@ -770,7 +777,9 @@ export function buildMODReadbackRows(
     let status: ExecStatus = 'success';
     if (!modOk) status = 'failed';
     else if (!hasReadback) status = 'unverified';
-    else if (Object.keys(setValues).some((p) => readVal(p) !== setValues[p])) status = 'mismatch';
+    else if (Object.keys(setValues).some((p) => (
+      comparableMODValue(readVal(p)) !== comparableMODValue(setValues[p])
+    ))) status = 'mismatch';
 
     rows.push({
       commandName: commandMeta?.commandName ?? firstMod?.commandName,

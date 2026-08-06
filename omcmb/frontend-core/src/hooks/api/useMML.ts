@@ -109,6 +109,7 @@ export function useMMLScriptRuns(scriptId: string, params: PageRequest) {
 }
 
 export function useExecuteMMLCommand() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
       commandCode,
@@ -121,6 +122,7 @@ export function useExecuteMMLCommand() {
       params?: Record<string, unknown>;
       payload?: Record<string, unknown>;
     }) => (payload ? api.executeCommand(payload) : api.executeCommand(commandCode!, deviceSns!, params)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] }),
   });
 }
 

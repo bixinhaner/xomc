@@ -203,6 +203,24 @@ func xsdType(valueType string) string {
 	}
 }
 
+// xsdTypeForPath applies device compatibility overrides to the SOAP wire type.
+// The Baicells SignallingTrace implementation accepts Enable only when the
+// numeric boolean value is sent as xsd:string (the standard xsd:boolean form
+// is acknowledged but not applied by the device).
+func xsdTypeForPath(path, valueType string) string {
+	if path == "Device.DeviceInfo.SignallingTrace.Enable" {
+		return "xsd:string"
+	}
+	return xsdType(valueType)
+}
+
+func normalizeTR069ValueForPath(path, value, valueType string) string {
+	if path == "Device.DeviceInfo.SignallingTrace.Enable" {
+		return normalizeTR069Value(value, "boolean")
+	}
+	return normalizeTR069Value(value, valueType)
+}
+
 // buildParameterNames 收集所有 paramRefs 的 tr069_path → {"names":[...]}。
 // LST/DSP 不依赖 formValues：用户在控制台不填表单，命令的 param_refs 即为读取范围。
 //
@@ -295,9 +313,12 @@ func buildParameterValues(paramRefs []MMLParamRef, formValues map[string]interfa
 			continue
 		}
 		values = append(values, valueEntry{
-			Name:  path,
-			Value: strVal,
-			Type:  xsdType(ref.ValueType),
+			Name: path,
+			// TR-069 的 xsd:boolean 允许 true/false 和 1/0，部分基站（包括
+			// SignallingTrace.Enable）只接受数字字面量。统一在协议边界编码为
+			// 0/1，避免把标准参数的 boolean 语义泄漏成厂商不兼容的 true/false。
+			Value: normalizeTR069ValueForPath(path, strVal, ref.ValueType),
+			Type:  xsdTypeForPath(path, ref.ValueType),
 		})
 	}
 
@@ -571,6 +592,22 @@ func stringifyValue(v interface{}) (string, bool) {
 		return fmt.Sprintf("%d", x), false
 	default:
 		return fmt.Sprintf("%v", v), false
+	}
+}
+
+// normalizeTR069Value 规范化需要兼容基站数字布尔约定的协议值。
+// 输入可能来自前端表单（"true"/"false"）、JSON bool 或历史脚本（"1"/"0"）。
+func normalizeTR069Value(value, valueType string) string {
+	if strings.ToLower(strings.TrimSpace(valueType)) != "boolean" {
+		return value
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1":
+		return "1"
+	case "false", "0":
+		return "0"
+	default:
+		return value
 	}
 }
 
