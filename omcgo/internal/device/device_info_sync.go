@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -461,6 +462,11 @@ var gpsHeightCandidatePaths = []string{
 	"Device.FAP.GPS.Height",
 }
 
+var gpsSatelliteCountCandidatePaths = []string{
+	"Device.FAP.GPS.NumberOfSatellites",
+	"Device.DeviceInfo.SAS.FAP.GPS.NumberOfSatellites",
+}
+
 const (
 	gpsLockedLatitudePath  = "Device.FAP.GPS.LockedLatitude"
 	gpsLockedLongitudePath = "Device.FAP.GPS.LockedLongitude"
@@ -484,6 +490,21 @@ func deriveEnbID(eci string) (string, bool) {
 		return "", false
 	}
 	return strconv.FormatInt(eciInt>>8, 10), true
+}
+
+func lookupGPSSatelliteCount(paramValues map[string]string) *int {
+	for _, path := range gpsSatelliteCountCandidatePaths {
+		raw := strings.TrimSpace(paramValues[path])
+		if raw == "" {
+			continue
+		}
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 {
+			continue
+		}
+		return &value
+	}
+	return nil
 }
 
 // deriveNetworkModel 根据 PHY 子帧 path 是否存在判定 TDD / FDD。
@@ -961,20 +982,37 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	}
 
 	if hasCoordinates {
+		receivedAt := time.Now().UTC()
+		locationAccepted := true
+		gpsLockStatus := CalcGPSStatus(paramValues)
 		observation := ReportedLocation{
-			Latitude:   latitude,
-			Longitude:  longitude,
-			GPSHeight:  reportedGPSHeight,
-			ObservedAt: time.Now(),
-			SourcePath: sourcePath,
+			Latitude:       latitude,
+			Longitude:      longitude,
+			GPSHeight:      reportedGPSHeight,
+			GPSLockStatus:  &gpsLockStatus,
+			SatelliteCount: lookupGPSSatelliteCount(paramValues),
+			ObservedAt:     receivedAt,
+			ReceivedAt:     receivedAt,
+			SourcePath:     sourcePath,
 		}
 		if s.locationObservationRepo != nil {
-			if err := s.locationObservationRepo.UpsertLatest(ctx, deviceID, observation); err != nil {
+			if _, err := s.locationObservationRepo.SaveLatestWithOutbox(
+				ctx,
+				deviceID,
+				observation,
+			); errors.Is(err, ErrLocationSourceNotAllowed) {
+				locationAccepted = false
+				s.logger.Debug(
+					"ignored device GPS for external positioning mode",
+					zap.String("device_id", deviceID.String()),
+					zap.String("source_path", sourcePath),
+				)
+			} else if err != nil {
 				return nil, fmt.Errorf("update reported GPS coordinates: %w", err)
 			}
 		}
 
-		if s.coordinateWriter != nil {
+		if locationAccepted && s.coordinateWriter != nil {
 			var accepted *Location
 			if reader, ok := s.coordinateWriter.(DeviceCoordinateReader); ok {
 				var err error

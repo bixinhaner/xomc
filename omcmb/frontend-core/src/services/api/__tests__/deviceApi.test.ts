@@ -84,9 +84,23 @@ describe('deviceApi.getList — filter → query 映射', () => {
 		});
 
 		const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+		expect(out.items[0].locationSourceMode).toBe('tr069');
 		expect(out.items[0].locationSync.status).toBe('pending');
 		expect(out.items[0].locationSync.reported?.version).toBe(8);
 		expect(out.items[0].locationSync.distanceMeters).toBe(146);
+	});
+
+	it('映射并提交设备位置来源模式', async () => {
+		getMock.mockResolvedValueOnce({ data: backendDevice({ location_source_mode: 'external' }) });
+		const device = await deviceApi.getById('d1');
+		expect(device?.locationSourceMode).toBe('external');
+
+		putMock.mockResolvedValueOnce({ data: backendDevice({ location_source_mode: 'external' }) });
+		getMock.mockResolvedValueOnce({ data: backendDevice({ location_source_mode: 'external' }) });
+		await deviceApi.update('d1', { locationSourceMode: 'external' });
+		expect(putMock).toHaveBeenCalledWith('/devices/d1', {
+			location_source_mode: 'external',
+		});
 	});
 
 	it('确认 GPS 同步提交 reported_version', async () => {

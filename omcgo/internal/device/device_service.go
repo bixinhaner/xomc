@@ -2196,6 +2196,16 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, id uuid.UUID, req Upda
 	if req.Longitude != nil {
 		device.Longitude = req.Longitude
 	}
+	if req.LocationSourceMode != nil {
+		if !req.LocationSourceMode.Valid() {
+			return nil, fmt.Errorf(
+				"invalid location source mode %q: %w",
+				*req.LocationSourceMode,
+				commonerrors.ErrInvalidInput,
+			)
+		}
+		device.LocationSourceMode = *req.LocationSourceMode
+	}
 	if req.Status != nil {
 		device.Status = *req.Status
 	}

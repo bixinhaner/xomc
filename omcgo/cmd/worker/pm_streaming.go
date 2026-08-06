@@ -9,6 +9,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/geofence"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	pmexport "github.com/omcgo/omcgo/internal/pm/export"
@@ -301,6 +302,19 @@ func startPMExportOnly(
 	})
 	registry.Register(exportRunner)
 	go runJobTypeWorker(ctx, registry, exportRunner.JobType(), logger)
+	geofenceRepository := geofence.NewPgRepository(w.PgPool)
+	geofenceMetrics := geofence.NewBatchMetrics(w.MetricsReg)
+	geofenceRunner := registerGeofenceManualBindRunner(
+		registry,
+		geofenceRepository,
+		geofenceMetrics,
+	)
+	go runJobTypeWorker(
+		ctx,
+		registry,
+		geofenceRunner.JobType(),
+		logger.Named("geofence-batch"),
+	)
 	sweeperInterval, zombieThreshold := loadAsyncJobThresholds(ctx, w.PgPool, logger)
 	sweeper := asyncjob.NewSweeper(jobRepo, sweeperInterval, zombieThreshold, logger)
 	sweeper.SetMetrics(asyncMetrics)
@@ -313,4 +327,14 @@ func startPMExportOnly(
 	startStationLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
 	startLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
 	logger.Info("PM KPI export worker ready", zap.String("bucket", exportBucket))
+}
+
+func registerGeofenceManualBindRunner(
+	registry *asyncjob.Registry,
+	repository geofence.ManualBindRunnerRepository,
+	metrics *geofence.BatchMetrics,
+) *geofence.ManualBindRunner {
+	runner := geofence.NewManualBindRunner(repository, metrics)
+	registry.Register(runner)
+	return runner
 }

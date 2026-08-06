@@ -27,11 +27,14 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	coreoutbox "github.com/omcgo/omcgo/internal/core/outbox"
 	"github.com/omcgo/omcgo/internal/core/rawarchive"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/geofence"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrcollector "github.com/omcgo/omcgo/internal/mr/collector"
 	"github.com/omcgo/omcgo/internal/notification"
@@ -184,6 +187,32 @@ func startPendingQueueRestore(
 
 func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	logger := w.Logger
+
+	eventOutboxRepo := coreoutbox.NewPgRelayRepository(storage.NewPoolDB(w.PgPool))
+	stopEventOutboxRelay, err := startEventOutboxRelay(
+		context.Background(),
+		eventOutboxRepo,
+		w.EventBus,
+		logger,
+	)
+	if err != nil {
+		logger.Fatal("start generic event outbox relay", zap.Error(err))
+	}
+	w.GS.Register("event-outbox-relay", 1, func(context.Context) error {
+		stopEventOutboxRelay()
+		return nil
+	})
+
+	stopGeofenceCoordinator, err := startGeofenceCoordinator(
+		storage.NewPoolDB(w.PgPool),
+		w.EventBus,
+	)
+	if err != nil {
+		logger.Fatal("start geofence coordinator", zap.Error(err))
+	}
+	w.GS.Register("geofence-coordinator", 1, func(context.Context) error {
+		return stopGeofenceCoordinator()
+	})
 
 	// L-10：worker 端也注入 audit sink，让 Sweeper 自动 stop / Exporter 异步导出
 	// 等系统级操作能写 audit_logs（actor=system，与 handler 的 actor=username 区分）。
@@ -380,6 +409,31 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	emailDispatcher := alarm.NewSMTPEmailDispatcher(emailCfg, logger.Named("email"), emailMetrics)
 	filterEngine.SetEmailDispatcher(emailDispatcher)
 	alarmEngine.SetFilterEngine(filterEngine)
+
+	geofenceAlarmMonitor := alarm.NewGeofenceAlarmMonitor(alarmEngine, logger)
+	if err := geofenceAlarmMonitor.Subscribe(w.EventBus); err != nil {
+		logger.Warn("subscribe geofence alarm monitor", zap.Error(err))
+	}
+	logger.Info("geofence alarm monitor started")
+
+	geofenceControlMonitor := geofence.NewGeofenceControlMonitor(
+		device.NewPgDeviceRepository(w.PgPool),
+		w.Carriers,
+		w.TaskService,
+		logger.Named("geofence-control"),
+	)
+	geofenceControlMonitor.SetParameterReader(
+		device.NewPgDeviceParameterRepository(w.PgPool),
+	)
+	geofenceControlMonitor.SetTaskHistoryReader(w.TaskRepo)
+	geofenceControlMonitor.SetActionRepository(
+		geofence.NewPgControlActionRepository(w.PgPool),
+	)
+	if err := geofenceControlMonitor.Subscribe(w.EventBus); err != nil {
+		logger.Warn("subscribe geofence control monitor", zap.Error(err))
+	} else {
+		logger.Info("geofence control monitor started")
+	}
 
 	// Alarm Sync Service (creates GPV tasks to query device alarms)
 	alarmSyncService := alarm.NewAlarmSyncService(w.TaskService, w.Redis, w.EventBus, logger)
@@ -890,6 +944,46 @@ func pmTSDBConnectionBudget(
 		return int32(pmMaxTSDBConnectionBudget)
 	}
 	return int32(total)
+}
+
+func startGeofenceCoordinator(
+	db storage.DB,
+	bus event.EventBus,
+) (func() error, error) {
+	repository := geofence.NewPgCoordinatorRepository(db)
+	coordinator := geofence.NewCoordinator(repository)
+	if err := coordinator.Start(bus); err != nil {
+		return nil, err
+	}
+	return coordinator.Stop, nil
+}
+
+func startEventOutboxRelay(
+	parent context.Context,
+	repo coreoutbox.DeliveryRepository,
+	publisher coreoutbox.Publisher,
+	logger *zap.Logger,
+) (func(), error) {
+	relay, err := coreoutbox.NewRelay(repo, publisher, coreoutbox.RelayConfig{}, logger)
+	if err != nil {
+		return nil, err
+	}
+	relayCtx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := relay.Run(relayCtx); err != nil {
+			logger.Error("generic event outbox relay stopped", zap.Error(err))
+		}
+	}()
+
+	var stopOnce sync.Once
+	return func() {
+		stopOnce.Do(func() {
+			cancel()
+			<-done
+		})
+	}, nil
 }
 
 // startAutoRecycleCron 启动 #779 回收站自动移入 cron（每天 00:10）。

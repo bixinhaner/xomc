@@ -2,14 +2,22 @@ package authz
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/global"
+	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeReader 用固定的设备→分组映射模拟 GroupReader。
@@ -20,6 +28,112 @@ type fakeReader struct {
 
 func (f fakeReader) GetDeviceGroupIDs(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
 	return f.groups, f.err
+}
+
+type resolverPermission struct {
+	err error
+}
+
+func (p resolverPermission) GetUserVisibleGroupIDs(
+	context.Context,
+	uuid.UUID,
+	bool,
+) ([]uuid.UUID, error) {
+	return nil, p.err
+}
+
+func TestResolverPermissionBackendErrorsAreAlwaysInternal(t *testing.T) {
+	tests := []struct {
+		name         string
+		backendError error
+		rawText      string
+	}{
+		{
+			name:         "plain error",
+			backendError: errors.New("database password=do-not-leak"),
+			rawText:      "database password=do-not-leak",
+		},
+		{
+			name:         "forbidden sentinel",
+			backendError: commonerrors.ErrForbidden,
+			rawText:      commonerrors.ErrForbidden.Error(),
+		},
+		{
+			name: "wrapped invalid input sentinel",
+			backendError: fmt.Errorf(
+				"permission query rejected: %w",
+				commonerrors.ErrInvalidInput,
+			),
+			rawText: "permission query rejected",
+		},
+		{
+			name: "wrapped unavailable sentinel",
+			backendError: fmt.Errorf(
+				"permission cache unavailable: %w",
+				commonerrors.ErrUnavailable,
+			),
+			rawText: "permission cache unavailable",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+			c.Set(admin.CtxKeyUserID, uuid.New())
+			c.Set(admin.CtxKeyIsSuperAdmin, false)
+			resolver := NewResolver(resolverPermission{err: tt.backendError})
+
+			_, err := resolver.ResolveFromContext(c)
+
+			require.Error(t, err)
+			require.ErrorIs(t, err, commonerrors.ErrInternal)
+			require.NotErrorIs(t, err, commonerrors.ErrForbidden)
+			require.NotErrorIs(t, err, commonerrors.ErrInvalidInput)
+			require.NotErrorIs(t, err, commonerrors.ErrUnavailable)
+			require.Contains(t, err.Error(), tt.rawText)
+
+			okGroups, ok := resolver.FromContext(c)
+			require.False(t, ok)
+			require.Nil(t, okGroups)
+			require.Equal(t, http.StatusInternalServerError, recorder.Code)
+			var envelope struct {
+				Ret  int    `json:"ret"`
+				Msg  string `json:"msg"`
+				Data any    `json:"data"`
+			}
+			require.NoError(
+				t,
+				json.Unmarshal(recorder.Body.Bytes(), &envelope),
+			)
+			require.Zero(t, envelope.Ret)
+			require.Nil(t, envelope.Data)
+			require.Equal(t, commonerrors.ErrInternal.Error(), envelope.Msg)
+			require.NotContains(t, recorder.Body.String(), tt.rawText)
+		})
+	}
+}
+
+func TestResolverMissingUserIDRemainsForbidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	resolver := NewResolver(resolverPermission{
+		err: errors.New("backend must not be reached"),
+	})
+
+	groups, ok := resolver.FromContext(c)
+
+	require.False(t, ok)
+	require.Nil(t, groups)
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	var envelope struct {
+		Msg string `json:"msg"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope))
+	require.Equal(t, commonerrors.ErrForbidden.Error(), envelope.Msg)
 }
 
 func TestAuthorizeDeviceAccess(t *testing.T) {

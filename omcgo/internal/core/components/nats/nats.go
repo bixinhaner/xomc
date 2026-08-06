@@ -52,6 +52,10 @@ func DefaultStreams() []StreamDef {
 		{Name: "DEVICE", Subjects: []string{"device.>"}, Retention: nats.InterestPolicy},
 		{Name: "COMMAND", Subjects: []string{"command.>"}, Retention: nats.InterestPolicy},
 		{Name: "TASK", Subjects: []string{"task.>"}, Retention: nats.InterestPolicy},
+		// Geofence lifecycle and evaluation events fan out to the coordinator,
+		// control monitor, and alarm monitor. They must survive process restarts
+		// and remain available to every independent durable consumer.
+		{Name: "GEOFENCE", Subjects: []string{"geofence.>"}, Retention: nats.InterestPolicy},
 		// Parameter-sync task results and run terminal events fan out to the
 		// result processor, provisioning bindings, and operational consumers.
 		{Name: "PARAM_SYNC", Subjects: []string{"param_sync.>"}, Retention: nats.InterestPolicy},

@@ -691,7 +691,9 @@ func (s *TaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCo
 }
 
 func shouldAutoRetryOnFailure(t *Task) bool {
-	return t != nil && t.Source == TaskSourceMML && t.CanRetry()
+	return t != nil &&
+		(t.Source == TaskSourceMML || t.Source == TaskSourceGeofence) &&
+		t.CanRetry()
 }
 
 func cloneTaskSnapshot(task *Task) *Task {

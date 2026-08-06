@@ -15,8 +15,12 @@ type fakeLocationSyncRepository struct {
 	err        error
 }
 
-func (f *fakeLocationSyncRepository) UpsertLatest(context.Context, uuid.UUID, ReportedLocation) error {
-	return nil
+func (f *fakeLocationSyncRepository) SaveLatestWithOutbox(
+	context.Context,
+	uuid.UUID,
+	ReportedLocation,
+) (LocationObservationWriteResult, error) {
+	return LocationObservationWriteResult{}, nil
 }
 
 func (f *fakeLocationSyncRepository) GetLatest(context.Context, uuid.UUID) (*ReportedLocation, error) {

@@ -110,6 +110,31 @@ func TestDefaultStreams_LogFileReceivedCovered(t *testing.T) {
 	}
 }
 
+func TestDefaultStreams_GeofenceEventsCovered(t *testing.T) {
+	streams := DefaultStreams()
+	for _, subject := range []string{
+		"geofence.lifecycle.reevaluate",
+		"geofence.lifecycle.deactivation_required",
+		"geofence.device.exited",
+		"geofence.device.entered",
+	} {
+		if !subjectCovered(subject, streams) {
+			t.Errorf("subject %s is not covered by any DefaultStreams stream", subject)
+		}
+	}
+
+	for _, stream := range streams {
+		if stream.Name != "GEOFENCE" {
+			continue
+		}
+		if stream.Retention != gonats.InterestPolicy {
+			t.Errorf("GEOFENCE stream retention = %v, want InterestPolicy", stream.Retention)
+		}
+		return
+	}
+	t.Fatal("GEOFENCE stream is not registered")
+}
+
 // TestDefaultStreams_NamesUnique 守卫不会因复制粘贴造成重复流名。
 func TestDefaultStreams_NamesUnique(t *testing.T) {
 	seen := map[string]bool{}

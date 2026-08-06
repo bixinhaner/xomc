@@ -9,6 +9,17 @@ import (
 	"github.com/google/uuid"
 )
 
+type LocationSourceMode string
+
+const (
+	LocationSourceTR069    LocationSourceMode = "tr069"
+	LocationSourceExternal LocationSourceMode = "external"
+)
+
+func (m LocationSourceMode) Valid() bool {
+	return m == LocationSourceTR069 || m == LocationSourceExternal
+}
+
 // Device 表示一台被管理的基站/小基站设备。
 // 对应数据库 devices 表，是设备全生命周期管理的核心实体。
 // 设备由 TR-069 Bootstrap Inform 自动注册入库。
@@ -66,17 +77,18 @@ type Device struct {
 	InformInterval    int        `json:"inform_interval" db:"inform_interval"`
 	// DeviceName 设备名称。DB 物理列名仍为 site_name（历史原因，未做物理迁移），
 	// 故 db tag 与字段名/JSON 不一致——这是有意为之，业务/API 层统一用 device_name。
-	DeviceName      string                 `json:"device_name" db:"site_name"`
-	SiteID          string                 `json:"site_id" db:"site_id"`
-	Latitude        *float64               `json:"latitude,omitempty" db:"latitude"`
-	Longitude       *float64               `json:"longitude,omitempty" db:"longitude"`
-	ExtensionData   map[string]interface{} `json:"extension_data,omitempty" db:"extension_data"`
-	CreatedAt       time.Time              `json:"created_at" db:"created_at"`
-	UpdatedAt       time.Time              `json:"updated_at" db:"updated_at"`
-	DeletedAt       *time.Time             `json:"deleted_at,omitempty" db:"deleted_at"`
-	DeletedBy       string                 `json:"deleted_by,omitempty" db:"deleted_by"` // who moved to recycle bin
-	RecycleType     string                 `json:"recycle_type,omitempty" db:"recycle_type"`
-	RecycleExecutor string                 `json:"recycle_executor,omitempty" db:"recycle_executor"`
+	DeviceName         string                 `json:"device_name" db:"site_name"`
+	SiteID             string                 `json:"site_id" db:"site_id"`
+	Latitude           *float64               `json:"latitude,omitempty" db:"latitude"`
+	Longitude          *float64               `json:"longitude,omitempty" db:"longitude"`
+	LocationSourceMode LocationSourceMode     `json:"location_source_mode" db:"location_source_mode"`
+	ExtensionData      map[string]interface{} `json:"extension_data,omitempty" db:"extension_data"`
+	CreatedAt          time.Time              `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at" db:"updated_at"`
+	DeletedAt          *time.Time             `json:"deleted_at,omitempty" db:"deleted_at"`
+	DeletedBy          string                 `json:"deleted_by,omitempty" db:"deleted_by"` // who moved to recycle bin
+	RecycleType        string                 `json:"recycle_type,omitempty" db:"recycle_type"`
+	RecycleExecutor    string                 `json:"recycle_executor,omitempty" db:"recycle_executor"`
 
 	// Group info (from device_groups table via device_group_members)
 	GroupName string `json:"group_name,omitempty" db:"group_name"`

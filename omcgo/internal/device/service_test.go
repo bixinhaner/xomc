@@ -947,6 +947,27 @@ func TestDeviceService_UpdateDevice_NotFound(t *testing.T) {
 	assert.Nil(t, device, "expected nil device when not found")
 }
 
+func TestDeviceService_UpdateDevice_ValidatesLocationSourceMode(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		getByIDFn: func(context.Context, uuid.UUID) (*model.Device, error) {
+			return &model.Device{ID: deviceID, SerialNumber: "SN-SOURCE"}, nil
+		},
+		updateFn: func(context.Context, *model.Device) error {
+			t.Fatal("invalid source mode must not be persisted")
+			return nil
+		},
+	}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	invalid := model.LocationSourceMode("auto")
+
+	_, err := svc.UpdateDevice(context.Background(), deviceID, UpdateDeviceRequest{
+		LocationSourceMode: &invalid,
+	})
+
+	require.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+}
+
 // ---------------------------------------------------------------------------
 // Tests: DeleteDevice
 // ---------------------------------------------------------------------------
