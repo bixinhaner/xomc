@@ -273,7 +273,7 @@ bash deploy/plan-resources.sh --floor-tolerance-pct 30  # 门禁容忍度（默�
 bash deploy/plan-resources.sh -h                  # 全部参数</pre>
 <p class="tip">随后 <code>sudo bash deploy/install.sh</code> 会把包内 <code>deploy/resources.env</code> 一并带入部署（拷进 <code>current/deploy/</code>）。首次安装缺少该文件会直接失败，不再回退 compose 内置默认限额。</p>
 <p><b>⬆️ 升级部署</b>：<code>resources.env</code> 由 install.sh <b>自动从上一版继承</b>（<code>current/deploy/resources.env</code> 或 <code>etc/resources.env.saved</code>），<b>通常无需重跑</b>。仅当目标主机资源变化需<b>重新规划</b>时，在<b>新版本包目录</b>跑 <code>bash deploy/plan-resources.sh</code>（会覆盖继承值）。</p>
-<p class="tip">脚本做三件事：① 探测 CPU / 内存 / 负载 / 其它容器占用；② 算「空闲预算」；③ <b>floor-first</b> 分配（每组件先发 100k 基线下限，剩余按权重分到上限）并<b>联动派生</b> <code>GOMEMLIMIT</code> / Postgres <code>shared_buffers·max_connections</code> / Redis <code>maxmemory</code>，写入带注释的 <code>resources.env</code>。主机低于最低配会<b>清晰报错并给建议最低配</b>（全栈约 ≥24 GiB，<code>--skip-monitoring</code> 约 16 GiB）。算法与档位详见交付包内 <code>deploy/RESOURCE-PLANNING.md</code>。</p>
+<p class="tip">脚本做三件事：① 探测 CPU / 内存 / 负载 / 其它容器占用；② 算「空闲预算」；③ <b>floor-first</b> 分配（每组件先发 100k 基线下限，剩余按权重分到上限）并<b>联动派生</b> <code>GOMEMLIMIT</code> / Postgres <code>shared_buffers·max_connections</code> / Redis <code>maxmemory</code>，写入带注释的 <code>resources.env</code>。主机低于最低配会<b>清晰报错并给建议最低配</b>（全栈约 ≥24 GiB，<code>--skip-monitoring</code> 约 20 GiB）。算法与档位详见交付包内 <code>deploy/RESOURCE-PLANNING.md</code>。</p>
 <div class="tip">生成后请<b>检视 / 按需微调</b> <code>resources.env</code>，务必遵守文件头注释的约束：<code>GOMEMLIMIT &lt; *_MEM</code>、核心 Redis 保留 1GiB / PM Redis 保留 2GiB AOF COW 余量、<code>PG_MAX_CONNECTIONS ≥ Go 端连接池总和（当前 180）</code>。<br>
 下游消费：<code>install.sh</code> 与 <code>svc.sh</code> 均以 <code>--env-file resources.env</code> 读取本文件，compose 用 <code>${VAR:-默认}</code> 套入限额。改完 <code>resources.env</code> 后跑 <code>bash svc.sh restart</code> 即按新限额有序重建生效。</div>
 
@@ -339,13 +339,14 @@ bash svc.sh logs app -f              # 跟随 app 日志(Ctrl-C 退出)
 bash svc.sh restart --skip-monitoring        # 重启时不动监控栈
 bash svc.sh status --skip-web                # 不算 web compose
 bash svc.sh -h                                # 完整帮助</pre>
-<p class="tip">常用服务名:<code>app</code> / <code>acs</code> / <code>worker</code> / <code>web</code>(业务);<code>postgres</code> / <code>redis</code> / <code>nats</code> / <code>minio</code>(基础设施);<code>prometheus</code> / <code>alertmanager</code> / <code>grafana</code> / <code>loki</code> / <code>tempo</code> / <code>otelcol</code>(监控栈)。<br>
-要看完整 compose ps 列表(全 17 个容器),直接跑 <code>bash svc.sh status</code>。</p>
+<p class="tip">常用服务名:<code>app</code> / <code>acs</code> / <code>acs-candidate</code> / <code>worker</code>(业务);<code>web</code>(web 层);<code>postgres</code> / <code>postgres-tsdb</code> / <code>redis-core</code> / <code>redis-pm</code> / <code>nats</code> / <code>minio</code>(基础设施);<code>prometheus</code> / <code>alertmanager</code> / <code>grafana</code> / <code>loki</code> / <code>tempo</code> / <code>otelcol</code> / <code>node-exporter</code> / <code>cadvisor</code> / <code>nats-exporter</code> / <code>nginx-exporter</code>(监控栈)。<br>
+要看完整 compose ps 列表(默认全栈约 21 个容器;加 <code>--skip-monitoring</code> 约 11 个),直接跑 <code>bash svc.sh status</code>。</p>
 <div class="tip">📊 <b>资源限额</b>:<code>svc.sh</code> 与 <code>install.sh</code> 一样会读取并校验同目录 <code>resources.env</code>(见 4.5)。改完该文件后,<code>bash svc.sh restart</code> 会按新限额有序重建容器(经 depends_on + 健康门控),无需重跑 install.sh。缺少或残缺 <code>resources.env</code> 时会拒绝重启，请先运行 <code>plan-resources.sh</code>。</div>
 
 <h2>✅ 6. 验证部署</h2>
 <pre>bash /opt/omc/current/deploy/healthcheck.sh</pre>
-<p class="lead">应输出全部 <code>[OK]</code>：业务容器（app/acs/worker）+ 基础设施容器（postgres/redis/nats/minio）+ 监控容器（prometheus/grafana/loki/...）+ 4 个健康端点（app /health, acs /healthz, app /metrics, 前端首页）。</p>
+<p class="lead">应输出全部 <code>[OK]</code>：业务容器（app/acs/acs-candidate/worker）+ 基础设施容器（postgres/postgres-tsdb/redis-core/redis-pm/nats/minio）+ 监控容器（prometheus/grafana/loki/...）+ 5 个健康端点（app /healthz, acs /healthz, worker /healthz, app /metrics, 前端首页）。</p>
+<p class="lead">脚本还会核对 Redis 业务路由隔离（redis-core / redis-pm 不同 run_id、prod.yaml 路由指向）、ACS 高并发网络参数（somaxconn / tcp_max_syn_backlog）、web nginx upstream 与临时端口范围、<code>OMC_PUBLIC_HOST</code> 在 app/acs/worker 容器内的实际取值，以及 <code>resources.env</code> 限额与容器渲染配置（GOMEMLIMIT / Redis maxmemory / PG shared_buffers·max_connections 等）是否一致——任一项漂移都会判 <code>[FAIL]</code>。</p>
 </div>
 
 <div class="tab-content" id="tab-config">
@@ -356,19 +357,22 @@ bash svc.sh -h                                # 完整帮助</pre>
 <thead><tr><th>端口</th><th>用途</th><th>URL / 接入方式</th><th>使用方</th></tr></thead>
 <tbody>
 <tr><td><b>8081</b></td><td>Web 管理界面 + REST + SSE</td><td>http://&lt;服务器IP&gt;:8081</td><td>运维浏览器登录(默认 admin/admin123)</td></tr>
-<tr><td><b>8080</b></td><td>基站连接(TR-069 ACS)</td><td>http://&lt;服务器IP&gt;:8080</td><td><b>基站设备侧</b>填这个作 ACS URL,人不浏览</td></tr>
+<tr><td><b>8080</b></td><td>基站连接(TR-069 ACS,nginx 反代 → ACS:7557)</td><td>http://&lt;服务器IP&gt;:8080</td><td>基站入口之一(等价 7557);人不浏览</td></tr>
+<tr><td>7547</td><td>ACS CWMP 标准 Inform</td><td>基站填 <code>http://&lt;OMC_PUBLIC_HOST&gt;:7547</code></td><td><b>基站设备侧</b> CPE 发 TR-069 Inform 的标准端口</td></tr>
+<tr><td>7557</td><td>ACS connection-request / 文件上传</td><td><code>http://&lt;OMC_PUBLIC_HOST&gt;:7557/smallcell/FileUploadService</code></td><td><b>基站设备侧</b>回传 PM/MR、ACS 主动触达(详 §9.5)</td></tr>
 <tr><td>5432</td><td>PostgreSQL</td><td><code>psql -h &lt;IP&gt; -p 5432 -U omcgo omcgo</code></td><td>数据中台拉数据 / 备份回填 / 跨机调试</td></tr>
+<tr><td>5433</td><td>TimescaleDB 时序库</td><td><code>psql -h &lt;IP&gt; -p 5433 -U omcgo omcgo</code></td><td>PM/KPI 超表查询(独立实例,避开主库 5432)</td></tr>
 <tr><td>6379</td><td>Redis</td><td><code>redis-cli -h &lt;IP&gt; -p 6379</code></td><td>缓存监控 / 跨机调试</td></tr>
 <tr><td>4222</td><td>NATS 客户端</td><td>nats CLI / SDK 连 <code>&lt;IP&gt;:4222</code></td><td>外部消费 JetStream / 跨机集成</td></tr>
 <tr><td>9000</td><td>MinIO S3 API</td><td>mc / S3 SDK 连 <code>http://&lt;IP&gt;:9000</code></td><td>S3 客户端;Console 浏览器上传/下载也依赖此端口</td></tr>
-<tr><td>9001</td><td>MinIO Console UI</td><td>http://&lt;服务器IP&gt;:9001</td><td>对象存储管理(默认 minioadmin/minioadmin)</td></tr>
+<tr><td>9001</td><td>MinIO Console UI</td><td>http://&lt;服务器IP&gt;:9001</td><td>对象存储管理(默认 omcadmin,口令见 secrets.env)</td></tr>
 <tr><td>9090</td><td>Prometheus</td><td>http://&lt;服务器IP&gt;:9090</td><td>指标查询 / 告警规则</td></tr>
 <tr><td>9093</td><td>Alertmanager</td><td>http://&lt;服务器IP&gt;:9093</td><td>告警静默 / receiver 状态</td></tr>
 <tr><td>3030</td><td>Grafana 监控大盘</td><td>http://&lt;服务器IP&gt;:3030 <span class="sz">仅启用监控栈时</span></td><td>默认 admin/admin,宿主 3030 → 容器 3000</td></tr>
 <tr><td>3100</td><td>Loki</td><td>http://&lt;服务器IP&gt;:3100</td><td>日志 API,一般通过 Grafana 查询不直浏览</td></tr>
 </tbody>
 </table>
-<div class="danger">⚠️ <b>5432 / 6379 / 4222 / 9000 / 9001 对内网全开</b> — 部署前必须改强口令(详 §9)。Redis 当前无密码,仅受信任内网可接受;公网 / DMZ 须配 <code>requirepass</code> 同步 etc/*.prod.yaml。防火墙 / 安全组在出公网前必须 deny 这 5 个端口。</div>
+<div class="danger">⚠️ <b>5432 / 5433 / 6379 / 4222 / 9000 / 9001 对内网全开</b> — 部署前必须改强口令(详 §9)。Redis 当前无密码,仅受信任内网可接受;公网 / DMZ 须配 <code>requirepass</code> 同步 etc/*.prod.yaml。防火墙 / 安全组在出公网前必须 deny 这 6 个端口。</div>
 
 <h3>7.2 仅本机回环 127.0.0.1(从工作机访问需 SSH 隧道)</h3>
 <table>
@@ -378,6 +382,7 @@ bash svc.sh -h                                # 完整帮助</pre>
 <tr><td>9095</td><td>acs 健康 / metrics</td><td><code>curl 127.0.0.1:9095/healthz</code>(容器内是 9090)</td></tr>
 <tr><td>9092</td><td>worker 健康 / metrics</td><td><code>curl 127.0.0.1:9092/healthz</code></td></tr>
 <tr><td>8222</td><td>NATS HTTP 监控</td><td>http://127.0.0.1:8222(server info / JetStream 状态)</td></tr>
+<tr><td>13133</td><td>otelcol 健康探针</td><td><code>curl 127.0.0.1:13133/</code>(health extension)</td></tr>
 </tbody>
 </table>
 <p class="tip">健康检查一键过:<code>bash /opt/omc/current/deploy/healthcheck.sh</code></p>
@@ -386,7 +391,7 @@ bash svc.sh -h                                # 完整帮助</pre>
 <div class="danger">⚠️ 全部默认口令<b>首次登录后必须改</b>。生产部署前需重新生成强口令并同步到 deploy/.env 与 *.prod.yaml。</div>
 <div class="kv">
 <b>Web 管理员：</b><code>admin</code> / <code>admin123</code><br>
-<b>MinIO Console：</b><code>minioadmin</code> / <code>minioadmin</code><br>
+<b>MinIO Console：</b><code>omcadmin</code> / <code>口令见 secrets.env(首次随机)</code><br>
 <b>PostgreSQL：</b><code>omcgo</code> / <code>omcgo123</code><br>
 <b>Grafana：</b><code>admin</code> / <code>admin</code>
 </div>
@@ -394,7 +399,7 @@ bash svc.sh -h                                # 完整帮助</pre>
 <h2>🔑 9. 配置文件修改指南（账号 / 口令 / JWT）</h2>
 <p class="lead">#175 治本后：凭证<b>唯一权威源</b>是 <code>/opt/omc/etc/secrets.env</code>（首次部署 <code>install.sh</code> 自动生成强随机，<code>600</code>/root）。<code>etc/*.prod.yaml</code> 已改用 <code>\${VAR}</code> 占位、从 <code>deploy/.env</code> 读取，<code>.env</code> 的 6 个密钥键由 <code>secrets.env</code> 自动同步覆盖——<b>无需再逐处手改口令</b>。改口令 / 轮换走 §9.3 的 <code>reset_password.sh</code>：</p>
 <ul class="list">
-<li><code>/opt/omc/etc/secrets.env</code> —— <b>唯一权威源</b>（6 键：PG / MinIO / Grafana / JWT / TR-069 共享密钥）</li>
+<li><code>/opt/omc/etc/secrets.env</code> —— <b>唯一权威源</b>（7 键：PG 主库 / PG 时序库 / MinIO / Grafana / JWT / TR-069 共享密钥）</li>
 <li><code>/opt/omc/current/deploy/.env</code> —— compose 起容器用；6 密钥键由 <code>secrets.env</code> 同步，<b>非密钥</b>键（镜像版本 / <code>OMC_PUBLIC_HOST</code>）在此手改</li>
 <li><code>/opt/omc/etc/{app,acs,worker}.prod.yaml</code> —— OMC 三进程连接中间件；已是 <code>\${VAR}</code> 占位，<b>无口令可手改</b></li>
 </ul>
@@ -404,7 +409,8 @@ bash svc.sh -h                                # 完整帮助</pre>
 <table>
 <thead><tr><th>项</th><th>secrets.env 键</th><th>prod.yaml 引用 / 默认占位</th><th>说明</th></tr></thead>
 <tbody>
-<tr><td>PostgreSQL 口令</td><td><code>POSTGRES_PASSWORD</code></td><td><code>db.dsn</code>/<code>tsdb.dsn</code> 的 <code>\${POSTGRES_PASSWORD}</code>（旧默认 <code>omcgo123</code>，首次已随机）</td><td>轮换：§9.3 <code>reset_password.sh pg</code></td></tr>
+<tr><td>PostgreSQL 口令（主库）</td><td><code>POSTGRES_PASSWORD</code></td><td><code>db.dsn</code> 的 <code>\${POSTGRES_PASSWORD}</code>（旧默认 <code>omcgo123</code>，首次已随机）</td><td>轮换：§9.3 <code>reset_password.sh pg</code></td></tr>
+<tr><td>PostgreSQL 口令（时序库）</td><td><code>POSTGRES_TSDB_PASSWORD</code></td><td><code>tsdb.dsn</code> 的 <code>\${POSTGRES_TSDB_PASSWORD}</code>（#347，独立随机，不复用主库）</td><td>reset_password.sh 暂不轮换此键</td></tr>
 <tr><td>PostgreSQL 账号 / 库</td><td>—（<code>.env</code> 的 <code>POSTGRES_USER</code>/<code>POSTGRES_DB</code>，非密钥）</td><td>DSN 账号 / <code>/库名</code></td><td>一般不改；reset_password.sh 不轮换账号</td></tr>
 <tr><td>MinIO 账号</td><td><code>MINIO_ROOT_USER</code></td><td><code>minio.access_key</code>（首次 = <code>omcadmin</code>）</td><td><b>建议只改口令不改账号</b>（access_key 改名牵连引用）</td></tr>
 <tr><td>MinIO 口令</td><td><code>MINIO_ROOT_PASSWORD</code></td><td><code>minio.secret_key</code>（旧默认 <code>minioadmin</code>，首次已随机）</td><td>轮换：§9.3 <code>reset_password.sh minio</code></td></tr>
@@ -417,7 +423,7 @@ bash svc.sh -h                                # 完整帮助</pre>
 </table>
 
 <h3>9.2 首次部署改口令（可选——默认已自动随机）</h3>
-<p>#175 后<b>默认无需手工改口令</b>：<code>install.sh</code> 首次部署自动生成强随机凭证到 <code>secrets.env</code> 并同步 <code>.env</code>。仅当要用<b>自定义</b>口令时（首次 <code>install.sh</code> 起 infra 之前，直接写 <code>etc/secrets.env</code> 的 6 键，<code>chmod 600</code>；非密钥 <code>OMC_PUBLIC_HOST</code> 改解压包内 <code>deploy/.env</code>，见 §4.5/§9.5，再跑 <code>install.sh</code> 复用 secrets.env）。下方为底层等价步骤（仅参考）：</p>
+<p>#175 后<b>默认无需手工改口令</b>：<code>install.sh</code> 首次部署自动生成强随机凭证到 <code>secrets.env</code> 并同步 <code>.env</code>。仅当要用<b>自定义</b>口令时（首次 <code>install.sh</code> 起 infra 之前，直接写 <code>etc/secrets.env</code> 的 7 键，<code>chmod 600</code>；非密钥 <code>OMC_PUBLIC_HOST</code> 改解压包内 <code>deploy/.env</code>，见 §4.5/§9.5，再跑 <code>install.sh</code> 复用 secrets.env）。下方为底层等价步骤（仅参考）：</p>
 <pre># 1) 生成强口令（示例）
 openssl rand -base64 24    # PostgreSQL 口令
 openssl rand -base64 24    # MinIO 口令
@@ -431,6 +437,8 @@ sudo vi /opt/omc/current/deploy/.env
 #     MINIO_ROOT_PASSWORD=       → 刚生成的 MinIO 强口令
 #     GRAFANA_ADMIN_PASSWORD=    → 刚生成的 Grafana 口令
 #     OMCGO_JWT_SECRET=          → 刚生成的 JWT 密钥
+#     OMC_SHARED_SECRET=         → TR-069 共享密钥（≥32 字符）
+#     POSTGRES_TSDB_PASSWORD=    → 时序库强口令（#347，独立于主库）
 #     OMC_PUBLIC_HOST=           → 本机对外 IP（基站可达，如 172.19.1.132），必填，见 §9.5
 
 # 3) （#175 后无需此步）etc/*.prod.yaml 已是 \${VAR} 占位、从 .env 读取，无明文口令可改；下面三行仅历史参考
