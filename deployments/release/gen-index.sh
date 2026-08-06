@@ -278,7 +278,7 @@ bash deploy/plan-resources.sh -h                  # 全部参数</pre>
 下游消费：<code>install.sh</code> 与 <code>svc.sh</code> 均以 <code>--env-file resources.env</code> 读取本文件，compose 用 <code>${VAR:-默认}</code> 套入限额。改完 <code>resources.env</code> 后跑 <code>bash svc.sh restart</code> 即按新限额有序重建生效。</div>
 
 <h2>🚚 5. 一键部署 OMC</h2>
-<p class="lead">所有场景都使用 <code>install.sh</code>，脚本会自动检测已有镜像并智能跳过重复加载；安装前必须存在完整 <code>resources.env</code>（见 4.5），脚本会在切换版本和重启容器前校验，并以 <code>--env-file</code> 套用其资源限额。</p>
+<p class="lead">所有场景都使用 <code>install.sh</code>，脚本会自动检测已有镜像并智能跳过重复加载；安装前必须存在完整 <code>resources.env</code>（见 4.5），脚本会在切换版本和重启容器前校验，并以 <code>--env-file</code> 套用其资源限额。所有示例均可加 <code>--lang cn</code> 切换中文安装提示（默认 <code>en</code>，亦可 <code>OMC_LANG=cn</code>）。</p>
 
 <h3>场景 A：首次部署（全新服务器）</h3>
 <pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;
@@ -295,10 +295,19 @@ sudo bash deploy/install.sh --skip-infra</pre>
 sudo bash deploy/install.sh</pre>
 <p class="lead">脚本检测到所有镜像已存在 → 自动跳过 load → 重启容器 → 重跑 migrate（幂等）→ 健康检查。适用于服务异常需要完整重启的场景。</p>
 
+<h3>场景 D：清理旧数据后全新部署（危险·不可恢复）</h3>
+<pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;
+sudo bash deploy/install.sh --fresh-install --lang cn --yes \
+    --public-host &lt;基站可达IP，如 11.22.33.44&gt;</pre>
+<p class="lead">先停旧 OMC 栈 → <b>永久删除</b>所有 bind-mount 数据目录（PG/TSDB/Redis/Redis-PM/NATS/MinIO）+ <code>/opt/omc/{data,etc,current,run/logs}</code> + 项目全部 Docker volumes → 按本机重新规划 <code>resources.env</code>（见 4.5）→ 走正常首次安装流程。等效 <code>uninstall.sh --purge --force</code> 后再 <code>install.sh</code>，一步完成。</p>
+<div class="danger">⚠️ <code>--fresh-install</code> 数据删除<b>不可恢复</b>。全新安装需要基站可达地址：通过 <code>--public-host</code> 传入，或 <code>deploy/.env</code> 已配有效的 <code>OMC_PUBLIC_HOST</code>（不能用 localhost/127.0.0.1，详 §9.5）；两者皆无则报错退出。省略 <code>--yes</code> 会在删除前二次交互确认。低内存主机可追加 <code>--skip-monitoring</code>，或 <code>--floor-tolerance-pct</code>（0-99，默认 60）放宽组件下限缺口容忍度。</div>
+
 <h3>其他参数</h3>
 <pre>sudo bash deploy/install.sh --check-only             # 仅检查环境，不动手
 sudo bash deploy/install.sh --skip-migrate            # 不跑 migrate / seed
 sudo bash deploy/install.sh --skip-monitoring         # 不起监控栈
+sudo bash deploy/install.sh --lang cn                 # 中文安装提示（默认 en；亦可 OMC_LANG=cn）
+sudo bash deploy/install.sh --overwrite-etc           # 用新包 etc/ 模板覆盖 /opt/omc/etc（旧自动备份）
 sudo bash deploy/install.sh -h                        # 查看所有参数</pre>
 
 <p class="tip">install.sh 自动：环境检查 → 目录布局 → 智能 load 镜像（已有则跳过并重启）→ 默认口令检查 → 启动 infra → 等就绪 → migrate → seed → <code>docker compose up -d</code> 全栈 → 健康检查。<b>全 docker compose 部署，宿主机不再放业务二进制。</b></p>
