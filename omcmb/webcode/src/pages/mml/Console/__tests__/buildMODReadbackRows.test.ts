@@ -100,6 +100,27 @@ describe('buildMODReadbackRows (#196 MOD 下发 + 回读 LST)', () => {
     expect(rows[0].status).toBe('mismatch');
   });
 
+  it('boolean 下发 true 与基站回读 1 视为一致', () => {
+    const path = 'Device.DeviceInfo.SignallingTrace.Enable';
+    const items: DeviceTaskResultItem[] = [
+      item({
+        success: true,
+        deviceTaskId: 'mod',
+        result: { success: true, rawOutput: '', parsedData: spvEnvelope, executionTime: 0, timestamp: '' },
+        parsedData: spvEnvelope,
+      }),
+      item({
+        success: true,
+        deviceTaskId: 'lst',
+        result: { success: true, rawOutput: '', parsedData: gpvEnvelope(path, '1'), executionTime: 0, timestamp: '' },
+        parsedData: gpvEnvelope(path, '1'),
+      }),
+    ];
+
+    const rows = buildMODReadbackRows(items, { [path]: 'true' });
+    expect(rows[0].status).toBe('success');
+  });
+
   it('mapTaskToRecord：裸 MOD 下发值在 commands.parameters（非 param_values）→ setValues 正确、回读一致 = success', () => {
     // 复现 task 3f637b26：RAW MOD 的下发值存 parameters（path→value map），param_values 缺失。
     // 修复前 setValues[path]='' → MOD 行值空 + 误判 mismatch；修复后回退 parameters → 正确。
