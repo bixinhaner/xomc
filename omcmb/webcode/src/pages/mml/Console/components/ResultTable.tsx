@@ -216,11 +216,14 @@ export default function ResultTable({
         key: 'planCommand',
         width: 150,
         ellipsis: true,
-        render: (_v: unknown, r: ResultRow) => (
-          <Text style={{ fontSize: 12 }} ellipsis={{ tooltip: r.commandName || r.commandCode || '-' }}>
-            {r.commandName || r.commandCode || '-'}
-          </Text>
-        ),
+        render: (_v: unknown, r: ResultRow) => {
+          const commandText = r.commandName || r.commandCode || execMeta?.commandName || execMeta?.label || '-';
+          return (
+            <Text style={{ fontSize: 12 }} ellipsis={{ tooltip: commandText }}>
+              {commandText}
+            </Text>
+          );
+        },
       },
     ];
 

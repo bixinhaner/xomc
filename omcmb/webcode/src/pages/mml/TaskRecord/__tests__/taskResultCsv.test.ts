@@ -109,6 +109,32 @@ describe('task result CSV export', () => {
     expect(command).toBe('MOD Device.FAP.Ipsec.2.:TUNNEL_ENABLE=false,TUNNEL_GATEWAY=192.0.2.2');
   });
 
+  it('shows MOD when the stored request payload uses a parameter map', () => {
+    const command = taskResultCommandText(row({
+      commandCode: 'MOD DEVICE_INFO',
+      operationType: 'MOD',
+      request: {
+        method: 'SetParameterValues',
+        payload: { values: { 'Device.DeviceInfo.SoftwareVersion': '1.2.3' } },
+      },
+    }));
+
+    expect(command).toBe('MOD Device.DeviceInfo.:SoftwareVersion=1.2.3');
+  });
+
+  it('shows MOD when the stored request payload uses the legacy parameters field', () => {
+    const command = taskResultCommandText(row({
+      commandCode: 'MOD DEVICE_INFO',
+      operationType: 'MOD',
+      request: {
+        method: 'SetParameterValues',
+        payload: { parameters: { 'Device.DeviceInfo.SoftwareVersion': '1.2.3' } },
+      },
+    }));
+
+    expect(command).toBe('MOD Device.DeviceInfo.:SoftwareVersion=1.2.3');
+  });
+
   it('fetches every result page with the backend-safe page size', async () => {
     const fetchPage = vi.fn()
       .mockResolvedValueOnce({

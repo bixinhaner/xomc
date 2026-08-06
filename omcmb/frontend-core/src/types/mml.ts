@@ -276,6 +276,8 @@ export interface MMLTaskCommandDetail {
   commandName?: string;
   operationType?: MMLOperationType | string;
   paramPaths?: string[];
+  /** 参数引用的命令码与 TR-069 path 对应关系；结构化 MOD 的 parameters 以命令码为 key。 */
+  paramRefs?: Array<{ paramCode?: string; tr069Path?: string }>;
   /** MOD 操作的下发值；与 paramPaths 同序对应 */
   paramValues?: unknown[];
   /**

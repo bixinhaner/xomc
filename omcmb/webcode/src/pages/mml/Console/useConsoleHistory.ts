@@ -140,7 +140,10 @@ export function useConsoleHistory(): ConsoleHistory {
     // 与实时收口、历史摘要同一构建函数；其余命令按逐 PATH 合并。
     const rows =
       baseActiveRecord.execMeta.operationType === 'MOD' && baseActiveRecord.setValues
-        ? buildMODReadbackRows(items, baseActiveRecord.setValues)
+        ? buildMODReadbackRows(items, baseActiveRecord.setValues, {
+            commandName: baseActiveRecord.execMeta.commandName,
+            commandCode: baseActiveRecord.execMeta.label,
+          })
         : buildDeviceRows(items, baseActiveRecord.columns, baseActiveRecord.execMeta.read);
     const localizedName = items.find((item) => item.commandName?.trim())?.commandName?.trim();
     const commandName = localizedName ?? baseActiveRecord.commandName;
