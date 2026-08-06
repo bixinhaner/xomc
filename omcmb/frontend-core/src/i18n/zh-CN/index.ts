@@ -1625,6 +1625,7 @@ const messages: Record<string, string> = {
   // 监控页面扩展字段 (Cell)
   'device.cellId':              '小区ID',
   'device.cellName':            '小区名称',
+  'device.cellIdentifier':      '小区标识',
   'device.subframeAssignment':  '子帧配比',
   'device.specialSubframe':     '特殊子帧配比',
   'device.rootIndex':           '根序列索引',
