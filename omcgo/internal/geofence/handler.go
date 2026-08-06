@@ -617,17 +617,28 @@ func (h *Handler) ResumeBinding(c *gin.Context) {
 	if !ok {
 		return
 	}
-	beginGeofenceAudit(
+	auditEntry := beginGeofenceAudit(
 		c,
 		auditActionBindingResume,
 		audit.ResourceGeofenceBinding,
 		bindingID.String(),
 		map[string]interface{}{"target_status": BindingStatusActive},
 	)
+	var body struct {
+		Reason string `json:"reason" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if auditEntry != nil {
+		auditEntry.Details["reason"] = strings.TrimSpace(body.Reason)
+	}
 	binding, err := h.service.ResumeBinding(
 		c.Request.Context(),
 		bindingID,
 		actorID,
+		body.Reason,
 	)
 	if err != nil {
 		h.abort(c, err)
@@ -877,12 +888,22 @@ func (h *Handler) RenameDefinition(c *gin.Context) {
 	if !ok {
 		return
 	}
+	auditEntry := beginGeofenceAudit(
+		c,
+		auditActionModify,
+		audit.ResourceGeofence,
+		geofenceID.String(),
+		map[string]interface{}{},
+	)
 	var body struct {
 		Name string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
+	}
+	if auditEntry != nil {
+		auditEntry.Details["name"] = strings.TrimSpace(body.Name)
 	}
 	if err := h.service.RenameDefinition(c.Request.Context(), geofenceID, body.Name, actorID); err != nil {
 		h.abort(c, err)

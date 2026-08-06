@@ -304,6 +304,28 @@ describe('GeofencePanel', () => {
     );
   });
 
+  it('blocks archive confirmation while a batch binding job is active', async () => {
+    mocks.preview.mockResolvedValueOnce({
+      ...impact('archived'),
+      activeBatchJobCount: 1,
+    });
+    const { user } = renderPanel();
+    const row = screen.getByTestId('geofence-row-fence-disabled');
+
+    await user.click(
+      within(row).getByRole('button', { name: '归档围栏' }),
+    );
+
+    expect(
+      await screen.findByText(
+        '存在尚未结束的批量绑定任务，任务进入终态后才能归档',
+      ),
+    ).toBeInTheDocument();
+    await user.type(screen.getByLabelText('操作原因'), '验收清理');
+    expect(screen.getByRole('button', { name: /确\s*认/ })).toBeDisabled();
+    expect(mocks.transition).not.toHaveBeenCalled();
+  });
+
   it('previews and confirms the selected carrier switch', async () => {
     const { user } = renderPanel();
 

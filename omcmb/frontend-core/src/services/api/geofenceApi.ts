@@ -820,9 +820,13 @@ export const geofenceApi = {
     return mapBinding(data);
   },
 
-  async resumeBinding(id: string): Promise<GeofenceBinding> {
+  async resumeBinding(
+    id: string,
+    reason: string,
+  ): Promise<GeofenceBinding> {
     const { data } = await http.post<GeofenceBindingRaw>(
       `/geofence-bindings/${id}/resume`,
+      { reason },
     );
     return mapBinding(data);
   },

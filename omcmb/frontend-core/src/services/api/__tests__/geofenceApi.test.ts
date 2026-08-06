@@ -763,8 +763,10 @@ describe('geofenceApi write contract', () => {
       'binding-1',
       '现场核查',
     );
-    const resumed =
-      await geofenceApi.resumeBinding('binding-1');
+    const resumed = await geofenceApi.resumeBinding(
+      'binding-1',
+      '维护完成',
+    );
     const removed = await geofenceApi.removeBinding(
       'binding-1',
       '错误绑定',
@@ -778,6 +780,7 @@ describe('geofenceApi write contract', () => {
     expect(postMock).toHaveBeenNthCalledWith(
       2,
       '/geofence-bindings/binding-1/resume',
+      { reason: '维护完成' },
     );
     expect(deleteMock).toHaveBeenCalledWith(
       '/geofence-bindings/binding-1',

@@ -23,6 +23,7 @@ import type {
   GeofenceMapDefinition,
   GeofencePolygonGeometry,
 } from '@core/types/geofence';
+import { geofenceErrorMessage } from './geofenceErrorMessage';
 
 interface EditorFormValues {
   name: string;
@@ -48,6 +49,45 @@ const DEFAULT_VALUES: EditorFormValues = {
   exitConsecutiveSamples: 2,
   reentryConsecutiveSamples: 2,
 };
+
+function samePosition(first: number[], second: number[]): boolean {
+  return first[0] === second[0] && first[1] === second[1];
+}
+
+function isFormValidationError(
+  error: unknown,
+): error is { errorFields: unknown[] } {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    Array.isArray((error as { errorFields?: unknown }).errorFields)
+  );
+}
+
+export function normalizePolygonGeometry(
+  geometry: GeofencePolygonGeometry,
+): GeofencePolygonGeometry {
+  const ring = geometry.coordinates[0] ?? [];
+  const normalized = ring.reduce<number[][]>((points, point) => {
+    if (
+      points.length === 0 ||
+      !samePosition(points[points.length - 1], point)
+    ) {
+      points.push([...point]);
+    }
+    return points;
+  }, []);
+  while (
+    normalized.length > 1 &&
+    samePosition(normalized[0], normalized[normalized.length - 1])
+  ) {
+    normalized.pop();
+  }
+  if (normalized.length > 0) {
+    normalized.push([...normalized[0]]);
+  }
+  return { ...geometry, coordinates: [normalized] };
+}
 
 export default function GeofenceEditorDrawer({
   open,
@@ -81,10 +121,7 @@ export default function GeofenceEditorDrawer({
         ? {
             name: item.definition.name,
             carrier: item.definition.carrier,
-            exitAction:
-              policy?.exitAction === 'manual_review'
-                ? 'manual_review'
-                : 'notify_only',
+            exitAction: policy?.exitAction ?? 'notify_only',
             exitConsecutiveSamples:
               policy?.exitConsecutiveSamples ?? 2,
             reentryConsecutiveSamples:
@@ -115,42 +152,69 @@ export default function GeofenceEditorDrawer({
         exitConsecutiveSamples: values.exitConsecutiveSamples,
         reentryConsecutiveSamples: values.reentryConsecutiveSamples,
       };
+      const normalizedGeometry = normalizePolygonGeometry(geometry);
       if (item) {
-        if (values.name.trim() !== item.definition.name) {
+        const normalizedName = values.name.trim();
+        const currentPolicy = item.currentVersion?.policy;
+        const nameChanged = normalizedName !== item.definition.name;
+        const policyChanged =
+          values.exitAction !== (currentPolicy?.exitAction ?? 'notify_only') ||
+          values.exitConsecutiveSamples !==
+            (currentPolicy?.exitConsecutiveSamples ?? 2) ||
+          values.reentryConsecutiveSamples !==
+            (currentPolicy?.reentryConsecutiveSamples ?? 2);
+        const versionChanged = Boolean(drawnGeometry) || policyChanged;
+        if (!nameChanged && !versionChanged) {
+          void message.info(
+            intl.formatMessage({ id: 'geofence.editor.noChanges' }),
+          );
+          return;
+        }
+        if (nameChanged) {
           await renameMutation.mutateAsync({
             id: item.definition.id,
-            name: values.name.trim(),
+            name: normalizedName,
           });
         }
-        const draft = await createDraftMutation.mutateAsync({
-          id: item.definition.id,
-          input: { geometry, policy },
-        });
-        await publishMutation.mutateAsync({
-          id: item.definition.id,
-          versionId: draft.id,
-        });
+        if (versionChanged) {
+          const draft = await createDraftMutation.mutateAsync({
+            id: item.definition.id,
+            input: { geometry: normalizedGeometry, policy },
+          });
+          await publishMutation.mutateAsync({
+            id: item.definition.id,
+            versionId: draft.id,
+          });
+        }
+        void message.success(
+          intl.formatMessage({
+            id: versionChanged
+              ? 'geofence.message.published'
+              : 'geofence.message.saved',
+          }),
+        );
       } else {
         const created = await createMutation.mutateAsync({
           name: values.name.trim(),
           carrier: values.carrier,
           ruleType: 'polygon_allow_zone',
-          geometry,
+          geometry: normalizedGeometry,
           policy,
         });
         await publishMutation.mutateAsync({
           id: created.definition.id,
           versionId: created.draftVersion.id,
         });
+        void message.success(
+          intl.formatMessage({ id: 'geofence.message.published' }),
+        );
       }
-      void message.success(
-        intl.formatMessage({ id: 'geofence.message.published' }),
-      );
       close();
     } catch (error) {
-      if (error instanceof Error) {
-        void message.error(error.message);
-      }
+      // Ant Design 已在对应字段下展示明确的校验文案，不再叠加一个
+      // “电子围栏操作失败”的通用 toast，避免把输入错误误报成服务异常。
+      if (isFormValidationError(error)) return;
+      void message.error(geofenceErrorMessage(intl, error));
     }
   };
 
@@ -184,7 +248,7 @@ export default function GeofenceEditorDrawer({
             onClick={() => void save()}
           >
             {intl.formatMessage({
-              id: 'geofence.action.saveAndPublish',
+              id: item ? 'common.save' : 'geofence.action.saveAndPublish',
             })}
           </Button>
         </Space>
@@ -212,9 +276,15 @@ export default function GeofenceEditorDrawer({
                 id: 'geofence.validation.nameRequired',
               }),
             },
+            {
+              max: 128,
+              message: intl.formatMessage({
+                id: 'geofence.validation.nameTooLong',
+              }),
+            },
           ]}
         >
-          <Input maxLength={128} />
+          <Input showCount />
         </Form.Item>
         <Form.Item
           name="carrier"
@@ -239,11 +309,12 @@ export default function GeofenceEditorDrawer({
           rules={[{ required: true }]}
         >
           <Select
-            options={['notifyOnly', 'manualReview'].map((key) => ({
-              value:
-                key === 'notifyOnly'
-                  ? 'notify_only'
-                  : 'manual_review',
+            options={[
+              ['notifyOnly', 'notify_only'],
+              ['manualReview', 'manual_review'],
+              ['deactivate', 'deactivate'],
+            ].map(([key, value]) => ({
+              value,
               label: intl.formatMessage({
                 id: `geofence.policy.${key}`,
               }),

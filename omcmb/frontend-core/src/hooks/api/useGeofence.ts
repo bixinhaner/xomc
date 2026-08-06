@@ -461,8 +461,13 @@ export function useSuspendGeofenceBinding() {
 export function useResumeGeofenceBinding() {
   const invalidate = useBindingTransitionInvalidation();
   return useMutation({
-    mutationFn: (id: string) =>
-      geofenceService.resumeBinding(id),
+    mutationFn: ({
+      id,
+      reason,
+    }: {
+      id: string;
+      reason: string;
+    }) => geofenceService.resumeBinding(id, reason),
     onSuccess: (binding) => invalidate(binding.geofenceId),
   });
 }

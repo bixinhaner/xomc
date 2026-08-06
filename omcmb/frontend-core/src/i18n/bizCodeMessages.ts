@@ -7,6 +7,10 @@
  */
 export const BIZ_CODE_I18N_MAP: Record<number, string> = {
   2034: 'product.standardParams.pathExists',
+  2601: 'geofence.validation.nameInvalid',
+  2602: 'geofence.validation.nameDuplicate',
+  2603: 'geofence.lifecycle.activeJobsBlockArchive',
+  2604: 'geofence.lifecycle.previewExpired',
   // 登录相关错误码（7000-7099）
   7000: 'login.error.invalidCredentials',  // 登录凭据无效
   7001: 'login.error.userNotFound',        // 用户不存在

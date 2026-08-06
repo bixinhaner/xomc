@@ -56,6 +56,7 @@ type coordinatorEventBusStub struct {
 	subject      string
 	subjects     []string
 	queue        string
+	queues       map[string]string
 	handler      event.EventHandler
 	subscription event.Subscription
 	err          error
@@ -84,6 +85,10 @@ func (b *coordinatorEventBusStub) QueueSubscribe(
 	b.subject = subject
 	b.subjects = append(b.subjects, subject)
 	b.queue = queue
+	if b.queues == nil {
+		b.queues = make(map[string]string)
+	}
+	b.queues[subject] = queue
 	b.handler = handler
 	return b.subscription, b.err
 }

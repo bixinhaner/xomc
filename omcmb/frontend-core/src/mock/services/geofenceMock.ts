@@ -1004,7 +1004,10 @@ export const geofenceMockService = {
     return baseBinding(binding);
   },
 
-  async resumeBinding(id: string): Promise<GeofenceBinding> {
+  async resumeBinding(
+    id: string,
+    _reason: string,
+  ): Promise<GeofenceBinding> {
     const binding = findBinding(id);
     binding.status = 'active';
     return baseBinding(binding);

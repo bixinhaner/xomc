@@ -2,17 +2,37 @@ package geofence
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func newUniqueViolation(constraint string) error {
 	return &pgconn.PgError{Code: "23505", ConstraintName: constraint}
+}
+
+func TestDefinitionNameDatabaseErrorMapsOnlyCarrierNameConflict(t *testing.T) {
+	err := definitionNameDatabaseError(
+		"create geofence definition",
+		newUniqueViolation("uq_geofence_definitions_carrier_name"),
+	)
+	var businessErr *commonerrors.BusinessError
+	require.True(t, errors.As(err, &businessErr))
+	assert.Equal(t, ErrCodeDefinitionNameDuplicate, businessErr.Code)
+	assert.ErrorIs(t, err, commonerrors.ErrAlreadyExists)
+
+	err = definitionNameDatabaseError(
+		"create geofence definition",
+		newUniqueViolation("unrelated_unique_constraint"),
+	)
+	businessErr = nil
+	assert.False(t, errors.As(err, &businessErr))
 }
 
 func TestPgRepository_BuildCreateDefinitionWithDraftQueriesMapsImmutableSnapshot(t *testing.T) {

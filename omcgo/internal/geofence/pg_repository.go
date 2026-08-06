@@ -720,12 +720,22 @@ func (r *PgRepository) UpdateDefinitionName(
 	}
 	result, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("update geofence name: %w", err)
+		return definitionNameDatabaseError("update geofence name", err)
 	}
 	if result.RowsAffected() != 1 {
 		return commonerrors.ErrNotFound
 	}
 	return nil
+}
+
+func definitionNameDatabaseError(operation string, err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) &&
+		pgErr.Code == "23505" &&
+		pgErr.ConstraintName == "uq_geofence_definitions_carrier_name" {
+		return fmt.Errorf("%s: %w", operation, duplicateDefinitionNameError(err))
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 func lifecycleDatabaseError(operation string, err error) error {
@@ -1178,7 +1188,7 @@ func (r *PgRepository) CreateDefinitionWithDraft(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	if _, err := tx.Exec(ctx, definitionSQL, definitionArgs...); err != nil {
-		return fmt.Errorf("create geofence definition: %w", err)
+		return definitionNameDatabaseError("create geofence definition", err)
 	}
 	if _, err := tx.Exec(ctx, versionSQL, versionArgs...); err != nil {
 		return fmt.Errorf("create geofence draft version: %w", err)

@@ -421,4 +421,35 @@ describe('GeofenceBindingsDrawer', () => {
       }),
     );
   });
+
+  it('requires and submits a reason when resuming a suspended binding', async () => {
+    const current = mocks.bindingsQuery();
+    mocks.bindingsQuery.mockReturnValue({
+      ...current,
+      data: {
+        ...current.data,
+        items: current.data.items.map((binding: { status: string }) => ({
+          ...binding,
+          status: 'suspended',
+        })),
+      },
+    });
+    const { user } = renderDrawer();
+
+    await user.click(
+      screen.getByRole('button', { name: '恢复绑定' }),
+    );
+    const confirm = screen.getByRole('button', { name: /确\s*认/ });
+    expect(confirm).toBeDisabled();
+
+    await user.type(screen.getByLabelText('操作原因'), '维护完成');
+    await user.click(confirm);
+
+    await waitFor(() =>
+      expect(mocks.resume).toHaveBeenCalledWith({
+        id: 'binding-1',
+        reason: '维护完成',
+      }),
+    );
+  });
 });

@@ -199,8 +199,11 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 		remoteAlarms = append(remoteAlarms, alarm)
 	}
 
-	// 4. Compute diff
-	diff := ComputeDiff(remoteAlarms, localAlarms)
+	// 4. Compute diff only against alarms owned by the device alarm table.
+	// OMC-generated alarms (for example geofence/offline) have independent
+	// lifecycle monitors and must not be cleared merely because they are absent
+	// from Device.FaultMgmt.CurrentAlarm.
+	diff := ComputeDiff(remoteAlarms, deviceReconciledAlarms(localAlarms))
 
 	// 5. Apply diff: ToAdd
 	for _, alarm := range diff.ToAdd {
@@ -301,6 +304,21 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 		result.Cleared++
 	}
 
+	return result
+}
+
+func deviceReconciledAlarms(alarms []*model.Alarm) []*model.Alarm {
+	result := make([]*model.Alarm, 0, len(alarms))
+	for _, alarm := range alarms {
+		if alarm == nil {
+			continue
+		}
+		if alarm.AlarmSource != nil &&
+			strings.EqualFold(strings.TrimSpace(*alarm.AlarmSource), "omc") {
+			continue
+		}
+		result = append(result, alarm)
+	}
 	return result
 }
 

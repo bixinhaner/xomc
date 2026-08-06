@@ -1467,6 +1467,30 @@ func TestHandler_PreviewEndpointsSkipComplianceAudit(t *testing.T) {
 func TestHandler_OtherGeofenceMutationsWriteSemanticAudit(t *testing.T) {
 	actorID := uuid.New()
 
+	t.Run("rename definition", func(t *testing.T) {
+		geofenceID := uuid.New()
+		auditRepository := newHandlerAuditRepository()
+		repository := &fakeRepository{}
+		router := newAuditedHandlerTestRouter(
+			NewService(repository, nil),
+			actorID,
+			auditRepository,
+		)
+
+		recorder := serveHandlerJSON(
+			router,
+			http.MethodPatch,
+			"/api/v1/geofences/"+geofenceID.String(),
+			`{"name":"  新围栏名称  "}`,
+		)
+
+		require.Equal(t, http.StatusOK, recorder.Code)
+		log := awaitHandlerAudit(t, auditRepository)
+		require.Equal(t, auditActionModify, log.Action)
+		require.Equal(t, geofenceID.String(), log.ResourceID)
+		require.Equal(t, "新围栏名称", log.Details["name"])
+	})
+
 	t.Run("definition lifecycle", func(t *testing.T) {
 		geofenceID := uuid.New()
 		auditRepository := newHandlerAuditRepository()
@@ -1549,6 +1573,29 @@ func TestHandler_OtherGeofenceMutationsWriteSemanticAudit(t *testing.T) {
 		require.Equal(t, auditActionBindingSuspend, log.Action)
 		require.Equal(t, bindingID.String(), log.ResourceID)
 		require.Equal(t, "device moved", log.Details["reason"])
+	})
+
+	t.Run("binding resume", func(t *testing.T) {
+		bindingID := uuid.New()
+		auditRepository := newHandlerAuditRepository()
+		router := newAuditedHandlerTestRouter(
+			NewService(&fakeRepository{}, nil),
+			actorID,
+			auditRepository,
+		)
+
+		recorder := serveHandlerJSON(
+			router,
+			http.MethodPost,
+			"/api/v1/geofence-bindings/"+bindingID.String()+"/resume",
+			`{"reason":"maintenance completed"}`,
+		)
+
+		require.Equal(t, http.StatusOK, recorder.Code)
+		log := awaitHandlerAudit(t, auditRepository)
+		require.Equal(t, auditActionBindingResume, log.Action)
+		require.Equal(t, bindingID.String(), log.ResourceID)
+		require.Equal(t, "maintenance completed", log.Details["reason"])
 	})
 
 	t.Run("manual batch binding", func(t *testing.T) {
@@ -2012,6 +2059,26 @@ func TestHandler_SuspendBindingRequiresReason(t *testing.T) {
 	assertErrorEnvelope(t, recorder)
 }
 
+func TestHandler_ResumeBindingRequiresReason(t *testing.T) {
+	actorID := uuid.New()
+	router := newHandlerTestRouter(
+		NewService(&fakeRepository{}, nil),
+		&actorID,
+	)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/geofence-bindings/"+uuid.NewString()+"/resume",
+		bytes.NewBufferString(`{}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assertErrorEnvelope(t, recorder)
+}
+
 func TestHandler_BindingLifecycleReturnsUpdatedBindings(t *testing.T) {
 	actorID := uuid.New()
 	bindingID := uuid.New()
@@ -2039,6 +2106,7 @@ func TestHandler_BindingLifecycleReturnsUpdatedBindings(t *testing.T) {
 			name:       "resume",
 			method:     http.MethodPost,
 			pathSuffix: "/resume",
+			body:       `{"reason":"maintenance completed"}`,
 			wantStatus: BindingStatusActive,
 		},
 		{
@@ -2093,8 +2161,9 @@ func TestHandler_BindingLifecycleMapsConflictToStandardEnvelope(t *testing.T) {
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v1/geofence-bindings/"+uuid.NewString()+"/resume",
-		nil,
+		bytes.NewBufferString(`{"reason":"resume conflict check"}`),
 	)
+	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
 	router.ServeHTTP(recorder, request)

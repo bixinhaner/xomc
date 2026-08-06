@@ -385,13 +385,14 @@ func (s *Service) ResumeBinding(
 	ctx context.Context,
 	bindingID uuid.UUID,
 	actorID uuid.UUID,
+	reason string,
 ) (*Binding, error) {
 	return s.transitionBinding(
 		ctx,
 		bindingID,
 		BindingStatusActive,
 		actorID,
-		"",
+		reason,
 	)
 }
 
@@ -424,9 +425,9 @@ func (s *Service) transitionBinding(
 		)
 	}
 	reason = strings.TrimSpace(reason)
-	if (target == BindingStatusSuspended ||
-		target == BindingStatusRemoved) &&
-		reason == "" {
+	if (target == BindingStatusActive ||
+		target == BindingStatusSuspended ||
+		target == BindingStatusRemoved) && reason == "" {
 		return nil, fmt.Errorf(
 			"reason is required for binding transition: %w",
 			commonerrors.ErrInvalidInput,
@@ -452,7 +453,10 @@ func (s *Service) CreateDefinition(
 ) (*CreateDefinitionResult, error) {
 	name := strings.TrimSpace(request.Name)
 	carrier := strings.TrimSpace(request.Carrier)
-	if name == "" || carrier == "" || request.ActorID == uuid.Nil {
+	if err := validateDefinitionName(name); err != nil {
+		return nil, err
+	}
+	if carrier == "" || request.ActorID == uuid.Nil {
 		return nil, fmt.Errorf("name, carrier and actor are required: %w", commonerrors.ErrInvalidInput)
 	}
 	if request.VisibleGroups != nil {
@@ -537,11 +541,21 @@ func (s *Service) RenameDefinition(
 	actorID uuid.UUID,
 ) error {
 	name = strings.TrimSpace(name)
-	if geofenceID == uuid.Nil || actorID == uuid.Nil || name == "" || len([]rune(name)) > 128 {
+	if geofenceID == uuid.Nil || actorID == uuid.Nil {
 		return fmt.Errorf("geofence name and actor are invalid: %w", commonerrors.ErrInvalidInput)
+	}
+	if err := validateDefinitionName(name); err != nil {
+		return err
 	}
 	if err := s.repository.UpdateDefinitionName(ctx, geofenceID, name, actorID, s.now()); err != nil {
 		return fmt.Errorf("rename geofence: %w", err)
+	}
+	return nil
+}
+
+func validateDefinitionName(name string) error {
+	if name == "" || len([]rune(name)) > 128 {
+		return invalidDefinitionNameError()
 	}
 	return nil
 }

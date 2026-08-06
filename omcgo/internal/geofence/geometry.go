@@ -68,10 +68,7 @@ func parsePolygon(raw json.RawMessage) (GeometrySnapshot, error) {
 		return GeometrySnapshot{}, fmt.Errorf("polygon must contain exactly one exterior ring: %w", ErrInvalidGeometry)
 	}
 
-	points := polygon.Coordinates[0]
-	if len(points) > 1 && samePoint(points[0], points[len(points)-1]) {
-		points = points[:len(points)-1]
-	}
+	points := normalizePolygonPoints(polygon.Coordinates[0])
 	if len(points) < 3 {
 		return GeometrySnapshot{}, fmt.Errorf("polygon requires at least three vertices: %w", ErrInvalidGeometry)
 	}
@@ -100,6 +97,23 @@ func parsePolygon(raw json.RawMessage) (GeometrySnapshot, error) {
 	return GeometrySnapshot{JSON: normalized, BoundingBox: bbox}, nil
 }
 
+// normalizePolygonPoints accepts the redundant vertices produced by common
+// map drawing controls when a user double-clicks to finish a polygon. The
+// stored ring is still canonicalized below with exactly one closing vertex.
+func normalizePolygonPoints(points [][]float64) [][]float64 {
+	normalized := make([][]float64, 0, len(points))
+	for _, point := range points {
+		if len(normalized) > 0 && samePoint(normalized[len(normalized)-1], point) {
+			continue
+		}
+		normalized = append(normalized, point)
+	}
+	for len(normalized) > 1 && samePoint(normalized[0], normalized[len(normalized)-1]) {
+		normalized = normalized[:len(normalized)-1]
+	}
+	return normalized
+}
+
 func validatePolygonPoints(points [][]float64) (BoundingBox, error) {
 	bbox := BoundingBox{
 		MinLongitude: math.Inf(1),
@@ -111,9 +125,6 @@ func validatePolygonPoints(points [][]float64) (BoundingBox, error) {
 	for index, point := range points {
 		if err := validateCoordinate(point); err != nil {
 			return BoundingBox{}, fmt.Errorf("polygon vertex %d: %w", index, err)
-		}
-		if index > 0 && samePoint(points[index-1], point) {
-			return BoundingBox{}, fmt.Errorf("polygon has adjacent duplicate vertices: %w", ErrInvalidGeometry)
 		}
 		distinct[[2]float64{point[0], point[1]}] = struct{}{}
 		bbox.MinLongitude = math.Min(bbox.MinLongitude, point[0])

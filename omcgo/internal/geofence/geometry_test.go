@@ -41,15 +41,30 @@ func TestParseAndValidateGeometry_RejectsSelfIntersection(t *testing.T) {
 	assert.Contains(t, err.Error(), "self-intersect")
 }
 
-func TestParseAndValidateGeometry_RejectsAdjacentDuplicate(t *testing.T) {
+func TestParseAndValidateGeometry_NormalizesDrawingControlDuplicates(t *testing.T) {
 	raw := json.RawMessage(`{
 		"type":"Polygon",
-		"coordinates":[[[121.1,31.1],[121.2,31.1],[121.2,31.1],[121.2,31.2]]]
+		"coordinates":[[[121.1,31.1],[121.2,31.1],[121.2,31.1],[121.2,31.2],[121.1,31.1],[121.1,31.1]]]
+	}`)
+
+	snapshot, err := ParseAndValidateGeometry(RuleTypePolygonAllowZone, raw)
+	require.NoError(t, err)
+
+	var normalized polygonJSON
+	require.NoError(t, json.Unmarshal(snapshot.JSON, &normalized))
+	require.Len(t, normalized.Coordinates[0], 4)
+	assert.Equal(t, normalized.Coordinates[0][0], normalized.Coordinates[0][3])
+}
+
+func TestParseAndValidateGeometry_RejectsFewerThanThreeDistinctVerticesAfterNormalization(t *testing.T) {
+	raw := json.RawMessage(`{
+		"type":"Polygon",
+		"coordinates":[[[121.1,31.1],[121.2,31.1],[121.2,31.1],[121.1,31.1]]]
 	}`)
 
 	_, err := ParseAndValidateGeometry(RuleTypePolygonAllowZone, raw)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "adjacent")
+	assert.Contains(t, err.Error(), "at least three vertices")
 }
 
 func TestParseAndValidateGeometry_RejectsDatelineCrossing(t *testing.T) {

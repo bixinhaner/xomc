@@ -20,13 +20,15 @@ type LifecycleImpact struct {
 	PreviewFingerprint  string           `json:"preview_fingerprint"`
 }
 
-var ErrStaleLifecyclePreview = fmt.Errorf(
-	"geofence lifecycle preview is stale: %w",
+var ErrStaleLifecyclePreview = commonerrors.NewBusinessError(
+	ErrCodeStaleLifecyclePreview,
+	"geofence lifecycle preview is stale",
 	commonerrors.ErrAlreadyExists,
 )
 
-var ErrActiveBatchJobs = fmt.Errorf(
-	"geofence has active batch jobs: %w",
+var ErrActiveBatchJobs = commonerrors.NewBusinessError(
+	ErrCodeActiveBatchJobs,
+	"geofence has active batch jobs",
 	commonerrors.ErrAlreadyExists,
 )
 

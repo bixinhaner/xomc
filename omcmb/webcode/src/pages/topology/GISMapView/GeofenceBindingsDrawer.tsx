@@ -48,7 +48,7 @@ interface GeofenceBindingsDrawerProps {
 }
 
 interface BindingAction {
-  kind: 'suspend' | 'remove';
+  kind: 'suspend' | 'resume' | 'remove';
   binding: GeofenceBindingDetail;
 }
 
@@ -137,25 +137,13 @@ export default function GeofenceBindingsDrawer({
       };
       if (bindingAction.kind === 'suspend') {
         await suspendMutation.mutateAsync(input);
+      } else if (bindingAction.kind === 'resume') {
+        await resumeMutation.mutateAsync(input);
       } else {
         await removeMutation.mutateAsync(input);
       }
       setBindingAction(undefined);
       setBindingActionReason('');
-    } catch (error) {
-      void message.error(
-        error instanceof Error
-          ? error.message
-          : intl.formatMessage({
-              id: 'geofence.message.operationFailed',
-            }),
-      );
-    }
-  };
-
-  const resumeBinding = async (binding: GeofenceBindingDetail) => {
-    try {
-      await resumeMutation.mutateAsync(binding.id);
     } catch (error) {
       void message.error(
         error instanceof Error
@@ -452,7 +440,9 @@ export default function GeofenceBindingsDrawer({
                         aria-label={intl.formatMessage({
                           id: 'geofence.action.resumeBinding',
                         })}
-                        onClick={() => void resumeBinding(binding)}
+                        onClick={() =>
+                          beginBindingAction(binding, 'resume')
+                        }
                       />
                     </Tooltip>
                   ) : null}
@@ -682,7 +672,9 @@ export default function GeofenceBindingsDrawer({
           disabled: !bindingActionReason.trim(),
         }}
         confirmLoading={
-          suspendMutation.isPending || removeMutation.isPending
+          suspendMutation.isPending ||
+          resumeMutation.isPending ||
+          removeMutation.isPending
         }
         onCancel={() => setBindingAction(undefined)}
         onOk={() => void runBindingAction()}

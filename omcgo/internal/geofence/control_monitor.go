@@ -81,12 +81,17 @@ func (m *GeofenceControlMonitor) Subscribe(bus event.EventBus) error {
 	if bus == nil {
 		return fmt.Errorf("geofence control monitor event bus is required")
 	}
-	if _, err := bus.QueueSubscribe(
+	for _, subject := range []string{
 		event.SubjectGeofenceDeviceExited,
-		GeofenceControlQueue,
-		m.handleExited,
-	); err != nil {
-		return fmt.Errorf("subscribe geofence control exit: %w", err)
+		event.SubjectGeofenceDeviceEscalated,
+	} {
+		if _, err := bus.QueueSubscribe(
+			subject,
+			geofenceControlQueue(subject),
+			m.handleExited,
+		); err != nil {
+			return fmt.Errorf("subscribe geofence control outside action %s: %w", subject, err)
+		}
 	}
 	for _, subject := range []string{
 		event.SubjectTaskCompleted,
@@ -94,7 +99,7 @@ func (m *GeofenceControlMonitor) Subscribe(bus event.EventBus) error {
 	} {
 		if _, err := bus.QueueSubscribe(
 			subject,
-			GeofenceControlQueue,
+			geofenceControlQueue(subject),
 			m.handleTaskTerminal,
 		); err != nil {
 			return fmt.Errorf("subscribe geofence control task terminal: %w", err)
@@ -102,19 +107,28 @@ func (m *GeofenceControlMonitor) Subscribe(bus event.EventBus) error {
 	}
 	if _, err := bus.QueueSubscribe(
 		event.SubjectGeofenceDeviceEntered,
-		GeofenceControlQueue,
+		geofenceControlQueue(event.SubjectGeofenceDeviceEntered),
 		m.handleEntered,
 	); err != nil {
 		return fmt.Errorf("subscribe geofence control enter: %w", err)
 	}
 	if _, err := bus.QueueSubscribe(
 		event.SubjectGeofenceLifecycleDeactivationRequired,
-		GeofenceControlQueue,
+		geofenceControlQueue(event.SubjectGeofenceLifecycleDeactivationRequired),
 		m.handleLifecycleDeactivation,
 	); err != nil {
 		return fmt.Errorf("subscribe geofence lifecycle deactivation: %w", err)
 	}
 	return nil
+}
+
+func geofenceControlQueue(subject string) string {
+	if subject == event.SubjectGeofenceDeviceExited {
+		// Preserve the already deployed durable and its acknowledgement position.
+		return GeofenceControlQueue
+	}
+	suffix := strings.NewReplacer(".", "-", "_", "-").Replace(subject)
+	return GeofenceControlQueue + "-" + suffix
 }
 
 func (m *GeofenceControlMonitor) handleExited(

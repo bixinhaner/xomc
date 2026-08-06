@@ -214,6 +214,59 @@ func TestGeofenceControlMonitorQueuesRFDeactivation(t *testing.T) {
 	require.NotContains(t, string(tasks.request.Params), "ParameterList")
 }
 
+func TestGeofenceControlMonitorSubscribesOutsideAndEscalationEdges(t *testing.T) {
+	monitor := NewGeofenceControlMonitor(
+		controlDeviceReaderStub{},
+		controlCarrierRegistry(),
+		&controlTaskStub{},
+		zap.NewNop(),
+	)
+	monitor.SetParameterReader(controlParameterReader())
+	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
+	monitor.SetActionRepository(newControlActionRepositoryStub())
+	bus := &coordinatorEventBusStub{}
+
+	require.NoError(t, monitor.Subscribe(bus))
+	require.Contains(t, bus.subjects, event.SubjectGeofenceDeviceExited)
+	require.Contains(t, bus.subjects, event.SubjectGeofenceDeviceEscalated)
+	require.Equal(
+		t,
+		geofenceControlQueue(event.SubjectGeofenceDeviceExited),
+		bus.queues[event.SubjectGeofenceDeviceExited],
+	)
+	require.Equal(
+		t,
+		geofenceControlQueue(event.SubjectGeofenceDeviceEscalated),
+		bus.queues[event.SubjectGeofenceDeviceEscalated],
+	)
+	require.NotEqual(
+		t,
+		bus.queues[event.SubjectGeofenceDeviceExited],
+		bus.queues[event.SubjectGeofenceDeviceEscalated],
+	)
+	require.Len(t, bus.queues, 6)
+}
+
+func TestGeofenceControlMonitorQueuesEscalatedDeactivation(t *testing.T) {
+	tasks := &controlTaskStub{}
+	monitor := NewGeofenceControlMonitor(
+		controlDeviceReaderStub{device: &model.Device{
+			ID: uuid.New(), SerialNumber: "SN-CONTROL-1", ProductClass: "BLQ",
+			Carrier: model.CarrierCMCC, Technology: model.TechLTE,
+		}},
+		controlCarrierRegistry(), tasks, zap.NewNop(),
+	)
+	monitor.SetParameterReader(controlParameterReader(1))
+	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
+	monitor.SetActionRepository(newControlActionRepositoryStub())
+	evt := controlExitEvent(t, string(ActionLevelDeactivate))
+	evt.Subject = event.SubjectGeofenceDeviceEscalated
+
+	require.NoError(t, monitor.handleExited(context.Background(), evt))
+	require.NotNil(t, tasks.request)
+	require.Contains(t, tasks.request.CommandKey, ":8:deactivate")
+}
+
 func TestGeofenceControlMonitorSkipsExistingDeactivation(t *testing.T) {
 	tasks := &controlTaskStub{}
 	monitor := NewGeofenceControlMonitor(

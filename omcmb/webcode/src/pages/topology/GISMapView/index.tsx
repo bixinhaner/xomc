@@ -1317,7 +1317,11 @@ export default function GISMapView() {
         {geofenceDrawing && (
           <div className="geofence-drawing-status">
             <span>
-              {intl.formatMessage({ id: 'geofence.message.drawing' })}
+              {intl.formatMessage({
+                id: geofenceEditorItem
+                  ? 'geofence.message.redrawing'
+                  : 'geofence.message.drawing',
+              })}
             </span>
             <Button
               size="small"
@@ -1325,6 +1329,9 @@ export default function GISMapView() {
                 mapRef.current?.stopGeofenceDraw();
                 setGeofenceDrawing(false);
                 setDrawnGeofenceGeometry(undefined);
+                if (geofenceEditorItem) {
+                  setGeofenceEditorOpen(true);
+                }
               }}
             >
               {intl.formatMessage({ id: 'geofence.action.cancelDrawing' })}
@@ -1382,9 +1389,12 @@ export default function GISMapView() {
             open
             item={geofenceEditorItem}
             drawnGeometry={drawnGeofenceGeometry}
-            onStartDraw={() =>
-              mapRef.current?.startGeofencePolygonDraw()
-            }
+            onStartDraw={() => {
+              setDrawnGeofenceGeometry(undefined);
+              setGeofenceEditorOpen(false);
+              setGeofenceDrawing(true);
+              mapRef.current?.startGeofencePolygonDraw();
+            }}
             onStopDraw={() => mapRef.current?.stopGeofenceDraw()}
             onClose={() => {
               setGeofenceEditorOpen(false);

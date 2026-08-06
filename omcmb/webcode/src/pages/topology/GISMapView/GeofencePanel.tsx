@@ -46,6 +46,7 @@ import type {
   UpdateGeofenceSettingsInput,
 } from '@core/types/geofence';
 import { geofenceSettingsToInput } from '@core/utils/geofenceSettings';
+import { geofenceErrorMessage } from './geofenceErrorMessage';
 
 interface GeofencePanelProps {
   open: boolean;
@@ -136,13 +137,7 @@ export default function GeofencePanel({
       setReason('');
       setPending({ item, target, impact });
     } catch (error) {
-      void message.error(
-        error instanceof Error
-          ? error.message
-          : intl.formatMessage({
-              id: 'geofence.message.operationFailed',
-            }),
-      );
+      void message.error(geofenceErrorMessage(intl, error));
     }
   };
 
@@ -165,13 +160,7 @@ export default function GeofencePanel({
       setPending(undefined);
       setReason('');
     } catch (error) {
-      void message.error(
-        error instanceof Error
-          ? error.message
-          : intl.formatMessage({
-              id: 'geofence.message.operationFailed',
-            }),
-      );
+      void message.error(geofenceErrorMessage(intl, error));
     }
   };
 
@@ -180,11 +169,7 @@ export default function GeofencePanel({
       setCandidatePreview(await candidateMutation.mutateAsync(id));
       setSelectedCandidateSNs([]);
     } catch (error) {
-      void message.error(
-        error instanceof Error
-          ? error.message
-          : intl.formatMessage({ id: 'geofence.message.operationFailed' }),
-      );
+      void message.error(geofenceErrorMessage(intl, error));
     }
   };
 
@@ -208,11 +193,7 @@ export default function GeofencePanel({
       const preview = await settingsPreviewMutation.mutateAsync(input);
       setPendingSettingsToggle({ enabled, input, preview });
     } catch (error) {
-      void message.error(
-        error instanceof Error
-          ? error.message
-          : intl.formatMessage({ id: 'geofence.message.operationFailed' }),
-      );
+      void message.error(geofenceErrorMessage(intl, error));
     }
   };
 
@@ -225,11 +206,7 @@ export default function GeofencePanel({
         intl.formatMessage({ id: 'geofence.settings.carrierUpdated' }),
       );
     } catch (error) {
-      void message.error(
-        error instanceof Error
-          ? error.message
-          : intl.formatMessage({ id: 'geofence.message.operationFailed' }),
-      );
+      void message.error(geofenceErrorMessage(intl, error));
     }
   };
 
@@ -647,7 +624,12 @@ export default function GeofencePanel({
         })}
         okText={intl.formatMessage({ id: 'common.confirm' })}
         cancelText={intl.formatMessage({ id: 'common.cancel' })}
-        okButtonProps={{ disabled: !reason.trim() }}
+        okButtonProps={{
+          disabled:
+            !reason.trim() ||
+            (pending?.target === 'archived' &&
+              pending.impact.activeBatchJobCount > 0),
+        }}
         confirmLoading={transitionMutation.isPending}
         onCancel={() => setPending(undefined)}
         onOk={() => void confirmTransition()}
@@ -695,6 +677,16 @@ export default function GeofencePanel({
                 })}
               />
             )}
+            {pending.target === 'archived' &&
+              pending.impact.activeBatchJobCount > 0 && (
+                <Alert
+                  type="error"
+                  showIcon
+                  title={intl.formatMessage({
+                    id: 'geofence.lifecycle.activeJobsBlockArchive',
+                  })}
+                />
+              )}
             <Input.TextArea
               aria-label={intl.formatMessage({
                 id: 'geofence.field.reason',

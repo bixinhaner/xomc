@@ -293,6 +293,7 @@ func TestPgRepositoryBindingLifecycleGuardsResumeAndSoftRemovesIntegration(
 		ctx,
 		fixture.activeBindingID,
 		fixture.actorID,
+		"resume disabled fence check",
 	)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
@@ -317,6 +318,7 @@ func TestPgRepositoryBindingLifecycleGuardsResumeAndSoftRemovesIntegration(
 		ctx,
 		fixture.activeBindingID,
 		fixture.actorID,
+		"planned maintenance completed",
 	)
 	require.NoError(t, err)
 	assert.Equal(t, BindingStatusActive, resumed.Status)
@@ -343,6 +345,7 @@ func TestPgRepositoryBindingLifecycleGuardsResumeAndSoftRemovesIntegration(
 		ctx,
 		fixture.activeBindingID,
 		fixture.actorID,
+		"resume removed binding check",
 	)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
@@ -390,6 +393,7 @@ func TestPgRepositoryBindingResumeMapsActiveRuleConflictIntegration(
 			ctx,
 			conflictingBindingID,
 			fixture.actorID,
+			"resume conflict check",
 		)
 
 	require.Error(t, err)

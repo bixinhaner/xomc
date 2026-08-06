@@ -3,6 +3,8 @@ package geofence
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +43,8 @@ type fakeRepository struct {
 	carrierVisibilityGroups []uuid.UUID
 	denyDeviceVisibility    bool
 	deviceVisibilityCalls   int
+	updatedName             string
+	updateDefinitionNameErr error
 }
 
 type candidateReaderStub struct {
@@ -71,6 +75,17 @@ func (f *fakeRepository) GetDefinition(context.Context, uuid.UUID) (*Definition,
 
 func (f *fakeRepository) GetVersion(context.Context, uuid.UUID) (*Version, error) {
 	return f.version, nil
+}
+
+func (f *fakeRepository) UpdateDefinitionName(
+	_ context.Context,
+	_ uuid.UUID,
+	name string,
+	_ uuid.UUID,
+	_ time.Time,
+) error {
+	f.updatedName = name
+	return f.updateDefinitionNameErr
 }
 
 func (f *fakeRepository) IsCarrierVisible(
@@ -206,6 +221,35 @@ func TestService_CreateDefinitionCreatesDraftWithNormalizedGeometry(t *testing.T
 	assert.Equal(t, actorID, result.Definition.CreatedBy)
 	assert.NotEmpty(t, repo.createdVersion.GeometryJSON)
 	assert.Nil(t, result.Definition.CurrentVersionID)
+}
+
+func TestService_DefinitionNameBoundaryIsSharedByCreateAndRename(t *testing.T) {
+	repository := &fakeRepository{}
+	service := NewService(repository, nil)
+	actorID := uuid.New()
+	validRequest := CreateDefinitionRequest{
+		Carrier: "cmcc", RuleType: RuleTypePolygonAllowZone,
+		Geometry: json.RawMessage(`{"type":"Polygon","coordinates":[[[121.1,31.1],[121.2,31.1],[121.2,31.2]]]}`),
+		Policy:   json.RawMessage(`{"exit_action":"notify_only"}`), ActorID: actorID,
+	}
+
+	validRequest.Name = strings.Repeat("围", 128)
+	_, err := service.CreateDefinition(context.Background(), validRequest)
+	require.NoError(t, err)
+
+	validRequest.Name = strings.Repeat("围", 129)
+	_, err = service.CreateDefinition(context.Background(), validRequest)
+	require.Error(t, err)
+	var businessErr *commonerrors.BusinessError
+	require.True(t, errors.As(err, &businessErr))
+	assert.Equal(t, ErrCodeDefinitionNameInvalid, businessErr.Code)
+
+	err = service.RenameDefinition(
+		context.Background(), uuid.New(), strings.Repeat("围", 129), actorID,
+	)
+	require.Error(t, err)
+	require.True(t, errors.As(err, &businessErr))
+	assert.Equal(t, ErrCodeDefinitionNameInvalid, businessErr.Code)
 }
 
 func TestService_PreviewGeofenceCandidatesClassifiesDevices(t *testing.T) {
@@ -515,6 +559,14 @@ func TestService_BindingLifecycleRequiresActorAndDestructiveReason(t *testing.T)
 		context.Background(),
 		bindingID,
 		uuid.Nil,
+		"resume after maintenance",
+	)
+	require.Error(t, err)
+	_, err = service.ResumeBinding(
+		context.Background(),
+		bindingID,
+		uuid.New(),
+		" ",
 	)
 	require.Error(t, err)
 	assert.Zero(t, repository.transitionBindingCalls)
@@ -540,6 +592,7 @@ func TestService_BindingLifecycleDelegatesExplicitTargets(t *testing.T) {
 		context.Background(),
 		bindingID,
 		actorID,
+		"maintenance completed",
 	)
 	require.NoError(t, err)
 	assert.Equal(t, BindingStatusActive, resumed.Status)
