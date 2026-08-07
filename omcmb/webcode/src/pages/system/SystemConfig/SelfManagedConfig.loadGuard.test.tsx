@@ -159,6 +159,7 @@ describe('self-managed system config load guard', () => {
       'minio.retention': { raw_object_days: '30' },
       'stationlog.retention': {
         max_retention_days: '30',
+        cleanup_interval_minutes: '60',
         max_file_count: '0',
         max_file_count_per_device: '0',
       },
@@ -198,6 +199,69 @@ describe('self-managed system config load guard', () => {
       expect(hookMocks.mutateAsync).toHaveBeenCalledWith({
         category: 'acs.backpressure',
         items: [{ key: 'disk_high_pct', value: '91', value_type: 'int' }],
+      });
+    });
+  });
+
+  it('资源保留与背压支持保存基站日志清理周期并校验范围', async () => {
+    const user = userEvent.setup();
+    const valuesByCategory: Record<string, Record<string, string>> = {
+      'acs.backpressure': {
+        enabled: 'true',
+        disk_high_pct: '90',
+        disk_low_pct: '70',
+        check_interval_sec: '60',
+      },
+      'minio.retention': { raw_object_days: '30' },
+      'stationlog.retention': {
+        max_retention_days: '30',
+        cleanup_interval_minutes: '60',
+        max_file_count: '0',
+        max_file_count_per_device: '0',
+      },
+      raw_archive: { compress_after_ingest: 'false' },
+    };
+    hookMocks.query.mockImplementation((category: string) => ({
+      data: Object.entries(valuesByCategory[category]).map(([key, value]) => ({
+        id: `${category}-${key}`,
+        category,
+        key,
+        value,
+        valueType: key === 'enabled' || key === 'compress_after_ingest' ? 'bool' : 'int',
+        isPublic: false,
+        isSecret: false,
+      })),
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      isSuccess: true,
+      refetch: hookMocks.refetch,
+    }));
+    hookMocks.mutateAsync.mockResolvedValue({});
+
+    render(<RetentionBackpressureSection />);
+
+    const card = screen.getByText('retentionBp.stationlog.title').closest('.ant-card');
+    expect(card).not.toBeNull();
+    const cardText = (card as HTMLElement).textContent ?? '';
+    expect(cardText.indexOf('retentionBp.field.cleanup_interval_minutes')).toBeGreaterThan(
+      cardText.indexOf('retentionBp.field.max_file_count_per_device'),
+    );
+    const intervalInput = within(card as HTMLElement).getByRole('spinbutton', {
+      name: 'retentionBp.field.cleanup_interval_minutes',
+    });
+    await waitFor(() => expect(intervalInput).toHaveValue('60'));
+    expect(intervalInput).toHaveAttribute('aria-valuemin', '10');
+    expect(intervalInput).toHaveAttribute('aria-valuemax', '1440');
+
+    await user.clear(intervalInput);
+    await user.type(intervalInput, '45');
+    await user.click(within(card as HTMLElement).getByRole('button', { name: 'retentionBp.save' }));
+
+    await waitFor(() => {
+      expect(hookMocks.mutateAsync).toHaveBeenCalledWith({
+        category: 'stationlog.retention',
+        items: [{ key: 'cleanup_interval_minutes', value: '45', value_type: 'int' }],
       });
     });
   });

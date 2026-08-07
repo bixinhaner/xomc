@@ -7694,9 +7694,11 @@ const messages: Record<string, string> = {
   'retentionBp.field.check_interval_sec':    'Sample Interval (sec)',
   'retentionBp.field.raw_object_days':       'Raw File Retention (days)',
   'retentionBp.field.max_retention_days':    'Station Log Retention (days)',
+  'retentionBp.field.cleanup_interval_minutes': 'Station Log Cleanup Interval (minutes)',
   'retentionBp.field.max_file_count':        'Fault Log File Quota (0=disabled)',
   'retentionBp.field.max_file_count_per_device': 'Fault Log File Quota Per Device (0=disabled)',
   'retentionBp.field.compress_after_ingest': 'Compress New Files After Ingest',
+  'retentionBp.validate.range':              '{field} must be between {min} and {max}',
 
   // -------------------------------------------------------------------------
   // Log Retention & Rotation (Storage Protection > Retention and Cleanup): log.retention + log.rotation
