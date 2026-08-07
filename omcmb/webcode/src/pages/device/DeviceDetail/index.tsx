@@ -948,8 +948,9 @@ const renderCellAdminState = (
   t: ReturnType<typeof useT>,
 ) => {
   return renderStatusTag(value, {
-    '1': { label: t('status.locked'), color: 'warning' },
-    '0': { label: t('status.unlocked'), color: 'success' },
+    // CellEnable.AdminState: 1 = 未锁定，0 = 锁定。
+    '1': { label: t('status.unlocked'), color: 'success' },
+    '0': { label: t('status.locked'), color: 'warning' },
     '2': { label: t('status.unlocked'), color: 'success' },
     '3': { label: t('status.shuttingDown'), color: 'error' },
     true: { label: t('status.locked'), color: 'warning' },
@@ -1331,6 +1332,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
                     pmMetricValueFormat
                     height={220}
                     areaFill
+                    connectNulls
                   />
                 )}
               </div>
@@ -1914,15 +1916,8 @@ export default function DeviceDetail() {
         ),
       },
       { key: 'alarmIdentifier', title: t('alarm.alarmIdentifier'), dataIndex: 'alarmIdentifier', width: 100, mono: true },
-      { key: 'alarmName', title: t('alarm.possibleCause'), dataIndex: 'alarmName', width: 180, ellipsis: true },
       { key: 'specificProblem', title: t('alarm.specificProblem'), dataIndex: 'specificProblem', width: 220, ellipsis: true },
-      {
-        key: 'eventTime',
-        title: t('alarm.time'),
-        dataIndex: 'eventTime',
-        width: 160,
-        render: (_val, record) => formatSystemTime(record.eventTime),
-      },
+      { key: 'alarmName', title: t('alarm.possibleCause'), dataIndex: 'alarmName', width: 260, ellipsis: true, copyable: true },
       {
         key: 'dealState',
         title: t('alarm.status'),
@@ -1933,6 +1928,13 @@ export default function DeviceDetail() {
             {record.dealState === '1' || record.dealState === '3' ? t('alarm.dealState.confirmedUncleared') : t('alarm.dealState.unconfirmedUncleared')}
           </Tag>
         ),
+      },
+      {
+        key: 'eventTime',
+        title: t('alarm.time'),
+        dataIndex: 'eventTime',
+        width: 160,
+        render: (_val, record) => formatSystemTime(record.eventTime),
       },
     ],
     [SEVERITY_LABEL, handleAcknowledgeAlarm, handleClearAlarm, handleShowAlarmDetail, handleUnacknowledgeAlarm, t]

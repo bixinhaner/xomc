@@ -758,6 +758,15 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
       ? (c.param_paths as unknown[]).filter((p): p is string => typeof p === 'string')
       : [];
     const paramPaths = pathsFromRefs.length > 0 ? pathsFromRefs : pathsFromLegacy;
+    const paramRefs = refsRaw.flatMap((r) => {
+      if (!r || typeof r !== 'object') return [];
+      const ref = r as { param_code?: unknown; tr069_path?: unknown };
+      if (typeof ref.tr069_path !== 'string' && typeof ref.param_code !== 'string') return [];
+      return [{
+        paramCode: typeof ref.param_code === 'string' ? ref.param_code : undefined,
+        tr069Path: typeof ref.tr069_path === 'string' ? ref.tr069_path : undefined,
+      }];
+    });
     return {
       commandCode: typeof c.command_code === 'string' ? c.command_code : JSON.stringify(c),
       // 后端 GetTask 注入的友好命令名（命令记录 / 执行结果显示「列出 设备基本信息」而非 command_code）。
@@ -767,6 +776,7 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
           ? (c.operation_type as MMLTaskCommandDetail['operationType'])
           : undefined,
       paramPaths: paramPaths.length > 0 ? paramPaths : undefined,
+      paramRefs: paramRefs.length > 0 ? paramRefs : undefined,
       paramValues: Array.isArray(c.param_values) ? (c.param_values as unknown[]) : undefined,
       // 裸路径/自定义 MOD 把下发值存于 parameters（path→value map），非 param_values 数组。
       parameters:

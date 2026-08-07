@@ -146,7 +146,10 @@ export default function MMLConsole() {
         // 双报文页签）；其余命令按逐 PATH 合并。
         rows =
           le.meta.operationType === 'MOD' && le.setValues
-            ? buildMODReadbackRows(resp.items, le.setValues)
+            ? buildMODReadbackRows(resp.items, le.setValues, {
+                commandName: le.meta.commandName,
+                commandCode: le.meta.label,
+              })
             : buildDeviceRows(resp.items, le.columns, le.meta.read);
       }
     } catch {
@@ -471,6 +474,25 @@ export default function MMLConsole() {
   const handleReexecute = (deviceSn: string): void => {
     // 选中记录仍在途时不重发（避免对同一在途任务重复下发）；其它命令在途不影响本条重发。
     if (activeRunning) return;
+
+    // MOD 必须优先使用当前记录的参数快照，不能使用顶部可能仍保留的另一条命令配置。
+    // 历史任务没有当前 command/config 时也通过裸路径请求重建同一条 SetParameterValues。
+    const historicalOp = dispExecMeta?.operationType;
+    const historicalValues = activeRecord?.setValues;
+    const historicalPaths = dispColumns.map((c) => c.path).filter(Boolean);
+    if (historicalOp === 'MOD' && historicalValues && historicalPaths.length > 0) {
+      void runExecute(
+        {
+          mode: 'raw',
+          operationType: 'MOD',
+          rows: historicalPaths.map((path, index) => ({ id: index, path, value: historicalValues[path] ?? '' })),
+          execMode: 'whole',
+        },
+        [deviceSn],
+      );
+      return;
+    }
+
     if (command || config) {
       const req: ExecRequest =
         config ?? { mode: 'standard', checkedPaths: command?.paramPaths.map((p) => p.path) ?? [] };

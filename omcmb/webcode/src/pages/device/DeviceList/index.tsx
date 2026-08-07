@@ -162,6 +162,15 @@ const FILTER_COLUMN_MAP: Record<string, string> = {
 
 type TFn = (id: string, values?: Record<string, string | number>) => string;
 
+function formatCellIdentifier(value: string | null | undefined): string {
+  if (!value) return '';
+  return value
+    .split(/[,，;；、\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(',');
+}
+
 function offlineDurationText(t: TFn, days?: number, hours?: number, minutes?: number): string {
   if (days === undefined || days === null) return '-';
   if (days >= 365) {
@@ -1528,8 +1537,9 @@ export default function DeviceList() {
   );
 
   const adminStateStatusMap = useMemo<Record<string, { label: string; color: string }>>(() => ({
-    '1': { label: t('status.locked'), color: 'warning' },
-    '0': { label: t('status.unlocked'), color: 'success' },
+    // CellEnable.AdminState: 1 = 未锁定，0 = 锁定。
+    '1': { label: t('status.unlocked'), color: 'success' },
+    '0': { label: t('status.locked'), color: 'warning' },
     '2': { label: t('status.unlocked'), color: 'success' },
     '3': { label: t('status.shuttingDown'), color: 'error' },
     true: { label: t('status.locked'), color: 'warning' },
@@ -1738,13 +1748,13 @@ export default function DeviceList() {
             // #361: 告警级别 Tag 旁拼接活动告警数（如「重要 · 3」）。
             const count = record.activeAlarmCount ?? 0;
             const display = count > 0 ? `${label} · ${count}` : label;
-            // 点击告警跳转到设备详情告警 tab
+            // 点击告警跳转到设备详情当前告警 tab
             return (
               <Tag
                 color={color}
                 style={{ cursor: 'pointer' }}
                 onMouseEnter={() => prefetchDeviceDetailEntry(record)}
-                onClick={() => openDeviceDetail(record, 'alarm')}
+                onClick={() => openDeviceDetail(record, 'alarms')}
               >
                 {display}
               </Tag>
@@ -2036,16 +2046,21 @@ export default function DeviceList() {
       },
       {
         key: 'siteName',
-        title: t('device.cellName'),
+        title: t('device.cellIdentifier'),
         dataIndex: 'cellId',
         width: 130,
         hidden: true,
         ellipsis: true,
         group: 'common',
-        // cellId 为空/null/空串 → 显占位符 '--'(绝不回退显 SN/设备编码,#184)。
-        render: (val) => {
-          const v = val as string | null | undefined;
-          return v == null || v === '' ? '--' : v;
+        // NR 使用 NCI，LTE 使用 ECI，GSM 保持使用 cellId；空值显示占位符。
+        render: (_val, record) => {
+          const cellIdentifier = record.networkType === 'gNB'
+            ? record.cellId
+            : record.networkType === 'eNB'
+              ? record.cellId || record.eci
+              : record.cellId;
+          const formatted = formatCellIdentifier(cellIdentifier);
+          return formatted === '' ? '--' : formatted;
         },
       },
       // Remark 列暂时隐藏（用户反馈：含义不明 + 表头自定义编辑能力暂未对接后端持久化）。
@@ -2243,6 +2258,15 @@ export default function DeviceList() {
         }
         case 'rfStatus':
           return record.rfStatus || '';
+        case 'siteName': {
+          const cellIdentifier = record.networkType === 'gNB'
+            ? record.cellId
+            : record.networkType === 'eNB'
+              ? record.cellId || record.eci
+              : record.cellId;
+          const formatted = formatCellIdentifier(cellIdentifier);
+          return formatted === '' ? '--' : formatted;
+        }
         case 'pci':
         case 'tac':
         case 'band':

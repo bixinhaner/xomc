@@ -4,10 +4,8 @@
  * 从 TaskDashboardPane 抽出，供页签1（任务仪表盘）+ 页签2（设备列表）复用同一渲染。
  *
  * #200 多设备折线断裂：多设备各自时钟/上报相位不同，同一 15min 窗口在并集轴上落成相邻
- * 但不同的桶，某设备系列在别设备的桶处取不到值 → 大量空洞 → connectNulls=false 时相邻点
- * 连不成线、整图贴底锯齿。后端已把 KPI 行 start_time 对齐到完整 15min 窗口（copy_ingest），
- * 前端再开 connectNulls=true 兜底：跨空洞桶连线，让稀疏多设备曲线连续（不改"真缺采样"语义——
- * 仅视觉连线，缺失桶仍无数据点 / tooltip 仍按桶显示）。
+ * 但不同的桶，某设备系列在别设备的桶处取不到值 → 大量空洞。与首页 KPI 趋势统一为
+ * connectNulls=true：跨空桶连接相邻有效点；缺失桶仍无数据点，tooltip 仍按桶显示。
  */
 
 import { memo, useEffect, useMemo, useState } from 'react';
@@ -166,9 +164,8 @@ function ChartCard({ chart }: { chart: MetricChart }) {
         showSymbol: true,
         symbolSize: 4,
         data: s.values,
-        // issue #429：规整网格下断档槽位置 '-'/null，connectNulls=false 让缺口处线断开
-        // （断档在网管有运维含义，不再连线抹平）；#200 的"假空洞"在规整网格下已不存在。
-        connectNulls: false,
+        // 与首页 KPI 趋势一致：空桶不补值，但连接前后已有数据点。
+        connectNulls: true,
       })),
     [chart.series],
   );
@@ -183,8 +180,8 @@ function ChartCard({ chart }: { chart: MetricChart }) {
         showSymbol: true,
         symbolSize: 4,
         data: s.values,
-        // issue #429：对比虚线同当前系列，断档处断开线（与上文同口径）。
-        connectNulls: false,
+        // 对比虚线同当前系列，空桶保留但跨空桶续连。
+        connectNulls: true,
         lineStyle: { type: 'dashed' as const },
       })),
     [chart.compareSeries],

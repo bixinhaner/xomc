@@ -2975,6 +2975,25 @@ func deviceTaskRowToResultMap(row DeviceTaskResultRowView, task *MMLTask) map[st
 			m["operation_type"] = op
 		}
 	}
+	// 老任务或结果查询时任务快照可能没有可用 command_index；仍从实际 RPC
+	// 方法补齐最小的命令语义，让 MOD 结果不会在前端显示为空。
+	if _, ok := m["operation_type"]; !ok {
+		switch row.Method {
+		case "SetParameterValues":
+			m["operation_type"] = "MOD"
+		case "GetParameterValues", "GetParameterAttributes", "GetParameterNames":
+			m["operation_type"] = "LST"
+		case "AddObject":
+			m["operation_type"] = "ADD"
+		case "DeleteObject":
+			m["operation_type"] = "RMV"
+		}
+	}
+	if _, ok := m["command_code"]; !ok {
+		if op, ok := m["operation_type"].(string); ok && op != "" {
+			m["command_code"] = op
+		}
+	}
 	if script := formatMMLScriptForResult(command, rawLine, row.DeviceSN); script != "" {
 		m["mml_script"] = script
 	}

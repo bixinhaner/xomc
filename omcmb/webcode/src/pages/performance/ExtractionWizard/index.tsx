@@ -216,6 +216,7 @@ export default function ExtractionWizard() {
                     series={chartSeries.map((s) => ({ name: s.name, data: s.data }))}
                     xData={chartSeries[0]?.xData ?? []}
                     height={380}
+                    connectNulls
                   />
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#8c8c8c' }}>
