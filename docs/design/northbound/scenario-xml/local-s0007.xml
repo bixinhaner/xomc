@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<NorthboundScenario schema="xomc-nb-scenario-v1" code="local-s0007" legacySource="S0007" name="Legacy S0007 compact">
+  <Defaults endpointGroup="default" profileSet="baicells-legacy-v1" dataVersion="1.0" compression="zip" timezone="local"/>
+  <Options manifest="inherit" lastPeriodInToday="inherit" ftpDateFolderFormat="inherit" logFileGenerateType="none"/>
+  <Files>
+    <Group id="cm-daily-csv" domain="CM" format="CSV" period="24H" cron="0 0 17 * * ?" path="/#FTPRoot#/#Province#/#OMC-R#/CM/#DateTime#/" name="Baicells-#Object#-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#][-#FileID#]">
+      <Object code="CP"/>
+      <Object code="EP"/>
+      <Object code="CC"/>
+      <Object code="CE"/>
+      <Object code="COMS"/>
+    </Group>
+    <Group id="pm-60m" domain="PM" format="CSV" period="60M" cron="0 20 * * * ?" path="/#FTPRoot#/#Province#/#OMC-R#/PM/#DateTime#/" name="Baicells-#Object#-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#]-#DataPeriod#[-#FileID#]">
+      <Object code="PC"/>
+    </Group>
+  </Files>
+</NorthboundScenario>

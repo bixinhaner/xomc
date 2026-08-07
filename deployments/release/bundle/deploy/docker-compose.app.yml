@@ -202,6 +202,11 @@ services:
       OMC_PUBLIC_HOST: ${OMC_PUBLIC_HOST}   # 本机对外 IP（基站可达），见 deploy/.env
     ports:
       - "127.0.0.1:9091:9091"        # metrics（Prometheus 经 docker network 抓取，外网不暴露）
+      # 北向 Socket 默认端口。页面改监听端口时，需同步调整这里的端口映射并重启 app。
+      - "${NORTHBOUND_SOCKET_CTCC_PORT:-31232}:${NORTHBOUND_SOCKET_CTCC_PORT:-31232}"
+      - "${NORTHBOUND_SOCKET_CUCC_PORT:-31233}:${NORTHBOUND_SOCKET_CUCC_PORT:-31233}"
+      # 北向 SNMP MIB 查询 Agent 默认 UDP 端口。页面改 Agent 监听端口时，需同步调整这里的端口映射。
+      - "${NORTHBOUND_SNMP_AGENT_PORT:-161}:${NORTHBOUND_SNMP_AGENT_PORT:-161}/udp"
     volumes:
       # 宿主实例配置覆盖镜像内默认值（/etc/omcgo/app.prod.yaml）
       - /opt/omc/etc/app.prod.yaml:/etc/omcgo/app.prod.yaml:ro

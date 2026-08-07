@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<NorthboundScenario schema="xomc-nb-scenario-v1" code="local-s0002" legacySource="S0002" name="Legacy S0002 compact">
+  <Defaults endpointGroup="default" profileSet="baicells-legacy-v1" dataVersion="1.0" compression="zip" timezone="local"/>
+  <Options manifest="inherit" lastPeriodInToday="inherit" ftpDateFolderFormat="inherit" logFileGenerateType="none"/>
+  <Files>
+    <Group id="cm-daily" domain="CM" format="XML" period="24H" cron="30 1 0 * * ?" path="/#FTPRoot#/#Province#/#OMC-R#/CM/#DateTime#/" name="Baicells-#Object#-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#][-#FileID#]">
+      <Object code="CP"/>
+      <Object code="EP"/>
+      <Object code="CC"/>
+      <Object code="CE"/>
+    </Group>
+    <Group id="pm-15m" domain="PM" format="CSV" period="15M" cron="0 5/15 * * * ?" path="/#FTPRoot#/#Province#/#OMC-R#/PM/#DateTime#/" name="Baicells-#Object#-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#]-#DataPeriod#[-#FileID#]">
+      <Object code="PE"/>
+      <Object code="PC"/>
+    </Group>
+    <Group id="mr-15m" domain="MR" format="XML" period="15M" cron="0 0/15 * * * ?" path="/#FTPRoot#/#Province#/#OMC-R#/MR/#DateTime#/" name="#ModuleType#-Baicells-#Object#-#LocalHost#-#eNBID#-#DateTime#[-#Ri#].xml">
+      <Object code="MRO"/>
+      <Object code="MRE"/>
+      <Object code="MRS"/>
+    </Group>
+  </Files>
+</NorthboundScenario>

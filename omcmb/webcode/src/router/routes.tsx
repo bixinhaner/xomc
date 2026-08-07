@@ -49,7 +49,7 @@ const CellManagement     = React.lazy(() => import('@/pages/config/CellManagemen
 const BaselineMgmt       = React.lazy(() => import('@/pages/config/BaselineManagement'));
 const CommonConfig       = React.lazy(() => import('@/pages/config/CommonConfig'));
 const NeighborParams     = React.lazy(() => import('@/pages/config/NeighborParams'));
-const NorthboundMgmt     = React.lazy(() => import('@/pages/config/NorthboundManagement'));
+const NorthboundPageConfig = React.lazy(() => import('@/pages/config/NorthboundPageConfig'));
 const AutoProvisioning   = React.lazy(() => import('@/pages/config/AutoProvisioning'));
 const InteropTesting     = React.lazy(() => import('@/pages/config/InteropTesting'));
 
@@ -207,6 +207,10 @@ export const routes: RouteObject[] = [
     element: <LoginPage />,
   },
   {
+    path: '/northbound-page-config',
+    element: withSuspense(NorthboundPageConfig),
+  },
+  {
     path: '/',
     element: (
       <PrivateRoute>
@@ -255,7 +259,8 @@ export const routes: RouteObject[] = [
       { path: 'config/baseline',         element: withSuspense(BaselineMgmt) },
       { path: 'config/common',           element: withSuspense(CommonConfig) },
       { path: 'config/neighbor',         element: withSuspense(NeighborParams) },
-      { path: 'config/northbound',       element: withSuspense(NorthboundMgmt) },
+      { path: 'config/northbound',       element: <Navigate to="/config/northbound-page-config" replace /> },
+      { path: 'config/northbound-page-config', element: withSuspense(NorthboundPageConfig) },
       { path: 'config/auto-provision',   element: withSuspense(AutoProvisioning) },
       { path: 'config/interop-test',     element: withSuspense(InteropTesting) },
 

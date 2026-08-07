@@ -5,6 +5,9 @@
 #   8444  — HTTPS（TLS，可选）
 #   50051 — gRPC（ACS ↔ App）
 #   9091  — Prometheus metrics + /healthz + /readyz
+#   31232 — 北向 Socket CTCC 默认端口
+#   31233 — 北向 Socket CUCC 默认端口
+#   161/UDP — 北向 SNMP MIB 查询 Agent 默认端口
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -55,6 +58,15 @@ spec:
             - name: metrics
               containerPort: 9091
               protocol: TCP
+            - name: nb-socket-ctcc
+              containerPort: 31232
+              protocol: TCP
+            - name: nb-socket-cucc
+              containerPort: 31233
+              protocol: TCP
+            - name: nb-snmp-agent
+              containerPort: 161
+              protocol: UDP
           envFrom:
             - secretRef:
                 name: omcgo-app-secret
