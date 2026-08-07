@@ -73,6 +73,6 @@ RUN chmod +x /entrypoint.sh
 ENV TZ=Asia/Shanghai
 ENV OMCGO_SERVICE=app
 
-EXPOSE 8081 8444 9091 50051
+EXPOSE 8081 8444 9091 50051 31232 31233 161/udp
 
 ENTRYPOINT ["/entrypoint.sh"]

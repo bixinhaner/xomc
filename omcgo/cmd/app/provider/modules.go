@@ -45,7 +45,9 @@ import (
 	mrtask "github.com/omcgo/omcgo/internal/mr/task"
 	"github.com/omcgo/omcgo/internal/nedirect"
 	"github.com/omcgo/omcgo/internal/northbound"
+	nbpageconfig "github.com/omcgo/omcgo/internal/northbound/pageconfig"
 	"github.com/omcgo/omcgo/internal/northbound/push"
+	nbsnmp "github.com/omcgo/omcgo/internal/northbound/snmp"
 	nbsync "github.com/omcgo/omcgo/internal/northbound/sync"
 	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/ops"
@@ -1494,6 +1496,57 @@ func initNorthboundModule(c *Container) error {
 	syncService := nbsync.NewService(c.DeviceRepo, c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, logger)
 	nbService := northbound.NewNorthboundService(c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, pushEngine, syncService, logger)
 	nbRouter := northbound.NewRouter(nbService)
+	pageConfigRepo := nbpageconfig.NewPgRepository(c.PgPool).WithTsPool(c.TsPool)
+	pageConfigService := nbpageconfig.NewServiceWithRepository(nbpageconfig.NewDefaultCatalog(), pageConfigRepo)
+	pageConfigService.SetAlarmStore(c.AlarmPgStore)
+	pageConfigService.SetSNMPSender(nbsnmp.NewGoSNMPSender(logger.Named("page-config-snmp")))
+	if c.MinIO != nil {
+		localArchiveStore := nbpageconfig.NewMinIOLocalArchiveStore(c.MinIO, nbpageconfig.DefaultLocalArchiveBucket)
+		if err := localArchiveStore.Ensure(context.Background()); err != nil {
+			logger.Warn("northbound page-config local archive bucket ensure failed", zap.Error(err))
+		}
+		pageConfigService.SetLocalArchive(
+			localArchiveStore,
+			nbpageconfig.LocalArchiveOptions{RetentionDays: 7},
+		)
+	}
+	nbRouter.SetPageConfigService(pageConfigService)
+	pageConfigScheduler := nbpageconfig.NewScheduler(pageConfigService, pageConfigRepo, logger)
+	pageConfigScheduler.Start(context.Background())
+	c.GS.Register("northbound-page-config-scheduler", 1, func(context.Context) error {
+		pageConfigScheduler.Stop()
+		pageConfigScheduler.Wait()
+		return nil
+	})
+	snmpForwarder := nbpageconfig.NewSNMPAlarmForwarder(pageConfigService, nil, logger)
+	alarmHandlers := []nbpageconfig.AlarmEventHandler{snmpForwarder.HandleAlarmEvent}
+	snmpMIBAgentManager := nbpageconfig.NewSNMPMIBAgentManager(pageConfigService, logger)
+	pageConfigService.RegisterSNMPConfigChangeListener(snmpMIBAgentManager.RequestReload)
+	if err := snmpMIBAgentManager.Start(context.Background()); err != nil {
+		logger.Warn("northbound page-config SNMP MIB agent start failed", zap.Error(err))
+	} else {
+		c.GS.Register("northbound-page-config-snmp-mib-agent", 1, func(context.Context) error {
+			return snmpMIBAgentManager.Stop()
+		})
+	}
+	socketServerManager := nbpageconfig.NewSocketAlarmServerManager(pageConfigService, nil, logger)
+	pageConfigService.RegisterSocketConfigChangeListener(socketServerManager.RequestReload)
+	if err := socketServerManager.Start(context.Background()); err != nil {
+		logger.Warn("northbound page-config socket alarm server start failed", zap.Error(err))
+	} else {
+		alarmHandlers = append(alarmHandlers, socketServerManager.HandleAlarmEvent)
+		c.GS.Register("northbound-page-config-socket-server", 1, func(context.Context) error {
+			return socketServerManager.Stop()
+		})
+	}
+	alarmConsumer := nbpageconfig.NewAlarmEventConsumer(c.EventBus, logger, alarmHandlers...)
+	if err := alarmConsumer.Start(); err != nil {
+		logger.Warn("northbound page-config alarm event consumer start failed", zap.Error(err))
+	} else {
+		c.GS.Register("northbound-page-config-alarm-consumer", 1, func(context.Context) error {
+			return alarmConsumer.Stop()
+		})
+	}
 	// 死信队列端点（GET /push/deadletter、POST /push/deadletter/:id/replay）
 	// 依赖 outbox repo；不注入则恒 503 "outbox not configured"。
 	nbRouter.SetOutboxRepo(outboxRepo)

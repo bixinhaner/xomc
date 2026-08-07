@@ -3,10 +3,13 @@ package snmp
 import (
 	"context"
 	"errors"
+	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	g "github.com/gosnmp/gosnmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -165,6 +168,58 @@ func TestBuildPDUs_TypeMapping(t *testing.T) {
 	assert.Equal(t, "fallback", last.Value)
 }
 
+func TestGoSNMPSender_Send_DeliversV2TrapToReceiver(t *testing.T) {
+	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	conn, err := net.ListenUDP("udp", addr)
+	require.NoError(t, err)
+	defer conn.Close()
+	_, portText, err := net.SplitHostPort(conn.LocalAddr().String())
+	require.NoError(t, err)
+	port, err := net.LookupPort("udp", portText)
+	require.NoError(t, err)
+
+	received := make(chan *g.SnmpPacket, 1)
+	go func() {
+		buf := make([]byte, 4096)
+		_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+		n, _, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			return
+		}
+		packet, err := g.Default.UnmarshalTrap(buf[:n], false)
+		if err == nil {
+			received <- packet
+		}
+	}()
+
+	sender := NewGoSNMPSender(nil)
+	target := &TrapTarget{
+		ID:        "receiver-test",
+		OSSName:   "receiver-test",
+		Host:      "127.0.0.1",
+		Port:      uint16(port),
+		Version:   VersionV2c,
+		Community: "public",
+		Timeout:   time.Second,
+	}
+	vars := []Variable{
+		{OID: OIDNotificationID, Type: VarTypeInteger, Value: 920188},
+		{OID: OIDAlarmUniqueID, Type: VarTypeOctetString, Value: "A0188"},
+	}
+	require.NoError(t, sender.Send(context.Background(), target, vars))
+
+	select {
+	case packet := <-received:
+		require.NotNil(t, packet)
+		require.GreaterOrEqual(t, len(packet.Variables), 4)
+		assert.Equal(t, OIDNotificationID, strings.TrimPrefix(packet.Variables[2].Name, "."))
+		assert.Equal(t, OIDAlarmUniqueID, strings.TrimPrefix(packet.Variables[3].Name, "."))
+	case <-time.After(3 * time.Second):
+		t.Fatal("did not receive SNMP trap")
+	}
+}
+
 func TestDefaultMapper_FieldOrderAndContent(t *testing.T) {
 	mapper := DefaultAlarmMapper()
 	now := time.Date(2026, 4, 28, 10, 0, 0, 0, time.UTC)
@@ -191,44 +246,48 @@ func TestDefaultMapper_FieldOrderAndContent(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "minimal alarm produces 4 vars in CMCC order",
+			name: "minimal alarm produces 18 vars in MIB order",
 			alarm: &AlarmEvent{
 				AlarmID: "A1", DeviceSerial: "D1", Severity: "critical", OccurTime: now,
 			},
 			assertVar: func(t *testing.T, vars []Variable) {
-				require.Len(t, vars, 4)
-				assert.Equal(t, OIDDeviceSerial, vars[0].OID)
-				assert.Equal(t, "D1", vars[0].Value)
-				assert.Equal(t, OIDAlarmIdentifier, vars[1].OID)
+				require.Len(t, vars, 18)
+				assert.Equal(t, OIDNotificationID, vars[0].OID)
+				assert.Equal(t, 1, vars[0].Value)
+				assert.Equal(t, OIDAlarmUniqueID, vars[1].OID)
 				assert.Equal(t, "A1", vars[1].Value)
-				assert.Equal(t, OIDAlarmSeverity, vars[2].OID)
-				assert.Equal(t, 1, vars[2].Value, "critical → 1 (CMCC)")
-				assert.Equal(t, OIDOccurTime, vars[3].OID)
+				assert.Equal(t, OIDNotificationType, vars[2].OID)
+				assert.Equal(t, "1", vars[2].Value)
+				assert.Equal(t, OIDEventTime, vars[3].OID)
+				assert.Equal(t, OIDEquipmentSDN, vars[4].OID)
+				assert.Equal(t, "D1", vars[4].Value)
+				assert.Equal(t, OIDPerceivedSeverity, vars[15].OID)
+				assert.Equal(t, "critical", vars[15].Value)
 			},
 		},
 		{
-			name: "full alarm appends type + carrier",
+			name: "full alarm maps type and carrier into MIB fields",
 			alarm: &AlarmEvent{
 				AlarmID: "A1", DeviceSerial: "D1", Severity: "major",
 				AlarmType: "POWER_FAIL", Carrier: "cmcc", OccurTime: now,
 			},
 			assertVar: func(t *testing.T, vars []Variable) {
-				require.Len(t, vars, 6)
-				assert.Equal(t, OIDAlarmType, vars[4].OID)
-				assert.Equal(t, "POWER_FAIL", vars[4].Value)
-				assert.Equal(t, OIDCarrierTag, vars[5].OID)
-				assert.Equal(t, "cmcc", vars[5].Value)
-				assert.Equal(t, 2, vars[2].Value, "major → 2")
+				require.Len(t, vars, 18)
+				assert.Equal(t, OIDAlarmType, vars[14].OID)
+				assert.Equal(t, "POWER_FAIL", vars[14].Value)
+				assert.Equal(t, OIDAdditionalInformation, vars[17].OID)
+				assert.Equal(t, "cmcc", vars[17].Value)
+				assert.Equal(t, "major", vars[15].Value)
 			},
 		},
 		{
-			name: "unknown severity downgrades to 5",
+			name: "unknown severity maps to unknown string",
 			alarm: &AlarmEvent{
 				AlarmID: "A1", DeviceSerial: "D1", Severity: "FOO",
 				OccurTime: now,
 			},
 			assertVar: func(t *testing.T, vars []Variable) {
-				assert.Equal(t, 5, vars[2].Value)
+				assert.Equal(t, "unknown", vars[15].Value)
 			},
 		},
 		{

@@ -58,6 +58,9 @@ export const componentRegistry: Record<string, ComponentType> = {
   'config/CommonConfig': lazy(() => import('@/pages/config/CommonConfig')),
   'config/NeighborParams': lazy(() => import('@/pages/config/NeighborParams')),
   'config/NorthboundManagement': lazy(() => import('@/pages/config/NorthboundManagement')),
+  'config/NorthboundPageConfig': lazy(
+    () => import('@/pages/config/NorthboundPageConfig'),
+  ),
   'config/AutoProvisioning': lazy(() => import('@/pages/config/AutoProvisioning')),
   'config/InteropTesting': lazy(() => import('@/pages/config/InteropTesting')),
 

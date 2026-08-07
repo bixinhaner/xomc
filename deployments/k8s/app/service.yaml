@@ -36,3 +36,15 @@ spec:
       port: 9091
       targetPort: metrics
       protocol: TCP
+    - name: nb-socket-ctcc
+      port: 31232
+      targetPort: nb-socket-ctcc
+      protocol: TCP
+    - name: nb-socket-cucc
+      port: 31233
+      targetPort: nb-socket-cucc
+      protocol: TCP
+    - name: nb-snmp-agent
+      port: 161
+      targetPort: nb-snmp-agent
+      protocol: UDP
