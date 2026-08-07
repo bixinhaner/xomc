@@ -19,7 +19,7 @@
 #   sudo bash deploy/install.sh --skip-migrate           # 不跑 migrate / seed
 #   sudo bash deploy/install.sh --skip-web               # 不起 web 容器
 #   sudo bash deploy/install.sh --skip-monitoring        # 不起监控栈
-#   sudo bash deploy/install.sh --fresh-install --yes --public-host 172.24.224.78
+#   sudo bash deploy/install.sh --fresh-install --yes --public-host 192.168.1.100
 #                                                        # 清理旧数据后全新安装
 #   sudo bash deploy/install.sh --fresh-install --floor-tolerance-pct 80 ...
 #                                                        # 自定义资源下限缺口容忍度（0-99）
@@ -324,7 +324,7 @@ fresh_install_reset() {
   [ -n "$PUBLIC_HOST_OVERRIDE" ] ||
     PUBLIC_HOST_OVERRIDE="$(deploy_env_file_value OMC_PUBLIC_HOST "$package_env" 2>/dev/null || true)"
   deploy_env_public_host_valid "$PUBLIC_HOST_OVERRIDE" ||
-    die "全新安装必须提供有效的 --public-host（例如 172.24.224.78）" "Fresh install requires a valid --public-host (for example, 172.24.224.78)" 1
+    die "全新安装必须提供有效的 --public-host（例如 192.168.1.100）" "Fresh install requires a valid --public-host (for example, 192.168.1.100)" 1
   set_env_value "$package_env" OMC_PUBLIC_HOST "$PUBLIC_HOST_OVERRIDE" ||
     die "无法写入 $package_env 的 OMC_PUBLIC_HOST" "Unable to write OMC_PUBLIC_HOST to $package_env" 1
 
