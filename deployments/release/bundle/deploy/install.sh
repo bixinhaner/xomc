@@ -374,7 +374,7 @@ fresh_install_reset() {
   [ -n "$PUBLIC_HOST_OVERRIDE" ] ||
     PUBLIC_HOST_OVERRIDE="$(deploy_env_file_value OMC_PUBLIC_HOST "$package_env" 2>/dev/null || true)"
   deploy_env_public_host_valid "$PUBLIC_HOST_OVERRIDE" ||
-    die "全新安装必须提供有效的 --public-host（例如 192.168.1.101）" "Fresh install requires a valid --public-host (for example, 192.168.1.100)" 1
+    die "全新安装必须提供有效的 --public-host（例如 192.168.1.100）" "Fresh install requires a valid --public-host (for example, 192.168.1.100)" 1
   set_env_value "$package_env" OMC_PUBLIC_HOST "$PUBLIC_HOST_OVERRIDE" ||
     die "无法写入 $package_env 的 OMC_PUBLIC_HOST" "Unable to write OMC_PUBLIC_HOST to $package_env" 1
 
