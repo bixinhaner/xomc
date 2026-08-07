@@ -57,7 +57,10 @@ type ControlAction struct {
 	CompletedAt           *time.Time              `json:"completed_at,omitempty"`
 }
 
-func marshalControlState(value any) (json.RawMessage, error) {
+func marshalControlState(value []ControlParameterState) (json.RawMessage, error) {
+	if value == nil {
+		value = []ControlParameterState{}
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return nil, err

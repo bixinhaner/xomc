@@ -214,6 +214,46 @@ func TestGeofenceControlMonitorQueuesRFDeactivation(t *testing.T) {
 	require.NotContains(t, string(tasks.request.Params), "ParameterList")
 }
 
+func TestGeofenceControlMonitorQueuesMBS31001IPSecDeactivation(t *testing.T) {
+	tasks := &controlTaskStub{}
+	monitor := NewGeofenceControlMonitor(
+		controlDeviceReaderStub{device: &model.Device{
+			ID:           uuid.New(),
+			SerialNumber: "SN-MBS31001-1",
+			ProductClass: "FAP/mBS31001/DC",
+			Carrier:      model.CarrierCMCC,
+			Technology:   model.TechLTE,
+		}},
+		controlCarrierRegistry(),
+		tasks,
+		zap.NewNop(),
+	)
+	monitor.SetParameterReader(controlParameterReaderStub{parameters: []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", ParameterValue: "false", Writable: true},
+		{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_ENABLE", ParameterValue: "true", Writable: true},
+		{ParameterPath: "Device.FAP.Ipsec.2.TUNNEL_ENABLE", ParameterValue: "true", Writable: true},
+	}})
+	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
+	monitor.SetActionRepository(newControlActionRepositoryStub())
+
+	payload, err := json.Marshal(event.GeofenceDeviceStatePayload{
+		DeviceID:              uuid.New(),
+		SerialNumber:          "SN-MBS31001-1",
+		EffectiveState:        string(EffectiveStateOutside),
+		RequiredActionLevel:   string(ActionLevelDeactivate),
+		EffectiveStateVersion: 9,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, monitor.handleExited(context.Background(), event.Event{
+		Subject: event.SubjectGeofenceDeviceExited,
+		Payload: payload,
+	}))
+	require.NotNil(t, tasks.request)
+	require.Contains(t, string(tasks.request.Params), "Device.FAP.Ipsec.1.TUNNEL_ENABLE")
+	require.Contains(t, string(tasks.request.Params), "Device.FAP.Ipsec.2.TUNNEL_ENABLE")
+}
+
 func TestGeofenceControlMonitorSubscribesOutsideAndEscalationEdges(t *testing.T) {
 	monitor := NewGeofenceControlMonitor(
 		controlDeviceReaderStub{},

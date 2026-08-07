@@ -580,23 +580,32 @@ func (m *GeofenceControlMonitor) geofenceControlPlan(
 	if err != nil {
 		return geofenceControlPlan{}, nil, fmt.Errorf("read geofence device parameter snapshot: %w", err)
 	}
-	instances, err := carrier.DetectGeofenceControlInstances(
-		parameterSnapshot,
-		device.ProductClass,
-		device.Technology,
-	)
-	if err != nil {
-		return geofenceControlPlan{}, nil, fmt.Errorf("detect geofence RF instances: %w", err)
-	}
 	if targets == nil {
-		targets, err = resolver.GeofenceControlParametersForInstances(
+		if snapshotTargets, snapshotErr := carrier.BuildGeofenceControlParametersForSnapshot(
 			device.ProductClass,
 			device.Technology,
 			enabled,
-			instances,
-		)
-		if err != nil {
-			return geofenceControlPlan{}, nil, fmt.Errorf("resolve geofence control parameters: %w", err)
+			parameterSnapshot,
+		); snapshotErr == nil {
+			targets = snapshotTargets
+		} else {
+			instances, detectErr := carrier.DetectGeofenceControlInstances(
+				parameterSnapshot,
+				device.ProductClass,
+				device.Technology,
+			)
+			if detectErr != nil {
+				return geofenceControlPlan{}, nil, fmt.Errorf("detect geofence RF instances: %w", detectErr)
+			}
+			targets, err = resolver.GeofenceControlParametersForInstances(
+				device.ProductClass,
+				device.Technology,
+				enabled,
+				instances,
+			)
+			if err != nil {
+				return geofenceControlPlan{}, nil, fmt.Errorf("resolve geofence control parameters: %w", err)
+			}
 		}
 	}
 	plan, err := buildGeofenceControlPlan(parameterSnapshot, targets)

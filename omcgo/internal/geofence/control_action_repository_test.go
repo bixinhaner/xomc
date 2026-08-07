@@ -1,6 +1,7 @@
 package geofence
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ func TestBuildCreateControlActionQueryPersistsOwnershipEvidence(t *testing.T) {
 	require.Contains(t, args, action.ActionKey)
 	require.Contains(t, args, action.DeviceID)
 	require.Contains(t, args, ControlActionDeactivate)
+	require.Contains(t, args, json.RawMessage("[]"))
 }
 
 func TestBuildGetControlActionByKeyQueryUsesStableIdempotencyKey(t *testing.T) {

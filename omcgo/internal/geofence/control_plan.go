@@ -18,6 +18,10 @@ var geofenceRFControlPathPattern = regexp.MustCompile(
 		`)$`,
 )
 
+var geofenceSingleIPSecControlPathPattern = regexp.MustCompile(
+	`^Device\.FAP\.Ipsec\.([0-9]+)\.TUNNEL_ENABLE$`,
+)
+
 type geofenceControlPlan struct {
 	Before    []ControlParameterState
 	Requested []ControlParameterState
@@ -82,6 +86,14 @@ func findControlParameterSnapshot(
 		}
 	}
 	want := geofenceRFControlPathPattern.FindStringSubmatch(standardPath)
+	if singleIPSec := geofenceSingleIPSecControlPathPattern.FindStringSubmatch(standardPath); len(singleIPSec) == 2 {
+		privatePath := "Device.FAP.Ipsec." + singleIPSec[1] + ".TUNNEL_CONFIG_TUNNELENABLE"
+		for _, parameter := range snapshot {
+			if parameter.ParameterPath == privatePath {
+				return parameter, true
+			}
+		}
+	}
 	if len(want) != 2 {
 		return model.DeviceParameter{}, false
 	}
@@ -133,10 +145,16 @@ func restoreTargets(
 		})
 	}
 	sort.SliceStable(targets, func(i, j int) bool {
-		// Recovery establishes IPSec before RF when both were changed.
-		iIPSec := strings.Contains(targets[i].Path, "IPSEC_ENABLE")
-		jIPSec := strings.Contains(targets[j].Path, "IPSEC_ENABLE")
+		// Recovery establishes every IPSec representation before RF.
+		iIPSec := isGeofenceIPSecPath(targets[i].Path)
+		jIPSec := isGeofenceIPSecPath(targets[j].Path)
 		return iIPSec && !jIPSec
 	})
 	return targets
+}
+
+func isGeofenceIPSecPath(path string) bool {
+	normalized := strings.ToLower(path)
+	return strings.Contains(normalized, ".ipsec.") ||
+		strings.Contains(normalized, "multiipsecconfigparam")
 }

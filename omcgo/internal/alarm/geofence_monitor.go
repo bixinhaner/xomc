@@ -130,6 +130,7 @@ func geofenceLocationAlarm(
 		AlarmType:       "geofence",
 		AlarmIdentifier: AlarmCodeGeofenceLocationOutside,
 		Description:     "Device is outside the configured geofence",
+		ProbableCause:   strPtr("Device is outside the configured geofence"),
 		RaisedAt:        payload.OccurredAt,
 		AlarmSource:     strPtr("omc"),
 		EventType:       strPtr("location_outside"),

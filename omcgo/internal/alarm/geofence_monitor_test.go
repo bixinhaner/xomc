@@ -58,6 +58,8 @@ func TestGeofenceAlarmMonitorProjectsDeviceExitToOneActiveAlarm(
 			require.Len(t, store.active, 1)
 			for _, saved := range store.active {
 				require.Equal(t, AlarmCodeGeofenceLocationOutside, saved.AlarmIdentifier)
+				require.NotNil(t, saved.ProbableCause)
+				require.Equal(t, "Device is outside the configured geofence", *saved.ProbableCause)
 				require.Equal(t, model.CarrierCMCC, saved.Carrier)
 				require.Equal(t, tt.severity, saved.Severity)
 				require.Equal(t, "geofence", saved.AlarmType)

@@ -64,6 +64,66 @@ func TestBuildGeofenceControlParameters(t *testing.T) {
 	}
 }
 
+func TestBuildGeofenceControlParametersForMBS31001(t *testing.T) {
+	parameters, err := BuildGeofenceControlParametersForSnapshot(
+		"FAP/mBS31001/DC",
+		model.TechLTE,
+		false,
+		[]model.DeviceParameter{
+			{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", ParameterValue: "true", Writable: true},
+			{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "true", Writable: true},
+			{ParameterPath: "Device.FAP.Ipsec.2.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "true", Writable: true},
+		},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []GeofenceControlParameter{
+		{Path: "Device.DeviceInfo.SAS.RadioEnable", Value: "0"},
+		{Path: "Device.FAP.Ipsec.1.TUNNEL_ENABLE", Value: "0"},
+		{Path: "Device.FAP.Ipsec.2.TUNNEL_ENABLE", Value: "0"},
+	}, parameters)
+}
+
+func TestBuildGeofenceControlParametersForMBS31001MultiIPSec(t *testing.T) {
+	parameters, err := BuildGeofenceControlParametersForSnapshot(
+		"FAP/mBS31001/DC",
+		model.TechLTE,
+		false,
+		[]model.DeviceParameter{
+			{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", ParameterValue: "true", Writable: true},
+			{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.MultiIpsecConfigParam.1.Enable", ParameterValue: "true", Writable: true},
+			{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.MultiIpsecConfigParam.2.Enable", ParameterValue: "true", Writable: true},
+		},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []GeofenceControlParameter{
+		{Path: "Device.DeviceInfo.SAS.RadioEnable", Value: "0"},
+		{Path: "Device.Services.FAPService.1.CellConfig.LTE.MultiIpsecConfigParam.1.Enable", Value: "0"},
+		{Path: "Device.Services.FAPService.1.CellConfig.LTE.MultiIpsecConfigParam.2.Enable", Value: "0"},
+	}, parameters)
+}
+
+func TestBuildGeofenceControlParametersFromSnapshotPrefersOneRFPathFamily(t *testing.T) {
+	parameters, err := BuildGeofenceControlParametersForSnapshot(
+		"BLQ",
+		model.TechLTE,
+		false,
+		[]model.DeviceParameter{
+			{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", ParameterValue: "true", Writable: true},
+			{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable", ParameterValue: "true", Writable: true},
+			{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", ParameterValue: "true", Writable: true},
+			{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "true", Writable: true},
+		},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []GeofenceControlParameter{
+		{Path: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", Value: "0"},
+		{Path: "Device.FAP.Ipsec.1.TUNNEL_ENABLE", Value: "0"},
+	}, parameters)
+}
+
 func TestBuildGeofenceControlParametersRejectsBMGSMReadOnlyState(t *testing.T) {
 	_, err := BuildGeofenceControlParametersForInstances(
 		"BM",
@@ -103,6 +163,17 @@ func TestDetectGeofenceControlInstancesRejectsMissingWritableInstance(t *testing
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no writable")
+}
+
+func TestDetectGeofenceControlInstancesForMBS31001UsesWritableIPSecTunnels(t *testing.T) {
+	instances, err := DetectGeofenceControlInstances([]model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", Writable: true},
+		{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_CONFIG_TUNNELENABLE", Writable: true},
+		{ParameterPath: "Device.FAP.Ipsec.2.TUNNEL_CONFIG_TUNNELENABLE", Writable: true},
+	}, "FAP/mBS31001/DC", model.TechLTE)
+
+	require.NoError(t, err)
+	require.Equal(t, []int{1, 2}, instances)
 }
 
 func expectedControlValue(enabled bool) string {

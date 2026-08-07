@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -23,6 +24,21 @@ type GeofenceControlParameterInstanceResolver interface {
 	) ([]GeofenceControlParameter, error)
 }
 
+var (
+	singleIPSecPathPattern = regexp.MustCompile(
+		`^Device\.FAP\.Ipsec\.([0-9]+)\.(?:TUNNEL_ENABLE|TUNNEL_CONFIG_TUNNELENABLE)$`,
+	)
+	multiIPSecPathPattern = regexp.MustCompile(
+		`^Device\.Services\.FAPService\.1\.CellConfig\.LTE\.MultiIpsecConfigParam\.([0-9]+)\.Enable$`,
+	)
+	rfControlPathPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^Device\.Services\.FAPService\.[0-9]+\.FAPControl\.LTE\.RFTxStatus$`),
+		regexp.MustCompile(`^Device\.Services\.FAPService\.[0-9]+\.CellConfig\.LTE\.RAN\.RF\.(?:X_COM_RadioEnable|AdminCellState)$`),
+		regexp.MustCompile(`^Device\.DeviceInfo\.SAS\.RadioEnable[0-9]*$`),
+		regexp.MustCompile(`^Device\.DeviceInfo\.(?:EU\.[0-9]+\.)?RU\.[0-9]+\.RFTxStatus$`),
+	}
+)
+
 func BuildGeofenceControlParametersForInstances(
 	productClass string,
 	tech model.Technology,
@@ -36,6 +52,25 @@ func BuildGeofenceControlParametersForInstances(
 	value := "0"
 	if enabled {
 		value = "1"
+	}
+	if isMBS31001ProductClass(productClass) {
+		if tech != model.TechLTE {
+			return nil, fmt.Errorf("no geofence RF control path for product class %q and technology %q", productClass, tech)
+		}
+		parameters := []GeofenceControlParameter{{
+			Path:  "Device.DeviceInfo.SAS.RadioEnable",
+			Value: value,
+		}}
+		for _, instance := range instances {
+			if instance <= 0 {
+				return nil, fmt.Errorf("FAPService instance must be positive")
+			}
+			parameters = append(parameters, GeofenceControlParameter{
+				Path:  fmt.Sprintf("Device.FAP.Ipsec.%d.TUNNEL_ENABLE", instance),
+				Value: value,
+			})
+		}
+		return parameters, nil
 	}
 
 	const rfPathTemplate = "Device.Services.FAPService.%d.FAPControl.LTE.RFTxStatus"
@@ -65,12 +100,98 @@ func BuildGeofenceControlParametersForInstances(
 	return parameters, nil
 }
 
+// BuildGeofenceControlParametersForSnapshot resolves LTE control capability
+// from the device's parameter snapshot. Returned names remain standard paths;
+// ACS translates them to product-private TR-069 paths.
+func BuildGeofenceControlParametersForSnapshot(
+	productClass string,
+	tech model.Technology,
+	enabled bool,
+	parameters []model.DeviceParameter,
+) ([]GeofenceControlParameter, error) {
+	productClass = strings.ToUpper(strings.TrimSpace(productClass))
+	if tech != model.TechLTE {
+		return nil, fmt.Errorf("no geofence RF control path for product class %q and technology %q", productClass, tech)
+	}
+	value := "0"
+	if enabled {
+		value = "1"
+	}
+	singleInstances := make(map[int]struct{})
+	multiInstances := make(map[int]struct{})
+	for _, parameter := range parameters {
+		if !parameter.Writable {
+			continue
+		}
+		if matches := singleIPSecPathPattern.FindStringSubmatch(parameter.ParameterPath); len(matches) == 2 {
+			if instance, ok := positiveInstance(matches[1]); ok {
+				singleInstances[instance] = struct{}{}
+			}
+			continue
+		}
+		if matches := multiIPSecPathPattern.FindStringSubmatch(parameter.ParameterPath); len(matches) == 2 {
+			if instance, ok := positiveInstance(matches[1]); ok {
+				multiInstances[instance] = struct{}{}
+			}
+		}
+	}
+	rfPaths := selectWritableRFControlPaths(parameters)
+	if len(rfPaths) == 0 {
+		return nil, fmt.Errorf("no writable geofence RF control parameter for product class %q", productClass)
+	}
+	parametersOut := make([]GeofenceControlParameter, 0, len(rfPaths)+len(singleInstances)+len(multiInstances))
+	for _, path := range rfPaths {
+		parametersOut = append(parametersOut, GeofenceControlParameter{Path: path, Value: value})
+	}
+	if len(multiInstances) > 0 {
+		for _, instance := range sortedInstances(multiInstances) {
+			parametersOut = append(parametersOut, GeofenceControlParameter{
+				Path:  fmt.Sprintf("Device.Services.FAPService.1.CellConfig.LTE.MultiIpsecConfigParam.%d.Enable", instance),
+				Value: value,
+			})
+		}
+		return parametersOut, nil
+	}
+	if len(singleInstances) == 0 {
+		return nil, fmt.Errorf("no writable geofence IPSec tunnel instances found for product class %q", productClass)
+	}
+	for _, instance := range sortedInstances(singleInstances) {
+		parametersOut = append(parametersOut, GeofenceControlParameter{
+			Path:  fmt.Sprintf("Device.FAP.Ipsec.%d.TUNNEL_ENABLE", instance),
+			Value: value,
+		})
+	}
+	return parametersOut, nil
+}
+
+func selectWritableRFControlPaths(parameters []model.DeviceParameter) []string {
+	for _, pattern := range rfControlPathPatterns {
+		paths := make([]string, 0)
+		for _, parameter := range parameters {
+			if parameter.Writable && pattern.MatchString(parameter.ParameterPath) {
+				paths = append(paths, parameter.ParameterPath)
+			}
+		}
+		if len(paths) > 0 {
+			sort.Strings(paths)
+			return paths
+		}
+	}
+	return nil
+}
+
 func DetectGeofenceControlInstances(
 	parameters []model.DeviceParameter,
 	productClass string,
 	tech model.Technology,
 ) ([]int, error) {
 	productClass = strings.ToUpper(strings.TrimSpace(productClass))
+	if IsMBS31001ProductClass(productClass) {
+		if tech != model.TechLTE {
+			return nil, fmt.Errorf("no geofence RF control parameter for product class %q and technology %q", productClass, tech)
+		}
+		return detectMBS31001IPSecInstances(parameters, productClass)
+	}
 	var supported bool
 	switch {
 	case tech == model.TechLTE && (productClass == "BLQ" || productClass == "MLQ" ||
@@ -113,4 +234,71 @@ func DetectGeofenceControlInstances(
 		return nil, fmt.Errorf("no writable geofence RF instances found for product class %q", productClass)
 	}
 	return instances, nil
+}
+
+func isMBS31001ProductClass(productClass string) bool {
+	return IsMBS31001ProductClass(productClass)
+}
+
+// IsMBS31001ProductClass identifies the 4G mBS31001 product family without
+// coupling callers to a specific /SC, /DC, or /CA suffix.
+func IsMBS31001ProductClass(productClass string) bool {
+	return strings.HasPrefix(productClass, "FAP/MBS31001/")
+}
+
+func detectMBS31001IPSecInstances(
+	parameters []model.DeviceParameter,
+	productClass string,
+) ([]int, error) {
+	const radioPath = "Device.DeviceInfo.SAS.RadioEnable"
+	instances := make([]int, 0)
+	seen := make(map[int]struct{})
+	hasWritableRadio := false
+	for _, parameter := range parameters {
+		if !parameter.Writable {
+			continue
+		}
+		if parameter.ParameterPath == radioPath {
+			hasWritableRadio = true
+			continue
+		}
+		matches := singleIPSecPathPattern.FindStringSubmatch(parameter.ParameterPath)
+		if len(matches) != 2 {
+			matches = multiIPSecPathPattern.FindStringSubmatch(parameter.ParameterPath)
+		}
+		if len(matches) != 2 {
+			continue
+		}
+		instance, ok := positiveInstance(matches[1])
+		if !ok {
+			continue
+		}
+		if _, ok := seen[instance]; ok {
+			continue
+		}
+		seen[instance] = struct{}{}
+		instances = append(instances, instance)
+	}
+	if !hasWritableRadio {
+		return nil, fmt.Errorf("no writable geofence RF control parameter for product class %q", productClass)
+	}
+	if len(instances) == 0 {
+		return nil, fmt.Errorf("no writable geofence IPSec tunnel instances found for product class %q", productClass)
+	}
+	sort.Ints(instances)
+	return instances, nil
+}
+
+func positiveInstance(raw string) (int, bool) {
+	instance, err := strconv.Atoi(raw)
+	return instance, err == nil && instance > 0
+}
+
+func sortedInstances(instances map[int]struct{}) []int {
+	result := make([]int, 0, len(instances))
+	for instance := range instances {
+		result = append(result, instance)
+	}
+	sort.Ints(result)
+	return result
 }

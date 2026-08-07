@@ -47,6 +47,20 @@ func TestBuildGeofenceControlPlanRequiresWritableKnownCurrentValue(t *testing.T)
 	require.ErrorContains(t, err, "not writable")
 }
 
+func TestBuildGeofenceControlPlanMatchesMBS31001PrivateSingleIPSecPath(t *testing.T) {
+	target := carrier.GeofenceControlParameter{
+		Path:  "Device.FAP.Ipsec.1.TUNNEL_ENABLE",
+		Value: "0",
+	}
+	plan, err := buildGeofenceControlPlan([]model.DeviceParameter{
+		{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "true", Writable: true},
+	}, []carrier.GeofenceControlParameter{target})
+
+	require.NoError(t, err)
+	require.Equal(t, []ControlParameterState{{Path: target.Path, Value: "1"}}, plan.Before)
+	require.Equal(t, []ControlParameterState{{Path: target.Path, Value: "0"}}, plan.Requested)
+}
+
 func TestRestoreTargetsRestoresOnlyParametersChangedByDeactivation(t *testing.T) {
 	ipsec := "Device.Services.FAPService.Ipsec.IPSEC_ENABLE"
 	rf := "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus"
@@ -56,4 +70,18 @@ func TestRestoreTargetsRestoresOnlyParametersChangedByDeactivation(t *testing.T)
 	)
 
 	require.Equal(t, []carrier.GeofenceControlParameter{{Path: rf, Value: "1"}}, targets)
+}
+
+func TestRestoreTargetsPlacesMultiIPSecBeforeRF(t *testing.T) {
+	multiIPSec := "Device.Services.FAPService.1.CellConfig.LTE.MultiIpsecConfigParam.1.Enable"
+	rf := "Device.DeviceInfo.SAS.RadioEnable"
+	targets := restoreTargets(
+		[]ControlParameterState{{Path: rf, Value: "1"}, {Path: multiIPSec, Value: "1"}},
+		[]ControlParameterState{{Path: rf, Value: "0"}, {Path: multiIPSec, Value: "0"}},
+	)
+
+	require.Equal(t, []carrier.GeofenceControlParameter{
+		{Path: multiIPSec, Value: "1"},
+		{Path: rf, Value: "1"},
+	}, targets)
 }
