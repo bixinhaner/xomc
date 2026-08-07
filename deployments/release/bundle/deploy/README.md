@@ -18,6 +18,59 @@ run a shell, `curl`, or `wget` inside that container. Its `health_check`
 extension listens on port 13133, the release compose publishes that port only
 on `127.0.0.1`, and `healthcheck.sh` probes it externally from the host.
 
+## Log retention and cleanup
+
+The release installer configures host file-log rotation and bounded Docker
+stdout logs. Existing `/etc/logrotate.d/omc-*` files are backed up to
+`/opt/omc/etc/logrotate-backups/*.bak.YYYYmmddHHMMSS` before replacement, so
+backup files are not scanned again by logrotate. The installer does not edit
+Docker daemon defaults; stdout limits are set per Compose service.
+
+| Log source | Location | Retention | Cleanup mechanism |
+|------------|----------|-----------|-------------------|
+| App, ACS, ACS candidate, Worker service logs | `/opt/omc/run/logs/{app,acs,acs-candidate,worker}/*.log` | 30 days in production service config | Go services use built-in lumberjack/compactor rotation before writing to the bind mount |
+| ACS protocol logs | `/opt/omc/run/logs/{acs,acs-candidate}/protocol.log*` | 7 days in production service config | ACS protocol log compactor rotates, compresses, and deletes old archives |
+| Nginx access/error logs | `/opt/omc/run/logs/nginx/*.log` | 14 daily rotations | `/etc/logrotate.d/omc-nginx` from `deploy/logrotate.d/omc-nginx` |
+| DB backup job log | `/var/log/omc/db-backup.log` | 30 daily rotations | `/etc/logrotate.d/omc-db-maintenance` from `deploy/logrotate.d/omc-db-maintenance` |
+| DB restore drill log | `/var/log/omc/db-restore-drill.log` | 30 daily rotations | `/etc/logrotate.d/omc-db-maintenance` from `deploy/logrotate.d/omc-db-maintenance` |
+| Docker stdout/stderr | Docker `json-file` logs under `/var/lib/docker/containers` | Default `50m` x `5` files per container | Compose `logging.options.max-size` and `max-file` on app, web, infra, and monitoring services |
+
+When the `omcops` user exists, `install.sh` pre-creates the two `/var/log/omc`
+job log files as `omcops:omcops`. If those files are deleted manually, recreate
+them with the same owner or rerun the installer before expecting the cron jobs
+to append logs again.
+
+To change Docker stdout retention, set these in `deploy/.env` before running
+`install.sh`, or edit `/opt/omc/current/deploy/.env` and recreate containers
+with `bash svc.sh restart`:
+
+```bash
+DOCKER_LOG_MAX_SIZE=100m
+DOCKER_LOG_MAX_FILE=7
+```
+
+Troubleshooting commands:
+
+```bash
+sudo logrotate -d /etc/logrotate.d/omc-nginx
+sudo logrotate -d /etc/logrotate.d/omc-db-maintenance
+sudo logrotate -f /etc/logrotate.d/omc-nginx
+sudo logrotate -f /etc/logrotate.d/omc-db-maintenance
+
+cd /opt/omc/current/deploy
+# If the host was installed with --skip-web or --skip-monitoring, omit the
+# matching docker-compose.web.yml or docker-compose.monitoring.yml argument.
+docker compose -p omcgo --env-file .env --env-file resources.env \
+  -f docker-compose.infra.yml -f docker-compose.app.yml \
+  -f docker-compose.web.yml -f docker-compose.monitoring.yml ps
+docker inspect "$(docker compose -p omcgo --env-file .env --env-file resources.env \
+  -f docker-compose.infra.yml -f docker-compose.app.yml \
+  -f docker-compose.web.yml -f docker-compose.monitoring.yml ps -q app)" \
+  --format '{{json .HostConfig.LogConfig}}'
+du -sh /opt/omc/run/logs /var/log/omc /var/lib/docker/containers 2>/dev/null
+ls -l /opt/omc/etc/logrotate-backups 2>/dev/null
+```
+
 ## Resource-plan contract
 
 `resources.env` is a required, complete deployment contract rather than a

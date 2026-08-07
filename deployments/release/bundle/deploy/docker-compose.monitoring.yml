@@ -17,10 +17,17 @@ networks:
     name: omcgo-net
     driver: bridge
 
+x-omc-json-log: &omc-json-log
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-50m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+
 services:
   prometheus:
     image: ${IMAGE_PROMETHEUS}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
     ports:
@@ -61,6 +68,7 @@ services:
   alertmanager:
     image: ${IMAGE_ALERTMANAGER}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
     ports:
@@ -95,6 +103,7 @@ services:
   grafana:
     image: ${IMAGE_GRAFANA}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
@@ -138,6 +147,7 @@ services:
   loki:
     image: ${IMAGE_LOKI}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
     ports:
@@ -177,6 +187,7 @@ services:
     # 让 Grafana 的 service_name 出现 omcgo-app/acs/worker。
     user: "0:0"
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
       # postgresqlreceiver 连主库/tsdb 库用的凭据（config.yaml 里用 ${env:VAR} 引用）；
@@ -223,6 +234,7 @@ services:
   tempo:
     image: ${IMAGE_TEMPO}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
       # 块压缩峰值受 Go 软限约束；硬限额另留 mmap、栈和内核记账余量。
@@ -255,6 +267,7 @@ services:
   nats-exporter:
     image: ${IMAGE_NATS_EXPORTER}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
     command: ["-varz", "-jsz=all", "-connz", "http://nats:8222"]
@@ -280,6 +293,7 @@ services:
   nginx-exporter:
     image: ${IMAGE_NGINX_EXPORTER}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
     command: ["--nginx.scrape-uri=http://web:8090/stub_status"]
@@ -300,6 +314,7 @@ services:
   node-exporter:
     image: ${IMAGE_NODE_EXPORTER}
     restart: unless-stopped
+    logging: *omc-json-log
     pid: host
     command:
       - "--path.procfs=/host/proc"
@@ -328,6 +343,7 @@ services:
   cadvisor:
     image: ${IMAGE_CADVISOR}
     restart: unless-stopped
+    logging: *omc-json-log
     # Keep only the bounded Compose service label for Prometheus service-level
     # panels; do not export arbitrary container labels.
     command:
