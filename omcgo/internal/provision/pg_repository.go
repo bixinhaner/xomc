@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -31,6 +32,14 @@ var listTaskColumns = append(
 		return columns
 	}(),
 	"COALESCE(d.serial_number, '')",
+	"COALESCE(prod.product_name, pp.product_class, d.product_class, '')",
+	"COALESCE(pp.name, '')",
+	"COALESCE(pp.execute_type, '')",
+	`CASE
+		WHEN pt.current_step_name LIKE 'software_upgrade%' THEN 'software_upgrade'
+		WHEN pt.current_step_name LIKE 'license%' THEN 'license'
+		ELSE 'self_config'
+	END`,
 )
 
 // PgProvisioningTaskRepository implements ProvisioningTaskRepository using PostgreSQL.
@@ -236,7 +245,7 @@ func (r *PgProvisioningTaskRepository) List(ctx context.Context, filter Provisio
 	pred := buildProvisioningTaskPredicate(filter)
 
 	// Count.
-	countBuilder := storage.Psql.Select("COUNT(*)").From("provisioning_tasks pt")
+	countBuilder := provisioningTaskQueryBase(storage.Psql.Select("COUNT(*)"))
 	if len(pred) > 0 {
 		countBuilder = countBuilder.Where(pred)
 	}
@@ -287,6 +296,8 @@ func buildProvisioningTaskListSQL(filter ProvisioningTaskFilter) (string, []inte
 	queryBuilder := storage.Psql.Select(listTaskColumns...).
 		From("provisioning_tasks pt").
 		LeftJoin("devices d ON d.id = pt.device_id").
+		LeftJoin("plug_and_play_policies pp ON pp.id = pt.policy_id").
+		LeftJoin("products prod ON prod.id = d.product_id").
 		Limit(uint64(pageSize)).
 		Offset(uint64((page - 1) * pageSize)).
 		OrderBy("pt.created_at DESC")
@@ -301,13 +312,58 @@ func buildProvisioningTaskPredicate(filter ProvisioningTaskFilter) sq.And {
 	if filter.DeviceID != nil {
 		pred = append(pred, sq.Eq{"pt.device_id": *filter.DeviceID})
 	}
+	if filter.PolicyID != nil {
+		pred = append(pred, sq.Eq{"pt.policy_id": *filter.PolicyID})
+	}
 	if filter.Status != "" {
 		pred = append(pred, sq.Eq{"pt.status": filter.Status})
+	}
+	if filter.RunningOnly {
+		pred = append(pred, sq.NotEq{"pt.status": []ProvisioningState{StateCompleted, StateFailed}})
 	}
 	if filter.PolicyOnly {
 		pred = append(pred, sq.Expr("pt.policy_id IS NOT NULL"))
 	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		pattern := "%" + search + "%"
+		pred = append(pred, sq.Or{
+			sq.ILike{"d.serial_number": pattern},
+			sq.ILike{"pp.name": pattern},
+		})
+	}
+	if productName := strings.TrimSpace(filter.ProductName); productName != "" {
+		pred = append(pred, sq.Expr(
+			"LOWER(COALESCE(prod.product_name, pp.product_class, d.product_class, '')) = LOWER(?)",
+			productName,
+		))
+	}
+	switch filter.Module {
+	case "software_upgrade":
+		pred = append(pred, sq.Like{"pt.current_step_name": "software_upgrade%"})
+	case "license":
+		pred = append(pred, sq.Like{"pt.current_step_name": "license%"})
+	case "self_config":
+		pred = append(pred,
+			sq.NotEq{"pt.current_step_name": nil},
+			sq.NotLike{"pt.current_step_name": "software_upgrade%"},
+			sq.NotLike{"pt.current_step_name": "license%"},
+		)
+	}
+	if filter.StartedAfter != nil {
+		pred = append(pred, sq.GtOrEq{"COALESCE(pt.started_at, pt.created_at)": *filter.StartedAfter})
+	}
+	if filter.StartedBefore != nil {
+		pred = append(pred, sq.LtOrEq{"COALESCE(pt.started_at, pt.created_at)": *filter.StartedBefore})
+	}
 	return pred
+}
+
+func provisioningTaskQueryBase(builder sq.SelectBuilder) sq.SelectBuilder {
+	return builder.
+		From("provisioning_tasks pt").
+		LeftJoin("devices d ON d.id = pt.device_id").
+		LeftJoin("plug_and_play_policies pp ON pp.id = pt.policy_id").
+		LeftJoin("products prod ON prod.id = d.product_id")
 }
 
 func (r *PgProvisioningTaskRepository) CountByStatus(ctx context.Context) (map[ProvisioningState]int64, error) {
@@ -333,6 +389,38 @@ func (r *PgProvisioningTaskRepository) CountByStatus(ctx context.Context) (map[P
 			return nil, fmt.Errorf("scan count row: %w", err)
 		}
 		result[ProvisioningState(status)] = count
+	}
+	return result, rows.Err()
+}
+
+func (r *PgProvisioningTaskRepository) CountByStatusFiltered(
+	ctx context.Context,
+	filter ProvisioningTaskFilter,
+) (map[ProvisioningState]int64, error) {
+	filter.Status = ""
+	filter.RunningOnly = false
+	builder := provisioningTaskQueryBase(storage.Psql.Select("pt.status", "COUNT(*)")).
+		GroupBy("pt.status")
+	if pred := buildProvisioningTaskPredicate(filter); len(pred) > 0 {
+		builder = builder.Where(pred)
+	}
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build filtered task status count SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count filtered tasks by status: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[ProvisioningState]int64)
+	for rows.Next() {
+		var status ProvisioningState
+		var count int64
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("scan filtered task status count: %w", err)
+		}
+		result[status] = count
 	}
 	return result, rows.Err()
 }
@@ -457,6 +545,7 @@ func scanTasks(rows pgx.Rows) ([]ProvisioningTask, error) {
 			&task.CurrentStep, &stepName, &task.TotalSteps, &errorMessage,
 			&task.RetryCount, &task.MaxRetries,
 			&startedAt, &completedAt, &task.CreatedAt, &task.UpdatedAt, &task.SerialNumber,
+			&task.ProductName, &task.PolicyName, &task.ExecuteType, &task.Module,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan task row: %w", err)

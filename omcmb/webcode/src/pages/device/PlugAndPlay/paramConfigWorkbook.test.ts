@@ -21,13 +21,17 @@ describe('parameter config workbook', () => {
     ]);
   });
 
-  it('includes every new LTE and NR planning field in generated templates', () => {
+  it('includes the supported LTE and NR planning fields in generated templates', () => {
     const lte = createParamConfigTemplateWorkbook('eNB');
     const nr = createParamConfigTemplateWorkbook('gNB');
     expect(XLSX.utils.sheet_to_json<unknown[]>(lte.Sheets.NETWORK, { header: 1 })[0])
-      .toEqual(['*SERIAL_NUMBER', 'WAN IP', 'OMC IP', 'NTP Enable', 'NTP Server1', 'Local Time Zone']);
+      .toEqual(['*SERIAL_NUMBER', 'WAN IP', 'NTP Enable', 'NTP Server1', 'Local Time Zone']);
     expect(XLSX.utils.sheet_to_json<unknown[]>(nr.Sheets.IPSEC, { header: 1 })[0])
       .toContain('LEFT_INTERFACE');
+    expect(XLSX.utils.sheet_to_json<unknown[]>(nr.Sheets.DEVICE, { header: 1 })[0])
+      .not.toContain('Time Zone Term');
+    expect(XLSX.utils.sheet_to_json<unknown[]>(nr.Sheets.INTERFACE, { header: 1 })[0])
+      .not.toContain('OMC IP');
     expect(XLSX.utils.sheet_to_json<unknown[]>(nr.Sheets.CELL, { header: 1 })[0])
       .toEqual(expect.arrayContaining(['PowerModify', 'OffsetToPointA', 'SsbSubcarrierOffset']));
   });

@@ -46,16 +46,17 @@ type DeviceFilter struct {
 	VisibleDeviceGrants []model.DeviceVisibilityGrant // grant-based device data permission
 
 	// Extended filters (device_info / devices additional fields)
-	Manufacturer  *string    // devices.manufacturer exact match
-	ProductID     *uuid.UUID // devices.product_id exact match（T-0098 产品装配件软引用；下拉来自 /products）
-	ProductClass  *string    // devices.product_class exact match; CSV means match any value
-	RFStatus      *string    // device_info.rf_status exact match
-	CellStatus    *string    // device_info.cell_status exact match
-	ProjectStatus *string    // device_info.project_status exact match
-	GPSStatus     *string    // device_info.gps_status exact match
-	AlarmSeverity *string    // device_info.alarm_severity exact match
-	LicenseStatus *string    // device_info.license_status exact match
-	OpState       *string    // "1" = activated (first_online_time NOT NULL), "0" = not activated
+	Manufacturer  *string     // devices.manufacturer exact match
+	ProductID     *uuid.UUID  // devices.product_id exact match（T-0098 产品装配件软引用；下拉来自 /products）
+	ProductIDs    []uuid.UUID // devices.product_id IN (...)，供跨多个产品名称检测
+	ProductClass  *string     // devices.product_class exact match; CSV means match any value
+	RFStatus      *string     // device_info.rf_status exact match
+	CellStatus    *string     // device_info.cell_status exact match
+	ProjectStatus *string     // device_info.project_status exact match
+	GPSStatus     *string     // device_info.gps_status exact match
+	AlarmSeverity *string     // device_info.alarm_severity exact match
+	LicenseStatus *string     // device_info.license_status exact match
+	OpState       *string     // "1" = activated (first_online_time NOT NULL), "0" = not activated
 
 	// T-0162 新增 3 个 device list 筛选维度（之前前端下拉空、后端无字段）
 	ModelName *string // devices.model_name exact match (字典 device_model)
@@ -676,6 +677,10 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 	if filter.ProductID != nil {
 		builder = builder.Where(sq.Eq{"d.product_id": *filter.ProductID})
 		countBuilder = countBuilder.Where(sq.Eq{"d.product_id": *filter.ProductID})
+	}
+	if len(filter.ProductIDs) > 0 {
+		builder = builder.Where(sq.Eq{"d.product_id": filter.ProductIDs})
+		countBuilder = countBuilder.Where(sq.Eq{"d.product_id": filter.ProductIDs})
 	}
 	if filter.ProductClass != nil && *filter.ProductClass != "" {
 		productClasses := SplitCSV(*filter.ProductClass)

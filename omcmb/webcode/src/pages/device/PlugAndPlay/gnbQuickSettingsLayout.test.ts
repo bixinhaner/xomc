@@ -26,7 +26,7 @@ describe('gNB parameter editor quick-settings layout', () => {
 
   it('places quick-setting sections through TDD before template-only sections', () => {
     expect(gnbSection).toContain('<Form.List name="plmnConfigList">');
-    expect(['gnb-other', 'gnb-plmn-extra', 'gnb-ip', 'gnb-slice', 'gnb-custom'].map(visualOrder))
+    expect(['gnb-other', 'gnb-plmn-extra', 'gnb-network', 'gnb-slice', 'gnb-custom'].map(visualOrder))
       .toEqual([8, 9, 10, 11, 12]);
   });
 });

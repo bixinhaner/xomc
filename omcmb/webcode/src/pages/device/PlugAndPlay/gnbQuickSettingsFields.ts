@@ -112,6 +112,16 @@ export const GNB_QUICK_SETTING_GROUPS: GnbQuickSettingGroup[] = [
     ],
   },
   {
+    id: 'gnb-management',
+    titleKey: 'provision.omcConfig',
+    fields: [
+      { id: 'ManagementServerURL', name: sheetField('DEVICE', 'URL'), labelKey: 'provision.nrQuick.managementServerUrl', range: '1 ~ 256' },
+      { id: 'PeriodicInformEnable', name: sheetField('DEVICE', 'Periodic Inform Enable'), labelKey: 'provision.nrQuick.periodicInformEnable', control: 'select', options: onOffOptions },
+      { id: 'PeriodicInformTime', name: sheetField('DEVICE', 'Periodic Inform Time'), labelKey: 'provision.nrQuick.periodicInformTime' },
+      { id: 'PeriodicInformInterval', name: sheetField('DEVICE', 'Periodic Inform Interval'), labelKey: 'provision.nrQuick.periodicInformInterval' },
+    ],
+  },
+  {
     id: 'gnb-sync-source',
     titleKey: 'provision.syncSourceConfig',
     fields: [
@@ -204,14 +214,9 @@ export const GNB_TEMPLATE_EXTRA_FIELDS: GnbQuickSettingField[] = [
   { id: 'DuplexMode', name: 'duplexMode', labelKey: 'provision.nrQuick.duplexMode', control: 'select', options: technicalOptions(['TDD', 'FDD']) },
   { id: 'PrachRootSequenceIndex', name: sheetField('CELL', 'Prach RootSequenceIndex'), labelKey: 'provision.nrQuick.prachRootSequenceIndex' },
   { id: 'PrachRootSequenceValue', name: sheetField('CELL', 'Prach RootSequenceValue'), labelKey: 'provision.nrQuick.prachRootSequenceValue' },
-  { id: 'PeriodicInformEnable', name: sheetField('DEVICE', 'Periodic Inform Enable'), labelKey: 'provision.nrQuick.periodicInformEnable', control: 'select', options: onOffOptions },
-  { id: 'PeriodicInformTime', name: sheetField('DEVICE', 'Periodic Inform Time'), labelKey: 'provision.nrQuick.periodicInformTime' },
-  { id: 'PeriodicInformInterval', name: sheetField('DEVICE', 'Periodic Inform Interval'), labelKey: 'provision.nrQuick.periodicInformInterval' },
-  { id: 'TimeZoneTerm', name: sheetField('DEVICE', 'Time Zone Term'), labelKey: 'provision.nrQuick.timeZoneTerm' },
-  { id: 'InterfaceName', name: sheetField('INTERFACE', 'Interface Name'), labelKey: 'provision.nrQuick.interfaceName' },
-  { id: 'AddressType', name: sheetField('INTERFACE', 'Address Type'), labelKey: 'provision.nrQuick.addressType' },
-  { id: 'PrefixLength', name: sheetField('INTERFACE', 'Prefix Length'), labelKey: 'provision.nrQuick.prefixLength' },
-  { id: 'BearType', name: sheetField('INTERFACE', 'Bear Type'), labelKey: 'provision.nrQuick.bearType' },
-  { id: 'VlanName', name: sheetField('INTERFACE', 'Vlan Name'), labelKey: 'provision.nrQuick.vlanName' },
   { id: 'FORCEENCAPS', name: sheetField('IPSEC', 'FORCEENCAPS'), labelKey: 'provision.nrQuick.forceEncapsulation' },
 ];
+
+export const GNB_COMMON_EXCLUDED_EXTRA_FIELD_IDS = [
+  'FORCEENCAPS',
+] as const;

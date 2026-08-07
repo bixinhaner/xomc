@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -366,6 +367,29 @@ func (r *Registry) GetProductByID(ctx context.Context, id uuid.UUID) (*Product, 
 	}
 	r.metrics.cacheHit("miss")
 	return p, nil
+}
+
+// GetProductByName 按产品名称加载产品。产品名称是管理面策略等业务功能的
+// 稳定展示/选择口径；设备南向上报的 product_class 仍由 MatchProductClass
+// 负责路由到同一产品。
+func (r *Registry) GetProductByName(ctx context.Context, name string) (*Product, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, nil
+	}
+	if err := r.ensureFresh(ctx); err != nil {
+		return nil, err
+	}
+	products, err := r.repo.ListProducts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list products by name: %w", err)
+	}
+	for _, p := range products {
+		if p != nil && strings.EqualFold(strings.TrimSpace(p.Name), name) {
+			return p, nil
+		}
+	}
+	return nil, nil
 }
 
 // ValidateReferences 全表扫描 products，校验 indicator_platform / alarm_ne_type 软引用。

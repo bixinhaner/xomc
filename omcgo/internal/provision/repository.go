@@ -17,6 +17,7 @@ type ProvisioningTaskRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status ProvisioningState, errorMsg string) error
 	List(ctx context.Context, filter ProvisioningTaskFilter) ([]ProvisioningTask, int64, error)
 	CountByStatus(ctx context.Context) (map[ProvisioningState]int64, error)
+	CountByStatusFiltered(ctx context.Context, filter ProvisioningTaskFilter) (map[ProvisioningState]int64, error)
 	// ListActivationChecksDue returns non-gNB self-configuration tasks whose
 	// five-minute post-reboot-online observation window elapsed.
 	ListActivationChecksDue(ctx context.Context, before time.Time, limit int) ([]ProvisioningTask, error)

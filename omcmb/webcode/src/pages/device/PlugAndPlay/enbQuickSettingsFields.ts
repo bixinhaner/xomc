@@ -117,20 +117,28 @@ export const ENB_TEMPLATE_EXTRA_FIELDS: GnbQuickSettingField[] = [
   { id: 'CELL_NUMBER', name: sheetField('CELL', '*CELL_NUMBER'), labelKey: 'provision.lteQuick.cellNumber' },
   { id: 'HALOB_ENABLE', name: 'halobEnable', labelKey: 'provision.lteQuick.halobEnable', control: 'select', options: onOffOptions },
   { id: 'WAN_IP', name: 'serviceIp', labelKey: 'provision.lteQuick.serviceIp' },
-  { id: 'OMC_IP', name: 'mgmtIp', labelKey: 'provision.lteQuick.omcIp' },
 ];
 
 export const ENB_1588_TEMPLATE_FIELDS: GnbQuickSettingField[] = [
   {
     id: 'PpsTimeMode', name: 'PpsTimeMode', labelKey: 'provision.nrQuick.mode',
-    control: 'select', options: technicalOptions([
-      'FREE_OSCILLATION', 'GPS_PPS', 'LOCAL_CLOCK_HOLDOVER_GPS_PPS',
-      'OCXO_PPS', '1588_PPS', 'GPS_AND_PTP',
-    ]),
+    control: 'select', options: [
+      { value: '1', label: 'GNSS' },
+      { value: '2', label: 'PTP' },
+      { value: '4', label: 'NL' },
+      { value: '8', label: 'Ext PPS' },
+      { value: '16', label: 'Free' },
+    ],
   },
   {
     id: 'SyncSource', name: 'SyncSource', labelKey: 'provision.nrQuick.syncSource',
-    control: 'multi-select', options: technicalOptions(['GPS', 'GLONASS', 'BEIDOU', 'GALILEO', 'QZSS']),
+    control: 'select', options: [
+      { value: '1', label: 'GPS' },
+      { value: '2', label: 'GLONASS' },
+      { value: '4', label: 'Galileo' },
+      { value: '8', label: 'BeiDou' },
+      { value: '16', label: 'QZSS' },
+    ],
   },
   {
     id: 'PTPProfile', name: 'PTPProfile', labelKey: 'provision.nrQuick.profileType',
@@ -143,7 +151,7 @@ export const ENB_1588_TEMPLATE_FIELDS: GnbQuickSettingField[] = [
   },
   {
     id: 'PTPInterface', name: 'PTPInterface', labelKey: 'provision.nrQuick.interface',
-    control: 'select', options: technicalOptions(['eth-WAN', 'eth0', 'eth1']),
+    control: 'select', options: technicalOptions(['eth0', 'eth1']),
   },
   {
     id: 'PTPUnicastMode', name: 'PTPUnicastMode', labelKey: 'provision.nrQuick.unicastEnable',
