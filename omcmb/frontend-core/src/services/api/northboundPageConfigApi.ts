@@ -29,6 +29,7 @@ export interface NorthboundFileGroup {
   start_time?: string;
   path_template: string;
   file_name_template: string;
+  csv_separator?: string;
   compression_enabled: boolean;
   compression_format?: NorthboundPageConfigCompressionFormat;
   objects: NorthboundScenarioObject[];
@@ -56,6 +57,7 @@ export interface NorthboundFileGroupPreview {
   period: NorthboundPageConfigPeriod;
   path_template: string;
   file_name_template: string;
+  csv_separator?: string;
   preview_path: string;
   preview_file_name: string;
   compression_enabled: boolean;

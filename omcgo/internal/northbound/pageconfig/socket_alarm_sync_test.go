@@ -40,17 +40,25 @@ func TestSocketAlarmPayloadMatchesNorthboundFields(t *testing.T) {
 		EventType:       &eventType,
 		NetworkLocation: &location,
 		AdditionalInfo: map[string]string{
-			"alarmSeq": "123456",
-			"omcUID":   "OMC_GD_01",
-			"pci":      "123",
+			"alarmSeq":     "123456",
+			"omcUID":       "OMC_GD_01",
+			"pci":          "123",
+			"eSerialNum":   "ESN-001",
+			"rootAlarmId":  "ROOT-1",
+			"causeType":    "root",
+			"rNeUID":       "R-ENB-1",
+			"rNeName":      "Remote-A",
+			"rNeType":      "ENB",
+			"locationInfo": "Rack-1",
 		},
 		CreatedAt: createdAt,
 	}
 
 	ctcc := socketAlarmCTCCPayload(alarm, event.SubjectAlarmRaised)
 	require.Equal(t, ctccMsgRealtimeAlarm, ctcc["msgType"])
-	require.Len(t, ctcc, 18)
+	require.Len(t, ctcc, 26)
 	require.Equal(t, int64(123456), ctcc["alarmSequenceId"])
+	require.Equal(t, "Backhaul Link Down", ctcc["alarmTitle"])
 	require.Equal(t, "1", ctcc["alarmStatus"])
 	require.Equal(t, "communicationsAlarm", ctcc["alarmType"])
 	require.Equal(t, "major", ctcc["origSeverity"])
@@ -64,9 +72,16 @@ func TestSocketAlarmPayloadMatchesNorthboundFields(t *testing.T) {
 	require.Equal(t, "CELL_1", ctcc["objectDn"])
 	require.Equal(t, "Cell-1", ctcc["objectName"])
 	require.Equal(t, "communicationsAlarm", ctcc["objectType"])
-	require.Equal(t, "alarmSeq=123456;omcUID=OMC_GD_01;pci=123", ctcc["addInfo"])
+	require.Equal(t, "Rack-1", ctcc["locationInfo"])
+	require.Equal(t, "alarmSeq=123456;causeType=root;eSerialNum=ESN-001;locationInfo=Rack-1;omcUID=OMC_GD_01;pci=123;rNeName=Remote-A;rNeType=ENB;rNeUID=R-ENB-1;rootAlarmId=ROOT-1", ctcc["addInfo"])
 	require.Equal(t, "20260728102032", ctcc["omcReceivedTime"])
 	require.Equal(t, "OMC_GD_01", ctcc["omcUID"])
+	require.Equal(t, "ESN-001", ctcc["eSerialNum"])
+	require.Equal(t, "ROOT-1", ctcc["rootAlarmId"])
+	require.Equal(t, "root", ctcc["causeType"])
+	require.Equal(t, "R-ENB-1", ctcc["rNeUID"])
+	require.Equal(t, "Remote-A", ctcc["rNeName"])
+	require.Equal(t, "ENB", ctcc["rNeType"])
 	require.NotContains(t, ctcc, "objectUID")
 
 	clearedAt := raisedAt.Add(time.Hour)
@@ -75,8 +90,8 @@ func TestSocketAlarmPayloadMatchesNorthboundFields(t *testing.T) {
 	cucc := cuccCommand("realTimeAlarm", socketAlarmCUCCFields(alarm, event.SubjectAlarmCleared))
 	command, cuccFields := parseCUCCCommand(cucc)
 	require.Equal(t, "realTimeAlarm", command)
-	require.Len(t, cuccFields, 34)
 	require.Equal(t, "123456", cuccFields["alarmSeq"])
+	require.Equal(t, "Backhaul Link Down", cuccFields["alarmTitle"])
 	require.Equal(t, "0", cuccFields["alarmStatus"])
 	require.Equal(t, "communicationsAlarm", cuccFields["alarmType"])
 	require.Equal(t, "major", cuccFields["origSeverity"])
@@ -90,9 +105,16 @@ func TestSocketAlarmPayloadMatchesNorthboundFields(t *testing.T) {
 	require.Equal(t, "CELL_1", cuccFields["objectUID"])
 	require.Equal(t, "Cell-1", cuccFields["objectName"])
 	require.Equal(t, "communicationsAlarm", cuccFields["objectType"])
-	require.Equal(t, "alarmSeq=123456,omcUID=OMC_GD_01,pci=123", cuccFields["addInfo"])
+	require.Equal(t, "Rack-1", cuccFields["locationInfo"])
+	require.Equal(t, "alarmSeq=123456,causeType=root,eSerialNum=ESN-001,locationInfo=Rack-1,omcUID=OMC_GD_01,pci=123,rNeName=Remote-A,rNeType=ENB,rNeUID=R-ENB-1,rootAlarmId=ROOT-1", cuccFields["addInfo"])
 	require.Equal(t, "20260728102032", cuccFields["omcReceivedTime"])
 	require.Equal(t, "OMC_GD_01", cuccFields["omcUID"])
+	require.Equal(t, "ESN-001", cuccFields["eSerialNum"])
+	require.Equal(t, "ROOT-1", cuccFields["rootAlarmId"])
+	require.Equal(t, "root", cuccFields["causeType"])
+	require.Equal(t, "R-ENB-1", cuccFields["rNeUID"])
+	require.Equal(t, "Remote-A", cuccFields["rNeName"])
+	require.Equal(t, "ENB", cuccFields["rNeType"])
 }
 
 func TestSocketCTCCSyncFrameUsesSyncMessageType(t *testing.T) {
@@ -171,6 +193,12 @@ func TestValidateSocketFileSyncRequest(t *testing.T) {
 	}
 }
 
+func TestValidateSocketMessageSyncRequestKeepsCUCCLegacyText(t *testing.T) {
+	require.Equal(t, "alarmSeq is not an integer", validateSocketMessageSyncRequest(socketAlarmSyncRequest{AlarmSeq: "abc"}, false))
+	require.Equal(t, "alarmSeq is not an integer.", validateSocketMessageSyncRequest(socketAlarmSyncRequest{AlarmSeq: "abc"}, true))
+	require.Equal(t, "reqId is not an integer.", validateSocketMessageSyncRequest(socketAlarmSyncRequest{ReqID: "req-a"}, true))
+}
+
 func TestSocketAlarmFileContentWritesGzipJSONLines(t *testing.T) {
 	alarm := model.Alarm{
 		ID:              uuid.New(),
@@ -204,13 +232,15 @@ func TestSocketAlarmFileContentWritesGzipJSONLines(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, raw, string(decompressed))
 
-	lines := strings.Split(strings.TrimSpace(string(decompressed)), "\n")
+	require.Contains(t, string(decompressed), "\r\n")
+	lines := strings.Split(strings.TrimSuffix(string(decompressed), "\r\n"), "\r\n")
 	require.Len(t, lines, 1)
 	var row map[string]any
 	require.NoError(t, json.Unmarshal([]byte(lines[0]), &row))
 	require.Equal(t, float64(987654321), row["alarmSeq"])
-	require.Len(t, row, 17)
+	require.Len(t, row, 25)
 	require.Equal(t, "1", row["alarmStatus"])
+	require.Equal(t, "Fan Fault", row["alarmTitle"])
 	require.Equal(t, "equipmentAlarm", row["alarmType"])
 	require.Equal(t, "warning", row["origSeverity"])
 	require.Equal(t, "20260728102030", row["eventTime"])
@@ -221,7 +251,14 @@ func TestSocketAlarmFileContentWritesGzipJSONLines(t *testing.T) {
 	require.Equal(t, "ENB_SN003", row["neName"])
 	require.NotEmpty(t, row["objectUID"])
 	require.NotEmpty(t, row["objectName"])
+	require.Equal(t, "0", row["locationInfo"])
 	require.Equal(t, "alarmSeq=987654321;omcUID=OMC_GD_01", row["addInfo"])
 	require.Equal(t, "20260728102032", row["omcReceivedTime"])
 	require.Equal(t, "OMC_GD_01", row["omcUID"])
+	require.Contains(t, row, "eSerialNum")
+	require.Contains(t, row, "rootAlarmId")
+	require.Contains(t, row, "causeType")
+	require.Contains(t, row, "rNeUID")
+	require.Contains(t, row, "rNeName")
+	require.Contains(t, row, "rNeType")
 }

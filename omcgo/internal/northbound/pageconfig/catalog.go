@@ -98,6 +98,15 @@ func group(id string, domain Domain, format OutputFormat, period Period, startMi
 	}
 }
 
+func csvSeparator(group FileGroup, separator string) FileGroup {
+	group.CSVSeparator = separator
+	return group
+}
+
+func pipeCSV(group FileGroup) FileGroup {
+	return csvSeparator(group, "|")
+}
+
 func obj(codes ...string) []ScenarioObject {
 	out := make([]ScenarioObject, 0, len(codes))
 	for _, code := range codes {
@@ -118,22 +127,22 @@ func defaultFileProfiles() []FileProfile {
 		}),
 		fileProfile("S0002", "CM + PM PE/PC + MR", "Telecom", "Telecom", []string{"PE/PC", "csv |"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
-			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC")),
+			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0003", "SH Telecom", "SH-Tele", "SH-Tele", []string{"PE/PC", "csv |"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
-			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC")),
+			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0004", "Shaanxi Telecom", "SN-Tele", "SN-Tele", []string{"PE/PC", "alarm cn", "csv |"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
-			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC")),
+			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
-		fileProfile("S0005", "Jiangsu Telecom delayed PM + custom log", "JS-Tele", "JS-Tele", []string{"PE/PC", "log type1"}, []FileGroup{
+		fileProfile("S0005", "Jiangsu Telecom delayed PM + custom log", "JS-Tele", "JS-Tele", []string{"PE/PC", "log type1", "csv |"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
-			group("pm-15m-delayed", DomainPM, FormatCSV, Period15M, 14, pathPM, namePM, obj("PE", "PC")),
+			pipeCSV(group("pm-15m-delayed", DomainPM, FormatCSV, Period15M, 14, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 			group("log-custom-daily", DomainLOG, FormatTXT, Period24H, 5, pathLOG, nameLOG, obj("login", "operation")),
 		}),
@@ -187,7 +196,7 @@ func defaultFileProfiles() []FileProfile {
 		}),
 		fileProfile("S0015", "Philippines DITO", "FeiLvBin-DITO", "FeiLvBin-DITO", []string{"PE/PC", "csv |"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
-			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC")),
+			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0016", "LTE + GSM PM", "MTN", "MTN", []string{"LTE/GSM"}, []FileGroup{

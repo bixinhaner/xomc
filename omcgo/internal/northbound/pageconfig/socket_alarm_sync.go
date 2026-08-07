@@ -269,6 +269,9 @@ func validateSocketFileSyncRequest(fields map[string]string) (socketAlarmSyncReq
 
 func validateSocketMessageSyncRequest(req socketAlarmSyncRequest, cucc bool) string {
 	if strings.TrimSpace(req.AlarmSeq) != "" && !validateSocketAlarmSeq(req.AlarmSeq) {
+		if cucc {
+			return "alarmSeq is not an integer."
+		}
 		return "alarmSeq is not an integer"
 	}
 	if cucc && strings.TrimSpace(req.ReqID) != "" {
@@ -297,25 +300,35 @@ func socketAlarmCTCCPayload(alarm model.Alarm, subject string) map[string]any {
 	neType := firstNonEmpty(stringPtrValue(alarm.Technology), string(alarm.Carrier))
 	objectName := firstNonEmpty(stringPtrValue(alarm.NetworkLocation), objectDn)
 	objectType := firstNonEmpty(stringPtrValue(alarm.EventType), alarm.AlarmType)
+	alarmType := firstNonEmpty(alarm.AlarmType, stringPtrValue(alarm.EventType))
+	specificProblem := firstNonEmpty(alarm.Description, alarmType)
 	return map[string]any{
 		"msgType":           ctccMsgRealtimeAlarm,
 		"alarmSequenceId":   socketAlarmSequenceJSONValue(alarm),
+		"alarmTitle":        socketAlarmText(alarm, specificProblem, "alarmTitle", "alarm_title", "title"),
 		"alarmStatus":       socketAlarmStatus(alarm, subject),
-		"alarmType":         firstNonEmpty(alarm.AlarmType, stringPtrValue(alarm.EventType)),
+		"alarmType":         alarmType,
 		"origSeverity":      alarmSeverityText(alarm.Severity),
 		"eventTime":         eventTime.Local().Format("2006-01-02 15:04:05"),
 		"alarmId":           socketAlarmID(alarm),
-		"specificProblemID": firstNonEmpty(alarm.AlarmIdentifier, alarm.AlarmType),
-		"specificProblem":   firstNonEmpty(alarm.Description, alarm.AlarmType),
+		"specificProblemID": firstNonEmpty(alarm.AlarmIdentifier, alarmType),
+		"specificProblem":   specificProblem,
 		"neDn":              alarm.DeviceSN,
 		"neName":            neName,
 		"neType":            neType,
 		"objectDn":          objectDn,
 		"objectName":        objectName,
 		"objectType":        objectType,
+		"locationInfo":      socketAlarmText(alarm, "0", "locationInfo", "location_info", "location"),
 		"addInfo":           compactAdditionalInfo(alarm.AdditionalInfo),
 		"omcReceivedTime":   socketOMCReceivedTime(alarm),
 		"omcUID":            socketOMCUID(alarm),
+		"eSerialNum":        socketAlarmText(alarm, "", "eSerialNum", "e_serial_num", "eserial_num"),
+		"rootAlarmId":       socketAlarmText(alarm, "", "rootAlarmId", "root_alarm_id"),
+		"causeType":         socketAlarmText(alarm, "", "causeType", "cause_type"),
+		"rNeUID":            socketAlarmText(alarm, "", "rNeUID", "r_ne_uid", "relatedNeUID", "related_ne_uid"),
+		"rNeName":           socketAlarmText(alarm, "", "rNeName", "r_ne_name", "relatedNeName", "related_ne_name"),
+		"rNeType":           socketAlarmText(alarm, "", "rNeType", "r_ne_type", "relatedNeType", "related_ne_type"),
 	}
 }
 
@@ -326,25 +339,46 @@ func socketAlarmCUCCFields(alarm model.Alarm, subject string) [][2]string {
 	neType := firstNonEmpty(stringPtrValue(alarm.Technology), string(alarm.Carrier))
 	objectName := firstNonEmpty(stringPtrValue(alarm.NetworkLocation), objectUID)
 	objectType := firstNonEmpty(stringPtrValue(alarm.EventType), alarm.AlarmType)
+	alarmType := firstNonEmpty(alarm.AlarmType, stringPtrValue(alarm.EventType))
+	specificProblem := firstNonEmpty(alarm.Description, alarmType)
 	return [][2]string{
 		{"alarmSeq", socketAlarmSequence(alarm)},
+		{"alarmTitle", socketAlarmText(alarm, specificProblem, "alarmTitle", "alarm_title", "title")},
 		{"alarmStatus", socketAlarmStatus(alarm, subject)},
-		{"alarmType", firstNonEmpty(alarm.AlarmType, stringPtrValue(alarm.EventType))},
+		{"alarmType", alarmType},
 		{"origSeverity", alarmSeverityText(alarm.Severity)},
 		{"eventTime", eventTime.Local().Format("20060102150405")},
 		{"alarmId", socketAlarmID(alarm)},
-		{"specificProblemID", firstNonEmpty(alarm.AlarmIdentifier, alarm.AlarmType)},
-		{"specificProblem", firstNonEmpty(alarm.Description, alarm.AlarmType)},
+		{"specificProblemID", firstNonEmpty(alarm.AlarmIdentifier, alarmType)},
+		{"specificProblem", specificProblem},
 		{"neUID", alarm.DeviceSN},
 		{"neName", neName},
 		{"neType", neType},
 		{"objectUID", objectUID},
 		{"objectName", objectName},
 		{"objectType", objectType},
+		{"locationInfo", socketAlarmText(alarm, "0", "locationInfo", "location_info", "location")},
 		{"addInfo", compactAdditionalInfo(alarm.AdditionalInfo)},
 		{"omcReceivedTime", socketOMCReceivedTime(alarm)},
 		{"omcUID", socketOMCUID(alarm)},
+		{"eSerialNum", socketAlarmText(alarm, "", "eSerialNum", "e_serial_num", "eserial_num")},
+		{"rootAlarmId", socketAlarmText(alarm, "", "rootAlarmId", "root_alarm_id")},
+		{"causeType", socketAlarmText(alarm, "", "causeType", "cause_type")},
+		{"rNeUID", socketAlarmText(alarm, "", "rNeUID", "r_ne_uid", "relatedNeUID", "related_ne_uid")},
+		{"rNeName", socketAlarmText(alarm, "", "rNeName", "r_ne_name", "relatedNeName", "related_ne_name")},
+		{"rNeType", socketAlarmText(alarm, "", "rNeType", "r_ne_type", "relatedNeType", "related_ne_type")},
 	}
+}
+
+func socketAlarmText(alarm model.Alarm, fallback string, keys ...string) string {
+	if alarm.AdditionalInfo != nil {
+		for _, key := range keys {
+			if value := strings.TrimSpace(alarm.AdditionalInfo[key]); value != "" {
+				return value
+			}
+		}
+	}
+	return fallback
 }
 
 func socketAlarmSequenceJSONValue(alarm model.Alarm) any {
@@ -420,7 +454,7 @@ func socketAlarmFileContent(config SocketAlarmConfig, req socketAlarmSyncRequest
 			return "", nil, "", fmt.Errorf("marshal socket alarm file row: %w", err)
 		}
 		raw.Write(line)
-		raw.WriteByte('\n')
+		raw.WriteString("\r\n")
 	}
 	var compressed bytes.Buffer
 	gw := gzip.NewWriter(&compressed)

@@ -62,6 +62,21 @@ type fakeLocalArchiveStore struct {
 	cleanupErr     error
 }
 
+type fakeMRSourceStore struct {
+	objects map[string][]byte
+}
+
+func (s *fakeMRSourceStore) Get(_ context.Context, objectKey string) ([]byte, error) {
+	if s == nil {
+		return nil, commonerrors.ErrNotFound
+	}
+	content, ok := s.objects[objectKey]
+	if !ok {
+		return nil, commonerrors.ErrNotFound
+	}
+	return append([]byte(nil), content...), nil
+}
+
 func (s *fakeLocalArchiveStore) Put(_ context.Context, object LocalArchiveObject) (LocalArchiveResult, error) {
 	object.Content = append([]byte(nil), object.Content...)
 	s.puts = append(s.puts, object)
@@ -137,8 +152,10 @@ func newFakeRepository() *fakeRepository {
 			"pm.object_ldn":   "",
 		}},
 		mrRows: []ExportDataRow{{
-			"mr.file_type": "MRO",
-			"mr.device_sn": "SN0001",
+			"mr.file_type":  "MRO",
+			"mr.device_sn":  "SN0001",
+			"mr.file_name":  "source-mro.xml",
+			"mr.minio_path": "mr/source-mro.xml",
 		}},
 		logRows: []ExportDataRow{{
 			"log.username":   "admin",
@@ -581,9 +598,17 @@ func (r *fakeRepository) CleanupExpiredResults(_ context.Context, runBefore time
 func setupTestRouterWithRepository(repo Repository) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewHandler(NewServiceWithRepository(NewDefaultCatalog(), repo), zap.NewNop())
+	h := NewHandler(newTestServiceWithRepository(repo), zap.NewNop())
 	h.RegisterRoutes(r.Group("/api/v1/northbound"))
 	return r
+}
+
+func newTestServiceWithRepository(repo Repository) *Service {
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	svc.SetMRSourceStore(&fakeMRSourceStore{objects: map[string][]byte{
+		"mr/source-mro.xml": []byte(`<bulkPmMrDataFile><fileHeader/></bulkPmMrDataFile>`),
+	}})
+	return svc
 }
 
 func TestListFileProfilesReturnsScenarioSeeds(t *testing.T) {
@@ -682,17 +707,20 @@ func TestValidateRejectsEGWObjects(t *testing.T) {
 	require.Contains(t, rr.Body.String(), "EGW/PEGW objects are not supported")
 }
 
-func TestValidateAcceptsCMCSVProfile(t *testing.T) {
+func TestValidateAcceptsCMCSVAndXMLProfile(t *testing.T) {
 	r := setupTestRouter()
-	body := []byte(`{"profile_kind":"file","domain":"CM","format":"CSV","period":"24H","compression_enabled":true,"compression_format":"zip","objects":[{"code":"CP"}]}`)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/northbound/page-config/validate", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
+	for _, format := range []string{"CSV", "XML"} {
+		body := []byte(fmt.Sprintf(`{"profile_kind":"file","domain":"CM","format":"%s","period":"24H","compression_enabled":true,"compression_format":"zip","objects":[{"code":"CP"}]}`, format))
 
-	require.Equal(t, http.StatusOK, rr.Code)
-	require.Contains(t, rr.Body.String(), `"valid":true`)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/northbound/page-config/validate", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+
+		require.Equal(t, http.StatusOK, rr.Code)
+		require.Contains(t, rr.Body.String(), `"valid":true`)
+	}
 }
 
 func TestValidateRejectsUnknownPMMetricPath(t *testing.T) {
@@ -915,6 +943,57 @@ func TestRunFileProfileGoldenContentAndName(t *testing.T) {
 		"SN0001,SN0001,SN0001,100001,Site-A,1,Nova-001,,Baicells,Nova,pBS11004,HW1,BaiBS_RTS_1.0,Nova-001,Site-A,,2026-08-04 16:45:00+08,Site-A,,",
 		"",
 	}, "\n"), run.ArtifactContent)
+}
+
+func TestRunFileProfileHonorsCSVSeparator(t *testing.T) {
+	repo := newFakeRepository()
+	pmGroup := group("pm-pipe", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, []ScenarioObject{{Code: "PC", Tech: "LTE"}})
+	pmGroup.CSVSeparator = "|"
+	pmGroup.CompressionEnabled = false
+	repo.fileProfiles = []FileProfile{
+		fileProfile("S9202", "PM pipe CSV", "Custom", "Custom", []string{"custom", "csv |"}, []FileGroup{pmGroup}),
+	}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	windowEnd := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S9202", RunProfileRequest{
+		GroupID:   "pm-pipe",
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	run := resp.Items[0]
+	lines := strings.Split(strings.TrimSpace(run.ArtifactContent), "\n")
+	require.NotEmpty(t, lines)
+	require.Equal(t, "Device SN|Metric Path|Metric Type|Metric Value|Statis Type|Granularity|End Time|Object LDN", lines[0])
+	require.Contains(t, lines[1], "SN0001|InternetGatewayDevice.Services.FAPService.1.PerfMgmt.PM.Counter.PUSCHPRBUsage|counter|12|avg|15min|2026-08-04 16:45:00+08|")
+}
+
+func TestRunFileProfileUsesMRSourceObjectContent(t *testing.T) {
+	repo := newFakeRepository()
+	mrGroup := group("mr-source", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, []ScenarioObject{{Code: "MRO"}})
+	mrGroup.CompressionEnabled = false
+	repo.fileProfiles = []FileProfile{
+		fileProfile("S9203", "MR source", "Custom", "Custom", []string{"custom"}, []FileGroup{mrGroup}),
+	}
+	svc := newTestServiceWithRepository(repo)
+	windowEnd := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S9203", RunProfileRequest{
+		GroupID:   "mr-source",
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	run := resp.Items[0]
+	require.Equal(t, "MRO-Baicells-MRO-127.0.0.1-100001-20260804000000.xml", run.ArtifactName)
+	require.Equal(t, `<bulkPmMrDataFile><fileHeader/></bulkPmMrDataFile>`, run.ArtifactContent)
+	require.NotContains(t, run.ArtifactContent, "<NorthboundExport>")
+	require.Equal(t, 1, run.RowCount)
+	require.Equal(t, true, run.Summary["mr_passthrough"])
+	require.Equal(t, "source-mro.xml", run.Summary["source_file_name"])
 }
 
 func TestRunInventoryProfileGoldenContentAndName(t *testing.T) {

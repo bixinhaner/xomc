@@ -6,7 +6,7 @@ import (
 )
 
 var supportedFormats = map[Domain]map[OutputFormat]struct{}{
-	DomainCM:        {FormatCSV: {}},
+	DomainCM:        {FormatCSV: {}, FormatXML: {}},
 	DomainPM:        {FormatCSV: {}},
 	DomainMR:        {FormatXML: {}},
 	DomainLOG:       {FormatTXT: {}, FormatCSV: {}},

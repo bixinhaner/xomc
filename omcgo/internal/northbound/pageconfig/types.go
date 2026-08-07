@@ -87,6 +87,7 @@ type FileGroup struct {
 	StartTime          string            `json:"start_time,omitempty"`
 	PathTemplate       string            `json:"path_template"`
 	FileNameTemplate   string            `json:"file_name_template"`
+	CSVSeparator       string            `json:"csv_separator,omitempty"`
 	CompressionEnabled bool              `json:"compression_enabled"`
 	CompressionFormat  CompressionFormat `json:"compression_format,omitempty"`
 	Objects            []ScenarioObject  `json:"objects"`
@@ -123,6 +124,7 @@ type FileGroupPreview struct {
 	Period               Period            `json:"period"`
 	PathTemplate         string            `json:"path_template"`
 	FileNameTemplate     string            `json:"file_name_template"`
+	CSVSeparator         string            `json:"csv_separator,omitempty"`
 	PreviewPath          string            `json:"preview_path"`
 	PreviewFileName      string            `json:"preview_file_name"`
 	CompressionEnabled   bool              `json:"compression_enabled"`

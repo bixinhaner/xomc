@@ -79,11 +79,59 @@ func (r *PgRepository) seedDefaults(ctx context.Context, catalog *Catalog) error
 		if err := r.insertDefaultFileProfile(ctx, profile); err != nil {
 			return err
 		}
+		if err := r.backfillDefaultFileProfileGroupMetadata(ctx, profile); err != nil {
+			return err
+		}
 	}
 	for _, profile := range catalog.InventoryProfiles() {
 		if err := r.insertDefaultInventoryProfile(ctx, profile); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (r *PgRepository) backfillDefaultFileProfileGroupMetadata(ctx context.Context, profile FileProfile) error {
+	defaultGroupsByID := make(map[string]FileGroup, len(profile.Groups))
+	for _, group := range profile.Groups {
+		defaultGroupsByID[group.ID] = group
+	}
+	if len(defaultGroupsByID) == 0 {
+		return nil
+	}
+
+	var raw []byte
+	if err := r.pool.QueryRow(ctx, `SELECT groups FROM northbound_file_profiles WHERE code = $1`, profile.Code).Scan(&raw); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("query default northbound_file_profiles groups %s: %w", profile.Code, err)
+	}
+	var groups []FileGroup
+	if err := json.Unmarshal(raw, &groups); err != nil {
+		return fmt.Errorf("unmarshal default northbound_file_profiles groups %s: %w", profile.Code, err)
+	}
+	changed := false
+	for i := range groups {
+		defaultGroup, ok := defaultGroupsByID[groups[i].ID]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(groups[i].CSVSeparator) == "" && strings.TrimSpace(defaultGroup.CSVSeparator) != "" {
+			groups[i].CSVSeparator = defaultGroup.CSVSeparator
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	updated, err := json.Marshal(groups)
+	if err != nil {
+		return fmt.Errorf("marshal default northbound_file_profiles groups %s: %w", profile.Code, err)
+	}
+	_, err = r.pool.Exec(ctx, `UPDATE northbound_file_profiles SET groups = $2, updated_at = now() WHERE code = $1`, profile.Code, updated)
+	if err != nil {
+		return fmt.Errorf("backfill default northbound_file_profiles groups %s: %w", profile.Code, err)
 	}
 	return nil
 }
