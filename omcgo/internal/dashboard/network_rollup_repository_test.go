@@ -249,6 +249,31 @@ func TestEnrichKPIDefinitionsReusesPMVersionRules(t *testing.T) {
 	assert.True(t, points[0].DefinitionComplete)
 }
 
+func TestEnrichKPIDefinitionsLeavesMissingCounterRuleIncomplete(t *testing.T) {
+	versionID := uuid.New()
+	loader := &fakeNetworkTaskVersionLoader{versions: []*pmstream.TaskVersionSnapshot{{
+		VersionID: versionID,
+		Metrics: map[string]pmstream.MetricRule{
+			"K1": {
+				MetricPath: "K1", MetricType: "kpi", Formula: "C1+C2",
+				Dependencies: []string{"C1", "C2"},
+			},
+		},
+		Counters: map[string]pmstream.CounterRule{
+			"C1": {MetricPath: "C1", Aggregation: pmstream.AggregationSum},
+		},
+	}}}
+	points := []NetworkRollupPoint{{MetricPath: "K1", TaskVersionID: versionID}}
+	repo := &NetworkRollupRepository{definitions: loader}
+
+	err := repo.enrichKPIDefinitions(context.Background(), points)
+
+	require.NoError(t, err)
+	assert.False(t, points[0].DefinitionComplete)
+	assert.Empty(t, points[0].Formula)
+	assert.Empty(t, points[0].CounterSignature)
+}
+
 func TestMergeNetworkRollupVersionSlicesDoesNotCrossCounterRuleChange(t *testing.T) {
 	start := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
 	first := NetworkRollupPoint{
