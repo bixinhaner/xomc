@@ -157,7 +157,8 @@ func NewNATSClient(cfg appconfig.NATSConfig, logger *zap.Logger) (*NATSClient, e
 	}, nil
 }
 
-// EnsureStreams creates all default JetStream streams if they don't exist.
+// EnsureStreams creates all default JetStream streams if they don't exist and
+// reconciles subjects on existing streams before consumers bind to them.
 // 当现有 stream 的 Retention 与 DefaultStreams 不一致时：
 //   - allowRebuild=true：删除重建（in-flight 消息丢失，仅适合 dev/test）
 //   - allowRebuild=false：仅 WARN，不破坏现有 stream（生产默认）
@@ -172,6 +173,12 @@ func (c *NATSClient) EnsureStreams(ctx context.Context, allowRebuild bool) error
 		}
 		if err != nil {
 			return fmt.Errorf("get stream info %s: %w", def.Name, err)
+		}
+
+		if err := reconcileStreamSubjects(def, info, func(config *nats.StreamConfig) (*nats.StreamInfo, error) {
+			return c.JS.UpdateStream(config)
+		}); err != nil {
+			return err
 		}
 
 		if err := enableDirectLookup(def, info, func(config *nats.StreamConfig) (*nats.StreamInfo, error) {
@@ -291,6 +298,39 @@ func enableDirectLookup(def StreamDef, info *nats.StreamInfo, update func(*nats.
 		return fmt.Errorf("enable direct message lookup for stream %s: %w", def.Name, err)
 	}
 	return nil
+}
+
+func reconcileStreamSubjects(
+	def StreamDef,
+	info *nats.StreamInfo,
+	update func(*nats.StreamConfig) (*nats.StreamInfo, error),
+) error {
+	if info == nil || sameSubjects(info.Config.Subjects, def.Subjects) {
+		return nil
+	}
+	config := info.Config
+	config.Subjects = append([]string(nil), def.Subjects...)
+	if _, err := update(&config); err != nil {
+		return fmt.Errorf("reconcile subjects for stream %s: %w", def.Name, err)
+	}
+	return nil
+}
+
+func sameSubjects(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	counts := make(map[string]int, len(left))
+	for _, subject := range left {
+		counts[subject]++
+	}
+	for _, subject := range right {
+		counts[subject]--
+		if counts[subject] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *NATSClient) createStream(def StreamDef) error {

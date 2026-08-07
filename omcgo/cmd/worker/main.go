@@ -139,8 +139,12 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	defer w.Logger.Sync()
 	w.Logger.Info("omcgo-worker starting", zap.String("config", cfgPath))
 
-	// Register all event subscribers
-	registerSubscribers(w, &cfg)
+	// Register all event subscribers. Geofence consumers are part of the
+	// acceptance-critical control plane, so a missing JetStream stream must
+	// fail startup instead of silently disabling alarms and device control.
+	if err := registerSubscribers(w, &cfg); err != nil {
+		return err
+	}
 
 	// 启动时把 device_tasks 里仍为 pending 的任务重灌进 Redis 设备队列。
 	// 大库冷启动时即使有专用索引，恢复也可能受机械盘或 autovacuum 影响；放到后台
@@ -185,7 +189,7 @@ func startPendingQueueRestore(
 	return done
 }
 
-func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
+func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	logger := w.Logger
 
 	eventOutboxRepo := coreoutbox.NewPgRelayRepository(storage.NewPoolDB(w.PgPool))
@@ -412,7 +416,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 
 	geofenceAlarmMonitor := alarm.NewGeofenceAlarmMonitor(alarmEngine, logger)
 	if err := geofenceAlarmMonitor.Subscribe(w.EventBus); err != nil {
-		logger.Warn("subscribe geofence alarm monitor", zap.Error(err))
+		return fmt.Errorf("subscribe geofence alarm monitor: %w", err)
 	}
 	logger.Info("geofence alarm monitor started")
 
@@ -430,7 +434,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		geofence.NewPgControlActionRepository(w.PgPool),
 	)
 	if err := geofenceControlMonitor.Subscribe(w.EventBus); err != nil {
-		logger.Warn("subscribe geofence control monitor", zap.Error(err))
+		return fmt.Errorf("subscribe geofence control monitor: %w", err)
 	} else {
 		logger.Info("geofence control monitor started")
 	}
@@ -873,6 +877,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	} else {
 		logger.Warn("tsdb shadow-dim sync disabled: TsPool not connected")
 	}
+	return nil
 }
 
 func newWorkerKPIRouteL2(w *workerInfra) router.L2Cache {
