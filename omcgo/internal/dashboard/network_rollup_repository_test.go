@@ -335,6 +335,22 @@ func TestBuildNetworkRollupSeriesSQLLoadsCounterRulesOnlyForPercentKPI(t *testin
 	assert.Contains(t, query, "pm_aggregation_version_counters")
 }
 
+func TestBuildNetworkRollupSeriesSQLKeepsDailyCounterQueryLightweight(t *testing.T) {
+	start := time.Date(2026, 8, 4, 0, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
+	end := start.Add(24 * time.Hour)
+
+	query, _, err := buildNetworkRollupSeriesSQL(NetworkRollupQuery{
+		Technology: model.TechLTE, Granularity: metrics.GranularityDaily,
+		MetricType: metrics.MetricTypeCounter, MetricPaths: []string{"C000060011"},
+		StartTime: start, EndTime: end,
+	})
+	require.NoError(t, err)
+
+	assert.NotContains(t, query, "pm_aggregation_version_metrics")
+	assert.NotContains(t, query, "pm_metric_dictionary")
+	assert.NotContains(t, query, "pm_aggregation_version_counters")
+}
+
 func TestBuildNetworkRollupSeriesSQLRejectsInvalidMetricType(t *testing.T) {
 	start := time.Now().UTC().Add(-time.Hour)
 	end := time.Now().UTC()
