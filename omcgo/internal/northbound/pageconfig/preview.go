@@ -65,6 +65,7 @@ func buildFileGroupPreview(group FileGroup) FileGroupPreview {
 		Period:               group.Period,
 		PathTemplate:         group.PathTemplate,
 		FileNameTemplate:     group.FileNameTemplate,
+		CSVSeparator:         group.CSVSeparator,
 		PreviewPath:          path,
 		PreviewFileName:      fileName,
 		CompressionEnabled:   group.CompressionEnabled,

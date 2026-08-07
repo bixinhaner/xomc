@@ -557,6 +557,9 @@ func (s *socketAlarmSession) finishSync() []socketProtocolFrame {
 }
 
 func (s *socketAlarmSession) queueOrWriteRealtimeFrame(frame socketProtocolFrame) error {
+	if strings.EqualFold(s.config.Profile, "CUCC") {
+		return s.writeFrame(frame.MessageType, frame.MessageFormat, frame.Body)
+	}
 	s.syncMu.Lock()
 	if s.syncing {
 		copied := socketProtocolFrame{
@@ -945,7 +948,7 @@ func (s *socketAlarmSession) handleCUCCFileSync(ctx context.Context, fields map[
 	ack := cuccCommand("ackSyncAlarmFile", [][2]string{
 		{"reqId", reqID},
 		{"result", "succ"},
-		{"resDesc", "accepted"},
+		{"resDesc", "null"},
 	})
 	if err := s.writeFrame(cuccMsgSyncAlarmFileAck, socketMessageFormatString, []byte(ack)); err != nil {
 		return err
@@ -1003,20 +1006,18 @@ func (s *socketAlarmSession) handleCUCCFileSync(ctx context.Context, fields map[
 		}
 	}
 	result := "succ"
-	desc := "success"
-	if len(failures) > 0 {
+	desc := "null"
+	if len(remotePaths) == 0 || len(failures) > 0 {
 		result = "fail"
 		desc = strings.Join(failures, ", ")
-	}
-	filePath := ""
-	if len(remotePaths) > 0 {
-		filePath = remotePaths[0]
+		if strings.TrimSpace(desc) == "" {
+			desc = "file create error."
+		}
 	}
 	done := cuccCommand("ackSyncAlarmFileResult", [][2]string{
 		{"reqId", reqID},
 		{"result", result},
-		{"fileName", artifactName},
-		{"filePath", filePath},
+		{"fileName", strings.Join(remotePaths, ",")},
 		{"resDesc", desc},
 	})
 	s.manager.recordEvent(eventFromSocketFileSync(s.config, reqID, artifactName, remotePaths, failures, done))

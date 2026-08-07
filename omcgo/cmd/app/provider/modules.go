@@ -1509,6 +1509,7 @@ func initNorthboundModule(c *Container) error {
 			localArchiveStore,
 			nbpageconfig.LocalArchiveOptions{RetentionDays: 7},
 		)
+		pageConfigService.SetMRSourceStore(nbpageconfig.NewMinIOMRSourceStore(c.MinIO, c.Cfg.MinIO.Buckets.MRFiles))
 	}
 	nbRouter.SetPageConfigService(pageConfigService)
 	pageConfigScheduler := nbpageconfig.NewScheduler(pageConfigService, pageConfigRepo, logger)

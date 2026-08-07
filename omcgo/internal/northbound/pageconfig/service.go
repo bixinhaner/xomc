@@ -52,6 +52,10 @@ type Repository interface {
 	CleanupExpiredResults(ctx context.Context, runBefore time.Time, eventBefore time.Time) (ResultCleanupSummary, error)
 }
 
+type MRSourceStore interface {
+	Get(ctx context.Context, objectKey string) ([]byte, error)
+}
+
 type Service struct {
 	catalog             *Catalog
 	repo                Repository
@@ -59,6 +63,7 @@ type Service struct {
 	snmpSender          nbsnmp.Sender
 	localArchive        LocalArchiveStore
 	localArchiveOptions LocalArchiveOptions
+	mrSourceStore       MRSourceStore
 
 	socketConfigListenersMu sync.RWMutex
 	socketConfigListeners   []func()
@@ -90,6 +95,10 @@ func (s *Service) SetSNMPSender(sender nbsnmp.Sender) {
 func (s *Service) SetLocalArchive(store LocalArchiveStore, opts LocalArchiveOptions) {
 	s.localArchive = store
 	s.localArchiveOptions = normalizeLocalArchiveOptions(opts)
+}
+
+func (s *Service) SetMRSourceStore(store MRSourceStore) {
+	s.mrSourceStore = store
 }
 
 func (s *Service) RegisterSocketConfigChangeListener(listener func()) {

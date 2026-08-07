@@ -82,6 +82,7 @@ interface FileGroup {
   cron: string;
   path: string;
   name: string;
+  csvSeparator?: string;
   compressionEnabled: boolean;
   compressionFormat: CompressionFormat;
   objects: ScenarioObject[];
@@ -119,6 +120,7 @@ interface ScenarioPeriodRow {
   objects: string;
   path: string;
   fileName: string;
+  csvSeparator?: string;
   compressionEnabled: boolean;
   compressionFormat: CompressionFormat;
   selectedFields?: string[];
@@ -3283,6 +3285,7 @@ function mapApiFileProfile(profile: NorthboundFileProfile): ScenarioRow {
           cron: cronFromPeriodStartMinute(period, item.start_minute),
           path: item.path_template,
           name: item.file_name_template,
+          csvSeparator: item.csv_separator,
           compressionEnabled: item.compression_enabled,
           compressionFormat: normalizeApiCompressionFormat(item.compression_format),
           objects: item.objects.map(mapApiScenarioObject),
@@ -3647,6 +3650,7 @@ function serializeEditorPeriodRows(
       start_minute: startMinuteFromCron(period, row.cron),
       path_template: row.path || defaultRemotePathByDomain[row.domain],
       file_name_template: row.fileName || defaultPeriodRow(row.domain).fileName,
+      csv_separator: row.csvSeparator,
       compression_enabled: row.compressionEnabled,
       compression_format: row.compressionFormat,
       selected_fields: selectedSet.size > 0 ? [...selectedSet] : undefined,
@@ -4340,6 +4344,7 @@ function getScenarioPeriodRows(scenario: ScenarioRow): ScenarioPeriodRow[] {
     objects: getGroupObjectsLabel(groupItem),
     path: groupItem.path,
     fileName: getGroupFileNameTemplate(groupItem),
+    csvSeparator: groupItem.csvSeparator,
     compressionEnabled: groupItem.compressionEnabled,
     compressionFormat: groupItem.compressionFormat,
     selectedFields: groupItem.selectedFields,

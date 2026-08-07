@@ -134,6 +134,9 @@ func (s *Service) getInventoryProfile(ctx context.Context, idOrCode string) (*In
 
 func (s *Service) buildFileRun(ctx context.Context, profile FileProfile, group FileGroup, object ScenarioObject, req RunProfileRequest) (FileRun, error) {
 	windowStart, windowEnd := normalizeRunWindow(group.Period, req)
+	if group.Domain == DomainMR {
+		return s.buildMRPassthroughRun(ctx, profile, group, object, req, windowStart, windowEnd)
+	}
 	content, rowCount, err := s.generateFileContent(ctx, group, object, windowStart, windowEnd, req.Limit)
 	if err != nil {
 		return FileRun{}, err
@@ -159,6 +162,71 @@ func (s *Service) buildFileRun(ctx context.Context, profile FileProfile, group F
 			"profile_name": profile.Name,
 			"format":       group.Format,
 			"period":       group.Period,
+		},
+	}, nil
+}
+
+func (s *Service) buildMRPassthroughRun(ctx context.Context, profile FileProfile, group FileGroup, object ScenarioObject, req RunProfileRequest, windowStart, windowEnd time.Time) (FileRun, error) {
+	if s.mrSourceStore == nil {
+		return FileRun{}, fmt.Errorf("MR source store is not configured")
+	}
+	rows, err := s.repo.LoadMRRows(ctx, object.Code, minPositive(normalizeLimit(req.Limit), 1))
+	if err != nil {
+		return FileRun{}, err
+	}
+	artifactPath, artifactName := renderArtifactName(group, object, windowStart, windowEnd, 1)
+	if len(rows) == 0 {
+		return FileRun{
+			ProfileKind:        ProfileKindFile,
+			ProfileCode:        profile.Code,
+			GroupID:            group.ID,
+			Domain:             group.Domain,
+			ObjectCode:         object.Code,
+			Status:             RunStatusSuccess,
+			WindowStart:        &windowStart,
+			WindowEnd:          &windowEnd,
+			ArtifactPath:       artifactPath,
+			ArtifactName:       artifactName,
+			CompressionEnabled: group.CompressionEnabled,
+			CompressionFormat:  compressionFormatOrDefault(group.CompressionFormat),
+			Summary: map[string]any{
+				"profile_name":   profile.Name,
+				"format":         group.Format,
+				"period":         group.Period,
+				"mr_passthrough": true,
+			},
+		}, nil
+	}
+	sourceName := rows[0]["mr.file_name"]
+	sourcePath := firstNonEmpty(rows[0]["mr.minio_path"], rows[0]["mr.object_key"], rows[0]["minio_path"])
+	contentBytes, err := s.mrSourceStore.Get(ctx, sourcePath)
+	if err != nil {
+		return FileRun{}, err
+	}
+	content := string(contentBytes)
+	return FileRun{
+		ProfileKind:        ProfileKindFile,
+		ProfileCode:        profile.Code,
+		GroupID:            group.ID,
+		Domain:             group.Domain,
+		ObjectCode:         object.Code,
+		Status:             RunStatusSuccess,
+		WindowStart:        &windowStart,
+		WindowEnd:          &windowEnd,
+		ArtifactPath:       artifactPath,
+		ArtifactName:       artifactName,
+		ArtifactContent:    content,
+		ArtifactSize:       int64(len(contentBytes)),
+		RowCount:           1,
+		CompressionEnabled: group.CompressionEnabled,
+		CompressionFormat:  compressionFormatOrDefault(group.CompressionFormat),
+		Summary: map[string]any{
+			"profile_name":       profile.Name,
+			"format":             group.Format,
+			"period":             group.Period,
+			"mr_passthrough":     true,
+			"source_file_name":   sourceName,
+			"source_object_path": sourcePath,
 		},
 	}, nil
 }
@@ -270,8 +338,6 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 			WindowEnd:   &windowEnd,
 			Limit:       normalizeLimit(limit),
 		})
-	case DomainMR:
-		rows, err = s.repo.LoadMRRows(ctx, object.Code, normalizeLimit(limit))
 	case DomainLOG:
 		rows, err = s.repo.LoadLogRows(ctx, object.Code, normalizeLimit(limit))
 	default:
@@ -289,7 +355,7 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 	if group.Domain == DomainCM && group.Format == FormatXML {
 		return renderCMXML(fields, rows, windowEnd), len(rows), nil
 	}
-	return renderRows(group.Format, fields, rows)
+	return renderRowsForGroup(group, fields, rows)
 }
 
 func (s *Service) generateInventoryContent(ctx context.Context, profile InventoryProfile, limit int) (string, int, error) {
@@ -342,9 +408,17 @@ func (s *Service) inventoryFields(profile InventoryProfile) []FieldDefinition {
 }
 
 func renderRows(format OutputFormat, fields []FieldDefinition, rows []ExportDataRow) (string, int, error) {
+	return renderRowsWithCSVSeparator(format, fields, rows, "")
+}
+
+func renderRowsForGroup(group FileGroup, fields []FieldDefinition, rows []ExportDataRow) (string, int, error) {
+	return renderRowsWithCSVSeparator(group.Format, fields, rows, group.CSVSeparator)
+}
+
+func renderRowsWithCSVSeparator(format OutputFormat, fields []FieldDefinition, rows []ExportDataRow, csvSeparator string) (string, int, error) {
 	switch format {
 	case FormatCSV:
-		content, err := renderCSV(fields, rows)
+		content, err := renderCSV(fields, rows, csvSeparator)
 		return content, len(rows), err
 	case FormatTXT:
 		content, err := renderDelimited(fields, rows, "|")
@@ -356,9 +430,16 @@ func renderRows(format OutputFormat, fields []FieldDefinition, rows []ExportData
 	}
 }
 
-func renderCSV(fields []FieldDefinition, rows []ExportDataRow) (string, error) {
+func renderCSV(fields []FieldDefinition, rows []ExportDataRow, separators ...string) (string, error) {
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
+	separator := ""
+	if len(separators) > 0 {
+		separator = separators[0]
+	}
+	if comma, ok := csvComma(separator); ok {
+		writer.Comma = comma
+	}
 	if err := writer.Write(outputAliases(fields)); err != nil {
 		return "", err
 	}
@@ -372,6 +453,23 @@ func renderCSV(fields []FieldDefinition, rows []ExportDataRow) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+func csvComma(separator string) (rune, bool) {
+	separator = strings.TrimSpace(separator)
+	if separator == "" {
+		return ',', false
+	}
+	runes := []rune(separator)
+	if len(runes) != 1 {
+		return ',', false
+	}
+	switch runes[0] {
+	case '"', '\r', '\n', 0:
+		return ',', false
+	default:
+		return runes[0], true
+	}
 }
 
 func renderDelimited(fields []FieldDefinition, rows []ExportDataRow, sep string) (string, error) {
