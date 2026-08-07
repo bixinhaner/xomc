@@ -295,8 +295,11 @@ describe('GeofenceBindingsDrawer', () => {
     renderDrawer();
 
     expect(screen.getByText('部分失败')).toBeInTheDocument();
-    expect(screen.getByText(/请求值.*rf = 0/)).toBeInTheDocument();
-    expect(screen.getByText(/设备回读值.*rf = 1/)).toBeInTheDocument();
+    expect(screen.getByText('控制参数')).toBeInTheDocument();
+    expect(screen.getAllByText('rf')).toHaveLength(2);
+    expect(screen.getByText('不一致')).toBeInTheDocument();
+    expect(screen.getAllByText('0').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1').length).toBeGreaterThan(0);
     expect(screen.getByText('rf expected 0 got 1')).toBeInTheDocument();
   });
 

@@ -654,6 +654,36 @@
   top: 10px;
 }
 
+.geofence-lifecycle-impact {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.geofence-lifecycle-impact-item {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--ant-color-fill-quaternary, #fafafa);
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 8px;
+}
+
+.geofence-lifecycle-impact-item span {
+  overflow: hidden;
+  color: var(--ant-color-text-secondary, #8c8c8c);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geofence-lifecycle-impact-item strong {
+  color: var(--ant-color-text-heading, #262626);
+  font-size: 24px;
+  line-height: 30px;
+}
+
 .geofence-candidate-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -856,7 +886,8 @@
 
 .geofence-control-results {
   margin-top: 16px;
-  padding: 10px 12px;
+  padding: 0;
+  overflow: hidden;
   background: var(--ant-color-fill-quaternary, rgba(127, 127, 127, 0.08));
   border: 1px solid var(--ant-color-border-secondary, #e5e7eb);
   border-radius: 6px;
@@ -870,14 +901,121 @@
   cursor: pointer;
   font-weight: 600;
   list-style: none;
+  padding: 12px 14px;
+  outline: none;
+  transition: background-color 160ms ease;
 }
 
 .geofence-control-results summary::-webkit-details-marker {
   display: none;
 }
 
+.geofence-control-results summary:hover,
 .geofence-control-results[open] summary {
-  margin-bottom: 10px;
+  background: var(--ant-color-fill-tertiary, rgba(127, 127, 127, 0.12));
+}
+
+.geofence-control-results summary:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--ant-color-primary-border, #91caff);
+}
+
+.geofence-control-results-count {
+  min-width: 24px;
+  padding: 1px 8px;
+  color: var(--ant-color-text-secondary, #8c8c8c);
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+  background: var(--ant-color-fill-secondary, rgba(127, 127, 127, 0.14));
+  border-radius: 999px;
+}
+
+.geofence-control-results-state {
+  padding: 18px 14px;
+  color: var(--ant-color-text-secondary, #8c8c8c);
+}
+
+.geofence-control-action-card {
+  margin: 0 12px 12px;
+  overflow: hidden;
+  background: var(--ant-color-bg-container, #fff);
+  border: 1px solid var(--ant-color-border-secondary, #e5e7eb);
+  border-radius: 8px;
+}
+
+.geofence-control-action-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ant-color-border-secondary, #e5e7eb);
+}
+
+.geofence-control-action-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.geofence-control-action-identity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.geofence-control-parameter-table {
+  overflow-x: auto;
+}
+
+.geofence-control-parameter-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) repeat(4, minmax(52px, 60px));
+  gap: 8px;
+  align-items: center;
+  min-width: 458px;
+  padding: 9px 14px;
+  color: var(--ant-color-text, #262626);
+  border-bottom: 1px solid var(--ant-color-border-secondary, #e5e7eb);
+}
+
+.geofence-control-parameter-row:last-child {
+  border-bottom: 0;
+}
+
+.geofence-control-parameter-head {
+  color: var(--ant-color-text-secondary, #8c8c8c);
+  font-size: 12px;
+  background: var(--ant-color-fill-quaternary, rgba(127, 127, 127, 0.08));
+}
+
+.geofence-control-parameter-name {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.geofence-control-parameter-name code {
+  display: block;
+  overflow: hidden;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geofence-control-parameter-row > code {
+  color: var(--ant-color-text, #262626);
+  font-weight: 600;
+}
+
+.geofence-control-parameter-row > .ant-tag {
+  margin-inline-end: 0;
+  text-align: center;
+}
+
+.geofence-control-action-error {
+  margin: 10px 12px 12px;
 }
 
 .geofence-binding-batch-divider {
@@ -885,6 +1023,20 @@
 }
 
 @media (max-width: 560px) {
+  .geofence-lifecycle-impact {
+    grid-template-columns: 1fr;
+  }
+
+  .geofence-lifecycle-impact-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .geofence-lifecycle-impact-item strong {
+    font-size: 20px;
+    line-height: 26px;
+  }
+
   .geofence-binding-card-footer {
     align-items: flex-start;
     flex-direction: column;
@@ -893,6 +1045,11 @@
   .geofence-binding-card-actions {
     align-self: flex-end;
   }
+
+  .geofence-control-action-header {
+    flex-direction: column;
+  }
+
 }
 
 @media (max-width: 720px) {

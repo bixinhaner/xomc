@@ -22,6 +22,15 @@ var geofenceSingleIPSecControlPathPattern = regexp.MustCompile(
 	`^Device\.FAP\.Ipsec\.([0-9]+)\.TUNNEL_ENABLE$`,
 )
 
+var geofenceMappedStandardRFControlPathPattern = regexp.MustCompile(
+	`^(?:` +
+		`Device\.Services\.FAPService\.[0-9]+\.FAPControl\.(?:LTE|NR)\.RFTxStatus|` +
+		`Device\.Services\.FAPService\.[0-9]+\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.(?:AdminCellState|X_COM_RadioEnable|ForceRadioEnable)|` +
+		`Device\.DeviceInfo\.(?:EU\.[0-9]+\.)?RU\.[0-9]+\.RFTxStatus|` +
+		`Device\.DeviceInfo\.SAS\.RadioEnable[0-9]*` +
+		`)$`,
+)
+
 type geofenceControlPlan struct {
 	Before    []ControlParameterState
 	Requested []ControlParameterState
@@ -53,7 +62,7 @@ func buildGeofenceControlPlan(
 				"geofence control parameter %s is missing from the device snapshot", target.Path,
 			)
 		}
-		if !current.Writable {
+		if !current.Writable && !geofenceMappedStandardRFControlPathPattern.MatchString(target.Path) {
 			return geofenceControlPlan{}, fmt.Errorf(
 				"geofence control parameter %s is not writable", target.Path,
 			)

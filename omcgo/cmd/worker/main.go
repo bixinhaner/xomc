@@ -244,6 +244,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 		logger.Warn("product registry refresh failed in worker; kpi route will be orphan-only",
 			zap.Error(err))
 	}
+	workerParamRegistry := newWorkerParamRegistry(w, pmProductRegistry, logger)
 	pmDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
 	pmIndicatorRepo := indicator.NewPgIndicatorRepository(w.PgPool)
 	pmFormulaRepo := indicator.NewPgPlatformFormulaRepository(w.PgPool)
@@ -428,6 +429,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	)
 	geofenceControlMonitor.SetParameterReader(
 		device.NewPgDeviceParameterRepository(w.PgPool),
+	)
+	geofenceControlMonitor.SetMappingReader(
+		newWorkerGeofenceMappingReader(pmProductRegistry, workerParamRegistry),
 	)
 	geofenceControlMonitor.SetTaskHistoryReader(w.TaskRepo)
 	geofenceControlMonitor.SetActionRepository(

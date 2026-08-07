@@ -61,6 +61,20 @@ func TestBuildGeofenceControlPlanMatchesMBS31001PrivateSingleIPSecPath(t *testin
 	require.Equal(t, []ControlParameterState{{Path: target.Path, Value: "0"}}, plan.Requested)
 }
 
+func TestBuildGeofenceControlPlanAllowsMappedStandardRFReadOnlySnapshot(t *testing.T) {
+	target := carrier.GeofenceControlParameter{
+		Path:  "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus",
+		Value: "0",
+	}
+	plan, err := buildGeofenceControlPlan([]model.DeviceParameter{
+		{ParameterPath: target.Path, ParameterValue: "true", Writable: false},
+	}, []carrier.GeofenceControlParameter{target})
+
+	require.NoError(t, err)
+	require.Equal(t, []ControlParameterState{{Path: target.Path, Value: "1"}}, plan.Before)
+	require.Equal(t, []ControlParameterState{{Path: target.Path, Value: "0"}}, plan.Requested)
+}
+
 func TestRestoreTargetsRestoresOnlyParametersChangedByDeactivation(t *testing.T) {
 	ipsec := "Device.Services.FAPService.Ipsec.IPSEC_ENABLE"
 	rf := "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus"

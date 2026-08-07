@@ -36,6 +36,7 @@ import {
 } from '@core/hooks/api/useGeofence';
 import type {
   GeofenceBindingDetail,
+  GeofenceControlAction,
   GeofenceManualBindingPreview,
   GeofenceMapDefinition,
 } from '@core/types/geofence';
@@ -61,6 +62,32 @@ function parseDeviceSNs(value: string): string[] {
         .filter(Boolean),
     ),
   ).slice(0, 1000);
+}
+
+interface ControlParameterRow {
+  path: string;
+  before?: string;
+  requested?: string;
+  verified?: string;
+}
+
+function controlParameterRows(action: GeofenceControlAction): ControlParameterRow[] {
+  const rows = new Map<string, ControlParameterRow>();
+  const merge = (field: 'before' | 'requested' | 'verified', path: string, value: string) => {
+    rows.set(path, { ...rows.get(path), path, [field]: value });
+  };
+  action.beforeState.forEach(({ path, value }) => merge('before', path, value));
+  action.requestedState.forEach(({ path, value }) => merge('requested', path, value));
+  action.verifiedState.forEach(({ path, value }) => merge('verified', path, value));
+  return Array.from(rows.values()).filter((row) => row.requested !== undefined || row.verified !== undefined);
+}
+
+function controlParameterName(path: string, format: (id: string, values?: Record<string, string>) => string) {
+  const rf = path.match(/FAPService\.(\d+)\..*RFTxStatus$/i);
+  if (rf) return format('geofence.control.rfInstance', { instance: rf[1] });
+  const ipsec = path.match(/Ipsec\.(\d+)\..*(?:TUNNEL_ENABLE|TUNNELENABLE)$/i);
+  if (ipsec) return format('geofence.control.ipsecInstance', { instance: ipsec[1] });
+  return path.split('.').slice(-2).join('.');
 }
 
 export default function GeofenceBindingsDrawer({
@@ -467,7 +494,7 @@ export default function GeofenceBindingsDrawer({
                       />
                     </Tooltip>
                   )}
-              </Space>
+                </Space>
               </div>
             </article>
           ))}
@@ -476,59 +503,161 @@ export default function GeofenceBindingsDrawer({
 
       <details className="geofence-control-results">
         <summary>
-          {intl.formatMessage({ id: 'geofence.control.title' })}
-          <Tag>{(actionsQuery.data ?? []).length}</Tag>
+          <span>{intl.formatMessage({ id: 'geofence.control.title' })}</span>
+          <span className="geofence-control-results-count">
+            {(actionsQuery.data ?? []).length}
+          </span>
         </summary>
-        <Descriptions column={1} size="small">
         {actionsQuery.isLoading ? (
-          <Descriptions.Item>
+          <div className="geofence-control-results-state">
             <Spin size="small" />
-          </Descriptions.Item>
+          </div>
         ) : actionsQuery.isError ? (
-          <Descriptions.Item>
+          <div className="geofence-control-results-state">
             <Typography.Text type="danger">
               {intl.formatMessage({ id: 'geofence.message.loadFailed' })}
             </Typography.Text>
-          </Descriptions.Item>
+          </div>
         ) : (actionsQuery.data ?? []).length === 0 ? (
-          <Descriptions.Item>
+          <div className="geofence-control-results-state">
             {intl.formatMessage({ id: 'geofence.control.empty' })}
-          </Descriptions.Item>
+          </div>
         ) : (
           (actionsQuery.data ?? []).map((action) => (
-            <Descriptions.Item
+            <article
+              className="geofence-control-action-card"
               key={action.id}
-              label={action.deviceSN}
             >
-              <Space size="small" wrap>
-                <Tag>{action.actionType === 'activate'
-                  ? intl.formatMessage({ id: 'geofence.control.activate' })
-                  : intl.formatMessage({ id: 'geofence.control.deactivate' })}</Tag>
-                <Tag color={action.status === 'verified' ? 'success' : action.status === 'failed' || action.status === 'partial_failed' ? 'error' : 'processing'}>
-                  {intl.formatMessage({
-                    id: `geofence.control.status.${action.status}`,
-                  })}
-                </Tag>
-                {action.requestedState.map((parameter) => (
-                  <Typography.Text type="secondary" key={`requested-${parameter.path}`}>
-                    {intl.formatMessage({ id: 'geofence.control.requested' })}:{' '}
-                    {parameter.path} = {parameter.value}
+              <header className="geofence-control-action-header">
+                <div className="geofence-control-action-identity">
+                  <strong>{action.deviceSN}</strong>
+                  <Typography.Text type="secondary">
+                    {intl.formatDate(
+                      action.completedAt ?? action.createdAt,
+                      {
+                        year: 'numeric',
+                        month: 'numeric',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false,
+                      },
+                    )}
                   </Typography.Text>
-                ))}
-                {action.verifiedState.map((parameter) => (
-                  <Typography.Text type="secondary" key={`verified-${parameter.path}`}>
-                    {intl.formatMessage({ id: 'geofence.control.verified' })}:{' '}
-                    {parameter.path} = {parameter.value}
-                  </Typography.Text>
-                ))}
-                {action.lastError && (
-                  <Typography.Text type="danger">{action.lastError}</Typography.Text>
-                )}
-              </Space>
-            </Descriptions.Item>
+                </div>
+                <Space size={6} wrap>
+                  <Tag>
+                    {action.actionType === 'activate'
+                      ? intl.formatMessage({
+                          id: 'geofence.control.activate',
+                        })
+                      : intl.formatMessage({
+                          id: 'geofence.control.deactivate',
+                        })}
+                  </Tag>
+                  <Tag
+                    color={
+                      action.status === 'verified'
+                        ? 'success'
+                        : action.status === 'failed' ||
+                            action.status === 'partial_failed'
+                          ? 'error'
+                          : 'processing'
+                    }
+                  >
+                    {intl.formatMessage({
+                      id: `geofence.control.status.${action.status}`,
+                    })}
+                  </Tag>
+                </Space>
+              </header>
+              <div
+                className="geofence-control-parameter-table"
+                role="table"
+              >
+                <div
+                  className="geofence-control-parameter-row geofence-control-parameter-head"
+                  role="row"
+                >
+                  <span>
+                    {intl.formatMessage({
+                      id: 'geofence.control.parameter',
+                    })}
+                  </span>
+                  <span>
+                    {intl.formatMessage({ id: 'geofence.control.before' })}
+                  </span>
+                  <span>
+                    {intl.formatMessage({
+                      id: 'geofence.control.requested',
+                    })}
+                  </span>
+                  <span>
+                    {intl.formatMessage({
+                      id: 'geofence.control.verified',
+                    })}
+                  </span>
+                  <span>
+                    {intl.formatMessage({ id: 'geofence.control.result' })}
+                  </span>
+                </div>
+                {controlParameterRows(action).map((parameter) => {
+                  const matched =
+                    parameter.requested !== undefined &&
+                    parameter.verified === parameter.requested;
+                  const missing =
+                    parameter.requested !== undefined &&
+                    parameter.verified === undefined;
+                  return (
+                    <div
+                      className="geofence-control-parameter-row"
+                      role="row"
+                      key={parameter.path}
+                    >
+                      <span className="geofence-control-parameter-name">
+                        <strong>
+                          {controlParameterName(
+                            parameter.path,
+                            (id, values) =>
+                              intl.formatMessage({ id }, values),
+                          )}
+                        </strong>
+                        <Tooltip title={parameter.path} placement="topLeft">
+                          <code>{parameter.path}</code>
+                        </Tooltip>
+                      </span>
+                      <code>{parameter.before ?? '—'}</code>
+                      <code>{parameter.requested ?? '—'}</code>
+                      <code>{parameter.verified ?? '—'}</code>
+                      <Tag
+                        color={
+                          matched ? 'success' : missing ? 'warning' : 'error'
+                        }
+                      >
+                        {intl.formatMessage({
+                          id: matched
+                            ? 'geofence.control.match'
+                            : missing
+                              ? 'geofence.control.missing'
+                              : 'geofence.control.mismatch',
+                        })}
+                      </Tag>
+                    </div>
+                  );
+                })}
+              </div>
+              {action.lastError && (
+                <Alert
+                  className="geofence-control-action-error"
+                  type="error"
+                  showIcon
+                  title={action.lastError}
+                />
+              )}
+            </article>
           ))
         )}
-        </Descriptions>
       </details>
 
       <Divider

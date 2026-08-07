@@ -636,29 +636,23 @@ export default function GeofencePanel({
       >
         {pending && (
           <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-            <Descriptions column={1} size="small">
-              <Descriptions.Item
-                label={intl.formatMessage({
-                  id: 'geofence.lifecycle.bindingCount',
-                })}
-              >
-                {pending.impact.bindingCount}
-              </Descriptions.Item>
-              <Descriptions.Item
-                label={intl.formatMessage({
-                  id: 'geofence.lifecycle.deviceCount',
-                })}
-              >
-                {pending.impact.deviceCount}
-              </Descriptions.Item>
-              <Descriptions.Item
-                label={intl.formatMessage({
-                  id: 'geofence.lifecycle.activeJobs',
-                })}
-              >
-                {pending.impact.activeBatchJobCount}
-              </Descriptions.Item>
-            </Descriptions>
+            <div
+              className="geofence-lifecycle-impact"
+              aria-label={intl.formatMessage({
+                id: 'geofence.lifecycle.previewTitle',
+              })}
+            >
+              {[
+                ['geofence.lifecycle.bindingCount', pending.impact.bindingCount],
+                ['geofence.lifecycle.deviceCount', pending.impact.deviceCount],
+                ['geofence.lifecycle.activeJobs', pending.impact.activeBatchJobCount],
+              ].map(([label, value]) => (
+                <div className="geofence-lifecycle-impact-item" key={String(label)}>
+                  <span>{intl.formatMessage({ id: String(label) })}</span>
+                  <strong>{value}</strong>
+                </div>
+              ))}
+            </div>
             {pending.target === 'disabled' && (
               <Alert
                 type="warning"

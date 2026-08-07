@@ -25,8 +25,17 @@ type controlParameterReaderStub struct {
 	parameters []model.DeviceParameter
 }
 
+type controlMappingReaderStub struct {
+	mappings []carrier.GeofenceControlMapping
+	err      error
+}
+
 func (s controlParameterReaderStub) GetByDevice(context.Context, uuid.UUID) ([]model.DeviceParameter, error) {
 	return s.parameters, nil
+}
+
+func (s controlMappingReaderStub) GetByProductClass(context.Context, string, string) ([]carrier.GeofenceControlMapping, error) {
+	return s.mappings, s.err
 }
 
 func (s controlDeviceReaderStub) GetBySerialNumber(context.Context, string) (*model.Device, error) {
@@ -230,8 +239,9 @@ func TestGeofenceControlMonitorQueuesMBS31001IPSecDeactivation(t *testing.T) {
 	)
 	monitor.SetParameterReader(controlParameterReaderStub{parameters: []model.DeviceParameter{
 		{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", ParameterValue: "false", Writable: true},
-		{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_ENABLE", ParameterValue: "true", Writable: true},
-		{ParameterPath: "Device.FAP.Ipsec.2.TUNNEL_ENABLE", ParameterValue: "true", Writable: true},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", ParameterValue: "true", Writable: false},
+		{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "true", Writable: true},
+		{ParameterPath: "Device.FAP.Ipsec.2.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "true", Writable: true},
 	}})
 	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
 	monitor.SetActionRepository(newControlActionRepositoryStub())
@@ -250,8 +260,51 @@ func TestGeofenceControlMonitorQueuesMBS31001IPSecDeactivation(t *testing.T) {
 		Payload: payload,
 	}))
 	require.NotNil(t, tasks.request)
+	require.Contains(t, string(tasks.request.Params), "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus")
+	require.NotContains(t, string(tasks.request.Params), "Device.DeviceInfo.SAS.RadioEnable")
 	require.Contains(t, string(tasks.request.Params), "Device.FAP.Ipsec.1.TUNNEL_ENABLE")
 	require.Contains(t, string(tasks.request.Params), "Device.FAP.Ipsec.2.TUNNEL_ENABLE")
+}
+
+func TestGeofenceControlMonitorUsesParamModelRFMapping(t *testing.T) {
+	tasks := &controlTaskStub{}
+	monitor := NewGeofenceControlMonitor(
+		controlDeviceReaderStub{device: &model.Device{
+			ID:              uuid.New(),
+			SerialNumber:    "SN-MAPPED-RF-1",
+			ProductClass:    "FAP/MLN/DC",
+			FirmwareVersion: "MLN_5.1.12.2",
+			Carrier:         model.CarrierCMCC,
+			Technology:      model.TechLTE,
+		}},
+		controlCarrierRegistry(),
+		tasks,
+		zap.NewNop(),
+	)
+	monitor.SetParameterReader(controlParameterReaderStub{parameters: []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", ParameterValue: "false", Writable: true},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", ParameterValue: "true", Writable: false},
+		{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_ENABLE", ParameterValue: "true", Writable: true},
+	}})
+	monitor.SetMappingReader(controlMappingReaderStub{mappings: []carrier.GeofenceControlMapping{
+		{
+			StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+			PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState",
+			EntryType:    "parameter",
+			Access:       "READ_WRITE",
+			IsActive:     true,
+			IsSupported:  true,
+		},
+	}})
+	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
+	monitor.SetActionRepository(newControlActionRepositoryStub())
+
+	err := monitor.handleExited(context.Background(), controlExitEvent(t, string(ActionLevelDeactivate)))
+
+	require.NoError(t, err)
+	require.NotNil(t, tasks.request)
+	require.Contains(t, string(tasks.request.Params), "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus")
+	require.NotContains(t, string(tasks.request.Params), "Device.DeviceInfo.SAS.RadioEnable")
 }
 
 func TestGeofenceControlMonitorSubscribesOutsideAndEscalationEdges(t *testing.T) {
@@ -645,4 +698,46 @@ func TestGeofenceControlMonitorDoesNotActivateWithoutCompletedDeactivation(t *te
 
 	require.NoError(t, monitor.handleEntered(context.Background(), event.Event{Payload: payload}))
 	require.Nil(t, tasks.request)
+}
+
+func TestGeofenceControlMonitorRestoresEveryOwnedRFAndIPSecChange(t *testing.T) {
+	tasks := &controlTaskStub{}
+	actions := newControlActionRepositoryStub()
+	deactivationID := uuid.New()
+	rfPath := "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus"
+	ipsecPath := "Device.FAP.Ipsec.1.TUNNEL_ENABLE"
+	actions.recoverable = &ControlAction{
+		ID: deactivationID, ActionKey: "geofence:device:10:deactivate",
+		ActionType: ControlActionDeactivate, Status: ControlActionVerified,
+		BeforeState: []ControlParameterState{
+			{Path: rfPath, Value: "1"}, {Path: ipsecPath, Value: "1"},
+		},
+		RequestedState: []ControlParameterState{
+			{Path: rfPath, Value: "0"}, {Path: ipsecPath, Value: "0"},
+		},
+	}
+	monitor := NewGeofenceControlMonitor(
+		controlDeviceReaderStub{device: &model.Device{
+			ID: uuid.New(), SerialNumber: "SN-RESTORE-ALL", ProductClass: "BLQ",
+			Carrier: model.CarrierCMCC, Technology: model.TechLTE,
+		}},
+		controlCarrierRegistry(), tasks, zap.NewNop(),
+	)
+	monitor.SetParameterReader(controlParameterReaderStub{parameters: []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable", ParameterValue: "0", Writable: true, FAPInstance: 1},
+		{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "0", Writable: true},
+	}})
+	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
+	monitor.SetActionRepository(actions)
+	payload, err := json.Marshal(event.GeofenceDeviceStatePayload{
+		DeviceID: uuid.New(), SerialNumber: "SN-RESTORE-ALL",
+		EffectiveState:        string(EffectiveStateInside),
+		EffectiveStateVersion: 11,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, monitor.handleEntered(context.Background(), event.Event{Payload: payload}))
+	require.NotNil(t, tasks.request)
+	require.Contains(t, string(tasks.request.Params), rfPath)
+	require.Contains(t, string(tasks.request.Params), ipsecPath)
 }

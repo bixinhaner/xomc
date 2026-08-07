@@ -104,6 +104,64 @@ func TestBuildGeofenceControlParametersForMBS31001MultiIPSec(t *testing.T) {
 	}, parameters)
 }
 
+func TestBuildGeofenceControlParametersForMBS31001PrefersMappedRFOverSAS(t *testing.T) {
+	parameters, err := BuildGeofenceControlParametersForSnapshot(
+		"FAP/mBS31001/DC",
+		model.TechLTE,
+		false,
+		[]model.DeviceParameter{
+			{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", ParameterValue: "false", Writable: true},
+			{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", ParameterValue: "true", Writable: false},
+			{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "true", Writable: true},
+			{ParameterPath: "Device.FAP.Ipsec.2.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "true", Writable: true},
+		},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []GeofenceControlParameter{
+		{Path: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", Value: "0"},
+		{Path: "Device.FAP.Ipsec.1.TUNNEL_ENABLE", Value: "0"},
+		{Path: "Device.FAP.Ipsec.2.TUNNEL_ENABLE", Value: "0"},
+	}, parameters)
+}
+
+func TestBuildGeofenceControlParametersForSnapshotUsesParamModelRFMapping(t *testing.T) {
+	parameters, err := BuildGeofenceControlParametersForSnapshotWithMappings(
+		"FAP/MLN/DC",
+		model.TechLTE,
+		false,
+		[]model.DeviceParameter{
+			{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", ParameterValue: "false", Writable: true},
+			{ParameterPath: "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.AdminCellState", ParameterValue: "true", Writable: false},
+			{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_ENABLE", ParameterValue: "true", Writable: true},
+		},
+		[]GeofenceControlMapping{
+			{
+				StandardPath: "Device.DeviceInfo.SAS.RadioEnable",
+				PrivatePath:  "Device.DeviceInfo.SAS.RadioEnable",
+				EntryType:    "parameter",
+				Access:       "READ_WRITE",
+				IsActive:     true,
+				IsSupported:  true,
+			},
+			{
+				StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+				PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState",
+				EntryType:    "parameter",
+				Access:       "READ_WRITE",
+				IsActive:     true,
+				IsSupported:  true,
+			},
+		},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []GeofenceControlParameter{
+		{Path: "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus", Value: "0"},
+		{Path: "Device.FAP.Ipsec.1.TUNNEL_ENABLE", Value: "0"},
+	}, parameters)
+}
+
 func TestBuildGeofenceControlParametersFromSnapshotPrefersOneRFPathFamily(t *testing.T) {
 	parameters, err := BuildGeofenceControlParametersForSnapshot(
 		"BLQ",

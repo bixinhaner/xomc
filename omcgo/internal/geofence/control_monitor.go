@@ -22,6 +22,7 @@ const GeofenceControlQueue = "geofence-control"
 type GeofenceControlMonitor struct {
 	devices    GeofenceControlDeviceReader
 	parameters GeofenceControlParameterReader
+	mappings   GeofenceControlMappingReader
 	carriers   *carrier.CarrierRegistry
 	tasks      task.Enqueuer
 	history    GeofenceControlTaskReader
@@ -40,6 +41,10 @@ type GeofenceControlTaskReader interface {
 
 type GeofenceControlParameterReader interface {
 	GetByDevice(context.Context, uuid.UUID) ([]model.DeviceParameter, error)
+}
+
+type GeofenceControlMappingReader interface {
+	GetByProductClass(context.Context, string, string) ([]carrier.GeofenceControlMapping, error)
 }
 
 func NewGeofenceControlMonitor(
@@ -61,6 +66,10 @@ func NewGeofenceControlMonitor(
 
 func (m *GeofenceControlMonitor) SetParameterReader(reader GeofenceControlParameterReader) {
 	m.parameters = reader
+}
+
+func (m *GeofenceControlMonitor) SetMappingReader(reader GeofenceControlMappingReader) {
+	m.mappings = reader
 }
 
 func (m *GeofenceControlMonitor) SetTaskHistoryReader(
@@ -581,14 +590,25 @@ func (m *GeofenceControlMonitor) geofenceControlPlan(
 		return geofenceControlPlan{}, nil, fmt.Errorf("read geofence device parameter snapshot: %w", err)
 	}
 	if targets == nil {
-		if snapshotTargets, snapshotErr := carrier.BuildGeofenceControlParametersForSnapshot(
+		var mappings []carrier.GeofenceControlMapping
+		if m.mappings != nil {
+			mappings, err = m.mappings.GetByProductClass(
+				ctx, device.ProductClass, device.FirmwareVersion,
+			)
+			if err != nil {
+				return geofenceControlPlan{}, nil, fmt.Errorf("read geofence ParamModel mappings: %w", err)
+			}
+		}
+		snapshotTargets, snapshotErr := carrier.BuildGeofenceControlParametersForSnapshotWithMappings(
 			device.ProductClass,
 			device.Technology,
 			enabled,
 			parameterSnapshot,
-		); snapshotErr == nil {
+			mappings,
+		)
+		if snapshotErr == nil {
 			targets = snapshotTargets
-		} else {
+		} else if m.mappings == nil {
 			instances, detectErr := carrier.DetectGeofenceControlInstances(
 				parameterSnapshot,
 				device.ProductClass,
@@ -606,6 +626,10 @@ func (m *GeofenceControlMonitor) geofenceControlPlan(
 			if err != nil {
 				return geofenceControlPlan{}, nil, fmt.Errorf("resolve geofence control parameters: %w", err)
 			}
+		} else {
+			return geofenceControlPlan{}, nil, fmt.Errorf(
+				"resolve geofence control parameters from ParamModel: %w", snapshotErr,
+			)
 		}
 	}
 	plan, err := buildGeofenceControlPlan(parameterSnapshot, targets)

@@ -15,6 +15,18 @@ type GeofenceControlParameter struct {
 	Value string
 }
 
+// GeofenceControlMapping is the small ParamModel projection needed by the
+// geofence capability resolver. The private path is retained for diagnostics;
+// control tasks still carry StandardPath and ACS performs the final translation.
+type GeofenceControlMapping struct {
+	StandardPath string
+	PrivatePath  string
+	EntryType    string
+	Access       string
+	IsActive     bool
+	IsSupported  bool
+}
+
 type GeofenceControlParameterInstanceResolver interface {
 	GeofenceControlParametersForInstances(
 		productClass string,
@@ -37,6 +49,9 @@ var (
 		regexp.MustCompile(`^Device\.DeviceInfo\.SAS\.RadioEnable[0-9]*$`),
 		regexp.MustCompile(`^Device\.DeviceInfo\.(?:EU\.[0-9]+\.)?RU\.[0-9]+\.RFTxStatus$`),
 	}
+	standardMappedRFControlPathPattern = regexp.MustCompile(
+		`^Device\.Services\.FAPService\.[0-9]+\.FAPControl\.LTE\.RFTxStatus$`,
+	)
 )
 
 func BuildGeofenceControlParametersForInstances(
@@ -109,6 +124,22 @@ func BuildGeofenceControlParametersForSnapshot(
 	enabled bool,
 	parameters []model.DeviceParameter,
 ) ([]GeofenceControlParameter, error) {
+	return BuildGeofenceControlParametersForSnapshotWithMappings(
+		productClass, tech, enabled, parameters, nil,
+	)
+}
+
+// BuildGeofenceControlParametersForSnapshotWithMappings resolves RF paths from
+// the product's ParamModel when available. The device snapshot supplies the
+// concrete instances and current values; it must not override a ParamModel
+// READ_WRITE mapping with a misleading aggregate switch.
+func BuildGeofenceControlParametersForSnapshotWithMappings(
+	productClass string,
+	tech model.Technology,
+	enabled bool,
+	parameters []model.DeviceParameter,
+	mappings []GeofenceControlMapping,
+) ([]GeofenceControlParameter, error) {
 	productClass = strings.ToUpper(strings.TrimSpace(productClass))
 	if tech != model.TechLTE {
 		return nil, fmt.Errorf("no geofence RF control path for product class %q and technology %q", productClass, tech)
@@ -135,7 +166,15 @@ func BuildGeofenceControlParametersForSnapshot(
 			}
 		}
 	}
-	rfPaths := selectWritableRFControlPaths(parameters)
+	var rfPaths []string
+	if len(mappings) > 0 {
+		rfPaths = selectMappedWritableRFControlPaths(parameters, mappings)
+		if len(rfPaths) == 0 {
+			return nil, fmt.Errorf("no ParamModel-mapped writable geofence RF control parameter for product class %q", productClass)
+		}
+	} else {
+		rfPaths = selectWritableRFControlPaths(parameters)
+	}
 	if len(rfPaths) == 0 {
 		return nil, fmt.Errorf("no writable geofence RF control parameter for product class %q", productClass)
 	}
@@ -165,7 +204,33 @@ func BuildGeofenceControlParametersForSnapshot(
 }
 
 func selectWritableRFControlPaths(parameters []model.DeviceParameter) []string {
-	for _, pattern := range rfControlPathPatterns {
+	for _, pattern := range rfControlPathPatterns[:2] {
+		paths := make([]string, 0)
+		for _, parameter := range parameters {
+			if parameter.Writable && pattern.MatchString(parameter.ParameterPath) {
+				paths = append(paths, parameter.ParameterPath)
+			}
+		}
+		if len(paths) > 0 {
+			sort.Strings(paths)
+			return paths
+		}
+	}
+	// RFTxStatus is the stable standard path for products whose ParamModel
+	// translates it to a writable private RF path. Its device snapshot may
+	// still mark the standard alias read-only, so prefer it before generic
+	// aggregate switches such as SAS.RadioEnable.
+	paths := make([]string, 0)
+	for _, parameter := range parameters {
+		if standardMappedRFControlPathPattern.MatchString(parameter.ParameterPath) {
+			paths = append(paths, parameter.ParameterPath)
+		}
+	}
+	if len(paths) > 0 {
+		sort.Strings(paths)
+		return paths
+	}
+	for _, pattern := range rfControlPathPatterns[2:] {
 		paths := make([]string, 0)
 		for _, parameter := range parameters {
 			if parameter.Writable && pattern.MatchString(parameter.ParameterPath) {
@@ -178,6 +243,127 @@ func selectWritableRFControlPaths(parameters []model.DeviceParameter) []string {
 		}
 	}
 	return nil
+}
+
+func selectMappedWritableRFControlPaths(
+	parameters []model.DeviceParameter,
+	mappings []GeofenceControlMapping,
+) []string {
+	paths := make([]string, 0)
+	seen := make(map[string]struct{})
+	bestPriority := int(^uint(0) >> 1)
+	for _, parameter := range parameters {
+		if !isRFControlPath(parameter.ParameterPath) {
+			continue
+		}
+		for _, mapping := range mappings {
+			standardPath, mapped := mappedStandardRFPath(mapping, parameter.ParameterPath)
+			if !mapping.IsActive || !mapping.IsSupported ||
+				!isReadWriteAccess(mapping.Access) ||
+				!isParameterEntry(mapping.EntryType) ||
+				!mapped {
+				continue
+			}
+			priority := rfControlPathPriority(standardPath)
+			if priority > bestPriority {
+				continue
+			}
+			if priority < bestPriority {
+				paths = paths[:0]
+				seen = make(map[string]struct{})
+				bestPriority = priority
+			}
+			if _, ok := seen[standardPath]; ok {
+				break
+			}
+			seen[standardPath] = struct{}{}
+			paths = append(paths, standardPath)
+			break
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func rfControlPathPriority(path string) int {
+	path = strings.TrimSpace(path)
+	switch {
+	case strings.Contains(path, ".FAPControl.LTE.RFTxStatus"):
+		return 10
+	case strings.Contains(path, ".CellConfig.LTE.RAN.RF."):
+		return 10
+	case strings.Contains(path, ".RU.") && strings.HasSuffix(path, ".RFTxStatus"):
+		return 20
+	case strings.Contains(path, ".SAS.RadioEnable"):
+		return 30
+	default:
+		return 100
+	}
+}
+
+func isRFControlPath(path string) bool {
+	for _, pattern := range rfControlPathPatterns {
+		if pattern.MatchString(path) {
+			return true
+		}
+	}
+	return false
+}
+
+func isParameterEntry(entryType string) bool {
+	return strings.EqualFold(strings.TrimSpace(entryType), "parameter")
+}
+
+func isReadWriteAccess(access string) bool {
+	access = strings.ToLower(strings.TrimSpace(access))
+	access = strings.NewReplacer("_", "", "-", "", " ", "").Replace(access)
+	return access == "readwrite" || access == "rw"
+}
+
+func mappingPathMatches(template, concrete string) bool {
+	template = strings.TrimSpace(template)
+	concrete = strings.TrimSpace(concrete)
+	if template == "" || concrete == "" {
+		return false
+	}
+	if !strings.Contains(template, "{i}") {
+		return template == concrete
+	}
+	pattern := regexp.QuoteMeta(template)
+	pattern = strings.ReplaceAll(pattern, `\{i\}`, `[0-9]+`)
+	matched, err := regexp.MatchString("^"+pattern+"$", concrete)
+	return err == nil && matched
+}
+
+func mappedStandardRFPath(mapping GeofenceControlMapping, snapshotPath string) (string, bool) {
+	if mappingPathMatches(mapping.StandardPath, snapshotPath) {
+		return snapshotPath, true
+	}
+	if !mappingPathMatches(mapping.PrivatePath, snapshotPath) {
+		return "", false
+	}
+	return instantiateMappedPath(mapping.StandardPath, mapping.PrivatePath, snapshotPath)
+}
+
+func instantiateMappedPath(standardTemplate, privateTemplate, concretePrivate string) (string, bool) {
+	if !strings.Contains(standardTemplate, "{i}") {
+		return standardTemplate, true
+	}
+	privatePattern := regexp.QuoteMeta(privateTemplate)
+	privatePattern = strings.ReplaceAll(privatePattern, `\{i\}`, `([0-9]+)`)
+	pattern, err := regexp.Compile("^" + privatePattern + "$")
+	if err != nil {
+		return "", false
+	}
+	matches := pattern.FindStringSubmatch(concretePrivate)
+	if len(matches) == 0 {
+		return "", false
+	}
+	standardPath := standardTemplate
+	for _, instance := range matches[1:] {
+		standardPath = strings.Replace(standardPath, "{i}", instance, 1)
+	}
+	return standardPath, !strings.Contains(standardPath, "{i}")
 }
 
 func DetectGeofenceControlInstances(

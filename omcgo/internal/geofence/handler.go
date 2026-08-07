@@ -15,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/admin/audit"
 	"github.com/omcgo/omcgo/internal/authz"
+	corelogger "github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"go.uber.org/zap"
@@ -188,8 +189,12 @@ func (payload thirdPartyLocationRequestPayload) canonicalRequest() ThirdPartyLoc
 }
 
 func (h *Handler) BatchUpdateDeviceLocation(c *gin.Context) {
+	log := corelogger.L(c.Request.Context())
 	var payload thirdPartyLocationRequestPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
+		log.Warn("third-party location batch rejected",
+			zap.String("error_code", "invalid_json"),
+			zap.Bool("idempotency_key_present", c.GetHeader("Idempotency-Key") != ""))
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": "Request parameter error",
@@ -203,20 +208,35 @@ func (h *Handler) BatchUpdateDeviceLocation(c *gin.Context) {
 		c.GetHeader("Idempotency-Key"),
 	)
 	if err != nil {
+		errorCode := "invalid_request"
 		if errors.Is(err, ErrThirdPartyLocationBatchConflict) {
+			errorCode = "idempotency_conflict"
+			log.Warn("third-party location batch rejected",
+				zap.String("error_code", errorCode), zap.Int("total_count", len(request.Devices)))
 			c.JSON(http.StatusConflict, gin.H{"success": false, "message": err.Error()})
 			return
 		}
 		if errors.Is(err, ErrThirdPartyLocationBatchInProgress) {
+			errorCode = "batch_in_progress"
+			log.Warn("third-party location batch rejected",
+				zap.String("error_code", errorCode), zap.Int("total_count", len(request.Devices)))
 			c.JSON(http.StatusConflict, gin.H{"success": false, "message": err.Error()})
 			return
 		}
+		log.Warn("third-party location batch rejected",
+			zap.String("error_code", errorCode), zap.Int("total_count", len(request.Devices)))
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": err.Error(),
 		})
 		return
 	}
+	log.Info("third-party location batch completed",
+		zap.Int("total_count", result.TotalCount),
+		zap.Int("success_count", result.SuccessCount),
+		zap.Int("fail_count", result.FailCount),
+		zap.Bool("replayed", replayed),
+		zap.Bool("idempotency_key_present", c.GetHeader("Idempotency-Key") != ""))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": func() string {

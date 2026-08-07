@@ -921,3 +921,53 @@ worker 包通过，生产构建通过，定向 ESLint `0 error`。全量 TypeScr
 - 已在 `control_action_model.go` 将 nil 状态统一序列化为 `[]`，并增加 repository 回归断言；本地
    `go test ./internal/core/carrier ./internal/geofence ./internal/alarm ./cmd/worker ./internal/device`
    全部通过。104 当前仍运行旧镜像，必须重新部署后重复真实 outside → inside 控制闭环。
+
+## 17. 2026-08-07 最新提交部署后的完整复验
+
+### 17.1 清理与前置
+
+- 104 已运行提交 `1abf26bab`；App、Worker、ACS、PostgreSQL、NATS 等容器健康，Worker 日志确认
+   `geofence alarm monitor` 和 `geofence control monitor` 均已启动。
+- 清理前发现两个历史启用围栏、一个主设备活动绑定和一个次设备活动绑定；均已通过带原因的移除、
+   禁用、归档流程清理。重新验收前系统总开关和 CMCC 开关均为关闭，历史围栏数量为 0。
+- 新建围栏 `105820-UAT-20260807-FRESH`，绑定主设备 `1202000240194DP0005`；混合 SN 任务中未知设备
+ 逐项跳过，合法设备最终 `2/2` 完成。
+
+### 17.2 第三方位置接口与位置状态
+
+- 主设备从 `tr069` 切换为 `external`，授权位置上报成功；恢复时已保存回 `tr069`。
+- 默认 `tr069` 模式提交第三方位置，逐项失败：`device is not configured for external positioning`。
+- 同一 `Idempotency-Key` 重放返回原结果；相同 key 修改请求返回 HTTP `409`；未知 SN 逐项失败；非法
+   经度逐项失败。以上均符合第三方接口规范的逐项结果与幂等要求。
+- 外部位置先形成 confirmed inside，再将版本 3 几何发布到主设备外侧
+   (`104.08–104.09E / 30.54–30.55N`)；连续越界后 confirmed outside，位置版本 `7089`。
+
+### 17.3 告警与控制闭环
+
+- confirmed outside 产生 `GEOFENCE_LOCATION_OUTSIDE`，页面显示可能原因和具体故障均为
+   `Device is outside the configured geofence`。
+- 去激活动作创建成功并最终 `verified`：Worker 先创建 SPV `5303eeda-4c9d-4d77-a775-598ce5c36a9a`，
+   再创建 GPV `447d3237-e00f-44d3-a91b-f4ddcc5bf049`；绑定面板显示请求值和回读值均为两条
+   `Device.FAP.Ipsec.{1,2}.TUNNEL_ENABLE = 0`。
+- 回区时提交围栏内坐标 `104.085,30.545`，confirmed inside 后告警清除；激活动作随后创建 SPV
+   `3a0744db-44f0-41ad-9366-2c47cef91405` 和 GPV `a391ea05-e493-425e-b075-b12055c1e15d`，
+   最终 `verified`，两条 IPSec 回读均为 `1`。
+- **发现新的真实缺口：RF 未被控制。** 去激活/激活两条动作的请求和回读均只有 IPSec 参数；设备详情在
+   去激活后仍显示两小区“射频开”，设备激活状态也仍为“激活”。因此原单“通知基站主动释放 IPSec
+   和射频”“恢复射频”的要求尚未满足，不能将 GF-16/GF-17 判为完整通过。
+
+### 17.4 最终清理与回读
+
+- 主设备绑定已移除；临时围栏已禁用并归档；系统总开关、CMCC 运营商开关均已关闭。
+- 位置来源已恢复为“设备 TR069 GPS”。
+- PostgreSQL 只读回查：`geofence_definitions` 全部 `archived`；`device_geofence_bindings` 全部
+   `removed`；主设备控制动作 `activate=verified` 1 条、`deactivate=verified` 1 条；
+   `device_geofence_effective_states` 为 `unmanaged / none / healthy`。
+
+### 17.5 本轮结论
+
+- 原单管理面、第三方位置接口、位置来源隔离、越界告警、IPSec SPV/GPV/回读和安全恢复已取得真实
+   证据。
+- 原单 RF 释放/恢复仍失败或未实现，且当前 `mBS31001 LTE` 真实动作未包含 RF 参数；因此 #105820
+   仍不能签署完整通过。下一步应以设备实际可写参数快照为准补齐 RF 映射，并重新执行一次 outside →
+   inside 及最终 RF/IPSec 回读。
