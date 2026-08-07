@@ -1,5 +1,6 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
+  AutoComplete,
   Button,
   Descriptions,
   Drawer,
@@ -227,6 +228,13 @@ type ApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 type ApiKind = '正式北向' | '业务复用' | '鉴权管理';
 type ApiCoverage = '旧能力对齐' | '部分覆盖' | '当前新增';
 type ApiFieldContract = '完整契约' | '当前契约' | '示例契约';
+
+const csvSeparatorOptions = [
+  { value: ',', label: '逗号 ,' },
+  { value: '|', label: '竖线 |' },
+  { value: ';', label: '分号 ;' },
+  { value: '\\t', label: 'Tab' },
+];
 
 type SocketProfile = 'CTCC' | 'CUCC';
 type SnmpVersion = 'v2' | 'v3';
@@ -3239,6 +3247,23 @@ function normalizeApiCompressionFormat(format: string | undefined): NorthboundPa
   return format === 'gz' ? 'gz' : 'zip';
 }
 
+function normalizeCSVSeparatorInput(value: string | undefined): string | undefined {
+  if (value === '\t') return '\\t';
+  const trimmed = value?.trim() ?? '';
+  if (!trimmed) return undefined;
+  if (trimmed === '\\t' || trimmed.toLowerCase() === 'tab') return '\\t';
+  return [...trimmed][0];
+}
+
+function csvSeparatorDisplay(value: string | undefined): string {
+  const normalized = normalizeCSVSeparatorInput(value);
+  if (!normalized || normalized === ',') return '默认逗号';
+  if (normalized === '|') return '竖线 |';
+  if (normalized === ';') return '分号 ;';
+  if (normalized === '\\t') return 'Tab';
+  return normalized;
+}
+
 function cronFromPeriodStartMinute(period: string, startMinute: number | undefined): string {
   const minute = Number.isInteger(startMinute) && startMinute !== undefined
     ? Math.max(0, Math.min(59, startMinute))
@@ -4587,6 +4612,46 @@ const PeriodTextInput = memo(function PeriodTextInput({
   );
 });
 
+interface CSVSeparatorInputProps {
+  value?: string;
+  rowKey: string;
+  onCommit: (rowKey: string, value: string | undefined) => void;
+}
+
+const CSVSeparatorInput = memo(function CSVSeparatorInput({
+  value,
+  rowKey,
+  onCommit,
+}: CSVSeparatorInputProps) {
+  const [local, setLocal] = useState(value ?? '');
+  useEffect(() => {
+    setLocal(value ?? '');
+  }, [value]);
+  return (
+    <AutoComplete
+      value={local}
+      options={csvSeparatorOptions}
+      placeholder="默认 ,"
+      style={{ width: 112 }}
+      onChange={setLocal}
+      onBlur={() => {
+        const normalized = normalizeCSVSeparatorInput(local);
+        setLocal(normalized ?? '');
+        if ((normalized ?? '') !== (value ?? '')) {
+          onCommit(rowKey, normalized);
+        }
+      }}
+      onSelect={(selectedValue) => {
+        const normalized = normalizeCSVSeparatorInput(selectedValue);
+        setLocal(normalized ?? '');
+        if ((normalized ?? '') !== (value ?? '')) {
+          onCommit(rowKey, normalized);
+        }
+      }}
+    />
+  );
+});
+
 interface FieldConfigSectionProps {
   periodRows: ScenarioPeriodRow[];
   pmMetricRows: PmMetric[];
@@ -5591,6 +5656,7 @@ export default function NorthboundPageConfig() {
         objects: nextDefault.objects,
         path: nextDefault.path,
         fileName: nextDefault.fileName,
+        csvSeparator: nextDefault.csvSeparator,
         compressionEnabled: false,
         compressionFormat: nextDefault.compressionFormat,
       } : row)),
@@ -8252,6 +8318,16 @@ export default function NorthboundPageConfig() {
                   },
                   { title: '制式/模式', dataIndex: 'scope', width: 128 },
                   { title: '格式', dataIndex: 'format', width: 104, render: (value: Format) => <Tag>{value}</Tag> },
+                  {
+                    title: 'CSV 分隔符',
+                    dataIndex: 'csvSeparator',
+                    width: 132,
+                    render: (value: string | undefined, record) => (
+                      normalizeFormatForDomain(record.domain, record.format) === 'CSV'
+                        ? <Tag>{csvSeparatorDisplay(value)}</Tag>
+                        : <Tag>不适用</Tag>
+                    ),
+                  },
                   { title: '统计周期', dataIndex: 'period', width: 128, render: (value: string) => <Typography.Text strong>{formatPeriodLabel(value)}</Typography.Text> },
                   { title: '生成计划', width: 210, render: (_, record) => formatScheduleLabel(record.period, record.cron) },
                   {
@@ -8280,7 +8356,7 @@ export default function NorthboundPageConfig() {
                 rowKey="key"
                 size="small"
                 pagination={false}
-                scroll={{ x: 2448 }}
+                scroll={{ x: 2580 }}
               />
             </div>
 
@@ -8456,6 +8532,22 @@ export default function NorthboundPageConfig() {
 	                  ),
 	                },
                 {
+                  title: 'CSV 分隔符',
+                  dataIndex: 'csvSeparator',
+                  width: 142,
+                  render: (value: string | undefined, record) => (
+                    normalizeFormatForDomain(record.domain, record.format) === 'CSV'
+                      ? (
+                          <CSVSeparatorInput
+                            value={value}
+                            rowKey={record.key}
+                            onCommit={(rowKey, csvSeparator) => updateEditorPeriodRow(rowKey, { csvSeparator })}
+                          />
+                        )
+                      : <Tag>不适用</Tag>
+                  ),
+                },
+                {
                   title: '统计周期',
                   dataIndex: 'period',
                   width: 128,
@@ -8567,7 +8659,7 @@ export default function NorthboundPageConfig() {
               rowKey="key"
 	              size="small"
 	              pagination={false}
-	              scroll={{ x: 2528 }}
+	              scroll={{ x: 2670 }}
 	            />
           </div>
           <div className={styles.editorSection}>

@@ -456,9 +456,15 @@ func renderCSV(fields []FieldDefinition, rows []ExportDataRow, separators ...str
 }
 
 func csvComma(separator string) (rune, bool) {
+	if separator == "\t" {
+		return '\t', true
+	}
 	separator = strings.TrimSpace(separator)
 	if separator == "" {
 		return ',', false
+	}
+	if separator == `\t` || strings.EqualFold(separator, "tab") {
+		return '\t', true
 	}
 	runes := []rune(separator)
 	if len(runes) != 1 {

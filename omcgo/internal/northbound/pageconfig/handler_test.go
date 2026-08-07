@@ -970,6 +970,14 @@ func TestRunFileProfileHonorsCSVSeparator(t *testing.T) {
 	require.Contains(t, lines[1], "SN0001|InternetGatewayDevice.Services.FAPService.1.PerfMgmt.PM.Counter.PUSCHPRBUsage|counter|12|avg|15min|2026-08-04 16:45:00+08|")
 }
 
+func TestCSVCommaAcceptsTabAliases(t *testing.T) {
+	for _, separator := range []string{"\t", `\t`, "tab", "Tab"} {
+		comma, ok := csvComma(separator)
+		require.True(t, ok)
+		require.Equal(t, '\t', comma)
+	}
+}
+
 func TestRunFileProfileUsesMRSourceObjectContent(t *testing.T) {
 	repo := newFakeRepository()
 	mrGroup := group("mr-source", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, []ScenarioObject{{Code: "MRO"}})
