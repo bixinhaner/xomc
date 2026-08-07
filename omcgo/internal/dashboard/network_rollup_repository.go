@@ -89,6 +89,12 @@ func (r *NetworkRollupRepository) ListSeries(ctx context.Context, query NetworkR
 	if err != nil {
 		return nil, err
 	}
+	// Issue #251 guarantees that a task version starts contributing from the
+	// next complete hour. An hourly window therefore never needs cross-version
+	// composition, so keep this hot dashboard path free of definition joins.
+	if query.Granularity == metrics.GranularityHourly {
+		return points, nil
+	}
 	merged := mergeNetworkRollupVersionSlices(points)
 	metricType := query.MetricType
 	if metricType == "" {
@@ -183,6 +189,26 @@ func buildNetworkRollupSeriesSQL(query NetworkRollupQuery) (string, []any, error
 		metricType = metrics.MetricTypeKPI
 	}
 	metricPaths := normalizeMetricPaths(query.MetricPaths)
+	formulaColumn := "''"
+	statisTypeColumn := "''"
+	dependenciesColumn := "ARRAY[]::text[]"
+	counterSignatureColumn := "ARRAY[]::text[]"
+	loadKPIDefinition := query.Granularity != metrics.GranularityHourly &&
+		metricType == metrics.MetricTypeKPI
+	if loadKPIDefinition {
+		formulaColumn = "COALESCE(metric_rule.formula, '')"
+		statisTypeColumn = "COALESCE(dictionary.statis_type, '')"
+		dependenciesColumn = "metric_rule.dependencies"
+		counterSignatureColumn = `CASE
+  WHEN LOWER(COALESCE(dictionary.statis_type, '')) = 'pct' THEN COALESCE((
+    SELECT array_agg(counter.metric_path || ':' || counter.aggregation_op ORDER BY counter.metric_path)
+      FROM pm_aggregation_version_counters counter
+     WHERE counter.task_version_id = r.task_version_id
+       AND counter.metric_path = ANY(metric_rule.dependencies)
+  ), ARRAY[]::text[])
+  ELSE ARRAY[]::text[]
+END`
+	}
 	builder := storage.Psql.Select(
 		"r.technology",
 		"r.metric_path",
@@ -194,31 +220,28 @@ func buildNetworkRollupSeriesSQL(query NetworkRollupQuery) (string, []any, error
 		"r.missing_slots",
 		"r.created_at",
 		"r.aggregation_op",
-		"COALESCE(metric_rule.formula, '')",
+		formulaColumn,
 		"r.sample_count",
 		"r.version_effective_from",
-		"COALESCE(dictionary.statis_type, '')",
+		statisTypeColumn,
 		"r.task_version_id",
-		"metric_rule.dependencies",
-		`COALESCE((
-  SELECT array_agg(counter.metric_path || ':' || counter.aggregation_op ORDER BY counter.metric_path)
-    FROM pm_aggregation_version_counters counter
-   WHERE counter.task_version_id = r.task_version_id
-     AND counter.metric_path = ANY(metric_rule.dependencies)
-), ARRAY[]::text[])`,
+		dependenciesColumn,
+		counterSignatureColumn,
 	).
-		From("pm_aggregation_results r").
-		Join(`pm_aggregation_version_metrics metric_rule
+		From("pm_aggregation_results r")
+	if loadKPIDefinition {
+		builder = builder.Join(`pm_aggregation_version_metrics metric_rule
   ON metric_rule.task_version_id = r.task_version_id
  AND metric_rule.metric_path = r.metric_path`).
-		LeftJoin(`pm_metric_dictionary dictionary
-  ON dictionary.metric_path = r.metric_path`).
-		Join(`pm_aggregation_publications published_revision
+			LeftJoin(`pm_metric_dictionary dictionary
+  ON dictionary.metric_path = r.metric_path`)
+	}
+	builder = builder.Join(`pm_aggregation_publications published_revision
   ON published_revision.task_version_id = r.task_version_id
  AND published_revision.granularity = r.granularity
  AND published_revision.window_start = r.window_start
  AND published_revision.status = 'published'
- AND published_revision.revision = r.revision`).
+	 AND published_revision.revision = r.revision`).
 		Where(sq.Eq{
 			"r.dimension":   "network",
 			"r.metric_type": string(metricType),

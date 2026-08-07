@@ -293,9 +293,62 @@ func TestBuildNetworkRollupSeriesSQLUsesPublishedCounterResults(t *testing.T) {
 
 	assert.Contains(t, query, "FROM pm_aggregation_results r")
 	assert.Contains(t, query, "JOIN pm_aggregation_publications published_revision")
+	assert.NotContains(t, query, "pm_aggregation_version_metrics")
+	assert.NotContains(t, query, "pm_metric_dictionary")
+	assert.NotContains(t, query, "pm_aggregation_version_counters")
 	assert.NotContains(t, query, "pm_metrics_hourly")
 	require.Contains(t, args, string(metrics.MetricTypeCounter))
 	require.Contains(t, args, "C010070004")
+}
+
+func TestBuildNetworkRollupSeriesSQLKeepsHourlyKPIQueryLightweight(t *testing.T) {
+	start := time.Date(2026, 8, 6, 10, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
+	end := start.Add(24 * time.Hour)
+
+	query, _, err := buildNetworkRollupSeriesSQL(NetworkRollupQuery{
+		Technology: model.TechLTE, Granularity: metrics.GranularityHourly,
+		MetricType: metrics.MetricTypeKPI, MetricPaths: []string{"K900010015"},
+		StartTime: start, EndTime: end,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, query, "JOIN pm_aggregation_publications published_revision")
+	assert.NotContains(t, query, "pm_aggregation_version_metrics")
+	assert.NotContains(t, query, "pm_metric_dictionary")
+	assert.NotContains(t, query, "pm_aggregation_version_counters")
+}
+
+func TestBuildNetworkRollupSeriesSQLLoadsCounterRulesOnlyForPercentKPI(t *testing.T) {
+	start := time.Date(2026, 8, 4, 0, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
+	end := start.Add(24 * time.Hour)
+
+	query, _, err := buildNetworkRollupSeriesSQL(NetworkRollupQuery{
+		Technology: model.TechLTE, Granularity: metrics.GranularityDaily,
+		MetricType: metrics.MetricTypeKPI, MetricPaths: []string{"K900010015"},
+		StartTime: start, EndTime: end,
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, query, "pm_aggregation_version_metrics")
+	assert.Contains(t, query, "pm_metric_dictionary")
+	assert.Contains(t, query, "WHEN LOWER(COALESCE(dictionary.statis_type, '')) = 'pct'")
+	assert.Contains(t, query, "pm_aggregation_version_counters")
+}
+
+func TestBuildNetworkRollupSeriesSQLKeepsDailyCounterQueryLightweight(t *testing.T) {
+	start := time.Date(2026, 8, 4, 0, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
+	end := start.Add(24 * time.Hour)
+
+	query, _, err := buildNetworkRollupSeriesSQL(NetworkRollupQuery{
+		Technology: model.TechLTE, Granularity: metrics.GranularityDaily,
+		MetricType: metrics.MetricTypeCounter, MetricPaths: []string{"C000060011"},
+		StartTime: start, EndTime: end,
+	})
+	require.NoError(t, err)
+
+	assert.NotContains(t, query, "pm_aggregation_version_metrics")
+	assert.NotContains(t, query, "pm_metric_dictionary")
+	assert.NotContains(t, query, "pm_aggregation_version_counters")
 }
 
 func TestBuildNetworkRollupSeriesSQLRejectsInvalidMetricType(t *testing.T) {
