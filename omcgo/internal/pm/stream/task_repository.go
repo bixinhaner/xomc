@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -499,19 +500,40 @@ func (r *PgProgressTaskLoader) LoadMatchableRevision(
 	return r.repository.LoadMatchableRevision(ctx)
 }
 
+// LoadVersionsByID loads the persisted definitions for the requested task
+// versions without device membership. Read-only consumers use this path when
+// result rows already identify the exact immutable versions they need.
+func (r *PgProgressTaskLoader) LoadVersionsByID(
+	ctx context.Context,
+	versionIDs []uuid.UUID,
+) ([]*TaskVersionSnapshot, error) {
+	if len(versionIDs) == 0 {
+		return nil, nil
+	}
+	ids := normalizeTaskVersionIDs(versionIDs)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	query, args, err := buildLoadTaskVersionsByIDSQL(ids)
+	if err != nil {
+		return nil, fmt.Errorf("build load PM aggregation task versions by ID SQL: %w", err)
+	}
+	return r.repository.loadTaskVersions(ctx, query, args, false)
+}
+
+func buildLoadTaskVersionsByIDSQL(versionIDs []uuid.UUID) (string, []interface{}, error) {
+	return taskVersionSelect().
+		Where(sq.Eq{"v.id": versionIDs}).
+		OrderBy("v.task_id", "v.version_no").
+		ToSql()
+}
+
 func (r *PgTaskRepository) loadMatchable(
 	ctx context.Context,
 	at time.Time,
 	includeMembers bool,
 ) ([]*TaskVersionSnapshot, error) {
-	query, args, err := storage.Psql.Select(
-		"t.id", "v.id", "v.version_no", "t.name", "v.enabled",
-		"COALESCE(v.technology, '')", "v.dimension", "v.granularities",
-		"v.object_ldns", "v.effective_from",
-		"(SELECT MIN(lineage.effective_from) FROM pm_aggregation_task_versions lineage WHERE lineage.task_id = v.task_id)",
-		"v.effective_to", "t.planned_end_at",
-	).From("pm_aggregation_task_versions v").
-		Join("pm_aggregation_tasks t ON t.id = v.task_id").
+	query, args, err := taskVersionSelect().
 		Where(sq.Or{
 			sq.Eq{"v.effective_to": nil},
 			sq.GtOrEq{"v.effective_to": at.Add(-45 * 24 * time.Hour)},
@@ -521,9 +543,29 @@ func (r *PgTaskRepository) loadMatchable(
 	if err != nil {
 		return nil, fmt.Errorf("build load matchable task versions SQL: %w", err)
 	}
+	return r.loadTaskVersions(ctx, query, args, includeMembers)
+}
+
+func taskVersionSelect() sq.SelectBuilder {
+	return storage.Psql.Select(
+		"t.id", "v.id", "v.version_no", "t.name", "v.enabled",
+		"COALESCE(v.technology, '')", "v.dimension", "v.granularities",
+		"v.object_ldns", "v.effective_from",
+		"(SELECT MIN(lineage.effective_from) FROM pm_aggregation_task_versions lineage WHERE lineage.task_id = v.task_id)",
+		"v.effective_to", "t.planned_end_at",
+	).From("pm_aggregation_task_versions v").
+		Join("pm_aggregation_tasks t ON t.id = v.task_id")
+}
+
+func (r *PgTaskRepository) loadTaskVersions(
+	ctx context.Context,
+	query string,
+	args []interface{},
+	includeMembers bool,
+) ([]*TaskVersionSnapshot, error) {
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query matchable PM aggregation task versions: %w", err)
+		return nil, fmt.Errorf("query PM aggregation task versions: %w", err)
 	}
 	var versions []*TaskVersionSnapshot
 	for rows.Next() {
@@ -559,6 +601,23 @@ func (r *PgTaskRepository) loadMatchable(
 		return nil, err
 	}
 	return versions, nil
+}
+
+func normalizeTaskVersionIDs(versionIDs []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{}, len(versionIDs))
+	ids := make([]uuid.UUID, 0, len(versionIDs))
+	for _, versionID := range versionIDs {
+		if versionID == uuid.Nil {
+			continue
+		}
+		if _, exists := seen[versionID]; exists {
+			continue
+		}
+		seen[versionID] = struct{}{}
+		ids = append(ids, versionID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
+	return ids
 }
 
 func (r *PgTaskRepository) loadDetails(
