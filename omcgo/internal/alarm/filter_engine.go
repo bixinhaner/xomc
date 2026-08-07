@@ -24,15 +24,15 @@ type alarmDefLookup interface {
 
 // FilterEngine 告警过滤引擎，根据告警过滤规则处理入站告警。
 type FilterEngine struct {
-	filterRepo      AlarmFilterRuleRepository
-	store           AlarmStore
-	dispatcher      WebhookDispatcher
-	deadLetterRepo  DeadLetterRepository
+	filterRepo          AlarmFilterRuleRepository
+	store               AlarmStore
+	dispatcher          WebhookDispatcher
+	deadLetterRepo      DeadLetterRepository
 	deviceGroupResolver DeviceGroupResolver
-	alarmDefs       alarmDefLookup
-	metrics         *WebhookMetrics
-	emailDispatcher EmailDispatcher
-	logger          *zap.Logger
+	alarmDefs           alarmDefLookup
+	metrics             *WebhookMetrics
+	emailDispatcher     EmailDispatcher
+	logger              *zap.Logger
 }
 
 // NewFilterEngine 创建告警过滤引擎。
@@ -436,7 +436,7 @@ func buildWebhookPayload(alarm *model.Alarm) webhookPayload {
 
 // enrichFromLibrary 从告警字典（alarm_definitions）按请求 locale 补全告警信息（issue #67）。
 //
-// 补全规则（以 ctx locale 选 cn/en 列，COALESCE(NULLIF(en,''),cn) 退化）：
+// 补全规则（以 ctx locale 选 cn/en 列，COALESCE(NULLIF(en,”),cn) 退化）：
 //   - Description（告警名）：字典命中则用字典本地化名覆盖；命中失败（unknown identifier）
 //     保留设备上报原文，绝不置空。
 //   - ProbableCause（可能原因）：设备未上报时用字典本地化 probable_cause 补；设备已上报则尊重原文。
@@ -471,11 +471,25 @@ func (e *FilterEngine) enrichFromLibrary(ctx context.Context, alarm *model.Alarm
 			alarm.ProbableCause = &cause
 		}
 	}
+
+	if alarm.AdditionalInfo == nil {
+		alarm.AdditionalInfo = make(map[string]string, 3)
+	}
+	if rd.NeType != "" {
+		alarm.AdditionalInfo["ne_type"] = rd.NeType
+	}
+	if alarm.Description != "" {
+		alarm.AdditionalInfo["alarm_name"] = alarm.Description
+	}
+	if suggestion := localizedName(loc, rd.CnSuggestion, rd.EnSuggestion); suggestion != "" {
+		alarm.AdditionalInfo["handling_suggestion"] = suggestion
+	}
 }
 
-// localizedName 按 locale 在中/英文之间取值，并做 COALESCE(NULLIF(en,''),cn) 式退化：
+// localizedName 按 locale 在中/英文之间取值，并做 COALESCE(NULLIF(en,”),cn) 式退化：
 //   - en-US：优先英文，英文空则回退中文；
 //   - 其它（含 zh-CN / 缺省）：优先中文，中文空则回退英文。
+//
 // 两者皆空返回空串，调用方据此决定是否保留原文。
 func localizedName(loc appcontext.Locale, cn, en string) string {
 	if loc == appcontext.LocaleEN {

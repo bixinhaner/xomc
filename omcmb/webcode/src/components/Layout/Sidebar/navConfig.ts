@@ -59,9 +59,9 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'alarm-history',      label: 'nav.alarm.history',        path: '/alarm/history' },
       // { key: 'alarm-stats',        label: 'nav.alarm.statistics',     path: '/alarm/statistics' },  // 隐藏告警统计
       { key: 'alarm-rule',         label: 'nav.alarm.rules',          path: '/alarm/rules' },
+      { key: 'alarm-email-settings', label: 'nav.alarm.emailSettings', path: '/alarm/email-settings' },
       // T-0098-P5-06：旧 alarm-knowledge（/alarm/library）已下线，治理走 /product/alarm-library（super_admin）。
       // { key: 'alarm-sync',         label: 'nav.alarm.sync',           path: '/alarm/sync' },           // 隐藏
-      // { key: 'alarm-notification', label: 'nav.alarm.notification',   path: '/alarm/notification' },  // 隐藏告警通知
       // { key: 'alarm-interface',    label: 'nav.alarm.interfaceFault', path: '/alarm/interface-fault' }, // 隐藏
     ],
   },
@@ -144,6 +144,14 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'transfer-task-create', label: 'nav.transfer.taskCreate', path: '/transfer/center' },
       { key: 'transfer-file-management', label: 'nav.transfer.fileManagement', path: '/transfer/file-management' },
       { key: 'transfer-template-config', label: 'nav.transfer.templateConfig', path: '/transfer/template-management', requireAdmin: true },
+    ],
+  },
+  {
+    key: 'notification',
+    label: 'nav.notification',
+    iconName: 'NotificationOutlined',
+    children: [
+      { key: 'notification-center', label: 'nav.notification.center', path: '/notifications' },
     ],
   },
   // 备份恢复菜单已下线：配置快照已整合进"文件传输 → 文件管理"

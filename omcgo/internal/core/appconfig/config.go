@@ -530,10 +530,21 @@ func (c MRConfig) Defaults() MRConfig {
 type NotificationConfig struct {
 	SMTP         SMTPConfig         `mapstructure:"smtp"`
 	AlertWebhook AlertWebhookConfig `mapstructure:"alert_webhook"`
+	ZedSummary   ZedSummaryConfig   `mapstructure:"zed_summary"`
 }
 
-// SMTPConfig 配置 SMTP 邮件发送。Username 为空表示不做 SMTP AUTH；
-// StartTLS 由 SMTP 服务器能力决定。
+// ZedSummaryConfig controls the #98018 scheduled 2G/4G/5G status summary.
+// It is disabled by default until the business sends the final schedule and
+// recipient scope for the target deployment.
+type ZedSummaryConfig struct {
+	Enabled    bool     `mapstructure:"enabled"`
+	SendTime   string   `mapstructure:"send_time"`
+	TimeZone   string   `mapstructure:"time_zone"`
+	Recipients []string `mapstructure:"recipients"`
+}
+
+// SMTPConfig 配置 SMTP 邮件发送。Username 为空表示不做 SMTP AUTH；TLSMode 明确
+// 使用 none/starttls/implicit。StartTLS 仅兼容升级前配置，TLSMode 非空时忽略。
 type SMTPConfig struct {
 	Enabled  bool          `mapstructure:"enabled"`
 	Host     string        `mapstructure:"host"`
@@ -541,6 +552,7 @@ type SMTPConfig struct {
 	Username string        `mapstructure:"username"`
 	Password string        `mapstructure:"password"`
 	From     string        `mapstructure:"from"`
+	TLSMode  string        `mapstructure:"tls_mode"`
 	StartTLS bool          `mapstructure:"starttls"`
 	Timeout  time.Duration `mapstructure:"timeout"`
 }

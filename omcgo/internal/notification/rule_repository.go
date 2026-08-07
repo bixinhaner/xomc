@@ -13,5 +13,6 @@ type RuleRepository interface {
 	UpdateDraft(context.Context, uuid.UUID, int64, RuleDraftInput, string) (*NotificationRule, error)
 	Publish(context.Context, uuid.UUID, int64, string) (*NotificationRule, error)
 	Enable(context.Context, uuid.UUID, int64, uuid.UUID) (*NotificationRule, error)
+	Disable(context.Context, uuid.UUID, int64) (*NotificationRule, error)
 	Archive(context.Context, uuid.UUID, int64) (*NotificationRule, error)
 }

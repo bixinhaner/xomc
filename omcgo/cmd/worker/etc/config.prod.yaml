@@ -56,16 +56,17 @@ alarm:
   lifecycle_stream_max_bytes: 10737418240
   lifecycle_start_sequence: 1
 
-# 与 app 共用同一套 SMTP 配置语义；密码由 Secret/部署配置注入。
+# 与 app 共用同一套阿里企业邮箱 SMTP 配置语义；密码由 Secret/部署配置注入。
+# Office365/OAuth 不属于当前部署范围。
 notification:
   smtp:
-    enabled: false
-    host: ""
-    port: 25
-    username: ""
-    password: ""
-    from: "omc-alert@example.com"
-    starttls: false
+    enabled: false              # 通过 OMCGO_NOTIFICATION_SMTP_ENABLED=true 显式开启
+    host: "smtp.qiye.aliyun.com"
+    port: 465                    # 阿里企业邮箱推荐 SMTPS 465
+    username: "${OMCGO_NOTIFICATION_SMTP_USERNAME:-}"
+    password: "${OMCGO_NOTIFICATION_SMTP_PASSWORD:-}" # 企业邮箱授权码，不写入仓库
+    from: "${OMCGO_NOTIFICATION_SMTP_FROM:-}"          # 通常与 username 相同
+    tls_mode: implicit          # 465 使用隐式 TLS
     timeout: 10s
 
 nats:

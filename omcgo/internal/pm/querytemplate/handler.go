@@ -25,6 +25,7 @@ const (
 type Handler struct {
 	repo                   Repository
 	enabledMetricValidator *EnabledMetricPayloadService
+	regularReports         *RegularReportService
 	logger                 *zap.Logger
 }
 
@@ -41,6 +42,11 @@ func (h *Handler) WithEnabledMetricPayloadService(svc *EnabledMetricPayloadServi
 	return h
 }
 
+func (h *Handler) WithRegularReportService(service *RegularReportService) *Handler {
+	h.regularReports = service
+	return h
+}
+
 // RegisterRoutes 挂载到 /api/v1（由调用方决定 group）。
 //
 // 端点：
@@ -53,6 +59,10 @@ func (h *Handler) WithEnabledMetricPayloadService(svc *EnabledMetricPayloadServi
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/pm/query-templates")
 	g.GET("", h.List)
+	if h.regularReports != nil {
+		g.GET("/:id/regular-report", h.GetRegularReport)
+		g.PATCH("/:id/regular-report", h.UpdateRegularReport)
+	}
 	g.GET("/:id", h.Get)
 	g.POST("", h.Create)
 	g.PATCH("/:id", h.Update)

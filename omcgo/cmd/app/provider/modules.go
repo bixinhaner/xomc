@@ -1676,21 +1676,31 @@ func initMiscModules(c *Container) error {
 	// W2.A.4 / T-0043: Notification template + history submodules
 	templateRepo := notification.NewPgTemplateRepository(c.PgPool)
 	templateService := notification.NewTemplateService(templateRepo, logger)
-	c.miscDeps.notifTemplateHandler = notification.NewTemplateHandler(templateService, logger)
 
 	ruleRepo := notification.NewPgRuleRepository(c.PgPool)
-	c.miscDeps.notifRuleHandler = notification.NewRuleHandler(notification.NewRuleService(ruleRepo))
-	c.miscDeps.notifRuleHandler.SetScopeAuthorizer(notification.NewRuleScopeAuthorizer(
+	ruleService := notification.NewRuleService(ruleRepo)
+	ruleScopeAuthorizer := notification.NewRuleScopeAuthorizer(
 		c.PermService, device.NewPgDeviceGroupReader(c.PgPool),
-	))
+	)
+	recipientProtector, protectorErr := notification.NewEnvRecipientProtector()
 	contactGroupRepo := notification.NewPgContactGroupRepository(c.PgPool)
-	c.miscDeps.notifContactGroupHandler = notification.NewContactGroupHandler(
-		notification.NewContactGroupService(contactGroupRepo),
-	)
-	managedTemplateRepo := notification.NewPgTemplateManagementRepository(c.PgPool)
-	c.miscDeps.notifManagedTemplateHandler = notification.NewTemplateManagementHandler(
-		notification.NewTemplateManagementService(managedTemplateRepo),
-	)
+	if protectorErr == nil {
+		c.miscDeps.alarmEmailSettingsHandler = notification.NewAlarmEmailSettingsHandler(
+			notification.NewAlarmEmailSettingsService(ruleService, ruleRepo, recipientProtector, contactGroupRepo),
+			ruleScopeAuthorizer,
+		)
+	} else if errors.Is(protectorErr, notification.ErrRecipientKeyUnavailable) {
+		logger.Warn("alarm email settings disabled: recipient encryption key is not configured",
+			zap.String("required_env", notification.EnvNotificationRecipientKey))
+	} else {
+		return fmt.Errorf("initialize alarm email recipient protection: %w", protectorErr)
+	}
+	if protectorErr == nil {
+		statusSummaryConfigRepo := notification.NewPgStatusSummaryConfigRepository(c.PgPool)
+		c.miscDeps.statusSummaryConfigHandler = notification.NewStatusSummaryConfigHandler(
+			notification.NewStatusSummaryConfigService(statusSummaryConfigRepo, recipientProtector, c.Cfg.Notification.SMTP.Enabled),
+		)
+	}
 	channelRepo := notification.NewPgChannelConfigRepository(c.PgPool)
 	c.miscDeps.notifChannelHandler = notification.NewChannelHandler(
 		notification.NewChannelService(channelRepo, notification.NewEmailChannelVerifier(sharedNotificationEmailSender(c))),
@@ -1703,7 +1713,6 @@ func initMiscModules(c *Container) error {
 
 	historyRepo := notification.NewPgHistoryRepository(c.PgPool)
 	historyService := notification.NewHistoryService(historyRepo, logger)
-	c.miscDeps.notifHistoryHandler = notification.NewHistoryHandler(historyService, logger)
 
 	// T-0152: SMTP 邮件发送器 + Mailer（模板渲染→发送→历史）+ Alertmanager
 	// 告警 webhook 入口。SMTP 默认 disabled，配好邮件服务器后由配置启用。
@@ -1715,8 +1724,7 @@ func initMiscModules(c *Container) error {
 	}, logger)
 
 	if c.Cfg.Alarm.LifecycleMode == string(alarm.LifecycleModeCanonical) && c.Cfg.Notification.SMTP.Enabled {
-		recipientProtector, protectorErr := notification.NewEnvRecipientProtector()
-		if protectorErr == nil {
+		if recipientProtector != nil {
 			workerID := fmt.Sprintf("%s-notification-%d", c.Cfg.RequestIDPrefix, os.Getpid())
 			materializer := notification.NewScheduledDeliveryHandler(deliveryRepo, workerID)
 			deliveryScheduler := notification.NewScheduler(
@@ -1739,11 +1747,9 @@ func initMiscModules(c *Container) error {
 				})
 			}
 			logger.Info("notification email delivery runtime started")
-		} else if errors.Is(protectorErr, notification.ErrRecipientKeyUnavailable) {
+		} else {
 			logger.Warn("notification email delivery runtime disabled: recipient encryption key is not configured",
 				zap.String("required_env", notification.EnvNotificationRecipientKey))
-		} else {
-			return fmt.Errorf("initialize notification email recipient protection: %w", protectorErr)
 		}
 	}
 
@@ -2746,14 +2752,11 @@ type miscDeps struct {
 	notificationHandler *notification.Handler
 	messageHub          *events.MessageHub
 
-	// W2.A.4 / T-0043: Notification template + history
-	notifTemplateHandler        *notification.TemplateHandler
-	notifHistoryHandler         *notification.HistoryHandler
-	notifRuleHandler            *notification.RuleHandler
-	notifContactGroupHandler    *notification.ContactGroupHandler
-	notifManagedTemplateHandler *notification.TemplateManagementHandler
-	notifChannelHandler         *notification.ChannelHandler
-	notifDeliveryHandler        *notification.DeliveryHandler
+	// Alarm email management and delivery observability
+	notifChannelHandler        *notification.ChannelHandler
+	notifDeliveryHandler       *notification.DeliveryHandler
+	alarmEmailSettingsHandler  *notification.AlarmEmailSettingsHandler
+	statusSummaryConfigHandler *notification.StatusSummaryConfigHandler
 
 	// T-0152: Alertmanager 告警 webhook 入口（SMTP 邮件发送链）
 	alertWebhookHandler *notification.AlertWebhookHandler

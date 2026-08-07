@@ -35,6 +35,7 @@ const CurrentAlarms      = React.lazy(() => import('@/pages/alarm/CurrentAlarms'
 const HistoricalAlarms   = React.lazy(() => import('@/pages/alarm/HistoricalAlarms'));
 const AlarmStatistics    = React.lazy(() => import('@/pages/alarm/AlarmStatistics'));
 const AlarmRules         = React.lazy(() => import('@/pages/alarm/AlarmRules'));
+const AlarmEmailSettings = React.lazy(() => import('@/pages/alarm/AlarmEmailSettings'));
 const AlarmSync          = React.lazy(() => import('@/pages/alarm/AlarmSync'));
 const CustomAlarmStats   = React.lazy(() => import('@/pages/alarm/CustomAlarmStats'));
 
@@ -241,6 +242,7 @@ export const routes: RouteObject[] = [
       { path: 'alarm/history',    element: withSuspense(HistoricalAlarms) },
       { path: 'alarm/statistics', element: withSuspense(AlarmStatistics) },
       { path: 'alarm/rules',      element: withSuspense(AlarmRules) },
+      { path: 'alarm/email-settings', element: withSuspense(AlarmEmailSettings) },
       { path: 'alarm/sync',       element: withSuspense(AlarmSync) },
       { path: 'alarm/custom-stats', element: withSuspense(CustomAlarmStats) },
 

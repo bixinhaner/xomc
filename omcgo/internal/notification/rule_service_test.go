@@ -13,14 +13,18 @@ import (
 )
 
 type ruleRepositoryStub struct {
-	rule            *NotificationRule
-	createInput     RuleDraftInput
-	updateRevision  int64
-	publishRevision int64
-	enableRevision  int64
-	enableVersionID uuid.UUID
-	archiveRevision int64
-	err             error
+	rule                  *NotificationRule
+	createInput           RuleDraftInput
+	updateRevision        int64
+	publishRevision       int64
+	enableRevision        int64
+	enableVersionID       uuid.UUID
+	disableRevision       int64
+	archiveRevision       int64
+	savePublishedID       uuid.UUID
+	savePublishedRevision int64
+	savePublishedEnabled  bool
+	err                   error
 }
 
 func (s *ruleRepositoryStub) List(context.Context) ([]NotificationRule, error) {
@@ -48,8 +52,25 @@ func (s *ruleRepositoryStub) Enable(_ context.Context, _ uuid.UUID, revision int
 	s.enableRevision, s.enableVersionID = revision, versionID
 	return s.rule, s.err
 }
+func (s *ruleRepositoryStub) Disable(_ context.Context, _ uuid.UUID, revision int64) (*NotificationRule, error) {
+	s.disableRevision = revision
+	return s.rule, s.err
+}
 func (s *ruleRepositoryStub) Archive(_ context.Context, _ uuid.UUID, revision int64) (*NotificationRule, error) {
 	s.archiveRevision = revision
+	return s.rule, s.err
+}
+func (s *ruleRepositoryStub) SavePublished(
+	_ context.Context,
+	id uuid.UUID,
+	revision int64,
+	_ RuleDraftInput,
+	enabled bool,
+	_ string,
+) (*NotificationRule, error) {
+	s.savePublishedID = id
+	s.savePublishedRevision = revision
+	s.savePublishedEnabled = enabled
 	return s.rule, s.err
 }
 
@@ -88,9 +109,12 @@ func TestRuleService_PropagatesRevisionAndPublicationInvariants(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 	require.Equal(t, int64(9), repository.enableRevision)
 	require.Equal(t, versionID, repository.enableVersionID)
-	_, err = service.Archive(context.Background(), ruleID, 10)
+	_, err = service.Disable(context.Background(), ruleID, 10)
 	require.ErrorIs(t, err, wantErr)
-	require.Equal(t, int64(10), repository.archiveRevision)
+	require.Equal(t, int64(10), repository.disableRevision)
+	_, err = service.Archive(context.Background(), ruleID, 11)
+	require.ErrorIs(t, err, wantErr)
+	require.Equal(t, int64(11), repository.archiveRevision)
 }
 
 func TestRuleService_WrapsRepositoryErrors(t *testing.T) {
@@ -98,4 +122,16 @@ func TestRuleService_WrapsRepositoryErrors(t *testing.T) {
 	service := NewRuleService(&ruleRepositoryStub{err: wantErr})
 	_, err := service.List(context.Background())
 	require.ErrorIs(t, err, wantErr)
+}
+
+func TestRuleService_SavePublishedDelegatesOneAtomicMutation(t *testing.T) {
+	ruleID := uuid.New()
+	repository := &ruleRepositoryStub{rule: &NotificationRule{ID: ruleID}}
+	service := NewRuleService(repository)
+
+	_, err := service.SavePublished(context.Background(), ruleID, 7, RuleDraftInput{Name: "alarm mail"}, true, "operator")
+	require.NoError(t, err)
+	require.Equal(t, ruleID, repository.savePublishedID)
+	require.Equal(t, int64(7), repository.savePublishedRevision)
+	require.True(t, repository.savePublishedEnabled)
 }

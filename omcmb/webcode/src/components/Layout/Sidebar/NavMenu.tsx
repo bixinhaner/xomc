@@ -28,6 +28,7 @@ import {
   CloudServerOutlined,
   AimOutlined,
   ExperimentOutlined,
+  NotificationOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTabStore } from '@core/store/tabStore';
@@ -74,6 +75,7 @@ const STATIC_ICON_MAP: Record<string, React.ReactNode> = {
   CloudServerOutlined: <CloudServerOutlined />,
   AimOutlined: <AimOutlined />,
   ExperimentOutlined: <ExperimentOutlined />,
+  NotificationOutlined: <NotificationOutlined />,
 };
 
 // ---------------------------------------------------------------------------

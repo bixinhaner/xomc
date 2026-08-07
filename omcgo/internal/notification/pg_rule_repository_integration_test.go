@@ -79,6 +79,48 @@ func TestPgRuleRepository_Integration(t *testing.T) {
 	}, "integration")
 	require.NoError(t, err)
 
+	atomicInput := RuleDraftInput{
+		Name: "atomic-alarm-mail-" + uuid.NewString(), Priority: 100,
+		MatchConditions: RuleMatchConditions{Severities: []model.AlarmSeverity{model.AlarmCritical}},
+		Policy:          json.RawMessage(`{}`), ChangeReason: "atomic create",
+		Recipients: []RuleRecipientInput{{
+			TargetType: RecipientTargetUser, TargetID: uuid.NewString(), ChannelLimit: []string{"email"},
+		}},
+		Channels: []RuleChannelInput{{
+			Channel: "email", ChannelConfigID: channelConfigID,
+			RaisedTemplateVersionID: template.Published.ID, Policy: json.RawMessage(`{}`),
+		}},
+	}
+	atomicCreated, err := repository.SavePublished(ctx, uuid.Nil, 0, atomicInput, true, "integration")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), atomicCreated.Revision)
+	require.NotNil(t, atomicCreated.CurrentDraftVersionID)
+	require.Equal(t, atomicCreated.CurrentDraftVersionID, atomicCreated.CurrentPublishedVersionID)
+	require.Equal(t, atomicCreated.CurrentPublishedVersionID, atomicCreated.CurrentEnabledVersionID)
+
+	atomicInput.ChangeReason = "atomic disable update"
+	atomicUpdated, err := repository.SavePublished(ctx, atomicCreated.ID, 1, atomicInput, false, "integration")
+	require.NoError(t, err)
+	require.Equal(t, int64(2), atomicUpdated.Revision)
+	require.Equal(t, atomicUpdated.CurrentDraftVersionID, atomicUpdated.CurrentPublishedVersionID)
+	require.Nil(t, atomicUpdated.CurrentEnabledVersionID)
+
+	_, err = pool.Exec(ctx, `UPDATE notification_channel_configs SET enabled=false WHERE id=$1`, channelConfigID)
+	require.NoError(t, err)
+	atomicInput.ChangeReason = "must roll back"
+	_, err = repository.SavePublished(ctx, atomicCreated.ID, 2, atomicInput, true, "integration")
+	require.ErrorIs(t, err, ErrChannelDisabled)
+	atomicAfterFailure, err := repository.Get(ctx, atomicCreated.ID)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), atomicAfterFailure.Revision)
+	var atomicVersionCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM notification_rule_versions WHERE rule_id=$1`, atomicCreated.ID,
+	).Scan(&atomicVersionCount))
+	require.Equal(t, 2, atomicVersionCount, "failed enable must roll back its immutable version")
+	_, err = pool.Exec(ctx, `UPDATE notification_channel_configs SET enabled=true WHERE id=$1`, channelConfigID)
+	require.NoError(t, err)
+
 	enabled, err := repository.Enable(ctx, created.ID, 2, version1ID)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), enabled.Revision)
@@ -134,10 +176,19 @@ func TestPgRuleRepository_Integration(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(6), enabled.Revision)
 	require.Equal(t, version2ID, enabled.Enabled.ID)
+	disabled, err := repository.Disable(ctx, created.ID, 6)
+	require.NoError(t, err)
+	require.Equal(t, int64(7), disabled.Revision)
+	require.Nil(t, disabled.CurrentEnabledVersionID)
+	require.False(t, disabled.Archived, "disabling must keep the rule editable and re-enableable")
+	enabled, err = repository.Enable(ctx, created.ID, 7, version2ID)
+	require.NoError(t, err)
+	require.Equal(t, int64(8), enabled.Revision)
+	require.Equal(t, version2ID, enabled.Enabled.ID)
 
 	_, err = repository.UpdateDraft(ctx, created.ID, 3, RuleDraftInput{Name: created.Name, Priority: 10, Policy: json.RawMessage(`{}`)}, "integration")
 	require.ErrorIs(t, err, ErrRevisionMismatch)
-	archived, err := repository.Archive(ctx, created.ID, 6)
+	archived, err := repository.Archive(ctx, created.ID, 8)
 	require.NoError(t, err)
 	require.True(t, archived.Archived)
 	require.Nil(t, archived.CurrentEnabledVersionID)

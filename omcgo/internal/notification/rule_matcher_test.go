@@ -48,6 +48,21 @@ func TestMatchRules_OrdersByPrioritySpecificityThenStableID(t *testing.T) {
 	require.Equal(t, stableSecond, matches[2].RuleID)
 }
 
+func TestMatchRulesForDeviceGroups_MatchesCurrentGroupMembership(t *testing.T) {
+	matchingGroup, otherGroup := uuid.New(), uuid.New()
+	snapshot := event.AlarmLifecycleSnapshot{
+		DeviceID: uuid.New(), Severity: model.AlarmMajor, AlarmIdentifier: "GPS_UNAVAILABLE",
+	}
+	matchingRule, nonMatchingRule := uuid.New(), uuid.New()
+
+	matches := MatchRulesForDeviceGroups(snapshot, []uuid.UUID{matchingGroup}, []RuleCandidate{
+		{ID: matchingRule, Priority: 10, Conditions: RuleMatchConditions{DeviceGroupIDs: []uuid.UUID{matchingGroup}}},
+		{ID: nonMatchingRule, Priority: 20, Conditions: RuleMatchConditions{DeviceGroupIDs: []uuid.UUID{otherGroup}}},
+	})
+
+	require.Equal(t, []RuleMatch{{RuleID: matchingRule, Priority: 10, Specificity: 1}}, matches)
+}
+
 func TestMergeRuleRecipientCandidates_DeduplicatesSameAddressPerChannel(t *testing.T) {
 	fingerprint := []byte("same-address")
 	winningRule, losingRule := uuid.New(), uuid.New()

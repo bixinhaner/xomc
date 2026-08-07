@@ -11,12 +11,37 @@ import type {
   ListTemplateParams,
   CreateTemplateInput,
   UpdateTemplateInput,
+  QueryTemplateRegularReport,
+  QueryTemplateRegularReportInput,
 } from '../../types/pmQuery';
 import { mapBackendQueryTemplate, templatePayloadToBackend } from '../../types/pmQuery';
 
 interface ListResponse {
   items: BackendQueryTemplate[];
   total: number;
+}
+
+interface BackendRegularReport {
+  template_id: string;
+  enabled: boolean;
+  send_time: string;
+  period: QueryTemplateRegularReport['period'];
+  recipients: string[];
+  revision: number;
+  next_run_at?: string;
+}
+
+function mapRegularReport(value: BackendRegularReport, etag?: string): QueryTemplateRegularReport {
+  const headerRevision = Number(etag?.replace(/^W\//, '').replaceAll('"', ''));
+  return {
+    templateId: value.template_id,
+    enabled: value.enabled,
+    sendTime: value.send_time,
+    period: value.period,
+    recipients: value.recipients ?? [],
+    revision: Number.isInteger(headerRevision) && headerRevision > 0 ? headerRevision : value.revision,
+    nextRunAt: value.next_run_at,
+  };
 }
 
 export const pmQueryApi = {
@@ -62,5 +87,28 @@ export const pmQueryApi = {
 
   async remove(id: string): Promise<void> {
     await http.delete(`/pm/query-templates/${id}`);
+  },
+
+  async getRegularReport(id: string): Promise<QueryTemplateRegularReport> {
+    const response = await http.get<BackendRegularReport>(`/pm/query-templates/${id}/regular-report`);
+    return mapRegularReport(response.data, response.headers.etag as string | undefined);
+  },
+
+  async updateRegularReport(
+    id: string,
+    revision: number,
+    input: QueryTemplateRegularReportInput,
+  ): Promise<QueryTemplateRegularReport> {
+    const response = await http.patch<BackendRegularReport>(
+      `/pm/query-templates/${id}/regular-report`,
+      {
+        enabled: input.enabled,
+        send_time: input.sendTime,
+        period: input.period,
+        recipients: input.recipients,
+      },
+      { headers: { 'If-Match': `"${revision}"` } },
+    );
+    return mapRegularReport(response.data, response.headers.etag as string | undefined);
   },
 };

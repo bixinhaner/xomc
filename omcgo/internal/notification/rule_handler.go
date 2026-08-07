@@ -33,6 +33,7 @@ func (h *RuleHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rules.PATCH("/:id", h.UpdateDraft)
 	rules.POST("/:id/publish", h.Publish)
 	rules.POST("/:id/enable", h.Enable)
+	rules.POST("/:id/disable", h.Disable)
 	rules.POST("/:id/archive", h.Archive)
 	rules.POST("/:id/preview", h.Preview)
 }
@@ -117,6 +118,15 @@ func (h *RuleHandler) Enable(c *gin.Context) {
 		return
 	}
 	rule, err := h.service.Enable(c.Request.Context(), id, revision, request.RuleVersionID)
+	writeRuleMutation(c, rule, err)
+}
+
+func (h *RuleHandler) Disable(c *gin.Context) {
+	id, revision, ok := parseRuleMutation(c)
+	if !ok {
+		return
+	}
+	rule, err := h.service.Disable(c.Request.Context(), id, revision)
 	writeRuleMutation(c, rule, err)
 }
 

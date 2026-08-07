@@ -313,6 +313,12 @@ func currentAlarmPayloads(device *model.Device, alarms []TR069Alarm, _ time.Time
 		if alarm.ManagedObjectInstance != "" {
 			additional["managed_object_instance"] = alarm.ManagedObjectInstance
 		}
+		if alarm.SpecificProblem != "" {
+			additional["specific_problem"] = alarm.SpecificProblem
+		}
+		if alarm.ProbableCause != "" {
+			additional["probable_cause"] = alarm.ProbableCause
+		}
 		result = append(result, AlarmPayload{
 			DeviceID:        device.ID.String(),
 			DeviceSN:        device.SerialNumber,
@@ -347,6 +353,12 @@ func alarmInfoPayloads(device *model.Device, alarms []alarmInfoEvent, _ time.Tim
 		if alarm.NotificationType != "" {
 			additional["notification_type"] = alarm.NotificationType
 		}
+		if alarm.SpecificProblem != "" {
+			additional["specific_problem"] = alarm.SpecificProblem
+		}
+		if alarm.ProbableCause != "" {
+			additional["probable_cause"] = alarm.ProbableCause
+		}
 		result = append(result, AlarmPayload{
 			DeviceID:        device.ID.String(),
 			DeviceSN:        device.SerialNumber,
@@ -380,6 +392,9 @@ func expeditedEventPayloads(device *model.Device, alarms []ExpeditedEvent, _ tim
 		}
 		if alarm.ProbableCause != "" {
 			additional["probable_cause"] = alarm.ProbableCause
+		}
+		if alarm.SpecificProblem != "" {
+			additional["specific_problem"] = alarm.SpecificProblem
 		}
 		if alarm.NotificationType != "" {
 			additional["notification_type"] = alarm.NotificationType

@@ -1,5 +1,7 @@
 # PRD: F04 告警通知链路
 
+> 历史 Draft：本文保留用于 backlog 追溯，不代表当前交付范围。当前告警邮件、KPI 定时报表、短信排除项和验收门禁以 `docs/superpowers/reviews/2026-08-06-email-notification-scope-convergence.md` 及对应 milestone acceptance 为准。
+
 **PRD ID**：F04-alarm-notification  
 **功能域**：F04 告警管理  
 **作者**：Claude AI（PM 角色）+ 待人工审批  

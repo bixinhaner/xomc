@@ -333,6 +333,8 @@ CREATE TABLE public.alarm_definitions (
     event_type integer,
     cn_probable_cause text,
     en_probable_cause text,
+    cn_suggestion text,
+    en_suggestion text,
     is_show boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -6236,9 +6238,169 @@ CREATE TABLE public.pm_query_templates (
     creator_id uuid NOT NULL,
     description text,
     payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    report_enabled boolean DEFAULT false NOT NULL,
+    report_send_time time without time zone DEFAULT '00:00:00'::time without time zone NOT NULL,
+    report_period character varying(16) DEFAULT 'day'::character varying NOT NULL,
+    report_revision bigint DEFAULT 1 NOT NULL,
+    report_next_run_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pm_query_templates_report_period_check CHECK (((report_period)::text = ANY (ARRAY['15min'::text, 'hour'::text, 'day'::text]))),
     CONSTRAINT pm_query_templates_visibility_check CHECK (((visibility)::text = ANY (ARRAY[('public'::character varying)::text, ('private'::character varying)::text])))
+);
+
+CREATE TABLE public.pm_query_template_report_recipients (
+    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+    template_id uuid NOT NULL,
+    address_ciphertext bytea NOT NULL,
+    address_key_version integer NOT NULL,
+    recipient_fingerprint bytea NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pm_query_template_report_recipients_key_check CHECK ((address_key_version > 0)),
+    CONSTRAINT pm_query_template_report_recipients_unique UNIQUE (template_id, recipient_fingerprint)
+);
+
+CREATE INDEX idx_pm_query_templates_report_due ON public.pm_query_templates USING btree (report_next_run_at)
+WHERE (report_enabled = true);
+
+CREATE TABLE public.pm_query_template_report_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    template_id uuid NOT NULL,
+    window_start timestamp with time zone NOT NULL,
+    window_end timestamp with time zone NOT NULL,
+    template_payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    export_task_id uuid,
+    state character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    attempt integer DEFAULT 0 NOT NULL,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pm_query_template_report_runs_window_chk CHECK (window_end > window_start),
+    CONSTRAINT pm_query_template_report_runs_state_chk CHECK ((state)::text = ANY (ARRAY['pending'::text, 'exporting'::text, 'sending'::text, 'retry_wait'::text, 'succeeded'::text, 'failed'::text]))
+);
+
+CREATE UNIQUE INDEX uq_pm_query_template_report_runs_window
+    ON public.pm_query_template_report_runs (template_id, window_start, window_end);
+CREATE INDEX idx_pm_query_template_report_runs_due
+    ON public.pm_query_template_report_runs (next_attempt_at, state)
+    WHERE ((state)::text = ANY (ARRAY['pending'::text, 'retry_wait'::text, 'failed'::text]));
+
+CREATE TABLE public.pm_query_template_report_run_recipients (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    run_id uuid NOT NULL,
+    address_ciphertext bytea NOT NULL,
+    address_key_version integer NOT NULL,
+    recipient_fingerprint bytea NOT NULL,
+    state character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    attempt integer DEFAULT 0 NOT NULL,
+    last_error text,
+    sent_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pm_query_template_report_run_recipients_state_chk CHECK ((state)::text = ANY (ARRAY['pending'::text, 'sending'::text, 'succeeded'::text, 'retry_wait'::text, 'failed'::text])),
+    CONSTRAINT pm_query_template_report_run_recipients_unique UNIQUE (run_id, recipient_fingerprint)
+);
+
+CREATE INDEX idx_pm_query_template_report_run_recipients_due
+    ON public.pm_query_template_report_run_recipients (run_id, state);
+
+
+--
+-- Name: notification_status_summary_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_status_summary_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    run_key character varying(160) NOT NULL,
+    generated_at timestamp with time zone NOT NULL,
+    time_zone character varying(128) NOT NULL,
+    snapshot jsonb DEFAULT '{}'::jsonb NOT NULL,
+    excluded_cpe bigint DEFAULT 0 NOT NULL,
+    state character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    attempt integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_error text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_status_summary_runs_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_status_summary_runs_run_key_key UNIQUE (run_key),
+    CONSTRAINT notification_status_summary_runs_state_check CHECK (((state)::text = ANY ((ARRAY['pending'::character varying, 'sending'::character varying, 'retry_wait'::character varying, 'succeeded'::character varying, 'failed'::character varying])::text[])))
+);
+
+CREATE INDEX idx_notification_status_summary_runs_due
+    ON public.notification_status_summary_runs (next_attempt_at, state);
+
+CREATE TABLE public.notification_status_summary_configs (
+    id uuid NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    send_time time without time zone DEFAULT '00:00:00'::time without time zone NOT NULL,
+    time_zone character varying(128) NOT NULL,
+    revision bigint DEFAULT 1 NOT NULL,
+    updated_by character varying(128),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_status_summary_configs_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_status_summary_configs_revision_check CHECK ((revision > 0))
+);
+
+CREATE TABLE public.notification_status_summary_config_recipients (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    config_id uuid NOT NULL,
+    address_ciphertext bytea NOT NULL,
+    address_key_version integer NOT NULL,
+    recipient_fingerprint bytea NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_status_summary_config_recipients_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_status_summary_config_recipients_unique UNIQUE (config_id, recipient_fingerprint),
+    CONSTRAINT notification_status_summary_config_recipients_key_version_check CHECK ((address_key_version > 0)),
+    CONSTRAINT notification_status_summary_config_recipients_config_id_fkey FOREIGN KEY (config_id) REFERENCES public.notification_status_summary_configs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_notification_status_summary_config_recipients_config
+    ON public.notification_status_summary_config_recipients (config_id);
+
+
+--
+-- Name: notification_status_summary_recipients; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_status_summary_recipients (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    run_id uuid NOT NULL,
+    address_ciphertext bytea NOT NULL,
+    address_key_version integer NOT NULL,
+    recipient_fingerprint bytea NOT NULL,
+    state character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    attempt integer DEFAULT 0 NOT NULL,
+    last_error text,
+    sent_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_status_summary_recipients_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_status_summary_recipients_key UNIQUE (run_id, recipient_fingerprint),
+    CONSTRAINT notification_status_summary_recipients_state_check CHECK (((state)::text = ANY ((ARRAY['pending'::character varying, 'sending'::character varying, 'retry_wait'::character varying, 'succeeded'::character varying, 'unknown'::character varying])::text[]))),
+    CONSTRAINT notification_status_summary_recipients_key_version_check CHECK ((address_key_version > 0)),
+    CONSTRAINT notification_status_summary_recipients_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.notification_status_summary_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_notification_status_summary_recipients_due
+    ON public.notification_status_summary_recipients (run_id, state);
+
+CREATE TABLE public.notification_status_summary_recipient_attempts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    recipient_id uuid NOT NULL,
+    attempt_no integer NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    finished_at timestamp with time zone,
+    result character varying(24) NOT NULL,
+    error_category character varying(64),
+    status_summary character varying(256),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT notification_status_summary_recipient_attempts_pkey PRIMARY KEY (id),
+    CONSTRAINT notification_status_summary_recipient_attempts_unique UNIQUE (recipient_id, attempt_no),
+    CONSTRAINT notification_status_summary_recipient_attempts_attempt_check CHECK ((attempt_no > 0)),
+    CONSTRAINT notification_status_summary_recipient_attempts_recipient_id_fkey FOREIGN KEY (recipient_id) REFERENCES public.notification_status_summary_recipients(id) ON DELETE CASCADE
 );
 
 
@@ -9741,6 +9903,14 @@ ALTER TABLE ONLY public.pm_panels
 
 ALTER TABLE ONLY public.pm_query_templates
     ADD CONSTRAINT pm_query_templates_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pm_query_template_report_recipients pm_query_template_report_recipients_template_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pm_query_template_report_recipients
+    ADD CONSTRAINT pm_query_template_report_recipients_template_id_fkey FOREIGN KEY (template_id) REFERENCES public.pm_query_templates(id) ON DELETE CASCADE;
 
 
 --

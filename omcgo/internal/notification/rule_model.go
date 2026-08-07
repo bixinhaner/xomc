@@ -23,6 +23,7 @@ type RuleMatchConditions struct {
 	AlarmIdentifiers []string              `json:"alarm_identifiers,omitempty"`
 	Severities       []model.AlarmSeverity `json:"severities,omitempty"`
 	DeviceIDs        []uuid.UUID           `json:"device_ids,omitempty"`
+	DeviceGroupIDs   []uuid.UUID           `json:"device_group_ids,omitempty"`
 	Carriers         []model.CarrierCode   `json:"carriers,omitempty"`
 	Technologies     []model.Technology    `json:"technologies,omitempty"`
 }

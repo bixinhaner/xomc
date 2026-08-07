@@ -15,6 +15,10 @@ import (
 
 type RuleService struct{ repository RuleRepository }
 
+type publishedRuleRepository interface {
+	SavePublished(context.Context, uuid.UUID, int64, RuleDraftInput, bool, string) (*NotificationRule, error)
+}
+
 func NewRuleService(repository RuleRepository) *RuleService {
 	return &RuleService{repository: repository}
 }
@@ -78,10 +82,45 @@ func (s *RuleService) Enable(ctx context.Context, id uuid.UUID, revision int64, 
 	return rule, nil
 }
 
+func (s *RuleService) Disable(ctx context.Context, id uuid.UUID, revision int64) (*NotificationRule, error) {
+	rule, err := s.repository.Disable(ctx, id, revision)
+	if err != nil {
+		return nil, fmt.Errorf("disable notification rule: %w", err)
+	}
+	return rule, nil
+}
+
 func (s *RuleService) Archive(ctx context.Context, id uuid.UUID, revision int64) (*NotificationRule, error) {
 	rule, err := s.repository.Archive(ctx, id, revision)
 	if err != nil {
 		return nil, fmt.Errorf("archive notification rule: %w", err)
+	}
+	return rule, nil
+}
+
+// SavePublished is the narrow atomic write used by the alarm-email business
+// adapter. Generic rule draft/publish APIs keep their independent lifecycle,
+// while one alarm-email form submission commits its version and enabled state
+// together so operators never observe a partially applied setting.
+func (s *RuleService) SavePublished(
+	ctx context.Context,
+	id uuid.UUID,
+	revision int64,
+	input RuleDraftInput,
+	enabled bool,
+	actor string,
+) (*NotificationRule, error) {
+	input, err := normalizeRuleDraft(input)
+	if err != nil {
+		return nil, err
+	}
+	repository, ok := s.repository.(publishedRuleRepository)
+	if !ok {
+		return nil, fmt.Errorf("save published notification rule: repository does not support atomic publication")
+	}
+	rule, err := repository.SavePublished(ctx, id, revision, input, enabled, normalizeActor(actor))
+	if err != nil {
+		return nil, fmt.Errorf("save published notification rule: %w", err)
 	}
 	return rule, nil
 }
@@ -117,6 +156,11 @@ func normalizeRuleDraft(input RuleDraftInput) (RuleDraftInput, error) {
 	}
 	for _, deviceID := range input.MatchConditions.DeviceIDs {
 		if deviceID == uuid.Nil {
+			return input, commonerrors.ErrInvalidInput
+		}
+	}
+	for _, groupID := range input.MatchConditions.DeviceGroupIDs {
+		if groupID == uuid.Nil {
 			return input, commonerrors.ErrInvalidInput
 		}
 	}

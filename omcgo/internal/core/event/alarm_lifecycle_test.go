@@ -30,6 +30,9 @@ func TestAlarmLifecyclePayload_RoundTrip(t *testing.T) {
 		AckCount:        3,
 		AdditionalInfo: map[string]string{
 			"managed_object_instance": "Device.Radio.1",
+			"ne_type":                 "ENB",
+			"specific_problem":        "S1 link unavailable",
+			"handling_suggestion":     "Check the transport link",
 			"internal_debug_token":    "must-not-leak",
 		},
 	}
@@ -65,6 +68,10 @@ func TestAlarmLifecyclePayload_RoundTrip(t *testing.T) {
 	require.Equal(t, alarm.ID, decoded.Snapshot.AlarmID)
 	require.Equal(t, alarm.DeviceID, decoded.Snapshot.DeviceID)
 	require.Equal(t, alarmEventType, *decoded.Snapshot.AlarmEventType)
+	require.Equal(t, "cell unavailable", *decoded.Snapshot.AlarmName)
+	require.Equal(t, "ENB", *decoded.Snapshot.NEType)
+	require.Equal(t, "S1 link unavailable", *decoded.Snapshot.SpecificProblem)
+	require.Equal(t, "Check the transport link", *decoded.Snapshot.HandlingSuggestion)
 	require.Equal(t, 3, decoded.Snapshot.AlarmCount)
 	require.Equal(t, "Device.Radio.1", decoded.Snapshot.Extensions["managed_object_instance"])
 }

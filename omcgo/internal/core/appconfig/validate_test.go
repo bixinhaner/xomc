@@ -290,6 +290,15 @@ func TestDashboardConfigValidateRejectsUnsafeBounds(t *testing.T) {
 	}
 }
 
+func TestZedSummaryConfigValidate(t *testing.T) {
+	require.NoError(t, (ZedSummaryConfig{}).validate(false))
+	require.ErrorContains(t, (ZedSummaryConfig{Enabled: true}).validate(false), "smtp.enabled")
+	require.ErrorContains(t, (ZedSummaryConfig{Enabled: true, SendTime: "00:00", TimeZone: "Asia/Shanghai"}).validate(true), "recipients")
+	require.NoError(t, (ZedSummaryConfig{
+		Enabled: true, SendTime: "00:00", TimeZone: "Asia/Shanghai", Recipients: []string{"noc@example.com"},
+	}).validate(true))
+}
+
 func TestLoad_ValidatesConfig(t *testing.T) {
 	// Write a minimal valid config to a temp file, then load it.
 	// This tests that Load() calls Validate() automatically.

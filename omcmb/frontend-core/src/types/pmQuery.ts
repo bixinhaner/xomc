@@ -65,6 +65,23 @@ export interface UpdateTemplateInput {
   visibility?: TemplateVisibility;
 }
 
+export type RegularReportPeriod = '15min' | 'hour' | 'day';
+
+export interface QueryTemplateRegularReport {
+  templateId: string;
+  enabled: boolean;
+  sendTime: string;
+  period: RegularReportPeriod;
+  recipients: string[];
+  revision: number;
+  nextRunAt?: string;
+}
+
+export type QueryTemplateRegularReportInput = Pick<
+  QueryTemplateRegularReport,
+  'enabled' | 'sendTime' | 'period' | 'recipients'
+>;
+
 // 后端 wire 类型
 export interface BackendQueryTemplate {
   id: string;

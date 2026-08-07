@@ -1,8 +1,12 @@
 import React, { useMemo } from 'react';
 import {
+  Alert,
+  Collapse,
   Descriptions,
   Drawer,
+  Empty,
   Space,
+  Spin,
   Tag,
   Typography,
 } from 'antd';
@@ -10,6 +14,10 @@ import {
   UserOutlined,
 } from '@ant-design/icons';
 import { useAlarmById } from '@core/hooks/api/useAlarms';
+import {
+  useNotificationDeliveries,
+  useNotificationDeliveryAttempts,
+} from '@core/hooks/api/useNotifications';
 import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import { useT } from '@/hooks/useT';
 import { formatBaseStationTypeLabel } from '../utils/baseStationType';
@@ -55,6 +63,89 @@ const LONG_TEXT_STYLE: React.CSSProperties = {
   overflowWrap: 'anywhere',
   wordBreak: 'break-word',
 };
+
+function NotificationAttemptSummary({ deliveryId }: { deliveryId: string }) {
+  const t = useT();
+  const attempts = useNotificationDeliveryAttempts(deliveryId);
+  if (attempts.isLoading) return <Spin size="small" />;
+  if (!attempts.data?.length) return <Text type="secondary">{t('notification.history.noAttempts')}</Text>;
+  return (
+    <Descriptions column={1} size="small" bordered>
+      {attempts.data.map((attempt) => (
+        <Descriptions.Item
+          key={attempt.id}
+          label={t('notification.alarmTrajectory.attempt', { number: attempt.attemptNo })}
+        >
+          <Space direction="vertical" size={0}>
+            <Text>{attempt.result || '-'}</Text>
+            {attempt.statusSummary && <Text type="secondary">{attempt.statusSummary}</Text>}
+            <Text type="secondary">{formatSystemTime(attempt.startedAt)}</Text>
+          </Space>
+        </Descriptions.Item>
+      ))}
+    </Descriptions>
+  );
+}
+
+function NotificationTrajectory({ occurrenceId }: { occurrenceId: string }) {
+  const t = useT();
+  const deliveries = useNotificationDeliveries({ occurrenceId, limit: 100, offset: 0 });
+  if (deliveries.isLoading) return <Spin size="small" />;
+  if (deliveries.isError) {
+    return <Alert type="warning" showIcon title={t('notification.alarmTrajectory.loadFailed')} />;
+  }
+  if (!deliveries.data?.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notification.alarmTrajectory.empty')} />;
+  }
+  return (
+    <Collapse
+      size="small"
+      destroyOnHidden
+      items={deliveries.data.map((delivery) => ({
+        key: delivery.id,
+        label: (
+          <Space wrap>
+            <Tag>{delivery.channel}</Tag>
+            <Tag>{t(`notification.delivery.flow.${delivery.flowState}`)}</Tag>
+            <Text>{delivery.maskedAddress || '-'}</Text>
+            <Text type="secondary">{formatSystemTime(delivery.createdAt)}</Text>
+          </Space>
+        ),
+        children: (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label={t('notification.history.deliveryResult')}>
+                {t(`notification.delivery.result.${delivery.deliveryResult}`)}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('notification.history.dispatchKind')}>
+                {delivery.dispatchKind || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('notification.history.ruleVersion')}>
+                <Text copyable code>{delivery.ruleVersionId || '-'}</Text>
+              </Descriptions.Item>
+              {delivery.suppressionReason && (
+                <Descriptions.Item label={t('notification.history.suppressionReason')}>
+                  {delivery.suppressionReason}
+                </Descriptions.Item>
+              )}
+              {delivery.failureReason && (
+                <Descriptions.Item label={t('notification.history.failureReason')}>
+                  <Text type="danger">{delivery.failureReason}</Text>
+                </Descriptions.Item>
+              )}
+              {delivery.originDeliveryId && (
+                <Descriptions.Item label={t('notification.history.originDelivery')}>
+                  <Text copyable code>{delivery.originDeliveryId}</Text>
+                </Descriptions.Item>
+              )}
+            </Descriptions>
+            <NotificationAttemptSummary deliveryId={delivery.id} />
+          </Space>
+        ),
+      }))}
+    />
+  );
+}
 
 const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
   const t = useT();
@@ -120,7 +211,7 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
       }
       open={open}
       onClose={onClose}
-      width={600}
+      size={720}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         {/* 基本信息 */}
@@ -288,6 +379,17 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
               )}
             </Descriptions.Item>
           </Descriptions>
+        </section>
+
+        <section>
+          <Text
+            type="secondary"
+            strong
+            style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 10 }}
+          >
+            {t('notification.alarmTrajectory.title')}
+          </Text>
+          {open && <NotificationTrajectory occurrenceId={resolvedAlarm.id} />}
         </section>
       </div>
     </Drawer>

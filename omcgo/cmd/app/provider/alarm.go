@@ -163,7 +163,8 @@ func sharedNotificationEmailSender(c *Container) *notification.EmailSender {
 			Enabled: c.Cfg.Notification.SMTP.Enabled, Host: c.Cfg.Notification.SMTP.Host,
 			Port: c.Cfg.Notification.SMTP.Port, Username: c.Cfg.Notification.SMTP.Username,
 			Password: c.Cfg.Notification.SMTP.Password, From: c.Cfg.Notification.SMTP.From,
-			StartTLS: c.Cfg.Notification.SMTP.StartTLS, Timeout: c.Cfg.Notification.SMTP.Timeout,
+			TLSMode: c.Cfg.Notification.SMTP.TLSMode, StartTLS: c.Cfg.Notification.SMTP.StartTLS,
+			Timeout: c.Cfg.Notification.SMTP.Timeout,
 		}, c.Logger)
 	}
 	return c.NotificationEmailSender

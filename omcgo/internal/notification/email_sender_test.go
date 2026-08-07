@@ -3,7 +3,12 @@ package notification
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net"
+	"net/mail"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +32,46 @@ func TestBuildMessage(t *testing.T) {
 	require.Contains(t, msg, "line1\r\nline2")
 	// header 与 body 之间有空行
 	require.Contains(t, msg, "\r\n\r\n")
+}
+
+func TestBuildEmailMessage_WithSingleCSVAttachment(t *testing.T) {
+	t.Parallel()
+	message, err := buildEmailMessage(
+		"from@x.com", "ops@x.com", "KPI report", "report attached",
+		[]EmailAttachment{{Filename: "kpi-report.csv", ContentType: "text/csv", Data: []byte("time,value\n1,2\n")}},
+	)
+	require.NoError(t, err)
+
+	parsed, err := mail.ReadMessage(strings.NewReader(string(message)))
+	require.NoError(t, err)
+	mediaType, params, err := mime.ParseMediaType(parsed.Header.Get("Content-Type"))
+	require.NoError(t, err)
+	require.Equal(t, "multipart/mixed", mediaType)
+	parts := multipart.NewReader(parsed.Body, params["boundary"])
+	bodyPart, err := parts.NextPart()
+	require.NoError(t, err)
+	body, err := io.ReadAll(bodyPart)
+	require.NoError(t, err)
+	require.Equal(t, "report attached", string(body))
+	attachmentPart, err := parts.NextPart()
+	require.NoError(t, err)
+	require.Equal(t, "kpi-report.csv", attachmentPart.FileName())
+	encoded, err := io.ReadAll(attachmentPart)
+	require.NoError(t, err)
+	decoded := make([]byte, base64.StdEncoding.DecodedLen(len(encoded)))
+	n, err := base64.StdEncoding.Decode(decoded, encoded)
+	require.NoError(t, err)
+	require.Equal(t, "time,value\n1,2\n", string(decoded[:n]))
+}
+
+func TestEmailSender_TLSModeCompatibilityAndValidation(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, SMTPTLSNone, NewEmailSender(SMTPOptions{}, nil).tlsMode())
+	require.Equal(t, SMTPTLSStartTLS, NewEmailSender(SMTPOptions{StartTLS: true}, nil).tlsMode())
+	require.Equal(t, SMTPTLSImplicit, NewEmailSender(SMTPOptions{TLSMode: "IMPLICIT", StartTLS: true}, nil).tlsMode())
+
+	sender := NewEmailSender(SMTPOptions{Enabled: true, Host: "smtp.example.com", Port: 465, TLSMode: "invalid"}, nil)
+	require.ErrorContains(t, sender.validateConnectionOptions(), "unsupported tls mode")
 }
 
 func TestEmailSender_Send_Disabled(t *testing.T) {

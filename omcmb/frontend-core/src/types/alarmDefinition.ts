@@ -13,6 +13,8 @@ export interface AlarmDefinition {
   eventType?: number | string;
   cnProbableCause?: string;
   enProbableCause?: string;
+  cnSuggestion?: string;
+  enSuggestion?: string;
   description?: string;
   isShow: boolean;
   isUnknown?: boolean;
@@ -58,6 +60,8 @@ export interface CreateAlarmDefinitionInput {
   eventType?: number;
   cnProbableCause?: string;
   enProbableCause?: string;
+  cnSuggestion?: string;
+  enSuggestion?: string;
   description?: string;
   isShow?: boolean;
 }

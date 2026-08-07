@@ -18,7 +18,7 @@ var allowedNotificationTemplateVariables = map[string]struct{}{
 	"alarm_name": {}, "alarm_identifier": {}, "severity": {}, "device_sn": {},
 	"device_id": {}, "device_type": {}, "carrier": {}, "technology": {},
 	"raised_at": {}, "occurred_at": {}, "cleared_at": {}, "probable_cause": {},
-	"specific_problem": {}, "omc_url": {}, "status": {},
+	"specific_problem": {}, "handling_suggestion": {}, "omc_url": {}, "status": {},
 	"event_count": {}, "window_started_at": {}, "window_ends_at": {},
 }
 

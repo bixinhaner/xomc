@@ -68,6 +68,8 @@ interface FormValues {
   eventType?: number;
   cnProbableCause?: string;
   enProbableCause?: string;
+  cnSuggestion?: string;
+  enSuggestion?: string;
   description?: string;
   isShow: boolean;
 }
@@ -106,6 +108,8 @@ export default function AlarmDefinitionDrawer({
         eventType: normalizeEventType(definition.eventType),
         cnProbableCause: definition.cnProbableCause,
         enProbableCause: definition.enProbableCause,
+        cnSuggestion: definition.cnSuggestion,
+        enSuggestion: definition.enSuggestion,
         description: definition.description,
         isShow: definition.isShow,
       });
@@ -132,6 +136,8 @@ export default function AlarmDefinitionDrawer({
           eventType: v.eventType,
           cnProbableCause: v.cnProbableCause,
           enProbableCause: v.enProbableCause,
+          cnSuggestion: v.cnSuggestion,
+          enSuggestion: v.enSuggestion,
           description: v.description,
           isShow: v.isShow,
         };
@@ -147,6 +153,8 @@ export default function AlarmDefinitionDrawer({
           eventType: v.eventType,
           cnProbableCause: v.cnProbableCause,
           enProbableCause: v.enProbableCause,
+          cnSuggestion: v.cnSuggestion,
+          enSuggestion: v.enSuggestion,
           description: v.description,
           isShow: v.isShow,
         };
@@ -224,6 +232,12 @@ export default function AlarmDefinitionDrawer({
         </Form.Item>
         <Form.Item name="enProbableCause" label="Probable Cause (EN)">
           <Input.TextArea rows={2} />
+        </Form.Item>
+        <Form.Item name="cnSuggestion" label={t('product.alarm.def.cnSuggestion')}>
+          <Input.TextArea rows={3} />
+        </Form.Item>
+        <Form.Item name="enSuggestion" label={t('product.alarm.def.enSuggestion')}>
+          <Input.TextArea rows={3} />
         </Form.Item>
         <Form.Item name="description" label={t('table.description')}>
           <Input.TextArea rows={2} placeholder={t('table.description')} />

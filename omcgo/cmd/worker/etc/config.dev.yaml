@@ -59,8 +59,13 @@ notification:
     username: ""
     password: ""
     from: "omc-alert@example.com"
-    starttls: false
+    tls_mode: none
     timeout: 10s
+  zed_summary:
+    enabled: false
+    send_time: "00:00"
+    time_zone: "Asia/Shanghai"
+    recipients: []
 
 nats:
   url: "nats://nats:4222"

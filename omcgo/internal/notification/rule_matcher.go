@@ -12,9 +12,16 @@ import (
 )
 
 func MatchRules(snapshot event.AlarmLifecycleSnapshot, candidates []RuleCandidate) []RuleMatch {
+	return MatchRulesForDeviceGroups(snapshot, nil, candidates)
+}
+
+// MatchRulesForDeviceGroups evaluates rule scope with the device's current
+// OMC group membership. Device groups are resolved by the orchestration input
+// builder so they do not have to be copied into the alarm fact snapshot.
+func MatchRulesForDeviceGroups(snapshot event.AlarmLifecycleSnapshot, deviceGroupIDs []uuid.UUID, candidates []RuleCandidate) []RuleMatch {
 	matches := make([]RuleMatch, 0, len(candidates))
 	for _, candidate := range candidates {
-		if !ruleMatches(snapshot, candidate.Conditions) {
+		if !ruleMatches(snapshot, deviceGroupIDs, candidate.Conditions) {
 			continue
 		}
 		matches = append(matches, RuleMatch{
@@ -34,10 +41,11 @@ func MatchRules(snapshot event.AlarmLifecycleSnapshot, candidates []RuleCandidat
 	return matches
 }
 
-func ruleMatches(snapshot event.AlarmLifecycleSnapshot, conditions RuleMatchConditions) bool {
+func ruleMatches(snapshot event.AlarmLifecycleSnapshot, deviceGroupIDs []uuid.UUID, conditions RuleMatchConditions) bool {
 	if !containsStringOrEmpty(conditions.AlarmIdentifiers, snapshot.AlarmIdentifier) ||
 		!containsSeverityOrEmpty(conditions.Severities, snapshot.Severity) ||
 		!containsUUIDOrEmpty(conditions.DeviceIDs, snapshot.DeviceID) ||
+		!uuidSetsOverlapOrEmpty(conditions.DeviceGroupIDs, deviceGroupIDs) ||
 		!containsCarrierOrEmpty(conditions.Carriers, snapshot.Carrier) {
 		return false
 	}
@@ -59,6 +67,9 @@ func ruleSpecificity(conditions RuleMatchConditions) int {
 	if len(conditions.DeviceIDs) > 0 {
 		specificity++
 	}
+	if len(conditions.DeviceGroupIDs) > 0 {
+		specificity++
+	}
 	if len(conditions.Carriers) > 0 {
 		specificity++
 	}
@@ -66,6 +77,20 @@ func ruleSpecificity(conditions RuleMatchConditions) int {
 		specificity++
 	}
 	return specificity
+}
+
+func uuidSetsOverlapOrEmpty(configured, actual []uuid.UUID) bool {
+	if len(configured) == 0 {
+		return true
+	}
+	for _, configuredID := range configured {
+		for _, actualID := range actual {
+			if configuredID == actualID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func MergeRuleRecipientCandidates(candidates []RuleRecipientCandidate) []RuleRecipientCandidate {

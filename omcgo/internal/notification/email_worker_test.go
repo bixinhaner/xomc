@@ -43,23 +43,22 @@ func (s *emailWorkerRepositoryStub) LoadEmailDeliveryContent(_ context.Context, 
 	return s.content, s.loadErr
 }
 
-func TestRenderEmailDelivery_DigestUsesAggregateValues(t *testing.T) {
+func TestRenderEmailDelivery_DigestUsesBackendDefinedFormat(t *testing.T) {
 	start := time.Date(2026, 8, 5, 14, 0, 0, 0, time.UTC)
 	end := start.Add(15 * time.Minute)
 	content := EmailDeliveryContent{
-		Template: DomainTemplateVersion{
-			Channel:  TemplateChannelEmail,
-			Subject:  `{{.event_count}} alarms`,
-			TextBody: `{{.window_started_at}} - {{.window_ends_at}}`,
-		},
+		Template:         DomainTemplateVersion{Channel: TemplateChannelEmail, Language: "en-US"},
 		DigestEventCount: 4, DigestWindowStartedAt: &start, DigestWindowEndsAt: &end,
 	}
 
-	subject, body, err := renderEmailDelivery(content)
+	subject, body, err := renderEmailDelivery(context.Background(), content)
 
 	require.NoError(t, err)
-	require.Equal(t, "4 alarms", subject)
-	require.Equal(t, "2026-08-05T14:00:00Z - 2026-08-05T14:15:00Z", body)
+	require.Equal(t, "Alarm Notification", subject)
+	require.Contains(t, body, "Alarm Count: 4")
+	require.Contains(t, body, "Window Start: 2026-08-05 14:00:00 UTC")
+	require.Contains(t, body, "Handling Suggestion:")
+	require.Contains(t, body, "Cleared At: Not cleared")
 }
 
 func (s *emailWorkerRepositoryStub) FinishEmailAttempt(_ context.Context, completion EmailAttemptCompletion) error {
@@ -106,25 +105,26 @@ func TestEmailWorker_AuthorizesBeforeAttemptAndCompletesAccepted(t *testing.T) {
 	require.Equal(t, 1, processed)
 	require.Equal(t, []string{"claim", "authorize", "decrypt", "content", "attempt", "smtp", "finish"}, repository.calls)
 	require.Equal(t, "noc@example.com", transport.recipient)
-	require.Equal(t, "POWER_FAIL major", transport.subject)
-	require.Equal(t, "SC-001 active", transport.body)
+	require.Equal(t, "Alarm Notification", transport.subject)
+	require.Contains(t, transport.body, "告警标识: POWER_FAIL")
+	require.Contains(t, transport.body, "设备 SN: SC-001")
 	require.Equal(t, "completed", repository.completion.FlowState)
 	require.Equal(t, "accepted", repository.completion.DeliveryResult)
 	require.Equal(t, "accepted", repository.completion.AttemptResult)
 	require.NotEqual(t, "delivered", repository.completion.DeliveryResult)
 }
 
-func TestEmailWorker_MissingTemplateVariableDeadLettersWithoutSMTP(t *testing.T) {
+func TestEmailWorker_NonEmailTemplateDeadLettersWithoutSMTP(t *testing.T) {
 	now := time.Date(2026, 8, 5, 14, 10, 0, 0, time.UTC)
 	repository := emailWorkerFixture(now)
-	repository.content.Template.Subject = `{{.missing_variable}}`
+	repository.content.Template.Channel = TemplateChannelSMS
 	transport := &singleEmailTransportStub{calls: &repository.calls}
 	worker := NewEmailWorker(repository, emailUnprotectorStub{address: "noc@example.com", calls: &repository.calls}, transport, "email-a", nil)
 	worker.now = func() time.Time { return now }
 
 	_, err := worker.RunOnce(context.Background())
 
-	require.ErrorContains(t, err, "render email subject")
+	require.ErrorContains(t, err, "template channel")
 	require.NotContains(t, repository.calls, "smtp")
 	require.Equal(t, "dead_letter", repository.completion.FlowState)
 	require.Equal(t, "failed", repository.completion.DeliveryResult)
@@ -198,13 +198,16 @@ func emailWorkerFixture(now time.Time) *emailWorkerRepositoryStub {
 		Snapshot: event.AlarmLifecycleSnapshot{
 			DeviceID: uuid.New(), DeviceSN: "SC-001", Severity: model.AlarmMajor,
 			AlarmIdentifier: "POWER_FAIL", Status: model.AlarmActive, RaisedAt: now,
+			HandlingSuggestion: stringPointer("Check the feeder"),
 		},
 	}
 	return &emailWorkerRepositoryStub{
 		delivery: delivery, attemptNo: 1,
 		content: EmailDeliveryContent{
-			Template: DomainTemplateVersion{Channel: TemplateChannelEmail, Subject: `{{.alarm_identifier}} {{.severity}}`, TextBody: `{{.device_sn}} {{.status}}`},
+			Template: DomainTemplateVersion{Channel: TemplateChannelEmail, Language: "zh-CN"},
 			Payload:  payload,
 		},
 	}
 }
+
+func stringPointer(value string) *string { return &value }

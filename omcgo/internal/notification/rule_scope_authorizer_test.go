@@ -31,6 +31,10 @@ func TestRuleScopeAuthorizer_RequiresExplicitScopeAndSameGrantDimensions(t *test
 		DeviceIDs: []uuid.UUID{deviceID}, Technologies: []model.Technology{model.TechLTE},
 	}})
 	require.NoError(t, err)
+	err = authorizer.Authorize(context.Background(), userID, false, RuleDraftInput{MatchConditions: RuleMatchConditions{
+		DeviceGroupIDs: []uuid.UUID{groupID}, Technologies: []model.Technology{model.TechLTE},
+	}})
+	require.NoError(t, err)
 }
 
 func TestRuleScopeAuthorizer_SuperAdminCanManageBroadRule(t *testing.T) {

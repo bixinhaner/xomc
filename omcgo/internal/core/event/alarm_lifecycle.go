@@ -62,6 +62,7 @@ type AlarmLifecycleSnapshot struct {
 	AlarmName           *string             `json:"alarm_name,omitempty"`
 	Description         string              `json:"description"`
 	SpecificProblem     *string             `json:"specific_problem,omitempty"`
+	HandlingSuggestion  *string             `json:"handling_suggestion,omitempty"`
 	AlarmSource         *string             `json:"alarm_source,omitempty"`
 	AlarmEventType      *string             `json:"alarm_event_type,omitempty"`
 	ProbableCause       *string             `json:"probable_cause,omitempty"`
@@ -134,24 +135,28 @@ func NewAlarmLifecyclePayload(
 		AlarmVersion:  version,
 		ChangeMask:    append([]AlarmChangeField(nil), changeMask...),
 		Snapshot: AlarmLifecycleSnapshot{
-			AlarmID:         alarm.ID,
-			DeviceID:        alarm.DeviceID,
-			DeviceSN:        alarm.DeviceSN,
-			Carrier:         alarm.Carrier,
-			Technology:      copyString(alarm.Technology),
-			Severity:        alarm.Severity,
-			AlarmType:       alarm.AlarmType,
-			AlarmIdentifier: alarm.AlarmIdentifier,
-			Description:     alarm.Description,
-			AlarmSource:     copyString(alarm.AlarmSource),
-			AlarmEventType:  copyString(alarm.EventType),
-			ProbableCause:   copyString(alarm.ProbableCause),
-			Status:          alarm.Status,
-			RaisedAt:        alarm.RaisedAt,
-			AcknowledgedAt:  copyTime(alarm.AcknowledgedAt),
-			ClearedAt:       copyTime(alarm.ClearedAt),
-			FirstRaisedAt:   alarm.FirstRaisedAt,
-			LastUpdatedAt:   alarm.LastUpdatedAt,
+			AlarmID:            alarm.ID,
+			DeviceID:           alarm.DeviceID,
+			DeviceSN:           alarm.DeviceSN,
+			Carrier:            alarm.Carrier,
+			Technology:         copyString(alarm.Technology),
+			NEType:             additionalString(alarm.AdditionalInfo, "ne_type"),
+			Severity:           alarm.Severity,
+			AlarmType:          alarm.AlarmType,
+			AlarmIdentifier:    alarm.AlarmIdentifier,
+			AlarmName:          optionalString(alarm.Description),
+			Description:        alarm.Description,
+			SpecificProblem:    additionalString(alarm.AdditionalInfo, "specific_problem"),
+			HandlingSuggestion: additionalString(alarm.AdditionalInfo, "handling_suggestion"),
+			AlarmSource:        copyString(alarm.AlarmSource),
+			AlarmEventType:     copyString(alarm.EventType),
+			ProbableCause:      copyString(alarm.ProbableCause),
+			Status:             alarm.Status,
+			RaisedAt:           alarm.RaisedAt,
+			AcknowledgedAt:     copyTime(alarm.AcknowledgedAt),
+			ClearedAt:          copyTime(alarm.ClearedAt),
+			FirstRaisedAt:      alarm.FirstRaisedAt,
+			LastUpdatedAt:      alarm.LastUpdatedAt,
 			// AckCount is the current persistence model's legacy name for the
 			// number of reports merged into this occurrence.
 			AlarmCount:          alarm.AckCount,
@@ -189,6 +194,21 @@ func (t AlarmLifecycleType) Subject() (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported alarm lifecycle type %q", t)
 	}
+}
+
+func optionalString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	result := value
+	return &result
+}
+
+func additionalString(values map[string]string, key string) *string {
+	if len(values) == 0 {
+		return nil
+	}
+	return optionalString(values[key])
 }
 
 func containsAlarmChange(fields []AlarmChangeField, want AlarmChangeField) bool {

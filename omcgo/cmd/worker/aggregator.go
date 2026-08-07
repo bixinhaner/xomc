@@ -14,6 +14,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	pmexport "github.com/omcgo/omcgo/internal/pm/export"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
@@ -27,8 +28,10 @@ func startPMAggregatorPipeline(
 	kpiRouter *router.Router,
 	tz *tzManager,
 	exportBucket string,
+	emailSender *notification.EmailSender,
+	zedSummaryConfig notification.StatusSummaryConfigRepository,
 ) {
-	startPMExportOnly(ctx, w, kpiRouter, tz, exportBucket)
+	startPMExportOnly(ctx, w, kpiRouter, tz, exportBucket, emailSender, zedSummaryConfig)
 }
 
 // runJobTypeWorker 单 JobType 内串行循环 RunNext。

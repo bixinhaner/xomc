@@ -43,6 +43,7 @@ export const componentRegistry: Record<string, ComponentType> = {
   'alarm/HistoricalAlarms': lazy(() => import('@/pages/alarm/HistoricalAlarms')),
   'alarm/AlarmStatistics': lazy(() => import('@/pages/alarm/AlarmStatistics')),
   'alarm/AlarmRules': lazy(() => import('@/pages/alarm/AlarmRules')),
+  'alarm/AlarmEmailSettings': lazy(() => import('@/pages/alarm/AlarmEmailSettings')),
   'alarm/AlarmSync': lazy(() => import('@/pages/alarm/AlarmSync')),
   'alarm/CustomAlarmStats': lazy(() => import('@/pages/alarm/CustomAlarmStats')),
 

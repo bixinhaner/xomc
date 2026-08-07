@@ -51,6 +51,19 @@ func TestRuleHandler_EnableRequiresExactVersionAndReturnsNewETag(t *testing.T) {
 	require.Equal(t, `"5"`, response.Header().Get("ETag"))
 }
 
+func TestRuleHandler_DisableUsesOptimisticRevisionAndReturnsNewETag(t *testing.T) {
+	repository := &ruleRepositoryStub{rule: &NotificationRule{ID: uuid.New(), Revision: 7}}
+	router := ruleTestRouter(repository)
+	request := httptest.NewRequest(http.MethodPost, "/notification-rules/"+repository.rule.ID.String()+"/disable", nil)
+	request.Header.Set("If-Match", `"6"`)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, int64(6), repository.disableRevision)
+	require.Equal(t, `"7"`, response.Header().Get("ETag"))
+}
+
 func ruleTestRouter(repository RuleRepository) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

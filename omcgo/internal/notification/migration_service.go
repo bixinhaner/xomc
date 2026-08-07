@@ -3,7 +3,6 @@ package notification
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -33,7 +32,6 @@ type LegacyEmailMigrationRepository interface {
 
 type MigrationRuleRepository interface {
 	Get(context.Context, uuid.UUID) (*NotificationRule, error)
-	Create(context.Context, RuleDraftInput, string) (*NotificationRule, error)
 }
 
 type MigrationOverlapFinding struct {
@@ -60,11 +58,6 @@ type LegacyEmailMigrationPreview struct {
 	UnsupportedScopeFields []string                  `json:"unsupported_scope_fields"`
 }
 
-type MigrationCandidateBinding struct {
-	ChannelConfigID         uuid.UUID
-	RaisedTemplateVersionID uuid.UUID
-}
-
 type MigrationCutoverInput struct {
 	LegacyRuleID              uuid.UUID
 	NotificationRuleID        uuid.UUID
@@ -77,17 +70,15 @@ type MigrationCutoverInput struct {
 }
 
 type MigrationService struct {
-	legacy    LegacyEmailMigrationRepository
-	rules     MigrationRuleRepository
-	protector RecipientProtector
+	legacy LegacyEmailMigrationRepository
+	rules  MigrationRuleRepository
 }
 
 func NewMigrationService(
 	legacy LegacyEmailMigrationRepository,
 	rules MigrationRuleRepository,
-	protector RecipientProtector,
 ) *MigrationService {
-	return &MigrationService{legacy: legacy, rules: rules, protector: protector}
+	return &MigrationService{legacy: legacy, rules: rules}
 }
 
 func (s *MigrationService) Preview(ctx context.Context) ([]LegacyEmailMigrationPreview, error) {
@@ -103,60 +94,6 @@ func (s *MigrationService) Preview(ctx context.Context) ([]LegacyEmailMigrationP
 		previews = append(previews, buildLegacyEmailPreview(rules, index))
 	}
 	return previews, nil
-}
-
-func (s *MigrationService) CreateDisabledCandidate(
-	ctx context.Context,
-	legacyRuleID uuid.UUID,
-	binding MigrationCandidateBinding,
-	actor string,
-) (*NotificationRule, error) {
-	preview, err := s.previewRule(ctx, legacyRuleID)
-	if err != nil {
-		return nil, err
-	}
-	if len(preview.UnsupportedScopeFields) > 0 {
-		return nil, fmt.Errorf("%w: %s", ErrMigrationScopeUnsupported, strings.Join(preview.UnsupportedScopeFields, ","))
-	}
-	if s.protector == nil || binding.ChannelConfigID == uuid.Nil || binding.RaisedTemplateVersionID == uuid.Nil {
-		return nil, fmt.Errorf("create disabled notification migration candidate: %w", ErrMigrationCandidateMismatch)
-	}
-	recipients := make([]RuleRecipientInput, 0, len(preview.RecipientEmails))
-	for _, address := range preview.RecipientEmails {
-		ciphertext, keyVersion, fingerprint, protectErr := s.protector.Protect(TemplateChannelEmail, address)
-		if protectErr != nil {
-			return nil, fmt.Errorf("protect migrated email recipient: %w", protectErr)
-		}
-		recipients = append(recipients, RuleRecipientInput{
-			TargetType: RecipientTargetFixedContact, AddressCiphertext: ciphertext,
-			AddressKeyVersion: keyVersion, RecipientFingerprint: fingerprint,
-			ChannelLimit: []string{TemplateChannelEmail},
-		})
-	}
-	policy, err := json.Marshal(NotificationPolicy{DeliveryMode: DeliveryModeRealtime})
-	if err != nil {
-		return nil, fmt.Errorf("marshal migrated notification policy: %w", err)
-	}
-	input, err := normalizeRuleDraft(RuleDraftInput{
-		Name: preview.CandidateName, Priority: preview.CandidatePriority,
-		MatchConditions: preview.CandidateConditions, Policy: policy,
-		ChangeReason: migrationReason(preview.LegacyRuleID), Recipients: recipients,
-		Channels: []RuleChannelInput{{
-			Channel: TemplateChannelEmail, ChannelConfigID: binding.ChannelConfigID,
-			RaisedTemplateVersionID: binding.RaisedTemplateVersionID,
-		}},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("validate disabled notification migration candidate: %w", err)
-	}
-	rule, err := s.rules.Create(ctx, input, normalizeActor(actor))
-	if err != nil {
-		return nil, fmt.Errorf("create disabled notification migration candidate: %w", err)
-	}
-	if rule == nil || rule.CurrentEnabledVersionID != nil || rule.Enabled != nil {
-		return nil, fmt.Errorf("%w: newly migrated rule was unexpectedly enabled", ErrMigrationCandidateMismatch)
-	}
-	return rule, nil
 }
 
 func (s *MigrationService) Cutover(ctx context.Context, input MigrationCutoverInput) error {

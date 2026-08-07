@@ -91,7 +91,11 @@ func (b *PgOrchestrationInputBuilder) BuildOrchestrationInput(
 		candidates = append(candidates, RuleCandidate{ID: source.RuleID, Priority: source.Priority, Conditions: source.Conditions})
 		byRuleID[source.RuleID] = source
 	}
-	for _, match := range MatchRules(payload.Snapshot, candidates) {
+	deviceGroupIDs, err := b.deviceGroups.GetDeviceGroupIDs(ctx, payload.Snapshot.DeviceID)
+	if err != nil {
+		return input, fmt.Errorf("resolve notification rule device groups: %w", err)
+	}
+	for _, match := range MatchRulesForDeviceGroups(payload.Snapshot, deviceGroupIDs, candidates) {
 		source := byRuleID[match.RuleID]
 		resolution, err := b.resolver.Resolve(ctx, source.Targets, payload.Snapshot)
 		if err != nil {
@@ -120,12 +124,14 @@ func (b *PgOrchestrationInputBuilder) BuildOrchestrationInput(
 			})
 		}
 		for _, channel := range source.Channels {
+			templateVersionID := channel.RaisedTemplateVersionID
 			if channel.ClearedTemplateVersionID != nil {
-				input.RecoveryBindings = append(input.RecoveryBindings, RecoveryBinding{
-					RuleVersionID: source.VersionID, Channel: channel.Channel,
-					ChannelConfigID: channel.ChannelConfigID, TemplateVersionID: *channel.ClearedTemplateVersionID,
-				})
+				templateVersionID = *channel.ClearedTemplateVersionID
 			}
+			input.RecoveryBindings = append(input.RecoveryBindings, RecoveryBinding{
+				RuleVersionID: source.VersionID, Channel: channel.Channel,
+				ChannelConfigID: channel.ChannelConfigID, TemplateVersionID: templateVersionID,
+			})
 		}
 	}
 
@@ -310,9 +316,8 @@ func (b *PgOrchestrationInputBuilder) loadHistoricalRecoveryBindings(ctx context
 		}
 	}
 	query, args, err := storage.Psql.Select(
-		"rule_version_id", "channel", "channel_config_id", "cleared_template_version_id",
-	).From("notification_rule_channels").Where(sq.Eq{"rule_version_id": ruleVersions}).
-		Where(sq.NotEq{"cleared_template_version_id": nil}).ToSql()
+		"rule_version_id", "channel", "channel_config_id", "COALESCE(cleared_template_version_id, raised_template_version_id)",
+	).From("notification_rule_channels").Where(sq.Eq{"rule_version_id": ruleVersions}).ToSql()
 	if err != nil {
 		return fmt.Errorf("build historical recovery binding lookup: %w", err)
 	}

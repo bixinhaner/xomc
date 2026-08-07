@@ -9,11 +9,14 @@ import (
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	pmexport "github.com/omcgo/omcgo/internal/pm/export"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	pmmetrics "github.com/omcgo/omcgo/internal/pm/metrics"
+	"github.com/omcgo/omcgo/internal/pm/querytemplate"
 	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"go.uber.org/zap"
@@ -274,6 +277,8 @@ func startPMExportOnly(
 	kpiRouter *router.Router,
 	tz *tzManager,
 	exportBucket string,
+	emailSender *notification.EmailSender,
+	zedSummaryConfig notification.StatusSummaryConfigRepository,
 ) {
 	logger := w.Logger.Named("pm-export")
 	aggr := aggregator.NewWithPool(w.TsPool, kpiRouter, logger)
@@ -292,14 +297,24 @@ func startPMExportOnly(
 	registry := asyncjob.NewRegistry(jobRepo, buildLockOwner(), logger)
 	asyncMetrics := asyncjob.NewMetrics(w.MetricsReg)
 	registry.SetMetrics(asyncMetrics)
+	exportRepo := pmexport.NewPgRepository(w.PgPool)
+	exportService := pmexport.NewService(exportRepo, jobRepo)
 	exportRunner := pmexport.NewRunner(pmexport.RunnerDeps{
-		Repo: pmexport.NewPgRepository(w.PgPool), Aggr: aggr,
+		Repo: exportRepo, Aggr: aggr,
 		MetricDB: w.TsPool, AdhocDB: w.TsPool, TaskMetaDB: w.PgPool,
 		Uploader: w.MinIO, Bucket: exportBucket, Logger: logger,
 		TimezoneProvider: exportTimezoneProvider(tz),
 	})
 	registry.Register(exportRunner)
 	go runJobTypeWorker(ctx, registry, exportRunner.JobType(), logger)
+	if recipientProtector, protectErr := notification.NewEnvRecipientProtector(); protectErr == nil {
+		startZedStatusSummaryWorker(ctx, notification.NewPgStatusSummaryRunRepository(w.PgPool), zedSummaryConfig, device.NewPgDeviceInfoRepository(w.PgPool), emailSender, recipientProtector, logger)
+		startRegularReportWorker(ctx, querytemplate.NewPgRepository(w.PgPool), exportService, exportRepo,
+			w.MinIO, exportBucket, emailSender, recipientProtector, tz, logger)
+	} else {
+		logger.Warn("KPI regular report worker disabled: recipient encryption key is unavailable",
+			zap.Error(protectErr))
+	}
 	sweeperInterval, zombieThreshold := loadAsyncJobThresholds(ctx, w.PgPool, logger)
 	sweeper := asyncjob.NewSweeper(jobRepo, sweeperInterval, zombieThreshold, logger)
 	sweeper.SetMetrics(asyncMetrics)

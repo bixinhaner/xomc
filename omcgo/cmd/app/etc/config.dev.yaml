@@ -291,7 +291,7 @@ notification:
     username: ""                # 留空 = 不做 SMTP AUTH
     password: ""
     from: "omc-alert@example.com"
-    starttls: false             # SMTP 支持 STARTTLS 时改 true
+    tls_mode: none              # none / starttls / implicit
     timeout: 10s
   alert_webhook:
     token: ""                   # 非空时校验 Authorization: Bearer <token>

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/response"
 )
 
 const (
@@ -136,7 +137,7 @@ func (w *EmailWorker) processClaimed(ctx context.Context, claimed DomainDelivery
 	if err != nil {
 		return w.recordLocalFailure(ctx, authorized, "template_error", err)
 	}
-	subject, body, err := renderEmailDelivery(content)
+	subject, body, err := renderEmailDelivery(ctx, content)
 	if err != nil {
 		return w.recordLocalFailure(ctx, authorized, "template_error", err)
 	}
@@ -248,43 +249,81 @@ func emailRetryDelay(deliveryID uuid.UUID, attemptNo int) time.Duration {
 	return delay + time.Duration(int64(delay)*int64(jitterPercent)/100)
 }
 
-func renderEmailDelivery(content EmailDeliveryContent) (string, string, error) {
+func renderEmailDelivery(ctx context.Context, content EmailDeliveryContent) (string, string, error) {
 	if content.Template.Channel != TemplateChannelEmail {
 		return "", "", fmt.Errorf("email delivery template channel is %q", content.Template.Channel)
 	}
-	values := emailTemplateValues(content.Payload)
-	values["event_count"] = strconv.Itoa(content.DigestEventCount)
-	values["window_started_at"] = timeValue(content.DigestWindowStartedAt)
-	values["window_ends_at"] = timeValue(content.DigestWindowEndsAt)
-	subject, err := renderStrictText("subject", content.Template.Subject, values)
-	if err != nil {
-		return "", "", fmt.Errorf("render email subject: %w", err)
+	values := emailTemplateValues(ctx, content.Payload)
+	zh := content.Template.Language != "en-US"
+	values["cleared_at"] = clearedTimeValue(ctx, content.Payload.Snapshot.ClearedAt, !zh)
+	labels := alarmEmailLabelsFor(zh)
+	lines := []string{
+		labels.AlarmName + ": " + values["alarm_name"],
+		labels.AlarmIdentifier + ": " + values["alarm_identifier"],
+		labels.Severity + ": " + values["severity"],
+		labels.NEType + ": " + values["device_type"],
+		labels.DeviceSN + ": " + values["device_sn"],
+		labels.Status + ": " + values["status"],
+		labels.RaisedAt + ": " + values["raised_at"],
+		labels.ClearedAt + ": " + values["cleared_at"],
+		labels.ProbableCause + ": " + values["probable_cause"],
+		labels.SpecificProblem + ": " + values["specific_problem"],
+		labels.HandlingSuggestion + ": " + values["handling_suggestion"],
 	}
-	body, err := renderStrictText("text_body", content.Template.TextBody, values)
-	if err != nil {
-		return "", "", fmt.Errorf("render email text body: %w", err)
+	if content.DigestEventCount > 0 {
+		lines = append([]string{
+			fmt.Sprintf("%s: %d", labels.EventCount, content.DigestEventCount),
+			labels.WindowStartedAt + ": " + timeValue(ctx, content.DigestWindowStartedAt),
+			labels.WindowEndsAt + ": " + timeValue(ctx, content.DigestWindowEndsAt),
+		}, lines...)
 	}
-	return subject, body, nil
+	return "Alarm Notification", strings.Join(lines, "\n"), nil
 }
 
-func emailTemplateValues(payload event.AlarmLifecyclePayload) map[string]string {
+type alarmEmailLabels struct {
+	AlarmName, AlarmIdentifier, Severity, NEType, DeviceSN, Status string
+	RaisedAt, ClearedAt, ProbableCause, SpecificProblem            string
+	HandlingSuggestion, EventCount, WindowStartedAt, WindowEndsAt  string
+}
+
+func alarmEmailLabelsFor(zh bool) alarmEmailLabels {
+	if !zh {
+		return alarmEmailLabels{
+			AlarmName: "Alarm Name", AlarmIdentifier: "Alarm Identifier", Severity: "Severity",
+			NEType: "Network Element Type", DeviceSN: "Device SN", Status: "Alarm Status",
+			RaisedAt: "Raised At", ClearedAt: "Cleared At", ProbableCause: "Probable Cause",
+			SpecificProblem: "Specific Problem", HandlingSuggestion: "Handling Suggestion",
+			EventCount: "Alarm Count", WindowStartedAt: "Window Start", WindowEndsAt: "Window End",
+		}
+	}
+	return alarmEmailLabels{
+		AlarmName: "告警名称", AlarmIdentifier: "告警标识", Severity: "告警级别",
+		NEType: "网元类型", DeviceSN: "设备 SN", Status: "告警状态",
+		RaisedAt: "产生时间", ClearedAt: "清除时间", ProbableCause: "可能原因",
+		SpecificProblem: "具体问题", HandlingSuggestion: "处理建议",
+		EventCount: "告警数量", WindowStartedAt: "统计开始时间", WindowEndsAt: "统计结束时间",
+	}
+}
+
+func emailTemplateValues(ctx context.Context, payload event.AlarmLifecyclePayload) map[string]string {
 	snapshot := payload.Snapshot
 	return map[string]string{
-		"alarm_name":       stringValue(snapshot.AlarmName),
-		"alarm_identifier": snapshot.AlarmIdentifier,
-		"severity":         emailSeverity(snapshot.Severity),
-		"device_sn":        snapshot.DeviceSN,
-		"device_id":        snapshot.DeviceID.String(),
-		"device_type":      stringValue(snapshot.NEType),
-		"carrier":          string(snapshot.Carrier),
-		"technology":       stringValue(snapshot.Technology),
-		"raised_at":        formatEmailTime(snapshot.RaisedAt),
-		"occurred_at":      formatEmailTime(payload.OccurredAt),
-		"cleared_at":       timeValue(snapshot.ClearedAt),
-		"probable_cause":   stringValue(snapshot.ProbableCause),
-		"specific_problem": stringValue(snapshot.SpecificProblem),
-		"omc_url":          "",
-		"status":           string(snapshot.Status),
+		"alarm_name":          stringValue(snapshot.AlarmName),
+		"alarm_identifier":    snapshot.AlarmIdentifier,
+		"severity":            emailSeverity(snapshot.Severity),
+		"device_sn":           snapshot.DeviceSN,
+		"device_id":           snapshot.DeviceID.String(),
+		"device_type":         stringValue(snapshot.NEType),
+		"carrier":             string(snapshot.Carrier),
+		"technology":          stringValue(snapshot.Technology),
+		"raised_at":           formatEmailTime(ctx, snapshot.RaisedAt),
+		"occurred_at":         formatEmailTime(ctx, payload.OccurredAt),
+		"cleared_at":          timeValue(ctx, snapshot.ClearedAt),
+		"probable_cause":      stringValue(snapshot.ProbableCause),
+		"specific_problem":    stringValue(snapshot.SpecificProblem),
+		"handling_suggestion": stringValue(snapshot.HandlingSuggestion),
+		"omc_url":             "",
+		"status":              string(snapshot.Status),
 	}
 }
 
@@ -299,7 +338,7 @@ func emailSeverity(severity model.AlarmSeverity) string {
 	case int(model.AlarmWarning), 31004:
 		return "warning"
 	default:
-		return strconv.Itoa(int(severity))
+		return fmt.Sprintf("%d", severity)
 	}
 }
 
@@ -310,16 +349,27 @@ func stringValue(value *string) string {
 	return *value
 }
 
-func timeValue(value *time.Time) string {
+func timeValue(ctx context.Context, value *time.Time) string {
 	if value == nil {
 		return ""
 	}
-	return formatEmailTime(*value)
+	return formatEmailTime(ctx, *value)
 }
 
-func formatEmailTime(value time.Time) string {
+func clearedTimeValue(ctx context.Context, value *time.Time, english bool) string {
+	if value == nil {
+		if english {
+			return "Not cleared"
+		}
+		return "未清除"
+	}
+	return formatEmailTime(ctx, *value)
+}
+
+func formatEmailTime(ctx context.Context, value time.Time) string {
 	if value.IsZero() {
 		return ""
 	}
-	return value.UTC().Format(time.RFC3339)
+	converted := response.TimeInCurrentLocation(ctx, value)
+	return converted.Format("2006-01-02 15:04:05 MST")
 }

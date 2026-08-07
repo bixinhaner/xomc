@@ -86,6 +86,7 @@ import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
 import { getEffectiveLdnsWithNrRecommendedDefault, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
 import { synchronizeUpdatedTemplateState } from './templateUpdateState';
 import QueryTemplateDetailModal from './QueryTemplateDetailModal';
+import RegularReportModal from './RegularReportModal';
 import { resolveTemplateMetricPaths } from './templateMetricResolver';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
 import {
@@ -179,6 +180,7 @@ export default function KPIQuery() {
 
   // ── 查询表单状态 ─────────────────────────────────────────────────
   const [payload, setPayload] = useState<QueryTemplatePayload>(restoredState.payload);
+  const [regularReportTemplate, setRegularReportTemplate] = useState<QueryTemplate | null>(null);
   const [customRange, setCustomRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(restoredState.customRange);
   // #595: 用户手动修改过时间范围后标记 dirty，粒度切换不再覆盖
   const [timeRangeDirty, setTimeRangeDirty] = useState(restoredState.timeRangeDirty);
@@ -710,6 +712,18 @@ export default function KPIQuery() {
               />
             </Tooltip>,
             ...(canEdit ? [
+                <Tooltip key="regular-report" title={t('perf.kpiQuery.regularReport.action')}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<ClockCircleOutlined />}
+                    aria-label={t('perf.kpiQuery.regularReport.action')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRegularReportTemplate(tpl);
+                    }}
+                  />
+                </Tooltip>,
                 <Tooltip key="edit" title={t('common.edit')}>
                   <Button
                     type="text"
@@ -1218,6 +1232,10 @@ export default function KPIQuery() {
           template={detailTemplate}
           metricLabels={metricLabels}
           onClose={() => setDetailTemplateId(undefined)}
+        />
+        <RegularReportModal
+          template={regularReportTemplate}
+          onClose={() => setRegularReportTemplate(null)}
         />
 
         <Modal

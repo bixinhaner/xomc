@@ -37,27 +37,12 @@ func (s *migrationLegacyRepositoryStub) ReplaceNotifyEmailWithBarrier(
 }
 
 type migrationRuleRepositoryStub struct {
-	rule        *NotificationRule
-	createInput RuleDraftInput
-	createActor string
-	err         error
+	rule *NotificationRule
+	err  error
 }
 
 func (s *migrationRuleRepositoryStub) Get(context.Context, uuid.UUID) (*NotificationRule, error) {
 	return s.rule, s.err
-}
-
-func (s *migrationRuleRepositoryStub) Create(
-	_ context.Context, input RuleDraftInput, actor string,
-) (*NotificationRule, error) {
-	s.createInput, s.createActor = input, actor
-	return s.rule, s.err
-}
-
-type migrationProtectorStub struct{}
-
-func (migrationProtectorStub) Protect(_ string, address string) ([]byte, int, []byte, error) {
-	return []byte("cipher:" + address), 1, []byte("fingerprint:" + address), nil
 }
 
 func TestMigrationPreviewReportsFirstMatchOverlapAndCompatibility(t *testing.T) {
@@ -79,7 +64,7 @@ func TestMigrationPreviewReportsFirstMatchOverlapAndCompatibility(t *testing.T) 
 			AlarmIdentifiers: []string{"CPU_HIGH"}, CreatedAt: now.Add(2 * time.Minute),
 		},
 	}}
-	service := NewMigrationService(repository, &migrationRuleRepositoryStub{}, migrationProtectorStub{})
+	service := NewMigrationService(repository, &migrationRuleRepositoryStub{})
 
 	previews, err := service.Preview(context.Background())
 
@@ -94,33 +79,6 @@ func TestMigrationPreviewReportsFirstMatchOverlapAndCompatibility(t *testing.T) 
 	require.Equal(t, []MigrationOverlapFinding{{
 		RuleID: overlapID, Name: "lower-ignore", Action: alarm.FilterActionIgnore, Priority: 20,
 	}}, preview.OverlapFindings)
-}
-
-func TestMigrationCreateCandidateIsDraftOnlyAndProtectsEachRecipient(t *testing.T) {
-	legacyID := uuid.New()
-	legacy := &migrationLegacyRepositoryStub{rules: []alarm.AlarmFilterRule{{
-		ID: legacyID, Name: "legacy-email", Action: alarm.FilterActionNotifyEmail, Priority: 0,
-		AlarmIdentifiers: []string{"DEVICE_OFFLINE"}, EmailRecipients: []string{"noc@example.com"},
-	}}}
-	created := &NotificationRule{ID: uuid.New(), CurrentEnabledVersionID: nil, Enabled: nil}
-	rules := &migrationRuleRepositoryStub{rule: created}
-	service := NewMigrationService(legacy, rules, migrationProtectorStub{})
-
-	result, err := service.CreateDisabledCandidate(context.Background(), legacyID, MigrationCandidateBinding{
-		ChannelConfigID: uuid.New(), RaisedTemplateVersionID: uuid.New(),
-	}, "operator")
-
-	require.NoError(t, err)
-	require.Same(t, created, result)
-	require.Equal(t, "operator", rules.createActor)
-	require.Equal(t, "legacy-email-"+legacyID.String(), rules.createInput.Name)
-	require.Equal(t, 1, rules.createInput.Priority)
-	require.Equal(t, migrationReason(legacyID), rules.createInput.ChangeReason)
-	require.Equal(t, []string{"DEVICE_OFFLINE"}, rules.createInput.MatchConditions.AlarmIdentifiers)
-	require.Len(t, rules.createInput.Recipients, 1)
-	require.Equal(t, []byte("cipher:noc@example.com"), rules.createInput.Recipients[0].AddressCiphertext)
-	require.Len(t, rules.createInput.Channels, 1)
-	require.Nil(t, result.CurrentEnabledVersionID)
 }
 
 func TestMigrationCutoverRequiresEveryGate(t *testing.T) {
@@ -149,7 +107,7 @@ func TestMigrationCutoverRequiresEveryGate(t *testing.T) {
 		CurrentEnabledVersionID: &versionID, Enabled: enabledVersion,
 	}
 	rules := &migrationRuleRepositoryStub{rule: candidate}
-	service := NewMigrationService(legacy, rules, migrationProtectorStub{})
+	service := NewMigrationService(legacy, rules)
 	valid := MigrationCutoverInput{
 		LegacyRuleID: legacyID, NotificationRuleID: notificationRuleID,
 		ExpectedLegacyUpdatedAt: updatedAt, ConfirmedOverlapRuleIDs: []uuid.UUID{overlapID},
@@ -206,7 +164,7 @@ func TestMigrationCutoverReplacesOnlyTheSelectedLegacyEmailRule(t *testing.T) {
 		ID: notificationRuleID, Name: "legacy-email-" + legacyID.String(), Priority: 1,
 		CurrentEnabledVersionID: &versionID, Enabled: enabledVersion,
 	}}
-	service := NewMigrationService(legacy, rules, migrationProtectorStub{})
+	service := NewMigrationService(legacy, rules)
 
 	err := service.Cutover(context.Background(), MigrationCutoverInput{
 		LegacyRuleID: legacyID, NotificationRuleID: notificationRuleID,

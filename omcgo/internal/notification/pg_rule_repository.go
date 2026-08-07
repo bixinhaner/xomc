@@ -71,6 +71,46 @@ func (r *PgRuleRepository) Get(ctx context.Context, id uuid.UUID) (*Notification
 	return rule, nil
 }
 
+// ListRuleRecipientTargets returns protected recipient material for the narrow
+// alarm-email settings adapter. Generic management responses continue to expose
+// only addressConfigured and never serialize ciphertext.
+func (r *PgRuleRepository) ListRuleRecipientTargets(ctx context.Context, versionID uuid.UUID) ([]RecipientTarget, error) {
+	query, args, err := storage.Psql.Select(
+		"target_type", "target_id", "address_ciphertext", "address_key_version", "recipient_fingerprint", "channel_limit",
+	).From("notification_rule_recipients").Where(sq.Eq{"rule_version_id": versionID}).OrderBy("created_at", "id").ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build notification rule recipient material list: %w", err)
+	}
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list notification rule recipient material: %w", err)
+	}
+	defer rows.Close()
+	items := make([]RecipientTarget, 0)
+	for rows.Next() {
+		var item RecipientTarget
+		var targetID *string
+		var keyVersion *int
+		if err := rows.Scan(
+			&item.TargetType, &targetID, &item.AddressCiphertext, &keyVersion,
+			&item.RecipientFingerprint, &item.ChannelLimit,
+		); err != nil {
+			return nil, fmt.Errorf("scan notification rule recipient material: %w", err)
+		}
+		if targetID != nil {
+			item.TargetID = *targetID
+		}
+		if keyVersion != nil {
+			item.AddressKeyVersion = *keyVersion
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate notification rule recipient material: %w", err)
+	}
+	return items, nil
+}
+
 func (r *PgRuleRepository) Create(ctx context.Context, input RuleDraftInput, actor string) (*NotificationRule, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -108,6 +148,113 @@ func (r *PgRuleRepository) Create(ctx context.Context, input RuleDraftInput, act
 		return nil, fmt.Errorf("commit notification rule create: %w", err)
 	}
 	return rule, nil
+}
+
+// SavePublished writes the alarm-email adapter's complete business state in a
+// single transaction. A nil id creates a rule; a non-nil id replaces its draft
+// with a newly published immutable version. The enabled pointer is updated in
+// the same revision as the version, preventing publish/enable half-success.
+func (r *PgRuleRepository) SavePublished(
+	ctx context.Context,
+	id uuid.UUID,
+	expectedRevision int64,
+	input RuleDraftInput,
+	enabled bool,
+	actor string,
+) (*NotificationRule, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin atomic published notification rule save: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	now, versionID := time.Now().UTC(), uuid.New()
+	creating := id == uuid.Nil
+	versionNo := int64(1)
+	if creating {
+		id = uuid.New()
+	} else {
+		rule, err := getNotificationRule(ctx, tx, id, true)
+		if err != nil {
+			return nil, err
+		}
+		if rule.Revision != expectedRevision {
+			return nil, ErrRevisionMismatch
+		}
+		if rule.Archived {
+			return nil, commonerrors.ErrInvalidInput
+		}
+		versionQuery, versionArgs, err := storage.Psql.Select("COALESCE(MAX(version_no), 0) + 1").
+			From("notification_rule_versions").Where(sq.Eq{"rule_id": id}).ToSql()
+		if err != nil {
+			return nil, fmt.Errorf("build next atomic notification rule version: %w", err)
+		}
+		if err := tx.QueryRow(ctx, versionQuery, versionArgs...).Scan(&versionNo); err != nil {
+			return nil, fmt.Errorf("read next atomic notification rule version: %w", err)
+		}
+	}
+
+	conditions, err := json.Marshal(input.MatchConditions)
+	if err != nil {
+		return nil, fmt.Errorf("marshal atomic notification rule conditions: %w", err)
+	}
+	var enabledVersionID any
+	if enabled {
+		enabledVersionID = versionID
+	}
+	// Keep the same insert order as Create: notification_rules first, followed
+	// by its version and bindings. All rows remain invisible until commit.
+	if creating {
+		query, args, err := storage.Psql.Insert("notification_rules").Columns(
+			"id", "name", "revision", "current_draft_version_id", "current_published_version_id",
+			"current_enabled_version_id", "priority", "archived", "created_by", "created_at", "updated_at",
+		).Values(
+			id, input.Name, 1, versionID, versionID, enabledVersionID,
+			input.Priority, false, actor, now, now,
+		).ToSql()
+		if err != nil {
+			return nil, fmt.Errorf("build atomic notification rule create: %w", err)
+		}
+		if _, err := tx.Exec(ctx, query, args...); err != nil {
+			return nil, mapRuleWriteError("create atomic published notification rule", err)
+		}
+	}
+
+	publishedAt := now
+	if err := insertNotificationRuleVersion(ctx, tx, NotificationRuleVersion{
+		ID: versionID, RuleID: id, VersionNo: versionNo, MatchConditions: input.MatchConditions,
+		Policy: input.Policy, CreatedBy: actor, ChangeReason: input.ChangeReason, CreatedAt: now,
+		PublishedAt: &publishedAt,
+	}, conditions); err != nil {
+		return nil, err
+	}
+	if err := insertRuleVersionBindings(ctx, tx, versionID, input, now); err != nil {
+		return nil, err
+	}
+	if err := validateRuleVersionBindings(ctx, tx, versionID, enabled); err != nil {
+		return nil, err
+	}
+
+	if !creating {
+		query, args, err := storage.Psql.Update("notification_rules").
+			Set("name", input.Name).
+			Set("priority", input.Priority).
+			Set("current_draft_version_id", versionID).
+			Set("current_published_version_id", versionID).
+			Set("current_enabled_version_id", enabledVersionID).
+			Set("revision", expectedRevision+1).
+			Set("updated_at", now).
+			Where(sq.Eq{"id": id, "revision": expectedRevision}).ToSql()
+		if err != nil {
+			return nil, fmt.Errorf("build atomic notification rule update: %w", err)
+		}
+		if tag, execErr := tx.Exec(ctx, query, args...); execErr != nil {
+			return nil, fmt.Errorf("update atomic published notification rule: %w", execErr)
+		} else if tag.RowsAffected() != 1 {
+			return nil, ErrRevisionMismatch
+		}
+	}
+	return commitAndReadRule(ctx, tx, id, "atomic published notification rule save")
 }
 
 func (r *PgRuleRepository) UpdateDraft(
@@ -265,6 +412,37 @@ func (r *PgRuleRepository) Enable(ctx context.Context, id uuid.UUID, expectedRev
 		return nil, ErrRevisionMismatch
 	}
 	return commitAndReadRule(ctx, tx, id, "notification rule enable")
+}
+
+func (r *PgRuleRepository) Disable(ctx context.Context, id uuid.UUID, expectedRevision int64) (*NotificationRule, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin notification rule disable: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rule, err := getNotificationRule(ctx, tx, id, true)
+	if err != nil {
+		return nil, err
+	}
+	if rule.Revision != expectedRevision {
+		return nil, ErrRevisionMismatch
+	}
+	if rule.Archived {
+		return nil, commonerrors.ErrInvalidInput
+	}
+	now := time.Now().UTC()
+	query, args, err := storage.Psql.Update("notification_rules").
+		Set("current_enabled_version_id", nil).Set("revision", expectedRevision+1).Set("updated_at", now).
+		Where(sq.Eq{"id": id, "revision": expectedRevision}).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build notification rule disable: %w", err)
+	}
+	if tag, execErr := tx.Exec(ctx, query, args...); execErr != nil {
+		return nil, fmt.Errorf("disable notification rule: %w", execErr)
+	} else if tag.RowsAffected() != 1 {
+		return nil, ErrRevisionMismatch
+	}
+	return commitAndReadRule(ctx, tx, id, "notification rule disable")
 }
 
 func (r *PgRuleRepository) Archive(ctx context.Context, id uuid.UUID, expectedRevision int64) (*NotificationRule, error) {

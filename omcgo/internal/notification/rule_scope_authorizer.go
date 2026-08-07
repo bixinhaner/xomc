@@ -29,10 +29,8 @@ func (a *RuleScopeAuthorizer) Authorize(ctx context.Context, userID uuid.UUID, s
 	if a == nil || a.permissions == nil || a.deviceGroups == nil || userID == uuid.Nil {
 		return ErrRuleScopeDenied
 	}
-	// 当前 canonical 告警事件没有设备组快照。为避免把“空设备条件”误解为
-	// 操作人可管理的全网范围，非超管必须显式给出设备 ID；后续若加入 group 条件，
-	// 应继续通过同一 visibility grant 校验，而不是用 carrier 代替授权边界。
-	if len(input.MatchConditions.DeviceIDs) == 0 {
+	// 非超管必须显式限定设备或设备组，不能把空范围解释为全网。
+	if len(input.MatchConditions.DeviceIDs) == 0 && len(input.MatchConditions.DeviceGroupIDs) == 0 {
 		return ErrRuleScopeDenied
 	}
 	grants, err := a.permissions.GetUserVisibleDeviceGrants(ctx, userID, false)
@@ -45,6 +43,11 @@ func (a *RuleScopeAuthorizer) Authorize(ctx context.Context, userID uuid.UUID, s
 			return fmt.Errorf("authorize notification rule device groups: %w", err)
 		}
 		if !grantsCoverRuleDevice(grants, groups, input.MatchConditions.Technologies) {
+			return ErrRuleScopeDenied
+		}
+	}
+	for _, groupID := range input.MatchConditions.DeviceGroupIDs {
+		if !grantsCoverRuleDevice(grants, []uuid.UUID{groupID}, input.MatchConditions.Technologies) {
 			return ErrRuleScopeDenied
 		}
 	}

@@ -672,22 +672,13 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		md.traceHandler.RegisterRoutes(permGroup("devices"))
 	}
 
-	// ----- W2.A.4 / T-0043: Notification template + history → resource "alarms" -----
-	// 路径前缀 /notifications，handler 内部挂 /templates 和 /history 子路由：
-	//   final paths: /api/v1/notifications/templates[...] + /api/v1/notifications/history[...]
-	notifGroup := permGroup("alarms").Group("/notifications")
-	md.notifTemplateHandler.RegisterReadOnlyRoutes(notifGroup)
-	md.notifHistoryHandler.RegisterRoutes(notifGroup)
-	// 通知中心管理面使用根级版本化 API。所有写操作同时经过 endpoint RBAC、
-	// audit_logs 与 sys_oper_logs；handler 额外执行 If-Match 并发前置条件。
-	if md.notifRuleHandler != nil {
-		md.notifRuleHandler.RegisterRoutes(permGroup("alarms"))
+	// 告警邮件只暴露与老 OMC 业务一致的专用配置接口；通用规则、联系人组和
+	// 可编辑模板仅保留为内部可靠性模型，不作为产品管理面开放。
+	if md.alarmEmailSettingsHandler != nil {
+		md.alarmEmailSettingsHandler.RegisterRoutes(permGroup("alarms"))
 	}
-	if md.notifContactGroupHandler != nil {
-		md.notifContactGroupHandler.RegisterRoutes(permGroup("alarms"))
-	}
-	if md.notifManagedTemplateHandler != nil {
-		md.notifManagedTemplateHandler.RegisterRoutes(permGroup("alarms"))
+	if md.statusSummaryConfigHandler != nil {
+		md.statusSummaryConfigHandler.RegisterRoutes(permGroup("alarms"))
 	}
 	if md.notifChannelHandler != nil {
 		md.notifChannelHandler.RegisterRoutes(permGroup("alarms"))

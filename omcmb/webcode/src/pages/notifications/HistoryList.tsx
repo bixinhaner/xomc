@@ -1,181 +1,104 @@
-import { useState, useMemo } from 'react';
-import { Button, Tag, Space } from 'antd';
+import { useMemo, useState } from 'react';
+import { Alert, Button, Space, Tag, Typography } from 'antd';
 import { EyeOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useNotificationHistory } from '@core/hooks/api/useNotifications';
+import { useNotificationDeliveries } from '@core/hooks/api/useNotifications';
 import type {
-  NotificationHistory,
-  NotificationChannel,
-  NotificationHistoryStatus,
+  NotificationDelivery,
+  NotificationDeliveryFlowState,
 } from '@core/types/notification';
+import { formatSystemTime } from '@core/utils/systemTime';
 import { useT } from '@/hooks/useT';
 import HistoryDetail from './HistoryDetail';
-import { formatSystemTime } from '@core/utils/systemTime';
-
-const channelColorMap: Record<NotificationChannel, string> = {
-  email: 'blue',
-  sms: 'green',
-  webhook: 'purple',
-};
-
-const statusColorMap: Record<NotificationHistoryStatus, string> = {
-  pending: 'orange',
-  sent: 'green',
-  failed: 'red',
-  dead_letter: 'volcano',
-};
 
 export default function HistoryList() {
   const t = useT();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [detail, setDetail] = useState<NotificationHistory | null>(null);
-
-  const { data, isLoading, refetch } = useNotificationHistory({
-    channel: filters.channel as NotificationChannel | undefined,
-    status: filters.status as NotificationHistoryStatus | undefined,
-    page,
-    pageSize,
+  const pageSize = 20;
+  const [detail, setDetail] = useState<NotificationDelivery | null>(null);
+  const deliveries = useNotificationDeliveries({
+    channel: 'email',
+    flowState: filters.flowState as NotificationDeliveryFlowState | undefined,
+    limit: pageSize + 1,
+    offset: (page - 1) * pageSize,
   });
 
-  const statusLabelMap: Record<NotificationHistoryStatus, string> = useMemo(
-    () => ({
-      pending: t('notification.status.pending'),
-      sent: t('notification.status.sent'),
-      failed: t('notification.status.failed'),
-      dead_letter: t('notification.status.dead_letter'),
-    }),
-    [t]
-  );
+  const filterFields = useMemo<FilterField[]>(() => [
+    {
+      name: 'flowState',
+      label: t('notification.history.flowState'),
+      type: 'select',
+      options: ['queued', 'sending', 'retry_wait', 'awaiting_receipt', 'completed', 'dead_letter', 'suppressed', 'cancelled']
+        .map((value) => ({ label: t(`notification.delivery.flow.${value}`), value })),
+    },
+  ], [t]);
 
-  const filterFields: FilterField[] = useMemo(
-    () => [
-      {
-        name: 'channel',
-        label: t('notification.template.channel'),
-        type: 'select',
-        options: [
-          { label: t('notification.channel.email'), value: 'email' },
-          { label: t('notification.channel.sms'), value: 'sms' },
-          { label: t('notification.channel.webhook'), value: 'webhook' },
-        ],
-      },
-      {
-        name: 'status',
-        label: t('notification.history.status'),
-        type: 'select',
-        options: [
-          { label: t('notification.status.pending'), value: 'pending' },
-          { label: t('notification.status.sent'), value: 'sent' },
-          { label: t('notification.status.failed'), value: 'failed' },
-          { label: t('notification.status.dead_letter'), value: 'dead_letter' },
-        ],
-      },
-    ],
-    [t]
-  );
+  const columns = useMemo<DataTableColumn<NotificationDelivery>[]>(() => [
+    {
+      key: 'createdAt',
+      title: t('notification.history.createdAt'),
+      dataIndex: 'createdAt',
+      width: 180,
+      render: (value) => value ? formatSystemTime(String(value)) : '-',
+    },
+    { key: 'deviceSn', title: t('notification.history.device'), dataIndex: 'deviceSn', width: 160 },
+    {
+      key: 'channel',
+      title: t('notification.history.channel'),
+      dataIndex: 'channel',
+      width: 120,
+      render: (value) => <Tag>{String(value)}</Tag>,
+    },
+    { key: 'dispatchKind', title: t('notification.history.dispatchKind'), dataIndex: 'dispatchKind', width: 120 },
+    { key: 'maskedAddress', title: t('notification.history.recipient'), dataIndex: 'maskedAddress', width: 180 },
+    {
+      key: 'flowState',
+      title: t('notification.history.flowState'),
+      dataIndex: 'flowState',
+      width: 140,
+      render: (value) => <Tag>{t(`notification.delivery.flow.${String(value)}`)}</Tag>,
+    },
+    {
+      key: 'deliveryResult',
+      title: t('notification.history.deliveryResult'),
+      dataIndex: 'deliveryResult',
+      width: 130,
+      render: (value) => <Tag>{t(`notification.delivery.result.${String(value)}`)}</Tag>,
+    },
+    {
+      key: 'actions',
+      title: t('common.operation'),
+      width: 100,
+      fixed: 'right',
+      render: (_, record) => (
+        <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => setDetail(record)}>
+          {t('common.detail')}
+        </Button>
+      ),
+    },
+  ], [t]);
 
-  const columns: DataTableColumn<NotificationHistory & Record<string, unknown>>[] =
-    useMemo(
-      () => [
-        {
-          key: 'createdAt',
-          title: t('notification.history.createdAt'),
-          dataIndex: 'createdAt',
-          width: 170,
-          render: (val) =>
-            val ? formatSystemTime(String(val)) : '-',
-        },
-        {
-          key: 'channel',
-          title: t('notification.template.channel'),
-          dataIndex: 'channel',
-          width: 100,
-          render: (val) => {
-            const ch = val as NotificationChannel;
-            return <Tag color={channelColorMap[ch]}>{ch}</Tag>;
-          },
-        },
-        {
-          key: 'status',
-          title: t('notification.history.status'),
-          dataIndex: 'status',
-          width: 110,
-          render: (val) => {
-            const s = val as NotificationHistoryStatus;
-            return <Tag color={statusColorMap[s]}>{statusLabelMap[s]}</Tag>;
-          },
-        },
-        {
-          key: 'subject',
-          title: t('notification.history.subject'),
-          dataIndex: 'subject',
-          width: 240,
-          ellipsis: true,
-        },
-        {
-          key: 'recipients',
-          title: t('notification.history.recipients'),
-          dataIndex: 'recipients',
-          width: 240,
-          ellipsis: true,
-          render: (val) => {
-            const list = (val as string[]) ?? [];
-            if (list.length === 0) return '-';
-            return list.join(', ');
-          },
-        },
-        {
-          key: 'retryCount',
-          title: t('notification.history.retryCount'),
-          dataIndex: 'retryCount',
-          width: 90,
-        },
-        {
-          key: 'sentAt',
-          title: t('notification.history.sentAt'),
-          dataIndex: 'sentAt',
-          width: 170,
-          render: (val) =>
-            val ? formatSystemTime(String(val)) : '-',
-        },
-        {
-          key: 'actions',
-          title: t('common.operation'),
-          dataIndex: 'id',
-          width: 100,
-          fixed: 'right',
-          render: (_, record) => {
-            const h = record as NotificationHistory;
-            return (
-              <Space size={4}>
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<EyeOutlined />}
-                  onClick={() => setDetail(h)}
-                >
-                  {t('common.detail')}
-                </Button>
-              </Space>
-            );
-          },
-        },
-      ],
-      [t, statusLabelMap]
-    );
+  const fetchedItems = deliveries.data ?? [];
+  const pageItems = fetchedItems.slice(0, pageSize);
+  const hasNextPage = fetchedItems.length > pageSize;
 
   return (
-    <div>
+    <>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        title={t('notification.history.perRecipientHint')}
+      />
       <FilterBar
-        filterId="notification-history-filter"
+        filterId="notification-delivery-filter"
         fields={filterFields}
-        onSearch={(vals) => {
-          setFilters(vals);
+        onSearch={(values) => {
+          setFilters(values);
           setPage(1);
         }}
         onReset={() => {
@@ -184,29 +107,27 @@ export default function HistoryList() {
         }}
       />
       <DataTable
-        tableId="notification-history"
+        tableId="notification-deliveries"
         columns={columns}
-        dataSource={
-          (data?.items ?? []) as (NotificationHistory & Record<string, unknown>)[]
-        }
-        loading={isLoading}
+        dataSource={pageItems}
+        loading={deliveries.isLoading}
         rowKey="id"
-        total={data?.total ?? 0}
-        pageSize={pageSize}
-        currentPage={page}
-        onPageChange={(p, s) => {
-          setPage(p);
-          setPageSize(s);
-        }}
-        onRefresh={() => void refetch()}
-        scroll={{ x: 1200 }}
+        showPagination={false}
+        onRefresh={() => void deliveries.refetch()}
+        scroll={{ x: 1250 }}
       />
-
-      <HistoryDetail
-        open={detail !== null}
-        history={detail}
-        onClose={() => setDetail(null)}
-      />
-    </div>
+      <Space style={{ justifyContent: 'flex-end', width: '100%', marginTop: 12 }}>
+        <Typography.Text type="secondary">
+          {t('notification.history.page', { page })}
+        </Typography.Text>
+        <Button disabled={page === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
+          {t('notification.history.previousPage')}
+        </Button>
+        <Button disabled={!hasNextPage} onClick={() => setPage((value) => value + 1)}>
+          {t('notification.history.nextPage')}
+        </Button>
+      </Space>
+      <HistoryDetail open={Boolean(detail)} delivery={detail} onClose={() => setDetail(null)} />
+    </>
   );
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/stretchr/testify/require"
 )
 
@@ -144,6 +145,7 @@ func TestHistoryProjectorSubscribeUsesFixedDurableAndStartSequence(t *testing.T)
 	require.Equal(t, AlarmHistoryProjectorDurable, bus.config.Durable)
 	require.Equal(t, uint64(417), bus.config.StartSequence)
 	require.Equal(t, 1, bus.config.Concurrency, "one TSDB writer is sufficient until measured otherwise")
+	require.Equal(t, -1, bus.config.MaxDeliver, "cleared alarm history must survive an extended TSDB outage")
 	require.NotNil(t, bus.key)
 	require.NotNil(t, bus.handler)
 
@@ -151,6 +153,9 @@ func TestHistoryProjectorSubscribeUsesFixedDurableAndStartSequence(t *testing.T)
 	key, err := bus.key(envelope)
 	require.NoError(t, err)
 	require.Equal(t, historyProjectorPayload(t, 1).OccurrenceID.String(), key)
+
+	_, err = bus.key(event.Event{Payload: []byte("{")})
+	require.ErrorIs(t, err, reliability.ErrPermanent, "an invalid event must not poison the unlimited durable")
 }
 
 func TestHistoryProjectorReadinessRequiresAvailableCaughtUpDurable(t *testing.T) {

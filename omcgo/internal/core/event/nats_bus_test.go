@@ -820,6 +820,26 @@ func TestUpdatedQueueConsumerConfigOverwritesMutableTuning(t *testing.T) {
 	assert.Equal(t, desired.MaxAckPending, got.MaxAckPending)
 }
 
+func TestUpdatedQueueConsumerConfigAllowsUnlimitedMaxDeliver(t *testing.T) {
+	desired := QueueTuning{AckWait: 30 * time.Second, MaxDeliver: -1, MaxAckPending: 64}
+	existing := &nats.ConsumerInfo{
+		Name: "alarm-history-projector-v1",
+		Config: nats.ConsumerConfig{
+			AckWait: 30 * time.Second, MaxDeliver: 5, MaxAckPending: 64,
+		},
+	}
+
+	got, changed := updatedQueueConsumerConfig(existing, desired)
+
+	require.True(t, changed)
+	assert.Equal(t, -1, got.MaxDeliver)
+}
+
+func TestKeyedDeliveryExhaustedHonorsUnlimited(t *testing.T) {
+	assert.True(t, keyedDeliveryExhausted(5, 5))
+	assert.False(t, keyedDeliveryExhausted(500, -1))
+}
+
 func TestReconcilePullTuningWithExisting_NilKeepsDesired(t *testing.T) {
 	desired := PullTuning{BatchSize: 64, Concurrency: 64, AckWait: 2 * time.Minute, MaxAckPending: 512}
 

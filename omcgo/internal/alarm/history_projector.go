@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/reliability"
 )
 
 const AlarmHistoryProjectorDurable = "alarm-history-projector-v1"
@@ -101,12 +102,12 @@ func (p *HistoryProjector) Subscribe() error {
 		event.SubjectDomainAlarmLifecycleCleared,
 		event.KeyedQueueConfig{
 			Durable: AlarmHistoryProjectorDurable, StartSequence: p.startSequence,
-			Concurrency: 1, QueueDepth: 64, MaxAckPending: 64,
+			Concurrency: 1, QueueDepth: 64, MaxDeliver: -1, MaxAckPending: 64,
 		},
 		func(envelope event.Event) (string, error) {
 			payload, err := decodeHistoryProjectionPayload(envelope)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("reject invalid alarm history event: %w: %w", err, reliability.ErrPermanent)
 			}
 			return payload.OccurrenceID.String(), nil
 		},

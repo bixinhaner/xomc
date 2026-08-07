@@ -424,7 +424,8 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 		Enabled: cfg.Notification.SMTP.Enabled, Host: cfg.Notification.SMTP.Host,
 		Port: cfg.Notification.SMTP.Port, Username: cfg.Notification.SMTP.Username,
 		Password: cfg.Notification.SMTP.Password, From: cfg.Notification.SMTP.From,
-		StartTLS: cfg.Notification.SMTP.StartTLS, Timeout: cfg.Notification.SMTP.Timeout,
+		TLSMode: cfg.Notification.SMTP.TLSMode, StartTLS: cfg.Notification.SMTP.StartTLS,
+		Timeout: cfg.Notification.SMTP.Timeout,
 	}, logger)
 	emailDispatcher := alarm.NewSharedEmailDispatcher(emailSender, logger.Named("email"), emailMetrics)
 	filterEngine.SetEmailDispatcher(emailDispatcher)
@@ -804,7 +805,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	// #458：cron 随 pipeCtx 取消统一停；后台轮询 sys_configs 感知改时区后即时重排（不重启）。
 	pmTz.shutdownOnCtx(pipeCtx)
 	pmTz.startReloadPoller(pipeCtx, defaultReloadPollInterval)
-	startPMAggregatorPipeline(pipeCtx, w, pmKPIRouter, pmTz, exportBucket)
+	startPMAggregatorPipeline(pipeCtx, w, pmKPIRouter, pmTz, exportBucket, emailSender, notification.NewPgStatusSummaryConfigRepository(w.PgPool))
 	startPMAggregationStream(pipeCtx, w, pmTz)
 	startRawObjectCleanup(pipeCtx, w, cfg)
 

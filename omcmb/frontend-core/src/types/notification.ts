@@ -1,99 +1,136 @@
-/**
- * Notification module types — 通知模板与历史记录
- *
- * 与后端 internal/notification 模块对齐：
- *  - NotificationTemplate / NotificationHistory 为前端域模型（camelCase）
- *  - Axios 响应不做 body 转换，因此 service 层提供 mapBackend* 进行 snake_case → camelCase 映射
- */
+export type NotificationChannel = 'email' | 'sms_kafka' | 'sms_direct';
 
-export type NotificationChannel = 'email' | 'sms' | 'webhook';
-export type NotificationLanguage = 'zh-CN' | 'en-US';
-export type NotificationHistoryStatus =
-  | 'pending'
-  | 'sent'
-  | 'failed'
-  | 'dead_letter';
-
-// ---------------------------------------------------------------------------
-// 通知模板
-// ---------------------------------------------------------------------------
-
-export interface NotificationTemplate {
+export interface AlarmEmailSetting {
   id: string;
   name: string;
-  channel: NotificationChannel;
-  language: NotificationLanguage;
-  subject: string;
-  body: string;
-  variables: string[];
+  revision: number;
   enabled: boolean;
+  alarmIdentifiers: string[];
+  severities: number[];
+  deviceIds: string[];
+  deviceGroupIds: string[];
+  technologies: string[];
+  intervalMinutes: 0 | 10 | 30 | 60;
+  toleranceDurationMinutes: 0 | 10 | 30 | 60;
+  recipients: string[];
+  includeDefaultRecipients: boolean;
+  updatedAt: string;
+}
+
+export type AlarmEmailSettingPayload = Omit<AlarmEmailSetting, 'id' | 'revision' | 'updatedAt'>;
+
+export interface AlarmEmailDefaults {
+  recipients: string[];
+  revision: number;
+  updatedAt: string;
+}
+
+export interface StatusSummaryConfig {
+  id: string;
+  enabled: boolean;
+  sendTime: string;
+  timeZone: string;
+  recipients: string[];
+  revision: number;
+  updatedAt: string;
+}
+
+export interface StatusSummaryConfigPayload {
+  enabled: boolean;
+  sendTime: string;
+  timeZone: string;
+  recipients: string[];
+}
+
+export interface NotificationChannelConfig {
+  id: string;
+  channel: NotificationChannel;
+  name: string;
+  enabled: boolean;
+  parameters: Record<string, unknown>;
+  secretConfigured: boolean;
+  revision: number;
+  createdBy: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface NotificationTemplateListParams {
-  channel?: NotificationChannel;
-  language?: NotificationLanguage;
-  enabled?: boolean;
-  page?: number;
-  pageSize?: number;
+export interface NotificationChannelHealth {
+  channelConfigId: string;
+  circuitState: 'closed' | 'open' | 'half_open';
+  consecutiveSuccesses: number;
+  consecutiveFailures: number;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  lastVerifiedAt?: string;
+  lastErrorCategory?: string;
+  lastErrorSummary?: string;
+  circuitOpenedAt?: string;
+  nextProbeAt?: string;
+  updatedAt: string;
 }
 
-export interface NotificationTemplateCreatePayload {
-  name: string;
-  channel: NotificationChannel;
-  language: NotificationLanguage;
-  subject: string;
-  body: string;
-  variables?: string[];
-  enabled?: boolean;
-}
+export type NotificationDeliveryFlowState =
+  | 'queued'
+  | 'sending'
+  | 'retry_wait'
+  | 'awaiting_receipt'
+  | 'completed'
+  | 'dead_letter'
+  | 'suppressed'
+  | 'cancelled';
 
-export type NotificationTemplateUpdatePayload =
-  Partial<NotificationTemplateCreatePayload>;
+export type NotificationDeliveryResult =
+  | 'none'
+  | 'accepted'
+  | 'delivered'
+  | 'failed'
+  | 'unknown'
+  | 'handoff_only';
 
-// ---------------------------------------------------------------------------
-// 通知历史
-// ---------------------------------------------------------------------------
-
-export interface NotificationHistory {
+export interface NotificationDelivery {
   id: string;
-  templateId?: string;
+  eventId: string;
+  occurrenceId: string;
+  deviceId: string;
+  deviceSn: string;
+  technology: string;
+  severity: number;
+  alarmStatus: string;
+  ruleVersionId: string;
+  templateVersionId: string;
   channel: NotificationChannel;
-  recipients: string[];
-  subject: string;
-  body: string;
-  status: NotificationHistoryStatus;
-  errorMessage?: string;
-  alarmId?: string;
-  retryCount: number;
-  sentAt?: string;
+  dispatchKind: string;
+  sequenceNo: number;
+  recipientType: string;
+  maskedAddress: string;
+  flowState: NotificationDeliveryFlowState;
+  deliveryResult: NotificationDeliveryResult;
+  suppressionReason?: string;
+  maintenanceWindowId?: string;
+  failureReason?: string;
+  originDeliveryId?: string;
   createdAt: string;
+  updatedAt: string;
 }
 
-export interface NotificationHistoryListParams {
+export interface NotificationDeliveryAttempt {
+  id: string;
+  deliveryId: string;
+  attemptNo: number;
+  startedAt: string;
+  finishedAt?: string;
+  result: string;
+  errorCategory?: string;
+  statusSummary?: string;
+  providerRequestId?: string;
+  nextRetryAt?: string;
+}
+
+export interface NotificationDeliveryListParams {
+  occurrenceId?: string;
   channel?: NotificationChannel;
-  status?: NotificationHistoryStatus;
-  templateId?: string;
-  alarmId?: string;
-  page?: number;
-  pageSize?: number;
-}
-
-// ---------------------------------------------------------------------------
-// 列表分页响应（与 PageResponse<T> 一致，但单独导出便于直接消费）
-// ---------------------------------------------------------------------------
-
-export interface NotificationTemplateListResponse {
-  items: NotificationTemplate[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export interface NotificationHistoryListResponse {
-  items: NotificationHistory[];
-  total: number;
-  page: number;
-  pageSize: number;
+  flowState?: NotificationDeliveryFlowState;
+  limit?: number;
+  offset?: number;
 }

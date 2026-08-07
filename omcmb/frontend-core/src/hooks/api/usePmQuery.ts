@@ -16,6 +16,7 @@ import type {
   CreateTemplateInput,
   QueryTemplate,
   UpdateTemplateInput,
+  QueryTemplateRegularReportInput,
 } from '../../types/pmQuery';
 import type { AggregatedQueryMeta, AggregatedQueryParams, AggregatedQueryResult, AggregatedRow } from '../../types/pmDashboard';
 import type { MetricObject } from '../../types/pmObject';
@@ -77,6 +78,23 @@ export function useDeleteQueryTemplate() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: [...KEY, 'list'] });
     },
+  });
+}
+
+export function useQueryTemplateRegularReport(id?: string) {
+  return useQuery({
+    queryKey: [...KEY, 'regular-report', id],
+    queryFn: () => pmQueryApi.getRegularReport(id!),
+    enabled: Boolean(id),
+  });
+}
+
+export function useUpdateQueryTemplateRegularReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, revision, input }: { id: string; revision: number; input: QueryTemplateRegularReportInput }) =>
+      pmQueryApi.updateRegularReport(id, revision, input),
+    onSuccess: (report) => qc.setQueryData([...KEY, 'regular-report', report.templateId], report),
   });
 }
 

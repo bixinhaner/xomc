@@ -30,6 +30,11 @@ func TestDomainSchemaTables(t *testing.T) {
 		"notification_deliveries",
 		"notification_delivery_attempts",
 		"notification_aggregation_buckets",
+		"notification_status_summary_configs",
+		"notification_status_summary_config_recipients",
+		"notification_status_summary_runs",
+		"notification_status_summary_recipients",
+		"notification_status_summary_recipient_attempts",
 	} {
 		require.NotEmpty(t, extractNotificationTableBody(t, schema, table))
 	}
@@ -56,6 +61,8 @@ func TestDomainSchemaIdentityAndEncryptionGuards(t *testing.T) {
 		"notification_rule_recipients",
 		"notification_contact_group_members",
 		"notification_deliveries",
+		"notification_status_summary_config_recipients",
+		"notification_status_summary_recipients",
 	} {
 		body := extractNotificationTableBody(t, schema, table)
 		require.Regexp(t, `(?i)address_ciphertext\s+bytea`, body, table)
@@ -101,22 +108,24 @@ func TestDomainSchemaIdempotencyAndClaimGuards(t *testing.T) {
 	}
 }
 
-func TestNotificationManagementEndpointsAreRegisteredBeforeBaselineRoleGrants(t *testing.T) {
+func TestExposedEmailNotificationEndpointsAreRegisteredBeforeBaselineRoleGrants(t *testing.T) {
 	seed := readNotificationSeedBaseline(t)
 	grantMarker := "-- admin：沿用内置角色兼容基线，补齐全部已登记 API。"
 	grantIndex := strings.Index(seed, grantMarker)
 	require.Greater(t, grantIndex, 0, "baseline role grant marker must exist")
-	require.Equal(t, 27, strings.Count(seed[:grantIndex], "50000000-0004-0000-0000-"),
-		"all notification management route and method pairs must be registered")
+	require.Equal(t, 20, strings.Count(seed[:grantIndex], "50000000-0004-0000-0000-"),
+		"all exposed alarm-email, Zed summary, KPI report, channel health and delivery route pairs must be registered")
 
 	for _, endpoint := range []string{
-		"/api/v1/notification-rules",
-		"/api/v1/notification-contact-groups",
-		"/api/v1/notification-templates",
+		"/api/v1/alarm-email-settings",
+		"/api/v1/alarm-email-settings/default-recipients",
+		"/api/v1/alarm-email-settings/:id",
+		"/api/v1/pm/query-templates/:id/regular-report",
 		"/api/v1/notification-channels",
 		"/api/v1/notification-deliveries",
 		"/api/v1/notification-deliveries/:id/attempts",
 		"/api/v1/notification-deliveries/:id/retry",
+		"/api/v1/notification/status-summary-settings",
 	} {
 		endpointIndex := strings.Index(seed, endpoint)
 		require.Greater(t, endpointIndex, 0, endpoint)

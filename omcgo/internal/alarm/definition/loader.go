@@ -266,7 +266,7 @@ func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType, loadedFrom string
 		ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert("alarm_definitions").Columns(
 			"identifier", "ne_type", "cn_name", "en_name",
 			"severity_id", "event_type",
-			"cn_probable_cause", "en_probable_cause", "is_show",
+			"cn_probable_cause", "en_probable_cause", "cn_suggestion", "en_suggestion", "is_show",
 			"loaded_from",
 		)
 		for _, a := range pending {
@@ -286,6 +286,7 @@ func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType, loadedFrom string
 				nullIfEmpty(a.CnName), nullIfEmpty(a.EnName),
 				sevID, eventType,
 				nullIfEmpty(a.CnProbableCause), nullIfEmpty(a.EnProbableCause),
+				nullIfEmpty(a.CnSuggestion), nullIfEmpty(a.EnSuggestion),
 				isShow,
 				nullIfEmpty(loadedFrom),
 			)
@@ -299,6 +300,8 @@ func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType, loadedFrom string
 		    event_type        = EXCLUDED.event_type,
 		    cn_probable_cause = EXCLUDED.cn_probable_cause,
 		    en_probable_cause = EXCLUDED.en_probable_cause,
+		    cn_suggestion     = EXCLUDED.cn_suggestion,
+		    en_suggestion     = EXCLUDED.en_suggestion,
 		    is_show           = EXCLUDED.is_show,
 		    loaded_from       = EXCLUDED.loaded_from`)
 		sqlStr, args, err := ib.ToSql()

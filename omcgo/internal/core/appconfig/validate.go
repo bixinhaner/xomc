@@ -2,6 +2,7 @@ package appconfig
 
 import (
 	"fmt"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -332,6 +333,41 @@ func (c NotificationConfig) validate() error {
 		}
 		if c.SMTP.From == "" {
 			return fmt.Errorf("notification.smtp.from must not be empty when smtp.enabled=true")
+		}
+		if c.SMTP.TLSMode != "" && c.SMTP.TLSMode != "none" && c.SMTP.TLSMode != "starttls" && c.SMTP.TLSMode != "implicit" {
+			return fmt.Errorf("notification.smtp.tls_mode must be none, starttls or implicit, got %q", c.SMTP.TLSMode)
+		}
+	}
+	if err := c.ZedSummary.validate(c.SMTP.Enabled); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c ZedSummaryConfig) validate(smtpEnabled bool) error {
+	if !c.Enabled {
+		return nil
+	}
+	if !smtpEnabled {
+		return fmt.Errorf("notification.zed_summary requires notification.smtp.enabled=true")
+	}
+	if _, err := time.Parse("15:04", strings.TrimSpace(c.SendTime)); err != nil {
+		return fmt.Errorf("notification.zed_summary.send_time must use HH:MM: %w", err)
+	}
+	if strings.TrimSpace(c.TimeZone) == "" {
+		return fmt.Errorf("notification.zed_summary.time_zone must not be empty")
+	}
+	if _, err := time.LoadLocation(c.TimeZone); err != nil {
+		return fmt.Errorf("notification.zed_summary.time_zone is invalid: %w", err)
+	}
+	if len(c.Recipients) == 0 {
+		return fmt.Errorf("notification.zed_summary.recipients must not be empty")
+	}
+	for _, raw := range c.Recipients {
+		address := strings.TrimSpace(raw)
+		parsed, err := mail.ParseAddress(address)
+		if err != nil || parsed.Address != address {
+			return fmt.Errorf("notification.zed_summary.recipients contains invalid email address")
 		}
 	}
 	return nil

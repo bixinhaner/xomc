@@ -77,6 +77,8 @@ type KeyedQueueConfig struct {
 	Concurrency   int
 	QueueDepth    int
 	AckWait       time.Duration
+	// MaxDeliver follows JetStream semantics: 0 uses the project default,
+	// -1 keeps a loss-intolerant durable retryable until it succeeds.
 	MaxDeliver    int
 	MaxAckPending int
 }
@@ -638,7 +640,7 @@ func (b *NATSEventBus) KeyedQueueSubscribe(
 	if config.AckWait <= 0 {
 		config.AckWait = gpvPullAckWait
 	}
-	if config.MaxDeliver <= 0 {
+	if config.MaxDeliver == 0 {
 		config.MaxDeliver = maxDeliveries
 	}
 	config.MaxAckPending = keyedMaxAckPending(
@@ -1125,7 +1127,7 @@ func updatedQueueConsumerConfig(info *nats.ConsumerInfo, desired QueueTuning) (n
 		cfg.AckWait = desired.AckWait
 		changed = true
 	}
-	if desired.MaxDeliver > 0 && cfg.MaxDeliver != desired.MaxDeliver {
+	if desired.MaxDeliver != 0 && cfg.MaxDeliver != desired.MaxDeliver {
 		cfg.MaxDeliver = desired.MaxDeliver
 		changed = true
 	}
@@ -1548,7 +1550,7 @@ func (b *NATSEventBus) processKeyedMsg(
 	tuning QueueTuning,
 	handler EventHandler,
 ) {
-	if tuning.MaxDeliver <= 0 {
+	if tuning.MaxDeliver == 0 {
 		tuning.MaxDeliver = maxDeliveries
 	}
 	if tuning.AckWait <= 0 {
@@ -1559,7 +1561,7 @@ func (b *NATSEventBus) processKeyedMsg(
 		handlerErr := handler(ctx, evt)
 		effectiveDelivery := serverDelivery + localAttempt
 		if handlerErr == nil || errors.Is(handlerErr, reliability.ErrPermanent) ||
-			effectiveDelivery >= uint64(tuning.MaxDeliver) {
+			keyedDeliveryExhausted(effectiveDelivery, tuning.MaxDeliver) {
 			b.settleDecodedMsgAtDelivery(
 				evt,
 				msg,
@@ -1589,6 +1591,10 @@ func (b *NATSEventBus) processKeyedMsg(
 		case <-timer.C:
 		}
 	}
+}
+
+func keyedDeliveryExhausted(deliveries uint64, maxDeliver int) bool {
+	return maxDeliver > 0 && deliveries >= uint64(maxDeliver)
 }
 
 func keyedRetryBackoff(attempt uint64, ackWait time.Duration) time.Duration {

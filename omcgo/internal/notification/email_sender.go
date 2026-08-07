@@ -1,11 +1,14 @@
 package notification
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"mime"
+	"mime/multipart"
 	"net"
 	"net/mail"
 	"net/smtp"
@@ -26,8 +29,22 @@ type SMTPOptions struct {
 	Username string        // 留空 = 不做 SMTP AUTH
 	Password string        // SMTP AUTH 口令
 	From     string        // 发件人地址
-	StartTLS bool          // true 时在握手后升级 STARTTLS
+	TLSMode  string        // none / starttls / implicit；空值兼容旧 StartTLS
+	StartTLS bool          // Deprecated: TLSMode 为空时兼容旧配置
 	Timeout  time.Duration // 连接超时（<=0 时取默认 10s）
+}
+
+const (
+	SMTPTLSNone        = "none"
+	SMTPTLSStartTLS    = "starttls"
+	SMTPTLSImplicit    = "implicit"
+	maxAttachmentBytes = 20 << 20
+)
+
+type EmailAttachment struct {
+	Filename    string
+	ContentType string
+	Data        []byte
 }
 
 const (
@@ -92,6 +109,35 @@ func (s *EmailSender) Send(ctx context.Context, to []string, subject, body strin
 // SendOne 在一个只含单个 RCPT TO 的 SMTP 信封中发送邮件。DATA 最终响应成功即视为
 // accepted；之后的 QUIT 失败不改变服务端已经受理的事实。
 func (s *EmailSender) SendOne(ctx context.Context, recipient, subject, body string) error {
+	return s.sendOne(ctx, recipient, subject, body, nil)
+}
+
+// SendOneWithAttachments 使用单收件人 SMTP 信封发送带附件邮件。当前业务只允许一个
+// KPI 报表附件，避免把发送器扩展成通用邮件客户端。
+func (s *EmailSender) SendOneWithAttachments(
+	ctx context.Context,
+	recipient, subject, body string,
+	attachments []EmailAttachment,
+) error {
+	if len(attachments) > 1 {
+		return emailSendError(EmailErrorMessage, false, false, "message", errors.New("at most one attachment is supported"))
+	}
+	for _, attachment := range attachments {
+		if attachment.Filename == "" || strings.ContainsAny(attachment.Filename, "\r\n") {
+			return emailSendError(EmailErrorMessage, false, false, "message", errors.New("invalid attachment filename"))
+		}
+		if len(attachment.Data) > maxAttachmentBytes {
+			return emailSendError(EmailErrorMessage, false, false, "message", fmt.Errorf("attachment exceeds %d bytes", maxAttachmentBytes))
+		}
+	}
+	return s.sendOne(ctx, recipient, subject, body, attachments)
+}
+
+func (s *EmailSender) sendOne(
+	ctx context.Context,
+	recipient, subject, body string,
+	attachments []EmailAttachment,
+) error {
 	if err := s.validateConnectionOptions(); err != nil {
 		return err
 	}
@@ -123,7 +169,12 @@ func (s *EmailSender) SendOne(ctx context.Context, recipient, subject, body stri
 	if err != nil {
 		return classifySMTPError("data", err, EmailErrorMessage)
 	}
-	if _, err := w.Write([]byte(buildMessage(s.opts.From, []string{recipient}, subject, body))); err != nil {
+	message, err := buildEmailMessage(s.opts.From, recipient, subject, body, attachments)
+	if err != nil {
+		_ = w.Close()
+		return emailSendError(EmailErrorMessage, false, false, "message", err)
+	}
+	if _, err := w.Write(message); err != nil {
 		_ = w.Close()
 		return emailSendError(EmailErrorConnection, true, false, "write_body", err)
 	}
@@ -155,9 +206,21 @@ func (s *EmailSender) connect(ctx context.Context) (*smtp.Client, error) {
 	}
 	addr := net.JoinHostPort(s.opts.Host, strconv.Itoa(s.opts.Port))
 	dialer := net.Dialer{Timeout: s.opts.Timeout}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	var conn net.Conn
+	var err error
+	if s.tlsMode() == SMTPTLSImplicit {
+		tlsDialer := tls.Dialer{NetDialer: &dialer, Config: s.tlsConfig()}
+		conn, err = tlsDialer.DialContext(ctx, "tcp", addr)
+	} else {
+		conn, err = dialer.DialContext(ctx, "tcp", addr)
+	}
 	if err != nil {
-		return nil, emailSendError(EmailErrorConnection, true, false, "connect", err)
+		category := EmailErrorConnection
+		stage := "connect"
+		if s.tlsMode() == SMTPTLSImplicit {
+			category, stage = EmailErrorTLS, "implicit_tls"
+		}
+		return nil, emailSendError(category, true, false, stage, err)
 	}
 	// 兜底超时，防止某个 SMTP 阶段无限挂起。
 	deadline := time.Now().Add(s.opts.Timeout)
@@ -172,12 +235,12 @@ func (s *EmailSender) connect(ctx context.Context) (*smtp.Client, error) {
 		return nil, classifySMTPError("handshake", err, EmailErrorConnection)
 	}
 
-	if s.opts.StartTLS {
+	if s.tlsMode() == SMTPTLSStartTLS {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
 			_ = client.Close()
 			return nil, emailSendError(EmailErrorTLS, false, false, "starttls", errors.New("server does not advertise STARTTLS"))
 		}
-		if err := client.StartTLS(&tls.Config{ServerName: s.opts.Host, MinVersion: tls.VersionTLS12}); err != nil {
+		if err := client.StartTLS(s.tlsConfig()); err != nil {
 			_ = client.Close()
 			return nil, emailSendError(EmailErrorTLS, false, false, "starttls", err)
 		}
@@ -202,7 +265,25 @@ func (s *EmailSender) validateConnectionOptions() error {
 	if s.opts.Port <= 0 {
 		return emailSendError(EmailErrorConfiguration, false, false, "configuration", errors.New("port is required"))
 	}
+	if mode := s.tlsMode(); mode != SMTPTLSNone && mode != SMTPTLSStartTLS && mode != SMTPTLSImplicit {
+		return emailSendError(EmailErrorConfiguration, false, false, "configuration", fmt.Errorf("unsupported tls mode %q", mode))
+	}
 	return nil
+}
+
+func (s *EmailSender) tlsMode() string {
+	mode := strings.ToLower(strings.TrimSpace(s.opts.TLSMode))
+	if mode == "" {
+		if s.opts.StartTLS {
+			return SMTPTLSStartTLS
+		}
+		return SMTPTLSNone
+	}
+	return mode
+}
+
+func (s *EmailSender) tlsConfig() *tls.Config {
+	return &tls.Config{ServerName: s.opts.Host, MinVersion: tls.VersionTLS12}
 }
 
 func plainEmailAddress(value string) bool {
@@ -239,6 +320,56 @@ func buildMessage(from string, to []string, subject, body string) string {
 	b.WriteString("\r\n")
 	b.WriteString(normalizeCRLF(body))
 	return b.String()
+}
+
+func buildEmailMessage(from, to, subject, body string, attachments []EmailAttachment) ([]byte, error) {
+	if len(attachments) == 0 {
+		return []byte(buildMessage(from, []string{to}, subject, body)), nil
+	}
+	var result bytes.Buffer
+	writer := multipart.NewWriter(&result)
+	result.WriteString("From: " + from + "\r\n")
+	result.WriteString("To: " + to + "\r\n")
+	result.WriteString("Subject: " + mime.QEncoding.Encode("utf-8", subject) + "\r\n")
+	result.WriteString("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n")
+	result.WriteString("MIME-Version: 1.0\r\n")
+	result.WriteString("Content-Type: multipart/mixed; boundary=" + strconv.Quote(writer.Boundary()) + "\r\n\r\n")
+
+	bodyHeader := textproto.MIMEHeader{}
+	bodyHeader.Set("Content-Type", `text/plain; charset="utf-8"`)
+	bodyHeader.Set("Content-Transfer-Encoding", "8bit")
+	bodyPart, err := writer.CreatePart(bodyHeader)
+	if err != nil {
+		return nil, fmt.Errorf("create email body part: %w", err)
+	}
+	if _, err := bodyPart.Write([]byte(normalizeCRLF(body))); err != nil {
+		return nil, fmt.Errorf("write email body part: %w", err)
+	}
+
+	attachment := attachments[0]
+	contentType := strings.TrimSpace(attachment.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	attachmentHeader := textproto.MIMEHeader{}
+	attachmentHeader.Set("Content-Type", mime.FormatMediaType(contentType, map[string]string{"name": attachment.Filename}))
+	attachmentHeader.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": attachment.Filename}))
+	attachmentHeader.Set("Content-Transfer-Encoding", "base64")
+	attachmentPart, err := writer.CreatePart(attachmentHeader)
+	if err != nil {
+		return nil, fmt.Errorf("create email attachment part: %w", err)
+	}
+	encoder := base64.NewEncoder(base64.StdEncoding, attachmentPart)
+	if _, err := encoder.Write(attachment.Data); err != nil {
+		return nil, fmt.Errorf("encode email attachment: %w", err)
+	}
+	if err := encoder.Close(); err != nil {
+		return nil, fmt.Errorf("finish email attachment: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("finish multipart email: %w", err)
+	}
+	return result.Bytes(), nil
 }
 
 // normalizeCRLF 把任意换行统一为 CRLF（SMTP DATA 要求）。

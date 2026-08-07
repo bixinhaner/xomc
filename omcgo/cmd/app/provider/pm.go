@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/dashboard"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
@@ -128,6 +129,16 @@ func initPMModule(c *Container) error {
 	pmQueryTemplateRepo := querytemplate.NewPgRepository(c.PgPool)
 	pmQueryTemplateHandler := querytemplate.NewHandler(pmQueryTemplateRepo, logger.Named("querytemplate")).
 		WithEnabledMetricPayloadService(querytemplate.NewEnabledMetricPayloadService(enabledRepo))
+	if recipientProtector, protectErr := notification.NewEnvRecipientProtector(); protectErr == nil {
+		pmQueryTemplateHandler.WithRegularReportService(
+			querytemplate.NewRegularReportService(pmQueryTemplateRepo, recipientProtector),
+		)
+	} else if errors.Is(protectErr, notification.ErrRecipientKeyUnavailable) {
+		logger.Warn("KPI regular report settings disabled: recipient encryption key is not configured",
+			zap.String("required_env", notification.EnvNotificationRecipientKey))
+	} else {
+		return fmt.Errorf("initialize KPI report recipient protection: %w", protectErr)
+	}
 
 	// KPI-EXPORT T1：KPI 数据导出 REST 入口（建任务落表 + 入队 pm_kpi_export job）。
 	// 文件管理下载默认走 app 同源流式响应；presign client 仅保留给 ?mode=url 兼容路径。

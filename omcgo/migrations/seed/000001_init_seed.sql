@@ -2515,6 +2515,7 @@ INSERT INTO public.menus VALUES
 	('aaaa0098-1000-0000-0000-000000000004', '告警库', 'menu', 'product:alarm-library', 'aaaa0098-0000-0000-0000-000000000001', 3, '/product/alarm-library', NULL, 'BookOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.896653+08', NULL, '2026-05-31 11:28:48.210268+08', '{"en-US": "Alarm Library", "zh-CN": "告警库"}'),
 	('aaaa0011-1000-0000-0000-000000000002', '告警库', 'menu', 'alarm:library', '11111111-1111-1111-1111-111111111105', 4, '/alarm/library', 'alarm/AlarmSupportLibrary', 'BookOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:47.900133+08', '{"en-US": "Alarm Library", "zh-CN": "告警库"}'),
 	('aaaa0011-1000-0000-0000-000000000001', '告警规则', 'menu', 'alarm:rules', '11111111-1111-1111-1111-111111111105', 3, '/alarm/rules', 'alarm/AlarmRules', 'FieldNumberOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:47.81669+08', '{"en-US": "Alarm Rules", "zh-CN": "告警规则"}'),
+	('aaaa0011-1000-0000-0000-000000000004', '邮件通知设置', 'menu', 'alarm:email-settings', '11111111-1111-1111-1111-111111111105', 4, '/alarm/email-settings', 'alarm/AlarmEmailSettings', 'MailOutlined', 'show', 'normal', NULL, '2026-08-06 00:00:00+08', NULL, '2026-08-06 00:00:00+08', '{"en-US": "Email Notification", "zh-CN": "邮件通知设置"}'),
 	('aaaa0098-1000-0000-0000-000000000003', 'PM 指标库', 'menu', 'product:kpi-library', 'aaaa0098-0000-0000-0000-000000000001', 2, '/product/kpi-library', NULL, 'BarChartOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.896653+08', NULL, '2026-05-31 11:28:48.210268+08', '{"en-US": "PM Indicator Library", "zh-CN": "PM 指标库"}'),
 	('fc0d270c-dca6-4e0d-b392-4a806cfed4d5', '添加', 'button', 'alarm:library:add', 'aaaa0011-1000-0000-0000-000000000002', 2, NULL, NULL, NULL, 'hide', 'normal', NULL, '2026-05-31 11:28:47.827035+08', NULL, '2026-05-31 11:28:47.900133+08', '{"en-US": "Add", "zh-CN": "添加"}'),
 	('0e71f2b9-2f35-4da9-af1e-5127e35754a1', '修改', 'button', 'alarm:library:edit', 'aaaa0011-1000-0000-0000-000000000002', 3, NULL, NULL, NULL, 'hide', 'normal', NULL, '2026-05-31 11:28:47.827035+08', NULL, '2026-05-31 11:28:47.900133+08', '{"en-US": "Edit", "zh-CN": "修改"}'),
@@ -8056,6 +8057,76 @@ INSERT INTO public.notification_channel_configs (
     'system'
 ) ON CONFLICT DO NOTHING;
 
+-- 老 OMC 的“默认收件人”映射为一个固定系统联系组。成员仍使用加密地址存储，
+-- 业务规则只引用组 ID；未配置成员时勾选默认收件人不会产生外发地址。
+INSERT INTO public.notification_contact_groups (
+    id, name, description, is_default, revision, archived, created_by
+) VALUES (
+    'aaaa000c-3000-0000-0000-000000000001',
+    'default-alarm-email-recipients',
+    'Default recipients for alarm email notifications',
+    true,
+    1,
+    false,
+    'system'
+) ON CONFLICT (id) DO UPDATE SET
+    is_default = true,
+    archived = false,
+    updated_at = NOW();
+
+-- 告警邮件正文由后端内置渲染器生成。本行只提供不可变版本锚点，供规则历史和投递审计
+-- 引用；不向操作员开放主题、正文或变量编辑。
+INSERT INTO public.notification_templates (
+    id, name, channel, language, subject, body, variables, enabled, revision,
+    current_draft_version_id, current_published_version_id, archived, created_by
+) VALUES (
+    'aaaa000c-2000-0000-0000-000000000001',
+    'builtin-alarm-email',
+    'email',
+    'zh-CN',
+    'Alarm Notification',
+    'backend-defined',
+    '{}'::text[],
+    true,
+    1,
+    NULL,
+    NULL,
+    false,
+    'system'
+) ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    subject = EXCLUDED.subject,
+    body = EXCLUDED.body,
+    enabled = true,
+    archived = false,
+    updated_at = NOW();
+
+INSERT INTO public.notification_template_versions (
+    id, template_id, version_no, channel, language, subject, text_body, variables,
+    created_by, change_reason, published_at
+) VALUES (
+    'aaaa000c-2100-0000-0000-000000000001',
+    'aaaa000c-2000-0000-0000-000000000001',
+    1,
+    'email',
+    'zh-CN',
+    'Alarm Notification',
+    'backend-defined',
+    '{}'::text[],
+    'system',
+    '后台固定告警邮件格式',
+    NOW()
+) ON CONFLICT (id) DO UPDATE SET
+    subject = EXCLUDED.subject,
+    text_body = EXCLUDED.text_body,
+    published_at = COALESCE(notification_template_versions.published_at, EXCLUDED.published_at);
+
+UPDATE public.notification_templates
+SET current_draft_version_id = 'aaaa000c-2100-0000-0000-000000000001',
+    current_published_version_id = 'aaaa000c-2100-0000-0000-000000000001',
+    updated_at = NOW()
+WHERE id = 'aaaa000c-2000-0000-0000-000000000001';
+
 --
 -- Data for Name: notification_history; Type: TABLE DATA; Schema: public; Owner: -
 --
@@ -10252,6 +10323,7 @@ INSERT INTO public.role_menus VALUES
 	('4985e4de-df53-4b6e-9cc7-a4190ca14266', '10000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111107', NULL, '2026-05-31 11:28:47.858032+08'),
 	('784a8024-aaf3-4c54-833b-b779bf7edf5d', '10000000-0000-0000-0000-000000000001', 'aaaa0011-1000-0000-0000-000000000002', NULL, '2026-05-31 11:28:47.858032+08'),
 	('90fb8e33-9abd-41e6-bc41-bbb82208ac93', '10000000-0000-0000-0000-000000000001', 'aaaa0011-1000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.858032+08'),
+	('aaaa0011-4000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'aaaa0011-1000-0000-0000-000000000004', NULL, '2026-08-06 00:00:00+08'),
 	('836be5b3-f055-465a-94cb-f615d22f3109', '10000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111106', NULL, '2026-05-31 11:28:47.858032+08'),
 	('b61e352a-ed0a-4247-9606-629423615634', '10000000-0000-0000-0000-000000000001', 'aaaa0011-1000-0000-0000-000000000003', NULL, '2026-05-31 11:28:47.858032+08'),
 	('c7b84ddc-9a43-4d81-99d8-5af308b73267', '10000000-0000-0000-0000-000000000001', '4c305bbd-eaee-42ef-81a8-08915d736ebd', NULL, '2026-05-31 11:28:47.858032+08'),
@@ -10412,6 +10484,7 @@ INSERT INTO public.role_menus VALUES
 	('43effbfc-ecf9-4c6e-9021-229eab64baca', '10000000-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111107', NULL, '2026-05-31 11:28:47.858032+08'),
 	('e2b1e55b-f803-4d27-9916-f955b07f412c', '10000000-0000-0000-0000-000000000002', 'aaaa0011-1000-0000-0000-000000000002', NULL, '2026-05-31 11:28:47.858032+08'),
 	('79a06a07-7442-4a07-9f0d-4cf95ac6df6f', '10000000-0000-0000-0000-000000000002', 'aaaa0011-1000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.858032+08'),
+	('aaaa0011-4000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000002', 'aaaa0011-1000-0000-0000-000000000004', NULL, '2026-08-06 00:00:00+08'),
 	('eb18b53e-09dd-4040-ab05-a2ee79024aaa', '10000000-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111106', NULL, '2026-05-31 11:28:47.858032+08'),
 	('261fb14c-423e-4fee-80dd-e4f8b8c6650e', '10000000-0000-0000-0000-000000000002', 'aaaa0011-1000-0000-0000-000000000003', NULL, '2026-05-31 11:28:47.858032+08'),
 	('5a065474-9c17-46e9-afdc-fd85468f0449', '10000000-0000-0000-0000-000000000002', '4c305bbd-eaee-42ef-81a8-08915d736ebd', NULL, '2026-05-31 11:28:47.858032+08'),
@@ -10521,6 +10594,7 @@ INSERT INTO public.role_menus VALUES
 	('13ff9701-8938-4f32-a10f-c779d7d33ea1', '10000000-0000-0000-0000-000000000003', '11111111-1111-1111-1111-111111111107', NULL, '2026-05-31 11:28:47.858032+08'),
 	('c9e05ce7-9330-4549-ba0b-a0db69ea6e43', '10000000-0000-0000-0000-000000000003', 'aaaa0011-1000-0000-0000-000000000002', NULL, '2026-05-31 11:28:47.858032+08'),
 	('5296bc4a-e60b-4acc-9bd2-bffa1553273e', '10000000-0000-0000-0000-000000000003', 'aaaa0011-1000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.858032+08'),
+	('aaaa0011-4000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000003', 'aaaa0011-1000-0000-0000-000000000004', NULL, '2026-08-06 00:00:00+08'),
 	('75e4641e-9915-4419-9960-6ad0b97ecec1', '10000000-0000-0000-0000-000000000003', '11111111-1111-1111-1111-111111111106', NULL, '2026-05-31 11:28:47.858032+08'),
 	('a0db32d6-0365-4ab5-bec8-6b59f8bbc9ed', '10000000-0000-0000-0000-000000000003', 'aaaa0011-1000-0000-0000-000000000003', NULL, '2026-05-31 11:28:47.858032+08'),
 	('bf4e679b-bfd4-4fa7-aed6-eb058ef27db4', '10000000-0000-0000-0000-000000000003', '18f3e2ef-7832-4d3e-b244-125052a54ca0', NULL, '2026-05-31 11:28:47.858032+08'),
@@ -26130,29 +26204,19 @@ UPDATE public.discovered_param_mappings d
    AND d.private_path = fixes.private_path;
 
 
--- 通知中心版本化管理与逐投递审计 API。端点必须先于下方内置角色补权语句登记，
--- 否则 RequireAPIPermission 会对非内置超管 fail closed。
+-- 告警邮件、Zed 汇总设置、通道健康和逐投递审计 API。内部版本化规则、联系组和模板
+-- 不作为产品管理面暴露。端点必须先于下方内置角色补权语句登记，否则
+-- RequireAPIPermission 会对非内置超管 fail closed。
 INSERT INTO public.api_endpoints (
     id, path, method, name, description, api_group, is_auto, created_at, updated_at, is_user_modified
 ) VALUES
-    ('50000000-0004-0000-0000-000000000001', '/api/v1/notification-rules', 'GET', 'GET /api/v1/notification-rules', '通知规则列表', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000002', '/api/v1/notification-rules', 'POST', 'POST /api/v1/notification-rules', '创建通知规则草稿', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000003', '/api/v1/notification-rules/:id', 'GET', 'GET /api/v1/notification-rules/:id', '通知规则详情', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000004', '/api/v1/notification-rules/:id', 'PATCH', 'PATCH /api/v1/notification-rules/:id', '更新通知规则草稿', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000005', '/api/v1/notification-rules/:id/publish', 'POST', 'POST /api/v1/notification-rules/:id/publish', '发布通知规则版本', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000006', '/api/v1/notification-rules/:id/enable', 'POST', 'POST /api/v1/notification-rules/:id/enable', '启用通知规则版本', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000007', '/api/v1/notification-rules/:id/archive', 'POST', 'POST /api/v1/notification-rules/:id/archive', '归档通知规则', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000008', '/api/v1/notification-rules/:id/preview', 'POST', 'POST /api/v1/notification-rules/:id/preview', '预览通知规则命中', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000009', '/api/v1/notification-contact-groups', 'GET', 'GET /api/v1/notification-contact-groups', '通知联系组列表', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000010', '/api/v1/notification-contact-groups', 'POST', 'POST /api/v1/notification-contact-groups', '创建通知联系组', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000011', '/api/v1/notification-contact-groups/:id', 'GET', 'GET /api/v1/notification-contact-groups/:id', '通知联系组详情', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000012', '/api/v1/notification-contact-groups/:id', 'PATCH', 'PATCH /api/v1/notification-contact-groups/:id', '更新通知联系组', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000013', '/api/v1/notification-templates', 'GET', 'GET /api/v1/notification-templates', '版本化通知模板列表', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000014', '/api/v1/notification-templates', 'POST', 'POST /api/v1/notification-templates', '创建通知模板草稿', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000015', '/api/v1/notification-templates/:id', 'GET', 'GET /api/v1/notification-templates/:id', '版本化通知模板详情', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000016', '/api/v1/notification-templates/:id', 'PATCH', 'PATCH /api/v1/notification-templates/:id', '更新通知模板草稿', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000017', '/api/v1/notification-templates/:id/publish', 'POST', 'POST /api/v1/notification-templates/:id/publish', '发布通知模板版本', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000018', '/api/v1/notification-templates/:id/preview', 'POST', 'POST /api/v1/notification-templates/:id/preview', '预览通知模板渲染', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000031', '/api/v1/alarm-email-settings', 'GET', 'GET /api/v1/alarm-email-settings', '告警邮件设置列表', 'alarm-email', false, '2026-08-06 00:00:00+08', '2026-08-06 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000032', '/api/v1/alarm-email-settings', 'POST', 'POST /api/v1/alarm-email-settings', '创建告警邮件设置', 'alarm-email', false, '2026-08-06 00:00:00+08', '2026-08-06 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000033', '/api/v1/alarm-email-settings/default-recipients', 'GET', 'GET /api/v1/alarm-email-settings/default-recipients', '查看告警邮件默认收件人（仅超管）', 'alarm-email', false, '2026-08-06 00:00:00+08', '2026-08-06 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000034', '/api/v1/alarm-email-settings/default-recipients', 'PATCH', 'PATCH /api/v1/alarm-email-settings/default-recipients', '更新告警邮件默认收件人（仅超管）', 'alarm-email', false, '2026-08-06 00:00:00+08', '2026-08-06 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000035', '/api/v1/alarm-email-settings/:id', 'GET', 'GET /api/v1/alarm-email-settings/:id', '告警邮件设置详情', 'alarm-email', false, '2026-08-06 00:00:00+08', '2026-08-06 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000036', '/api/v1/alarm-email-settings/:id', 'PATCH', 'PATCH /api/v1/alarm-email-settings/:id', '更新告警邮件设置', 'alarm-email', false, '2026-08-06 00:00:00+08', '2026-08-06 00:00:00+08', false),
+    ('50000000-0004-0000-0000-000000000037', '/api/v1/alarm-email-settings/:id', 'DELETE', 'DELETE /api/v1/alarm-email-settings/:id', '删除告警邮件设置', 'alarm-email', false, '2026-08-06 00:00:00+08', '2026-08-06 00:00:00+08', false),
     ('50000000-0004-0000-0000-000000000019', '/api/v1/notification-channels', 'GET', 'GET /api/v1/notification-channels', '通知渠道列表', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
     ('50000000-0004-0000-0000-000000000020', '/api/v1/notification-channels/:id', 'PATCH', 'PATCH /api/v1/notification-channels/:id', '更新通知渠道', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
     ('50000000-0004-0000-0000-000000000021', '/api/v1/notification-channels/:id/verify', 'POST', 'POST /api/v1/notification-channels/:id/verify', '验证通知渠道连接', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
@@ -26161,8 +26225,16 @@ INSERT INTO public.api_endpoints (
     ('50000000-0004-0000-0000-000000000024', '/api/v1/notification-deliveries/retry', 'POST', 'POST /api/v1/notification-deliveries/retry', '批量重试通知死信', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
     ('50000000-0004-0000-0000-000000000025', '/api/v1/notification-deliveries/:id', 'GET', 'GET /api/v1/notification-deliveries/:id', '通知逐投递详情', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
     ('50000000-0004-0000-0000-000000000026', '/api/v1/notification-deliveries/:id/attempts', 'GET', 'GET /api/v1/notification-deliveries/:id/attempts', '通知投递尝试轨迹', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
-    ('50000000-0004-0000-0000-000000000027', '/api/v1/notification-deliveries/:id/retry', 'POST', 'POST /api/v1/notification-deliveries/:id/retry', '重试单条通知死信', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false)
+    ('50000000-0004-0000-0000-000000000027', '/api/v1/notification-deliveries/:id/retry', 'POST', 'POST /api/v1/notification-deliveries/:id/retry', '重试单条通知死信', 'notifications', false, '2026-08-05 00:00:00+08', '2026-08-05 00:00:00+08', false),
+	('50000000-0004-0000-0000-000000000029', '/api/v1/pm/query-templates/:id/regular-report', 'GET', 'GET /api/v1/pm/query-templates/:id/regular-report', '查看 KPI 定时报表配置', 'pm', false, '2026-08-06 00:00:00+08', '2026-08-06 00:00:00+08', false),
+	('50000000-0004-0000-0000-000000000030', '/api/v1/pm/query-templates/:id/regular-report', 'PATCH', 'PATCH /api/v1/pm/query-templates/:id/regular-report', '更新 KPI 定时报表配置', 'pm', false, '2026-08-06 00:00:00+08', '2026-08-06 00:00:00+08', false),
+	('50000000-0004-0000-0000-000000000038', '/api/v1/notification/status-summary-settings', 'GET', 'GET /api/v1/notification/status-summary-settings', '查看 Zed Mobile 状态汇总配置', 'notifications', false, '2026-08-10 00:00:00+08', '2026-08-10 00:00:00+08', false),
+	('50000000-0004-0000-0000-000000000039', '/api/v1/notification/status-summary-settings', 'PATCH', 'PATCH /api/v1/notification/status-summary-settings', '更新 Zed Mobile 状态汇总配置', 'notifications', false, '2026-08-10 00:00:00+08', '2026-08-10 00:00:00+08', false)
 ON CONFLICT DO NOTHING;
+
+INSERT INTO public.notification_status_summary_configs (id, enabled, send_time, time_zone, revision, updated_by)
+VALUES ('aaaa000c-4000-0000-0000-000000000001', false, '00:00:00', 'Asia/Shanghai', 1, 'seed')
+ON CONFLICT (id) DO NOTHING;
 
 -- Consolidated from former incremental migrations: seed 000002-000003
 
@@ -26584,6 +26656,65 @@ SET product_scope = scope.product_scope,
 FROM scope
 WHERE tt.type_code = scope.type_code;
 
+
+-- Task 13: expose the cross-domain notification management center.
+INSERT INTO public.menus (
+    id, name, type, permission_key, parent_id, sort_order, route_path,
+    component_path, icon, show_status, status, name_i18n
+) VALUES
+(
+    'aaaa0013-0000-0000-0000-000000000001',
+    '通知管理',
+    'directory',
+    'notification',
+    NULL,
+    10,
+    '',
+    NULL,
+    'NotificationOutlined',
+    'show',
+    'normal',
+    '{"en-US":"Notification Management","zh-CN":"通知管理"}'::jsonb
+),
+(
+    'aaaa0013-1000-0000-0000-000000000001',
+    '通知中心',
+    'menu',
+    'notification:center',
+    'aaaa0013-0000-0000-0000-000000000001',
+    1,
+    '/notifications',
+    'notifications/Index',
+    'NotificationOutlined',
+    'show',
+    'normal',
+    '{"en-US":"Notification Center","zh-CN":"通知中心"}'::jsonb
+)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    permission_key = EXCLUDED.permission_key,
+    parent_id = EXCLUDED.parent_id,
+    sort_order = EXCLUDED.sort_order,
+    route_path = EXCLUDED.route_path,
+    component_path = EXCLUDED.component_path,
+    icon = EXCLUDED.icon,
+    show_status = EXCLUDED.show_status,
+    status = EXCLUDED.status,
+    name_i18n = EXCLUDED.name_i18n,
+    updated_at = NOW();
+
+INSERT INTO public.role_menus (role_id, menu_id)
+SELECT role_id, menu_id
+FROM unnest(ARRAY[
+    '10000000-0000-0000-0000-000000000001'::uuid,
+    '10000000-0000-0000-0000-000000000002'::uuid,
+    '10000000-0000-0000-0000-000000000003'::uuid
+]) AS built_in_roles(role_id)
+CROSS JOIN unnest(ARRAY[
+    'aaaa0013-0000-0000-0000-000000000001'::uuid,
+    'aaaa0013-1000-0000-0000-000000000001'::uuid
+]) AS notification_menus(menu_id)
+ON CONFLICT (role_id, menu_id) DO NOTHING;
 
 -- Consolidated from the pre-release storage protection menu seed migration.
 INSERT INTO public.menus (

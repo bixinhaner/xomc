@@ -8,8 +8,7 @@ import { expectPageRenders, smokeLogin } from './helpers';
  *   - src/pages/SystemLicense/index.tsx + History.tsx
  *     （后端 system_license 表为空时 GetCurrent 返回 biz_code 12113，
  *       页面应渲染"未配置"引导空态而非 ErrorBoundary 崩溃——这正是冒烟要断言的）
- *   - src/pages/notifications/index.tsx（ListPageLayout + Tabs：通知模板 / 发送历史，
- *     TemplateList 内部 DataTable 始终渲染 antd Table，空数据也有表头）
+ *   - src/pages/notifications/index.tsx（ListPageLayout + Tabs：站内消息 / 邮件通道 / 发送历史）
  *   - i18n 语料 frontend-core/src/i18n/{zh-CN,en-US}/index.ts 的
  *     systemLicense.* / notification.* 段，正则兼容双语
  */
@@ -48,22 +47,25 @@ test.describe('许可与通知冒烟（真实后端）', { tag: '@smoke' }, () =
     ).toBeVisible();
   });
 
-  test('/notifications 渲染通知中心，模板/历史两个 Tab 与表格骨架可见', async ({ page }) => {
+  test('/notifications 渲染通知中心，消息/邮件通道/发送历史三个 Tab 可见', async ({ page }) => {
     await expectPageRenders(page, '/notifications');
 
     // ListPageLayout 标题：notification.title（通知中心 / Notification Center）
     await expect(page.getByText(/通知中心|Notification Center/).first()).toBeVisible();
 
-    // Tabs：通知模板（默认激活）+ 发送历史
+    // 通知中心只承担消息、邮件通道健康和发送历史，不开放通用规则/模板编辑器。
     await expect(page.locator('.ant-tabs')).toBeVisible();
     await expect(
-      page.locator('.ant-tabs-tab').filter({ hasText: /通知模板|Templates/ }),
+      page.locator('.ant-tabs-tab').filter({ hasText: /站内消息|Messages/ }),
+    ).toBeVisible();
+    await expect(
+      page.locator('.ant-tabs-tab').filter({ hasText: /通道健康|Channel Health/ }),
     ).toBeVisible();
     await expect(
       page.locator('.ant-tabs-tab').filter({ hasText: /发送历史|History/ }),
     ).toBeVisible();
 
-    // 默认 Tab（通知模板）内 DataTable 骨架：空数据也渲染 .ant-table 表头
+    // 默认站内消息 Tab 保持既有 DataTable 骨架。
     await expect(page.locator('.ant-table').first()).toBeVisible();
   });
 });
