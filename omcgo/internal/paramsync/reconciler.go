@@ -440,7 +440,8 @@ WITH stalled AS (
     (event_type, aggregate_type, aggregate_id, dedupe_key, payload, created_at, updated_at)
   SELECT $4::text, 'run', run.id, $4::text || ':' || run.id::text,
     jsonb_build_object('request_id', run.request_id, 'run_id', run.id,
-      'device_id', run.device_id, 'status', run.status), $3, $3
+      'device_id', run.device_id, 'status', run.status,
+      'trigger_reason', run.trigger_reason, 'sync_scope', run.sync_scope), $3, $3
   FROM updated_runs run
   ON CONFLICT (dedupe_key) DO NOTHING
   RETURNING id

@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="BSC" totalEntries="228">
+<parameterModel paramModel="BSC" totalEntries="229">
     <objects>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
@@ -37,6 +37,7 @@
         <param name="Device.DeviceInfo.X_COM_ROLLBACK_CONTROL" standardPath="Device.DeviceInfo.ROLLBACK_CONTROL" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_ROLLBACK_ENABLE" standardPath="Device.DeviceInfo.ROLLBACK_ENABLE" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_STATION_RUN_Time" standardPath="Device.DeviceInfo.UpTime" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.X_COM_UE_Count" standardPath="Device.DeviceInfo.UE_Count" access="READ_ONLY" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.FAP.PerfMgmt.Config.{i}.Enable" standardPath="Device.FAP.PerfMgmt.Config.{i}.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadInterval" standardPath="Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadInterval" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.FAP.PerfMgmt.Config.{i}.URL" standardPath="Device.FAP.PerfMgmt.Config.{i}.URL" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>

@@ -2,6 +2,7 @@ package stationlog
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,12 +16,14 @@ func TestRetentionPolicy_Defaults(t *testing.T) {
 	p := NewRetentionPolicy(nil, nil) // nil lookup → 恒默认
 	assert.Equal(t, DefaultMaxRetentionDays, p.MaxRetentionDays(context.Background()))
 	assert.Equal(t, DefaultMaxFileCount, p.MaxFileCount(context.Background()))
+	assert.Equal(t, DefaultCleanupIntervalMinutes, p.CleanupIntervalMinutes(context.Background()))
 }
 
 func TestRetentionPolicy_ReadsAndValidates(t *testing.T) {
 	values := map[string]string{
-		KeyMaxRetentionDays: "90",
-		KeyMaxFileCount:     "0", // 0 = 禁用配额
+		KeyMaxRetentionDays:       "90",
+		KeyMaxFileCount:           "0", // 0 = 禁用配额
+		KeyCleanupIntervalMinutes: "120",
 	}
 	lookup := func(_ context.Context, category, key string) (string, bool) {
 		if category != RetentionCategory {
@@ -32,12 +35,41 @@ func TestRetentionPolicy_ReadsAndValidates(t *testing.T) {
 	p := NewRetentionPolicy(lookup, nil)
 	assert.Equal(t, 90, p.MaxRetentionDays(context.Background()))
 	assert.Equal(t, 0, p.MaxFileCount(context.Background()))
+	assert.Equal(t, 120, p.CleanupIntervalMinutes(context.Background()))
 
 	// 非法值回落默认。
 	bad := NewRetentionPolicy(func(_ context.Context, _, key string) (string, bool) {
 		return "-5", true
 	}, nil)
 	assert.Equal(t, DefaultMaxRetentionDays, bad.MaxRetentionDays(context.Background()))
+	assert.Equal(t, DefaultCleanupIntervalMinutes, bad.CleanupIntervalMinutes(context.Background()))
+}
+
+func TestRetentionPolicy_CleanupIntervalMinutes_ReadsRangeAndFallback(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{name: "min", raw: "10", want: 10},
+		{name: "max", raw: "1440", want: 1440},
+		{name: "trim", raw: " 30 ", want: 30},
+		{name: "too small", raw: "9", want: DefaultCleanupIntervalMinutes},
+		{name: "too large", raw: "1441", want: DefaultCleanupIntervalMinutes},
+		{name: "not int", raw: "abc", want: DefaultCleanupIntervalMinutes},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewRetentionPolicy(func(_ context.Context, category, key string) (string, bool) {
+				if category != RetentionCategory || key != KeyCleanupIntervalMinutes {
+					return "", false
+				}
+				return tc.raw, true
+			}, nil)
+			assert.Equal(t, tc.want, p.CleanupIntervalMinutes(context.Background()))
+		})
+	}
 }
 
 func TestRetentionPolicy_MaxFileCountPerDevice_Default(t *testing.T) {
@@ -120,6 +152,13 @@ func (r *fakeRemover) RemoveObject(_ context.Context, bucket, object string, _ m
 	return nil
 }
 
+type failingRemover struct{ removed []string }
+
+func (r *failingRemover) RemoveObject(_ context.Context, bucket, object string, _ minio.RemoveObjectOptions) error {
+	r.removed = append(r.removed, bucket+"/"+object)
+	return errors.New("minio unavailable")
+}
+
 func logFile(bucket, path string) *LogFile {
 	return &LogFile{ID: uuid.New(), Bucket: bucket, ObjectPath: path}
 }
@@ -170,6 +209,21 @@ func TestCleanupRunner_DeletesExpiredObjectsAndRows(t *testing.T) {
 	assert.ElementsMatch(t, []string{"logs/fault/a", "logs/fault/b", "logs/run/x"}, remover.removed)
 }
 
+func TestCleanupRunner_DoesNotMarkDeletedWhenObjectRemovalFails(t *testing.T) {
+	old := logFile("logs", "fault/a")
+	placeholder := logFile("", "")
+	fault := &fakeCleanupStore{remaining: []*LogFile{old, placeholder}}
+	remover := &failingRemover{}
+	runner := NewCleanupRunner(fault, nil, remover, NewRetentionPolicy(nil, nil), nil)
+
+	out, err := runner.Run(context.Background(), nil)
+	require.NoError(t, err)
+	require.NotNil(t, out)
+
+	assert.Equal(t, []string{"logs/fault/a"}, remover.removed)
+	assert.Equal(t, []uuid.UUID{placeholder.ID}, fault.deleted, "MinIO 删除失败的记录不能错误软删；无对象占位仍可软删")
+}
+
 func TestCleanupRunner_DeletesExpiredTaskLogMetadata(t *testing.T) {
 	taskLogs := &fakeTaskLogStore{remaining: []TaskLogFile{
 		{ID: 101, Bucket: "backup", ObjectPath: "logs/running/task-a.log"},
@@ -190,6 +244,23 @@ func TestCleanupRunner_DeletesExpiredTaskLogMetadata(t *testing.T) {
 		"backup/logs/fault/task-b.log",
 	}, remover.removed)
 	assert.JSONEq(t, `{"days":60,"fault_deleted":0,"running_deleted":0,"task_log_deleted":3}`, string(out))
+}
+
+func TestCleanupRunner_DoesNotMarkTaskLogDeletedWhenObjectRemovalFails(t *testing.T) {
+	taskLogs := &fakeTaskLogStore{remaining: []TaskLogFile{
+		{ID: 101, Bucket: "backup", ObjectPath: "logs/running/task-a.log"},
+		{ID: 102},
+	}}
+	remover := &failingRemover{}
+	runner := NewCleanupRunner(nil, nil, remover, NewRetentionPolicy(nil, nil), nil)
+	runner.SetTaskLogStore(taskLogs)
+
+	out, err := runner.Run(context.Background(), nil)
+	require.NoError(t, err)
+	require.NotNil(t, out)
+
+	assert.Equal(t, []string{"backup/logs/running/task-a.log"}, remover.removed)
+	assert.Equal(t, []int64{102}, taskLogs.deleted, "MinIO 删除失败的任务文件不能错误软删；无对象占位仍可软删")
 }
 
 func TestCleanupRunner_NilStoresSafe(t *testing.T) {

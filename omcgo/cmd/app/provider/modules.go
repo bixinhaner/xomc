@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -53,6 +54,7 @@ import (
 	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/omcgo/omcgo/internal/rebootrecord"
@@ -643,6 +645,7 @@ func initProvisionModule(c *Container) error {
 	logger := c.Logger.Named("provision")
 
 	provisionRepo := provision.NewPgProvisioningTaskRepository(c.PgPool)
+	plugAndPlayRepo := provision.NewPgPlugAndPlayRepository(c.PgPool)
 	discoveryLogRepo := provision.NewPgParameterDiscoveryLogRepository(c.PgPool)
 	provisionEngine := provision.NewProvisioningEngine(
 		provisionRepo, c.DeviceService, c.TemplateService,
@@ -650,6 +653,15 @@ func initProvisionModule(c *Container) error {
 	)
 	provisionEngine.SetDeduper(c.Deduper)
 	provisionEngine.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
+	provisionEngine.SetActivationStateReader(c.DeviceInfoRepo)
+	provisionEngine.SetActivationStateRefresher(device.NewInfoSyncer(
+		c.DeviceInfoRepo,
+		c.ParamRepo,
+		device.NewPgDeviceRepository(c.PgPool),
+		c.Carriers,
+		logger,
+		device.NewPgLocationObservationRepository(c.PgPool),
+	))
 	if c.miscDeps.paramSyncStarter != nil {
 		provisionEngine.SetRegisteredDeviceSyncStarter(c.miscDeps.paramSyncStarter)
 		provisionEngine.SetDeviceOnlineFullSyncSubmitter(c.miscDeps.paramSyncStarter)
@@ -810,8 +822,39 @@ func initProvisionModule(c *Container) error {
 
 	c.miscDeps.provisionRepo = provisionRepo
 	c.miscDeps.provisionEngine = provisionEngine
+	c.miscDeps.plugAndPlayRepo = plugAndPlayRepo
+	registerProvisionCompletionHandler(
+		c.miscDeps.completionRouter, c.miscDeps.taskSvc, provisionEngine, logger,
+	)
 
 	return nil
+}
+
+// registerProvisionCompletionHandler wires terminal device-task results only
+// after ProvisioningEngine exists. The misc module creates CompletionRouter
+// before the provision module is initialized, so attempting this registration
+// from initMiscModules silently skips it and leaves PnP Download SOAP faults to
+// be reported later as generic provisioning timeouts.
+func registerProvisionCompletionHandler(
+	router *task.CompletionRouter,
+	taskSvc *task.TaskService,
+	handler task.TaskCompletionCallback,
+	logger *zap.Logger,
+) {
+	if handler == nil {
+		return
+	}
+	if router != nil {
+		router.Register(task.TaskSourceSystem, handler)
+		logger.Info("provision completion callback registered to TaskSourceSystem")
+		return
+	}
+	if taskSvc != nil {
+		taskSvc.AddCompletionCallback(handler)
+		logger.Info("provision completion callback registered to TaskService")
+		return
+	}
+	logger.Warn("task completion routing unavailable; provisioning device-task failures will not propagate")
 }
 
 // initTaskModule 初始化 F06 任务队列模块。
@@ -976,6 +1019,7 @@ func initBackupModule(c *Container) error {
 		snapshotRepo, c.MinIO, snapshotFileLookup, c.DeviceRepo,
 		backup.SnapshotBucketDefault, logger,
 	)
+	c.miscDeps.snapshotService = snapshotService
 	// #61: promote 解码管线 —— 读源备份对象 + AES-256-GCM 解密器，把(压缩/加密的)
 	// 备份还原成明文写快照（替代会产生不可用快照的 server-side CopyObject）。
 	// 源读取器在 MinIO 注入时才装；解密器仅在 KEK 可用时装（与上传加密算法一致），
@@ -1022,6 +1066,10 @@ func initBackupModule(c *Container) error {
 		c.miscDeps.taskSvc, backup.LicenseBucketDefault, logger,
 	)
 	backupHandler.SetLicenseService(licenseService)
+	licensePreinstallSubscriber := backup.NewLicensePreinstallSubscriber(licenseService, logger)
+	if err := licensePreinstallSubscriber.Subscribe(c.EventBus); err != nil {
+		logger.Warn("subscribe license preinstall dispatcher", zap.Error(err))
+	}
 	if c.miscDeps.ufteService != nil {
 		c.miscDeps.ufteService.SetLicenseUpgradeDispatcher(licenseService)
 	}
@@ -1388,7 +1436,11 @@ func initDashboardModule(c *Container) error {
 	}
 	dashboardCfg := c.Cfg.Dashboard.Defaults()
 	dashboardMetrics := dashboard.NewMetrics(c.MetricsReg)
-	networkRollups := dashboard.NewNetworkRollupRepository(c.TsPool, dashboardCfg.StatementTimeout)
+	networkRollups := dashboard.NewNetworkRollupRepository(
+		c.TsPool,
+		dashboardCfg.StatementTimeout,
+		pmstream.NewPgProgressTaskLoader(c.PgPool),
+	)
 	queryGuard := dashboard.NewKPIQueryGuard(dashboard.KPIQueryGuardConfig{
 		QueryTimeout:  dashboardCfg.QueryTimeout,
 		MaxConcurrent: dashboardCfg.MaxConcurrent,
@@ -2287,11 +2339,6 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			// 聚合器随后判定"无在途"才不会在顺序链中途误判完成（见 finalizeIfComplete 注释）。
 			c.miscDeps.completionRouter.Register(task.TaskSourceMML, sequencer) // Sprint B Q-V3-3
 			c.miscDeps.completionRouter.Register(task.TaskSourceMML, aggregator)
-			// D2 修复：provision 创建的 device_task（GPV / Upload / SPV / Reboot）source=system，
-			// 失败时由 ProvisioningEngine 回查 source_id（=ProvisioningTask.id）联动 fail。
-			if c.miscDeps.provisionEngine != nil {
-				c.miscDeps.completionRouter.Register(task.TaskSourceSystem, c.miscDeps.provisionEngine)
-			}
 			// F05 MR 任务完成回调改由 initMRTaskModule 注册（依赖图 misc → mrtask，
 			// 这里 c.miscDeps.mrTaskRepo 还是 nil，原版 if 永远进不来）。CompletionRouter
 			// mutex-safe 支持后挂 handler。
@@ -2310,9 +2357,6 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			// 顺序同上：Sequencer 先注册，聚合器后注册（见 finalizeIfComplete 注释）。
 			c.miscDeps.taskSvc.AddCompletionCallback(sequencer) // Sprint B Q-V3-3
 			c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
-			if c.miscDeps.provisionEngine != nil {
-				c.miscDeps.taskSvc.AddCompletionCallback(c.miscDeps.provisionEngine)
-			}
 		}
 
 		logger.Info("MML fan-out bridge enabled")
@@ -2339,37 +2383,41 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	deviceCounter := license.NewPgDeviceCounter(c.PgPool)
 	licenseMetrics := license.NewEnforcementMetrics(c.MetricsReg)
 	licenseEnforcer := license.NewEnforcer(systemLicenseRepo, deviceCounter, logger, licenseMetrics)
-	licenseMonitor := license.NewMonitor(systemLicenseRepo, deviceCounter, license.NoopAlertSink{}, licenseMetrics, logger)
-
-	// OEM 公钥加载 + 注入 SignatureVerifier。dev 默认 strict=false + 空
-	// PublicKeyDir → 退化为 unverified 放过；prod 推荐配置 OEM 公钥目录 +
-	// strict=true 收紧。
-	licenseVerifier := license.NewSignatureVerifier(c.Cfg.License.Signing.Strict)
-	if dir := c.Cfg.License.Signing.PublicKeyDir; dir != "" {
-		if loadErr := licenseVerifier.LoadKeysFromDir(dir); loadErr != nil {
-			logger.Warn("license OEM public key load reported errors (non-fatal)",
-				zap.String("dir", dir), zap.Error(loadErr))
-		}
-		logger.Info("license signature verifier loaded",
-			zap.String("dir", dir),
-			zap.Int("key_count", licenseVerifier.KeyCount()),
-			zap.Bool("strict", c.Cfg.License.Signing.Strict))
-	}
-	// strict=true 但实际 0 keys 启动是高风险静默失败 — 所有 Update 都会被拒，
-	// 运维不知原因。Fatal 阻止启动让运维立刻定位 license.signing.public_key_dir 误配。
-	if c.Cfg.License.Signing.Strict && licenseVerifier.KeyCount() == 0 {
-		logger.Fatal("license strict mode requires at least 1 OEM public key but none loaded; check license.signing.public_key_dir",
-			zap.String("dir", c.Cfg.License.Signing.PublicKeyDir))
-	}
+	licenseAlertSink := newSystemLicenseAlertSink(c.AlarmEngine, logger)
+	licenseMonitor := license.NewMonitor(systemLicenseRepo, deviceCounter, licenseAlertSink, licenseMetrics, logger)
 
 	c.miscDeps.licenseEnforcer = licenseEnforcer
 	c.miscDeps.licenseMonitor = licenseMonitor
 
-	// SystemLicense service/handler — 复用 verifier + enforcer（Update 后调
-	// Invalidate 让 enforcer 立即拉新 license，避开 5min cache TTL）。
+	// SystemLicense service/handler — 复刻旧项目 TrueLicense 导入、验签和
+	// 授权限制；Update 后调 Invalidate 让 enforcer 立即拉新 license。
 	systemLicenseSvc := license.NewSystemLicenseService(systemLicenseRepo, logger)
-	systemLicenseSvc.SetSignatureVerifier(licenseVerifier)
 	systemLicenseSvc.SetEnforcer(licenseEnforcer)
+	featureMappingPath := filepath.Join(c.Cfg.DictLoader.XMLBaseDir, "license-feature-mapping.json")
+	if mapping, mappingErr := license.LoadLegacyFeatureMapping(featureMappingPath); mappingErr != nil {
+		logger.Warn("License feature mapping unavailable", zap.String("path", featureMappingPath), zap.Error(mappingErr))
+	} else {
+		systemLicenseSvc.SetLegacyFeatureMapping(mapping)
+		logger.Info("License feature mapping loaded", zap.String("path", featureMappingPath), zap.Int("id_code_count", len(mapping.IDToCode)), zap.Int("feature_count", len(mapping.Features)))
+	}
+	if path := c.Cfg.License.Signing.LegacyKeyStorePath; path != "" {
+		keyStore, readErr := os.ReadFile(path)
+		if readErr != nil {
+			logger.Warn("legacy TrueLicense keystore could not be loaded",
+				zap.String("path", path), zap.Error(readErr))
+		} else {
+			systemLicenseSvc.SetLegacyTrueLicenseConfig(
+				keyStore,
+				c.Cfg.License.Signing.LegacyStorePassword,
+				c.Cfg.License.Signing.LegacyKeyAlias,
+				c.Cfg.License.Signing.LegacyVerifyIntegrity,
+			)
+			logger.Info("legacy TrueLicense decoder configured",
+				zap.String("path", path),
+				zap.String("alias", c.Cfg.License.Signing.LegacyKeyAlias),
+				zap.Bool("verify_integrity", c.Cfg.License.Signing.LegacyVerifyIntegrity))
+		}
+	}
 	c.miscDeps.systemLicenseHandler = license.NewSystemLicenseHandler(systemLicenseSvc, logger)
 
 	// Wire enforcer into DeviceService so device.create / future write ops
@@ -2595,6 +2643,7 @@ type miscDeps struct {
 	// Provision
 	provisionRepo     *provision.PgProvisioningTaskRepository
 	provisionEngine   *provision.ProvisioningEngine
+	plugAndPlayRepo   *provision.PgPlugAndPlayRepository
 	paramSyncHandler  *paramsync.Handler
 	paramSyncStarter  *paramSyncStarter
 	paramSyncConsumer *paramsync.ResultConsumer
@@ -2607,6 +2656,7 @@ type miscDeps struct {
 	// Backup
 	backupHandler       *backup.Handler
 	backupPolicyMonitor *backup.PolicyMonitor // T-0073 Phase 1
+	snapshotService     *backup.SnapshotService
 
 	// StationLog
 	stationlogHandler *stationlog.Handler

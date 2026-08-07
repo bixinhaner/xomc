@@ -47,16 +47,20 @@ export function useSystemLicenseHistory(params: SystemLicenseHistoryQuery) {
 /**
  * 上传新 license 文件覆盖当前。
  *
- * 入参是 FileReader 读出的 license JSON 文件字符串。成功后自动 invalidate
+ * 入参是旧项目 .lic 二进制文件的 Base64 字符串。成功后自动 invalidate
  * current + history 查询，让页面拉到新数据。错误由调用方在 onError 里按
  * SystemLicenseErrorCodes 区分（12109 签名失败 / 12110 ID 已存在 / 12111 格式错）。
  */
+export interface SystemLicenseUpload {
+  rawContent: string;
+}
+
 export function useUpdateSystemLicense() {
   const queryClient = useQueryClient();
-  return useMutation<SystemLicenseUpdateResult, Error, string>({
-    mutationFn: (rawContent) => {
+  return useMutation<SystemLicenseUpdateResult, Error, SystemLicenseUpload>({
+    mutationFn: (upload) => {
       if (useMock) return Promise.reject(new Error(MOCK_NOT_SUPPORTED));
-      return systemLicenseApi.update(rawContent);
+      return systemLicenseApi.update(upload.rawContent);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['systemLicense'] });

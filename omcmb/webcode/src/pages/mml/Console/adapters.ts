@@ -682,6 +682,13 @@ export function buildDeviceRows(
 
 const upperOp = (d?: MMLTaskCommandDetail): string => (d?.operationType ?? '').toString().toUpperCase();
 
+function comparableMODValue(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return '1';
+  if (normalized === 'false' || normalized === '0') return '0';
+  return value;
+}
+
 /**
  * #196：MOD 自动回读复合（SetParameterValues 下发 + GetParameterValues 回读）→ 每设备一行。
  * 把「下发值（命令 paramValues）」与「回读值（回读 LST 结果）」按 path 关联成 verify 对比，
@@ -690,6 +697,7 @@ const upperOp = (d?: MMLTaskCommandDetail): string => (d?.operationType ?? '').t
 export function buildMODReadbackRows(
   items: DeviceTaskResultItem[],
   setValues: Record<string, string>,
+  commandMeta?: { commandName?: string; commandCode?: string },
 ): ResultRow[] {
   // 按结果报文判别下发(SPV)/回读(GPV)，不依赖 commands_detail 是否透出回读命令。
   const isLst = (it: DeviceTaskResultItem): boolean =>
@@ -769,9 +777,13 @@ export function buildMODReadbackRows(
     let status: ExecStatus = 'success';
     if (!modOk) status = 'failed';
     else if (!hasReadback) status = 'unverified';
-    else if (Object.keys(setValues).some((p) => readVal(p) !== setValues[p])) status = 'mismatch';
+    else if (Object.keys(setValues).some((p) => (
+      comparableMODValue(readVal(p)) !== comparableMODValue(setValues[p])
+    ))) status = 'mismatch';
 
     rows.push({
+      commandName: commandMeta?.commandName ?? firstMod?.commandName,
+      commandCode: commandMeta?.commandCode ?? firstMod?.commandCode,
       deviceSn,
       deviceTaskId: modTaskId,
       status,
@@ -813,8 +825,11 @@ export function mapTaskToRecord(task: MMLTask): ExecRecord {
     for (const d of details) {
       if (upperOp(d) !== 'MOD') continue;
       (d.paramPaths ?? []).forEach((p, i) => {
-        // 裸路径/自定义 MOD 的下发值在 parameters[path]，结构化命令在 paramValues[i]；优先数组，缺则回退 map。
-        const v = d.paramValues?.[i] ?? d.parameters?.[p];
+        // 裸路径/自定义 MOD 的下发值在 parameters[path]；结构化命令的
+        // parameters 使用 param_refs[].param_code 作为 key，而 paramPaths 是 TR-069 path。
+        // 优先 paramValues，兼容新旧两种快照形态。
+        const paramCode = d.paramRefs?.find((ref) => ref.tr069Path === p)?.paramCode;
+        const v = d.paramValues?.[i] ?? d.parameters?.[p] ?? (paramCode ? d.parameters?.[paramCode] : undefined);
         setValues[p] = v != null ? String(v as unknown) : '';
       });
     }
@@ -833,7 +848,10 @@ export function mapTaskToRecord(task: MMLTask): ExecRecord {
       deviceCount: task.totalDevices || task.deviceSns.length,
       execMeta: { operationType: 'MOD' as MMLOperationType, read: false, label: name, commandName: name },
       columns: cols,
-      rows: buildMODReadbackRows((task.results ?? []) as unknown as DeviceTaskResultItem[], setValues),
+      rows: buildMODReadbackRows((task.results ?? []) as unknown as DeviceTaskResultItem[], setValues, {
+        commandName: detail?.commandName,
+        commandCode: detail?.commandCode,
+      }),
       // 跨刷新惰性补结果行（useConsoleHistory）据此走 buildMODReadbackRows，而非逐 PATH。
       setValues,
     };

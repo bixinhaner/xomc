@@ -140,13 +140,14 @@ northbound:
   push_targets: []
 
 # T-0100-P4-B/C + P5-a/b — License 治理层运行时配置（详 docs/project/prd/F06-license.md §5.3 §5.4）
-# 默认 strict=false（test/POC 部署没 OEM 公钥也能起来）；
-# GA 部署必改 strict=true 且 public_key_dir 下放置 OEM 公钥 .pem 文件，
-# 否则 P5-a W4 启动期 Fatal（KeyCount==0 + strict=true → 阻止启动）。
+# 旧项目 TrueLicense .lic 的 JKS/DSA 验签配置。
 license:
   signing:
-    public_key_dir: "/etc/omcgo/oem_public_keys"
-    strict: false
+    # 密码请通过部署环境注入，不要写入配置文件。
+    legacy_keystore_path: "/etc/omc/license/omcPublicKey.store"
+    legacy_store_password: "${OMC_LICENSE_STORE_PASSWORD:-}"
+    legacy_key_alias: "omcPublicKey"
+    legacy_verify_integrity: true
   log_archive:
     retention_months: 6
     minio_bucket: ""  # 空 → fallback minio.buckets.logs

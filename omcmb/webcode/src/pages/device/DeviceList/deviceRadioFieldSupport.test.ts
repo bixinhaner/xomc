@@ -30,6 +30,13 @@ describe('formatDeviceRadioField', () => {
     expect(formatDeviceRadioField(lte, 'txPower', 0)).toBe('0');
   });
 
+  it('GSM band 透出带宽样式值时，改为根据 ARFCN 推导真实频段', () => {
+    const gsm = { networkType: 'GSM', productClass: 'UNKNOWN', arfcn: '62' };
+
+    expect(formatDeviceRadioField(gsm, 'band', 'GSM200K')).toBe('GSM900');
+    expect(formatDeviceRadioField(gsm, 'band', '200')).toBe('GSM900');
+  });
+
   it('BTS 发射功率有产品模型支持，缺失时不能伪装成不适用', () => {
     const bts = { networkType: 'GSM', productClass: 'FAP/BTS' };
 

@@ -19,7 +19,7 @@
 #   sudo bash deploy/install.sh --skip-migrate           # 不跑 migrate / seed
 #   sudo bash deploy/install.sh --skip-web               # 不起 web 容器
 #   sudo bash deploy/install.sh --skip-monitoring        # 不起监控栈
-#   sudo bash deploy/install.sh --fresh-install --yes --public-host 172.24.224.78
+#   sudo bash deploy/install.sh --fresh-install --yes --public-host 192.168.1.100
 #                                                        # 清理旧数据后全新安装
 #   sudo bash deploy/install.sh --fresh-install --floor-tolerance-pct 80 ...
 #                                                        # 自定义资源下限缺口容忍度（0-99）
@@ -170,7 +170,7 @@ fi
 # 【版本相关】键(PROJECT_VERSION / IMAGE_*)不在此列,始终用新包值。
 # 注：POSTGRES_TSDB_USER/PASSWORD/DB（时序库凭据，#347）跨版本继承；TSDB_HOST 是 compose 服务名
 # （随包固定值），故【不】列入继承白名单，始终用新包值。
-ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH PM_AGGREGATION_FINALIZE_CONCURRENCY GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING"
+ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USER POSTGRES_TSDB_PASSWORD POSTGRES_TSDB_DB MINIO_ROOT_USER MINIO_ROOT_PASSWORD GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD OMCGO_JWT_SECRET OMC_SHARED_SECRET OMC_PUBLIC_HOST POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH DOCKER_LOG_MAX_SIZE DOCKER_LOG_MAX_FILE PM_AGGREGATION_FINALIZE_CONCURRENCY GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH GPV_RPC_DURABLE GPV_RPC_SOURCE_CONSUMER GPV_RPC_START_SEQUENCE GPV_RPC_CONCURRENCY GPV_RPC_QUEUE_DEPTH GPV_ACK_WAIT GPV_MAX_DELIVER GPV_MAX_ACK_PENDING"
 
 # merge_env_preserve <prev_env> <new_env>
 # 升级继承:以新包 .env 为基底(拿到新镜像 tag),把上一版 .env 中白名单键的值
@@ -297,6 +297,56 @@ set_env_value() { # set_env_value <file> <key> <value>
   return 1
 }
 
+install_logrotate_template() { # install_logrotate_template <template_name>
+  local name="$1" src dst stamp backup_dir backup
+  src="$RELEASE_DIR/deploy/logrotate.d/$name"
+  dst="/etc/logrotate.d/$name"
+  [ -f "$src" ] ||
+    die "缺少 logrotate 模板：$src" "Missing logrotate template: $src" 1
+
+  mkdir -p /etc/logrotate.d
+  if [ -e "$dst" ]; then
+    if cmp -s "$src" "$dst"; then
+      log "logrotate 已是最新：$dst" "logrotate is already up to date: $dst"
+      return 0
+    fi
+    stamp="$(date +%Y%m%d%H%M%S)"
+    backup_dir="$OMC_ROOT/etc/logrotate-backups"
+    mkdir -p "$backup_dir"
+    backup="$backup_dir/$name.bak.$stamp"
+    cp -a "$dst" "$backup" ||
+      die "备份已有 logrotate 配置失败：$dst" "Failed to back up the existing logrotate config: $dst" 1
+    warn "已备份已有 logrotate 配置：$backup" "Backed up the existing logrotate config: $backup"
+  fi
+
+  install -m 0644 "$src" "$dst" ||
+    die "安装 logrotate 配置失败：$dst" "Failed to install logrotate config: $dst" 1
+  log "安装 logrotate 配置：$dst" "Installed logrotate config: $dst"
+}
+
+install_log_retention_configs() {
+  mkdir -p "$OMC_ROOT/run/logs/nginx" /var/log/omc
+  if id omcops >/dev/null 2>&1; then
+    for log_file in /var/log/omc/db-backup.log /var/log/omc/db-restore-drill.log; do
+      if [ ! -e "$log_file" ]; then
+        install -o omcops -g omcops -m 0644 /dev/null "$log_file" ||
+          warn "创建 $log_file 失败；请确认 omcops 有权限写 /var/log/omc" "Failed to create $log_file; confirm omcops can write to /var/log/omc"
+      fi
+    done
+  else
+    warn "未发现 omcops 用户；已安装日志轮转配置，但数据库备份 cron 账号需先创建并具备 /var/log/omc 写权限" "User omcops was not found; log rotation configs were installed, but the database backup cron user must be created and allowed to write /var/log/omc"
+  fi
+
+  install_logrotate_template omc-nginx
+  install_logrotate_template omc-db-maintenance
+
+  if command -v logrotate >/dev/null 2>&1; then
+    log "logrotate 已配置；系统将按 cron/timer 周期自动轮转 OMC 文件日志" "logrotate is configured; the system cron/timer will rotate OMC file logs automatically"
+  else
+    warn "未检测到 logrotate 命令；配置已写入 /etc/logrotate.d，请安装 logrotate 并启用 cron/timer" "logrotate was not found; configs were written to /etc/logrotate.d. Install logrotate and enable its cron/timer"
+  fi
+}
+
 fresh_install_reset() {
   local package_env="$PKG_ROOT/deploy/.env"
   local old_deploy="$OMC_ROOT/current/deploy"
@@ -324,7 +374,7 @@ fresh_install_reset() {
   [ -n "$PUBLIC_HOST_OVERRIDE" ] ||
     PUBLIC_HOST_OVERRIDE="$(deploy_env_file_value OMC_PUBLIC_HOST "$package_env" 2>/dev/null || true)"
   deploy_env_public_host_valid "$PUBLIC_HOST_OVERRIDE" ||
-    die "全新安装必须提供有效的 --public-host（例如 172.24.224.78）" "Fresh install requires a valid --public-host (for example, 172.24.224.78)" 1
+    die "全新安装必须提供有效的 --public-host（例如 192.168.1.100）" "Fresh install requires a valid --public-host (for example, 192.168.1.100)" 1
   set_env_value "$package_env" OMC_PUBLIC_HOST "$PUBLIC_HOST_OVERRIDE" ||
     die "无法写入 $package_env 的 OMC_PUBLIC_HOST" "Unable to write OMC_PUBLIC_HOST to $package_env" 1
 
@@ -548,6 +598,8 @@ docker info >/dev/null 2>&1 || die "docker 服务不可用，请先 systemctl st
 [ -f "$PKG_ROOT/deploy/docker-compose.app.yml" ]       || die "缺 deploy/docker-compose.app.yml" "Missing deploy/docker-compose.app.yml" 1
 [ "$SKIP_WEB" = 1 ]        || [ -f "$PKG_ROOT/deploy/docker-compose.web.yml" ]        || die "缺 deploy/docker-compose.web.yml（或加 --skip-web）" "Missing deploy/docker-compose.web.yml (or use --skip-web)" 1
 [ "$SKIP_MONITORING" = 1 ] || [ -f "$PKG_ROOT/deploy/docker-compose.monitoring.yml" ] || die "缺 deploy/docker-compose.monitoring.yml（或加 --skip-monitoring）" "Missing deploy/docker-compose.monitoring.yml (or use --skip-monitoring)" 1
+[ -f "$PKG_ROOT/deploy/logrotate.d/omc-nginx" ]        || die "缺 deploy/logrotate.d/omc-nginx" "Missing deploy/logrotate.d/omc-nginx" 1
+[ -f "$PKG_ROOT/deploy/logrotate.d/omc-db-maintenance" ] || die "缺 deploy/logrotate.d/omc-db-maintenance" "Missing deploy/logrotate.d/omc-db-maintenance" 1
 
 # OMC_PUBLIC_HOST 是基站回传 PM/MR 文件所需的运维地址，不能等到复制包、
 # 切换 current 或覆盖 etc 后才校验。新包显式配置优先；新包留空时继承现行
@@ -930,6 +982,9 @@ log "current → $RELEASE_DIR" "current -> $RELEASE_DIR"
 cp -f "$RELEASE_DIR/deploy/.env" "$OMC_ROOT/etc/.env.saved" 2>/dev/null || true
 # resources.env 同样落 etc/ 快照,供 uninstall→reinstall 继承(与 .env.saved 对称)。
 [ -f "$RELEASE_DIR/deploy/resources.env" ] && cp -f "$RELEASE_DIR/deploy/resources.env" "$OMC_ROOT/etc/resources.env.saved" 2>/dev/null || true
+
+# 文件日志保留策略：随离线包安装到 /etc/logrotate.d，已有同名配置先备份再替换。
+install_log_retention_configs
 
 # 凭证就位（#175）：必须在下方 Step 4 `source .env`（把 .env 导入 shell 环境，compose 取值
 # 优先 shell env）与 Step 7 起 infra 之前执行，否则容器仍拿到 REPLACE_ME/默认值。

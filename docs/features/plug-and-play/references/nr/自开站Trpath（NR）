@@ -1,0 +1,68 @@
+Trpath	参数名
+Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.PhyCellID	PCI
+Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.Antenna.NumOfTxAntenna	TX Antenna Count
+Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.Antenna.NumOfRxAntenna	RX Antenna Count
+Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{i}.FreqBandIndicatorNR	Band
+Services.FAPService.1.CellConfig.{i}.NR.RAN.RF.NRARFCNUL	UL NRARFCN
+Services.FAPService.1.CellConfig.{i}.NR.RAN.RF.NRARFCNDL	DL NRARFCN
+Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing	DL SubCarrierSpacing
+Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing	UL SubCarrierSpacing
+Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth	DL CarrierBandWidth(RB)
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth	UL CarrierBandWidth(RB)
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PowerModify	Power Modify
+Device.Ethernet.Interface.{i}.Name	Interface Name
+	Interface ID
+Device.Ethernet.Interface.{i}.Enable	Interface Enable
+Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType	Addressing Type
+Device.Ethernet.Interface.{i}.IPv4Address.{i}.PortType	Port Type
+Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress	IP
+Device.Ethernet.Interface.{i}.IPv4Address.{i}.DefaultGateway	Default Gateway
+Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask	Subnet Mask
+Device.Ethernet.Interface.{i}.IPv6Address.{i}.Origin	Addressing Type
+Device.Ethernet.Interface.{i}.IPv6Address.{i}.PortType	Port Type
+Device.Ethernet.Interface.{i}.IPv6Address.{i}.IPAddress	IP
+Device.Ethernet.Interface.{i}.IPv6Address.{i}.DefaultGateway	Default Gateway
+Device.Ethernet.Interface.{i}.IPv6Address.{i}.PrefixLength	Prefix Length
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.Name	Name
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.Id	ID
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.Enable	Enable
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.AddressingType	Addressing Type
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.PortType	Port Type
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.IPAddress	IP
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.DefaultGateway	Default Gateway
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.SubnetMask	Subnet Mask
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.Origin	Addressing Type
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.PortType	Port Type
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.IPAddress	IP
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.DefaultGateway	Default Gateway
+Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.PrefixLength	Prefix Length
+Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NguLocalIpAddrList	NGAP Local IP
+Device.LAN_HostConfigManagement.IPInterface.NgapMgmt.NguLocalIpAddrList	AMF IP
+	Egtpu Local IP
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.VoNR.VoNRSwitch	VONR
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.VoNR.EpsFallBackType	EPS Fallback Type
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.SsbFrequency	SsbFrequency
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.OffsetToPointA	OffsetToPointA
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.SSB.SsbSubcarrierOffset	SSB Sub Carrier Offset
+Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBIdLength	GNB ID Length
+Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId	GNB ID
+Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBName	GNB Name
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.NrcellIdentity	Cell ID
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.TAC	TAC
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.Ranac	Ranac
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigGeneric.PrachConfigurationIndex	Prach Config Index
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPUL.{i}.RACHConfigGeneric.RootSequenceIndex	Root Seq Index
+Device.FAP.GPS.SyncSource	Sync Source
+Device.FAP.Synchronization.PpsTimeMode	PPS Time Module
+Device.DeviceInfo.X_BAICELLS_COM_FORCED_SYNC_CONTROL_Switch	forced sync
+Device.ManagementServer.URL	Management Server
+FAP.PerfMgmt.Config.{i}.Enable	Performance Management
+FAP.PerfMgmt.Config.{i}.Alias	Alias
+FAP.PerfMgmt.Config.{i}.URL	URL
+FAP.PerfMgmt.Config.{i}.Username	UserName
+FAP.PerfMgmt.Config.{i}.Password	Password
+Device.DeviceInfo.HUB.1.HubPort1.NrPortCfg 	添加5G同频
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.IntraFreq.{i}.SSBFrequency
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.IntraFreq.{i}.SubcarrierSpacing
+Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.IntraFreq.{i}.DeriveSSBIndexFromCell
+Device.FAP.gNB.config.dns	DNS

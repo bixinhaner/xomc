@@ -558,6 +558,25 @@ func TestPromoteFromBackup_FallbackToLatestWhenTaskIDMismatch(t *testing.T) {
 // ImportFromUpload tests
 // ─────────────────────────────────────────────────────────────────────────
 
+func TestImportFromUpload_AllowsUnknownDevice(t *testing.T) {
+	repo := newFakeSnapshotRepo()
+	mover := &fakeMover{}
+	svc := newTestSnapshotService(t, repo, mover, nil,
+		&fakeSnapshotDeviceLookup{bySN: map[string]*model.Device{}})
+
+	res, err := svc.ImportFromUpload(t.Context(), []SnapshotImportItem{{
+		FileName: "NOT-REGISTERED_CFG.xml",
+		Content:  []byte("<config/>")},
+	}, "alice")
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"NOT-REGISTERED"}, res.Succeeded)
+	require.Empty(t, res.Failed)
+	stored, err := repo.GetBySerialNumber(t.Context(), "NOT-REGISTERED")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+}
+
 func TestImportFromUpload_AllSucceed(t *testing.T) {
 	repo := newFakeSnapshotRepo()
 	mover := &fakeMover{}

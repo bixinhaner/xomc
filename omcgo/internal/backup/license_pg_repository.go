@@ -25,6 +25,7 @@ var licenseColumns = []string{
 	"file_size",
 	"source",
 	"description",
+	"auto_dispatch_pending",
 	"update_by",
 	"update_time",
 	"created_at",
@@ -61,6 +62,7 @@ func (r *PgLicenseRepository) Upsert(ctx context.Context, lic *DeviceLicense) er
 	if lic.Source == "" {
 		lic.Source = LicenseSourceManualUpload
 	}
+	lic.AutoDispatchPending = true
 
 	query, args, err := storage.Psql.Insert("device_licenses").
 		Columns(
@@ -84,6 +86,7 @@ func (r *PgLicenseRepository) Upsert(ctx context.Context, lic *DeviceLicense) er
 			file_size     = EXCLUDED.file_size,
 			source        = EXCLUDED.source,
 			description   = COALESCE(EXCLUDED.description, device_licenses.description),
+			auto_dispatch_pending = TRUE,
 			update_by     = COALESCE(EXCLUDED.update_by, device_licenses.update_by),
 			update_time   = NOW(),
 			updated_at    = NOW()
@@ -95,6 +98,40 @@ func (r *PgLicenseRepository) Upsert(ctx context.Context, lic *DeviceLicense) er
 	if scanErr := r.pool.QueryRow(ctx, query, args...).
 		Scan(&lic.CreatedAt, &lic.UpdatedAt, &lic.UpdateTime); scanErr != nil {
 		return fmt.Errorf("upsert device_licenses: %w", scanErr)
+	}
+	return nil
+}
+
+// ClaimAutoDispatch atomically claims one pending preinstall. Registered and
+// online events can arrive together, so a read-then-update sequence would
+// enqueue the same license twice.
+func (r *PgLicenseRepository) ClaimAutoDispatch(ctx context.Context, sn string) (bool, error) {
+	query, args, err := storage.Psql.Update("device_licenses").
+		Set("auto_dispatch_pending", false).
+		Where(sq.Eq{"serial_number": sn, "auto_dispatch_pending": true}).
+		Suffix("RETURNING serial_number").ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build device_licenses dispatch claim SQL: %w", err)
+	}
+	var claimedSN string
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&claimedSN); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("claim device_license auto dispatch sn=%s: %w", sn, err)
+	}
+	return true, nil
+}
+
+func (r *PgLicenseRepository) ReleaseAutoDispatch(ctx context.Context, sn string) error {
+	query, args, err := storage.Psql.Update("device_licenses").
+		Set("auto_dispatch_pending", true).
+		Where(sq.Eq{"serial_number": sn}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build device_licenses dispatch release SQL: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("release device_license auto dispatch sn=%s: %w", sn, err)
 	}
 	return nil
 }
@@ -277,7 +314,7 @@ func scanLicense(row pgx.Row) (*DeviceLicense, error) {
 	if err := row.Scan(
 		&l.SerialNumber, &l.EnbName, &l.ProductType,
 		&l.FileName, &l.FileExt, &l.ObjectBucket, &l.ObjectPath,
-		&l.MD5, &l.FileSize, &source, &l.Description, &l.UpdateBy,
+		&l.MD5, &l.FileSize, &source, &l.Description, &l.AutoDispatchPending, &l.UpdateBy,
 		&l.UpdateTime, &l.CreatedAt, &l.UpdatedAt,
 	); err != nil {
 		return nil, err
@@ -292,7 +329,7 @@ func scanLicenseRow(rows pgx.Rows) (*DeviceLicense, error) {
 	if err := rows.Scan(
 		&l.SerialNumber, &l.EnbName, &l.ProductType,
 		&l.FileName, &l.FileExt, &l.ObjectBucket, &l.ObjectPath,
-		&l.MD5, &l.FileSize, &source, &l.Description, &l.UpdateBy,
+		&l.MD5, &l.FileSize, &source, &l.Description, &l.AutoDispatchPending, &l.UpdateBy,
 		&l.UpdateTime, &l.CreatedAt, &l.UpdatedAt,
 	); err != nil {
 		return nil, err

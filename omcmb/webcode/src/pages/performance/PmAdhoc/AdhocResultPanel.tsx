@@ -5,7 +5,7 @@
  * - 不写 pm_panels 表，运行时构造（与 plan §G7-Gap-2 一致）
  * - 粒度 Tab 完全由结果数据驱动 — task.granularities 多个时 Tab 显示
  *
- * 与 G6 panel 一致的视觉：ECharts Line + 缺采 '-' 断线
+ * 与首页 KPI 趋势一致的视觉：ECharts Line + 缺采 '-' 保留、跨空桶续连
  */
 
 import { useEffect, useMemo, useState } from 'react';

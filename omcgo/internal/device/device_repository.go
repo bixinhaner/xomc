@@ -48,7 +48,7 @@ type DeviceFilter struct {
 	// Extended filters (device_info / devices additional fields)
 	Manufacturer  *string    // devices.manufacturer exact match
 	ProductID     *uuid.UUID // devices.product_id exact match（T-0098 产品装配件软引用；下拉来自 /products）
-	ProductClass  *string    // devices.product_class exact match
+	ProductClass  *string    // devices.product_class exact match; CSV means match any value
 	RFStatus      *string    // device_info.rf_status exact match
 	CellStatus    *string    // device_info.cell_status exact match
 	ProjectStatus *string    // device_info.project_status exact match
@@ -678,8 +678,9 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 		countBuilder = countBuilder.Where(sq.Eq{"d.product_id": *filter.ProductID})
 	}
 	if filter.ProductClass != nil && *filter.ProductClass != "" {
-		builder = builder.Where(sq.Eq{"d.product_class": *filter.ProductClass})
-		countBuilder = countBuilder.Where(sq.Eq{"d.product_class": *filter.ProductClass})
+		productClasses := SplitCSV(*filter.ProductClass)
+		builder = builder.Where(sq.Eq{"d.product_class": productClasses})
+		countBuilder = countBuilder.Where(sq.Eq{"d.product_class": productClasses})
 	}
 
 	// Count total
@@ -917,6 +918,7 @@ func deviceColumns() []string {
 	return []string{
 		"d.id", "d.serial_number", "d.oui", "d.product_class", "d.manufacturer", "d.model_name",
 		"d.carrier", "d.technology",
+		"d.product_id", "d.param_model_id",
 		"d.lifecycle_state", "d.is_online", // T-0162: 替代 d.status
 		"d.firmware_version",
 		"host(d.ip_address) as ip_address", "d.connection_request_url",
@@ -949,6 +951,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 	err := row.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
 		&d.Carrier, &d.Technology,
+		&d.ProductID, &d.ParamModelID,
 		&d.LifecycleState, &d.IsOnline, // T-0162: 替代 &d.Status
 		&firmwareVersion,
 		&ipAddr, &connReqURL,
@@ -1033,6 +1036,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 	err := rows.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
 		&d.Carrier, &d.Technology,
+		&d.ProductID, &d.ParamModelID,
 		&d.LifecycleState, &d.IsOnline, // T-0162: 替代 &d.Status
 		&firmwareVersion,
 		&ipAddr, &connReqURL,

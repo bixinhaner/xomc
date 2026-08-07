@@ -977,7 +977,6 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		eventParams = taskItem.Params
 	}
 	h.publishRPCResponseEvent(r.Context(), deviceSN, method, body, eventParams, taskItem, log)
-
 	// 在下发下一条命令前检查单会话 RPC 上限。
 	if h.sessionRPCLimitReached(session) {
 		log.Info("ACS session RPC limit reached after response, completing session",
@@ -1762,9 +1761,14 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 		entry.CwmpID = cwmpID
 	}
 
-	// 发布事件
-	evt, _ := event.NewEvent(event.SubjectDeviceTransferComplete, tc)
-	h.eventBus.Publish(r.Context(), event.SubjectDeviceTransferComplete, evt)
+	// 发布事件。TransferComplete SOAP 正文没有设备标识；把会话中的序列号放入
+	// metadata，供设备未正确回传 CommandKey 时做受限的设备级容错关联。
+	evt, evtErr := newTransferCompleteEvent(*tc, deviceSN)
+	if evtErr != nil {
+		log.Error("build TransferComplete event", zap.Error(evtErr))
+	} else if err := h.eventBus.Publish(r.Context(), event.SubjectDeviceTransferComplete, evt); err != nil {
+		log.Error("publish TransferComplete event", zap.Error(err))
+	}
 
 	// 发送 TransferCompleteResponse
 	resp, err := soap.RenderResponse(soap.TransferCompleteRespTmpl, soap.InformResponseData{ID: cwmpID})
@@ -1783,6 +1787,17 @@ func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request,
 		h.setSessionCookie(w, sessionID)
 	}
 	h.sendSOAPResponse(w, resp, log)
+}
+
+func newTransferCompleteEvent(tc tr069.TransferComplete, deviceSN string) (event.Event, error) {
+	evt, err := event.NewEvent(event.SubjectDeviceTransferComplete, tc)
+	if err != nil {
+		return event.Event{}, err
+	}
+	if deviceSN = strings.TrimSpace(deviceSN); deviceSN != "" {
+		evt.Metadata = map[string]string{event.MetadataDeviceSN: deviceSN}
+	}
+	return evt, nil
 }
 
 // handleAutonomousTransferComplete 处理 CPE 设备发送的 AutonomousTransferComplete 消息
@@ -1875,6 +1890,7 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 	payload := map[string]interface{}{
 		"device_id":      inform.DeviceId,
 		"events":         eventCodes,
+		"event_structs":  inform.Event,
 		"parameter_list": inform.ParameterList,
 		"current_time":   inform.CurrentTime,
 		"retry_count":    inform.RetryCount,
@@ -1890,6 +1906,10 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 		subject = event.SubjectDeviceBootstrap
 	case tr069.IsAlarm(inform.Event):
 		subject = event.SubjectDeviceAlarm
+	case tr069.IsStartupResultReport(inform.Event):
+		subject = event.SubjectDeviceStartupResultReport
+	case tr069.IsStartupStageReport(inform.Event):
+		subject = event.SubjectDeviceStartupStageReport
 	case tr069.IsRebootComplete(inform.Event), tr069.IsBoot(inform.Event):
 		subject = event.SubjectDeviceRebootComplete
 	case tr069.IsUpgradeFinish(inform.Event):

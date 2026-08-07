@@ -61,6 +61,7 @@ const CARDS: CardSpec[] = [
       { key: 'max_retention_days', type: 'int', min: 1, max: 3650 },
       { key: 'max_file_count', type: 'int', min: 0, max: 100000 },
       { key: 'max_file_count_per_device', type: 'int', min: 0, max: 100000 },
+      { key: 'cleanup_interval_minutes', type: 'int', min: 10, max: 1440 },
     ],
   },
   {
@@ -197,6 +198,18 @@ function CategoryConfigCard({ spec }: { spec: CardSpec }) {
               name={f.key}
               label={t(`retentionBp.field.${f.key}`)}
               valuePropName={f.type === 'bool' ? 'checked' : 'value'}
+              rules={f.type === 'bool' ? undefined : [
+                {
+                  type: 'number',
+                  min: f.min,
+                  max: f.max,
+                  message: t('retentionBp.validate.range', {
+                    field: t(`retentionBp.field.${f.key}`),
+                    min: f.min ?? 0,
+                    max: f.max ?? 0,
+                  }),
+                },
+              ]}
               style={{ marginBottom: 12, maxWidth: 360 }}
             >
               {f.type === 'bool' ? (

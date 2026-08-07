@@ -34,7 +34,7 @@ import {
   validateValue,
   type QuickSettingsInstanceContext,
 } from './validators';
-import { inferDeviceTimeMode, isNrNetworkType, mapDeviceTimeModeLabel } from './deviceTimeMode';
+import { inferDeviceTimeMode, isNrNetworkType, mapDeviceTimeModeLabel, shouldShowDeviceTimeNtpServerFields } from './deviceTimeMode';
 import { formatDeviceFaultBrief } from './MultiInstanceTable';
 import {
   isPlmnRowLimitReached,
@@ -439,12 +439,6 @@ function formatTime(at: number): string {
 
 function isNtpServerPath(path: string): boolean {
   return /^Device\.Time\.NTPServer\d+$/.test(path);
-}
-
-function isValidNtpServerValue(raw: unknown): boolean {
-  const value = String(raw ?? '').trim();
-  if (!value) return false;
-  return !['0.0.0.0', '::', '::0', '0:0:0:0:0:0:0:0'].includes(value);
 }
 
 /** T-0146:状态机 Tag 显示规则。 */
@@ -1204,8 +1198,10 @@ export default function CellParameterForm({
   const watchedLocalTimeZoneName = Form.useWatch('LocalTimeZoneName', form);
   const watchedIpsecEnable = Form.useWatch('IPSEC_ENABLE', form);
   const watchedPpsTimeMode = Form.useWatch('PpsTimeMode', form);
+  const watchedDeviceTimeEnable = Form.useWatch('Enable', form);
   const dlSubCarrierSpacing = Form.useWatch('DLSubCarrierSpacing', form);
   const ulSubCarrierSpacing = Form.useWatch('ULSubCarrierSpacing', form);
+  const [deviceTimeShowNtpServerFields, setDeviceTimeShowNtpServerFields] = useState(true);
   const updateMutation = useUpdateParameters();
   const queryClient = useQueryClient();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -1435,21 +1431,17 @@ export default function CellParameterForm({
         return false;
       });
     }
-    if (!isDeviceTimeGroup || deviceTimeParams === undefined) {
+    if (!isDeviceTimeGroup) {
       return effectiveParams;
     }
-    if (deviceTimeParams.length === 0) {
-      return effectiveParams;
-    }
-    const availableTimeParams = new Map(deviceTimeParams.map((item) => [item.parameterPath, item.parameterValue]));
     return effectiveParams.filter((param) => {
       const path = param.standardPath || '';
-      if (!isNtpServerPath(path)) {
-        return true;
+      if (!deviceTimeShowNtpServerFields && isNtpServerPath(path)) {
+        return false;
       }
-      return isValidNtpServerValue(availableTimeParams.get(path));
+      return true;
     });
-  }, [bmPpsTimeModeParams, deviceTimeParams, draft, effectiveParams, gnbSyncFapSchemaResp, isBmSyncSourceGroup, isDeviceTimeGroup, isGnbSyncSourceGroup, watchedPpsTimeMode, resolveReadPath]);
+  }, [bmPpsTimeModeParams, draft, deviceTimeShowNtpServerFields, effectiveParams, gnbSyncFapSchemaResp, isBmSyncSourceGroup, isDeviceTimeGroup, isGnbSyncSourceGroup, watchedPpsTimeMode, resolveReadPath]);
   const visibleParamNameSet = useMemo(
     () => new Set(visibleParams.map((param) => param.name)),
     [visibleParams],
@@ -1599,6 +1591,19 @@ export default function CellParameterForm({
     }
     return map;
   }, [mmeIpPlmnParams, nrCommonParams, nrNguParams, nrNguFallbackParams, deviceTimeParams, bmPpsTimeModeParams, bmGnssSyncSourceParams, bmPtpConfigParams, ipsecControlParams]);
+  useEffect(() => {
+    if (!isDeviceTimeGroup) {
+      setDeviceTimeShowNtpServerFields(true);
+      return;
+    }
+
+    const currentMode = watchedDeviceTimeEnable
+      ?? draft?.Enable
+      ?? inferDeviceTimeMode(rawParameterByPath, schemaByPath, instanceContext.networkType);
+    setDeviceTimeShowNtpServerFields(
+      shouldShowDeviceTimeNtpServerFields(instanceContext.networkType, String(currentMode ?? '')),
+    );
+  }, [draft?.Enable, instanceContext.networkType, isDeviceTimeGroup, rawParameterByPath, schemaByPath, watchedDeviceTimeEnable]);
   const timeZoneParam = useMemo(
     () => visibleParams.find((param) => param.name === 'LocalTimeZoneName'),
     [visibleParams],
@@ -1846,6 +1851,10 @@ export default function CellParameterForm({
           : special?.kind === 'bind-select' && p.name === 'NguBindInterface'
             ? findRawValueBySuffix(nrNguParams, '.BindInterface') ?? findRawValueBySuffix(nrNguFallbackParams, '.NguLocalIpAddrList')
             : undefined);
+
+      if (isDeviceTimeGroup && !deviceTimeShowNtpServerFields && isNtpServerPath(path)) {
+        continue;
+      }
 
       if (special?.kind === 'mme-ip-plmn-table') {
         const normalizedRows = normalizeMmeIpPlmnRows(toMmeIpPlmnRows(values[p.name]));
@@ -2491,6 +2500,11 @@ export default function CellParameterForm({
                   <Select
                     disabled={!modeWritable}
                     options={modeOptions}
+                    onChange={(value) => {
+                      setDeviceTimeShowNtpServerFields(
+                        shouldShowDeviceTimeNtpServerFields(instanceContext.networkType, String(value ?? '')),
+                      );
+                    }}
                   />
                 </Form.Item>
               </Col>

@@ -47,10 +47,13 @@ type DeviceLicense struct {
 	FileSize     int64         `json:"file_size"`
 	Source       LicenseSource `json:"source"`
 	Description  *string       `json:"description,omitempty"`
-	UpdateBy     *string       `json:"update_by,omitempty"`
-	UpdateTime   time.Time     `json:"update_time"`
-	CreatedAt    time.Time     `json:"created_at"`
-	UpdatedAt    time.Time     `json:"updated_at"`
+	// AutoDispatchPending marks a preinstalled license that still needs to be
+	// sent when its device is registered or comes online.
+	AutoDispatchPending bool      `json:"auto_dispatch_pending"`
+	UpdateBy            *string   `json:"update_by,omitempty"`
+	UpdateTime          time.Time `json:"update_time"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // LicenseFilter 列表查询条件。

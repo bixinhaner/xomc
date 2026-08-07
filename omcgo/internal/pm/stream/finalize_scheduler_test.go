@@ -23,6 +23,92 @@ func TestFinalizeSchedulerUsesConfiguredFinalizerConcurrency(t *testing.T) {
 	}
 }
 
+func TestFinalizeSchedulerReplaysOnlyIncompleteDeviceHours(t *testing.T) {
+	deviceVersion := uuid.New()
+	windows := finalizeTestWindows(deviceVersion, GranularityHourly, 2)
+	windows[0].ExpectedSlots, windows[0].ReceivedSlots = 4, 4
+	windows[1].ExpectedSlots, windows[1].ReceivedSlots = 4, 3
+	repo := newMemoryFinalizeRepository(windows...)
+	replayed := make(map[string]int)
+	reasons := make(map[string]CloseReason)
+	scanner := newTestTimeoutScanner(repo, deviceVersion, 1, func(
+		_ context.Context, key WindowKey, reason CloseReason, _ uuid.UUID,
+	) error {
+		reasons[key.EntityKey] = reason
+		return nil
+	}).SetIncompleteDeviceHourReplay(func(
+		_ context.Context, key WindowKey,
+	) (bool, error) {
+		replayed[key.EntityKey]++
+		return true, nil
+	})
+
+	if err := scanner.runOnce(context.Background()); err != nil {
+		t.Fatalf("run device-hour replay scheduler: %v", err)
+	}
+	if replayed[windows[0].Key.EntityKey] != 0 {
+		t.Fatalf("complete 4/4 window was replayed")
+	}
+	if replayed[windows[1].Key.EntityKey] != 1 {
+		t.Fatalf("incomplete 3/4 window replay calls = %d, want 1", replayed[windows[1].Key.EntityKey])
+	}
+	if reasons[windows[0].Key.EntityKey] != CloseComplete ||
+		reasons[windows[1].Key.EntityKey] != CloseComplete {
+		t.Fatalf("final reasons = %v, replayed 3/4 and original 4/4 must both be complete", reasons)
+	}
+}
+
+func TestFinalizeSchedulerKeepsTimeoutWhenDurableReplayCannotFillGap(t *testing.T) {
+	deviceVersion := uuid.New()
+	windows := finalizeTestWindows(deviceVersion, GranularityHourly, 1)
+	windows[0].ExpectedSlots, windows[0].ReceivedSlots = 4, 3
+	repo := newMemoryFinalizeRepository(windows...)
+	var reason CloseReason
+	scanner := newTestTimeoutScanner(repo, deviceVersion, 1, func(
+		_ context.Context, _ WindowKey, got CloseReason, _ uuid.UUID,
+	) error {
+		reason = got
+		return nil
+	}).SetIncompleteDeviceHourReplay(func(
+		context.Context, WindowKey,
+	) (bool, error) {
+		return false, nil
+	})
+
+	if err := scanner.runOnce(context.Background()); err != nil {
+		t.Fatalf("run incomplete replay scheduler: %v", err)
+	}
+	if reason != CloseTimeout {
+		t.Fatalf("unfilled device hour reason = %s, want timeout", reason)
+	}
+}
+
+func TestFinalizeSchedulerDoesNotPublishWhenDurableReplayFails(t *testing.T) {
+	deviceVersion := uuid.New()
+	windows := finalizeTestWindows(deviceVersion, GranularityHourly, 1)
+	windows[0].ExpectedSlots, windows[0].ReceivedSlots = 4, 3
+	repo := newMemoryFinalizeRepository(windows...)
+	var finalized atomic.Int64
+	scanner := newTestTimeoutScanner(repo, deviceVersion, 1, func(
+		context.Context, WindowKey, CloseReason, uuid.UUID,
+	) error {
+		finalized.Add(1)
+		return nil
+	}).SetIncompleteDeviceHourReplay(func(
+		context.Context, WindowKey,
+	) (bool, error) {
+		return false, errors.New("durable replay unavailable")
+	})
+
+	err := scanner.runOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "durable replay unavailable") {
+		t.Fatalf("run device-hour replay scheduler error = %v", err)
+	}
+	if finalized.Load() != 0 {
+		t.Fatalf("finalizer calls = %d, want 0 after replay failure", finalized.Load())
+	}
+}
+
 func TestHourlyPreparationStartsAtWindowEndWhileLongPeriodsKeepGrace(t *testing.T) {
 	now := time.Date(2026, 8, 1, 15, 0, 30, 0, time.UTC)
 

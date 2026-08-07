@@ -16,11 +16,18 @@ networks:
     name: omcgo-net
     driver: bridge
 
+x-omc-json-log: &omc-json-log
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-50m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+
 services:
   # ── GPV RPC 无损升级接力（升级/重启 app 前一次性运行）────────────────
   gpv-handoff:
     image: ${IMAGE_APP}
     restart: "no"
+    logging: *omc-json-log
     profiles: ["operations"]
     entrypoint: ["omcgo-gpv-handoff"]
     command: ["--config", "/etc/omcgo/app.prod.yaml"]
@@ -42,6 +49,7 @@ services:
   migrate-schema:
     image: ${IMAGE_APP}
     restart: "no"
+    logging: *omc-json-log
     network_mode: "service:postgres"
     environment:
       TZ: "Asia/Shanghai"
@@ -77,6 +85,7 @@ services:
   migrate-seed-sql:
     image: ${IMAGE_APP}
     restart: "no"
+    logging: *omc-json-log
     network_mode: "service:postgres"
     environment:
       TZ: "Asia/Shanghai"
@@ -113,6 +122,7 @@ services:
   migrate-tsdb-schema:
     image: ${IMAGE_APP}
     restart: "no"
+    logging: *omc-json-log
     network_mode: "service:postgres-tsdb"
     environment:
       TZ: "Asia/Shanghai"
@@ -148,6 +158,7 @@ services:
   app:
     image: ${IMAGE_APP}
     restart: unless-stopped
+    logging: *omc-json-log
     # 与 Go 端 shutdown_timeout(30s) 对齐：留足 GracefulShutdown 关 HTTP/gRPC/连接池
     stop_grace_period: 30s
     deploy:
@@ -238,6 +249,7 @@ services:
   acs: &acs-service
     image: ${IMAGE_ACS}
     restart: unless-stopped
+    logging: *omc-json-log
     # 2 万设备同步 Inform 波峰会瞬时建立数千条 Nginx→ACS 连接。默认
     # somaxconn=4096 / SYN backlog=2048 会让连接在代理侧超时；显式扩大
     # 容器网络命名空间内的监听队列，与 session.max_concurrent=30000 对齐。
@@ -328,6 +340,7 @@ services:
   worker:
     image: ${IMAGE_WORKER}
     restart: unless-stopped
+    logging: *omc-json-log
     # 与 Go 端 shutdown_timeout(30s) 对齐
     stop_grace_period: 30s
     deploy:
@@ -408,6 +421,7 @@ services:
     image: ${IMAGE_WORKER}
     profiles: ["operations"]
     restart: "no"
+    logging: *omc-json-log
     entrypoint: ["omcctl", "pm-redis", "migrate"]
     command: ["--dry-run"]
     deploy:

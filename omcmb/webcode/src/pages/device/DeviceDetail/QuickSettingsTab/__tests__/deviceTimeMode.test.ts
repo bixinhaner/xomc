@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inferDeviceTimeMode, isNrNetworkType, mapDeviceTimeModeLabel } from '../deviceTimeMode';
+import { inferDeviceTimeMode, isNrNetworkType, mapDeviceTimeModeLabel, shouldShowDeviceTimeNtpServerFields } from '../deviceTimeMode';
 
 describe('device time mode mapping', () => {
   const labels = {
@@ -43,5 +43,12 @@ describe('device time mode mapping', () => {
     expect(inferDeviceTimeMode(rawByPath, schemaByPath, 'nr')).toBe('1');
     // non-NR: has server -> enable(1)
     expect(inferDeviceTimeMode(rawByPath, schemaByPath, 'lte')).toBe('1');
+  });
+
+  it('hides NTP server fields only for NR server mode', () => {
+    expect(shouldShowDeviceTimeNtpServerFields('nr', '1')).toBe(true);
+    expect(shouldShowDeviceTimeNtpServerFields('nr', '0')).toBe(false);
+    expect(shouldShowDeviceTimeNtpServerFields('nr', 'server')).toBe(false);
+    expect(shouldShowDeviceTimeNtpServerFields('lte', '0')).toBe(true);
   });
 });

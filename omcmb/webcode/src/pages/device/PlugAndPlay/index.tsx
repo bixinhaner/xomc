@@ -23,7 +23,10 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 import {
   useProvisioningTasks,
-  useRetryProvisioningTask,
+  useRetryPlugAndPlayTask,
+  usePlugAndPlayPolicies,
+  useSetPlugAndPlayPolicyEnabled,
+  useDeletePlugAndPlayPolicy,
 } from '@core/hooks/api/useProvisioning';
 import {
   mapTaskToExecuteView,
@@ -37,6 +40,11 @@ import BatchRetryDialog from './components/BatchRetryDialog';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { useAppStore } from '@core/store/appStore';
 import { getI18nText } from '@core/utils/i18nText';
+import { useProductClasses } from '@core/hooks/api/useDevices';
+import { useProductList } from '@core/hooks/api/useProducts';
+import { toSupportedProductClassOptions } from './productClassOptions';
+import ProductClassSelect from './components/ProductClassSelect';
+import { getPolicyActionAvailability } from './policyActionAvailability';
 
 const { Text } = Typography;
 
@@ -48,6 +56,7 @@ interface Policy {
   policyName: string;
   policyNameI18n?: Record<string, string>;
   productClass: string;
+  productClasses: string[];
   executeType: ExecuteType;
   selfStartEnable: '0' | '1';
   upgradeEnable: '0' | '1';
@@ -58,92 +67,6 @@ interface Policy {
   updateTime: string;
 }
 
-// Product types
-const PRODUCT_TYPES = [
-  { label: 'QAFA', value: 'QAFA' },
-  { label: 'QAFB', value: 'QAFB' },
-  { label: 'QAFC', value: 'QAFC' },
-  { label: 'CPE-A100', value: 'CPE-A100' },
-  { label: 'CPE-B200', value: 'CPE-B200' },
-];
-
-// 策略管理（自动开通策略）目前**没有后端端点**——provision 域后端（F09）只暴露
-// /api/v1/provisioning/tasks（任务列表/详情/创建/重试），无 policies 资源。
-// 因此策略列表仍为前端配置态（增删改/开关只改本地 state），等后端补 policies API 后再接线。
-// 见 issue #140：本次只接线「执行状态」任务列表为真实 API。
-const MOCK_POLICIES: Policy[] = [
-  {
-    policyId: 'pnp-1',
-    policyName: 'QAFA自动开通策略',
-    policyNameI18n: { 'zh-CN': 'QAFA自动开通策略', 'en-US': 'QAFA Auto Provisioning Policy' },
-    productClass: 'QAFA',
-    executeType: '0',
-    selfStartEnable: '1',
-    upgradeEnable: '1',
-    targetVersion: ['V2.1.0'],
-    licenseEnable: '1',
-    selfConfigEnable: '1',
-    createTime: '2026-03-15 10:00:00',
-    updateTime: '2026-04-01 14:30:00',
-  },
-  {
-    policyId: 'pnp-2',
-    policyName: 'QAFB手动升级策略',
-    policyNameI18n: { 'zh-CN': 'QAFB手动升级策略', 'en-US': 'QAFB Manual Upgrade Policy' },
-    productClass: 'QAFB',
-    executeType: '1',
-    selfStartEnable: '0',
-    upgradeEnable: '1',
-    targetVersion: ['V2.2.0'],
-    licenseEnable: '0',
-    selfConfigEnable: '1',
-    createTime: '2026-03-20 09:00:00',
-    updateTime: '2026-03-25 11:00:00',
-  },
-  {
-    policyId: 'pnp-3',
-    policyName: 'License更新策略',
-    policyNameI18n: { 'zh-CN': 'License更新策略', 'en-US': 'License Update Policy' },
-    productClass: 'QAFA',
-    executeType: '0',
-    selfStartEnable: '1',
-    upgradeEnable: '0',
-    targetVersion: [],
-    licenseEnable: '1',
-    selfConfigEnable: '0',
-    createTime: '2026-04-01 08:00:00',
-    updateTime: '2026-04-01 08:00:00',
-  },
-  {
-    policyId: 'pnp-4',
-    policyName: 'CPE自动开通策略',
-    policyNameI18n: { 'zh-CN': 'CPE自动开通策略', 'en-US': 'CPE Auto Provisioning Policy' },
-    productClass: 'CPE-A100',
-    executeType: '0',
-    selfStartEnable: '1',
-    upgradeEnable: '1',
-    targetVersion: ['V1.5.0'],
-    licenseEnable: '0',
-    selfConfigEnable: '1',
-    createTime: '2026-03-10 10:00:00',
-    updateTime: '2026-03-15 14:00:00',
-  },
-  {
-    policyId: 'pnp-5',
-    policyName: 'QAFC全量开通策略',
-    policyNameI18n: { 'zh-CN': 'QAFC全量开通策略', 'en-US': 'QAFC Full Provisioning Policy' },
-    productClass: 'QAFC',
-    executeType: '0',
-    selfStartEnable: '1',
-    upgradeEnable: '1',
-    targetVersion: ['V3.0.0'],
-    licenseEnable: '1',
-    selfConfigEnable: '1',
-    createTime: '2026-03-18 09:30:00',
-    updateTime: '2026-04-02 10:00:00',
-  },
-];
-
 const PAGE_SIZE = 10;
 
 export default function PlugAndPlay() {
@@ -151,13 +74,37 @@ export default function PlugAndPlay() {
   const navigate = useNavigate();
   const { message } = App.useApp();
   const appLocale = useAppStore((s) => s.locale);
-
-  // Policy state (front-end config-only, no backend endpoint yet — see comment above)
-  const [policies, setPolicies] = useState<Policy[]>(MOCK_POLICIES);
+  const { data: supportedProductClasses, isLoading: productClassesLoading } = useProductClasses();
+  const { data: productCatalog, isLoading: productCatalogLoading } = useProductList();
+  const productClassOptions = useMemo(
+    () => toSupportedProductClassOptions(supportedProductClasses, productCatalog?.items),
+    [productCatalog?.items, supportedProductClasses],
+  );
 
   // Policy filter state
   const [policyProductClass, setPolicyProductClass] = useState<string>('');
   const [policySearchText, setPolicySearchText] = useState('');
+  const { data: policyData, isLoading: policiesLoading } = usePlugAndPlayPolicies({
+    page: 1, pageSize: 100,
+    productClass: policyProductClass || undefined,
+    search: policySearchText || undefined,
+  });
+  const setPolicyEnabledMutation = useSetPlugAndPlayPolicyEnabled();
+  const deletePolicyMutation = useDeletePlugAndPlayPolicy();
+  const policies = useMemo<Policy[]>(() => (policyData?.items ?? []).map((p) => ({
+    policyId: p.id,
+    policyName: p.name,
+    productClass: p.productClasses.join(', '),
+    productClasses: p.productClasses,
+    executeType: p.executeType === 'auto' ? '0' : '1',
+    selfStartEnable: p.enabled ? '1' : '0',
+    upgradeEnable: p.upgradeEnabled ? '1' : '0',
+    targetVersion: p.targetVersion ? [p.targetVersion] : [],
+    licenseEnable: p.licenseEnabled ? '1' : '0',
+    selfConfigEnable: p.selfConfigEnabled ? '1' : '0',
+    createTime: p.createdAt,
+    updateTime: p.updatedAt,
+  })), [policyData]);
 
   // Task filter state (执行状态 — real provisioning/tasks API)
   const [taskStatus, setTaskStatus] = useState<string>('');
@@ -182,9 +129,10 @@ export default function PlugAndPlay() {
     page: taskPage,
     pageSize: taskPageSize,
     status: backendStatusFilter,
+    policyOnly: true,
   });
 
-  const retryTaskMutation = useRetryProvisioningTask();
+  const retryTaskMutation = useRetryPlugAndPlayTask();
 
   // Dialog state
   const [detectDialogOpen, setDetectDialogOpen] = useState(false);
@@ -213,8 +161,7 @@ export default function PlugAndPlay() {
     return reasonMap[reason] || reason;
   }, [t]);
 
-  // Handlers - Policy (local config state only — no backend policies API yet)
-  const handlePolicyMenuClick = useCallback((key: string, record: Policy) => {
+  const handlePolicyMenuClick = useCallback(async (key: string, record: Policy) => {
     switch (key) {
       case 'info':
         navigate(`/device/plug-and-play/view/${record.policyId}`);
@@ -227,24 +174,33 @@ export default function PlugAndPlay() {
         setDetectDialogOpen(true);
         break;
       case 'delete':
-        setPolicies(prev => prev.filter(p => p.policyId !== record.policyId));
-        message.success(t('common.deleteSuccess'));
+        try {
+          await deletePolicyMutation.mutateAsync(record.policyId);
+          message.success(t('common.deleteSuccess'));
+        } catch {
+          message.error(t('common.operationFailed'));
+        }
         break;
     }
-  }, [navigate, message, t]);
+  }, [navigate, message, t, deletePolicyMutation]);
 
-  const handlePolicySwitch = useCallback((record: Policy, checked: boolean) => {
-    const newEnable = checked ? '1' : '0';
-    setPolicies(prev => prev.map(p =>
-      p.policyId === record.policyId ? { ...p, selfStartEnable: newEnable } : p
-    ));
-    message.success(t('common.success'));
-  }, [message, t]);
+  const handlePolicySwitch = useCallback(async (record: Policy, checked: boolean) => {
+    try {
+      await setPolicyEnabledMutation.mutateAsync({ id: record.policyId, enabled: checked });
+      message.success(t('common.success'));
+    } catch {
+      message.error(t('common.operationFailed'));
+    }
+  }, [message, t, setPolicyEnabledMutation]);
 
   // Handlers - Task (real API)
   const handleRetryTask = useCallback(async (record: ProvisioningExecuteView) => {
     try {
-      await retryTaskMutation.mutateAsync(record.taskId);
+      if (!record.policyId) throw new Error('missing policy ID');
+      await retryTaskMutation.mutateAsync({
+        policyId: record.policyId,
+        deviceId: record.deviceId,
+      });
       message.success(t('common.success'));
     } catch {
       message.error(t('common.operationFailed'));
@@ -258,7 +214,8 @@ export default function PlugAndPlay() {
   const handleDetectSuccess = useCallback(() => {
     setDetectDialogOpen(false);
     message.success(t('provision.detectSuccess'));
-  }, [message, t]);
+    void refetchTasks();
+  }, [message, refetchTasks, t]);
 
   const handleRefreshTasks = useCallback(() => {
     void refetchTasks();
@@ -271,27 +228,30 @@ export default function PlugAndPlay() {
       title: '',
       width: 100,
       fixed: 'right',
-      render: (_, record) => (
-        <Space size={4}>
-          <Button type="link" size="small" onClick={() => handlePolicyMenuClick('info', record)}>
-            {t('common.detail')}
-          </Button>
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'edit', label: t('common.edit'), icon: <EditOutlined />, disabled: record.selfStartEnable === '1' },
-                { key: 'detect', label: t('provision.detect'), icon: <ScanOutlined /> },
-                { type: 'divider' as const },
-                { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, disabled: record.selfStartEnable === '1' },
-              ] as MenuProps['items'],
-              onClick: ({ key }) => handlePolicyMenuClick(key, record),
-            }}
-            trigger={['click']}
-          >
-            <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
-          </Dropdown>
-        </Space>
-      ),
+      render: (_, record) => {
+        const actions = getPolicyActionAvailability({ enabled: record.selfStartEnable === '1' });
+        return (
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => handlePolicyMenuClick('info', record)}>
+              {t('common.detail')}
+            </Button>
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'edit', label: t('common.edit'), icon: <EditOutlined />, disabled: !actions.edit },
+                  { key: 'detect', label: t('provision.detect'), icon: <ScanOutlined />, disabled: !actions.detect },
+                  { type: 'divider' as const },
+                  { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, disabled: !actions.delete },
+                ] as MenuProps['items'],
+                onClick: ({ key }) => handlePolicyMenuClick(key, record),
+              }}
+              trigger={['click']}
+            >
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          </Space>
+        );
+      },
     },
     {
       key: 'selfStartEnable',
@@ -417,9 +377,9 @@ export default function PlugAndPlay() {
       },
     },
     {
-      key: 'deviceId',
-      title: t('provision.deviceId'),
-      dataIndex: 'deviceId',
+      key: 'serialNumber',
+      title: t('provision.serialNumber'),
+      dataIndex: 'serialNumber',
       width: 280,
       mono: true,
       ellipsis: true,
@@ -479,17 +439,18 @@ export default function PlugAndPlay() {
     },
   ], [t, STATUS_CONFIG, translateFailureReason, handleRetryTask]);
 
-  // Filtered policies (local config state)
+  // The server applies the same filters; this local pass keeps UI responsive
+  // while a new query is in flight.
   const filteredPolicies = useMemo(() => {
     let result = policies;
     if (policyProductClass) {
-      result = result.filter(p => p.productClass === policyProductClass);
+      result = result.filter(p => p.productClasses.includes(policyProductClass));
     }
     if (policySearchText) {
       const search = policySearchText.toLowerCase();
       result = result.filter(p =>
         getI18nText(p.policyNameI18n, appLocale, p.policyName).toLowerCase().includes(search) ||
-        p.productClass.toLowerCase().includes(search) ||
+        p.productClasses.some(productClass => productClass.toLowerCase().includes(search)) ||
         p.targetVersion?.[0]?.toLowerCase().includes(search)
       );
     }
@@ -511,7 +472,7 @@ export default function PlugAndPlay() {
     }
     if (taskSearchText) {
       const search = taskSearchText.toLowerCase();
-      result = result.filter(item => item.deviceId.toLowerCase().includes(search));
+      result = result.filter(item => item.serialNumber.toLowerCase().includes(search));
     }
     return result;
   }, [allTasks, taskStatus, taskSearchText]);
@@ -549,7 +510,7 @@ export default function PlugAndPlay() {
       }
     >
       <div className="plug-and-play-container" style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/* Policy List Section (front-end config state — no backend policies API yet, see issue #140) */}
+        {/* Persisted plug-and-play policies */}
         <Card
           size="small"
           styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
@@ -561,6 +522,7 @@ export default function PlugAndPlay() {
               tableId="policy-table"
               columns={policyColumns}
               dataSource={filteredPolicies}
+              loading={policiesLoading}
               rowKey="policyId"
               total={filteredPolicies.length}
               showPagination
@@ -572,13 +534,14 @@ export default function PlugAndPlay() {
               extraToolbarLeft={<Text className={styles.cardHeaderTitle}>{t('provision.policyList')}</Text>}
               extraToolbarRight={
                 <Space>
-                  <Select
+                  <ProductClassSelect
                     placeholder={t('provision.productClass')}
                     value={policyProductClass || undefined}
                     onChange={(value) => setPolicyProductClass(value || '')}
                     allowClear
-                    style={{ width: 140 }}
-                    options={PRODUCT_TYPES}
+                    loading={productClassesLoading || productCatalogLoading}
+                    style={{ width: 240 }}
+                    options={productClassOptions}
                   />
                   <Input
                     placeholder={t('provision.searchPolicyPlaceholder')}
@@ -689,6 +652,10 @@ export default function PlugAndPlay() {
             failureReason: detailTask.failureReason,
             startTime: detailTask.startTime,
             endTime: detailTask.endTime,
+            currentStep: detailTask.currentStep,
+            totalSteps: detailTask.totalSteps,
+            currentStepName: detailTask.currentStepName,
+            xmlFileId: detailTask.xmlFileId,
           } : undefined}
           onClose={() => setDetailTaskId(null)}
         />
@@ -700,12 +667,14 @@ export default function PlugAndPlay() {
         taskCount={selectedTaskIds.length}
         onClose={() => setBatchRetryOpen(false)}
         onConfirm={async (_includeSuccess) => {
-          // Backend only allows retrying failed tasks; retry each selected failed task.
-          const failedIds = filteredTasks
-            .filter(item => selectedTaskIds.includes(item.taskId) && item.status === '1')
-            .map(item => item.taskId);
+          const failedTasks = filteredTasks.filter(item =>
+            selectedTaskIds.includes(item.taskId) && item.status === '1' && item.policyId
+          );
           const results = await Promise.allSettled(
-            failedIds.map(id => retryTaskMutation.mutateAsync(id))
+            failedTasks.map(item => retryTaskMutation.mutateAsync({
+              policyId: item.policyId,
+              deviceId: item.deviceId,
+            }))
           );
           const ok = results.filter(r => r.status === 'fulfilled').length;
           setBatchRetryOpen(false);

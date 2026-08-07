@@ -68,4 +68,24 @@ describe('ResultTable', () => {
     expect(headers.slice(2).every((header) => !header.classList.contains('ant-table-cell-fix'))).toBe(true);
     expect(container.querySelectorAll('tbody button')).toHaveLength(3);
   });
+
+  it('falls back to the selected command metadata when a MOD readback row has no command fields', () => {
+    const { container } = render(
+      <ResultTable
+        execMeta={{
+          operationType: 'MOD',
+          read: false,
+          label: 'MOD DEVICE_INFO',
+          commandName: '修改 设备基本信息',
+        }}
+        commandId="command-mod"
+        columns={[{ key: 'value', label: 'Value', path: 'Device.Test.Value' }]}
+        rows={[{ ...row, planLineNo: undefined, planOrder: undefined, planRawLine: undefined, commandCode: undefined, commandName: undefined }]}
+        running={false}
+        hasExecuted
+      />,
+    );
+
+    expect(container).toHaveTextContent('修改 设备基本信息');
+  });
 });

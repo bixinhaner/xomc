@@ -100,6 +100,27 @@ describe('buildMODReadbackRows (#196 MOD 下发 + 回读 LST)', () => {
     expect(rows[0].status).toBe('mismatch');
   });
 
+  it('boolean 下发 true 与基站回读 1 视为一致', () => {
+    const path = 'Device.DeviceInfo.SignallingTrace.Enable';
+    const items: DeviceTaskResultItem[] = [
+      item({
+        success: true,
+        deviceTaskId: 'mod',
+        result: { success: true, rawOutput: '', parsedData: spvEnvelope, executionTime: 0, timestamp: '' },
+        parsedData: spvEnvelope,
+      }),
+      item({
+        success: true,
+        deviceTaskId: 'lst',
+        result: { success: true, rawOutput: '', parsedData: gpvEnvelope(path, '1'), executionTime: 0, timestamp: '' },
+        parsedData: gpvEnvelope(path, '1'),
+      }),
+    ];
+
+    const rows = buildMODReadbackRows(items, { [path]: 'true' });
+    expect(rows[0].status).toBe('success');
+  });
+
   it('mapTaskToRecord：裸 MOD 下发值在 commands.parameters（非 param_values）→ setValues 正确、回读一致 = success', () => {
     // 复现 task 3f637b26：RAW MOD 的下发值存 parameters（path→value map），param_values 缺失。
     // 修复前 setValues[path]='' → MOD 行值空 + 误判 mismatch；修复后回退 parameters → 正确。
@@ -149,6 +170,38 @@ describe('buildMODReadbackRows (#196 MOD 下发 + 回读 LST)', () => {
     expect(rec.rows[0].status).toBe('success');
     const modRow = (rec.rows[0].pathTasks ?? []).find((t) => t.opType === 'MOD');
     expect(modRow?.value).toBe(NEW_URL); // MOD 行值不再为空
+  });
+
+  it('mapTaskToRecord：结构化 MOD 的 parameters 使用 param_code key 时按 path 恢复下发值', () => {
+    const task: MMLTask = {
+      id: 'task-structured-mod',
+      taskName: 'MOD URL',
+      deviceSns: [SN],
+      commands: ['MOD DEVICE_INFO', 'MOD DEVICE_INFO'],
+      commandsDetail: [
+        {
+          commandCode: 'MOD DEVICE_INFO',
+          operationType: 'MOD',
+          paramPaths: [URL_PATH],
+          paramRefs: [{ paramCode: 'URL', tr069Path: URL_PATH }],
+          parameters: { URL: NEW_URL },
+        },
+        { commandCode: 'LST DEVICE_INFO', operationType: 'LST', paramPaths: [URL_PATH] },
+      ],
+      status: 'completed',
+      results: [
+        item({ success: true, deviceTaskId: 'mod', parsedData: spvEnvelope }),
+        item({ success: true, deviceTaskId: 'lst', parsedData: gpvEnvelope(URL_PATH, NEW_URL) }),
+      ] as unknown as MMLTask['results'],
+      createdAt: '',
+      updatedAt: '',
+      executeType: 'immediate',
+    } as MMLTask;
+
+    const record = mapTaskToRecord(task);
+    expect(record.setValues?.[URL_PATH]).toBe(NEW_URL);
+    expect(record.rows[0].status).toBe('success');
+    expect(record.rows[0].commandCode).toBe('MOD DEVICE_INFO');
   });
 
   it('仅 MOD 无回读（GPV 缺失）→ status=unverified，仅 MOD 行', () => {

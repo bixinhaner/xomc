@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import {
   Form,
   Input,
@@ -13,7 +13,6 @@ import {
   Typography,
   Checkbox,
   Table,
-  Tag,
   Upload,
   InputNumber,
   message,
@@ -21,6 +20,7 @@ import {
   Drawer,
   Collapse,
   Descriptions,
+  Alert,
   Dropdown,
   type UploadFile,
   type MenuProps,
@@ -38,9 +38,76 @@ import {
   InboxOutlined,
   MoreOutlined,
 } from '@ant-design/icons';
+import * as XLSX from 'xlsx';
 import { useT } from '@/hooks/useT';
+import {
+  usePlugAndPlayPolicy,
+  useSavePlugAndPlayPolicy,
+} from '@core/hooks/api/useProvisioning';
+import { useDeviceList, useProductClasses } from '@core/hooks/api/useDevices';
+import { useProductList, useProductMatch } from '@core/hooks/api/useProducts';
+import { useSoftwareVersions, useUploadFirmware } from '@core/hooks/api/useSoftware';
+import {
+  useDeleteDeviceLicense,
+  useDeviceLicenses,
+} from '@core/hooks/api/useDeviceLicense';
+import type { DeviceLicense } from '@core/services/api/deviceLicenseApi';
+import LicenseImportDrawer from '@/pages/backup/DeviceLicenseLibrary/ImportDrawer';
+import {
+  normalizeProductTechnology,
+  resolveProductClassTechnology,
+  toSupportedProductClassOptions,
+  type ProductTechnology,
+} from './productClassOptions';
+import {
+  toActualSoftwareVersionOptions,
+  toFirmwareVersionOptions,
+} from './softwareVersionOptions';
+import {
+  createParamConfigWorkbook,
+  createParamConfigTemplateWorkbook,
+  mergeImportedParamConfigs,
+  ParamConfigWorkbookError,
+  parseParamConfigWorkbook,
+  type ParamConfigDeviceType,
+} from './paramConfigWorkbook';
+import { getParamConfigTemplate, toParamConfigDeviceType } from './paramConfigTemplate';
+import {
+  mergeParamConfigFormValues,
+  toParamConfigFormValues,
+  withTemplateSheetParameters,
+} from './paramConfigDetail';
+import {
+  GSM_GROUPED_TEMPLATE_FIELDS,
+  type TemplateFieldRef,
+} from './paramConfigGroupedFields';
+import { isParamConfigToolbarEnabled } from './paramConfigToolbarAvailability';
+import { getPolicyModuleActionAvailability } from './policyActionAvailability';
+import ProductClassMultiSelect from './components/ProductClassMultiSelect';
+import PolicyReadOnlySection from './components/PolicyReadOnlySection';
+import GnbQuickSettingsCards, { GnbTemplateExtraFieldGrid } from './GnbQuickSettingsCards';
+import EnbQuickSettingsCards, { EnbTemplateExtraFieldGrid } from './EnbQuickSettingsCards';
 
 const { Text, Title } = Typography;
+
+function TemplateFieldGrid({ fields }: { fields: readonly TemplateFieldRef[] }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', columnGap: 16 }}>
+      {fields.map(({ sheet, header }) => (
+        <Form.Item
+          key={`${sheet}.${header}`}
+          name={['sheetParameters', sheet, 0, header]}
+          label={header.replace(/^\*/, '')}
+          getValueProps={(inputValue) => ({
+            value: inputValue === undefined || inputValue === null ? '' : String(inputValue),
+          })}
+        >
+          <Input style={{ width: '100%' }} />
+        </Form.Item>
+      ))}
+    </div>
+  );
+}
 
 // Types
 type ExecuteType = '0' | '1';
@@ -50,13 +117,13 @@ type EnableType = '0' | '1';
 export interface _PolicyForm {
   selfStartEnable: EnableType;
   policyName: string;
-  productClass: string;
+  productClasses: string[];
   executeType: ExecuteType;
   functionModule: '0' | '1' | '2'; // 0-software upgrade, 1-license, 2-self config
   // Software Upgrade
   upgradeEnable: EnableType;
   specifyVersionType: EnableType;
-  originalVersion: string;
+  originalVersion: string[];
   targetVersion: string;
   preserveSetting: EnableType;
   // License
@@ -66,25 +133,14 @@ export interface _PolicyForm {
   switchEnable: EnableType;
 }
 
-interface OriginalVersion {
-  originalVersion: string;
-}
-
-interface LicenseFile {
-  serial_number: string;
-  file_name: string;
-  upload_time: string;
-  execute_status: '0' | '1' | '2' | '3';
-}
-
 // Device type for param config
 type DeviceType = 'eNB' | 'gNB' | 'GSM';
 
 // IPSECS Tunnel for eNB
 interface IpsecTunnel {
   key: string;
+  TUNNEL_INDEX?: string;
   TUNNEL_ENABLE: '0' | '1';
-  authBy: string;
   LEFT_AUTH: string;
   RIGHT_AUTH: string;
   TUNNEL_GATEWAY: string;
@@ -107,19 +163,10 @@ interface IpsecTunnel {
   REKEYMARGIN: string;
   DPDACTION: string;
   DPDDELAY: string;
+  FRAGMENTATION?: string;
+  LEFT_INTERFACE?: string;
+  FORCEENCAPS?: string;
 }
-
-// WAN Binding item for eNB
-interface WanBindingItem {
-  ipAddress: string;
-  netmask: string;
-  gateway: string;
-  vlanId: string;
-  binding: string;
-}
-
-// eNB WAN固定分组类型 (T-0136: 保留为 export 占位避免 TS6196)
-export type _EnbWanGroup = 'wanOamTr069' | 'wanS1c' | 'wanS1u' | 'wanX2ap';
 
 // 自定义参数项
 interface CustomParam {
@@ -137,7 +184,6 @@ interface AmfItem {
 // MME配置项（支持多个）
 interface MmeItem {
   mmeIp: string;
-  mmePort: number;
 }
 
 // Param Config item for new design
@@ -148,6 +194,7 @@ interface ParamConfig {
   cellName: string;
   updatedBy: string;
   updatedAt: string;
+  sheetParameters?: Record<string, Record<string, unknown>[]>;
   // ========== eNB 基础配置字段 ==========
   eNodeBId?: string;
   bandsSupport?: number;
@@ -178,17 +225,9 @@ interface ParamConfig {
   mgmtGatewayMask?: string;
   mgmtVlan?: number;
   // ========== eNB IPSECS配置 ==========
-  ipsecSwitch?: '0' | '1';
   ipsecEnable?: '0' | '1';
-  ipsecRightIkePort?: string;
   leftInterface?: string;
   ipsecList?: IpsecTunnel[];
-  // ========== eNB WAN配置 ==========
-  wanSendEnable?: '0' | '1';
-  wanOamTr069?: WanBindingItem;
-  wanS1c?: WanBindingItem;
-  wanS1u?: WanBindingItem;
-  wanX2ap?: WanBindingItem;
   mtu?: number;  // MTU配置
   // ========== eNB 功率控制配置 ==========
   totalTxPower?: string;
@@ -291,49 +330,8 @@ interface SliceConfigItem {
   sdValue: string;
 }
 
-// Product types - 设备类型
-const PRODUCT_TYPES = [
-  { label: 'eNB', value: 'eNB' },
-  { label: 'gNB', value: 'gNB' },
-  { label: 'GSM', value: 'GSM' },
-];
-
-// Target versions (mock)
-const TARGET_VERSIONS = [
-  { label: 'V2.2.0', value: 'V2.2.0' },
-  { label: 'V2.1.0', value: 'V2.1.0' },
-  { label: 'V2.0.5', value: 'V2.0.5' },
-  { label: 'V2.0.0', value: 'V2.0.0' },
-  { label: 'V1.5.0', value: 'V1.5.0' },
-];
-
-// Original versions (mock for selection)
-const AVAILABLE_ORIGINAL_VERSIONS = [
-  { originalVersion: 'V1.0.0' },
-  { originalVersion: 'V1.1.0' },
-  { originalVersion: 'V1.2.0' },
-  { originalVersion: 'V1.5.0' },
-  { originalVersion: 'V2.0.0' },
-];
-
-// License files (mock)
-const MOCK_LICENSE_FILES: LicenseFile[] = [
-  {
-    serial_number: 'ENB00001',
-    file_name: 'license_001.lic',
-    upload_time: '2026-04-07 10:00:00',
-    execute_status: '0',
-  },
-  {
-    serial_number: 'ENB00002',
-    file_name: 'license_002.lic',
-    upload_time: '2026-04-07 11:00:00',
-    execute_status: '1',
-  },
-];
-
 // Param Config mock data (for new design) - eNB, gNB, GSM one each
-const MOCK_PARAM_CONFIGS: ParamConfig[] = [
+const _MOCK_PARAM_CONFIGS: ParamConfig[] = [
   {
     id: '1',
     deviceType: 'eNB',
@@ -381,15 +379,12 @@ const MOCK_PARAM_CONFIGS: ParamConfig[] = [
     halobEnable: '0',
     mme: '192.168.1.100',
     // IPSECS
-    ipsecSwitch: '1',
     ipsecEnable: '1',
-    ipsecRightIkePort: '500',
     leftInterface: 'eth0',
     ipsecList: [
       {
         key: '1',
         TUNNEL_ENABLE: '1',
-        authBy: 'psk',
         LEFT_AUTH: 'psk',
         RIGHT_AUTH: 'psk',
         TUNNEL_GATEWAY: '10.0.0.1',
@@ -414,36 +409,6 @@ const MOCK_PARAM_CONFIGS: ParamConfig[] = [
         DPDDELAY: '30s',
       },
     ],
-    // WAN Config
-    wanSendEnable: '1',
-    wanOamTr069: {
-      ipAddress: '192.168.10.50',
-      netmask: '255.255.255.0',
-      gateway: '192.168.10.1',
-      vlanId: '100',
-      binding: 'TR069-1',
-    },
-    wanS1c: {
-      ipAddress: '192.168.20.50',
-      netmask: '255.255.255.0',
-      gateway: '192.168.20.1',
-      vlanId: '200',
-      binding: 'S1-C-1',
-    },
-    wanS1u: {
-      ipAddress: '192.168.30.50',
-      netmask: '255.255.255.0',
-      gateway: '192.168.30.1',
-      vlanId: '300',
-      binding: 'S1-U-1',
-    },
-    wanX2ap: {
-      ipAddress: '192.168.40.50',
-      netmask: '255.255.255.0',
-      gateway: '192.168.40.1',
-      vlanId: '400',
-      binding: 'X2-AP-1',
-    },
     // 自定义参数
     customParams: [
       { name: 'param1', value: 'value1', trPath: 'Device.X_CUSTOM.Param1' },
@@ -569,16 +534,10 @@ const MOCK_PARAM_CONFIGS: ParamConfig[] = [
     updatedAt: '2026-04-07 12:00:00',
   },
 ];
+void _MOCK_PARAM_CONFIGS;
 
 // _BANDWIDTH_OPTIONS_DXDF 占位常量已拆到同级 ./constants.ts
 // （react-refresh/only-export-components：页面文件只导出组件）。
-
-const BANDWIDTH_OPTIONS_OTHER = [
-  { label: '5MHz', value: 'n25' },
-  { label: '10MHz', value: 'n50' },
-  { label: '15MHz', value: 'n75' },
-  { label: '20MHz', value: 'n100' },
-];
 
 // Subframe assignment options
 const SUBFRAME_OPTIONS = [
@@ -588,85 +547,52 @@ const SUBFRAME_OPTIONS = [
   { label: '6 (DL:UL = 3:5)', value: '6' },
 ];
 
-// Special subframe options
-const SPECIAL_SUBFRAME_OPTIONS = [
-  { label: '5', value: '5' },
-  { label: '7', value: '7' },
-];
-
-// IPSEC options
-const AUTH_BY_OPTIONS = [
-  { label: 'PSK', value: 'psk' },
-  { label: 'Cert', value: 'cert' },
-  { label: 'AKA PSK', value: 'aka_psk' },
-  { label: 'AKA Cert', value: 'aka_cert' },
-];
-const AUTH_OPTIONS = [
-  { label: 'PSK', value: 'psk' },
-  { label: 'Pubkey', value: 'pubkey' },
-  { label: 'EAP-AKA', value: 'eap-aka' },
-];
-const ENCRYPTION_OPTIONS = [
-  { label: 'AES128', value: 'aes128' },
-  { label: 'AES256', value: 'aes256' },
-  { label: '3DES', value: '3des' },
-  { label: 'DES', value: 'des' },
-];
-const DH_GROUP_OPTIONS = [
-  { label: 'MODP768', value: 'modp768' },
-  { label: 'MODP1024', value: 'modp1024' },
-  { label: 'MODP1536', value: 'modp1536' },
-  { label: 'MODP2048', value: 'modp2048' },
-  { label: 'MODP4096', value: 'modp4096' },
-];
-const AUTH_ALGORITHM_OPTIONS = [
-  { label: 'SHA1', value: 'sha1' },
-  { label: 'SHA1_160', value: 'sha1_160' },
-  { label: 'SHA256_96', value: 'sha256_96' },
-  { label: 'SHA256', value: 'sha256' },
-];
-const DPD_ACTION_OPTIONS = [
-  { label: 'None', value: 'none' },
-  { label: 'Clear', value: 'clear' },
-  { label: 'Hold', value: 'hold' },
-  { label: 'Restart', value: 'restart' },
-];
-
 export default function AddPolicyPage() {
   const t = useT();
+  const { data: supportedProductClasses, isLoading: productClassesLoading } = useProductClasses();
+  const { data: productCatalog, isLoading: productCatalogLoading } = useProductList();
   const navigate = useNavigate();
   const location = useLocation();
+  const { id = '' } = useParams();
   const [form] = Form.useForm();
+  const productTechnology = Form.useWatch('productTechnology', form) as ProductTechnology | undefined;
+  const productTechnologyOptions = useMemo(() => [
+    { label: t('provision.productTechnology.lte'), value: 'lte' },
+    { label: t('provision.productTechnology.nr'), value: 'nr' },
+    { label: t('provision.productTechnology.gsm'), value: 'gsm' },
+  ], [t]);
+  const productClassOptions = useMemo(
+    () => toSupportedProductClassOptions(
+      supportedProductClasses,
+      productCatalog?.items,
+      productTechnology,
+    ),
+    [productCatalog?.items, productTechnology, supportedProductClasses],
+  );
+  const [firmwareImportForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
-
-  // License status config with translations
-  const LICENSE_STATUS_CONFIG = useMemo(() => ({
-    '0': { label: t('provision.licenseStatusPending'), color: 'default' },
-    '1': { label: t('provision.licenseStatusSuccess'), color: 'success' },
-    '2': { label: t('provision.licenseStatusFailed'), color: 'error' },
-    '3': { label: t('provision.licenseStatusRunning'), color: 'processing' },
-  }), [t]);
 
   // Get mode from URL path
   const pathParts = location.pathname.split('/');
   const lastPart = pathParts[pathParts.length - 2];
   const isEdit = lastPart === 'edit';
   const isView = lastPart === 'view';
+  const moduleActions = getPolicyModuleActionAvailability(
+    isView ? 'view' : isEdit ? 'edit' : 'create',
+  );
+  const { data: persistedPolicy } = usePlugAndPlayPolicy(isEdit || isView ? id : '');
+  const savePolicyMutation = useSavePlugAndPlayPolicy(isEdit ? id : undefined);
 
   // State for software upgrade
-  const [selectedOriginalVersions, setSelectedOriginalVersions] = useState<OriginalVersion[]>([]);
-  const [manualVersion, setManualVersion] = useState('');
-  const [selectedAvailableVersions, setSelectedAvailableVersions] = useState<string[]>([]);
-  const [showVersionList, setShowVersionList] = useState(false);
+  const [firmwareImportVisible, setFirmwareImportVisible] = useState(false);
+  const [firmwareFileList, setFirmwareFileList] = useState<UploadFile[]>([]);
 
   // State for license
-  const [licenseFiles, setLicenseFiles] = useState<LicenseFile[]>(MOCK_LICENSE_FILES);
   const [licenseSearchText, setLicenseSearchText] = useState('');
   const [licenseImportModalVisible, setLicenseImportModalVisible] = useState(false);
-  const [licenseFileList, setLicenseFileList] = useState<UploadFile[]>([]);
 
   // State for self config (new design - config list)
-  const [paramConfigList, setParamConfigList] = useState<ParamConfig[]>(MOCK_PARAM_CONFIGS);
+  const [paramConfigList, setParamConfigList] = useState<ParamConfig[]>([]);
   const [configSearchText, setConfigSearchText] = useState('');
   const [configDetailVisible, setConfigDetailVisible] = useState(false);
   const [configDetailMode, setConfigDetailMode] = useState<'view' | 'edit'>('view');
@@ -678,7 +604,91 @@ export default function AddPolicyPage() {
 
   // Current function module
   const [functionModule, setFunctionModule] = useState<'0' | '1' | '2'>('0');
-  const [productClass, setProductClass] = useState<string>('');
+  const [productClasses, setProductClasses] = useState<string[]>([]);
+  const productClass = productClasses[0] ?? '';
+  const { data: productDevicesData, isLoading: actualVersionsLoading } = useDeviceList(
+    { page: 1, pageSize: 1000, productClass },
+    { enabled: Boolean(productClass) },
+  );
+  const {
+    data: productMatchData,
+  } = useProductMatch(productClass);
+  const activeParamDeviceType = useMemo<ParamConfigDeviceType | undefined>(
+    () => toParamConfigDeviceType(productMatchData?.product?.tech),
+    [productMatchData],
+  );
+  const matchedProductId = productMatchData?.product?.id;
+  const {
+    data: licenseData,
+    isLoading: licensesLoading,
+    refetch: refetchLicenses,
+  } = useDeviceLicenses({
+    page: 1,
+    pageSize: 1000,
+    serialNumber: licenseSearchText || undefined,
+    productId: matchedProductId,
+  });
+  const deleteLicenseMutation = useDeleteDeviceLicense();
+  const {
+    data: productFirmwareData,
+    isLoading: productFirmwareLoading,
+  } = useSoftwareVersions(
+    { page: 1, pageSize: 100, productId: matchedProductId, fileType: 0 },
+    { enabled: Boolean(matchedProductId) },
+  );
+  const {
+    data: legacyClassFirmwareData,
+    isLoading: legacyFirmwareLoading,
+  } = useSoftwareVersions(
+    { page: 1, pageSize: 100, deviceType: productClass, fileType: 0 },
+    { enabled: Boolean(productClass) },
+  );
+  const uploadFirmwareMutation = useUploadFirmware();
+  const actualVersionOptions = useMemo(
+    () => toActualSoftwareVersionOptions(productDevicesData?.items ?? []),
+    [productDevicesData],
+  );
+  const targetVersionOptions = useMemo(
+    () => toFirmwareVersionOptions(
+      productFirmwareData?.items ?? [],
+      legacyClassFirmwareData?.items ?? [],
+    ),
+    [legacyClassFirmwareData, productFirmwareData],
+  );
+  const targetVersionsLoading = productFirmwareLoading || legacyFirmwareLoading;
+
+  useEffect(() => {
+    if (!persistedPolicy) return;
+    const config = persistedPolicy.config ?? {};
+    const savedProductClasses = persistedPolicy.productClasses.length
+      ? persistedPolicy.productClasses
+      : [persistedPolicy.productClass].filter(Boolean);
+    const originalVersionValue = config.originalVersion;
+    const originalVersions = Array.isArray(originalVersionValue)
+      ? originalVersionValue.map(String).filter(Boolean)
+      : String(originalVersionValue ?? '')
+        .split(',')
+        .map((version) => version.trim())
+        .filter(Boolean);
+    form.setFieldsValue({
+      ...config,
+      originalVersion: originalVersions,
+      policyName: persistedPolicy.name,
+      productTechnology: normalizeProductTechnology(String(config.productTechnology ?? ''))
+        ?? resolveProductClassTechnology(savedProductClasses[0] ?? '', productCatalog?.items),
+      productClasses: savedProductClasses,
+      executeType: persistedPolicy.executeType === 'auto' ? '0' : '1',
+      selfStartEnable: persistedPolicy.enabled,
+      upgradeEnable: persistedPolicy.upgradeEnabled,
+      targetVersion: persistedPolicy.targetVersion,
+      licenseEnable: persistedPolicy.licenseEnabled,
+      selfConfigEnable: persistedPolicy.selfConfigEnabled,
+    });
+    setProductClasses(savedProductClasses);
+    if (Array.isArray(config.paramConfigList)) {
+      setParamConfigList(config.paramConfigList as ParamConfig[]);
+    }
+  }, [persistedPolicy, form, productCatalog?.items]);
 
   // Page title
   const pageTitle = useMemo(() => {
@@ -688,63 +698,71 @@ export default function AddPolicyPage() {
   }, [isView, isEdit, t]);
 
   // Handle product type change
-  const handleProductClassChange = useCallback((value: string) => {
-    setProductClass(value);
-  }, []);
+  const handleProductClassChange = useCallback((values: string[]) => {
+    setProductClasses(values);
+    form.setFieldsValue({ originalVersion: [], targetVersion: undefined });
+  }, [form]);
 
-  // Handle add version from list
-  const handleAddVersionsFromList = useCallback(() => {
-    const versionsToAdd = selectedAvailableVersions.filter(
-      v => !selectedOriginalVersions.find(sv => sv.originalVersion === v)
-    );
-    if (versionsToAdd.length > 0) {
-      setSelectedOriginalVersions(prev => [
-        ...prev,
-        ...versionsToAdd.map(v => ({ originalVersion: v })),
-      ]);
-    }
-    setSelectedAvailableVersions([]);
-    setShowVersionList(false);
-  }, [selectedAvailableVersions, selectedOriginalVersions]);
-
-  // Handle manual add version
-  const handleManualAddVersion = useCallback(() => {
-    if (manualVersion && !selectedOriginalVersions.find(v => v.originalVersion === manualVersion)) {
-      setSelectedOriginalVersions(prev => [...prev, { originalVersion: manualVersion }]);
-      setManualVersion('');
-    }
-  }, [manualVersion, selectedOriginalVersions]);
-
-  // Handle delete version
-  const handleDeleteVersion = useCallback((version: string) => {
-    setSelectedOriginalVersions(prev => {
-      const newVersions = prev.filter(v => v.originalVersion !== version);
-      form.setFieldValue('originalVersion', newVersions.map(v => v.originalVersion).join(','));
-      return newVersions;
+  const handleProductTechnologyChange = useCallback(() => {
+    setProductClasses([]);
+    form.setFieldsValue({
+      productClasses: [],
+      originalVersion: [],
+      targetVersion: undefined,
     });
   }, [form]);
 
-  // Handle clear versions
-  const handleClearVersions = useCallback(() => {
-    setSelectedOriginalVersions([]);
-    form.setFieldValue('originalVersion', '');
-  }, [form]);
+  const handleOpenFirmwareImport = useCallback(() => {
+    if (!productClass) {
+      void message.warning(t('software.firmware.selectProductClass'));
+      return;
+    }
+    firmwareImportForm.resetFields();
+    setFirmwareFileList([]);
+    setFirmwareImportVisible(true);
+  }, [firmwareImportForm, productClass, t]);
 
-  // Handle license delete
-  const handleDeleteLicense = useCallback((fileName: string) => {
-    setLicenseFiles(prev => prev.filter(f => f.file_name !== fileName));
-  }, []);
+  const handleCloseFirmwareImport = useCallback(() => {
+    setFirmwareImportVisible(false);
+    setFirmwareFileList([]);
+    firmwareImportForm.resetFields();
+  }, [firmwareImportForm]);
 
-  // Available versions list
-  const availableVersions = AVAILABLE_ORIGINAL_VERSIONS;
-
-  // Filtered license files
-  const filteredLicenseFiles = useMemo(() => {
-    if (!licenseSearchText) return licenseFiles;
-    return licenseFiles.filter(f =>
-      f.serial_number.toLowerCase().includes(licenseSearchText.toLowerCase())
-    );
-  }, [licenseFiles, licenseSearchText]);
+  const handleImportFirmware = useCallback(async () => {
+    try {
+      const values = await firmwareImportForm.validateFields();
+      const rawFile = firmwareFileList[0]?.originFileObj as File | undefined;
+      if (!rawFile) {
+        void message.warning(t('software.firmware.selectFile'));
+        return;
+      }
+      const uploaded = await uploadFirmwareMutation.mutateAsync({
+        file: rawFile,
+        metadata: {
+          version: values.version,
+          productId: matchedProductId,
+          productClass,
+          fileType: 0,
+        },
+      });
+      form.setFieldValue('targetVersion', uploaded.versionCode);
+      handleCloseFirmwareImport();
+      void message.success(t('software.firmware.importSuccess'));
+    } catch (error) {
+      if (error instanceof Error && error.message) {
+        void message.error(error.message);
+      }
+    }
+  }, [
+    firmwareFileList,
+    firmwareImportForm,
+    form,
+    handleCloseFirmwareImport,
+    matchedProductId,
+    productClass,
+    t,
+    uploadFirmwareMutation,
+  ]);
 
   // License file table columns
   const licenseColumns = [
@@ -753,44 +771,41 @@ export default function AddPolicyPage() {
       key: 'action',
       width: 80,
       fixed: 'right' as const,
-      render: (_: unknown, record: LicenseFile) => (
+      render: (_: unknown, record: DeviceLicense) => moduleActions.delete ? (
         <Button
           type="link"
           size="small"
           danger
           icon={<DeleteOutlined />}
-          onClick={() => handleDeleteLicense(record.file_name)}
+          loading={deleteLicenseMutation.isPending}
+          onClick={() => {
+            void deleteLicenseMutation.mutateAsync(record.serialNumber)
+              .then(() => message.success(t('common.success')))
+              .catch((error: Error) => message.error(error.message));
+          }}
         />
-      ),
+      ) : null,
     },
     {
       title: t('provision.deviceCode'),
-      dataIndex: 'serial_number',
-      key: 'serial_number',
+      dataIndex: 'serialNumber',
+      key: 'serialNumber',
     },
     {
       title: 'License ' + t('common.file'),
-      dataIndex: 'file_name',
-      key: 'file_name',
+      dataIndex: 'fileName',
+      key: 'fileName',
     },
     {
       title: t('provision.uploadTime'),
-      dataIndex: 'upload_time',
-      key: 'upload_time',
-    },
-    {
-      title: t('table.status'),
-      dataIndex: 'execute_status',
-      key: 'execute_status',
-      render: (status: string) => {
-        const cfg = LICENSE_STATUS_CONFIG[status as keyof typeof LICENSE_STATUS_CONFIG];
-        return <Tag color={cfg?.color || 'default'}>{cfg?.label || status}</Tag>;
-      },
+      dataIndex: 'updateTime',
+      key: 'updateTime',
     },
   ];
 
   // Param config table columns (simplified - only basic fields)
   const selfConfigEnabled = Form.useWatch('selfConfigEnable', form);
+  const paramConfigToolbarEnabled = isParamConfigToolbarEnabled(selfConfigEnabled);
 
   // Simplified columns for all device types
   const paramConfigColumns = [
@@ -801,22 +816,36 @@ export default function AddPolicyPage() {
       fixed: 'right' as const,
       render: (_: unknown, record: ParamConfig) => {
         const items: MenuProps['items'] = [
-          { key: 'edit', label: t('common.edit'), icon: <EditOutlined />, disabled: !!selfConfigEnabled,
-            onClick: () => { setCurrentConfig(record); setConfigDetailMode('edit'); configForm.setFieldsValue(record); setConfigDetailVisible(true); },
+          { key: 'edit', label: t('common.edit'), icon: <EditOutlined />,
+            onClick: () => {
+              const hydrated = withTemplateSheetParameters(record);
+              setCurrentConfig(hydrated);
+              setConfigDetailMode('edit');
+              configForm.setFieldsValue(toParamConfigFormValues(hydrated));
+              setConfigDetailVisible(true);
+            },
           },
-          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, disabled: !!selfConfigEnabled,
+          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true,
             onClick: () => { setParamConfigList(prev => prev.filter(item => item.id !== record.id)); message.success(t('common.success')); },
           },
         ];
         return (
           <Space size={4}>
             <Button type="link" size="small" icon={<EyeOutlined />}
-              onClick={() => { setCurrentConfig(record); setConfigDetailMode('view'); configForm.setFieldsValue(record); setConfigDetailVisible(true); }}>
+              onClick={() => {
+                const hydrated = withTemplateSheetParameters(record);
+                setCurrentConfig(hydrated);
+                setConfigDetailMode('view');
+                configForm.setFieldsValue(toParamConfigFormValues(hydrated));
+                setConfigDetailVisible(true);
+              }}>
               {t('common.view')}
             </Button>
-            <Dropdown menu={{ items }} trigger={['click']}>
-              <Button type="text" size="small" icon={<MoreOutlined />} />
-            </Dropdown>
+            {moduleActions.edit && moduleActions.delete && (
+              <Dropdown menu={{ items }} trigger={['click']}>
+                <Button type="text" size="small" icon={<MoreOutlined />} />
+              </Dropdown>
+            )}
           </Space>
         );
       },
@@ -875,13 +904,14 @@ export default function AddPolicyPage() {
     },
   ];
 
-  // Filtered param config list - filter by productClass and search text
+  // Parameter rows belong to a radio technology while the selected value is a product class.
   const filteredParamConfigList = useMemo(() => {
     let list = paramConfigList;
 
-    // Filter by product type (device type)
-    if (productClass) {
-      list = list.filter(item => item.deviceType === productClass);
+    if (activeParamDeviceType) {
+      list = list.filter(item => item.deviceType === activeParamDeviceType);
+    } else if (productClass) {
+      list = [];
     }
 
     // Filter by search text
@@ -892,21 +922,49 @@ export default function AddPolicyPage() {
     }
 
     return list;
-  }, [paramConfigList, productClass, configSearchText]);
+  }, [activeParamDeviceType, paramConfigList, productClass, configSearchText]);
 
-  // Handle export
   const handleExportConfig = useCallback(() => {
-    const data = filteredParamConfigList.map(item => ({
-      serialNumber: item.serialNumber,
-      cellName: item.cellName,
-      bandsSupport: item.bandsSupport,
-      bandWidth: item.bandWidth,
-      frequency: item.frequency,
-      subframeAssignment: item.subframeAssignment,
+    if (!productClass) {
+      void message.warning(t('provision.selectProductClassFirst'));
+      return;
+    }
+    if (filteredParamConfigList.length === 0) {
+      void message.warning(t('provision.noParamConfigToExport'));
+      return;
+    }
+
+    const workbook = createParamConfigWorkbook(filteredParamConfigList);
+    const safeProductClass = (productClass || 'parameter-config').replace(/[\\/:*?"<>|]+/g, '_');
+    XLSX.writeFile(workbook, `${safeProductClass}-参数配置.xlsx`);
+    void message.success(t('provision.paramConfigExportSuccess', {
+      count: filteredParamConfigList.length,
     }));
-    console.log('Export data:', data);
-    message.success(t('common.success'));
-  }, [filteredParamConfigList, t]);
+  }, [filteredParamConfigList, productClass, t]);
+
+  const handleDownloadParamConfigTemplate = useCallback(() => {
+    if (!productClass) {
+      void message.warning(t('provision.selectProductClassFirst'));
+      return;
+    }
+    const template = getParamConfigTemplate(activeParamDeviceType);
+    if (!template) {
+      void message.warning(t('provision.paramConfigTemplateUnavailable'));
+      return;
+    }
+
+    if (!activeParamDeviceType) return;
+    XLSX.writeFile(createParamConfigTemplateWorkbook(activeParamDeviceType), template.fileName);
+    void message.success(t('provision.paramConfigTemplateDownloaded'));
+  }, [activeParamDeviceType, productClass, t]);
+
+  const handleOpenParamConfigImport = useCallback(() => {
+    if (!productClass) {
+      void message.warning(t('provision.selectProductClassFirst'));
+      return;
+    }
+    setImportModalVisible(true);
+  }, [productClass, t]);
 
   // Handle config form submit
   const handleConfigFormSubmit = useCallback(() => {
@@ -914,7 +972,9 @@ export default function AddPolicyPage() {
       if (currentConfig) {
         // Edit mode
         setParamConfigList(prev => prev.map(item =>
-          item.id === currentConfig.id ? { ...item, ...values } : item
+          item.id === currentConfig.id
+            ? mergeParamConfigFormValues(currentConfig, values)
+            : item
         ));
       }
       setConfigDetailVisible(false);
@@ -924,41 +984,91 @@ export default function AddPolicyPage() {
     });
   }, [currentConfig, configForm, t]);
 
-  // Handle import
-  const handleImportConfig = useCallback((_file: File) => {
-    // Simulate import
-    const newConfig: ParamConfig = {
-      id: Date.now().toString(),
-      deviceType: 'eNB',
-      serialNumber: `ENB${Date.now().toString().slice(-5)}`,
-      cellName: `Cell-${Date.now().toString().slice(-4)}`,
-      bandsSupport: 38,
-      bandWidth: '20MHz',
-      frequency: 36000,
-      subframeAssignment: 2,
-      updatedBy: 'import',
-      updatedAt: new Date().toLocaleString(),
-    };
-    if (paramImportType === 'replace') {
-      setParamConfigList([newConfig]);
-    } else {
-      setParamConfigList(prev => [...prev, newConfig]);
+  const handleImportConfig = useCallback(async (file: File) => {
+    if (!activeParamDeviceType) {
+      void message.warning(t('provision.paramConfigDeviceTypeUnavailable'));
+      return;
     }
-    setImportModalVisible(false);
-    message.success(t('common.success'));
-    return false;
-  }, [paramImportType, t]);
+
+    try {
+      const importedAt = new Date().toLocaleString();
+      const rows = parseParamConfigWorkbook(
+        await file.arrayBuffer(),
+        activeParamDeviceType,
+        importedAt,
+      );
+      const importId = Date.now();
+      const importedConfigs: ParamConfig[] = rows.map((row, index) => ({
+        id: `import-${importId}-${index}`,
+        deviceType: row.deviceType ?? activeParamDeviceType,
+        serialNumber: row.serialNumber,
+        cellName: row.cellName ?? '',
+        bandsSupport: row.bandsSupport,
+        bandWidth: row.bandWidth,
+        frequency: row.frequency,
+        subframeAssignment: row.subframeAssignment,
+        sheetParameters: row.sheetParameters,
+        updatedBy: row.updatedBy ?? 'import',
+        updatedAt: row.updatedAt ?? importedAt,
+      }));
+
+      setParamConfigList((previous) =>
+        mergeImportedParamConfigs(previous, importedConfigs, paramImportType),
+      );
+      setImportModalVisible(false);
+      setParamFileList([]);
+      void message.success(t('provision.paramConfigImportSuccess', {
+        count: importedConfigs.length,
+      }));
+    } catch (error) {
+      if (error instanceof ParamConfigWorkbookError) {
+        if (error.code === 'empty_workbook') {
+          void message.error(t('provision.paramConfigImportEmpty'));
+        } else if (error.code === 'template_no_data') {
+          void message.error(t('provision.paramConfigTemplateNoData'));
+        } else if (error.code === 'missing_columns') {
+          void message.error(t('provision.paramConfigImportMissingColumns'));
+        } else {
+          void message.error(t('provision.paramConfigImportInvalidRow', {
+            row: error.row ?? '-',
+            field: error.field ?? '-',
+          }));
+        }
+        return;
+      }
+      void message.error(t('provision.paramConfigImportFailed'));
+    }
+  }, [activeParamDeviceType, paramImportType, t]);
 
   // Handle submit
   const handleSubmit = useCallback(async () => {
     try {
-      const values = await form.validateFields();
+      await form.validateFields();
+      // Module panels are conditionally mounted. validateFields() only returns
+      // values from the currently mounted panel, while getFieldsValue(true)
+      // also includes the preserved values of the other selected modules.
+      const values = form.getFieldsValue(true);
+      const selectedProductClasses = (values.productClasses ?? []) as string[];
       setLoading(true);
 
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      console.log('Submit values:', values);
+      await savePolicyMutation.mutateAsync({
+        name: values.policyName,
+        enabled: Boolean(values.selfStartEnable),
+        productClass: selectedProductClasses[0] ?? '',
+        productClasses: selectedProductClasses,
+        executeType: values.executeType === '0' ? 'auto' : 'manual',
+        priority: Number(values.priority || 100),
+        upgradeEnabled: Boolean(values.upgradeEnable),
+        targetVersion: values.targetVersion || '',
+        licenseEnabled: Boolean(values.licenseEnable),
+        selfConfigEnabled: Boolean(values.selfConfigEnable),
+        config: {
+          ...values,
+          productClass: selectedProductClasses[0] ?? '',
+          productClasses: selectedProductClasses,
+          paramConfigList,
+        },
+      });
       message.success(t('common.success'));
       navigate('/device/plug-and-play');
     } catch (error) {
@@ -966,7 +1076,7 @@ export default function AddPolicyPage() {
     } finally {
       setLoading(false);
     }
-  }, [form, navigate, t]);
+  }, [form, navigate, t, savePolicyMutation, paramConfigList]);
 
   // Handle cancel
   const handleCancel = useCallback(() => {
@@ -979,7 +1089,11 @@ export default function AddPolicyPage() {
       <Space>
         <span>{t('provision.softwareUpgrade')}</span>
         <Form.Item name="upgradeEnable" valuePropName="checked" noStyle>
-          <Switch size="small" checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
+          <Switch
+            size="small"
+            checkedChildren={t('common.on')}
+            unCheckedChildren={t('common.off')}
+          />
         </Form.Item>
       </Space>
     } style={{ marginBottom: 16 }}>
@@ -997,7 +1111,13 @@ export default function AddPolicyPage() {
           </Space>
         </div>
 
-        <Form.Item noStyle shouldUpdate={(prev, curr) => prev.specifyVersionType !== curr.specifyVersionType}>
+        <Form.Item
+          noStyle
+          shouldUpdate={(prev, curr) =>
+            prev.specifyVersionType !== curr.specifyVersionType ||
+            prev.upgradeEnable !== curr.upgradeEnable
+          }
+        >
           {({ getFieldValue }) => {
             const specifyVersionType = getFieldValue('specifyVersionType');
 
@@ -1015,112 +1135,30 @@ export default function AddPolicyPage() {
             }
 
             return (
-              <div>
-                {/* Manual input row */}
-                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                  <Input
-                    value={manualVersion}
-                    onChange={(e) => setManualVersion(e.target.value)}
-                    placeholder={t('provision.enterVersion')}
-                    style={{ width: 240 }}
-                    onPressEnter={handleManualAddVersion}
-                  />
-                  <Button type="primary" icon={<PlusOutlined />} onClick={handleManualAddVersion}>
-                    {t('common.add')}
-                  </Button>
-                  <Button
-                    type={showVersionList ? 'primary' : 'default'}
-                    ghost={showVersionList}
-                    onClick={() => setShowVersionList(!showVersionList)}
-                  >
-                    {t('provision.selectFromList')}
-                  </Button>
-                </div>
-
-                {/* Selected versions as tags */}
-                <div style={{ marginBottom: showVersionList ? 12 : 0 }}>
-                  {selectedOriginalVersions.length > 0 ? (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-                      <Text type="secondary" style={{ marginRight: 4 }}>
-                        {t('provision.selectedVersions')} ({selectedOriginalVersions.length}):
-                      </Text>
-                      {selectedOriginalVersions.map(v => (
-                        <Tag
-                          key={v.originalVersion}
-                          closable
-                          color="blue"
-                          onClose={() => handleDeleteVersion(v.originalVersion)}
-                        >
-                          {v.originalVersion}
-                        </Tag>
-                      ))}
-                      <Button type="link" size="small" danger onClick={handleClearVersions}>
-                        {t('provision.clearAll')}
-                      </Button>
-                    </div>
-                  ) : (
-                    <Text type="secondary">{t('provision.noVersionAdded')}</Text>
-                  )}
-                </div>
-
-                {/* Available versions list (collapsible) */}
-                {showVersionList && (
-                  <div style={{
-                    border: '1px solid #f0f0f0',
-                    borderRadius: 4,
-                    marginTop: 8,
-                    maxHeight: 220,
-                    overflow: 'auto',
-                    display: 'flex',
-                    flexDirection: 'column',
-                  }}>
-                    <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', background: '#fafafa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Checkbox
-                        checked={availableVersions.length > 0 && availableVersions.every(v => selectedAvailableVersions.includes(v.originalVersion))}
-                        indeterminate={selectedAvailableVersions.length > 0 && !availableVersions.every(v => selectedAvailableVersions.includes(v.originalVersion))}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedAvailableVersions(availableVersions.map(v => v.originalVersion));
-                          } else {
-                            setSelectedAvailableVersions([]);
-                          }
-                        }}
-                      >
-                        {t('provision.selectAll')}
-                      </Checkbox>
-                      <Button
-                        size="small"
-                        type="primary"
-                        disabled={selectedAvailableVersions.length === 0}
-                        onClick={handleAddVersionsFromList}
-                      >
-                        {t('common.confirm')} ({selectedAvailableVersions.length})
-                      </Button>
-                    </div>
-                    {availableVersions.map(v => (
-                      <div key={v.originalVersion} style={{
-                        padding: '6px 12px',
-                        borderBottom: '1px solid #f5f5f5',
-                        display: 'flex',
-                        alignItems: 'center',
-                      }}>
-                        <Checkbox
-                          checked={selectedAvailableVersions.includes(v.originalVersion)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedAvailableVersions(prev => [...prev, v.originalVersion]);
-                            } else {
-                              setSelectedAvailableVersions(prev => prev.filter(id => id !== v.originalVersion));
-                            }
-                          }}
-                        >
-                          {v.originalVersion}
-                        </Checkbox>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <Form.Item
+                name="originalVersion"
+                style={{ marginBottom: 0 }}
+                rules={[{
+                  validator: (_, value) => {
+                    if (!getFieldValue('upgradeEnable') || (Array.isArray(value) && value.length > 0)) {
+                      return Promise.resolve();
+                    }
+                    return Promise.reject(new Error(t('common.pleaseSelect')));
+                  },
+                }]}
+              >
+                <Select
+                  mode="multiple"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder={t('provision.selectFromList')}
+                  options={actualVersionOptions}
+                  loading={actualVersionsLoading}
+                  notFoundContent={actualVersionsLoading ? t('common.loading') : t('common.noData')}
+                  style={{ width: 360 }}
+                />
+              </Form.Item>
             );
           }}
         </Form.Item>
@@ -1130,10 +1168,33 @@ export default function AddPolicyPage() {
       <Divider style={{ margin: '8px 0 16px' }} />
 
       {/* 目标版本 + 保留配置 */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 32 }}>
-        <Form.Item name="targetVersion" label={t('provision.targetVersion')} style={{ marginBottom: 0 }}>
-          <Select placeholder={t('common.pleaseSelect')} style={{ width: 240 }} options={TARGET_VERSIONS} />
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16 }}>
+        <Form.Item
+          name="targetVersion"
+          label={t('provision.targetVersion')}
+          style={{ marginBottom: 0 }}
+          rules={[{
+            validator: (_, value) => {
+              if (!form.getFieldValue('upgradeEnable') || value) return Promise.resolve();
+              return Promise.reject(new Error(t('common.pleaseSelect')));
+            },
+          }]}
+        >
+          <Select
+            placeholder={t('common.pleaseSelect')}
+            style={{ width: 280 }}
+            options={targetVersionOptions}
+            loading={targetVersionsLoading}
+            showSearch
+            optionFilterProp="label"
+            notFoundContent={targetVersionsLoading ? t('common.loading') : t('common.noData')}
+          />
         </Form.Item>
+        {moduleActions.import && (
+          <Button icon={<UploadOutlined />} onClick={handleOpenFirmwareImport}>
+            {t('provision.importVersionPackage')}
+          </Button>
+        )}
         <Form.Item name="preserveSetting" valuePropName="checked" style={{ marginBottom: 0 }}>
           <Checkbox>{t('provision.preserveConfig')}</Checkbox>
         </Form.Item>
@@ -1147,7 +1208,12 @@ export default function AddPolicyPage() {
       <Space>
         <span>License</span>
         <Form.Item name="licenseEnable" valuePropName="checked" noStyle>
-          <Switch size="small" checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
+          <Switch
+            size="small"
+            disabled={isView}
+            checkedChildren={t('common.on')}
+            unCheckedChildren={t('common.off')}
+          />
         </Form.Item>
       </Space>
     } style={{ marginBottom: 16 }}>
@@ -1163,15 +1229,18 @@ export default function AddPolicyPage() {
               style={{ width: 200 }}
               size="small"
             />
-            <Button size="small" type="primary" icon={<UploadOutlined />} onClick={() => setLicenseImportModalVisible(true)}>
-              {t('common.import')}
-            </Button>
+            {moduleActions.import && (
+              <Button size="small" type="primary" icon={<UploadOutlined />} onClick={() => setLicenseImportModalVisible(true)}>
+                {t('common.import')}
+              </Button>
+            )}
           </Space>
         </div>
         <Table
           columns={licenseColumns}
-          dataSource={filteredLicenseFiles}
-          rowKey="file_name"
+          dataSource={licenseData?.items ?? []}
+          rowKey="serialNumber"
+          loading={licensesLoading}
           pagination={false}
           size="small"
           scroll={{ y: 250 }}
@@ -1186,7 +1255,12 @@ export default function AddPolicyPage() {
       <Space>
         <span>{t('provision.selfConfig')}</span>
         <Form.Item name="selfConfigEnable" valuePropName="checked" noStyle>
-          <Switch size="small" checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
+          <Switch
+            size="small"
+            disabled={isView}
+            checkedChildren={t('common.on')}
+            unCheckedChildren={t('common.off')}
+          />
         </Form.Item>
       </Space>
     } style={{ marginBottom: 16 }}>
@@ -1202,10 +1276,27 @@ export default function AddPolicyPage() {
             allowClear
           />
           <Space>
-            <Button icon={<UploadOutlined />} onClick={() => setImportModalVisible(true)}>
-              {t('common.import')}
+            <Button
+              icon={<DownloadOutlined />}
+              disabled={!paramConfigToolbarEnabled}
+              onClick={handleDownloadParamConfigTemplate}
+            >
+              {t('provision.downloadTemplate')}
             </Button>
-            <Button icon={<DownloadOutlined />} onClick={handleExportConfig}>
+            {moduleActions.import && (
+              <Button
+                icon={<UploadOutlined />}
+                disabled={!paramConfigToolbarEnabled}
+                onClick={handleOpenParamConfigImport}
+              >
+                {t('common.import')}
+              </Button>
+            )}
+            <Button
+              icon={<DownloadOutlined />}
+              disabled={!paramConfigToolbarEnabled}
+              onClick={handleExportConfig}
+            >
               {t('common.export')}
             </Button>
           </Space>
@@ -1257,11 +1348,11 @@ export default function AddPolicyPage() {
         <Form
           form={form}
           layout="vertical"
-          disabled={isView}
           initialValues={{
             executeType: '0',
             functionModule: '0',
             upgradeEnable: false,
+            originalVersion: [],
             licenseEnable: false,
             selfConfigEnable: false,
             switchEnable: false,
@@ -1270,33 +1361,53 @@ export default function AddPolicyPage() {
           }}
         >
           {/* Basic Info Card */}
-          <Card size="small" title={t('common.basicInfo')} style={{ marginBottom: 16 }}>
-            <Descriptions column={1} bordered size="small" labelStyle={{ width: 120 }} contentStyle={{ flex: 1 }}>
-              <Descriptions.Item label={t('provision.settingSwitch')}>
-                <Form.Item name="selfStartEnable" valuePropName="checked" noStyle>
-                  <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
-                </Form.Item>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('provision.policyName')}>
-                <Form.Item name="policyName" noStyle rules={[{ required: true, message: t('common.pleaseInput') }]}>
-                  <Input placeholder={t('provision.policyNamePlaceholder')} maxLength={50} />
-                </Form.Item>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('provision.productClass')}>
-                <Form.Item name="productClass" noStyle rules={[{ required: true, message: t('common.pleaseSelect') }]}>
-                  <Select placeholder={t('common.pleaseSelect')} options={PRODUCT_TYPES} onChange={handleProductClassChange} />
-                </Form.Item>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('provision.executeType')}>
-                <Form.Item name="executeType" noStyle rules={[{ required: true }]}>
-                  <Radio.Group>
-                    <Radio value="0">{t('provision.autoExecute')}</Radio>
-                    <Radio value="1">{t('provision.manualExecute')}</Radio>
-                  </Radio.Group>
-                </Form.Item>
-              </Descriptions.Item>
-            </Descriptions>
-          </Card>
+          <PolicyReadOnlySection readOnly={isView}>
+            <Card size="small" title={t('common.basicInfo')} style={{ marginBottom: 16 }}>
+              <Descriptions column={1} bordered size="small" labelStyle={{ width: 120 }} contentStyle={{ flex: 1 }}>
+                <Descriptions.Item label={t('provision.settingSwitch')}>
+                  <Form.Item name="selfStartEnable" valuePropName="checked" noStyle>
+                    <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
+                  </Form.Item>
+                </Descriptions.Item>
+                <Descriptions.Item label={t('provision.policyName')}>
+                  <Form.Item name="policyName" noStyle rules={[{ required: true, message: t('common.pleaseInput') }]}>
+                    <Input placeholder={t('provision.policyNamePlaceholder')} maxLength={50} />
+                  </Form.Item>
+                </Descriptions.Item>
+                <Descriptions.Item label={t('provision.productTechnology')}>
+                  <Form.Item name="productTechnology" noStyle rules={[{ required: true, message: t('common.pleaseSelect') }]}>
+                    <Select
+                      placeholder={t('provision.productTechnologyPlaceholder')}
+                      options={productTechnologyOptions}
+                      onChange={handleProductTechnologyChange}
+                      style={{ width: '100%', maxWidth: 420 }}
+                    />
+                  </Form.Item>
+                </Descriptions.Item>
+                <Descriptions.Item label={t('provision.productClass')}>
+                  <Form.Item name="productClasses" noStyle rules={[{ required: true, message: t('common.pleaseSelect') }]}>
+                    <ProductClassMultiSelect
+                      placeholder={productTechnology
+                        ? t('common.pleaseSelect')
+                        : t('provision.selectProductTechnologyFirst')}
+                      options={productClassOptions}
+                      loading={productClassesLoading || productCatalogLoading}
+                      onChange={handleProductClassChange}
+                      disabled={!productTechnology}
+                    />
+                  </Form.Item>
+                </Descriptions.Item>
+                <Descriptions.Item label={t('provision.executeType')}>
+                  <Form.Item name="executeType" noStyle rules={[{ required: true }]}>
+                    <Radio.Group>
+                      <Radio value="0">{t('provision.autoExecute')}</Radio>
+                      <Radio value="1">{t('provision.manualExecute')}</Radio>
+                    </Radio.Group>
+                  </Form.Item>
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+          </PolicyReadOnlySection>
 
           {/* Function Module Selection */}
           <Card size="small" style={{ marginBottom: 16 }}>
@@ -1328,14 +1439,14 @@ export default function AddPolicyPage() {
           </Card>
 
           {/* Module Config Panels */}
-          {functionModule === '0' && renderSoftwareUpgradeConfig()}
+          {functionModule === '0' && (
+            <PolicyReadOnlySection readOnly={isView}>
+              {renderSoftwareUpgradeConfig()}
+            </PolicyReadOnlySection>
+          )}
           {functionModule === '1' && renderLicenseConfig()}
           {functionModule === '2' && renderSelfConfig()}
 
-          {/* Hidden field for original version */}
-          <Form.Item name="originalVersion" hidden>
-            <Input />
-          </Form.Item>
         </Form>
       </div>
 
@@ -1352,332 +1463,14 @@ export default function AddPolicyPage() {
         destroyOnHidden
       >
         <Form form={configForm} layout="vertical" disabled={configDetailMode === 'view'} style={{ paddingBottom: 60 }}>
-          {/* eNB specific fields */}
+          {/* eNB fields aligned with device quick settings; template-only fields follow. */}
           {currentConfig?.deviceType === 'eNB' && (
-            <Collapse defaultActiveKey={['enb-basic', 'enb-core', 'enb-ip', 'enb-ipsec', 'enb-wan', 'enb-custom']} ghost>
-              <Collapse.Panel key="enb-basic" header={t('provision.enbBasicConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="eNodeBId" label="eNodeB ID" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="plmnId" label="PLMN ID" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="tac" label="TAC" tooltip={`${t('provision.integer')}, ${t('provision.range')}: 0~65535`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={65535} />
-                  </Form.Item>
-                  <Form.Item name="cellIdentity" label="ECI" tooltip={`${t('provision.integer')}, ${t('provision.range')}: 0~268435455`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={268435455} />
-                  </Form.Item>
-                  <Form.Item name="phycellid" label="PCI" tooltip={`${t('provision.integer')}, ${t('provision.range')}: 0~503`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={503} />
-                  </Form.Item>
-                  <Form.Item name="bandsSupport" label={t('provision.bandsSupport')} rules={[{ required: true }]} tooltip={`${t('provision.integer')}, ${t('provision.range')}: 1~62`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={1} max={62} />
-                  </Form.Item>
-                  <Form.Item name="bandWidth" label={t('provision.bandwidth')} rules={[{ required: true }]} style={{ flex: '1 1 200px' }}>
-                    <Select options={BANDWIDTH_OPTIONS_OTHER} />
-                  </Form.Item>
-                  <Form.Item name="frequency" label={t('provision.frequency')} rules={[{ required: true }]} tooltip={`${t('provision.integer')}, ${t('provision.range')}: 1~65535`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={1} max={65535} />
-                  </Form.Item>
-                  <Form.Item name="subframeAssignment" label={t('provision.subframeAssignment')} rules={[{ required: true }]} style={{ flex: '1 1 200px' }}>
-                    <Select options={SUBFRAME_OPTIONS} />
-                  </Form.Item>
-                  <Form.Item name="specialSubframePatterns" label={t('provision.specialSubframePatterns')} style={{ flex: '1 1 200px' }}>
-                    <Select options={SPECIAL_SUBFRAME_OPTIONS} />
-                  </Form.Item>
-                  <Form.Item name="rootSequenceIndex" label={t('provision.rootSequenceIndex')} tooltip={`${t('provision.integer')}, ${t('provision.range')}: 0~837`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={837} />
-                  </Form.Item>
-                </div>
-              </Collapse.Panel>
-              <Collapse.Panel key="enb-core" header={t('provision.coreNetworkConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="halobEnable" label={t('provision.halobSwitch')} style={{ flex: '1 1 200px' }}>
-                    <Select options={[
-                      { label: t('provision.halobOn'), value: '1' },
-                      { label: t('provision.halobOff'), value: '0' },
-                    ]} />
-                  </Form.Item>
-                </div>
-                <Divider titlePlacement="left" style={{ margin: '12px 0 16px' }}>{t('provision.mmeList')}</Divider>
-                <Form.List name="mmeList">
-                  {(fields, { add, remove }) => (
-                    <>
-                      {fields.map(({ key, name, ...restField }) => (
-                        <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.mmeItem')} ${name + 1}`} extra={
-                          <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                        }>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'mmeIp']} label="MME IP" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} placeholder={t('provision.mmePlaceholder')} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'mmePort']} label="MME Port" style={{ flex: '1 1 200px' }}>
-                              <InputNumber style={{ width: '100%' }} min={1} max={65535} />
-                            </Form.Item>
-                          </div>
-                        </Card>
-                      ))}
-                      <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                        {t('provision.addMme')}
-                      </Button>
-                    </>
-                  )}
-                </Form.List>
-              </Collapse.Panel>
-              <Collapse.Panel key="enb-ip" header={t('provision.ipConfig')}>
-                <Card size="small" style={{ marginBottom: 12 }} title={t('provision.serviceIpConfig')}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                    <Form.Item name="serviceIp" label={t('provision.serviceIp')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="serviceMask" label={t('provision.serviceMask')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="serviceGateway" label={t('provision.serviceGateway')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="serviceGatewayMask" label={t('provision.serviceGatewayMask')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="serviceVlan" label={t('provision.serviceVlan')} style={{ flex: '1 1 200px' }}>
-                      <InputNumber style={{ width: '100%' }} min={0} max={4095} />
-                    </Form.Item>
-                  </div>
-                </Card>
-                <Card size="small" title={t('provision.mgmtIpConfig')}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                    <Form.Item name="mgmtIp" label={t('provision.mgmtIp')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="mgmtMask" label={t('provision.mgmtMask')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="mgmtGateway" label={t('provision.mgmtGateway')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="mgmtGatewayMask" label={t('provision.mgmtGatewayMask')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="mgmtVlan" label={t('provision.mgmtVlan')} style={{ flex: '1 1 200px' }}>
-                      <InputNumber style={{ width: '100%' }} min={0} max={4095} />
-                    </Form.Item>
-                  </div>
-                </Card>
-              </Collapse.Panel>
-              <Collapse.Panel key="enb-ipsec" header={t('provision.ipsecConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="ipsecSwitch" label={t('provision.ipsecSwitch')} valuePropName="checked" style={{ flex: '1 1 200px' }}>
-                    <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
-                  </Form.Item>
-                  <Form.Item name="ipsecEnable" label={t('provision.ipsecEnable')} style={{ flex: '1 1 200px' }}>
-                    <Select options={[
-                      { label: t('common.enable'), value: '1' },
-                      { label: t('common.disable'), value: '0' },
-                    ]} />
-                  </Form.Item>
-                  <Form.Item name="ipsecRightIkePort" label="Right IKE Port" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="leftInterface" label="Left Interface" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                </div>
-                <Divider titlePlacement="left" style={{ margin: '12px 0 16px' }}>{t('provision.ipsecTunnelList')}</Divider>
-                <Form.List name="ipsecList">
-                  {(fields, { add, remove }) => (
-                    <>
-                      {fields.map(({ key, name, ...restField }) => (
-                        <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.ipsecTunnel')} ${name + 1}`} extra={
-                          <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                        }>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'TUNNEL_ENABLE']} label={t('provision.tunnelEnable')} valuePropName="checked" style={{ flex: '1 1 200px' }}>
-                              <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'authBy']} label="AuthBy" style={{ flex: '1 1 200px' }}>
-                              <Select options={AUTH_BY_OPTIONS} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'LEFT_AUTH']} label="Left Auth" style={{ flex: '1 1 200px' }}>
-                              <Select options={AUTH_OPTIONS} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'RIGHT_AUTH']} label="Right Auth" style={{ flex: '1 1 200px' }}>
-                              <Select options={AUTH_OPTIONS} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'TUNNEL_GATEWAY']} label={t('provision.tunnelGateway')} style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'LEFT_IDENTIFIER']} label="Left ID" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'RIGHT_IDENTIFIER']} label="Right ID" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'LEFT_CERT']} label="Left Cert" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'SECRET_KEY']} label="Secret Key" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'RIGHT_SECRET_KEY']} label="Right Secret Key" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'LEFTSOURCEIP']} label="Left Source IP" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} placeholder="%config" />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'LEFT_SUBNET']} label="Left Subnet" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'RIGHT_SUBNET']} label="Right Subnet" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                          </div>
-                          <Divider titlePlacement="left" style={{ margin: '8px 0 12px', fontSize: 12 }}>IKE</Divider>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'IKE_ENCRYPTION']} label="IKE Encryption" style={{ flex: '1 1 200px' }}>
-                              <Select options={ENCRYPTION_OPTIONS} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'IKE_DH_GROUP']} label="IKE DH Group" style={{ flex: '1 1 200px' }}>
-                              <Select options={DH_GROUP_OPTIONS} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'IKE_AUTHENTICATION']} label="IKE Auth" style={{ flex: '1 1 200px' }}>
-                              <Select options={AUTH_ALGORITHM_OPTIONS} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'IKELIFETIME']} label="IKE Life Time" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} placeholder="e.g. 8h" />
-                            </Form.Item>
-                          </div>
-                          <Divider titlePlacement="left" style={{ margin: '8px 0 12px', fontSize: 12 }}>ESP</Divider>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'ESP_ENCRYPTION']} label="ESP Encryption" style={{ flex: '1 1 200px' }}>
-                              <Select options={ENCRYPTION_OPTIONS} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'ESP_DH_GROUP']} label="ESP DH Group" style={{ flex: '1 1 200px' }}>
-                              <Select options={DH_GROUP_OPTIONS} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'ESP_AUTHENTICATION']} label="ESP Auth" style={{ flex: '1 1 200px' }}>
-                              <Select options={AUTH_ALGORITHM_OPTIONS} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'KEYLIFE']} label="Key Life" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} placeholder="e.g. 1h" />
-                            </Form.Item>
-                          </div>
-                          <Divider titlePlacement="left" style={{ margin: '8px 0 12px', fontSize: 12 }}>DPD / Rekey</Divider>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'REKEYMARGIN']} label="Rekey Margin" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} placeholder="e.g. 9m" />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'DPDACTION']} label="DPD Action" style={{ flex: '1 1 200px' }}>
-                              <Select options={DPD_ACTION_OPTIONS} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'DPDDELAY']} label="DPD Delay" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} placeholder="e.g. 30s" />
-                            </Form.Item>
-                          </div>
-                        </Card>
-                      ))}
-                      <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                        {t('provision.addTunnel')}
-                      </Button>
-                    </>
-                  )}
-                </Form.List>
-              </Collapse.Panel>
-              <Collapse.Panel key="enb-wan" header={t('provision.enbWanConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="wanSendEnable" label={t('provision.wanSendEnable')} valuePropName="checked" style={{ flex: '1 1 200px' }}>
-                    <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
-                  </Form.Item>
-                </div>
-
-                {/* WAN(OAM-TR069) */}
-                <Card size="small" style={{ marginBottom: 12 }} title={t('provision.wanOamTr069')}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                    <Form.Item name={['wanOamTr069', 'ipAddress']} label={t('provision.ipAddr')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanOamTr069', 'netmask']} label={t('provision.subnetMask')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanOamTr069', 'gateway']} label={t('provision.gateway')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanOamTr069', 'vlanId']} label="VLAN ID" style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanOamTr069', 'binding']} label="TR069 Binding" style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                  </div>
-                </Card>
-
-                {/* WAN(S1-C) */}
-                <Card size="small" style={{ marginBottom: 12 }} title={t('provision.wanS1c')}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                    <Form.Item name={['wanS1c', 'ipAddress']} label={t('provision.ipAddr')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanS1c', 'netmask']} label={t('provision.subnetMask')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanS1c', 'gateway']} label={t('provision.gateway')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanS1c', 'vlanId']} label="VLAN ID" style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanS1c', 'binding']} label="S1-C Binding" style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                  </div>
-                </Card>
-
-                {/* WAN(S1-U) */}
-                <Card size="small" style={{ marginBottom: 12 }} title={t('provision.wanS1u')}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                    <Form.Item name={['wanS1u', 'ipAddress']} label={t('provision.ipAddr')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanS1u', 'netmask']} label={t('provision.subnetMask')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanS1u', 'gateway']} label={t('provision.gateway')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanS1u', 'vlanId']} label="VLAN ID" style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanS1u', 'binding']} label="S1-U Binding" style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                  </div>
-                </Card>
-
-                {/* WAN(X2AP) */}
-                <Card size="small" style={{ marginBottom: 12 }} title={t('provision.wanX2ap')}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                    <Form.Item name={['wanX2ap', 'ipAddress']} label={t('provision.ipAddr')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanX2ap', 'netmask']} label={t('provision.subnetMask')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanX2ap', 'gateway']} label={t('provision.gateway')} style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanX2ap', 'vlanId']} label="VLAN ID" style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name={['wanX2ap', 'binding']} label="X2-ap Binding" style={{ flex: '1 1 200px' }}>
-                      <Input style={{ width: '100%' }} />
-                    </Form.Item>
-                  </div>
-                </Card>
-              </Collapse.Panel>
-
-              {/* 自定义参数 */}
-              <Collapse.Panel key="enb-custom" header={t('provision.customParams')}>
+            <>
+              <EnbQuickSettingsCards />
+              <Card size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16 }}>
+                <EnbTemplateExtraFieldGrid />
+              </Card>
+              <Card size="small" title={t('provision.customParams')} style={{ marginBottom: 16 }}>
                 <Form.List name="customParams">
                   {(fields, { add, remove }) => (
                     <>
@@ -1685,16 +1478,10 @@ export default function AddPolicyPage() {
                         <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.customParam')} ${name + 1}`} extra={
                           <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
                         }>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'name']} label="Name" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'value']} label="Value" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'trPath']} label="TR Path" style={{ flex: '1 1 300px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', columnGap: 16 }}>
+                            <Form.Item {...restField} name={[name, 'name']} label={t('provision.nrQuick.name')}><Input /></Form.Item>
+                            <Form.Item {...restField} name={[name, 'value']} label={t('provision.nrQuick.value')}><Input /></Form.Item>
+                            <Form.Item {...restField} name={[name, 'trPath']} label={t('provision.nrQuick.trPath')}><Input /></Form.Item>
                           </div>
                         </Card>
                       ))}
@@ -1704,144 +1491,15 @@ export default function AddPolicyPage() {
                     </>
                   )}
                 </Form.List>
-              </Collapse.Panel>
-            </Collapse>
+              </Card>
+            </>
           )}
-
           {/* gNB specific fields */}
           {currentConfig?.deviceType === 'gNB' && (
-            <Collapse defaultActiveKey={['gnb-basic', 'gnb-sync', 'gnb-amf', 'gnb-ip', 'gnb-dns', 'gnb-ipsec', 'gnb-custom']} ghost>
-              <Collapse.Panel key="gnb-basic" header={t('provision.gnbBasicConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="gnbName" label="gNB Name" style={{ flex: '1 1 300px' }}>
-                    <Input style={{ width: '100%' }} placeholder={t('provision.gnbNamePlaceholder')} maxLength={150} />
-                  </Form.Item>
-                  <Form.Item name="plmnId" label="PLMN ID" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="gnbId" label="gNB ID" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="gnbIdLength" label="gNB ID Length" tooltip={`${t('provision.integer')}, ${t('provision.range')}: 22~32`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={22} max={32} />
-                  </Form.Item>
-                  <Form.Item name="nci" label="NCI" tooltip={`${t('provision.range')}: 0~68719476735`} style={{ flex: '1 1 300px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="tac" label="TAC" tooltip={`${t('provision.integer')}, ${t('provision.range')}: 0~16777215`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={16777215} />
-                  </Form.Item>
-                  <Form.Item name="ranac" label={t('provision.ranac')} tooltip={`${t('provision.integer')}, ${t('provision.range')}: 0~255`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={255} />
-                  </Form.Item>
-                </div>
-                <Divider titlePlacement="left" style={{ margin: '16px 0 12px', fontSize: 12 }}>Radio Config</Divider>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="pci" label="PCI" tooltip={`${t('provision.integer')}, ${t('provision.range')}: 0~1007`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={1007} />
-                  </Form.Item>
-                  <Form.Item name="freqBandIndicator" label={t('provision.freqBandIndicator')} tooltip={`${t('provision.integer')}, ${t('provision.range')}: 1~1024`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={1} max={1024} />
-                  </Form.Item>
-                  <Form.Item name="nrarfcnndl" label={t('provision.nrarfcnndl')} tooltip={`${t('provision.integer')}, ${t('provision.range')}: 0~3279165`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={3279165} />
-                  </Form.Item>
-                  <Form.Item name="dlbandwidth" label={t('provision.dlbandwidth')} style={{ flex: '1 1 200px' }}>
-                    <Select options={[
-                      { label: '5 MHz', value: '5' },
-                      { label: '10 MHz', value: '10' },
-                      { label: '15 MHz', value: '15' },
-                      { label: '20 MHz', value: '20' },
-                      { label: '25 MHz', value: '25' },
-                      { label: '30 MHz', value: '30' },
-                      { label: '40 MHz', value: '40' },
-                      { label: '50 MHz', value: '50' },
-                      { label: '60 MHz', value: '60' },
-                      { label: '80 MHz', value: '80' },
-                      { label: '90 MHz', value: '90' },
-                      { label: '100 MHz', value: '100' },
-                      { label: '200 MHz', value: '200' },
-                      { label: '400 MHz', value: '400' },
-                    ]} />
-                  </Form.Item>
-                  <Form.Item name="ssbFrequency" label={t('provision.ssbFrequency')} tooltip={`${t('provision.integer')}, ${t('provision.range')}: 0~3279165`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={3279165} />
-                  </Form.Item>
-                  <Form.Item name="nrarfcnul" label={t('provision.nrarfcnul')} tooltip={`${t('provision.integer')}, ${t('provision.range')}: 0~3279165`} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={3279165} />
-                  </Form.Item>
-                  <Form.Item name="duplexMode" label={t('provision.duplexMode')} style={{ flex: '1 1 200px' }}>
-                    <Select options={[
-                      { label: 'TDD', value: 'TDD' },
-                      { label: 'FDD', value: 'FDD' },
-                    ]} />
-                  </Form.Item>
-                  <Form.Item name="arfcn" label="ARFCN" style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="ssbAbsoluteFrequency" label={t('provision.ssbAbsoluteFrequency')} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="frameOffset" label={t('provision.frameOffset')} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="prachConfigIndex" label="PRACH Config Index" style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} />
-                  </Form.Item>
-                </div>
-                <Divider titlePlacement="left" style={{ margin: '16px 0 12px', fontSize: 12 }}>Slice Config</Divider>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="sliceSst" label={t('provision.sliceSst')} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="sliceSd" label={t('provision.sliceSd')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                </div>
-              </Collapse.Panel>
-              <Collapse.Panel key="gnb-sync" header={t('provision.syncConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="gpsSync" label={t('provision.gpsSync')} valuePropName="checked" style={{ flex: '1 1 200px' }}>
-                    <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
-                  </Form.Item>
-                  <Form.Item name="ntpSync" label={t('provision.ntpSync')} valuePropName="checked" style={{ flex: '1 1 200px' }}>
-                    <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
-                  </Form.Item>
-                  <Form.Item name="offsetToPointA" label={t('provision.offsetToPointA')} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="kssb" label="Kssb" style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} />
-                  </Form.Item>
-                </div>
-              </Collapse.Panel>
-              <Collapse.Panel key="gnb-amf" header={t('provision.amfConfig')}>
-                <Form.List name="amfList">
-                  {(fields, { add, remove }) => (
-                    <>
-                      {fields.map(({ key, name, ...restField }) => (
-                        <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.amfItem')} ${name + 1}`} extra={
-                          <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                        }>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'amfIp']} label="AMF IP" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'amfPort']} label="AMF Port" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                          </div>
-                        </Card>
-                      ))}
-                      <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                        {t('provision.addAmf')}
-                      </Button>
-                    </>
-                  )}
-                </Form.List>
-              </Collapse.Panel>
-              <Collapse.Panel key="gnb-ip" header={t('provision.ipConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <GnbQuickSettingsCards />
+              <Card key="gnb-ip" size="small" title={t('provision.ipConfig')} style={{ marginBottom: 16, order: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', columnGap: 16 }}>
                   <Form.Item name="serviceIp" label={t('provision.serviceIp')} style={{ flex: '1 1 200px' }}>
                     <Input style={{ width: '100%' }} />
                   </Form.Item>
@@ -1851,61 +1509,15 @@ export default function AddPolicyPage() {
                   <Form.Item name="omIp" label={t('provision.omIp')} style={{ flex: '1 1 200px' }}>
                     <Input style={{ width: '100%' }} />
                   </Form.Item>
-                  <Form.Item name="omMask" label={t('provision.omMask')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
                   <Form.Item name="serviceGateway" label={t('provision.serviceGateway')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="serviceGatewayMask" label={t('provision.serviceGatewayMask')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="mgmtGateway" label={t('provision.mgmtGateway')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="mgmtGatewayMask" label={t('provision.mgmtGatewayMask')} style={{ flex: '1 1 200px' }}>
                     <Input style={{ width: '100%' }} />
                   </Form.Item>
                   <Form.Item name="serviceVlan" label={t('provision.serviceVlan')} style={{ flex: '1 1 200px' }}>
                     <InputNumber style={{ width: '100%' }} min={0} max={4095} />
                   </Form.Item>
-                  <Form.Item name="mgmtVlan" label={t('provision.mgmtVlan')} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={4095} />
-                  </Form.Item>
                 </div>
-              </Collapse.Panel>
-              <Collapse.Panel key="gnb-tdd" header={t('provision.tddPatternConfig')}>
-                <Form.Item noStyle shouldUpdate={(prev, curr) => prev.duplexMode !== curr.duplexMode}>
-                  {({ getFieldValue }) => {
-                    const duplexMode = getFieldValue('duplexMode');
-                    if (duplexMode !== 'TDD') {
-                      return <Text type="secondary">{t('provision.tddPatternHint')}</Text>;
-                    }
-                    return (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                        <Form.Item name="subframeSlot" label={t('provision.subframeSlot')} style={{ flex: '1 1 200px' }}>
-                          <Select options={[
-                            { label: 'DSDDU', value: 'DSDDU' },
-                            { label: 'DDDSU', value: 'DDDSU' },
-                            { label: 'DDSUU', value: 'DDSUU' },
-                          ]} />
-                        </Form.Item>
-                        <Form.Item name="subframeSlotDlUl" label={t('provision.subframeSlotDlUl')} style={{ flex: '1 1 200px' }}>
-                          <Select options={[
-                            { label: 'DDDDDDDSUU', value: 'DDDDDDDSUU' },
-                            { label: 'DDDDDDDSUD', value: 'DDDDDDDSUD' },
-                            { label: 'DDDUUDDDUU', value: 'DDDUUDDDUU' },
-                          ]} />
-                        </Form.Item>
-                        <Form.Item name="slotConfig" label={t('provision.slotConfig')} style={{ flex: '1 1 200px' }}>
-                          <Input style={{ width: '100%' }} />
-                        </Form.Item>
-                      </div>
-                    );
-                  }}
-                </Form.Item>
-              </Collapse.Panel>
-              <Collapse.Panel key="gnb-plmn" header={t('provision.plmnConfigList')}>
+              </Card>
+              <Card key="gnb-plmn-extra" size="small" title={t('provision.plmnConfigList')} style={{ marginBottom: 16, order: 9 }}>
                 <Form.List name="plmnConfigList">
                   {(fields, { add, remove }) => (
                     <>
@@ -1913,11 +1525,11 @@ export default function AddPolicyPage() {
                         <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.plmnConfig')} ${name + 1}`} extra={
                           <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
                         }>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'plmnId']} label="PLMN ID" style={{ flex: '1 1 200px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', columnGap: 16 }}>
+                            <Form.Item {...restField} name={[name, 'plmnId']} label={t('provision.nrQuick.plmn')}>
                               <Input style={{ width: '100%' }} />
                             </Form.Item>
-                            <Form.Item {...restField} name={[name, 'primary']} label={t('provision.primary')} style={{ flex: '1 1 200px' }}>
+                            <Form.Item {...restField} name={[name, 'primary']} label={t('provision.primary')}>
                               <Select options={[
                                 { label: t('common.yes'), value: '1' },
                                 { label: t('common.no'), value: '0' },
@@ -1932,8 +1544,8 @@ export default function AddPolicyPage() {
                     </>
                   )}
                 </Form.List>
-              </Collapse.Panel>
-              <Collapse.Panel key="gnb-slice" header={t('provision.sliceConfigList')}>
+              </Card>
+              <Card key="gnb-slice" size="small" title={t('provision.sliceConfigList')} style={{ marginBottom: 16, order: 11 }}>
                 <Form.List name="sliceConfigList">
                   {(fields, { add, remove }) => (
                     <>
@@ -1942,13 +1554,13 @@ export default function AddPolicyPage() {
                           <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
                         }>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'sd']} label="SD" style={{ flex: '1 1 200px' }}>
+                            <Form.Item {...restField} name={[name, 'sd']} label={t('provision.nrQuick.sd')} style={{ flex: '1 1 200px' }}>
                               <Select options={[
                                 { label: t('provision.sdEmpty'), value: '0' },
                                 { label: t('provision.sdNotEmpty'), value: '1' },
                               ]} />
                             </Form.Item>
-                            <Form.Item {...restField} name={[name, 'sdValue']} label="SD Value" style={{ flex: '1 1 200px' }}>
+                            <Form.Item {...restField} name={[name, 'sdValue']} label={t('provision.nrQuick.sdValue')} style={{ flex: '1 1 200px' }}>
                               <Input style={{ width: '100%' }} placeholder="e.g. 010203" />
                             </Form.Item>
                           </div>
@@ -1960,44 +1572,11 @@ export default function AddPolicyPage() {
                     </>
                   )}
                 </Form.List>
-              </Collapse.Panel>
-              <Collapse.Panel key="gnb-dns" header={t('provision.dnsConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="dns1" label="DNS1" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} placeholder="e.g. 8.8.8.8" />
-                  </Form.Item>
-                  <Form.Item name="dns2" label="DNS2" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} placeholder="e.g. 8.8.4.4" />
-                  </Form.Item>
-                </div>
-              </Collapse.Panel>
-              <Collapse.Panel key="gnb-ipsec" header={t('provision.ipsecConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="ipsecEnable" label={t('provision.ipsecEnable')} valuePropName="checked" style={{ flex: '1 1 200px' }}>
-                    <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
-                  </Form.Item>
-                </div>
-                <Form.Item noStyle shouldUpdate={(prev, curr) => prev.ipsecEnable !== curr.ipsecEnable}>
-                  {({ getFieldValue }) => {
-                    const ipsecEnable = getFieldValue('ipsecEnable');
-                    if (!ipsecEnable) return null;
-                    return (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                        <Form.Item name="ipsecImsi" label="IMSI" style={{ flex: '1 1 200px' }}>
-                          <Input style={{ width: '100%' }} />
-                        </Form.Item>
-                        <Form.Item name="ipsecKey" label="Key" style={{ flex: '1 1 200px' }}>
-                          <Input style={{ width: '100%' }} />
-                        </Form.Item>
-                        <Form.Item name="ipsecOpc" label="OPC" style={{ flex: '1 1 200px' }}>
-                          <Input style={{ width: '100%' }} />
-                        </Form.Item>
-                      </div>
-                    );
-                  }}
-                </Form.Item>
-              </Collapse.Panel>
-              <Collapse.Panel key="gnb-custom" header={t('provision.customParams')}>
+              </Card>
+              <Card key="gnb-other" size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16, order: 8 }}>
+                <GnbTemplateExtraFieldGrid />
+              </Card>
+              <Card key="gnb-custom" size="small" title={t('provision.customParams')} style={{ marginBottom: 16, order: 12 }}>
                 <Form.List name="customParams">
                   {(fields, { add, remove }) => (
                     <>
@@ -2006,13 +1585,13 @@ export default function AddPolicyPage() {
                           <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
                         }>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'name']} label="Name" style={{ flex: '1 1 200px' }}>
+                            <Form.Item {...restField} name={[name, 'name']} label={t('provision.nrQuick.name')} style={{ flex: '1 1 200px' }}>
                               <Input style={{ width: '100%' }} />
                             </Form.Item>
-                            <Form.Item {...restField} name={[name, 'value']} label="Value" style={{ flex: '1 1 200px' }}>
+                            <Form.Item {...restField} name={[name, 'value']} label={t('provision.nrQuick.value')} style={{ flex: '1 1 200px' }}>
                               <Input style={{ width: '100%' }} />
                             </Form.Item>
-                            <Form.Item {...restField} name={[name, 'trPath']} label="TR Path" style={{ flex: '1 1 300px' }}>
+                            <Form.Item {...restField} name={[name, 'trPath']} label={t('provision.nrQuick.trPath')} style={{ flex: '1 1 300px' }}>
                               <Input style={{ width: '100%' }} />
                             </Form.Item>
                           </div>
@@ -2024,97 +1603,18 @@ export default function AddPolicyPage() {
                     </>
                   )}
                 </Form.List>
-              </Collapse.Panel>
-            </Collapse>
+              </Card>
+            </div>
           )}
 
           {/* GSM specific fields */}
           {currentConfig?.deviceType === 'GSM' && (
-            <Collapse defaultActiveKey={['gsm-basic', 'gsm-route', 'gsm-wan', 'gsm-custom']} ghost>
+            <Collapse defaultActiveKey={['gsm-basic', 'gsm-other', 'gsm-custom']} ghost>
               <Collapse.Panel key="gsm-basic" header={t('provision.gsmBasicConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="ipaUnitid" label="IPA Unit ID" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="bscServiceIp" label={t('provision.bscServiceIp')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="omlRemoteIp" label="OML Remote IP" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="omlRemoteIpBak" label="OML Remote IP (Backup)" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="rfPower" label="RF Power" style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} />
-                  </Form.Item>
-                </div>
+                <TemplateFieldGrid fields={GSM_GROUPED_TEMPLATE_FIELDS.quickAbis} />
               </Collapse.Panel>
-              <Collapse.Panel key="gsm-route" header={t('provision.routeConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="onboot" label={t('provision.onboot')} style={{ flex: '1 1 200px' }}>
-                    <Select options={[
-                      { label: 'Yes', value: 'yes' },
-                      { label: 'No', value: 'no' },
-                    ]} />
-                  </Form.Item>
-                  <Form.Item name="routeGateway" label={t('provision.gateway')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="netAddr" label={t('provision.netAddr')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="netMask" label={t('provision.netMask')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                </div>
-              </Collapse.Panel>
-              <Collapse.Panel key="gsm-wan" header={t('provision.wanConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="wanEnable" label={t('provision.enable')} valuePropName="checked" style={{ flex: '1 1 200px' }}>
-                    <Switch checkedChildren={t('common.on')} unCheckedChildren={t('common.off')} />
-                  </Form.Item>
-                  <Form.Item name="ipMode" label={t('provision.ipMode')} style={{ flex: '1 1 200px' }}>
-                    <Select options={[
-                      { label: 'Static', value: 'static' },
-                      { label: 'DHCP', value: 'dhcp' },
-                    ]} />
-                  </Form.Item>
-                  <Form.Item name="ipAddr" label={t('provision.ipAddr')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="wanNetMask" label={t('provision.subnetMask')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="gateway" label={t('provision.gateway')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="vlanId" label="VLAN ID" style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={4095} />
-                  </Form.Item>
-                </div>
-              </Collapse.Panel>
-              <Collapse.Panel key="gsm-dns" header={t('provision.dnsTimezoneConfig')}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                  <Form.Item name="dns1" label="DNS1" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} placeholder="e.g. 8.8.8.8" />
-                  </Form.Item>
-                  <Form.Item name="dns2" label="DNS2" style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} placeholder="e.g. 8.8.4.4" />
-                  </Form.Item>
-                  <Form.Item name="localTimezoneName" label={t('provision.timezone')} style={{ flex: '1 1 200px' }}>
-                    <Select showSearch options={[
-                      { label: 'Asia/Shanghai', value: 'Asia/Shanghai' },
-                      { label: 'Asia/Hong_Kong', value: 'Asia/Hong_Kong' },
-                      { label: 'Asia/Tokyo', value: 'Asia/Tokyo' },
-                      { label: 'America/New_York', value: 'America/New_York' },
-                      { label: 'America/Los_Angeles', value: 'America/Los_Angeles' },
-                      { label: 'Europe/London', value: 'Europe/London' },
-                      { label: 'Europe/Paris', value: 'Europe/Paris' },
-                      { label: 'UTC', value: 'UTC' },
-                    ]} />
-                  </Form.Item>
-                </div>
+              <Collapse.Panel key="gsm-other" header="其他参数">
+                <TemplateFieldGrid fields={GSM_GROUPED_TEMPLATE_FIELDS.other} />
               </Collapse.Panel>
               <Collapse.Panel key="gsm-custom" header={t('provision.customParams')}>
                 <Form.List name="customParams">
@@ -2168,78 +1668,68 @@ export default function AddPolicyPage() {
         </div>
       </Drawer>
 
-      {/* License Import Modal */}
+      {/* Firmware package import belongs to the target version. */}
       <Modal
-        title={t('provision.importLicenseFile')}
-        open={licenseImportModalVisible}
-        onCancel={() => {
-          setLicenseImportModalVisible(false);
-          setLicenseFileList([]);
-        }}
-        footer={[
-          <Button key="cancel" onClick={() => {
-            setLicenseImportModalVisible(false);
-            setLicenseFileList([]);
-          }}>
-            {t('common.cancel')}
-          </Button>,
-          <Button
-            key="download"
-            onClick={() => {
-              // Download template logic
-              void message.success(t('common.success'));
-            }}
-          >
-            {t('provision.downloadTemplate')}
-          </Button>,
-          <Button
-            key="import"
-            type="primary"
-            onClick={() => {
-              if (licenseFileList.length === 0) {
-                void message.warning(t('common.pleaseSelect'));
-                return;
-              }
-              // Process license files
-              licenseFileList.forEach(file => {
-                const newFile: LicenseFile = {
-                  serial_number: `NEW-${Date.now()}`,
-                  file_name: file.name,
-                  upload_time: new Date().toLocaleString(),
-                  execute_status: '0',
-                };
-                setLicenseFiles(prev => [...prev, newFile]);
-              });
-              setLicenseImportModalVisible(false);
-              setLicenseFileList([]);
-              void message.success(t('common.success'));
-            }}
-          >
-            {t('common.import')}
-          </Button>,
-        ]}
-        width={520}
+        title={t('provision.importVersionPackage')}
+        open={firmwareImportVisible}
+        onCancel={handleCloseFirmwareImport}
+        onOk={() => void handleImportFirmware()}
+        confirmLoading={uploadFirmwareMutation.isPending}
+        okText={t('common.import')}
+        cancelText={t('common.cancel')}
+        width={560}
+        destroyOnHidden
       >
-        <Upload.Dragger
-          accept=".lic"
-          fileList={licenseFileList}
-          beforeUpload={(file) => {
-            setLicenseFileList([file]);
-            return false;
-          }}
-          onRemove={() => {
-            setLicenseFileList([]);
-          }}
-        >
-          <p className="ant-upload-drag-icon">
-            <InboxOutlined style={{ fontSize: 40, color: 'var(--color-primary-600)' }} />
-          </p>
-          <p className="ant-upload-text">{t('recycle.importSelectFile')}</p>
-          <p className="ant-upload-hint" style={{ fontSize: 12, color: '#8c8c8c' }}>
-            {t('provision.importLicenseHint')}
-          </p>
-        </Upload.Dragger>
+        <Form form={firmwareImportForm} layout="vertical">
+          <Form.Item label={t('provision.productClass')}>
+            <Input value={productClasses.join(', ')} disabled />
+          </Form.Item>
+          <Form.Item
+            name="version"
+            label={t('software.firmware.version')}
+            rules={[
+              { required: true, message: t('software.firmware.inputVersion') },
+              { max: 45, message: t('software.firmware.versionMaxLen') },
+            ]}
+          >
+            <Input placeholder={t('software.firmware.inputVersion')} maxLength={45} />
+          </Form.Item>
+          <Form.Item
+            label={t('software.firmware.fileName')}
+            required
+          >
+            <Upload.Dragger
+              accept=".img,.ext"
+              fileList={firmwareFileList}
+              maxCount={1}
+              beforeUpload={(file) => {
+                setFirmwareFileList([{
+                  uid: file.uid,
+                  name: file.name,
+                  status: 'done',
+                  originFileObj: file,
+                }]);
+                return false;
+              }}
+              onRemove={() => setFirmwareFileList([])}
+            >
+              <p className="ant-upload-drag-icon">
+                <InboxOutlined style={{ fontSize: 40, color: 'var(--color-primary-600)' }} />
+              </p>
+              <p className="ant-upload-text">{t('software.firmware.clickOrDrag')}</p>
+              <p className="ant-upload-hint">
+                {t('software.firmware.supportFormat', { format: 'IMG / EXT' })}
+              </p>
+            </Upload.Dragger>
+          </Form.Item>
+        </Form>
       </Modal>
+
+      <LicenseImportDrawer
+        open={licenseImportModalVisible}
+        onClose={() => setLicenseImportModalVisible(false)}
+        onSuccess={() => { void refetchLicenses(); }}
+      />
 
       {/* Import Config Modal */}
       <Modal
@@ -2257,15 +1747,6 @@ export default function AddPolicyPage() {
             {t('common.cancel')}
           </Button>,
           <Button
-            key="download"
-            onClick={() => {
-              // Download template logic
-              void message.success(t('common.success'));
-            }}
-          >
-            {t('provision.downloadTemplate')}
-          </Button>,
-          <Button
             key="import"
             type="primary"
             onClick={() => {
@@ -2273,14 +1754,9 @@ export default function AddPolicyPage() {
                 void message.warning(t('common.pleaseSelect'));
                 return;
               }
-              // Process import based on import type
-              paramFileList.forEach((file) => {
-                // antd UploadFile carries originFileObj: File for actual upload
-                const realFile = (file.originFileObj ?? file) as File;
-                handleImportConfig(realFile);
-              });
-              setImportModalVisible(false);
-              setParamFileList([]);
+              const selectedFile = paramFileList[0];
+              const realFile = (selectedFile.originFileObj ?? selectedFile) as File;
+              void handleImportConfig(realFile);
             }}
           >
             {t('common.import')}
@@ -2313,6 +1789,15 @@ export default function AddPolicyPage() {
             {paramImportType === 'append' ? t('provision.importTypeAppendHint') : t('provision.importTypeReplaceHint')}
           </Text>
         </div>
+
+        {activeParamDeviceType === 'gNB' && (
+          <Alert
+            type="info"
+            showIcon
+            message={t('provision.paramConfig5GTemplateFillHint')}
+            style={{ marginBottom: 16 }}
+          />
+        )}
 
         {/* Upload Area */}
         <Upload.Dragger

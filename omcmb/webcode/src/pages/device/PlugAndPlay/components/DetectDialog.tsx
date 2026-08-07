@@ -9,10 +9,12 @@ import {
   EditOutlined,
 } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
+import { provisionApi } from '@core/services/api/provisionApi';
 
 const { Text } = Typography;
 
 interface Device {
+  id: string;
   serialNumber: string;
   cellName: string;
   softwareVersion: string;
@@ -34,19 +36,7 @@ interface Props {
   onSuccess: () => void;
 }
 
-// Mock device data
-const MOCK_DEVICES: Device[] = [
-  { serialNumber: 'ENB00001', cellName: '北京朝阳基站01', softwareVersion: 'V2.0.5', product: 'QAFA', groupName: '北京区域', connectionStatus: 'online' },
-  { serialNumber: 'ENB00002', cellName: '北京海淀基站01', softwareVersion: 'V2.0.5', product: 'QAFA', groupName: '北京区域', connectionStatus: 'online' },
-  { serialNumber: 'ENB00003', cellName: '上海浦东基站01', softwareVersion: 'V2.0.4', product: 'QAFA', groupName: '上海区域', connectionStatus: 'offline' },
-  { serialNumber: 'ENB00004', cellName: '上海徐汇基站01', softwareVersion: 'V2.0.5', product: 'QAFA', groupName: '上海区域', connectionStatus: 'online' },
-  { serialNumber: 'ENB00005', cellName: '广州天河基站01', softwareVersion: 'V2.0.5', product: 'QAFB', groupName: '广州区域', connectionStatus: 'online' },
-  { serialNumber: 'ENB00006', cellName: '深圳南山基站01', softwareVersion: 'V2.0.3', product: 'QAFB', groupName: '深圳区域', connectionStatus: 'offline' },
-  { serialNumber: 'ENB00007', cellName: '杭州西湖基站01', softwareVersion: 'V2.0.5', product: 'QAFA', groupName: '杭州区域', connectionStatus: 'online' },
-  { serialNumber: 'ENB00008', cellName: '成都武侯基站01', softwareVersion: 'V2.0.5', product: 'QAFA', groupName: '成都区域', connectionStatus: 'online' },
-];
-
-export default function DetectDialog({ open, onClose, onSuccess }: Props) {
+export default function DetectDialog({ open, policy, onClose, onSuccess }: Props) {
   const t = useT();
   const { message } = App.useApp();
 
@@ -57,6 +47,7 @@ export default function DetectDialog({ open, onClose, onSuccess }: Props) {
   const [batchInputValue, setBatchInputValue] = useState('');
   const [batchInputError, setBatchInputError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [devices, setDevices] = useState<Device[]>([]);
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -65,18 +56,33 @@ export default function DetectDialog({ open, onClose, onSuccess }: Props) {
       setSelectedDevices([]);
       setBatchInputValue('');
       setBatchInputError('');
+      if (policy) {
+        setLoading(true);
+        void provisionApi.detectDevices(policy.policyId)
+          .then((items) => setDevices(items.map((d) => ({
+            id: d.id,
+            serialNumber: d.serialNumber,
+            cellName: d.deviceName,
+            softwareVersion: d.firmwareVersion,
+            product: d.productClass,
+            groupName: d.groupName,
+            connectionStatus: d.isOnline ? 'online' : 'offline',
+          }))))
+          .catch(() => message.error(t('common.operationFailed')))
+          .finally(() => setLoading(false));
+      }
     }
-  }, [open]);
+  }, [open, policy, message, t]);
 
   // Filtered available devices
   const filteredDevices = useMemo(() => {
-    if (!searchText) return MOCK_DEVICES;
+    if (!searchText) return devices;
     const search = searchText.toLowerCase();
-    return MOCK_DEVICES.filter(d =>
+    return devices.filter(d =>
       d.serialNumber.toLowerCase().includes(search) ||
       d.cellName.toLowerCase().includes(search)
     );
-  }, [searchText]);
+  }, [devices, searchText]);
 
   // Available devices (not selected)
   const availableDevices = useMemo(() => {
@@ -128,7 +134,7 @@ export default function DetectDialog({ open, onClose, onSuccess }: Props) {
     const newDevices: Device[] = [];
 
     for (const sn of sns) {
-      const device = MOCK_DEVICES.find(d => d.serialNumber.toLowerCase() === sn.trim().toLowerCase());
+      const device = devices.find(d => d.serialNumber.toLowerCase() === sn.trim().toLowerCase());
       if (device && !selectedDevices.some(sd => sd.serialNumber === device.serialNumber)) {
         newDevices.push(device);
       }
@@ -143,22 +149,28 @@ export default function DetectDialog({ open, onClose, onSuccess }: Props) {
 
     setBatchInputOpen(false);
     setBatchInputValue('');
-  }, [batchInputValue, selectedDevices, validateBatchInput, message, t]);
+  }, [batchInputValue, devices, selectedDevices, validateBatchInput, message, t]);
 
   // Handle submit
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (selectedDevices.length === 0) {
       message.warning(t('provision.selectDeviceRequired'));
       return;
     }
 
-    setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
+    if (!policy) return;
+    try {
+      setLoading(true);
+      await provisionApi.executePolicy(policy.policyId, selectedDevices.map((d) => d.id));
       setLoading(false);
       onSuccess();
-    }, 1000);
-  }, [selectedDevices, onSuccess, message, t]);
+    } catch (error) {
+      setLoading(false);
+      message.error(error instanceof Error && error.message
+        ? error.message
+        : t('common.operationFailed'));
+    }
+  }, [policy, selectedDevices, onSuccess, message, t]);
 
   // Available devices columns
   const availableColumns: TableColumnsType<Device> = useMemo(() => [
