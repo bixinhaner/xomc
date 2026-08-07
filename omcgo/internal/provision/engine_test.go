@@ -572,6 +572,7 @@ type mockTaskRepo struct {
 	UpdateStatusFn            func(ctx context.Context, id uuid.UUID, status ProvisioningState, errorMsg string) error
 	ListFn                    func(ctx context.Context, filter ProvisioningTaskFilter) ([]ProvisioningTask, int64, error)
 	CountByStatusFn           func(ctx context.Context) (map[ProvisioningState]int64, error)
+	CountByStatusFilteredFn   func(ctx context.Context, filter ProvisioningTaskFilter) (map[ProvisioningState]int64, error)
 	FailStaleFn               func(ctx context.Context, maxAge time.Duration) (int64, error)
 	ListActivationChecksDueFn func(ctx context.Context, before time.Time, limit int) ([]ProvisioningTask, error)
 }
@@ -635,6 +636,13 @@ func (m *mockTaskRepo) List(ctx context.Context, filter ProvisioningTaskFilter) 
 func (m *mockTaskRepo) CountByStatus(ctx context.Context) (map[ProvisioningState]int64, error) {
 	if m.CountByStatusFn != nil {
 		return m.CountByStatusFn(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockTaskRepo) CountByStatusFiltered(ctx context.Context, filter ProvisioningTaskFilter) (map[ProvisioningState]int64, error) {
+	if m.CountByStatusFilteredFn != nil {
+		return m.CountByStatusFilteredFn(ctx, filter)
 	}
 	return nil, nil
 }

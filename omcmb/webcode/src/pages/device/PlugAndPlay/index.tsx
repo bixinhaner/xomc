@@ -1,7 +1,8 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Space, Tag, Switch, Dropdown, Input, App, Typography, Card, Select } from 'antd';
+import { Button, Space, Tag, Switch, Dropdown, Input, App, Typography, Card, Select, DatePicker, Radio } from 'antd';
 import type { MenuProps } from 'antd';
+import type { Dayjs } from 'dayjs';
 import {
   PlusOutlined,
   SearchOutlined,
@@ -40,21 +41,24 @@ import BatchRetryDialog from './components/BatchRetryDialog';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { useAppStore } from '@core/store/appStore';
 import { getI18nText } from '@core/utils/i18nText';
-import { useProductClasses } from '@core/hooks/api/useDevices';
 import { useProductList } from '@core/hooks/api/useProducts';
-import { toSupportedProductClassOptions } from './productClassOptions';
+import { toSupportedProductNameOptions } from './productClassOptions';
 import ProductClassSelect from './components/ProductClassSelect';
 import { getPolicyActionAvailability } from './policyActionAvailability';
+import { findEnabledPolicyProductConflict } from './policyEnableConflict';
 
 const { Text } = Typography;
 
 // Types
 type ExecuteType = '0' | '1'; // 0-auto, 1-manual
+type TaskModule = '' | 'software_upgrade' | 'license' | 'self_config';
 
 interface Policy {
   policyId: string;
   policyName: string;
   policyNameI18n?: Record<string, string>;
+  productName: string;
+  productNames: string[];
   productClass: string;
   productClasses: string[];
   executeType: ExecuteType;
@@ -74,19 +78,18 @@ export default function PlugAndPlay() {
   const navigate = useNavigate();
   const { message } = App.useApp();
   const appLocale = useAppStore((s) => s.locale);
-  const { data: supportedProductClasses, isLoading: productClassesLoading } = useProductClasses();
   const { data: productCatalog, isLoading: productCatalogLoading } = useProductList();
   const productClassOptions = useMemo(
-    () => toSupportedProductClassOptions(supportedProductClasses, productCatalog?.items),
-    [productCatalog?.items, supportedProductClasses],
+    () => toSupportedProductNameOptions(productCatalog?.items),
+    [productCatalog?.items],
   );
 
   // Policy filter state
-  const [policyProductClass, setPolicyProductClass] = useState<string>('');
+  const [policyProductName, setPolicyProductName] = useState<string>('');
   const [policySearchText, setPolicySearchText] = useState('');
   const { data: policyData, isLoading: policiesLoading } = usePlugAndPlayPolicies({
     page: 1, pageSize: 100,
-    productClass: policyProductClass || undefined,
+    productName: policyProductName || undefined,
     search: policySearchText || undefined,
   });
   const setPolicyEnabledMutation = useSetPlugAndPlayPolicyEnabled();
@@ -94,7 +97,9 @@ export default function PlugAndPlay() {
   const policies = useMemo<Policy[]>(() => (policyData?.items ?? []).map((p) => ({
     policyId: p.id,
     policyName: p.name,
-    productClass: p.productClasses.join(', '),
+    productName: p.productNames.join(', ') || p.productClasses.join(', '),
+    productNames: p.productNames.length ? p.productNames : p.productClasses,
+    productClass: p.productClass,
     productClasses: p.productClasses,
     executeType: p.executeType === 'auto' ? '0' : '1',
     selfStartEnable: p.enabled ? '1' : '0',
@@ -109,6 +114,9 @@ export default function PlugAndPlay() {
   // Task filter state (执行状态 — real provisioning/tasks API)
   const [taskStatus, setTaskStatus] = useState<string>('');
   const [taskSearchText, setTaskSearchText] = useState('');
+  const [taskProductName, setTaskProductName] = useState('');
+  const [taskModule, setTaskModule] = useState<TaskModule>('');
+  const [taskTimeRange, setTaskTimeRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState(PAGE_SIZE);
 
@@ -118,6 +126,7 @@ export default function PlugAndPlay() {
   const backendStatusFilter = useMemo(() => {
     if (taskStatus === '0') return 'completed';
     if (taskStatus === '1') return 'failed';
+    if (taskStatus === '2') return 'running';
     return undefined;
   }, [taskStatus]);
 
@@ -130,6 +139,11 @@ export default function PlugAndPlay() {
     pageSize: taskPageSize,
     status: backendStatusFilter,
     policyOnly: true,
+    search: taskSearchText || undefined,
+    productName: taskProductName || undefined,
+    module: taskModule || undefined,
+    startedAfter: taskTimeRange?.[0].toISOString(),
+    startedBefore: taskTimeRange?.[1].toISOString(),
   });
 
   const retryTaskMutation = useRetryPlugAndPlayTask();
@@ -185,13 +199,31 @@ export default function PlugAndPlay() {
   }, [navigate, message, t, deletePolicyMutation]);
 
   const handlePolicySwitch = useCallback(async (record: Policy, checked: boolean) => {
+    if (checked) {
+      const conflict = findEnabledPolicyProductConflict({
+        policyId: record.policyId,
+        productNames: record.productNames,
+        enabled: false,
+      }, policies.map((policy) => ({
+        policyId: policy.policyId,
+        productNames: policy.productNames,
+        enabled: policy.selfStartEnable === '1',
+      })));
+      if (conflict) {
+        message.error(t('provision.enabledPolicyProductConflict'));
+        return;
+      }
+    }
     try {
       await setPolicyEnabledMutation.mutateAsync({ id: record.policyId, enabled: checked });
       message.success(t('common.success'));
-    } catch {
-      message.error(t('common.operationFailed'));
+    } catch (error) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      message.error(status === 409
+        ? t('provision.enabledPolicyProductConflict')
+        : t('common.operationFailed'));
     }
-  }, [message, t, setPolicyEnabledMutation]);
+  }, [message, policies, t, setPolicyEnabledMutation]);
 
   // Handlers - Task (real API)
   const handleRetryTask = useCallback(async (record: ProvisioningExecuteView) => {
@@ -267,9 +299,9 @@ export default function PlugAndPlay() {
       ),
     },
     {
-      key: 'productClass',
-      title: t('provision.productClass'),
-      dataIndex: 'productClass',
+      key: 'productName',
+      title: t('provision.productName'),
+      dataIndex: 'productName',
       width: 120,
       ellipsis: true,
     },
@@ -385,6 +417,31 @@ export default function PlugAndPlay() {
       ellipsis: true,
     },
     {
+      key: 'productName',
+      title: t('provision.productName'),
+      dataIndex: 'productName',
+      width: 140,
+      ellipsis: true,
+      render: (val: unknown) => (val as string) || '-',
+    },
+    {
+      key: 'policyName',
+      title: t('provision.policyName'),
+      dataIndex: 'policyName',
+      width: 180,
+      ellipsis: true,
+      render: (val: unknown) => (val as string) || '-',
+    },
+    {
+      key: 'executeType',
+      title: t('provision.executeType'),
+      dataIndex: 'executeType',
+      width: 110,
+      render: (val: unknown) => val === 'auto'
+        ? t('provision.autoExecute')
+        : val === 'manual' ? t('provision.manualExecute') : '-',
+    },
+    {
       key: 'status',
       title: t('table.status'),
       dataIndex: 'status',
@@ -443,42 +500,31 @@ export default function PlugAndPlay() {
   // while a new query is in flight.
   const filteredPolicies = useMemo(() => {
     let result = policies;
-    if (policyProductClass) {
-      result = result.filter(p => p.productClasses.includes(policyProductClass));
+    if (policyProductName) {
+      result = result.filter(p => p.productNames.includes(policyProductName));
     }
     if (policySearchText) {
       const search = policySearchText.toLowerCase();
       result = result.filter(p =>
         getI18nText(p.policyNameI18n, appLocale, p.policyName).toLowerCase().includes(search) ||
-        p.productClasses.some(productClass => productClass.toLowerCase().includes(search)) ||
+        p.productNames.some(productName => productName.toLowerCase().includes(search)) ||
         p.targetVersion?.[0]?.toLowerCase().includes(search)
       );
     }
     return result;
-  }, [appLocale, policies, policyProductClass, policySearchText]);
+  }, [appLocale, policies, policyProductName, policySearchText]);
 
-  // Tasks from real API → view model. Status '2'/'3'/'4' are filtered
-  // client-side (the API only maps the terminal completed/failed states).
+  // Tasks from real API → view model. Filtering and pagination stay on the
+  // server so module/time/product queries cover the full result set.
   const allTasks = useMemo<ProvisioningExecuteView[]>(
     () => (taskData?.items ?? []).map(mapTaskToExecuteView),
     [taskData]
   );
 
-  const filteredTasks = useMemo(() => {
-    let result = allTasks;
-    if (taskStatus && taskStatus !== '0' && taskStatus !== '1') {
-      // running / pending / skipped — backend has no exact filter, narrow locally
-      result = result.filter(item => item.status === taskStatus);
-    }
-    if (taskSearchText) {
-      const search = taskSearchText.toLowerCase();
-      result = result.filter(item => item.serialNumber.toLowerCase().includes(search));
-    }
-    return result;
-  }, [allTasks, taskStatus, taskSearchText]);
+  const filteredTasks = allTasks;
 
-  const successCount = useMemo(() => allTasks.filter(item => item.status === '0').length, [allTasks]);
-  const failCount = useMemo(() => allTasks.filter(item => item.status === '1').length, [allTasks]);
+  const successCount = taskData?.statusCounts.completed ?? 0;
+  const failCount = taskData?.statusCounts.failed ?? 0;
 
   const totalTasks = taskData?.total ?? filteredTasks.length;
 
@@ -535,11 +581,11 @@ export default function PlugAndPlay() {
               extraToolbarRight={
                 <Space>
                   <ProductClassSelect
-                    placeholder={t('provision.productClass')}
-                    value={policyProductClass || undefined}
-                    onChange={(value) => setPolicyProductClass(value || '')}
+                    placeholder={t('provision.productName')}
+                    value={policyProductName || undefined}
+                    onChange={(value) => setPolicyProductName(value || '')}
                     allowClear
-                    loading={productClassesLoading || productCatalogLoading}
+                    loading={productCatalogLoading}
                     style={{ width: 240 }}
                     options={productClassOptions}
                   />
@@ -602,8 +648,49 @@ export default function PlugAndPlay() {
             onSelectionChange={(keys) => setSelectedTaskIds(keys as string[])}
             batchActions={taskBatchActions}
             scroll={{ x: 'max-content', y: 220 }}
+            extraToolbarLeft={
+              <Radio.Group
+                size="small"
+                optionType="button"
+                buttonStyle="solid"
+                value={taskModule}
+                onChange={(event) => { setTaskModule(event.target.value as TaskModule); setTaskPage(1); }}
+                options={[
+                  { label: t('provision.allTasks'), value: '' },
+                  { label: t('provision.softwareUpgrade'), value: 'software_upgrade' },
+                  { label: t('provision.license'), value: 'license' },
+                  { label: t('provision.selfConfig'), value: 'self_config' },
+                ]}
+              />
+            }
             extraToolbarRight={
               <Space>
+                <Input
+                  placeholder={t('provision.searchPlaceholder')}
+                  prefix={<SearchOutlined />}
+                  value={taskSearchText}
+                  onChange={(e) => { setTaskSearchText(e.target.value); setTaskPage(1); }}
+                  style={{ width: 210 }}
+                  allowClear
+                />
+                <DatePicker.RangePicker
+                  showTime
+                  value={taskTimeRange}
+                  onChange={(value) => {
+                    setTaskTimeRange(value ? [value[0]!, value[1]!] : null);
+                    setTaskPage(1);
+                  }}
+                  style={{ width: 310 }}
+                />
+                <ProductClassSelect
+                  placeholder={t('provision.productName')}
+                  value={taskProductName || undefined}
+                  onChange={(value) => { setTaskProductName(value || ''); setTaskPage(1); }}
+                  allowClear
+                  loading={productCatalogLoading}
+                  style={{ width: 180 }}
+                  options={productClassOptions}
+                />
                 <Select
                   placeholder={t('table.status')}
                   value={taskStatus || undefined}
@@ -615,14 +702,6 @@ export default function PlugAndPlay() {
                     { label: t('status.failed'), value: '1' },
                     { label: t('status.running'), value: '2' },
                   ]}
-                />
-                <Input
-                  placeholder={t('provision.searchDeviceCode')}
-                  prefix={<SearchOutlined />}
-                  value={taskSearchText}
-                  onChange={(e) => { setTaskSearchText(e.target.value); setTaskPage(1); }}
-                  style={{ width: 200 }}
-                  allowClear
                 />
                 <Button icon={<ReloadOutlined />} onClick={handleRefreshTasks}>
                   {t('common.refresh')}

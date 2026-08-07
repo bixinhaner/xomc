@@ -48,6 +48,39 @@ describe('provisionApi.getTasks', () => {
       params: { page: 1, page_size: 20, policy_only: true },
     });
   });
+
+  it('sends operational filters and maps task context plus status counts', async () => {
+    getMock.mockResolvedValue({ data: {
+      items: [{
+        id: 'task-id', device_id: 'device-id', serial_number: 'SN-001',
+        product_name: 'BaiBNQ', policy_name: 'NR policy', execute_type: 'manual',
+        module: 'self_config', template_id: null, policy_id: 'policy-id', status: 'failed',
+        current_step: 1, total_steps: 1, error_message: 'cell inactive',
+        retry_count: 0, max_retries: 3, started_at: null, completed_at: null,
+        created_at: '2026-08-07T00:00:00Z', updated_at: '2026-08-07T00:00:00Z',
+      }],
+      total: 1,
+      status_counts: { completed: 7, failed: 2 },
+    } });
+
+    const result = await provisionApi.getTasks({
+      page: 2, pageSize: 10, policyOnly: true, status: 'running',
+      policyId: 'policy-id',
+      search: 'NR policy', productName: 'BaiBNQ', module: 'self_config',
+      startedAfter: '2026-08-01T00:00:00Z', startedBefore: '2026-08-07T23:59:59Z',
+    });
+
+    expect(getMock).toHaveBeenCalledWith('/provisioning/tasks', { params: {
+      page: 2, page_size: 10, policy_only: true, status: 'running',
+      policy_id: 'policy-id',
+      search: 'NR policy', product_name: 'BaiBNQ', module: 'self_config',
+      started_after: '2026-08-01T00:00:00Z', started_before: '2026-08-07T23:59:59Z',
+    } });
+    expect(result.statusCounts).toEqual({ completed: 7, failed: 2 });
+    expect(mapTaskToExecuteView(result.items[0])).toMatchObject({
+      productName: 'BaiBNQ', policyName: 'NR policy', executeType: 'manual', module: 'self_config',
+    });
+  });
 });
 
 describe('plug-and-play policy product classes', () => {

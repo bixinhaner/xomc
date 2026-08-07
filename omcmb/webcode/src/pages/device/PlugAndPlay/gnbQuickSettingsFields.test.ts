@@ -10,6 +10,7 @@ describe('gNB plug-and-play quick-setting fields', () => {
   it('matches the NR quick-settings group and field order through TDD', () => {
     expect(GNB_QUICK_SETTING_GROUPS.map((group) => group.id)).toEqual([
       'device-time',
+      'gnb-management',
       'gnb-sync-source',
       'device-ipsec-control',
       'gnb-ipsec',
@@ -19,6 +20,7 @@ describe('gNB plug-and-play quick-setting fields', () => {
     ]);
     const expectedFields = {
       'device-time': ['Enable', 'LocalTimeZoneName', 'NTPServer1', 'NTPServer2', 'NTPServer3', 'NTPServer4', 'NTPServer5'],
+      'gnb-management': ['ManagementServerURL', 'PeriodicInformEnable', 'PeriodicInformTime', 'PeriodicInformInterval'],
       'gnb-sync-source': ['PpsTimeMode', 'SyncSource', 'ForcedSync', 'PTPProfile', 'PTPDomain', 'PTPTransmode', 'PTPInterface', 'PTPUnicastMode', 'PTPSyncInterval', 'PTPDelayInterval'],
       'device-ipsec-control': ['IPSEC_ENABLE'],
       'gnb-ipsec': ['TUNNEL_ENABLE', 'TUNNEL_GATEWAY', 'TUNNEL_LEFT_AUTH', 'TUNNEL_RIGHT_AUTH', 'LEFT_IDENTIFIER', 'RIGHT_IDENTIFIER', 'LEFTSOURCEIP', 'LEFTSUBNET', 'RIGHT_SUBNET', 'TUNNEL_FRAGMENTATION', 'IKE_ENCRYPTION', 'IKE_DH_GROUP', 'IKE_AUTHENTICATION', 'ESP_ENCRYPTION', 'ESP_DH_GROUP', 'ESP_AUTHENTICATION', 'KEYLIFE', 'IKELIFETIME', 'REKEYMARGIN', 'DPDACTION', 'DPDDELAY', 'LEFT_INTERFACE'],

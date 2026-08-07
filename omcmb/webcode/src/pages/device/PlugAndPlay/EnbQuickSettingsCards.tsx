@@ -4,12 +4,12 @@ import { Button, Card, Divider, Form, Input } from 'antd';
 import { useT } from '@/hooks/useT';
 import { GnbQuickSettingFieldGrid } from './GnbQuickSettingsCards';
 import {
-  ENB_1588_TEMPLATE_FIELDS,
   ENB_IPSEC_TEMPLATE_EXTRA_FIELDS,
   ENB_QUICK_SETTING_GROUPS,
   ENB_TEMPLATE_EXTRA_FIELDS,
 } from './enbQuickSettingsFields';
-import { isIpsecParametersVisible, isPtpDetailsVisible } from './quickSettingsVisibility';
+import { getEnbProductSyncConfig } from './enbProductSyncFields';
+import { isIpsecParametersVisible } from './quickSettingsVisibility';
 
 function MmeListCard() {
   const t = useT();
@@ -87,12 +87,20 @@ function IpsecListCard() {
   );
 }
 
-export default function EnbQuickSettingsCards() {
+export default function EnbQuickSettingsCards({
+  paramModelName,
+}: {
+  paramModelName?: string;
+}) {
   const t = useT();
   const form = Form.useFormInstance();
   const ipsecEnable = Form.useWatch('ipsecEnable', form);
-  const syncMode = Form.useWatch('PpsTimeMode', form);
-  const show1588Settings = isPtpDetailsVisible(syncMode);
+  const syncConfig = getEnbProductSyncConfig(paramModelName);
+  const syncMode = Form.useWatch(syncConfig.modeFieldName ?? '__unsupportedSyncMode', form);
+  const showSyncDetails = syncConfig.ptpModeValues.includes(String(syncMode ?? ''));
+  const visibleSyncFields = showSyncDetails
+    ? syncConfig.fields
+    : syncConfig.fields.slice(0, syncConfig.collapsedFieldCount);
 
   return (
     <>
@@ -109,17 +117,13 @@ export default function EnbQuickSettingsCards() {
                 ? <IpsecListCard />
                 : <GnbQuickSettingFieldGrid fields={group.fields} />}
           </Card>
-          {group.id === 'device-time' && (
+          {group.id === 'device-time' && visibleSyncFields.length > 0 && (
             <Card
               size="small"
               title={t('provision.syncSourceConfig')}
               style={{ marginBottom: 16 }}
             >
-              <GnbQuickSettingFieldGrid fields={
-                show1588Settings
-                  ? ENB_1588_TEMPLATE_FIELDS
-                  : ENB_1588_TEMPLATE_FIELDS.slice(0, 2)
-              } />
+              <GnbQuickSettingFieldGrid fields={visibleSyncFields} />
             </Card>
           )}
         </Fragment>

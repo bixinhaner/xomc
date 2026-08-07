@@ -64,7 +64,7 @@ export default function DetectDialog({ open, policy, onClose, onSuccess }: Props
             serialNumber: d.serialNumber,
             cellName: d.deviceName,
             softwareVersion: d.firmwareVersion,
-            product: d.productClass,
+            product: d.productName,
             groupName: d.groupName,
             connectionStatus: d.isOnline ? 'online' : 'offline',
           }))))
@@ -104,6 +104,19 @@ export default function DetectDialog({ open, policy, onClose, onSuccess }: Props
   const handleClearSelected = useCallback(() => {
     setSelectedDevices([]);
   }, []);
+
+  const handleSelectAllAvailable = useCallback(() => {
+    const remaining = Math.max(0, 50 - selectedDevices.length);
+    if (remaining === 0) {
+      message.warning(t('provision.batchSelectLimit', { max: 50 }));
+      return;
+    }
+    const additions = availableDevices.slice(0, remaining);
+    setSelectedDevices((previous) => [...previous, ...additions]);
+    if (additions.length < availableDevices.length) {
+      message.warning(t('provision.batchSelectLimit', { max: 50 }));
+    }
+  }, [availableDevices, message, selectedDevices.length, t]);
 
   // Batch input validation
   const validateBatchInput = useCallback((value: string): boolean => {
@@ -219,7 +232,7 @@ export default function DetectDialog({ open, policy, onClose, onSuccess }: Props
       width: 80,
     },
     {
-      title: t('provision.productClass'),
+      title: t('provision.productName'),
       dataIndex: 'product',
       width: 60,
     },
@@ -292,6 +305,14 @@ export default function DetectDialog({ open, policy, onClose, onSuccess }: Props
             <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text strong>{t('provision.availableDevices')}</Text>
               <Space size={8}>
+                <Button
+                  size="small"
+                  type="primary"
+                  onClick={handleSelectAllAvailable}
+                  disabled={availableDevices.length === 0}
+                >
+                  {t('provision.selectAll')}
+                </Button>
                 <Input
                   placeholder={t('provision.searchDeviceCode')}
                   prefix={<SearchOutlined />}

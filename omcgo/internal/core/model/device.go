@@ -20,6 +20,7 @@ type Device struct {
 	SerialNumber string      `json:"serial_number" db:"serial_number"`
 	OUI          string      `json:"oui" db:"oui"`
 	ProductClass string      `json:"product_class" db:"product_class"`
+	ProductName  string      `json:"product_name,omitempty" db:"-"`
 	Manufacturer string      `json:"manufacturer" db:"manufacturer"`
 	ModelName    string      `json:"model_name" db:"model_name"`
 	Carrier      CarrierCode `json:"carrier" db:"carrier"`

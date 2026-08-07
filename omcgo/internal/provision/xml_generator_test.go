@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/xml"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -162,6 +163,29 @@ func TestCompilePolicyParametersRejectsUnknownCustomPath(t *testing.T) {
 	require.ErrorContains(t, err, "not registered in quick settings")
 }
 
+func TestCompilePolicyParametersIgnoresRetiredPlugAndPlayFields(t *testing.T) {
+	policy := &PlugAndPlayPolicy{
+		SelfConfigEnabled: true,
+		Config: []byte(`{"paramConfigList":[{
+			"serialNumber":"SN1",
+			"sheetParameters":{
+				"DEVICE":[{"NTP Enable":true,"Time Zone Term":"CET-1"}],
+				"INTERFACE":[{"OMC IP":"198.51.100.10"}]
+			}
+		}]}`),
+	}
+	got, err := CompilePolicyParameters(policy, &model.Device{
+		SerialNumber: "SN1", Technology: model.TechNR,
+	}, "BaiBNQ", []quicksettings.Group{{Params: []quicksettings.Param{
+		{Name: "Enable", StandardPath: "Device.Time.Enable", Type: "boolean"},
+		{Name: "LocalTimeZoneName", StandardPath: "Device.Time.LocalTimeZoneName"},
+		{Name: "OMCIP", StandardPath: "Device.ManagementServer.OMCIP"},
+	}}})
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	require.Equal(t, "Device.Time.Enable", got.Parameters[0].TRPath)
+}
+
 func TestCompilePolicyParametersAcceptsBaiBNQDefaultWorkbookDeviceSheet(t *testing.T) {
 	registry := quicksettings.NewRegistry()
 	loader := quicksettings.NewLoader(
@@ -180,6 +204,7 @@ func TestCompilePolicyParametersAcceptsBaiBNQDefaultWorkbookDeviceSheet(t *testi
 			"sheetParameters":{"DEVICE":[{
 				"Serial Number":"1202000534228JB0007",
 				"NTP Enable":true,
+				"Local Time Zone":"Asia/Shanghai",
 				"Time Zone Term":"CET-1",
 				"Periodic Inform Enable":true,
 				"Periodic Inform Interval":30
@@ -204,9 +229,309 @@ func TestCompilePolicyParametersAcceptsBaiBNQDefaultWorkbookDeviceSheet(t *testi
 		byPath[parameter.TRPath] = parameter.Value
 	}
 	assert.Equal(t, "1", byPath["Device.Time.Enable"])
-	assert.Equal(t, "CET-1", byPath["Device.Time.LocalTimeZoneName"])
+	assert.Equal(t, "Asia/Shanghai", byPath["Device.Time.LocalTimeZoneName"])
 	assert.Equal(t, "1", byPath["Device.ManagementServer.PeriodicInformEnable"])
 	assert.Equal(t, "30", byPath["Device.ManagementServer.PeriodicInformInterval"])
+}
+
+func TestCompilePolicyParametersAcceptsBaiBNQDefaultWorkbookGNBLengthHeader(t *testing.T) {
+	registry := quicksettings.NewRegistry()
+	loader := quicksettings.NewLoader(
+		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
+		"../../data",
+		registry,
+		zap.NewNop(),
+	)
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+
+	policy := &PlugAndPlayPolicy{
+		SelfConfigEnabled: true,
+		Config: []byte(`{"paramConfigList":[{
+			"serialNumber":"1202000534228JB0007",
+			"sheetParameters":{"CELL":[{
+				"*Serial Number":"1202000534228JB0007",
+				"*gNB Lenth":32
+			}]}
+		}]}`),
+	}
+	got, err := CompilePolicyParameters(
+		policy,
+		&model.Device{SerialNumber: "1202000534228JB0007", Technology: model.TechNR},
+		"BaiBNQ",
+		registry.GetByParamModel("BaiBNQ"),
+	)
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	assert.Equal(t,
+		"Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBIdLength",
+		got.Parameters[0].TRPath,
+	)
+	assert.Equal(t, "32", got.Parameters[0].Value)
+}
+
+func TestCompilePolicyParametersAcceptsBaiBNQTDDWorkbookFieldsWithProductMappings(t *testing.T) {
+	registry := quicksettings.NewRegistry()
+	loader := quicksettings.NewLoader(
+		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
+		"../../data",
+		registry,
+		zap.NewNop(),
+	)
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+
+	const tddBase = "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon."
+	mappings := make([]parammodel.ParamMapping, 0, 10)
+	for _, pattern := range []string{"pattern1", "pattern2"} {
+		for _, leaf := range []string{
+			"DlULTransmissionPeriodicity",
+			"NrofDownlinkSlots",
+			"NrofDownlinkSymbols",
+			"NrofUplinkSlots",
+			"NrofUplinkSymbols",
+		} {
+			mappings = append(mappings, parammodel.ParamMapping{
+				StandardPath: tddBase + pattern + "." + leaf,
+				EntryType:    "parameter",
+				Access:       "READ_WRITE",
+				DataType:     "U_INT",
+				IsSupported:  true,
+			})
+		}
+	}
+
+	policy := &PlugAndPlayPolicy{
+		SelfConfigEnabled: true,
+		Config: []byte(`{"paramConfigList":[{
+			"serialNumber":"1202000534228JB0007",
+			"sheetParameters":{"CELL":[{
+				"*Serial Number":"1202000534228JB0007",
+				"DL ULTransmissionPeriodicity1":5,
+				"Nrof DownlinkSlots1":7,
+				"Nrof DownlinkSymbols1":6,
+				"Nrof  UplinkSlots1":2,
+				"Nrof  UplinkSymbols1":4,
+				"DL ULTransmissionPeriodicity2":6,
+				"Nrof  DownlinkSlots2":8,
+				"Nrof  DownlinkSymbols2":5,
+				"Nrof  UplinkSlots2":3,
+				"Nrof  UplinkSymbols2":2
+			}]}
+		}]}`),
+	}
+	got, err := CompilePolicyParametersWithMappings(
+		policy,
+		&model.Device{SerialNumber: "1202000534228JB0007", Technology: model.TechNR},
+		"BaiBNQ",
+		registry.GetByParamModel("BaiBNQ"),
+		mappings,
+	)
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 10)
+
+	byPath := make(map[string]string, len(got.Parameters))
+	for _, parameter := range got.Parameters {
+		byPath[parameter.TRPath] = parameter.Value
+	}
+	assert.Equal(t, "7", byPath["Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.NrofDownlinkSlots"])
+	assert.Equal(t, "8", byPath["Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.TddULDLConfigurationCommon.pattern2.NrofDownlinkSlots"])
+}
+
+func TestBuildParameterDefinitionsPrefersUniqueQuickSettingNamesOverMappingLeafCollisions(t *testing.T) {
+	quickPaths := map[string]string{
+		"gNBIdLength":         "Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBIdLength",
+		"TAC":                 "Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.TAC",
+		"PLMNID":              "Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.PLMNList.{i}.PLMNID",
+		"SsbSubcarrierOffset": "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.SSB.SsbSubcarrierOffset",
+	}
+	groups := []quicksettings.Group{{ID: "colliding-fields"}}
+	for name, path := range quickPaths {
+		groups[0].Params = append(groups[0].Params, quicksettings.Param{Name: name, StandardPath: path})
+	}
+	mappings := []parammodel.ParamMapping{
+		{StandardPath: quickPaths["gNBIdLength"], EntryType: "parameter", IsSupported: true},
+		{StandardPath: "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.gNBIdLength", EntryType: "parameter", IsSupported: true},
+		{StandardPath: quickPaths["TAC"], EntryType: "parameter", IsSupported: true},
+		{StandardPath: "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.TAC", EntryType: "parameter", IsSupported: true},
+		{StandardPath: quickPaths["PLMNID"], EntryType: "parameter", IsSupported: true},
+		{StandardPath: "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.PLMNID", EntryType: "parameter", IsSupported: true},
+		{StandardPath: quickPaths["SsbSubcarrierOffset"], EntryType: "parameter", IsSupported: true},
+		{StandardPath: "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.{i}.SsbSubcarrierOffset", EntryType: "parameter", IsSupported: true},
+	}
+
+	_, aliases := buildParameterDefinitions(groups, mappings)
+	for alias, name := range map[string]string{
+		"gNB ID Length": "gNBIdLength",
+		"TAC":           "TAC",
+		"PLMN ID":       "PLMNID",
+		"kSSB":          "SsbSubcarrierOffset",
+	} {
+		assert.Equal(t, quickPaths[name], aliases[normalizeParameterKey(alias)], alias)
+	}
+}
+
+func TestBaiBNQWorkbookTemplateHeadersResolveAgainstProductionDefinitions(t *testing.T) {
+	registry := quicksettings.NewRegistry()
+	loader := quicksettings.NewLoader(
+		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
+		"../../data",
+		registry,
+		zap.NewNop(),
+	)
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+
+	type xmlMapping struct {
+		StandardPath string `xml:"standardPath,attr"`
+		Access       string `xml:"access,attr"`
+		DataType     string `xml:"type,attr"`
+		Supported    string `xml:"supported,attr"`
+	}
+	var document struct {
+		Params []xmlMapping `xml:"parameters>param"`
+	}
+	raw, err := os.ReadFile("../../data/param-mappings/BaiBNQ.xml")
+	require.NoError(t, err)
+	require.NoError(t, xml.Unmarshal(raw, &document))
+	mappings := make([]parammodel.ParamMapping, 0, len(document.Params))
+	for _, item := range document.Params {
+		mappings = append(mappings, parammodel.ParamMapping{
+			StandardPath: item.StandardPath,
+			EntryType:    "parameter",
+			Access:       item.Access,
+			DataType:     item.DataType,
+			IsSupported:  !strings.EqualFold(item.Supported, "false"),
+		})
+	}
+	_, aliases := buildParameterDefinitions(registry.GetByParamModel("BaiBNQ"), mappings)
+
+	// Keep this contract aligned with the public gNB workbook in
+	// omcmb/webcode/src/pages/device/PlugAndPlay/paramConfigTemplate.ts.
+	templateHeaders := map[string][]string{
+		"DEVICE": {
+			"Serial Number", "URL", "Periodic Inform Enable", "Periodic Inform Time",
+			"Periodic Inform Interval", "NTP Enable", "NTP Server1", "NTP Server2",
+			"NTP Server3", "NTP Server4", "NTP Server5", "Local Time Zone",
+			"PpsTimeMode",
+		},
+		"CELL": {
+			"*Serial Number", "gNB Name", "*gNB ID", "*gNB Lenth", "*PCI",
+			"SSB Frequency", "Freq BandIndicator", "NRARFCNDL", "NRARFCNUL",
+			"DLBandwidth", "ULBandwidth", "Duplex Mode", "DLAntNum", "ULAntNum",
+			"DL ULTransmissionPeriodicity1", "Nrof DownlinkSlots1",
+			"Nrof DownlinkSymbols1", "Nrof  UplinkSlots1", "Nrof  UplinkSymbols1",
+			"DL ULTransmissionPeriodicity2", "Nrof  DownlinkSlots2",
+			"Nrof  DownlinkSymbols2", "Nrof  UplinkSlots2", "Nrof  UplinkSymbols2",
+			"Prach RootSequenceIndex", "Prach RootSequenceValue",
+			"SubcarrierSpacing(UL)", "SubcarrierSpacing(DL)", "PowerModify",
+			"OffsetToPointA", "SsbSubcarrierOffset",
+		},
+		"PLMN": {
+			"Serial Number", "*NCI", "*TAC", "*RANAC", "*PLMN ID", "*PRIMARY",
+			"SD", "SD Value", "AMF IP:DEFAULT", "NguBindInterface",
+		},
+		"INTERFACE": {
+			"Serial Number", "Interface Name", "Address Type", "IP Address",
+			"Subnet Mask", "Prefix Length", "Gateway", "Bear Type", "Vlan Name",
+			"Vlan ID",
+		},
+		"IPSEC": {
+			"Serial Number", "TUNNEL_ENABLE", "TUNNEL_GATEWAY", "LEFT_AUTH",
+			"RIGHT_AUTH", "RIGHT_SUBNET", "LEFT_IDENTIFIER", "RIGHT_IDENTIFIER",
+			"LEFTSOURCEIP", "LEFT_SUBNET", "FRAGMENTATION", "IKE_ENCRYPTION",
+			"IKE_DH_GROUP", "IKE_AUTHENTICATION", "ESP_ENCRYPTION", "ESP_DH_GROUP",
+			"ESP_AUTHENTICATION", "KEYLIFE", "IKELIFETIME", "REKEYMARGIN",
+			"DPDACTION", "DPDDELAY", "LEFT_INTERFACE", "FORCEENCAPS",
+		},
+	}
+	for sheet, headers := range templateHeaders {
+		for _, header := range headers {
+			normalized := normalizeParameterKey(header)
+			if _, ignored := ignoredPolicyFields[normalized]; ignored {
+				continue
+			}
+			if _, optional := optionalPlanningFields[normalized]; optional {
+				continue
+			}
+			assert.Contains(t, aliases, normalized, "%s.%s", sheet, header)
+		}
+	}
+}
+
+func TestCompilePolicyParametersAcceptsCurrentBaiBNQWorkbookWithProductMappings(t *testing.T) {
+	registry := quicksettings.NewRegistry()
+	loader := quicksettings.NewLoader(
+		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
+		"../../data",
+		registry,
+		zap.NewNop(),
+	)
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+
+	type xmlMapping struct {
+		StandardPath string `xml:"standardPath,attr"`
+		Access       string `xml:"access,attr"`
+		DataType     string `xml:"type,attr"`
+		Supported    string `xml:"supported,attr"`
+	}
+	var document struct {
+		Params []xmlMapping `xml:"parameters>param"`
+	}
+	raw, err := os.ReadFile("../../data/param-mappings/BaiBNQ.xml")
+	require.NoError(t, err)
+	require.NoError(t, xml.Unmarshal(raw, &document))
+	mappings := make([]parammodel.ParamMapping, 0, len(document.Params))
+	for _, item := range document.Params {
+		mappings = append(mappings, parammodel.ParamMapping{
+			StandardPath: item.StandardPath,
+			EntryType:    "parameter",
+			Access:       item.Access,
+			DataType:     item.DataType,
+			IsSupported:  !strings.EqualFold(item.Supported, "false"),
+		})
+	}
+
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"1202000534228JB0007",
+			"sheetParameters":{
+				"DEVICE":[{"Periodic Inform Enable":true,"Periodic Inform Interval":30,"Time Zone Term":"CET-1"}],
+				"CELL":[{
+					"*PCI":"4556","*gNB ID":"21","DLAntNum":"4","ULAntNum":"4",
+					"gNB Name":"212","NRARFCNDL":"687676","NRARFCNUL":"67676776",
+					"*gNB Lenth":"23","DLBandwidth":"133","ULBandwidth":"133",
+					"PowerModify":"23","OffsetToPointA":"3434","SsbSubcarrierOffset":"3",
+					"SubcarrierSpacing(DL)":"1","SubcarrierSpacing(UL)":"1",
+					"DL ULTransmissionPeriodicity1":"1","Nrof DownlinkSlots1":"1",
+					"Nrof DownlinkSymbols1":"1","Nrof  UplinkSlots1":"1","Nrof  UplinkSymbols1":"1",
+					"DL ULTransmissionPeriodicity2":"1","Nrof  DownlinkSlots2":"1",
+					"Nrof  DownlinkSymbols2":"1","Nrof  UplinkSlots2":"1","Nrof  UplinkSymbols2":"1"
+				}],
+				"PLMN":[{
+					"*NCI":"34354656","*TAC":"3","*PLMN ID":"46000",
+					"AMF IP:DEFAULT":"172.17.1.23","NguBindInterface":"172.17.1.23"
+				}]
+			}
+		}]
+	}`)}
+	got, err := CompilePolicyParametersWithMappings(
+		policy,
+		&model.Device{SerialNumber: "1202000534228JB0007", Technology: model.TechNR},
+		"BaiBNQ",
+		registry.GetByParamModel("BaiBNQ"),
+		mappings,
+	)
+	require.NoError(t, err)
+
+	byPath := make(map[string]string, len(got.Parameters))
+	for _, parameter := range got.Parameters {
+		byPath[parameter.TRPath] = parameter.Value
+	}
+	assert.Equal(t, "172.17.1.23", byPath["Device.Services.FAPService.1.FAPControl.NR.AMFPoolConfigParam.1.AmfIP1"])
+	assert.Equal(t, "3", byPath["Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC"])
+	assert.Equal(t, "46000", byPath["Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.PLMNList.1.PLMNID"])
 }
 
 func TestCompilePolicyParametersAcceptsMLNDefaultWorkbookSynchronizationMode(t *testing.T) {
@@ -390,6 +715,7 @@ func TestCompilePolicyParametersFallsBackToProductParameterMappings(t *testing.T
 			"sheetParameters":{"DEVICE":[{
 				"Serial Number":"SN-PRODUCT-MAPPING",
 				"NTP Enable":true,
+				"Local Time Zone":"Asia/Shanghai",
 				"Time Zone Term":"CET-1",
 				"Periodic Inform Enable":true,
 				"Periodic Inform Interval":30
@@ -417,7 +743,7 @@ func TestCompilePolicyParametersFallsBackToProductParameterMappings(t *testing.T
 		byPath[parameter.TRPath] = parameter.Value
 	}
 	assert.Equal(t, "1", byPath["Device.Time.Enable"])
-	assert.Equal(t, "CET-1", byPath["Device.Time.LocalTimeZoneName"])
+	assert.Equal(t, "Asia/Shanghai", byPath["Device.Time.LocalTimeZoneName"])
 	assert.Equal(t, "1", byPath["Device.ManagementServer.PeriodicInformEnable"])
 	assert.Equal(t, "30", byPath["Device.ManagementServer.PeriodicInformInterval"])
 }

@@ -53,9 +53,11 @@ var policyFieldAliases = map[string]string{
 	"totaltxpower":            "MaxTxPower",
 	"wanip":                   "WAN_CONFIG1_IPADDR",
 	// NR/gNB form and CMCC workbook fields.
-	"gnbname":                      "gNBName",
-	"gnbid":                        "gNBId",
-	"gnbidlength":                  "gNBIdLength",
+	"gnbname":     "gNBName",
+	"gnbid":       "gNBId",
+	"gnbidlength": "gNBIdLength",
+	// Keep compatibility with the historical CMCC workbook header "*gNB Lenth".
+	"gnblenth":                     "gNBIdLength",
 	"pci":                          "PCI",
 	"freqbandindicator":            "Band",
 	"bandindicator":                "Band",
@@ -73,6 +75,8 @@ var policyFieldAliases = map[string]string{
 	"nci":                          "NrcellIdentity",
 	"plmnid":                       "PLMNID",
 	"amfip":                        "AmfIP1",
+	"amfipdefault":                 "AmfIP1",
+	"primary":                      "IsPrimaryPlmn",
 	"ngubindinterface":             "BindInterface",
 	"powermodify":                  "PowerModify",
 	"subcarrierspacingul":          "ULSubCarrierSpacing",
@@ -93,7 +97,7 @@ var policyFieldAliases = map[string]string{
 	"fragmentation":                "TUNNEL_FRAGMENTATION",
 	// 中国移动默认规划模板 DEVICE 工作表字段。
 	"ntpenable":              "Enable",
-	"timezoneterm":           "LocalTimeZoneName",
+	"localtimezone":          "LocalTimeZoneName",
 	"periodicinformenable":   "PeriodicInformEnable",
 	"periodicinforminterval": "PeriodicInformInterval",
 	"synchronizationmode":    "tfcsManagerPrimsrc",
@@ -110,6 +114,9 @@ var policyFieldAliases = map[string]string{
 // of the ambiguous leaf/name.
 var policyFieldPathAliases = map[string]string{
 	"ntpenable": "Device.Time.Enable",
+	"tac":       "Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.TAC",
+	"plmnid":    "Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.PLMNList.{i}.PLMNID",
+	"url":       "Device.ManagementServer.URL",
 }
 
 var servingPLMNPattern = regexp.MustCompile(`^\d{5,6}$`)
@@ -117,13 +124,24 @@ var servingPLMNPattern = regexp.MustCompile(`^\d{5,6}$`)
 var ignoredPolicyFields = map[string]struct{}{
 	"id": {}, "devicetype": {}, "serialnumber": {}, "updatedby": {}, "updatedat": {},
 	"sheetparameters": {}, "customparams": {}, "amflist": {}, "plmnconfiglist": {},
+	// Removed Plug-and-Play planning fields. Ignore historical policy values so
+	// they cannot be resolved through a product-specific alias and downlinked.
+	"timezoneterm": {}, "omcip": {},
 }
 
 // These planning-workbook fields are shared across product families, but a
 // particular device model may not expose a writable TR-069 parameter for one
 // of them. Preserve them in the policy while compiling every supported field.
 var optionalPlanningFields = map[string]struct{}{
-	"ipa": {}, "bindip": {}, "wanip": {}, "synchronization": {}, "omc": {}, "omcip": {},
+	"ipa": {}, "bindip": {}, "wanip": {}, "synchronization": {}, "omc": {},
+	// The shared gNB planning workbook contains composite or informational
+	// fields that do not have a safe one-to-one BaiBNQ TR-069 path. Preserve
+	// them in the policy snapshot instead of binding them to an unrelated leaf
+	// with the same name from the full product parameter table.
+	"duplexmode": {}, "prachrootsequenceindex": {}, "prachrootsequencevalue": {},
+	"sd": {}, "sdvalue": {},
+	"addresstype": {}, "ipaddress": {}, "subnetmask": {}, "prefixlength": {},
+	"beartype": {}, "vlanname": {}, "forceencaps": {},
 	// The shared eNB workbook always carries the complete PTP/1588 section,
 	// while individual product models expose only the subset they support.
 	// Keep unsupported planning values in the policy snapshot and compile the
@@ -246,14 +264,16 @@ func buildParameterDefinitions(
 	definitions := make(map[string]parameterDefinition)
 	aliases := make(map[string]string)
 	keysByName := make(map[string][]string)
+	quickSettingKeysByName := make(map[string][]string)
+	quickSettingKeysByAlias := make(map[string][]string)
 	collisions := make(map[string]struct{})
-	addNameKey := func(name, definitionKey string) {
-		for _, existing := range keysByName[name] {
+	addKey := func(target map[string][]string, name, definitionKey string) {
+		for _, existing := range target[name] {
 			if existing == definitionKey {
 				return
 			}
 		}
-		keysByName[name] = append(keysByName[name], definitionKey)
+		target[name] = append(target[name], definitionKey)
 	}
 	addAlias := func(alias, definitionKey string) {
 		aliasKey := normalizeParameterKey(alias)
@@ -288,7 +308,7 @@ func buildParameterDefinitions(
 			MinValue: mapping.MinValue, MaxValue: mapping.MaxValue,
 			EnumOptions: mappingEnumOptions(mapping),
 		}
-		addNameKey(name, template)
+		addKey(keysByName, name, template)
 		addAlias(name, template)
 		addAlias(template, template)
 	}
@@ -307,14 +327,33 @@ func buildParameterDefinitions(
 				Readonly: param.Readonly, MinValue: param.MinValue, MaxValue: param.MaxValue,
 				EnumOptions: param.EnumOptions,
 			}
-			addNameKey(param.Name, definitionKey)
+			addKey(keysByName, param.Name, definitionKey)
+			addKey(quickSettingKeysByName, param.Name, definitionKey)
+			for _, alias := range []string{param.Name, param.TitleZh, param.TitleEn} {
+				aliasKey := normalizeParameterKey(alias)
+				if aliasKey != "" {
+					addKey(quickSettingKeysByAlias, aliasKey, definitionKey)
+				}
+			}
 			addAlias(param.Name, definitionKey)
 			addAlias(param.TitleZh, definitionKey)
 			addAlias(param.TitleEn, definitionKey)
 		}
 	}
+	// Quick Settings is the curated business-facing subset and therefore wins
+	// over ambiguous leaf names in the product's full parameter table. Keep an
+	// alias ambiguous only when Quick Settings itself maps it to multiple paths.
+	for alias, keys := range quickSettingKeysByAlias {
+		if len(keys) == 1 {
+			aliases[alias] = keys[0]
+		}
+	}
 	for alias, name := range policyFieldAliases {
-		if keys := keysByName[name]; len(keys) == 1 {
+		keys := quickSettingKeysByName[name]
+		if len(keys) == 0 {
+			keys = keysByName[name]
+		}
+		if len(keys) == 1 {
 			aliases[alias] = keys[0]
 		}
 	}
