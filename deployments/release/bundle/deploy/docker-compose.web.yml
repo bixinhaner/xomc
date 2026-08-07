@@ -14,10 +14,17 @@ networks:
     name: omcgo-net
     driver: bridge
 
+x-omc-json-log: &omc-json-log
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-50m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+
 services:
   web:
     image: ${IMAGE_WEB}
     restart: unless-stopped
+    logging: *omc-json-log
     # ACS 代理目标是单一 4-tuple；即使 upstream keepalive 异常退化，也要给
     # 短连接/TIME_WAIT 留足端口余量，避免默认 32768-60999 在波峰期耗尽。
     sysctls:

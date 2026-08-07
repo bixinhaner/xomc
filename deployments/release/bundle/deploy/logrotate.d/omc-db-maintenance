@@ -1,0 +1,10 @@
+/var/log/omc/db-backup.log /var/log/omc/db-restore-drill.log {
+    daily
+    rotate 30
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    dateext
+}
