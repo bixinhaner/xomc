@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -124,7 +125,8 @@ func startRetentionCleanupCron(
 // 与 PM retention 同范式：retention.Service 角色由 stationlog.RetentionPolicy 承担（从 sys_configs
 // 读 stationlog.retention.max_retention_days / max_file_count，TTL 缓存）；CleanupRunner 按时间删
 // station_fault_logs / station_running_logs 旧表，以及 backup_restore_file 中运行/故障日志任务文件
-// 的过期 MinIO 对象 + PG 软删；cron 每日 04:00（与 PM 03:00 错峰）触发 + 启动补跑。
+// 的过期 MinIO 对象 + PG 软删；调度周期从 stationlog.retention.cleanup_interval_minutes
+// 读取，按周期触发 async job。
 // 文件数配额仅针对故障日志文件（事件驱动，app 进程）并与本时间清理并存。
 func startStationLogRetentionCleanup(
 	ctx context.Context,
@@ -157,9 +159,9 @@ func startStationLogRetentionCleanup(
 
 	go runJobTypeWorker(ctx, registry, stationlog.JobTypeStationLogCleanup, logger)
 
-	startStationLogCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, tz)
+	startStationLogCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, tz, policy)
 
-	logger.Info("stationlog retention cleanup pipeline ready (1 runner + 1 cron + catchup)")
+	logger.Info("stationlog retention cleanup pipeline ready (1 runner + interval scheduler)")
 }
 
 type stationLogTaskFileStore struct {
@@ -274,41 +276,122 @@ func startLogCleanupCron(
 		zap.String("spec", spec), zap.String("job_type", jobType))
 }
 
-// startStationLogCleanupCron 单 cron entry，每日 04:00 触发基站日志时间清理入队
-// （与 startRetentionCleanupCron 同机制，错峰 + 共享 cron_state 表的不同 job_type 行）。
+const (
+	stationLogCleanupPollInterval       = time.Minute
+	stationLogMinCleanupIntervalMinutes = 10
+	stationLogMaxCleanupIntervalMinutes = 1440
+)
+
+// startStationLogCleanupCron 按 stationlog.retention.cleanup_interval_minutes 配置周期触发
+// 基站日志时间清理入队。函数名保留 cron 语义：仍复用 async_jobs_cron_state 记录最近触发桶，
+// 并复用 async_jobs 的 bucket 去重；worker 每轮调度前重新读取 RetentionPolicy（带 TTL）。
 func startStationLogCleanupCron(
 	ctx context.Context,
 	jobRepo asyncjob.Repository,
 	stateRepo asyncjob.CronStateRepository,
 	logger *zap.Logger,
-	asyncMetrics *asyncjob.Metrics,
+	_ *asyncjob.Metrics,
 	tz *tzManager,
+	policy *stationlog.RetentionPolicy,
 ) {
-	const spec = "0 4 * * *" // 每日 04:00（业务时区，与 PM retention 03:00 错峰）
-	jobType := stationlog.JobTypeStationLogCleanup
-
-	entry := cronEntry{
-		spec:    spec,
-		jobType: jobType,
-		window: func(now time.Time) (time.Time, time.Time) {
-			today := truncateDay(now.In(tz.Current()))
-			return today.AddDate(0, 0, -1), today
-		},
-		advance: func(prev time.Time) time.Time { return prev.AddDate(0, 0, 1) },
+	if policy == nil {
+		policy = stationlog.NewRetentionPolicy(nil, logger)
+	}
+	if tz == nil {
+		tz = &tzManager{}
+		tz.cur.Store(time.UTC)
 	}
 
-	now := time.Now().In(tz.Current())
-	catchupCronEntry(ctx, jobRepo, stateRepo, entry, now, logger, asyncMetrics)
+	go func() {
+		triggerStationLogCleanupIfDue(ctx, jobRepo, stateRepo, policy.CleanupIntervalMinutes(ctx), time.Now().In(tz.Current()), logger, tz.Current)
 
-	tz.registerCron(func(loc *time.Location) (*cron.Cron, error) {
-		c := cron.New(cron.WithLocation(loc))
-		if _, err := c.AddFunc(spec, func() {
-			triggerCron(ctx, jobRepo, stateRepo, entry, logger, tz.Current)
-		}); err != nil {
-			return nil, err
+		ticker := time.NewTicker(stationLogCleanupPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				triggerStationLogCleanupIfDue(ctx, jobRepo, stateRepo, policy.CleanupIntervalMinutes(ctx), now.In(tz.Current()), logger, tz.Current)
+			}
 		}
-		return c, nil
-	})
-	logger.Info("stationlog retention cleanup cron started",
-		zap.String("spec", spec), zap.String("job_type", jobType))
+	}()
+
+	logger.Info("stationlog retention cleanup interval scheduler started",
+		zap.Duration("poll_interval", stationLogCleanupPollInterval),
+		zap.String("job_type", stationlog.JobTypeStationLogCleanup))
+}
+
+func triggerStationLogCleanupIfDue(
+	ctx context.Context,
+	jobRepo asyncjob.Repository,
+	stateRepo asyncjob.CronStateRepository,
+	intervalMinutes int,
+	now time.Time,
+	logger *zap.Logger,
+	locFn func() *time.Location,
+) bool {
+	entry := stationLogCleanupCronEntry(intervalMinutes, locFn)
+	start, end := entry.window(now)
+
+	state, err := stateRepo.Get(ctx, entry.jobType)
+	switch {
+	case err == nil && state.LastBucketEnd != nil && !state.LastBucketEnd.Before(end):
+		return false
+	case err == nil:
+	case err == asyncjob.ErrNoCronState:
+	default:
+		logger.Warn("load stationlog cleanup cron state failed; skip trigger",
+			zap.String("job_type", entry.jobType), zap.Error(err))
+		return false
+	}
+
+	if _, err := enqueueAggregationJob(context.Background(), jobRepo, entry.jobType, start, end, logger); err != nil {
+		logger.Warn("stationlog cleanup enqueue failed",
+			zap.String("job_type", entry.jobType),
+			zap.Time("bucket_start", start),
+			zap.Time("bucket_end", end),
+			zap.Error(err))
+		return false
+	}
+
+	bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := stateRepo.Upsert(bg, entry.jobType, entry.spec, now, end); err != nil {
+		logger.Warn("upsert stationlog cleanup cron state failed",
+			zap.String("job_type", entry.jobType), zap.Error(err))
+	}
+	return true
+}
+
+func stationLogCleanupCronEntry(intervalMinutes int, locFn func() *time.Location) cronEntry {
+	if intervalMinutes < stationLogMinCleanupIntervalMinutes || intervalMinutes > stationLogMaxCleanupIntervalMinutes {
+		intervalMinutes = stationlog.DefaultCleanupIntervalMinutes
+	}
+	interval := time.Duration(intervalMinutes) * time.Minute
+	return cronEntry{
+		spec:    fmt.Sprintf("@every %dm", intervalMinutes),
+		jobType: stationlog.JobTypeStationLogCleanup,
+		window: func(now time.Time) (time.Time, time.Time) {
+			loc := time.UTC
+			if locFn != nil {
+				loc = locFn()
+			}
+			if loc == nil {
+				loc = time.UTC
+			}
+			end := truncateToContinuousInterval(now.In(loc), interval)
+			return end.Add(-interval), end
+		},
+		advance: func(prev time.Time) time.Time { return prev.Add(interval) },
+	}
+}
+
+func truncateToContinuousInterval(t time.Time, interval time.Duration) time.Time {
+	if interval <= 0 {
+		interval = time.Duration(stationlog.DefaultCleanupIntervalMinutes) * time.Minute
+	}
+	epoch := time.Unix(0, 0).UTC()
+	elapsed := t.UTC().Sub(epoch)
+	return epoch.Add((elapsed / interval) * interval)
 }

@@ -10794,6 +10794,7 @@ INSERT INTO public.sys_configs VALUES
 	('fb26dac0-247f-4aea-a62b-fa13ff971121', 'minio.retention', 'raw_object_days', '60', 'int', 'MinIO 原始 PM/MR 文件 ILM 过期天数（#319）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('be44244b-f3ce-459e-92d3-19af1593ede6', 'stationlog.retention', 'max_retention_days', '60', 'int', '基站日志按时间保留天数（#320）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('758b89d8-57e0-4253-a186-3c774d89d7e6', 'stationlog.retention', 'max_file_count', '20', 'int', '故障日志文件数配额，0=禁用仅按时间保留（#320）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
+	('68215596-199f-4ce2-8604-958a8456ad08', 'stationlog.retention', 'cleanup_interval_minutes', '60', 'int', '基站日志清理周期分钟，范围 10..1440（#277）', false, '2026-08-07 14:14:25+08', '2026-08-07 14:14:25+08', '{}'),
 	('803bcd55-b664-40fa-9636-df327fae9fd5', 'raw_archive', 'compress_after_ingest', 'true', 'bool', '仅对新 PM/MR 原始 XML 在成功入库后尝试一次 gzip 压缩；失败不影响业务处理，不扫描历史文件（#836）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('ace314eb-3fd5-4c76-9651-a370d66ad413', 'acs.backpressure', 'enabled', 'true', 'bool', 'PM 上传资源背压总开关（#318）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('4dfc6bf8-1a60-4aee-84d5-f8af5f4f55af', 'acs.backpressure', 'disk_high_pct', '70', 'int', '数据盘使用率高水位%，达到后停收 PM 上传（#318）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),

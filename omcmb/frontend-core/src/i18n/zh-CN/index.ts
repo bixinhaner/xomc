@@ -7721,9 +7721,11 @@ const messages: Record<string, string> = {
   'retentionBp.field.check_interval_sec':    '采样周期（秒）',
   'retentionBp.field.raw_object_days':       '原始件保留天数',
   'retentionBp.field.max_retention_days':    '基站日志保留天数',
+  'retentionBp.field.cleanup_interval_minutes': '基站日志清理周期（分钟）',
   'retentionBp.field.max_file_count':        '故障日志文件数配额（0=禁用）',
   'retentionBp.field.max_file_count_per_device': '每设备故障日志文件数配额（0=禁用）',
   'retentionBp.field.compress_after_ingest': '新文件入库后压缩',
+  'retentionBp.validate.range':              '{field}必须在 {min} 到 {max} 之间',
 
   // -------------------------------------------------------------------------
   // 日志保留与轮转（资源与存储保护页“有效期与清理”区域）：log.retention + log.rotation
