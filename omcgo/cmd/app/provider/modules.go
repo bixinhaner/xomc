@@ -52,6 +52,7 @@ import (
 	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/omcgo/omcgo/internal/rebootrecord"
@@ -1433,7 +1434,11 @@ func initDashboardModule(c *Container) error {
 	}
 	dashboardCfg := c.Cfg.Dashboard.Defaults()
 	dashboardMetrics := dashboard.NewMetrics(c.MetricsReg)
-	networkRollups := dashboard.NewNetworkRollupRepository(c.TsPool, dashboardCfg.StatementTimeout)
+	networkRollups := dashboard.NewNetworkRollupRepository(
+		c.TsPool,
+		dashboardCfg.StatementTimeout,
+		pmstream.NewPgProgressTaskLoader(c.PgPool),
+	)
 	queryGuard := dashboard.NewKPIQueryGuard(dashboard.KPIQueryGuardConfig{
 		QueryTimeout:  dashboardCfg.QueryTimeout,
 		MaxConcurrent: dashboardCfg.MaxConcurrent,

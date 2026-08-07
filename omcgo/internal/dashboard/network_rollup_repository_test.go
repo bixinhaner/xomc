@@ -33,8 +33,9 @@ func TestBuildNetworkRollupSeriesSQLUsesOnlyPublishedNetworkResults(t *testing.T
 	assert.Contains(t, query, "published_revision.status = 'published'")
 	assert.Contains(t, query, "published_revision.revision = r.revision")
 	assert.NotContains(t, query, "DISTINCT ON (r.technology, r.metric_path, r.window_start)")
-	assert.Contains(t, query, "JOIN pm_aggregation_version_metrics metric_rule")
+	assert.NotContains(t, query, "pm_aggregation_version_metrics")
 	assert.Contains(t, query, "LEFT JOIN pm_metric_dictionary dictionary")
+	assert.NotContains(t, query, "pm_aggregation_version_counters")
 	assert.Contains(t, query, "r.dimension =")
 	assert.Contains(t, query, "r.metric_type =")
 	assert.Contains(t, query, "r.task_id IN")
@@ -66,6 +67,7 @@ func TestMergeNetworkRollupVersionSlicesCoversIssue266DaySum(t *testing.T) {
 			WindowStart: windowStart, WindowEnd: windowStart.Add(24 * time.Hour),
 			Value: 35287.03464, Aggregation: pmstream.AggregationFormula,
 			Formula: formula, SampleCount: 39, StatisType: "sum",
+			DefinitionComplete:   true,
 			VersionEffectiveFrom: windowStart.Add(19 * time.Hour),
 		},
 		{
@@ -74,6 +76,7 @@ func TestMergeNetworkRollupVersionSlicesCoversIssue266DaySum(t *testing.T) {
 			WindowStart: windowStart, WindowEnd: windowStart.Add(24 * time.Hour),
 			Value: 159736.99992, Aggregation: pmstream.AggregationFormula,
 			Formula: formula, SampleCount: 164, StatisType: "sum",
+			DefinitionComplete:   true,
 			VersionEffectiveFrom: windowStart.Add(20 * time.Hour),
 		},
 	}
@@ -91,7 +94,7 @@ func TestMergeNetworkRollupVersionSlicesDoesNotCrossFormulaChange(t *testing.T) 
 		Technology: model.TechLTE, MetricPath: "K1", Granularity: metrics.GranularityDaily,
 		WindowStart: start, WindowEnd: start.Add(24 * time.Hour), Value: 10,
 		Aggregation: pmstream.AggregationFormula, Formula: "C1/1000",
-		StatisType:           "sum",
+		StatisType: "sum", DefinitionComplete: true,
 		VersionEffectiveFrom: start.Add(time.Hour),
 	}
 	latest := old
@@ -127,7 +130,8 @@ func TestMergeNetworkRollupVersionSlicesHandlesAllValueAggregationTypes(t *testi
 				Technology: model.TechLTE, MetricPath: "K1", Granularity: metrics.GranularityDaily,
 				WindowStart: start, WindowEnd: start.Add(24 * time.Hour), Value: jsonx.Float(tt.first),
 				Aggregation: pmstream.AggregationFormula, Formula: "C1", StatisType: tt.statisType,
-				SampleCount: tt.firstCount, Complete: true, VersionEffectiveFrom: start.Add(time.Hour),
+				DefinitionComplete: true,
+				SampleCount:        tt.firstCount, Complete: true, VersionEffectiveFrom: start.Add(time.Hour),
 			}
 			second := first
 			second.Value = jsonx.Float(tt.second)
@@ -169,6 +173,7 @@ func TestMergeNetworkRollupVersionSlicesStopsAtSemanticChange(t *testing.T) {
 			Technology: model.TechLTE, MetricPath: "K1", Granularity: metrics.GranularityDaily,
 			WindowStart: start, WindowEnd: start.Add(24 * time.Hour), Value: jsonx.Float(value),
 			Aggregation: pmstream.AggregationFormula, Formula: formula, StatisType: "sum",
+			DefinitionComplete:   true,
 			VersionEffectiveFrom: start.Add(time.Duration(hour) * time.Hour),
 		}
 	}
@@ -187,7 +192,8 @@ func TestMergeNetworkRollupVersionSlicesDoesNotCrossStatisTypeChange(t *testing.
 		Technology: model.TechLTE, MetricPath: "K1", Granularity: metrics.GranularityDaily,
 		WindowStart: start, WindowEnd: start.Add(24 * time.Hour), Value: 10,
 		Aggregation: pmstream.AggregationFormula, Formula: "C1", StatisType: "sum",
-		SampleCount: 1, VersionEffectiveFrom: start.Add(time.Hour),
+		DefinitionComplete: true,
+		SampleCount:        1, VersionEffectiveFrom: start.Add(time.Hour),
 	}
 	latest := old
 	latest.Value = 20
@@ -202,34 +208,135 @@ func TestMergeNetworkRollupVersionSlicesDoesNotCrossStatisTypeChange(t *testing.
 	assert.EqualValues(t, 3, merged[0].SampleCount)
 }
 
+type fakeNetworkTaskVersionLoader struct {
+	versions []*pmstream.TaskVersionSnapshot
+	loaded   []uuid.UUID
+}
+
+func (f *fakeNetworkTaskVersionLoader) LoadVersionsByID(
+	_ context.Context,
+	versionIDs []uuid.UUID,
+) ([]*pmstream.TaskVersionSnapshot, error) {
+	f.loaded = append([]uuid.UUID(nil), versionIDs...)
+	return f.versions, nil
+}
+
+func TestEnrichKPIDefinitionsReusesPMVersionRules(t *testing.T) {
+	versionID := uuid.New()
+	loader := &fakeNetworkTaskVersionLoader{versions: []*pmstream.TaskVersionSnapshot{{
+		VersionID: versionID,
+		Metrics: map[string]pmstream.MetricRule{
+			"K1": {
+				MetricPath: "K1", MetricType: "kpi", Formula: "C2/C1",
+				Dependencies: []string{"C2", "C1"},
+			},
+		},
+		Counters: map[string]pmstream.CounterRule{
+			"C1": {MetricPath: "C1", Aggregation: pmstream.AggregationSum},
+			"C2": {MetricPath: "C2", Aggregation: pmstream.AggregationAvg},
+		},
+	}}}
+	points := []NetworkRollupPoint{{MetricPath: "K1", TaskVersionID: versionID}}
+	repo := &NetworkRollupRepository{definitions: loader}
+
+	err := repo.enrichKPIDefinitions(context.Background(), points)
+
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{versionID}, loader.loaded)
+	assert.Equal(t, "C2/C1", points[0].Formula)
+	assert.Equal(t, []string{"C2", "C1"}, points[0].Dependencies)
+	assert.Equal(t, []string{"C1:sum", "C2:avg"}, points[0].CounterSignature)
+	assert.True(t, points[0].DefinitionComplete)
+}
+
+func TestEnrichKPIDefinitionsLeavesMissingCounterRuleIncomplete(t *testing.T) {
+	versionID := uuid.New()
+	loader := &fakeNetworkTaskVersionLoader{versions: []*pmstream.TaskVersionSnapshot{{
+		VersionID: versionID,
+		Metrics: map[string]pmstream.MetricRule{
+			"K1": {
+				MetricPath: "K1", MetricType: "kpi", Formula: "C1+C2",
+				Dependencies: []string{"C1", "C2"},
+			},
+		},
+		Counters: map[string]pmstream.CounterRule{
+			"C1": {MetricPath: "C1", Aggregation: pmstream.AggregationSum},
+		},
+	}}}
+	points := []NetworkRollupPoint{{MetricPath: "K1", TaskVersionID: versionID}}
+	repo := &NetworkRollupRepository{definitions: loader}
+
+	err := repo.enrichKPIDefinitions(context.Background(), points)
+
+	require.NoError(t, err)
+	assert.False(t, points[0].DefinitionComplete)
+	assert.Empty(t, points[0].Formula)
+	assert.Empty(t, points[0].CounterSignature)
+}
+
+func TestMergeNetworkRollupVersionSlicesDoesNotCrossCounterRuleChange(t *testing.T) {
+	start := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
+	first := NetworkRollupPoint{
+		MetricPath: "K1", Granularity: metrics.GranularityDaily,
+		WindowStart: start, WindowEnd: start.Add(24 * time.Hour), Value: 10,
+		Aggregation: pmstream.AggregationFormula, Formula: "C1", StatisType: "sum",
+		Dependencies: []string{"C1"}, CounterSignature: []string{"C1:sum"},
+		DefinitionComplete: true, VersionEffectiveFrom: start.Add(time.Hour),
+	}
+	latest := first
+	latest.Value = 20
+	latest.CounterSignature = []string{"C1:avg"}
+	latest.VersionEffectiveFrom = start.Add(2 * time.Hour)
+
+	merged := mergeNetworkRollupVersionSlices([]NetworkRollupPoint{first, latest})
+
+	require.Len(t, merged, 1)
+	assert.Equal(t, jsonx.Float(20), merged[0].Value)
+}
+
+func TestMergeNetworkRollupVersionSlicesDoesNotMergeIncompleteDefinitions(t *testing.T) {
+	start := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
+	first := NetworkRollupPoint{
+		MetricPath: "K1", Granularity: metrics.GranularityDaily,
+		WindowStart: start, WindowEnd: start.Add(24 * time.Hour), Value: 10,
+		Aggregation: pmstream.AggregationFormula, StatisType: "sum",
+		VersionEffectiveFrom: start.Add(time.Hour),
+	}
+	latest := first
+	latest.Value = 20
+	latest.VersionEffectiveFrom = start.Add(2 * time.Hour)
+
+	merged := mergeNetworkRollupVersionSlices([]NetworkRollupPoint{first, latest})
+
+	require.Len(t, merged, 1)
+	assert.Equal(t, jsonx.Float(20), merged[0].Value)
+}
+
 type fakeNetworkCounterRollups struct {
 	payloads    []pmstream.RollupPayload
 	granularity pmstream.Granularity
+	entityKeys  []string
 }
 
-func (f *fakeNetworkCounterRollups) VisitSnapshotsForPeriod(
+func (f *fakeNetworkCounterRollups) ListSnapshots(
 	_ context.Context,
-	versionIDs []uuid.UUID,
+	versionID uuid.UUID,
+	entityKey string,
 	granularity pmstream.Granularity,
 	start time.Time,
 	end time.Time,
-	visit func(pmstream.RollupPayload) error,
-) error {
+) ([]pmstream.RollupPayload, error) {
 	f.granularity = granularity
-	allowed := make(map[uuid.UUID]struct{}, len(versionIDs))
-	for _, versionID := range versionIDs {
-		allowed[versionID] = struct{}{}
-	}
+	f.entityKeys = append(f.entityKeys, entityKey)
+	var out []pmstream.RollupPayload
 	for _, payload := range f.payloads {
-		if _, ok := allowed[payload.TaskVersionID]; !ok ||
+		if payload.TaskVersionID != versionID || payload.EntityKey != entityKey ||
 			payload.WindowStart.Before(start) || !payload.WindowStart.Before(end) {
 			continue
 		}
-		if err := visit(payload); err != nil {
-			return err
-		}
+		out = append(out, payload)
 	}
-	return nil
+	return out, nil
 }
 
 func TestRecomputePercentVersionSlicesUsesComposedCounters(t *testing.T) {
@@ -243,7 +350,8 @@ func TestRecomputePercentVersionSlicesUsesComposedCounters(t *testing.T) {
 			Aggregation: pmstream.AggregationFormula, Formula: "C_NUM/C_DEN*100",
 			Dependencies:     []string{"C_NUM", "C_DEN"},
 			CounterSignature: []string{"C_DEN:sum", "C_NUM:sum"}, StatisType: "pct",
-			TaskVersionID: versionID, SampleCount: 4, Complete: true,
+			DefinitionComplete: true,
+			TaskVersionID:      versionID, SampleCount: 4, Complete: true,
 			VersionEffectiveFrom: start.Add(time.Duration(hour) * time.Hour),
 		}
 	}
@@ -275,6 +383,7 @@ func TestRecomputePercentVersionSlicesUsesComposedCounters(t *testing.T) {
 	assert.InDelta(t, 10, float64(merged[0].Value), 0.000001)
 	assert.EqualValues(t, 8, merged[0].SampleCount)
 	assert.Equal(t, pmstream.GranularityHourly, rollups.granularity)
+	assert.Equal(t, []string{"network", "network"}, rollups.entityKeys)
 }
 
 func TestBuildNetworkRollupSeriesSQLUsesPublishedCounterResults(t *testing.T) {
@@ -318,7 +427,7 @@ func TestBuildNetworkRollupSeriesSQLKeepsHourlyKPIQueryLightweight(t *testing.T)
 	assert.NotContains(t, query, "pm_aggregation_version_counters")
 }
 
-func TestBuildNetworkRollupSeriesSQLLoadsCounterRulesOnlyForPercentKPI(t *testing.T) {
+func TestBuildNetworkRollupSeriesSQLKeepsDailyKPIQueryInsideTSDB(t *testing.T) {
 	start := time.Date(2026, 8, 4, 0, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
 	end := start.Add(24 * time.Hour)
 
@@ -329,10 +438,9 @@ func TestBuildNetworkRollupSeriesSQLLoadsCounterRulesOnlyForPercentKPI(t *testin
 	})
 	require.NoError(t, err)
 
-	assert.Contains(t, query, "pm_aggregation_version_metrics")
+	assert.NotContains(t, query, "pm_aggregation_version_metrics")
 	assert.Contains(t, query, "pm_metric_dictionary")
-	assert.Contains(t, query, "WHEN LOWER(COALESCE(dictionary.statis_type, '')) = 'pct'")
-	assert.Contains(t, query, "pm_aggregation_version_counters")
+	assert.NotContains(t, query, "pm_aggregation_version_counters")
 }
 
 func TestBuildNetworkRollupSeriesSQLKeepsDailyCounterQueryLightweight(t *testing.T) {

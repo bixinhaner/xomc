@@ -37,6 +37,7 @@ type NetworkRollupPoint struct {
 	TaskVersionID        uuid.UUID
 	Dependencies         []string
 	CounterSignature     []string
+	DefinitionComplete   bool
 }
 
 type NetworkRollupQuery struct {
@@ -56,26 +57,35 @@ type NetworkRollupReader interface {
 type NetworkRollupRepository struct {
 	pool             *pgxpool.Pool
 	statementTimeout time.Duration
+	definitions      networkTaskVersionLoader
 	counterRollups   networkCounterRollupReader
 }
 
+type networkTaskVersionLoader interface {
+	LoadVersionsByID(context.Context, []uuid.UUID) ([]*pmstream.TaskVersionSnapshot, error)
+}
+
 type networkCounterRollupReader interface {
-	VisitSnapshotsForPeriod(
+	ListSnapshots(
 		context.Context,
-		[]uuid.UUID,
+		uuid.UUID,
+		string,
 		pmstream.Granularity,
 		time.Time,
 		time.Time,
-		func(pmstream.RollupPayload) error,
-	) error
+	) ([]pmstream.RollupPayload, error)
 }
 
 var _ NetworkRollupReader = (*NetworkRollupRepository)(nil)
 var _ CounterSeriesReader = (*NetworkRollupRepository)(nil)
 
-func NewNetworkRollupRepository(pool *pgxpool.Pool, statementTimeout time.Duration) *NetworkRollupRepository {
+func NewNetworkRollupRepository(
+	pool *pgxpool.Pool,
+	statementTimeout time.Duration,
+	definitions networkTaskVersionLoader,
+) *NetworkRollupRepository {
 	return &NetworkRollupRepository{
-		pool: pool, statementTimeout: statementTimeout,
+		pool: pool, statementTimeout: statementTimeout, definitions: definitions,
 		counterRollups: pmstream.NewRollupOutboxRepository(pool),
 	}
 }
@@ -95,17 +105,95 @@ func (r *NetworkRollupRepository) ListSeries(ctx context.Context, query NetworkR
 	if query.Granularity == metrics.GranularityHourly {
 		return points, nil
 	}
-	merged := mergeNetworkRollupVersionSlices(points)
 	metricType := query.MetricType
 	if metricType == "" {
 		metricType = metrics.MetricTypeKPI
 	}
-	if metricType == metrics.MetricTypeKPI && query.Granularity != metrics.GranularityHourly {
+	if metricType == metrics.MetricTypeKPI {
+		if err := r.enrichKPIDefinitions(ctx, points); err != nil {
+			return nil, err
+		}
+	}
+	merged := mergeNetworkRollupVersionSlices(points)
+	if metricType == metrics.MetricTypeKPI {
 		if err := r.recomputePercentVersionSlices(ctx, points, merged); err != nil {
 			return nil, err
 		}
 	}
 	return merged, nil
+}
+
+func (r *NetworkRollupRepository) enrichKPIDefinitions(
+	ctx context.Context,
+	points []NetworkRollupPoint,
+) error {
+	if len(points) == 0 {
+		return nil
+	}
+	if r.definitions == nil {
+		return fmt.Errorf("dashboard PM task version loader is not configured")
+	}
+	versionSet := make(map[uuid.UUID]struct{})
+	for _, point := range points {
+		if point.TaskVersionID != uuid.Nil {
+			versionSet[point.TaskVersionID] = struct{}{}
+		}
+	}
+	versionIDs := make([]uuid.UUID, 0, len(versionSet))
+	for versionID := range versionSet {
+		versionIDs = append(versionIDs, versionID)
+	}
+	versions, err := r.definitions.LoadVersionsByID(ctx, versionIDs)
+	if err != nil {
+		return fmt.Errorf("load dashboard PM task version definitions: %w", err)
+	}
+	byID := make(map[uuid.UUID]*pmstream.TaskVersionSnapshot, len(versions))
+	for _, version := range versions {
+		if version != nil {
+			byID[version.VersionID] = version
+		}
+	}
+	for index := range points {
+		point := &points[index]
+		version := byID[point.TaskVersionID]
+		if version == nil {
+			continue
+		}
+		rule, exists := version.Metrics[point.MetricPath]
+		if !exists || rule.MetricType != string(metrics.MetricTypeKPI) ||
+			rule.Formula == "" || len(rule.Dependencies) == 0 {
+			continue
+		}
+		signature := make([]string, 0, len(rule.Dependencies))
+		complete := true
+		for _, dependency := range rule.Dependencies {
+			counter, exists := version.Counters[dependency]
+			if !exists || !isComposableCounterAggregation(counter.Aggregation) {
+				complete = false
+				break
+			}
+			signature = append(signature, dependency+":"+string(counter.Aggregation))
+		}
+		if !complete {
+			continue
+		}
+		sort.Strings(signature)
+		point.Formula = rule.Formula
+		point.Dependencies = append([]string(nil), rule.Dependencies...)
+		point.CounterSignature = signature
+		point.DefinitionComplete = true
+	}
+	return nil
+}
+
+func isComposableCounterAggregation(operation pmstream.AggregationOp) bool {
+	switch operation {
+	case pmstream.AggregationSum, pmstream.AggregationAvg,
+		pmstream.AggregationMin, pmstream.AggregationMax:
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *NetworkRollupRepository) ListLatestHourly(ctx context.Context, start, end time.Time) ([]NetworkRollupPoint, error) {
@@ -189,25 +277,11 @@ func buildNetworkRollupSeriesSQL(query NetworkRollupQuery) (string, []any, error
 		metricType = metrics.MetricTypeKPI
 	}
 	metricPaths := normalizeMetricPaths(query.MetricPaths)
-	formulaColumn := "''"
 	statisTypeColumn := "''"
-	dependenciesColumn := "ARRAY[]::text[]"
-	counterSignatureColumn := "ARRAY[]::text[]"
-	loadKPIDefinition := query.Granularity != metrics.GranularityHourly &&
+	loadKPIStatisType := query.Granularity != metrics.GranularityHourly &&
 		metricType == metrics.MetricTypeKPI
-	if loadKPIDefinition {
-		formulaColumn = "COALESCE(metric_rule.formula, '')"
+	if loadKPIStatisType {
 		statisTypeColumn = "COALESCE(dictionary.statis_type, '')"
-		dependenciesColumn = "metric_rule.dependencies"
-		counterSignatureColumn = `CASE
-  WHEN LOWER(COALESCE(dictionary.statis_type, '')) = 'pct' THEN COALESCE((
-    SELECT array_agg(counter.metric_path || ':' || counter.aggregation_op ORDER BY counter.metric_path)
-      FROM pm_aggregation_version_counters counter
-     WHERE counter.task_version_id = r.task_version_id
-       AND counter.metric_path = ANY(metric_rule.dependencies)
-  ), ARRAY[]::text[])
-  ELSE ARRAY[]::text[]
-END`
 	}
 	builder := storage.Psql.Select(
 		"r.technology",
@@ -220,20 +294,17 @@ END`
 		"r.missing_slots",
 		"r.created_at",
 		"r.aggregation_op",
-		formulaColumn,
+		"''",
 		"r.sample_count",
 		"r.version_effective_from",
 		statisTypeColumn,
 		"r.task_version_id",
-		dependenciesColumn,
-		counterSignatureColumn,
+		"ARRAY[]::text[]",
+		"ARRAY[]::text[]",
 	).
 		From("pm_aggregation_results r")
-	if loadKPIDefinition {
-		builder = builder.Join(`pm_aggregation_version_metrics metric_rule
-  ON metric_rule.task_version_id = r.task_version_id
- AND metric_rule.metric_path = r.metric_path`).
-			LeftJoin(`pm_metric_dictionary dictionary
+	if loadKPIStatisType {
+		builder = builder.LeftJoin(`pm_metric_dictionary dictionary
   ON dictionary.metric_path = r.metric_path`)
 	}
 	builder = builder.Join(`pm_aggregation_publications published_revision
@@ -405,6 +476,11 @@ func compatibleLatestVersionSlices(points []NetworkRollupPoint) []NetworkRollupP
 }
 
 func sameNetworkRollupSemantics(left, right NetworkRollupPoint) bool {
+	if (left.Aggregation == pmstream.AggregationFormula ||
+		right.Aggregation == pmstream.AggregationFormula) &&
+		(!left.DefinitionComplete || !right.DefinitionComplete) {
+		return false
+	}
 	return networkRollupOperation(left) == networkRollupOperation(right) &&
 		left.Aggregation == right.Aggregation &&
 		left.Formula == right.Formula &&
@@ -515,22 +591,24 @@ func (r *NetworkRollupRepository) recomputePercentVersionSlices(
 	if r.counterRollups == nil {
 		return fmt.Errorf("dashboard pct Counter rollup reader is not configured")
 	}
-	if err := r.counterRollups.VisitSnapshotsForPeriod(
-		ctx, versionIDs, sourceGranularity, snapshotStart, snapshotEnd,
-		func(payload pmstream.RollupPayload) error {
-			if payload.EntityKey != "network" {
-				return nil
-			}
+	for _, versionID := range versionIDs {
+		payloads, err := r.counterRollups.ListSnapshots(
+			ctx, versionID, "network", sourceGranularity, snapshotStart, snapshotEnd,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"load dashboard network Counter rollups for PM task version %s: %w",
+				versionID, err,
+			)
+		}
+		for _, payload := range payloads {
 			for _, target := range byVersion[payload.TaskVersionID] {
 				if payload.WindowStart.Before(target.start) || !payload.WindowStart.Before(target.end) {
 					continue
 				}
 				mergeNetworkPercentPayload(target, payload)
 			}
-			return nil
-		},
-	); err != nil {
-		return fmt.Errorf("recompute dashboard pct across PM task versions: %w", err)
+		}
 	}
 
 	seen := make(map[*networkPercentTarget]struct{})
