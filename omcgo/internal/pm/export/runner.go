@@ -16,6 +16,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/calendarfilter"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 )
 
 // taskRepo 是 Runner 操作导出任务表的契约（载任务 + 三态切换），便于单测 stub。
@@ -48,6 +49,7 @@ type Runner struct {
 	bucket     string   // 导出文件落地桶
 	logger     *zap.Logger
 	timezone   TimezoneProvider
+	admission  storageprotection.WriteAdmission
 
 	// buildSourceFn 取数源构造入口；默认 r.buildSource，单测可注入 stub 源绕过 DB。
 	// 返回取数源 + 横表指标列集（列名已解析）+ CSV 列布局（首列表头 / 是否含小区列），
@@ -71,6 +73,7 @@ type RunnerDeps struct {
 	Bucket           string
 	Logger           *zap.Logger
 	TimezoneProvider TimezoneProvider
+	StorageAdmission storageprotection.WriteAdmission
 }
 
 // NewRunner 构造 T2 Runner。
@@ -89,6 +92,7 @@ func NewRunner(d RunnerDeps) *Runner {
 		bucket:     d.Bucket,
 		logger:     logger.Named("pm.export.runner"),
 		timezone:   d.TimezoneProvider,
+		admission:  d.StorageAdmission,
 	}
 	r.buildSourceFn = r.buildSource
 	return r
@@ -171,6 +175,15 @@ func (r *Runner) generate(ctx context.Context, task *Task) (genResult, error) {
 	}
 	if r.bucket == "" {
 		return genResult{}, fmt.Errorf("export bucket not configured")
+	}
+	if r.admission != nil {
+		decision, err := r.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopePM)
+		if err != nil {
+			return genResult{}, fmt.Errorf("storage admission check: %w", err)
+		}
+		if !decision.Allowed {
+			return genResult{}, fmt.Errorf("storage write protected: %s", decision.Reason)
+		}
 	}
 
 	src, cols, layout, err := r.buildSourceFn(ctx, task)

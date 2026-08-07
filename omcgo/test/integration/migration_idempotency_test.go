@@ -132,6 +132,32 @@ func TestSeedBaselineHasOnConflict(t *testing.T) {
 	t.Logf("校验通过：%d 条 INSERT INTO public.* 均带 ON CONFLICT", len(inserts))
 }
 
+func TestDefaultStorageProtectionPolicySeedContract(t *testing.T) {
+	inserts := parsePublicInserts(t)
+
+	var policySeed *publicInsert
+	for i := range inserts {
+		if inserts[i].table == "storage_protection_policies" {
+			if policySeed != nil {
+				t.Fatalf("默认存储保护策略 seed 应保持单条 INSERT，避免多处默认值漂移")
+			}
+			policySeed = &inserts[i]
+		}
+	}
+	if policySeed == nil {
+		t.Fatalf("seed 缺少默认存储保护策略")
+	}
+
+	sql := policySeed.sql
+	policyContract := regexp.MustCompile(`(?is)INSERT INTO public\.storage_protection_policies\s*\(\s*id,\s*target_type,\s*target_id,\s*write_scope,\s*enabled,\s*warn_used_percent,\s*recover_used_percent,\s*block_used_percent,\s*check_interval_seconds,\s*unknown_behavior,\s*current_state,\s*updated_by\s*\)\s*VALUES\s*\(\s*'27800000-0000-4000-8000-000000000001'\s*,\s*'filesystem'\s*,\s*'root'\s*,\s*'all'\s*,\s*true\s*,\s*80\s*,\s*85\s*,\s*90\s*,\s*30\s*,\s*'allow_with_alarm'\s*,\s*'normal'\s*,\s*'system'\s*\)\s*ON CONFLICT\s*\(\s*target_type\s*,\s*target_id\s*,\s*write_scope\s*\)\s*DO NOTHING\s*;`)
+	if !policyContract.MatchString(sql) {
+		t.Fatalf("默认存储保护策略 seed 未匹配约定字段、默认值或幂等冲突策略")
+	}
+	if strings.Contains(sql, "DO UPDATE") {
+		t.Fatalf("默认存储保护策略 seed 不能 DO UPDATE，否则重跑 seed 会覆盖用户已修改的策略")
+	}
+}
+
 // TestSeedBaselineIdempotent DB 守护：在已建好 schema 的库上把每条 public INSERT
 // 重复前向应用，断言第二次不报错且行数稳定。未设 OMCGO_TEST_DB_DSN 时跳过。
 //

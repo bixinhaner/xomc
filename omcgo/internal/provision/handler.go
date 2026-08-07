@@ -25,6 +25,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/quicksettings"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	devtask "github.com/omcgo/omcgo/internal/task"
 )
 
@@ -51,6 +52,7 @@ type Handler struct {
 	fileWorkflow   plugAndPlayFileWorkflow
 	xmlObjectStore plugAndPlayXMLObjectStore
 	xmlBucket      string
+	admission      storageprotection.WriteAdmission
 }
 
 type plugAndPlayDeviceService interface {
@@ -132,6 +134,10 @@ func (h *Handler) SetPlugAndPlayXMLDependencies(
 // Download path as firmware and license files.
 func (h *Handler) SetPlugAndPlayXMLStorage(store plugAndPlayXMLObjectStore, bucket string) {
 	h.xmlObjectStore, h.xmlBucket = store, strings.TrimSpace(bucket)
+}
+
+func (h *Handler) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	h.admission = admission
 }
 
 // SetPlugAndPlayFileWorkflow wires firmware and license execution services into
@@ -855,6 +861,15 @@ func (h *Handler) stageXMLDownload(
 	}
 	if xmlFile == nil || xmlFile.ID == uuid.Nil {
 		return "", fmt.Errorf("plug and play XML file ID is required")
+	}
+	if h.admission != nil {
+		decision, err := h.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeUpload)
+		if err != nil {
+			return "", fmt.Errorf("storage admission check: %w", err)
+		}
+		if !decision.Allowed {
+			return "", fmt.Errorf("storage write protected: %s", decision.Reason)
+		}
 	}
 	objectName := fmt.Sprintf("plug-and-play/%s.xml", xmlFile.ID)
 	if _, err := h.xmlObjectStore.PutObject(

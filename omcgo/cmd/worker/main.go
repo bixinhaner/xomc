@@ -259,6 +259,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Named("raw-archive"),
 		4,
 	)
+	rawArchiver.SetStorageAdmission(w.StorageProtection, cfg.MinIO.Buckets.PMFiles, cfg.MinIO.Buckets.MRFiles)
 
 	pmCollector := collector.NewPMCollector(w.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, kpiEngine, pmFileStore, w.EventBus, logger)
 	pmMetrics := pm.NewPMMetrics(w.MetricsReg)
@@ -560,6 +561,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		cfg.MinIO.Buckets,
 		w.EventBus, transferDeduper, logger,
 	)
+	transferBridge.SetStorageAdmission(w.StorageProtection)
 	if err := transferBridge.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe transfer bridge", zap.Error(err))
 	}
@@ -608,6 +610,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	var traceBulk *trace.BulkStore
 	if w.MinIO != nil && cfg.MinIO.Buckets.TraceBulk != "" {
 		traceBulk = trace.NewBulkStore(w.MinIO, cfg.MinIO.Buckets.TraceBulk)
+		traceBulk.SetStorageAdmission(w.StorageProtection)
 		logger.Info("trace bulk store enabled",
 			zap.String("bucket", cfg.MinIO.Buckets.TraceBulk),
 			zap.Int("inline_max_bytes", trace.MaxInlinePayloadBytes))

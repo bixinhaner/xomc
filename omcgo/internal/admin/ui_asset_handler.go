@@ -25,12 +25,13 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 )
 
 // UI 资产上传体积上限（bytes）。
 const (
-	uiAssetMaxLoginBg int64 = 1 * 1024 * 1024  // 1 MiB
-	uiAssetMaxLogo    int64 = 400 * 1024       // 400 KiB
+	uiAssetMaxLoginBg int64 = 1 * 1024 * 1024 // 1 MiB
+	uiAssetMaxLogo    int64 = 400 * 1024      // 400 KiB
 	uiAssetPublicBase       = "/api/v1/admin/public/ui-assets/"
 )
 
@@ -43,13 +44,18 @@ var uploadKindLimits = map[string]int64{
 
 // UIAssetHandler 处理 UI 定制化资产的上传与公开读取。
 type UIAssetHandler struct {
-	minio  *minio.Client
-	bucket string
+	minio            *minio.Client
+	bucket           string
+	storageAdmission storageprotection.WriteAdmission
 }
 
 // NewUIAssetHandler creates a new UIAssetHandler bound to the given MinIO bucket.
 func NewUIAssetHandler(client *minio.Client, bucket string) *UIAssetHandler {
 	return &UIAssetHandler{minio: client, bucket: bucket}
+}
+
+func (h *UIAssetHandler) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	h.storageAdmission = admission
 }
 
 // RegisterRoutes 注册受鉴权保护的上传端点（挂在 admin 子组下）。
@@ -157,6 +163,15 @@ func (h *UIAssetHandler) Serve(c *gin.Context) {
 
 // putObject 流式把 multipart 文件写入 MinIO。
 func (h *UIAssetHandler) putObject(ctx context.Context, fh *multipart.FileHeader, objectName, contentType string) error {
+	if h.storageAdmission != nil {
+		decision, err := h.storageAdmission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeUpload)
+		if err != nil {
+			return fmt.Errorf("storage admission check: %w", err)
+		}
+		if !decision.Allowed {
+			return fmt.Errorf("storage write protected: %s", decision.Reason)
+		}
+	}
 	src, err := fh.Open()
 	if err != nil {
 		return fmt.Errorf("open uploaded file: %w", err)

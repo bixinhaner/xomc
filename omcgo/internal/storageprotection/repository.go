@@ -15,6 +15,10 @@ type UsageProvider interface {
 	Snapshot(ctx context.Context, targetType TargetType, targetID string) (UsageSnapshot, error)
 }
 
+type UsageTargetLister interface {
+	ListTargets(ctx context.Context) ([]UsageSnapshot, error)
+}
+
 type WriteAdmission interface {
 	Check(ctx context.Context, targetType TargetType, targetID string, scope WriteScope) (AdmissionDecision, error)
 }

@@ -9,6 +9,7 @@ import {
   Spin,
 } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
+import { useSearchParams } from 'react-router-dom';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 import BasicSettings from './BasicSettings';
@@ -52,6 +53,10 @@ const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'retention_bp', labelKey: 'system.config.retentionBp' },
 ];
 
+function coerceSettingsTab(raw: string | null): SettingsTab {
+  return settingsTabs.some((tab) => tab.key === raw) ? (raw as SettingsTab) : 'basic';
+}
+
 // ----- value <-> form value 编解码 -----
 // sys_configs.value 列是 TEXT；DDL CHECK value_type IN ('string','int','float','bool','json')。
 // 表单各控件期望强类型（Switch=boolean, InputNumber=number, Input/Select=string），
@@ -83,12 +88,19 @@ function decodeValue(raw: string, type: SysConfigValueType | undefined): unknown
 
 export default function SystemConfig() {
   const t = useT();
+  const [searchParams] = useSearchParams();
   const tabsContainerRef = useRef<HTMLDivElement>(null);
-  const [activeTab, setActiveTab] = useState<SettingsTab>('basic');
+  const requestedTab = coerceSettingsTab(searchParams.get('tab'));
+  const [activeTab, setActiveTab] = useState<SettingsTab>(requestedTab);
   const [submittedBatch, setSubmittedBatch] = useState<ConfigApplyBatch | null>(null);
   const { data: refreshedBatch } = useSysConfigApplyBatch(submittedBatch?.id);
   const applyBatch = refreshedBatch ?? submittedBatch;
   const visibleApplyBatch = isApplyBatchForCategory(applyBatch, activeTab) ? applyBatch : null;
+
+  useEffect(() => {
+    setActiveTab(requestedTab);
+    setSubmittedBatch(null);
+  }, [requestedTab]);
 
   // 各设置模块的表单实例
   const [basicForm] = Form.useForm();

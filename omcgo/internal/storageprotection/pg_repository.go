@@ -31,6 +31,25 @@ type PgRepository struct {
 
 func NewPgRepository(pool *pgxpool.Pool) *PgRepository { return &PgRepository{pool: pool} }
 
+func (r *PgRepository) EnsureDefaultPolicy(ctx context.Context) error {
+	policy := DefaultPolicy()
+	if err := validatePolicy(&policy); err != nil {
+		return err
+	}
+	query, args, err := storage.Psql.Insert("storage_protection_policies").
+		Columns("id", "target_type", "target_id", "write_scope", "enabled", "warn_used_percent", "recover_used_percent", "block_used_percent", "check_interval_seconds", "unknown_behavior", "current_state", "updated_by").
+		Values(policy.ID, string(policy.TargetType), policy.TargetID, string(policy.WriteScope), policy.Enabled, policy.WarnUsedPercent, policy.RecoverUsedPercent, policy.BlockUsedPercent, policy.CheckIntervalSeconds, string(policy.UnknownBehavior), string(policy.CurrentState), policy.UpdatedBy).
+		Suffix("ON CONFLICT (target_type, target_id, write_scope) DO NOTHING").
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build default storage protection policy seed: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("ensure default storage protection policy: %w", err)
+	}
+	return nil
+}
+
 func (r *PgRepository) GetEnabledPolicy(ctx context.Context, targetType TargetType, targetID string, scope WriteScope) (*Policy, error) {
 	for _, candidateScope := range policyLookupScopes(scope) {
 		query, args, err := storage.Psql.Select(policyColumns...).From("storage_protection_policies").

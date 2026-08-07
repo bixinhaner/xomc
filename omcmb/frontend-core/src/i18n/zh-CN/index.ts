@@ -5287,9 +5287,9 @@ const messages: Record<string, string> = {
   'system.dashboard.service.pmCollection':   '性能采集服务',
   'system.dashboard.service.fileTransfer':   '文件传输服务',
   'system.dashboard.service.northbound':     '北向接口服务',
-  'system.storageProtection.description':     '统一按宿主机根文件系统设置容量阈值，并在业务写入入口执行准入保护。',
+  'system.storageProtection.description':     '统一按 OMC 关键写入磁盘设置容量阈值，并在业务写入入口执行准入保护。',
   'system.storageProtection.unifiedTarget':   '统一物理存储',
-  'system.storageProtection.unifiedTargetDescription': '当前部署所有 OMC 数据共用同一物理文件系统（/）。MinIO、数据库和监控数据仅作逻辑观测；写入范围只用于优先级和审计，不单独分配磁盘配额。',
+  'system.storageProtection.unifiedTargetDescription': '系统按数据库、MinIO、Redis、NATS、业务日志、OMC 数据目录和 Docker 数据根的真实落盘位置识别受保护挂载点；策略仍是一套全局阈值，不按服务单独分配磁盘配额。',
   'system.storageProtection.retentionDescription': '统一配置数据库日志和 OMC 服务程序日志的保留期限、轮转参数及过期清理策略。',
   'system.storageProtection.capacityOverview': '容量总览',
   'system.storageProtection.policyList':       '保护策略',
@@ -5310,7 +5310,8 @@ const messages: Record<string, string> = {
   'system.storageProtection.targetId':         '目标标识',
   'system.storageProtection.targetIdPlaceholder': '例如：minio-data 或 /data/omc',
   'system.storageProtection.scope':            '写入范围',
-  'system.storageProtection.thresholds':       '告警 / 阻断 / 恢复',
+  'system.storageProtection.thresholds':       '告警 / 恢复 / 阻断',
+  'system.storageProtection.thresholdValidation': '阈值必须满足：告警 < 恢复 < 阻断。',
   'system.storageProtection.warnThreshold':    '告警阈值',
   'system.storageProtection.blockThreshold':   '阻断阈值',
   'system.storageProtection.recoverThreshold': '恢复阈值',
@@ -5327,6 +5328,7 @@ const messages: Record<string, string> = {
   'system.storageProtection.audit':            '审计记录',
   'system.storageProtection.noEvents':         '暂无状态变更记录',
   'system.storageProtection.lastObserved':     '最近观测占用率',
+  'system.storageProtection.sourcePaths':      '来源路径',
   'system.storageProtection.targetType.filesystem':  '文件系统',
   'system.storageProtection.targetType.minio':       'MinIO',
   'system.storageProtection.targetType.database':    '数据库',
@@ -7728,7 +7730,7 @@ const messages: Record<string, string> = {
   'retentionBp.validate.range':              '{field}必须在 {min} 到 {max} 之间',
 
   // -------------------------------------------------------------------------
-  // 日志保留与轮转（资源与存储保护页“有效期与清理”区域）：log.retention + log.rotation
+  // 日志保留与轮转（系统配置“资源保留与背压”页签）：log.retention + log.rotation
   // -------------------------------------------------------------------------
   'logCfg.save':                        '保存',
   'logCfg.save.success':                '保存成功，新配置已热加载生效',

@@ -136,7 +136,6 @@ const SystemConfig       = React.lazy(() => import('@/pages/system/SystemConfig'
 const UICustomization    = React.lazy(() => import('@/pages/system/UICustomization'));
 const MenuManagement     = React.lazy(() => import('@/pages/system/MenuManagement'));
 const SystemDashboard    = React.lazy(() => import('@/pages/system/SystemDashboard'));
-const StorageProtection   = React.lazy(() => import('@/pages/system/StorageProtection'));
 const ApiManagement      = React.lazy(() => import('@/pages/system/ApiManagement'));
 const DataDictionary     = React.lazy(() => import('@/pages/system/DataDictionary'));
 const DictLoaderPage     = React.lazy(() => import('@/pages/system/DictLoader'));
@@ -343,7 +342,7 @@ export const routes: RouteObject[] = [
       { path: 'system/ui-custom',      element: withSuspense(UICustomization) },
       { path: 'system/menus',          element: withSuspense(MenuManagement) },
       { path: 'system/dashboard',      element: withSuspense(SystemDashboard) },
-      { path: 'system/storage-protection', element: withSuspense(StorageProtection) },
+      { path: 'system/storage-protection', element: <Navigate to="/system/config?tab=retention_bp" replace /> },
       { path: 'system/api-management', element: withSuspense(ApiManagement) },
       { path: 'system/data-dictionary', element: withSuspense(DataDictionary) },
       { path: 'system/dict-loader',    element: withSuspense(DictLoaderPage) },

@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
+
+	"github.com/omcgo/omcgo/internal/storageprotection"
 )
 
 // BulkStore 抽象 MinIO trace-bulk bucket 操作。
@@ -19,13 +21,18 @@ import (
 //   - task_id 前缀方便 purge 时批量删除
 //   - 报文 ID 作为唯一标识
 type BulkStore struct {
-	client *minio.Client
-	bucket string
+	client           *minio.Client
+	bucket           string
+	storageAdmission storageprotection.WriteAdmission
 }
 
 // NewBulkStore 构造函数。bucket 为空时 Enabled() 返 false，调用方应跳过。
 func NewBulkStore(client *minio.Client, bucket string) *BulkStore {
 	return &BulkStore{client: client, bucket: bucket}
+}
+
+func (b *BulkStore) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	b.storageAdmission = admission
 }
 
 // Enabled 当 MinIO 客户端 + bucket 配置齐全时返回 true。
@@ -42,6 +49,15 @@ func (b *BulkStore) ObjectKey(taskID, msgID uuid.UUID) string {
 func (b *BulkStore) Put(ctx context.Context, taskID, msgID uuid.UUID, payload string) (string, error) {
 	if !b.Enabled() {
 		return "", fmt.Errorf("bulk store disabled")
+	}
+	if b.storageAdmission != nil {
+		decision, err := b.storageAdmission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeTrace)
+		if err != nil {
+			return "", fmt.Errorf("storage admission check: %w", err)
+		}
+		if !decision.Allowed {
+			return "", fmt.Errorf("storage write protected: %s", decision.Reason)
+		}
 	}
 	key := b.ObjectKey(taskID, msgID)
 

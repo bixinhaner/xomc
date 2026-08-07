@@ -34,7 +34,8 @@ export default function SystemLicenseHistoryPage() {
   const { data, isLoading, isFetching } = useSystemLicenseHistory(params);
 
   const downloadRawLicense = (license: SystemLicenseHistory) => {
-    const blob = new Blob([decodeSystemLicenseRawContent(license.rawContent)], { type: 'application/octet-stream' });
+    const raw = decodeSystemLicenseRawContent(license.rawContent);
+    const blob = new Blob([raw.slice().buffer], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;

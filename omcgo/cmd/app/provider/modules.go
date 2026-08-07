@@ -1017,6 +1017,7 @@ func initBackupModule(c *Container) error {
 		snapshotRepo, c.MinIO, snapshotFileLookup, c.DeviceRepo,
 		backup.SnapshotBucketDefault, logger,
 	)
+	snapshotService.SetStorageAdmission(c.StorageProtection)
 	c.miscDeps.snapshotService = snapshotService
 	// #61: promote 解码管线 —— 读源备份对象 + AES-256-GCM 解密器，把(压缩/加密的)
 	// 备份还原成明文写快照（替代会产生不可用快照的 server-side CopyObject）。
@@ -1063,6 +1064,7 @@ func initBackupModule(c *Container) error {
 		licenseRepo, c.MinIO, c.DeviceRepo,
 		c.miscDeps.taskSvc, backup.LicenseBucketDefault, logger,
 	)
+	licenseService.SetStorageAdmission(c.StorageProtection)
 	backupHandler.SetLicenseService(licenseService)
 	licensePreinstallSubscriber := backup.NewLicensePreinstallSubscriber(licenseService, logger)
 	if err := licensePreinstallSubscriber.Subscribe(c.EventBus); err != nil {
@@ -1587,8 +1589,12 @@ func initMiscModules(c *Container) error {
 			prometheusURL = "http://prometheus:9090"
 		}
 		storageCollector := components.NewPrometheusStorageCollector(prometheusURL, 2*time.Second, time.Minute, nil)
+		storageProtectionRepo := storageprotection.NewPgRepository(c.PgPool)
+		if err := storageProtectionRepo.EnsureDefaultPolicy(context.Background()); err != nil {
+			return fmt.Errorf("ensure default storage protection policy: %w", err)
+		}
 		storageProtection := storageprotection.NewService(
-			storageprotection.NewPgRepository(c.PgPool),
+			storageProtectionRepo,
 			storageprotection.NewCollectorUsageProvider(storageCollector),
 			storageprotection.NewMetrics(c.MetricsReg),
 			logger,
@@ -1604,6 +1610,12 @@ func initMiscModules(c *Container) error {
 				return nil
 			})
 		}
+	}
+	if c.miscDeps.softwareService != nil {
+		c.miscDeps.softwareService.SetStorageAdmission(c.StorageProtection)
+	}
+	if c.adminHandlerDeps != nil && c.adminHandlerDeps.uiAssetHandler != nil {
+		c.adminHandlerDeps.uiAssetHandler.SetStorageAdmission(c.StorageProtection)
 	}
 
 	// Syslog module
@@ -1756,6 +1768,7 @@ func initMiscModules(c *Container) error {
 		if c.PresignBridge != nil {
 			mmlExporter.SetSignProvider(c.PresignBridge)
 		}
+		mmlExporter.SetStorageAdmission(c.StorageProtection)
 		mmlService.SetExporter(mmlExporter)
 	}
 	// T-0090-c：注入 admin RoleRepo 作 RBAC group 派生器，让 ListCustomCommands

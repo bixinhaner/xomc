@@ -5,16 +5,16 @@
 //
 // 写入路径有两条：
 //
-//   1. 自动 promote：备份任务完成后 FilePathRecorder 调用 PromoteFromBackup，
-//      读 config_backup bucket 的源文件 → 解密(.enc) + 解压(.gz 等) 还原成明文 →
-//      PutObject 写到 config-snapshots bucket，命名统一为 <SN>_CFG.<ext>，
-//      然后 Upsert 表行（MD5=明文哈希）。原任务文件保留不动。失败不影响主流程。
-//      （#61：早期用 server-side CopyObject 换名复制会丢 .enc/.gz 后缀并错配
-//      AEAD AAD，导致加密/压缩场景下快照永久不可用——已改为明文解码管线。）
+//  1. 自动 promote：备份任务完成后 FilePathRecorder 调用 PromoteFromBackup，
+//     读 config_backup bucket 的源文件 → 解密(.enc) + 解压(.gz 等) 还原成明文 →
+//     PutObject 写到 config-snapshots bucket，命名统一为 <SN>_CFG.<ext>，
+//     然后 Upsert 表行（MD5=明文哈希）。原任务文件保留不动。失败不影响主流程。
+//     （#61：早期用 server-side CopyObject 换名复制会丢 .enc/.gz 后缀并错配
+//     AEAD AAD，导致加密/压缩场景下快照永久不可用——已改为明文解码管线。）
 //
-//   2. 手动导入：用户上传 multipart 文件，逐项强校验命名 <SN>_CFG.{xml,nv}，
-//      PutObject 到 config-snapshots，然后 Upsert 表行。DB 写失败时补偿删
-//      MinIO 对象，避免孤儿。批量返回 succeeded + failed 结构化结果。
+//  2. 手动导入：用户上传 multipart 文件，逐项强校验命名 <SN>_CFG.{xml,nv}，
+//     PutObject 到 config-snapshots，然后 Upsert 表行。DB 写失败时补偿删
+//     MinIO 对象，避免孤儿。批量返回 succeeded + failed 结构化结果。
 //
 // 历史数据不回填（用户确认 2026-05-22）—— 本 service 只对新备份事件 / 新导入
 // 操作生效，不扫旧 backup_tasks / 旧 backup_restore_file。
@@ -37,6 +37,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 )
 
 // SnapshotMover 是 SnapshotService 对 MinIO 的最小依赖。
@@ -137,10 +138,10 @@ type SnapshotImportResult struct {
 
 // Sentinel error codes returned in SnapshotImportFailure.ErrorCode.
 const (
-	ImportErrInvalidName  = "INVALID_FILE_NAME"
-	ImportErrEmptyBody    = "EMPTY_FILE_BODY"
-	ImportErrPutObject    = "MINIO_PUT_FAILED"
-	ImportErrUpsert       = "DB_UPSERT_FAILED"
+	ImportErrInvalidName   = "INVALID_FILE_NAME"
+	ImportErrEmptyBody     = "EMPTY_FILE_BODY"
+	ImportErrPutObject     = "MINIO_PUT_FAILED"
+	ImportErrUpsert        = "DB_UPSERT_FAILED"
 	ImportErrUnknownDevice = "UNKNOWN_DEVICE"
 )
 
@@ -157,6 +158,11 @@ type SnapshotService struct {
 	// SetPromoteDecoder 注入；未注入时 PromoteFromBackup 返回 ErrPromoteNotConfigured。
 	sourceReader SnapshotSourceReader
 	decryptor    Encryptor
+	admission    storageprotection.WriteAdmission
+}
+
+func (s *SnapshotService) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	s.admission = admission
 }
 
 // SetPromoteDecoder 注入 promote 路径的源对象读取器与（可选）解密器（#61）。
@@ -217,13 +223,13 @@ var ErrPromoteNotConfigured = errors.New("snapshot promote not configured: fileL
 // FilePathRecorder 调用。
 //
 // 流程（#61 改造 —— 由 server-side CopyObject 换名复制，改为解码成明文再写）：
-//   1) 从 backup_restore_file 取该 (sn, task_id) 对应的最新一行得到源 bucket/path
-//   2) 读源对象完整字节（capped）
-//   3) decodeToPlaintext：按 object_path 后缀解密(.enc) + 解压(.gz/.zst/.lz4/.bz2)
-//      还原成"CPE 实际应拿到的明文配置"，并得到规范扩展名（xml/nv）
-//   4) 以明文计算 MD5、PutObject 写到 (snapshotBucket, <SN>_CFG.<ext>)
-//   5) 若 deviceLookup 可用，补 enb_name / product_type
-//   6) Upsert config_snapshots（source=backup, source_task_id，MD5=明文哈希）
+//  1. 从 backup_restore_file 取该 (sn, task_id) 对应的最新一行得到源 bucket/path
+//  2. 读源对象完整字节（capped）
+//  3. decodeToPlaintext：按 object_path 后缀解密(.enc) + 解压(.gz/.zst/.lz4/.bz2)
+//     还原成"CPE 实际应拿到的明文配置"，并得到规范扩展名（xml/nv）
+//  4. 以明文计算 MD5、PutObject 写到 (snapshotBucket, <SN>_CFG.<ext>)
+//  5. 若 deviceLookup 可用，补 enb_name / product_type
+//  6. Upsert config_snapshots（source=backup, source_task_id，MD5=明文哈希）
 //
 // 为何不再 CopyObject（#61）：源备份对象在开启压缩/加密时是 .gz/.enc 字节，且
 // AEAD 的 AAD 绑定到源 basename；换名复制会丢后缀（下载侧据后缀决定是否解压/解密）
@@ -281,6 +287,9 @@ func (s *SnapshotService) PromoteFromBackup(
 	}
 	dstPath := SnapshotObjectPath(deviceSN, ext)
 
+	if err := s.checkStorageAdmission(ctx, storageprotection.WriteScopeBackup); err != nil {
+		return err
+	}
 	if _, err := s.mover.PutObject(ctx,
 		s.bucket, dstPath,
 		bytes.NewReader(plaintext), int64(len(plaintext)),
@@ -427,6 +436,14 @@ func (s *SnapshotService) importOne(
 	sum := md5.Sum(item.Content)
 	md5Hex := hex.EncodeToString(sum[:])
 
+	if err := s.checkStorageAdmission(ctx, storageprotection.WriteScopeBackup); err != nil {
+		return &SnapshotImportFailure{
+			FileName:     item.FileName,
+			SerialNumber: sn,
+			ErrorCode:    ImportErrPutObject,
+			Message:      err.Error(),
+		}
+	}
 	if _, err := s.mover.PutObject(ctx,
 		s.bucket, objectPath,
 		bytes.NewReader(item.Content), int64(len(item.Content)),
@@ -473,6 +490,20 @@ func (s *SnapshotService) importOne(
 		zap.Int64("size", snap.FileSize),
 		zap.String("upload_by", uploadBy),
 	)
+	return nil
+}
+
+func (s *SnapshotService) checkStorageAdmission(ctx context.Context, scope storageprotection.WriteScope) error {
+	if s.admission == nil {
+		return nil
+	}
+	decision, err := s.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, scope)
+	if err != nil {
+		return fmt.Errorf("storage admission check: %w", err)
+	}
+	if !decision.Allowed {
+		return fmt.Errorf("storage write protected: %s", decision.Reason)
+	}
 	return nil
 }
 

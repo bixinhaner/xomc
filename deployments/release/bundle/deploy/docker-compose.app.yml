@@ -211,6 +211,16 @@ services:
       OMCGO_JWT_SECRET: ${OMCGO_JWT_SECRET}
       OMC_SHARED_SECRET: ${OMC_SHARED_SECRET}   # TR-069 ConnReq/STUN 共享密钥，见 deploy/.env
       OMC_PUBLIC_HOST: ${OMC_PUBLIC_HOST}   # 本机对外 IP（基站可达），见 deploy/.env
+      POSTGRES_DATA_PATH: "${POSTGRES_DATA_PATH:-}"
+      TSDB_DATA_PATH: "${TSDB_DATA_PATH:-}"
+      REDIS_DATA_PATH: "${REDIS_DATA_PATH:-}"
+      REDIS_PM_DATA_PATH: "${REDIS_PM_DATA_PATH:-}"
+      NATS_DATA_PATH: "${NATS_DATA_PATH:-}"
+      MINIO_DATA_PATH: "${MINIO_DATA_PATH:-}"
+      OMCGO_DOCKER_ROOT_DIR: "${OMCGO_DOCKER_ROOT_DIR:-/var/lib/docker}"
+      OMCGO_DOCKER_VOLUME_PREFIX: "${OMCGO_DOCKER_VOLUME_PREFIX:-omcgo}"
+      OMCGO_HOST_LOGS_PATH: "${OMCGO_HOST_LOGS_PATH:-/opt/omc/run/logs}"
+      OMCGO_HOST_DATA_PATH: "${OMCGO_HOST_DATA_PATH:-/opt/omc/data}"
     ports:
       - "127.0.0.1:9091:9091"        # metrics（Prometheus 经 docker network 抓取，外网不暴露）
     volumes:
@@ -287,6 +297,16 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       OMC_SHARED_SECRET: ${OMC_SHARED_SECRET}   # TR-069 ConnReq/STUN 共享密钥，见 deploy/.env
       OMC_PUBLIC_HOST: ${OMC_PUBLIC_HOST}   # 本机对外 IP（基站可达），见 deploy/.env
+      POSTGRES_DATA_PATH: "${POSTGRES_DATA_PATH:-}"
+      TSDB_DATA_PATH: "${TSDB_DATA_PATH:-}"
+      REDIS_DATA_PATH: "${REDIS_DATA_PATH:-}"
+      REDIS_PM_DATA_PATH: "${REDIS_PM_DATA_PATH:-}"
+      NATS_DATA_PATH: "${NATS_DATA_PATH:-}"
+      MINIO_DATA_PATH: "${MINIO_DATA_PATH:-}"
+      OMCGO_DOCKER_ROOT_DIR: "${OMCGO_DOCKER_ROOT_DIR:-/var/lib/docker}"
+      OMCGO_DOCKER_VOLUME_PREFIX: "${OMCGO_DOCKER_VOLUME_PREFIX:-omcgo}"
+      OMCGO_HOST_LOGS_PATH: "${OMCGO_HOST_LOGS_PATH:-/opt/omc/run/logs}"
+      OMCGO_HOST_DATA_PATH: "${OMCGO_HOST_DATA_PATH:-/opt/omc/data}"
     ports:
       - "7547:7547"                  # CPE → ACS（HTTP，TR-069 标准端口）
       - "7557:7557"                  # 内部 connection-request 接口
@@ -382,6 +402,16 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       OMC_PUBLIC_HOST: ${OMC_PUBLIC_HOST}   # 本机对外 IP（基站可达）：worker 据此生成 PM 上传 URL，见 deploy/.env
+      POSTGRES_DATA_PATH: "${POSTGRES_DATA_PATH:-}"
+      TSDB_DATA_PATH: "${TSDB_DATA_PATH:-}"
+      REDIS_DATA_PATH: "${REDIS_DATA_PATH:-}"
+      REDIS_PM_DATA_PATH: "${REDIS_PM_DATA_PATH:-}"
+      NATS_DATA_PATH: "${NATS_DATA_PATH:-}"
+      MINIO_DATA_PATH: "${MINIO_DATA_PATH:-}"
+      OMCGO_DOCKER_ROOT_DIR: "${OMCGO_DOCKER_ROOT_DIR:-/var/lib/docker}"
+      OMCGO_DOCKER_VOLUME_PREFIX: "${OMCGO_DOCKER_VOLUME_PREFIX:-omcgo}"
+      OMCGO_HOST_LOGS_PATH: "${OMCGO_HOST_LOGS_PATH:-/opt/omc/run/logs}"
+      OMCGO_HOST_DATA_PATH: "${OMCGO_HOST_DATA_PATH:-/opt/omc/data}"
     ports:
       - "127.0.0.1:9092:9092"        # metrics
     volumes:

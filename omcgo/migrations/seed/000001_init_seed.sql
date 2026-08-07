@@ -26537,6 +26537,27 @@ FROM scope
 WHERE tt.type_code = scope.type_code;
 
 
+-- Consolidated from the pre-release storage protection default policy seed.
+INSERT INTO public.storage_protection_policies (
+    id, target_type, target_id, write_scope, enabled,
+    warn_used_percent, recover_used_percent, block_used_percent,
+    check_interval_seconds, unknown_behavior, current_state, updated_by
+) VALUES (
+    '27800000-0000-4000-8000-000000000001',
+    'filesystem',
+    'root',
+    'all',
+    true,
+    80,
+    85,
+    90,
+    30,
+    'allow_with_alarm',
+    'normal',
+    'system'
+)
+ON CONFLICT (target_type, target_id, write_scope) DO NOTHING;
+
 -- Consolidated from the pre-release storage protection menu seed migration.
 INSERT INTO public.menus (
     id, name, type, permission_key, parent_id, sort_order, route_path,
@@ -26548,11 +26569,11 @@ INSERT INTO public.menus (
     'system:storage-protection',
     '11111111-1111-1111-1111-111111111108',
     21,
-    '/system/storage-protection',
-    'system/StorageProtection',
+    '/system/config?tab=retention_bp',
+    'system/SystemConfig',
     'DatabaseOutlined',
-    'show',
-    'normal',
+    'hide',
+    'disabled',
     '{"en-US":"Resource and Storage Protection","zh-CN":"资源与存储保护"}'::jsonb
 )
 ON CONFLICT (id) DO UPDATE SET

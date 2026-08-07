@@ -143,7 +143,7 @@ func Setup(r *gin.Engine, c *Container) error {
 		// 时 backup 跑得比 software 早，softwareService 还是 nil，hook 永远拿不到通知。
 		// 依赖 ufte (T-0164)：backup.RestoreService 反向注入到 ufte.Service 作为
 		// CONFIG_RESTORE 派发器；ufte 必须先就绪。
-		Depends: []string{"software", "ufte"},
+		Depends: []string{"software", "ufte", "misc"},
 		Init:    func() error { return initBackupModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
@@ -459,6 +459,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Provisioning routes → resource "config" -----
 	provisionHandler := provision.NewHandler(md.provisionRepo, md.provisionEngine)
+	provisionHandler.SetStorageAdmission(c.StorageProtection)
 	// issue #126 item 10: 建任务前预检设备存在性，避免 device_id 合法但不存在
 	// 时落库孤儿任务（provisioning_tasks 对 device_id 无外键）。
 	if c.DeviceService != nil {

@@ -181,7 +181,8 @@ export default function SystemLicensePage() {
   })();
 
   const downloadRawLicense = () => {
-    const blob = new Blob([decodeSystemLicenseRawContent(lic.rawContent)], { type: 'application/octet-stream' });
+    const raw = decodeSystemLicenseRawContent(lic.rawContent);
+    const blob = new Blob([raw.slice().buffer], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
