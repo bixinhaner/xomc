@@ -26,6 +26,7 @@ export { mrApi } from './mrApi';
 export { dashboardApi } from './dashboardApi';
 export { logApi } from './logApi';
 export { northboundApi } from './northboundApi';
+export { northboundPageConfigApi } from './northboundPageConfigApi';
 export { provisionApi } from './provisionApi';
 export { interopApi } from './interopApi';
 export { configSyncApi } from './configSyncApi';

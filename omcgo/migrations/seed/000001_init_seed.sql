@@ -350,6 +350,36 @@ INSERT INTO public.api_endpoints VALUES
 	('d99f9301-e16c-42fa-91e2-d34d9baa2e3d', '/api/v1/northbound/sync/full', 'GET', 'GET /api/v1/northbound/sync/full', '', 'northbound', true, '2026-05-31 12:11:47.618531+08', '2026-05-31 12:52:23.927644+08', false),
 	('279f3073-c13e-434f-af7d-7acd3bacb758', '/api/v1/northbound/sync/incremental', 'GET', 'GET /api/v1/northbound/sync/incremental', '', 'northbound', true, '2026-05-31 12:11:47.618757+08', '2026-05-31 12:52:23.927848+08', false),
 	('b4c876b7-eeed-45fd-8111-11e4033de2ba', '/api/v1/northbound/servers', 'GET', 'GET /api/v1/northbound/servers', '', 'northbound', true, '2026-05-31 12:11:47.618972+08', '2026-05-31 12:52:23.928033+08', false),
+	('50000000-0008-0000-0000-000000000001', '/api/v1/northbound/page-config/overview', 'GET', 'GET /api/v1/northbound/page-config/overview', '北向页面化配置 - 总览', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000002', '/api/v1/northbound/page-config/file/profiles', 'GET', 'GET /api/v1/northbound/page-config/file/profiles', '北向页面化配置 - 文件 profile 列表', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000028', '/api/v1/northbound/page-config/file/profiles', 'POST', 'POST /api/v1/northbound/page-config/file/profiles', '北向页面化配置 - 新增文件 profile', 'northbound', true, '2026-08-04 18:30:00+08', '2026-08-04 18:30:00+08', false),
+	('50000000-0008-0000-0000-000000000008', '/api/v1/northbound/page-config/file/profiles/:id/preview', 'GET', 'GET /api/v1/northbound/page-config/file/profiles/:id/preview', '北向页面化配置 - 文件模板预览', 'northbound', true, '2026-08-04 16:36:00+08', '2026-08-04 16:36:00+08', false),
+	('50000000-0008-0000-0000-000000000003', '/api/v1/northbound/page-config/inventory/profiles', 'GET', 'GET /api/v1/northbound/page-config/inventory/profiles', '北向页面化配置 - Inventory profile 列表', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000004', '/api/v1/northbound/page-config/fields', 'GET', 'GET /api/v1/northbound/page-config/fields', '北向页面化配置 - 字段目录', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000005', '/api/v1/northbound/page-config/validate', 'POST', 'POST /api/v1/northbound/page-config/validate', '北向页面化配置 - 配置校验', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000006', '/api/v1/northbound/page-config/file/profiles/:id', 'PUT', 'PUT /api/v1/northbound/page-config/file/profiles/:id', '北向页面化配置 - 保存文件 profile', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000007', '/api/v1/northbound/page-config/inventory/profiles/:id', 'PUT', 'PUT /api/v1/northbound/page-config/inventory/profiles/:id', '北向页面化配置 - 保存 Inventory profile', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000009', '/api/v1/northbound/page-config/file/profiles/:id/run', 'POST', 'POST /api/v1/northbound/page-config/file/profiles/:id/run', '北向页面化配置 - 手动执行文件 profile', 'northbound', true, '2026-08-04 16:55:00+08', '2026-08-04 16:55:00+08', false),
+	('50000000-0008-0000-0000-000000000010', '/api/v1/northbound/page-config/inventory/profiles/:id/run', 'POST', 'POST /api/v1/northbound/page-config/inventory/profiles/:id/run', '北向页面化配置 - 手动执行 Inventory profile', 'northbound', true, '2026-08-04 16:55:00+08', '2026-08-04 16:55:00+08', false),
+	('50000000-0008-0000-0000-000000000011', '/api/v1/northbound/page-config/runs', 'GET', 'GET /api/v1/northbound/page-config/runs', '北向页面化配置 - 上报记录列表', 'northbound', true, '2026-08-04 16:55:00+08', '2026-08-04 16:55:00+08', false),
+	('50000000-0008-0000-0000-000000000012', '/api/v1/northbound/page-config/runs/:id', 'GET', 'GET /api/v1/northbound/page-config/runs/:id', '北向页面化配置 - 上报记录详情', 'northbound', true, '2026-08-04 16:55:00+08', '2026-08-04 16:55:00+08', false),
+	('50000000-0008-0000-0000-000000000013', '/api/v1/northbound/page-config/runs/:id/download', 'GET', 'GET /api/v1/northbound/page-config/runs/:id/download', '北向页面化配置 - 下载最新上报文件', 'northbound', true, '2026-08-04 16:55:00+08', '2026-08-04 16:55:00+08', false),
+	('50000000-0008-0000-0000-000000000014', '/api/v1/northbound/page-config/delivery/targets', 'GET', 'GET /api/v1/northbound/page-config/delivery/targets', '北向页面化配置 - FTP/SFTP 目标列表', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000015', '/api/v1/northbound/page-config/delivery/targets', 'PUT', 'PUT /api/v1/northbound/page-config/delivery/targets', '北向页面化配置 - 保存 FTP/SFTP 目标', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000016', '/api/v1/northbound/page-config/alarm/snmp/targets', 'GET', 'GET /api/v1/northbound/page-config/alarm/snmp/targets', '北向页面化配置 - SNMP 告警目标列表', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000017', '/api/v1/northbound/page-config/alarm/snmp/targets/:key', 'PUT', 'PUT /api/v1/northbound/page-config/alarm/snmp/targets/:key', '北向页面化配置 - 保存 SNMP 告警目标', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000018', '/api/v1/northbound/page-config/alarm/socket/configs', 'GET', 'GET /api/v1/northbound/page-config/alarm/socket/configs', '北向页面化配置 - Socket 告警配置列表', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000019', '/api/v1/northbound/page-config/alarm/socket/configs/:key', 'PUT', 'PUT /api/v1/northbound/page-config/alarm/socket/configs/:key', '北向页面化配置 - 保存 Socket 告警配置', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000020', '/api/v1/northbound/page-config/api/configs', 'GET', 'GET /api/v1/northbound/page-config/api/configs', '北向页面化配置 - 北向 API 配置列表', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000021', '/api/v1/northbound/page-config/api/configs/:key', 'PUT', 'PUT /api/v1/northbound/page-config/api/configs/:key', '北向页面化配置 - 保存北向 API 开关', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000029', '/api/v1/northbound/page-config/api/clients', 'GET', 'GET /api/v1/northbound/page-config/api/clients', '北向页面化配置 - API client 列表', 'northbound', true, '2026-08-04 19:30:00+08', '2026-08-04 19:30:00+08', false),
+	('50000000-0008-0000-0000-000000000030', '/api/v1/northbound/page-config/api/clients', 'PUT', 'PUT /api/v1/northbound/page-config/api/clients', '北向页面化配置 - 保存 API client', 'northbound', true, '2026-08-04 19:30:00+08', '2026-08-04 19:30:00+08', false),
+	('50000000-0008-0000-0000-000000000022', '/api/v1/northbound/page-config/delivery/targets/test', 'POST', 'POST /api/v1/northbound/page-config/delivery/targets/test', '北向页面化配置 - FTP/SFTP 连接测试', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
+	('50000000-0008-0000-0000-000000000023', '/api/v1/northbound/page-config/alarm/snmp/targets/:key/test', 'POST', 'POST /api/v1/northbound/page-config/alarm/snmp/targets/:key/test', '北向页面化配置 - SNMP 告警测试报文', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
+	('50000000-0008-0000-0000-000000000024', '/api/v1/northbound/page-config/alarm/socket/configs/:key/test', 'POST', 'POST /api/v1/northbound/page-config/alarm/socket/configs/:key/test', '北向页面化配置 - Socket 告警测试报文', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
+	('50000000-0008-0000-0000-000000000025', '/api/v1/northbound/page-config/api/configs/:key/test', 'POST', 'POST /api/v1/northbound/page-config/api/configs/:key/test', '北向页面化配置 - 北向 API 契约检查', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
+	('50000000-0008-0000-0000-000000000026', '/api/v1/northbound/page-config/events', 'GET', 'GET /api/v1/northbound/page-config/events', '北向页面化配置 - 上报事件列表', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
+	('50000000-0008-0000-0000-000000000027', '/api/v1/northbound/page-config/events/:id', 'GET', 'GET /api/v1/northbound/page-config/events/:id', '北向页面化配置 - 上报事件详情', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
 	('e095c692-c595-4e53-b81a-f08a2f99f963', '/api/v1/notifications', 'GET', 'GET /api/v1/notifications', '', 'notifications', true, '2026-05-31 12:11:47.619473+08', '2026-05-31 12:52:23.928643+08', false),
 	('49f3c8ce-39fe-4470-9274-2bd2d0ab3a17', '/api/v1/notifications/templates', 'GET', 'GET /api/v1/notifications/templates', '', 'notifications', true, '2026-05-31 12:11:47.619724+08', '2026-05-31 12:52:23.928911+08', false),
 	('968589ad-6b5f-4cfd-a740-a94742b18d88', '/api/v1/notifications/templates/:id', 'GET', 'GET /api/v1/notifications/templates/:id', '', 'notifications', true, '2026-05-31 12:11:47.620068+08', '2026-05-31 12:52:23.929184+08', false),
@@ -2529,7 +2559,6 @@ INSERT INTO public.menus VALUES
 	('aaaa0007-1000-0000-0000-000000000002', '启动记录', 'menu', 'device:abnormal-reboot', 'aaaa000a-0000-0000-0000-000000000001', 50, '/device/abnormal-reboot', 'device/AbnormalReboot', 'WarningOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-06-12 18:16:52.414685+08', '{"en-US": "Startup Records", "zh-CN": "启动记录"}'),
 	('aaaa0098-1000-0000-0000-000000000005', '未知设备', 'menu', 'product:orphan-devices', 'aaaa0098-0000-0000-0000-000000000001', 5, '/product/orphan-devices', NULL, 'DisconnectOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.896653+08', NULL, '2026-06-12 18:16:52.417503+08', '{"en-US": "Unknown Devices", "zh-CN": "未知设备"}'),
 	('aaaa0002-1000-0000-0000-000000000003', '指标库', 'menu', 'performance:kpi-standard', 'aaaa0002-0000-0000-0000-000000000001', 3, '/performance/kpi-standard', 'performance/KPIStandardReport', 'AreaChartOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-06-12 18:16:52.418392+08', '{"en-US": "Indicator Library", "zh-CN": "指标库"}'),
-	('aaaa0120-1000-0000-0000-000000000001', '批量参数模板', 'menu', 'config:batch-template', 'aaaa0120-0000-0000-0000-000000000001', 1, '/config/batch-template', NULL, 'ProfileOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.905369+08', NULL, '2026-05-31 11:28:49.181274+08', '{"en-US": "Batch Param Templates", "zh-CN": "批量参数模板"}'),
 	('aaaa000b-1000-0000-0000-000000000001', '任务管理', 'menu', 'transfer:center', 'aaaa000b-0000-0000-0000-000000000001', 1, '/transfer/center', 'transfer/FileTransferCenter', 'CloudServerOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.903207+08', NULL, '2026-05-31 11:28:48.64538+08', '{"en-US": "Task Management", "zh-CN": "任务管理"}'),
 	('aaaa000b-1000-0000-0000-000000000003', '文件管理', 'menu', 'transfer:file-management', 'aaaa000b-0000-0000-0000-000000000001', 2, '/transfer/file-management', 'transfer/FileManagement', 'FolderOpenOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:48.64538+08', NULL, '2026-05-31 11:28:48.64538+08', '{"en-US": "File Management", "zh-CN": "文件管理"}'),
 	('aaaa0002-1000-0000-0000-000000000010', '性能仪表盘', 'menu', 'performance:pm-dashboard', 'aaaa0002-0000-0000-0000-000000000001', 0, '/performance', 'performance/PmDashboard/PerformanceLayout', 'DashboardOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:49.106107+08', NULL, '2026-05-31 11:28:49.109178+08', '{"en-US": "Performance Dashboard", "zh-CN": "性能仪表盘"}'),
@@ -2601,7 +2630,6 @@ INSERT INTO public.menus VALUES
 	('11111111-1111-1111-1111-111111111101', '设备管理', 'directory', 'device', NULL, 2, NULL, NULL, 'ClusterOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:43.435931+08', NULL, '2026-05-31 11:28:47.81669+08', '{"en-US": "Devices", "zh-CN": "设备管理"}'),
 	('11111111-1111-1111-1111-111111111105', '告警管理', 'directory', 'alarm', NULL, 3, NULL, NULL, 'AlertOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:43.435931+08', NULL, '2026-05-31 11:28:47.81669+08', '{"en-US": "Alarms", "zh-CN": "告警管理"}'),
 	('aaaa0002-0000-0000-0000-000000000001', '性能管理', 'directory', 'performance', NULL, 4, NULL, NULL, 'LineChartOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:47.81669+08', '{"en-US": "Performance", "zh-CN": "性能管理"}'),
-	('aaaa0120-0000-0000-0000-000000000001', '配置管理', 'directory', 'config', NULL, 5, '', NULL, 'SettingOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.905369+08', NULL, '2026-05-31 11:28:49.181274+08', '{"en-US": "Config Management", "zh-CN": "配置管理"}'),
 	('aaaa0003-0000-0000-0000-000000000001', 'MML管理', 'directory', 'mml', NULL, 5, NULL, NULL, 'CodeOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:47.81669+08', '{"en-US": "MML Management", "zh-CN": "MML管理"}'),
 	('aaaa0003-1004-0000-0000-000000000001', '执行', 'button', 'mml:console:execute', 'aaaa0003-1000-0000-0000-000000000004', 1, NULL, NULL, NULL, 'show', 'normal', NULL, '2026-06-17 20:08:35.605663+08', NULL, '2026-06-17 20:08:35.612851+08', '{"en-US": "Execute", "zh-CN": "执行"}'),
 	('aaaa0003-1004-0000-0000-000000000002', '导出', 'button', 'mml:console:export', 'aaaa0003-1000-0000-0000-000000000004', 2, NULL, NULL, NULL, 'show', 'normal', NULL, '2026-06-17 20:08:35.605663+08', NULL, '2026-06-17 20:08:35.612851+08', '{"en-US": "Export", "zh-CN": "导出"}'),
@@ -10636,8 +10664,6 @@ INSERT INTO public.role_menus VALUES
 	('4684aa64-0483-440b-b0a3-eb4a94644c0d', '10000000-0000-0000-0000-000000000003', 'aaaa000b-0000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.903207+08'),
 	('7fcd8f28-aa1e-4c07-bd73-acb5d20c1d92', '10000000-0000-0000-0000-000000000003', 'aaaa000b-1000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.903207+08'),
 	('df89b25f-3a6a-436a-a8f7-770b7fc48b49', '10000000-0000-0000-0000-000000000001', 'aaaa000b-1000-0000-0000-000000000002', NULL, '2026-05-31 11:28:47.904664+08'),
-	('6239bd4d-aadf-4e3c-a86d-97ae825e2448', '10000000-0000-0000-0000-000000000001', 'aaaa0120-0000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.905369+08'),
-	('5a64b4b5-cac2-43c6-9d2c-b1b0c8c4f5b6', '10000000-0000-0000-0000-000000000001', 'aaaa0120-1000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.905369+08'),
 	('91e9b332-7c19-4bb1-91b4-1a4494d1f3ec', '10000000-0000-0000-0000-000000000001', 'aaaa0126-1000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.908689+08'),
 	('24414546-f01f-4333-867e-a2ddeb486d4f', '10000000-0000-0000-0000-000000000001', 'aaaa0126-1000-0000-0000-000000000002', NULL, '2026-05-31 11:28:47.908689+08'),
 	('807b1d44-355e-477c-830f-6023907a3146', '10000000-0000-0000-0000-000000000001', 'aaaa0126-1000-0000-0000-000000000003', NULL, '2026-05-31 11:28:47.908689+08'),
@@ -26593,6 +26619,45 @@ INSERT INTO public.role_menus (role_id, menu_id)
 VALUES (
     '10000000-0000-0000-0000-000000000001',
     'aaaa0008-1000-0000-0000-000000000010'
+)
+ON CONFLICT (role_id, menu_id) DO NOTHING;
+
+-- Northbound configuration entry under System Management (moved from the removed
+-- Config Management directory; renamed 北向页面化配置 -> 北向配置).
+INSERT INTO public.menus (
+    id, name, type, permission_key, parent_id, sort_order, route_path,
+    component_path, icon, show_status, status, name_i18n
+) VALUES (
+    'aaaa0120-1000-0000-0000-000000000008',
+    '北向配置',
+    'menu',
+    'config:northbound-page-config',
+    '11111111-1111-1111-1111-111111111108',
+    30,
+    '/config/northbound-page-config',
+    'config/NorthboundPageConfig',
+    'ApiOutlined',
+    'show',
+    'normal',
+    '{"en-US":"Northbound Config","zh-CN":"北向配置"}'::jsonb
+)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    permission_key = EXCLUDED.permission_key,
+    parent_id = EXCLUDED.parent_id,
+    sort_order = EXCLUDED.sort_order,
+    route_path = EXCLUDED.route_path,
+    component_path = EXCLUDED.component_path,
+    icon = EXCLUDED.icon,
+    show_status = EXCLUDED.show_status,
+    status = EXCLUDED.status,
+    name_i18n = EXCLUDED.name_i18n,
+    updated_at = NOW();
+
+INSERT INTO public.role_menus (role_id, menu_id)
+VALUES (
+    '10000000-0000-0000-0000-000000000001',
+    'aaaa0120-1000-0000-0000-000000000008'
 )
 ON CONFLICT (role_id, menu_id) DO NOTHING;
 

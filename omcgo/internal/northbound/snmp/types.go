@@ -30,10 +30,13 @@ func (v SNMPVersion) IsValid() bool {
 type AuthProtocol string
 
 const (
-	AuthMD5     AuthProtocol = "MD5"
-	AuthSHA     AuthProtocol = "SHA"
-	AuthSHA256  AuthProtocol = "SHA256"
-	AuthNoAuth  AuthProtocol = "" // explicit no-auth marker
+	AuthMD5    AuthProtocol = "MD5"
+	AuthSHA    AuthProtocol = "SHA"
+	AuthSHA224 AuthProtocol = "SHA224"
+	AuthSHA256 AuthProtocol = "SHA256"
+	AuthSHA384 AuthProtocol = "SHA384"
+	AuthSHA512 AuthProtocol = "SHA512"
+	AuthNoAuth AuthProtocol = "" // explicit no-auth marker
 )
 
 // PrivProtocol enumerates SNMPv3 privacy (encryption) protocols.
@@ -42,6 +45,8 @@ type PrivProtocol string
 const (
 	PrivDES    PrivProtocol = "DES"
 	PrivAES    PrivProtocol = "AES"
+	PrivAES128 PrivProtocol = "AES128"
+	PrivAES192 PrivProtocol = "AES192"
 	PrivAES256 PrivProtocol = "AES256"
 	PrivNoPriv PrivProtocol = "" // explicit no-priv marker
 )
@@ -70,6 +75,7 @@ type TrapTarget struct {
 	Carrier      string // optional: cmcc | ctcc | cucc
 	Timeout      time.Duration
 	Retries      int // skeleton stage: 0
+	Inform       bool
 	Enabled      bool
 }
 

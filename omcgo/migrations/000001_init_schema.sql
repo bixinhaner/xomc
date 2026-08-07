@@ -4772,6 +4772,315 @@ CREATE TABLE public.nedirect_sessions (
 
 
 --
+-- Name: northbound_endpoints; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_endpoints (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name character varying(128) NOT NULL,
+    protocol character varying(16) NOT NULL,
+    purpose character varying(64) DEFAULT ''::character varying NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    host character varying(255) DEFAULT ''::character varying NOT NULL,
+    port integer,
+    username character varying(128) DEFAULT ''::character varying NOT NULL,
+    credential_ref character varying(255) DEFAULT ''::character varying NOT NULL,
+    auth_mode character varying(32) DEFAULT 'PASSWORD'::character varying NOT NULL,
+    remote_root character varying(512) DEFAULT ''::character varying NOT NULL,
+    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    status character varying(32) DEFAULT 'terminated'::character varying NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_endpoints_auth_mode_check CHECK (((auth_mode)::text = ANY (ARRAY[('PASSWORD'::character varying)::text, ('PRIVATE_KEY'::character varying)::text, ('NONE'::character varying)::text]))),
+    CONSTRAINT northbound_endpoints_port_check CHECK (((port IS NULL) OR ((port > 0) AND (port <= 65535)))),
+    CONSTRAINT northbound_endpoints_protocol_check CHECK (((protocol)::text = ANY (ARRAY[('FTP'::character varying)::text, ('SFTP'::character varying)::text, ('SNMP'::character varying)::text, ('SOCKET'::character varying)::text, ('API'::character varying)::text]))),
+    CONSTRAINT northbound_endpoints_status_check CHECK (((status)::text = ANY (ARRAY[('normal'::character varying)::text, ('terminated'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_field_mappings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_field_mappings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    profile_kind character varying(32) NOT NULL,
+    profile_code character varying(64) NOT NULL,
+    domain character varying(32) NOT NULL,
+    object_code character varying(64) NOT NULL,
+    field_key text NOT NULL,
+    output_alias text NOT NULL,
+    system_field text NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    support_status character varying(32) DEFAULT 'supported'::character varying NOT NULL,
+    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_field_mappings_domain_check CHECK (((domain)::text = ANY (ARRAY[('CM'::character varying)::text, ('PM'::character varying)::text, ('MR'::character varying)::text, ('LOG'::character varying)::text, ('INVENTORY'::character varying)::text]))),
+    CONSTRAINT northbound_field_mappings_profile_kind_check CHECK (((profile_kind)::text = ANY (ARRAY[('file'::character varying)::text, ('inventory'::character varying)::text, ('socket'::character varying)::text, ('snmp'::character varying)::text, ('api'::character varying)::text]))),
+    CONSTRAINT northbound_field_mappings_support_status_check CHECK (((support_status)::text = ANY (ARRAY[('supported'::character varying)::text, ('partial'::character varying)::text, ('unsupported'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_file_profiles; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_file_profiles (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    code character varying(32) NOT NULL,
+    name character varying(255) NOT NULL,
+    vendor character varying(128) DEFAULT 'Baicells'::character varying NOT NULL,
+    scenario_name character varying(128) DEFAULT ''::character varying NOT NULL,
+    scenario_name_en character varying(128) DEFAULT ''::character varying NOT NULL,
+    description text DEFAULT ''::text NOT NULL,
+    flags jsonb DEFAULT '[]'::jsonb NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    status character varying(32) DEFAULT 'terminated'::character varying NOT NULL,
+    groups jsonb DEFAULT '[]'::jsonb NOT NULL,
+    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_file_profiles_code_check CHECK (((code)::text ~ '^S[0-9]{4}$'::text)),
+    CONSTRAINT northbound_file_profiles_status_check CHECK (((status)::text = ANY (ARRAY[('normal'::character varying)::text, ('terminated'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_inventory_profiles; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_inventory_profiles (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    code character varying(32) NOT NULL,
+    name character varying(255) NOT NULL,
+    object_code character varying(32) NOT NULL,
+    tech character varying(32) DEFAULT ''::character varying NOT NULL,
+    period character varying(16) DEFAULT '24H'::character varying NOT NULL,
+    start_minute integer DEFAULT 5 NOT NULL,
+    path_template text NOT NULL,
+    file_name_template text NOT NULL,
+    compression_enabled boolean DEFAULT true NOT NULL,
+    compression_format character varying(16) DEFAULT 'zip'::character varying NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    status character varying(32) DEFAULT 'terminated'::character varying NOT NULL,
+    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_inventory_profiles_code_check CHECK (((code)::text = ANY (ARRAY[('ENB'::character varying)::text, ('GNB'::character varying)::text, ('GSM'::character varying)::text, ('OMC'::character varying)::text]))),
+    CONSTRAINT northbound_inventory_profiles_compression_format_check CHECK (((compression_format)::text = ANY (ARRAY[('zip'::character varying)::text, ('gz'::character varying)::text]))),
+    CONSTRAINT northbound_inventory_profiles_period_check CHECK (((period)::text = ANY (ARRAY[('15M'::character varying)::text, ('60M'::character varying)::text, ('24H'::character varying)::text, ('7D'::character varying)::text, ('1MO'::character varying)::text]))),
+    CONSTRAINT northbound_inventory_profiles_start_minute_check CHECK (((start_minute >= 0) AND (start_minute <= 59))),
+    CONSTRAINT northbound_inventory_profiles_status_check CHECK (((status)::text = ANY (ARRAY[('normal'::character varying)::text, ('terminated'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_file_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_file_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    profile_kind character varying(32) NOT NULL,
+    profile_code character varying(32) NOT NULL,
+    group_id character varying(128) DEFAULT ''::character varying NOT NULL,
+    domain character varying(32) NOT NULL,
+    object_code character varying(32) DEFAULT ''::character varying NOT NULL,
+    status character varying(32) DEFAULT 'running'::character varying NOT NULL,
+    window_start timestamp with time zone,
+    window_end timestamp with time zone,
+    artifact_path text DEFAULT ''::text NOT NULL,
+    artifact_name text DEFAULT ''::text NOT NULL,
+    artifact_content text DEFAULT ''::text NOT NULL,
+    artifact_size bigint DEFAULT 0 NOT NULL,
+    row_count integer DEFAULT 0 NOT NULL,
+    compression_enabled boolean DEFAULT false NOT NULL,
+    compression_format character varying(16),
+    error_message text DEFAULT ''::text NOT NULL,
+    summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_file_runs_artifact_size_check CHECK ((artifact_size >= 0)),
+    CONSTRAINT northbound_file_runs_profile_kind_check CHECK (((profile_kind)::text = ANY (ARRAY[('file'::character varying)::text, ('inventory'::character varying)::text]))),
+    CONSTRAINT northbound_file_runs_row_count_check CHECK ((row_count >= 0)),
+    CONSTRAINT northbound_file_runs_status_check CHECK (((status)::text = ANY (ARRAY[('running'::character varying)::text, ('success'::character varying)::text, ('failed'::character varying)::text, ('terminated'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_delivery_targets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_delivery_targets (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    scope character varying(32) NOT NULL,
+    owner_code character varying(64) DEFAULT ''::character varying NOT NULL,
+    target_key character varying(128) NOT NULL,
+    name character varying(200) NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    protocol character varying(8) DEFAULT 'FTP'::character varying NOT NULL,
+    host character varying(255) DEFAULT ''::character varying NOT NULL,
+    port integer DEFAULT 21 NOT NULL,
+    username character varying(128) DEFAULT ''::character varying NOT NULL,
+    credential_secret text DEFAULT ''::text NOT NULL,
+    auth_mode character varying(32) DEFAULT 'PASSWORD'::character varying NOT NULL,
+    remote_root text DEFAULT '/northupload'::text NOT NULL,
+    retry_times integer DEFAULT 3 NOT NULL,
+    timeout_seconds integer DEFAULT 30 NOT NULL,
+    passive_mode boolean DEFAULT true NOT NULL,
+    host_key_policy character varying(32) DEFAULT 'INSECURE'::character varying NOT NULL,
+    host_key_fingerprint text DEFAULT ''::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_delivery_targets_auth_mode_check CHECK (((auth_mode)::text = ANY (ARRAY[('PASSWORD'::character varying)::text, ('PRIVATE_KEY'::character varying)::text]))),
+    CONSTRAINT northbound_delivery_targets_host_key_policy_check CHECK (((host_key_policy)::text = ANY (ARRAY[('INSECURE'::character varying)::text, ('FINGERPRINT'::character varying)::text]))),
+    CONSTRAINT northbound_delivery_targets_port_check CHECK (((port >= 1) AND (port <= 65535))),
+    CONSTRAINT northbound_delivery_targets_protocol_check CHECK (((protocol)::text = ANY (ARRAY[('FTP'::character varying)::text, ('SFTP'::character varying)::text]))),
+    CONSTRAINT northbound_delivery_targets_retry_times_check CHECK (((retry_times >= 0) AND (retry_times <= 20))),
+    CONSTRAINT northbound_delivery_targets_scope_check CHECK (((scope)::text = ANY (ARRAY[('file'::character varying)::text, ('inventory'::character varying)::text, ('socket'::character varying)::text]))),
+    CONSTRAINT northbound_delivery_targets_timeout_seconds_check CHECK (((timeout_seconds >= 1) AND (timeout_seconds <= 300)))
+);
+
+
+--
+-- Name: northbound_snmp_alarm_targets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_snmp_alarm_targets (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    target_key character varying(128) NOT NULL,
+    name character varying(200) NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    version character varying(8) DEFAULT 'v2'::character varying NOT NULL,
+    notification_type character varying(16) DEFAULT 'Trap'::character varying NOT NULL,
+    listen_ip character varying(64) DEFAULT '0.0.0.0'::character varying NOT NULL,
+    listen_port integer DEFAULT 161 NOT NULL,
+    target_host character varying(255) DEFAULT ''::character varying NOT NULL,
+    target_port integer DEFAULT 162 NOT NULL,
+    community_secret text DEFAULT ''::text NOT NULL,
+    security_name character varying(128) DEFAULT ''::character varying NOT NULL,
+    auth_protocol character varying(16) DEFAULT ''::character varying NOT NULL,
+    auth_secret text DEFAULT ''::text NOT NULL,
+    priv_protocol character varying(16) DEFAULT ''::character varying NOT NULL,
+    priv_secret text DEFAULT ''::text NOT NULL,
+    clear_severity_policy character varying(64) DEFAULT '保留原级别'::character varying NOT NULL,
+    mib_query_enabled boolean DEFAULT true NOT NULL,
+    timeout_seconds integer DEFAULT 5 NOT NULL,
+    retries integer DEFAULT 1 NOT NULL,
+    mib_fields jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_snmp_alarm_targets_notification_type_check CHECK (((notification_type)::text = ANY (ARRAY[('Trap'::character varying)::text, ('Inform'::character varying)::text]))),
+    CONSTRAINT northbound_snmp_alarm_targets_port_check CHECK (((listen_port >= 1) AND (listen_port <= 65535) AND (target_port >= 1) AND (target_port <= 65535))),
+    CONSTRAINT northbound_snmp_alarm_targets_retries_check CHECK (((retries >= 0) AND (retries <= 20))),
+    CONSTRAINT northbound_snmp_alarm_targets_timeout_seconds_check CHECK (((timeout_seconds >= 1) AND (timeout_seconds <= 300))),
+    CONSTRAINT northbound_snmp_alarm_targets_version_check CHECK (((version)::text = ANY (ARRAY[('v2'::character varying)::text, ('v3'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_socket_alarm_configs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_socket_alarm_configs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    config_key character varying(128) NOT NULL,
+    name character varying(200) NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    profile character varying(32) NOT NULL,
+    mode character varying(32) DEFAULT 'server'::character varying NOT NULL,
+    listen_ip character varying(64) DEFAULT '0.0.0.0'::character varying NOT NULL,
+    listen_port integer DEFAULT 31232 NOT NULL,
+    max_clients integer DEFAULT 20 NOT NULL,
+    realtime_push_enabled boolean DEFAULT true NOT NULL,
+    client_sync_enabled boolean DEFAULT true NOT NULL,
+    heartbeat_seconds integer DEFAULT 60 NOT NULL,
+    heartbeat_times integer DEFAULT 3 NOT NULL,
+    idle_timeout_seconds integer DEFAULT 180 NOT NULL,
+    accounts jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_socket_alarm_configs_heartbeat_seconds_check CHECK (((heartbeat_seconds >= 5) AND (heartbeat_seconds <= 3600))),
+    CONSTRAINT northbound_socket_alarm_configs_heartbeat_times_check CHECK (((heartbeat_times >= 1) AND (heartbeat_times <= 100))),
+    CONSTRAINT northbound_socket_alarm_configs_idle_timeout_seconds_check CHECK (((idle_timeout_seconds >= 10) AND (idle_timeout_seconds <= 86400))),
+    CONSTRAINT northbound_socket_alarm_configs_listen_port_check CHECK (((listen_port >= 1) AND (listen_port <= 65535))),
+    CONSTRAINT northbound_socket_alarm_configs_max_clients_check CHECK (((max_clients >= 1) AND (max_clients <= 10000))),
+    CONSTRAINT northbound_socket_alarm_configs_mode_check CHECK (((mode)::text = 'server'::text)),
+    CONSTRAINT northbound_socket_alarm_configs_profile_check CHECK (((profile)::text = ANY (ARRAY[('CTCC'::character varying)::text, ('CUCC'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_api_configs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_api_configs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    api_key character varying(128) NOT NULL,
+    name character varying(200) NOT NULL,
+    method character varying(16) NOT NULL,
+    path character varying(256) NOT NULL,
+    kind character varying(64) DEFAULT '业务复用'::character varying NOT NULL,
+    data_type character varying(64) DEFAULT ''::character varying NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    old_system_supported boolean DEFAULT true NOT NULL,
+    current_supported boolean DEFAULT true NOT NULL,
+    source character varying(128) DEFAULT ''::character varying NOT NULL,
+    response_contract jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_api_configs_method_check CHECK (((method)::text = ANY (ARRAY[('GET'::character varying)::text, ('POST'::character varying)::text, ('PUT'::character varying)::text, ('DELETE'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_api_clients; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_api_clients (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    client_key character varying(128) NOT NULL,
+    name character varying(200) NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    token_secret text DEFAULT ''::text NOT NULL,
+    allowed_api_keys jsonb DEFAULT '[]'::jsonb NOT NULL,
+    ip_whitelist jsonb DEFAULT '[]'::jsonb NOT NULL,
+    expires_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: northbound_page_config_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_page_config_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    capability character varying(32) NOT NULL,
+    owner_code character varying(128) DEFAULT ''::character varying NOT NULL,
+    target_key character varying(128) DEFAULT ''::character varying NOT NULL,
+    event_type character varying(64) DEFAULT 'status'::character varying NOT NULL,
+    status character varying(32) DEFAULT 'success'::character varying NOT NULL,
+    artifact_type character varying(32) DEFAULT 'message'::character varying NOT NULL,
+    artifact_name text DEFAULT ''::text NOT NULL,
+    artifact_path text DEFAULT ''::text NOT NULL,
+    payload text DEFAULT ''::text NOT NULL,
+    payload_content_type character varying(128) DEFAULT 'text/plain; charset=utf-8'::character varying NOT NULL,
+    error_message text DEFAULT ''::text NOT NULL,
+    summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_page_config_events_artifact_type_check CHECK (((artifact_type)::text = ANY (ARRAY[('file'::character varying)::text, ('message'::character varying)::text, ('json'::character varying)::text]))),
+    CONSTRAINT northbound_page_config_events_capability_check CHECK (((capability)::text = ANY (ARRAY[('file'::character varying)::text, ('inventory'::character varying)::text, ('delivery'::character varying)::text, ('snmp'::character varying)::text, ('socket'::character varying)::text, ('api'::character varying)::text]))),
+    CONSTRAINT northbound_page_config_events_status_check CHECK (((status)::text = ANY (ARRAY[('running'::character varying)::text, ('success'::character varying)::text, ('failed'::character varying)::text, ('terminated'::character varying)::text])))
+);
+
+
+--
 -- Name: northbound_outbox; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -8813,6 +9122,150 @@ ALTER TABLE ONLY public.nedirect_commands
 
 ALTER TABLE ONLY public.nedirect_sessions
     ADD CONSTRAINT nedirect_sessions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_endpoints northbound_endpoints_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_endpoints
+    ADD CONSTRAINT northbound_endpoints_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_field_mappings northbound_field_mappings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_field_mappings
+    ADD CONSTRAINT northbound_field_mappings_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_file_profiles northbound_file_profiles_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_file_profiles
+    ADD CONSTRAINT northbound_file_profiles_code_key UNIQUE (code);
+
+
+--
+-- Name: northbound_file_profiles northbound_file_profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_file_profiles
+    ADD CONSTRAINT northbound_file_profiles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_file_runs northbound_file_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_file_runs
+    ADD CONSTRAINT northbound_file_runs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_delivery_targets northbound_delivery_targets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_delivery_targets
+    ADD CONSTRAINT northbound_delivery_targets_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_delivery_targets northbound_delivery_targets_scope_owner_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_delivery_targets
+    ADD CONSTRAINT northbound_delivery_targets_scope_owner_key_key UNIQUE (scope, owner_code, target_key);
+
+
+--
+-- Name: northbound_snmp_alarm_targets northbound_snmp_alarm_targets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_snmp_alarm_targets
+    ADD CONSTRAINT northbound_snmp_alarm_targets_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_snmp_alarm_targets northbound_snmp_alarm_targets_target_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_snmp_alarm_targets
+    ADD CONSTRAINT northbound_snmp_alarm_targets_target_key_key UNIQUE (target_key);
+
+
+--
+-- Name: northbound_socket_alarm_configs northbound_socket_alarm_configs_config_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_socket_alarm_configs
+    ADD CONSTRAINT northbound_socket_alarm_configs_config_key_key UNIQUE (config_key);
+
+
+--
+-- Name: northbound_socket_alarm_configs northbound_socket_alarm_configs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_socket_alarm_configs
+    ADD CONSTRAINT northbound_socket_alarm_configs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_api_configs northbound_api_configs_api_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_api_configs
+    ADD CONSTRAINT northbound_api_configs_api_key_key UNIQUE (api_key);
+
+
+--
+-- Name: northbound_api_configs northbound_api_configs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_api_configs
+    ADD CONSTRAINT northbound_api_configs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_api_clients northbound_api_clients_client_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_api_clients
+    ADD CONSTRAINT northbound_api_clients_client_key_key UNIQUE (client_key);
+
+
+--
+-- Name: northbound_api_clients northbound_api_clients_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_api_clients
+    ADD CONSTRAINT northbound_api_clients_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_page_config_events northbound_page_config_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_page_config_events
+    ADD CONSTRAINT northbound_page_config_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_inventory_profiles northbound_inventory_profiles_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_inventory_profiles
+    ADD CONSTRAINT northbound_inventory_profiles_code_key UNIQUE (code);
+
+
+--
+-- Name: northbound_inventory_profiles northbound_inventory_profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_inventory_profiles
+    ADD CONSTRAINT northbound_inventory_profiles_pkey PRIMARY KEY (id);
 
 
 --
@@ -13752,6 +14205,118 @@ CREATE INDEX idx_nedirect_sessions_user_id ON public.nedirect_sessions USING btr
 
 
 --
+-- Name: idx_northbound_endpoints_protocol_purpose; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_endpoints_protocol_purpose ON public.northbound_endpoints USING btree (protocol, purpose);
+
+
+--
+-- Name: idx_northbound_endpoints_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_endpoints_status ON public.northbound_endpoints USING btree (status, enabled);
+
+
+--
+-- Name: idx_northbound_field_mappings_profile; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_field_mappings_profile ON public.northbound_field_mappings USING btree (profile_kind, profile_code, domain, object_code, sort_order);
+
+
+--
+-- Name: idx_northbound_file_profiles_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_file_profiles_status ON public.northbound_file_profiles USING btree (status, enabled);
+
+
+--
+-- Name: idx_northbound_file_runs_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_file_runs_created_at ON public.northbound_file_runs USING btree (created_at DESC);
+
+
+--
+-- Name: idx_northbound_file_runs_profile; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_file_runs_profile ON public.northbound_file_runs USING btree (profile_kind, profile_code, created_at DESC);
+
+
+--
+-- Name: idx_northbound_file_runs_schedule; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_file_runs_schedule ON public.northbound_file_runs USING btree (profile_kind, profile_code, group_id, window_end DESC, status);
+
+
+--
+-- Name: idx_northbound_file_runs_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_file_runs_status ON public.northbound_file_runs USING btree (status, created_at DESC);
+
+
+--
+-- Name: idx_northbound_delivery_targets_scope; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_delivery_targets_scope ON public.northbound_delivery_targets USING btree (scope, owner_code, enabled);
+
+
+--
+-- Name: idx_northbound_snmp_alarm_targets_enabled; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_snmp_alarm_targets_enabled ON public.northbound_snmp_alarm_targets USING btree (enabled, version);
+
+
+--
+-- Name: idx_northbound_socket_alarm_configs_enabled; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_socket_alarm_configs_enabled ON public.northbound_socket_alarm_configs USING btree (enabled, profile);
+
+
+--
+-- Name: idx_northbound_api_configs_path; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_api_configs_path ON public.northbound_api_configs USING btree (method, path, enabled);
+
+
+--
+-- Name: idx_northbound_api_clients_enabled; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_api_clients_enabled ON public.northbound_api_clients USING btree (enabled, client_key);
+
+
+--
+-- Name: idx_northbound_page_config_events_lookup; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_page_config_events_lookup ON public.northbound_page_config_events USING btree (capability, owner_code, target_key, event_type, created_at DESC);
+
+
+--
+-- Name: idx_northbound_page_config_events_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_page_config_events_status ON public.northbound_page_config_events USING btree (status, created_at DESC);
+
+
+--
+-- Name: idx_northbound_inventory_profiles_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_inventory_profiles_status ON public.northbound_inventory_profiles USING btree (status, enabled);
+
+
+--
 -- Name: idx_northbound_outbox_dead; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -18039,6 +18604,83 @@ CREATE TRIGGER trg_mr_customize_task_updated_at BEFORE UPDATE ON public.mr_custo
 --
 
 CREATE TRIGGER trg_nedirect_sessions_updated_at BEFORE UPDATE ON public.nedirect_sessions FOR EACH ROW EXECUTE FUNCTION public.nedirect_sessions_updated_at();
+
+
+--
+-- Name: northbound_endpoints trg_northbound_endpoints_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_endpoints_updated_at BEFORE UPDATE ON public.northbound_endpoints FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_field_mappings trg_northbound_field_mappings_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_field_mappings_updated_at BEFORE UPDATE ON public.northbound_field_mappings FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_file_profiles trg_northbound_file_profiles_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_file_profiles_updated_at BEFORE UPDATE ON public.northbound_file_profiles FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_file_runs trg_northbound_file_runs_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_file_runs_updated_at BEFORE UPDATE ON public.northbound_file_runs FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_delivery_targets trg_northbound_delivery_targets_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_delivery_targets_updated_at BEFORE UPDATE ON public.northbound_delivery_targets FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_snmp_alarm_targets trg_northbound_snmp_alarm_targets_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_snmp_alarm_targets_updated_at BEFORE UPDATE ON public.northbound_snmp_alarm_targets FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_socket_alarm_configs trg_northbound_socket_alarm_configs_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_socket_alarm_configs_updated_at BEFORE UPDATE ON public.northbound_socket_alarm_configs FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_api_configs trg_northbound_api_configs_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_api_configs_updated_at BEFORE UPDATE ON public.northbound_api_configs FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_api_clients trg_northbound_api_clients_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_api_clients_updated_at BEFORE UPDATE ON public.northbound_api_clients FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_page_config_events trg_northbound_page_config_events_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_page_config_events_updated_at BEFORE UPDATE ON public.northbound_page_config_events FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_inventory_profiles trg_northbound_inventory_profiles_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_inventory_profiles_updated_at BEFORE UPDATE ON public.northbound_inventory_profiles FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 
 --

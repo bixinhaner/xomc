@@ -144,8 +144,8 @@ func TestEngine_Process_PassesPDUsToSender(t *testing.T) {
 
 	_ = e.Process(context.Background(), newTestAlarm())
 	require.NotNil(t, snd.lastVars)
-	// default mapper produces 6 vars for our test alarm (with carrier+type)
-	assert.Len(t, snd.lastVars, 6)
+	// default mapper follows omcAlarmMIB.mib and always emits 18 VarBinds.
+	assert.Len(t, snd.lastVars, 18)
 }
 
 func TestEngine_Process_RecordsLatency(t *testing.T) {

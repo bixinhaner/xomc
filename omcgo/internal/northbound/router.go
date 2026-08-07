@@ -1,28 +1,34 @@
 package northbound
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/ratelimit"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/northbound/pageconfig"
 	"github.com/omcgo/omcgo/internal/northbound/push"
 )
 
 // Router registers northbound/OSS API routes.
 type Router struct {
-	svc           *NorthboundService
-	pmHandler     *PMHandler
-	alarmHandler  *AlarmHandler
-	configHandler *ConfigHandler
-	serverHandler *ServerHandler        // 主备服务器配置 + 切换（system/config 北向设置）
-	outboxRepo    push.OutboxRepository // may be nil if outbox is not configured
-	scoper        *Scoper               // 多租户数据隔离；nil 时退化为不隔离（dev/test）
-	rateLimiter   *ratelimit.FixedWindowLimiter // per-endpoint 限流；nil 时不限流
+	svc               *NorthboundService
+	pmHandler         *PMHandler
+	alarmHandler      *AlarmHandler
+	configHandler     *ConfigHandler
+	pageConfigHandler *pageconfig.Handler
+	pageConfigService *pageconfig.Service
+	serverHandler     *ServerHandler                // 主备服务器配置 + 切换（system/config 北向设置）
+	outboxRepo        push.OutboxRepository         // may be nil if outbox is not configured
+	scoper            *Scoper                       // 多租户数据隔离；nil 时退化为不隔离（dev/test）
+	rateLimiter       *ratelimit.FixedWindowLimiter // per-endpoint 限流；nil 时不限流
 }
 
 // NewRouter creates a new northbound Router.
@@ -30,11 +36,14 @@ type Router struct {
 // serverHandler 通过 SetServerService 在 ServerService 装配完成后注入。
 func NewRouter(svc *NorthboundService) *Router {
 	logger := svc.logger
+	pageConfigService := pageconfig.NewService(pageconfig.NewDefaultCatalog())
 	return &Router{
-		svc:           svc,
-		pmHandler:     NewPMHandler(svc, logger),
-		alarmHandler:  NewAlarmHandler(svc, logger),
-		configHandler: NewConfigHandler(svc, logger),
+		svc:               svc,
+		pmHandler:         NewPMHandler(svc, logger),
+		alarmHandler:      NewAlarmHandler(svc, logger),
+		configHandler:     NewConfigHandler(svc, logger),
+		pageConfigHandler: pageconfig.NewHandler(pageConfigService, logger.Named("page-config")),
+		pageConfigService: pageConfigService,
 	}
 }
 
@@ -42,6 +51,22 @@ func NewRouter(svc *NorthboundService) *Router {
 // 在 provider/modules.go 完成 northbound_servers repo + service 装配后调用。
 func (r *Router) SetServerService(svc *ServerService) {
 	r.serverHandler = NewServerHandler(svc, r.svc.logger)
+}
+
+// SetPageConfigRepository wires page-config persistence. Without this injection
+// the page-config handler serves the built-in read-only catalog for tests.
+func (r *Router) SetPageConfigRepository(repo pageconfig.Repository) {
+	r.SetPageConfigService(pageconfig.NewServiceWithRepository(pageconfig.NewDefaultCatalog(), repo))
+}
+
+// SetPageConfigService wires page-config service. It is used by app provider
+// so the HTTP handler and background scheduler share one service/repository.
+func (r *Router) SetPageConfigService(svc *pageconfig.Service) {
+	r.pageConfigService = svc
+	r.pageConfigHandler = pageconfig.NewHandler(
+		svc,
+		r.svc.logger.Named("page-config"),
+	)
 }
 
 // SetOutboxRepo sets the outbox repository for dead letter queue endpoints.
@@ -85,6 +110,75 @@ func (r *Router) rateLimit(endpoint string) gin.HandlerFunc {
 	}
 }
 
+func (r *Router) pageConfiguredAPI(apiKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !r.requirePageConfiguredAPI(c, apiKey) {
+			return
+		}
+		if !r.requirePageConfiguredAPIClient(c, apiKey) {
+			return
+		}
+		c.Next()
+	}
+}
+
+func (r *Router) requirePageConfiguredAPI(c *gin.Context, apiKey string) bool {
+	if r.pageConfigService == nil {
+		return true
+	}
+	enabled, err := r.pageConfigService.IsAPIConfigEnabled(c.Request.Context(), apiKey)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, "northbound API page-config check failed")
+		return false
+	}
+	if !enabled {
+		response.Fail(c, http.StatusForbidden, "northbound API is disabled by page-config")
+		return false
+	}
+	return true
+}
+
+func (r *Router) requirePageConfiguredAPIClient(c *gin.Context, apiKey string) bool {
+	if r.pageConfigService == nil {
+		return true
+	}
+	client, err := r.pageConfigService.AuthenticateAPIClient(
+		c.Request.Context(),
+		northboundAPIClientCredential(c),
+		c.ClientIP(),
+		apiKey,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, commonerrors.ErrUnauthorized):
+			response.Fail(c, http.StatusUnauthorized, err.Error())
+		case errors.Is(err, commonerrors.ErrForbidden):
+			response.Fail(c, http.StatusForbidden, err.Error())
+		default:
+			response.Fail(c, http.StatusInternalServerError, "northbound API client check failed")
+		}
+		return false
+	}
+	if client != nil {
+		c.Set("northbound_api_client", client.ClientKey)
+	}
+	return true
+}
+
+func northboundAPIClientCredential(c *gin.Context) string {
+	if token := strings.TrimSpace(c.GetHeader("X-Northbound-Token")); token != "" {
+		return token
+	}
+	if token := strings.TrimSpace(c.GetHeader("X-API-Key")); token != "" {
+		return token
+	}
+	auth := strings.TrimSpace(c.GetHeader("Authorization"))
+	if len(auth) > 7 && strings.EqualFold(auth[:7], "Bearer ") {
+		return strings.TrimSpace(auth[7:])
+	}
+	return ""
+}
+
 // RegisterRoutes registers northbound API routes on the given router group.
 func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 	nb := rg.Group("/northbound")
@@ -115,7 +209,13 @@ func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 		// Export endpoints（per-endpoint 限流）
 		nb.POST("/export/pm", r.rateLimit("nb:export:pm"), r.pmHandler.ExportPM)
 		nb.POST("/export/alarms", r.rateLimit("nb:export:alarms"), r.alarmHandler.ExportAlarms)
-		nb.GET("/export/config/:deviceId", r.rateLimit("nb:export:config"), r.configHandler.ExportConfig)
+		nb.GET("/export/config/:deviceId", r.rateLimit("nb:export:config"), r.pageConfiguredAPI("nb-export-config"), r.configHandler.ExportConfig)
+
+		// Page-config control plane. P0 exposes default catalogs and validation
+		// without changing existing northbound push/sync/export behavior.
+		if r.pageConfigHandler != nil {
+			r.pageConfigHandler.RegisterRoutes(nb)
+		}
 
 		// 主备服务器配置 + 切换（system/config 北向设置）。
 		// 仅在 SetServerService 注入后挂载，未注入时这三条端点 404，避免 nil deref。
@@ -251,6 +351,14 @@ func (r *Router) fullSync(c *gin.Context) {
 	}
 
 	dataType := c.DefaultQuery("data_type", "device")
+	if dataType == "device" {
+		if !r.requirePageConfiguredAPI(c, "nb-sync-full-device") {
+			return
+		}
+		if !r.requirePageConfiguredAPIClient(c, "nb-sync-full-device") {
+			return
+		}
+	}
 	result, err := r.svc.SyncService().FullSync(c.Request.Context(), dataType)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
