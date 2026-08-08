@@ -210,6 +210,7 @@ function StorageProtectionSection() {
   const [form] = Form.useForm<PolicyFormValues>();
   const [editingId, setEditingId] = useState<string>();
   const [editorOpen, setEditorOpen] = useState(false);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const { data: policies = [], isFetching: policiesFetching, refetch: refetchPolicies } = useStorageProtectionPolicies();
   const { data: targets = [], isFetching: targetsFetching, refetch: refetchTargets } = useStorageProtectionTargets();
   const { data: events = [], isFetching: eventsFetching, refetch: refetchEvents } = useStorageProtectionEvents(5);
@@ -290,10 +291,19 @@ function StorageProtectionSection() {
     }
   };
 
-  const refresh = () => {
-    void refetchTargets();
-    void refetchPolicies();
-    void refetchEvents();
+  const refresh = async () => {
+    setManualRefreshing(true);
+    try {
+      const results = await Promise.all([refetchTargets(), refetchPolicies(), refetchEvents()]);
+      if (results.some((result) => result.isError)) {
+        throw new Error(t('common.refreshFailed'));
+      }
+      message.success(t('common.refreshSuccess'));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t('common.refreshFailed'));
+    } finally {
+      setManualRefreshing(false);
+    }
   };
 
   return (
@@ -310,7 +320,11 @@ function StorageProtectionSection() {
         title={<Space><DatabaseOutlined />{t('system.storageProtection.capacityOverview')}</Space>}
         style={{ marginBottom: 16 }}
         extra={
-          <Button icon={<ReloadOutlined />} loading={targetsFetching || policiesFetching || eventsFetching} onClick={refresh}>
+          <Button
+            icon={<ReloadOutlined />}
+            loading={manualRefreshing || targetsFetching || policiesFetching || eventsFetching}
+            onClick={() => void refresh()}
+          >
             {t('common.refresh')}
           </Button>
         }

@@ -108,6 +108,7 @@ const messages: Record<string, string> = {
   'common.selectAll':      'Select All',
   'common.unselectAll':    'Unselect All',
   'common.refreshSuccess': 'Refreshed successfully',
+  'common.refreshFailed':  'Refresh failed',
   'common.totalItems':     '{count} items in total',
   'common.operation':      'Actions',
   'common.basicInfo':      'Basic Info',

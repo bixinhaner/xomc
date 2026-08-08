@@ -108,6 +108,7 @@ const messages: Record<string, string> = {
   'common.selectAll':      '全选',
   'common.unselectAll':    '取消全选',
   'common.refreshSuccess': '刷新成功',
+  'common.refreshFailed':  '刷新失败',
   'common.totalItems':     '共 {count} 条',
   'common.operation':      '操作',
   'common.basicInfo':      '基础信息',
