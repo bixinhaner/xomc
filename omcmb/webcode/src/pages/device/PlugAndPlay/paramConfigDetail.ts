@@ -2,6 +2,12 @@ import {
   getParamConfigTemplateDefaults,
   getParamConfigTemplateSheets,
 } from './paramConfigTemplate';
+import {
+  ENB_SHEET_FIELD_MAPPINGS,
+  GNB_SHEET_FIELD_MAPPINGS,
+} from './paramConfigFieldMappings';
+import { GNB_NETWORK_CONFIG_FIELDS } from './gnbNetworkConfigFields';
+import { sanitizeRetiredParamConfigFields } from './retiredParamConfigFields';
 
 export type ImportedSheetParameters = Record<string, Record<string, unknown>[]>;
 
@@ -17,59 +23,16 @@ interface ParamConfigDetailSource {
   bandWidth?: unknown;
   subframeAssignment?: unknown;
   plmnConfigList?: Array<{ plmnId?: unknown; primary?: unknown }>;
+  serviceIp?: unknown;
+  serviceMask?: unknown;
+  serviceGateway?: unknown;
+  serviceVlan?: unknown;
+  tfcsManagerPrimsrc?: unknown;
+  addressType?: unknown;
+  bearType?: unknown;
+  prefixLength?: unknown;
+  vlanName?: unknown;
 }
-
-interface SheetFieldMapping {
-  field: string;
-  sheet: string;
-  header: string;
-}
-
-const ENB_SHEET_FIELD_MAPPINGS: SheetFieldMapping[] = [
-  { field: 'cellName', sheet: 'CELL', header: 'CELL_NAME' },
-  { field: 'cellIdentity', sheet: 'CELL', header: '*ECI' },
-  { field: 'bandsSupport', sheet: 'CELL', header: '*BAND' },
-  { field: 'frequency', sheet: 'CELL', header: '*EARFCN_DL' },
-  { field: 'bandWidth', sheet: 'CELL', header: '*BANDWIDTH_DL' },
-  { field: 'phycellid', sheet: 'CELL', header: '*PCI' },
-  { field: 'specialSubframePatterns', sheet: 'CELL', header: 'SPECIAL_SUBFRAME_PATTERNS' },
-  { field: 'subframeAssignment', sheet: 'CELL', header: 'SUBFRAME_ASSIGNMENT' },
-  { field: 'rootSequenceIndex', sheet: 'CELL', header: '*ROOT_SEQUENCE_INDEX' },
-  { field: 'tac', sheet: 'CELL', header: '*TAC' },
-  { field: 'plmnId', sheet: 'NETWORK_ENABLE', header: '*PLMN' },
-  { field: 'ipsecEnable', sheet: 'NETWORK_ENABLE', header: 'IPSEC_ENABLE' },
-  { field: 'halobEnable', sheet: 'NETWORK_ENABLE', header: 'HALOB_ENABLE' },
-  { field: 'totalTxPower', sheet: 'CELL', header: 'MaxTxPower' },
-  { field: 'serviceIp', sheet: 'NETWORK', header: 'WAN IP' },
-  { field: 'mgmtIp', sheet: 'NETWORK', header: 'OMC IP' },
-  { field: 'ntpSync', sheet: 'NETWORK', header: 'NTP Enable' },
-];
-
-const GNB_SHEET_FIELD_MAPPINGS: SheetFieldMapping[] = [
-  { field: 'gnbName', sheet: 'CELL', header: 'gNB Name' },
-  { field: 'gnbId', sheet: 'CELL', header: '*gNB ID' },
-  { field: 'gnbIdLength', sheet: 'CELL', header: '*gNB Lenth' },
-  { field: 'pci', sheet: 'CELL', header: '*PCI' },
-  { field: 'ssbFrequency', sheet: 'CELL', header: 'SSB Frequency' },
-  { field: 'freqBandIndicator', sheet: 'CELL', header: 'Freq BandIndicator' },
-  { field: 'nrarfcnndl', sheet: 'CELL', header: 'NRARFCNDL' },
-  { field: 'nrarfcnul', sheet: 'CELL', header: 'NRARFCNUL' },
-  { field: 'dlbandwidth', sheet: 'CELL', header: 'DLBandwidth' },
-  { field: 'duplexMode', sheet: 'CELL', header: 'Duplex Mode' },
-  { field: 'nci', sheet: 'PLMN', header: '*NCI' },
-  { field: 'tac', sheet: 'PLMN', header: '*TAC' },
-  { field: 'ranac', sheet: 'PLMN', header: '*RANAC' },
-  { field: 'plmnId', sheet: 'PLMN', header: '*PLMN ID' },
-  { field: 'ntpSync', sheet: 'DEVICE', header: 'NTP Enable' },
-  { field: 'serviceIp', sheet: 'INTERFACE', header: 'IP Address' },
-  { field: 'serviceMask', sheet: 'INTERFACE', header: 'Subnet Mask' },
-  { field: 'serviceGateway', sheet: 'INTERFACE', header: 'Gateway' },
-  { field: 'serviceVlan', sheet: 'INTERFACE', header: 'Vlan ID' },
-  { field: 'omIp', sheet: 'INTERFACE', header: 'OMC IP' },
-  { field: 'totalTxPower', sheet: 'CELL', header: 'PowerModify' },
-  { field: 'offsetToPointA', sheet: 'CELL', header: 'OffsetToPointA' },
-  { field: 'kssb', sheet: 'CELL', header: 'SsbSubcarrierOffset' },
-];
 
 const ENB_IPSEC_FIELD_MAPPINGS = [
   ['TUNNEL_INDEX', '*TUNNEL_INDEX'],
@@ -107,6 +70,12 @@ function stringValue(input: unknown): string | undefined {
   return String(input).trim();
 }
 
+function binaryStringValue(input: unknown): string | undefined {
+  const parsed = booleanValue(input);
+  if (parsed !== undefined) return parsed ? '1' : '0';
+  return stringValue(input);
+}
+
 function booleanValue(input: unknown): boolean | undefined {
   if (typeof input === 'boolean') return input;
   const normalized = String(input ?? '').trim().toLowerCase();
@@ -119,6 +88,21 @@ function compact(values: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(values).filter(([, item]) => item !== undefined),
   );
+}
+
+function hasMeaningfulSheetValues(row: Record<string, unknown>): boolean {
+  return Object.entries(row).some(([header, item]) => {
+    if (header.replace(/^\*/, '').replace(/[\s_]+/g, '').toLowerCase() === 'serialnumber') {
+      return false;
+    }
+    return item !== undefined && item !== null && String(item).trim() !== '';
+  });
+}
+
+function hasMeaningfulNetworkValues(row: Record<string, unknown>): boolean {
+  return GNB_NETWORK_CONFIG_FIELDS.some(({ header }) => (
+    row[header] !== undefined && row[header] !== null && String(row[header]).trim() !== ''
+  ));
 }
 
 function cloneSheets(sheets: ImportedSheetParameters): ImportedSheetParameters {
@@ -142,7 +126,7 @@ export function withTemplateSheetParameters<T extends ParamConfigDetailSource>(
   );
   if (!templateSheets) return config;
 
-  const existing = config.sheetParameters ?? {};
+  const existing = sanitizeRetiredParamConfigFields(config.sheetParameters ?? {});
   const defaults = getParamConfigTemplateDefaults(
     config.deviceType as 'eNB' | 'gNB' | 'GSM' | undefined,
   );
@@ -237,7 +221,9 @@ export function mergeParamConfigFormValues<T extends ParamConfigDetailSource>(
   }
 
   const originalForm = toParamConfigFormValues(current);
-  const sheets = cloneSheets(submitted.sheetParameters as ImportedSheetParameters);
+  const sheets = sanitizeRetiredParamConfigFields(
+    cloneSheets(submitted.sheetParameters as ImportedSheetParameters),
+  );
   const mappings = current.deviceType === 'gNB'
     ? GNB_SHEET_FIELD_MAPPINGS
     : current.deviceType === 'eNB'
@@ -299,6 +285,14 @@ export function mergeParamConfigFormValues<T extends ParamConfigDetailSource>(
     });
   }
 
+  if (current.deviceType === 'gNB'
+    && !valuesEqual(submitted.networkConfigList, originalForm.networkConfigList)) {
+    const list = submitted.networkConfigList as Array<Record<string, unknown>> | undefined;
+    replaceSheetRows(sheets, 'INTERFACE', list?.map((item) => (
+      Object.fromEntries(GNB_NETWORK_CONFIG_FIELDS.map(({ header }) => [header, item[header] ?? '']))
+    )), current.serialNumber);
+  }
+
   if (current.deviceType === 'eNB'
     && !valuesEqual(submitted.ipsecList, originalForm.ipsecList)) {
     const list = submitted.ipsecList as Array<Record<string, unknown>> | undefined;
@@ -338,10 +332,24 @@ export function toParamConfigFormValues(
   if (config.deviceType === 'gNB') {
     const dlBandwidth = stringValue(value(cell, 'DLBandwidth'));
     const ipsecRows = sheets?.IPSEC ?? [];
+    const populatedIpsecRows = ipsecRows.filter(hasMeaningfulSheetValues);
+    const configuredIpsecEnable = binaryStringValue(config.IPSEC_ENABLE ?? config.ipsecEnable);
+    const networkRows = sheets?.INTERFACE ?? [];
+    const populatedNetworkRows = networkRows.filter(hasMeaningfulNetworkValues);
+    const legacyNetworkConfig = compact({
+      'Address Type': config.addressType,
+      'IP Address': config.serviceIp,
+      'Subnet Mask': config.serviceMask,
+      'Prefix Length': config.prefixLength,
+      'Gateway': config.serviceGateway,
+      'Bear Type': config.bearType,
+      'Vlan Name': config.vlanName,
+      'Vlan ID': config.serviceVlan,
+    });
     return {
       ...config,
       ...compact({
-        IPSEC_ENABLE: stringValue(config.IPSEC_ENABLE ?? config.ipsecEnable) || '0',
+        IPSEC_ENABLE: configuredIpsecEnable || (populatedIpsecRows.length > 0 ? '1' : '0'),
         gnbName: value(cell, 'gNB Name') ?? config.cellName,
         gnbId: value(cell, '*gNB ID', 'gNB ID'),
         gnbIdLength: value(cell, '*gNB Lenth', '*gNB Length', 'gNB ID Length'),
@@ -356,12 +364,16 @@ export function toParamConfigFormValues(
         tac: value(firstPlmn, '*TAC', 'TAC'),
         ranac: value(firstPlmn, '*RANAC', 'RANAC'),
         plmnId: value(firstPlmn, '*PLMN ID', 'PLMN ID'),
-        ntpSync: stringValue(value(firstRow(sheets, 'DEVICE'), 'NTP Enable')),
+        ntpSync: binaryStringValue(value(firstRow(sheets, 'DEVICE'), 'NTP Enable')),
+        networkConfigList: populatedNetworkRows.length > 0
+          ? populatedNetworkRows.map((row) => compact(Object.fromEntries(
+            GNB_NETWORK_CONFIG_FIELDS.map(({ header }) => [header, value(row, header)]),
+          )))
+          : (Object.keys(legacyNetworkConfig).length > 0 ? [legacyNetworkConfig] : undefined),
         serviceIp: value(firstRow(sheets, 'INTERFACE'), 'IP Address'),
         serviceMask: value(firstRow(sheets, 'INTERFACE'), 'Subnet Mask'),
         serviceGateway: value(firstRow(sheets, 'INTERFACE'), 'Gateway'),
         serviceVlan: value(firstRow(sheets, 'INTERFACE'), 'Vlan ID'),
-        omIp: value(firstRow(sheets, 'INTERFACE'), 'OMC IP'),
         totalTxPower: value(cell, 'PowerModify'),
         offsetToPointA: value(cell, 'OffsetToPointA'),
         kssb: value(cell, 'SsbSubcarrierOffset'),
@@ -380,8 +392,8 @@ export function toParamConfigFormValues(
             sdValue: value(row, 'SD Value'),
           }))
           : undefined,
-        ipsecList: ipsecRows.length > 0
-          ? ipsecRows.map((row, index) => compact({
+        ipsecList: populatedIpsecRows.length > 0
+          ? populatedIpsecRows.map((row, index) => compact({
             key: String(index + 1),
             ...Object.fromEntries(ENB_IPSEC_FIELD_MAPPINGS
               .filter(([field]) => field !== 'TUNNEL_INDEX')
@@ -428,7 +440,10 @@ export function toParamConfigFormValues(
         halobEnable: stringValue(value(network, 'HALOB_ENABLE')),
         totalTxPower: value(cell, 'MaxTxPower'),
         serviceIp: value(firstRow(sheets, 'NETWORK'), 'WAN IP'),
-        mgmtIp: value(firstRow(sheets, 'NETWORK'), 'OMC IP'),
+        tfcsManagerPrimsrc: value(
+          firstRow(sheets, '1588_CONFIGURATION'),
+          '*SYNCHRONIZATION_MODE',
+        ) ?? config.tfcsManagerPrimsrc,
         ipsecList: ipsecRows.length > 0
           ? ipsecRows.map((row, index) => compact({
             key: String(index + 1),

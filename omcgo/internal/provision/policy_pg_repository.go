@@ -3,7 +3,9 @@ package provision
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -45,8 +47,19 @@ func (r *PgPlugAndPlayRepository) CreatePolicy(ctx context.Context, p *PlugAndPl
 	if err != nil {
 		return fmt.Errorf("build create plug and play policy SQL: %w", err)
 	}
-	if _, err = r.pool.Exec(ctx, q, args...); err != nil {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin create plug and play policy: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err = ensureEnabledPolicyProductsAvailable(ctx, tx, p); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, q, args...); err != nil {
 		return fmt.Errorf("create plug and play policy: %w", err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit create plug and play policy: %w", err)
 	}
 	return nil
 }
@@ -62,11 +75,28 @@ func (r *PgPlugAndPlayRepository) GetPolicy(ctx context.Context, id uuid.UUID) (
 
 func (r *PgPlugAndPlayRepository) ListPolicies(ctx context.Context, f PolicyFilter) ([]PlugAndPlayPolicy, int64, error) {
 	pred := sq.And{sq.Eq{"deleted_at": nil}}
-	if f.ProductClass != "" {
-		pred = append(pred, sq.Or{
-			sq.Eq{"product_class": f.ProductClass},
-			sq.Expr("? = ANY(product_classes)", f.ProductClass),
-		})
+	if f.ProductClass != "" || f.ProductName != "" {
+		productPredicates := sq.Or{}
+		if f.ProductClass != "" {
+			productPredicates = append(productPredicates,
+				sq.Eq{"product_class": f.ProductClass},
+				sq.Expr("? = ANY(product_classes)", f.ProductClass),
+			)
+		}
+		if f.ProductName != "" {
+			productPredicates = append(productPredicates,
+				sq.Eq{"product_class": f.ProductName},
+				sq.Expr("? = ANY(product_classes)", f.ProductName),
+				sq.Expr(`EXISTS (
+					SELECT 1 FROM product_class_patterns pcp
+					JOIN products prod ON prod.id = pcp.product_id
+					WHERE prod.product_name = ?
+					  AND (pcp.product_class = plug_and_play_policies.product_class
+					       OR pcp.product_class = ANY(plug_and_play_policies.product_classes))
+				)`, f.ProductName),
+			)
+		}
+		pred = append(pred, productPredicates)
 	}
 	if f.Search != "" {
 		pattern := "%" + f.Search + "%"
@@ -74,6 +104,13 @@ func (r *PgPlugAndPlayRepository) ListPolicies(ctx context.Context, f PolicyFilt
 			sq.ILike{"name": pattern},
 			sq.ILike{"product_class": pattern},
 			sq.Expr("array_to_string(product_classes, ',') ILIKE ?", pattern),
+			sq.Expr(`EXISTS (
+				SELECT 1 FROM product_class_patterns pcp
+				JOIN products prod ON prod.id = pcp.product_id
+				WHERE prod.product_name ILIKE ?
+				  AND (pcp.product_class = plug_and_play_policies.product_class
+				       OR pcp.product_class = ANY(plug_and_play_policies.product_classes))
+			)`, pattern),
 		})
 	}
 	count := storage.Psql.Select("COUNT(*)").From("plug_and_play_policies")
@@ -133,14 +170,74 @@ func (r *PgPlugAndPlayRepository) UpdatePolicy(ctx context.Context, p *PlugAndPl
 	if err != nil {
 		return fmt.Errorf("build update plug and play policy SQL: %w", err)
 	}
-	tag, err := r.pool.Exec(ctx, q, args...)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin update plug and play policy: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err = ensureEnabledPolicyProductsAvailable(ctx, tx, p); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("update plug and play policy: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
 	}
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit update plug and play policy: %w", err)
+	}
 	return nil
+}
+
+const enabledPolicyProductLock = "plug_and_play_policies:enabled_product"
+
+func ensureEnabledPolicyProductsAvailable(ctx context.Context, tx pgx.Tx, policy *PlugAndPlayPolicy) error {
+	if policy == nil || !policy.Enabled {
+		return nil
+	}
+	productKeys := make([]string, 0, len(policy.ProductClasses)+1)
+	seen := make(map[string]struct{}, len(policy.ProductClasses)+1)
+	for _, productName := range append([]string{policy.ProductClass}, policy.ProductClasses...) {
+		key := strings.ToLower(strings.TrimSpace(productName))
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		productKeys = append(productKeys, key)
+	}
+	if len(productKeys) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", enabledPolicyProductLock); err != nil {
+		return fmt.Errorf("lock enabled plug and play policies: %w", err)
+	}
+	var existingName string
+	err := tx.QueryRow(ctx, `
+		SELECT name
+		FROM plug_and_play_policies
+		WHERE enabled = true
+		  AND deleted_at IS NULL
+		  AND id <> $1
+		  AND (
+		    lower(product_class) = ANY($2::text[])
+		    OR EXISTS (
+		      SELECT 1 FROM unnest(product_classes) AS configured_product
+		      WHERE lower(configured_product) = ANY($2::text[])
+		    )
+		  )
+		LIMIT 1`, policy.ID, productKeys).Scan(&existingName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check enabled plug and play policy products: %w", err)
+	}
+	return fmt.Errorf("%w: %s", ErrEnabledPolicyProductConflict, existingName)
 }
 
 func (r *PgPlugAndPlayRepository) DeletePolicy(ctx context.Context, id uuid.UUID) error {

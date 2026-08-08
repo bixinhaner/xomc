@@ -100,12 +100,14 @@ func (s *recordingXMLObjectStore) PutObject(
 }
 
 type executePolicyRepository struct {
-	policy   *PlugAndPlayPolicy
-	policies []PlugAndPlayPolicy
+	policy    *PlugAndPlayPolicy
+	policies  []PlugAndPlayPolicy
+	createErr error
+	updateErr error
 }
 
 func (r *executePolicyRepository) CreatePolicy(context.Context, *PlugAndPlayPolicy) error {
-	return nil
+	return r.createErr
 }
 func (r *executePolicyRepository) GetPolicy(context.Context, uuid.UUID) (*PlugAndPlayPolicy, error) {
 	return r.policy, nil
@@ -114,7 +116,47 @@ func (r *executePolicyRepository) ListPolicies(context.Context, PolicyFilter) ([
 	return r.policies, int64(len(r.policies)), nil
 }
 func (r *executePolicyRepository) UpdatePolicy(context.Context, *PlugAndPlayPolicy) error {
-	return nil
+	return r.updateErr
+}
+
+func TestCreatePolicyReturnsConflictWhenProductAlreadyHasEnabledPolicy(t *testing.T) {
+	c, rec := newCreateRequest(t, `{
+		"name":"second-enabled-policy",
+		"enabled":true,
+		"product_name":"BNQ",
+		"product_names":["BNQ"],
+		"product_class":"BNQ",
+		"product_classes":["BNQ"],
+		"execute_type":"auto",
+		"config":{}
+	}`)
+	h := NewHandler(nil, nil)
+	h.policyRepo = &executePolicyRepository{createErr: ErrEnabledPolicyProductConflict}
+
+	h.CreatePolicy(c)
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Contains(t, rec.Body.String(), "only one enabled")
+}
+
+func TestSetPolicyEnabledReturnsConflictWhenProductAlreadyHasEnabledPolicy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	policyID := uuid.New()
+	c.Params = gin.Params{{Key: "id", Value: policyID.String()}}
+	c.Request = httptest.NewRequest(http.MethodPatch, "/api/v1/provisioning/policies/"+policyID.String()+"/enabled", strings.NewReader(`{"enabled":true}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h := NewHandler(nil, nil)
+	h.policyRepo = &executePolicyRepository{
+		policy:    &PlugAndPlayPolicy{ID: policyID, ProductClass: "BNQ", ProductClasses: []string{"BNQ"}},
+		updateErr: ErrEnabledPolicyProductConflict,
+	}
+
+	h.SetPolicyEnabled(c)
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Contains(t, rec.Body.String(), "only one enabled")
 }
 func (r *executePolicyRepository) DeletePolicy(context.Context, uuid.UUID) error {
 	return nil
@@ -185,6 +227,58 @@ func TestHandlerListBindsPolicyOnly(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.True(t, captured.PolicyOnly)
+}
+
+func TestHandlerListBindsPlugAndPlayTaskFiltersAndReturnsStatusCounts(t *testing.T) {
+	var captured ProvisioningTaskFilter
+	policyID := uuid.New()
+	h := NewHandler(&mockTaskRepo{
+		ListFn: func(_ context.Context, filter ProvisioningTaskFilter) ([]ProvisioningTask, int64, error) {
+			captured = filter
+			return []ProvisioningTask{{SerialNumber: "SN-001", PolicyName: "Policy A"}}, 1, nil
+		},
+		CountByStatusFilteredFn: func(_ context.Context, filter ProvisioningTaskFilter) (map[ProvisioningState]int64, error) {
+			assert.Equal(t, captured, filter)
+			return map[ProvisioningState]int64{StateCompleted: 7, StateFailed: 2}, nil
+		},
+	}, nil)
+
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet,
+		"/api/v1/provisioning/tasks?policy_only=true&status=running&search=Policy+A&"+
+			"product_name=BaiBNQ&module=self_config&policy_id="+policyID.String()+"&"+
+			"started_after=2026-08-01T00%3A00%3A00Z&started_before=2026-08-07T23%3A59%3A59Z", nil)
+
+	h.List(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.True(t, captured.PolicyOnly)
+	assert.True(t, captured.RunningOnly)
+	assert.Equal(t, "Policy A", captured.Search)
+	assert.Equal(t, "BaiBNQ", captured.ProductName)
+	assert.Equal(t, "self_config", captured.Module)
+	require.NotNil(t, captured.PolicyID)
+	assert.Equal(t, policyID, *captured.PolicyID)
+	require.NotNil(t, captured.StartedAfter)
+	require.NotNil(t, captured.StartedBefore)
+	assert.Contains(t, rec.Body.String(), `"completed":7`)
+	assert.Contains(t, rec.Body.String(), `"failed":2`)
+	assert.Contains(t, rec.Body.String(), `"policy_name":"Policy A"`)
+}
+
+func TestHandlerListRejectsUnknownTaskModule(t *testing.T) {
+	h := NewHandler(&mockTaskRepo{}, nil)
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet,
+		"/api/v1/provisioning/tasks?module=unknown", nil)
+
+	h.List(c)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func (w *recordingFileWorkflow) ExecuteUpgrade(

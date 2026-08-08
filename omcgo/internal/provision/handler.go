@@ -24,6 +24,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/quicksettings"
 	"github.com/omcgo/omcgo/internal/storageprotection"
 	devtask "github.com/omcgo/omcgo/internal/task"
@@ -39,25 +40,32 @@ type deviceExistenceChecker interface {
 
 // Handler provides HTTP handlers for provisioning REST API.
 type Handler struct {
-	repo           ProvisioningTaskRepository
-	engine         *ProvisioningEngine
-	deviceChecker  deviceExistenceChecker
-	policyRepo     PlugAndPlayPolicyRepository
-	xmlRepo        ProvisioningXMLRepository
-	deviceService  plugAndPlayDeviceService
-	taskEnqueuer   plugAndPlayTaskEnqueuer
-	quickSettings  *quicksettings.Registry
-	paramModels    plugAndPlayParamModelLookup
-	paramMappings  plugAndPlayParamMappingLookup
-	fileWorkflow   plugAndPlayFileWorkflow
-	xmlObjectStore plugAndPlayXMLObjectStore
-	xmlBucket      string
-	admission      storageprotection.WriteAdmission
+	repo            ProvisioningTaskRepository
+	engine          *ProvisioningEngine
+	deviceChecker   deviceExistenceChecker
+	policyRepo      PlugAndPlayPolicyRepository
+	xmlRepo         ProvisioningXMLRepository
+	deviceService   plugAndPlayDeviceService
+	taskEnqueuer    plugAndPlayTaskEnqueuer
+	quickSettings   *quicksettings.Registry
+	paramModels     plugAndPlayParamModelLookup
+	paramMappings   plugAndPlayParamMappingLookup
+	productResolver plugAndPlayProductResolver
+	fileWorkflow    plugAndPlayFileWorkflow
+	xmlObjectStore  plugAndPlayXMLObjectStore
+	xmlBucket       string
+	admission       storageprotection.WriteAdmission
 }
 
 type plugAndPlayDeviceService interface {
 	GetDevice(context.Context, uuid.UUID) (*model.Device, error)
 	ListDevices(context.Context, device.DeviceFilter) (*model.ListResponse[model.Device], error)
+}
+
+type plugAndPlayProductResolver interface {
+	MatchProductClass(context.Context, string) (*product.MatchResult, error)
+	GetProductByID(context.Context, uuid.UUID) (*product.Product, error)
+	GetProductByName(context.Context, string) (*product.Product, error)
 }
 
 type plugAndPlayTaskEnqueuer interface {
@@ -118,6 +126,13 @@ func (h *Handler) SetPlugAndPlayDependencies(
 	tasks plugAndPlayTaskEnqueuer,
 ) {
 	h.policyRepo, h.xmlRepo, h.deviceService, h.taskEnqueuer = policies, xmlFiles, devices, tasks
+}
+
+// SetPlugAndPlayProductResolver switches policy validation, detection and
+// execution matching to the product-name/product-id route while keeping the
+// device's TR-069 product_class as the southbound identity.
+func (h *Handler) SetPlugAndPlayProductResolver(resolver plugAndPlayProductResolver) {
+	h.productResolver = resolver
 }
 
 // SetPlugAndPlayXMLDependencies wires both parameter sources used by XML
@@ -184,9 +199,38 @@ func (h *Handler) List(c *gin.Context) {
 		PageSize: 20,
 	}
 	if status := c.Query("status"); status != "" {
-		filter.Status = ProvisioningState(status)
+		if status == "running" {
+			filter.RunningOnly = true
+		} else {
+			filter.Status = ProvisioningState(status)
+		}
 	}
 	filter.PolicyOnly = c.Query("policy_only") == "true"
+	if value := strings.TrimSpace(c.Query("policy_id")); value != "" {
+		policyID, parseErr := uuid.Parse(value)
+		if parseErr != nil {
+			response.Fail(c, http.StatusBadRequest, "invalid policy_id")
+			return
+		}
+		filter.PolicyID = &policyID
+	}
+	filter.Search = strings.TrimSpace(c.Query("search"))
+	filter.ProductName = strings.TrimSpace(c.Query("product_name"))
+	filter.Module = strings.TrimSpace(c.Query("module"))
+	if filter.Module != "" && filter.Module != "software_upgrade" &&
+		filter.Module != "license" && filter.Module != "self_config" {
+		response.Fail(c, http.StatusBadRequest, "invalid module")
+		return
+	}
+	var err error
+	if filter.StartedAfter, err = parseOptionalTaskTime(c.Query("started_after")); err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid started_after")
+		return
+	}
+	if filter.StartedBefore, err = parseOptionalTaskTime(c.Query("started_before")); err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid started_before")
+		return
+	}
 	if value, err := strconv.Atoi(c.Query("page")); err == nil && value > 0 {
 		filter.Page = value
 	}
@@ -207,7 +251,24 @@ func (h *Handler) List(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	response.OK(c, gin.H{"items": items, "total": total})
+	counts, err := h.repo.CountByStatusFiltered(c.Request.Context(), filter)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, gin.H{"items": items, "total": total, "status_counts": counts})
+}
+
+func parseOptionalTaskTime(value string) (*time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
 }
 
 func (h *Handler) requirePolicyRepo(c *gin.Context) bool {
@@ -226,11 +287,15 @@ func (h *Handler) ListPolicies(c *gin.Context) {
 	size, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	items, total, err := h.policyRepo.ListPolicies(c.Request.Context(), PolicyFilter{
 		ProductClass: strings.TrimSpace(c.Query("product_class")),
+		ProductName:  strings.TrimSpace(c.Query("product_name")),
 		Search:       strings.TrimSpace(c.Query("search")), Page: page, PageSize: size,
 	})
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
+	}
+	for i := range items {
+		h.enrichPolicyProductNames(c.Request.Context(), &items[i])
 	}
 	response.OK(c, gin.H{"items": items, "total": total, "page": page, "page_size": size})
 }
@@ -243,7 +308,8 @@ func bindPolicy(c *gin.Context) (*PlugAndPlayPolicy, bool) {
 	}
 	policy.Name = strings.TrimSpace(policy.Name)
 	normalizePolicyProductClasses(&policy)
-	if policy.Name == "" || policy.ProductClass == "" {
+	normalizePolicyProductNames(&policy)
+	if policy.Name == "" || (policy.ProductClass == "" && policy.ProductName == "") {
 		response.Fail(c, http.StatusBadRequest, "name and product_classes are required")
 		return nil, false
 	}
@@ -254,7 +320,112 @@ func bindPolicy(c *gin.Context) (*PlugAndPlayPolicy, bool) {
 	if len(policy.Config) == 0 || !json.Valid(policy.Config) {
 		policy.Config = []byte(`{}`)
 	}
+	if err := validatePolicyCommonParameters(&policy); err != nil {
+		response.Fail(c, http.StatusUnprocessableEntity, err.Error())
+		return nil, false
+	}
 	return &policy, true
+}
+
+func (h *Handler) validatePolicyProductNames(ctx context.Context, policy *PlugAndPlayPolicy) error {
+	if policy == nil || len(policy.ProductNames) == 0 || h.productResolver == nil {
+		return nil
+	}
+	for _, name := range policy.ProductNames {
+		matched, err := h.productResolver.GetProductByName(ctx, name)
+		if err != nil {
+			return fmt.Errorf("resolve policy product name %q: %w", name, err)
+		}
+		if matched == nil {
+			return fmt.Errorf("unknown product name %q", name)
+		}
+	}
+	return nil
+}
+
+func (h *Handler) enrichPolicyProductNames(ctx context.Context, policy *PlugAndPlayPolicy) {
+	if policy == nil || len(policy.ProductNames) > 0 || h.productResolver == nil {
+		return
+	}
+	names := make([]string, 0, len(policy.ProductClasses))
+	for _, productClass := range policy.ProductClasses {
+		match, err := h.productResolver.MatchProductClass(ctx, strings.TrimSpace(productClass))
+		if err == nil && match != nil && match.Product != nil && strings.TrimSpace(match.Product.Name) != "" {
+			names = append(names, match.Product.Name)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	policy.ProductNames = uniqueStrings(names)
+	policy.ProductName = policy.ProductNames[0]
+}
+
+func uniqueStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		key := strings.ToLower(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func (h *Handler) resolvePolicyProductIDs(ctx context.Context, policy *PlugAndPlayPolicy) ([]uuid.UUID, error) {
+	if h.productResolver == nil {
+		return nil, nil
+	}
+	ids := make([]uuid.UUID, 0, len(policyProductNames(policy)))
+	seen := make(map[uuid.UUID]struct{}, len(ids))
+	for _, name := range policyProductNames(policy) {
+		matched, err := h.productResolver.GetProductByName(ctx, name)
+		if err != nil {
+			return nil, fmt.Errorf("resolve policy product name %q: %w", name, err)
+		}
+		if matched == nil {
+			return nil, fmt.Errorf("unknown product name %q", name)
+		}
+		if _, exists := seen[matched.ID]; exists {
+			continue
+		}
+		seen[matched.ID] = struct{}{}
+		ids = append(ids, matched.ID)
+	}
+	return ids, nil
+}
+
+func (h *Handler) resolveDeviceProductName(ctx context.Context, dev *model.Device) (string, error) {
+	if dev == nil {
+		return "", nil
+	}
+	if h.productResolver == nil {
+		return strings.TrimSpace(dev.ProductClass), nil
+	}
+	if dev.ProductID != nil {
+		matched, err := h.productResolver.GetProductByID(ctx, *dev.ProductID)
+		if err != nil {
+			return "", fmt.Errorf("resolve device product id %s: %w", dev.ProductID, err)
+		}
+		if matched != nil && strings.TrimSpace(matched.Name) != "" {
+			return strings.TrimSpace(matched.Name), nil
+		}
+	}
+	if strings.TrimSpace(dev.ProductClass) == "" {
+		return "", nil
+	}
+	matched, err := h.productResolver.MatchProductClass(ctx, dev.ProductClass)
+	if err != nil || matched == nil || matched.Product == nil {
+		return strings.TrimSpace(dev.ProductClass), nil
+	}
+	return strings.TrimSpace(matched.Product.Name), nil
 }
 
 func (h *Handler) CreatePolicy(c *gin.Context) {
@@ -265,10 +436,19 @@ func (h *Handler) CreatePolicy(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if err := h.validatePolicyProductNames(c.Request.Context(), policy); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := h.policyRepo.CreatePolicy(c.Request.Context(), policy); err != nil {
+		if errors.Is(err, ErrEnabledPolicyProductConflict) {
+			response.Fail(c, http.StatusConflict, ErrEnabledPolicyProductConflict.Error())
+			return
+		}
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	h.enrichPolicyProductNames(c.Request.Context(), policy)
 	response.OKWithStatus(c, http.StatusCreated, policy)
 }
 
@@ -294,6 +474,7 @@ func (h *Handler) GetPolicy(c *gin.Context) {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
+	h.enrichPolicyProductNames(c.Request.Context(), policy)
 	response.OK(c, policy)
 }
 
@@ -309,11 +490,20 @@ func (h *Handler) UpdatePolicy(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if err := h.validatePolicyProductNames(c.Request.Context(), policy); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	policy.ID = id
 	if err := h.policyRepo.UpdatePolicy(c.Request.Context(), policy); err != nil {
+		if errors.Is(err, ErrEnabledPolicyProductConflict) {
+			response.Fail(c, http.StatusConflict, ErrEnabledPolicyProductConflict.Error())
+			return
+		}
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
+	h.enrichPolicyProductNames(c.Request.Context(), policy)
 	response.OK(c, policy)
 }
 
@@ -339,9 +529,14 @@ func (h *Handler) SetPolicyEnabled(c *gin.Context) {
 	}
 	policy.Enabled = req.Enabled
 	if err := h.policyRepo.UpdatePolicy(c.Request.Context(), policy); err != nil {
+		if errors.Is(err, ErrEnabledPolicyProductConflict) {
+			response.Fail(c, http.StatusConflict, ErrEnabledPolicyProductConflict.Error())
+			return
+		}
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	h.enrichPolicyProductNames(c.Request.Context(), policy)
 	response.OK(c, policy)
 }
 
@@ -377,8 +572,19 @@ func (h *Handler) DetectDevices(c *gin.Context) {
 	size, _ := strconv.Atoi(c.DefaultQuery("page_size", "100"))
 	search := strings.TrimSpace(c.Query("search"))
 	normalizePolicyProductClasses(policy)
-	productClasses := strings.Join(policy.ProductClasses, ",")
-	filter := device.DeviceFilter{ProductClass: &productClasses}
+	h.enrichPolicyProductNames(c.Request.Context(), policy)
+	productIDs, resolveErr := h.resolvePolicyProductIDs(c.Request.Context(), policy)
+	if resolveErr != nil {
+		response.Fail(c, http.StatusUnprocessableEntity, resolveErr.Error())
+		return
+	}
+	filter := device.DeviceFilter{}
+	if len(productIDs) > 0 {
+		filter.ProductIDs = productIDs
+	} else {
+		productClasses := strings.Join(policy.ProductClasses, ",")
+		filter.ProductClass = &productClasses
+	}
 	filter.Page, filter.PageSize = page, size
 	if search != "" {
 		filter.Search = &search
@@ -388,7 +594,43 @@ func (h *Handler) DetectDevices(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	for i := range result.Items {
+		result.Items[i].ProductName, _ = h.resolveDeviceProductName(c.Request.Context(), &result.Items[i])
+	}
 	response.OK(c, result)
+}
+
+func (h *Handler) listPolicyDevices(ctx context.Context, policy *PlugAndPlayPolicy) ([]model.Device, error) {
+	productIDs, err := h.resolvePolicyProductIDs(ctx, policy)
+	if err != nil {
+		return nil, err
+	}
+	filter := device.DeviceFilter{}
+	if len(productIDs) > 0 {
+		filter.ProductIDs = productIDs
+	} else {
+		productClasses := strings.Join(policy.ProductClasses, ",")
+		filter.ProductClass = &productClasses
+	}
+	filter.PageSize = 1000
+	filter.SortBy = "created_at"
+	filter.SortDir = "asc"
+	result := make([]model.Device, 0)
+	for page := 1; ; page++ {
+		filter.Page = page
+		batch, listErr := h.deviceService.ListDevices(ctx, filter)
+		if listErr != nil {
+			return nil, listErr
+		}
+		if batch == nil {
+			break
+		}
+		result = append(result, batch.Items...)
+		if int64(len(result)) >= batch.Total || len(batch.Items) == 0 {
+			break
+		}
+	}
+	return result, nil
 }
 
 func (h *Handler) ExecutePolicy(c *gin.Context) {
@@ -409,6 +651,7 @@ func (h *Handler) ExecutePolicy(c *gin.Context) {
 		response.Fail(c, http.StatusConflict, "plug and play policy is disabled")
 		return
 	}
+	h.enrichPolicyProductNames(c.Request.Context(), policy)
 	if policy.SelfConfigEnabled && h.xmlRepo == nil {
 		response.Fail(c, http.StatusServiceUnavailable, "plug and play parameter configuration unavailable")
 		return
@@ -441,10 +684,15 @@ func (h *Handler) ExecutePolicy(c *gin.Context) {
 			commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 			return
 		}
-		if !policySupportsProductClass(policy, dev.ProductClass) {
+		productName, resolveNameErr := h.resolveDeviceProductName(c.Request.Context(), dev)
+		if resolveNameErr != nil {
+			commonerrors.AbortWithError(c, http.StatusUnprocessableEntity, resolveNameErr)
+			return
+		}
+		if !policySupportsProductName(policy, productName) {
 			response.Fail(c, http.StatusUnprocessableEntity,
-				fmt.Sprintf("device %s product class %q does not match policy %q",
-					dev.SerialNumber, dev.ProductClass, policy.ProductClasses))
+				fmt.Sprintf("device %s product name %q does not match policy %q",
+					dev.SerialNumber, productName, policyProductNames(policy)))
 			return
 		}
 		devices = append(devices, dev)
@@ -529,8 +777,12 @@ func (h *Handler) ExecuteAutomaticPolicy(ctx context.Context, deviceID uuid.UUID
 	if dev == nil {
 		return nil
 	}
+	productName, resolveNameErr := h.resolveDeviceProductName(ctx, dev)
+	if resolveNameErr != nil {
+		return resolveNameErr
+	}
 	policies, _, err := h.policyRepo.ListPolicies(ctx, PolicyFilter{
-		ProductClass: dev.ProductClass, Page: 1, PageSize: 100,
+		ProductClass: dev.ProductClass, ProductName: productName, Page: 1, PageSize: 100,
 	})
 	if err != nil {
 		return fmt.Errorf("list automatic plug and play policies: %w", err)
@@ -538,8 +790,9 @@ func (h *Handler) ExecuteAutomaticPolicy(ctx context.Context, deviceID uuid.UUID
 	var matched *PlugAndPlayPolicy
 	for i := range policies {
 		candidate := &policies[i]
+		h.enrichPolicyProductNames(ctx, candidate)
 		if candidate.Enabled && candidate.ExecuteType == "auto" &&
-			policySupportsProductClass(candidate, dev.ProductClass) &&
+			policySupportsProductName(candidate, productName) &&
 			policyMatchesFirmware(candidate, dev.FirmwareVersion) {
 			matched = candidate
 			break
@@ -709,8 +962,12 @@ func (h *Handler) executeXML(ctx context.Context, policy *PlugAndPlayPolicy, dev
 	if dev == nil {
 		return nil, fmt.Errorf("get plug and play device %s: %w", deviceID, commonerrors.ErrNotFound)
 	}
-	if !policySupportsProductClass(policy, dev.ProductClass) {
-		return nil, fmt.Errorf("device %s product class %q does not match policy %q", dev.SerialNumber, dev.ProductClass, policy.ProductClasses)
+	productName, err := h.resolveDeviceProductName(ctx, dev)
+	if err != nil {
+		return nil, fmt.Errorf("resolve plug and play device %s product name: %w", deviceID, err)
+	}
+	if !policySupportsProductName(policy, productName) {
+		return nil, fmt.Errorf("device %s product name %q does not match policy %q", dev.SerialNumber, productName, policyProductNames(policy))
 	}
 	var (
 		paramModel    string
@@ -742,8 +999,19 @@ func (h *Handler) executeXML(ctx context.Context, policy *PlugAndPlayPolicy, dev
 	if len(groups) == 0 && len(mappings) == 0 && definitionErr != nil {
 		return nil, fmt.Errorf("lookup device parameter model: %w", definitionErr)
 	}
+	compilationPolicy := policy
+	if policyHasCommonParameters(policy) {
+		fleet, listErr := h.listPolicyDevices(ctx, policy)
+		if listErr != nil {
+			return nil, fmt.Errorf("list product devices for parameter allocation: %w", listErr)
+		}
+		compilationPolicy, err = materializePolicyParameters(policy, dev, fleet)
+		if err != nil {
+			return nil, err
+		}
+	}
 	compiled, err := CompilePolicyParametersWithMappings(
-		policy, dev, paramModel, groups, mappings,
+		compilationPolicy, dev, paramModel, groups, mappings,
 	)
 	if err != nil {
 		return nil, err

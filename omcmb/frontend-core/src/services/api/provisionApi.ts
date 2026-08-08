@@ -8,6 +8,10 @@ interface BackendProvisioningTask {
   id: string;
   device_id: string;
   serial_number?: string;
+  product_name?: string;
+  policy_name?: string;
+  execute_type?: 'auto' | 'manual' | '';
+  module?: 'software_upgrade' | 'license' | 'self_config' | '';
   template_id: string | null;
   policy_id?: string | null;
   xml_file_id?: string | null;
@@ -31,6 +35,10 @@ export interface ProvisioningTask {
   id: string;
   deviceId: string;
   serialNumber: string;
+  productName: string;
+  policyName: string;
+  executeType: 'auto' | 'manual' | '';
+  module: 'software_upgrade' | 'license' | 'self_config' | '';
   templateId: string | null;
   policyId: string | null;
   xmlFileId: string | null;
@@ -56,6 +64,8 @@ interface BackendPlugAndPlayPolicy {
   id: string;
   name: string;
   enabled: boolean;
+  product_name?: string;
+  product_names?: string[];
   product_class: string;
   product_classes?: string[];
   execute_type: 'auto' | 'manual';
@@ -73,6 +83,8 @@ export interface PlugAndPlayPolicy {
   id: string;
   name: string;
   enabled: boolean;
+  productName: string;
+  productNames: string[];
   productClass: string;
   productClasses: string[];
   executeType: 'auto' | 'manual';
@@ -94,6 +106,7 @@ interface BackendDetectedDevice {
   device_name?: string;
   firmware_version?: string;
   product_class: string;
+  product_name?: string;
   group_name?: string;
   is_online: boolean;
 }
@@ -104,6 +117,7 @@ export interface PlugAndPlayDevice {
   deviceName: string;
   firmwareVersion: string;
   productClass: string;
+  productName: string;
   groupName: string;
   isOnline: boolean;
 }
@@ -126,6 +140,10 @@ export interface ProvisioningExecuteView {
   deviceId: string;
   policyId: string;
   serialNumber: string;
+  productName: string;
+  policyName: string;
+  executeType: 'auto' | 'manual' | '';
+  module: 'software_upgrade' | 'license' | 'self_config' | '';
   status: ProvisioningTaskStatusCode;
   startTime: string;
   endTime: string;
@@ -163,6 +181,10 @@ export function mapTaskToExecuteView(t: ProvisioningTask): ProvisioningExecuteVi
     deviceId: t.deviceId,
     policyId: t.policyId ?? '',
     serialNumber: t.serialNumber,
+    productName: t.productName,
+    policyName: t.policyName,
+    executeType: t.executeType,
+    module: t.module,
     status: provisioningStatusCode(t.status),
     startTime: t.startedAt ?? '',
     endTime: t.completedAt ?? '',
@@ -184,6 +206,10 @@ function mapBackendTask(t: BackendProvisioningTask): ProvisioningTask {
     id: t.id,
     deviceId: t.device_id,
     serialNumber: t.serial_number ?? '',
+    productName: t.product_name ?? '',
+    policyName: t.policy_name ?? '',
+    executeType: t.execute_type ?? '',
+    module: t.module ?? '',
     templateId: t.template_id,
     policyId: t.policy_id ?? null,
     xmlFileId: t.xml_file_id ?? null,
@@ -203,11 +229,16 @@ function mapBackendTask(t: BackendProvisioningTask): ProvisioningTask {
 }
 
 function mapPolicy(p: BackendPlugAndPlayPolicy): PlugAndPlayPolicy {
+  const productNames = p.product_names?.length
+    ? p.product_names
+    : [p.product_name].filter(Boolean) as string[];
   const productClasses = p.product_classes?.length
     ? p.product_classes
     : [p.product_class].filter(Boolean);
   return {
-    id: p.id, name: p.name, enabled: p.enabled, productClass: productClasses[0] ?? '',
+    id: p.id, name: p.name, enabled: p.enabled,
+    productName: productNames[0] ?? '', productNames,
+    productClass: productClasses[0] ?? '',
     productClasses,
     executeType: p.execute_type, priority: p.priority, upgradeEnabled: p.upgrade_enabled,
     targetVersion: p.target_version ?? '', licenseEnabled: p.license_enabled,
@@ -217,9 +248,13 @@ function mapPolicy(p: BackendPlugAndPlayPolicy): PlugAndPlayPolicy {
 }
 
 function policyBody(p: SavePlugAndPlayPolicyRequest) {
+  const productNames = p.productNames?.length ? p.productNames : [p.productName].filter(Boolean);
   const productClasses = p.productClasses.length ? p.productClasses : [p.productClass].filter(Boolean);
   return {
-    name: p.name, enabled: p.enabled, product_class: productClasses[0] ?? '', product_classes: productClasses,
+    name: p.name, enabled: p.enabled,
+    product_name: productNames[0] ?? '', product_names: productNames,
+    // 兼容旧服务端和历史数据；新服务端以 product_names 为策略口径。
+    product_class: productClasses[0] ?? productNames[0] ?? '', product_classes: productClasses.length ? productClasses : productNames,
     execute_type: p.executeType, priority: p.priority,
     upgrade_enabled: p.upgradeEnabled, target_version: p.targetVersion,
     license_enabled: p.licenseEnabled, self_config_enabled: p.selfConfigEnabled,
@@ -230,10 +265,10 @@ function policyBody(p: SavePlugAndPlayPolicyRequest) {
 // --- Exported service ---
 
 export const provisionApi = {
-  async getPolicies(params: PageRequest & { productClass?: string; search?: string }): Promise<PageResponse<PlugAndPlayPolicy>> {
+  async getPolicies(params: PageRequest & { productClass?: string; productName?: string; search?: string }): Promise<PageResponse<PlugAndPlayPolicy>> {
     const { data } = await http.get<{ items: BackendPlugAndPlayPolicy[]; total: number }>(
       '/provisioning/policies',
-      { params: { page: params.page, page_size: params.pageSize, product_class: params.productClass, search: params.search } }
+      { params: { page: params.page, page_size: params.pageSize, product_class: params.productClass, product_name: params.productName, search: params.search } }
     );
     return { items: (data.items ?? []).map(mapPolicy), total: data.total, page: params.page, pageSize: params.pageSize };
   },
@@ -269,6 +304,7 @@ export const provisionApi = {
     return (data.items ?? []).map((d) => ({
       id: d.id, serialNumber: d.serial_number, deviceName: d.device_name ?? '',
       firmwareVersion: d.firmware_version ?? '', productClass: d.product_class,
+      productName: d.product_name ?? d.product_class,
       groupName: d.group_name ?? '', isOnline: d.is_online,
     }));
   },
@@ -284,18 +320,34 @@ export const provisionApi = {
     params: {
       status?: string;
       deviceId?: string;
+      policyId?: string;
       policyOnly?: boolean;
+      search?: string;
+      productName?: string;
+      module?: 'software_upgrade' | 'license' | 'self_config';
+      startedAfter?: string;
+      startedBefore?: string;
     } & PageRequest
-  ): Promise<PageResponse<ProvisioningTask>> {
+  ): Promise<PageResponse<ProvisioningTask> & { statusCounts: Record<string, number> }> {
     const query: Record<string, unknown> = {
       page: params.page,
       page_size: params.pageSize,
     };
     if (params.status) query.status = params.status;
     if (params.deviceId) query.device_id = params.deviceId;
+    if (params.policyId) query.policy_id = params.policyId;
     if (params.policyOnly) query.policy_only = true;
+    if (params.search) query.search = params.search;
+    if (params.productName) query.product_name = params.productName;
+    if (params.module) query.module = params.module;
+    if (params.startedAfter) query.started_after = params.startedAfter;
+    if (params.startedBefore) query.started_before = params.startedBefore;
 
-    const { data } = await http.get<{ items: BackendProvisioningTask[]; total: number }>(
+    const { data } = await http.get<{
+      items: BackendProvisioningTask[];
+      total: number;
+      status_counts?: Record<string, number>;
+    }>(
       '/provisioning/tasks',
       { params: query }
     );
@@ -305,6 +357,7 @@ export const provisionApi = {
       total: data.total,
       page: params.page,
       pageSize: params.pageSize,
+      statusCounts: data.status_counts ?? {},
     };
   },
 

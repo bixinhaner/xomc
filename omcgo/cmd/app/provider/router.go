@@ -460,6 +460,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Provisioning routes → resource "config" -----
 	provisionHandler := provision.NewHandler(md.provisionRepo, md.provisionEngine)
 	provisionHandler.SetStorageAdmission(c.StorageProtection)
+	if c.ProductRegistry != nil {
+		provisionHandler.SetPlugAndPlayProductResolver(c.ProductRegistry)
+	}
 	// issue #126 item 10: 建任务前预检设备存在性，避免 device_id 合法但不存在
 	// 时落库孤儿任务（provisioning_tasks 对 device_id 无外键）。
 	if c.DeviceService != nil {

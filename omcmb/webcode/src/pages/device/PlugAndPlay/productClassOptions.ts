@@ -4,6 +4,7 @@ export interface ProductClassOption {
 }
 
 interface ProductClassCatalogItem {
+  name?: string;
   tech?: string;
   patterns?: readonly string[];
 }
@@ -71,4 +72,29 @@ export function toSupportedProductClassOptions(
   return Array.from(new Set([...observedClasses, ...catalogClasses]))
     .sort((left, right) => left.localeCompare(right))
     .map((productClass) => ({ label: productClass, value: productClass }));
+}
+
+export function toSupportedProductNameOptions(
+  catalogProducts: readonly ProductClassCatalogItem[] | undefined = [],
+  technology?: ProductTechnology,
+): ProductClassOption[] {
+  const products = (catalogProducts ?? []).filter(
+    (product) => Boolean(product.name) && (!technology || normalizeProductTechnology(product.tech) === technology),
+  );
+  const names = products.map((product) => product.name!.trim()).filter(Boolean);
+
+  return Array.from(new Set(names))
+    .sort((left, right) => left.localeCompare(right))
+    .map((name) => ({ label: name, value: name }));
+}
+
+export function resolveProductClassForName(
+  productName: string,
+  catalogProducts: readonly ProductClassCatalogItem[] | undefined,
+): string {
+  const product = (catalogProducts ?? []).find(
+    (item) => item.name?.trim().toLowerCase() === productName.trim().toLowerCase(),
+  );
+  const literalPattern = product?.patterns?.map(toLiteralProductClass).find(Boolean);
+  return literalPattern || productName.trim();
 }

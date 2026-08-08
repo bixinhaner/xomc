@@ -3,16 +3,21 @@ package provision
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
+var ErrEnabledPolicyProductConflict = errors.New("a product can have only one enabled plug and play policy")
+
 type PlugAndPlayPolicy struct {
 	ID                uuid.UUID       `json:"id"`
 	Name              string          `json:"name"`
 	Enabled           bool            `json:"enabled"`
+	ProductName       string          `json:"product_name,omitempty"`
+	ProductNames      []string        `json:"product_names,omitempty"`
 	ProductClass      string          `json:"product_class"`
 	ProductClasses    []string        `json:"product_classes"`
 	ExecuteType       string          `json:"execute_type"`
@@ -24,6 +29,34 @@ type PlugAndPlayPolicy struct {
 	Config            json.RawMessage `json:"config"`
 	CreatedAt         time.Time       `json:"created_at"`
 	UpdatedAt         time.Time       `json:"updated_at"`
+}
+
+func normalizePolicyProductNames(policy *PlugAndPlayPolicy) {
+	if policy == nil {
+		return
+	}
+	names := make([]string, 0, len(policy.ProductNames)+1)
+	seen := make(map[string]struct{}, len(policy.ProductNames)+1)
+	for _, name := range append([]string{policy.ProductName}, policy.ProductNames...) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return
+	}
+	policy.ProductNames = names
+	policy.ProductName = names[0]
+	// 旧数据库列作为兼容存储载体；API 同时明确返回 product_names。
+	policy.ProductClasses = append([]string(nil), names...)
+	policy.ProductClass = names[0]
 }
 
 func normalizePolicyProductClasses(policy *PlugAndPlayPolicy) {
@@ -60,6 +93,38 @@ func policySupportsProductClass(policy *PlugAndPlayPolicy, productClass string) 
 	productClass = strings.TrimSpace(productClass)
 	for _, supported := range policy.ProductClasses {
 		if supported == productClass {
+			return true
+		}
+	}
+	return false
+}
+
+func policyProductNames(policy *PlugAndPlayPolicy) []string {
+	if policy == nil {
+		return nil
+	}
+	if len(policy.ProductNames) > 0 {
+		return policy.ProductNames
+	}
+	if len(policy.ProductClasses) > 0 {
+		return policy.ProductClasses
+	}
+	if strings.TrimSpace(policy.ProductClass) != "" {
+		return []string{policy.ProductClass}
+	}
+	return nil
+}
+
+func policySupportsProductName(policy *PlugAndPlayPolicy, productName string) bool {
+	productName = strings.TrimSpace(productName)
+	if productName == "" {
+		return false
+	}
+	if len(policyProductNames(policy)) == 0 {
+		return false
+	}
+	for _, supported := range policyProductNames(policy) {
+		if strings.EqualFold(strings.TrimSpace(supported), productName) {
 			return true
 		}
 	}
@@ -105,6 +170,7 @@ func policyModuleFromStepName(stepName string) (policyModule, bool) {
 
 type PolicyFilter struct {
 	ProductClass string
+	ProductName  string
 	Search       string
 	Page         int
 	PageSize     int

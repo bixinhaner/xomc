@@ -6,7 +6,7 @@ import {
   type SavePlugAndPlayPolicyRequest,
 } from '../../services/api/provisionApi';
 
-export function usePlugAndPlayPolicies(params: PageRequest & { productClass?: string; search?: string }) {
+export function usePlugAndPlayPolicies(params: PageRequest & { productClass?: string; productName?: string; search?: string }) {
   return useQuery({
     queryKey: ['provisioning', 'policies', params],
     queryFn: () => provisionApi.getPolicies(params),
@@ -47,12 +47,24 @@ export function useDeletePlugAndPlayPolicy() {
 }
 
 export function useProvisioningTasks(
-  params: { status?: string; deviceId?: string; policyOnly?: boolean } & PageRequest
+  params: {
+    status?: string;
+    deviceId?: string;
+    policyId?: string;
+    policyOnly?: boolean;
+    search?: string;
+    productName?: string;
+    module?: 'software_upgrade' | 'license' | 'self_config';
+    startedAfter?: string;
+    startedBefore?: string;
+  } & PageRequest,
+  options?: { enabled?: boolean; refetchInterval?: number | false },
 ) {
   return useQuery({
     queryKey: ['provisioning', 'tasks', params],
     queryFn: () => provisionApi.getTasks(params),
-    refetchInterval: 10 * 1000, // auto-refresh every 10s for live status
+    enabled: options?.enabled ?? true,
+    refetchInterval: options?.refetchInterval ?? 10 * 1000, // auto-refresh every 10s for live status
   });
 }
 

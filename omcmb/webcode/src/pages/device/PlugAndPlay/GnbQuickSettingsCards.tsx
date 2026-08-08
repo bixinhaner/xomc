@@ -34,6 +34,20 @@ function appendCurrentOption(
   return [...options, { value, label: value }];
 }
 
+function normalizeBinaryOptionValue(
+  field: GnbQuickSettingField,
+  value: unknown,
+): unknown {
+  if (field.control !== 'select' || !field.options?.some((option) => option.value === '0')
+    || !field.options.some((option) => option.value === '1')) {
+    return value;
+  }
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (['true', 'yes', 'on'].includes(normalized)) return '1';
+  if (['false', 'no', 'off'].includes(normalized)) return '0';
+  return value;
+}
+
 function FieldLabel({ field }: { field: GnbQuickSettingField }) {
   const t = useT();
   return (
@@ -91,12 +105,21 @@ function QuickSettingControl({
     );
   }
   if (field.control === 'select' || field.control === 'multi-select') {
+    const currentValues = (Array.isArray(value) ? value : [value])
+      .map((current) => normalizeBinaryOptionValue(field, current));
+    const options = localizedOptions(field.options, t);
+    currentValues.forEach((current) => {
+      const normalized = current == null ? '' : String(current);
+      if (normalized && !options.some((option) => option.value === normalized)) {
+        options.push({ value: normalized, label: normalized });
+      }
+    });
     return (
       <Select
         mode={field.control === 'multi-select' ? 'multiple' : undefined}
         showSearch
         optionFilterProp="label"
-        options={localizedOptions(field.options, t)}
+        options={options}
         value={value as string | string[] | undefined}
         onChange={onChange}
       />
@@ -132,7 +155,11 @@ function QuickSettingFieldItem({
           return { value: String(rawValue ?? '').split(',').map((item) => item.trim()).filter(Boolean) };
         }
         if (control === 'select' || control === 'timezone' || control.endsWith('-bandwidth')) {
-          return { value: rawValue == null || rawValue === '' ? undefined : String(rawValue) };
+          return {
+            value: rawValue == null || rawValue === ''
+              ? undefined
+              : String(normalizeBinaryOptionValue(field, rawValue)),
+          };
         }
         return { value: rawValue == null ? '' : String(rawValue) };
       }}
@@ -198,7 +225,11 @@ function IpsecListCard({ fields }: { fields: GnbQuickSettingField[] }) {
   );
 }
 
-export default function GnbQuickSettingsCards() {
+export default function GnbQuickSettingsCards({
+  excludedFieldIds = [],
+}: {
+  excludedFieldIds?: string[];
+}) {
   const t = useT();
   const form = Form.useFormInstance();
   const ipsecEnable = Form.useWatch('IPSEC_ENABLE', form);
@@ -217,9 +248,9 @@ export default function GnbQuickSettingsCards() {
           {group.multiInstance
             ? <IpsecListCard fields={group.fields} />
             : <GnbQuickSettingFieldGrid fields={
-              group.id === 'gnb-sync-source' && !isPtpDetailsVisible(syncMode)
+              (group.id === 'gnb-sync-source' && !isPtpDetailsVisible(syncMode)
                 ? group.fields.slice(0, 3)
-                : group.fields
+                : group.fields).filter((field) => !excludedFieldIds.includes(field.id))
             } />}
         </Card>
         ))}
@@ -227,6 +258,14 @@ export default function GnbQuickSettingsCards() {
   );
 }
 
-export function GnbTemplateExtraFieldGrid() {
-  return <GnbQuickSettingFieldGrid fields={GNB_TEMPLATE_EXTRA_FIELDS} />;
+export function GnbTemplateExtraFieldGrid({
+  excludedFieldIds = [],
+}: {
+  excludedFieldIds?: readonly string[];
+}) {
+  return (
+    <GnbQuickSettingFieldGrid
+      fields={GNB_TEMPLATE_EXTRA_FIELDS.filter((field) => !excludedFieldIds.includes(field.id))}
+    />
+  );
 }
