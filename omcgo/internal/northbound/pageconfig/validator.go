@@ -59,6 +59,9 @@ func (c *Catalog) Validate(req ValidateRequest) ValidationResult {
 	allowedObjects := supportedObjects[req.Domain]
 	for _, object := range req.Objects {
 		code := strings.TrimSpace(object.Code)
+		if req.Domain == DomainLOG {
+			code = normalizeLogObjectCode(code)
+		}
 		if code == "" {
 			result.Errors = append(result.Errors, "object code is required")
 			continue

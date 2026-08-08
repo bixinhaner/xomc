@@ -79,9 +79,6 @@ func validateSNMPAlarmTarget(target SNMPAlarmTarget) error {
 			return fmt.Errorf("%w: SNMP v3 security_name is required when enabled", commonerrors.ErrInvalidInput)
 		}
 	}
-	if strings.EqualFold(target.Version, "v3") && target.MIBQueryEnabled {
-		return fmt.Errorf("%w: SNMP v3 MIB query is not supported by the built-in v2c query agent", commonerrors.ErrInvalidInput)
-	}
 	if strings.TrimSpace(target.AuthProtocol) != "" && !allowedSNMPAuthProtocol(target.AuthProtocol) {
 		return fmt.Errorf("%w: unsupported SNMP auth_protocol %s", commonerrors.ErrInvalidInput, target.AuthProtocol)
 	}

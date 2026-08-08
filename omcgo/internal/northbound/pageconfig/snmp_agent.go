@@ -3,11 +3,14 @@ package pageconfig
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	g "github.com/gosnmp/gosnmp"
@@ -25,7 +28,12 @@ const (
 	snmpAgentPageSize  = 1000
 	snmpMaxBulkRows    = 100
 	snmpMaxOIDResponse = 65535
+	snmpAgentEngineID  = "goomc-snmp-agent"
+
+	oidUSMStatsUnknownEngineIDs = ".1.3.6.1.6.3.15.1.1.4.0"
 )
+
+var snmpAgentGosnmpLogger = g.NewLogger(log.New(io.Discard, "", 0))
 
 type SNMPMIBAgentManager struct {
 	svc    *Service
@@ -172,6 +180,15 @@ type snmpMIBServerConfig struct {
 	ListenIP    string
 	ListenPort  int
 	Communities []string
+	Users       []snmpMIBUser
+}
+
+type snmpMIBUser struct {
+	Username       string
+	AuthProtocol   string
+	AuthCredential string
+	PrivProtocol   string
+	PrivCredential string
 }
 
 func (c snmpMIBServerConfig) address() string {
@@ -179,11 +196,16 @@ func (c snmpMIBServerConfig) address() string {
 }
 
 func (c snmpMIBServerConfig) equal(other snmpMIBServerConfig) bool {
-	if c.address() != other.address() || len(c.Communities) != len(other.Communities) {
+	if c.address() != other.address() || len(c.Communities) != len(other.Communities) || len(c.Users) != len(other.Users) {
 		return false
 	}
 	for i := range c.Communities {
 		if c.Communities[i] != other.Communities[i] {
+			return false
+		}
+	}
+	for i := range c.Users {
+		if c.Users[i] != other.Users[i] {
 			return false
 		}
 	}
@@ -193,12 +215,9 @@ func (c snmpMIBServerConfig) equal(other snmpMIBServerConfig) bool {
 func desiredSNMPMIBServerConfigs(targets []SNMPAlarmTarget) map[string]snmpMIBServerConfig {
 	grouped := map[string]snmpMIBServerConfig{}
 	communitySets := map[string]map[string]struct{}{}
+	userSets := map[string]map[string]snmpMIBUser{}
 	for _, target := range targets {
-		if !target.Enabled || !target.MIBQueryEnabled || !strings.EqualFold(target.Version, "v2") {
-			continue
-		}
-		community := strings.TrimSpace(target.Community)
-		if community == "" {
+		if !target.Enabled || !target.MIBQueryEnabled {
 			continue
 		}
 		config := snmpMIBServerConfig{ListenIP: target.ListenIP, ListenPort: target.ListenPort}
@@ -207,11 +226,35 @@ func desiredSNMPMIBServerConfigs(targets []SNMPAlarmTarget) map[string]snmpMIBSe
 		if existing.ListenPort == 0 {
 			existing = config
 		}
-		if communitySets[key] == nil {
-			communitySets[key] = map[string]struct{}{}
+		if strings.EqualFold(target.Version, "v2") {
+			community := strings.TrimSpace(target.Community)
+			if community == "" {
+				continue
+			}
+			if communitySets[key] == nil {
+				communitySets[key] = map[string]struct{}{}
+			}
+			communitySets[key][community] = struct{}{}
+			grouped[key] = existing
+			continue
 		}
-		communitySets[key][community] = struct{}{}
-		grouped[key] = existing
+		if strings.EqualFold(target.Version, "v3") {
+			user := snmpMIBUser{
+				Username:       strings.TrimSpace(target.SecurityName),
+				AuthProtocol:   strings.ToUpper(strings.TrimSpace(target.AuthProtocol)),
+				AuthCredential: target.AuthCredential,
+				PrivProtocol:   strings.ToUpper(strings.TrimSpace(target.PrivProtocol)),
+				PrivCredential: target.PrivCredential,
+			}
+			if user.Username == "" {
+				continue
+			}
+			if userSets[key] == nil {
+				userSets[key] = map[string]snmpMIBUser{}
+			}
+			userSets[key][snmpMIBUserKey(user)] = user
+			grouped[key] = existing
+		}
 	}
 	for key, set := range communitySets {
 		communities := make([]string, 0, len(set))
@@ -223,7 +266,23 @@ func desiredSNMPMIBServerConfigs(targets []SNMPAlarmTarget) map[string]snmpMIBSe
 		config.Communities = communities
 		grouped[key] = config
 	}
+	for key, set := range userSets {
+		users := make([]snmpMIBUser, 0, len(set))
+		for _, user := range set {
+			users = append(users, user)
+		}
+		sort.Slice(users, func(i, j int) bool {
+			return snmpMIBUserKey(users[i]) < snmpMIBUserKey(users[j])
+		})
+		config := grouped[key]
+		config.Users = users
+		grouped[key] = config
+	}
 	return grouped
+}
+
+func snmpMIBUserKey(user snmpMIBUser) string {
+	return strings.Join([]string{user.Username, user.AuthProtocol, user.AuthCredential, user.PrivProtocol, user.PrivCredential}, "\x00")
 }
 
 type snmpMIBServer struct {
@@ -231,10 +290,12 @@ type snmpMIBServer struct {
 	config snmpMIBServerConfig
 	logger *zap.Logger
 
-	conn   *net.UDPConn
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	conn                 *net.UDPConn
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	wg                   sync.WaitGroup
+	startedAt            time.Time
+	unknownEngineIDCount uint32
 
 	cacheMu     sync.Mutex
 	cache       *snmpMIBSnapshot
@@ -265,6 +326,7 @@ func (s *snmpMIBServer) Start(ctx context.Context) error {
 	}
 	s.conn = conn
 	s.ctx, s.cancel = context.WithCancel(ctx)
+	s.startedAt = time.Now()
 	s.wg.Add(1)
 	go s.readLoop()
 	return nil
@@ -315,14 +377,15 @@ func (s *snmpMIBServer) readLoop() {
 }
 
 func (s *snmpMIBServer) handlePacket(data []byte, remote *net.UDPAddr) {
-	packet, err := (&g.GoSNMP{}).UnmarshalTrap(data, false)
+	packet, err := s.decodePacket(data)
 	if err != nil || packet == nil {
 		return
 	}
-	if packet.Version != g.Version2c {
+	if !s.requestAllowed(packet) {
 		return
 	}
-	if !s.communityAllowed(packet.Community) {
+	if packet.Version == g.Version3 && s.shouldReportV3EngineID(packet) {
+		s.sendV3EngineIDReport(packet, remote)
 		return
 	}
 	switch packet.PDUType {
@@ -337,14 +400,7 @@ func (s *snmpMIBServer) handlePacket(data []byte, remote *net.UDPAddr) {
 		s.logger.Warn("load SNMP MIB alarm snapshot failed", zap.Error(err))
 		return
 	}
-	response := &g.SnmpPacket{
-		Version:   packet.Version,
-		Community: packet.Community,
-		PDUType:   g.GetResponse,
-		RequestID: packet.RequestID,
-		Error:     g.NoError,
-		Variables: s.responseVariables(packet, snapshot),
-	}
+	response := s.responsePacket(packet, snapshot)
 	wire, err := response.MarshalMsg()
 	if err != nil {
 		s.logger.Warn("marshal SNMP MIB response failed", zap.Error(err))
@@ -352,6 +408,162 @@ func (s *snmpMIBServer) handlePacket(data []byte, remote *net.UDPAddr) {
 	}
 	if _, err := s.conn.WriteToUDP(wire, remote); err != nil {
 		s.logger.Warn("write SNMP MIB response failed", zap.String("remote", remote.String()), zap.Error(err))
+	}
+}
+
+func (s *snmpMIBServer) decodePacket(data []byte) (*g.SnmpPacket, error) {
+	decoder := s.v3Decoder(true)
+	packet, err := decoder.UnmarshalTrap(data, true)
+	if err == nil || len(s.config.Users) == 0 {
+		return packet, err
+	}
+	return s.v3Decoder(false).UnmarshalTrap(data, true)
+}
+
+func (s *snmpMIBServer) requestAllowed(packet *g.SnmpPacket) bool {
+	switch packet.Version {
+	case g.Version2c:
+		return s.communityAllowed(packet.Community)
+	case g.Version3:
+		return s.v3UserAllowed(packet)
+	default:
+		return false
+	}
+}
+
+func (s *snmpMIBServer) v3Decoder(withUserTable bool) *g.GoSNMP {
+	decoder := &g.GoSNMP{
+		Version:            g.Version3,
+		SecurityModel:      g.UserSecurityModel,
+		MsgFlags:           g.AuthPriv,
+		SecurityParameters: s.v3BaseSecurityParameters(""),
+		Logger:             snmpAgentGosnmpLogger,
+	}
+	if withUserTable && len(s.config.Users) > 0 {
+		table := g.NewSnmpV3SecurityParametersTable(snmpAgentGosnmpLogger)
+		for _, user := range s.config.Users {
+			if err := table.Add(user.Username, s.v3UserSecurityParameters(user)); err != nil {
+				s.logger.Warn("register SNMP v3 MIB user failed", zap.String("user", user.Username), zap.Error(err))
+			}
+		}
+		decoder.TrapSecurityParametersTable = table
+	}
+	return decoder
+}
+
+func (s *snmpMIBServer) v3BaseSecurityParameters(username string) *g.UsmSecurityParameters {
+	return &g.UsmSecurityParameters{
+		UserName:                 username,
+		AuthoritativeEngineID:    snmpAgentEngineID,
+		AuthoritativeEngineBoots: 1,
+		AuthoritativeEngineTime:  s.v3EngineTime(),
+		Logger:                   snmpAgentGosnmpLogger,
+	}
+}
+
+func (s *snmpMIBServer) v3UserSecurityParameters(user snmpMIBUser) *g.UsmSecurityParameters {
+	params := s.v3BaseSecurityParameters(user.Username)
+	params.AuthenticationProtocol = snmpAgentAuthProtocol(user.AuthProtocol)
+	params.AuthenticationPassphrase = user.AuthCredential
+	params.PrivacyProtocol = snmpAgentPrivProtocol(user.PrivProtocol)
+	params.PrivacyPassphrase = user.PrivCredential
+	return params
+}
+
+func (s *snmpMIBServer) v3EngineTime() uint32 {
+	if s == nil || s.startedAt.IsZero() {
+		return 1
+	}
+	elapsed := time.Since(s.startedAt) / time.Second
+	if elapsed < 1 {
+		return 1
+	}
+	return uint32(elapsed)
+}
+
+func (s *snmpMIBServer) v3UserAllowed(packet *g.SnmpPacket) bool {
+	if packet == nil {
+		return false
+	}
+	params, _ := packet.SecurityParameters.(*g.UsmSecurityParameters)
+	username := ""
+	if params != nil {
+		username = strings.TrimSpace(params.UserName)
+	}
+	if username == "" && s.shouldReportV3EngineID(packet) {
+		return len(s.config.Users) > 0
+	}
+	for _, user := range s.config.Users {
+		if username == user.Username {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *snmpMIBServer) shouldReportV3EngineID(packet *g.SnmpPacket) bool {
+	if packet == nil || packet.Version != g.Version3 || packet.SecurityModel != g.UserSecurityModel {
+		return false
+	}
+	params, _ := packet.SecurityParameters.(*g.UsmSecurityParameters)
+	if params == nil {
+		return false
+	}
+	engineID := params.AuthoritativeEngineID
+	if engineID == snmpAgentEngineID {
+		return false
+	}
+	return len(engineID) < 5 || len(engineID) > 32
+}
+
+func (s *snmpMIBServer) sendV3EngineIDReport(packet *g.SnmpPacket, remote *net.UDPAddr) {
+	if packet == nil || remote == nil {
+		return
+	}
+	params, _ := packet.SecurityParameters.(*g.UsmSecurityParameters)
+	if params == nil {
+		params = s.v3BaseSecurityParameters("")
+	} else {
+		params = params.Copy().(*g.UsmSecurityParameters)
+		params.AuthoritativeEngineID = snmpAgentEngineID
+		params.AuthoritativeEngineBoots = 1
+		params.AuthoritativeEngineTime = s.v3EngineTime()
+	}
+	count := atomic.AddUint32(&s.unknownEngineIDCount, 1)
+	packet.PDUType = g.Report
+	packet.MsgFlags &= g.AuthPriv
+	packet.SecurityParameters = params
+	packet.Variables = []g.SnmpPDU{{
+		Name:  oidUSMStatsUnknownEngineIDs,
+		Type:  g.Counter32,
+		Value: count,
+	}}
+	wire, err := packet.MarshalMsg()
+	if err != nil {
+		s.logger.Warn("marshal SNMP v3 engineID report failed", zap.Error(err))
+		return
+	}
+	if _, err := s.conn.WriteToUDP(wire, remote); err != nil {
+		s.logger.Warn("write SNMP v3 engineID report failed", zap.String("remote", remote.String()), zap.Error(err))
+	}
+}
+
+func (s *snmpMIBServer) responsePacket(packet *g.SnmpPacket, snapshot *snmpMIBSnapshot) *g.SnmpPacket {
+	variables := s.responseVariables(packet, snapshot)
+	if packet.Version == g.Version3 {
+		packet.PDUType = g.GetResponse
+		packet.Error = g.NoError
+		packet.ErrorIndex = 0
+		packet.Variables = variables
+		return packet
+	}
+	return &g.SnmpPacket{
+		Version:   packet.Version,
+		Community: packet.Community,
+		PDUType:   g.GetResponse,
+		RequestID: packet.RequestID,
+		Error:     g.NoError,
+		Variables: variables,
 	}
 }
 
@@ -363,6 +575,40 @@ func (s *snmpMIBServer) communityAllowed(community string) bool {
 		}
 	}
 	return false
+}
+
+func snmpAgentAuthProtocol(protocol string) g.SnmpV3AuthProtocol {
+	switch strings.ToUpper(strings.TrimSpace(protocol)) {
+	case "MD5":
+		return g.MD5
+	case "SHA", "SHA1":
+		return g.SHA
+	case "SHA224":
+		return g.SHA224
+	case "SHA256":
+		return g.SHA256
+	case "SHA384":
+		return g.SHA384
+	case "SHA512":
+		return g.SHA512
+	default:
+		return g.NoAuth
+	}
+}
+
+func snmpAgentPrivProtocol(protocol string) g.SnmpV3PrivProtocol {
+	switch strings.ToUpper(strings.TrimSpace(protocol)) {
+	case "DES":
+		return g.DES
+	case "AES", "AES128":
+		return g.AES
+	case "AES192":
+		return g.AES192
+	case "AES256":
+		return g.AES256
+	default:
+		return g.NoPriv
+	}
 }
 
 func (s *snmpMIBServer) snapshot(ctx context.Context) (*snmpMIBSnapshot, error) {

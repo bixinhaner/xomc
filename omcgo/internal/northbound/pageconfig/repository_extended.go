@@ -46,8 +46,17 @@ END $$`,
 		    SET priv_protocol = 'AES128'
 		  WHERE version = 'v3' AND upper(priv_protocol) = 'AES'`,
 		`UPDATE northbound_snmp_alarm_targets
-		    SET mib_query_enabled = false
-		  WHERE version = 'v3' AND mib_query_enabled = true`,
+		    SET target_port = 163
+		  WHERE target_key = 'snmp-v3-inform'
+		    AND version = 'v3'
+		    AND target_port = 162
+		    AND COALESCE(NULLIF(BTRIM(target_host), ''), '') = ''`,
+		`UPDATE northbound_snmp_alarm_targets
+		    SET priv_protocol = 'DES'
+		  WHERE target_key = 'snmp-v3-inform'
+		    AND version = 'v3'
+		    AND upper(priv_protocol) = 'AES128'
+		    AND COALESCE(NULLIF(BTRIM(target_host), ''), '') = ''`,
 	}
 	for _, statement := range statements {
 		if _, err := r.pool.Exec(ctx, statement); err != nil {
@@ -979,16 +988,17 @@ func normalizeSNMPAlarmTarget(key string, target SNMPAlarmTarget) SNMPAlarmTarge
 		target.ListenPort = 161
 	}
 	if target.TargetPort == 0 {
-		target.TargetPort = 162
+		if strings.EqualFold(target.Version, "v3") {
+			target.TargetPort = 163
+		} else {
+			target.TargetPort = 162
+		}
 	}
 	if target.AuthProtocol == "" && strings.EqualFold(target.Version, "v3") {
 		target.AuthProtocol = "SHA"
 	}
 	if target.PrivProtocol == "" && strings.EqualFold(target.Version, "v3") {
-		target.PrivProtocol = "AES128"
-	}
-	if strings.EqualFold(target.Version, "v3") {
-		target.MIBQueryEnabled = false
+		target.PrivProtocol = "DES"
 	}
 	if target.ClearSeverityPolicy == "" {
 		target.ClearSeverityPolicy = "保留原级别"

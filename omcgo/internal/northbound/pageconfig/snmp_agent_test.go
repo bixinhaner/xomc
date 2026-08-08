@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	g "github.com/gosnmp/gosnmp"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -67,6 +68,89 @@ func TestSNMPMIBAgentRespondsToV2GetAndWalk(t *testing.T) {
 		Community: "baicells",
 		Timeout:   time.Second,
 		Retries:   0,
+	}
+	require.NoError(t, client.Connect())
+	defer client.Conn.Close()
+
+	getResp, err := client.Get([]string{OIDSpecificProblemValue + ".123456"})
+	require.NoError(t, err)
+	require.Len(t, getResp.Variables, 1)
+	require.Equal(t, OIDSpecificProblemValue+".123456", trimOID(getResp.Variables[0].Name))
+	require.Equal(t, "Backhaul Link Down", snmpStringValue(getResp.Variables[0].Value))
+
+	walkRows, err := client.WalkAll(snmpAlarmEntryRootOID())
+	require.NoError(t, err)
+	require.Len(t, walkRows, 18)
+	require.Equal(t, OIDNotificationIDValue+".123456", trimOID(walkRows[0].Name))
+	require.Equal(t, 123456, walkRows[0].Value)
+	require.Equal(t, OIDPerceivedSeverityValue+".123456", trimOID(walkRows[15].Name))
+	require.Equal(t, "major", snmpStringValue(walkRows[15].Value))
+}
+
+func TestSNMPMIBAgentRespondsToV3GetAndWalk(t *testing.T) {
+	deviceName := "Site-A"
+	technology := "ENB"
+	source := "CELL_1"
+	eventType := "communicationsAlarm"
+	location := "Cell-1"
+	probableCause := "Link Failure"
+	raisedAt := time.Date(2026, 7, 28, 10, 20, 30, 0, time.Local)
+	store := &snmpAgentAlarmStore{alarms: []model.Alarm{{
+		ID:              uuid.MustParse("7d3b9b19-4831-4240-a3ab-9e0ef4c7af42"),
+		DeviceSN:        "ENB_SN001",
+		Carrier:         model.CarrierCTCC,
+		Severity:        model.AlarmMajor,
+		AlarmType:       "communicationsAlarm",
+		AlarmIdentifier: "40123",
+		Description:     "Backhaul Link Down",
+		Status:          model.AlarmActive,
+		RaisedAt:        raisedAt,
+		DeviceName:      &deviceName,
+		Technology:      &technology,
+		AlarmSource:     &source,
+		EventType:       &eventType,
+		NetworkLocation: &location,
+		ProbableCause:   &probableCause,
+		AdditionalInfo: map[string]string{
+			"notificationID": "123456",
+			"pci":            "123",
+		},
+	}}}
+	svc := NewService(NewDefaultCatalog())
+	svc.SetAlarmStore(store)
+	server := newSNMPMIBServer(svc, snmpMIBServerConfig{
+		ListenIP:   "127.0.0.1",
+		ListenPort: 0,
+		Users: []snmpMIBUser{{
+			Username:       "secBaiV3",
+			AuthProtocol:   "SHA",
+			AuthCredential: "AuthPassword",
+			PrivProtocol:   "DES",
+			PrivCredential: "PrivPassword",
+		}},
+	}, zap.NewExample())
+	require.NoError(t, server.Start(context.Background()))
+	defer server.Stop()
+
+	host, portText, err := net.SplitHostPort(server.Address())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portText)
+	require.NoError(t, err)
+	client := &g.GoSNMP{
+		Target:        host,
+		Port:          uint16(port),
+		Version:       g.Version3,
+		SecurityModel: g.UserSecurityModel,
+		MsgFlags:      g.AuthPriv,
+		SecurityParameters: &g.UsmSecurityParameters{
+			UserName:                 "secBaiV3",
+			AuthenticationProtocol:   g.SHA,
+			AuthenticationPassphrase: "AuthPassword",
+			PrivacyProtocol:          g.DES,
+			PrivacyPassphrase:        "PrivPassword",
+		},
+		Timeout: time.Second,
+		Retries: 0,
 	}
 	require.NoError(t, client.Connect())
 	defer client.Conn.Close()
