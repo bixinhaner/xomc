@@ -449,13 +449,13 @@ const startMinuteOptions = Array.from({ length: 60 }, (_, minute) => String(minu
     value: minute,
   }));
 
-const scopeOptions = [
-  { label: '默认', value: '默认' },
-  { label: 'ENB/LTE', value: 'LTE' },
+const defaultScopeOption = { label: '默认', value: '默认' };
+const radioTechScopeOptions: Array<{ label: string; value: Tech }> = [
+  { label: 'ENB', value: 'LTE' },
   { label: 'GNB', value: 'GNB' },
   { label: 'GSM', value: 'GSM' },
-  { label: 'ENB/LTE+GNB', value: 'LTE/GNB' },
-  { label: 'ENB/LTE+GSM', value: 'LTE/GSM' },
+];
+const logScopeOptions = [
   { label: 'custom', value: 'custom' },
   { label: 'fix', value: 'fix' },
 ];
@@ -469,11 +469,13 @@ const allProductClassValue = 'ALL';
 const fieldCandidateDefaultOptionLimit = 10;
 const fieldCandidateSearchOptionLimit = 50;
 
-const fieldTechFilterOptions: Array<{ label: string; value: FieldTechFilter }> = [
-  { label: '全部制式', value: 'ALL' },
-  { label: 'ENB/LTE', value: 'LTE' },
+const radioFieldTechFilterOptions: Array<{ label: string; value: FieldTechFilter }> = [
+  { label: 'ENB', value: 'LTE' },
   { label: 'GNB', value: 'GNB' },
   { label: 'GSM', value: 'GSM' },
+];
+const nonRadioFieldTechFilterOptions: Array<{ label: string; value: FieldTechFilter }> = [
+  { label: '不区分制式', value: 'ALL' },
 ];
 
 const objectOptionsByDomain: Record<Domain, Array<{ label: string; value: string }>> = {
@@ -645,7 +647,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
   },
   {
     code: 'S0012',
-    name: 'LTE + GNB 双制式',
+    name: 'ENB + GNB 双制式',
     enabled: false,
     groups: [
       group('cm-daily-lte', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
@@ -689,7 +691,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
   },
   {
     code: 'S0016',
-    name: 'LTE + GSM PM',
+    name: 'ENB + GSM PM',
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
@@ -792,15 +794,15 @@ const scenarioMeta: Record<string, Pick<ScenarioRow, 'vendor' | 'scenarioName' |
     vendor: 'Baicells',
     scenarioName: '陕西移动',
     scenarioNameEn: 'Shaanxi Mobile',
-    description: '陕西移动：LTE + GNB 双制式，CM/PM 按制式拆分输出。',
-    flags: ['LTE/GNB', '双制式'],
+    description: '陕西移动：ENB + GNB 双制式，CM/PM 按制式拆分输出。',
+    flags: ['ENB/GNB', '双制式'],
   },
   S0013: {
     vendor: 'Baicells',
     scenarioName: 'ZED 场景',
     scenarioNameEn: 'ZED',
-    description: 'ZED：pmresult 命名，LTE/GSM/GNB 性能文件按 60 分钟窗口输出。',
-    flags: ['LTE/GSM/GNB', 'PM 60M', 'pmresult'],
+    description: 'ZED：pmresult 命名，ENB/GSM/GNB 性能文件按 60 分钟窗口输出。',
+    flags: ['ENB/GSM/GNB', 'PM 60M', 'pmresult'],
   },
   S0014: {
     vendor: 'Baicells',
@@ -820,8 +822,8 @@ const scenarioMeta: Record<string, Pick<ScenarioRow, 'vendor' | 'scenarioName' |
     vendor: 'Baicells',
     scenarioName: 'MTN 场景',
     scenarioNameEn: 'MTN',
-    description: 'MTN：LTE + GSM 性能混合输出，GSM 使用 pmresult 命名。',
-    flags: ['LTE/GSM', 'show_site_id'],
+    description: 'MTN：ENB + GSM 性能混合输出，GSM 使用 pmresult 命名。',
+    flags: ['ENB/GSM', 'show_site_id'],
   },
   S0017: {
     vendor: 'Baicells',
@@ -2934,23 +2936,55 @@ function isTech(value: string | undefined): value is Tech {
   return value === 'LTE' || value === 'GNB' || value === 'GSM';
 }
 
+function isRadioTechDomain(domain: Domain | undefined): boolean {
+  return domain === 'CM' || domain === 'PM';
+}
+
+function normalizeTechValue(value: string | undefined): Tech | undefined {
+  const normalized = value?.trim().toUpperCase();
+  if (!normalized) return undefined;
+  if (normalized === 'ENB' || normalized === 'LTE') return 'LTE';
+  if (normalized === 'GNB' || normalized === 'NR') return 'GNB';
+  if (normalized === 'GSM') return 'GSM';
+  return undefined;
+}
+
+function formatTechLabel(tech: Tech | undefined): string {
+  if (tech === 'LTE') return 'ENB';
+  if (tech === 'GNB') return 'GNB';
+  if (tech === 'GSM') return 'GSM';
+  return '通用';
+}
+
+function formatScopeLabel(scope: string): string {
+  const tech = normalizeTechValue(scope);
+  if (tech) return formatTechLabel(tech);
+  return scope || '默认';
+}
+
+function getScopeOptions(domain: Domain) {
+  if (isRadioTechDomain(domain)) return radioTechScopeOptions;
+  if (domain === 'LOG') return logScopeOptions;
+  return [defaultScopeOption];
+}
+
 function parseObjectToken(token: string): { code: string; tech?: Tech } {
   const [code, tech] = token.split('/').map((item) => item.trim());
   return {
     code,
-    tech: isTech(tech) ? tech : undefined,
+    tech: normalizeTechValue(tech),
   };
 }
 
 function formatObjectToken(token: string): string {
   const parsed = parseObjectToken(token);
   if (!parsed.tech && logObjectLabelByCode[parsed.code]) return logObjectLabelByCode[parsed.code];
-  return parsed.tech ? `${parsed.code} / ${parsed.tech}` : parsed.code;
+  return parsed.tech ? `${parsed.code} / ${formatTechLabel(parsed.tech)}` : parsed.code;
 }
 
 function formatFieldTargetLabel(target: FieldTarget): string {
   const tech = getTargetTech(target);
-  return tech ? `${target.objectCode} / ${tech}` : target.objectCode;
+  return tech ? `${target.objectCode} / ${formatTechLabel(tech)}` : target.objectCode;
 }
 
 function formatReportFieldObject(row: ReportFieldRow): string {
@@ -2959,11 +2993,42 @@ function formatReportFieldObject(row: ReportFieldRow): string {
 }
 
 function resolveTechLabel(value?: string): Tech | undefined {
-  return isTech(value) ? value : undefined;
+  return normalizeTechValue(value);
 }
 
 function getTargetTech(target: FieldTarget | undefined): Tech | undefined {
   return target?.tech ?? resolveTechLabel(target?.scope);
+}
+
+function getFieldTechFilterOptions(domain: Domain, targets: FieldTarget[]): Array<{ label: string; value: FieldTechFilter }> {
+  if (!isRadioTechDomain(domain)) return nonRadioFieldTechFilterOptions;
+  const availableTechs = new Set(
+    targets
+      .filter((target) => target.domain === domain)
+      .map(getTargetTech)
+      .filter(isTech),
+  );
+  if (availableTechs.size === 0) return radioFieldTechFilterOptions;
+  return radioFieldTechFilterOptions.filter((option) => option.value !== 'ALL' && availableTechs.has(option.value));
+}
+
+function getFieldTechFilterForTarget(target: FieldTarget | undefined): FieldTechFilter {
+  if (!target || !isRadioTechDomain(target.domain)) return 'ALL';
+  return getTargetTech(target) ?? 'LTE';
+}
+
+function getFieldTechFilterForDomain(
+  domain: Domain,
+  targets: FieldTarget[],
+  currentFilter?: FieldTechFilter,
+): FieldTechFilter {
+  if (!isRadioTechDomain(domain)) return 'ALL';
+  if (currentFilter && currentFilter !== 'ALL' && targets.some((target) => (
+    target.domain === domain && targetMatchesTechFilter(target, currentFilter)
+  ))) {
+    return currentFilter;
+  }
+  return getFieldTechFilterForTarget(targets.find((target) => target.domain === domain));
 }
 
 function getRowTech(row: ReportFieldRow): Tech | undefined {
@@ -2971,7 +3036,7 @@ function getRowTech(row: ReportFieldRow): Tech | undefined {
 }
 
 function formatReportFieldTech(row: ReportFieldRow): string {
-  return getRowTech(row) ?? '通用';
+  return formatTechLabel(getRowTech(row));
 }
 
 function targetMatchesTechFilter(target: FieldTarget, filter: FieldTechFilter): boolean {
@@ -2985,6 +3050,8 @@ function rowMatchesTechFilter(row: ReportFieldRow, filter: FieldTechFilter): boo
 }
 
 function getPmTechsFromScope(scope: string): Tech[] {
+  const normalizedScope = normalizeTechValue(scope);
+  if (normalizedScope) return [normalizedScope];
   const scopeText = scope.toUpperCase();
   const techs: Tech[] = [];
   if (scopeText.includes('LTE') || scopeText.includes('ENB')) techs.push('LTE');
@@ -3012,12 +3079,13 @@ function getFieldTargets(rows: ScenarioPeriodRow[]): FieldTarget[] {
   rows.forEach((row) => {
     splitObjects(row.objects).forEach((objectToken) => {
       const parsedObject = parseObjectToken(objectToken);
+      const rowScopeTech = normalizeTechValue(row.scope);
       const techs = parsedObject.tech
         ? [parsedObject.tech]
         : row.domain === 'PM'
           ? getPmTechsFromScope(row.scope)
-          : row.domain === 'CM' && isTech(row.scope)
-            ? [row.scope]
+          : row.domain === 'CM' && rowScopeTech
+            ? [rowScopeTech]
             : [undefined];
       techs.forEach((tech) => {
         const scope = tech ?? row.scope;
@@ -3291,12 +3359,19 @@ function defaultPeriodRow(domain: Domain = 'CM', includeObjects = true): Scenari
     LOG: '24H',
     INVENTORY: '24H',
   };
+  const scopeByDomain: Record<Domain, string> = {
+    CM: 'LTE',
+    PM: 'LTE',
+    MR: '默认',
+    LOG: 'custom',
+    INVENTORY: '默认',
+  };
   const period = periodByDomain[domain];
   const cron = defaultCronForPeriod(period);
   return {
     key: `custom-${Date.now()}`,
     domain,
-    scope: domain === 'CM' || domain === 'PM' ? 'LTE' : '默认',
+    scope: scopeByDomain[domain],
     format: defaultFormatByDomain[domain],
     period,
     trigger: formatScheduleLabel(period, cron),
@@ -3317,10 +3392,33 @@ function defaultPeriodRow(domain: Domain = 'CM', includeObjects = true): Scenari
   };
 }
 
-function getGroupTechLabel(groupItem: FileGroup): string {
-  const techs = [...new Set(groupItem.objects.map((object) => object.tech).filter(Boolean))];
-  if (techs.length > 0) return techs.join('/');
+function getScenarioObjectTech(groupItem: FileGroup, object: ScenarioObject): Tech | undefined {
+  const tech = normalizeTechValue(object.tech);
+  if (tech) return tech;
   if (groupItem.domain === 'CM' || groupItem.domain === 'PM') return 'LTE';
+  return undefined;
+}
+
+function splitFileGroupByTech(groupItem: FileGroup): FileGroup[] {
+  if (groupItem.domain !== 'CM' && groupItem.domain !== 'PM') return [groupItem];
+  const objectTechPairs = groupItem.objects.map((object) => ({
+    object,
+    tech: getScenarioObjectTech(groupItem, object),
+  }));
+  const techs = [...new Set(objectTechPairs.map((pair) => pair.tech).filter(isTech))];
+  if (techs.length <= 1) return [groupItem];
+  return techs.map((tech) => ({
+    ...groupItem,
+    id: `${groupItem.id}-${tech.toLowerCase()}`,
+    objects: objectTechPairs
+      .filter((pair) => pair.tech === tech)
+      .map((pair) => ({ ...pair.object, tech })),
+  }));
+}
+
+function getGroupTechLabel(groupItem: FileGroup): string {
+  const techs = [...new Set(groupItem.objects.map((object) => getScenarioObjectTech(groupItem, object)).filter(isTech))];
+  if (techs.length > 0) return techs[0];
   return '默认';
 }
 
@@ -3850,12 +3948,13 @@ function periodRowTargetKeys(row: ScenarioPeriodRow): string[] {
   const keys: string[] = [];
   splitObjects(row.objects).forEach((objectToken) => {
     const parsedObject = parseObjectToken(objectToken);
+    const rowScopeTech = normalizeTechValue(row.scope);
     const techs = parsedObject.tech
       ? [parsedObject.tech]
       : row.domain === 'PM'
         ? getPmTechsFromScope(row.scope)
-        : row.domain === 'CM' && isTech(row.scope)
-          ? [row.scope]
+        : row.domain === 'CM' && rowScopeTech
+          ? [rowScopeTech]
           : [undefined];
     techs.forEach((tech) => {
       const scope = tech ?? row.scope;
@@ -3897,7 +3996,7 @@ function serializeEditorPeriodRows(
       selected_fields: selectedSet.size > 0 ? [...selectedSet] : undefined,
       objects: splitObjects(row.objects).map((objectToken) => {
         const parsed = parseObjectToken(objectToken);
-        const tech = parsed.tech ?? (isTech(row.scope) ? row.scope : undefined);
+        const tech = parsed.tech ?? normalizeTechValue(row.scope);
         return {
           code: parsed.code,
           tech,
@@ -3913,6 +4012,9 @@ function validateEditorPeriodRows(rows: ScenarioPeriodRow[]): string | undefined
     return '请至少新增一个文件对象';
   }
   for (const row of rows) {
+    if ((row.domain === 'CM' || row.domain === 'PM') && !normalizeTechValue(row.scope)) {
+      return `${row.domain} 制式只能选择 ENB、GNB 或 GSM`;
+    }
     if (splitObjects(row.objects).length === 0) {
       return `${row.domain} 请至少选择一个对象`;
     }
@@ -4593,7 +4695,7 @@ function formatBytes(value?: number): string {
 }
 
 function getScenarioPeriodRows(scenario: ScenarioRow): ScenarioPeriodRow[] {
-  const rows: ScenarioPeriodRow[] = scenario.groups.map((groupItem) => ({
+  const rows: ScenarioPeriodRow[] = scenario.groups.flatMap(splitFileGroupByTech).map((groupItem) => ({
     key: groupItem.id,
     domain: groupItem.domain,
     scope: getGroupTechLabel(groupItem),
@@ -4657,7 +4759,7 @@ function summarizeScenarioDomains(scenario: ScenarioRow): DomainSummary[] {
       formats: [],
     };
     existing.objects.push(...splitObjects(periodRow.objects).map((object) => parseObjectToken(object).code));
-    existing.scopes.push(periodRow.scope);
+    existing.scopes.push(formatScopeLabel(periodRow.scope));
     existing.periods.push(formatPeriodLabel(periodRow.period));
     existing.formats.push(periodRow.format);
     summaries.set(periodRow.domain, existing);
@@ -4675,7 +4777,7 @@ function getScenarioOutputTooltip(scenario: ScenarioRow): string {
 
 function getScenarioScheduleTooltip(scenario: ScenarioRow): string {
   return getScenarioPeriodRows(scenario)
-    .map((periodRow) => `${periodRow.domain} ${periodRow.scope}: ${formatPeriodLabel(periodRow.period)} / ${periodRow.trigger}`)
+    .map((periodRow) => `${periodRow.domain} ${formatScopeLabel(periodRow.scope)}: ${formatPeriodLabel(periodRow.period)} / ${periodRow.trigger}`)
     .join('\n');
 }
 
@@ -4905,7 +5007,7 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
     const firstTarget = getFirstFieldTarget(periodRows);
     const [fieldConfigDomain, setFieldConfigDomain] = useState<Domain>(firstTarget?.domain ?? 'CM');
     const [fieldConfigTargetKey, setFieldConfigTargetKey] = useState(firstTarget?.key ?? '');
-    const [fieldTechFilter, setFieldTechFilter] = useState<FieldTechFilter>('ALL');
+    const [fieldTechFilter, setFieldTechFilter] = useState<FieldTechFilter>(() => getFieldTechFilterForTarget(firstTarget));
     const [fieldCandidateKey, setFieldCandidateKey] = useState<string>();
     const [fieldCandidateSearch, setFieldCandidateSearch] = useState('');
     const [fieldCandidateOpen, setFieldCandidateOpen] = useState(false);
@@ -4920,9 +5022,17 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
       () => [...new Set(fieldTargets.map((t) => t.domain))].map((d) => ({ label: d, value: d })),
       [fieldTargets],
     );
+    const activeFieldTechFilter = useMemo(
+      () => getFieldTechFilterForDomain(fieldConfigDomain, fieldTargets, fieldTechFilter),
+      [fieldConfigDomain, fieldTargets, fieldTechFilter],
+    );
+    const fieldTechFilterOptions = useMemo(
+      () => getFieldTechFilterOptions(fieldConfigDomain, fieldTargets),
+      [fieldConfigDomain, fieldTargets],
+    );
     const visibleFieldTargets = useMemo(
-      () => fieldTargets.filter((t) => t.domain === fieldConfigDomain).filter((t) => targetMatchesTechFilter(t, fieldTechFilter)),
-      [fieldTargets, fieldConfigDomain, fieldTechFilter],
+      () => fieldTargets.filter((t) => t.domain === fieldConfigDomain).filter((t) => targetMatchesTechFilter(t, activeFieldTechFilter)),
+      [fieldTargets, fieldConfigDomain, activeFieldTechFilter],
     );
     const fieldTargetOptions = useMemo(
       () => visibleFieldTargets.map((t) => ({ label: formatFieldTargetLabel(t), value: t.key })),
@@ -4945,13 +5055,17 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
       if (!domainExists) {
         setFieldConfigDomain(nextDomain);
       }
+      const nextFilter = getFieldTechFilterForDomain(nextDomain, fieldTargets, fieldTechFilter);
+      if (nextFilter !== fieldTechFilter) {
+        setFieldTechFilter(nextFilter);
+      }
       const targetExists = fieldTargets.some((t) => (
         t.key === fieldConfigTargetKey
         && t.domain === nextDomain
-        && targetMatchesTechFilter(t, fieldTechFilter)
+        && targetMatchesTechFilter(t, nextFilter)
       ));
       if (!targetExists) {
-        const nextTarget = fieldTargets.find((t) => t.domain === nextDomain && targetMatchesTechFilter(t, fieldTechFilter))
+        const nextTarget = fieldTargets.find((t) => t.domain === nextDomain && targetMatchesTechFilter(t, nextFilter))
           ?? fieldTargets.find((t) => t.domain === nextDomain)
           ?? fieldTargets[0];
         setFieldConfigTargetKey(nextTarget.key);
@@ -5053,16 +5167,16 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
       });
     }, [fieldBaseRows, fieldCandidatePoolRows, selectedFieldKeysForTarget, selectedFieldTarget]);
     const fieldConfigRows = useMemo(
-      () => targetFieldRows.filter((row) => rowMatchesTechFilter(row, fieldTechFilter)),
-      [fieldTechFilter, targetFieldRows],
+      () => targetFieldRows.filter((row) => rowMatchesTechFilter(row, activeFieldTechFilter)),
+      [activeFieldTechFilter, targetFieldRows],
     );
     const fieldCandidateRows = useMemo(() => {
       if (!shouldBuildFieldCandidates) return [];
       const currentIds = new Set(targetFieldRows.map(fieldCandidateIdentity));
       return fieldCandidatePoolRows
         .filter((row) => !currentIds.has(fieldCandidateIdentity(row)))
-        .filter((row) => rowMatchesTechFilter(row, fieldTechFilter));
-    }, [fieldCandidatePoolRows, fieldTechFilter, shouldBuildFieldCandidates, targetFieldRows]);
+        .filter((row) => rowMatchesTechFilter(row, activeFieldTechFilter));
+    }, [fieldCandidatePoolRows, activeFieldTechFilter, shouldBuildFieldCandidates, targetFieldRows]);
     const displayedFieldCandidateRows = useMemo(
       () => {
         const rows = getVisibleFieldCandidateRows(fieldCandidateRows, fieldCandidateSearch);
@@ -5106,14 +5220,17 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
       );
     }, [targetFieldRows, updateCurrentFieldRows]);
     const changeFieldConfigDomain = useCallback((domain: Domain) => {
+      const nextFilter = getFieldTechFilterForDomain(domain, fieldTargets);
       setFieldConfigDomain(domain);
-      setFieldTechFilter('ALL');
-      const nextTarget = fieldTargets.find((t) => t.domain === domain);
+      setFieldTechFilter(nextFilter);
+      const nextTarget = fieldTargets.find((t) => t.domain === domain && targetMatchesTechFilter(t, nextFilter))
+        ?? fieldTargets.find((t) => t.domain === domain);
       if (nextTarget) setFieldConfigTargetKey(nextTarget.key);
     }, [fieldTargets]);
     const changeFieldTechFilter = useCallback((techFilter: FieldTechFilter) => {
-      setFieldTechFilter(techFilter);
-      const nextTarget = fieldTargets.find((t) => t.domain === fieldConfigDomain && targetMatchesTechFilter(t, techFilter));
+      const nextFilter = getFieldTechFilterForDomain(fieldConfigDomain, fieldTargets, techFilter);
+      setFieldTechFilter(nextFilter);
+      const nextTarget = fieldTargets.find((t) => t.domain === fieldConfigDomain && targetMatchesTechFilter(t, nextFilter));
       setFieldConfigTargetKey(nextTarget?.key ?? '');
     }, [fieldTargets, fieldConfigDomain]);
 
@@ -5196,10 +5313,10 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
               onChange={(value) => changeFieldConfigDomain(value as Domain)}
             />
             <Select
-              value={fieldTechFilter}
+              value={activeFieldTechFilter}
               style={{ width: 132 }}
               options={fieldTechFilterOptions}
-              disabled={!hasFieldTargets}
+              disabled={!hasFieldTargets || !isRadioTechDomain(fieldConfigDomain)}
               onChange={(value) => changeFieldTechFilter(value as FieldTechFilter)}
             />
             <Select
@@ -5266,7 +5383,7 @@ export default function NorthboundPageConfig() {
   const [selectedScenario, setSelectedScenario] = useState<ScenarioRow | null>(null);
   const [viewFieldConfigDomain, setViewFieldConfigDomain] = useState<Domain>(defaultFieldTarget?.domain ?? 'CM');
   const [viewFieldConfigTargetKey, setViewFieldConfigTargetKey] = useState(defaultFieldTarget?.key ?? '');
-  const [viewFieldTechFilter, setViewFieldTechFilter] = useState<FieldTechFilter>('ALL');
+  const [viewFieldTechFilter, setViewFieldTechFilter] = useState<FieldTechFilter>(() => getFieldTechFilterForTarget(defaultFieldTarget));
   const [scenarioEnabled, setScenarioEnabled] = useState<Record<string, boolean>>(
     () => Object.fromEntries(scenarioRows.map((s) => [s.code, s.enabled])),
   );
@@ -5802,11 +5919,19 @@ export default function NorthboundPageConfig() {
       .map((domain) => ({ label: domain, value: domain })),
     [viewFieldTargets],
   );
+  const activeViewFieldTechFilter = useMemo(
+    () => getFieldTechFilterForDomain(viewFieldConfigDomain, viewFieldTargets, viewFieldTechFilter),
+    [viewFieldConfigDomain, viewFieldTargets, viewFieldTechFilter],
+  );
+  const viewFieldTechFilterOptions = useMemo(
+    () => getFieldTechFilterOptions(viewFieldConfigDomain, viewFieldTargets),
+    [viewFieldConfigDomain, viewFieldTargets],
+  );
   const visibleViewFieldTargets = useMemo(
     () => viewFieldTargets
       .filter((target) => target.domain === viewFieldConfigDomain)
-      .filter((target) => targetMatchesTechFilter(target, viewFieldTechFilter)),
-    [viewFieldConfigDomain, viewFieldTargets, viewFieldTechFilter],
+      .filter((target) => targetMatchesTechFilter(target, activeViewFieldTechFilter)),
+    [viewFieldConfigDomain, viewFieldTargets, activeViewFieldTechFilter],
   );
   const viewFieldTargetOptions = useMemo(
     () => visibleViewFieldTargets.map((target) => ({
@@ -5821,8 +5946,8 @@ export default function NorthboundPageConfig() {
   );
   const viewFieldRows = useMemo(
     () => getReportFieldRows(selectedViewFieldTarget, pmMetricRows)
-      .filter((row) => rowMatchesTechFilter(row, viewFieldTechFilter)),
-    [pmMetricRows, selectedViewFieldTarget, viewFieldTechFilter],
+      .filter((row) => rowMatchesTechFilter(row, activeViewFieldTechFilter)),
+    [pmMetricRows, selectedViewFieldTarget, activeViewFieldTechFilter],
   );
 
   useEffect(() => {
@@ -5835,24 +5960,31 @@ export default function NorthboundPageConfig() {
     if (!domainHasTargets) {
       const [nextTarget] = viewFieldTargets;
       setViewFieldConfigDomain(nextTarget.domain);
-      setViewFieldTechFilter('ALL');
+      setViewFieldTechFilter(getFieldTechFilterForTarget(nextTarget));
       setViewFieldConfigTargetKey(nextTarget.key);
       return;
     }
-    if (visibleViewFieldTargets.length === 0) {
+    const nextFilter = getFieldTechFilterForDomain(viewFieldConfigDomain, viewFieldTargets, viewFieldTechFilter);
+    if (nextFilter !== viewFieldTechFilter) {
+      setViewFieldTechFilter(nextFilter);
+    }
+    const nextVisibleTargets = viewFieldTargets
+      .filter((target) => target.domain === viewFieldConfigDomain)
+      .filter((target) => targetMatchesTechFilter(target, nextFilter));
+    if (nextVisibleTargets.length === 0) {
       if (viewFieldConfigTargetKey) setViewFieldConfigTargetKey('');
       return;
     }
-    const currentTarget = visibleViewFieldTargets.find((target) => target.key === viewFieldConfigTargetKey);
+    const currentTarget = nextVisibleTargets.find((target) => target.key === viewFieldConfigTargetKey);
     if (currentTarget) return;
-    setViewFieldConfigTargetKey(visibleViewFieldTargets[0].key);
-  }, [selectedScenario, viewFieldConfigDomain, viewFieldConfigTargetKey, viewFieldTargets, visibleViewFieldTargets]);
+    setViewFieldConfigTargetKey(nextVisibleTargets[0].key);
+  }, [selectedScenario, viewFieldConfigDomain, viewFieldConfigTargetKey, viewFieldTargets, viewFieldTechFilter]);
 
   const openViewDrawer = (row: ScenarioRow) => {
     const periodRows = getScenarioPeriodRows(row);
     const firstTarget = getFirstFieldTarget(periodRows);
     setSelectedScenario(row);
-    setViewFieldTechFilter('ALL');
+    setViewFieldTechFilter(getFieldTechFilterForTarget(firstTarget));
     if (firstTarget) {
       setViewFieldConfigDomain(firstTarget.domain);
       setViewFieldConfigTargetKey(firstTarget.key);
@@ -5860,15 +5992,18 @@ export default function NorthboundPageConfig() {
   };
 
   const changeViewFieldConfigDomain = (domain: Domain) => {
+    const nextFilter = getFieldTechFilterForDomain(domain, viewFieldTargets);
     setViewFieldConfigDomain(domain);
-    setViewFieldTechFilter('ALL');
-    const nextTarget = viewFieldTargets.find((target) => target.domain === domain);
+    setViewFieldTechFilter(nextFilter);
+    const nextTarget = viewFieldTargets.find((target) => target.domain === domain && targetMatchesTechFilter(target, nextFilter))
+      ?? viewFieldTargets.find((target) => target.domain === domain);
     setViewFieldConfigTargetKey(nextTarget?.key ?? '');
   };
 
   const changeViewFieldTechFilter = (techFilter: FieldTechFilter) => {
-    setViewFieldTechFilter(techFilter);
-    const nextTarget = viewFieldTargets.find((target) => target.domain === viewFieldConfigDomain && targetMatchesTechFilter(target, techFilter));
+    const nextFilter = getFieldTechFilterForDomain(viewFieldConfigDomain, viewFieldTargets, techFilter);
+    setViewFieldTechFilter(nextFilter);
+    const nextTarget = viewFieldTargets.find((target) => target.domain === viewFieldConfigDomain && targetMatchesTechFilter(target, nextFilter));
     setViewFieldConfigTargetKey(nextTarget?.key ?? '');
   };
 
@@ -8692,7 +8827,7 @@ export default function NorthboundPageConfig() {
                       </Space>
                     ),
                   },
-                  { title: '制式/模式', dataIndex: 'scope', width: 128 },
+                  { title: '制式/模式', dataIndex: 'scope', width: 128, render: (value: string) => <Tag>{formatScopeLabel(value)}</Tag> },
                   { title: '格式', dataIndex: 'format', width: 104, render: (value: Format) => <Tag>{value}</Tag> },
                   {
                     title: 'CSV 分隔符',
@@ -8762,9 +8897,10 @@ export default function NorthboundPageConfig() {
                     onChange={(value) => changeViewFieldConfigDomain(value as Domain)}
                   />
                   <Select
-                    value={viewFieldTechFilter}
+                    value={activeViewFieldTechFilter}
                     style={{ width: 132 }}
-                    options={fieldTechFilterOptions}
+                    options={viewFieldTechFilterOptions}
+                    disabled={!isRadioTechDomain(viewFieldConfigDomain)}
                     onChange={(value) => changeViewFieldTechFilter(value as FieldTechFilter)}
                   />
                   <Select
@@ -8895,24 +9031,24 @@ export default function NorthboundPageConfig() {
                     <Select
                       value={value}
                       style={{ width: 110 }}
-                      options={scopeOptions}
+                      options={getScopeOptions(record.domain)}
                       onChange={(nextScope) => updateEditorPeriodRow(record.key, { scope: nextScope })}
                     />
                   ),
                 },
-	                {
-	                  title: '格式',
-	                  dataIndex: 'format',
-	                  width: 104,
-	                  render: (value: Format, record) => (
-	                    <Select
-	                      value={normalizeFormatForDomain(record.domain, value)}
-	                      style={{ width: 86 }}
-	                      options={getFormatOptions(record.domain)}
-	                      onChange={(nextFormat) => updateEditorPeriodRow(record.key, { format: normalizeFormatForDomain(record.domain, nextFormat as Format) })}
-	                    />
-	                  ),
-	                },
+                {
+                  title: '格式',
+                  dataIndex: 'format',
+                  width: 104,
+                  render: (value: Format, record) => (
+                    <Select
+                      value={normalizeFormatForDomain(record.domain, value)}
+                      style={{ width: 86 }}
+                      options={getFormatOptions(record.domain)}
+                      onChange={(nextFormat) => updateEditorPeriodRow(record.key, { format: normalizeFormatForDomain(record.domain, nextFormat as Format) })}
+                    />
+                  ),
+                },
                 {
                   title: 'CSV 分隔符',
                   dataIndex: 'csvSeparator',

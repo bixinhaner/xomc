@@ -696,6 +696,9 @@ func (s *Service) validateFileProfile(req UpdateFileProfileRequest) ValidationRe
 		result.Errors = append(result.Errors, fmt.Sprintf("unsupported status %q", req.Status))
 	}
 	for _, group := range req.Groups {
+		if errMessage := validateSingleTechFileGroup(group); errMessage != "" {
+			result.Errors = append(result.Errors, errMessage)
+		}
 		vr := s.catalog.Validate(ValidateRequest{
 			ProfileKind:        "file",
 			Domain:             group.Domain,
@@ -711,6 +714,29 @@ func (s *Service) validateFileProfile(req UpdateFileProfileRequest) ValidationRe
 	}
 	result.Valid = len(result.Errors) == 0
 	return result
+}
+
+func validateSingleTechFileGroup(group FileGroup) string {
+	if group.Domain != DomainCM && group.Domain != DomainPM {
+		return ""
+	}
+	techs := make(map[string]struct{}, len(group.Objects))
+	for _, object := range group.Objects {
+		tech := normalizeTech(object.Tech)
+		if tech == "" {
+			tech = "LTE"
+		}
+		switch tech {
+		case "LTE", "GNB", "GSM":
+			techs[tech] = struct{}{}
+		default:
+			return fmt.Sprintf("group %q uses unsupported technology %q; choose ENB, GNB or GSM", group.ID, object.Tech)
+		}
+	}
+	if len(techs) > 1 {
+		return fmt.Sprintf("group %q mixes multiple technologies; create one group row per ENB/GNB/GSM technology", group.ID)
+	}
+	return ""
 }
 
 func (s *Service) validateInventoryProfile(req UpdateInventoryProfileRequest) ValidationResult {

@@ -180,14 +180,14 @@ func defaultFileProfiles() []FileProfile {
 			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
-		fileProfile("S0012", "LTE + GNB dual technology", "Shaanxi Mobile", "Shaanxi Mobile", []string{"LTE/GNB"}, []FileGroup{
+		fileProfile("S0012", "ENB + GNB dual technology", "Shaanxi Mobile", "Shaanxi Mobile", []string{"ENB/GNB"}, []FileGroup{
 			group("cm-daily-lte", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
 			group("cm-daily-gnb", DomainCM, FormatXML, Period24H, 3, pathCM+"GNB/", nameCM, []ScenarioObject{{Code: "CP", Tech: "GNB"}, {Code: "EP", Tech: "GNB"}, {Code: "CC", Tech: "GNB"}, {Code: "CE", Tech: "GNB"}}),
 			group("pm-15m-lte", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 			group("pm-pc-15m-gnb", DomainPM, FormatCSV, Period15M, 8, pathPM+"GNB/", namePM, []ScenarioObject{{Code: "PC", Tech: "GNB", Profile: "pm.pc.gnb.csv.v1"}}),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
-		fileProfile("S0013", "pmresult 60M multi-technology", "ZED", "ZED", []string{"LTE/GSM/GNB", "PM 60M", "pmresult"}, []FileGroup{
+		fileProfile("S0013", "pmresult 60M multi-technology", "ZED", "ZED", []string{"ENB/GSM/GNB", "PM 60M", "pmresult"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
 			group("pm-pc-60m-lte", DomainPM, FormatCSV, Period60M, 25, pathPM, "pmresult_152XXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Profile: "pm.pc.pmresult.csv.v1"}}),
 			group("pm-pc-60m-gsm", DomainPM, FormatCSV, Period60M, 20, pathPM, "pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Tech: "GSM", Profile: "pm.pc.gsm.pmresult.csv.v1"}}),
@@ -204,7 +204,7 @@ func defaultFileProfiles() []FileProfile {
 			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
-		fileProfile("S0016", "LTE + GSM PM", "MTN", "MTN", []string{"LTE/GSM"}, []FileGroup{
+		fileProfile("S0016", "ENB + GSM PM", "MTN", "MTN", []string{"ENB/GSM"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
 			group("pm-15m-lte", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 			group("pm-pc-15m-gsm", DomainPM, FormatCSV, Period15M, 5, pathPM+"gsm/", "pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Tech: "GSM", Profile: "pm.pc.gsm.pmresult.csv.v1"}}),
