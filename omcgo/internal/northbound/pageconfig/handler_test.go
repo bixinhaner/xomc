@@ -860,6 +860,81 @@ func TestUpdateFileProfilePersistsThroughRepository(t *testing.T) {
 	require.Contains(t, rr.Body.String(), `"name":"enabled scenario"`)
 }
 
+func TestUpdateFileProfileRejectsMixedTechnologyGroup(t *testing.T) {
+	r := setupTestRouterWithRepository(newFakeRepository())
+	body := []byte(`{
+  "groups": [
+    {
+      "id": "pm-mixed",
+      "domain": "PM",
+      "format": "CSV",
+      "period": "15M",
+      "start_minute": 5,
+      "path_template": "/#FTPRoot#/#Province#/#OMC-R#/PM/#DateTime#/",
+      "file_name_template": "Baicells-#Object#-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#]-#DataPeriod#[-#FileID#]",
+      "compression_enabled": true,
+      "compression_format": "zip",
+      "objects": [
+        {"code": "PC", "tech": "LTE"},
+        {"code": "PC", "tech": "GNB"}
+      ]
+    }
+  ]
+}`)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/northbound/page-config/file/profiles/S0001", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.Contains(t, rr.Body.String(), "mixes multiple technologies")
+	require.Contains(t, rr.Body.String(), "one group row per ENB/GNB/GSM")
+}
+
+func TestUpdateFileProfileAcceptsSplitTechnologyGroups(t *testing.T) {
+	r := setupTestRouterWithRepository(newFakeRepository())
+	body := []byte(`{
+  "groups": [
+    {
+      "id": "pm-enb",
+      "domain": "PM",
+      "format": "CSV",
+      "period": "15M",
+      "start_minute": 5,
+      "path_template": "/#FTPRoot#/#Province#/#OMC-R#/PM/#DateTime#/",
+      "file_name_template": "Baicells-#Object#-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#]-#DataPeriod#[-#FileID#]",
+      "compression_enabled": true,
+      "compression_format": "zip",
+      "objects": [{"code": "PC", "tech": "LTE"}]
+    },
+    {
+      "id": "pm-gnb",
+      "domain": "PM",
+      "format": "CSV",
+      "period": "15M",
+      "start_minute": 8,
+      "path_template": "/#FTPRoot#/#Province#/#OMC-R#/PM/GNB/#DateTime#/",
+      "file_name_template": "Baicells-#Object#-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#]-#DataPeriod#[-#FileID#]",
+      "compression_enabled": true,
+      "compression_format": "zip",
+      "objects": [{"code": "PC", "tech": "GNB"}]
+    }
+  ]
+}`)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/northbound/page-config/file/profiles/S0001", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), `"id":"pm-enb"`)
+	require.Contains(t, rr.Body.String(), `"id":"pm-gnb"`)
+	require.Contains(t, rr.Body.String(), `"tech":"LTE"`)
+	require.Contains(t, rr.Body.String(), `"tech":"GNB"`)
+}
+
 func TestCreateFileProfilePersistsThroughRepository(t *testing.T) {
 	r := setupTestRouterWithRepository(newFakeRepository())
 	body := []byte(`{
