@@ -199,8 +199,7 @@ function StorageProtectionSection() {
   const [editingId, setEditingId] = useState<string>();
   const [editorOpen, setEditorOpen] = useState(false);
   const [targetsRefreshing, setTargetsRefreshing] = useState(false);
-  const [policiesRefreshing, setPoliciesRefreshing] = useState(false);
-  const [eventsRefreshing, setEventsRefreshing] = useState(false);
+  const [storageProtectionRefreshing, setStorageProtectionRefreshing] = useState(false);
   const { data: policies = [], isFetching: policiesFetching, refetch: refetchPolicies } = useStorageProtectionPolicies();
   const { data: targets = [], isFetching: targetsFetching, refetch: refetchTargets } = useStorageProtectionTargets();
   const { data: events = [], isFetching: eventsFetching, refetch: refetchEvents } = useStorageProtectionEvents(5);
@@ -296,33 +295,19 @@ function StorageProtectionSection() {
     }
   };
 
-  const refreshPolicies = async () => {
-    setPoliciesRefreshing(true);
+  const refreshStorageProtection = async () => {
+    setStorageProtectionRefreshing(true);
     try {
-      const result = await refetchPolicies();
-      if (result.isError) {
-        throw result.error instanceof Error ? result.error : new Error(t('common.refreshFailed'));
+      const [policiesResult, eventsResult] = await Promise.all([refetchPolicies(), refetchEvents()]);
+      const failedResult = [policiesResult, eventsResult].find((result) => result.isError);
+      if (failedResult?.isError) {
+        throw failedResult.error instanceof Error ? failedResult.error : new Error(t('common.refreshFailed'));
       }
       message.success(t('common.refreshSuccess'));
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('common.refreshFailed'));
     } finally {
-      setPoliciesRefreshing(false);
-    }
-  };
-
-  const refreshEvents = async () => {
-    setEventsRefreshing(true);
-    try {
-      const result = await refetchEvents();
-      if (result.isError) {
-        throw result.error instanceof Error ? result.error : new Error(t('common.refreshFailed'));
-      }
-      message.success(t('common.refreshSuccess'));
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : t('common.refreshFailed'));
-    } finally {
-      setEventsRefreshing(false);
+      setStorageProtectionRefreshing(false);
     }
   };
 
@@ -383,108 +368,101 @@ function StorageProtectionSection() {
       </Card>
 
       <Card
-        loading={policiesFetching}
-        title={<Space><SettingOutlined />{t('system.storageProtection.policySummary')}</Space>}
+        title={<Space><SettingOutlined />{t('system.storageProtection.title')}</Space>}
         style={{ marginBottom: 16 }}
-        extra={(
-          <Space wrap>
-            <Button
-              icon={<ReloadOutlined />}
-              loading={policiesRefreshing || policiesFetching}
-              onClick={() => void refreshPolicies()}
-            >
-              {t('common.refresh')}
-            </Button>
-            {policy && (
-              <>
-                <Popconfirm
-                  title={t(policy.enabled ? 'system.storageProtection.disableConfirm' : 'system.storageProtection.enableConfirm')}
-                  onConfirm={() => void togglePolicy(!policy.enabled)}
-                  okText={t('common.confirm')}
-                  cancelText={t('common.cancel')}
-                >
-                  <Button loading={updatePolicy.isPending}>
-                    {t(policy.enabled ? 'system.storageProtection.disablePolicy' : 'system.storageProtection.enablePolicy')}
-                  </Button>
-                </Popconfirm>
-                <Button type="primary" onClick={() => startEdit(policy)}>{t('common.edit')}</Button>
-              </>
-            )}
-          </Space>
-        )}
-      >
-        {policy ? (
-          <Descriptions bordered size="small" column={2}>
-            <Descriptions.Item label={t('system.storageProtection.target')}>
-              {t('system.storageProtection.unifiedTarget')}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('system.storageProtection.enabled')}>
-              <Tag color={policy.enabled ? 'green' : 'default'}>
-                {t(policy.enabled ? 'common.enabled' : 'common.disabled')}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label={t('system.storageProtection.thresholds')}>
-              {`${policy.warnUsedPercent}% / ${policy.recoverUsedPercent}% / ${policy.blockUsedPercent}%`}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('system.storageProtection.checkInterval')}>
-              {`${policy.checkIntervalSeconds} ${t('system.storageProtection.seconds')}`}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('system.storageProtection.unknownBehavior')}>
-              {t(`system.storageProtection.unknownBehavior.${policy.unknownBehavior}`)}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('system.storageProtection.state')}>
-              <Tag color={stateColors[policy.currentState]}>
-                {t(`system.storageProtection.state.${policy.currentState}`)}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label={t('system.storageProtection.currentBlocks')} span={2}>
-              {policy.currentState === 'blocked' ? (
-                <Space direction="vertical" size={0}>
-                  <Tag color="red">{t('system.storageProtection.state.blocked')}</Tag>
-                  <span style={{ color: '#888' }}>
-                    {t('system.storageProtection.lastObserved')}: {policy.lastObservedRatio === undefined ? unavailable : `${(policy.lastObservedRatio * 100).toFixed(1)}%`}
-                  </span>
-                </Space>
-              ) : <Tag>{t('system.storageProtection.notBlocked')}</Tag>}
-            </Descriptions.Item>
-          </Descriptions>
-        ) : (
-          <Space direction="vertical" align="center" style={{ width: '100%', padding: '24px 0' }}>
-            <span>{t('system.storageProtection.noPolicyDescription')}</span>
-            <Button type="primary" icon={<SettingOutlined />} onClick={openCreate}>
-              {t('system.storageProtection.configurePolicy')}
-            </Button>
-          </Space>
-        )}
-      </Card>
-
-      <Card
-        title={t('system.storageProtection.audit')}
-        size="small"
-        style={{ marginBottom: 16 }}
-        loading={eventsFetching}
         extra={(
           <Button
             icon={<ReloadOutlined />}
-            loading={eventsRefreshing || eventsFetching}
-            onClick={() => void refreshEvents()}
+            loading={storageProtectionRefreshing || policiesFetching || eventsFetching}
+            onClick={() => void refreshStorageProtection()}
           >
             {t('common.refresh')}
           </Button>
         )}
       >
-        {events.length > 0 ? (
-          <Space direction="vertical" style={{ width: '100%' }}>
-            {events.map((event) => (
-              <span key={`${event.policyId}-${event.createdAt}`}>
-                <Tag color={stateColors[event.newState]}>{t(`system.storageProtection.state.${event.newState}`)}</Tag>
-                {formatEventReason(event, t, unavailable)}
-              </span>
-            ))}
-          </Space>
-        ) : (
-          <span>{t('system.storageProtection.noEvents')}</span>
-        )}
+        <Space align="center" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }} wrap>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>
+            {t('system.storageProtection.policySettings')}
+          </div>
+          {policy && (
+            <Space wrap>
+              <Popconfirm
+                title={t(policy.enabled ? 'system.storageProtection.disableConfirm' : 'system.storageProtection.enableConfirm')}
+                onConfirm={() => void togglePolicy(!policy.enabled)}
+                okText={t('common.confirm')}
+                cancelText={t('common.cancel')}
+              >
+                <Button loading={updatePolicy.isPending}>
+                  {t(policy.enabled ? 'system.storageProtection.disablePolicy' : 'system.storageProtection.enablePolicy')}
+                </Button>
+              </Popconfirm>
+              <Button type="primary" onClick={() => startEdit(policy)}>{t('common.edit')}</Button>
+            </Space>
+          )}
+        </Space>
+        <Spin spinning={policiesFetching}>
+          {policy ? (
+            <Descriptions bordered size="small" column={2}>
+              <Descriptions.Item label={t('system.storageProtection.target')}>
+                {t('system.storageProtection.unifiedTarget')}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('system.storageProtection.enabled')}>
+                <Tag color={policy.enabled ? 'green' : 'default'}>
+                  {t(policy.enabled ? 'common.enabled' : 'common.disabled')}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('system.storageProtection.thresholds')}>
+                {`${policy.warnUsedPercent}% / ${policy.recoverUsedPercent}% / ${policy.blockUsedPercent}%`}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('system.storageProtection.checkInterval')}>
+                {`${policy.checkIntervalSeconds} ${t('system.storageProtection.seconds')}`}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('system.storageProtection.unknownBehavior')}>
+                {t(`system.storageProtection.unknownBehavior.${policy.unknownBehavior}`)}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('system.storageProtection.state')}>
+                <Tag color={stateColors[policy.currentState]}>
+                  {t(`system.storageProtection.state.${policy.currentState}`)}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('system.storageProtection.currentBlocks')} span={2}>
+                {policy.currentState === 'blocked' ? (
+                  <Space direction="vertical" size={0}>
+                    <Tag color="red">{t('system.storageProtection.state.blocked')}</Tag>
+                    <span style={{ color: '#888' }}>
+                      {t('system.storageProtection.lastObserved')}: {policy.lastObservedRatio === undefined ? unavailable : `${(policy.lastObservedRatio * 100).toFixed(1)}%`}
+                    </span>
+                  </Space>
+                ) : <Tag>{t('system.storageProtection.notBlocked')}</Tag>}
+              </Descriptions.Item>
+            </Descriptions>
+          ) : (
+            <Space direction="vertical" align="center" style={{ width: '100%', padding: '24px 0' }}>
+              <span>{t('system.storageProtection.noPolicyDescription')}</span>
+              <Button type="primary" icon={<SettingOutlined />} onClick={openCreate}>
+                {t('system.storageProtection.configurePolicy')}
+              </Button>
+            </Space>
+          )}
+        </Spin>
+
+        <div style={{ fontSize: 14, fontWeight: 600, margin: '20px 0 12px' }}>
+          {t('system.storageProtection.stateRecords')}
+        </div>
+        <Spin spinning={eventsFetching}>
+          {events.length > 0 ? (
+            <Space direction="vertical" style={{ width: '100%' }}>
+              {events.map((event) => (
+                <span key={`${event.policyId}-${event.createdAt}`}>
+                  <Tag color={stateColors[event.newState]}>{t(`system.storageProtection.state.${event.newState}`)}</Tag>
+                  {formatEventReason(event, t, unavailable)}
+                </span>
+              ))}
+            </Space>
+          ) : (
+            <span>{t('system.storageProtection.noEvents')}</span>
+          )}
+        </Spin>
       </Card>
 
       <Drawer

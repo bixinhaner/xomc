@@ -8,6 +8,9 @@ const hookMocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutateAsync: vi.fn(),
   refetch: vi.fn(),
+  refetchPolicies: vi.fn(),
+  refetchTargets: vi.fn(),
+  refetchEvents: vi.fn(),
 }));
 
 vi.mock('@core/hooks/api/useSystem', () => ({
@@ -20,17 +23,17 @@ vi.mock('@core/hooks/api/useStorageProtection', () => ({
   useStorageProtectionPolicies: () => ({
     data: [],
     isFetching: false,
-    refetch: hookMocks.refetch,
+    refetch: hookMocks.refetchPolicies,
   }),
   useStorageProtectionTargets: () => ({
     data: [],
     isFetching: false,
-    refetch: hookMocks.refetch,
+    refetch: hookMocks.refetchTargets,
   }),
   useStorageProtectionEvents: () => ({
     data: [],
     isFetching: false,
-    refetch: hookMocks.refetch,
+    refetch: hookMocks.refetchEvents,
   }),
   useSaveStorageProtectionPolicy: () => ({
     mutateAsync: hookMocks.mutateAsync,
@@ -59,6 +62,9 @@ describe('self-managed system config load guard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hookMocks.query.mockReturnValue(failedQuery);
+    hookMocks.refetchPolicies.mockResolvedValue({ isError: false });
+    hookMocks.refetchTargets.mockResolvedValue({ isError: false });
+    hookMocks.refetchEvents.mockResolvedValue({ isError: false });
   });
 
   it('PM 保留策略加载失败时禁止保存和重置', () => {
@@ -230,6 +236,65 @@ describe('self-managed system config load guard', () => {
         items: [{ key: 'raw_object_days', value: '31', value_type: 'int' }],
       });
     });
+  });
+
+  it('资源保留与背压的容量刷新和存储保护刷新互不串联', async () => {
+    const user = userEvent.setup();
+    const valuesByCategory: Record<string, Record<string, string>> = {
+      'acs.backpressure': {
+        enabled: 'true',
+        disk_high_pct: '90',
+        disk_low_pct: '70',
+        check_interval_sec: '60',
+      },
+      'minio.retention': { raw_object_days: '30' },
+      'stationlog.retention': {
+        max_retention_days: '30',
+        cleanup_interval_minutes: '60',
+        max_file_count: '0',
+        max_file_count_per_device: '0',
+      },
+      raw_archive: { compress_after_ingest: 'false' },
+    };
+    hookMocks.query.mockImplementation((category: string) => ({
+      data: Object.entries(valuesByCategory[category]).map(([key, value]) => ({
+        id: `${category}-${key}`,
+        category,
+        key,
+        value,
+        valueType: key === 'enabled' || key === 'compress_after_ingest' ? 'bool' : 'int',
+        isPublic: false,
+        isSecret: false,
+      })),
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      isSuccess: true,
+      refetch: hookMocks.refetch,
+    }));
+
+    render(<RetentionBackpressureSection />);
+
+    const capacityCard = screen.getByText('system.storageProtection.capacityOverview').closest('.ant-card');
+    const storageProtectionCard = screen.getByText('system.storageProtection.title').closest('.ant-card');
+    expect(capacityCard).not.toBeNull();
+    expect(storageProtectionCard).not.toBeNull();
+
+    await user.click(within(capacityCard as HTMLElement).getByRole('button', { name: /common\.refresh/ }));
+    await waitFor(() => expect(hookMocks.refetchTargets).toHaveBeenCalledTimes(1));
+    expect(hookMocks.refetchPolicies).not.toHaveBeenCalled();
+    expect(hookMocks.refetchEvents).not.toHaveBeenCalled();
+
+    hookMocks.refetchPolicies.mockClear();
+    hookMocks.refetchTargets.mockClear();
+    hookMocks.refetchEvents.mockClear();
+
+    await user.click(within(storageProtectionCard as HTMLElement).getByRole('button', { name: /common\.refresh/ }));
+    await waitFor(() => {
+      expect(hookMocks.refetchPolicies).toHaveBeenCalledTimes(1);
+      expect(hookMocks.refetchEvents).toHaveBeenCalledTimes(1);
+    });
+    expect(hookMocks.refetchTargets).not.toHaveBeenCalled();
   });
 
   it('资源保留与背压支持保存基站日志清理周期并校验范围', async () => {
