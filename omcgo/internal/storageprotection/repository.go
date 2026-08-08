@@ -1,6 +1,9 @@
 package storageprotection
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type Repository interface {
 	GetEnabledPolicy(ctx context.Context, targetType TargetType, targetID string, scope WriteScope) (*Policy, error)
@@ -9,6 +12,7 @@ type Repository interface {
 	UpdateState(ctx context.Context, policy *Policy) error
 	RecordEvent(ctx context.Context, event Event) error
 	ListEvents(ctx context.Context, targetType TargetType, targetID string, limit int) ([]Event, error)
+	CleanupEvents(ctx context.Context, before time.Time, keepLatest int) (int64, error)
 }
 
 type UsageProvider interface {

@@ -242,7 +242,7 @@ export const storageProtectionApi = {
     return (data ?? []).map(mapTarget);
   },
 
-  async getEvents(limit = 100) {
+  async getEvents(limit = 5) {
     const { data } = await http.get<BackendStorageProtectionEvent[]>('/admin/storage-protection/events', {
       params: { limit },
     });

@@ -50,11 +50,12 @@ import {
   UNIFIED_STORAGE_TARGET,
   type StorageProtectionPolicy,
   type StorageProtectionPolicyPayload,
+  type StorageProtectionEvent,
   type StorageProtectionState,
   type StorageProtectionTarget,
   type StorageUnknownBehavior,
 } from '@core/services/api/storageProtectionApi';
-import { useT } from '@/hooks/useT';
+import { useT, type TranslateFn } from '@/hooks/useT';
 
 type FieldType = 'int' | 'float' | 'bool';
 
@@ -178,6 +179,32 @@ function validateThresholds(values: PolicyFormValues) {
   );
 }
 
+function formatObservedRatio(value: number | undefined, unavailable: string) {
+  if (value === undefined || !Number.isFinite(value)) return unavailable;
+  const percent = value <= 1 ? value * 100 : value;
+  return `${percent.toFixed(1)}%`;
+}
+
+const eventReasonRules: Array<[string, string]> = [
+  ['usage reached warning threshold for two checks', 'system.storageProtection.event.reason.warningThreshold'],
+  ['usage reached block threshold for two checks', 'system.storageProtection.event.reason.blockThreshold'],
+  ['usage reached block threshold; confirmation pending', 'system.storageProtection.event.reason.blockPending'],
+  ['usage recovered below recovery threshold for two checks', 'system.storageProtection.event.reason.recovered'],
+  ['storage usage is unavailable', 'system.storageProtection.event.reason.capacityUnknown'],
+  ['host filesystem metrics unavailable', 'system.storageProtection.event.reason.capacityUnknown'],
+];
+
+function formatEventReason(event: StorageProtectionEvent, t: TranslateFn, unavailable: string) {
+  const reason = event.reason.toLowerCase();
+  const key = eventReasonRules.find(([needle]) => reason.includes(needle))?.[1]
+    ?? 'system.storageProtection.event.reason.stateChanged';
+  return t(key, {
+    previous: event.previousState ? t(`system.storageProtection.state.${event.previousState}`) : unavailable,
+    current: t(`system.storageProtection.state.${event.newState}`),
+    ratio: formatObservedRatio(event.observedRatio, unavailable),
+  });
+}
+
 function StorageProtectionSection() {
   const t = useT();
   const [form] = Form.useForm<PolicyFormValues>();
@@ -185,7 +212,7 @@ function StorageProtectionSection() {
   const [editorOpen, setEditorOpen] = useState(false);
   const { data: policies = [], isFetching: policiesFetching, refetch: refetchPolicies } = useStorageProtectionPolicies();
   const { data: targets = [], isFetching: targetsFetching, refetch: refetchTargets } = useStorageProtectionTargets();
-  const { data: events = [] } = useStorageProtectionEvents();
+  const { data: events = [], isFetching: eventsFetching, refetch: refetchEvents } = useStorageProtectionEvents(5);
   const savePolicy = useSaveStorageProtectionPolicy();
   const updatePolicy = useUpdateStorageProtectionPolicy();
   const unavailable = t('common.notAvailable');
@@ -266,6 +293,7 @@ function StorageProtectionSection() {
   const refresh = () => {
     void refetchTargets();
     void refetchPolicies();
+    void refetchEvents();
   };
 
   return (
@@ -282,7 +310,7 @@ function StorageProtectionSection() {
         title={<Space><DatabaseOutlined />{t('system.storageProtection.capacityOverview')}</Space>}
         style={{ marginBottom: 16 }}
         extra={
-          <Button icon={<ReloadOutlined />} loading={targetsFetching || policiesFetching} onClick={refresh}>
+          <Button icon={<ReloadOutlined />} loading={targetsFetching || policiesFetching || eventsFetching} onClick={refresh}>
             {t('common.refresh')}
           </Button>
         }
@@ -299,7 +327,7 @@ function StorageProtectionSection() {
                     {percent !== undefined ? (
                       <Progress percent={percent} status={percent >= 90 ? 'exception' : percent >= 80 ? 'active' : 'normal'} />
                     ) : (
-                      <span>{target.reason || unavailable}</span>
+                      <span>{t('system.storageProtection.capacityUnavailable')}</span>
                     )}
                     <span>{t('system.storageProtection.used')}: {formatBytes(target.usedBytes, unavailable)} / {formatBytes(target.capacityBytes, unavailable)}</span>
                     <Space size={[4, 4]} wrap>
@@ -385,18 +413,20 @@ function StorageProtectionSection() {
         )}
       </Card>
 
-      {events.length > 0 && (
-        <Card title={t('system.storageProtection.audit')} size="small" style={{ marginBottom: 16 }}>
+      <Card title={t('system.storageProtection.audit')} size="small" style={{ marginBottom: 16 }} loading={eventsFetching}>
+        {events.length > 0 ? (
           <Space direction="vertical" style={{ width: '100%' }}>
-            {events.slice(0, 5).map((event) => (
+            {events.map((event) => (
               <span key={`${event.policyId}-${event.createdAt}`}>
                 <Tag color={stateColors[event.newState]}>{t(`system.storageProtection.state.${event.newState}`)}</Tag>
-                {event.reason}
+                {formatEventReason(event, t, unavailable)}
               </span>
             ))}
           </Space>
-        </Card>
-      )}
+        ) : (
+          <span>{t('system.storageProtection.noEvents')}</span>
+        )}
+      </Card>
 
       <Drawer
         title={t(editingId ? 'system.storageProtection.editPolicy' : 'system.storageProtection.configurePolicy')}

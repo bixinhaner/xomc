@@ -9,6 +9,12 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	defaultEventRetentionDays = 180
+	defaultEventKeepLatest    = 1000
+	eventCleanupInterval      = 24 * time.Hour
+)
+
 type Service struct {
 	repo    Repository
 	usage   UsageProvider
@@ -18,6 +24,7 @@ type Service struct {
 	mu      sync.Mutex
 	logMu   sync.RWMutex
 	logGate LogAdmissionController
+	cleanup bool
 	cancel  context.CancelFunc
 	done    chan struct{}
 }
@@ -40,6 +47,18 @@ func (s *Service) SetLogAdmissionController(controller LogAdmissionController) {
 	s.logMu.Lock()
 	s.logGate = controller
 	s.logMu.Unlock()
+}
+
+// EnableEventCleanup makes this process responsible for pruning historical
+// storage-protection state records. App owns the cleanup loop; worker only
+// needs admission checks and should not duplicate database cleanup work.
+func (s *Service) EnableEventCleanup() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.cleanup = true
+	s.mu.Unlock()
 }
 
 func (s *Service) setLogAdmissionBlocked(blocked bool) {
@@ -85,18 +104,30 @@ func (s *Service) Start(ctx context.Context, interval time.Duration) {
 	s.cancel = cancel
 	s.done = make(chan struct{})
 	done := s.done
+	cleanupEnabled := s.cleanup
 	s.mu.Unlock()
 	go func() {
 		defer close(done)
 		s.evaluateAll(workerCtx)
+		if cleanupEnabled {
+			s.cleanupEvents(workerCtx)
+		}
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+		var cleanupC <-chan time.Time
+		if cleanupEnabled {
+			cleanupTicker := time.NewTicker(eventCleanupInterval)
+			defer cleanupTicker.Stop()
+			cleanupC = cleanupTicker.C
+		}
 		for {
 			select {
 			case <-workerCtx.Done():
 				return
 			case <-ticker.C:
 				s.evaluateAll(workerCtx)
+			case <-cleanupC:
+				s.cleanupEvents(workerCtx)
 			}
 		}
 	}()
@@ -139,6 +170,21 @@ func (s *Service) evaluateAll(ctx context.Context) {
 		// A policy can be disabled or deleted while a previous state was
 		// blocked. Do not leave the process logger permanently closed.
 		s.setLogAdmissionBlocked(false)
+	}
+}
+
+func (s *Service) cleanupEvents(ctx context.Context) {
+	if s == nil || s.repo == nil {
+		return
+	}
+	before := s.now().AddDate(0, 0, -defaultEventRetentionDays)
+	deleted, err := s.repo.CleanupEvents(ctx, before, defaultEventKeepLatest)
+	if err != nil {
+		s.logger.Warn("cleanup storage protection events failed", zap.Error(err))
+		return
+	}
+	if deleted > 0 {
+		s.logger.Info("cleanup storage protection events completed", zap.Int64("deleted", deleted))
 	}
 }
 

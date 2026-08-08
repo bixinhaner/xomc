@@ -11,8 +11,11 @@ import (
 )
 
 type fakeRepository struct {
-	policy *Policy
-	events []Event
+	policy        *Policy
+	events        []Event
+	cleanupCalls  int
+	cleanupBefore time.Time
+	cleanupKeep   int
 }
 
 func (r *fakeRepository) GetEnabledPolicy(context.Context, TargetType, string, WriteScope) (*Policy, error) {
@@ -40,6 +43,12 @@ func (r *fakeRepository) RecordEvent(_ context.Context, event Event) error {
 }
 func (r *fakeRepository) ListEvents(context.Context, TargetType, string, int) ([]Event, error) {
 	return append([]Event(nil), r.events...), nil
+}
+func (r *fakeRepository) CleanupEvents(_ context.Context, before time.Time, keepLatest int) (int64, error) {
+	r.cleanupCalls++
+	r.cleanupBefore = before
+	r.cleanupKeep = keepLatest
+	return 0, nil
 }
 
 type fakeUsageProvider struct {
@@ -120,6 +129,19 @@ func TestStorageProtectionWarningRemainsLatchedWhileUsageStaysHigh(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, StateWarning, decision.State)
 	require.Len(t, repo.events, 1)
+}
+
+func TestStorageProtectionCleanupEventsUsesBoundedRetention(t *testing.T) {
+	now := time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{}
+	svc := NewService(repo, fakeUsageProvider{}, nil, zap.NewNop())
+	svc.now = func() time.Time { return now }
+
+	svc.cleanupEvents(context.Background())
+
+	require.Equal(t, 1, repo.cleanupCalls)
+	require.Equal(t, now.AddDate(0, 0, -defaultEventRetentionDays), repo.cleanupBefore)
+	require.Equal(t, defaultEventKeepLatest, repo.cleanupKeep)
 }
 
 func TestStorageProtectionUnknownBehavior(t *testing.T) {

@@ -193,6 +193,32 @@ func (r *PgRepository) ListEvents(ctx context.Context, targetType TargetType, ta
 	return events, nil
 }
 
+func (r *PgRepository) CleanupEvents(ctx context.Context, before time.Time, keepLatest int) (int64, error) {
+	var deleted int64
+	if !before.IsZero() {
+		result, err := r.pool.Exec(ctx, "DELETE FROM storage_protection_events WHERE created_at < $1", before)
+		if err != nil {
+			return 0, fmt.Errorf("delete expired storage protection events: %w", err)
+		}
+		deleted += result.RowsAffected()
+	}
+	if keepLatest > 0 {
+		result, err := r.pool.Exec(ctx, `
+DELETE FROM storage_protection_events
+WHERE id IN (
+    SELECT id
+    FROM storage_protection_events
+    ORDER BY created_at DESC, id DESC
+    OFFSET $1
+)`, keepLatest)
+		if err != nil {
+			return deleted, fmt.Errorf("delete excess storage protection events: %w", err)
+		}
+		deleted += result.RowsAffected()
+	}
+	return deleted, nil
+}
+
 func nullableState(state State) any {
 	if state == "" {
 		return nil
