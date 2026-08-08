@@ -26,6 +26,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	devtask "github.com/omcgo/omcgo/internal/task"
 )
 
@@ -109,6 +110,9 @@ type SoftwareService struct {
 	// nil-safe 语义一致；生产路由经 SetDeviceGroupReader 注入。可见分组的解析在 handler
 	// （持 gin ctx），service 这层只按已解析的 visibleGroups 做逐设备归属判定。
 	groupReader authz.GroupReader
+	// storageAdmission gates firmware and transfer artifact writes when the
+	// global disk protection policy blocks new business data.
+	storageAdmission storageprotection.WriteAdmission
 }
 
 // SetDeviceGroupReader 注入设备组读取器（#59 Problem 4 / #64 统一强制层），供
@@ -116,6 +120,10 @@ type SoftwareService struct {
 // 未注入时 AuthorizeDevicesAccess 退化为不校验（dev/test），与 device 模块语义一致。
 func (s *SoftwareService) SetDeviceGroupReader(reader authz.GroupReader) {
 	s.groupReader = reader
+}
+
+func (s *SoftwareService) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	s.storageAdmission = admission
 }
 
 // AuthorizeDevicesAccess 对一批 deviceID 逐个做设备组归属校验（#59 Problem 4）。
@@ -210,6 +218,15 @@ func NewSoftwareService(
 
 // UploadFirmware stores a firmware file to MinIO and creates a firmware version record.
 func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersion, file io.Reader, fileSize int64) error {
+	if s.storageAdmission != nil {
+		decision, err := s.storageAdmission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeUpload)
+		if err != nil {
+			return fmt.Errorf("storage admission check: %w", err)
+		}
+		if !decision.Allowed {
+			return fmt.Errorf("storage write protected: %s", decision.Reason)
+		}
+	}
 	// #638：把 ProductID（旧单值）与 ProductIDs（新多值）双向打齐，保证：
 	//  · DB 唯一索引 (product_id, version, file_type) 仍能命中"主产品"
 	//  · ProductIDs 列存全部适用产品，列表/任务过滤走 ANY(product_ids)

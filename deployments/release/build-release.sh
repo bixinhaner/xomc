@@ -282,6 +282,12 @@ REDIS_DATA_PATH=
 REDIS_PM_DATA_PATH=
 NATS_DATA_PATH=
 MINIO_DATA_PATH=
+# 写入保护运行时路径解析。默认生产部署使用 docker compose -p omcgo；
+# Docker Root Dir 如被安装到非 /var/lib/docker，请在部署前改成 docker info 的值。
+OMCGO_DOCKER_ROOT_DIR=/var/lib/docker
+OMCGO_DOCKER_VOLUME_PREFIX=omcgo
+OMCGO_HOST_LOGS_PATH=/opt/omc/run/logs
+OMCGO_HOST_DATA_PATH=/opt/omc/data
 # OMC 运行环境（容器内 entrypoint.sh 读）
 OMCGO_ENV=prod
 # JWT 密钥（app 容器读）—— 由 install.sh ensure_secrets 自动生成（#175）

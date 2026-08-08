@@ -81,6 +81,12 @@ export interface StorageProtectionEvent {
 export interface StorageProtectionTarget {
   targetType: StorageTargetType;
   targetId: string;
+  label?: string;
+  mountpoint?: string;
+  mountPath?: string;
+  components: string[];
+  sourcePaths: string[];
+  protectedPaths: string[];
   capacityBytes: number;
   usedBytes: number;
   usedRatio: number;
@@ -130,6 +136,12 @@ interface BackendStorageProtectionEvent {
 interface BackendStorageProtectionTarget {
   target_type: StorageTargetType;
   target_id: string;
+  label?: string;
+  mountpoint?: string;
+  mount_path?: string;
+  components?: string[];
+  source_paths?: string[];
+  protected_paths?: string[];
   capacity_bytes: number;
   used_bytes: number;
   used_ratio: number;
@@ -202,6 +214,12 @@ function mapTarget(target: BackendStorageProtectionTarget): StorageProtectionTar
   return {
     targetType: target.target_type,
     targetId: target.target_id,
+    label: target.label,
+    mountpoint: target.mountpoint,
+    mountPath: target.mount_path,
+    components: target.components ?? [],
+    sourcePaths: target.source_paths ?? [],
+    protectedPaths: target.protected_paths ?? [],
     capacityBytes: target.capacity_bytes,
     usedBytes: target.used_bytes,
     usedRatio: target.used_ratio,
@@ -224,7 +242,7 @@ export const storageProtectionApi = {
     return (data ?? []).map(mapTarget);
   },
 
-  async getEvents(limit = 100) {
+  async getEvents(limit = 5) {
     const { data } = await http.get<BackendStorageProtectionEvent[]>('/admin/storage-protection/events', {
       params: { limit },
     });

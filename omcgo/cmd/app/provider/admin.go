@@ -28,6 +28,9 @@ func initAdminModule(c *Container) error {
 	roleRepo := admin.NewPgRoleRepository(c.PgPool)
 	auditRepo := admin.NewPgAuditRepository(c.PgPool)
 	menuRepo := admin.NewPgMenuRepository(c.PgPool)
+	if err := admin.EnsureLegacyStorageProtectionMenuRetired(context.Background(), c.PgPool); err != nil {
+		return fmt.Errorf("retire legacy storage protection menu: %w", err)
+	}
 
 	jwtService, err := admin.NewJWTServiceWithTTL(c.Cfg.JWT.Secret, c.Cfg.JWT.AccessTokenTTL, c.Cfg.JWT.RefreshTokenTTL)
 	if err != nil {

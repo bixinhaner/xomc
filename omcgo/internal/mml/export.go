@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/pkg/soap"
 )
 
@@ -40,6 +41,7 @@ type Exporter struct {
 	signProvider PresignClientProvider // issue #548 切片 4：sys_configs 热改 endpoint 后下次 presign 即生效
 	bucket       string
 	logger       *zap.Logger
+	admission    storageprotection.WriteAdmission
 }
 
 // NewExporter 构造导出器。put/sign 任一为 nil 视为未配置（ExportXxx 返回 503）。
@@ -54,6 +56,13 @@ func (e *Exporter) SetSignProvider(p PresignClientProvider) {
 		return
 	}
 	e.signProvider = p
+}
+
+func (e *Exporter) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	if e == nil {
+		return
+	}
+	e.admission = admission
 }
 
 // signClient 返回当前该用于签发预签名 URL 的 client：优先 provider.Get()，其次 e.sign。
@@ -71,6 +80,15 @@ func (e *Exporter) ready() bool {
 }
 
 func (e *Exporter) upload(ctx context.Context, key string, data []byte) error {
+	if e.admission != nil {
+		decision, err := e.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeReport)
+		if err != nil {
+			return fmt.Errorf("storage admission check: %w", err)
+		}
+		if !decision.Allowed {
+			return fmt.Errorf("storage write protected: %s", decision.Reason)
+		}
+	}
 	_, err := e.put.PutObject(ctx, e.bucket, key, bytes.NewReader(data), int64(len(data)),
 		minio.PutObjectOptions{ContentType: "text/csv; charset=utf-8"})
 	if err != nil {

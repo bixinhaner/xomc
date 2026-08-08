@@ -5,13 +5,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/core/components"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
 type fakeRepository struct {
-	policy *Policy
-	events []Event
+	policy        *Policy
+	events        []Event
+	cleanupCalls  int
+	cleanupBefore time.Time
+	cleanupKeep   int
 }
 
 func (r *fakeRepository) GetEnabledPolicy(context.Context, TargetType, string, WriteScope) (*Policy, error) {
@@ -40,9 +44,16 @@ func (r *fakeRepository) RecordEvent(_ context.Context, event Event) error {
 func (r *fakeRepository) ListEvents(context.Context, TargetType, string, int) ([]Event, error) {
 	return append([]Event(nil), r.events...), nil
 }
+func (r *fakeRepository) CleanupEvents(_ context.Context, before time.Time, keepLatest int) (int64, error) {
+	r.cleanupCalls++
+	r.cleanupBefore = before
+	r.cleanupKeep = keepLatest
+	return 0, nil
+}
 
 type fakeUsageProvider struct {
 	snapshot UsageSnapshot
+	targets  []UsageSnapshot
 	err      error
 }
 
@@ -52,6 +63,13 @@ func (g *fakeLogAdmissionController) SetBlocked(blocked bool) { g.blocked = bloc
 
 func (p fakeUsageProvider) Snapshot(context.Context, TargetType, string) (UsageSnapshot, error) {
 	return p.snapshot, p.err
+}
+
+func (p fakeUsageProvider) ListTargets(context.Context) ([]UsageSnapshot, error) {
+	if len(p.targets) > 0 {
+		return append([]UsageSnapshot(nil), p.targets...), p.err
+	}
+	return []UsageSnapshot{p.snapshot}, p.err
 }
 
 func TestStorageProtectionStateMachineRequiresConfirmationAndRecovers(t *testing.T) {
@@ -111,6 +129,19 @@ func TestStorageProtectionWarningRemainsLatchedWhileUsageStaysHigh(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, StateWarning, decision.State)
 	require.Len(t, repo.events, 1)
+}
+
+func TestStorageProtectionCleanupEventsUsesBoundedRetention(t *testing.T) {
+	now := time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC)
+	repo := &fakeRepository{}
+	svc := NewService(repo, fakeUsageProvider{}, nil, zap.NewNop())
+	svc.now = func() time.Time { return now }
+
+	svc.cleanupEvents(context.Background())
+
+	require.Equal(t, 1, repo.cleanupCalls)
+	require.Equal(t, now.AddDate(0, 0, -defaultEventRetentionDays), repo.cleanupBefore)
+	require.Equal(t, defaultEventKeepLatest, repo.cleanupKeep)
 }
 
 func TestStorageProtectionUnknownBehavior(t *testing.T) {
@@ -182,6 +213,38 @@ func TestStorageProtectionUnknownClosesLogAdmission(t *testing.T) {
 	require.True(t, gate.blocked, "unknown capacity must fail-closed for logs")
 }
 
+func TestStorageProtectionBlocksOnWorstProtectedMountpoint(t *testing.T) {
+	repo := &fakeRepository{policy: &Policy{
+		ID: "policy-worst", TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, WriteScope: WriteScopeAll,
+		Enabled: true, WarnUsedPercent: 80, BlockUsedPercent: 90, RecoverUsedPercent: 85,
+		CheckIntervalSeconds: 30, UnknownBehavior: UnknownAllowWithAlarm, CurrentState: StateNormal,
+		Version: 1,
+	}}
+	at := time.Now()
+	provider := NewCollectorUsageProviderWithResolver(
+		fakeStorageCollector{metrics: []components.StorageMetric{
+			hostMetric("/opt", 1000, 700, 70, at),
+			hostMetric("/var/lib/docker", 1000, 920, 92, at),
+		}},
+		staticProtectedPathResolver{paths: []ProtectedPath{
+			{ID: "logs", Path: "/opt/omc/run/logs"},
+			{ID: "postgres", Path: "/var/lib/docker/volumes/omcgo_pgdata/_data"},
+		}},
+	)
+	svc := NewService(repo, provider, nil, zap.NewNop())
+
+	decision, err := svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeAll)
+	require.NoError(t, err)
+	require.True(t, decision.Allowed, "first block observation waits for confirmation")
+	decision, err = svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeAll)
+	require.NoError(t, err)
+	require.False(t, decision.Allowed)
+	require.Equal(t, StateBlocked, decision.State)
+	require.NotNil(t, repo.policy.LastObservedRatio)
+	require.Equal(t, .92, *repo.policy.LastObservedRatio)
+	require.Contains(t, decision.Reason, "/var/lib/docker")
+}
+
 func TestValidateStorageProtectionPolicy(t *testing.T) {
 	policy := &Policy{TargetType: TargetFilesystem, TargetID: "root", WriteScope: WriteScopeAll, WarnUsedPercent: 80, RecoverUsedPercent: 85, BlockUsedPercent: 90, CheckIntervalSeconds: 30, UnknownBehavior: UnknownAllowWithAlarm}
 	require.NoError(t, validatePolicy(policy))
@@ -211,4 +274,28 @@ func TestListTargetsAlwaysIncludesUnifiedPhysicalFilesystem(t *testing.T) {
 	require.Equal(t, total, targets[0].CapacityBytes)
 	require.Equal(t, used, targets[0].UsedBytes)
 	require.True(t, targets[0].Available)
+}
+
+func TestListTargetsReturnsProtectedMountpointsWithGlobalPolicyState(t *testing.T) {
+	repo := &fakeRepository{policy: &Policy{
+		ID: "policy-targets", TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, WriteScope: WriteScopeAll,
+		Enabled: true, WarnUsedPercent: 80, BlockUsedPercent: 90, RecoverUsedPercent: 85,
+		CheckIntervalSeconds: 30, UnknownBehavior: UnknownAllowWithAlarm, CurrentState: StateNormal,
+		Version: 1,
+	}}
+	at := time.Now()
+	svc := NewService(repo, fakeUsageProvider{targets: []UsageSnapshot{
+		{TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, Mountpoint: "/", CapacityBytes: 1000, UsedBytes: 500, UsedRatio: .5, Available: true, ObservedAt: at, ProtectedPaths: []string{"/opt/omc/data"}},
+		{TargetType: TargetFilesystem, TargetID: "mount-data", Mountpoint: "/data", CapacityBytes: 1000, UsedBytes: 910, UsedRatio: .91, Available: true, ObservedAt: at, ProtectedPaths: []string{"/data/minio"}},
+	}}, nil, zap.NewNop())
+
+	targets, err := svc.ListTargets(context.Background())
+	require.NoError(t, err)
+	require.Len(t, targets, 2)
+	require.Equal(t, UnifiedStorageTargetID, targets[0].TargetID)
+	require.Equal(t, "mount-data", targets[1].TargetID)
+	require.Equal(t, "/data", targets[1].Mountpoint)
+	require.Equal(t, StateBlocked, targets[1].CurrentState)
+	require.Equal(t, []WriteScope{WriteScopeAll}, targets[1].WriteScopes)
+	require.Equal(t, []string{"/data/minio"}, targets[1].ProtectedPaths)
 }

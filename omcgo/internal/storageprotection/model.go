@@ -19,11 +19,13 @@ const (
 
 const (
 	// UnifiedStorageTargetID is the canonical storage-protection target for
-	// the current deployment model. All OMC containers share the host root
-	// filesystem, so capacity thresholds are evaluated once on that physical
-	// mount instead of once per component or logical data store.
+	// policy compatibility. Thresholds remain global and are stored on this
+	// target, but runtime evaluation expands it to every protected host
+	// mountpoint that contains an OMC write path.
 	UnifiedStorageTargetID   = "root"
 	UnifiedStorageMountpoint = "/"
+
+	DefaultPolicyID = "27800000-0000-4000-8000-000000000001"
 )
 
 type WriteScope string
@@ -77,28 +79,51 @@ type Policy struct {
 	UpdatedAt            time.Time       `json:"updated_at"`
 }
 
+func DefaultPolicy() Policy {
+	return Policy{
+		ID:                   DefaultPolicyID,
+		TargetType:           TargetFilesystem,
+		TargetID:             UnifiedStorageTargetID,
+		WriteScope:           WriteScopeAll,
+		Enabled:              true,
+		WarnUsedPercent:      80,
+		RecoverUsedPercent:   85,
+		BlockUsedPercent:     90,
+		CheckIntervalSeconds: 30,
+		UnknownBehavior:      UnknownAllowWithAlarm,
+		CurrentState:         StateNormal,
+		StateObservations:    0,
+		UpdatedBy:            "system",
+		Version:              1,
+	}
+}
+
 type UsageSnapshot struct {
-	TargetType    TargetType `json:"target_type"`
-	TargetID      string     `json:"target_id"`
-	CapacityBytes uint64     `json:"capacity_bytes"`
-	UsedBytes     uint64     `json:"used_bytes"`
-	UsedRatio     float64    `json:"used_ratio"`
-	ObservedAt    time.Time  `json:"observed_at"`
-	Available     bool       `json:"available"`
-	Reason        string     `json:"reason,omitempty"`
+	TargetType     TargetType `json:"target_type"`
+	TargetID       string     `json:"target_id"`
+	Mountpoint     string     `json:"mountpoint,omitempty"`
+	ProtectedPaths []string   `json:"protected_paths,omitempty"`
+	CapacityBytes  uint64     `json:"capacity_bytes"`
+	UsedBytes      uint64     `json:"used_bytes"`
+	UsedRatio      float64    `json:"used_ratio"`
+	ObservedAt     time.Time  `json:"observed_at"`
+	Available      bool       `json:"available"`
+	Reason         string     `json:"reason,omitempty"`
 }
 
 type TargetSnapshot struct {
-	TargetType    TargetType   `json:"target_type"`
-	TargetID      string       `json:"target_id"`
-	CapacityBytes uint64       `json:"capacity_bytes"`
-	UsedBytes     uint64       `json:"used_bytes"`
-	UsedRatio     float64      `json:"used_ratio"`
-	Available     bool         `json:"available"`
-	Reason        string       `json:"reason,omitempty"`
-	ObservedAt    time.Time    `json:"observed_at"`
-	CurrentState  State        `json:"current_state"`
-	WriteScopes   []WriteScope `json:"write_scopes"`
+	TargetType     TargetType   `json:"target_type"`
+	TargetID       string       `json:"target_id"`
+	Mountpoint     string       `json:"mountpoint,omitempty"`
+	ProtectedPaths []string     `json:"protected_paths,omitempty"`
+	CapacityBytes  uint64       `json:"capacity_bytes"`
+	UsedBytes      uint64       `json:"used_bytes"`
+	UsedRatio      float64      `json:"used_ratio"`
+	Available      bool         `json:"available"`
+	Reason         string       `json:"reason,omitempty"`
+	ObservedAt     time.Time    `json:"observed_at"`
+	CurrentState   State        `json:"current_state"`
+	WriteScopes    []WriteScope `json:"write_scopes"`
 }
 
 type AdmissionDecision struct {

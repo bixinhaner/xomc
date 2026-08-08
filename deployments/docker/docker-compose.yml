@@ -383,6 +383,16 @@ services:
       # 缺省空串：GOMEMLIMIT 关闭、GOMAXPROCS 由 Go 从 cgroup 推断 —— 与改造前行为一致。
       GOMEMLIMIT: "${ACS_GOMEMLIMIT:-}"
       GOMAXPROCS: "${ACS_GOMAXPROCS:-}"
+      POSTGRES_DATA_PATH: "${POSTGRES_DATA_PATH:-}"
+      TSDB_DATA_PATH: "${TSDB_DATA_PATH:-}"
+      REDIS_DATA_PATH: "${REDIS_DATA_PATH:-}"
+      REDIS_PM_DATA_PATH: "${REDIS_PM_DATA_PATH:-}"
+      NATS_DATA_PATH: "${NATS_DATA_PATH:-}"
+      MINIO_DATA_PATH: "${MINIO_DATA_PATH:-}"
+      OMCGO_DOCKER_ROOT_DIR: "${OMCGO_DOCKER_ROOT_DIR:-/var/lib/docker}"
+      OMCGO_DOCKER_VOLUME_PREFIX: "${OMCGO_DOCKER_VOLUME_PREFIX:-docker}"
+      OMCGO_HOST_LOGS_PATH: "${OMCGO_HOST_LOGS_PATH:-/opt/omc/run/logs}"
+      OMCGO_HOST_DATA_PATH: "${OMCGO_HOST_DATA_PATH:-/opt/omc/data}"
     volumes:
       - ../../run/logs/acs:/run/logs/acs
       - /etc/localtime:/etc/localtime:ro
@@ -447,6 +457,16 @@ services:
       # Go 运行时上限（resources.env 注入）；缺省空串 = 历史行为（GOMEMLIMIT 关、GOMAXPROCS 由 cgroup 推断）。
       GOMEMLIMIT: "${APP_GOMEMLIMIT:-}"
       GOMAXPROCS: "${APP_GOMAXPROCS:-}"
+      POSTGRES_DATA_PATH: "${POSTGRES_DATA_PATH:-}"
+      TSDB_DATA_PATH: "${TSDB_DATA_PATH:-}"
+      REDIS_DATA_PATH: "${REDIS_DATA_PATH:-}"
+      REDIS_PM_DATA_PATH: "${REDIS_PM_DATA_PATH:-}"
+      NATS_DATA_PATH: "${NATS_DATA_PATH:-}"
+      MINIO_DATA_PATH: "${MINIO_DATA_PATH:-}"
+      OMCGO_DOCKER_ROOT_DIR: "${OMCGO_DOCKER_ROOT_DIR:-/var/lib/docker}"
+      OMCGO_DOCKER_VOLUME_PREFIX: "${OMCGO_DOCKER_VOLUME_PREFIX:-docker}"
+      OMCGO_HOST_LOGS_PATH: "${OMCGO_HOST_LOGS_PATH:-/opt/omc/run/logs}"
+      OMCGO_HOST_DATA_PATH: "${OMCGO_HOST_DATA_PATH:-/opt/omc/data}"
     volumes:
       - ../../run/logs/app:/run/logs/app
       # 旧项目 License 公钥库，只读挂载；不是 TLS keystore。
@@ -502,6 +522,16 @@ services:
       # 缺省空串 = 历史行为（GOMEMLIMIT 关、GOMAXPROCS 由 cgroup 推断）。
       GOMEMLIMIT: "${WORKER_GOMEMLIMIT:-}"
       GOMAXPROCS: "${WORKER_GOMAXPROCS:-}"
+      POSTGRES_DATA_PATH: "${POSTGRES_DATA_PATH:-}"
+      TSDB_DATA_PATH: "${TSDB_DATA_PATH:-}"
+      REDIS_DATA_PATH: "${REDIS_DATA_PATH:-}"
+      REDIS_PM_DATA_PATH: "${REDIS_PM_DATA_PATH:-}"
+      NATS_DATA_PATH: "${NATS_DATA_PATH:-}"
+      MINIO_DATA_PATH: "${MINIO_DATA_PATH:-}"
+      OMCGO_DOCKER_ROOT_DIR: "${OMCGO_DOCKER_ROOT_DIR:-/var/lib/docker}"
+      OMCGO_DOCKER_VOLUME_PREFIX: "${OMCGO_DOCKER_VOLUME_PREFIX:-docker}"
+      OMCGO_HOST_LOGS_PATH: "${OMCGO_HOST_LOGS_PATH:-/opt/omc/run/logs}"
+      OMCGO_HOST_DATA_PATH: "${OMCGO_HOST_DATA_PATH:-/opt/omc/data}"
       PM_AGGREGATION_ENABLED: "${PM_AGGREGATION_ENABLED:-true}"
       PM_AGGREGATION_CLOSE_GRACE: "${PM_AGGREGATION_CLOSE_GRACE:-12m}"
       PM_AGGREGATION_DAILY_CLOSE_GRACE: "${PM_AGGREGATION_DAILY_CLOSE_GRACE:-15m}"

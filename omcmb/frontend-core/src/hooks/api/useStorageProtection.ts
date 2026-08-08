@@ -20,10 +20,10 @@ export function useStorageProtectionTargets() {
   });
 }
 
-export function useStorageProtectionEvents() {
+export function useStorageProtectionEvents(limit = 5) {
   return useQuery({
-    queryKey: ['system', 'storage-protection', 'events'],
-    queryFn: () => (useMock ? Promise.resolve([]) : storageProtectionApi.getEvents()),
+    queryKey: ['system', 'storage-protection', 'events', limit],
+    queryFn: () => (useMock ? Promise.resolve([]) : storageProtectionApi.getEvents(limit)),
     refetchInterval: 30_000,
   });
 }

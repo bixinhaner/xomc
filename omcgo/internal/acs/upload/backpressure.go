@@ -49,7 +49,7 @@ const (
 	bpKeyQueueOldestLow   = "queue_oldest_low_sec"
 	bpKeyQueueSlopeWindow = "queue_slope_window_sec"
 
-	bpDefaultEnabled     = true
+	bpDefaultEnabled     = false
 	bpDefaultDiskHighPct = 70.0
 	bpDefaultDiskLowPct  = 60.0
 	bpDefaultIOSomeHigh  = 70.0
@@ -66,6 +66,7 @@ const (
 	bpDefaultQueueSlopeWindow = 5 * time.Minute
 	bpMinQueueSlopeWindow     = 2 * event.QueueHealthSampleInterval
 	bpMinInterval             = 5 * time.Second
+	legacyDefaultEnabledAt    = "2026-06-17 20:08:35.34786+08"
 
 	rejectReasonResourcePressure = "resource_pressure"
 	rejectReasonInflightLimit    = "inflight_limit"
@@ -80,6 +81,24 @@ const (
 	pressureReasonQueueFailure      = "queue_sample_failure"
 	pressureReasonRecovered         = "recovered"
 )
+
+// EnsureLegacyDefaultBackpressureDisabled flips only the untouched pre-#278
+// default row. Operators who later edited the switch keep their local choice.
+func EnsureLegacyDefaultBackpressureDisabled(ctx context.Context, pool *pgxpool.Pool) error {
+	if pool == nil {
+		return nil
+	}
+	_, err := pool.Exec(ctx, `
+UPDATE sys_configs
+   SET value='false', updated_at=now()
+ WHERE category=$1
+   AND key=$2
+   AND value='true'
+   AND updated_at=$3::timestamptz`,
+		BackpressureCategory, bpKeyEnabled, legacyDefaultEnabledAt,
+	)
+	return err
+}
 
 // BackpressureGate 是 PM 上传背压门闸的最小读取接口（便于 handler 测试）。
 type BackpressureGate interface {

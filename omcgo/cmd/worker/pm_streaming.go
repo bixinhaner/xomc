@@ -298,6 +298,7 @@ func startPMExportOnly(
 		MetricDB: w.TsPool, AdhocDB: w.TsPool, TaskMetaDB: w.PgPool,
 		Uploader: w.MinIO, Bucket: exportBucket, Logger: logger,
 		TimezoneProvider: exportTimezoneProvider(tz),
+		StorageAdmission: w.StorageProtection,
 	})
 	registry.Register(exportRunner)
 	go runJobTypeWorker(ctx, registry, exportRunner.JobType(), logger)

@@ -30,6 +30,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/compress"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 )
 
 const (
@@ -54,6 +55,7 @@ type outcome int
 const (
 	outcomeError      outcome = iota // 读/写/压缩失败，保持 raw_compressed=false
 	outcomeDisabled                  // 总开关关闭，保持 raw_compressed=false
+	outcomeBlocked                   // 全局磁盘保护阻断新写入，保持 raw_compressed=false
 	outcomeEmpty                     // 对象 0 字节，无可压，保持 raw_compressed=false
 	outcomeSkippedGz                 // 已是 gzip（真机 .xml.gz 常态），可标记 raw_compressed=true
 	outcomeCompressed                // 明文压缩并回写成功，可标记 raw_compressed=true
@@ -89,6 +91,8 @@ func (o outcome) label() string {
 		return "not_found"
 	case outcomeDisabled:
 		return "disabled"
+	case outcomeBlocked:
+		return "blocked"
 	default:
 		return "error"
 	}
@@ -135,12 +139,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 
 // Archiver 异步、有界并发地对入库完成的原始对象做压缩回写。零值不可用，须经 New 构造。
 type Archiver struct {
-	baseCtx context.Context
-	store   RawStore
-	lookup  ConfigLookup
-	metrics *Metrics
-	logger  *zap.Logger
-	sem     chan struct{}
+	baseCtx   context.Context
+	store     RawStore
+	lookup    ConfigLookup
+	metrics   *Metrics
+	logger    *zap.Logger
+	sem       chan struct{}
+	admission storageprotection.WriteAdmission
+	pmBucket  string
+	mrBucket  string
 
 	mu       sync.Mutex
 	cached   bool
@@ -164,6 +171,15 @@ func New(baseCtx context.Context, store RawStore, lookup ConfigLookup, metrics *
 		logger:  logger,
 		sem:     make(chan struct{}, concurrency),
 	}
+}
+
+func (a *Archiver) SetStorageAdmission(admission storageprotection.WriteAdmission, pmBucket, mrBucket string) {
+	if a == nil {
+		return
+	}
+	a.admission = admission
+	a.pmBucket = pmBucket
+	a.mrBucket = mrBucket
 }
 
 // Schedule 非阻塞地排程一次压缩回写。并发已满则丢弃本次（记 dropped_busy）。
@@ -250,6 +266,17 @@ func (a *Archiver) compress(ctx context.Context, bucket, object string) (outcome
 	if !a.enabled(ctx) {
 		return outcomeDisabled, 0, object
 	}
+	if a.admission != nil {
+		decision, err := a.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, a.writeScope(bucket))
+		if err != nil {
+			a.warn("storage admission check", bucket, object, err)
+			return outcomeError, 0, object
+		}
+		if !decision.Allowed {
+			a.warn("storage write protected", bucket, object, errors.New(decision.Reason))
+			return outcomeBlocked, 0, object
+		}
+	}
 
 	// 廉价探测：前 2 字节命中 gzip 魔数 → 对象已压缩（真机常态），跳过整文件读写。
 	head, err := a.store.ReadHead(ctx, bucket, object, probeBytes)
@@ -317,6 +344,17 @@ func (a *Archiver) compress(ctx context.Context, bucket, object string) (outcome
 		zap.String("bucket", bucket), zap.String("object", object), zap.String("new_object", newObject),
 		zap.Int("orig_bytes", len(raw)), zap.Int("gz_bytes", len(gz)), zap.Int64("saved_bytes", saved))
 	return outcomeCompressed, saved, newObject
+}
+
+func (a *Archiver) writeScope(bucket string) storageprotection.WriteScope {
+	switch bucket {
+	case a.mrBucket:
+		return storageprotection.WriteScopeMR
+	case a.pmBucket:
+		return storageprotection.WriteScopePM
+	default:
+		return storageprotection.WriteScopeAll
+	}
 }
 
 // enabled 返回压缩回写开关，结果 TTL 缓存避免每文件查 sys_configs。
