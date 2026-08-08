@@ -26646,7 +26646,7 @@ INSERT INTO public.menus (
     30,
     '/config/northbound-page-config',
     'config/NorthboundPageConfig',
-    'ApiOutlined',
+    'GatewayOutlined',
     'show',
     'normal',
     '{"en-US":"Northbound Config","zh-CN":"北向配置"}'::jsonb
