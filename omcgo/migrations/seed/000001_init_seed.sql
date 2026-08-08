@@ -10822,7 +10822,7 @@ INSERT INTO public.sys_configs VALUES
 	('758b89d8-57e0-4253-a186-3c774d89d7e6', 'stationlog.retention', 'max_file_count', '20', 'int', '故障日志文件数配额，0=禁用仅按时间保留（#320）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('68215596-199f-4ce2-8604-958a8456ad08', 'stationlog.retention', 'cleanup_interval_minutes', '60', 'int', '基站日志清理周期分钟，范围 10..1440（#277）', false, '2026-08-07 14:14:25+08', '2026-08-07 14:14:25+08', '{}'),
 	('803bcd55-b664-40fa-9636-df327fae9fd5', 'raw_archive', 'compress_after_ingest', 'true', 'bool', '仅对新 PM/MR 原始 XML 在成功入库后尝试一次 gzip 压缩；失败不影响业务处理，不扫描历史文件（#836）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
-	('ace314eb-3fd5-4c76-9651-a370d66ad413', 'acs.backpressure', 'enabled', 'true', 'bool', 'PM 上传资源背压总开关（#318）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
+	('ace314eb-3fd5-4c76-9651-a370d66ad413', 'acs.backpressure', 'enabled', 'false', 'bool', 'PM 上传资源背压总开关（#318，默认关闭，统一磁盘拒写由存储保护策略兜底）', false, '2026-06-17 20:08:35.34786+08', '2026-08-08 09:50:00+08', '{}'),
 	('4dfc6bf8-1a60-4aee-84d5-f8af5f4f55af', 'acs.backpressure', 'disk_high_pct', '70', 'int', '数据盘使用率高水位%，达到后停收 PM 上传（#318）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('a150909e-36c3-4b6a-a856-0f5fe5d3e810', 'acs.backpressure', 'disk_low_pct', '60', 'int', '数据盘使用率低水位%，回落到此自动恢复（#318）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('9d73435a-f4dd-42ca-95a2-aa52ea35cd70', 'acs.backpressure', 'io_some_high_pct', '70', 'int', 'IO PSI some avg10 高水位%，超过停收 PM 上传', false, '2026-07-18 08:00:00+08', '2026-07-18 08:00:00+08', '{}'),
@@ -26173,6 +26173,16 @@ UPDATE sys_configs
 UPDATE sys_configs
    SET value='60', updated_at=now()
  WHERE category='acs.backpressure' AND key='disk_low_pct' AND value='75';
+
+-- PM upload backpressure is no longer exposed as the primary disk protection
+-- control. Existing untouched default rows are switched off; operator-touched
+-- rows keep their local choice.
+UPDATE sys_configs
+   SET value='false', updated_at=now()
+ WHERE category='acs.backpressure'
+   AND key='enabled'
+   AND value='true'
+   AND updated_at='2026-06-17 20:08:35.34786+08'::timestamptz;
 
 
 -- Consolidated from pre-release baseline-only migrations: main data 000003-000004 and seed 000002-000005

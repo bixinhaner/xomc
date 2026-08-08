@@ -1,7 +1,6 @@
-// #318-321 资源保留与上传背压配置（系统配置页 —— 一个 tab，4 张分类卡片）。
+// #319-321 资源保留配置（系统配置页 —— 一个 tab，3 张分类卡片）。
 //
 // 后端 sys_configs 分类（seed migrations/seed/000004，各模块热加载）：
-//   acs.backpressure     #318 PM 上传背压 watchdog（ACS 每采样周期轮询刷新）
 //   minio.retention      #319 原始件 ILM 保留天数（app RegisterSavedHook 重应用 lifecycle）
 //   stationlog.retention #320+#798 基站日志按时间保留 + 全局/每设备文件数配额（worker TTL 缓存）
 //   raw_archive          #836 PM/MR 新文件入库后一次性压缩开关（worker TTL 缓存）
@@ -94,17 +93,6 @@ const defaultPolicyFormValues: PolicyFormValues = {
 
 // 字段定义与后端 sys_configs 键 + value_type 严格对齐（seed 000004）。
 const CARDS: CardSpec[] = [
-  {
-    category: 'acs.backpressure',
-    titleKey: 'retentionBp.bp.title',
-    descKey: 'retentionBp.bp.desc',
-    fields: [
-      { key: 'enabled', type: 'bool' },
-      { key: 'disk_high_pct', type: 'int', min: 1, max: 100 },
-      { key: 'disk_low_pct', type: 'int', min: 0, max: 100 },
-      { key: 'check_interval_sec', type: 'int', min: 1, max: 3600 },
-    ],
-  },
   {
     category: 'minio.retention',
     titleKey: 'retentionBp.ilm.title',

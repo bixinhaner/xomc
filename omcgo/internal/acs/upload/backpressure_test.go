@@ -351,7 +351,12 @@ func TestQueueSignalRates_DerivesRatesAndRejectsResetOrStaleSample(t *testing.T)
 func TestQueueSignalWatchdog_UsesSamplerCacheAndFailureCannotReleasePressure(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewBackpressureMetrics(reg)
-	w := NewWatchdog(nil, nil, metrics, nil)
+	w := NewWatchdog(func(_ context.Context, category, key string) (string, bool) {
+		if category == BackpressureCategory && key == bpKeyEnabled {
+			return "true", true
+		}
+		return "", false
+	}, nil, metrics, nil)
 	w.ioPressure = nil
 	w.loadFn = nil
 	source := &queueStatsSourceStub{
@@ -385,7 +390,12 @@ func TestQueueSignalWatchdog_RecentCachedSuccessCannotHideNewerSampleFailure(t *
 		lastAttempt:      now.Add(time.Second),
 		attemptSucceeded: false,
 	}
-	w := NewWatchdog(nil, nil, NewBackpressureMetrics(nil), nil)
+	w := NewWatchdog(func(_ context.Context, category, key string) (string, bool) {
+		if category == BackpressureCategory && key == bpKeyEnabled {
+			return "true", true
+		}
+		return "", false
+	}, nil, NewBackpressureMetrics(nil), nil)
 	w.ioPressure = nil
 	w.loadFn = nil
 	w.active.Store(true)
@@ -598,7 +608,7 @@ func TestQueueSignalMetrics_ExportsStateTransitionsRatesAndFreshness(t *testing.
 func TestLoadBackpressureConfig_DefaultsAndClamp(t *testing.T) {
 	// nil lookup → 全默认。
 	def := loadBackpressureConfig(context.Background(), nil)
-	assert.True(t, def.Enabled)
+	assert.False(t, def.Enabled)
 	assert.Equal(t, 70.0, def.DiskHighPct)
 	assert.Equal(t, 60.0, def.DiskLowPct)
 	assert.Equal(t, 70.0, def.IOSomeHighPct)
