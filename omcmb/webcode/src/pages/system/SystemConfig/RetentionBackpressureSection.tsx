@@ -210,7 +210,9 @@ function StorageProtectionSection() {
   const [form] = Form.useForm<PolicyFormValues>();
   const [editingId, setEditingId] = useState<string>();
   const [editorOpen, setEditorOpen] = useState(false);
-  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [targetsRefreshing, setTargetsRefreshing] = useState(false);
+  const [policiesRefreshing, setPoliciesRefreshing] = useState(false);
+  const [eventsRefreshing, setEventsRefreshing] = useState(false);
   const { data: policies = [], isFetching: policiesFetching, refetch: refetchPolicies } = useStorageProtectionPolicies();
   const { data: targets = [], isFetching: targetsFetching, refetch: refetchTargets } = useStorageProtectionTargets();
   const { data: events = [], isFetching: eventsFetching, refetch: refetchEvents } = useStorageProtectionEvents(5);
@@ -291,18 +293,48 @@ function StorageProtectionSection() {
     }
   };
 
-  const refresh = async () => {
-    setManualRefreshing(true);
+  const refreshTargets = async () => {
+    setTargetsRefreshing(true);
     try {
-      const results = await Promise.all([refetchTargets(), refetchPolicies(), refetchEvents()]);
-      if (results.some((result) => result.isError)) {
-        throw new Error(t('common.refreshFailed'));
+      const result = await refetchTargets();
+      if (result.isError) {
+        throw result.error instanceof Error ? result.error : new Error(t('common.refreshFailed'));
       }
       message.success(t('common.refreshSuccess'));
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('common.refreshFailed'));
     } finally {
-      setManualRefreshing(false);
+      setTargetsRefreshing(false);
+    }
+  };
+
+  const refreshPolicies = async () => {
+    setPoliciesRefreshing(true);
+    try {
+      const result = await refetchPolicies();
+      if (result.isError) {
+        throw result.error instanceof Error ? result.error : new Error(t('common.refreshFailed'));
+      }
+      message.success(t('common.refreshSuccess'));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t('common.refreshFailed'));
+    } finally {
+      setPoliciesRefreshing(false);
+    }
+  };
+
+  const refreshEvents = async () => {
+    setEventsRefreshing(true);
+    try {
+      const result = await refetchEvents();
+      if (result.isError) {
+        throw result.error instanceof Error ? result.error : new Error(t('common.refreshFailed'));
+      }
+      message.success(t('common.refreshSuccess'));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t('common.refreshFailed'));
+    } finally {
+      setEventsRefreshing(false);
     }
   };
 
@@ -322,8 +354,8 @@ function StorageProtectionSection() {
         extra={
           <Button
             icon={<ReloadOutlined />}
-            loading={manualRefreshing || targetsFetching || policiesFetching || eventsFetching}
-            onClick={() => void refresh()}
+            loading={targetsRefreshing || targetsFetching}
+            onClick={() => void refreshTargets()}
           >
             {t('common.refresh')}
           </Button>
@@ -366,19 +398,30 @@ function StorageProtectionSection() {
         loading={policiesFetching}
         title={<Space><SettingOutlined />{t('system.storageProtection.policySummary')}</Space>}
         style={{ marginBottom: 16 }}
-        extra={policy && (
+        extra={(
           <Space wrap>
-            <Popconfirm
-              title={t(policy.enabled ? 'system.storageProtection.disableConfirm' : 'system.storageProtection.enableConfirm')}
-              onConfirm={() => void togglePolicy(!policy.enabled)}
-              okText={t('common.confirm')}
-              cancelText={t('common.cancel')}
+            <Button
+              icon={<ReloadOutlined />}
+              loading={policiesRefreshing || policiesFetching}
+              onClick={() => void refreshPolicies()}
             >
-              <Button loading={updatePolicy.isPending}>
-                {t(policy.enabled ? 'system.storageProtection.disablePolicy' : 'system.storageProtection.enablePolicy')}
-              </Button>
-            </Popconfirm>
-            <Button type="primary" onClick={() => startEdit(policy)}>{t('common.edit')}</Button>
+              {t('common.refresh')}
+            </Button>
+            {policy && (
+              <>
+                <Popconfirm
+                  title={t(policy.enabled ? 'system.storageProtection.disableConfirm' : 'system.storageProtection.enableConfirm')}
+                  onConfirm={() => void togglePolicy(!policy.enabled)}
+                  okText={t('common.confirm')}
+                  cancelText={t('common.cancel')}
+                >
+                  <Button loading={updatePolicy.isPending}>
+                    {t(policy.enabled ? 'system.storageProtection.disablePolicy' : 'system.storageProtection.enablePolicy')}
+                  </Button>
+                </Popconfirm>
+                <Button type="primary" onClick={() => startEdit(policy)}>{t('common.edit')}</Button>
+              </>
+            )}
           </Space>
         )}
       >
@@ -427,7 +470,21 @@ function StorageProtectionSection() {
         )}
       </Card>
 
-      <Card title={t('system.storageProtection.audit')} size="small" style={{ marginBottom: 16 }} loading={eventsFetching}>
+      <Card
+        title={t('system.storageProtection.audit')}
+        size="small"
+        style={{ marginBottom: 16 }}
+        loading={eventsFetching}
+        extra={(
+          <Button
+            icon={<ReloadOutlined />}
+            loading={eventsRefreshing || eventsFetching}
+            onClick={() => void refreshEvents()}
+          >
+            {t('common.refresh')}
+          </Button>
+        )}
+      >
         {events.length > 0 ? (
           <Space direction="vertical" style={{ width: '100%' }}>
             {events.map((event) => (
