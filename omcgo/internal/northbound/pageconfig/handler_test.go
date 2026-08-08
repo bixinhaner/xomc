@@ -306,7 +306,7 @@ func (r *fakeRepository) LoadMRRows(context.Context, string, int) ([]ExportDataR
 	return r.mrRows, nil
 }
 
-func (r *fakeRepository) LoadLogRows(context.Context, string, int) ([]ExportDataRow, error) {
+func (r *fakeRepository) LoadLogRows(context.Context, string, time.Time, time.Time, int) ([]ExportDataRow, error) {
 	return r.logRows, nil
 }
 
@@ -327,6 +327,16 @@ func (r *fakeRepository) ListPMMetricFields(context.Context, FieldFilter) ([]Fie
 		CnName:        "PUSCH PRB 使用率",
 		SupportStatus: SupportSupported,
 	}}, nil
+}
+
+func (r *fakeRepository) ListDeviceInfoFields(_ context.Context, filter FieldFilter) ([]FieldDefinition, error) {
+	fields := make([]FieldDefinition, 0, 3)
+	for _, column := range []string{"device_name", "project_status", "last_offline_time"} {
+		if field, ok := optionalDeviceInfoFieldFromColumn(filter.Domain, filter.ObjectCode, column, "text"); ok {
+			fields = append(fields, field)
+		}
+	}
+	return fields, nil
 }
 
 func (r *fakeRepository) ValidatePMMetricPaths(_ context.Context, metricPaths []string) ([]string, error) {
@@ -668,6 +678,29 @@ func TestPMFieldsComeFromRepositoryWhenConfigured(t *testing.T) {
 	require.Contains(t, rr.Body.String(), `pm_metrics.metric_path`)
 }
 
+func TestDeviceInfoFieldsComeFromRepositoryWhenConfigured(t *testing.T) {
+	r := setupTestRouterWithRepository(newFakeRepository())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/page-config/fields?domain=CM&object=CP", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), `"system_field":"device_info.project_status"`)
+}
+
+func TestInventoryDeviceInfoFieldsComeFromRepositoryWhenConfigured(t *testing.T) {
+	r := setupTestRouterWithRepository(newFakeRepository())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/page-config/fields?domain=INVENTORY&object=gNB", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), `"domain":"INVENTORY"`)
+	require.Contains(t, rr.Body.String(), `"system_field":"device_info.project_status"`)
+}
+
 func TestPreviewFileProfileRendersTemplates(t *testing.T) {
 	r := setupTestRouterWithRepository(newFakeRepository())
 
@@ -679,6 +712,81 @@ func TestPreviewFileProfileRendersTemplates(t *testing.T) {
 	require.Contains(t, rr.Body.String(), `"profile_code":"S0001"`)
 	require.Contains(t, rr.Body.String(), `"preview_path":"/northupload/GD/BaiOMC/CM/20260804000000/"`)
 	require.Contains(t, rr.Body.String(), `"preview_artifact_name":"Baicells-CP-127.0.0.1-1.0-20260804000000.xml.zip"`)
+}
+
+func TestRenderCustomLogRowsMatchesLegacyHeaders(t *testing.T) {
+	rows := []ExportDataRow{{
+		"log.log_time":       "2026-08-07 15:30:21",
+		"log.login_time":     "2026-08-07 15:30:21",
+		"log.operation_time": "2026-08-07 15:30:21",
+		"log.account_name":   "admin",
+		"log.terminal_name":  "Browser",
+		"log.terminal_ip":    "10.10.10.100",
+		"log.result":         "success",
+		"log.main_name":      "admin",
+		"log.log_name":       "Update",
+		"log.detail":         "changed config",
+	}}
+
+	loginContent, count, err := renderLogRows("login", rows)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Contains(t, loginContent, "log_time|sys_source_name|account_name|terminal_name|terminal_ip|log_result|log_start_time|log_end_time\n")
+	require.Contains(t, loginContent, "2026-08-07 15:30:21|baicells omc|admin|Browser|10.10.10.100|success|2026-08-07 15:30:21|2026-08-07 15:30:21\n")
+
+	operationContent, count, err := renderLogRows("operation", rows)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Contains(t, operationContent, "log_time|sys_source_name|terminal_name|terminal_ip|main_name|sub_account|asset_name|asset_ip|asset_port|asset_attribute|log_data\n")
+	require.Contains(t, operationContent, "\"{\"Update\",\"changed config\",\"success\"}\"")
+}
+
+func TestRenderFixedLogRowsQuotesAllFields(t *testing.T) {
+	rows := []ExportDataRow{{
+		"log.id":             "10234",
+		"log.user_name":      "admin",
+		"log.ip_address":     "10.10.10.100",
+		"log.log_name":       "LoginLogout",
+		"log.detail":         "login success",
+		"log.result_text":    "Success",
+		"log.failure_reason": " ",
+		"log.login_time":     "2026-08-07 15:30:21",
+		"log.op_start_time":  "2026-08-07 15:30:21",
+		"log.op_end_time":    "2026-08-07 15:30:22",
+	}}
+
+	securityContent, count, err := renderLogRows("login_fix", rows)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, "\"ID\",\"User Name\",\"IP Address\",\"Log Name\",\"Record Detail\",\"Results\",\"Failure Reason\",\"Time\"\n\"10234\",\"admin\",\"10.10.10.100\",\"LoginLogout\",\"login success\",\"Success\",\" \",\"2026-08-07 15:30:21\t\"\n", securityContent)
+
+	operationContent, count, err := renderLogRows("operation_fix", rows)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, "\"User Name\",\"IP Address\",\"Log Name\",\"Record Detail\",\"Results\",\"Failure Reason\",\"Op Start Time\",\"Op End Time\"\n\"admin\",\"10.10.10.100\",\"LoginLogout\",\"login success\",\"Success\",\" \",\"2026-08-07 15:30:21\t\",\"2026-08-07 15:30:22\t\"\n", operationContent)
+}
+
+func TestRenderLogArtifactNameMatchesLegacyFiles(t *testing.T) {
+	group := FileGroup{
+		Domain:             DomainLOG,
+		Format:             FormatCSV,
+		Period:             Period24H,
+		PathTemplate:       pathLOG,
+		FileNameTemplate:   "#Object#_#PeriodStartTime#-24H.csv",
+		CompressionEnabled: true,
+		CompressionFormat:  CompressionGz,
+	}
+	windowStart := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
+	windowEnd := time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)
+
+	path, name := renderArtifactName(group, ScenarioObject{Code: "login_fix"}, windowStart, windowEnd, 1)
+	require.Equal(t, "/northupload/LOGS/20260807/", path)
+	require.Equal(t, "SecurityLogs_20260807000000-24H.csv.gz", name)
+
+	group.Format = FormatTXT
+	path, name = renderArtifactName(group, ScenarioObject{Code: "operation"}, windowStart, windowEnd, 1)
+	require.Equal(t, "/northupload/LOGS/20260807/", path)
+	require.Equal(t, "oper_20260807.txt.gz", name)
 }
 
 func TestValidateRejectsInventoryAsFileProfile(t *testing.T) {

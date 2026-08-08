@@ -47,6 +47,7 @@ import type {
   NorthboundAPIConfig,
   NorthboundAPIClient,
   NorthboundDeliveryTarget,
+  NorthboundFieldDefinition,
   NorthboundInventoryField,
   NorthboundInventoryProfile,
   NorthboundPageConfigEvent,
@@ -159,6 +160,7 @@ interface FileProfileEditorValues {
   scenarioNameEn?: string;
   name: string;
   description?: string;
+  domains?: Domain[];
   enabled?: boolean;
 }
 
@@ -250,10 +252,10 @@ const snmpAuthProtocolOptions = [
 ];
 
 const snmpPrivProtocolOptions = [
+  { label: 'DES', value: 'DES' },
   { label: 'AES128', value: 'AES128' },
   { label: 'AES192', value: 'AES192' },
   { label: 'AES256', value: 'AES256' },
-  { label: 'DES', value: 'DES' },
 ];
 
 interface SocketAlarmConfigRow {
@@ -378,13 +380,13 @@ interface FieldTarget {
 const PATH_CM = '/#FTPRoot#/#Province#/#OMC-R#/CM/#DateTime#/';
 const PATH_PM = '/#FTPRoot#/#Province#/#OMC-R#/PM/#DateTime#/';
 const PATH_MR = '/#FTPRoot#/#Province#/#OMC-R#/MR/#DateTime#/';
-const PATH_LOG = '/#FTPRoot#/#Province#/#OMC-R#/LOGS/#DateTime#/';
+const PATH_LOG = '/#FTPRoot#/LOGS/#Date#/';
 const PATH_INVENTORY = '/#FTPRoot#/#Province#/#OMC-R#/Inventory/#Object#/#DateTime#/';
 const CM_NAME = 'Baicells-#Object#-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#][-#FileID#]';
 const PM_NAME = 'Baicells-#Object#-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#]-#DataPeriod#[-#FileID#]';
 const MR_NAME = '#ModuleType#-Baicells-#Object#-#LocalHost#-#eNBID#-#DateTime#[-#Ri#].xml';
-const LOG_CUSTOM_NAME = 'Northbound-log-{login|operation}-#DateTime#.txt';
-const LOG_FIX_NAME = 'Northbound-log-fix-{login|operation}-#DateTime#.csv';
+const LOG_CUSTOM_NAME = '#Object#_#Date#.txt';
+const LOG_FIX_NAME = '#Object#_#PeriodStartTime#-24H.csv';
 const INVENTORY_NAME = 'BaiOMC_#Object#_#DateTime#.csv';
 
 const domainOptions = [
@@ -449,11 +451,11 @@ const startMinuteOptions = Array.from({ length: 60 }, (_, minute) => String(minu
 
 const scopeOptions = [
   { label: '默认', value: '默认' },
-  { label: 'LTE', value: 'LTE' },
+  { label: 'ENB/LTE', value: 'LTE' },
   { label: 'GNB', value: 'GNB' },
   { label: 'GSM', value: 'GSM' },
-  { label: 'LTE/GNB', value: 'LTE/GNB' },
-  { label: 'LTE/GSM', value: 'LTE/GSM' },
+  { label: 'ENB/LTE+GNB', value: 'LTE/GNB' },
+  { label: 'ENB/LTE+GSM', value: 'LTE/GSM' },
   { label: 'custom', value: 'custom' },
   { label: 'fix', value: 'fix' },
 ];
@@ -464,10 +466,12 @@ const compressionFormatOptions = [
 ];
 
 const allProductClassValue = 'ALL';
+const fieldCandidateDefaultOptionLimit = 10;
+const fieldCandidateSearchOptionLimit = 50;
 
 const fieldTechFilterOptions: Array<{ label: string; value: FieldTechFilter }> = [
   { label: '全部制式', value: 'ALL' },
-  { label: 'LTE', value: 'LTE' },
+  { label: 'ENB/LTE', value: 'LTE' },
   { label: 'GNB', value: 'GNB' },
   { label: 'GSM', value: 'GSM' },
 ];
@@ -476,8 +480,20 @@ const objectOptionsByDomain: Record<Domain, Array<{ label: string; value: string
   CM: ['CP', 'EP', 'CC', 'CE', 'COMS'].map((value) => ({ label: value, value })),
   PM: ['PC', 'PE'].map((value) => ({ label: value, value })),
   MR: ['MRO', 'MRE', 'MRS'].map((value) => ({ label: value, value })),
-  LOG: ['登录日志', '操作日志', '登录固定格式', '操作固定格式'].map((value) => ({ label: value, value })),
+  LOG: [
+    { label: '登录/安全日志', value: 'login' },
+    { label: '操作日志', value: 'operation' },
+    { label: '登录/安全日志（固定格式）', value: 'login_fix' },
+    { label: '操作日志（固定格式）', value: 'operation_fix' },
+  ],
   INVENTORY: ['eNB', 'gNB', 'GSM', 'OMC'].map((value) => ({ label: value, value })),
+};
+
+const logObjectLabelByCode: Record<string, string> = {
+  login: '登录/安全日志',
+  operation: '操作日志',
+  login_fix: '登录/安全日志（固定格式）',
+  operation_fix: '操作日志（固定格式）',
 };
 
 const cmObjects: ScenarioObject[] = [{ code: 'CP' }, { code: 'EP' }, { code: 'CC' }, { code: 'CE' }];
@@ -951,21 +967,38 @@ const mrFieldsByObject: Record<string, FieldDefinition[]> = {
 };
 
 const logFieldDefinitions: FieldDefinition[] = [
-  ['login_time', 'log.login_time', 'audit_logs.created_at', 'datetime', 'yyyy-MM-dd HH:mm:ss', '登录时间'],
-  ['username', 'log.username', 'audit_logs.username', 'string', 'quote', '用户名'],
-  ['client_ip', 'log.client_ip', 'audit_logs.client_ip', 'string', 'quote', '客户端 IP'],
-  ['operation_time', 'log.operation_time', 'operation_logs.created_at', 'datetime', 'yyyy-MM-dd HH:mm:ss', '操作时间'],
-  ['operator', 'log.operator', 'operation_logs.operator', 'string', 'quote', '操作人'],
-  ['module', 'log.module', 'operation_logs.module', 'string', 'quote', '模块'],
-  ['action', 'log.action', 'operation_logs.action', 'string', 'quote', '动作'],
-  ['result', 'log.result', 'audit_logs.result / operation_logs.result', 'string', 'enum', '结果'],
+  ['log_time', 'log.log_time', 'sys_login_logs.login_at / sys_oper_logs.created_at', 'datetime', 'yyyy-MM-dd HH:mm:ss', '日志时间'],
+  ['sys_source_name', 'log.sys_source_name', '系统固定值 baicells omc', 'string', 'quote', '系统来源'],
+  ['account_name', 'log.account_name', 'sys_login_logs.username', 'string', 'quote', '账号名称'],
+  ['terminal_name', 'log.terminal_name', '浏览器 / 客户端标识', 'string', 'quote', '终端名称'],
+  ['terminal_ip', 'log.terminal_ip', 'sys_login_logs.ip_address / sys_oper_logs.ip_address', 'string', 'quote', '终端 IP'],
+  ['log_result', 'log.result', '日志状态', 'string', 'enum', '日志结果'],
+  ['log_start_time', 'log.log_start_time', 'sys_login_logs.login_at', 'datetime', 'yyyy-MM-dd HH:mm:ss', '日志开始时间'],
+  ['log_end_time', 'log.log_end_time', 'sys_login_logs.login_at', 'datetime', 'yyyy-MM-dd HH:mm:ss', '日志结束时间'],
+  ['main_name', 'log.main_name', 'sys_oper_logs.username', 'string', 'quote', '主账号'],
+  ['sub_account', 'log.sub_account', '空值占位', 'string', 'quote', '子账号'],
+  ['asset_name', 'log.asset_name', '空值占位', 'string', 'quote', '资产名称'],
+  ['asset_ip', 'log.asset_ip', '空值占位', 'string', 'quote', '资产 IP'],
+  ['asset_port', 'log.asset_port', '空值占位', 'string', 'quote', '资产端口'],
+  ['asset_attribute', 'log.asset_attribute', '空值占位', 'string', 'quote', '资产属性'],
+  ['log_data', 'log.detail', 'sys_oper_logs.action / detail / status', 'string', 'quote', '日志数据'],
+  ['ID', 'log.id', 'sys_login_logs.id', 'string', 'quote', 'ID'],
+  ['User Name', 'log.user_name', 'sys_login_logs.username / sys_oper_logs.username', 'string', 'quote', '用户名称'],
+  ['IP Address', 'log.ip_address', 'sys_login_logs.ip_address / sys_oper_logs.ip_address', 'string', 'quote', 'IP 地址'],
+  ['Log Name', 'log.log_name', '登录/操作名称', 'string', 'quote', '日志名称'],
+  ['Record Detail', 'log.detail', '日志详情', 'string', 'quote', '记录详情'],
+  ['Results', 'log.result_text', '日志状态', 'string', 'enum', '结果'],
+  ['Failure Reason', 'log.failure_reason', '失败原因', 'string', 'quote', '失败原因'],
+  ['Time', 'log.login_time', 'sys_login_logs.login_at', 'datetime', 'yyyy-MM-dd HH:mm:ss', '时间'],
+  ['Op Start Time', 'log.op_start_time', 'sys_oper_logs.created_at', 'datetime', 'yyyy-MM-dd HH:mm:ss', '操作开始时间'],
+  ['Op End Time', 'log.op_end_time', 'sys_oper_logs.created_at + cost_ms', 'datetime', 'yyyy-MM-dd HH:mm:ss', '操作结束时间'],
 ].map(([outputAlias, systemField, source, dataType, renderer, cnName]) => ({ outputAlias, systemField, source, dataType, renderer, cnName }));
 
 const logFieldsByObject: Record<string, FieldDefinition[]> = {
-  登录日志: logFieldDefinitions.filter((field) => ['login_time', 'username', 'client_ip', 'result'].includes(field.outputAlias)),
-  操作日志: logFieldDefinitions.filter((field) => ['operation_time', 'operator', 'module', 'action', 'result'].includes(field.outputAlias)),
-  登录固定格式: logFieldDefinitions.filter((field) => ['login_time', 'username', 'client_ip', 'result'].includes(field.outputAlias)),
-  操作固定格式: logFieldDefinitions.filter((field) => ['operation_time', 'operator', 'module', 'action', 'result'].includes(field.outputAlias)),
+  login: logFieldDefinitions.filter((field) => ['log_time', 'sys_source_name', 'account_name', 'terminal_name', 'terminal_ip', 'log_result', 'log_start_time', 'log_end_time'].includes(field.outputAlias)),
+  operation: logFieldDefinitions.filter((field) => ['log_time', 'sys_source_name', 'terminal_name', 'terminal_ip', 'main_name', 'sub_account', 'asset_name', 'asset_ip', 'asset_port', 'asset_attribute', 'log_data'].includes(field.outputAlias)),
+  login_fix: logFieldDefinitions.filter((field) => ['ID', 'User Name', 'IP Address', 'Log Name', 'Record Detail', 'Results', 'Failure Reason', 'Time'].includes(field.outputAlias)),
+  operation_fix: logFieldDefinitions.filter((field) => ['User Name', 'IP Address', 'Log Name', 'Record Detail', 'Results', 'Failure Reason', 'Op Start Time', 'Op End Time'].includes(field.outputAlias)),
 };
 
 const extraFieldDefinitionsByDomainObject: Partial<Record<Domain, Record<string, FieldDefinition[]>>> = {
@@ -1002,21 +1035,23 @@ const extraFieldDefinitionsByDomainObject: Partial<Record<Domain, Record<string,
     ].map(([outputAlias, systemField, source, dataType, renderer, cnName]) => ({ outputAlias, systemField, source, dataType, renderer, cnName })),
   },
   LOG: {
-    登录日志: [
-      ['request_id', 'log.request_id', 'audit_logs.request_id', 'string', 'quote', '请求 ID'],
-      ['user_agent', 'log.user_agent', 'audit_logs.user_agent', 'string', 'quote', '客户端标识'],
+    login: [
+      ['browser', 'log.browser', 'sys_login_logs.browser', 'string', 'quote', '浏览器'],
+      ['os', 'log.os', 'sys_login_logs.os', 'string', 'quote', '操作系统'],
     ].map(([outputAlias, systemField, source, dataType, renderer, cnName]) => ({ outputAlias, systemField, source, dataType, renderer, cnName })),
-    操作日志: [
-      ['request_id', 'log.request_id', 'operation_logs.request_id', 'string', 'quote', '请求 ID'],
-      ['resource', 'log.resource', 'operation_logs.resource', 'string', 'quote', '资源对象'],
+    operation: [
+      ['action', 'log.action', 'sys_oper_logs.action', 'string', 'quote', '操作动作'],
+      ['resource', 'log.resource', 'sys_oper_logs.target', 'string', 'quote', '资源对象'],
+      ['user_agent', 'log.user_agent', 'sys_oper_logs.user_agent', 'string', 'quote', '客户端标识'],
     ].map(([outputAlias, systemField, source, dataType, renderer, cnName]) => ({ outputAlias, systemField, source, dataType, renderer, cnName })),
-    登录固定格式: [
-      ['request_id', 'log.request_id', 'audit_logs.request_id', 'string', 'quote', '请求 ID'],
-      ['user_agent', 'log.user_agent', 'audit_logs.user_agent', 'string', 'quote', '客户端标识'],
+    login_fix: [
+      ['browser', 'log.browser', 'sys_login_logs.browser', 'string', 'quote', '浏览器'],
+      ['os', 'log.os', 'sys_login_logs.os', 'string', 'quote', '操作系统'],
     ].map(([outputAlias, systemField, source, dataType, renderer, cnName]) => ({ outputAlias, systemField, source, dataType, renderer, cnName })),
-    操作固定格式: [
-      ['request_id', 'log.request_id', 'operation_logs.request_id', 'string', 'quote', '请求 ID'],
-      ['resource', 'log.resource', 'operation_logs.resource', 'string', 'quote', '资源对象'],
+    operation_fix: [
+      ['action', 'log.action', 'sys_oper_logs.action', 'string', 'quote', '操作动作'],
+      ['resource', 'log.resource', 'sys_oper_logs.target', 'string', 'quote', '资源对象'],
+      ['user_agent', 'log.user_agent', 'sys_oper_logs.user_agent', 'string', 'quote', '客户端标识'],
     ].map(([outputAlias, systemField, source, dataType, renderer, cnName]) => ({ outputAlias, systemField, source, dataType, renderer, cnName })),
   },
   INVENTORY: {
@@ -1156,6 +1191,82 @@ const inventoryTypeOptions: Array<{ label: string; value: InventoryType }> = [
   { label: 'GSM', value: 'GSM' },
   { label: 'OMC', value: 'OMC' },
 ];
+
+const deviceInfoFieldDefinitions = [
+  ['device_id', 'Device Info Device ID', '设备信息设备 ID', 'string', 'quote'],
+  ['device_name', 'Device Name', '设备名称', 'string', 'quote'],
+  ['address', 'Address', '安装地址', 'string', 'quote'],
+  ['remark', 'Remark', '备注', 'string', 'quote'],
+  ['project_status', 'Project Status', '工程状态', 'string', 'quote'],
+  ['height', 'Height', '海拔/高度', 'number', 'number'],
+  ['eci', 'ECI', 'ECI', 'string', 'preserve text'],
+  ['pci', 'PCI', 'PCI', 'string', 'preserve text'],
+  ['cell_id', 'Cell ID', '小区 ID', 'string', 'quote'],
+  ['freq_point', 'Frequency Point', '频点', 'number', 'preserve text'],
+  ['bandwidth', 'Bandwidth', '带宽', 'number', 'number'],
+  ['transmit_power', 'Transmit Power', '发射功率', 'number', 'number'],
+  ['plmn', 'PLMN', 'PLMN', 'string', 'preserve text'],
+  ['rf_status', 'RF Status', '射频状态', 'string', 'enum'],
+  ['cell_status', 'Cell Status', '小区状态', 'string', 'enum'],
+  ['mme_status', 'MME Status', 'MME/AMF 状态', 'string', 'enum'],
+  ['sync_status', 'Sync Status', '同步状态', 'string', 'enum'],
+  ['kpi_status', 'KPI Report Status', 'KPI 上报状态', 'string', 'enum'],
+  ['num_of_cells', 'Number of Cells', '小区数量', 'number', 'number'],
+  ['gps_status', 'GPS Status', 'GPS 状态', 'string', 'enum'],
+  ['alarm_severity', 'Alarm Severity', '告警级别', 'string', 'enum'],
+  ['license_status', 'License Status', 'License 状态', 'string', 'enum'],
+  ['mac', 'MAC Address', 'MAC 地址', 'string', 'quote'],
+  ['hardware_version', 'Hardware Version', '硬件版本', 'string', 'quote'],
+  ['first_online_time', 'First Online Time', '首次上线时间', 'datetime', 'yyyy-MM-dd HH:mm:ss'],
+  ['last_online_time', 'Last Online Time', '最近上线时间', 'datetime', 'yyyy-MM-dd HH:mm:ss'],
+  ['last_offline_time', 'Last Offline Time', '最近离线时间', 'datetime', 'yyyy-MM-dd HH:mm:ss'],
+  ['run_time', 'Run Time', '运行时长', 'number', 'number'],
+  ['creator', 'Creator', '创建人', 'string', 'quote'],
+  ['updater', 'Updater', '更新人', 'string', 'quote'],
+  ['created_at', 'Created At', '创建时间', 'datetime', 'yyyy-MM-dd HH:mm:ss'],
+  ['updated_at', 'Updated At', '更新时间', 'datetime', 'yyyy-MM-dd HH:mm:ss'],
+  ['tac', 'TAC', 'TAC', 'string', 'quote'],
+  ['band', 'Band', '频段', 'string', 'quote'],
+  ['ul_earfcn', 'UL EARFCN', '上行频点', 'number', 'preserve text'],
+  ['subframe_assignment', 'Subframe Assignment', '子帧配比', 'string', 'quote'],
+  ['special_subframe', 'Special Subframe', '特殊子帧配比', 'string', 'quote'],
+  ['root_index', 'Root Index', '根序列索引', 'number', 'preserve text'],
+  ['gps_satellites', 'GPS Satellites', 'GPS 卫星数', 'number', 'number'],
+  ['gps_height', 'GPS Height', 'GPS 高度', 'number', 'number'],
+  ['lock_status', 'Lock Status', '锁定状态', 'string', 'enum'],
+  ['enb_id', 'eNB ID', '基站 ID', 'string', 'quote'],
+  ['network_model', 'Network Model', '网络制式/双工模式', 'string', 'enum'],
+  ['lac', 'LAC', 'LAC', 'string', 'quote'],
+  ['cumulative_online_duration', 'Cumulative Online Duration', '累计在线时长', 'number', 'number'],
+  ['op_state', 'Operation State', '激活状态', 'string', 'enum'],
+  ['admin_state', 'Admin State', '管理状态', 'string', 'enum'],
+  ['ipsec_addr', 'IPsec Address', 'IPsec 地址', 'string', 'quote'],
+  ['bsc_select', 'BSC Select', 'BSC 主备选择', 'string', 'enum'],
+  ['oml_remote_ip', 'OML Remote IP', 'OML 主 BSC IP', 'string', 'quote'],
+  ['oml_remote_ip_bak', 'OML Remote IP Backup', 'OML 备 BSC IP', 'string', 'quote'],
+  ['ipa_unit_id', 'IPA Unit ID', 'IPA Unit ID', 'string', 'quote'],
+  ['ue_count', 'UE Count', 'UE 数', 'number', 'number'],
+  ['active_alarm_count', 'Active Alarm Count', '活动告警数', 'number', 'number'],
+  ['name_sync_pending', 'Name Sync Pending', '名称同步待处理', 'bool', 'enum'],
+  ['lmt_device_name', 'LMT Device Name', 'LMT 设备名称', 'string', 'quote'],
+  ['highest_alarm_severity', 'Highest Alarm Severity', '最高告警级别', 'number', 'number'],
+  ['highest_severity_alarm_count', 'Highest Severity Alarm Count', '最高级别告警数量', 'number', 'number'],
+] satisfies Array<[string, string, string, string, string]>;
+
+const deviceInfoInventoryFields: InventoryField[] = inventoryTypeOptions
+  .filter((option) => option.value !== 'OMC')
+  .flatMap((option) => deviceInfoFieldDefinitions.map(([column, outputAlias, , dataType, renderer]) => ({
+    key: `${option.value.toLowerCase()}-device-info-${column}`,
+    template: option.value,
+    column: inventoryAliasByType[option.value][outputAlias] ?? outputAlias,
+    exportKey: `device_info.${column}`,
+    source: `device_info.${column}`,
+    dataType,
+    renderer,
+    enabled: true,
+  })));
+
+const inventoryAvailableFields = [...inventoryFields, ...deviceInfoInventoryFields];
 
 const deliveryProtocolOptions: Array<{ label: string; value: DeliveryProtocol }> = [
   { label: 'SFTP', value: 'SFTP' },
@@ -1312,7 +1423,7 @@ const snmpAlarmTargets: SnmpAlarmTargetRow[] = [
     mibQueryEnabled: true,
     clearSeverityPolicy: '保留原级别',
     timeoutSeconds: 5,
-    retries: 3,
+    retries: 1,
   },
   {
     key: 'snmp-v3-inform',
@@ -1325,11 +1436,11 @@ const snmpAlarmTargets: SnmpAlarmTargetRow[] = [
     targetPort: 163,
     securityName: 'notifyV3',
     authProtocol: 'SHA',
-    privProtocol: 'AES128',
+    privProtocol: 'DES',
     mibQueryEnabled: false,
-    clearSeverityPolicy: '清除置 0',
+    clearSeverityPolicy: '保留原级别',
     timeoutSeconds: 5,
-    retries: 3,
+    retries: 1,
   },
 ];
 
@@ -1572,9 +1683,9 @@ const reportStatusSamples: Record<string, Partial<ReportStatusInfo>> = {
     artifactName: 'omcAlarmNotification notificationID=920171',
     artifactPath: 'snmp://10.10.41.12:163',
     size: '1.3 KB',
-    targetSummary: 'Inform 等待响应超时，已重试 3 次',
+    targetSummary: 'Inform 等待响应超时，已重试 1 次',
     detail: '目标未返回 Inform ACK，建议检查 NMS 地址、安全用户和防火墙。',
-    payload: 'version=v3; user=notifyV3; auth=SHA; priv=AES128; notificationID=920171; perceivedSeverity=minor; result=timeout',
+    payload: 'version=v3; user=notifyV3; auth=SHA; priv=DES; notificationID=920171; perceivedSeverity=minor; result=timeout',
   },
 };
 
@@ -2833,14 +2944,17 @@ function parseObjectToken(token: string): { code: string; tech?: Tech } {
 
 function formatObjectToken(token: string): string {
   const parsed = parseObjectToken(token);
+  if (!parsed.tech && logObjectLabelByCode[parsed.code]) return logObjectLabelByCode[parsed.code];
   return parsed.tech ? `${parsed.code} / ${parsed.tech}` : parsed.code;
 }
 
 function formatFieldTargetLabel(target: FieldTarget): string {
-  return target.objectCode;
+  const tech = getTargetTech(target);
+  return tech ? `${target.objectCode} / ${tech}` : target.objectCode;
 }
 
 function formatReportFieldObject(row: ReportFieldRow): string {
+  if (row.domain === 'LOG' && logObjectLabelByCode[row.objectCode]) return logObjectLabelByCode[row.objectCode];
   return row.objectCode;
 }
 
@@ -2873,7 +2987,7 @@ function rowMatchesTechFilter(row: ReportFieldRow, filter: FieldTechFilter): boo
 function getPmTechsFromScope(scope: string): Tech[] {
   const scopeText = scope.toUpperCase();
   const techs: Tech[] = [];
-  if (scopeText.includes('LTE')) techs.push('LTE');
+  if (scopeText.includes('LTE') || scopeText.includes('ENB')) techs.push('LTE');
   if (scopeText.includes('GNB')) techs.push('GNB');
   if (scopeText.includes('GSM')) techs.push('GSM');
   return techs.length > 0 ? [...new Set(techs)] : ['LTE'];
@@ -2989,10 +3103,23 @@ function getInventoryFieldRows(target: FieldTarget): ReportFieldRow[] {
     }));
 }
 
+const pmFieldRowsCache = new WeakMap<PmMetric[], Map<string, ReportFieldRow[]>>();
+
 function getPmFieldRows(target: FieldTarget, metrics: PmMetric[], limit?: number): ReportFieldRow[] {
   const tech = getTargetTech(target);
   if (!tech) return [];
-  const profileMetrics = metrics.filter((metric) => metric.tech === tech && metric.profile === target.profile);
+  let metricCache = pmFieldRowsCache.get(metrics);
+  if (!metricCache) {
+    metricCache = new Map<string, ReportFieldRow[]>();
+    pmFieldRowsCache.set(metrics, metricCache);
+  }
+  const cacheKey = `${target.objectCode}:${target.scope}:${target.profile}:${tech}:${limit ?? 'all'}`;
+  const cachedRows = metricCache.get(cacheKey);
+  if (cachedRows) return cachedRows;
+  const exactProfileMetrics = metrics.filter((metric) => metric.tech === tech && metric.profile === target.profile);
+  const profileMetrics = exactProfileMetrics.length > 0
+    ? exactProfileMetrics
+    : metrics.filter((metric) => metric.tech === tech && target.objectCode === 'PC');
   if (profileMetrics.length === 0) return [];
   const rows: ReportFieldRow[] = profileMetrics.map((metric) => ({
     key: `PM-${target.objectCode}-${metric.key}`,
@@ -3012,7 +3139,9 @@ function getPmFieldRows(target: FieldTarget, metrics: PmMetric[], limit?: number
     cnName: metric.cnName,
     enabled: true,
   }));
-  return typeof limit === 'number' ? rows.slice(0, limit) : rows;
+  const resultRows = typeof limit === 'number' ? rows.slice(0, limit) : rows;
+  metricCache.set(cacheKey, resultRows);
+  return resultRows;
 }
 
 function getReportFieldRows(target: FieldTarget | undefined, metrics: PmMetric[]): ReportFieldRow[] {
@@ -3041,10 +3170,27 @@ function getExtraFieldRows(target: FieldTarget | undefined): ReportFieldRow[] {
   return buildFieldRows(target.domain, target.objectCode, definitions, getTargetProductClasses(target), target);
 }
 
-function dedupeReportRows(rows: ReportFieldRow[]): ReportFieldRow[] {
+function getDeviceInfoReportFieldRows(target: FieldTarget | undefined): ReportFieldRow[] {
+  if (!target) return [];
+  const normalizedObject = target.objectCode.toUpperCase();
+  const supportsDeviceInfo = target.domain === 'CM'
+    || (target.domain === 'INVENTORY' && ['ENB', 'GNB', 'GSM'].includes(normalizedObject));
+  if (!supportsDeviceInfo) return [];
+  const definitions = deviceInfoFieldDefinitions.map(([column, outputAlias, cnName, dataType, renderer]) => ({
+    outputAlias,
+    systemField: `device_info.${column}`,
+    source: `device_info.${column}`,
+    dataType,
+    renderer,
+    cnName,
+  }));
+  return buildFieldRows(target.domain, target.objectCode, definitions, getTargetProductClasses(target), target);
+}
+
+function dedupeFieldCandidateRows(rows: ReportFieldRow[]): ReportFieldRow[] {
   const seen = new Set<string>();
   return rows.filter((row) => {
-    const id = fieldIdentity(row);
+    const id = fieldCandidateIdentity(row);
     if (seen.has(id)) return false;
     seen.add(id);
     return true;
@@ -3054,7 +3200,36 @@ function dedupeReportRows(rows: ReportFieldRow[]): ReportFieldRow[] {
 function getAvailableReportFieldRows(target: FieldTarget | undefined, metrics: PmMetric[]): ReportFieldRow[] {
   if (!target) return [];
   if (target.domain === 'PM') return getPmFieldRows(target, metrics);
-  return dedupeReportRows([...getReportFieldRows(target, metrics), ...getExtraFieldRows(target)]);
+  return dedupeFieldCandidateRows([
+    ...getReportFieldRows(target, metrics),
+    ...getExtraFieldRows(target),
+    ...getDeviceInfoReportFieldRows(target),
+  ]);
+}
+
+function fieldCandidateMatchesSearch(row: ReportFieldRow, searchText: string): boolean {
+  const keyword = searchText.trim().toLowerCase();
+  if (!keyword) return true;
+  return [
+    row.outputAlias,
+    row.cnName,
+    row.systemField,
+    row.source,
+    row.metricType,
+    row.statisType,
+    row.unit,
+    row.dataType,
+    row.renderer,
+    getRowTech(row),
+  ]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(keyword));
+}
+
+function getVisibleFieldCandidateRows(rows: ReportFieldRow[], searchText: string): ReportFieldRow[] {
+  const keyword = searchText.trim();
+  const matchedRows = keyword ? rows.filter((row) => fieldCandidateMatchesSearch(row, keyword)) : rows;
+  return matchedRows.slice(0, keyword ? fieldCandidateSearchOptionLimit : fieldCandidateDefaultOptionLimit);
 }
 
 function formatProductClasses(productClasses?: string[]): string {
@@ -3065,6 +3240,10 @@ function formatProductClasses(productClasses?: string[]): string {
 
 function fieldIdentity(row: ReportFieldRow): string {
   return `${row.domain}:${row.objectCode}:${row.outputAlias}:${row.systemField}`;
+}
+
+function fieldCandidateIdentity(row: ReportFieldRow): string {
+  return `${row.domain}:${row.objectCode}:${row.systemField}`.toLowerCase();
 }
 
 // Backend FieldDefinition.Key format (catalog.go): `${domain}.${objectCode}.${systemField}`, lowercased.
@@ -3101,8 +3280,10 @@ function hydrateFieldRowsByTarget(
   return result;
 }
 
-function defaultPeriodRow(domain: Domain = 'CM'): ScenarioPeriodRow {
-  const firstObjects = objectOptionsByDomain[domain].slice(0, domain === 'CM' ? 4 : 1).map((option) => option.value);
+function defaultPeriodRow(domain: Domain = 'CM', includeObjects = true): ScenarioPeriodRow {
+  const firstObjects = includeObjects
+    ? objectOptionsByDomain[domain].slice(0, domain === 'CM' ? 4 : 1).map((option) => option.value)
+    : [];
   const periodByDomain: Record<Domain, string> = {
     CM: '24H',
     PM: '15M',
@@ -3131,7 +3312,7 @@ function defaultPeriodRow(domain: Domain = 'CM'): ScenarioPeriodRow {
         : domain === 'LOG'
             ? LOG_CUSTOM_NAME
             : INVENTORY_NAME,
-    compressionEnabled: false,
+    compressionEnabled: domain === 'LOG',
     compressionFormat: domain === 'LOG' ? 'gz' : 'zip',
   };
 }
@@ -3365,13 +3546,48 @@ function mapApiInventoryField(field: NorthboundInventoryField, template: Invento
   };
 }
 
+function mapApiInventoryCandidateField(field: NorthboundFieldDefinition, template: InventoryType): InventoryField {
+  return {
+    key: field.key,
+    template,
+    column: field.output_alias,
+    exportKey: field.system_field,
+    source: field.source,
+    dataType: field.data_type,
+    renderer: field.renderer,
+    enabled: true,
+  };
+}
+
+function dedupeInventoryFields(fields: InventoryField[]): InventoryField[] {
+  const seen = new Set<string>();
+  return fields.filter((field) => {
+    const id = `${field.template}:${field.exportKey}`.toLowerCase();
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 function scenarioEnabledMap(rows: ScenarioRow[]): Record<string, boolean> {
   return Object.fromEntries(rows.map((row) => [row.code, row.enabled]));
 }
 
 function getNextCustomScenarioCode(rows: ScenarioRow[]): string {
   const usedCodes = new Set(rows.map((row) => row.code.toUpperCase()));
-  for (let index = 9001; index <= 9999; index += 1) {
+  let maxCodeNumber = 0;
+  rows.forEach((row) => {
+    const match = row.code.toUpperCase().match(/^S(\d{4})$/);
+    if (!match) return;
+    maxCodeNumber = Math.max(maxCodeNumber, Number(match[1]));
+  });
+  for (let index = Math.min(maxCodeNumber + 1, 9999); index <= 9999; index += 1) {
+    const code = `S${String(index).padStart(4, '0')}`;
+    if (!usedCodes.has(code)) {
+      return code;
+    }
+  }
+  for (let index = 1; index <= maxCodeNumber; index += 1) {
     const code = `S${String(index).padStart(4, '0')}`;
     if (!usedCodes.has(code)) {
       return code;
@@ -3463,7 +3679,7 @@ function mapApiSnmpTarget(target: NorthboundSNMPAlarmTarget): SnmpAlarmTargetRow
     authCredential: target.auth_credential_set ? '已加密存储' : target.auth_credential,
     privProtocol: target.priv_protocol,
     privCredential: target.priv_credential_set ? '已加密存储' : target.priv_credential,
-    mibQueryEnabled: target.version === 'v2' ? target.mib_query_enabled : false,
+    mibQueryEnabled: target.mib_query_enabled,
     clearSeverityPolicy: target.clear_severity_policy,
     timeoutSeconds: target.timeout_seconds,
     retries: target.retries,
@@ -3488,7 +3704,7 @@ function serializeSnmpTarget(row: SnmpAlarmTargetRow, enabled: boolean): Northbo
     priv_protocol: row.privProtocol,
     priv_credential: row.privCredential === '已加密存储' ? '' : row.privCredential,
     clear_severity_policy: row.clearSeverityPolicy,
-    mib_query_enabled: row.version === 'v2' ? row.mibQueryEnabled : false,
+    mib_query_enabled: row.mibQueryEnabled,
     timeout_seconds: row.timeoutSeconds,
     retries: row.retries,
   };
@@ -3692,6 +3908,24 @@ function serializeEditorPeriodRows(
   });
 }
 
+function validateEditorPeriodRows(rows: ScenarioPeriodRow[]): string | undefined {
+  if (rows.length === 0) {
+    return '请至少新增一个文件对象';
+  }
+  for (const row of rows) {
+    if (splitObjects(row.objects).length === 0) {
+      return `${row.domain} 请至少选择一个对象`;
+    }
+    if (!row.path.trim()) {
+      return `${row.domain} 请填写上传目录模板`;
+    }
+    if (!row.fileName.trim()) {
+      return `${row.domain} 请填写文件名模板`;
+    }
+  }
+  return undefined;
+}
+
 function serializeInventoryConfig(
   row: InventoryConfigRow,
   enabled: boolean,
@@ -3728,6 +3962,7 @@ function replaceTemplateTokens(template: string, row: ScenarioPeriodRow, dateOnl
     '#Province#': 'GD',
     '#OMC-R#': 'BaiOMC',
     '#DateTime#': dateOnly ? '20260730' : '20260730010000',
+    '#Date#': '20260730',
     '#PeriodStartTime#': '20260730000000',
     '#PeriodEndTime#': '20260730010000',
     '#LocalHost#': '172.21.172.189',
@@ -4384,7 +4619,7 @@ function getScenarioPeriodRows(scenario: ScenarioRow): ScenarioPeriodRow[] {
       period: scenario.logs.period,
       trigger: formatScheduleLabel(scenario.logs.period, scenario.logs.cron),
       cron: scenario.logs.cron,
-      objects: scenario.logs.mode === 'custom' ? '登录日志, 操作日志' : '登录固定格式, 操作固定格式',
+      objects: scenario.logs.mode === 'custom' ? 'login, operation' : 'login_fix, operation_fix',
       path: PATH_LOG,
       fileName: scenario.logs.mode === 'custom'
         ? LOG_CUSTOM_NAME
@@ -4672,12 +4907,15 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
     const [fieldConfigTargetKey, setFieldConfigTargetKey] = useState(firstTarget?.key ?? '');
     const [fieldTechFilter, setFieldTechFilter] = useState<FieldTechFilter>('ALL');
     const [fieldCandidateKey, setFieldCandidateKey] = useState<string>();
+    const [fieldCandidateSearch, setFieldCandidateSearch] = useState('');
+    const [fieldCandidateOpen, setFieldCandidateOpen] = useState(false);
     const [fieldRowsByTarget, setFieldRowsByTarget] = useState<Record<string, ReportFieldRow[]>>(initialFieldRowsByTarget);
     const [backendFieldCatalog, setBackendFieldCatalog] = useState<Record<string, ReportFieldRow[]>>({});
 
     useImperativeHandle(ref, () => ({ getFieldRowsByTarget: () => fieldRowsByTarget }), [fieldRowsByTarget]);
 
     const fieldTargets = useMemo(() => getFieldTargets(periodRows), [periodRows]);
+    const hasFieldTargets = fieldTargets.length > 0;
     const fieldDomainOptions = useMemo(
       () => [...new Set(fieldTargets.map((t) => t.domain))].map((d) => ({ label: d, value: d })),
       [fieldTargets],
@@ -4694,25 +4932,79 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
       () => visibleFieldTargets.find((t) => t.key === fieldConfigTargetKey) ?? visibleFieldTargets[0],
       [visibleFieldTargets, fieldConfigTargetKey],
     );
-    const backendCatalogKey = selectedFieldTarget ? `${selectedFieldTarget.domain}:${selectedFieldTarget.objectCode}` : '';
+    useEffect(() => {
+      if (fieldTargets.length === 0) {
+        setFieldConfigTargetKey('');
+        setFieldCandidateKey(undefined);
+        setFieldCandidateSearch('');
+        setFieldTechFilter('ALL');
+        return;
+      }
+      const domainExists = fieldTargets.some((t) => t.domain === fieldConfigDomain);
+      const nextDomain = domainExists ? fieldConfigDomain : fieldTargets[0].domain;
+      if (!domainExists) {
+        setFieldConfigDomain(nextDomain);
+      }
+      const targetExists = fieldTargets.some((t) => (
+        t.key === fieldConfigTargetKey
+        && t.domain === nextDomain
+        && targetMatchesTechFilter(t, fieldTechFilter)
+      ));
+      if (!targetExists) {
+        const nextTarget = fieldTargets.find((t) => t.domain === nextDomain && targetMatchesTechFilter(t, fieldTechFilter))
+          ?? fieldTargets.find((t) => t.domain === nextDomain)
+          ?? fieldTargets[0];
+        setFieldConfigTargetKey(nextTarget.key);
+      }
+    }, [fieldConfigDomain, fieldConfigTargetKey, fieldTargets, fieldTechFilter]);
+    useEffect(() => {
+      setFieldCandidateKey(undefined);
+      setFieldCandidateSearch('');
+      setFieldCandidateOpen(false);
+    }, [selectedFieldTarget?.key]);
+    const backendCatalogKey = selectedFieldTarget
+      ? `${selectedFieldTarget.domain}:${selectedFieldTarget.objectCode}:${getTargetTech(selectedFieldTarget) ?? 'ALL'}:${selectedFieldTarget.profile}`
+      : '';
+    const selectedFieldKeysForTarget = useMemo(() => {
+      if (!selectedFieldTarget) return [];
+      const ownerRow = periodRows.find((row) => periodRowTargetKeys(row).includes(selectedFieldTarget.key));
+      return ownerRow?.selectedFields ?? [];
+    }, [periodRows, selectedFieldTarget?.key]);
+    const shouldBuildFieldCandidates = fieldCandidateOpen
+      || Boolean(fieldCandidateKey)
+      || Boolean(fieldCandidateSearch.trim())
+      || selectedFieldKeysForTarget.length > 0;
     useEffect(() => {
       const target = selectedFieldTarget;
       if (!target) return;
-      const cacheKey = `${target.domain}:${target.objectCode}`;
-      if (backendFieldCatalog[cacheKey]) return;
+      const cacheKey = backendCatalogKey;
+      if (!shouldBuildFieldCandidates || !cacheKey || backendFieldCatalog[cacheKey]) return;
+      const tech = getTargetTech(target);
       let cancelled = false;
-      void northboundPageConfigApi.getFields({ domain: target.domain, object: target.objectCode })
+      void northboundPageConfigApi.getFields({
+        domain: target.domain,
+        object: target.objectCode,
+        ...(target.domain === 'PM' && tech ? { tech, profile: target.profile } : {}),
+      })
         .then((resp) => {
           if (cancelled) return;
           const rows: ReportFieldRow[] = (resp.items ?? []).map((f) => ({
             key: `${target.domain}-${target.objectCode}-${f.system_field}`,
             domain: target.domain,
             objectCode: target.objectCode,
+            scope: target.scope,
+            tech: isTech(f.tech) ? f.tech : target.tech,
             outputAlias: f.output_alias,
             systemField: f.system_field,
             source: f.source,
             dataType: f.data_type,
             renderer: f.renderer,
+            productClasses: f.product_class
+              ? f.product_class.split(',').map((item) => item.trim()).filter(Boolean)
+              : getTargetProductClasses(target),
+            metricType: f.metric_type === 'counter' || f.metric_type === 'kpi' ? f.metric_type : undefined,
+            statisType: f.statis_type,
+            unit: f.unit,
             cnName: f.cn_name,
             enabled: true,
           }));
@@ -4720,39 +5012,72 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
         })
         .catch(() => { /* fall back to static catalog */ });
       return () => { cancelled = true; };
-    }, [selectedFieldTarget, backendFieldCatalog]);
+    }, [backendCatalogKey, selectedFieldTarget, backendFieldCatalog, shouldBuildFieldCandidates]);
     const fieldBaseRows = useMemo(
-      () => (backendCatalogKey && backendFieldCatalog[backendCatalogKey])
-        ? backendFieldCatalog[backendCatalogKey]
-        : getReportFieldRows(selectedFieldTarget, pmMetricRows),
-      [backendCatalogKey, backendFieldCatalog, selectedFieldTarget, pmMetricRows],
+      () => getReportFieldRows(selectedFieldTarget, pmMetricRows),
+      [selectedFieldTarget, pmMetricRows],
     );
     const fieldCandidatePoolRows = useMemo(
-      () => (backendCatalogKey && backendFieldCatalog[backendCatalogKey])
-        ? backendFieldCatalog[backendCatalogKey]
-        : getAvailableReportFieldRows(selectedFieldTarget, pmMetricRows),
-      [backendCatalogKey, backendFieldCatalog, selectedFieldTarget, pmMetricRows],
+      () => {
+        if (!shouldBuildFieldCandidates) return [];
+        return dedupeFieldCandidateRows([
+          ...(backendCatalogKey && backendFieldCatalog[backendCatalogKey] ? backendFieldCatalog[backendCatalogKey] : []),
+          ...getAvailableReportFieldRows(selectedFieldTarget, pmMetricRows),
+        ]);
+      },
+      [backendCatalogKey, backendFieldCatalog, selectedFieldTarget, pmMetricRows, shouldBuildFieldCandidates],
     );
     const targetFieldRows = useMemo(() => {
       if (!selectedFieldTarget) return [];
       return fieldRowsByTarget[selectedFieldTarget.key] ?? fieldBaseRows;
     }, [fieldBaseRows, fieldRowsByTarget, selectedFieldTarget]);
+    useEffect(() => {
+      if (!selectedFieldTarget) return;
+      const selectedFields = selectedFieldKeysForTarget;
+      if (!selectedFields || selectedFields.length === 0) return;
+      const wanted = new Set(selectedFields.map((key) => key.toLowerCase()));
+      const selectedRows = dedupeFieldCandidateRows([...fieldBaseRows, ...fieldCandidatePoolRows])
+        .filter((row) => wanted.has(selectionKey(row).toLowerCase()));
+      if (selectedRows.length === 0) return;
+      setFieldRowsByTarget((prev) => {
+        const currentRows = prev[selectedFieldTarget.key] ?? [];
+        const existing = new Set(currentRows.map((row) => selectionKey(row).toLowerCase()));
+        const missingRows = selectedRows.filter((row) => !existing.has(selectionKey(row).toLowerCase()));
+        if (missingRows.length === 0 && currentRows.length > 0) return prev;
+        return {
+          ...prev,
+          [selectedFieldTarget.key]: currentRows.length > 0
+            ? [...currentRows, ...missingRows]
+            : selectedRows,
+        };
+      });
+    }, [fieldBaseRows, fieldCandidatePoolRows, selectedFieldKeysForTarget, selectedFieldTarget]);
     const fieldConfigRows = useMemo(
       () => targetFieldRows.filter((row) => rowMatchesTechFilter(row, fieldTechFilter)),
       [fieldTechFilter, targetFieldRows],
     );
     const fieldCandidateRows = useMemo(() => {
-      const currentIds = new Set(targetFieldRows.map(fieldIdentity));
+      if (!shouldBuildFieldCandidates) return [];
+      const currentIds = new Set(targetFieldRows.map(fieldCandidateIdentity));
       return fieldCandidatePoolRows
-        .filter((row) => !currentIds.has(fieldIdentity(row)))
+        .filter((row) => !currentIds.has(fieldCandidateIdentity(row)))
         .filter((row) => rowMatchesTechFilter(row, fieldTechFilter));
-    }, [fieldCandidatePoolRows, fieldTechFilter, targetFieldRows]);
+    }, [fieldCandidatePoolRows, fieldTechFilter, shouldBuildFieldCandidates, targetFieldRows]);
+    const displayedFieldCandidateRows = useMemo(
+      () => {
+        const rows = getVisibleFieldCandidateRows(fieldCandidateRows, fieldCandidateSearch);
+        const selectedRow = fieldCandidateRows.find((row) => row.key === fieldCandidateKey);
+        if (!selectedRow || rows.some((row) => row.key === selectedRow.key)) return rows;
+        return [selectedRow, ...rows];
+      },
+      [fieldCandidateRows, fieldCandidateKey, fieldCandidateSearch],
+    );
     const fieldCandidateOptions = useMemo(
-      () => fieldCandidateRows.map((row) => ({
+      () => displayedFieldCandidateRows.map((row) => ({
         label: `${formatReportFieldTech(row)} ${row.cnName ?? row.outputAlias} / ${row.outputAlias} / ${row.systemField}`,
         value: row.key,
       })),
-      [fieldCandidateRows],
+      [displayedFieldCandidateRows],
     );
 
     const updateCurrentFieldRows = useCallback((rows: ReportFieldRow[]) => {
@@ -4762,13 +5087,15 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
     const addFieldConfigRow = useCallback(() => {
       const row = fieldCandidateRows.find((candidate) => candidate.key === fieldCandidateKey);
       if (!row) return;
-      const baseOrder = new Map(fieldCandidatePoolRows.map((item, index) => [fieldIdentity(item), index]));
-      const nextRows = [...targetFieldRows, row].sort((a, b) => (
-        (baseOrder.get(fieldIdentity(a)) ?? Number.MAX_SAFE_INTEGER)
-        - (baseOrder.get(fieldIdentity(b)) ?? Number.MAX_SAFE_INTEGER)
+      const enabledRow = { ...row, enabled: true };
+      const baseOrder = new Map(fieldCandidatePoolRows.map((item, index) => [fieldCandidateIdentity(item), index]));
+      const nextRows = [...targetFieldRows, enabledRow].sort((a, b) => (
+        (baseOrder.get(fieldCandidateIdentity(a)) ?? Number.MAX_SAFE_INTEGER)
+        - (baseOrder.get(fieldCandidateIdentity(b)) ?? Number.MAX_SAFE_INTEGER)
       ));
       updateCurrentFieldRows(nextRows);
       setFieldCandidateKey(undefined);
+      setFieldCandidateSearch('');
     }, [fieldCandidateRows, fieldCandidateKey, fieldCandidatePoolRows, targetFieldRows, updateCurrentFieldRows]);
     const removeFieldConfigRow = useCallback((row: ReportFieldRow) => {
       updateCurrentFieldRows(targetFieldRows.filter((item) => fieldIdentity(item) !== fieldIdentity(row)));
@@ -4861,15 +5188,18 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
           <Typography.Text strong>字段/指标配置</Typography.Text>
           <Space size={8} wrap className={styles.fieldConfigTools}>
             <Select
-              value={fieldConfigDomain}
+              value={hasFieldTargets ? fieldConfigDomain : undefined}
+              placeholder="业务域"
               style={{ width: 120 }}
               options={fieldDomainOptions}
+              disabled={!hasFieldTargets}
               onChange={(value) => changeFieldConfigDomain(value as Domain)}
             />
             <Select
               value={fieldTechFilter}
               style={{ width: 132 }}
               options={fieldTechFilterOptions}
+              disabled={!hasFieldTargets}
               onChange={(value) => changeFieldTechFilter(value as FieldTechFilter)}
             />
             <Select
@@ -4877,6 +5207,7 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
               placeholder="对象"
               style={{ width: 132 }}
               options={fieldTargetOptions}
+              disabled={!hasFieldTargets}
               onChange={setFieldConfigTargetKey}
               notFoundContent="无对象"
             />
@@ -4884,11 +5215,19 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
               allowClear
               showSearch
               value={fieldCandidateKey}
+              searchValue={fieldCandidateSearch}
               placeholder="搜索可新增字段/指标"
-              optionFilterProp="label"
+              filterOption={false}
               style={{ width: 340 }}
               options={fieldCandidateOptions}
-              onChange={setFieldCandidateKey}
+              disabled={!selectedFieldTarget}
+              onOpenChange={setFieldCandidateOpen}
+              onSearch={setFieldCandidateSearch}
+              onChange={(value) => {
+                setFieldCandidateKey(value);
+                setFieldCandidateSearch('');
+              }}
+              onClear={() => setFieldCandidateSearch('')}
               notFoundContent="无可新增项"
             />
             <Button
@@ -4905,8 +5244,15 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
           dataSource={fieldConfigRows}
           rowKey="key"
           size="small"
+          virtual
           loading={pmLoading && selectedFieldTarget?.domain === 'PM'}
-          pagination={false}
+          pagination={fieldConfigRows.length > 100 ? {
+            pageSize: 50,
+            showSizeChanger: true,
+            pageSizeOptions: [20, 50, 100],
+            showTotal: (total) => `共 ${total} 项`,
+          } : false}
+          locale={{ emptyText: hasFieldTargets ? '暂无数据' : '暂无字段目标，请先新增对象' }}
           scroll={{ x: 1820, y: 320 }}
         />
       </div>
@@ -4941,6 +5287,7 @@ export default function NorthboundPageConfig() {
   const [inventoryEnabled, setInventoryEnabled] = useState<Record<InventoryType, boolean>>(defaultInventoryEnabled);
   const [inventoryProfileSaving, setInventoryProfileSaving] = useState<Record<string, boolean>>({});
   const [inventoryFieldRowsByType, setInventoryFieldRowsByType] = useState<Record<InventoryType, InventoryField[]>>(defaultInventoryFieldRows);
+  const [inventoryFieldCatalogByType, setInventoryFieldCatalogByType] = useState<Partial<Record<InventoryType, InventoryField[]>>>({});
   const [inventoryDeliveryTargetsByType, setInventoryDeliveryTargetsByType] = useState<Record<InventoryType, DeliveryTargetRow[]>>(
     () => Object.fromEntries(inventoryTypeOptions.map((option) => [
       option.value,
@@ -5129,12 +5476,32 @@ export default function NorthboundPageConfig() {
   );
   const currentInventoryFields = inventoryFieldRowsByType[selectedInventoryType] ?? [];
   const viewInventoryFields = viewInventoryType ? inventoryFieldRowsByType[viewInventoryType] ?? [] : [];
+  useEffect(() => {
+    if (!inventoryEditorOpen || !selectedInventoryConfig || selectedInventoryConfig.key === 'OMC') return;
+    if (inventoryFieldCatalogByType[selectedInventoryConfig.key]) return;
+    let cancelled = false;
+    void northboundPageConfigApi.getFields({
+      domain: 'INVENTORY',
+      object: selectedInventoryConfig.objectCode,
+    })
+      .then((resp) => {
+        if (cancelled) return;
+        const rows = (resp.items ?? []).map((field) => mapApiInventoryCandidateField(field, selectedInventoryConfig.key));
+        setInventoryFieldCatalogByType((prev) => (
+          prev[selectedInventoryConfig.key] ? prev : { ...prev, [selectedInventoryConfig.key]: rows }
+        ));
+      })
+      .catch(() => { /* local fallback stays available */ });
+    return () => { cancelled = true; };
+  }, [inventoryEditorOpen, inventoryFieldCatalogByType, selectedInventoryConfig]);
   const inventoryCandidateRows = useMemo(() => {
-    const selectedIds = new Set(currentInventoryFields.map((field) => field.exportKey));
-    return inventoryFields
-      .filter((field) => field.template === selectedInventoryType)
-      .filter((field) => !selectedIds.has(field.exportKey));
-  }, [currentInventoryFields, selectedInventoryType]);
+    const selectedIds = new Set(currentInventoryFields.map((field) => field.exportKey.toLowerCase()));
+    const candidatePool = dedupeInventoryFields([
+      ...(inventoryFieldCatalogByType[selectedInventoryType] ?? []),
+      ...inventoryAvailableFields.filter((field) => field.template === selectedInventoryType),
+    ]);
+    return candidatePool.filter((field) => !selectedIds.has(field.exportKey.toLowerCase()));
+  }, [currentInventoryFields, inventoryFieldCatalogByType, selectedInventoryType]);
   const inventoryCandidateOptions = useMemo(
     () => inventoryCandidateRows.map((field) => ({
       label: `${field.column} / ${field.exportKey}`,
@@ -5506,21 +5873,20 @@ export default function NorthboundPageConfig() {
   };
 
   const openCreateEditor = () => {
-    const periodRows = clonePeriodRows(defaultEditorPeriodRows);
     setEditorMode('create');
-    setEditorPeriodRows(periodRows);
+    setEditorPeriodRows([]);
     setInitialFieldRows({});
     setEditorSession((n) => n + 1);
     const nextCode = getNextCustomScenarioCode(fileProfiles);
     configForm.setFieldsValue({
       scenarioCode: nextCode,
-      vendor: 'Baicells',
-      scenarioName: '自定义场景',
-      scenarioNameEn: 'Custom',
-      name: '自定义北向文件配置',
+      vendor: '',
+      scenarioName: '',
+      scenarioNameEn: '',
+      name: '',
       description: '',
-      domains: ['CM', 'PM'],
-      periods: ['24H', '15M'],
+      domains: [],
+      periods: [],
       enabled: false,
     });
     setEditorOpen(true);
@@ -5560,6 +5926,11 @@ export default function NorthboundPageConfig() {
       const enabled = Boolean(values.enabled);
       const vendor = values.vendor?.trim() || selectedScenario?.vendor || 'Baicells';
       const fieldRowsByTarget = fieldConfigRef.current?.getFieldRowsByTarget() ?? {};
+      const periodValidationError = validateEditorPeriodRows(editorPeriodRows);
+      if (periodValidationError) {
+        void message.warning(periodValidationError);
+        return;
+      }
       const groups = serializeEditorPeriodRows(editorPeriodRows, fieldRowsByTarget);
       const request: NorthboundUpdateFileProfileRequest = {
         name: values.name.trim(),
@@ -5644,7 +6015,7 @@ export default function NorthboundPageConfig() {
   };
 
   const updateEditorPeriodDomain = (key: string, domain: Domain) => {
-    const nextDefault = defaultPeriodRow(domain);
+    const nextDefault = defaultPeriodRow(domain, false);
     setEditorPeriodRows((rows) =>
       rows.map((row) => (row.key === key ? {
         ...row,
@@ -5653,18 +6024,24 @@ export default function NorthboundPageConfig() {
         format: nextDefault.format,
         period: nextDefault.period,
         cron: nextDefault.cron,
-        objects: nextDefault.objects,
+        objects: '',
         path: nextDefault.path,
         fileName: nextDefault.fileName,
         csvSeparator: nextDefault.csvSeparator,
-        compressionEnabled: false,
+        compressionEnabled: nextDefault.compressionEnabled,
         compressionFormat: nextDefault.compressionFormat,
       } : row)),
     );
   };
 
   const addEditorPeriodRow = () => {
-    setEditorPeriodRows((rows) => [...rows, defaultPeriodRow()]);
+    const selectedDomains = (configForm.getFieldValue('domains') ?? []) as Domain[];
+    const [domain] = selectedDomains;
+    if (!domain) {
+      void message.warning('请先选择业务域');
+      return;
+    }
+    setEditorPeriodRows((rows) => [...rows, defaultPeriodRow(domain, false)]);
   };
 
   const removeEditorPeriodRow = (key: string) => {
@@ -7163,7 +7540,7 @@ export default function NorthboundPageConfig() {
       width: 220,
       render: (_, row) => (
 	        <Space size={4} wrap>
-	          {row.version === 'v2' && row.mibQueryEnabled ? <Tag color="blue">MIB 查询</Tag> : <Tag>MIB 关闭</Tag>}
+	          {row.mibQueryEnabled ? <Tag color="blue">MIB 查询</Tag> : <Tag>MIB 关闭</Tag>}
 	          <Tag>{row.clearSeverityPolicy}</Tag>
 	        </Space>
       ),
@@ -7816,7 +8193,7 @@ export default function NorthboundPageConfig() {
                 <Descriptions.Item label="版本">{snmpVersionTag(selectedSnmp.version)}</Descriptions.Item>
                 <Descriptions.Item label="通知类型">{snmpNotificationTag(selectedSnmp.notificationType)}</Descriptions.Item>
                 <Descriptions.Item label="启用配置">{statusTag(Boolean(snmpEnabled[selectedSnmp.key]))}</Descriptions.Item>
-                <Descriptions.Item label="MIB 查询">{selectedSnmp.version === 'v2' && selectedSnmp.mibQueryEnabled ? '开启' : '关闭'}</Descriptions.Item>
+                <Descriptions.Item label="MIB 查询">{selectedSnmp.mibQueryEnabled ? '开启' : '关闭'}</Descriptions.Item>
                 <Descriptions.Item label="Agent 监听">
                   <span className={styles.monoText}>{endpointText(selectedSnmp.listenIp, selectedSnmp.listenPort)}</span>
                 </Descriptions.Item>
@@ -7887,9 +8264,9 @@ export default function NorthboundPageConfig() {
 	                      onChange={(version) => setSnmpEditor((current) => (current ? {
 	                        ...current,
 	                        version,
-	                        mibQueryEnabled: version === 'v2' ? current.mibQueryEnabled : false,
+	                        mibQueryEnabled: current.mibQueryEnabled,
 	                        authProtocol: version === 'v3' ? (current.authProtocol || 'SHA') : current.authProtocol,
-	                        privProtocol: version === 'v3' ? (current.privProtocol || 'AES128') : current.privProtocol,
+	                        privProtocol: version === 'v3' ? (current.privProtocol || 'DES') : current.privProtocol,
 	                      } : current))}
 	                    />
 	                  </Form.Item>
@@ -7905,10 +8282,9 @@ export default function NorthboundPageConfig() {
                     />
                   </Form.Item>
 	                  <Form.Item label="MIB 查询">
-	                    <Tooltip title={snmpEditor.version === 'v3' ? 'v3 目标用于 Trap/Inform 发送；MIB walk/get 使用 v2c Agent' : undefined}>
+	                    <Tooltip title={snmpEditor.version === 'v3' ? 'v3 MIB walk/get 使用 security name 与认证/加密凭据' : undefined}>
 	                      <Switch
-	                        checked={snmpEditor.version === 'v2' && snmpEditor.mibQueryEnabled}
-	                        disabled={snmpEditor.version === 'v3'}
+	                        checked={snmpEditor.mibQueryEnabled}
 	                        checkedChildren="开"
 	                        unCheckedChildren="关"
 	                        onChange={(mibQueryEnabled) => setSnmpEditor((current) => (current ? { ...current, mibQueryEnabled } : current))}
@@ -7950,7 +8326,7 @@ export default function NorthboundPageConfig() {
                     <Input.Password placeholder={snmpEditor.authCredential === '已加密存储' ? '未修改保持原密码' : '请输入认证密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, authCredential: event.target.value || current.authCredential } : current))} />
                   </Form.Item>
 	                  <Form.Item label="加密算法">
-	                    <Select value={snmpEditor.privProtocol ?? 'AES128'} options={snmpPrivProtocolOptions} onChange={(privProtocol) => setSnmpEditor((current) => (current ? { ...current, privProtocol } : current))} />
+	                    <Select value={snmpEditor.privProtocol ?? 'DES'} options={snmpPrivProtocolOptions} onChange={(privProtocol) => setSnmpEditor((current) => (current ? { ...current, privProtocol } : current))} />
 	                  </Form.Item>
                   <Form.Item label="加密密码">
                     <Input.Password placeholder={snmpEditor.privCredential === '已加密存储' ? '未修改保持原密码' : '请输入加密密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, privCredential: event.target.value || current.privCredential } : current))} />
@@ -8406,8 +8782,14 @@ export default function NorthboundPageConfig() {
                 dataSource={viewFieldRows}
                 rowKey="key"
                 size="small"
+                virtual
                 loading={pmLoading && selectedViewFieldTarget?.domain === 'PM'}
-                pagination={false}
+                pagination={viewFieldRows.length > 100 ? {
+                  pageSize: 50,
+                  showSizeChanger: true,
+                  pageSizeOptions: [20, 50, 100],
+                  showTotal: (total) => `共 ${total} 项`,
+                } : false}
                 scroll={{ x: 1726, y: 320 }}
               />
             </div>
@@ -8649,7 +9031,7 @@ export default function NorthboundPageConfig() {
                         size="small"
                         icon={<DeleteOutlined />}
                         onClick={() => removeEditorPeriodRow(record.key)}
-                        disabled={editorPeriodRows.length <= 1}
+                        disabled={editorMode === 'edit' && editorPeriodRows.length <= 1}
                       />
                     </Tooltip>
                   ),
@@ -8657,6 +9039,7 @@ export default function NorthboundPageConfig() {
               ]}
               dataSource={editorPeriodRows}
               rowKey="key"
+              locale={{ emptyText: '暂无对象，请新增对象后选择业务域和对象' }}
 	              size="small"
 	              pagination={false}
 	              scroll={{ x: 2670 }}

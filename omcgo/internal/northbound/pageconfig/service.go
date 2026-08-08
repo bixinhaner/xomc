@@ -27,8 +27,9 @@ type Repository interface {
 	LoadOMCInventoryRows(ctx context.Context) ([]ExportDataRow, error)
 	LoadPMMetricRows(ctx context.Context, req PMMetricQuery) ([]ExportDataRow, error)
 	LoadMRRows(ctx context.Context, objectCode string, limit int) ([]ExportDataRow, error)
-	LoadLogRows(ctx context.Context, objectCode string, limit int) ([]ExportDataRow, error)
+	LoadLogRows(ctx context.Context, objectCode string, windowStart time.Time, windowEnd time.Time, limit int) ([]ExportDataRow, error)
 	ListPMMetricFields(ctx context.Context, filter FieldFilter) ([]FieldDefinition, error)
+	ListDeviceInfoFields(ctx context.Context, filter FieldFilter) ([]FieldDefinition, error)
 	ValidatePMMetricPaths(ctx context.Context, metricPaths []string) ([]string, error)
 	EnsureExtendedDefaults(ctx context.Context) error
 	ListDeliveryTargets(ctx context.Context, filter DeliveryTargetFilter) ([]DeliveryTarget, error)
@@ -297,7 +298,31 @@ func (s *Service) ListFields(ctx context.Context, filter FieldFilter) []FieldDef
 			return fields
 		}
 	}
-	return s.catalog.Fields(filter)
+	fields := s.catalog.Fields(filter)
+	if s.repo != nil && (filter.Domain == DomainCM || filter.Domain == DomainInventory) {
+		if dynamicFields, err := s.repo.ListDeviceInfoFields(ctx, filter); err == nil && len(dynamicFields) > 0 {
+			return appendMissingFieldDefinitions(fields, dynamicFields)
+		}
+	}
+	return fields
+}
+
+func appendMissingFieldDefinitions(base []FieldDefinition, extra []FieldDefinition) []FieldDefinition {
+	seen := make(map[string]struct{}, len(base)+len(extra))
+	for _, field := range base {
+		seen[strings.ToLower(field.Key)] = struct{}{}
+	}
+	out := make([]FieldDefinition, 0, len(base)+len(extra))
+	out = append(out, base...)
+	for _, field := range extra {
+		key := strings.ToLower(field.Key)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		out = append(out, field)
+		seen[key] = struct{}{}
+	}
+	return out
 }
 
 func (s *Service) Validate(ctx context.Context, req ValidateRequest) ValidationResult {

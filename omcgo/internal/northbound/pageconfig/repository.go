@@ -121,6 +121,27 @@ func (r *PgRepository) backfillDefaultFileProfileGroupMetadata(ctx context.Conte
 			groups[i].CSVSeparator = defaultGroup.CSVSeparator
 			changed = true
 		}
+		if defaultGroup.Domain == DomainLOG {
+			if strings.TrimSpace(groups[i].PathTemplate) == "" || isLegacyLogPathTemplate(groups[i].PathTemplate) {
+				groups[i].PathTemplate = defaultGroup.PathTemplate
+				changed = true
+			}
+			if strings.TrimSpace(groups[i].FileNameTemplate) == "" || isLegacyLogFileNameTemplate(groups[i].FileNameTemplate) {
+				groups[i].FileNameTemplate = defaultGroup.FileNameTemplate
+				changed = true
+			}
+			if !groups[i].CompressionEnabled {
+				groups[i].CompressionEnabled = true
+				changed = true
+			}
+			if groups[i].CompressionFormat != defaultGroup.CompressionFormat {
+				groups[i].CompressionFormat = defaultGroup.CompressionFormat
+				changed = true
+			}
+			if normalizeScenarioLogObjects(groups[i].Objects) {
+				changed = true
+			}
+		}
 	}
 	if !changed {
 		return nil
@@ -134,6 +155,28 @@ func (r *PgRepository) backfillDefaultFileProfileGroupMetadata(ctx context.Conte
 		return fmt.Errorf("backfill default northbound_file_profiles groups %s: %w", profile.Code, err)
 	}
 	return nil
+}
+
+func isLegacyLogPathTemplate(template string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(template))
+	return strings.Contains(normalized, "/logs/#datetime#/") || strings.Contains(normalized, "/#province#/#omc-r#/logs/")
+}
+
+func isLegacyLogFileNameTemplate(template string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(template))
+	return strings.Contains(normalized, "northbound-log") || strings.Contains(normalized, "{login|operation}")
+}
+
+func normalizeScenarioLogObjects(objects []ScenarioObject) bool {
+	changed := false
+	for i := range objects {
+		normalized := normalizeLogObjectCode(objects[i].Code)
+		if normalized != objects[i].Code {
+			objects[i].Code = normalized
+			changed = true
+		}
+	}
+	return changed
 }
 
 func (r *PgRepository) insertDefaultFileProfile(ctx context.Context, profile FileProfile) error {
@@ -414,61 +457,86 @@ UPDATE northbound_file_runs
 func (r *PgRepository) LoadDeviceSnapshotRows(ctx context.Context, tech string, limit int) ([]ExportDataRow, error) {
 	rows, err := r.pool.Query(ctx, `
 SELECT
-  COALESCE(d.serial_number, ''),
-  COALESCE(d.manufacturer, ''),
-  COALESCE(d.model_name, ''),
-  COALESCE(d.product_class, ''),
-  COALESCE(d.firmware_version, ''),
-  COALESCE(d.ip_address::text, ''),
-  COALESCE(d.site_name, ''),
-  COALESCE(d.site_id, ''),
+  COALESCE(d.serial_number, '') AS "device.serial_number",
+  COALESCE(d.manufacturer, '') AS "device.manufacturer",
+  COALESCE(d.model_name, '') AS "device.model_name",
+  COALESCE(d.product_class, '') AS "device.product_class",
+  COALESCE(d.firmware_version, '') AS "device.firmware_version",
+  COALESCE(d.ip_address::text, '') AS "device.ip_address",
+  COALESCE(d.site_name, '') AS "device.site_name",
+  COALESCE(d.site_id, '') AS "device.site_id",
   COALESCE((
     SELECT string_agg(DISTINCT dg.name, ',' ORDER BY dg.name)
       FROM device_group_members dgm
       JOIN device_groups dg ON dg.id = dgm.group_id
      WHERE dgm.device_id = d.id
-  ), ''),
-  COALESCE((SELECT p.product_name FROM products p WHERE p.id = d.product_id), ''),
-  COALESCE(d.last_inform_at::text, ''),
-  COALESCE(d.is_online::text, ''),
-  COALESCE(d.longitude::text, ''),
-  COALESCE(d.latitude::text, ''),
-  COALESCE(d.lifecycle_state, ''),
-  COALESCE(d.created_at::text, ''),
-  COALESCE(di.device_name, ''),
-  COALESCE(di.address, ''),
-  COALESCE(di.hardware_version, ''),
-  COALESCE(di.mac, ''),
-  COALESCE(di.plmn, ''),
-  COALESCE(di.sync_status, ''),
-  COALESCE(di.enb_id, ''),
-  COALESCE(di.eci, ''),
-  COALESCE(di.pci, ''),
-  COALESCE(di.cell_id, ''),
-  COALESCE(di.freq_point, ''),
-  COALESCE(di.bandwidth::text, ''),
-  COALESCE(di.transmit_power::text, ''),
-  COALESCE(di.op_state, ''),
-  COALESCE(di.ue_count::text, ''),
-  COALESCE(di.rf_status, ''),
-  COALESCE(di.kpi_status, ''),
-  COALESCE(di.num_of_cells::text, ''),
-  COALESCE(di.active_alarm_count::text, ''),
-  COALESCE(di.highest_alarm_severity::text, ''),
-  COALESCE(di.cumulative_online_duration::text, ''),
-  COALESCE(di.mme_status, ''),
-  COALESCE(di.tac, ''),
-  COALESCE(di.band, ''),
-  COALESCE(di.ul_earfcn, ''),
-  COALESCE(di.subframe_assignment, ''),
-  COALESCE(di.special_subframe, ''),
-  COALESCE(di.root_index, ''),
-  COALESCE(di.gps_satellites::text, ''),
-  COALESCE(di.gps_height::text, ''),
-  COALESCE(di.ipsec_addr, ''),
-  COALESCE(di.lac, ''),
-  COALESCE(di.run_time::text, ''),
-  COALESCE(di.first_online_time::text, '')
+  ), '') AS "device_groups.name",
+  COALESCE((SELECT p.product_name FROM products p WHERE p.id = d.product_id), '') AS "product.name",
+  COALESCE(d.last_inform_at::text, '') AS "device.last_inform_at",
+  COALESCE(d.is_online::text, '') AS "device.is_online",
+  COALESCE(d.longitude::text, '') AS "device.longitude",
+  COALESCE(d.latitude::text, '') AS "device.latitude",
+  COALESCE(d.lifecycle_state, '') AS "device.lifecycle_state",
+  COALESCE(d.created_at::text, '') AS "device.created_at",
+  COALESCE(di.device_id::text, '') AS "device_info.device_id",
+  COALESCE(di.device_name, '') AS "device_info.device_name",
+  COALESCE(di.address, '') AS "device_info.address",
+  COALESCE(di.remark, '') AS "device_info.remark",
+  COALESCE(di.project_status, '') AS "device_info.project_status",
+  COALESCE(di.height::text, '') AS "device_info.height",
+  COALESCE(di.eci, '') AS "device_info.eci",
+  COALESCE(di.pci, '') AS "device_info.pci",
+  COALESCE(di.cell_id, '') AS "device_info.cell_id",
+  COALESCE(di.freq_point, '') AS "device_info.freq_point",
+  COALESCE(di.bandwidth::text, '') AS "device_info.bandwidth",
+  COALESCE(di.transmit_power::text, '') AS "device_info.transmit_power",
+  COALESCE(di.plmn, '') AS "device_info.plmn",
+  COALESCE(di.rf_status, '') AS "device_info.rf_status",
+  COALESCE(di.cell_status, '') AS "device_info.cell_status",
+  COALESCE(di.mme_status, '') AS "device_info.mme_status",
+  COALESCE(di.sync_status, '') AS "device_info.sync_status",
+  COALESCE(di.kpi_status, '') AS "device_info.kpi_status",
+  COALESCE(di.num_of_cells::text, '') AS "device_info.num_of_cells",
+  COALESCE(di.gps_status, '') AS "device_info.gps_status",
+  COALESCE(di.alarm_severity, '') AS "device_info.alarm_severity",
+  COALESCE(di.license_status, '') AS "device_info.license_status",
+  COALESCE(di.mac, '') AS "device_info.mac",
+  COALESCE(di.hardware_version, '') AS "device_info.hardware_version",
+  COALESCE(di.first_online_time::text, '') AS "device_info.first_online_time",
+  COALESCE(di.last_online_time::text, '') AS "device_info.last_online_time",
+  COALESCE(di.last_offline_time::text, '') AS "device_info.last_offline_time",
+  COALESCE(di.run_time::text, '') AS "device_info.run_time",
+  COALESCE(di.creator, '') AS "device_info.creator",
+  COALESCE(di.updater, '') AS "device_info.updater",
+  COALESCE(di.created_at::text, '') AS "device_info.created_at",
+  COALESCE(di.updated_at::text, '') AS "device_info.updated_at",
+  COALESCE(di.tac, '') AS "device_info.tac",
+  COALESCE(di.band, '') AS "device_info.band",
+  COALESCE(di.ul_earfcn, '') AS "device_info.ul_earfcn",
+  COALESCE(di.subframe_assignment, '') AS "device_info.subframe_assignment",
+  COALESCE(di.special_subframe, '') AS "device_info.special_subframe",
+  COALESCE(di.root_index, '') AS "device_info.root_index",
+  COALESCE(di.gps_satellites::text, '') AS "device_info.gps_satellites",
+  COALESCE(di.gps_height::text, '') AS "device_info.gps_height",
+  COALESCE(di.lock_status, '') AS "device_info.lock_status",
+  COALESCE(di.enb_id, '') AS "device_info.enb_id",
+  COALESCE(di.network_model, '') AS "device_info.network_model",
+  COALESCE(di.lac, '') AS "device_info.lac",
+  COALESCE(di.cumulative_online_duration::text, '') AS "device_info.cumulative_online_duration",
+  COALESCE(di.op_state, '') AS "device_info.op_state",
+  COALESCE(di.admin_state, '') AS "device_info.admin_state",
+  COALESCE(di.ipsec_addr, '') AS "device_info.ipsec_addr",
+  COALESCE(di.bsc_select, '') AS "device_info.bsc_select",
+  COALESCE(di.oml_remote_ip, '') AS "device_info.oml_remote_ip",
+  COALESCE(di.oml_remote_ip_bak, '') AS "device_info.oml_remote_ip_bak",
+  COALESCE(di.ipa_unit_id, '') AS "device_info.ipa_unit_id",
+  COALESCE(di.ue_count::text, '') AS "device_info.ue_count",
+  COALESCE(di.active_alarm_count::text, '') AS "device_info.active_alarm_count",
+  COALESCE(di.name_sync_pending::text, '') AS "device_info.name_sync_pending",
+  COALESCE(di.lmt_device_name, '') AS "device_info.lmt_device_name",
+  COALESCE(di.highest_alarm_severity::text, '') AS "device_info.highest_alarm_severity",
+  COALESCE(di.highest_severity_alarm_count::text, '') AS "device_info.highest_severity_alarm_count",
+  COALESCE(to_jsonb(di), '{}'::jsonb)::text AS "device_info.__json"
 FROM devices d
 LEFT JOIN device_info di ON di.device_id = d.id
 WHERE d.deleted_at IS NULL
@@ -480,100 +548,100 @@ LIMIT $2`, normalizeDeviceTech(tech), normalizeLimit(limit))
 	}
 	defer rows.Close()
 
+	fieldDescriptions := rows.FieldDescriptions()
 	out := make([]ExportDataRow, 0)
 	for rows.Next() {
-		var serialNumber, manufacturer, modelName, productClass, firmwareVersion string
-		var ipAddress, siteName, siteID, deviceGroup, productName, lastInformAt, isOnline, longitude, latitude, lifecycleState, createdAt string
-		var deviceName, address, hardwareVersion, mac, plmn, syncStatus, enbID, eci, pci, cellID, freqPoint string
-		var bandwidth, transmitPower, opState, ueCount, rfStatus, kpiStatus, numOfCells string
-		var activeAlarmCount, highestAlarmSeverity, cumulativeOnlineDuration string
-		var mmeStatus, tac, band, ulEarfcn, subframeAssignment, specialSubframe, rootIndex string
-		var gpsSatellites, gpsHeight, ipsecAddr, lac, runTime, firstOnlineTime string
-		if err := rows.Scan(
-			&serialNumber, &manufacturer, &modelName, &productClass, &firmwareVersion,
-			&ipAddress, &siteName, &siteID, &deviceGroup, &productName, &lastInformAt, &isOnline, &longitude, &latitude,
-			&lifecycleState, &createdAt,
-			&deviceName, &address, &hardwareVersion, &mac, &plmn, &syncStatus, &enbID, &eci, &pci, &cellID, &freqPoint,
-			&bandwidth, &transmitPower, &opState, &ueCount, &rfStatus, &kpiStatus, &numOfCells,
-			&activeAlarmCount, &highestAlarmSeverity, &cumulativeOnlineDuration,
-			&mmeStatus, &tac, &band, &ulEarfcn, &subframeAssignment, &specialSubframe, &rootIndex,
-			&gpsSatellites, &gpsHeight, &ipsecAddr, &lac, &runTime, &firstOnlineTime,
-		); err != nil {
+		values, err := rows.Values()
+		if err != nil {
 			return nil, fmt.Errorf("scan device snapshot row: %w", err)
 		}
-		out = append(out, ExportDataRow{
-			"device.serial_number":                   serialNumber,
-			"device.manufacturer":                    manufacturer,
-			"device.model_name":                      modelName,
-			"device.product_class":                   productClass,
-			"device.firmware_version":                firmwareVersion,
-			"device.ip_address":                      ipAddress,
-			"device.site_name":                       siteName,
-			"device.site_id":                         siteID,
-			"device_groups.name":                     deviceGroup,
-			"product.name":                           productName,
-			"device.last_inform_at":                  lastInformAt,
-			"device.is_online":                       isOnline,
-			"device.longitude":                       longitude,
-			"device.latitude":                        latitude,
-			"device.lifecycle_state":                 lifecycleState,
-			"device.created_at":                      createdAt,
-			"device_info.device_name":                deviceName,
-			"device_info.address":                    address,
-			"device_info.hardware_version":           hardwareVersion,
-			"device_info.mac":                        mac,
-			"device_info.plmn":                       plmn,
-			"device_info.sync_status":                syncStatus,
-			"device_info.enb_id":                     enbID,
-			"device_info.eci":                        eci,
-			"device_info.pci":                        pci,
-			"device_info.cell_id":                    cellID,
-			"device_info.freq_point":                 freqPoint,
-			"device_info.bandwidth":                  bandwidth,
-			"device_info.transmit_power":             transmitPower,
-			"device_info.op_state":                   opState,
-			"device_info.ue_count":                   ueCount,
-			"device_info.rf_status":                  rfStatus,
-			"device_info.kpi_status":                 kpiStatus,
-			"device_info.num_of_cells":               numOfCells,
-			"device_info.active_alarm_count":         activeAlarmCount,
-			"device_info.highest_alarm_severity":     highestAlarmSeverity,
-			"device_info.cumulative_online_duration": cumulativeOnlineDuration,
-			"device_info.mme_status":                 mmeStatus,
-			"device_info.tac":                        tac,
-			"device_info.band":                       band,
-			"device_info.ul_earfcn":                  ulEarfcn,
-			"device_info.subframe_assignment":        subframeAssignment,
-			"device_info.special_subframe":           specialSubframe,
-			"device_info.root_index":                 rootIndex,
-			"device_info.gps_satellites":             gpsSatellites,
-			"device_info.gps_height":                 gpsHeight,
-			"device_info.ipsec_addr":                 ipsecAddr,
-			"device_info.lac":                        lac,
-			"device_info.run_time":                   runTime,
-			"device_info.first_online_time":          firstOnlineTime,
-			"inventory.enb.snapshot_time":            time.Now().Format(time.RFC3339),
-			"inventory.gnb.snapshot_time":            time.Now().Format(time.RFC3339),
-			"inventory.gsm.snapshot_time":            time.Now().Format(time.RFC3339),
-			"inventory.omc.snapshot_time":            time.Now().Format(time.RFC3339),
-			"inventory.enb.serial_number":            serialNumber,
-			"inventory.gnb.serial_number":            serialNumber,
-			"inventory.gsm.serial_number":            serialNumber,
-			"inventory.enb.cell_status":              opState,
-			"inventory.gnb.cell_status":              opState,
-			"inventory.gsm.cell_status":              opState,
-			"inventory.enb.online_status":            isOnline,
-			"inventory.gnb.online_status":            isOnline,
-			"inventory.gsm.online_status":            isOnline,
-			"inventory.enb.ip_address":               ipAddress,
-			"inventory.gnb.ip_address":               ipAddress,
-			"inventory.gsm.ip_address":               ipAddress,
-			"inventory.enb.product_type":             productClass,
-			"inventory.gnb.product_type":             productClass,
-			"inventory.gsm.product_type":             productClass,
-		})
+		row := make(ExportDataRow, len(values)+16)
+		for i, value := range values {
+			row[string(fieldDescriptions[i].Name)] = exportDataValue(value)
+		}
+		flattenDeviceInfoJSON(row, row["device_info.__json"])
+		delete(row, "device_info.__json")
+		snapshotTime := time.Now().Format(time.RFC3339)
+		serialNumber := row["device.serial_number"]
+		opState := row["device_info.op_state"]
+		isOnline := row["device.is_online"]
+		ipAddress := row["device.ip_address"]
+		productClass := row["device.product_class"]
+		row["inventory.enb.snapshot_time"] = snapshotTime
+		row["inventory.gnb.snapshot_time"] = snapshotTime
+		row["inventory.gsm.snapshot_time"] = snapshotTime
+		row["inventory.omc.snapshot_time"] = snapshotTime
+		row["inventory.enb.serial_number"] = serialNumber
+		row["inventory.gnb.serial_number"] = serialNumber
+		row["inventory.gsm.serial_number"] = serialNumber
+		row["inventory.enb.cell_status"] = opState
+		row["inventory.gnb.cell_status"] = opState
+		row["inventory.gsm.cell_status"] = opState
+		row["inventory.enb.online_status"] = isOnline
+		row["inventory.gnb.online_status"] = isOnline
+		row["inventory.gsm.online_status"] = isOnline
+		row["inventory.enb.ip_address"] = ipAddress
+		row["inventory.gnb.ip_address"] = ipAddress
+		row["inventory.gsm.ip_address"] = ipAddress
+		row["inventory.enb.product_type"] = productClass
+		row["inventory.gnb.product_type"] = productClass
+		row["inventory.gsm.product_type"] = productClass
+		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+func exportDataValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func flattenDeviceInfoJSON(row ExportDataRow, raw string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" || raw == "null" {
+		return
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	var values map[string]any
+	if err := decoder.Decode(&values); err != nil {
+		return
+	}
+	for column, value := range values {
+		key := "device_info." + column
+		if existing, ok := row[key]; ok && existing != "" {
+			continue
+		}
+		row[key] = exportJSONDataValue(value)
+	}
+}
+
+func exportJSONDataValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return v
+	case json.Number:
+		return v.String()
+	case bool:
+		return fmt.Sprint(v)
+	default:
+		if data, err := json.Marshal(v); err == nil {
+			return string(data)
+		}
+		return fmt.Sprint(v)
+	}
 }
 
 func (r *PgRepository) LoadOMCInventoryRows(ctx context.Context) ([]ExportDataRow, error) {
@@ -715,6 +783,34 @@ func (r *PgRepository) ListPMMetricFields(ctx context.Context, filter FieldFilte
 	return out, nil
 }
 
+func (r *PgRepository) ListDeviceInfoFields(ctx context.Context, filter FieldFilter) ([]FieldDefinition, error) {
+	if !supportsOptionalDeviceInfoFields(filter.Domain, filter.ObjectCode) {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'device_info'
+ORDER BY ordinal_position`)
+	if err != nil {
+		return nil, fmt.Errorf("query device_info field catalog: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]FieldDefinition, 0)
+	for rows.Next() {
+		var column, dataType string
+		if err := rows.Scan(&column, &dataType); err != nil {
+			return nil, fmt.Errorf("scan device_info field catalog: %w", err)
+		}
+		if field, ok := optionalDeviceInfoFieldFromColumn(filter.Domain, filter.ObjectCode, column, dataType); ok {
+			out = append(out, field)
+		}
+	}
+	return out, rows.Err()
+}
+
 func (r *PgRepository) ValidatePMMetricPaths(ctx context.Context, metricPaths []string) ([]string, error) {
 	paths := normalizeMetricPaths(metricPaths)
 	if len(paths) == 0 {
@@ -814,30 +910,32 @@ LIMIT $2`, normalizeMRType(objectCode), normalizeLimit(limit))
 	return out, rows.Err()
 }
 
-func (r *PgRepository) LoadLogRows(ctx context.Context, objectCode string, limit int) ([]ExportDataRow, error) {
-	switch strings.ToLower(strings.TrimSpace(objectCode)) {
+func (r *PgRepository) LoadLogRows(ctx context.Context, objectCode string, windowStart time.Time, windowEnd time.Time, limit int) ([]ExportDataRow, error) {
+	switch normalizeLogObjectCode(objectCode) {
 	case "login", "login_fix":
-		return r.loadLoginLogRows(ctx, limit)
+		return r.loadLoginLogRows(ctx, windowStart, windowEnd, limit)
 	case "operation", "operation_fix":
-		return r.loadOperationLogRows(ctx, limit)
+		return r.loadOperationLogRows(ctx, windowStart, windowEnd, limit)
 	default:
 		return nil, fmt.Errorf("%w: unsupported log object %s", commonerrors.ErrInvalidInput, objectCode)
 	}
 }
 
-func (r *PgRepository) loadLoginLogRows(ctx context.Context, limit int) ([]ExportDataRow, error) {
+func (r *PgRepository) loadLoginLogRows(ctx context.Context, windowStart time.Time, windowEnd time.Time, limit int) ([]ExportDataRow, error) {
 	rows, err := r.pool.Query(ctx, `
 SELECT
+  COALESCE(id::text, ''),
   COALESCE(username, ''),
   COALESCE(ip_address, ''),
   COALESCE(browser, ''),
   COALESCE(os, ''),
   COALESCE(status::text, ''),
   COALESCE(message, ''),
-  COALESCE(login_at::text, '')
+  COALESCE(to_char(login_at, 'YYYY-MM-DD HH24:MI:SS'), '')
 FROM sys_login_logs
-ORDER BY login_at DESC
-LIMIT $1`, normalizeLimit(limit))
+WHERE login_at >= $1 AND login_at < $2
+ORDER BY login_at ASC
+LIMIT $3`, windowStart, windowEnd, normalizeLimit(limit))
 	if err != nil {
 		return nil, fmt.Errorf("query sys_login_logs rows: %w", err)
 	}
@@ -845,38 +943,65 @@ LIMIT $1`, normalizeLimit(limit))
 
 	out := make([]ExportDataRow, 0)
 	for rows.Next() {
-		var username, ipAddress, browser, osName, status, msg, loginAt string
-		if err := rows.Scan(&username, &ipAddress, &browser, &osName, &status, &msg, &loginAt); err != nil {
+		var id, username, ipAddress, browser, osName, status, msg, loginAt string
+		if err := rows.Scan(&id, &username, &ipAddress, &browser, &osName, &status, &msg, &loginAt); err != nil {
 			return nil, fmt.Errorf("scan sys_login_logs row: %w", err)
 		}
+		result := "fail"
+		resultText := "Fail"
+		failureReason := firstNonEmpty(msg, " ")
+		if isLogSuccess(status) {
+			result = "success"
+			resultText = "Success"
+			failureReason = " "
+		}
+		detail := firstNonEmpty(msg, "user login")
 		out = append(out, ExportDataRow{
-			"log.username":   username,
-			"log.client_ip":  ipAddress,
-			"log.browser":    browser,
-			"log.os":         osName,
-			"log.result":     status,
-			"log.message":    msg,
-			"log.login_time": loginAt,
+			"log.id":              id,
+			"log.username":        username,
+			"log.user_name":       username,
+			"log.account_name":    username,
+			"log.client_ip":       ipAddress,
+			"log.ip_address":      ipAddress,
+			"log.terminal_ip":     ipAddress,
+			"log.terminal_name":   firstNonEmpty(browser, osName, "Browser"),
+			"log.browser":         browser,
+			"log.os":              osName,
+			"log.result":          result,
+			"log.result_text":     resultText,
+			"log.failure_reason":  failureReason,
+			"log.message":         msg,
+			"log.detail":          detail,
+			"log.log_name":        "LoginLogout",
+			"log.login_time":      loginAt,
+			"log.log_time":        loginAt,
+			"log.log_start_time":  loginAt,
+			"log.log_end_time":    loginAt,
+			"log.time":            loginAt,
+			"log.sys_source_name": "baicells omc",
 		})
 	}
 	return out, rows.Err()
 }
 
-func (r *PgRepository) loadOperationLogRows(ctx context.Context, limit int) ([]ExportDataRow, error) {
+func (r *PgRepository) loadOperationLogRows(ctx context.Context, windowStart time.Time, windowEnd time.Time, limit int) ([]ExportDataRow, error) {
 	rows, err := r.pool.Query(ctx, `
 SELECT
   COALESCE(username, ''),
   COALESCE(action, ''),
   COALESCE(module, ''),
   COALESCE(target, ''),
+  COALESCE(detail, ''),
   COALESCE(status::text, ''),
   COALESCE(error_msg, ''),
   COALESCE(ip_address, ''),
   COALESCE(user_agent, ''),
-  COALESCE(created_at::text, '')
+  COALESCE(to_char(created_at, 'YYYY-MM-DD HH24:MI:SS'), ''),
+  COALESCE(to_char(created_at + (COALESCE(cost_ms, 0) * interval '1 millisecond'), 'YYYY-MM-DD HH24:MI:SS'), '')
 FROM sys_oper_logs
-ORDER BY created_at DESC
-LIMIT $1`, normalizeLimit(limit))
+WHERE created_at >= $1 AND created_at < $2
+ORDER BY created_at ASC
+LIMIT $3`, windowStart, windowEnd, normalizeLimit(limit))
 	if err != nil {
 		return nil, fmt.Errorf("query sys_oper_logs rows: %w", err)
 	}
@@ -884,20 +1009,45 @@ LIMIT $1`, normalizeLimit(limit))
 
 	out := make([]ExportDataRow, 0)
 	for rows.Next() {
-		var username, action, module, target, status, errorMsg, ipAddress, userAgent, createdAt string
-		if err := rows.Scan(&username, &action, &module, &target, &status, &errorMsg, &ipAddress, &userAgent, &createdAt); err != nil {
+		var username, action, module, target, detail, status, errorMsg, ipAddress, userAgent, createdAt, endedAt string
+		if err := rows.Scan(&username, &action, &module, &target, &detail, &status, &errorMsg, &ipAddress, &userAgent, &createdAt, &endedAt); err != nil {
 			return nil, fmt.Errorf("scan sys_oper_logs row: %w", err)
 		}
+		result := "fail"
+		resultText := "Fail"
+		failureReason := firstNonEmpty(errorMsg, " ")
+		if isLogSuccess(status) {
+			result = "success"
+			resultText = "Success"
+			failureReason = " "
+		}
+		logName := firstNonEmpty(action, module, "Operation")
+		recordDetail := firstNonEmpty(detail, target, action, module, "operation")
 		out = append(out, ExportDataRow{
-			"log.operator":       username,
-			"log.action":         action,
-			"log.module":         module,
-			"log.resource":       target,
-			"log.result":         status,
-			"log.message":        errorMsg,
-			"log.client_ip":      ipAddress,
-			"log.user_agent":     userAgent,
-			"log.operation_time": createdAt,
+			"log.operator":        username,
+			"log.username":        username,
+			"log.user_name":       username,
+			"log.main_name":       username,
+			"log.action":          action,
+			"log.module":          module,
+			"log.resource":        target,
+			"log.target":          target,
+			"log.detail":          recordDetail,
+			"log.log_name":        logName,
+			"log.result":          result,
+			"log.result_text":     resultText,
+			"log.failure_reason":  failureReason,
+			"log.message":         firstNonEmpty(errorMsg, recordDetail),
+			"log.client_ip":       ipAddress,
+			"log.ip_address":      ipAddress,
+			"log.terminal_ip":     ipAddress,
+			"log.user_agent":      userAgent,
+			"log.terminal_name":   firstNonEmpty(userAgent, "Browser"),
+			"log.operation_time":  createdAt,
+			"log.log_time":        createdAt,
+			"log.op_start_time":   createdAt,
+			"log.op_end_time":     firstNonEmpty(endedAt, createdAt),
+			"log.sys_source_name": "baicells omc",
 		})
 	}
 	return out, rows.Err()

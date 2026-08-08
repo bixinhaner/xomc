@@ -134,6 +134,9 @@ func (s *Service) getInventoryProfile(ctx context.Context, idOrCode string) (*In
 
 func (s *Service) buildFileRun(ctx context.Context, profile FileProfile, group FileGroup, object ScenarioObject, req RunProfileRequest) (FileRun, error) {
 	windowStart, windowEnd := normalizeRunWindow(group.Period, req)
+	if group.Domain == DomainLOG {
+		object.Code = normalizeLogObjectCode(object.Code)
+	}
 	if group.Domain == DomainMR {
 		return s.buildMRPassthroughRun(ctx, profile, group, object, req, windowStart, windowEnd)
 	}
@@ -280,25 +283,39 @@ func (s *Service) buildInventoryRun(ctx context.Context, profile InventoryProfil
 
 // applySelectedFields narrows the catalog field set to the explicitly selected keys.
 // A nil/empty wanted list means "all fields" (default), returning fields unchanged.
-// Matching is by FieldDefinition.Key; catalog order is preserved. Unknown keys are
-// silently dropped (the generator naturally ignores them).
-func applySelectedFields(fields []FieldDefinition, wanted []string) []FieldDefinition {
+// Matching is by FieldDefinition.Key; catalog order is preserved. Device-info
+// table fields selected from the UI's optional pool are appended in selection
+// order without expanding the default catalog output.
+func applySelectedFields(domain Domain, objectCode string, fields []FieldDefinition, wanted []string) []FieldDefinition {
 	if len(wanted) == 0 {
 		return fields
 	}
 	keep := make(map[string]struct{}, len(wanted))
 	for _, k := range wanted {
-		keep[k] = struct{}{}
+		keep[strings.ToLower(strings.TrimSpace(k))] = struct{}{}
 	}
+	added := make(map[string]struct{}, len(wanted))
 	out := make([]FieldDefinition, 0, len(fields))
 	for _, f := range fields {
-		if _, ok := keep[f.Key]; ok {
+		key := strings.ToLower(f.Key)
+		if _, ok := keep[key]; ok {
 			out = append(out, f)
+			added[key] = struct{}{}
+		}
+	}
+	for _, k := range wanted {
+		key := strings.ToLower(strings.TrimSpace(k))
+		if _, ok := added[key]; ok {
+			continue
+		}
+		if field, ok := optionalDeviceInfoFieldByKey(domain, objectCode, key); ok {
+			out = append(out, field)
+			added[key] = struct{}{}
 		}
 	}
 	if len(out) == 0 {
-		// None of the selected keys matched this object's catalog fields — e.g. PM
-		// per-metric keys against the fixed PM column set, or a stale/foreign
+		// None of the selected keys matched this object's supported fields — e.g.
+		// PM per-metric keys against the fixed PM column set, or a stale/foreign
 		// selection. Keep all fields rather than producing an empty/failed export.
 		return fields
 	}
@@ -306,6 +323,9 @@ func applySelectedFields(fields []FieldDefinition, wanted []string) []FieldDefin
 }
 
 func (s *Service) generateFileContent(ctx context.Context, group FileGroup, object ScenarioObject, windowStart, windowEnd time.Time, limit int) (string, int, error) {
+	if group.Domain == DomainLOG {
+		object.Code = normalizeLogObjectCode(object.Code)
+	}
 	fields := s.catalog.Fields(FieldFilter{
 		Domain:     group.Domain,
 		ObjectCode: object.Code,
@@ -314,7 +334,7 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 	})
 	// Honor per-profile field selection: empty SelectedFields = all catalog fields
 	// (default); non-empty = only the listed field keys, preserving catalog order.
-	fields = applySelectedFields(fields, group.SelectedFields)
+	fields = applySelectedFields(group.Domain, object.Code, fields, group.SelectedFields)
 	if len(fields) == 0 {
 		return "", 0, fmt.Errorf("%w: no supported fields for %s %s", commonerrors.ErrInvalidInput, group.Domain, object.Code)
 	}
@@ -339,7 +359,7 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 			Limit:       normalizeLimit(limit),
 		})
 	case DomainLOG:
-		rows, err = s.repo.LoadLogRows(ctx, object.Code, normalizeLimit(limit))
+		rows, err = s.repo.LoadLogRows(ctx, object.Code, windowStart, windowEnd, normalizeLimit(limit))
 	default:
 		err = fmt.Errorf("%w: unsupported file domain %s", commonerrors.ErrInvalidInput, group.Domain)
 	}
@@ -354,6 +374,9 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 	// CM uses the Baicells DataFile XML format when format is XML (MR keeps its own XML format).
 	if group.Domain == DomainCM && group.Format == FormatXML {
 		return renderCMXML(fields, rows, windowEnd), len(rows), nil
+	}
+	if group.Domain == DomainLOG {
+		return renderLogRows(object.Code, rows)
 	}
 	return renderRowsForGroup(group, fields, rows)
 }
@@ -493,6 +516,210 @@ func renderDelimited(fields []FieldDefinition, rows []ExportDataRow, sep string)
 	return b.String(), nil
 }
 
+func renderLogRows(objectCode string, rows []ExportDataRow) (string, int, error) {
+	switch normalizeLogObjectCode(objectCode) {
+	case "login":
+		return renderCustomLoginLogRows(rows), len(rows), nil
+	case "operation":
+		return renderCustomOperationLogRows(rows), len(rows), nil
+	case "login_fix":
+		return renderFixedSecurityLogRows(rows), len(rows), nil
+	case "operation_fix":
+		return renderFixedOperationLogRows(rows), len(rows), nil
+	default:
+		return "", 0, fmt.Errorf("%w: unsupported log object %s", commonerrors.ErrInvalidInput, objectCode)
+	}
+}
+
+func normalizeLogObjectCode(objectCode string) string {
+	normalized := strings.ToLower(strings.TrimSpace(objectCode))
+	switch normalized {
+	case "login", "security", "security_log", "login_log", "登录日志", "安全日志", "登录/安全日志":
+		return "login"
+	case "operation", "operation_log", "oper", "操作日志":
+		return "operation"
+	case "login_fix", "security_fix", "登录固定格式", "安全固定格式", "登录/安全日志（固定格式）", "登录/安全日志(固定格式)":
+		return "login_fix"
+	case "operation_fix", "oper_fix", "操作固定格式", "操作日志（固定格式）", "操作日志(固定格式)":
+		return "operation_fix"
+	default:
+		return strings.TrimSpace(objectCode)
+	}
+}
+
+func renderCustomLoginLogRows(rows []ExportDataRow) string {
+	var b strings.Builder
+	b.WriteString("log_time|sys_source_name|account_name|terminal_name|terminal_ip|log_result|log_start_time|log_end_time\n")
+	for _, row := range rows {
+		values := []string{
+			firstNonEmpty(row["log.log_time"], row["log.login_time"]),
+			firstNonEmpty(row["log.sys_source_name"], "baicells omc"),
+			firstNonEmpty(row["log.account_name"], row["log.username"], `""`),
+			firstNonEmpty(row["log.terminal_name"], `""`),
+			firstNonEmpty(row["log.terminal_ip"], row["log.client_ip"], row["log.ip_address"], `""`),
+			legacyLogResult(row),
+			firstNonEmpty(row["log.log_start_time"], row["log.login_time"]),
+			firstNonEmpty(row["log.log_end_time"], row["log.login_time"]),
+		}
+		writePipeLogRow(&b, values)
+	}
+	return b.String()
+}
+
+func renderCustomOperationLogRows(rows []ExportDataRow) string {
+	var b strings.Builder
+	b.WriteString("log_time|sys_source_name|terminal_name|terminal_ip|main_name|sub_account|asset_name|asset_ip|asset_port|asset_attribute|log_data\n")
+	for _, row := range rows {
+		values := []string{
+			firstNonEmpty(row["log.log_time"], row["log.operation_time"]),
+			firstNonEmpty(row["log.sys_source_name"], "baicells omc"),
+			firstNonEmpty(row["log.terminal_name"], `""`),
+			firstNonEmpty(row["log.terminal_ip"], row["log.client_ip"], row["log.ip_address"], `""`),
+			firstNonEmpty(row["log.main_name"], row["log.operator"], row["log.username"], `""`),
+			firstNonEmpty(row["log.sub_account"], `""`),
+			firstNonEmpty(row["log.asset_name"], `""`),
+			firstNonEmpty(row["log.asset_ip"], `""`),
+			firstNonEmpty(row["log.asset_port"], `""`),
+			firstNonEmpty(row["log.asset_attribute"], `""`),
+			customOperationLogData(row),
+		}
+		writePipeLogRow(&b, values)
+	}
+	return b.String()
+}
+
+func renderFixedSecurityLogRows(rows []ExportDataRow) string {
+	headers := []string{"ID", "User Name", "IP Address", "Log Name", "Record Detail", "Results", "Failure Reason", "Time"}
+	data := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, []string{
+			row["log.id"],
+			firstNonEmpty(row["log.user_name"], row["log.username"]),
+			firstNonEmpty(row["log.ip_address"], row["log.client_ip"]),
+			firstNonEmpty(row["log.log_name"], "LoginLogout"),
+			firstNonEmpty(row["log.detail"], row["log.message"], "user login"),
+			fixedLogResult(row),
+			logFailureReason(row),
+			withTrailingTab(firstNonEmpty(row["log.time"], row["log.login_time"], row["log.log_time"])),
+		})
+	}
+	return renderQuotedCSVRows(headers, data)
+}
+
+func renderFixedOperationLogRows(rows []ExportDataRow) string {
+	headers := []string{"User Name", "IP Address", "Log Name", "Record Detail", "Results", "Failure Reason", "Op Start Time", "Op End Time"}
+	data := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, []string{
+			firstNonEmpty(row["log.user_name"], row["log.operator"], row["log.username"]),
+			firstNonEmpty(row["log.ip_address"], row["log.client_ip"]),
+			firstNonEmpty(row["log.log_name"], row["log.action"], row["log.module"], "Operation"),
+			firstNonEmpty(row["log.detail"], row["log.message"], row["log.resource"]),
+			fixedLogResult(row),
+			logFailureReason(row),
+			withTrailingTab(firstNonEmpty(row["log.op_start_time"], row["log.operation_time"], row["log.log_time"])),
+			withTrailingTab(firstNonEmpty(row["log.op_end_time"], row["log.operation_time"], row["log.log_time"])),
+		})
+	}
+	return renderQuotedCSVRows(headers, data)
+}
+
+func writePipeLogRow(b *strings.Builder, values []string) {
+	for i := range values {
+		values[i] = sanitizePipeLogField(values[i])
+	}
+	b.WriteString(strings.Join(values, "|"))
+	b.WriteByte('\n')
+}
+
+func renderQuotedCSVRows(headers []string, rows [][]string) string {
+	var b strings.Builder
+	writeQuotedCSVRow(&b, headers)
+	for _, row := range rows {
+		writeQuotedCSVRow(&b, row)
+	}
+	return b.String()
+}
+
+func writeQuotedCSVRow(b *strings.Builder, values []string) {
+	for i, value := range values {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(quoteCSVField(value))
+	}
+	b.WriteByte('\n')
+}
+
+func quoteCSVField(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
+}
+
+func sanitizePipeLogField(value string) string {
+	value = strings.ReplaceAll(value, "|", " ")
+	value = strings.ReplaceAll(value, "\r", " ")
+	value = strings.ReplaceAll(value, "\n", " ")
+	return strings.TrimSpace(value)
+}
+
+func sanitizeLogDataPart(value string) string {
+	value = strings.ReplaceAll(value, `"`, `'`)
+	value = strings.ReplaceAll(value, "\r", " ")
+	value = strings.ReplaceAll(value, "\n", " ")
+	return strings.TrimSpace(value)
+}
+
+func customOperationLogData(row ExportDataRow) string {
+	logName := firstNonEmpty(row["log.log_name"], row["log.action"], row["log.module"], "Operation")
+	detail := firstNonEmpty(row["log.detail"], row["log.message"], row["log.resource"], "operation")
+	result := legacyLogResult(row)
+	return fmt.Sprintf("\"{\"%s\",\"%s\",\"%s\"}\"", sanitizeLogDataPart(logName), sanitizeLogDataPart(detail), sanitizeLogDataPart(result))
+}
+
+func legacyLogResult(row ExportDataRow) string {
+	if isLogSuccess(firstNonEmpty(row["log.result"], row["log.result_text"])) {
+		return "success"
+	}
+	return "fail"
+}
+
+func fixedLogResult(row ExportDataRow) string {
+	if value := strings.TrimSpace(row["log.result_text"]); value != "" {
+		return value
+	}
+	if isLogSuccess(row["log.result"]) {
+		return "Success"
+	}
+	return "Fail"
+}
+
+func logFailureReason(row ExportDataRow) string {
+	if isLogSuccess(firstNonEmpty(row["log.result"], row["log.result_text"])) {
+		return " "
+	}
+	return firstNonEmpty(row["log.failure_reason"], row["log.message"], " ")
+}
+
+func isLogSuccess(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "success", "succeeded", "ok", "yes", "成功":
+		return true
+	default:
+		return false
+	}
+}
+
+func withTrailingTab(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "\t"
+	}
+	if strings.HasSuffix(value, "\t") {
+		return value
+	}
+	return value + "\t"
+}
+
 func renderSimpleXML(fields []FieldDefinition, rows []ExportDataRow) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
@@ -591,6 +818,9 @@ func normalizeOffset(offset int) int {
 }
 
 func renderArtifactName(group FileGroup, object ScenarioObject, windowStart, windowEnd time.Time, fileID int) (string, string) {
+	if group.Domain == DomainLOG {
+		return renderLogArtifactName(group, object, windowStart, windowEnd, fileID)
+	}
 	tokens := runtimeTokenValues(group, object, windowStart, windowEnd, fileID)
 	path, _ := renderTemplate(group.PathTemplate, tokens)
 	fileName, _ := renderTemplate(group.FileNameTemplate, tokens)
@@ -600,6 +830,52 @@ func renderArtifactName(group FileGroup, object ScenarioObject, windowStart, win
 		artifactName = fmt.Sprintf("%s.%s", artifactName, compressionFormatOrDefault(group.CompressionFormat))
 	}
 	return path, artifactName
+}
+
+func renderLogArtifactName(group FileGroup, object ScenarioObject, windowStart, windowEnd time.Time, fileID int) (string, string) {
+	date := windowStart.Format("20060102")
+	timestamp := windowStart.Format("20060102150405")
+	path := "/northupload/LOGS/" + date + "/"
+	if strings.TrimSpace(group.PathTemplate) != "" && !isLegacyLogPathTemplate(group.PathTemplate) {
+		tokens := runtimeTokenValues(group, object, windowStart, windowEnd, fileID)
+		renderedPath, _ := renderTemplate(group.PathTemplate, tokens)
+		if strings.TrimSpace(renderedPath) != "" {
+			path = renderedPath
+		}
+	}
+
+	var fileName string
+	switch normalizeLogObjectCode(object.Code) {
+	case "login":
+		fileName = "login_" + date + ".txt"
+	case "operation":
+		fileName = "oper_" + date + ".txt"
+	case "login_fix":
+		fileName = fmt.Sprintf("SecurityLogs_%s-%dH.csv", timestamp, logPeriodHours(group.Period))
+	case "operation_fix":
+		fileName = fmt.Sprintf("OperationLogs_%s-%dH.csv", timestamp, logPeriodHours(group.Period))
+	default:
+		tokens := runtimeTokenValues(group, object, windowStart, windowEnd, fileID)
+		fileName, _ = renderTemplate(group.FileNameTemplate, tokens)
+		fileName = ensurePreviewFileExtension(fileName, group.Format)
+	}
+
+	if group.CompressionEnabled {
+		fileName = fmt.Sprintf("%s.%s", fileName, compressionFormatOrDefault(group.CompressionFormat))
+	}
+	return path, fileName
+}
+
+func logPeriodHours(period Period) int {
+	duration := periodDuration(period)
+	if duration <= 0 {
+		return 24
+	}
+	hours := int(duration / time.Hour)
+	if hours <= 0 {
+		return 1
+	}
+	return hours
 }
 
 func runtimeTokenValues(group FileGroup, object ScenarioObject, windowStart, windowEnd time.Time, fileID int) map[string]string {
@@ -612,6 +888,7 @@ func runtimeTokenValues(group FileGroup, object ScenarioObject, windowStart, win
 		"#Province#":        "GD",
 		"#OMC-R#":           "BaiOMC",
 		"#DateTime#":        windowEnd.Format("20060102150405"),
+		"#Date#":            windowStart.Format("20060102"),
 		"#PeriodStartTime#": windowStart.Format("20060102150405"),
 		"#PeriodEndTime#":   windowEnd.Format("20060102150405"),
 		"#LocalHost#":       "127.0.0.1",

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 var (
@@ -19,6 +20,7 @@ var supportedTemplateTokens = map[string]struct{}{
 	"#Province#":        {},
 	"#OMC-R#":           {},
 	"#DateTime#":        {},
+	"#Date#":            {},
 	"#PeriodStartTime#": {},
 	"#PeriodEndTime#":   {},
 	"#LocalHost#":       {},
@@ -43,6 +45,9 @@ func buildFileProfilePreview(profile FileProfile) FileProfilePreview {
 }
 
 func buildFileGroupPreview(group FileGroup) FileGroupPreview {
+	if group.Domain == DomainLOG {
+		return buildLogFileGroupPreview(group)
+	}
 	tokens := previewTokenValues(group)
 	path, pathUnknownTokens := renderTemplate(group.PathTemplate, tokens)
 	fileName, fileUnknownTokens := renderTemplate(group.FileNameTemplate, tokens)
@@ -76,6 +81,34 @@ func buildFileGroupPreview(group FileGroup) FileGroupPreview {
 	}
 }
 
+func buildLogFileGroupPreview(group FileGroup) FileGroupPreview {
+	windowEnd := time.Date(2026, 8, 4, 0, 0, 0, 0, time.Local)
+	windowStart := windowEnd.Add(-periodDuration(group.Period))
+	previewObject := ScenarioObject{Code: previewObjectCode(group)}
+	path, artifactName := renderLogArtifactName(group, previewObject, windowStart, windowEnd, 1)
+	fileName := artifactName
+	if group.CompressionEnabled {
+		suffix := "." + string(compressionFormatOrDefault(group.CompressionFormat))
+		fileName = strings.TrimSuffix(fileName, suffix)
+	}
+	warnings := append(validateTemplatePath(path), validateTemplateFileName(fileName)...)
+	return FileGroupPreview{
+		GroupID:             group.ID,
+		Domain:              group.Domain,
+		Format:              group.Format,
+		Period:              group.Period,
+		PathTemplate:        group.PathTemplate,
+		FileNameTemplate:    group.FileNameTemplate,
+		CSVSeparator:        group.CSVSeparator,
+		PreviewPath:         path,
+		PreviewFileName:     fileName,
+		CompressionEnabled:  group.CompressionEnabled,
+		CompressionFormat:   compressionFormatOrDefault(group.CompressionFormat),
+		PreviewArtifactName: artifactName,
+		Warnings:            uniqueStrings(warnings),
+	}
+}
+
 func previewTokenValues(group FileGroup) map[string]string {
 	objectCode := previewObjectCode(group)
 	return map[string]string{
@@ -83,6 +116,7 @@ func previewTokenValues(group FileGroup) map[string]string {
 		"#Province#":        "GD",
 		"#OMC-R#":           "BaiOMC",
 		"#DateTime#":        "20260804000000",
+		"#Date#":            "20260804",
 		"#PeriodStartTime#": "20260803234500",
 		"#PeriodEndTime#":   "20260804000000",
 		"#LocalHost#":       "127.0.0.1",

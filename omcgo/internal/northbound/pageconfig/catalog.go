@@ -9,13 +9,13 @@ const (
 	pathCM        = "/#FTPRoot#/#Province#/#OMC-R#/CM/#DateTime#/"
 	pathPM        = "/#FTPRoot#/#Province#/#OMC-R#/PM/#DateTime#/"
 	pathMR        = "/#FTPRoot#/#Province#/#OMC-R#/MR/#DateTime#/"
-	pathLOG       = "/#FTPRoot#/#Province#/#OMC-R#/LOGS/#DateTime#/"
+	pathLOG       = "/#FTPRoot#/LOGS/#Date#/"
 	pathInventory = "/#FTPRoot#/#Province#/#OMC-R#/Inventory/#Object#/#DateTime#/"
 
 	nameCM        = "Baicells-#Object#-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#][-#FileID#]"
 	namePM        = "Baicells-#Object#-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#]-#DataPeriod#[-#FileID#]"
 	nameMR        = "#ModuleType#-Baicells-#Object#-#LocalHost#-#eNBID#-#DateTime#[-#Ri#].xml"
-	nameLOG       = "Northbound-log-{login|operation}-#DateTime#.txt"
+	nameLOG       = "#Object#_#Date#.txt"
 	nameInventory = "BaiOMC_#Object#_#DateTime#.csv"
 )
 
@@ -107,6 +107,11 @@ func pipeCSV(group FileGroup) FileGroup {
 	return csvSeparator(group, "|")
 }
 
+func gzipGroup(group FileGroup) FileGroup {
+	group.CompressionFormat = CompressionGz
+	return group
+}
+
 func obj(codes ...string) []ScenarioObject {
 	out := make([]ScenarioObject, 0, len(codes))
 	for _, code := range codes {
@@ -144,7 +149,7 @@ func defaultFileProfiles() []FileProfile {
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
 			pipeCSV(group("pm-15m-delayed", DomainPM, FormatCSV, Period15M, 14, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
-			group("log-custom-daily", DomainLOG, FormatTXT, Period24H, 5, pathLOG, nameLOG, obj("login", "operation")),
+			gzipGroup(group("log-custom-daily", DomainLOG, FormatTXT, Period24H, 5, pathLOG, nameLOG, obj("login", "operation"))),
 		}),
 		fileProfile("S0006", "CM/PM without MR", "Thai-True", "Thai-True", []string{"no MR"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
@@ -158,7 +163,7 @@ func defaultFileProfiles() []FileProfile {
 			group("cm-daily-csv", DomainCM, FormatCSV, Period24H, 1, pathCM, nameCM, cmComs),
 			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
-			group("log-fixed-daily", DomainLOG, FormatCSV, Period24H, 5, pathLOG, "Northbound-log-fix-{login|operation}-#DateTime#.csv", obj("login_fix", "operation_fix")),
+			gzipGroup(group("log-fixed-daily", DomainLOG, FormatCSV, Period24H, 5, pathLOG, "#Object#_#PeriodStartTime#-24H.csv", obj("login_fix", "operation_fix"))),
 		}),
 		fileProfile("S0009", "PC 60M + MR", "Laos-Tele", "Laos-Tele", []string{"PM 60M"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
@@ -314,6 +319,67 @@ var stationInventoryFieldSeeds = []inventoryFieldSeed{
 	{"Special Subframe Patterns", "device_info.special_subframe", "device_info.special_subframe", "string", "quote", "Special subframe patterns"},
 }
 
+var deviceInfoOptionalFieldSeeds = []inventoryFieldSeed{
+	{"Device Info Device ID", "device_info.device_id", "device_info.device_id", "string", "quote", "Device info device ID"},
+	{"Device Name", "device_info.device_name", "device_info.device_name", "string", "quote", "Device name"},
+	{"Address", "device_info.address", "device_info.address", "string", "quote", "Address"},
+	{"Remark", "device_info.remark", "device_info.remark", "string", "quote", "Remark"},
+	{"Project Status", "device_info.project_status", "device_info.project_status", "string", "quote", "Project status"},
+	{"Height", "device_info.height", "device_info.height", "number", "number", "Height"},
+	{"ECI", "device_info.eci", "device_info.eci", "string", "preserve text", "ECI"},
+	{"PCI", "device_info.pci", "device_info.pci", "string", "preserve text", "PCI"},
+	{"Cell ID", "device_info.cell_id", "device_info.cell_id", "string", "quote", "Cell ID"},
+	{"Frequency Point", "device_info.freq_point", "device_info.freq_point", "number", "preserve text", "Frequency point"},
+	{"Bandwidth", "device_info.bandwidth", "device_info.bandwidth", "number", "number", "Bandwidth"},
+	{"Transmit Power", "device_info.transmit_power", "device_info.transmit_power", "number", "number", "Transmit power"},
+	{"PLMN", "device_info.plmn", "device_info.plmn", "string", "preserve text", "PLMN"},
+	{"RF Status", "device_info.rf_status", "device_info.rf_status", "string", "enum", "RF status"},
+	{"Cell Status", "device_info.cell_status", "device_info.cell_status", "string", "enum", "Cell status"},
+	{"MME Status", "device_info.mme_status", "device_info.mme_status", "string", "enum", "MME status"},
+	{"Sync Status", "device_info.sync_status", "device_info.sync_status", "string", "enum", "Sync status"},
+	{"KPI Report Status", "device_info.kpi_status", "device_info.kpi_status", "string", "enum", "KPI report status"},
+	{"Number of Cells", "device_info.num_of_cells", "device_info.num_of_cells", "number", "number", "Number of cells"},
+	{"GPS Status", "device_info.gps_status", "device_info.gps_status", "string", "enum", "GPS status"},
+	{"Alarm Severity", "device_info.alarm_severity", "device_info.alarm_severity", "string", "enum", "Alarm severity"},
+	{"License Status", "device_info.license_status", "device_info.license_status", "string", "enum", "License status"},
+	{"MAC Address", "device_info.mac", "device_info.mac", "string", "quote", "MAC address"},
+	{"Hardware Version", "device_info.hardware_version", "device_info.hardware_version", "string", "quote", "Hardware version"},
+	{"First Online Time", "device_info.first_online_time", "device_info.first_online_time", "datetime", "yyyy-MM-dd HH:mm:ss", "First online time"},
+	{"Last Online Time", "device_info.last_online_time", "device_info.last_online_time", "datetime", "yyyy-MM-dd HH:mm:ss", "Last online time"},
+	{"Last Offline Time", "device_info.last_offline_time", "device_info.last_offline_time", "datetime", "yyyy-MM-dd HH:mm:ss", "Last offline time"},
+	{"Run Time", "device_info.run_time", "device_info.run_time", "number", "number", "Run time"},
+	{"Creator", "device_info.creator", "device_info.creator", "string", "quote", "Creator"},
+	{"Updater", "device_info.updater", "device_info.updater", "string", "quote", "Updater"},
+	{"Created At", "device_info.created_at", "device_info.created_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Created at"},
+	{"Updated At", "device_info.updated_at", "device_info.updated_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Updated at"},
+	{"TAC", "device_info.tac", "device_info.tac", "string", "quote", "TAC"},
+	{"Band", "device_info.band", "device_info.band", "string", "quote", "Band"},
+	{"UL EARFCN", "device_info.ul_earfcn", "device_info.ul_earfcn", "number", "preserve text", "UL EARFCN"},
+	{"Subframe Assignment", "device_info.subframe_assignment", "device_info.subframe_assignment", "string", "quote", "Subframe assignment"},
+	{"Special Subframe", "device_info.special_subframe", "device_info.special_subframe", "string", "quote", "Special subframe"},
+	{"Root Index", "device_info.root_index", "device_info.root_index", "number", "preserve text", "Root index"},
+	{"GPS Satellites", "device_info.gps_satellites", "device_info.gps_satellites", "number", "number", "GPS satellites"},
+	{"GPS Height", "device_info.gps_height", "device_info.gps_height", "number", "number", "GPS height"},
+	{"Lock Status", "device_info.lock_status", "device_info.lock_status", "string", "enum", "Lock status"},
+	{"eNB ID", "device_info.enb_id", "device_info.enb_id", "string", "quote", "eNB ID"},
+	{"Network Model", "device_info.network_model", "device_info.network_model", "string", "enum", "Network model"},
+	{"LAC", "device_info.lac", "device_info.lac", "string", "quote", "LAC"},
+	{"Cumulative Online Duration", "device_info.cumulative_online_duration", "device_info.cumulative_online_duration", "number", "number", "Cumulative online duration"},
+	{"Operation State", "device_info.op_state", "device_info.op_state", "string", "enum", "Operation state"},
+	{"Admin State", "device_info.admin_state", "device_info.admin_state", "string", "enum", "Admin state"},
+	{"IPsec Address", "device_info.ipsec_addr", "device_info.ipsec_addr", "string", "quote", "IPsec address"},
+	{"BSC Select", "device_info.bsc_select", "device_info.bsc_select", "string", "enum", "BSC select"},
+	{"OML Remote IP", "device_info.oml_remote_ip", "device_info.oml_remote_ip", "string", "quote", "OML remote IP"},
+	{"OML Remote IP Backup", "device_info.oml_remote_ip_bak", "device_info.oml_remote_ip_bak", "string", "quote", "OML remote IP backup"},
+	{"IPA Unit ID", "device_info.ipa_unit_id", "device_info.ipa_unit_id", "string", "quote", "IPA unit ID"},
+	{"UE Count", "device_info.ue_count", "device_info.ue_count", "number", "number", "UE count"},
+	{"Active Alarm Count", "device_info.active_alarm_count", "device_info.active_alarm_count", "number", "number", "Active alarm count"},
+	{"Name Sync Pending", "device_info.name_sync_pending", "device_info.name_sync_pending", "bool", "enum", "Name sync pending"},
+	{"LMT Device Name", "device_info.lmt_device_name", "device_info.lmt_device_name", "string", "quote", "LMT device name"},
+	{"Highest Alarm Severity", "device_info.highest_alarm_severity", "device_info.highest_alarm_severity", "number", "number", "Highest alarm severity"},
+	{"Highest Severity Alarm Count", "device_info.highest_severity_alarm_count", "device_info.highest_severity_alarm_count", "number", "number", "Highest severity alarm count"},
+}
+
 var inventoryAliasesByObject = map[string]map[string]string{
 	"GNB": {
 		"Cell Name": "gNB Name", "ECI": "NCI", "Earfcn": "NR-ARFCN", "MME Status": "AMF Status",
@@ -335,6 +401,81 @@ func inventoryField(objectCode string, index int, seed inventoryFieldSeed) Field
 	definition := field(DomainInventory, objectCode, outputAlias, seed.systemField, seed.source, seed.dataType, seed.renderer, seed.cnName)
 	definition.Key = strings.ToLower(string(DomainInventory) + "." + objectCode + "." + strconv.Itoa(index+1))
 	return definition
+}
+
+func optionalDeviceInfoFieldByKey(domain Domain, objectCode, key string) (FieldDefinition, bool) {
+	if !supportsOptionalDeviceInfoFields(domain, objectCode) {
+		return FieldDefinition{}, false
+	}
+	prefix := strings.ToLower(string(domain) + "." + objectCode + ".device_info.")
+	normalizedKey := strings.ToLower(strings.TrimSpace(key))
+	if !strings.HasPrefix(normalizedKey, prefix) {
+		return FieldDefinition{}, false
+	}
+	column := strings.TrimPrefix(normalizedKey, prefix)
+	return optionalDeviceInfoFieldFromColumn(domain, objectCode, column, "")
+}
+
+func optionalDeviceInfoFieldFromColumn(domain Domain, objectCode, column, dbType string) (FieldDefinition, bool) {
+	if !supportsOptionalDeviceInfoFields(domain, objectCode) {
+		return FieldDefinition{}, false
+	}
+	column = strings.TrimSpace(strings.ToLower(column))
+	if column == "" {
+		return FieldDefinition{}, false
+	}
+	for _, seed := range deviceInfoOptionalFieldSeeds {
+		if strings.EqualFold(seed.systemField, "device_info."+column) {
+			return field(domain, objectCode, seed.outputAlias, seed.systemField, seed.source, seed.dataType, seed.renderer, seed.cnName), true
+		}
+	}
+	dataType, renderer := dataTypeForDeviceInfoColumn(dbType)
+	outputAlias := titleFromColumn(column)
+	return field(domain, objectCode, outputAlias, "device_info."+column, "device_info."+column, dataType, renderer, outputAlias), true
+}
+
+func dataTypeForDeviceInfoColumn(dbType string) (string, string) {
+	normalized := strings.ToLower(dbType)
+	switch {
+	case strings.Contains(normalized, "timestamp"), strings.Contains(normalized, "date"), strings.Contains(normalized, "time"):
+		return "datetime", "yyyy-MM-dd HH:mm:ss"
+	case strings.Contains(normalized, "bool"):
+		return "bool", "enum"
+	case strings.Contains(normalized, "int"), strings.Contains(normalized, "numeric"), strings.Contains(normalized, "decimal"),
+		strings.Contains(normalized, "real"), strings.Contains(normalized, "double"):
+		return "number", "number"
+	default:
+		return "string", "quote"
+	}
+}
+
+func titleFromColumn(column string) string {
+	parts := strings.Fields(strings.ReplaceAll(column, "_", " "))
+	for i, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+func supportsOptionalDeviceInfoFields(domain Domain, objectCode string) bool {
+	switch domain {
+	case DomainCM:
+		for _, code := range []string{"CP", "EP", "CC", "CE", "COMS"} {
+			if strings.EqualFold(objectCode, code) {
+				return true
+			}
+		}
+	case DomainInventory:
+		for _, code := range []string{"ENB", "GNB", "GSM"} {
+			if strings.EqualFold(objectCode, code) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func defaultFields() []FieldDefinition {
@@ -474,10 +615,41 @@ func defaultFields() []FieldDefinition {
 		field(DomainMR, "MRO", "device_sn", "mr.device_sn", "mr_files.device_sn", "string", "quote", "Device SN"),
 		field(DomainMR, "MRE", "file_type", "mr.file_type", "mr_files.file_type", "string", "quote", "MR type"),
 		field(DomainMR, "MRS", "file_type", "mr.file_type", "mr_files.file_type", "string", "quote", "MR type"),
-		field(DomainLOG, "login", "login_time", "log.login_time", "audit_logs.created_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Login time"),
-		field(DomainLOG, "login", "username", "log.username", "audit_logs.username", "string", "quote", "Username"),
-		field(DomainLOG, "operation", "operation_time", "log.operation_time", "sys_oper_logs.created_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Operation time"),
-		field(DomainLOG, "operation", "operator", "log.operator", "sys_oper_logs.username", "string", "quote", "Operator"),
+		field(DomainLOG, "login", "log_time", "log.log_time", "sys_login_logs.login_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Log time"),
+		field(DomainLOG, "login", "sys_source_name", "log.sys_source_name", "literal baicells omc", "string", "quote", "System source name"),
+		field(DomainLOG, "login", "account_name", "log.account_name", "sys_login_logs.username", "string", "quote", "Account name"),
+		field(DomainLOG, "login", "terminal_name", "log.terminal_name", "sys_login_logs.browser / os", "string", "quote", "Terminal name"),
+		field(DomainLOG, "login", "terminal_ip", "log.terminal_ip", "sys_login_logs.ip_address", "string", "quote", "Terminal IP"),
+		field(DomainLOG, "login", "log_result", "log.result", "sys_login_logs.status", "string", "enum", "Log result"),
+		field(DomainLOG, "login", "log_start_time", "log.log_start_time", "sys_login_logs.login_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Log start time"),
+		field(DomainLOG, "login", "log_end_time", "log.log_end_time", "sys_login_logs.login_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Log end time"),
+		field(DomainLOG, "operation", "log_time", "log.log_time", "sys_oper_logs.created_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Log time"),
+		field(DomainLOG, "operation", "sys_source_name", "log.sys_source_name", "literal baicells omc", "string", "quote", "System source name"),
+		field(DomainLOG, "operation", "terminal_name", "log.terminal_name", "sys_oper_logs.user_agent", "string", "quote", "Terminal name"),
+		field(DomainLOG, "operation", "terminal_ip", "log.terminal_ip", "sys_oper_logs.ip_address", "string", "quote", "Terminal IP"),
+		field(DomainLOG, "operation", "main_name", "log.main_name", "sys_oper_logs.username", "string", "quote", "Main account"),
+		field(DomainLOG, "operation", "sub_account", "log.sub_account", "literal empty", "string", "quote", "Sub account"),
+		field(DomainLOG, "operation", "asset_name", "log.asset_name", "literal empty", "string", "quote", "Asset name"),
+		field(DomainLOG, "operation", "asset_ip", "log.asset_ip", "literal empty", "string", "quote", "Asset IP"),
+		field(DomainLOG, "operation", "asset_port", "log.asset_port", "literal empty", "string", "quote", "Asset port"),
+		field(DomainLOG, "operation", "asset_attribute", "log.asset_attribute", "literal empty", "string", "quote", "Asset attribute"),
+		field(DomainLOG, "operation", "log_data", "log.detail", "sys_oper_logs.action / detail / status", "string", "quote", "Log data"),
+		field(DomainLOG, "login_fix", "ID", "log.id", "sys_login_logs.id", "string", "quote", "ID"),
+		field(DomainLOG, "login_fix", "User Name", "log.user_name", "sys_login_logs.username", "string", "quote", "User name"),
+		field(DomainLOG, "login_fix", "IP Address", "log.ip_address", "sys_login_logs.ip_address", "string", "quote", "IP address"),
+		field(DomainLOG, "login_fix", "Log Name", "log.log_name", "literal LoginLogout", "string", "quote", "Log name"),
+		field(DomainLOG, "login_fix", "Record Detail", "log.detail", "sys_login_logs.message", "string", "quote", "Record detail"),
+		field(DomainLOG, "login_fix", "Results", "log.result_text", "sys_login_logs.status", "string", "enum", "Results"),
+		field(DomainLOG, "login_fix", "Failure Reason", "log.failure_reason", "sys_login_logs.message", "string", "quote", "Failure reason"),
+		field(DomainLOG, "login_fix", "Time", "log.login_time", "sys_login_logs.login_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Time"),
+		field(DomainLOG, "operation_fix", "User Name", "log.user_name", "sys_oper_logs.username", "string", "quote", "User name"),
+		field(DomainLOG, "operation_fix", "IP Address", "log.ip_address", "sys_oper_logs.ip_address", "string", "quote", "IP address"),
+		field(DomainLOG, "operation_fix", "Log Name", "log.log_name", "sys_oper_logs.action / module", "string", "quote", "Log name"),
+		field(DomainLOG, "operation_fix", "Record Detail", "log.detail", "sys_oper_logs.detail / target", "string", "quote", "Record detail"),
+		field(DomainLOG, "operation_fix", "Results", "log.result_text", "sys_oper_logs.status", "string", "enum", "Results"),
+		field(DomainLOG, "operation_fix", "Failure Reason", "log.failure_reason", "sys_oper_logs.error_msg", "string", "quote", "Failure reason"),
+		field(DomainLOG, "operation_fix", "Op Start Time", "log.op_start_time", "sys_oper_logs.created_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Operation start time"),
+		field(DomainLOG, "operation_fix", "Op End Time", "log.op_end_time", "sys_oper_logs.created_at + cost_ms", "datetime", "yyyy-MM-dd HH:mm:ss", "Operation end time"),
 	}
 	for _, objectCode := range []string{"ENB", "GNB", "GSM"} {
 		for index, seed := range stationInventoryFieldSeeds {
