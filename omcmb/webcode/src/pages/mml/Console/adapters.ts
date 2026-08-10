@@ -713,27 +713,29 @@ export function buildMODReadbackRows(
   const rows: ResultRow[] = [];
   for (const [deviceSn, devItems] of byDevice) {
     const modItems = devItems.filter((it) => !isLst(it));
-    const lstItem = devItems.find((it) => isLst(it));
+    const lstItems = devItems.filter((it) => isLst(it));
+    const lstItem = lstItems[0];
     const modTaskId = modItems[0]?.deviceTaskId ?? '';
     const lstTaskId = lstItem?.deviceTaskId ?? '';
 
     // 回读值 + 回读 path（GetParameterValues 响应的参数名即 PATH，修复回读行 PATH 为空）
     const readback = new Map<string, string>();
-    const readbackPairs: { path: string; value: string }[] = [];
-    if (lstItem?.result?.parsedData) {
-      const parsed = parseMmlDeviceTaskResult(lstItem.result.parsedData, CONSOLE_PARSE_OPTIONS);
+    const readbackPairs: { path: string; value: string; item: DeviceTaskResultItem }[] = [];
+    for (const item of lstItems) {
+      if (!item.result?.parsedData) continue;
+      const parsed = parseMmlDeviceTaskResult(item.result.parsedData, CONSOLE_PARSE_OPTIONS);
       if (parsed?.kind === 'gpv' && parsed.params) {
         for (const p of parsed.params) {
           readback.set(p.name, p.value);
           readback.set(leafName(p.name), p.value);
-          readbackPairs.push({ path: p.name, value: p.value });
+          readbackPairs.push({ path: p.name, value: p.value, item });
         }
       }
     }
     const readVal = (path: string): string => readback.get(path) ?? readback.get(leafName(path)) ?? '';
     const hasReadback = readbackPairs.length > 0;
     const modOk = modItems.length > 0 && modItems.every((it) => it.result?.success);
-    const lstOk = lstItem?.result?.success === true;
+    const lstOk = lstItems.length > 0 && lstItems.every((item) => item.result?.success === true);
     const firstMod = modItems[0];
 
     // 「PATH 列表」：MOD（下发）行 —— path 取自下发参数；LST（回读）行 —— path 取自回读响应。
@@ -751,18 +753,18 @@ export function buildMODReadbackRows(
       });
     }
     if (lstItem) {
-      const lstRows = hasReadback
+      const lstRows: { path: string; value: string; item?: DeviceTaskResultItem }[] = hasReadback
         ? readbackPairs
         : Object.keys(setValues).map((path) => ({ path, value: lstOk ? '' : (lstItem.failReason ?? READBACK_FAILED_FALLBACK) }));
-      for (const { path, value } of lstRows) {
+      for (const { path, value, item = lstItem } of lstRows) {
         pathTasks.push({
           pathIndex: 1,
           path,
-          subTaskId: lstTaskId,
+          subTaskId: item?.deviceTaskId ?? lstTaskId,
           opType: 'LST',
-          status: lstOk ? 'success' : 'failed',
-          dispatchedAt: toClock(lstItem.startedAt) ?? '',
-          respondedAt: toClock(lstItem.finishedAt) ?? '',
+          status: item?.result?.success ? 'success' : 'failed',
+          dispatchedAt: toClock(item?.startedAt) ?? '',
+          respondedAt: toClock(item?.finishedAt) ?? '',
           value,
         });
       }
@@ -792,10 +794,10 @@ export function buildMODReadbackRows(
       unverifiedReason: status === 'unverified' ? 'query-failed' : undefined,
       pathTasks,
       dispatchedAt: toClock(firstMod?.startedAt),
-      respondedAt: toClock(lstItem?.finishedAt ?? firstMod?.finishedAt),
+      respondedAt: toClock(lstItems.at(-1)?.finishedAt ?? firstMod?.finishedAt),
       raw: firstMod?.result?.rawOutput ?? '',
       readbackRaw: lstItem?.result?.rawOutput ?? '',
-      elapsedMs: (firstMod?.result?.executionTime ?? 0) + (lstItem?.result?.executionTime ?? 0),
+      elapsedMs: (firstMod?.result?.executionTime ?? 0) + lstItems.reduce((sum, item) => sum + (item.result?.executionTime ?? 0), 0),
     });
   }
   return rows;

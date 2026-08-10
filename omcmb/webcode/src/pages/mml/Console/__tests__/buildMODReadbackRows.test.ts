@@ -100,6 +100,43 @@ describe('buildMODReadbackRows (#196 MOD 下发 + 回读 LST)', () => {
     expect(rows[0].status).toBe('mismatch');
   });
 
+  it('Issue #272：逐 PATH MOD/LST 各三条时合并全部回读，不丢后两条结果', () => {
+    const stunEnable = 'Device.ManagementServer.STUNEnable';
+    const keepAlive = 'Device.ManagementServer.STUNMinimumKeepAlivePeriod';
+    const url = 'Device.ManagementServer.URL';
+    const setValues = {
+      [stunEnable]: 'true',
+      [keepAlive]: '30',
+      [url]: 'http://172.24.224.251:8080/smallcell/AcsService',
+    };
+    const items: DeviceTaskResultItem[] = Object.entries(setValues).flatMap(([path, value], index) => [
+      item({
+        success: true,
+        commandIndex: index * 2,
+        deviceTaskId: `mod-${index}`,
+        parsedData: spvEnvelope,
+      }),
+      item({
+        success: true,
+        commandIndex: index * 2 + 1,
+        deviceTaskId: `lst-${index}`,
+        parsedData: gpvEnvelope(path, value),
+      }),
+    ]);
+
+    const rows = buildMODReadbackRows(items, setValues);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('success');
+    expect(rows[0].cells).toEqual(setValues);
+    expect(rows[0].pathTasks).toHaveLength(6);
+    expect(rows[0].pathTasks?.filter((task) => task.opType === 'LST')).toEqual([
+      expect.objectContaining({ path: stunEnable, value: 'true', subTaskId: 'lst-0' }),
+      expect.objectContaining({ path: keepAlive, value: '30', subTaskId: 'lst-1' }),
+      expect.objectContaining({ path: url, value: setValues[url], subTaskId: 'lst-2' }),
+    ]);
+  });
+
   it('boolean 下发 true 与基站回读 1 视为一致', () => {
     const path = 'Device.DeviceInfo.SignallingTrace.Enable';
     const items: DeviceTaskResultItem[] = [
