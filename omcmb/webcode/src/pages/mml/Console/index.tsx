@@ -558,6 +558,7 @@ export default function MMLConsole() {
           <ResultTable
             execMeta={dispExecMeta}
             commandId={dispCommandId}
+            commandIds={records.map((record) => record.commandId)}
             columns={dispColumns}
             rows={dispRows}
             running={activeRunning}

@@ -1,4 +1,5 @@
 import http from '../http';
+import { mergeMmlTaskCsvTexts } from './mmlCsvMerge';
 import { generateUid } from '../../utils/uid';
 import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLTaskCommandInput, MMLParam, MMLCustomCommand, MMLCustomCommandPathDef, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource, MMLTaskPlanItem, MMLTaskCreateInput, MMLScriptImportValidation, MMLScriptValidationSummary, MMLScriptIssue, MMLImportedScriptCreateInput, MMLImportedScriptReplaceInput, MMLScriptExecutionInput, MMLScriptImportTemplate } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
@@ -1459,6 +1460,18 @@ export const mmlApi = {
       responseType: 'blob',
     });
     return data as Blob;
+  },
+
+  /** 合并下载多条控制台命令记录；taskIds 按期望的导出顺序传入。 */
+  async downloadTasksCsv(taskIds: string[]): Promise<Blob> {
+    const blobs = await Promise.all(taskIds.map(async (taskId) => {
+      const { data } = await http.get(`/mml/tasks/${taskId}/export/download`, {
+        responseType: 'blob',
+      });
+      return data as Blob;
+    }));
+    const texts = await Promise.all(blobs.map((blob) => blob.text()));
+    return new Blob([mergeMmlTaskCsvTexts(texts)], { type: 'text/csv;charset=utf-8' });
   },
 
   /** 同源流式下载「单设备」CSV（GET，responseType=blob）。 */

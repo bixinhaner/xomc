@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -677,7 +678,14 @@ func buildLongFormatCSVForLocale(
 	for _, sn := range order {
 		deviceSeq++
 		firstRowOfDevice := true
-		for _, row := range groups[sn] {
+		deviceRows := groups[sn]
+		sort.SliceStable(deviceRows, func(i, j int) bool {
+			if deviceRows[i].CommandIndex != deviceRows[j].CommandIndex {
+				return deviceRows[i].CommandIndex < deviceRows[j].CommandIndex
+			}
+			return deviceRows[i].CreatedAt.Before(deviceRows[j].CreatedAt)
+		})
+		for _, row := range deviceRows {
 			commandCols := commandExportColumns(commands, cols, row.CommandIndex)
 			er := rowToExport(row, commandCols, read)
 			status := localizedDeviceStatusText(row.Status, row.ErrorCode, locale)
@@ -694,11 +702,11 @@ func buildLongFormatCSVForLocale(
 				if firstRowOfDevice { // 设备级公共字段：仅设备首行
 					rec[0] = strconv.Itoa(deviceSeq)
 					rec[1] = sn
-					rec[2] = commandDisplayField(commands, row.CommandIndex)
-					rec[3] = commandStringField(commands, row.CommandIndex, "operation_type")
 					firstRowOfDevice = false
 				}
 				if firstRowOfTask { // 下发/响应/报文仅在该 device_task 首行填，避免重复
+					rec[2] = commandDisplayField(commands, row.CommandIndex)
+					rec[3] = commandStringField(commands, row.CommandIndex, "operation_type")
 					rec[10] = er.sentAt
 					rec[11] = er.completedAt
 					rec[12] = raw
