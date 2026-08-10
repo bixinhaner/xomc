@@ -1408,3 +1408,40 @@ RSA-OAEP 登录流程直接调用 104 的真实 API；所有写操作都限定�
 本节结论：**当前 `203b2267a` 的 RF/IPSec 去激活通过，IPSec 回区恢复通过，但 RF 回区恢复仍为
 缺陷，不能签署 100% 完整通过。应先部署本地恢复修复，再在设备不会自行恢复 RF 的窗口内重新取得
 激活动作包含 RF=1、私有 RF GPV=true 和 UI 四项一致的证据。**
+
+### 21.7 2026-08-10 重部署后 RF 恢复复验
+
+本轮在修复提交 `5738c06b5` 重部署完成后，重新创建临时围栏
+`105820-UAT-20260810-RF-RECOVERY`（ID `17b510c7-2fb4-4d33-8ffe-4879aeb8d339`），只绑定主设备
+`1202000240194DP0005`，使用真实浏览器、统一 Web 入口和任务 API 复验。服务门禁：App 与 Worker
+`/readyz` 均返回 `ok`，数据库、中间件和业务组件健康。
+
+- 系统与 CMCC 执行开关开启，围栏发布后页面显示“已启用”；绑定任务真实终态为“执行成功”，
+   `已完成 1/1`。
+- 两次围栏外位置提交均返回 `200` 且 `successCount=1`。主设备在位置版本 `24157` 确认
+   `outside`，距离边界约 `1416.6 m`。
+- 去激活动作 `geofence:4db68ea6-ce54-4983-acc2-99791f7afcfa:61:deactivate` 在 UI 和控制动作 API
+   均为 `verified`。控制前 RF 两小区为 `1`，请求值为 `0`，设备回读为 `0`，两项均显示“一致”。
+   该轮设备 IPSec 当前快照已为 `0`，因此没有虚构 IPSec 的重复写入；动作的 `before_state` 明确记录
+   两条 IPSec 为 `0`。
+- 任务 API 的真实 ACS 证据如下：
+   `SetParameterValues` 请求标准路径
+   `Device.Services.FAPService.1/2.FAPControl.LTE.RFTxStatus=0`；对应 GPV 返回私有路径
+   `Device.Services.FAPService.1/2.CellConfig.LTE.RAN.RF.X_COM_RadioEnable=false`，标准反译值为
+   `false`。SPV 和 GPV 任务均为 `completed`。
+- 两次围栏内位置提交均返回 `200` 且 `successCount=1`。主设备在位置版本 `24159` 确认
+   `inside`，随后产生激活动作 `geofence:4db68ea6-ce54-4983-acc2-99791f7afcfa:61:activate`。
+- 激活动作在 UI 和控制动作 API 均为 `verified`，明确包含 RF 两小区请求值 `1`，设备回读值均为
+   `1`，两项均显示“一致”。这是修复前缺失、修复后新增的动作级证据。
+- 激活任务 API 的真实 ACS 证据如下：
+   `SetParameterValues` 请求标准 RF 两路径值 `1`；对应 GPV 返回私有路径
+   `Device.Services.FAPService.1/2.CellConfig.LTE.RAN.RF.X_COM_RadioEnable=true`，标准反译值为
+   `true`。SPV 和 GPV 任务均为 `completed`。
+- 本轮 `GEOFENCE_LOCATION_OUTSIDE` 告警在回区时自动清除；活动告警接口中电子围栏告警数量为 `0`。
+
+现场清理后只读反查：临时围栏状态 `archived`，绑定状态 `removed`，地图活动围栏 `0`，系统及
+`cmcc/ctcc/cucc` 开关全部 `off`，主设备 `location_source_mode=tr069`，RF 状态 `on,on`，活动
+电子围栏告警数量 `0`。
+
+本轮结论：**修复提交重部署后，主设备 RF 去激活和回区恢复均已取得标准路径、私有路径、SPV/GPV、
+UI 五列一致性和告警清理的真实证据；本次 RF 恢复缺陷验收通过。**
