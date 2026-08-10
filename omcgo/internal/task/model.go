@@ -28,6 +28,7 @@ const (
 	TaskSourceMML       TaskSource = "mml"        // MML 批量任务扇出
 	TaskSourceOps       TaskSource = "ops"        // F06 运维即时命令 (T-0102-c)
 	TaskSourceParamSync TaskSource = "param_sync" // durable parameter-sync run task
+	TaskSourceGeofence  TaskSource = "geofence"   // geofence location control task
 )
 
 // Task 表示一个设备任务

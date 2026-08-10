@@ -1,11 +1,15 @@
 package device
 
 import (
+	"errors"
 	"math"
 	"strconv"
 	"strings"
 	"time"
 )
+
+var ErrStaleLocationObservation = errors.New("stale location observation")
+var ErrLocationSourceNotAllowed = errors.New("location source is not allowed for device mode")
 
 const (
 	LocationSyncNoReport    LocationSyncStatus = "no_report"
@@ -28,12 +32,25 @@ type Location struct {
 
 // ReportedLocation is the latest valid coordinate pair observed from a device.
 type ReportedLocation struct {
-	Latitude   float64   `json:"latitude"`
-	Longitude  float64   `json:"longitude"`
-	GPSHeight  *float64  `json:"gps_height,omitempty"`
-	ObservedAt time.Time `json:"observed_at"`
-	Version    int64     `json:"version"`
-	SourcePath string    `json:"source_path"`
+	Latitude         float64    `json:"latitude"`
+	Longitude        float64    `json:"longitude"`
+	GPSHeight        *float64   `json:"gps_height,omitempty"`
+	GPSLockStatus    *string    `json:"gps_lock_status,omitempty"`
+	SatelliteCount   *int       `json:"satellite_count,omitempty"`
+	AccuracyMeters   *float64   `json:"accuracy_meters,omitempty"`
+	ObservedAt       time.Time  `json:"observed_at"`
+	ReceivedAt       time.Time  `json:"received_at"`
+	DeviceReportedAt *time.Time `json:"device_reported_at,omitempty"`
+	Version          int64      `json:"version"`
+	SourcePath       string     `json:"source_path"`
+}
+
+type LocationObservationWriteResult struct {
+	Current           ReportedLocation
+	Previous          *ReportedLocation
+	MovementDistanceM *float64
+	ElapsedSeconds    *float64
+	ImpliedSpeedMPS   *float64
 }
 
 type LocationSync struct {
@@ -179,4 +196,34 @@ func haversineMeters(lat1, lng1, lat2, lng2 float64) float64 {
 	lat2Rad := toRadians(lat2)
 	a := math.Sin(dLat/2)*math.Sin(dLat/2) + math.Cos(lat1Rad)*math.Cos(lat2Rad)*math.Sin(dLng/2)*math.Sin(dLng/2)
 	return earthRadiusMeters * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+}
+
+func normalizeReportedLocation(observation ReportedLocation, receivedFallback time.Time) ReportedLocation {
+	if observation.ReceivedAt.IsZero() {
+		observation.ReceivedAt = receivedFallback
+	}
+	if observation.DeviceReportedAt != nil {
+		observation.ObservedAt = *observation.DeviceReportedAt
+	} else {
+		observation.ObservedAt = observation.ReceivedAt
+	}
+	return observation
+}
+
+func movementEvidence(previous *ReportedLocation, current ReportedLocation) (*float64, *float64, *float64) {
+	if previous == nil {
+		return nil, nil, nil
+	}
+	distance := haversineMeters(
+		previous.Latitude,
+		previous.Longitude,
+		current.Latitude,
+		current.Longitude,
+	)
+	elapsed := current.ObservedAt.Sub(previous.ObservedAt).Seconds()
+	if elapsed <= 0 {
+		return &distance, nil, nil
+	}
+	speed := distance / elapsed
+	return &distance, &elapsed, &speed
 }

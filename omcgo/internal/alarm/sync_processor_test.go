@@ -95,6 +95,33 @@ func TestProcessSync_UsesExistingAlarmDeviceFieldsWhenLookupMissing(t *testing.T
 	assert.Equal(t, model.CarrierCode("cucc"), alarm.Carrier)
 }
 
+func TestProcessSync_DoesNotClearOMCOwnedAlarmsMissingFromDeviceTable(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	deviceID := uuid.New()
+	omcAlarm := &model.Alarm{
+		ID: uuid.New(), DeviceID: deviceID, DeviceSN: "SN-SYNC-OMC",
+		Carrier: model.CarrierCMCC, AlarmIdentifier: AlarmCodeGeofenceLocationOutside,
+		AlarmType: "geofence", AlarmSource: strPtr("omc"), Status: model.AlarmActive,
+		RaisedAt: time.Now(), AdditionalInfo: map[string]string{},
+	}
+	deviceAlarm := &model.Alarm{
+		ID: uuid.New(), DeviceID: deviceID, DeviceSN: "SN-SYNC-OMC",
+		Carrier: model.CarrierCMCC, AlarmIdentifier: "70011",
+		AlarmType: "equipment", AlarmSource: strPtr("TR069"), Status: model.AlarmActive,
+		RaisedAt: time.Now(), AdditionalInfo: map[string]string{},
+	}
+	store.active[omcAlarm.ID] = omcAlarm
+	store.active[deviceAlarm.ID] = deviceAlarm
+	processor := NewAlarmSyncProcessor(engine, store, nil, nil, zap.NewNop())
+
+	result := processor.processSync(context.Background(), "SN-SYNC-OMC", nil)
+
+	require.Equal(t, 1, result.Cleared)
+	require.Contains(t, store.active, omcAlarm.ID)
+	require.NotContains(t, store.active, deviceAlarm.ID)
+}
+
 func TestProcessSync_AddsDistinctAlarmsForSameIdentifierWithDifferentAdditionalInformation(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)

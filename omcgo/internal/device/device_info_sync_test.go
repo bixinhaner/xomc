@@ -107,11 +107,17 @@ type stubLocationObservationRepo struct {
 	upsert func(deviceID uuid.UUID, observation ReportedLocation) error
 }
 
-func (s stubLocationObservationRepo) UpsertLatest(_ context.Context, deviceID uuid.UUID, observation ReportedLocation) error {
+func (s stubLocationObservationRepo) SaveLatestWithOutbox(
+	_ context.Context,
+	deviceID uuid.UUID,
+	observation ReportedLocation,
+) (LocationObservationWriteResult, error) {
 	if s.upsert != nil {
-		return s.upsert(deviceID, observation)
+		if err := s.upsert(deviceID, observation); err != nil {
+			return LocationObservationWriteResult{}, err
+		}
 	}
-	return nil
+	return LocationObservationWriteResult{Current: observation}, nil
 }
 
 func (s stubLocationObservationRepo) GetLatest(context.Context, uuid.UUID) (*ReportedLocation, error) {
@@ -570,6 +576,8 @@ func TestInfoSyncer_SyncFromParameters_StoresStandardGPSObservationWithoutOverwr
 		{ParameterPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude", ParameterValue: "39904200"},
 		{ParameterPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude", ParameterValue: "116407400"},
 		{ParameterPath: "Device.FAP.GPS.Height", ParameterValue: "174"},
+		{ParameterPath: "Device.DeviceInfo.X_COM_GPS_Status", ParameterValue: "1"},
+		{ParameterPath: "Device.FAP.GPS.NumberOfSatellites", ParameterValue: "8"},
 	}}
 
 	accepted := &Location{Latitude: 31.2, Longitude: 121.5}
@@ -584,12 +592,65 @@ func TestInfoSyncer_SyncFromParameters_StoresStandardGPSObservationWithoutOverwr
 		if assert.NotNil(t, observation.GPSHeight) {
 			assert.Equal(t, 174.0, *observation.GPSHeight)
 		}
+		if assert.NotNil(t, observation.GPSLockStatus) {
+			assert.Equal(t, "normal", *observation.GPSLockStatus)
+		}
+		if assert.NotNil(t, observation.SatelliteCount) {
+			assert.Equal(t, 8, *observation.SatelliteCount)
+		}
+		assert.False(t, observation.ReceivedAt.IsZero())
+		assert.Equal(t, observation.ReceivedAt, observation.ObservedAt)
+		assert.Nil(t, observation.DeviceReportedAt)
+		assert.Nil(t, observation.AccuracyMeters)
 		assert.Equal(t, "Device.DeviceInfo.SAS.FAP.GPS", observation.SourcePath)
 		return nil
 	}}
 
 	syncer := NewInfoSyncer(infoRepoNoop{}, paramRepo, coordinateWriter, registry, zap.NewNop(), observationRepo)
 	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE, "")
+	assert.NoError(t, err)
+}
+
+func TestInfoSyncer_SyncFromParameters_IgnoresTR069GPSInExternalMode(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude", ParameterValue: "39904200"},
+		{ParameterPath: "Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude", ParameterValue: "116407400"},
+	}}
+	coordinateWriter := stubDeviceCoordinateWriter{updateCoordinates: func(
+		context.Context,
+		uuid.UUID,
+		float64,
+		float64,
+	) error {
+		t.Fatal("external positioning mode must not accept TR069 coordinates")
+		return nil
+	}}
+	observationRepo := stubLocationObservationRepo{upsert: func(
+		uuid.UUID,
+		ReportedLocation,
+	) error {
+		return ErrLocationSourceNotAllowed
+	}}
+	syncer := NewInfoSyncer(
+		infoRepoNoop{},
+		paramRepo,
+		coordinateWriter,
+		registry,
+		zap.NewNop(),
+		observationRepo,
+	)
+
+	_, err := syncer.SyncFromParameters(
+		context.Background(),
+		deviceID,
+		model.CarrierCMCC,
+		model.TechLTE,
+		"",
+	)
+
 	assert.NoError(t, err)
 }
 

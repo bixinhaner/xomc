@@ -92,6 +92,9 @@ func normalizeDeviceForPersist(device *model.Device) {
 		// 000137 migration 的 chk_devices_lifecycle_state CHECK 约束失败
 		device.LifecycleState = model.LifecycleRegistered
 	}
+	if !device.LocationSourceMode.Valid() {
+		device.LocationSourceMode = model.LocationSourceTR069
+	}
 }
 
 // populateDeviceCompat 在 SELECT scan 后用 LifecycleState + IsOnline 反推 Status

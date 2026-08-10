@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -41,38 +42,74 @@ func NewPgTaskRepository(pool *pgxpool.Pool) *PgTaskRepository {
 	return &PgTaskRepository{pool: pool, syncLockSlots: make(chan struct{}, lockSlots)}
 }
 
-// AcquireSyncGPVDeviceLock serializes sync-gpv creation for one device across
-// all application instances. The returned release function ends the otherwise
-// empty transaction, which releases the transaction-scoped advisory lock.
-func (r *PgTaskRepository) AcquireSyncGPVDeviceLock(ctx context.Context, deviceSN string) (func(), error) {
+func (r *PgTaskRepository) acquireTaskAdvisoryLock(
+	ctx context.Context,
+	lockKey string,
+	purpose string,
+) (func(), error) {
 	if r == nil || r.pool == nil {
 		return func() {}, nil
 	}
+	if strings.TrimSpace(lockKey) == "" {
+		return nil, fmt.Errorf("acquire %s lock: lock key is required", purpose)
+	}
 	if r.pool.Config().MaxConns < 2 {
-		return nil, fmt.Errorf("acquire sync-gpv device lock: postgres pool requires at least 2 connections")
+		return nil, fmt.Errorf(
+			"acquire %s lock: postgres pool requires at least 2 connections",
+			purpose,
+		)
 	}
 	select {
 	case r.syncLockSlots <- struct{}{}:
 	case <-ctx.Done():
-		return nil, fmt.Errorf("wait for sync-gpv lock slot: %w", ctx.Err())
+		return nil, fmt.Errorf("wait for %s lock slot: %w", purpose, ctx.Err())
 	}
 	releaseSlot := func() { <-r.syncLockSlots }
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		releaseSlot()
-		return nil, fmt.Errorf("begin sync-gpv device lock transaction: %w", err)
+		return nil, fmt.Errorf("begin %s lock transaction: %w", purpose, err)
 	}
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", deviceSN); err != nil {
+	if _, err := tx.Exec(
+		ctx,
+		"SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+		lockKey,
+	); err != nil {
 		_ = tx.Rollback(context.Background())
 		releaseSlot()
-		return nil, fmt.Errorf("acquire sync-gpv device lock: %w", err)
+		return nil, fmt.Errorf("acquire %s lock: %w", purpose, err)
 	}
 	return func() {
 		defer releaseSlot()
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		releaseCtx, cancel := context.WithTimeout(
+			context.Background(),
+			5*time.Second,
+		)
 		defer cancel()
 		_ = tx.Rollback(releaseCtx)
 	}, nil
+}
+
+// AcquireSyncGPVDeviceLock serializes sync-gpv creation for one device across
+// all application instances. The returned release function ends the otherwise
+// empty transaction, which releases the transaction-scoped advisory lock.
+func (r *PgTaskRepository) AcquireSyncGPVDeviceLock(ctx context.Context, deviceSN string) (func(), error) {
+	return r.acquireTaskAdvisoryLock(ctx, deviceSN, "sync-gpv device")
+}
+
+// AcquireCommandKeyLock serializes check-and-create for a deterministic task
+// command key across all worker instances. The lock is held while the caller
+// checks durable history and creates the Redis/PostgreSQL task, closing the
+// at-least-once event delivery race without introducing a second task model.
+func (r *PgTaskRepository) AcquireCommandKeyLock(
+	ctx context.Context,
+	commandKey string,
+) (func(), error) {
+	return r.acquireTaskAdvisoryLock(
+		ctx,
+		"device-task-command-key:"+commandKey,
+		"task command key",
+	)
 }
 
 // nilUUID converts an empty string to nil for nullable UUID columns.
@@ -855,8 +892,7 @@ func (r *PgTaskRepository) LatestOpenByDeviceMethodDescription(
 }
 
 // LatestCompletedByDeviceCommandKey returns the newest successful execution of
-// one idempotent system command. PM online setup uses it to avoid re-applying an
-// unchanged configuration after every rolling deployment or transient reconnect.
+// one idempotent system command.
 func (r *PgTaskRepository) LatestCompletedByDeviceCommandKey(
 	ctx context.Context,
 	deviceSN, commandKey string,
@@ -882,6 +918,29 @@ func (r *PgTaskRepository) LatestCompletedByDeviceCommandKey(
 		return nil, fmt.Errorf("query latest completed task: %w", err)
 	}
 	return taskItem, nil
+}
+
+func (r *PgTaskRepository) GetByCommandKey(
+	ctx context.Context,
+	commandKey string,
+) (*Task, error) {
+	query, args, err := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.Eq{"command_key": commandKey}).
+		OrderBy("created_at DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build geofence command task query: %w", err)
+	}
+	item, err := r.scanTaskRow(r.pool.QueryRow(ctx, query, args...))
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query geofence command task: %w", err)
+	}
+	return item, nil
 }
 
 // defaultPendingBatchLimit 是 ListPendingAllDevices 在调用方未给上界（limit<=0）时

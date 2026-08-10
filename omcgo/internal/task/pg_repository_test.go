@@ -170,6 +170,39 @@ func TestPgRepo_Integration_AcquireSyncGPVDeviceLockSerializesByDevice(t *testin
 	require.NoError(t, afterReleaseTx.Rollback(ctx))
 }
 
+func TestPgRepo_Integration_AcquireCommandKeyLockSerializesByCommand(t *testing.T) {
+	pool := newTestPool(t)
+	if pool == nil {
+		return
+	}
+	repo := NewPgTaskRepository(pool)
+	ctx := context.Background()
+	commandKey := "geofence:device:8:deactivate"
+	lockKey := "device-task-command-key:" + commandKey
+
+	release, err := repo.AcquireCommandKeyLock(ctx, commandKey)
+	require.NoError(t, err)
+
+	competingTx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	var acquired bool
+	require.NoError(t, competingTx.QueryRow(ctx,
+		"SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))", lockKey,
+	).Scan(&acquired))
+	assert.False(t, acquired, "the same command key lock must be exclusive")
+	require.NoError(t, competingTx.Rollback(ctx))
+
+	release()
+
+	afterReleaseTx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	require.NoError(t, afterReleaseTx.QueryRow(ctx,
+		"SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))", lockKey,
+	).Scan(&acquired))
+	assert.True(t, acquired, "the command key lock must be available after release")
+	require.NoError(t, afterReleaseTx.Rollback(ctx))
+}
+
 func TestPgRepo_Integration_CreateAndGet(t *testing.T) {
 	pool := newTestPool(t)
 	if pool == nil {

@@ -64,6 +64,11 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initDeviceModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
+		Name:    "geofence",
+		Depends: []string{"device", "productregistry", "paramregistry"},
+		Init:    func() error { return initGeofenceModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
 		Name:    "alarm",
 		Depends: []string{"productregistry"},
 		Init:    func() error { return initAlarmModule(c) },
@@ -372,6 +377,13 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// #122：OperLogger 写 sys_oper_logs（管理面写操作的可分页运维视图，
 	// 与 audit_logs 合规链并存）。fire-and-forget，写失败仅 Warn 不阻塞请求。
 	v1.Use(admin.OperLogger(ad.logRepo, c.Logger.Named("oper-log")))
+	if c.GeofenceHandler != nil {
+		thirdParty := r.Group("")
+		thirdParty.Use(admin.RequireAuthWithAPIKey(ad.jwtService, ad.apiKeySvc, ad.userRepo, ad.roleRepo, ad.tokenRevoker))
+		thirdParty.Use(admin.AuditLogger(ad.auditRepo))
+		thirdParty.Use(admin.OperLogger(ad.logRepo, c.Logger.Named("oper-log")))
+		c.GeofenceHandler.RegisterThirdPartyRoutes(thirdParty)
+	}
 
 	// Protected auth routes (no permission check)
 	v1.GET("/auth/me", ad.adminHandler.Me)
@@ -379,6 +391,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	v1.GET("/auth/menus", ad.adminHandler.GetUserMenusByRole)
 	// Authenticated user routes (any authenticated user)
 	ad.adminHandler.RegisterAuthenticatedRoutes(v1)
+	if c.GeofenceHandler != nil {
+		c.GeofenceHandler.RegisterAvailabilityRoute(v1)
+	}
 
 	agentRuntimeHandler := agentruntime.NewHandler(
 		ad.agentConfigHandler.Service(),
@@ -409,6 +424,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	locationSyncRepo := device.NewPgLocationObservationRepository(c.PgPool)
 	deviceHandler.SetLocationSyncService(device.NewLocationSyncService(locationSyncRepo))
 	deviceHandler.RegisterRoutes(permGroup("devices"))
+	if c.GeofenceHandler != nil {
+		c.GeofenceHandler.RegisterRoutes(permGroup("devices"))
+	}
 	if c.miscDeps.paramSyncHandler != nil {
 		c.miscDeps.paramSyncHandler.RegisterRoutes(permGroup("devices"))
 	}

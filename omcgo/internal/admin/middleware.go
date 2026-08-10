@@ -368,8 +368,7 @@ func AuditLogger(auditRepo AuditRepository) gin.HandlerFunc {
 			return
 		}
 
-		// Only audit successful operations
-		if c.Writer.Status() >= 400 {
+		if auditSkipped(c) {
 			return
 		}
 
@@ -386,13 +385,31 @@ func AuditLogger(auditRepo AuditRepository) gin.HandlerFunc {
 			}
 		}
 
-		log := &AuditLog{
-			UserID:    userID,
-			Username:  usernameStr,
-			Action:    method,
-			Resource:  c.FullPath(),
-			IPAddress: auditClientIP(c),
-			UserAgent: c.Request.UserAgent(),
+		var log *AuditLog
+		if entry, ok := businessAuditFromGin(c); ok {
+			entry.UserID = userID
+			entry.Username = usernameStr
+			entry.IPAddress = auditClientIP(c)
+			entry.UserAgent = c.Request.UserAgent()
+			entry.Success = c.Writer.Status() < 400
+			if !entry.Success && entry.ErrorMessage == "" {
+				entry.ErrorMessage = http.StatusText(c.Writer.Status())
+			}
+			log = auditLogFromEntry(entry)
+		} else {
+			// Generic compliance records retain the historical behavior: only
+			// successful writes are recorded.
+			if c.Writer.Status() >= 400 {
+				return
+			}
+			log = &AuditLog{
+				UserID:    userID,
+				Username:  usernameStr,
+				Action:    method,
+				Resource:  c.FullPath(),
+				IPAddress: auditClientIP(c),
+				UserAgent: c.Request.UserAgent(),
+			}
 		}
 
 		// Fire and forget — audit logging should not block the response.

@@ -110,6 +110,55 @@ func TestDefaultStreams_LogFileReceivedCovered(t *testing.T) {
 	}
 }
 
+func TestDefaultStreams_GeofenceEventsCovered(t *testing.T) {
+	streams := DefaultStreams()
+	for _, subject := range []string{
+		"geofence.lifecycle.reevaluate",
+		"geofence.lifecycle.deactivation_required",
+		"geofence.device.exited",
+		"geofence.device.entered",
+	} {
+		if !subjectCovered(subject, streams) {
+			t.Errorf("subject %s is not covered by any DefaultStreams stream", subject)
+		}
+	}
+
+	for _, stream := range streams {
+		if stream.Name != "GEOFENCE" {
+			continue
+		}
+		if stream.Retention != gonats.InterestPolicy {
+			t.Errorf("GEOFENCE stream retention = %v, want InterestPolicy", stream.Retention)
+		}
+		return
+	}
+	t.Fatal("GEOFENCE stream is not registered")
+}
+
+func TestReconcileStreamSubjectsUpdatesExistingStreamDefinition(t *testing.T) {
+	def := StreamDef{
+		Name:     "GEOFENCE",
+		Subjects: []string{"geofence.>"},
+	}
+	info := &gonats.StreamInfo{Config: gonats.StreamConfig{
+		Name:     "GEOFENCE",
+		Subjects: []string{"geofence.lifecycle.>"},
+	}}
+	var updated gonats.StreamConfig
+
+	err := reconcileStreamSubjects(def, info, func(config *gonats.StreamConfig) (*gonats.StreamInfo, error) {
+		updated = *config
+		return &gonats.StreamInfo{Config: *config}, nil
+	})
+
+	if err != nil {
+		t.Fatalf("reconcile stream subjects: %v", err)
+	}
+	if len(updated.Subjects) != 1 || updated.Subjects[0] != "geofence.>" {
+		t.Fatalf("updated subjects = %v, want [geofence.>]", updated.Subjects)
+	}
+}
+
 // TestDefaultStreams_NamesUnique 守卫不会因复制粘贴造成重复流名。
 func TestDefaultStreams_NamesUnique(t *testing.T) {
 	seen := map[string]bool{}

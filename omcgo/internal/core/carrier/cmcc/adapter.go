@@ -138,6 +138,12 @@ func (c *CMCCCarrier) RFControlPath(tech model.Technology) string {
 	}
 }
 
+func (c *CMCCCarrier) GeofenceControlParametersForInstances(
+	productClass string, tech model.Technology, enabled bool, instances []int,
+) ([]carrier.GeofenceControlParameter, error) {
+	return carrier.BuildGeofenceControlParametersForInstances(productClass, tech, enabled, instances)
+}
+
 // SupportsMRType reports whether CMCC collects the given MR type. CMCC supports
 // all three measurement-report types (MRO / MRS / MRE) — #17.
 func (c *CMCCCarrier) SupportsMRType(mrType model.MRType) bool {
