@@ -3078,6 +3078,8 @@ const messages: Record<string, string> = {
   'header.switchToDark':  '切换到深色主题',
   'header.switchToDim':   '切换到柔和暗色',
   'header.switchToLight': '切换到浅色主题',
+  'header.switchToEnglish': '切换到英文',
+  'header.switchToChinese': '切换到中文',
   'header.timezone':      '时区:',
   'header.localTimezone': '本地时区',
   'header.timezoneTitle': '当前系统时区: {tz}',

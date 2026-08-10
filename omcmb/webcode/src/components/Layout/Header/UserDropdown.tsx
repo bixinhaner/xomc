@@ -4,13 +4,11 @@ import { Avatar, Space, Modal, Form, Input, App, Alert, Button } from 'antd';
 import {
   UserOutlined,
   LockOutlined,
-  TranslationOutlined,
   LogoutOutlined,
   DownOutlined,
 } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
 import { useUserStore } from '@core/store/userStore';
-import { useAppStore } from '@core/store/appStore';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { adminApi } from '@core/services/api/adminApi';
@@ -26,8 +24,6 @@ export default function UserDropdown() {
   // 进入首页后本组件唤醒自动弹改密 Modal、且以不可关闭模式呈现。
   const mustChangePassword = useUserStore((s) => s.mustChangePassword);
   const setMustChangePassword = useUserStore((s) => s.setMustChangePassword);
-  const toggleLocale = useAppStore((s) => s.toggleLocale);
-  const locale = useAppStore((s) => s.locale);
   const t = useT();
   const { message } = App.useApp();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -96,12 +92,10 @@ export default function UserDropdown() {
     logout();
   };
 
-  const handleMenuClick = (key: 'logout' | 'switchLang' | 'changePassword') => {
+  const handleMenuClick = (key: 'logout' | 'changePassword') => {
     setMenuOpen(false);
     if (key === 'logout') {
       handleManualLogout();
-    } else if (key === 'switchLang') {
-      toggleLocale();
     } else if (key === 'changePassword') {
       setChangePwdVisible(true);
     }
@@ -161,16 +155,6 @@ export default function UserDropdown() {
             >
               <LockOutlined />
               <span>{t('user.changePassword')}</span>
-            </button>
-
-            <button
-              className={styles.userDropdownItem}
-              type="button"
-              role="menuitem"
-              onClick={() => handleMenuClick('switchLang')}
-            >
-              <TranslationOutlined />
-              <span>{locale === 'zh-CN' ? t('user.switchToEn') : t('user.switchToZh')}</span>
             </button>
 
             <div className={styles.userDropdownDivider} />

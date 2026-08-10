@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Badge, Popover } from 'antd';
+import { Badge, Popover, Tooltip } from 'antd';
 import {
   BellOutlined,
   MenuOutlined,
   SunOutlined,
   MoonOutlined,
+  TranslationOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   RobotOutlined,
@@ -40,6 +41,8 @@ export default function Header({ agentVisible = false, agentOpen = false, onAgen
   const deviceType = useAppStore((s) => s.deviceType);
   const theme = useAppStore((s) => s.theme);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
+  const locale = useAppStore((s) => s.locale);
+  const toggleLocale = useAppStore((s) => s.toggleLocale);
   const setMobileOverlayOpen = useAppStore((s) => s.setMobileOverlayOpen);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
@@ -151,6 +154,18 @@ export default function Header({ agentVisible = false, agentOpen = false, onAgen
         >
           {theme === 'tech' ? <SunOutlined style={{ fontSize: 16 }} /> : <MoonOutlined style={{ fontSize: 16 }} />}
         </button>
+
+        {/* Language switch stays in the global action zone for one-click access. */}
+        <Tooltip title={locale === 'zh-CN' ? t('header.switchToEnglish') : t('header.switchToChinese')}>
+          <button
+            className={styles.headerAction}
+            onClick={toggleLocale}
+            aria-label={locale === 'zh-CN' ? t('header.switchToEnglish') : t('header.switchToChinese')}
+            type="button"
+          >
+            <TranslationOutlined style={{ fontSize: 16 }} />
+          </button>
+        </Tooltip>
 
         {agentVisible && (
           <button
