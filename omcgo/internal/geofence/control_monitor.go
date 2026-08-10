@@ -524,6 +524,7 @@ func (m *GeofenceControlMonitor) queueDeviceControl(
 		}
 		plan, params, err = m.geofenceControlPlan(
 			ctx, carrierAdapter, deviceRecord, enabled, targets,
+			action.ActionType == ControlActionActivate,
 		)
 		if err != nil {
 			return err
@@ -574,6 +575,7 @@ func (m *GeofenceControlMonitor) geofenceControlPlan(
 	device *model.Device,
 	enabled bool,
 	targets []carrier.GeofenceControlParameter,
+	forceRequested bool,
 ) (geofenceControlPlan, []byte, error) {
 	resolver, ok := adapter.(carrier.GeofenceControlParameterInstanceResolver)
 	if !ok {
@@ -632,7 +634,9 @@ func (m *GeofenceControlMonitor) geofenceControlPlan(
 			)
 		}
 	}
-	plan, err := buildGeofenceControlPlan(parameterSnapshot, targets)
+	plan, err := buildGeofenceControlPlanWithRestore(
+		parameterSnapshot, targets, forceRequested,
+	)
 	if err != nil {
 		return geofenceControlPlan{}, nil, fmt.Errorf("build geofence control plan: %w", err)
 	}

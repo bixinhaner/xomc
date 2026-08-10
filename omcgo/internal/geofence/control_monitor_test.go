@@ -683,6 +683,7 @@ func TestGeofenceControlMonitorQueuesActivationOnlyAfterCompletedDeactivation(t 
 	require.Equal(t, "geofence:device:8:activate", tasks.request.CommandKey)
 	require.Equal(t, actions.actions[tasks.request.CommandKey].ID.String(), tasks.request.SourceID)
 	require.Contains(t, string(tasks.request.Params), `"value":"1"`)
+	require.Contains(t, string(tasks.request.Params), "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus")
 	require.NotContains(t, string(tasks.request.Params), "IPSEC_ENABLE")
 }
 

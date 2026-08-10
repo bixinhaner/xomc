@@ -40,6 +40,14 @@ func buildGeofenceControlPlan(
 	snapshot []model.DeviceParameter,
 	targets []carrier.GeofenceControlParameter,
 ) (geofenceControlPlan, error) {
+	return buildGeofenceControlPlanWithRestore(snapshot, targets, false)
+}
+
+func buildGeofenceControlPlanWithRestore(
+	snapshot []model.DeviceParameter,
+	targets []carrier.GeofenceControlParameter,
+	forceRequested bool,
+) (geofenceControlPlan, error) {
 	plan := geofenceControlPlan{
 		Before:    make([]ControlParameterState, 0, len(targets)),
 		Requested: make([]ControlParameterState, 0, len(targets)),
@@ -76,7 +84,7 @@ func buildGeofenceControlPlan(
 		plan.Before = append(plan.Before, ControlParameterState{
 			Path: target.Path, Value: currentValue,
 		})
-		if currentValue != targetValue {
+		if forceRequested || currentValue != targetValue {
 			plan.Requested = append(plan.Requested, ControlParameterState{
 				Path: target.Path, Value: targetValue,
 			})

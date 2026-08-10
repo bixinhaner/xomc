@@ -75,6 +75,20 @@ func TestBuildGeofenceControlPlanAllowsMappedStandardRFReadOnlySnapshot(t *testi
 	require.Equal(t, []ControlParameterState{{Path: target.Path, Value: "0"}}, plan.Requested)
 }
 
+func TestBuildGeofenceControlPlanRestoresTargetDespiteStaleCurrentValue(t *testing.T) {
+	target := carrier.GeofenceControlParameter{
+		Path:  "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus",
+		Value: "1",
+	}
+	plan, err := buildGeofenceControlPlanWithRestore([]model.DeviceParameter{
+		{ParameterPath: target.Path, ParameterValue: "true", Writable: false},
+	}, []carrier.GeofenceControlParameter{target}, true)
+
+	require.NoError(t, err)
+	require.Equal(t, []ControlParameterState{{Path: target.Path, Value: "1"}}, plan.Before)
+	require.Equal(t, []ControlParameterState{{Path: target.Path, Value: "1"}}, plan.Requested)
+}
+
 func TestRestoreTargetsRestoresOnlyParametersChangedByDeactivation(t *testing.T) {
 	ipsec := "Device.Services.FAPService.Ipsec.IPSEC_ENABLE"
 	rf := "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus"
