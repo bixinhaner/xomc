@@ -125,6 +125,12 @@ func (c *CTCCCarrier) RFControlPath(tech model.Technology) string {
 	}
 }
 
+func (c *CTCCCarrier) GeofenceControlParametersForInstances(
+	productClass string, tech model.Technology, enabled bool, instances []int,
+) ([]carrier.GeofenceControlParameter, error) {
+	return carrier.BuildGeofenceControlParametersForInstances(productClass, tech, enabled, instances)
+}
+
 // SupportsMRType reports whether CTCC collects the given MR type. CTCC supports
 // all three measurement-report types (MRO / MRS / MRE) — #17.
 func (c *CTCCCarrier) SupportsMRType(mrType model.MRType) bool {

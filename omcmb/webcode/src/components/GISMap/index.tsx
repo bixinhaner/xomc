@@ -13,6 +13,7 @@ import { useThemeToken } from '@/hooks/useThemeToken';
 import type { GISMapProps, MapDevice, MapViewport, MapStats, MapBounds } from '@core/types/map';
 import { MAP_CONFIG, ANIMATION_CONFIG } from './constants';
 import { useOLMap } from './useOLMap';
+import { useGeofenceLayer } from './useGeofenceLayer';
 import MapPopup from './MapPopup';
 import MapControls from './MapControls';
 import MapStatsPanel from './MapStatsPanel';
@@ -78,6 +79,12 @@ interface GISMapRef {
   startMeasure: () => void;
   /** 退出测距模式并清除折线 */
   stopMeasure: () => void;
+  /** 开启 Polygon 围栏绘制，并停止测距 */
+  startGeofencePolygonDraw: () => void;
+  /** 停止围栏绘制并清除临时图形 */
+  stopGeofenceDraw: () => void;
+  /** 自适应显示指定围栏 */
+  fitGeofence: (id: string) => boolean;
 }
 
 /**
@@ -86,6 +93,10 @@ interface GISMapRef {
  */
 const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   devices = [],
+  geofences = [],
+  selectedGeofenceId,
+  onGeofenceClick,
+  onGeofenceDrawComplete,
   searchResultDevice = null,
   selectedDevice = null,
   antennaSectors = [],
@@ -146,8 +157,8 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     highlightAndSpiderfyIfNeeded,
     metadata,
     setTileConcurrency,
-    startMeasure,
-    stopMeasure,
+    startMeasure: startOLMeasure,
+    stopMeasure: stopOLMeasure,
     updateAntennaSectors,
   } = useOLMap({
     center: defaultCenter,
@@ -183,6 +194,41 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       onMapClick?.();
     },
   });
+
+  const {
+    startPolygonDraw,
+    stopGeofenceDraw,
+    fitGeofence,
+    isGeofenceDrawing,
+  } = useGeofenceLayer({
+    mapInstanceRef,
+    isReady,
+    items: geofences,
+    selectedId: selectedGeofenceId,
+    onSelect: (item) => {
+      setClickedDevice(null);
+      setClickedPosition(null);
+      onGeofenceClick?.(item);
+    },
+    onDrawComplete: onGeofenceDrawComplete,
+  });
+
+  const stopMeasure = useCallback(() => {
+    stopOLMeasure();
+    setIsMeasuring(false);
+  }, [stopOLMeasure]);
+
+  const startMeasure = useCallback(() => {
+    stopGeofenceDraw();
+    startOLMeasure();
+    setIsMeasuring(true);
+  }, [startOLMeasure, stopGeofenceDraw]);
+
+  const startGeofencePolygonDraw = useCallback(() => {
+    stopOLMeasure();
+    setIsMeasuring(false);
+    startPolygonDraw();
+  }, [startPolygonDraw, stopOLMeasure]);
 
   // 合并主设备列表和搜索结果设备
   const mergedDevices = useMemo(() => {
@@ -316,6 +362,17 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isMeasuring, stopMeasure]);
+
+  useEffect(() => {
+    if (!isGeofenceDrawing) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        stopGeofenceDraw();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isGeofenceDrawing, stopGeofenceDraw]);
 
   // 高亮设备（用于搜索定位）
   const highlightAndFlyTo = useCallback((device: MapDevice) => {
@@ -520,7 +577,10 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     setTileConcurrency,
     startMeasure,
     stopMeasure,
-  }), [highlightAndFlyTo, highlightAndFlyToWithCard, flyTo, getViewport, fitBounds, clearDevices, closeClickedCard, setTileConcurrency, startMeasure, stopMeasure]);
+    startGeofencePolygonDraw,
+    stopGeofenceDraw,
+    fitGeofence,
+  }), [highlightAndFlyTo, highlightAndFlyToWithCard, flyTo, getViewport, fitBounds, clearDevices, closeClickedCard, setTileConcurrency, startMeasure, stopMeasure, startGeofencePolygonDraw, stopGeofenceDraw, fitGeofence]);
 
   // 计算统计数据
   const stats = useMemo<MapStats>(() => {

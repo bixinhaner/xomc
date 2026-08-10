@@ -34,6 +34,10 @@ func (s *AuditSink) Write(ctx context.Context, e audit.Entry) error {
 		return nil
 	}
 
+	return s.repo.Create(ctx, auditLogFromEntry(e))
+}
+
+func auditLogFromEntry(e audit.Entry) *AuditLog {
 	action := e.Action
 	if !e.Success && e.Action != "" {
 		action = e.Action + "_failed"
@@ -59,6 +63,5 @@ func (s *AuditSink) Write(ctx context.Context, e audit.Entry) error {
 	if e.ResourceID != "" {
 		log.ResourceID = e.ResourceID
 	}
-
-	return s.repo.Create(ctx, log)
+	return log
 }

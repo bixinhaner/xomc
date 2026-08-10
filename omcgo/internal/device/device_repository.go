@@ -474,6 +474,7 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		Set("site_name", device.DeviceName).
 		Set("latitude", device.Latitude).
 		Set("longitude", device.Longitude).
+		Set("location_source_mode", device.LocationSourceMode).
 		Set("extension_data", extData).
 		Where(sq.Eq{"id": device.ID}).
 		Where(sq.Eq{"deleted_at": nil}). // 防软删 device 被 inform 静默复活；命中时 RowsAffected=0 → 上层 ErrNotFound → 清 cache 走 auto-register
@@ -931,6 +932,7 @@ func deviceColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"d.location_source_mode",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 		"d.recycle_type", "d.recycle_executor",
 		"d.last_param_sync_at",
@@ -964,6 +966,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		&d.LastInformAt, &eventsData,
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
+		&d.LocationSourceMode,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 		&recycleType, &recycleExecutor,
 		&d.LastParamSyncAt,
@@ -1049,6 +1052,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		&d.LastInformAt, &eventsData,
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
+		&d.LocationSourceMode,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 		&recycleType, &recycleExecutor,
 		&d.LastParamSyncAt,
@@ -1579,6 +1583,7 @@ func recycleBinSelectColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"d.location_source_mode",
 		"dlo.latitude AS reported_latitude", "dlo.longitude AS reported_longitude",
 		"dlo.gps_height AS reported_gps_height", "dlo.observed_at AS reported_observed_at",
 		"dlo.version AS reported_version", "dlo.source_path AS reported_source_path",

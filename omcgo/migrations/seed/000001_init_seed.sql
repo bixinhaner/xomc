@@ -26572,6 +26572,362 @@ SET product_scope = scope.product_scope,
 FROM scope
 WHERE tt.type_code = scope.type_code;
 
+-- Consolidated pre-release geofence defaults and administrator permissions.
+
+-- +omcgo MainReconcileBegin
+INSERT INTO public.sys_configs (
+    id, category, key, value, value_type, description, is_public,
+    created_at, updated_at, description_i18n
+) VALUES (
+    '6d1f0b32-37ac-4e58-98e8-32a90c648e90',
+    'geofence',
+    'mode',
+    'off',
+    'string',
+    '电子围栏系统运行模式：off/observe/enforce',
+    false,
+    now(),
+    now(),
+    '{"zh-CN":"电子围栏系统运行模式","en-US":"Geofence system runtime mode"}'::jsonb
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.geofence_carrier_settings (
+    carrier, mode, default_baseline_radius_meters, updated_by, updated_at
+) VALUES
+    ('cmcc', 'off', 100, NULL, now()),
+    ('ctcc', 'off', 100, NULL, now()),
+    ('cucc', 'off', 100, NULL, now())
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.api_endpoints (
+    id, path, method, name, description, api_group, is_auto,
+    created_at, updated_at, is_user_modified
+) VALUES
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648e91',
+        '/api/v1/geofences/settings',
+        'GET',
+        'GET /api/v1/geofences/settings',
+        '读取电子围栏系统及运营商运行模式',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648e92',
+        '/api/v1/geofences/settings/preview',
+        'POST',
+        'POST /api/v1/geofences/settings/preview',
+        '预览电子围栏运行模式变更影响',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648e93',
+        '/api/v1/geofences/settings',
+        'PUT',
+        'PUT /api/v1/geofences/settings',
+        '更新电子围栏系统及运营商运行模式',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea1',
+        '/api/v1/geofences/:id/versions',
+        'POST',
+        'POST /api/v1/geofences/:id/versions',
+        '创建电子围栏不可变草稿版本',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea2',
+        '/api/v1/geofences/:id/enable-preview',
+        'POST',
+        'POST /api/v1/geofences/:id/enable-preview',
+        '预览启用电子围栏的影响',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea3',
+        '/api/v1/geofences/:id/enable',
+        'POST',
+        'POST /api/v1/geofences/:id/enable',
+        '启用电子围栏',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea4',
+        '/api/v1/geofences/:id/disable-preview',
+        'POST',
+        'POST /api/v1/geofences/:id/disable-preview',
+        '预览禁用电子围栏的影响',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea5',
+        '/api/v1/geofences/:id/disable',
+        'POST',
+        'POST /api/v1/geofences/:id/disable',
+        '禁用电子围栏但保留设备绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea6',
+        '/api/v1/geofences/:id/archive-preview',
+        'POST',
+        'POST /api/v1/geofences/:id/archive-preview',
+        '预览归档电子围栏的影响',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea7',
+        '/api/v1/geofences/:id/archive',
+        'POST',
+        'POST /api/v1/geofences/:id/archive',
+        '归档电子围栏并软移除有效绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea8',
+        '/api/v1/geofence-bindings/:id/suspend',
+        'POST',
+        'POST /api/v1/geofence-bindings/:id/suspend',
+        '暂停单个设备电子围栏绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea9',
+        '/api/v1/geofence-bindings/:id/resume',
+        'POST',
+        'POST /api/v1/geofence-bindings/:id/resume',
+        '恢复单个设备电子围栏绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648eaa',
+        '/api/v1/geofence-bindings/:id',
+        'DELETE',
+        'DELETE /api/v1/geofence-bindings/:id',
+        '软移除单个设备电子围栏绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648eb1',
+        '/api/v1/geofences/:id/binding-preview',
+        'POST',
+        'POST /api/v1/geofences/:id/binding-preview',
+        '预览电子围栏批量设备绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648eb2',
+        '/api/v1/geofences/:id/bindings',
+        'POST',
+        'POST /api/v1/geofences/:id/bindings',
+        '创建电子围栏批量设备绑定任务',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648eb3',
+        '/api/v1/geofence-jobs/:id',
+        'GET',
+        'GET /api/v1/geofence-jobs/:id',
+        '查询电子围栏批量绑定任务',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648eb4',
+        '/api/v1/geofence-jobs/:id/items',
+        'GET',
+        'GET /api/v1/geofence-jobs/:id/items',
+        '查询电子围栏批量绑定任务明细',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec1',
+        '/api/v1/geofences',
+        'GET',
+        'GET /api/v1/geofences',
+        '查询电子围栏定义列表',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec2',
+        '/api/v1/geofences',
+        'POST',
+        'POST /api/v1/geofences',
+        '创建电子围栏定义和初始草稿',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec3',
+        '/api/v1/geofences/map',
+        'GET',
+        'GET /api/v1/geofences/map',
+        '按地图范围查询电子围栏及当前版本几何',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec4',
+        '/api/v1/geofences/:id',
+        'GET',
+        'GET /api/v1/geofences/:id',
+        '查询单个电子围栏定义',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec5',
+        '/api/v1/geofences/:id/versions',
+        'GET',
+        'GET /api/v1/geofences/:id/versions',
+        '查询电子围栏不可变版本历史',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec6',
+        '/api/v1/geofences/:id/publish',
+        'POST',
+        'POST /api/v1/geofences/:id/publish',
+        '发布电子围栏草稿版本',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec7',
+        '/api/v1/geofences/:id/bindings',
+        'GET',
+        'GET /api/v1/geofences/:id/bindings',
+        '分页查询电子围栏绑定设备',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    )
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT
+    '10000000-0000-0000-0000-000000000001'::uuid,
+    endpoint.id
+FROM public.api_endpoints AS endpoint
+WHERE endpoint.id IN (
+    '6d1f0b32-37ac-4e58-98e8-32a90c648e91'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648e92'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648e93'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea1'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea2'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea3'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea4'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea5'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea6'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea7'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea8'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea9'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648eaa'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648eb1'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648eb2'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648eb3'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648eb4'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec1'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec2'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec3'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec4'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec5'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec6'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec7'::uuid
+)
+ON CONFLICT DO NOTHING;
+-- +omcgo MainReconcileEnd
+
 
 -- Consolidated from the pre-release storage protection default policy seed.
 INSERT INTO public.storage_protection_policies (
@@ -26632,6 +26988,54 @@ VALUES (
 )
 ON CONFLICT (role_id, menu_id) DO NOTHING;
 
+-- GIS 电子围栏按钮权限。系统开关决定入口是否存在；这两个权限只决定
+-- 已开启时谁可以查看、谁可以执行配置变更。
+-- +omcgo MainReconcileBegin
+INSERT INTO public.menus (
+    id, name, type, permission_key, parent_id, sort_order, route_path,
+    component_path, icon, show_status, status, name_i18n
+) VALUES
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ed1',
+        '查看电子围栏',
+        'button',
+        'topology:gis-map:geofence:view',
+        'aaaa0004-1000-0001-0000-000000000001',
+        1,
+        NULL,
+        NULL,
+        NULL,
+        'show',
+        'normal',
+        '{"zh-CN":"查看电子围栏","en-US":"View geofences"}'::jsonb
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ed2',
+        '管理电子围栏',
+        'button',
+        'topology:gis-map:geofence:manage',
+        'aaaa0004-1000-0001-0000-000000000001',
+        2,
+        NULL,
+        NULL,
+        NULL,
+        'show',
+        'normal',
+        '{"zh-CN":"管理电子围栏","en-US":"Manage geofences"}'::jsonb
+    )
+ON CONFLICT (id) DO UPDATE SET
+	name = EXCLUDED.name,
+	permission_key = EXCLUDED.permission_key,
+	parent_id = EXCLUDED.parent_id,
+	sort_order = EXCLUDED.sort_order,
+	route_path = EXCLUDED.route_path,
+	component_path = EXCLUDED.component_path,
+	icon = EXCLUDED.icon,
+	show_status = EXCLUDED.show_status,
+	status = EXCLUDED.status,
+	name_i18n = EXCLUDED.name_i18n,
+	updated_at = NOW();
+
 -- Northbound configuration entry under System Management (moved from the removed
 -- Config Management directory; renamed 北向页面化配置 -> 北向配置).
 INSERT INTO public.menus (
@@ -26651,6 +27055,7 @@ INSERT INTO public.menus (
     'normal',
     '{"en-US":"Northbound Config","zh-CN":"北向配置"}'::jsonb
 )
+>>>>>>> origin/main
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,
     permission_key = EXCLUDED.permission_key,
@@ -26663,6 +27068,19 @@ ON CONFLICT (id) DO UPDATE SET
     status = EXCLUDED.status,
     name_i18n = EXCLUDED.name_i18n,
     updated_at = NOW();
+
+INSERT INTO public.role_menus (role_id, menu_id)
+VALUES
+    (
+        '10000000-0000-0000-0000-000000000001',
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ed1'
+    ),
+    (
+        '10000000-0000-0000-0000-000000000001',
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ed2'
+    )
+ON CONFLICT (role_id, menu_id) DO NOTHING;
+-- +omcgo MainReconcileEnd
 
 INSERT INTO public.role_menus (role_id, menu_id)
 VALUES (

@@ -65,6 +65,87 @@ type ParamSyncRequestedPayload struct {
 	IdempotencyKey string   `json:"idempotency_key"`
 }
 
+// DeviceLocationObservedPayload is the immutable position snapshot consumed by
+// geofence evaluation. All quality fields belong to the same parameter sync
+// snapshot as the coordinates.
+type DeviceLocationObservedPayload struct {
+	DeviceID                   uuid.UUID  `json:"device_id"`
+	SerialNumber               string     `json:"serial_number"`
+	Carrier                    string     `json:"carrier"`
+	ObservationVersion         int64      `json:"observation_version"`
+	Latitude                   float64    `json:"latitude"`
+	Longitude                  float64    `json:"longitude"`
+	GPSHeight                  *float64   `json:"gps_height,omitempty"`
+	GPSLockStatus              *string    `json:"gps_lock_status,omitempty"`
+	SatelliteCount             *int       `json:"satellite_count,omitempty"`
+	AccuracyMeters             *float64   `json:"accuracy_meters,omitempty"`
+	ObservedAt                 time.Time  `json:"observed_at"`
+	ReceivedAt                 time.Time  `json:"received_at"`
+	DeviceReportedAt           *time.Time `json:"device_reported_at,omitempty"`
+	SourcePath                 string     `json:"source_path"`
+	PreviousObservationVersion *int64     `json:"previous_observation_version,omitempty"`
+	MovementDistanceMeters     *float64   `json:"movement_distance_meters,omitempty"`
+	ElapsedSeconds             *float64   `json:"elapsed_seconds,omitempty"`
+	ImpliedSpeedMPS            *float64   `json:"implied_speed_mps,omitempty"`
+}
+
+type GeofenceLifecycleReevaluatePayload struct {
+	DeviceID   uuid.UUID `json:"device_id"`
+	GeofenceID uuid.UUID `json:"geofence_id"`
+	Reason     string    `json:"reason"`
+}
+
+// GeofenceLifecycleDeactivationPayload records the safety action required when
+// an enabled fence is disabled or archived while a device's last confirmed
+// binding state is inside. The outbox event ID is the idempotency boundary.
+type GeofenceLifecycleDeactivationPayload struct {
+	DeviceID     uuid.UUID `json:"device_id"`
+	SerialNumber string    `json:"serial_number"`
+	GeofenceID   uuid.UUID `json:"geofence_id"`
+	TargetStatus string    `json:"target_status"`
+	Reason       string    `json:"reason"`
+}
+
+// GeofenceEvaluationPayload is emitted for every completed or deterministically
+// failed binding evaluation. The event identity is carried by the Event
+// envelope; these fields provide the stable business identity used by
+// downstream history and metrics consumers.
+type GeofenceEvaluationPayload struct {
+	DeviceID             uuid.UUID `json:"device_id"`
+	SerialNumber         string    `json:"serial_number"`
+	Carrier              string    `json:"carrier"`
+	BindingID            uuid.UUID `json:"binding_id"`
+	RuleType             string    `json:"rule_type"`
+	GeofenceID           uuid.UUID `json:"geofence_id"`
+	GeofenceVersionID    uuid.UUID `json:"geofence_version_id"`
+	ObservationVersion   int64     `json:"observation_version"`
+	StateVersion         int64     `json:"state_version"`
+	EvaluationID         uuid.UUID `json:"evaluation_id"`
+	ConfirmedState       string    `json:"confirmed_state"`
+	EvaluationHealth     string    `json:"evaluation_health"`
+	ReasonCode           string    `json:"reason_code"`
+	ErrorCode            string    `json:"error_code,omitempty"`
+	OccurredAt           time.Time `json:"occurred_at"`
+	SignedDistanceMeters *float64  `json:"signed_distance_meters,omitempty"`
+}
+
+// GeofenceDeviceStatePayload represents a device-wide effective-state edge.
+// Consumers must use EffectiveStateVersion as the action-level idempotency
+// boundary rather than a single binding evaluation ID.
+type GeofenceDeviceStatePayload struct {
+	DeviceID              uuid.UUID  `json:"device_id"`
+	SerialNumber          string     `json:"serial_number"`
+	Carrier               string     `json:"carrier"`
+	TriggerBindingID      *uuid.UUID `json:"binding_id,omitempty"`
+	ObservationVersion    int64      `json:"observation_version"`
+	EffectiveState        string     `json:"effective_state"`
+	RequiredActionLevel   string     `json:"required_action_level"`
+	EffectiveStateVersion int64      `json:"effective_state_version"`
+	EvaluationHealth      string     `json:"evaluation_health"`
+	ReasonCode            string     `json:"reason_code"`
+	OccurredAt            time.Time  `json:"occurred_at"`
+}
+
 // PMAggregationMetric 是已完成 15 分钟计算、可直接进入窗口累加的有限数值。
 type PMAggregationMetric struct {
 	MetricPath string  `json:"metric_path"`

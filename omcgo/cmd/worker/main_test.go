@@ -2,17 +2,24 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/alarm/definition"
+	"github.com/omcgo/omcgo/internal/core/asyncjob"
+	"github.com/omcgo/omcgo/internal/core/event"
+	coreoutbox "github.com/omcgo/omcgo/internal/core/outbox"
+	"github.com/omcgo/omcgo/internal/geofence"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestWireUnknownAlarmFallback_InjectsBothReceivers(t *testing.T) {
@@ -296,4 +303,286 @@ func (f *fakeKnownReportKeyRepo) ListCounterReportKeys(_ context.Context, dt ind
 		return nil, f.err
 	}
 	return append([]string(nil), f.keys[dt]...), nil
+}
+
+type workerRelayRepository struct {
+	claims chan coreoutbox.ClaimOptions
+}
+
+func (r *workerRelayRepository) ClaimDue(
+	_ context.Context,
+	options coreoutbox.ClaimOptions,
+) ([]coreoutbox.Entry, error) {
+	select {
+	case r.claims <- options:
+	default:
+	}
+	return nil, nil
+}
+
+func (r *workerRelayRepository) MarkPublished(
+	context.Context,
+	uuid.UUID,
+	uuid.UUID,
+	time.Time,
+) (bool, error) {
+	return true, nil
+}
+
+func (r *workerRelayRepository) MarkFailed(
+	context.Context,
+	uuid.UUID,
+	uuid.UUID,
+	string,
+	time.Time,
+) (bool, error) {
+	return true, nil
+}
+
+func (r *workerRelayRepository) MarkDead(
+	context.Context,
+	uuid.UUID,
+	uuid.UUID,
+	string,
+	time.Time,
+) (bool, error) {
+	return true, nil
+}
+
+type workerRelayPublisher struct{}
+
+func (workerRelayPublisher) Publish(
+	context.Context,
+	string,
+	event.Event,
+) error {
+	return nil
+}
+
+func TestStartEventOutboxRelayProcessesImmediatelyAndStops(t *testing.T) {
+	repo := &workerRelayRepository{claims: make(chan coreoutbox.ClaimOptions, 1)}
+
+	stop, err := startEventOutboxRelay(
+		context.Background(),
+		repo,
+		workerRelayPublisher{},
+		zap.NewNop(),
+	)
+	require.NoError(t, err)
+
+	select {
+	case options := <-repo.claims:
+		require.Equal(t, 100, options.Limit)
+		require.Equal(t, 10, options.MaxAttempts)
+		require.Equal(t, 30*time.Second, options.Lease)
+	case <-time.After(time.Second):
+		t.Fatal("event outbox relay did not process immediately")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("event outbox relay did not stop after cancellation")
+	}
+}
+
+type workerGeofenceSubscription struct {
+	unsubscribed bool
+}
+
+func (s *workerGeofenceSubscription) Unsubscribe() error {
+	s.unsubscribed = true
+	return nil
+}
+
+type workerGeofenceBus struct {
+	subject  string
+	subjects []string
+	queue    string
+	sub      *workerGeofenceSubscription
+}
+
+func (b *workerGeofenceBus) Publish(
+	context.Context,
+	string,
+	event.Event,
+) error {
+	return nil
+}
+
+func (b *workerGeofenceBus) Subscribe(
+	string,
+	event.EventHandler,
+) (event.Subscription, error) {
+	panic("unexpected Subscribe")
+}
+
+func (b *workerGeofenceBus) QueueSubscribe(
+	subject string,
+	queue string,
+	_ event.EventHandler,
+) (event.Subscription, error) {
+	b.subject = subject
+	b.subjects = append(b.subjects, subject)
+	b.queue = queue
+	b.sub = &workerGeofenceSubscription{}
+	return b.sub, nil
+}
+
+func (b *workerGeofenceBus) PullSubscribe(
+	string,
+	string,
+	event.EventHandler,
+) (event.Subscription, error) {
+	panic("unexpected PullSubscribe")
+}
+
+func (b *workerGeofenceBus) Close() error {
+	return nil
+}
+
+func TestStartGeofenceCoordinatorRegistersWorkerConsumerAndStops(t *testing.T) {
+	bus := &workerGeofenceBus{}
+
+	stop, err := startGeofenceCoordinator(nil, bus)
+	require.NoError(t, err)
+	require.Contains(t, bus.subjects, event.SubjectDeviceLocationObserved)
+	require.Contains(t, bus.subjects, event.SubjectGeofenceLifecycleReevaluate)
+	require.Equal(t, geofence.CoordinatorQueue, bus.queue)
+
+	require.NoError(t, stop())
+	require.True(t, bus.sub.unsubscribed)
+}
+
+type workerAsyncJobRepository struct {
+	lockedJobTypes chan string
+}
+
+func (r *workerAsyncJobRepository) Insert(
+	context.Context,
+	asyncjob.InsertRequest,
+) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+
+func (r *workerAsyncJobRepository) GetByID(
+	context.Context,
+	uuid.UUID,
+) (*asyncjob.Job, error) {
+	return nil, asyncjob.ErrNoPendingJob
+}
+
+func (r *workerAsyncJobRepository) LockNextPending(
+	_ context.Context,
+	jobType string,
+	_ string,
+) (*asyncjob.Job, error) {
+	r.lockedJobTypes <- jobType
+	return nil, asyncjob.ErrNoPendingJob
+}
+
+func (r *workerAsyncJobRepository) UpdateHeartbeat(
+	context.Context,
+	uuid.UUID,
+) error {
+	return nil
+}
+
+func (r *workerAsyncJobRepository) MarkSucceeded(
+	context.Context,
+	uuid.UUID,
+	json.RawMessage,
+) error {
+	return nil
+}
+
+func (r *workerAsyncJobRepository) MarkFailed(
+	context.Context,
+	uuid.UUID,
+	string,
+) error {
+	return nil
+}
+
+func (r *workerAsyncJobRepository) ListZombies(
+	context.Context,
+	time.Duration,
+) ([]asyncjob.Job, error) {
+	return nil, nil
+}
+
+func (r *workerAsyncJobRepository) ResetZombie(
+	context.Context,
+	uuid.UUID,
+) error {
+	return nil
+}
+
+type workerManualBindRepository struct{}
+
+func (workerManualBindRepository) ListPendingManualBindItemIDs(
+	context.Context,
+	uuid.UUID,
+	int,
+	int,
+) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (workerManualBindRepository) ProcessManualBindItem(
+	context.Context,
+	geofence.ProcessManualBindItemRequest,
+) (geofence.BatchItemResult, error) {
+	return geofence.BatchItemResult{}, nil
+}
+
+func (workerManualBindRepository) GetBatchProgress(
+	context.Context,
+	uuid.UUID,
+) (geofence.BatchProgress, error) {
+	return geofence.BatchProgress{}, nil
+}
+
+func TestRegisterGeofenceManualBindRunnerUsesSharedRegistryAndWorkerStopsOnCancel(
+	t *testing.T,
+) {
+	asyncRepository := &workerAsyncJobRepository{
+		lockedJobTypes: make(chan string, 1),
+	}
+	registry := asyncjob.NewRegistry(
+		asyncRepository,
+		"worker-test",
+		zap.NewNop(),
+	)
+
+	runner := registerGeofenceManualBindRunner(
+		registry,
+		workerManualBindRepository{},
+		nil,
+	)
+
+	require.Equal(t, geofence.ManualBindJobType, runner.JobType())
+	ran, err := registry.RunNext(context.Background(), runner.JobType())
+	require.NoError(t, err)
+	require.False(t, ran)
+	require.Equal(t, geofence.ManualBindJobType, <-asyncRepository.lockedJobTypes)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		runJobTypeWorker(ctx, registry, runner.JobType(), zap.NewNop())
+		close(stopped)
+	}()
+	cancel()
+
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("geofence manual bind worker did not stop after cancellation")
+	}
 }

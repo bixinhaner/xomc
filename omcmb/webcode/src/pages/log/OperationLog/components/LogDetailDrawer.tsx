@@ -1,6 +1,10 @@
 import { Drawer, Descriptions, Tag, Space, Button } from 'antd';
 import type { OperationLog } from '@core/types/system';
 import { useT } from '@/hooks/useT';
+import {
+  localizeAuditAction,
+  localizeAuditReason,
+} from '../geofenceAuditText';
 
 interface LogDetailDrawerProps {
   open: boolean;
@@ -16,22 +20,23 @@ const resultColorMap: Record<string, string> = {
   failure: 'error',
 };
 
-// 结果文本映射
-const resultTextMap: Record<string, string> = {
-  '1': '成功',
-  '0': '失败',
-  success: '成功',
-  failure: '失败',
-};
-
 export default function LogDetailDrawer({ open, log, onClose }: LogDetailDrawerProps) {
   const t = useT();
 
   if (!log) return null;
 
-  const detailText = log.detail || log.content || log.message || log.reason || '暂无详情内容';
+  const rawDetailText = log.detail || log.content || log.message || log.reason || '-';
+  const detailText = localizeAuditReason(rawDetailText, t);
   const isFailure = String(log.result).toLowerCase() === 'failure' || String(log.result) === '0';
-  const reasonText = isFailure ? (log.reason || log.message || '-') : '-';
+  const reasonText = isFailure
+    ? localizeAuditReason(log.reason || log.message || '-', t)
+    : '-';
+  const resultTextMap: Record<string, string> = {
+    '1': t('log.success'),
+    '0': t('log.failure'),
+    success: t('log.success'),
+    failure: t('log.failure'),
+  };
 
   return (
     <Drawer
@@ -54,7 +59,7 @@ export default function LogDetailDrawer({ open, log, onClose }: LogDetailDrawerP
           <span style={{ fontFamily: 'monospace' }}>{log.clientIp}</span>
         </Descriptions.Item>
         <Descriptions.Item label={t('log.logName')}>
-          {log.logName || log.module || '-'}
+          {localizeAuditAction(log.logName || log.module || '', t)}
         </Descriptions.Item>
         <Descriptions.Item label={t('log.detail')}>
           <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>

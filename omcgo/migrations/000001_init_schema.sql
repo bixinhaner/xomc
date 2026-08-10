@@ -3004,6 +3004,7 @@ CREATE TABLE public.devices (
     site_id character varying(64),
     latitude double precision,
     longitude double precision,
+    location_source_mode character varying(16) DEFAULT 'tr069'::character varying NOT NULL,
     extension_data jsonb,
     deleted_at timestamp with time zone,
     deleted_by text,
@@ -3021,6 +3022,7 @@ CREATE TABLE public.devices (
     last_offline_reason character varying(32),
     recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
     recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT devices_location_source_mode_check CHECK (((location_source_mode)::text = ANY ((ARRAY['tr069'::character varying, 'external'::character varying])::text[]))),
     CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
     CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 )
@@ -3297,6 +3299,7 @@ CREATE TABLE public.devices_cmcc (
     site_id character varying(64),
     latitude double precision,
     longitude double precision,
+    location_source_mode character varying(16) DEFAULT 'tr069'::character varying NOT NULL,
     extension_data jsonb,
     deleted_at timestamp with time zone,
     deleted_by text,
@@ -3314,6 +3317,7 @@ CREATE TABLE public.devices_cmcc (
     last_offline_reason character varying(32),
     recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
     recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT devices_location_source_mode_check CHECK (((location_source_mode)::text = ANY ((ARRAY['tr069'::character varying, 'external'::character varying])::text[]))),
     CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
     CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 )
@@ -3345,6 +3349,7 @@ CREATE TABLE public.devices_ctcc (
     site_id character varying(64),
     latitude double precision,
     longitude double precision,
+    location_source_mode character varying(16) DEFAULT 'tr069'::character varying NOT NULL,
     extension_data jsonb,
     deleted_at timestamp with time zone,
     deleted_by text,
@@ -3362,6 +3367,7 @@ CREATE TABLE public.devices_ctcc (
     last_offline_reason character varying(32),
     recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
     recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT devices_location_source_mode_check CHECK (((location_source_mode)::text = ANY ((ARRAY['tr069'::character varying, 'external'::character varying])::text[]))),
     CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
     CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
@@ -3392,6 +3398,7 @@ CREATE TABLE public.devices_cucc (
     site_id character varying(64),
     latitude double precision,
     longitude double precision,
+    location_source_mode character varying(16) DEFAULT 'tr069'::character varying NOT NULL,
     extension_data jsonb,
     deleted_at timestamp with time zone,
     deleted_by text,
@@ -3409,6 +3416,7 @@ CREATE TABLE public.devices_cucc (
     last_offline_reason character varying(32),
     recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
     recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT devices_location_source_mode_check CHECK (((location_source_mode)::text = ANY ((ARRAY['tr069'::character varying, 'external'::character varying])::text[]))),
     CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
     CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
@@ -3439,6 +3447,7 @@ CREATE TABLE public.devices_other (
     site_id character varying(64),
     latitude double precision,
     longitude double precision,
+    location_source_mode character varying(16) DEFAULT 'tr069'::character varying NOT NULL,
     extension_data jsonb,
     deleted_at timestamp with time zone,
     deleted_by text,
@@ -3456,6 +3465,7 @@ CREATE TABLE public.devices_other (
     last_offline_reason character varying(32),
     recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
     recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT devices_location_source_mode_check CHECK (((location_source_mode)::text = ANY ((ARRAY['tr069'::character varying, 'external'::character varying])::text[]))),
     CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
     CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
@@ -20197,7 +20207,11 @@ ALTER TABLE public.pm_aggregation_task_versions
 CREATE INDEX idx_pm_aggregation_task_versions_content_hash
     ON public.pm_aggregation_task_versions (task_id, content_hash);
 
-CREATE TABLE public.plug_and_play_policies (
+-- +omcgo MainReconcileBegin
+-- Existing pre-release databases may already record goose version 1 while
+-- missing this consolidated additive block. Keep it idempotent so migrate can
+-- replay it after the seed baseline without rebuilding the database.
+CREATE TABLE IF NOT EXISTS public.plug_and_play_policies (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     name varchar(100) NOT NULL,
     enabled boolean NOT NULL DEFAULT false,
@@ -20217,13 +20231,13 @@ CREATE TABLE public.plug_and_play_policies (
         CHECK (execute_type IN ('auto', 'manual'))
 );
 
-CREATE INDEX idx_plug_and_play_policies_match
+CREATE INDEX IF NOT EXISTS idx_plug_and_play_policies_match
     ON public.plug_and_play_policies (enabled, product_class, priority, created_at);
 
-CREATE INDEX idx_plug_and_play_policies_product_classes
+CREATE INDEX IF NOT EXISTS idx_plug_and_play_policies_product_classes
     ON public.plug_and_play_policies USING gin (product_classes);
 
-CREATE TABLE public.provisioning_xml_files (
+CREATE TABLE IF NOT EXISTS public.provisioning_xml_files (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     policy_id uuid NOT NULL REFERENCES public.plug_and_play_policies(id),
     device_id uuid NOT NULL,
@@ -20234,17 +20248,18 @@ CREATE TABLE public.provisioning_xml_files (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_provisioning_xml_files_device
+CREATE INDEX IF NOT EXISTS idx_provisioning_xml_files_device
     ON public.provisioning_xml_files (device_id, created_at DESC);
 
 ALTER TABLE public.provisioning_tasks
-    ADD COLUMN policy_id uuid REFERENCES public.plug_and_play_policies(id),
-    ADD COLUMN xml_file_id uuid REFERENCES public.provisioning_xml_files(id),
-    ADD COLUMN device_task_id uuid,
-    ADD COLUMN current_step_name varchar(64);
+    ADD COLUMN IF NOT EXISTS policy_id uuid REFERENCES public.plug_and_play_policies(id),
+    ADD COLUMN IF NOT EXISTS xml_file_id uuid REFERENCES public.provisioning_xml_files(id),
+    ADD COLUMN IF NOT EXISTS device_task_id uuid,
+    ADD COLUMN IF NOT EXISTS current_step_name varchar(64);
 
-CREATE INDEX idx_provisioning_tasks_policy
+CREATE INDEX IF NOT EXISTS idx_provisioning_tasks_policy
     ON public.provisioning_tasks (policy_id);
+-- +omcgo MainReconcileEnd
 
 
 -- Consolidated from pre-release baseline-only migrations: main schema 000002-000005
@@ -20339,6 +20354,524 @@ CREATE TABLE IF NOT EXISTS public.storage_protection_events (
 
 CREATE INDEX IF NOT EXISTS storage_protection_events_target_time_idx
     ON public.storage_protection_events (target_type, target_id, write_scope, created_at DESC);
+-- Consolidated pre-release geofence Observe schema.
+
+-- +omcgo MainReconcileBegin
+ALTER TABLE public.devices
+    ADD COLUMN IF NOT EXISTS location_source_mode varchar(16)
+        NOT NULL DEFAULT 'tr069';
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.devices'::regclass
+          AND conname = 'devices_location_source_mode_check'
+    ) THEN
+        ALTER TABLE public.devices
+            ADD CONSTRAINT devices_location_source_mode_check
+            CHECK (location_source_mode IN ('tr069', 'external'));
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+CREATE TABLE IF NOT EXISTS public.geofence_carrier_settings (
+    carrier varchar(16) PRIMARY KEY,
+    mode varchar(16) NOT NULL DEFAULT 'off',
+    default_baseline_radius_meters double precision NOT NULL DEFAULT 100,
+    updated_by uuid,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT geofence_carrier_settings_mode_check
+        CHECK (mode IN ('off', 'observe', 'enforce')),
+    CONSTRAINT geofence_carrier_settings_radius_check
+        CHECK (default_baseline_radius_meters > 0
+            AND default_baseline_radius_meters <= 50000)
+);
+
+CREATE TABLE IF NOT EXISTS public.geofence_definitions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name varchar(128) NOT NULL,
+    carrier varchar(16) NOT NULL,
+    rule_type varchar(32) NOT NULL,
+    owner_device_id uuid,
+    status varchar(16) NOT NULL DEFAULT 'draft',
+    current_version_id uuid,
+    created_by uuid NOT NULL,
+    updated_by uuid NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT geofence_definitions_rule_type_check
+        CHECK (rule_type IN ('polygon_allow_zone', 'baseline_radius')),
+    CONSTRAINT geofence_definitions_status_check
+        CHECK (status IN ('draft', 'enabled', 'disabled', 'archived')),
+    CONSTRAINT geofence_definitions_owner_check CHECK (
+        (rule_type = 'baseline_radius' AND owner_device_id IS NOT NULL)
+        OR
+        (rule_type = 'polygon_allow_zone' AND owner_device_id IS NULL)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_geofence_definitions_carrier_name
+    ON public.geofence_definitions (carrier, lower(name))
+    WHERE status <> 'archived';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_geofence_definitions_baseline_owner
+    ON public.geofence_definitions (owner_device_id)
+    WHERE rule_type = 'baseline_radius' AND status <> 'archived';
+
+CREATE TABLE IF NOT EXISTS public.geofence_versions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    geofence_id uuid NOT NULL
+        REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
+    version bigint NOT NULL,
+    status varchar(16) NOT NULL DEFAULT 'draft',
+    geometry_json jsonb NOT NULL,
+    bbox_min_longitude double precision NOT NULL,
+    bbox_min_latitude double precision NOT NULL,
+    bbox_max_longitude double precision NOT NULL,
+    bbox_max_latitude double precision NOT NULL,
+    policy_json jsonb NOT NULL,
+    created_by uuid NOT NULL,
+    published_by uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    published_at timestamptz,
+    CONSTRAINT geofence_versions_version_check CHECK (version > 0),
+    CONSTRAINT geofence_versions_status_check
+        CHECK (status IN ('draft', 'published', 'superseded')),
+    CONSTRAINT geofence_versions_bbox_check CHECK (
+        bbox_min_longitude >= -180 AND bbox_max_longitude <= 180
+        AND bbox_min_latitude >= -90 AND bbox_max_latitude <= 90
+        AND bbox_min_longitude <= bbox_max_longitude
+        AND bbox_min_latitude <= bbox_max_latitude
+    ),
+    CONSTRAINT uq_geofence_versions_number UNIQUE (geofence_id, version)
+);
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.geofence_definitions'::regclass
+          AND conname = 'geofence_definitions_current_version_fk'
+    ) THEN
+        ALTER TABLE public.geofence_definitions
+            ADD CONSTRAINT geofence_definitions_current_version_fk
+            FOREIGN KEY (current_version_id)
+            REFERENCES public.geofence_versions(id) ON DELETE RESTRICT;
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+CREATE TABLE IF NOT EXISTS public.device_geofence_bindings (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id uuid NOT NULL,
+    geofence_id uuid NOT NULL
+        REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
+    rule_type varchar(32) NOT NULL,
+    status varchar(16) NOT NULL DEFAULT 'pending',
+    bind_source varchar(16) NOT NULL,
+    bound_by uuid NOT NULL,
+    bound_at timestamptz NOT NULL DEFAULT now(),
+    removed_by uuid,
+    removed_at timestamptz,
+    remove_reason text,
+    CONSTRAINT device_geofence_bindings_rule_type_check
+        CHECK (rule_type IN ('polygon_allow_zone', 'baseline_radius')),
+    CONSTRAINT device_geofence_bindings_status_check
+        CHECK (status IN ('pending', 'active', 'suspended', 'removed')),
+    CONSTRAINT device_geofence_bindings_source_check
+        CHECK (bind_source IN ('manual', 'auto'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_device_geofence_active_rule_type
+    ON public.device_geofence_bindings (device_id, rule_type)
+    WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_device_geofence_bindings_geofence
+    ON public.device_geofence_bindings (geofence_id, status);
+
+CREATE TABLE IF NOT EXISTS public.device_geofence_states (
+    binding_id uuid PRIMARY KEY
+        REFERENCES public.device_geofence_bindings(id) ON DELETE RESTRICT,
+    device_id uuid NOT NULL,
+    confirmed_state varchar(16) NOT NULL DEFAULT 'unknown',
+    candidate_state varchar(16),
+    candidate_count integer NOT NULL DEFAULT 0,
+    candidate_since timestamptz,
+    state_version bigint NOT NULL DEFAULT 1,
+    last_geofence_version_id uuid
+        REFERENCES public.geofence_versions(id) ON DELETE RESTRICT,
+    last_observation_version bigint,
+    last_observed_at timestamptz,
+    last_distance_to_boundary double precision,
+    last_evaluation_id uuid,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT device_geofence_states_confirmed_check
+        CHECK (confirmed_state IN ('unknown', 'inside', 'outside')),
+    CONSTRAINT device_geofence_states_candidate_check
+        CHECK (candidate_state IS NULL OR candidate_state IN ('exit', 'reentry')),
+    CONSTRAINT device_geofence_states_count_check CHECK (candidate_count >= 0),
+    CONSTRAINT device_geofence_states_version_check CHECK (state_version > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_geofence_states_device
+    ON public.device_geofence_states (device_id);
+
+CREATE TABLE IF NOT EXISTS public.device_geofence_effective_states (
+    device_id uuid PRIMARY KEY,
+    effective_state varchar(16) NOT NULL DEFAULT 'unmanaged',
+    required_action_level varchar(16) NOT NULL DEFAULT 'none',
+    state_version bigint NOT NULL DEFAULT 1,
+    trigger_binding_id uuid
+        REFERENCES public.device_geofence_bindings(id) ON DELETE SET NULL,
+    last_observation_version bigint,
+    evaluation_health varchar(16) NOT NULL DEFAULT 'healthy',
+    last_evaluation_error_code varchar(64),
+    last_successful_evaluation_at timestamptz,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT device_geofence_effective_state_check
+        CHECK (effective_state IN ('unmanaged', 'unknown', 'inside', 'outside')),
+    CONSTRAINT device_geofence_action_level_check
+        CHECK (required_action_level IN ('none', 'notify_only', 'manual_review', 'deactivate')),
+    CONSTRAINT device_geofence_health_check
+        CHECK (evaluation_health IN ('healthy', 'stale', 'failed')),
+    CONSTRAINT device_geofence_effective_version_check CHECK (state_version > 0)
+);
+
+CREATE TABLE IF NOT EXISTS public.geofence_control_actions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    action_key varchar(255) NOT NULL UNIQUE,
+    parent_action_id uuid
+        REFERENCES public.geofence_control_actions(id) ON DELETE RESTRICT,
+    device_id uuid NOT NULL,
+    device_sn varchar(64) NOT NULL,
+    geofence_id uuid
+        REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
+    binding_id uuid
+        REFERENCES public.device_geofence_bindings(id) ON DELETE SET NULL,
+    effective_state_version bigint NOT NULL,
+    action_type varchar(16) NOT NULL,
+    status varchar(32) NOT NULL DEFAULT 'pending',
+    before_state jsonb NOT NULL DEFAULT '[]'::jsonb,
+    requested_state jsonb NOT NULL DEFAULT '[]'::jsonb,
+    verified_state jsonb NOT NULL DEFAULT '[]'::jsonb,
+    last_error text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    completed_at timestamptz,
+    CONSTRAINT geofence_control_actions_state_version_check
+        CHECK (effective_state_version >= 0),
+    CONSTRAINT geofence_control_actions_type_check
+        CHECK (action_type IN ('deactivate', 'activate')),
+    CONSTRAINT geofence_control_actions_status_check CHECK (status IN (
+        'pending', 'executing', 'verifying', 'verified', 'partial_failed',
+        'failed'
+    )),
+    CONSTRAINT geofence_control_actions_before_state_array_check
+        CHECK (jsonb_typeof(before_state) = 'array'),
+    CONSTRAINT geofence_control_actions_requested_state_array_check
+        CHECK (jsonb_typeof(requested_state) = 'array'),
+    CONSTRAINT geofence_control_actions_verified_state_array_check
+        CHECK (jsonb_typeof(verified_state) = 'array')
+);
+
+CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_device_time
+    ON public.geofence_control_actions (device_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_status
+    ON public.geofence_control_actions (status, updated_at)
+    WHERE status IN ('pending', 'executing', 'verifying');
+
+ALTER TABLE public.device_location_observations
+    ADD COLUMN IF NOT EXISTS received_at timestamptz,
+    ADD COLUMN IF NOT EXISTS device_reported_at timestamptz,
+    ADD COLUMN IF NOT EXISTS gps_lock_status varchar(32),
+    ADD COLUMN IF NOT EXISTS satellite_count integer,
+    ADD COLUMN IF NOT EXISTS accuracy_meters double precision;
+
+UPDATE public.device_location_observations
+SET received_at = observed_at
+WHERE received_at IS NULL;
+
+ALTER TABLE public.device_location_observations
+    ALTER COLUMN received_at SET DEFAULT now(),
+    ALTER COLUMN received_at SET NOT NULL;
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.device_location_observations'::regclass
+          AND conname = 'device_location_observations_satellite_count_check'
+    ) THEN
+        ALTER TABLE public.device_location_observations
+            ADD CONSTRAINT device_location_observations_satellite_count_check
+            CHECK (satellite_count IS NULL OR satellite_count >= 0);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.device_location_observations'::regclass
+          AND conname = 'device_location_observations_accuracy_check'
+    ) THEN
+        ALTER TABLE public.device_location_observations
+            ADD CONSTRAINT device_location_observations_accuracy_check
+            CHECK (accuracy_meters IS NULL OR accuracy_meters >= 0);
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+CREATE TABLE IF NOT EXISTS public.event_outbox (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    aggregate_type varchar(64) NOT NULL,
+    aggregate_id varchar(160) NOT NULL,
+    subject varchar(160) NOT NULL,
+    payload jsonb NOT NULL,
+    dedupe_key varchar(255) NOT NULL,
+    status varchar(16) NOT NULL DEFAULT 'pending',
+    attempts integer NOT NULL DEFAULT 0,
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    claim_token uuid,
+    claim_expires_at timestamptz,
+    last_error text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    published_at timestamptz,
+    CONSTRAINT event_outbox_dedupe_key_unique UNIQUE (dedupe_key),
+    CONSTRAINT event_outbox_status_check
+        CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'dead')),
+    CONSTRAINT event_outbox_attempts_check CHECK (attempts >= 0),
+    CONSTRAINT event_outbox_claim_check CHECK (
+        (status = 'publishing' AND claim_token IS NOT NULL AND claim_expires_at IS NOT NULL)
+        OR
+        (status <> 'publishing' AND claim_token IS NULL AND claim_expires_at IS NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_outbox_claimable
+    ON public.event_outbox (status, next_attempt_at, claim_expires_at, created_at)
+    WHERE status IN ('pending', 'failed', 'publishing');
+
+CREATE TABLE IF NOT EXISTS public.geofence_evaluations (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    binding_id uuid NOT NULL
+        REFERENCES public.device_geofence_bindings(id) ON DELETE RESTRICT,
+    device_id uuid NOT NULL,
+    geofence_id uuid NOT NULL
+        REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
+    geofence_version_id uuid NOT NULL
+        REFERENCES public.geofence_versions(id) ON DELETE RESTRICT,
+    observation_version bigint NOT NULL,
+    latitude double precision NOT NULL,
+    longitude double precision NOT NULL,
+    gps_height double precision,
+    observed_at timestamptz NOT NULL,
+    received_at timestamptz NOT NULL,
+    device_reported_at timestamptz,
+    gps_lock_status varchar(32),
+    satellite_count integer,
+    accuracy_meters double precision,
+    source_path text NOT NULL,
+    previous_observation_version bigint,
+    movement_distance_meters double precision,
+    elapsed_seconds double precision,
+    implied_speed_mps double precision,
+    rule_type varchar(32) NOT NULL,
+    raw_position varchar(16),
+    signed_distance_meters double precision,
+    previous_confirmed_state varchar(16) NOT NULL,
+    confirmed_state varchar(16) NOT NULL,
+    candidate_state varchar(16),
+    candidate_count integer NOT NULL DEFAULT 0,
+    candidate_since timestamptz,
+    state_edge boolean NOT NULL DEFAULT false,
+    status varchar(16) NOT NULL,
+    reason_code varchar(64) NOT NULL,
+    failure_stage varchar(64),
+    error_code varchar(64),
+    error_summary text,
+    evaluated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT geofence_evaluations_observation_version_check
+        CHECK (observation_version > 0),
+    CONSTRAINT geofence_evaluations_rule_type_check
+        CHECK (rule_type IN ('polygon_allow_zone', 'baseline_radius')),
+    CONSTRAINT geofence_evaluations_raw_position_check
+        CHECK (raw_position IS NULL OR raw_position IN ('unknown', 'inside', 'outside', 'boundary')),
+    CONSTRAINT geofence_evaluations_previous_state_check
+        CHECK (previous_confirmed_state IN ('unknown', 'inside', 'outside')),
+    CONSTRAINT geofence_evaluations_confirmed_state_check
+        CHECK (confirmed_state IN ('unknown', 'inside', 'outside')),
+    CONSTRAINT geofence_evaluations_candidate_state_check
+        CHECK (candidate_state IS NULL OR candidate_state IN ('exit', 'reentry')),
+    CONSTRAINT geofence_evaluations_candidate_count_check
+        CHECK (candidate_count >= 0),
+    CONSTRAINT geofence_evaluations_status_check
+        CHECK (status IN ('completed', 'failed')),
+    CONSTRAINT geofence_evaluations_failure_evidence_check CHECK (
+        (status = 'completed'
+            AND failure_stage IS NULL
+            AND error_code IS NULL
+            AND error_summary IS NULL)
+        OR
+        (status = 'failed'
+            AND failure_stage IS NOT NULL
+            AND error_code IS NOT NULL)
+    ),
+    CONSTRAINT uq_geofence_evaluations_identity
+        UNIQUE (binding_id, geofence_version_id, observation_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_geofence_evaluations_device_time
+    ON public.geofence_evaluations (device_id, evaluated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_geofence_evaluations_status_time
+    ON public.geofence_evaluations (status, evaluated_at DESC);
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.device_geofence_states'::regclass
+          AND conname = 'device_geofence_states_last_evaluation_fk'
+    ) THEN
+        ALTER TABLE public.device_geofence_states
+            ADD CONSTRAINT device_geofence_states_last_evaluation_fk
+            FOREIGN KEY (last_evaluation_id)
+            REFERENCES public.geofence_evaluations(id) ON DELETE RESTRICT;
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+CREATE TABLE IF NOT EXISTS public.geofence_batch_items (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_id uuid NOT NULL
+        REFERENCES public.async_jobs(id) ON DELETE RESTRICT,
+    geofence_id uuid NOT NULL
+        REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
+    input_key varchar(320) NOT NULL,
+    input_kind varchar(16) NOT NULL,
+    input_value varchar(255) NOT NULL,
+    device_id uuid,
+    device_sn_snapshot varchar(255),
+    status varchar(16) NOT NULL DEFAULT 'pending',
+    reason_code varchar(64),
+    error_message text,
+    expected_source_binding_id uuid
+        REFERENCES public.device_geofence_bindings(id) ON DELETE RESTRICT,
+    binding_id uuid
+        REFERENCES public.device_geofence_bindings(id) ON DELETE RESTRICT,
+    attempt integer NOT NULL DEFAULT 0,
+    started_at timestamptz,
+    finished_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT geofence_batch_items_input_kind_check
+        CHECK (input_kind IN ('device_id', 'device_sn')),
+    CONSTRAINT geofence_batch_items_status_check
+        CHECK (status IN ('pending', 'succeeded', 'skipped', 'failed')),
+    CONSTRAINT geofence_batch_items_attempt_check CHECK (attempt >= 0),
+    CONSTRAINT geofence_batch_items_success_binding_check
+        CHECK (status <> 'succeeded' OR binding_id IS NOT NULL),
+    CONSTRAINT uq_geofence_batch_items_job_input UNIQUE (job_id, input_key)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_geofence_batch_items_job_device
+    ON public.geofence_batch_items (job_id, device_id)
+    WHERE device_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_geofence_batch_items_job_status
+    ON public.geofence_batch_items (job_id, status, created_at, id);
+
+CREATE INDEX IF NOT EXISTS idx_geofence_batch_items_geofence_status
+    ON public.geofence_batch_items (geofence_id, status);
+
+CREATE TABLE IF NOT EXISTS public.third_party_location_batches (
+    idempotency_key varchar(255) PRIMARY KEY,
+    request_hash char(64) NOT NULL,
+    status varchar(16) NOT NULL,
+    result jsonb,
+    completed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT third_party_location_batches_status_check
+        CHECK (status IN ('processing', 'completed')),
+    CONSTRAINT third_party_location_batches_completed_result_check
+        CHECK (status <> 'completed' OR result IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_third_party_location_batches_created_at
+    ON public.third_party_location_batches (created_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_async_jobs_geofence_manual_bind_request
+    ON public.async_jobs (
+        job_type,
+        (payload->>'geofence_id'),
+        (payload->>'requested_by'),
+        (payload->>'preview_fingerprint')
+    )
+    WHERE job_type = 'geofence_manual_bind'
+      AND status IN ('pending', 'running', 'succeeded');
+
+-- +goose StatementBegin
+DO $$
+DECLARE
+    required_relation text;
+BEGIN
+    FOREACH required_relation IN ARRAY ARRAY[
+        'public.geofence_carrier_settings',
+        'public.geofence_definitions',
+        'public.geofence_versions',
+        'public.device_geofence_bindings',
+        'public.device_geofence_states',
+        'public.device_geofence_effective_states',
+        'public.geofence_control_actions',
+        'public.event_outbox',
+        'public.geofence_evaluations',
+        'public.geofence_batch_items',
+        'public.third_party_location_batches'
+    ] LOOP
+        IF to_regclass(required_relation) IS NULL THEN
+            RAISE EXCEPTION 'main baseline reconcile missing relation %', required_relation;
+        END IF;
+    END LOOP;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'devices'
+          AND column_name = 'location_source_mode'
+    ) THEN
+        RAISE EXCEPTION 'main baseline reconcile missing devices.location_source_mode';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'provisioning_tasks'
+          AND column_name = 'policy_id'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'provisioning_tasks'
+          AND column_name = 'current_step_name'
+    ) THEN
+        RAISE EXCEPTION 'main baseline reconcile missing provisioning task columns';
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+-- +omcgo MainReconcileEnd
 
 
 -- +goose Down

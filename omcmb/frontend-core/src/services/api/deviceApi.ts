@@ -33,6 +33,7 @@ interface BackendDevice {
   site_id: string;
   latitude: number;
   longitude: number;
+  location_source_mode?: 'tr069' | 'external';
   location_sync?: BackendLocationSync;
   created_at: string;
   updated_at: string;
@@ -496,6 +497,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     stationId: bd.site_id,
     oui: bd.oui ?? '',
     carrier: bd.carrier ?? '',
+    locationSourceMode: bd.location_source_mode === 'external' ? 'external' : 'tr069',
 
     // T-0162 新字段
     lifecycleState,
@@ -857,6 +859,7 @@ export const deviceApi = {
     if (data.stationId !== undefined) devicePayload.site_id = data.stationId;
     if (data.latitude !== undefined) devicePayload.latitude = data.latitude;
     if (data.longitude !== undefined) devicePayload.longitude = data.longitude;
+    if (data.locationSourceMode !== undefined) devicePayload.location_source_mode = data.locationSourceMode;
 
     if (data.remark !== undefined) deviceInfoPayload.remark = data.remark;
     if (data.installAddress !== undefined) deviceInfoPayload.address = data.installAddress;
