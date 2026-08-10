@@ -206,6 +206,21 @@ func TestScoper_RequireDeviceScope(t *testing.T) {
 	assert.True(t, scoper.RequireDeviceScope(c3, false))
 }
 
+func TestScoper_NorthboundAPIUserBypassesSystemUserScope(t *testing.T) {
+	deviceID := uuid.New()
+	scoper := NewScoper(
+		fakeVisibleGroups{groups: map[uuid.UUID][]uuid.UUID{}},
+		fakeDeviceAuthz{},
+		nil,
+	)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Set("northbound_api_user", "oss-a")
+
+	assert.True(t, scoper.RequireDeviceScope(c, false))
+	assert.True(t, scoper.AuthorizeDevice(c, deviceID))
+}
+
 // nil scoper 依赖（dev/test）→ 退化放行。
 func TestScoper_NilDeps_FailOpen(t *testing.T) {
 	scoper := NewScoper(nil, nil, nil)

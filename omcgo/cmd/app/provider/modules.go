@@ -1498,6 +1498,16 @@ func initNorthboundModule(c *Container) error {
 	syncService := nbsync.NewService(c.DeviceRepo, c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, logger)
 	nbService := northbound.NewNorthboundService(c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, pushEngine, syncService, logger)
 	nbRouter := northbound.NewRouter(nbService)
+	nbRouter.SetDeviceTaskServices(c.DeviceService, c.TaskSvc)
+	if c.deviceHandlerDeps != nil {
+		nbRouter.SetDeviceRegistrationService(c.deviceHandlerDeps.regService)
+	}
+	if c.GroupService != nil {
+		nbRouter.SetDeviceGroupService(c.GroupService)
+	}
+	if c.miscDeps.ufteService != nil {
+		nbRouter.SetTransferTaskService(c.miscDeps.ufteService)
+	}
 	pageConfigRepo := nbpageconfig.NewPgRepository(c.PgPool).WithTsPool(c.TsPool)
 	pageConfigService := nbpageconfig.NewServiceWithRepository(nbpageconfig.NewDefaultCatalog(), pageConfigRepo)
 	pageConfigService.SetAlarmStore(c.AlarmPgStore)

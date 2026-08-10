@@ -327,20 +327,18 @@ export interface NorthboundAPIConfig {
   response_contract?: Record<string, unknown>;
 }
 
-export interface NorthboundAPIClient {
+export interface NorthboundAPIUser {
   id?: string;
-  client_key: string;
-  name: string;
+  username: string;
   enabled: boolean;
-  allowed_api_keys: string[];
-  ip_whitelist: string[];
-  token_secret?: string;
-  token_set?: boolean;
-  expires_at?: string;
+  password?: string;
+  password_set?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
-export interface NorthboundReplaceAPIClientsRequest {
-  items: NorthboundAPIClient[];
+export interface NorthboundReplaceAPIUsersRequest {
+  items: NorthboundAPIUser[];
 }
 
 export interface NorthboundPageConfigEvent {
@@ -587,6 +585,14 @@ export const northboundPageConfigApi = {
     return data;
   },
 
+  async updateAllAPIConfigs(enabled: boolean): Promise<ListResponse<NorthboundAPIConfig>> {
+    const { data } = await http.put<ListResponse<NorthboundAPIConfig>>(
+      '/northbound/page-config/api/configs',
+      { enabled },
+    );
+    return data;
+  },
+
   async testAPIConfig(key: string): Promise<NorthboundPageConfigEvent> {
     const { data } = await http.post<NorthboundPageConfigEvent>(
       `/northbound/page-config/api/configs/${key}/test`,
@@ -594,18 +600,18 @@ export const northboundPageConfigApi = {
     return data;
   },
 
-  async getAPIClients(): Promise<ListResponse<NorthboundAPIClient>> {
-    const { data } = await http.get<ListResponse<NorthboundAPIClient>>(
-      '/northbound/page-config/api/clients',
+  async getAPIUsers(): Promise<ListResponse<NorthboundAPIUser>> {
+    const { data } = await http.get<ListResponse<NorthboundAPIUser>>(
+      '/northbound/page-config/api/users',
     );
     return data;
   },
 
-  async replaceAPIClients(
-    req: NorthboundReplaceAPIClientsRequest,
-  ): Promise<ListResponse<NorthboundAPIClient>> {
-    const { data } = await http.put<ListResponse<NorthboundAPIClient>>(
-      '/northbound/page-config/api/clients',
+  async replaceAPIUsers(
+    req: NorthboundReplaceAPIUsersRequest,
+  ): Promise<ListResponse<NorthboundAPIUser>> {
+    const { data } = await http.put<ListResponse<NorthboundAPIUser>>(
+      '/northbound/page-config/api/users',
       req,
     );
     return data;

@@ -1022,6 +1022,37 @@ func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter, visibleG
 	return paginate(items, filter.Page, filter.PageSize), nil
 }
 
+// GetTask returns a single UFTE/file-transfer task by ID. It is intentionally a
+// service-level helper so other modules can reuse the same catalog mapping and
+// visibility semantics as ListTasks without going through HTTP.
+func (s *Service) GetTask(ctx context.Context, rawID string, visibleGroups []uuid.UUID) (*Task, error) {
+	id, err := uuid.Parse(strings.TrimSpace(rawID))
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid task id", commonerrors.ErrInvalidInput)
+	}
+	catalog, err := s.loadTaskTypeCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if visibleGroups != nil && s.groupReader != nil {
+		visibleTaskIDs, err := s.visibleTaskIDSet(ctx, catalog, TaskListFilter{}, visibleGroups)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := visibleTaskIDs[id]; !ok {
+			return nil, commonerrors.ErrForbidden
+		}
+	}
+	task, err := s.taskRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, commonerrors.ErrNotFound
+	}
+	return s.mapTask(ctx, catalog, task)
+}
+
 // visibleTaskIDSet 用一次批量 sub_tasks 加载，算出「至少含一台可见设备」的任务 ID 集合。
 // 仅在非超管（visibleGroups != nil）时调用。语义为「任务触及调用者任一可见设备即可见」，
 // 与写路径「整批含域外设备即拒绝」是读/写两侧各自合理的取舍：读侧不因混入域外设备而

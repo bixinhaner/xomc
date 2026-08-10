@@ -82,6 +82,14 @@
   justify-content: flex-end;
 }
 
+.apiToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .rowControl {
   display: flex;
   align-items: center;
@@ -612,6 +620,7 @@
 
   .toolbarBand,
   .fileToolbar,
+  .apiToolbar,
   .sectionHeader {
     align-items: stretch;
     flex-direction: column;

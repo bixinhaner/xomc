@@ -2,17 +2,23 @@ package pageconfig
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
+
+const northboundAPITokenTTL = 30 * time.Minute
 
 func (r *PgRepository) EnsureExtendedDefaults(ctx context.Context) error {
 	return r.extDefaultsSeeded.Do(func() error {
@@ -28,6 +34,8 @@ func (r *PgRepository) ensureExtendedSchema(ctx context.Context) error {
 		`ALTER TABLE northbound_socket_alarm_configs ADD COLUMN IF NOT EXISTS max_clients integer DEFAULT 20 NOT NULL`,
 		`ALTER TABLE northbound_socket_alarm_configs ADD COLUMN IF NOT EXISTS heartbeat_times integer DEFAULT 3 NOT NULL`,
 		`ALTER TABLE northbound_socket_alarm_configs ALTER COLUMN heartbeat_seconds SET DEFAULT 60`,
+		`ALTER TABLE northbound_api_clients ADD COLUMN IF NOT EXISTS access_token_secret text DEFAULT '' NOT NULL`,
+		`ALTER TABLE northbound_api_clients ADD COLUMN IF NOT EXISTS access_token_expires_at timestamptz`,
 		`DO $$
 BEGIN
   ALTER TABLE northbound_socket_alarm_configs
@@ -163,7 +171,16 @@ INSERT INTO northbound_api_configs (
   api_key, name, method, path, kind, data_type, enabled,
   old_system_supported, current_supported, source, response_contract
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-ON CONFLICT (api_key) DO NOTHING`,
+ON CONFLICT (api_key) DO UPDATE SET
+  name=EXCLUDED.name,
+  method=EXCLUDED.method,
+  path=EXCLUDED.path,
+  kind=EXCLUDED.kind,
+  data_type=EXCLUDED.data_type,
+  old_system_supported=EXCLUDED.old_system_supported,
+  current_supported=EXCLUDED.current_supported,
+  source=EXCLUDED.source,
+  response_contract=EXCLUDED.response_contract`,
 		config.Key, config.Name, config.Method, config.Path, config.Kind, config.DataType,
 		config.Enabled, config.OldSystemSupported, config.CurrentSupported, config.Source, contract)
 	if err != nil {
@@ -566,53 +583,152 @@ RETURNING id::text, client_key, name, enabled, token_secret <> '' AS token_set,
 	return out, nil
 }
 
+func (r *PgRepository) ListAPIUsers(ctx context.Context) ([]APIUser, error) {
+	rows, err := r.pool.Query(ctx, `
+SELECT id::text, client_key, enabled, token_secret <> '' AS password_set,
+       token_secret, created_at, updated_at
+  FROM northbound_api_clients
+ ORDER BY client_key ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("query northbound API users: %w", err)
+	}
+	defer rows.Close()
+	out := make([]APIUser, 0)
+	for rows.Next() {
+		user, err := scanAPIUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *user)
+	}
+	return out, rows.Err()
+}
+
+func (r *PgRepository) ReplaceAPIUsers(ctx context.Context, req ReplaceAPIUsersRequest) ([]APIUser, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin replace northbound API users: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	existingPasswords, err := loadAPIClientSecrets(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM northbound_api_clients`); err != nil {
+		return nil, fmt.Errorf("delete northbound API users: %w", err)
+	}
+
+	out := make([]APIUser, 0, len(req.Items))
+	for _, item := range req.Items {
+		item = normalizeAPIUser(item)
+		item.Password = credentialToPersist(item.Password, existingPasswords[item.Username])
+		if err := validateAPIUser(item); err != nil {
+			return nil, err
+		}
+		row := tx.QueryRow(ctx, `
+INSERT INTO northbound_api_clients (
+  client_key, name, enabled, token_secret, allowed_api_keys, ip_whitelist,
+  expires_at, access_token_secret, access_token_expires_at
+) VALUES ($1,$2,$3,$4,'[]'::jsonb,'[]'::jsonb,NULL,'',NULL)
+RETURNING id::text, client_key, enabled, token_secret <> '' AS password_set,
+          token_secret, created_at, updated_at`,
+			item.Username, item.Username, item.Enabled, item.Password)
+		created, err := scanAPIUser(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *created)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit replace northbound API users: %w", err)
+	}
+	return out, nil
+}
+
+func (r *PgRepository) LoginAPIUser(ctx context.Context, req APIUserLoginRequest) (*APIUserToken, error) {
+	username := strings.TrimSpace(req.Username)
+	password := strings.TrimSpace(req.Password)
+	if username == "" || password == "" {
+		return nil, fmt.Errorf("%w: username or password is invalid", commonerrors.ErrUnauthorized)
+	}
+
+	var (
+		enabled        bool
+		storedPassword string
+	)
+	err := r.pool.QueryRow(ctx, `
+SELECT enabled, token_secret
+  FROM northbound_api_clients
+ WHERE client_key = $1`,
+		username).Scan(&enabled, &storedPassword)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("%w: username or password is invalid", commonerrors.ErrUnauthorized)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query northbound API user %s: %w", username, err)
+	}
+	if !enabled {
+		return nil, fmt.Errorf("%w: user is disabled", commonerrors.ErrUnauthorized)
+	}
+	if subtle.ConstantTimeCompare([]byte(storedPassword), []byte(password)) != 1 {
+		return nil, fmt.Errorf("%w: username or password is invalid", commonerrors.ErrUnauthorized)
+	}
+
+	token, err := generateNorthboundAccessToken()
+	if err != nil {
+		return nil, err
+	}
+	expiresAt := time.Now().Add(northboundAPITokenTTL).UTC()
+	if _, err := r.pool.Exec(ctx, `
+UPDATE northbound_api_clients
+   SET access_token_secret = $2,
+       access_token_expires_at = $3,
+       updated_at = now()
+ WHERE client_key = $1`,
+		username, token, expiresAt); err != nil {
+		return nil, fmt.Errorf("update northbound API user token %s: %w", username, err)
+	}
+
+	return &APIUserToken{
+		Token:       token,
+		AccessToken: token,
+		Expires:     int(northboundAPITokenTTL.Seconds()),
+		ExpiresAt:   expiresAt,
+		TokenType:   "Bearer",
+	}, nil
+}
+
 func (r *PgRepository) AuthenticateAPIClient(ctx context.Context, credential string, remoteIP string, apiKey string) (*APIClient, error) {
 	var activeCount int
 	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM northbound_api_clients WHERE enabled = true`).Scan(&activeCount); err != nil {
 		return nil, fmt.Errorf("count active northbound_api_clients: %w", err)
 	}
 	if activeCount == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("%w: no enabled northbound API user configured", commonerrors.ErrUnauthorized)
 	}
 	credential = strings.TrimSpace(credential)
 	if credential == "" {
-		return nil, fmt.Errorf("%w: northbound API client token is required", commonerrors.ErrUnauthorized)
+		return nil, fmt.Errorf("%w: northbound API user token is required", commonerrors.ErrUnauthorized)
 	}
 
-	rows, err := r.pool.Query(ctx, `
-SELECT id::text, client_key, name, enabled, token_secret, allowed_api_keys,
-       ip_whitelist, expires_at, created_at, updated_at
+	row := r.pool.QueryRow(ctx, `
+SELECT id::text, client_key, name, enabled, token_secret <> '' AS token_set,
+       allowed_api_keys, ip_whitelist, expires_at, created_at, updated_at
   FROM northbound_api_clients
  WHERE enabled = true
-   AND (expires_at IS NULL OR expires_at > now())
- ORDER BY client_key ASC`)
+   AND access_token_secret = $1
+   AND access_token_expires_at > now()
+ ORDER BY client_key ASC
+ LIMIT 1`, credential)
+	client, err := scanAPIClient(row)
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, commonerrors.ErrNotFound) {
+		return nil, fmt.Errorf("%w: invalid or expired northbound API user token", commonerrors.ErrUnauthorized)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("query active northbound_api_clients: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		client, token, err := scanAPIClientWithSecret(rows)
-		if err != nil {
-			return nil, err
-		}
-		if subtle.ConstantTimeCompare([]byte(token), []byte(credential)) != 1 {
-			continue
-		}
-		if !apiClientAllowsAPI(*client, apiKey) {
-			return nil, fmt.Errorf("%w: northbound API client %s cannot access %s", commonerrors.ErrForbidden, client.ClientKey, apiKey)
-		}
-		if !apiClientAllowsIP(*client, remoteIP) {
-			return nil, fmt.Errorf("%w: northbound API client %s IP %s is not whitelisted", commonerrors.ErrForbidden, client.ClientKey, remoteIP)
-		}
-		client.TokenSecret = ""
-		client.TokenSet = true
-		return client, nil
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("%w: invalid northbound API client token", commonerrors.ErrUnauthorized)
+	return client, nil
 }
 
 func scanDeliveryTarget(row scanner) (*DeliveryTarget, error) {
@@ -827,6 +943,20 @@ func scanAPIClient(row scanner) (*APIClient, error) {
 		client.ExpiresAt = &t
 	}
 	return &client, nil
+}
+
+func scanAPIUser(row scanner) (*APIUser, error) {
+	var user APIUser
+	if err := row.Scan(
+		&user.ID, &user.Username, &user.Enabled, &user.PasswordSet,
+		&user.Password, &user.CreatedAt, &user.UpdatedAt,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("scan northbound API user row: %w", err)
+	}
+	return &user, nil
 }
 
 func scanAPIClientWithSecret(row scanner) (*APIClient, string, error) {
@@ -1058,6 +1188,12 @@ func normalizeAPIClient(client APIClient) APIClient {
 	return client
 }
 
+func normalizeAPIUser(user APIUser) APIUser {
+	user.Username = strings.TrimSpace(user.Username)
+	user.Password = strings.TrimSpace(user.Password)
+	return user
+}
+
 func validateAPIClient(client APIClient) error {
 	if strings.TrimSpace(client.ClientKey) == "" {
 		return fmt.Errorf("%w: API client_key is required", commonerrors.ErrInvalidInput)
@@ -1073,6 +1209,16 @@ func validateAPIClient(client APIClient) error {
 			continue
 		}
 		return fmt.Errorf("%w: invalid API client ip_whitelist entry %s", commonerrors.ErrInvalidInput, entry)
+	}
+	return nil
+}
+
+func validateAPIUser(user APIUser) error {
+	if strings.TrimSpace(user.Username) == "" {
+		return fmt.Errorf("%w: northbound API username is required", commonerrors.ErrInvalidInput)
+	}
+	if user.Enabled && strings.TrimSpace(user.Password) == "" {
+		return fmt.Errorf("%w: northbound API password is required when enabled", commonerrors.ErrInvalidInput)
 	}
 	return nil
 }
@@ -1138,6 +1284,14 @@ func credentialToPersist(next, current string) string {
 		return current
 	}
 	return next
+}
+
+func generateNorthboundAccessToken() (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate northbound API token: %w", err)
+	}
+	return "nbt_" + base64.RawURLEncoding.EncodeToString(raw[:]), nil
 }
 
 func mergeSocketAccountSecrets(accounts []SocketAccount, current map[string]string) []SocketAccount {

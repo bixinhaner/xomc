@@ -47,6 +47,9 @@ type Repository interface {
 	ListAPIClients(ctx context.Context) ([]APIClient, error)
 	ReplaceAPIClients(ctx context.Context, req ReplaceAPIClientsRequest) ([]APIClient, error)
 	AuthenticateAPIClient(ctx context.Context, credential string, remoteIP string, apiKey string) (*APIClient, error)
+	ListAPIUsers(ctx context.Context) ([]APIUser, error)
+	ReplaceAPIUsers(ctx context.Context, req ReplaceAPIUsersRequest) ([]APIUser, error)
+	LoginAPIUser(ctx context.Context, req APIUserLoginRequest) (*APIUserToken, error)
 	CreateEvent(ctx context.Context, event PageConfigEvent) (*PageConfigEvent, error)
 	ListEvents(ctx context.Context, filter EventFilter) (EventListResult, error)
 	GetEvent(ctx context.Context, id string) (*PageConfigEvent, error)
@@ -483,6 +486,28 @@ func (s *Service) UpdateAPIConfig(ctx context.Context, key string, enabled bool)
 	return s.repo.UpdateAPIConfig(ctx, key, enabled)
 }
 
+func (s *Service) UpdateAllAPIConfigs(ctx context.Context, enabled bool) ([]APIConfig, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("northbound page-config repository is not configured")
+	}
+	if err := s.repo.EnsureExtendedDefaults(ctx); err != nil {
+		return nil, err
+	}
+	configs, err := s.repo.ListAPIConfigs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	updated := make([]APIConfig, 0, len(configs))
+	for _, config := range configs {
+		item, err := s.repo.UpdateAPIConfig(ctx, config.Key, enabled)
+		if err != nil {
+			return nil, err
+		}
+		updated = append(updated, *item)
+	}
+	return updated, nil
+}
+
 func (s *Service) IsAPIConfigEnabled(ctx context.Context, key string) (bool, error) {
 	if s == nil || s.repo == nil {
 		return true, nil
@@ -523,9 +548,47 @@ func (s *Service) ReplaceAPIClients(ctx context.Context, req ReplaceAPIClientsRe
 
 func (s *Service) AuthenticateAPIClient(ctx context.Context, credential string, remoteIP string, apiKey string) (*APIClient, error) {
 	if s == nil || s.repo == nil {
-		return nil, nil
+		return nil, fmt.Errorf("%w: northbound API user token is required", commonerrors.ErrUnauthorized)
 	}
 	return s.repo.AuthenticateAPIClient(ctx, credential, remoteIP, apiKey)
+}
+
+func (s *Service) ListAPIUsers(ctx context.Context) ([]APIUser, error) {
+	if s.repo == nil {
+		return []APIUser{}, nil
+	}
+	if err := s.repo.EnsureExtendedDefaults(ctx); err != nil {
+		return nil, err
+	}
+	return s.repo.ListAPIUsers(ctx)
+}
+
+func (s *Service) ReplaceAPIUsers(ctx context.Context, req ReplaceAPIUsersRequest) ([]APIUser, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("northbound page-config repository is not configured")
+	}
+	if err := s.repo.EnsureExtendedDefaults(ctx); err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	for i := range req.Items {
+		req.Items[i] = normalizeAPIUser(req.Items[i])
+		if _, ok := seen[req.Items[i].Username]; ok {
+			return nil, fmt.Errorf("%w: duplicate northbound API username %s", commonerrors.ErrInvalidInput, req.Items[i].Username)
+		}
+		seen[req.Items[i].Username] = struct{}{}
+	}
+	return s.repo.ReplaceAPIUsers(ctx, req)
+}
+
+func (s *Service) LoginAPIUser(ctx context.Context, req APIUserLoginRequest) (*APIUserToken, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("northbound page-config repository is not configured")
+	}
+	if err := s.repo.EnsureExtendedDefaults(ctx); err != nil {
+		return nil, err
+	}
+	return s.repo.LoginAPIUser(ctx, req)
 }
 
 func (s *Service) ListEvents(ctx context.Context, filter EventFilter) (EventListResult, error) {
