@@ -3,7 +3,6 @@ package mml
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/google/uuid"
 )
@@ -61,19 +60,16 @@ func (s *SupportedSet) Contains(path string) bool {
 	return ok
 }
 
-// HasPathWithPrefix 判断 set 中是否存在以 prefix 开头的 path。
-// 用于 ADD/RMV 命令的"父对象有可创建/删除的子路径"判断。
-// 空 prefix → 返 false（防御性）。
-func (s *SupportedSet) HasPathWithPrefix(prefix string) bool {
-	if s == nil || s.Paths == nil || prefix == "" {
+// SupportsObjectCollection 判断模型是否显式声明了 collection 下的实例对象。
+// ADD/RMV 的 target_object 是集合路径（如 Device.Ethernet.Interface.），参数模型中的
+// object 映射是实例模板（如 Device.Ethernet.Interface.{i}.）。叶子参数前缀命中不能
+// 代表设备支持 AddObject/DeleteObject。
+func (s *SupportedSet) SupportsObjectCollection(collection string) bool {
+	if s == nil || s.Paths == nil || collection == "" {
 		return false
 	}
-	for p := range s.Paths {
-		if strings.HasPrefix(p, prefix) {
-			return true
-		}
-	}
-	return false
+	_, ok := s.Paths[collection+"{i}."]
+	return ok
 }
 
 // Size 返回 set 大小（用于日志/指标）。

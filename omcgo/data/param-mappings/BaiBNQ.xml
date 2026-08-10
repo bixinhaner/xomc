@@ -1,11 +1,12 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="BaiBNQ" totalEntries="827">
+<parameterModel paramModel="BaiBNQ" totalEntries="835">
     <objects>
         <object name="Device.FAP.License." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FAP.License.LicenseItem." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FAP.Ipsec." standardPath="Device.FAP.Ipsec." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Ethernet.Interface.{i}." standardPath="Device.Ethernet.Interface.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier." standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier." standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier." standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
@@ -74,7 +75,14 @@
         <param name="Device.DeviceInfo.indoorDeployment" standardPath="Device.DeviceInfo.indoorDeployment" access="READ_WRITE" type="INT" changeApplies="Immediate" max="1"/>
         <param name="Device.DeviceInfo.lowFrequency" standardPath="Device.DeviceInfo.lowFrequency" access="READ_ONLY" type="INT" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.supportedN48N78SharedRf" standardPath="Device.DeviceInfo.supportedN48N78SharedRf" access="READ_ONLY" type="STRING" changeApplies="Immediate" max="5"/>
-        <param name="Device.Ethernet.Interface.{i}.MACAddress" standardPath="Device.Ethernet.Interface.{i}.MACAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.DuplexMode" standardPath="Device.Ethernet.Interface.{i}.DuplexMode" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="4" max="4"/>
+        <param name="Device.Ethernet.Interface.{i}.Enable" standardPath="Device.Ethernet.Interface.{i}.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.MACAddress" standardPath="Device.Ethernet.Interface.{i}.MACAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="17"/>
+        <param name="Device.Ethernet.Interface.{i}.MaxBitRate" standardPath="Device.Ethernet.Interface.{i}.MaxBitRate" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="2" max="4"/>
+        <param name="Device.Ethernet.Interface.{i}.Name" standardPath="Device.Ethernet.Interface.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="64"/>
+        <param name="Device.Ethernet.Interface.{i}.PortLocation" standardPath="Device.Ethernet.Interface.{i}.PortLocation" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="64"/>
+        <param name="Device.Ethernet.Interface.{i}.SignTransMedia" standardPath="Device.Ethernet.Interface.{i}.SignTransMedia" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.UserLabel" standardPath="Device.Ethernet.Interface.{i}.UserLabel" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="64"/>
         <param name="Device.FAP.GPS.LockedLatitude" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-90000000" max="90000000"/>
         <param name="Device.FAP.GPS.LockedLongitude" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-180000000" max="180000000"/>
         <param name="Device.FAP.GPS.SyncStatus" standardPath="Device.DeviceInfo.GPS_Status" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>

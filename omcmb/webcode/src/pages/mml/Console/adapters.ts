@@ -459,6 +459,7 @@ export function expandObjectPathColumns(
 ): ResultColumn[] {
   const expanded: ResultColumn[] = [];
   const emittedPaths = new Set<string>();
+  const expandedDescendantPaths = new Set<string>();
   let objectPathColumnCount = 0;
   for (const column of columns) {
     if (!column.path.endsWith('.')) {
@@ -477,6 +478,7 @@ export function expandObjectPathColumns(
         hasDescendant = true;
         if (emittedPaths.has(path)) continue;
         emittedPaths.add(path);
+        expandedDescendantPaths.add(path);
         objectPathColumnCount += 1;
         descendantPaths.push(path);
       }
@@ -492,7 +494,27 @@ export function expandObjectPathColumns(
       expanded.push({ key: `${column.key}:child:${index}`, label: leafName(path), path });
     });
   }
-  return expanded;
+
+  // 某些设备模型会把旧标准叶子映射到新对象下的私有叶子，同时命令还会查询该新对象。
+  // 对象展开后，旧叶子列没有精确值却与真实后代形成同名重复列。仅在「旧列全无值」且
+  // 对象名 + 实例 + 叶子名的结构尾部一致时移除旧列，避免误伤其他对象的同名参数。
+  const structuralTail = (path: string): string => path
+    .split('.')
+    .filter(Boolean)
+    .map((segment) => (segment === '{i}' || /^\d+$/.test(segment) ? '{i}' : segment))
+    .slice(-3)
+    .join('.');
+  const descendantTails = new Set(
+    [...expandedDescendantPaths]
+      .filter((path) => rows.some((row) => Object.prototype.hasOwnProperty.call(row.cells, path)))
+      .map(structuralTail),
+  );
+
+  return expanded.filter((column) => {
+    if (expandedDescendantPaths.has(column.path) || column.path.endsWith('.')) return true;
+    const hasOwnValue = rows.some((row) => Object.prototype.hasOwnProperty.call(row.cells, column.path));
+    return hasOwnValue || !descendantTails.has(structuralTail(column.path));
+  });
 }
 
 /**
