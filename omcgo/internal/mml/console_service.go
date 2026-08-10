@@ -477,7 +477,7 @@ func (s *ConsoleService) BuildFlatGroupTree(ctx context.Context) ([]FlatGroup, e
 }
 
 // BuildFlatGroupTreeFiltered 返回按产品支持集合裁剪后的 flat 命令树。
-// LST/MOD 只保留与 supported paths 的交集；ADD/RMV 保留目标对象前缀命中的命令。
+// LST/MOD 只保留与 supported paths 的交集；ADD/RMV 仅保留有显式对象映射的命令。
 // productClass/deviceKey 任一传入即启用过滤，两者都为空时保持 admin/浏览视图全集。
 func (s *ConsoleService) BuildFlatGroupTreeFiltered(
 	ctx context.Context, productClass, deviceKey string,
@@ -553,7 +553,7 @@ func filterFlatCommand(command FlatCommand, supported *SupportedSet) (FlatComman
 		command.ObjectPath = kept
 		return command, len(kept) > 0
 	case string:
-		return command, supported.HasPathWithPrefix(paths)
+		return command, supported.SupportsObjectCollection(paths)
 	default:
 		return command, false
 	}

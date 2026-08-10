@@ -87,6 +87,59 @@ func TestBMNeighborListHasWritableX2Flag(t *testing.T) {
 	t.Fatalf("expected BM.xml to define writable X2Flag mapping at %s", path)
 }
 
+func TestBMWANUsesIPInterfaceAliases(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	wantObjects := map[string]string{
+		"Device.IP.Interface.{i}.":                 "Device.Ethernet.Interface.{i}.",
+		"Device.IP.Interface.{i}.IPv4Address.{i}.": "Device.Ethernet.Interface.{i}.IPv4Address.{i}.",
+		"Device.IP.Interface.{i}.IPv6Address.{i}.": "Device.Ethernet.Interface.{i}.IPv6Address.{i}.",
+	}
+	for privatePath, standardPath := range wantObjects {
+		found := false
+		for _, object := range doc.Objects {
+			if object.Name != privatePath {
+				continue
+			}
+			found = true
+			assert.Equal(t, standardPath, object.StandardPath)
+		}
+		require.True(t, found, "expected BM WAN object alias %s", privatePath)
+	}
+
+	wantParams := map[string]struct {
+		standardPath string
+		access       string
+	}{
+		"Device.IP.Interface.{i}.Enable":                         {"Device.Ethernet.Interface.{i}.Enable", "READ_WRITE"},
+		"Device.IP.Interface.{i}.Name":                           {"Device.Ethernet.Interface.{i}.Name", "READ_ONLY"},
+		"Device.IP.Interface.{i}.Status":                         {"Device.Ethernet.Interface.{i}.Status", "READ_ONLY"},
+		"Device.DeviceInfo.X_COM_MACAddress":                     {"Device.Ethernet.Interface.{i}.MACAddress", "READ_ONLY"},
+		"Device.IP.Interface.{i}.IPv4Address.{i}.AddressingType": {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType", "READ_ONLY"},
+		"Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress":      {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress", "READ_WRITE"},
+		"Device.IP.Interface.{i}.IPv4Address.{i}.SubnetMask":     {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask", "READ_WRITE"},
+		"Device.IP.Interface.{i}.IPv6Address.{i}.IPAddress":      {"Device.Ethernet.Interface.{i}.IPv6Address.{i}.IPAddress", "READ_WRITE"},
+		"Device.IP.Interface.{i}.IPv6Address.{i}.Origin":         {"Device.Ethernet.Interface.{i}.IPv6Address.{i}.Origin", "READ_ONLY"},
+	}
+	found := make(map[string]xmlParamEntry, len(wantParams))
+	for _, param := range doc.Params {
+		if _, ok := wantParams[param.Name]; ok {
+			found[param.Name] = param
+		}
+	}
+	for privatePath, want := range wantParams {
+		param, ok := found[privatePath]
+		require.True(t, ok, "expected BM WAN parameter alias %s", privatePath)
+		assert.Equal(t, want.standardPath, param.StandardPath)
+		assert.Equal(t, want.access, param.Access)
+	}
+}
+
 func TestMLQPLMNListObjectIsWritable(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "MLQ.xml")
 	body, err := os.ReadFile(xmlPath)
@@ -149,6 +202,52 @@ func TestBaiBNQGNBNameIsWritableNRCommonPath(t *testing.T) {
 	}
 
 	t.Fatalf("expected BaiBNQ.xml to define writable gNBName mapping at %s", path)
+}
+
+func TestBaiBNQIncludesNRWANInterfaceParameters(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const interfaceObject = "Device.Ethernet.Interface.{i}."
+	foundObject := false
+	for _, object := range doc.Objects {
+		if object.Name == interfaceObject {
+			foundObject = true
+			assert.Equal(t, interfaceObject, object.StandardPath)
+			assert.Equal(t, "READ_WRITE", object.Access)
+		}
+	}
+	require.True(t, foundObject, "NR must explicitly support WAN interface AddObject/DeleteObject")
+
+	want := map[string]string{
+		"Device.Ethernet.Interface.{i}.Enable":         "READ_WRITE",
+		"Device.Ethernet.Interface.{i}.UserLabel":      "READ_WRITE",
+		"Device.Ethernet.Interface.{i}.Name":           "READ_ONLY",
+		"Device.Ethernet.Interface.{i}.Status":         "READ_WRITE",
+		"Device.Ethernet.Interface.{i}.MACAddress":     "READ_ONLY",
+		"Device.Ethernet.Interface.{i}.MaxBitRate":     "READ_WRITE",
+		"Device.Ethernet.Interface.{i}.SignTransMedia": "READ_ONLY",
+		"Device.Ethernet.Interface.{i}.DuplexMode":     "READ_WRITE",
+		"Device.Ethernet.Interface.{i}.PortLocation":   "READ_ONLY",
+		"Device.Ethernet.Interface.{i}.interfaceType":  "READ_WRITE",
+	}
+	found := make(map[string]xmlParamEntry, len(want))
+	for _, param := range doc.Params {
+		if _, ok := want[param.StandardPath]; ok {
+			found[param.StandardPath] = param
+		}
+	}
+
+	for path, access := range want {
+		param, ok := found[path]
+		require.True(t, ok, "expected BaiBNQ.xml to define NR WAN parameter %s", path)
+		assert.Equal(t, path, param.Name)
+		assert.Equal(t, access, param.Access)
+	}
 }
 
 func TestBaiBNQTopLevelDeviceInfoUsesStandardPaths(t *testing.T) {

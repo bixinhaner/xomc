@@ -44,6 +44,35 @@ func TestIssue274SeedRepairsOtherMultiInstanceCommands(t *testing.T) {
 	assert.NotContains(t, block, "('PLMNID', 'U_INT')")
 }
 
+func TestIssue274SeedCopiesWritableFieldsToEveryMultiInstanceAdd(t *testing.T) {
+	seed, err := os.ReadFile("../../migrations/seed/000001_init_seed.sql")
+	require.NoError(t, err)
+	block := issue274CorrectionBlock(string(seed))
+
+	assert.Contains(t, block, "-- Every multi-instance ADD must expose the writable fields of its MOD counterpart.")
+	assert.Contains(t, block, "mod.command_code = 'MOD ' || substr(add.command_code, 5)")
+	assert.Contains(t, block, "source_sf.access_type = 'RW'")
+	assert.Contains(t, block, "regexp_replace(source_sp.standard_path, '[^.]+$', '')")
+	assert.Contains(t, block, "regexp_replace(add.target_object, '\\{i\\}\\.', '', 'g')")
+	assert.Contains(t, block, "add.operation_type = 'ADD'")
+	assert.Contains(t, block, "-- Commands without a MOD counterpart fall back to the standard writable fields.")
+	assert.Contains(t, block, "NOT EXISTS (")
+	assert.Contains(t, block, "candidate_sp.access = 'READ_WRITE'")
+}
+
+func TestIssue274SeedRepairsX2AndMMEAddObjectFamilies(t *testing.T) {
+	seed, err := os.ReadFile("../../migrations/seed/000001_init_seed.sql")
+	require.NoError(t, err)
+	block := issue274CorrectionBlock(string(seed))
+
+	assert.Contains(t, block, "-- Repair X2 and MME multi-instance command families before generic ADD field inheritance.")
+	assert.Contains(t, block, "Device.Services.FAPService.{i}.FAPControl.X2IpAddrMapInfo.")
+	assert.Contains(t, block, "Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.")
+	assert.Contains(t, block, "'LST X2_IP_ADDR_MAP_INFO', 'MOD X2_IP_ADDR_MAP_INFO',")
+	assert.Contains(t, block, "x.operation_type = 'LST' OR canonical_sp.access = 'READ_WRITE'")
+	assert.Contains(t, block, "mme_sp.access <> 'READ_WRITE'")
+}
+
 func TestIssue274SeedMakes5GCellSSBOptionalForAdd(t *testing.T) {
 	seed, err := os.ReadFile("../../migrations/seed/000001_init_seed.sql")
 	require.NoError(t, err)
@@ -52,6 +81,15 @@ func TestIssue274SeedMakes5GCellSSBOptionalForAdd(t *testing.T) {
 	assert.Contains(t, block, "sp.standard_path = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}.SSB'")
 	assert.Contains(t, block, "c.command_code = 'ADD 5G_CELL'")
 	assert.Contains(t, block, "SET is_required = false")
+}
+
+func TestSeedDisablesMRObjectCommandsForEveryBaseStation(t *testing.T) {
+	seed, err := os.ReadFile("../../migrations/seed/000001_init_seed.sql")
+	require.NoError(t, err)
+	sql := string(seed)
+
+	assert.Contains(t, sql, "WHERE command_code IN ('ADD MR_MGMT_CONFIG', 'RMV MR_MGMT_CONFIG')")
+	assert.NotContains(t, issue274CorrectionBlock(sql), "'ADD MR_MGMT_CONFIG',\n            '添加 MR参数管理'")
 }
 
 func TestIssue274SeedAddsNRDeviceLTENeighborObjectCommands(t *testing.T) {

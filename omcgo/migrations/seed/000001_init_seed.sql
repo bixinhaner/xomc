@@ -21613,110 +21613,6 @@ SET target_paths = cp.target_paths,
 FROM command_paths cp
 WHERE c.id = cp.command_id;
 
--- Device.FAP.MRMgmt.Config. object commands belong to MR参数管理.
-WITH mr_group AS (
-    SELECT id
-    FROM public.mml_command_groups
-    WHERE group_code = 'chapter:SP'
-      AND deleted_at IS NULL
-      AND deprecated_at IS NULL
-      AND is_active = true
-    LIMIT 1
-), desired_commands AS (
-    SELECT *
-    FROM (VALUES
-        (
-            'ADD MR_MGMT_CONFIG',
-            '添加 MR参数管理',
-            'Add MR Parameters',
-            'ADD',
-            'Device.FAP.MRMgmt.Config.',
-            'MR参数管理',
-            'MR Parameters'
-        ),
-        (
-            'RMV MR_MGMT_CONFIG',
-            '删除 MR参数管理',
-            'Remove MR Parameters',
-            'RMV',
-            'Device.FAP.MRMgmt.Config.',
-            'MR参数管理',
-            'MR Parameters'
-        )
-    ) AS v(
-        command_code,
-        command_name,
-        command_name_en,
-        operation_type,
-        target_object,
-        logical_name_zh,
-        logical_name_en
-    )
-)
-INSERT INTO public.mml_commands (
-    command_name,
-    command_code,
-    category,
-    description,
-    rpc_method,
-    target_paths,
-    target_object,
-    group_id,
-    command_name_i18n,
-    require_confirm,
-    confirm_msg_i18n,
-    operation_type,
-    logical_name_i18n,
-    source,
-    catalog_protected,
-    platform_tags,
-    tree_node_refs,
-    instance_range_meta
-)
-SELECT dc.command_name,
-       dc.command_code,
-       '3',
-       dc.command_name,
-       CASE dc.operation_type
-           WHEN 'ADD' THEN 'AddObject'
-           ELSE 'DeleteObject'
-       END,
-       jsonb_build_array(dc.target_object),
-       dc.target_object,
-       mg.id,
-       jsonb_build_object('zh-CN', dc.command_name, 'en-US', dc.command_name_en),
-       false,
-       '{}'::jsonb,
-       dc.operation_type,
-       jsonb_build_object('zh-CN', dc.logical_name_zh, 'en-US', dc.logical_name_en),
-       'standard',
-       true,
-       '{}'::jsonb,
-       '[]'::jsonb,
-       '[]'::jsonb
-FROM desired_commands dc
-CROSS JOIN mr_group mg
-ON CONFLICT (command_code) DO UPDATE
-SET command_name = EXCLUDED.command_name,
-    category = EXCLUDED.category,
-    description = EXCLUDED.description,
-    rpc_method = EXCLUDED.rpc_method,
-    target_paths = EXCLUDED.target_paths,
-    target_object = EXCLUDED.target_object,
-    group_id = EXCLUDED.group_id,
-    command_name_i18n = EXCLUDED.command_name_i18n,
-    require_confirm = EXCLUDED.require_confirm,
-    confirm_msg_i18n = EXCLUDED.confirm_msg_i18n,
-    operation_type = EXCLUDED.operation_type,
-    logical_name_i18n = EXCLUDED.logical_name_i18n,
-    source = EXCLUDED.source,
-    catalog_protected = EXCLUDED.catalog_protected,
-    platform_tags = EXCLUDED.platform_tags,
-    tree_node_refs = EXCLUDED.tree_node_refs,
-    instance_range_meta = EXCLUDED.instance_range_meta,
-    deprecated_at = NULL,
-    updated_at = now();
-
 -- Device.FAP.MRMgmt.Config.{i}.* belongs to MR参数管理.
 WITH target_commands AS (
     SELECT c.id AS command_id,
@@ -27060,6 +26956,188 @@ SET target_paths = r.paths,
 FROM refreshed r
 WHERE c.id = r.id;
 
+-- Repair X2 and MME multi-instance command families before generic ADD field inheritance.
+WITH repaired_objects(command_code, target_object) AS (
+    VALUES
+        ('ADD X2_IP_ADDR_MAP_INFO', 'Device.Services.FAPService.{i}.FAPControl.X2IpAddrMapInfo.'),
+        ('RMV X2_IP_ADDR_MAP_INFO', 'Device.Services.FAPService.{i}.FAPControl.X2IpAddrMapInfo.'),
+        ('ADD LTE_MME_POOL_CONFIG_PARAM', 'Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.'),
+        ('RMV LTE_MME_POOL_CONFIG_PARAM', 'Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.')
+)
+UPDATE public.mml_commands c
+SET target_object = r.target_object,
+    tree_node_refs = jsonb_build_array(r.target_object),
+    updated_at = now()
+FROM repaired_objects r
+WHERE c.command_code = r.command_code
+  AND c.deprecated_at IS NULL;
+
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c
+WHERE sf.command_id = c.id
+  AND c.command_code IN (
+      'LST X2_IP_ADDR_MAP_INFO', 'MOD X2_IP_ADDR_MAP_INFO',
+      'ADD X2_IP_ADDR_MAP_INFO', 'RMV X2_IP_ADDR_MAP_INFO'
+  );
+
+WITH x2_commands AS (
+    SELECT id, operation_type
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST X2_IP_ADDR_MAP_INFO', 'MOD X2_IP_ADDR_MAP_INFO',
+        'ADD X2_IP_ADDR_MAP_INFO', 'RMV X2_IP_ADDR_MAP_INFO'
+    )
+      AND deprecated_at IS NULL
+), x2_fields AS (
+    SELECT
+        x.id AS command_id,
+        x.operation_type,
+        canonical_sp.id AS standard_path_id,
+        canonical_sp.standard_path,
+        canonical_sp.access,
+        split_part(canonical_sp.standard_path, '.', array_length(string_to_array(canonical_sp.standard_path, '.'), 1)) AS leaf_name,
+        row_number() OVER (PARTITION BY x.id ORDER BY canonical_sp.standard_path) AS sort_order
+    FROM x2_commands x
+    JOIN public.standard_params canonical_sp
+      ON canonical_sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.X2IpAddrMapInfo.{i}.%'
+     AND canonical_sp.entry_type = 'parameter'
+    WHERE x.operation_type = 'LST' OR canonical_sp.access = 'READ_WRITE'
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    command_id,
+    standard_path_id,
+    LEFT(UPPER(regexp_replace(leaf_name, '([a-z0-9])([A-Z])', '\1_\2', 'g')), 100),
+    jsonb_build_object('zh-CN', leaf_name, 'en-US', leaf_name),
+    true,
+    false,
+    sort_order,
+    CASE WHEN access = 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
+    true
+FROM x2_fields
+WHERE operation_type <> 'RMV'
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+-- MME ADD previously forced three READ_ONLY fields to RW. Keep only fields the
+-- standard model permits SetParameterValues to write after AddObject.
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c,
+      public.standard_params mme_sp
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = mme_sp.id
+  AND c.command_code = 'ADD LTE_MME_POOL_CONFIG_PARAM'
+  AND mme_sp.access <> 'READ_WRITE';
+
+UPDATE public.mml_command_sub_fields sf
+SET is_required = false,
+    access_type = 'RW',
+    updated_at = now()
+FROM public.mml_commands c
+WHERE sf.command_id = c.id
+  AND c.command_code = 'ADD LTE_MME_POOL_CONFIG_PARAM'
+  AND sf.deprecated_at IS NULL;
+
+-- Every multi-instance ADD must expose the writable fields of its MOD counterpart.
+-- AddObject creates only the row; values entered in the console are applied by the
+-- existing AddObject -> SetParameterValues compound flow after the new instance
+-- number is returned. Limit the copy to direct children of target_object so a
+-- parent ADD never absorbs fields from nested child tables.
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    add.id,
+    source_sf.standard_path_id,
+    source_sf.mml_code,
+    source_sf.label_i18n,
+    true,
+    false,
+    source_sf.sort_order,
+    source_sf.access_type,
+    source_sf.is_supported
+FROM public.mml_commands add
+JOIN public.mml_commands mod
+  ON mod.command_code = 'MOD ' || substr(add.command_code, 5)
+ AND mod.deprecated_at IS NULL
+JOIN public.mml_command_sub_fields source_sf
+  ON source_sf.command_id = mod.id
+ AND source_sf.deprecated_at IS NULL
+ AND source_sf.access_type = 'RW'
+JOIN public.standard_params source_sp
+  ON source_sp.id = source_sf.standard_path_id
+ AND source_sp.entry_type = 'parameter'
+WHERE add.operation_type = 'ADD'
+  AND add.deprecated_at IS NULL
+  AND add.target_object IS NOT NULL
+  AND add.target_object <> ''
+  AND source_sp.standard_path !~ '\{i\}$'
+  AND regexp_replace(
+          regexp_replace(source_sp.standard_path, '[^.]+$', ''),
+          '\{i\}\.', '', 'g'
+      ) = regexp_replace(add.target_object, '\{i\}\.', '', 'g')
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET deprecated_at = NULL,
+    updated_at = now();
+
+-- Commands without a MOD counterpart fall back to the standard writable fields.
+-- This covers standalone object families (for example MR configuration) while
+-- keeping MOD-defined command-specific labels and field subsets authoritative.
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    add.id,
+    candidate_sp.id,
+    LEFT(UPPER(regexp_replace(
+        split_part(candidate_sp.standard_path, '.', array_length(string_to_array(candidate_sp.standard_path, '.'), 1)),
+        '([a-z0-9])([A-Z])', '\1_\2', 'g'
+    )), 91) || '_' || substr(md5(candidate_sp.standard_path), 1, 8),
+    jsonb_build_object(
+        'zh-CN', COALESCE(NULLIF(candidate_sp.description, ''), split_part(candidate_sp.standard_path, '.', array_length(string_to_array(candidate_sp.standard_path, '.'), 1))),
+        'en-US', split_part(candidate_sp.standard_path, '.', array_length(string_to_array(candidate_sp.standard_path, '.'), 1))
+    ),
+    true,
+    false,
+    row_number() OVER (PARTITION BY add.id ORDER BY candidate_sp.standard_path),
+    'RW',
+    true
+FROM public.mml_commands add
+JOIN public.standard_params candidate_sp
+  ON candidate_sp.entry_type = 'parameter'
+ AND candidate_sp.access = 'READ_WRITE'
+ AND candidate_sp.standard_path !~ '\{i\}$'
+ AND regexp_replace(
+         regexp_replace(candidate_sp.standard_path, '[^.]+$', ''),
+         '\{i\}\.', '', 'g'
+     ) = regexp_replace(add.target_object, '\{i\}\.', '', 'g')
+WHERE add.operation_type = 'ADD'
+  AND add.deprecated_at IS NULL
+  AND add.target_object IS NOT NULL
+  AND add.target_object <> ''
+  AND NOT EXISTS (
+      SELECT 1
+      FROM public.mml_commands mod
+      WHERE mod.command_code = 'MOD ' || substr(add.command_code, 5)
+        AND mod.deprecated_at IS NULL
+  )
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET deprecated_at = NULL,
+    updated_at = now();
+
 -- The legacy BM/BLN catalog imported numeric 5G neighbor fields as STRING.
 -- Their min/max values are numeric ranges (not string lengths); keep PLMNID as
 -- STRING because its 5..6 constraint is intentionally a character length.
@@ -27080,6 +27158,13 @@ FROM numeric_5g_neighbor_types n
 WHERE pm.standard_path =
       'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}.' || n.leaf_name
   AND pm.is_active = true;
+
+-- MR configuration is a singleton on every base station. Keep only LST/MOD;
+-- suppress legacy object operations regardless of the selected device model.
+UPDATE public.mml_commands
+SET deprecated_at = COALESCE(deprecated_at, now()),
+    updated_at = now()
+WHERE command_code IN ('ADD MR_MGMT_CONFIG', 'RMV MR_MGMT_CONFIG');
 
 COMMIT;
 

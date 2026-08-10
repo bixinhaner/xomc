@@ -4404,26 +4404,6 @@
             "Device.FAP.MRMgmt.Config.{i}.MRECGIList",
             "Device.FAP.MRMgmt.Config.{i}.MeasureItems"
           ]
-        },
-        {
-          "command_code": "ADD MR_MGMT_CONFIG",
-          "logical_code": "MR_MGMT_CONFIG",
-          "operation_type": "ADD",
-          "rpc_method": "AddObject",
-          "target_paths": [
-            "Device.FAP.MRMgmt.Config."
-          ],
-          "target_object": "Device.FAP.MRMgmt.Config."
-        },
-        {
-          "command_code": "RMV MR_MGMT_CONFIG",
-          "logical_code": "MR_MGMT_CONFIG",
-          "operation_type": "RMV",
-          "rpc_method": "DeleteObject",
-          "target_paths": [
-            "Device.FAP.MRMgmt.Config."
-          ],
-          "target_object": "Device.FAP.MRMgmt.Config."
         }
       ]
     },
