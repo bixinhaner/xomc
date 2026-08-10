@@ -35,6 +35,8 @@ interface ResultTableProps {
   execMeta: ExecMeta | null;
   /** 当前记录的命令 ID（= mml_tasks.id，传给详情页展示/深链） */
   commandId: string | null;
+  /** 左侧命令记录的全部任务 ID（最近执行在前）。 */
+  commandIds?: string[];
   columns: ResultColumn[];
   rows: ResultRow[];
   running: boolean;
@@ -71,6 +73,7 @@ function StatusTag({
 export default function ResultTable({
   execMeta,
   commandId,
+  commandIds = [],
   columns,
   rows,
   running,
@@ -94,13 +97,14 @@ export default function ResultTable({
   );
 
   const handleExportAllCsv = (): void => {
-    if (!commandId) {
+    const exportTaskIds = commandIds.length > 0 ? commandIds : (commandId ? [commandId] : []);
+    if (exportTaskIds.length === 0) {
       // 无真实任务 ID（理论不达），回退客户端导出。
       exportAll('csv', displayColumns, rows, execMeta?.label ?? 'result');
       return;
     }
-    const name = t('mml.consoleV2.result.summaryFileName', { name: execMeta?.commandName ?? execMeta?.label ?? 'mml-result' });
-    exportCsv.mutate(commandId, {
+    const name = t('mml.consoleV2.result.summaryFileName', { name: 'MML' });
+    exportCsv.mutate(exportTaskIds, {
       onSuccess: (blob) => {
         saveBlob(blob, name);
         void message.success(t('mml.consoleV2.result.summaryDownloaded'));
@@ -319,7 +323,7 @@ export default function ResultTable({
         <Tooltip title={canExportPerm ? undefined : t('common.noPermission')}>
           <Button
             icon={<DownloadOutlined />}
-            disabled={rows.length === 0 || !canExportPerm}
+            disabled={(commandIds.length === 0 && (rows.length === 0 || !commandId)) || !canExportPerm}
             loading={exportCsv.isPending}
             onClick={handleExportAllCsv}
           >

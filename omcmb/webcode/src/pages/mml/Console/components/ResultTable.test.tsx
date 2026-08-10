@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import ResultTable from './ResultTable';
@@ -8,8 +8,10 @@ vi.mock('@/hooks/useT', () => ({
   useT: () => (id: string) => id,
 }));
 
+const exportAllMutate = vi.fn();
+
 vi.mock('@core/hooks/api/useMmlConsole', () => ({
-  useExportTaskCSV: () => ({ mutate: vi.fn(), isPending: false }),
+  useExportTaskCSV: () => ({ mutate: exportAllMutate, isPending: false }),
   useExportTaskDeviceCSV: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
@@ -37,6 +39,26 @@ const row: ResultRow = {
 };
 
 describe('ResultTable', () => {
+  it('downloads every command record instead of only the selected command', () => {
+    render(
+      <ResultTable
+        execMeta={{ operationType: 'LST', read: true, label: 'LST PERF_MGMT_CONFIG' }}
+        commandId="command-latest"
+        commandIds={['command-latest', 'command-middle', 'command-oldest']}
+        columns={[{ key: 'value', label: 'Value', path: 'Device.Test.Value' }]}
+        rows={[row]}
+        running={false}
+        hasExecuted
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /mml\.consoleV2\.result\.downloadAll/ }));
+    expect(exportAllMutate).toHaveBeenCalledWith(
+      ['command-latest', 'command-middle', 'command-oldest'],
+      expect.any(Object),
+    );
+  });
+
   it('keeps only SN and action fixed while plan command scrolls with result columns', () => {
     const { container } = render(
       <ResultTable

@@ -251,6 +251,62 @@ func TestBuildLongFormatCSV_DoesNotEmitDeviceSeparatorOrLegacyColumns(t *testing
 	}
 }
 
+func TestBuildLongFormatCSV_OrdersCommandsAndLabelsEveryCommand(t *testing.T) {
+	commands := []map[string]interface{}{
+		{
+			"command_code":   "MOD HSS",
+			"operation_type": "MOD",
+			"param_paths":    []interface{}{"Device.HSS.APNINFO", "Device.HSS.SUBINFO"},
+		},
+		{
+			"command_code":   "LST HSS",
+			"operation_type": "LST",
+			"param_paths":    []interface{}{"Device.HSS.APNINFO", "Device.HSS.SUBINFO"},
+		},
+	}
+	rows := []DeviceTaskResultRowView{
+		{DeviceSN: "SN001", Status: "completed", CommandIndex: 1},
+		{DeviceSN: "SN001", Status: "completed", CommandIndex: 0},
+	}
+
+	data, err := buildLongFormatCSVForLocale(
+		[]exportColumn{
+			{standard: "Device.HSS.APNINFO", private: "Device.HSS.APNINFO"},
+			{standard: "Device.HSS.SUBINFO", private: "Device.HSS.SUBINFO"},
+		},
+		rows,
+		commands,
+		nil,
+		false,
+		appcontext.LocaleEN,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	records := mustCSVRecords(t, data)
+	if len(records) != 5 {
+		t.Fatalf("record count = %d, want 5", len(records))
+	}
+	got := [][]string{
+		{records[1][2], records[1][3], records[1][4]},
+		{records[2][2], records[2][3], records[2][4]},
+		{records[3][2], records[3][3], records[3][4]},
+		{records[4][2], records[4][3], records[4][4]},
+	}
+	want := [][]string{
+		{"MOD HSS", "MOD", "Device.HSS.APNINFO"},
+		{"", "", "Device.HSS.SUBINFO"},
+		{"LST HSS", "LST", "Device.HSS.APNINFO"},
+		{"", "", "Device.HSS.SUBINFO"},
+	}
+	for i := range want {
+		if strings.Join(got[i], "|") != strings.Join(want[i], "|") {
+			t.Fatalf("command rows = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestDeviceTaskRowToResultMap_PreservesCommandName(t *testing.T) {
 	task := &MMLTask{Commands: []map[string]interface{}{
 		{

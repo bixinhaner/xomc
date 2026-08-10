@@ -255,11 +255,11 @@ export function useExecuteStatementsStructured(): ReturnType<
  * 返回 { object, downloadUrl }；调用方拿 downloadUrl 触发浏览器下载。
  */
 export function useExportTaskCSV(): ReturnType<
-  typeof useMutation<Blob, Error, string>
+  typeof useMutation<Blob, Error, string[]>
 > {
   return useMutation({
-    // 同源流式下载（GET responseType=blob），调用方拿 Blob 触发浏览器保存。
-    mutationFn: (taskId: string) => mmlApi.downloadTaskCsv(taskId),
+    // 命令记录最近在前；导出时反转为实际执行的先后顺序，并合并为单个 CSV。
+    mutationFn: (taskIds: string[]) => mmlApi.downloadTasksCsv([...taskIds].reverse()),
   });
 }
 
