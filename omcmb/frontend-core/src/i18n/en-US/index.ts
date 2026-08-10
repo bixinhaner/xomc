@@ -2870,6 +2870,8 @@ const messages: Record<string, string> = {
   'header.switchToDark':  'Switch to Dark Theme',
   'header.switchToDim':   'Switch to Dim Theme',
   'header.switchToLight': 'Switch to Light Theme',
+  'header.switchToEnglish': 'Switch to English',
+  'header.switchToChinese': 'Switch to Chinese',
   'header.timezone':      'TZ:',
   'header.localTimezone': 'Local',
   'header.timezoneTitle': 'System timezone: {tz}',
