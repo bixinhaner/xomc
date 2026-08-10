@@ -40,6 +40,7 @@ import {
   type DeviceFramePayload,
   type TaskCompletedPayload,
 } from './adapters';
+import { buildHistoricalReexecuteRequest } from './reexecute';
 
 /** 任务终态集合（轮询兜底据此判定执行已结束）。 */
 const TERMINAL_TASK_STATUS = new Set(['completed', 'failed', 'expired', 'cancelled', 'timeout']);
@@ -58,8 +59,7 @@ interface LiveExec {
   rows: ResultRow[];
   deviceCount: number;
   /**
-   * #196：MOD 下发值 path→value。MOD 命令后端自动追加回读 LST（compound），
-   * 收口时据此走 buildMODReadbackRows 关联「下发 vs 回读」；非 MOD 为空。
+   * 写命令下发值 path→value。MOD 据此关联回读；ADD 成功后据此回填结果列。
    */
   setValues?: Record<string, string>;
 }
@@ -150,7 +150,7 @@ export default function MMLConsole() {
                 commandName: le.meta.commandName,
                 commandCode: le.meta.label,
               })
-            : buildDeviceRows(resp.items, le.columns, le.meta.read);
+            : buildDeviceRows(resp.items, le.columns, le.meta.read, le.meta.operationType === 'ADD' ? le.setValues : undefined);
       }
     } catch {
       /* 拉取失败：交给轮询下个 tick 重试 */
@@ -284,7 +284,7 @@ export default function MMLConsole() {
     let columns: ResultColumn[];
     let meta: ExecMeta;
     let taskId: string;
-    // #196：MOD 下发值 path→value（收口时关联回读 LST）；非 MOD 保持 undefined。
+    // 写命令下发值 path→value：MOD 用于关联回读，ADD 用于成功结果回显。
     let setValues: Record<string, string> | undefined;
 
     try {
@@ -303,7 +303,7 @@ export default function MMLConsole() {
           label: command.commandCode,
           commandName: command.commandName,
         };
-        if (command.operationType === 'MOD') {
+        if (command.operationType === 'MOD' || command.operationType === 'ADD') {
           const checkedSet = new Set(req.checkedPaths);
           const picked: Record<string, string> = {};
           command.paramPaths
@@ -375,7 +375,7 @@ export default function MMLConsole() {
           return;
         }
         columns = buildColumnsFromRawPaths(paths);
-        if (req.operationType === 'MOD') {
+        if (req.operationType === 'MOD' || req.operationType === 'ADD') {
           const picked: Record<string, string> = {};
           for (const r of req.rows) {
             const p = r.path.trim();
@@ -468,56 +468,29 @@ export default function MMLConsole() {
   // 选中记录是否仍在途（其 taskId 仍在在途 Map）：驱动结果表格 loading 与「重新执行」禁用。
   const activeRunning = !!activeRecord && liveExecs.has(activeRecord.commandId);
 
-  // 「重新执行」（结果列表逐设备）：仅对该设备重跑同一命令。
-  // 优先用当前命令+配置（刚执行完，含正确写入值）；回看历史记录（无当前命令）时按展示的
-  // 操作类型 + PATH 重建 RAW 执行——读类（LST）适用，写类需重新配置（避免丢失下发值误写）。
+  // 「重新执行」只从当前选中的历史记录重建，绝不回退到顶部当前命令。
   const handleReexecute = (deviceSn: string): void => {
     // 选中记录仍在途时不重发（避免对同一在途任务重复下发）；其它命令在途不影响本条重发。
     if (activeRunning) return;
 
-    // MOD 必须优先使用当前记录的参数快照，不能使用顶部可能仍保留的另一条命令配置。
-    // 历史任务没有当前 command/config 时也通过裸路径请求重建同一条 SetParameterValues。
     const historicalOp = dispExecMeta?.operationType;
     const historicalValues = activeRecord?.setValues;
     const historicalPaths = dispColumns.map((c) => c.path).filter(Boolean);
-    if (historicalOp === 'MOD' && historicalValues && historicalPaths.length > 0) {
-      void runExecute(
-        {
-          mode: 'raw',
-          operationType: 'MOD',
-          rows: historicalPaths.map((path, index) => ({ id: index, path, value: historicalValues[path] ?? '' })),
-          execMode: 'whole',
-        },
-        [deviceSn],
-      );
-      return;
-    }
-
-    if (command || config) {
-      const req: ExecRequest =
-        config ?? { mode: 'standard', checkedPaths: command?.paramPaths.map((p) => p.path) ?? [] };
-      void runExecute(req, [deviceSn]);
-      return;
-    }
-    const op = dispExecMeta?.operationType;
-    const paths = dispColumns.map((c) => c.path);
-    if (!op || paths.length === 0) {
+    const decision = buildHistoricalReexecuteRequest({
+      operationType: historicalOp,
+      read: dispExecMeta?.read ?? false,
+      paths: historicalPaths,
+      values: historicalValues,
+    });
+    if (decision.reason === 'missing') {
       message.warning(t('mml.consoleV2.msg.noReexecutable'));
       return;
     }
-    if (!dispExecMeta?.read) {
+    if (decision.reason === 'write-reconfigure') {
       message.warning(t('mml.consoleV2.msg.writeReconfig'));
       return;
     }
-    void runExecute(
-      {
-        mode: 'raw',
-        operationType: op,
-        rows: paths.map((p, i) => ({ id: i, path: p, value: '' })),
-        execMode: 'whole',
-      },
-      [deviceSn],
-    );
+    if (decision.request) void runExecute(decision.request, [deviceSn]);
   };
 
   return (

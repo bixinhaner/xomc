@@ -22,10 +22,11 @@ import (
 // ============================================================
 
 // structuredFixture 提供共享的命令 + sub_fields 测试装置：
-//   cmd 含 3 个 sub_field，每个绑定不同 standardPath
-//   Path1 = "Device.IP.Address",   MMLCode=ADDR
-//   Path2 = "Device.IP.Netmask",   MMLCode=MASK
-//   Path3 = "Device.IP.Enable",    MMLCode=ENBL
+//
+//	cmd 含 3 个 sub_field，每个绑定不同 standardPath
+//	Path1 = "Device.IP.Address",   MMLCode=ADDR
+//	Path2 = "Device.IP.Netmask",   MMLCode=MASK
+//	Path3 = "Device.IP.Enable",    MMLCode=ENBL
 type structuredFixture struct {
 	cmd       *MMLCommand
 	subFields []MMLCommandSubField
@@ -142,6 +143,31 @@ func TestStructuredToStatement_RMV_SingleInstancePassThrough(t *testing.T) {
 	assert.Equal(t, 7, *stmt.RmvInstanceIndex)
 }
 
+func TestStructuredToStatement_RMV_InstanceIndicesWireCompatibility(t *testing.T) {
+	fx := newStructuredFixture()
+	svc := fx.install()
+	stmt, err := svc.StructuredToStatement(context.Background(), StructuredStatement{
+		CommandID:       fx.cmd.ID,
+		OperationType:   "RMV",
+		InstanceIndices: []int{3},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, stmt.RmvInstanceIndex)
+	assert.Equal(t, 3, *stmt.RmvInstanceIndex)
+}
+
+func TestStructuredToStatement_RMV_RejectsMultipleInstanceIndices(t *testing.T) {
+	fx := newStructuredFixture()
+	svc := fx.install()
+	_, err := svc.StructuredToStatement(context.Background(), StructuredStatement{
+		CommandID:       fx.cmd.ID,
+		OperationType:   "RMV",
+		InstanceIndices: []int{2, 3},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exactly one instance index")
+}
+
 func TestStructuredToStatement_UnknownPaths_Aggregated(t *testing.T) {
 	fx := newStructuredFixture()
 	svc := fx.install()
@@ -150,13 +176,13 @@ func TestStructuredToStatement_UnknownPaths_Aggregated(t *testing.T) {
 		CommandID:     fx.cmd.ID,
 		OperationType: "MOD",
 		Paths: []string{
-			"Device.IP.Address",   // 已知
+			"Device.IP.Address",    // 已知
 			"Device.Unknown.PathA", // 未知
 		},
 		Values: map[string]string{
-			"Device.IP.Netmask":      "255.255.255.0", // 已知
-			"Device.Unknown.PathB":   "v",             // 未知
-			"Device.Unknown.PathA":   "v",             // 与 Paths 重复未知 — 去重
+			"Device.IP.Netmask":    "255.255.255.0", // 已知
+			"Device.Unknown.PathB": "v",             // 未知
+			"Device.Unknown.PathA": "v",             // 与 Paths 重复未知 — 去重
 		},
 	})
 	require.Error(t, err)

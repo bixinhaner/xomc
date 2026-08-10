@@ -107,4 +107,24 @@ describe('buildDeviceRows (逐 PATH 合并)', () => {
     const rows = buildDeviceRows(items, columns, true);
     expect(rows.map((r) => r.deviceSn).sort()).toEqual(['A', 'B']);
   });
+
+  it('ADD 成功但响应不带参数值时，用已下发值回填结果列', () => {
+    const submitted = { [SW]: '12', [HW]: '123' };
+    const rows = buildDeviceRows([item({ success: true })], columns, false, submitted);
+
+    expect(rows[0].status).toBe('success');
+    expect(rows[0].cells).toMatchObject(submitted);
+  });
+
+  it('ADD 失败时不把已下发值伪装成成功结果', () => {
+    const rows = buildDeviceRows(
+      [item({ success: false, failReason: 'SPV failed' })],
+      columns,
+      false,
+      { [SW]: '12' },
+    );
+
+    expect(rows[0].status).toBe('failed');
+    expect(rows[0].cells[SW]).not.toBe('12');
+  });
 });

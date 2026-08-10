@@ -81,6 +81,7 @@ export function subFieldsToParamPaths(subFields: SubFieldDef[]): CommandParamPat
       enumOptions: sf.enumOptions,
       description: sf.description,
       defaultSelected: sf.defaultSelected,
+      isRequired: sf.isRequired,
     }));
 }
 
@@ -213,7 +214,7 @@ export function computeInstanceSlots(command: CommandItem): { key: string; label
   if (isAddRmv) {
     source = command.targetObject ?? '';
   } else {
-    const count = (s: string): number => (s.match(/\.\{i\}\./g) ?? []).length;
+    const count = (s: string): number => (s.match(/\.\{i\}(?=\.|$)/g) ?? []).length;
     for (const p of command.paramPaths) {
       if (count(p.path) > count(source)) source = p.path;
     }
@@ -222,8 +223,8 @@ export function computeInstanceSlots(command: CommandItem): { key: string; label
   const slots: { key: string; label: string }[] = [];
   let n = 0;
   for (let k = 0; k < segs.length; k++) {
-    // 仅统计前后都有点的 `.{i}.`（与后端 strings.Count(path, ".{i}.") 一致）。
-    if (segs[k] === '{i}' && k > 0 && k < segs.length - 1) {
+    // 同时统计中间 `.{i}.` 与末级对象 `.{i}`；后端查询替换支持两种形态。
+    if (segs[k] === '{i}' && k > 0) {
       n += 1;
       slots.push({ key: `i${String(n).padStart(2, '0')}`, label: segs[k - 1] || `实例${n}` });
     }
@@ -630,6 +631,7 @@ export function buildDeviceRows(
   items: DeviceTaskResultItem[],
   columns: ResultColumn[],
   read: boolean,
+  submittedValues?: Record<string, string>,
 ): ResultRow[] {
   if (items.some((it) => typeof it.planLineNo === 'number')) {
     return [...items]
@@ -646,12 +648,20 @@ export function buildDeviceRows(
   const rows: ResultRow[] = [];
   for (const [, devItems] of byDevice) {
     if (devItems.length <= 1) {
-      rows.push(mapResultItemToRow(devItems[0], columns, read));
+      const row = mapResultItemToRow(devItems[0], columns, read);
+      if (!read && row.status === 'success' && submittedValues) {
+        row.cells = { ...row.cells, ...submittedValues };
+      }
+      rows.push(row);
       continue;
     }
     // 逐 PATH 合并
     const base = devItems.map((it) => mapResultItemToRow(it, columns, read));
-    const cells: Record<string, string> = Object.assign({}, ...base.map((r) => r.cells));
+    const cells: Record<string, string> = Object.assign(
+      {},
+      ...base.map((r) => r.cells),
+      ...(submittedValues && base.every((r) => r.status === 'success') ? [submittedValues] : []),
+    );
     const pathTasks: PathTask[] = [];
     devItems.forEach((it, i) => {
       const idx = typeof it.commandIndex === 'number' ? it.commandIndex : i;

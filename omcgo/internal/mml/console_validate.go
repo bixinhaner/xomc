@@ -263,7 +263,7 @@ func collectStandardPaths(commands []map[string]interface{}) []string {
 	seen := make(map[string]struct{})
 	addPath := func(p string) {
 		if p != "" {
-			seen[p] = struct{}{}
+			seen[normalizeNewInstancePlaceholder(p)] = struct{}{}
 		}
 	}
 	for _, entry := range commands {
@@ -306,7 +306,7 @@ func applyTranslationToCommandEntry(entry map[string]interface{}, trans map[stri
 		updated := make([]MMLParamRef, len(refs))
 		copy(updated, refs)
 		for i := range updated {
-			if t, hit := trans[updated[i].Tr069Path]; hit {
+			if t, hit := translationForRuntimePath(trans, updated[i].Tr069Path); hit {
 				updated[i].PrivatePath = t.Private
 				updated[i].TranslationSource = t.Source
 				usedTranslations = append(usedTranslations, t)
@@ -320,7 +320,7 @@ func applyTranslationToCommandEntry(entry map[string]interface{}, trans map[stri
 				continue
 			}
 			p, _ := m["tr069_path"].(string)
-			if t, hit := trans[p]; hit {
+			if t, hit := translationForRuntimePath(trans, p); hit {
 				m["private_path"] = t.Private
 				m["translation_source"] = t.Source
 				usedTranslations = append(usedTranslations, t)
@@ -331,4 +331,28 @@ func applyTranslationToCommandEntry(entry map[string]interface{}, trans map[stri
 	if len(usedTranslations) > 0 {
 		entry["translation_results"] = usedTranslations
 	}
+}
+
+// ADD 的复合 AddObject→SPV 流程用 {NEW} 表示尚未由设备返回的新实例号。
+// Translator 的模板匹配只接受具体数字实例，不接受“外层已具体 + 内层 {i}”的
+// 混合运行时路径。因此预翻译时用一个不会真正下发的数字哨兵值匹配
+// param_mappings，写回 private path 时再恢复 {NEW}，供 Sequencer 替换为
+// AddObjectResponse.instance_number。
+const newInstanceTranslationSentinel = "2147483647"
+
+func normalizeNewInstancePlaceholder(path string) string {
+	return strings.ReplaceAll(path, "{NEW}", newInstanceTranslationSentinel)
+}
+
+func translationForRuntimePath(trans map[string]TranslatedPath, runtimePath string) (TranslatedPath, bool) {
+	lookupPath := normalizeNewInstancePlaceholder(runtimePath)
+	t, ok := trans[lookupPath]
+	if !ok {
+		return TranslatedPath{}, false
+	}
+	t.Standard = runtimePath
+	if strings.Contains(runtimePath, "{NEW}") {
+		t.Private = strings.ReplaceAll(t.Private, newInstanceTranslationSentinel, "{NEW}")
+	}
+	return t, true
 }

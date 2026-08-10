@@ -293,3 +293,89 @@ func TestSequencer_ChainBreakRecordsDependentFailureAndContinues(t *testing.T) {
 	assert.Equal(t, "GetParameterValues", enqueuer.reqs[1].Method)
 	assert.False(t, enqueuer.reqs[1].FailImmediately)
 }
+
+func TestSequencer_FailedAddSPVRollsBackCreatedInstance(t *testing.T) {
+	mmlID := uuid.New()
+	mmlTask := &MMLTask{
+		ID: mmlID, Status: TaskRunning, DeviceSNs: []string{"SN001"},
+		Commands: []map[string]interface{}{
+			{"rpc_method": "AddObject"},
+			{"rpc_method": "SetParameterValues", "compound_phase": "spv_after_add"},
+			{
+				"rpc_method": "DeleteObject", "compound_phase": "rollback_after_add",
+				"compensation_only": true,
+				"parameters":        map[string]interface{}{"object_name": "Device.Cell.{NEW}."},
+			},
+		},
+	}
+	repo := &mockTaskRepo{getByIDFn: func(context.Context, uuid.UUID) (*MMLTask, error) { return mmlTask, nil }}
+	enqueuer := &sequencerTestEnqueuer{}
+	seq := NewSequencer(repo, enqueuer, NewFanouter(nil, nil, nil, nil, zap.NewNop()), zap.NewNop())
+
+	seq.OnTaskCompleted(context.Background(), &task.Task{
+		ID: uuid.NewString(), Source: task.TaskSourceMML, SourceID: mmlID.String(),
+		DeviceSN: "SN001", Method: "SetParameterValues", CommandIndex: 1,
+		Status: task.TaskStatusFailed,
+		Params: json.RawMessage(`{"values":[],"_mml_rollback_object_name":"Device.Cell.3."}`),
+	})
+
+	require.Len(t, enqueuer.reqs, 1)
+	assert.Equal(t, "DeleteObject", enqueuer.reqs[0].Method)
+	assert.Equal(t, 2, enqueuer.reqs[0].CommandIndex)
+	var params map[string]interface{}
+	require.NoError(t, json.Unmarshal(enqueuer.reqs[0].Params, &params))
+	assert.Equal(t, "Device.Cell.3.", params["object_name"])
+}
+
+func TestSequencer_AddObjectPassesRollbackTargetToSPV(t *testing.T) {
+	mmlID := uuid.New()
+	mmlTask := &MMLTask{
+		ID: mmlID, Status: TaskRunning, DeviceSNs: []string{"SN001"},
+		Commands: []map[string]interface{}{
+			{"rpc_method": "AddObject"},
+			{
+				"rpc_method": "SetParameterValues", "compound_phase": "spv_after_add",
+				"param_refs": []MMLParamRef{{ParamCode: "Enable", Tr069Path: "Device.Cell.{NEW}.Enable", ValueType: "boolean"}},
+				"parameters": map[string]interface{}{"Enable": "true"},
+			},
+		},
+	}
+	repo := &mockTaskRepo{getByIDFn: func(context.Context, uuid.UUID) (*MMLTask, error) { return mmlTask, nil }}
+	enqueuer := &sequencerTestEnqueuer{}
+	seq := NewSequencer(repo, enqueuer, NewFanouter(nil, nil, nil, nil, zap.NewNop()), zap.NewNop())
+
+	seq.OnTaskCompleted(context.Background(), &task.Task{
+		ID: uuid.NewString(), Source: task.TaskSourceMML, SourceID: mmlID.String(), DeviceSN: "SN001",
+		Method: "AddObject", CommandIndex: 0, Status: task.TaskStatusCompleted,
+		Params: json.RawMessage(`{"object_name":"Device.Cell."}`),
+		Result: json.RawMessage(`{"instance_number":3}`),
+	})
+
+	require.Len(t, enqueuer.reqs, 1)
+	var params map[string]interface{}
+	require.NoError(t, json.Unmarshal(enqueuer.reqs[0].Params, &params))
+	assert.Equal(t, "Device.Cell.3.", params[rollbackObjectNameKey])
+}
+
+func TestSequencer_SuccessfulAddSPVSkipsRollback(t *testing.T) {
+	mmlID := uuid.New()
+	mmlTask := &MMLTask{
+		ID: mmlID, Status: TaskRunning, DeviceSNs: []string{"SN001"},
+		Commands: []map[string]interface{}{
+			{"rpc_method": "AddObject"},
+			{"rpc_method": "SetParameterValues", "compound_phase": "spv_after_add"},
+			{"rpc_method": "DeleteObject", "compound_phase": "rollback_after_add", "compensation_only": true},
+		},
+	}
+	repo := &mockTaskRepo{getByIDFn: func(context.Context, uuid.UUID) (*MMLTask, error) { return mmlTask, nil }}
+	enqueuer := &sequencerTestEnqueuer{}
+	seq := NewSequencer(repo, enqueuer, NewFanouter(nil, nil, nil, nil, zap.NewNop()), zap.NewNop())
+
+	seq.OnTaskCompleted(context.Background(), &task.Task{
+		ID: uuid.NewString(), Source: task.TaskSourceMML, SourceID: mmlID.String(),
+		DeviceSN: "SN001", Method: "SetParameterValues", CommandIndex: 1,
+		Status: task.TaskStatusCompleted,
+	})
+
+	assert.Empty(t, enqueuer.reqs)
+}
