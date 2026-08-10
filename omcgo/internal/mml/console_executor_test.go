@@ -315,7 +315,7 @@ func TestBuildEntries_ADD_WithValues_CompoundTwoEntries(t *testing.T) {
 	}
 	entries, err := buildStatementCommandEntries(stmt, cmd, subFields)
 	require.NoError(t, err)
-	require.Len(t, entries, 2, "ADD with values → AddObject + SPV")
+	require.Len(t, entries, 3, "ADD with values → AddObject + SPV + conditional rollback")
 
 	// 第 1 entry: AddObject，target_object 已 substitute iα=1
 	assert.Equal(t, "AddObject", entries[0]["rpc_method"])
@@ -335,6 +335,12 @@ func TestBuildEntries_ADD_WithValues_CompoundTwoEntries(t *testing.T) {
 	)
 	params1 := entries[1]["parameters"].(map[string]interface{})
 	assert.Equal(t, "46000", params1["PLMNID"])
+
+	assert.Equal(t, "DeleteObject", entries[2]["rpc_method"])
+	assert.Equal(t, "rollback_after_add", entries[2]["compound_phase"])
+	assert.Equal(t, true, entries[2]["compensation_only"])
+	params2 := entries[2]["parameters"].(map[string]interface{})
+	assert.Equal(t, "Device.Services.FAPService.1.PLMNList.{NEW}.", params2["object_name"])
 }
 
 // TestBuildEntries_ADD_WithValues_NoSubFieldMatch_OnlyAddObject — stmt.Values keys

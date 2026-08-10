@@ -159,7 +159,7 @@ describe('ConfigParamsModal', () => {
     expect(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ })).toBeEnabled();
   });
 
-  it('shows the standard data type and keeps minValue as the MOD default', () => {
+  it('shows the standard data type without treating string minLength as a default', () => {
     renderModal({
       command: {
         ...command,
@@ -178,7 +178,7 @@ describe('ConfigParamsModal', () => {
     });
 
     expect(screen.getByText('string')).toBeInTheDocument();
-    expect(screen.getByRole('textbox')).toHaveValue('2');
+    expect(screen.getByRole('textbox')).toHaveValue('');
   });
 
   it('blocks execution and shows a per-field error outside the configured range', () => {
@@ -279,6 +279,77 @@ describe('ConfigParamsModal', () => {
       checkedPaths: ['Device.Info.Name'],
       values: { 'Device.Info.Name': 'cell-a' },
     }));
+  });
+
+  it('does not use a STRING min length as the ADD default and blocks invalid submission', () => {
+    const onConfirmAndExecute = vi.fn();
+    const plmnPath = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}.PLMNID';
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'ADD',
+        commandCode: 'ADD 5G_CELL',
+        commandName: '新增 NR邻区参数管理',
+        targetObject: 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.',
+        paramPaths: [{
+          path: plmnPath,
+          label: 'PLMNID',
+          writable: true,
+          isObject: false,
+          isRequired: true,
+          valueType: 'STRING',
+          minValue: 5,
+          maxValue: 6,
+        }],
+      },
+      selectedPathKeys: [plmnPath],
+      onConfirmAndExecute,
+    });
+
+    const input = screen.getByRole('textbox');
+    expect(input).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+    expect(screen.getByText('mml.consoleV2.config.validation.required')).toBeInTheDocument();
+    expect(onConfirmAndExecute).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: '46000' } });
+    expect(screen.queryByText('mml.consoleV2.config.validation.required')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+    expect(onConfirmAndExecute).toHaveBeenCalled();
+  });
+
+  it('allows optional ADD parameters such as 5GCell SSB to remain blank', () => {
+    const onConfirmAndExecute = vi.fn();
+    const ssbPath = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}.SSB';
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'ADD',
+        commandCode: 'ADD 5G_CELL',
+        commandName: '新增 NR邻区参数管理',
+        targetObject: 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.',
+        paramPaths: [{
+          path: ssbPath,
+          label: 'SSB',
+          writable: true,
+          isObject: false,
+          isRequired: false,
+          valueType: 'U_INT',
+          minValue: 0,
+          maxValue: 3279165,
+        }],
+      },
+      selectedPathKeys: [ssbPath],
+      onConfirmAndExecute,
+    });
+
+    const input = screen.getByRole('textbox');
+    expect(input).toHaveValue('0');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+
+    expect(screen.queryByText('mml.consoleV2.config.validation.required')).not.toBeInTheDocument();
+    expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({ values: {} }));
   });
 
   it('executes confirmed query Paths in command-definition order', () => {

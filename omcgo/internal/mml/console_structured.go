@@ -46,6 +46,7 @@ type StructuredStatement struct {
 	Values            map[string]string `json:"values,omitempty"`
 	InstanceSelectors map[string]string `json:"instance_selectors,omitempty"`
 	RmvInstance       *int              `json:"rmv_instance,omitempty"`
+	InstanceIndices   []int             `json:"instance_indices,omitempty"`
 }
 
 // StructuredExecuteRequest 是 POST /mml/console/execute-statements-structured 的请求体。
@@ -90,6 +91,17 @@ func (e *ErrUnknownPaths) Code() int { return global.ErrCodeInvalidStatementPayl
 func (s *ConsoleService) StructuredToStatement(ctx context.Context, ss StructuredStatement) (Statement, error) {
 	if ss.CommandID == uuid.Nil {
 		return Statement{}, fmt.Errorf("structured statement: command_id required")
+	}
+	if ss.OperationType == "RMV" && len(ss.InstanceIndices) > 1 {
+		return Statement{}, fmt.Errorf("structured RMV requires exactly one instance index, got %d", len(ss.InstanceIndices))
+	}
+	if ss.RmvInstance != nil && len(ss.InstanceIndices) > 0 {
+		return Statement{}, fmt.Errorf("structured RMV instance fields are mutually exclusive")
+	}
+	rmvInstance := ss.RmvInstance
+	if len(ss.InstanceIndices) == 1 {
+		idx := ss.InstanceIndices[0]
+		rmvInstance = &idx
 	}
 
 	cmd, err := s.commandRepo.GetByID(ctx, ss.CommandID)
@@ -148,7 +160,7 @@ func (s *ConsoleService) StructuredToStatement(ctx context.Context, ss Structure
 		OperationType:       ss.OperationType,
 		SelectedSubFieldIDs: selectedIDs,
 		Values:              values,
-		RmvInstanceIndex:    ss.RmvInstance,
+		RmvInstanceIndex:    rmvInstance,
 		InstanceSelectors:   ss.InstanceSelectors,
 	}, nil
 }

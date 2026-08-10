@@ -63,6 +63,8 @@ export interface CommandParamPath {
   description?: string;
   /** MML 配置中的默认勾选标记；兼容数据缺失时按 false 处理。 */
   defaultSelected?: boolean;
+  /** MML 配置中的必填标记；false 时允许留空且不会下发。 */
+  isRequired?: boolean;
 }
 
 /**

@@ -71,6 +71,17 @@ describe('computeInstanceSlots (命令参数 {i} 槽位)', () => {
     expect(slots[0]).toEqual({ key: 'i01', label: 'FAPService' });
   });
 
+  it('LST：识别以 .{i} 结尾的末级对象实例槽位', () => {
+    const c = cmd('LST', [
+      path('Device.Services.FAPService.{i}.NeighborList.LTECell.{i}'),
+    ]);
+    const slots = computeInstanceSlots(c);
+    expect(slots).toEqual([
+      { key: 'i01', label: 'FAPService' },
+      { key: 'i02', label: 'LTECell' },
+    ]);
+  });
+
   it('无 {i} → 空槽位', () => {
     expect(computeInstanceSlots(cmd('LST', [path('Device.DeviceInfo.SoftwareVersion')]))).toHaveLength(0);
   });

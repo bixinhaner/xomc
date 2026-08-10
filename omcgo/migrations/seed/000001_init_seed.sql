@@ -26671,6 +26671,416 @@ VALUES (
 )
 ON CONFLICT (role_id, menu_id) DO NOTHING;
 
+-- issue #274: restore neighbor and inter-frequency MML commands.
+-- The previous supplemental seed removed every {i} placeholder from ADD/RMV
+-- target_object values. Product filtering compares target_object with the
+-- ParamModel standard paths, so those commands disappeared after device
+-- selection even though the command rows existed.
+WITH object_defs(command_code, target_object) AS (
+    VALUES
+        ('ADD 5G_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+        ('RMV 5G_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+        ('ADD INTER_RAT_CELL_NR', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
+        ('RMV INTER_RAT_CELL_NR', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
+        ('ADD INTER_RAT_CELL_UMTS', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
+        ('RMV INTER_RAT_CELL_UMTS', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
+        ('ADD INTER_RAT_CELL_GSM', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
+        ('RMV INTER_RAT_CELL_GSM', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
+        ('ADD LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.'),
+        ('RMV LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.'),
+        ('ADD NR_CELL', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.'),
+        ('RMV NR_CELL', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.'),
+        ('ADD SJ_CONN_EUTRA_CARRIER', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.'),
+        ('RMV SJ_CONN_EUTRA_CARRIER', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.'),
+        ('ADD SJ_CONN_NR_INTER_FREQ_CARRIER', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.'),
+        ('RMV SJ_CONN_NR_INTER_FREQ_CARRIER', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.'),
+        ('ADD INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv4Address.'),
+        ('RMV INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv4Address.'),
+        ('ADD INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv6Address.'),
+        ('RMV INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv6Address.'),
+        ('ADD VLAN_INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.'),
+        ('RMV VLAN_INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.'),
+        ('ADD VLAN_INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.'),
+        ('RMV VLAN_INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.'),
+        ('ADD PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.'),
+        ('RMV PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.'),
+        ('ADD PDCP_INIT_PARAM', 'Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.'),
+        ('RMV PDCP_INIT_PARAM', 'Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.')
+)
+UPDATE public.mml_commands c
+SET target_object = d.target_object,
+    tree_node_refs = jsonb_build_array(d.target_object),
+    updated_at = now()
+FROM object_defs d
+WHERE c.command_code = d.command_code
+  AND c.deprecated_at IS NULL;
+
+-- SI_SUB_01 is a compatibility command family: some LTE products expose NR
+-- neighbors as NeighborList.5GCell while others use InterRATCell.NR. Keep the
+-- ADD/RMV commands for both object models active under the same business name;
+-- product filtering will retain the variant supported by the selected device.
+UPDATE public.mml_commands c
+SET command_name = CASE c.operation_type
+        WHEN 'ADD' THEN '新增 NR邻区参数管理 (5GCell)'
+        ELSE '删除 NR邻区参数管理 (5GCell)'
+    END,
+    description = CASE c.operation_type
+        WHEN 'ADD' THEN '新增 NR邻区参数管理 (5GCell)'
+        ELSE '删除 NR邻区参数管理 (5GCell)'
+    END,
+    command_name_i18n = jsonb_build_object(
+        'zh-CN', CASE c.operation_type WHEN 'ADD' THEN '新增 NR邻区参数管理' ELSE '删除 NR邻区参数管理' END,
+        'en-US', CASE c.operation_type WHEN 'ADD' THEN 'Add NR Neighbor Parameter Management' ELSE 'Remove NR Neighbor Parameter Management' END
+    ),
+    logical_name_i18n = jsonb_build_object(
+        'zh-CN', 'NR邻区参数管理',
+        'en-US', 'NR Neighbor Parameter Management'
+    ),
+    target_object = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.',
+    tree_node_refs = jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+    deprecated_at = NULL,
+    updated_at = now()
+WHERE c.command_code IN ('ADD 5G_CELL', 'RMV 5G_CELL');
+
+-- BU1810's local 5G neighbour form does not expose SSB and the device accepts
+-- AddObject without it. An omitted optional value is excluded from the SPV.
+UPDATE public.mml_command_sub_fields sf
+SET is_required = false,
+    updated_at = now()
+FROM public.mml_commands c
+JOIN public.standard_params sp
+  ON sp.standard_path = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}.SSB'
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = sp.id
+  AND c.command_code = 'ADD 5G_CELL'
+  AND c.deprecated_at IS NULL
+  AND sf.deprecated_at IS NULL;
+
+-- NR products expose LTE neighbours below the two-level CellConfig.{i}.LTE
+-- standard object (translated to CellConfig.{i}.NR on BaiBNQ). Keep separate
+-- command variants so product filtering selects the correct object shape
+-- without breaking the one-level LTE products.
+WITH si_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SI'
+      AND param_version = 'cmcc-td-lte-v2.3'
+      AND deleted_at IS NULL
+    ORDER BY updated_at DESC
+    LIMIT 1
+), nr_lte_defs(command_code, operation_type, rpc_method, command_name_zh, command_name_en) AS (
+    VALUES
+        ('ADD NR_LTE_CELL', 'ADD', 'AddObject', '添加 LTE邻区参数管理', 'Add LTE Neighbor Parameter Management'),
+        ('RMV NR_LTE_CELL', 'RMV', 'DeleteObject', '删除 LTE邻区参数管理', 'Remove LTE Neighbor Parameter Management')
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method,
+    target_paths, target_object, group_id, command_name_i18n,
+    require_confirm, confirm_msg_i18n, operation_type, logical_name_i18n,
+    source, catalog_protected, platform_tags, deprecated_at, tree_node_refs,
+    instance_range_meta, help_doc, notes
+)
+SELECT
+    d.command_name_zh || ' (NR)',
+    d.command_code,
+    'neighbor-list-coverage',
+    d.command_name_zh,
+    d.rpc_method,
+    jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.'),
+    'Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.',
+    g.id,
+    jsonb_build_object('zh-CN', d.command_name_zh, 'en-US', d.command_name_en),
+    false,
+    '{}'::jsonb,
+    d.operation_type,
+    jsonb_build_object('zh-CN', 'LTE邻区参数管理', 'en-US', 'LTE Neighbor Parameter Management'),
+    'standard',
+    true,
+    '{}'::jsonb,
+    NULL,
+    jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.'),
+    '[]'::jsonb,
+    '',
+    ''
+FROM nr_lte_defs d
+CROSS JOIN si_group g
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    target_paths = EXCLUDED.target_paths,
+    target_object = EXCLUDED.target_object,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    operation_type = EXCLUDED.operation_type,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    tree_node_refs = EXCLUDED.tree_node_refs,
+    deprecated_at = NULL,
+    updated_at = now();
+
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    dst.id,
+    src_sf.standard_path_id,
+    src_sf.mml_code,
+    src_sf.label_i18n,
+    true,
+    dst.operation_type = 'ADD',
+    src_sf.sort_order,
+    src_sf.access_type,
+    true
+FROM public.mml_commands dst
+JOIN public.mml_commands src ON src.command_code = 'ADD LTE_CELL'
+JOIN public.mml_command_sub_fields src_sf
+  ON src_sf.command_id = src.id AND src_sf.deprecated_at IS NULL
+JOIN public.standard_params sp ON sp.id = src_sf.standard_path_id
+WHERE dst.command_code IN ('ADD NR_LTE_CELL', 'RMV NR_LTE_CELL')
+  AND dst.deprecated_at IS NULL
+  AND sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.%'
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = true,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH refreshed AS (
+    SELECT
+        c.id,
+        jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.')
+        || COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
+                    FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS paths
+    FROM public.mml_commands c
+    LEFT JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    WHERE c.command_code IN ('ADD NR_LTE_CELL', 'RMV NR_LTE_CELL')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = r.paths,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
+-- Multi-instance sub-fields across several chapters used mml_code (including
+-- collision hashes) as their visible label. Keep mml_code as the execution
+-- key, but expose a business label derived from the parameter description or
+-- path leaf.
+WITH multi_instance_fields AS (
+    SELECT
+        sf.id,
+        sp.description,
+        CASE
+            WHEN split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) = '{i}'
+                THEN split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1) - 1)
+            ELSE split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))
+        END AS leaf_name
+    FROM public.mml_command_sub_fields sf
+    JOIN public.mml_commands c ON c.id = sf.command_id
+    JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    WHERE sp.standard_path LIKE '%{i}%'
+      AND c.deprecated_at IS NULL
+      AND sf.deprecated_at IS NULL
+)
+UPDATE public.mml_command_sub_fields sf
+SET label_i18n = jsonb_build_object(
+        'zh-CN', COALESCE(NULLIF(sp.description, ''), leaf_name),
+        'en-US', leaf_name
+    ),
+    updated_at = now()
+FROM multi_instance_fields sp
+WHERE sf.id = sp.id;
+
+-- LTE products without a CellConfig instance use this standard path for the
+-- quick-settings "neighbor frequency" table. The existing clean commands only
+-- covered CellConfig.{i}.LTE and were therefore filtered out for these eNBs.
+WITH si_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SI'
+      AND param_version = 'cmcc-td-lte-v2.3'
+      AND deleted_at IS NULL
+    ORDER BY updated_at DESC
+    LIMIT 1
+), command_defs(command_code, command_name, logical_name, operation_type, rpc_method) AS (
+    VALUES
+        ('LST LTE_INTER_FREQ_CARRIER', '查询 LTE邻频参数管理', 'LTE邻频参数管理', 'LST', 'GetParameterValues'),
+        ('MOD LTE_INTER_FREQ_CARRIER', '修改 LTE邻频参数管理', 'LTE邻频参数管理', 'MOD', 'SetParameterValues'),
+        ('ADD LTE_INTER_FREQ_CARRIER', '添加 LTE邻频参数管理', 'LTE邻频参数管理', 'ADD', 'AddObject'),
+        ('RMV LTE_INTER_FREQ_CARRIER', '删除 LTE邻频参数管理', 'LTE邻频参数管理', 'RMV', 'DeleteObject')
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method, operation_type,
+    target_paths, target_object, tree_node_refs, group_id, command_name_i18n,
+    logical_name_i18n, source, catalog_protected, help_doc
+)
+SELECT
+    d.command_name,
+    d.command_code,
+    'MML',
+    d.command_name,
+    d.rpc_method,
+    d.operation_type,
+    '[]'::jsonb,
+    'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.',
+    jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.'),
+    g.id,
+    jsonb_build_object('zh-CN', d.command_name, 'en-US', d.command_code),
+    jsonb_build_object('zh-CN', d.logical_name, 'en-US', 'LTE Inter-Frequency Carrier Parameters'),
+    'standard',
+    true,
+    ''
+FROM command_defs d
+CROSS JOIN si_group g
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    operation_type = EXCLUDED.operation_type,
+    target_object = EXCLUDED.target_object,
+    tree_node_refs = EXCLUDED.tree_node_refs,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_commands AS (
+    SELECT id, operation_type
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST LTE_INTER_FREQ_CARRIER', 'MOD LTE_INTER_FREQ_CARRIER',
+        'ADD LTE_INTER_FREQ_CARRIER', 'RMV LTE_INTER_FREQ_CARRIER'
+    )
+      AND deprecated_at IS NULL
+), source_paths AS (
+    SELECT
+        c.id AS command_id,
+        c.operation_type,
+        sp.id AS standard_path_id,
+        sp.standard_path,
+        sp.description,
+        sp.access,
+        CASE
+            WHEN split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) = '{i}'
+                THEN split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1) - 1)
+            ELSE split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))
+        END AS leaf_name,
+        row_number() OVER (PARTITION BY c.id ORDER BY sp.standard_path) AS sort_order
+    FROM target_commands c
+    JOIN public.standard_params sp
+      ON (sp.standard_path = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}'
+       OR sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.%')
+     AND sp.entry_type = 'parameter'
+    WHERE c.operation_type IN ('LST', 'ADD', 'RMV')
+       OR (c.operation_type = 'MOD' AND sp.access = 'READ_WRITE')
+), desired_fields AS (
+    SELECT
+        command_id,
+        standard_path_id,
+        LEFT(UPPER(regexp_replace(leaf_name, '([a-z0-9])([A-Z])', '\1_\2', 'g')), 91)
+            || '_' || substr(md5(standard_path), 1, 8) AS mml_code,
+        jsonb_build_object(
+            'zh-CN', COALESCE(NULLIF(sp.description, ''), leaf_name),
+            'en-US', leaf_name
+        ) AS label_i18n,
+        sort_order,
+        operation_type,
+        access
+    FROM source_paths sp
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    true,
+    operation_type IN ('ADD', 'MOD'),
+    sort_order,
+    CASE WHEN access = 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
+    true
+FROM desired_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_commands AS (
+    SELECT id, target_object
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST LTE_INTER_FREQ_CARRIER', 'MOD LTE_INTER_FREQ_CARRIER',
+        'ADD LTE_INTER_FREQ_CARRIER', 'RMV LTE_INTER_FREQ_CARRIER'
+    )
+), refreshed AS (
+    SELECT
+        c.id,
+        c.target_object,
+        COALESCE(
+            jsonb_agg(to_jsonb(sp.standard_path) ORDER BY sf.sort_order, sp.standard_path)
+                FILTER (WHERE sp.standard_path IS NOT NULL),
+            '[]'::jsonb
+        ) AS paths
+    FROM target_commands c
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = c.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY c.id, c.target_object
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = CASE
+        WHEN c.operation_type IN ('ADD', 'RMV') THEN jsonb_build_array(r.target_object)
+        ELSE r.paths
+    END,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
+-- The legacy BM/BLN catalog imported numeric 5G neighbor fields as STRING.
+-- Their min/max values are numeric ranges (not string lengths); keep PLMNID as
+-- STRING because its 5..6 constraint is intentionally a character length.
+WITH numeric_5g_neighbor_types(leaf_name, data_type) AS (
+    VALUES
+        ('CellId', 'U_INT'),
+        ('GnbId', 'U_INT'),
+        ('GnbIdLength', 'U_INT'),
+        ('PCI', 'U_INT'),
+        ('QOFFSET', 'INT'),
+        ('SSB', 'U_INT'),
+        ('TAC', 'U_INT')
+)
+UPDATE public.param_mappings pm
+SET data_type = n.data_type,
+    updated_at = now()
+FROM numeric_5g_neighbor_types n
+WHERE pm.standard_path =
+      'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}.' || n.leaf_name
+  AND pm.is_active = true;
+
 COMMIT;
 
 -- +goose Down

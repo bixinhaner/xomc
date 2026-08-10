@@ -25,7 +25,11 @@ export function validateModParamValue(
   path: CommandParamPath,
   value: string,
 ): ModParamValidationError | null {
-  if (value.trim() === '') return { code: 'required' };
+  if (value.trim() === '') {
+    // Explicitly optional catalog fields may be omitted from MOD/ADD. Keep
+    // undefined as required for compatibility with older command payloads.
+    return path.isRequired === false ? null : { code: 'required' };
+  }
 
   if (path.enumOptions?.length && !path.enumOptions.some((option) => option.value === value)) {
     return { code: 'enumValue' };

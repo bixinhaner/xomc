@@ -41,6 +41,7 @@ import {
 import { getModParamValidationErrors } from '../modParamValidation';
 import { useT } from '@/hooks/useT';
 import { usePermission } from '@core/hooks/usePermission';
+import { dataTypeRangeKind } from '@core/types/paramModel';
 
 const { Text } = Typography;
 
@@ -200,7 +201,7 @@ export default function ConfigParamsModal({
               ?? 'false';
           } else if (p.defaultValue != null && p.defaultValue !== '') {
             initVals[p.path] = p.defaultValue;
-          } else if (p.minValue != null) {
+          } else if (p.minValue != null && dataTypeRangeKind(p.valueType) !== 'length') {
             initVals[p.path] = String(p.minValue);
           }
         });
@@ -232,8 +233,9 @@ export default function ConfigParamsModal({
   const rawAllValid = rawPayload.rows.every(
     (r) => validateRawPath(rawPayload.operationType, r.path) === null,
   );
-  const modValidationErrors = useMemo(
+  const writeValidationErrors = useMemo(
     () => command?.operationType === 'MOD'
+      || command?.operationType === 'ADD'
       ? getModParamValidationErrors(writablePaths, values)
       : {},
     [command?.operationType, values, writablePaths],
@@ -256,7 +258,9 @@ export default function ConfigParamsModal({
 
   const checkedPathSet = new Set(checkedPaths);
   const selectedValues = Object.fromEntries(
-    Object.entries(values).filter(([path]) => checkedPathSet.has(path)),
+    Object.entries(values).filter(([path, value]) => (
+      checkedPathSet.has(path) && value.trim() !== ''
+    )),
   );
 
   const buildRequest = (): ExecRequest =>
@@ -281,7 +285,8 @@ export default function ConfigParamsModal({
         };
 
   const handleConfirmAndExecute = () => {
-    if (command?.operationType === 'MOD' && Object.keys(modValidationErrors).length > 0) {
+    if ((command?.operationType === 'MOD' || command?.operationType === 'ADD')
+      && Object.keys(writeValidationErrors).length > 0) {
       setShowModValidationErrors(true);
       return;
     }
@@ -428,8 +433,9 @@ export default function ConfigParamsModal({
         ) : (
           <Space orientation="vertical" size={10} style={{ width: '100%', marginTop: 8 }}>
             {writablePaths.map((p) => {
-              const error = command.operationType === 'MOD' && showModValidationErrors
-                ? modValidationErrors[p.path]
+              const error = (command.operationType === 'MOD' || command.operationType === 'ADD')
+                && showModValidationErrors
+                ? writeValidationErrors[p.path]
                 : undefined;
               const isBoolean = isBooleanValueType(p.valueType);
               const enumOptions = isBoolean ? BOOLEAN_OPTIONS : (p.enumOptions ?? []);
