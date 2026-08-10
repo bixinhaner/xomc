@@ -462,6 +462,33 @@ type ReplaceAPIClientsRequest struct {
 	Items []APIClient `json:"items"`
 }
 
+type APIUser struct {
+	ID          string    `json:"id"`
+	Username    string    `json:"username"`
+	Enabled     bool      `json:"enabled"`
+	Password    string    `json:"password,omitempty"`
+	PasswordSet bool      `json:"password_set"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type ReplaceAPIUsersRequest struct {
+	Items []APIUser `json:"items"`
+}
+
+type APIUserLoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type APIUserToken struct {
+	Token       string    `json:"token"`
+	AccessToken string    `json:"access_token"`
+	Expires     int       `json:"expires"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	TokenType   string    `json:"token_type"`
+}
+
 type EventArtifactType string
 
 const (

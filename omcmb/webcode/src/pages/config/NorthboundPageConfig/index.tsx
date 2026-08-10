@@ -45,7 +45,7 @@ import type {
   NorthboundFileProfile,
   NorthboundFileRun,
   NorthboundAPIConfig,
-  NorthboundAPIClient,
+  NorthboundAPIUser,
   NorthboundDeliveryTarget,
   NorthboundFieldDefinition,
   NorthboundInventoryField,
@@ -228,7 +228,6 @@ interface SnmpVarBindRow {
 
 type ApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 type ApiKind = '正式北向' | '业务复用' | '鉴权管理';
-type ApiCoverage = '旧能力对齐' | '部分覆盖' | '当前新增';
 type ApiFieldContract = '完整契约' | '当前契约' | '示例契约';
 
 const csvSeparatorOptions = [
@@ -319,6 +318,7 @@ interface SocketAccountRow {
 
 interface NorthboundApiRow {
   key: string;
+  configKey?: string;
   apiKind?: ApiKind;
   module: string;
   name: string;
@@ -326,24 +326,23 @@ interface NorthboundApiRow {
   url: string;
   auth: string;
   backendSource: string;
-  oldMapping?: string;
-  coverage?: ApiCoverage;
   fieldContract?: ApiFieldContract;
   responseFields?: string[];
-  compatibilityNote?: string;
   requestExample: string;
   responseExample: string;
 }
 
-interface ApiClientRow {
-  clientKey: string;
-  name: string;
+type NorthboundApiDisplayAlias = Partial<NorthboundApiRow> & Pick<
+  NorthboundApiRow,
+  'key' | 'name' | 'method' | 'url' | 'requestExample' | 'responseExample'
+>;
+
+interface ApiUserRow {
+  username: string;
   enabled: boolean;
-  tokenSecret: string;
-  tokenSet: boolean;
-  allowedApiKeys: string;
-  ipWhitelist: string;
-  expiresAt?: string;
+  password: string;
+  passwordSet: boolean;
+  createdAt?: string;
 }
 
 interface ReportFieldRow {
@@ -1691,184 +1690,55 @@ const reportStatusSamples: Record<string, Partial<ReportStatusInfo>> = {
   },
 };
 
-const commonApiAuth = 'JWT 或 X-API-Key；/api/v1 统一鉴权 + Casbin 端点权限';
+const commonApiAuth = '北向 API 用户 token；Authorization: Bearer <access-token> 或 X-Northbound-Token';
 const currentEnvelopeFields = ['ret', 'msg', 'data'];
 const listResponseFields = ['ret', 'msg', 'data.items', 'data.total', 'data.page', 'data.page_size', 'data.total_pages', 'data.stats?'];
+const apiUserPasswordMask = '********';
 
 const northboundApiRows: NorthboundApiRow[] = [
   {
     key: 'auth-login',
     apiKind: '鉴权管理',
     module: '鉴权',
-    name: '登录获取 JWT',
+    name: '北向认证：获取访问 Token',
     method: 'POST',
-    url: '/api/v1/auth/login',
-    auth: '公开接口；登录后使用 Authorization: Bearer <access_token>',
-    backendSource: 'omcgo/internal/admin/auth_handler.go',
-    oldMapping: '/v1/access/token',
-    coverage: '部分覆盖',
+    url: '/api/v1/northbound/v1/access/token',
+    auth: '公开接口；只校验北向 API 专用用户',
+    backendSource: 'omcgo/internal/northbound/pageconfig/service.go + cmd/app/provider/router.go',
     fieldContract: '完整契约',
-    responseFields: [...currentEnvelopeFields, 'data.access_token', 'data.refresh_token', 'data.expires_at', 'data.token_type', 'data.must_change_password?', 'data.password_expires_in_days?', 'data.login_notify_msg?'],
-    compatibilityNote: '当前登录接口使用 /api/v1/auth/login 和 TokenPair 字段；不兼容老系统 /v1/access/token 的 Result.data.token/expires 命名。',
-    requestExample: `POST /api/v1/auth/login
+    responseFields: [...currentEnvelopeFields, 'data.token', 'data.expires', 'data.access_token', 'data.expires_at', 'data.token_type'],
+    requestExample: `POST /api/v1/northbound/v1/access/token
 Content-Type: application/json
 
 {
   "username": "northbound_api",
-  "encrypted_password": "<RSA-OAEP 密文>",
-  "key_id": "login-key-20260730"
+  "password": "******"
 }`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
   "data": {
-    "access_token": "eyJhbGciOiJIUzI1NiIs...",
-    "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
-    "expires_at": "2026-07-30T02:00:00+08:00",
+    "token": "nbt_AOa...",
+    "access_token": "nbt_AOa...",
+    "expires": 1800,
+    "expires_at": "2026-07-30T02:00:00Z",
     "token_type": "Bearer"
   }
 }`,
   },
   {
-    key: 'api-key-create',
-    apiKind: '鉴权管理',
-    module: '鉴权',
-    name: '创建 API Key',
-    method: 'POST',
-    url: '/api/v1/api-keys',
-    auth: 'JWT；创建后调用北向接口使用 X-API-Key',
-    backendSource: 'omcgo/internal/admin/apikey_handler.go',
-    oldMapping: '老系统无 API Key；对应 /v1/access/token 的程序化调用替代方案',
-    coverage: '当前新增',
-    fieldContract: '完整契约',
-    responseFields: [...currentEnvelopeFields, 'data.id', 'data.name', 'data.key', 'data.key_prefix', 'data.scopes', 'data.expires_at?', 'data.created_at'],
-    compatibilityNote: 'key 明文只在创建响应返回一次，后续列表只显示 key_prefix。',
-    requestExample: `POST /api/v1/api-keys
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "name": "oss-primary",
-  "scopes": ["northbound:read", "northbound:write", "pm:read"],
-  "expires_at": "2027-07-30T00:00:00+08:00"
-}`,
-    responseExample: `{
-  "ret": 1,
-  "msg": "ok",
-  "data": {
-    "id": "5f8f33aa-6e7d-4f53-a5a6-b2c100010001",
-    "name": "oss-primary",
-    "key": "omc_nb_xxxxxxxxxxxxxxxxx",
-    "key_prefix": "omc_nb_xx",
-    "scopes": ["northbound:read", "northbound:write", "pm:read"],
-    "expires_at": "2027-07-30T00:00:00+08:00",
-    "created_at": "2026-07-30T01:00:00+08:00"
-  }
-}`,
-  },
-  {
-    key: 'auth-refresh',
-    apiKind: '鉴权管理',
-    module: '鉴权',
-    name: '刷新 JWT',
-    method: 'POST',
-    url: '/api/v1/auth/refresh',
-    auth: '公开接口；使用 refresh_token 换取新的 access_token',
-    backendSource: 'omcgo/internal/admin/auth_handler.go',
-    oldMapping: '老系统 /v1/access/token 重新登录获取 token',
-    coverage: '部分覆盖',
-    fieldContract: '完整契约',
-    responseFields: [...currentEnvelopeFields, 'data.access_token', 'data.refresh_token', 'data.expires_at', 'data.token_type'],
-    compatibilityNote: '当前 refresh 与登录拆分；老系统文档未提供独立 refresh endpoint。',
-    requestExample: `POST /api/v1/auth/refresh
-Content-Type: application/json
-
-{
-  "refresh_token": "eyJhbGciOiJIUzI1NiIs..."
-}`,
-    responseExample: `{
-  "ret": 1,
-  "msg": "ok",
-  "data": {
-    "access_token": "eyJhbGciOiJIUzI1NiIs...",
-    "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
-    "expires_at": "2026-07-30T03:00:00+08:00",
-    "token_type": "Bearer"
-  }
-}`,
-  },
-  {
-    key: 'api-key-list',
-    apiKind: '鉴权管理',
-    module: '鉴权',
-    name: '查询 API Key',
-    method: 'GET',
-    url: '/api/v1/api-keys',
-    auth: commonApiAuth,
-    backendSource: 'omcgo/internal/admin/apikey_handler.go',
-    oldMapping: '老系统无 API Key 管理接口',
-    coverage: '当前新增',
-    fieldContract: '完整契约',
-    responseFields: [...currentEnvelopeFields, 'data.items[].id', 'data.items[].user_id', 'data.items[].name', 'data.items[].key_prefix', 'data.items[].scopes', 'data.items[].expires_at?', 'data.items[].last_used_at?', 'data.items[].created_at', 'data.items[].updated_at', 'data.items[].revoked_at?', 'data.total'],
-    compatibilityNote: '列表不会返回 key 明文。',
-    requestExample: `GET /api/v1/api-keys
-Authorization: Bearer <token>`,
-    responseExample: `{
-  "ret": 1,
-  "msg": "ok",
-  "data": {
-    "items": [
-      {
-        "id": "5f8f33aa-6e7d-4f53-a5a6-b2c100010001",
-        "name": "oss-primary",
-        "key_prefix": "omc_nb_xx",
-        "scopes": ["northbound:read"],
-        "last_used_at": "2026-07-30T01:10:00+08:00",
-        "created_at": "2026-07-30T01:00:00+08:00"
-      }
-    ],
-    "total": 1
-  }
-}`,
-  },
-  {
-    key: 'api-key-revoke',
-    apiKind: '鉴权管理',
-    module: '鉴权',
-    name: '撤销 API Key',
-    method: 'DELETE',
-    url: '/api/v1/api-keys/{id}',
-    auth: commonApiAuth,
-    backendSource: 'omcgo/internal/admin/apikey_handler.go',
-    oldMapping: '老系统无 API Key 管理接口',
-    coverage: '当前新增',
-    fieldContract: '完整契约',
-    responseFields: ['ret', 'msg', 'data=null'],
-    compatibilityNote: '撤销后该 key 不再可用于 X-API-Key 鉴权。',
-    requestExample: `DELETE /api/v1/api-keys/5f8f33aa-6e7d-4f53-a5a6-b2c100010001
-Authorization: Bearer <token>`,
-    responseExample: `{
-  "ret": 1,
-  "msg": "api key revoked",
-  "data": null
-}`,
-  },
-  {
-    key: 'nb-sync-full',
+    key: 'nb-sync-full-device',
     apiKind: '正式北向',
     module: '同步',
-    name: '全量同步',
+    name: '设备全量同步：导出当前设备清单',
     method: 'GET',
-    url: '/api/v1/northbound/sync/full?data_type=device&format=json',
+    url: '/api/v1/northbound/v1/sync/full?data_type=device&format=json',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go + internal/northbound/sync/service.go',
-    oldMapping: '/v1/device/query、/v1/cpe/infos/{sn}、/v1/enodeb/infos/status/{sn}',
-    coverage: '部分覆盖',
     fieldContract: '当前契约',
     responseFields: [...currentEnvelopeFields, 'data.data_type', 'data.items[]', 'data.total', 'data.synced_at', 'data.truncated?'],
-    compatibilityNote: '当前只支持 data_type=device/alarm/pm；items 字段随类型返回 Device、Alarm 或 PMCounter，不兼容老系统按 sn 的 Map 透传返回。',
-    requestExample: `GET /api/v1/northbound/sync/full?data_type=device&format=json
-X-API-Key: <api-key>`,
+    requestExample: `GET /api/v1/northbound/v1/sync/full?data_type=device&format=json
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -1898,13 +1768,10 @@ X-API-Key: <api-key>`,
     url: '/api/v1/northbound/sync/incremental?data_type=alarm&since=2026-07-30T00:00:00Z&format=json',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go + internal/northbound/sync/service.go',
-    oldMapping: '老系统无统一增量同步接口；参数/任务类异步接口通过 /v1/job/result/{jobId} 查询状态',
-    coverage: '当前新增',
     fieldContract: '当前契约',
     responseFields: [...currentEnvelopeFields, 'data.data_type', 'data.items[]', 'data.total', 'data.synced_at', 'data.truncated?'],
-    compatibilityNote: '当前只支持 data_type=alarm/pm；since 必须为 RFC3339。',
     requestExample: `GET /api/v1/northbound/sync/incremental?data_type=alarm&since=2026-07-30T00:00:00Z&format=json
-X-API-Key: <api-key>`,
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -1933,13 +1800,10 @@ X-API-Key: <api-key>`,
     url: '/api/v1/northbound/export/pm',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/pm_handler.go',
-    oldMapping: '老系统 northboundApi 无 PM REST 导出；PM 文件由北向文件模块生成',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...listResponseFields, 'data.items[].time', 'data.items[].device_id', 'data.items[].oui', 'data.items[].device_sn', 'data.items[].cell_id', 'data.items[].counter_group', 'data.items[].counter_name', 'data.items[].counter_value', 'data.items[].granularity', 'data.items[].statis_type?', 'data.items[].unit?'],
-    compatibilityNote: '该端点只导出 counter；KPI 导出方法在代码中存在但当前 router 未挂载，不能在页面承诺为正式北向接口。',
     requestExample: `POST /api/v1/northbound/export/pm
-X-API-Key: <api-key>
+X-Northbound-Token: <access-token>
 Content-Type: application/json
 
 {
@@ -1982,13 +1846,10 @@ Content-Type: application/json
     url: '/api/v1/northbound/export/alarms',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/alarm_handler.go',
-    oldMapping: '老系统 northboundApi 无统一告警导出接口；告警外送主要在 Socket/SNMP/File',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...listResponseFields, 'data.items[].id', 'data.items[].device_id', 'data.items[].device_sn', 'data.items[].carrier', 'data.items[].severity', 'data.items[].alarm_type', 'data.items[].alarm_identifier', 'data.items[].description', 'data.items[].status', 'data.items[].raised_at', 'data.items[].acknowledged_at?', 'data.items[].cleared_at?', 'data.items[].device_name?', 'data.items[].technology?', 'data.items[].additional_info?'],
-    compatibilityNote: 'severity 支持 1-4 和 31001-31004；非超管必须指定 device_sn。',
     requestExample: `POST /api/v1/northbound/export/alarms
-X-API-Key: <api-key>
+X-Northbound-Token: <access-token>
 Content-Type: application/json
 
 {
@@ -2023,18 +1884,15 @@ Content-Type: application/json
     key: 'nb-export-config',
     apiKind: '正式北向',
     module: '配置',
-    name: '配置快照导出',
+    name: '配置快照导出：按设备ID导出参数',
     method: 'GET',
-    url: '/api/v1/northbound/export/config/{deviceId}',
+    url: '/api/v1/northbound/v1/export/config/{deviceId}',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/config_handler.go',
-    oldMapping: '/v1/device/parameters/{sn}',
-    coverage: '部分覆盖',
     fieldContract: '完整契约',
     responseFields: [...currentEnvelopeFields, 'data.device_id', 'data.parameters[].device_id', 'data.parameters[].parameter_path', 'data.parameters[].parameter_value', 'data.parameters[].parameter_type', 'data.parameters[].writable', 'data.parameters[].last_updated_at', 'data.parameters[].fap_instance', 'data.parameters[].param_group', 'data.total'],
-    compatibilityNote: '当前按 device UUID 查询，返回 device_parameters 当前快照；老系统按 sn 查询且字段命名不同。',
-    requestExample: `GET /api/v1/northbound/export/config/9a4d7b2f-2b2c-4f0a-9ec5-5e9b3a8c1001
-X-API-Key: <api-key>`,
+    requestExample: `GET /api/v1/northbound/v1/export/config/9a4d7b2f-2b2c-4f0a-9ec5-5e9b3a8c1001
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -2062,13 +1920,10 @@ X-API-Key: <api-key>`,
     url: '/api/v1/northbound/push/targets',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go + internal/northbound/push',
-    oldMapping: '老系统无 HTTP Push 目标管理接口',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...currentEnvelopeFields, 'data.items[].id', 'data.items[].url', 'data.items[].auth_type', 'data.items[].auth_token', 'data.items[].data_types', 'data.items[].format', 'data.items[].batch_size', 'data.items[].retry_count', 'data.items[].enabled', 'data.total'],
-    compatibilityNote: '用于 HTTP Push fanout 目标管理；与文件 FTP/SFTP 传输目标分开。',
     requestExample: `GET /api/v1/northbound/push/targets
-X-API-Key: <api-key>`,
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -2098,13 +1953,10 @@ X-API-Key: <api-key>`,
     url: '/api/v1/northbound/push/targets',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go',
-    oldMapping: '老系统无 HTTP Push 目标管理接口',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...currentEnvelopeFields, 'data.message', 'data.id'],
-    compatibilityNote: '目标开关默认应保持关闭，配置验证通过后再启用。',
     requestExample: `POST /api/v1/northbound/push/targets
-X-API-Key: <api-key>
+X-Northbound-Token: <access-token>
 Content-Type: application/json
 
 {
@@ -2136,13 +1988,10 @@ Content-Type: application/json
     url: '/api/v1/northbound/push/targets/{id}',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go',
-    oldMapping: '老系统无 HTTP Push 目标管理接口',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...currentEnvelopeFields, 'data.id'],
-    compatibilityNote: '目标不存在返回 404。',
     requestExample: `DELETE /api/v1/northbound/push/targets/oss-primary
-X-API-Key: <api-key>`,
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "push target removed",
@@ -2160,13 +2009,10 @@ X-API-Key: <api-key>`,
     url: '/api/v1/northbound/push/targets/{id}/circuit',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go',
-    oldMapping: '老系统无 HTTP Push 熔断状态接口',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...currentEnvelopeFields, 'data.target_id', 'data.state', 'data.failure_count', 'data.threshold'],
-    compatibilityNote: 'state 来自 reliability circuit breaker，典型值为 closed/open/half-open。',
     requestExample: `GET /api/v1/northbound/push/targets/oss-primary/circuit
-X-API-Key: <api-key>`,
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -2187,13 +2033,10 @@ X-API-Key: <api-key>`,
     url: '/api/v1/northbound/push/targets/{id}/circuit/reset',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go',
-    oldMapping: '老系统无 HTTP Push 熔断状态接口',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...currentEnvelopeFields, 'data.target_id', 'data.state'],
-    compatibilityNote: '用于目标恢复后人工关闭熔断状态。',
     requestExample: `POST /api/v1/northbound/push/targets/oss-primary/circuit/reset
-X-API-Key: <api-key>`,
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "circuit breaker reset",
@@ -2212,13 +2055,10 @@ X-API-Key: <api-key>`,
     url: '/api/v1/northbound/push/deadletter?limit=20&offset=0',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go + internal/northbound/push/outbox.go',
-    oldMapping: '老系统无 HTTP Push 死信接口',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...currentEnvelopeFields, 'data.items[].id', 'data.items[].event_id', 'data.items[].subject', 'data.items[].payload', 'data.items[].target_id', 'data.items[].status', 'data.items[].attempts', 'data.items[].max_attempts', 'data.items[].last_error?', 'data.items[].next_retry_at', 'data.items[].created_at', 'data.items[].updated_at', 'data.total'],
-    compatibilityNote: 'limit 范围 1-100，未配置 outbox 时返回 503。',
     requestExample: `GET /api/v1/northbound/push/deadletter?limit=20&offset=0
-X-API-Key: <api-key>`,
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -2248,13 +2088,10 @@ X-API-Key: <api-key>`,
     url: '/api/v1/northbound/push/deadletter/{id}/replay',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go + internal/northbound/push/outbox.go',
-    oldMapping: '老系统无 HTTP Push 死信接口',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...currentEnvelopeFields, 'data.id'],
-    compatibilityNote: '仅对 dead 状态 outbox 条目执行重放。',
     requestExample: `POST /api/v1/northbound/push/deadletter/4a65c2aa-086b-4c1b-a3b7-000100010001/replay
-X-API-Key: <api-key>`,
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "dead letter replayed",
@@ -2272,13 +2109,10 @@ X-API-Key: <api-key>`,
     url: '/api/v1/northbound/servers',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/server_handler.go',
-    oldMapping: '老系统无统一北向主备服务器配置接口',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...currentEnvelopeFields, 'data.items[].id', 'data.items[].role', 'data.items[].host', 'data.items[].port', 'data.items[].description', 'data.items[].is_active', 'data.items[].created_at', 'data.items[].updated_at'],
-    compatibilityNote: '仅在 ServerService 注入后挂载；未注入时该组端点为 404。',
     requestExample: `GET /api/v1/northbound/servers
-X-API-Key: <api-key>`,
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -2304,13 +2138,10 @@ X-API-Key: <api-key>`,
     url: '/api/v1/northbound/servers/active',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/server_handler.go',
-    oldMapping: '老系统无统一北向主备服务器配置接口',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...currentEnvelopeFields, 'data.role'],
-    compatibilityNote: 'role 仅允许 primary 或 standby。',
     requestExample: `PUT /api/v1/northbound/servers/active
-X-API-Key: <api-key>
+X-Northbound-Token: <access-token>
 Content-Type: application/json
 
 {
@@ -2333,13 +2164,10 @@ Content-Type: application/json
     url: '/api/v1/northbound/servers/{role}',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/server_handler.go',
-    oldMapping: '老系统无统一北向主备服务器配置接口',
-    coverage: '当前新增',
     fieldContract: '完整契约',
     responseFields: [...currentEnvelopeFields, 'data.role'],
-    compatibilityNote: '只编辑 host/port/description；激活状态必须通过 /servers/active 修改。',
     requestExample: `PUT /api/v1/northbound/servers/primary
-X-API-Key: <api-key>
+X-Northbound-Token: <access-token>
 Content-Type: application/json
 
 {
@@ -2358,13 +2186,21 @@ Content-Type: application/json
   {
     key: 'device-list',
     module: '设备',
-    name: '设备列表查询',
-    method: 'GET',
-    url: '/api/v1/devices?page=1&page_size=20&technology=LTE&sn=1202000240194',
-    auth: 'JWT 或 API Key，权限 scope=devices:read',
-    backendSource: 'omcgo/internal/device/device_handler.go',
-    requestExample: `GET /api/v1/devices?page=1&page_size=20&technology=LTE&sn=1202000240194
-Authorization: Bearer <token>`,
+    name: '设备查询：按SN/制式/分组分页查询',
+    method: 'POST',
+    url: '/api/v1/northbound/v1/device/query',
+    auth: commonApiAuth,
+    backendSource: 'omcgo/internal/northbound/legacy_facade.go',
+    requestExample: `POST /api/v1/northbound/v1/device/query
+X-Northbound-Token: <access-token>
+Content-Type: application/json
+
+{
+  "page": 1,
+  "rows": 20,
+  "sn": "1202000240194",
+  "technology": "LTE"
+}`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -2388,29 +2224,22 @@ Authorization: Bearer <token>`,
   {
     key: 'device-detail',
     module: '设备',
-    name: '设备详情查询',
+    name: '设备详情：基础信息与扩展信息',
     method: 'GET',
-    url: '/api/v1/devices/{id}/detail',
-    auth: 'JWT 或 API Key，权限 scope=devices:read',
-    backendSource: 'omcgo/internal/device/device_info_handler.go',
-    requestExample: `GET /api/v1/devices/9a4d7b2f-2b2c-4f0a-9ec5-5e9b3a8c1001/detail
-Authorization: Bearer <token>`,
+    url: '/api/v1/northbound/v1/device/infos/{sn}',
+    auth: commonApiAuth,
+    backendSource: 'omcgo/internal/northbound/legacy_facade.go',
+    requestExample: `GET /api/v1/northbound/v1/device/infos/1202000240194
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
   "data": {
-    "device": {
-      "id": "9a4d7b2f-2b2c-4f0a-9ec5-5e9b3a8c1001",
-      "serial_number": "1202000240194",
-      "site_name": "SH-001",
-      "firmware_version": "BaiBS_QRTB_2.9"
-    },
-    "device_info": {
-      "op_state": "enabled",
-      "mme_status": "connected",
-      "ue_count": 32,
-      "cell_id": "1"
-    }
+    "serial_number": "1202000240194",
+    "device_name": "Site-A-1",
+    "product_class": "FAP-LTE-100",
+    "is_online": true,
+    "technology": "LTE"
   }
 }`,
   },
@@ -2424,7 +2253,7 @@ Authorization: Bearer <token>`,
     backendSource: 'omcgo/internal/device/export_handler.go',
     requestExample: `GET /api/v1/devices/export?carrier=CMCC&status=online
 Accept: text/csv
-Authorization: Bearer <token>`,
+Authorization: Bearer <access-token>`,
     responseExample: `HTTP/1.1 200 OK
 Content-Type: text/csv; charset=utf-8
 Content-Disposition: attachment; filename=devices_20260730_010000.csv
@@ -2435,41 +2264,43 @@ serial_number,product_class,site_name,status,last_inform_at
   {
     key: 'parameter-tree',
     module: '配置',
-    name: '参数树快照',
+    name: '参数快照：读取系统已保存参数',
     method: 'GET',
-    url: '/api/v1/devices/{id}/parameters/tree?root=Device.DeviceInfo',
-    auth: 'JWT 或 API Key，权限 scope=devices:read',
-    backendSource: 'omcgo/internal/device/device_param_handler.go',
-    requestExample: `GET /api/v1/devices/9a4d7b2f-2b2c-4f0a-9ec5-5e9b3a8c1001/parameters/tree?root=Device.DeviceInfo
-Authorization: Bearer <token>`,
+    url: '/api/v1/northbound/v1/device/parameters/{sn}',
+    auth: commonApiAuth,
+    backendSource: 'omcgo/internal/northbound/legacy_facade.go',
+    requestExample: `GET /api/v1/northbound/v1/device/parameters/1202000240194
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
   "data": {
-    "name": "DeviceInfo",
-    "full_path": "Device.DeviceInfo.",
-    "is_leaf": false,
-    "children": [
+    "sn": "1202000240194",
+    "parameters": {
+      "Device.DeviceInfo.SoftwareVersion": "BaiBS_QRTB_2.9"
+    },
+    "items": [
       {
-        "name": "SoftwareVersion",
-        "full_path": "Device.DeviceInfo.SoftwareVersion",
-        "value": "BaiBS_QRTB_2.9",
-        "type": "string",
+        "parameter_path": "Device.DeviceInfo.SoftwareVersion",
+        "parameter_value": "BaiBS_QRTB_2.9",
+        "parameter_type": "string",
         "writable": false
       }
-    ]
+    ],
+    "total": 1
   }
 }`,
   },
   {
     key: 'parameter-set',
     module: '配置',
-    name: '参数异步下发',
+    name: '参数下发：异步设置设备参数',
     method: 'PUT',
-    url: '/api/v1/devices/{id}/parameters',
-    auth: 'JWT 或 API Key，权限 scope=devices:write',
-    backendSource: 'omcgo/internal/device/device_param_handler.go',
-    requestExample: `PUT /api/v1/devices/9a4d7b2f-2b2c-4f0a-9ec5-5e9b3a8c1001/parameters
+    url: '/api/v1/northbound/v1/device/parameters/{sn}',
+    auth: commonApiAuth,
+    backendSource: 'omcgo/internal/northbound/legacy_facade.go',
+    requestExample: `PUT /api/v1/northbound/v1/device/parameters/1202000240194
+X-Northbound-Token: <access-token>
 Content-Type: application/json
 
 {
@@ -2487,21 +2318,23 @@ Content-Type: application/json
   "data": {
     "message": "set parameter values command queued",
     "parameters": 1,
-    "reboot_required": false,
-    "task_id": "cmd-20260730010000-0001"
+    "task_id": "cmd-20260730010000-0001",
+    "jobId": "cmd-20260730010000-0001",
+    "sn": "1202000240194",
+    "waitTime": 5
   }
 }`,
   },
   {
     key: 'config-pull',
     module: '配置',
-    name: '配置参数拉取',
+    name: '参数拉取：异步从设备读取指定路径',
     method: 'POST',
-    url: '/api/v1/config/sync/pull/{device_sn}',
-    auth: 'JWT 或 API Key，权限 scope=config:write',
-    backendSource: 'omcgo/internal/config/sync_handler.go',
-    requestExample: `POST /api/v1/config/sync/pull/1202000240194
-Idempotency-Key: nb-pull-20260730010000
+    url: '/api/v1/northbound/v1/device/parameters/query/{sn}',
+    auth: commonApiAuth,
+    backendSource: 'omcgo/internal/northbound/legacy_facade.go',
+    requestExample: `POST /api/v1/northbound/v1/device/parameters/query/1202000240194
+X-Northbound-Token: <access-token>
 Content-Type: application/json
 
 {
@@ -2514,10 +2347,10 @@ Content-Type: application/json
   "ret": 1,
   "msg": "configuration pull queued",
   "data": {
-    "device_id": "1202000240194",
-    "command_id": "run-20260730010000-0001",
-    "request_id": "nb-pull-20260730010000",
-    "batch_count": 1,
+    "jobId": "northbound-manual:7b2e...",
+    "sn": "1202000240194",
+    "waitTime": 5,
+    "task_count": 1,
     "status": "queued"
   }
 }`,
@@ -2525,21 +2358,23 @@ Content-Type: application/json
   {
     key: 'task-detail',
     module: '任务',
-    name: '异步任务结果查询',
+    name: '任务结果查询：按jobId查看异步结果',
     method: 'GET',
-    url: '/api/v1/devices/tasks/{task_id}',
-    auth: 'JWT 或 API Key，权限 scope=devices:read',
-    backendSource: 'omcgo/internal/task/handler.go',
-    requestExample: `GET /api/v1/devices/tasks/cmd-20260730010000-0001
-Authorization: Bearer <token>`,
+    url: '/api/v1/northbound/v1/job/result/{jobId}',
+    auth: commonApiAuth,
+    backendSource: 'omcgo/internal/northbound/legacy_facade.go + internal/task/service.go',
+    requestExample: `GET /api/v1/northbound/v1/job/result/cmd-20260730010000-0001
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
   "data": {
     "id": "cmd-20260730010000-0001",
+    "jobId": "cmd-20260730010000-0001",
     "device_sn": "1202000240194",
     "method": "SetParameterValues",
     "status": "completed",
+    "legacy_status": "2",
     "result_code": "0",
     "completed_at": "2026-07-30T01:00:04+08:00"
   }
@@ -2548,18 +2383,22 @@ Authorization: Bearer <token>`,
   {
     key: 'device-reboot',
     module: '设备',
-    name: '设备重启',
+    name: '设备重启：下发Reboot任务',
     method: 'POST',
-    url: '/api/v1/devices/{id}/reboot',
-    auth: 'JWT 或 API Key，权限 scope=devices:write',
-    backendSource: 'omcgo/internal/device/device_handler.go',
-    requestExample: `POST /api/v1/devices/9a4d7b2f-2b2c-4f0a-9ec5-5e9b3a8c1001/reboot
-Authorization: Bearer <token>`,
+    url: '/api/v1/northbound/v1/device/reboot/{sn}',
+    auth: commonApiAuth,
+    backendSource: 'omcgo/internal/northbound/legacy_facade.go',
+    requestExample: `POST /api/v1/northbound/v1/device/reboot/1202000240194
+X-Northbound-Token: <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
   "data": {
-    "message": "reboot command queued"
+    "message": "reboot command queued",
+    "task_id": "cmd-20260730010000-0002",
+    "jobId": "cmd-20260730010000-0002",
+    "sn": "1202000240194",
+    "waitTime": 5
   }
 }`,
   },
@@ -2572,7 +2411,7 @@ Authorization: Bearer <token>`,
     auth: 'JWT 或 API Key，权限 scope=alarms:read',
     backendSource: 'omcgo/internal/alarm/handler.go',
     requestExample: `GET /api/v1/alarms/active?page=1&page_size=20&severity=major&device_sn=1202000240194
-Authorization: Bearer <token>`,
+Authorization: Bearer <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -2599,7 +2438,7 @@ Authorization: Bearer <token>`,
     auth: 'JWT 或 API Key，权限 scope=alarms:read',
     backendSource: 'omcgo/internal/alarm/handler.go',
     requestExample: `GET /api/v1/alarms/statistics?device_sn=1202000240194&start_time=2026-07-30T00:00:00%2B08:00&end_time=2026-07-30T01:00:00%2B08:00
-Authorization: Bearer <token>`,
+Authorization: Bearer <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -2622,7 +2461,7 @@ Authorization: Bearer <token>`,
     auth: 'JWT 或 API Key，权限 scope=pm:read',
     backendSource: 'omcgo/internal/pm/handler.go',
     requestExample: `GET /api/v1/pm/metrics/aggregated?granularity=15min&dimension=device&device_sn=1202000240194&metric_paths=KGNB0101,K001&technology=GNB
-Authorization: Bearer <token>`,
+Authorization: Bearer <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -2686,7 +2525,7 @@ Content-Type: application/json
     auth: 'JWT 或 API Key，权限 scope=pm:read',
     backendSource: 'omcgo/internal/mr/handler.go',
     requestExample: `GET /api/v1/mr/data?device_id=9a4d7b2f-2b2c-4f0a-9ec5-5e9b3a8c1001&mr_type=MRO&page=1&page_size=20
-Authorization: Bearer <token>`,
+Authorization: Bearer <access-token>`,
     responseExample: `{
   "ret": 1,
   "msg": "ok",
@@ -2733,134 +2572,137 @@ device_id,mr_type,cell_id,collect_time
 const apiMetaByKey: Record<string, Partial<NorthboundApiRow>> = {
   'device-list': {
     apiKind: '业务复用',
-    oldMapping: '/v1/device/query、/v1/cpe/infos/{sn}',
-    coverage: '部分覆盖',
     fieldContract: '当前契约',
     responseFields: [...listResponseFields, 'data.items[].id', 'data.items[].serial_number', 'data.items[].oui', 'data.items[].product_class', 'data.items[].manufacturer', 'data.items[].model_name', 'data.items[].carrier', 'data.items[].technology', 'data.items[].lifecycle_state', 'data.items[].is_online', 'data.items[].firmware_version', 'data.items[].ip_address', 'data.items[].device_name', 'data.items[].site_id', 'data.items[].last_inform_at?', 'data.items[].group_name?'],
-    compatibilityNote: '当前设备列表按 /api/v1/devices 返回 Device/ListResponse；老系统按 /v1/device/query 透传下游对象，URL 和字段命名不兼容。',
   },
   'device-detail': {
     apiKind: '业务复用',
-    oldMapping: '/v1/cpe/infos/{sn}、/v1/enodeb/infos/status/{sn}',
-    coverage: '部分覆盖',
     fieldContract: '当前契约',
     responseFields: [...currentEnvelopeFields, 'data.device', 'data.device_info', 'data.parameters?', 'data.alarms?'],
-    compatibilityNote: '当前按 device UUID 查询详情；老系统多数接口按 sn 查询。',
   },
   'inventory-export': {
     apiKind: '业务复用',
-    oldMapping: '老 northboundApi 无 Inventory REST；对应当前 Inventory 文件/设备清单导出能力',
-    coverage: '当前新增',
     fieldContract: '当前契约',
     responseFields: ['HTTP 200 CSV stream', 'Content-Type', 'Content-Disposition', 'CSV columns depend on export service'],
-    compatibilityNote: '该接口返回 CSV 文件流，不使用 ret/msg/data JSON envelope。',
   },
   'parameter-tree': {
     apiKind: '业务复用',
-    oldMapping: '/v1/device/parameters/{sn}',
-    coverage: '部分覆盖',
     fieldContract: '当前契约',
     responseFields: [...currentEnvelopeFields, 'data.name', 'data.full_path', 'data.is_leaf', 'data.children[]', 'data.children[].name', 'data.children[].full_path', 'data.children[].value?', 'data.children[].type?', 'data.children[].writable?'],
-    compatibilityNote: '当前参数树按 device UUID + root 查询，老系统按 sn 查询参数快照。',
   },
   'parameter-set': {
     apiKind: '业务复用',
-    oldMapping: '/v1/device/parameters/{sn}、/v1/device/parameters/cellname/{sn}',
-    coverage: '部分覆盖',
     fieldContract: '当前契约',
     responseFields: [...currentEnvelopeFields, 'data.message', 'data.parameters', 'data.reboot_required', 'data.task_id'],
-    compatibilityNote: '当前异步任务 ID 字段为 task_id；老系统通常返回 jobId、sn、waitTime。',
   },
   'config-pull': {
     apiKind: '业务复用',
-    oldMapping: '/v1/device/parameters/query/{sn}',
-    coverage: '部分覆盖',
     fieldContract: '当前契约',
     responseFields: [...currentEnvelopeFields, 'data.device_id', 'data.command_id', 'data.request_id', 'data.batch_count', 'data.status'],
-    compatibilityNote: '当前用于触发 ACS 参数拉取；完整结果需结合任务结果/参数快照查询。',
   },
   'task-detail': {
     apiKind: '业务复用',
-    oldMapping: '/v1/job/result/{jobId}',
-    coverage: '部分覆盖',
     fieldContract: '当前契约',
     responseFields: [...currentEnvelopeFields, 'data.id', 'data.device_id?', 'data.device_sn?', 'data.method?', 'data.status', 'data.result_code?', 'data.error_message?', 'data.created_at?', 'data.completed_at?'],
-    compatibilityNote: '当前任务模型不直接兼容老 JobInfo 字段；如果 OSS 要老字段，需要增加适配 facade。',
   },
   'device-reboot': {
     apiKind: '业务复用',
-    oldMapping: '/v1/device/reboot/{sn}',
-    coverage: '部分覆盖',
     fieldContract: '当前契约',
     responseFields: [...currentEnvelopeFields, 'data.message'],
-    compatibilityNote: '当前按 device UUID 触发 reboot；老系统按 sn。',
   },
   'alarm-active': {
     apiKind: '业务复用',
-    oldMapping: '老 northboundApi 无活动告警查询；告警北向来自 Socket/SNMP/File',
-    coverage: '当前新增',
     fieldContract: '当前契约',
     responseFields: [...listResponseFields, 'data.items[].id', 'data.items[].device_sn', 'data.items[].severity', 'data.items[].alarm_type', 'data.items[].alarm_identifier', 'data.items[].description', 'data.items[].status', 'data.items[].raised_at'],
-    compatibilityNote: '建议 OSS 查询告警优先使用正式北向 /api/v1/northbound/export/alarms。',
   },
   'alarm-statistics': {
     apiKind: '业务复用',
-    oldMapping: '老 northboundApi 无告警统计接口',
-    coverage: '当前新增',
     fieldContract: '当前契约',
     responseFields: [...currentEnvelopeFields, 'data.total', 'data.by_severity'],
-    compatibilityNote: '统计字段以 alarm handler 当前 DTO 为准。',
   },
   'pm-aggregated': {
     apiKind: '业务复用',
-    oldMapping: '老 northboundApi 无 PM REST 查询；PM 文件由北向文件模块生成',
-    coverage: '当前新增',
     fieldContract: '当前契约',
     responseFields: [...listResponseFields, 'data.items[].device_sn?', 'data.items[].metric_path', 'data.items[].value', 'data.items[].bucket_start', 'data.items[].technology?'],
-    compatibilityNote: '该接口可查 counter/KPI 聚合结果，适合作为 UI/临时查询；正式北向 counter 导出见 /api/v1/northbound/export/pm。',
   },
   'pm-export': {
     apiKind: '业务复用',
-    oldMapping: '老 northboundApi 无 PM REST 导出',
-    coverage: '当前新增',
     fieldContract: '当前契约',
     responseFields: [...currentEnvelopeFields, 'data.id', 'data.task_name', 'data.source_type', 'data.format', 'data.status', 'data.row_count', 'data.file_size'],
-    compatibilityNote: '这是 PM 导出任务接口，和正式北向 /northbound/export/pm 的同步 JSON 响应不同。',
   },
   'mr-data': {
     apiKind: '业务复用',
-    oldMapping: '老 northboundApi 无 MR REST 查询',
-    coverage: '当前新增',
     fieldContract: '当前契约',
     responseFields: [...listResponseFields, 'data.items[].device_id', 'data.items[].mr_type', 'data.items[].cell_id?', 'data.items[].collect_time?'],
-    compatibilityNote: 'MR 文件北向仍按文件配置输出 XML；该接口用于查询落库后的 MR 数据。',
   },
   'mr-export': {
     apiKind: '业务复用',
-    oldMapping: '老 northboundApi 无 MR REST 导出',
-    coverage: '当前新增',
     fieldContract: '当前契约',
     responseFields: ['HTTP 200 CSV stream', 'Content-Type', 'Content-Disposition', 'CSV columns depend on MR export service'],
-    compatibilityNote: '该接口返回 CSV 文件流，不使用 ret/msg/data JSON envelope。',
   },
 };
 
+const apiDisplayAliases: Record<string, NorthboundApiDisplayAlias[]> = {};
+
 const legacySupportedApiKeys = new Set([
   'auth-login',
-  'device-list',
-  'device-detail',
+  'nb-sync-full-device',
   'nb-export-config',
+  'device-list',
+  'device-status',
+  'device-detail',
+  'device-register-create',
+  'device-register-list',
+  'device-register-delete',
+  'device-group-tree',
+  'device-group-create',
+  'device-group-update',
+  'device-group-delete',
+  'device-group-add-devices',
   'parameter-tree',
   'parameter-set',
+  'parameter-cellname',
   'config-pull',
   'task-detail',
+  'task-page',
+  'device-task-create',
   'device-reboot',
+  'device-reset',
+  'device-log-collect',
 ]);
 
-const legacySupportedApiRows = northboundApiRows.filter((row) => legacySupportedApiKeys.has(row.key));
+function apiConfigKey(row: NorthboundApiRow): string {
+  return row.configKey ?? row.key;
+}
+
+function apiConfigKeys(rows: NorthboundApiRow[]): string[] {
+  return Array.from(new Set(rows.map(apiConfigKey)));
+}
+
+function expandApiDisplayRows(rows: NorthboundApiRow[]): NorthboundApiRow[] {
+  return rows.flatMap((row) => {
+    const aliases = apiDisplayAliases[row.key];
+    if (!aliases || aliases.length === 0) {
+      return [{ ...row, configKey: row.configKey ?? row.key }];
+    }
+    return aliases.map((alias) => ({
+      ...row,
+      ...alias,
+      configKey: row.key,
+      apiKind: alias.apiKind ?? row.apiKind,
+      module: alias.module ?? row.module,
+      auth: alias.auth ?? row.auth,
+      backendSource: alias.backendSource ?? row.backendSource,
+      fieldContract: alias.fieldContract ?? row.fieldContract,
+      responseFields: alias.responseFields ?? row.responseFields,
+    }));
+  });
+}
+
+const legacySupportedApiRows = expandApiDisplayRows(northboundApiRows.filter((row) => legacySupportedApiKeys.has(row.key)));
 
 const defaultApiEnabled = Object.fromEntries(
-  legacySupportedApiRows.map((row) => [row.key, false]),
+  apiConfigKeys(legacySupportedApiRows).map((key) => [key, false]),
 ) as Record<string, boolean>;
 
 const defaultEditorPeriodRows: ScenarioPeriodRow[] = [
@@ -3890,55 +3732,52 @@ function mapApiConfig(row: NorthboundAPIConfig): NorthboundApiRow {
   const fallback = northboundApiRows.find((item) => item.key === row.key);
   return {
     key: row.key,
+    configKey: row.key,
     apiKind: (row.kind as ApiKind) || fallback?.apiKind,
-    module: fallback?.module ?? row.data_type,
+    module: fallback?.module ?? apiModuleLabel(row.data_type),
     name: row.name,
     method: row.method,
     url: row.path,
     auth: fallback?.auth ?? commonApiAuth,
     backendSource: row.source || fallback?.backendSource || '',
-    oldMapping: fallback?.oldMapping,
-    coverage: fallback?.coverage ?? '旧能力对齐',
     fieldContract: fallback?.fieldContract ?? '当前契约',
     responseFields: (row.response_contract?.fields as string[] | undefined) ?? fallback?.responseFields,
-    compatibilityNote: fallback?.compatibilityNote,
     requestExample: fallback?.requestExample ?? `${row.method} ${row.path}`,
     responseExample: fallback?.responseExample ?? '{ "ret": 1, "msg": "ok", "data": {} }',
   };
 }
 
-function mapApiClient(row: NorthboundAPIClient): ApiClientRow {
+function apiModuleLabel(dataType: string): string {
+  const labels: Record<string, string> = {
+    auth: '鉴权',
+    device: '设备',
+    group: '设备组',
+    config: '配置',
+    task: '任务',
+    advanced_task: '高级任务',
+    log_collect: '日志采集',
+  };
+  return labels[dataType] ?? dataType;
+}
+
+function mapApiUser(row: NorthboundAPIUser): ApiUserRow {
   return {
-    clientKey: row.client_key,
-    name: row.name || row.client_key,
+    username: row.username,
     enabled: row.enabled,
-    tokenSecret: row.token_set ? '已加密存储' : '',
-    tokenSet: Boolean(row.token_set),
-    allowedApiKeys: (row.allowed_api_keys ?? []).join('\n'),
-    ipWhitelist: (row.ip_whitelist ?? []).join('\n'),
-    expiresAt: row.expires_at,
+    password: row.password || (row.password_set ? apiUserPasswordMask : ''),
+    passwordSet: Boolean(row.password_set),
+    createdAt: row.created_at,
   };
 }
 
-function serializeApiClients(rows: ApiClientRow[]) {
+function serializeApiUsers(rows: ApiUserRow[]) {
   return {
     items: rows.map((row) => ({
-      client_key: row.clientKey.trim(),
-      name: row.name.trim() || row.clientKey.trim(),
+      username: row.username.trim(),
       enabled: row.enabled,
-      token_secret: row.tokenSecret === '已加密存储' ? '' : row.tokenSecret.trim(),
-      allowed_api_keys: splitTextareaList(row.allowedApiKeys),
-      ip_whitelist: splitTextareaList(row.ipWhitelist),
-      expires_at: row.expiresAt?.trim() || undefined,
+      password: row.password === apiUserPasswordMask ? '' : row.password.trim(),
     })),
   };
-}
-
-function splitTextareaList(value: string): string[] {
-  return value
-    .split(/[\n,，]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 // Derives the field-target keys (domain:objectCode:scope:profile) that belong to a
@@ -4197,6 +4036,7 @@ function buildSnmpReportStatus(row: SnmpAlarmTargetRow): ReportStatusInfo {
 
 function buildApiReportStatus(row: NorthboundApiRow): ReportStatusInfo {
   const meta = getApiMeta(row);
+  const responseFields = row.responseFields ?? meta.responseFields ?? currentEnvelopeFields;
   return {
     key: `api:${row.key}`,
     capabilityName: row.name,
@@ -4206,14 +4046,14 @@ function buildApiReportStatus(row: NorthboundApiRow): ReportStatusInfo {
     artifactType: 'message',
     artifactName: `${row.method} ${row.name}`,
     artifactPath: row.url,
-    size: `${(row.responseFields ?? meta.responseFields ?? []).length} 字段`,
-    targetSummary: meta.coverage,
-    detail: meta.compatibilityNote,
+    size: `${responseFields.length} 字段`,
+    targetSummary: `${row.module || '北向 API'} / ${meta.fieldContract}`,
+    detail: '接口契约检查结果来自当前系统配置。',
     payload: JSON.stringify({
       method: row.method,
       url: row.url,
       request: normalizeLegacyApiText(row.requestExample),
-      response_fields: row.responseFields ?? meta.responseFields ?? currentEnvelopeFields,
+      response_fields: responseFields,
     }, null, 2),
   };
 }
@@ -4678,7 +4518,7 @@ function eventDetailText(event: NorthboundPageConfigEvent): string {
   if (event.capability === 'delivery') return 'FTP/SFTP 目标连接探测结果来自后端。';
   if (event.capability === 'snmp') return 'SNMP 告警字段和 OID 顺序按 omcAlarmMIB.mib 生成。';
   if (event.capability === 'socket') return 'Socket 服务端登录、心跳、同步和实时告警推送结果可查看。';
-  if (event.capability === 'api') return '北向 API 仅展示老系统支持且当前 xomc 能满足的接口契约。';
+  if (event.capability === 'api') return '北向 API 接口契约检查结果可查看。';
   return '北向页面化配置事件。';
 }
 
@@ -4828,28 +4668,14 @@ function getApiMeta(row: NorthboundApiRow) {
   const meta = apiMetaByKey[row.key] ?? {};
   return {
     apiKind: row.apiKind ?? meta.apiKind ?? '业务复用',
-    oldMapping: row.oldMapping ?? meta.oldMapping ?? '当前 xomc 接口，老系统无直接对应',
-    coverage: row.coverage ?? meta.coverage ?? '部分覆盖',
     fieldContract: row.fieldContract ?? meta.fieldContract ?? '当前契约',
     responseFields: row.responseFields ?? meta.responseFields ?? currentEnvelopeFields,
-    compatibilityNote: row.compatibilityNote ?? meta.compatibilityNote ?? '以当前 xomc 后端 DTO 为准。',
   };
 }
 
 function normalizeLegacyApiText(value: string) {
   return value
-    .replaceAll('JWT 或 X-API-Key；/api/v1 统一鉴权 + Casbin 端点权限', 'JWT；/api/v1 统一鉴权 + Casbin 端点权限')
-    .replaceAll('JWT 或 API Key，', 'JWT，')
-    .replaceAll('X-API-Key: <api-key>', 'Authorization: Bearer <token>');
-}
-
-function apiKindTag(value: ApiKind) {
-  const colors: Record<ApiKind, string> = {
-    正式北向: 'blue',
-    业务复用: 'cyan',
-    鉴权管理: 'geekblue',
-  };
-  return <Tag color={colors[value]}>{value}</Tag>;
+    .replaceAll('JWT 或 API Key，', 'JWT，');
 }
 
 function statusTag(enabled: boolean) {
@@ -5414,9 +5240,15 @@ export default function NorthboundPageConfig() {
   const [inventoryCandidateKey, setInventoryCandidateKey] = useState<string>();
   const [apiEnabled, setApiEnabled] = useState<Record<string, boolean>>(defaultApiEnabled);
   const [apiRows, setApiRows] = useState<NorthboundApiRow[]>(legacySupportedApiRows);
-  const [apiClients, setApiClients] = useState<ApiClientRow[]>([]);
-  const [apiClientSaving, setApiClientSaving] = useState(false);
+  const [apiUsers, setApiUsers] = useState<ApiUserRow[]>([]);
+  const [apiUserSaving, setApiUserSaving] = useState(false);
+  const [apiSwitchSaving, setApiSwitchSaving] = useState(false);
+  const [apiUserPasswordVisible, setApiUserPasswordVisible] = useState<Record<string, boolean>>({});
+  const [apiCatalogOpen, setApiCatalogOpen] = useState(false);
   const [selectedApi, setSelectedApi] = useState<NorthboundApiRow | null>(null);
+  const pageConfigLoadingRef = useRef(false);
+  const apiUserDirtyRef = useRef(false);
+  const apiUserSavingRef = useRef(false);
   const [selectedReportStatus, setSelectedReportStatus] = useState<ReportStatusInfo | null>(null);
   const [reportRunList, setReportRunList] = useState<NorthboundFileRun[]>([]);
   const [reportEventList, setReportEventList] = useState<NorthboundPageConfigEvent[]>([]);
@@ -5451,9 +5283,17 @@ export default function NorthboundPageConfig() {
   const [pmMetricRows, setPmMetricRows] = useState<PmMetric[]>([]);
   const [pmLoading, setPmLoading] = useState(true);
   const [pageConfigLoading, setPageConfigLoading] = useState(false);
+  const apiManagedKeys = useMemo(() => apiConfigKeys(apiRows), [apiRows]);
+  const apiEnabledCount = useMemo(
+    () => apiManagedKeys.filter((key) => apiEnabled[key]).length,
+    [apiEnabled, apiManagedKeys],
+  );
+  const apiGloballyEnabled = apiManagedKeys.length > 0 && apiEnabledCount === apiManagedKeys.length;
+  const apiPartiallyEnabled = apiEnabledCount > 0 && apiEnabledCount < apiManagedKeys.length;
 
   const loadPageConfig = useCallback(async (silent = false) => {
-    setPageConfigLoading(true);
+    pageConfigLoadingRef.current = true;
+    if (!silent) setPageConfigLoading(true);
     try {
       const [
         fileProfileResp,
@@ -5464,7 +5304,7 @@ export default function NorthboundPageConfig() {
         snmpResp,
         socketResp,
         apiResp,
-        apiClientResp,
+        apiUserResp,
       ] = await Promise.all([
         northboundPageConfigApi.getFileProfiles(),
         northboundPageConfigApi.getInventoryProfiles(),
@@ -5474,7 +5314,7 @@ export default function NorthboundPageConfig() {
         northboundPageConfigApi.getSNMPAlarmTargets(),
         northboundPageConfigApi.getSocketAlarmConfigs(),
         northboundPageConfigApi.getAPIConfigs(),
-        northboundPageConfigApi.getAPIClients(),
+        northboundPageConfigApi.getAPIUsers(),
       ]);
       const nextFileProfiles = fileProfileResp.items.map(mapApiFileProfile);
       const nextInventoryProfiles = inventoryProfileResp.items
@@ -5544,11 +5384,13 @@ export default function NorthboundPageConfig() {
         }));
       }
 
-      const nextApiRows = apiResp.items.map(mapApiConfig);
+      const nextApiRows = expandApiDisplayRows(apiResp.items.map(mapApiConfig));
       if (nextApiRows.length > 0) {
-      setApiRows(nextApiRows);
-      setApiEnabled(Object.fromEntries(apiResp.items.map((row) => [row.key, row.enabled])));
-      setApiClients(apiClientResp.items.map(mapApiClient));
+        setApiRows(nextApiRows);
+        setApiEnabled(Object.fromEntries(apiResp.items.map((row) => [row.key, row.enabled])));
+      }
+      if (!apiUserDirtyRef.current && !apiUserSavingRef.current) {
+        setApiUsers(apiUserResp.items.map(mapApiUser));
       }
 
       if (!silent) void message.success('北向页面配置已刷新');
@@ -5557,7 +5399,8 @@ export default function NorthboundPageConfig() {
         void message.error('北向页面配置加载失败，已保留当前页面数据');
       }
     } finally {
-      setPageConfigLoading(false);
+      pageConfigLoadingRef.current = false;
+      if (!silent) setPageConfigLoading(false);
     }
   }, []);
 
@@ -5581,6 +5424,15 @@ export default function NorthboundPageConfig() {
 
   useEffect(() => {
     void loadPageConfig(true);
+  }, [loadPageConfig]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      if (pageConfigLoadingRef.current || apiUserDirtyRef.current || apiUserSavingRef.current) return;
+      void loadPageConfig(true);
+    }, 30000);
+    return () => window.clearInterval(timer);
   }, [loadPageConfig]);
 
   const selectedInventoryConfig = useMemo(
@@ -6536,55 +6388,67 @@ export default function NorthboundPageConfig() {
       });
   };
 
-  const persistApiEnabled = (row: NorthboundApiRow, checked: boolean) => {
-    const previous = Boolean(apiEnabled[row.key]);
-    setApiEnabled((prev) => ({ ...prev, [row.key]: checked }));
-    void northboundPageConfigApi.updateAPIConfig(row.key, checked)
-      .then((config) => {
-        setApiRows((rows) => rows.map((item) => (item.key === config.key ? mapApiConfig(config) : item)));
-        setApiEnabled((prev) => ({ ...prev, [config.key]: config.enabled }));
+  const persistAllApiEnabled = (checked: boolean) => {
+    const previous = { ...apiEnabled };
+    setApiSwitchSaving(true);
+    setApiEnabled((prev) => ({
+      ...prev,
+      ...Object.fromEntries(apiManagedKeys.map((key) => [key, checked])),
+    }));
+    void northboundPageConfigApi.updateAllAPIConfigs(checked)
+      .then((resp) => {
+        const configRows = resp.items.map(mapApiConfig);
+        setApiRows(expandApiDisplayRows(configRows));
+        setApiEnabled(Object.fromEntries(resp.items.map((row) => [row.key, row.enabled])));
+        void message.success(`北向 API 总开关已${checked ? '启用' : '停用'}`);
       })
       .catch(() => {
-        setApiEnabled((prev) => ({ ...prev, [row.key]: previous }));
-        void message.error(`${row.name} API 启停状态保存失败`);
-      });
+        setApiEnabled(previous);
+        void message.error('北向 API 总开关保存失败');
+      })
+      .finally(() => setApiSwitchSaving(false));
   };
 
-  const patchApiClient = (clientKey: string, patch: Partial<ApiClientRow>) => {
-    setApiClients((rows) => rows.map((row) => (row.clientKey === clientKey ? { ...row, ...patch } : row)));
+  const patchApiUser = (username: string, patch: Partial<ApiUserRow>) => {
+    apiUserDirtyRef.current = true;
+    setApiUsers((rows) => rows.map((row) => (row.username === username ? { ...row, ...patch } : row)));
   };
 
-  const addApiClient = () => {
-    const index = apiClients.length + 1;
-    setApiClients((rows) => [
+  const addApiUser = () => {
+    const index = apiUsers.length + 1;
+    apiUserDirtyRef.current = true;
+    setApiUsers((rows) => [
       ...rows,
       {
-        clientKey: `northbound-client-${index}`,
-        name: `北向客户端 ${index}`,
+        username: `north_api_${index}`,
         enabled: false,
-        tokenSecret: '',
-        tokenSet: false,
-        allowedApiKeys: apiRows.map((row) => row.key).join('\n'),
-        ipWhitelist: '',
+        password: '',
+        passwordSet: false,
       },
     ]);
   };
 
-  const removeApiClient = (clientKey: string) => {
-    setApiClients((rows) => rows.filter((row) => row.clientKey !== clientKey));
+  const removeApiUser = (username: string) => {
+    apiUserDirtyRef.current = true;
+    setApiUsers((rows) => rows.filter((row) => row.username !== username));
   };
 
-  const saveApiClients = () => {
-    setApiClientSaving(true);
-    void northboundPageConfigApi.replaceAPIClients(serializeApiClients(apiClients))
+  const saveApiUsers = () => {
+    apiUserSavingRef.current = true;
+    setApiUserSaving(true);
+    void northboundPageConfigApi.replaceAPIUsers(serializeApiUsers(apiUsers))
       .then((resp) => {
-        setApiClients(resp.items.map(mapApiClient));
-        void message.success('API client 配置已保存');
+        apiUserDirtyRef.current = false;
+        setApiUsers(resp.items.map(mapApiUser));
+        void message.success('北向 API 用户已保存');
       })
       .catch(() => {
-        void message.error('API client 配置保存失败');
+        void message.error('北向 API 用户保存失败');
       })
-      .finally(() => setApiClientSaving(false));
+      .finally(() => {
+        apiUserSavingRef.current = false;
+        setApiUserSaving(false);
+      });
   };
 
   const testSocketAlarm = (row: SocketAlarmConfigRow) => {
@@ -6614,7 +6478,7 @@ export default function NorthboundPageConfig() {
   };
 
   const testApiContract = (row: NorthboundApiRow) => {
-    void northboundPageConfigApi.testAPIConfig(row.key)
+    void northboundPageConfigApi.testAPIConfig(apiConfigKey(row))
       .then((event) => {
         openSingleEventReport(event, row.name);
         void message.success(`${row.name} 契约检查已记录`);
@@ -7018,50 +6882,34 @@ export default function NorthboundPageConfig() {
   const apiColumns: ColumnsType<NorthboundApiRow> = [
     {
       title: '操作',
-      width: 104,
+      width: 64,
       fixed: 'left',
       render: (_, row) => (
-        <div className={styles.rowControl}>
-          <Switch
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: [
+              { key: 'view', icon: <EyeOutlined />, label: '查看' },
+              { key: 'report', icon: <FileSearchOutlined />, label: '契约结果' },
+              { key: 'test', icon: <PlayCircleOutlined />, label: '检查契约' },
+            ],
+            onClick: ({ key, domEvent }) => {
+              domEvent.stopPropagation();
+              if (key === 'view') setSelectedApi(row);
+              if (key === 'report') showLatestEventReport('api', apiConfigKey(row), effectiveReportStatus(buildApiReportStatus(row), Boolean(apiEnabled[apiConfigKey(row)])));
+              if (key === 'test') testApiContract(row);
+            },
+          }}
+        >
+          <Button
+            aria-label={`更多操作 ${row.name}`}
+            type="text"
             size="small"
-            checked={apiEnabled[row.key]}
-            checkedChildren="开"
-            unCheckedChildren="关"
-            onClick={(_, event) => event.stopPropagation()}
-            onChange={(checked) => persistApiEnabled(row, checked)}
+            icon={<MoreOutlined />}
+            onClick={(event) => event.stopPropagation()}
           />
-          <Dropdown
-            trigger={['click']}
-            menu={{
-              items: [
-                { key: 'view', icon: <EyeOutlined />, label: '查看' },
-                { key: 'report', icon: <FileSearchOutlined />, label: '契约结果' },
-                { key: 'test', icon: <PlayCircleOutlined />, label: '检查契约' },
-              ],
-              onClick: ({ key, domEvent }) => {
-                domEvent.stopPropagation();
-                if (key === 'view') setSelectedApi(row);
-                if (key === 'report') showLatestEventReport('api', row.key, effectiveReportStatus(buildApiReportStatus(row), Boolean(apiEnabled[row.key])));
-                if (key === 'test') testApiContract(row);
-              },
-            }}
-          >
-            <Button
-              aria-label={`更多操作 ${row.name}`}
-              type="text"
-              size="small"
-              icon={<MoreOutlined />}
-              onClick={(event) => event.stopPropagation()}
-            />
-          </Dropdown>
-        </div>
+        </Dropdown>
       ),
-    },
-    {
-      title: '类型',
-      width: 108,
-      fixed: 'left',
-      render: (_, row) => apiKindTag(getApiMeta(row).apiKind as ApiKind),
     },
     {
       title: '模块',
@@ -7072,8 +6920,12 @@ export default function NorthboundPageConfig() {
     {
       title: '接口名称',
       dataIndex: 'name',
-      width: 180,
-      render: (value: string) => <Typography.Text strong ellipsis>{value}</Typography.Text>,
+      width: 260,
+      render: (value: string) => (
+        <Tooltip title={value}>
+          <Typography.Text strong ellipsis>{value}</Typography.Text>
+        </Tooltip>
+      ),
     },
     {
       title: '方法',
@@ -7087,15 +6939,9 @@ export default function NorthboundPageConfig() {
       width: 440,
       render: (value: string) => <Typography.Text className={styles.monoText} ellipsis>{value}</Typography.Text>,
     },
-    {
-      title: '鉴权',
-      dataIndex: 'auth',
-      width: 240,
-      render: (value: string) => <Typography.Text ellipsis>{normalizeLegacyApiText(value)}</Typography.Text>,
-    },
   ];
 
-  const apiClientColumns: ColumnsType<ApiClientRow> = [
+  const apiUserColumns: ColumnsType<ApiUserRow> = [
     {
       title: '启用',
       dataIndex: 'enabled',
@@ -7107,81 +6953,57 @@ export default function NorthboundPageConfig() {
           checked={value}
           checkedChildren="开"
           unCheckedChildren="关"
-          onChange={(enabled) => patchApiClient(row.clientKey, { enabled })}
+          onChange={(enabled) => patchApiUser(row.username, { enabled })}
         />
       ),
     },
     {
-      title: 'Client Key',
-      dataIndex: 'clientKey',
+      title: '用户名',
+      dataIndex: 'username',
       width: 210,
       fixed: 'left',
       render: (value: string, row) => (
         <Input
           value={value}
           className={styles.monoText}
-          onChange={(event) => patchApiClient(row.clientKey, { clientKey: event.target.value })}
+          onChange={(event) => patchApiUser(row.username, { username: event.target.value })}
         />
       ),
     },
     {
-      title: '名称',
-      dataIndex: 'name',
-      width: 180,
-      render: (value: string, row) => (
-        <Input value={value} onChange={(event) => patchApiClient(row.clientKey, { name: event.target.value })} />
-      ),
-    },
-    {
-      title: 'Token',
-      dataIndex: 'tokenSecret',
+      title: '密码',
+      dataIndex: 'password',
       width: 220,
-      render: (value: string, row) => (
-        <Input.Password
-          placeholder={row.tokenSet ? '未修改保持原 token' : '请输入 token'}
-          onChange={(event) => patchApiClient(row.clientKey, { tokenSecret: event.target.value || value })}
-        />
-      ),
+      render: (value: string, row) => {
+        const visible = Boolean(apiUserPasswordVisible[row.username]);
+        return (
+          <Input.Password
+            value={visible ? value : (value ? apiUserPasswordMask : '')}
+            placeholder={row.passwordSet ? '未修改保持原密码' : '请输入密码'}
+            visibilityToggle={{
+              visible,
+              onVisibleChange: (nextVisible) => {
+                setApiUserPasswordVisible((prev) => ({ ...prev, [row.username]: nextVisible }));
+              },
+            }}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              patchApiUser(row.username, {
+                password: !visible && nextValue.startsWith(apiUserPasswordMask)
+                  ? nextValue.slice(apiUserPasswordMask.length)
+                  : nextValue,
+              });
+            }}
+          />
+        );
+      },
     },
     {
-      title: '允许接口',
-      dataIndex: 'allowedApiKeys',
-      width: 260,
-      render: (value: string, row) => (
-        <Input.TextArea
-          value={value}
-          autoSize={{ minRows: 2, maxRows: 4 }}
-          className={styles.monoText}
-          placeholder="留空表示允许全部已启用 API"
-          onChange={(event) => patchApiClient(row.clientKey, { allowedApiKeys: event.target.value })}
-        />
-      ),
-    },
-    {
-      title: 'IP 白名单',
-      dataIndex: 'ipWhitelist',
-      width: 240,
-      render: (value: string, row) => (
-        <Input.TextArea
-          value={value}
-          autoSize={{ minRows: 2, maxRows: 4 }}
-          className={styles.monoText}
-          placeholder="单 IP 或 CIDR；留空不限"
-          onChange={(event) => patchApiClient(row.clientKey, { ipWhitelist: event.target.value })}
-        />
-      ),
-    },
-    {
-      title: '过期时间',
-      dataIndex: 'expiresAt',
-      width: 210,
-      render: (value: string | undefined, row) => (
-        <Input
-          value={value}
-          className={styles.monoText}
-          placeholder="2026-12-31T16:00:00Z"
-          onChange={(event) => patchApiClient(row.clientKey, { expiresAt: event.target.value })}
-        />
+      title: '创建时间',
+      dataIndex: 'createdAt',
+      width: 180,
+      render: (value: string | undefined) => (
+        <span className={styles.monoText}>{formatRunTime(value)}</span>
       ),
     },
     {
@@ -7189,13 +7011,13 @@ export default function NorthboundPageConfig() {
       width: 74,
       fixed: 'right',
       render: (_, row) => (
-        <Tooltip title="删除 client">
+        <Tooltip title="删除用户">
           <Button
             danger
             size="small"
             type="text"
             icon={<DeleteOutlined />}
-            onClick={() => removeApiClient(row.clientKey)}
+            onClick={() => removeApiUser(row.username)}
           />
         </Tooltip>
       ),
@@ -7728,45 +7550,66 @@ export default function NorthboundPageConfig() {
 
   const apiTab = (
     <div className={styles.tabContent}>
-      <Table<NorthboundApiRow>
-        className={styles.compactScenarioTable}
-        columns={apiColumns}
-        dataSource={apiRows}
-        rowKey="key"
-        size="small"
-        pagination={renderTablePagination('刷新北向 API')}
-        scroll={{ x: 1254, y: 560 }}
-        rowClassName={(row) => (selectedApi?.key === row.key ? styles.selectedRow : '')}
-        onRow={(row) => ({ onClick: () => setSelectedApi(row) })}
-      />
+      <div className={styles.apiToolbar}>
+        <Space>
+          <Switch
+            checked={apiGloballyEnabled}
+            loading={apiSwitchSaving}
+            checkedChildren="开"
+            unCheckedChildren="关"
+            onChange={persistAllApiEnabled}
+          />
+          <Typography.Text strong>北向 API 总开关</Typography.Text>
+          <Tag color={apiGloballyEnabled ? 'success' : apiPartiallyEnabled ? 'warning' : 'default'}>
+            {apiGloballyEnabled ? '已启用' : apiPartiallyEnabled ? '部分开启' : '已停用'}
+          </Tag>
+        </Space>
+        <Space>
+          <Button
+            size="small"
+            icon={<FileSearchOutlined />}
+            onClick={() => setApiCatalogOpen(true)}
+          >
+            查看接口清单
+          </Button>
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={pageConfigLoading}
+            onClick={() => loadPageConfig(false)}
+          >
+            刷新
+          </Button>
+        </Space>
+      </div>
       <div className={styles.editorSection}>
         <div className={styles.editorSectionHeader}>
           <Space>
             <SafetyCertificateOutlined />
-            <Typography.Text strong>API client 与白名单</Typography.Text>
+            <Typography.Text strong>北向 API 用户</Typography.Text>
           </Space>
           <Space>
-            <Button size="small" icon={<PlusOutlined />} onClick={addApiClient}>
+            <Button size="small" icon={<PlusOutlined />} onClick={addApiUser}>
               新增
             </Button>
             <Button
               size="small"
               type="primary"
-              loading={apiClientSaving}
-              onClick={saveApiClients}
+              loading={apiUserSaving}
+              onClick={saveApiUsers}
             >
               保存
             </Button>
           </Space>
         </div>
-        <Table<ApiClientRow>
-          columns={apiClientColumns}
-          dataSource={apiClients}
-          rowKey="clientKey"
+        <Table<ApiUserRow>
+          columns={apiUserColumns}
+          dataSource={apiUsers}
+          rowKey="username"
           size="small"
           pagination={false}
-          scroll={{ x: 1470, y: 260 }}
-          locale={{ emptyText: '未配置 API client，北向 API 使用现有兼容模式' }}
+          scroll={{ x: 720, y: 260 }}
+          locale={{ emptyText: '未配置北向 API 用户，外部系统不能调用北向 API' }}
         />
       </div>
     </div>
@@ -7989,23 +7832,43 @@ export default function NorthboundPageConfig() {
       </Drawer>
 
       <Drawer
+        title="北向 API 接口清单"
+        open={apiCatalogOpen}
+        onClose={() => setApiCatalogOpen(false)}
+        size="large"
+        rootClassName={styles.inventoryDrawer}
+        destroyOnClose
+        extra={(
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={pageConfigLoading}
+            onClick={() => loadPageConfig(false)}
+          >
+            刷新
+          </Button>
+        )}
+      >
+        <Table<NorthboundApiRow>
+          className={styles.compactScenarioTable}
+          columns={apiColumns}
+          dataSource={apiRows}
+          rowKey="key"
+          size="small"
+          pagination={renderTablePagination('刷新北向 API')}
+          scroll={{ x: 866, y: 560 }}
+          rowClassName={(row) => (selectedApi?.key === row.key ? styles.selectedRow : '')}
+          onRow={(row) => ({ onClick: () => setSelectedApi(row) })}
+        />
+      </Drawer>
+
+      <Drawer
         title={selectedApi ? `${selectedApi.name} API` : '北向 API'}
         open={Boolean(selectedApi)}
         onClose={() => setSelectedApi(null)}
         size="large"
         rootClassName={styles.inventoryDrawer}
         destroyOnClose
-        extra={selectedApi ? (
-          <Space>
-            <Typography.Text type="secondary">接口开关</Typography.Text>
-            <Switch
-              checked={apiEnabled[selectedApi.key]}
-              checkedChildren="开"
-              unCheckedChildren="关"
-              onChange={(checked) => persistApiEnabled(selectedApi, checked)}
-            />
-          </Space>
-        ) : undefined}
       >
         {selectedApi && (
           <Space orientation="vertical" size={16} className={styles.drawerBody}>
@@ -8016,13 +7879,11 @@ export default function NorthboundPageConfig() {
               <Descriptions bordered size="small" column={2}>
                 <Descriptions.Item label="接口名称">{selectedApi.name}</Descriptions.Item>
                 <Descriptions.Item label="模块">{selectedApi.module}</Descriptions.Item>
-                <Descriptions.Item label="接口类型">{apiKindTag(getApiMeta(selectedApi).apiKind as ApiKind)}</Descriptions.Item>
                 <Descriptions.Item label="方法">{apiMethodTag(selectedApi.method)}</Descriptions.Item>
-                <Descriptions.Item label="启用配置">{statusTag(Boolean(apiEnabled[selectedApi.key]))}</Descriptions.Item>
+                <Descriptions.Item label="总开关状态">{statusTag(Boolean(apiEnabled[apiConfigKey(selectedApi)]))}</Descriptions.Item>
                 <Descriptions.Item label="接口 URL" span={2}>
                   <span className={styles.monoText}>{selectedApi.url}</span>
                 </Descriptions.Item>
-                <Descriptions.Item label="鉴权" span={2}>{normalizeLegacyApiText(selectedApi.auth)}</Descriptions.Item>
                 <Descriptions.Item label="后端实现" span={2}>
                   <span className={styles.monoText}>{selectedApi.backendSource}</span>
                 </Descriptions.Item>

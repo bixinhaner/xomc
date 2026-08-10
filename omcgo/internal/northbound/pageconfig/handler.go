@@ -56,8 +56,11 @@ func (h *Handler) RegisterRoutes(nb *gin.RouterGroup) {
 		pc.POST("/alarm/socket/configs/:key/test", h.TestSocketAlarmConfig)
 		pc.PUT("/alarm/socket/configs/:key", h.UpdateSocketAlarmConfig)
 		pc.GET("/api/configs", h.ListAPIConfigs)
+		pc.PUT("/api/configs", h.UpdateAllAPIConfigs)
 		pc.POST("/api/configs/:key/test", h.TestAPIConfig)
 		pc.PUT("/api/configs/:key", h.UpdateAPIConfig)
+		pc.GET("/api/users", h.ListAPIUsers)
+		pc.PUT("/api/users", h.ReplaceAPIUsers)
 		pc.GET("/api/clients", h.ListAPIClients)
 		pc.PUT("/api/clients", h.ReplaceAPIClients)
 		pc.GET("/events", h.ListEvents)
@@ -471,6 +474,27 @@ func (h *Handler) UpdateAPIConfig(c *gin.Context) {
 	response.OK(c, item)
 }
 
+func (h *Handler) UpdateAllAPIConfigs(c *gin.Context) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid request: "+err.Error())
+		return
+	}
+	items, err := h.svc.UpdateAllAPIConfigs(c.Request.Context(), req.Enabled)
+	h.auditPageConfig(c, "update_all_api_configs", "api-configs", err == nil, err, map[string]interface{}{
+		"capability": "api",
+		"enabled":    req.Enabled,
+		"total":      len(items),
+	})
+	if err != nil {
+		h.handleUpdateError(c, "update northbound API configs failed", err)
+		return
+	}
+	response.OK(c, gin.H{"items": items, "total": len(items)})
+}
+
 func (h *Handler) ListAPIClients(c *gin.Context) {
 	items, err := h.svc.ListAPIClients(c.Request.Context())
 	if err != nil {
@@ -478,6 +502,52 @@ func (h *Handler) ListAPIClients(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"items": items, "total": len(items)})
+}
+
+func (h *Handler) ListAPIUsers(c *gin.Context) {
+	items, err := h.svc.ListAPIUsers(c.Request.Context())
+	if err != nil {
+		h.handleUpdateError(c, "list northbound API users failed", err)
+		return
+	}
+	response.OK(c, gin.H{"items": items, "total": len(items)})
+}
+
+func (h *Handler) ReplaceAPIUsers(c *gin.Context) {
+	var req ReplaceAPIUsersRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid request: "+err.Error())
+		return
+	}
+	items, err := h.svc.ReplaceAPIUsers(c.Request.Context(), req)
+	h.auditPageConfig(c, "replace_api_users", "api-users", err == nil, err, map[string]interface{}{
+		"capability":    "api",
+		"user_count":    len(req.Items),
+		"enabled_count": enabledAPIUserCount(req.Items),
+	})
+	if err != nil {
+		h.handleUpdateError(c, "replace northbound API users failed", err)
+		return
+	}
+	response.OK(c, gin.H{"items": items, "total": len(items)})
+}
+
+func (h *Handler) LoginAPIUser(c *gin.Context) {
+	var req APIUserLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid request: "+err.Error())
+		return
+	}
+	token, err := h.svc.LoginAPIUser(c.Request.Context(), req)
+	if err != nil {
+		if errors.Is(err, commonerrors.ErrUnauthorized) {
+			response.Fail(c, http.StatusUnauthorized, err.Error())
+			return
+		}
+		h.handleUpdateError(c, "northbound API login failed", err)
+		return
+	}
+	response.OK(c, token)
 }
 
 func (h *Handler) ReplaceAPIClients(c *gin.Context) {
@@ -636,6 +706,16 @@ func enabledAPIClientCount(clients []APIClient) int {
 	total := 0
 	for _, client := range clients {
 		if client.Enabled {
+			total++
+		}
+	}
+	return total
+}
+
+func enabledAPIUserCount(users []APIUser) int {
+	total := 0
+	for _, user := range users {
+		if user.Enabled {
 			total++
 		}
 	}

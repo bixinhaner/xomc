@@ -46,6 +46,7 @@ type fakeRepository struct {
 	socketConfigs     []SocketAlarmConfig
 	apiConfigs        []APIConfig
 	apiClients        []APIClient
+	apiTokens         map[string]string
 	events            []PageConfigEvent
 	deviceRows        []ExportDataRow
 	pmRows            []ExportDataRow
@@ -119,6 +120,7 @@ func newFakeRepository() *fakeRepository {
 		snmpTargets:       defaultSNMPAlarmTargets(),
 		socketConfigs:     defaultSocketAlarmConfigs(),
 		apiConfigs:        defaultAPIConfigs(),
+		apiTokens:         map[string]string{},
 		deviceRows: []ExportDataRow{{
 			"device.serial_number":         "SN0001",
 			"device.manufacturer":          "Baicells",
@@ -496,6 +498,76 @@ func (r *fakeRepository) ReplaceAPIClients(_ context.Context, req ReplaceAPIClie
 	return r.ListAPIClients(context.Background())
 }
 
+func (r *fakeRepository) ListAPIUsers(context.Context) ([]APIUser, error) {
+	out := make([]APIUser, 0, len(r.apiClients))
+	for _, client := range r.apiClients {
+		out = append(out, APIUser{
+			ID:          client.ID,
+			Username:    client.ClientKey,
+			Enabled:     client.Enabled,
+			Password:    client.TokenSecret,
+			PasswordSet: strings.TrimSpace(client.TokenSecret) != "" || client.TokenSet,
+			CreatedAt:   client.CreatedAt,
+			UpdatedAt:   client.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+func (r *fakeRepository) ReplaceAPIUsers(_ context.Context, req ReplaceAPIUsersRequest) ([]APIUser, error) {
+	next := make([]APIClient, 0, len(req.Items))
+	currentPasswords := map[string]string{}
+	for _, client := range r.apiClients {
+		currentPasswords[client.ClientKey] = client.TokenSecret
+	}
+	for _, user := range req.Items {
+		user = normalizeAPIUser(user)
+		password := credentialToPersist(user.Password, currentPasswords[user.Username])
+		if err := validateAPIUser(APIUser{Username: user.Username, Enabled: user.Enabled, Password: password}); err != nil {
+			return nil, err
+		}
+		next = append(next, APIClient{
+			ClientKey:   user.Username,
+			Name:        user.Username,
+			Enabled:     user.Enabled,
+			TokenSecret: password,
+			TokenSet:    strings.TrimSpace(password) != "",
+			CreatedAt:   user.CreatedAt,
+			UpdatedAt:   user.UpdatedAt,
+		})
+	}
+	r.apiClients = next
+	return r.ListAPIUsers(context.Background())
+}
+
+func (r *fakeRepository) LoginAPIUser(_ context.Context, req APIUserLoginRequest) (*APIUserToken, error) {
+	for _, client := range r.apiClients {
+		if client.ClientKey != strings.TrimSpace(req.Username) {
+			continue
+		}
+		if !client.Enabled {
+			return nil, commonerrors.ErrUnauthorized
+		}
+		if client.TokenSecret != strings.TrimSpace(req.Password) {
+			return nil, commonerrors.ErrUnauthorized
+		}
+		token := "test-token-" + client.ClientKey
+		if r.apiTokens == nil {
+			r.apiTokens = map[string]string{}
+		}
+		r.apiTokens[token] = client.ClientKey
+		expiresAt := time.Now().Add(northboundAPITokenTTL)
+		return &APIUserToken{
+			Token:       token,
+			AccessToken: token,
+			Expires:     int(northboundAPITokenTTL.Seconds()),
+			ExpiresAt:   expiresAt,
+			TokenType:   "Bearer",
+		}, nil
+	}
+	return nil, commonerrors.ErrUnauthorized
+}
+
 func (r *fakeRepository) AuthenticateAPIClient(_ context.Context, credential string, remoteIP string, apiKey string) (*APIClient, error) {
 	active := 0
 	for _, client := range r.apiClients {
@@ -504,18 +576,13 @@ func (r *fakeRepository) AuthenticateAPIClient(_ context.Context, credential str
 		}
 	}
 	if active == 0 {
-		return nil, nil
+		return nil, commonerrors.ErrUnauthorized
 	}
+	username := r.apiTokens[strings.TrimSpace(credential)]
 	for i := range r.apiClients {
 		client := r.apiClients[i]
-		if !client.Enabled || client.TokenSecret != credential {
+		if !client.Enabled || client.ClientKey != username {
 			continue
-		}
-		if !apiClientAllowsAPI(client, apiKey) {
-			return nil, commonerrors.ErrForbidden
-		}
-		if !apiClientAllowsIP(client, remoteIP) {
-			return nil, commonerrors.ErrForbidden
 		}
 		return &client, nil
 	}
@@ -1615,8 +1682,25 @@ func TestUpdateAPIConfigOnlyTogglesSupportedConfig(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rr.Code)
 	require.Contains(t, rr.Body.String(), `"enabled":true`)
-	require.Contains(t, rr.Body.String(), `/api/v1/northbound/sync/full?data_type=device`)
+	require.Contains(t, rr.Body.String(), `/api/v1/northbound/v1/sync/full?data_type=device`)
 	require.Contains(t, rr.Body.String(), `"data_type":"device"`)
+}
+
+func TestUpdateAllAPIConfigsTogglesEverySupportedConfig(t *testing.T) {
+	repo := newFakeRepository()
+	r := setupTestRouterWithRepository(repo)
+	body := []byte(`{"enabled":true}`)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/northbound/page-config/api/configs", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), fmt.Sprintf(`"total":%d`, len(repo.apiConfigs)))
+	for _, config := range repo.apiConfigs {
+		require.True(t, config.Enabled, config.Key)
+	}
 }
 
 func TestIsAPIConfigEnabledFollowsPageSwitch(t *testing.T) {
@@ -1638,45 +1722,53 @@ func TestIsAPIConfigEnabledFollowsPageSwitch(t *testing.T) {
 	require.False(t, enabled)
 }
 
-func TestAPIClientAuthenticationUsesTokenScopeAndIPWhitelist(t *testing.T) {
+func TestAPIUserLoginIssuesNorthboundOnlyToken(t *testing.T) {
 	repo := newFakeRepository()
 	repo.apiClients = []APIClient{{
 		ClientKey:      "oss-a",
 		Name:           "OSS A",
 		Enabled:        true,
-		TokenSecret:    "secret-token",
+		TokenSecret:    "secret-password",
 		AllowedAPIKeys: []string{"nb-sync-full-device"},
 		IPWhitelist:    []string{"127.0.0.1/32"},
 	}}
 	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
 
-	client, err := svc.AuthenticateAPIClient(context.Background(), "secret-token", "127.0.0.1", "nb-sync-full-device")
+	token, err := svc.LoginAPIUser(context.Background(), APIUserLoginRequest{
+		Username: "oss-a",
+		Password: "secret-password",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, token.Token)
+	require.Equal(t, 1800, token.Expires)
+
+	client, err := svc.AuthenticateAPIClient(context.Background(), token.Token, "10.0.0.10", "nb-export-config")
 	require.NoError(t, err)
 	require.Equal(t, "oss-a", client.ClientKey)
 
 	_, err = svc.AuthenticateAPIClient(context.Background(), "bad-token", "127.0.0.1", "nb-sync-full-device")
 	require.ErrorIs(t, err, commonerrors.ErrUnauthorized)
 
-	_, err = svc.AuthenticateAPIClient(context.Background(), "secret-token", "127.0.0.1", "nb-export-config")
-	require.ErrorIs(t, err, commonerrors.ErrForbidden)
-
-	_, err = svc.AuthenticateAPIClient(context.Background(), "secret-token", "10.0.0.10", "nb-sync-full-device")
-	require.ErrorIs(t, err, commonerrors.ErrForbidden)
+	_, err = svc.LoginAPIUser(context.Background(), APIUserLoginRequest{
+		Username: "oss-a",
+		Password: "bad-password",
+	})
+	require.ErrorIs(t, err, commonerrors.ErrUnauthorized)
 }
 
-func TestReplaceAPIClientsRedactsToken(t *testing.T) {
+func TestReplaceAPIUsersReturnsPasswordForManagementPage(t *testing.T) {
 	r := setupTestRouterWithRepository(newFakeRepository())
-	body := []byte(`{"items":[{"client_key":"oss-a","name":"OSS A","enabled":true,"token_secret":"secret-token","allowed_api_keys":["nb-sync-full-device"],"ip_whitelist":["127.0.0.1/32"]}]}`)
+	body := []byte(`{"items":[{"username":"oss-a","enabled":true,"password":"secret-password"}]}`)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/northbound/page-config/api/clients", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/northbound/page-config/api/users", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
 	require.Equal(t, http.StatusOK, rr.Code)
-	require.Contains(t, rr.Body.String(), `"client_key":"oss-a"`)
-	require.Contains(t, rr.Body.String(), `"token_set":true`)
-	require.NotContains(t, rr.Body.String(), "secret-token")
+	require.Contains(t, rr.Body.String(), `"username":"oss-a"`)
+	require.Contains(t, rr.Body.String(), `"password_set":true`)
+	require.Contains(t, rr.Body.String(), `"password":"secret-password"`)
 }
 
 func TestCleanupExpiredResultsRemovesOldRunsAndEvents(t *testing.T) {
@@ -1791,7 +1883,7 @@ func TestTestAPIConfigReturnsContractEvent(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code)
 	require.Len(t, repo.events, 1)
 	require.Contains(t, rr.Body.String(), `"capability":"api"`)
-	require.Contains(t, rr.Body.String(), `/api/v1/northbound/sync/full?data_type=device`)
+	require.Contains(t, rr.Body.String(), `/api/v1/northbound/v1/sync/full?data_type=device`)
 }
 
 type testFTPUpload struct {

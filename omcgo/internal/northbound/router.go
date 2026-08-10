@@ -29,6 +29,11 @@ type Router struct {
 	outboxRepo        push.OutboxRepository         // may be nil if outbox is not configured
 	scoper            *Scoper                       // 多租户数据隔离；nil 时退化为不隔离（dev/test）
 	rateLimiter       *ratelimit.FixedWindowLimiter // per-endpoint 限流；nil 时不限流
+	deviceService     northboundDeviceService       // optional device business facade for legacy northbound API overlap
+	taskService       northboundTaskService         // optional task facade for legacy async job overlap
+	regService        northboundRegistrationService // optional device pre-registration facade
+	groupService      northboundDeviceGroupService  // optional current device-group facade
+	transferService   northboundTransferTaskService // optional UFTE facade for station log collection
 }
 
 // NewRouter creates a new northbound Router.
@@ -86,6 +91,32 @@ func (r *Router) SetScoper(s *Scoper) {
 // SetRateLimiter 注入 per-endpoint Redis 固定窗口限流器。
 func (r *Router) SetRateLimiter(l *ratelimit.FixedWindowLimiter) {
 	r.rateLimiter = l
+}
+
+// SetDeviceTaskServices wires current xomc device/task capabilities into the
+// northbound facade. These routes are thin wrappers so the original device and
+// task APIs keep their behavior unchanged.
+func (r *Router) SetDeviceTaskServices(deviceSvc northboundDeviceService, taskSvc northboundTaskService) {
+	r.deviceService = deviceSvc
+	r.taskService = taskSvc
+}
+
+// SetDeviceRegistrationService wires current device pre-registration into the
+// legacy-shaped northbound facade.
+func (r *Router) SetDeviceRegistrationService(svc northboundRegistrationService) {
+	r.regService = svc
+}
+
+// SetDeviceGroupService wires current topology device-group management into the
+// legacy-shaped northbound facade.
+func (r *Router) SetDeviceGroupService(svc northboundDeviceGroupService) {
+	r.groupService = svc
+}
+
+// SetTransferTaskService wires UFTE file-transfer tasks into the northbound
+// facade. It is used for real station running/fault log collection.
+func (r *Router) SetTransferTaskService(svc northboundTransferTaskService) {
+	r.transferService = svc
 }
 
 // rateLimit 返回一个按端点名限流的 Gin 中间件。endpoint 为限流 key（端点标识）。
@@ -155,11 +186,12 @@ func (r *Router) requirePageConfiguredAPIClient(c *gin.Context, apiKey string) b
 		case errors.Is(err, commonerrors.ErrForbidden):
 			response.Fail(c, http.StatusForbidden, err.Error())
 		default:
-			response.Fail(c, http.StatusInternalServerError, "northbound API client check failed")
+			response.Fail(c, http.StatusInternalServerError, "northbound API user check failed")
 		}
 		return false
 	}
 	if client != nil {
+		c.Set("northbound_api_user", client.ClientKey)
 		c.Set("northbound_api_client", client.ClientKey)
 	}
 	return true
@@ -169,9 +201,6 @@ func northboundAPIClientCredential(c *gin.Context) string {
 	if token := strings.TrimSpace(c.GetHeader("X-Northbound-Token")); token != "" {
 		return token
 	}
-	if token := strings.TrimSpace(c.GetHeader("X-API-Key")); token != "" {
-		return token
-	}
 	auth := strings.TrimSpace(c.GetHeader("Authorization"))
 	if len(auth) > 7 && strings.EqualFold(auth[:7], "Bearer ") {
 		return strings.TrimSpace(auth[7:])
@@ -179,15 +208,46 @@ func northboundAPIClientCredential(c *gin.Context) string {
 	return ""
 }
 
+func northboundResponseContext() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set(response.ContextKeyNorthbound, true)
+		c.Next()
+	}
+}
+
+func (r *Router) pageConfiguredOnly(apiKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !r.requirePageConfiguredAPI(c, apiKey) {
+			return
+		}
+		c.Next()
+	}
+}
+
+func (r *Router) apiUserLogin(c *gin.Context) {
+	if r.pageConfigHandler == nil {
+		response.Fail(c, http.StatusInternalServerError, "northbound API user service is not configured")
+		return
+	}
+	r.pageConfigHandler.LoginAPIUser(c)
+}
+
+// RegisterPublicRoutes registers northbound API routes that are called by
+// external OSS systems with northbound-only users and tokens.
+func (r *Router) RegisterPublicRoutes(rg *gin.RouterGroup) {
+	nb := rg.Group("/northbound")
+	nb.Use(northboundResponseContext())
+	legacy := nb.Group("/v1")
+	legacy.POST("/access/token", r.rateLimit("nb:legacy:auth:token"), r.pageConfiguredOnly("auth-login"), r.apiUserLogin)
+	r.registerLegacyV1Routes(legacy)
+}
+
 // RegisterRoutes registers northbound API routes on the given router group.
 func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 	nb := rg.Group("/northbound")
 	// 北向响应对上游 OSS 必须保持 UTC 标准格式（issue #457）：打上下文标记，
 	// 统一响应出口（response.renderJSON）识别后整体跳过系统时区转换。
-	nb.Use(func(c *gin.Context) {
-		c.Set(response.ContextKeyNorthbound, true)
-		c.Next()
-	})
+	nb.Use(northboundResponseContext())
 	{
 		// Push target management
 		nb.GET("/push/targets", r.listTargets)
@@ -227,6 +287,38 @@ func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 			nb.PUT("/servers/:role", r.serverHandler.UpdateServer)
 		}
 	}
+}
+
+func (r *Router) registerLegacyV1Routes(legacy *gin.RouterGroup) {
+	// Legacy-shaped northboundApi routes. They live under the northbound
+	// namespace so existing xomc business endpoints are not shadowed.
+	legacy.GET("/sync/full", r.rateLimit("nb:legacy:sync:full"), r.pageConfiguredAPI("nb-sync-full-device"), r.fullSync)
+	legacy.GET("/export/config/:deviceId", r.rateLimit("nb:legacy:export:config"), r.pageConfiguredAPI("nb-export-config"), r.configHandler.ExportConfig)
+	legacy.POST("/device/query", r.rateLimit("nb:legacy:device:query"), r.pageConfiguredAPI("device-list"), r.legacyDeviceQuery)
+	legacy.GET("/device/status/:sn", r.rateLimit("nb:legacy:device:status"), r.pageConfiguredAPI("device-status"), r.legacyDeviceStatus)
+	legacy.GET("/device/infos/:sn", r.rateLimit("nb:legacy:device:infos"), r.pageConfiguredAPI("device-detail"), r.legacyDeviceInfo)
+	legacy.GET("/enodeb/infos/status/:sn", r.rateLimit("nb:legacy:enodeb:status"), r.pageConfiguredAPI("device-status"), r.legacyDeviceStatus)
+	legacy.POST("/device/register", r.rateLimit("nb:legacy:device:register:create"), r.pageConfiguredAPI("device-register-create"), r.legacyCreateRegistration)
+	legacy.GET("/device/register/page", r.rateLimit("nb:legacy:device:register:list"), r.pageConfiguredAPI("device-register-list"), r.legacyListRegistrations)
+	legacy.POST("/device/register/page", r.rateLimit("nb:legacy:device:register:list"), r.pageConfiguredAPI("device-register-list"), r.legacyListRegistrations)
+	legacy.DELETE("/device/register/:id", r.rateLimit("nb:legacy:device:register:delete"), r.pageConfiguredAPI("device-register-delete"), r.legacyDeleteRegistration)
+	legacy.GET("/device/group", r.rateLimit("nb:legacy:device:group:tree"), r.pageConfiguredAPI("device-group-tree"), r.legacyDeviceGroupTree)
+	legacy.POST("/device/group", r.rateLimit("nb:legacy:device:group:create"), r.pageConfiguredAPI("device-group-create"), r.legacyCreateDeviceGroup)
+	legacy.PUT("/device/group", r.rateLimit("nb:legacy:device:group:update"), r.pageConfiguredAPI("device-group-update"), r.legacyUpdateDeviceGroup)
+	legacy.PUT("/device/group/:id", r.rateLimit("nb:legacy:device:group:update"), r.pageConfiguredAPI("device-group-update"), r.legacyUpdateDeviceGroup)
+	legacy.DELETE("/device/group", r.rateLimit("nb:legacy:device:group:delete"), r.pageConfiguredAPI("device-group-delete"), r.legacyDeleteDeviceGroup)
+	legacy.DELETE("/device/group/:id", r.rateLimit("nb:legacy:device:group:delete"), r.pageConfiguredAPI("device-group-delete"), r.legacyDeleteDeviceGroup)
+	legacy.POST("/device/group/:id/devices", r.rateLimit("nb:legacy:device:group:add-devices"), r.pageConfiguredAPI("device-group-add-devices"), r.legacyAddDevicesToGroup)
+	legacy.GET("/device/parameters/:sn", r.rateLimit("nb:legacy:parameters:get"), r.pageConfiguredAPI("parameter-tree"), r.legacyGetDeviceParameters)
+	legacy.POST("/device/parameters/query/:sn", r.rateLimit("nb:legacy:parameters:query"), r.pageConfiguredAPI("config-pull"), r.legacyQueryDeviceParameters)
+	legacy.PUT("/device/parameters/cellname/:sn", r.rateLimit("nb:legacy:cellname:set"), r.pageConfiguredAPI("parameter-cellname"), r.legacySetDeviceName)
+	legacy.PUT("/device/parameters/:sn", r.rateLimit("nb:legacy:parameters:set"), r.pageConfiguredAPI("parameter-set"), r.legacySetDeviceParameters)
+	legacy.POST("/device/task/:sn", r.rateLimit("nb:legacy:device:task:create"), r.pageConfiguredAPI("device-task-create"), r.legacyCreateDeviceTask)
+	legacy.POST("/device/reboot/:sn", r.rateLimit("nb:legacy:device:reboot"), r.pageConfiguredAPI("device-reboot"), r.legacyRebootDevice)
+	legacy.POST("/device/reset/:sn", r.rateLimit("nb:legacy:device:reset"), r.pageConfiguredAPI("device-reset"), r.legacyResetDevice)
+	legacy.POST("/device/log/collect/:sn", r.rateLimit("nb:legacy:device:log-collect"), r.pageConfiguredAPI("device-log-collect"), r.legacyCollectDeviceLog)
+	legacy.GET("/job/result/:taskId", r.rateLimit("nb:legacy:job:result"), r.pageConfiguredAPI("task-detail"), r.legacyGetTask)
+	legacy.POST("/job/result/page", r.rateLimit("nb:legacy:job:page"), r.pageConfiguredAPI("task-page"), r.legacyListTasks)
 }
 
 func (r *Router) listTargets(c *gin.Context) {

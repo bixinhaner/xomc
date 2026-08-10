@@ -354,6 +354,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// Public auth routes (no authentication required)
 	publicV1 := r.Group("/api/v1")
 	ad.adminHandler.RegisterAuthRoutes(publicV1, ad.pubKeyHandler)
+	if c.miscDeps.nbRouter != nil {
+		c.miscDeps.nbRouter.RegisterPublicRoutes(publicV1)
+	}
 
 	// 公开端点：登录页拉取品牌化资产 + 公开配置项（is_public=true）
 	// 详见 docs/prd/system/ui-customization.md §6
