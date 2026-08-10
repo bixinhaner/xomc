@@ -1,6 +1,7 @@
 import { Form, Input } from 'antd';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import SystemConfig from './index';
 
 const hookMocks = vi.hoisted(() => ({
@@ -48,6 +49,14 @@ vi.mock('./AgentSettings', () => ({ default: () => <div /> }));
 vi.mock('./PmRetentionSection', () => ({ default: () => <div /> }));
 vi.mock('./RetentionBackpressureSection', () => ({ default: () => <div /> }));
 
+function renderSystemConfig() {
+  return render(
+    <MemoryRouter>
+      <SystemConfig />
+    </MemoryRouter>,
+  );
+}
+
 describe('SystemConfig load guard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -63,7 +72,7 @@ describe('SystemConfig load guard', () => {
       refetch: hookMocks.refetch,
     });
 
-    render(<SystemConfig />);
+    renderSystemConfig();
 
     expect(screen.getByText('empty.loadFailed')).toBeInTheDocument();
     const saveButton = screen.getByRole('button', { name: /common\.save/ });
@@ -107,7 +116,7 @@ describe('SystemConfig load guard', () => {
       batch: { id: 'batch-1', category: 'basic', status: 'applied', targets: [] },
     });
 
-    render(<SystemConfig />);
+    renderSystemConfig();
 
     const nameInput = screen.getByLabelText('omc-name');
     await waitFor(() => expect(nameInput).toHaveValue('Original OMC'));
@@ -136,7 +145,7 @@ describe('SystemConfig load guard', () => {
       batch: { id: 'batch-empty', category: 'basic', status: 'applied', targets: [] },
     });
 
-    render(<SystemConfig />);
+    renderSystemConfig();
 
     const saveButton = screen.getByRole('button', { name: /common\.save/ });
     expect(saveButton).toBeEnabled();
@@ -179,7 +188,7 @@ describe('SystemConfig load guard', () => {
     };
     hookMocks.query.mockImplementation(() => queryState);
 
-    const { rerender } = render(<SystemConfig />);
+    const { rerender } = renderSystemConfig();
 
     const nameInput = screen.getByLabelText('omc-name');
     await waitFor(() => expect(nameInput).toHaveValue('Original OMC'));
@@ -188,7 +197,11 @@ describe('SystemConfig load guard', () => {
     await waitFor(() => expect(hookMocks.validate).toHaveBeenCalled());
 
     queryState = { ...queryState, isFetching: true };
-    rerender(<SystemConfig />);
+    rerender(
+      <MemoryRouter>
+        <SystemConfig />
+      </MemoryRouter>,
+    );
     await act(async () => releaseValidation());
 
     await waitFor(() => expect(hookMocks.mutateAsync).not.toHaveBeenCalled());

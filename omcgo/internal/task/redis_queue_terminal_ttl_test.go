@@ -233,6 +233,7 @@ func TestRedisTaskQueue_UpdateCanMaterializeTerminalTombstoneFromDurableTask(t *
 	q, m := newRedisQueueWithTerminalTTL(t, 15*time.Minute)
 	ctx := context.Background()
 	task := newTaskForQueue("task-durable-terminal", "SN-DURABLE", "Reboot")
+	task.SourceID = generateUUID()
 	task.MarkExpired()
 
 	require.NoError(t, q.Update(ctx, task))
@@ -240,6 +241,8 @@ func TestRedisTaskQueue_UpdateCanMaterializeTerminalTombstoneFromDurableTask(t *
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, TaskStatusExpired, got.Status)
+	require.False(t, q.client.HExists(ctx, q.taskKey(task.ID), "data").Val())
+	require.Equal(t, []string{"status"}, q.client.HKeys(ctx, q.taskKey(task.ID)).Val())
 	require.Equal(t, 15*time.Minute, m.TTL(q.taskKey(task.ID)))
 }
 

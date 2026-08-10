@@ -130,6 +130,7 @@ export interface Device {
   oui: string;
   /** 运营商代码 'cmcc' / 'ctcc' / 'cucc'。同上 roundtrip 用。 */
   carrier: string;
+  locationSourceMode?: 'tr069' | 'external';
 
   // T-0162: 新解耦字段
   lifecycleState: DeviceLifecycle;

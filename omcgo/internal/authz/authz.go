@@ -18,8 +18,8 @@ package authz
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/http"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/gin-gonic/gin"
@@ -67,6 +67,18 @@ type Resolver struct {
 	perm VisibleGroupsResolver
 }
 
+type permissionBackendError struct {
+	cause error
+}
+
+func (e *permissionBackendError) Error() string {
+	return fmt.Sprintf("resolve visible groups: %v", e.cause)
+}
+
+func (e *permissionBackendError) Unwrap() error {
+	return commonerrors.ErrInternal
+}
+
 // NewResolver 构造 Resolver。perm 为 nil 时退化为不强制（dev/test）。
 func NewResolver(perm VisibleGroupsResolver) *Resolver { return &Resolver{perm: perm} }
 
@@ -74,6 +86,34 @@ func NewResolver(perm VisibleGroupsResolver) *Resolver { return &Resolver{perm: 
 // perm == nil 对应 dev/test 退化（不强制），与 device 既有 nil-safe 语义一致；
 // 生产路由始终注入 perm。
 func (r *Resolver) Enabled() bool { return r != nil && r.perm != nil }
+
+// ResolveFromContext resolves visible groups without writing an HTTP response.
+// Handlers that need module-specific logging or public error normalization can
+// use this method and render the returned error through their normal error path.
+func (r *Resolver) ResolveFromContext(
+	c *gin.Context,
+) ([]uuid.UUID, error) {
+	if !r.Enabled() {
+		return nil, nil
+	}
+	userIDVal, _ := c.Get(admin.CtxKeyUserID)
+	uid, isUUID := userIDVal.(uuid.UUID)
+	if !isUUID {
+		return nil, commonerrors.ErrForbidden
+	}
+	isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
+	isSuper, _ := isSuperVal.(bool)
+
+	groups, err := r.perm.GetUserVisibleGroupIDs(
+		c.Request.Context(),
+		uid,
+		isSuper,
+	)
+	if err != nil {
+		return nil, &permissionBackendError{cause: err}
+	}
+	return groups, nil
+}
 
 // FromContext 解析 gin ctx 中主体的可见设备组。
 //
@@ -83,22 +123,14 @@ func (r *Resolver) Enabled() bool { return r != nil && r.perm != nil }
 // 未装配强制（perm == nil）时返回 (nil, true)，即「超管等价、不限制」，保持既有
 // dev/test 退化行为；生产装配始终注入 perm。
 func (r *Resolver) FromContext(c *gin.Context) (groups []uuid.UUID, ok bool) {
-	if !r.Enabled() {
-		return nil, true
-	}
-	userIDVal, _ := c.Get(admin.CtxKeyUserID)
-	uid, isUUID := userIDVal.(uuid.UUID)
-	if !isUUID {
-		// 已过鉴权中间件却拿不到 user_id：按拒绝处理，不泄露数据。
-		commonerrors.AbortWithError(c, http.StatusForbidden, commonerrors.ErrForbidden)
-		return nil, false
-	}
-	isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
-	isSuper, _ := isSuperVal.(bool)
-
-	groups, err := r.perm.GetUserVisibleGroupIDs(c.Request.Context(), uid, isSuper)
+	groups, err := r.ResolveFromContext(c)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		status := commonerrors.HTTPStatusFromError(err)
+		responseErr := err
+		if errors.Is(err, commonerrors.ErrInternal) {
+			responseErr = commonerrors.ErrInternal
+		}
+		commonerrors.AbortWithError(c, status, responseErr)
 		return nil, false
 	}
 	return groups, true

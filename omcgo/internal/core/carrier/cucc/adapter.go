@@ -110,6 +110,12 @@ func (c *CUCCCarrier) RFControlPath(tech model.Technology) string {
 	return ""
 }
 
+func (c *CUCCCarrier) GeofenceControlParametersForInstances(
+	productClass string, tech model.Technology, enabled bool, instances []int,
+) ([]carrier.GeofenceControlParameter, error) {
+	return carrier.BuildGeofenceControlParametersForInstances(productClass, tech, enabled, instances)
+}
+
 // SupportsMRType reports whether CUCC collects the given MR type. CUCC (China
 // Unicom) does NOT collect MRE (UE capability) reports, so MRE returns false;
 // MRO / MRS are supported. This replaces the "if carrier == cucc" branch

@@ -21,6 +21,7 @@ import TransferSettings from './TransferSettings';
 import AgentSettings from './AgentSettings';
 import PmRetentionSection from './PmRetentionSection';
 import RetentionBackpressureSection from './RetentionBackpressureSection';
+import GeofenceSystemSettings from './GeofenceSystemSettings';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
@@ -30,13 +31,14 @@ import type { SysConfigValueType } from '@core/types/system';
 import { buildBatchItems } from './sysConfigSerialize';
 import type { ConfigApplyBatch } from '@core/types/system';
 import { isApplyBatchForCategory, isEventDeliveryBatch } from './applyStatus';
+import { useUserStore } from '@core/store/userStore';
 import styles from './SystemConfig.module.css';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
 // notify tab 已隐藏（#781）：邮件/短信后端未真实打通前不展示，避免误导用户
 // omc tab 已隐藏（#802）：rsyslog/磁盘告警后端未实现，两个卡片均为空壳
 // northbound tab 已隐藏（#820）：北向功能未完成（用户管理 Mock 数据、服务信息无 DB 记录），待完成后恢复
-type SettingsTab = 'basic' | 'security' | 'device' | 'storage' | 'acs_transfer' | 'agent' | 'pm_retention' | 'retention_bp';
+type SettingsTab = 'basic' | 'security' | 'device' | 'storage' | 'acs_transfer' | 'agent' | 'geofence' | 'pm_retention' | 'retention_bp';
 
 // 设置子页签配置
 const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
@@ -46,6 +48,7 @@ const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'storage', labelKey: 'system.config.storage' },
   { key: 'acs_transfer', labelKey: 'system.config.acsTransfer' },
   { key: 'agent', labelKey: 'system.config.agent' },
+  { key: 'geofence', labelKey: 'system.config.geofence' },
   // northbound 已隐藏（#820）
   // T-0164 收尾 G2-Gap-1：PM 数据保留策略页签
   { key: 'pm_retention', labelKey: 'system.config.pmRetention' },
@@ -88,6 +91,9 @@ function decodeValue(raw: string, type: SysConfigValueType | undefined): unknown
 
 export default function SystemConfig() {
   const t = useT();
+  const isSuperAdmin = useUserStore(
+    (state) => state.currentUser?.isSuperAdmin === true,
+  );
   const [searchParams] = useSearchParams();
   const tabsContainerRef = useRef<HTMLDivElement>(null);
   const requestedTab = coerceSettingsTab(searchParams.get('tab'));
@@ -230,6 +236,8 @@ export default function SystemConfig() {
 		return <TransferSettings form={transferForm} />;
       case 'agent':
         return <AgentSettings />;
+      case 'geofence':
+        return <GeofenceSystemSettings />;
       // northbound case 已移除（#820）
       case 'pm_retention':
         // T-0164 收尾 G2-Gap-1：PM 数据保留独立组件，内部自管 form + state（不需要 form props）
@@ -243,10 +251,12 @@ export default function SystemConfig() {
   };
 
   // Tabs 配置
-  const tabItems = settingsTabs.map((tab) => ({
-    key: tab.key,
-    label: t(tab.labelKey),
-  }));
+  const tabItems = settingsTabs
+    .filter((tab) => tab.key !== 'geofence' || isSuperAdmin)
+    .map((tab) => ({
+      key: tab.key,
+      label: t(tab.labelKey),
+    }));
 
   const handleTabChange = useCallback((key: string) => {
     const scrollContainer = tabsContainerRef.current?.closest('main');

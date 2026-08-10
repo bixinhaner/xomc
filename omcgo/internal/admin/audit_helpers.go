@@ -11,6 +11,11 @@ import (
 
 type auditRequestMetadataContextKey struct{}
 
+const (
+	ctxKeyBusinessAudit = "__business_audit_entry"
+	ctxKeySkipAudit     = "__skip_compliance_audit"
+)
+
 type auditRequestMetadata struct {
 	IPAddress string
 	UserAgent string
@@ -104,4 +109,65 @@ func AuditContextFromGin(c *gin.Context) audit.Entry {
 		}
 	}
 	return e
+}
+
+// SetBusinessAudit replaces the generic method-and-route audit record for the
+// current request with one business-semantic entry. The AuditLogger middleware
+// fills actor/request metadata and derives success from the final HTTP status.
+func SetBusinessAudit(c *gin.Context, entry audit.Entry) *audit.Entry {
+	if c == nil || entry.Action == "" {
+		return nil
+	}
+	entryCopy := entry
+	c.Set(ctxKeyBusinessAudit, &entryCopy)
+	return &entryCopy
+}
+
+// SetBusinessAuditError attaches the domain failure reason to the business
+// audit entry registered for the current request.
+func SetBusinessAuditError(c *gin.Context, err error) {
+	if c == nil || err == nil {
+		return
+	}
+	value, exists := c.Get(ctxKeyBusinessAudit)
+	if !exists {
+		return
+	}
+	entry, ok := value.(*audit.Entry)
+	if !ok || entry == nil {
+		return
+	}
+	entry.ErrorMessage = err.Error()
+}
+
+// SkipAudit excludes a write-shaped read operation, such as a preview endpoint,
+// from the compliance audit log. The operational HTTP log remains unaffected.
+func SkipAudit(c *gin.Context) {
+	if c != nil {
+		c.Set(ctxKeySkipAudit, true)
+	}
+}
+
+func businessAuditFromGin(c *gin.Context) (audit.Entry, bool) {
+	if c == nil {
+		return audit.Entry{}, false
+	}
+	value, exists := c.Get(ctxKeyBusinessAudit)
+	if !exists {
+		return audit.Entry{}, false
+	}
+	entry, ok := value.(*audit.Entry)
+	if !ok || entry == nil || entry.Action == "" {
+		return audit.Entry{}, false
+	}
+	return *entry, true
+}
+
+func auditSkipped(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	value, exists := c.Get(ctxKeySkipAudit)
+	skip, ok := value.(bool)
+	return exists && ok && skip
 }

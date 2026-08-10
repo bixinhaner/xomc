@@ -783,7 +783,12 @@ const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): Field
 
 // ─── 其他信息组 ────────────────────────────────────────────────────────
 
-const getOtherFields = (t: ReturnType<typeof useT>, networkType: string, device: DetailDevice): FieldGroup => {
+const getOtherFields = (
+  t: ReturnType<typeof useT>,
+  networkType: string,
+  device: DetailDevice,
+  onEditLocationSource?: () => void,
+): FieldGroup => {
   const fields: FieldItem[] = [
     // 时间信息
     { key: 'onlineTime', label: t('device.onlineTime'), render: (d) => fmtTime(d.onlineTime) },
@@ -814,6 +819,29 @@ const getOtherFields = (t: ReturnType<typeof useT>, networkType: string, device:
     // 站址信息
     { key: 'siteName', label: t('device.siteName'), render: (d) => d.deviceName || '-' },
     { key: 'installAddress', label: t('device.installAddress'), render: (d) => d.installAddress || '-' },
+    {
+      key: 'locationSourceMode',
+      label: t('device.locationSourceMode'),
+      render: (d) => (
+        <Space size={4}>
+          <Text>
+            {t(d.locationSourceMode === 'external' ? 'device.locationSourceExternal' : 'device.locationSourceTr069')}
+          </Text>
+          {onEditLocationSource && (
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              title={t('device.locationSourceMode')}
+              aria-label={t('device.locationSourceMode')}
+              onClick={onEditLocationSource}
+            >
+              {t('common.edit')}
+            </Button>
+          )}
+        </Space>
+      ),
+    },
   ];
 
   if (shouldShowGpsLocation(device)) {
@@ -1367,6 +1395,9 @@ export default function DeviceDetail() {
   const renameMutation = useRenameDevice(device?.id ?? '');
   const [omcNameEditorOpen, setOmcNameEditorOpen] = useState(false);
   const [omcNameDraft, setOmcNameDraft] = useState('');
+  const [locationSourceEditorOpen, setLocationSourceEditorOpen] = useState(false);
+  const [locationSourceDraft, setLocationSourceDraft] = useState<'tr069' | 'external'>('tr069');
+  const [locationSourceSaving, setLocationSourceSaving] = useState(false);
   const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(device?.id ?? '');
   const [quickSettingsSyncTargetPaths, setQuickSettingsSyncTargetPaths] = useState<string[]>([]);
   const [licenseSyncTargetPaths, setLicenseSyncTargetPaths] = useState<string[]>([]);
@@ -1977,6 +2008,31 @@ export default function DeviceDetail() {
     }
   }, [message, omcNameDraft, renameMutation, t]);
 
+  const handleOpenLocationSourceEditor = useCallback(() => {
+    if (!displayDevice) return;
+    setLocationSourceDraft(displayDevice.locationSourceMode === 'external' ? 'external' : 'tr069');
+    setLocationSourceEditorOpen(true);
+  }, [displayDevice]);
+
+  const handleSaveLocationSource = useCallback(async () => {
+    if (!displayDevice?.id) return;
+    setLocationSourceSaving(true);
+    try {
+      await deviceApi.update(
+        displayDevice.id,
+        { locationSourceMode: locationSourceDraft },
+        displayDevice,
+      );
+      setLocationSourceEditorOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ['devices'] });
+      void message.success(t('common.operationSuccess'));
+    } catch {
+      void message.error(t('common.operationFailed'));
+    } finally {
+      setLocationSourceSaving(false);
+    }
+  }, [displayDevice, locationSourceDraft, message, queryClient, t]);
+
   const renderDeviceNetworkType = useCallback<FieldItem['render']>(
     (d) => {
       const label = resolveNetworkTypeLabel(d.networkType, networkTypeDict?.sysDictionaryDetails, appLocale);
@@ -2002,9 +2058,9 @@ export default function DeviceDetail() {
     if (!detailResolved.isBSC) {
       groups.push(getStatusFields(t, networkType));
     }
-    groups.push(getOtherFields(t, networkType, displayDevice));
+    groups.push(getOtherFields(t, networkType, displayDevice, handleOpenLocationSourceEditor));
     return groups;
-  }, [appLocale, detailResolved.isBSC, displayDevice, handleOpenOMCNameEditor, handleResolveNameSync, renderDeviceNetworkType, t]);
+  }, [appLocale, detailResolved.isBSC, displayDevice, handleOpenLocationSourceEditor, handleOpenOMCNameEditor, handleResolveNameSync, renderDeviceNetworkType, t]);
 
   const cellGroup = useMemo((): FieldGroup | null => {
     if (!displayDevice) return null;
@@ -2358,6 +2414,30 @@ export default function DeviceDetail() {
           onChange={(event) => setOmcNameDraft(event.target.value)}
           onPressEnter={() => void handleRenameOMCName()}
         />
+      </Modal>
+
+      <Modal
+        title={t('device.locationSourceMode')}
+        open={locationSourceEditorOpen}
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
+        confirmLoading={locationSourceSaving}
+        onOk={() => void handleSaveLocationSource()}
+        onCancel={() => setLocationSourceEditorOpen(false)}
+        destroyOnHidden
+      >
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="info" showIcon title={t('device.locationSourceModeHint')} />
+          <Select
+            value={locationSourceDraft}
+            style={{ width: '100%' }}
+            onChange={setLocationSourceDraft}
+            options={[
+              { value: 'tr069', label: t('device.locationSourceTr069') },
+              { value: 'external', label: t('device.locationSourceExternal') },
+            ]}
+          />
+        </Space>
       </Modal>
 
       <AlarmDetail alarm={detailAlarm} open={detailOpen} onClose={handleCloseAlarmDetail} />

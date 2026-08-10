@@ -24,6 +24,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/realtime"
 	"github.com/omcgo/omcgo/internal/core/systimezone"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/geofence"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	kpirouter "github.com/omcgo/omcgo/internal/pm/kpi/router"
@@ -140,6 +141,10 @@ type Container struct {
 	// 在 initDeviceModule 创建时尚无 matcher，由 initMiscModules 创建 matcher 后
 	// 反向注入 SetGroupAssigner — 避免循环依赖（device → topology）。
 	InformHandler *device.InformHandler
+
+	// GeofenceModule 设置。Phase 1 仅提供配置、版本和绑定能力，不连接设备控制。
+	GeofenceService *geofence.Service
+	GeofenceHandler *geofence.Handler
 
 	// AlarmModule 设置
 	AlarmPgStore             *alarm.PgAlarmStore
