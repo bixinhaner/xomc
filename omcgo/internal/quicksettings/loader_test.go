@@ -3,6 +3,7 @@ package quicksettings
 import (
 	"context"
 	"encoding/xml"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -289,6 +290,56 @@ func TestBuiltinBaiBNQ_IncludesStringSyncSourceSettings(t *testing.T) {
 	assert.Contains(t, ptpDelayInterval.EnumOptions, xmlEnumOption{Value: "-4", Label: "-4"})
 }
 
+func TestBuiltinBaiBNQ_NetworkSettingsPrecedeExistingIPSecGroups(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "BaiBNQ.xml"))
+	require.NoError(t, err)
+
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+
+	indices := make(map[string]int, len(doc.Groups))
+	groups := make(map[string]xmlGroup, len(doc.Groups))
+	for i, group := range doc.Groups {
+		indices[group.ID] = i
+		groups[group.ID] = group
+	}
+
+	for _, id := range []string{
+		"gnb-network-interface",
+		"gnb-network-default-route",
+		"gnb-network-dscp",
+		"gnb-network-dscp-list",
+		"gnb-network-static-route",
+	} {
+		_, exists := groups[id]
+		require.Truef(t, exists, "%s must be migrated from the legacy 5G network page", id)
+		assert.Less(t, indices[id], indices["device-ipsec-control"])
+		assert.Less(t, indices[id], indices["gnb-ipsec"])
+	}
+
+	interfaceGroup := groups["gnb-network-interface"]
+	assert.Equal(t, "true", interfaceGroup.MultiInstance)
+	assert.Equal(t, "table", interfaceGroup.Style)
+	assert.Equal(t, "Device.Ethernet.Interface.{i}.", interfaceGroup.ObjectPath)
+
+	for _, id := range []string{"gnb-interface-ipv4", "gnb-interface-ipv6", "gnb-interface-vlan"} {
+		group, exists := groups[id]
+		require.True(t, exists)
+		assert.Equal(t, "gnb-network-interface", group.ParentSelector)
+		assert.Equal(t, "subtable", group.Style)
+	}
+
+	assert.Equal(t, "Device.Ethernet.IpRoute.{i}.", groups["gnb-network-static-route"].ObjectPath)
+
+	ipsecCount := 0
+	for _, group := range doc.Groups {
+		if group.ID == "device-ipsec-control" || group.ID == "gnb-ipsec" {
+			ipsecCount++
+		}
+	}
+	assert.Equal(t, 2, ipsecCount, "5G network migration must reuse, not duplicate, existing IPSec groups")
+}
+
 func TestBuiltinMLN_IncludesIndependentPLMNList(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "MLN.xml"))
 	require.NoError(t, err)
@@ -312,6 +363,25 @@ func TestBuiltinMLN_IncludesIndependentPLMNList(t *testing.T) {
 		plmnGroup.Params[0].StandardPath,
 	)
 	assert.Equal(t, "6", plmnGroup.Params[0].MaxValue)
+}
+
+func TestBuiltinMLN_WANSettingsFollowTimeSync(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "MLN.xml"))
+	require.NoError(t, err)
+
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+
+	indices := make(map[string]int, len(doc.Groups))
+	for i, group := range doc.Groups {
+		indices[group.ID] = i
+	}
+
+	wanIndex, hasWAN := indices["device-wan"]
+	timeIndex, hasTime := indices["device-time"]
+	require.True(t, hasWAN)
+	require.True(t, hasTime)
+	assert.Less(t, timeIndex, wanIndex)
 }
 
 func TestBuiltinBM_IncludesIndependentPLMNList(t *testing.T) {
@@ -365,6 +435,39 @@ func TestBuiltinBLQ_IncludesIndependentPLMNList(t *testing.T) {
 	assert.Equal(t, "PLMNID", plmnGroup.Params[0].Leaf)
 }
 
+func TestBuiltinBLQ_WANSettingsPrecedeExistingIPSecGroups(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "BLQ.xml"))
+	require.NoError(t, err)
+
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+
+	indices := make(map[string]int, len(doc.Groups))
+	for i, group := range doc.Groups {
+		indices[group.ID] = i
+	}
+
+	wanIndex, hasWAN := indices["device-wan"]
+	wan12Index, hasWAN12 := indices["device-wan-12"]
+	ipsecControlIndex, hasIPSecControl := indices["device-ipsec-control"]
+	ipsecIndex, hasIPSec := indices["device-ipsec"]
+	require.True(t, hasWAN)
+	require.True(t, hasWAN12)
+	require.True(t, hasIPSecControl)
+	require.True(t, hasIPSec)
+	assert.Less(t, wanIndex, ipsecControlIndex)
+	assert.Less(t, wan12Index, ipsecControlIndex)
+	assert.Less(t, ipsecControlIndex, ipsecIndex)
+
+	count := 0
+	for _, group := range doc.Groups {
+		if group.ID == "device-ipsec-control" || group.ID == "device-ipsec" {
+			count++
+		}
+	}
+	assert.Equal(t, 2, count, "WAN migration must reuse, not duplicate, the existing IPSec groups")
+}
+
 func TestBuiltinMLQ_IncludesIndependentPLMNList(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "MLQ.xml"))
 	require.NoError(t, err)
@@ -403,7 +506,12 @@ func TestBuiltinBLN_QuickSettingsReferenceParamModel(t *testing.T) {
 	for _, group := range doc.Groups {
 		groupIDs = append(groupIDs, group.ID)
 	}
-	assert.Equal(t, []string{"enb-cell", "enb-plmn", "device-ipsec", "enb-neighbor-freq", "enb-neighbor-cell"}, groupIDs)
+	assert.Equal(t, []string{
+		"enb-cell", "enb-plmn", "device-wan", "device-wan-1", "device-wan-2",
+		"device-wan-3", "device-wan-4", "device-static-route-1", "device-static-route-2",
+		"device-static-route-3", "device-static-route-4", "device-ipsec", "enb-neighbor-freq",
+		"enb-neighbor-cell",
+	}, groupIDs)
 
 	paramModelData, err := os.ReadFile(filepath.Join("..", "..", "data", "param-mappings", "BLN.xml"))
 	require.NoError(t, err)
@@ -437,7 +545,67 @@ func TestBuiltinBLN_QuickSettingsReferenceParamModel(t *testing.T) {
 			assert.Containsf(t, standardPaths, standardPath, "quicksettings group %s param %s must reference BLN param model", group.ID, param.Name)
 		}
 	}
-	assert.Equal(t, 54, checked)
+	assert.Equal(t, 104, checked)
+}
+
+func TestBuiltinLteNetworkGroupsCoverWanLanAndStaticRouting(t *testing.T) {
+	for _, model := range []string{"BLN", "MLN"} {
+		t.Run(model, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", model+".xml"))
+			require.NoError(t, err)
+
+			var doc xmlQuickSettings
+			require.NoError(t, xml.Unmarshal(data, &doc))
+
+			groups := make(map[string]xmlGroup, len(doc.Groups))
+			for _, group := range doc.Groups {
+				groups[group.ID] = group
+			}
+
+			wanSettings := groups["device-wan"]
+			for _, name := range []string{"ConnectType", "LinkSpeed", "DNS1", "DNS2", "LmtWanEnable", "LanIPAddress", "LanNetmask"} {
+				assert.Containsf(t, paramNames(wanSettings), name, "%s must expose WAN/LAN param %s", model, name)
+			}
+			assert.NotContains(t, paramNames(wanSettings), "DNSConfigMode")
+
+			var connectType *xmlParam
+			for index := range wanSettings.Params {
+				if wanSettings.Params[index].Name == "ConnectType" {
+					connectType = &wanSettings.Params[index]
+					break
+				}
+			}
+			require.NotNil(t, connectType)
+			assert.Contains(t, connectType.EnumOptions, xmlEnumOption{Value: "auto", Label: "Auto"})
+
+			for index := 1; index <= 4; index++ {
+				wan := groups[fmt.Sprintf("device-wan-%d", index)]
+				assert.Contains(t, paramNames(wan), "IPMode")
+				assert.Contains(t, paramNames(wan), "IPAddress")
+				assert.Contains(t, paramNames(wan), "Netmask")
+				assert.Contains(t, paramNames(wan), "Gateway")
+				assert.Contains(t, paramNames(wan), "VLAN")
+				assert.Contains(t, paramNames(wan), "Option60")
+				if index > 1 {
+					assert.Contains(t, paramNames(wan), "Enable")
+				}
+
+				route := groups[fmt.Sprintf("device-static-route-%d", index)]
+				assert.Contains(t, paramNames(route), "Enable")
+				assert.Contains(t, paramNames(route), "DestinationNetwork")
+				assert.Contains(t, paramNames(route), "Netmask")
+				assert.Contains(t, paramNames(route), "Gateway")
+			}
+		})
+	}
+}
+
+func paramNames(group xmlGroup) []string {
+	names := make([]string, 0, len(group.Params))
+	for _, param := range group.Params {
+		names = append(names, param.Name)
+	}
+	return names
 }
 
 func TestBuiltinLTENeighborCellIncludesRequiredTACAndNumericConstraints(t *testing.T) {

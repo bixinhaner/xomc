@@ -328,6 +328,57 @@
         <param name="Device.FAP.MRMgmt.Config.{i}.MrGnssReportEnable" standardPath="Device.FAP.MRMgmt.Config.{i}.MrGnssReportEnable" access="READ_WRITE" type="INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.FAPService.UeAccess.Enable" standardPath="Device.DeviceInfo.FAPService.UeAccess.Enable" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.X_COM_Localweb_password" standardPath="Device.Services.lmt.userConfig.{i}.pass" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="5" max="64" />
+        <param name="Device.DeviceInfo.DNS_CONFIG_IPMODE" standardPath="Device.DeviceInfo.DNS_CONFIG_IPMODE" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="dhcp,static" />
+        <param name="Device.DeviceInfo.HOST_CONFIG_DNS1" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS1" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.HOST_CONFIG_DNS2" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS2" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.LAN_CONFIG_IPADDR" standardPath="Device.DeviceInfo.LAN_CONFIG_IPADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.LAN_CONFIG_NETMASK" standardPath="Device.DeviceInfo.LAN_CONFIG_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG1_CONNECT_TYPE" standardPath="Device.DeviceInfo.WAN_CONFIG1_CONNECT_TYPE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG1_DEFAULTGW" standardPath="Device.DeviceInfo.WAN_CONFIG1_DEFAULTGW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG1_IPADDR" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG1_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPMODE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG1_NETMASK" standardPath="Device.DeviceInfo.WAN_CONFIG1_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG1_OPTION60" standardPath="Device.DeviceInfo.WAN_CONFIG1_OPTION60" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG1_VLAN" standardPath="Device.DeviceInfo.WAN_CONFIG1_VLAN" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="4094" />
+        <param name="Device.DeviceInfo.WAN_CONFIG2_DEFAULTGW" standardPath="Device.DeviceInfo.WAN_CONFIG2_DEFAULTGW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG2_ENABLE" standardPath="Device.DeviceInfo.WAN_CONFIG2_ENABLE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG2_IPADDR" standardPath="Device.DeviceInfo.WAN_CONFIG2_IPADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG2_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG2_IPMODE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG2_NETMASK" standardPath="Device.DeviceInfo.WAN_CONFIG2_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG2_OPTION60" standardPath="Device.DeviceInfo.WAN_CONFIG2_OPTION60" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG2_VLAN" standardPath="Device.DeviceInfo.WAN_CONFIG2_VLAN" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="4094" />
+        <param name="Device.DeviceInfo.WAN_CONFIG3_DEFAULTGW" standardPath="Device.DeviceInfo.WAN_CONFIG3_DEFAULTGW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG3_ENABLE" standardPath="Device.DeviceInfo.WAN_CONFIG3_ENABLE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG3_IPADDR" standardPath="Device.DeviceInfo.WAN_CONFIG3_IPADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG3_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG3_IPMODE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG3_NETMASK" standardPath="Device.DeviceInfo.WAN_CONFIG3_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG3_OPTION60" standardPath="Device.DeviceInfo.WAN_CONFIG3_OPTION60" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG3_VLAN" standardPath="Device.DeviceInfo.WAN_CONFIG3_VLAN" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="4094" />
+        <param name="Device.DeviceInfo.WAN_CONFIG4_DEFAULTGW" standardPath="Device.DeviceInfo.WAN_CONFIG4_DEFAULTGW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG4_ENABLE" standardPath="Device.DeviceInfo.WAN_CONFIG4_ENABLE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG4_IPADDR" standardPath="Device.DeviceInfo.WAN_CONFIG4_IPADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG4_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG4_IPMODE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG4_NETMASK" standardPath="Device.DeviceInfo.WAN_CONFIG4_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG4_OPTION60" standardPath="Device.DeviceInfo.WAN_CONFIG4_OPTION60" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG4_VLAN" standardPath="Device.DeviceInfo.WAN_CONFIG4_VLAN" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="4094" />
+        <param name="Device.DeviceInfo.WanLinkSpeed" standardPath="Device.DeviceInfo.WanLinkSpeed" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,2" enumLabels="Auto Negotiation,1000M" defaultValue="0" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG1_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG1_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG1_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG2_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG2_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG2_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG3_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG3_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG3_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG3_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG4_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG4_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG4_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG4_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.WebConfig.WanVisitEnable" standardPath="Device.WebConfig.WanVisitEnable" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.RunningStatus" standardPath="Device.DeviceInfo.RunningStatus" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.NeighCellTypeContainer" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.EnbType" access="READ_WRITE" type="INT" changeApplies="Immediate" />
         <param name="Device.ManagementServer.X_COM_ssl_enable" standardPath="Device.Https.HttpsEnable" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate" />

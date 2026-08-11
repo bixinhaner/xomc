@@ -130,6 +130,13 @@ func TestMappingValidator_ValidateAddObject_OK(t *testing.T) {
 	assert.Nil(t, v.ValidateAddObject("Dev.WiFi.SSID.", 5))
 }
 
+func TestMappingValidator_ValidateAddObject_MatchesChildObjectTemplate(t *testing.T) {
+	v := NewMappingValidator(mkSet([]ParamMapping{
+		{PrivatePath: "Device.Ethernet.Interface.{i}.VlanInterface.{i}.", EntryType: "object", Access: "READ_WRITE"},
+	}))
+	assert.Nil(t, v.ValidateAddObject("Device.Ethernet.Interface.2.VlanInterface.", 0))
+}
+
 func TestMappingValidator_ValidateAddObject_NotWritable(t *testing.T) {
 	v := NewMappingValidator(mkSet([]ParamMapping{
 		{PrivatePath: "Dev.WiFi.", EntryType: "object", Access: "readOnly"},

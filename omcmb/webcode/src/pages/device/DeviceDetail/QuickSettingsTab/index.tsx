@@ -13,6 +13,7 @@ import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import CellParameterForm from './CellParameterForm';
 import InstanceSelectorForm from './InstanceSelectorForm';
 import MultiInstanceTable, { formatDeviceFaultBrief, formatTime, statusTagSpec } from './MultiInstanceTable';
+import FixedScalarSettingsTable from './FixedScalarSettingsTable';
 import BscBtsAddModal from './BscBtsAddModal';
 import { BSC_BTS_FEEDBACK_GROUP_ID } from './bscBtsFeedback';
 import { applyInstanceContext, type QuickSettingsInstanceContext } from './validators';
@@ -156,7 +157,33 @@ function normalizeQuickSettingsNetworkType(networkType: string): string {
 const LTE_NUM_OF_CELLS_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells';
 const HIDDEN_GROUP_IDS = new Set(['device-sync']);
 const DEVICE_LEVEL_IPSEC_GROUP_IDS = new Set(['device-ipsec', 'gnb-ipsec']);
-const OUTER_GROUP_IDS = new Set(['device-time', 'bm-sync-source', 'gnb-sync-source', 'device-ipsec-control', 'device-ipsec', 'gnb-ipsec']);
+const IPSEC_GROUP_IDS = new Set(['device-ipsec-control', 'device-ipsec', 'gnb-ipsec']);
+const OUTER_GROUP_IDS = new Set([
+  'device-time', 'bm-sync-source', 'gnb-sync-source',
+  'gnb-network-interface', 'gnb-network-default-route', 'gnb-network-dscp',
+  'gnb-network-dscp-list', 'gnb-network-static-route',
+  'device-ipsec-control', 'device-ipsec', 'gnb-ipsec',
+]);
+const FIXED_NETWORK_GROUP_IDS = new Set([
+  'device-wan-1', 'device-wan-2', 'device-wan-3', 'device-wan-4',
+  'device-static-route-1', 'device-static-route-2', 'device-static-route-3', 'device-static-route-4',
+]);
+const FIXED_NETWORK_TABLE_MODELS = new Set(['BLN', 'MLN']);
+function isFixedNetworkGroup(group: QuickSettingsGroup): boolean {
+  return FIXED_NETWORK_GROUP_IDS.has(group.id);
+}
+function getWanTableInsertionParamName(group: QuickSettingsGroup): string | undefined {
+  const linkSpeedParam = group.params.find((param) => (
+    param.name === 'LinkSpeed'
+    || param.standardPath?.endsWith('.WanLinkSpeed')
+    || param.titleEn === 'Link Speed Negotiated'
+  ));
+  return linkSpeedParam?.name ?? group.params.find((param) => param.name === 'ConnectType')?.name;
+}
+const isOuterGroup = (groupId: string): boolean => (
+  OUTER_GROUP_IDS.has(groupId)
+  || groupId === 'device-wan'
+);
 // BSC 设备 BTS 多实例父路径。额外的顶部 ＋/✖ 按钮调用 AddObject/DeleteObject
 // 在该路径下管理 BTS 实例。
 const BSC_BTS_OBJECT_PREFIX = 'DeviceGSM.Bts.';
@@ -296,8 +323,30 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   }, [data?.groups, isENB, isBM, activeBmTech, hasDeviceIpsecGroup]);
 
   const outerGroups = useMemo(
-    () => visibleGroups.filter((group) => OUTER_GROUP_IDS.has(group.id)),
+    () => visibleGroups.filter((group) => isOuterGroup(group.id)),
     [visibleGroups],
+  );
+  const nonIpsecOuterGroups = useMemo(
+    () => outerGroups.filter((group) => !IPSEC_GROUP_IDS.has(group.id)),
+    [outerGroups],
+  );
+  const wanOuterGroups = useMemo(
+    () => nonIpsecOuterGroups.filter((group) => group.id === 'device-wan'),
+    [nonIpsecOuterGroups],
+  );
+  const nonWanOuterGroups = useMemo(
+    () => nonIpsecOuterGroups.filter((group) => group.id !== 'device-wan'),
+    [nonIpsecOuterGroups],
+  );
+  const ipsecOuterGroups = useMemo(
+    () => outerGroups.filter((group) => IPSEC_GROUP_IDS.has(group.id)),
+    [outerGroups],
+  );
+  const fixedNetworkGroups = useMemo(
+    () => FIXED_NETWORK_TABLE_MODELS.has(paramModel.toUpperCase())
+      ? visibleGroups.filter(isFixedNetworkGroup)
+      : [],
+    [paramModel, visibleGroups],
   );
 
   useEffect(() => {
@@ -307,8 +356,11 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   }, [visibleGroups]);
 
   const instanceScopedGroups = useMemo(
-    () => visibleGroups.filter((group) => !OUTER_GROUP_IDS.has(group.id)),
-    [visibleGroups],
+    () => visibleGroups.filter((group) => (
+      !isOuterGroup(group.id)
+      && !(FIXED_NETWORK_TABLE_MODELS.has(paramModel.toUpperCase()) && isFixedNetworkGroup(group))
+    )),
+    [paramModel, visibleGroups],
   );
 
   const selectedInstance =
@@ -345,8 +397,14 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
     : String(instanceContext.fapInstance);
 
   const renderGroup = (group: typeof visibleGroups[number], keySuffix: string, eager = false) => {
-    const childGroups = instanceScopedGroups.filter((g) => g.parentSelector === group.id);
+    const childGroups = instanceScopedGroups.filter((g) => (
+      g.parentSelector === group.id
+      || (group.id === 'gnb-network-interface' && g.parentSelector === 'gnb-interface-vlan')
+    ));
     if (group.parentSelector) return null;
+    const wanTableInsertionParamName = group.id === 'device-wan'
+      ? getWanTableInsertionParamName(group)
+      : undefined;
     const title = locale === 'en-US' ? (group.titleEn || group.titleZh) : (group.titleZh || group.titleEn);
     return (
       <QuickSettingsGroupGate
@@ -390,6 +448,18 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
               locale={locale}
               onIpsecControlChange={group.id === 'device-ipsec-control' ? setIpsecControlValue : undefined}
               actionMode={group.id === 'device-ipsec-control' ? 'staged' : 'standalone'}
+              afterParamName={fixedNetworkGroups.length > 0 ? wanTableInsertionParamName : undefined}
+              afterParamContent={fixedNetworkGroups.length > 0 && wanTableInsertionParamName ? (
+                <FixedScalarSettingsTable
+                  key={`device-wan-embedded-table::${refreshTick}`}
+                  deviceId={deviceId}
+                  active={childActive}
+                  groups={fixedNetworkGroups}
+                  locale={locale}
+                  kind="wan"
+                  embedded
+                />
+              ) : undefined}
             />
           );
         }}
@@ -610,8 +680,35 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   }
 
   return (
-    <div style={{ padding: 16 }}>
-      {outerGroups.map((group, index) => renderGroup(group, 'outer', index < 2))}
+    <div style={{ minHeight: '100%', padding: 12, background: '#f4f6f9' }}>
+      {nonWanOuterGroups.map((group, index) => renderGroup(group, 'outer', index < 2))}
+
+      {wanOuterGroups.map((group) => renderGroup(group, 'wan'))}
+
+      {fixedNetworkGroups.length > 0 && (
+        <>
+          {wanOuterGroups.length === 0 && (
+            <FixedScalarSettingsTable
+              key={`device-wan-table::${refreshTick}`}
+              deviceId={deviceId}
+              active={queryActive}
+              groups={fixedNetworkGroups}
+              locale={locale}
+              kind="wan"
+            />
+          )}
+          <FixedScalarSettingsTable
+            key={`device-static-route-table::${refreshTick}`}
+            deviceId={deviceId}
+            active={queryActive}
+            groups={fixedNetworkGroups}
+            locale={locale}
+            kind="static-route"
+          />
+        </>
+      )}
+
+      {ipsecOuterGroups.map((group) => renderGroup(group, 'outer-ipsec'))}
 
       {(isENB || isNR || isBSC) && (
         <Space style={{ marginBottom: 16 }}>

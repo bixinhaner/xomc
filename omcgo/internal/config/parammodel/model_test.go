@@ -223,6 +223,22 @@ func TestBaiBNQIncludesNRWANInterfaceParameters(t *testing.T) {
 	}
 	require.True(t, foundObject, "NR must explicitly support WAN interface AddObject/DeleteObject")
 
+	for _, objectPath := range []string{
+		"Device.Ethernet.Interface.{i}.VlanInterface.{i}.",
+		"Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.",
+		"Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.",
+	} {
+		foundObject = false
+		for _, object := range doc.Objects {
+			if object.Name == objectPath {
+				foundObject = true
+				assert.Equal(t, objectPath, object.StandardPath)
+				assert.Equal(t, "READ_WRITE", object.Access)
+			}
+		}
+		require.True(t, foundObject, "NR VLAN path must be an object: %s", objectPath)
+	}
+
 	want := map[string]string{
 		"Device.Ethernet.Interface.{i}.Enable":         "READ_WRITE",
 		"Device.Ethernet.Interface.{i}.UserLabel":      "READ_WRITE",
