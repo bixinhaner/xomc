@@ -22,6 +22,7 @@ type LegacyLicenseClaims struct {
 	MACAddress       string
 	SystemUUID       string
 	HardwareLimit    string
+	IsCloud          bool
 	FeatureIDs       []string
 	FeatureCodes     []string
 	LegacyExtra      map[string]LegacyXMLValue
@@ -47,6 +48,7 @@ func MapLegacyTrueLicense(artifact *LegacyTrueLicenseArtifact) (*LegacyLicenseCl
 	}
 
 	productType := legacyString(artifact.Extra, "productType")
+	claims.IsCloud = productType == "1"
 	useFor := legacyString(artifact.Extra, "useFor")
 	switch {
 	case useFor == "1":

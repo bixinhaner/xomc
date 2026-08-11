@@ -34,6 +34,12 @@ import { useTabStore } from '@core/store/tabStore';
 import { useAppStore } from '@core/store/appStore';
 import { useMenuStore } from '@core/store/menuStore';
 import { useUserStore } from '@core/store/userStore';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
+import {
+  extractLicenseErrorCode,
+  SystemLicenseErrorCodes,
+} from '@core/services/api/systemLicenseApi';
+import { isSystemLicensePath } from '@core/utils/systemLicenseAccess';
 import type { Menu as DynamicMenu } from '@core/types/menu';
 import { resolveMenuLabel } from '@core/types/menu';
 import { useResponsive } from '@/hooks/useResponsive';
@@ -137,6 +143,20 @@ interface DynamicLeaf {
 
 function isVisible(menu: DynamicMenu): boolean {
   return menu.status === 'normal' && menu.showStatus !== 'hide';
+}
+
+function keepSystemLicenseMenu(menu: DynamicMenu): boolean {
+  return isSystemLicensePath(menu.routePath ?? '')
+    || (menu.children ?? []).some(keepSystemLicenseMenu);
+}
+
+function filterSystemLicenseMenus(menus: DynamicMenu[]): DynamicMenu[] {
+  return menus
+    .filter(keepSystemLicenseMenu)
+    .map((menu) => ({
+      ...menu,
+      children: menu.children ? filterSystemLicenseMenus(menu.children) : menu.children,
+    }));
 }
 
 function renderIcon(name: string | undefined): React.ReactNode {
@@ -276,6 +296,14 @@ export default function NavMenu({
   const showMenuIcon = useAppStore((s) => s.showMenuIcon);
 
   const dynamicMenus = useMenuStore((s) => s.menus);
+  const { data: currentLicense, isLoading: isLicenseLoading, error: licenseError } = useSystemLicense();
+  const licenseOnlyMode = !isLicenseLoading
+    && !currentLicense
+    && extractLicenseErrorCode(licenseError) === SystemLicenseErrorCodes.NotConfigured;
+  const visibleDynamicMenus = useMemo(
+    () => (licenseOnlyMode ? filterSystemLicenseMenus(dynamicMenus || []) : dynamicMenus || []),
+    [dynamicMenus, licenseOnlyMode],
+  );
 
   // 动态菜单 label 解析器：依赖 intl.locale，切换语言后 antd Menu 立即重渲染
   // （同时影响 openTab 标题）。译文存 DB（menus.name_i18n），不再依赖前端 i18n 包。
@@ -302,33 +330,34 @@ export default function NavMenu({
   // 动态分支由后端 service 层完成同等过滤，无需前端二次处理。
   const filteredNav = useMemo(
     () => (NAV_CONFIG || [])
+      .filter((group) => !licenseOnlyMode || group.key === 'license')
       .filter((g) => !g.requireSuperAdmin || isSuperAdmin)
       .map((group) => ({
         ...group,
         children: (group.children || []).filter((child) => !child.requireAdmin || isAdmin),
       }))
       .filter((group) => (group.children || []).length > 0),
-    [isAdmin, isSuperAdmin],
+    [isAdmin, isSuperAdmin, licenseOnlyMode],
   );
 
   const menuItems = useMemo(
     () =>
       useDynamic
-        ? buildDynamicMenuItems(dynamicMenus || [], labelResolver, showMenuIcon)
+        ? buildDynamicMenuItems(visibleDynamicMenus, labelResolver, showMenuIcon)
         : buildStaticMenuItems(filteredNav || [], t),
-    [useDynamic, dynamicMenus, labelResolver, showMenuIcon, filteredNav, t],
+    [useDynamic, visibleDynamicMenus, labelResolver, showMenuIcon, filteredNav, t],
   );
 
   const dynamicKeyToLeaf = useMemo(
     () =>
       useDynamic
-        ? buildDynamicKeyToLeaf(dynamicMenus || [], labelResolver)
+        ? buildDynamicKeyToLeaf(visibleDynamicMenus, labelResolver)
         : new Map<string, DynamicLeaf>(),
-    [useDynamic, dynamicMenus, labelResolver],
+    [useDynamic, visibleDynamicMenus, labelResolver],
   );
   const dynamicPathToKey = useMemo(
-    () => (useDynamic ? buildDynamicPathToKey(dynamicMenus || []) : new Map<string, string>()),
-    [useDynamic, dynamicMenus],
+    () => (useDynamic ? buildDynamicPathToKey(visibleDynamicMenus) : new Map<string, string>()),
+    [useDynamic, visibleDynamicMenus],
   );
   const staticKeyToChild = useMemo(
     () => (useDynamic ? new Map<string, NavChild>() : buildStaticKeyToChild(filteredNav || [])),
@@ -347,13 +376,13 @@ export default function NavMenu({
 
   const defaultOpenKeys = useMemo(() => {
     if (useDynamic) {
-      return findDynamicTopOpenKey(dynamicMenus || [], location.pathname);
+      return findDynamicTopOpenKey(visibleDynamicMenus, location.pathname);
     }
     const selectedKey = staticPathToKey.get(location.pathname);
     if (!selectedKey) return [];
     const group = (filteredNav || []).find((g) => (g.children || [])?.some((c) => c.key === selectedKey));
     return group ? [group.key] : [];
-  }, [useDynamic, dynamicMenus, staticPathToKey, filteredNav, location.pathname]);
+  }, [useDynamic, visibleDynamicMenus, staticPathToKey, filteredNav, location.pathname]);
 
   const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
     if (useDynamic) {

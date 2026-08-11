@@ -143,9 +143,11 @@ northbound:
 # 旧项目 TrueLicense .lic 的 JKS/DSA 验签配置。
 license:
   signing:
-    # 密码请通过部署环境注入，不要写入配置文件。
+    # omcPublicKey.store 是公钥库（随仓库分发、只读挂载），bcb9omc6 是其完整性密码
+    # （非签名私钥，私钥不在仓库），正式发布默认用此值开箱即用；自定义 keystore 用
+    # OMC_LICENSE_STORE_PASSWORD 覆盖。
     legacy_keystore_path: "/etc/omc/license/omcPublicKey.store"
-    legacy_store_password: "${OMC_LICENSE_STORE_PASSWORD:-}"
+    legacy_store_password: "${OMC_LICENSE_STORE_PASSWORD:-bcb9omc6}"
     legacy_key_alias: "omcPublicKey"
     legacy_verify_integrity: true
   log_archive:

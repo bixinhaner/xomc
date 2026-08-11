@@ -40,6 +40,7 @@ type SystemLicenseService struct {
 	legacyKeyAlias        string
 	legacyVerifyIntegrity bool
 	legacyFeatureMapping  *LegacyFeatureMapping
+	usageRepo             SystemLicenseUsageRepository
 }
 
 // NewSystemLicenseService 构造旧项目 License 业务 service。
@@ -71,6 +72,12 @@ func (s *SystemLicenseService) SetLegacyFeatureMapping(mapping *LegacyFeatureMap
 	s.legacyFeatureMapping = mapping
 }
 
+// SetUsageRepo 注入累计使用时长仓储，启用 GetCurrent 响应里的累计状态填充
+//（cumulative_used_hours / cumulative_limit_hours / is_expired）。
+func (s *SystemLicenseService) SetUsageRepo(r SystemLicenseUsageRepository) {
+	s.usageRepo = r
+}
+
 // GetCurrent 返回当前生效 license。无 license 时返业务错误 12113 +
 // commonerrors.ErrNotFound（→ HTTP 404）。
 func (s *SystemLicenseService) GetCurrent(ctx context.Context) (*SystemLicense, error) {
@@ -86,7 +93,37 @@ func (s *SystemLicenseService) GetCurrent(ctx context.Context) (*SystemLicense, 
 		return nil, fmt.Errorf("get current system license: %w", err)
 	}
 	s.enrichLegacyFeatureList(&lic.FeatureList)
+	s.enrichCumulativeStatus(ctx, lic)
 	return lic, nil
+}
+
+// enrichCumulativeStatus 填充 is_expired / cumulative_used_hours / cumulative_limit_hours
+// 三个 transient 字段。is_expired 覆盖日期过期 + 累计超限；累计值含未推进增量
+// （now - last_visited）以保证展示与 enforcement 裁决口径一致。usageRepo 未注入
+// 或读取失败时仅做日期过期判断（不阻塞响应）。
+func (s *SystemLicenseService) enrichCumulativeStatus(ctx context.Context, lic *SystemLicense) {
+	now := nowFunc()
+	expired := lic.ExpiryDate != nil && now.After(*lic.ExpiryDate)
+
+	if s.usageRepo != nil {
+		timeLimit := extractTimeLimitHours(lic.FeatureList)
+		if timeLimit > 0 {
+			lic.CumulativeLimitHours = timeLimit
+			total, lastVisited, err := s.usageRepo.CurrentUsage(ctx)
+			if err == nil {
+				if elapsed := now.Sub(lastVisited); elapsed > 0 {
+					total += elapsed.Hours()
+				}
+				lic.CumulativeUsedHours = &total
+				if total >= float64(timeLimit) {
+					expired = true
+				}
+			} else {
+				s.logger.Warn("enrich cumulative status: read usage failed", zap.Error(err))
+			}
+		}
+	}
+	lic.IsExpired = expired
 }
 
 // ListHistory 透传 repo.ListHistory。Filter 内部走 pagination 默认值兜底。
@@ -121,6 +158,9 @@ func (s *SystemLicenseService) enrichLegacyFeatureList(featureList *FeatureList)
 		return
 	}
 	payload["features"] = s.legacyFeatureMapping.Normalize(ids, codes)
+	if _, ok := payload["authorization_tree"]; !ok {
+		payload["authorization_tree"] = s.legacyFeatureMapping.AuthorizationTree(ids, codes)
+	}
 	encoded, err := json.Marshal(payload)
 	if err == nil {
 		*featureList = FeatureList(encoded)
@@ -139,6 +179,49 @@ func legacyPayloadStrings(value any) []string {
 		}
 	}
 	return result
+}
+
+// HasActiveLicense reports whether a system license is currently configured.
+// Satisfies admin.LicenseFeatureGate. No license (GetCurrent → 404 NotConfigured)
+// returns (false, nil); a transient error returns (false, err) so the caller can
+// fail-open on the menu path (the frontend licenseOnlyMode only triggers on 404).
+func (s *SystemLicenseService) HasActiveLicense(ctx context.Context) (bool, error) {
+	_, err := s.GetCurrent(ctx)
+	if err != nil {
+		if errors.Is(err, commonerrors.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// FilterAuthorized returns the subset of legacy feature codes authorized by the
+// current system license. Satisfies admin.LicenseFeatureGate structurally (no
+// import of admin). Fail-open: on no-license (GetCurrent 404) or transient
+// error returns the input unchanged (menu visibility must not lock the UI out;
+// device-level enforcement is fail-closed via the Enforcer).
+func (s *SystemLicenseService) FilterAuthorized(ctx context.Context, codes []string) ([]string, error) {
+	lic, err := s.GetCurrent(ctx)
+	if err != nil {
+		return codes, nil
+	}
+	tree := extractAuthorizationTree(lic.FeatureList)
+	authorized := make([]string, 0, len(codes))
+	for _, code := range codes {
+		code = strings.TrimSpace(code)
+		if code == "" {
+			continue
+		}
+		path := codeToPath(code)
+		if len(path) == 0 {
+			continue
+		}
+		if HasFeature(FeatureList(tree), path...) {
+			authorized = append(authorized, code)
+		}
+	}
+	return authorized, nil
 }
 
 // CheckFeature evaluates one dot-separated feature path against the current license.
@@ -167,7 +250,7 @@ func (s *SystemLicenseService) CheckFeature(ctx context.Context, path string) (b
 	if err != nil {
 		return false, err
 	}
-	return HasFeature(lic.FeatureList, parts...), nil
+	return HasFeature(FeatureList(extractAuthorizationTree(lic.FeatureList)), parts...), nil
 }
 
 // UpdateRequest — POST /system-license 请求体。
@@ -220,6 +303,11 @@ func (s *SystemLicenseService) Update(ctx context.Context, req UpdateRequest) (*
 	parsed, sigStatus, sigNote, storedRawContent, err := s.parseLegacyUpdate(req.RawContent)
 	if err != nil {
 		return nil, commonerrors.NewBusinessError(global.ErrCodeSystemLicenseInvalidFormat, err.Error(), commonerrors.ErrInvalidInput)
+	}
+
+	// 硬件绑定校验（MAC / SystemUUID）：license 非空绑定且与本机不匹配 → 拒绝上传（403）。
+	if hwErr := validateHardwareBinding(parsed.MACAddress, parsed.SystemUUID); hwErr != nil {
+		return nil, commonerrors.NewBusinessError(global.ErrCodeSystemLicenseHardwareMismatch, hwErr.Error(), commonerrors.ErrLicenseHardwareMismatch)
 	}
 
 	// license_id 重复预检：current 行 + history 表都查一遍。Replace 内部
@@ -318,12 +406,21 @@ func (s *SystemLicenseService) parseLegacyUpdate(encodedRaw string) (*parsedLice
 	if err != nil {
 		return nil, SignatureInvalid, "", "", err
 	}
+	// 复刻旧项目 FunctionCodeRelation 的 feature code 补全规则（sysList/gnbList/
+	// getOrtherCode/delAdvanceControl/delAdvancePlug），使真实 .lic 的授权 code 集合与
+	// 旧项目 supportFeatureCode 一致。无 mapping 时退回原始 codes。
+	effectiveCodes := claims.FeatureCodes
+	if s.legacyFeatureMapping != nil {
+		effectiveCodes = s.legacyFeatureMapping.ExpandFeatureCodes(claims.FeatureIDs, claims.FeatureCodes, claims.IsCloud)
+	}
 	featurePayloadData := map[string]any{
 		"legacy_feature_ids":   claims.FeatureIDs,
-		"legacy_feature_codes": claims.FeatureCodes,
+		"legacy_feature_codes": effectiveCodes,
+		"time_limit_hours":     claims.TimeLimitHours,
 	}
 	if s.legacyFeatureMapping != nil {
-		featurePayloadData["features"] = s.legacyFeatureMapping.Normalize(claims.FeatureIDs, claims.FeatureCodes)
+		featurePayloadData["features"] = s.legacyFeatureMapping.Normalize(nil, effectiveCodes)
+		featurePayloadData["authorization_tree"] = s.legacyFeatureMapping.AuthorizationTree(nil, effectiveCodes)
 	}
 	featurePayload, err := json.Marshal(featurePayloadData)
 	if err != nil {
@@ -343,6 +440,9 @@ func (s *SystemLicenseService) parseLegacyUpdate(encodedRaw string) (*parsedLice
 		DevicesSupport: claims.DevicesSupport,
 		FeatureList:    featurePayload,
 		Signature:      &artifact.Signature,
+		MACAddress:     claims.MACAddress,
+		SystemUUID:     claims.SystemUUID,
+		TimeLimitHours: claims.TimeLimitHours,
 	}, SignatureVerified, "legacy TrueLicense SHA1withDSA verified", base64.StdEncoding.EncodeToString(raw), nil
 }
 
@@ -361,4 +461,7 @@ type parsedLicense struct {
 	FeatureList    json.RawMessage `json:"feature_list"`
 	Signature      *string         `json:"signature,omitempty"`
 	SignatureKeyID *string         `json:"signature_key_id,omitempty"`
+	MACAddress     string          `json:"mac_address,omitempty"`
+	SystemUUID     string          `json:"system_uuid,omitempty"`
+	TimeLimitHours int             `json:"time_limit_hours,omitempty"`
 }

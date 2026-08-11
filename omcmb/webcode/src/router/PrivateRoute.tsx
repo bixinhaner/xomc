@@ -2,6 +2,12 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useUserStore } from '@core/store/userStore';
 import { useMenuStore } from '@core/store/menuStore';
 import { isDynamicMenuEnabled } from '@/components/MenuBootstrap/featureFlag';
+import { useSystemLicense } from '@core/hooks/api/useSystemLicense';
+import {
+  extractLicenseErrorCode,
+  SystemLicenseErrorCodes,
+} from '@core/services/api/systemLicenseApi';
+import { isSystemLicensePath } from '@core/utils/systemLicenseAccess';
 
 interface PrivateRouteProps {
   children: React.ReactNode;
@@ -88,6 +94,10 @@ export default function PrivateRoute({
   const menuLoaded = useMenuStore((s) => s.loaded);
   const routePaths = useMenuStore((s) => s.routePaths);
   const location = useLocation();
+  const { data: currentLicense, isLoading: isLicenseLoading, error: licenseError } = useSystemLicense();
+  const licenseOnlyMode = !isLicenseLoading
+    && !currentLicense
+    && extractLicenseErrorCode(licenseError) === SystemLicenseErrorCodes.NotConfigured;
 
   // Not authenticated at all → redirect to login
   if (!isAuthenticated) {
@@ -113,6 +123,10 @@ export default function PrivateRoute({
     return <Navigate to="/403" replace />;
   }
 
+  if (licenseOnlyMode && !isSystemLicensePath(location.pathname) && location.pathname !== '/403') {
+    return <Navigate to="/license" replace />;
+  }
+
   // 路径守卫：仅动态模式 + 菜单已加载时启用，避免误判
   //
   // 超管 / admin 整体放行（授权全量）：admin 是系统管理员，应能进所有业务路由，
@@ -120,7 +134,7 @@ export default function PrivateRoute({
   // admin bypass 口径见 frontend-core/utils/routeAccess。
   const isAdminLike =
     currentUser?.role === 'admin' || currentUser?.isSuperAdmin === true;
-  if (isDynamicMenuEnabled() && menuLoaded && !isAdminLike) {
+  if (!licenseOnlyMode && isDynamicMenuEnabled() && menuLoaded && !isAdminLike) {
     const pathname = location.pathname;
     if (
       !ALWAYS_ALLOWED_PATHS.has(pathname) &&

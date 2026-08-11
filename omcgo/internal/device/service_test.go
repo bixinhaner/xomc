@@ -514,6 +514,87 @@ func TestDeviceService_RegisterFromInform_DeletedDeviceSkipped(t *testing.T) {
 	assert.False(t, createCalled, "expected Create not to be called for recycle-bin device")
 }
 
+// mockLicenseEnforcer 是 device.LicenseEnforcer 的测试 stub。
+type mockLicenseEnforcer struct {
+	capacityErr  error
+	expiryErr    error
+	capacityArg  int
+	expiryOp     string
+}
+
+func (m *mockLicenseEnforcer) EnforceCapacity(_ context.Context, additional int) error {
+	m.capacityArg = additional
+	return m.capacityErr
+}
+
+func (m *mockLicenseEnforcer) EnforceExpiry(_ context.Context, operation string) error {
+	m.expiryOp = operation
+	return m.expiryErr
+}
+
+func TestDeviceService_RegisterFromInform_LicenseCapacityExceeded(t *testing.T) {
+	createCalled := false
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(ctx context.Context, sn string) (*model.Device, error) {
+			return nil, nil // 全新设备
+		},
+		createFn: func(ctx context.Context, device *model.Device) error {
+			createCalled = true
+			return nil
+		},
+	}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	enforcer := &mockLicenseEnforcer{capacityErr: commonerrors.ErrLicenseCapacityExceeded}
+	svc.SetLicenseEnforcer(enforcer)
+
+	_, err := svc.RegisterFromInform(context.Background(), sampleInform("SN-CAP"), model.CarrierCMCC)
+	require.ErrorIs(t, err, commonerrors.ErrLicenseCapacityExceeded)
+	assert.False(t, createCalled, "Create 不应在容量超限时被调用")
+	assert.Equal(t, 1, enforcer.capacityArg)
+}
+
+func TestDeviceService_RegisterFromInform_LicenseExpired(t *testing.T) {
+	createCalled := false
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(ctx context.Context, sn string) (*model.Device, error) {
+			return nil, nil
+		},
+		createFn: func(ctx context.Context, device *model.Device) error {
+			createCalled = true
+			return nil
+		},
+	}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	svc.SetLicenseEnforcer(&mockLicenseEnforcer{expiryErr: commonerrors.ErrLicenseExpired})
+
+	_, err := svc.RegisterFromInform(context.Background(), sampleInform("SN-EXP"), model.CarrierCMCC)
+	require.ErrorIs(t, err, commonerrors.ErrLicenseExpired)
+	assert.False(t, createCalled, "Create 不应在 license 过期时被调用")
+}
+
+func TestDeviceService_RegisterFromInform_LicenseOk_ExistingDeviceNotBlocked(t *testing.T) {
+	// 已注册设备的 Inform 更新不应被 license enforcer 拦截。
+	existing := &model.Device{ID: uuid.New(), SerialNumber: "SN-EXIST", Status: model.DeviceActive}
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(ctx context.Context, sn string) (*model.Device, error) {
+			return existing, nil
+		},
+		updateFn: func(ctx context.Context, device *model.Device) error {
+			return nil
+		},
+	}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	enforcer := &mockLicenseEnforcer{
+		capacityErr: commonerrors.ErrLicenseCapacityExceeded, // 即使容量满也不应拦已注册设备
+	}
+	svc.SetLicenseEnforcer(enforcer)
+
+	registration, err := svc.RegisterFromInform(context.Background(), sampleInform("SN-EXIST"), model.CarrierCMCC)
+	require.NoError(t, err)
+	require.NotNil(t, registration)
+	assert.Equal(t, 0, enforcer.capacityArg, "已注册设备不应触发容量检查")
+}
+
 // ---------------------------------------------------------------------------
 // Tests: UpdateFromInform
 // ---------------------------------------------------------------------------

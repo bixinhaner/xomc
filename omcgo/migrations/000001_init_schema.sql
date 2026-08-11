@@ -3902,6 +3902,7 @@ CREATE TABLE public.menus (
     updated_by uuid,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     name_i18n jsonb,
+    feature_code text[],
     CONSTRAINT chk_menu_type CHECK (((type)::text = ANY (ARRAY[('directory'::character varying)::text, ('menu'::character varying)::text, ('button'::character varying)::text]))),
     CONSTRAINT chk_show_status CHECK (((show_status)::text = ANY (ARRAY[('show'::character varying)::text, ('hide'::character varying)::text]))),
     CONSTRAINT chk_status CHECK (((status)::text = ANY (ARRAY[('normal'::character varying)::text, ('disabled'::character varying)::text])))
@@ -7304,6 +7305,18 @@ CREATE TABLE public.system_license (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT chk_license_type CHECK (((license_type)::text = ANY (ARRAY[('Commercial'::character varying)::text, ('Trial'::character varying)::text, ('Evaluation'::character varying)::text, ('Internal'::character varying)::text]))),
     CONSTRAINT chk_signature_status CHECK (((signature_status)::text = ANY (ARRAY[('verified'::character varying)::text, ('unverified'::character varying)::text, ('invalid'::character varying)::text])))
+);
+
+-- system_license_usage：累计使用时长 + 时间回拨检测的 singleton 状态（复刻旧项目 check_au_info）。
+-- 单行（id 固定为 1）；enforcer 在过期检查时 compute-on-read：按 now - last_visited_time 累加，
+-- 若 now < last_visited_time 判定系统时间回拨 → license 失效。
+CREATE TABLE public.system_license_usage (
+    id integer DEFAULT 1 NOT NULL,
+    use_duration_hours double precision DEFAULT 0 NOT NULL,
+    last_visited_time timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT system_license_usage_pkey PRIMARY KEY (id),
+    CONSTRAINT system_license_usage_singleton CHECK (id = 1)
 );
 
 

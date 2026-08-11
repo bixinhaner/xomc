@@ -56,6 +56,33 @@ describe('resolveRouteTab', () => {
     })).toBeNull();
   });
 
+  it('resolves the license recovery surface even though its menu is hidden', () => {
+    expect(resolveRouteTab({
+      pathname: '/license',
+      dynamicMenuEnabled: true,
+      dynamicMenus: [],
+      staticNav: NAV_CONFIG,
+      locale: 'zh-CN',
+      isAdmin: true,
+      isSuperAdmin: false,
+    })).toEqual({
+      key: '/license',
+      label: 'nav.systemLicense',
+      path: '/license',
+      closable: true,
+      labelRaw: false,
+    });
+    expect(resolveRouteTab({
+      pathname: '/license/history',
+      dynamicMenuEnabled: true,
+      dynamicMenus: [],
+      staticNav: NAV_CONFIG,
+      locale: 'zh-CN',
+      isAdmin: true,
+      isSuperAdmin: false,
+    })?.label).toBe('systemLicense.history.title');
+  });
+
   it('keeps the static KPI route admin-only', () => {
     expect(resolveRouteTab({
       pathname: '/system/kpi-config',

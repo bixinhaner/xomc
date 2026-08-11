@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -98,6 +99,18 @@ type roleCopyBindingRepository interface {
 const copyRoleCleanupTimeout = 5 * time.Second
 
 // AdminService provides user management, authentication, and RBAC functionality.
+// LicenseFeatureGate 判定菜单的 feature_code 是否被当前系统 license 授权。
+// 实现方（license.SystemLicenseService）按 code 派生路径后查授权树。菜单可见性
+// fail-open：无 license / 查询异常时返回全集（不隐藏，避免锁死 UI）；设备级
+// fail-closed 走 license.Enforcer，与此正交。
+type LicenseFeatureGate interface {
+	// FilterAuthorized 返回 codes 中被授权的子集（仅在 HasActiveLicense=true 时调用）。
+	FilterAuthorized(ctx context.Context, codes []string) ([]string, error)
+	// HasActiveLicense 报告当前是否已配置系统 license。
+	// 无 license（GetCurrent 404）→ (false, nil)；瞬时错误 → (false, err)。
+	HasActiveLicense(ctx context.Context) (bool, error)
+}
+
 type AdminService struct {
 	userRepo         UserRepository
 	roleRepo         RoleRepository
@@ -109,6 +122,7 @@ type AdminService struct {
 	permInvalidator  PermissionInvalidator
 	metrics          *AdminMetrics
 	policy           *SecurityPolicy // 可选；nil 时单点登录 / 密码策略等走 default
+	featureGate      LicenseFeatureGate // 可选；nil 时菜单不做 license feature 过滤
 	logger           *zap.Logger
 }
 
@@ -156,6 +170,12 @@ func (s *AdminService) SetTokenRevoker(r *TokenRevoker) {
 // sys_configs (category='security') 的运行时配置（如单点登录开关、密码强度）。
 func (s *AdminService) SetSecurityPolicy(p *SecurityPolicy) {
 	s.policy = p
+}
+
+// SetLicenseFeatureGate 注入 license 特性闸门，启用菜单按 license feature 过滤。
+// 不调用（nil）时 GetUserMenuTreeByRole 不做 feature 过滤，菜单全可见。
+func (s *AdminService) SetLicenseFeatureGate(g LicenseFeatureGate) {
+	s.featureGate = g
 }
 
 // policySnapshot 返当前生效的 SecurityPolicy 快照；未注入时返 default。
@@ -1401,8 +1421,8 @@ func (s *AdminService) GetUserMenuTree(ctx context.Context, userID uuid.UUID) ([
 		return nil, err
 	}
 
-	// Build tree and filter out button type items for display
-	tree := buildMenuTree(menus)
+	menus = s.applyLicenseMenuGate(ctx, menus)
+	tree := pruneEmptyDirectories(buildMenuTree(menus))
 	return filterTreeForDisplay(tree), nil
 }
 
@@ -1632,26 +1652,198 @@ func (s *AdminService) GetUserMenuTreeByRole(ctx context.Context, userID uuid.UU
 	if err != nil {
 		return nil, fmt.Errorf("get user for menu tree by role: %w", err)
 	}
+	var menus []Menu
 	if user.Source == UserSourceBuiltIn {
-		menus, err := s.menuRepo.GetAllActive(ctx)
+		menus, err = s.menuRepo.GetAllActive(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return buildMenuTree(menus), nil
-	}
-	menus, err := s.menuRepo.GetByRole(ctx, roleID)
-	if err != nil {
-		return nil, err
-	}
-	if !isBuiltInRole(roleID) {
-		allMenus, err := s.menuRepo.GetAllActive(ctx)
+	} else {
+		menus, err = s.menuRepo.GetByRole(ctx, roleID)
 		if err != nil {
-			return nil, fmt.Errorf("load active menus for custom role: %w", err)
+			return nil, err
 		}
-		menus = includeButtonsUnderGrantedMenus(menus, allMenus)
+		if !isBuiltInRole(roleID) {
+			allMenus, err := s.menuRepo.GetAllActive(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("load active menus for custom role: %w", err)
+			}
+			menus = includeButtonsUnderGrantedMenus(menus, allMenus)
+		}
 	}
-	// GetByRole 已按 parent/sort 排序但未组装成树。
-	return buildMenuTree(menus), nil
+	menus = s.applyLicenseMenuGate(ctx, menus)
+	return pruneEmptyDirectories(buildMenuTree(menus)), nil
+}
+
+// applyLicenseMenuGate 统一菜单 license 闸门（GetUserMenuTree 与 GetUserMenuTreeByRole 共用）。
+// 无 license → 只剩 /license；有 license → 按 feature_code 过滤 + 确保 /license 始终可见；
+// 瞬时错误 → fail-open。
+func (s *AdminService) applyLicenseMenuGate(ctx context.Context, menus []Menu) []Menu {
+	if s.featureGate == nil {
+		return menus
+	}
+	active, err := s.featureGate.HasActiveLicense(ctx)
+	switch {
+	case err != nil:
+		// 瞬时错误（DB 抖动等）→ fail-open，不隐藏菜单；前端 licenseOnlyMode 只在 404 触发。
+		s.logger.Warn("license active check failed, skipping menu filter", zap.Error(err))
+	case !active:
+		// 无 license → 只保留 /license 菜单。/license 可能不在 GetAllActive/GetByUser 结果里
+		// （show_status=hide 或 role_menus 未分配），故从 GetTree（含 hide）全集里取，
+		// 确保用户能进上传入口。
+		all, err := s.menuRepo.GetTree(ctx, nil)
+		if err != nil {
+			s.logger.Warn("load menu tree for license-only filter failed, skip filter", zap.Error(err))
+			return menus
+		}
+		return filterLicenseOnlyMenus(flattenMenuTree(all))
+	default:
+		gated := s.applyLicenseFeatureGate(ctx, menus)
+		// 有 license 时 /license 也必须可见：用户需要查看/替换/管理 license。
+		// 走 GetByRole 的非 builtIn 用户（含系统 admin 角色）若 role_menus 未分配 /license，
+		// 菜单会缺失，此处从全集补回，与无 license 分支行为一致。
+		return s.ensureLicenseMenuVisible(ctx, gated)
+	}
+	return menus
+}
+
+// ensureLicenseMenuVisible 确保 /license 菜单出现在结果集中。
+// 若 menus 已含 /license 直接返回；否则从 GetTree 全集取 status=normal && show_status=show
+// 的 /license 节点追加。菜单表小（<200 行），仅在缺失时才查全集。
+func (s *AdminService) ensureLicenseMenuVisible(ctx context.Context, menus []Menu) []Menu {
+	for _, m := range menus {
+		if isLicenseMenu(m) {
+			return menus
+		}
+	}
+	all, err := s.menuRepo.GetTree(ctx, nil)
+	if err != nil {
+		s.logger.Warn("load menu tree for license menu ensure failed, skip", zap.Error(err))
+		return menus
+	}
+	for _, m := range flattenMenuTree(all) {
+		if isLicenseMenu(m) && m.Status == MenuStatusNormal && m.ShowStatus == MenuShow {
+			menus = append(menus, m)
+		}
+	}
+	return menus
+}
+
+// applyLicenseFeatureGate 按 license feature_code 过滤菜单（fail-open）。
+// 保留 feature_code 为空（不受控）或任一 code 已授权（OR）的菜单；移除孤儿子节点；
+// 无 license / 查询异常时返回原集合（不隐藏，避免锁死 UI）。
+func (s *AdminService) applyLicenseFeatureGate(ctx context.Context, menus []Menu) []Menu {
+	codeSet := make(map[string]struct{})
+	for _, m := range menus {
+		for _, c := range m.FeatureCodes {
+			if c = strings.TrimSpace(c); c != "" {
+				codeSet[c] = struct{}{}
+			}
+		}
+	}
+	if len(codeSet) == 0 {
+		return menus
+	}
+	codes := make([]string, 0, len(codeSet))
+	for c := range codeSet {
+		codes = append(codes, c)
+	}
+	authorized, err := s.featureGate.FilterAuthorized(ctx, codes)
+	if err != nil {
+		s.logger.Warn("license feature gate unavailable, skipping menu filter", zap.Error(err))
+		return menus
+	}
+	authSet := make(map[string]struct{}, len(authorized))
+	for _, c := range authorized {
+		authSet[strings.TrimSpace(c)] = struct{}{}
+	}
+
+	kept := make([]Menu, 0, len(menus))
+	keptIDs := make(map[uuid.UUID]struct{}, len(menus))
+	for _, m := range menus {
+		if menuAuthorizedByFeature(m, authSet) {
+			kept = append(kept, m)
+			keptIDs[m.ID] = struct{}{}
+		}
+	}
+	// 清理孤儿：父节点被过滤的子节点（按钮等）一并移除。层级最多 3 层，两遍收敛。
+	for iter := 0; iter < 2; iter++ {
+		pruned := make([]Menu, 0, len(kept))
+		for _, m := range kept {
+			if m.ParentID == nil {
+				pruned = append(pruned, m)
+				continue
+			}
+			if _, ok := keptIDs[*m.ParentID]; ok {
+				pruned = append(pruned, m)
+			}
+		}
+		kept = pruned
+		keptIDs = make(map[uuid.UUID]struct{}, len(kept))
+		for _, m := range kept {
+			keptIDs[m.ID] = struct{}{}
+		}
+	}
+	return kept
+}
+
+func menuAuthorizedByFeature(m Menu, authorized map[string]struct{}) bool {
+	if len(m.FeatureCodes) == 0 {
+		return true
+	}
+	for _, c := range m.FeatureCodes {
+		if _, ok := authorized[strings.TrimSpace(c)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// pruneEmptyDirectories 移除子树已被过滤光的一级目录（directory），避免空分组残留。
+func pruneEmptyDirectories(nodes []Menu) []Menu {
+	result := make([]Menu, 0, len(nodes))
+	for _, n := range nodes {
+		if len(n.Children) > 0 {
+			n.Children = pruneEmptyDirectories(n.Children)
+		}
+		if n.Type == MenuTypeDirectory && len(n.Children) == 0 {
+			continue
+		}
+		result = append(result, n)
+	}
+	return result
+}
+
+// filterLicenseOnlyMenus 无 license 时只保留 /license 菜单（其他全不可见），
+// 确保用户能进入上传 License 的入口，其余业务菜单在后端即被裁掉。
+func filterLicenseOnlyMenus(menus []Menu) []Menu {
+	kept := make([]Menu, 0, len(menus))
+	for _, m := range menus {
+		if isLicenseMenu(m) {
+			kept = append(kept, m)
+		}
+	}
+	return kept
+}
+
+func isLicenseMenu(m Menu) bool {
+	rp := strings.TrimSpace(m.RoutePath)
+	if rp == "" {
+		return false
+	}
+	return rp == "/license" || strings.HasPrefix(rp, "/license/")
+}
+
+// flattenMenuTree 把树形菜单展平成列表（保留每个节点，含其 Children 字段）。
+func flattenMenuTree(nodes []Menu) []Menu {
+	var out []Menu
+	for _, n := range nodes {
+		out = append(out, n)
+		if len(n.Children) > 0 {
+			out = append(out, flattenMenuTree(n.Children)...)
+		}
+	}
+	return out
 }
 
 // includeButtonsUnderGrantedMenus derives effective operation permissions for

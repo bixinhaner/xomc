@@ -471,6 +471,9 @@ services:
       - ../../run/logs/app:/run/logs/app
       # 旧项目 License 公钥库，只读挂载；不是 TLS keystore。
       - ../../license-run-time/keystore/omcPublicKey.store:/etc/omc/license/omcPublicKey.store:ro
+      # 宿主机 sysfs 只读挂载：license MAC/UUID 绑定需读到物理机网卡 MAC（/sys/class/net）
+      # 与硬件 UUID（/sys/class/dmi/id/product_uuid）。容器内通过 /host/sys 访问。
+      - /sys:/host/sys:ro
       # 全局 API 密钥共享卷:app 启动期幂等签发 .api-key,worker(omcctl) 只读消费。
       # 详见 omcgo/CLAUDE.md §5.6 全局 API 密钥约定。
       - omcgo-secrets:/var/lib/omcgo/secrets

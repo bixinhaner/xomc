@@ -37,6 +37,8 @@ export interface BackendMenu {
   status: MenuStatus;
   created_at?: string;
   updated_at?: string;
+  /** P7-A：菜单关联的 license feature code（多值 OR）；缺失/空=不受 license 控制。 */
+  feature_code?: string[] | null;
   children?: BackendMenu[];
 }
 
@@ -56,6 +58,8 @@ export interface Menu {
   status: MenuStatus;
   createdAt?: string;
   updatedAt?: string;
+  /** P7-A：菜单关联的 license feature code（多值 OR）；后端已按 license 过滤，前端仅供诊断/扩展用。 */
+  featureCode?: string[];
   children?: Menu[];
 }
 
@@ -76,6 +80,7 @@ export function mapBackendMenu(b: BackendMenu): Menu {
     status: b.status,
     createdAt: b.created_at,
     updatedAt: b.updated_at,
+    featureCode: b.feature_code ?? undefined,
     children: b.children?.map(mapBackendMenu),
   };
 }

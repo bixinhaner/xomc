@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -155,20 +156,20 @@ func TestSystemLicenseService_CheckFeature(t *testing.T) {
 	repo := &mockSystemLicenseRepo{current: &SystemLicense{
 		LicenseID:   "NO2026-05-001",
 		LicenseType: SystemLicenseTypeCommercial,
-		FeatureList: FeatureList(`{"eNB":{"Monitor":["Settings"]}}`),
+		FeatureList: FeatureList(`{"legacy_feature_codes":["CODE_ENB_MONITOR"],"authorization_tree":{"eNB":{"Monitor":"All"}}}`),
 		IsCurrent:   true,
 	}}
 	svc := newTestSystemLicenseService(repo)
 
-	authorized, err := svc.CheckFeature(context.Background(), "eNB.Monitor.Settings")
+	authorized, err := svc.CheckFeature(context.Background(), "eNB.Monitor")
 	require.NoError(t, err)
 	assert.True(t, authorized)
 
-	authorized, err = svc.CheckFeature(context.Background(), "eNB.Monitor.Active")
+	authorized, err = svc.CheckFeature(context.Background(), "eNB.Settings")
 	require.NoError(t, err)
 	assert.False(t, authorized)
 
-	_, err = svc.CheckFeature(context.Background(), "eNB..Settings")
+	_, err = svc.CheckFeature(context.Background(), "eNB..Monitor")
 	require.Error(t, err)
 }
 
@@ -194,6 +195,118 @@ func TestSystemLicenseService_GetCurrentEnrichesPersistedLegacyFeatures(t *testi
 	feature := features[0].(map[string]any)
 	assert.Equal(t, "DHCP", feature["name_zh"])
 	assert.Equal(t, "高级 / DHCP", feature["path"])
+
+	authTree, ok := payload["authorization_tree"]
+	require.True(t, ok, "authorization_tree should be enriched for legacy rows")
+	treeMap := authTree.(map[string]any)
+	tool := treeMap["Tool"].(map[string]any)
+	assert.Equal(t, "All", tool["Dhcp"], "CODE_TOOL_DHCP → Tool.Dhcp")
+}
+
+func TestLegacyFeatureMapping_ExpandFeatureCodes(t *testing.T) {
+	mapping, err := LoadLegacyFeatureMapping(filepath.Join("..", "..", "data", "license-feature-mapping.json"))
+	require.NoError(t, err)
+	contains := func(codes []string, want ...string) {
+		set := make(map[string]bool, len(codes))
+		for _, c := range codes {
+			set[c] = true
+		}
+		for _, w := range want {
+			assert.True(t, set[w], "expected expanded codes to contain %s, got %v", w, codes)
+		}
+	}
+
+	t.Run("branch1 IDs auto-add sysList + RF_ENABLE", func(t *testing.T) {
+		// IDs 6 (ENB_MONITOR) + 40 (ALARM_VIEW): ID6 补 RF_ENABLE；sysList 默认补
+		got := mapping.ExpandFeatureCodes([]string{"6", "40"}, nil, false)
+		contains(got, "CODE_ENB_MONITOR", "CODE_ALARM_VIEW", "CODE_ENB_RF_ENABLE",
+			"CODE_SYSTEM_USERS", "CODE_SYSTEM_SETTINGS", "CODE_HELP_GUIDE")
+	})
+
+	t.Run("branch2 CODE_GNB auto-add gnbList", func(t *testing.T) {
+		got := mapping.ExpandFeatureCodes(nil, []string{"CODE_GNB", "CODE_DASHBOARD"}, false)
+		contains(got, "CODE_GNB_MONITOR", "CODE_GNB_MML", "CODE_GNB_DEVICE_REGISTER", "CODE_DASHBOARD")
+	})
+
+	t.Run("cloud strips ACCESS_CONTROL", func(t *testing.T) {
+		got := mapping.ExpandFeatureCodes(nil, []string{"CODE_ADVANCE_ACCESS_CONTROL", "CODE_DASHBOARD"}, true)
+		contains(got, "CODE_DASHBOARD")
+		assert.NotContains(t, got, "CODE_ADVANCE_ACCESS_CONTROL")
+	})
+
+	t.Run("SELFSTART without PNP adds PNP", func(t *testing.T) {
+		got := mapping.ExpandFeatureCodes(nil, []string{"CODE_ADVANCE_SELFSTART"}, false)
+		contains(got, "CODE_ADVANCE_SELFSTART", "CODE_PLUG_AND_PLAY")
+	})
+}
+
+func TestLegacyFeatureMapping_AuthorizationTree(t *testing.T) {
+	mapping, err := LoadLegacyFeatureMapping(filepath.Join("..", "..", "data", "license-feature-mapping.json"))
+	require.NoError(t, err)
+
+	tree := mapping.AuthorizationTree(
+		[]string{},
+		[]string{"CODE_ENB_MONITOR", "CODE_ENB_MML", "CODE_ENB_UPGRADE_IMAGE", "CODE_DASHBOARD", "CODE_BOGUS_XX"},
+	)
+	raw, err := json.Marshal(tree)
+	require.NoError(t, err)
+	fl := FeatureList(raw)
+
+	assert.True(t, HasFeature(fl, "eNB", "Monitor"))
+	assert.True(t, HasFeature(fl, "eNB", "Mml"))
+	assert.True(t, HasFeature(fl, "eNB", "UpgradeImage"))
+	assert.True(t, HasFeature(fl, "Dashboard"))
+	assert.False(t, HasFeature(fl, "eNB", "Settings"), "eNB.Settings not licensed")
+	assert.False(t, HasFeature(fl, "eNB"), "module-level not authorized (only specific leaves)")
+	assert.False(t, HasFeature(fl, "Bogus", "Xx"), "unknown code must not be authorized")
+}
+
+func TestSystemLicenseService_FilterAuthorized(t *testing.T) {
+	mapping, err := LoadLegacyFeatureMapping(filepath.Join("..", "..", "data", "license-feature-mapping.json"))
+	require.NoError(t, err)
+
+	t.Run("license grants subset", func(t *testing.T) {
+		repo := &mockSystemLicenseRepo{current: &SystemLicense{
+			LicenseID:   "LIC-FILTER",
+			LicenseType: SystemLicenseTypeCommercial,
+			FeatureList: FeatureList(`{"legacy_feature_codes":["CODE_ENB_MONITOR","CODE_DASHBOARD","CODE_TOPO"]}`),
+			IsCurrent:   true,
+		}}
+		svc := newTestSystemLicenseService(repo)
+		svc.SetLegacyFeatureMapping(mapping)
+
+		auth, err := svc.FilterAuthorized(context.Background(),
+			[]string{"CODE_ENB_MONITOR", "CODE_DASHBOARD", "CODE_ALARM_VIEW", "CODE_TOPO", "BOGUS"})
+		require.NoError(t, err)
+		sort.Strings(auth)
+		assert.Equal(t, []string{"CODE_DASHBOARD", "CODE_ENB_MONITOR", "CODE_TOPO"}, auth)
+	})
+
+	t.Run("no license → fail-open returns all", func(t *testing.T) {
+		svc := newTestSystemLicenseService(&mockSystemLicenseRepo{})
+		svc.SetLegacyFeatureMapping(mapping)
+		auth, err := svc.FilterAuthorized(context.Background(), []string{"CODE_ENB_MONITOR"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"CODE_ENB_MONITOR"}, auth)
+	})
+}
+
+func TestSystemLicenseService_HasActiveLicense(t *testing.T) {
+	t.Run("no license configured", func(t *testing.T) {
+		svc := newTestSystemLicenseService(&mockSystemLicenseRepo{})
+		active, err := svc.HasActiveLicense(context.Background())
+		require.NoError(t, err)
+		assert.False(t, active)
+	})
+	t.Run("license present", func(t *testing.T) {
+		repo := &mockSystemLicenseRepo{current: &SystemLicense{
+			LicenseID: "LIC-ACTIVE", LicenseType: SystemLicenseTypeCommercial, IsCurrent: true,
+		}}
+		svc := newTestSystemLicenseService(repo)
+		active, err := svc.HasActiveLicense(context.Background())
+		require.NoError(t, err)
+		assert.True(t, active)
+	})
 }
 
 func TestSystemLicenseService_Update(t *testing.T) {

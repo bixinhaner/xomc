@@ -9,8 +9,10 @@
 //
 // 老 /api/v1/licenses/* 路由完全保留（Step 5 才下线），两套并存便于灰度。
 //
-// feature-check 端点（PRD §5）依赖三级嵌套 feature_list 的查询器，按 PRD §7
-// 拆到 Phase 7 RBAC 联动 sprint；本 step 不实现。
+// feature-check 端点（PRD §5）已接通授权树：Update/读取 enrich 时从 legacy
+// feature code 前缀派生三级嵌套 authorization_tree，CheckFeature 解树后走
+// HasFeature 返回真实授权结果。剩余 P7 工作：把 feature_list 接到前端菜单
+// 显隐 + 后端 API middleware 拦截（feature 真正控 UI），仍为独立 sprint。
 package license
 
 import (

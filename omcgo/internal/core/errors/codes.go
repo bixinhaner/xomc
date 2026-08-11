@@ -115,6 +115,9 @@ const (
 	ErrCodeLicenseExpired        = global.ErrCodeLicenseExpired
 	ErrCodeLicenseAlreadyActive  = global.ErrCodeLicenseAlreadyActive
 	ErrCodeLicenseAlreadyRevoked = global.ErrCodeLicenseAlreadyRevoked
+	ErrCodeSystemLicenseNotActive        = global.ErrCodeSystemLicenseNotActive
+	ErrCodeSystemLicenseHardwareMismatch = global.ErrCodeSystemLicenseHardwareMismatch
+	ErrCodeSystemLicenseCapacityExceeded = global.ErrCodeSystemLicenseCapacityExceeded
 )
 
 // Reports (13000-13999)

@@ -55,6 +55,21 @@ func (s *systemLicenseAlertSink) Send(ctx context.Context, alert license.Alert) 
 	return nil
 }
 
+// Clear 撤销此前由 Send 发出的、指定 identifier 的 license 告警。
+// 通过 AlarmEngine.AutoClear 按 DeviceSN + AlarmIdentifier 匹配清除；
+// 未找到匹配告警时 AutoClear 返回 nil（幂等），故重复调用安全。
+func (s *systemLicenseAlertSink) Clear(ctx context.Context, identifier string) error {
+	clearAlarm := &model.Alarm{
+		DeviceSN:        systemLicenseAlarmSN,
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: identifier,
+	}
+	if err := s.engine.AutoClear(ctx, clearAlarm); err != nil {
+		return fmt.Errorf("clear system license alert %q: %w", identifier, err)
+	}
+	return nil
+}
+
 func mapLicenseAlertSeverity(severity license.AlertSeverity) model.AlarmSeverity {
 	switch severity {
 	case license.AlertSeverityCritical:

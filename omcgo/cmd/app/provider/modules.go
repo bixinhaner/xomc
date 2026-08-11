@@ -2407,9 +2407,12 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	systemLicenseRepo := license.NewPgSystemLicenseRepository(c.PgPool)
 	deviceCounter := license.NewPgDeviceCounter(c.PgPool)
 	licenseMetrics := license.NewEnforcementMetrics(c.MetricsReg)
+	licenseUsageRepo := license.NewPgSystemLicenseUsageRepository(c.PgPool)
 	licenseEnforcer := license.NewEnforcer(systemLicenseRepo, deviceCounter, logger, licenseMetrics)
+	licenseEnforcer.SetUsageRepo(licenseUsageRepo)
 	licenseAlertSink := newSystemLicenseAlertSink(c.AlarmEngine, logger)
 	licenseMonitor := license.NewMonitor(systemLicenseRepo, deviceCounter, licenseAlertSink, licenseMetrics, logger)
+	licenseMonitor.SetUsageRepo(licenseUsageRepo)
 
 	c.miscDeps.licenseEnforcer = licenseEnforcer
 	c.miscDeps.licenseMonitor = licenseMonitor
@@ -2418,6 +2421,8 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	// 授权限制；Update 后调 Invalidate 让 enforcer 立即拉新 license。
 	systemLicenseSvc := license.NewSystemLicenseService(systemLicenseRepo, logger)
 	systemLicenseSvc.SetEnforcer(licenseEnforcer)
+	systemLicenseSvc.SetUsageRepo(licenseUsageRepo)
+	c.miscDeps.systemLicenseSvc = systemLicenseSvc // P7-B: middleware 需要 feature check 能力
 	featureMappingPath := filepath.Join(c.Cfg.DictLoader.XMLBaseDir, "license-feature-mapping.json")
 	if mapping, mappingErr := license.LoadLegacyFeatureMapping(featureMappingPath); mappingErr != nil {
 		logger.Warn("License feature mapping unavailable", zap.String("path", featureMappingPath), zap.Error(mappingErr))
@@ -2426,6 +2431,12 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 		logger.Info("License feature mapping loaded", zap.String("path", featureMappingPath), zap.Int("id_code_count", len(mapping.IDToCode)), zap.Int("feature_count", len(mapping.Features)))
 	}
 	if path := c.Cfg.License.Signing.LegacyKeyStorePath; path != "" {
+		if c.Cfg.License.Signing.LegacyStorePassword == "" || c.Cfg.License.Signing.LegacyKeyAlias == "" {
+			logger.Warn("license signing config incomplete: keystore path set but store_password/key_alias empty — license upload & verify will fail",
+				zap.String("path", path),
+				zap.Bool("store_password_set", c.Cfg.License.Signing.LegacyStorePassword != ""),
+				zap.Bool("key_alias_set", c.Cfg.License.Signing.LegacyKeyAlias != ""))
+		}
 		keyStore, readErr := os.ReadFile(path)
 		if readErr != nil {
 			logger.Warn("legacy TrueLicense keystore could not be loaded",
@@ -2444,6 +2455,12 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 		}
 	}
 	c.miscDeps.systemLicenseHandler = license.NewSystemLicenseHandler(systemLicenseSvc, logger)
+
+	// P7-A：把 license feature gate 注入 AdminService，让菜单按 license feature 过滤。
+	// admin 模块先于 misc 初始化，此处 c.AdminService 已就绪；nil 时不过滤（菜单全可见）。
+	if c.AdminService != nil {
+		c.AdminService.SetLicenseFeatureGate(systemLicenseSvc)
+	}
 
 	// Wire enforcer into DeviceService so device.create / future write ops
 	// gate on capacity + expiry. Read-only operations are unaffected (D1).
@@ -2728,6 +2745,7 @@ type miscDeps struct {
 	// F06 System License 重构（PRD F06-system-license-redesign Step 5）：
 	// singleton 模型 handler，唯一的 license REST 入口。
 	systemLicenseHandler *license.SystemLicenseHandler
+	systemLicenseSvc     *license.SystemLicenseService // P7-B: RequireFeature middleware 注入
 
 	// DeviceDetail "License 参数" tab 后端（device 模块 license_params.go）
 	licenseParamHandler *device.LicenseParamHandler

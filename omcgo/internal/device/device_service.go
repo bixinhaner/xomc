@@ -686,6 +686,19 @@ func (s *DeviceService) RegisterFromInformEvent(
 		return nil, commonerrors.ErrNotFound
 	}
 
+	// License enforcement (E-04)：南向 Inform 自动注册同样受 license 容量/过期/
+	// fail-closed 约束，与管理面 CreateDevice（:2088）对齐，避免南向绕过容量限制。
+	// 仅对全新设备生效——已注册设备的更新路径不走这里（上方 existing != nil 分支
+	// 已提前返回）。nil enforcer = 执法未启用（轻量部署/测试）。
+	if s.licenseEnforcer != nil {
+		if err := s.licenseEnforcer.EnforceExpiry(ctx, "device.inform.register"); err != nil {
+			return nil, err
+		}
+		if err := s.licenseEnforcer.EnforceCapacity(ctx, 1); err != nil {
+			return nil, err
+		}
+	}
+
 	modelName := findParamValue(inform.ParameterList, "Device.DeviceInfo.ModelName")
 	firmwareVersion := findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")
 
