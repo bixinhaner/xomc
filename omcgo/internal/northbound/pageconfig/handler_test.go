@@ -421,6 +421,16 @@ func (r *fakeRepository) ListActiveSNMPAlarmTargetsForSend(context.Context) ([]S
 	return out, nil
 }
 
+func (r *fakeRepository) ListSNMPMIBTargetsForServe(context.Context) ([]SNMPAlarmTarget, error) {
+	out := make([]SNMPAlarmTarget, 0, len(r.snmpTargets))
+	for _, target := range r.snmpTargets {
+		if target.MIBQueryEnabled {
+			out = append(out, target)
+		}
+	}
+	return out, nil
+}
+
 func (r *fakeRepository) UpdateSNMPAlarmTarget(_ context.Context, key string, target SNMPAlarmTarget) (*SNMPAlarmTarget, error) {
 	target = normalizeSNMPAlarmTarget(key, target)
 	for i := range r.snmpTargets {
@@ -1649,6 +1659,209 @@ func TestUpdateSNMPV2TargetDefaultsCommunity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, defaultSNMPV2Community, target.Community)
 	require.True(t, target.Enabled)
+}
+
+func TestUpdateBuiltInSNMPTargetKeepsVersionByKey(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	target, err := svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v2-primary", SNMPAlarmTarget{
+		Key:              "snmp-v2-primary",
+		Name:             "SNMP V2C",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Trap",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       162,
+		MIBQueryEnabled:  false,
+		TimeoutSeconds:   5,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "v2", target.Version)
+
+	target, err = svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP V3",
+		Enabled:          false,
+		Version:          "v2",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		AuthProtocol:     "SHA",
+		PrivProtocol:     "DES",
+		MIBQueryEnabled:  false,
+		TimeoutSeconds:   5,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "v3", target.Version)
+}
+
+func TestSNMPMIBQueryTargetsDoNotRequireAlarmReportEnabled(t *testing.T) {
+	repo := newFakeRepository()
+	repo.snmpTargets = []SNMPAlarmTarget{{
+		Key:             "snmp-v2-query-only",
+		Name:            "SNMP v2 Query",
+		Enabled:         false,
+		Version:         "v2",
+		ListenIP:        "0.0.0.0",
+		ListenPort:      161,
+		Community:       defaultSNMPV2Community,
+		MIBQueryEnabled: true,
+	}}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	targets, err := svc.listActiveSNMPMIBTargetsForServe(context.Background())
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	require.False(t, targets[0].Enabled)
+	require.True(t, targets[0].MIBQueryEnabled)
+}
+
+func TestUpdateSNMPV3MIBQueryRequiresSecurityCredentials(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	_, err := svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		AuthProtocol:     "SHA",
+		PrivProtocol:     "DES",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "security_name")
+}
+
+func TestUpdateSNMPV3MIBQueryAllowsNoAuthNoPriv(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	target, err := svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, target.AuthProtocol)
+	require.Empty(t, target.PrivProtocol)
+	require.True(t, target.MIBQueryEnabled)
+}
+
+func TestUpdateSNMPV3MIBQueryRequiresCredentialsBySecurityLevel(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	_, err := svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		AuthProtocol:     "SHA",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "auth credential")
+
+	_, err = svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		AuthProtocol:     "SHA",
+		AuthCredential:   "AuthPassword",
+		PrivProtocol:     "DES",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "privacy credential")
+
+	_, err = svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		AuthProtocol:     "SHA",
+		AuthCredential:   "short",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "auth credential must be at least 8 characters")
+
+	_, err = svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		AuthProtocol:     "SHA",
+		AuthCredential:   "AuthPassword",
+		PrivProtocol:     "DES",
+		PrivCredential:   "short",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "privacy credential must be at least 8 characters")
+
+	_, err = svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		PrivProtocol:     "DES",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "privacy requires auth_protocol")
 }
 
 func TestTestSNMPAlarmTargetUsesSenderAndRecordsResult(t *testing.T) {

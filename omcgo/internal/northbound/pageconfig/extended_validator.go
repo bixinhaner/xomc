@@ -75,15 +75,34 @@ func validateSNMPAlarmTarget(target SNMPAlarmTarget) error {
 		if strings.EqualFold(target.Version, "v2") && strings.TrimSpace(target.Community) == "" && !target.CommunitySet {
 			return fmt.Errorf("%w: SNMP v2 community is required when enabled", commonerrors.ErrInvalidInput)
 		}
-		if strings.EqualFold(target.Version, "v3") && strings.TrimSpace(target.SecurityName) == "" {
-			return fmt.Errorf("%w: SNMP v3 security_name is required when enabled", commonerrors.ErrInvalidInput)
-		}
 	}
-	if strings.TrimSpace(target.AuthProtocol) != "" && !allowedSNMPAuthProtocol(target.AuthProtocol) {
+	authProtocol := strings.TrimSpace(target.AuthProtocol)
+	privProtocol := strings.TrimSpace(target.PrivProtocol)
+	if authProtocol != "" && !allowedSNMPAuthProtocol(authProtocol) {
 		return fmt.Errorf("%w: unsupported SNMP auth_protocol %s", commonerrors.ErrInvalidInput, target.AuthProtocol)
 	}
-	if strings.TrimSpace(target.PrivProtocol) != "" && !allowedSNMPPrivProtocol(target.PrivProtocol) {
+	if privProtocol != "" && !allowedSNMPPrivProtocol(privProtocol) {
 		return fmt.Errorf("%w: unsupported SNMP priv_protocol %s", commonerrors.ErrInvalidInput, target.PrivProtocol)
+	}
+	if strings.EqualFold(target.Version, "v3") && privProtocol != "" && authProtocol == "" {
+		return fmt.Errorf("%w: SNMP v3 privacy requires auth_protocol", commonerrors.ErrInvalidInput)
+	}
+	if strings.EqualFold(target.Version, "v3") && (target.Enabled || target.MIBQueryEnabled) {
+		if strings.TrimSpace(target.SecurityName) == "" {
+			return fmt.Errorf("%w: SNMP v3 security_name is required when v3 alarm report or MIB query is enabled", commonerrors.ErrInvalidInput)
+		}
+		if authProtocol != "" && strings.TrimSpace(target.AuthCredential) == "" && !target.AuthCredentialSet {
+			return fmt.Errorf("%w: SNMP v3 auth credential is required when v3 alarm report or MIB query is enabled", commonerrors.ErrInvalidInput)
+		}
+		if authProtocol != "" && !target.AuthCredentialSet && len(strings.TrimSpace(target.AuthCredential)) < 8 {
+			return fmt.Errorf("%w: SNMP v3 auth credential must be at least 8 characters", commonerrors.ErrInvalidInput)
+		}
+		if privProtocol != "" && strings.TrimSpace(target.PrivCredential) == "" && !target.PrivCredentialSet {
+			return fmt.Errorf("%w: SNMP v3 privacy credential is required when v3 alarm report or MIB query is enabled", commonerrors.ErrInvalidInput)
+		}
+		if privProtocol != "" && !target.PrivCredentialSet && len(strings.TrimSpace(target.PrivCredential)) < 8 {
+			return fmt.Errorf("%w: SNMP v3 privacy credential must be at least 8 characters", commonerrors.ErrInvalidInput)
+		}
 	}
 	if target.TimeoutSeconds < 1 || target.TimeoutSeconds > 300 {
 		return fmt.Errorf("%w: SNMP timeout_seconds must be between 1 and 300", commonerrors.ErrInvalidInput)

@@ -36,7 +36,7 @@ func defaultSNMPAlarmTargets() []SNMPAlarmTarget {
 	return []SNMPAlarmTarget{
 		{
 			Key:                 "snmp-v2-primary",
-			Name:                "SNMP v2 Trap 主用目标",
+			Name:                "SNMP V2C",
 			Enabled:             false,
 			Version:             "v2",
 			NotificationType:    "Trap",
@@ -53,7 +53,7 @@ func defaultSNMPAlarmTargets() []SNMPAlarmTarget {
 		},
 		{
 			Key:                 "snmp-v3-inform",
-			Name:                "SNMP v3 Inform 备用目标",
+			Name:                "SNMP V3",
 			Enabled:             false,
 			Version:             "v3",
 			NotificationType:    "Inform",

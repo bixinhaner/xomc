@@ -557,6 +557,11 @@ func (r *Router) legacyGetTask(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "task_id is required")
 		return
 	}
+	if _, err := uuid.Parse(taskID); err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid task_id")
+		return
+	}
+	invalidTaskID := false
 	if r.taskService != nil {
 		item, err := r.taskService.GetTask(c.Request.Context(), taskID)
 		if err == nil && item != nil {
@@ -566,7 +571,9 @@ func (r *Router) legacyGetTask(c *gin.Context) {
 			response.OK(c, taskResultPayload(item))
 			return
 		}
-		if err != nil && !errors.Is(err, task.ErrTaskNotFound) && !errors.Is(err, commonerrors.ErrNotFound) {
+		if isInvalidTaskIdentifierError(err) {
+			invalidTaskID = true
+		} else if err != nil && !errors.Is(err, task.ErrTaskNotFound) && !errors.Is(err, commonerrors.ErrNotFound) {
 			failNorthboundFacade(c, err)
 			return
 		}
@@ -577,12 +584,31 @@ func (r *Router) legacyGetTask(c *gin.Context) {
 			response.OK(c, transferTaskResultPayload(item))
 			return
 		}
-		if err != nil && !errors.Is(err, commonerrors.ErrNotFound) {
+		if isInvalidTaskIdentifierError(err) {
+			invalidTaskID = true
+		} else if err != nil && !errors.Is(err, commonerrors.ErrNotFound) {
 			failNorthboundFacade(c, err)
 			return
 		}
 	}
+	if invalidTaskID {
+		response.Fail(c, http.StatusBadRequest, "invalid task_id")
+		return
+	}
 	response.Fail(c, http.StatusNotFound, "task not found")
+}
+
+func isInvalidTaskIdentifierError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, commonerrors.ErrInvalidInput) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "invalid input syntax for type uuid") ||
+		strings.Contains(msg, "sqlstate 22p02") ||
+		strings.Contains(msg, "invalid task id")
 }
 
 func (r *Router) legacyListTasks(c *gin.Context) {

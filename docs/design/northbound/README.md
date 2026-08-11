@@ -8,6 +8,7 @@
 |---|---|---|
 | 当前权威设计 | `page-config-redesign-20260731.md` | 页面可配置化主线：能力开关、字段/指标选择、多目标传输、Socket/SNMP/API 配置和数据准确性约束 |
 | 数据支持矩阵 | `data-support-matrix-20260731.md` | 逐项比对 Station/OMC Inventory 字段、旧 PM KPI/counter 与当前 xomc 数据源的支持状态 |
+| SNMP 测试手册 | `Net-SNMP测试步骤文档.md` | 使用 Net-SNMP 验证 SNMP v2c/v3 MIB 查询、Trap、Inform、鉴权失败和页面配置生效 |
 | 历史设计稿 | `overall-redesign-20260730.md` | XML/Profile 管理方案历史参考，不作为当前运行配置主线 |
 | 场景 XML 附件 | `scenario-xml/` | `local-s0001.xml` 到 `local-s0017.xml`，仅作为旧场景模板和映射覆盖率参考 |
 | Profile 附件 | `scenario-xml/profiles/` | `baicells-legacy-v1.xml`，仅作为旧 profile 方案和字段映射参考 |
@@ -19,10 +20,11 @@
 1. 看“现在北向整体怎么设计”时，读 `page-config-redesign-20260731.md`。
 2. 看“为什么不继续用 XML 管理”时，读 `page-config-redesign-20260731.md` 的 `1`、`3`、`5` 章。
 3. 看“设备字段、Inventory 字段、PM KPI/counter 当前到底有没有”时，读 `data-support-matrix-20260731.md`。
-4. 看“`local-s0001` 到 `local-s0017` 怎么用”时，读 `scenario-xml/README.md`；它们只作为内置模板和映射参考。
-5. 看“旧 XML/Profile 方案当时怎么想”时，读 `overall-redesign-20260730.md`。
-6. 看“为什么早期要做 SNMP Trap”时，读 `../../project/prd/F08-oss-protocol.md`。
-7. 旧桌面资料和 `othernorth` 资料只作为设计输入，不直接进入运行配置，也不代表 xomc 最终 URL、鉴权方式或响应结构。
+4. 看“SNMP v2c/v3 怎么用 Net-SNMP 验证”时，读 `Net-SNMP测试步骤文档.md`。
+5. 看“`local-s0001` 到 `local-s0017` 怎么用”时，读 `scenario-xml/README.md`；它们只作为内置模板和映射参考。
+6. 看“旧 XML/Profile 方案当时怎么想”时，读 `overall-redesign-20260730.md`。
+7. 看“为什么早期要做 SNMP Trap”时，读 `../../project/prd/F08-oss-protocol.md`。
+8. 旧桌面资料和 `othernorth` 资料只作为设计输入，不直接进入运行配置，也不代表 xomc 最终 URL、鉴权方式或响应结构。
 
 ## 维护约定
 

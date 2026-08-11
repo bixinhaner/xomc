@@ -217,7 +217,7 @@ func desiredSNMPMIBServerConfigs(targets []SNMPAlarmTarget) map[string]snmpMIBSe
 	communitySets := map[string]map[string]struct{}{}
 	userSets := map[string]map[string]snmpMIBUser{}
 	for _, target := range targets {
-		if !target.Enabled || !target.MIBQueryEnabled {
+		if !target.MIBQueryEnabled {
 			continue
 		}
 		config := snmpMIBServerConfig{ListenIP: target.ListenIP, ListenPort: target.ListenPort}
@@ -435,7 +435,7 @@ func (s *snmpMIBServer) v3Decoder(withUserTable bool) *g.GoSNMP {
 	decoder := &g.GoSNMP{
 		Version:            g.Version3,
 		SecurityModel:      g.UserSecurityModel,
-		MsgFlags:           g.AuthPriv,
+		MsgFlags:           g.NoAuthNoPriv,
 		SecurityParameters: s.v3BaseSecurityParameters(""),
 		Logger:             snmpAgentGosnmpLogger,
 	}

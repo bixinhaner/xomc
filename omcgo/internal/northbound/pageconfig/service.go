@@ -38,6 +38,7 @@ type Repository interface {
 	ListSNMPAlarmTargets(ctx context.Context) ([]SNMPAlarmTarget, error)
 	GetSNMPAlarmTargetForSend(ctx context.Context, key string) (*SNMPAlarmTarget, error)
 	ListActiveSNMPAlarmTargetsForSend(ctx context.Context) ([]SNMPAlarmTarget, error)
+	ListSNMPMIBTargetsForServe(ctx context.Context) ([]SNMPAlarmTarget, error)
 	UpdateSNMPAlarmTarget(ctx context.Context, key string, target SNMPAlarmTarget) (*SNMPAlarmTarget, error)
 	ListSocketAlarmConfigs(ctx context.Context) ([]SocketAlarmConfig, error)
 	ListActiveSocketAlarmConfigsForServe(ctx context.Context) ([]SocketAlarmConfig, error)
@@ -424,7 +425,7 @@ func (s *Service) listActiveSNMPMIBTargetsForServe(ctx context.Context) ([]SNMPA
 	if err := s.repo.EnsureExtendedDefaults(ctx); err != nil {
 		return nil, err
 	}
-	return s.repo.ListActiveSNMPAlarmTargetsForSend(ctx)
+	return s.repo.ListSNMPMIBTargetsForServe(ctx)
 }
 
 func (s *Service) ListSocketAlarmConfigs(ctx context.Context) ([]SocketAlarmConfig, error) {
