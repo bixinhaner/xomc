@@ -160,7 +160,7 @@ func (r *PgStatusSummaryRunRepository) ClaimRuns(ctx context.Context, now time.T
 	query, args, err := storage.Psql.Select(
 		"id", "run_key", "generated_at", "time_zone", "snapshot", "state", "attempt", "next_attempt_at", "COALESCE(last_error, '')",
 	).From("notification_status_summary_runs").Where(sq.Or{
-		sq.And{sq.Eq{"state": []string{"pending", "retry_wait", "failed"}}, sq.LtOrEq{"next_attempt_at": now}},
+		sq.And{sq.Eq{"state": []string{"pending", "retry_wait"}}, sq.LtOrEq{"next_attempt_at": now}},
 		sq.And{sq.Eq{"state": "sending"}, sq.LtOrEq{"updated_at": now.Add(-5 * time.Minute)}},
 	}).OrderBy("next_attempt_at", "id").Limit(uint64(limit)).Suffix("FOR UPDATE SKIP LOCKED").ToSql()
 	if err != nil {
