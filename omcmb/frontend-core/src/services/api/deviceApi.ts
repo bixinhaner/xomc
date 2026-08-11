@@ -379,18 +379,26 @@ interface BackendAntennaSector {
   missing_fields?: string[];
 }
 
+export interface AntennaSectorPlanInput {
+  azimuth?: number;
+  antennaHeight?: number;
+  mechanicalDowntilt?: number;
+  horizontalBeamwidth?: number;
+  verticalBeamwidth?: number;
+}
+
 function mapBackendAntennaSector(sector: BackendAntennaSector): AntennaSector {
   return {
     number: sector.number,
     cellId: sector.cell_id,
-    antennaHeight: sector.antenna_height,
-    mechanicalDowntilt: sector.mechanical_downtilt,
+    antennaHeight: sector.antenna_height ?? undefined,
+    mechanicalDowntilt: sector.mechanical_downtilt ?? undefined,
     electronicDowntilt: sector.electronic_downtilt,
-    verticalBeamwidth: sector.vertical_beamwidth,
-    horizontalBeamwidth: sector.horizontal_beamwidth,
-    azimuth: sector.azimuth,
-    nearRadiusMeters: sector.near_radius_meters,
-    farRadiusMeters: sector.far_radius_meters,
+    verticalBeamwidth: sector.vertical_beamwidth ?? undefined,
+    horizontalBeamwidth: sector.horizontal_beamwidth ?? undefined,
+    azimuth: sector.azimuth ?? undefined,
+    nearRadiusMeters: sector.near_radius_meters ?? undefined,
+    farRadiusMeters: sector.far_radius_meters ?? undefined,
     fieldSources: sector.field_sources ?? {},
     directionAvailable: sector.direction_available ?? false,
     coverageAvailable: sector.coverage_available ?? false,
@@ -691,6 +699,24 @@ export const deviceApi = {
   async getAntennaSectors(id: string): Promise<AntennaSector[]> {
     const { data } = await http.get<BackendAntennaSector[]>(`/devices/${id}/antenna-sectors`);
     return data.map(mapBackendAntennaSector);
+  },
+
+  async updateAntennaSectorPlan(
+    id: string,
+    sectorNumber: number,
+    plan: AntennaSectorPlanInput,
+  ): Promise<AntennaSector> {
+    const { data } = await http.put<BackendAntennaSector>(
+      `/devices/${id}/antenna-sectors/${sectorNumber}`,
+      {
+        azimuth: plan.azimuth,
+        antenna_height: plan.antennaHeight,
+        mechanical_downtilt: plan.mechanicalDowntilt,
+        horizontal_beamwidth: plan.horizontalBeamwidth,
+        vertical_beamwidth: plan.verticalBeamwidth,
+      },
+    );
+    return mapBackendAntennaSector(data);
   },
 
   async getList(params: DeviceFilter & PageRequest): Promise<DeviceListResponse> {

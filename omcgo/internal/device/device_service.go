@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"regexp"
@@ -64,6 +65,7 @@ type DeviceService struct {
 	redisClient            redis.UniversalClient
 	deviceRepo             DeviceRepository
 	paramRepo              DeviceParameterRepository
+	antennaPlanRepo        AntennaSectorPlanRepository
 	deviceInfoRepo         DeviceInfoRepository
 	disconnectAlarms       disconnectedAlarmStore
 	disconnectClearer      disconnectedAlarmClearer
@@ -90,6 +92,10 @@ type DeviceService struct {
 	groupReader            DeviceGroupReader      // 越权校验：读设备组归属（nil = 退化为不校验，见 AuthorizeDeviceGroupAccess）
 	sysConfigLookup        SysConfigLookup        // 读系统配置（nameSyncMode 等）
 	logger                 *zap.Logger
+}
+
+func (s *DeviceService) SetAntennaSectorPlanRepository(repo AntennaSectorPlanRepository) {
+	s.antennaPlanRepo = repo
 }
 
 type disconnectedAlarmStore interface {
@@ -1937,7 +1943,78 @@ func (s *DeviceService) GetAntennaSectors(ctx context.Context, deviceID uuid.UUI
 	if err != nil {
 		return nil, fmt.Errorf("get antenna params: %w", err)
 	}
-	return AssembleAntennaSectors(params), nil
+	sectors := AssembleAntennaSectors(params)
+	if s.antennaPlanRepo == nil {
+		return sectors, nil
+	}
+	plans, err := s.antennaPlanRepo.ListByDevice(ctx, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("get antenna sector plans: %w", err)
+	}
+	return mergeAntennaSectorPlans(sectors, plans), nil
+}
+
+func (s *DeviceService) UpdateAntennaSectorPlan(
+	ctx context.Context,
+	deviceID uuid.UUID,
+	sectorNumber int,
+	req UpdateAntennaSectorPlanRequest,
+) (*AntennaSector, error) {
+	if sectorNumber < 1 || sectorNumber > 32767 || !validAntennaPlan(req) {
+		return nil, commonerrors.ErrInvalidInput
+	}
+	if s.antennaPlanRepo == nil {
+		return nil, fmt.Errorf("antenna sector plan repository is not configured: %w", commonerrors.ErrUnavailable)
+	}
+	device, err := s.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("get device: %w", err)
+	}
+	if device == nil {
+		return nil, commonerrors.ErrNotFound
+	}
+	if err := s.antennaPlanRepo.Upsert(ctx, AntennaSectorPlan{
+		DeviceID:            deviceID,
+		SectorNumber:        sectorNumber,
+		Azimuth:             req.Azimuth,
+		AntennaHeight:       req.AntennaHeight,
+		MechanicalDowntilt:  req.MechanicalDowntilt,
+		HorizontalBeamwidth: req.HorizontalBeamwidth,
+		VerticalBeamwidth:   req.VerticalBeamwidth,
+	}); err != nil {
+		return nil, fmt.Errorf("save antenna sector plan: %w", err)
+	}
+	sectors, err := s.GetAntennaSectors(ctx, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range sectors {
+		if sectors[i].Number == sectorNumber {
+			return &sectors[i], nil
+		}
+	}
+	return nil, commonerrors.ErrNotFound
+}
+
+func validAntennaPlan(req UpdateAntennaSectorPlanRequest) bool {
+	return validOptionalRange(req.Azimuth, 0, 360, true) &&
+		validOptionalRange(req.AntennaHeight, 0, 10000, false) &&
+		validOptionalRange(req.MechanicalDowntilt, 0, 90, true) &&
+		validOptionalRange(req.HorizontalBeamwidth, 0, 180, false) &&
+		validOptionalRange(req.VerticalBeamwidth, 0, 180, false)
+}
+
+func validOptionalRange(value *float64, min, max float64, allowMin bool) bool {
+	if value == nil {
+		return true
+	}
+	if math.IsNaN(*value) || math.IsInf(*value, 0) || *value >= max {
+		return false
+	}
+	if allowMin {
+		return *value >= min
+	}
+	return *value > min
 }
 
 func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID uuid.UUID) (*DeviceDetailComposite, error) {

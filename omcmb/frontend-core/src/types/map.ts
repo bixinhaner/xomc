@@ -108,6 +108,13 @@ export interface AntennaSector {
   missingFields: string[];
 }
 
+export type AntennaEditableField =
+  | 'azimuth'
+  | 'antennaHeight'
+  | 'mechanicalDowntilt'
+  | 'horizontalBeamwidth'
+  | 'verticalBeamwidth';
+
 /**
  * 设备地理信息（后端返回格式）
  */
@@ -360,10 +367,10 @@ export interface GISMapProps {
   /** 当前选中设备的运行时天线扇区。 */
   antennaSectors?: AntennaSector[];
   /** 天线编辑值变更时更新地图中的临时覆盖预览。 */
-  onAntennaPreviewChange?: (sectorNumber: number, field: 'azimuth' | 'mechanicalDowntilt', value: number | null) => void;
+  onAntennaPreviewChange?: (sectorNumber: number, field: AntennaEditableField, value: number | null) => void;
   /** 放弃编辑值并恢复地图中的原始覆盖范围。 */
   onAntennaCancel?: () => void;
-  /** 提交设备天线参数设置任务。 */
+  /** 保存 OMC 本地天线规划参数。 */
   onAntennaSave?: (sectorNumber: number) => Promise<unknown>;
   /** 天线参数设置任务是否正在提交。 */
   antennaSaving?: boolean;

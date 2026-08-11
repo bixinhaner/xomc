@@ -2,6 +2,7 @@ package device
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -35,10 +36,39 @@ func (h *DeviceInfoHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.GET("/:id/info", h.GetDeviceInfo)
 		devices.GET("/:id/detail", h.GetDeviceDetail)
 		devices.GET("/:id/antenna-sectors", h.GetAntennaSectors)
+		devices.PUT("/:id/antenna-sectors/:sectorNo", h.UpdateAntennaSectorPlan)
 		devices.PUT("/:id/info", h.UpdateDeviceInfo)
 		devices.PUT("/:id/activate", h.ActivateDevice)
 		devices.PUT("/:id/deactivate", h.DeactivateDevice)
 	}
+}
+
+// UpdateAntennaSectorPlan saves OMC-local planning values for one sector.
+func (h *DeviceInfoHandler) UpdateAntennaSectorPlan(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	sectorNumber, err := strconv.Atoi(c.Param("sectorNo"))
+	if err != nil || sectorNumber < 1 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
+		return
+	}
+	var req UpdateAntennaSectorPlanRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	sector, err := h.service.UpdateAntennaSectorPlan(c.Request.Context(), id, sectorNumber, req)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OK(c, sector)
 }
 
 // GetDeviceInfo handles GET /api/v1/devices/:id/info.

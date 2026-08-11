@@ -14,18 +14,18 @@ var antennaInfoPath = regexp.MustCompile(`^(.*\.AntennaInfo\.)([^.]+)$`)
 var antennaFieldWithNumber = regexp.MustCompile(`^([A-Za-z]+)([0-9]+)$`)
 var cellConfigInstancePath = regexp.MustCompile(`\.CellConfig\.([0-9]+)\.AntennaInfo\.`)
 
-// AntennaSector is the normalized, read-only antenna geometry for one sector.
+// AntennaSector is the normalized antenna geometry for one sector.
 type AntennaSector struct {
 	Number              int               `json:"number"`
 	CellID              string            `json:"cell_id,omitempty"`
-	AntennaHeight       float64           `json:"antenna_height,omitempty"`
-	MechanicalDowntilt  float64           `json:"mechanical_downtilt,omitempty"`
+	AntennaHeight       *float64          `json:"antenna_height"`
+	MechanicalDowntilt  *float64          `json:"mechanical_downtilt"`
 	ElectronicDowntilt  string            `json:"electronic_downtilt,omitempty"`
-	VerticalBeamwidth   float64           `json:"vertical_beamwidth,omitempty"`
-	HorizontalBeamwidth float64           `json:"horizontal_beamwidth,omitempty"`
-	Azimuth             float64           `json:"azimuth,omitempty"`
-	NearRadiusMeters    float64           `json:"near_radius_meters,omitempty"`
-	FarRadiusMeters     float64           `json:"far_radius_meters,omitempty"`
+	VerticalBeamwidth   *float64          `json:"vertical_beamwidth"`
+	HorizontalBeamwidth *float64          `json:"horizontal_beamwidth"`
+	Azimuth             *float64          `json:"azimuth"`
+	NearRadiusMeters    *float64          `json:"near_radius_meters"`
+	FarRadiusMeters     *float64          `json:"far_radius_meters"`
 	FieldSources        map[string]string `json:"field_sources"`
 	DirectionAvailable  bool              `json:"direction_available"`
 	CoverageAvailable   bool              `json:"coverage_available"`
@@ -100,13 +100,13 @@ func assignAntennaField(sector *AntennaSector, field string, param model.DeviceP
 		sector.CellID = param.ParameterValue
 	case "height", "antennaheight":
 		if value, ok := parseAntennaNumber(param.ParameterValue); ok {
-			sector.AntennaHeight = value
+			sector.AntennaHeight = antennaFloat(value)
 		} else {
 			delete(sector.FieldSources, field)
 		}
 	case "downtilt", "mechanicaldowntilt":
 		if value, ok := parseAntennaNumber(param.ParameterValue); ok {
-			sector.MechanicalDowntilt = value
+			sector.MechanicalDowntilt = antennaFloat(value)
 		} else {
 			delete(sector.FieldSources, field)
 		}
@@ -114,19 +114,19 @@ func assignAntennaField(sector *AntennaSector, field string, param model.DeviceP
 		sector.ElectronicDowntilt = param.ParameterValue
 	case "verticalbeamwidth":
 		if value, ok := parseAntennaNumber(param.ParameterValue); ok {
-			sector.VerticalBeamwidth = value
+			sector.VerticalBeamwidth = antennaFloat(value)
 		} else {
 			delete(sector.FieldSources, field)
 		}
 	case "beamwidth", "horizontalbeamwidth":
 		if value, ok := parseAntennaNumber(param.ParameterValue); ok {
-			sector.HorizontalBeamwidth = value
+			sector.HorizontalBeamwidth = antennaFloat(value)
 		} else {
 			delete(sector.FieldSources, field)
 		}
 	case "azimuth":
 		if value, ok := parseAntennaNumber(param.ParameterValue); ok {
-			sector.Azimuth = value
+			sector.Azimuth = antennaFloat(value)
 		} else {
 			delete(sector.FieldSources, field)
 		}
@@ -156,23 +156,33 @@ func parseAntennaNumber(value string) (float64, bool) {
 	return parsed, true
 }
 
+func antennaFloat(value float64) *float64 {
+	return &value
+}
+
 func validateAntennaSector(sector *AntennaSector) {
-	if hasAntennaField(sector, "azimuth") && sector.Azimuth >= 0 && sector.Azimuth < 360 {
+	sector.DirectionAvailable = false
+	sector.CoverageAvailable = false
+	sector.NearRadiusMeters = nil
+	sector.FarRadiusMeters = nil
+	sector.MissingFields = nil
+
+	if sector.Azimuth != nil && *sector.Azimuth >= 0 && *sector.Azimuth < 360 {
 		sector.DirectionAvailable = true
 	} else {
 		sector.MissingFields = append(sector.MissingFields, "azimuth")
 	}
 
-	if !hasAntennaField(sector, "height", "antennaheight") || sector.AntennaHeight <= 0 {
+	if sector.AntennaHeight == nil || *sector.AntennaHeight <= 0 {
 		sector.MissingFields = append(sector.MissingFields, "antennaHeight")
 	}
-	if !hasAntennaField(sector, "downtilt", "mechanicaldowntilt") || sector.MechanicalDowntilt < 0 || sector.MechanicalDowntilt >= 90 {
+	if sector.MechanicalDowntilt == nil || *sector.MechanicalDowntilt < 0 || *sector.MechanicalDowntilt >= 90 {
 		sector.MissingFields = append(sector.MissingFields, "mechanicalDowntilt")
 	}
-	if !hasAntennaField(sector, "beamwidth", "horizontalbeamwidth") || sector.HorizontalBeamwidth <= 0 || sector.HorizontalBeamwidth >= 180 {
+	if sector.HorizontalBeamwidth == nil || *sector.HorizontalBeamwidth <= 0 || *sector.HorizontalBeamwidth >= 180 {
 		sector.MissingFields = append(sector.MissingFields, "horizontalBeamwidth")
 	}
-	if !hasAntennaField(sector, "verticalbeamwidth") || sector.VerticalBeamwidth <= 0 || sector.VerticalBeamwidth >= 180 {
+	if sector.VerticalBeamwidth == nil || *sector.VerticalBeamwidth <= 0 || *sector.VerticalBeamwidth >= 180 {
 		sector.MissingFields = append(sector.MissingFields, "verticalBeamwidth")
 	}
 
@@ -180,27 +190,22 @@ func validateAntennaSector(sector *AntennaSector) {
 		return
 	}
 
-	nearAngle := sector.MechanicalDowntilt + sector.VerticalBeamwidth/2
-	farAngle := sector.MechanicalDowntilt - sector.VerticalBeamwidth/2
+	nearAngle := *sector.MechanicalDowntilt + *sector.VerticalBeamwidth/2
+	farAngle := *sector.MechanicalDowntilt - *sector.VerticalBeamwidth/2
 	if farAngle <= 0 || nearAngle >= 90 {
 		sector.MissingFields = append(sector.MissingFields, "coverageGeometry")
 		return
 	}
 
-	sector.NearRadiusMeters = sector.AntennaHeight / math.Tan(degreesToRadians(nearAngle))
-	sector.FarRadiusMeters = sector.AntennaHeight / math.Tan(degreesToRadians(farAngle))
-	sector.CoverageAvailable = sector.NearRadiusMeters > 0 && sector.NearRadiusMeters < sector.FarRadiusMeters
+	nearRadius := *sector.AntennaHeight / math.Tan(degreesToRadians(nearAngle))
+	farRadius := *sector.AntennaHeight / math.Tan(degreesToRadians(farAngle))
+	if nearRadius > 0 && nearRadius < farRadius {
+		sector.NearRadiusMeters = antennaFloat(nearRadius)
+		sector.FarRadiusMeters = antennaFloat(farRadius)
+		sector.CoverageAvailable = true
+	}
 }
 
 func degreesToRadians(degrees float64) float64 {
 	return degrees * math.Pi / 180
-}
-
-func hasAntennaField(sector *AntennaSector, fields ...string) bool {
-	for _, field := range fields {
-		if _, ok := sector.FieldSources[field]; ok {
-			return true
-		}
-	}
-	return false
 }

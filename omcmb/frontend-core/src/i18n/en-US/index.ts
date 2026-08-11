@@ -86,8 +86,8 @@ const messages: Record<string, string> = {
   'gis.antenna.verticalBeamwidth': 'Vertical beamwidth',
   'gis.antenna.coverageRange': 'Coverage range',
   'gis.antenna.incompleteFields': 'Missing fields: {fields}',
-  'gis.antenna.updateSubmitted': 'Antenna parameter update task submitted; waiting for device acknowledgement',
-  'gis.antenna.updateFailed': 'Failed to submit antenna parameter update task',
+  'gis.antenna.updateSubmitted': 'Antenna planning parameters saved',
+  'gis.antenna.updateFailed': 'Failed to save antenna planning parameters',
 
   // GIS geofence
   'geofence.title': 'Geo-fence',
