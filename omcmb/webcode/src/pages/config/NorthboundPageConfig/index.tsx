@@ -6360,10 +6360,13 @@ export default function NorthboundPageConfig() {
     setSelectedReportStatus(buildEventReportStatus(event, capabilityName));
   };
 
-  const renderStatusCell = (info: ReportStatusInfo, enabled: boolean) => {
-    const displayInfo = effectiveReportStatus(info, enabled);
-    const normal = displayInfo.state === 'success' || displayInfo.state === 'running';
-    return <Tag color={normal ? 'success' : 'default'}>{normal ? '正常' : '终止'}</Tag>;
+  const renderStatusCell = (enabled: boolean) => {
+    const normal = Boolean(enabled);
+    return (
+      <Tag data-northbound-i18n-skip="true" color={normal ? 'success' : 'default'}>
+        {nt(normal ? '正常' : '终止')}
+      </Tag>
+    );
   };
 
   const showLatestRunReport = (
@@ -6841,7 +6844,7 @@ export default function NorthboundPageConfig() {
     {
       title: '状态',
       width: 88,
-      render: (_, row) => renderStatusCell(buildFileReportStatus(row), Boolean(scenarioEnabled[row.code])),
+      render: (_, row) => renderStatusCell(Boolean(scenarioEnabled[row.code])),
     },
     {
       title: '输出内容',
@@ -6980,7 +6983,7 @@ export default function NorthboundPageConfig() {
     {
       title: '状态',
       width: 88,
-      render: (_, row) => renderStatusCell(buildInventoryReportStatus(row), Boolean(inventoryEnabled[row.key])),
+      render: (_, row) => renderStatusCell(Boolean(inventoryEnabled[row.key])),
     },
     {
       title: '输出内容',
