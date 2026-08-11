@@ -90,6 +90,22 @@
   margin-bottom: 12px;
 }
 
+.apiFieldList {
+  display: flex;
+  max-height: 220px;
+  align-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow: auto;
+}
+
+.apiFieldTag {
+  max-width: 100%;
+  margin-inline-end: 0;
+  white-space: normal;
+  word-break: break-all;
+}
+
 .rowControl {
   display: flex;
   align-items: center;

@@ -1628,6 +1628,29 @@ func TestSNMPFieldsFollowMIBOrder(t *testing.T) {
 	require.Contains(t, rr.Body.String(), `"field":"additionalInformation"`)
 }
 
+func TestUpdateSNMPV2TargetDefaultsCommunity(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	target, err := svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v2-primary", SNMPAlarmTarget{
+		Key:              "snmp-v2-primary",
+		Name:             "SNMP v2",
+		Enabled:          true,
+		Version:          "v2",
+		NotificationType: "Trap",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetHost:       "127.0.0.1",
+		TargetPort:       162,
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, defaultSNMPV2Community, target.Community)
+	require.True(t, target.Enabled)
+}
+
 func TestTestSNMPAlarmTargetUsesSenderAndRecordsResult(t *testing.T) {
 	repo := newFakeRepository()
 	repo.snmpTargets = []SNMPAlarmTarget{{

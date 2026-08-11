@@ -440,7 +440,7 @@ func eventFromAPITest(config APIConfig) PageConfigEvent {
 		EventType:          "contract_check",
 		Status:             status,
 		ArtifactType:       EventArtifactJSON,
-		ArtifactName:       fmt.Sprintf("%s contract", config.Name),
+		ArtifactName:       fmt.Sprintf("%s 接口检查", config.Name),
 		ArtifactPath:       config.Path,
 		Payload:            payload,
 		PayloadContentType: "application/json; charset=utf-8",
