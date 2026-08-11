@@ -1,62 +1,79 @@
-# 原始件 ILM 保留：MinIO 自动删除机制与真实验证结论
+# 原始件 ILM 保留功能说明
 
-来源：GitLab Issue #275。
+## 功能说明
 
-本文说明系统配置页「资源保留与背压」里的「原始件 ILM 保留」是否真实生效。该配置用于控制 MinIO 中 PM/MR 原始 XML 文件的保留天数，涉及 `pm-files` 和 `mr-files` 两个桶。
+位置：系统配置 / 资源保留与背压 / 原始件 ILM 保留
 
-## 结论
+配置项：原始件保留天数
 
-配置生效。系统设置保存后，后端会把 MinIO `pm-files` / `mr-files` 的正式 lifecycle 规则重下发；MinIO 会按规则自动删除满足过期条件的真实 PM/MR 原始件。
+当前配置：`60` 天
 
-当前环境已恢复为测试前口径：
+作用：
 
-- 页面值：原始件保留天数 = 60 天
-- 配置库：`minio.retention.raw_object_days = 60`
-- 清理模式：`minio.retention.cleanup_mode = shadow`
-- `pm-files` lifecycle：`omc-raw-expire-60d`，Enabled，60 天，整桶覆盖
-- `mr-files` lifecycle：`omc-raw-expire-60d`，Enabled，60 天，整桶覆盖
-- worker：已恢复运行
+- 控制原始 PM/MR 文件在 MinIO 中保留多久。
+- 涉及 bucket：`pm-files`、`mr-files`。
+- 保存配置后，系统会重新下发 MinIO lifecycle 规则。
+- MinIO 根据 lifecycle 自动清理到期对象。
 
-## 真实验证摘要
+规则形态：
 
-验证时通过系统设置页把保留天数从 60 天临时改为 1 天，并临时停止 worker，避免应用层兜底清理和 MinIO ILM 自动删除混淆。验证过程中没有创建临时 lifecycle 规则，也没有执行 `mc rm` 手工删除对象。
+- 规则 ID：`omc-raw-expire-<天数>d`
+- 规则范围：整个 bucket
+- 当前规则：`omc-raw-expire-60d`
 
-关键结果：
+清理机制：
 
-- 修改前 `pm-files` 总对象数：204
-- 修改前超过 24 小时候选对象数：119
-- 修改后 `pm-files` 对象数：132
-- 修改后超过 24 小时候选对象数：47
-- `mr-files` 当前无对象，无法观察 MR 原始件实际删除，但 lifecycle 已同步重下发
+- 删除动作由 MinIO lifecycle 执行，不是业务代码手动删除对象。
+- 对象到期后会进入可删除状态。
+- 真正物理删除由 MinIO 后台 scanner 异步执行，不能保证在某一秒删完。
+- `x-amz-expiration` 响应头可以用来确认单个对象的计划过期时间。
 
-已确认被 MinIO lifecycle 自动清理的真实候选对象：
+时间计算说明：
 
-- `pm-files/2026/08/04/A20260804.1345+0800-1400+0800_48BF74.1202000240194DP0015.xml.gz`
-- `pm-files/2026/08/04/A20260804.1400+0800-1415+0800_48BF74.1202000240194DP0015.xml.gz`
+- S3/MinIO 按天数计算 lifecycle 时，会按 UTC 日期边界对齐。
+- 示例：对象时间是 `2026-08-04 03:00:00 UTC`，过期时间为 7 天，按时间计算的过期时刻是 `2026-08-11 03:00:00 UTC`；但 MinIO 会对齐到下一个 UTC 零点，也就是 `2026-08-12 00:00:00 UTC`。
+- 因此，“满 N 天”不等于对象会在满 N 天的那一秒立刻物理删除。
 
-未过期对照对象仍保留：
+## 测试验证说明
 
-- `pm-files/2026/08/06/A20260806.1900+0800-1915+0800_48BF74.1202000240194DP0015.xml.gz`
+测试环境：`172.24.224.197`
 
-## 规则说明
+页面版本：`v100.0.0-20260810-1337`
 
-MinIO lifecycle 是按单个对象判断，不是等整个桶都过期后才删除。
+验证目标：
 
-- 某个 PM/MR 原始文件满配置天数，就只删除这个过期文件。
-- 其他没满配置天数的文件继续保留。
-- `pm-files` / `mr-files` 桶本身不会被删除。
-- 空前缀表示桶内所有对象都适用同一条规则。
+- 验证页面保存“原始件保留天数”后，系统会重新应用 MinIO lifecycle。
+- 验证 MinIO 会按 lifecycle 自动删除到期原始件。
+- 验证测试结束后配置可以恢复为 `60` 天。
 
-## 参考记录
+验证方式：
 
-本地完整排查记录：
+- 通过页面修改配置。
+- 不直接修改数据库。
+- 不直接修改 MinIO lifecycle。
+- 不手动删除对象。
 
-`/Users/shangyingbin/project/tmp/原始件ILM保留排查结论.md`
+验证结果：
 
-代码依据：
+| 项目 | 结果 |
+| --- | --- |
+| 页面保存后规则是否变化 | 是。保留天数改为 `6` 后，`pm-files`、`mr-files` 规则变为 `omc-raw-expire-6d` |
+| 是否观察到真实自动删除 | 是。最早样本对象 HEAD 从 `200` 变为 `404` |
+| 观察前缀 | `pm-files/2026/08/04/` |
+| 删除前对象数 | 1,040,107 |
+| 删除后剩余对象数 | 217,356 |
+| 已删除对象数 | 822,751 |
+| 删除执行耗时 | 约 19 分 57 秒 |
+| 最终恢复结果 | 已恢复为 `60` 天，两个 bucket 均为 `omc-raw-expire-60d` |
 
-- `xomc/omcgo/internal/core/components/minio/minio.go`
-- `xomc/omcgo/cmd/app/provider/minio_ilm.go`
-- `xomc/omcgo/cmd/worker/raw_cleanup.go`
-- `xomc/omcgo/internal/rawcleanup/runner.go`
-- `xomc/omcgo/migrations/seed/000001_init_seed.sql`
+结论：
+
+- 原始件 ILM 保留配置生效。
+- 页面保存后，系统会重新应用 MinIO lifecycle。
+- MinIO 能按 lifecycle 自动删除到期原始件。
+- 本次测试结束后，配置已恢复为 `60` 天。
+
+补充说明：
+
+- 删除窗口内 S3 `ListObjectsV2` 连续超时，因此实时删除数量使用 MinIO 数据目录对象目录计数。
+- 对象总大小的释放量未做最终精确补齐。
