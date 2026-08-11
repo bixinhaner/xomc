@@ -175,7 +175,13 @@ describe('deviceApi.getList — filter → query 映射', () => {
         page: 1,
         page_size: 20,
         total_pages: 1,
-        stats: { total: 1, online_count: 1, offline_count: 0, alarmed: 0 },
+        stats: {
+          total: 1,
+          online_count: 1,
+          offline_count: 0,
+          current_ue_count: 4,
+          alarmed: 0,
+        },
       },
     });
     const out = await deviceApi.getList({ page: 1, pageSize: 20 });
@@ -191,6 +197,7 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(d.sourceType).toBe('manual');
     // 后端 stats 直读（不靠 items.filter 估算）
     expect(out.stats.online_count).toBe(1);
+    expect(out.stats.current_ue_count).toBe(4);
   });
 
   it('按制式映射核心网状态，非本制式字段保持为空', async () => {

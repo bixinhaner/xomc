@@ -65,6 +65,9 @@ type DeviceListStats struct {
 	// 不限定 lifecycle（"在线"语义是 is_online=TRUE，与生命周期解耦）。
 	OnlineCount  int64 `json:"online_count"`
 	OfflineCount int64 `json:"offline_count"`
+	// CurrentUECount = 当前在线设备上报的接入 UE 数之和。离线设备的 ue_count
+	// 可能是断连前遗留值，因此不计入首页“当前接入 UE 数”。
+	CurrentUECount int64 `json:"current_ue_count"`
 	// Alarmed = active 告警总条数（任何级别）。#361 已落地：来自
 	// SUM(active_alarm_count) FROM alarms_active WHERE status<>'cleared'，
 	// 受同一 applyDeviceFilters 约束，与列表行内告警数量加总一致。

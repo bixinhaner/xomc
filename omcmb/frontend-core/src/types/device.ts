@@ -434,6 +434,8 @@ export interface DeviceListStats {
   online_count: number;
   /** T-0162: is_online=false 的设备数 */
   offline_count: number;
+  /** 当前在线设备上报的接入 UE 数之和；旧版后端可能暂不返回 */
+  current_ue_count?: number;
   /** T-0162: 按 lifecycle_state 分组计数 */
   by_lifecycle?: Partial<Record<DeviceLifecycle, number>>;
   /** active 告警总条数（任意级别） */

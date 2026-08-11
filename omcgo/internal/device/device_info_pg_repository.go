@@ -598,9 +598,21 @@ func (r *PgDeviceInfoRepository) GetByIDWithInfo(ctx context.Context, deviceID u
 	return d, nil
 }
 
+const deviceListStatsCurrentUECountExpr = `CASE
+	WHEN d.is_online THEN COALESCE(di.ue_count, 0)
+	ELSE 0
+END AS current_ue_count`
+
+func deviceListStatsGroupQuery(subQ string) string {
+	return "SELECT lifecycle_state, is_online, COUNT(*), " +
+		"COALESCE(SUM(active_alarm_count), 0), " +
+		"COALESCE(SUM(current_ue_count), 0) FROM (" + subQ +
+		") s GROUP BY lifecycle_state, is_online"
+}
+
 // ComputeListStats 在 ListDevicesWithInfo 同样筛选条件下跑 group-by 聚合，
-// 返回 lifecycle/online/alarm 三维统计。T-0162 D5：取代前端用当前页 items
-// filter() 自行估算的不准做法。
+// 返回 lifecycle/online/alarm/current UE 全量统计。T-0162 D5：取代前端用
+// 当前页 items filter() 自行估算的不准做法。
 //
 // 注意：本方法用与 ListDevicesWithInfo 相同的 LEFT JOIN，但只 GROUP BY 设备
 // 维度（DISTINCT device_id），避免 dgm 一对多导致同设备被计数多次。
@@ -614,7 +626,13 @@ func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter De
 		FROM alarms_active aa
 		WHERE aa.device_id = d.id AND aa.status <> 'cleared'
 	) AS active_alarm_count`
-	subBuilder := storage.Psql.Select("DISTINCT d.id", "d.lifecycle_state", "d.is_online", activeAlarmCountExpr).
+	subBuilder := storage.Psql.Select(
+		"DISTINCT d.id",
+		"d.lifecycle_state",
+		"d.is_online",
+		activeAlarmCountExpr,
+		deviceListStatsCurrentUECountExpr,
+	).
 		From("devices d").
 		LeftJoin("device_info di ON di.device_id = d.id").
 		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
@@ -635,9 +653,7 @@ func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter De
 	// #361: 外层 GROUP BY 增加 alarmed 真实统计——SUM 活动告警条数。
 	// active_alarm_count 已是子查询每设备唯一一行的数值，外层 SUM 后与列表行内
 	// active_alarm_count 加总一致。
-	groupQ := "SELECT lifecycle_state, is_online, COUNT(*), " +
-		"COALESCE(SUM(active_alarm_count), 0) FROM (" + subQ +
-		") s GROUP BY lifecycle_state, is_online"
+	groupQ := deviceListStatsGroupQuery(subQ)
 
 	rows, err := r.pool.Query(ctx, groupQ, subArgs...)
 	if err != nil {
@@ -653,12 +669,14 @@ func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter De
 		var isOnline bool
 		var count int64
 		var alarmedCount int64
-		if err := rows.Scan(&lifecycle, &isOnline, &count, &alarmedCount); err != nil {
+		var currentUECount int64
+		if err := rows.Scan(&lifecycle, &isOnline, &count, &alarmedCount, &currentUECount); err != nil {
 			return nil, fmt.Errorf("scan device list stats: %w", err)
 		}
 		stats.Total += count
 		stats.ByLifecycle[lifecycle] += count
 		stats.Alarmed += alarmedCount
+		stats.CurrentUECount += currentUECount
 		if isOnline {
 			stats.OnlineCount += count
 		} else {

@@ -136,10 +136,11 @@ export default function DashboardPage() {
     isPending,
     refetch: refetchDashboardSummary,
   } = useDashboardSummary(dashboardApiScope, currentUserId);
-  const { data: dashboardDeviceStats } = useDashboardDeviceStats(
-    dashboardApiScope,
-    currentUserId,
-  );
+  const {
+    data: dashboardDeviceStats,
+    isPending: isDeviceStatsPending,
+    isError: isDeviceStatsError,
+  } = useDashboardDeviceStats(dashboardApiScope, currentUserId);
   // 每次渲染读取一个小型快照，确保成功 effect 写入后，后续任意 Query 状态变化
   // 都会拿到最近值；避免额外 state/effect 级联渲染，也不会跨用户复用。
   const dashboardSnapshot = currentUserId
@@ -211,7 +212,8 @@ export default function DashboardPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [timeAgoText, setTimeAgoText] = useState('');
 
-  // 只在 Summary 成功返回后更新四张卡快照；pending/error 不用默认值覆盖历史成功值。
+  // 只在 Summary 成功返回后更新卡片快照；pending/error 不用默认值覆盖历史成功值。
+  // 当前接入 UE 不复用该 PM 快照，始终以设备全量统计为准。
   useEffect(() => {
     if (!dashboardSummary || !currentUserId) return;
 
@@ -275,8 +277,9 @@ export default function DashboardPage() {
   const totalDevices = dashboardDeviceStats?.total ?? cardDisplay.totalDevices;
   const onlineDevices = dashboardDeviceStats?.online_count ?? cardDisplay.onlineDevices;
   const activeAlarms = cardDisplay.activeAlarms;
-  const currentActiveUE = cardDisplay.activeUE;
+  const currentUE = dashboardDeviceStats?.current_ue_count ?? 0;
   const deviceCardsLoading = !dashboardDeviceStats && cardDisplay.loading;
+  const currentUECardLoading = !dashboardDeviceStats && isDeviceStatsPending;
   const summaryCardsLoading = cardDisplay.loading;
   const runningTasks = dashboardSummary?.taskSummary?.running ?? 0;
 
@@ -284,7 +287,6 @@ export default function DashboardPage() {
   const kpiDeltas = dashboardSummary?.kpiDeltas ?? {};
   const totalDevicesDelta = kpiDeltas['total_devices'];
   const activeAlarmsDelta = kpiDeltas['active_alarms'];
-  const ueTrendDelta = kpiDeltas['UE_ACTIVE'];
 
   const quickAccessItems = useMemo(
     () => QUICK_ACCESS_ITEMS.filter(
@@ -475,17 +477,12 @@ export default function DashboardPage() {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <KPICard
-            title={t('dashboard.activeUE')}
-            value={currentActiveUE}
+            title={t('dashboard.currentUE')}
+            value={isDeviceStatsError ? '--' : currentUE}
             icon={<TeamOutlined />}
             iconBgColor="#f6ffed"
             iconColor="#10B981"
-            loading={summaryCardsLoading}
-            hasComparison={ueTrendDelta?.hasComparison === true}
-            unavailableText={t('dashboard.notComparable')}
-            trend={ueTrendDelta?.trend ?? 'stable'}
-            delta={ueTrendDelta?.changePercent !== undefined ? `${ueTrendDelta.changePercent.toFixed(1)}%` : undefined}
-            deltaLabel={ueTrendDelta?.changePercent !== undefined ? t('dashboard.vsLastWeek') : undefined}
+            loading={currentUECardLoading}
             minHeight={20}
           />
         </Col>

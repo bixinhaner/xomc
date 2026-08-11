@@ -29,12 +29,16 @@ let groups: DeviceGroup[] = [
 function computeStats(items: Device[]) {
   const online = items.filter((d) => d.connStatus === 'online').length;
   const offline = items.filter((d) => d.connStatus === 'offline').length;
+  const currentUECount = items
+    .filter((d) => d.connStatus === 'online')
+    .reduce((sum, d) => sum + d.ueCount, 0);
   return {
     total: items.length,
     online,
     offline,
     online_count: online,
     offline_count: offline,
+    current_ue_count: currentUECount,
     alarmed: items.filter((d) => d.alarmLevel !== 'none').length,
   };
 }

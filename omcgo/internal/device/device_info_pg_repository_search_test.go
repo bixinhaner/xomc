@@ -47,3 +47,12 @@ func TestComputeListStats_UsesAlarmTotalNotAlarmedDeviceCount(t *testing.T) {
 	assert.Contains(t, groupQ, "SUM(active_alarm_count)")
 	assert.NotContains(t, groupQ, "COUNT(*) FILTER (WHERE alarmed)")
 }
+
+func TestComputeListStats_CurrentUEOnlyIncludesOnlineDevices(t *testing.T) {
+	const subQ = `SELECT DISTINCT d.id, d.lifecycle_state, d.is_online, ` + deviceListStatsCurrentUECountExpr + ` FROM devices d`
+	groupQ := deviceListStatsGroupQuery(subQ)
+
+	assert.Contains(t, subQ, "WHEN d.is_online THEN COALESCE(di.ue_count, 0)")
+	assert.Contains(t, subQ, "ELSE 0")
+	assert.Contains(t, groupQ, "SUM(current_ue_count)")
+}
