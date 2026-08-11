@@ -143,6 +143,67 @@ func TestSocketCTCCSyncFrameUsesSyncMessageType(t *testing.T) {
 	require.Equal(t, "1", payload["alarmStatus"])
 }
 
+func TestSocketCTCCSyncEventPayloadIncludesReplayAlarmPreview(t *testing.T) {
+	alarm := model.Alarm{
+		ID:              uuid.New(),
+		DeviceSN:        "ENB_SN002",
+		Severity:        model.AlarmMinor,
+		AlarmType:       "processingErrorAlarm",
+		AlarmIdentifier: "50012",
+		Description:     "Sync Loss",
+		Status:          model.AlarmActive,
+		RaisedAt:        time.Date(2026, 7, 28, 10, 20, 30, 0, time.Local),
+		AdditionalInfo:  map[string]string{"alarmSeq": "100"},
+	}
+
+	payload := socketCTCCSyncEventPayload(map[string]any{
+		"reqId":    "1005",
+		"result":   0,
+		"count":    1,
+		"alarmSeq": "0",
+	}, []socketAlarmSyncItem{{
+		Alarm:   alarm,
+		Subject: event.SubjectAlarmRaised,
+	}}, nil)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(payload), &parsed))
+	require.Equal(t, float64(1), parsed["total_count"])
+	require.Equal(t, float64(1), parsed["displayed_count"])
+	alarms, ok := parsed["alarms"].([]any)
+	require.True(t, ok)
+	require.Len(t, alarms, 1)
+	first, ok := alarms[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "Sync Loss", first["alarmTitle"])
+	require.Equal(t, float64(ctccMsgSyncAlarmResult), first["msgType"])
+	require.Equal(t, float64(100), first["alarmSequenceId"])
+}
+
+func TestSocketCUCCSyncEventPayloadIncludesReplayAlarmPreview(t *testing.T) {
+	alarm := model.Alarm{
+		ID:              uuid.New(),
+		DeviceSN:        "ENB_SN003",
+		Severity:        model.AlarmMajor,
+		AlarmType:       "communicationsAlarm",
+		AlarmIdentifier: "70001",
+		Description:     "Cell Unavailable",
+		Status:          model.AlarmActive,
+		RaisedAt:        time.Date(2026, 7, 28, 10, 20, 30, 0, time.Local),
+		AdditionalInfo:  map[string]string{"alarmSeq": "920188"},
+	}
+
+	payload := socketCUCCSyncEventPayload("ackSyncAlarmMsg;reqId=1;result=0;alarmSeq=0;count=1;resDesc=success", []socketAlarmSyncItem{{
+		Alarm:   alarm,
+		Subject: event.SubjectAlarmRaised,
+	}}, nil)
+
+	require.Contains(t, payload, "ackSyncAlarmMsg;reqId=1")
+	require.Contains(t, payload, "realTimeAlarm;")
+	require.Contains(t, payload, "alarmSeq=920188")
+	require.Contains(t, payload, "specificProblem=Cell Unavailable")
+}
+
 func TestValidateSocketFileSyncRequest(t *testing.T) {
 	req, msg := validateSocketFileSyncRequest(map[string]string{"reqid": "7"})
 	require.Empty(t, msg)

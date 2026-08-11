@@ -54,6 +54,7 @@ type Repository interface {
 	CreateEvent(ctx context.Context, event PageConfigEvent) (*PageConfigEvent, error)
 	ListEvents(ctx context.Context, filter EventFilter) (EventListResult, error)
 	GetEvent(ctx context.Context, id string) (*PageConfigEvent, error)
+	PruneEvents(ctx context.Context, filter EventFilter, keep int) (int64, error)
 	CleanupExpiredResults(ctx context.Context, runBefore time.Time, eventBefore time.Time) (ResultCleanupSummary, error)
 }
 
