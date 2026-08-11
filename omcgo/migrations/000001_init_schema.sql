@@ -2305,6 +2305,27 @@ CREATE TABLE public.device_parameters_p31 (
 
 
 --
+-- Name: device_antenna_sector_plans; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.device_antenna_sector_plans (
+    device_id uuid NOT NULL,
+    sector_no smallint NOT NULL,
+    azimuth_deg numeric(6,2),
+    antenna_height_m numeric(8,2),
+    mechanical_downtilt_deg numeric(6,2),
+    horizontal_beamwidth_deg numeric(6,2),
+    vertical_beamwidth_deg numeric(6,2),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT device_antenna_sector_plans_pkey PRIMARY KEY (device_id, sector_no)
+);
+
+
+COMMENT ON TABLE public.device_antenna_sector_plans IS 'OMC 天线扇区规划参数；保存后用于 GIS 覆盖示意，不向设备下发。';
+
+
+--
 -- Name: device_registrations; Type: TABLE; Schema: public; Owner: -
 --
 

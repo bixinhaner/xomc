@@ -22,6 +22,7 @@ func initDeviceModule(c *Container) error {
 	// Repositories
 	deviceRepo := device.NewPgDeviceRepository(c.PgPool)
 	paramRepo := device.NewPgDeviceParameterRepository(c.PgPool)
+	antennaPlanRepo := device.NewPgAntennaSectorPlanRepository(c.PgPool)
 	deviceInfoRepo := device.NewPgDeviceInfoRepository(c.PgPool)
 	deviceCache := device.NewDeviceCache(c.Redis, logger)
 
@@ -70,6 +71,7 @@ func initDeviceModule(c *Container) error {
 
 	// DeviceService
 	deviceService := device.NewDeviceService(deviceRepo, paramRepo, reconciler, c.EventBus, logger)
+	deviceService.SetAntennaSectorPlanRepository(antennaPlanRepo)
 	deviceService.SetRedis(c.Redis)
 	deviceService.SetDisconnectedAlarmCleaner(c.AlarmPgStore, c.AlarmEngine)
 	deviceService.SetDeviceCache(deviceCache)

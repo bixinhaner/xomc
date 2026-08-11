@@ -1,24 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useUpdateParameters } from './api/useDeviceParameters';
-import type { AntennaSector } from '../types/map';
-import type { ParameterUpdateRequest } from '../types/deviceParameter';
-
-export type AntennaEditableField = 'azimuth' | 'mechanicalDowntilt';
-
-const fieldSourceKeys: Record<AntennaEditableField, string> = {
-  azimuth: 'azimuth',
-  mechanicalDowntilt: 'downtilt',
-};
-
-export function isAntennaSectorFieldEditable(sector: AntennaSector, field: AntennaEditableField): boolean {
-  return Boolean(sector.fieldSources[fieldSourceKeys[field]]);
-}
+import { deviceApi } from '../services/api/deviceApi';
+import type { AntennaEditableField, AntennaSector } from '../types/map';
+import { calculateAntennaCoverage } from '../utils/antennaCoverage';
 
 export function useAntennaSectorEditor(deviceId: string | undefined, sectors: AntennaSector[]) {
   const queryClient = useQueryClient();
-  const updateParameters = useUpdateParameters();
   const [previewSectors, setPreviewSectors] = useState<AntennaSector[]>(sectors);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     setPreviewSectors(sectors);
@@ -27,7 +16,9 @@ export function useAntennaSectorEditor(deviceId: string | undefined, sectors: An
   const updatePreview = useCallback((sectorNumber: number, field: AntennaEditableField, value: number | null) => {
     if (value === null || !Number.isFinite(value)) return;
     setPreviewSectors((current) => current.map((sector) => (
-      sector.number === sectorNumber ? { ...sector, [field]: value } : sector
+      sector.number === sectorNumber
+        ? calculateAntennaCoverage({ ...sector, [field]: value })
+        : sector
     )));
   }, []);
 
@@ -38,32 +29,33 @@ export function useAntennaSectorEditor(deviceId: string | undefined, sectors: An
   const saveSector = useCallback(async (sectorNumber: number) => {
     if (!deviceId) throw new Error('device ID is required');
     const sector = previewSectors.find((item) => item.number === sectorNumber);
-    const originalSector = sectors.find((item) => item.number === sectorNumber);
-    if (!sector || !originalSector) throw new Error('antenna sector not found');
+    if (!sector) throw new Error('antenna sector not found');
 
-    const fields: AntennaEditableField[] = ['azimuth', 'mechanicalDowntilt'];
-    const parameters: ParameterUpdateRequest[] = fields.flatMap((field) => {
-      const path = sector.fieldSources[fieldSourceKeys[field]];
-      const value = sector[field];
-      if (!path || value === undefined || value === originalSector[field]) return [];
-      return [{ parameterPath: path, parameterValue: String(value), parameterType: 'int' }];
-    });
-    if (parameters.length === 0) throw new Error('no editable antenna parameters');
-
-    const result = await updateParameters.mutateAsync({ deviceId, parameters });
-    // SetParameterValues 异步等待 CPE 回执，保留预览值；避免立即查询旧上报值而回跳。
-    await queryClient.invalidateQueries({
-      queryKey: ['devices', deviceId, 'antenna-sectors'],
-      refetchType: 'none',
-    });
-    return result;
-  }, [deviceId, previewSectors, queryClient, sectors, updateParameters]);
+    setIsSaving(true);
+    try {
+      const saved = await deviceApi.updateAntennaSectorPlan(deviceId, sectorNumber, {
+        azimuth: sector.azimuth,
+        antennaHeight: sector.antennaHeight,
+        mechanicalDowntilt: sector.mechanicalDowntilt,
+        horizontalBeamwidth: sector.horizontalBeamwidth,
+        verticalBeamwidth: sector.verticalBeamwidth,
+      });
+      queryClient.setQueryData<AntennaSector[]>(
+        ['devices', deviceId, 'antenna-sectors'],
+        (current = []) => current.map((item) => item.number === sectorNumber ? saved : item),
+      );
+      setPreviewSectors((current) => current.map((item) => item.number === sectorNumber ? saved : item));
+      return saved;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [deviceId, previewSectors, queryClient]);
 
   return {
     previewSectors,
     updatePreview,
     discardPreview,
     saveSector,
-    isSaving: updateParameters.isPending,
+    isSaving,
   };
 }

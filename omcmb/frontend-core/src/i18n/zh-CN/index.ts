@@ -86,8 +86,8 @@ const messages: Record<string, string> = {
   'gis.antenna.verticalBeamwidth': '垂直波瓣宽度',
   'gis.antenna.coverageRange': '覆盖距离',
   'gis.antenna.incompleteFields': '缺失字段：{fields}',
-  'gis.antenna.updateSubmitted': '天线参数设置任务已提交，等待设备回执',
-  'gis.antenna.updateFailed': '提交天线参数设置任务失败',
+  'gis.antenna.updateSubmitted': '天线规划参数已保存',
+  'gis.antenna.updateFailed': '保存天线规划参数失败',
 
   // GIS 电子围栏
   'geofence.title': '电子围栏',

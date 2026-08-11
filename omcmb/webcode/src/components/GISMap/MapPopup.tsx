@@ -8,7 +8,7 @@ import React, { useState } from 'react';
 import { Button, Form, InputNumber, message, Tabs } from 'antd';
 import { useIntl } from 'react-intl';
 import { useThemeToken } from '@/hooks/useThemeToken';
-import type { AntennaSector, MapDevice } from '@core/types/map';
+import type { AntennaEditableField, AntennaSector, MapDevice } from '@core/types/map';
 import { DEVICE_STATUS_CONFIG, ALARM_BADGE_CONFIG } from './constants';
 import styles from './styles.module.css';
 
@@ -34,10 +34,10 @@ interface MapPopupProps {
   /** 当前选中设备已解析的天线扇区。 */
   antennaSectors?: AntennaSector[];
   /** 编辑值变更时更新地图覆盖范围预览。 */
-  onAntennaPreviewChange?: (sectorNumber: number, field: 'azimuth' | 'mechanicalDowntilt', value: number | null) => void;
+  onAntennaPreviewChange?: (sectorNumber: number, field: AntennaEditableField, value: number | null) => void;
   /** 放弃编辑值并恢复地图中的原始覆盖范围。 */
   onAntennaCancel?: () => void;
-  /** 向设备提交异步天线参数设置任务。 */
+  /** 保存 OMC 本地天线规划参数。 */
   onAntennaSave?: (sectorNumber: number) => Promise<unknown>;
   antennaSaving?: boolean;
 }
@@ -193,10 +193,20 @@ const MapPopup: React.FC<MapPopupProps> = ({
     color: '#262626',
     fontWeight: 500,
   };
-  const canEdit = Boolean(activeSector && onAntennaSave && (
-    activeSector.fieldSources.azimuth
-    || activeSector.fieldSources.downtilt
-  ));
+  const canEdit = Boolean(activeSector && onAntennaSave);
+  const editorFields: Array<{
+    field: AntennaEditableField;
+    label: string;
+    min: number;
+    max: number;
+    unit: string;
+  }> = [
+    { field: 'azimuth', label: intl.formatMessage({ id: 'gis.antenna.azimuth' }), min: 0, max: 359, unit: '°' },
+    { field: 'antennaHeight', label: intl.formatMessage({ id: 'gis.antenna.height' }), min: 0.01, max: 9999, unit: 'm' },
+    { field: 'mechanicalDowntilt', label: intl.formatMessage({ id: 'gis.antenna.mechanicalDowntilt' }), min: 0, max: 89.99, unit: '°' },
+    { field: 'horizontalBeamwidth', label: intl.formatMessage({ id: 'gis.antenna.horizontalBeamwidth' }), min: 0.01, max: 179.99, unit: '°' },
+    { field: 'verticalBeamwidth', label: intl.formatMessage({ id: 'gis.antenna.verticalBeamwidth' }), min: 0.01, max: 179.99, unit: '°' },
+  ];
 
   const saveAntennaSector = async () => {
     if (!activeSector || !onAntennaSave) return;
@@ -401,22 +411,21 @@ const MapPopup: React.FC<MapPopupProps> = ({
                 )}
                 {editingSector && (
                   <Form className={styles.sectorEditor} layout="vertical" size="small">
-                    {activeSector.fieldSources.azimuth && (
-                      <Form.Item label={intl.formatMessage({ id: 'gis.antenna.azimuth' })}>
+                    {editorFields.map(({ field, label, min, max, unit }) => (
+                      <Form.Item key={field} label={label}>
                         <div className={styles.sectorEditorInput}>
-                          <InputNumber controls={false} min={0} max={359} precision={0} value={activeSector.azimuth} aria-label={intl.formatMessage({ id: 'gis.antenna.azimuth' })} onChange={(value) => onAntennaPreviewChange?.(activeSector.number, 'azimuth', value)} />
-                          <span>°</span>
+                          <InputNumber
+                            controls={false}
+                            min={min}
+                            max={max}
+                            value={activeSector[field]}
+                            aria-label={label}
+                            onChange={(value) => onAntennaPreviewChange?.(activeSector.number, field, value)}
+                          />
+                          <span>{unit}</span>
                         </div>
                       </Form.Item>
-                    )}
-                    {activeSector.fieldSources.downtilt && (
-                      <Form.Item label={intl.formatMessage({ id: 'gis.antenna.mechanicalDowntilt' })}>
-                        <div className={styles.sectorEditorInput}>
-                          <InputNumber controls={false} value={activeSector.mechanicalDowntilt} aria-label={intl.formatMessage({ id: 'gis.antenna.mechanicalDowntilt' })} onChange={(value) => onAntennaPreviewChange?.(activeSector.number, 'mechanicalDowntilt', value)} />
-                          <span>°</span>
-                        </div>
-                      </Form.Item>
-                    )}
+                    ))}
                     <div className={styles.sectorEditorActions}>
                       <Button type="primary" loading={antennaSaving} onClick={() => void saveAntennaSector()}>{intl.formatMessage({ id: 'common.save' })}</Button>
                     </div>

@@ -39,8 +39,6 @@ import {
   pickProgressiveSteps,
 } from './constants';
 
-// 水平方位角以正北为 0 度、顺时针增加；覆盖范围以方位角为法线向两侧各偏移 60 度。
-const COVERAGE_HALF_ANGLE_RADIANS = Math.PI / 3;
 import {
   clusterStyleFunction,
   createSpiderfyLineStyle,
@@ -294,7 +292,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       source.addFeature(direction);
 
       if (!sector.coverageAvailable || sector.nearRadiusMeters === undefined || sector.farRadiusMeters === undefined) continue;
-      const halfBeam = COVERAGE_HALF_ANGLE_RADIANS;
+      if (sector.horizontalBeamwidth === undefined) continue;
+      const halfBeam = sector.horizontalBeamwidth * Math.PI / 360;
       const outer: number[][] = [];
       const inner: number[][] = [];
       for (let step = 0; step <= 20; step++) {

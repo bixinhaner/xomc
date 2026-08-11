@@ -567,3 +567,40 @@ describe('deviceApi.getStats / getProductClasses — 端点透传', () => {
     expect(list).toEqual(['PC100', 'PC200']);
   });
 });
+
+describe('deviceApi.updateAntennaSectorPlan', () => {
+  it('保存五项本地规划参数并映射响应', async () => {
+    putMock.mockResolvedValue({
+      data: {
+        number: 1,
+        azimuth: 0,
+        antenna_height: 18,
+        mechanical_downtilt: 6,
+        horizontal_beamwidth: 65,
+        vertical_beamwidth: 8,
+        field_sources: { azimuth: 'planned' },
+        direction_available: true,
+        coverage_available: true,
+        missing_fields: [],
+      },
+    });
+
+    const result = await deviceApi.updateAntennaSectorPlan('d1', 1, {
+      azimuth: 0,
+      antennaHeight: 18,
+      mechanicalDowntilt: 6,
+      horizontalBeamwidth: 65,
+      verticalBeamwidth: 8,
+    });
+
+    expect(putMock).toHaveBeenCalledWith('/devices/d1/antenna-sectors/1', {
+      azimuth: 0,
+      antenna_height: 18,
+      mechanical_downtilt: 6,
+      horizontal_beamwidth: 65,
+      vertical_beamwidth: 8,
+    });
+    expect(result.azimuth).toBe(0);
+    expect(result.coverageAvailable).toBe(true);
+  });
+});
