@@ -427,6 +427,7 @@ interface BackendListResponse<T> {
     by_lifecycle?: Record<string, number>;
     online_count: number;
     offline_count: number;
+    current_ue_count?: number;
     alarmed: number;
   };
 }
@@ -672,6 +673,7 @@ function mapListResponse(resp: BackendListResponse<BackendDevice>): DeviceListRe
         total: resp.stats.total,
         online_count: resp.stats.online_count,
         offline_count: resp.stats.offline_count,
+        current_ue_count: resp.stats.current_ue_count,
         // T-0162 alias for backward compat
         online: resp.stats.online_count,
         offline: resp.stats.offline_count,

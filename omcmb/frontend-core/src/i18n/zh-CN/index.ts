@@ -3174,6 +3174,7 @@ const messages: Record<string, string> = {
   'dashboard.throughputTrend':    '上下行速率趋势',
   'dashboard.ueTrend':            'UE用户数趋势',
   'dashboard.activeUE':           '活跃UE',
+  'dashboard.currentUE':          '当前接入UE数',
   'dashboard.peakUE':             '峰值UE',
   'dashboard.qualityTrend':       '无线质量指标趋势',
   'dashboard.timeRange.label':    '对比周期',

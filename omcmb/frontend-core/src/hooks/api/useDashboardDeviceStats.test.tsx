@@ -20,6 +20,7 @@ const deviceStats: DeviceListStats = {
   total: 20_002,
   online_count: 19_572,
   offline_count: 430,
+  current_ue_count: 67,
   alarmed: 0,
 };
 

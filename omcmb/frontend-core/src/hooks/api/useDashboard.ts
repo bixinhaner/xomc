@@ -204,6 +204,9 @@ export function useDashboardDeviceStats(apiScope: string, userScope: string | un
       if (stats.online_count + stats.offline_count !== stats.total) {
         throw new Error('device list returned incomplete page-level stats');
       }
+      if (!Number.isFinite(stats.current_ue_count)) {
+        throw new Error('device list returned no current UE stats');
+      }
       return stats;
     },
     enabled: Boolean(userScope),

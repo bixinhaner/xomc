@@ -310,6 +310,7 @@ describe('DashboardPage card snapshot integration', () => {
         total: 20_002,
         online_count: 19_572,
         offline_count: 430,
+        current_ue_count: 67,
         alarmed: 0,
       },
       dataUpdatedAt: 300,
@@ -329,7 +330,7 @@ describe('DashboardPage card snapshot integration', () => {
     expect(screen.getByTestId('kpi-dashboard.totalDevices')).toHaveTextContent('20002');
     expect(screen.getByTestId('kpi-dashboard.onlineDevices')).toHaveTextContent('19572');
     expect(screen.getByTestId('kpi-dashboard.activeAlarmsEvents')).toHaveTextContent('4');
-    expect(screen.getByTestId('kpi-dashboard.activeUE')).toHaveTextContent('8');
+    expect(screen.getByTestId('kpi-dashboard.currentUE')).toHaveTextContent('67');
     expect(dashboardMocks.useDashboardDeviceStats).toHaveBeenCalledWith(
       resolveDashboardCardApiScope('/api/v1', undefined, window.location.origin),
       user.id,
@@ -361,7 +362,11 @@ describe('DashboardPage card snapshot integration', () => {
     expect(screen.getByTestId('kpi-dashboard.totalDevices')).toHaveTextContent('10');
     expect(screen.getByTestId('kpi-dashboard.onlineDevices')).toHaveTextContent('6');
     expect(screen.getByTestId('kpi-dashboard.activeAlarmsEvents')).toHaveTextContent('2');
-    expect(screen.getByTestId('kpi-dashboard.activeUE')).toHaveTextContent('3');
+    expect(screen.getByTestId('kpi-dashboard.currentUE')).toHaveTextContent('0');
+    expect(screen.getByTestId('kpi-dashboard.currentUE')).toHaveAttribute(
+      'data-loading',
+      'true',
+    );
     expect(screen.getByText(/dashboard\.lastUpdate/)).toHaveTextContent(
       'dashboard.daysAgo',
     );
@@ -384,6 +389,7 @@ describe('DashboardPage card snapshot integration', () => {
         total: 20_002,
         online_count: 19_572,
         offline_count: 430,
+        current_ue_count: 67,
         alarmed: 0,
       },
       dataUpdatedAt: 300,
@@ -404,7 +410,7 @@ describe('DashboardPage card snapshot integration', () => {
     expect(screen.getByTestId('kpi-dashboard.totalDevices')).toHaveAttribute('data-loading', 'false');
     expect(screen.getByTestId('kpi-dashboard.onlineDevices')).toHaveTextContent('19572');
     expect(screen.getByTestId('kpi-dashboard.activeAlarmsEvents')).toHaveTextContent('2');
-    expect(screen.getByTestId('kpi-dashboard.activeUE')).toHaveTextContent('3');
+    expect(screen.getByTestId('kpi-dashboard.currentUE')).toHaveTextContent('67');
   });
 
   it('keeps the latest successful Summary in memory if Query data disappears', async () => {
@@ -437,6 +443,18 @@ describe('DashboardPage card snapshot integration', () => {
       isFetching: false,
       refetch: vi.fn(),
     };
+    dashboardMocks.deviceStatsResult = {
+      data: {
+        total: 20,
+        online_count: 15,
+        offline_count: 5,
+        current_ue_count: 67,
+        alarmed: 0,
+      },
+      dataUpdatedAt: 300,
+      isPending: false,
+      isFetching: false,
+    };
     view.rerender(
       <QueryClientProvider client={queryClient}>
         <DashboardPage />
@@ -464,7 +482,7 @@ describe('DashboardPage card snapshot integration', () => {
     expect(screen.getByTestId('kpi-dashboard.totalDevices')).toHaveTextContent('20');
     expect(screen.getByTestId('kpi-dashboard.onlineDevices')).toHaveTextContent('15');
     expect(screen.getByTestId('kpi-dashboard.activeAlarmsEvents')).toHaveTextContent('4');
-    expect(screen.getByTestId('kpi-dashboard.activeUE')).toHaveTextContent('8');
+    expect(screen.getByTestId('kpi-dashboard.currentUE')).toHaveTextContent('67');
   });
 
   it('keeps first-load skeletons while an offline query is pending but paused', () => {
@@ -520,9 +538,9 @@ describe('DashboardPage card snapshot integration', () => {
       'data-has-comparison',
       'false',
     );
-    expect(screen.getByTestId('kpi-dashboard.activeUE')).toHaveAttribute(
+    expect(screen.getByTestId('kpi-dashboard.currentUE')).toHaveAttribute(
       'data-has-comparison',
-      'false',
+      'undefined',
     );
   });
 

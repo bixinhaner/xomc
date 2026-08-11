@@ -3167,6 +3167,7 @@ const messages: Record<string, string> = {
   'dashboard.throughputTrend':    'Throughput Trend',
   'dashboard.ueTrend':            'UE Users Trend',
   'dashboard.activeUE':           'Active UE',
+  'dashboard.currentUE':          'Current Connected UEs',
   'dashboard.peakUE':             'Peak UE',
   'dashboard.qualityTrend':       'Network Quality Trend',
   'dashboard.timeRange.label':    'Compare Period',
