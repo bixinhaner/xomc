@@ -464,7 +464,33 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	if c.DeviceService != nil {
 		provisionHandler.SetDeviceChecker(c.DeviceService)
 	}
+	if md.plugAndPlayRepo != nil && c.DeviceService != nil && c.TaskSvc != nil {
+		provisionHandler.SetPlugAndPlayDependencies(
+			md.plugAndPlayRepo, md.plugAndPlayRepo, c.DeviceService, c.TaskSvc,
+		)
+		if c.ProductRepo != nil && c.ParamRegistry != nil {
+			provisionHandler.SetPlugAndPlayXMLDependencies(
+				c.QuickSettingsRegistry, c.ProductRepo, c.ParamRegistry,
+			)
+		}
+		if c.MinIO != nil && c.Cfg != nil {
+			provisionHandler.SetPlugAndPlayXMLStorage(
+				c.MinIO, c.Cfg.MinIO.Buckets.Firmware,
+			)
+		}
+		if md.softwareService != nil && md.ufteService != nil {
+			provisionHandler.SetPlugAndPlayFileWorkflow(&plugAndPlayFileWorkflowAdapter{
+				software: md.softwareService,
+				ufte:     md.ufteService,
+			})
+		}
+		if md.provisionEngine != nil {
+			md.provisionEngine.SetPolicyContinuation(provisionHandler)
+			md.provisionEngine.SetAutomaticPolicyExecutor(provisionHandler)
+		}
+	}
 	provisionHandler.RegisterRoutes(permGroup("config"))
+	provisionHandler.RegisterPublicRoutes(publicV1)
 
 	// ----- Topology routes → resource "devices" -----
 	th := c.topologyHandlerDeps

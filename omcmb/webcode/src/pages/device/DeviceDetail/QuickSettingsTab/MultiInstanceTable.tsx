@@ -2631,11 +2631,8 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
             size="small"
             icon={<EditOutlined />}
             onClick={() => openEditModal(row)}
-            disabled={isIpsecGroup && (
-              !ipsecGlobalEnabled
-              || isSubmitting
-              || batchAwaitingDevice
-            )}
+            // 统一提交后，直到设备返回结果前禁止继续编辑，避免覆盖在途下发。
+            disabled={isSubmitting || batchAwaitingDevice || (isIpsecGroup && !ipsecGlobalEnabled)}
           >
             {t('common.edit')}
           </Button>
@@ -2644,11 +2641,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
             onConfirm={() => row.instanceId && void handleDelete(row.instanceId)}
             disabled={
               (!canDelete && row.pending !== 'add')
-              || (isIpsecGroup && (
-                !ipsecGlobalEnabled
-                || isSubmitting
-                || batchAwaitingDevice
-              ))
+              || isSubmitting
+              || batchAwaitingDevice
+              || (isIpsecGroup && !ipsecGlobalEnabled)
             }
           >
             <Button
@@ -2658,11 +2653,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
               icon={<DeleteOutlined />}
               disabled={
                 (!canDelete && row.pending !== 'add')
-                || (isIpsecGroup && (
-                  !ipsecGlobalEnabled
-                  || isSubmitting
-                  || batchAwaitingDevice
-                ))
+                || isSubmitting
+                || batchAwaitingDevice
+                || (isIpsecGroup && !ipsecGlobalEnabled)
               }
             >
               {t('common.delete')}

@@ -3,7 +3,7 @@
 // 后端 PRD: docs/project/prd/F06-system-license-redesign.md §5 API 契约
 // 后端实现: omcgo/internal/license/system_license_handler.go (Step 2 commit 50840622)
 //
-// 与 licenseApi.ts 完全并存——本文件只消费新 singleton 接口：
+// 与历史页面接口并存——本文件提供旧项目 License 的当前状态、历史和限制查询：
 //
 //   GET  /api/v1/system-license          → SystemLicense
 //   POST /api/v1/system-license          → UpdateResult{current, replaced}
@@ -24,7 +24,25 @@ export type DevicesSupport = Record<string, number>;
  * feature_list 是后端 json.RawMessage（三级嵌套：string "All" / string[] / Record<string, string[]>）。
  * 前端展示用 `unknown` + 类型保护，不在 API 层强类型化（结构灵活性优先）。
  */
-export type FeatureList = Record<string, unknown>;
+export interface SystemLicenseFeature {
+  featureId?: string;
+  featureCode?: string;
+  nameZh: string;
+  nameEn: string;
+  path?: string;
+  pathEn?: string;
+  source: string;
+  recognized: boolean;
+  licensed: boolean;
+  rawIds?: string[];
+  rawCodes?: string[];
+}
+
+export type FeatureList = Record<string, unknown> & {
+  features?: SystemLicenseFeature[];
+  legacy_feature_ids?: string[];
+  legacy_feature_codes?: string[];
+};
 
 /** 当前生效 license。 */
 export interface SystemLicense {
@@ -76,6 +94,11 @@ export interface SystemLicenseUpdateResult {
   replaced: SystemLicenseHistory | null;
 }
 
+export interface SystemLicenseFeatureCheck {
+  path: string;
+  authorized: boolean;
+}
+
 // ---- Backend snake_case mirrors（response interceptor 不做自动转换，需要手动 map） ----
 
 interface BackendSystemLicense {
@@ -97,6 +120,53 @@ interface BackendSystemLicense {
   is_current: boolean;
   created_at: string;
   updated_at: string;
+}
+
+interface BackendSystemLicenseFeature {
+  feature_id?: string;
+  feature_code?: string;
+  name_zh: string;
+  name_en: string;
+  path?: string;
+  path_en?: string;
+  source: string;
+  recognized: boolean;
+  licensed: boolean;
+  raw_ids?: string[];
+  raw_codes?: string[];
+}
+
+function mapFeatureList(value: FeatureList): FeatureList {
+  if (!value || typeof value !== 'object') return {};
+  const features = Array.isArray(value.features)
+    ? value.features.map((feature) => {
+        const backend = feature as unknown as BackendSystemLicenseFeature;
+        return {
+          featureId: backend.feature_id,
+          featureCode: backend.feature_code,
+          nameZh: backend.name_zh ?? '',
+          nameEn: backend.name_en ?? '',
+          path: backend.path,
+          pathEn: backend.path_en,
+          source: backend.source ?? 'unknown',
+          recognized: backend.recognized === true,
+          licensed: backend.licensed === true,
+          rawIds: backend.raw_ids ?? [],
+          rawCodes: backend.raw_codes ?? [],
+        } satisfies SystemLicenseFeature;
+      })
+    : undefined;
+  return features ? { ...value, features } : value;
+}
+
+/** Decode the stored Base64 representation back to the original .lic bytes. */
+export function decodeSystemLicenseRawContent(rawContent: string): Uint8Array {
+  const binary = atob(rawContent);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 interface BackendSystemLicenseHistory {
@@ -142,7 +212,7 @@ function mapSystemLicense(b: BackendSystemLicense): SystemLicense {
     issuedAt: b.issued_at,
     expiryDate: b.expiry_date,
     devicesSupport: b.devices_support ?? {},
-    featureList: b.feature_list ?? {},
+    featureList: mapFeatureList(b.feature_list ?? {}),
     rawContent: b.raw_content,
     signature: b.signature,
     signatureKeyId: b.signature_key_id,
@@ -165,7 +235,7 @@ function mapSystemLicenseHistory(b: BackendSystemLicenseHistory): SystemLicenseH
     issuedAt: b.issued_at,
     expiryDate: b.expiry_date,
     devicesSupport: b.devices_support ?? {},
-    featureList: b.feature_list ?? {},
+    featureList: mapFeatureList(b.feature_list ?? {}),
     rawContent: b.raw_content,
     signature: b.signature,
     signatureKeyId: b.signature_key_id,
@@ -196,15 +266,16 @@ export const systemLicenseApi = {
   /**
    * 上传新 license 覆盖当前。
    *
-   * @param rawContent license JSON 文件原始字符串（前端 FileReader 读出）
+  * @param rawContent 旧项目 .lic 二进制文件的 Base64 原文
    * 后端业务错误（前端按 biz_code 区分）：
    *   - 12109 签名校验失败（strict 模式）
    *   - 12110 license_id 已存在
-   *   - 12111 JSON 格式错误 / 必填字段缺失
+   *   - 12111 旧项目 .lic 格式错误 / 解密或验签失败
    */
   async update(rawContent: string): Promise<SystemLicenseUpdateResult> {
     const { data } = await http.post<BackendUpdateResult>('/system-license', {
       raw_content: rawContent,
+      raw_content_encoding: 'base64',
     });
     return {
       current: mapSystemLicense(data.current),
@@ -224,6 +295,14 @@ export const systemLicenseApi = {
       page: data.page ?? params.page,
       pageSize: data.page_size ?? params.pageSize,
     };
+  },
+
+  /** 查询当前 License 是否授权指定的三级功能路径。 */
+  async checkFeature(path: string): Promise<SystemLicenseFeatureCheck> {
+    const { data } = await http.get<SystemLicenseFeatureCheck>('/system-license/feature-check', {
+      params: { path },
+    });
+    return data;
   },
 };
 

@@ -1,5 +1,5 @@
-import React, { useMemo, useCallback } from 'react';
-import { Drawer, Table, Tag } from 'antd';
+import React, { useMemo, useCallback, useState } from 'react';
+import { App, Button, Drawer, Space, Table, Tag, Typography } from 'antd';
 import type { TableColumnsType } from 'antd';
 import {
   CheckCircleOutlined,
@@ -9,6 +9,8 @@ import {
   ForwardOutlined,
 } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
+import { provisionApi } from '@core/services/api/provisionApi';
+import { buildProvisioningSteps } from '../provisioningSteps';
 
 interface Props {
   taskId: string;
@@ -18,6 +20,10 @@ interface Props {
     failureReason: string;
     startTime: string;
     endTime: string;
+    currentStep: number;
+    totalSteps: number;
+    currentStepName?: string;
+    xmlFileId?: string | null;
   };
   onClose: () => void;
 }
@@ -41,6 +47,13 @@ const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = 
 
 export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
   const t = useT();
+  const { message } = App.useApp();
+  const [downloading, setDownloading] = useState(false);
+  const currentStepLabel = taskData?.currentStepName === 'completed'
+    ? t('status.success')
+    : taskData?.currentStepName === 'download_xml'
+      ? `${t('common.download')} XML`
+      : taskData?.currentStepName || '-';
 
   const getStatusText = useCallback((status: string) => {
     const map: Record<string, string> = {
@@ -65,7 +78,32 @@ export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
     'software_upgrade': t('provision.softwareUpgrade'),
     'license': t('provision.license'),
     'self_config': t('provision.selfConfig'),
+    'match_policy': t('provision.matchPolicy'),
+    'prepare_context': t('provision.prepareContext'),
+    'generate_xml': t('provision.generateXml'),
+    'upload_file': t('provision.uploadFile'),
+    'download_xml': t('provision.downloadXml'),
+    'wait_transfer_complete': t('provision.waitTransferComplete'),
+    'wait_startup_stage': t('provision.waitStartupStage'),
+    'parameter_validation': t('provision.parameterValidation'),
+    'parameter_configuration': t('provision.parameterConfiguration'),
+    'cell_activation': t('provision.cellActivation'),
+    'wait_startup_result': t('provision.waitStartupResult'),
+    'verify_online': t('provision.verifyOnline'),
+    'completed': t('provision.orchestrationCompleted'),
   }), [t]);
+
+  const downloadXML = useCallback(async () => {
+    if (!taskData?.xmlFileId) return;
+    setDownloading(true);
+    try {
+      await provisionApi.downloadXML(taskData.xmlFileId);
+    } catch {
+      void message.error(t('common.downloadFailed'));
+    } finally {
+      setDownloading(false);
+    }
+  }, [message, t, taskData?.xmlFileId]);
 
   // Parse executeProcedure into step records
   const records: TaskRecord[] = useMemo(() => {
@@ -76,6 +114,21 @@ export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
     const failureReason = taskData.failureReason;
     const taskStartTime = taskData.startTime;
     const taskEndTime = taskData.endTime;
+
+    const orchestrationSteps = buildProvisioningSteps({
+      status: taskStatus,
+      currentStep: taskData.currentStep,
+      totalSteps: taskData.totalSteps,
+      failureReason,
+    });
+    if (orchestrationSteps.length > 0) {
+      return orchestrationSteps.map((step, idx) => ({
+        ...step,
+        stepName: stepNameMap[step.stepName] || step.stepName,
+        startTime: idx === 0 ? taskStartTime : '',
+        endTime: idx === orchestrationSteps.length - 1 ? taskEndTime : '',
+      }));
+    }
 
     // Handle special procedure texts
     if (procedure === 'waiting') {
@@ -158,6 +211,20 @@ export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
       onClose={onClose}
       styles={{ body: { padding: 16 } }}
     >
+      {taskData?.xmlFileId && (
+        <Space style={{ marginBottom: 16 }}>
+          <Typography.Text>
+            {t('provision.stepProgress')}: {currentStepLabel}
+          </Typography.Text>
+          <Button
+            type="link"
+            loading={downloading}
+            onClick={() => void downloadXML()}
+          >
+            {t('common.download')}
+          </Button>
+        </Space>
+      )}
       <Table
         columns={columns}
         dataSource={records}

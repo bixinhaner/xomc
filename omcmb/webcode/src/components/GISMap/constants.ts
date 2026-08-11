@@ -198,7 +198,7 @@ export const MAP_CONFIG = {
   /**
    * 默认中心点 [lng, lat]
    * 支持环境变量配置：VITE_MAP_DEFAULT_CENTER="lng,lat,zoom"
-   * 优先级：环境变量 > 赞比亚中心点 (28.221, -14.607)
+  * 优先级：环境变量 > 中国区域默认中心点
    */
   get defaultCenter(): [number, number] {
     // 尝试从环境变量读取
@@ -217,8 +217,8 @@ export const MAP_CONFIG = {
         console.warn('[MAP_CONFIG] Failed to parse VITE_MAP_DEFAULT_CENTER, using default');
       }
     }
-    // 默认值：赞比亚中心 (所有设备经纬度平均值)
-    return [28.221, -14.607];
+    // 默认值：没有离线元数据且没有设备坐标时使用中国区域中心
+    return [104.0, 35.0];
   },
 
   /**
@@ -243,7 +243,7 @@ export const MAP_CONFIG = {
       }
     }
     // 默认缩放级别
-    return 6;
+    return 4;
   },
   /** 最小缩放级别 */
   minZoom: 1,
@@ -255,8 +255,8 @@ export const MAP_CONFIG = {
   osmTileUrl: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   /** 默认版权信息 */
   attribution: '© OpenStreetMap contributors',
-  /** 默认地理边界（赞比亚区域） */
-  bounds: { minLon: 22.0, maxLon: 34.0, minLat: -18.0, maxLat: -8.0 },
+  /** 默认地理边界（全球范围，仅用于没有设备数据时的兜底） */
+  bounds: { minLon: -180, maxLon: 180, minLat: -85, maxLat: 85 },
   /**
    * 瓦片服务地址（智能选择）
    * 优先级：环境变量 VITE_MAP_TILE_URL > 在线 OSM

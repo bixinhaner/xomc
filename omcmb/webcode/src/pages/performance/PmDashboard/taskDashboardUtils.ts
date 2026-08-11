@@ -302,10 +302,6 @@ export function filterRowsByMetricPaths(
   return rows.filter((row) => set.has(row.metricPath));
 }
 
-function isFormalResultRow(row: AdhocResultRow): boolean {
-  return row.partial !== true && row.periodComplete !== false;
-}
-
 /**
  * 转置主函数：结果行 → 每指标一张图（图内按系列键分多条线，缺桶补 '-'）。
  * @param rows        任务结果行（多粒度混在一起，本函数内按 granularity 过滤）
@@ -319,7 +315,9 @@ export function buildMetricCharts(
   locale: Locale = 'zh-CN',
   metricDisplayNames?: MetricDisplayNameMap,
 ): MetricChart[] {
-  const filtered = rows.filter((r) => r.granularity === granularity && isFormalResultRow(r));
+  // 与首页 KPI 趋势保持一致：已发布的进行中/不完整结果仍按实际聚合值出图。
+  // 完整性由页面提示表达；真正没有结果行的桶仍保持空值，绝不补 0。
+  const filtered = rows.filter((r) => r.granularity === granularity);
   if (filtered.length === 0) return [];
 
   // 按 metricPath 分图，保留出现顺序。
@@ -392,8 +390,8 @@ export function buildMetricCharts(
   // （不产假 0，逐点语义正确），但前端若仅按本指标返回行的 distinct key 渲染 legend，会让那条线
   // 整组消失，造成「上行流量两组、E-RAB掉线率只剩一组」的错觉。
   // 治法：对「实体身份即 legend」的维度（device_group/product/band/aggregate_group），把任务本批
-  // 结果里所有指标出现过的系列键并成全集，每张图都按全集铺 legend；本指标缺的桶留 '-'（断点，
-  // connectNulls=false 自然断开），绝不补 0 假点。network（单线）/device（缺设备=该设备真无数据，
+  // 结果里所有指标出现过的系列键并成全集，每张图都按全集铺 legend；本指标缺的桶留 '-'（空点，
+  // connectNulls=true 跨空桶续连），绝不补 0 假点。network（单线）/device（缺设备=该设备真无数据，
   // legend 缺失有意义）不套全集，保持原行为。
   const fixedLegendDims: AdhocDimension[] = [
     'device_group',

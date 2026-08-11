@@ -162,6 +162,81 @@ func TestBuildTR069Params_SetParameterValues(t *testing.T) {
 	assert.Equal(t, "xsd:int", byName["Device.X_BAICELLS_LTE.NriBitLen"].Type)
 }
 
+func TestBuildTR069Params_SetParameterValues_NormalizesBooleanToNumericWireValue(t *testing.T) {
+	refs := []MMLParamRef{
+		{ParamCode: "ENABLE", Tr069Path: "Device.DeviceInfo.SignallingTrace.Enable", ValueType: "boolean"},
+	}
+
+	for _, tc := range []struct {
+		name string
+		form interface{}
+		want string
+	}{
+		{name: "string true", form: "true", want: "1"},
+		{name: "string false", form: "false", want: "0"},
+		{name: "json true", form: true, want: "1"},
+		{name: "json false", form: false, want: "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := BuildTR069Params("SetParameterValues", refs,
+				map[string]interface{}{"ENABLE": tc.form}, "MOD")
+			require.NoError(t, err)
+			var got struct {
+				Values []struct {
+					Name  string `json:"name"`
+					Value string `json:"value"`
+					Type  string `json:"type"`
+				} `json:"values"`
+			}
+			require.NoError(t, json.Unmarshal(payload, &got))
+			require.Len(t, got.Values, 1)
+			assert.Equal(t, "Device.DeviceInfo.SignallingTrace.Enable", got.Values[0].Name)
+			assert.Equal(t, tc.want, got.Values[0].Value)
+			assert.Equal(t, "xsd:string", got.Values[0].Type)
+		})
+	}
+}
+
+func TestBuildTR069Params_SetParameterValues_KeepsBooleanWireTypeForOtherPaths(t *testing.T) {
+	refs := []MMLParamRef{{ParamCode: "ENABLE", Tr069Path: "Device.X.Enable", ValueType: "boolean"}}
+
+	payload, err := BuildTR069Params("SetParameterValues", refs,
+		map[string]interface{}{"ENABLE": true}, "MOD")
+	require.NoError(t, err)
+
+	var got struct {
+		Values []struct {
+			Type string `json:"type"`
+		} `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &got))
+	require.Len(t, got.Values, 1)
+	assert.Equal(t, "xsd:boolean", got.Values[0].Type)
+}
+
+func TestBuildTR069Params_SetParameterValues_NormalizesRawSignallingTraceEnable(t *testing.T) {
+	refs := []MMLParamRef{{
+		ParamCode: "Device.DeviceInfo.SignallingTrace.Enable",
+		Tr069Path: "Device.DeviceInfo.SignallingTrace.Enable",
+		ValueType: "string",
+	}}
+
+	payload, err := BuildTR069Params("SetParameterValues", refs,
+		map[string]interface{}{"Device.DeviceInfo.SignallingTrace.Enable": "true"}, "MOD")
+	require.NoError(t, err)
+
+	var got struct {
+		Values []struct {
+			Value string `json:"value"`
+			Type  string `json:"type"`
+		} `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &got))
+	require.Len(t, got.Values, 1)
+	assert.Equal(t, "1", got.Values[0].Value)
+	assert.Equal(t, "xsd:string", got.Values[0].Type)
+}
+
 func TestBuildTR069Params_SetParameterValues_KeepsStandardPathForACSTranslation(t *testing.T) {
 	refs := []MMLParamRef{{
 		ParamCode:         "LICENSE_CODE",

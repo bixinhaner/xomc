@@ -246,6 +246,24 @@ func TestDeviceTaskRowToResultMap_IncludesRequestAndResponseMessages(t *testing.
 	}
 }
 
+func TestDeviceTaskRowToResultMap_FallsBackToRPCOperationWhenCommandSnapshotMissing(t *testing.T) {
+	row := DeviceTaskResultRowView{
+		DeviceTaskID: "device-task-mod-fallback",
+		DeviceSN:     "SN001",
+		Method:       "SetParameterValues",
+		Params:       json.RawMessage(`{"values":[{"name":"Device.DeviceInfo.SoftwareVersion","value":"1.2.3","type":"xsd:string"}]}`),
+		Status:       "failed",
+	}
+
+	got := deviceTaskRowToResultMap(row, nil)
+	if got["operation_type"] != "MOD" {
+		t.Fatalf("operation_type = %v, want MOD", got["operation_type"])
+	}
+	if got["command_code"] != "MOD" {
+		t.Fatalf("command_code = %v, want MOD", got["command_code"])
+	}
+}
+
 func TestBuildDeviceBoundPlanCSV(t *testing.T) {
 	taskID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	task := &MMLTask{

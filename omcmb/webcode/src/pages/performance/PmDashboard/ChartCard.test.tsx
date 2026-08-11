@@ -96,6 +96,19 @@ function NewRefSameContentHarness({ values }: { values: number[] }) {
 describe('ChartCard 渲染隔离 (#444)', () => {
   beforeEach(() => echartsRenderSpy.mockClear());
 
+  it('当前周期和周期对比曲线均与首页一致跨空桶连线', () => {
+    const chart = makeChart([1, '-', 3]);
+    chart.compareSeries = [{ key: 'dev1', name: 'dev1', values: [4, '-', 6] }];
+
+    render(wrapIntl(<ChartCard chart={chart} />));
+
+    const option = echartsRenderSpy.mock.calls[0][0] as {
+      series: Array<{ connectNulls?: boolean }>;
+    };
+    expect(option.series).toHaveLength(2);
+    expect(option.series.every((series) => series.connectNulls === true)).toBe(true);
+  });
+
   it('多设备 tooltip 设置最大高度，并提示点击图表固定后滚动查看（#24）', () => {
     const chart = makeChart([1, 2]);
     const rawNrObjectLdn = 'Type=Cell,Mode=SA,gNBID=25,NrCGI=401,CUID=1,PLMNID=00101';

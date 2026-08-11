@@ -183,6 +183,45 @@ func TestGetCoordinatesQueryUsesDeviceAlias(t *testing.T) {
 	assert.Contains(t, query, "d.deleted_at")
 }
 
+func TestApplyGeoBoundsFilter(t *testing.T) {
+	bounds := &GeoBounds{
+		MinLng: 73.5,
+		MaxLng: 135.1,
+		MinLat: 3.8,
+		MaxLat: 53.6,
+	}
+
+	query, args, err := applyGeoBoundsFilter(
+		storage.Psql.Select("d.id").From("devices d"),
+		bounds,
+	).ToSql()
+	require.NoError(t, err)
+
+	assert.Contains(t, query, "d.longitude >= $1")
+	assert.Contains(t, query, "d.longitude <= $2")
+	assert.Contains(t, query, "d.latitude >= $3")
+	assert.Contains(t, query, "d.latitude <= $4")
+	assert.Equal(t, []interface{}{73.5, 135.1, 3.8, 53.6}, args)
+}
+
+func TestApplyGeoBoundsFilter_NilKeepsQueryUnbounded(t *testing.T) {
+	query, args, err := applyGeoBoundsFilter(
+		storage.Psql.Select("d.id").From("devices d"),
+		nil,
+	).ToSql()
+	require.NoError(t, err)
+
+	assert.NotContains(t, query, "longitude")
+	assert.NotContains(t, query, "latitude")
+	assert.Empty(t, args)
+}
+
+func TestDeviceColumnsIncludeProductParameterBindings(t *testing.T) {
+	columns := deviceColumns()
+	assert.Contains(t, columns, "d.product_id")
+	assert.Contains(t, columns, "d.param_model_id")
+}
+
 // ---------------------------------------------------------------------------
 // issue #203：FindStaleDevicesByClass 的 SQL 构建断言（DB-free）
 //

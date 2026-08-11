@@ -1408,23 +1408,29 @@ func (e *UpgradeExecutor) verifyFirmware(subTask *UpgradeSubTask, fw *FirmwareVe
 }
 
 func (e *UpgradeExecutor) failSubTask(ctx context.Context, subTask *UpgradeSubTask, reason string, code FailureCode) {
+	e.failSubTaskWithLockRelease(ctx, subTask, reason, code, true)
+}
+
+func (e *UpgradeExecutor) failSubTaskWithLockRelease(ctx context.Context, subTask *UpgradeSubTask, reason string, code FailureCode, releaseLock bool) {
 	if err := e.subTaskRepo.UpdateStatusWithCode(ctx, subTask.ID, UpgradeFailed, reason, code); err != nil {
 		e.logger.Error("fail sub-task", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
 	}
-	if subTask.DeviceSN != "" {
+	if releaseLock && subTask.DeviceSN != "" {
 		e.releaseDeviceLock(ctx, subTask.DeviceSN, subTask.ID)
 	}
 	if err := e.taskRepo.IncrementCounts(ctx, subTask.TaskID, 0, 1); err != nil {
 		e.logger.Error("increment fail count", zap.Error(err))
 	}
 	finalizeTask(ctx, e.taskRepo, e.logger, subTask.TaskID)
+	e.publishUpgradeResult(ctx, event.SubjectUpgradeFailed, subTask, subTask.DeviceSN, reason)
 }
 
 // failLockedSubTask handles the DEVICE_LOCKED case by looking up the blocking task name.
 func (e *UpgradeExecutor) failLockedSubTask(ctx context.Context, subTask *UpgradeSubTask, deviceSN string) {
 	reason := "Upgrade can not be started, device can not be in multi running tasks."
 
-	e.failSubTask(ctx, subTask, reason, FailureDeviceLocked)
+	// This contender never acquired the lock, so it must not release it.
+	e.failSubTaskWithLockRelease(ctx, subTask, reason, FailureDeviceLocked, false)
 }
 
 func (e *UpgradeExecutor) completeSubTask(ctx context.Context, subTask *UpgradeSubTask, deviceSN string) {
@@ -1452,6 +1458,40 @@ func (e *UpgradeExecutor) completeSubTask(ctx context.Context, subTask *UpgradeS
 		e.logger.Error("increment success count", zap.Error(err))
 	}
 	finalizeTask(ctx, e.taskRepo, e.logger, subTask.TaskID)
+	e.publishUpgradeResult(ctx, event.SubjectUpgradeCompleted, subTask, deviceSN, "")
+}
+
+func (e *UpgradeExecutor) publishUpgradeResult(
+	ctx context.Context,
+	subject string,
+	subTask *UpgradeSubTask,
+	deviceSN string,
+	reason string,
+) {
+	if e.eventBus == nil || e.deviceRepo == nil || subTask == nil || strings.TrimSpace(deviceSN) == "" {
+		return
+	}
+	dev, err := e.deviceRepo.GetBySerialNumber(ctx, deviceSN)
+	if err != nil || dev == nil {
+		e.logger.Warn("lookup device before publishing upgrade result",
+			zap.String("subject", subject),
+			zap.String("device_sn", deviceSN),
+			zap.Error(err))
+		return
+	}
+	evt, err := event.NewEvent(subject, map[string]interface{}{
+		"sub_task_id": subTask.ID.String(),
+		"task_id":     subTask.TaskID.String(),
+		"device_id":   dev.ID.String(),
+		"reason":      reason,
+	})
+	if err != nil {
+		e.logger.Warn("build upgrade result event", zap.String("subject", subject), zap.Error(err))
+		return
+	}
+	if err := e.eventBus.Publish(ctx, subject, evt); err != nil {
+		e.logger.Warn("publish upgrade result event", zap.String("subject", subject), zap.Error(err))
+	}
 }
 
 // backfillDestVersion 在子任务完成后，用设备最新上报的固件版本回填 dest_version（qa-614 #371）。

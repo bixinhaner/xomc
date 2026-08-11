@@ -87,6 +87,35 @@ type DeviceOnlineFullSyncSubmitter interface {
 	) (*DeviceOnlineFullSyncResult, error)
 }
 
+// policyContinuation advances an explicitly executed plug-and-play policy only
+// after the existing file-management state machine reports a terminal result.
+type policyContinuation interface {
+	ContinuePolicy(context.Context, uuid.UUID, uuid.UUID, policyModule) error
+}
+
+// automaticPolicyExecutor starts the plug-and-play policy after the existing
+// first-registration full parameter synchronization has finished. Parameter
+// synchronization is only a sequencing boundary; it is not a provisioning
+// task step and its result is not copied into the plug-and-play task.
+type automaticPolicyExecutor interface {
+	ExecuteAutomaticPolicy(context.Context, uuid.UUID) error
+}
+
+type activationStateReader interface {
+	GetByDeviceID(context.Context, uuid.UUID) (*device.DeviceInfo, error)
+}
+
+type activationStateRefresher interface {
+	SyncFromParameters(context.Context, uuid.UUID, model.CarrierCode, model.Technology, string) ([]string, error)
+}
+
+const activationCheckDelay = 5 * time.Minute
+const activationCheckOrigin = "provision.activation_check"
+
+// activationCheckMaxAttempts counts the initial observation as attempt one.
+// The schedule is therefore T+5m, T+10m and T+15m, with no T+20m check.
+const activationCheckMaxAttempts = 3
+
 type ProvisioningEngine struct {
 	taskRepo           ProvisioningTaskRepository
 	deviceService      *device.DeviceService
@@ -110,9 +139,29 @@ type ProvisioningEngine struct {
 	config               appconfig.ProvisionConfig
 	paramSyncRoutingMode string
 	logger               *zap.Logger
+	policyContinuation   policyContinuation
+	automaticPolicy      automaticPolicyExecutor
+	activationState      activationStateReader
+	activationRefresher  activationStateRefresher
 
 	gpvWorkersOnce sync.Once
 	gpvWorkerChans []chan gpvWorkItem
+}
+
+func (e *ProvisioningEngine) SetPolicyContinuation(continuation policyContinuation) {
+	e.policyContinuation = continuation
+}
+
+func (e *ProvisioningEngine) SetAutomaticPolicyExecutor(executor automaticPolicyExecutor) {
+	e.automaticPolicy = executor
+}
+
+func (e *ProvisioningEngine) SetActivationStateReader(reader activationStateReader) {
+	e.activationState = reader
+}
+
+func (e *ProvisioningEngine) SetActivationStateRefresher(refresher activationStateRefresher) {
+	e.activationRefresher = refresher
 }
 
 // NewProvisioningEngine creates a new ProvisioningEngine with all dependencies.
@@ -372,6 +421,75 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 		return fmt.Errorf("subscribe registered-device parameter sync: %w", err)
 	}
 
+	if _, err := bus.QueueSubscribe(
+		event.SubjectDeviceTransferComplete,
+		"provision-xml-transfer-complete",
+		func(ctx context.Context, evt event.Event) error {
+			return e.handleXMLTransferCompleteEvent(ctx, evt)
+		},
+	); err != nil {
+		return fmt.Errorf("subscribe plug and play TransferComplete: %w", err)
+	}
+	if _, err := bus.QueueSubscribe(
+		event.SubjectParamSyncRunCompleted,
+		"provision-auto-policy-after-registered-sync",
+		e.handleRegisteredParamSyncCompleted,
+	); err != nil {
+		return fmt.Errorf("subscribe registered-device parameter sync completion: %w", err)
+	}
+	if _, err := bus.QueueSubscribe(
+		event.SubjectParamSyncRunFailed,
+		"provision-pnp-activation-sync-failed",
+		e.handleActivationSyncFailedEvent,
+	); err != nil {
+		return fmt.Errorf("subscribe plug and play activation sync failure: %w", err)
+	}
+	if _, err := bus.QueueSubscribe(
+		event.SubjectDeviceStartupStageReport,
+		"provision-xml-startup-stage",
+		func(ctx context.Context, evt event.Event) error {
+			var payload device.InformEventPayload
+			if err := evt.DecodePayload(&payload); err != nil {
+				return fmt.Errorf("decode plug and play startup stage Inform: %w", err)
+			}
+			return e.HandleStartupStageReport(ctx, payload)
+		},
+	); err != nil {
+		return fmt.Errorf("subscribe plug and play startup stage: %w", err)
+	}
+	if _, err := bus.QueueSubscribe(
+		event.SubjectDeviceStartupResultReport,
+		"provision-xml-startup-result",
+		func(ctx context.Context, evt event.Event) error {
+			var payload device.InformEventPayload
+			if err := evt.DecodePayload(&payload); err != nil {
+				return fmt.Errorf("decode plug and play startup result Inform: %w", err)
+			}
+			return e.HandleStartupResultReport(ctx, payload)
+		},
+	); err != nil {
+		return fmt.Errorf("subscribe plug and play startup result: %w", err)
+	}
+	for _, subscription := range []struct {
+		subject string
+		queue   string
+		failed  bool
+	}{
+		{event.SubjectUpgradeCompleted, "provision-delegated-upgrade-completed", false},
+		{event.SubjectUpgradeFailed, "provision-delegated-upgrade-failed", true},
+	} {
+		item := subscription
+		if _, err := bus.QueueSubscribe(item.subject, item.queue, func(ctx context.Context, evt event.Event) error {
+			var payload delegatedUpgradeEvent
+			if err := evt.DecodePayload(&payload); err != nil {
+				return fmt.Errorf("decode delegated upgrade result: %w", err)
+			}
+			return e.HandleDelegatedUpgradeResult(ctx, payload, item.failed)
+		}); err != nil {
+			return fmt.Errorf("subscribe %s: %w", item.subject, err)
+		}
+	}
+
 	// Subscribe to datamodel.file.received for Path C model upload processing.
 	if _, err := bus.QueueSubscribe(event.SubjectDataModelFileReceived, "provision-model-upload", func(ctx context.Context, evt event.Event) error {
 		return e.handleDataModelFileReceived(ctx, evt)
@@ -479,6 +597,49 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 	return nil
 }
 
+type paramSyncCompletedEvent struct {
+	DeviceID      uuid.UUID `json:"device_id"`
+	TriggerReason string    `json:"trigger_reason"`
+	SyncScope     string    `json:"sync_scope"`
+}
+
+func (e *ProvisioningEngine) handleRegisteredParamSyncCompleted(ctx context.Context, evt event.Event) error {
+	var completed paramSyncCompletedEvent
+	if err := evt.DecodePayload(&completed); err != nil {
+		return fmt.Errorf("decode registered-device parameter sync completion: %w", err)
+	}
+	if completed.DeviceID == uuid.Nil || completed.SyncScope != "full" {
+		return nil
+	}
+	if completed.TriggerReason == "device_online" {
+		return e.handleActivationSyncCompleted(ctx, completed.DeviceID)
+	}
+	if completed.TriggerReason != "device_registered" {
+		return nil
+	}
+	if e.automaticPolicy == nil {
+		e.logger.Warn("automatic plug-and-play executor is unavailable after registered-device sync",
+			zap.String("device_id", completed.DeviceID.String()))
+		return nil
+	}
+	return e.automaticPolicy.ExecuteAutomaticPolicy(ctx, completed.DeviceID)
+}
+
+// handleXMLTransferCompleteEvent only accepts the CommandKey assigned to the
+// plug-and-play Download RPC. Generic or fixed CommandKeys cannot be safely
+// correlated: the same device may concurrently report unrelated upload,
+// download, or historical TransferComplete events.
+func (e *ProvisioningEngine) handleXMLTransferCompleteEvent(ctx context.Context, evt event.Event) error {
+	var transfer tr069.TransferComplete
+	if err := evt.DecodePayload(&transfer); err != nil {
+		return fmt.Errorf("decode plug and play TransferComplete: %w", err)
+	}
+	if !strings.HasPrefix(transfer.CommandKey, "PNPXML_") {
+		return nil
+	}
+	return e.HandleXMLTransferComplete(ctx, transfer)
+}
+
 // HandleDeviceOnline 处理已存在设备从 offline 恢复 active 的事件。
 //
 // 节流：Redis token bucket key=provision:online_sync:{deviceID} TTL=60s，
@@ -499,6 +660,32 @@ func (e *ProvisioningEngine) handleDeviceOnline(
 		attribute.String("provision.device_id", evt.DeviceID.String()),
 	)
 	defer span.End()
+
+	// Compatibility for CONFIG_RESTORE tasks created before Auto Start File
+	// dispatch was introduced. Do this before the generic online-sync throttle so
+	// an in-flight legacy PnP task is never skipped by the duplicate-online guard.
+	if pt, lookupErr := e.taskRepo.GetByDeviceID(ctx, evt.DeviceID); lookupErr == nil && pt != nil && !IsTerminal(pt.Status) {
+		switch pt.CurrentStepName {
+		case "wait_device_online":
+			pt.Status = StateVerifying
+			pt.CurrentStep = 11
+			pt.CurrentStepName = "wait_activation_check"
+			pt.RetryCount = 0
+			pt.MaxRetries = activationCheckMaxAttempts
+			if updateErr := e.taskRepo.Update(ctx, pt); updateErr != nil {
+				return fmt.Errorf("schedule plug and play activation check: %w", updateErr)
+			}
+			// The reboot-complete online event is the start of the required
+			// five-minute quiet period. Do not launch the generic immediate
+			// device-online sync; the activation checker submits a fresh query
+			// only after that period has elapsed.
+			return nil
+		case "wait_activation_check", "wait_activation_sync":
+			// Duplicate online events during the observation/query window must
+			// not reset the timer or start an early parameter query.
+			return nil
+		}
+	}
 
 	if e.paramSyncRoutingMode != "durable" {
 		e.logger.Debug("device.online parameter sync blocked by routing mode",
@@ -1057,6 +1244,20 @@ func (e *ProvisioningEngine) OnTaskCompleted(ctx context.Context, t *task.Task) 
 		return
 	}
 	if t.Status == task.TaskStatusCompleted {
+		if t.Method == "Download" && strings.HasPrefix(t.CommandKey, "PNPXML_") && t.SourceID != "" {
+			if id, err := uuid.Parse(t.SourceID); err == nil {
+				if pt, getErr := e.taskRepo.GetByID(ctx, id); getErr == nil && pt != nil && !IsTerminal(pt.Status) {
+					pt.CurrentStep = 6
+					pt.CurrentStepName = "wait_transfer_complete"
+					if updateErr := e.taskRepo.Update(ctx, pt); updateErr != nil {
+						e.logger.Error("update plug and play XML task progress",
+							zap.String("provisioning_task_id", id.String()), zap.Error(updateErr))
+						return
+					}
+				}
+			}
+			return
+		}
 		e.maybeFinalizeRecoveredSyncGPV(ctx, t)
 		return
 	}
@@ -1097,6 +1298,399 @@ func (e *ProvisioningEngine) OnTaskCompleted(ctx context.Context, t *task.Task) 
 		zap.String("device_task_id", t.ID),
 		zap.String("device_sn", t.DeviceSN),
 		zap.Int("error_code", t.ErrorCode))
+}
+
+// HandleXMLTransferComplete makes the CPE report authoritative for a
+// plug-and-play XML download. DownloadResponse only acknowledges the RPC.
+func (e *ProvisioningEngine) HandleXMLTransferComplete(ctx context.Context, transfer tr069.TransferComplete) error {
+	const commandPrefix = "PNPXML_"
+	if !strings.HasPrefix(transfer.CommandKey, commandPrefix) {
+		return nil
+	}
+	taskID, err := uuid.Parse(strings.TrimPrefix(transfer.CommandKey, commandPrefix))
+	if err != nil {
+		return nil
+	}
+	pt, err := e.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get plug and play task for TransferComplete: %w", err)
+	}
+	if pt == nil || IsTerminal(pt.Status) {
+		return nil
+	}
+	if pt.CurrentStepName == "wait_device_online" ||
+		pt.CurrentStepName == "wait_activation_check" ||
+		pt.CurrentStepName == "wait_activation_sync" {
+		return nil
+	}
+
+	pt.CurrentStep = 6
+	pt.CurrentStepName = "wait_transfer_complete"
+	if transfer.FaultStruct != nil && (transfer.FaultStruct.FaultCode != 0 || strings.TrimSpace(transfer.FaultStruct.FaultString) != "") {
+		if err := e.taskRepo.Update(ctx, pt); err != nil {
+			return fmt.Errorf("update failed XML transfer progress: %w", err)
+		}
+		return e.failTask(ctx, pt, fmt.Errorf("TransferComplete fault %d: %s",
+			transfer.FaultStruct.FaultCode, transfer.FaultStruct.FaultString))
+	}
+	dev, err := e.deviceService.GetDevice(ctx, pt.DeviceID)
+	if err != nil {
+		return fmt.Errorf("get plug and play device for TransferComplete: %w", err)
+	}
+	if dev == nil {
+		return e.failTask(ctx, pt, fmt.Errorf("plug and play device %s not found after TransferComplete", pt.DeviceID))
+	}
+	if dev.Technology != model.TechNR {
+		// LTE/GSM devices do not reboot automatically after applying the legacy
+		// Auto Start File. Queue an explicit Reboot and wait for the subsequent
+		// BOOT-driven device.online event before starting the five-minute window.
+		pt.Status = StateConfiguring
+		pt.CurrentStep = 7
+		pt.CurrentStepName = "wait_device_online"
+		pt.RetryCount = 0
+		if err := e.taskRepo.Update(ctx, pt); err != nil {
+			return fmt.Errorf("prepare automatic-start reboot: %w", err)
+		}
+		noRetries := 0
+		rebootTask, err := e.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+			DeviceSN:    dev.SerialNumber,
+			Method:      MethodReboot,
+			Params:      json.RawMessage(`{}`),
+			Source:      task.TaskSourceSystem,
+			SourceID:    pt.ID.String(),
+			CommandKey:  "PNPREBOOT_" + pt.ID.String(),
+			Description: "plug and play reboot after automatic-start XML",
+			MaxRetries:  &noRetries,
+		})
+		if err != nil {
+			return e.failTask(ctx, pt, fmt.Errorf("enqueue automatic-start Reboot: %w", err))
+		}
+		if rebootTask != nil {
+			if id, parseErr := uuid.Parse(rebootTask.ID); parseErr == nil {
+				pt.DeviceTaskID = &id
+			}
+			if err := e.taskRepo.Update(ctx, pt); err != nil {
+				return fmt.Errorf("record automatic-start Reboot task: %w", err)
+			}
+		}
+		return nil
+	}
+
+	pt.CurrentStep = 6
+	pt.CurrentStepName = "wait_startup_stage"
+	if err := e.taskRepo.Update(ctx, pt); err != nil {
+		return fmt.Errorf("update successful XML transfer progress: %w", err)
+	}
+	return nil
+}
+
+// HandleStartupStageReport advances a PnP XML task from device-reported CMCC
+// stages. Connection/file-transfer stages are OMC-derived; Stage 1..3 cover
+// validation, configuration and cell activation.
+func (e *ProvisioningEngine) HandleStartupStageReport(ctx context.Context, payload device.InformEventPayload) error {
+	pt, err := e.activePlugAndPlayTask(ctx, payload)
+	if err != nil || pt == nil {
+		return err
+	}
+	stage := informParameterValue(payload.ParameterList, "Stage")
+	var step int
+	var name string
+	switch stage {
+	case "1":
+		step, name = 7, "parameter_validation"
+	case "2":
+		step, name = 8, "parameter_configuration"
+	case "3":
+		step, name = 9, "cell_activation"
+	default:
+		return fmt.Errorf("unsupported automatic-start Stage %q for device %s", stage, payload.DeviceId.SerialNumber)
+	}
+	if step < pt.CurrentStep {
+		return nil
+	}
+	pt.Status = StateConfiguring
+	pt.CurrentStep, pt.CurrentStepName = step, name
+	if err := e.taskRepo.Update(ctx, pt); err != nil {
+		return fmt.Errorf("update automatic-start stage %s: %w", stage, err)
+	}
+	return nil
+}
+
+// HandleStartupResultReport closes a PnP XML task only after the authoritative
+// device result event. Status=1 means every cell is active; Status=2 requires a
+// readable FailureCause.
+func (e *ProvisioningEngine) HandleStartupResultReport(ctx context.Context, payload device.InformEventPayload) error {
+	pt, err := e.activePlugAndPlayTask(ctx, payload)
+	if err != nil || pt == nil {
+		return err
+	}
+	status := informParameterValue(payload.ParameterList, "Status")
+	failureCause := informParameterValue(payload.ParameterList, "FailureCause")
+	pt.CurrentStep, pt.CurrentStepName = 10, "wait_startup_result"
+	if err := e.taskRepo.Update(ctx, pt); err != nil {
+		return fmt.Errorf("update automatic-start result progress: %w", err)
+	}
+	switch status {
+	case "1":
+		pt.CurrentStep, pt.CurrentStepName = 11, "verify_online"
+		if err := e.taskRepo.Update(ctx, pt); err != nil {
+			return fmt.Errorf("update automatic-start verification progress: %w", err)
+		}
+		pt.CurrentStep, pt.CurrentStepName = pt.TotalSteps, "completed"
+		if err := e.taskRepo.Update(ctx, pt); err != nil {
+			return fmt.Errorf("update successful automatic-start result: %w", err)
+		}
+		return e.completeTask(ctx, pt)
+	case "2":
+		if strings.TrimSpace(failureCause) == "" {
+			failureCause = "device reported automatic-start failure without FailureCause"
+		}
+		return e.failTask(ctx, pt, fmt.Errorf("%s", failureCause))
+	default:
+		return fmt.Errorf("unsupported automatic-start Status %q for device %s", status, payload.DeviceId.SerialNumber)
+	}
+}
+
+type delegatedUpgradeEvent struct {
+	TaskID   string `json:"task_id"`
+	DeviceID string `json:"device_id"`
+	Reason   string `json:"reason"`
+}
+
+// HandleDelegatedUpgradeResult mirrors the authoritative file-management
+// upgrade result into the PnP task row. Creating the UFTE task is only an
+// acknowledgement and must never be treated as successful completion.
+func (e *ProvisioningEngine) HandleDelegatedUpgradeResult(
+	ctx context.Context,
+	payload delegatedUpgradeEvent,
+	failed bool,
+) error {
+	delegatedTaskID, err := uuid.Parse(strings.TrimSpace(payload.TaskID))
+	if err != nil {
+		return fmt.Errorf("parse delegated upgrade task id %q: %w", payload.TaskID, err)
+	}
+	deviceID, err := uuid.Parse(strings.TrimSpace(payload.DeviceID))
+	if err != nil {
+		return fmt.Errorf("parse delegated upgrade device id %q: %w", payload.DeviceID, err)
+	}
+	pt, err := e.taskRepo.GetByDelegatedTaskID(ctx, delegatedTaskID, deviceID)
+	if err != nil {
+		return fmt.Errorf("get delegated plug and play upgrade task: %w", err)
+	}
+	if pt == nil || IsTerminal(pt.Status) {
+		return nil
+	}
+	if failed {
+		reason := strings.TrimSpace(payload.Reason)
+		if reason == "" {
+			reason = "software upgrade failed"
+		}
+		return e.failTask(ctx, pt, fmt.Errorf("%s", reason))
+	}
+	completedModule, canContinue := policyModuleFromStepName(pt.CurrentStepName)
+	if completedModule == policyModuleSelfConfig {
+		// Compatibility for non-gNB CONFIG_RESTORE tasks already in flight during
+		// deployment. New self-configuration tasks use PNPXML_ Download and start
+		// this timer in HandleXMLTransferComplete.
+		pt.Status = StateVerifying
+		pt.CurrentStep = 11
+		pt.CurrentStepName = "wait_activation_check"
+		pt.RetryCount = 0
+		pt.MaxRetries = activationCheckMaxAttempts
+		if err := e.taskRepo.Update(ctx, pt); err != nil {
+			return fmt.Errorf("start self configuration cell-state timer: %w", err)
+		}
+		return nil
+	}
+	pt.CurrentStep = pt.TotalSteps
+	pt.CurrentStepName = string(completedModule) + "_completed"
+	if err := e.taskRepo.Update(ctx, pt); err != nil {
+		return fmt.Errorf("update delegated upgrade completion progress: %w", err)
+	}
+	if err := e.completeTask(ctx, pt); err != nil {
+		return err
+	}
+	if canContinue && pt.PolicyID != nil && e.policyContinuation != nil {
+		return e.policyContinuation.ContinuePolicy(ctx, *pt.PolicyID, pt.DeviceID, completedModule)
+	}
+	return nil
+}
+
+// CheckDueActivationTasks submits a fresh full parameter query for non-gNB
+// self-configuration tasks after the five-minute post-reboot-online window.
+// The terminal sync event refreshes and evaluates device_info.cell_status.
+func (e *ProvisioningEngine) CheckDueActivationTasks(ctx context.Context, now time.Time) error {
+	if e.activationState == nil || e.deviceOnlineSync == nil {
+		return nil
+	}
+	items, err := e.taskRepo.ListActivationChecksDue(ctx, now.Add(-activationCheckDelay), 100)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		item := &items[i]
+		if item.CurrentStepName != "wait_activation_check" {
+			continue
+		}
+		dev, lookupErr := e.deviceService.GetDevice(ctx, item.DeviceID)
+		if lookupErr != nil {
+			return fmt.Errorf("lookup device for activation query: %w", lookupErr)
+		}
+		if dev == nil {
+			return fmt.Errorf("device %s not found for activation query", item.DeviceID)
+		}
+		sourceID := fmt.Sprintf("pnp-activation:%s:%d", item.ID, item.RetryCount+1)
+		if err := e.startDeviceOnlineFullSync(ctx, dev, sourceID, activationCheckOrigin); err != nil {
+			return fmt.Errorf("submit activation parameter query for device %s: %w", item.DeviceID, err)
+		}
+		item.CurrentStepName = "wait_activation_sync"
+		item.ErrorMessage = ""
+		if err := e.taskRepo.Update(ctx, item); err != nil {
+			return fmt.Errorf("record activation parameter query for device %s: %w", item.DeviceID, err)
+		}
+	}
+	return nil
+}
+
+func (e *ProvisioningEngine) handleActivationSyncCompleted(ctx context.Context, deviceID uuid.UUID) error {
+	pt, err := e.taskRepo.GetByDeviceID(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("get plug and play task after activation sync: %w", err)
+	}
+	if pt == nil || IsTerminal(pt.Status) || pt.CurrentStepName != "wait_activation_sync" {
+		return nil
+	}
+	dev, err := e.deviceService.GetDevice(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("get device after activation sync: %w", err)
+	}
+	if dev == nil {
+		return e.recordActivationCheckResult(ctx, pt, nil, fmt.Errorf("device not found after activation sync"))
+	}
+	if e.activationRefresher != nil {
+		if _, err := e.activationRefresher.SyncFromParameters(
+			ctx, dev.ID, dev.Carrier, dev.Technology, dev.ProductClass,
+		); err != nil {
+			return fmt.Errorf("refresh activation state after parameter sync: %w", err)
+		}
+	}
+	info, readErr := e.activationState.GetByDeviceID(ctx, deviceID)
+	return e.recordActivationCheckResult(ctx, pt, info, readErr)
+}
+
+func (e *ProvisioningEngine) handleActivationSyncFailedEvent(ctx context.Context, evt event.Event) error {
+	var failed paramSyncCompletedEvent
+	if err := evt.DecodePayload(&failed); err != nil {
+		return fmt.Errorf("decode activation parameter sync failure: %w", err)
+	}
+	if failed.DeviceID == uuid.Nil || failed.TriggerReason != "device_online" || failed.SyncScope != "full" {
+		return nil
+	}
+	pt, err := e.taskRepo.GetByDeviceID(ctx, failed.DeviceID)
+	if err != nil {
+		return fmt.Errorf("get plug and play task after activation sync failure: %w", err)
+	}
+	if pt == nil || IsTerminal(pt.Status) || pt.CurrentStepName != "wait_activation_sync" {
+		return nil
+	}
+	return e.recordActivationCheckResult(ctx, pt, nil, fmt.Errorf("activation parameter query failed"))
+}
+
+func (e *ProvisioningEngine) recordActivationCheckResult(
+	ctx context.Context,
+	pt *ProvisioningTask,
+	info *device.DeviceInfo,
+	readErr error,
+) error {
+	if info != nil && strings.TrimSpace(info.CellStatus) == string(device.CellStatusNormal) {
+		pt.ErrorMessage = ""
+		pt.CurrentStep = pt.TotalSteps
+		pt.CurrentStepName = "activation_verified"
+		return e.completeTask(ctx, pt)
+	}
+	checkErr := readErr
+	if checkErr == nil {
+		cellStatus := "unknown"
+		if info != nil && strings.TrimSpace(info.CellStatus) != "" {
+			cellStatus = strings.TrimSpace(info.CellStatus)
+		}
+		checkErr = fmt.Errorf("cell status is %s", cellStatus)
+	}
+	if pt.MaxRetries <= 0 {
+		pt.MaxRetries = activationCheckMaxAttempts
+	}
+	attempt := pt.RetryCount + 1
+	pt.RetryCount = attempt
+	if attempt < pt.MaxRetries {
+		pt.CurrentStepName = "wait_activation_check"
+		pt.ErrorMessage = fmt.Sprintf(
+			"activation check failed (%d/%d checks), next check in %s: %s",
+			pt.RetryCount, pt.MaxRetries, activationCheckDelay, checkErr,
+		)
+		if err := e.taskRepo.Update(ctx, pt); err != nil {
+			return fmt.Errorf("schedule activation check retry for device %s: %w", pt.DeviceID, err)
+		}
+		return nil
+	}
+	if err := e.taskRepo.Update(ctx, pt); err != nil {
+		return fmt.Errorf("record final activation check for device %s: %w", pt.DeviceID, err)
+	}
+	return e.failTask(ctx, pt, fmt.Errorf(
+		"activation check failed after %d checks: %s", pt.MaxRetries, checkErr,
+	))
+}
+
+func (e *ProvisioningEngine) activePlugAndPlayTask(ctx context.Context, payload device.InformEventPayload) (*ProvisioningTask, error) {
+	if e.deviceService == nil {
+		return nil, fmt.Errorf("device service is unavailable")
+	}
+	dev, err := e.deviceService.GetBySerialNumber(ctx, strings.TrimSpace(payload.DeviceId.SerialNumber))
+	if err != nil {
+		return nil, fmt.Errorf("get device for automatic-start event: %w", err)
+	}
+	if dev == nil {
+		return nil, nil
+	}
+
+	var pt *ProvisioningTask
+	for _, evt := range payload.EventStructs {
+		const prefix = "PNPXML_"
+		if !strings.HasPrefix(evt.CommandKey, prefix) {
+			continue
+		}
+		taskID, parseErr := uuid.Parse(strings.TrimPrefix(evt.CommandKey, prefix))
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse automatic-start command key %q: %w", evt.CommandKey, parseErr)
+		}
+		pt, err = e.taskRepo.GetByID(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("get automatic-start task by command key: %w", err)
+		}
+		if pt != nil && pt.DeviceID != dev.ID {
+			return nil, fmt.Errorf("automatic-start task %s does not belong to device %s", taskID, payload.DeviceId.SerialNumber)
+		}
+		break
+	}
+	if pt == nil {
+		pt, err = e.taskRepo.GetByDeviceID(ctx, dev.ID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get automatic-start task by device: %w", err)
+	}
+	if pt == nil || pt.PolicyID == nil || pt.XMLFileID == nil || IsTerminal(pt.Status) {
+		return nil, nil
+	}
+	return pt, nil
+}
+
+func informParameterValue(values []tr069.ParameterValueStruct, leaf string) string {
+	for _, value := range values {
+		name := strings.TrimSpace(value.Name)
+		if strings.EqualFold(name, leaf) || strings.HasSuffix(strings.ToLower(name), "."+strings.ToLower(leaf)) {
+			return strings.TrimSpace(value.Value)
+		}
+	}
+	return ""
 }
 
 func (e *ProvisioningEngine) maybeFinalizeRecoveredSyncGPV(ctx context.Context, t *task.Task) {
@@ -1441,7 +2035,7 @@ func (e *ProvisioningEngine) StartTaskReaper() {
 		timeout = 15 * time.Minute
 	}
 	interval := timeout / 2
-	if interval < 30*time.Second {
+	if interval > 30*time.Second || interval <= 0 {
 		interval = 30 * time.Second
 	}
 
@@ -1450,20 +2044,28 @@ func (e *ProvisioningEngine) StartTaskReaper() {
 		zap.Duration("interval", interval))
 
 	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for range ticker.C {
+		reap := func() {
 			ctx := context.Background()
+			if err := e.CheckDueActivationTasks(ctx, time.Now()); err != nil {
+				e.logger.Error("provisioning task reaper: check activation state", zap.Error(err))
+			}
 			n, err := e.taskRepo.FailStale(ctx, timeout)
 			if err != nil {
 				e.logger.Error("provisioning task reaper: fail stale tasks", zap.Error(err))
-				continue
+				return
 			}
 			if n > 0 {
 				e.logger.Warn("provisioning task reaper: timed out stale tasks",
 					zap.Int64("count", n),
 					zap.Duration("timeout", timeout))
 			}
+		}
+
+		reap()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			reap()
 		}
 	}()
 }

@@ -137,6 +137,7 @@ export default function PerformanceCharts() {
             height={400}
             smooth
             areaFill={false}
+            connectNulls
           />
         </Card>
       );
@@ -161,6 +162,7 @@ export default function PerformanceCharts() {
                   height={220}
                   smooth
                   areaFill
+                  connectNulls
                 />
               </Card>
             </Col>

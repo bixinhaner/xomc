@@ -46,7 +46,8 @@ export function buildAdhocChartOption(series: AdhocMetricSeries[], buckets: stri
       showSymbol: true,
       symbolSize: 4,
       data: s.values,
-      connectNulls: false,
+      // 与首页 KPI 趋势一致：缺失值不补 0，但连接相邻有效点。
+      connectNulls: true,
     })),
     tooltip: {
       trigger: 'axis' as const,

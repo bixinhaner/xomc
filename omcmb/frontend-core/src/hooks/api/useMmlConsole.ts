@@ -15,7 +15,7 @@
  *     P2-b 实施时若需 storybook 场景再补 mock。
  */
 
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { mmlApi, type UnsupportedPathInfo } from '../../services/api/mmlApi';
 import type {
@@ -222,8 +222,10 @@ export function useParseMML(): ReturnType<typeof useMutation<ParseResponse, Erro
 export function useExecuteStatements(): ReturnType<
   typeof useMutation<MMLTask, Error, ExecuteStatementsRequest>
 > {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (req: ExecuteStatementsRequest) => mmlApi.executeStatements(req),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] }),
   });
 }
 
@@ -241,8 +243,10 @@ export function useExecuteStatements(): ReturnType<
 export function useExecuteStatementsStructured(): ReturnType<
   typeof useMutation<MMLTask, Error, StructuredExecuteRequest>
 > {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (req: StructuredExecuteRequest) => mmlApi.executeStatementsStructured(req),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] }),
   });
 }
 

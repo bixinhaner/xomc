@@ -80,6 +80,17 @@ describe('getDeviceListParamSyncPaths', () => {
     expect(paths).not.toContain('Device.FAP.GPS.LockedLatitude');
   });
 
+  it('UE 数同步使用当前接入数标准路径，不查询 LTE 容量上限', () => {
+    for (const networkType of ['eNB', 'gNB', 'GSM'] as const) {
+      const paths = getDeviceListParamSyncPaths({ ...baseDevice, networkType });
+
+      expect(paths).toContain('Device.DeviceInfo.UE_Count');
+      expect(paths).not.toContain(
+        'Device.Services.FAPService.{i}.CellConfig.AccessMgmt.LTE.MaxUEsServed',
+      );
+    }
+  });
+
   it('RF 状态同步使用产品模型可翻译的标准路径', () => {
     const ltePaths = getDeviceListParamSyncPaths(baseDevice);
     const nrPaths = getDeviceListParamSyncPaths({ ...baseDevice, networkType: 'gNB' });

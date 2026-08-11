@@ -178,6 +178,39 @@ func TestBaiBNQTopLevelDeviceInfoUsesStandardPaths(t *testing.T) {
 	}
 }
 
+func TestUECountVendorPathsMapToStandardCurrentCount(t *testing.T) {
+	tests := []struct {
+		model       string
+		privatePath string
+	}{
+		{model: "BaiBNQ", privatePath: "Device.DeviceInfo.X_CUSTOM_COM_UeNumber"},
+		{model: "BSC", privatePath: "Device.DeviceInfo.X_COM_UE_Count"},
+		{model: "BTS", privatePath: "Device.DeviceInfo.X_COM_UE_Count"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", tt.model+".xml")
+			body, err := os.ReadFile(xmlPath)
+			require.NoError(t, err)
+
+			var doc xmlParameterModel
+			require.NoError(t, xml.Unmarshal(body, &doc))
+
+			for _, param := range doc.Params {
+				if param.Name != tt.privatePath {
+					continue
+				}
+				assert.Equal(t, "Device.DeviceInfo.UE_Count", param.StandardPath)
+				assert.Equal(t, "READ_ONLY", param.Access)
+				return
+			}
+
+			t.Fatalf("expected %s.xml to define UE count alias %s", tt.model, tt.privatePath)
+		})
+	}
+}
+
 func TestBaiBNQNguFallbackIsWritable(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
 	body, err := os.ReadFile(xmlPath)

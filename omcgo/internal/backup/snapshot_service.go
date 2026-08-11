@@ -423,26 +423,6 @@ func (s *SnapshotService) importOne(
 			Message:      "上传内容为空",
 		}
 	}
-	// 校验 SN 在 devices 表存在 —— 防御性，前端校验只是 UX 加速，
-	// 后端必须强校验避免脏数据进 config_snapshots。
-	if s.deviceLookup != nil {
-		dev, devErr := s.deviceLookup.GetBySerialNumber(ctx, sn)
-		if devErr == nil && dev == nil {
-			return &SnapshotImportFailure{
-				FileName:     item.FileName,
-				SerialNumber: sn,
-				ErrorCode:    ImportErrUnknownDevice,
-				Message:      fmt.Sprintf("设备 SN %q 不在系统设备列表中（不存在或已删除）", sn),
-			}
-		}
-		// devErr 非 nil 说明设施故障（pg/redis），降级为允许导入 —— 避免基础设施
-		// 短时不可用造成所有导入失败。运维通过日志感知。
-		if devErr != nil {
-			s.logger.Warn("device existence check failed; proceeding with import",
-				zap.String("sn", sn), zap.Error(devErr))
-		}
-	}
-
 	objectPath := SnapshotObjectPath(sn, ext)
 	sum := md5.Sum(item.Content)
 	md5Hex := hex.EncodeToString(sum[:])

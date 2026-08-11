@@ -395,7 +395,8 @@ func (e *RollbackExecutor) FailRollbackSubTask(ctx context.Context, subTask *Upg
 	if err := e.subTaskRepo.UpdateStatusWithCode(ctx, subTask.ID, UpgradeFailed, reason, code); err != nil {
 		e.logger.Error("fail rollback sub-task", zap.String("sub_task_id", subTask.ID.String()), zap.Error(err))
 	}
-	if subTask.DeviceSN != "" {
+	if subTask.DeviceSN != "" && code != FailureDeviceLocked {
+		// DEVICE_LOCKED means this sub-task never acquired the lock.
 		e.releaseDeviceLock(ctx, subTask.DeviceSN, subTask.ID)
 	}
 	if err := e.taskRepo.IncrementCounts(ctx, subTask.TaskID, 0, 1); err != nil {

@@ -181,6 +181,7 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 	).SetBatch(cfg.OutboxBatch).SetMetrics(streamMetrics)
 	scanner := pmstream.NewTimeoutScanner(windowRepo, finalizer, cfg.CloseGrace, logger).
 		SetGranularityGrace(cfg.DailyCloseGrace, cfg.WeeklyCloseGrace, cfg.MonthlyCloseGrace).
+		SetIncompleteDeviceHourReplay(recovery.ReplayDurableDeviceHour).
 		SetMetrics(streamMetrics)
 	rebuilder := pmstream.NewRebuilder(
 		rebuildRepo, recovery, finalizer, store, rollupOutboxRepo, logger,
@@ -323,6 +324,7 @@ func startPMExportOnly(
 		ctx, jobRepo, asyncMetrics, 30*time.Second, &queueDepthSamplerLogger{logger: logger},
 	)
 	cronStateRepo := asyncjob.NewPgCronStateRepository(w.PgPool)
+	startPMRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
 	startStationLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
 	startLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
 	logger.Info("PM KPI export worker ready", zap.String("bucket", exportBucket))

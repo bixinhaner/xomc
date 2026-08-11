@@ -17,7 +17,14 @@ function normalizeOperation(value?: string): string {
 function requestValues(row: DeviceTaskResultItem): RequestValue[] {
   const payload = row.request?.payload;
   if (!payload || typeof payload !== 'object') return [];
-  const rawValues = (payload as { values?: unknown }).values;
+  const payloadObject = payload as { values?: unknown; parameter_values?: unknown; parameters?: unknown };
+  const rawValues = payloadObject.values ?? payloadObject.parameter_values ?? payloadObject.parameters;
+  if (rawValues && typeof rawValues === 'object' && !Array.isArray(rawValues)) {
+    return Object.entries(rawValues as Record<string, unknown>).map(([name, value]) => ({
+      name,
+      value: value === null || value === undefined ? '' : String(value),
+    }));
+  }
   if (!Array.isArray(rawValues)) return [];
   return rawValues
     .map((item) => {
@@ -45,7 +52,7 @@ function parameterLeaf(path: string): string {
 
 function formatModFromRequest(row: DeviceTaskResultItem): string {
   if (normalizeOperation(row.operationType) !== 'MOD') return '';
-  if (row.request?.method !== 'SetParameterValues') return '';
+  if (row.request?.method && row.request.method !== 'SetParameterValues') return '';
   const values = requestValues(row);
   if (values.length === 0) return '';
   const parent = parameterParentPath(values[0].name);

@@ -213,6 +213,15 @@ export interface MapFilterParams {
   ueCountMax?: number;
 }
 
+/** 设备地理查询结果及其完整性信息。 */
+export interface MapGeoResponse {
+  items: DeviceGeo[];
+  total: number;
+  hasMore: boolean;
+  complete: boolean;
+  coordinateCount: number;
+}
+
 /**
  * 地图统计数据
  */

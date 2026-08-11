@@ -19,6 +19,7 @@ import (
 	"io"
 	pathpkg "path"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
@@ -142,22 +143,6 @@ func (s *LicenseService) importOne(
 			ErrorCode: ImportErrEmptyBody, Message: "上传内容为空",
 		}
 	}
-	// 强校验 SN 存在
-	if s.deviceLookup != nil {
-		dev, devErr := s.deviceLookup.GetBySerialNumber(ctx, sn)
-		if devErr == nil && dev == nil {
-			return &LicenseImportFailure{
-				FileName: item.FileName, SerialNumber: sn,
-				ErrorCode: ImportErrUnknownDevice,
-				Message:   fmt.Sprintf("设备 SN %q 不在系统设备列表中", sn),
-			}
-		}
-		if devErr != nil {
-			s.logger.Warn("device existence check failed; proceeding",
-				zap.String("sn", sn), zap.Error(devErr))
-		}
-	}
-
 	objectPath := LicenseObjectPath(sn, ext)
 	sum := md5.Sum(item.Content)
 	md5Hex := hex.EncodeToString(sum[:])
@@ -203,6 +188,13 @@ func (s *LicenseService) importOne(
 		zap.String("sn", sn), zap.String("file_name", lic.FileName),
 		zap.Int64("size", lic.FileSize), zap.String("upload_by", uploadBy),
 	)
+	// Import is successful once the preinstall is durable. If the device is
+	// already online, deliver immediately; a transient enqueue failure leaves
+	// the row pending for the next registered/online event.
+	if err := s.DispatchPendingLicense(ctx, sn); err != nil {
+		s.logger.Warn("immediate preinstalled license dispatch failed; left pending",
+			zap.String("sn", sn), zap.Error(err))
+	}
 	return nil
 }
 
@@ -349,6 +341,10 @@ func (s *LicenseService) DispatchLicenseUpgradeBySN(
 	dispatchedFiles := make(map[string]string, len(targetDeviceSNs))
 	for _, sn := range targetDeviceSNs {
 		lic := licMap[sn]
+		if s.deviceLookup == nil {
+			skipped = append(skipped, sn)
+			continue
+		}
 		dev, dErr := s.deviceLookup.GetBySerialNumber(ctx, sn)
 		if dErr != nil || dev == nil {
 			skipped = append(skipped, sn)
@@ -356,40 +352,12 @@ func (s *LicenseService) DispatchLicenseUpgradeBySN(
 				zap.String("device_sn", sn), zap.Error(dErr))
 			continue
 		}
-		downloadURL := lic.ObjectBucket + "/" + lic.ObjectPath
-		targetFileName := pathpkg.Base(lic.ObjectPath)
-		// MD5 在 license 上传入库时已算好（md5.Sum(item.Content) → device_licenses.md5），
-		// 这里读回塞进 Download params，供 CPE 下载后做完整性校验（Download 报文必填）。
-		licMD5 := ""
-		if lic.MD5 != nil {
-			licMD5 = *lic.MD5
-		}
-		params, mErr := json.Marshal(map[string]interface{}{
-			// FileType = "License File"——TR-069 私有 license 文件下行格式。
-			// 不同于配置恢复的 "10 <OUI> Configuration File"，license 这边
-			// 当前 CPE 实测使用 free-form 字符串 "License File" 即可识别。
-			// 若以后接其它厂商要求带 OUI，调整这里集中改动。
-			"file_type":        "License File",
-			"url":              downloadURL,
-			"target_file_name": targetFileName,
-			"md5":              licMD5,
-		})
-		if mErr != nil {
-			return uuid.Nil, nil, nil, fmt.Errorf("marshal Download params for %s: %w", sn, mErr)
-		}
 		// CommandKey 与 software.BuildDirectDispatchCommandKey 严格对齐：
 		// "<typeCode>_<upgradeTaskID8>_<sn>"。这样 handleTCBody.GetByCommandKey
 		// 能在 upgrade_sub_tasks 表里命中本任务的子任务并自动推进。
 		commandKey := fmt.Sprintf("LICENSE_UPGRADE_%s_%s", tidShort, dev.SerialNumber)
-		if _, qErr := s.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
-			DeviceSN:   dev.SerialNumber,
-			Method:     "Download",
-			Params:     params,
-			Source:     devtask.TaskSourceSystem,
-			SourceID:   dispatchID.String(),
-			CreatorID:  createUser,
-			CommandKey: commandKey,
-		}); qErr != nil {
+		targetFileName, qErr := s.enqueueLicenseDownload(ctx, lic, dev, createUser, dispatchID, commandKey)
+		if qErr != nil {
 			skipped = append(skipped, sn)
 			s.logger.Warn("enqueue Download device task failed (license upgrade)",
 				zap.String("device_sn", sn), zap.Error(qErr))
@@ -406,6 +374,86 @@ func (s *LicenseService) DispatchLicenseUpgradeBySN(
 		zap.Int("skipped", len(skipped)),
 	)
 	return dispatchID, dispatchedFiles, nil, nil
+}
+
+// DispatchPendingLicense sends a preinstalled license once the target device
+// exists and is online. The repository claim makes registered+online delivery
+// idempotent across app replicas.
+func (s *LicenseService) DispatchPendingLicense(ctx context.Context, sn string) error {
+	if sn == "" || s.taskSvc == nil || s.deviceLookup == nil {
+		return nil
+	}
+	lic, err := s.repo.GetBySerialNumber(ctx, sn)
+	if err != nil || lic == nil {
+		return err
+	}
+	dev, err := s.deviceLookup.GetBySerialNumber(ctx, sn)
+	if err != nil {
+		return fmt.Errorf("lookup device for preinstalled license: %w", err)
+	}
+	if dev == nil || !dev.IsOnline {
+		return nil
+	}
+	claimed, err := s.repo.ClaimAutoDispatch(ctx, sn)
+	if err != nil || !claimed {
+		return err
+	}
+	dispatchID := uuid.New()
+	shortID := strings.ReplaceAll(dispatchID.String(), "-", "")[:8]
+	commandKey := fmt.Sprintf("LICENSE_PREINSTALL_%s_%s", shortID, sn)
+	if _, err := s.enqueueLicenseDownload(ctx, lic, dev, "", dispatchID, commandKey); err != nil {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		if releaseErr := s.repo.ReleaseAutoDispatch(releaseCtx, sn); releaseErr != nil {
+			s.logger.Error("release failed preinstall dispatch claim",
+				zap.String("sn", sn), zap.Error(releaseErr))
+		}
+		return err
+	}
+	s.logger.Info("preinstalled license dispatched",
+		zap.String("sn", sn), zap.String("command_key", commandKey))
+	return nil
+}
+
+func (s *LicenseService) enqueueLicenseDownload(
+	ctx context.Context,
+	lic *DeviceLicense,
+	dev *model.Device,
+	createUser string,
+	dispatchID uuid.UUID,
+	commandKey string,
+) (string, error) {
+	targetFileName := pathpkg.Base(lic.ObjectPath)
+	licMD5 := ""
+	if lic.MD5 != nil {
+		licMD5 = *lic.MD5
+	}
+	params, err := json.Marshal(map[string]interface{}{
+		"file_type":        "License File",
+		"url":              lic.ObjectBucket + "/" + lic.ObjectPath,
+		"target_file_name": targetFileName,
+		"md5":              licMD5,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal Download params for %s: %w", dev.SerialNumber, err)
+	}
+	description := "License upgrade download"
+	if strings.HasPrefix(commandKey, "LICENSE_PREINSTALL_") {
+		description = "Auto-install preloaded license on device online"
+	}
+	if _, err := s.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
+		DeviceSN:    dev.SerialNumber,
+		Method:      "Download",
+		Params:      params,
+		Source:      devtask.TaskSourceSystem,
+		SourceID:    dispatchID.String(),
+		CreatorID:   createUser,
+		CommandKey:  commandKey,
+		Description: description,
+	}); err != nil {
+		return "", err
+	}
+	return targetFileName, nil
 }
 
 // PreviewLicenseFiles 不入队任何 device_task，只返回 sn → 预期下发的 license 文件名。

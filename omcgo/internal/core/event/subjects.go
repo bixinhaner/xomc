@@ -66,6 +66,16 @@ const (
 	// 发布者：acs/handler.go，订阅者：暂无
 	SubjectDeviceConnectionRequest = "device.inform.connection_request"
 
+	// SubjectDeviceStartupStageReport is the CMCC automatic-start stage event
+	// ("105 STARTUP STAGE REPORT"). Payload follows the regular Inform event
+	// shape and carries Stage in ParameterList.
+	SubjectDeviceStartupStageReport = "device.inform.startup_stage_report"
+
+	// SubjectDeviceStartupResultReport is the CMCC automatic-start terminal
+	// event ("106 STARTUP RESULT REPORT"). Payload carries Status and optional
+	// FailureCause in ParameterList.
+	SubjectDeviceStartupResultReport = "device.inform.startup_result_report"
+
 	// SubjectDeviceConnectionLost 是设备连接超时或主动断线时发布。
 	// 发布者：device.HeartbeatMonitor，订阅者：暂无（可用于天致告警联动）
 	SubjectDeviceConnectionLost = "device.connection.lost"

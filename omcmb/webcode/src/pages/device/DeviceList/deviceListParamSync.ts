@@ -22,7 +22,7 @@ const DEVICE_LIST_SYNC_PARAMS: DeviceListSyncParam[] = [
     ],
   },
   { key: 'upTime', scope: 'common', paths: ['Device.DeviceInfo.UpTime', 'Device.DeviceInfo.X_COM_STATION_RUN_Time'] },
-  { key: 'ueCount', scope: 'common', paths: ['Device.Services.FAPService.{i}.CellConfig.AccessMgmt.LTE.MaxUEsServed'] },
+  { key: 'ueCount', scope: 'common', paths: ['Device.DeviceInfo.UE_Count'] },
   {
     key: 'mmeStatus',
     scope: 'eNB',

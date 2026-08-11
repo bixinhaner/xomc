@@ -599,6 +599,39 @@ func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeou
 	return result, nil
 }
 
+// FailStaleWithDetails returns the exact sub-tasks transitioned by this reap.
+// Callers use these identifiers to publish the same terminal event emitted by
+// the normal executor failure path, so delegated workflows cannot remain stuck.
+func (r *PgSubTaskRepository) FailStaleWithDetails(ctx context.Context, cutoffs StaleTimeouts) ([]UpgradeSubTask, error) {
+	rpcCutoff := time.Now().Add(-cutoffs.RPCResponse)
+	onlineCutoff := time.Now().Add(-cutoffs.DeviceOnline)
+	tcCutoff := time.Now().Add(-cutoffs.TransferComplete)
+
+	returningColumns := make([]string, len(subTaskColumns))
+	for i, column := range subTaskColumns {
+		returningColumns[i] = "ust." + column
+	}
+	query := buildFailStaleSubTasksWithDetailsSQL(joinColumns(returningColumns))
+	rows, err := r.pool.Query(ctx, query, rpcCutoff, onlineCutoff, tcCutoff)
+	if err != nil {
+		return nil, fmt.Errorf("fail stale sub-tasks with details: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]UpgradeSubTask, 0)
+	for rows.Next() {
+		subTask, scanErr := scanSubTaskRow(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan stale sub-task details: %w", scanErr)
+		}
+		result = append(result, *subTask)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("fail stale sub-task detail rows: %w", err)
+	}
+	return result, nil
+}
+
 func buildFailStaleSubTasksSQL() string {
 	return `WITH failed AS (
 		UPDATE upgrade_sub_tasks ust
@@ -627,6 +660,32 @@ func buildFailStaleSubTasksSQL() string {
 		)
 		SELECT task_id, id, device_sn
 		FROM failed`
+}
+
+func buildFailStaleSubTasksWithDetailsSQL(returningColumns string) string {
+	return fmt.Sprintf(`UPDATE upgrade_sub_tasks ust
+		SET status = 'failed', error_message = CASE
+		    WHEN ut.task_type = 2 AND ust.status = 'downloading' AND ust.command_key LIKE 'rollback-enable-check-%%' THEN 'Rollback enable check timed out: no GetParameterValuesResponse from device.'
+		    WHEN ut.task_type = 2 AND ust.status = 'rebooting' THEN 'Rollback timed out: no reboot completion from device after SetParameterValues.'
+		    WHEN ust.status = 'downloading' THEN 'Download response timed out: no DownloadResponse from device.'
+		    WHEN ust.status = 'uploading'   THEN 'Timed out waiting for upload / TransferComplete from device.'
+		    WHEN ust.status = 'suspended'   THEN 'Timed out waiting for device to come online.'
+		    ELSE                                 'Timed out waiting for TransferComplete from device.'
+		END, failure_reason = CASE
+		    WHEN ut.task_type = 2 AND ust.status = 'downloading' AND ust.command_key LIKE 'rollback-enable-check-%%' THEN 'ROLLBACK_ENABLE_CHECK_TIMEOUT'
+		    WHEN ut.task_type = 2 AND ust.status = 'rebooting' THEN 'ROLLBACK_APPLY_TIMEOUT'
+		    WHEN ust.status = 'downloading' THEN 'DOWNLOAD_TIMEOUT'
+		    ELSE                                 'TASK_TIMEOUT'
+		END, started_at = COALESCE(ust.started_at, NOW()), completed_at = NOW(), updated_at = NOW()
+		FROM upgrade_tasks ut
+		WHERE ust.task_id = ut.id
+		  AND ut.status NOT IN ('pending', 'suspended')
+		  AND (
+		    (ust.status = 'downloading' AND ust.updated_at < $1)
+		    OR (ust.status = 'suspended'  AND ust.updated_at < $2)
+		    OR (ust.status NOT IN ('completed', 'failed', 'terminated', 'downloading', 'suspended') AND ust.updated_at < $3)
+		  )
+		RETURNING %s`, returningColumns)
 }
 
 // ListAll returns sub-tasks across all main tasks, JOINing upgrade_tasks for task_name.

@@ -18,7 +18,7 @@ import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '
 import GISMap from '@/components/GISMap';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
 import { useMapConfig } from '@/components/GISMap/useMapConfig';
-import { calculateCenterFromDevices, parseEnvCenter } from '@/utils/mapValidation';
+import { calculateCenterFromDevices, parseEnvCenter, resolveMapInitialView } from '@/utils/mapValidation';
 import type { GISMapRef } from '@/components/GISMap';
 import type { AntennaSector, MapDevice, DeviceGroupNode, DeviceGeo, MapViewport } from '@core/types/map';
 import { useThemeToken } from '@/hooks/useThemeToken';
@@ -120,8 +120,12 @@ export default function GISMapView() {
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
   // 是否已完成初始化（用于控制 API 请求时机）
   const [isInitialized, setIsInitialized] = useState(false);
+  // 首次设备查询完成前不使用地图 bounds，避免初始视口反向限制设备发现。
+  const [isInitialGeoQueryComplete, setIsInitialGeoQueryComplete] = useState(false);
   // 地图视口状态（用于动态加载设备）
   const [mapViewport, setMapViewport] = useState<MapViewport | null>(null);
+  // 用户操作地图后，后台设备刷新不得再次覆盖用户视图。
+  const [mapViewControlState, setMapViewControlState] = useState<'automatic' | 'user-controlled'>('automatic');
   // 搜索结果设备（用于独立显示在地图上）
   const [searchResultDevice, setSearchResultDevice] = useState<MapDevice | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<MapDevice | null>(null);
@@ -274,7 +278,7 @@ export default function GISMapView() {
 
     // 根据视口范围生成 bounds 参数
     let boundsParam: string | undefined;
-    if (mapViewport?.bounds) {
+    if (isInitialGeoQueryComplete && mapViewport?.bounds) {
       const { minLng, maxLng, minLat, maxLat } = mapViewport.bounds;
       boundsParam = `${minLng},${maxLng},${minLat},${maxLat}`;
     }
@@ -298,9 +302,23 @@ export default function GISMapView() {
       // 根据缩放级别调整页面大小
       pageSize: strategy.pageSize,
     };
-  }, [selectedGroupIds, statusFilter, isInitialized, allGroupIds, mapViewport, getLoadStrategy]);
+  }, [
+    selectedGroupIds,
+    statusFilter,
+    isInitialized,
+    isInitialGeoQueryComplete,
+    allGroupIds,
+    mapViewport,
+    getLoadStrategy,
+  ]);
 
-  const { data: devicesGeoData } = useMapDevicesGeo(filterParams);
+  const { data: devicesGeoData, isSuccess: isDevicesGeoQuerySuccessful } = useMapDevicesGeo(filterParams);
+
+  useEffect(() => {
+    if (isDevicesGeoQuerySuccessful) {
+      setIsInitialGeoQueryComplete(true);
+    }
+  }, [isDevicesGeoQuerySuccessful]);
   const {
     data: antennaSectors = EMPTY_ANTENNA_SECTORS,
   } = useDeviceAntennaSectors(selectedDevice?.id);
@@ -404,33 +422,27 @@ export default function GISMapView() {
    * 4. 代码默认值（全球默认）
    */
   const { initialCenter, initialZoom } = useMemo(() => {
-    // 第一层：优先使用 tiles.json 元数据中心点
-    if (mapConfigData.metadata && !mapConfigData.isUsingDefault && mapConfigData.status === 'success') {
-      const metadataCenter: [number, number] = [
-        mapConfigData.metadata.center.lon,
-        mapConfigData.metadata.center.lat,
-      ];
-      const metadataZoom = mapConfigData.metadata.zoom.default || 8;
-      return { initialCenter: metadataCenter, initialZoom: metadataZoom };
-    }
+    const resolvedView = resolveMapInitialView({
+      metadata: mapConfigData.metadata,
+      metadataAvailable:
+        mapConfigData.status === 'success' &&
+        !mapConfigData.isUsingDefault &&
+        mapConfigData.tilesAvailable === true,
+      devices: devicesGeoData?.complete ? (deviceItems ?? []) : [],
+      envCenter: ENV_CENTER,
+      defaultCenter: MAP_CONFIG.defaultCenter,
+      defaultZoom: MAP_CONFIG.defaultZoom,
+    });
 
-    // 第二层：如果元数据不可用但有设备数据，计算设备范围的中心点
-    if (deviceItems && deviceItems.length > 0) {
-      const result = calculateCenterFromDevices(deviceItems);
-      return { initialCenter: result.center, initialZoom: result.zoom };
-    }
-
-    // 第三层：尝试使用环境变量配置（模块级缓存，无重复解析开销）
-    if (ENV_CENTER) {
-      return { initialCenter: ENV_CENTER.center, initialZoom: ENV_CENTER.zoom };
-    }
-
-    // 第四层：使用代码默认值
-    return { initialCenter: MAP_CONFIG.defaultCenter, initialZoom: MAP_CONFIG.defaultZoom };
+    return {
+      initialCenter: resolvedView.center,
+      initialZoom: resolvedView.zoom,
+    };
   }, [
     mapConfigData.metadata,
     mapConfigData.isUsingDefault,
     mapConfigData.status,
+    mapConfigData.tilesAvailable,
     deviceItems,
   ]);
 
@@ -442,7 +454,8 @@ export default function GISMapView() {
   const hasAutoFittedRef = useRef(false);
   useEffect(() => {
     if (hasAutoFittedRef.current) return;
-    if (!mapDevices.length) return;
+    if (mapViewControlState === 'user-controlled') return;
+    if (!devicesGeoData?.complete || !mapDevices.length) return;
 
     const map = mapRef.current;
     if (!map) return;
@@ -471,7 +484,7 @@ export default function GISMapView() {
       progressive: false,
     });
     hasAutoFittedRef.current = true;
-  }, [mapDevices]);
+  }, [devicesGeoData?.complete, mapDevices, mapViewControlState]);
 
   // ========== 搜索处理 ==========
 
@@ -1135,6 +1148,9 @@ export default function GISMapView() {
           onAntennaSave={saveSector}
           antennaSaving={antennaSaving}
           onViewportChange={(viewport) => {
+            // useOLMap 已过滤程序化飞行事件，此处收到的 viewport 代表用户视图变化。
+            setMapViewControlState('user-controlled');
+
             // 视口变化防抖（默认 300ms，可通过 MAP_CONFIG.viewportDebounce 调整）
             // 需要这里防抖是因为 useOLMap 内部的 moveend 只做了 100ms 偏轻的合并，
             // 拖动过程中仍会频繁调出；再叠一层防抖避免拖动期间堆 setState。

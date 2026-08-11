@@ -3,6 +3,15 @@
 
 STORAGE_PATH_KEYS="POSTGRES_DATA_PATH TSDB_DATA_PATH REDIS_DATA_PATH REDIS_PM_DATA_PATH NATS_DATA_PATH MINIO_DATA_PATH"
 
+storage_error() {
+  local cn="$1" en="${2:-$1}"
+  if [ "${OMC_LANG:-en}" = en ]; then
+    printf '[storage][Error] %s\n' "$en" >&2
+  else
+    printf '[storage][错误] %s\n' "$cn" >&2
+  fi
+}
+
 storage_env_get() {
   local env_file="$1" key="$2"
   [ -f "$env_file" ] || return 0
@@ -81,11 +90,11 @@ storage_validate_env_paths() {
     case "$value" in
       /*) ;;
       "")
-        printf '[storage][错误] %s 未配置；请先运行 plan-resources.sh 或编辑 %s\n' "$key" "$env_file" >&2
+        storage_error "$key 未配置；请先运行 plan-resources.sh 或编辑 $env_file" "$key is not configured; run plan-resources.sh first or edit $env_file"
         failed=1
         ;;
       *)
-        printf '[storage][错误] %s 必须是绝对路径，当前值：%s\n' "$key" "$value" >&2
+        storage_error "$key 必须是绝对路径，当前值：$value" "$key must be an absolute path, current value: $value"
         failed=1
         ;;
     esac
@@ -99,11 +108,11 @@ storage_prepare_env_paths() {
   for key in $STORAGE_PATH_KEYS; do
     value="$(storage_env_get "$env_file" "$key")"
     mkdir -p "$value" || {
-      printf '[storage][错误] 无法创建 %s=%s\n' "$key" "$value" >&2
+      storage_error "无法创建 $key=$value" "Unable to create $key=$value"
       return 1
     }
     if [ ! -d "$value" ] || [ ! -w "$value" ]; then
-      printf '[storage][错误] 数据目录不可写：%s=%s\n' "$key" "$value" >&2
+      storage_error "数据目录不可写：$key=$value" "Data directory is not writable: $key=$value"
       return 1
     fi
   done
@@ -117,16 +126,16 @@ storage_prepare_configured_env_paths() {
     case "$value" in
       /*) ;;
       *)
-        printf '[storage][错误] %s 必须是绝对路径，当前值：%s\n' "$key" "$value" >&2
+        storage_error "$key 必须是绝对路径，当前值：$value" "$key must be an absolute path, current value: $value"
         return 1
         ;;
     esac
     mkdir -p "$value" || {
-      printf '[storage][错误] 无法创建 %s=%s\n' "$key" "$value" >&2
+      storage_error "无法创建 $key=$value" "Unable to create $key=$value"
       return 1
     }
     if [ ! -d "$value" ] || [ ! -w "$value" ]; then
-      printf '[storage][错误] 数据目录不可写：%s=%s\n' "$key" "$value" >&2
+      storage_error "数据目录不可写：$key=$value" "Data directory is not writable: $key=$value"
       return 1
     fi
   done

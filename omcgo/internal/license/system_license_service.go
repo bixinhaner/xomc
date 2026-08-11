@@ -9,6 +9,7 @@ package license
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,13 +32,17 @@ import (
 // 与老 License Service 的区别：无 Activate/Revoke 概念，singleton 不变量靠
 // repo 事务 + DB partial unique index 保证。
 type SystemLicenseService struct {
-	repo        SystemLicenseRepository
-	logger      *zap.Logger
-	sigVerifier *SignatureVerifier // 可选；nil 时退化为 unverified 放过
-	enforcer    Enforcer           // 可选；Update 成功后调 Invalidate 让 enforcer 重读
+	repo                  SystemLicenseRepository
+	logger                *zap.Logger
+	enforcer              Enforcer // 可选；Update 成功后调 Invalidate 让 enforcer 重读
+	legacyKeyStore        []byte
+	legacyStorePassword   string
+	legacyKeyAlias        string
+	legacyVerifyIntegrity bool
+	legacyFeatureMapping  *LegacyFeatureMapping
 }
 
-// NewSystemLicenseService 构造 service。sigVerifier 可后置 SetSignatureVerifier。
+// NewSystemLicenseService 构造旧项目 License 业务 service。
 func NewSystemLicenseService(repo SystemLicenseRepository, logger *zap.Logger) *SystemLicenseService {
 	return &SystemLicenseService{
 		repo:   repo,
@@ -45,19 +50,25 @@ func NewSystemLicenseService(repo SystemLicenseRepository, logger *zap.Logger) *
 	}
 }
 
-// SetSignatureVerifier 注入 OEM 公钥验签器。
-//
-// nil 等价于"不验签 + 全部 unverified"；strict 模式由 verifier 自身的 strict
-// 字段控制（与老 license 共用同一 verifier 实例，配置走 license.signing.strict）。
-func (s *SystemLicenseService) SetSignatureVerifier(v *SignatureVerifier) {
-	s.sigVerifier = v
-}
-
 // SetEnforcer 注入 Enforcer，让 Update 成功后能调 Invalidate 让 enforcer 立即
 // 拉新 license（避免 5min cache TTL 内 device.create 仍用旧容量裁决）。
 // nil 安全：Update 路径跳过 Invalidate。
 func (s *SystemLicenseService) SetEnforcer(e Enforcer) {
 	s.enforcer = e
+}
+
+// SetLegacyTrueLicenseConfig configures the pure-Go decoder for legacy .lic
+// files. The key store bytes are copied so callers may release their buffer.
+func (s *SystemLicenseService) SetLegacyTrueLicenseConfig(keyStore []byte, password, alias string, verifyIntegrity bool) {
+	s.legacyKeyStore = append([]byte(nil), keyStore...)
+	s.legacyStorePassword = strings.TrimRight(password, "\r\n")
+	s.legacyKeyAlias = alias
+	s.legacyVerifyIntegrity = verifyIntegrity
+}
+
+// SetLegacyFeatureMapping injects the old project's ID/Code/menu mapping.
+func (s *SystemLicenseService) SetLegacyFeatureMapping(mapping *LegacyFeatureMapping) {
+	s.legacyFeatureMapping = mapping
 }
 
 // GetCurrent 返回当前生效 license。无 license 时返业务错误 12113 +
@@ -74,6 +85,7 @@ func (s *SystemLicenseService) GetCurrent(ctx context.Context) (*SystemLicense, 
 		}
 		return nil, fmt.Errorf("get current system license: %w", err)
 	}
+	s.enrichLegacyFeatureList(&lic.FeatureList)
 	return lic, nil
 }
 
@@ -85,16 +97,87 @@ func (s *SystemLicenseService) ListHistory(
 	if err != nil {
 		return nil, fmt.Errorf("list system license history: %w", err)
 	}
+	for i := range resp.Items {
+		s.enrichLegacyFeatureList(&resp.Items[i].FeatureList)
+	}
 	return resp, nil
+}
+
+// enrichLegacyFeatureList upgrades an older persisted feature snapshot at read
+// time. Existing rows may predate the ID/Code mapping deployment; rewriting
+// them on every read would create unrelated database writes, so the response
+// receives the derived display objects without changing the stored License.
+func (s *SystemLicenseService) enrichLegacyFeatureList(featureList *FeatureList) {
+	if s.legacyFeatureMapping == nil || featureList == nil || len(*featureList) == 0 {
+		return
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(*featureList, &payload); err != nil {
+		return
+	}
+	ids := legacyPayloadStrings(payload["legacy_feature_ids"])
+	codes := legacyPayloadStrings(payload["legacy_feature_codes"])
+	if len(ids) == 0 && len(codes) == 0 {
+		return
+	}
+	payload["features"] = s.legacyFeatureMapping.Normalize(ids, codes)
+	encoded, err := json.Marshal(payload)
+	if err == nil {
+		*featureList = FeatureList(encoded)
+	}
+}
+
+func legacyPayloadStrings(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+			result = append(result, strings.TrimSpace(text))
+		}
+	}
+	return result
+}
+
+// CheckFeature evaluates one dot-separated feature path against the current license.
+func (s *SystemLicenseService) CheckFeature(ctx context.Context, path string) (bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false, commonerrors.NewBusinessError(
+			global.ErrCodeSystemLicenseInvalidFormat,
+			"feature path is required",
+			commonerrors.ErrInvalidInput,
+		)
+	}
+
+	parts := strings.Split(path, ".")
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			return false, commonerrors.NewBusinessError(
+				global.ErrCodeSystemLicenseInvalidFormat,
+				"feature path contains an empty segment",
+				commonerrors.ErrInvalidInput,
+			)
+		}
+	}
+
+	lic, err := s.GetCurrent(ctx)
+	if err != nil {
+		return false, err
+	}
+	return HasFeature(lic.FeatureList, parts...), nil
 }
 
 // UpdateRequest — POST /system-license 请求体。
 //
-// RawContent 是 OEM 签发的 license JSON 文件原文（可含 signature/signature_key_id
-// 字段，verifier 会按 canonical JSON 验签）。
+// RawContent 是旧项目 TrueLicense .lic 二进制原文的 Base64 编码。JSON 只作为
+// HTTP 请求封装，不是 License 文件格式。
 type UpdateRequest struct {
-	RawContent       string     `json:"raw_content"`
-	UploadedByUserID *uuid.UUID `json:"-"` // 由 handler 从 gin ctx 注入
+	RawContent         string     `json:"raw_content"`
+	RawContentEncoding string     `json:"raw_content_encoding"`
+	UploadedByUserID   *uuid.UUID `json:"-"` // 由 handler 从 gin ctx 注入
 }
 
 // UpdateResult — Update 的返回值。
@@ -107,9 +190,8 @@ type UpdateResult struct {
 
 // Update 上传新 license 覆盖当前：
 //
-//  1. 解析 RawContent JSON → parsedLicense
-//  2. 必填字段校验（license_id / license_type / issued_at）
-//  3. 验签（sigVerifier 注入时）→ strict 模式失败拒
+//  1. 解码旧项目 TrueLicense .lic → parsedLicense
+//  2. PBE/GZIP/XML 解密、JKS/DSA 验签和旧字段映射
 //  4. license_id 重复预检（current 表或 history 表存在 → 12110）
 //  5. 构造 SystemLicense + repo.Replace（事务 + SELECT FOR UPDATE）
 //
@@ -127,32 +209,17 @@ func (s *SystemLicenseService) Update(ctx context.Context, req UpdateRequest) (*
 		)
 	}
 
-	parsed, err := parseSystemLicenseJSON([]byte(req.RawContent))
-	if err != nil {
+	if req.RawContentEncoding != "base64" {
 		return nil, commonerrors.NewBusinessError(
 			global.ErrCodeSystemLicenseInvalidFormat,
-			err.Error(),
+			"raw_content must be a Base64-encoded legacy TrueLicense .lic file",
 			commonerrors.ErrInvalidInput,
 		)
 	}
 
-	// 签名验证（可选）。verifier=nil → unverified 放过；strict=true 时未签/失败拒。
-	sigStatus := SignatureUnverified
-	sigNote := "signature verifier not configured"
-	if s.sigVerifier != nil {
-		var sigErr error
-		sigStatus, sigNote, sigErr = s.sigVerifier.VerifyLicenseJSON([]byte(req.RawContent))
-		if sigErr != nil {
-			s.logger.Warn("system license signature rejected (strict mode)",
-				zap.String("license_id", parsed.LicenseID),
-				zap.String("signature_status", string(sigStatus)),
-				zap.String("signature_note", sigNote))
-			return nil, commonerrors.NewBusinessError(
-				global.ErrCodeLicenseSignatureVerifyFailed,
-				"system license signature verification failed: "+sigNote,
-				commonerrors.ErrInvalidInput,
-			)
-		}
+	parsed, sigStatus, sigNote, storedRawContent, err := s.parseLegacyUpdate(req.RawContent)
+	if err != nil {
+		return nil, commonerrors.NewBusinessError(global.ErrCodeSystemLicenseInvalidFormat, err.Error(), commonerrors.ErrInvalidInput)
 	}
 
 	// license_id 重复预检：current 行 + history 表都查一遍。Replace 内部
@@ -179,7 +246,7 @@ func (s *SystemLicenseService) Update(ctx context.Context, req UpdateRequest) (*
 		ExpiryDate:       parsed.ExpiryDate,
 		DevicesSupport:   parsed.DevicesSupport,
 		FeatureList:      FeatureList(parsed.FeatureList),
-		RawContent:       req.RawContent,
+		RawContent:       storedRawContent,
 		SignatureKeyID:   parsed.SignatureKeyID,
 		Signature:        parsed.Signature,
 		SignatureStatus:  sigStatus,
@@ -217,7 +284,69 @@ func (s *SystemLicenseService) Update(ctx context.Context, req UpdateRequest) (*
 	return &UpdateResult{Current: lic, Replaced: replaced}, nil
 }
 
-// parsedLicense 是 RawContent JSON 的中间结构，仅用于解析 → 业务字段提取。
+func (s *SystemLicenseService) parseLegacyUpdate(encodedRaw string) (*parsedLicense, SignatureStatus, string, string, error) {
+	if len(s.legacyKeyStore) == 0 || strings.TrimSpace(s.legacyStorePassword) == "" || strings.TrimSpace(s.legacyKeyAlias) == "" {
+		return nil, SignatureUnverified, "", "", errors.New("legacy TrueLicense keystore is not configured")
+	}
+	raw, err := base64.StdEncoding.DecodeString(encodedRaw)
+	if err != nil {
+		return nil, SignatureInvalid, "", "", fmt.Errorf("decode legacy license base64: %w", err)
+	}
+	artifact, err := DecodeLegacyTrueLicense(raw, s.legacyStorePassword)
+	if err != nil {
+		s.logger.Warn("legacy license decrypt failed",
+			zap.Int("received_size", len(raw)),
+			zap.String("received_sha256", hexSHA256(raw)),
+			zap.Error(err))
+		return nil, SignatureInvalid, "", "", fmt.Errorf(
+			"%w (received_size=%d, received_sha256=%s)",
+			err,
+			len(raw),
+			hexSHA256(raw),
+		)
+	}
+	if err := VerifyLegacyTrueLicenseSignatureWithOptions(
+		artifact,
+		s.legacyKeyStore,
+		s.legacyStorePassword,
+		s.legacyKeyAlias,
+		LegacyJKSOptions{VerifyIntegrity: s.legacyVerifyIntegrity},
+	); err != nil {
+		return nil, SignatureInvalid, "", "", err
+	}
+	claims, err := MapLegacyTrueLicense(artifact)
+	if err != nil {
+		return nil, SignatureInvalid, "", "", err
+	}
+	featurePayloadData := map[string]any{
+		"legacy_feature_ids":   claims.FeatureIDs,
+		"legacy_feature_codes": claims.FeatureCodes,
+	}
+	if s.legacyFeatureMapping != nil {
+		featurePayloadData["features"] = s.legacyFeatureMapping.Normalize(claims.FeatureIDs, claims.FeatureCodes)
+	}
+	featurePayload, err := json.Marshal(featurePayloadData)
+	if err != nil {
+		return nil, SignatureInvalid, "", "", fmt.Errorf("marshal legacy feature list: %w", err)
+	}
+	var expiryDate *time.Time
+	if claims.OMCNotAfter != nil {
+		expiryDate = claims.OMCNotAfter
+	} else {
+		expiryDate = claims.StandardNotAfter
+	}
+	return &parsedLicense{
+		LicenseID:      claims.LicenseID,
+		LicenseType:    string(claims.LicenseType),
+		IssuedAt:       claims.IssuedAt,
+		ExpiryDate:     expiryDate,
+		DevicesSupport: claims.DevicesSupport,
+		FeatureList:    featurePayload,
+		Signature:      &artifact.Signature,
+	}, SignatureVerified, "legacy TrueLicense SHA1withDSA verified", base64.StdEncoding.EncodeToString(raw), nil
+}
+
+// parsedLicense 是旧 TrueLicense 字段映射后的中间结构，仅用于业务字段提取。
 //
 // 注意：不和 SystemLicense 共用结构体——SystemLicense 有 DB 元字段（id / is_current
 // / created_at 等），不应允许 license 文件控制；这里只接受文件级字段。
@@ -232,46 +361,4 @@ type parsedLicense struct {
 	FeatureList    json.RawMessage `json:"feature_list"`
 	Signature      *string         `json:"signature,omitempty"`
 	SignatureKeyID *string         `json:"signature_key_id,omitempty"`
-}
-
-// parseSystemLicenseJSON 解析 raw bytes 并做基本字段校验。
-//
-// 必填：license_id / license_type / issued_at。
-// license_type 必须是 SystemLicenseType 枚举之一（DB CHECK 也会兜底）。
-func parseSystemLicenseJSON(raw []byte) (*parsedLicense, error) {
-	var p parsedLicense
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("license JSON parse failed: %w", err)
-	}
-	if strings.TrimSpace(p.LicenseID) == "" {
-		return nil, errors.New("license_id is required")
-	}
-	if strings.TrimSpace(p.LicenseType) == "" {
-		return nil, errors.New("license_type is required")
-	}
-	if !isValidSystemLicenseType(p.LicenseType) {
-		return nil, fmt.Errorf("license_type %q is invalid (must be Commercial/Trial/Evaluation/Internal)", p.LicenseType)
-	}
-	if p.IssuedAt.IsZero() {
-		return nil, errors.New("issued_at is required")
-	}
-	if p.DevicesSupport == nil {
-		p.DevicesSupport = DevicesSupport{}
-	}
-	if len(p.FeatureList) == 0 {
-		p.FeatureList = json.RawMessage("{}")
-	}
-	return &p, nil
-}
-
-// isValidSystemLicenseType 检查 license_type 是否在枚举内。
-func isValidSystemLicenseType(t string) bool {
-	switch SystemLicenseType(t) {
-	case SystemLicenseTypeCommercial,
-		SystemLicenseTypeTrial,
-		SystemLicenseTypeEvaluation,
-		SystemLicenseTypeInternal:
-		return true
-	}
-	return false
 }
