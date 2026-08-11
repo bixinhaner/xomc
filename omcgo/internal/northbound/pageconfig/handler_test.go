@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -241,6 +242,25 @@ func (r *fakeRepository) ListFileRuns(_ context.Context, filter RunFilter) (RunL
 		}
 		run.ArtifactContent = ""
 		out = append(out, run)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if filter.LatestPerProfile {
+		seen := make(map[string]struct{}, len(out))
+		latest := make([]FileRun, 0, len(out))
+		for _, run := range out {
+			key := strings.TrimSpace(run.ProfileCode)
+			if key == "" {
+				key = run.ID
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			latest = append(latest, run)
+		}
+		out = latest
 	}
 	total := len(out)
 	offset := normalizeOffset(filter.Offset)
@@ -1588,6 +1608,39 @@ func TestListAndDownloadRun(t *testing.T) {
 	require.Equal(t, http.StatusOK, downloadRR.Code)
 	require.Equal(t, "text/csv; charset=utf-8", downloadRR.Header().Get("Content-Type"))
 	require.Equal(t, "Serial Number\nSN0001\n", downloadRR.Body.String())
+}
+
+func TestListRunsLatestPerProfileUsesLatestSuccessfulRun(t *testing.T) {
+	repo := newFakeRepository()
+	r := setupTestRouterWithRepository(repo)
+	base := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	for _, run := range []FileRun{
+		{ID: "s1-old", ProfileKind: ProfileKindFile, ProfileCode: "S0001", GroupID: "cm", Status: RunStatusSuccess, CreatedAt: base},
+		{ID: "s1-new", ProfileKind: ProfileKindFile, ProfileCode: "S0001", GroupID: "pm", Status: RunStatusSuccess, CreatedAt: base.Add(2 * time.Hour)},
+		{ID: "s2-success", ProfileKind: ProfileKindFile, ProfileCode: "S0002", GroupID: "cm", Status: RunStatusSuccess, CreatedAt: base.Add(time.Hour)},
+		{ID: "s2-failed-newer", ProfileKind: ProfileKindFile, ProfileCode: "S0002", GroupID: "pm", Status: RunStatusFailed, CreatedAt: base.Add(3 * time.Hour)},
+		{ID: "inv-enb", ProfileKind: ProfileKindInventory, ProfileCode: "ENB", GroupID: "ENB", Status: RunStatusSuccess, CreatedAt: base.Add(4 * time.Hour)},
+	} {
+		_, err := repo.CreateFileRun(context.Background(), run)
+		require.NoError(t, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/page-config/runs?profile_kind=file&status=success&latest_per_profile=true&limit=10", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		Data struct {
+			Items []FileRun `json:"items"`
+			Total int       `json:"total"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	require.Equal(t, 2, body.Data.Total)
+	require.Len(t, body.Data.Items, 2)
+	require.Equal(t, "s1-new", body.Data.Items[0].ID)
+	require.Equal(t, "s2-success", body.Data.Items[1].ID)
 }
 
 func TestReplaceDeliveryTargetsRedactsCredential(t *testing.T) {

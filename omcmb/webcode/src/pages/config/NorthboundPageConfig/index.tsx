@@ -114,6 +114,8 @@ interface ScenarioRow {
   enabled: boolean;
   groups: FileGroup[];
   logs?: LogConfig;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 interface ScenarioPeriodRow {
@@ -156,6 +158,8 @@ interface InventoryConfigRow {
   fileName: string;
   compressionEnabled: boolean;
   compressionFormat: CompressionFormat;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 interface FileProfileEditorValues {
@@ -174,6 +178,14 @@ type DeliveryAuthMode = 'PASSWORD' | 'PRIVATE_KEY';
 type DeliveryHostKeyPolicy = 'INSECURE' | 'FINGERPRINT';
 type ReportState = 'success' | 'failed' | 'running' | 'idle';
 type ReportArtifactType = 'file' | 'message';
+type ProfileHealthState = 'normal' | 'broken' | 'pending' | 'terminated';
+
+interface ProfileHealthInfo {
+  state: ProfileHealthState;
+  label: string;
+  color: 'success' | 'error' | 'warning' | 'default';
+  detail: string;
+}
 
 interface DeliveryTargetRow {
   key: string;
@@ -3319,6 +3331,8 @@ function getPreviewDataPeriod(period: string): string {
   if (period === '15M') return '15';
   if (period === '60M') return '60';
   if (period === '24H') return '1440';
+  if (period === '7D') return '10080';
+  if (period === '1MO') return '43200';
   return period.replace(/\D/g, '') || period;
 }
 
@@ -3326,17 +3340,129 @@ function formatPeriodLabel(period: string): string {
   if (period === '15M') return '15 分钟';
   if (period === '60M') return '60 分钟';
   if (period === '24H') return '每日';
+  if (period === '7D') return '7 天';
+  if (period === '1MO') return '每月';
   return period;
 }
 
 function getPeriodMinutes(period: string): number {
+  if (period === '1MO') return 30 * 24 * 60;
+  if (period === '7D') return 7 * 24 * 60;
+  if (period === '24H') return 24 * 60;
   if (period === '60M') return 60;
   if (period === '15M') return 15;
   return Number(period.replace(/\D/g, '')) || 15;
 }
 
+function formatRecurringPeriodLabel(period: string): string {
+  if (period === '24H') return '每日';
+  if (period === '7D') return '每 7 天';
+  if (period === '1MO') return '每月';
+  return `每 ${getPeriodMinutes(period)} 分钟`;
+}
+
+function getHealthGraceMinutes(periodMinutes: number): number {
+  return Math.min(Math.max(Math.ceil(periodMinutes * 0.25), 30), 24 * 60);
+}
+
+function getHealthWindowMs(periodMinutes: number): number {
+  return (periodMinutes + getHealthGraceMinutes(periodMinutes)) * 60 * 1000;
+}
+
+function formatPeriodMinutesForHealth(minutes: number): string {
+  if (minutes >= 30 * 24 * 60) return '每月';
+  if (minutes >= 7 * 24 * 60) return '每 7 天';
+  if (minutes >= 24 * 60) return '每日';
+  if (minutes >= 60 && minutes % 60 === 0) return `每 ${minutes / 60} 小时`;
+  return `每 ${minutes} 分钟`;
+}
+
+function profileTimestampMs(...values: Array<string | undefined>): number | undefined {
+  const parsed = values
+    .map((value) => {
+      if (!value) return NaN;
+      const ms = Date.parse(value);
+      const date = new Date(ms);
+      if (!Number.isFinite(ms) || date.getUTCFullYear() < 2000) return NaN;
+      return ms;
+    })
+    .filter(Number.isFinite);
+  return parsed.length > 0 ? Math.max(...parsed) : undefined;
+}
+
+function latestSuccessRunMap(items: NorthboundFileRun[]): Record<string, NorthboundFileRun> {
+  return items.reduce<Record<string, NorthboundFileRun>>((acc, run) => {
+    const key = run.profile_code;
+    if (!key) return acc;
+    const currentMs = profileTimestampMs(run.created_at) ?? 0;
+    const previousMs = profileTimestampMs(acc[key]?.created_at) ?? 0;
+    if (!acc[key] || currentMs >= previousMs) {
+      acc[key] = run;
+    }
+    return acc;
+  }, {});
+}
+
+function scenarioMaxPeriodMinutes(row: ScenarioRow): number {
+  const periods = getScenarioPeriodRows(row).map((periodRow) => getPeriodMinutes(periodRow.period));
+  return Math.max(...periods, 15);
+}
+
+function buildProfileHealth(
+  enabled: boolean,
+  periodMinutes: number,
+  latestSuccessRun: NorthboundFileRun | undefined,
+  createdAt: string | undefined,
+  updatedAt: string | undefined,
+  nowMs = Date.now(),
+): ProfileHealthInfo {
+  if (!enabled) {
+    return {
+      state: 'terminated',
+      label: '终止',
+      color: 'default',
+      detail: '配置开关关闭，当前不会触发文件生成或上报。',
+    };
+  }
+
+  const windowMs = getHealthWindowMs(periodMinutes);
+  const graceMinutes = getHealthGraceMinutes(periodMinutes);
+  const maxWaitText = `${formatPeriodMinutesForHealth(periodMinutes)} + ${graceMinutes} 分钟容忍`;
+  const lastSuccessMs = profileTimestampMs(latestSuccessRun?.created_at, latestSuccessRun?.window_end);
+  if (lastSuccessMs) {
+    const stale = nowMs - lastSuccessMs > windowMs;
+    return {
+      state: stale ? 'broken' : 'normal',
+      label: stale ? '异常' : '正常',
+      color: stale ? 'error' : 'success',
+      detail: stale
+        ? `最近成功上报时间已超过最大周期（${maxWaitText}），请检查调度、数据源和传输目标。`
+        : `最近成功上报在最大周期内（${maxWaitText}），调度状态正常。`,
+    };
+  }
+
+  const baselineMs = profileTimestampMs(updatedAt, createdAt);
+  if (baselineMs && nowMs - baselineMs > windowMs) {
+    return {
+      state: 'broken',
+      label: '异常',
+      color: 'error',
+      detail: `启用后超过最大周期（${maxWaitText}）仍未产生成功上报记录，请检查调度、数据源和传输目标。`,
+    };
+  }
+
+  return {
+    state: 'pending',
+    label: '待上报',
+    color: 'warning',
+    detail: `配置已启用，正在等待首次成功上报；超过最大周期（${maxWaitText}）后仍无成功记录会显示异常。`,
+  };
+}
+
 function defaultCronForPeriod(period: string): string {
   if (period === '24H') return '0 1 0 * * ?';
+  if (period === '7D') return '0 0 0 ? * MON';
+  if (period === '1MO') return '0 0 0 1 * ?';
   return `0 0/${getPeriodMinutes(period)} * * * ?`;
 }
 
@@ -3363,12 +3489,14 @@ function cronFromDailyTime(time: string): string {
 }
 
 function cronFromIntervalStart(period: string, startMinute: string): string {
+  if (period === '7D') return `0 ${Number(startMinute)} 0 ? * MON`;
+  if (period === '1MO') return `0 ${Number(startMinute)} 0 1 * ?`;
   return `0 ${Number(startMinute)}/${getPeriodMinutes(period)} * * * ?`;
 }
 
 function formatScheduleLabel(period: string, cron: string): string {
   if (period === '24H') return `每日 ${getDailyTimeValue(cron)} 生成`;
-  return `每 ${getPeriodMinutes(period)} 分钟，${getIntervalStartMinuteValue(cron)} 分开始生成`;
+  return `${formatRecurringPeriodLabel(period)}，${getIntervalStartMinuteValue(cron)} 分开始生成`;
 }
 
 function normalizeApiPeriod(period: string | undefined): NorthboundPageConfigPeriod {
@@ -3501,6 +3629,8 @@ function mapApiFileProfile(profile: NorthboundFileProfile): ScenarioRow {
     enabled: profile.enabled,
     groups,
     logs: fallback?.logs,
+    createdAt: profile.created_at,
+    updatedAt: profile.updated_at,
   };
 }
 
@@ -3520,6 +3650,8 @@ function mapApiInventoryProfile(profile: NorthboundInventoryProfile): InventoryC
     fileName: profile.file_name_template || fallback?.fileName || INVENTORY_NAME,
     compressionEnabled: profile.compression_enabled,
     compressionFormat: normalizeApiCompressionFormat(profile.compression_format),
+    createdAt: profile.created_at,
+    updatedAt: profile.updated_at,
   };
 }
 
@@ -5473,6 +5605,8 @@ export default function NorthboundPageConfig() {
   const [reportEventTotal, setReportEventTotal] = useState(0);
   const [reportEventLoading, setReportEventLoading] = useState(false);
   const [reportCapabilityName, setReportCapabilityName] = useState<string>('');
+  const [fileLatestSuccessRuns, setFileLatestSuccessRuns] = useState<Record<string, NorthboundFileRun>>({});
+  const [inventoryLatestSuccessRuns, setInventoryLatestSuccessRuns] = useState<Record<string, NorthboundFileRun>>({});
   const [fileProfileRunning, setFileProfileRunning] = useState<Record<string, boolean>>({});
   const [inventoryProfileRunning, setInventoryProfileRunning] = useState<Record<string, boolean>>({});
   const [socketConfigs, setSocketConfigs] = useState<SocketAlarmConfigRow[]>(socketAlarmConfigs);
@@ -5524,6 +5658,8 @@ export default function NorthboundPageConfig() {
         socketResp,
         apiResp,
         apiUserResp,
+        fileLatestRunResp,
+        inventoryLatestRunResp,
       ] = await Promise.all([
         northboundPageConfigApi.getFileProfiles(),
         northboundPageConfigApi.getInventoryProfiles(),
@@ -5534,6 +5670,18 @@ export default function NorthboundPageConfig() {
         northboundPageConfigApi.getSocketAlarmConfigs(),
         northboundPageConfigApi.getAPIConfigs(),
         northboundPageConfigApi.getAPIUsers(),
+        northboundPageConfigApi.listRuns({
+          profile_kind: 'file',
+          status: 'success',
+          latest_per_profile: true,
+          limit: 1000,
+        }),
+        northboundPageConfigApi.listRuns({
+          profile_kind: 'inventory',
+          status: 'success',
+          latest_per_profile: true,
+          limit: 1000,
+        }),
       ]);
       const nextFileProfiles = fileProfileResp.items.map(mapApiFileProfile);
       const nextInventoryProfiles = inventoryProfileResp.items
@@ -5545,12 +5693,14 @@ export default function NorthboundPageConfig() {
 
       setFileProfiles(nextFileProfiles);
       setScenarioEnabled(scenarioEnabledMap(nextFileProfiles));
+      setFileLatestSuccessRuns(latestSuccessRunMap(fileLatestRunResp.items));
       setSelectedScenario((current) => (
         current ? nextFileProfiles.find((row) => row.code === current.code) ?? current : current
       ));
 
       setInventoryConfigs(nextInventoryProfiles);
       setInventoryEnabled(inventoryEnabledMap(nextInventoryProfiles, inventoryProfileResp.items));
+      setInventoryLatestSuccessRuns(latestSuccessRunMap(inventoryLatestRunResp.items));
       const nextInventoryFields = { ...defaultInventoryFieldRows };
       inventoryProfileResp.items.forEach((profile) => {
         const key = normalizeInventoryType(profile.code || profile.object_code);
@@ -6300,7 +6450,7 @@ export default function NorthboundPageConfig() {
     }
     return (
       <Space size={8} wrap>
-        <Tag>{`每 ${getPeriodMinutes(period)} 分钟`}</Tag>
+        <Tag>{formatRecurringPeriodLabel(period)}</Tag>
         <Select
           aria-label="起始分钟"
           value={getIntervalStartMinuteValue(cron)}
@@ -6364,12 +6514,13 @@ export default function NorthboundPageConfig() {
     setSelectedReportStatus(buildEventReportStatus(event, capabilityName));
   };
 
-  const renderStatusCell = (enabled: boolean) => {
-    const normal = Boolean(enabled);
+  const renderStatusCell = (health: ProfileHealthInfo) => {
     return (
-      <Tag data-northbound-i18n-skip="true" color={normal ? 'success' : 'default'}>
-        {nt(normal ? '正常' : '终止')}
-      </Tag>
+      <Tooltip title={nt(health.detail)}>
+        <Tag data-northbound-i18n-skip="true" color={health.color}>
+          {nt(health.label)}
+        </Tag>
+      </Tooltip>
     );
   };
 
@@ -6553,6 +6704,10 @@ export default function NorthboundPageConfig() {
     setFileProfileRunning((prev) => ({ ...prev, [row.code]: true }));
     void northboundPageConfigApi.runFileProfile(row.code, { limit: 200 })
       .then((result) => {
+        const latestSuccess = latestSuccessRunMap(result.items)[row.code];
+        if (latestSuccess) {
+          setFileLatestSuccessRuns((prev) => ({ ...prev, [row.code]: latestSuccess }));
+        }
         openReportDrawer(result.items, `${row.code} 北向文件`, null);
         void message.success(nt(`${row.code} 已生成 ${result.total} 条上报记录`));
       })
@@ -6568,6 +6723,9 @@ export default function NorthboundPageConfig() {
     setInventoryProfileRunning((prev) => ({ ...prev, [row.key]: true }));
     void northboundPageConfigApi.runInventoryProfile(row.key, { limit: 200 })
       .then((run) => {
+        if (run.status === 'success') {
+          setInventoryLatestSuccessRuns((prev) => ({ ...prev, [row.key]: run }));
+        }
         void resolveRunReportStatus(run, `${row.objectCode} Inventory`)
           .then(setSelectedReportStatus);
         void message.success(nt(`${row.objectCode} Inventory 已生成上报记录`));
@@ -6847,8 +7005,14 @@ export default function NorthboundPageConfig() {
     },
     {
       title: '状态',
-      width: 88,
-      render: (_, row) => renderStatusCell(Boolean(scenarioEnabled[row.code])),
+      width: 104,
+      render: (_, row) => renderStatusCell(buildProfileHealth(
+        Boolean(scenarioEnabled[row.code]),
+        scenarioMaxPeriodMinutes(row),
+        fileLatestSuccessRuns[row.code],
+        row.createdAt,
+        row.updatedAt,
+      )),
     },
     {
       title: '输出内容',
@@ -6986,8 +7150,14 @@ export default function NorthboundPageConfig() {
     },
     {
       title: '状态',
-      width: 88,
-      render: (_, row) => renderStatusCell(Boolean(inventoryEnabled[row.key])),
+      width: 104,
+      render: (_, row) => renderStatusCell(buildProfileHealth(
+        Boolean(inventoryEnabled[row.key]),
+        getPeriodMinutes(row.period),
+        inventoryLatestSuccessRuns[row.key],
+        row.createdAt,
+        row.updatedAt,
+      )),
     },
     {
       title: '输出内容',

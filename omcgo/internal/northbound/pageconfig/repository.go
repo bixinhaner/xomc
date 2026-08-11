@@ -247,7 +247,7 @@ ON CONFLICT (code) DO NOTHING`,
 func (r *PgRepository) ListFileProfiles(ctx context.Context) ([]FileProfile, error) {
 	rows, err := r.pool.Query(ctx, `
 SELECT code, name, vendor, scenario_name, scenario_name_en, description,
-       flags, enabled, status, groups
+       flags, enabled, status, groups, created_at, updated_at
   FROM northbound_file_profiles
  ORDER BY code ASC`)
 	if err != nil {
@@ -282,7 +282,7 @@ INSERT INTO northbound_file_profiles (
   flags, enabled, status, groups
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 RETURNING code, name, vendor, scenario_name, scenario_name_en, description,
-          flags, enabled, status, groups`,
+          flags, enabled, status, groups, created_at, updated_at`,
 		profile.Code, profile.Name, profile.Vendor, profile.ScenarioName, profile.ScenarioNameEn,
 		profile.Description, flags, profile.Enabled, profile.Status, groups)
 	created, err := scanFileProfile(row)
@@ -319,7 +319,7 @@ UPDATE northbound_file_profiles
        flags=$7, enabled=$8, status=$9, groups=$10, version=version+1
  WHERE code=$1 OR id::text=$1
  RETURNING code, name, vendor, scenario_name, scenario_name_en, description,
-           flags, enabled, status, groups`,
+           flags, enabled, status, groups, created_at, updated_at`,
 		idOrCode, merged.Name, merged.Vendor, merged.ScenarioName, merged.ScenarioNameEn, merged.Description,
 		flags, merged.Enabled, merged.Status, groups)
 	return scanFileProfile(row)
@@ -328,7 +328,8 @@ UPDATE northbound_file_profiles
 func (r *PgRepository) ListInventoryProfiles(ctx context.Context) ([]InventoryProfile, error) {
 	rows, err := r.pool.Query(ctx, `
 SELECT code, name, object_code, tech, period, start_minute, path_template,
-       file_name_template, compression_enabled, compression_format, enabled, status, config
+       file_name_template, compression_enabled, compression_format, enabled, status, config,
+       created_at, updated_at
   FROM northbound_inventory_profiles
  ORDER BY code ASC`)
 	if err != nil {
@@ -365,7 +366,8 @@ UPDATE northbound_inventory_profiles
        compression_format=$10, enabled=$11, status=$12, config=$13, version=version+1
  WHERE code=$1 OR id::text=$1
  RETURNING code, name, object_code, tech, period, start_minute, path_template,
-           file_name_template, compression_enabled, compression_format, enabled, status, config`,
+           file_name_template, compression_enabled, compression_format, enabled, status, config,
+           created_at, updated_at`,
 		idOrCode, merged.Name, merged.ObjectCode, merged.Tech, merged.Period, merged.StartMinute,
 		merged.PathTemplate, merged.FileNameTemplate, merged.CompressionEnabled, merged.CompressionFormat,
 		merged.Enabled, merged.Status, config)
@@ -414,6 +416,49 @@ func (r *PgRepository) ListFileRuns(ctx context.Context, filter RunFilter) (RunL
 	}
 	whereClause := strings.Join(where, " AND ")
 	var total int
+	if filter.LatestPerProfile {
+		if err := r.pool.QueryRow(ctx, fmt.Sprintf(`
+SELECT COUNT(*)
+  FROM (
+    SELECT DISTINCT profile_code
+      FROM northbound_file_runs
+     WHERE %s
+  ) latest`, whereClause), args...).Scan(&total); err != nil {
+			return RunListResult{}, fmt.Errorf("count latest northbound_file_runs: %w", err)
+		}
+		limit := normalizeLimit(filter.Limit)
+		offset := normalizeOffset(filter.Offset)
+		args = append(args, limit, offset)
+		query := fmt.Sprintf(`
+SELECT id, profile_kind, profile_code, group_id, domain, object_code, status,
+       window_start, window_end, artifact_path, artifact_name, artifact_content,
+       artifact_size, row_count, compression_enabled, compression_format,
+       error_message, summary, created_at, updated_at
+  FROM (
+    SELECT DISTINCT ON (profile_code)
+           id::text AS id, profile_kind, profile_code, group_id, domain, object_code, status,
+           window_start, window_end, artifact_path, artifact_name,
+           ''::text AS artifact_content, artifact_size, row_count, compression_enabled,
+           COALESCE(compression_format, '') AS compression_format,
+           error_message, summary, created_at, updated_at
+      FROM northbound_file_runs
+     WHERE %s
+     ORDER BY profile_code, created_at DESC
+  ) latest
+ ORDER BY created_at DESC
+ LIMIT $%d OFFSET $%d`, whereClause, len(args)-1, len(args))
+		rows, err := r.pool.Query(ctx, query, args...)
+		if err != nil {
+			return RunListResult{}, fmt.Errorf("query latest northbound_file_runs: %w", err)
+		}
+		defer rows.Close()
+		items, err := scanFileRuns(rows)
+		if err != nil {
+			return RunListResult{}, err
+		}
+		return RunListResult{Items: items, Total: total, Limit: limit, Offset: offset}, nil
+	}
+
 	if err := r.pool.QueryRow(ctx, fmt.Sprintf(`
 SELECT COUNT(*)
   FROM northbound_file_runs
@@ -1154,7 +1199,7 @@ func normalizeMetricPaths(metricPaths []string) []string {
 func (r *PgRepository) getFileProfile(ctx context.Context, idOrCode string) (*FileProfile, error) {
 	row := r.pool.QueryRow(ctx, `
 SELECT code, name, vendor, scenario_name, scenario_name_en, description,
-       flags, enabled, status, groups
+       flags, enabled, status, groups, created_at, updated_at
   FROM northbound_file_profiles
  WHERE code=$1 OR id::text=$1`, idOrCode)
 	return scanFileProfile(row)
@@ -1163,7 +1208,8 @@ SELECT code, name, vendor, scenario_name, scenario_name_en, description,
 func (r *PgRepository) getInventoryProfile(ctx context.Context, idOrCode string) (*InventoryProfile, error) {
 	row := r.pool.QueryRow(ctx, `
 SELECT code, name, object_code, tech, period, start_minute, path_template,
-       file_name_template, compression_enabled, compression_format, enabled, status, config
+       file_name_template, compression_enabled, compression_format, enabled, status, config,
+       created_at, updated_at
   FROM northbound_inventory_profiles
  WHERE code=$1 OR id::text=$1`, idOrCode)
 	return scanInventoryProfile(row)
@@ -1180,7 +1226,7 @@ func scanFileProfile(row scanner) (*FileProfile, error) {
 	if err := row.Scan(
 		&profile.Code, &profile.Name, &profile.Vendor, &profile.ScenarioName,
 		&profile.ScenarioNameEn, &profile.Description, &flagsRaw, &profile.Enabled,
-		&status, &groupsRaw,
+		&status, &groupsRaw, &profile.CreatedAt, &profile.UpdatedAt,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, commonerrors.ErrNotFound
@@ -1212,6 +1258,7 @@ func scanInventoryProfile(row scanner) (*InventoryProfile, error) {
 		&profile.Code, &profile.Name, &profile.ObjectCode, &profile.Tech, &period,
 		&profile.StartMinute, &profile.PathTemplate, &profile.FileNameTemplate,
 		&profile.CompressionEnabled, &compression, &profile.Enabled, &status, &configRaw,
+		&profile.CreatedAt, &profile.UpdatedAt,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, commonerrors.ErrNotFound
