@@ -63,6 +63,10 @@ func TestHTTPStatusFromError(t *testing.T) {
 		{"ErrInvalidInput", ErrInvalidInput, http.StatusBadRequest},
 		{"ErrUnauthorized", ErrUnauthorized, http.StatusUnauthorized},
 		{"ErrForbidden", ErrForbidden, http.StatusForbidden},
+		{"ErrLicenseCapacityExceeded", ErrLicenseCapacityExceeded, http.StatusForbidden},
+		{"ErrLicenseExpired", ErrLicenseExpired, http.StatusForbidden},
+		{"ErrLicenseUnavailable", ErrLicenseUnavailable, http.StatusForbidden},
+		{"ErrLicenseHardwareMismatch", ErrLicenseHardwareMismatch, http.StatusForbidden},
 		{"ErrTimeout", ErrTimeout, http.StatusGatewayTimeout},
 		{"ErrUnavailable", ErrUnavailable, http.StatusServiceUnavailable},
 		{"nil (default)", nil, http.StatusInternalServerError},
@@ -159,4 +163,58 @@ func TestAbortWithError_BusinessError_NoLeakWhenMessageIsSafe(t *testing.T) {
 	assert.Contains(t, body, `"ret":0`)
 	assert.Contains(t, body, `"biz_code":7001`)
 	assert.Contains(t, body, `"msg":"authentication failed"`)
+}
+
+// TestAbortWithError_LicenseSentinelsCarryBizCode 验证 license enforcement 的
+// sentinel error（plain errors.New，非 BusinessError）经 AbortWithError 写出时，
+// 响应体携带正确的 biz_code，让前端/监控能区分容量/过期/无 license/硬件失配，
+// 而不是都落到无编码的 403。
+func TestAbortWithError_LicenseSentinelsCarryBizCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+	}{
+		{"capacity exceeded", ErrLicenseCapacityExceeded, ErrCodeSystemLicenseCapacityExceeded},
+		{"expired", ErrLicenseExpired, ErrCodeLicenseExpired},
+		{"unavailable", ErrLicenseUnavailable, ErrCodeSystemLicenseNotActive},
+		{"hardware mismatch", ErrLicenseHardwareMismatch, ErrCodeSystemLicenseHardwareMismatch},
+		{"feature not authorized", fmt.Errorf("feature check: %w", ErrLicenseFeatureNotAuthorized), ErrCodeSystemLicenseNotActive},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/devices", nil)
+
+			AbortWithError(c, http.StatusForbidden, tc.err)
+
+			body := w.Body.String()
+			assert.Equal(t, http.StatusForbidden, w.Code, body)
+			assert.Contains(t, body, `"biz_code":`, "license sentinel should carry biz_code: %s", body)
+			assert.Contains(t, body, fmt.Sprintf(`"biz_code":%d`, tc.wantCode), body)
+		})
+	}
+}
+
+// TestAbortWithError_WrappedLicenseSentinelPreservesBizCode 验证经过 fmt.Errorf("...: %w", err)
+// 包装的 license sentinel 仍能被 errors.Is 命中并写出正确 biz_code（enforcer/device service
+// 都会 wrap 上下文）。
+func TestAbortWithError_WrappedLicenseSentinelPreservesBizCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	wrapped := fmt.Errorf("create device: %w", ErrLicenseCapacityExceeded)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/devices", nil)
+
+	AbortWithError(c, http.StatusForbidden, wrapped)
+
+	body := w.Body.String()
+	assert.Contains(t, body, fmt.Sprintf(`"biz_code":%d`, ErrCodeSystemLicenseCapacityExceeded), body)
+	assert.Contains(t, body, "create device:", "wrapped context should appear in msg")
 }

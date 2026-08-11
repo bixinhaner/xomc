@@ -200,6 +200,9 @@ const (
 	ErrCodeSystemLicenseInvalidFormat = 12111 // license JSON 解析失败 / 必填字段缺失
 	ErrCodeSystemLicenseDowngrade     = 12112 // 新 license 容量小于已用，需 force 或先降容（Step 3 enforcer 落地）
 	ErrCodeSystemLicenseNotConfigured = 12113 // GetCurrent 时 system_license 表空
+	ErrCodeSystemLicenseNotActive     = 12114 // 受 License 控制的业务在无有效 license 时被拒绝（fail-closed）
+	ErrCodeSystemLicenseHardwareMismatch = 12115 // license MAC/UUID 与本机硬件不匹配，拒绝上传
+	ErrCodeSystemLicenseCapacityExceeded = 12116 // 设备创建/注册超出 license 容量（enforcer 拒绝）
 )
 
 // Reports (13000-13999)

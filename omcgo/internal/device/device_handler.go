@@ -279,7 +279,7 @@ func (h *Handler) CreateDevice(c *gin.Context) {
 			commonerrors.AbortWithError(c, http.StatusConflict, err)
 			return
 		}
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 

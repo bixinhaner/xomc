@@ -75,6 +75,9 @@ type Container struct {
 	// ProductRegistry 模块设置（T-0098 P2-01）
 	ProductRegistry *product.Registry
 
+	// AdminService（initAdminModule 设置；misc/license 模块注入 license feature gate）
+	AdminService *admin.AdminService
+
 	// QuickSettingsRegistry 模块设置（T-0138）
 	QuickSettingsRegistry *quicksettings.Registry
 

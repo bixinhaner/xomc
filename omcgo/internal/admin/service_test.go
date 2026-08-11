@@ -293,6 +293,7 @@ func (m *mockAuditRepo) List(ctx context.Context, filter AuditLogFilter) (*model
 type mockMenuRepo struct {
 	getAllActiveFn   func(ctx context.Context) ([]Menu, error)
 	getByRoleFn      func(ctx context.Context, roleID uuid.UUID) ([]Menu, error)
+	getTreeFn        func(ctx context.Context, status *MenuStatus) ([]Menu, error)
 	getRoleMenuIDsFn func(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	setRoleMenusFn   func(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error
 }
@@ -309,7 +310,10 @@ func (m *mockMenuRepo) Update(_ context.Context, _ uuid.UUID, _ *UpdateMenuReque
 	return nil
 }
 func (m *mockMenuRepo) Delete(_ context.Context, _ []uuid.UUID) error { return nil }
-func (m *mockMenuRepo) GetTree(_ context.Context, _ *MenuStatus) ([]Menu, error) {
+func (m *mockMenuRepo) GetTree(ctx context.Context, status *MenuStatus) ([]Menu, error) {
+	if m.getTreeFn != nil {
+		return m.getTreeFn(ctx, status)
+	}
 	return nil, nil
 }
 func (m *mockMenuRepo) GetByRole(ctx context.Context, roleID uuid.UUID) ([]Menu, error) {
@@ -1708,4 +1712,156 @@ func TestRegisterSecurityValidators_DefaultPasswd(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	})
+}
+
+// stubFeatureGate implements LicenseFeatureGate for menu filter tests.
+type stubFeatureGate struct {
+	authorized map[string]bool
+	err        error // FilterAuthorized error
+	active     bool
+	activeErr  error // HasActiveLicense error
+}
+
+func (s stubFeatureGate) FilterAuthorized(_ context.Context, codes []string) ([]string, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	var out []string
+	for _, c := range codes {
+		if s.authorized[c] {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (s stubFeatureGate) HasActiveLicense(_ context.Context) (bool, error) {
+	if s.activeErr != nil {
+		return false, s.activeErr
+	}
+	return s.active, nil
+}
+
+func TestApplyLicenseFeatureGate(t *testing.T) {
+	svc := NewAdminService(nil, nil, nil, nil, nil, zap.NewNop())
+	svc.featureGate = stubFeatureGate{authorized: map[string]bool{"CODE_KEEP": true}}
+
+	deviceDir := uuid.New()
+	keepMenu := uuid.New()
+	dropMenu := uuid.New()
+
+	menus := []Menu{
+		{ID: deviceDir, Type: MenuTypeDirectory, PermissionKey: "device"},
+		{ID: keepMenu, Type: MenuTypeMenu, PermissionKey: "device:list", ParentID: &deviceDir, FeatureCodes: []string{"CODE_KEEP"}},
+		{ID: dropMenu, Type: MenuTypeMenu, PermissionKey: "alarm:current", ParentID: &deviceDir, FeatureCodes: []string{"CODE_DROP"}},
+		{ID: uuid.New(), Type: MenuTypeButton, PermissionKey: "alarm:current:query", ParentID: &dropMenu},
+	}
+
+	got := svc.applyLicenseFeatureGate(context.Background(), menus)
+	permKeys := make(map[string]bool)
+	for _, m := range got {
+		permKeys[m.PermissionKey] = true
+	}
+	assert.True(t, permKeys["device"], "directory (no feature_code) kept")
+	assert.True(t, permKeys["device:list"], "authorized menu kept (CODE_KEEP)")
+	assert.False(t, permKeys["alarm:current"], "unauthorized menu dropped (CODE_DROP)")
+	assert.False(t, permKeys["alarm:current:query"], "orphan button under dropped menu removed")
+}
+
+func TestApplyLicenseFeatureGate_FailOpen(t *testing.T) {
+	svc := NewAdminService(nil, nil, nil, nil, nil, zap.NewNop())
+	svc.featureGate = stubFeatureGate{err: fmt.Errorf("db down")}
+	menus := []Menu{{ID: uuid.New(), Type: MenuTypeMenu, PermissionKey: "x", FeatureCodes: []string{"CODE_X"}}}
+	got := svc.applyLicenseFeatureGate(context.Background(), menus)
+	assert.Len(t, got, 1, "gate error → fail-open, menu not hidden")
+}
+
+func TestFilterLicenseOnlyMenus(t *testing.T) {
+	menus := []Menu{
+		{ID: uuid.New(), Type: MenuTypeMenu, PermissionKey: "system_license", RoutePath: "/license"},
+		{ID: uuid.New(), Type: MenuTypeDirectory, PermissionKey: "device", RoutePath: ""},
+		{ID: uuid.New(), Type: MenuTypeMenu, PermissionKey: "device:list", RoutePath: "/device/list"},
+		{ID: uuid.New(), Type: MenuTypeMenu, PermissionKey: "system:user", RoutePath: "/system/users"},
+	}
+	got := filterLicenseOnlyMenus(menus)
+	assert.Len(t, got, 1, "no license → only /license menu kept")
+	assert.Equal(t, "/license", got[0].RoutePath)
+}
+
+// TestEnsureLicenseMenuVisible_PresentWhenAlreadyInSet 验证 menus 已含 /license 时直接返回。
+func TestEnsureLicenseMenuVisible_PresentWhenAlreadyInSet(t *testing.T) {
+	svc := NewAdminService(nil, nil, nil, nil, nil, zap.NewNop())
+	svc.menuRepo = &mockMenuRepo{}
+	lic := Menu{ID: uuid.New(), Type: MenuTypeMenu, PermissionKey: "system_license", RoutePath: "/license"}
+	menus := []Menu{
+		{ID: uuid.New(), Type: MenuTypeMenu, PermissionKey: "device:list", RoutePath: "/device/list"},
+		lic,
+	}
+	got := svc.ensureLicenseMenuVisible(context.Background(), menus)
+	assert.Len(t, got, len(menus), "no extra append when /license already present")
+}
+
+// TestEnsureLicenseMenuVisible_AppendedWhenMissing 验证 /license 缺失时从 GetTree 全集补回
+// （模拟非 builtIn 用户 role_menus 未分配 /license 的场景）。
+func TestEnsureLicenseMenuVisible_AppendedWhenMissing(t *testing.T) {
+	licenseMenu := Menu{
+		ID: uuid.New(), Type: MenuTypeMenu, PermissionKey: "system_license", RoutePath: "/license",
+		Status: MenuStatusNormal, ShowStatus: MenuShow,
+	}
+	repo := &mockMenuRepo{
+		getTreeFn: func(_ context.Context, _ *MenuStatus) ([]Menu, error) {
+			return []Menu{
+				licenseMenu,
+				{ID: uuid.New(), Type: MenuTypeDirectory, PermissionKey: "device"},
+				// hidden /license 副本不应被补回（show_status=hide）
+				{ID: uuid.New(), Type: MenuTypeMenu, RoutePath: "/license/hidden", ShowStatus: MenuHide, Status: MenuStatusNormal},
+			}, nil
+		},
+	}
+	svc := NewAdminService(nil, nil, nil, nil, nil, zap.NewNop())
+	svc.menuRepo = repo
+
+	menus := []Menu{
+		{ID: uuid.New(), Type: MenuTypeMenu, PermissionKey: "device:list", RoutePath: "/device/list"},
+	}
+	got := svc.ensureLicenseMenuVisible(context.Background(), menus)
+
+	permKeys := make(map[string]bool)
+	for _, m := range got {
+		permKeys[m.PermissionKey] = true
+	}
+	assert.True(t, permKeys["system_license"], "/license must be appended when missing")
+	assert.True(t, permKeys["device:list"], "existing menus preserved")
+}
+
+// TestApplyLicenseMenuGate_WithLicenseKeepsLicenseMenu 验证有 license 时（applyLicenseFeatureGate 后）
+// /license 仍可见，覆盖 bug：source=admin 用户走 GetByRole，role_menus 未分配 /license 导致菜单丢失。
+func TestApplyLicenseMenuGate_WithLicenseKeepsLicenseMenu(t *testing.T) {
+	licenseMenu := Menu{
+		ID: uuid.New(), Type: MenuTypeMenu, PermissionKey: "system_license", RoutePath: "/license",
+		Status: MenuStatusNormal, ShowStatus: MenuShow,
+	}
+	repo := &mockMenuRepo{
+		getTreeFn: func(_ context.Context, _ *MenuStatus) ([]Menu, error) {
+			return []Menu{licenseMenu}, nil
+		},
+	}
+	svc := NewAdminService(nil, nil, nil, nil, nil, zap.NewNop())
+	svc.menuRepo = repo
+	// 有 active license；授权 CODE_KEEP。
+	svc.featureGate = stubFeatureGate{active: true, authorized: map[string]bool{"CODE_KEEP": true}}
+
+	// 模拟 GetByRole 结果：不含 /license（role_menus 未分配）。
+	menus := []Menu{
+		{ID: uuid.New(), Type: MenuTypeMenu, PermissionKey: "device:list", FeatureCodes: []string{"CODE_KEEP"}},
+	}
+	got := svc.applyLicenseMenuGate(context.Background(), menus)
+
+	hasLicense := false
+	for _, m := range got {
+		if m.PermissionKey == "system_license" {
+			hasLicense = true
+		}
+	}
+	assert.True(t, hasLicense, "/license must remain visible when license active even if role_menus lacks it")
 }

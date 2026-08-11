@@ -64,6 +64,12 @@ export interface SystemLicense {
   isCurrent: boolean;
   createdAt: string;
   updatedAt: string;
+  /** 运行时计算（非 DB 列）：日期过期 OR 累计超限。 */
+  isExpired: boolean;
+  /** 累计已使用时长（小时，含未推进增量）；无 time_limit 时为 null。 */
+  cumulativeUsedHours?: number | null;
+  /** 累计上限（小时）；无 time_limit 时为 0。 */
+  cumulativeLimitHours?: number;
 }
 
 /** 历史 license（每次 Update 保留的归档）。 */
@@ -120,6 +126,9 @@ interface BackendSystemLicense {
   is_current: boolean;
   created_at: string;
   updated_at: string;
+  is_expired: boolean;
+  cumulative_used_hours?: number | null;
+  cumulative_limit_hours?: number;
 }
 
 interface BackendSystemLicenseFeature {
@@ -222,6 +231,9 @@ function mapSystemLicense(b: BackendSystemLicense): SystemLicense {
     isCurrent: b.is_current,
     createdAt: b.created_at,
     updatedAt: b.updated_at,
+    isExpired: b.is_expired,
+    cumulativeUsedHours: b.cumulative_used_hours ?? null,
+    cumulativeLimitHours: b.cumulative_limit_hours ?? 0,
   };
 }
 

@@ -14,9 +14,17 @@ interface UserStoreShape {
 }
 
 let userStoreState: UserStoreShape;
+let systemLicenseState: {
+  data: { id: string } | undefined;
+  isLoading: boolean;
+  error: unknown;
+};
 
 vi.mock('@core/store/userStore', () => ({
   useUserStore: () => userStoreState,
+}));
+vi.mock('@core/hooks/api/useSystemLicense', () => ({
+  useSystemLicense: () => systemLicenseState,
 }));
 
 import PrivateRoute from '../PrivateRoute';
@@ -35,6 +43,14 @@ function renderRoute(initialPath = '/protected', requireSuperAdmin = false) {
         />
         <Route path="/login" element={<div data-testid="login">login page</div>} />
         <Route path="/403" element={<div data-testid="forbidden">forbidden</div>} />
+        <Route
+          path="/license"
+          element={
+            <PrivateRoute>
+              <div data-testid="license">license page</div>
+            </PrivateRoute>
+          }
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -46,6 +62,11 @@ beforeEach(() => {
     accessToken: null,
     refreshToken: null,
     isTokenExpired: () => false,
+  };
+  systemLicenseState = {
+    data: { id: 'license-1' },
+    isLoading: false,
+    error: null,
   };
 });
 
@@ -129,5 +150,43 @@ describe('PrivateRoute', () => {
 
     expect(screen.getByTestId('protected')).toBeInTheDocument();
     expect(screen.queryByTestId('forbidden')).not.toBeInTheDocument();
+  });
+
+  it('redirects non-license routes to license when no license is configured', () => {
+    userStoreState = {
+      isAuthenticated: true,
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      isTokenExpired: () => false,
+      currentUser: { role: 'admin', isSuperAdmin: true },
+    };
+    systemLicenseState = {
+      data: undefined,
+      isLoading: false,
+      error: { bizCode: 12113 },
+    };
+
+    renderRoute();
+
+    expect(screen.getByTestId('license')).toBeInTheDocument();
+    expect(screen.queryByTestId('protected')).not.toBeInTheDocument();
+  });
+
+  it('keeps the license route available when no license is configured', () => {
+    userStoreState = {
+      isAuthenticated: true,
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      isTokenExpired: () => false,
+    };
+    systemLicenseState = {
+      data: undefined,
+      isLoading: false,
+      error: { bizCode: 12113 },
+    };
+
+    renderRoute('/license');
+
+    expect(screen.getByTestId('license')).toBeInTheDocument();
   });
 });

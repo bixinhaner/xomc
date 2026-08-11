@@ -89,6 +89,13 @@ type SystemLicense struct {
 	IsCurrent         bool                         `json:"is_current"                  db:"is_current"`
 	CreatedAt         time.Time                    `json:"created_at"                  db:"created_at"`
 	UpdatedAt         time.Time                    `json:"updated_at"                  db:"updated_at"`
+
+	// 以下为 compute-on-read 的运行时状态（非 DB 列），由 SystemLicenseService
+	// GetCurrent 填充。CumulativeUsedHours 含未推进的增量（now - last_visited）
+	// 以保证页面展示与 enforcement 裁决一致。
+	CumulativeUsedHours  *float64 `json:"cumulative_used_hours,omitempty" db:"-"`
+	CumulativeLimitHours int      `json:"cumulative_limit_hours"         db:"-"`
+	IsExpired            bool     `json:"is_expired"                     db:"-"`
 }
 
 // SystemLicenseHistory 对应 system_license_history 表行——每次 Update 把

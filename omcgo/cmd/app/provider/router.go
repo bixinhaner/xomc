@@ -21,6 +21,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/license"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrtask "github.com/omcgo/omcgo/internal/mr/task"
 	"github.com/omcgo/omcgo/internal/pm"
@@ -417,41 +418,52 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		return g
 	}
 
+	// P7-B：featGroup 在 permGroup 基础上叠加 license feature 准入控制。
+	// 前端隐藏菜单 ≠ 后端拦截（改 URL 直调 API 可能绕过）；本中间件在后端补齐。
+	// OR 语义：传入多个 feature path 时任一授权即放行（与 menus.feature_code 一致）。
+	featGroup := func(permRes string, paths ...string) *gin.RouterGroup {
+		g := permGroup(permRes)
+		if c.miscDeps.systemLicenseSvc != nil && len(paths) > 0 {
+			g.Use(license.RequireFeature(c.miscDeps.systemLicenseSvc, paths...))
+		}
+		return g
+	}
+
 	// ----- Device routes → resource "devices" -----
 	dh := c.deviceHandlerDeps
 	deviceHandler := device.NewHandler(c.DeviceService)
 	deviceHandler.SetPermissionService(c.PermService)
 	locationSyncRepo := device.NewPgLocationObservationRepository(c.PgPool)
 	deviceHandler.SetLocationSyncService(device.NewLocationSyncService(locationSyncRepo))
-	deviceHandler.RegisterRoutes(permGroup("devices"))
+	deviceHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	if c.GeofenceHandler != nil {
-		c.GeofenceHandler.RegisterRoutes(permGroup("devices"))
+		c.GeofenceHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	}
 	if c.miscDeps.paramSyncHandler != nil {
-		c.miscDeps.paramSyncHandler.RegisterRoutes(permGroup("devices"))
+		c.miscDeps.paramSyncHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	}
 
 	deviceInfoHandler := device.NewDeviceInfoHandler(c.DeviceService)
 	deviceInfoHandler.SetPermissionService(c.PermService)
-	deviceInfoHandler.RegisterRoutes(permGroup("devices"))
+	deviceInfoHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	regHandler := device.NewRegistrationHandler(dh.regService)
 	regHandler.SetPermissionService(c.PermService) // #64 设备组可见性数据权限
-	regHandler.RegisterRoutes(permGroup("devices"))
+	regHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	columnConfigRepo := device.NewPgColumnConfigRepository(c.PgPool)
 	columnConfigHandler := device.NewColumnConfigHandler(columnConfigRepo)
-	columnConfigHandler.RegisterRoutes(permGroup("devices"))
+	columnConfigHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	exportService := device.NewExportService(c.DeviceInfoRepo, c.Logger)
 	exportHandler := device.NewExportHandler(exportService)
 	exportHandler.SetPermissionService(c.PermService)
-	exportHandler.RegisterRoutes(permGroup("devices"))
+	exportHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	// T-0098 P5-01：dmRegistry 已删除，直接注入 ParamRegistry / ProductRegistry。
 	paramTreeHandler := device.NewParameterTreeHandler(c.DeviceService, c.ParamRepo, c.ParamRegistry, c.ProductRegistry, c.Logger)
 	paramTreeHandler.SetPermissionService(c.PermService)
-	paramTreeHandler.RegisterRoutes(permGroup("devices"))
+	paramTreeHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	// T-0179 + T-0183: devsweep HTTP 端点已下线 — omcctl device sweep-paths
 	// 改成进程内直连 PG/Redis,在 CLI 进程内调用 devsweep.Service + Applier。
@@ -465,7 +477,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 			c.ProductRegistry,
 			c.ProductRepo,
 		)
-		quickSettingsHandler.RegisterRoutes(permGroup("devices"))
+		quickSettingsHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	}
 
 	// T-0098-P5-01：旧 /api/v1/datamodels CRUD 已下线，治理走 /api/v1/products + /api/v1/param-models（super_admin）。
@@ -476,7 +488,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	templateHandler := template.NewHandler(ch.templateRepo)
 	// T-0120: 接 provisioning engine 给 POST /:id/dispatch 提供 Path A 显式下发能力。
 	templateHandler.SetDispatcher(md.provisionEngine)
-	templateHandler.RegisterRoutes(permGroup("config"))
+	templateHandler.RegisterRoutes(featGroup("config", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	// ----- Provisioning routes → resource "config" -----
 	provisionHandler := provision.NewHandler(md.provisionRepo, md.provisionEngine)
@@ -514,14 +526,14 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 			md.provisionEngine.SetAutomaticPolicyExecutor(provisionHandler)
 		}
 	}
-	provisionHandler.RegisterRoutes(permGroup("config"))
+	provisionHandler.RegisterRoutes(featGroup("config", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	provisionHandler.RegisterPublicRoutes(publicV1)
 
 	// ----- Topology routes → resource "devices" -----
 	th := c.topologyHandlerDeps
 	topologyHandler := topology.NewHandler(th.groupRepo, th.groupService, th.siteRepo, th.topoNodeRepo, th.topoEdgeRepo, th.syncSvc, th.logger)
 	topologyHandler.SetPermissionService(c.PermService)
-	topologyHandler.RegisterRoutes(permGroup("devices"))
+	topologyHandler.RegisterRoutes(featGroup("devices", "Topo"))
 
 	// ----- PM routes → resource "pm" -----
 	ph := c.pmHandlerDeps
@@ -534,25 +546,25 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	if c.ProductRegistry != nil {
 		pmHandler.SetProductPatternResolver(c.ProductRegistry) // #602 按产品名称下拉过滤
 	}
-	pmHandler.RegisterRoutes(permGroup("pm"))
+	pmHandler.RegisterRoutes(featGroup("pm", "Performance.View"))
 	// T-0164-P7 / G7：adhoc 自定义聚合任务 REST 路由（同 pm 权限组）
 	if ph.pmAdhocHandler != nil {
-		ph.pmAdhocHandler.RegisterRoutes(permGroup("pm"))
+		ph.pmAdhocHandler.RegisterRoutes(featGroup("pm", "Performance.View"))
 	}
 	// T-0174 阶段 1：指标查询模板 REST 路由（5 CRUD，同 pm 权限组）
 	if ph.pmQueryTemplateHandler != nil {
-		ph.pmQueryTemplateHandler.RegisterRoutes(permGroup("pm"))
+		ph.pmQueryTemplateHandler.RegisterRoutes(featGroup("pm", "Performance.View"))
 	}
 	// KPI-EXPORT T1：KPI 导出 REST 路由（建任务/列任务/列文件/下载/删除，同 pm 权限组）
 	if ph.pmExportHandler != nil {
-		ph.pmExportHandler.RegisterRoutes(permGroup("pm"))
+		ph.pmExportHandler.RegisterRoutes(featGroup("pm", "Performance.View"))
 	}
 
 	// ----- Alarm routes → resource "alarms" -----
 	ah := c.alarmHandlerDeps
 	alarmHandler := alarm.NewHandler(c.AlarmEngine, ah.alarmPgStore, ah.alarmSyncService, c.Logger)
 	alarmHandler.SetPermissionService(c.PermService) // #64 设备组可见性数据权限
-	alarmHandler.RegisterRoutes(permGroup("alarms"))
+	alarmHandler.RegisterRoutes(featGroup("alarms", "Alarm.View"))
 
 	// T-0098-P5-06：旧 /alarms/alarm-libraries 路由已下线，治理走 /alarms/alarm-definitions（super_admin）。
 
@@ -591,15 +603,15 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Alarm filter rule routes → resource "alarms" -----
 	alarmFilterHandler := alarm.NewFilterHandler(ah.alarmFilterRuleRepo, c.Logger)
-	alarmFilterHandler.RegisterRoutes(permGroup("alarms").Group("/alarms/alarm-filters"))
+	alarmFilterHandler.RegisterRoutes(featGroup("alarms", "Alarm.View").Group("/alarms/alarm-filters"))
 
 	// ----- KPI threshold routes → resource "pm" -----
 	thresholdHandler := pm.NewThresholdHandler(md.thresholdRepo, c.Logger)
-	pmGroup := permGroup("pm").Group("/pm")
+	pmGroup := featGroup("pm", "Performance.View").Group("/pm")
 	thresholdHandler.RegisterRoutes(pmGroup)
 
 	// ----- Indicator management routes → resource "pm" -----
-	ph.indicatorHandler.RegisterRoutes(permGroup("pm"))
+	ph.indicatorHandler.RegisterRoutes(featGroup("pm", "Performance.View"))
 
 	// ----- T-0098 P3-03: Indicator REST routes → super_admin only -----
 	if ph.indicatorRESTHandler != nil {
@@ -614,43 +626,41 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Dashboard routes → resource "devices" -----
 	md.dashboardHandler.SetPermissionService(c.PermService)
-	md.dashboardHandler.RegisterRoutes(permGroup("devices"))
+	md.dashboardHandler.RegisterRoutes(featGroup("devices", "Dashboard"))
 
 	// ----- Syslog routes → resource "devices" -----
-	md.syslogHandler.RegisterRoutes(permGroup("devices"))
+	md.syslogHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	// ----- Config sync routes → resource "config" -----
-	md.syncHandler.RegisterRoutes(permGroup("config"))
+	md.syncHandler.RegisterRoutes(featGroup("config", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	// ----- MR routes → resource "pm" -----
 	mrHandler := mr.NewHandler(md.mrStore, md.mrIndRepo, md.mrMapRepo, c.MinIO, c.Cfg.MinIO.Buckets.MRFiles, c.Logger)
 	if c.ProductRegistry != nil {
 		mrHandler.SetProductPatternResolver(c.ProductRegistry) // #602 按产品名称下拉过滤
 	}
-	mrHandler.RegisterRoutes(permGroup("pm"))
-
-	// ----- MR Task management (F05 测量任务) → resource "pm" -----
+	mrHandler.RegisterRoutes(featGroup("pm", "Performance.View"))	// ----- MR Task management (F05 测量任务) → resource "pm" -----
 	// 复用 initMRTaskModule 已构造的 repo（dispatcher / scheduler / heartbeat / cleaner 共享）。
 	if md.mrTaskRepo != nil {
 		mrTaskSvc := mrtask.NewService(md.mrTaskRepo, c.Logger)
-		mrtask.NewHandler(mrTaskSvc, c.Logger).RegisterRoutes(permGroup("pm"))
+		mrtask.NewHandler(mrTaskSvc, c.Logger).RegisterRoutes(featGroup("pm", "Performance.View"))
 	}
 
 	// ----- Software routes → resource "firmware" -----
 	md.softwareHandler.SetPermissionService(c.PermService) // #59 升级/回退创建逐设备归属校验
-	md.softwareHandler.RegisterRoutes(permGroup("firmware"))
+	md.softwareHandler.RegisterRoutes(featGroup("firmware", "eNB.UpgradeFile", "gNB.UpgradeFile", "CPE.UpgradeFile"))
 	md.ufteHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
-	md.ufteHandler.RegisterRoutes(permGroup("firmware"))
+	md.ufteHandler.RegisterRoutes(featGroup("firmware", "eNB.UpgradeFile", "gNB.UpgradeFile", "CPE.UpgradeFile"))
 
 	// ----- Task routes → resource "devices" -----
-	md.taskHandler.RegisterRoutes(permGroup("devices"))
+	md.taskHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	// ----- Interop routes → resource "interop" -----
 	md.interopHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
-	md.interopHandler.RegisterRoutes(permGroup("interop"))
+	md.interopHandler.RegisterRoutes(featGroup("interop", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	// ----- Backup routes → resource "devices" -----
-	md.backupHandler.RegisterRoutes(permGroup("devices"))
+	md.backupHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	// ----- 文件管理 4 Tab 批量下载（bundle 模块,同步流式） -----
 	// 每个模块 POST /<module>/batch-download 挂在各自资源下,鉴权独立。
@@ -683,50 +693,50 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Station Log routes → resource "devices" -----
 	if md.stationlogHandler != nil {
 		md.stationlogHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
-		md.stationlogHandler.RegisterRoutes(permGroup("devices"))
+		md.stationlogHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	}
 
 	// ----- EventLog routes → resource "devices" -----
 	if md.eventlogHandler != nil {
 		md.eventlogHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
-		md.eventlogHandler.RegisterRoutes(permGroup("devices"))
+		md.eventlogHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	}
 
 	// ----- RebootRecord routes（统一重启记录）→ resource "devices" -----
 	if md.rebootrecordHandler != nil {
 		md.rebootrecordHandler.SetPermissionService(c.PermService) // #63 设备组可见性数据权限
-		md.rebootrecordHandler.RegisterRoutes(permGroup("devices"))
+		md.rebootrecordHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	}
 
 	// ----- File Manager routes → resource "devices" -----
-	md.fileHandler.RegisterRoutes(permGroup("devices"))
+	md.fileHandler.RegisterRoutes(featGroup("devices", "eNB.UpgradeFile", "gNB.UpgradeFile", "CPE.UpgradeFile"))
 
 	// ----- MML Console routes → resource "devices" -----
-	md.mmlHandler.RegisterRoutes(permGroup("devices"))
+	md.mmlHandler.RegisterRoutes(featGroup("devices", "eNB.Mml"))
 	// T-0123-P0：MML Catalog Admin (13 endpoints) → resource "devices"（端点级 Casbin 鉴权进一步细分）
 	if md.mmlAdminHandler != nil {
-		md.mmlAdminHandler.RegisterRoutes(permGroup("devices"))
+		md.mmlAdminHandler.RegisterRoutes(featGroup("devices", "eNB.Mml"))
 	}
 	// T-0123-P1：MML Console 5 端点（group-tree / sub-fields / render / parse / execute-statements）
 	if md.mmlConsoleHandler != nil {
-		md.mmlConsoleHandler.RegisterRoutes(permGroup("devices"))
+		md.mmlConsoleHandler.RegisterRoutes(featGroup("devices", "eNB.Mml"))
 	}
 
 	// ----- SSE Stream endpoint (authenticated users, no permission check) -----
 	md.sseHandler.RegisterRoutes(v1)
 
 	// ----- Notifications → resource "devices" -----
-	md.notificationHandler.RegisterRoutes(permGroup("devices"))
+	md.notificationHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	// ----- T-0137 / M1: TR069 报文跟踪 → resource "devices" -----
 	if md.traceHandler != nil {
-		md.traceHandler.RegisterRoutes(permGroup("devices"))
+		md.traceHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	}
 
 	// ----- W2.A.4 / T-0043: Notification template + history → resource "alarms" -----
 	// 路径前缀 /notifications，handler 内部挂 /templates 和 /history 子路由：
 	//   final paths: /api/v1/notifications/templates[...] + /api/v1/notifications/history[...]
-	notifGroup := permGroup("alarms").Group("/notifications")
+	notifGroup := featGroup("alarms", "Alarm.View").Group("/notifications")
 	md.notifTemplateHandler.RegisterRoutes(notifGroup)
 	md.notifHistoryHandler.RegisterRoutes(notifGroup)
 
@@ -738,7 +748,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	}
 
 	// ----- Config Baseline routes → resource "config" -----
-	md.baselineHandler.RegisterRoutes(permGroup("config"))
+	md.baselineHandler.RegisterRoutes(featGroup("config", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	// ----- System License (singleton) routes → resource "devices" -----
 	// F06 重构 Step 5：老 /licenses/* multi-license 路由已下线；本路由是唯一入口。
@@ -750,17 +760,17 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// GET  /api/v1/devices/:id/license-params          → ListLicenseParams
 	// POST /api/v1/devices/:id/license-params/refresh  → 下发 GPV 刷新
 	if md.licenseParamHandler != nil {
-		md.licenseParamHandler.RegisterRoutes(permGroup("devices"))
+		md.licenseParamHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	}
 
 	// ----- OpsTools routes → resource "devices" -----
-	md.opsHandler.RegisterRoutes(permGroup("devices"))
+	md.opsHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	if md.opsExtHandler != nil {
-		md.opsExtHandler.RegisterRoutes(permGroup("devices"))
+		md.opsExtHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	}
 
 	// ----- Report routes → resource "pm" -----
-	md.reportHandler.RegisterRoutes(permGroup("pm"))
+	md.reportHandler.RegisterRoutes(featGroup("pm", "Performance.View"))
 
 	// ----- System Info endpoint -----
 	sysInfoGroup := v1.Group("")

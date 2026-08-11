@@ -182,7 +182,7 @@ export default function SystemLicensePage() {
 
   const downloadRawLicense = () => {
     const rawContent = decodeSystemLicenseRawContent(lic.rawContent);
-    const blob = new Blob([rawContent.buffer.slice(rawContent.byteOffset, rawContent.byteOffset + rawContent.byteLength) as ArrayBuffer], { type: 'application/octet-stream' });
+    const blob = new Blob([rawContent as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -220,6 +220,11 @@ export default function SystemLicensePage() {
       {/* Basic Info */}
       <Card title={t('systemLicense.basicInfo')} style={{ marginBottom: 16 }}>
         <Descriptions column={{ xs: 1, sm: 2, md: 2, lg: 3 }} bordered size="small">
+          <Descriptions.Item label={t('systemLicense.basicInfo.status')}>
+            <Tag color={lic.isExpired ? 'error' : 'success'}>
+              {t(lic.isExpired ? 'systemLicense.basicInfo.statusExpired' : 'systemLicense.basicInfo.statusValid')}
+            </Tag>
+          </Descriptions.Item>
           <Descriptions.Item label={t('systemLicense.basicInfo.licenseId')}>
             <Text copyable>{lic.licenseId}</Text>
           </Descriptions.Item>

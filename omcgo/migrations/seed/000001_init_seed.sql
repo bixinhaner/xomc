@@ -2410,7 +2410,7 @@ ALTER TABLE public.managed_files ENABLE TRIGGER ALL;
 
 ALTER TABLE public.menus DISABLE TRIGGER ALL;
 
-INSERT INTO public.menus VALUES
+INSERT INTO public.menus (id, name, type, permission_key, parent_id, sort_order, route_path, component_path, icon, show_status, status, created_by, created_at, updated_by, updated_at, name_i18n) VALUES
 	('11111111-1111-1111-1111-111111111104', '设备注册', 'menu', 'device:register', '11111111-1111-1111-1111-111111111101', 3, '/device/register', NULL, 'PlusOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:43.435931+08', NULL, '2026-05-31 11:28:49.176665+08', '{"en-US": "Device Registration", "zh-CN": "设备注册"}'),
 	('11111111-1111-1111-1111-111111111201', '查询', 'button', 'device:list:query', '11111111-1111-1111-1111-111111111102', 1, NULL, NULL, NULL, 'show', 'normal', NULL, '2026-05-31 11:28:43.435931+08', NULL, '2026-05-31 11:28:43.435931+08', '{"en-US": "Query", "zh-CN": "查询"}'),
 	('11111111-1111-1111-1111-111111111202', '添加', 'button', 'device:list:add', '11111111-1111-1111-1111-111111111102', 2, NULL, NULL, NULL, 'show', 'normal', NULL, '2026-05-31 11:28:43.435931+08', NULL, '2026-05-31 11:28:43.435931+08', '{"en-US": "Add", "zh-CN": "添加"}'),
@@ -2585,7 +2585,7 @@ INSERT INTO public.menus VALUES
 	('aaaa0004-1000-0005-0000-000000000001', '图例管理', 'menu', 'topology:legend', 'aaaa0004-0000-0000-0000-000000000001', 5, '/topology/legend', NULL, 'BgColorsOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.901226+08', NULL, '2026-05-31 11:28:49.176665+08', '{"en-US": "Legend Management", "zh-CN": "图例管理"}'),
 	('aaaa0010-1000-0000-0000-000000000002', '设备规则', 'menu', 'device:rules', '11111111-1111-1111-1111-111111111101', 4, '/device/rules', 'device/DeviceRules', 'ControlOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:49.176665+08', '{"en-US": "Device Rules", "zh-CN": "设备规则"}'),
 	('aaaa0126-1000-0000-0000-000000000003', '即插即用策略编辑', 'menu', 'device:plug-and-play:edit', 'aaaa0010-1000-0000-0000-000000000001', 93, '/device/plug-and-play/edit', NULL, '', 'hide', 'normal', NULL, '2026-05-31 11:28:47.908689+08', NULL, '2026-05-31 11:28:47.908689+08', '{"en-US": "Plug-and-Play Policy Editor", "zh-CN": "即插即用策略编辑"}'),
-	('aaaa0009-0000-0000-0000-000000000010', 'License', 'menu', 'system_license', NULL, 10, '/license', NULL, 'SafetyOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.915266+08', NULL, '2026-05-31 11:28:49.181274+08', '{"en-US": "License", "zh-CN": "License"}'),
+	('aaaa0009-0000-0000-0000-000000000010', 'License', 'menu', 'system_license', NULL, 10, '/license', NULL, 'SafetyOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.915266+08', NULL, '2026-05-31 11:28:49.181274+08', '{"en-US": "License", "zh-CN": "License"}'),
 	('aaaa0126-1000-0000-0000-000000000001', '设备详情', 'menu', 'device:detail', '11111111-1111-1111-1111-111111111101', 91, '/device/detail', NULL, '', 'hide', 'normal', NULL, '2026-05-31 11:28:47.908689+08', NULL, '2026-05-31 11:28:47.908689+08', '{"en-US": "Device Details", "zh-CN": "设备详情"}'),
 	('aaaa0004-1000-0001-0000-000000000001', 'GIS地图', 'menu', 'topology:gis-map', 'aaaa0004-0000-0000-0000-000000000001', 0, '/topology/gis-map', NULL, 'EnvironmentOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.901226+08', NULL, '2026-05-31 11:28:47.901226+08', '{"en-US": "GIS Map", "zh-CN": "GIS地图"}'),
 	('aaaa0011-1000-0000-0000-000000000003', '自定义告警', 'menu', 'alarm:custom-stats', '11111111-1111-1111-1111-111111111105', 5, '/alarm/custom-stats', 'alarm/CustomAlarmStats', 'BarChartOutlined', 'hide', 'disabled', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:48.248765+08', '{"en-US": "Custom Alarms", "zh-CN": "自定义告警"}'),
@@ -2636,6 +2636,73 @@ INSERT INTO public.menus VALUES
 	('aaaa0003-1004-0000-0000-000000000003', '清空记录', 'button', 'mml:console:history', 'aaaa0003-1000-0000-0000-000000000004', 3, NULL, NULL, NULL, 'show', 'normal', NULL, '2026-06-17 20:08:35.605663+08', NULL, '2026-06-17 20:08:35.612851+08', '{"en-US": "Clear History", "zh-CN": "清空记录"}'),
 	('aaaa0003-1000-0000-0000-000000000004', 'MML控制台', 'menu', 'mml:console', 'aaaa0003-0000-0000-0000-000000000001', 1, '/mml/console', 'mml/Console', 'ExperimentOutlined', 'show', 'normal', NULL, '2026-06-12 18:16:52.429731+08', NULL, '2026-07-16 10:27:03.848487+08', '{"en-US": "MML Console", "zh-CN": "MML控制台"}'),
 	('aaaa0003-1000-0000-0000-000000000002', '脚本管理', 'menu', 'mml:script', 'aaaa0003-0000-0000-0000-000000000001', 2, '/mml/script', 'mml/ScriptTask', 'FileTextOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-07-16 10:27:03.848487+08', '{"en-US": "Script Management", "zh-CN": "脚本管理"}') ON CONFLICT DO NOTHING;
+
+-- P7-A: 菜单 ↔ license feature_code 回填（text[]，多值 OR 语义）。
+-- 仅回填有明确 legacy feature 对应的页面级菜单；未列出的菜单 feature_code=NULL（不受控=可见）。
+-- 完整逐项映射待产品确认后在此扩充（纯数据，不改代码）。/license 固定 NULL 防死锁。
+UPDATE public.menus SET feature_code = ARRAY['CODE_DASHBOARD'] WHERE id = 'aaaa0001-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_VIEW'] WHERE id = '11111111-1111-1111-1111-111111111106';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_VIEW'] WHERE id = '11111111-1111-1111-1111-111111111107';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_VIEW'] WHERE id = '11111111-1111-1111-1111-111111111120';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_LIBRARY'] WHERE id = 'aaaa0011-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_LIBRARY'] WHERE id = 'aaaa0011-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0001-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_USERS_USER'] WHERE id = '11111111-1111-1111-1111-111111111109';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_USERS_ROLE'] WHERE id = '11111111-1111-1111-1111-111111111110';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_LOGS_OPERATION'] WHERE id = '11111111-1111-1111-1111-111111111112';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_VIEW'] WHERE id = 'aaaa0002-1000-0000-0000-000000000010';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = '11111111-1111-1111-1111-111111111102';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = '11111111-1111-1111-1111-111111111103';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PLUG_AND_PLAY'] WHERE id = 'aaaa0010-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_DEVICE_REGISTER','CODE_GNB_DEVICE_REGISTER','CODE_CPE_DEVICE'] WHERE id = '11111111-1111-1111-1111-111111111104';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0010-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0010-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_IMAGE','CODE_GNB_UPGRADE_IMAGE','CODE_CPE_UPGRADE_IMAGE'] WHERE id = 'aaaa0006-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE'] WHERE id = 'aaaa0006-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_ROLLBACK','CODE_GNB_ROLLBACK'] WHERE id = 'aaaa0006-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MML','CODE_GNB_MML'] WHERE id = 'aaaa0003-1000-0000-0000-000000000004';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MML','CODE_GNB_MML'] WHERE id = 'aaaa0003-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MML','CODE_GNB_MML'] WHERE id = 'aaaa0003-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MML','CODE_GNB_MML'] WHERE id = 'aaaa0008-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_TR069_MSG_EXCHANGE','CODE_GNB_TR069_MSG_EXCHANGE'] WHERE id = 'aaaa000a-1000-0000-0000-000000000006';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_VIEW'] WHERE id = 'aaaa0002-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_VIEW'] WHERE id = 'aaaa0002-1000-0000-0000-000000000012';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MEASUREMENT'] WHERE id = 'aaaa0002-1000-0000-0000-000000000011';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MEASUREMENT'] WHERE id = 'aaaa0002-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MANAGEMENT'] WHERE id = 'aaaa0002-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MEASUREMENT'] WHERE id = 'aaaa000a-1000-0000-0000-000000000007';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = 'aaaa0008-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0002-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0003-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0004-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0005-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_BATCH_CONFIG','CODE_GNB_BATCH_CONFIG'] WHERE id = 'aaaa0120-1000-0000-0000-000000000001';
+-- 新 OMC 模块菜单映射到已有 code（产品中心/文件传输/运维/系统新功能/下钻页）；旧 license 无对应，按最近语义挂靠，可调
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000006';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MANAGEMENT'] WHERE id = 'aaaa0098-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_LIBRARY'] WHERE id = 'aaaa0098-1000-0000-0000-000000000004';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000005';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE'] WHERE id = 'aaaa000b-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE'] WHERE id = 'aaaa000b-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE'] WHERE id = 'aaaa000b-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000004';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000005';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = 'aaaa0008-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = 'aaaa0008-1000-0000-0000-000000000004';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MANAGEMENT'] WHERE id = 'aaaa0008-1000-0000-0000-000000000009';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = '11111111-1111-1111-1111-111111111111';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = 'aaaa0008-1000-0000-0000-000000000010';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0126-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0126-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0007-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MANAGEMENT'] WHERE id = 'aaaa0126-1000-0000-0000-000000000004';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_VIEW'] WHERE id = 'aaaa0011-1000-0000-0000-000000000003';
 
 
 ALTER TABLE public.menus ENABLE TRIGGER ALL;
