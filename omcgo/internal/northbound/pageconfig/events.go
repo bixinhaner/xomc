@@ -108,6 +108,46 @@ SELECT id::text, capability, owner_code, target_key, event_type, status,
 	return scanPageConfigEvent(row)
 }
 
+func (r *PgRepository) PruneEvents(ctx context.Context, filter EventFilter, keep int) (int64, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	args := make([]any, 0, 4)
+	where := []string{"true"}
+	if strings.TrimSpace(filter.Capability) != "" {
+		args = append(args, filter.Capability)
+		where = append(where, fmt.Sprintf("capability = $%d", len(args)))
+	}
+	if strings.TrimSpace(filter.OwnerCode) != "" {
+		args = append(args, filter.OwnerCode)
+		where = append(where, fmt.Sprintf("owner_code = $%d", len(args)))
+	}
+	if strings.TrimSpace(filter.TargetKey) != "" {
+		args = append(args, filter.TargetKey)
+		where = append(where, fmt.Sprintf("target_key = $%d", len(args)))
+	}
+	if strings.TrimSpace(filter.EventType) != "" {
+		args = append(args, filter.EventType)
+		where = append(where, fmt.Sprintf("event_type = $%d", len(args)))
+	}
+	args = append(args, keep)
+	whereClause := strings.Join(where, " AND ")
+	tag, err := r.pool.Exec(ctx, fmt.Sprintf(`
+WITH stale AS (
+  SELECT id
+    FROM northbound_page_config_events
+   WHERE %s
+   ORDER BY created_at DESC, id DESC
+  OFFSET $%d
+)
+DELETE FROM northbound_page_config_events
+ WHERE id IN (SELECT id FROM stale)`, whereClause, len(args)), args...)
+	if err != nil {
+		return 0, fmt.Errorf("prune northbound_page_config_events: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *PgRepository) CleanupExpiredResults(ctx context.Context, runBefore time.Time, eventBefore time.Time) (ResultCleanupSummary, error) {
 	var summary ResultCleanupSummary
 	if !runBefore.IsZero() {

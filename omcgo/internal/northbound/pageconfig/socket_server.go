@@ -22,6 +22,7 @@ import (
 
 const (
 	socketDefaultReloadInterval = 30 * time.Second
+	socketEventKeepLimit        = 50
 	socketMaxFrameBody          = 1 << 20
 	socketWriteTimeout          = 5 * time.Second
 
@@ -742,7 +743,7 @@ func (s *socketAlarmSession) handleCTCCFrame(ctx context.Context, frame socketPr
 			status = RunStatusFailed
 			errMessage = replayErr.Error()
 		}
-		s.manager.recordEvent(eventFromSocketRuntime(s.config, "sync_request", status, mustMarshalEventPayload(result), errMessage, map[string]any{
+		s.manager.recordEvent(eventFromSocketRuntime(s.config, "sync_request", status, socketCTCCSyncEventPayload(result, replayItems, replayEvents), errMessage, map[string]any{
 			"remote_addr":                s.remote,
 			"request_id":                 reqID,
 			"alarm_seq":                  alarmSeq,
@@ -867,7 +868,7 @@ func (s *socketAlarmSession) handleCUCCFrame(ctx context.Context, frame socketPr
 			{"count", strconv.Itoa(replayCount)},
 			{"resDesc", desc},
 		})
-		s.manager.recordEvent(eventFromSocketRuntime(s.config, "sync_request", status, body, errMessage, map[string]any{
+		s.manager.recordEvent(eventFromSocketRuntime(s.config, "sync_request", status, socketCUCCSyncEventPayload(body, replayItems, replayEvents), errMessage, map[string]any{
 			"remote_addr":   s.remote,
 			"request_id":    reqID,
 			"alarm_seq":     alarmSeq,
@@ -1378,5 +1379,20 @@ func (m *SocketAlarmServerManager) recordEvent(evt PageConfigEvent) {
 			zap.String("config_key", evt.OwnerCode),
 			zap.String("event_type", evt.EventType),
 			zap.Error(err))
+		return
+	}
+	if deleted, err := m.svc.repo.PruneEvents(ctx, EventFilter{
+		Capability: "socket",
+		OwnerCode:  evt.OwnerCode,
+		TargetKey:  evt.TargetKey,
+	}, socketEventKeepLimit); err != nil {
+		m.logger.Warn("prune northbound socket page-config events failed",
+			zap.String("config_key", evt.OwnerCode),
+			zap.Error(err))
+	} else if deleted > 0 {
+		m.logger.Debug("pruned northbound socket page-config events",
+			zap.String("config_key", evt.OwnerCode),
+			zap.Int64("deleted", deleted),
+			zap.Int("keep", socketEventKeepLimit))
 	}
 }

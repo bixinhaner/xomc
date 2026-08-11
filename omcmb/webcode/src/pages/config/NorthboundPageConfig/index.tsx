@@ -231,6 +231,19 @@ interface MessageFieldRow {
   value: string;
 }
 
+interface MessageRecordRow {
+  key: string;
+  values: Record<string, string>;
+}
+
+interface MessageRecordPreview {
+  title: string;
+  rows: MessageRecordRow[];
+  fields: string[];
+  total?: number;
+  displayed?: number;
+}
+
 interface DelimitedMessageRow {
   key: string;
   command: string;
@@ -4498,8 +4511,10 @@ function valuePreview(value: unknown): string {
   if (value === null || value === undefined) return '-';
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return `${value.length} 项`;
   try {
-    return JSON.stringify(value);
+    const text = JSON.stringify(value);
+    return text.length > 500 ? `${text.slice(0, 500)}...` : text;
   } catch {
     return String(value);
   }
@@ -4560,6 +4575,75 @@ function getJsonFieldRows(value: unknown): MessageFieldRow[] {
   }));
 }
 
+const jsonRecordFieldPriority = [
+  'alarmSequenceId',
+  'alarmSeq',
+  'alarmTitle',
+  'alarmStatus',
+  'origSeverity',
+  'eventTime',
+  'neDn',
+  'neUID',
+  'neName',
+  'neType',
+  'objectDn',
+  'objectUID',
+  'objectName',
+  'objectType',
+  'specificProblemID',
+  'specificProblem',
+  'omcReceivedTime',
+  'omcUID',
+];
+
+function getJsonRecordPreview(value: unknown): MessageRecordPreview | null {
+  if (!value) return null;
+  const root = Array.isArray(value) ? { items: value } : value;
+  if (!root || typeof root !== 'object' || Array.isArray(root)) return null;
+  const objectValue = root as Record<string, unknown>;
+  const recordEntries: Array<[string, unknown]> = [
+    ['alarms', objectValue.alarms],
+    ['records', objectValue.records],
+    ['items', objectValue.items],
+    ['messages', objectValue.messages],
+    ['data', objectValue.data],
+  ];
+  const match = recordEntries.find(([, candidate]) => Array.isArray(candidate)
+    && candidate.some((item) => item && typeof item === 'object' && !Array.isArray(item)));
+  if (!match) return null;
+  const [recordKey, rawRows] = match;
+  const rows = (rawRows as unknown[])
+    .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+    .map((item, index) => ({
+      key: `${recordKey}-${index}`,
+      values: Object.fromEntries(
+        Object.entries(item as Record<string, unknown>).map(([field, fieldValue]) => [field, valuePreview(fieldValue)]),
+      ),
+    }));
+  if (rows.length === 0) return null;
+  const fieldSet = new Set<string>();
+  rows.forEach((row) => {
+    Object.keys(row.values).forEach((field) => fieldSet.add(field));
+  });
+  const priorityFields = jsonRecordFieldPriority.filter((field) => fieldSet.has(field));
+  const remainingFields = Array.from(fieldSet)
+    .filter((field) => !priorityFields.includes(field))
+    .sort((left, right) => left.localeCompare(right));
+  const total = typeof objectValue.total_count === 'number'
+    ? objectValue.total_count
+    : typeof objectValue.count === 'number'
+      ? objectValue.count
+      : undefined;
+  const displayed = typeof objectValue.displayed_count === 'number' ? objectValue.displayed_count : rows.length;
+  return {
+    title: recordKey === 'alarms' ? '告警明细' : '明细列表',
+    rows,
+    fields: [...priorityFields, ...remainingFields].slice(0, 24),
+    total,
+    displayed,
+  };
+}
+
 function parseDelimitedMessages(content: string): DelimitedMessageRow[] {
   return content
     .split(/\r?\n/)
@@ -4604,6 +4688,7 @@ function parseSnmpVarBinds(content: string): SnmpVarBindRow[] {
 function MessageReportPreview({ content }: { content: string }) {
   const formatted = useMemo(() => formatMessagePayload(content), [content]);
   const jsonRows = useMemo(() => getJsonFieldRows(formatted.parsed), [formatted.parsed]);
+  const jsonRecordPreview = useMemo(() => getJsonRecordPreview(formatted.parsed), [formatted.parsed]);
   const delimitedRows = useMemo(() => parseDelimitedMessages(content), [content]);
   const snmpRows = useMemo(() => parseSnmpVarBinds(formatted.text), [formatted.text]);
   const lineCount = content ? content.split(/\r?\n/).length : 0;
@@ -4611,6 +4696,18 @@ function MessageReportPreview({ content }: { content: string }) {
   const fieldColumns: ColumnsType<MessageFieldRow> = [
     { title: '字段', dataIndex: 'field', width: 220, render: (value: string) => <span className={styles.monoText}>{value}</span> },
     { title: '值', dataIndex: 'value', render: (value: string) => <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text> },
+  ];
+  const recordColumns: ColumnsType<MessageRecordRow> = [
+    { title: '序号', width: 70, fixed: 'left', render: (_, __, index) => index + 1 },
+    ...(jsonRecordPreview?.fields ?? []).map((field) => ({
+      title: field,
+      width: field.length > 18 ? 220 : 160,
+      render: (_: unknown, row: MessageRecordRow) => (
+        <Typography.Text ellipsis={{ tooltip: row.values[field] || '-' }}>
+          {row.values[field] || '-'}
+        </Typography.Text>
+      ),
+    })),
   ];
   const snmpColumns: ColumnsType<SnmpVarBindRow> = [
     { title: '序号', dataIndex: 'index', width: 70, fixed: 'left' },
@@ -4654,6 +4751,27 @@ function MessageReportPreview({ content }: { content: string }) {
           pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: jsonRows.length <= 20 }}
           scroll={{ x: 760, y: 260 }}
         />
+      )}
+      {jsonRecordPreview && (
+        <div>
+          <div className={styles.editorSectionHeader}>
+            <Typography.Text strong>{jsonRecordPreview.title}</Typography.Text>
+            <Typography.Text type="secondary">
+              显示 {jsonRecordPreview.displayed ?? jsonRecordPreview.rows.length}
+              {jsonRecordPreview.total !== undefined ? ` / ${jsonRecordPreview.total}` : ''}
+              {' 条'}
+            </Typography.Text>
+          </div>
+          <Table<MessageRecordRow>
+            className={styles.compactScenarioTable}
+            columns={recordColumns}
+            dataSource={jsonRecordPreview.rows}
+            rowKey="key"
+            size="small"
+            pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: jsonRecordPreview.rows.length <= 20 }}
+            scroll={{ x: Math.max(760, (jsonRecordPreview.fields.length + 1) * 150), y: 300 }}
+          />
+        </div>
       )}
       {snmpRows.length === 0 && delimitedRows.length > 0 && (
         <Table<DelimitedMessageRow>
@@ -6646,7 +6764,7 @@ export default function NorthboundPageConfig() {
     void northboundPageConfigApi.listEvents({
       capability,
       target_key: targetKey,
-      limit: 100,
+      limit: 50,
       include_payload: false,
     })
       .then((result) => {

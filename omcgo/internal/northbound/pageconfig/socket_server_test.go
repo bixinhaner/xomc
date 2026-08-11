@@ -111,6 +111,61 @@ func TestSocketAlarmServerAcceptsCUCCLoginHeartbeatAndRealtimePush(t *testing.T)
 	require.Contains(t, string(replayFrame.Body), "alarmSeq=920188")
 }
 
+func TestSocketAlarmServerPrunesRecentEventsPerConfig(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	manager := NewSocketAlarmServerManager(svc, nil, zap.NewNop())
+
+	manager.recordEvent(PageConfigEvent{
+		Capability: "snmp",
+		OwnerCode:  "snmp-v2",
+		TargetKey:  "snmp-v2",
+		EventType:  "message_test",
+		Status:     RunStatusSuccess,
+	})
+	manager.recordEvent(PageConfigEvent{
+		Capability: "socket",
+		OwnerCode:  "socket-cucc-server",
+		TargetKey:  "socket-cucc-server",
+		EventType:  "login",
+		Status:     RunStatusSuccess,
+	})
+	for i := 0; i < socketEventKeepLimit+5; i++ {
+		manager.recordEvent(PageConfigEvent{
+			Capability: "socket",
+			OwnerCode:  "socket-ctcc-server",
+			TargetKey:  "socket-ctcc-server",
+			EventType:  "heartbeat",
+			Status:     RunStatusSuccess,
+			Summary:    map[string]any{"seq": i},
+		})
+	}
+
+	ctcc, err := repo.ListEvents(context.Background(), EventFilter{
+		Capability: "socket",
+		OwnerCode:  "socket-ctcc-server",
+		TargetKey:  "socket-ctcc-server",
+		Limit:      100,
+	})
+	require.NoError(t, err)
+	require.Equal(t, socketEventKeepLimit, ctcc.Total)
+	require.Equal(t, 5, ctcc.Items[0].Summary["seq"])
+	require.Equal(t, socketEventKeepLimit+4, ctcc.Items[len(ctcc.Items)-1].Summary["seq"])
+
+	snmp, err := repo.ListEvents(context.Background(), EventFilter{Capability: "snmp", Limit: 10})
+	require.NoError(t, err)
+	require.Equal(t, 1, snmp.Total)
+
+	cucc, err := repo.ListEvents(context.Background(), EventFilter{
+		Capability: "socket",
+		OwnerCode:  "socket-cucc-server",
+		TargetKey:  "socket-cucc-server",
+		Limit:      10,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, cucc.Total)
+}
+
 func TestSocketAlarmServerReloadsImmediatelyWhenConfigChanges(t *testing.T) {
 	port := freeTCPPort(t)
 	config := SocketAlarmConfig{

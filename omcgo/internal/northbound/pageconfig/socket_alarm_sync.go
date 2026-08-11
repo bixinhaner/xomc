@@ -20,6 +20,7 @@ const (
 	socketAlarmQueryLimit     = 1000
 	socketAlarmMessageLimit   = 1000
 	socketAlarmFileMaxRows    = 50000
+	socketSyncEventPreviewMax = 100
 	socketDefaultOMCUID       = "OMC"
 	socketFileSyncSourceState = "0"
 	socketFileSyncSourceFlow  = "1"
@@ -291,6 +292,85 @@ func socketCTCCSyncFrameFromItem(item socketAlarmSyncItem) socketProtocolFrame {
 	payload["msgType"] = ctccMsgSyncAlarmResult
 	body, _ := json.Marshal(payload)
 	return socketProtocolFrame{MessageType: ctccMsgSyncAlarmResult, MessageFormat: socketMessageFormatJSON, Body: body}
+}
+
+func socketCTCCSyncEventPayload(result map[string]any, replayItems []socketAlarmSyncItem, replayEvents []PageConfigEvent) string {
+	payload := make(map[string]any, len(result)+5)
+	for key, value := range result {
+		payload[key] = value
+	}
+	total := len(replayItems) + len(replayEvents)
+	payload["total_count"] = total
+	if total == 0 {
+		return mustMarshalEventPayload(payload)
+	}
+	records := make([]map[string]any, 0, minPositive(total, socketSyncEventPreviewMax))
+	for _, item := range replayItems {
+		if len(records) >= socketSyncEventPreviewMax {
+			break
+		}
+		record := socketAlarmCTCCPayload(item.Alarm, item.Subject)
+		record["msgType"] = ctccMsgSyncAlarmResult
+		records = append(records, record)
+	}
+	if len(records) < socketSyncEventPreviewMax {
+		for _, event := range replayEvents {
+			if len(records) >= socketSyncEventPreviewMax {
+				break
+			}
+			if record := socketEventPayloadAsRecord(event.Payload); len(record) > 0 {
+				records = append(records, record)
+			}
+		}
+	}
+	payload["displayed_count"] = len(records)
+	payload["alarms"] = records
+	if total > len(records) {
+		payload["truncated"] = true
+		payload["display_note"] = fmt.Sprintf("展示前 %d 条，完整同步结果已写回 socket 连接", len(records))
+	}
+	return mustMarshalEventPayload(payload)
+}
+
+func socketCUCCSyncEventPayload(ack string, replayItems []socketAlarmSyncItem, replayEvents []PageConfigEvent) string {
+	total := len(replayItems) + len(replayEvents)
+	lines := make([]string, 0, 1+minPositive(total, socketSyncEventPreviewMax)+1)
+	lines = append(lines, ack)
+	for _, item := range replayItems {
+		if len(lines)-1 >= socketSyncEventPreviewMax {
+			break
+		}
+		frame, _, _ := socketRealtimeFrameFromItem(SocketAlarmConfig{Profile: "CUCC"}, item)
+		if text := strings.TrimSpace(string(frame.Body)); text != "" {
+			lines = append(lines, text)
+		}
+	}
+	if len(lines)-1 < socketSyncEventPreviewMax {
+		for _, event := range replayEvents {
+			if len(lines)-1 >= socketSyncEventPreviewMax {
+				break
+			}
+			if text := strings.TrimSpace(event.Payload); text != "" {
+				lines = append(lines, text)
+			}
+		}
+	}
+	if total > len(lines)-1 {
+		lines = append(lines, fmt.Sprintf("# 展示前 %d 条，完整同步结果已写回 socket 连接", len(lines)-1))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func socketEventPayloadAsRecord(payload string) map[string]any {
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return nil
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(payload), &record); err == nil {
+		return record
+	}
+	return map[string]any{"payload": payload}
 }
 
 func socketAlarmCTCCPayload(alarm model.Alarm, subject string) map[string]any {

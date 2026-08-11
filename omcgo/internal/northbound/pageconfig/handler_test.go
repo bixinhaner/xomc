@@ -677,6 +677,48 @@ func (r *fakeRepository) GetEvent(_ context.Context, id string) (*PageConfigEven
 	return nil, commonerrors.ErrNotFound
 }
 
+func (r *fakeRepository) PruneEvents(_ context.Context, filter EventFilter, keep int) (int64, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	matches := make([]int, 0, len(r.events))
+	for i, event := range r.events {
+		if filter.Capability != "" && event.Capability != filter.Capability {
+			continue
+		}
+		if filter.OwnerCode != "" && event.OwnerCode != filter.OwnerCode {
+			continue
+		}
+		if filter.TargetKey != "" && event.TargetKey != filter.TargetKey {
+			continue
+		}
+		if filter.EventType != "" && event.EventType != filter.EventType {
+			continue
+		}
+		if filter.Status != "" && event.Status != filter.Status {
+			continue
+		}
+		matches = append(matches, i)
+	}
+	if len(matches) <= keep {
+		return 0, nil
+	}
+	remove := map[int]struct{}{}
+	for _, idx := range matches[:len(matches)-keep] {
+		remove[idx] = struct{}{}
+	}
+	kept := r.events[:0]
+	for i, event := range r.events {
+		if _, ok := remove[i]; ok {
+			continue
+		}
+		kept = append(kept, event)
+	}
+	deleted := int64(len(r.events) - len(kept))
+	r.events = kept
+	return deleted, nil
+}
+
 func (r *fakeRepository) CleanupExpiredResults(_ context.Context, runBefore time.Time, eventBefore time.Time) (ResultCleanupSummary, error) {
 	var summary ResultCleanupSummary
 	keptRuns := r.runs[:0]
