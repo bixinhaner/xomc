@@ -71,6 +71,10 @@ type Tech = 'LTE' | 'GNB' | 'GSM';
 type FieldTechFilter = 'ALL' | Tech;
 type InventoryType = 'ENB' | 'GNB' | 'GSM' | 'OMC';
 
+function nowrapColumnTitle(title: string) {
+  return <span className={styles.nowrapHeader}>{title}</span>;
+}
+
 interface ScenarioObject {
   code: string;
   tech?: Tech;
@@ -6897,8 +6901,8 @@ export default function NorthboundPageConfig() {
       ),
     },
     {
-      title: '压缩',
-      width: 100,
+      title: nowrapColumnTitle('压缩'),
+      width: 124,
       render: (_, row) => (
         <div className={styles.compressionList}>
           {getScenarioCompressionTags(row).map((compression) => (
@@ -7030,8 +7034,8 @@ export default function NorthboundPageConfig() {
       ),
     },
     {
-      title: '压缩',
-      width: 100,
+      title: nowrapColumnTitle('压缩'),
+      width: 124,
       render: (_, row) => row.compressionEnabled
         ? <Tag color="green">{row.compressionFormat}</Tag>
         : <Tag>不压缩</Tag>,
@@ -9021,11 +9025,11 @@ export default function NorthboundPageConfig() {
                   { title: '统计周期', dataIndex: 'period', width: 128, render: (value: string) => <Typography.Text strong>{formatPeriodLabel(value)}</Typography.Text> },
                   { title: '生成计划', width: 210, render: (_, record) => formatScheduleLabel(record.period, record.cron) },
                   {
-                    title: '压缩',
-                    width: 86,
+                    title: nowrapColumnTitle('压缩'),
+                    width: 116,
                     render: (_, record) => record.compressionEnabled ? <Tag color="green">开启</Tag> : <Tag>关闭</Tag>,
                   },
-                  { title: '压缩格式', dataIndex: 'compressionFormat', width: 120, render: (value: CompressionFormat) => <Tag>{value}</Tag> },
+                  { title: nowrapColumnTitle('压缩格式'), dataIndex: 'compressionFormat', width: 152, render: (value: CompressionFormat) => <Tag>{value}</Tag> },
                   { title: '上传目录模板', dataIndex: 'path', width: 360, render: (value: string) => <span className={styles.monoText}>{value}</span> },
                   { title: '文件名模板', dataIndex: 'fileName', width: 460, render: (value: string) => <span className={styles.fileNameTemplate}>{value}</span> },
                   {
@@ -9267,8 +9271,8 @@ export default function NorthboundPageConfig() {
                   ),
                 },
                 {
-                  title: '压缩',
-                  width: 86,
+                  title: nowrapColumnTitle('压缩'),
+                  width: 116,
                   render: (_, record) => (
                     <Switch
                       size="small"
@@ -9280,9 +9284,9 @@ export default function NorthboundPageConfig() {
                   ),
                 },
                 {
-                  title: '压缩格式',
+                  title: nowrapColumnTitle('压缩格式'),
                   dataIndex: 'compressionFormat',
-                  width: 120,
+                  width: 152,
                   render: (value: CompressionFormat, record) => (
                     <Select
                       value={value}

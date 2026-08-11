@@ -122,6 +122,11 @@
   font-size: 13px;
 }
 
+.nowrapHeader {
+  display: inline-flex;
+  white-space: nowrap;
+}
+
 .compactScenarioTable :global(.ant-table-tbody > tr > td) {
   height: 48px;
   padding-bottom: 6px;
