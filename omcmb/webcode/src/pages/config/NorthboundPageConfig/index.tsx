@@ -60,6 +60,7 @@ import type {
   NorthboundUpdateInventoryProfileRequest,
 } from '@core/services/api/northboundPageConfigApi';
 import { loadPmMetrics, type PmMetric } from './pmMetricCatalog';
+import { NorthboundI18nScope, useNorthboundI18n } from './i18n';
 import styles from './index.module.css';
 
 type Domain = 'CM' | 'PM' | 'MR' | 'LOG' | 'INVENTORY';
@@ -203,6 +204,9 @@ interface ReportStatusInfo {
   detail: string;
   payload: string;
   deliveryNote?: string;
+  previewTitle?: string;
+  copyLabel?: string;
+  resultTitle?: string;
 }
 
 interface MessageFieldRow {
@@ -228,7 +232,7 @@ interface SnmpVarBindRow {
 
 type ApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 type ApiKind = '正式北向' | '业务复用' | '鉴权管理';
-type ApiFieldContract = '完整契约' | '当前契约' | '示例契约';
+type ApiFieldContract = '完整返回字段' | '当前返回字段' | '示例返回字段';
 
 const csvSeparatorOptions = [
   { value: ',', label: '逗号 ,' },
@@ -256,6 +260,9 @@ const snmpPrivProtocolOptions = [
   { label: 'AES192', value: 'AES192' },
   { label: 'AES256', value: 'AES256' },
 ];
+
+const snmpDefaultCommunity = 'baicells';
+const storedCredentialText = '已加密存储';
 
 interface SocketAlarmConfigRow {
   key: string;
@@ -1419,8 +1426,7 @@ const snmpAlarmTargets: SnmpAlarmTargetRow[] = [
     listenPort: 161,
     targetHost: '10.10.41.11',
     targetPort: 162,
-    community: 'baicells',
-    securityName: 'baicells',
+    community: snmpDefaultCommunity,
     mibQueryEnabled: true,
     clearSeverityPolicy: '保留原级别',
     timeoutSeconds: 5,
@@ -1705,7 +1711,7 @@ const northboundApiRows: NorthboundApiRow[] = [
     url: '/api/v1/northbound/v1/access/token',
     auth: '公开接口；只校验北向 API 专用用户',
     backendSource: 'omcgo/internal/northbound/pageconfig/service.go + cmd/app/provider/router.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.token', 'data.expires', 'data.access_token', 'data.expires_at', 'data.token_type'],
     requestExample: `POST /api/v1/northbound/v1/access/token
 Content-Type: application/json
@@ -1735,7 +1741,7 @@ Content-Type: application/json
     url: '/api/v1/northbound/v1/sync/full?data_type=device&format=json',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go + internal/northbound/sync/service.go',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...currentEnvelopeFields, 'data.data_type', 'data.items[]', 'data.total', 'data.synced_at', 'data.truncated?'],
     requestExample: `GET /api/v1/northbound/v1/sync/full?data_type=device&format=json
 X-Northbound-Token: <access-token>`,
@@ -1768,7 +1774,7 @@ X-Northbound-Token: <access-token>`,
     url: '/api/v1/northbound/sync/incremental?data_type=alarm&since=2026-07-30T00:00:00Z&format=json',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go + internal/northbound/sync/service.go',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...currentEnvelopeFields, 'data.data_type', 'data.items[]', 'data.total', 'data.synced_at', 'data.truncated?'],
     requestExample: `GET /api/v1/northbound/sync/incremental?data_type=alarm&since=2026-07-30T00:00:00Z&format=json
 X-Northbound-Token: <access-token>`,
@@ -1800,7 +1806,7 @@ X-Northbound-Token: <access-token>`,
     url: '/api/v1/northbound/export/pm',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/pm_handler.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...listResponseFields, 'data.items[].time', 'data.items[].device_id', 'data.items[].oui', 'data.items[].device_sn', 'data.items[].cell_id', 'data.items[].counter_group', 'data.items[].counter_name', 'data.items[].counter_value', 'data.items[].granularity', 'data.items[].statis_type?', 'data.items[].unit?'],
     requestExample: `POST /api/v1/northbound/export/pm
 X-Northbound-Token: <access-token>
@@ -1846,7 +1852,7 @@ Content-Type: application/json
     url: '/api/v1/northbound/export/alarms',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/alarm_handler.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...listResponseFields, 'data.items[].id', 'data.items[].device_id', 'data.items[].device_sn', 'data.items[].carrier', 'data.items[].severity', 'data.items[].alarm_type', 'data.items[].alarm_identifier', 'data.items[].description', 'data.items[].status', 'data.items[].raised_at', 'data.items[].acknowledged_at?', 'data.items[].cleared_at?', 'data.items[].device_name?', 'data.items[].technology?', 'data.items[].additional_info?'],
     requestExample: `POST /api/v1/northbound/export/alarms
 X-Northbound-Token: <access-token>
@@ -1889,7 +1895,7 @@ Content-Type: application/json
     url: '/api/v1/northbound/v1/export/config/{deviceId}',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/config_handler.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.device_id', 'data.parameters[].device_id', 'data.parameters[].parameter_path', 'data.parameters[].parameter_value', 'data.parameters[].parameter_type', 'data.parameters[].writable', 'data.parameters[].last_updated_at', 'data.parameters[].fap_instance', 'data.parameters[].param_group', 'data.total'],
     requestExample: `GET /api/v1/northbound/v1/export/config/9a4d7b2f-2b2c-4f0a-9ec5-5e9b3a8c1001
 X-Northbound-Token: <access-token>`,
@@ -1920,7 +1926,7 @@ X-Northbound-Token: <access-token>`,
     url: '/api/v1/northbound/push/targets',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go + internal/northbound/push',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.items[].id', 'data.items[].url', 'data.items[].auth_type', 'data.items[].auth_token', 'data.items[].data_types', 'data.items[].format', 'data.items[].batch_size', 'data.items[].retry_count', 'data.items[].enabled', 'data.total'],
     requestExample: `GET /api/v1/northbound/push/targets
 X-Northbound-Token: <access-token>`,
@@ -1953,7 +1959,7 @@ X-Northbound-Token: <access-token>`,
     url: '/api/v1/northbound/push/targets',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.message', 'data.id'],
     requestExample: `POST /api/v1/northbound/push/targets
 X-Northbound-Token: <access-token>
@@ -1988,7 +1994,7 @@ Content-Type: application/json
     url: '/api/v1/northbound/push/targets/{id}',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.id'],
     requestExample: `DELETE /api/v1/northbound/push/targets/oss-primary
 X-Northbound-Token: <access-token>`,
@@ -2009,7 +2015,7 @@ X-Northbound-Token: <access-token>`,
     url: '/api/v1/northbound/push/targets/{id}/circuit',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.target_id', 'data.state', 'data.failure_count', 'data.threshold'],
     requestExample: `GET /api/v1/northbound/push/targets/oss-primary/circuit
 X-Northbound-Token: <access-token>`,
@@ -2033,7 +2039,7 @@ X-Northbound-Token: <access-token>`,
     url: '/api/v1/northbound/push/targets/{id}/circuit/reset',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.target_id', 'data.state'],
     requestExample: `POST /api/v1/northbound/push/targets/oss-primary/circuit/reset
 X-Northbound-Token: <access-token>`,
@@ -2055,7 +2061,7 @@ X-Northbound-Token: <access-token>`,
     url: '/api/v1/northbound/push/deadletter?limit=20&offset=0',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go + internal/northbound/push/outbox.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.items[].id', 'data.items[].event_id', 'data.items[].subject', 'data.items[].payload', 'data.items[].target_id', 'data.items[].status', 'data.items[].attempts', 'data.items[].max_attempts', 'data.items[].last_error?', 'data.items[].next_retry_at', 'data.items[].created_at', 'data.items[].updated_at', 'data.total'],
     requestExample: `GET /api/v1/northbound/push/deadletter?limit=20&offset=0
 X-Northbound-Token: <access-token>`,
@@ -2088,7 +2094,7 @@ X-Northbound-Token: <access-token>`,
     url: '/api/v1/northbound/push/deadletter/{id}/replay',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/router.go + internal/northbound/push/outbox.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.id'],
     requestExample: `POST /api/v1/northbound/push/deadletter/4a65c2aa-086b-4c1b-a3b7-000100010001/replay
 X-Northbound-Token: <access-token>`,
@@ -2109,7 +2115,7 @@ X-Northbound-Token: <access-token>`,
     url: '/api/v1/northbound/servers',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/server_handler.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.items[].id', 'data.items[].role', 'data.items[].host', 'data.items[].port', 'data.items[].description', 'data.items[].is_active', 'data.items[].created_at', 'data.items[].updated_at'],
     requestExample: `GET /api/v1/northbound/servers
 X-Northbound-Token: <access-token>`,
@@ -2138,7 +2144,7 @@ X-Northbound-Token: <access-token>`,
     url: '/api/v1/northbound/servers/active',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/server_handler.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.role'],
     requestExample: `PUT /api/v1/northbound/servers/active
 X-Northbound-Token: <access-token>
@@ -2164,7 +2170,7 @@ Content-Type: application/json
     url: '/api/v1/northbound/servers/{role}',
     auth: commonApiAuth,
     backendSource: 'omcgo/internal/northbound/server_handler.go',
-    fieldContract: '完整契约',
+    fieldContract: '完整返回字段',
     responseFields: [...currentEnvelopeFields, 'data.role'],
     requestExample: `PUT /api/v1/northbound/servers/primary
 X-Northbound-Token: <access-token>
@@ -2572,72 +2578,72 @@ device_id,mr_type,cell_id,collect_time
 const apiMetaByKey: Record<string, Partial<NorthboundApiRow>> = {
   'device-list': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...listResponseFields, 'data.items[].id', 'data.items[].serial_number', 'data.items[].oui', 'data.items[].product_class', 'data.items[].manufacturer', 'data.items[].model_name', 'data.items[].carrier', 'data.items[].technology', 'data.items[].lifecycle_state', 'data.items[].is_online', 'data.items[].firmware_version', 'data.items[].ip_address', 'data.items[].device_name', 'data.items[].site_id', 'data.items[].last_inform_at?', 'data.items[].group_name?'],
   },
   'device-detail': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...currentEnvelopeFields, 'data.device', 'data.device_info', 'data.parameters?', 'data.alarms?'],
   },
   'inventory-export': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: ['HTTP 200 CSV stream', 'Content-Type', 'Content-Disposition', 'CSV columns depend on export service'],
   },
   'parameter-tree': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...currentEnvelopeFields, 'data.name', 'data.full_path', 'data.is_leaf', 'data.children[]', 'data.children[].name', 'data.children[].full_path', 'data.children[].value?', 'data.children[].type?', 'data.children[].writable?'],
   },
   'parameter-set': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...currentEnvelopeFields, 'data.message', 'data.parameters', 'data.reboot_required', 'data.task_id'],
   },
   'config-pull': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...currentEnvelopeFields, 'data.device_id', 'data.command_id', 'data.request_id', 'data.batch_count', 'data.status'],
   },
   'task-detail': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...currentEnvelopeFields, 'data.id', 'data.device_id?', 'data.device_sn?', 'data.method?', 'data.status', 'data.result_code?', 'data.error_message?', 'data.created_at?', 'data.completed_at?'],
   },
   'device-reboot': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...currentEnvelopeFields, 'data.message'],
   },
   'alarm-active': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...listResponseFields, 'data.items[].id', 'data.items[].device_sn', 'data.items[].severity', 'data.items[].alarm_type', 'data.items[].alarm_identifier', 'data.items[].description', 'data.items[].status', 'data.items[].raised_at'],
   },
   'alarm-statistics': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...currentEnvelopeFields, 'data.total', 'data.by_severity'],
   },
   'pm-aggregated': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...listResponseFields, 'data.items[].device_sn?', 'data.items[].metric_path', 'data.items[].value', 'data.items[].bucket_start', 'data.items[].technology?'],
   },
   'pm-export': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...currentEnvelopeFields, 'data.id', 'data.task_name', 'data.source_type', 'data.format', 'data.status', 'data.row_count', 'data.file_size'],
   },
   'mr-data': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: [...listResponseFields, 'data.items[].device_id', 'data.items[].mr_type', 'data.items[].cell_id?', 'data.items[].collect_time?'],
   },
   'mr-export': {
     apiKind: '业务复用',
-    fieldContract: '当前契约',
+    fieldContract: '当前返回字段',
     responseFields: ['HTTP 200 CSV stream', 'Content-Type', 'Content-Disposition', 'CSV columns depend on MR export service'],
   },
 };
@@ -3604,6 +3610,9 @@ function serializeDeliveryTarget(
 
 function mapApiSnmpTarget(target: NorthboundSNMPAlarmTarget): SnmpAlarmTargetRow {
   const fallback = snmpAlarmTargets.find((row) => row.key === target.key);
+  const community = target.community_set
+    ? storedCredentialText
+    : (target.community || (target.version === 'v2' ? snmpDefaultCommunity : undefined));
   return {
     key: target.key,
     name: target.name || fallback?.name || target.key,
@@ -3613,12 +3622,12 @@ function mapApiSnmpTarget(target: NorthboundSNMPAlarmTarget): SnmpAlarmTargetRow
     listenPort: target.listen_port,
     targetHost: target.target_host,
     targetPort: target.target_port,
-    community: target.community_set ? '已加密存储' : target.community,
+    community,
     securityName: target.security_name,
     authProtocol: target.auth_protocol,
-    authCredential: target.auth_credential_set ? '已加密存储' : target.auth_credential,
+    authCredential: target.auth_credential_set ? storedCredentialText : target.auth_credential,
     privProtocol: target.priv_protocol,
-    privCredential: target.priv_credential_set ? '已加密存储' : target.priv_credential,
+    privCredential: target.priv_credential_set ? storedCredentialText : target.priv_credential,
     mibQueryEnabled: target.mib_query_enabled,
     clearSeverityPolicy: target.clear_severity_policy,
     timeoutSeconds: target.timeout_seconds,
@@ -3627,6 +3636,14 @@ function mapApiSnmpTarget(target: NorthboundSNMPAlarmTarget): SnmpAlarmTargetRow
 }
 
 function serializeSnmpTarget(row: SnmpAlarmTargetRow, enabled: boolean): NorthboundSNMPAlarmTarget {
+  const isV2 = row.version === 'v2';
+  const isV3 = row.version === 'v3';
+  const communityIsStored = row.community === storedCredentialText;
+  const community = communityIsStored
+    ? ''
+    : (row.community?.trim() || (isV2 ? snmpDefaultCommunity : undefined));
+  const authCredentialIsStored = row.authCredential === storedCredentialText;
+  const privCredentialIsStored = row.privCredential === storedCredentialText;
   return {
     key: row.key,
     name: row.name,
@@ -3637,12 +3654,15 @@ function serializeSnmpTarget(row: SnmpAlarmTargetRow, enabled: boolean): Northbo
     listen_port: row.listenPort,
     target_host: row.targetHost,
     target_port: row.targetPort,
-    community: row.community === '已加密存储' ? '' : row.community,
-    security_name: row.securityName,
-    auth_protocol: row.authProtocol,
-    auth_credential: row.authCredential === '已加密存储' ? '' : row.authCredential,
-    priv_protocol: row.privProtocol,
-    priv_credential: row.privCredential === '已加密存储' ? '' : row.privCredential,
+    community: isV2 ? community : undefined,
+    community_set: isV2 ? communityIsStored : false,
+    security_name: isV3 ? row.securityName : undefined,
+    auth_protocol: isV3 ? row.authProtocol : undefined,
+    auth_credential: isV3 ? (authCredentialIsStored ? '' : row.authCredential) : undefined,
+    auth_credential_set: isV3 ? authCredentialIsStored : false,
+    priv_protocol: isV3 ? row.privProtocol : undefined,
+    priv_credential: isV3 ? (privCredentialIsStored ? '' : row.privCredential) : undefined,
+    priv_credential_set: isV3 ? privCredentialIsStored : false,
     clear_severity_policy: row.clearSeverityPolicy,
     mib_query_enabled: row.mibQueryEnabled,
     timeout_seconds: row.timeoutSeconds,
@@ -3655,7 +3675,7 @@ function getSnmpEnableBlocker(row: SnmpAlarmTargetRow): string | null {
     return '请先编辑通知目标 IP/域名，再启用真实上报';
   }
   if (row.version === 'v2' && !row.community?.trim()) {
-    return '请先编辑 SNMP v2 community，再启用真实上报';
+    return null;
   }
   if (row.version === 'v3' && !row.securityName?.trim()) {
     return '请先编辑 SNMP v3 security name，再启用真实上报';
@@ -3740,7 +3760,7 @@ function mapApiConfig(row: NorthboundAPIConfig): NorthboundApiRow {
     url: row.path,
     auth: fallback?.auth ?? commonApiAuth,
     backendSource: row.source || fallback?.backendSource || '',
-    fieldContract: fallback?.fieldContract ?? '当前契约',
+    fieldContract: fallback?.fieldContract ?? '当前返回字段',
     responseFields: (row.response_contract?.fields as string[] | undefined) ?? fallback?.responseFields,
     requestExample: fallback?.requestExample ?? `${row.method} ${row.path}`,
     responseExample: fallback?.responseExample ?? '{ "ret": 1, "msg": "ok", "data": {} }',
@@ -4041,20 +4061,26 @@ function buildApiReportStatus(row: NorthboundApiRow): ReportStatusInfo {
     key: `api:${row.key}`,
     capabilityName: row.name,
     state: 'success',
-    statusText: '契约正常',
+    statusText: '接口可用',
     lastTime: '-',
     artifactType: 'message',
     artifactName: `${row.method} ${row.name}`,
     artifactPath: row.url,
     size: `${responseFields.length} 字段`,
-    targetSummary: `${row.module || '北向 API'} / ${meta.fieldContract}`,
-    detail: '接口契约检查结果来自当前系统配置。',
+    targetSummary: `${row.module || '北向 API'} / 返回字段 ${responseFields.length} 项`,
+    detail: '已按当前系统配置生成接口调用说明和返回字段清单。',
     payload: JSON.stringify({
-      method: row.method,
-      url: row.url,
-      request: normalizeLegacyApiText(row.requestExample),
-      response_fields: responseFields,
+      接口名称: row.name,
+      所属模块: row.module || '北向 API',
+      请求方式: row.method,
+      接口地址: row.url,
+      返回字段范围: meta.fieldContract,
+      请求示例: normalizeLegacyApiText(row.requestExample),
+      返回字段: responseFields,
     }, null, 2),
+    previewTitle: '接口检查结果',
+    copyLabel: '复制结果',
+    resultTitle: `${row.name} 接口检查结果`,
   };
 }
 
@@ -4280,6 +4306,52 @@ function valuePreview(value: unknown): string {
   }
 }
 
+function parseJSONPayload(payload: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(payload);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function friendlyBool(value: unknown): string {
+  if (value === true) return '支持';
+  if (value === false) return '不支持';
+  return '-';
+}
+
+function friendlyApiArtifactName(value?: string): string {
+  const raw = value || '接口检查';
+  return raw.replace(/\s+contract$/i, ' 接口检查');
+}
+
+function friendlyApiEventPayload(event: NorthboundPageConfigEvent): string {
+  const parsed = parseJSONPayload(event.payload || '') ?? {};
+  const summary = event.summary ?? {};
+  const responseContract = parsed.response_contract;
+  const responseFields = responseContract
+    && typeof responseContract === 'object'
+    && !Array.isArray(responseContract)
+    && Array.isArray((responseContract as Record<string, unknown>).fields)
+    ? (responseContract as Record<string, unknown>).fields
+    : responseContract;
+
+  return JSON.stringify({
+    接口名称: friendlyApiArtifactName(event.artifact_name).replace(/\s+接口检查$/, ''),
+    请求方式: parsed.method ?? summary.method ?? '-',
+    接口地址: parsed.path ?? event.artifact_path ?? '-',
+    接口类型: summary.kind ?? '-',
+    数据类型: summary.data_type ?? '-',
+    旧系统支持: friendlyBool(parsed.old_system ?? summary.old_system_supported),
+    当前系统支持: friendlyBool(parsed.current_supported ?? summary.current_supported),
+    返回字段: responseFields ?? '-',
+  }, null, 2);
+}
+
 function getJsonFieldRows(value: unknown): MessageFieldRow[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
   return Object.entries(value as Record<string, unknown>).map(([field, fieldValue]) => ({
@@ -4402,7 +4474,10 @@ function MessageReportPreview({ content }: { content: string }) {
 
 function buildEventReportStatus(event: NorthboundPageConfigEvent, fallbackCapabilityName: string): ReportStatusInfo {
   const state = reportStateFromEvent(event);
-  const payload = event.payload || JSON.stringify(event.summary ?? {}, null, 2);
+  const isApiEvent = event.capability === 'api';
+  const payload = isApiEvent
+    ? friendlyApiEventPayload(event)
+    : event.payload || JSON.stringify(event.summary ?? {}, null, 2);
   return {
     key: `event:${event.id}`,
     capabilityName: fallbackCapabilityName,
@@ -4410,12 +4485,15 @@ function buildEventReportStatus(event: NorthboundPageConfigEvent, fallbackCapabi
     statusText: eventStatusText(event),
     lastTime: formatRunTime(event.created_at),
     artifactType: event.artifact_type === 'file' ? 'file' : 'message',
-    artifactName: event.artifact_name || '-',
+    artifactName: isApiEvent ? friendlyApiArtifactName(event.artifact_name) : event.artifact_name || '-',
     artifactPath: event.artifact_path || '-',
     size: formatBytes(payload.length),
     targetSummary: eventTargetSummary(event),
     detail: event.error_message || eventDetailText(event),
     payload,
+    previewTitle: isApiEvent ? '接口检查结果' : undefined,
+    copyLabel: isApiEvent ? '复制结果' : undefined,
+    resultTitle: isApiEvent ? `${fallbackCapabilityName || '北向 API'} 接口检查结果` : undefined,
   };
 }
 
@@ -4431,7 +4509,7 @@ function eventTypeLabel(event: NorthboundPageConfigEvent): string {
     alarm_push: '实时告警',
     connection_rejected: '连接拒绝',
     connection_test: '连接测试',
-    contract_check: '契约检查',
+    contract_check: '接口检查',
     delivery: '文件投递',
     file_sync: '文件补录',
     heartbeat: '心跳',
@@ -4508,7 +4586,7 @@ function eventTargetSummary(event: NorthboundPageConfigEvent): string {
   if (event.event_type === 'connection_test') return '连接测试已记录';
   if (event.event_type === 'delivery') return '文件投递结果已记录';
   if (event.event_type === 'message_test') return '测试报文已记录';
-  if (event.event_type === 'contract_check') return '接口契约检查已记录';
+  if (event.event_type === 'contract_check') return '接口检查已记录';
   if (event.event_type === 'run') return '运行记录已生成';
   return '状态已记录';
 }
@@ -4518,7 +4596,7 @@ function eventDetailText(event: NorthboundPageConfigEvent): string {
   if (event.capability === 'delivery') return 'FTP/SFTP 目标连接探测结果来自后端。';
   if (event.capability === 'snmp') return 'SNMP 告警字段和 OID 顺序按 omcAlarmMIB.mib 生成。';
   if (event.capability === 'socket') return 'Socket 服务端登录、心跳、同步和实时告警推送结果可查看。';
-  if (event.capability === 'api') return '北向 API 接口契约检查结果可查看。';
+  if (event.capability === 'api') return '北向 API 接口检查结果可查看，包含请求方式、接口地址、支持状态和返回字段清单。';
   return '北向页面化配置事件。';
 }
 
@@ -4668,7 +4746,7 @@ function getApiMeta(row: NorthboundApiRow) {
   const meta = apiMetaByKey[row.key] ?? {};
   return {
     apiKind: row.apiKind ?? meta.apiKind ?? '业务复用',
-    fieldContract: row.fieldContract ?? meta.fieldContract ?? '当前契约',
+    fieldContract: row.fieldContract ?? meta.fieldContract ?? '当前返回字段',
     responseFields: row.responseFields ?? meta.responseFields ?? currentEnvelopeFields,
   };
 }
@@ -4676,6 +4754,19 @@ function getApiMeta(row: NorthboundApiRow) {
 function normalizeLegacyApiText(value: string) {
   return value
     .replaceAll('JWT 或 API Key，', 'JWT，');
+}
+
+function apiUsageSummary(row: NorthboundApiRow): string {
+  if (row.module === '鉴权') return '外部系统先调用该接口获取访问 Token，再调用其它北向 API。';
+  if (row.module === '设备') return '用于外部系统查询设备清单、设备详情、设备状态、注册设备或触发设备操作。';
+  if (row.module === '设备组') return '用于外部系统同步和维护设备分组，以及维护分组内设备关系。';
+  if (row.module === '参数') return '用于外部系统查询或设置设备参数，返回结果以当前系统设备参数能力为准。';
+  if (row.module === '告警') return '用于外部系统查询当前告警、历史告警或告警统计信息。';
+  if (row.module === 'PM') return '用于外部系统导出性能数据或查询聚合指标。';
+  if (row.module === 'MR') return '用于外部系统查询或导出 MR 数据。';
+  if (row.module === '日志') return '用于外部系统触发设备日志收集并查询处理结果。';
+  if (row.module === '任务') return '用于外部系统查询异步任务执行结果。';
+  return '用于外部系统调用当前系统已开放的北向业务能力。';
 }
 
 function statusTag(enabled: boolean) {
@@ -4705,7 +4796,7 @@ function snmpVersionTag(version: SnmpVersion) {
     v2: 'blue',
     v3: 'purple',
   };
-  return <Tag color={colors[version]}>{version.toUpperCase()}</Tag>;
+  return <Tag color={colors[version]}>{version === 'v2' ? 'V2C' : 'V3'}</Tag>;
 }
 
 function snmpNotificationTag(type: SnmpNotificationType) {
@@ -5204,6 +5295,7 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
 ));
 
 export default function NorthboundPageConfig() {
+  const nt = useNorthboundI18n();
   const [configForm] = Form.useForm();
   const [fileProfiles, setFileProfiles] = useState<ScenarioRow[]>(scenarioRows);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioRow | null>(null);
@@ -5278,6 +5370,7 @@ export default function NorthboundPageConfig() {
   );
   const [snmpTargets, setSnmpTargets] = useState<SnmpAlarmTargetRow[]>(snmpAlarmTargets);
   const [snmpEnabled, setSnmpEnabled] = useState<Record<string, boolean>>(defaultSnmpEnabled);
+  const [snmpSaving, setSnmpSaving] = useState<Record<string, boolean>>({});
   const [selectedSnmp, setSelectedSnmp] = useState<SnmpAlarmTargetRow | null>(null);
   const [snmpEditor, setSnmpEditor] = useState<SnmpAlarmTargetRow | null>(null);
   const [pmMetricRows, setPmMetricRows] = useState<PmMetric[]>([]);
@@ -5393,10 +5486,10 @@ export default function NorthboundPageConfig() {
         setApiUsers(apiUserResp.items.map(mapApiUser));
       }
 
-      if (!silent) void message.success('北向页面配置已刷新');
+      if (!silent) void message.success(nt('北向页面配置已刷新'));
     } catch {
       if (!silent) {
-        void message.error('北向页面配置加载失败，已保留当前页面数据');
+        void message.error(nt('北向页面配置加载失败，已保留当前页面数据'));
       }
     } finally {
       pageConfigLoadingRef.current = false;
@@ -5412,7 +5505,7 @@ export default function NorthboundPageConfig() {
         if (!cancelled) setPmMetricRows(metrics);
       })
       .catch(() => {
-        if (!cancelled) void message.error('指标目录加载失败');
+        if (!cancelled) void message.error(nt('指标目录加载失败'));
       })
       .finally(() => {
         if (!cancelled) setPmLoading(false);
@@ -5554,20 +5647,20 @@ export default function NorthboundPageConfig() {
     ownerCode: string,
   ) => {
     if (!row.host || !row.username) {
-      void message.warning('请先填写主机地址和用户名');
+      void message.warning(nt('请先填写主机地址和用户名'));
       return;
     }
 	    void northboundPageConfigApi.testDeliveryTarget(serializeDeliveryTarget(scope, ownerCode, row))
 	      .then((event) => {
 	        openSingleEventReport(event, `${row.name} ${row.protocol}`);
         if (event.status === 'success') {
-          void message.success(`${row.name} ${row.protocol} 连接测试通过`);
+          void message.success(nt(`${row.name} ${row.protocol} 连接测试通过`));
         } else {
-          void message.warning(`${row.name} ${row.protocol} 连接测试未通过`);
+          void message.warning(nt(`${row.name} ${row.protocol} 连接测试未通过`));
         }
       })
       .catch(() => {
-        void message.error(`${row.name} ${row.protocol} 连接测试失败`);
+        void message.error(nt(`${row.name} ${row.protocol} 连接测试失败`));
       });
   };
 
@@ -5712,6 +5805,15 @@ export default function NorthboundPageConfig() {
     });
   };
 
+  const setSnmpTargetSaving = (key: string, saving: boolean) => {
+    setSnmpSaving((prev) => {
+      const next = { ...prev };
+      if (saving) next[key] = true;
+      else delete next[key];
+      return next;
+    });
+  };
+
   const saveInventoryDraft = () => {
     if (!selectedInventoryConfig) return;
     const enabled = Boolean(inventoryEnabled[selectedInventoryConfig.key]);
@@ -5732,11 +5834,11 @@ export default function NorthboundPageConfig() {
     ])
       .then(([profile]) => {
         applyInventoryProfile(profile);
-        void message.success(`${profile.object_code} Inventory 配置已保存`);
+        void message.success(nt(`${profile.object_code} Inventory 配置已保存`));
         setInventoryEditorOpen(false);
       })
       .catch(() => {
-        void message.error(`${selectedInventoryConfig.objectCode} Inventory 配置保存失败`);
+        void message.error(nt(`${selectedInventoryConfig.objectCode} Inventory 配置保存失败`));
       })
       .finally(() => setInventorySaving(selectedInventoryConfig.key, false));
   };
@@ -5903,11 +6005,11 @@ export default function NorthboundPageConfig() {
     void configForm.validateFields().then((values: FileProfileEditorValues) => {
       const code = values.scenarioCode.trim().toUpperCase();
       if (!code) {
-        void message.warning('请输入配置编号');
+        void message.warning(nt('请输入配置编号'));
         return;
       }
       if (!/^S\d{4}$/.test(code)) {
-        void message.warning('配置编号必须使用 S0000 格式');
+        void message.warning(nt('配置编号必须使用 S0000 格式'));
         return;
       }
       const enabled = Boolean(values.enabled);
@@ -5915,7 +6017,7 @@ export default function NorthboundPageConfig() {
       const fieldRowsByTarget = fieldConfigRef.current?.getFieldRowsByTarget() ?? {};
       const periodValidationError = validateEditorPeriodRows(editorPeriodRows);
       if (periodValidationError) {
-        void message.warning(periodValidationError);
+        void message.warning(nt(periodValidationError));
         return;
       }
       const groups = serializeEditorPeriodRows(editorPeriodRows, fieldRowsByTarget);
@@ -5955,11 +6057,11 @@ export default function NorthboundPageConfig() {
           .then(([profile]) => {
             applyFileProfile(profile);
             setSelectedScenario(mapApiFileProfile(profile));
-            void message.success(`新增配置已保存：${profile.name}`);
+            void message.success(nt(`新增配置已保存：${profile.name}`));
             setEditorOpen(false);
           })
           .catch(() => {
-            void message.error(`配置保存失败：${code}`);
+            void message.error(nt(`配置保存失败：${code}`));
           })
           .finally(() => setFileSaving(code, false));
         return;
@@ -5973,11 +6075,11 @@ export default function NorthboundPageConfig() {
       ])
         .then(([profile]) => {
           applyFileProfile(profile);
-          void message.success(`编辑配置已保存：${profile.name}`);
+          void message.success(nt(`编辑配置已保存：${profile.name}`));
           setEditorOpen(false);
         })
         .catch(() => {
-          void message.error(`配置保存失败：${code}`);
+          void message.error(nt(`配置保存失败：${code}`));
         })
         .finally(() => setFileSaving(code, false));
     });
@@ -6025,7 +6127,7 @@ export default function NorthboundPageConfig() {
     const selectedDomains = (configForm.getFieldValue('domains') ?? []) as Domain[];
     const [domain] = selectedDomains;
     if (!domain) {
-      void message.warning('请先选择业务域');
+      void message.warning(nt('请先选择业务域'));
       return;
     }
     setEditorPeriodRows((rows) => [...rows, defaultPeriodRow(domain, false)]);
@@ -6105,9 +6207,9 @@ export default function NorthboundPageConfig() {
   const copyReportPayload = (info: ReportStatusInfo) => {
     const finish = (success: boolean) => {
       if (success) {
-        void message.success('报文已复制');
+        void message.success(nt('报文已复制'));
       } else {
-        void message.error('报文复制失败');
+        void message.error(nt('报文复制失败'));
       }
     };
     if (navigator.clipboard?.writeText) {
@@ -6185,7 +6287,7 @@ export default function NorthboundPageConfig() {
       .catch(() => {
         setReportRunList([]);
         setSelectedReportStatus(fallback);
-        void message.warning('未读取到最近上报记录，已显示配置预览');
+        void message.warning(nt('未读取到最近上报记录，已显示配置预览'));
       });
   };
 
@@ -6246,7 +6348,7 @@ export default function NorthboundPageConfig() {
         setSelectedReportStatus(buildEventReportStatus(fullEvent, capabilityName));
       })
       .catch(() => {
-        void message.warning('未读取到完整事件详情，已显示列表摘要');
+        void message.warning(nt('未读取到完整事件详情，已显示列表摘要'));
       });
   };
 
@@ -6279,7 +6381,7 @@ export default function NorthboundPageConfig() {
       })
       .catch(() => {
         setSelectedReportStatus(fallback);
-        void message.warning('未读取到最近事件，已显示配置预览');
+        void message.warning(nt('未读取到最近事件，已显示配置预览'));
       })
       .finally(() => {
         setReportEventLoading(false);
@@ -6297,7 +6399,7 @@ export default function NorthboundPageConfig() {
       .then(applyFileProfile)
       .catch(() => {
         setScenarioEnabled((prev) => ({ ...prev, [row.code]: previous }));
-        void message.error(`${row.code} 启停状态保存失败`);
+        void message.error(nt(`${row.code} 启停状态保存失败`));
       })
       .finally(() => setFileSaving(row.code, false));
   };
@@ -6313,7 +6415,7 @@ export default function NorthboundPageConfig() {
       .then(applyInventoryProfile)
       .catch(() => {
         setInventoryEnabled((prev) => ({ ...prev, [row.key]: previous }));
-        void message.error(`${row.objectCode} Inventory 启停状态保存失败`);
+        void message.error(nt(`${row.objectCode} Inventory 启停状态保存失败`));
       })
       .finally(() => setInventorySaving(row.key, false));
   };
@@ -6323,10 +6425,10 @@ export default function NorthboundPageConfig() {
     void northboundPageConfigApi.runFileProfile(row.code, { limit: 200 })
       .then((result) => {
         openReportDrawer(result.items, `${row.code} 北向文件`, null);
-        void message.success(`${row.code} 已生成 ${result.total} 条上报记录`);
+        void message.success(nt(`${row.code} 已生成 ${result.total} 条上报记录`));
       })
       .catch(() => {
-        void message.error(`${row.code} 手动执行失败`);
+        void message.error(nt(`${row.code} 手动执行失败`));
       })
       .finally(() => {
         setFileProfileRunning((prev) => ({ ...prev, [row.code]: false }));
@@ -6339,10 +6441,10 @@ export default function NorthboundPageConfig() {
       .then((run) => {
         void resolveRunReportStatus(run, `${row.objectCode} Inventory`)
           .then(setSelectedReportStatus);
-        void message.success(`${row.objectCode} Inventory 已生成上报记录`);
+        void message.success(nt(`${row.objectCode} Inventory 已生成上报记录`));
       })
       .catch(() => {
-        void message.error(`${row.objectCode} Inventory 手动执行失败`);
+        void message.error(nt(`${row.objectCode} Inventory 手动执行失败`));
       })
       .finally(() => {
         setInventoryProfileRunning((prev) => ({ ...prev, [row.key]: false }));
@@ -6353,11 +6455,12 @@ export default function NorthboundPageConfig() {
     if (checked) {
       const blocker = getSnmpEnableBlocker(row);
       if (blocker) {
-        void message.warning(`${row.name} ${blocker}`);
+        void message.warning(nt(`${row.name} ${blocker}`));
         return;
       }
     }
     const previous = Boolean(snmpEnabled[row.key]);
+    setSnmpTargetSaving(row.key, true);
     setSnmpEnabled((prev) => ({ ...prev, [row.key]: checked }));
     void northboundPageConfigApi.updateSNMPAlarmTarget(row.key, serializeSnmpTarget(row, checked))
       .then((target) => {
@@ -6367,8 +6470,9 @@ export default function NorthboundPageConfig() {
       })
       .catch(() => {
         setSnmpEnabled((prev) => ({ ...prev, [row.key]: previous }));
-        void message.error(`${row.name} SNMP 启停状态保存失败`);
-      });
+        void message.error(nt(`${row.name} SNMP 启停状态保存失败`));
+      })
+      .finally(() => setSnmpTargetSaving(row.key, false));
   };
 
   const persistSocketEnabled = (row: SocketAlarmConfigRow, checked: boolean) => {
@@ -6384,7 +6488,7 @@ export default function NorthboundPageConfig() {
       })
       .catch(() => {
         setSocketEnabled((prev) => ({ ...prev, [row.key]: previous }));
-        void message.error(`${row.name} Socket 启停状态保存失败`);
+        void message.error(nt(`${row.name} Socket 启停状态保存失败`));
       });
   };
 
@@ -6400,11 +6504,11 @@ export default function NorthboundPageConfig() {
         const configRows = resp.items.map(mapApiConfig);
         setApiRows(expandApiDisplayRows(configRows));
         setApiEnabled(Object.fromEntries(resp.items.map((row) => [row.key, row.enabled])));
-        void message.success(`北向 API 总开关已${checked ? '启用' : '停用'}`);
+        void message.success(nt(`北向 API 总开关已${checked ? '启用' : '停用'}`));
       })
       .catch(() => {
         setApiEnabled(previous);
-        void message.error('北向 API 总开关保存失败');
+        void message.error(nt('北向 API 总开关保存失败'));
       })
       .finally(() => setApiSwitchSaving(false));
   };
@@ -6440,10 +6544,10 @@ export default function NorthboundPageConfig() {
       .then((resp) => {
         apiUserDirtyRef.current = false;
         setApiUsers(resp.items.map(mapApiUser));
-        void message.success('北向 API 用户已保存');
+        void message.success(nt('北向 API 用户已保存'));
       })
       .catch(() => {
-        void message.error('北向 API 用户保存失败');
+        void message.error(nt('北向 API 用户保存失败'));
       })
       .finally(() => {
         apiUserSavingRef.current = false;
@@ -6455,10 +6559,10 @@ export default function NorthboundPageConfig() {
     void northboundPageConfigApi.testSocketAlarmConfig(row.key)
       .then((event) => {
         openSingleEventReport(event, row.name);
-        void message.success(`${row.name} 样例报文已记录`);
+        void message.success(nt(`${row.name} 样例报文已记录`));
       })
       .catch(() => {
-        void message.error(`${row.name} 样例报文生成失败`);
+        void message.error(nt(`${row.name} 样例报文生成失败`));
       });
   };
 
@@ -6467,13 +6571,13 @@ export default function NorthboundPageConfig() {
       .then((event) => {
         openSingleEventReport(event, row.name);
         if (event.status === 'success') {
-          void message.success(`${row.name} 测试报文已生成`);
+          void message.success(nt(`${row.name} 测试报文已生成`));
         } else {
-          void message.warning(`${row.name} 测试报文已生成，但目标配置不完整`);
+          void message.warning(nt(`${row.name} 测试报文已生成，但目标配置不完整`));
         }
       })
       .catch(() => {
-        void message.error(`${row.name} 测试报文生成失败`);
+        void message.error(nt(`${row.name} 测试报文生成失败`));
       });
   };
 
@@ -6481,10 +6585,10 @@ export default function NorthboundPageConfig() {
     void northboundPageConfigApi.testAPIConfig(apiConfigKey(row))
       .then((event) => {
         openSingleEventReport(event, row.name);
-        void message.success(`${row.name} 契约检查已记录`);
+        void message.success(nt(`${row.name} 接口检查已记录`));
       })
       .catch(() => {
-        void message.error(`${row.name} 契约检查失败`);
+        void message.error(nt(`${row.name} 接口检查失败`));
       });
   };
 
@@ -6506,11 +6610,11 @@ export default function NorthboundPageConfig() {
           ...prev,
           [config.key]: deliveryResp.items.map(mapApiDeliveryTarget),
         }));
-        void message.success(`${next.name} 已保存`);
+        void message.success(nt(`${next.name} 已保存`));
         closeSocketEditor();
       })
       .catch(() => {
-        void message.error(`${row.name} Socket 配置保存失败`);
+        void message.error(nt(`${row.name} Socket 配置保存失败`));
       });
   };
 
@@ -6519,21 +6623,23 @@ export default function NorthboundPageConfig() {
     if (enabled) {
       const blocker = getSnmpEnableBlocker(row);
       if (blocker) {
-        void message.warning(`${row.name} ${blocker}`);
+        void message.warning(nt(`${row.name} ${blocker}`));
         return;
       }
     }
+    setSnmpTargetSaving(row.key, true);
     void northboundPageConfigApi.updateSNMPAlarmTarget(row.key, serializeSnmpTarget(row, enabled))
       .then((target) => {
         const next = mapApiSnmpTarget(target);
         setSnmpTargets((rows) => rows.map((item) => (item.key === next.key ? next : item)));
         setSnmpEnabled((prev) => ({ ...prev, [next.key]: target.enabled }));
-        void message.success(`${next.name} 已保存`);
+        void message.success(nt(`${next.name} 已保存`));
         setSnmpEditor(null);
       })
       .catch(() => {
-        void message.error(`${row.name} SNMP 配置保存失败`);
-      });
+        void message.error(nt(`${row.name} SNMP 配置保存失败`));
+      })
+      .finally(() => setSnmpTargetSaving(row.key, false));
   };
 
   const scenarioColumns: ColumnsType<ScenarioRow> = [
@@ -6581,7 +6687,7 @@ export default function NorthboundPageConfig() {
                   return;
                 }
                 if (key === 'copy') {
-                  void message.info(`${row.code} 已复制为草稿`);
+                  void message.info(nt(`${row.code} 已复制为草稿`));
                   return;
                 }
                 runFileProfile(row);
@@ -6890,8 +6996,8 @@ export default function NorthboundPageConfig() {
           menu={{
             items: [
               { key: 'view', icon: <EyeOutlined />, label: '查看' },
-              { key: 'report', icon: <FileSearchOutlined />, label: '契约结果' },
-              { key: 'test', icon: <PlayCircleOutlined />, label: '检查契约' },
+              { key: 'report', icon: <FileSearchOutlined />, label: '最近检查结果' },
+              { key: 'test', icon: <PlayCircleOutlined />, label: '检查接口' },
             ],
             onClick: ({ key, domEvent }) => {
               domEvent.stopPropagation();
@@ -7443,6 +7549,7 @@ export default function NorthboundPageConfig() {
             checked={snmpEnabled[row.key]}
             checkedChildren="开"
             unCheckedChildren="关"
+            loading={Boolean(snmpSaving[row.key])}
             onClick={(_, event) => event.stopPropagation()}
             onChange={(checked) => persistSnmpEnabled(row, checked)}
           />
@@ -7489,7 +7596,7 @@ export default function NorthboundPageConfig() {
       title: '安全配置',
       width: 220,
       render: (_, row) => row.version === 'v2'
-        ? <span className={styles.monoText}>{row.community}</span>
+        ? <span className={styles.monoText}>{row.community === storedCredentialText ? '********' : (row.community || snmpDefaultCommunity)}</span>
         : <Space size={4}><Tag>{row.securityName}</Tag><Tag>{row.authProtocol}</Tag><Tag>{row.privProtocol}</Tag></Space>,
     },
     {
@@ -7673,7 +7780,7 @@ export default function NorthboundPageConfig() {
     { title: '事件', dataIndex: 'event_type', width: 110, render: (_, event) => <Tag>{eventTypeLabel(event)}</Tag> },
     { title: '状态', dataIndex: 'status', width: 88, render: (_, event) => reportStateTag(reportStateFromEvent(event), eventStatusText(event)) },
     {
-      title: '目标/报文',
+      title: '目标/内容',
       width: 220,
       render: (_, event) => (
         <div className={styles.summaryCell}>
@@ -7696,8 +7803,11 @@ export default function NorthboundPageConfig() {
   const reportSummary = reportRunList.length > 1
     ? `共 ${reportRunList.length} 个对象：成功 ${reportSuccessCount} · 失败 ${reportRunList.length - reportSuccessCount}`
     : '';
+  const selectedApiMeta = selectedApi ? getApiMeta(selectedApi) : null;
+  const selectedApiResponseFields = selectedApiMeta?.responseFields ?? [];
 
   return (
+    <NorthboundI18nScope>
     <div className={styles.page}>
       <ListPageLayout>
         <Tabs
@@ -7715,9 +7825,10 @@ export default function NorthboundPageConfig() {
 
       <Drawer
         title={
-          reportCapabilityName || selectedReportStatus?.capabilityName
-            ? `${reportCapabilityName || selectedReportStatus?.capabilityName} 上报结果`
-            : '上报结果'
+          selectedReportStatus?.resultTitle
+            || (reportCapabilityName || selectedReportStatus?.capabilityName
+              ? `${reportCapabilityName || selectedReportStatus?.capabilityName} 上报结果`
+              : '上报结果')
         }
         open={Boolean(selectedReportStatus)}
 	        onClose={() => {
@@ -7738,7 +7849,7 @@ export default function NorthboundPageConfig() {
 	                icon={<CopyOutlined />}
 	                onClick={() => copyReportPayload(selectedReportStatus)}
 	              >
-	                复制报文
+	                {selectedReportStatus.copyLabel ?? '复制报文'}
 	              </Button>
 	            )}
 	            {selectedReportStatus.artifactType === 'file' && (
@@ -7747,7 +7858,7 @@ export default function NorthboundPageConfig() {
 	                icon={<DownloadOutlined />}
 	                onClick={() => {
 	                  void downloadReportArtifact(selectedReportStatus).catch(() => {
-	                    void message.error('上报文件下载失败');
+	                    void message.error(nt('上报文件下载失败'));
 	                  });
 	                }}
 	              >
@@ -7759,6 +7870,19 @@ export default function NorthboundPageConfig() {
 	      >
 	        {selectedReportStatus && (
 	          <Space orientation="vertical" size={16} className={styles.drawerBody}>
+	            <div className={styles.editorSection}>
+	              <Descriptions bordered size="small" column={2}>
+	                <Descriptions.Item label="状态">{reportStateTag(selectedReportStatus.state, selectedReportStatus.statusText)}</Descriptions.Item>
+	                <Descriptions.Item label="最近时间">{selectedReportStatus.lastTime || '-'}</Descriptions.Item>
+	                <Descriptions.Item label="目标/地址" span={2}>
+	                  <Typography.Text ellipsis={{ tooltip: selectedReportStatus.artifactPath }}>
+	                    {selectedReportStatus.artifactPath}
+	                  </Typography.Text>
+	                </Descriptions.Item>
+	                <Descriptions.Item label="结果摘要" span={2}>{selectedReportStatus.targetSummary}</Descriptions.Item>
+	                <Descriptions.Item label="说明" span={2}>{selectedReportStatus.detail}</Descriptions.Item>
+	              </Descriptions>
+	            </div>
 	            {(reportEventLoading || reportEventList.length > 0) && (
 	              <div className={styles.editorSection}>
 	                <div className={styles.editorSectionHeader}>
@@ -7810,7 +7934,8 @@ export default function NorthboundPageConfig() {
             <div className={styles.editorSection}>
               <div className={styles.editorSectionHeader}>
                 <Typography.Text strong>
-                  {selectedReportStatus.artifactType === 'file' ? '文件内容预览' : '上报报文'}
+                  {selectedReportStatus.previewTitle
+                    ?? (selectedReportStatus.artifactType === 'file' ? '文件内容预览' : '上报报文')}
                 </Typography.Text>
                 {reportStateTag(selectedReportStatus.state, selectedReportStatus.statusText)}
               </div>
@@ -7881,13 +8006,29 @@ export default function NorthboundPageConfig() {
                 <Descriptions.Item label="模块">{selectedApi.module}</Descriptions.Item>
                 <Descriptions.Item label="方法">{apiMethodTag(selectedApi.method)}</Descriptions.Item>
                 <Descriptions.Item label="总开关状态">{statusTag(Boolean(apiEnabled[apiConfigKey(selectedApi)]))}</Descriptions.Item>
+                <Descriptions.Item label="返回字段">{selectedApiMeta?.fieldContract ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="字段数量">{selectedApiResponseFields.length} 项</Descriptions.Item>
                 <Descriptions.Item label="接口 URL" span={2}>
                   <span className={styles.monoText}>{selectedApi.url}</span>
                 </Descriptions.Item>
-                <Descriptions.Item label="后端实现" span={2}>
-                  <span className={styles.monoText}>{selectedApi.backendSource}</span>
+                <Descriptions.Item label="接口说明" span={2}>
+                  {apiUsageSummary(selectedApi)}
                 </Descriptions.Item>
               </Descriptions>
+            </div>
+
+            <div className={styles.editorSection}>
+              <div className={styles.editorSectionHeader}>
+                <Typography.Text strong>返回字段清单</Typography.Text>
+                <Typography.Text type="secondary">共 {selectedApiResponseFields.length} 项</Typography.Text>
+              </div>
+              <div className={styles.apiFieldList}>
+                {selectedApiResponseFields.map((field) => (
+                  <Tag key={field} className={styles.apiFieldTag}>
+                    {field}
+                  </Tag>
+                ))}
+              </div>
             </div>
 
             <div className={styles.editorSection}>
@@ -8198,7 +8339,7 @@ export default function NorthboundPageConfig() {
                 </Descriptions.Item>
                 <Descriptions.Item label="安全配置" span={2}>
                   {selectedSnmp.version === 'v2'
-                    ? <span className={styles.monoText}>{selectedSnmp.community}</span>
+                    ? <span className={styles.monoText}>{selectedSnmp.community === storedCredentialText ? '********' : (selectedSnmp.community || snmpDefaultCommunity)}</span>
                     : <Space size={4}><Tag>{selectedSnmp.securityName}</Tag><Tag>{selectedSnmp.authProtocol}</Tag><Tag>{selectedSnmp.privProtocol}</Tag></Space>}
                 </Descriptions.Item>
                 <Descriptions.Item label="清除告警级别">{selectedSnmp.clearSeverityPolicy}</Descriptions.Item>
@@ -8239,6 +8380,7 @@ export default function NorthboundPageConfig() {
         extra={snmpEditor ? (
           <Button
             type="primary"
+            loading={Boolean(snmpSaving[snmpEditor.key])}
             onClick={() => saveSnmpEditor(snmpEditor)}
           >
             保存
@@ -8256,11 +8398,12 @@ export default function NorthboundPageConfig() {
 	                  <Form.Item label="版本">
 	                    <Select
 	                      value={snmpEditor.version}
-	                      options={[{ label: 'V2', value: 'v2' }, { label: 'V3', value: 'v3' }]}
+	                      options={[{ label: 'V2C', value: 'v2' }, { label: 'V3', value: 'v3' }]}
 	                      onChange={(version) => setSnmpEditor((current) => (current ? {
 	                        ...current,
 	                        version,
 	                        mibQueryEnabled: current.mibQueryEnabled,
+	                        community: version === 'v2' ? (current.community || snmpDefaultCommunity) : current.community,
 	                        authProtocol: version === 'v3' ? (current.authProtocol || 'SHA') : current.authProtocol,
 	                        privProtocol: version === 'v3' ? (current.privProtocol || 'DES') : current.privProtocol,
 	                      } : current))}
@@ -8274,6 +8417,7 @@ export default function NorthboundPageConfig() {
                       checked={snmpEnabled[snmpEditor.key]}
                       checkedChildren="开"
                       unCheckedChildren="关"
+                      loading={Boolean(snmpSaving[snmpEditor.key])}
                       onChange={(checked) => setSnmpEnabled((prev) => ({ ...prev, [snmpEditor.key]: checked }))}
                     />
                   </Form.Item>
@@ -8309,24 +8453,37 @@ export default function NorthboundPageConfig() {
               </div>
               <Form layout="vertical" className={styles.compactForm}>
                 <div className={styles.inventoryFormGrid}>
-                  <Form.Item label="Community">
-                    <Input value={snmpEditor.community} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, community: event.target.value } : current))} />
-                  </Form.Item>
-                  <Form.Item label="安全名">
-                    <Input value={snmpEditor.securityName} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, securityName: event.target.value } : current))} />
-                  </Form.Item>
-	                  <Form.Item label="认证算法">
-	                    <Select value={snmpEditor.authProtocol ?? 'SHA'} options={snmpAuthProtocolOptions} onChange={(authProtocol) => setSnmpEditor((current) => (current ? { ...current, authProtocol } : current))} />
-	                  </Form.Item>
-                  <Form.Item label="认证密码">
-                    <Input.Password placeholder={snmpEditor.authCredential === '已加密存储' ? '未修改保持原密码' : '请输入认证密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, authCredential: event.target.value || current.authCredential } : current))} />
-                  </Form.Item>
-	                  <Form.Item label="加密算法">
-	                    <Select value={snmpEditor.privProtocol ?? 'DES'} options={snmpPrivProtocolOptions} onChange={(privProtocol) => setSnmpEditor((current) => (current ? { ...current, privProtocol } : current))} />
-	                  </Form.Item>
-                  <Form.Item label="加密密码">
-                    <Input.Password placeholder={snmpEditor.privCredential === '已加密存储' ? '未修改保持原密码' : '请输入加密密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, privCredential: event.target.value || current.privCredential } : current))} />
-                  </Form.Item>
+                  {snmpEditor.version === 'v2' && (
+                    <Form.Item label="Community">
+                      <Input.Password
+                        value={snmpEditor.community === storedCredentialText ? '' : (snmpEditor.community || snmpDefaultCommunity)}
+                        placeholder={snmpEditor.community === storedCredentialText ? '未修改保持原 community' : `默认 ${snmpDefaultCommunity}`}
+                        onChange={(event) => setSnmpEditor((current) => (current ? {
+                          ...current,
+                          community: event.target.value || (current.community === storedCredentialText ? storedCredentialText : ''),
+                        } : current))}
+                      />
+                    </Form.Item>
+                  )}
+                  {snmpEditor.version === 'v3' && (
+                    <>
+                      <Form.Item label="安全名">
+                        <Input value={snmpEditor.securityName} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, securityName: event.target.value } : current))} />
+                      </Form.Item>
+                      <Form.Item label="认证算法">
+                        <Select value={snmpEditor.authProtocol ?? 'SHA'} options={snmpAuthProtocolOptions} onChange={(authProtocol) => setSnmpEditor((current) => (current ? { ...current, authProtocol } : current))} />
+                      </Form.Item>
+                      <Form.Item label="认证密码">
+                        <Input.Password placeholder={snmpEditor.authCredential === storedCredentialText ? '未修改保持原密码' : '请输入认证密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, authCredential: event.target.value || current.authCredential } : current))} />
+                      </Form.Item>
+                      <Form.Item label="加密算法">
+                        <Select value={snmpEditor.privProtocol ?? 'DES'} options={snmpPrivProtocolOptions} onChange={(privProtocol) => setSnmpEditor((current) => (current ? { ...current, privProtocol } : current))} />
+                      </Form.Item>
+                      <Form.Item label="加密密码">
+                        <Input.Password placeholder={snmpEditor.privCredential === storedCredentialText ? '未修改保持原密码' : '请输入加密密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, privCredential: event.target.value || current.privCredential } : current))} />
+                      </Form.Item>
+                    </>
+                  )}
                   <Form.Item label="清除告警级别">
                     <Select value={snmpEditor.clearSeverityPolicy} options={[{ label: '保留原级别', value: '保留原级别' }, { label: '清除置 0', value: '清除置 0' }]} onChange={(clearSeverityPolicy) => setSnmpEditor((current) => (current ? { ...current, clearSeverityPolicy } : current))} />
                   </Form.Item>
@@ -9079,5 +9236,6 @@ export default function NorthboundPageConfig() {
         </Form>
       </Drawer>
     </div>
+    </NorthboundI18nScope>
   );
 }

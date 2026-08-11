@@ -65,6 +65,11 @@ END $$`,
 		    AND version = 'v3'
 		    AND upper(priv_protocol) = 'AES128'
 		    AND COALESCE(NULLIF(BTRIM(target_host), ''), '') = ''`,
+		`UPDATE northbound_snmp_alarm_targets
+		    SET community_secret = 'baicells'
+		  WHERE target_key = 'snmp-v2-primary'
+		    AND version = 'v2'
+		    AND COALESCE(NULLIF(BTRIM(community_secret), ''), '') = ''`,
 	}
 	for _, statement := range statements {
 		if _, err := r.pool.Exec(ctx, statement); err != nil {
@@ -125,13 +130,13 @@ func (r *PgRepository) insertDefaultSNMPAlarmTarget(ctx context.Context, target 
 	_, err = r.pool.Exec(ctx, `
 INSERT INTO northbound_snmp_alarm_targets (
   target_key, name, enabled, version, notification_type, listen_ip, listen_port,
-  target_host, target_port, security_name, auth_protocol, priv_protocol,
+  target_host, target_port, community_secret, security_name, auth_protocol, priv_protocol,
   clear_severity_policy, mib_query_enabled, timeout_seconds, retries, mib_fields
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 ON CONFLICT (target_key) DO NOTHING`,
 		target.Key, target.Name, target.Enabled, target.Version, target.NotificationType,
 		target.ListenIP, target.ListenPort, target.TargetHost, target.TargetPort,
-		target.SecurityName, target.AuthProtocol, target.PrivProtocol, target.ClearSeverityPolicy,
+		target.Community, target.SecurityName, target.AuthProtocol, target.PrivProtocol, target.ClearSeverityPolicy,
 		target.MIBQueryEnabled, target.TimeoutSeconds, target.Retries, fields)
 	if err != nil {
 		return fmt.Errorf("insert default northbound_snmp_alarm_targets %s: %w", target.Key, err)
@@ -1107,6 +1112,9 @@ func normalizeSNMPAlarmTarget(key string, target SNMPAlarmTarget) SNMPAlarmTarge
 	}
 	if target.Version == "" {
 		target.Version = "v2"
+	}
+	if strings.EqualFold(target.Version, "v2") && strings.TrimSpace(target.Community) == "" && !target.CommunitySet {
+		target.Community = defaultSNMPV2Community
 	}
 	if target.NotificationType == "" {
 		target.NotificationType = "Trap"

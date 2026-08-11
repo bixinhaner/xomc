@@ -75,3 +75,11 @@ func TestDefaultAPIConfigsCoverLegacyNorthboundOverlap(t *testing.T) {
 		require.Equal(t, path, byKey[key].Path, "northbound API should expose legacy-shaped path for %s", key)
 	}
 }
+
+func TestDefaultSNMPV2TargetUsesFieldCommunity(t *testing.T) {
+	targets := defaultSNMPAlarmTargets()
+	require.NotEmpty(t, targets)
+	require.Equal(t, "snmp-v2-primary", targets[0].Key)
+	require.Equal(t, defaultSNMPV2Community, targets[0].Community)
+	require.True(t, targets[0].MIBQueryEnabled)
+}

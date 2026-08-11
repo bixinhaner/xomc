@@ -1,5 +1,7 @@
 package pageconfig
 
+const defaultSNMPV2Community = "baicells"
+
 // No built-in delivery targets: delivery destinations are environment-specific and must
 // be added manually by the operator. Kept as a function (returning nil) so the no-repo
 // fallback and test fakes have a stable empty default.
@@ -42,7 +44,7 @@ func defaultSNMPAlarmTargets() []SNMPAlarmTarget {
 			ListenPort:          161,
 			TargetHost:          "",
 			TargetPort:          162,
-			Community:           "",
+			Community:           defaultSNMPV2Community,
 			ClearSeverityPolicy: "保留原级别",
 			MIBQueryEnabled:     true,
 			TimeoutSeconds:      5,
