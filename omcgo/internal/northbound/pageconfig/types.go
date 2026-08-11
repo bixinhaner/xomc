@@ -110,6 +110,8 @@ type FileProfile struct {
 	Enabled        bool          `json:"enabled"`
 	Status         ProfileStatus `json:"status"`
 	Groups         []FileGroup   `json:"groups"`
+	CreatedAt      time.Time     `json:"created_at"`
+	UpdatedAt      time.Time     `json:"updated_at"`
 }
 
 type FileProfilePreview struct {
@@ -161,6 +163,8 @@ type InventoryProfile struct {
 	Enabled            bool                   `json:"enabled"`
 	Status             ProfileStatus          `json:"status"`
 	Fields             []InventoryFieldConfig `json:"fields"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
 }
 
 // InventoryFieldConfig is the persisted field contract for one inventory
@@ -232,11 +236,12 @@ type RunProfileResponse struct {
 }
 
 type RunFilter struct {
-	ProfileKind ProfileKind
-	ProfileCode string
-	Status      RunStatus
-	Limit       int
-	Offset      int
+	ProfileKind      ProfileKind
+	ProfileCode      string
+	Status           RunStatus
+	LatestPerProfile bool
+	Limit            int
+	Offset           int
 }
 
 type RunListResult struct {

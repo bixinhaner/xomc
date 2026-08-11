@@ -621,6 +621,10 @@ func initUFTEModule(c *Container) error {
 
 	c.miscDeps.ufteHandler = ufte.NewHandler(service, logger)
 	c.miscDeps.ufteService = service
+	if c.miscDeps.nbRouter != nil {
+		c.miscDeps.nbRouter.SetTransferTaskService(service)
+		logger.Info("northbound UFTE task facade wired")
+	}
 
 	// 把"定时任务调度器触发 LogCollect 类任务"的回调指向 ufte.Service.StartTask。
 	// StartTask 内部已经按 TaskType / TypeCode 分流到 ResumeCollect 或 startDirectDispatchTask，

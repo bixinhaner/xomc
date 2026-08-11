@@ -60,7 +60,7 @@ import type {
   NorthboundUpdateInventoryProfileRequest,
 } from '@core/services/api/northboundPageConfigApi';
 import { loadPmMetrics, type PmMetric } from './pmMetricCatalog';
-import { NorthboundI18nScope, useNorthboundI18n } from './i18n';
+import { NorthboundI18nScope, useNorthboundI18n, useNorthboundLocale } from './i18n';
 import styles from './index.module.css';
 
 type Domain = 'CM' | 'PM' | 'MR' | 'LOG' | 'INVENTORY';
@@ -70,6 +70,10 @@ type MetricType = 'counter' | 'kpi';
 type Tech = 'LTE' | 'GNB' | 'GSM';
 type FieldTechFilter = 'ALL' | Tech;
 type InventoryType = 'ENB' | 'GNB' | 'GSM' | 'OMC';
+
+function nowrapColumnTitle(title: string) {
+  return <span className={styles.nowrapHeader}>{title}</span>;
+}
 
 interface ScenarioObject {
   code: string;
@@ -110,6 +114,8 @@ interface ScenarioRow {
   enabled: boolean;
   groups: FileGroup[];
   logs?: LogConfig;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 interface ScenarioPeriodRow {
@@ -152,6 +158,8 @@ interface InventoryConfigRow {
   fileName: string;
   compressionEnabled: boolean;
   compressionFormat: CompressionFormat;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 interface FileProfileEditorValues {
@@ -170,6 +178,14 @@ type DeliveryAuthMode = 'PASSWORD' | 'PRIVATE_KEY';
 type DeliveryHostKeyPolicy = 'INSECURE' | 'FINGERPRINT';
 type ReportState = 'success' | 'failed' | 'running' | 'idle';
 type ReportArtifactType = 'file' | 'message';
+type ProfileHealthState = 'normal' | 'broken' | 'pending' | 'terminated';
+
+interface ProfileHealthInfo {
+  state: ProfileHealthState;
+  label: string;
+  color: 'success' | 'error' | 'warning' | 'default';
+  detail: string;
+}
 
 interface DeliveryTargetRow {
   key: string;
@@ -244,6 +260,7 @@ const csvSeparatorOptions = [
 type SocketProfile = 'CTCC' | 'CUCC';
 type SnmpVersion = 'v2' | 'v3';
 type SnmpNotificationType = 'Trap' | 'Inform';
+type SnmpV3SecurityLevel = 'noAuthNoPriv' | 'authNoPriv' | 'authPriv';
 
 const snmpAuthProtocolOptions = [
   { label: 'SHA', value: 'SHA' },
@@ -259,6 +276,12 @@ const snmpPrivProtocolOptions = [
   { label: 'AES128', value: 'AES128' },
   { label: 'AES192', value: 'AES192' },
   { label: 'AES256', value: 'AES256' },
+];
+
+const snmpV3SecurityLevelOptions: Array<{ label: string; value: SnmpV3SecurityLevel }> = [
+  { label: '认证并加密', value: 'authPriv' },
+  { label: '仅认证', value: 'authNoPriv' },
+  { label: '不认证不加密', value: 'noAuthNoPriv' },
 ];
 
 const snmpDefaultCommunity = 'baicells';
@@ -345,6 +368,7 @@ type NorthboundApiDisplayAlias = Partial<NorthboundApiRow> & Pick<
 >;
 
 interface ApiUserRow {
+  key: string;
   username: string;
   enabled: boolean;
   password: string;
@@ -1419,7 +1443,7 @@ const socketAlarmConfigs: SocketAlarmConfigRow[] = [
 const snmpAlarmTargets: SnmpAlarmTargetRow[] = [
   {
     key: 'snmp-v2-primary',
-    name: 'NMS V2 Trap',
+    name: 'SNMP V2C',
     version: 'v2',
     notificationType: 'Trap',
     listenIp: '0.0.0.0',
@@ -1434,7 +1458,7 @@ const snmpAlarmTargets: SnmpAlarmTargetRow[] = [
   },
   {
     key: 'snmp-v3-inform',
-    name: 'NMS V3 Inform',
+    name: 'SNMP V3',
     version: 'v3',
     notificationType: 'Inform',
     listenIp: '0.0.0.0',
@@ -1679,7 +1703,7 @@ const reportStatusSamples: Record<string, Partial<ReportStatusInfo>> = {
     artifactPath: 'snmp://10.10.41.11:162',
     size: '1.2 KB',
     targetSummary: 'Trap 发送成功',
-    detail: 'SNMP V2 Trap 已发送到目标 NMS。',
+    detail: 'SNMP V2C Trap 已发送到目标 NMS。',
     payload: buildSampleSnmpPayload('920188', 'major'),
   },
   'snmp:snmp-v3-inform': {
@@ -3307,6 +3331,8 @@ function getPreviewDataPeriod(period: string): string {
   if (period === '15M') return '15';
   if (period === '60M') return '60';
   if (period === '24H') return '1440';
+  if (period === '7D') return '10080';
+  if (period === '1MO') return '43200';
   return period.replace(/\D/g, '') || period;
 }
 
@@ -3314,17 +3340,129 @@ function formatPeriodLabel(period: string): string {
   if (period === '15M') return '15 分钟';
   if (period === '60M') return '60 分钟';
   if (period === '24H') return '每日';
+  if (period === '7D') return '7 天';
+  if (period === '1MO') return '每月';
   return period;
 }
 
 function getPeriodMinutes(period: string): number {
+  if (period === '1MO') return 30 * 24 * 60;
+  if (period === '7D') return 7 * 24 * 60;
+  if (period === '24H') return 24 * 60;
   if (period === '60M') return 60;
   if (period === '15M') return 15;
   return Number(period.replace(/\D/g, '')) || 15;
 }
 
+function formatRecurringPeriodLabel(period: string): string {
+  if (period === '24H') return '每日';
+  if (period === '7D') return '每 7 天';
+  if (period === '1MO') return '每月';
+  return `每 ${getPeriodMinutes(period)} 分钟`;
+}
+
+function getHealthGraceMinutes(periodMinutes: number): number {
+  return Math.min(Math.max(Math.ceil(periodMinutes * 0.25), 30), 24 * 60);
+}
+
+function getHealthWindowMs(periodMinutes: number): number {
+  return (periodMinutes + getHealthGraceMinutes(periodMinutes)) * 60 * 1000;
+}
+
+function formatPeriodMinutesForHealth(minutes: number): string {
+  if (minutes >= 30 * 24 * 60) return '每月';
+  if (minutes >= 7 * 24 * 60) return '每 7 天';
+  if (minutes >= 24 * 60) return '每日';
+  if (minutes >= 60 && minutes % 60 === 0) return `每 ${minutes / 60} 小时`;
+  return `每 ${minutes} 分钟`;
+}
+
+function profileTimestampMs(...values: Array<string | undefined>): number | undefined {
+  const parsed = values
+    .map((value) => {
+      if (!value) return NaN;
+      const ms = Date.parse(value);
+      const date = new Date(ms);
+      if (!Number.isFinite(ms) || date.getUTCFullYear() < 2000) return NaN;
+      return ms;
+    })
+    .filter(Number.isFinite);
+  return parsed.length > 0 ? Math.max(...parsed) : undefined;
+}
+
+function latestSuccessRunMap(items: NorthboundFileRun[]): Record<string, NorthboundFileRun> {
+  return items.reduce<Record<string, NorthboundFileRun>>((acc, run) => {
+    const key = run.profile_code;
+    if (!key) return acc;
+    const currentMs = profileTimestampMs(run.created_at) ?? 0;
+    const previousMs = profileTimestampMs(acc[key]?.created_at) ?? 0;
+    if (!acc[key] || currentMs >= previousMs) {
+      acc[key] = run;
+    }
+    return acc;
+  }, {});
+}
+
+function scenarioMaxPeriodMinutes(row: ScenarioRow): number {
+  const periods = getScenarioPeriodRows(row).map((periodRow) => getPeriodMinutes(periodRow.period));
+  return Math.max(...periods, 15);
+}
+
+function buildProfileHealth(
+  enabled: boolean,
+  periodMinutes: number,
+  latestSuccessRun: NorthboundFileRun | undefined,
+  createdAt: string | undefined,
+  updatedAt: string | undefined,
+  nowMs = Date.now(),
+): ProfileHealthInfo {
+  if (!enabled) {
+    return {
+      state: 'terminated',
+      label: '终止',
+      color: 'default',
+      detail: '配置开关关闭，当前不会触发文件生成或上报。',
+    };
+  }
+
+  const windowMs = getHealthWindowMs(periodMinutes);
+  const graceMinutes = getHealthGraceMinutes(periodMinutes);
+  const maxWaitText = `${formatPeriodMinutesForHealth(periodMinutes)} + ${graceMinutes} 分钟容忍`;
+  const lastSuccessMs = profileTimestampMs(latestSuccessRun?.created_at, latestSuccessRun?.window_end);
+  if (lastSuccessMs) {
+    const stale = nowMs - lastSuccessMs > windowMs;
+    return {
+      state: stale ? 'broken' : 'normal',
+      label: stale ? '异常' : '正常',
+      color: stale ? 'error' : 'success',
+      detail: stale
+        ? `最近成功上报时间已超过最大周期（${maxWaitText}），请检查调度、数据源和传输目标。`
+        : `最近成功上报在最大周期内（${maxWaitText}），调度状态正常。`,
+    };
+  }
+
+  const baselineMs = profileTimestampMs(updatedAt, createdAt);
+  if (baselineMs && nowMs - baselineMs > windowMs) {
+    return {
+      state: 'broken',
+      label: '异常',
+      color: 'error',
+      detail: `启用后超过最大周期（${maxWaitText}）仍未产生成功上报记录，请检查调度、数据源和传输目标。`,
+    };
+  }
+
+  return {
+    state: 'pending',
+    label: '待上报',
+    color: 'warning',
+    detail: `配置已启用，正在等待首次成功上报；超过最大周期（${maxWaitText}）后仍无成功记录会显示异常。`,
+  };
+}
+
 function defaultCronForPeriod(period: string): string {
   if (period === '24H') return '0 1 0 * * ?';
+  if (period === '7D') return '0 0 0 ? * MON';
+  if (period === '1MO') return '0 0 0 1 * ?';
   return `0 0/${getPeriodMinutes(period)} * * * ?`;
 }
 
@@ -3351,12 +3489,14 @@ function cronFromDailyTime(time: string): string {
 }
 
 function cronFromIntervalStart(period: string, startMinute: string): string {
+  if (period === '7D') return `0 ${Number(startMinute)} 0 ? * MON`;
+  if (period === '1MO') return `0 ${Number(startMinute)} 0 1 * ?`;
   return `0 ${Number(startMinute)}/${getPeriodMinutes(period)} * * * ?`;
 }
 
 function formatScheduleLabel(period: string, cron: string): string {
   if (period === '24H') return `每日 ${getDailyTimeValue(cron)} 生成`;
-  return `每 ${getPeriodMinutes(period)} 分钟，${getIntervalStartMinuteValue(cron)} 分开始生成`;
+  return `${formatRecurringPeriodLabel(period)}，${getIntervalStartMinuteValue(cron)} 分开始生成`;
 }
 
 function normalizeApiPeriod(period: string | undefined): NorthboundPageConfigPeriod {
@@ -3415,6 +3555,37 @@ function normalizeInventoryType(value: string): InventoryType {
   return 'ENB';
 }
 
+function hasChineseText(value?: string) {
+  return /[\u4e00-\u9fff]/.test(value ?? '');
+}
+
+function normalizeScenarioNames(
+  profile: NorthboundFileProfile,
+  fallback?: Pick<ScenarioRow, 'scenarioName' | 'scenarioNameEn'>,
+) {
+  const apiName = profile.scenario_name?.trim() ?? '';
+  const apiNameEn = profile.scenario_name_en?.trim() ?? '';
+  const fallbackName = fallback?.scenarioName?.trim() ?? '';
+  const fallbackNameEn = fallback?.scenarioNameEn?.trim() ?? '';
+  const swapped = apiName !== '' && apiNameEn !== '' && !hasChineseText(apiName) && hasChineseText(apiNameEn);
+  if (swapped) {
+    return {
+      scenarioName: apiNameEn,
+      scenarioNameEn: apiName,
+    };
+  }
+  const duplicatedDefaultEnglish = fallbackName !== ''
+    && fallbackNameEn !== ''
+    && apiName === apiNameEn
+    && apiNameEn === fallbackNameEn;
+  return {
+    scenarioName: duplicatedDefaultEnglish
+      ? fallbackName
+      : (apiName || fallbackName || profile.name || profile.code),
+    scenarioNameEn: apiNameEn || fallbackNameEn || apiName || profile.code,
+  };
+}
+
 function mapApiScenarioObject(object: { code: string; tech?: string; profile?: string }): ScenarioObject {
   return {
     code: object.code,
@@ -3446,17 +3617,20 @@ function mapApiFileProfile(profile: NorthboundFileProfile): ScenarioRow {
       })
     : fallback?.groups ?? [];
 
+  const scenarioNames = normalizeScenarioNames(profile, fallback);
   return {
     code: profile.code,
     vendor: profile.vendor || fallback?.vendor || 'Baicells',
-    scenarioName: profile.scenario_name || fallback?.scenarioName || profile.name,
-    scenarioNameEn: profile.scenario_name_en || fallback?.scenarioNameEn || profile.code,
+    scenarioName: scenarioNames.scenarioName,
+    scenarioNameEn: scenarioNames.scenarioNameEn,
     description: profile.description || fallback?.description || profile.name,
     flags: profile.flags?.length ? profile.flags : fallback?.flags ?? [],
     name: profile.name || fallback?.name || profile.code,
     enabled: profile.enabled,
     groups,
     logs: fallback?.logs,
+    createdAt: profile.created_at,
+    updatedAt: profile.updated_at,
   };
 }
 
@@ -3476,6 +3650,8 @@ function mapApiInventoryProfile(profile: NorthboundInventoryProfile): InventoryC
     fileName: profile.file_name_template || fallback?.fileName || INVENTORY_NAME,
     compressionEnabled: profile.compression_enabled,
     compressionFormat: normalizeApiCompressionFormat(profile.compression_format),
+    createdAt: profile.created_at,
+    updatedAt: profile.updated_at,
   };
 }
 
@@ -3610,13 +3786,14 @@ function serializeDeliveryTarget(
 
 function mapApiSnmpTarget(target: NorthboundSNMPAlarmTarget): SnmpAlarmTargetRow {
   const fallback = snmpAlarmTargets.find((row) => row.key === target.key);
-  const community = target.community_set
-    ? storedCredentialText
-    : (target.community || (target.version === 'v2' ? snmpDefaultCommunity : undefined));
+  const version = snmpVersionForKey(target.key, target.version);
+  const community = version === 'v2'
+    ? (target.community?.trim() || (target.community_set ? storedCredentialText : snmpDefaultCommunity))
+    : undefined;
   return {
     key: target.key,
     name: target.name || fallback?.name || target.key,
-    version: target.version,
+    version,
     notificationType: target.notification_type,
     listenIp: target.listen_ip,
     listenPort: target.listen_port,
@@ -3670,17 +3847,34 @@ function serializeSnmpTarget(row: SnmpAlarmTargetRow, enabled: boolean): Northbo
   };
 }
 
-function getSnmpEnableBlocker(row: SnmpAlarmTargetRow): string | null {
-  if (!row.targetHost.trim()) {
+function getSnmpConfigBlocker(row: SnmpAlarmTargetRow, reportEnabled: boolean): string | null {
+  if (reportEnabled && !row.targetHost.trim()) {
     return '请先编辑通知目标 IP/域名，再启用真实上报';
   }
-  if (row.version === 'v2' && !row.community?.trim()) {
-    return null;
-  }
-  if (row.version === 'v3' && !row.securityName?.trim()) {
-    return '请先编辑 SNMP v3 security name，再启用真实上报';
+  if (row.version === 'v3' && (reportEnabled || row.mibQueryEnabled)) {
+    if (!row.securityName?.trim()) {
+      return '请先填写 SNMP v3 安全名';
+    }
+    const securityLevel = snmpV3SecurityLevel(row);
+    if (securityLevel !== 'noAuthNoPriv' && !row.authCredential?.trim()) {
+      return '请先填写 SNMP v3 认证密码';
+    }
+    if (securityLevel !== 'noAuthNoPriv' && snmpCredentialTooShort(row.authCredential)) {
+      return 'SNMP v3 认证密码至少 8 位';
+    }
+    if (securityLevel === 'authPriv' && !row.privCredential?.trim()) {
+      return '请先填写 SNMP v3 加密密码';
+    }
+    if (securityLevel === 'authPriv' && snmpCredentialTooShort(row.privCredential)) {
+      return 'SNMP v3 加密密码至少 8 位';
+    }
   }
   return null;
+}
+
+function snmpCredentialTooShort(value?: string) {
+  const credential = value?.trim() ?? '';
+  return credential !== '' && credential !== storedCredentialText && credential.length < 8;
 }
 
 function mapApiSocketConfig(config: NorthboundSocketAlarmConfig): SocketAlarmConfigRow {
@@ -3782,12 +3976,17 @@ function apiModuleLabel(dataType: string): string {
 
 function mapApiUser(row: NorthboundAPIUser): ApiUserRow {
   return {
+    key: row.id || `api-user:${row.username}`,
     username: row.username,
     enabled: row.enabled,
     password: row.password || (row.password_set ? apiUserPasswordMask : ''),
     passwordSet: Boolean(row.password_set),
     createdAt: row.created_at,
   };
+}
+
+function newApiUserKey(): string {
+  return `api-user-draft:${Date.now()}:${Math.random().toString(36).slice(2)}`;
 }
 
 function serializeApiUsers(rows: ApiUserRow[]) {
@@ -4040,7 +4239,7 @@ function buildSocketReportStatus(row: SocketAlarmConfigRow): ReportStatusInfo {
 function buildSnmpReportStatus(row: SnmpAlarmTargetRow): ReportStatusInfo {
   return mergeReportStatus({
     key: `snmp:${row.key}`,
-    capabilityName: row.name,
+    capabilityName: snmpVersionLabel(row.version),
     state: 'success',
     statusText: `${row.notificationType} 正常`,
     lastTime: '2026-08-03 16:50:00',
@@ -4787,8 +4986,25 @@ function deliveryProtocolTag(protocol: DeliveryProtocol) {
   return <Tag color={protocol === 'SFTP' ? 'blue' : 'cyan'}>{protocol}</Tag>;
 }
 
-function socketProfileTag(profile: SocketProfile) {
-  return <Tag color={profile === 'CTCC' ? 'blue' : 'purple'}>{profile === 'CTCC' ? '电信' : '联通'}</Tag>;
+function scenarioDisplayName(scenario: ScenarioRow, locale: string) {
+  if (locale === 'en-US') {
+    return scenario.scenarioNameEn || scenario.scenarioName || scenario.code;
+  }
+  return scenario.scenarioName || scenario.scenarioNameEn || scenario.code;
+}
+
+function socketProfileTag(profile: SocketProfile, translate: (value: string) => string = (value) => value) {
+  return <Tag color={profile === 'CTCC' ? 'blue' : 'purple'}>{translate(profile === 'CTCC' ? '电信' : '联通')}</Tag>;
+}
+
+function snmpVersionLabel(version: SnmpVersion) {
+  return version === 'v2' ? 'SNMP V2C' : 'SNMP V3';
+}
+
+function snmpVersionForKey(key: string, fallback: SnmpVersion): SnmpVersion {
+  if (key === 'snmp-v2-primary') return 'v2';
+  if (key === 'snmp-v3-inform') return 'v3';
+  return fallback;
 }
 
 function snmpVersionTag(version: SnmpVersion) {
@@ -4797,6 +5013,47 @@ function snmpVersionTag(version: SnmpVersion) {
     v3: 'purple',
   };
   return <Tag color={colors[version]}>{version === 'v2' ? 'V2C' : 'V3'}</Tag>;
+}
+
+function snmpV3SecurityLevel(row: SnmpAlarmTargetRow): SnmpV3SecurityLevel {
+  if (row.privProtocol?.trim()) {
+    return 'authPriv';
+  }
+  if (row.authProtocol?.trim()) {
+    return 'authNoPriv';
+  }
+  return 'noAuthNoPriv';
+}
+
+function snmpV3SecurityLevelLabel(level: SnmpV3SecurityLevel) {
+  switch (level) {
+    case 'authPriv':
+      return '认证并加密';
+    case 'authNoPriv':
+      return '仅认证';
+    case 'noAuthNoPriv':
+    default:
+      return '不认证不加密';
+  }
+}
+
+function applySnmpV3SecurityLevel(row: SnmpAlarmTargetRow, level: SnmpV3SecurityLevel): SnmpAlarmTargetRow {
+  if (level === 'noAuthNoPriv') {
+    return { ...row, authProtocol: '', authCredential: '', privProtocol: '', privCredential: '' };
+  }
+  if (level === 'authNoPriv') {
+    return {
+      ...row,
+      authProtocol: row.authProtocol?.trim() || 'SHA',
+      privProtocol: '',
+      privCredential: '',
+    };
+  }
+  return {
+    ...row,
+    authProtocol: row.authProtocol?.trim() || 'SHA',
+    privProtocol: row.privProtocol?.trim() || 'DES',
+  };
 }
 
 function snmpNotificationTag(type: SnmpNotificationType) {
@@ -5296,6 +5553,7 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
 
 export default function NorthboundPageConfig() {
   const nt = useNorthboundI18n();
+  const locale = useNorthboundLocale();
   const [configForm] = Form.useForm();
   const [fileProfiles, setFileProfiles] = useState<ScenarioRow[]>(scenarioRows);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioRow | null>(null);
@@ -5347,6 +5605,8 @@ export default function NorthboundPageConfig() {
   const [reportEventTotal, setReportEventTotal] = useState(0);
   const [reportEventLoading, setReportEventLoading] = useState(false);
   const [reportCapabilityName, setReportCapabilityName] = useState<string>('');
+  const [fileLatestSuccessRuns, setFileLatestSuccessRuns] = useState<Record<string, NorthboundFileRun>>({});
+  const [inventoryLatestSuccessRuns, setInventoryLatestSuccessRuns] = useState<Record<string, NorthboundFileRun>>({});
   const [fileProfileRunning, setFileProfileRunning] = useState<Record<string, boolean>>({});
   const [inventoryProfileRunning, setInventoryProfileRunning] = useState<Record<string, boolean>>({});
   const [socketConfigs, setSocketConfigs] = useState<SocketAlarmConfigRow[]>(socketAlarmConfigs);
@@ -5398,6 +5658,8 @@ export default function NorthboundPageConfig() {
         socketResp,
         apiResp,
         apiUserResp,
+        fileLatestRunResp,
+        inventoryLatestRunResp,
       ] = await Promise.all([
         northboundPageConfigApi.getFileProfiles(),
         northboundPageConfigApi.getInventoryProfiles(),
@@ -5408,6 +5670,18 @@ export default function NorthboundPageConfig() {
         northboundPageConfigApi.getSocketAlarmConfigs(),
         northboundPageConfigApi.getAPIConfigs(),
         northboundPageConfigApi.getAPIUsers(),
+        northboundPageConfigApi.listRuns({
+          profile_kind: 'file',
+          status: 'success',
+          latest_per_profile: true,
+          limit: 1000,
+        }),
+        northboundPageConfigApi.listRuns({
+          profile_kind: 'inventory',
+          status: 'success',
+          latest_per_profile: true,
+          limit: 1000,
+        }),
       ]);
       const nextFileProfiles = fileProfileResp.items.map(mapApiFileProfile);
       const nextInventoryProfiles = inventoryProfileResp.items
@@ -5419,12 +5693,14 @@ export default function NorthboundPageConfig() {
 
       setFileProfiles(nextFileProfiles);
       setScenarioEnabled(scenarioEnabledMap(nextFileProfiles));
+      setFileLatestSuccessRuns(latestSuccessRunMap(fileLatestRunResp.items));
       setSelectedScenario((current) => (
         current ? nextFileProfiles.find((row) => row.code === current.code) ?? current : current
       ));
 
       setInventoryConfigs(nextInventoryProfiles);
       setInventoryEnabled(inventoryEnabledMap(nextInventoryProfiles, inventoryProfileResp.items));
+      setInventoryLatestSuccessRuns(latestSuccessRunMap(inventoryLatestRunResp.items));
       const nextInventoryFields = { ...defaultInventoryFieldRows };
       inventoryProfileResp.items.forEach((profile) => {
         const key = normalizeInventoryType(profile.code || profile.object_code);
@@ -6174,7 +6450,7 @@ export default function NorthboundPageConfig() {
     }
     return (
       <Space size={8} wrap>
-        <Tag>{`每 ${getPeriodMinutes(period)} 分钟`}</Tag>
+        <Tag>{formatRecurringPeriodLabel(period)}</Tag>
         <Select
           aria-label="起始分钟"
           value={getIntervalStartMinuteValue(cron)}
@@ -6238,10 +6514,14 @@ export default function NorthboundPageConfig() {
     setSelectedReportStatus(buildEventReportStatus(event, capabilityName));
   };
 
-  const renderStatusCell = (info: ReportStatusInfo, enabled: boolean) => {
-    const displayInfo = effectiveReportStatus(info, enabled);
-    const normal = displayInfo.state === 'success' || displayInfo.state === 'running';
-    return <Tag color={normal ? 'success' : 'default'}>{normal ? '正常' : '终止'}</Tag>;
+  const renderStatusCell = (health: ProfileHealthInfo) => {
+    return (
+      <Tooltip title={nt(health.detail)}>
+        <Tag data-northbound-i18n-skip="true" color={health.color}>
+          {nt(health.label)}
+        </Tag>
+      </Tooltip>
+    );
   };
 
   const showLatestRunReport = (
@@ -6424,6 +6704,10 @@ export default function NorthboundPageConfig() {
     setFileProfileRunning((prev) => ({ ...prev, [row.code]: true }));
     void northboundPageConfigApi.runFileProfile(row.code, { limit: 200 })
       .then((result) => {
+        const latestSuccess = latestSuccessRunMap(result.items)[row.code];
+        if (latestSuccess) {
+          setFileLatestSuccessRuns((prev) => ({ ...prev, [row.code]: latestSuccess }));
+        }
         openReportDrawer(result.items, `${row.code} 北向文件`, null);
         void message.success(nt(`${row.code} 已生成 ${result.total} 条上报记录`));
       })
@@ -6439,6 +6723,9 @@ export default function NorthboundPageConfig() {
     setInventoryProfileRunning((prev) => ({ ...prev, [row.key]: true }));
     void northboundPageConfigApi.runInventoryProfile(row.key, { limit: 200 })
       .then((run) => {
+        if (run.status === 'success') {
+          setInventoryLatestSuccessRuns((prev) => ({ ...prev, [row.key]: run }));
+        }
         void resolveRunReportStatus(run, `${row.objectCode} Inventory`)
           .then(setSelectedReportStatus);
         void message.success(nt(`${row.objectCode} Inventory 已生成上报记录`));
@@ -6452,12 +6739,11 @@ export default function NorthboundPageConfig() {
   };
 
   const persistSnmpEnabled = (row: SnmpAlarmTargetRow, checked: boolean) => {
-    if (checked) {
-      const blocker = getSnmpEnableBlocker(row);
-      if (blocker) {
-        void message.warning(nt(`${row.name} ${blocker}`));
-        return;
-      }
+    const displayName = snmpVersionLabel(row.version);
+    const blocker = getSnmpConfigBlocker(row, checked);
+    if (blocker) {
+      void message.warning(nt(`${displayName} ${blocker}`));
+      return;
     }
     const previous = Boolean(snmpEnabled[row.key]);
     setSnmpTargetSaving(row.key, true);
@@ -6470,7 +6756,7 @@ export default function NorthboundPageConfig() {
       })
       .catch(() => {
         setSnmpEnabled((prev) => ({ ...prev, [row.key]: previous }));
-        void message.error(nt(`${row.name} SNMP 启停状态保存失败`));
+        void message.error(nt(`${displayName} SNMP 启停状态保存失败`));
       })
       .finally(() => setSnmpTargetSaving(row.key, false));
   };
@@ -6513,9 +6799,9 @@ export default function NorthboundPageConfig() {
       .finally(() => setApiSwitchSaving(false));
   };
 
-  const patchApiUser = (username: string, patch: Partial<ApiUserRow>) => {
+  const patchApiUser = (key: string, patch: Partial<ApiUserRow>) => {
     apiUserDirtyRef.current = true;
-    setApiUsers((rows) => rows.map((row) => (row.username === username ? { ...row, ...patch } : row)));
+    setApiUsers((rows) => rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   };
 
   const addApiUser = () => {
@@ -6524,6 +6810,7 @@ export default function NorthboundPageConfig() {
     setApiUsers((rows) => [
       ...rows,
       {
+        key: newApiUserKey(),
         username: `north_api_${index}`,
         enabled: false,
         password: '',
@@ -6532,9 +6819,9 @@ export default function NorthboundPageConfig() {
     ]);
   };
 
-  const removeApiUser = (username: string) => {
+  const removeApiUser = (key: string) => {
     apiUserDirtyRef.current = true;
-    setApiUsers((rows) => rows.filter((row) => row.username !== username));
+    setApiUsers((rows) => rows.filter((row) => row.key !== key));
   };
 
   const saveApiUsers = () => {
@@ -6567,17 +6854,18 @@ export default function NorthboundPageConfig() {
   };
 
   const testSnmpAlarm = (row: SnmpAlarmTargetRow) => {
+    const displayName = snmpVersionLabel(row.version);
     void northboundPageConfigApi.testSNMPAlarmTarget(row.key)
       .then((event) => {
-        openSingleEventReport(event, row.name);
+        openSingleEventReport(event, displayName);
         if (event.status === 'success') {
-          void message.success(nt(`${row.name} 测试报文已生成`));
+          void message.success(nt(`${displayName} 测试报文已生成`));
         } else {
-          void message.warning(nt(`${row.name} 测试报文已生成，但目标配置不完整`));
+          void message.warning(nt(`${displayName} 测试报文已生成，但目标配置不完整`));
         }
       })
       .catch(() => {
-        void message.error(nt(`${row.name} 测试报文生成失败`));
+        void message.error(nt(`${displayName} 测试报文生成失败`));
       });
   };
 
@@ -6620,12 +6908,11 @@ export default function NorthboundPageConfig() {
 
   const saveSnmpEditor = (row: SnmpAlarmTargetRow) => {
     const enabled = Boolean(snmpEnabled[row.key]);
-    if (enabled) {
-      const blocker = getSnmpEnableBlocker(row);
-      if (blocker) {
-        void message.warning(nt(`${row.name} ${blocker}`));
-        return;
-      }
+    const displayName = snmpVersionLabel(row.version);
+    const blocker = getSnmpConfigBlocker(row, enabled);
+    if (blocker) {
+      void message.warning(nt(`${displayName} ${blocker}`));
+      return;
     }
     setSnmpTargetSaving(row.key, true);
     void northboundPageConfigApi.updateSNMPAlarmTarget(row.key, serializeSnmpTarget(row, enabled))
@@ -6633,11 +6920,11 @@ export default function NorthboundPageConfig() {
         const next = mapApiSnmpTarget(target);
         setSnmpTargets((rows) => rows.map((item) => (item.key === next.key ? next : item)));
         setSnmpEnabled((prev) => ({ ...prev, [next.key]: target.enabled }));
-        void message.success(nt(`${next.name} 已保存`));
+        void message.success(nt(`${snmpVersionLabel(next.version)} 已保存`));
         setSnmpEditor(null);
       })
       .catch(() => {
-        void message.error(nt(`${row.name} SNMP 配置保存失败`));
+        void message.error(nt(`${displayName} SNMP 配置保存失败`));
       })
       .finally(() => setSnmpTargetSaving(row.key, false));
   };
@@ -6713,14 +7000,19 @@ export default function NorthboundPageConfig() {
     },
     {
       title: '场景名称',
-      dataIndex: 'scenarioName',
       width: 140,
-      render: (value: string) => <Typography.Text ellipsis>{value}</Typography.Text>,
+      render: (_, row) => <Typography.Text ellipsis>{scenarioDisplayName(row, locale)}</Typography.Text>,
     },
     {
       title: '状态',
-      width: 88,
-      render: (_, row) => renderStatusCell(buildFileReportStatus(row), Boolean(scenarioEnabled[row.code])),
+      width: 104,
+      render: (_, row) => renderStatusCell(buildProfileHealth(
+        Boolean(scenarioEnabled[row.code]),
+        scenarioMaxPeriodMinutes(row),
+        fileLatestSuccessRuns[row.code],
+        row.createdAt,
+        row.updatedAt,
+      )),
     },
     {
       title: '输出内容',
@@ -6773,8 +7065,8 @@ export default function NorthboundPageConfig() {
       ),
     },
     {
-      title: '压缩',
-      width: 100,
+      title: nowrapColumnTitle('压缩'),
+      width: 124,
       render: (_, row) => (
         <div className={styles.compressionList}>
           {getScenarioCompressionTags(row).map((compression) => (
@@ -6858,8 +7150,14 @@ export default function NorthboundPageConfig() {
     },
     {
       title: '状态',
-      width: 88,
-      render: (_, row) => renderStatusCell(buildInventoryReportStatus(row), Boolean(inventoryEnabled[row.key])),
+      width: 104,
+      render: (_, row) => renderStatusCell(buildProfileHealth(
+        Boolean(inventoryEnabled[row.key]),
+        getPeriodMinutes(row.period),
+        inventoryLatestSuccessRuns[row.key],
+        row.createdAt,
+        row.updatedAt,
+      )),
     },
     {
       title: '输出内容',
@@ -6906,8 +7204,8 @@ export default function NorthboundPageConfig() {
       ),
     },
     {
-      title: '压缩',
-      width: 100,
+      title: nowrapColumnTitle('压缩'),
+      width: 124,
       render: (_, row) => row.compressionEnabled
         ? <Tag color="green">{row.compressionFormat}</Tag>
         : <Tag>不压缩</Tag>,
@@ -7059,7 +7357,7 @@ export default function NorthboundPageConfig() {
           checked={value}
           checkedChildren="开"
           unCheckedChildren="关"
-          onChange={(enabled) => patchApiUser(row.username, { enabled })}
+          onChange={(enabled) => patchApiUser(row.key, { enabled })}
         />
       ),
     },
@@ -7072,7 +7370,7 @@ export default function NorthboundPageConfig() {
         <Input
           value={value}
           className={styles.monoText}
-          onChange={(event) => patchApiUser(row.username, { username: event.target.value })}
+          onChange={(event) => patchApiUser(row.key, { username: event.target.value })}
         />
       ),
     },
@@ -7081,7 +7379,7 @@ export default function NorthboundPageConfig() {
       dataIndex: 'password',
       width: 220,
       render: (value: string, row) => {
-        const visible = Boolean(apiUserPasswordVisible[row.username]);
+        const visible = Boolean(apiUserPasswordVisible[row.key]);
         return (
           <Input.Password
             value={visible ? value : (value ? apiUserPasswordMask : '')}
@@ -7089,12 +7387,12 @@ export default function NorthboundPageConfig() {
             visibilityToggle={{
               visible,
               onVisibleChange: (nextVisible) => {
-                setApiUserPasswordVisible((prev) => ({ ...prev, [row.username]: nextVisible }));
+                setApiUserPasswordVisible((prev) => ({ ...prev, [row.key]: nextVisible }));
               },
             }}
             onChange={(event) => {
               const nextValue = event.target.value;
-              patchApiUser(row.username, {
+              patchApiUser(row.key, {
                 password: !visible && nextValue.startsWith(apiUserPasswordMask)
                   ? nextValue.slice(apiUserPasswordMask.length)
                   : nextValue,
@@ -7123,7 +7421,7 @@ export default function NorthboundPageConfig() {
             size="small"
             type="text"
             icon={<DeleteOutlined />}
-            onClick={() => removeApiUser(row.username)}
+            onClick={() => removeApiUser(row.key)}
           />
         </Tooltip>
       ),
@@ -7188,8 +7486,27 @@ export default function NorthboundPageConfig() {
     { title: '类型', dataIndex: 'dataType', width: 120, render: (value: string) => <Tag>{value}</Tag> },
   ];
 
+  const readonlyAlarmFieldColumns: ColumnsType<AlarmFieldMappingRow> = [
+    { title: '上报', width: 76, fixed: 'left', render: (_, row) => statusTag(row.enabled) },
+    { title: '序号', dataIndex: 'order', width: 70, fixed: 'left' },
+    { title: '输出字段', dataIndex: 'field', width: 220, fixed: 'left', render: (value: string) => <span className={styles.monoText}>{value}</span> },
+    { title: '字段名称', dataIndex: 'cnName', width: 150 },
+    { title: 'xomc 数据源', dataIndex: 'source', width: 320, render: (value: string) => <span className={styles.monoText}>{value}</span> },
+    { title: '类型', dataIndex: 'dataType', width: 120, render: (value: string) => <Tag>{value}</Tag> },
+  ];
+
   const snmpAlarmFieldColumns: ColumnsType<AlarmFieldMappingRow> = [
     { title: '上报', width: 76, fixed: 'left', render: (_, row) => <Switch size="small" checked={row.enabled} disabled checkedChildren="开" unCheckedChildren="关" /> },
+    { title: '序号', dataIndex: 'order', width: 70, fixed: 'left' },
+    { title: '输出字段', dataIndex: 'field', width: 220, fixed: 'left', render: (value: string) => <span className={styles.monoText}>{value}</span> },
+    { title: 'OID', width: 300, render: (_, row) => <Typography.Text className={styles.monoText} ellipsis={{ tooltip: snmpAlarmOIDForField(row.field) }}>{snmpAlarmOIDForField(row.field)}</Typography.Text> },
+    { title: '字段名称', dataIndex: 'cnName', width: 150 },
+    { title: 'xomc 数据源', dataIndex: 'source', width: 320, render: (value: string) => <span className={styles.monoText}>{value}</span> },
+    { title: '类型', dataIndex: 'dataType', width: 150, render: (value: string) => <Tag>{value}</Tag> },
+  ];
+
+  const readonlySnmpAlarmFieldColumns: ColumnsType<AlarmFieldMappingRow> = [
+    { title: '上报', width: 76, fixed: 'left', render: (_, row) => statusTag(row.enabled) },
     { title: '序号', dataIndex: 'order', width: 70, fixed: 'left' },
     { title: '输出字段', dataIndex: 'field', width: 220, fixed: 'left', render: (value: string) => <span className={styles.monoText}>{value}</span> },
     { title: 'OID', width: 300, render: (_, row) => <Typography.Text className={styles.monoText} ellipsis={{ tooltip: snmpAlarmOIDForField(row.field) }}>{snmpAlarmOIDForField(row.field)}</Typography.Text> },
@@ -7486,12 +7803,7 @@ export default function NorthboundPageConfig() {
       ),
     },
     { title: '配置名称', dataIndex: 'name', width: 176, fixed: 'left', render: (value: string) => <Typography.Text strong ellipsis>{value}</Typography.Text> },
-    {
-      title: '状态',
-      width: 88,
-      render: (_, row) => renderStatusCell(buildSocketReportStatus(row), Boolean(socketEnabled[row.key])),
-    },
-    { title: '协议', width: 120, render: (_, row) => <Space size={4}>{socketProfileTag(row.profile)}<Tag>{row.encoding}</Tag></Space> },
+    { title: '协议', width: 120, render: (_, row) => <Space size={4}>{socketProfileTag(row.profile, nt)}<Tag>{row.encoding}</Tag></Space> },
     { title: '监听地址', width: 170, render: (_, row) => <span className={styles.monoText}>{endpointText(row.listenIp, row.listenPort)}</span> },
     {
       title: '服务能力',
@@ -7572,7 +7884,7 @@ export default function NorthboundPageConfig() {
             }}
           >
             <Button
-              aria-label={`更多操作 ${row.name}`}
+              aria-label={`更多操作 ${snmpVersionLabel(row.version)}`}
               type="text"
               size="small"
               icon={<MoreOutlined />}
@@ -7582,37 +7894,41 @@ export default function NorthboundPageConfig() {
         </div>
       ),
     },
-    { title: '目标名称', dataIndex: 'name', width: 180, fixed: 'left', render: (value: string) => <Typography.Text strong ellipsis>{value}</Typography.Text> },
     {
-      title: '状态',
-      width: 88,
-      render: (_, row) => renderStatusCell(buildSnmpReportStatus(row), Boolean(snmpEnabled[row.key])),
+      title: '版本',
+      width: 108,
+      fixed: 'left',
+      render: (_, row) => snmpVersionTag(row.version),
     },
-    { title: '版本', width: 100, render: (_, row) => snmpVersionTag(row.version) },
     { title: '通知', width: 100, render: (_, row) => snmpNotificationTag(row.notificationType) },
-    { title: 'Agent 监听', width: 170, render: (_, row) => <span className={styles.monoText}>{endpointText(row.listenIp, row.listenPort)}</span> },
-    { title: '通知目标', width: 170, render: (_, row) => <span className={styles.monoText}>{endpointText(row.targetHost, row.targetPort)}</span> },
     {
-      title: '安全配置',
-      width: 220,
-      render: (_, row) => row.version === 'v2'
-        ? <span className={styles.monoText}>{row.community === storedCredentialText ? '********' : (row.community || snmpDefaultCommunity)}</span>
-        : <Space size={4}><Tag>{row.securityName}</Tag><Tag>{row.authProtocol}</Tag><Tag>{row.privProtocol}</Tag></Space>,
+      title: 'Agent 监听',
+      width: 170,
+      render: (_, row) => row.mibQueryEnabled
+        ? <span className={styles.monoText}>{endpointText(row.listenIp, row.listenPort)}</span>
+        : <Tag>未开放查询</Tag>,
     },
     {
-      title: 'MIB/清除策略',
+      title: '通知目标',
+      width: 170,
+      render: (_, row) => snmpEnabled[row.key]
+        ? <span className={styles.monoText}>{endpointText(row.targetHost, row.targetPort)}</span>
+        : <Tag>未启用上报</Tag>,
+    },
+    {
+      title: '查询/清除策略',
       width: 220,
       render: (_, row) => (
-	        <Space size={4} wrap>
-	          {row.mibQueryEnabled ? <Tag color="blue">MIB 查询</Tag> : <Tag>MIB 关闭</Tag>}
-	          <Tag>{row.clearSeverityPolicy}</Tag>
-	        </Space>
+        <Space size={4} wrap>
+          {row.mibQueryEnabled ? <Tag color="blue">允许 MIB 查询</Tag> : <Tag>未开放查询</Tag>}
+          <Tag>{row.clearSeverityPolicy}</Tag>
+        </Space>
       ),
     },
     {
       title: '重试',
       width: 120,
-      render: (_, row) => <Tag>{row.timeoutSeconds}s / {row.retries} 次</Tag>,
+      render: (_, row) => row.notificationType === 'Inform' ? <Tag>{row.timeoutSeconds}s / {row.retries} 次</Tag> : <span>-</span>,
     },
   ];
 
@@ -7712,7 +8028,7 @@ export default function NorthboundPageConfig() {
         <Table<ApiUserRow>
           columns={apiUserColumns}
           dataSource={apiUsers}
-          rowKey="username"
+          rowKey="key"
           size="small"
           pagination={false}
           scroll={{ x: 720, y: 260 }}
@@ -7747,7 +8063,7 @@ export default function NorthboundPageConfig() {
         rowKey="key"
         size="small"
         pagination={renderTablePagination('刷新 SNMP 告警')}
-        scroll={{ x: 1628, y: 560 }}
+        scroll={{ x: 1180, y: 560 }}
         rowClassName={(row) => (selectedSnmp?.key === row.key || snmpEditor?.key === row.key ? styles.selectedRow : '')}
         onRow={(row) => ({ onClick: () => setSelectedSnmp(row) })}
       />
@@ -8083,7 +8399,7 @@ export default function NorthboundPageConfig() {
                 <Typography.Text strong>基础信息</Typography.Text>
               </div>
               <Descriptions bordered size="small" column={2}>
-                <Descriptions.Item label="协议场景">{socketProfileTag(selectedSocket.profile)}</Descriptions.Item>
+                <Descriptions.Item label="协议场景">{socketProfileTag(selectedSocket.profile, nt)}</Descriptions.Item>
                 <Descriptions.Item label="启用配置">{statusTag(Boolean(socketEnabled[selectedSocket.key]))}</Descriptions.Item>
                 <Descriptions.Item label="监听地址">
                   <span className={styles.monoText}>{endpointText(selectedSocket.listenIp, selectedSocket.listenPort)}</span>
@@ -8135,7 +8451,7 @@ export default function NorthboundPageConfig() {
                 <Typography.Text strong>告警字段映射</Typography.Text>
               </div>
               <Table<AlarmFieldMappingRow>
-                columns={alarmFieldColumns}
+                columns={readonlyAlarmFieldColumns}
                 dataSource={getSocketFields(selectedSocket.profile)}
                 rowKey="key"
                 size="small"
@@ -8173,7 +8489,7 @@ export default function NorthboundPageConfig() {
 	                <div className={styles.inventoryFormGrid}>
 	                  <Form.Item label="协议场景">
 	                    <Space size={4} wrap>
-	                      {socketProfileTag(socketEditor.profile)}
+	                      {socketProfileTag(socketEditor.profile, nt)}
 	                      <Tag>{socketEditor.encoding}</Tag>
 	                    </Space>
 	                  </Form.Item>
@@ -8293,32 +8609,12 @@ export default function NorthboundPageConfig() {
       </Drawer>
 
       <Drawer
-        title={selectedSnmp ? selectedSnmp.name : 'SNMP 告警'}
+        title={selectedSnmp ? `${snmpVersionLabel(selectedSnmp.version)} 告警` : 'SNMP 告警'}
         open={Boolean(selectedSnmp)}
         onClose={() => setSelectedSnmp(null)}
         size="large"
         rootClassName={styles.inventoryDrawer}
         destroyOnClose
-        extra={selectedSnmp ? (
-          <Space>
-            <Switch
-              checked={snmpEnabled[selectedSnmp.key]}
-              checkedChildren="开"
-              unCheckedChildren="关"
-              onChange={(checked) => persistSnmpEnabled(selectedSnmp, checked)}
-            />
-            <Button
-              icon={<EditOutlined />}
-              onClick={() => {
-                const snmpConfig = selectedSnmp;
-                setSelectedSnmp(null);
-                setSnmpEditor(snmpConfig);
-              }}
-            >
-              编辑
-            </Button>
-          </Space>
-        ) : undefined}
       >
         {selectedSnmp && (
           <Space orientation="vertical" size={16} className={styles.drawerBody}>
@@ -8329,21 +8625,41 @@ export default function NorthboundPageConfig() {
               <Descriptions bordered size="small" column={2}>
                 <Descriptions.Item label="版本">{snmpVersionTag(selectedSnmp.version)}</Descriptions.Item>
                 <Descriptions.Item label="通知类型">{snmpNotificationTag(selectedSnmp.notificationType)}</Descriptions.Item>
-                <Descriptions.Item label="启用配置">{statusTag(Boolean(snmpEnabled[selectedSnmp.key]))}</Descriptions.Item>
-                <Descriptions.Item label="MIB 查询">{selectedSnmp.mibQueryEnabled ? '开启' : '关闭'}</Descriptions.Item>
-                <Descriptions.Item label="Agent 监听">
-                  <span className={styles.monoText}>{endpointText(selectedSnmp.listenIp, selectedSnmp.listenPort)}</span>
-                </Descriptions.Item>
-                <Descriptions.Item label="通知目标">
-                  <span className={styles.monoText}>{endpointText(selectedSnmp.targetHost, selectedSnmp.targetPort)}</span>
-                </Descriptions.Item>
-                <Descriptions.Item label="安全配置" span={2}>
-                  {selectedSnmp.version === 'v2'
-                    ? <span className={styles.monoText}>{selectedSnmp.community === storedCredentialText ? '********' : (selectedSnmp.community || snmpDefaultCommunity)}</span>
-                    : <Space size={4}><Tag>{selectedSnmp.securityName}</Tag><Tag>{selectedSnmp.authProtocol}</Tag><Tag>{selectedSnmp.privProtocol}</Tag></Space>}
-                </Descriptions.Item>
-                <Descriptions.Item label="清除告警级别">{selectedSnmp.clearSeverityPolicy}</Descriptions.Item>
-                <Descriptions.Item label="超时/重试">{selectedSnmp.timeoutSeconds}s / {selectedSnmp.retries} 次</Descriptions.Item>
+                <Descriptions.Item label="告警上报">{statusTag(Boolean(snmpEnabled[selectedSnmp.key]))}</Descriptions.Item>
+                <Descriptions.Item label="允许 MIB 查询">{selectedSnmp.mibQueryEnabled ? '开启' : '关闭'}</Descriptions.Item>
+                {selectedSnmp.mibQueryEnabled && (
+                  <Descriptions.Item label="Agent 监听">
+                    <span className={styles.monoText}>{endpointText(selectedSnmp.listenIp, selectedSnmp.listenPort)}</span>
+                  </Descriptions.Item>
+                )}
+                {Boolean(snmpEnabled[selectedSnmp.key]) && (
+                  <Descriptions.Item label="通知目标">
+                    <span className={styles.monoText}>{endpointText(selectedSnmp.targetHost, selectedSnmp.targetPort)}</span>
+                  </Descriptions.Item>
+                )}
+                {selectedSnmp.version === 'v2' && (Boolean(snmpEnabled[selectedSnmp.key]) || selectedSnmp.mibQueryEnabled) && (
+                  <Descriptions.Item label="Community" span={2}>
+                    <span className={styles.monoText}>{selectedSnmp.community === storedCredentialText ? '********' : (selectedSnmp.community || snmpDefaultCommunity)}</span>
+                  </Descriptions.Item>
+                )}
+                {selectedSnmp.version === 'v3' && (Boolean(snmpEnabled[selectedSnmp.key]) || selectedSnmp.mibQueryEnabled) && (
+                  <>
+                    <Descriptions.Item label="安全级别">{snmpV3SecurityLevelLabel(snmpV3SecurityLevel(selectedSnmp))}</Descriptions.Item>
+                    <Descriptions.Item label="安全名">{selectedSnmp.securityName || '-'}</Descriptions.Item>
+                    {snmpV3SecurityLevel(selectedSnmp) !== 'noAuthNoPriv' && (
+                      <Descriptions.Item label="认证算法">{selectedSnmp.authProtocol || '-'}</Descriptions.Item>
+                    )}
+                    {snmpV3SecurityLevel(selectedSnmp) === 'authPriv' && (
+                      <Descriptions.Item label="加密算法">{selectedSnmp.privProtocol || '-'}</Descriptions.Item>
+                    )}
+                  </>
+                )}
+                {Boolean(snmpEnabled[selectedSnmp.key]) && (
+                  <Descriptions.Item label="清除告警级别">{selectedSnmp.clearSeverityPolicy}</Descriptions.Item>
+                )}
+                {Boolean(snmpEnabled[selectedSnmp.key]) && selectedSnmp.notificationType === 'Inform' && (
+                  <Descriptions.Item label="超时/重试">{selectedSnmp.timeoutSeconds}s / {selectedSnmp.retries} 次</Descriptions.Item>
+                )}
                 <Descriptions.Item label="MIB 根" span={2}>
                   <span className={styles.monoText}>1.3.6.1.4.1.53058.1.1</span>
                 </Descriptions.Item>
@@ -8358,7 +8674,7 @@ export default function NorthboundPageConfig() {
                 <Typography.Text strong>omcAlarmEntry 字段映射</Typography.Text>
               </div>
               <Table<AlarmFieldMappingRow>
-                columns={snmpAlarmFieldColumns}
+                columns={readonlySnmpAlarmFieldColumns}
                 dataSource={snmpAlarmFields}
                 rowKey="key"
                 size="small"
@@ -8371,7 +8687,7 @@ export default function NorthboundPageConfig() {
       </Drawer>
 
       <Drawer
-        title={snmpEditor ? `编辑 ${snmpEditor.name}` : '编辑 SNMP 告警'}
+        title={snmpEditor ? `编辑 ${snmpVersionLabel(snmpEditor.version)}` : '编辑 SNMP 告警'}
         open={Boolean(snmpEditor)}
         onClose={() => setSnmpEditor(null)}
         size="large"
@@ -8395,24 +8711,12 @@ export default function NorthboundPageConfig() {
               </div>
               <Form layout="vertical" className={styles.compactForm}>
                 <div className={styles.inventoryFormGrid}>
-	                  <Form.Item label="版本">
-	                    <Select
-	                      value={snmpEditor.version}
-	                      options={[{ label: 'V2C', value: 'v2' }, { label: 'V3', value: 'v3' }]}
-	                      onChange={(version) => setSnmpEditor((current) => (current ? {
-	                        ...current,
-	                        version,
-	                        mibQueryEnabled: current.mibQueryEnabled,
-	                        community: version === 'v2' ? (current.community || snmpDefaultCommunity) : current.community,
-	                        authProtocol: version === 'v3' ? (current.authProtocol || 'SHA') : current.authProtocol,
-	                        privProtocol: version === 'v3' ? (current.privProtocol || 'DES') : current.privProtocol,
-	                      } : current))}
-	                    />
-	                  </Form.Item>
-                  <Form.Item label="通知类型">
-                    <Select value={snmpEditor.notificationType} options={[{ label: 'Trap', value: 'Trap' }, { label: 'Inform', value: 'Inform' }]} onChange={(notificationType) => setSnmpEditor((current) => (current ? { ...current, notificationType } : current))} />
-                  </Form.Item>
-                  <Form.Item label="启用配置">
+                  {Boolean(snmpEnabled[snmpEditor.key]) && (
+                    <Form.Item label="通知类型">
+                      <Select value={snmpEditor.notificationType} options={[{ label: 'Trap', value: 'Trap' }, { label: 'Inform', value: 'Inform' }]} onChange={(notificationType) => setSnmpEditor((current) => (current ? { ...current, notificationType } : current))} />
+                    </Form.Item>
+                  )}
+                  <Form.Item label="启用告警上报">
                     <Switch
                       checked={snmpEnabled[snmpEditor.key]}
                       checkedChildren="开"
@@ -8421,81 +8725,112 @@ export default function NorthboundPageConfig() {
                       onChange={(checked) => setSnmpEnabled((prev) => ({ ...prev, [snmpEditor.key]: checked }))}
                     />
                   </Form.Item>
-	                  <Form.Item label="MIB 查询">
-	                    <Tooltip title={snmpEditor.version === 'v3' ? 'v3 MIB walk/get 使用 security name 与认证/加密凭据' : undefined}>
-	                      <Switch
-	                        checked={snmpEditor.mibQueryEnabled}
-	                        checkedChildren="开"
-	                        unCheckedChildren="关"
-	                        onChange={(mibQueryEnabled) => setSnmpEditor((current) => (current ? { ...current, mibQueryEnabled } : current))}
-	                      />
-	                    </Tooltip>
-	                  </Form.Item>
-                  <Form.Item label="Agent IP">
-                    <Input value={snmpEditor.listenIp} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, listenIp: event.target.value } : current))} />
+                  <Form.Item label="允许 MIB 查询">
+                    <Tooltip title={snmpEditor.version === 'v3' ? 'v3 MIB walk/get 使用安全名，并按安全级别校验认证/加密参数' : undefined}>
+                      <Switch
+                        checked={snmpEditor.mibQueryEnabled}
+                        checkedChildren="开"
+                        unCheckedChildren="关"
+                        onChange={(mibQueryEnabled) => setSnmpEditor((current) => (current ? { ...current, mibQueryEnabled } : current))}
+                      />
+                    </Tooltip>
                   </Form.Item>
-                  <Form.Item label="Agent 端口">
-                    <InputNumber value={snmpEditor.listenPort} min={1} max={65535} style={{ width: '100%' }} onChange={(listenPort) => setSnmpEditor((current) => (current ? { ...current, listenPort: Number(listenPort ?? 1) } : current))} />
-                  </Form.Item>
-                  <Form.Item label="目标 IP">
-                    <Input value={snmpEditor.targetHost} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, targetHost: event.target.value } : current))} />
-                  </Form.Item>
-                  <Form.Item label="目标端口">
-                    <InputNumber value={snmpEditor.targetPort} min={1} max={65535} style={{ width: '100%' }} onChange={(targetPort) => setSnmpEditor((current) => (current ? { ...current, targetPort: Number(targetPort ?? 1) } : current))} />
-                  </Form.Item>
+                  {snmpEditor.mibQueryEnabled && (
+                    <>
+                      <Form.Item label="Agent IP">
+                        <Input value={snmpEditor.listenIp} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, listenIp: event.target.value } : current))} />
+                      </Form.Item>
+                      <Form.Item label="Agent 端口">
+                        <InputNumber value={snmpEditor.listenPort} min={1} max={65535} style={{ width: '100%' }} onChange={(listenPort) => setSnmpEditor((current) => (current ? { ...current, listenPort: Number(listenPort ?? 1) } : current))} />
+                      </Form.Item>
+                    </>
+                  )}
+                  {Boolean(snmpEnabled[snmpEditor.key]) && (
+                    <>
+                      <Form.Item label="目标 IP">
+                        <Input value={snmpEditor.targetHost} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, targetHost: event.target.value } : current))} />
+                      </Form.Item>
+                      <Form.Item label="目标端口">
+                        <InputNumber value={snmpEditor.targetPort} min={1} max={65535} style={{ width: '100%' }} onChange={(targetPort) => setSnmpEditor((current) => (current ? { ...current, targetPort: Number(targetPort ?? 1) } : current))} />
+                      </Form.Item>
+                    </>
+                  )}
                 </div>
               </Form>
             </div>
 
-            <div className={styles.editorSection}>
-              <div className={styles.editorSectionHeader}>
-                <Typography.Text strong>安全与运行</Typography.Text>
-              </div>
-              <Form layout="vertical" className={styles.compactForm}>
-                <div className={styles.inventoryFormGrid}>
-                  {snmpEditor.version === 'v2' && (
-                    <Form.Item label="Community">
-                      <Input.Password
-                        value={snmpEditor.community === storedCredentialText ? '' : (snmpEditor.community || snmpDefaultCommunity)}
-                        placeholder={snmpEditor.community === storedCredentialText ? '未修改保持原 community' : `默认 ${snmpDefaultCommunity}`}
-                        onChange={(event) => setSnmpEditor((current) => (current ? {
-                          ...current,
-                          community: event.target.value || (current.community === storedCredentialText ? storedCredentialText : ''),
-                        } : current))}
-                      />
-                    </Form.Item>
-                  )}
-                  {snmpEditor.version === 'v3' && (
-                    <>
-                      <Form.Item label="安全名">
-                        <Input value={snmpEditor.securityName} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, securityName: event.target.value } : current))} />
-                      </Form.Item>
-                      <Form.Item label="认证算法">
-                        <Select value={snmpEditor.authProtocol ?? 'SHA'} options={snmpAuthProtocolOptions} onChange={(authProtocol) => setSnmpEditor((current) => (current ? { ...current, authProtocol } : current))} />
-                      </Form.Item>
-                      <Form.Item label="认证密码">
-                        <Input.Password placeholder={snmpEditor.authCredential === storedCredentialText ? '未修改保持原密码' : '请输入认证密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, authCredential: event.target.value || current.authCredential } : current))} />
-                      </Form.Item>
-                      <Form.Item label="加密算法">
-                        <Select value={snmpEditor.privProtocol ?? 'DES'} options={snmpPrivProtocolOptions} onChange={(privProtocol) => setSnmpEditor((current) => (current ? { ...current, privProtocol } : current))} />
-                      </Form.Item>
-                      <Form.Item label="加密密码">
-                        <Input.Password placeholder={snmpEditor.privCredential === storedCredentialText ? '未修改保持原密码' : '请输入加密密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, privCredential: event.target.value || current.privCredential } : current))} />
-                      </Form.Item>
-                    </>
-                  )}
-                  <Form.Item label="清除告警级别">
-                    <Select value={snmpEditor.clearSeverityPolicy} options={[{ label: '保留原级别', value: '保留原级别' }, { label: '清除置 0', value: '清除置 0' }]} onChange={(clearSeverityPolicy) => setSnmpEditor((current) => (current ? { ...current, clearSeverityPolicy } : current))} />
-                  </Form.Item>
-                  <Form.Item label="超时（秒）">
-                    <InputNumber value={snmpEditor.timeoutSeconds} min={1} style={{ width: '100%' }} onChange={(timeoutSeconds) => setSnmpEditor((current) => (current ? { ...current, timeoutSeconds: Number(timeoutSeconds ?? 1) } : current))} />
-                  </Form.Item>
-                  <Form.Item label="重试次数">
-                    <InputNumber value={snmpEditor.retries} min={0} style={{ width: '100%' }} onChange={(retries) => setSnmpEditor((current) => (current ? { ...current, retries: Number(retries ?? 0) } : current))} />
-                  </Form.Item>
+            {(Boolean(snmpEnabled[snmpEditor.key]) || snmpEditor.mibQueryEnabled) && (
+              <div className={styles.editorSection}>
+                <div className={styles.editorSectionHeader}>
+                  <Typography.Text strong>安全与运行</Typography.Text>
                 </div>
-              </Form>
-            </div>
+                <Form layout="vertical" className={styles.compactForm}>
+                  <div className={styles.inventoryFormGrid}>
+                    {snmpEditor.version === 'v2' && (Boolean(snmpEnabled[snmpEditor.key]) || snmpEditor.mibQueryEnabled) && (
+                      <Form.Item label="Community">
+                        <Input.Password
+                          value={snmpEditor.community === storedCredentialText ? '' : (snmpEditor.community || snmpDefaultCommunity)}
+                          placeholder={snmpEditor.community === storedCredentialText ? '未修改保持原 community' : `默认 ${snmpDefaultCommunity}`}
+                          onChange={(event) => setSnmpEditor((current) => (current ? {
+                            ...current,
+                            community: event.target.value || (current.community === storedCredentialText ? storedCredentialText : ''),
+                          } : current))}
+                        />
+                      </Form.Item>
+                    )}
+                    {snmpEditor.version === 'v3' && (Boolean(snmpEnabled[snmpEditor.key]) || snmpEditor.mibQueryEnabled) && (
+                      <>
+                        <Form.Item label="安全级别">
+                          <Select
+                            value={snmpV3SecurityLevel(snmpEditor)}
+                            options={snmpV3SecurityLevelOptions}
+                            onChange={(securityLevel: SnmpV3SecurityLevel) => setSnmpEditor((current) => (current ? applySnmpV3SecurityLevel(current, securityLevel) : current))}
+                          />
+                        </Form.Item>
+                        <Form.Item label="安全名">
+                          <Input value={snmpEditor.securityName} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, securityName: event.target.value } : current))} />
+                        </Form.Item>
+                        {snmpV3SecurityLevel(snmpEditor) !== 'noAuthNoPriv' && (
+                          <>
+                            <Form.Item label="认证算法">
+                              <Select value={snmpEditor.authProtocol || 'SHA'} options={snmpAuthProtocolOptions} onChange={(authProtocol) => setSnmpEditor((current) => (current ? { ...current, authProtocol } : current))} />
+                            </Form.Item>
+                            <Form.Item label="认证密码">
+                              <Input.Password minLength={8} placeholder={snmpEditor.authCredential === storedCredentialText ? '未修改保持原密码' : '至少 8 位认证密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, authCredential: event.target.value || current.authCredential } : current))} />
+                            </Form.Item>
+                          </>
+                        )}
+                        {snmpV3SecurityLevel(snmpEditor) === 'authPriv' && (
+                          <>
+                            <Form.Item label="加密算法">
+                              <Select value={snmpEditor.privProtocol || 'DES'} options={snmpPrivProtocolOptions} onChange={(privProtocol) => setSnmpEditor((current) => (current ? { ...current, privProtocol } : current))} />
+                            </Form.Item>
+                            <Form.Item label="加密密码">
+                              <Input.Password minLength={8} placeholder={snmpEditor.privCredential === storedCredentialText ? '未修改保持原密码' : '至少 8 位加密密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, privCredential: event.target.value || current.privCredential } : current))} />
+                            </Form.Item>
+                          </>
+                        )}
+                      </>
+                    )}
+                    {Boolean(snmpEnabled[snmpEditor.key]) && (
+                      <Form.Item label="清除告警级别">
+                        <Select value={snmpEditor.clearSeverityPolicy} options={[{ label: '保留原级别', value: '保留原级别' }, { label: '清除置 0', value: '清除置 0' }]} onChange={(clearSeverityPolicy) => setSnmpEditor((current) => (current ? { ...current, clearSeverityPolicy } : current))} />
+                      </Form.Item>
+                    )}
+                    {Boolean(snmpEnabled[snmpEditor.key]) && snmpEditor.notificationType === 'Inform' && (
+                      <>
+                        <Form.Item label="超时（秒）">
+                          <InputNumber value={snmpEditor.timeoutSeconds} min={1} style={{ width: '100%' }} onChange={(timeoutSeconds) => setSnmpEditor((current) => (current ? { ...current, timeoutSeconds: Number(timeoutSeconds ?? 1) } : current))} />
+                        </Form.Item>
+                        <Form.Item label="重试次数">
+                          <InputNumber value={snmpEditor.retries} min={0} style={{ width: '100%' }} onChange={(retries) => setSnmpEditor((current) => (current ? { ...current, retries: Number(retries ?? 0) } : current))} />
+                        </Form.Item>
+                      </>
+                    )}
+                  </div>
+                </Form>
+              </div>
+            )}
 
             <div className={styles.editorSection}>
               <div className={styles.editorSectionHeader}>
@@ -8860,11 +9195,11 @@ export default function NorthboundPageConfig() {
                   { title: '统计周期', dataIndex: 'period', width: 128, render: (value: string) => <Typography.Text strong>{formatPeriodLabel(value)}</Typography.Text> },
                   { title: '生成计划', width: 210, render: (_, record) => formatScheduleLabel(record.period, record.cron) },
                   {
-                    title: '压缩',
-                    width: 86,
+                    title: nowrapColumnTitle('压缩'),
+                    width: 116,
                     render: (_, record) => record.compressionEnabled ? <Tag color="green">开启</Tag> : <Tag>关闭</Tag>,
                   },
-                  { title: '压缩格式', dataIndex: 'compressionFormat', width: 120, render: (value: CompressionFormat) => <Tag>{value}</Tag> },
+                  { title: nowrapColumnTitle('压缩格式'), dataIndex: 'compressionFormat', width: 152, render: (value: CompressionFormat) => <Tag>{value}</Tag> },
                   { title: '上传目录模板', dataIndex: 'path', width: 360, render: (value: string) => <span className={styles.monoText}>{value}</span> },
                   { title: '文件名模板', dataIndex: 'fileName', width: 460, render: (value: string) => <span className={styles.fileNameTemplate}>{value}</span> },
                   {
@@ -9106,8 +9441,8 @@ export default function NorthboundPageConfig() {
                   ),
                 },
                 {
-                  title: '压缩',
-                  width: 86,
+                  title: nowrapColumnTitle('压缩'),
+                  width: 116,
                   render: (_, record) => (
                     <Switch
                       size="small"
@@ -9119,9 +9454,9 @@ export default function NorthboundPageConfig() {
                   ),
                 },
                 {
-                  title: '压缩格式',
+                  title: nowrapColumnTitle('压缩格式'),
                   dataIndex: 'compressionFormat',
-                  width: 120,
+                  width: 152,
                   render: (value: CompressionFormat, record) => (
                     <Select
                       value={value}

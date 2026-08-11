@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -227,21 +228,22 @@ func TestDeviceFacadeSetParametersReturnsLegacyJobFields(t *testing.T) {
 }
 
 func TestDeviceFacadeTaskDetailReturnsLegacyStatus(t *testing.T) {
+	taskID := uuid.NewString()
 	taskSvc := &fakeNBTaskService{
-		getFn: func(_ context.Context, taskID string) (*task.Task, error) {
-			require.Equal(t, "task-001", taskID)
-			return &task.Task{ID: taskID, DeviceSN: "SN001", Method: "SetParameterValues", Status: task.TaskStatusCompleted}, nil
+		getFn: func(_ context.Context, gotTaskID string) (*task.Task, error) {
+			require.Equal(t, taskID, gotTaskID)
+			return &task.Task{ID: gotTaskID, DeviceSN: "SN001", Method: "SetParameterValues", Status: task.TaskStatusCompleted}, nil
 		},
 	}
 
 	router := setupDeviceFacadeRouter(nil, taskSvc)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/v1/job/result/task-001", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/v1/job/result/"+taskID, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"legacy_status":"2"`)
-	require.Contains(t, rec.Body.String(), `"jobId":"task-001"`)
+	require.Contains(t, rec.Body.String(), `"jobId":"`+taskID+`"`)
 }
 
 func TestLegacyFacadeGetParametersReturnsSnapshotMap(t *testing.T) {
@@ -409,20 +411,66 @@ func TestLegacyFacadeLogCollectUsesUFTE(t *testing.T) {
 }
 
 func TestLegacyFacadeTaskDetailFallsBackToUFTE(t *testing.T) {
+	taskID := uuid.NewString()
 	transferSvc := &fakeNBTransferTaskService{
 		getFn: func(_ context.Context, id string, visibleGroups []uuid.UUID) (*ufte.Task, error) {
-			require.Equal(t, "ufte-log-task", id)
+			require.Equal(t, taskID, id)
 			require.Nil(t, visibleGroups)
 			return &ufte.Task{ID: id, TaskName: "log collect", TypeCode: "RUNTIME_LOG_COLLECT", Category: "station_log", Status: "ended", Progress: 100}, nil
 		},
 	}
 
 	router := setupDeviceFacadeRouterWithExtras(nil, nil, nil, nil, transferSvc)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/v1/job/result/ufte-log-task", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/v1/job/result/"+taskID, nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Contains(t, rec.Body.String(), `"jobId":"ufte-log-task"`)
+	require.Contains(t, rec.Body.String(), `"jobId":"`+taskID+`"`)
 	require.Contains(t, rec.Body.String(), `"legacy_status":"2"`)
+}
+
+func TestLegacyFacadeTaskDetailInvalidStorageIDReturnsBadRequest(t *testing.T) {
+	called := false
+	taskSvc := &fakeNBTaskService{
+		getFn: func(_ context.Context, _ string) (*task.Task, error) {
+			called = true
+			return nil, errors.New(`get task from repository: ERROR: invalid input syntax for type uuid: "not-a-uuid" (SQLSTATE 22P02)`)
+		},
+	}
+
+	router := setupDeviceFacadeRouter(nil, taskSvc)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/v1/job/result/not-a-uuid", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.False(t, called)
+	require.Contains(t, rec.Body.String(), `"msg":"invalid task_id"`)
+}
+
+func TestLegacyFacadeListTasksWithoutSNUsesUFTE(t *testing.T) {
+	transferSvc := &fakeNBTransferTaskService{
+		listFn: func(_ context.Context, filter ufte.TaskListFilter, visibleGroups []uuid.UUID) (*model.ListResponse[ufte.Task], error) {
+			require.Nil(t, visibleGroups)
+			require.Equal(t, "station_log", filter.Category)
+			require.Equal(t, 2, filter.Page)
+			require.Equal(t, 5, filter.PageSize)
+			return model.NewListResponse([]ufte.Task{{
+				ID:       uuid.NewString(),
+				TaskName: "northbound log collect",
+				Category: "station_log",
+				Status:   "ended",
+			}}, 1, 2, 5), nil
+		},
+	}
+
+	router := setupDeviceFacadeRouterWithExtras(nil, nil, nil, nil, transferSvc)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/northbound/v1/job/result/page", bytes.NewBufferString(`{"page":2,"rows":5}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"northbound log collect"`)
 }

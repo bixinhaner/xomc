@@ -51,6 +51,20 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$`,
 		`UPDATE northbound_snmp_alarm_targets
+		    SET version = 'v2'
+		  WHERE target_key = 'snmp-v2-primary' AND version <> 'v2'`,
+		`UPDATE northbound_snmp_alarm_targets
+		    SET version = 'v3'
+		  WHERE target_key = 'snmp-v3-inform' AND version <> 'v3'`,
+		`UPDATE northbound_snmp_alarm_targets
+		    SET name = 'SNMP V2C'
+		  WHERE target_key = 'snmp-v2-primary'
+		    AND (COALESCE(NULLIF(BTRIM(name), ''), '') = '' OR name IN ('NMS V2 Trap', 'SNMP v2', 'SNMP v2 Trap 主用目标'))`,
+		`UPDATE northbound_snmp_alarm_targets
+		    SET name = 'SNMP V3'
+		  WHERE target_key = 'snmp-v3-inform'
+		    AND (COALESCE(NULLIF(BTRIM(name), ''), '') = '' OR name IN ('NMS V3 Inform', 'SNMP v3', 'SNMP v3 Inform 备用目标'))`,
+		`UPDATE northbound_snmp_alarm_targets
 		    SET priv_protocol = 'AES128'
 		  WHERE version = 'v3' AND upper(priv_protocol) = 'AES'`,
 		`UPDATE northbound_snmp_alarm_targets
@@ -305,6 +319,7 @@ func (r *PgRepository) ListSNMPAlarmTargets(ctx context.Context) ([]SNMPAlarmTar
 	rows, err := r.pool.Query(ctx, `
 SELECT id::text, target_key, name, enabled, version, notification_type, listen_ip,
        listen_port, target_host, target_port, community_secret <> '' AS community_set,
+       CASE WHEN community_secret = 'baicells' THEN community_secret ELSE '' END AS community,
        security_name, auth_protocol, auth_secret <> '' AS auth_credential_set,
        priv_protocol, priv_secret <> '' AS priv_credential_set, clear_severity_policy,
        mib_query_enabled, timeout_seconds, retries, mib_fields, created_at, updated_at
@@ -364,6 +379,32 @@ SELECT id::text, target_key, name, enabled, version, notification_type, listen_i
 	return out, rows.Err()
 }
 
+func (r *PgRepository) ListSNMPMIBTargetsForServe(ctx context.Context) ([]SNMPAlarmTarget, error) {
+	rows, err := r.pool.Query(ctx, `
+SELECT id::text, target_key, name, enabled, version, notification_type, listen_ip,
+       listen_port, target_host, target_port, community_secret <> '' AS community_set,
+       security_name, auth_protocol, auth_secret <> '' AS auth_credential_set,
+       priv_protocol, priv_secret <> '' AS priv_credential_set, clear_severity_policy,
+       mib_query_enabled, timeout_seconds, retries, mib_fields, created_at, updated_at,
+       community_secret, auth_secret, priv_secret
+  FROM northbound_snmp_alarm_targets
+ WHERE mib_query_enabled = true
+ ORDER BY target_key ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("query MIB-enabled northbound_snmp_alarm_targets: %w", err)
+	}
+	defer rows.Close()
+	out := make([]SNMPAlarmTarget, 0)
+	for rows.Next() {
+		target, err := scanSNMPAlarmTargetWithSecrets(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *target)
+	}
+	return out, rows.Err()
+}
+
 func (r *PgRepository) UpdateSNMPAlarmTarget(ctx context.Context, key string, target SNMPAlarmTarget) (*SNMPAlarmTarget, error) {
 	current, _ := r.getSNMPAlarmSecrets(ctx, key)
 	target = normalizeSNMPAlarmTarget(key, target)
@@ -390,6 +431,7 @@ ON CONFLICT (target_key) DO UPDATE SET
   retries=EXCLUDED.retries, mib_fields=EXCLUDED.mib_fields
 RETURNING id::text, target_key, name, enabled, version, notification_type, listen_ip,
           listen_port, target_host, target_port, community_secret <> '' AS community_set,
+          CASE WHEN community_secret = 'baicells' THEN community_secret ELSE '' END AS community,
           security_name, auth_protocol, auth_secret <> '' AS auth_credential_set,
           priv_protocol, priv_secret <> '' AS priv_credential_set, clear_severity_policy,
           mib_query_enabled, timeout_seconds, retries, mib_fields, created_at, updated_at`,
@@ -788,10 +830,10 @@ func scanSNMPAlarmTarget(row scanner) (*SNMPAlarmTarget, error) {
 	if err := row.Scan(
 		&target.ID, &target.Key, &target.Name, &target.Enabled, &target.Version,
 		&target.NotificationType, &target.ListenIP, &target.ListenPort, &target.TargetHost,
-		&target.TargetPort, &target.CommunitySet, &target.SecurityName, &target.AuthProtocol,
-		&target.AuthCredentialSet, &target.PrivProtocol, &target.PrivCredentialSet,
-		&target.ClearSeverityPolicy, &target.MIBQueryEnabled, &target.TimeoutSeconds,
-		&target.Retries, &fieldsRaw, &target.CreatedAt, &target.UpdatedAt,
+		&target.TargetPort, &target.CommunitySet, &target.Community, &target.SecurityName,
+		&target.AuthProtocol, &target.AuthCredentialSet, &target.PrivProtocol,
+		&target.PrivCredentialSet, &target.ClearSeverityPolicy, &target.MIBQueryEnabled,
+		&target.TimeoutSeconds, &target.Retries, &fieldsRaw, &target.CreatedAt, &target.UpdatedAt,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, commonerrors.ErrNotFound
@@ -1110,7 +1152,9 @@ func normalizeSNMPAlarmTarget(key string, target SNMPAlarmTarget) SNMPAlarmTarge
 	if target.Name == "" {
 		target.Name = target.Key
 	}
-	if target.Version == "" {
+	if version, ok := builtinSNMPVersionForKey(target.Key); ok {
+		target.Version = version
+	} else if target.Version == "" {
 		target.Version = "v2"
 	}
 	if strings.EqualFold(target.Version, "v2") && strings.TrimSpace(target.Community) == "" && !target.CommunitySet {
@@ -1132,12 +1176,6 @@ func normalizeSNMPAlarmTarget(key string, target SNMPAlarmTarget) SNMPAlarmTarge
 			target.TargetPort = 162
 		}
 	}
-	if target.AuthProtocol == "" && strings.EqualFold(target.Version, "v3") {
-		target.AuthProtocol = "SHA"
-	}
-	if target.PrivProtocol == "" && strings.EqualFold(target.Version, "v3") {
-		target.PrivProtocol = "DES"
-	}
 	if target.ClearSeverityPolicy == "" {
 		target.ClearSeverityPolicy = "保留原级别"
 	}
@@ -1148,6 +1186,17 @@ func normalizeSNMPAlarmTarget(key string, target SNMPAlarmTarget) SNMPAlarmTarge
 		target.MIBFields = defaultSNMPAlarmFields()
 	}
 	return target
+}
+
+func builtinSNMPVersionForKey(key string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "snmp-v2-primary":
+		return "v2", true
+	case "snmp-v3-inform":
+		return "v3", true
+	default:
+		return "", false
+	}
 }
 
 func normalizeSocketAlarmConfig(key string, config SocketAlarmConfig) SocketAlarmConfig {

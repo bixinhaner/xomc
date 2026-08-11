@@ -48,6 +48,8 @@ export interface NorthboundFileProfile {
   enabled: boolean;
   status: NorthboundPageConfigStatus;
   groups: NorthboundFileGroup[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface NorthboundFileGroupPreview {
@@ -87,6 +89,8 @@ export interface NorthboundInventoryProfile {
   enabled: boolean;
   status: NorthboundPageConfigStatus;
   fields?: NorthboundInventoryField[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface NorthboundInventoryField {
@@ -370,6 +374,7 @@ export interface NorthboundRunQuery {
   profile_kind?: NorthboundProfileKind;
   profile_code?: string;
   status?: NorthboundRunStatus;
+  latest_per_profile?: boolean;
   limit?: number;
   offset?: number;
 }

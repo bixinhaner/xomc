@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -242,6 +243,25 @@ func (r *fakeRepository) ListFileRuns(_ context.Context, filter RunFilter) (RunL
 		run.ArtifactContent = ""
 		out = append(out, run)
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if filter.LatestPerProfile {
+		seen := make(map[string]struct{}, len(out))
+		latest := make([]FileRun, 0, len(out))
+		for _, run := range out {
+			key := strings.TrimSpace(run.ProfileCode)
+			if key == "" {
+				key = run.ID
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			latest = append(latest, run)
+		}
+		out = latest
+	}
 	total := len(out)
 	offset := normalizeOffset(filter.Offset)
 	limit := normalizeLimit(filter.Limit)
@@ -415,6 +435,16 @@ func (r *fakeRepository) ListActiveSNMPAlarmTargetsForSend(context.Context) ([]S
 	out := make([]SNMPAlarmTarget, 0, len(r.snmpTargets))
 	for _, target := range r.snmpTargets {
 		if target.Enabled {
+			out = append(out, target)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeRepository) ListSNMPMIBTargetsForServe(context.Context) ([]SNMPAlarmTarget, error) {
+	out := make([]SNMPAlarmTarget, 0, len(r.snmpTargets))
+	for _, target := range r.snmpTargets {
+		if target.MIBQueryEnabled {
 			out = append(out, target)
 		}
 	}
@@ -1580,6 +1610,39 @@ func TestListAndDownloadRun(t *testing.T) {
 	require.Equal(t, "Serial Number\nSN0001\n", downloadRR.Body.String())
 }
 
+func TestListRunsLatestPerProfileUsesLatestSuccessfulRun(t *testing.T) {
+	repo := newFakeRepository()
+	r := setupTestRouterWithRepository(repo)
+	base := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	for _, run := range []FileRun{
+		{ID: "s1-old", ProfileKind: ProfileKindFile, ProfileCode: "S0001", GroupID: "cm", Status: RunStatusSuccess, CreatedAt: base},
+		{ID: "s1-new", ProfileKind: ProfileKindFile, ProfileCode: "S0001", GroupID: "pm", Status: RunStatusSuccess, CreatedAt: base.Add(2 * time.Hour)},
+		{ID: "s2-success", ProfileKind: ProfileKindFile, ProfileCode: "S0002", GroupID: "cm", Status: RunStatusSuccess, CreatedAt: base.Add(time.Hour)},
+		{ID: "s2-failed-newer", ProfileKind: ProfileKindFile, ProfileCode: "S0002", GroupID: "pm", Status: RunStatusFailed, CreatedAt: base.Add(3 * time.Hour)},
+		{ID: "inv-enb", ProfileKind: ProfileKindInventory, ProfileCode: "ENB", GroupID: "ENB", Status: RunStatusSuccess, CreatedAt: base.Add(4 * time.Hour)},
+	} {
+		_, err := repo.CreateFileRun(context.Background(), run)
+		require.NoError(t, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/page-config/runs?profile_kind=file&status=success&latest_per_profile=true&limit=10", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		Data struct {
+			Items []FileRun `json:"items"`
+			Total int       `json:"total"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	require.Equal(t, 2, body.Data.Total)
+	require.Len(t, body.Data.Items, 2)
+	require.Equal(t, "s1-new", body.Data.Items[0].ID)
+	require.Equal(t, "s2-success", body.Data.Items[1].ID)
+}
+
 func TestReplaceDeliveryTargetsRedactsCredential(t *testing.T) {
 	repo := newFakeRepository()
 	r := setupTestRouterWithRepository(repo)
@@ -1649,6 +1712,209 @@ func TestUpdateSNMPV2TargetDefaultsCommunity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, defaultSNMPV2Community, target.Community)
 	require.True(t, target.Enabled)
+}
+
+func TestUpdateBuiltInSNMPTargetKeepsVersionByKey(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	target, err := svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v2-primary", SNMPAlarmTarget{
+		Key:              "snmp-v2-primary",
+		Name:             "SNMP V2C",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Trap",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       162,
+		MIBQueryEnabled:  false,
+		TimeoutSeconds:   5,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "v2", target.Version)
+
+	target, err = svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP V3",
+		Enabled:          false,
+		Version:          "v2",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		AuthProtocol:     "SHA",
+		PrivProtocol:     "DES",
+		MIBQueryEnabled:  false,
+		TimeoutSeconds:   5,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "v3", target.Version)
+}
+
+func TestSNMPMIBQueryTargetsDoNotRequireAlarmReportEnabled(t *testing.T) {
+	repo := newFakeRepository()
+	repo.snmpTargets = []SNMPAlarmTarget{{
+		Key:             "snmp-v2-query-only",
+		Name:            "SNMP v2 Query",
+		Enabled:         false,
+		Version:         "v2",
+		ListenIP:        "0.0.0.0",
+		ListenPort:      161,
+		Community:       defaultSNMPV2Community,
+		MIBQueryEnabled: true,
+	}}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	targets, err := svc.listActiveSNMPMIBTargetsForServe(context.Background())
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	require.False(t, targets[0].Enabled)
+	require.True(t, targets[0].MIBQueryEnabled)
+}
+
+func TestUpdateSNMPV3MIBQueryRequiresSecurityCredentials(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	_, err := svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		AuthProtocol:     "SHA",
+		PrivProtocol:     "DES",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "security_name")
+}
+
+func TestUpdateSNMPV3MIBQueryAllowsNoAuthNoPriv(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	target, err := svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, target.AuthProtocol)
+	require.Empty(t, target.PrivProtocol)
+	require.True(t, target.MIBQueryEnabled)
+}
+
+func TestUpdateSNMPV3MIBQueryRequiresCredentialsBySecurityLevel(t *testing.T) {
+	repo := newFakeRepository()
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	_, err := svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		AuthProtocol:     "SHA",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "auth credential")
+
+	_, err = svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		AuthProtocol:     "SHA",
+		AuthCredential:   "AuthPassword",
+		PrivProtocol:     "DES",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "privacy credential")
+
+	_, err = svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		AuthProtocol:     "SHA",
+		AuthCredential:   "short",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "auth credential must be at least 8 characters")
+
+	_, err = svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		AuthProtocol:     "SHA",
+		AuthCredential:   "AuthPassword",
+		PrivProtocol:     "DES",
+		PrivCredential:   "short",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "privacy credential must be at least 8 characters")
+
+	_, err = svc.UpdateSNMPAlarmTarget(context.Background(), "snmp-v3-inform", SNMPAlarmTarget{
+		Key:              "snmp-v3-inform",
+		Name:             "SNMP v3",
+		Enabled:          false,
+		Version:          "v3",
+		NotificationType: "Inform",
+		ListenIP:         "0.0.0.0",
+		ListenPort:       161,
+		TargetPort:       163,
+		SecurityName:     "queryV3",
+		PrivProtocol:     "DES",
+		MIBQueryEnabled:  true,
+		TimeoutSeconds:   5,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "privacy requires auth_protocol")
 }
 
 func TestTestSNMPAlarmTargetUsesSenderAndRecordsResult(t *testing.T) {

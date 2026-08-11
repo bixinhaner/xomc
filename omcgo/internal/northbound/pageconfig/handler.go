@@ -234,12 +234,14 @@ func (h *Handler) RunInventoryProfile(c *gin.Context) {
 func (h *Handler) ListRuns(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	latestPerProfile, _ := strconv.ParseBool(c.DefaultQuery("latest_per_profile", "false"))
 	result, err := h.svc.ListRuns(c.Request.Context(), RunFilter{
-		ProfileKind: ProfileKind(c.Query("profile_kind")),
-		ProfileCode: c.Query("profile_code"),
-		Status:      RunStatus(c.Query("status")),
-		Limit:       limit,
-		Offset:      offset,
+		ProfileKind:      ProfileKind(c.Query("profile_kind")),
+		ProfileCode:      c.Query("profile_code"),
+		Status:           RunStatus(c.Query("status")),
+		LatestPerProfile: latestPerProfile,
+		Limit:            limit,
+		Offset:           offset,
 	})
 	if err != nil {
 		h.handleUpdateError(c, "list northbound file runs failed", err)
