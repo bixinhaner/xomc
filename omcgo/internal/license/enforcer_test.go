@@ -60,11 +60,11 @@ func TestEnforcer_EnforceCapacity(t *testing.T) {
 		wantErr    error
 	}{
 		{
-			name:       "no license configured → default allow",
+			name:       "no license configured → fail-closed reject",
 			licCurrent: nil,
 			used:       9999,
 			additional: 1,
-			wantErr:    nil,
+			wantErr:    commonerrors.ErrLicenseUnavailable,
 		},
 		{
 			name:       "well under capacity allowed",
@@ -130,9 +130,9 @@ func TestEnforcer_EnforceExpiry(t *testing.T) {
 		wantErr    error
 	}{
 		{
-			name:       "no license → default allow",
+			name:       "no license → fail-closed reject",
 			licCurrent: nil,
-			wantErr:    nil,
+			wantErr:    commonerrors.ErrLicenseUnavailable,
 		},
 		{
 			name:       "NULL expiry (perpetual) allowed",
@@ -266,4 +266,68 @@ type countingRepo struct {
 func (r *countingRepo) GetCurrent(ctx context.Context) (*SystemLicense, error) {
 	r.getCurrentCalls++
 	return r.mockSystemLicenseRepo.GetCurrent(ctx)
+}
+
+// stubUsageRepo — SystemLicenseUsageRepository 简化 mock。
+type stubUsageRepo struct {
+	lastVisited time.Time
+	total       float64
+	err         error
+}
+
+func (s stubUsageRepo) LastVisited(_ context.Context) (time.Time, error) {
+	return s.lastVisited, s.err
+}
+
+func (s stubUsageRepo) Advance(_ context.Context, addHours float64) (float64, error) {
+	if s.err != nil {
+		return 0, s.err
+	}
+	return s.total + addHours, nil
+}
+
+func (s stubUsageRepo) CurrentUsage(_ context.Context) (float64, time.Time, error) {
+	return s.total, s.lastVisited, s.err
+}
+
+func TestEnforceExpiry_CumulativeUsage(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	defer fixedClock(now)()
+	// perpetual（无 expiry_date）但 time_limit_hours=10；lastVisited 20h 前 → 累计超限
+	repo := &mockSystemLicenseRepo{current: &SystemLicense{
+		ID: uuid.New(), LicenseID: "CUM", LicenseType: SystemLicenseTypeCommercial, IsCurrent: true,
+		FeatureList: FeatureList(`{"time_limit_hours":10}`),
+	}}
+	e := NewEnforcer(repo, &fakeDeviceCounter{}, zap.NewNop(), nil)
+	e.SetUsageRepo(stubUsageRepo{lastVisited: now.Add(-20 * time.Hour)})
+	err := e.EnforceExpiry(context.Background(), "device.create")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrLicenseExpired))
+}
+
+func TestEnforceExpiry_TimeRollback(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	defer fixedClock(now)()
+	repo := &mockSystemLicenseRepo{current: &SystemLicense{
+		ID: uuid.New(), LicenseID: "RB", LicenseType: SystemLicenseTypeCommercial, IsCurrent: true,
+		FeatureList: FeatureList(`{"time_limit_hours":100}`),
+	}}
+	e := NewEnforcer(repo, &fakeDeviceCounter{}, zap.NewNop(), nil)
+	e.SetUsageRepo(stubUsageRepo{lastVisited: now.Add(1 * time.Hour)}) // 上次检查时间在未来 → 回拨
+	err := e.EnforceExpiry(context.Background(), "device.create")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrLicenseExpired))
+}
+
+func TestEnforceExpiry_CumulativeWithinLimit(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	defer fixedClock(now)()
+	repo := &mockSystemLicenseRepo{current: &SystemLicense{
+		ID: uuid.New(), LicenseID: "OK", LicenseType: SystemLicenseTypeCommercial, IsCurrent: true,
+		FeatureList: FeatureList(`{"time_limit_hours":100}`),
+	}}
+	e := NewEnforcer(repo, &fakeDeviceCounter{}, zap.NewNop(), nil)
+	e.SetUsageRepo(stubUsageRepo{lastVisited: now.Add(-1 * time.Hour)}) // elapsed 1h < 100h
+	err := e.EnforceExpiry(context.Background(), "device.create")
+	require.NoError(t, err)
 }

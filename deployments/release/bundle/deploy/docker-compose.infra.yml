@@ -36,10 +36,17 @@ networks:
         - subnet: 173.18.0.0/16
           gateway: 173.18.0.1
 
+x-omc-json-log: &omc-json-log
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-50m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+
 services:
   postgres:
     image: ${IMAGE_POSTGRES}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
       POSTGRES_USER: ${POSTGRES_USER}
@@ -108,6 +115,7 @@ services:
   postgres-tsdb:
     image: ${IMAGE_POSTGRES_TSDB}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
       POSTGRES_USER: ${POSTGRES_TSDB_USER}
@@ -174,6 +182,7 @@ services:
   redis-core:
     image: ${IMAGE_REDIS}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
     ports:
@@ -207,6 +216,7 @@ services:
   redis-pm:
     image: ${IMAGE_REDIS}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
     command: redis-server --appendonly yes --appendfsync everysec --maxmemory ${REDIS_PM_MAXMEMORY:-6gb} --maxmemory-policy noeviction --no-appendfsync-on-rewrite yes --save "" --auto-aof-rewrite-min-size 2gb --auto-aof-rewrite-percentage 500
@@ -233,6 +243,7 @@ services:
   nats:
     image: ${IMAGE_NATS}
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
     ports:
@@ -285,6 +296,7 @@ services:
     # 对齐官方行为（无安全回退），让 root 属主的卷可写。换回官方 minio 时本行保留亦无害。
     user: "0:0"
     restart: unless-stopped
+    logging: *omc-json-log
     environment:
       TZ: "Asia/Shanghai"
       # PM/KPI 批量上报场景下会有成百上千个设备在同一 15min 窗口边界集中上传，

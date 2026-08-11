@@ -76,8 +76,11 @@ func (r *PgSystemLicenseRepository) GetCurrent(ctx context.Context) (*SystemLice
 
 // Replace 在事务里完成 singleton 切换：
 //  1. 锁 current（若有），UPDATE is_current=false
-//  2. 把它整行 COPY 到 system_license_history（replaced_at=NOW, replaced_by_id=newLic.ID）
-//  3. INSERT newLic（is_current=true，ID 由实现层 gen_random_uuid 兜底）
+//  2. INSERT newLic（is_current=true，ID 由实现层 gen_random_uuid 兜底）
+//  3. 把旧 current 整行 COPY 到 system_license_history（replaced_at=NOW, replaced_by_id=newLic.ID）
+//
+// 注意 Step 3 必须在 Step 2 之后：history.replaced_by_id 经 fk_replaced_by
+// 引用 system_license.id，新 license 行必须先存在。
 //
 // 返回的 replacedHistory 是已被替换的 history 行（如有），调用方可用于审计 / 通知。
 //
@@ -126,8 +129,21 @@ func (r *PgSystemLicenseRepository) Replace(ctx context.Context, newLic *SystemL
 		); err != nil {
 			return nil, fmt.Errorf("clear is_current: %w", err)
 		}
+	}
 
-		// Step 2b: COPY current 到 history
+	// Step 3: INSERT newLic（is_current=true）
+	//   必须在 insertHistory 之前：history.replaced_by_id 经 fk_replaced_by
+	//   引用 system_license.id，新行需先存在，否则 FK 校验失败。
+	if err := insertSystemLicense(ctx, tx, newLic); err != nil {
+		// 命中 license_id UNIQUE → ErrSystemLicenseIDExists
+		if isUniqueViolation(err, "system_license_license_id_key") {
+			return nil, ErrSystemLicenseIDExists
+		}
+		return nil, fmt.Errorf("insert new system_license: %w", err)
+	}
+
+	// Step 2b: COPY current 到 history（replaced_by_id 指向已插入的 newLic.ID）
+	if hasCurrent {
 		historyRow = &SystemLicenseHistory{
 			ID:               uuid.New(),
 			LicenseID:        current.LicenseID,
@@ -149,15 +165,6 @@ func (r *PgSystemLicenseRepository) Replace(ctx context.Context, newLic *SystemL
 		if err := insertHistory(ctx, tx, historyRow); err != nil {
 			return nil, err
 		}
-	}
-
-	// Step 3: INSERT newLic（is_current=true）
-	if err := insertSystemLicense(ctx, tx, newLic); err != nil {
-		// 命中 license_id UNIQUE → ErrSystemLicenseIDExists
-		if isUniqueViolation(err, "system_license_license_id_key") {
-			return nil, ErrSystemLicenseIDExists
-		}
-		return nil, fmt.Errorf("insert new system_license: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

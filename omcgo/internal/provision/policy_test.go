@@ -70,3 +70,14 @@ func TestNormalizePolicyProductClassesSupportsMultipleAndLegacyValues(t *testing
 	assert.Equal(t, []string{"FAP/LEGACY"}, legacy.ProductClasses)
 	assert.Equal(t, "FAP/LEGACY", legacy.ProductClass)
 }
+
+func TestPolicySupportsProductNameUsesNamesAndLegacyFallback(t *testing.T) {
+	policy := &PlugAndPlayPolicy{
+		ProductNames:   []string{" XG-500 ", "XG-800"},
+		ProductClasses: []string{"legacy-class"},
+	}
+
+	assert.True(t, policySupportsProductName(policy, "xg-500"))
+	assert.False(t, policySupportsProductName(policy, "legacy-class"))
+	assert.True(t, policySupportsProductName(&PlugAndPlayPolicy{ProductClass: " FAP/LEGACY "}, "fap/legacy"))
+}

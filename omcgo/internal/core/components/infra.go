@@ -230,7 +230,7 @@ func (inf *Infra) ConnectNATSWithAlarmLifecycleMaxBytes(
 	inf.GS.Register("nats-conn-metrics", 1, func(context.Context) error { natsConnMetrics.Stop(); return nil })
 
 	if err := client.EnsureStreamsWithAlarmLifecycleMaxBytes(ctx, cfg.AllowStreamRebuild, maxBytes); err != nil {
-		inf.Logger.Warn("ensure NATS streams", zap.Error(err))
+		return fmt.Errorf("ensure NATS streams: %w", err)
 	}
 	return nil
 }

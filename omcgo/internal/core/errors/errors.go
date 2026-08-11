@@ -30,9 +30,12 @@ var (
 	ErrUnavailable   = errors.New("service unavailable")
 
 	// License enforcement sentinels (R-103 / T-0015).
-	// Both map to HTTP 403 via HTTPStatusFromError.
+	// All three map to HTTP 403 via HTTPStatusFromError.
 	ErrLicenseCapacityExceeded = errors.New("license capacity exceeded")
 	ErrLicenseExpired          = errors.New("license expired")
+	ErrLicenseUnavailable      = errors.New("license unavailable")
+	ErrLicenseHardwareMismatch = errors.New("license hardware mismatch")
+	ErrLicenseFeatureNotAuthorized = errors.New("license feature not authorized")
 )
 
 // Error code ranges by domain:
@@ -115,6 +118,12 @@ func AbortWithError(c *gin.Context, statusCode int, err error) {
 	if errors.As(err, &bErr) {
 		resp.BizCode = bErr.Code
 		resp.Msg = bErr.Message
+	} else if code, ok := bizCodeFromSentinel(err); ok {
+		// License enforcement sentinels（ErrLicenseCapacityExceeded 等）是 plain
+		// errors.New，不携带数字编码；这里集中映射到对应 biz_code，让前端/日志
+		// 能区分容量/过期/无 license/硬件失配，而不都归到无编码的 403。
+		resp.BizCode = code
+		resp.Msg = string(redact.RedactJSON([]byte(err.Error())))
 	} else if err != nil {
 		// If the error string is itself JSON (common when bubbling up
 		// upstream API errors), redact embedded sensitive fields before
@@ -138,6 +147,26 @@ func AbortWithError(c *gin.Context, statusCode int, err error) {
 	c.Abort()
 }
 
+// bizCodeFromSentinel 把 license enforcement 的 sentinel error 映射到对应 biz_code。
+// 这些 sentinel 是 plain errors.New（非 BusinessError），AbortWithError 默认不会带 biz_code；
+// 前端/监控/日志需要按 biz_code 区分容量/过期/无 license/硬件失配，故在此集中补充。
+// 未命中返回 (0, false)。
+func bizCodeFromSentinel(err error) (int, bool) {
+	switch {
+	case errors.Is(err, ErrLicenseCapacityExceeded):
+		return ErrCodeSystemLicenseCapacityExceeded, true
+	case errors.Is(err, ErrLicenseExpired):
+		return ErrCodeLicenseExpired, true
+	case errors.Is(err, ErrLicenseUnavailable):
+		return ErrCodeSystemLicenseNotActive, true
+	case errors.Is(err, ErrLicenseHardwareMismatch):
+		return ErrCodeSystemLicenseHardwareMismatch, true
+	case errors.Is(err, ErrLicenseFeatureNotAuthorized):
+		return ErrCodeSystemLicenseNotActive, true
+	}
+	return 0, false
+}
+
 // HTTPStatusFromError maps sentinel errors to HTTP status codes.
 func HTTPStatusFromError(err error) int {
 	switch {
@@ -152,7 +181,10 @@ func HTTPStatusFromError(err error) int {
 	case errors.Is(err, ErrForbidden):
 		return http.StatusForbidden
 	case errors.Is(err, ErrLicenseCapacityExceeded),
-		errors.Is(err, ErrLicenseExpired):
+		errors.Is(err, ErrLicenseExpired),
+		errors.Is(err, ErrLicenseUnavailable),
+		errors.Is(err, ErrLicenseHardwareMismatch),
+		errors.Is(err, ErrLicenseFeatureNotAuthorized):
 		return http.StatusForbidden
 	case errors.Is(err, ErrTimeout):
 		return http.StatusGatewayTimeout

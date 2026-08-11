@@ -27,6 +27,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	devtask "github.com/omcgo/omcgo/internal/task"
 )
 
@@ -69,8 +70,13 @@ type LicenseService struct {
 	deviceLookup LicenseDeviceLookup
 	bucket       string
 	// taskSvc 与 restoreSvc 同款，用 devtask.Enqueuer 入队 Download。
-	taskSvc devtask.Enqueuer
-	logger  *zap.Logger
+	taskSvc   devtask.Enqueuer
+	logger    *zap.Logger
+	admission storageprotection.WriteAdmission
+}
+
+func (s *LicenseService) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	s.admission = admission
 }
 
 // NewLicenseService 装配。
@@ -147,6 +153,12 @@ func (s *LicenseService) importOne(
 	sum := md5.Sum(item.Content)
 	md5Hex := hex.EncodeToString(sum[:])
 
+	if err := s.checkStorageAdmission(ctx); err != nil {
+		return &LicenseImportFailure{
+			FileName: item.FileName, SerialNumber: sn,
+			ErrorCode: ImportErrPutObject, Message: err.Error(),
+		}
+	}
 	if _, err := s.mover.PutObject(ctx,
 		s.bucket, objectPath,
 		bytes.NewReader(item.Content), int64(len(item.Content)),
@@ -194,6 +206,20 @@ func (s *LicenseService) importOne(
 	if err := s.DispatchPendingLicense(ctx, sn); err != nil {
 		s.logger.Warn("immediate preinstalled license dispatch failed; left pending",
 			zap.String("sn", sn), zap.Error(err))
+	}
+	return nil
+}
+
+func (s *LicenseService) checkStorageAdmission(ctx context.Context) error {
+	if s.admission == nil {
+		return nil
+	}
+	decision, err := s.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeUpload)
+	if err != nil {
+		return fmt.Errorf("storage admission check: %w", err)
+	}
+	if !decision.Allowed {
+		return fmt.Errorf("storage write protected: %s", decision.Reason)
 	}
 	return nil
 }

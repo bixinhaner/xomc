@@ -14,13 +14,14 @@ import {
   Checkbox,
   Table,
   Upload,
-  InputNumber,
   message,
   Modal,
   Drawer,
   Collapse,
   Descriptions,
   Alert,
+  Tag,
+  Tabs,
   Dropdown,
   type UploadFile,
   type MenuProps,
@@ -42,9 +43,10 @@ import * as XLSX from 'xlsx';
 import { useT } from '@/hooks/useT';
 import {
   usePlugAndPlayPolicy,
+  useProvisioningTasks,
   useSavePlugAndPlayPolicy,
 } from '@core/hooks/api/useProvisioning';
-import { useDeviceList, useProductClasses } from '@core/hooks/api/useDevices';
+import { useDeviceList } from '@core/hooks/api/useDevices';
 import { useProductList, useProductMatch } from '@core/hooks/api/useProducts';
 import { useSoftwareVersions, useUploadFirmware } from '@core/hooks/api/useSoftware';
 import {
@@ -56,7 +58,8 @@ import LicenseImportDrawer from '@/pages/backup/DeviceLicenseLibrary/ImportDrawe
 import {
   normalizeProductTechnology,
   resolveProductClassTechnology,
-  toSupportedProductClassOptions,
+  resolveProductClassForName,
+  toSupportedProductNameOptions,
   type ProductTechnology,
 } from './productClassOptions';
 import {
@@ -82,11 +85,21 @@ import {
   type TemplateFieldRef,
 } from './paramConfigGroupedFields';
 import { isParamConfigToolbarEnabled } from './paramConfigToolbarAvailability';
+import {
+  buildParamConfigImportPreview,
+  buildParamConfigInsights,
+  type ParamConfigImportPreviewItem,
+  type ParamConfigSource,
+  type ParamConfigValidationStatus,
+} from './paramConfigInsights';
 import { getPolicyModuleActionAvailability } from './policyActionAvailability';
 import ProductClassMultiSelect from './components/ProductClassMultiSelect';
 import PolicyReadOnlySection from './components/PolicyReadOnlySection';
 import GnbQuickSettingsCards, { GnbTemplateExtraFieldGrid } from './GnbQuickSettingsCards';
 import EnbQuickSettingsCards, { EnbTemplateExtraFieldGrid } from './EnbQuickSettingsCards';
+import CommonParameterConfigPanel from './CommonParameterConfigPanel';
+import { sanitizeCommonParamConfig } from './commonParameterConfig';
+import GnbNetworkConfigCards from './GnbNetworkConfigCards';
 
 const { Text, Title } = Typography;
 
@@ -219,7 +232,6 @@ interface ParamConfig {
   serviceGateway?: string;
   serviceGatewayMask?: string;
   serviceVlan?: number;
-  mgmtIp?: string;
   mgmtMask?: string;
   mgmtGateway?: string;
   mgmtGatewayMask?: string;
@@ -274,7 +286,6 @@ interface ParamConfig {
   amfPlmnId?: string;
   amfDefault?: '0' | '1';
   // ========== gNB IP配置 ==========
-  omIp?: string;
   omMask?: string;
   // ========== gNB IPSec配置 ==========
   ipsecImsi?: string;
@@ -364,7 +375,6 @@ const _MOCK_PARAM_CONFIGS: ParamConfig[] = [
     // IP配置
     serviceIp: '192.168.100.50',
     serviceMask: '255.255.255.0',
-    omIp: '192.168.200.50',
     omMask: '255.255.255.0',
     serviceGateway: '192.168.100.1',
     serviceGatewayMask: '255.255.255.0',
@@ -467,7 +477,6 @@ const _MOCK_PARAM_CONFIGS: ParamConfig[] = [
     // IP Config
     serviceIp: '192.168.100.50',
     serviceMask: '255.255.255.0',
-    omIp: '192.168.200.50',
     omMask: '255.255.255.0',
     serviceGateway: '192.168.100.1',
     serviceGatewayMask: '255.255.255.0',
@@ -539,17 +548,8 @@ void _MOCK_PARAM_CONFIGS;
 // _BANDWIDTH_OPTIONS_DXDF 占位常量已拆到同级 ./constants.ts
 // （react-refresh/only-export-components：页面文件只导出组件）。
 
-// Subframe assignment options
-const SUBFRAME_OPTIONS = [
-  { label: '0 (DL:UL = 1:3)', value: '0' },
-  { label: '1 (DL:UL = 2:2)', value: '1' },
-  { label: '2 (DL:UL = 3:1)', value: '2' },
-  { label: '6 (DL:UL = 3:5)', value: '6' },
-];
-
 export default function AddPolicyPage() {
   const t = useT();
-  const { data: supportedProductClasses, isLoading: productClassesLoading } = useProductClasses();
   const { data: productCatalog, isLoading: productCatalogLoading } = useProductList();
   const navigate = useNavigate();
   const location = useLocation();
@@ -562,12 +562,11 @@ export default function AddPolicyPage() {
     { label: t('provision.productTechnology.gsm'), value: 'gsm' },
   ], [t]);
   const productClassOptions = useMemo(
-    () => toSupportedProductClassOptions(
-      supportedProductClasses,
+    () => toSupportedProductNameOptions(
       productCatalog?.items,
       productTechnology,
     ),
-    [productCatalog?.items, productTechnology, supportedProductClasses],
+    [productCatalog?.items, productTechnology],
   );
   const [firmwareImportForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -594,30 +593,75 @@ export default function AddPolicyPage() {
   // State for self config (new design - config list)
   const [paramConfigList, setParamConfigList] = useState<ParamConfig[]>([]);
   const [configSearchText, setConfigSearchText] = useState('');
+  const [configSourceFilter, setConfigSourceFilter] = useState<ParamConfigSource | undefined>();
+  const [configValidationFilter, setConfigValidationFilter] = useState<ParamConfigValidationStatus | undefined>();
   const [configDetailVisible, setConfigDetailVisible] = useState(false);
   const [configDetailMode, setConfigDetailMode] = useState<'view' | 'edit'>('view');
   const [currentConfig, setCurrentConfig] = useState<ParamConfig | null>(null);
   const [configForm] = Form.useForm();
+  const [commonConfigForm] = Form.useForm();
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [paramImportType, setParamImportType] = useState<'append' | 'replace'>('append');
   const [paramFileList, setParamFileList] = useState<UploadFile[]>([]);
+  const [importPreview, setImportPreview] = useState<ParamConfigImportPreviewItem[]>([]);
+  const [pendingImportedConfigs, setPendingImportedConfigs] = useState<ParamConfig[]>([]);
+  const [importPreviewError, setImportPreviewError] = useState('');
+  useEffect(() => {
+    if (!configDetailVisible || !currentConfig) return;
+    configForm.setFieldsValue(toParamConfigFormValues(currentConfig));
+  }, [configDetailVisible, configForm, currentConfig]);
 
   // Current function module
   const [functionModule, setFunctionModule] = useState<'0' | '1' | '2'>('0');
   const [productClasses, setProductClasses] = useState<string[]>([]);
-  const productClass = productClasses[0] ?? '';
-  const { data: productDevicesData, isLoading: actualVersionsLoading } = useDeviceList(
-    { page: 1, pageSize: 1000, productClass },
-    { enabled: Boolean(productClass) },
+  // Compatibility form field: values are product names. Southbound-only
+  // calls still receive a literal product class resolved from the catalog.
+  const productName = productClasses[0] ?? '';
+  const selectedProduct = productCatalog?.items.find(
+    (item) => item.name.trim().toLowerCase() === productName.trim().toLowerCase(),
   );
+  const productClass = resolveProductClassForName(productName, productCatalog?.items);
+  const { data: productDevicesData, isLoading: actualVersionsLoading } = useDeviceList(
+    {
+      page: 1,
+      pageSize: 1000,
+      productId: selectedProduct?.id,
+      productClass: selectedProduct?.id ? undefined : productClass,
+    },
+    { enabled: Boolean(productName) },
+  );
+  const { data: parameterTaskData } = useProvisioningTasks({
+    page: 1,
+    pageSize: 1000,
+    policyOnly: true,
+    policyId: id,
+    module: 'self_config',
+  }, {
+    enabled: Boolean(id),
+    refetchInterval: isView ? 10_000 : false,
+  });
   const {
     data: productMatchData,
-  } = useProductMatch(productClass);
+  } = useProductMatch(selectedProduct?.id ? '' : productClass);
   const activeParamDeviceType = useMemo<ParamConfigDeviceType | undefined>(
-    () => toParamConfigDeviceType(productMatchData?.product?.tech),
-    [productMatchData],
+    () => toParamConfigDeviceType(selectedProduct?.tech ?? productMatchData?.product?.tech),
+    [productMatchData, selectedProduct?.tech],
   );
-  const matchedProductId = productMatchData?.product?.id;
+  useEffect(() => {
+    if (!activeParamDeviceType || functionModule !== '2') return;
+    const current = commonConfigForm.getFieldsValue(true);
+    const saved = persistedPolicy?.config?.commonParamConfig;
+    commonConfigForm.setFieldsValue({
+      deviceType: activeParamDeviceType,
+      ...(saved && typeof saved === 'object' ? saved : {}),
+      ...(activeParamDeviceType === 'gNB' && !current.gnbIdAllocation && !saved ? {
+        gnbIdAllocation: { start: 1, end: 16_777_215, step: 1, reserved: [] },
+        pciAllocation: { start: 0, end: 1007, step: 1, reserved: [] },
+        gnbIdLength: 24,
+      } : {}),
+    });
+  }, [activeParamDeviceType, commonConfigForm, functionModule, persistedPolicy]);
+  const matchedProductId = selectedProduct?.id ?? productMatchData?.product?.id;
   const {
     data: licenseData,
     isLoading: licensesLoading,
@@ -641,7 +685,7 @@ export default function AddPolicyPage() {
     isLoading: legacyFirmwareLoading,
   } = useSoftwareVersions(
     { page: 1, pageSize: 100, deviceType: productClass, fileType: 0 },
-    { enabled: Boolean(productClass) },
+    { enabled: Boolean(productClass) && !matchedProductId },
   );
   const uploadFirmwareMutation = useUploadFirmware();
   const actualVersionOptions = useMemo(
@@ -663,6 +707,9 @@ export default function AddPolicyPage() {
     const savedProductClasses = persistedPolicy.productClasses.length
       ? persistedPolicy.productClasses
       : [persistedPolicy.productClass].filter(Boolean);
+    const savedProductNames = persistedPolicy.productNames.length
+      ? persistedPolicy.productNames
+      : savedProductClasses;
     const originalVersionValue = config.originalVersion;
     const originalVersions = Array.isArray(originalVersionValue)
       ? originalVersionValue.map(String).filter(Boolean)
@@ -675,8 +722,11 @@ export default function AddPolicyPage() {
       originalVersion: originalVersions,
       policyName: persistedPolicy.name,
       productTechnology: normalizeProductTechnology(String(config.productTechnology ?? ''))
-        ?? resolveProductClassTechnology(savedProductClasses[0] ?? '', productCatalog?.items),
-      productClasses: savedProductClasses,
+        ?? resolveProductClassTechnology(
+          resolveProductClassForName(savedProductNames[0] ?? '', productCatalog?.items),
+          productCatalog?.items,
+        ),
+      productClasses: savedProductNames,
       executeType: persistedPolicy.executeType === 'auto' ? '0' : '1',
       selfStartEnable: persistedPolicy.enabled,
       upgradeEnable: persistedPolicy.upgradeEnabled,
@@ -684,7 +734,7 @@ export default function AddPolicyPage() {
       licenseEnable: persistedPolicy.licenseEnabled,
       selfConfigEnable: persistedPolicy.selfConfigEnabled,
     });
-    setProductClasses(savedProductClasses);
+    setProductClasses(savedProductNames);
     if (Array.isArray(config.paramConfigList)) {
       setParamConfigList(config.paramConfigList as ParamConfig[]);
     }
@@ -803,53 +853,89 @@ export default function AddPolicyPage() {
     },
   ];
 
-  // Param config table columns (simplified - only basic fields)
+  // Parameter configuration summary, validation and latest execution context.
   const selfConfigEnabled = Form.useWatch('selfConfigEnable', form);
   const paramConfigToolbarEnabled = isParamConfigToolbarEnabled(selfConfigEnabled);
+  const configInsights = useMemo(
+    () => buildParamConfigInsights(paramConfigList),
+    [paramConfigList],
+  );
+  const latestParameterTaskBySerial = useMemo(() => {
+    const result = new Map<string, NonNullable<typeof parameterTaskData>['items'][number]>();
+    for (const task of parameterTaskData?.items ?? []) {
+      if (task.serialNumber && !result.has(task.serialNumber)) result.set(task.serialNumber, task);
+    }
+    return result;
+  }, [parameterTaskData]);
 
-  // Simplified columns for all device types
-  const paramConfigColumns = [
-    {
-      title: t('table.operation'),
-      key: 'action',
-      width: 100,
-      fixed: 'right' as const,
-      render: (_: unknown, record: ParamConfig) => {
-        const items: MenuProps['items'] = [
-          { key: 'edit', label: t('common.edit'), icon: <EditOutlined />,
-            onClick: () => {
+  const operationColumn = {
+    title: t('table.operation'),
+    key: 'action',
+    width: 100,
+    fixed: 'right' as const,
+    render: (_: unknown, record: ParamConfig) => {
+      const items: MenuProps['items'] = [
+        { key: 'edit', label: t('common.edit'), icon: <EditOutlined />,
+          onClick: () => {
+            const hydrated = withTemplateSheetParameters(record);
+            setCurrentConfig(hydrated);
+            setConfigDetailMode('edit');
+            setConfigDetailVisible(true);
+          },
+        },
+        { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true,
+          onClick: () => { setParamConfigList(prev => prev.filter(item => item.id !== record.id)); void message.success(t('common.success')); },
+        },
+      ];
+      return (
+        <Space size={4}>
+          <Button type="link" size="small" icon={<EyeOutlined />}
+            onClick={() => {
               const hydrated = withTemplateSheetParameters(record);
               setCurrentConfig(hydrated);
-              setConfigDetailMode('edit');
-              configForm.setFieldsValue(toParamConfigFormValues(hydrated));
+              setConfigDetailMode('view');
               setConfigDetailVisible(true);
-            },
-          },
-          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true,
-            onClick: () => { setParamConfigList(prev => prev.filter(item => item.id !== record.id)); message.success(t('common.success')); },
-          },
-        ];
-        return (
-          <Space size={4}>
-            <Button type="link" size="small" icon={<EyeOutlined />}
-              onClick={() => {
-                const hydrated = withTemplateSheetParameters(record);
-                setCurrentConfig(hydrated);
-                setConfigDetailMode('view');
-                configForm.setFieldsValue(toParamConfigFormValues(hydrated));
-                setConfigDetailVisible(true);
-              }}>
-              {t('common.view')}
-            </Button>
-            {moduleActions.edit && moduleActions.delete && (
-              <Dropdown menu={{ items }} trigger={['click']}>
-                <Button type="text" size="small" icon={<MoreOutlined />} />
-              </Dropdown>
-            )}
-          </Space>
-        );
-      },
+            }}>
+            {t('common.view')}
+          </Button>
+          {moduleActions.edit && moduleActions.delete && (
+            <Dropdown menu={{ items }} trigger={['click']}>
+              <Button type="text" size="small" icon={<MoreOutlined />} />
+            </Dropdown>
+          )}
+        </Space>
+      );
     },
+  };
+  const summaryColumn = (
+    title: string,
+    key: 'gnbId' | 'pci' | 'band' | 'bandwidth' | 'frequency' | 'ssbFrequency' | 'tac',
+    width = 110,
+  ) => ({
+    title,
+    key,
+    width,
+    render: (_: unknown, record: ParamConfig) => configInsights.get(record.serialNumber)?.[key] ?? '-',
+  });
+  const technologyColumns = activeParamDeviceType === 'gNB'
+    ? [
+      summaryColumn(t('provision.gnbId'), 'gnbId'),
+      summaryColumn('PCI', 'pci', 80),
+      summaryColumn(t('provision.bandsSupport'), 'band', 100),
+      summaryColumn(t('provision.bandwidth'), 'bandwidth', 110),
+      summaryColumn(t('provision.nrarfcnDl'), 'frequency', 130),
+      summaryColumn(t('provision.ssbFrequency'), 'ssbFrequency', 130),
+      summaryColumn('TAC', 'tac', 100),
+    ]
+    : activeParamDeviceType === 'eNB'
+      ? [
+        summaryColumn(t('provision.bandsSupport'), 'band', 100),
+        summaryColumn(t('provision.bandwidth'), 'bandwidth', 110),
+        summaryColumn(t('provision.frequency'), 'frequency', 110),
+      ]
+      : [];
+  const paramConfigColumns = [
+    operationColumn,
     {
       title: t('provision.serialNumber'),
       dataIndex: 'serialNumber',
@@ -862,39 +948,38 @@ export default function AddPolicyPage() {
       key: 'cellName',
       width: 120,
     },
+    ...technologyColumns,
     {
-      title: t('provision.bandsSupport'),
-      dataIndex: 'bandsSupport',
-      key: 'bandsSupport',
-      width: 100,
-    },
-    {
-      title: t('provision.bandwidth'),
-      dataIndex: 'bandWidth',
-      key: 'bandWidth',
-      width: 100,
-    },
-    {
-      title: t('provision.frequency'),
-      dataIndex: 'frequency',
-      key: 'frequency',
-      width: 100,
-    },
-    {
-      title: t('provision.subframeAssignment'),
-      dataIndex: 'subframeAssignment',
-      key: 'subframeAssignment',
-      width: 140,
-      render: (val: number) => {
-        const option = SUBFRAME_OPTIONS.find(o => o.value === String(val));
-        return option?.label || val;
+      title: t('provision.configSource'),
+      key: 'configSource',
+      width: 110,
+      render: (_: unknown, record: ParamConfig) => {
+        const source = configInsights.get(record.serialNumber)?.source ?? 'manual';
+        return t(`provision.configSource.${source}`);
       },
     },
     {
-      title: t('provision.updatedBy'),
-      dataIndex: 'updatedBy',
-      key: 'updatedBy',
-      width: 100,
+      title: t('provision.validationStatus'),
+      key: 'validationStatus',
+      width: 110,
+      render: (_: unknown, record: ParamConfig) => {
+        const status = configInsights.get(record.serialNumber)?.validationStatus ?? 'incomplete';
+        const color = status === 'valid' ? 'success' : status === 'conflict' ? 'error' : 'warning';
+        return <Tag color={color}>{t(`provision.validationStatus.${status}`)}</Tag>;
+      },
+    },
+    {
+      title: t('provision.latestExecution'),
+      key: 'latestExecution',
+      width: 120,
+      render: (_: unknown, record: ParamConfig) => {
+        const task = latestParameterTaskBySerial.get(record.serialNumber);
+        if (!task) return '-';
+        const color = task.status === 'completed' ? 'success'
+          : task.status === 'failed' ? 'error'
+            : 'processing';
+        return <Tag color={color}>{t(`provision.taskStatus.${task.status}`)}</Tag>;
+      },
     },
     {
       title: t('provision.updatedAt'),
@@ -921,8 +1006,25 @@ export default function AddPolicyPage() {
       );
     }
 
+    if (configSourceFilter) {
+      list = list.filter((item) => configInsights.get(item.serialNumber)?.source === configSourceFilter);
+    }
+    if (configValidationFilter) {
+      list = list.filter((item) => (
+        configInsights.get(item.serialNumber)?.validationStatus === configValidationFilter
+      ));
+    }
+
     return list;
-  }, [activeParamDeviceType, paramConfigList, productClass, configSearchText]);
+  }, [
+    activeParamDeviceType,
+    configInsights,
+    configSearchText,
+    configSourceFilter,
+    configValidationFilter,
+    paramConfigList,
+    productClass,
+  ]);
 
   const handleExportConfig = useCallback(() => {
     if (!productClass) {
@@ -936,7 +1038,7 @@ export default function AddPolicyPage() {
 
     const workbook = createParamConfigWorkbook(filteredParamConfigList);
     const safeProductClass = (productClass || 'parameter-config').replace(/[\\/:*?"<>|]+/g, '_');
-    XLSX.writeFile(workbook, `${safeProductClass}-参数配置.xlsx`);
+    XLSX.writeFile(workbook, `${safeProductClass}-${t('provision.paramConfigExportFileSuffix')}.xlsx`);
     void message.success(t('provision.paramConfigExportSuccess', {
       count: filteredParamConfigList.length,
     }));
@@ -963,6 +1065,10 @@ export default function AddPolicyPage() {
       void message.warning(t('provision.selectProductClassFirst'));
       return;
     }
+    setParamFileList([]);
+    setImportPreview([]);
+    setPendingImportedConfigs([]);
+    setImportPreviewError('');
     setImportModalVisible(true);
   }, [productClass, t]);
 
@@ -984,7 +1090,7 @@ export default function AddPolicyPage() {
     });
   }, [currentConfig, configForm, t]);
 
-  const handleImportConfig = useCallback(async (file: File) => {
+  const previewImportConfig = useCallback(async (file: File) => {
     if (!activeParamDeviceType) {
       void message.warning(t('provision.paramConfigDeviceTypeUnavailable'));
       return;
@@ -1011,34 +1117,47 @@ export default function AddPolicyPage() {
         updatedBy: row.updatedBy ?? 'import',
         updatedAt: row.updatedAt ?? importedAt,
       }));
-
-      setParamConfigList((previous) =>
-        mergeImportedParamConfigs(previous, importedConfigs, paramImportType),
-      );
-      setImportModalVisible(false);
-      setParamFileList([]);
-      void message.success(t('provision.paramConfigImportSuccess', {
-        count: importedConfigs.length,
-      }));
+      const preview = buildParamConfigImportPreview(paramConfigList, importedConfigs);
+      setPendingImportedConfigs(importedConfigs);
+      setImportPreview(preview);
+      setImportPreviewError('');
     } catch (error) {
+      setPendingImportedConfigs([]);
+      setImportPreview([]);
       if (error instanceof ParamConfigWorkbookError) {
-        if (error.code === 'empty_workbook') {
-          void message.error(t('provision.paramConfigImportEmpty'));
-        } else if (error.code === 'template_no_data') {
-          void message.error(t('provision.paramConfigTemplateNoData'));
-        } else if (error.code === 'missing_columns') {
-          void message.error(t('provision.paramConfigImportMissingColumns'));
-        } else {
-          void message.error(t('provision.paramConfigImportInvalidRow', {
+        const errorMessage = error.code === 'empty_workbook'
+          ? t('provision.paramConfigImportEmpty')
+          : error.code === 'template_no_data'
+            ? t('provision.paramConfigTemplateNoData')
+            : error.code === 'missing_columns'
+              ? t('provision.paramConfigImportMissingColumns')
+              : t('provision.paramConfigImportInvalidRow', {
             row: error.row ?? '-',
             field: error.field ?? '-',
-          }));
-        }
+          });
+        setImportPreviewError(errorMessage);
         return;
       }
-      void message.error(t('provision.paramConfigImportFailed'));
+      setImportPreviewError(t('provision.paramConfigImportFailed'));
     }
-  }, [activeParamDeviceType, paramImportType, t]);
+  }, [activeParamDeviceType, paramConfigList, t]);
+
+  const applyImportConfig = useCallback(() => {
+    if (pendingImportedConfigs.length === 0 || importPreview.some((item) => item.action === 'duplicate')) {
+      void message.warning(t('provision.paramConfigImportResolveConflicts'));
+      return;
+    }
+    setParamConfigList((previous) =>
+      mergeImportedParamConfigs(previous, pendingImportedConfigs, paramImportType),
+    );
+    setImportModalVisible(false);
+    setParamFileList([]);
+    setImportPreview([]);
+    setPendingImportedConfigs([]);
+    void message.success(t('provision.paramConfigImportSuccess', {
+      count: pendingImportedConfigs.length,
+    }));
+  }, [importPreview, paramImportType, pendingImportedConfigs, t]);
 
   // Handle submit
   const handleSubmit = useCallback(async () => {
@@ -1048,14 +1167,28 @@ export default function AddPolicyPage() {
       // values from the currently mounted panel, while getFieldsValue(true)
       // also includes the preserved values of the other selected modules.
       const values = form.getFieldsValue(true);
-      const selectedProductClasses = (values.productClasses ?? []) as string[];
+      let commonParamConfig = persistedPolicy?.config?.commonParamConfig ?? {};
+      if (values.selfConfigEnable && functionModule === '2') {
+        await commonConfigForm.validateFields();
+        commonParamConfig = sanitizeCommonParamConfig({
+          ...commonConfigForm.getFieldsValue(true),
+          deviceType: activeParamDeviceType,
+        });
+      }
+      const selectedProductNames = (values.productClasses ?? []) as string[];
+      const selectedProductClass = resolveProductClassForName(
+        selectedProductNames[0] ?? '',
+        productCatalog?.items,
+      );
       setLoading(true);
 
       await savePolicyMutation.mutateAsync({
         name: values.policyName,
         enabled: Boolean(values.selfStartEnable),
-        productClass: selectedProductClasses[0] ?? '',
-        productClasses: selectedProductClasses,
+        productName: selectedProductNames[0] ?? '',
+        productNames: selectedProductNames,
+        productClass: selectedProductClass,
+        productClasses: selectedProductNames,
         executeType: values.executeType === '0' ? 'auto' : 'manual',
         priority: Number(values.priority || 100),
         upgradeEnabled: Boolean(values.upgradeEnable),
@@ -1064,8 +1197,11 @@ export default function AddPolicyPage() {
         selfConfigEnabled: Boolean(values.selfConfigEnable),
         config: {
           ...values,
-          productClass: selectedProductClasses[0] ?? '',
-          productClasses: selectedProductClasses,
+          productName: selectedProductNames[0] ?? '',
+          productNames: selectedProductNames,
+          productClass: selectedProductClass,
+          productClasses: selectedProductNames,
+          commonParamConfig,
           paramConfigList,
         },
       });
@@ -1073,10 +1209,13 @@ export default function AddPolicyPage() {
       navigate('/device/plug-and-play');
     } catch (error) {
       console.error('Validation error:', error);
+      if ((error as { response?: { status?: number } })?.response?.status === 409) {
+        message.error(t('provision.enabledPolicyProductConflict'));
+      }
     } finally {
       setLoading(false);
     }
-  }, [form, navigate, t, savePolicyMutation, paramConfigList]);
+  }, [activeParamDeviceType, commonConfigForm, form, functionModule, navigate, persistedPolicy?.config?.commonParamConfig, productCatalog?.items, t, savePolicyMutation, paramConfigList]);
 
   // Handle cancel
   const handleCancel = useCallback(() => {
@@ -1264,58 +1403,110 @@ export default function AddPolicyPage() {
         </Form.Item>
       </Space>
     } style={{ marginBottom: 16 }}>
-      <div style={{ padding: '16px 0' }}>
-        {/* Toolbar */}
-        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Input
-            placeholder={t('provision.searchBySerialNumber')}
-            prefix={<SearchOutlined />}
-            value={configSearchText}
-            onChange={(e) => setConfigSearchText(e.target.value)}
-            style={{ width: 240 }}
-            allowClear
-          />
-          <Space>
-            <Button
-              icon={<DownloadOutlined />}
-              disabled={!paramConfigToolbarEnabled}
-              onClick={handleDownloadParamConfigTemplate}
-            >
-              {t('provision.downloadTemplate')}
-            </Button>
-            {moduleActions.import && (
-              <Button
-                icon={<UploadOutlined />}
-                disabled={!paramConfigToolbarEnabled}
-                onClick={handleOpenParamConfigImport}
-              >
-                {t('common.import')}
-              </Button>
-            )}
-            <Button
-              icon={<DownloadOutlined />}
-              disabled={!paramConfigToolbarEnabled}
-              onClick={handleExportConfig}
-            >
-              {t('common.export')}
-            </Button>
-          </Space>
-        </div>
-
-        {/* Config List Table */}
-        <Table
-          columns={paramConfigColumns}
-          dataSource={filteredParamConfigList}
-          rowKey="id"
-          pagination={{
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total) => t('table.totalCount', { count: total }),
-          }}
-          size="small"
-          scroll={{ x: 1200 }}
-        />
-      </div>
+      <Tabs
+        defaultActiveKey="common"
+        items={[
+          {
+            key: 'common',
+            label: t('provision.commonParameters'),
+            children: (
+              <div style={{ paddingTop: 8 }}>
+                <CommonParameterConfigPanel
+                  form={commonConfigForm}
+                  deviceType={activeParamDeviceType}
+                  paramModelName={selectedProduct?.paramModelName}
+                  disabled={isView || !paramConfigToolbarEnabled}
+                />
+              </div>
+            ),
+          },
+          {
+            key: 'overrides',
+            label: t('provision.deviceParameterOverrides'),
+            children: (
+              <div style={{ padding: '8px 0' }}>
+                <Alert
+                  type="info"
+                  showIcon
+                  title={t('provision.deviceParameterOverridesHint')}
+                  style={{ marginBottom: 16 }}
+                />
+                <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <Space wrap>
+                    <Input
+                      placeholder={t('provision.searchBySerialNumber')}
+                      prefix={<SearchOutlined />}
+                      value={configSearchText}
+                      onChange={(e) => setConfigSearchText(e.target.value)}
+                      style={{ width: 220 }}
+                      allowClear
+                    />
+                    <Select
+                      allowClear
+                      placeholder={t('provision.configSource')}
+                      value={configSourceFilter}
+                      onChange={setConfigSourceFilter}
+                      style={{ width: 130 }}
+                      options={(['import', 'batch_plan', 'manual'] as const).map((value) => ({
+                        value,
+                        label: t(`provision.configSource.${value}`),
+                      }))}
+                    />
+                    <Select
+                      allowClear
+                      placeholder={t('provision.validationStatus')}
+                      value={configValidationFilter}
+                      onChange={setConfigValidationFilter}
+                      style={{ width: 130 }}
+                      options={(['valid', 'conflict', 'incomplete'] as const).map((value) => ({
+                        value,
+                        label: t(`provision.validationStatus.${value}`),
+                      }))}
+                    />
+                  </Space>
+                  <Space>
+                    <Button
+                      icon={<DownloadOutlined />}
+                      disabled={!paramConfigToolbarEnabled}
+                      onClick={handleDownloadParamConfigTemplate}
+                    >
+                      {t('provision.downloadTemplate')}
+                    </Button>
+                    {moduleActions.import && (
+                      <Button
+                        icon={<UploadOutlined />}
+                        disabled={!paramConfigToolbarEnabled}
+                        onClick={handleOpenParamConfigImport}
+                      >
+                        {t('common.import')}
+                      </Button>
+                    )}
+                    <Button
+                      icon={<DownloadOutlined />}
+                      disabled={!paramConfigToolbarEnabled}
+                      onClick={handleExportConfig}
+                    >
+                      {t('common.export')}
+                    </Button>
+                  </Space>
+                </div>
+                <Table
+                  columns={paramConfigColumns}
+                  dataSource={filteredParamConfigList}
+                  rowKey="id"
+                  pagination={{
+                    showSizeChanger: true,
+                    showQuickJumper: true,
+                    showTotal: (total) => t('table.totalCount', { count: total }),
+                  }}
+                  size="small"
+                  scroll={{ x: 1200 }}
+                />
+              </div>
+            ),
+          },
+        ]}
+      />
     </Card>
   );
 
@@ -1384,14 +1575,14 @@ export default function AddPolicyPage() {
                     />
                   </Form.Item>
                 </Descriptions.Item>
-                <Descriptions.Item label={t('provision.productClass')}>
+                <Descriptions.Item label={t('provision.productName')}>
                   <Form.Item name="productClasses" noStyle rules={[{ required: true, message: t('common.pleaseSelect') }]}>
                     <ProductClassMultiSelect
                       placeholder={productTechnology
                         ? t('common.pleaseSelect')
                         : t('provision.selectProductTechnologyFirst')}
                       options={productClassOptions}
-                      loading={productClassesLoading || productCatalogLoading}
+                      loading={productCatalogLoading}
                       onChange={handleProductClassChange}
                       disabled={!productTechnology}
                     />
@@ -1466,7 +1657,7 @@ export default function AddPolicyPage() {
           {/* eNB fields aligned with device quick settings; template-only fields follow. */}
           {currentConfig?.deviceType === 'eNB' && (
             <>
-              <EnbQuickSettingsCards />
+              <EnbQuickSettingsCards paramModelName={selectedProduct?.paramModelName} />
               <Card size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16 }}>
                 <EnbTemplateExtraFieldGrid />
               </Card>
@@ -1498,25 +1689,9 @@ export default function AddPolicyPage() {
           {currentConfig?.deviceType === 'gNB' && (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <GnbQuickSettingsCards />
-              <Card key="gnb-ip" size="small" title={t('provision.ipConfig')} style={{ marginBottom: 16, order: 10 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', columnGap: 16 }}>
-                  <Form.Item name="serviceIp" label={t('provision.serviceIp')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="serviceMask" label={t('provision.serviceMask')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="omIp" label={t('provision.omIp')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="serviceGateway" label={t('provision.serviceGateway')} style={{ flex: '1 1 200px' }}>
-                    <Input style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="serviceVlan" label={t('provision.serviceVlan')} style={{ flex: '1 1 200px' }}>
-                    <InputNumber style={{ width: '100%' }} min={0} max={4095} />
-                  </Form.Item>
-                </div>
-              </Card>
+              <div key="gnb-network" style={{ order: 10 }}>
+                <GnbNetworkConfigCards readOnly={configDetailMode === 'view'} />
+              </div>
               <Card key="gnb-plmn-extra" size="small" title={t('provision.plmnConfigList')} style={{ marginBottom: 16, order: 9 }}>
                 <Form.List name="plmnConfigList">
                   {(fields, { add, remove }) => (
@@ -1613,7 +1788,7 @@ export default function AddPolicyPage() {
               <Collapse.Panel key="gsm-basic" header={t('provision.gsmBasicConfig')}>
                 <TemplateFieldGrid fields={GSM_GROUPED_TEMPLATE_FIELDS.quickAbis} />
               </Collapse.Panel>
-              <Collapse.Panel key="gsm-other" header="其他参数">
+              <Collapse.Panel key="gsm-other" header={t('provision.otherParams')}>
                 <TemplateFieldGrid fields={GSM_GROUPED_TEMPLATE_FIELDS.other} />
               </Collapse.Panel>
               <Collapse.Panel key="gsm-custom" header={t('provision.customParams')}>
@@ -1681,7 +1856,7 @@ export default function AddPolicyPage() {
         destroyOnHidden
       >
         <Form form={firmwareImportForm} layout="vertical">
-          <Form.Item label={t('provision.productClass')}>
+          <Form.Item label={t('provision.productName')}>
             <Input value={productClasses.join(', ')} disabled />
           </Form.Item>
           <Form.Item
@@ -1738,26 +1913,26 @@ export default function AddPolicyPage() {
         onCancel={() => {
           setImportModalVisible(false);
           setParamFileList([]);
+          setImportPreview([]);
+          setPendingImportedConfigs([]);
+          setImportPreviewError('');
         }}
         footer={[
           <Button key="cancel" onClick={() => {
             setImportModalVisible(false);
             setParamFileList([]);
+            setImportPreview([]);
+            setPendingImportedConfigs([]);
+            setImportPreviewError('');
           }}>
             {t('common.cancel')}
           </Button>,
           <Button
             key="import"
             type="primary"
-            onClick={() => {
-              if (paramFileList.length === 0) {
-                void message.warning(t('common.pleaseSelect'));
-                return;
-              }
-              const selectedFile = paramFileList[0];
-              const realFile = (selectedFile.originFileObj ?? selectedFile) as File;
-              void handleImportConfig(realFile);
-            }}
+            disabled={pendingImportedConfigs.length === 0
+              || importPreview.some((item) => item.action === 'duplicate')}
+            onClick={applyImportConfig}
           >
             {t('common.import')}
           </Button>,
@@ -1794,7 +1969,7 @@ export default function AddPolicyPage() {
           <Alert
             type="info"
             showIcon
-            message={t('provision.paramConfig5GTemplateFillHint')}
+            title={t('provision.paramConfig5GTemplateFillHint')}
             style={{ marginBottom: 16 }}
           />
         )}
@@ -1805,10 +1980,14 @@ export default function AddPolicyPage() {
           fileList={paramFileList}
           beforeUpload={(file) => {
             setParamFileList([file]);
+            void previewImportConfig(file);
             return false;
           }}
           onRemove={() => {
             setParamFileList([]);
+            setImportPreview([]);
+            setPendingImportedConfigs([]);
+            setImportPreviewError('');
           }}
         >
           <p className="ant-upload-drag-icon">
@@ -1819,7 +1998,44 @@ export default function AddPolicyPage() {
             {t('provision.importParamConfigHint')}
           </p>
         </Upload.Dragger>
+        {importPreviewError && (
+          <Alert type="error" showIcon title={importPreviewError} style={{ marginTop: 16 }} />
+        )}
+        {importPreview.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <Alert
+              type={importPreview.some((item) => item.action === 'duplicate') ? 'warning' : 'success'}
+              showIcon
+              title={t('provision.paramConfigImportPreviewSummary', {
+                add: importPreview.filter((item) => item.action === 'add').length,
+                update: importPreview.filter((item) => item.action === 'update').length,
+                conflict: importPreview.filter((item) => item.action === 'duplicate').length,
+              })}
+              style={{ marginBottom: 12 }}
+            />
+            <Table
+              size="small"
+              rowKey={(record) => `${record.serialNumber}-${record.action}`}
+              pagination={{ pageSize: 5, hideOnSinglePage: true }}
+              dataSource={importPreview}
+              columns={[
+                { title: t('provision.serialNumber'), dataIndex: 'serialNumber' },
+                {
+                  title: t('provision.importAction'),
+                  dataIndex: 'action',
+                  width: 100,
+                  render: (action: ParamConfigImportPreviewItem['action']) => (
+                    <Tag color={action === 'add' ? 'success' : action === 'update' ? 'processing' : 'error'}>
+                      {t(`provision.importAction.${action}`)}
+                    </Tag>
+                  ),
+                },
+              ]}
+            />
+          </div>
+        )}
       </Modal>
+
     </div>
   );
 }

@@ -129,6 +129,36 @@ func TestTranslateTaskParams_Passthrough_WhenDisabled(t *testing.T) {
 	assert.JSONEq(t, string(in), string(out))
 }
 
+func TestTranslateTaskParams_MapsGeofenceStandardRFPathToQRTBPrivatePath(t *testing.T) {
+	dev := &coremodel.Device{
+		ProductClass:    "FAP/mBS31001/DC",
+		FirmwareVersion: "BLQ_5.1.11.9",
+	}
+	prod := &product.Product{ID: uuid.New(), ParamModelID: func() *uuid.UUID { id := uuid.New(); return &id }()}
+	tr := buildTranslator(t, map[string]string{
+		"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus": "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable",
+	})
+	service := NewPathTranslationService(
+		&stubDeviceLookup{dev: dev},
+		&stubProductMatcher{res: &product.MatchResult{Product: prod}},
+		&stubTranslatorFactory{tr: tr},
+		zap.NewNop(),
+	)
+
+	input := json.RawMessage(`{"values":[{"name":"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus","value":"0","type":"xsd:boolean"}]}`)
+	taskRecord := &task.Task{
+		ID:       "geofence-rf",
+		DeviceSN: "SN-MBS31001-1",
+		Method:   "SetParameterValues",
+		Params:   input,
+	}
+
+	output, changed := service.TranslateTaskParams(context.Background(), taskRecord)
+
+	assert.True(t, changed)
+	assert.JSONEq(t, `{"values":[{"name":"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable","value":"0","type":"xsd:boolean"}]}`, string(output))
+}
+
 func TestTranslateTaskParams_TranslatesGPVNames(t *testing.T) {
 	dev := &coremodel.Device{ProductClass: "X-BLQ", FirmwareVersion: "1.0.0"}
 	prodID := uuid.New()

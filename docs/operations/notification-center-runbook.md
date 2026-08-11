@@ -255,8 +255,8 @@ accepted 吞吐、数据库锁等待、stream bytes、三个 durable lag 和最�
 P95 必须小于 30 秒。
 
 本机里程碑 A 实测约 1.18 KiB/生命周期事件、当前 10 GiB 在 80% 水位下只支持约 12 条/秒
-的 7 天窗口，仅用于发现默认值风险，不能作为现场容量结论。详见
-`docs/superpowers/reviews/2026-08-06-email-sms-milestone-a-acceptance.md`。
+的 7 天窗口，仅用于发现默认值风险，不能作为现场容量结论。部署后验收方案见
+`docs/superpowers/reviews/2026-08-11-email-notification-server-acceptance.md`。
 
 每次演练或上线附一份记录，至少包含：环境、版本、现场输入、开关前后值、样本网元、测试
 收件人范围、各阶段时间戳、查询/指标快照、浏览器截图、失败项、回退结果和双人签字。

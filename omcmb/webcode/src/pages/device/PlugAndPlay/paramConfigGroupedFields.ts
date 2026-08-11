@@ -30,7 +30,14 @@ export const GNB_GROUPED_TEMPLATE_FIELDS = {
     'NTP Server4', 'NTP Server5',
   ]),
   quickSyncSource: fields('DEVICE', ['PpsTimeMode']),
+  management: fields('DEVICE', [
+    'URL', 'Periodic Inform Enable', 'Periodic Inform Time', 'Periodic Inform Interval',
+  ]),
   quickCore: fields('PLMN', ['NguBindInterface']),
+  network: fields('INTERFACE', [
+    'Interface Name', 'Address Type', 'IP Address', 'Subnet Mask', 'Prefix Length',
+    'Gateway', 'Bear Type', 'Vlan Name', 'Vlan ID',
+  ]),
   tdd: fields('CELL', [
     'DL ULTransmissionPeriodicity1', 'Nrof DownlinkSlots1',
     'Nrof DownlinkSymbols1', 'Nrof  UplinkSlots1', 'Nrof  UplinkSymbols1',
@@ -47,12 +54,7 @@ export const GNB_GROUPED_TEMPLATE_FIELDS = {
   ]),
   other: fields('CELL', [
     'Prach RootSequenceIndex', 'Prach RootSequenceValue',
-  ]).concat(fields('DEVICE', [
-    'Periodic Inform Enable', 'Periodic Inform Time', 'Periodic Inform Interval',
-    'Time Zone Term',
-  ])).concat(fields('INTERFACE', [
-    'Interface Name', 'Address Type', 'Prefix Length', 'Bear Type', 'Vlan Name',
-  ])).concat(fields('IPSEC', ['FORCEENCAPS'])),
+  ]).concat(fields('IPSEC', ['FORCEENCAPS'])),
 } as const;
 
 export const GSM_GROUPED_TEMPLATE_FIELDS = {
@@ -75,7 +77,7 @@ const ENB_STRUCTURED_FIELDS = [
     'IKELIFETIME', 'REKEYMARGIN', 'DPDACTION', 'DPDDELAY', 'RIGHT_SECRET_KEY',
     'LEFT_SUBNET', 'RIGHT_SUBNET', 'FRAGMENTATION', 'LEFT_INTERFACE', 'FORCEENCAPS',
   ]),
-  ...fields('NETWORK', ['WAN IP', 'OMC IP', 'NTP Enable']),
+  ...fields('NETWORK', ['WAN IP', 'NTP Enable']),
 ];
 
 const GNB_STRUCTURED_FIELDS = [
@@ -87,7 +89,6 @@ const GNB_STRUCTURED_FIELDS = [
   ...fields('DEVICE', ['NTP Enable']),
   ...fields('PLMN', ['*NCI', '*TAC', '*RANAC', '*PLMN ID', '*PRIMARY', 'SD', 'SD Value']),
   ...fields('PLMN', ['AMF IP:DEFAULT']),
-  ...fields('INTERFACE', ['IP Address', 'Subnet Mask', 'Gateway', 'Vlan ID', 'OMC IP']),
 ];
 
 function key(field: TemplateFieldRef): string {

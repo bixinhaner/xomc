@@ -3,6 +3,11 @@
  * @module types/map
  */
 
+import type {
+  GeofenceMapDefinition,
+  GeofencePolygonGeometry,
+} from './geofence';
+
 /**
  * 设备状态枚举（地图显示用）
  * - onlineActive: 在线激活
@@ -338,6 +343,16 @@ export interface DeviceGroupNode {
 export interface GISMapProps {
   /** 设备数据列表 */
   devices?: MapDevice[];
+  /** 当前视口需要渲染的电子围栏。 */
+  geofences?: GeofenceMapDefinition[];
+  /** 当前选中的电子围栏 ID。 */
+  selectedGeofenceId?: string;
+  /** 点击电子围栏回调。 */
+  onGeofenceClick?: (item: GeofenceMapDefinition) => void;
+  /** 完成 Polygon 绘制后返回 WGS84 geometry。 */
+  onGeofenceDrawComplete?: (
+    geometry: GeofencePolygonGeometry,
+  ) => void;
   /** 搜索结果设备（独立显示，不受主设备列表限制） */
   searchResultDevice?: MapDevice | null;
   /** 当前选中的设备，用于展示其天线扇区。 */
@@ -417,6 +432,16 @@ export interface GISMapRef {
    * 搜索时调低，为 API 请求让出连接；搜索完成后恢复
    */
   setTileConcurrency: (n: number) => void;
+  /** 开启测距模式，并停止正在进行的围栏绘制。 */
+  startMeasure: () => void;
+  /** 停止测距模式。 */
+  stopMeasure: () => void;
+  /** 开启 Polygon 围栏绘制，并停止正在进行的测距。 */
+  startGeofencePolygonDraw: () => void;
+  /** 停止围栏绘制并清理临时图形。 */
+  stopGeofenceDraw: () => void;
+  /** 定位并自适应显示指定电子围栏。 */
+  fitGeofence: (id: string) => boolean;
 }
 
 /**

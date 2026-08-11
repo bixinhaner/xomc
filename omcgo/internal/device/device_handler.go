@@ -256,12 +256,13 @@ type CreateDeviceRequest struct {
 
 // UpdateDeviceRequest defines the request body for updating a device.
 type UpdateDeviceRequest struct {
-	DeviceName *string             `json:"device_name"`
-	SiteID     *string             `json:"site_id"`
-	ModelName  *string             `json:"model_name"`
-	Latitude   *float64            `json:"latitude"`
-	Longitude  *float64            `json:"longitude"`
-	Status     *model.DeviceStatus `json:"status"`
+	DeviceName         *string                   `json:"device_name"`
+	SiteID             *string                   `json:"site_id"`
+	ModelName          *string                   `json:"model_name"`
+	Latitude           *float64                  `json:"latitude"`
+	Longitude          *float64                  `json:"longitude"`
+	LocationSourceMode *model.LocationSourceMode `json:"location_source_mode"`
+	Status             *model.DeviceStatus       `json:"status"`
 }
 
 // CreateDevice handles POST /api/v1/devices.
@@ -278,7 +279,7 @@ func (h *Handler) CreateDevice(c *gin.Context) {
 			commonerrors.AbortWithError(c, http.StatusConflict, err)
 			return
 		}
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
 
@@ -301,6 +302,10 @@ func (h *Handler) UpdateDevice(c *gin.Context) {
 
 	device, err := h.service.UpdateDevice(c.Request.Context(), id, req)
 	if err != nil {
+		if errors.Is(err, commonerrors.ErrInvalidInput) {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+			return
+		}
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}

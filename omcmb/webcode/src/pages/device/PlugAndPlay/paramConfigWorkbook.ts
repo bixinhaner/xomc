@@ -3,6 +3,7 @@ import {
   getParamConfigTemplateDefaults,
   getParamConfigTemplateSheets,
 } from './paramConfigTemplate';
+import { sanitizeRetiredParamConfigFields } from './retiredParamConfigFields';
 
 export type ParamConfigDeviceType = 'eNB' | 'gNB' | 'GSM';
 
@@ -140,7 +141,9 @@ export function createParamConfigWorkbook(
   if (sourceSheetNames.length > 0) {
     const workbook = XLSX.utils.book_new();
     for (const sheetName of sourceSheetNames) {
-      const rows = configs.flatMap((config) => config.sheetParameters?.[sheetName] ?? []);
+      const rows = configs.flatMap((config) => (
+        sanitizeRetiredParamConfigFields(config.sheetParameters ?? {})[sheetName] ?? []
+      ));
       if (rows.length === 0) continue;
       const worksheet = XLSX.utils.json_to_sheet(rows);
       XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
@@ -297,11 +300,11 @@ function parseDefaultTemplateWorkbook(
       if (!serialNumber || /^length\s*:/i.test(serialNumber)) return;
 
       const sheetRow = headerRowIndex + rowOffset + 2;
-      const rawParameters = Object.fromEntries(
-        headers.flatMap((header, index) => (
+      const rawParameters = sanitizeRetiredParamConfigFields({
+        [sheetName]: [Object.fromEntries(headers.flatMap((header, index) => (
           header ? [[header, row[index] ?? '']] : []
-        )),
-      );
+        )))],
+      })[sheetName][0];
       const previous = rowsBySerial.get(serialNumber);
       const sheetParameters = {
         ...(previous?.sheetParameters ?? {}),

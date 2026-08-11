@@ -8,12 +8,41 @@ const hookMocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutateAsync: vi.fn(),
   refetch: vi.fn(),
+  refetchPolicies: vi.fn(),
+  refetchTargets: vi.fn(),
+  refetchEvents: vi.fn(),
 }));
 
 vi.mock('@core/hooks/api/useSystem', () => ({
   useSysConfigsByCategory: (category: string) => hookMocks.query(category),
   useBatchUpdateSysConfigs: () => ({ mutateAsync: hookMocks.mutateAsync }),
   useSysConfigApplyBatch: () => ({ data: undefined }),
+}));
+
+vi.mock('@core/hooks/api/useStorageProtection', () => ({
+  useStorageProtectionPolicies: () => ({
+    data: [],
+    isFetching: false,
+    refetch: hookMocks.refetchPolicies,
+  }),
+  useStorageProtectionTargets: () => ({
+    data: [],
+    isFetching: false,
+    refetch: hookMocks.refetchTargets,
+  }),
+  useStorageProtectionEvents: () => ({
+    data: [],
+    isFetching: false,
+    refetch: hookMocks.refetchEvents,
+  }),
+  useSaveStorageProtectionPolicy: () => ({
+    mutateAsync: hookMocks.mutateAsync,
+    isPending: false,
+  }),
+  useUpdateStorageProtectionPolicy: () => ({
+    mutateAsync: hookMocks.mutateAsync,
+    isPending: false,
+  }),
 }));
 
 vi.mock('@/hooks/useT', () => ({
@@ -33,6 +62,9 @@ describe('self-managed system config load guard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hookMocks.query.mockReturnValue(failedQuery);
+    hookMocks.refetchPolicies.mockResolvedValue({ isError: false });
+    hookMocks.refetchTargets.mockResolvedValue({ isError: false });
+    hookMocks.refetchEvents.mockResolvedValue({ isError: false });
   });
 
   it('PM 保留策略加载失败时禁止保存和重置', () => {
@@ -50,11 +82,11 @@ describe('self-managed system config load guard', () => {
   it('资源保留与背压各分类加载失败时分别禁止保存', () => {
     render(<RetentionBackpressureSection />);
 
-    expect(screen.getAllByText('empty.loadFailed')).toHaveLength(4);
+    expect(screen.getAllByText('empty.loadFailed')).toHaveLength(3);
     for (const button of screen.getAllByRole('button', { name: 'retentionBp.save' })) {
       expect(button).toBeDisabled();
     }
-    expect(screen.getAllByRole('button', { name: 'common.retry' })).toHaveLength(4);
+    expect(screen.getAllByRole('button', { name: 'common.retry' })).toHaveLength(3);
     expect(hookMocks.mutateAsync).not.toHaveBeenCalled();
   });
 
@@ -147,7 +179,7 @@ describe('self-managed system config load guard', () => {
     });
   });
 
-  it('资源保留与背压只提交当前卡片内实际修改的字段', async () => {
+  it('资源保留与背压隐藏 PM 上传背压并只提交当前卡片内实际修改的字段', async () => {
     const user = userEvent.setup();
     const valuesByCategory: Record<string, Record<string, string>> = {
       'acs.backpressure': {
@@ -159,6 +191,7 @@ describe('self-managed system config load guard', () => {
       'minio.retention': { raw_object_days: '30' },
       'stationlog.retention': {
         max_retention_days: '30',
+        cleanup_interval_minutes: '60',
         max_file_count: '0',
         max_file_count_per_device: '0',
       },
@@ -184,20 +217,145 @@ describe('self-managed system config load guard', () => {
 
     render(<RetentionBackpressureSection />);
 
-    const card = screen.getByText('retentionBp.bp.title').closest('.ant-card');
+    expect(screen.queryByText('retentionBp.bp.title')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('retentionBp.field.disk_high_pct')).not.toBeInTheDocument();
+
+    const card = screen.getByText('retentionBp.ilm.title').closest('.ant-card');
     expect(card).not.toBeNull();
-    const highInput = within(card as HTMLElement).getByRole('spinbutton', {
-      name: 'retentionBp.field.disk_high_pct',
+    const retentionInput = within(card as HTMLElement).getByRole('spinbutton', {
+      name: 'retentionBp.field.raw_object_days',
     });
-    await waitFor(() => expect(highInput).toHaveValue('90'));
-    await user.clear(highInput);
-    await user.type(highInput, '91');
+    await waitFor(() => expect(retentionInput).toHaveValue('30'));
+    await user.clear(retentionInput);
+    await user.type(retentionInput, '31');
     await user.click(within(card as HTMLElement).getByRole('button', { name: 'retentionBp.save' }));
 
     await waitFor(() => {
       expect(hookMocks.mutateAsync).toHaveBeenCalledWith({
-        category: 'acs.backpressure',
-        items: [{ key: 'disk_high_pct', value: '91', value_type: 'int' }],
+        category: 'minio.retention',
+        items: [{ key: 'raw_object_days', value: '31', value_type: 'int' }],
+      });
+    });
+  });
+
+  it('资源保留与背压的容量刷新和存储保护刷新互不串联', async () => {
+    const user = userEvent.setup();
+    const valuesByCategory: Record<string, Record<string, string>> = {
+      'acs.backpressure': {
+        enabled: 'true',
+        disk_high_pct: '90',
+        disk_low_pct: '70',
+        check_interval_sec: '60',
+      },
+      'minio.retention': { raw_object_days: '30' },
+      'stationlog.retention': {
+        max_retention_days: '30',
+        cleanup_interval_minutes: '60',
+        max_file_count: '0',
+        max_file_count_per_device: '0',
+      },
+      raw_archive: { compress_after_ingest: 'false' },
+    };
+    hookMocks.query.mockImplementation((category: string) => ({
+      data: Object.entries(valuesByCategory[category]).map(([key, value]) => ({
+        id: `${category}-${key}`,
+        category,
+        key,
+        value,
+        valueType: key === 'enabled' || key === 'compress_after_ingest' ? 'bool' : 'int',
+        isPublic: false,
+        isSecret: false,
+      })),
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      isSuccess: true,
+      refetch: hookMocks.refetch,
+    }));
+
+    render(<RetentionBackpressureSection />);
+
+    const capacityCard = screen.getByText('system.storageProtection.capacityOverview').closest('.ant-card');
+    const storageProtectionCard = screen.getByText('system.storageProtection.title').closest('.ant-card');
+    expect(capacityCard).not.toBeNull();
+    expect(storageProtectionCard).not.toBeNull();
+
+    await user.click(within(capacityCard as HTMLElement).getByRole('button', { name: /common\.refresh/ }));
+    await waitFor(() => expect(hookMocks.refetchTargets).toHaveBeenCalledTimes(1));
+    expect(hookMocks.refetchPolicies).not.toHaveBeenCalled();
+    expect(hookMocks.refetchEvents).not.toHaveBeenCalled();
+
+    hookMocks.refetchPolicies.mockClear();
+    hookMocks.refetchTargets.mockClear();
+    hookMocks.refetchEvents.mockClear();
+
+    await user.click(within(storageProtectionCard as HTMLElement).getByRole('button', { name: /common\.refresh/ }));
+    await waitFor(() => {
+      expect(hookMocks.refetchPolicies).toHaveBeenCalledTimes(1);
+      expect(hookMocks.refetchEvents).toHaveBeenCalledTimes(1);
+    });
+    expect(hookMocks.refetchTargets).not.toHaveBeenCalled();
+  });
+
+  it('资源保留与背压支持保存基站日志清理周期并校验范围', async () => {
+    const user = userEvent.setup();
+    const valuesByCategory: Record<string, Record<string, string>> = {
+      'acs.backpressure': {
+        enabled: 'true',
+        disk_high_pct: '90',
+        disk_low_pct: '70',
+        check_interval_sec: '60',
+      },
+      'minio.retention': { raw_object_days: '30' },
+      'stationlog.retention': {
+        max_retention_days: '30',
+        cleanup_interval_minutes: '60',
+        max_file_count: '0',
+        max_file_count_per_device: '0',
+      },
+      raw_archive: { compress_after_ingest: 'false' },
+    };
+    hookMocks.query.mockImplementation((category: string) => ({
+      data: Object.entries(valuesByCategory[category]).map(([key, value]) => ({
+        id: `${category}-${key}`,
+        category,
+        key,
+        value,
+        valueType: key === 'enabled' || key === 'compress_after_ingest' ? 'bool' : 'int',
+        isPublic: false,
+        isSecret: false,
+      })),
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      isSuccess: true,
+      refetch: hookMocks.refetch,
+    }));
+    hookMocks.mutateAsync.mockResolvedValue({});
+
+    render(<RetentionBackpressureSection />);
+
+    const card = screen.getByText('retentionBp.stationlog.title').closest('.ant-card');
+    expect(card).not.toBeNull();
+    const cardText = (card as HTMLElement).textContent ?? '';
+    expect(cardText.indexOf('retentionBp.field.cleanup_interval_minutes')).toBeGreaterThan(
+      cardText.indexOf('retentionBp.field.max_file_count_per_device'),
+    );
+    const intervalInput = within(card as HTMLElement).getByRole('spinbutton', {
+      name: 'retentionBp.field.cleanup_interval_minutes',
+    });
+    await waitFor(() => expect(intervalInput).toHaveValue('60'));
+    expect(intervalInput).toHaveAttribute('aria-valuemin', '10');
+    expect(intervalInput).toHaveAttribute('aria-valuemax', '1440');
+
+    await user.clear(intervalInput);
+    await user.type(intervalInput, '45');
+    await user.click(within(card as HTMLElement).getByRole('button', { name: 'retentionBp.save' }));
+
+    await waitFor(() => {
+      expect(hookMocks.mutateAsync).toHaveBeenCalledWith({
+        category: 'stationlog.retention',
+        items: [{ key: 'cleanup_interval_minutes', value: '45', value_type: 'int' }],
       });
     });
   });

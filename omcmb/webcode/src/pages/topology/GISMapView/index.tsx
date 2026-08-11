@@ -13,15 +13,28 @@ import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 import { useTabStore } from '@core/store/tabStore';
-import { Checkbox, Spin, Empty, Collapse, Input, Tooltip, message } from 'antd';
-import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
+import { Button, Checkbox, Spin, Empty, Collapse, Input, Tooltip, message } from 'antd';
+import {
+  CaretDownOutlined,
+  MinusOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  SafetyCertificateOutlined,
+  SettingOutlined,
+  UnorderedListOutlined,
+} from '@ant-design/icons';
 import GISMap from '@/components/GISMap';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
 import { useMapConfig } from '@/components/GISMap/useMapConfig';
 import { calculateCenterFromDevices, parseEnvCenter, resolveMapInitialView } from '@/utils/mapValidation';
 import type { GISMapRef } from '@/components/GISMap';
 import type { AntennaSector, MapDevice, DeviceGroupNode, DeviceGeo, MapViewport } from '@core/types/map';
+import type {
+  GeofenceMapDefinition,
+  GeofencePolygonGeometry,
+} from '@core/types/geofence';
 import { useThemeToken } from '@/hooks/useThemeToken';
+import { usePermission } from '@core/hooks/usePermission';
 // import { useMapDeviceCache } from '@/hooks/useMapDeviceCache'; // 暂未使用
 import {
   useDomainTree,
@@ -31,6 +44,10 @@ import {
 } from '@core/hooks/api/useTopology';
 import { useDeviceSearch } from '@core/hooks/useDeviceSearch';
 import { useAntennaSectorEditor } from '@core/hooks/useAntennaSectorEditor';
+import {
+  useGeofenceAvailability,
+  useGeofenceMap,
+} from '@core/hooks/api/useGeofence';
 import { topologyApi } from '@core/services/api/topologyApi';
 import { SPACING, RADIUS, SHADOWS, COLORS, transitionString, DURATION, EASING } from './styles';
 import { hasValidCoord } from './coord';
@@ -41,11 +58,19 @@ import {
   getGroupNodeDisplayName,
   normalizeGroupLocale,
 } from './groupDisplay';
+import { buildGeofenceMapQuery } from './geofenceViewModel';
+import GeofenceBindingsDrawer from './GeofenceBindingsDrawer';
+import GeofenceEditorDrawer from './GeofenceEditorDrawer';
+import GeofencePanel from './GeofencePanel';
+import GeofenceSettingsDrawer from './GeofenceSettingsDrawer';
 import './animations.css';
 
 // 环境变量在运行期不变，解析一次即可，避免每次 useMemo 重跑并重复打日志
 const ENV_CENTER = parseEnvCenter();
 const EMPTY_ANTENNA_SECTORS: AntennaSector[] = [];
+const EMPTY_GEOFENCES: GeofenceMapDefinition[] = [];
+const GEOFENCE_VIEW_PERMISSION = 'topology:gis-map:geofence:view';
+const GEOFENCE_MANAGE_PERMISSION = 'topology:gis-map:geofence:manage';
 
 /**
  * 将 DeviceGeo 转换为 MapDevice
@@ -109,6 +134,8 @@ const CollapseIcon = ({ direction }: { direction: 'left' | 'right' }) => (
 export default function GISMapView() {
   const token = useThemeToken();
   const intl = useIntl();
+  const canViewGeofence = usePermission(GEOFENCE_VIEW_PERMISSION);
+  const canManageGeofence = usePermission(GEOFENCE_MANAGE_PERMISSION);
 
   // ========== 状态管理 ==========
 
@@ -129,6 +156,25 @@ export default function GISMapView() {
   // 搜索结果设备（用于独立显示在地图上）
   const [searchResultDevice, setSearchResultDevice] = useState<MapDevice | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<MapDevice | null>(null);
+  const [geofenceToolEnabled, setGeofenceToolEnabled] =
+    useState(false);
+  const [geofencePanelVisible, setGeofencePanelVisible] =
+    useState(true);
+  const [selectedGeofence, setSelectedGeofence] =
+    useState<GeofenceMapDefinition | null>(null);
+  const [geofenceSettingsOpen, setGeofenceSettingsOpen] =
+    useState(false);
+  const [geofenceEditorOpen, setGeofenceEditorOpen] =
+    useState(false);
+  const [geofenceDrawing, setGeofenceDrawing] = useState(false);
+  const [geofenceEditorItem, setGeofenceEditorItem] =
+    useState<GeofenceMapDefinition>();
+  const [drawnGeofenceGeometry, setDrawnGeofenceGeometry] =
+    useState<GeofencePolygonGeometry>();
+  const [geofenceBindingsItem, setGeofenceBindingsItem] =
+    useState<GeofenceMapDefinition>();
+  const [geofenceBindingDeviceSNs, setGeofenceBindingDeviceSNs] =
+    useState<string[]>();
 
   // 状态筛选：在线激活/在线未激活/离线
   const [statusFilter, setStatusFilter] = useState<{
@@ -313,12 +359,31 @@ export default function GISMapView() {
   ]);
 
   const { data: devicesGeoData, isSuccess: isDevicesGeoQuerySuccessful } = useMapDevicesGeo(filterParams);
+  const geofenceAvailabilityQuery = useGeofenceAvailability();
+  const geofenceFeatureVisible =
+    canViewGeofence && geofenceAvailabilityQuery.data?.enabled === true;
+  const geofenceToolActive = geofenceFeatureVisible && geofenceToolEnabled;
 
   useEffect(() => {
     if (isDevicesGeoQuerySuccessful) {
       setIsInitialGeoQueryComplete(true);
     }
   }, [isDevicesGeoQuerySuccessful]);
+  const geofenceMapQuery = useMemo(
+    () =>
+      buildGeofenceMapQuery(
+        geofenceToolActive,
+        mapViewport,
+      ),
+    [geofenceToolActive, mapViewport],
+  );
+  const { data: geofenceMapData } = useGeofenceMap(
+    geofenceMapQuery.filter,
+    { enabled: geofenceMapQuery.enabled },
+  );
+  const visibleGeofences = geofenceToolActive
+    ? (geofenceMapData?.items ?? EMPTY_GEOFENCES)
+    : EMPTY_GEOFENCES;
   const {
     data: antennaSectors = EMPTY_ANTENNA_SECTORS,
   } = useDeviceAntennaSectors(selectedDevice?.id);
@@ -1120,6 +1185,19 @@ export default function GISMapView() {
         <GISMap
           ref={mapRef}
           devices={mapDevices}
+          geofences={visibleGeofences}
+          selectedGeofenceId={
+            selectedGeofence?.definition.id
+          }
+          onGeofenceClick={(item) => {
+            setSelectedDevice(null);
+            setSelectedGeofence(item);
+          }}
+          onGeofenceDrawComplete={(geometry) => {
+            setDrawnGeofenceGeometry(geometry);
+            setGeofenceDrawing(false);
+            setGeofenceEditorOpen(true);
+          }}
           searchResultDevice={localizedSearchResultDevice}
           selectedDevice={localizedSelectedDevice}
           antennaSectors={previewSectors}
@@ -1129,7 +1207,10 @@ export default function GISMapView() {
           showStats={false}
           showControls={false}
           tileUrl={mapConfigData.status === 'success' && !mapConfigData.isUsingDefault ? MAP_CONFIG.tileUrl : undefined}
-          onDeviceClick={setSelectedDevice}
+          onDeviceClick={(device) => {
+            setSelectedGeofence(null);
+            setSelectedDevice(device);
+          }}
           onAlarmClick={(sn) => {
               const path = `/alarm/current?deviceSN=${encodeURIComponent(sn)}`;
               openTab({ key: 'alarm/current', label: intl.formatMessage({ id: 'nav.alarm.current' }), path, closable: true, labelRaw: true });
@@ -1137,6 +1218,7 @@ export default function GISMapView() {
             }}
           onMapClick={() => {
 			setSelectedDevice(null);
+            setSelectedGeofence(null);
             // 点击地图时收起搜索结果面板
             setDeviceSearchExpanded(false);
             // 不清除搜索结果设备，保留高亮显示
@@ -1167,6 +1249,173 @@ export default function GISMapView() {
             }, MAP_CONFIG.viewportDebounce);
           }}
         />
+
+        {geofenceFeatureVisible && (
+        <div className="geofence-map-controls">
+          <Button
+            className={`geofence-map-tool-button${geofenceToolEnabled ? ' is-active' : ''}`}
+            aria-pressed={geofenceToolEnabled}
+            aria-label={intl.formatMessage({
+              id: 'geofence.map.enableTool',
+            })}
+            icon={<SafetyCertificateOutlined aria-hidden="true" />}
+            onClick={() => {
+              const nextEnabled = !geofenceToolEnabled;
+              if (!nextEnabled) {
+                mapRef.current?.stopGeofenceDraw();
+                setSelectedGeofence(null);
+                setGeofenceSettingsOpen(false);
+                setGeofenceEditorOpen(false);
+                setGeofenceDrawing(false);
+                setGeofenceEditorItem(undefined);
+                setDrawnGeofenceGeometry(undefined);
+                setGeofenceBindingsItem(undefined);
+                setGeofenceBindingDeviceSNs(undefined);
+                setGeofencePanelVisible(true);
+              } else if (isMeasuring) {
+                mapRef.current?.stopMeasure();
+                setIsMeasuring(false);
+              }
+              if (nextEnabled) setGeofencePanelVisible(true);
+              setGeofenceToolEnabled(nextEnabled);
+            }}
+          >
+            {intl.formatMessage({
+              id: 'geofence.map.enableTool',
+            })}
+          </Button>
+
+          {geofenceToolEnabled && canManageGeofence && (
+            <Button
+              aria-label={intl.formatMessage({
+                id: 'geofence.settings.title',
+              })}
+              icon={<SettingOutlined aria-hidden="true" />}
+              onClick={() => setGeofenceSettingsOpen(true)}
+            >
+              {intl.formatMessage({
+                id: 'geofence.action.settings',
+              })}
+            </Button>
+          )}
+        </div>
+        )}
+
+        {geofenceToolEnabled &&
+          !geofencePanelVisible &&
+          !geofenceDrawing &&
+          !geofenceEditorOpen && (
+            <Button
+              className="geofence-panel-return"
+              icon={<UnorderedListOutlined aria-hidden="true" />}
+              onClick={() => setGeofencePanelVisible(true)}
+            >
+              {intl.formatMessage({ id: 'geofence.map.showList' })}
+            </Button>
+          )}
+
+        {geofenceDrawing && (
+          <div className="geofence-drawing-status">
+            <span>
+              {intl.formatMessage({
+                id: geofenceEditorItem
+                  ? 'geofence.message.redrawing'
+                  : 'geofence.message.drawing',
+              })}
+            </span>
+            <Button
+              size="small"
+              onClick={() => {
+                mapRef.current?.stopGeofenceDraw();
+                setGeofenceDrawing(false);
+                setDrawnGeofenceGeometry(undefined);
+                if (geofenceEditorItem) {
+                  setGeofenceEditorOpen(true);
+                }
+              }}
+            >
+              {intl.formatMessage({ id: 'geofence.action.cancelDrawing' })}
+            </Button>
+          </div>
+        )}
+
+        <GeofencePanel
+          canManage={canManageGeofence}
+          open={
+            geofenceToolEnabled &&
+            geofencePanelVisible &&
+            !geofenceDrawing &&
+            !geofenceEditorOpen
+          }
+          selectedId={selectedGeofence?.definition.id}
+          onCreate={() => {
+            setGeofenceEditorItem(undefined);
+            setDrawnGeofenceGeometry(undefined);
+            setGeofenceDrawing(true);
+            mapRef.current?.startGeofencePolygonDraw();
+          }}
+          onEdit={(item) => {
+            setGeofenceEditorItem(item);
+            setDrawnGeofenceGeometry(undefined);
+            setGeofenceEditorOpen(true);
+          }}
+          onBind={(item, deviceSNs) => {
+            setGeofenceBindingsItem(item);
+            setGeofenceBindingDeviceSNs(deviceSNs);
+          }}
+          onLocate={(item) => {
+            const bounds = item.currentVersion?.boundingBox;
+            if (!bounds) return;
+            setSelectedGeofence(item);
+            setGeofencePanelVisible(false);
+            mapRef.current?.fitBounds({
+              minLng: bounds.minLongitude,
+              maxLng: bounds.maxLongitude,
+              minLat: bounds.minLatitude,
+              maxLat: bounds.maxLatitude,
+            });
+          }}
+        />
+
+        {geofenceSettingsOpen && canManageGeofence && (
+          <GeofenceSettingsDrawer
+            open
+            onClose={() => setGeofenceSettingsOpen(false)}
+          />
+        )}
+
+        {geofenceEditorOpen && canManageGeofence && (
+          <GeofenceEditorDrawer
+            open
+            item={geofenceEditorItem}
+            drawnGeometry={drawnGeofenceGeometry}
+            onStartDraw={() => {
+              setDrawnGeofenceGeometry(undefined);
+              setGeofenceEditorOpen(false);
+              setGeofenceDrawing(true);
+              mapRef.current?.startGeofencePolygonDraw();
+            }}
+            onStopDraw={() => mapRef.current?.stopGeofenceDraw()}
+            onClose={() => {
+              setGeofenceEditorOpen(false);
+              setGeofenceEditorItem(undefined);
+              setDrawnGeofenceGeometry(undefined);
+              setGeofenceDrawing(false);
+            }}
+          />
+        )}
+
+        {geofenceBindingsItem && canManageGeofence && (
+          <GeofenceBindingsDrawer
+            open
+            item={geofenceBindingsItem}
+            initialDeviceSNs={geofenceBindingDeviceSNs}
+            onClose={() => {
+              setGeofenceBindingsItem(undefined);
+              setGeofenceBindingDeviceSNs(undefined);
+            }}
+          />
+        )}
 
         {/* 设备搜索 */}
         <div ref={searchContainerRef} style={deviceSearchStyle} onClick={(e) => e.stopPropagation()}>

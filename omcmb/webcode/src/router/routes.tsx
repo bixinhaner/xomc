@@ -50,7 +50,7 @@ const CellManagement     = React.lazy(() => import('@/pages/config/CellManagemen
 const BaselineMgmt       = React.lazy(() => import('@/pages/config/BaselineManagement'));
 const CommonConfig       = React.lazy(() => import('@/pages/config/CommonConfig'));
 const NeighborParams     = React.lazy(() => import('@/pages/config/NeighborParams'));
-const NorthboundMgmt     = React.lazy(() => import('@/pages/config/NorthboundManagement'));
+const NorthboundPageConfig = React.lazy(() => import('@/pages/config/NorthboundPageConfig'));
 const AutoProvisioning   = React.lazy(() => import('@/pages/config/AutoProvisioning'));
 const InteropTesting     = React.lazy(() => import('@/pages/config/InteropTesting'));
 
@@ -137,7 +137,6 @@ const SystemConfig       = React.lazy(() => import('@/pages/system/SystemConfig'
 const UICustomization    = React.lazy(() => import('@/pages/system/UICustomization'));
 const MenuManagement     = React.lazy(() => import('@/pages/system/MenuManagement'));
 const SystemDashboard    = React.lazy(() => import('@/pages/system/SystemDashboard'));
-const StorageProtection   = React.lazy(() => import('@/pages/system/StorageProtection'));
 const ApiManagement      = React.lazy(() => import('@/pages/system/ApiManagement'));
 const DataDictionary     = React.lazy(() => import('@/pages/system/DataDictionary'));
 const DictLoaderPage     = React.lazy(() => import('@/pages/system/DictLoader'));
@@ -208,6 +207,10 @@ export const routes: RouteObject[] = [
     element: <LoginPage />,
   },
   {
+    path: '/northbound-page-config',
+    element: withSuspense(NorthboundPageConfig),
+  },
+  {
     path: '/',
     element: (
       <PrivateRoute>
@@ -257,7 +260,8 @@ export const routes: RouteObject[] = [
       { path: 'config/baseline',         element: withSuspense(BaselineMgmt) },
       { path: 'config/common',           element: withSuspense(CommonConfig) },
       { path: 'config/neighbor',         element: withSuspense(NeighborParams) },
-      { path: 'config/northbound',       element: withSuspense(NorthboundMgmt) },
+      { path: 'config/northbound',       element: <Navigate to="/config/northbound-page-config" replace /> },
+      { path: 'config/northbound-page-config', element: withSuspense(NorthboundPageConfig) },
       { path: 'config/auto-provision',   element: withSuspense(AutoProvisioning) },
       { path: 'config/interop-test',     element: withSuspense(InteropTesting) },
 
@@ -345,7 +349,7 @@ export const routes: RouteObject[] = [
       { path: 'system/ui-custom',      element: withSuspense(UICustomization) },
       { path: 'system/menus',          element: withSuspense(MenuManagement) },
       { path: 'system/dashboard',      element: withSuspense(SystemDashboard) },
-      { path: 'system/storage-protection', element: withSuspense(StorageProtection) },
+      { path: 'system/storage-protection', element: <Navigate to="/system/config?tab=retention_bp" replace /> },
       { path: 'system/api-management', element: withSuspense(ApiManagement) },
       { path: 'system/data-dictionary', element: withSuspense(DataDictionary) },
       { path: 'system/dict-loader',    element: withSuspense(DictLoaderPage) },

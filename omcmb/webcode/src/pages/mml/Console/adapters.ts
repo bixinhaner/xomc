@@ -81,6 +81,7 @@ export function subFieldsToParamPaths(subFields: SubFieldDef[]): CommandParamPat
       enumOptions: sf.enumOptions,
       description: sf.description,
       defaultSelected: sf.defaultSelected,
+      isRequired: sf.isRequired,
     }));
 }
 
@@ -213,7 +214,7 @@ export function computeInstanceSlots(command: CommandItem): { key: string; label
   if (isAddRmv) {
     source = command.targetObject ?? '';
   } else {
-    const count = (s: string): number => (s.match(/\.\{i\}\./g) ?? []).length;
+    const count = (s: string): number => (s.match(/\.\{i\}(?=\.|$)/g) ?? []).length;
     for (const p of command.paramPaths) {
       if (count(p.path) > count(source)) source = p.path;
     }
@@ -222,8 +223,8 @@ export function computeInstanceSlots(command: CommandItem): { key: string; label
   const slots: { key: string; label: string }[] = [];
   let n = 0;
   for (let k = 0; k < segs.length; k++) {
-    // 仅统计前后都有点的 `.{i}.`（与后端 strings.Count(path, ".{i}.") 一致）。
-    if (segs[k] === '{i}' && k > 0 && k < segs.length - 1) {
+    // 同时统计中间 `.{i}.` 与末级对象 `.{i}`；后端查询替换支持两种形态。
+    if (segs[k] === '{i}' && k > 0) {
       n += 1;
       slots.push({ key: `i${String(n).padStart(2, '0')}`, label: segs[k - 1] || `实例${n}` });
     }
@@ -458,6 +459,7 @@ export function expandObjectPathColumns(
 ): ResultColumn[] {
   const expanded: ResultColumn[] = [];
   const emittedPaths = new Set<string>();
+  const expandedDescendantPaths = new Set<string>();
   let objectPathColumnCount = 0;
   for (const column of columns) {
     if (!column.path.endsWith('.')) {
@@ -476,6 +478,7 @@ export function expandObjectPathColumns(
         hasDescendant = true;
         if (emittedPaths.has(path)) continue;
         emittedPaths.add(path);
+        expandedDescendantPaths.add(path);
         objectPathColumnCount += 1;
         descendantPaths.push(path);
       }
@@ -491,7 +494,27 @@ export function expandObjectPathColumns(
       expanded.push({ key: `${column.key}:child:${index}`, label: leafName(path), path });
     });
   }
-  return expanded;
+
+  // 某些设备模型会把旧标准叶子映射到新对象下的私有叶子，同时命令还会查询该新对象。
+  // 对象展开后，旧叶子列没有精确值却与真实后代形成同名重复列。仅在「旧列全无值」且
+  // 对象名 + 实例 + 叶子名的结构尾部一致时移除旧列，避免误伤其他对象的同名参数。
+  const structuralTail = (path: string): string => path
+    .split('.')
+    .filter(Boolean)
+    .map((segment) => (segment === '{i}' || /^\d+$/.test(segment) ? '{i}' : segment))
+    .slice(-3)
+    .join('.');
+  const descendantTails = new Set(
+    [...expandedDescendantPaths]
+      .filter((path) => rows.some((row) => Object.prototype.hasOwnProperty.call(row.cells, path)))
+      .map(structuralTail),
+  );
+
+  return expanded.filter((column) => {
+    if (expandedDescendantPaths.has(column.path) || column.path.endsWith('.')) return true;
+    const hasOwnValue = rows.some((row) => Object.prototype.hasOwnProperty.call(row.cells, column.path));
+    return hasOwnValue || !descendantTails.has(structuralTail(column.path));
+  });
 }
 
 /**
@@ -630,6 +653,7 @@ export function buildDeviceRows(
   items: DeviceTaskResultItem[],
   columns: ResultColumn[],
   read: boolean,
+  submittedValues?: Record<string, string>,
 ): ResultRow[] {
   if (items.some((it) => typeof it.planLineNo === 'number')) {
     return [...items]
@@ -646,12 +670,20 @@ export function buildDeviceRows(
   const rows: ResultRow[] = [];
   for (const [, devItems] of byDevice) {
     if (devItems.length <= 1) {
-      rows.push(mapResultItemToRow(devItems[0], columns, read));
+      const row = mapResultItemToRow(devItems[0], columns, read);
+      if (!read && row.status === 'success' && submittedValues) {
+        row.cells = { ...row.cells, ...submittedValues };
+      }
+      rows.push(row);
       continue;
     }
     // 逐 PATH 合并
     const base = devItems.map((it) => mapResultItemToRow(it, columns, read));
-    const cells: Record<string, string> = Object.assign({}, ...base.map((r) => r.cells));
+    const cells: Record<string, string> = Object.assign(
+      {},
+      ...base.map((r) => r.cells),
+      ...(submittedValues && base.every((r) => r.status === 'success') ? [submittedValues] : []),
+    );
     const pathTasks: PathTask[] = [];
     devItems.forEach((it, i) => {
       const idx = typeof it.commandIndex === 'number' ? it.commandIndex : i;
@@ -713,27 +745,29 @@ export function buildMODReadbackRows(
   const rows: ResultRow[] = [];
   for (const [deviceSn, devItems] of byDevice) {
     const modItems = devItems.filter((it) => !isLst(it));
-    const lstItem = devItems.find((it) => isLst(it));
+    const lstItems = devItems.filter((it) => isLst(it));
+    const lstItem = lstItems[0];
     const modTaskId = modItems[0]?.deviceTaskId ?? '';
     const lstTaskId = lstItem?.deviceTaskId ?? '';
 
     // 回读值 + 回读 path（GetParameterValues 响应的参数名即 PATH，修复回读行 PATH 为空）
     const readback = new Map<string, string>();
-    const readbackPairs: { path: string; value: string }[] = [];
-    if (lstItem?.result?.parsedData) {
-      const parsed = parseMmlDeviceTaskResult(lstItem.result.parsedData, CONSOLE_PARSE_OPTIONS);
+    const readbackPairs: { path: string; value: string; item: DeviceTaskResultItem }[] = [];
+    for (const item of lstItems) {
+      if (!item.result?.parsedData) continue;
+      const parsed = parseMmlDeviceTaskResult(item.result.parsedData, CONSOLE_PARSE_OPTIONS);
       if (parsed?.kind === 'gpv' && parsed.params) {
         for (const p of parsed.params) {
           readback.set(p.name, p.value);
           readback.set(leafName(p.name), p.value);
-          readbackPairs.push({ path: p.name, value: p.value });
+          readbackPairs.push({ path: p.name, value: p.value, item });
         }
       }
     }
     const readVal = (path: string): string => readback.get(path) ?? readback.get(leafName(path)) ?? '';
     const hasReadback = readbackPairs.length > 0;
     const modOk = modItems.length > 0 && modItems.every((it) => it.result?.success);
-    const lstOk = lstItem?.result?.success === true;
+    const lstOk = lstItems.length > 0 && lstItems.every((item) => item.result?.success === true);
     const firstMod = modItems[0];
 
     // 「PATH 列表」：MOD（下发）行 —— path 取自下发参数；LST（回读）行 —— path 取自回读响应。
@@ -751,18 +785,18 @@ export function buildMODReadbackRows(
       });
     }
     if (lstItem) {
-      const lstRows = hasReadback
+      const lstRows: { path: string; value: string; item?: DeviceTaskResultItem }[] = hasReadback
         ? readbackPairs
         : Object.keys(setValues).map((path) => ({ path, value: lstOk ? '' : (lstItem.failReason ?? READBACK_FAILED_FALLBACK) }));
-      for (const { path, value } of lstRows) {
+      for (const { path, value, item = lstItem } of lstRows) {
         pathTasks.push({
           pathIndex: 1,
           path,
-          subTaskId: lstTaskId,
+          subTaskId: item?.deviceTaskId ?? lstTaskId,
           opType: 'LST',
-          status: lstOk ? 'success' : 'failed',
-          dispatchedAt: toClock(lstItem.startedAt) ?? '',
-          respondedAt: toClock(lstItem.finishedAt) ?? '',
+          status: item?.result?.success ? 'success' : 'failed',
+          dispatchedAt: toClock(item?.startedAt) ?? '',
+          respondedAt: toClock(item?.finishedAt) ?? '',
           value,
         });
       }
@@ -792,10 +826,10 @@ export function buildMODReadbackRows(
       unverifiedReason: status === 'unverified' ? 'query-failed' : undefined,
       pathTasks,
       dispatchedAt: toClock(firstMod?.startedAt),
-      respondedAt: toClock(lstItem?.finishedAt ?? firstMod?.finishedAt),
+      respondedAt: toClock(lstItems.at(-1)?.finishedAt ?? firstMod?.finishedAt),
       raw: firstMod?.result?.rawOutput ?? '',
       readbackRaw: lstItem?.result?.rawOutput ?? '',
-      elapsedMs: (firstMod?.result?.executionTime ?? 0) + (lstItem?.result?.executionTime ?? 0),
+      elapsedMs: (firstMod?.result?.executionTime ?? 0) + lstItems.reduce((sum, item) => sum + (item.result?.executionTime ?? 0), 0),
     });
   }
   return rows;

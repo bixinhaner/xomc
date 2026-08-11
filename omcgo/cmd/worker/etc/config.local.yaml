@@ -12,8 +12,8 @@ db:
 tsdb:
   # KPI/时序库物理分离：本机裸跑时序库实例在 localhost:5433（postgres-tsdb 宿主映射）。
   dsn: "postgres://omcgo:omcgo123@localhost:5433/omcgo?sslmode=disable"
-  # 4 路 PM 入库 + 4 路 finalize + 三路各 8 个聚合消费者 + 8 路余量。
-  max_conns: 40
+  # ingest=4 + finalize=32 + 三路各 8 个聚合消费者 + reserve=8 = 68，max_conns 须 ≥ 并发预算。
+  max_conns: 80
   min_conns: 5
   max_conn_lifetime: 30m
   max_conn_idle_time: 5m

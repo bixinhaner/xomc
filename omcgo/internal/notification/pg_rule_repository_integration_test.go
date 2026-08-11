@@ -28,14 +28,18 @@ func TestPgRuleRepository_Integration(t *testing.T) {
 	var databaseName string
 	require.NoError(t, pool.QueryRow(ctx, "SELECT current_database()").Scan(&databaseName))
 	requireDedicatedNotificationDatabase(t, databaseName)
-	templateRepository := NewPgTemplateManagementRepository(pool)
-	template, err := templateRepository.Create(ctx, ManagedTemplateInput{
-		Name: "rule-template-" + uuid.NewString(), Channel: "email", Language: "zh-CN",
-		Subject: "告警 {{.alarm_identifier}}", TextBody: "设备 {{.device_sn}}",
-		Variables: []string{"alarm_identifier", "device_sn"},
-	}, "integration")
+	templateID, templateVersionID := uuid.New(), uuid.New()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO notification_templates
+			(id, name, channel, language, subject, body, variables, enabled, created_by)
+		VALUES ($1, $2, 'email', 'zh-CN', $3, $4, $5, true, 'integration')
+	`, templateID, "rule-template-"+uuid.NewString(), "告警 {{.alarm_identifier}}", "设备 {{.device_sn}}", []string{"alarm_identifier", "device_sn"})
 	require.NoError(t, err)
-	template, err = templateRepository.Publish(ctx, template.ID, template.Revision, "integration")
+	_, err = pool.Exec(ctx, `
+		INSERT INTO notification_template_versions
+			(id, template_id, version_no, channel, language, subject, text_body, variables, created_by, change_reason, published_at)
+		VALUES ($1, $2, 1, 'email', 'zh-CN', $3, $4, $5, 'integration', 'initial', $6)
+	`, templateVersionID, templateID, "告警 {{.alarm_identifier}}", "设备 {{.device_sn}}", []string{"alarm_identifier", "device_sn"}, time.Now().UTC())
 	require.NoError(t, err)
 	channelConfigID := uuid.New()
 	_, err = pool.Exec(ctx,
@@ -57,7 +61,7 @@ func TestPgRuleRepository_Integration(t *testing.T) {
 		}},
 		Channels: []RuleChannelInput{{
 			Channel: "email", ChannelConfigID: channelConfigID,
-			RaisedTemplateVersionID: template.Published.ID, Policy: json.RawMessage(`{}`),
+			RaisedTemplateVersionID: templateVersionID, Policy: json.RawMessage(`{}`),
 		}},
 	}, "integration")
 	require.NoError(t, err)
@@ -88,7 +92,7 @@ func TestPgRuleRepository_Integration(t *testing.T) {
 		}},
 		Channels: []RuleChannelInput{{
 			Channel: "email", ChannelConfigID: channelConfigID,
-			RaisedTemplateVersionID: template.Published.ID, Policy: json.RawMessage(`{}`),
+			RaisedTemplateVersionID: templateVersionID, Policy: json.RawMessage(`{}`),
 		}},
 	}
 	atomicCreated, err := repository.SavePublished(ctx, uuid.Nil, 0, atomicInput, true, "integration")
@@ -135,7 +139,7 @@ func TestPgRuleRepository_Integration(t *testing.T) {
 		}},
 		Channels: []RuleChannelInput{{
 			Channel: "email", ChannelConfigID: channelConfigID,
-			RaisedTemplateVersionID: template.Published.ID, Policy: json.RawMessage(`{}`),
+			RaisedTemplateVersionID: templateVersionID, Policy: json.RawMessage(`{}`),
 		}},
 	}, "integration")
 	require.NoError(t, err)
@@ -240,57 +244,6 @@ func TestPgContactGroupRepository_Integration(t *testing.T) {
 	require.True(t, second.Members[0].AddressConfigured)
 
 	_, err = repository.Update(ctx, second.ID, 9, ContactGroupInput{Name: second.Name}, "integration")
-	require.ErrorIs(t, err, ErrRevisionMismatch)
-}
-
-func TestPgTemplateManagementRepository_Integration(t *testing.T) {
-	dsn := os.Getenv("NOTIFICATION_RULE_TEST_DSN")
-	if dsn == "" {
-		t.Skip("set NOTIFICATION_RULE_TEST_DSN to a dedicated database")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-	var databaseName string
-	require.NoError(t, pool.QueryRow(ctx, "SELECT current_database()").Scan(&databaseName))
-	requireDedicatedNotificationDatabase(t, databaseName)
-
-	repository := NewPgTemplateManagementRepository(pool)
-	created, err := repository.Create(ctx, ManagedTemplateInput{
-		Name: "email-" + uuid.NewString(), Channel: "email", Language: "zh-CN",
-		Subject: "告警 {{.alarm_identifier}}", TextBody: "基站 {{.device_sn}}",
-		Variables: []string{"alarm_identifier", "device_sn"}, ChangeReason: "initial",
-	}, "integration")
-	require.NoError(t, err)
-	require.Equal(t, int64(1), created.Revision)
-	require.NotNil(t, created.Draft)
-	version1ID := created.Draft.ID
-
-	published, err := repository.Publish(ctx, created.ID, 1, "integration")
-	require.NoError(t, err)
-	require.Equal(t, int64(2), published.Revision)
-	require.Equal(t, version1ID, published.Published.ID)
-	_, err = repository.Publish(ctx, created.ID, 2, "integration")
-	require.ErrorIs(t, err, ErrDraftUnavailable)
-
-	updated, err := repository.UpdateDraft(ctx, created.ID, 2, ManagedTemplateInput{
-		Name: created.Name, Channel: "email", Language: "zh-CN", Subject: "升级 {{.alarm_identifier}}",
-		TextBody: "设备 {{.device_sn}}", Variables: []string{"alarm_identifier", "device_sn"}, ChangeReason: "escalated",
-	}, "integration")
-	require.NoError(t, err)
-	require.Equal(t, int64(3), updated.Revision)
-	require.NotEqual(t, version1ID, updated.Draft.ID)
-	require.Equal(t, version1ID, updated.Published.ID,
-		"new draft must not silently change the published template version")
-	var immutableSubject string
-	require.NoError(t, pool.QueryRow(ctx, "SELECT subject FROM notification_template_versions WHERE id=$1", version1ID).Scan(&immutableSubject))
-	require.Equal(t, "告警 {{.alarm_identifier}}", immutableSubject)
-
-	_, err = repository.UpdateDraft(ctx, created.ID, 1, ManagedTemplateInput{
-		Name: created.Name, Channel: "email", Language: "zh-CN", Subject: "subject", TextBody: "body",
-	}, "integration")
 	require.ErrorIs(t, err, ErrRevisionMismatch)
 }
 

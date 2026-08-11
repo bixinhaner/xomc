@@ -3,6 +3,8 @@ package mml
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -277,6 +279,77 @@ func TestTranslateTaskPaths_MODUsesParamRefs(t *testing.T) {
 	// parameters 不动（SOAP 层用 param_refs 查 MMLCode → PrivatePath）
 	params := task.Commands[0]["parameters"].(map[string]interface{})
 	assert.Equal(t, "myDevice", params["UserLabel"], "parameters keys are MMLCode and stay untouched")
+}
+
+func TestTranslateTaskPaths_ADDNormalizesNewInstancePlaceholder(t *testing.T) {
+	s := newServiceForTest()
+	s.SetDeviceLookup(&fakeDeviceLookup{devs: map[string]*model.Device{
+		"SN1": {SerialNumber: "SN1", ProductClass: "FAP/BU1810"},
+	}})
+	modelPath := "Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.5GCell.{i}.CellId"
+	runtimePath := strings.Replace(modelPath, "{i}", "{NEW}", 1)
+	translationPath := strings.Replace(runtimePath, "{NEW}", newInstanceTranslationSentinel, 1)
+	s.SetPathTranslator(&fakePathTranslator{mapping: map[string]string{
+		translationPath: translationPath,
+	}})
+
+	task := &MMLTask{
+		DeviceSNs: []string{"SN1"},
+		Commands: []map[string]interface{}{{
+			"command_code":   "ADD 5G_CELL",
+			"operation_type": "MOD",
+			"param_refs": []MMLParamRef{{
+				ParamCode: "CELL_ID",
+				Tr069Path: runtimePath,
+			}},
+		}},
+	}
+
+	require.NoError(t, s.translateTaskPaths(context.Background(), task))
+	refs := task.Commands[0]["param_refs"].([]MMLParamRef)
+	assert.Equal(t, "discovered", refs[0].TranslationSource)
+	assert.Contains(t, refs[0].PrivatePath, ".{NEW}.")
+}
+
+func TestTranslateTaskPaths_ADDHandlesEveryMultiInstanceDepth(t *testing.T) {
+	s := newServiceForTest()
+	s.SetDeviceLookup(&fakeDeviceLookup{devs: map[string]*model.Device{
+		"SN1": {SerialNumber: "SN1", ProductClass: "FAP/BU1810"},
+	}})
+
+	runtimePaths := []string{
+		"Device.Ethernet.Interface.{NEW}.Name",
+		"Device.Ethernet.Interface.2.IPv4Address.{NEW}.IPAddress",
+		"Device.Services.FAPService.1.CellConfig.2.NR.RAN.NeighborList.NRCell.{NEW}.CID",
+	}
+	mapping := make(map[string]string, len(runtimePaths))
+	for _, path := range runtimePaths {
+		lookup := normalizeNewInstancePlaceholder(path)
+		mapping[lookup] = strings.Replace(lookup, "Device.", "Device.X_VENDOR.", 1)
+	}
+	s.SetPathTranslator(&fakePathTranslator{mapping: mapping})
+
+	refs := make([]MMLParamRef, len(runtimePaths))
+	for i, path := range runtimePaths {
+		refs[i] = MMLParamRef{ParamCode: fmt.Sprintf("P%d", i), Tr069Path: path}
+	}
+	task := &MMLTask{
+		DeviceSNs: []string{"SN1"},
+		Commands: []map[string]interface{}{{
+			"command_code":   "ADD MULTI_INSTANCE",
+			"operation_type": "MOD",
+			"param_refs":     refs,
+		}},
+	}
+
+	require.NoError(t, s.translateTaskPaths(context.Background(), task))
+	translated := task.Commands[0]["param_refs"].([]MMLParamRef)
+	for i := range translated {
+		assert.Equal(t, "discovered", translated[i].TranslationSource)
+		assert.Contains(t, translated[i].PrivatePath, ".{NEW}.")
+		assert.NotContains(t, translated[i].PrivatePath, newInstanceTranslationSentinel)
+		assert.Equal(t, runtimePaths[i], translated[i].Tr069Path)
+	}
 }
 
 func TestTranslateTaskPaths_NoTranslatorInjected_Skips(t *testing.T) {

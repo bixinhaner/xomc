@@ -8,14 +8,42 @@
 version: 1
 
 storage_targets:
-  # All current OMC data is stored on the same host filesystem. This is the
-  # only target that may receive capacity warning/block/recovery thresholds.
+  # Backward-compatible policy identity. Thresholds are still configured once
+  # on filesystem/root with write_scope=all. At runtime OMC expands this global
+  # policy to the protected write paths below and evaluates the highest-usage
+  # host mountpoint among them.
   - target_type: filesystem
     target_id: root
     mountpoint: /
     source: node_exporter
     write_scope: [all]
-    components: [application, pgdata, tsdbdata, redisdata, natsdata, miniodata, prometheusdata, alertmanagerdata, grafanadata, lokidata, tempodata, promtaildata, omcgo-secrets]
+    resolution: protected_write_mountpoints
+    components: [application, pgdata, tsdbdata, redisdata, redispmdata, natsdata, miniodata, docker-root]
+
+# Runtime path contract consumed by the storage-protection backend. If a
+# *_DATA_PATH variable is empty, Docker named volume storage is resolved as:
+#   ${OMCGO_DOCKER_ROOT_DIR:-/var/lib/docker}/volumes/${OMCGO_DOCKER_VOLUME_PREFIX:-omcgo}_<volume>/_data
+# Multiple paths on the same host mountpoint are deduplicated before display
+# and admission decisions.
+protected_write_paths:
+  - env: POSTGRES_DATA_PATH
+    named_volume: pgdata
+  - env: TSDB_DATA_PATH
+    named_volume: tsdbdata
+  - env: REDIS_DATA_PATH
+    named_volume: redisdata
+  - env: REDIS_PM_DATA_PATH
+    named_volume: redispmdata
+  - env: NATS_DATA_PATH
+    named_volume: natsdata
+  - env: MINIO_DATA_PATH
+    named_volume: miniodata
+  - path: /opt/omc/run/logs
+    env: OMCGO_HOST_LOGS_PATH
+  - path: /opt/omc/data
+    env: OMCGO_HOST_DATA_PATH
+  - path: /var/lib/docker
+    env: OMCGO_DOCKER_ROOT_DIR
 
 # These are logical ownership/retention classes on the same physical target.
 # They are not storage-protection targets and must not receive independent

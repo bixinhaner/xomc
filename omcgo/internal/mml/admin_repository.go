@@ -318,6 +318,7 @@ func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, comman
 	validationPatternExpr := "NULL::text"
 	minValueExpr := "sp.min_value"
 	maxValueExpr := "sp.max_value"
+	valueTypeExpr := "COALESCE(sp.data_type, 'string')"
 	enumValuesExpr := "NULL::text"
 	enumLabelsExpr := "NULL::text"
 	isSupportedExpr := `(
@@ -330,7 +331,7 @@ func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, comman
 	if paramModelID != nil {
 		modelMappingJoin = `
 LEFT JOIN LATERAL (
-    SELECT pm.default_value, pm.validation_pattern,
+	    SELECT pm.default_value, pm.validation_pattern, pm.data_type,
            pm.min_value, pm.max_value, pm.enum_values, pm.enum_labels
       FROM param_mappings pm
      WHERE pm.standard_path = sp.standard_path
@@ -344,6 +345,7 @@ LEFT JOIN LATERAL (
 		validationPatternExpr = "model_pm.validation_pattern"
 		minValueExpr = "COALESCE(model_pm.min_value, sp.min_value)"
 		maxValueExpr = "COALESCE(model_pm.max_value, sp.max_value)"
+		valueTypeExpr = "COALESCE(model_pm.data_type, sp.data_type, 'string')"
 		enumValuesExpr = "model_pm.enum_values"
 		enumLabelsExpr = "model_pm.enum_labels"
 		paramModelFilter = `
@@ -372,7 +374,7 @@ SELECT
     csf.id, csf.command_id, csf.standard_path_id AS param_id, csf.mml_code, csf.label_i18n,
     csf.default_selected, csf.is_required, csf.sort_order, csf.created_at, csf.updated_at,
     sp.standard_path                      AS tr069_path,
-    COALESCE(sp.data_type, 'string')      AS value_type,
+    ` + valueTypeExpr + `                AS value_type,
     COALESCE(sp.access, 'READ_ONLY')      AS access_type,
     (sp.entry_type = 'object')            AS is_object,
     false                                 AS supports_add,

@@ -28,10 +28,12 @@ const (
 	// RetentionCategory 是 sys_configs 中基站日志保留策略的 category。
 	RetentionCategory = "stationlog.retention"
 	// KeyMaxRetentionDays 时间保留天数键；KeyMaxFileCount 故障日志文件数配额键（0=不限）；
-	// KeyMaxFileCountPerDevice 每设备故障日志文件数配额键（0=不限，#798）。
-	KeyMaxRetentionDays      = "max_retention_days"
-	KeyMaxFileCount          = "max_file_count"
-	KeyMaxFileCountPerDevice = "max_file_count_per_device"
+	// KeyMaxFileCountPerDevice 每设备故障日志文件数配额键（0=不限，#798）；
+	// KeyCleanupIntervalMinutes worker 清理调度周期键。
+	KeyMaxRetentionDays       = "max_retention_days"
+	KeyMaxFileCount           = "max_file_count"
+	KeyMaxFileCountPerDevice  = "max_file_count_per_device"
+	KeyCleanupIntervalMinutes = "cleanup_interval_minutes"
 
 	// DefaultMaxRetentionDays 默认按时间保留 60 天（用户场景）。
 	DefaultMaxRetentionDays = 60
@@ -41,11 +43,15 @@ const (
 	// 不对齐老系统 RebootLogSaveCount 的默认值 2）。与全局配额并存：全局兜底总量，
 	// 本配额防止单台设备刷屏挤占其他设备的保留空间。
 	DefaultMaxFileCountPerDevice = 5
+	// DefaultCleanupIntervalMinutes 默认每 60 分钟触发一次基站日志时间清理。
+	DefaultCleanupIntervalMinutes = 60
 
-	minRetentionDays      = 1
-	maxRetentionDays      = 3650
-	maxFileCount          = 1_000_000
-	maxFileCountPerDevice = 1_000_000
+	minRetentionDays          = 1
+	maxRetentionDays          = 3650
+	maxFileCount              = 1_000_000
+	maxFileCountPerDevice     = 1_000_000
+	minCleanupIntervalMinutes = 10
+	maxCleanupIntervalMinutes = 1440
 
 	policyTTL = 60 * time.Second
 )
@@ -59,11 +65,12 @@ type RetentionPolicy struct {
 	lookup ConfigLookup
 	logger *zap.Logger
 
-	mu           sync.Mutex
-	days         int
-	count        int
-	perDeviceCnt int
-	loadedAt     time.Time
+	mu                     sync.Mutex
+	days                   int
+	count                  int
+	perDeviceCnt           int
+	cleanupIntervalMinutes int
+	loadedAt               time.Time
 }
 
 // NewRetentionPolicy 构造保留策略。lookup 为 nil 时恒返回默认值。
@@ -72,11 +79,12 @@ func NewRetentionPolicy(lookup ConfigLookup, logger *zap.Logger) *RetentionPolic
 		logger = zap.NewNop()
 	}
 	return &RetentionPolicy{
-		lookup:       lookup,
-		logger:       logger.Named("stationlog.retention"),
-		days:         DefaultMaxRetentionDays,
-		count:        DefaultMaxFileCount,
-		perDeviceCnt: DefaultMaxFileCountPerDevice,
+		lookup:                 lookup,
+		logger:                 logger.Named("stationlog.retention"),
+		days:                   DefaultMaxRetentionDays,
+		count:                  DefaultMaxFileCount,
+		perDeviceCnt:           DefaultMaxFileCountPerDevice,
+		cleanupIntervalMinutes: DefaultCleanupIntervalMinutes,
 	}
 }
 
@@ -94,8 +102,14 @@ func (p *RetentionPolicy) MaxFileCount(ctx context.Context) int {
 
 // MaxFileCountPerDevice 返回当前生效的每设备故障日志文件数配额（0 表示不限，#798）。
 func (p *RetentionPolicy) MaxFileCountPerDevice(ctx context.Context) int {
-	_, _, pc := p.getAll(ctx)
+	_, _, pc, _ := p.getAll(ctx)
 	return pc
+}
+
+// CleanupIntervalMinutes 返回 worker 基站日志时间清理调度周期（分钟）。
+func (p *RetentionPolicy) CleanupIntervalMinutes(ctx context.Context) int {
+	_, _, _, interval := p.getAll(ctx)
+	return interval
 }
 
 // InvalidateCache 让下一次读取立即回源 sys_configs，用于配置保存后的热生效。
@@ -109,17 +123,17 @@ func (p *RetentionPolicy) InvalidateCache() {
 }
 
 func (p *RetentionPolicy) get(ctx context.Context) (days, count int) {
-	days, count, _ = p.getAll(ctx)
+	days, count, _, _ = p.getAll(ctx)
 	return days, count
 }
 
-func (p *RetentionPolicy) getAll(ctx context.Context) (days, count, perDeviceCnt int) {
+func (p *RetentionPolicy) getAll(ctx context.Context) (days, count, perDeviceCnt, cleanupIntervalMinutes int) {
 	// 快路径：仅短暂持锁读缓存，命中即返回（不在锁内做 DB IO）。
 	p.mu.Lock()
 	if !p.loadedAt.IsZero() && time.Since(p.loadedAt) < policyTTL {
-		days, count, perDeviceCnt = p.days, p.count, p.perDeviceCnt
+		days, count, perDeviceCnt, cleanupIntervalMinutes = p.days, p.count, p.perDeviceCnt, p.cleanupIntervalMinutes
 		p.mu.Unlock()
-		return days, count, perDeviceCnt
+		return days, count, perDeviceCnt, cleanupIntervalMinutes
 	}
 	p.mu.Unlock()
 
@@ -129,12 +143,13 @@ func (p *RetentionPolicy) getAll(ctx context.Context) (days, count, perDeviceCnt
 	newDays := p.readInt(ctx, KeyMaxRetentionDays, DefaultMaxRetentionDays, minRetentionDays, maxRetentionDays)
 	newCount := p.readInt(ctx, KeyMaxFileCount, DefaultMaxFileCount, 0, maxFileCount)
 	newPerDeviceCnt := p.readInt(ctx, KeyMaxFileCountPerDevice, DefaultMaxFileCountPerDevice, 0, maxFileCountPerDevice)
+	newCleanupIntervalMinutes := p.readInt(ctx, KeyCleanupIntervalMinutes, DefaultCleanupIntervalMinutes, minCleanupIntervalMinutes, maxCleanupIntervalMinutes)
 
 	p.mu.Lock()
-	p.days, p.count, p.perDeviceCnt, p.loadedAt = newDays, newCount, newPerDeviceCnt, time.Now()
-	days, count, perDeviceCnt = p.days, p.count, p.perDeviceCnt
+	p.days, p.count, p.perDeviceCnt, p.cleanupIntervalMinutes, p.loadedAt = newDays, newCount, newPerDeviceCnt, newCleanupIntervalMinutes, time.Now()
+	days, count, perDeviceCnt, cleanupIntervalMinutes = p.days, p.count, p.perDeviceCnt, p.cleanupIntervalMinutes
 	p.mu.Unlock()
-	return days, count, perDeviceCnt
+	return days, count, perDeviceCnt, cleanupIntervalMinutes
 }
 
 func (p *RetentionPolicy) readInt(ctx context.Context, key string, def, lo, hi int) int {
@@ -273,6 +288,7 @@ func (r *CleanupRunner) cleanupTable(ctx context.Context, table string, store cl
 					r.logger.Warn("remove expired log object",
 						zap.String("table", table), zap.String("id", old.ID.String()),
 						zap.String("path", old.ObjectPath), zap.Error(rmErr))
+					continue
 				}
 			}
 			if mErr := store.MarkDeleted(ctx, old.ID); mErr != nil {
@@ -320,6 +336,7 @@ func (r *CleanupRunner) cleanupTaskLogs(ctx context.Context, cutoff time.Time) i
 				if rmErr := r.remover.RemoveObject(ctx, old.Bucket, old.ObjectPath, minio.RemoveObjectOptions{}); rmErr != nil {
 					r.logger.Warn("remove expired task log object",
 						zap.Int64("id", old.ID), zap.String("path", old.ObjectPath), zap.Error(rmErr))
+					continue
 				}
 			}
 			if mErr := r.taskLogs.MarkTaskLogDeleted(ctx, old.ID); mErr != nil {

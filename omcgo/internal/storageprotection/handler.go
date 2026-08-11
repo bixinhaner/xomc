@@ -36,7 +36,7 @@ func (h *Handler) listTargets(c *gin.Context) {
 }
 
 func (h *Handler) listEvents(c *gin.Context) {
-	limit := 100
+	limit := 5
 	if raw := c.Query("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed <= 0 {

@@ -365,6 +365,7 @@ type Menu struct {
 	CreatedAt     time.Time         `json:"created_at"`
 	UpdatedBy     *uuid.UUID        `json:"updated_by,omitempty"`
 	UpdatedAt     time.Time         `json:"updated_at"`
+	FeatureCodes  []string          `json:"feature_code,omitempty"`
 	Children      []Menu            `json:"children,omitempty"`
 }
 

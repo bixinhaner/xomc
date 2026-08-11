@@ -27,6 +27,10 @@ type ProvisioningTask struct {
 	ID              uuid.UUID         `json:"id"`
 	DeviceID        uuid.UUID         `json:"device_id"`
 	SerialNumber    string            `json:"serial_number,omitempty"`
+	ProductName     string            `json:"product_name,omitempty"`
+	PolicyName      string            `json:"policy_name,omitempty"`
+	ExecuteType     string            `json:"execute_type,omitempty"`
+	Module          string            `json:"module,omitempty"`
 	TemplateID      *uuid.UUID        `json:"template_id,omitempty"`
 	PolicyID        *uuid.UUID        `json:"policy_id,omitempty"`
 	XMLFileID       *uuid.UUID        `json:"xml_file_id,omitempty"`
@@ -55,8 +59,15 @@ type ProvisioningStep struct {
 
 // ProvisioningTaskFilter provides filtering options for listing tasks.
 type ProvisioningTaskFilter struct {
-	DeviceID *uuid.UUID        `json:"device_id,omitempty"`
-	Status   ProvisioningState `json:"status,omitempty"`
+	DeviceID      *uuid.UUID        `json:"device_id,omitempty"`
+	PolicyID      *uuid.UUID        `json:"policy_id,omitempty"`
+	Status        ProvisioningState `json:"status,omitempty"`
+	RunningOnly   bool              `json:"running_only,omitempty"`
+	Search        string            `json:"search,omitempty"`
+	ProductName   string            `json:"product_name,omitempty"`
+	Module        string            `json:"module,omitempty"`
+	StartedAfter  *time.Time        `json:"started_after,omitempty"`
+	StartedBefore *time.Time        `json:"started_before,omitempty"`
 	// PolicyOnly excludes bootstrap discovery/model-upload tasks and returns
 	// only tasks created by plug-and-play policy execution.
 	PolicyOnly bool `json:"policy_only,omitempty"`

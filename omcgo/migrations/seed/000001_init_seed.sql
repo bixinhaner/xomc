@@ -350,6 +350,36 @@ INSERT INTO public.api_endpoints VALUES
 	('d99f9301-e16c-42fa-91e2-d34d9baa2e3d', '/api/v1/northbound/sync/full', 'GET', 'GET /api/v1/northbound/sync/full', '', 'northbound', true, '2026-05-31 12:11:47.618531+08', '2026-05-31 12:52:23.927644+08', false),
 	('279f3073-c13e-434f-af7d-7acd3bacb758', '/api/v1/northbound/sync/incremental', 'GET', 'GET /api/v1/northbound/sync/incremental', '', 'northbound', true, '2026-05-31 12:11:47.618757+08', '2026-05-31 12:52:23.927848+08', false),
 	('b4c876b7-eeed-45fd-8111-11e4033de2ba', '/api/v1/northbound/servers', 'GET', 'GET /api/v1/northbound/servers', '', 'northbound', true, '2026-05-31 12:11:47.618972+08', '2026-05-31 12:52:23.928033+08', false),
+	('50000000-0008-0000-0000-000000000001', '/api/v1/northbound/page-config/overview', 'GET', 'GET /api/v1/northbound/page-config/overview', '北向页面化配置 - 总览', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000002', '/api/v1/northbound/page-config/file/profiles', 'GET', 'GET /api/v1/northbound/page-config/file/profiles', '北向页面化配置 - 文件 profile 列表', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000028', '/api/v1/northbound/page-config/file/profiles', 'POST', 'POST /api/v1/northbound/page-config/file/profiles', '北向页面化配置 - 新增文件 profile', 'northbound', true, '2026-08-04 18:30:00+08', '2026-08-04 18:30:00+08', false),
+	('50000000-0008-0000-0000-000000000008', '/api/v1/northbound/page-config/file/profiles/:id/preview', 'GET', 'GET /api/v1/northbound/page-config/file/profiles/:id/preview', '北向页面化配置 - 文件模板预览', 'northbound', true, '2026-08-04 16:36:00+08', '2026-08-04 16:36:00+08', false),
+	('50000000-0008-0000-0000-000000000003', '/api/v1/northbound/page-config/inventory/profiles', 'GET', 'GET /api/v1/northbound/page-config/inventory/profiles', '北向页面化配置 - Inventory profile 列表', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000004', '/api/v1/northbound/page-config/fields', 'GET', 'GET /api/v1/northbound/page-config/fields', '北向页面化配置 - 字段目录', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000005', '/api/v1/northbound/page-config/validate', 'POST', 'POST /api/v1/northbound/page-config/validate', '北向页面化配置 - 配置校验', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000006', '/api/v1/northbound/page-config/file/profiles/:id', 'PUT', 'PUT /api/v1/northbound/page-config/file/profiles/:id', '北向页面化配置 - 保存文件 profile', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000007', '/api/v1/northbound/page-config/inventory/profiles/:id', 'PUT', 'PUT /api/v1/northbound/page-config/inventory/profiles/:id', '北向页面化配置 - 保存 Inventory profile', 'northbound', true, '2026-08-04 16:08:00+08', '2026-08-04 16:08:00+08', false),
+	('50000000-0008-0000-0000-000000000009', '/api/v1/northbound/page-config/file/profiles/:id/run', 'POST', 'POST /api/v1/northbound/page-config/file/profiles/:id/run', '北向页面化配置 - 手动执行文件 profile', 'northbound', true, '2026-08-04 16:55:00+08', '2026-08-04 16:55:00+08', false),
+	('50000000-0008-0000-0000-000000000010', '/api/v1/northbound/page-config/inventory/profiles/:id/run', 'POST', 'POST /api/v1/northbound/page-config/inventory/profiles/:id/run', '北向页面化配置 - 手动执行 Inventory profile', 'northbound', true, '2026-08-04 16:55:00+08', '2026-08-04 16:55:00+08', false),
+	('50000000-0008-0000-0000-000000000011', '/api/v1/northbound/page-config/runs', 'GET', 'GET /api/v1/northbound/page-config/runs', '北向页面化配置 - 上报记录列表', 'northbound', true, '2026-08-04 16:55:00+08', '2026-08-04 16:55:00+08', false),
+	('50000000-0008-0000-0000-000000000012', '/api/v1/northbound/page-config/runs/:id', 'GET', 'GET /api/v1/northbound/page-config/runs/:id', '北向页面化配置 - 上报记录详情', 'northbound', true, '2026-08-04 16:55:00+08', '2026-08-04 16:55:00+08', false),
+	('50000000-0008-0000-0000-000000000013', '/api/v1/northbound/page-config/runs/:id/download', 'GET', 'GET /api/v1/northbound/page-config/runs/:id/download', '北向页面化配置 - 下载最新上报文件', 'northbound', true, '2026-08-04 16:55:00+08', '2026-08-04 16:55:00+08', false),
+	('50000000-0008-0000-0000-000000000014', '/api/v1/northbound/page-config/delivery/targets', 'GET', 'GET /api/v1/northbound/page-config/delivery/targets', '北向页面化配置 - FTP/SFTP 目标列表', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000015', '/api/v1/northbound/page-config/delivery/targets', 'PUT', 'PUT /api/v1/northbound/page-config/delivery/targets', '北向页面化配置 - 保存 FTP/SFTP 目标', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000016', '/api/v1/northbound/page-config/alarm/snmp/targets', 'GET', 'GET /api/v1/northbound/page-config/alarm/snmp/targets', '北向页面化配置 - SNMP 告警目标列表', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000017', '/api/v1/northbound/page-config/alarm/snmp/targets/:key', 'PUT', 'PUT /api/v1/northbound/page-config/alarm/snmp/targets/:key', '北向页面化配置 - 保存 SNMP 告警目标', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000018', '/api/v1/northbound/page-config/alarm/socket/configs', 'GET', 'GET /api/v1/northbound/page-config/alarm/socket/configs', '北向页面化配置 - Socket 告警配置列表', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000019', '/api/v1/northbound/page-config/alarm/socket/configs/:key', 'PUT', 'PUT /api/v1/northbound/page-config/alarm/socket/configs/:key', '北向页面化配置 - 保存 Socket 告警配置', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000020', '/api/v1/northbound/page-config/api/configs', 'GET', 'GET /api/v1/northbound/page-config/api/configs', '北向页面化配置 - 北向 API 配置列表', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000021', '/api/v1/northbound/page-config/api/configs/:key', 'PUT', 'PUT /api/v1/northbound/page-config/api/configs/:key', '北向页面化配置 - 保存北向 API 开关', 'northbound', true, '2026-08-04 17:10:00+08', '2026-08-04 17:10:00+08', false),
+	('50000000-0008-0000-0000-000000000029', '/api/v1/northbound/page-config/api/clients', 'GET', 'GET /api/v1/northbound/page-config/api/clients', '北向页面化配置 - API client 列表', 'northbound', true, '2026-08-04 19:30:00+08', '2026-08-04 19:30:00+08', false),
+	('50000000-0008-0000-0000-000000000030', '/api/v1/northbound/page-config/api/clients', 'PUT', 'PUT /api/v1/northbound/page-config/api/clients', '北向页面化配置 - 保存 API client', 'northbound', true, '2026-08-04 19:30:00+08', '2026-08-04 19:30:00+08', false),
+	('50000000-0008-0000-0000-000000000022', '/api/v1/northbound/page-config/delivery/targets/test', 'POST', 'POST /api/v1/northbound/page-config/delivery/targets/test', '北向页面化配置 - FTP/SFTP 连接测试', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
+	('50000000-0008-0000-0000-000000000023', '/api/v1/northbound/page-config/alarm/snmp/targets/:key/test', 'POST', 'POST /api/v1/northbound/page-config/alarm/snmp/targets/:key/test', '北向页面化配置 - SNMP 告警测试报文', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
+	('50000000-0008-0000-0000-000000000024', '/api/v1/northbound/page-config/alarm/socket/configs/:key/test', 'POST', 'POST /api/v1/northbound/page-config/alarm/socket/configs/:key/test', '北向页面化配置 - Socket 告警测试报文', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
+	('50000000-0008-0000-0000-000000000025', '/api/v1/northbound/page-config/api/configs/:key/test', 'POST', 'POST /api/v1/northbound/page-config/api/configs/:key/test', '北向页面化配置 - 北向 API 接口检查', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
+	('50000000-0008-0000-0000-000000000026', '/api/v1/northbound/page-config/events', 'GET', 'GET /api/v1/northbound/page-config/events', '北向页面化配置 - 上报事件列表', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
+	('50000000-0008-0000-0000-000000000027', '/api/v1/northbound/page-config/events/:id', 'GET', 'GET /api/v1/northbound/page-config/events/:id', '北向页面化配置 - 上报事件详情', 'northbound', true, '2026-08-04 17:35:00+08', '2026-08-04 17:35:00+08', false),
 	('e095c692-c595-4e53-b81a-f08a2f99f963', '/api/v1/notifications', 'GET', 'GET /api/v1/notifications', '', 'notifications', true, '2026-05-31 12:11:47.619473+08', '2026-05-31 12:52:23.928643+08', false),
 	('49f3c8ce-39fe-4470-9274-2bd2d0ab3a17', '/api/v1/notifications/templates', 'GET', 'GET /api/v1/notifications/templates', '', 'notifications', true, '2026-05-31 12:11:47.619724+08', '2026-05-31 12:52:23.928911+08', false),
 	('968589ad-6b5f-4cfd-a740-a94742b18d88', '/api/v1/notifications/templates/:id', 'GET', 'GET /api/v1/notifications/templates/:id', '', 'notifications', true, '2026-05-31 12:11:47.620068+08', '2026-05-31 12:52:23.929184+08', false),
@@ -2380,7 +2410,7 @@ ALTER TABLE public.managed_files ENABLE TRIGGER ALL;
 
 ALTER TABLE public.menus DISABLE TRIGGER ALL;
 
-INSERT INTO public.menus VALUES
+INSERT INTO public.menus (id, name, type, permission_key, parent_id, sort_order, route_path, component_path, icon, show_status, status, created_by, created_at, updated_by, updated_at, name_i18n) VALUES
 	('11111111-1111-1111-1111-111111111104', '设备注册', 'menu', 'device:register', '11111111-1111-1111-1111-111111111101', 3, '/device/register', NULL, 'PlusOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:43.435931+08', NULL, '2026-05-31 11:28:49.176665+08', '{"en-US": "Device Registration", "zh-CN": "设备注册"}'),
 	('11111111-1111-1111-1111-111111111201', '查询', 'button', 'device:list:query', '11111111-1111-1111-1111-111111111102', 1, NULL, NULL, NULL, 'show', 'normal', NULL, '2026-05-31 11:28:43.435931+08', NULL, '2026-05-31 11:28:43.435931+08', '{"en-US": "Query", "zh-CN": "查询"}'),
 	('11111111-1111-1111-1111-111111111202', '添加', 'button', 'device:list:add', '11111111-1111-1111-1111-111111111102', 2, NULL, NULL, NULL, 'show', 'normal', NULL, '2026-05-31 11:28:43.435931+08', NULL, '2026-05-31 11:28:43.435931+08', '{"en-US": "Add", "zh-CN": "添加"}'),
@@ -2530,7 +2560,6 @@ INSERT INTO public.menus VALUES
 	('aaaa0007-1000-0000-0000-000000000002', '启动记录', 'menu', 'device:abnormal-reboot', 'aaaa000a-0000-0000-0000-000000000001', 50, '/device/abnormal-reboot', 'device/AbnormalReboot', 'WarningOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-06-12 18:16:52.414685+08', '{"en-US": "Startup Records", "zh-CN": "启动记录"}'),
 	('aaaa0098-1000-0000-0000-000000000005', '未知设备', 'menu', 'product:orphan-devices', 'aaaa0098-0000-0000-0000-000000000001', 5, '/product/orphan-devices', NULL, 'DisconnectOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.896653+08', NULL, '2026-06-12 18:16:52.417503+08', '{"en-US": "Unknown Devices", "zh-CN": "未知设备"}'),
 	('aaaa0002-1000-0000-0000-000000000003', '指标库', 'menu', 'performance:kpi-standard', 'aaaa0002-0000-0000-0000-000000000001', 3, '/performance/kpi-standard', 'performance/KPIStandardReport', 'AreaChartOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-06-12 18:16:52.418392+08', '{"en-US": "Indicator Library", "zh-CN": "指标库"}'),
-	('aaaa0120-1000-0000-0000-000000000001', '批量参数模板', 'menu', 'config:batch-template', 'aaaa0120-0000-0000-0000-000000000001', 1, '/config/batch-template', NULL, 'ProfileOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.905369+08', NULL, '2026-05-31 11:28:49.181274+08', '{"en-US": "Batch Param Templates", "zh-CN": "批量参数模板"}'),
 	('aaaa000b-1000-0000-0000-000000000001', '任务管理', 'menu', 'transfer:center', 'aaaa000b-0000-0000-0000-000000000001', 1, '/transfer/center', 'transfer/FileTransferCenter', 'CloudServerOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.903207+08', NULL, '2026-05-31 11:28:48.64538+08', '{"en-US": "Task Management", "zh-CN": "任务管理"}'),
 	('aaaa000b-1000-0000-0000-000000000003', '文件管理', 'menu', 'transfer:file-management', 'aaaa000b-0000-0000-0000-000000000001', 2, '/transfer/file-management', 'transfer/FileManagement', 'FolderOpenOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:48.64538+08', NULL, '2026-05-31 11:28:48.64538+08', '{"en-US": "File Management", "zh-CN": "文件管理"}'),
 	('aaaa0002-1000-0000-0000-000000000010', '性能仪表盘', 'menu', 'performance:pm-dashboard', 'aaaa0002-0000-0000-0000-000000000001', 0, '/performance', 'performance/PmDashboard/PerformanceLayout', 'DashboardOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:49.106107+08', NULL, '2026-05-31 11:28:49.109178+08', '{"en-US": "Performance Dashboard", "zh-CN": "性能仪表盘"}'),
@@ -2557,7 +2586,7 @@ INSERT INTO public.menus VALUES
 	('aaaa0004-1000-0005-0000-000000000001', '图例管理', 'menu', 'topology:legend', 'aaaa0004-0000-0000-0000-000000000001', 5, '/topology/legend', NULL, 'BgColorsOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.901226+08', NULL, '2026-05-31 11:28:49.176665+08', '{"en-US": "Legend Management", "zh-CN": "图例管理"}'),
 	('aaaa0010-1000-0000-0000-000000000002', '设备规则', 'menu', 'device:rules', '11111111-1111-1111-1111-111111111101', 4, '/device/rules', 'device/DeviceRules', 'ControlOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:49.176665+08', '{"en-US": "Device Rules", "zh-CN": "设备规则"}'),
 	('aaaa0126-1000-0000-0000-000000000003', '即插即用策略编辑', 'menu', 'device:plug-and-play:edit', 'aaaa0010-1000-0000-0000-000000000001', 93, '/device/plug-and-play/edit', NULL, '', 'hide', 'normal', NULL, '2026-05-31 11:28:47.908689+08', NULL, '2026-05-31 11:28:47.908689+08', '{"en-US": "Plug-and-Play Policy Editor", "zh-CN": "即插即用策略编辑"}'),
-	('aaaa0009-0000-0000-0000-000000000010', 'License', 'menu', 'system_license', NULL, 10, '/license', NULL, 'SafetyOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.915266+08', NULL, '2026-05-31 11:28:49.181274+08', '{"en-US": "License", "zh-CN": "License"}'),
+	('aaaa0009-0000-0000-0000-000000000010', 'License', 'menu', 'system_license', NULL, 10, '/license', NULL, 'SafetyOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.915266+08', NULL, '2026-05-31 11:28:49.181274+08', '{"en-US": "License", "zh-CN": "License"}'),
 	('aaaa0126-1000-0000-0000-000000000001', '设备详情', 'menu', 'device:detail', '11111111-1111-1111-1111-111111111101', 91, '/device/detail', NULL, '', 'hide', 'normal', NULL, '2026-05-31 11:28:47.908689+08', NULL, '2026-05-31 11:28:47.908689+08', '{"en-US": "Device Details", "zh-CN": "设备详情"}'),
 	('aaaa0004-1000-0001-0000-000000000001', 'GIS地图', 'menu', 'topology:gis-map', 'aaaa0004-0000-0000-0000-000000000001', 0, '/topology/gis-map', NULL, 'EnvironmentOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.901226+08', NULL, '2026-05-31 11:28:47.901226+08', '{"en-US": "GIS Map", "zh-CN": "GIS地图"}'),
 	('aaaa0011-1000-0000-0000-000000000003', '自定义告警', 'menu', 'alarm:custom-stats', '11111111-1111-1111-1111-111111111105', 5, '/alarm/custom-stats', 'alarm/CustomAlarmStats', 'BarChartOutlined', 'hide', 'disabled', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:48.248765+08', '{"en-US": "Custom Alarms", "zh-CN": "自定义告警"}'),
@@ -2602,13 +2631,79 @@ INSERT INTO public.menus VALUES
 	('11111111-1111-1111-1111-111111111101', '设备管理', 'directory', 'device', NULL, 2, NULL, NULL, 'ClusterOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:43.435931+08', NULL, '2026-05-31 11:28:47.81669+08', '{"en-US": "Devices", "zh-CN": "设备管理"}'),
 	('11111111-1111-1111-1111-111111111105', '告警管理', 'directory', 'alarm', NULL, 3, NULL, NULL, 'AlertOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:43.435931+08', NULL, '2026-05-31 11:28:47.81669+08', '{"en-US": "Alarms", "zh-CN": "告警管理"}'),
 	('aaaa0002-0000-0000-0000-000000000001', '性能管理', 'directory', 'performance', NULL, 4, NULL, NULL, 'LineChartOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:47.81669+08', '{"en-US": "Performance", "zh-CN": "性能管理"}'),
-	('aaaa0120-0000-0000-0000-000000000001', '配置管理', 'directory', 'config', NULL, 5, '', NULL, 'SettingOutlined', 'hide', 'normal', NULL, '2026-05-31 11:28:47.905369+08', NULL, '2026-05-31 11:28:49.181274+08', '{"en-US": "Config Management", "zh-CN": "配置管理"}'),
 	('aaaa0003-0000-0000-0000-000000000001', 'MML管理', 'directory', 'mml', NULL, 5, NULL, NULL, 'CodeOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-05-31 11:28:47.81669+08', '{"en-US": "MML Management", "zh-CN": "MML管理"}'),
 	('aaaa0003-1004-0000-0000-000000000001', '执行', 'button', 'mml:console:execute', 'aaaa0003-1000-0000-0000-000000000004', 1, NULL, NULL, NULL, 'show', 'normal', NULL, '2026-06-17 20:08:35.605663+08', NULL, '2026-06-17 20:08:35.612851+08', '{"en-US": "Execute", "zh-CN": "执行"}'),
 	('aaaa0003-1004-0000-0000-000000000002', '导出', 'button', 'mml:console:export', 'aaaa0003-1000-0000-0000-000000000004', 2, NULL, NULL, NULL, 'show', 'normal', NULL, '2026-06-17 20:08:35.605663+08', NULL, '2026-06-17 20:08:35.612851+08', '{"en-US": "Export", "zh-CN": "导出"}'),
 	('aaaa0003-1004-0000-0000-000000000003', '清空记录', 'button', 'mml:console:history', 'aaaa0003-1000-0000-0000-000000000004', 3, NULL, NULL, NULL, 'show', 'normal', NULL, '2026-06-17 20:08:35.605663+08', NULL, '2026-06-17 20:08:35.612851+08', '{"en-US": "Clear History", "zh-CN": "清空记录"}'),
 	('aaaa0003-1000-0000-0000-000000000004', 'MML控制台', 'menu', 'mml:console', 'aaaa0003-0000-0000-0000-000000000001', 1, '/mml/console', 'mml/Console', 'ExperimentOutlined', 'show', 'normal', NULL, '2026-06-12 18:16:52.429731+08', NULL, '2026-07-16 10:27:03.848487+08', '{"en-US": "MML Console", "zh-CN": "MML控制台"}'),
 	('aaaa0003-1000-0000-0000-000000000002', '脚本管理', 'menu', 'mml:script', 'aaaa0003-0000-0000-0000-000000000001', 2, '/mml/script', 'mml/ScriptTask', 'FileTextOutlined', 'show', 'normal', NULL, '2026-05-31 11:28:47.81669+08', NULL, '2026-07-16 10:27:03.848487+08', '{"en-US": "Script Management", "zh-CN": "脚本管理"}') ON CONFLICT DO NOTHING;
+
+-- P7-A: 菜单 ↔ license feature_code 回填（text[]，多值 OR 语义）。
+-- 仅回填有明确 legacy feature 对应的页面级菜单；未列出的菜单 feature_code=NULL（不受控=可见）。
+-- 完整逐项映射待产品确认后在此扩充（纯数据，不改代码）。/license 固定 NULL 防死锁。
+UPDATE public.menus SET feature_code = ARRAY['CODE_DASHBOARD'] WHERE id = 'aaaa0001-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_VIEW'] WHERE id = '11111111-1111-1111-1111-111111111106';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_VIEW'] WHERE id = '11111111-1111-1111-1111-111111111107';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_VIEW'] WHERE id = '11111111-1111-1111-1111-111111111120';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_LIBRARY'] WHERE id = 'aaaa0011-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_LIBRARY'] WHERE id = 'aaaa0011-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0001-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_USERS_USER'] WHERE id = '11111111-1111-1111-1111-111111111109';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_USERS_ROLE'] WHERE id = '11111111-1111-1111-1111-111111111110';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_LOGS_OPERATION'] WHERE id = '11111111-1111-1111-1111-111111111112';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_VIEW'] WHERE id = 'aaaa0002-1000-0000-0000-000000000010';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = '11111111-1111-1111-1111-111111111102';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = '11111111-1111-1111-1111-111111111103';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PLUG_AND_PLAY'] WHERE id = 'aaaa0010-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_DEVICE_REGISTER','CODE_GNB_DEVICE_REGISTER','CODE_CPE_DEVICE'] WHERE id = '11111111-1111-1111-1111-111111111104';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0010-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0010-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_IMAGE','CODE_GNB_UPGRADE_IMAGE','CODE_CPE_UPGRADE_IMAGE'] WHERE id = 'aaaa0006-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE'] WHERE id = 'aaaa0006-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_ROLLBACK','CODE_GNB_ROLLBACK'] WHERE id = 'aaaa0006-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MML','CODE_GNB_MML'] WHERE id = 'aaaa0003-1000-0000-0000-000000000004';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MML','CODE_GNB_MML'] WHERE id = 'aaaa0003-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MML','CODE_GNB_MML'] WHERE id = 'aaaa0003-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MML','CODE_GNB_MML'] WHERE id = 'aaaa0008-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_TR069_MSG_EXCHANGE','CODE_GNB_TR069_MSG_EXCHANGE'] WHERE id = 'aaaa000a-1000-0000-0000-000000000006';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_VIEW'] WHERE id = 'aaaa0002-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_VIEW'] WHERE id = 'aaaa0002-1000-0000-0000-000000000012';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MEASUREMENT'] WHERE id = 'aaaa0002-1000-0000-0000-000000000011';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MEASUREMENT'] WHERE id = 'aaaa0002-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MANAGEMENT'] WHERE id = 'aaaa0002-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MEASUREMENT'] WHERE id = 'aaaa000a-1000-0000-0000-000000000007';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = 'aaaa0008-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0002-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0003-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0004-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_TOPO'] WHERE id = 'aaaa0004-1000-0005-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_BATCH_CONFIG','CODE_GNB_BATCH_CONFIG'] WHERE id = 'aaaa0120-1000-0000-0000-000000000001';
+-- 新 OMC 模块菜单映射到已有 code（产品中心/文件传输/运维/系统新功能/下钻页）；旧 license 无对应，按最近语义挂靠，可调
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000006';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MANAGEMENT'] WHERE id = 'aaaa0098-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_LIBRARY'] WHERE id = 'aaaa0098-1000-0000-0000-000000000004';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0098-1000-0000-0000-000000000005';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE'] WHERE id = 'aaaa000b-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE'] WHERE id = 'aaaa000b-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_UPGRADE_FILE','CODE_GNB_UPGRADE_FILE','CODE_CPE_UPGRADE_FILE'] WHERE id = 'aaaa000b-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000004';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa000a-1000-0000-0000-000000000005';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = 'aaaa0008-1000-0000-0000-000000000003';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = 'aaaa0008-1000-0000-0000-000000000004';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MANAGEMENT'] WHERE id = 'aaaa0008-1000-0000-0000-000000000009';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = '11111111-1111-1111-1111-111111111111';
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_SETTINGS'] WHERE id = 'aaaa0008-1000-0000-0000-000000000010';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0126-1000-0000-0000-000000000001';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0126-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0007-1000-0000-0000-000000000002';
+UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MANAGEMENT'] WHERE id = 'aaaa0126-1000-0000-0000-000000000004';
+UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_VIEW'] WHERE id = 'aaaa0011-1000-0000-0000-000000000003';
 
 
 ALTER TABLE public.menus ENABLE TRIGGER ALL;
@@ -10725,8 +10820,6 @@ INSERT INTO public.role_menus VALUES
 	('4684aa64-0483-440b-b0a3-eb4a94644c0d', '10000000-0000-0000-0000-000000000003', 'aaaa000b-0000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.903207+08'),
 	('7fcd8f28-aa1e-4c07-bd73-acb5d20c1d92', '10000000-0000-0000-0000-000000000003', 'aaaa000b-1000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.903207+08'),
 	('df89b25f-3a6a-436a-a8f7-770b7fc48b49', '10000000-0000-0000-0000-000000000001', 'aaaa000b-1000-0000-0000-000000000002', NULL, '2026-05-31 11:28:47.904664+08'),
-	('6239bd4d-aadf-4e3c-a86d-97ae825e2448', '10000000-0000-0000-0000-000000000001', 'aaaa0120-0000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.905369+08'),
-	('5a64b4b5-cac2-43c6-9d2c-b1b0c8c4f5b6', '10000000-0000-0000-0000-000000000001', 'aaaa0120-1000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.905369+08'),
 	('91e9b332-7c19-4bb1-91b4-1a4494d1f3ec', '10000000-0000-0000-0000-000000000001', 'aaaa0126-1000-0000-0000-000000000001', NULL, '2026-05-31 11:28:47.908689+08'),
 	('24414546-f01f-4333-867e-a2ddeb486d4f', '10000000-0000-0000-0000-000000000001', 'aaaa0126-1000-0000-0000-000000000002', NULL, '2026-05-31 11:28:47.908689+08'),
 	('807b1d44-355e-477c-830f-6023907a3146', '10000000-0000-0000-0000-000000000001', 'aaaa0126-1000-0000-0000-000000000003', NULL, '2026-05-31 11:28:47.908689+08'),
@@ -10883,8 +10976,9 @@ INSERT INTO public.sys_configs VALUES
 	('fb26dac0-247f-4aea-a62b-fa13ff971121', 'minio.retention', 'raw_object_days', '60', 'int', 'MinIO 原始 PM/MR 文件 ILM 过期天数（#319）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('be44244b-f3ce-459e-92d3-19af1593ede6', 'stationlog.retention', 'max_retention_days', '60', 'int', '基站日志按时间保留天数（#320）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('758b89d8-57e0-4253-a186-3c774d89d7e6', 'stationlog.retention', 'max_file_count', '20', 'int', '故障日志文件数配额，0=禁用仅按时间保留（#320）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
+	('68215596-199f-4ce2-8604-958a8456ad08', 'stationlog.retention', 'cleanup_interval_minutes', '60', 'int', '基站日志清理周期分钟，范围 10..1440（#277）', false, '2026-08-07 14:14:25+08', '2026-08-07 14:14:25+08', '{}'),
 	('803bcd55-b664-40fa-9636-df327fae9fd5', 'raw_archive', 'compress_after_ingest', 'true', 'bool', '仅对新 PM/MR 原始 XML 在成功入库后尝试一次 gzip 压缩；失败不影响业务处理，不扫描历史文件（#836）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
-	('ace314eb-3fd5-4c76-9651-a370d66ad413', 'acs.backpressure', 'enabled', 'true', 'bool', 'PM 上传资源背压总开关（#318）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
+	('ace314eb-3fd5-4c76-9651-a370d66ad413', 'acs.backpressure', 'enabled', 'false', 'bool', 'PM 上传资源背压总开关（#318，默认关闭，统一磁盘拒写由存储保护策略兜底）', false, '2026-06-17 20:08:35.34786+08', '2026-08-08 09:50:00+08', '{}'),
 	('4dfc6bf8-1a60-4aee-84d5-f8af5f4f55af', 'acs.backpressure', 'disk_high_pct', '70', 'int', '数据盘使用率高水位%，达到后停收 PM 上传（#318）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('a150909e-36c3-4b6a-a856-0f5fe5d3e810', 'acs.backpressure', 'disk_low_pct', '60', 'int', '数据盘使用率低水位%，回落到此自动恢复（#318）', false, '2026-06-17 20:08:35.34786+08', '2026-06-17 20:08:35.34786+08', '{}'),
 	('9d73435a-f4dd-42ca-95a2-aa52ea35cd70', 'acs.backpressure', 'io_some_high_pct', '70', 'int', 'IO PSI some avg10 高水位%，超过停收 PM 上传', false, '2026-07-18 08:00:00+08', '2026-07-18 08:00:00+08', '{}'),
@@ -21675,110 +21769,6 @@ SET target_paths = cp.target_paths,
 FROM command_paths cp
 WHERE c.id = cp.command_id;
 
--- Device.FAP.MRMgmt.Config. object commands belong to MR参数管理.
-WITH mr_group AS (
-    SELECT id
-    FROM public.mml_command_groups
-    WHERE group_code = 'chapter:SP'
-      AND deleted_at IS NULL
-      AND deprecated_at IS NULL
-      AND is_active = true
-    LIMIT 1
-), desired_commands AS (
-    SELECT *
-    FROM (VALUES
-        (
-            'ADD MR_MGMT_CONFIG',
-            '添加 MR参数管理',
-            'Add MR Parameters',
-            'ADD',
-            'Device.FAP.MRMgmt.Config.',
-            'MR参数管理',
-            'MR Parameters'
-        ),
-        (
-            'RMV MR_MGMT_CONFIG',
-            '删除 MR参数管理',
-            'Remove MR Parameters',
-            'RMV',
-            'Device.FAP.MRMgmt.Config.',
-            'MR参数管理',
-            'MR Parameters'
-        )
-    ) AS v(
-        command_code,
-        command_name,
-        command_name_en,
-        operation_type,
-        target_object,
-        logical_name_zh,
-        logical_name_en
-    )
-)
-INSERT INTO public.mml_commands (
-    command_name,
-    command_code,
-    category,
-    description,
-    rpc_method,
-    target_paths,
-    target_object,
-    group_id,
-    command_name_i18n,
-    require_confirm,
-    confirm_msg_i18n,
-    operation_type,
-    logical_name_i18n,
-    source,
-    catalog_protected,
-    platform_tags,
-    tree_node_refs,
-    instance_range_meta
-)
-SELECT dc.command_name,
-       dc.command_code,
-       '3',
-       dc.command_name,
-       CASE dc.operation_type
-           WHEN 'ADD' THEN 'AddObject'
-           ELSE 'DeleteObject'
-       END,
-       jsonb_build_array(dc.target_object),
-       dc.target_object,
-       mg.id,
-       jsonb_build_object('zh-CN', dc.command_name, 'en-US', dc.command_name_en),
-       false,
-       '{}'::jsonb,
-       dc.operation_type,
-       jsonb_build_object('zh-CN', dc.logical_name_zh, 'en-US', dc.logical_name_en),
-       'standard',
-       true,
-       '{}'::jsonb,
-       '[]'::jsonb,
-       '[]'::jsonb
-FROM desired_commands dc
-CROSS JOIN mr_group mg
-ON CONFLICT (command_code) DO UPDATE
-SET command_name = EXCLUDED.command_name,
-    category = EXCLUDED.category,
-    description = EXCLUDED.description,
-    rpc_method = EXCLUDED.rpc_method,
-    target_paths = EXCLUDED.target_paths,
-    target_object = EXCLUDED.target_object,
-    group_id = EXCLUDED.group_id,
-    command_name_i18n = EXCLUDED.command_name_i18n,
-    require_confirm = EXCLUDED.require_confirm,
-    confirm_msg_i18n = EXCLUDED.confirm_msg_i18n,
-    operation_type = EXCLUDED.operation_type,
-    logical_name_i18n = EXCLUDED.logical_name_i18n,
-    source = EXCLUDED.source,
-    catalog_protected = EXCLUDED.catalog_protected,
-    platform_tags = EXCLUDED.platform_tags,
-    tree_node_refs = EXCLUDED.tree_node_refs,
-    instance_range_meta = EXCLUDED.instance_range_meta,
-    deprecated_at = NULL,
-    updated_at = now();
-
 -- Device.FAP.MRMgmt.Config.{i}.* belongs to MR参数管理.
 WITH target_commands AS (
     SELECT c.id AS command_id,
@@ -26268,6 +26258,16 @@ UPDATE sys_configs
    SET value='60', updated_at=now()
  WHERE category='acs.backpressure' AND key='disk_low_pct' AND value='75';
 
+-- PM upload backpressure is no longer exposed as the primary disk protection
+-- control. Existing untouched default rows are switched off; operator-touched
+-- rows keep their local choice.
+UPDATE sys_configs
+   SET value='false', updated_at=now()
+ WHERE category='acs.backpressure'
+   AND key='enabled'
+   AND value='true'
+   AND updated_at='2026-06-17 20:08:35.34786+08'::timestamptz;
+
 
 -- Consolidated from pre-release baseline-only migrations: main data 000003-000004 and seed 000002-000005
 
@@ -26545,7 +26545,7 @@ INSERT INTO public.sys_configs (
     '原始对象精确清理阶段：shadow/fallback/exclusive',
     false,
     now(),
-    now(),
+	now(),
     '{}'::jsonb
 )
 ON CONFLICT DO NOTHING;
@@ -26656,6 +26656,383 @@ SET product_scope = scope.product_scope,
 FROM scope
 WHERE tt.type_code = scope.type_code;
 
+-- Consolidated pre-release geofence defaults and administrator permissions.
+
+-- +omcgo MainReconcileBegin
+INSERT INTO public.sys_configs (
+    id, category, key, value, value_type, description, is_public,
+    created_at, updated_at, description_i18n
+) VALUES (
+    '6d1f0b32-37ac-4e58-98e8-32a90c648e90',
+    'geofence',
+    'mode',
+    'off',
+    'string',
+    '电子围栏系统运行模式：off/observe/enforce',
+    false,
+    now(),
+    now(),
+    '{"zh-CN":"电子围栏系统运行模式","en-US":"Geofence system runtime mode"}'::jsonb
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.geofence_carrier_settings (
+    carrier, mode, default_baseline_radius_meters, updated_by, updated_at
+) VALUES
+    ('cmcc', 'off', 100, NULL, now()),
+    ('ctcc', 'off', 100, NULL, now()),
+    ('cucc', 'off', 100, NULL, now())
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.api_endpoints (
+    id, path, method, name, description, api_group, is_auto,
+    created_at, updated_at, is_user_modified
+) VALUES
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648e91',
+        '/api/v1/geofences/settings',
+        'GET',
+        'GET /api/v1/geofences/settings',
+        '读取电子围栏系统及运营商运行模式',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648e92',
+        '/api/v1/geofences/settings/preview',
+        'POST',
+        'POST /api/v1/geofences/settings/preview',
+        '预览电子围栏运行模式变更影响',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648e93',
+        '/api/v1/geofences/settings',
+        'PUT',
+        'PUT /api/v1/geofences/settings',
+        '更新电子围栏系统及运营商运行模式',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea1',
+        '/api/v1/geofences/:id/versions',
+        'POST',
+        'POST /api/v1/geofences/:id/versions',
+        '创建电子围栏不可变草稿版本',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea2',
+        '/api/v1/geofences/:id/enable-preview',
+        'POST',
+        'POST /api/v1/geofences/:id/enable-preview',
+        '预览启用电子围栏的影响',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea3',
+        '/api/v1/geofences/:id/enable',
+        'POST',
+        'POST /api/v1/geofences/:id/enable',
+        '启用电子围栏',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea4',
+        '/api/v1/geofences/:id/disable-preview',
+        'POST',
+        'POST /api/v1/geofences/:id/disable-preview',
+        '预览禁用电子围栏的影响',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea5',
+        '/api/v1/geofences/:id/disable',
+        'POST',
+        'POST /api/v1/geofences/:id/disable',
+        '禁用电子围栏但保留设备绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea6',
+        '/api/v1/geofences/:id/archive-preview',
+        'POST',
+        'POST /api/v1/geofences/:id/archive-preview',
+        '预览归档电子围栏的影响',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea7',
+        '/api/v1/geofences/:id/archive',
+        'POST',
+        'POST /api/v1/geofences/:id/archive',
+        '归档电子围栏并软移除有效绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea8',
+        '/api/v1/geofence-bindings/:id/suspend',
+        'POST',
+        'POST /api/v1/geofence-bindings/:id/suspend',
+        '暂停单个设备电子围栏绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ea9',
+        '/api/v1/geofence-bindings/:id/resume',
+        'POST',
+        'POST /api/v1/geofence-bindings/:id/resume',
+        '恢复单个设备电子围栏绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648eaa',
+        '/api/v1/geofence-bindings/:id',
+        'DELETE',
+        'DELETE /api/v1/geofence-bindings/:id',
+        '软移除单个设备电子围栏绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648eb1',
+        '/api/v1/geofences/:id/binding-preview',
+        'POST',
+        'POST /api/v1/geofences/:id/binding-preview',
+        '预览电子围栏批量设备绑定',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648eb2',
+        '/api/v1/geofences/:id/bindings',
+        'POST',
+        'POST /api/v1/geofences/:id/bindings',
+        '创建电子围栏批量设备绑定任务',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648eb3',
+        '/api/v1/geofence-jobs/:id',
+        'GET',
+        'GET /api/v1/geofence-jobs/:id',
+        '查询电子围栏批量绑定任务',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648eb4',
+        '/api/v1/geofence-jobs/:id/items',
+        'GET',
+        'GET /api/v1/geofence-jobs/:id/items',
+        '查询电子围栏批量绑定任务明细',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec1',
+        '/api/v1/geofences',
+        'GET',
+        'GET /api/v1/geofences',
+        '查询电子围栏定义列表',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec2',
+        '/api/v1/geofences',
+        'POST',
+        'POST /api/v1/geofences',
+        '创建电子围栏定义和初始草稿',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec3',
+        '/api/v1/geofences/map',
+        'GET',
+        'GET /api/v1/geofences/map',
+        '按地图范围查询电子围栏及当前版本几何',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec4',
+        '/api/v1/geofences/:id',
+        'GET',
+        'GET /api/v1/geofences/:id',
+        '查询单个电子围栏定义',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec5',
+        '/api/v1/geofences/:id/versions',
+        'GET',
+        'GET /api/v1/geofences/:id/versions',
+        '查询电子围栏不可变版本历史',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec6',
+        '/api/v1/geofences/:id/publish',
+        'POST',
+        'POST /api/v1/geofences/:id/publish',
+        '发布电子围栏草稿版本',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ec7',
+        '/api/v1/geofences/:id/bindings',
+        'GET',
+        'GET /api/v1/geofences/:id/bindings',
+        '分页查询电子围栏绑定设备',
+        'geofence',
+        false,
+        now(),
+        now(),
+        false
+    )
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT
+    '10000000-0000-0000-0000-000000000001'::uuid,
+    endpoint.id
+FROM public.api_endpoints AS endpoint
+WHERE endpoint.id IN (
+    '6d1f0b32-37ac-4e58-98e8-32a90c648e91'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648e92'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648e93'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea1'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea2'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea3'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea4'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea5'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea6'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea7'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea8'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ea9'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648eaa'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648eb1'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648eb2'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648eb3'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648eb4'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec1'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec2'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec3'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec4'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec5'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec6'::uuid,
+    '6d1f0b32-37ac-4e58-98e8-32a90c648ec7'::uuid
+)
+ON CONFLICT DO NOTHING;
+-- +omcgo MainReconcileEnd
+
+
+-- Consolidated from the pre-release storage protection default policy seed.
+INSERT INTO public.storage_protection_policies (
+    id, target_type, target_id, write_scope, enabled,
+    warn_used_percent, recover_used_percent, block_used_percent,
+    check_interval_seconds, unknown_behavior, current_state, updated_by
+) VALUES (
+    '27800000-0000-4000-8000-000000000001',
+    'filesystem',
+    'root',
+    'all',
+    true,
+    80,
+    85,
+    90,
+    30,
+    'allow_with_alarm',
+    'normal',
+    'system'
+)
+ON CONFLICT (target_type, target_id, write_scope) DO NOTHING;
 
 -- Task 13: expose the cross-domain notification management center.
 INSERT INTO public.menus (
@@ -26727,11 +27104,11 @@ INSERT INTO public.menus (
     'system:storage-protection',
     '11111111-1111-1111-1111-111111111108',
     21,
-    '/system/storage-protection',
-    'system/StorageProtection',
+    '/system/config?tab=retention_bp',
+    'system/SystemConfig',
     'DatabaseOutlined',
-    'show',
-    'normal',
+    'hide',
+    'disabled',
     '{"en-US":"Resource and Storage Protection","zh-CN":"资源与存储保护"}'::jsonb
 )
 ON CONFLICT (id) DO UPDATE SET
@@ -26753,6 +27130,705 @@ VALUES (
     'aaaa0008-1000-0000-0000-000000000010'
 )
 ON CONFLICT (role_id, menu_id) DO NOTHING;
+
+-- GIS 电子围栏按钮权限。系统开关决定入口是否存在；这两个权限只决定
+-- 已开启时谁可以查看、谁可以执行配置变更。
+-- +omcgo MainReconcileBegin
+INSERT INTO public.menus (
+    id, name, type, permission_key, parent_id, sort_order, route_path,
+    component_path, icon, show_status, status, name_i18n
+) VALUES
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ed1',
+        '查看电子围栏',
+        'button',
+        'topology:gis-map:geofence:view',
+        'aaaa0004-1000-0001-0000-000000000001',
+        1,
+        NULL,
+        NULL,
+        NULL,
+        'show',
+        'normal',
+        '{"zh-CN":"查看电子围栏","en-US":"View geofences"}'::jsonb
+    ),
+    (
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ed2',
+        '管理电子围栏',
+        'button',
+        'topology:gis-map:geofence:manage',
+        'aaaa0004-1000-0001-0000-000000000001',
+        2,
+        NULL,
+        NULL,
+        NULL,
+        'show',
+        'normal',
+        '{"zh-CN":"管理电子围栏","en-US":"Manage geofences"}'::jsonb
+    )
+ON CONFLICT (id) DO UPDATE SET
+	name = EXCLUDED.name,
+	permission_key = EXCLUDED.permission_key,
+	parent_id = EXCLUDED.parent_id,
+	sort_order = EXCLUDED.sort_order,
+	route_path = EXCLUDED.route_path,
+	component_path = EXCLUDED.component_path,
+	icon = EXCLUDED.icon,
+	show_status = EXCLUDED.show_status,
+	status = EXCLUDED.status,
+	name_i18n = EXCLUDED.name_i18n,
+	updated_at = NOW();
+
+-- Northbound configuration entry under System Management (moved from the removed
+-- Config Management directory; renamed 北向页面化配置 -> 北向配置).
+INSERT INTO public.menus (
+    id, name, type, permission_key, parent_id, sort_order, route_path,
+    component_path, icon, show_status, status, name_i18n
+) VALUES (
+    'aaaa0120-1000-0000-0000-000000000008',
+    '北向配置',
+    'menu',
+    'config:northbound-page-config',
+    '11111111-1111-1111-1111-111111111108',
+    30,
+    '/config/northbound-page-config',
+    'config/NorthboundPageConfig',
+    'GatewayOutlined',
+    'show',
+    'normal',
+    '{"en-US":"Northbound Config","zh-CN":"北向配置"}'::jsonb
+)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    permission_key = EXCLUDED.permission_key,
+    parent_id = EXCLUDED.parent_id,
+    sort_order = EXCLUDED.sort_order,
+    route_path = EXCLUDED.route_path,
+    component_path = EXCLUDED.component_path,
+    icon = EXCLUDED.icon,
+    show_status = EXCLUDED.show_status,
+    status = EXCLUDED.status,
+    name_i18n = EXCLUDED.name_i18n,
+    updated_at = NOW();
+
+INSERT INTO public.role_menus (role_id, menu_id)
+VALUES
+    (
+        '10000000-0000-0000-0000-000000000001',
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ed1'
+    ),
+    (
+        '10000000-0000-0000-0000-000000000001',
+        '6d1f0b32-37ac-4e58-98e8-32a90c648ed2'
+    )
+ON CONFLICT (role_id, menu_id) DO NOTHING;
+-- +omcgo MainReconcileEnd
+
+INSERT INTO public.role_menus (role_id, menu_id)
+VALUES (
+    '10000000-0000-0000-0000-000000000001',
+    'aaaa0120-1000-0000-0000-000000000008'
+)
+ON CONFLICT (role_id, menu_id) DO NOTHING;
+
+-- issue #274: restore neighbor and inter-frequency MML commands.
+-- The previous supplemental seed removed every {i} placeholder from ADD/RMV
+-- target_object values. Product filtering compares target_object with the
+-- ParamModel standard paths, so those commands disappeared after device
+-- selection even though the command rows existed.
+WITH object_defs(command_code, target_object) AS (
+    VALUES
+        ('ADD 5G_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+        ('RMV 5G_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+        ('ADD INTER_RAT_CELL_NR', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
+        ('RMV INTER_RAT_CELL_NR', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.'),
+        ('ADD INTER_RAT_CELL_UMTS', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
+        ('RMV INTER_RAT_CELL_UMTS', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.'),
+        ('ADD INTER_RAT_CELL_GSM', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
+        ('RMV INTER_RAT_CELL_GSM', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.'),
+        ('ADD LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.'),
+        ('RMV LTE_CELL', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.'),
+        ('ADD NR_CELL', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.'),
+        ('RMV NR_CELL', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.'),
+        ('ADD SJ_CONN_EUTRA_CARRIER', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.'),
+        ('RMV SJ_CONN_EUTRA_CARRIER', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.'),
+        ('ADD SJ_CONN_NR_INTER_FREQ_CARRIER', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.'),
+        ('RMV SJ_CONN_NR_INTER_FREQ_CARRIER', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.'),
+        ('ADD INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv4Address.'),
+        ('RMV INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv4Address.'),
+        ('ADD INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv6Address.'),
+        ('RMV INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.IPv6Address.'),
+        ('ADD VLAN_INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.'),
+        ('RMV VLAN_INTERFACE_I_PV4_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.'),
+        ('ADD VLAN_INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.'),
+        ('RMV VLAN_INTERFACE_I_PV6_ADDRESS', 'Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.'),
+        ('ADD PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.'),
+        ('RMV PLMN_LIST', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.'),
+        ('ADD PDCP_INIT_PARAM', 'Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.'),
+        ('RMV PDCP_INIT_PARAM', 'Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.')
+)
+UPDATE public.mml_commands c
+SET target_object = d.target_object,
+    tree_node_refs = jsonb_build_array(d.target_object),
+    updated_at = now()
+FROM object_defs d
+WHERE c.command_code = d.command_code
+  AND c.deprecated_at IS NULL;
+
+-- SI_SUB_01 is a compatibility command family: some LTE products expose NR
+-- neighbors as NeighborList.5GCell while others use InterRATCell.NR. Keep the
+-- ADD/RMV commands for both object models active under the same business name;
+-- product filtering will retain the variant supported by the selected device.
+UPDATE public.mml_commands c
+SET command_name = CASE c.operation_type
+        WHEN 'ADD' THEN '新增 NR邻区参数管理 (5GCell)'
+        ELSE '删除 NR邻区参数管理 (5GCell)'
+    END,
+    description = CASE c.operation_type
+        WHEN 'ADD' THEN '新增 NR邻区参数管理 (5GCell)'
+        ELSE '删除 NR邻区参数管理 (5GCell)'
+    END,
+    command_name_i18n = jsonb_build_object(
+        'zh-CN', CASE c.operation_type WHEN 'ADD' THEN '新增 NR邻区参数管理' ELSE '删除 NR邻区参数管理' END,
+        'en-US', CASE c.operation_type WHEN 'ADD' THEN 'Add NR Neighbor Parameter Management' ELSE 'Remove NR Neighbor Parameter Management' END
+    ),
+    logical_name_i18n = jsonb_build_object(
+        'zh-CN', 'NR邻区参数管理',
+        'en-US', 'NR Neighbor Parameter Management'
+    ),
+    target_object = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.',
+    tree_node_refs = jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.'),
+    deprecated_at = NULL,
+    updated_at = now()
+WHERE c.command_code IN ('ADD 5G_CELL', 'RMV 5G_CELL');
+
+-- BU1810's local 5G neighbour form does not expose SSB and the device accepts
+-- AddObject without it. An omitted optional value is excluded from the SPV.
+UPDATE public.mml_command_sub_fields sf
+SET is_required = false,
+    updated_at = now()
+FROM public.mml_commands c
+JOIN public.standard_params sp
+  ON sp.standard_path = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}.SSB'
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = sp.id
+  AND c.command_code = 'ADD 5G_CELL'
+  AND c.deprecated_at IS NULL
+  AND sf.deprecated_at IS NULL;
+
+-- NR products expose LTE neighbours below the two-level CellConfig.{i}.LTE
+-- standard object (translated to CellConfig.{i}.NR on BaiBNQ). Keep separate
+-- command variants so product filtering selects the correct object shape
+-- without breaking the one-level LTE products.
+WITH si_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SI'
+      AND param_version = 'cmcc-td-lte-v2.3'
+      AND deleted_at IS NULL
+    ORDER BY updated_at DESC
+    LIMIT 1
+), nr_lte_defs(command_code, operation_type, rpc_method, command_name_zh, command_name_en) AS (
+    VALUES
+        ('ADD NR_LTE_CELL', 'ADD', 'AddObject', '添加 LTE邻区参数管理', 'Add LTE Neighbor Parameter Management'),
+        ('RMV NR_LTE_CELL', 'RMV', 'DeleteObject', '删除 LTE邻区参数管理', 'Remove LTE Neighbor Parameter Management')
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method,
+    target_paths, target_object, group_id, command_name_i18n,
+    require_confirm, confirm_msg_i18n, operation_type, logical_name_i18n,
+    source, catalog_protected, platform_tags, deprecated_at, tree_node_refs,
+    instance_range_meta, help_doc, notes
+)
+SELECT
+    d.command_name_zh || ' (NR)',
+    d.command_code,
+    'neighbor-list-coverage',
+    d.command_name_zh,
+    d.rpc_method,
+    jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.'),
+    'Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.',
+    g.id,
+    jsonb_build_object('zh-CN', d.command_name_zh, 'en-US', d.command_name_en),
+    false,
+    '{}'::jsonb,
+    d.operation_type,
+    jsonb_build_object('zh-CN', 'LTE邻区参数管理', 'en-US', 'LTE Neighbor Parameter Management'),
+    'standard',
+    true,
+    '{}'::jsonb,
+    NULL,
+    jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.'),
+    '[]'::jsonb,
+    '',
+    ''
+FROM nr_lte_defs d
+CROSS JOIN si_group g
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    target_paths = EXCLUDED.target_paths,
+    target_object = EXCLUDED.target_object,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    operation_type = EXCLUDED.operation_type,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    tree_node_refs = EXCLUDED.tree_node_refs,
+    deprecated_at = NULL,
+    updated_at = now();
+
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    dst.id,
+    src_sf.standard_path_id,
+    src_sf.mml_code,
+    src_sf.label_i18n,
+    true,
+    dst.operation_type = 'ADD',
+    src_sf.sort_order,
+    src_sf.access_type,
+    true
+FROM public.mml_commands dst
+JOIN public.mml_commands src ON src.command_code = 'ADD LTE_CELL'
+JOIN public.mml_command_sub_fields src_sf
+  ON src_sf.command_id = src.id AND src_sf.deprecated_at IS NULL
+JOIN public.standard_params sp ON sp.id = src_sf.standard_path_id
+WHERE dst.command_code IN ('ADD NR_LTE_CELL', 'RMV NR_LTE_CELL')
+  AND dst.deprecated_at IS NULL
+  AND sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.%'
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = true,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH refreshed AS (
+    SELECT
+        c.id,
+        jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.')
+        || COALESCE(jsonb_agg(sp.standard_path ORDER BY sf.sort_order, sp.standard_path)
+                    FILTER (WHERE sp.standard_path IS NOT NULL), '[]'::jsonb) AS paths
+    FROM public.mml_commands c
+    LEFT JOIN public.mml_command_sub_fields sf
+      ON sf.command_id = c.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    WHERE c.command_code IN ('ADD NR_LTE_CELL', 'RMV NR_LTE_CELL')
+      AND c.deprecated_at IS NULL
+    GROUP BY c.id
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = r.paths,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
+-- Multi-instance sub-fields across several chapters used mml_code (including
+-- collision hashes) as their visible label. Keep mml_code as the execution
+-- key, but expose a business label derived from the parameter description or
+-- path leaf.
+WITH multi_instance_fields AS (
+    SELECT
+        sf.id,
+        sp.description,
+        CASE
+            WHEN split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) = '{i}'
+                THEN split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1) - 1)
+            ELSE split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))
+        END AS leaf_name
+    FROM public.mml_command_sub_fields sf
+    JOIN public.mml_commands c ON c.id = sf.command_id
+    JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    WHERE sp.standard_path LIKE '%{i}%'
+      AND c.deprecated_at IS NULL
+      AND sf.deprecated_at IS NULL
+)
+UPDATE public.mml_command_sub_fields sf
+SET label_i18n = jsonb_build_object(
+        'zh-CN', COALESCE(NULLIF(sp.description, ''), leaf_name),
+        'en-US', leaf_name
+    ),
+    updated_at = now()
+FROM multi_instance_fields sp
+WHERE sf.id = sp.id;
+
+-- LTE products without a CellConfig instance use this standard path for the
+-- quick-settings "neighbor frequency" table. The existing clean commands only
+-- covered CellConfig.{i}.LTE and were therefore filtered out for these eNBs.
+WITH si_group AS (
+    SELECT id
+    FROM public.mml_command_groups
+    WHERE group_code = 'chapter:SI'
+      AND param_version = 'cmcc-td-lte-v2.3'
+      AND deleted_at IS NULL
+    ORDER BY updated_at DESC
+    LIMIT 1
+), command_defs(command_code, command_name, logical_name, operation_type, rpc_method) AS (
+    VALUES
+        ('LST LTE_INTER_FREQ_CARRIER', '查询 LTE邻频参数管理', 'LTE邻频参数管理', 'LST', 'GetParameterValues'),
+        ('MOD LTE_INTER_FREQ_CARRIER', '修改 LTE邻频参数管理', 'LTE邻频参数管理', 'MOD', 'SetParameterValues'),
+        ('ADD LTE_INTER_FREQ_CARRIER', '添加 LTE邻频参数管理', 'LTE邻频参数管理', 'ADD', 'AddObject'),
+        ('RMV LTE_INTER_FREQ_CARRIER', '删除 LTE邻频参数管理', 'LTE邻频参数管理', 'RMV', 'DeleteObject')
+)
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method, operation_type,
+    target_paths, target_object, tree_node_refs, group_id, command_name_i18n,
+    logical_name_i18n, source, catalog_protected, help_doc
+)
+SELECT
+    d.command_name,
+    d.command_code,
+    'MML',
+    d.command_name,
+    d.rpc_method,
+    d.operation_type,
+    '[]'::jsonb,
+    'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.',
+    jsonb_build_array('Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.'),
+    g.id,
+    jsonb_build_object('zh-CN', d.command_name, 'en-US', d.command_code),
+    jsonb_build_object('zh-CN', d.logical_name, 'en-US', 'LTE Inter-Frequency Carrier Parameters'),
+    'standard',
+    true,
+    ''
+FROM command_defs d
+CROSS JOIN si_group g
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    operation_type = EXCLUDED.operation_type,
+    target_object = EXCLUDED.target_object,
+    tree_node_refs = EXCLUDED.tree_node_refs,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    source = EXCLUDED.source,
+    catalog_protected = EXCLUDED.catalog_protected,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_commands AS (
+    SELECT id, operation_type
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST LTE_INTER_FREQ_CARRIER', 'MOD LTE_INTER_FREQ_CARRIER',
+        'ADD LTE_INTER_FREQ_CARRIER', 'RMV LTE_INTER_FREQ_CARRIER'
+    )
+      AND deprecated_at IS NULL
+), source_paths AS (
+    SELECT
+        c.id AS command_id,
+        c.operation_type,
+        sp.id AS standard_path_id,
+        sp.standard_path,
+        sp.description,
+        sp.access,
+        CASE
+            WHEN split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1)) = '{i}'
+                THEN split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1) - 1)
+            ELSE split_part(sp.standard_path, '.', array_length(string_to_array(sp.standard_path, '.'), 1))
+        END AS leaf_name,
+        row_number() OVER (PARTITION BY c.id ORDER BY sp.standard_path) AS sort_order
+    FROM target_commands c
+    JOIN public.standard_params sp
+      ON (sp.standard_path = 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}'
+       OR sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.%')
+     AND sp.entry_type = 'parameter'
+    WHERE c.operation_type IN ('LST', 'ADD', 'RMV')
+       OR (c.operation_type = 'MOD' AND sp.access = 'READ_WRITE')
+), desired_fields AS (
+    SELECT
+        command_id,
+        standard_path_id,
+        LEFT(UPPER(regexp_replace(leaf_name, '([a-z0-9])([A-Z])', '\1_\2', 'g')), 91)
+            || '_' || substr(md5(standard_path), 1, 8) AS mml_code,
+        jsonb_build_object(
+            'zh-CN', COALESCE(NULLIF(sp.description, ''), leaf_name),
+            'en-US', leaf_name
+        ) AS label_i18n,
+        sort_order,
+        operation_type,
+        access
+    FROM source_paths sp
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    command_id,
+    standard_path_id,
+    mml_code,
+    label_i18n,
+    true,
+    operation_type IN ('ADD', 'MOD'),
+    sort_order,
+    CASE WHEN access = 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
+    true
+FROM desired_fields
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+WITH target_commands AS (
+    SELECT id, target_object
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST LTE_INTER_FREQ_CARRIER', 'MOD LTE_INTER_FREQ_CARRIER',
+        'ADD LTE_INTER_FREQ_CARRIER', 'RMV LTE_INTER_FREQ_CARRIER'
+    )
+), refreshed AS (
+    SELECT
+        c.id,
+        c.target_object,
+        COALESCE(
+            jsonb_agg(to_jsonb(sp.standard_path) ORDER BY sf.sort_order, sp.standard_path)
+                FILTER (WHERE sp.standard_path IS NOT NULL),
+            '[]'::jsonb
+        ) AS paths
+    FROM target_commands c
+    LEFT JOIN public.mml_command_sub_fields sf ON sf.command_id = c.id AND sf.deprecated_at IS NULL
+    LEFT JOIN public.standard_params sp ON sp.id = sf.standard_path_id
+    GROUP BY c.id, c.target_object
+)
+UPDATE public.mml_commands c
+SET target_paths = r.paths,
+    tree_node_refs = CASE
+        WHEN c.operation_type IN ('ADD', 'RMV') THEN jsonb_build_array(r.target_object)
+        ELSE r.paths
+    END,
+    updated_at = now()
+FROM refreshed r
+WHERE c.id = r.id;
+
+-- Repair X2 and MME multi-instance command families before generic ADD field inheritance.
+WITH repaired_objects(command_code, target_object) AS (
+    VALUES
+        ('ADD X2_IP_ADDR_MAP_INFO', 'Device.Services.FAPService.{i}.FAPControl.X2IpAddrMapInfo.'),
+        ('RMV X2_IP_ADDR_MAP_INFO', 'Device.Services.FAPService.{i}.FAPControl.X2IpAddrMapInfo.'),
+        ('ADD LTE_MME_POOL_CONFIG_PARAM', 'Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.'),
+        ('RMV LTE_MME_POOL_CONFIG_PARAM', 'Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.')
+)
+UPDATE public.mml_commands c
+SET target_object = r.target_object,
+    tree_node_refs = jsonb_build_array(r.target_object),
+    updated_at = now()
+FROM repaired_objects r
+WHERE c.command_code = r.command_code
+  AND c.deprecated_at IS NULL;
+
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c
+WHERE sf.command_id = c.id
+  AND c.command_code IN (
+      'LST X2_IP_ADDR_MAP_INFO', 'MOD X2_IP_ADDR_MAP_INFO',
+      'ADD X2_IP_ADDR_MAP_INFO', 'RMV X2_IP_ADDR_MAP_INFO'
+  );
+
+WITH x2_commands AS (
+    SELECT id, operation_type
+    FROM public.mml_commands
+    WHERE command_code IN (
+        'LST X2_IP_ADDR_MAP_INFO', 'MOD X2_IP_ADDR_MAP_INFO',
+        'ADD X2_IP_ADDR_MAP_INFO', 'RMV X2_IP_ADDR_MAP_INFO'
+    )
+      AND deprecated_at IS NULL
+), x2_fields AS (
+    SELECT
+        x.id AS command_id,
+        x.operation_type,
+        canonical_sp.id AS standard_path_id,
+        canonical_sp.standard_path,
+        canonical_sp.access,
+        split_part(canonical_sp.standard_path, '.', array_length(string_to_array(canonical_sp.standard_path, '.'), 1)) AS leaf_name,
+        row_number() OVER (PARTITION BY x.id ORDER BY canonical_sp.standard_path) AS sort_order
+    FROM x2_commands x
+    JOIN public.standard_params canonical_sp
+      ON canonical_sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.X2IpAddrMapInfo.{i}.%'
+     AND canonical_sp.entry_type = 'parameter'
+    WHERE x.operation_type = 'LST' OR canonical_sp.access = 'READ_WRITE'
+)
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    command_id,
+    standard_path_id,
+    LEFT(UPPER(regexp_replace(leaf_name, '([a-z0-9])([A-Z])', '\1_\2', 'g')), 100),
+    jsonb_build_object('zh-CN', leaf_name, 'en-US', leaf_name),
+    true,
+    false,
+    sort_order,
+    CASE WHEN access = 'READ_WRITE' THEN 'RW' ELSE 'RO' END,
+    true
+FROM x2_fields
+WHERE operation_type <> 'RMV'
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET mml_code = EXCLUDED.mml_code,
+    label_i18n = EXCLUDED.label_i18n,
+    default_selected = EXCLUDED.default_selected,
+    is_required = EXCLUDED.is_required,
+    sort_order = EXCLUDED.sort_order,
+    access_type = EXCLUDED.access_type,
+    is_supported = EXCLUDED.is_supported,
+    deprecated_at = NULL,
+    updated_at = now();
+
+-- MME ADD previously forced three READ_ONLY fields to RW. Keep only fields the
+-- standard model permits SetParameterValues to write after AddObject.
+DELETE FROM public.mml_command_sub_fields sf
+USING public.mml_commands c,
+      public.standard_params mme_sp
+WHERE sf.command_id = c.id
+  AND sf.standard_path_id = mme_sp.id
+  AND c.command_code = 'ADD LTE_MME_POOL_CONFIG_PARAM'
+  AND mme_sp.access <> 'READ_WRITE';
+
+UPDATE public.mml_command_sub_fields sf
+SET is_required = false,
+    access_type = 'RW',
+    updated_at = now()
+FROM public.mml_commands c
+WHERE sf.command_id = c.id
+  AND c.command_code = 'ADD LTE_MME_POOL_CONFIG_PARAM'
+  AND sf.deprecated_at IS NULL;
+
+-- Every multi-instance ADD must expose the writable fields of its MOD counterpart.
+-- AddObject creates only the row; values entered in the console are applied by the
+-- existing AddObject -> SetParameterValues compound flow after the new instance
+-- number is returned. Limit the copy to direct children of target_object so a
+-- parent ADD never absorbs fields from nested child tables.
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    add.id,
+    source_sf.standard_path_id,
+    source_sf.mml_code,
+    source_sf.label_i18n,
+    true,
+    false,
+    source_sf.sort_order,
+    source_sf.access_type,
+    source_sf.is_supported
+FROM public.mml_commands add
+JOIN public.mml_commands mod
+  ON mod.command_code = 'MOD ' || substr(add.command_code, 5)
+ AND mod.deprecated_at IS NULL
+JOIN public.mml_command_sub_fields source_sf
+  ON source_sf.command_id = mod.id
+ AND source_sf.deprecated_at IS NULL
+ AND source_sf.access_type = 'RW'
+JOIN public.standard_params source_sp
+  ON source_sp.id = source_sf.standard_path_id
+ AND source_sp.entry_type = 'parameter'
+WHERE add.operation_type = 'ADD'
+  AND add.deprecated_at IS NULL
+  AND add.target_object IS NOT NULL
+  AND add.target_object <> ''
+  AND source_sp.standard_path !~ '\{i\}$'
+  AND regexp_replace(
+          regexp_replace(source_sp.standard_path, '[^.]+$', ''),
+          '\{i\}\.', '', 'g'
+      ) = regexp_replace(add.target_object, '\{i\}\.', '', 'g')
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET deprecated_at = NULL,
+    updated_at = now();
+
+-- Commands without a MOD counterpart fall back to the standard writable fields.
+-- This covers standalone object families (for example MR configuration) while
+-- keeping MOD-defined command-specific labels and field subsets authoritative.
+INSERT INTO public.mml_command_sub_fields (
+    command_id, standard_path_id, mml_code, label_i18n, default_selected,
+    is_required, sort_order, access_type, is_supported
+)
+SELECT
+    add.id,
+    candidate_sp.id,
+    LEFT(UPPER(regexp_replace(
+        split_part(candidate_sp.standard_path, '.', array_length(string_to_array(candidate_sp.standard_path, '.'), 1)),
+        '([a-z0-9])([A-Z])', '\1_\2', 'g'
+    )), 91) || '_' || substr(md5(candidate_sp.standard_path), 1, 8),
+    jsonb_build_object(
+        'zh-CN', COALESCE(NULLIF(candidate_sp.description, ''), split_part(candidate_sp.standard_path, '.', array_length(string_to_array(candidate_sp.standard_path, '.'), 1))),
+        'en-US', split_part(candidate_sp.standard_path, '.', array_length(string_to_array(candidate_sp.standard_path, '.'), 1))
+    ),
+    true,
+    false,
+    row_number() OVER (PARTITION BY add.id ORDER BY candidate_sp.standard_path),
+    'RW',
+    true
+FROM public.mml_commands add
+JOIN public.standard_params candidate_sp
+  ON candidate_sp.entry_type = 'parameter'
+ AND candidate_sp.access = 'READ_WRITE'
+ AND candidate_sp.standard_path !~ '\{i\}$'
+ AND regexp_replace(
+         regexp_replace(candidate_sp.standard_path, '[^.]+$', ''),
+         '\{i\}\.', '', 'g'
+     ) = regexp_replace(add.target_object, '\{i\}\.', '', 'g')
+WHERE add.operation_type = 'ADD'
+  AND add.deprecated_at IS NULL
+  AND add.target_object IS NOT NULL
+  AND add.target_object <> ''
+  AND NOT EXISTS (
+      SELECT 1
+      FROM public.mml_commands mod
+      WHERE mod.command_code = 'MOD ' || substr(add.command_code, 5)
+        AND mod.deprecated_at IS NULL
+  )
+ON CONFLICT (command_id, standard_path_id) DO UPDATE
+SET deprecated_at = NULL,
+    updated_at = now();
+
+-- The legacy BM/BLN catalog imported numeric 5G neighbor fields as STRING.
+-- Their min/max values are numeric ranges (not string lengths); keep PLMNID as
+-- STRING because its 5..6 constraint is intentionally a character length.
+WITH numeric_5g_neighbor_types(leaf_name, data_type) AS (
+    VALUES
+        ('CellId', 'U_INT'),
+        ('GnbId', 'U_INT'),
+        ('GnbIdLength', 'U_INT'),
+        ('PCI', 'U_INT'),
+        ('QOFFSET', 'INT'),
+        ('SSB', 'U_INT'),
+        ('TAC', 'U_INT')
+)
+UPDATE public.param_mappings pm
+SET data_type = n.data_type,
+    updated_at = now()
+FROM numeric_5g_neighbor_types n
+WHERE pm.standard_path =
+      'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}.' || n.leaf_name
+  AND pm.is_active = true;
+
+-- MR configuration is a singleton on every base station. Keep only LST/MOD;
+-- suppress legacy object operations regardless of the selected device model.
+UPDATE public.mml_commands
+SET deprecated_at = COALESCE(deprecated_at, now()),
+    updated_at = now()
+WHERE command_code IN ('ADD MR_MGMT_CONFIG', 'RMV MR_MGMT_CONFIG');
 
 COMMIT;
 

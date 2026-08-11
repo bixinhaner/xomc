@@ -9,10 +9,21 @@ const (
 	SubjectParamSyncRunFailed    = "param_sync.run.failed"
 )
 
+const (
+	SubjectGeofenceLifecycleReevaluate           = "geofence.lifecycle.reevaluate"
+	SubjectGeofenceLifecycleDeactivationRequired = "geofence.lifecycle.deactivation_required"
+)
+
 // Device events
 //
 // 这类事件由 ACS Handler 在处理 CPE TR-069 Inform 报文时发布。
 const (
+	// SubjectDeviceLocationObserved is emitted from the transactional outbox
+	// after a device GPS snapshot and its strictly increasing version commit.
+	// Publisher: device.PgLocationObservationRepository/outbox relay.
+	// Consumer: geofence Coordinator.
+	SubjectDeviceLocationObserved = "device.location.observed"
+
 	// SubjectDeviceBootstrap 是设备首次入网或出厂重置结束时发布。
 	// Inform 事件码包含 "0 BOOTSTRAP"。
 	// 发布者：acs/handler.go，订阅者：device.InformHandler（设备注册）、provision.Engine（自动开站入口）
@@ -141,6 +152,20 @@ const (
 	// 发布者：acs/handler.go publishInformEvents（当 IsBoot 且有故障原因参数时）。
 	// 订阅者：stationlog.FaultLogService（按收集模式决定是否自动下发 SetParam + FaultLogURL）。
 	SubjectDeviceFaultDetected = "device.fault.detected"
+)
+
+// Geofence events are durable business facts emitted by the Coordinator
+// through the transactional event outbox. Notification and control consumers
+// remain downstream and must be independently idempotent.
+const (
+	SubjectGeofenceEvaluationCompleted = "geofence.evaluation.completed"
+	SubjectGeofenceEvaluationFailed    = "geofence.evaluation.failed"
+	SubjectGeofenceRuleExited          = "geofence.rule.exited"
+	SubjectGeofenceRuleEntered         = "geofence.rule.entered"
+	SubjectGeofenceDeviceExited        = "geofence.device.exited"
+	SubjectGeofenceDeviceEscalated     = "geofence.device.policy_escalated"
+	SubjectGeofenceDeviceEntered       = "geofence.device.entered"
+	SubjectGeofenceDeviceUnknown       = "geofence.device.unknown"
 )
 
 // System-wide control-plane events

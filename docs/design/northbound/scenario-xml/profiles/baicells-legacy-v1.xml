@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OutputProfileCatalog schema="xomc-nb-profile-v1" profileSet="baicells-legacy-v1">
+  <Defaults encoding="UTF-8" csvDelimiter="," csvQuote="standard" emptyValue="" nullValue="" timezone="local"/>
+
+  <Profile key="cm.cp.xml.v1" domain="CM" object="CP" format="XML" adapter="cm.device_params.v1" columnSet="cm.cp.legacy.v1" renderer="cm.xml.v1"/>
+  <Profile key="cm.ep.xml.v1" domain="CM" object="EP" format="XML" adapter="cm.device_params.v1" columnSet="cm.ep.legacy.v1" renderer="cm.xml.v1"/>
+  <Profile key="cm.cc.xml.v1" domain="CM" object="CC" format="XML" adapter="cm.device_params.v1" columnSet="cm.cc.legacy.v1" renderer="cm.xml.v1"/>
+  <Profile key="cm.ce.xml.v1" domain="CM" object="CE" format="XML" adapter="cm.device_params.v1" columnSet="cm.ce.legacy.v1" renderer="cm.xml.v1"/>
+
+  <Profile key="cm.cp.gnb.xml.v1" domain="CM" object="CP" tech="GNB" format="XML" adapter="cm.device_params.v1" columnSet="cm.cp.gnb.legacy.v1" renderer="cm.xml.v1"/>
+  <Profile key="cm.ep.gnb.xml.v1" domain="CM" object="EP" tech="GNB" format="XML" adapter="cm.device_params.v1" columnSet="cm.ep.gnb.legacy.v1" renderer="cm.xml.v1"/>
+  <Profile key="cm.cc.gnb.xml.v1" domain="CM" object="CC" tech="GNB" format="XML" adapter="cm.device_params.v1" columnSet="cm.cc.gnb.legacy.v1" renderer="cm.xml.v1"/>
+  <Profile key="cm.ce.gnb.xml.v1" domain="CM" object="CE" tech="GNB" format="XML" adapter="cm.device_params.v1" columnSet="cm.ce.gnb.legacy.v1" renderer="cm.xml.v1"/>
+
+  <Profile key="cm.cp.csv.v1" domain="CM" object="CP" format="CSV" adapter="cm.device_params.v1" columnSet="cm.cp.legacy.v1" renderer="csv.v1"/>
+  <Profile key="cm.ep.csv.v1" domain="CM" object="EP" format="CSV" adapter="cm.device_params.v1" columnSet="cm.ep.legacy.v1" renderer="csv.v1"/>
+  <Profile key="cm.cc.csv.v1" domain="CM" object="CC" format="CSV" adapter="cm.device_params.v1" columnSet="cm.cc.legacy.v1" renderer="csv.v1"/>
+  <Profile key="cm.ce.csv.v1" domain="CM" object="CE" format="CSV" adapter="cm.device_params.v1" columnSet="cm.ce.legacy.v1" renderer="csv.v1"/>
+  <Profile key="cm.coms.csv.v1" domain="CM" object="COMS" format="CSV" adapter="cm.device_params.v1" columnSet="cm.coms.legacy.v1" renderer="csv.v1"/>
+
+  <Profile key="pm.pc.csv.v1" domain="PM" object="PC" format="CSV" adapter="pm.metrics.v1" columnSet="pm.pc.baicells.legacy.v1" renderer="pm.csv.v1">
+    <TimeColumn name="DATE_TIME" format="dd/MM/yyyy HH:mm" value="window_start"/>
+    <MetricWindow source="period" supportedPeriods="15M,60M"/>
+  </Profile>
+  <Profile key="pm.pe.csv.v1" domain="PM" object="PE" format="CSV" adapter="pm.metrics.v1" columnSet="pm.pe.baicells.legacy.v1" renderer="pm.csv.v1">
+    <TimeColumn name="DATE_TIME" format="dd/MM/yyyy HH:mm" value="window_start"/>
+    <MetricWindow source="period" supportedPeriods="15M"/>
+  </Profile>
+  <Profile key="pm.pc.gnb.csv.v1" domain="PM" object="PC" tech="GNB" format="CSV" adapter="pm.metrics.v1" columnSet="pm.pc.gnb.baicells.legacy.v1" renderer="pm.csv.v1">
+    <TimeColumn name="DATE_TIME" format="dd/MM/yyyy HH:mm" value="window_start"/>
+    <MetricWindow source="period" supportedPeriods="15M"/>
+  </Profile>
+
+  <Profile key="pm.pc.pmresult.csv.v1" domain="PM" object="PC" format="CSV" adapter="pm.metrics.v1" columnSet="pm.pc.pmresult.legacy.v1" renderer="pmresult.csv.v1">
+    <TimeColumn name="PERIOD_START_TIME" format="yyyyMMddHHmmss" value="window_start"/>
+    <TimeColumn name="PERIOD_END_TIME" format="yyyyMMddHHmmss" value="window_end"/>
+    <MetricWindow source="period" supportedPeriods="60M"/>
+  </Profile>
+  <Profile key="pm.pc.gsm.pmresult.csv.v1" domain="PM" object="PC" tech="GSM" format="CSV" adapter="pm.metrics.v1" columnSet="pm.pc.gsm.pmresult.legacy.v1" renderer="pmresult.csv.v1">
+    <TimeColumn name="PERIOD_START_TIME" format="yyyyMMddHHmmss" value="window_start"/>
+    <TimeColumn name="PERIOD_END_TIME" format="yyyyMMddHHmmss" value="window_end"/>
+    <MetricWindow source="period" supportedPeriods="15M,60M"/>
+  </Profile>
+  <Profile key="pm.pc.gnb.pmresult.csv.v1" domain="PM" object="PC" tech="GNB" format="CSV" adapter="pm.metrics.v1" columnSet="pm.pc.gnb.pmresult.legacy.v1" renderer="pmresult.csv.v1">
+    <TimeColumn name="PERIOD_START_TIME" format="yyyyMMddHHmmss" value="window_start"/>
+    <TimeColumn name="PERIOD_END_TIME" format="yyyyMMddHHmmss" value="window_end"/>
+    <MetricWindow source="period" supportedPeriods="60M"/>
+  </Profile>
+
+  <Profile key="mr.mro.xml.v1" domain="MR" object="MRO" format="XML" adapter="mr.files.v1" columnSet="mr.mro.legacy.v1" renderer="mr.xml.v1"/>
+  <Profile key="mr.mre.xml.v1" domain="MR" object="MRE" format="XML" adapter="mr.files.v1" columnSet="mr.mre.legacy.v1" renderer="mr.xml.v1"/>
+  <Profile key="mr.mrs.xml.v1" domain="MR" object="MRS" format="XML" adapter="mr.files.v1" columnSet="mr.mrs.legacy.v1" renderer="mr.xml.v1"/>
+
+  <Profile key="log.custom.v1" domain="LOG" object="CUSTOM" format="TXT" adapter="audit.logs.v1" columnSet="log.custom.legacy.v1" renderer="log.custom.txt.v1" compression="gz"/>
+  <Profile key="log.fix.v1" domain="LOG" object="FIX" format="CSV" adapter="audit.logs.v1" columnSet="log.fix.legacy.v1" renderer="log.fix.csv.v1" compression="gz"/>
+
+  <Profile key="inventory.station.csv.v1" domain="INVENTORY" object="STATION" format="CSV" adapter="inventory.station.v1" columnSet="inventory.station.baicells.v1" renderer="inventory.station.csv.v1" encoding="GBK" quoteAll="true">
+    <PreserveAsText columns="ECI,PCI,Earfcn,PLMN,Last Period Time,First Online Time,Network Access Time,First Period Time"/>
+  </Profile>
+  <Profile key="inventory.station.gsm.csv.v1" domain="INVENTORY" object="STATION" tech="GSM" format="CSV" adapter="inventory.station.v1" columnSet="inventory.station.baicells.v1" renderer="inventory.station.csv.v1" encoding="GBK" quoteAll="true">
+    <PreserveAsText columns="ECI,PCI,Earfcn,PLMN,Last Period Time,First Online Time,Network Access Time,First Period Time"/>
+  </Profile>
+  <Profile key="inventory.station.gnb.csv.v1" domain="INVENTORY" object="STATION" tech="GNB" format="CSV" adapter="inventory.station.v1" columnSet="inventory.station.baicells.v1" renderer="inventory.station.csv.v1" encoding="GBK" quoteAll="true">
+    <PreserveAsText columns="ECI,PCI,Earfcn,PLMN,Last Period Time,First Online Time,Network Access Time,First Period Time"/>
+  </Profile>
+  <Profile key="inventory.omc.csv.v1" domain="INVENTORY" object="OMC" format="CSV" adapter="inventory.omc.v1" columnSet="inventory.omc.baicells.v1" renderer="inventory.omc.csv.v1" encoding="UTF-8"/>
+  <ColumnSets>
+    <ColumnSet key="cm.cp.legacy.v1" source="legacy Attribute alias list" mapping="device field, parameter path, expression, or empty"/>
+    <ColumnSet key="cm.ep.legacy.v1" source="legacy Attribute alias list" mapping="device field, parameter path, expression, or empty"/>
+    <ColumnSet key="cm.cc.legacy.v1" source="legacy Attribute alias list" mapping="device field, parameter path, expression, or empty"/>
+    <ColumnSet key="cm.ce.legacy.v1" source="legacy Attribute alias list" mapping="device field, parameter path, expression, or empty"/>
+    <ColumnSet key="cm.coms.legacy.v1" source="legacy Attribute alias list" mapping="device field, parameter path, expression, or empty"/>
+    <ColumnSet key="cm.cp.gnb.legacy.v1" source="legacy GNB Attribute alias list" mapping="device field, parameter path, expression, or empty"/>
+    <ColumnSet key="cm.ep.gnb.legacy.v1" source="legacy GNB Attribute alias list" mapping="device field, parameter path, expression, or empty"/>
+    <ColumnSet key="cm.cc.gnb.legacy.v1" source="legacy GNB Attribute alias list" mapping="device field, parameter path, expression, or empty"/>
+    <ColumnSet key="cm.ce.gnb.legacy.v1" source="legacy GNB Attribute alias list" mapping="device field, parameter path, expression, or empty"/>
+    <ColumnSet key="pm.pc.baicells.legacy.v1" source="legacy PM DataContent + Bson project aliases" mapping="pm metric path, device dimension, expression, or empty"/>
+    <ColumnSet key="pm.pe.baicells.legacy.v1" source="legacy PM DataContent + Bson project aliases" mapping="pm metric path, device dimension, expression, or empty"/>
+    <ColumnSet key="pm.pc.gnb.baicells.legacy.v1" source="legacy GNB PM DataContent + Bson project aliases" mapping="pm metric path, device dimension, expression, or empty"/>
+    <ColumnSet key="pm.pc.pmresult.legacy.v1" source="legacy pmresult DataContent + Bson project aliases" mapping="pm metric path, device dimension, expression, or empty"/>
+    <ColumnSet key="pm.pc.gsm.pmresult.legacy.v1" source="legacy GSM pmresult DataContent + Bson project aliases" mapping="pm metric path, device dimension, expression, or empty"/>
+    <ColumnSet key="pm.pc.gnb.pmresult.legacy.v1" source="legacy GNB pmresult DataContent + Bson project aliases" mapping="pm metric path, device dimension, expression, or empty"/>
+    <ColumnSet key="mr.mro.legacy.v1" source="MR XML pass-through contract" mapping="MR file metadata and stored object"/>
+    <ColumnSet key="mr.mre.legacy.v1" source="MR XML pass-through contract" mapping="MR file metadata and stored object"/>
+    <ColumnSet key="mr.mrs.legacy.v1" source="MR XML pass-through contract" mapping="MR file metadata and stored object"/>
+    <ColumnSet key="log.custom.legacy.v1" source="custom log TXT columns" mapping="login and operation audit sources"/>
+    <ColumnSet key="log.fix.legacy.v1" source="fix log CSV columns" mapping="login and operation audit sources"/>
+    <ColumnSet key="inventory.station.baicells.v1" source="enbMonitorExport BaiOMC_Station mysql + mongo column order" mapping="devices, device_info, device_parameters, alarms_active, device groups, system config, expression, or empty"/>
+    <ColumnSet key="inventory.omc.baicells.v1" source="enbMonitorExport OMC_INVENTORY columns" mapping="device aggregate, device_info aggregate, system config, build info, or explicit default"/>
+  </ColumnSets>
+</OutputProfileCatalog>

@@ -106,6 +106,8 @@ export default function UpdateModal({ open, onClose }: UpdateModalProps) {
           message.info(t('systemLicense.update.firstInstallHint'));
         }
         resetAndClose();
+        // 上传成功后刷新整个页面：license 数据 + 菜单 + feature 状态全部重新加载
+        setTimeout(() => window.location.reload(), 800);
       },
       onError: (err) => {
         const code = extractLicenseErrorCode(err);

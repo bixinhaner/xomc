@@ -97,6 +97,29 @@ func TestPgProgressTaskLoaderExcludesVersionMembers(t *testing.T) {
 	require.False(t, loader.includeMembers)
 }
 
+func TestBuildLoadTaskVersionsByIDSQLTargetsExactImmutableVersions(t *testing.T) {
+	first := uuid.MustParse("10000000-0000-4000-8000-000000000001")
+	second := uuid.MustParse("10000000-0000-4000-8000-000000000002")
+
+	query, args, err := buildLoadTaskVersionsByIDSQL([]uuid.UUID{first, second})
+
+	require.NoError(t, err)
+	require.Contains(t, query, "FROM pm_aggregation_task_versions v")
+	require.Contains(t, query, "JOIN pm_aggregation_tasks t")
+	require.Contains(t, query, "v.id IN ($1,$2)")
+	require.NotContains(t, query, "effective_to >=")
+	require.Equal(t, []interface{}{first, second}, args)
+}
+
+func TestNormalizeTaskVersionIDsRemovesNilAndDuplicates(t *testing.T) {
+	first := uuid.MustParse("10000000-0000-4000-8000-000000000001")
+	second := uuid.MustParse("10000000-0000-4000-8000-000000000002")
+
+	got := normalizeTaskVersionIDs([]uuid.UUID{second, uuid.Nil, first, second})
+
+	require.Equal(t, []uuid.UUID{first, second}, got)
+}
+
 func TestTaskMemberBatchesStayBelowPostgresParameterLimit(t *testing.T) {
 	members := make([]TaskMember, 2501)
 

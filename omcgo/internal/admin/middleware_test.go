@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/admin/audit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -475,6 +477,146 @@ func TestAuditLogger_WritesOnPost(t *testing.T) {
 	// Note: audit is fire-and-forget via goroutine so we can't assert immediately.
 	// In a real test we'd use a channel or sync mechanism. For now we verify no panic.
 	_ = auditCreated
+}
+
+func TestAuditLogger_UsesSingleBusinessAuditEntry(t *testing.T) {
+	created := make(chan *AuditLog, 2)
+	auditRepo := &mockAuditRepo{
+		createFn: func(_ context.Context, log *AuditLog) error {
+			created <- log
+			return nil
+		},
+	}
+	userID := uuid.New()
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUserID, userID)
+		c.Set(CtxKeyUsername, "operator")
+		c.Next()
+	})
+	r.Use(AuditLogger(auditRepo))
+	r.POST("/geofences/:id/enable", func(c *gin.Context) {
+		SetBusinessAudit(c, audit.Entry{
+			Action:       "config_geofence_enable",
+			ResourceType: "geofence",
+			ResourceID:   c.Param("id"),
+			Details: map[string]interface{}{
+				"reason":        "site moved",
+				"target_status": "enabled",
+			},
+		})
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	resourceID := uuid.NewString()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/geofences/"+resourceID+"/enable",
+		nil,
+	)
+	req.Header.Set("User-Agent", "audit-test")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	select {
+	case got := <-created:
+		require.Equal(t, "config_geofence_enable", got.Action)
+		require.Equal(t, "geofence", got.Resource)
+		require.Equal(t, resourceID, got.ResourceID)
+		require.Equal(t, "operator", got.Username)
+		require.Equal(t, &userID, got.UserID)
+		require.Equal(t, "audit-test", got.UserAgent)
+		require.Equal(t, "site moved", got.Details["reason"])
+	case <-time.After(time.Second):
+		t.Fatal("business audit entry was not created")
+	}
+
+	select {
+	case duplicate := <-created:
+		t.Fatalf("unexpected duplicate audit entry: %+v", duplicate)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestAuditLogger_RecordsFailedBusinessAuditWithReason(t *testing.T) {
+	created := make(chan *AuditLog, 1)
+	auditRepo := &mockAuditRepo{
+		createFn: func(_ context.Context, log *AuditLog) error {
+			created <- log
+			return nil
+		},
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUsername, "operator")
+		c.Next()
+	})
+	r.Use(AuditLogger(auditRepo))
+	r.POST("/geofences/:id/disable", func(c *gin.Context) {
+		SetBusinessAudit(c, audit.Entry{
+			Action:       "config_geofence_disable",
+			ResourceType: "geofence",
+			ResourceID:   c.Param("id"),
+		})
+		SetBusinessAuditError(c, errors.New("preview fingerprint is stale"))
+		c.AbortWithStatus(http.StatusConflict)
+	})
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/geofences/"+uuid.NewString()+"/disable",
+		nil,
+	)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+	select {
+	case got := <-created:
+		require.Equal(t, "config_geofence_disable_failed", got.Action)
+		require.Equal(t, "preview fingerprint is stale", got.Details["error"])
+	case <-time.After(time.Second):
+		t.Fatal("failed business audit entry was not created")
+	}
+}
+
+func TestAuditLogger_SkipsExplicitlyExcludedWrite(t *testing.T) {
+	created := make(chan *AuditLog, 1)
+	auditRepo := &mockAuditRepo{
+		createFn: func(_ context.Context, log *AuditLog) error {
+			created <- log
+			return nil
+		},
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUsername, "operator")
+		c.Next()
+	})
+	r.Use(AuditLogger(auditRepo))
+	r.POST("/geofences/:id/enable-preview", func(c *gin.Context) {
+		SkipAudit(c)
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/geofences/"+uuid.NewString()+"/enable-preview",
+		nil,
+	)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	select {
+	case got := <-created:
+		t.Fatalf("preview unexpectedly created audit entry: %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
 }
 
 func TestRequireResourcePermission_MapsMethodToAction(t *testing.T) {

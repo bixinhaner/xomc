@@ -16,6 +16,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
@@ -30,6 +31,7 @@ type TransferBridge struct {
 	eventBus    event.EventBus
 	deduper     *event.Deduper
 	logger      *zap.Logger
+	admission   storageprotection.WriteAdmission
 }
 
 // NewTransferBridge creates a new TransferBridge.
@@ -53,6 +55,10 @@ func NewTransferBridge(
 		deduper:  deduper,
 		logger:   logger.Named("transfer-bridge"),
 	}
+}
+
+func (b *TransferBridge) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	b.admission = admission
 }
 
 // Subscribe registers the bridge to listen for autonomous transfer complete events.
@@ -319,6 +325,15 @@ func parseLogFilename(filename string) (taskID8, deviceSN string) {
 
 // downloadAndStore fetches the file from the given URL and stores it in MinIO.
 func (b *TransferBridge) downloadAndStore(ctx context.Context, url, bucket, objectPath string) (int64, error) {
+	if b.admission != nil {
+		decision, err := b.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, b.writeScope(bucket))
+		if err != nil {
+			return 0, fmt.Errorf("storage admission check: %w", err)
+		}
+		if !decision.Allowed {
+			return 0, fmt.Errorf("storage write protected: %s", decision.Reason)
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, fmt.Errorf("create request: %w", err)
@@ -341,4 +356,19 @@ func (b *TransferBridge) downloadAndStore(ctx context.Context, url, bucket, obje
 	}
 
 	return info.Size, nil
+}
+
+func (b *TransferBridge) writeScope(bucket string) storageprotection.WriteScope {
+	switch bucket {
+	case b.buckets.PMFiles:
+		return storageprotection.WriteScopePM
+	case b.buckets.MRFiles:
+		return storageprotection.WriteScopeMR
+	case b.buckets.ConfigBackup:
+		return storageprotection.WriteScopeBackup
+	case b.buckets.Reports:
+		return storageprotection.WriteScopeReport
+	default:
+		return storageprotection.WriteScopeUpload
+	}
 }

@@ -9,7 +9,8 @@
 // 内部已由老 multi-license 模型切到 singleton system_license 模型。
 //
 //   - 数据源：`SystemLicenseRepository.GetCurrent` — 全系统唯一 license 行；
-//     空表 = default-allow + warn（与老逻辑一致，dev 友好）
+//     空表 = fail-closed：受控业务返回 ErrLicenseUnavailable（对齐旧项目"无 License
+//     安全拒绝"语义；进程不退出，仅受控业务全部拒绝）
 //   - 容量：`SystemLicense.DevicesSupport` 是 map[device_type]int；本期
 //     `EnforceCapacity(ctx, additional)` 暂用所有 type 容量**之和**作为总容量
 //     （接口签名保留，device.Service 零改动），per-type 精细 gating 留给
@@ -43,17 +44,20 @@ import (
 type Enforcer interface {
 	// EnforceCapacity returns ErrLicenseCapacityExceeded if adding `additional`
 	// devices would cross the system-license total capacity (sum of all
-	// device_type quotas). Returns nil when no license is configured
-	// (default-allow).
+	// device_type quotas). Returns ErrLicenseUnavailable when no license is
+	// configured (fail-closed).
 	EnforceCapacity(ctx context.Context, additional int) error
 
 	// EnforceExpiry returns ErrLicenseExpired if the current license is past
-	// expiry_date. Operation name is passed through for metric labels +
-	// audit. Returns nil when no license is configured or expiry_date is NULL.
+	// expiry_date, or ErrLicenseUnavailable when no license is configured
+	// (fail-closed). Operation name is passed through for metric labels +
+	// audit. Returns nil only when a license exists and expiry_date is NULL
+	// (perpetual) or in the future.
 	EnforceExpiry(ctx context.Context, operation string) error
 
 	// ActiveLicense returns the current system license, or nil if none
-	// configured (default-allow scenario).
+	// configured (EnforceCapacity/EnforceExpiry translate nil into
+	// ErrLicenseUnavailable — fail-closed).
 	//
 	// 注意：返回类型由老 License 改为 SystemLicense（Step 3 breaking 变更，
 	// 但唯一 caller 是 enforcer 自身 / handler / test，已同步更新）。
@@ -91,6 +95,7 @@ type EnforcerImpl struct {
 	devices DeviceCounter
 	logger  *zap.Logger
 	metrics *EnforcementMetrics
+	usageRepo SystemLicenseUsageRepository
 
 	cacheMu      sync.RWMutex
 	cachedActive *SystemLicense
@@ -121,6 +126,12 @@ func (e *EnforcerImpl) SetCacheTTL(ttl time.Duration) {
 	e.cacheTTL = ttl
 }
 
+// SetUsageRepo 注入累计使用时长仓储，启用累计时长 + 时间回拨检测。
+// 不调用（nil）时 EnforceExpiry 只做日期过期校验（兼容旧测试/轻量部署）。
+func (e *EnforcerImpl) SetUsageRepo(r SystemLicenseUsageRepository) {
+	e.usageRepo = r
+}
+
 // Invalidate clears the cached system license.
 func (e *EnforcerImpl) Invalidate() {
 	e.cacheMu.Lock()
@@ -130,7 +141,8 @@ func (e *EnforcerImpl) Invalidate() {
 }
 
 // ActiveLicense returns the cached current system license, refreshing if stale.
-// Returns nil if no license is configured (default-allow scenario).
+// Returns nil if no license is configured (callers EnforceCapacity/EnforceExpiry
+// translate nil into ErrLicenseUnavailable — fail-closed).
 func (e *EnforcerImpl) ActiveLicense(ctx context.Context) (*SystemLicense, error) {
 	e.cacheMu.RLock()
 	if !e.cachedAt.IsZero() && nowFunc().Sub(e.cachedAt) < e.cacheTTL {
@@ -152,7 +164,8 @@ func (e *EnforcerImpl) ActiveLicense(ctx context.Context) (*SystemLicense, error
 	lic, err := e.repo.GetCurrent(ctx)
 	if err != nil {
 		if errors.Is(err, ErrSystemLicenseNotFound) {
-			// 空表 = default-allow；缓存 nil 避免每次 Enforce 都打 DB。
+			// 空表 = fail-closed：缓存 nil 避免每次 Enforce 都打 DB；EnforceCapacity/
+			// EnforceExpiry 会把 nil 翻译成 ErrLicenseUnavailable。
 			e.cachedActive = nil
 			e.cachedAt = nowFunc()
 			return nil, nil
@@ -183,8 +196,8 @@ func totalCapacity(lic *SystemLicense) int {
 }
 
 // EnforceCapacity rejects when current device count + additional exceeds the
-// total capacity (sum of all device_type quotas). Returns nil if no license
-// (default-allow + log).
+// total capacity (sum of all device_type quotas), or when no license is
+// configured (fail-closed → ErrLicenseUnavailable).
 func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, additional int) error {
 	if additional < 0 {
 		return fmt.Errorf("additional must be >= 0: %w", commonerrors.ErrInvalidInput)
@@ -195,9 +208,11 @@ func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, additional int) erro
 		return err
 	}
 	if lic == nil {
-		e.recordEnforcement("capacity", "no_active_license")
-		e.logger.Warn("license enforcement skipped: no system license configured")
-		return nil
+		e.recordEnforcement("capacity", "denied_no_license")
+		e.logger.Warn("license capacity enforcement denied: no system license configured",
+			zap.String("audit", "enforcement_capacity"),
+		)
+		return fmt.Errorf("no system license configured: %w", commonerrors.ErrLicenseUnavailable)
 	}
 
 	used, err := e.devices.CountDevices(ctx)
@@ -224,23 +239,24 @@ func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, additional int) erro
 	return nil
 }
 
-// EnforceExpiry rejects when the current license is past expiry_date.
-// NULL expiry_date or no license configured = default-allow.
+// EnforceExpiry rejects when the current license is past expiry_date, when
+// cumulative usage exceeds time_limit_hours, on system time rollback, or when
+// no license is configured (fail-closed → ErrLicenseUnavailable). NULL
+// expiry_date (perpetual) skips the date check but cumulative/rollback still apply.
 func (e *EnforcerImpl) EnforceExpiry(ctx context.Context, operation string) error {
 	lic, err := e.ActiveLicense(ctx)
 	if err != nil {
 		return err
 	}
 	if lic == nil {
-		e.recordEnforcement(operation, "no_active_license")
-		return nil
+		e.recordEnforcement(operation, "denied_no_license")
+		e.logger.Warn("license expiry enforcement denied: no system license configured",
+			zap.String("audit", "enforcement_expiry"),
+			zap.String("operation", operation),
+		)
+		return fmt.Errorf("no system license configured: %w", commonerrors.ErrLicenseUnavailable)
 	}
-	if lic.ExpiryDate == nil {
-		// NULL = perpetual / no expiry。与老 TypePerpetual 语义一致。
-		e.recordEnforcement(operation, "allowed")
-		return nil
-	}
-	if nowFunc().After(*lic.ExpiryDate) {
+	if lic.ExpiryDate != nil && nowFunc().After(*lic.ExpiryDate) {
 		e.recordEnforcement(operation, "denied_expired")
 		e.logger.Warn("license expired — operation denied",
 			zap.String("audit", "enforcement_expiry"),
@@ -252,8 +268,53 @@ func (e *EnforcerImpl) EnforceExpiry(ctx context.Context, operation string) erro
 			lic.LicenseID, lic.ExpiryDate.Format(time.RFC3339),
 			commonerrors.ErrLicenseExpired)
 	}
-
+	if err := e.enforceCumulative(ctx, lic); err != nil {
+		return err
+	}
 	e.recordEnforcement(operation, "allowed")
+	return nil
+}
+
+// enforceCumulative 复刻旧项目 checkOMCTimeUsed/checkLicenseExpire 的累计时长 +
+// 时间回拨检测（compute-on-read：按 now - last_visited 累加）。time_limit_hours<=0
+// 或未注入 usageRepo 时跳过。持久化错误 fail-open（仅告警），避免 DB 抖动锁死全部业务。
+func (e *EnforcerImpl) enforceCumulative(ctx context.Context, lic *SystemLicense) error {
+	if e.usageRepo == nil {
+		return nil
+	}
+	timeLimit := extractTimeLimitHours(lic.FeatureList)
+	if timeLimit <= 0 {
+		return nil
+	}
+	lastVisited, err := e.usageRepo.LastVisited(ctx)
+	if err != nil {
+		e.logger.Warn("license cumulative usage load failed, skip", zap.Error(err))
+		return nil
+	}
+	now := nowFunc()
+	elapsed := now.Sub(lastVisited)
+	if elapsed < 0 {
+		e.recordEnforcement("expiry", "denied_rollback")
+		e.logger.Warn("license time rollback detected — operation denied",
+			zap.String("audit", "enforcement_expiry"),
+			zap.Time("now", now), zap.Time("last_visited", lastVisited))
+		return fmt.Errorf("system time rollback (now=%s < last_visited=%s): %w",
+			now.UTC().Format(time.RFC3339), lastVisited.UTC().Format(time.RFC3339),
+			commonerrors.ErrLicenseExpired)
+	}
+	total, err := e.usageRepo.Advance(ctx, elapsed.Hours())
+	if err != nil {
+		e.logger.Warn("license cumulative usage advance failed, skip", zap.Error(err))
+		return nil
+	}
+	if total >= float64(timeLimit) {
+		e.recordEnforcement("expiry", "denied_cumulative")
+		e.logger.Warn("license cumulative usage exceeded — operation denied",
+			zap.String("audit", "enforcement_expiry"),
+			zap.Float64("used_hours", total), zap.Int("limit_hours", timeLimit))
+		return fmt.Errorf("license cumulative usage %.1fh >= limit %dh: %w",
+			total, timeLimit, commonerrors.ErrLicenseExpired)
+	}
 	return nil
 }
 
@@ -321,6 +382,8 @@ func EnforcementError(err error) (kind string, isEnforcement bool) {
 		return "capacity_exceeded", true
 	case errors.Is(err, commonerrors.ErrLicenseExpired):
 		return "expired", true
+	case errors.Is(err, commonerrors.ErrLicenseUnavailable):
+		return "no_license", true
 	default:
 		return "", false
 	}

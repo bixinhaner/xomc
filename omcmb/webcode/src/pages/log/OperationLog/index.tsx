@@ -14,6 +14,10 @@ import type { FilterField } from '@/components/FilterBar';
 import { useOperationLogs } from '@core/hooks/api/useLogs';
 import type { OperationLog } from '@core/types/system';
 import { useT } from '@/hooks/useT';
+import {
+  localizeAuditAction,
+  localizeAuditReason,
+} from './geofenceAuditText';
 
 // 日志类型
 // northbound（北向接口日志）暂不在此页展示：后端 northbound 模块只有 push/sync/deadletter，
@@ -214,7 +218,7 @@ export default function OperationLogPage() {
       title: t('log.logName'),
       dataIndex: 'logName',
       width: 200,
-      render: (val) => (val as string) || '-',
+      render: (val) => localizeAuditAction(String(val ?? ''), t),
     },
     {
       key: 'detail',
@@ -222,8 +226,8 @@ export default function OperationLogPage() {
       dataIndex: 'detail',
       ellipsis: true,
       render: (val) => (
-        <Tooltip title={String(val)}>
-          <span>{truncate(String(val), 50)}</span>
+        <Tooltip title={localizeAuditReason(String(val ?? ''), t)}>
+          <span>{truncate(localizeAuditReason(String(val ?? ''), t), 50)}</span>
         </Tooltip>
       ),
     },
@@ -248,8 +252,8 @@ export default function OperationLogPage() {
       width: 200,
       ellipsis: true,
       render: (val) => (
-        <Tooltip title={String(val)}>
-          <span>{truncate(String(val), 30)}</span>
+        <Tooltip title={localizeAuditReason(String(val ?? ''), t)}>
+          <span>{truncate(localizeAuditReason(String(val ?? ''), t), 30)}</span>
         </Tooltip>
       ),
     },

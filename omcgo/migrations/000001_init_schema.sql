@@ -3036,6 +3036,7 @@ CREATE TABLE public.devices (
     site_id character varying(64),
     latitude double precision,
     longitude double precision,
+    location_source_mode character varying(16) DEFAULT 'tr069'::character varying NOT NULL,
     extension_data jsonb,
     deleted_at timestamp with time zone,
     deleted_by text,
@@ -3053,6 +3054,7 @@ CREATE TABLE public.devices (
     last_offline_reason character varying(32),
     recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
     recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT devices_location_source_mode_check CHECK (((location_source_mode)::text = ANY ((ARRAY['tr069'::character varying, 'external'::character varying])::text[]))),
     CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
     CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 )
@@ -3329,6 +3331,7 @@ CREATE TABLE public.devices_cmcc (
     site_id character varying(64),
     latitude double precision,
     longitude double precision,
+    location_source_mode character varying(16) DEFAULT 'tr069'::character varying NOT NULL,
     extension_data jsonb,
     deleted_at timestamp with time zone,
     deleted_by text,
@@ -3346,6 +3349,7 @@ CREATE TABLE public.devices_cmcc (
     last_offline_reason character varying(32),
     recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
     recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT devices_location_source_mode_check CHECK (((location_source_mode)::text = ANY ((ARRAY['tr069'::character varying, 'external'::character varying])::text[]))),
     CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
     CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 )
@@ -3377,6 +3381,7 @@ CREATE TABLE public.devices_ctcc (
     site_id character varying(64),
     latitude double precision,
     longitude double precision,
+    location_source_mode character varying(16) DEFAULT 'tr069'::character varying NOT NULL,
     extension_data jsonb,
     deleted_at timestamp with time zone,
     deleted_by text,
@@ -3394,6 +3399,7 @@ CREATE TABLE public.devices_ctcc (
     last_offline_reason character varying(32),
     recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
     recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT devices_location_source_mode_check CHECK (((location_source_mode)::text = ANY ((ARRAY['tr069'::character varying, 'external'::character varying])::text[]))),
     CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
     CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
@@ -3424,6 +3430,7 @@ CREATE TABLE public.devices_cucc (
     site_id character varying(64),
     latitude double precision,
     longitude double precision,
+    location_source_mode character varying(16) DEFAULT 'tr069'::character varying NOT NULL,
     extension_data jsonb,
     deleted_at timestamp with time zone,
     deleted_by text,
@@ -3441,6 +3448,7 @@ CREATE TABLE public.devices_cucc (
     last_offline_reason character varying(32),
     recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
     recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT devices_location_source_mode_check CHECK (((location_source_mode)::text = ANY ((ARRAY['tr069'::character varying, 'external'::character varying])::text[]))),
     CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
     CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
@@ -3471,6 +3479,7 @@ CREATE TABLE public.devices_other (
     site_id character varying(64),
     latitude double precision,
     longitude double precision,
+    location_source_mode character varying(16) DEFAULT 'tr069'::character varying NOT NULL,
     extension_data jsonb,
     deleted_at timestamp with time zone,
     deleted_by text,
@@ -3488,6 +3497,7 @@ CREATE TABLE public.devices_other (
     last_offline_reason character varying(32),
     recycle_type character varying(16) DEFAULT ''::character varying NOT NULL,
     recycle_executor character varying(128) DEFAULT ''::character varying NOT NULL,
+    CONSTRAINT devices_location_source_mode_check CHECK (((location_source_mode)::text = ANY ((ARRAY['tr069'::character varying, 'external'::character varying])::text[]))),
     CONSTRAINT chk_devices_lifecycle_state CHECK (((lifecycle_state)::text = ANY (ARRAY[('discovered'::character varying)::text, ('registered'::character varying)::text, ('provisioning'::character varying)::text, ('commissioned'::character varying)::text, ('maintenance'::character varying)::text, ('decommissioned'::character varying)::text]))),
     CONSTRAINT devices_recycle_type_check CHECK (((recycle_type)::text = ANY ((ARRAY[''::character varying, 'manual'::character varying, 'auto'::character varying])::text[])))
 );
@@ -3924,6 +3934,7 @@ CREATE TABLE public.menus (
     updated_by uuid,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     name_i18n jsonb,
+    feature_code text[],
     CONSTRAINT chk_menu_type CHECK (((type)::text = ANY (ARRAY[('directory'::character varying)::text, ('menu'::character varying)::text, ('button'::character varying)::text]))),
     CONSTRAINT chk_show_status CHECK (((show_status)::text = ANY (ARRAY[('show'::character varying)::text, ('hide'::character varying)::text]))),
     CONSTRAINT chk_status CHECK (((status)::text = ANY (ARRAY[('normal'::character varying)::text, ('disabled'::character varying)::text])))
@@ -4800,6 +4811,315 @@ CREATE TABLE public.nedirect_sessions (
     disconnect_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: northbound_endpoints; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_endpoints (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name character varying(128) NOT NULL,
+    protocol character varying(16) NOT NULL,
+    purpose character varying(64) DEFAULT ''::character varying NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    host character varying(255) DEFAULT ''::character varying NOT NULL,
+    port integer,
+    username character varying(128) DEFAULT ''::character varying NOT NULL,
+    credential_ref character varying(255) DEFAULT ''::character varying NOT NULL,
+    auth_mode character varying(32) DEFAULT 'PASSWORD'::character varying NOT NULL,
+    remote_root character varying(512) DEFAULT ''::character varying NOT NULL,
+    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    status character varying(32) DEFAULT 'terminated'::character varying NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_endpoints_auth_mode_check CHECK (((auth_mode)::text = ANY (ARRAY[('PASSWORD'::character varying)::text, ('PRIVATE_KEY'::character varying)::text, ('NONE'::character varying)::text]))),
+    CONSTRAINT northbound_endpoints_port_check CHECK (((port IS NULL) OR ((port > 0) AND (port <= 65535)))),
+    CONSTRAINT northbound_endpoints_protocol_check CHECK (((protocol)::text = ANY (ARRAY[('FTP'::character varying)::text, ('SFTP'::character varying)::text, ('SNMP'::character varying)::text, ('SOCKET'::character varying)::text, ('API'::character varying)::text]))),
+    CONSTRAINT northbound_endpoints_status_check CHECK (((status)::text = ANY (ARRAY[('normal'::character varying)::text, ('terminated'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_field_mappings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_field_mappings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    profile_kind character varying(32) NOT NULL,
+    profile_code character varying(64) NOT NULL,
+    domain character varying(32) NOT NULL,
+    object_code character varying(64) NOT NULL,
+    field_key text NOT NULL,
+    output_alias text NOT NULL,
+    system_field text NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    support_status character varying(32) DEFAULT 'supported'::character varying NOT NULL,
+    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_field_mappings_domain_check CHECK (((domain)::text = ANY (ARRAY[('CM'::character varying)::text, ('PM'::character varying)::text, ('MR'::character varying)::text, ('LOG'::character varying)::text, ('INVENTORY'::character varying)::text]))),
+    CONSTRAINT northbound_field_mappings_profile_kind_check CHECK (((profile_kind)::text = ANY (ARRAY[('file'::character varying)::text, ('inventory'::character varying)::text, ('socket'::character varying)::text, ('snmp'::character varying)::text, ('api'::character varying)::text]))),
+    CONSTRAINT northbound_field_mappings_support_status_check CHECK (((support_status)::text = ANY (ARRAY[('supported'::character varying)::text, ('partial'::character varying)::text, ('unsupported'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_file_profiles; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_file_profiles (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    code character varying(32) NOT NULL,
+    name character varying(255) NOT NULL,
+    vendor character varying(128) DEFAULT 'Baicells'::character varying NOT NULL,
+    scenario_name character varying(128) DEFAULT ''::character varying NOT NULL,
+    scenario_name_en character varying(128) DEFAULT ''::character varying NOT NULL,
+    description text DEFAULT ''::text NOT NULL,
+    flags jsonb DEFAULT '[]'::jsonb NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    status character varying(32) DEFAULT 'terminated'::character varying NOT NULL,
+    groups jsonb DEFAULT '[]'::jsonb NOT NULL,
+    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_file_profiles_code_check CHECK (((code)::text ~ '^S[0-9]{4}$'::text)),
+    CONSTRAINT northbound_file_profiles_status_check CHECK (((status)::text = ANY (ARRAY[('normal'::character varying)::text, ('terminated'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_inventory_profiles; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_inventory_profiles (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    code character varying(32) NOT NULL,
+    name character varying(255) NOT NULL,
+    object_code character varying(32) NOT NULL,
+    tech character varying(32) DEFAULT ''::character varying NOT NULL,
+    period character varying(16) DEFAULT '24H'::character varying NOT NULL,
+    start_minute integer DEFAULT 5 NOT NULL,
+    path_template text NOT NULL,
+    file_name_template text NOT NULL,
+    compression_enabled boolean DEFAULT true NOT NULL,
+    compression_format character varying(16) DEFAULT 'zip'::character varying NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    status character varying(32) DEFAULT 'terminated'::character varying NOT NULL,
+    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_inventory_profiles_code_check CHECK (((code)::text = ANY (ARRAY[('ENB'::character varying)::text, ('GNB'::character varying)::text, ('GSM'::character varying)::text, ('OMC'::character varying)::text]))),
+    CONSTRAINT northbound_inventory_profiles_compression_format_check CHECK (((compression_format)::text = ANY (ARRAY[('zip'::character varying)::text, ('gz'::character varying)::text]))),
+    CONSTRAINT northbound_inventory_profiles_period_check CHECK (((period)::text = ANY (ARRAY[('15M'::character varying)::text, ('60M'::character varying)::text, ('24H'::character varying)::text, ('7D'::character varying)::text, ('1MO'::character varying)::text]))),
+    CONSTRAINT northbound_inventory_profiles_start_minute_check CHECK (((start_minute >= 0) AND (start_minute <= 59))),
+    CONSTRAINT northbound_inventory_profiles_status_check CHECK (((status)::text = ANY (ARRAY[('normal'::character varying)::text, ('terminated'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_file_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_file_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    profile_kind character varying(32) NOT NULL,
+    profile_code character varying(32) NOT NULL,
+    group_id character varying(128) DEFAULT ''::character varying NOT NULL,
+    domain character varying(32) NOT NULL,
+    object_code character varying(32) DEFAULT ''::character varying NOT NULL,
+    status character varying(32) DEFAULT 'running'::character varying NOT NULL,
+    window_start timestamp with time zone,
+    window_end timestamp with time zone,
+    artifact_path text DEFAULT ''::text NOT NULL,
+    artifact_name text DEFAULT ''::text NOT NULL,
+    artifact_content text DEFAULT ''::text NOT NULL,
+    artifact_size bigint DEFAULT 0 NOT NULL,
+    row_count integer DEFAULT 0 NOT NULL,
+    compression_enabled boolean DEFAULT false NOT NULL,
+    compression_format character varying(16),
+    error_message text DEFAULT ''::text NOT NULL,
+    summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_file_runs_artifact_size_check CHECK ((artifact_size >= 0)),
+    CONSTRAINT northbound_file_runs_profile_kind_check CHECK (((profile_kind)::text = ANY (ARRAY[('file'::character varying)::text, ('inventory'::character varying)::text]))),
+    CONSTRAINT northbound_file_runs_row_count_check CHECK ((row_count >= 0)),
+    CONSTRAINT northbound_file_runs_status_check CHECK (((status)::text = ANY (ARRAY[('running'::character varying)::text, ('success'::character varying)::text, ('failed'::character varying)::text, ('terminated'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_delivery_targets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_delivery_targets (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    scope character varying(32) NOT NULL,
+    owner_code character varying(64) DEFAULT ''::character varying NOT NULL,
+    target_key character varying(128) NOT NULL,
+    name character varying(200) NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    protocol character varying(8) DEFAULT 'FTP'::character varying NOT NULL,
+    host character varying(255) DEFAULT ''::character varying NOT NULL,
+    port integer DEFAULT 21 NOT NULL,
+    username character varying(128) DEFAULT ''::character varying NOT NULL,
+    credential_secret text DEFAULT ''::text NOT NULL,
+    auth_mode character varying(32) DEFAULT 'PASSWORD'::character varying NOT NULL,
+    remote_root text DEFAULT '/northupload'::text NOT NULL,
+    retry_times integer DEFAULT 3 NOT NULL,
+    timeout_seconds integer DEFAULT 30 NOT NULL,
+    passive_mode boolean DEFAULT true NOT NULL,
+    host_key_policy character varying(32) DEFAULT 'INSECURE'::character varying NOT NULL,
+    host_key_fingerprint text DEFAULT ''::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_delivery_targets_auth_mode_check CHECK (((auth_mode)::text = ANY (ARRAY[('PASSWORD'::character varying)::text, ('PRIVATE_KEY'::character varying)::text]))),
+    CONSTRAINT northbound_delivery_targets_host_key_policy_check CHECK (((host_key_policy)::text = ANY (ARRAY[('INSECURE'::character varying)::text, ('FINGERPRINT'::character varying)::text]))),
+    CONSTRAINT northbound_delivery_targets_port_check CHECK (((port >= 1) AND (port <= 65535))),
+    CONSTRAINT northbound_delivery_targets_protocol_check CHECK (((protocol)::text = ANY (ARRAY[('FTP'::character varying)::text, ('SFTP'::character varying)::text]))),
+    CONSTRAINT northbound_delivery_targets_retry_times_check CHECK (((retry_times >= 0) AND (retry_times <= 20))),
+    CONSTRAINT northbound_delivery_targets_scope_check CHECK (((scope)::text = ANY (ARRAY[('file'::character varying)::text, ('inventory'::character varying)::text, ('socket'::character varying)::text]))),
+    CONSTRAINT northbound_delivery_targets_timeout_seconds_check CHECK (((timeout_seconds >= 1) AND (timeout_seconds <= 300)))
+);
+
+
+--
+-- Name: northbound_snmp_alarm_targets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_snmp_alarm_targets (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    target_key character varying(128) NOT NULL,
+    name character varying(200) NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    version character varying(8) DEFAULT 'v2'::character varying NOT NULL,
+    notification_type character varying(16) DEFAULT 'Trap'::character varying NOT NULL,
+    listen_ip character varying(64) DEFAULT '0.0.0.0'::character varying NOT NULL,
+    listen_port integer DEFAULT 161 NOT NULL,
+    target_host character varying(255) DEFAULT ''::character varying NOT NULL,
+    target_port integer DEFAULT 162 NOT NULL,
+    community_secret text DEFAULT ''::text NOT NULL,
+    security_name character varying(128) DEFAULT ''::character varying NOT NULL,
+    auth_protocol character varying(16) DEFAULT ''::character varying NOT NULL,
+    auth_secret text DEFAULT ''::text NOT NULL,
+    priv_protocol character varying(16) DEFAULT ''::character varying NOT NULL,
+    priv_secret text DEFAULT ''::text NOT NULL,
+    clear_severity_policy character varying(64) DEFAULT '保留原级别'::character varying NOT NULL,
+    mib_query_enabled boolean DEFAULT true NOT NULL,
+    timeout_seconds integer DEFAULT 5 NOT NULL,
+    retries integer DEFAULT 1 NOT NULL,
+    mib_fields jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_snmp_alarm_targets_notification_type_check CHECK (((notification_type)::text = ANY (ARRAY[('Trap'::character varying)::text, ('Inform'::character varying)::text]))),
+    CONSTRAINT northbound_snmp_alarm_targets_port_check CHECK (((listen_port >= 1) AND (listen_port <= 65535) AND (target_port >= 1) AND (target_port <= 65535))),
+    CONSTRAINT northbound_snmp_alarm_targets_retries_check CHECK (((retries >= 0) AND (retries <= 20))),
+    CONSTRAINT northbound_snmp_alarm_targets_timeout_seconds_check CHECK (((timeout_seconds >= 1) AND (timeout_seconds <= 300))),
+    CONSTRAINT northbound_snmp_alarm_targets_version_check CHECK (((version)::text = ANY (ARRAY[('v2'::character varying)::text, ('v3'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_socket_alarm_configs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_socket_alarm_configs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    config_key character varying(128) NOT NULL,
+    name character varying(200) NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    profile character varying(32) NOT NULL,
+    mode character varying(32) DEFAULT 'server'::character varying NOT NULL,
+    listen_ip character varying(64) DEFAULT '0.0.0.0'::character varying NOT NULL,
+    listen_port integer DEFAULT 31232 NOT NULL,
+    max_clients integer DEFAULT 20 NOT NULL,
+    realtime_push_enabled boolean DEFAULT true NOT NULL,
+    client_sync_enabled boolean DEFAULT true NOT NULL,
+    heartbeat_seconds integer DEFAULT 60 NOT NULL,
+    heartbeat_times integer DEFAULT 3 NOT NULL,
+    idle_timeout_seconds integer DEFAULT 180 NOT NULL,
+    accounts jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_socket_alarm_configs_heartbeat_seconds_check CHECK (((heartbeat_seconds >= 5) AND (heartbeat_seconds <= 3600))),
+    CONSTRAINT northbound_socket_alarm_configs_heartbeat_times_check CHECK (((heartbeat_times >= 1) AND (heartbeat_times <= 100))),
+    CONSTRAINT northbound_socket_alarm_configs_idle_timeout_seconds_check CHECK (((idle_timeout_seconds >= 10) AND (idle_timeout_seconds <= 86400))),
+    CONSTRAINT northbound_socket_alarm_configs_listen_port_check CHECK (((listen_port >= 1) AND (listen_port <= 65535))),
+    CONSTRAINT northbound_socket_alarm_configs_max_clients_check CHECK (((max_clients >= 1) AND (max_clients <= 10000))),
+    CONSTRAINT northbound_socket_alarm_configs_mode_check CHECK (((mode)::text = 'server'::text)),
+    CONSTRAINT northbound_socket_alarm_configs_profile_check CHECK (((profile)::text = ANY (ARRAY[('CTCC'::character varying)::text, ('CUCC'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_api_configs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_api_configs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    api_key character varying(128) NOT NULL,
+    name character varying(200) NOT NULL,
+    method character varying(16) NOT NULL,
+    path character varying(256) NOT NULL,
+    kind character varying(64) DEFAULT '业务复用'::character varying NOT NULL,
+    data_type character varying(64) DEFAULT ''::character varying NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    old_system_supported boolean DEFAULT true NOT NULL,
+    current_supported boolean DEFAULT true NOT NULL,
+    source character varying(128) DEFAULT ''::character varying NOT NULL,
+    response_contract jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_api_configs_method_check CHECK (((method)::text = ANY (ARRAY[('GET'::character varying)::text, ('POST'::character varying)::text, ('PUT'::character varying)::text, ('DELETE'::character varying)::text])))
+);
+
+
+--
+-- Name: northbound_api_clients; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_api_clients (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    client_key character varying(128) NOT NULL,
+    name character varying(200) NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    token_secret text DEFAULT ''::text NOT NULL,
+    allowed_api_keys jsonb DEFAULT '[]'::jsonb NOT NULL,
+    ip_whitelist jsonb DEFAULT '[]'::jsonb NOT NULL,
+    expires_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: northbound_page_config_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.northbound_page_config_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    capability character varying(32) NOT NULL,
+    owner_code character varying(128) DEFAULT ''::character varying NOT NULL,
+    target_key character varying(128) DEFAULT ''::character varying NOT NULL,
+    event_type character varying(64) DEFAULT 'status'::character varying NOT NULL,
+    status character varying(32) DEFAULT 'success'::character varying NOT NULL,
+    artifact_type character varying(32) DEFAULT 'message'::character varying NOT NULL,
+    artifact_name text DEFAULT ''::text NOT NULL,
+    artifact_path text DEFAULT ''::text NOT NULL,
+    payload text DEFAULT ''::text NOT NULL,
+    payload_content_type character varying(128) DEFAULT 'text/plain; charset=utf-8'::character varying NOT NULL,
+    error_message text DEFAULT ''::text NOT NULL,
+    summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT northbound_page_config_events_artifact_type_check CHECK (((artifact_type)::text = ANY (ARRAY[('file'::character varying)::text, ('message'::character varying)::text, ('json'::character varying)::text]))),
+    CONSTRAINT northbound_page_config_events_capability_check CHECK (((capability)::text = ANY (ARRAY[('file'::character varying)::text, ('inventory'::character varying)::text, ('delivery'::character varying)::text, ('snmp'::character varying)::text, ('socket'::character varying)::text, ('api'::character varying)::text]))),
+    CONSTRAINT northbound_page_config_events_status_check CHECK (((status)::text = ANY (ARRAY[('running'::character varying)::text, ('success'::character varying)::text, ('failed'::character varying)::text, ('terminated'::character varying)::text])))
 );
 
 
@@ -7614,6 +7934,18 @@ CREATE TABLE public.system_license (
     CONSTRAINT chk_signature_status CHECK (((signature_status)::text = ANY (ARRAY[('verified'::character varying)::text, ('unverified'::character varying)::text, ('invalid'::character varying)::text])))
 );
 
+-- system_license_usage：累计使用时长 + 时间回拨检测的 singleton 状态（复刻旧项目 check_au_info）。
+-- 单行（id 固定为 1）；enforcer 在过期检查时 compute-on-read：按 now - last_visited_time 累加，
+-- 若 now < last_visited_time 判定系统时间回拨 → license 失效。
+CREATE TABLE public.system_license_usage (
+    id integer DEFAULT 1 NOT NULL,
+    use_duration_hours double precision DEFAULT 0 NOT NULL,
+    last_visited_time timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT system_license_usage_pkey PRIMARY KEY (id),
+    CONSTRAINT system_license_usage_singleton CHECK (id = 1)
+);
+
 
 --
 -- Name: TABLE system_license; Type: COMMENT; Schema: public; Owner: -
@@ -9464,6 +9796,150 @@ ALTER TABLE ONLY public.nedirect_commands
 
 ALTER TABLE ONLY public.nedirect_sessions
     ADD CONSTRAINT nedirect_sessions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_endpoints northbound_endpoints_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_endpoints
+    ADD CONSTRAINT northbound_endpoints_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_field_mappings northbound_field_mappings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_field_mappings
+    ADD CONSTRAINT northbound_field_mappings_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_file_profiles northbound_file_profiles_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_file_profiles
+    ADD CONSTRAINT northbound_file_profiles_code_key UNIQUE (code);
+
+
+--
+-- Name: northbound_file_profiles northbound_file_profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_file_profiles
+    ADD CONSTRAINT northbound_file_profiles_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_file_runs northbound_file_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_file_runs
+    ADD CONSTRAINT northbound_file_runs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_delivery_targets northbound_delivery_targets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_delivery_targets
+    ADD CONSTRAINT northbound_delivery_targets_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_delivery_targets northbound_delivery_targets_scope_owner_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_delivery_targets
+    ADD CONSTRAINT northbound_delivery_targets_scope_owner_key_key UNIQUE (scope, owner_code, target_key);
+
+
+--
+-- Name: northbound_snmp_alarm_targets northbound_snmp_alarm_targets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_snmp_alarm_targets
+    ADD CONSTRAINT northbound_snmp_alarm_targets_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_snmp_alarm_targets northbound_snmp_alarm_targets_target_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_snmp_alarm_targets
+    ADD CONSTRAINT northbound_snmp_alarm_targets_target_key_key UNIQUE (target_key);
+
+
+--
+-- Name: northbound_socket_alarm_configs northbound_socket_alarm_configs_config_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_socket_alarm_configs
+    ADD CONSTRAINT northbound_socket_alarm_configs_config_key_key UNIQUE (config_key);
+
+
+--
+-- Name: northbound_socket_alarm_configs northbound_socket_alarm_configs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_socket_alarm_configs
+    ADD CONSTRAINT northbound_socket_alarm_configs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_api_configs northbound_api_configs_api_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_api_configs
+    ADD CONSTRAINT northbound_api_configs_api_key_key UNIQUE (api_key);
+
+
+--
+-- Name: northbound_api_configs northbound_api_configs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_api_configs
+    ADD CONSTRAINT northbound_api_configs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_api_clients northbound_api_clients_client_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_api_clients
+    ADD CONSTRAINT northbound_api_clients_client_key_key UNIQUE (client_key);
+
+
+--
+-- Name: northbound_api_clients northbound_api_clients_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_api_clients
+    ADD CONSTRAINT northbound_api_clients_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_page_config_events northbound_page_config_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_page_config_events
+    ADD CONSTRAINT northbound_page_config_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: northbound_inventory_profiles northbound_inventory_profiles_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_inventory_profiles
+    ADD CONSTRAINT northbound_inventory_profiles_code_key UNIQUE (code);
+
+
+--
+-- Name: northbound_inventory_profiles northbound_inventory_profiles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.northbound_inventory_profiles
+    ADD CONSTRAINT northbound_inventory_profiles_pkey PRIMARY KEY (id);
 
 
 --
@@ -14448,6 +14924,118 @@ CREATE INDEX idx_nedirect_sessions_user_id ON public.nedirect_sessions USING btr
 
 
 --
+-- Name: idx_northbound_endpoints_protocol_purpose; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_endpoints_protocol_purpose ON public.northbound_endpoints USING btree (protocol, purpose);
+
+
+--
+-- Name: idx_northbound_endpoints_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_endpoints_status ON public.northbound_endpoints USING btree (status, enabled);
+
+
+--
+-- Name: idx_northbound_field_mappings_profile; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_field_mappings_profile ON public.northbound_field_mappings USING btree (profile_kind, profile_code, domain, object_code, sort_order);
+
+
+--
+-- Name: idx_northbound_file_profiles_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_file_profiles_status ON public.northbound_file_profiles USING btree (status, enabled);
+
+
+--
+-- Name: idx_northbound_file_runs_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_file_runs_created_at ON public.northbound_file_runs USING btree (created_at DESC);
+
+
+--
+-- Name: idx_northbound_file_runs_profile; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_file_runs_profile ON public.northbound_file_runs USING btree (profile_kind, profile_code, created_at DESC);
+
+
+--
+-- Name: idx_northbound_file_runs_schedule; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_file_runs_schedule ON public.northbound_file_runs USING btree (profile_kind, profile_code, group_id, window_end DESC, status);
+
+
+--
+-- Name: idx_northbound_file_runs_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_file_runs_status ON public.northbound_file_runs USING btree (status, created_at DESC);
+
+
+--
+-- Name: idx_northbound_delivery_targets_scope; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_delivery_targets_scope ON public.northbound_delivery_targets USING btree (scope, owner_code, enabled);
+
+
+--
+-- Name: idx_northbound_snmp_alarm_targets_enabled; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_snmp_alarm_targets_enabled ON public.northbound_snmp_alarm_targets USING btree (enabled, version);
+
+
+--
+-- Name: idx_northbound_socket_alarm_configs_enabled; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_socket_alarm_configs_enabled ON public.northbound_socket_alarm_configs USING btree (enabled, profile);
+
+
+--
+-- Name: idx_northbound_api_configs_path; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_api_configs_path ON public.northbound_api_configs USING btree (method, path, enabled);
+
+
+--
+-- Name: idx_northbound_api_clients_enabled; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_api_clients_enabled ON public.northbound_api_clients USING btree (enabled, client_key);
+
+
+--
+-- Name: idx_northbound_page_config_events_lookup; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_page_config_events_lookup ON public.northbound_page_config_events USING btree (capability, owner_code, target_key, event_type, created_at DESC);
+
+
+--
+-- Name: idx_northbound_page_config_events_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_page_config_events_status ON public.northbound_page_config_events USING btree (status, created_at DESC);
+
+
+--
+-- Name: idx_northbound_inventory_profiles_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_northbound_inventory_profiles_status ON public.northbound_inventory_profiles USING btree (status, enabled);
+
+
+--
 -- Name: idx_northbound_outbox_dead; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -18738,6 +19326,83 @@ CREATE TRIGGER trg_nedirect_sessions_updated_at BEFORE UPDATE ON public.nedirect
 
 
 --
+-- Name: northbound_endpoints trg_northbound_endpoints_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_endpoints_updated_at BEFORE UPDATE ON public.northbound_endpoints FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_field_mappings trg_northbound_field_mappings_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_field_mappings_updated_at BEFORE UPDATE ON public.northbound_field_mappings FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_file_profiles trg_northbound_file_profiles_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_file_profiles_updated_at BEFORE UPDATE ON public.northbound_file_profiles FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_file_runs trg_northbound_file_runs_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_file_runs_updated_at BEFORE UPDATE ON public.northbound_file_runs FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_delivery_targets trg_northbound_delivery_targets_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_delivery_targets_updated_at BEFORE UPDATE ON public.northbound_delivery_targets FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_snmp_alarm_targets trg_northbound_snmp_alarm_targets_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_snmp_alarm_targets_updated_at BEFORE UPDATE ON public.northbound_snmp_alarm_targets FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_socket_alarm_configs trg_northbound_socket_alarm_configs_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_socket_alarm_configs_updated_at BEFORE UPDATE ON public.northbound_socket_alarm_configs FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_api_configs trg_northbound_api_configs_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_api_configs_updated_at BEFORE UPDATE ON public.northbound_api_configs FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_api_clients trg_northbound_api_clients_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_api_clients_updated_at BEFORE UPDATE ON public.northbound_api_clients FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_page_config_events trg_northbound_page_config_events_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_page_config_events_updated_at BEFORE UPDATE ON public.northbound_page_config_events FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: northbound_inventory_profiles trg_northbound_inventory_profiles_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_northbound_inventory_profiles_updated_at BEFORE UPDATE ON public.northbound_inventory_profiles FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
 -- Name: northbound_servers trg_northbound_servers_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -20251,7 +20916,11 @@ ALTER TABLE public.pm_aggregation_task_versions
 CREATE INDEX idx_pm_aggregation_task_versions_content_hash
     ON public.pm_aggregation_task_versions (task_id, content_hash);
 
-CREATE TABLE public.plug_and_play_policies (
+-- +omcgo MainReconcileBegin
+-- Existing pre-release databases may already record goose version 1 while
+-- missing this consolidated additive block. Keep it idempotent so migrate can
+-- replay it after the seed baseline without rebuilding the database.
+CREATE TABLE IF NOT EXISTS public.plug_and_play_policies (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     name varchar(100) NOT NULL,
     enabled boolean NOT NULL DEFAULT false,
@@ -20271,13 +20940,13 @@ CREATE TABLE public.plug_and_play_policies (
         CHECK (execute_type IN ('auto', 'manual'))
 );
 
-CREATE INDEX idx_plug_and_play_policies_match
+CREATE INDEX IF NOT EXISTS idx_plug_and_play_policies_match
     ON public.plug_and_play_policies (enabled, product_class, priority, created_at);
 
-CREATE INDEX idx_plug_and_play_policies_product_classes
+CREATE INDEX IF NOT EXISTS idx_plug_and_play_policies_product_classes
     ON public.plug_and_play_policies USING gin (product_classes);
 
-CREATE TABLE public.provisioning_xml_files (
+CREATE TABLE IF NOT EXISTS public.provisioning_xml_files (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     policy_id uuid NOT NULL REFERENCES public.plug_and_play_policies(id),
     device_id uuid NOT NULL,
@@ -20288,17 +20957,18 @@ CREATE TABLE public.provisioning_xml_files (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_provisioning_xml_files_device
+CREATE INDEX IF NOT EXISTS idx_provisioning_xml_files_device
     ON public.provisioning_xml_files (device_id, created_at DESC);
 
 ALTER TABLE public.provisioning_tasks
-    ADD COLUMN policy_id uuid REFERENCES public.plug_and_play_policies(id),
-    ADD COLUMN xml_file_id uuid REFERENCES public.provisioning_xml_files(id),
-    ADD COLUMN device_task_id uuid,
-    ADD COLUMN current_step_name varchar(64);
+    ADD COLUMN IF NOT EXISTS policy_id uuid REFERENCES public.plug_and_play_policies(id),
+    ADD COLUMN IF NOT EXISTS xml_file_id uuid REFERENCES public.provisioning_xml_files(id),
+    ADD COLUMN IF NOT EXISTS device_task_id uuid,
+    ADD COLUMN IF NOT EXISTS current_step_name varchar(64);
 
-CREATE INDEX idx_provisioning_tasks_policy
+CREATE INDEX IF NOT EXISTS idx_provisioning_tasks_policy
     ON public.provisioning_tasks (policy_id);
+-- +omcgo MainReconcileEnd
 
 
 -- Consolidated from pre-release baseline-only migrations: main schema 000002-000005
@@ -20393,6 +21063,524 @@ CREATE TABLE IF NOT EXISTS public.storage_protection_events (
 
 CREATE INDEX IF NOT EXISTS storage_protection_events_target_time_idx
     ON public.storage_protection_events (target_type, target_id, write_scope, created_at DESC);
+-- Consolidated pre-release geofence Observe schema.
+
+-- +omcgo MainReconcileBegin
+ALTER TABLE public.devices
+    ADD COLUMN IF NOT EXISTS location_source_mode varchar(16)
+        NOT NULL DEFAULT 'tr069';
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.devices'::regclass
+          AND conname = 'devices_location_source_mode_check'
+    ) THEN
+        ALTER TABLE public.devices
+            ADD CONSTRAINT devices_location_source_mode_check
+            CHECK (location_source_mode IN ('tr069', 'external'));
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+CREATE TABLE IF NOT EXISTS public.geofence_carrier_settings (
+    carrier varchar(16) PRIMARY KEY,
+    mode varchar(16) NOT NULL DEFAULT 'off',
+    default_baseline_radius_meters double precision NOT NULL DEFAULT 100,
+    updated_by uuid,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT geofence_carrier_settings_mode_check
+        CHECK (mode IN ('off', 'observe', 'enforce')),
+    CONSTRAINT geofence_carrier_settings_radius_check
+        CHECK (default_baseline_radius_meters > 0
+            AND default_baseline_radius_meters <= 50000)
+);
+
+CREATE TABLE IF NOT EXISTS public.geofence_definitions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name varchar(128) NOT NULL,
+    carrier varchar(16) NOT NULL,
+    rule_type varchar(32) NOT NULL,
+    owner_device_id uuid,
+    status varchar(16) NOT NULL DEFAULT 'draft',
+    current_version_id uuid,
+    created_by uuid NOT NULL,
+    updated_by uuid NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT geofence_definitions_rule_type_check
+        CHECK (rule_type IN ('polygon_allow_zone', 'baseline_radius')),
+    CONSTRAINT geofence_definitions_status_check
+        CHECK (status IN ('draft', 'enabled', 'disabled', 'archived')),
+    CONSTRAINT geofence_definitions_owner_check CHECK (
+        (rule_type = 'baseline_radius' AND owner_device_id IS NOT NULL)
+        OR
+        (rule_type = 'polygon_allow_zone' AND owner_device_id IS NULL)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_geofence_definitions_carrier_name
+    ON public.geofence_definitions (carrier, lower(name))
+    WHERE status <> 'archived';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_geofence_definitions_baseline_owner
+    ON public.geofence_definitions (owner_device_id)
+    WHERE rule_type = 'baseline_radius' AND status <> 'archived';
+
+CREATE TABLE IF NOT EXISTS public.geofence_versions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    geofence_id uuid NOT NULL
+        REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
+    version bigint NOT NULL,
+    status varchar(16) NOT NULL DEFAULT 'draft',
+    geometry_json jsonb NOT NULL,
+    bbox_min_longitude double precision NOT NULL,
+    bbox_min_latitude double precision NOT NULL,
+    bbox_max_longitude double precision NOT NULL,
+    bbox_max_latitude double precision NOT NULL,
+    policy_json jsonb NOT NULL,
+    created_by uuid NOT NULL,
+    published_by uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    published_at timestamptz,
+    CONSTRAINT geofence_versions_version_check CHECK (version > 0),
+    CONSTRAINT geofence_versions_status_check
+        CHECK (status IN ('draft', 'published', 'superseded')),
+    CONSTRAINT geofence_versions_bbox_check CHECK (
+        bbox_min_longitude >= -180 AND bbox_max_longitude <= 180
+        AND bbox_min_latitude >= -90 AND bbox_max_latitude <= 90
+        AND bbox_min_longitude <= bbox_max_longitude
+        AND bbox_min_latitude <= bbox_max_latitude
+    ),
+    CONSTRAINT uq_geofence_versions_number UNIQUE (geofence_id, version)
+);
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.geofence_definitions'::regclass
+          AND conname = 'geofence_definitions_current_version_fk'
+    ) THEN
+        ALTER TABLE public.geofence_definitions
+            ADD CONSTRAINT geofence_definitions_current_version_fk
+            FOREIGN KEY (current_version_id)
+            REFERENCES public.geofence_versions(id) ON DELETE RESTRICT;
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+CREATE TABLE IF NOT EXISTS public.device_geofence_bindings (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id uuid NOT NULL,
+    geofence_id uuid NOT NULL
+        REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
+    rule_type varchar(32) NOT NULL,
+    status varchar(16) NOT NULL DEFAULT 'pending',
+    bind_source varchar(16) NOT NULL,
+    bound_by uuid NOT NULL,
+    bound_at timestamptz NOT NULL DEFAULT now(),
+    removed_by uuid,
+    removed_at timestamptz,
+    remove_reason text,
+    CONSTRAINT device_geofence_bindings_rule_type_check
+        CHECK (rule_type IN ('polygon_allow_zone', 'baseline_radius')),
+    CONSTRAINT device_geofence_bindings_status_check
+        CHECK (status IN ('pending', 'active', 'suspended', 'removed')),
+    CONSTRAINT device_geofence_bindings_source_check
+        CHECK (bind_source IN ('manual', 'auto'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_device_geofence_active_rule_type
+    ON public.device_geofence_bindings (device_id, rule_type)
+    WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_device_geofence_bindings_geofence
+    ON public.device_geofence_bindings (geofence_id, status);
+
+CREATE TABLE IF NOT EXISTS public.device_geofence_states (
+    binding_id uuid PRIMARY KEY
+        REFERENCES public.device_geofence_bindings(id) ON DELETE RESTRICT,
+    device_id uuid NOT NULL,
+    confirmed_state varchar(16) NOT NULL DEFAULT 'unknown',
+    candidate_state varchar(16),
+    candidate_count integer NOT NULL DEFAULT 0,
+    candidate_since timestamptz,
+    state_version bigint NOT NULL DEFAULT 1,
+    last_geofence_version_id uuid
+        REFERENCES public.geofence_versions(id) ON DELETE RESTRICT,
+    last_observation_version bigint,
+    last_observed_at timestamptz,
+    last_distance_to_boundary double precision,
+    last_evaluation_id uuid,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT device_geofence_states_confirmed_check
+        CHECK (confirmed_state IN ('unknown', 'inside', 'outside')),
+    CONSTRAINT device_geofence_states_candidate_check
+        CHECK (candidate_state IS NULL OR candidate_state IN ('exit', 'reentry')),
+    CONSTRAINT device_geofence_states_count_check CHECK (candidate_count >= 0),
+    CONSTRAINT device_geofence_states_version_check CHECK (state_version > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_geofence_states_device
+    ON public.device_geofence_states (device_id);
+
+CREATE TABLE IF NOT EXISTS public.device_geofence_effective_states (
+    device_id uuid PRIMARY KEY,
+    effective_state varchar(16) NOT NULL DEFAULT 'unmanaged',
+    required_action_level varchar(16) NOT NULL DEFAULT 'none',
+    state_version bigint NOT NULL DEFAULT 1,
+    trigger_binding_id uuid
+        REFERENCES public.device_geofence_bindings(id) ON DELETE SET NULL,
+    last_observation_version bigint,
+    evaluation_health varchar(16) NOT NULL DEFAULT 'healthy',
+    last_evaluation_error_code varchar(64),
+    last_successful_evaluation_at timestamptz,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT device_geofence_effective_state_check
+        CHECK (effective_state IN ('unmanaged', 'unknown', 'inside', 'outside')),
+    CONSTRAINT device_geofence_action_level_check
+        CHECK (required_action_level IN ('none', 'notify_only', 'manual_review', 'deactivate')),
+    CONSTRAINT device_geofence_health_check
+        CHECK (evaluation_health IN ('healthy', 'stale', 'failed')),
+    CONSTRAINT device_geofence_effective_version_check CHECK (state_version > 0)
+);
+
+CREATE TABLE IF NOT EXISTS public.geofence_control_actions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    action_key varchar(255) NOT NULL UNIQUE,
+    parent_action_id uuid
+        REFERENCES public.geofence_control_actions(id) ON DELETE RESTRICT,
+    device_id uuid NOT NULL,
+    device_sn varchar(64) NOT NULL,
+    geofence_id uuid
+        REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
+    binding_id uuid
+        REFERENCES public.device_geofence_bindings(id) ON DELETE SET NULL,
+    effective_state_version bigint NOT NULL,
+    action_type varchar(16) NOT NULL,
+    status varchar(32) NOT NULL DEFAULT 'pending',
+    before_state jsonb NOT NULL DEFAULT '[]'::jsonb,
+    requested_state jsonb NOT NULL DEFAULT '[]'::jsonb,
+    verified_state jsonb NOT NULL DEFAULT '[]'::jsonb,
+    last_error text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    completed_at timestamptz,
+    CONSTRAINT geofence_control_actions_state_version_check
+        CHECK (effective_state_version >= 0),
+    CONSTRAINT geofence_control_actions_type_check
+        CHECK (action_type IN ('deactivate', 'activate')),
+    CONSTRAINT geofence_control_actions_status_check CHECK (status IN (
+        'pending', 'executing', 'verifying', 'verified', 'partial_failed',
+        'failed'
+    )),
+    CONSTRAINT geofence_control_actions_before_state_array_check
+        CHECK (jsonb_typeof(before_state) = 'array'),
+    CONSTRAINT geofence_control_actions_requested_state_array_check
+        CHECK (jsonb_typeof(requested_state) = 'array'),
+    CONSTRAINT geofence_control_actions_verified_state_array_check
+        CHECK (jsonb_typeof(verified_state) = 'array')
+);
+
+CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_device_time
+    ON public.geofence_control_actions (device_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_status
+    ON public.geofence_control_actions (status, updated_at)
+    WHERE status IN ('pending', 'executing', 'verifying');
+
+ALTER TABLE public.device_location_observations
+    ADD COLUMN IF NOT EXISTS received_at timestamptz,
+    ADD COLUMN IF NOT EXISTS device_reported_at timestamptz,
+    ADD COLUMN IF NOT EXISTS gps_lock_status varchar(32),
+    ADD COLUMN IF NOT EXISTS satellite_count integer,
+    ADD COLUMN IF NOT EXISTS accuracy_meters double precision;
+
+UPDATE public.device_location_observations
+SET received_at = observed_at
+WHERE received_at IS NULL;
+
+ALTER TABLE public.device_location_observations
+    ALTER COLUMN received_at SET DEFAULT now(),
+    ALTER COLUMN received_at SET NOT NULL;
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.device_location_observations'::regclass
+          AND conname = 'device_location_observations_satellite_count_check'
+    ) THEN
+        ALTER TABLE public.device_location_observations
+            ADD CONSTRAINT device_location_observations_satellite_count_check
+            CHECK (satellite_count IS NULL OR satellite_count >= 0);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.device_location_observations'::regclass
+          AND conname = 'device_location_observations_accuracy_check'
+    ) THEN
+        ALTER TABLE public.device_location_observations
+            ADD CONSTRAINT device_location_observations_accuracy_check
+            CHECK (accuracy_meters IS NULL OR accuracy_meters >= 0);
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+CREATE TABLE IF NOT EXISTS public.event_outbox (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    aggregate_type varchar(64) NOT NULL,
+    aggregate_id varchar(160) NOT NULL,
+    subject varchar(160) NOT NULL,
+    payload jsonb NOT NULL,
+    dedupe_key varchar(255) NOT NULL,
+    status varchar(16) NOT NULL DEFAULT 'pending',
+    attempts integer NOT NULL DEFAULT 0,
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    claim_token uuid,
+    claim_expires_at timestamptz,
+    last_error text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    published_at timestamptz,
+    CONSTRAINT event_outbox_dedupe_key_unique UNIQUE (dedupe_key),
+    CONSTRAINT event_outbox_status_check
+        CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'dead')),
+    CONSTRAINT event_outbox_attempts_check CHECK (attempts >= 0),
+    CONSTRAINT event_outbox_claim_check CHECK (
+        (status = 'publishing' AND claim_token IS NOT NULL AND claim_expires_at IS NOT NULL)
+        OR
+        (status <> 'publishing' AND claim_token IS NULL AND claim_expires_at IS NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_outbox_claimable
+    ON public.event_outbox (status, next_attempt_at, claim_expires_at, created_at)
+    WHERE status IN ('pending', 'failed', 'publishing');
+
+CREATE TABLE IF NOT EXISTS public.geofence_evaluations (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    binding_id uuid NOT NULL
+        REFERENCES public.device_geofence_bindings(id) ON DELETE RESTRICT,
+    device_id uuid NOT NULL,
+    geofence_id uuid NOT NULL
+        REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
+    geofence_version_id uuid NOT NULL
+        REFERENCES public.geofence_versions(id) ON DELETE RESTRICT,
+    observation_version bigint NOT NULL,
+    latitude double precision NOT NULL,
+    longitude double precision NOT NULL,
+    gps_height double precision,
+    observed_at timestamptz NOT NULL,
+    received_at timestamptz NOT NULL,
+    device_reported_at timestamptz,
+    gps_lock_status varchar(32),
+    satellite_count integer,
+    accuracy_meters double precision,
+    source_path text NOT NULL,
+    previous_observation_version bigint,
+    movement_distance_meters double precision,
+    elapsed_seconds double precision,
+    implied_speed_mps double precision,
+    rule_type varchar(32) NOT NULL,
+    raw_position varchar(16),
+    signed_distance_meters double precision,
+    previous_confirmed_state varchar(16) NOT NULL,
+    confirmed_state varchar(16) NOT NULL,
+    candidate_state varchar(16),
+    candidate_count integer NOT NULL DEFAULT 0,
+    candidate_since timestamptz,
+    state_edge boolean NOT NULL DEFAULT false,
+    status varchar(16) NOT NULL,
+    reason_code varchar(64) NOT NULL,
+    failure_stage varchar(64),
+    error_code varchar(64),
+    error_summary text,
+    evaluated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT geofence_evaluations_observation_version_check
+        CHECK (observation_version > 0),
+    CONSTRAINT geofence_evaluations_rule_type_check
+        CHECK (rule_type IN ('polygon_allow_zone', 'baseline_radius')),
+    CONSTRAINT geofence_evaluations_raw_position_check
+        CHECK (raw_position IS NULL OR raw_position IN ('unknown', 'inside', 'outside', 'boundary')),
+    CONSTRAINT geofence_evaluations_previous_state_check
+        CHECK (previous_confirmed_state IN ('unknown', 'inside', 'outside')),
+    CONSTRAINT geofence_evaluations_confirmed_state_check
+        CHECK (confirmed_state IN ('unknown', 'inside', 'outside')),
+    CONSTRAINT geofence_evaluations_candidate_state_check
+        CHECK (candidate_state IS NULL OR candidate_state IN ('exit', 'reentry')),
+    CONSTRAINT geofence_evaluations_candidate_count_check
+        CHECK (candidate_count >= 0),
+    CONSTRAINT geofence_evaluations_status_check
+        CHECK (status IN ('completed', 'failed')),
+    CONSTRAINT geofence_evaluations_failure_evidence_check CHECK (
+        (status = 'completed'
+            AND failure_stage IS NULL
+            AND error_code IS NULL
+            AND error_summary IS NULL)
+        OR
+        (status = 'failed'
+            AND failure_stage IS NOT NULL
+            AND error_code IS NOT NULL)
+    ),
+    CONSTRAINT uq_geofence_evaluations_identity
+        UNIQUE (binding_id, geofence_version_id, observation_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_geofence_evaluations_device_time
+    ON public.geofence_evaluations (device_id, evaluated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_geofence_evaluations_status_time
+    ON public.geofence_evaluations (status, evaluated_at DESC);
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.device_geofence_states'::regclass
+          AND conname = 'device_geofence_states_last_evaluation_fk'
+    ) THEN
+        ALTER TABLE public.device_geofence_states
+            ADD CONSTRAINT device_geofence_states_last_evaluation_fk
+            FOREIGN KEY (last_evaluation_id)
+            REFERENCES public.geofence_evaluations(id) ON DELETE RESTRICT;
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+CREATE TABLE IF NOT EXISTS public.geofence_batch_items (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_id uuid NOT NULL
+        REFERENCES public.async_jobs(id) ON DELETE RESTRICT,
+    geofence_id uuid NOT NULL
+        REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
+    input_key varchar(320) NOT NULL,
+    input_kind varchar(16) NOT NULL,
+    input_value varchar(255) NOT NULL,
+    device_id uuid,
+    device_sn_snapshot varchar(255),
+    status varchar(16) NOT NULL DEFAULT 'pending',
+    reason_code varchar(64),
+    error_message text,
+    expected_source_binding_id uuid
+        REFERENCES public.device_geofence_bindings(id) ON DELETE RESTRICT,
+    binding_id uuid
+        REFERENCES public.device_geofence_bindings(id) ON DELETE RESTRICT,
+    attempt integer NOT NULL DEFAULT 0,
+    started_at timestamptz,
+    finished_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT geofence_batch_items_input_kind_check
+        CHECK (input_kind IN ('device_id', 'device_sn')),
+    CONSTRAINT geofence_batch_items_status_check
+        CHECK (status IN ('pending', 'succeeded', 'skipped', 'failed')),
+    CONSTRAINT geofence_batch_items_attempt_check CHECK (attempt >= 0),
+    CONSTRAINT geofence_batch_items_success_binding_check
+        CHECK (status <> 'succeeded' OR binding_id IS NOT NULL),
+    CONSTRAINT uq_geofence_batch_items_job_input UNIQUE (job_id, input_key)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_geofence_batch_items_job_device
+    ON public.geofence_batch_items (job_id, device_id)
+    WHERE device_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_geofence_batch_items_job_status
+    ON public.geofence_batch_items (job_id, status, created_at, id);
+
+CREATE INDEX IF NOT EXISTS idx_geofence_batch_items_geofence_status
+    ON public.geofence_batch_items (geofence_id, status);
+
+CREATE TABLE IF NOT EXISTS public.third_party_location_batches (
+    idempotency_key varchar(255) PRIMARY KEY,
+    request_hash char(64) NOT NULL,
+    status varchar(16) NOT NULL,
+    result jsonb,
+    completed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT third_party_location_batches_status_check
+        CHECK (status IN ('processing', 'completed')),
+    CONSTRAINT third_party_location_batches_completed_result_check
+        CHECK (status <> 'completed' OR result IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_third_party_location_batches_created_at
+    ON public.third_party_location_batches (created_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_async_jobs_geofence_manual_bind_request
+    ON public.async_jobs (
+        job_type,
+        (payload->>'geofence_id'),
+        (payload->>'requested_by'),
+        (payload->>'preview_fingerprint')
+    )
+    WHERE job_type = 'geofence_manual_bind'
+      AND status IN ('pending', 'running', 'succeeded');
+
+-- +goose StatementBegin
+DO $$
+DECLARE
+    required_relation text;
+BEGIN
+    FOREACH required_relation IN ARRAY ARRAY[
+        'public.geofence_carrier_settings',
+        'public.geofence_definitions',
+        'public.geofence_versions',
+        'public.device_geofence_bindings',
+        'public.device_geofence_states',
+        'public.device_geofence_effective_states',
+        'public.geofence_control_actions',
+        'public.event_outbox',
+        'public.geofence_evaluations',
+        'public.geofence_batch_items',
+        'public.third_party_location_batches'
+    ] LOOP
+        IF to_regclass(required_relation) IS NULL THEN
+            RAISE EXCEPTION 'main baseline reconcile missing relation %', required_relation;
+        END IF;
+    END LOOP;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'devices'
+          AND column_name = 'location_source_mode'
+    ) THEN
+        RAISE EXCEPTION 'main baseline reconcile missing devices.location_source_mode';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'provisioning_tasks'
+          AND column_name = 'policy_id'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'provisioning_tasks'
+          AND column_name = 'current_step_name'
+    ) THEN
+        RAISE EXCEPTION 'main baseline reconcile missing provisioning task columns';
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+-- +omcgo MainReconcileEnd
 
 
 -- +goose Down

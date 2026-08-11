@@ -53,8 +53,13 @@ type Alert struct {
 
 // AlertSink delivers a license alert. Implementations should be non-blocking
 // or short-running; the cron tick will block waiting on Send.
+//
+// Clear 撤销此前用 Send 发出的、指定 identifier 的告警（条件解除时调用，
+// 例如 license 重新上传后过期告警应消失）。实现应幂等：未找到匹配告警时
+// 返回 nil 而非 error。
 type AlertSink interface {
 	Send(ctx context.Context, alert Alert) error
+	Clear(ctx context.Context, identifier string) error
 }
 
 // NoopAlertSink discards alerts (useful for dev/test).
@@ -62,6 +67,9 @@ type NoopAlertSink struct{}
 
 // Send implements AlertSink by doing nothing.
 func (NoopAlertSink) Send(_ context.Context, _ Alert) error { return nil }
+
+// Clear implements AlertSink by doing nothing.
+func (NoopAlertSink) Clear(_ context.Context, _ string) error { return nil }
 
 // CapacityDedupWindow is the minimum time between repeated alerts for the
 // same threshold. Crossing into a new (higher) threshold short-circuits this.
@@ -95,6 +103,8 @@ type Monitor struct {
 	metrics *EnforcementMetrics
 	logger  *zap.Logger
 
+	usageRepo SystemLicenseUsageRepository
+
 	cron   *cron.Cron
 	cancel context.CancelFunc
 
@@ -104,6 +114,14 @@ type Monitor struct {
 	capacityDedupMu sync.Mutex
 	lastCapAlertAt  time.Time
 	lastCapAlertPct int
+
+	// 告警恢复状态（进程内 best-effort）：记录当前是否有活跃告警，条件解除时
+	// 调 sink.Clear 撤销。重启会丢失，但下一轮 tick 重新评估，最坏只多一次
+	// 幂等 Clear 或漏清（与 dedup 状态同生命周期，可接受）。
+	capAlertActive    bool // 受 capacityDedupMu 保护
+	expiryAlertActive bool // 仅 CheckExpiringSoon 串行访问，无需额外锁
+
+	cumulativeAlertActive bool // 仅 CheckCumulativeUsage 串行访问
 }
 
 // NewMonitor constructs a Monitor. sink defaults to NoopAlertSink when nil.
@@ -121,6 +139,12 @@ func NewMonitor(repo SystemLicenseRepository, devices DeviceCounter, sink AlertS
 		metrics: metrics,
 		logger:  logger.Named("license-monitor"),
 	}
+}
+
+// SetUsageRepo 注入累计使用时长仓储，启用周期累计推进 + 超限告警。
+// 不调用（nil）时跳过累计检查（兼容无 time_limit 的部署）。
+func (m *Monitor) SetUsageRepo(r SystemLicenseUsageRepository) {
+	m.usageRepo = r
 }
 
 // Start launches the cron schedule:
@@ -152,10 +176,25 @@ func (m *Monitor) Start(ctx context.Context) error {
 		return fmt.Errorf("schedule capacity check: %w", err)
 	}
 
+	// 每 5 分钟推进累计使用时长，使 system_license_usage.total_used 保持当前，
+	// 让页面/菜单的 is_expired 反映真实状态（enforcement 点自己的推进不受影响）。
+	if m.usageRepo != nil {
+		if _, err := m.cron.AddFunc("*/5 * * * *", func() {
+			c, c2 := context.WithTimeout(scoped, time.Minute)
+			defer c2()
+			if err := m.CheckCumulativeUsage(c); err != nil {
+				m.logger.Warn("cumulative usage check failed", zap.Error(err))
+			}
+		}); err != nil {
+			return fmt.Errorf("schedule cumulative usage check: %w", err)
+		}
+	}
+
 	m.cron.Start()
 	m.logger.Info("license monitor cron started (system_license model)",
 		zap.String("expiring_soon_schedule", "0 1 * * * UTC"),
 		zap.String("capacity_schedule", "0 * * * * (hourly)"),
+		zap.String("cumulative_schedule", "*/5 * * * * (every 5min)"),
 	)
 	return nil
 }
@@ -182,6 +221,7 @@ func (m *Monitor) CheckExpiringSoon(ctx context.Context) error {
 	}
 	if lic == nil || lic.ExpiryDate == nil {
 		m.metrics.SetExpiryDaysRemaining("system", -1)
+		m.clearExpiryAlerts(ctx)
 		return nil
 	}
 	now := nowFunc()
@@ -190,6 +230,7 @@ func (m *Monitor) CheckExpiringSoon(ctx context.Context) error {
 
 	// 过期或在 30/7/1d 窗口内：发告警。已过期视为 1d critical。
 	if days > 30 {
+		m.clearExpiryAlerts(ctx)
 		return nil
 	}
 	severity := AlertSeverityCritical
@@ -219,6 +260,7 @@ func (m *Monitor) CheckExpiringSoon(ctx context.Context) error {
 			zap.String("license_id", lic.LicenseID),
 			zap.Error(sendErr))
 	}
+	m.expiryAlertActive = true
 	m.logger.Warn("license expiring",
 		zap.String("audit", "expiry_alert"),
 		zap.String("identifier", alert.Identifier),
@@ -240,6 +282,7 @@ func (m *Monitor) CheckCapacity(ctx context.Context) error {
 	}
 	if lic == nil {
 		m.metrics.SetCapacity(0, 0, 0)
+		m.clearCapacityAlerts(ctx)
 		return nil
 	}
 
@@ -256,6 +299,7 @@ func (m *Monitor) CheckCapacity(ctx context.Context) error {
 	m.metrics.SetCapacity(used, maxDevices, ratio)
 
 	if maxDevices == 0 {
+		m.clearCapacityAlerts(ctx)
 		return nil
 	}
 
@@ -270,6 +314,7 @@ func (m *Monitor) CheckCapacity(ctx context.Context) error {
 		}
 	}
 	if highestCrossed == -1 {
+		m.clearCapacityAlerts(ctx)
 		return nil
 	}
 
@@ -279,11 +324,14 @@ func (m *Monitor) CheckCapacity(ctx context.Context) error {
 	if m.lastCapAlertPct == highestCrossed &&
 		!m.lastCapAlertAt.IsZero() &&
 		now.Sub(m.lastCapAlertAt) < CapacityDedupWindow {
+		// dedup 抑制重发，但告警仍活跃（保持 capAlertActive=true）。
+		m.capAlertActive = true
 		m.capacityDedupMu.Unlock()
 		return nil
 	}
 	m.lastCapAlertPct = highestCrossed
 	m.lastCapAlertAt = now
+	m.capAlertActive = true
 	m.capacityDedupMu.Unlock()
 
 	severity := capacitySeverity(highestCrossed, thresholds)
@@ -331,6 +379,147 @@ func (m *Monitor) getCurrentOrNil(ctx context.Context) (*SystemLicense, error) {
 		return nil, fmt.Errorf("get current system license: %w", err)
 	}
 	return lic, nil
+}
+
+// clearExpiryAlerts 在过期告警条件解除时（license 有效 / 永久 / 无 license）
+// 撤销此前发出的所有过期告警。expiration 窗口逐级收紧（30d→7d→1d）会产生
+// 不同 identifier 的告警，故遍历所有窗口 suffix 一并清；Clear 幂等，未匹配
+// 返 nil。仅在 expiryAlertActive=true 时调用，避免健康态每轮空跑 DB。
+func (m *Monitor) clearExpiryAlerts(ctx context.Context) {
+	if !m.expiryAlertActive {
+		return
+	}
+	for _, w := range ExpiryWindowsDays {
+		identifier := "license_expiring_" + w.Suffix
+		if err := m.sink.Clear(ctx, identifier); err != nil {
+			m.logger.Warn("clear license expiry alert failed",
+				zap.String("identifier", identifier), zap.Error(err))
+		}
+	}
+	m.logger.Info("license expiry alerts cleared on recovery")
+	m.expiryAlertActive = false
+}
+
+// clearCapacityAlerts 在容量告警条件解除时（低于阈值 / 无 license / 无容量）
+// 撤销此前发出的所有容量告警。跨档位升级（80→90→95）会产生多个 identifier，
+// 故遍历所有阈值一并清。仅在 capAlertActive=true 时调用。
+func (m *Monitor) clearCapacityAlerts(ctx context.Context) {
+	m.capacityDedupMu.Lock()
+	if !m.capAlertActive {
+		m.capacityDedupMu.Unlock()
+		return
+	}
+	m.capAlertActive = false
+	m.lastCapAlertPct = 0
+	m.lastCapAlertAt = time.Time{}
+	m.capacityDedupMu.Unlock()
+
+	for _, pct := range DefaultCapacityThresholds {
+		identifier := fmt.Sprintf("license_capacity_%dpct", pct)
+		if err := m.sink.Clear(ctx, identifier); err != nil {
+			m.logger.Warn("clear license capacity alert failed",
+				zap.String("identifier", identifier), zap.Error(err))
+		}
+	}
+	m.logger.Info("license capacity alerts cleared on recovery")
+}
+
+// CheckCumulativeUsage 每 5min 推进累计使用时长并检查是否超限。
+//
+// 设计要点：
+//   - 推进逻辑与 enforcer.enforceCumulative 一致（按 now - last_visited 累加），
+//     但不拒绝业务——仅推进 + 告警。enforcement 点（device.create/inform）仍有
+//     自己的即时推进 + 拒绝。
+//   - 推进使 system_license_usage.total_used 保持当前，页面/菜单据此判断 is_expired。
+//   - 无 license / time_limit_hours<=0 → noop（同时清历史告警）。
+//   - 时间回拨 → 发 critical 告警，不推进（避免负值污染累计）。
+func (m *Monitor) CheckCumulativeUsage(ctx context.Context) error {
+	if m.usageRepo == nil {
+		return nil
+	}
+	lic, err := m.getCurrentOrNil(ctx)
+	if err != nil {
+		return err
+	}
+	if lic == nil {
+		m.clearCumulativeAlerts(ctx)
+		return nil
+	}
+	timeLimit := extractTimeLimitHours(lic.FeatureList)
+	if timeLimit <= 0 {
+		m.clearCumulativeAlerts(ctx)
+		return nil
+	}
+
+	lastVisited, err := m.usageRepo.LastVisited(ctx)
+	if err != nil {
+		m.logger.Warn("cumulative usage load failed, skip", zap.Error(err))
+		return nil
+	}
+	now := nowFunc()
+	elapsed := now.Sub(lastVisited)
+	if elapsed < 0 {
+		if !m.cumulativeAlertActive {
+			alert := Alert{
+				LicenseID:  lic.ID,
+				Identifier: "license_cumulative_rollback",
+				Severity:   AlertSeverityCritical,
+				Summary:    "System license time rollback detected",
+				Details: map[string]interface{}{
+					"license_id":    lic.LicenseID,
+					"now":           now.UTC().Format(time.RFC3339),
+					"last_visited":  lastVisited.UTC().Format(time.RFC3339),
+				},
+			}
+			m.sink.Send(ctx, alert)
+			m.cumulativeAlertActive = true
+		}
+		m.logger.Warn("license time rollback detected during cumulative check",
+			zap.Time("now", now), zap.Time("last_visited", lastVisited))
+		return nil
+	}
+
+	total, err := m.usageRepo.Advance(ctx, elapsed.Hours())
+	if err != nil {
+		m.logger.Warn("cumulative usage advance failed, skip", zap.Error(err))
+		return nil
+	}
+
+	if total >= float64(timeLimit) {
+		if !m.cumulativeAlertActive {
+			alert := Alert{
+				LicenseID:  lic.ID,
+				Identifier: "license_cumulative_exceeded",
+				Severity:   AlertSeverityCritical,
+				Summary:    fmt.Sprintf("System license cumulative usage %.1fh >= limit %dh", total, timeLimit),
+				Details: map[string]interface{}{
+					"license_id":     lic.LicenseID,
+					"used_hours":     total,
+					"limit_hours":    timeLimit,
+				},
+			}
+			m.sink.Send(ctx, alert)
+			m.cumulativeAlertActive = true
+		}
+		m.logger.Warn("license cumulative usage exceeded",
+			zap.Float64("used_hours", total), zap.Int("limit_hours", timeLimit))
+	} else {
+		m.clearCumulativeAlerts(ctx)
+	}
+	return nil
+}
+
+// clearCumulativeAlerts 撤销累计超限/回拨告警（恢复或换 license 后调用）。
+func (m *Monitor) clearCumulativeAlerts(ctx context.Context) {
+	if !m.cumulativeAlertActive {
+		return
+	}
+	for _, id := range []string{"license_cumulative_exceeded", "license_cumulative_rollback"} {
+		if err := m.sink.Clear(ctx, id); err != nil {
+			m.logger.Warn("clear cumulative alert failed", zap.String("identifier", id), zap.Error(err))
+		}
+	}
+	m.cumulativeAlertActive = false
 }
 
 // capacitySeverity picks Warning/Major/Critical based on threshold position

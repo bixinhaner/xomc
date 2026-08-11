@@ -188,7 +188,8 @@ func buildStatementCommandEntries(stmt Statement, cmd *MMLCommand, subFields []M
 		}
 		// spv 可能为 nil（防御性：所有 sub_fields 都没在 stmt.Values 里）— 此时不追加
 		if spv != nil {
-			return []map[string]interface{}{base, spv}, nil
+			rollback := buildADDCompensationEntry(stmt, cmd)
+			return []map[string]interface{}{base, spv, rollback}, nil
 		}
 	}
 	// #196 复合：MOD with values 后自动追加 LST 回读，核实基站是否真的改成功。
@@ -206,6 +207,24 @@ func buildStatementCommandEntries(stmt Statement, cmd *MMLCommand, subFields []M
 		}
 	}
 	return []map[string]interface{}{base}, nil
+}
+
+func buildADDCompensationEntry(stmt Statement, cmd *MMLCommand) map[string]interface{} {
+	targetObject := strings.TrimSpace(cmd.TargetObject)
+	if !strings.HasSuffix(targetObject, ".") {
+		targetObject += "."
+	}
+	targetObject, _ = substituteInstanceSelectors(targetObject, stmt.InstanceSelectors)
+	return map[string]interface{}{
+		"command_code":      cmd.CommandCode,
+		"operation_type":    "RMV",
+		"command_id":        cmd.ID.String(),
+		"logical_code":      stmt.LogicalCode,
+		"rpc_method":        "DeleteObject",
+		"parameters":        map[string]interface{}{"object_name": targetObject + "{NEW}."},
+		"compound_phase":    "rollback_after_add",
+		"compensation_only": true,
+	}
 }
 
 // buildMODReadbackLSTEntry 构造 #196「MOD 后自动 LST 回读核实」的第 2 行 GetParameterValues entry。

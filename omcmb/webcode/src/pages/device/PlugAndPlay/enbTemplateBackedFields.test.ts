@@ -17,18 +17,18 @@ const enbSection = pageSource.slice(
 
 describe('eNB parameter editor', () => {
   it('uses the LTE quick-settings cards and puts template extensions after them', () => {
-    expect(enbSection).toContain('<EnbQuickSettingsCards />');
+    expect(enbSection).toContain('<EnbQuickSettingsCards paramModelName={selectedProduct?.paramModelName} />');
     expect(enbSection).toContain('<EnbTemplateExtraFieldGrid />');
     expect(enbSection.indexOf('<EnbTemplateExtraFieldGrid />'))
-      .toBeGreaterThan(enbSection.indexOf('<EnbQuickSettingsCards />'));
+      .toBeGreaterThan(enbSection.indexOf('<EnbQuickSettingsCards paramModelName={selectedProduct?.paramModelName} />'));
   });
 
-  it('shows sync-source mode separately and gates the LTE 1588 details by mode', () => {
-    expect(cardsSource).toContain("const syncMode = Form.useWatch('PpsTimeMode', form)");
-    expect(cardsSource).toContain('const show1588Settings = isPtpDetailsVisible(syncMode)');
-    expect(cardsSource).toContain("group.id === 'device-time' && (");
+  it('shows product-specific sync-source fields and gates supported PTP details by mode', () => {
+    expect(cardsSource).toContain('getEnbProductSyncConfig(paramModelName)');
+    expect(cardsSource).toContain("syncConfig.ptpModeValues.includes(String(syncMode ?? ''))");
+    expect(cardsSource).toContain("group.id === 'device-time' && visibleSyncFields.length > 0 && (");
     expect(cardsSource).toContain("title={t('provision.syncSourceConfig')}");
-    expect(cardsSource).toContain('ENB_1588_TEMPLATE_FIELDS.slice(0, 2)');
+    expect(cardsSource).toContain('syncConfig.fields.slice(0, syncConfig.collapsedFieldCount)');
   });
 
   it('omits legacy unsupported controls', () => {

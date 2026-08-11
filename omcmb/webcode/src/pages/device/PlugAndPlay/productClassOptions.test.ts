@@ -3,6 +3,7 @@ import {
   normalizeProductTechnology,
   resolveProductClassTechnology,
   toSupportedProductClassOptions,
+  toSupportedProductNameOptions,
 } from './productClassOptions';
 
 describe('toSupportedProductClassOptions', () => {
@@ -65,5 +66,29 @@ describe('toSupportedProductClassOptions', () => {
       { tech: '4G', patterns: ['^FAP/BU1810$'] },
       { tech: '5G', patterns: ['^FAP/NR100$'] },
     ])).toBe('lte');
+  });
+});
+
+describe('toSupportedProductNameOptions', () => {
+  it('only exposes catalog product names belonging to the selected technology', () => {
+    const products = [
+      { name: 'LTE Product', tech: '4G', patterns: ['^FAP/LTE$'] },
+      { name: 'NR Product', tech: '5G', patterns: ['^FAP/NR$'] },
+    ];
+
+    expect(toSupportedProductNameOptions(
+      products,
+      'lte',
+    )).toEqual([
+      { label: 'LTE Product', value: 'LTE Product' },
+    ]);
+  });
+
+  it('does not expose an unmatched product class as a product name', () => {
+    expect(toSupportedProductNameOptions(
+      [{ name: 'LTE Product', tech: '4G', patterns: ['^FAP/LTE$'] }],
+    )).toEqual([
+      { label: 'LTE Product', value: 'LTE Product' },
+    ]);
   });
 });

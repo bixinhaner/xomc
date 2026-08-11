@@ -22,7 +22,7 @@ import (
 var menuColumns = []string{
 	"id", "name", "name_i18n", "type", "permission_key", "parent_id", "sort_order",
 	"route_path", "component_path", "icon", "show_status", "status",
-	"created_by", "created_at", "updated_by", "updated_at",
+	"created_by", "created_at", "updated_by", "updated_at", "feature_code",
 }
 
 // marshalNameI18n 把 map 序列化为 JSONB；nil/空 map 返 nil（写 SQL NULL）。
@@ -342,7 +342,7 @@ func (r *PgMenuRepository) GetByRole(ctx context.Context, roleID uuid.UUID) ([]M
 	query, args, err := storage.Psql.Select("m.id", "m.name", "m.name_i18n",
 		"m.type", "m.permission_key", "m.parent_id",
 		"m.sort_order", "m.route_path", "m.component_path", "m.icon", "m.show_status", "m.status",
-		"m.created_by", "m.created_at", "m.updated_by", "m.updated_at").
+		"m.created_by", "m.created_at", "m.updated_by", "m.updated_at", "m.feature_code").
 		From("menus m").
 		Join("role_menus rm ON m.id = rm.menu_id").
 		Where(sq.And{
@@ -381,7 +381,7 @@ func (r *PgMenuRepository) GetByUser(ctx context.Context, userID uuid.UUID) ([]M
 	query, args, err := storage.Psql.Select("DISTINCT m.id", "m.name", "m.name_i18n",
 		"m.type", "m.permission_key", "m.parent_id",
 		"m.sort_order", "m.route_path", "m.component_path", "m.icon", "m.show_status", "m.status",
-		"m.created_by", "m.created_at", "m.updated_by", "m.updated_at").
+		"m.created_by", "m.created_at", "m.updated_by", "m.updated_at", "m.feature_code").
 		From("menus m").
 		Join("role_menus rm ON m.id = rm.menu_id").
 		Join("user_roles ur ON ur.role_id = rm.role_id").
@@ -487,7 +487,7 @@ func scanMenu(row pgx.Row) (*Menu, error) {
 		&m.ID, &m.Name, &nameI18nRaw,
 		&m.Type, &m.PermissionKey, &parentID, &m.SortOrder,
 		&routePath, &componentPath, &icon, &m.ShowStatus, &m.Status,
-		&createdBy, &m.CreatedAt, &updatedBy, &m.UpdatedAt,
+		&createdBy, &m.CreatedAt, &updatedBy, &m.UpdatedAt, &m.FeatureCodes,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -513,7 +513,7 @@ func scanMenuFromRows(rows pgx.Rows) (*Menu, error) {
 		&m.ID, &m.Name, &nameI18nRaw,
 		&m.Type, &m.PermissionKey, &parentID, &m.SortOrder,
 		&routePath, &componentPath, &icon, &m.ShowStatus, &m.Status,
-		&createdBy, &m.CreatedAt, &updatedBy, &m.UpdatedAt,
+		&createdBy, &m.CreatedAt, &updatedBy, &m.UpdatedAt, &m.FeatureCodes,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan menu row: %w", err)

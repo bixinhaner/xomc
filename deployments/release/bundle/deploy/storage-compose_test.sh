@@ -255,6 +255,8 @@ contains "开发 Redis 默认命名卷" '${REDIS_DATA_PATH:-redisdata}:/data' "$
 contains "开发 PM Redis 默认命名卷" '${REDIS_PM_DATA_PATH:-redispmdata}:/data' "$DEV_COMPOSE"
 contains "开发 NATS 默认命名卷" '${NATS_DATA_PATH:-natsdata}:/data' "$DEV_COMPOSE"
 contains "开发 MinIO 默认命名卷" '${MINIO_DATA_PATH:-miniodata}:/data' "$DEV_COMPOSE"
+contains "开发写入保护默认匹配 compose 项目名前缀" 'OMCGO_DOCKER_VOLUME_PREFIX: "${OMCGO_DOCKER_VOLUME_PREFIX:-docker}"' "$DEV_COMPOSE"
+contains "release 写入保护默认匹配生产 compose 项目前缀" 'OMCGO_DOCKER_VOLUME_PREFIX: "${OMCGO_DOCKER_VOLUME_PREFIX:-omcgo}"' "$RELEASE_APP_COMPOSE"
 
 echo "── 过载保护配置 ──"
 contains "release TimescaleDB 共享内存兜底" 'shm_size: ${TSDB_SHM_SIZE:-512m}' "$RELEASE_COMPOSE"

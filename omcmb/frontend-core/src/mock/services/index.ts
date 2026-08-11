@@ -18,3 +18,7 @@ export { opsToolsService } from './opsToolsService';
 export { dashboardService } from './dashboardService';
 export { indicatorService } from './indicatorService';
 export { notificationCenterService } from './notificationCenterService';
+export {
+  geofenceMockService,
+  resetGeofenceMock,
+} from './geofenceMock';

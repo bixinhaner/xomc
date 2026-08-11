@@ -16,6 +16,51 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
+type ContactGroup struct {
+	ID          uuid.UUID            `json:"id"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	IsDefault   bool                 `json:"is_default"`
+	Revision    int64                `json:"revision"`
+	Archived    bool                 `json:"archived"`
+	CreatedBy   string               `json:"created_by"`
+	CreatedAt   time.Time            `json:"created_at"`
+	UpdatedAt   time.Time            `json:"updated_at"`
+	Members     []ContactGroupMember `json:"members"`
+}
+
+type ContactGroupMember struct {
+	ID                uuid.UUID `json:"id"`
+	TargetType        string    `json:"target_type"`
+	TargetID          string    `json:"target_id,omitempty"`
+	AddressConfigured bool      `json:"address_configured"`
+	ChannelLimit      []string  `json:"channel_limit"`
+}
+
+type ContactGroupMemberInput struct {
+	TargetType           string   `json:"target_type"`
+	TargetID             string   `json:"target_id,omitempty"`
+	AddressCiphertext    []byte   `json:"address_ciphertext,omitempty"`
+	AddressKeyVersion    int      `json:"address_key_version,omitempty"`
+	RecipientFingerprint []byte   `json:"recipient_fingerprint,omitempty"`
+	ChannelLimit         []string `json:"channel_limit"`
+}
+
+type ContactGroupInput struct {
+	Name        string                    `json:"name"`
+	Description string                    `json:"description"`
+	IsDefault   bool                      `json:"is_default"`
+	Members     []ContactGroupMemberInput `json:"members"`
+}
+
+type ContactGroupRepository interface {
+	List(context.Context) ([]ContactGroup, error)
+	Get(context.Context, uuid.UUID) (*ContactGroup, error)
+	Create(context.Context, ContactGroupInput, string) (*ContactGroup, error)
+	Update(context.Context, uuid.UUID, int64, ContactGroupInput, string) (*ContactGroup, error)
+	ListMembers(context.Context, uuid.UUID) ([]RecipientTarget, error)
+}
+
 var _ ContactGroupRepository = (*PgContactGroupRepository)(nil)
 
 type PgContactGroupRepository struct{ db storage.DB }

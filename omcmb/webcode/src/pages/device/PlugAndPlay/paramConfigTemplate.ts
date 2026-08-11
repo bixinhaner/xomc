@@ -48,14 +48,14 @@ const PARAM_CONFIG_TEMPLATE_SHEETS: Partial<
       '*MODE_SWITCH', '*DOMAIN', '*SYNC_INTERVAL', '*DELAY_INTERVAL',
       '*ASYMMETRY', '*STARTUP_TIME', 'UNICAST_SERVER_IP_ADDRESS',
     ],
-    NETWORK: ['*SERIAL_NUMBER', 'WAN IP', 'OMC IP', 'NTP Enable', 'NTP Server1', 'Local Time Zone'],
+    NETWORK: ['*SERIAL_NUMBER', 'WAN IP', 'NTP Enable', 'NTP Server1', 'Local Time Zone'],
   },
   gNB: {
     DEVICE: [
-      'Serial Number', 'Periodic Inform Enable', 'Periodic Inform Time',
+      'Serial Number', 'URL', 'Periodic Inform Enable', 'Periodic Inform Time',
       'Periodic Inform Interval', 'NTP Enable', 'NTP Server1', 'NTP Server2',
       'NTP Server3', 'NTP Server4', 'NTP Server5', 'Local Time Zone',
-      'Time Zone Term', 'PpsTimeMode',
+      'PpsTimeMode',
     ],
     CELL: [
       '*Serial Number', 'gNB Name', '*gNB ID', '*gNB Lenth', '*PCI',
@@ -76,7 +76,7 @@ const PARAM_CONFIG_TEMPLATE_SHEETS: Partial<
     INTERFACE: [
       'Serial Number', 'Interface Name', 'Address Type', 'IP Address',
       'Subnet Mask', 'Prefix Length', 'Gateway', 'Bear Type', 'Vlan Name',
-      'Vlan ID', 'OMC IP',
+      'Vlan ID',
     ],
     IPSEC: [
       'Serial Number', 'TUNNEL_ENABLE', 'TUNNEL_GATEWAY', 'LEFT_AUTH',

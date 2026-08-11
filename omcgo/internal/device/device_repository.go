@@ -46,16 +46,17 @@ type DeviceFilter struct {
 	VisibleDeviceGrants []model.DeviceVisibilityGrant // grant-based device data permission
 
 	// Extended filters (device_info / devices additional fields)
-	Manufacturer  *string    // devices.manufacturer exact match
-	ProductID     *uuid.UUID // devices.product_id exact match（T-0098 产品装配件软引用；下拉来自 /products）
-	ProductClass  *string    // devices.product_class exact match; CSV means match any value
-	RFStatus      *string    // device_info.rf_status exact match
-	CellStatus    *string    // device_info.cell_status exact match
-	ProjectStatus *string    // device_info.project_status exact match
-	GPSStatus     *string    // device_info.gps_status exact match
-	AlarmSeverity *string    // device_info.alarm_severity exact match
-	LicenseStatus *string    // device_info.license_status exact match
-	OpState       *string    // "1" = activated (first_online_time NOT NULL), "0" = not activated
+	Manufacturer  *string     // devices.manufacturer exact match
+	ProductID     *uuid.UUID  // devices.product_id exact match（T-0098 产品装配件软引用；下拉来自 /products）
+	ProductIDs    []uuid.UUID // devices.product_id IN (...)，供跨多个产品名称检测
+	ProductClass  *string     // devices.product_class exact match; CSV means match any value
+	RFStatus      *string     // device_info.rf_status exact match
+	CellStatus    *string     // device_info.cell_status exact match
+	ProjectStatus *string     // device_info.project_status exact match
+	GPSStatus     *string     // device_info.gps_status exact match
+	AlarmSeverity *string     // device_info.alarm_severity exact match
+	LicenseStatus *string     // device_info.license_status exact match
+	OpState       *string     // "1" = activated (first_online_time NOT NULL), "0" = not activated
 
 	// T-0162 新增 3 个 device list 筛选维度（之前前端下拉空、后端无字段）
 	ModelName *string // devices.model_name exact match (字典 device_model)
@@ -473,6 +474,7 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		Set("site_name", device.DeviceName).
 		Set("latitude", device.Latitude).
 		Set("longitude", device.Longitude).
+		Set("location_source_mode", device.LocationSourceMode).
 		Set("extension_data", extData).
 		Where(sq.Eq{"id": device.ID}).
 		Where(sq.Eq{"deleted_at": nil}). // 防软删 device 被 inform 静默复活；命中时 RowsAffected=0 → 上层 ErrNotFound → 清 cache 走 auto-register
@@ -676,6 +678,10 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 	if filter.ProductID != nil {
 		builder = builder.Where(sq.Eq{"d.product_id": *filter.ProductID})
 		countBuilder = countBuilder.Where(sq.Eq{"d.product_id": *filter.ProductID})
+	}
+	if len(filter.ProductIDs) > 0 {
+		builder = builder.Where(sq.Eq{"d.product_id": filter.ProductIDs})
+		countBuilder = countBuilder.Where(sq.Eq{"d.product_id": filter.ProductIDs})
 	}
 	if filter.ProductClass != nil && *filter.ProductClass != "" {
 		productClasses := SplitCSV(*filter.ProductClass)
@@ -926,6 +932,7 @@ func deviceColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"d.location_source_mode",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 		"d.recycle_type", "d.recycle_executor",
 		"d.last_param_sync_at",
@@ -959,6 +966,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		&d.LastInformAt, &eventsData,
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
+		&d.LocationSourceMode,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 		&recycleType, &recycleExecutor,
 		&d.LastParamSyncAt,
@@ -1044,6 +1052,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		&d.LastInformAt, &eventsData,
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
+		&d.LocationSourceMode,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 		&recycleType, &recycleExecutor,
 		&d.LastParamSyncAt,
@@ -1574,6 +1583,7 @@ func recycleBinSelectColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"d.location_source_mode",
 		"dlo.latitude AS reported_latitude", "dlo.longitude AS reported_longitude",
 		"dlo.gps_height AS reported_gps_height", "dlo.observed_at AS reported_observed_at",
 		"dlo.version AS reported_version", "dlo.source_path AS reported_source_path",

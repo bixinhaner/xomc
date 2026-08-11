@@ -112,6 +112,45 @@ describe('GPV 对象路径结果展示', () => {
     ]);
   });
 
+  it('对象展开已有同结构实值时移除模型别名产生的同名空列', () => {
+    const aliasColumn: ResultColumn = {
+      key: 'alias-cid',
+      label: 'CID',
+      path: 'Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.CID',
+    };
+    const objectColumn: ResultColumn = {
+      key: 'nr-lte-cell',
+      label: 'LTECell',
+      path: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.NeighborList.LTECell.',
+    };
+    const actualPath = `${objectColumn.path}1.CID`;
+    const row = { ...pendingRow, cells: { [actualPath]: '1' } };
+
+    expect(expandObjectPathColumns([aliasColumn, objectColumn], [row])).toEqual([
+      { key: 'nr-lte-cell:child:0', label: 'CID', path: actualPath },
+    ]);
+  });
+
+  it('不同对象的同名叶子不能因为一列为空而被误删', () => {
+    const servingCell: ResultColumn = {
+      key: 'serving-cid',
+      label: 'CID',
+      path: 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Common.CID',
+    };
+    const neighborObject: ResultColumn = {
+      key: 'neighbor',
+      label: 'LTECell',
+      path: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.NeighborList.LTECell.',
+    };
+    const neighborCID = `${neighborObject.path}1.CID`;
+    const row = { ...pendingRow, cells: { [neighborCID]: '1' } };
+
+    expect(expandObjectPathColumns([servingCell, neighborObject], [row]).map((column) => column.path)).toEqual([
+      servingCell.path,
+      neighborCID,
+    ]);
+  });
+
   it('大对象路径最多展开 80 个动态列，避免刷新历史结果时卡住页面', () => {
     const row = {
       ...pendingRow,

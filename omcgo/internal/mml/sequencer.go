@@ -106,6 +106,14 @@ func (s *Sequencer) OnTaskCompleted(ctx context.Context, t *task.Task) {
 		return
 	}
 
+	// ADD compound compensation is conditional: a successful SPV must not
+	// delete the newly configured instance. Mark the compensation command as a
+	// virtual success so a later statement in the same script can still run.
+	if isSpvMethod(t.Method) && isAddRollbackEntry(mmlTask.Commands[nextIdx]) && t.Status == task.TaskStatusCompleted {
+		s.continueAfterCompensationSkip(ctx, mmlTask, t, nextIdx)
+		return
+	}
+
 	// 构造下一行 device_task — 复用 fanouter 的单 command 翻译能力。
 	// R-4.3 复合：prevTask 传入，buildNextRequest 据此识别 AddObject→SPV 链路并替换 .{NEW}.
 	nextReq, err := s.buildNextRequest(ctx, mmlTask, t.DeviceSN, t.DeviceIndex, nextIdx, t)
@@ -236,6 +244,19 @@ func (s *Sequencer) continueAfterSkippedCommand(ctx context.Context, mmlTask *MM
 	s.OnTaskCompleted(ctx, virtual)
 }
 
+func (s *Sequencer) continueAfterCompensationSkip(ctx context.Context, mmlTask *MMLTask, prev *task.Task, skippedIdx int) {
+	virtual := &task.Task{
+		Source:       task.TaskSourceMML,
+		SourceID:     prev.SourceID,
+		DeviceSN:     prev.DeviceSN,
+		DeviceIndex:  prev.DeviceIndex,
+		CommandIndex: skippedIdx,
+		Method:       "DeleteObject",
+		Status:       task.TaskStatusCompleted,
+	}
+	s.OnTaskCompleted(ctx, virtual)
+}
+
 // buildNextRequest 用 fanouter 的逻辑构造单条 device_task 请求。
 // 单命令单设备 → 返回单 request；不合规 / 翻译失败 → 返 nil（caller 跳过）。
 //
@@ -264,6 +285,13 @@ func (s *Sequencer) buildNextRequest(ctx context.Context, mmlTask *MMLTask, devi
 			zap.Int("instance_number", instanceNumber),
 		)
 	}
+	if prevTask != nil && isSpvMethod(prevTask.Method) && isAddRollbackEntry(cmdEntry) {
+		objectName, ok := rollbackObjectName(prevTask.Params)
+		if !ok {
+			return nil, fmt.Errorf("ADD compensation chain break: SPV task %s missing rollback object", prevTask.ID)
+		}
+		cmdEntry = setObjectName(cmdEntry, objectName)
+	}
 
 	// 临时构造一个只含单 device + 单 command 的 MMLTask 视图，
 	// 复用 fanouter.buildDeviceTaskRequests 的 BuildTR069Params 链路。
@@ -288,6 +316,12 @@ func (s *Sequencer) buildNextRequest(ctx context.Context, mmlTask *MMLTask, devi
 	// 还原成原 mmlTask 中的真实索引，保证 result_aggregator / 后续 Sequencer 调用链正确。
 	reqs[0].CommandIndex = cmdIdx
 	reqs[0].DeviceIndex = deviceIdx
+	if prevTask != nil && isAddObjectMethod(prevTask.Method) && isSpvCmdEntry(cmdEntry) {
+		instanceNumber, _ := extractInstanceNumber(prevTask.Result)
+		if objectName, ok := addInstanceObjectName(prevTask.Params, instanceNumber); ok {
+			reqs[0].Params = withRollbackObjectName(reqs[0].Params, objectName)
+		}
+	}
 	return reqs[0], nil
 }
 
@@ -354,6 +388,63 @@ func isSpvCmdEntry(entry map[string]interface{}) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(s), "SetParameterValues")
+}
+
+func isSpvMethod(method string) bool {
+	return strings.EqualFold(strings.TrimSpace(method), "SetParameterValues")
+}
+
+func isAddRollbackEntry(entry map[string]interface{}) bool {
+	return commandString(entry, "compound_phase") == "rollback_after_add"
+}
+
+const rollbackObjectNameKey = "_mml_rollback_object_name"
+
+func addInstanceObjectName(params json.RawMessage, instanceNumber int) (string, bool) {
+	if instanceNumber <= 0 {
+		return "", false
+	}
+	var payload map[string]interface{}
+	if json.Unmarshal(params, &payload) != nil {
+		return "", false
+	}
+	base, _ := payload["object_name"].(string)
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return "", false
+	}
+	return strings.TrimSuffix(base, ".") + "." + strconv.Itoa(instanceNumber) + ".", true
+}
+
+func withRollbackObjectName(params json.RawMessage, objectName string) json.RawMessage {
+	var payload map[string]interface{}
+	if json.Unmarshal(params, &payload) != nil {
+		return params
+	}
+	payload[rollbackObjectNameKey] = objectName
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return params
+	}
+	return out
+}
+
+func rollbackObjectName(params json.RawMessage) (string, bool) {
+	var payload map[string]interface{}
+	if json.Unmarshal(params, &payload) != nil {
+		return "", false
+	}
+	name, _ := payload[rollbackObjectNameKey].(string)
+	return name, strings.TrimSpace(name) != ""
+}
+
+func setObjectName(cmd map[string]interface{}, objectName string) map[string]interface{} {
+	out := make(map[string]interface{}, len(cmd))
+	for k, v := range cmd {
+		out[k] = v
+	}
+	out["parameters"] = map[string]interface{}{"object_name": objectName}
+	return out
 }
 
 // extractInstanceNumber 从 device_task.result JSON 解析 instance_number 整数。

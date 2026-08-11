@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	appcontext "github.com/omcgo/omcgo/internal/core/context"
+	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/pkg/soap"
 )
 
@@ -40,6 +42,7 @@ type Exporter struct {
 	signProvider PresignClientProvider // issue #548 切片 4：sys_configs 热改 endpoint 后下次 presign 即生效
 	bucket       string
 	logger       *zap.Logger
+	admission    storageprotection.WriteAdmission
 }
 
 // NewExporter 构造导出器。put/sign 任一为 nil 视为未配置（ExportXxx 返回 503）。
@@ -54,6 +57,13 @@ func (e *Exporter) SetSignProvider(p PresignClientProvider) {
 		return
 	}
 	e.signProvider = p
+}
+
+func (e *Exporter) SetStorageAdmission(admission storageprotection.WriteAdmission) {
+	if e == nil {
+		return
+	}
+	e.admission = admission
 }
 
 // signClient 返回当前该用于签发预签名 URL 的 client：优先 provider.Get()，其次 e.sign。
@@ -71,6 +81,15 @@ func (e *Exporter) ready() bool {
 }
 
 func (e *Exporter) upload(ctx context.Context, key string, data []byte) error {
+	if e.admission != nil {
+		decision, err := e.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeReport)
+		if err != nil {
+			return fmt.Errorf("storage admission check: %w", err)
+		}
+		if !decision.Allowed {
+			return fmt.Errorf("storage write protected: %s", decision.Reason)
+		}
+	}
 	_, err := e.put.PutObject(ctx, e.bucket, key, bytes.NewReader(data), int64(len(data)),
 		minio.PutObjectOptions{ContentType: "text/csv; charset=utf-8"})
 	if err != nil {
@@ -659,7 +678,14 @@ func buildLongFormatCSVForLocale(
 	for _, sn := range order {
 		deviceSeq++
 		firstRowOfDevice := true
-		for _, row := range groups[sn] {
+		deviceRows := groups[sn]
+		sort.SliceStable(deviceRows, func(i, j int) bool {
+			if deviceRows[i].CommandIndex != deviceRows[j].CommandIndex {
+				return deviceRows[i].CommandIndex < deviceRows[j].CommandIndex
+			}
+			return deviceRows[i].CreatedAt.Before(deviceRows[j].CreatedAt)
+		})
+		for _, row := range deviceRows {
 			commandCols := commandExportColumns(commands, cols, row.CommandIndex)
 			er := rowToExport(row, commandCols, read)
 			status := localizedDeviceStatusText(row.Status, row.ErrorCode, locale)
@@ -676,11 +702,11 @@ func buildLongFormatCSVForLocale(
 				if firstRowOfDevice { // 设备级公共字段：仅设备首行
 					rec[0] = strconv.Itoa(deviceSeq)
 					rec[1] = sn
-					rec[2] = commandDisplayField(commands, row.CommandIndex)
-					rec[3] = commandStringField(commands, row.CommandIndex, "operation_type")
 					firstRowOfDevice = false
 				}
 				if firstRowOfTask { // 下发/响应/报文仅在该 device_task 首行填，避免重复
+					rec[2] = commandDisplayField(commands, row.CommandIndex)
+					rec[3] = commandStringField(commands, row.CommandIndex, "operation_type")
 					rec[10] = er.sentAt
 					rec[11] = er.completedAt
 					rec[12] = raw

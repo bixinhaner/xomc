@@ -2161,6 +2161,12 @@ func (h *Handler) queueAutoGPVAfterSPV(ctx context.Context, spvTask *task.Task, 
 	if h.taskService == nil || spvTask == nil || len(spvTask.Params) == 0 {
 		return
 	}
+	// Geofence actions own a correlated readback task and must not also create
+	// the generic T-0147 readback. The correlated task carries SourceID so the
+	// action can distinguish "SPV accepted" from "requested values verified".
+	if spvTask.Source == task.TaskSourceGeofence {
+		return
+	}
 
 	var spvParams struct {
 		Values []struct {

@@ -52,6 +52,45 @@ describe('parameter configuration detail mapping', () => {
     });
   });
 
+  it('shows populated imported 5G device, interface and IPsec values', () => {
+    expect(toParamConfigFormValues({
+      deviceType: 'gNB',
+      sheetParameters: {
+        DEVICE: [{
+          'NTP Enable': true,
+          'NTP Server1': '192.0.2.1',
+          'Local Time Zone': 'UTC0',
+        }],
+        INTERFACE: [{
+          'IP Address': '192.0.2.10',
+          'Subnet Mask': '255.255.255.0',
+          'Vlan ID': 100,
+        }],
+        IPSEC: [{
+          TUNNEL_ENABLE: '1',
+          TUNNEL_GATEWAY: '198.51.100.1',
+          LEFT_AUTH: 'psk',
+        }],
+      },
+    })).toMatchObject({
+      ntpSync: '1',
+      networkConfigList: [{
+        'IP Address': '192.0.2.10',
+        'Subnet Mask': '255.255.255.0',
+        'Vlan ID': 100,
+      }],
+      ipsecList: [{
+        TUNNEL_ENABLE: '1',
+        TUNNEL_GATEWAY: '198.51.100.1',
+        LEFT_AUTH: 'psk',
+      }],
+      IPSEC_ENABLE: '1',
+      serviceIp: '192.0.2.10',
+      serviceMask: '255.255.255.0',
+      serviceVlan: 100,
+    });
+  });
+
   it('maps 4G CELL and NETWORK_ENABLE values into the detail form', () => {
     expect(toParamConfigFormValues({
       deviceType: 'eNB',
@@ -224,7 +263,7 @@ describe('parameter configuration detail mapping', () => {
       'DEVICE', 'CELL', 'PLMN', 'INTERFACE', 'IPSEC',
     ]);
     expect(Object.values(hydrated.sheetParameters ?? {})
-      .flatMap((rows) => Object.keys(rows[0] ?? {}))).toHaveLength(89);
+      .flatMap((rows) => Object.keys(rows[0] ?? {}))).toHaveLength(88);
     expect(hydrated.sheetParameters?.CELL[0]).toMatchObject({
       '*Serial Number': '5G-HISTORY-001',
       '*PCI': 321,
@@ -243,7 +282,7 @@ describe('parameter configuration detail mapping', () => {
       'CELL', 'NETWORK_ENABLE', 'NETWORK_IPSEC', '1588_CONFIGURATION', 'NETWORK',
     ]);
     expect(Object.values(hydrated.sheetParameters ?? {})
-      .flatMap((rows) => Object.keys(rows[0] ?? {}))).toHaveLength(63);
+      .flatMap((rows) => Object.keys(rows[0] ?? {}))).toHaveLength(62);
     expect(hydrated.sheetParameters?.CELL[0]['*SERIAL_NUMBER'])
       .toBe('4G-HISTORY-001');
     expect(hydrated.sheetParameters?.['1588_CONFIGURATION'][0])
@@ -296,13 +335,52 @@ describe('parameter configuration detail mapping', () => {
 
     expect(mergeParamConfigFormValues(current, {
       ...form,
-      serviceIp: '192.0.2.20',
+      networkConfigList: [{
+        ...(form.networkConfigList as Array<Record<string, unknown>>)[0],
+        'IP Address': '192.0.2.20',
+      }],
       amfList: [{ amfIp: '10.0.0.2', amfPort: '38412' }],
       sliceConfigList: [{ sd: '1', sdValue: '112233' }],
     })).toMatchObject({
       sheetParameters: {
         INTERFACE: [{ 'IP Address': '192.0.2.20' }],
         PLMN: [{ 'AMF IP:DEFAULT': '10.0.0.2', 'SD Value': '112233' }],
+      },
+    });
+  });
+
+  it('round-trips multiple network instances', () => {
+    const current = withTemplateSheetParameters({
+      deviceType: 'gNB',
+      serialNumber: '5G-NETWORK-001',
+      sheetParameters: {
+        INTERFACE: [
+          { 'Serial Number': '5G-NETWORK-001', 'Interface Name': 'eth0', 'IP Address': '192.0.2.10' },
+          { 'Serial Number': '5G-NETWORK-001', 'Interface Name': 'eth1', 'IP Address': '192.0.2.20' },
+        ],
+      },
+    });
+    const form = toParamConfigFormValues(current);
+
+    expect(form).toMatchObject({
+      networkConfigList: [
+        { 'Interface Name': 'eth0', 'IP Address': '192.0.2.10' },
+        { 'Interface Name': 'eth1', 'IP Address': '192.0.2.20' },
+      ],
+    });
+
+    expect(mergeParamConfigFormValues(current, {
+      ...form,
+      networkConfigList: [
+        { 'Interface Name': 'eth1', 'IP Address': '192.0.2.21' },
+        { 'Interface Name': 'eth2', 'IP Address': '192.0.2.30' },
+      ],
+    })).toMatchObject({
+      sheetParameters: {
+        INTERFACE: [
+          { 'Interface Name': 'eth1', 'IP Address': '192.0.2.21' },
+          { 'Interface Name': 'eth2', 'IP Address': '192.0.2.30' },
+        ],
       },
     });
   });
@@ -368,7 +446,10 @@ describe('parameter configuration detail mapping', () => {
       BandSupport: 'Band 41',
       tfcsManagerPrimsrc: '10',
       NTPServer2: '192.0.2.22',
-      sheetParameters: { CELL: [{ CELL_NAME: 'LTE Cell Updated' }] },
+      sheetParameters: {
+        CELL: [{ CELL_NAME: 'LTE Cell Updated' }],
+        '1588_CONFIGURATION': [{ '*SYNCHRONIZATION_MODE': '10' }],
+      },
     });
   });
 

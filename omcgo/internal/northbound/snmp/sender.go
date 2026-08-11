@@ -92,6 +92,7 @@ func (s *GoSNMPSender) Send(ctx context.Context, target *TrapTarget, vars []Vari
 	pdus := buildPDUs(vars)
 	trap := g.SnmpTrap{
 		Variables: pdus,
+		IsInform:  target.Inform,
 	}
 
 	if _, err := params.SendTrap(trap); err != nil {
@@ -186,8 +187,14 @@ func gosnmpAuthProtocol(p AuthProtocol) g.SnmpV3AuthProtocol {
 		return g.MD5
 	case AuthSHA:
 		return g.SHA
+	case AuthSHA224:
+		return g.SHA224
 	case AuthSHA256:
 		return g.SHA256
+	case AuthSHA384:
+		return g.SHA384
+	case AuthSHA512:
+		return g.SHA512
 	default:
 		return g.NoAuth
 	}
@@ -197,8 +204,10 @@ func gosnmpPrivProtocol(p PrivProtocol) g.SnmpV3PrivProtocol {
 	switch p {
 	case PrivDES:
 		return g.DES
-	case PrivAES:
+	case PrivAES, PrivAES128:
 		return g.AES
+	case PrivAES192:
+		return g.AES192
 	case PrivAES256:
 		return g.AES256
 	default:

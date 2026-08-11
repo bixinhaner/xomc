@@ -9,6 +9,12 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	defaultEventRetentionDays = 180
+	defaultEventKeepLatest    = 1000
+	eventCleanupInterval      = 24 * time.Hour
+)
+
 type Service struct {
 	repo    Repository
 	usage   UsageProvider
@@ -18,6 +24,7 @@ type Service struct {
 	mu      sync.Mutex
 	logMu   sync.RWMutex
 	logGate LogAdmissionController
+	cleanup bool
 	cancel  context.CancelFunc
 	done    chan struct{}
 }
@@ -40,6 +47,18 @@ func (s *Service) SetLogAdmissionController(controller LogAdmissionController) {
 	s.logMu.Lock()
 	s.logGate = controller
 	s.logMu.Unlock()
+}
+
+// EnableEventCleanup makes this process responsible for pruning historical
+// storage-protection state records. App owns the cleanup loop; worker only
+// needs admission checks and should not duplicate database cleanup work.
+func (s *Service) EnableEventCleanup() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.cleanup = true
+	s.mu.Unlock()
 }
 
 func (s *Service) setLogAdmissionBlocked(blocked bool) {
@@ -85,18 +104,30 @@ func (s *Service) Start(ctx context.Context, interval time.Duration) {
 	s.cancel = cancel
 	s.done = make(chan struct{})
 	done := s.done
+	cleanupEnabled := s.cleanup
 	s.mu.Unlock()
 	go func() {
 		defer close(done)
 		s.evaluateAll(workerCtx)
+		if cleanupEnabled {
+			s.cleanupEvents(workerCtx)
+		}
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+		var cleanupC <-chan time.Time
+		if cleanupEnabled {
+			cleanupTicker := time.NewTicker(eventCleanupInterval)
+			defer cleanupTicker.Stop()
+			cleanupC = cleanupTicker.C
+		}
 		for {
 			select {
 			case <-workerCtx.Done():
 				return
 			case <-ticker.C:
 				s.evaluateAll(workerCtx)
+			case <-cleanupC:
+				s.cleanupEvents(workerCtx)
 			}
 		}
 	}()
@@ -139,6 +170,21 @@ func (s *Service) evaluateAll(ctx context.Context) {
 		// A policy can be disabled or deleted while a previous state was
 		// blocked. Do not leave the process logger permanently closed.
 		s.setLogAdmissionBlocked(false)
+	}
+}
+
+func (s *Service) cleanupEvents(ctx context.Context) {
+	if s == nil || s.repo == nil {
+		return
+	}
+	before := s.now().AddDate(0, 0, -defaultEventRetentionDays)
+	deleted, err := s.repo.CleanupEvents(ctx, before, defaultEventKeepLatest)
+	if err != nil {
+		s.logger.Warn("cleanup storage protection events failed", zap.Error(err))
+		return
+	}
+	if deleted > 0 {
+		s.logger.Info("cleanup storage protection events completed", zap.Int64("deleted", deleted))
 	}
 }
 
@@ -195,6 +241,7 @@ func (s *Service) Check(ctx context.Context, targetType TargetType, targetID str
 		policy.StateObservations = 0
 	}
 	nextState, observations, reason := evaluateState(policy, usage.UsedRatio, usage.ObservedAt)
+	reason = usageReason(reason, usage)
 	policy.CurrentState = nextState
 	policy.StateObservations = observations
 	policy.LastObservedRatio = floatPtr(usage.UsedRatio)
@@ -214,6 +261,16 @@ func (s *Service) Check(ctx context.Context, targetType TargetType, targetID str
 		}
 	}
 	return s.decision(policy, scope, usage.ObservedAt, reason), nil
+}
+
+func usageReason(reason string, usage UsageSnapshot) string {
+	if usage.Reason == "" {
+		return reason
+	}
+	if reason == "" {
+		return usage.Reason
+	}
+	return reason + "; " + usage.Reason
 }
 
 func (s *Service) handleUnknown(ctx context.Context, policy *Policy, scope WriteScope, reason string) (AdmissionDecision, error) {
@@ -310,62 +367,62 @@ func (s *Service) ListTargets(ctx context.Context) ([]TargetSnapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list storage protection targets: %w", err)
 	}
-	type targetEntry struct {
-		snapshot TargetSnapshot
-		seen     map[WriteScope]struct{}
-	}
-	entries := make(map[string]*targetEntry)
-	order := make([]string, 0)
-	// Expose the physical target even before an administrator creates a
-	// policy. This keeps the targets endpoint useful for capacity observation
-	// and avoids implying that a missing policy means a missing disk.
-	rootKey := string(TargetFilesystem) + "\x00" + UnifiedStorageTargetID
-	entries[rootKey] = &targetEntry{
-		snapshot: TargetSnapshot{TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, CurrentState: StateNormal},
-		seen:     make(map[WriteScope]struct{}),
-	}
-	order = append(order, rootKey)
+	writeScopes := make([]WriteScope, 0)
+	seenScopes := make(map[WriteScope]struct{})
+	var globalPolicy *Policy
 	for _, policy := range policies {
 		if policy.TargetType != TargetFilesystem || policy.TargetID != UnifiedStorageTargetID {
 			continue
 		}
-		key := string(policy.TargetType) + "\x00" + policy.TargetID
-		entry, ok := entries[key]
-		if !ok {
-			entry = &targetEntry{
-				snapshot: TargetSnapshot{TargetType: policy.TargetType, TargetID: policy.TargetID, CurrentState: StateNormal},
-				seen:     make(map[WriteScope]struct{}),
-			}
-			entries[key] = entry
-			order = append(order, key)
+		if _, ok := seenScopes[policy.WriteScope]; !ok {
+			writeScopes = append(writeScopes, policy.WriteScope)
+			seenScopes[policy.WriteScope] = struct{}{}
 		}
-		if _, ok := entry.seen[policy.WriteScope]; !ok {
-			entry.snapshot.WriteScopes = append(entry.snapshot.WriteScopes, policy.WriteScope)
-			entry.seen[policy.WriteScope] = struct{}{}
-		}
-		if policy.CurrentState == StateBlocked || (policy.CurrentState == StateWarning && entry.snapshot.CurrentState != StateBlocked) || (policy.CurrentState == StateUnknown && entry.snapshot.CurrentState == StateNormal) {
-			entry.snapshot.CurrentState = policy.CurrentState
+		if policy.Enabled && (globalPolicy == nil || policy.WriteScope == WriteScopeAll) {
+			copy := policy
+			globalPolicy = &copy
 		}
 	}
-	targets := make([]TargetSnapshot, 0, len(order))
-	for _, key := range order {
-		snapshot := entries[key].snapshot
-		if s.usage != nil {
-			usage, usageErr := s.usage.Snapshot(ctx, snapshot.TargetType, snapshot.TargetID)
-			if usageErr != nil {
-				snapshot.Reason = usageErr.Error()
-			} else {
-				snapshot.CapacityBytes = usage.CapacityBytes
-				snapshot.UsedBytes = usage.UsedBytes
-				snapshot.UsedRatio = usage.UsedRatio
-				snapshot.Available = usage.Available
-				snapshot.Reason = usage.Reason
-				snapshot.ObservedAt = usage.ObservedAt
-			}
+	usageTargets := []UsageSnapshot{{TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, Mountpoint: UnifiedStorageMountpoint, Available: false, Reason: "storage usage provider is unavailable"}}
+	if lister, ok := s.usage.(UsageTargetLister); ok {
+		usageTargets, err = lister.ListTargets(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list storage protection usage targets: %w", err)
 		}
-		targets = append(targets, snapshot)
+	} else if s.usage != nil {
+		usage, usageErr := s.usage.Snapshot(ctx, TargetFilesystem, UnifiedStorageTargetID)
+		if usageErr != nil {
+			usage = UsageSnapshot{TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, Mountpoint: UnifiedStorageMountpoint, Available: false, Reason: usageErr.Error()}
+		}
+		usageTargets = []UsageSnapshot{usage}
+	}
+
+	targets := make([]TargetSnapshot, 0, len(usageTargets))
+	for _, usage := range usageTargets {
+		targets = append(targets, TargetSnapshot{
+			TargetType: usage.TargetType, TargetID: usage.TargetID, Mountpoint: usage.Mountpoint, ProtectedPaths: append([]string(nil), usage.ProtectedPaths...),
+			CapacityBytes: usage.CapacityBytes, UsedBytes: usage.UsedBytes, UsedRatio: usage.UsedRatio,
+			Available: usage.Available, Reason: usage.Reason, ObservedAt: usage.ObservedAt,
+			CurrentState: targetState(globalPolicy, usage), WriteScopes: append([]WriteScope(nil), writeScopes...),
+		})
 	}
 	return targets, nil
+}
+
+func targetState(policy *Policy, usage UsageSnapshot) State {
+	if policy == nil || !policy.Enabled {
+		return StateNormal
+	}
+	if !usage.Available {
+		return StateUnknown
+	}
+	if usage.UsedRatio >= float64(policy.BlockUsedPercent)/100 {
+		return StateBlocked
+	}
+	if usage.UsedRatio >= float64(policy.WarnUsedPercent)/100 {
+		return StateWarning
+	}
+	return StateNormal
 }
 
 func (s *Service) ListEvents(ctx context.Context, targetType TargetType, targetID string, limit int) ([]Event, error) {

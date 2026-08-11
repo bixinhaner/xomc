@@ -23,7 +23,10 @@
 - 时序库 schema 变化折回 `tsdb/000001_tsdb_schema.sql`。
 - 软件封版本后，先更新根 `AGENTS.md`、本 README 和 `seed/README.md`，明确允许追加迁移，再从各自流的 `000002` 开始新增文件。
 
-> ⚠️ 当前 baseline 只兼容全新安装或允许清库重建的环境，不是既有数据库的就地升级路径。既有库处理方式见 [Baseline 运维手册](../../docs/ref/migration-baseline-runbook.md)。
+> ⚠️ 当前 baseline 仍以全新安装为准。对已有的预发布数据库，仅允许把纯新增、可幂等
+> 重放的主库结构和种子放进 `MainReconcile` 标记区段；迁移程序执行既有的
+> `migrations/seed` 流程时会自动协调这些区段。删除、改名、类型收紧或数据回填等非加法
+> 变化仍必须按 [Baseline 运维手册](../../docs/ref/migration-baseline-runbook.md) 单独设计并先备份。
 
 ## 三个基线文件
 
@@ -54,6 +57,19 @@ make migrate-up
 ```
 
 `migrate-schema` 使用默认版本表 `goose_db_version`；`migrate-seed` 必须使用 `goose_db_version_seed`；`migrate-tsdb-schema` 必须使用 `goose_db_version_tsdb`。全新库验证 seed 时不要用共享默认版本表，否则 seed 的 `000001` 会被误判为已应用。
+
+### 预发布主库兼容协调
+
+`omcgo-migrate` 在执行既有 `migrations/seed` 目录时自动协调，无需修改 Docker Compose
+参数。该步骤从主 schema 和 seed 两个 `000001` 中提取成对的
+`-- +omcgo MainReconcileBegin/End` 区段，在 PostgreSQL advisory transaction lock 下先补齐
+schema，再执行 Goose seed，最后幂等补齐 seed；任一步失败都会返回非零状态，并通过既有
+`depends_on: service_completed_successfully` 阻止 App、ACS 和 Worker 使用不完整结构。
+
+协调区段只允许静态、可重复执行的 SQL：`ADD COLUMN IF NOT EXISTS`、
+`CREATE TABLE/INDEX IF NOT EXISTS`、带 catalog 守卫的约束，以及 `INSERT ... ON CONFLICT`。
+禁止在其中放 `DROP`、`TRUNCATE` 或无条件覆盖业务数据的 DML。104 等保留真机数据的环境
+首次升级前仍必须执行 `pg_dump` 并审核实际 SQL。
 
 ## 相关链接
 

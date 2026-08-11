@@ -44,3 +44,36 @@ func hasFeatureRaw(raw json.RawMessage, path []string) bool {
 	}
 	return hasFeatureValue(value, path)
 }
+
+// extractTimeLimitHours pulls the legacy cumulative-usage limit (hours) out of the
+// feature_list envelope. Returns 0 when absent (no cumulative limit / perpetual).
+func extractTimeLimitHours(featureList FeatureList) int {
+	if len(featureList) == 0 {
+		return 0
+	}
+	var env struct {
+		TimeLimitHours int `json:"time_limit_hours"`
+	}
+	if err := json.Unmarshal(featureList, &env); err != nil {
+		return 0
+	}
+	return env.TimeLimitHours
+}
+
+// extractAuthorizationTree unwraps the persisted feature_list envelope to the
+// nested authorization tree that HasFeature traverses. The envelope shape is
+// {legacy_feature_ids, legacy_feature_codes, features, authorization_tree};
+// HasFeature must operate on authorization_tree alone, not the whole envelope.
+// Returns nil when the envelope or tree is absent (HasFeature then returns false).
+func extractAuthorizationTree(featureList FeatureList) json.RawMessage {
+	if len(featureList) == 0 {
+		return nil
+	}
+	var envelope struct {
+		Tree json.RawMessage `json:"authorization_tree"`
+	}
+	if err := json.Unmarshal(featureList, &envelope); err != nil {
+		return nil
+	}
+	return envelope.Tree
+}

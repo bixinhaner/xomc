@@ -59,6 +59,9 @@ export const componentRegistry: Record<string, ComponentType> = {
   'config/CommonConfig': lazy(() => import('@/pages/config/CommonConfig')),
   'config/NeighborParams': lazy(() => import('@/pages/config/NeighborParams')),
   'config/NorthboundManagement': lazy(() => import('@/pages/config/NorthboundManagement')),
+  'config/NorthboundPageConfig': lazy(
+    () => import('@/pages/config/NorthboundPageConfig'),
+  ),
   'config/AutoProvisioning': lazy(() => import('@/pages/config/AutoProvisioning')),
   'config/InteropTesting': lazy(() => import('@/pages/config/InteropTesting')),
 
@@ -143,7 +146,7 @@ export const componentRegistry: Record<string, ComponentType> = {
   'system/UICustomization': lazy(() => import('@/pages/system/UICustomization')),
   'system/MenuManagement': lazy(() => import('@/pages/system/MenuManagement')),
   'system/SystemDashboard': lazy(() => import('@/pages/system/SystemDashboard')),
-  'system/StorageProtection': lazy(() => import('@/pages/system/StorageProtection')),
+  'system/StorageProtection': lazy(() => import('@/pages/system/SystemConfig')),
   'system/ApiManagement': lazy(() => import('@/pages/system/ApiManagement')),
   'system/DataDictionary': lazy(() => import('@/pages/system/DataDictionary')),
   'system/DictLoader': lazy(() => import('@/pages/system/DictLoader')),

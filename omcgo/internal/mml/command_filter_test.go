@@ -18,21 +18,22 @@ func TestAnnotateCommand(t *testing.T) {
 	supported := newSupportedSet(true,
 		"Device.X.A",
 		"Device.X.B",
+		"Device.Y.Parent.{i}.",
 		"Device.Y.Parent.Child1",
 		"Device.Y.Parent.Child2",
 	)
 	orphan := newSupportedSet(false)
 
 	tests := []struct {
-		name             string
-		opType           string
-		targetPathsJSON  string
-		targetObject     string
-		supported        *SupportedSet
-		wantVisible      bool
-		wantSupported    int
-		wantUnsupported  []string
-		wantProductFlag  *bool
+		name            string
+		opType          string
+		targetPathsJSON string
+		targetObject    string
+		supported       *SupportedSet
+		wantVisible     bool
+		wantSupported   int
+		wantUnsupported []string
+		wantProductFlag *bool
 	}{
 		{
 			name:            "LST partial supported (≥1 → visible)",
@@ -65,13 +66,23 @@ func TestAnnotateCommand(t *testing.T) {
 			wantProductFlag: ptrBool(true),
 		},
 		{
-			name:            "ADD prefix-hit (visible)",
+			name:            "ADD explicit-object-hit (visible)",
 			opType:          "ADD",
 			targetObject:    "Device.Y.Parent.",
 			supported:       supported,
 			wantVisible:     true,
 			wantSupported:   1,
 			wantUnsupported: nil,
+			wantProductFlag: ptrBool(true),
+		},
+		{
+			name:            "ADD child-prefix-only (hidden)",
+			opType:          "ADD",
+			targetObject:    "Device.Y.Other.",
+			supported:       newSupportedSet(true, "Device.Y.Other.Child"),
+			wantVisible:     false,
+			wantSupported:   0,
+			wantUnsupported: []string{"Device.Y.Other."},
 			wantProductFlag: ptrBool(true),
 		},
 		{

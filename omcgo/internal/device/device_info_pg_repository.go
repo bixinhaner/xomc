@@ -459,6 +459,10 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		builder = builder.Where(sq.Eq{"d.product_id": *filter.ProductID})
 		countBuilder = countBuilder.Where(sq.Eq{"d.product_id": *filter.ProductID})
 	}
+	if len(filter.ProductIDs) > 0 {
+		builder = builder.Where(sq.Eq{"d.product_id": filter.ProductIDs})
+		countBuilder = countBuilder.Where(sq.Eq{"d.product_id": filter.ProductIDs})
+	}
 	if filter.RFStatus != nil && *filter.RFStatus != "" {
 		builder = builder.Where(sq.Eq{"di.rf_status": *filter.RFStatus})
 		countBuilder = countBuilder.Where(sq.Eq{"di.rf_status": *filter.RFStatus})
@@ -721,6 +725,9 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 		// 导致 ?product_id= 在 /devices 列表静默失效（List 方法有、此 live 路径无）。
 		b = b.Where(sq.Eq{"d.product_id": *filter.ProductID})
 	}
+	if len(filter.ProductIDs) > 0 {
+		b = b.Where(sq.Eq{"d.product_id": filter.ProductIDs})
+	}
 	if filter.ProductClass != nil && *filter.ProductClass != "" {
 		b = b.Where(sq.Eq{"d.product_class": SplitCSV(*filter.ProductClass)})
 	}
@@ -848,6 +855,7 @@ func deviceWithInfoSelectColumns() []string {
 		"d.last_inform_at", "d.last_inform_events",
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
+		"d.location_source_mode",
 		"dlo.latitude AS reported_latitude", "dlo.longitude AS reported_longitude",
 		"dlo.gps_height AS reported_gps_height", "dlo.observed_at AS reported_observed_at",
 		"dlo.version AS reported_version", "dlo.source_path AS reported_source_path",
@@ -1129,6 +1137,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&d.LastInformAt, &eventsData,
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
+		&d.LocationSourceMode,
 		&reportedLatitude, &reportedLongitude, &reportedGPSHeight, &reportedObservedAt,
 		&reportedVersion, &reportedSourcePath,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,

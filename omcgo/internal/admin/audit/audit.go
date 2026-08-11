@@ -66,17 +66,20 @@ const (
 
 // ResourceType constants identify the entity an action targets.
 const (
-	ResourceAuth        = "auth"
-	ResourceDevice      = "device"
-	ResourceTemplate    = "template"
-	ResourceBaseline    = "baseline"
-	ResourceFirmware    = "firmware"
-	ResourceUpgradeTask = "upgrade_task"
-	ResourceLicense     = "license"
-	ResourceAlarmFilter = "alarm_filter"
-	ResourceUser        = "user"
-	ResourceRole        = "role"
-	ResourceConfig      = "config"
+	ResourceAuth             = "auth"
+	ResourceDevice           = "device"
+	ResourceTemplate         = "template"
+	ResourceBaseline         = "baseline"
+	ResourceFirmware         = "firmware"
+	ResourceUpgradeTask      = "upgrade_task"
+	ResourceLicense          = "license"
+	ResourceAlarmFilter      = "alarm_filter"
+	ResourceUser             = "user"
+	ResourceRole             = "role"
+	ResourceConfig           = "config"
+	ResourceGeofence         = "geofence"
+	ResourceGeofenceBinding  = "geofence_binding"
+	ResourceGeofenceSettings = "geofence_settings"
 )
 
 // Entry is a single business audit record.

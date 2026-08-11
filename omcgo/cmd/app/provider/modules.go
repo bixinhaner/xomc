@@ -46,13 +46,16 @@ import (
 	mrtask "github.com/omcgo/omcgo/internal/mr/task"
 	"github.com/omcgo/omcgo/internal/nedirect"
 	"github.com/omcgo/omcgo/internal/northbound"
+	nbpageconfig "github.com/omcgo/omcgo/internal/northbound/pageconfig"
 	"github.com/omcgo/omcgo/internal/northbound/push"
+	nbsnmp "github.com/omcgo/omcgo/internal/northbound/snmp"
 	nbsync "github.com/omcgo/omcgo/internal/northbound/sync"
 	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/ops"
 	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
+	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/omcgo/omcgo/internal/rebootrecord"
@@ -1017,6 +1020,7 @@ func initBackupModule(c *Container) error {
 		snapshotRepo, c.MinIO, snapshotFileLookup, c.DeviceRepo,
 		backup.SnapshotBucketDefault, logger,
 	)
+	snapshotService.SetStorageAdmission(c.StorageProtection)
 	c.miscDeps.snapshotService = snapshotService
 	// #61: promote 解码管线 —— 读源备份对象 + AES-256-GCM 解密器，把(压缩/加密的)
 	// 备份还原成明文写快照（替代会产生不可用快照的 server-side CopyObject）。
@@ -1063,6 +1067,7 @@ func initBackupModule(c *Container) error {
 		licenseRepo, c.MinIO, c.DeviceRepo,
 		c.miscDeps.taskSvc, backup.LicenseBucketDefault, logger,
 	)
+	licenseService.SetStorageAdmission(c.StorageProtection)
 	backupHandler.SetLicenseService(licenseService)
 	licensePreinstallSubscriber := backup.NewLicensePreinstallSubscriber(licenseService, logger)
 	if err := licensePreinstallSubscriber.Subscribe(c.EventBus); err != nil {
@@ -1434,7 +1439,11 @@ func initDashboardModule(c *Container) error {
 	}
 	dashboardCfg := c.Cfg.Dashboard.Defaults()
 	dashboardMetrics := dashboard.NewMetrics(c.MetricsReg)
-	networkRollups := dashboard.NewNetworkRollupRepository(c.TsPool, dashboardCfg.StatementTimeout)
+	networkRollups := dashboard.NewNetworkRollupRepository(
+		c.TsPool,
+		dashboardCfg.StatementTimeout,
+		pmstream.NewPgProgressTaskLoader(c.PgPool),
+	)
 	queryGuard := dashboard.NewKPIQueryGuard(dashboard.KPIQueryGuardConfig{
 		QueryTimeout:  dashboardCfg.QueryTimeout,
 		MaxConcurrent: dashboardCfg.MaxConcurrent,
@@ -1566,6 +1575,68 @@ func initNorthboundModule(c *Container) error {
 	syncService := nbsync.NewService(c.DeviceRepo, c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, logger)
 	nbService := northbound.NewNorthboundService(c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, pushEngine, syncService, logger)
 	nbRouter := northbound.NewRouter(nbService)
+	nbRouter.SetDeviceTaskServices(c.DeviceService, c.TaskSvc)
+	if c.deviceHandlerDeps != nil {
+		nbRouter.SetDeviceRegistrationService(c.deviceHandlerDeps.regService)
+	}
+	if c.GroupService != nil {
+		nbRouter.SetDeviceGroupService(c.GroupService)
+	}
+	if c.miscDeps.ufteService != nil {
+		nbRouter.SetTransferTaskService(c.miscDeps.ufteService)
+	}
+	pageConfigRepo := nbpageconfig.NewPgRepository(c.PgPool).WithTsPool(c.TsPool)
+	pageConfigService := nbpageconfig.NewServiceWithRepository(nbpageconfig.NewDefaultCatalog(), pageConfigRepo)
+	pageConfigService.SetAlarmStore(c.AlarmPgStore)
+	pageConfigService.SetSNMPSender(nbsnmp.NewGoSNMPSender(logger.Named("page-config-snmp")))
+	if c.MinIO != nil {
+		localArchiveStore := nbpageconfig.NewMinIOLocalArchiveStore(c.MinIO, nbpageconfig.DefaultLocalArchiveBucket)
+		if err := localArchiveStore.Ensure(context.Background()); err != nil {
+			logger.Warn("northbound page-config local archive bucket ensure failed", zap.Error(err))
+		}
+		pageConfigService.SetLocalArchive(
+			localArchiveStore,
+			nbpageconfig.LocalArchiveOptions{RetentionDays: 7},
+		)
+		pageConfigService.SetMRSourceStore(nbpageconfig.NewMinIOMRSourceStore(c.MinIO, c.Cfg.MinIO.Buckets.MRFiles))
+	}
+	nbRouter.SetPageConfigService(pageConfigService)
+	pageConfigScheduler := nbpageconfig.NewScheduler(pageConfigService, pageConfigRepo, logger)
+	pageConfigScheduler.Start(context.Background())
+	c.GS.Register("northbound-page-config-scheduler", 1, func(context.Context) error {
+		pageConfigScheduler.Stop()
+		pageConfigScheduler.Wait()
+		return nil
+	})
+	snmpForwarder := nbpageconfig.NewSNMPAlarmForwarder(pageConfigService, nil, logger)
+	alarmHandlers := []nbpageconfig.AlarmEventHandler{snmpForwarder.HandleAlarmEvent}
+	snmpMIBAgentManager := nbpageconfig.NewSNMPMIBAgentManager(pageConfigService, logger)
+	pageConfigService.RegisterSNMPConfigChangeListener(snmpMIBAgentManager.RequestReload)
+	if err := snmpMIBAgentManager.Start(context.Background()); err != nil {
+		logger.Warn("northbound page-config SNMP MIB agent start failed", zap.Error(err))
+	} else {
+		c.GS.Register("northbound-page-config-snmp-mib-agent", 1, func(context.Context) error {
+			return snmpMIBAgentManager.Stop()
+		})
+	}
+	socketServerManager := nbpageconfig.NewSocketAlarmServerManager(pageConfigService, nil, logger)
+	pageConfigService.RegisterSocketConfigChangeListener(socketServerManager.RequestReload)
+	if err := socketServerManager.Start(context.Background()); err != nil {
+		logger.Warn("northbound page-config socket alarm server start failed", zap.Error(err))
+	} else {
+		alarmHandlers = append(alarmHandlers, socketServerManager.HandleAlarmEvent)
+		c.GS.Register("northbound-page-config-socket-server", 1, func(context.Context) error {
+			return socketServerManager.Stop()
+		})
+	}
+	alarmConsumer := nbpageconfig.NewAlarmEventConsumer(c.EventBus, logger, alarmHandlers...)
+	if err := alarmConsumer.Start(); err != nil {
+		logger.Warn("northbound page-config alarm event consumer start failed", zap.Error(err))
+	} else {
+		c.GS.Register("northbound-page-config-alarm-consumer", 1, func(context.Context) error {
+			return alarmConsumer.Stop()
+		})
+	}
 	// 死信队列端点（GET /push/deadletter、POST /push/deadletter/:id/replay）
 	// 依赖 outbox repo；不注入则恒 503 "outbox not configured"。
 	nbRouter.SetOutboxRepo(outboxRepo)
@@ -1659,13 +1730,18 @@ func initMiscModules(c *Container) error {
 			prometheusURL = "http://prometheus:9090"
 		}
 		storageCollector := components.NewPrometheusStorageCollector(prometheusURL, 2*time.Second, time.Minute, nil)
+		storageProtectionRepo := storageprotection.NewPgRepository(c.PgPool)
+		if err := storageProtectionRepo.EnsureDefaultPolicy(context.Background()); err != nil {
+			return fmt.Errorf("ensure default storage protection policy: %w", err)
+		}
 		storageProtection := storageprotection.NewService(
-			storageprotection.NewPgRepository(c.PgPool),
+			storageProtectionRepo,
 			storageprotection.NewCollectorUsageProvider(storageCollector),
 			storageprotection.NewMetrics(c.MetricsReg),
 			logger,
 		)
 		storageProtection.SetLogAdmissionController(c.LogGate)
+		storageProtection.EnableEventCleanup()
 		storageProtection.Start(context.Background(), 30*time.Second)
 		c.StorageCollector = storageCollector
 		c.StorageProtection = storageProtection
@@ -1676,6 +1752,12 @@ func initMiscModules(c *Container) error {
 				return nil
 			})
 		}
+	}
+	if c.miscDeps.softwareService != nil {
+		c.miscDeps.softwareService.SetStorageAdmission(c.StorageProtection)
+	}
+	if c.adminHandlerDeps != nil && c.adminHandlerDeps.uiAssetHandler != nil {
+		c.adminHandlerDeps.uiAssetHandler.SetStorageAdmission(c.StorageProtection)
 	}
 
 	// Syslog module
@@ -1881,6 +1963,7 @@ func initMiscModules(c *Container) error {
 		if c.PresignBridge != nil {
 			mmlExporter.SetSignProvider(c.PresignBridge)
 		}
+		mmlExporter.SetStorageAdmission(c.StorageProtection)
 		mmlService.SetExporter(mmlExporter)
 	}
 	// T-0090-c：注入 admin RoleRepo 作 RBAC group 派生器，让 ListCustomCommands
@@ -2454,9 +2537,12 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	systemLicenseRepo := license.NewPgSystemLicenseRepository(c.PgPool)
 	deviceCounter := license.NewPgDeviceCounter(c.PgPool)
 	licenseMetrics := license.NewEnforcementMetrics(c.MetricsReg)
+	licenseUsageRepo := license.NewPgSystemLicenseUsageRepository(c.PgPool)
 	licenseEnforcer := license.NewEnforcer(systemLicenseRepo, deviceCounter, logger, licenseMetrics)
+	licenseEnforcer.SetUsageRepo(licenseUsageRepo)
 	licenseAlertSink := newSystemLicenseAlertSink(c.AlarmEngine, logger)
 	licenseMonitor := license.NewMonitor(systemLicenseRepo, deviceCounter, licenseAlertSink, licenseMetrics, logger)
+	licenseMonitor.SetUsageRepo(licenseUsageRepo)
 
 	c.miscDeps.licenseEnforcer = licenseEnforcer
 	c.miscDeps.licenseMonitor = licenseMonitor
@@ -2465,6 +2551,8 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	// 授权限制；Update 后调 Invalidate 让 enforcer 立即拉新 license。
 	systemLicenseSvc := license.NewSystemLicenseService(systemLicenseRepo, logger)
 	systemLicenseSvc.SetEnforcer(licenseEnforcer)
+	systemLicenseSvc.SetUsageRepo(licenseUsageRepo)
+	c.miscDeps.systemLicenseSvc = systemLicenseSvc // P7-B: middleware 需要 feature check 能力
 	featureMappingPath := filepath.Join(c.Cfg.DictLoader.XMLBaseDir, "license-feature-mapping.json")
 	if mapping, mappingErr := license.LoadLegacyFeatureMapping(featureMappingPath); mappingErr != nil {
 		logger.Warn("License feature mapping unavailable", zap.String("path", featureMappingPath), zap.Error(mappingErr))
@@ -2473,6 +2561,12 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 		logger.Info("License feature mapping loaded", zap.String("path", featureMappingPath), zap.Int("id_code_count", len(mapping.IDToCode)), zap.Int("feature_count", len(mapping.Features)))
 	}
 	if path := c.Cfg.License.Signing.LegacyKeyStorePath; path != "" {
+		if c.Cfg.License.Signing.LegacyStorePassword == "" || c.Cfg.License.Signing.LegacyKeyAlias == "" {
+			logger.Warn("license signing config incomplete: keystore path set but store_password/key_alias empty — license upload & verify will fail",
+				zap.String("path", path),
+				zap.Bool("store_password_set", c.Cfg.License.Signing.LegacyStorePassword != ""),
+				zap.Bool("key_alias_set", c.Cfg.License.Signing.LegacyKeyAlias != ""))
+		}
 		keyStore, readErr := os.ReadFile(path)
 		if readErr != nil {
 			logger.Warn("legacy TrueLicense keystore could not be loaded",
@@ -2491,6 +2585,12 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 		}
 	}
 	c.miscDeps.systemLicenseHandler = license.NewSystemLicenseHandler(systemLicenseSvc, logger)
+
+	// P7-A：把 license feature gate 注入 AdminService，让菜单按 license feature 过滤。
+	// admin 模块先于 misc 初始化，此处 c.AdminService 已就绪；nil 时不过滤（菜单全可见）。
+	if c.AdminService != nil {
+		c.AdminService.SetLicenseFeatureGate(systemLicenseSvc)
+	}
 
 	// Wire enforcer into DeviceService so device.create / future write ops
 	// gate on capacity + expiry. Read-only operations are unaffected (D1).
@@ -2775,6 +2875,7 @@ type miscDeps struct {
 	// F06 System License 重构（PRD F06-system-license-redesign Step 5）：
 	// singleton 模型 handler，唯一的 license REST 入口。
 	systemLicenseHandler *license.SystemLicenseHandler
+	systemLicenseSvc     *license.SystemLicenseService // P7-B: RequireFeature middleware 注入
 
 	// DeviceDetail "License 参数" tab 后端（device 模块 license_params.go）
 	licenseParamHandler *device.LicenseParamHandler

@@ -1,6 +1,6 @@
 # 消息中心（Notification Center）设计文档
 
-> 历史设计：本文只描述站内任务消息中心（device task feedback），不描述告警邮件或 KPI 定时报表外发。当前邮件范围、权限和验收以 `docs/superpowers/specs/2026-07-31-email-sms-notification-center-design.md` 与 `docs/superpowers/reviews/2026-08-06-email-notification-scope-convergence.md` 为准。
+> 历史设计：本文只描述站内任务消息中心（device task feedback），不描述告警邮件或 KPI 定时报表外发。当前邮件范围、权限和验收以 `docs/superpowers/reviews/2026-08-06-email-notification-scope-convergence.md` 为准。
 
 > 版本：v0.3
 > 日期：2026-05-19

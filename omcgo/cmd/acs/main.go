@@ -309,6 +309,13 @@ func runACS(cmd *cobra.Command, args []string) error {
 		// （host loadavg ÷ 核数）超高水位时拒收 PM 上传（设备重传不丢数据），回落自动恢复。配置
 		// 走 sys_configs(acs.backpressure)，经 SubjectSysConfigSaved 热刷新；GS 注册优雅关停。
 		bpSysCfg := admin.NewPgSysConfigRepository(inf.PgPool)
+		{
+			disableCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := upload.EnsureLegacyDefaultBackpressureDisabled(disableCtx, inf.PgPool); err != nil {
+				inf.Logger.Warn("disable legacy default PM upload backpressure failed", zap.Error(err))
+			}
+			cancel()
+		}
 		bpLookup := func(ctx context.Context, category, key string) (string, bool) {
 			row, lookupErr := bpSysCfg.GetByKey(ctx, category, key)
 			if lookupErr != nil || row == nil {

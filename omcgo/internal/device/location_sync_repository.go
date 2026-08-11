@@ -7,7 +7,7 @@ import (
 )
 
 type LocationObservationRepository interface {
-	UpsertLatest(ctx context.Context, deviceID uuid.UUID, observation ReportedLocation) error
+	SaveLatestWithOutbox(ctx context.Context, deviceID uuid.UUID, observation ReportedLocation) (LocationObservationWriteResult, error)
 	GetLatest(ctx context.Context, deviceID uuid.UUID) (*ReportedLocation, error)
 }
 

@@ -28,6 +28,9 @@ func initAdminModule(c *Container) error {
 	roleRepo := admin.NewPgRoleRepository(c.PgPool)
 	auditRepo := admin.NewPgAuditRepository(c.PgPool)
 	menuRepo := admin.NewPgMenuRepository(c.PgPool)
+	if err := admin.EnsureLegacyStorageProtectionMenuRetired(context.Background(), c.PgPool); err != nil {
+		return fmt.Errorf("retire legacy storage protection menu: %w", err)
+	}
 
 	jwtService, err := admin.NewJWTServiceWithTTL(c.Cfg.JWT.Secret, c.Cfg.JWT.AccessTokenTTL, c.Cfg.JWT.RefreshTokenTTL)
 	if err != nil {
@@ -38,6 +41,7 @@ func initAdminModule(c *Container) error {
 	tokenRevoker := admin.NewTokenRevoker(c.Redis, c.Cfg.JWT.RefreshTokenTTL)
 
 	adminService := admin.NewAdminService(userRepo, roleRepo, menuRepo, auditRepo, jwtService, logger)
+	c.AdminService = adminService
 	adminService.SetTokenRevoker(tokenRevoker)
 	// PRD §10 DoD：失效失败计数器 omc_perm_cache_invalidate_failed_total。
 	adminMetrics := admin.NewAdminMetrics(c.MetricsReg)

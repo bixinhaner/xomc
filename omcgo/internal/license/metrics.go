@@ -2,7 +2,7 @@
 //
 // Step 5 起：老 license_active_count gauge（multi-license 模型 active 数量）
 // 已删除；system_license singleton 模型下"是否有 license"由 capacity_max=0
-// 反映（max=0 = 无 license / unprotected mode），不必单列 active_count。
+// 反映（max=0 = 无 license，受控业务 fail-closed 拒绝），不必单列 active_count。
 //
 // All metrics are registered via NewEnforcementMetrics; nil metrics degrades
 // to no-op recording so tests and lightweight environments don't need a registry.
@@ -33,7 +33,7 @@ func NewEnforcementMetrics(reg prometheus.Registerer) *EnforcementMetrics {
 		}),
 		maxDevices: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "license_capacity_max_devices",
-			Help: "Sum of system_license.devices_support quotas (0 = no license / unprotected).",
+			Help: "Sum of system_license.devices_support quotas (0 = no license; operations denied fail-closed).",
 		}),
 		usageRatio: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "license_capacity_usage_ratio",

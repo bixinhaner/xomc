@@ -63,8 +63,16 @@ func (s *Scoper) principal(c *gin.Context) (uuid.UUID, bool, bool) {
 	return uid, isSuper, ok
 }
 
+func isNorthboundAPIUser(c *gin.Context) bool {
+	_, ok := c.Get("northbound_api_user")
+	return ok
+}
+
 // IsSuperAdmin 返回当前请求是否为超管（用于端点内决定是否放行全量）。
 func (s *Scoper) IsSuperAdmin(c *gin.Context) bool {
+	if isNorthboundAPIUser(c) {
+		return true
+	}
 	isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
 	isSuper, _ := isSuperVal.(bool)
 	return isSuper
@@ -76,6 +84,9 @@ func (s *Scoper) IsSuperAdmin(c *gin.Context) bool {
 // 跨租户访问（CTCC 用户 → CMCC 设备）→ AuthorizeDeviceGroupAccess 返 ErrForbidden → 403。
 func (s *Scoper) AuthorizeDevice(c *gin.Context, deviceID uuid.UUID) bool {
 	if s.permService == nil || s.deviceAuthz == nil {
+		return true
+	}
+	if isNorthboundAPIUser(c) {
 		return true
 	}
 	uid, isSuper, ok := s.principal(c)

@@ -10,6 +10,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/geofence"
 	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
@@ -305,6 +306,7 @@ func startPMExportOnly(
 		MetricDB: w.TsPool, AdhocDB: w.TsPool, TaskMetaDB: w.PgPool,
 		Uploader: w.MinIO, Bucket: exportBucket, Logger: logger,
 		TimezoneProvider: exportTimezoneProvider(tz),
+		StorageAdmission: w.StorageProtection,
 	})
 	registry.Register(exportRunner)
 	go runJobTypeWorker(ctx, registry, exportRunner.JobType(), logger)
@@ -316,6 +318,19 @@ func startPMExportOnly(
 		logger.Warn("KPI regular report worker disabled: recipient encryption key is unavailable",
 			zap.Error(protectErr))
 	}
+	geofenceRepository := geofence.NewPgRepository(w.PgPool)
+	geofenceMetrics := geofence.NewBatchMetrics(w.MetricsReg)
+	geofenceRunner := registerGeofenceManualBindRunner(
+		registry,
+		geofenceRepository,
+		geofenceMetrics,
+	)
+	go runJobTypeWorker(
+		ctx,
+		registry,
+		geofenceRunner.JobType(),
+		logger.Named("geofence-batch"),
+	)
 	sweeperInterval, zombieThreshold := loadAsyncJobThresholds(ctx, w.PgPool, logger)
 	sweeper := asyncjob.NewSweeper(jobRepo, sweeperInterval, zombieThreshold, logger)
 	sweeper.SetMetrics(asyncMetrics)
@@ -328,4 +343,14 @@ func startPMExportOnly(
 	startStationLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
 	startLogRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, tz)
 	logger.Info("PM KPI export worker ready", zap.String("bucket", exportBucket))
+}
+
+func registerGeofenceManualBindRunner(
+	registry *asyncjob.Registry,
+	repository geofence.ManualBindRunnerRepository,
+	metrics *geofence.BatchMetrics,
+) *geofence.ManualBindRunner {
+	runner := geofence.NewManualBindRunner(repository, metrics)
+	registry.Register(runner)
+	return runner
 }

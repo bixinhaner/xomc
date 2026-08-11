@@ -15,14 +15,17 @@ import {
   type SystemLicenseUpdateResult,
 } from '../../services/api/systemLicenseApi';
 import { useMock } from '../../services/apiSwitch';
+import { useUserStore } from '../../store/userStore';
 
 const MOCK_NOT_SUPPORTED =
   'system_license API does not support mock mode; toggle VITE_USE_MOCK=false';
 
 /** 拉取当前生效 license。404（biz_code 12113）需调用方自己识别空态。 */
 export function useSystemLicense() {
+  const userId = useUserStore((s) => s.currentUser?.id);
   return useQuery({
     queryKey: ['systemLicense', 'current'],
+    enabled: Boolean(userId),
     queryFn: () => {
       if (useMock) return Promise.reject(new Error(MOCK_NOT_SUPPORTED));
       return systemLicenseApi.getCurrent();
