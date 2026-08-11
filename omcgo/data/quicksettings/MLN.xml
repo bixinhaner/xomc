@@ -37,6 +37,87 @@
            standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.ExistPlmnidList"
            maxValue="6"/>
   </group>
+       <group id="device-wan-1" titleZh="WAN 配置 1" titleEn="WAN Config 1">
+              <param name="IPMode" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPMODE">
+                     <option value="0" label="DHCP"/><option value="1" label="Static IP"/>
+              </param>
+              <param name="IPAddress" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPADDR"/>
+              <param name="Netmask" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG1_NETMASK"/>
+              <param name="Gateway" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG1_DEFAULTGW"/>
+              <param name="VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG1_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+              <param name="Option60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG1_OPTION60" type="string" maxValue="64"/>
+       </group>
+       <group id="device-wan-2" titleZh="WAN 配置 2" titleEn="WAN Config 2">
+              <param name="Enable" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG2_ENABLE">
+                     <option value="1" label="ON"/><option value="0" label="OFF"/>
+              </param>
+              <param name="IPMode" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG2_IPMODE">
+                     <option value="0" label="DHCP"/><option value="1" label="Static IP"/>
+              </param>
+              <param name="IPAddress" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG2_IPADDR"/>
+              <param name="Netmask" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG2_NETMASK"/>
+              <param name="Gateway" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG2_DEFAULTGW"/>
+              <param name="VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG2_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+              <param name="Option60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG2_OPTION60" type="string" maxValue="64"/>
+       </group>
+       <group id="device-wan-3" titleZh="WAN 配置 3" titleEn="WAN Config 3">
+              <param name="Enable" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG3_ENABLE">
+                     <option value="1" label="ON"/><option value="0" label="OFF"/>
+              </param>
+              <param name="IPMode" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG3_IPMODE">
+                     <option value="0" label="DHCP"/><option value="1" label="Static IP"/>
+              </param>
+              <param name="IPAddress" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG3_IPADDR"/>
+              <param name="Netmask" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG3_NETMASK"/>
+              <param name="Gateway" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG3_DEFAULTGW"/>
+              <param name="VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG3_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+              <param name="Option60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG3_OPTION60" type="string" maxValue="64"/>
+       </group>
+       <group id="device-wan-4" titleZh="WAN 配置 4" titleEn="WAN Config 4">
+              <param name="Enable" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG4_ENABLE">
+                     <option value="1" label="ON"/><option value="0" label="OFF"/>
+              </param>
+              <param name="IPMode" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG4_IPMODE">
+                     <option value="0" label="DHCP"/><option value="1" label="Static IP"/>
+              </param>
+              <param name="IPAddress" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG4_IPADDR"/>
+              <param name="Netmask" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG4_NETMASK"/>
+              <param name="Gateway" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG4_DEFAULTGW"/>
+              <param name="VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG4_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+              <param name="Option60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG4_OPTION60" type="string" maxValue="64"/>
+       </group>
+       <group id="device-static-route-1" titleZh="静态路由 1" titleEn="Static Routing 1">
+              <param name="Enable" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB">
+                     <option value="1" label="ON"/><option value="0" label="OFF"/>
+              </param>
+              <param name="DestinationNetwork" titleZh="目的网络" titleEn="Destination Network" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETADDR"/>
+              <param name="Netmask" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETMASK"/>
+              <param name="Gateway" titleZh="隧道网关" titleEn="Tunnel Gateway" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_GW"/>
+       </group>
+       <group id="device-static-route-2" titleZh="静态路由 2" titleEn="Static Routing 2">
+              <param name="Enable" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB">
+                     <option value="1" label="ON"/><option value="0" label="OFF"/>
+              </param>
+              <param name="DestinationNetwork" titleZh="目的网络" titleEn="Destination Network" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_NETADDR"/>
+              <param name="Netmask" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_NETMASK"/>
+              <param name="Gateway" titleZh="隧道网关" titleEn="Tunnel Gateway" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_GW"/>
+       </group>
+       <group id="device-static-route-3" titleZh="静态路由 3" titleEn="Static Routing 3">
+              <param name="Enable" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_ONBOOTENB">
+                     <option value="1" label="ON"/><option value="0" label="OFF"/>
+              </param>
+              <param name="DestinationNetwork" titleZh="目的网络" titleEn="Destination Network" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_NETADDR"/>
+              <param name="Netmask" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_NETMASK"/>
+              <param name="Gateway" titleZh="隧道网关" titleEn="Tunnel Gateway" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_GW"/>
+       </group>
+       <group id="device-static-route-4" titleZh="静态路由 4" titleEn="Static Routing 4">
+              <param name="Enable" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_ONBOOTENB">
+                     <option value="1" label="ON"/><option value="0" label="OFF"/>
+              </param>
+              <param name="DestinationNetwork" titleZh="目的网络" titleEn="Destination Network" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_NETADDR"/>
+              <param name="Netmask" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_NETMASK"/>
+              <param name="Gateway" titleZh="隧道网关" titleEn="Tunnel Gateway" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_GW"/>
+       </group>
   <group id="enb-mme" titleZh="MME IP+PLMN 列表" titleEn="MME IP + PLMN List">
     <param name="MmeIpPlmnList" titleZh="MME IP+PLMN 列表" titleEn="MME IP + PLMN List"
            standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeIpPlmnList"
@@ -69,6 +150,22 @@
     <param name="LocalTimeZoneName" titleZh="本地时区" titleEn="Local Time Zone"
            standardPath="Device.Time.LocalTimeZoneName"/>
   </group>
+       <group id="device-wan" titleZh="WAN 设置" titleEn="WAN Settings">
+              <param name="ConnectType" titleZh="连接类型" titleEn="Connect Type" standardPath="Device.DeviceInfo.WAN_CONFIG1_CONNECT_TYPE">
+                     <option value="auto" label="Auto"/>
+                     <option value="fiber" label="Fiber"/><option value="copper" label="Copper"/>
+              </param>
+              <param name="LinkSpeed" titleZh="协商链路速率" titleEn="Link Speed Negotiated" standardPath="Device.DeviceInfo.WanLinkSpeed">
+                     <option value="0" label="Auto Negotiation"/><option value="2" label="1000M"/>
+              </param>
+              <param name="DNS1" titleZh="DNS 地址 1" titleEn="DNS Address 1" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS1"/>
+              <param name="DNS2" titleZh="DNS 地址 2" titleEn="DNS Address 2" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS2"/>
+              <param name="LmtWanEnable" titleZh="允许从 WAN 访问 LMT" titleEn="Access LMT via WAN" standardPath="Device.WebConfig.WanVisitEnable">
+                     <option value="1" label="ON"/><option value="0" label="OFF"/>
+              </param>
+              <param name="LanIPAddress" titleZh="LAN IP 地址" titleEn="LAN IP Address" standardPath="Device.DeviceInfo.LAN_CONFIG_IPADDR"/>
+              <param name="LanNetmask" titleZh="LAN 子网掩码" titleEn="LAN Subnet Mask" standardPath="Device.DeviceInfo.LAN_CONFIG_NETMASK"/>
+       </group>
   <group id="device-ipsec" titleZh="IPSec 参数" titleEn="IPSec Settings"
          multiInstance="true" maxInstances="4"
          objectPath="Device.FAP.Ipsec.{i}.">

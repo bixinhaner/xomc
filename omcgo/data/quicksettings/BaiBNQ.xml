@@ -185,6 +185,126 @@
     </param>
   </group>
 
+  <!-- 5G 网络设置：来自旧 OMC 的 WAN(VLAN)/LAN、Default Route、DSCP、Static Routing。
+       IPSEC 已由下方既有分组承载，这里不重复定义。 -->
+  <group id="gnb-network-interface" titleZh="WAN(VLAN)/LAN" titleEn="WAN(VLAN)/LAN"
+         multiInstance="true" style="table" maxInstances="16"
+         objectPath="Device.Ethernet.Interface.{i}.">
+    <param name="Status" titleZh="状态" titleEn="Status" leaf="Status" readonly="true"/>
+    <param name="InterfaceType" titleZh="接口类型" titleEn="Interface Type" leaf="interfaceType"/>
+  </group>
+  <group id="gnb-interface-ipv4" titleZh="接口直连 IPv4" titleEn="Direct Interface IPv4"
+         multiInstance="true" style="subtable" parentSelector="gnb-network-interface" maxInstances="8"
+         objectPath="Device.Ethernet.Interface.{i}.IPv4Address.{i}.">
+    <param name="AddressingType" titleZh="IP 类型" titleEn="IP Type" leaf="AddressingType" type="enum">
+      <option value="DHCP" label="DHCP"/>
+      <option value="Static" label="Static"/>
+    </param>
+    <param name="IPAddress" titleZh="IP 地址" titleEn="IP Address" leaf="IPAddress"/>
+    <param name="SubnetMask" titleZh="子网掩码" titleEn="Subnet Mask" leaf="SubnetMask"/>
+    <param name="DefaultGateway" titleZh="网关" titleEn="Gateway" leaf="DefaultGateway"/>
+    <param name="PortType" titleZh="端口类型" titleEn="Port Type" leaf="PortType" type="enum">
+      <option value="NG" label="NG"/><option value="OAM" label="OAM"/><option value="NGU" label="NGU"/>
+      <option value="NG/OAM" label="NG/OAM"/><option value="NG/NGU" label="NG/NGU"/><option value="OAM/NGU" label="OAM/NGU"/>
+      <option value="NG/OAM/NGU" label="NG/OAM/NGU"/><option value="Other" label="Other"/>
+    </param>
+  </group>
+  <group id="gnb-interface-ipv6" titleZh="IPv6 地址" titleEn="IPv6 Address"
+         multiInstance="true" style="subtable" parentSelector="gnb-network-interface" maxInstances="8"
+         objectPath="Device.Ethernet.Interface.{i}.IPv6Address.{i}.">
+    <param name="Origin" titleZh="IP 类型" titleEn="IP Type" leaf="Origin" type="enum">
+      <option value="DHCPv6" label="DHCPv6"/><option value="Static" label="Static"/>
+    </param>
+    <param name="IPAddress" titleZh="IP 地址" titleEn="IP Address" leaf="IPAddress"/>
+    <param name="PrefixLength" titleZh="前缀长度" titleEn="Prefix Length" leaf="PrefixLength"/>
+    <param name="DefaultGateway" titleZh="网关" titleEn="Gateway" leaf="DefaultGateway"/>
+    <param name="PortType" titleZh="端口类型" titleEn="Port Type" leaf="PortType" type="enum">
+      <option value="NG" label="NG"/><option value="OAM" label="OAM"/><option value="NGU" label="NGU"/>
+      <option value="NG/OAM" label="NG/OAM"/><option value="NG/NGU" label="NG/NGU"/><option value="OAM/NGU" label="OAM/NGU"/>
+      <option value="NG/OAM/NGU" label="NG/OAM/NGU"/><option value="Other" label="Other"/>
+    </param>
+  </group>
+  <group id="gnb-interface-vlan" titleZh="VLAN" titleEn="VLAN"
+         multiInstance="true" style="subtable" parentSelector="gnb-network-interface" maxInstances="16"
+         objectPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.">
+    <param name="Name" titleZh="VLAN 名称" titleEn="VLAN Name" leaf="Name"/>
+    <param name="Id" titleZh="VLAN ID" titleEn="VLAN ID" leaf="Id"/>
+              <param name="Enable" titleZh="启用" titleEn="Enable" leaf="Enable" type="enum">
+                     <option value="1" label="ON"/><option value="0" label="OFF"/>
+    </param>
+  </group>
+       <group id="gnb-interface-vlan-ipv4" titleZh="VLAN IPv4 地址" titleEn="VLAN IPv4 Address"
+                             multiInstance="true" style="subtable" parentSelector="gnb-interface-vlan" maxInstances="8"
+                              objectPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.">
+              <param name="AddressingType" titleZh="IP 类型" titleEn="IP Type" leaf="AddressingType" type="enum">
+                     <option value="DHCP" label="DHCP"/><option value="Static" label="Static"/>
+              </param>
+              <param name="IPAddress" titleZh="IP 地址" titleEn="IP Address" leaf="IPAddress"/>
+              <param name="SubnetMask" titleZh="子网掩码" titleEn="Subnet Mask" leaf="SubnetMask"/>
+              <param name="DefaultGateway" titleZh="网关" titleEn="Gateway" leaf="DefaultGateway"/>
+              <param name="PortType" titleZh="端口类型" titleEn="Port Type" leaf="PortType" type="enum">
+                     <option value="NG" label="NG"/><option value="OAM" label="OAM"/><option value="NGU" label="NGU"/>
+                     <option value="NG/OAM" label="NG/OAM"/><option value="NG/NGU" label="NG/NGU"/><option value="OAM/NGU" label="OAM/NGU"/>
+                     <option value="NG/OAM/NGU" label="NG/OAM/NGU"/><option value="Other" label="Other"/>
+              </param>
+       </group>
+       <group id="gnb-interface-vlan-ipv6" titleZh="VLAN IPv6 地址" titleEn="VLAN IPv6 Address"
+                             multiInstance="true" style="subtable" parentSelector="gnb-interface-vlan" maxInstances="8"
+                              objectPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.">
+              <param name="Origin" titleZh="IP 类型" titleEn="IP Type" leaf="Origin" type="enum">
+                     <option value="DHCPv6" label="DHCPv6"/><option value="Static" label="Static"/>
+              </param>
+              <param name="IPAddress" titleZh="IPv6 地址" titleEn="IPv6 Address" leaf="IPAddress"/>
+              <param name="PrefixLength" titleZh="前缀长度" titleEn="Prefix Length" leaf="PrefixLength"/>
+              <param name="DefaultGateway" titleZh="网关" titleEn="Gateway" leaf="DefaultGateway"/>
+              <param name="PortType" titleZh="端口类型" titleEn="Port Type" leaf="PortType" type="enum">
+                     <option value="NG" label="NG"/><option value="OAM" label="OAM"/><option value="NGU" label="NGU"/>
+                     <option value="NG/OAM" label="NG/OAM"/><option value="NG/NGU" label="NG/NGU"/><option value="OAM/NGU" label="OAM/NGU"/>
+                     <option value="NG/OAM/NGU" label="NG/OAM/NGU"/><option value="Other" label="Other"/>
+              </param>
+       </group>
+
+  <group id="gnb-network-default-route" titleZh="默认路由" titleEn="Default Route">
+    <param name="DefaultInterfaceName" titleZh="默认路由" titleEn="Default Route"
+           standardPath="Device.Ethernet.DefaultIpRoute.DefaultInterfaceName"/>
+    <param name="DnsType" titleZh="DNS 类型" titleEn="DNS Type"
+           standardPath="Device.FAP.gNB.config.DnsType" type="enum">
+      <option value="Static" label="Static"/>
+      <option value="DHCP" label="DHCP"/>
+    </param>
+    <param name="Dns" titleZh="DNS" titleEn="DNS"
+           standardPath="Device.FAP.gNB.config.dns" type="string"/>
+  </group>
+
+  <group id="gnb-network-dscp" titleZh="DSCP" titleEn="DSCP">
+    <param name="NgapDscp" titleZh="NGAP DSCP" titleEn="NGAP DSCP" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.NgapDscp.Dscp"/>
+    <param name="NgapVlanPrio" titleZh="NGAP VLAN 优先级" titleEn="NGAP VLAN Priority" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.NgapDscp.VlanPrio"/>
+    <param name="X2apDscp" titleZh="X2AP DSCP" titleEn="X2AP DSCP" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.X2apDscp.Dscp"/>
+    <param name="X2apVlanPrio" titleZh="X2AP VLAN 优先级" titleEn="X2AP VLAN Priority" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.X2apDscp.VlanPrio"/>
+    <param name="F1apDscp" titleZh="F1AP DSCP" titleEn="F1AP DSCP" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.F1apDscp.Dscp"/>
+    <param name="F1apVlanPrio" titleZh="F1AP VLAN 优先级" titleEn="F1AP VLAN Priority" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.F1apDscp.VlanPrio"/>
+    <param name="XnapDscp" titleZh="XNAP DSCP" titleEn="XNAP DSCP" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.XnapDscp.Dscp"/>
+    <param name="XnapVlanPrio" titleZh="XNAP VLAN 优先级" titleEn="XNAP VLAN Priority" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.XnapDscp.VlanPrio"/>
+    <param name="OamDscp" titleZh="OAM DSCP" titleEn="OAM DSCP" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.OamDscp.Dscp"/>
+    <param name="OamVlanPrio" titleZh="OAM VLAN 优先级" titleEn="OAM VLAN Priority" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.OamDscp.VlanPrio"/>
+  </group>
+  <group id="gnb-network-dscp-list" titleZh="DSCP 映射列表" titleEn="DSCP Mapping List" multiInstance="true" maxInstances="16" objectPath="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}.">
+    <param name="Dscp" titleZh="DSCP" titleEn="DSCP" leaf="Dscp"/>
+    <param name="VlanPrio" titleZh="VLAN 优先级" titleEn="VLAN Priority" leaf="VlanPrio"/>
+  </group>
+  <group id="gnb-network-static-route" titleZh="静态路由" titleEn="Static Routing" multiInstance="true" maxInstances="32" objectPath="Device.Ethernet.IpRoute.{i}.">
+    <param name="IpVer" titleZh="IP 版本" titleEn="IP Version" leaf="IpVer" type="enum" defaultValue="1">
+      <option value="1" label="IPv4"/>
+      <option value="2" label="IPv6"/>
+    </param>
+    <param name="InterfaceName" titleZh="接口名称" titleEn="Interface Name" leaf="InterfaceName" type="enum" defaultValue="opt">
+      <option value="opt" label="opt"/>
+    </param>
+    <param name="DstIpNetwork" titleZh="目的网络" titleEn="Destination Network" leaf="DstIpNetwork" required="true"/>
+    <param name="PrefixLength" titleZh="前缀长度/子网掩码" titleEn="Prefix Length/Subnet Mask" leaf="PrefixLength" required="true"/>
+    <param name="GatewayIpAddress" titleZh="网关" titleEn="Gateway" leaf="GatewayIpAddress" required="true"/>
+  </group>
+
        <group id="device-ipsec-control" titleZh="IPSec 配置" titleEn="IPSec Config">
               <param name="IPSEC_ENABLE" titleZh="IPSec 开关" titleEn="IPSec Enable"
                                     standardPath="Device.IPsec.Enable">

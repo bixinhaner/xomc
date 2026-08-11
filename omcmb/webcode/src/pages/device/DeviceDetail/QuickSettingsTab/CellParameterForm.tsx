@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment, type ReactNode } from 'react';
 import { Alert, AutoComplete, Button, Card, Checkbox, Col, Form, Input, Row, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import type { FormInstance } from 'antd';
-import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, DownOutlined, FileTextOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParameterSchema, useSearchParameters, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
 import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
@@ -730,6 +730,8 @@ interface CellParameterFormProps {
   locale: 'zh-CN' | 'en-US';
   onIpsecControlChange?: (value: string | undefined) => void;
   actionMode?: 'standalone' | 'staged';
+  afterParamName?: string;
+  afterParamContent?: ReactNode;
 }
 
 interface BindSelectOption {
@@ -740,7 +742,7 @@ interface BindSelectOption {
 type BindSelectValueMode = 'path' | 'ip';
 
 interface SpecialFieldConfig {
-  kind: 'input' | 'mme-ip-plmn-table' | 'plmn-list-table' | 'bind-select';
+  kind: 'input' | 'mme-ip-plmn-table' | 'plmn-list-table' | 'dns-list' | 'bind-select';
   configPath: string;
   displayPath?: string;
   bindValueMode?: BindSelectValueMode;
@@ -866,6 +868,81 @@ function PlmnListTable({
         showIcon
         message={t('device.cell.plmnLimitHint', { max: maxRows })}
       />
+    </Space>
+  );
+}
+
+interface DnsListTableProps {
+  value?: string;
+  onChange?: (value: string) => void;
+  disabled?: boolean;
+  locale: 'zh-CN' | 'en-US';
+}
+
+function parseDnsList(value: string): string[] {
+  return value
+    .split(/[;,\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isIpv4Address(value: string): boolean {
+  const octets = value.split('.');
+  return octets.length === 4 && octets.every((octet) => {
+    if (!/^\d{1,3}$/.test(octet)) return false;
+    const number = Number(octet);
+    return number >= 0 && number <= 255;
+  });
+}
+
+function DnsListTable({
+  value = '',
+  onChange,
+  disabled = false,
+  locale,
+}: DnsListTableProps) {
+  const [draft, setDraft] = useState('');
+  const rows = parseDnsList(value);
+
+  const addDns = () => {
+    const address = draft.trim();
+    if (!isIpv4Address(address)) {
+      message.error(locale === 'zh-CN' ? '请输入有效的 IPv4 地址' : 'Enter a valid IPv4 address');
+      return;
+    }
+    if (rows.includes(address)) {
+      message.warning(locale === 'zh-CN' ? 'DNS 地址不能重复' : 'Duplicate DNS addresses are not allowed');
+      return;
+    }
+    onChange?.([...rows, address].join(','));
+    setDraft('');
+  };
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={8}>
+      <Space.Compact style={{ width: 420, maxWidth: '100%' }}>
+        <Input
+          value={draft}
+          disabled={disabled}
+          placeholder={locale === 'zh-CN' ? '请输入 DNS 地址' : 'Enter DNS address'}
+          onChange={(event) => setDraft(event.target.value)}
+          onPressEnter={addDns}
+        />
+        <Button danger icon={<PlusOutlined />} disabled={disabled} onClick={addDns}>
+          {locale === 'zh-CN' ? '添加' : 'Add'}
+        </Button>
+      </Space.Compact>
+      <Space wrap>
+        {rows.map((address) => (
+          <Tag
+            key={address}
+            closable={!disabled}
+            onClose={() => onChange?.(rows.filter((item) => item !== address).join(','))}
+          >
+            {address}
+          </Tag>
+        ))}
+      </Space>
     </Space>
   );
 }
@@ -1086,6 +1163,13 @@ function buildSpecialFieldConfig(
       forceWritable: true,
     };
   }
+  if (groupId === 'gnb-network-default-route' && paramName === 'Dns') {
+    return {
+      kind: 'dns-list',
+      configPath: 'Device.FAP.gNB.config.dns',
+      forceWritable: true,
+    };
+  }
   if (groupId === 'gnb-core' && paramName === 'gNBName') {
     return {
       kind: 'input',
@@ -1191,6 +1275,8 @@ export default function CellParameterForm({
   locale,
   onIpsecControlChange,
   actionMode = 'standalone',
+  afterParamName,
+  afterParamContent,
 }: CellParameterFormProps) {
   const t = useT();
   const [form] = Form.useForm();
@@ -2273,8 +2359,16 @@ export default function CellParameterForm({
 
   return (
     <Card
-      title={title}
+      title={(
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <DownOutlined style={{ color: '#596579', fontSize: 11 }} />
+          <FileTextOutlined style={{ color: '#3e638b', fontSize: 14 }} />
+          <span>{title}</span>
+        </span>
+      )}
       size="small"
+      style={{ marginBottom: 16, border: '1px solid #d7dce5', borderRadius: 0, boxShadow: 'none', background: '#fff' }}
+      styles={{ body: { paddingBottom: 8 } }}
       extra={actionMode === 'staged' ? null : (
         <Space>
           {visibleLastSubmit && (() => {
@@ -2305,12 +2399,12 @@ export default function CellParameterForm({
           </Button>
         </Space>
       )}
-      style={{ marginBottom: 16 }}
     >
       <Spin spinning={isSchemaLoading}>
       <Form
         form={form}
         layout="vertical"
+        style={{ marginBottom: -16 }}
         onValuesChange={(changedValues) => {
           // 同步到 store draft，跨顶层 TabBar 切走切回可恢复
           for (const [name, value] of Object.entries(changedValues)) {
@@ -2614,7 +2708,7 @@ export default function CellParameterForm({
             const extraInfoFormatted = extraInfoRaw ? formatExtraInfoRange(extraInfoRaw) : '';
             const label = (
               <Space size={4}>
-                <span style={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' ? { whiteSpace: 'nowrap' } : undefined}>
+                <span style={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' || special?.kind === 'dns-list' ? { whiteSpace: 'nowrap' } : undefined}>
                   {locale === 'zh-CN' ? p.titleZh : p.titleEn}
                 </span>
                 {(!writable || p.readonly) && <Text type="secondary" style={{ fontSize: 12 }}>{t('device.cell.readonly')}</Text>}
@@ -2695,9 +2789,9 @@ export default function CellParameterForm({
                 )
               : [];
             const input = (
-              <Col span={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' ? 24 : 8} key={p.name}>
+              <Col span={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' || special?.kind === 'dns-list' ? 24 : 8} key={p.name}>
                 <Form.Item
-                  label={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' ? undefined : label}
+                  label={special?.kind === 'mme-ip-plmn-table' || special?.kind === 'plmn-list-table' || special?.kind === 'dns-list' ? undefined : label}
                   name={isTransmissionPowerField ? undefined : p.name}
                   valuePropName={!isTransmissionPowerField && isSwitchField ? 'checked' : undefined}
                   normalize={isCodecSupport ? normalizeBscCodecSupportValue : undefined}
@@ -2733,6 +2827,11 @@ export default function CellParameterForm({
                       disabled={!finalWritable}
                       maxRows={p.maxValue ?? 6}
                     />
+                  ) : special?.kind === 'dns-list' ? (
+                    <DnsListTable
+                      disabled={!finalWritable}
+                      locale={locale}
+                    />
                   ) : isSwitchField ? (
                     <Switch
                       disabled={!finalWritable}
@@ -2763,7 +2862,7 @@ export default function CellParameterForm({
                 </Form.Item>
               </Col>
             );
-            return renderFrequencyAfter ? (
+            const renderedInput = renderFrequencyAfter ? (
               <Fragment key={p.name}>
                 {input}
                 <FrequencyDisplay form={form} locale={locale} />
@@ -2799,6 +2898,12 @@ export default function CellParameterForm({
                 <CellIdDerivedDisplay form={form} locale={locale} />
               </Fragment>
             ) : input;
+            return afterParamName === p.name && afterParamContent ? (
+              <Fragment key={p.name}>
+                {renderedInput}
+                {afterParamContent}
+              </Fragment>
+            ) : renderedInput;
           })}
         </Row>
       </Form>

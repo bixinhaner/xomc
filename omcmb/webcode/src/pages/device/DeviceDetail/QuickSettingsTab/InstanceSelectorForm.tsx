@@ -22,6 +22,7 @@ import {
   ClockCircleOutlined,
   CloseCircleOutlined,
   DeleteOutlined,
+  EditOutlined,
   LoadingOutlined,
   PlusCircleFilled,
   PlusOutlined,
@@ -56,6 +57,7 @@ import {
   validateValue,
   type QuickSettingsInstanceContext,
 } from './validators';
+import MultiInstanceTable from './MultiInstanceTable';
 
 /** 字段控件类型(原 bscPanelDefs.ts，现内联，由 XML 驱动)。 */
 type BscFieldType = 'string' | 'int' | 'enum' | 'multiCheckbox';
@@ -77,7 +79,7 @@ interface BscSubTableDef {
   /** 子表对象名（拼为 DeviceGSM.Bts.{i}.<subObject>.{j}.<col>） */
   subObject: string;
   /** 列定义 */
-  columns: { key: string; title: string }[];
+  columns: { key: string; title: string; options?: { value: string; label: string }[] }[];
 }
 
 function normalizeComparableFieldValue(value: unknown, param?: QuickSettingsParam): string {
@@ -104,7 +106,6 @@ function paramToFieldDef(param: QuickSettingsParam, locale: 'zh-CN' | 'en-US'): 
     maxValue: param.maxValue,
   };
 }
-
 /** 从子表 group 的 objectPath 推断 subObject 名。e.g. DeviceGSM.Bts.{i}.Trx.{j}. → Trx。 */
 function extractSubObject(childObjectPath: string, parentObjectPath: string): string {
   if (!childObjectPath || !parentObjectPath) return '';
@@ -325,6 +326,11 @@ function renderSubTable(
   deletePending: boolean,
   getWritable: (path: string) => boolean,
   locale: 'zh-CN' | 'en-US',
+  listAddStyle = false,
+  onSave?: () => void,
+  savePending = false,
+  expandedRowRender?: (row: { id: number }) => React.ReactNode,
+  onEdit?: (rowIdx: number) => void,
 ): React.ReactNode {
   const dataSource = rowIds.map((id) => ({ key: id, id }));
   const columns = [
@@ -340,53 +346,89 @@ function renderSubTable(
       render: (_: unknown, row: { id: number }) => {
         const path = `${objectPath}${selectedInstId}.${def.subObject}.${row.id}.${col.key}`;
         const writable = getWritable(path);
-        return (
-          <Input
-            value={getValue(path)}
-            onChange={(e) => setValue(path, e.target.value)}
-            size="small"
-            disabled={!writable}
-          />
-        );
+        if (col.options && col.options.length > 0) {
+          return <Select value={getValue(path) || undefined} options={col.options} onChange={(value) => setValue(path, String(value))} size="small" style={{ width: '100%' }} disabled={!writable} />;
+        }
+        const nestedPrefix = col.key.includes('.') ? `${col.key.slice(0, col.key.lastIndexOf('.') + 1)}` : '';
+        const addressingTypePath = `${objectPath}${selectedInstId}.${def.subObject}.${row.id}.${nestedPrefix}AddressingType`;
+        const leafName = col.key.split('.').at(-1) || col.key;
+        const isStaticOnlyField = ['IPAddress', 'SubnetMask', 'DefaultGateway'].includes(leafName);
+        const disabledByDhcp = isStaticOnlyField && getValue(addressingTypePath) === 'DHCP';
+        return <Input value={getValue(path)} onChange={(e) => setValue(path, e.target.value)} size="small" disabled={!writable || disabledByDhcp} />;
       },
     })),
     {
-      title: 'Operate',
+      title: locale === 'zh-CN' ? '操作' : 'Operate',
       key: '_op',
-      width: 90,
+      width: onEdit ? 150 : 110,
       render: (_: unknown, row: { id: number }) => (
-        <Popconfirm
-          title={locale === 'zh-CN' ? `确认删除 ${def.subObject}.${row.id} ？` : `Delete ${def.subObject}.${row.id}?`}
-          onConfirm={() => onDelete(row.id)}
-          disabled={deletePending}
-        >
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            loading={deletePending}
-          />
-        </Popconfirm>
+        <Space size={4}>
+          {onEdit && (
+            <Button
+              type="link"
+              size="small"
+              icon={<EditOutlined />}
+              title={locale === 'zh-CN' ? '修改' : 'Edit'}
+              onClick={() => onEdit(row.id)}
+              disabled={deletePending}
+            >{locale === 'zh-CN' ? '修改' : 'Edit'}</Button>
+          )}
+          <Popconfirm
+            title={locale === 'zh-CN' ? `确认删除 ${def.subObject}.${row.id} ？` : `Delete ${def.subObject}.${row.id}?`}
+            onConfirm={() => onDelete(row.id)}
+            disabled={deletePending}
+          >
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              title={locale === 'zh-CN' ? '删除' : 'Delete'}
+              loading={deletePending}
+            >{locale === 'zh-CN' ? '删除' : 'Delete'}</Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
   return (
-    <div style={{ position: 'relative' }}>
-      <Button
-        type="primary"
-        shape="circle"
-        size="small"
-        icon={<PlusCircleFilled />}
-        onClick={onAdd}
-        loading={addPending}
-        style={{ position: 'absolute', top: -36, right: 8, zIndex: 1 }}
-      />
+    <div
+      style={{
+        position: 'relative',
+        marginBottom: listAddStyle ? 4 : 0,
+        border: listAddStyle ? '1px solid #d7dce5' : undefined,
+        borderRadius: 0,
+        boxShadow: 'none',
+        background: listAddStyle ? '#fff' : undefined,
+        padding: listAddStyle ? '4px 4px 0' : undefined,
+      }}
+    >
+      <Space size={8} style={{ position: 'absolute', top: -36, right: 8, zIndex: 1 }}>
+        {onSave && (
+          <Button
+            type="primary"
+            size="small"
+            icon={<SaveOutlined />}
+            onClick={onSave}
+            loading={savePending}
+          >{locale === 'zh-CN' ? '保存' : 'Save'}</Button>
+        )}
+        <Button
+          type="primary"
+          size="small"
+          shape={listAddStyle ? undefined : 'circle'}
+          icon={listAddStyle ? <PlusOutlined /> : <PlusCircleFilled />}
+          onClick={onAdd}
+          loading={addPending}
+        >{listAddStyle ? (locale === 'zh-CN' ? '新增' : 'Add') : undefined}</Button>
+      </Space>
       <Table
         size="small"
         pagination={false}
         rowKey="key"
         dataSource={dataSource}
         columns={columns}
+        expandable={expandedRowRender ? { expandedRowRender } : undefined}
         locale={{ emptyText: locale === 'zh-CN' ? '暂无数据' : 'No data' }}
       />
     </div>
@@ -439,6 +481,14 @@ export default function InstanceSelectorForm({
       .map((n) => String(n))
       .sort((a, b) => Number(a) - Number(b));
   }, [objectEntry]);
+  const wanInstanceId = useMemo(
+    () => instanceIds.find((id) => schemaByPath.get(`${objectPath}${id}.interfaceType`)?.currentValue?.toLowerCase() === 'wan'),
+    [instanceIds, objectPath, schemaByPath],
+  );
+  const lanInstanceId = useMemo(
+    () => instanceIds.find((id) => schemaByPath.get(`${objectPath}${id}.interfaceType`)?.currentValue?.toLowerCase() === 'lan'),
+    [instanceIds, objectPath, schemaByPath],
+  );
 
   /** 字段 leaf → schema（任取第一个有 schema 的实例做模板）。新增/默认值/校验沿用。 */
   const leafSchemaByLeaf = useMemo(() => {
@@ -489,10 +539,14 @@ export default function InstanceSelectorForm({
       if (selectedInstId !== null) setSelectedInstId(null);
       return;
     }
+    if (wanInstanceId && selectedInstId !== wanInstanceId) {
+      setSelectedInstId(wanInstanceId);
+      return;
+    }
     if (!selectedInstId || !instanceIds.includes(selectedInstId)) {
       setSelectedInstId(instanceIds[0]);
     }
-  }, [instanceIds, selectedInstId]);
+  }, [instanceIds, selectedInstId, wanInstanceId]);
 
   // 表单本地编辑值（仅记录用户改过的字段；其余从 schema 取）
   const [formEdits, setFormEdits] = useState<Record<string, string>>({});
@@ -632,6 +686,23 @@ export default function InstanceSelectorForm({
     [objectPath, schemaByPath, selectedInstId],
   );
 
+  const subInstanceIdsFor = useCallback(
+    (interfaceId: string, subObject: string): number[] => {
+      const prefix = `${objectPath}${interfaceId}.${subObject}.`;
+      const ids = new Set<number>();
+      for (const path of schemaByPath.keys()) {
+        if (!path.startsWith(prefix)) continue;
+        const rest = path.slice(prefix.length);
+        const dot = rest.indexOf('.');
+        if (dot < 0) continue;
+        const n = Number(rest.slice(0, dot));
+        if (Number.isInteger(n)) ids.add(n);
+      }
+      return Array.from(ids).sort((a, b) => a - b);
+    },
+    [objectPath, schemaByPath],
+  );
+
   const waitForTaskTerminal = useCallback(async (taskId: string) => {
     const timeoutAt = Date.now() + 60000;
     while (Date.now() < timeoutAt) {
@@ -645,6 +716,14 @@ export default function InstanceSelectorForm({
   // 新增实例：用 Modal 收集新值 → AddObject → 等待 → 取新实例号 → SetParameterValues
   type AddModalState = { values: Record<string, string>; errors: Record<string, string> } | null;
   const [addModal, setAddModal] = useState<AddModalState>(null);
+  type NrWanAddState = {
+    enable: '0' | '1';
+    vlanName: string;
+    vlanId: string;
+  };
+  const [nrWanAdd, setNrWanAdd] = useState<NrWanAddState | null>(null);
+  type VlanEditState = NrWanAddState & { instanceId: string };
+  const [vlanEdit, setVlanEdit] = useState<VlanEditState | null>(null);
 
   const buildInitialAddValues = useCallback((): Record<string, string> => {
     return Object.fromEntries(
@@ -801,15 +880,16 @@ export default function InstanceSelectorForm({
     waitForTaskTerminal,
   ]);
 
-  const handleDelete = useCallback(async () => {
-    if (!selectedInstId) return;
+  const handleDelete = useCallback(async (targetInstanceId?: string) => {
+    const instanceId = targetInstanceId ?? selectedInstId;
+    if (!instanceId) return;
     try {
       const result = await deleteMutation.mutateAsync({
         deviceId,
-        objectPath: `${objectPath}${selectedInstId}.`,
+        objectPath: `${objectPath}${instanceId}.`,
       });
       message.success({
-        content: `已下发 DeleteObject(${selectedInstId}),请在右上角铃铛查看任务结果`,
+        content: `已下发 DeleteObject(${instanceId}),请在右上角铃铛查看任务结果`,
         duration: 6,
       });
       setFeedback(fbKey, {
@@ -817,24 +897,24 @@ export default function InstanceSelectorForm({
         action: 'delete',
         submitStatus: 'queued',
         taskId: result.taskId,
-        detail: `实例 ${selectedInstId}`,
+        detail: `实例 ${instanceId}`,
         at: Date.now(),
       });
       // 删后让 useEffect 重置 selectedInstId
-      setSelectedInstId((prev) => (prev === selectedInstId ? null : prev));
+      setSelectedInstId((prev) => (prev === instanceId ? null : prev));
       void refetch();
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
         message: `DeleteObject 入队失败(${selectorGroup.titleZh})`,
-        description: `实例 ${selectedInstId} 删除失败:${errMsg}`,
+        description: `实例 ${instanceId} 删除失败:${errMsg}`,
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
       setFeedback(fbKey, {
         kind: 'multi',
         action: 'delete',
         submitStatus: 'failed_to_queue',
-        detail: `实例 ${selectedInstId}:${errMsg}`,
+        detail: `实例 ${instanceId}:${errMsg}`,
         at: Date.now(),
       });
     } finally {
@@ -961,6 +1041,98 @@ export default function InstanceSelectorForm({
     [addMutation, deviceId, fbKey, objectPath, queryClient, refetch, selectedInstId, setFeedback],
   );
 
+  const handleNrWanAdd = useCallback(async () => {
+    if (!selectedInstId || !nrWanAdd) return;
+    const vlanId = Number(nrWanAdd.vlanId);
+    if (!nrWanAdd.vlanName || nrWanAdd.vlanName.length > 13 || !Number.isInteger(vlanId) || vlanId < 0 || vlanId > 4094) {
+      message.error(locale === 'zh-CN' ? 'VLAN Name 长度需为 1~13，VLAN ID 需为 0~4094 的整数' : 'VLAN Name must be 1-13 characters and VLAN ID an integer from 0 to 4094');
+      return;
+    }
+    const vlanBase = `${objectPath}${selectedInstId}.VlanInterface.`;
+    const knownVlanIds = new Set(subInstanceIds('VlanInterface').map(String));
+    try {
+      const vlanResult = await addMutation.mutateAsync({ deviceId, objectPath: vlanBase });
+      const vlanTask = await waitForTaskTerminal(vlanResult.taskId);
+      if (vlanTask.status !== 'completed') throw new Error(vlanTask.errorMessage || `AddObject VlanInterface ${vlanTask.status}`);
+
+      const vlanRefresh = await refetch();
+      const vlanObject = vlanRefresh.data?.objects.find((item) => item.path === vlanBase);
+      const vlanInstance = vlanObject?.currentInstances.map(String).find((id) => !knownVlanIds.has(id));
+      if (!vlanInstance) throw new Error(locale === 'zh-CN' ? '未能识别新增 VLAN 对象编号' : 'Unable to identify the new VLAN object');
+
+      const parameters: ParameterUpdateRequest[] = [
+        { parameterPath: `${vlanBase}${vlanInstance}.Name`, parameterValue: nrWanAdd.vlanName, parameterType: 'string' },
+        { parameterPath: `${vlanBase}${vlanInstance}.Id`, parameterValue: nrWanAdd.vlanId, parameterType: 'unsignedInt' },
+        { parameterPath: `${vlanBase}${vlanInstance}.Enable`, parameterValue: nrWanAdd.enable, parameterType: 'boolean' },
+      ];
+      const updateResult = await updateMutation.mutateAsync({ deviceId, parameters });
+      setFormEdits((prev) => ({
+        ...prev,
+        ...Object.fromEntries(parameters.map((parameter) => [parameter.parameterPath, parameter.parameterValue])),
+      }));
+      setFeedback(fbKey, {
+        kind: 'multi', action: 'save', submitStatus: 'queued', taskId: updateResult.taskId,
+        savedInstId: selectedInstId, detail: `VLAN ${vlanInstance}`, at: Date.now(),
+      });
+      message.success({ content: locale === 'zh-CN' ? 'NR WAN/VLAN 对象已创建并下发' : 'NR WAN/VLAN object created and queued', duration: 6 });
+      setNrWanAdd(null);
+      void refetch();
+    } catch (err) {
+      notification.error({
+        message: locale === 'zh-CN' ? '新增 NR WAN/VLAN 失败' : 'Failed to add NR WAN/VLAN',
+        description: err instanceof Error ? err.message : String(err),
+        duration: ERROR_FEEDBACK_DURATION_SECONDS,
+      });
+    }
+  }, [addMutation, deviceId, fbKey, locale, nrWanAdd, objectPath, refetch, selectedInstId, setFeedback, subInstanceIds, updateMutation, waitForTaskTerminal]);
+
+  const openVlanEdit = useCallback((rowId: number) => {
+    if (!selectedInstId) return;
+    const prefix = `${objectPath}${selectedInstId}.VlanInterface.${rowId}.`;
+    const enable = fieldValueByPath(`${prefix}Enable`).toLowerCase();
+    setVlanEdit({
+      instanceId: String(rowId),
+      enable: ['1', 'true', 'on'].includes(enable) ? '1' : '0',
+      vlanName: fieldValueByPath(`${prefix}Name`),
+      vlanId: fieldValueByPath(`${prefix}Id`),
+    });
+  }, [fieldValueByPath, objectPath, selectedInstId]);
+
+  const handleVlanEdit = useCallback(async () => {
+    if (!selectedInstId || !vlanEdit) return;
+    const vlanId = Number(vlanEdit.vlanId);
+    if (!vlanEdit.vlanName || vlanEdit.vlanName.length > 13 || !Number.isInteger(vlanId) || vlanId < 0 || vlanId > 4094) {
+      message.error(locale === 'zh-CN' ? 'VLAN Name 长度需为 1~13，VLAN ID 需为 0~4094 的整数' : 'VLAN Name must be 1-13 characters and VLAN ID an integer from 0 to 4094');
+      return;
+    }
+    const vlanBase = `${objectPath}${selectedInstId}.VlanInterface.${vlanEdit.instanceId}.`;
+    const parameters: ParameterUpdateRequest[] = [
+      { parameterPath: `${vlanBase}Name`, parameterValue: vlanEdit.vlanName, parameterType: 'string' },
+      { parameterPath: `${vlanBase}Id`, parameterValue: vlanEdit.vlanId, parameterType: 'unsignedInt' },
+      { parameterPath: `${vlanBase}Enable`, parameterValue: vlanEdit.enable, parameterType: 'boolean' },
+    ];
+    try {
+      const result = await updateMutation.mutateAsync({ deviceId, parameters });
+      setFormEdits((prev) => ({
+        ...prev,
+        ...Object.fromEntries(parameters.map((parameter) => [parameter.parameterPath, parameter.parameterValue])),
+      }));
+      setFeedback(fbKey, {
+        kind: 'multi', action: 'save', submitStatus: 'queued', taskId: result.taskId,
+        savedInstId: selectedInstId, detail: `VLAN ${vlanEdit.instanceId}`, at: Date.now(),
+      });
+      setVlanEdit(null);
+      message.success({ content: locale === 'zh-CN' ? 'VLAN 修改已下发' : 'VLAN update queued', duration: 5 });
+      void refetch();
+    } catch (err) {
+      notification.error({
+        message: locale === 'zh-CN' ? '修改 VLAN 失败' : 'Failed to update VLAN',
+        description: err instanceof Error ? err.message : String(err),
+        duration: ERROR_FEEDBACK_DURATION_SECONDS,
+      });
+    }
+  }, [deviceId, fbKey, locale, objectPath, refetch, selectedInstId, setFeedback, updateMutation, vlanEdit]);
+
   /** 子表行级 DeleteObject。 */
   const handleSubDelete = useCallback(
     async (subObject: string, rowIdx: number) => {
@@ -1005,6 +1177,10 @@ export default function InstanceSelectorForm({
   const title = locale === 'zh-CN' ? selectorGroup.titleZh : selectorGroup.titleEn;
   const maxInstances = selectorGroup.maxInstances && selectorGroup.maxInstances > 0 ? selectorGroup.maxInstances : undefined;
   const reachedMax = maxInstances !== undefined && instanceIds.length >= maxInstances;
+  const isGnbNetworkInterface = selectorGroup.id === 'gnb-network-interface';
+  const directChildGroups = childGroups.filter((group) => group.parentSelector === selectorGroup.id);
+  const vlanAddressGroups = childGroups.filter((group) => group.parentSelector === 'gnb-interface-vlan');
+  const visibleChildGroups = directChildGroups;
   const cardTitle = maxInstances !== undefined
     ? `${title}（${instanceIds.length}/${maxInstances}）`
     : title;
@@ -1037,7 +1213,7 @@ export default function InstanceSelectorForm({
           : null
       }
     >
-      <Space style={{ marginBottom: 16 }} wrap>
+      {!isGnbNetworkInterface && <Space style={{ marginBottom: 16 }} wrap>
         <Text strong>{locale === 'zh-CN' ? '选择实例:' : 'Select Instance:'}</Text>
         <Select
           value={selectedInstId ?? undefined}
@@ -1102,7 +1278,17 @@ export default function InstanceSelectorForm({
             {locale === 'zh-CN' ? '已更新' : 'Updated'} {formatTime(lastSyncedAt.getTime())}
           </Tag>
         ) : null}
-      </Space>
+      </Space>}
+
+      {isGnbNetworkInterface && (
+        <>
+          <div style={{ marginBottom: 8, fontWeight: 600 }}>
+            {wanInstanceId
+              ? (locale === 'zh-CN' ? `WAN 口设置（Interface.${wanInstanceId}）` : `WAN Port Settings (Interface.${wanInstanceId})`)
+              : (locale === 'zh-CN' ? '未找到 WAN 口' : 'WAN port not found')}
+          </div>
+        </>
+      )}
 
       {isLoading ? (
         <div style={{ textAlign: 'center', padding: 24 }}>
@@ -1117,18 +1303,48 @@ export default function InstanceSelectorForm({
       ) : (
         <Spin spinning={isFetching} tip={locale === 'zh-CN' ? '正在更新…' : 'Updating...'} delay={150}>
           <Collapse
-            defaultActiveKey={childGroups.map((g) => g.id)}
-            items={childGroups.map((cg) => {
+            defaultActiveKey={visibleChildGroups
+              .filter((group) => {
+                const subObject = extractSubObject(group.objectPath || '', selectorGroup.objectPath || '');
+                return subInstanceIds(subObject).length > 0;
+              })
+              .map((group) => group.id)}
+            items={visibleChildGroups.map((cg) => {
               const label = (
                 <strong>{locale === 'zh-CN' ? cg.titleZh : cg.titleEn}</strong>
               );
               if (cg.style === 'subtable') {
                 const subObject = extractSubObject(cg.objectPath || '', selectorGroup.objectPath || '');
+                if (selectorGroup.id === 'gnb-network-interface' && selectedInstId && subObject !== 'VlanInterface') {
+                  const listGroup: QuickSettingsGroup = {
+                    ...cg,
+                    id: `${cg.id}-interface-${selectedInstId}`,
+                    parentSelector: undefined,
+                    style: 'table',
+                    objectPath: (cg.objectPath || '')
+                      .replace('{i}', selectedInstId)
+                      .replace('{j}', '{i}'),
+                  };
+                  return {
+                    key: cg.id,
+                    label,
+                    children: (
+                      <MultiInstanceTable
+                        deviceId={deviceId}
+                        active={active}
+                        group={listGroup}
+                        instanceContext={instanceContext}
+                        locale={locale}
+                      />
+                    ),
+                  };
+                }
                 const def: BscSubTableDef = {
                   subObject,
                   columns: cg.params.map((p) => ({
                     key: p.leaf || p.name,
                     title: locale === 'zh-CN' ? p.titleZh : p.titleEn,
+                    options: p.enumOptions?.map((option) => ({ value: option.value, label: option.label })),
                   })),
                 };
                 return {
@@ -1141,12 +1357,50 @@ export default function InstanceSelectorForm({
                     subInstanceIds(subObject),
                     fieldValueByPath,
                     setFieldValueByPath,
-                    () => void handleSubAdd(subObject),
+                    () => {
+                      if (selectorGroup.id === 'gnb-network-interface' && subObject === 'VlanInterface') {
+                        setNrWanAdd({ enable: '1', vlanName: '', vlanId: '' });
+                        return;
+                      }
+                      void handleSubAdd(subObject);
+                    },
                     (rowIdx) => void handleSubDelete(subObject, rowIdx),
                     addMutation.isPending,
                     deleteMutation.isPending,
                     getWritableByPath,
                     locale,
+                    selectorGroup.id === 'gnb-network-interface',
+                    cg.id === 'gnb-interface-vlan' ? () => void handleSave() : undefined,
+                    cg.id === 'gnb-interface-vlan' ? updateMutation.isPending : false,
+                    cg.id === 'gnb-interface-vlan'
+                      ? (row) => (
+                          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                            {vlanAddressGroups.map((addressGroup) => {
+                              const listGroup: QuickSettingsGroup = {
+                                ...addressGroup,
+                                id: `${addressGroup.id}-interface-${selectedInstId}-vlan-${row.id}`,
+                                parentSelector: undefined,
+                                style: 'table',
+                                objectPath: (addressGroup.objectPath || '')
+                                  .replace('{i}', selectedInstId)
+                                  .replace('{i}', String(row.id))
+                                  .replace('{i}', '{i}'),
+                              };
+                              return (
+                                <MultiInstanceTable
+                                  key={listGroup.id}
+                                  deviceId={deviceId}
+                                  active={active}
+                                  group={listGroup}
+                                  instanceContext={instanceContext}
+                                  locale={locale}
+                                />
+                              );
+                            })}
+                          </Space>
+                        )
+                      : undefined,
+                    cg.id === 'gnb-interface-vlan' ? (rowIdx) => openVlanEdit(rowIdx) : undefined,
                   ),
                 };
               }
@@ -1168,7 +1422,7 @@ export default function InstanceSelectorForm({
               };
             })}
           />
-          <div style={{ marginTop: 16, textAlign: 'right' }}>
+          {!isGnbNetworkInterface && <div style={{ marginTop: 16, textAlign: 'right' }}>
             <Button
               type="primary"
               icon={<SaveOutlined />}
@@ -1178,9 +1432,124 @@ export default function InstanceSelectorForm({
             >
               {locale === 'zh-CN' ? '保 存' : 'Save'}
             </Button>
-          </div>
+          </div>}
         </Spin>
       )}
+
+      {isGnbNetworkInterface && !isLoading && lanInstanceId && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ marginBottom: 8, fontWeight: 600 }}>
+            {locale === 'zh-CN'
+              ? `LAN 口设置（Interface.${lanInstanceId}）`
+              : `LAN Port Settings (Interface.${lanInstanceId})`}
+          </div>
+          <Collapse
+            defaultActiveKey={directChildGroups
+              .filter((group) => {
+                const subObject = extractSubObject(group.objectPath || '', selectorGroup.objectPath || '');
+                return subObject !== 'VlanInterface' && subInstanceIdsFor(lanInstanceId, subObject).length > 0;
+              })
+              .map((group) => `lan-${group.id}`)}
+            items={directChildGroups
+              .filter((group) => {
+                const subObject = extractSubObject(group.objectPath || '', selectorGroup.objectPath || '');
+                return group.style === 'subtable' && subObject !== 'VlanInterface';
+              })
+              .map((group) => {
+                const listGroup: QuickSettingsGroup = {
+                  ...group,
+                  id: `${group.id}-interface-${lanInstanceId}`,
+                  parentSelector: undefined,
+                  style: 'table',
+                  objectPath: (group.objectPath || '')
+                    .replace('{i}', lanInstanceId)
+                    .replace('{j}', '{i}'),
+                };
+                return {
+                  key: `lan-${group.id}`,
+                  label: <strong>{locale === 'zh-CN' ? group.titleZh : group.titleEn}</strong>,
+                  children: (
+                    <MultiInstanceTable
+                      deviceId={deviceId}
+                      active={active}
+                      group={listGroup}
+                      instanceContext={instanceContext}
+                      locale={locale}
+                    />
+                  ),
+                };
+              })}
+          />
+        </div>
+      )}
+
+      <Modal
+        title={locale === 'zh-CN' ? '添加 NR WAN(VLAN)' : 'Add NR WAN(VLAN)'}
+        open={Boolean(nrWanAdd)}
+        onOk={() => void handleNrWanAdd()}
+        onCancel={() => setNrWanAdd(null)}
+        okText={locale === 'zh-CN' ? '确定' : 'OK'}
+        cancelText={locale === 'zh-CN' ? '取消' : 'Cancel'}
+        confirmLoading={addMutation.isPending || updateMutation.isPending}
+        width={760}
+        destroyOnHidden
+      >
+        {nrWanAdd && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '18px 28px' }}>
+            <div>
+              <div style={{ marginBottom: 6 }}>Enable</div>
+              <Select
+                style={{ width: '100%' }}
+                value={nrWanAdd.enable}
+                options={[{ value: '1', label: 'ON' }, { value: '0', label: 'OFF' }]}
+                onChange={(value) => setNrWanAdd((prev) => prev ? { ...prev, enable: value } : prev)}
+              />
+            </div>
+            <div>
+              <div style={{ marginBottom: 6 }}>VLAN Name <Text type="secondary">Length: 1~13 Characters</Text></div>
+              <Input maxLength={13} value={nrWanAdd.vlanName} onChange={(event) => setNrWanAdd((prev) => prev ? { ...prev, vlanName: event.target.value } : prev)} />
+            </div>
+            <div>
+              <div style={{ marginBottom: 6 }}>VLAN ID <Text type="secondary">0~4094, Integer</Text></div>
+              <Input value={nrWanAdd.vlanId} onChange={(event) => setNrWanAdd((prev) => prev ? { ...prev, vlanId: event.target.value } : prev)} />
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        title={locale === 'zh-CN' ? `修改 NR WAN(VLAN) · 实例 ${vlanEdit?.instanceId ?? ''}` : `Edit NR WAN(VLAN) · Instance ${vlanEdit?.instanceId ?? ''}`}
+        open={Boolean(vlanEdit)}
+        onOk={() => void handleVlanEdit()}
+        onCancel={() => setVlanEdit(null)}
+        okText={locale === 'zh-CN' ? '保存' : 'Save'}
+        cancelText={locale === 'zh-CN' ? '取消' : 'Cancel'}
+        confirmLoading={updateMutation.isPending}
+        width={760}
+        destroyOnHidden
+      >
+        {vlanEdit && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '18px 28px' }}>
+            <div>
+              <div style={{ marginBottom: 6 }}>Enable</div>
+              <Select
+                style={{ width: '100%' }}
+                value={vlanEdit.enable}
+                options={[{ value: '1', label: 'ON' }, { value: '0', label: 'OFF' }]}
+                onChange={(value) => setVlanEdit((prev) => prev ? { ...prev, enable: value } : prev)}
+              />
+            </div>
+            <div>
+              <div style={{ marginBottom: 6 }}>VLAN Name <Text type="secondary">Length: 1~13 Characters</Text></div>
+              <Input maxLength={13} value={vlanEdit.vlanName} onChange={(event) => setVlanEdit((prev) => prev ? { ...prev, vlanName: event.target.value } : prev)} />
+            </div>
+            <div>
+              <div style={{ marginBottom: 6 }}>VLAN ID <Text type="secondary">0~4094, Integer</Text></div>
+              <Input value={vlanEdit.vlanId} onChange={(event) => setVlanEdit((prev) => prev ? { ...prev, vlanId: event.target.value } : prev)} />
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         title={locale === 'zh-CN' ? `${title} · 新增实例` : `${title} · Add Instance`}

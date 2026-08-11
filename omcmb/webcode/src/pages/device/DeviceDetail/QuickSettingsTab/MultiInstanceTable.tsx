@@ -30,6 +30,7 @@ import {
   formatEnumDisplayValue,
   getEffectiveEnumMeta,
   getFeedbackScopeContext,
+  localizeEnumLabel,
   resolveQuickSettingsParameterType,
   serializeQuickSettingsMultiCheckboxValue,
   validateLteQOffsetValue,
@@ -247,6 +248,56 @@ const GNB_NR_NEIGHBOR_CELL_GROUP_ID = 'gnb-nr-neighbor-cell';
 const GNB_NR_NEIGHBOR_SSB_LEAF = 'ssbFrequency';
 const GNB_NR_INTER_FREQ_SSB_LEAF = 'SSBFrequency';
 const GNB_NR_INTER_FREQ_ENABLE_LEAF = 'Enable';
+const GNB_NETWORK_IPV4_GROUP_IDS = new Set([
+  'gnb-interface-ipv4',
+  'gnb-interface-vlan-ipv4',
+]);
+const GNB_NETWORK_IPV6_GROUP_IDS = new Set([
+  'gnb-interface-ipv6',
+  'gnb-interface-vlan-ipv6',
+]);
+const GNB_NETWORK_IPV4_STATIC_LEAVES = new Set([
+  'IPAddress',
+  'SubnetMask',
+  'DefaultGateway',
+]);
+const GNB_NETWORK_IPV6_STATIC_LEAVES = new Set([
+  'IPAddress',
+  'PrefixLength',
+  'DefaultGateway',
+]);
+
+function isGnbNetworkIpv4Group(groupId: string): boolean {
+  return Array.from(GNB_NETWORK_IPV4_GROUP_IDS).some(
+    (group) => groupId === group || groupId.startsWith(`${group}-interface-`),
+  );
+}
+
+function isGnbNetworkAddressGroup(groupId: string): boolean {
+  return isGnbNetworkIpv4Group(groupId) || Array.from(GNB_NETWORK_IPV6_GROUP_IDS).some(
+    (group) => groupId === group || groupId.startsWith(`${group}-interface-`),
+  );
+}
+
+function isGnbNetworkStaticField(groupId: string, leaf: string): boolean {
+  const isIpv4 = isGnbNetworkIpv4Group(groupId);
+  const isIpv6 = Array.from(GNB_NETWORK_IPV6_GROUP_IDS).some(
+    (group) => groupId === group || groupId.startsWith(`${group}-interface-`),
+  );
+  return (isIpv4 && GNB_NETWORK_IPV4_STATIC_LEAVES.has(leaf))
+    || (isIpv6 && GNB_NETWORK_IPV6_STATIC_LEAVES.has(leaf));
+}
+
+function isGnbNetworkIpv4FieldVisible(
+  groupId: string,
+  leaf: string,
+  values: Record<string, string>,
+  addressingTypeLeaf: string,
+): boolean {
+  if (!isGnbNetworkStaticField(groupId, leaf)) return true;
+  const addressingType = String(values[addressingTypeLeaf] ?? '').trim().toLowerCase();
+  return addressingType === 'static';
+}
 
 function composeLteEci(enbId: string, cellId: string): string {
   return String(Number(enbId) * 256 + Number(cellId));
@@ -823,6 +874,7 @@ function PackedScalarNeighborTable({
     <Card
       title={cardTitle}
       size="small"
+      styles={{ body: hasRows ? undefined : { padding: 0 } }}
       extra={
         <Space>
           {lastAction && lastAction.action !== 'add_rollback' && (() => {
@@ -884,22 +936,24 @@ function PackedScalarNeighborTable({
       }
       style={{ marginBottom: 16 }}
     >
-      <Table
-        rowKey="key"
-        dataSource={rows}
-        columns={columns}
-        loading={isLoading}
-        size="small"
-        pagination={false}
-        scroll={multiTableScroll(hasRows)}
-        tableLayout={hasRows ? undefined : 'fixed'}
-        sticky
-        locale={{ emptyText: t('device.multi.packed.emptyText') }}
-      />
-      <div style={{ marginTop: 8, color: '#8c8c8c', fontSize: 12 }}>
-        {t('device.multi.packed.sourceLabel')}{scalarPath}
-        {lastSyncedAt ? ` · ${t('device.multi.packed.lastSynced', { time: formatTime(new Date(lastSyncedAt).getTime()) })}` : ''}
-      </div>
+      {hasRows && (
+        <>
+          <Table
+            rowKey="key"
+            dataSource={rows}
+            columns={columns}
+            loading={isLoading}
+            size="small"
+            pagination={false}
+            scroll={multiTableScroll(true)}
+            sticky
+          />
+          <div style={{ marginTop: 8, color: '#8c8c8c', fontSize: 12 }}>
+            {t('device.multi.packed.sourceLabel')}{scalarPath}
+            {lastSyncedAt ? ` · ${t('device.multi.packed.lastSynced', { time: formatTime(new Date(lastSyncedAt).getTime()) })}` : ''}
+          </div>
+        </>
+      )}
 
       <Modal
         title={t('device.multi.modalAddTitle', { title })}
@@ -1085,8 +1139,10 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
   );
   // 后端 schema 目前只会为"已有实例"的对象返回 ObjectSchemaItem，空列表时 objectEntry 可能缺失。
   // 这类场景下仍允许直接走 AddObject，由后端最终校验 objectPath 是否可新增。
-  const canAdd = objectEntry?.canAdd ?? Boolean(group.objectPath && objectPath);
-  const canDelete = objectEntry?.canDeleteAny ?? false;
+  // NR 网络子对象的部分旧模型错误上报 canAdd/canDeleteAny=false；实际对象支持标准 AddObject/DeleteObject。
+  const isNrNetworkChildGroup = /^gnb-interface-(?:ipv4|ipv6|vlan-ipv4|vlan-ipv6)-interface-\d+(?:-vlan-\d+)?$/.test(group.id);
+  const canAdd = isNrNetworkChildGroup || (objectEntry?.canAdd ?? Boolean(group.objectPath && objectPath));
+  const canDelete = isNrNetworkChildGroup || (objectEntry?.canDeleteAny ?? false);
 
   const schemaByPath = useMemo(() => {
     const map = new Map<string, ParameterSchemaItem>();
@@ -1175,6 +1231,12 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     }
     return map;
   }, [group.params]);
+
+  const gnbNetworkAddressingTypeLeaf = useMemo(
+    () => group.params.find((param) => param.name === 'AddressingType' || param.name === 'Origin')?.leaf
+      ?? 'AddressingType',
+    [group.params],
+  );
 
   const leafSchemaByLeaf = useMemo(() => {
     const map = new Map<string, ParameterSchemaItem>();
@@ -1711,7 +1773,15 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
 
   const buildUpdatesForRow = useCallback((instId: string, edits: Record<string, string>): ParameterUpdateRequest[] => {
     const updates: ParameterUpdateRequest[] = [];
+    const valuesForVisibility = isGnbNetworkAddressGroup(group.id)
+      ? {
+          ...edits,
+          [gnbNetworkAddressingTypeLeaf]: edits[gnbNetworkAddressingTypeLeaf]
+            ?? cellValue(instId, gnbNetworkAddressingTypeLeaf),
+        }
+      : edits;
     for (const [leaf, value] of Object.entries(edits)) {
+      if (!isGnbNetworkIpv4FieldVisible(group.id, leaf, valuesForVisibility, gnbNetworkAddressingTypeLeaf)) continue;
       const item = schemaByPath.get(`${objectPath}${instId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf);
       const param = groupParamByLeaf.get(leaf);
       const nextValue = normalizeComparableQuickSettingsValue(value, param);
@@ -1724,7 +1794,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       });
     }
     return updates;
-  }, [groupParamByLeaf, leafSchemaByLeaf, objectPath, schemaByPath]);
+  }, [cellValue, gnbNetworkAddressingTypeLeaf, group.id, groupParamByLeaf, leafSchemaByLeaf, objectPath, schemaByPath]);
 
   const displayColumns = useMemo<SpecialColumnSpec[]>(() => {
     if (!specialColumns) {
@@ -1900,6 +1970,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     for (const column of modalColumns) {
       const leaf = column.leaf || '';
       if (!leaf || column.readOnly) continue;
+      if (!isGnbNetworkIpv4FieldVisible(group.id, leaf, modal.values, gnbNetworkAddressingTypeLeaf)) continue;
 
       const rawValue = modal.values[leaf] ?? '';
       if (column.virtual) {
@@ -1968,7 +2039,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     }
 
     return { errors, updates, pendingEdits };
-  }, [addModalColumns, cellValue, displayColumns, group.id, groupParamByLeaf, groupParamLeafSet, isIpsecGroup, leafSchemaByLeaf, nrInterFreqLoading, nrInterFreqSchemaResp, nrInterFreqSsbState.enabled, nrInterFreqSsbState.known, objectPath, schemaByPath, tableRows, t, usesSplitNeighborCellIdentity]);
+  }, [addModalColumns, cellValue, displayColumns, gnbNetworkAddressingTypeLeaf, group.id, groupParamByLeaf, groupParamLeafSet, isIpsecGroup, leafSchemaByLeaf, nrInterFreqLoading, nrInterFreqSchemaResp, nrInterFreqSsbState.enabled, nrInterFreqSsbState.known, objectPath, schemaByPath, tableRows, t, usesSplitNeighborCellIdentity]);
 
   const rollbackAddedInstance = useCallback(async (instId: string | undefined, reason: string) => {
     if (!instId || !/^\d+$/.test(instId)) return;
@@ -2114,12 +2185,21 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
 
     addRows.forEach((row, idx) => {
       Object.entries(row.values).forEach(([leaf, value]) => {
+        if (!isGnbNetworkIpv4FieldVisible(group.id, leaf, row.values, gnbNetworkAddressingTypeLeaf)) return;
         const err = validateDraftCell(`+${idx + 1}`, leaf, value);
         if (err) validationErrors.push(err);
       });
     });
     editedRows.forEach(([instId, state]) => {
+      const valuesForVisibility = isGnbNetworkAddressGroup(group.id)
+        ? {
+            ...state.edits,
+            [gnbNetworkAddressingTypeLeaf]: state.edits[gnbNetworkAddressingTypeLeaf]
+              ?? cellValue(instId, gnbNetworkAddressingTypeLeaf),
+          }
+        : state.edits;
       Object.entries(state.edits).forEach(([leaf, value]) => {
+        if (!isGnbNetworkIpv4FieldVisible(group.id, leaf, valuesForVisibility, gnbNetworkAddressingTypeLeaf)) return;
         const err = validateDraftCell(instId, leaf, value, instId);
         if (err) validationErrors.push(err);
       });
@@ -2313,15 +2393,17 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
           throw new Error(t('device.multi.addInstanceNoId'));
         }
         addCreatedInst = String(instNumberRaw);
-        const updates = Object.entries(row.values).map(([leaf, value]) => {
-          const item = leafSchemaByLeaf.get(leaf);
-          const param = groupParamByLeaf.get(leaf);
-          return {
-            parameterPath: `${objectPath}${addCreatedInst}.${leaf}`,
-            parameterValue: value,
-            parameterType: effectiveParamType(item, param),
-          };
-        });
+        const updates = Object.entries(row.values)
+          .filter(([leaf]) => isGnbNetworkIpv4FieldVisible(group.id, leaf, row.values, gnbNetworkAddressingTypeLeaf))
+          .map(([leaf, value]) => {
+            const item = leafSchemaByLeaf.get(leaf);
+            const param = groupParamByLeaf.get(leaf);
+            return {
+              parameterPath: `${objectPath}${addCreatedInst}.${leaf}`,
+              parameterValue: value,
+              parameterType: effectiveParamType(item, param),
+            };
+          });
         if (updates.length > 0) {
           const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
           recordTask(result.taskId);
@@ -2517,6 +2599,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     addMutation,
     batchAwaitingDevice,
     buildUpdatesForRow,
+    cellValue,
     clearDraft,
     clearTunnelLocalBatchChanges,
     currentIpsecEnabled,
@@ -2525,6 +2608,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     fbKey,
     group.titleZh,
     group.id,
+    gnbNetworkAddressingTypeLeaf,
     group.maxInstances,
     groupParamByLeaf,
     hasIpsecGlobalChange,
@@ -2698,6 +2782,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     <Card
       title={cardTitle}
       size="small"
+      styles={{ body: hasRows ? undefined : { padding: 0 } }}
       extra={
         <Space>
           {lastAction && lastAction.action !== 'add_rollback' && (() => {
@@ -2752,19 +2837,20 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
           )}
         </Space>
       }
-      style={{ marginBottom: 16 }}
+      style={{ marginBottom: isGnbNetworkAddressGroup(group.id) ? 8 : 16 }}
     >
-      <Table<TableRow>
-        rowKey={(row) => row.key}
-        dataSource={tableRows}
-        columns={columns}
-        loading={isLoading}
-        size="small"
-        pagination={false}
-        scroll={multiTableScroll(hasRows)}
-        tableLayout={hasRows ? undefined : 'fixed'}
-        sticky
-      />
+      {hasRows && (
+        <Table<TableRow>
+          rowKey={(row) => row.key}
+          dataSource={tableRows}
+          columns={columns}
+          loading={isLoading}
+          size="small"
+          pagination={false}
+          scroll={multiTableScroll(true)}
+          sticky
+        />
+      )}
       <Modal
         title={editModal?.mode === 'add' ? t('device.multi.modalAddTitle', { title }) : t('device.multi.modalEditTitle', { title, instId: editModal?.instanceId ?? '' })}
         open={Boolean(editModal)}
@@ -2791,6 +2877,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
             if (editModal.mode === 'add' && (!leaf || column.readOnly || (!column.virtual && !groupParamLeafSet.has(leaf)))) {
               return null;
             }
+            if (!isGnbNetworkIpv4FieldVisible(group.id, leaf, editModal.values, gnbNetworkAddressingTypeLeaf)) {
+              return null;
+            }
             const value = leaf
               ? (editModal.values[leaf] ?? '')
               : (editModal.instanceId ? (column.getValue?.({ key: editModal.instanceId, instanceId: editModal.instanceId }, instanceContext) ?? '') : '');
@@ -2805,15 +2894,23 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
               && canEditByToggle
               && (editModal.mode === 'add' ? true : ((item?.writable ?? true)));
             const enumMeta = getEffectiveEnumMeta(constraints, item?.path);
+            const configuredEnumOptions = param?.enumOptions && param.enumOptions.length > 0
+              ? {
+                  values: param.enumOptions.map((option) => option.value),
+                  labels: param.enumOptions.map((option) => localizeEnumLabel(option.label, option.value, locale)),
+                }
+              : undefined;
             const effectiveEnumOptions = isIpsecToggleField
               ? {
                   values: ['true', 'false'],
                   labels: locale === 'zh-CN' ? ['开启', '关闭'] : ['Enabled', 'Disabled'],
                 }
-              : enumMeta;
+              : (configuredEnumOptions ?? enumMeta);
             const error = leaf ? editModal.errors[leaf] : '';
             const label = column.titleKey ? t(column.titleKey) : (locale === 'zh-CN' ? (column.titleZh ?? column.titleEn) : column.titleEn);
-            const rangeHint = column.virtual
+            const rangeHint = effectiveEnumOptions
+              ? ''
+              : column.virtual
               ? `[${column.virtual.constraints.minValue ?? '-∞'} ~ ${column.virtual.constraints.maxValue ?? '∞'}]`
               : (leaf ? formatEffectiveConstraintHint(item, param, t) : '');
             // 同列渲染：column.formatValue 收原始值；未提供则退到 enum 兜底。

@@ -67,6 +67,272 @@
            standardPath="Device.Time.LocalTimeZoneName"/>
   </group>
 
+  <group id="device-wan" titleZh="WAN 设置" titleEn="WAN Settings">
+    <param name="ConnectType" titleZh="连接类型" titleEn="Connect Type" standardPath="Device.DeviceInfo.WAN_CONFIG1_CONNECT_TYPE">
+      <option value="fiber" label="Fiber"/>
+      <option value="copper" label="Copper"/>
+    </param>
+    <param name="DNS1" titleZh="DNS 地址 1" titleEn="DNS Address 1" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS1"/>
+    <param name="DNS2" titleZh="DNS 地址 2" titleEn="DNS Address 2" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS2"/>
+    <param name="MTU" titleZh="MTU" titleEn="MTU" standardPath="Device.DeviceInfo.X_COM_OMC_ETH_CONFIG_MTU" type="unsignedInt" minValue="700" maxValue="1600"/>
+    <param name="TR069Interface" titleZh="TR-069 接口绑定" titleEn="Quick Interface Binding" standardPath="Device.DeviceInfo.LTE_TR069_IFNAME"/>
+    <param name="LmtWanEnable" titleZh="允许从 WAN 访问 LMT" titleEn="Access LMT via WAN" standardPath="Device.DeviceInfo.X_COM_LmtEnable">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="LanIPAddress" titleZh="LAN IP 地址" titleEn="LAN IP Address" standardPath="Device.DeviceInfo.LAN_CONFIG_IPADDR"/>
+    <param name="LanNetmask" titleZh="LAN 子网掩码" titleEn="LAN Subnet Mask" standardPath="Device.DeviceInfo.LAN_CONFIG_NETMASK"/>
+  </group>
+
+  <group id="device-wan-1" titleZh="WAN 配置 1" titleEn="WAN Config 1">
+    <param name="WAN_CONFIG1_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG1_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPADDR"/>
+    <param name="WAN_CONFIG1_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG1_NETMASK"/>
+    <param name="WAN_CONFIG1_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG1_DEFAULTGW"/>
+    <param name="WAN_CONFIG1_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG1_V6_IPADDR"/>
+    <param name="WAN_CONFIG1_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG1_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG1_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG1_V6_GW"/>
+    <param name="WAN_CONFIG1_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG1_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG1_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG1_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+  <group id="device-wan-2" titleZh="WAN 配置 2" titleEn="WAN Config 2">
+    <param name="WAN_CONFIG2_ENABLE" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG2_ENABLE">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="WAN_CONFIG2_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG2_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG2_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG2_IPADDR"/>
+    <param name="WAN_CONFIG2_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG2_NETMASK"/>
+    <param name="WAN_CONFIG2_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG2_DEFAULTGW"/>
+    <param name="WAN_CONFIG2_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG2_V6_IPADDR"/>
+    <param name="WAN_CONFIG2_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG2_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG2_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG2_V6_GW"/>
+    <param name="WAN_CONFIG2_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG2_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG2_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG2_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+  <group id="device-wan-3" titleZh="WAN 配置 3" titleEn="WAN Config 3">
+    <param name="WAN_CONFIG3_ENABLE" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG3_ENABLE">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="WAN_CONFIG3_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG3_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG3_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG3_IPADDR"/>
+    <param name="WAN_CONFIG3_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG3_NETMASK"/>
+    <param name="WAN_CONFIG3_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG3_DEFAULTGW"/>
+    <param name="WAN_CONFIG3_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG3_V6_IPADDR"/>
+    <param name="WAN_CONFIG3_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG3_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG3_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG3_V6_GW"/>
+    <param name="WAN_CONFIG3_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG3_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG3_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG3_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+  <group id="device-wan-4" titleZh="WAN 配置 4" titleEn="WAN Config 4">
+    <param name="WAN_CONFIG4_ENABLE" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG4_ENABLE">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="WAN_CONFIG4_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG4_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG4_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG4_IPADDR"/>
+    <param name="WAN_CONFIG4_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG4_NETMASK"/>
+    <param name="WAN_CONFIG4_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG4_DEFAULTGW"/>
+    <param name="WAN_CONFIG4_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG4_V6_IPADDR"/>
+    <param name="WAN_CONFIG4_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG4_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG4_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG4_V6_GW"/>
+    <param name="WAN_CONFIG4_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG4_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG4_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG4_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+  <group id="device-wan-5" titleZh="WAN 配置 5" titleEn="WAN Config 5">
+    <param name="WAN_CONFIG5_ENABLE" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG5_ENABLE">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="WAN_CONFIG5_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG5_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG5_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG5_IPADDR"/>
+    <param name="WAN_CONFIG5_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG5_NETMASK"/>
+    <param name="WAN_CONFIG5_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG5_DEFAULTGW"/>
+    <param name="WAN_CONFIG5_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG5_V6_IPADDR"/>
+    <param name="WAN_CONFIG5_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG5_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG5_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG5_V6_GW"/>
+    <param name="WAN_CONFIG5_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG5_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG5_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG5_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+  <group id="device-wan-6" titleZh="WAN 配置 6" titleEn="WAN Config 6">
+    <param name="WAN_CONFIG6_ENABLE" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG6_ENABLE">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="WAN_CONFIG6_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG6_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG6_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG6_IPADDR"/>
+    <param name="WAN_CONFIG6_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG6_NETMASK"/>
+    <param name="WAN_CONFIG6_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG6_DEFAULTGW"/>
+    <param name="WAN_CONFIG6_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG6_V6_IPADDR"/>
+    <param name="WAN_CONFIG6_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG6_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG6_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG6_V6_GW"/>
+    <param name="WAN_CONFIG6_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG6_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG6_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG6_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+  <group id="device-wan-7" titleZh="WAN 配置 7" titleEn="WAN Config 7">
+    <param name="WAN_CONFIG7_ENABLE" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG7_ENABLE">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="WAN_CONFIG7_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG7_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG7_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG7_IPADDR"/>
+    <param name="WAN_CONFIG7_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG7_NETMASK"/>
+    <param name="WAN_CONFIG7_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG7_DEFAULTGW"/>
+    <param name="WAN_CONFIG7_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG7_V6_IPADDR"/>
+    <param name="WAN_CONFIG7_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG7_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG7_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG7_V6_GW"/>
+    <param name="WAN_CONFIG7_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG7_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG7_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG7_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+  <group id="device-wan-8" titleZh="WAN 配置 8" titleEn="WAN Config 8">
+    <param name="WAN_CONFIG8_ENABLE" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG8_ENABLE">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="WAN_CONFIG8_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG8_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG8_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG8_IPADDR"/>
+    <param name="WAN_CONFIG8_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG8_NETMASK"/>
+    <param name="WAN_CONFIG8_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG8_DEFAULTGW"/>
+    <param name="WAN_CONFIG8_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG8_V6_IPADDR"/>
+    <param name="WAN_CONFIG8_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG8_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG8_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG8_V6_GW"/>
+    <param name="WAN_CONFIG8_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG8_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG8_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG8_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+  <group id="device-wan-9" titleZh="WAN 配置 9" titleEn="WAN Config 9">
+    <param name="WAN_CONFIG9_ENABLE" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG9_ENABLE">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="WAN_CONFIG9_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG9_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG9_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG9_IPADDR"/>
+    <param name="WAN_CONFIG9_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG9_NETMASK"/>
+    <param name="WAN_CONFIG9_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG9_DEFAULTGW"/>
+    <param name="WAN_CONFIG9_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG9_V6_IPADDR"/>
+    <param name="WAN_CONFIG9_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG9_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG9_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG9_V6_GW"/>
+    <param name="WAN_CONFIG9_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG9_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG9_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG9_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+  <group id="device-wan-10" titleZh="WAN 配置 10" titleEn="WAN Config 10">
+    <param name="WAN_CONFIG10_ENABLE" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG10_ENABLE">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="WAN_CONFIG10_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG10_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG10_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG10_IPADDR"/>
+    <param name="WAN_CONFIG10_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG10_NETMASK"/>
+    <param name="WAN_CONFIG10_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG10_DEFAULTGW"/>
+    <param name="WAN_CONFIG10_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG10_V6_IPADDR"/>
+    <param name="WAN_CONFIG10_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG10_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG10_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG10_V6_GW"/>
+    <param name="WAN_CONFIG10_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG10_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG10_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG10_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+  <group id="device-wan-11" titleZh="WAN 配置 11" titleEn="WAN Config 11">
+    <param name="WAN_CONFIG11_ENABLE" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG11_ENABLE">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="WAN_CONFIG11_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG11_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG11_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG11_IPADDR"/>
+    <param name="WAN_CONFIG11_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG11_NETMASK"/>
+    <param name="WAN_CONFIG11_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG11_DEFAULTGW"/>
+    <param name="WAN_CONFIG11_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG11_V6_IPADDR"/>
+    <param name="WAN_CONFIG11_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG11_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG11_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG11_V6_GW"/>
+    <param name="WAN_CONFIG11_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG11_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG11_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG11_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+  <group id="device-wan-12" titleZh="WAN 配置 12" titleEn="WAN Config 12">
+    <param name="WAN_CONFIG12_ENABLE" titleZh="是否生效" titleEn="Enabled" standardPath="Device.DeviceInfo.WAN_CONFIG12_ENABLE">
+      <option value="1" label="ON"/>
+      <option value="0" label="OFF"/>
+    </param>
+    <param name="WAN_CONFIG12_IPMODE" titleZh="IP 接入模式" titleEn="IP Access Mode" standardPath="Device.DeviceInfo.WAN_CONFIG12_IPMODE">
+      <option value="0" label="DHCP"/>
+      <option value="1" label="Static IP"/>
+      <option value="3" label="IPv6 DHCP"/>
+      <option value="4" label="IPv6 Static IP"/>
+    </param>
+    <param name="WAN_CONFIG12_IPADDR" titleZh="IP 地址" titleEn="IP Address" standardPath="Device.DeviceInfo.WAN_CONFIG12_IPADDR"/>
+    <param name="WAN_CONFIG12_NETMASK" titleZh="子网掩码" titleEn="Netmask" standardPath="Device.DeviceInfo.WAN_CONFIG12_NETMASK"/>
+    <param name="WAN_CONFIG12_DEFAULTGW" titleZh="网关" titleEn="Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG12_DEFAULTGW"/>
+    <param name="WAN_CONFIG12_V6_IPADDR" titleZh="IPv6 地址" titleEn="IPv6 Address" standardPath="Device.DeviceInfo.WAN_CONFIG12_V6_IPADDR"/>
+    <param name="WAN_CONFIG12_V6_PREFIX" titleZh="IPv6 前缀" titleEn="IPv6 Prefix" standardPath="Device.DeviceInfo.WAN_CONFIG12_V6_PREFIX" type="unsignedInt" minValue="0" maxValue="128"/>
+    <param name="WAN_CONFIG12_V6_GW" titleZh="IPv6 网关" titleEn="IPv6 Gateway" standardPath="Device.DeviceInfo.WAN_CONFIG12_V6_GW"/>
+    <param name="WAN_CONFIG12_VLAN" titleZh="VLAN ID" titleEn="VLAN ID" standardPath="Device.DeviceInfo.WAN_CONFIG12_VLAN" type="unsignedInt" minValue="0" maxValue="4094"/>
+    <param name="WAN_CONFIG12_OPTION60" titleZh="Option60" titleEn="Option60" standardPath="Device.DeviceInfo.WAN_CONFIG12_OPTION60" type="string" maxValue="64"/>
+  </group>
+
+
        <group id="device-ipsec-control" titleZh="IPSec 配置" titleEn="IPSec Config">
               <param name="IPSEC_ENABLE" titleZh="IPSec 开关" titleEn="IPSec Enable"
                                     standardPath="Device.Services.FAPService.Ipsec.IPSEC_ENABLE">

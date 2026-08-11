@@ -100,9 +100,13 @@ func objectLookupCandidates(privatePath string) []string {
 		return nil
 	}
 	if strings.HasSuffix(trimmed, ".") {
-		return []string{trimmed, strings.TrimSuffix(trimmed, ".")}
+		return []string{
+			trimmed,
+			strings.TrimSuffix(trimmed, "."),
+			strings.TrimSuffix(trimmed, ".") + ".{i}.",
+		}
 	}
-	return []string{trimmed, trimmed + "."}
+	return []string{trimmed, trimmed + ".", trimmed + ".{i}."}
 }
 
 // ValidateValue 按 ParamMapping 的元属性校验单条 set 请求。

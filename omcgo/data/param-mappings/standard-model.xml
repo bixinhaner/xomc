@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<standardModel totalPaths="2001" totalObjects="13" totalParams="1988">
+<standardModel totalPaths="2001" totalObjects="16" totalParams="1985">
     <objects>
         <object standardPath="Device.DeviceInfo.EU." access="READ_ONLY" changeApplies="Immediate"/>
         <object standardPath="Device.DeviceInfo.EU.{i}.RU." access="READ_ONLY" changeApplies="Immediate"/>
@@ -14,6 +14,9 @@
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell." access="READ_WRITE" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE." access="READ_ONLY" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity." access="READ_ONLY" changeApplies="Immediate"/>
+        <object standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}." access="READ_WRITE" changeApplies="Immediate"/>
     </objects>
     <parameters>
         <param standardPath="Device.DeviceInfo.1588_Status" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
@@ -487,19 +490,17 @@
         <param standardPath="Device.Ethernet.Interface.{i}.PppoeAddress.{i}.PppoeUser" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.SignTransMedia" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.Status" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.AddressingType" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.DefaultGateway" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.IPAddress" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.PortType" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.SubnetMask" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.DefaultGateway" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.IPAddress" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.Origin" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.PortType" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.PrefixLength" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.Id" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.Name" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.VlanPppoeAddress.{i}" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
