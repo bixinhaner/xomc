@@ -172,6 +172,8 @@ const exactEn: Record<string, string> = {
   '保留原级别': 'Keep Original Severity',
   '主用目标': 'Primary Target',
   '备用目标': 'Backup Target',
+  '电信': 'CTCC',
+  '联通': 'CUCC',
   '电信 Socket 告警服务端': 'CTCC Socket Alarm Server',
   '联通 Socket 告警服务端': 'CUCC Socket Alarm Server',
   '安全用户': 'Security User',
@@ -335,6 +337,8 @@ const replacements: Array<[string, string]> = [
   ['备用', 'secondary'],
   ['电信 Socket 告警服务端', 'CTCC socket alarm server'],
   ['联通 Socket 告警服务端', 'CUCC socket alarm server'],
+  ['电信', 'CTCC'],
+  ['联通', 'CUCC'],
   ['服务端', 'server'],
   ['成功', 'success'],
   ['失败', 'failed'],
@@ -588,7 +592,7 @@ function getDocumentLocale(): Locale | undefined {
   return normalizeLocale(document.documentElement.lang);
 }
 
-function useNorthboundLocale(): Locale {
+export function useNorthboundLocale(): Locale {
   const storeLocale = useAppStore((state) => state.locale);
   const [documentLocale, setDocumentLocale] = useState<Locale | undefined>(() => getDocumentLocale());
   const [persistedLocale, setPersistedLocale] = useState<Locale | undefined>(() => readPersistedLocale());

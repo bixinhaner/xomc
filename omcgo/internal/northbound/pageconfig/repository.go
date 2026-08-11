@@ -79,6 +79,9 @@ func (r *PgRepository) seedDefaults(ctx context.Context, catalog *Catalog) error
 		if err := r.insertDefaultFileProfile(ctx, profile); err != nil {
 			return err
 		}
+		if err := r.backfillDefaultFileProfileScenarioNames(ctx, profile); err != nil {
+			return err
+		}
 		if err := r.backfillDefaultFileProfileGroupMetadata(ctx, profile); err != nil {
 			return err
 		}
@@ -153,6 +156,29 @@ func (r *PgRepository) backfillDefaultFileProfileGroupMetadata(ctx context.Conte
 	_, err = r.pool.Exec(ctx, `UPDATE northbound_file_profiles SET groups = $2, updated_at = now() WHERE code = $1`, profile.Code, updated)
 	if err != nil {
 		return fmt.Errorf("backfill default northbound_file_profiles groups %s: %w", profile.Code, err)
+	}
+	return nil
+}
+
+func (r *PgRepository) backfillDefaultFileProfileScenarioNames(ctx context.Context, profile FileProfile) error {
+	scenarioName := strings.TrimSpace(profile.ScenarioName)
+	scenarioNameEn := strings.TrimSpace(profile.ScenarioNameEn)
+	if scenarioName == "" || scenarioNameEn == "" {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `
+UPDATE northbound_file_profiles
+   SET scenario_name = $2,
+       scenario_name_en = $3,
+       updated_at = now()
+ WHERE code = $1
+   AND (
+       NULLIF(BTRIM(scenario_name), '') IS NULL
+       OR (scenario_name = scenario_name_en AND scenario_name_en = $3)
+   )`,
+		profile.Code, scenarioName, scenarioNameEn)
+	if err != nil {
+		return fmt.Errorf("backfill default northbound_file_profiles scenario names %s: %w", profile.Code, err)
 	}
 	return nil
 }

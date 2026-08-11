@@ -60,7 +60,7 @@ import type {
   NorthboundUpdateInventoryProfileRequest,
 } from '@core/services/api/northboundPageConfigApi';
 import { loadPmMetrics, type PmMetric } from './pmMetricCatalog';
-import { NorthboundI18nScope, useNorthboundI18n } from './i18n';
+import { NorthboundI18nScope, useNorthboundI18n, useNorthboundLocale } from './i18n';
 import styles from './index.module.css';
 
 type Domain = 'CM' | 'PM' | 'MR' | 'LOG' | 'INVENTORY';
@@ -3423,6 +3423,37 @@ function normalizeInventoryType(value: string): InventoryType {
   return 'ENB';
 }
 
+function hasChineseText(value?: string) {
+  return /[\u4e00-\u9fff]/.test(value ?? '');
+}
+
+function normalizeScenarioNames(
+  profile: NorthboundFileProfile,
+  fallback?: Pick<ScenarioRow, 'scenarioName' | 'scenarioNameEn'>,
+) {
+  const apiName = profile.scenario_name?.trim() ?? '';
+  const apiNameEn = profile.scenario_name_en?.trim() ?? '';
+  const fallbackName = fallback?.scenarioName?.trim() ?? '';
+  const fallbackNameEn = fallback?.scenarioNameEn?.trim() ?? '';
+  const swapped = apiName !== '' && apiNameEn !== '' && !hasChineseText(apiName) && hasChineseText(apiNameEn);
+  if (swapped) {
+    return {
+      scenarioName: apiNameEn,
+      scenarioNameEn: apiName,
+    };
+  }
+  const duplicatedDefaultEnglish = fallbackName !== ''
+    && fallbackNameEn !== ''
+    && apiName === apiNameEn
+    && apiNameEn === fallbackNameEn;
+  return {
+    scenarioName: duplicatedDefaultEnglish
+      ? fallbackName
+      : (apiName || fallbackName || profile.name || profile.code),
+    scenarioNameEn: apiNameEn || fallbackNameEn || apiName || profile.code,
+  };
+}
+
 function mapApiScenarioObject(object: { code: string; tech?: string; profile?: string }): ScenarioObject {
   return {
     code: object.code,
@@ -3454,11 +3485,12 @@ function mapApiFileProfile(profile: NorthboundFileProfile): ScenarioRow {
       })
     : fallback?.groups ?? [];
 
+  const scenarioNames = normalizeScenarioNames(profile, fallback);
   return {
     code: profile.code,
     vendor: profile.vendor || fallback?.vendor || 'Baicells',
-    scenarioName: profile.scenario_name || fallback?.scenarioName || profile.name,
-    scenarioNameEn: profile.scenario_name_en || fallback?.scenarioNameEn || profile.code,
+    scenarioName: scenarioNames.scenarioName,
+    scenarioNameEn: scenarioNames.scenarioNameEn,
     description: profile.description || fallback?.description || profile.name,
     flags: profile.flags?.length ? profile.flags : fallback?.flags ?? [],
     name: profile.name || fallback?.name || profile.code,
@@ -4818,8 +4850,15 @@ function deliveryProtocolTag(protocol: DeliveryProtocol) {
   return <Tag color={protocol === 'SFTP' ? 'blue' : 'cyan'}>{protocol}</Tag>;
 }
 
-function socketProfileTag(profile: SocketProfile) {
-  return <Tag color={profile === 'CTCC' ? 'blue' : 'purple'}>{profile === 'CTCC' ? '电信' : '联通'}</Tag>;
+function scenarioDisplayName(scenario: ScenarioRow, locale: string) {
+  if (locale === 'en-US') {
+    return scenario.scenarioNameEn || scenario.scenarioName || scenario.code;
+  }
+  return scenario.scenarioName || scenario.scenarioNameEn || scenario.code;
+}
+
+function socketProfileTag(profile: SocketProfile, translate: (value: string) => string = (value) => value) {
+  return <Tag color={profile === 'CTCC' ? 'blue' : 'purple'}>{translate(profile === 'CTCC' ? '电信' : '联通')}</Tag>;
 }
 
 function snmpVersionLabel(version: SnmpVersion) {
@@ -5378,6 +5417,7 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
 
 export default function NorthboundPageConfig() {
   const nt = useNorthboundI18n();
+  const locale = useNorthboundLocale();
   const [configForm] = Form.useForm();
   const [fileProfiles, setFileProfiles] = useState<ScenarioRow[]>(scenarioRows);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioRow | null>(null);
@@ -6795,9 +6835,8 @@ export default function NorthboundPageConfig() {
     },
     {
       title: '场景名称',
-      dataIndex: 'scenarioName',
       width: 140,
-      render: (value: string) => <Typography.Text ellipsis>{value}</Typography.Text>,
+      render: (_, row) => <Typography.Text ellipsis>{scenarioDisplayName(row, locale)}</Typography.Text>,
     },
     {
       title: '状态',
@@ -7587,7 +7626,7 @@ export default function NorthboundPageConfig() {
       ),
     },
     { title: '配置名称', dataIndex: 'name', width: 176, fixed: 'left', render: (value: string) => <Typography.Text strong ellipsis>{value}</Typography.Text> },
-    { title: '协议', width: 120, render: (_, row) => <Space size={4}>{socketProfileTag(row.profile)}<Tag>{row.encoding}</Tag></Space> },
+    { title: '协议', width: 120, render: (_, row) => <Space size={4}>{socketProfileTag(row.profile, nt)}<Tag>{row.encoding}</Tag></Space> },
     { title: '监听地址', width: 170, render: (_, row) => <span className={styles.monoText}>{endpointText(row.listenIp, row.listenPort)}</span> },
     {
       title: '服务能力',
@@ -8183,7 +8222,7 @@ export default function NorthboundPageConfig() {
                 <Typography.Text strong>基础信息</Typography.Text>
               </div>
               <Descriptions bordered size="small" column={2}>
-                <Descriptions.Item label="协议场景">{socketProfileTag(selectedSocket.profile)}</Descriptions.Item>
+                <Descriptions.Item label="协议场景">{socketProfileTag(selectedSocket.profile, nt)}</Descriptions.Item>
                 <Descriptions.Item label="启用配置">{statusTag(Boolean(socketEnabled[selectedSocket.key]))}</Descriptions.Item>
                 <Descriptions.Item label="监听地址">
                   <span className={styles.monoText}>{endpointText(selectedSocket.listenIp, selectedSocket.listenPort)}</span>
@@ -8273,7 +8312,7 @@ export default function NorthboundPageConfig() {
 	                <div className={styles.inventoryFormGrid}>
 	                  <Form.Item label="协议场景">
 	                    <Space size={4} wrap>
-	                      {socketProfileTag(socketEditor.profile)}
+	                      {socketProfileTag(socketEditor.profile, nt)}
 	                      <Tag>{socketEditor.encoding}</Tag>
 	                    </Space>
 	                  </Form.Item>
