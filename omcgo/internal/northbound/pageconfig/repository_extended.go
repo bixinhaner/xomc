@@ -884,27 +884,12 @@ func scanSNMPAlarmTargetWithSecrets(row scanner) (*SNMPAlarmTarget, error) {
 }
 
 func scanSocketAlarmConfig(row scanner) (*SocketAlarmConfig, error) {
-	var config SocketAlarmConfig
-	var accountsRaw []byte
-	if err := row.Scan(
-		&config.ID, &config.Key, &config.Name, &config.Enabled, &config.Profile,
-		&config.Mode, &config.ListenIP, &config.ListenPort, &config.MaxClients,
-		&config.RealtimePushEnabled, &config.ClientSyncEnabled, &config.HeartbeatSeconds,
-		&config.HeartbeatTimes, &config.IdleTimeoutSeconds,
-		&accountsRaw, &config.CreatedAt, &config.UpdatedAt,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, commonerrors.ErrNotFound
-		}
-		return nil, fmt.Errorf("scan northbound_socket_alarm_configs row: %w", err)
+	config, err := scanSocketAlarmConfigRaw(row)
+	if err != nil {
+		return nil, err
 	}
-	if len(accountsRaw) > 0 {
-		if err := json.Unmarshal(accountsRaw, &config.Accounts); err != nil {
-			return nil, fmt.Errorf("unmarshal socket accounts: %w", err)
-		}
-	}
-	redactSocketAccountCredentials(config.Accounts)
-	return &config, nil
+	markSocketAccountCredentialSet(config.Accounts)
+	return config, nil
 }
 
 func scanSocketAlarmConfigWithSecrets(row scanner) (*SocketAlarmConfig, error) {
@@ -912,9 +897,7 @@ func scanSocketAlarmConfigWithSecrets(row scanner) (*SocketAlarmConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i := range config.Accounts {
-		config.Accounts[i].CredentialSet = strings.TrimSpace(config.Accounts[i].Credential) != ""
-	}
+	markSocketAccountCredentialSet(config.Accounts)
 	return config, nil
 }
 
@@ -1358,9 +1341,8 @@ func mergeSocketAccountSecrets(accounts []SocketAccount, current map[string]stri
 	return accounts
 }
 
-func redactSocketAccountCredentials(accounts []SocketAccount) {
+func markSocketAccountCredentialSet(accounts []SocketAccount) {
 	for i := range accounts {
 		accounts[i].CredentialSet = strings.TrimSpace(accounts[i].Credential) != ""
-		accounts[i].Credential = ""
 	}
 }
