@@ -920,18 +920,25 @@ function DnsListTable({
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={8}>
-      <Space.Compact style={{ width: 420, maxWidth: '100%' }}>
+      <Space size={12} wrap style={{ maxWidth: '100%' }}>
         <Input
           value={draft}
           disabled={disabled}
           placeholder={locale === 'zh-CN' ? '请输入 DNS 地址' : 'Enter DNS address'}
           onChange={(event) => setDraft(event.target.value)}
           onPressEnter={addDns}
+          style={{ width: 338, maxWidth: '100%' }}
         />
-        <Button danger icon={<PlusOutlined />} disabled={disabled} onClick={addDns}>
+        <Button
+          danger
+          icon={<PlusOutlined style={{ fontSize: 14 }} />}
+          disabled={disabled}
+          onClick={addDns}
+          style={{ minWidth: 82 }}
+        >
           {locale === 'zh-CN' ? '添加' : 'Add'}
         </Button>
-      </Space.Compact>
+      </Space>
       <Space wrap>
         {rows.map((address) => (
           <Tag
