@@ -2394,7 +2394,13 @@ export default function CellParameterForm({
         </span>
       )}
       size="small"
-      style={{ marginBottom: 16, border: '1px solid #d7dce5', borderRadius: 0, boxShadow: 'none', background: '#fff' }}
+      style={{
+        marginBottom: 16,
+        border: '1px solid var(--color-border, #d7dce5)',
+        borderRadius: 0,
+        boxShadow: 'none',
+        background: 'var(--color-bg-container, #fff)',
+      }}
       styles={{ body: { paddingBottom: 8 } }}
       extra={actionMode === 'staged' ? null : (
         <Space>
