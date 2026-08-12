@@ -103,6 +103,14 @@ export default function GeofenceEditorDrawer({
     ? appContext.message
     : staticMessage;
   const [form] = Form.useForm<EditorFormValues>();
+  const watchedExitAction = Form.useWatch('exitAction', form);
+  const selectedExitAction =
+    watchedExitAction ??
+    (item
+      ? item.currentVersion?.policy.exitAction === 'manual_review'
+        ? undefined
+        : item.currentVersion?.policy.exitAction ?? 'notify_only'
+      : DEFAULT_VALUES.exitAction);
   const createMutation = useCreateGeofenceDefinition();
   const createDraftMutation = useCreateGeofenceDraftVersion();
   const publishMutation = usePublishGeofenceDraft();
@@ -112,16 +120,23 @@ export default function GeofenceEditorDrawer({
       ? item.currentVersion.geometry
       : undefined;
   const geometry = drawnGeometry ?? existingGeometry;
+  const hasLegacyManualReview =
+    item?.currentVersion?.policy.exitAction === 'manual_review';
 
   useEffect(() => {
     if (!open) return;
     const policy = item?.currentVersion?.policy;
+    const exitAction = item
+      ? policy?.exitAction === 'manual_review'
+        ? undefined
+        : policy?.exitAction ?? 'notify_only'
+      : DEFAULT_VALUES.exitAction;
     form.setFieldsValue(
       item
         ? {
             name: item.definition.name,
             carrier: item.definition.carrier,
-            exitAction: policy?.exitAction ?? 'notify_only',
+            exitAction,
             exitConsecutiveSamples:
               policy?.exitConsecutiveSamples ?? 2,
             reentryConsecutiveSamples:
@@ -163,7 +178,10 @@ export default function GeofenceEditorDrawer({
             (currentPolicy?.exitConsecutiveSamples ?? 2) ||
           values.reentryConsecutiveSamples !==
             (currentPolicy?.reentryConsecutiveSamples ?? 2);
-        const versionChanged = Boolean(drawnGeometry) || policyChanged;
+        // 历史人工复核策略必须通过新版本显式收敛到受支持的动作，
+        // 不能走“围栏信息没有变化”的快速返回分支。
+        const versionChanged =
+          Boolean(drawnGeometry) || hasLegacyManualReview || policyChanged;
         if (!nameChanged && !versionChanged) {
           void message.info(
             intl.formatMessage({ id: 'geofence.editor.noChanges' }),
@@ -265,6 +283,16 @@ export default function GeofenceEditorDrawer({
             })}
           />
         )}
+        {hasLegacyManualReview && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            title={intl.formatMessage({
+              id: 'geofence.policy.legacyManualReviewWarning',
+            })}
+          />
+        )}
         <Form.Item
           name="name"
           label={intl.formatMessage({ id: 'geofence.field.name' })}
@@ -306,12 +334,32 @@ export default function GeofenceEditorDrawer({
           label={intl.formatMessage({
             id: 'geofence.policy.exitAction',
           })}
-          rules={[{ required: true }]}
+          extra={
+            selectedExitAction === 'notify_only'
+              ? intl.formatMessage({
+                  id: 'geofence.policy.notifyOnlyDescription',
+                })
+              : selectedExitAction === 'deactivate'
+                ? intl.formatMessage({
+                    id: 'geofence.policy.deactivateDescription',
+                  })
+                : undefined
+          }
+          rules={[
+            {
+              required: true,
+              message: intl.formatMessage({
+                id: 'geofence.validation.exitActionRequired',
+              }),
+            },
+          ]}
         >
           <Select
+            placeholder={intl.formatMessage({
+              id: 'geofence.validation.exitActionRequired',
+            })}
             options={[
               ['notifyOnly', 'notify_only'],
-              ['manualReview', 'manual_review'],
               ['deactivate', 'deactivate'],
             ].map(([key, value]) => ({
               value,

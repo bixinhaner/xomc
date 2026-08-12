@@ -566,7 +566,9 @@ func validatePolicy(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, fmt.Errorf("policy must be a JSON object: %w", commonerrors.ErrInvalidInput)
 	}
 	action, ok := policy["exit_action"].(string)
-	if !ok || (action != "notify_only" && action != "manual_review" && action != "deactivate") {
+	// manual_review remains a readable runtime value for historical versions,
+	// but it has no review/approval workflow and must not be written again.
+	if !ok || (action != "notify_only" && action != "deactivate") {
 		return nil, fmt.Errorf("unsupported exit_action: %w", commonerrors.ErrInvalidInput)
 	}
 	normalized, err := json.Marshal(policy)
