@@ -227,10 +227,7 @@ func initAdminModule(c *Container) error {
 	admin.RegisterSecurityValidators(sysConfigService, securityPolicy)
 	// ACS 上传/下发地址会直接下发到设备；保存前校验 HTTP(S) URL 与安全路径。
 	// 运营商生产网普遍使用私网地址，可达性由实际基站网络拓扑保证，不能按 IP 类型阻断。
-	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyUploadBaseURL, transfercfg.ValidateBaseURL)
-	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyDownloadBaseURL, transfercfg.ValidateBaseURL)
-	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyUploadPath, transfercfg.ValidateServicePath)
-	sysConfigService.RegisterValidator(transfercfg.Category, transfercfg.KeyDownloadPath, transfercfg.ValidateServicePath)
+	registerACSTransferValidators(sysConfigService)
 	sysConfigService.RegisterApplyHandler(
 		transfercfg.Category,
 		"acs_transfer_event_delivery",
@@ -277,6 +274,14 @@ func initAdminModule(c *Container) error {
 
 	logger.Info("admin/RBAC module initialized")
 	return nil
+}
+
+func registerACSTransferValidators(service *admin.SysConfigService) {
+	service.RegisterValidator(transfercfg.Category, transfercfg.KeyUploadBaseURL, transfercfg.ValidateHTTPBaseURL)
+	service.RegisterValidator(transfercfg.Category, transfercfg.KeyDownloadBaseURL, transfercfg.ValidateHTTPBaseURL)
+	service.RegisterValidator(transfercfg.Category, transfercfg.KeyUploadPath, transfercfg.ValidateServicePath)
+	service.RegisterValidator(transfercfg.Category, transfercfg.KeyDownloadPath, transfercfg.ValidateServicePath)
+	service.RegisterCategoryValidator(transfercfg.Category, transfercfg.ValidateConfig)
 }
 
 func newACSConfigDeliveryHandler(bus event.EventBus) admin.ConfigApplyHandler {

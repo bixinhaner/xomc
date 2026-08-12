@@ -637,19 +637,17 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 		w.EventBus, logger,
 	)
 	// 从 sys_configs 读取 ACS 传输配置（界面「系统管理 → ACS 传输」可配置，运行时生效）。
-	// YAML 不再提供默认值，配置全部源自 DB。
+	// 全新部署的 seed 只落协议开关和 HTTPS 字段；HTTP 地址沿用启动配置作为兜底，避免
+	// 未填写页面时 PM 首次自动下发拿不到默认 upload base。
 	sysConfigRepo := admin.NewPgSysConfigRepository(w.PgPool)
-	backupTransferPolicy := transfercfg.NewPolicy(
-		transfercfg.Snapshot{},
-		func(ctx context.Context, category, key string) (string, bool) {
-			cfg, err := sysConfigRepo.GetByKey(ctx, category, key)
-			if err != nil || cfg == nil {
-				return "", false
-			}
-			return cfg.Value, true
-		},
+	transferPolicy := transfercfg.NewPolicy(
+		newWorkerTransferDefaults(cfg.PM),
+		newTransferSysConfigLookup(sysConfigRepo),
 	)
-	backupExecutor.SetTransferProvider(backupTransferPolicy)
+	// SYS is a WorkQueue stream and ACS owns the existing sys.config.saved
+	// consumer. Worker policies therefore use the bounded Policy TTL instead of
+	// registering a competing filtered consumer.
+	backupExecutor.SetTransferProvider(transferPolicy)
 	// T-0073 Phase 1: opt-in backup-failure alarm publish via PolicyService.
 	// Worker shares the same backup_policies table as app; reads policy on each
 	// failure to honour latest AlertOnFailure flag.
@@ -754,11 +752,11 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	if cfg.PM.AutoSetupOnOnline {
 		// 启动期一次性校验 PM 上传 URL 模板的 host：渲染后 host 为空（如生产 .env
 		// 漏配 OMC_PUBLIC_HOST，模板渲染成 "http://:7557/..."）则醒目 Error 告警，
-		// 把运维漏配从「设备上线时静默跳过下发」前移到「部署即可见」。不 fail-fast：
-		// worker 还跑 PM 解析/聚合等关键流程，单个配置项不应阻断整个 worker；
-		// 真正下发时 OnlineSubscriber.handle 仍有 per-event host 守卫兜底。
+		// 把运维漏配从「设备上线时才发现」前移到「部署即可见」。不 fail-fast：
+		// worker 还跑 PM 解析/聚合等关键流程，单个配置项不应阻断整个 worker。
+		// 真正下发优先使用统一 transfercfg.AddressResolver 决策的 base URL。
 		if rendered, verr := pm.ValidateUploadURLTemplate(cfg.PM.UploadURLTemplate); verr != nil {
-			logger.Error("PM upload URL template invalid; auto-SPV will be skipped until fixed (check OMC_PUBLIC_HOST)",
+			logger.Error("PM upload URL template invalid; unified transfer base URL will be used when available (check OMC_PUBLIC_HOST fallback)",
 				zap.String("url_template", cfg.PM.UploadURLTemplate),
 				zap.String("rendered", rendered),
 				zap.Error(verr))
@@ -771,17 +769,10 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 			logger,
 		)
 		pmOnlineSub.SetAdmissionGate(pm.NewRedisPMSetupAdmissionGate(w.Redis, 0))
-		// PM 上传 URL 基址与「系统配置→ACS 传输」同源：运行时读 sys_configs
-		// acs_transfer.uploadBaseURL，非空则覆盖 ${OMC_PUBLIC_HOST} 模板的 host
-		// （修「URL 渲染成 localhost 不可达」+ 统一真值源，改 IP 即时生效无需重建）。
-		pmUploadSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
-		pmOnlineSub.SetUploadBaseURLResolver(func(ctx context.Context) string {
-			row, gerr := pmUploadSysCfg.GetByKey(ctx, "acs_transfer", "uploadBaseURL")
-			if gerr != nil || row == nil {
-				return ""
-			}
-			return row.Value
-		})
+		pmOnlineSub.SetUploadAddressResolver(newTransferAddressResolver(
+			transferPolicy,
+			device.NewPgDeviceParameterRepository(w.PgPool),
+		))
 		if err := pmOnlineSub.Subscribe(w.EventBus); err != nil {
 			logger.Warn("subscribe pm online subscriber failed", zap.Error(err))
 		} else {

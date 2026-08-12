@@ -115,13 +115,7 @@ func initMRTaskModule(c *Container) error {
 	if mrCfg.URLBase == "" {
 		sysCfg := admin.NewPgSysConfigRepository(c.PgPool)
 		mrPolicy := transfercfg.NewPolicy(transfercfg.Snapshot{},
-			func(ctx context.Context, category, key string) (string, bool) {
-				row, err := sysCfg.GetByKey(ctx, category, key)
-				if err != nil || row == nil {
-					return "", false
-				}
-				return row.Value, true
-			})
+			newTransferSysConfigLookup(sysCfg))
 		if snap := mrPolicy.Snapshot(context.Background()); snap.Upload.BaseURL != "" {
 			mrCfg.URLBase = snap.Upload.BaseURL
 			logger.Info("mr.url_base empty; resolved via sys_configs.acs_transfer.uploadBaseURL",
@@ -311,21 +305,26 @@ func initSoftwareModule(c *Container) error {
 		softwareService.SetUploadConfig(c.Cfg.Upgrade.ACSUploadBaseURL)
 	}
 	// 注入运行时 ACS 传输配置：从 sys_config 'acs_transfer' 类别读 BaseURL / Username /
-	// Password / Path。前端"系统管理 → ACS 传输"页面修改后 30 秒内自动生效，
-	// 优先级高于 YAML 静态兜底。worker 进程 / acs 进程也各自起一份 Policy（详见
+	// Password / Path。前端"系统管理 → ACS 传输"页面保存后通过 SavedHook 立即
+	// 失效本进程缓存，优先级高于 YAML 静态兜底。worker 进程 / acs 进程也各自起一份 Policy（详见
 	// cmd/worker/main.go / cmd/acs/main.go），共享同一张 sys_configs 表。
 	softwareSysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
 	softwareTransferPolicy := transfercfg.NewPolicy(
-		transfercfg.Snapshot{},
-		func(ctx context.Context, category, key string) (string, bool) {
-			row, err := softwareSysConfigRepo.GetByKey(ctx, category, key)
-			if err != nil || row == nil {
-				return "", false
-			}
-			return row.Value, true
-		},
+		newSoftwareTransferDefaults(c.Cfg.Upgrade),
+		newTransferSysConfigLookup(softwareSysConfigRepo),
 	)
 	softwareService.SetTransferProvider(softwareTransferPolicy)
+	softwareParamRepo := c.ParamRepo
+	if softwareParamRepo == nil {
+		softwareParamRepo = device.NewPgDeviceParameterRepository(c.PgPool)
+	}
+	softwareService.SetDownloadAddressResolver(newTransferAddressResolver(
+		softwareTransferPolicy,
+		softwareParamRepo,
+	))
+	if c.SysConfigSvc != nil {
+		registerTransferPolicyInvalidation(c.SysConfigSvc, softwareTransferPolicy)
+	}
 
 	// Canary monitor + metrics (T-0018 / R-101)
 	canaryMetrics := software.NewCanaryMetrics(c.MetricsReg)
@@ -442,14 +441,11 @@ func initUFTEModule(c *Container) error {
 	ufteSysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
 	ufteTransferPolicy := transfercfg.NewPolicy(
 		transfercfg.Snapshot{},
-		func(ctx context.Context, category, key string) (string, bool) {
-			row, err := ufteSysConfigRepo.GetByKey(ctx, category, key)
-			if err != nil || row == nil {
-				return "", false
-			}
-			return row.Value, true
-		},
+		newTransferSysConfigLookup(ufteSysConfigRepo),
 	)
+	if c.SysConfigSvc != nil {
+		registerTransferPolicyInvalidation(c.SysConfigSvc, ufteTransferPolicy)
+	}
 	service.SetDownloadURLLookup(func(ctx context.Context, sn, fileName string) (string, error) {
 		if minioClient == nil || sn == "" || fileName == "" {
 			return "", nil

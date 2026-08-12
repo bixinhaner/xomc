@@ -1,6 +1,10 @@
 package transfercfg
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestValidateBaseURL_ProductionRejectsLocalOnlyAddresses(t *testing.T) {
 	t.Setenv("OMCGO_ENV", "production")
@@ -75,6 +79,46 @@ func TestValidateBaseURL_RejectsNonAbsoluteOrUnsupportedURL(t *testing.T) {
 			if err := ValidateBaseURL(raw); err == nil {
 				t.Fatalf("ValidateBaseURL(%q) unexpectedly accepted an invalid endpoint", raw)
 			}
+		})
+	}
+}
+
+func TestValidateBaseURL_RejectsMalformedPortsAndRawDelimiters(t *testing.T) {
+	t.Setenv("OMCGO_ENV", "dev")
+	t.Setenv("GIN_MODE", "debug")
+
+	for _, raw := range []string{
+		"http://edge.example.com:",
+		"https://edge.example.com:",
+		"http://edge.example.com:abc",
+		"https://edge.example.com:abc",
+		"http://edge.example.com:0",
+		"https://edge.example.com:0",
+		"http://edge.example.com:65536",
+		"https://edge.example.com:65536",
+		"http://edge.example.com/transfer?",
+		"https://edge.example.com/transfer?",
+		"http://edge.example.com/transfer#",
+		"https://edge.example.com/transfer#",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			if err := ValidateBaseURL(raw); err == nil {
+				t.Fatalf("ValidateBaseURL(%q) unexpectedly accepted an invalid endpoint", raw)
+			}
+		})
+	}
+}
+
+func TestValidateBaseURL_AllowsBracketedIPv6WithValidPort(t *testing.T) {
+	t.Setenv("OMCGO_ENV", "dev")
+	t.Setenv("GIN_MODE", "debug")
+
+	for _, raw := range []string{
+		"http://[fd00::10]:8080/upload",
+		"https://[fd00::10]:8443/download",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			require.NoError(t, ValidateBaseURL(raw))
 		})
 	}
 }

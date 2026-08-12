@@ -50,6 +50,52 @@ func TestBuildTemplateURL_PreservesBusinessQueryOrderAndEmptyFilenameTail(t *tes
 	)
 }
 
+func TestBuildURL_PreservesIPLiteralPortProxyPrefixAndEncoding(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		want    string
+	}{
+		{
+			name:    "IPv4",
+			baseURL: "http://192.0.2.10:8080/reverse-proxy",
+			want:    "http://192.0.2.10:8080/reverse-proxy/smallcell/FileDownloadService/device%20SN/%E5%9B%BA%E4%BB%B6.bin",
+		},
+		{
+			name:    "bracketed IPv6",
+			baseURL: "https://[2001:db8::10]:9443/reverse-proxy",
+			want:    "https://[2001:db8::10]:9443/reverse-proxy/smallcell/FileDownloadService/device%20SN/%E5%9B%BA%E4%BB%B6.bin",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildURL(
+				tt.baseURL,
+				"/smallcell/FileDownloadService",
+				[]string{"device SN", "固件.bin"},
+				nil,
+			)
+
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestBuildTemplateURL_PreservesBracketedIPv6AndEncodedTemplate(t *testing.T) {
+	got, err := BuildTemplateURL(
+		"https://[2001:db8::20]:10443/omc-proxy",
+		"/smallcell/FileUploadService/%E8%AE%BE%E5%A4%87?fileType=LOG&filename=",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t,
+		"https://[2001:db8::20]:10443/omc-proxy/smallcell/FileUploadService/%E8%AE%BE%E5%A4%87?fileType=LOG&filename=",
+		got,
+	)
+}
+
 func TestBuildURL_RejectsInvalidConfiguredComponents(t *testing.T) {
 	for name, tc := range map[string]struct {
 		baseURL     string

@@ -245,9 +245,10 @@ func runACS(cmd *cobra.Command, args []string) error {
 	)
 	deps.TransferConfigProvider = transferPolicy
 	if inf.EventBus != nil {
-		sub, err := inf.EventBus.Subscribe(
-			event.SubjectSysConfigSaved,
-			transfercfg.HandleSysConfigSavedEvent(transferPolicy, inf.Logger.Named("transfercfg")),
+		sub, err := subscribeTransferPolicyInvalidation(
+			inf.EventBus,
+			transferPolicy,
+			inf.Logger.Named("transfercfg"),
 		)
 		if err != nil {
 			inf.Logger.Warn("subscribe sys config saved events for transfer config", zap.Error(err))
