@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Space, Tag, Switch, Dropdown, Input, App, Typography, Card, Select, DatePicker, Radio } from 'antd';
 import type { MenuProps } from 'antd';
@@ -44,8 +44,10 @@ import { getI18nText } from '@core/utils/i18nText';
 import { useProductList } from '@core/hooks/api/useProducts';
 import { toSupportedProductNameOptions } from './productClassOptions';
 import ProductClassSelect from './components/ProductClassSelect';
+import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
 import { getPolicyActionAvailability } from './policyActionAvailability';
 import { findEnabledPolicyProductConflict } from './policyEnableConflict';
+import { serializeTaskTimeRange } from './taskTimeFilter';
 
 const { Text } = Typography;
 
@@ -78,6 +80,7 @@ export default function PlugAndPlay() {
   const navigate = useNavigate();
   const { message } = App.useApp();
   const appLocale = useAppStore((s) => s.locale);
+  const systemTimezone = useAppStore((s) => s.systemTimezone);
   const { data: productCatalog, isLoading: productCatalogLoading } = useProductList();
   const productClassOptions = useMemo(
     () => toSupportedProductNameOptions(productCatalog?.items),
@@ -119,6 +122,8 @@ export default function PlugAndPlay() {
   const [taskTimeRange, setTaskTimeRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState(PAGE_SIZE);
+  const [taskAutoRefresh, setTaskAutoRefresh] = useState(false);
+  const [taskRefreshInterval, setTaskRefreshInterval] = useState(30);
 
   // Map UI status code → backend lifecycle filter. Only the terminal states map
   // 1:1; the page's "running" bucket spans several backend states, so it is
@@ -130,10 +135,16 @@ export default function PlugAndPlay() {
     return undefined;
   }, [taskStatus]);
 
+  const taskTimeFilter = useMemo(
+    () => serializeTaskTimeRange(taskTimeRange, systemTimezone),
+    [taskTimeRange, systemTimezone],
+  );
+
   const {
     data: taskData,
     isLoading: tasksLoading,
     refetch: refetchTasks,
+    isFetching: tasksFetching,
   } = useProvisioningTasks({
     page: taskPage,
     pageSize: taskPageSize,
@@ -142,9 +153,16 @@ export default function PlugAndPlay() {
     search: taskSearchText || undefined,
     productName: taskProductName || undefined,
     module: taskModule || undefined,
-    startedAfter: taskTimeRange?.[0].toISOString(),
-    startedBefore: taskTimeRange?.[1].toISOString(),
+    startedAfter: taskTimeFilter.startedAfter,
+    startedBefore: taskTimeFilter.startedBefore,
+  }, {
+    refetchInterval: taskAutoRefresh ? taskRefreshInterval * 1000 : false,
   });
+
+  useEffect(() => {
+    if (!taskAutoRefresh) return;
+    void refetchTasks();
+  }, [taskAutoRefresh, taskRefreshInterval, refetchTasks]);
 
   const retryTaskMutation = useRetryPlugAndPlayTask();
 
@@ -650,7 +668,6 @@ export default function PlugAndPlay() {
             scroll={{ x: 'max-content', y: 220 }}
             extraToolbarLeft={
               <Radio.Group
-                size="small"
                 optionType="button"
                 buttonStyle="solid"
                 value={taskModule}
@@ -664,7 +681,7 @@ export default function PlugAndPlay() {
               />
             }
             extraToolbarRight={
-              <Space>
+              <Space size={8}>
                 <Input
                   placeholder={t('provision.searchPlaceholder')}
                   prefix={<SearchOutlined />}
@@ -703,11 +720,26 @@ export default function PlugAndPlay() {
                     { label: t('status.running'), value: '2' },
                   ]}
                 />
-                <Button icon={<ReloadOutlined />} onClick={handleRefreshTasks}>
+                <Button
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  loading={tasksFetching}
+                  onClick={handleRefreshTasks}
+                >
                   {t('common.refresh')}
                 </Button>
+                <AutoRefreshDropdown
+                  enabled={taskAutoRefresh}
+                  intervalSeconds={taskRefreshInterval}
+                  onEnabledChange={setTaskAutoRefresh}
+                  onIntervalChange={setTaskRefreshInterval}
+                  spinning={taskAutoRefresh && tasksFetching}
+                  size="small"
+                />
               </Space>
             }
+            hideRealtime
+            hideRefresh
           />
         </div>
       </Card>

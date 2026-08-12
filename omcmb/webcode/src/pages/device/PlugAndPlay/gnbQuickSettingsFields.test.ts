@@ -26,7 +26,7 @@ describe('gNB plug-and-play quick-setting fields', () => {
       'gnb-ipsec': ['TUNNEL_ENABLE', 'TUNNEL_GATEWAY', 'TUNNEL_LEFT_AUTH', 'TUNNEL_RIGHT_AUTH', 'LEFT_IDENTIFIER', 'RIGHT_IDENTIFIER', 'LEFTSOURCEIP', 'LEFTSUBNET', 'RIGHT_SUBNET', 'TUNNEL_FRAGMENTATION', 'IKE_ENCRYPTION', 'IKE_DH_GROUP', 'IKE_AUTHENTICATION', 'ESP_ENCRYPTION', 'ESP_DH_GROUP', 'ESP_AUTHENTICATION', 'KEYLIFE', 'IKELIFETIME', 'REKEYMARGIN', 'DPDACTION', 'DPDDELAY', 'LEFT_INTERFACE'],
       'gnb-cell': ['Band', 'SsbFrequency', 'DLSubCarrierSpacing', 'ULSubCarrierSpacing', 'DLCarrierBandWidth', 'ULCarrierBandWidth', 'NRARFCNDL', 'NRARFCNUL', 'NumOfRxAntenna', 'NumOfTxAntenna', 'OffsetToPointA', 'PCI', 'PowerModify', 'RFEnable', 'SsbSubcarrierOffset'],
       'gnb-core': ['PLMNID', 'TAC', 'AmfIP1', 'gNBName', 'NguBindInterface', 'gNBId', 'gNBIdLength', 'NrcellIdentity'],
-      'gnb-tdd': ['ReferenceSubcarrierSpacing', 'DlULTransmissionPeriodicity', 'NrofDownlinkSlots', 'NrofDownlinkSymbols', 'NrofUplinkSlots', 'NrofUplinkSymbols', 'Pat2DlULTransmissionPeriodicity', 'Pat2NrofDownlinkSlots', 'Pat2NrofDownlinkSymbols', 'Pat2NrofUplinkSlots', 'Pat2NrofUplinkSymbols'],
+      'gnb-tdd': ['DlULTransmissionPeriodicity', 'NrofDownlinkSlots', 'NrofDownlinkSymbols', 'NrofUplinkSlots', 'NrofUplinkSymbols', 'Pat2DlULTransmissionPeriodicity', 'Pat2NrofDownlinkSlots', 'Pat2NrofDownlinkSymbols', 'Pat2NrofUplinkSlots', 'Pat2NrofUplinkSymbols'],
     };
     for (const group of GNB_QUICK_SETTING_GROUPS) {
       expect(group.fields.map((field) => field.id)).toEqual(

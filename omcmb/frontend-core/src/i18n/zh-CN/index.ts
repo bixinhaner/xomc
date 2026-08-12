@@ -4920,7 +4920,6 @@ const messages: Record<string, string> = {
   'provision.nrQuick.gnbId':          'gNB ID',
   'provision.nrQuick.gnbIdLength':    'gNB 长度',
   'provision.nrQuick.nci':            'NCI',
-  'provision.nrQuick.referenceSubcarrierSpacing': '参考子载波间隔',
   'provision.nrQuick.patternPeriod':  'Pattern{pattern} 时隙周期',
   'provision.nrQuick.patternDlSlots': 'Pattern{pattern} 下行时隙数',
   'provision.nrQuick.patternDlSymbols': 'Pattern{pattern} 下行特殊符号数',
