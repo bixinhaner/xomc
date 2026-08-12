@@ -479,3 +479,39 @@ func TestDownloadHandler_NonConfigRestoreAbsoluteURLIsNotReResolved(t *testing.T
 	assert.Contains(t, string(result), "http://vendor.example.com/smallcell/FileDownloadService/firmware/pkg.bin")
 	assert.Equal(t, uuid.Nil, resolver.seenDeviceID)
 }
+
+func TestDownloadHandler_LicenseReResolvesAbsoluteURLAtSOAPBuild(t *testing.T) {
+	deviceID := uuid.New()
+	resolver := &staticAddressResolver{decision: transfercfg.AddressDecision{
+		Direction: transfercfg.TransferDirectionDownload,
+		Protocol:  transfercfg.TransferProtocolHTTPS,
+		BaseURL:   "https://fresh-license.example.com:9443/secure",
+	}}
+	d := NewDispatcher(DispatcherConfig{
+		TransferConfigProvider: staticTransferProvider{snapshot: transfercfg.Snapshot{
+			Download: transfercfg.DownloadSettings{Path: "/smallcell/FileDownloadService"},
+		}},
+		TransferAddressResolver: resolver,
+		DownloadDeviceLookup:    staticDownloadDeviceLookup{device: &model.Device{ID: deviceID, SerialNumber: "SN-LIC"}},
+	})
+	cmd := &Command{
+		DeviceSN:   "SN-LIC",
+		Method:     "Download",
+		CommandKey: "LICENSE_UPGRADE_29900000_SN-LIC",
+		Params: json.RawMessage(`{
+			"file_type": "License File",
+			"url": "http://stale.example.com/old/smallcell/FileDownloadService/device-licenses/SN-LIC.lic",
+			"target_file_name": "SN-LIC.lic",
+			"md5": "d41d8cd98f00b204e9800998ecf8427e"
+		}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-license")
+
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "https://fresh-license.example.com:9443/secure/smallcell/FileDownloadService/device-licenses/SN-LIC.lic")
+	assert.NotContains(t, body, "stale.example.com")
+	assert.Equal(t, deviceID, resolver.seenDeviceID)
+	assert.Equal(t, transfercfg.TransferDirectionDownload, resolver.seenDirection)
+}

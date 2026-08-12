@@ -25,6 +25,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/storageprotection"
@@ -73,10 +74,21 @@ type LicenseService struct {
 	taskSvc   devtask.Enqueuer
 	logger    *zap.Logger
 	admission storageprotection.WriteAdmission
+
+	transferProvider transfercfg.Provider
+	downloadResolver transferAddressResolver
 }
 
 func (s *LicenseService) SetStorageAdmission(admission storageprotection.WriteAdmission) {
 	s.admission = admission
+}
+
+func (s *LicenseService) SetTransferProvider(p transfercfg.Provider) {
+	s.transferProvider = p
+}
+
+func (s *LicenseService) SetDownloadAddressResolver(r transferAddressResolver) {
+	s.downloadResolver = r
 }
 
 // NewLicenseService 装配。
@@ -454,9 +466,13 @@ func (s *LicenseService) enqueueLicenseDownload(
 	if lic.MD5 != nil {
 		licMD5 = *lic.MD5
 	}
+	downloadURL, transferFields, err := s.resolveLicenseDownloadURL(ctx, dev, lic.ObjectBucket, lic.ObjectPath)
+	if err != nil {
+		return "", err
+	}
 	params, err := json.Marshal(map[string]interface{}{
 		"file_type":        "License File",
-		"url":              lic.ObjectBucket + "/" + lic.ObjectPath,
+		"url":              downloadURL,
 		"target_file_name": targetFileName,
 		"md5":              licMD5,
 	})
@@ -479,7 +495,55 @@ func (s *LicenseService) enqueueLicenseDownload(
 	}); err != nil {
 		return "", err
 	}
+	s.logger.Info("license Download task enqueued",
+		zap.String("device_sn", dev.SerialNumber),
+		zap.String("command_key", commandKey),
+		zap.String("transfer_protocol", transferFields.Protocol),
+		zap.String("transfer_reason", transferFields.Reason),
+		zap.String("https_capability", transferFields.Capability),
+	)
 	return targetFileName, nil
+}
+
+func (s *LicenseService) resolveLicenseDownloadURL(
+	ctx context.Context,
+	dev *model.Device,
+	bucket string,
+	objectPath string,
+) (string, transferDecisionLogFields, error) {
+	fields := transferDecisionLogFields{
+		Protocol:   string(transfercfg.TransferProtocolHTTP),
+		Reason:     "legacy_download_config",
+		Capability: string(transfercfg.HTTPSCapabilityNotRead),
+	}
+	if s.transferProvider == nil && s.downloadResolver == nil {
+		return bucket + "/" + objectPath, fields, nil
+	}
+	settings := transfercfg.DownloadSettings{Path: "/smallcell/FileDownloadService"}
+	if s.transferProvider != nil {
+		settings = s.transferProvider.Snapshot(ctx).Download
+		if settings.Path == "" {
+			settings.Path = "/smallcell/FileDownloadService"
+		}
+	}
+	baseURL := settings.BaseURL
+	if s.downloadResolver != nil {
+		decision, err := s.downloadResolver.Resolve(ctx, dev.ID, transfercfg.TransferDirectionDownload)
+		if err != nil {
+			return "", transferDecisionLogFields{}, fmt.Errorf("resolve license download address: %w", err)
+		}
+		baseURL = decision.BaseURL
+		fields = transferDecisionLogFields{
+			Protocol:   string(decision.Protocol),
+			Reason:     string(decision.Reason),
+			Capability: string(decision.Capability),
+		}
+	}
+	downloadURL, err := buildRestoreDownloadURL(baseURL, settings.Path, bucket, objectPath)
+	if err != nil {
+		return "", transferDecisionLogFields{}, fmt.Errorf("build license download URL: %w", err)
+	}
+	return downloadURL, fields, nil
 }
 
 // PreviewLicenseFiles 不入队任何 device_task，只返回 sn → 预期下发的 license 文件名。
