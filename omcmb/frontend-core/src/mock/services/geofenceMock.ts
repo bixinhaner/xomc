@@ -766,6 +766,19 @@ export const geofenceMockService = {
         binding.geofenceId === id &&
         binding.status !== 'removed',
     );
+    const currentVersion = versions.find(
+      (version) => version.id === definition.currentVersionId,
+    );
+    const deactivationDeviceCount = new Set(
+      activeBindings
+        .filter(
+          (binding) =>
+            binding.status === 'active' &&
+            binding.evaluation.confirmedState === 'inside' &&
+            currentVersion?.policy.exitAction === 'deactivate',
+        )
+        .map((binding) => binding.deviceId),
+    ).size;
     return {
       geofenceId: id,
       currentVersionId: definition.currentVersionId,
@@ -775,6 +788,7 @@ export const geofenceMockService = {
       deviceCount: new Set(
         activeBindings.map((binding) => binding.deviceId),
       ).size,
+      deactivationDeviceCount,
       activeBatchJobCount: jobs.filter(
         (job) =>
           job.geofenceId === id &&

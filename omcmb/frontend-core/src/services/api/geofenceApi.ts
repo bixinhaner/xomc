@@ -162,6 +162,7 @@ interface GeofenceLifecycleImpactRaw {
   target_status: GeofenceLifecycleImpact['targetStatus'];
   binding_count: number;
   device_count: number;
+  deactivation_device_count: number;
   active_batch_job_count: number;
   preview_fingerprint: string;
 }
@@ -481,6 +482,7 @@ function mapLifecycleImpact(
     targetStatus: raw.target_status,
     bindingCount: raw.binding_count,
     deviceCount: raw.device_count,
+    deactivationDeviceCount: raw.deactivation_device_count,
     activeBatchJobCount: raw.active_batch_job_count,
     previewFingerprint: raw.preview_fingerprint,
   };

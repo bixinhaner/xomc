@@ -168,6 +168,84 @@ func TestPgRepositoryDefinitionLifecycleRejectsStalePreviewIntegration(
 	assertDefinitionStatus(t, ctx, pool, fixture.geofenceID, DefinitionStatusEnabled)
 }
 
+func TestPgRepositoryDefinitionLifecycleRejectsChangedCandidateSetIntegration(
+	t *testing.T,
+) {
+	dsn := os.Getenv("TEST_PG_URL")
+	if dsn == "" {
+		t.Skip("TEST_PG_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	fixture := newLifecycleFixture()
+	insertLifecycleFixture(t, ctx, pool, fixture)
+	t.Cleanup(func() {
+		deleteLifecycleFixture(context.Background(), pool, fixture)
+	})
+
+	_, err = pool.Exec(
+		ctx,
+		"UPDATE geofence_versions SET policy_json = $1 WHERE id = $2",
+		json.RawMessage(`{"exit_action":"deactivate"}`),
+		fixture.versionID,
+	)
+	require.NoError(t, err)
+	_, err = pool.Exec(
+		ctx,
+		"UPDATE device_geofence_bindings SET status = 'active' WHERE id = $1",
+		fixture.suspendedBindingID,
+	)
+	require.NoError(t, err)
+	_, err = pool.Exec(
+		ctx,
+		`INSERT INTO device_geofence_states
+            (binding_id, device_id, confirmed_state, last_observation_version)
+          VALUES ($1, $2, 'inside', 7), ($3, $4, 'outside', 7)`,
+		fixture.activeBindingID,
+		fixture.activeDeviceID,
+		fixture.suspendedBindingID,
+		fixture.suspendedDeviceID,
+	)
+	require.NoError(t, err)
+
+	service := NewService(NewPgRepository(pool), nil)
+	preview, err := service.PreviewDefinitionTransition(
+		ctx,
+		fixture.geofenceID,
+		DefinitionStatusDisabled,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), preview.DeactivationDeviceCount)
+
+	_, err = pool.Exec(
+		ctx,
+		`UPDATE device_geofence_states
+          SET confirmed_state = CASE binding_id
+            WHEN $1 THEN 'outside'
+            WHEN $2 THEN 'inside'
+          END
+          WHERE binding_id IN ($1, $2)`,
+		fixture.activeBindingID,
+		fixture.suspendedBindingID,
+	)
+	require.NoError(t, err)
+
+	err = service.TransitionDefinition(
+		ctx,
+		fixture.geofenceID,
+		DefinitionStatusDisabled,
+		fixture.actorID,
+		"candidate set changed",
+		preview.PreviewFingerprint,
+	)
+
+	require.ErrorIs(t, err, ErrStaleLifecyclePreview)
+	assertDefinitionStatus(t, ctx, pool, fixture.geofenceID, DefinitionStatusEnabled)
+}
+
 func TestPgRepositoryArchiveRejectsActiveManualBindJobIntegration(t *testing.T) {
 	service, pool, fixture := lifecycleFixtureWithPendingBatchJob(t)
 	ctx := context.Background()
@@ -443,7 +521,29 @@ func insertLifecycleFixture(
 	fixture *lifecycleFixture,
 ) {
 	t.Helper()
-	query, args, err := storage.Psql.
+	deviceInsert := storage.Psql.
+		Insert("devices").
+		Columns("id", "serial_number", "oui", "carrier", "technology").
+		Values(
+			fixture.activeDeviceID,
+			"LIFECYCLE-"+fixture.activeDeviceID.String(),
+			"001122",
+			"cmcc",
+			"4G",
+		).
+		Values(
+			fixture.suspendedDeviceID,
+			"LIFECYCLE-"+fixture.suspendedDeviceID.String(),
+			"001122",
+			"cmcc",
+			"4G",
+		)
+	query, args, err := deviceInsert.ToSql()
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, query, args...)
+	require.NoError(t, err)
+
+	query, args, err = storage.Psql.
 		Insert("geofence_definitions").
 		Columns(
 			"id",
@@ -812,6 +912,12 @@ func deleteLifecycleFixture(
 	}
 	deleteBy("geofence_batch_items", sq.Eq{"id": fixture.batchItemIDs})
 	deleteBy("async_jobs", sq.Eq{"id": fixture.batchJobIDs})
+	deleteBy("device_geofence_states", sq.Eq{
+		"binding_id": append(
+			[]uuid.UUID{fixture.activeBindingID, fixture.suspendedBindingID},
+			fixture.extraBindingIDs...,
+		),
+	})
 	bindingIDs := []uuid.UUID{
 		fixture.activeBindingID,
 		fixture.suspendedBindingID,
@@ -828,4 +934,8 @@ func deleteLifecycleFixture(
 	}
 	deleteBy("geofence_versions", sq.Eq{"id": fixture.versionID})
 	deleteBy("geofence_definitions", sq.Eq{"id": fixture.geofenceID})
+	deleteBy("devices", sq.Eq{"id": []uuid.UUID{
+		fixture.activeDeviceID,
+		fixture.suspendedDeviceID,
+	}})
 }

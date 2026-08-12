@@ -10,14 +10,19 @@ import (
 )
 
 type LifecycleImpact struct {
-	GeofenceID          uuid.UUID        `json:"geofence_id"`
-	CurrentVersionID    *uuid.UUID       `json:"current_version_id,omitempty"`
-	CurrentStatus       DefinitionStatus `json:"current_status"`
-	TargetStatus        DefinitionStatus `json:"target_status"`
-	BindingCount        int64            `json:"binding_count"`
-	DeviceCount         int64            `json:"device_count"`
-	ActiveBatchJobCount int64            `json:"active_batch_job_count"`
-	PreviewFingerprint  string           `json:"preview_fingerprint"`
+	GeofenceID              uuid.UUID        `json:"geofence_id"`
+	CurrentVersionID        *uuid.UUID       `json:"current_version_id,omitempty"`
+	CurrentStatus           DefinitionStatus `json:"current_status"`
+	TargetStatus            DefinitionStatus `json:"target_status"`
+	BindingCount            int64            `json:"binding_count"`
+	DeviceCount             int64            `json:"device_count"`
+	DeactivationDeviceCount int64            `json:"deactivation_device_count"`
+	ActiveBatchJobCount     int64            `json:"active_batch_job_count"`
+	PreviewFingerprint      string           `json:"preview_fingerprint"`
+
+	bindingSignature        string
+	deactivationSignature   string
+	activeBatchJobSignature string
 }
 
 var ErrStaleLifecyclePreview = commonerrors.NewBusinessError(
@@ -59,14 +64,18 @@ func lifecyclePreviewFingerprint(impact LifecycleImpact) string {
 		versionID = impact.CurrentVersionID.String()
 	}
 	content := fmt.Sprintf(
-		"%s|%s|%s|%s|%d|%d|%d",
+		"%s|%s|%s|%s|%d|%d|%d|%d|%s|%s|%s",
 		impact.GeofenceID,
 		versionID,
 		impact.CurrentStatus,
 		impact.TargetStatus,
 		impact.BindingCount,
 		impact.DeviceCount,
+		impact.DeactivationDeviceCount,
 		impact.ActiveBatchJobCount,
+		impact.bindingSignature,
+		impact.deactivationSignature,
+		impact.activeBatchJobSignature,
 	)
 	sum := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(sum[:])

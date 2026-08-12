@@ -118,6 +118,7 @@ function impact(
     targetStatus,
     bindingCount: 3,
     deviceCount: 2,
+    deactivationDeviceCount: 1,
     activeBatchJobCount: 0,
     previewFingerprint: `preview-${targetStatus}`,
   };
@@ -280,7 +281,9 @@ describe('GeofencePanel', () => {
         target: 'disabled',
       }),
     );
-    expect(screen.getByText('受影响设备数')).toBeInTheDocument();
+    expect(screen.getByText('当前绑定设备数')).toBeInTheDocument();
+    expect(screen.getByText('预计去激活设备数')).toBeInTheDocument();
+    expect(screen.queryByText('活动批任务数')).not.toBeInTheDocument();
     expect(
       screen.getByText(
         '禁用围栏只停止后续检查，不会自动恢复或重新激活设备',
@@ -289,6 +292,10 @@ describe('GeofencePanel', () => {
 
     const confirm = screen.getByRole('button', { name: /确\s*认/ });
     expect(confirm).toBeDisabled();
+    const reasonItem = screen.getByLabelText('操作原因').closest('.ant-form-item');
+    expect(reasonItem?.querySelector('label')).toHaveClass(
+      'ant-form-item-required',
+    );
     await user.type(screen.getByLabelText('操作原因'), '维护窗口');
     await user.click(confirm);
 
@@ -313,12 +320,12 @@ describe('GeofencePanel', () => {
     const row = screen.getByTestId('geofence-row-fence-disabled');
 
     await user.click(
-      within(row).getByRole('button', { name: '归档围栏' }),
+      within(row).getByRole('button', { name: '删除围栏' }),
     );
 
     expect(
       await screen.findByText(
-        '存在尚未结束的批量绑定任务，任务进入终态后才能归档',
+        '存在尚未结束的批量绑定任务，任务进入终态后才能删除',
       ),
     ).toBeInTheDocument();
     await user.type(screen.getByLabelText('操作原因'), '验收清理');
@@ -393,16 +400,16 @@ describe('GeofencePanel', () => {
     ]);
   });
 
-  it('only offers archive from disabled and requires preview confirmation', async () => {
+  it('exposes soft delete but only enables it after disabling', async () => {
     const { user } = renderPanel();
     const enabledRow = screen.getByTestId('geofence-row-fence-enabled');
     const disabledRow = screen.getByTestId('geofence-row-fence-disabled');
 
     expect(
-      within(enabledRow).queryByRole('button', { name: '归档围栏' }),
-    ).not.toBeInTheDocument();
+      within(enabledRow).getByRole('button', { name: '删除围栏' }),
+    ).toBeDisabled();
     await user.click(
-      within(disabledRow).getByRole('button', { name: '归档围栏' }),
+      within(disabledRow).getByRole('button', { name: '删除围栏' }),
     );
     await waitFor(() =>
       expect(mocks.preview).toHaveBeenCalledWith({
@@ -412,7 +419,7 @@ describe('GeofencePanel', () => {
     );
     expect(
       screen.getByText(
-        '归档会移除当前绑定且不会恢复设备原围栏归属，也不会自动恢复或重新激活设备',
+        '删除后围栏将从列表和地图中隐藏，当前绑定会被移除；历史版本、判定记录和审计日志仍会保留。',
       ),
     ).toBeInTheDocument();
 
@@ -428,5 +435,29 @@ describe('GeofencePanel', () => {
         },
       }),
     );
+  });
+
+  it('summarizes a zero-impact disable without rendering zero cards', async () => {
+    mocks.preview.mockResolvedValueOnce({
+      ...impact('disabled'),
+      bindingCount: 0,
+      deviceCount: 0,
+      deactivationDeviceCount: 0,
+    });
+    const { user } = renderPanel();
+
+    await user.click(
+      within(screen.getByTestId('geofence-row-fence-enabled')).getByRole(
+        'button',
+        { name: '禁用围栏' },
+      ),
+    );
+
+    expect(
+      await screen.findByText(
+        '当前没有受影响的绑定设备，本次操作仅变更围栏状态，不会产生设备控制动作。',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('当前绑定设备数')).not.toBeInTheDocument();
   });
 });
