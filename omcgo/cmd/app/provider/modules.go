@@ -350,6 +350,10 @@ func initSoftwareModule(c *Container) error {
 	if softwareParamRepo == nil {
 		softwareParamRepo = device.NewPgDeviceParameterRepository(c.PgPool)
 	}
+	softwareService.SetUploadAddressResolver(newTransferAddressResolver(
+		softwareTransferPolicy,
+		softwareParamRepo,
+	))
 	softwareService.SetDownloadAddressResolver(newTransferAddressResolver(
 		softwareTransferPolicy,
 		softwareParamRepo,

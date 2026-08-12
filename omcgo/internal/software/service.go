@@ -368,6 +368,12 @@ func (s *SoftwareService) SetTransferProvider(p transfercfg.Provider) {
 	s.executor.SetTransferProvider(p)
 }
 
+func (s *SoftwareService) SetUploadAddressResolver(r interface {
+	Resolve(context.Context, uuid.UUID, transfercfg.TransferDirection) (transfercfg.AddressDecision, error)
+}) {
+	s.executor.SetUploadAddressResolver(r)
+}
+
 func (s *SoftwareService) SetDownloadAddressResolver(r interface {
 	Resolve(context.Context, uuid.UUID, transfercfg.TransferDirection) (transfercfg.AddressDecision, error)
 }) {
