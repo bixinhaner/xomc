@@ -588,6 +588,7 @@ describe('deviceApi.updateAntennaSectorPlan', () => {
         field_sources: { azimuth: 'planned' },
         direction_available: true,
         coverage_available: true,
+        coverage_status: 'available',
         missing_fields: [],
       },
     });
@@ -609,5 +610,6 @@ describe('deviceApi.updateAntennaSectorPlan', () => {
     });
     expect(result.azimuth).toBe(0);
     expect(result.coverageAvailable).toBe(true);
+    expect(result.coverageStatus).toBe('available');
   });
 });

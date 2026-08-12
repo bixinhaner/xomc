@@ -376,6 +376,8 @@ interface BackendAntennaSector {
   field_sources?: Record<string, string>;
   direction_available?: boolean;
   coverage_available?: boolean;
+  coverage_status?: 'available' | 'incomplete' | 'invalid_geometry';
+  coverage_issue?: string;
   missing_fields?: string[];
 }
 
@@ -402,6 +404,9 @@ function mapBackendAntennaSector(sector: BackendAntennaSector): AntennaSector {
     fieldSources: sector.field_sources ?? {},
     directionAvailable: sector.direction_available ?? false,
     coverageAvailable: sector.coverage_available ?? false,
+    coverageStatus: sector.coverage_status
+      ?? (sector.coverage_available ? 'available' : 'incomplete'),
+    coverageIssue: sector.coverage_issue,
     missingFields: sector.missing_fields ?? [],
   };
 }

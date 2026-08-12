@@ -26,6 +26,8 @@ export function calculateAntennaCoverage(sector: AntennaSector): AntennaSector {
       ...sector,
       directionAvailable,
       coverageAvailable: false,
+      coverageStatus: 'incomplete',
+      coverageIssue: undefined,
       nearRadiusMeters: undefined,
       farRadiusMeters: undefined,
       missingFields,
@@ -34,26 +36,45 @@ export function calculateAntennaCoverage(sector: AntennaSector): AntennaSector {
 
   const nearAngle = sector.mechanicalDowntilt! + sector.verticalBeamwidth! / 2;
   const farAngle = sector.mechanicalDowntilt! - sector.verticalBeamwidth! / 2;
-  if (farAngle <= 0 || nearAngle >= 90) {
+  if (farAngle <= 0) {
     return {
       ...sector,
       directionAvailable,
       coverageAvailable: false,
+      coverageStatus: 'invalid_geometry',
+      coverageIssue: 'far_angle_not_positive',
       nearRadiusMeters: undefined,
       farRadiusMeters: undefined,
-      missingFields: ['coverageGeometry'],
+      missingFields: [],
+    };
+  }
+  if (nearAngle >= 90) {
+    return {
+      ...sector,
+      directionAvailable,
+      coverageAvailable: false,
+      coverageStatus: 'invalid_geometry',
+      coverageIssue: 'near_angle_out_of_range',
+      nearRadiusMeters: undefined,
+      farRadiusMeters: undefined,
+      missingFields: [],
     };
   }
 
   const nearRadiusMeters = sector.antennaHeight! / Math.tan(radians(nearAngle));
   const farRadiusMeters = sector.antennaHeight! / Math.tan(radians(farAngle));
-  const coverageAvailable = nearRadiusMeters > 0 && nearRadiusMeters < farRadiusMeters;
+  const radiiFinite = Number.isFinite(nearRadiusMeters) && Number.isFinite(farRadiusMeters);
+  const coverageAvailable = radiiFinite && nearRadiusMeters > 0 && nearRadiusMeters < farRadiusMeters;
   return {
     ...sector,
     directionAvailable,
     coverageAvailable,
+    coverageStatus: coverageAvailable ? 'available' : 'invalid_geometry',
+    coverageIssue: coverageAvailable
+      ? undefined
+      : radiiFinite ? 'radius_order_invalid' : 'radius_not_finite',
     nearRadiusMeters: coverageAvailable ? nearRadiusMeters : undefined,
     farRadiusMeters: coverageAvailable ? farRadiusMeters : undefined,
-    missingFields: coverageAvailable ? [] : ['coverageGeometry'],
+    missingFields: [],
   };
 }

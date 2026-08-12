@@ -34,6 +34,7 @@ import type {
   GeofencePolygonGeometry,
 } from '@core/types/geofence';
 import { useThemeToken } from '@/hooks/useThemeToken';
+import { useResponsive } from '@/hooks/useResponsive';
 import { usePermission } from '@core/hooks/usePermission';
 // import { useMapDeviceCache } from '@/hooks/useMapDeviceCache'; // 暂未使用
 import {
@@ -133,6 +134,7 @@ const CollapseIcon = ({ direction }: { direction: 'left' | 'right' }) => (
 
 export default function GISMapView() {
   const token = useThemeToken();
+  const { isMobile } = useResponsive();
   const intl = useIntl();
   const canViewGeofence = usePermission(GEOFENCE_VIEW_PERMISSION);
   const canManageGeofence = usePermission(GEOFENCE_MANAGE_PERMISSION);
@@ -794,7 +796,7 @@ export default function GISMapView() {
 
   const zoomControlsStyle: React.CSSProperties = {
     position: 'absolute',
-    right: 24,
+    right: selectedDevice && !isMobile ? 364 : 24,
     top: 100,
     width: 44,
     background: '#FFF',

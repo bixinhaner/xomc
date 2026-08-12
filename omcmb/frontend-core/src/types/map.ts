@@ -91,6 +91,8 @@ export interface MapDevice {
 }
 
 /** 设备运行时参数解析出的天线扇区。 */
+export type AntennaCoverageStatus = 'available' | 'incomplete' | 'invalid_geometry';
+
 export interface AntennaSector {
   number: number;
   cellId?: string;
@@ -105,6 +107,8 @@ export interface AntennaSector {
   fieldSources: Record<string, string>;
   directionAvailable: boolean;
   coverageAvailable: boolean;
+  coverageStatus: AntennaCoverageStatus;
+  coverageIssue?: string;
   missingFields: string[];
 }
 

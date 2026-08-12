@@ -51,6 +51,11 @@ import {
   isValidMapMetadata,
   buildSafeConfig,
 } from '@/utils/mapValidation';
+import {
+  DIRECTION_INDICATOR_LENGTH_PX,
+  formatAntennaCoverageRange,
+  resolveAntennaSectorRenderMode,
+} from './antennaSectorRender';
 
 // 用于 spiderfy 函数内部访问
 const SPIDERFY_CONFIG_REF = SPIDERFY_CONFIG;
@@ -171,7 +176,11 @@ interface UseOLMapReturn {
   startMeasure: () => void;
   /** 退出测距模式：清除折线和标注 */
   stopMeasure: () => void;
-  updateAntennaSectors: (device: MapDevice | null, sectors: AntennaSector[]) => void;
+  updateAntennaSectors: (
+    device: MapDevice | null,
+    sectors: AntennaSector[],
+    activeSectorNumber?: number,
+  ) => void;
 }
 
 /**
@@ -273,22 +282,52 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
   const [isReady, setIsReady] = useState(false);
 
-  const updateAntennaSectors = useCallback((device: MapDevice | null, sectors: AntennaSector[]) => {
+  const updateAntennaSectors = useCallback((
+    device: MapDevice | null,
+    sectors: AntennaSector[],
+    activeSectorNumber?: number,
+  ) => {
     const source = antennaSectorSourceRef.current;
     const map = mapInstanceRef.current;
     if (!source) return;
     source.clear();
     if (!device || !map || (map.getView().getZoom() ?? 0) < 13) return;
 
+    const deviceCoordinate = fromLonLat([device.lng, device.lat]);
+    const devicePixel = map.getPixelFromCoordinate(deviceCoordinate);
+
     for (const sector of sectors) {
       if (!sector.directionAvailable || sector.azimuth === undefined) continue;
       const bearing = sector.azimuth * Math.PI / 180;
-      const lineEnd = offsetCoordinate([device.lng, device.lat], 100, bearing);
+      const isActive = sector.number === (activeSectorNumber ?? sectors[0]?.number);
+      const referenceEnd = fromLonLat(offsetCoordinate([device.lng, device.lat], 1000, bearing));
+      const referencePixel = map.getPixelFromCoordinate(referenceEnd);
+      let directionEnd = referenceEnd;
+      if (devicePixel && referencePixel) {
+        const deltaX = referencePixel[0] - devicePixel[0];
+        const deltaY = referencePixel[1] - devicePixel[1];
+        const pixelLength = Math.hypot(deltaX, deltaY);
+        if (pixelLength > 0) {
+          directionEnd = map.getCoordinateFromPixel([
+            devicePixel[0] + deltaX / pixelLength * DIRECTION_INDICATOR_LENGTH_PX,
+            devicePixel[1] + deltaY / pixelLength * DIRECTION_INDICATOR_LENGTH_PX,
+          ]);
+        }
+      }
       const direction = new Feature(new LineString([
-        fromLonLat([device.lng, device.lat]),
-        fromLonLat(lineEnd),
+        deviceCoordinate,
+        directionEnd,
       ]));
-      direction.setStyle(new Style({ stroke: new Stroke({ color: '#1677ff', width: 2.5 }) }));
+      const directionColor = sector.coverageStatus === 'invalid_geometry'
+        ? '#d48806'
+        : sector.coverageStatus === 'incomplete' ? '#8c8c8c' : '#1677ff';
+      direction.setStyle(new Style({
+        stroke: new Stroke({
+          color: directionColor,
+          width: isActive ? 3 : 1.5,
+          lineDash: sector.coverageAvailable ? undefined : [6, 4],
+        }),
+      }));
       source.addFeature(direction);
 
       if (!sector.coverageAvailable || sector.nearRadiusMeters === undefined || sector.farRadiusMeters === undefined) continue;
@@ -301,14 +340,64 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         outer.push(fromLonLat(offsetCoordinate([device.lng, device.lat], sector.farRadiusMeters, angle)));
         inner.push(fromLonLat(offsetCoordinate([device.lng, device.lat], sector.nearRadiusMeters, angle)));
       }
+      const outerStartPixel = map.getPixelFromCoordinate(outer[0]);
+      const outerEndPixel = map.getPixelFromCoordinate(outer[outer.length - 1]);
+      const renderMode = resolveAntennaSectorRenderMode(
+        sector,
+        outerStartPixel ? [outerStartPixel[0], outerStartPixel[1]] : undefined,
+        outerEndPixel ? [outerEndPixel[0], outerEndPixel[1]] : undefined,
+      );
+
+      if (renderMode === 'polygon') {
         const ring = [...outer, ...inner.reverse()];
         ring.push(ring[0]);
         const coverage = new Feature(new Polygon([ring]));
-      coverage.setStyle(new Style({
-        fill: new Fill({ color: 'rgba(22, 119, 255, 0.16)' }),
-        stroke: new Stroke({ color: '#1677ff', width: 1.5 }),
+        coverage.setStyle(new Style({
+          fill: new Fill({ color: isActive ? 'rgba(22, 119, 255, 0.18)' : 'rgba(22, 119, 255, 0.07)' }),
+          stroke: new Stroke({ color: '#1677ff', width: isActive ? 1.8 : 1 }),
+        }));
+        source.addFeature(coverage);
+      }
+
+      if (!isActive) continue;
+
+      const nearCenter = fromLonLat(offsetCoordinate([device.lng, device.lat], sector.nearRadiusMeters, bearing));
+      const farCenter = fromLonLat(offsetCoordinate([device.lng, device.lat], sector.farRadiusMeters, bearing));
+      const radiusLine = new Feature(new LineString([nearCenter, farCenter]));
+      radiusLine.setStyle(new Style({
+        stroke: new Stroke({
+          color: '#1677ff',
+          width: renderMode === 'narrow' ? 2.5 : 1.5,
+          lineDash: renderMode === 'narrow' ? [7, 5] : undefined,
+        }),
       }));
-      source.addFeature(coverage);
+      source.addFeature(radiusLine);
+
+      const endpointStyle = (filled: boolean) => new Style({
+        image: new Circle({
+          radius: 4,
+          fill: new Fill({ color: filled ? '#1677ff' : '#ffffff' }),
+          stroke: new Stroke({ color: '#1677ff', width: 2 }),
+        }),
+      });
+      const nearPoint = new Feature(new Point(nearCenter));
+      nearPoint.setStyle(endpointStyle(false));
+      source.addFeature(nearPoint);
+
+      const rangeText = formatAntennaCoverageRange(sector);
+      const farPoint = new Feature(new Point(farCenter));
+      farPoint.setStyle(new Style({
+        image: endpointStyle(true).getImage() ?? undefined,
+        text: rangeText ? new Text({
+          text: rangeText,
+          offsetY: -16,
+          font: '12px sans-serif',
+          fill: new Fill({ color: '#0958d9' }),
+          backgroundFill: new Fill({ color: 'rgba(255,255,255,0.92)' }),
+          padding: [3, 5, 3, 5],
+        }) : undefined,
+      }));
+      source.addFeature(farPoint);
     }
   }, []);
 

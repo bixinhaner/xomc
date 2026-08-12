@@ -12,6 +12,7 @@ const sector = (overrides: Partial<AntennaSector> = {}): AntennaSector => ({
   fieldSources: {},
   directionAvailable: false,
   coverageAvailable: false,
+  coverageStatus: 'incomplete',
   missingFields: [],
   ...overrides,
 });
@@ -34,6 +35,21 @@ describe('calculateAntennaCoverage', () => {
   it('几何条件不成立时不生成伪覆盖', () => {
     const result = calculateAntennaCoverage(sector({ mechanicalDowntilt: 2 }));
     expect(result.coverageAvailable).toBe(false);
-    expect(result.missingFields).toEqual(['coverageGeometry']);
+    expect(result.coverageStatus).toBe('invalid_geometry');
+    expect(result.coverageIssue).toBe('far_angle_not_positive');
+    expect(result.missingFields).toEqual([]);
+  });
+
+  it('极窄水平波宽仍保留真实覆盖计算', () => {
+    const result = calculateAntennaCoverage(sector({
+      antennaHeight: 27,
+      mechanicalDowntilt: 1,
+      horizontalBeamwidth: 0.01,
+      verticalBeamwidth: 1,
+    }));
+
+    expect(result.coverageAvailable).toBe(true);
+    expect(result.coverageStatus).toBe('available');
+    expect(result.horizontalBeamwidth).toBe(0.01);
   });
 });
