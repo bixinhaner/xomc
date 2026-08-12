@@ -79,4 +79,22 @@ describe('KPICard loading 态', () => {
     expect(container.textContent).not.toContain('较昨日');
     expect(container.querySelector('.anticon-arrow-up')).toBeFalsy();
   });
+
+  it('卡片拉伸到栅格单元高度，避免无趋势卡片变矮', () => {
+    const { container } = render(
+      <KPICard
+        title="当前接入UE数"
+        value={1}
+        icon={<span>icon</span>}
+      />,
+    );
+
+    expect(container.querySelector('.omc-kpi-card')).toHaveStyle({
+      width: '100%',
+      height: '100%',
+    });
+    expect(container.querySelector('.ant-card')).toHaveStyle({
+      height: '100%',
+    });
+  });
 });
