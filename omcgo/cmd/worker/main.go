@@ -648,6 +648,11 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	// consumer. Worker policies therefore use the bounded Policy TTL instead of
 	// registering a competing filtered consumer.
 	backupExecutor.SetTransferProvider(transferPolicy)
+	transferParamRepo := device.NewPgDeviceParameterRepository(w.PgPool)
+	backupExecutor.SetUploadAddressResolver(newTransferAddressResolver(
+		transferPolicy,
+		transferParamRepo,
+	))
 	// T-0073 Phase 1: opt-in backup-failure alarm publish via PolicyService.
 	// Worker shares the same backup_policies table as app; reads policy on each
 	// failure to honour latest AlertOnFailure flag.
@@ -755,7 +760,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 		logger,
 	)
 	pmOnlineSub.SetAdmissionGate(pm.NewRedisPMSetupAdmissionGate(w.Redis, 0))
-	pmParameterRepo := device.NewPgDeviceParameterRepository(w.PgPool)
+	pmParameterRepo := transferParamRepo
 	pmOnlineSub.SetUploadAddressResolver(newTransferAddressResolver(
 		transferPolicy,
 		pmParameterRepo,

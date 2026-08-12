@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,6 +19,30 @@ type staticTransferProvider struct {
 
 func (s staticTransferProvider) Snapshot(context.Context) transfercfg.Snapshot {
 	return s.snapshot
+}
+
+type staticAddressResolver struct {
+	decision      transfercfg.AddressDecision
+	seenDeviceID  uuid.UUID
+	seenDirection transfercfg.TransferDirection
+}
+
+func (s *staticAddressResolver) Resolve(
+	_ context.Context,
+	deviceID uuid.UUID,
+	direction transfercfg.TransferDirection,
+) (transfercfg.AddressDecision, error) {
+	s.seenDeviceID = deviceID
+	s.seenDirection = direction
+	return s.decision, nil
+}
+
+type staticDownloadDeviceLookup struct {
+	device *model.Device
+}
+
+func (s staticDownloadDeviceLookup) GetBySerialNumber(_ context.Context, _ string) (*model.Device, error) {
+	return s.device, nil
 }
 
 func TestNewDispatcher_AllHandlersRegistered(t *testing.T) {
@@ -382,4 +408,74 @@ func TestDownloadHandler_PreservesExternalURLsContainingLegacyBucketSegment(t *t
 			assert.Contains(t, string(result), "<URL>"+externalURL+"</URL>")
 		})
 	}
+}
+
+func TestDownloadHandler_ConfigRestoreReResolvesAbsoluteURLAtSOAPBuild(t *testing.T) {
+	deviceID := uuid.New()
+	resolver := &staticAddressResolver{decision: transfercfg.AddressDecision{
+		Direction: transfercfg.TransferDirectionDownload,
+		Protocol:  transfercfg.TransferProtocolHTTPS,
+		BaseURL:   "https://fresh.example.com:9443/secure",
+	}}
+	d := NewDispatcher(DispatcherConfig{
+		TransferConfigProvider: staticTransferProvider{snapshot: transfercfg.Snapshot{
+			Download: transfercfg.DownloadSettings{
+				BaseURL:      "http://old.example.com",
+				HTTPSBaseURL: "https://fresh.example.com:9443/secure",
+				Path:         "/smallcell/FileDownloadService",
+			},
+		}},
+		TransferAddressResolver: resolver,
+		DownloadDeviceLookup:    staticDownloadDeviceLookup{device: &model.Device{ID: deviceID, SerialNumber: "SN001"}},
+	})
+	cmd := &Command{
+		DeviceSN:   "SN001",
+		Method:     "Download",
+		CommandKey: "CONFIG_RESTORE_29800000_SN001",
+		Params: json.RawMessage(`{
+			"file_type": "10 48BF74 Configuration File",
+			"url": "http://stale.example.com/old/smallcell/FileDownloadService/config-snapshots/DG298/restore/SN001_CFG.xml",
+			"target_file_name": "SN001_CFG.xml",
+			"md5": "a2bd0c39a47fbbc6a4c294eeac762b62"
+		}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-config-restore")
+
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "https://fresh.example.com:9443/secure/smallcell/FileDownloadService/config-snapshots/DG298/restore/SN001_CFG.xml")
+	assert.NotContains(t, body, "stale.example.com")
+	assert.Equal(t, deviceID, resolver.seenDeviceID)
+	assert.Equal(t, transfercfg.TransferDirectionDownload, resolver.seenDirection)
+}
+
+func TestDownloadHandler_NonConfigRestoreAbsoluteURLIsNotReResolved(t *testing.T) {
+	resolver := &staticAddressResolver{decision: transfercfg.AddressDecision{
+		Direction: transfercfg.TransferDirectionDownload,
+		Protocol:  transfercfg.TransferProtocolHTTPS,
+		BaseURL:   "https://fresh.example.com:9443/secure",
+	}}
+	d := NewDispatcher(DispatcherConfig{
+		TransferConfigProvider: staticTransferProvider{snapshot: transfercfg.Snapshot{
+			Download: transfercfg.DownloadSettings{Path: "/smallcell/FileDownloadService"},
+		}},
+		TransferAddressResolver: resolver,
+		DownloadDeviceLookup:    staticDownloadDeviceLookup{device: &model.Device{ID: uuid.New(), SerialNumber: "SN001"}},
+	})
+	cmd := &Command{
+		DeviceSN:   "SN001",
+		Method:     "Download",
+		CommandKey: "firmware-download",
+		Params: json.RawMessage(`{
+			"file_type": "1 Firmware Upgrade Image",
+			"url": "http://vendor.example.com/smallcell/FileDownloadService/firmware/pkg.bin"
+		}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-firmware")
+
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "http://vendor.example.com/smallcell/FileDownloadService/firmware/pkg.bin")
+	assert.Equal(t, uuid.Nil, resolver.seenDeviceID)
 }

@@ -218,11 +218,27 @@ func (m *execCmdQueue) GetQueueLength(_ context.Context, _ string) (int64, error
 
 // execTransferProvider 是测试用的 transfercfg.Provider mock。
 type execTransferProvider struct {
-	upload transfercfg.UploadSettings
+	policy   string
+	upload   transfercfg.UploadSettings
+	download transfercfg.DownloadSettings
 }
 
 func (m *execTransferProvider) Snapshot(_ context.Context) transfercfg.Snapshot {
-	return transfercfg.Snapshot{Upload: m.upload}
+	return transfercfg.Snapshot{
+		ProtocolPolicy: m.policy,
+		Upload:         m.upload,
+		Download:       m.download,
+	}
+}
+
+type backupCapabilityReader struct {
+	status transfercfg.HTTPSCapabilityStatus
+	reads  int
+}
+
+func (r *backupCapabilityReader) ReadHTTPSCapability(_ context.Context, _ uuid.UUID) transfercfg.HTTPSCapabilityStatus {
+	r.reads++
+	return r.status
 }
 
 type execPolicyGetter struct {
@@ -375,6 +391,103 @@ func TestHandleTask_PushUploadCommand(t *testing.T) {
 	// M2: CommandKey 格式含 _BACKUP_ 标记
 	assert.Equal(t, task.ID.String(), cmdQ.pushed[0].Req.SourceID)
 	assert.Contains(t, cmdQ.pushed[0].Req.CommandKey, "_BACKUP_")
+}
+
+func TestHandleTask_ACSUploadUsesTransferPolicyHTTPSWhenCapabilityTrue(t *testing.T) {
+	taskID := uuid.New()
+	deviceID := uuid.New()
+	task := &BackupTask{
+		ID:        taskID,
+		Status:    TaskPending,
+		TargetIDs: []string{"SN BACKUP+HTTPS"},
+	}
+	taskRepo := &execTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*BackupTask, error) { return task, nil },
+		updateFn:  func(_ context.Context, _ *BackupTask) error { return nil },
+	}
+	deviceRepo := &execDeviceRepo{
+		getBySNFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:           deviceID,
+				SerialNumber: sn,
+				OUI:          "0000B9",
+				ProductClass: "FAP/BLQ/SC",
+			}, nil
+		},
+	}
+	cmdQ := &execCmdQueue{}
+	executor := newTestExecutor(taskRepo, deviceRepo, cmdQ)
+	policy := transfercfg.NewPolicy(transfercfg.Snapshot{
+		ProtocolPolicy: transfercfg.ProtocolPolicyPreferHTTPS,
+		Upload: transfercfg.UploadSettings{
+			BaseURL:      "http://upload.example.com:8080/proxy",
+			HTTPSBaseURL: "https://[2001:db8::10]:8443/secure",
+			Path:         "/smallcell/FileUploadService",
+		},
+	}, nil)
+	reader := &backupCapabilityReader{status: transfercfg.HTTPSCapabilityEnabled}
+	executor.SetTransferProvider(policy)
+	executor.SetUploadAddressResolver(transfercfg.NewAddressResolver(policy, reader))
+
+	payload, _ := json.Marshal(backupTaskPayload{TaskID: taskID.String()})
+	evt := event.Event{ID: uuid.New().String(), Subject: event.SubjectBackupTaskCreated, Payload: payload, Timestamp: time.Now()}
+
+	err := executor.handleTaskCreated(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, cmdQ.pushed, 1)
+	assert.Equal(t, 1, reader.reads)
+	var params map[string]any
+	require.NoError(t, json.Unmarshal(cmdQ.pushed[0].Req.Params, &params))
+	assert.Equal(t,
+		"https://[2001:db8::10]:8443/secure/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn=SN+BACKUP%2BHTTPS&taskId="+taskID.String()+"&filename=SN+BACKUP%2BHTTPS_CFG.xml",
+		params["url"],
+	)
+	assert.Equal(t, "10 0000B9 Configuration File", params["file_type"])
+	assert.Contains(t, cmdQ.pushed[0].Req.CommandKey, "_BACKUP_")
+}
+
+func TestHandleTask_ACSUploadForceHTTPDoesNotReadCapability(t *testing.T) {
+	taskID := uuid.New()
+	task := &BackupTask{
+		ID:        taskID,
+		Status:    TaskPending,
+		TargetIDs: []string{"SN001"},
+	}
+	taskRepo := &execTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*BackupTask, error) { return task, nil },
+		updateFn:  func(_ context.Context, _ *BackupTask) error { return nil },
+	}
+	deviceRepo := &execDeviceRepo{
+		getBySNFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{ID: uuid.New(), SerialNumber: sn, OUI: "0000B9", ProductClass: "FAP/BLQ/SC"}, nil
+		},
+	}
+	cmdQ := &execCmdQueue{}
+	executor := newTestExecutor(taskRepo, deviceRepo, cmdQ)
+	policy := transfercfg.NewPolicy(transfercfg.Snapshot{
+		ProtocolPolicy: transfercfg.ProtocolPolicyForceHTTP,
+		Upload: transfercfg.UploadSettings{
+			BaseURL:      "http://upload.example.com:8080/proxy",
+			HTTPSBaseURL: "https://upload.example.com:8443/secure",
+			Path:         "/smallcell/FileUploadService",
+		},
+	}, nil)
+	reader := &backupCapabilityReader{status: transfercfg.HTTPSCapabilityEnabled}
+	executor.SetTransferProvider(policy)
+	executor.SetUploadAddressResolver(transfercfg.NewAddressResolver(policy, reader))
+
+	payload, _ := json.Marshal(backupTaskPayload{TaskID: taskID.String()})
+	evt := event.Event{ID: uuid.New().String(), Subject: event.SubjectBackupTaskCreated, Payload: payload, Timestamp: time.Now()}
+
+	err := executor.handleTaskCreated(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, cmdQ.pushed, 1)
+	assert.Equal(t, 0, reader.reads)
+	var params map[string]any
+	require.NoError(t, json.Unmarshal(cmdQ.pushed[0].Req.Params, &params))
+	assert.Contains(t, params["url"], "http://upload.example.com:8080/proxy/smallcell/FileUploadService")
 }
 
 func TestHandleTask_NVPlatform(t *testing.T) {

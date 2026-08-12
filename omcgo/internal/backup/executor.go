@@ -105,10 +105,15 @@ type BackupExecutor struct {
 	connReq          *connreq.Client
 	eventBus         event.EventBus
 	transferProvider transfercfg.Provider // ACS 上传配置（来自 sys_configs acs_transfer，UI 可配置）
-	policyService    PolicyGetter         // optional (T-0073)
-	ftpConfigRepo    FTPConfigRepository  // optional; used when remote storage backend is selected
-	metrics          *PolicyMetrics       // optional (T-0073)
+	uploadResolver   transferAddressResolver
+	policyService    PolicyGetter        // optional (T-0073)
+	ftpConfigRepo    FTPConfigRepository // optional; used when remote storage backend is selected
+	metrics          *PolicyMetrics      // optional (T-0073)
 	logger           *zap.Logger
+}
+
+type transferAddressResolver interface {
+	Resolve(context.Context, uuid.UUID, transfercfg.TransferDirection) (transfercfg.AddressDecision, error)
 }
 
 // NewBackupExecutor creates a new BackupExecutor.
@@ -135,6 +140,10 @@ func NewBackupExecutor(
 // 支持运行时修改无需重启。须在 Subscribe 前调用；未注入时 URL 为空。
 func (e *BackupExecutor) SetTransferProvider(p transfercfg.Provider) {
 	e.transferProvider = p
+}
+
+func (e *BackupExecutor) SetUploadAddressResolver(r transferAddressResolver) {
+	e.uploadResolver = r
 }
 
 // SetFTPConfigRepository injects the remote FTP/SFTP config source used when
@@ -175,49 +184,80 @@ func buildRemoteUploadURL(cfg *FTPConfig, filename string, storageBackend string
 	return fmt.Sprintf("%s://%s%s/%s", protocol, host, remotePath, url.PathEscape(filename))
 }
 
-func (e *BackupExecutor) resolveUploadTarget(ctx context.Context, spec *BackupTypeSpec, dev *model.Device, task *BackupTask, targetFilename string) (string, string, string, error) {
+type transferDecisionLogFields struct {
+	Protocol   string
+	Reason     string
+	Capability string
+}
+
+func (e *BackupExecutor) resolveUploadTarget(ctx context.Context, spec *BackupTypeSpec, dev *model.Device, task *BackupTask, targetFilename string) (string, string, string, transferDecisionLogFields, error) {
 	if e.policyService != nil {
 		policy, err := e.policyService.Get(ctx)
 		if err != nil {
-			return "", "", "", fmt.Errorf("get backup policy: %w", err)
+			return "", "", "", transferDecisionLogFields{}, fmt.Errorf("get backup policy: %w", err)
 		}
 		if policy != nil {
 			switch policy.StorageBackend {
 			case "ftp", "sftp":
 				if policy.FTPConfigID == nil {
-					return "", "", "", fmt.Errorf("backup policy storage_backend=%s missing ftp_config_id", policy.StorageBackend)
+					return "", "", "", transferDecisionLogFields{}, fmt.Errorf("backup policy storage_backend=%s missing ftp_config_id", policy.StorageBackend)
 				}
 				if e.ftpConfigRepo == nil {
-					return "", "", "", fmt.Errorf("backup policy storage_backend=%s but ftp config repo is not wired", policy.StorageBackend)
+					return "", "", "", transferDecisionLogFields{}, fmt.Errorf("backup policy storage_backend=%s but ftp config repo is not wired", policy.StorageBackend)
 				}
 				cfg, err := e.ftpConfigRepo.GetByID(ctx, *policy.FTPConfigID)
 				if err != nil {
-					return "", "", "", fmt.Errorf("load ftp config %s: %w", policy.FTPConfigID.String(), err)
+					return "", "", "", transferDecisionLogFields{}, fmt.Errorf("load ftp config %s: %w", policy.FTPConfigID.String(), err)
 				}
 				if cfg == nil {
-					return "", "", "", fmt.Errorf("ftp config %s not found", policy.FTPConfigID.String())
+					return "", "", "", transferDecisionLogFields{}, fmt.Errorf("ftp config %s not found", policy.FTPConfigID.String())
 				}
 				if !cfg.Enabled {
-					return "", "", "", fmt.Errorf("ftp config %s is disabled", cfg.ID.String())
+					return "", "", "", transferDecisionLogFields{}, fmt.Errorf("ftp config %s is disabled", cfg.ID.String())
 				}
 				password := ""
 				if cfg.PasswordEncrypted != nil {
 					password = *cfg.PasswordEncrypted
 				}
-				return buildRemoteUploadURL(cfg, targetFilename, policy.StorageBackend), cfg.Username, password, nil
+				fields := transferDecisionLogFields{
+					Protocol: normalizeRemoteProtocol(cfg.Protocol, policy.StorageBackend),
+					Reason:   "backup_policy_remote_storage",
+				}
+				return buildRemoteUploadURL(cfg, targetFilename, policy.StorageBackend), cfg.Username, password, fields, nil
 			}
 		}
 	}
 
 	var uploadSettings transfercfg.UploadSettings
+	decisionFields := transferDecisionLogFields{
+		Protocol:   string(transfercfg.TransferProtocolHTTP),
+		Reason:     "legacy_upload_config",
+		Capability: string(transfercfg.HTTPSCapabilityNotRead),
+	}
+	baseURL := ""
 	if e.transferProvider != nil {
 		uploadSettings = e.transferProvider.Snapshot(ctx).Upload
 	}
+	if e.uploadResolver != nil {
+		decision, err := e.uploadResolver.Resolve(ctx, dev.ID, transfercfg.TransferDirectionUpload)
+		if err != nil {
+			return "", "", "", transferDecisionLogFields{}, fmt.Errorf("resolve ACS backup upload address: %w", err)
+		}
+		baseURL = decision.BaseURL
+		decisionFields = transferDecisionLogFields{
+			Protocol:   string(decision.Protocol),
+			Reason:     string(decision.Reason),
+			Capability: string(decision.Capability),
+		}
+	} else {
+		baseURL = uploadSettings.BaseURL
+	}
+	uploadSettings.BaseURL = baseURL
 	uploadURL, err := buildBackupUploadURL(uploadSettings, spec, dev.SerialNumber, task.ID.String(), targetFilename)
 	if err != nil {
-		return "", "", "", fmt.Errorf("build ACS backup upload URL: %w", err)
+		return "", "", "", transferDecisionLogFields{}, fmt.Errorf("build ACS backup upload URL: %w", err)
 	}
-	return uploadURL, uploadSettings.Username, uploadSettings.Password, nil
+	return uploadURL, uploadSettings.Username, uploadSettings.Password, decisionFields, nil
 }
 
 // Subscribe registers the executor to listen for backup task created events.
@@ -306,7 +346,7 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 		spec := selectBackupType(dev.ProductClass)
 		targetFilename := fmt.Sprintf("%s_CFG%s", dev.SerialNumber, spec.FileExtension)
 
-		uploadURL, uploadUsername, uploadPassword, uploadErr := e.resolveUploadTarget(ctx, spec, dev, task, targetFilename)
+		uploadURL, uploadUsername, uploadPassword, transferFields, uploadErr := e.resolveUploadTarget(ctx, spec, dev, task, targetFilename)
 		if uploadErr != nil {
 			e.logger.Warn("resolve backup upload target",
 				zap.String("device_sn", dev.SerialNumber),
@@ -361,7 +401,9 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 			zap.String("device_sn", dev.SerialNumber),
 			zap.String("file_type", fileType),
 			zap.String("backup_type", spec.TypeCode),
-			zap.String("upload_url", uploadURL))
+			zap.String("transfer_protocol", transferFields.Protocol),
+			zap.String("transfer_reason", transferFields.Reason),
+			zap.String("https_capability", transferFields.Capability))
 
 		// Wake device via Connection Request
 		if dev.ConnectionRequestURL != "" {

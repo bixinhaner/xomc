@@ -28,6 +28,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -109,12 +110,14 @@ const SnapshotRestoreSourcePlaceholder = "(per-device-latest)"
 
 // RestoreService orchestrates restore_task creation + device task fan-out.
 type RestoreService struct {
-	repo       RestoreTaskRepository
-	deviceRepo DeviceLookup
-	taskSvc    TaskCreator
-	stater     MinIOStater
-	metrics    *RestoreMetrics
-	logger     *zap.Logger
+	repo             RestoreTaskRepository
+	deviceRepo       DeviceLookup
+	taskSvc          TaskCreator
+	stater           MinIOStater
+	transferProvider transfercfg.Provider
+	downloadResolver transferAddressResolver
+	metrics          *RestoreMetrics
+	logger           *zap.Logger
 	// T-0079: optional — when wired enables POST /backup/restore/by-task-id.
 	// nil-safe: nil disables the endpoint (handler returns 503).
 	backupTaskFinder BackupTaskFinder
@@ -167,10 +170,59 @@ func (s *RestoreService) SetObjectReader(r RestoreObjectReader) {
 	s.objReader = r
 }
 
+func (s *RestoreService) SetTransferProvider(p transfercfg.Provider) {
+	s.transferProvider = p
+}
+
+func (s *RestoreService) SetDownloadAddressResolver(r transferAddressResolver) {
+	s.downloadResolver = r
+}
+
 // SetCrossVersionChecker wires the cross-version schema check (#70 task 3).
 // Pass nil to disable.
 func (s *RestoreService) SetCrossVersionChecker(c *CrossVersionChecker) {
 	s.crossVersion = c
+}
+
+func buildRestoreDownloadURL(baseURL, servicePath, bucket, objectPath string) (string, error) {
+	if servicePath == "" {
+		servicePath = "/smallcell/FileDownloadService"
+	}
+	segments := append([]string{bucket}, strings.Split(objectPath, "/")...)
+	return transfercfg.BuildURL(baseURL, servicePath, segments, nil)
+}
+
+func (s *RestoreService) resolveDownloadURL(ctx context.Context, dev *model.Device, bucket, objectPath string) (string, transferDecisionLogFields, error) {
+	settings := transfercfg.DownloadSettings{Path: "/smallcell/FileDownloadService"}
+	if s.transferProvider != nil {
+		settings = s.transferProvider.Snapshot(ctx).Download
+		if settings.Path == "" {
+			settings.Path = "/smallcell/FileDownloadService"
+		}
+	}
+	fields := transferDecisionLogFields{
+		Protocol:   string(transfercfg.TransferProtocolHTTP),
+		Reason:     "legacy_download_config",
+		Capability: string(transfercfg.HTTPSCapabilityNotRead),
+	}
+	baseURL := settings.BaseURL
+	if s.downloadResolver != nil {
+		decision, err := s.downloadResolver.Resolve(ctx, dev.ID, transfercfg.TransferDirectionDownload)
+		if err != nil {
+			return "", transferDecisionLogFields{}, fmt.Errorf("resolve restore download address: %w", err)
+		}
+		baseURL = decision.BaseURL
+		fields = transferDecisionLogFields{
+			Protocol:   string(decision.Protocol),
+			Reason:     string(decision.Reason),
+			Capability: string(decision.Capability),
+		}
+	}
+	downloadURL, err := buildRestoreDownloadURL(baseURL, settings.Path, bucket, objectPath)
+	if err != nil {
+		return "", transferDecisionLogFields{}, fmt.Errorf("build restore download URL: %w", err)
+	}
+	return downloadURL, fields, nil
 }
 
 // computeSourceMD5 streams the source object and returns its lowercase-hex MD5.
@@ -306,7 +358,6 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 	// Fan out: enqueue one Download device task per (existing) device. Missing
 	// SNs are recorded in error_message JSON so the operator sees what was
 	// skipped without an aggregate failure.
-	restoreURL := physicalBucket + "/" + req.ObjectPath
 	skipped := make([]string, 0)
 	enqueued := 0
 	for _, sn := range req.TargetDeviceSNs {
@@ -316,6 +367,14 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 			s.logger.Warn("device not found for restore; skipping",
 				zap.String("device_sn", sn),
 				zap.Error(err))
+			continue
+		}
+		restoreURL, transferFields, urlErr := s.resolveDownloadURL(ctx, dev, physicalBucket, req.ObjectPath)
+		if urlErr != nil {
+			skipped = append(skipped, sn)
+			s.logger.Warn("resolve restore download target failed",
+				zap.String("device_sn", sn),
+				zap.Error(urlErr))
 			continue
 		}
 		params, err := json.Marshal(map[string]interface{}{
@@ -348,6 +407,11 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 				zap.Error(err))
 			continue
 		}
+		s.logger.Info("restore download command queued",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("transfer_protocol", transferFields.Protocol),
+			zap.String("transfer_reason", transferFields.Reason),
+			zap.String("https_capability", transferFields.Capability))
 		enqueued++
 	}
 	s.metrics.RecordRequest("accepted")
@@ -596,7 +660,13 @@ func (s *RestoreService) CreateBySnapshot(
 				continue
 			}
 		}
-		restoreURL := snap.ObjectBucket + "/" + snap.ObjectPath
+		restoreURL, transferFields, urlErr := s.resolveDownloadURL(ctx, dev, snap.ObjectBucket, snap.ObjectPath)
+		if urlErr != nil {
+			skipped = append(skipped, sn)
+			s.logger.Warn("resolve snapshot restore download target failed",
+				zap.String("device_sn", sn), zap.Error(urlErr))
+			continue
+		}
 		targetFileName := pathpkg.Base(snap.ObjectPath)
 		// 下发时读该设备快照文件流现算 MD5（Download 报文必填）。每设备文件不同，
 		// 故循环内逐个算；算失败跳过该设备，避免下发缺 MD5 的 Download。
@@ -634,6 +704,11 @@ func (s *RestoreService) CreateBySnapshot(
 				zap.String("device_sn", sn), zap.Error(qErr))
 			continue
 		}
+		s.logger.Info("restore download command queued (by-snapshot)",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("transfer_protocol", transferFields.Protocol),
+			zap.String("transfer_reason", transferFields.Reason),
+			zap.String("https_capability", transferFields.Capability))
 		dispatchedFiles[dev.SerialNumber] = targetFileName
 		enqueued++
 	}

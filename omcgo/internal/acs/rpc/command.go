@@ -15,6 +15,7 @@ import (
 // then sets CWMPID and renders the corresponding SOAP envelope.
 type Command struct {
 	ID         string          // task ID (for logging only)
+	DeviceSN   string          // device serial number, used by handlers that need runtime device state
 	Method     string          // TR-069 RPC method name
 	Params     json.RawMessage // method-specific params
 	Priority   int             // lower = higher priority (unused by handlers)
