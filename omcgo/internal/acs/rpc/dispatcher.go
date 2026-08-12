@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/soap"
 )
 
@@ -23,11 +26,21 @@ type Dispatcher struct {
 
 // DispatcherConfig holds optional configuration for the RPC dispatcher.
 type DispatcherConfig struct {
-	DownloadBaseURL        string // Download server base URL, e.g. "http://localhost:8080"
-	DownloadPath           string // Download path prefix, e.g. "/smallcell/FileDownloadService"
-	DownloadUser           string // Download HTTP Basic Auth username
-	DownloadPass           string // Download HTTP Basic Auth password
-	TransferConfigProvider transfercfg.Provider
+	DownloadBaseURL         string // Download server base URL, e.g. "http://localhost:8080"
+	DownloadPath            string // Download path prefix, e.g. "/smallcell/FileDownloadService"
+	DownloadUser            string // Download HTTP Basic Auth username
+	DownloadPass            string // Download HTTP Basic Auth password
+	TransferConfigProvider  transfercfg.Provider
+	TransferAddressResolver transferAddressResolver
+	DownloadDeviceLookup    DownloadDeviceLookup
+}
+
+type transferAddressResolver interface {
+	Resolve(context.Context, uuid.UUID, transfercfg.TransferDirection) (transfercfg.AddressDecision, error)
+}
+
+type DownloadDeviceLookup interface {
+	GetBySerialNumber(context.Context, string) (*model.Device, error)
 }
 
 // NewDispatcher creates a new RPC dispatcher with all standard handlers registered.
@@ -52,6 +65,8 @@ func NewDispatcher(cfgs ...DispatcherConfig) *Dispatcher {
 		DownloadUser:    cfg.DownloadUser,
 		DownloadPass:    cfg.DownloadPass,
 		ConfigProvider:  cfg.TransferConfigProvider,
+		AddressResolver: cfg.TransferAddressResolver,
+		DeviceLookup:    cfg.DownloadDeviceLookup,
 	})
 	d.Register("Upload", &UploadHandler{})
 	d.Register("Reboot", &RebootHandler{})
@@ -185,6 +200,8 @@ type DownloadHandler struct {
 	DownloadUser    string // HTTP Basic Auth credentials injected into download URL
 	DownloadPass    string
 	ConfigProvider  transfercfg.Provider
+	AddressResolver transferAddressResolver
+	DeviceLookup    DownloadDeviceLookup
 }
 
 func (h *DownloadHandler) BuildRequest(cmd *Command) ([]byte, error) {
@@ -205,6 +222,15 @@ func (h *DownloadHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	// 应该是空标签。Params.URL 上层若已显式塞凭据走透传；空字符串则渲染成空标签。
 	params.URL = appconfig.NormalizeConfigBackupReference(params.URL)
 	current := h.currentSettings()
+	if isConfigRestoreDownloadCommand(cmd.CommandKey) && strings.TrimSpace(params.URL) != "" {
+		rewrittenURL, ok, err := h.resolveConfigRestoreDownloadURL(cmd, params.URL, current)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			params.URL = rewrittenURL
+		}
+	}
 	if current.BaseURL != "" && params.URL != "" && !strings.Contains(params.URL, "://") {
 		servicePath := current.Path
 		if servicePath == "" {
@@ -234,6 +260,116 @@ func (h *DownloadHandler) currentSettings() transfercfg.DownloadSettings {
 		Username: h.DownloadUser,
 		Password: h.DownloadPass,
 	}
+}
+
+func (h *DownloadHandler) resolveConfigRestoreDownloadURL(
+	cmd *Command,
+	rawURL string,
+	current transfercfg.DownloadSettings,
+) (string, bool, error) {
+	servicePath := current.Path
+	if servicePath == "" {
+		servicePath = "/smallcell/FileDownloadService"
+	}
+	objectSegments, ok, err := downloadObjectSegments(rawURL, servicePath)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve config restore Download URL: %w", err)
+	}
+	if !ok {
+		return "", false, nil
+	}
+	if h.AddressResolver == nil {
+		return "", false, fmt.Errorf("resolve config restore Download URL: transfer address resolver is required")
+	}
+	if h.DeviceLookup == nil {
+		return "", false, fmt.Errorf("resolve config restore Download URL: device lookup is required")
+	}
+	deviceSN := strings.TrimSpace(cmd.DeviceSN)
+	if deviceSN == "" {
+		return "", false, fmt.Errorf("resolve config restore Download URL: device serial number is required")
+	}
+	device, err := h.DeviceLookup.GetBySerialNumber(context.Background(), deviceSN)
+	if err != nil {
+		return "", false, fmt.Errorf("lookup device %q for config restore Download URL: %w", deviceSN, err)
+	}
+	if device == nil {
+		return "", false, fmt.Errorf("lookup device %q for config restore Download URL: not found", deviceSN)
+	}
+	decision, err := h.AddressResolver.Resolve(context.Background(), device.ID, transfercfg.TransferDirectionDownload)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve config restore Download address: %w", err)
+	}
+	builtURL, err := transfercfg.BuildURL(decision.BaseURL, servicePath, objectSegments, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("build config restore Download URL: %w", err)
+	}
+	return builtURL, true, nil
+}
+
+func isConfigRestoreDownloadCommand(commandKey string) bool {
+	commandKey = strings.TrimSpace(commandKey)
+	return strings.HasPrefix(commandKey, "CONFIG_RESTORE_") ||
+		strings.Contains(commandKey, "_RESTORE_") ||
+		strings.HasPrefix(commandKey, "restore-")
+}
+
+func downloadObjectSegments(rawURL, servicePath string) ([]string, bool, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil, false, nil
+	}
+	if !strings.Contains(rawURL, "://") {
+		segments := splitObjectPath(rawURL)
+		if len(segments) == 0 {
+			return nil, false, fmt.Errorf("object path is required")
+		}
+		return segments, true, nil
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, false, err
+	}
+	decodedPath, err := url.PathUnescape(parsed.EscapedPath())
+	if err != nil {
+		return nil, false, err
+	}
+	for _, marker := range downloadServicePathMarkers(servicePath) {
+		prefix := strings.TrimRight(marker, "/") + "/"
+		idx := strings.Index(decodedPath, prefix)
+		if idx < 0 {
+			continue
+		}
+		segments := splitObjectPath(decodedPath[idx+len(prefix):])
+		if len(segments) == 0 {
+			return nil, false, fmt.Errorf("object path is required")
+		}
+		return segments, true, nil
+	}
+	return nil, false, nil
+}
+
+func downloadServicePathMarkers(servicePath string) []string {
+	servicePath = strings.TrimSpace(servicePath)
+	if servicePath == "" {
+		servicePath = "/smallcell/FileDownloadService"
+	}
+	markers := []string{servicePath}
+	const canonical = "/smallcell/FileDownloadService"
+	if servicePath != canonical {
+		markers = append(markers, canonical)
+	}
+	return markers
+}
+
+func splitObjectPath(objectPath string) []string {
+	parts := strings.Split(strings.Trim(objectPath, "/"), "/")
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			segments = append(segments, part)
+		}
+	}
+	return segments
 }
 
 type UploadHandler struct{}

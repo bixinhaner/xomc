@@ -597,6 +597,14 @@ func isRuntimeLogUpload(fileType, transportPath string) bool {
 		strings.Contains(normalizedPath, "FILETYPE=LOG")
 }
 
+func isConfigBackupUpload(fileType, transportPath string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(fileType))
+	normalizedPath := strings.ToUpper(strings.TrimSpace(transportPath))
+	return strings.Contains(normalized, "CONFIGURATION FILE") ||
+		strings.Contains(normalizedPath, "FILETYPE=CONFIGBACKUP_XML") ||
+		strings.Contains(normalizedPath, "FILETYPE=CONFIGBACKUP_NV")
+}
+
 func buildTransferUploadURL(baseURL, resolvedTransport string) (string, error) {
 	return transfercfg.BuildTemplateURL(baseURL, resolvedTransport)
 }
@@ -677,7 +685,8 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 	// 拿运行时 ACS 上传 base URL（前端"系统管理 → ACS 传输 → 上传服务"维护）。
 	// 优先级：transferProvider.Snapshot.Upload.BaseURL → SetUploadConfig 静态兜底 → 空。
 	// 凭据不下发——产品线要求 Upload / Download 都不走 HTTP Basic Auth，CPE 拿到空 Username/Password 标签即可。
-	useTransferDecision := isRuntimeLogUpload(resolvedFileType, resolvedTransport)
+	runtimeLogUpload := isRuntimeLogUpload(resolvedFileType, resolvedTransport)
+	useTransferDecision := runtimeLogUpload || isConfigBackupUpload(resolvedFileType, resolvedTransport)
 	uploadBaseURL := e.resolveUploadBaseURL(ctx)
 	transferDecision := transfercfg.AddressDecision{
 		Direction:  transfercfg.TransferDirectionUpload,
@@ -723,7 +732,7 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 	// 实测路径："12 ... Configuration File" / "10 ... Configuration File" 这类 NV/XML
 	// 备份必须用 "Collect NV|<MFR>_<SN>,<UUID>" / "Collect XML|<MFR>_<SN>,<UUID>" 业务串；
 	// 其他 FileType（日志采集 / 数据模型 upload）保持原 UUID 格式，避免影响存量流程。
-	commandKey := deriveUploadCommandKey(resolvedFileType, dev.OUI, dev.SerialNumber, subTask.ID.String(), useTransferDecision)
+	commandKey := deriveUploadCommandKey(resolvedFileType, dev.OUI, dev.SerialNumber, subTask.ID.String(), runtimeLogUpload)
 	// username / password 不传——产品线要求 Upload 不走 Basic Auth，
 	// soap.UploadData 零值字段会渲染成空 <cwmp:Username></cwmp:Username>。
 	paramsJSON, err := json.Marshal(map[string]interface{}{

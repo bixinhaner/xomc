@@ -123,6 +123,7 @@ func TestCreateBySnapshot_CrossVersionWarn_StillDispatches(t *testing.T) {
 	}}
 	sink := &memAuditSink{}
 	svc := NewRestoreService(repo, devRepo, enq, &fakeStater{exists: true}, NewRestoreMetrics(nil), zap.NewNop())
+	setRestoreTransferPolicy(t, svc, "force_http", "not_read")
 	svc.SetSnapshotLookup(&fakeSnapshotLookup{rows: map[string]*ConfigSnapshot{"SN001": snapWithVersion("SN001", "1.0.0")}})
 	svc.SetObjectReader(&fakeObjReader{content: []byte("x")})
 	svc.SetCrossVersionChecker(NewCrossVersionChecker(CrossVersionWarnAudit, sink, zap.NewNop()))

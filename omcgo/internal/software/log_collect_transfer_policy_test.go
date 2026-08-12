@@ -167,6 +167,62 @@ func TestExecuteOneUpload_RuntimeLogUsesTransferPolicyHTTPSIPv6(t *testing.T) {
 	)
 }
 
+func TestExecuteOneUpload_ConfigBackupUsesTransferPolicyHTTPSPreservesBackupWireContract(t *testing.T) {
+	ctx := context.Background()
+	dev := &model.Device{
+		ID:           uuid.New(),
+		SerialNumber: "SN CONFIG+XML",
+		OUI:          "0000B9",
+		Status:       model.DeviceActive,
+	}
+	var got *devtask.CreateTaskRequest
+	executor, subTask := newLogCollectExecutorForTest(t, dev, func(req *devtask.CreateTaskRequest) {
+		got = req
+	}, nil)
+	reader := &logCollectCapabilityReader{values: map[uuid.UUID]string{
+		dev.ID: "true",
+	}}
+	policy := transfercfg.NewPolicy(transfercfg.Snapshot{
+		ProtocolPolicy: transfercfg.ProtocolPolicyPreferHTTPS,
+		Upload: transfercfg.UploadSettings{
+			BaseURL:      "http://upload.example.com:8080",
+			HTTPSBaseURL: "https://[2001:db8::30]:8443/omc",
+		},
+	}, nil)
+	executor.SetUploadAddressResolver(transfercfg.NewAddressResolver(
+		policy,
+		transfercfg.NewDeviceParameterHTTPSCapabilityReader(reader),
+	))
+
+	executor.ExecuteOneUpload(
+		ctx,
+		subTask,
+		"10 {OUI} Configuration File",
+		"{sn}_CFG.xml",
+		"/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn={sn}&taskId={taskId}&filename=",
+	)
+
+	require.NotNil(t, got)
+	assert.Equal(t, "Upload", got.Method)
+	assert.Equal(t, "Collect XML|0000B9_SN CONFIG+XML,"+subTask.ID.String(), got.CommandKey)
+	assert.Equal(t, transfercfg.HTTPSCapabilityParameterPath, reader.seenPath)
+
+	var params struct {
+		CommandKey     string `json:"command_key"`
+		FileType       string `json:"file_type"`
+		URL            string `json:"url"`
+		TargetFileName string `json:"target_file_name"`
+	}
+	require.NoError(t, json.Unmarshal(got.Params, &params))
+	assert.Equal(t, got.CommandKey, params.CommandKey)
+	assert.Equal(t, "10 0000B9 Configuration File", params.FileType)
+	assert.Equal(t, "SN CONFIG+XML_CFG.xml", params.TargetFileName)
+	assert.Equal(t,
+		"https://[2001:db8::30]:8443/omc/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn=SN+CONFIG%2BXML&taskId="+subTask.TaskID.String()+"&filename=",
+		params.URL,
+	)
+}
+
 func TestExecuteOneSetParamCollect_FaultLogForceHTTPUsesTransferPolicy(t *testing.T) {
 	ctx := context.Background()
 	dev := &model.Device{

@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	devicemodel "github.com/omcgo/omcgo/internal/core/model"
@@ -83,11 +84,17 @@ func (m *mockRestoreRepo) MarkVerified(_ context.Context, _ uuid.UUID, _ Restore
 // service. Narrow interface = small mock.
 type fakeDeviceLookup struct {
 	knownSNs map[string]bool
+	devices  map[string]*devicemodel.Device
 }
 
 func (f *fakeDeviceLookup) GetBySerialNumber(_ context.Context, sn string) (*devicemodel.Device, error) {
+	if f.devices != nil {
+		if dev := f.devices[sn]; dev != nil {
+			return dev, nil
+		}
+	}
 	if f.knownSNs[sn] {
-		return &devicemodel.Device{SerialNumber: sn}, nil
+		return &devicemodel.Device{ID: uuid.New(), SerialNumber: sn}, nil
 	}
 	return nil, nil
 }
@@ -165,7 +172,34 @@ func newSvc(t *testing.T, knownSNs []string, statExists bool) (*RestoreService, 
 	devRepo := &fakeDeviceLookup{knownSNs: known}
 	stater := &fakeStater{exists: statExists}
 	svc := NewRestoreService(repo, devRepo, enq, stater, NewRestoreMetrics(nil), zap.NewNop())
+	setRestoreTransferPolicy(t, svc, transfercfg.ProtocolPolicyForceHTTP, transfercfg.HTTPSCapabilityNotRead)
 	return svc, repo, enq
+}
+
+type restoreCapabilityReader struct {
+	status transfercfg.HTTPSCapabilityStatus
+	calls  int
+}
+
+func (r *restoreCapabilityReader) ReadHTTPSCapability(context.Context, uuid.UUID) transfercfg.HTTPSCapabilityStatus {
+	r.calls++
+	return r.status
+}
+
+func setRestoreTransferPolicy(t *testing.T, svc *RestoreService, policyValue string, capability transfercfg.HTTPSCapabilityStatus) *restoreCapabilityReader {
+	t.Helper()
+	policy := transfercfg.NewPolicy(transfercfg.Snapshot{
+		ProtocolPolicy: policyValue,
+		Download: transfercfg.DownloadSettings{
+			BaseURL:      "http://download.example.com:8080/proxy",
+			HTTPSBaseURL: "https://download.example.com:9443/secure-proxy",
+			Path:         "/smallcell/FileDownloadService",
+		},
+	}, nil)
+	reader := &restoreCapabilityReader{status: capability}
+	svc.SetTransferProvider(policy)
+	svc.SetDownloadAddressResolver(transfercfg.NewAddressResolver(policy, reader))
+	return reader
 }
 
 func TestCreate_validRequest_fanOut(t *testing.T) {
@@ -188,8 +222,64 @@ func TestCreate_validRequest_fanOut(t *testing.T) {
 		// FileType = "10 <OUI> Configuration File"；fake device 没填 OUI →
 		// 退化到 fallback OUI 48BF74（Baicells）。
 		assert.Contains(t, string(req.Params), `"file_type":"10 48BF74 Configuration File"`)
-		assert.Contains(t, string(req.Params), `"url":"config-backup/backup/2026/04/29/cfg.xml.gz"`)
+		assert.Contains(t, string(req.Params), `"url":"http://download.example.com:8080/proxy/smallcell/FileDownloadService/config-backup/backup/2026/04/29/cfg.xml.gz"`)
 	}
+}
+
+func restoreQueuedURL(t *testing.T, req *devtask.CreateTaskRequest) string {
+	t.Helper()
+	var params map[string]interface{}
+	require.NoError(t, jsonUnmarshal(req.Params, &params))
+	got, ok := params["url"].(string)
+	require.True(t, ok)
+	return got
+}
+
+func TestCreate_UsesHTTPSDownloadResolverAndEncodesObjectPath(t *testing.T) {
+	svc, _, enq := newSvc(t, []string{"SN HTTPS+RESTORE"}, true)
+	reader := setRestoreTransferPolicy(t, svc, transfercfg.ProtocolPolicyPreferHTTPS, transfercfg.HTTPSCapabilityEnabled)
+	svc.SetObjectReader(&fakeObjReader{content: []byte("restore config")})
+
+	_, err := svc.Create(context.Background(), &CreateRestoreRequest{
+		Bucket:          CanonicalRestoreBucket,
+		ObjectPath:      "backup/2026/08/13/配置 A+B.xml",
+		TargetDeviceSNs: []string{"SN HTTPS+RESTORE"},
+	}, "alice")
+
+	require.NoError(t, err)
+	require.Len(t, enq.requests, 1)
+	assert.Equal(t, 1, reader.calls)
+	assert.Equal(t,
+		"https://download.example.com:9443/secure-proxy/smallcell/FileDownloadService/config-backup/backup/2026/08/13/%E9%85%8D%E7%BD%AE%20A+B.xml",
+		restoreQueuedURL(t, enq.requests[0]),
+	)
+	assert.Contains(t, string(enq.requests[0].Params), `"target_file_name":"配置 A+B.xml"`)
+}
+
+type failingTransferResolver struct {
+	err error
+}
+
+func (r failingTransferResolver) Resolve(context.Context, uuid.UUID, transfercfg.TransferDirection) (transfercfg.AddressDecision, error) {
+	return transfercfg.AddressDecision{}, r.err
+}
+
+func TestCreate_DownloadResolverErrorFailsClosedWithoutEnqueue(t *testing.T) {
+	svc, repo, enq := newSvc(t, []string{"SN001"}, true)
+	svc.SetDownloadAddressResolver(failingTransferResolver{err: errors.New("resolver down")})
+
+	rt, err := svc.Create(context.Background(), &CreateRestoreRequest{
+		Bucket:          CanonicalRestoreBucket,
+		ObjectPath:      "backup/cfg.xml",
+		TargetDeviceSNs: []string{"SN001"},
+	}, "alice")
+
+	require.NoError(t, err)
+	require.NotNil(t, rt)
+	require.Len(t, repo.created, 1)
+	assert.Empty(t, enq.requests, "resolver 失败时不能退回裸 bucket/object 下发")
+	require.NotNil(t, repo.created[0].ErrorMessage)
+	assert.Contains(t, *repo.created[0].ErrorMessage, "SN001")
 }
 
 func TestCreate_LegacyLogicalBucketUsesValidPhysicalBucketForMinIO(t *testing.T) {
@@ -341,6 +431,7 @@ func newSvcNilStater(t *testing.T, knownSNs []string) (*RestoreService, *mockRes
 	devRepo := &fakeDeviceLookup{knownSNs: known}
 	// stater 显式传 nil → 预检被跳过，由 computeSourceMD5 的 GetObject 兜底翻译。
 	svc := NewRestoreService(repo, devRepo, enq, nil, NewRestoreMetrics(nil), zap.NewNop())
+	setRestoreTransferPolicy(t, svc, transfercfg.ProtocolPolicyForceHTTP, transfercfg.HTTPSCapabilityNotRead)
 	return svc, repo, enq
 }
 
@@ -481,7 +572,7 @@ func TestCreateByTaskID_resolvesAndDispatches(t *testing.T) {
 	require.NotNil(t, res.Task)
 	require.Nil(t, res.Warning, "single-device source must have no warning")
 	require.Len(t, enq.requests, 1)
-	assert.Contains(t, string(enq.requests[0].Params), `"url":"config-backup/backup/2026/04/29/backup-abcdef12-SN001.xml.gz"`)
+	assert.Contains(t, string(enq.requests[0].Params), `"url":"http://download.example.com:8080/proxy/smallcell/FileDownloadService/config-backup/backup/2026/04/29/backup-abcdef12-SN001.xml.gz"`)
 }
 
 func TestCreateByTaskID_multiDeviceWarning(t *testing.T) {
@@ -590,8 +681,38 @@ func TestCreateBySnapshot_AllPresent_FansOutPerDevice(t *testing.T) {
 		urls = append(urls, params["url"].(string))
 	}
 	assert.ElementsMatch(t,
-		[]string{"config-snapshots/SN001_CFG.xml", "config-snapshots/SN002_CFG.xml"},
+		[]string{
+			"http://download.example.com:8080/proxy/smallcell/FileDownloadService/config-snapshots/SN001_CFG.xml",
+			"http://download.example.com:8080/proxy/smallcell/FileDownloadService/config-snapshots/SN002_CFG.xml",
+		},
 		urls)
+}
+
+func TestCreateBySnapshot_ForceHTTPDoesNotReadCapabilityAndEncodesPath(t *testing.T) {
+	svc, _, enq := newSvc(t, []string{"SN001"}, true)
+	reader := setRestoreTransferPolicy(t, svc, transfercfg.ProtocolPolicyForceHTTP, transfercfg.HTTPSCapabilityEnabled)
+	svc.SetSnapshotLookup(&fakeSnapshotLookup{rows: map[string]*ConfigSnapshot{
+		"SN001": {
+			SerialNumber: "SN001",
+			FileName:     "配置 A+B.xml",
+			FileExt:      "xml",
+			ObjectBucket: "config-snapshots",
+			ObjectPath:   "SN001/配置 A+B.xml",
+			Source:       SnapshotSourceManualUpload,
+		},
+	}})
+
+	res, err := svc.CreateBySnapshot(context.Background(),
+		&CreateBySnapshotRequest{TargetDeviceSNs: []string{"SN001"}}, "alice")
+
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.Len(t, enq.requests, 1)
+	assert.Zero(t, reader.calls)
+	assert.Equal(t,
+		"http://download.example.com:8080/proxy/smallcell/FileDownloadService/config-snapshots/SN001/%E9%85%8D%E7%BD%AE%20A+B.xml",
+		restoreQueuedURL(t, enq.requests[0]),
+	)
 }
 
 func TestCreateBySnapshot_PartialMissing_IntegrallyRejects(t *testing.T) {

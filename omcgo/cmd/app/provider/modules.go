@@ -1006,6 +1006,23 @@ func initBackupModule(c *Container) error {
 	restoreService := backup.NewRestoreService(
 		restoreRepo, c.DeviceRepo, c.TaskSvc, c.MinIO, restoreMetrics, logger,
 	)
+	restoreSysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
+	restoreTransferPolicy := transfercfg.NewPolicy(
+		newSoftwareTransferDefaults(c.Cfg.Upgrade),
+		newTransferSysConfigLookup(restoreSysConfigRepo),
+	)
+	restoreParamRepo := c.ParamRepo
+	if restoreParamRepo == nil {
+		restoreParamRepo = device.NewPgDeviceParameterRepository(c.PgPool)
+	}
+	restoreService.SetTransferProvider(restoreTransferPolicy)
+	restoreService.SetDownloadAddressResolver(newTransferAddressResolver(
+		restoreTransferPolicy,
+		restoreParamRepo,
+	))
+	if c.SysConfigSvc != nil {
+		registerTransferPolicyInvalidation(c.SysConfigSvc, restoreTransferPolicy)
+	}
 	// 配置文件恢复在下发时读 MinIO 文件流现算 Download MD5（Download 报文必填字段）。
 	restoreService.SetObjectReader(backup.NewMinIOObjectReader(c.MinIO))
 	// #70 task 3：跨版本检查（快照来源版本 vs 目标设备当前固件版本）。默认 warn+audit

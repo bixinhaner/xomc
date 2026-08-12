@@ -259,7 +259,15 @@ func runACS(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	deps.RPCDispatcher = rpc.NewDispatcher(rpc.DispatcherConfig{TransferConfigProvider: transferPolicy})
+	transferParamRepo := device.NewPgDeviceParameterRepository(inf.PgPool)
+	deps.RPCDispatcher = rpc.NewDispatcher(rpc.DispatcherConfig{
+		TransferConfigProvider: transferPolicy,
+		TransferAddressResolver: transfercfg.NewAddressResolver(
+			transferPolicy,
+			transfercfg.NewDeviceParameterHTTPSCapabilityReader(transferParamRepo),
+		),
+		DownloadDeviceLookup: device.NewPgDeviceRepository(inf.PgPool),
+	})
 
 	// PM queue-health metrics have an independent lifecycle: they must continue
 	// to sample when uploads/backpressure are disabled or when MinIO/TSDB is not
