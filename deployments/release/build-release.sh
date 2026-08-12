@@ -77,6 +77,7 @@ done
 log "运行发布前回归门禁 ..."
 RELEASE_VERIFY_SCRIPTS=(
   "$SCRIPT_DIR/bundle/deploy/storage-compose_test.sh"
+  "$SCRIPT_DIR/bundle/deploy/nginx-https-file-entry_test.sh"
   "$SCRIPT_DIR/bundle/deploy/license-keystore-release_test.sh"
   "$REPO_ROOT/deployments/monitoring/tests/validate-tempo-memory-budget.sh"
   "$SCRIPT_DIR/validate-release-archive-portability.sh"
