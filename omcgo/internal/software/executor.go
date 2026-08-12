@@ -35,6 +35,7 @@ type UpgradeExecutor struct {
 	// 'acs_transfer' 类别）拿，对应前端"系统管理 → ACS 传输"页面。未注入或运行时未配时退化到
 	// acsUploadBaseURL（YAML 静态配置），仍为空则 Warn——CPE 拿到纯路径必然拒绝上传。
 	transferProvider transfercfg.Provider
+	downloadResolver downloadAddressResolver
 	acsUploadBaseURL string // CPE 可达的 ACS 上传服务基础 URL，如 "http://localhost:8080"
 	// logCollectResumer 在设备上线时唤醒挂在 redis wait key 的 LogCollect 类子任务
 	// （备份 / 日志采集，FirmwareID=NULL，没有"重新执行"所需的固件信息）。实现位于
@@ -95,6 +96,17 @@ func (e *UpgradeExecutor) SetUploadConfig(acsUploadBaseURL string) {
 // BaseURL / Username / Password。改配置不用重启进程，30 秒缓存内自动生效。
 func (e *UpgradeExecutor) SetTransferProvider(p transfercfg.Provider) {
 	e.transferProvider = p
+}
+
+type downloadAddressResolver interface {
+	Resolve(ctx context.Context, deviceID uuid.UUID, direction transfercfg.TransferDirection) (transfercfg.AddressDecision, error)
+}
+
+// SetDownloadAddressResolver injects the unified HTTP/HTTPS address decision
+// used by ordinary IMG Download dispatch. Non-IMG paths keep their legacy
+// relative URL behavior until their own rollout issues wire into transfercfg.
+func (e *UpgradeExecutor) SetDownloadAddressResolver(r downloadAddressResolver) {
+	e.downloadResolver = r
 }
 
 // SetLogCollectResumer 注入 LogCollect 类子任务"设备上线即重试"的回调实现。
@@ -182,6 +194,10 @@ func (e *UpgradeExecutor) SetFirmwareMetrics(m *FirmwareMetrics) {
 // ExecuteOne runs the upgrade flow for a single sub-task.
 // Flow: Step 1 (online check) → Step 2 (send Download cmd) → Step 3 (monitor download) → wait for events.
 func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTask, fw *FirmwareVersion, isKeepConfig bool, downloadFileType string) {
+	e.executeOne(ctx, subTask, fw, isKeepConfig, downloadFileType, true)
+}
+
+func (e *UpgradeExecutor) executeOne(ctx context.Context, subTask *UpgradeSubTask, fw *FirmwareVersion, isKeepConfig bool, downloadFileType string, resolveIMGDownload bool) {
 	// #59 Problem 3 紧急叫停（第一道）：ctx 已被取消（任务被 Suspend/Terminate/阈值暂停）
 	// 时整批 goroutine 还没轮到执行就提前退出，绝不下发。ctx.Err() 非阻塞，比 select 更直白。
 	if ctx.Err() != nil {
@@ -263,6 +279,15 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 	effectiveDownloadFileType := downloadFileType
 	if effectiveDownloadFileType == "" {
 		effectiveDownloadFileType = e.adapter.DownloadFileType(fw.FileType)
+	}
+	if resolveIMGDownload && shouldResolveIMGDownloadURL(fw) && e.downloadResolver != nil {
+		resolvedURL, err := e.resolveIMGDownloadURL(ctx, dev.ID, fw)
+		if err != nil {
+			e.releaseDeviceLock(context.Background(), dev.SerialNumber, subTask.ID)
+			e.failSubTask(ctx, subTask, fmt.Sprintf("Upgrade can not be started, invalid download URL: %v", err), FailureInternalError)
+			return
+		}
+		downloadURL = resolvedURL
 	}
 
 	rawMode := "true"
@@ -346,6 +371,53 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 
 	// Step 3: Start download progress monitor in background
 	go e.monitorDownloadProgress(context.Background(), subTask, dev.SerialNumber)
+}
+
+func shouldResolveIMGDownloadURL(fw *FirmwareVersion) bool {
+	return fw != nil && fw.FileType == FileTypeIMG
+}
+
+func (e *UpgradeExecutor) resolveIMGDownloadURL(ctx context.Context, deviceID uuid.UUID, fw *FirmwareVersion) (string, error) {
+	if e.downloadResolver == nil {
+		return "", fmt.Errorf("download address resolver is not configured")
+	}
+	decision, err := e.downloadResolver.Resolve(ctx, deviceID, transfercfg.TransferDirectionDownload)
+	if err != nil {
+		return "", fmt.Errorf("resolve download address: %w", err)
+	}
+
+	servicePath := ""
+	if e.transferProvider != nil {
+		servicePath = e.transferProvider.Snapshot(ctx).Download.Path
+	}
+	segments, err := firmwareDownloadObjectSegments(fw.MinIOPath)
+	if err != nil {
+		return "", err
+	}
+	downloadURL, err := transfercfg.BuildURL(decision.BaseURL, servicePath, segments, nil)
+	if err != nil {
+		return "", fmt.Errorf("build download URL: %w", err)
+	}
+	return downloadURL, nil
+}
+
+func firmwareDownloadObjectSegments(minioPath string) ([]string, error) {
+	trimmed := strings.Trim(minioPath, "/")
+	if trimmed == "" {
+		return nil, fmt.Errorf("firmware object path is empty")
+	}
+	parts := strings.Split(trimmed, "/")
+	segments := make([]string, 0, len(parts)+1)
+	if parts[0] != "firmware" {
+		segments = append(segments, "firmware")
+	}
+	for _, part := range parts {
+		if part == "" {
+			return nil, fmt.Errorf("firmware object path contains an empty segment")
+		}
+		segments = append(segments, part)
+	}
+	return segments, nil
 }
 
 // monitorDownloadProgress polls the DownloadingFlag Redis key to track download progress.
@@ -1272,7 +1344,7 @@ func (e *UpgradeExecutor) HandleDeviceOnline(ctx context.Context, evt event.Even
 		// Reset status to pending for re-execution
 		e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradePending, "")
 
-		go e.ExecuteOne(context.Background(), subTask, fw, isKeepConfig, downloadFileType)
+		go e.executeOne(context.Background(), subTask, fw, isKeepConfig, downloadFileType, false)
 		return nil
 	}
 

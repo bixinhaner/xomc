@@ -15,16 +15,23 @@ const (
 	Category = "acs_transfer"
 	cacheTTL = 30 * time.Second
 
-	KeyUploadBaseURL     = "uploadBaseURL"
-	KeyUploadPath        = "uploadPath"
-	KeyUploadUsername    = "uploadUsername"
-	KeyUploadPassword    = "uploadPassword"
-	KeyUploadMaxFileSize = "uploadMaxFileSize"
+	KeyProtocolPolicy = "protocolPolicy"
 
-	KeyDownloadBaseURL  = "downloadBaseURL"
-	KeyDownloadPath     = "downloadPath"
-	KeyDownloadUsername = "downloadUsername"
-	KeyDownloadPassword = "downloadPassword"
+	ProtocolPolicyForceHTTP   = "force_http"
+	ProtocolPolicyPreferHTTPS = "prefer_https"
+
+	KeyUploadBaseURL      = "uploadBaseURL"
+	KeyHTTPSUploadBaseURL = "httpsUploadBaseURL"
+	KeyUploadPath         = "uploadPath"
+	KeyUploadUsername     = "uploadUsername"
+	KeyUploadPassword     = "uploadPassword"
+	KeyUploadMaxFileSize  = "uploadMaxFileSize"
+
+	KeyDownloadBaseURL      = "downloadBaseURL"
+	KeyHTTPSDownloadBaseURL = "httpsDownloadBaseURL"
+	KeyDownloadPath         = "downloadPath"
+	KeyDownloadUsername     = "downloadUsername"
+	KeyDownloadPassword     = "downloadPassword"
 
 	// KeyMaxGlobalUpgradeConcurrency 系统级（跨任务）升级/回退设备并发上限。
 	// 前端"系统设置 → ACS 传输配置"页维护；software 模块消费（全局升级闸）。
@@ -38,23 +45,26 @@ type Provider interface {
 type SysConfigLookup func(ctx context.Context, category, key string) (value string, found bool)
 
 type UploadSettings struct {
-	BaseURL     string
-	Path        string
-	Username    string
-	Password    string
-	MaxFileSize int64
+	BaseURL      string
+	HTTPSBaseURL string
+	Path         string
+	Username     string
+	Password     string
+	MaxFileSize  int64
 }
 
 type DownloadSettings struct {
-	BaseURL  string
-	Path     string
-	Username string
-	Password string
+	BaseURL      string
+	HTTPSBaseURL string
+	Path         string
+	Username     string
+	Password     string
 }
 
 type Snapshot struct {
-	Upload   UploadSettings
-	Download DownloadSettings
+	ProtocolPolicy string
+	Upload         UploadSettings
+	Download       DownloadSettings
 	// MaxGlobalUpgradeConcurrency 系统级（跨任务）升级/回退设备并发上限；
 	// 0 表示 sys_config 未配置，消费方应回落自己的默认值。
 	MaxGlobalUpgradeConcurrency int
@@ -71,6 +81,7 @@ type Policy struct {
 
 func DefaultsFromACSConfig(cfg appconfig.ACSConfig) Snapshot {
 	return Snapshot{
+		ProtocolPolicy: ProtocolPolicyForceHTTP,
 		Upload: UploadSettings{
 			BaseURL:     normalizeBaseURL(cfg.Upload.BaseURL),
 			Path:        normalizePath(cfg.Upload.Path),
@@ -88,9 +99,14 @@ func DefaultsFromACSConfig(cfg appconfig.ACSConfig) Snapshot {
 }
 
 func NewPolicy(defaults Snapshot, lookup SysConfigLookup) *Policy {
+	if strings.TrimSpace(defaults.ProtocolPolicy) == "" {
+		defaults.ProtocolPolicy = ProtocolPolicyForceHTTP
+	}
 	defaults.Upload.BaseURL = normalizeBaseURL(defaults.Upload.BaseURL)
+	defaults.Upload.HTTPSBaseURL = normalizeBaseURL(defaults.Upload.HTTPSBaseURL)
 	defaults.Upload.Path = normalizePath(defaults.Upload.Path)
 	defaults.Download.BaseURL = normalizeBaseURL(defaults.Download.BaseURL)
+	defaults.Download.HTTPSBaseURL = normalizeBaseURL(defaults.Download.HTTPSBaseURL)
 	defaults.Download.Path = normalizePath(defaults.Download.Path)
 	return &Policy{lookup: lookup, defaults: defaults}
 }
@@ -120,9 +136,19 @@ func (p *Policy) InvalidateCache() {
 }
 
 func (p *Policy) loadFromSysConfig(ctx context.Context, snap *Snapshot) {
+	if value, ok := p.lookup(ctx, Category, KeyProtocolPolicy); ok {
+		if trimmed, ok := optionalString(value); ok {
+			snap.ProtocolPolicy = trimmed
+		}
+	}
 	if value, ok := p.lookup(ctx, Category, KeyUploadBaseURL); ok {
 		if normalized, ok := normalizedOptionalBaseURL(value); ok {
 			snap.Upload.BaseURL = normalized
+		}
+	}
+	if value, ok := p.lookup(ctx, Category, KeyHTTPSUploadBaseURL); ok {
+		if normalized, ok := normalizedOptionalBaseURL(value); ok {
+			snap.Upload.HTTPSBaseURL = normalized
 		}
 	}
 	if value, ok := p.lookup(ctx, Category, KeyUploadPath); ok {
@@ -149,6 +175,11 @@ func (p *Policy) loadFromSysConfig(ctx context.Context, snap *Snapshot) {
 	if value, ok := p.lookup(ctx, Category, KeyDownloadBaseURL); ok {
 		if normalized, ok := normalizedOptionalBaseURL(value); ok {
 			snap.Download.BaseURL = normalized
+		}
+	}
+	if value, ok := p.lookup(ctx, Category, KeyHTTPSDownloadBaseURL); ok {
+		if normalized, ok := normalizedOptionalBaseURL(value); ok {
+			snap.Download.HTTPSBaseURL = normalized
 		}
 	}
 	if value, ok := p.lookup(ctx, Category, KeyDownloadPath); ok {

@@ -26535,6 +26535,34 @@ SET product_scope = scope.product_scope,
 FROM scope
 WHERE tt.type_code = scope.type_code;
 
+-- Consolidated pre-release ACS transfer protocol defaults.
+INSERT INTO public.sys_configs (
+    id, category, key, value, value_type, description, is_public,
+    created_at, updated_at, description_i18n
+) VALUES
+    (
+        '29400000-0000-4000-8000-000000000001',
+        'acs_transfer', 'protocolPolicy', 'force_http', 'string',
+        '基站文件传输协议策略：force_http/prefer_https', false,
+        now(), now(),
+        '{"zh-CN":"基站文件传输协议策略","en-US":"Base station file transfer protocol policy"}'::jsonb
+    ),
+    (
+        '29400000-0000-4000-8000-000000000002',
+        'acs_transfer', 'httpsUploadBaseURL', '', 'string',
+        '基站 HTTPS 文件上传基础地址', false,
+        now(), now(),
+        '{"zh-CN":"HTTPS 上传基础地址","en-US":"HTTPS upload base URL"}'::jsonb
+    ),
+    (
+        '29400000-0000-4000-8000-000000000003',
+        'acs_transfer', 'httpsDownloadBaseURL', '', 'string',
+        '基站 HTTPS 文件下载基础地址', false,
+        now(), now(),
+        '{"zh-CN":"HTTPS 下载基础地址","en-US":"HTTPS download base URL"}'::jsonb
+    )
+ON CONFLICT (category, key) DO NOTHING;
+
 -- Consolidated pre-release geofence defaults and administrator permissions.
 
 -- +omcgo MainReconcileBegin

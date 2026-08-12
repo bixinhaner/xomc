@@ -368,6 +368,14 @@ func (s *SoftwareService) SetTransferProvider(p transfercfg.Provider) {
 	s.executor.SetTransferProvider(p)
 }
 
+func (s *SoftwareService) SetDownloadAddressResolver(r interface {
+	Resolve(context.Context, uuid.UUID, transfercfg.TransferDirection) (transfercfg.AddressDecision, error)
+}) {
+	if s.executor != nil {
+		s.executor.SetDownloadAddressResolver(r)
+	}
+}
+
 // acquireGlobalUpgradeSlot 为 taskID 占用一个系统级升级槽位（跨任务轮转分配）。
 // 占位前先按运行时配置刷新上限（系统设置 → ACS 传输配置 → 升级并发上限，30s 缓存
 // 生效）；满载排队等待，ctx 取消（任务急停）时放弃并返回 false。

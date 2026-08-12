@@ -1,4 +1,4 @@
-import { Card, Form, Input, Space, Typography } from 'antd';
+import { Card, Form, Input, Segmented, Space, Typography } from 'antd';
 import { AddonInput, AddonInputNumber } from '@/components/common/InputAddon';
 import { useT } from '@/hooks/useT';
 import {
@@ -47,6 +47,40 @@ function validateTransferAddress(
 	const result = parseTransferAddress(raw);
 	if (result.kind !== 'invalid') return Promise.resolve();
 	return Promise.reject(new Error(/^https?:/i.test(raw) ? baseURLError : hostError));
+}
+
+async function validateHTTPTransferAddress(
+	value: unknown,
+	hostError: string,
+	baseURLError: string,
+	httpSchemeError: string,
+): Promise<void> {
+	await validateTransferAddress(value, hostError, baseURLError);
+	const raw = typeof value === 'string' ? value : '';
+	if (!raw) return;
+	let protocol: string;
+	try {
+		protocol = new URL(raw).protocol;
+	} catch (error) {
+		throw new Error(baseURLError, { cause: error });
+	}
+	if (protocol !== 'http:') {
+		throw new Error(httpSchemeError);
+	}
+}
+
+function validateHTTPSBaseURL(value: unknown, errorMessage: string): Promise<void> {
+	const raw = typeof value === 'string' ? value : '';
+	if (!raw) return Promise.resolve();
+	const result = parseTransferAddress(raw);
+	if (result.kind === 'invalid') return Promise.reject(new Error(errorMessage));
+	try {
+		return new URL(raw).protocol === 'https:'
+			? Promise.resolve()
+			: Promise.reject(new Error(errorMessage));
+	} catch {
+		return Promise.reject(new Error(errorMessage));
+	}
 }
 
 interface TransferAddressInputProps extends Omit<
@@ -110,6 +144,7 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 			layout="vertical"
 			size="small"
 			initialValues={{
+				protocolPolicy: 'force_http',
 				uploadPath: DEFAULT_UPLOAD_PATH,
 				downloadPath: DEFAULT_DOWNLOAD_PATH,
 				uploadMaxFileSize: DEFAULT_MAX_FILE_SIZE,
@@ -120,6 +155,18 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 				{t('system.transfer.inheritHint')} {t('system.transfer.deviceReachabilityHelp')}
 			</Typography.Paragraph>
 
+			<Form.Item
+				name="protocolPolicy"
+				label={t('system.transfer.protocolPolicy')}
+			>
+				<Segmented
+					options={[
+						{ label: t('system.transfer.forceHTTP'), value: 'force_http' },
+						{ label: t('system.transfer.preferHTTPS'), value: 'prefer_https' },
+					]}
+				/>
+			</Form.Item>
+
 			<Card
 				size="small"
 				title={<span style={cardTitleStyle}>{t('system.transfer.uploadSection')}</span>}
@@ -127,19 +174,40 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 			>
 				<Form.Item
 					name="uploadBaseURL"
-					label={t('system.transfer.uploadServerIP')}
+					label={t('system.transfer.httpUploadBaseURL')}
 					extra={t('system.transfer.serverIPHelp')}
 					rules={[
 						{
-							validator: (_, value) => validateTransferAddress(
+							validator: (_, value) => validateHTTPTransferAddress(
 								value,
 								t('system.transfer.serverIPInvalid'),
 								t('system.transfer.baseURLInvalid'),
+								t('system.transfer.httpBaseURLInvalid'),
 							),
 						},
 					]}
 				>
 					<TransferAddressInput placeholder={t('system.transfer.serverIPPlaceholder')} />
+				</Form.Item>
+				<Form.Item
+					name="httpsUploadBaseURL"
+					label={t('system.transfer.httpsUploadBaseURL')}
+					extra={t('system.transfer.httpsBaseURLHelp')}
+					dependencies={['protocolPolicy']}
+					rules={[
+						({ getFieldValue }) => ({
+							required: getFieldValue('protocolPolicy') === 'prefer_https',
+							message: t('system.transfer.httpsBaseURLRequired'),
+						}),
+						{
+							validator: (_, value) => validateHTTPSBaseURL(
+								value,
+								t('system.transfer.httpsBaseURLInvalid'),
+							),
+						},
+					]}
+				>
+					<Input placeholder={t('system.transfer.httpsBaseURLPlaceholder')} />
 				</Form.Item>
 				<Space orientation="vertical" style={{ width: '100%' }} size={12}>
 					<Form.Item
@@ -174,19 +242,40 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 			>
 				<Form.Item
 					name="downloadBaseURL"
-					label={t('system.transfer.downloadServerIP')}
+					label={t('system.transfer.httpDownloadBaseURL')}
 					extra={t('system.transfer.serverIPHelp')}
 					rules={[
 						{
-							validator: (_, value) => validateTransferAddress(
+							validator: (_, value) => validateHTTPTransferAddress(
 								value,
 								t('system.transfer.serverIPInvalid'),
 								t('system.transfer.baseURLInvalid'),
+								t('system.transfer.httpBaseURLInvalid'),
 							),
 						},
 					]}
 				>
 					<TransferAddressInput placeholder={t('system.transfer.serverIPPlaceholder')} />
+				</Form.Item>
+				<Form.Item
+					name="httpsDownloadBaseURL"
+					label={t('system.transfer.httpsDownloadBaseURL')}
+					extra={t('system.transfer.httpsBaseURLHelp')}
+					dependencies={['protocolPolicy']}
+					rules={[
+						({ getFieldValue }) => ({
+							required: getFieldValue('protocolPolicy') === 'prefer_https',
+							message: t('system.transfer.httpsBaseURLRequired'),
+						}),
+						{
+							validator: (_, value) => validateHTTPSBaseURL(
+								value,
+								t('system.transfer.httpsBaseURLInvalid'),
+							),
+						},
+					]}
+				>
+					<Input placeholder={t('system.transfer.httpsBaseURLPlaceholder')} />
 				</Form.Item>
 				<Form.Item
 					name="downloadPath"

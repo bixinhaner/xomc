@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/task"
@@ -72,6 +73,47 @@ type stubPMSetupAdmissionGate struct {
 	renewed  int
 }
 
+type stubPMUploadAddressResolver struct {
+	decision  transfercfg.AddressDecision
+	err       error
+	deviceIDs []uuid.UUID
+	direction transfercfg.TransferDirection
+}
+
+func (r *stubPMUploadAddressResolver) Resolve(
+	_ context.Context,
+	deviceID uuid.UUID,
+	direction transfercfg.TransferDirection,
+) (transfercfg.AddressDecision, error) {
+	r.deviceIDs = append(r.deviceIDs, deviceID)
+	r.direction = direction
+	if r.err != nil {
+		return transfercfg.AddressDecision{}, r.err
+	}
+	return r.decision, nil
+}
+
+type staticPMTransferProvider struct {
+	snapshot transfercfg.Snapshot
+}
+
+func (p staticPMTransferProvider) Snapshot(context.Context) transfercfg.Snapshot {
+	return p.snapshot
+}
+
+type stubPMHTTPSCapabilityReader struct {
+	status    transfercfg.HTTPSCapabilityStatus
+	deviceIDs []uuid.UUID
+}
+
+func (r *stubPMHTTPSCapabilityReader) ReadHTTPSCapability(
+	_ context.Context,
+	deviceID uuid.UUID,
+) transfercfg.HTTPSCapabilityStatus {
+	r.deviceIDs = append(r.deviceIDs, deviceID)
+	return r.status
+}
+
 func (g *stubPMSetupAdmissionGate) Acquire(
 	context.Context,
 	string,
@@ -106,6 +148,19 @@ func samplePayload() device.DeviceOnlineEvent {
 		ProductClass: "FAP/mBS31001/SC",
 		SwVersion:    "BaiBLQ_5.0.16.1_1229",
 	}
+}
+
+func capturedPMUploadURL(t *testing.T, req *task.CreateTaskRequest) string {
+	t.Helper()
+	var params spvParams
+	require.NoError(t, json.Unmarshal(req.Params, &params))
+	for _, v := range params.Values {
+		if v.Name == "Device.FAP.PerfMgmt.Config.1.URL" {
+			return v.Value
+		}
+	}
+	t.Fatalf("missing PM upload URL SPV parameter")
+	return ""
 }
 
 func Test_OnlineSubscriber_EnqueuesSingleSPVWith3Params(t *testing.T) {
@@ -293,6 +348,144 @@ func Test_OnlineSubscriber_BaseURLResolverEmptyFallsBackToTemplate(t *testing.T)
 			assert.Contains(t, v.Value, "http://1.2.3.4:8080/smallcell/FileUploadService")
 		}
 	}
+}
+
+func Test_OnlineSubscriber_UsesUnifiedUploadAddressDecision(t *testing.T) {
+	cases := []struct {
+		name                string
+		policy              string
+		capability          transfercfg.HTTPSCapabilityStatus
+		wantURL             string
+		wantCapabilityReads int
+	}{
+		{
+			name:                "force_http_even_when_capability_enabled",
+			policy:              transfercfg.ProtocolPolicyForceHTTP,
+			capability:          transfercfg.HTTPSCapabilityEnabled,
+			wantURL:             "http://upload-http.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+			wantCapabilityReads: 0,
+		},
+		{
+			name:                "prefer_https_enabled",
+			policy:              transfercfg.ProtocolPolicyPreferHTTPS,
+			capability:          transfercfg.HTTPSCapabilityEnabled,
+			wantURL:             "https://upload-https.example.com:8443/smallcell/FileUploadService?fileType=PM&filename=",
+			wantCapabilityReads: 1,
+		},
+		{
+			name:                "prefer_https_disabled_falls_back_to_http",
+			policy:              transfercfg.ProtocolPolicyPreferHTTPS,
+			capability:          transfercfg.HTTPSCapabilityDisabled,
+			wantURL:             "http://upload-http.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+			wantCapabilityReads: 1,
+		},
+		{
+			name:                "prefer_https_unknown_falls_back_to_http",
+			policy:              transfercfg.ProtocolPolicyPreferHTTPS,
+			capability:          transfercfg.HTTPSCapabilityUnknown,
+			wantURL:             "http://upload-http.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+			wantCapabilityReads: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubTaskCreator{}
+			capabilityReader := &stubPMHTTPSCapabilityReader{status: tc.capability}
+			resolver := transfercfg.NewAddressResolver(staticPMTransferProvider{snapshot: transfercfg.Snapshot{
+				ProtocolPolicy: tc.policy,
+				Upload: transfercfg.UploadSettings{
+					BaseURL:      "http://upload-http.example.com:8080",
+					HTTPSBaseURL: "https://upload-https.example.com:8443",
+				},
+			}}, capabilityReader)
+			s := NewOnlineSubscriber(
+				stub,
+				"http://template.example.com:7557/smallcell/FileUploadService?fileType=PM&filename=",
+				"1",
+				900,
+				nil,
+			)
+			s.SetUploadAddressResolver(resolver)
+			payload := samplePayload()
+
+			require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, payload)))
+			require.Len(t, stub.captured, 1)
+			assert.Equal(t, tc.wantURL, capturedPMUploadURL(t, stub.captured[0]))
+			assert.Len(t, capabilityReader.deviceIDs, tc.wantCapabilityReads)
+			if tc.wantCapabilityReads > 0 {
+				assert.Equal(t, payload.DeviceID, capabilityReader.deviceIDs[0])
+			}
+		})
+	}
+}
+
+func Test_OnlineSubscriber_UploadAddressResolverErrorRetriesEvent(t *testing.T) {
+	stub := &stubTaskCreator{}
+	s := NewOnlineSubscriber(
+		stub,
+		"http://template.example.com:7557/smallcell/FileUploadService?fileType=PM&filename=",
+		"1",
+		900,
+		nil,
+	)
+	s.SetUploadAddressResolver(&stubPMUploadAddressResolver{err: errors.New("https base unavailable")})
+
+	err := s.handleOnline(context.Background(), mustEvent(t, samplePayload()))
+	require.Error(t, err)
+	assert.Empty(t, stub.captured)
+}
+
+func Test_OnlineSubscriber_RegisteredPassesDeviceIDToUploadAddressResolver(t *testing.T) {
+	stub := &stubTaskCreator{}
+	resolver := &stubPMUploadAddressResolver{decision: transfercfg.AddressDecision{
+		Direction: transfercfg.TransferDirectionUpload,
+		BaseURL:   "https://upload.example.com:8443",
+	}}
+	s := NewOnlineSubscriber(
+		stub,
+		"http://template.example.com:7557/smallcell/FileUploadService?fileType=PM&filename=",
+		"1",
+		900,
+		nil,
+	)
+	s.SetUploadAddressResolver(resolver)
+	deviceID := uuid.New()
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]interface{}{
+		"device_id":     deviceID.String(),
+		"serial_number": "REG-ADDR-001",
+		"created":       true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.handleRegistered(context.Background(), evt))
+	require.Len(t, stub.captured, 1)
+	require.Len(t, resolver.deviceIDs, 1)
+	assert.Equal(t, deviceID, resolver.deviceIDs[0])
+	assert.Equal(t, "https://upload.example.com:8443/smallcell/FileUploadService?fileType=PM&filename=", capturedPMUploadURL(t, stub.captured[0]))
+}
+
+func Test_OnlineSubscriber_UnifiedUploadAddressPreservesBaseProxyPrefix(t *testing.T) {
+	stub := &stubTaskCreator{}
+	resolver := &stubPMUploadAddressResolver{decision: transfercfg.AddressDecision{
+		Direction: transfercfg.TransferDirectionUpload,
+		BaseURL:   "https://upload.example.com:8443/reverse-proxy",
+	}}
+	s := NewOnlineSubscriber(
+		stub,
+		"http://template.example.com:7557/smallcell/FileUploadService?fileType=PM&filename=",
+		"1",
+		900,
+		nil,
+	)
+	s.SetUploadAddressResolver(resolver)
+
+	require.NoError(t, s.handleOnline(context.Background(), mustEvent(t, samplePayload())))
+	require.Len(t, stub.captured, 1)
+	assert.Equal(
+		t,
+		"https://upload.example.com:8443/reverse-proxy/smallcell/FileUploadService?fileType=PM&filename=",
+		capturedPMUploadURL(t, stub.captured[0]),
+	)
 }
 
 // Test_OnlineSubscriber_RegisteredTriggersSPV 验证：首次 onboard 的 device.registered

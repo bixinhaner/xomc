@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
@@ -47,6 +48,7 @@ type OnlineSubscriber struct {
 	// acs_transfer.uploadBaseURL，与「系统配置→ACS 传输」页同源）。非空合法时
 	// 覆盖 urlTemplate 的 scheme/host（path+query 仍取自 urlTemplate）；为空回退 urlTemplate。
 	resolveBaseURL func(ctx context.Context) string
+	resolveAddress PMUploadAddressResolver
 	admissionGate  PMSetupAdmissionGate
 	logger         *zap.Logger
 }
@@ -78,6 +80,14 @@ type PMSetupAdmissionGate interface {
 	Acquire(ctx context.Context, deviceSN string) (leaseToken string, acquired bool, err error)
 	Renew(ctx context.Context, deviceSN, leaseToken string) (renewed bool, err error)
 	Release(ctx context.Context, deviceSN, leaseToken string) error
+}
+
+type PMUploadAddressResolver interface {
+	Resolve(
+		ctx context.Context,
+		deviceID uuid.UUID,
+		direction transfercfg.TransferDirection,
+	) (transfercfg.AddressDecision, error)
 }
 
 type redisPMSetupAdmissionGate struct {
@@ -214,6 +224,10 @@ func (s *OnlineSubscriber) SetUploadBaseURLResolver(fn func(ctx context.Context)
 	s.resolveBaseURL = fn
 }
 
+func (s *OnlineSubscriber) SetUploadAddressResolver(resolver PMUploadAddressResolver) {
+	s.resolveAddress = resolver
+}
+
 func (s *OnlineSubscriber) SetAdmissionGate(gate PMSetupAdmissionGate) {
 	s.admissionGate = gate
 }
@@ -281,7 +295,14 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 		return nil
 	}
 
-	url := s.resolveUploadURL(ctx)
+	url, err := s.resolveUploadURL(ctx, deviceID)
+	if err != nil {
+		s.logger.Warn("resolve PM upload URL failed",
+			zap.String("device_sn", serialNumber),
+			zap.String("device_id", deviceID),
+			zap.Error(err))
+		return fmt.Errorf("resolve PM upload URL: %w", err)
+	}
 	// host 非空守卫：渲染后若缺 scheme 或 host（如 OMC_PUBLIC_HOST 漏配渲染成
 	// "http://:7557/..."，u.Hostname() 返空；或 "${...}" 残留），跳过 SPV 不污染设备。
 	if u, perr := neturl.Parse(url); perr != nil || u.Scheme == "" || u.Hostname() == "" {
@@ -485,31 +506,58 @@ func jsonSemanticallyEqual(left, right json.RawMessage) bool {
 }
 
 // resolveUploadURL 计算 PM 上传 URL：
-//   - 无 resolveBaseURL（未注入）或解析为空/非法 → 回退 expandEnv(urlTemplate)；
-//   - 解析到合法 base（如 sys_configs.acs_transfer.uploadBaseURL=http://172.19.1.173:8080）
-//     → 用 base 的 scheme/host，path+query 仍取自 urlTemplate（保留 fileType=PM&filename= 等），
-//     使上传地址与「系统配置→ACS 传输」页同源、改 IP 即时生效、无需重建镜像。
-func (s *OnlineSubscriber) resolveUploadURL(ctx context.Context) string {
+//   - 优先走统一 transfercfg.AddressResolver，按设备 HTTPS 能力和策略选择上传基址；
+//   - 无统一 resolver 时保留旧 resolveBaseURL 兼容路径；
+//   - 最终 URL 用所选 base 的 scheme/host，path+query 仍取自 urlTemplate
+//     （保留 fileType=PM&filename= 等 PM 端约定）。
+func (s *OnlineSubscriber) resolveUploadURL(ctx context.Context, deviceID string) (string, error) {
 	rendered := expandEnv(s.urlTemplate)
+	if s.resolveAddress != nil {
+		parsedDeviceID := uuid.Nil
+		if trimmed := strings.TrimSpace(deviceID); trimmed != "" {
+			parsed, err := uuid.Parse(trimmed)
+			if err != nil {
+				s.logger.Warn("PM upload address resolver received invalid device_id; treating capability as unknown",
+					zap.String("device_id", deviceID),
+					zap.Error(err))
+			} else {
+				parsedDeviceID = parsed
+			}
+		}
+		decision, err := s.resolveAddress.Resolve(ctx, parsedDeviceID, transfercfg.TransferDirectionUpload)
+		if err != nil {
+			return "", fmt.Errorf("resolve transfer upload address: %w", err)
+		}
+		return uploadURLWithBase(rendered, decision.BaseURL)
+	}
 	if s.resolveBaseURL == nil {
-		return rendered
+		return rendered, nil
 	}
 	base := strings.TrimSpace(s.resolveBaseURL(ctx))
 	if base == "" {
-		return rendered
+		return rendered, nil
 	}
-	bu, err := neturl.Parse(base)
-	if err != nil || bu.Scheme == "" || bu.Host == "" {
-		return rendered // base 非法，回退模板
+	resolved, err := uploadURLWithBase(rendered, base)
+	if err != nil {
+		return rendered, nil // legacy base resolver 非法时仍回退模板
 	}
-	tu, terr := neturl.Parse(rendered)
-	if terr != nil || tu.Path == "" {
-		// 模板不可解析/无 path：用 base + 默认 PM 上传 path+query
-		return strings.TrimRight(base, "/") + defaultPMUploadPathQuery
+	return resolved, nil
+}
+
+func uploadURLWithBase(rendered, base string) (string, error) {
+	return transfercfg.BuildTemplateURL(base, pmUploadRelativeReference(rendered))
+}
+
+func pmUploadRelativeReference(rendered string) string {
+	tu, err := neturl.Parse(rendered)
+	if err != nil || tu.Path == "" {
+		return defaultPMUploadPathQuery
 	}
-	tu.Scheme = bu.Scheme
-	tu.Host = bu.Host
-	return tu.String()
+	relative := tu.EscapedPath()
+	if tu.RawQuery != "" || tu.ForceQuery {
+		relative += "?" + tu.RawQuery
+	}
+	return relative
 }
 
 // spvParam 是 SetParameterValuesHandler.BuildRequest 解析期望的 params.values[] 项。

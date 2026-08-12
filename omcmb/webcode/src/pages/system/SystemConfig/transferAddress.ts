@@ -103,7 +103,8 @@ function splitAuthority(authority: string): { host: string; port?: string } | un
 function hasInvalidPort(port: string | undefined): boolean {
   if (port === undefined) return false;
   if (!/^\d+$/.test(port)) return true;
-  return Number(port) > 65535;
+  const numericPort = Number(port);
+  return numericPort < 1 || numericPort > 65535;
 }
 
 function hasUnsafePath(rawPath: string): boolean {
