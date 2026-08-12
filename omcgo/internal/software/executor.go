@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -35,7 +36,8 @@ type UpgradeExecutor struct {
 	// 'acs_transfer' 类别）拿，对应前端"系统管理 → ACS 传输"页面。未注入或运行时未配时退化到
 	// acsUploadBaseURL（YAML 静态配置），仍为空则 Warn——CPE 拿到纯路径必然拒绝上传。
 	transferProvider transfercfg.Provider
-	downloadResolver downloadAddressResolver
+	uploadResolver   transferAddressResolver
+	downloadResolver transferAddressResolver
 	acsUploadBaseURL string // CPE 可达的 ACS 上传服务基础 URL，如 "http://localhost:8080"
 	// logCollectResumer 在设备上线时唤醒挂在 redis wait key 的 LogCollect 类子任务
 	// （备份 / 日志采集，FirmwareID=NULL，没有"重新执行"所需的固件信息）。实现位于
@@ -98,14 +100,21 @@ func (e *UpgradeExecutor) SetTransferProvider(p transfercfg.Provider) {
 	e.transferProvider = p
 }
 
-type downloadAddressResolver interface {
+type transferAddressResolver interface {
 	Resolve(ctx context.Context, deviceID uuid.UUID, direction transfercfg.TransferDirection) (transfercfg.AddressDecision, error)
+}
+
+// SetUploadAddressResolver injects the unified HTTP/HTTPS address decision
+// used by station log upload dispatch. Config backup upload remains on the
+// legacy base-url path until its own rollout issue wires it in.
+func (e *UpgradeExecutor) SetUploadAddressResolver(r transferAddressResolver) {
+	e.uploadResolver = r
 }
 
 // SetDownloadAddressResolver injects the unified HTTP/HTTPS address decision
 // used by ordinary IMG Download dispatch. Non-IMG paths keep their legacy
 // relative URL behavior until their own rollout issues wire into transfercfg.
-func (e *UpgradeExecutor) SetDownloadAddressResolver(r downloadAddressResolver) {
+func (e *UpgradeExecutor) SetDownloadAddressResolver(r transferAddressResolver) {
 	e.downloadResolver = r
 }
 
@@ -500,7 +509,14 @@ func taskIDPrefix(id uuid.UUID) string {
 //
 // fileType 形如 "10 48BF74 Configuration File" / "12 48BF74 Configuration File" /
 // "4 Vendor Log File 1,2,3,4"——以第一个 token 的数字部分区分。
-func deriveUploadCommandKey(resolvedFileType, oui, serialNumber, subTaskID string) string {
+func deriveUploadCommandKey(resolvedFileType, oui, serialNumber, subTaskID string, runtimeLog bool) string {
+	if runtimeLog {
+		short := subTaskID
+		if len(short) > 13 {
+			short = short[:13]
+		}
+		return fmt.Sprintf("Collect LOG,%s", short)
+	}
 	parts := strings.SplitN(strings.TrimSpace(resolvedFileType), " ", 2)
 	if len(parts) < 2 {
 		return subTaskID
@@ -518,15 +534,6 @@ func deriveUploadCommandKey(resolvedFileType, oui, serialNumber, subTaskID strin
 			ouiKey = fallbackOUI
 		}
 		return fmt.Sprintf("Collect XML|%s_%s,%s", ouiKey, serialNumber, subTaskID)
-	case "4":
-		// 厂商样本 CommandKey 用 UUID 前 13 字符（前 8 hex + "-" + 后 4 hex），与
-		// transport_path 里的 taskId32 (32 hex 无连字符) 是同一个 sub_task UUID
-		// 的不同截断/呈现形式。subTaskID 标准格式形如 "886de1ef-31d0-4f.." → 取前 13。
-		short := subTaskID
-		if len(short) > 13 {
-			short = short[:13]
-		}
-		return fmt.Sprintf("Collect LOG,%s", short)
 	default:
 		return subTaskID
 	}
@@ -555,6 +562,39 @@ func (e *UpgradeExecutor) resolveUploadBaseURL(ctx context.Context) string {
 		}
 	}
 	return strings.TrimRight(e.acsUploadBaseURL, "/")
+}
+
+func encodeQueryTemplateValue(value string) string {
+	return url.QueryEscape(value)
+}
+
+func (e *UpgradeExecutor) resolveLogUploadAddress(
+	ctx context.Context,
+	dev *model.Device,
+) (string, transfercfg.AddressDecision, error) {
+	if e.uploadResolver == nil {
+		baseURL := e.resolveUploadBaseURL(ctx)
+		return baseURL, transfercfg.AddressDecision{
+			Direction:  transfercfg.TransferDirectionUpload,
+			Protocol:   transfercfg.TransferProtocolHTTP,
+			BaseURL:    baseURL,
+			Capability: transfercfg.HTTPSCapabilityNotRead,
+			Reason:     transfercfg.AddressReasonForceHTTP,
+		}, nil
+	}
+	decision, err := e.uploadResolver.Resolve(ctx, dev.ID, transfercfg.TransferDirectionUpload)
+	if err != nil {
+		return "", transfercfg.AddressDecision{}, err
+	}
+	return strings.TrimRight(decision.BaseURL, "/"), decision, nil
+}
+
+func isRuntimeLogUpload(fileType, transportPath string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(fileType))
+	normalizedPath := strings.ToUpper(strings.TrimSpace(transportPath))
+	return normalized == "4" ||
+		strings.Contains(normalized, "VENDOR LOG FILE") ||
+		strings.Contains(normalizedPath, "FILETYPE=LOG")
 }
 
 func buildTransferUploadURL(baseURL, resolvedTransport string) (string, error) {
@@ -637,7 +677,24 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 	// 拿运行时 ACS 上传 base URL（前端"系统管理 → ACS 传输 → 上传服务"维护）。
 	// 优先级：transferProvider.Snapshot.Upload.BaseURL → SetUploadConfig 静态兜底 → 空。
 	// 凭据不下发——产品线要求 Upload / Download 都不走 HTTP Basic Auth，CPE 拿到空 Username/Password 标签即可。
+	useTransferDecision := isRuntimeLogUpload(resolvedFileType, resolvedTransport)
 	uploadBaseURL := e.resolveUploadBaseURL(ctx)
+	transferDecision := transfercfg.AddressDecision{
+		Direction:  transfercfg.TransferDirectionUpload,
+		Protocol:   transfercfg.TransferProtocolHTTP,
+		BaseURL:    uploadBaseURL,
+		Capability: transfercfg.HTTPSCapabilityNotRead,
+		Reason:     transfercfg.AddressReasonForceHTTP,
+	}
+	if useTransferDecision {
+		var resolveErr error
+		uploadBaseURL, transferDecision, resolveErr = e.resolveLogUploadAddress(ctx, dev)
+		if resolveErr != nil {
+			e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
+			e.failSubTask(ctx, subTask, fmt.Sprintf("Log collect can not be started, resolve upload address failed: %v", resolveErr), FailureInternalError)
+			return
+		}
+	}
 
 	// 构造完整上传 URL：先解析 transportPath 模板，再拼接基础 URL。
 	// 占位符 {sn} 与 {taskId} 必须渲染——UFTE 内置 transportPath 模板会带这两个
@@ -647,7 +704,7 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 	resolvedPath := resolveTemplate(resolvedTransport, map[string]string{
 		"fileType":       resolvedFileType,
 		"targetFileName": targetFileName,
-		"sn":             dev.SerialNumber,
+		"sn":             encodeQueryTemplateValue(dev.SerialNumber),
 		"taskId":         subTask.TaskID.String(),
 		// {taskId32}: UUID 去连字符的 32 字符纯 hex 形式。
 		// 厂商 baicells/MMMM 真实样本的 Upload URL 用这种格式（详见 migrations/000141
@@ -666,7 +723,7 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 	// 实测路径："12 ... Configuration File" / "10 ... Configuration File" 这类 NV/XML
 	// 备份必须用 "Collect NV|<MFR>_<SN>,<UUID>" / "Collect XML|<MFR>_<SN>,<UUID>" 业务串；
 	// 其他 FileType（日志采集 / 数据模型 upload）保持原 UUID 格式，避免影响存量流程。
-	commandKey := deriveUploadCommandKey(resolvedFileType, dev.OUI, dev.SerialNumber, subTask.ID.String())
+	commandKey := deriveUploadCommandKey(resolvedFileType, dev.OUI, dev.SerialNumber, subTask.ID.String(), useTransferDecision)
 	// username / password 不传——产品线要求 Upload 不走 Basic Auth，
 	// soap.UploadData 零值字段会渲染成空 <cwmp:Username></cwmp:Username>。
 	paramsJSON, err := json.Marshal(map[string]interface{}{
@@ -722,15 +779,27 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 		}()
 	}
 
-	e.logger.Info("log collect Upload RPC pushed",
+	logFields := []zap.Field{
 		zap.String("sub_task_id", subTask.ID.String()),
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("device_oui", dev.OUI),
 		zap.String("file_type_template", fileType),         // 原始模板，便于核对配置
 		zap.String("file_type_resolved", resolvedFileType), // 真正给 CPE 的串
-		zap.String("upload_url", uploadURL),
-		zap.String("upload_base_url", uploadBaseURL), // 单独打 base，方便核对 sys_config 是否生效
-		zap.String("target_file_name", targetFileName))
+		zap.String("target_file_name", targetFileName),
+	}
+	if useTransferDecision {
+		logFields = append(logFields,
+			zap.String("transfer_protocol", string(transferDecision.Protocol)),
+			zap.String("transfer_reason", string(transferDecision.Reason)),
+			zap.String("https_capability", string(transferDecision.Capability)),
+		)
+	} else {
+		logFields = append(logFields,
+			zap.String("upload_url", uploadURL),
+			zap.String("upload_base_url", uploadBaseURL), // 单独打 base，方便核对 sys_config 是否生效
+		)
+	}
+	e.logger.Info("log collect Upload RPC pushed", logFields...)
 }
 
 // ExecuteOneSetParamCollect 通过 SetParameterValues 触发设备主动上传日志文件。
@@ -779,10 +848,15 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 	// 渲染上传 URL。{id} 用主任务 UUID，ACS upload handler 后续用它发布事件并
 	// 写入 backup_restore_file.task_id，便于按 (sn, parent_task_id) 反查真实落地文件。
 	// {sn} 用设备序列号。{fileName} 留空让设备自己决定上传名（与现网 Upload 链路一致）。
-	uploadBaseURL := e.resolveUploadBaseURL(ctx)
+	uploadBaseURL, transferDecision, resolveErr := e.resolveLogUploadAddress(ctx, dev)
+	if resolveErr != nil {
+		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
+		e.failSubTask(ctx, subTask, fmt.Sprintf("Log collect can not be started, resolve upload address failed: %v", resolveErr), FailureInternalError)
+		return
+	}
 	resolvedPath := resolveTemplate(transportPath, map[string]string{
 		"id": subTask.TaskID.String(),
-		"sn": dev.SerialNumber,
+		"sn": encodeQueryTemplateValue(dev.SerialNumber),
 	})
 	uploadURL, err := buildTransferUploadURL(uploadBaseURL, resolvedPath)
 	if err != nil {
@@ -903,8 +977,9 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("standard_path", paramPath),
 		zap.String("dispatch_path", dispatchPath),
-		zap.String("upload_url", uploadURL),
-		zap.String("upload_base_url", uploadBaseURL))
+		zap.String("transfer_protocol", string(transferDecision.Protocol)),
+		zap.String("transfer_reason", string(transferDecision.Reason)),
+		zap.String("https_capability", string(transferDecision.Capability)))
 }
 
 // HandleSetParamsResponse 处理 SetParameterValues 响应事件。SPV 在 OMC 内有两条
