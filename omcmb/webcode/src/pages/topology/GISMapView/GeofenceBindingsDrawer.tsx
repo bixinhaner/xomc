@@ -6,8 +6,10 @@ import {
   Descriptions,
   Divider,
   Drawer,
+  Form,
   Input,
   Modal,
+  Segmented,
   Space,
   Spin,
   Tag,
@@ -27,6 +29,7 @@ import {
   useExportGeofenceBindings,
   useGeofenceBindings,
   useGeofenceControlActions,
+  useGeofenceDefinitions,
   useGeofenceManualBindItems,
   useGeofenceManualBindJob,
   usePreviewGeofenceManualBindings,
@@ -52,6 +55,19 @@ interface BindingAction {
   kind: 'suspend' | 'resume' | 'remove';
   binding: GeofenceBindingDetail;
 }
+
+const PREVIEW_REASON_MESSAGE_IDS: Record<string, string> = {
+  device_unavailable: 'geofence.binding.reason.deviceUnavailable',
+  geofence_not_enabled: 'geofence.binding.reason.geofenceNotEnabled',
+  carrier_mismatch: 'geofence.binding.reason.carrierMismatch',
+  baseline_owner_mismatch: 'geofence.binding.reason.baselineOwnerMismatch',
+  already_bound: 'geofence.binding.reason.alreadyBound',
+  binding_suspended: 'geofence.binding.reason.bindingSuspended',
+  active_rule_conflict: 'geofence.binding.reason.activeRuleConflict',
+  binding_changed: 'geofence.binding.reason.bindingChanged',
+  reassigned: 'geofence.binding.reason.reassigned',
+  geofence_version_changed: 'geofence.binding.reason.geofenceVersionChanged',
+};
 
 function parseDeviceSNs(value: string): string[] {
   return Array.from(
@@ -106,6 +122,9 @@ export default function GeofenceBindingsDrawer({
   const [preview, setPreview] =
     useState<GeofenceManualBindingPreview>();
   const [jobId, setJobId] = useState<string>();
+  const [bindingView, setBindingView] = useState<'current' | 'history'>(
+    'current',
+  );
   const [bindingAction, setBindingAction] =
     useState<BindingAction>();
   const [bindingActionReason, setBindingActionReason] =
@@ -116,6 +135,7 @@ export default function GeofenceBindingsDrawer({
     { page: 1, pageSize: 50 },
     { enabled: open },
   );
+  const definitionsQuery = useGeofenceDefinitions({}, { enabled: open });
   const actionsQuery = useGeofenceControlActions(
     geofenceId,
     { enabled: open },
@@ -136,11 +156,33 @@ export default function GeofenceBindingsDrawer({
   const executableCount = preview
     ? preview.eligibleCount + preview.moveCount
     : 0;
+  const bindingItems = bindingsQuery.data?.items ?? [];
+  const visibleBindings = bindingItems.filter((binding) =>
+    bindingView === 'current'
+      ? binding.status === 'active' || binding.status === 'suspended'
+      : binding.status === 'removed',
+  );
+  const currentBindingCount = bindingItems.filter(
+    (binding) =>
+      binding.status === 'active' || binding.status === 'suspended',
+  ).length;
+  const historyBindingCount = bindingItems.filter(
+    (binding) => binding.status === 'removed',
+  ).length;
+  const geofenceNameByID = new Map(
+    (definitionsQuery.data ?? []).map((geofence) => [
+      geofence.id,
+      geofence.name,
+    ]),
+  );
 
   useEffect(() => {
     if (!open) {
       setInputText('');
+      setReason('');
       setPreview(undefined);
+      setJobId(undefined);
+      setBindingView('current');
       return;
     }
     setInputText(initialDeviceSNs?.join('\n') ?? '');
@@ -280,23 +322,42 @@ export default function GeofenceBindingsDrawer({
             id: 'geofence.binding.currentTitle',
           })}
         </strong>
-        <Tooltip
-          title={intl.formatMessage({
-            id: 'geofence.action.exportBindings',
-          })}
-        >
-          <Button
-            type="text"
+        <Space size="small">
+          <Segmented
             size="small"
-            icon={<DownloadOutlined aria-hidden />}
-            aria-label={intl.formatMessage({
+            value={bindingView}
+            options={[
+              {
+                value: 'current',
+                label: `${intl.formatMessage({ id: 'geofence.binding.current' })} ${currentBindingCount}`,
+              },
+              {
+                value: 'history',
+                label: `${intl.formatMessage({ id: 'geofence.binding.history' })} ${historyBindingCount}`,
+              },
+            ]}
+            onChange={(value) =>
+              setBindingView(value as 'current' | 'history')
+            }
+          />
+          <Tooltip
+            title={intl.formatMessage({
               id: 'geofence.action.exportBindings',
             })}
-            loading={exportMutation.isPending}
-            disabled={!geofenceId}
-            onClick={() => void exportBindings()}
-          />
-        </Tooltip>
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<DownloadOutlined aria-hidden />}
+              aria-label={intl.formatMessage({
+                id: 'geofence.action.exportBindings',
+              })}
+              loading={exportMutation.isPending}
+              disabled={!geofenceId}
+              onClick={() => void exportBindings()}
+            />
+          </Tooltip>
+        </Space>
       </div>
       {bindingsQuery.isLoading ? (
         <Spin style={{ display: 'block', margin: 24 }} />
@@ -318,7 +379,7 @@ export default function GeofenceBindingsDrawer({
         />
       ) : (
         <div className="geofence-binding-list">
-          {(bindingsQuery.data?.items ?? []).map((binding) => (
+          {visibleBindings.map((binding) => (
             <article className="geofence-binding-card" key={binding.id}>
               <div className="geofence-binding-card-header">
                 <div>
@@ -732,29 +793,118 @@ export default function GeofenceBindingsDrawer({
               })}
             />
           )}
-          <Input.TextArea
+          <div
+            className="geofence-binding-preview-table"
+            role="table"
             aria-label={intl.formatMessage({
-              id: 'geofence.field.reason',
+              id: 'geofence.binding.previewTitle',
             })}
-            value={reason}
-            rows={2}
-            style={{ marginTop: 12 }}
-            placeholder={intl.formatMessage({
-              id: 'geofence.lifecycle.reasonRequired',
-            })}
-            onChange={(event) => setReason(event.target.value)}
-          />
-          <Button
-            type="primary"
-            style={{ marginTop: 12 }}
-            disabled={executableCount === 0 || !reason.trim()}
-            loading={createJobMutation.isPending}
-            onClick={() => void createJob()}
           >
-            {intl.formatMessage({
-              id: 'geofence.binding.createJob',
+            <div className="geofence-binding-preview-row geofence-binding-preview-head" role="row">
+              <span role="columnheader">
+                {intl.formatMessage({ id: 'geofence.binding.previewDevice' })}
+              </span>
+              <span role="columnheader">
+                {intl.formatMessage({ id: 'geofence.binding.previewDecision' })}
+              </span>
+              <span role="columnheader">
+                {intl.formatMessage({ id: 'geofence.binding.previewDetail' })}
+              </span>
+            </div>
+            {preview.items.map((previewItem) => {
+              const sourceName = previewItem.sourceGeofenceId
+                ? geofenceNameByID.get(previewItem.sourceGeofenceId)
+                : undefined;
+              const reasonMessageID = previewItem.reasonCode
+                ? PREVIEW_REASON_MESSAGE_IDS[previewItem.reasonCode]
+                : undefined;
+              return (
+                <div
+                  className="geofence-binding-preview-row"
+                  role="row"
+                  key={previewItem.inputKey}
+                >
+                  <Typography.Text ellipsis role="cell">
+                    {previewItem.deviceSN ?? previewItem.input}
+                  </Typography.Text>
+                  <span role="cell">
+                    <Tag
+                      color={
+                        previewItem.decision === 'eligible'
+                          ? 'green'
+                          : previewItem.decision === 'move'
+                            ? 'blue'
+                            : 'default'
+                      }
+                    >
+                      {intl.formatMessage({
+                        id: `geofence.binding.decision.${previewItem.decision}`,
+                      })}
+                    </Tag>
+                  </span>
+                  <Typography.Text type="secondary" role="cell">
+                    {sourceName
+                      ? intl.formatMessage(
+                          { id: 'geofence.binding.sourceFence' },
+                          { name: sourceName },
+                        )
+                      : reasonMessageID
+                        ? intl.formatMessage({ id: reasonMessageID })
+                        : intl.formatMessage({
+                            id: 'geofence.binding.reason.ready',
+                          })}
+                  </Typography.Text>
+                </div>
+              );
             })}
-          </Button>
+          </div>
+          <Form.Item
+            required
+            label={intl.formatMessage({ id: 'geofence.field.reason' })}
+            validateStatus={!reason.trim() ? 'error' : undefined}
+            help={
+              !reason.trim()
+                ? intl.formatMessage({
+                    id: 'geofence.validation.reasonRequired',
+                  })
+                : undefined
+            }
+            style={{ marginTop: 16, marginBottom: 12 }}
+          >
+            <Input.TextArea
+              aria-label={intl.formatMessage({
+                id: 'geofence.field.reason',
+              })}
+              value={reason}
+              rows={2}
+              placeholder={intl.formatMessage({
+                id: 'geofence.lifecycle.reasonRequired',
+              })}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </Form.Item>
+          <Tooltip
+            title={
+              executableCount > 0 && !reason.trim()
+                ? intl.formatMessage({
+                    id: 'geofence.binding.reasonBeforeCreate',
+                  })
+                : undefined
+            }
+          >
+            <span>
+              <Button
+                type="primary"
+                disabled={executableCount === 0 || !reason.trim()}
+                loading={createJobMutation.isPending}
+                onClick={() => void createJob()}
+              >
+                {intl.formatMessage({
+                  id: 'geofence.binding.createJob',
+                })}
+              </Button>
+            </span>
+          </Tooltip>
         </div>
       )}
 
