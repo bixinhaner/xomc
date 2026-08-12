@@ -943,7 +943,7 @@ else
     warn "$OMC_ROOT/etc/ 已有实例配置（包含可能已改好的强口令 / JWT 密钥 / TLS 证书路径等）" "$OMC_ROOT/etc/ contains instance configuration (possibly including custom credentials, JWT keys, and TLS certificate paths)"
     warn "  选 y 将覆盖为新包模板（原 etc 自动备份到 etc.bak.<时间戳>）" "  Enter y to replace it with the package template (the old etc is backed up automatically)"
     warn "  选 N 保留现有配置不动（默认）" "  Enter N to keep the current configuration (default)"
-    read -rp "$(install_message "是否用新包模板覆盖 $OMC_ROOT/etc/？" "Replace $OMC_ROOT/etc/ with the package template?") [y/N] " yn
+    read -rp "$(install_message "是否用新包的配置文件模板覆盖 $OMC_ROOT/etc/？" "Replace $OMC_ROOT/etc/ with the new configuration file template?") [y/N] " yn
     case "${yn:-N}" in [Yy]*) do_overwrite=1 ;; esac
   fi
 
