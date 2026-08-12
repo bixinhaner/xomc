@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -492,6 +493,28 @@ func TestBuiltinMLQ_IncludesIndependentPLMNList(t *testing.T) {
 	require.Len(t, plmnGroup.Params, 1)
 	assert.Equal(t, "PLMNID", plmnGroup.Params[0].Name)
 	assert.Equal(t, "PLMNID", plmnGroup.Params[0].Leaf)
+
+	wanGroups := make(map[string]xmlGroup)
+	for _, group := range doc.Groups {
+		if strings.HasPrefix(group.ID, "device-wan-") {
+			wanGroups[group.ID] = group
+		}
+	}
+	require.Len(t, wanGroups, 12)
+	for index := 1; index <= 12; index++ {
+		group, ok := wanGroups[fmt.Sprintf("device-wan-%d", index)]
+		require.True(t, ok)
+		require.NotEmpty(t, group.Params)
+		var ipModePath string
+		expectedPath := fmt.Sprintf("Device.DeviceInfo.WAN_CONFIG%d_IPMODE", index)
+		for _, param := range group.Params {
+			if param.StandardPath == expectedPath {
+				ipModePath = param.StandardPath
+				break
+			}
+		}
+		assert.Equal(t, expectedPath, ipModePath)
+	}
 }
 
 func TestBuiltinBLN_QuickSettingsReferenceParamModel(t *testing.T) {

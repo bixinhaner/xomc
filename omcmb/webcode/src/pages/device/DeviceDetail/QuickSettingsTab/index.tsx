@@ -164,13 +164,9 @@ const OUTER_GROUP_IDS = new Set([
   'gnb-network-dscp-list', 'gnb-network-static-route',
   'device-ipsec-control', 'device-ipsec', 'gnb-ipsec',
 ]);
-const FIXED_NETWORK_GROUP_IDS = new Set([
-  'device-wan-1', 'device-wan-2', 'device-wan-3', 'device-wan-4',
-  'device-static-route-1', 'device-static-route-2', 'device-static-route-3', 'device-static-route-4',
-]);
-const FIXED_NETWORK_TABLE_MODELS = new Set(['BLN', 'MLN']);
+const FIXED_NETWORK_TABLE_MODELS = new Set(['BLN', 'BLQ', 'MLN', 'MLQ']);
 function isFixedNetworkGroup(group: QuickSettingsGroup): boolean {
-  return FIXED_NETWORK_GROUP_IDS.has(group.id);
+  return /^device-(?:wan|static-route)-\d+$/.test(group.id);
 }
 function getWanTableInsertionParamName(group: QuickSettingsGroup): string | undefined {
   const linkSpeedParam = group.params.find((param) => (
@@ -348,6 +344,14 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
       : [],
     [paramModel, visibleGroups],
   );
+  const fixedWanGroups = useMemo(
+    () => fixedNetworkGroups.filter((group) => group.id.startsWith('device-wan-')),
+    [fixedNetworkGroups],
+  );
+  const fixedStaticRouteGroups = useMemo(
+    () => fixedNetworkGroups.filter((group) => group.id.startsWith('device-static-route-')),
+    [fixedNetworkGroups],
+  );
 
   useEffect(() => {
     if (!visibleGroups.some((group) => group.id === 'device-ipsec-control')) {
@@ -448,13 +452,13 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
               locale={locale}
               onIpsecControlChange={group.id === 'device-ipsec-control' ? setIpsecControlValue : undefined}
               actionMode={group.id === 'device-ipsec-control' ? 'staged' : 'standalone'}
-              afterParamName={fixedNetworkGroups.length > 0 ? wanTableInsertionParamName : undefined}
-              afterParamContent={fixedNetworkGroups.length > 0 && wanTableInsertionParamName ? (
+              afterParamName={fixedWanGroups.length > 0 ? wanTableInsertionParamName : undefined}
+              afterParamContent={fixedWanGroups.length > 0 && wanTableInsertionParamName ? (
                 <FixedScalarSettingsTable
                   key={`device-wan-embedded-table::${refreshTick}`}
                   deviceId={deviceId}
                   active={childActive}
-                  groups={fixedNetworkGroups}
+                  groups={fixedWanGroups}
                   locale={locale}
                   kind="wan"
                   embedded
@@ -685,26 +689,28 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
 
       {wanOuterGroups.map((group) => renderGroup(group, 'wan'))}
 
-      {fixedNetworkGroups.length > 0 && (
+      {(fixedWanGroups.length > 0 || fixedStaticRouteGroups.length > 0) && (
         <>
-          {wanOuterGroups.length === 0 && (
+          {fixedWanGroups.length > 0 && wanOuterGroups.length === 0 && (
             <FixedScalarSettingsTable
               key={`device-wan-table::${refreshTick}`}
               deviceId={deviceId}
               active={queryActive}
-              groups={fixedNetworkGroups}
+              groups={fixedWanGroups}
               locale={locale}
               kind="wan"
             />
           )}
-          <FixedScalarSettingsTable
-            key={`device-static-route-table::${refreshTick}`}
-            deviceId={deviceId}
-            active={queryActive}
-            groups={fixedNetworkGroups}
-            locale={locale}
-            kind="static-route"
-          />
+          {fixedStaticRouteGroups.length > 0 && (
+            <FixedScalarSettingsTable
+              key={`device-static-route-table::${refreshTick}`}
+              deviceId={deviceId}
+              active={queryActive}
+              groups={fixedStaticRouteGroups}
+              locale={locale}
+              kind="static-route"
+            />
+          )}
         </>
       )}
 
