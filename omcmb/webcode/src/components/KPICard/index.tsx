@@ -46,12 +46,17 @@ const KPICard: React.FC<KPICardProps> = ({
     trend === 'up' ? ArrowUpOutlined : trend === 'down' ? ArrowDownOutlined : null;
 
   return (
-    <TiltCard shadow>
+    <TiltCard
+      shadow
+      className="omc-kpi-card"
+      style={{ width: '100%', height: '100%' }}
+    >
       <Card
         hoverable={Boolean(onClick)}
         onClick={onClick}
         style={{
           borderRadius: 12,
+          height: '100%',
           cursor: onClick ? 'pointer' : 'default',
           userSelect: 'none',
         }}
