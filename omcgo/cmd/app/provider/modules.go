@@ -1503,6 +1503,9 @@ func initNorthboundModule(c *Container) error {
 	nbService := northbound.NewNorthboundService(c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, pushEngine, syncService, logger)
 	nbRouter := northbound.NewRouter(nbService)
 	nbRouter.SetDeviceTaskServices(c.DeviceService, c.TaskSvc)
+	if c.miscDeps.paramSyncService != nil {
+		nbRouter.SetParamSyncService(c.miscDeps.paramSyncService)
+	}
 	if c.deviceHandlerDeps != nil {
 		nbRouter.SetDeviceRegistrationService(c.deviceHandlerDeps.regService)
 	}
@@ -2691,6 +2694,7 @@ type miscDeps struct {
 	provisionEngine   *provision.ProvisioningEngine
 	plugAndPlayRepo   *provision.PgPlugAndPlayRepository
 	paramSyncHandler  *paramsync.Handler
+	paramSyncService  *paramsync.Service
 	paramSyncStarter  *paramSyncStarter
 	paramSyncConsumer *paramsync.ResultConsumer
 

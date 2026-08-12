@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
 	"github.com/omcgo/omcgo/internal/ufte"
@@ -145,6 +146,33 @@ func (f *fakeNBTransferTaskService) ListTasks(ctx context.Context, filter ufte.T
 	return f.listFn(ctx, filter, visibleGroups)
 }
 
+type fakeNBParamSyncService struct {
+	getRequestFn        func(context.Context, uuid.UUID) (*paramsync.SyncRequest, error)
+	getRunFn            func(context.Context, uuid.UUID) (*paramsync.SyncRun, error)
+	findByIdempotencyFn func(context.Context, string, string) (*paramsync.SyncRequest, error)
+}
+
+func (f *fakeNBParamSyncService) GetRequest(ctx context.Context, id uuid.UUID) (*paramsync.SyncRequest, error) {
+	if f.getRequestFn == nil {
+		return nil, errors.New("no rows")
+	}
+	return f.getRequestFn(ctx, id)
+}
+
+func (f *fakeNBParamSyncService) GetRun(ctx context.Context, id uuid.UUID) (*paramsync.SyncRun, error) {
+	if f.getRunFn == nil {
+		return nil, errors.New("no rows")
+	}
+	return f.getRunFn(ctx, id)
+}
+
+func (f *fakeNBParamSyncService) FindRequestByIdempotency(ctx context.Context, callerType, key string) (*paramsync.SyncRequest, error) {
+	if f.findByIdempotencyFn == nil {
+		return nil, errors.New("no rows")
+	}
+	return f.findByIdempotencyFn(ctx, callerType, key)
+}
+
 func setupDeviceFacadeRouter(deviceSvc northboundDeviceService, taskSvc northboundTaskService) *gin.Engine {
 	return setupDeviceFacadeRouterWithExtras(deviceSvc, taskSvc, nil, nil, nil)
 }
@@ -165,6 +193,19 @@ func setupDeviceFacadeRouterWithExtras(
 	router.SetDeviceRegistrationService(regSvc)
 	router.SetDeviceGroupService(groupSvc)
 	router.SetTransferTaskService(transferSvc)
+	engine := gin.New()
+	router.RegisterPublicRoutes(engine.Group("/api/v1"))
+	return engine
+}
+
+func setupDeviceFacadeRouterWithParamSync(paramSyncSvc northboundParamSyncService, taskSvc northboundTaskService) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	svc := &NorthboundService{logger: zap.NewNop()}
+	router := NewRouter(svc)
+	router.pageConfigService = nil
+	router.pageConfigHandler = nil
+	router.SetDeviceTaskServices(nil, taskSvc)
+	router.SetParamSyncService(paramSyncSvc)
 	engine := gin.New()
 	router.RegisterPublicRoutes(engine.Group("/api/v1"))
 	return engine
@@ -447,6 +488,87 @@ func TestLegacyFacadeTaskDetailInvalidStorageIDReturnsBadRequest(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.False(t, called)
 	require.Contains(t, rec.Body.String(), `"msg":"invalid task_id"`)
+}
+
+func TestLegacyFacadeTaskDetailReturnsParamSyncRequestBySourceJobID(t *testing.T) {
+	requestID := uuid.New()
+	runID := uuid.New()
+	sourceID := "northbound-manual:" + uuid.NewString()
+	paramSyncSvc := &fakeNBParamSyncService{
+		findByIdempotencyFn: func(_ context.Context, callerType, key string) (*paramsync.SyncRequest, error) {
+			require.Equal(t, "manual", callerType)
+			require.Equal(t, sourceID, key)
+			return &paramsync.SyncRequest{
+				ID: requestID, DeviceSN: "SN001", TriggerReason: paramsync.TriggerManual,
+				SyncScope: paramsync.SyncScopePartial, RequestedPaths: []string{"Device.DeviceInfo.SoftwareVersion"},
+				Status: paramsync.RequestStatusRunning, RunID: &runID, IdempotencyKey: &sourceID,
+			}, nil
+		},
+		getRunFn: func(_ context.Context, id uuid.UUID) (*paramsync.SyncRun, error) {
+			require.Equal(t, runID, id)
+			return &paramsync.SyncRun{
+				ID: runID, RequestID: requestID, DeviceSN: "SN001",
+				TriggerReason: paramsync.TriggerManual, SyncScope: paramsync.SyncScopePartial,
+				Status: paramsync.RunStatusWaitingDevice, ExpectedTaskCount: 1,
+			}, nil
+		},
+	}
+
+	router := setupDeviceFacadeRouterWithParamSync(paramSyncSvc, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/v1/job/result/"+sourceID, nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"jobId":"`+runID.String()+`"`)
+	require.Contains(t, rec.Body.String(), `"request_id":"`+requestID.String()+`"`)
+	require.Contains(t, rec.Body.String(), `"source_id":"`+sourceID+`"`)
+	require.Contains(t, rec.Body.String(), `"requested_paths":["Device.DeviceInfo.SoftwareVersion"]`)
+}
+
+func TestLegacyFacadeTaskDetailReturnsParamSyncRunByUUID(t *testing.T) {
+	requestID := uuid.New()
+	runID := uuid.New()
+	sourceID := "northbound-manual:" + uuid.NewString()
+	paramSyncSvc := &fakeNBParamSyncService{
+		getRequestFn: func(_ context.Context, id uuid.UUID) (*paramsync.SyncRequest, error) {
+			if id == runID {
+				return nil, errors.New("no rows")
+			}
+			require.Equal(t, requestID, id)
+			return &paramsync.SyncRequest{
+				ID: requestID, DeviceSN: "SN001", TriggerReason: paramsync.TriggerManual,
+				SyncScope: paramsync.SyncScopePartial, RequestedPaths: []string{"Device.DeviceInfo.SoftwareVersion"},
+				Status: paramsync.RequestStatusSucceeded, RunID: &runID, IdempotencyKey: &sourceID,
+			}, nil
+		},
+		getRunFn: func(_ context.Context, id uuid.UUID) (*paramsync.SyncRun, error) {
+			require.Equal(t, runID, id)
+			return &paramsync.SyncRun{
+				ID: runID, RequestID: requestID, DeviceSN: "SN001",
+				TriggerReason: paramsync.TriggerManual, SyncScope: paramsync.SyncScopePartial,
+				Status: paramsync.RunStatusSucceeded, ExpectedTaskCount: 1,
+				TerminalTaskCount: 1, ProcessedTaskCount: 1,
+			}, nil
+		},
+		findByIdempotencyFn: func(context.Context, string, string) (*paramsync.SyncRequest, error) {
+			return &paramsync.SyncRequest{
+				ID: requestID, DeviceSN: "SN001", TriggerReason: paramsync.TriggerManual,
+				SyncScope: paramsync.SyncScopePartial, RequestedPaths: []string{"Device.DeviceInfo.SoftwareVersion"},
+				Status: paramsync.RequestStatusSucceeded, RunID: &runID, IdempotencyKey: &sourceID,
+			}, nil
+		},
+	}
+
+	router := setupDeviceFacadeRouterWithParamSync(paramSyncSvc, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/v1/job/result/"+runID.String(), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"jobId":"`+runID.String()+`"`)
+	require.Contains(t, rec.Body.String(), `"legacy_status":"2"`)
+	require.Contains(t, rec.Body.String(), `"expected_task_count":1`)
 }
 
 func TestLegacyFacadeListTasksWithoutSNUsesUFTE(t *testing.T) {

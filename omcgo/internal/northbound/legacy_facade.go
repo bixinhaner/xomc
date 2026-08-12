@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
 	"github.com/omcgo/omcgo/internal/ufte"
@@ -557,7 +558,40 @@ func (r *Router) legacyGetTask(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "task_id is required")
 		return
 	}
-	if _, err := uuid.Parse(taskID); err != nil {
+	if parsedID, err := uuid.Parse(taskID); err == nil {
+		if r.paramSyncService != nil {
+			if payload, ok, err := r.lookupParamSyncJob(c, parsedID); err != nil {
+				failNorthboundFacade(c, err)
+				return
+			} else if ok {
+				if payload != nil {
+					response.OK(c, payload)
+				}
+				return
+			}
+		}
+	} else if r.paramSyncService != nil && isNorthboundParamSyncSourceID(taskID) {
+		req, findErr := r.findParamSyncRequestBySourceID(c, taskID)
+		if findErr == nil && req != nil {
+			if r.scoper != nil && req.DeviceSN != "" && !r.scoper.AuthorizeDeviceBySN(c, req.DeviceSN) {
+				return
+			}
+			payload := paramSyncRequestResultPayload(req)
+			if req.RunID != nil {
+				if run, runErr := r.paramSyncService.GetRun(c.Request.Context(), *req.RunID); runErr == nil && run != nil {
+					payload = paramSyncRunResultPayload(req, run)
+				}
+			}
+			response.OK(c, payload)
+			return
+		}
+		if findErr != nil && !isNotFoundLike(findErr) {
+			failNorthboundFacade(c, findErr)
+			return
+		}
+		response.Fail(c, http.StatusNotFound, "task not found")
+		return
+	} else if _, err := uuid.Parse(taskID); err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid task_id")
 		return
 	}
@@ -598,6 +632,177 @@ func (r *Router) legacyGetTask(c *gin.Context) {
 	response.Fail(c, http.StatusNotFound, "task not found")
 }
 
+func (r *Router) findParamSyncRequestBySourceID(c *gin.Context, taskID string) (*paramsync.SyncRequest, error) {
+	for _, callerType := range paramSyncSourceIDCallerTypes(taskID) {
+		req, err := r.paramSyncService.FindRequestByIdempotency(c.Request.Context(), callerType, taskID)
+		if err == nil || !isNotFoundLike(err) {
+			return req, err
+		}
+	}
+	return nil, commonerrors.ErrNotFound
+}
+
+func (r *Router) lookupParamSyncJob(c *gin.Context, id uuid.UUID) (gin.H, bool, error) {
+	req, err := r.paramSyncService.GetRequest(c.Request.Context(), id)
+	if err == nil && req != nil {
+		if r.scoper != nil && req.DeviceSN != "" && !r.scoper.AuthorizeDeviceBySN(c, req.DeviceSN) {
+			return nil, true, nil
+		}
+		payload := paramSyncRequestResultPayload(req)
+		if req.RunID != nil {
+			if run, runErr := r.paramSyncService.GetRun(c.Request.Context(), *req.RunID); runErr == nil && run != nil {
+				payload = paramSyncRunResultPayload(req, run)
+			}
+		}
+		return payload, true, nil
+	}
+	if err != nil && !isNotFoundLike(err) {
+		return nil, false, err
+	}
+
+	run, err := r.paramSyncService.GetRun(c.Request.Context(), id)
+	if err == nil && run != nil {
+		req, reqErr := r.paramSyncService.GetRequest(c.Request.Context(), run.RequestID)
+		if reqErr != nil && !isNotFoundLike(reqErr) {
+			return nil, false, reqErr
+		}
+		if r.scoper != nil && run.DeviceSN != "" && !r.scoper.AuthorizeDeviceBySN(c, run.DeviceSN) {
+			return nil, true, nil
+		}
+		return paramSyncRunResultPayload(req, run), true, nil
+	}
+	if err != nil && !isNotFoundLike(err) {
+		return nil, false, err
+	}
+	return nil, false, nil
+}
+
+func paramSyncRequestResultPayload(req *paramsync.SyncRequest) gin.H {
+	if req == nil {
+		return gin.H{}
+	}
+	status := string(req.Status)
+	payload := gin.H{
+		"jobId":           req.ID.String(),
+		"task_id":         req.ID.String(),
+		"request_id":      req.ID.String(),
+		"name":            "GetParameterValues",
+		"method":          "GetParameterValues",
+		"status":          status,
+		"legacy_status":   legacyParamSyncStatus(status, req.Status.Terminal()),
+		"sn":              req.DeviceSN,
+		"device_sn":       req.DeviceSN,
+		"errorMessage":    req.ErrorMessage,
+		"error_code":      req.ResultCode,
+		"createTime":      req.CreatedAt,
+		"created_at":      req.CreatedAt,
+		"completeTime":    req.CompletedAt,
+		"completed_at":    req.CompletedAt,
+		"source":          "param_sync",
+		"source_id":       stringPtrValue(req.IdempotencyKey),
+		"trigger_reason":  req.TriggerReason,
+		"sync_scope":      req.SyncScope,
+		"requested_paths": req.RequestedPaths,
+		"result_code":     req.ResultCode,
+	}
+	if req.RunID != nil {
+		payload["run_id"] = req.RunID.String()
+	}
+	if req.ActiveRunID != nil {
+		payload["active_run_id"] = req.ActiveRunID.String()
+	}
+	return payload
+}
+
+func paramSyncRunResultPayload(req *paramsync.SyncRequest, run *paramsync.SyncRun) gin.H {
+	if run == nil {
+		return paramSyncRequestResultPayload(req)
+	}
+	status := string(run.Status)
+	payload := gin.H{
+		"jobId":                run.ID.String(),
+		"task_id":              run.ID.String(),
+		"run_id":               run.ID.String(),
+		"request_id":           run.RequestID.String(),
+		"name":                 "GetParameterValues",
+		"method":               "GetParameterValues",
+		"status":               status,
+		"legacy_status":        legacyParamSyncStatus(status, run.Status.Terminal()),
+		"sn":                   run.DeviceSN,
+		"device_sn":            run.DeviceSN,
+		"errorMessage":         run.ErrorMessage,
+		"createTime":           run.StartedAt,
+		"created_at":           run.StartedAt,
+		"completeTime":         run.CompletedAt,
+		"completed_at":         run.CompletedAt,
+		"source":               "param_sync",
+		"source_id":            run.ID.String(),
+		"trigger_reason":       run.TriggerReason,
+		"sync_scope":           run.SyncScope,
+		"mapping_source":       run.MappingSource,
+		"mapping_version":      run.MappingVersion,
+		"coverage":             run.Coverage,
+		"task_count":           run.ExpectedTaskCount,
+		"expected_task_count":  run.ExpectedTaskCount,
+		"terminal_task_count":  run.TerminalTaskCount,
+		"processed_task_count": run.ProcessedTaskCount,
+		"failed_task_count":    run.FailedTaskCount,
+	}
+	if req != nil {
+		payload["requested_paths"] = req.RequestedPaths
+		payload["result_code"] = req.ResultCode
+		payload["source_id"] = stringPtrValue(req.IdempotencyKey)
+		payload["request_status"] = req.Status
+		payload["error_code"] = req.ResultCode
+		if req.ErrorMessage != "" && run.ErrorMessage == "" {
+			payload["errorMessage"] = req.ErrorMessage
+		}
+	}
+	return payload
+}
+
+func legacyParamSyncStatus(status string, terminal bool) string {
+	switch status {
+	case "succeeded":
+		return "2"
+	case "failed", "timed_out", "cancelled", "rejected":
+		return "3"
+	case "accepted", "queued", "planning":
+		return "0"
+	default:
+		if terminal {
+			return "2"
+		}
+		return "1"
+	}
+}
+
+func isNorthboundParamSyncSourceID(taskID string) bool {
+	return strings.HasPrefix(taskID, "northbound-manual:") ||
+		strings.HasPrefix(taskID, "northbound-legacy-query:")
+}
+
+func paramSyncSourceIDCallerTypes(taskID string) []string {
+	preferred := []string{}
+	if strings.HasPrefix(taskID, "northbound-manual:") ||
+		strings.HasPrefix(taskID, "northbound-legacy-query:") {
+		preferred = append(preferred, "manual")
+	}
+	for _, callerType := range []string{"manual", "provision", "config", "acs", "license", "system"} {
+		seen := false
+		for _, existing := range preferred {
+			if existing == callerType {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			preferred = append(preferred, callerType)
+		}
+	}
+	return preferred
+}
+
 func isInvalidTaskIdentifierError(err error) bool {
 	if err == nil {
 		return false
@@ -609,6 +814,23 @@ func isInvalidTaskIdentifierError(err error) bool {
 	return strings.Contains(msg, "invalid input syntax for type uuid") ||
 		strings.Contains(msg, "sqlstate 22p02") ||
 		strings.Contains(msg, "invalid task id")
+}
+
+func isNotFoundLike(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, task.ErrTaskNotFound) || errors.Is(err, commonerrors.ErrNotFound) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "no rows")
+}
+
+func stringPtrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (r *Router) legacyListTasks(c *gin.Context) {

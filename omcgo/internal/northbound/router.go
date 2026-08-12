@@ -25,6 +25,7 @@ type Router struct {
 	configHandler     *ConfigHandler
 	pageConfigHandler *pageconfig.Handler
 	pageConfigService *pageconfig.Service
+	paramSyncService  northboundParamSyncService
 	serverHandler     *ServerHandler                // 主备服务器配置 + 切换（system/config 北向设置）
 	outboxRepo        push.OutboxRepository         // may be nil if outbox is not configured
 	scoper            *Scoper                       // 多租户数据隔离；nil 时退化为不隔离（dev/test）

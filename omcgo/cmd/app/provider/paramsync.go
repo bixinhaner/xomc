@@ -681,6 +681,11 @@ func initParamSyncModule(c *Container) error {
 		}
 	}()
 	starter := &paramSyncStarter{service: service, flags: flags, binding: binding, devices: c.DeviceRepo}
+	c.miscDeps.paramSyncService = service
+	if c.miscDeps.nbRouter != nil {
+		c.miscDeps.nbRouter.SetParamSyncService(service)
+		logger.Info("northbound parameter sync status facade wired")
+	}
 	c.miscDeps.paramSyncHandler = paramsync.NewHandler(service).
 		WithOperations(paramsync.NewOperations(c.PgPool, service)).
 		WithAuthorization(c.PermService, c.DeviceService)

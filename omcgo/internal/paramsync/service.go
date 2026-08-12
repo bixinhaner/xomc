@@ -303,6 +303,14 @@ func (s *Service) GetRequest(ctx context.Context, requestID uuid.UUID) (*SyncReq
 	return s.repo.GetRequest(ctx, requestID)
 }
 
+func (s *Service) GetRun(ctx context.Context, runID uuid.UUID) (*SyncRun, error) {
+	return s.repo.GetRun(ctx, runID)
+}
+
+func (s *Service) FindRequestByIdempotency(ctx context.Context, callerType, key string) (*SyncRequest, error) {
+	return s.repo.FindRequestByIdempotency(ctx, callerType, key)
+}
+
 func (s *Service) GetActiveRun(ctx context.Context, deviceID uuid.UUID) (*SyncRun, error) {
 	return s.repo.GetActiveRunByDevice(ctx, deviceID)
 }
