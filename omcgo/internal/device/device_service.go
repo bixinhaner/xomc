@@ -882,6 +882,32 @@ func deriveInformIPAddress(udpAddr, connReqURL string) string {
 	return parsed.Hostname()
 }
 
+// updateConnectionRequestSummary applies ConnectionRequestURL as a partial
+// Inform field: absence, an empty value, or an invalid URL must not erase the
+// last known management endpoint. Only a valid HTTP(S) URL updates both the
+// persisted URL and its derived management IP address.
+func updateConnectionRequestSummary(device *model.Device, params []tr069.ParameterValueStruct) {
+	if device == nil {
+		return
+	}
+	for _, param := range params {
+		if param.Name != "Device.ManagementServer.ConnectionRequestURL" {
+			continue
+		}
+		candidate := strings.TrimSpace(param.Value)
+		if candidate == "" {
+			return
+		}
+		parsed, err := url.ParseRequestURI(candidate)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+			return
+		}
+		device.ConnectionRequestURL = candidate
+		device.IPAddress = parsed.Hostname()
+		return
+	}
+}
+
 func rebootDeviceType(tech model.Technology) string {
 	switch tech {
 	case model.TechNR:
@@ -949,15 +975,13 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	// Phase 6: ProductRegistry 回填 model_name（仅在 ModelName 为空时尝试）
 	s.applyProductMetadata(ctx, device)
 	device.FirmwareVersion = findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")
-	device.ConnectionRequestURL = findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL")
+	updateConnectionRequestSummary(device, inform.ParameterList)
 	device.LastInformAt = &now
 	device.LastInformEvents = tr069.EventCodes(inform.Event)
 	// T-0162: 收到 Inform 即视为在线。对于已 scan 出 lifecycle_state 的设备，
 	// normalizeDeviceForPersist 不会再从老 Status 反推新双字段；这里必须显式置 true，
 	// 否则设备一旦被 OfflineDetector 标记成 is_online=false，后续正常 Inform 也无法恢复在线展示。
 	device.IsOnline = true
-	device.IPAddress = deriveInformIPAddress("", device.ConnectionRequestURL)
-
 	udpAddr := deriveUDPConnectionRequestAddress(inform.ParameterList)
 	if udpAddr != "" {
 		device.IPAddress = deriveInformIPAddress(udpAddr, device.ConnectionRequestURL)

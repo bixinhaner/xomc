@@ -516,10 +516,10 @@ func TestDeviceService_RegisterFromInform_DeletedDeviceSkipped(t *testing.T) {
 
 // mockLicenseEnforcer 是 device.LicenseEnforcer 的测试 stub。
 type mockLicenseEnforcer struct {
-	capacityErr  error
-	expiryErr    error
-	capacityArg  int
-	expiryOp     string
+	capacityErr error
+	expiryErr   error
+	capacityArg int
+	expiryOp    string
 }
 
 func (m *mockLicenseEnforcer) EnforceCapacity(_ context.Context, additional int) error {
@@ -687,6 +687,47 @@ func TestDeviceService_UpdateFromInform_FallsBackToConnectionRequestURLHost(t *t
 	assert.Empty(t, updatedDevice.UDPConnectionRequestAddress)
 	assert.False(t, updatedDevice.NatDetected)
 	assert.True(t, updatedDevice.IsOnline)
+}
+
+func TestDeviceService_UpdateFromInform_PreservesConnectionRequestSummaryWhenURLIsNotValid(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		params []tr069.ParameterValueStruct
+	}{
+		{name: "parameter missing", params: []tr069.ParameterValueStruct{{Name: "Device.DeviceInfo.SoftwareVersion", Value: "1.0.0"}}},
+		{name: "parameter empty", params: []tr069.ParameterValueStruct{{Name: "Device.ManagementServer.ConnectionRequestURL", Value: ""}}},
+		{name: "parameter invalid", params: []tr069.ParameterValueStruct{{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "://invalid"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var updatedDevice *model.Device
+			deviceRepo := &mockDeviceRepo{
+				getBySerialNumberFn: func(context.Context, string) (*model.Device, error) {
+					return &model.Device{
+						ID:                   uuid.New(),
+						SerialNumber:         "BM-SN",
+						Technology:           model.TechLTE,
+						LifecycleState:       model.LifecycleCommissioned,
+						Status:               model.DeviceActive,
+						ConnectionRequestURL: "http://172.19.9.217:7547",
+						IPAddress:            "172.19.9.217",
+					}, nil
+				},
+				updateFn: func(_ context.Context, device *model.Device) error {
+					updatedDevice = device
+					return nil
+				},
+			}
+			svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+			inform := sampleInform("BM-SN")
+			inform.ParameterList = tt.params
+
+			_, err := svc.UpdateFromInform(context.Background(), inform)
+			require.NoError(t, err)
+			require.NotNil(t, updatedDevice)
+			assert.Equal(t, "http://172.19.9.217:7547", updatedDevice.ConnectionRequestURL)
+			assert.Equal(t, "172.19.9.217", updatedDevice.IPAddress)
+		})
+	}
 }
 
 func TestDeviceService_UpdateFromInform_IgnoresUnspecifiedUDPAddress(t *testing.T) {
