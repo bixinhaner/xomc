@@ -7,6 +7,7 @@ import type {
   GeofenceMapDefinition,
   GeofencePolygonGeometry,
 } from '@core/types/geofence';
+import type { Locale } from '@core/types/common';
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
@@ -80,8 +81,10 @@ const existing: GeofenceMapDefinition = {
 function renderEditor(options: {
   item?: GeofenceMapDefinition;
   drawnGeometry?: GeofencePolygonGeometry;
+  locale?: Locale;
 } = {}) {
   const { item } = options;
+  const locale = options.locale ?? 'zh-CN';
   const drawnGeometry = Object.prototype.hasOwnProperty.call(
     options,
     'drawnGeometry',
@@ -100,9 +103,9 @@ function renderEditor(options: {
     user: userEvent.setup(),
     ...render(
       <IntlProvider
-        locale="zh-CN"
-        defaultLocale="zh-CN"
-        messages={getMessages('zh-CN')}
+        locale={locale}
+        defaultLocale={locale}
+        messages={getMessages(locale)}
       >
         <GeofenceEditorDrawer
           open
@@ -201,10 +204,120 @@ describe('GeofenceEditorDrawer', () => {
     };
     const { user } = renderEditor({ item: deactivateFence });
 
-    expect(screen.getByText('去激活')).toBeInTheDocument();
+    expect(screen.getByText('自动去激活')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /保\s*存/ }));
 
     await waitFor(() => expect(mocks.createDraft).not.toHaveBeenCalled());
+  });
+
+  it('offers only alarm and automatic deactivation with explicit effects', async () => {
+    const { user } = renderEditor();
+
+    expect(
+      screen.getByText('仅告警：记录越界告警，不改变设备状态。'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('自动去激活：确认越界后自动关闭 IPSec/RF。'),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText('越界处理方式'));
+
+    expect(
+      screen.getByRole('option', { name: '仅告警' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: '自动去激活' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: '人工复核' }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByTitle('自动去激活'));
+
+    expect(
+      screen.queryByText('仅告警：记录越界告警，不改变设备状态。'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('自动去激活：确认越界后自动关闭 IPSec/RF。'),
+    ).toBeInTheDocument();
+  });
+
+  it('switches the selected policy description in English', async () => {
+    const { user } = renderEditor({ locale: 'en-US' });
+
+    expect(
+      screen.getByText(
+        'Alarm only: record a geofence alarm without changing device state.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        'Automatic deactivation: turn off IPSec/RF after the exit is confirmed.',
+      ),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText('Exit Handling'));
+    await user.click(screen.getByTitle('Automatic Deactivation'));
+
+    expect(
+      screen.queryByText(
+        'Alarm only: record a geofence alarm without changing device state.',
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Automatic deactivation: turn off IPSec/RF after the exit is confirmed.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('requires an explicit supported policy when editing manual review history', async () => {
+    const legacyFence: GeofenceMapDefinition = {
+      ...existing,
+      currentVersion: {
+        ...existing.currentVersion!,
+        policy: {
+          ...existing.currentVersion!.policy,
+          exitAction: 'manual_review',
+        },
+      },
+    };
+    const { user } = renderEditor({ item: legacyFence });
+
+    expect(
+      screen.getByText(
+        '该围栏使用历史“人工复核”策略，此策略未形成处理闭环。请明确选择“仅告警”或“自动去激活”后再保存发布。',
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /保\s*存/ }));
+
+    expect(await screen.findByText('请选择越界处理方式')).toBeInTheDocument();
+    expect(mocks.rename).not.toHaveBeenCalled();
+    expect(mocks.createDraft).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+
+    await user.click(screen.getByLabelText('越界处理方式'));
+    await user.click(screen.getByTitle('自动去激活'));
+    await user.click(screen.getByRole('button', { name: /保\s*存/ }));
+
+    await waitFor(() =>
+      expect(mocks.createDraft).toHaveBeenCalledWith({
+        id: 'fence-1',
+        input: {
+          geometry,
+          policy: {
+            exitAction: 'deactivate',
+            exitConsecutiveSamples: 2,
+            reentryConsecutiveSamples: 2,
+          },
+        },
+      }),
+    );
+    expect(mocks.publish).toHaveBeenCalledWith({
+      id: 'fence-1',
+      versionId: 'draft-2',
+    });
   });
 
   it('starts an explicit redraw without writing server state', async () => {

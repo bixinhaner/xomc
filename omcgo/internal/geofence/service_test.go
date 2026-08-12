@@ -223,6 +223,29 @@ func TestService_CreateDefinitionCreatesDraftWithNormalizedGeometry(t *testing.T
 	assert.Nil(t, result.Definition.CurrentVersionID)
 }
 
+func TestService_CreateDefinitionRejectsManualReviewPolicy(t *testing.T) {
+	repository := &fakeRepository{}
+	service := NewService(repository, nil)
+
+	_, err := service.CreateDefinition(
+		context.Background(),
+		CreateDefinitionRequest{
+			Name:     "legacy manual review",
+			Carrier:  "cmcc",
+			RuleType: RuleTypePolygonAllowZone,
+			Geometry: json.RawMessage(`{"type":"Polygon","coordinates":[[[121.1,31.1],[121.2,31.1],[121.2,31.2]]]}`),
+			Policy:   json.RawMessage(`{"exit_action":"manual_review"}`),
+			ActorID:  uuid.New(),
+		},
+	)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.ErrorContains(t, err, "unsupported exit_action")
+	assert.Nil(t, repository.createdDefinition)
+	assert.Nil(t, repository.createdVersion)
+}
+
 func TestService_DefinitionNameBoundaryIsSharedByCreateAndRename(t *testing.T) {
 	repository := &fakeRepository{}
 	service := NewService(repository, nil)
@@ -486,6 +509,35 @@ func TestService_CreateDraftVersionRejectsInvalidGeometryBeforeRepository(
 	)
 
 	require.Error(t, err)
+	assert.Nil(t, repository.createdDraft)
+}
+
+func TestService_CreateDraftVersionRejectsManualReviewPolicy(
+	t *testing.T,
+) {
+	geofenceID := uuid.New()
+	repository := &fakeRepository{definition: &Definition{
+		ID: geofenceID, RuleType: RuleTypePolygonAllowZone,
+		Status: DefinitionStatusEnabled,
+	}}
+	service := NewService(repository, nil)
+
+	_, err := service.CreateDraftVersion(
+		context.Background(),
+		CreateVersionRequest{
+			GeofenceID: geofenceID,
+			Geometry: json.RawMessage(
+				`{"type":"Polygon","coordinates":[[[120,30],[121,30],` +
+					`[121,31],[120,30]]]}`,
+			),
+			Policy:  json.RawMessage(`{"exit_action":"manual_review"}`),
+			ActorID: uuid.New(),
+		},
+	)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.ErrorContains(t, err, "unsupported exit_action")
 	assert.Nil(t, repository.createdDraft)
 }
 
