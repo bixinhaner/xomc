@@ -215,7 +215,7 @@ export interface GeofenceBindingEvaluation {
 }
 
 export interface GeofenceBindingFilter {
-  status?: Exclude<GeofenceBindingStatus, 'pending'>;
+  status?: Exclude<GeofenceBindingStatus, 'pending'> | 'current';
   keyword?: string;
   page?: number;
   pageSize?: number;

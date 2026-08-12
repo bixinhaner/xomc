@@ -982,11 +982,13 @@ func (h *Handler) ListBindings(c *gin.Context) {
 	if !ok {
 		return
 	}
+	status, currentOnly := parseBindingStatusFilter(c.Query("status"))
 	bindings, err := h.service.ListBindingDetails(
 		c.Request.Context(),
 		BindingDetailFilter{
 			GeofenceID:    id,
-			Status:        BindingStatus(strings.TrimSpace(c.Query("status"))),
+			Status:        status,
+			CurrentOnly:   currentOnly,
 			Keyword:       strings.TrimSpace(c.Query("keyword")),
 			Page:          page,
 			PageSize:      pageSize,
@@ -1005,9 +1007,11 @@ func (h *Handler) ExportBindings(c *gin.Context) {
 	if !ok {
 		return
 	}
+	status, currentOnly := parseBindingStatusFilter(c.Query("status"))
 	filter := BindingDetailFilter{
 		GeofenceID:    id,
-		Status:        BindingStatus(strings.TrimSpace(c.Query("status"))),
+		Status:        status,
+		CurrentOnly:   currentOnly,
 		Keyword:       strings.TrimSpace(c.Query("keyword")),
 		Page:          1,
 		PageSize:      MaxBindingPageSize,
@@ -1065,6 +1069,14 @@ func (h *Handler) ExportBindings(c *gin.Context) {
 	if err := writer.Error(); err != nil {
 		h.logger.Warn("write geofence bindings export", zap.Error(err))
 	}
+}
+
+func parseBindingStatusFilter(raw string) (BindingStatus, bool) {
+	value := strings.TrimSpace(raw)
+	if value == BindingStatusCurrent {
+		return "", true
+	}
+	return BindingStatus(value), false
 }
 
 func (h *Handler) abort(c *gin.Context, err error) {

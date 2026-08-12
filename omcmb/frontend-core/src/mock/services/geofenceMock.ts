@@ -815,7 +815,10 @@ export const geofenceMockService = {
       .filter((binding) => binding.geofenceId === id)
       .filter(
         (binding) =>
-          !filter.status || binding.status === filter.status,
+          !filter.status ||
+          (filter.status === 'current'
+            ? binding.status === 'active' || binding.status === 'suspended'
+            : binding.status === filter.status),
       )
       .filter(
         (binding) =>
@@ -845,7 +848,10 @@ export const geofenceMockService = {
       .filter((binding) => binding.geofenceId === id)
       .filter(
         (binding) =>
-          !filter.status || binding.status === filter.status,
+          !filter.status ||
+          (filter.status === 'current'
+            ? binding.status === 'active' || binding.status === 'suspended'
+            : binding.status === filter.status),
       )
       .filter(
         (binding) =>

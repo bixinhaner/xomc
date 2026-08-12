@@ -1405,9 +1405,9 @@ export default function GISMapView() {
           />
         )}
 
-        {geofenceBindingsItem && canManageGeofence && (
+        {canManageGeofence && (
           <GeofenceBindingsDrawer
-            open
+            open={Boolean(geofenceBindingsItem)}
             item={geofenceBindingsItem}
             initialDeviceSNs={geofenceBindingDeviceSNs}
             onClose={() => {

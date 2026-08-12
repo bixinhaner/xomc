@@ -64,8 +64,12 @@ export function geofenceJobRefetchInterval(
     case 'running':
     case 'zombie':
       return intervalMs;
-    default:
+    case 'succeeded':
+    case 'failed':
+    case 'canceled':
       return false;
+    default:
+      return intervalMs;
   }
 }
 
@@ -140,10 +144,20 @@ export async function invalidateGeofenceBindingCaches(
 export async function invalidateGeofenceCompletedJobCaches(
   queryClient: GeofenceCacheInvalidator,
   jobId: string,
-  geofenceId: string,
+  geofenceIds: readonly string[],
 ) {
+  const affectedGeofenceIds = Array.from(
+    new Set(geofenceIds.filter(Boolean)),
+  );
   await Promise.all([
-    invalidateGeofenceBindingCaches(queryClient, geofenceId),
+    ...affectedGeofenceIds.map((geofenceId) =>
+      queryClient.invalidateQueries({
+        queryKey: geofenceKeys.bindingLists(geofenceId),
+      }),
+    ),
+    queryClient.invalidateQueries({
+      queryKey: geofenceKeys.maps(),
+    }),
     queryClient.invalidateQueries({
       queryKey: geofenceKeys.jobItemsRoot(jobId),
     }),
@@ -319,6 +333,8 @@ export function useGeofenceBindings(
     queryFn: () =>
       geofenceService.listBindings(id as string, filter),
     enabled: Boolean(id) && (options?.enabled ?? true),
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 }
 
@@ -380,7 +396,7 @@ export function useCreateGeofenceManualBindJob() {
 
 export function useGeofenceManualBindJob(
   id: string | undefined,
-  geofenceId: string | undefined,
+  affectedGeofenceIds: readonly string[] | undefined,
   options?: { intervalMs?: number },
 ) {
   const queryClient = useQueryClient();
@@ -404,7 +420,11 @@ export function useGeofenceManualBindJob(
 
   useEffect(() => {
     const status = query.data?.status;
-    if (!id || !geofenceId || !isGeofenceJobTerminal(status)) {
+    if (
+      !id ||
+      !affectedGeofenceIds?.length ||
+      !isGeofenceJobTerminal(status)
+    ) {
       return;
     }
     const terminalKey = `${id}:${status}`;
@@ -415,9 +435,9 @@ export function useGeofenceManualBindJob(
     void invalidateGeofenceCompletedJobCaches(
       queryClient,
       id,
-      geofenceId,
+      affectedGeofenceIds,
     );
-  }, [geofenceId, id, query.data?.status, queryClient]);
+  }, [affectedGeofenceIds, id, query.data?.status, queryClient]);
 
   return query;
 }

@@ -16,6 +16,7 @@ import (
 const (
 	DefaultBindingPageSize = 50
 	MaxBindingPageSize     = 200
+	BindingStatusCurrent   = "current"
 )
 
 type BindingDetail struct {
@@ -45,6 +46,7 @@ type BindingEvaluationDetail struct {
 type BindingDetailFilter struct {
 	GeofenceID    uuid.UUID
 	Status        BindingStatus
+	CurrentOnly   bool
 	Keyword       string
 	Page          int
 	PageSize      int
@@ -69,6 +71,12 @@ func normalizeBindingDetailFilter(
 	}
 	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
 		return BindingDetailFilter{}, commonerrors.ErrForbidden
+	}
+	if filter.CurrentOnly && filter.Status != "" {
+		return BindingDetailFilter{}, fmt.Errorf(
+			"binding current scope and status are mutually exclusive: %w",
+			commonerrors.ErrInvalidInput,
+		)
 	}
 	switch filter.Status {
 	case "", BindingStatusActive, BindingStatusSuspended, BindingStatusRemoved:
@@ -150,7 +158,12 @@ func buildListBindingDetailsQuery(
 		).
 		Where(sq.Eq{"binding.geofence_id": filter.GeofenceID}).
 		Where("d.deleted_at IS NULL")
-	if filter.Status != "" {
+	if filter.CurrentOnly {
+		builder = builder.Where(sq.Eq{"binding.status": []BindingStatus{
+			BindingStatusActive,
+			BindingStatusSuspended,
+		}})
+	} else if filter.Status != "" {
 		builder = builder.Where(sq.Eq{"binding.status": filter.Status})
 	}
 	if filter.Keyword != "" {

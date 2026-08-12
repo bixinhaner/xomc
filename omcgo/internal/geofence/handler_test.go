@@ -1180,6 +1180,33 @@ func TestHandlerListBindingsReturnsPermissionSafePage(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), "longitude")
 }
 
+func TestHandlerListBindingsMapsCurrentStatusScope(t *testing.T) {
+	actorID := uuid.New()
+	geofenceID := uuid.New()
+	repository := &fakeRepository{
+		definition: &Definition{ID: geofenceID},
+	}
+	router := newManualBatchHandlerTestRouter(
+		NewService(repository, nil),
+		&actorID,
+		true,
+		nil,
+	)
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/geofences/"+geofenceID.String()+
+			"/bindings?status=current",
+		nil,
+	)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.True(t, repository.bindingDetailFilter.CurrentOnly)
+	require.Empty(t, repository.bindingDetailFilter.Status)
+}
+
 func TestHandlerExportBindingsReturnsPermissionSafeCSV(t *testing.T) {
 	actorID := uuid.New()
 	groupID := uuid.New()
