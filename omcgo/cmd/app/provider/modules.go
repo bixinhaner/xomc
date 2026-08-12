@@ -144,28 +144,6 @@ func initMRTaskModule(c *Container) error {
 	logger := c.Logger.Named("mr-task")
 
 	mrCfg := c.Cfg.MR.Defaults()
-	// mr.url_base 为空时回退到 sys_configs.acs_transfer.uploadBaseURL（运行时配置，
-	// 跟 FAULT_LOG_COLLECT / CONFIG_RESTORE 等其它 ACS 上传链路共用同一个真值源）。
-	// YAML 里的 acs_upload_base_url 是 deploy-time 兜底，sys_configs 表才是
-	// "系统管理 → ACS 传输"页面修改后的真实运行时值。
-	// 原 dispatcher 在 base="" 时直接下发相对 path `/smallcell/...`，设备拿到
-	// 拒收 / 拼错 host → MR 文件 0 上传，progress 推到 openSuccess 但 health 永远 abnormal。
-	if mrCfg.URLBase == "" {
-		sysCfg := admin.NewPgSysConfigRepository(c.PgPool)
-		mrPolicy := transfercfg.NewPolicy(transfercfg.Snapshot{},
-			newTransferSysConfigLookup(sysCfg))
-		if snap := mrPolicy.Snapshot(context.Background()); snap.Upload.BaseURL != "" {
-			mrCfg.URLBase = snap.Upload.BaseURL
-			logger.Info("mr.url_base empty; resolved via sys_configs.acs_transfer.uploadBaseURL",
-				zap.String("base", mrCfg.URLBase))
-		} else if c.Cfg.Upgrade.ACSUploadBaseURL != "" {
-			mrCfg.URLBase = c.Cfg.Upgrade.ACSUploadBaseURL
-			logger.Info("mr.url_base empty; sys_configs empty too, fell back to YAML acs_upload_base_url",
-				zap.String("base", mrCfg.URLBase))
-		} else {
-			logger.Warn("mr.url_base empty AND no fallback found; MrUrl will be path-only and devices will reject")
-		}
-	}
 	taskRepo := mrtask.NewPgRepository(c.PgPool)
 	// Prometheus 指标（4 + 2 共 6 个）；c.MetricsReg 为 nil 时所有 IncXxx 退化为 no-op。
 	metrics := mrtask.NewMetrics(c.MetricsReg)
@@ -180,6 +158,22 @@ func initMRTaskModule(c *Container) error {
 		logger,
 	)
 	dispatcher.SetMetrics(metrics)
+	mrSysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
+	mrTransferPolicy := transfercfg.NewPolicy(
+		newMRTransferDefaults(c.Cfg.Upgrade),
+		newTransferSysConfigLookup(mrSysConfigRepo),
+	)
+	mrParamRepo := c.ParamRepo
+	if mrParamRepo == nil {
+		mrParamRepo = device.NewPgDeviceParameterRepository(c.PgPool)
+	}
+	dispatcher.SetUploadAddressResolver(newTransferAddressResolver(
+		mrTransferPolicy,
+		mrParamRepo,
+	))
+	if c.SysConfigSvc != nil {
+		registerTransferPolicyInvalidation(c.SysConfigSvc, mrTransferPolicy)
+	}
 	// 平台判断走"productClass → ProductRegistry → param_model.name → 允许列表"。
 	// c.ParamModelRepo 由 paramregistry 模块初始化（PgRepository）。
 	dispatcher.SetPlatformResolver(NewMRPlatformResolver(c.ProductRegistry, c.ParamModelRepo, logger))

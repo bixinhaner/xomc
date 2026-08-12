@@ -10,7 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
@@ -65,6 +68,16 @@ func (f *fakeEnqueuer) GetQueueLength(_ context.Context, _ string) (int64, error
 	return 0, nil
 }
 
+type fakeHTTPSCapabilityReader struct {
+	status transfercfg.HTTPSCapabilityStatus
+	reads  int
+}
+
+func (f *fakeHTTPSCapabilityReader) ReadHTTPSCapability(_ context.Context, _ uuid.UUID) transfercfg.HTTPSCapabilityStatus {
+	f.reads++
+	return f.status
+}
+
 // fakeResolver 是 TranslatorResolver 的轻量实现。mappings 给的 standardPath →
 // privatePath 会被 Translator 命中（Found=true）。
 // 未在 mappings 中的 path 会 Found=false → dispatcher 降级返回 standardPath。
@@ -104,11 +117,21 @@ func newDispatcherSetupWithResolver(productClass string, lookupErr error, resolv
 	repo := newFakeRepo()
 	dev := &fakeDeviceContext{
 		devs: map[string]*coremodel.Device{
-			"SN001": {SerialNumber: "SN001", ProductClass: productClass, FirmwareVersion: "1.0"},
+			"SN001": {ID: uuid.New(), SerialNumber: "SN001", ProductClass: productClass, FirmwareVersion: "1.0"},
 		},
 		err: lookupErr,
 	}
 	d := NewDispatcher(cfg, enq, dev, resolver, repo, nil)
+	d.SetUploadAddressResolver(transfercfg.NewAddressResolver(
+		transfercfg.NewPolicy(transfercfg.Snapshot{
+			ProtocolPolicy: transfercfg.ProtocolPolicyForceHTTP,
+			Upload: transfercfg.UploadSettings{
+				BaseURL: "http://omc.example.com",
+				Path:    "/smallcell/FileUploadService",
+			},
+		}, nil),
+		nil,
+	))
 	// 默认把 supported productClass（如 INTEL_CR_SC_CARRIER / FAP/BAIBLQ/SC）
 	// 都解析为 "BLQ" 让测试走过 IsSupportedPlatform；不支持的 productClass
 	// 如 QAV3_SC 解析为空 → unsupport。
@@ -132,7 +155,6 @@ func sampleTask() *Task {
 		StartTime:    time.Now(),
 		EndTime:      &endTime,
 		TaskStatus:   StatusWaiting,
-		
 	}
 }
 
@@ -186,6 +208,197 @@ func TestDispatcher_Open_SupportedPlatform_EnqueuesSPVWith6Params(t *testing.T) 
 		"MR URL 必须含 cellCode 与空 filename")
 }
 
+func TestDispatcher_Open_MRUploadURLUsesUnifiedTransferPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		policy     string
+		capability transfercfg.HTTPSCapabilityStatus
+		wantURL    string
+		wantReads  int
+	}{
+		{
+			name:       "force_http ignores enabled capability",
+			policy:     transfercfg.ProtocolPolicyForceHTTP,
+			capability: transfercfg.HTTPSCapabilityEnabled,
+			wantURL:    "http://192.0.2.10:8080/reverse-proxy/smallcell/FileUploadService?fileType=MR&cellCode=CELL001&filename=",
+		},
+		{
+			name:       "prefer_https uses HTTPS only when capability is true",
+			policy:     transfercfg.ProtocolPolicyPreferHTTPS,
+			capability: transfercfg.HTTPSCapabilityEnabled,
+			wantURL:    "https://[2001:db8::10]:9443/secure-proxy/smallcell/FileUploadService?fileType=MR&cellCode=CELL001&filename=",
+			wantReads:  1,
+		},
+		{
+			name:       "prefer_https falls back to HTTP when capability is false",
+			policy:     transfercfg.ProtocolPolicyPreferHTTPS,
+			capability: transfercfg.HTTPSCapabilityDisabled,
+			wantURL:    "http://192.0.2.10:8080/reverse-proxy/smallcell/FileUploadService?fileType=MR&cellCode=CELL001&filename=",
+			wantReads:  1,
+		},
+		{
+			name:       "prefer_https falls back to HTTP when capability is unknown",
+			policy:     transfercfg.ProtocolPolicyPreferHTTPS,
+			capability: transfercfg.HTTPSCapabilityUnknown,
+			wantURL:    "http://192.0.2.10:8080/reverse-proxy/smallcell/FileUploadService?fileType=MR&cellCode=CELL001&filename=",
+			wantReads:  1,
+		},
+		{
+			name:       "prefer_https falls back to HTTP when capability read errors",
+			policy:     transfercfg.ProtocolPolicyPreferHTTPS,
+			capability: transfercfg.HTTPSCapabilityReadError,
+			wantURL:    "http://192.0.2.10:8080/reverse-proxy/smallcell/FileUploadService?fileType=MR&cellCode=CELL001&filename=",
+			wantReads:  1,
+		},
+		{
+			name:       "prefer_https falls back to HTTP for non true values",
+			policy:     transfercfg.ProtocolPolicyPreferHTTPS,
+			capability: transfercfg.HTTPSCapabilityOtherValue,
+			wantURL:    "http://192.0.2.10:8080/reverse-proxy/smallcell/FileUploadService?fileType=MR&cellCode=CELL001&filename=",
+			wantReads:  1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, enq, _ := newDispatcherSetup("INTEL_CR_SC_CARRIER", nil)
+			reader := &fakeHTTPSCapabilityReader{status: tc.capability}
+			policy := transfercfg.NewPolicy(transfercfg.Snapshot{
+				ProtocolPolicy: tc.policy,
+				Upload: transfercfg.UploadSettings{
+					BaseURL:      "http://192.0.2.10:8080/reverse-proxy",
+					HTTPSBaseURL: "https://[2001:db8::10]:9443/secure-proxy",
+				},
+			}, nil)
+			d.SetUploadAddressResolver(transfercfg.NewAddressResolver(policy, reader))
+			task := sampleTask()
+			cell := sampleProgress()
+			cell.TaskID = task.TaskID
+
+			require.NoError(t, d.Open(context.Background(), task, cell))
+
+			assert.Equal(t, tc.wantReads, reader.reads)
+			assert.Equal(t, tc.wantURL, capturedMRURL(t, enq.captured[0].Params))
+		})
+	}
+}
+
+func TestDispatcher_Open_MRUploadURLReadsCurrentPolicyForEachDispatch(t *testing.T) {
+	d, enq, _ := newDispatcherSetup("INTEL_CR_SC_CARRIER", nil)
+	reader := &fakeHTTPSCapabilityReader{status: transfercfg.HTTPSCapabilityEnabled}
+	values := map[string]string{
+		transfercfg.KeyProtocolPolicy:     transfercfg.ProtocolPolicyForceHTTP,
+		transfercfg.KeyUploadBaseURL:      "http://192.0.2.10:8080/reverse-proxy",
+		transfercfg.KeyHTTPSUploadBaseURL: "https://[2001:db8::10]:9443/secure-proxy",
+	}
+	policy := transfercfg.NewPolicy(transfercfg.Snapshot{}, func(_ context.Context, category, key string) (string, bool) {
+		if category != transfercfg.Category {
+			return "", false
+		}
+		value, ok := values[key]
+		return value, ok
+	})
+	d.SetUploadAddressResolver(transfercfg.NewAddressResolver(policy, reader))
+	task := sampleTask()
+	cell := sampleProgress()
+	cell.TaskID = task.TaskID
+
+	require.NoError(t, d.Open(context.Background(), task, cell))
+
+	values[transfercfg.KeyProtocolPolicy] = transfercfg.ProtocolPolicyPreferHTTPS
+	policy.InvalidateCache()
+	require.NoError(t, d.Open(context.Background(), task, cell))
+
+	require.Len(t, enq.captured, 2)
+	assert.Equal(t,
+		"http://192.0.2.10:8080/reverse-proxy/smallcell/FileUploadService?fileType=MR&cellCode=CELL001&filename=",
+		capturedMRURL(t, enq.captured[0].Params),
+	)
+	assert.Equal(t,
+		"https://[2001:db8::10]:9443/secure-proxy/smallcell/FileUploadService?fileType=MR&cellCode=CELL001&filename=",
+		capturedMRURL(t, enq.captured[1].Params),
+	)
+	assert.Equal(t, 1, reader.reads)
+}
+
+func TestDispatcher_Open_LogsProtocolDecisionWithoutFullURL(t *testing.T) {
+	d, enq, _ := newDispatcherSetup("INTEL_CR_SC_CARRIER", nil)
+	core, logs := observer.New(zap.InfoLevel)
+	d.logger = zap.New(core).Named("mr-dispatcher")
+	reader := &fakeHTTPSCapabilityReader{status: transfercfg.HTTPSCapabilityEnabled}
+	policy := transfercfg.NewPolicy(transfercfg.Snapshot{
+		ProtocolPolicy: transfercfg.ProtocolPolicyPreferHTTPS,
+		Upload: transfercfg.UploadSettings{
+			BaseURL:      "http://user:secret@192.0.2.10:8080/reverse-proxy",
+			HTTPSBaseURL: "https://[2001:db8::10]:9443/secure-proxy",
+		},
+	}, nil)
+	d.SetUploadAddressResolver(transfercfg.NewAddressResolver(policy, reader))
+	task := sampleTask()
+	cell := sampleProgress()
+	cell.TaskID = task.TaskID
+
+	require.NoError(t, d.Open(context.Background(), task, cell))
+	require.Len(t, enq.captured, 1)
+
+	entries := logs.FilterMessage("MR open SPV enqueued").All()
+	require.Len(t, entries, 1)
+	contextMap := entries[0].ContextMap()
+	assert.Equal(t, "https", contextMap["transfer_protocol"])
+	assert.Equal(t, "https_capability_enabled", contextMap["transfer_reason"])
+	assert.Equal(t, "enabled", contextMap["https_capability"])
+	assert.NotContains(t, entries[0].Context, "secret")
+	assert.NotContains(t, entries[0].Context, "FileUploadService")
+}
+
+func TestDispatcher_Open_MRUploadURLPreservesCellEncoding(t *testing.T) {
+	d, enq, _ := newDispatcherSetup("INTEL_CR_SC_CARRIER", nil)
+	policy := transfercfg.NewPolicy(transfercfg.Snapshot{
+		ProtocolPolicy: transfercfg.ProtocolPolicyForceHTTP,
+		Upload: transfercfg.UploadSettings{
+			BaseURL: "http://192.0.2.10:8080/reverse-proxy",
+		},
+	}, nil)
+	d.SetUploadAddressResolver(transfercfg.NewAddressResolver(policy, nil))
+	task := sampleTask()
+	cell := sampleProgress()
+	cell.TaskID = task.TaskID
+	cell.SmallCellCode = "CELL 001/A&B"
+
+	require.NoError(t, d.Open(context.Background(), task, cell))
+
+	assert.Equal(t,
+		"http://192.0.2.10:8080/reverse-proxy/smallcell/FileUploadService?fileType=MR&cellCode=CELL+001%2FA%26B&filename=",
+		capturedMRURL(t, enq.captured[0].Params),
+	)
+}
+
+func TestDispatcher_Open_InvalidMRUploadURLDoesNotEnqueueAndMarksOpenFailure(t *testing.T) {
+	d, enq, repo := newDispatcherSetup("INTEL_CR_SC_CARRIER", nil)
+	policy := transfercfg.NewPolicy(transfercfg.Snapshot{
+		ProtocolPolicy: transfercfg.ProtocolPolicyPreferHTTPS,
+		Upload: transfercfg.UploadSettings{
+			BaseURL: "http://192.0.2.10:8080/reverse-proxy",
+		},
+	}, nil)
+	d.SetUploadAddressResolver(transfercfg.NewAddressResolver(
+		policy,
+		&fakeHTTPSCapabilityReader{status: transfercfg.HTTPSCapabilityEnabled},
+	))
+	task := sampleTask()
+	cell := sampleProgress()
+	cell.TaskID = task.TaskID
+
+	err := d.Open(context.Background(), task, cell)
+
+	require.Error(t, err)
+	assert.Empty(t, enq.captured)
+	require.NotNil(t, repo.lastProgressDispatch)
+	assert.Equal(t, task.TaskID, repo.lastProgressDispatch.taskID)
+	assert.Equal(t, cell.SmallCellCode, repo.lastProgressDispatch.smallCellCode)
+	assert.Equal(t, ProgressOpenFailure, repo.lastProgressDispatch.status)
+	require.NotNil(t, repo.lastProgressDispatch.faultCode)
+	assert.Equal(t, "invalid_mr_upload_url", *repo.lastProgressDispatch.faultCode)
+}
+
 func TestDispatcher_Open_UnsupportedPlatform_MarksUnsupportNoEnqueue(t *testing.T) {
 	d, enq, repo := newDispatcherSetup("QAV3_SC", nil)
 	task := sampleTask()
@@ -194,7 +407,8 @@ func TestDispatcher_Open_UnsupportedPlatform_MarksUnsupportNoEnqueue(t *testing.
 	cell.TaskID = task.TaskID
 
 	// 让 repo 能找到这一行
-	_ = repo.CreateTask(context.Background(), task); _ = repo.InsertProgressRows(context.Background(), task.TaskID, []CellTarget{
+	_ = repo.CreateTask(context.Background(), task)
+	_ = repo.InsertProgressRows(context.Background(), task.TaskID, []CellTarget{
 		{SmallCellCode: cell.SmallCellCode, SerialNumber: cell.SerialNumber},
 	})
 
@@ -251,6 +465,21 @@ func TestDispatcher_Open_TranslatesStandardPathsToPrivate(t *testing.T) {
 	// 关键：被翻译过的 standardPath 路径不应同时出现（避免双下发）
 	assert.NotContains(t, byName, "Device.FAP.MRMgmt.Config.1.MrEnable",
 		"original standardPath should not appear when translated to privatePath")
+}
+
+func capturedMRURL(t *testing.T, params []byte) string {
+	t.Helper()
+	var body struct {
+		Values []spvValue `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal(params, &body))
+	for _, v := range body.Values {
+		if v.Name == "Device.FAP.MRMgmt.Config.1.MrUrl" {
+			return v.Value
+		}
+	}
+	t.Fatalf("MR URL parameter not found in %#v", body.Values)
+	return ""
 }
 
 func TestDispatcher_Open_NilResolver_UsesStandardPath(t *testing.T) {

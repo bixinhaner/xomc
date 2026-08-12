@@ -21,6 +21,15 @@ type fakeRepo struct {
 	tasks       map[uuid.UUID]*Task
 	targets     map[uuid.UUID][]CellTarget
 	createError error
+
+	lastProgressDispatch *progressDispatchUpdate
+}
+
+type progressDispatchUpdate struct {
+	taskID        uuid.UUID
+	smallCellCode string
+	status        ProgressStatus
+	faultCode     *string
 }
 
 func newFakeRepo() *fakeRepo {
@@ -88,7 +97,13 @@ func (f *fakeRepo) DeleteTask(_ context.Context, id uuid.UUID) error {
 func (f *fakeRepo) ListProgress(_ context.Context, _ ProgressListFilter) (*model.ListResponse[Progress], error) {
 	return model.NewListResponse([]Progress{}, 0, 1, 20), nil
 }
-func (f *fakeRepo) UpdateProgressDispatch(_ context.Context, _ uuid.UUID, _ string, _ ProgressStatus, _ *string) error {
+func (f *fakeRepo) UpdateProgressDispatch(_ context.Context, taskID uuid.UUID, smallCellCode string, status ProgressStatus, faultCode *string) error {
+	f.lastProgressDispatch = &progressDispatchUpdate{
+		taskID:        taskID,
+		smallCellCode: smallCellCode,
+		status:        status,
+		faultCode:     faultCode,
+	}
 	return nil
 }
 func (f *fakeRepo) TouchHeartbeat(_ context.Context, _ string) (bool, error) { return true, nil }
