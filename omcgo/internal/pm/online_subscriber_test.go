@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,8 +17,11 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/pkg/soap"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -27,6 +31,7 @@ type stubTaskCreator struct {
 	captured       []*task.CreateTaskRequest
 	err            error
 	open           *task.Task
+	openTasks      []*task.Task
 	completed      *task.Task
 	completedByKey map[string]*task.Task
 	completedKeys  []string
@@ -34,7 +39,51 @@ type stubTaskCreator struct {
 	openStarted    chan struct{}
 	openRelease    <-chan struct{}
 	openStartOnce  sync.Once
+	openLookups    []openTaskLookup
 }
+
+type openTaskLookup struct {
+	deviceSN    string
+	method      string
+	description string
+}
+
+type recordedQueueSubscription struct {
+	subject string
+	queue   string
+}
+
+type recordingEventBus struct {
+	queueSubscriptions []recordedQueueSubscription
+}
+
+type noopSubscription struct{}
+
+func (noopSubscription) Unsubscribe() error { return nil }
+
+func (b *recordingEventBus) Publish(context.Context, string, event.Event) error { return nil }
+
+func (b *recordingEventBus) Subscribe(string, event.EventHandler) (event.Subscription, error) {
+	return noopSubscription{}, nil
+}
+
+func (b *recordingEventBus) QueueSubscribe(
+	subject string,
+	queue string,
+	_ event.EventHandler,
+) (event.Subscription, error) {
+	b.queueSubscriptions = append(b.queueSubscriptions, recordedQueueSubscription{
+		subject: subject,
+		queue:   queue,
+	})
+	return noopSubscription{}, nil
+}
+
+func (b *recordingEventBus) PullSubscribe(string, string, event.EventHandler) (event.Subscription, error) {
+	return noopSubscription{}, nil
+}
+
+func (b *recordingEventBus) Close() error { return nil }
 
 func (s *stubTaskCreator) CreateTask(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
 	s.mu.Lock()
@@ -47,13 +96,43 @@ func (s *stubTaskCreator) CreateTask(_ context.Context, req *task.CreateTaskRequ
 }
 
 func (s *stubTaskCreator) LatestOpenTaskByDeviceAndMethod(
-	_ context.Context, _, _, _ string,
+	_ context.Context, deviceSN, method, description string,
 ) (*task.Task, error) {
+	s.openLookups = append(s.openLookups, openTaskLookup{
+		deviceSN:    deviceSN,
+		method:      method,
+		description: description,
+	})
 	if s.openStarted != nil {
 		s.openStartOnce.Do(func() { close(s.openStarted) })
 		<-s.openRelease
 	}
 	return s.open, s.lookupErr
+}
+
+func (s *stubTaskCreator) ListOpenTasksByDeviceAndMethods(
+	_ context.Context,
+	deviceSN string,
+	methods []string,
+) ([]*task.Task, error) {
+	s.openLookups = append(s.openLookups, openTaskLookup{
+		deviceSN: deviceSN,
+		method:   strings.Join(methods, ","),
+	})
+	if s.openStarted != nil {
+		s.openStartOnce.Do(func() { close(s.openStarted) })
+		<-s.openRelease
+	}
+	if s.lookupErr != nil {
+		return nil, s.lookupErr
+	}
+	if s.openTasks != nil {
+		return s.openTasks, nil
+	}
+	if s.open != nil {
+		return []*task.Task{s.open}, nil
+	}
+	return nil, nil
 }
 
 func (s *stubTaskCreator) LatestCompletedTaskByDeviceAndCommandKey(
@@ -106,6 +185,53 @@ type stubPMHTTPSCapabilityReader struct {
 	deviceIDs []uuid.UUID
 }
 
+type stubPMDeviceLookup struct {
+	devices map[uuid.UUID]*model.Device
+	err     error
+}
+
+func (l stubPMDeviceLookup) GetByID(_ context.Context, deviceID uuid.UUID) (*model.Device, error) {
+	if l.err != nil {
+		return nil, l.err
+	}
+	return l.devices[deviceID], nil
+}
+
+type stubPMParameterReader struct {
+	values    map[uuid.UUID]map[string]string
+	updatedAt time.Time
+	err       error
+	reads     []string
+}
+
+func (r *stubPMParameterReader) GetByPath(
+	_ context.Context,
+	deviceID uuid.UUID,
+	path string,
+) (*model.DeviceParameter, error) {
+	r.reads = append(r.reads, path)
+	if r.err != nil {
+		return nil, r.err
+	}
+	deviceValues := r.values[deviceID]
+	if deviceValues == nil {
+		return nil, nil
+	}
+	value, ok := deviceValues[path]
+	if !ok {
+		return nil, nil
+	}
+	return &model.DeviceParameter{
+		DeviceID:       deviceID,
+		ParameterPath:  path,
+		ParameterValue: value,
+		ParameterType:  "xsd:string",
+		LastUpdatedAt:  r.updatedAt,
+		FAPInstance:    1,
+		ParamGroup:     "PerfMgmt",
+	}, nil
+}
+
 func (r *stubPMHTTPSCapabilityReader) ReadHTTPSCapability(
 	_ context.Context,
 	deviceID uuid.UUID,
@@ -152,8 +278,7 @@ func samplePayload() device.DeviceOnlineEvent {
 
 func capturedPMUploadURL(t *testing.T, req *task.CreateTaskRequest) string {
 	t.Helper()
-	var params spvParams
-	require.NoError(t, json.Unmarshal(req.Params, &params))
+	params := capturedSPVParams(t, req)
 	for _, v := range params.Values {
 		if v.Name == "Device.FAP.PerfMgmt.Config.1.URL" {
 			return v.Value
@@ -161,6 +286,361 @@ func capturedPMUploadURL(t *testing.T, req *task.CreateTaskRequest) string {
 	}
 	t.Fatalf("missing PM upload URL SPV parameter")
 	return ""
+}
+
+func capturedSPVParams(t *testing.T, req *task.CreateTaskRequest) spvParams {
+	t.Helper()
+	var params spvParams
+	require.NoError(t, json.Unmarshal(req.Params, &params))
+	return params
+}
+
+func mustParamSyncCompletedEvent(t *testing.T, deviceID uuid.UUID, status string) event.Event {
+	t.Helper()
+	return mustParamSyncCompletedEventForRun(t, deviceID, uuid.New(), status, string(paramsync.SyncScopeFull))
+}
+
+func mustParamSyncCompletedEventForRun(
+	t *testing.T,
+	deviceID uuid.UUID,
+	runID uuid.UUID,
+	status string,
+	syncScope string,
+) event.Event {
+	t.Helper()
+	evt, err := event.NewEvent(event.SubjectParamSyncRunCompleted, map[string]any{
+		"run_id":     runID.String(),
+		"device_id":  deviceID.String(),
+		"status":     status,
+		"sync_scope": syncScope,
+	})
+	require.NoError(t, err)
+	return evt
+}
+
+func newPMHTTPSCompensationSubscriber(
+	stub *stubTaskCreator,
+	deviceID uuid.UUID,
+	protocolPolicy string,
+	values map[string]string,
+) (*OnlineSubscriber, *stubPMParameterReader) {
+	parameterReader := &stubPMParameterReader{values: map[uuid.UUID]map[string]string{
+		deviceID: values,
+	}, updatedAt: time.Now()}
+	resolver := transfercfg.NewAddressResolver(staticPMTransferProvider{snapshot: transfercfg.Snapshot{
+		ProtocolPolicy: protocolPolicy,
+		Upload: transfercfg.UploadSettings{
+			BaseURL:      "http://upload.example.com:8080",
+			HTTPSBaseURL: "https://upload.example.com:8443",
+		},
+	}}, transfercfg.NewDeviceParameterHTTPSCapabilityReader(parameterReader))
+	s := NewOnlineSubscriber(
+		stub,
+		"http://template.example.com:7557/smallcell/FileUploadService?fileType=PM&filename=",
+		"1",
+		900,
+		nil,
+	)
+	s.SetUploadAddressResolver(resolver)
+	s.SetParamSyncPMCompensationReaders(
+		stubPMDeviceLookup{devices: map[uuid.UUID]*model.Device{
+			deviceID: {ID: deviceID, SerialNumber: "SYNC-PM-001"},
+		}},
+		parameterReader,
+	)
+	return s, parameterReader
+}
+
+func Test_OnlineSubscriber_SubscribeParamSyncCompletedDoesNotSubscribeOnlineSetup(t *testing.T) {
+	deviceID := uuid.New()
+	stub := &stubTaskCreator{}
+	s, _ := newPMHTTPSCompensationSubscriber(stub, deviceID, transfercfg.ProtocolPolicyPreferHTTPS, map[string]string{
+		transfercfg.HTTPSCapabilityParameterPath: "true",
+		"Device.FAP.PerfMgmt.Config.1.URL":       "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+	})
+	bus := &recordingEventBus{}
+
+	require.NoError(t, s.SubscribeParamSyncCompleted(bus))
+
+	require.Equal(t, []recordedQueueSubscription{{
+		subject: event.SubjectParamSyncRunCompleted,
+		queue:   "pm-param-sync-https-compensation",
+	}}, bus.queueSubscriptions)
+}
+
+func Test_OnlineSubscriber_ParamSyncCompletedCompensatesPMURLToHTTPSOnly(t *testing.T) {
+	deviceID := uuid.New()
+	runID := uuid.New()
+	stub := &stubTaskCreator{}
+	s, _ := newPMHTTPSCompensationSubscriber(stub, deviceID, transfercfg.ProtocolPolicyPreferHTTPS, map[string]string{
+		transfercfg.HTTPSCapabilityParameterPath: "true",
+		"Device.FAP.PerfMgmt.Config.1.URL":       "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+	})
+
+	require.NoError(t, s.handleParamSyncCompleted(context.Background(), mustParamSyncCompletedEventForRun(
+		t, deviceID, runID, string(paramsync.RunStatusSucceeded), string(paramsync.SyncScopeFull),
+	)))
+
+	require.Len(t, stub.captured, 1)
+	req := stub.captured[0]
+	assert.Equal(t, "SYNC-PM-001", req.DeviceSN)
+	assert.Equal(t, string(soap.MethodSetParameterValues), req.Method)
+	assert.Equal(t, task.TaskSourceSystem, req.Source)
+	assert.Equal(t, "", req.CreatorID)
+	assert.Equal(t, "pm_upload_https_compensation:"+deviceID.String()+":"+runID.String(), req.CommandKey)
+	assert.Equal(t, "Compensate PM upload URL to HTTPS after parameter sync", req.Description)
+	require.NotNil(t, req.MaxRetries)
+	assert.Equal(t, req.ExpiresIn/req.RetryIntervalSeconds, *req.MaxRetries)
+
+	params := capturedSPVParams(t, req)
+	require.Len(t, params.Values, 1)
+	assert.Equal(t, "Device.FAP.PerfMgmt.Config.1.URL", params.Values[0].Name)
+	assert.Equal(t, "https://upload.example.com:8443/smallcell/FileUploadService?fileType=PM&filename=", params.Values[0].Value)
+	assert.Equal(t, "xsd:string", params.Values[0].Type)
+}
+
+func Test_OnlineSubscriber_ParamSyncCompletedHTTPSCompensationSkipsIneligibleDevices(t *testing.T) {
+	tests := []struct {
+		name           string
+		policy         string
+		values         map[string]string
+		completedState string
+	}{
+		{
+			name:   "force_http_policy",
+			policy: transfercfg.ProtocolPolicyForceHTTP,
+			values: map[string]string{
+				transfercfg.HTTPSCapabilityParameterPath: "true",
+				"Device.FAP.PerfMgmt.Config.1.URL":       "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+			},
+			completedState: string(paramsync.RunStatusSucceeded),
+		},
+		{
+			name:   "https_capability_false",
+			policy: transfercfg.ProtocolPolicyPreferHTTPS,
+			values: map[string]string{
+				transfercfg.HTTPSCapabilityParameterPath: "false",
+				"Device.FAP.PerfMgmt.Config.1.URL":       "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+			},
+			completedState: string(paramsync.RunStatusSucceeded),
+		},
+		{
+			name:   "https_capability_missing",
+			policy: transfercfg.ProtocolPolicyPreferHTTPS,
+			values: map[string]string{
+				"Device.FAP.PerfMgmt.Config.1.URL": "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+			},
+			completedState: string(paramsync.RunStatusSucceeded),
+		},
+		{
+			name:   "https_capability_uppercase_true",
+			policy: transfercfg.ProtocolPolicyPreferHTTPS,
+			values: map[string]string{
+				transfercfg.HTTPSCapabilityParameterPath: "TRUE",
+				"Device.FAP.PerfMgmt.Config.1.URL":       "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+			},
+			completedState: string(paramsync.RunStatusSucceeded),
+		},
+		{
+			name:   "current_pm_url_already_https",
+			policy: transfercfg.ProtocolPolicyPreferHTTPS,
+			values: map[string]string{
+				transfercfg.HTTPSCapabilityParameterPath: "true",
+				"Device.FAP.PerfMgmt.Config.1.URL":       "https://upload.example.com:8443/smallcell/FileUploadService?fileType=PM&filename=",
+			},
+			completedState: string(paramsync.RunStatusSucceeded),
+		},
+		{
+			name:   "sync_failed",
+			policy: transfercfg.ProtocolPolicyPreferHTTPS,
+			values: map[string]string{
+				transfercfg.HTTPSCapabilityParameterPath: "true",
+				"Device.FAP.PerfMgmt.Config.1.URL":       "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+			},
+			completedState: string(paramsync.RunStatusFailed),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deviceID := uuid.New()
+			stub := &stubTaskCreator{}
+			s, _ := newPMHTTPSCompensationSubscriber(stub, deviceID, tt.policy, tt.values)
+
+			require.NoError(t, s.handleParamSyncCompleted(context.Background(), mustParamSyncCompletedEvent(t, deviceID, tt.completedState)))
+
+			assert.Empty(t, stub.captured)
+		})
+	}
+}
+
+func Test_OnlineSubscriber_ParamSyncCompletedHTTPSCompensationRequiresSucceededFullSyncEvent(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload map[string]any
+	}{
+		{
+			name: "missing_status",
+			payload: map[string]any{
+				"run_id":     uuid.New().String(),
+				"device_id":  uuid.New().String(),
+				"sync_scope": string(paramsync.SyncScopeFull),
+			},
+		},
+		{
+			name: "missing_sync_scope",
+			payload: map[string]any{
+				"run_id":    uuid.New().String(),
+				"device_id": uuid.New().String(),
+				"status":    string(paramsync.RunStatusSucceeded),
+			},
+		},
+		{
+			name: "partial_sync",
+			payload: map[string]any{
+				"run_id":     uuid.New().String(),
+				"device_id":  uuid.New().String(),
+				"status":     string(paramsync.RunStatusSucceeded),
+				"sync_scope": string(paramsync.SyncScopePartial),
+			},
+		},
+		{
+			name: "missing_run_id",
+			payload: map[string]any{
+				"device_id":  uuid.New().String(),
+				"status":     string(paramsync.RunStatusSucceeded),
+				"sync_scope": string(paramsync.SyncScopeFull),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deviceID := uuid.New()
+			stub := &stubTaskCreator{}
+			s, _ := newPMHTTPSCompensationSubscriber(stub, deviceID, transfercfg.ProtocolPolicyPreferHTTPS, map[string]string{
+				transfercfg.HTTPSCapabilityParameterPath: "true",
+				"Device.FAP.PerfMgmt.Config.1.URL":       "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+			})
+			evt, err := event.NewEvent(event.SubjectParamSyncRunCompleted, tt.payload)
+			require.NoError(t, err)
+
+			require.NoError(t, s.handleParamSyncCompleted(context.Background(), evt))
+
+			assert.Empty(t, stub.captured)
+		})
+	}
+}
+
+func Test_OnlineSubscriber_ParamSyncCompletedHTTPSCompensationSkipsEquivalentOpenOrCompletedTask(t *testing.T) {
+	deviceID := uuid.New()
+	runID := uuid.New()
+	paramUpdatedAt := time.Now()
+	paramsJSON, err := json.Marshal(buildURLOnlySPVParams("https://upload.example.com:8443/smallcell/FileUploadService?fileType=PM&filename="))
+	require.NoError(t, err)
+	paramsWithExtraJSON, err := json.Marshal(spvParams{Values: []spvParam{
+		{
+			Name:  pmUploadURLParameterPath,
+			Value: "https://upload.example.com:8443/smallcell/FileUploadService?fileType=PM&filename=",
+			Type:  "xsd:string",
+		},
+		{
+			Name:  "Device.FAP.PerfMgmt.Config.1.PeriodicUploadInterval",
+			Value: "900",
+			Type:  "xsd:unsignedInt",
+		},
+	}})
+	require.NoError(t, err)
+	values := map[string]string{
+		transfercfg.HTTPSCapabilityParameterPath: "true",
+		"Device.FAP.PerfMgmt.Config.1.URL":       "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+	}
+
+	t.Run("open", func(t *testing.T) {
+		stub := &stubTaskCreator{open: &task.Task{
+			ID:          "open-equivalent-spv",
+			Params:      paramsWithExtraJSON,
+			CommandKey:  "manual-pm-url-correction",
+			Description: "Manually requested PM URL correction",
+		}}
+		s, parameterReader := newPMHTTPSCompensationSubscriber(stub, deviceID, transfercfg.ProtocolPolicyPreferHTTPS, values)
+		parameterReader.updatedAt = paramUpdatedAt
+
+		require.NoError(t, s.handleParamSyncCompleted(context.Background(), mustParamSyncCompletedEventForRun(
+			t, deviceID, runID, string(paramsync.RunStatusSucceeded), string(paramsync.SyncScopeFull),
+		)))
+
+		assert.Empty(t, stub.captured)
+		require.Len(t, stub.openLookups, 1)
+		assert.Equal(t, string(soap.MethodSetParameterValues), stub.openLookups[0].method)
+	})
+
+	t.Run("completed", func(t *testing.T) {
+		completedAt := paramUpdatedAt.Add(time.Second)
+		stub := &stubTaskCreator{completedByKey: map[string]*task.Task{
+			"pm_upload_https_compensation:" + deviceID.String() + ":" + runID.String(): {
+				ID:          "completed-compensation",
+				Params:      paramsJSON,
+				CreatedAt:   completedAt,
+				CompletedAt: &completedAt,
+			},
+		}}
+		s, parameterReader := newPMHTTPSCompensationSubscriber(stub, deviceID, transfercfg.ProtocolPolicyPreferHTTPS, values)
+		parameterReader.updatedAt = paramUpdatedAt
+
+		require.NoError(t, s.handleParamSyncCompleted(context.Background(), mustParamSyncCompletedEventForRun(
+			t, deviceID, runID, string(paramsync.RunStatusSucceeded), string(paramsync.SyncScopeFull),
+		)))
+
+		assert.Empty(t, stub.captured)
+		assert.Equal(t, []string{"pm_upload_https_compensation:" + deviceID.String() + ":" + runID.String()}, stub.completedKeys)
+	})
+}
+
+func Test_OnlineSubscriber_ParamSyncCompletedHTTPSCompensationReappliesWhenCurrentHTTPIsNewerThanCompletedTask(t *testing.T) {
+	deviceID := uuid.New()
+	oldRunID := uuid.New()
+	newRunID := uuid.New()
+	oldCompletedAt := time.Now().Add(-time.Minute)
+	currentHTTPUpdatedAt := time.Now()
+	paramsJSON, err := json.Marshal(buildURLOnlySPVParams("https://upload.example.com:8443/smallcell/FileUploadService?fileType=PM&filename="))
+	require.NoError(t, err)
+	stub := &stubTaskCreator{completedByKey: map[string]*task.Task{
+		"pm_upload_https_compensation:" + deviceID.String() + ":" + oldRunID.String(): {
+			ID:          "old-completed-compensation",
+			Params:      paramsJSON,
+			CreatedAt:   oldCompletedAt,
+			CompletedAt: &oldCompletedAt,
+		},
+	}}
+	s, parameterReader := newPMHTTPSCompensationSubscriber(stub, deviceID, transfercfg.ProtocolPolicyPreferHTTPS, map[string]string{
+		transfercfg.HTTPSCapabilityParameterPath: "true",
+		"Device.FAP.PerfMgmt.Config.1.URL":       "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+	})
+	parameterReader.updatedAt = currentHTTPUpdatedAt
+
+	require.NoError(t, s.handleParamSyncCompleted(context.Background(), mustParamSyncCompletedEventForRun(
+		t, deviceID, newRunID, string(paramsync.RunStatusSucceeded), string(paramsync.SyncScopeFull),
+	)))
+
+	require.Len(t, stub.captured, 1)
+	assert.Equal(t, "https://upload.example.com:8443/smallcell/FileUploadService?fileType=PM&filename=", capturedPMUploadURL(t, stub.captured[0]))
+	assert.Equal(t, "pm_upload_https_compensation:"+deviceID.String()+":"+newRunID.String(), stub.captured[0].CommandKey)
+}
+
+func Test_OnlineSubscriber_ParamSyncCompletedHTTPSCompensationCoalescesConcurrentEvents(t *testing.T) {
+	deviceID := uuid.New()
+	stub := &stubTaskCreator{}
+	s, _ := newPMHTTPSCompensationSubscriber(stub, deviceID, transfercfg.ProtocolPolicyPreferHTTPS, map[string]string{
+		transfercfg.HTTPSCapabilityParameterPath: "true",
+		"Device.FAP.PerfMgmt.Config.1.URL":       "http://upload.example.com:8080/smallcell/FileUploadService?fileType=PM&filename=",
+	})
+	s.SetAdmissionGate(&stubPMSetupAdmissionGate{acquired: false})
+
+	require.NoError(t, s.handleParamSyncCompleted(
+		context.Background(),
+		mustParamSyncCompletedEvent(t, deviceID, string(paramsync.RunStatusSucceeded)),
+	))
+
+	assert.Empty(t, stub.captured)
 }
 
 func Test_OnlineSubscriber_EnqueuesSingleSPVWith3Params(t *testing.T) {
@@ -176,7 +656,7 @@ func Test_OnlineSubscriber_EnqueuesSingleSPVWith3Params(t *testing.T) {
 	require.Len(t, stub.captured, 1)
 	req := stub.captured[0]
 	assert.Equal(t, "BLQ-TEST-001", req.DeviceSN)
-	assert.Equal(t, "SetParameterValues", req.Method)
+	assert.Equal(t, string(soap.MethodSetParameterValues), req.Method)
 	assert.Equal(t, task.TaskSourceSystem, req.Source)
 	assert.Equal(t, "", req.CreatorID, "system task should not have CreatorID (skip notification)")
 	assert.Equal(t, "pm_upload_setup_on_online:"+sample.DeviceID.String(), req.CommandKey)
