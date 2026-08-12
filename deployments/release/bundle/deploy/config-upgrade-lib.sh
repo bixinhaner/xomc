@@ -233,6 +233,20 @@ config_has_top_level_section() {
   ' "$config"
 }
 
+# config_dir_has_instance_config <实例配置目录>
+#
+# etc/ may already contain auxiliary state created earlier in the same install
+# (notably license/omcPublicKey.store).  Those files do not make a fresh install
+# an upgrade.  Conversely, any existing service config means operator settings
+# may need preserving, so the caller must use the upgrade path.
+config_dir_has_instance_config() {
+  local config_dir="$1" service_config
+  for service_config in acs.prod.yaml app.prod.yaml worker.prod.yaml; do
+    [ -e "$config_dir/$service_config" ] && return 0
+  done
+  return 1
+}
+
 # upgrade_pm_redis_config <现网配置> <新包模板>
 #
 # 旧版本保留的 app/worker 配置没有 pm_redis。只追加新模板中的完整顶层段，

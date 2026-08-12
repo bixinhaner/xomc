@@ -892,11 +892,10 @@ for _pair in $_legacy_custom_map; do
   rm -rf "$_csrc"
 done
 
-# 实例配置：首次复制模板；非首次默认保留以保护已改口令
-etc_is_empty=0
-[ -z "$(ls -A "$OMC_ROOT/etc" 2>/dev/null)" ] && etc_is_empty=1
-
-if [ "$etc_is_empty" = 1 ]; then
+# 实例配置：三份服务配置均不存在才是首次复制模板；非首次默认保留以保护已改口令。
+# 不能用 etc 目录是否为空判断：本脚本会在此之前播种 License 公钥库，使真正的
+# 首次部署也拥有 etc/license/omcPublicKey.store。
+if ! config_dir_has_instance_config "$OMC_ROOT/etc"; then
   log "首次部署：复制配置模板到 $OMC_ROOT/etc/（首次必修改默认口令！）" "Fresh install: copying configuration templates to $OMC_ROOT/etc/ (change default credentials before production use)"
   cp -rn "$RELEASE_DIR/etc/." "$OMC_ROOT/etc/"
 else
