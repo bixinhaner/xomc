@@ -63,3 +63,14 @@ func newSoftwareTransferDefaults(cfg appconfig.UpgradeConfig) transfercfg.Snapsh
 		},
 	}
 }
+
+func newMRTransferDefaults(cfg appconfig.UpgradeConfig) transfercfg.Snapshot {
+	baseURL := strings.TrimSpace(cfg.ACSUploadBaseURL)
+	return transfercfg.Snapshot{
+		ProtocolPolicy: transfercfg.ProtocolPolicyForceHTTP,
+		Upload: transfercfg.UploadSettings{
+			BaseURL: baseURL,
+			Path:    "/smallcell/FileUploadService",
+		},
+	}
+}

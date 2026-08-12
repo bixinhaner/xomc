@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
 )
@@ -20,9 +21,9 @@ import (
 // 单测增加几个能精确控制的口子：固定的 due 任务列表 + IncrementMissed 计数。
 type schedulerFakeRepo struct {
 	*fakeRepo
-	dueWaiting       []Task
-	dueOn            []Task
-	incMissedCalls   int
+	dueWaiting        []Task
+	dueOn             []Task
+	incMissedCalls    int
 	incMissedAbnormal bool // 控制 IncrementMissedHeartbeat 是否返回 becameAbnormal
 }
 
@@ -54,7 +55,18 @@ func newSchedulerDispatcher(repo Repository) *Dispatcher {
 			"SN001": {SerialNumber: "SN001", ProductClass: "INTEL_CR_SC_CARRIER"},
 		},
 	}
-	return NewDispatcher(appconfig.MRConfig{}.Defaults(), enq, dev, &fakeResolver{disable: true}, repo, nil)
+	d := NewDispatcher(appconfig.MRConfig{}.Defaults(), enq, dev, &fakeResolver{disable: true}, repo, nil)
+	d.SetUploadAddressResolver(transfercfg.NewAddressResolver(
+		transfercfg.NewPolicy(transfercfg.Snapshot{
+			ProtocolPolicy: transfercfg.ProtocolPolicyForceHTTP,
+			Upload: transfercfg.UploadSettings{
+				BaseURL: "http://omc.example.com",
+				Path:    "/smallcell/FileUploadService",
+			},
+		}, nil),
+		nil,
+	))
+	return d
 }
 
 func newMiniRedisClient(t *testing.T) (redis.UniversalClient, func()) {
@@ -75,10 +87,11 @@ func TestScheduler_TickOpen_DispatchesAndAdvancesToOn(t *testing.T) {
 	taskID := uuid.New()
 	task := Task{TaskID: taskID, TaskName: "x", TaskStatus: StatusWaiting,
 		MRType: "MRS,MRE,MRO", StatisPeriod: "5120", ReportPeriod: "15",
-		StartTime: time.Now().Add(-time.Minute),  Creator: "alice"}
+		StartTime: time.Now().Add(-time.Minute), Creator: "alice"}
 	repo.tasks[taskID] = &task
 	// 预置一行 pending progress（dispatcher.Open 会读 device + 派发 SPV）
-	_ = repo.CreateTask(context.Background(), &task); _ = repo.InsertProgressRows(context.Background(), task.TaskID, []CellTarget{
+	_ = repo.CreateTask(context.Background(), &task)
+	_ = repo.InsertProgressRows(context.Background(), task.TaskID, []CellTarget{
 		{SmallCellCode: "CELL001", SerialNumber: "SN001"},
 	})
 	repo.dueWaiting = []Task{task}
@@ -101,7 +114,7 @@ func TestScheduler_TickClose_DueOnTasksClosedToOff(t *testing.T) {
 	task := Task{TaskID: taskID, TaskName: "x", TaskStatus: StatusOn,
 		MRType: "MRS,MRE,MRO", StatisPeriod: "5120", ReportPeriod: "15",
 		StartTime: time.Now().Add(-time.Hour), EndTime: &end,
-		 Creator: "alice"}
+		Creator: "alice"}
 	repo.tasks[taskID] = &task
 	repo.dueOn = []Task{task}
 
@@ -121,11 +134,12 @@ func TestScheduler_TickHeartbeat_MissedTriggersIncrement(t *testing.T) {
 	taskID := uuid.New()
 	task := Task{TaskID: taskID, TaskName: "x", TaskStatus: StatusOn,
 		MRType: "MRS,MRE,MRO", StatisPeriod: "5120", ReportPeriod: "15",
-		StartTime: time.Now().Add(-time.Hour),  Creator: "alice"}
+		StartTime: time.Now().Add(-time.Hour), Creator: "alice"}
 	repo.tasks[taskID] = &task
 	repo.targets[taskID] = []CellTarget{{SmallCellCode: "CELL001", SerialNumber: "SN001"}}
 	// 让 fakeRepo.ListProgress 返回 openSuccess 行
-	_ = repo.CreateTask(context.Background(), &task); _ = repo.InsertProgressRows(context.Background(), task.TaskID, repo.targets[taskID])
+	_ = repo.CreateTask(context.Background(), &task)
+	_ = repo.InsertProgressRows(context.Background(), task.TaskID, repo.targets[taskID])
 
 	repo.incMissedAbnormal = false
 	s := NewScheduler(repo, newSchedulerDispatcher(repo), cli,

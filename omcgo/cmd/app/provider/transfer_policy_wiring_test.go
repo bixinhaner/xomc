@@ -89,6 +89,19 @@ func TestNewSoftwareTransferDefaultsUsesUpgradeBaseURLForFreshDeployHTTPFallback
 	assert.Equal(t, "/smallcell/FileDownloadService", snapshot.Download.Path)
 }
 
+func TestNewMRTransferDefaultsUsesSharedACSUploadBaseURLForFreshDeployHTTPFallback(t *testing.T) {
+	defaults := newMRTransferDefaults(appconfig.UpgradeConfig{
+		ACSUploadBaseURL: " http://acs-upload.example.com:8080/base/ ",
+	})
+	policy := transfercfg.NewPolicy(defaults, nil)
+
+	snapshot := policy.Snapshot(context.Background())
+
+	assert.Equal(t, transfercfg.ProtocolPolicyForceHTTP, snapshot.ProtocolPolicy)
+	assert.Equal(t, "http://acs-upload.example.com:8080/base", snapshot.Upload.BaseURL)
+	assert.Equal(t, "/smallcell/FileUploadService", snapshot.Upload.Path)
+}
+
 func TestRegisterTransferPolicyInvalidation_RefreshesAppSnapshotAfterSave(t *testing.T) {
 	values := map[string]string{
 		transfercfg.KeyProtocolPolicy:       transfercfg.ProtocolPolicyForceHTTP,
