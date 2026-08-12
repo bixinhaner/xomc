@@ -133,16 +133,15 @@ type ProvisioningEngine struct {
 	// deviceCache 在 lazy bind 写库成功后失效 SN 缓存。
 	// nil 表示禁用（不影响主流程，仅留下 stale 缓存的可能 — admin 改 productClass 时
 	// 见 §C C2 修复路径）。T-0176-PR-D 注入。
-	deviceCache          deviceCacheInvalidator
-	redisClient          redis.UniversalClient
-	metrics              *Metrics
-	config               appconfig.ProvisionConfig
-	paramSyncRoutingMode string
-	logger               *zap.Logger
-	policyContinuation   policyContinuation
-	automaticPolicy      automaticPolicyExecutor
-	activationState      activationStateReader
-	activationRefresher  activationStateRefresher
+	deviceCache         deviceCacheInvalidator
+	redisClient         redis.UniversalClient
+	metrics             *Metrics
+	config              appconfig.ProvisionConfig
+	logger              *zap.Logger
+	policyContinuation  policyContinuation
+	automaticPolicy     automaticPolicyExecutor
+	activationState     activationStateReader
+	activationRefresher activationStateRefresher
 
 	gpvWorkersOnce sync.Once
 	gpvWorkerChans []chan gpvWorkItem
@@ -203,25 +202,6 @@ func (e *ProvisioningEngine) SetRegisteredDeviceSyncStarter(starter RegisteredDe
 
 func (e *ProvisioningEngine) SetDeviceOnlineFullSyncSubmitter(submitter DeviceOnlineFullSyncSubmitter) {
 	e.deviceOnlineSync = submitter
-}
-
-// SetParamSyncRoutingMode configures the P0 routing gate. Empty keeps the
-// legacy-compatible behavior for tests and older local configurations; a
-// production deployment should explicitly use closed, durable_shadow, or
-// durable before enabling the new request path.
-func (e *ProvisioningEngine) SetParamSyncRoutingMode(mode string) {
-	e.paramSyncRoutingMode = strings.TrimSpace(mode)
-}
-
-func (e *ProvisioningEngine) blocksLegacyParamSync(entry string) bool {
-	switch e.paramSyncRoutingMode {
-	case "durable_shadow", "durable", "closed":
-		e.logger.Info("parameter sync legacy entry blocked by routing mode",
-			zap.String("entry", entry), zap.String("routing_mode", e.paramSyncRoutingMode))
-		return true
-	default:
-		return false
-	}
 }
 
 // SetRedisClient 注入 Redis 客户端供 device.online 节流与 Path B 同步差异日志使用（T-0123）。
@@ -687,12 +667,6 @@ func (e *ProvisioningEngine) handleDeviceOnline(
 		}
 	}
 
-	if e.paramSyncRoutingMode != "durable" {
-		e.logger.Debug("device.online parameter sync blocked by routing mode",
-			zap.String("device_id", evt.DeviceID.String()),
-			zap.String("routing_mode", e.paramSyncRoutingMode))
-		return nil
-	}
 	if e.deviceOnlineSync == nil {
 		return fmt.Errorf("device.online durable parameter sync submitter unavailable")
 	}
@@ -865,7 +839,7 @@ func (e *ProvisioningEngine) handleFirmwareChanged(
 	//
 	// 这一步必须位于 model-upload 的 10 分钟锁之外：较早的固件变化可能已经
 	// 获取模型上传锁，但随后真正的 BecameOnline 仍必须触发恢复同步。
-	if evt.BecameOnline && e.paramSyncRoutingMode == "durable" {
+	if evt.BecameOnline {
 		if err := e.startDeviceOnlineFullSync(
 			ctx,
 			dev,
@@ -1001,8 +975,10 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 		)
 	}
 
-	// Path B: AutoSync enabled + paramMapping available → sync via GPV.
-	if e.config.AutoSync.Enabled && e.syncService != nil && e.syncService.PathBEnabled(ctx, dev) && !e.blocksLegacyParamSync("bootstrap") {
+	// Newly created devices are synchronized by the independent
+	// device.registered durable consumer. Re-entering here would submit the same
+	// full sync with a different idempotency key.
+	if !evt.Created && e.config.AutoSync.Enabled && e.syncService != nil && e.syncService.PathBEnabled(ctx, dev) {
 		return e.handleAutoSync(ctx, task, dev)
 	}
 
@@ -1023,12 +999,7 @@ func (e *ProvisioningEngine) handleRegisteredDeviceSyncEvent(ctx context.Context
 	if err := evt.DecodePayload(&registered); err != nil {
 		return fmt.Errorf("decode registered-device sync event: %w", err)
 	}
-	switch e.paramSyncRoutingMode {
-	case "durable":
-		if !registered.Created || e.registeredSync == nil {
-			return nil
-		}
-	default:
+	if !registered.Created || e.registeredSync == nil {
 		return nil
 	}
 	dev, err := e.deviceService.GetDevice(ctx, registered.DeviceID)
@@ -1046,20 +1017,14 @@ func (e *ProvisioningEngine) startRegisteredDeviceSync(
 	evt bootstrapEvent,
 	dev *model.Device,
 ) error {
-	var err error
-	switch e.paramSyncRoutingMode {
-	case "durable":
-		if !evt.Created || e.registeredSync == nil {
-			return nil
-		}
-		err = e.registeredSync.StartRegisteredDeviceSync(
-			ctx,
-			dev,
-			"device_registered:"+dev.ID.String(),
-		)
-	default:
+	if !evt.Created || e.registeredSync == nil {
 		return nil
 	}
+	err := e.registeredSync.StartRegisteredDeviceSync(
+		ctx,
+		dev,
+		"device_registered:"+dev.ID.String(),
+	)
 	if err != nil {
 		return fmt.Errorf("start registered-device parameter sync: %w", err)
 	}
@@ -1142,10 +1107,6 @@ func (e *ProvisioningEngine) handleModelUpload(ctx context.Context, task *Provis
 // handleAutoSync initiates Path B parameter value synchronization.
 func (e *ProvisioningEngine) handleAutoSync(ctx context.Context, task *ProvisioningTask,
 	dev *model.Device) error {
-	if e.blocksLegacyParamSync("bootstrap") {
-		return nil
-	}
-
 	if err := e.transitionTask(ctx, task, StateSyncing); err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("transition to syncing: %w", err))
 	}

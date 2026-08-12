@@ -220,8 +220,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 		inf.Logger.Info("periodic UE count query enabled (#220)")
 	}
 	deps.GPVFaultRecoverer = paramsync.NewGPVFaultRecoverer(inf.PgPool, taskService)
-	deps.DurableReadbackEnabled = cfg.ParamSync.RunEnabled && cfg.ParamSync.ResultConsumerEnabled &&
-		cfg.ParamSync.StagingEnabled && cfg.ParamSync.CanaryPercent == 100
+	deps.DurableReadbackEnabled = true
 
 	// #746: 心跳周期自动调整策略 — BOOTSTRAP/BOOT 时 GPV 查询当前值，与配置目标比较后 SPV 调整。
 	// 依赖 sys_configs(device.enbInformPeriodAdjustEnable/enbInformPeriod/cpeInformPeriodAdjustEnable/cpeInformPeriod)。

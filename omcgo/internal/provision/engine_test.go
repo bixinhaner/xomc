@@ -289,7 +289,6 @@ func TestHandleDeviceOnlineSchedulesActivationCheck(t *testing.T) {
 	submitter := &recordingDeviceOnlineFullSyncSubmitter{}
 	h.engine.SetDeviceOnlineFullSyncSubmitter(submitter)
 	h.engine.SetActivationStateReader(stubActivationStateReader{})
-	h.engine.SetParamSyncRoutingMode("durable")
 
 	require.NoError(t, h.engine.HandleDeviceOnline(context.Background(), device.DeviceOnlineEvent{
 		DeviceID: deviceID, SerialNumber: "SN-LTE",
@@ -1384,7 +1383,6 @@ func TestProvisioningEngine_Subscribe_RegisteredSyncRetriesSubmitFailure(t *test
 	starter := &fakeRegisteredDeviceSyncStarter{
 		errs: []error{errors.New("temporary submit failure"), nil},
 	}
-	h.engine.SetParamSyncRoutingMode("durable")
 	h.engine.SetRegisteredDeviceSyncStarter(starter)
 
 	var syncHandler event.EventHandler
@@ -1414,7 +1412,6 @@ func TestHandleRegisteredDeviceSyncEvent_DeletedBeforeConsumptionIsSkipped(t *te
 		},
 	})
 	starter := &fakeRegisteredDeviceSyncStarter{}
-	h.engine.SetParamSyncRoutingMode("durable")
 	h.engine.SetRegisteredDeviceSyncStarter(starter)
 	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
 		DeviceID: uuid.New(), SerialNumber: "SN-DELETED-BEFORE-SYNC", Created: true,
@@ -1438,7 +1435,6 @@ func TestHandleRegisteredDeviceSyncEvent_CreatedDeviceDurableModeStartsSync(t *t
 		}, nil
 	}
 	starter := &fakeRegisteredDeviceSyncStarter{}
-	h.engine.SetParamSyncRoutingMode("durable")
 	h.engine.SetRegisteredDeviceSyncStarter(starter)
 
 	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
@@ -1463,7 +1459,6 @@ func TestHandleRegisteredDeviceSyncEvent_ExistingDeviceDoesNotStartSync(t *testi
 		return &model.Device{ID: deviceID, SerialNumber: "SN-EXISTING"}, nil
 	}
 	starter := &fakeRegisteredDeviceSyncStarter{}
-	h.engine.SetParamSyncRoutingMode("durable")
 	h.engine.SetRegisteredDeviceSyncStarter(starter)
 
 	evt, err := event.NewEvent(event.SubjectDeviceRegistered, bootstrapEvent{
@@ -1954,7 +1949,6 @@ func TestHandleDeviceOnline_RedisTokenBucketSkipsRepeat(t *testing.T) {
 		},
 	}
 	engine, _ := newOnlineHarness(t, deviceRepo)
-	engine.SetParamSyncRoutingMode("durable")
 	engine.SetDeviceOnlineFullSyncSubmitter(&recordingDeviceOnlineFullSyncSubmitter{})
 
 	evt := device.DeviceOnlineEvent{
@@ -1983,29 +1977,10 @@ func TestHandleDeviceOnline_DeviceNotFound_NoOp(t *testing.T) {
 		},
 	}
 	engine, _ := newOnlineHarness(t, deviceRepo)
-	engine.SetParamSyncRoutingMode("durable")
 	engine.SetDeviceOnlineFullSyncSubmitter(&recordingDeviceOnlineFullSyncSubmitter{})
 	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-GONE"}
 	err := engine.HandleDeviceOnline(context.Background(), evt)
 	assert.NoError(t, err)
-}
-
-func TestHandleDeviceOnline_NonDurableModeDoesNotUseLegacyPath(t *testing.T) {
-	deviceID := uuid.New()
-	lookupCount := 0
-	deviceRepo := &mockDeviceRepo{
-		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
-			lookupCount++
-			return &model.Device{ID: deviceID, SerialNumber: "SN-NOSYNC"}, nil
-		},
-	}
-	engine, _ := newOnlineHarness(t, deviceRepo)
-	engine.SetParamSyncRoutingMode("legacy")
-
-	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-NOSYNC"}
-	err := engine.HandleDeviceOnline(context.Background(), evt)
-	assert.NoError(t, err)
-	assert.Equal(t, 0, lookupCount, "non-durable mode must not enter the legacy Path B route")
 }
 
 func TestHandleDeviceOnline_RedisDown_StillProceeds(t *testing.T) {
@@ -2016,7 +1991,6 @@ func TestHandleDeviceOnline_RedisDown_StillProceeds(t *testing.T) {
 		},
 	}
 	engine, mr := newOnlineHarness(t, deviceRepo)
-	engine.SetParamSyncRoutingMode("durable")
 	engine.SetDeviceOnlineFullSyncSubmitter(&recordingDeviceOnlineFullSyncSubmitter{})
 	mr.Close() // 模拟 Redis 不可达 — SetNX 返 err；HandleDeviceOnline 应继续推进不阻塞
 
@@ -2041,7 +2015,6 @@ func TestHandleDeviceOnline_DurableModeStartsFullSyncAndThrottlesRepeat(t *testi
 		},
 	}
 	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
-	engine.SetParamSyncRoutingMode("durable")
 
 	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-ONLINE-FULL"}
 	require.NoError(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-full"))
@@ -2071,7 +2044,6 @@ func TestHandleDeviceOnline_DurableAutomaticBackoffIsQueuedWithoutRetry(t *testi
 		},
 	}
 	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
-	engine.SetParamSyncRoutingMode("durable")
 
 	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-ONLINE-BACKOFF"}
 	require.NoError(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-backoff"))
@@ -2090,7 +2062,6 @@ func TestHandleDeviceOnline_DurableSubmitFailureReleasesThrottleForRetry(t *test
 	engine, _ := newOnlineHarness(t, deviceRepo)
 	submitter := &recordingDeviceOnlineFullSyncSubmitter{err: errors.New("database unavailable")}
 	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
-	engine.SetParamSyncRoutingMode("durable")
 
 	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-ONLINE-RETRY"}
 	require.Error(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-retry"))
@@ -2112,7 +2083,6 @@ func TestProvisioningEngine_Subscribe_DeviceOnlineRetriesSubmitFailure(t *testin
 		err: errors.New("temporary durable submit failure"),
 	}
 	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
-	engine.SetParamSyncRoutingMode("durable")
 	engine.SetDeduper(event.NewDeduper(
 		redis.NewClient(&redis.Options{Addr: mr.Addr()}),
 		time.Hour,
@@ -2156,7 +2126,6 @@ func TestHandleDeviceOnline_LookupFailureReleasesThrottleForRetry(t *testing.T) 
 	engine, _ := newOnlineHarness(t, deviceRepo)
 	submitter := &recordingDeviceOnlineFullSyncSubmitter{}
 	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
-	engine.SetParamSyncRoutingMode("durable")
 
 	evt := device.DeviceOnlineEvent{DeviceID: deviceID, SerialNumber: "SN-ONLINE-LOOKUP-RETRY"}
 	require.Error(t, engine.handleDeviceOnline(context.Background(), evt, "evt-online-lookup-retry"))
@@ -2431,7 +2400,6 @@ func TestHandleFirmwareChanged_BecameOnlineStartsDurableFullSync(t *testing.T) {
 	engine, _ := newOnlineHarness(t, deviceRepo)
 	submitter := &recordingDeviceOnlineFullSyncSubmitter{}
 	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
-	engine.SetParamSyncRoutingMode("durable")
 
 	err := engine.handleFirmwareChanged(context.Background(), device.DeviceFirmwareChangedEvent{
 		DeviceID:     deviceID,
@@ -2459,7 +2427,6 @@ func TestHandleFirmwareChanged_ModelUploadLockDoesNotSuppressLaterOnlineSync(t *
 	engine, _ := newOnlineHarness(t, deviceRepo)
 	submitter := &recordingDeviceOnlineFullSyncSubmitter{}
 	engine.SetDeviceOnlineFullSyncSubmitter(submitter)
-	engine.SetParamSyncRoutingMode("durable")
 
 	require.NoError(t, engine.handleFirmwareChanged(context.Background(), device.DeviceFirmwareChangedEvent{
 		DeviceID: deviceID, SerialNumber: "SN-FW-LATER-ONLINE",

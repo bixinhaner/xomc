@@ -65,15 +65,9 @@ pm_redis:
   db: 0
   pool_size: 200
 
-# Reliable parameter-sync data plane. Production requires migration 000021.
+# Durable parameter-sync data plane runtime tuning. The data plane is always active.
 param_sync:
-  routing_mode: durable
   manual_offline_mode: reject
-  run_enabled: true
-  result_consumer_enabled: true
-  staging_enabled: true
-  canary_percent: 100
-  legacy_fallback_enabled: false
   result_consumer_shard_count: 16
   result_consumer_queue_depth: 64
   result_consumer_pull_batch_size: 64

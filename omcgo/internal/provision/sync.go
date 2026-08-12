@@ -60,8 +60,8 @@ type SyncService struct {
 	durableStarter       DurableParamSyncStarter
 }
 
-// DurableParamSyncStarter lets the reliable request/run data plane take over a
-// deterministic canary without coupling provision to the paramsync package.
+// DurableParamSyncStarter exposes the durable request/run data plane without
+// coupling provision to the paramsync package.
 type DurableParamSyncStarter interface {
 	StartDurableSync(ctx context.Context, dev *model.Device, sourceID, reason string, parameterPaths []string) (handled bool, taskCount int, err error)
 }

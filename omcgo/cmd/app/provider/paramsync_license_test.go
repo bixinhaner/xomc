@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/omcgo/omcgo/internal/core/model"
-	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/paramsync"
 )
 
@@ -112,22 +111,13 @@ func TestSubmitRegisteredDeviceSync_RetryUsesNewIdempotencyKeyAndStableSourceEve
 	assert.Equal(t, sourceID, submitter.command.SourceEventID)
 }
 
-func TestParamSyncStarter_RegisteredDeviceBypassesDeviceCanary(t *testing.T) {
+func TestParamSyncStarter_RegisteredDeviceUsesDurableSync(t *testing.T) {
 	dev := &model.Device{ID: uuid.Nil, SerialNumber: "registered-device"}
 	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
 		Status: paramsync.RequestStatusRunning,
 	}}
-	flags := paramsync.FeatureFlags{
-		RunEnabled:            true,
-		ResultConsumerEnabled: true,
-		StagingEnabled:        true,
-		CanaryPercent:         1,
-	}
-	require.NoError(t, flags.Validate())
-	require.False(t, flags.EnabledForDevice(dev.ID.String()))
 	starter := &paramSyncStarter{
 		service: submitter,
-		flags:   flags,
 	}
 
 	err := starter.StartRegisteredDeviceSync(
@@ -152,12 +142,6 @@ func TestParamSyncStarter_DeviceOnlineUsesDirectDurableFullRequest(t *testing.T)
 	}}
 	starter := &paramSyncStarter{
 		service: submitter,
-		flags: paramsync.FeatureFlags{
-			RunEnabled:            true,
-			ResultConsumerEnabled: true,
-			StagingEnabled:        true,
-			CanaryPercent:         100,
-		},
 	}
 
 	result, err := starter.SubmitDeviceOnlineFullSync(
@@ -193,12 +177,6 @@ func TestParamSyncStarter_DeviceOnlinePreservesQueuedAutomaticBackoffResult(t *t
 	}}
 	starter := &paramSyncStarter{
 		service: submitter,
-		flags: paramsync.FeatureFlags{
-			RunEnabled:            true,
-			ResultConsumerEnabled: true,
-			StagingEnabled:        true,
-			CanaryPercent:         100,
-		},
 	}
 
 	result, err := starter.SubmitDeviceOnlineFullSync(
@@ -217,24 +195,21 @@ func TestParamSyncStarter_DeviceOnlinePreservesQueuedAutomaticBackoffResult(t *t
 	assert.Zero(t, result.TaskCount)
 }
 
-func TestParamSyncStarter_DeviceOnlineNeverFallsBackWhenDurableDisabled(t *testing.T) {
-	dev := &model.Device{ID: uuid.New(), SerialNumber: "online-device"}
-	starter := &paramSyncStarter{
-		flags:  paramsync.FeatureFlags{RunEnabled: false},
-		legacy: fakeLegacyManualSyncStarter{used: true, count: 3},
-	}
+func TestParamSyncStarter_OMCRedeployUsesExplicitOrigin(t *testing.T) {
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "redeploy-device"}
+	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
+		RequestID: uuid.New(), Status: paramsync.RequestStatusRunning,
+	}}
+	starter := &paramSyncStarter{service: submitter}
 
-	result, err := starter.SubmitDeviceOnlineFullSync(
-		context.Background(),
-		dev,
-		"device_online:event-disabled",
-		"event-disabled",
-		"device.online",
+	_, err := starter.SubmitStartupDeviceOnlineFullSync(
+		context.Background(), dev, "omc-redeploy:key", "omc-redeploy:event",
 	)
 
-	require.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "durable device-online parameter sync is disabled")
+	require.NoError(t, err)
+	assert.Equal(t, "omc.redeploy", submitter.command.OriginEventType)
+	assert.Equal(t, "omc-redeploy:key", submitter.command.IdempotencyKey)
+	assert.Equal(t, "omc-redeploy:event", submitter.command.SourceEventID)
 }
 
 func TestSubmitReleaseSync_UsesCampaignAndAttemptMetadata(t *testing.T) {
@@ -264,36 +239,13 @@ func TestSubmitReleaseSync_UsesCampaignAndAttemptMetadata(t *testing.T) {
 	assert.Contains(t, submitter.command.IdempotencyKey, attemptID.String())
 }
 
-func TestParamSyncStarter_StartReleaseSync_DisabledSkips(t *testing.T) {
-	starter := &paramSyncStarter{flags: paramsync.FeatureFlags{RunEnabled: false}}
-
-	submitted, err := starter.StartReleaseSync(
-		context.Background(),
-		&model.Device{ID: uuid.New(), SerialNumber: "release-device"},
-		uuid.New(),
-		uuid.New(),
-	)
-
-	require.NoError(t, err)
-	assert.False(t, submitted)
-}
-
-func TestParamSyncStarter_ReleaseBypassesDeviceCanary(t *testing.T) {
+func TestParamSyncStarter_ReleaseUsesDurableSync(t *testing.T) {
 	dev := &model.Device{ID: uuid.Nil, SerialNumber: "release-device"}
 	submitter := &fakeLicenseParamSyncSubmitter{result: &paramsync.SubmitResult{
 		Status: paramsync.RequestStatusRunning,
 	}}
-	flags := paramsync.FeatureFlags{
-		RunEnabled:            true,
-		ResultConsumerEnabled: true,
-		StagingEnabled:        true,
-		CanaryPercent:         1,
-	}
-	require.NoError(t, flags.Validate())
-	require.False(t, flags.EnabledForDevice(dev.ID.String()))
 	starter := &paramSyncStarter{
 		service: submitter,
-		flags:   flags,
 	}
 
 	submitted, err := starter.StartReleaseSync(
@@ -306,39 +258,4 @@ func TestParamSyncStarter_ReleaseBypassesDeviceCanary(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, submitted)
 	assert.Equal(t, paramsync.TriggerOMCUpgrade, submitter.command.TriggerReason)
-}
-
-func TestParamSyncStarter_StartDurableSync_PeriodicUsesLegacyFallbackWhenDisabled(t *testing.T) {
-	starter := &paramSyncStarter{flags: paramsync.FeatureFlags{RunEnabled: false}}
-	dev := &model.Device{ID: uuid.New(), SerialNumber: "periodic-device"}
-
-	handled, taskCount, err := starter.StartDurableSync(context.Background(), dev, "", string(paramsync.TriggerPeriodic), nil)
-
-	require.NoError(t, err)
-	assert.False(t, handled, "periodic sync should keep the same temporary sync-gpv fallback as other triggers")
-	assert.Equal(t, 0, taskCount)
-}
-
-type fakeLegacyManualSyncStarter struct {
-	used  bool
-	count int
-	err   error
-}
-
-func (f fakeLegacyManualSyncStarter) StartManualSync(context.Context, *model.Device, string, []string) (bool, int, error) {
-	return f.used, f.count, f.err
-}
-
-func TestParamSyncStarter_StartManualSyncDetailed_UsesLegacyFallbackWhenDisabled(t *testing.T) {
-	starter := &paramSyncStarter{
-		flags:  paramsync.FeatureFlags{RunEnabled: false},
-		legacy: fakeLegacyManualSyncStarter{used: true, count: 3},
-	}
-	dev := &model.Device{ID: uuid.New(), SerialNumber: "manual-device"}
-
-	result, err := starter.StartManualSyncDetailed(context.Background(), dev, uuid.NewString(), nil)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.Equal(t, &device.ManualParamSyncStart{Used: true, TaskCount: 3, Status: "queued"}, result)
 }
