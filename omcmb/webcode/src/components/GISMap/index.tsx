@@ -9,6 +9,7 @@ import { Spin, Alert } from 'antd';
 import { LoadingOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useIntl } from 'react-intl';
 import { fromLonLat } from 'ol/proj';
+import { offset as offsetCoordinate } from 'ol/sphere';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import type { GISMapProps, MapDevice, MapViewport, MapStats, MapBounds } from '@core/types/map';
 import { MAP_CONFIG, ANIMATION_CONFIG } from './constants';
@@ -18,6 +19,7 @@ import MapPopup from './MapPopup';
 import MapControls from './MapControls';
 import MapStatsPanel from './MapStatsPanel';
 import styles from './styles.module.css';
+import { resolveAntennaSectorRenderMode } from './antennaSectorRender';
 
 /**
  * 高亮并显示卡片的配置选项
@@ -136,7 +138,8 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   const [shouldShowMetadataAlert, setShouldShowMetadataAlert] = useState(false);
   // 点击锁定的设备（优先显示，支持复制）
   const [clickedDevice, setClickedDevice] = useState<MapDevice | null>(null);
-  const [clickedPosition, setClickedPosition] = useState<{ x: number; y: number } | null>(null);
+  const [activeSectorNumber, setActiveSectorNumber] = useState<number | undefined>();
+  const [mapLayoutRevision, setMapLayoutRevision] = useState(0);
   // 测距模式状态（仅用于 showControls=true 场景下的 MapControls 按钮联动）
   // 通过 mapRef.current?.startMeasure() 外部调用时不同步此 state，
   // 但 ESC 由调用方（如 GISMapView）自行监听处理。
@@ -164,12 +167,9 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     center: defaultCenter,
     zoom: defaultZoom,
     tileUrl,
-    onDeviceClick: (device, pixel) => {
-      // 点击设备时锁定弹窗
+    onDeviceClick: (device) => {
+      // 点击设备时锁定右侧详情
       setClickedDevice(device);
-      if (pixel) {
-        setClickedPosition({ x: pixel.x, y: pixel.y });
-      }
       onDeviceClick?.(device);
     },
     onDeviceHover: (device, pixel) => {
@@ -190,7 +190,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     onMapClick: () => {
       // 点击地图空白时清除锁定
       setClickedDevice(null);
-      setClickedPosition(null);
       onMapClick?.();
     },
   });
@@ -207,7 +206,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     selectedId: selectedGeofenceId,
     onSelect: (item) => {
       setClickedDevice(null);
-      setClickedPosition(null);
       onGeofenceClick?.(item);
     },
     onDrawComplete: onGeofenceDrawComplete,
@@ -255,10 +253,58 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   }, [isReady, mergedDevices, updateDevices]);
 
   useEffect(() => {
+    setActiveSectorNumber((current) => {
+      if (current !== undefined && antennaSectors.some((sector) => sector.number === current)) return current;
+      return antennaSectors[0]?.number;
+    });
+  }, [antennaSectors, selectedDevice?.id]);
+
+  useEffect(() => {
     if (isReady) {
-      updateAntennaSectors(selectedDevice, antennaSectors);
+      updateAntennaSectors(selectedDevice, antennaSectors, activeSectorNumber);
     }
-  }, [antennaSectors, isReady, selectedDevice, updateAntennaSectors, viewport?.zoom]);
+  }, [activeSectorNumber, antennaSectors, isReady, mapLayoutRevision, selectedDevice, updateAntennaSectors, viewport?.zoom]);
+
+  useEffect(() => {
+    if (!isReady) return;
+    const frame = window.requestAnimationFrame(() => {
+      updateSize();
+      setMapLayoutRevision((revision) => revision + 1);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [clickedDevice, isReady, updateSize]);
+
+  const activeSectorRenderMode = useMemo(() => {
+    const map = mapInstanceRef.current;
+    const currentZoom = viewport?.zoom;
+    const sector = antennaSectors.find((item) => item.number === activeSectorNumber);
+    if (!map || currentZoom === undefined || currentZoom < 13 || !selectedDevice || !sector?.coverageAvailable
+      || sector.azimuth === undefined
+      || sector.horizontalBeamwidth === undefined || sector.farRadiusMeters === undefined) {
+      return 'unavailable' as const;
+    }
+    const bearing = sector.azimuth! * Math.PI / 180;
+    const halfBeam = sector.horizontalBeamwidth * Math.PI / 360;
+    const outerStart = fromLonLat(offsetCoordinate(
+      [selectedDevice.lng, selectedDevice.lat],
+      sector.farRadiusMeters,
+      bearing - halfBeam,
+    ));
+    const outerEnd = fromLonLat(offsetCoordinate(
+      [selectedDevice.lng, selectedDevice.lat],
+      sector.farRadiusMeters,
+      bearing + halfBeam,
+    ));
+    const startPixel = map.getPixelFromCoordinate(outerStart);
+    const endPixel = map.getPixelFromCoordinate(outerEnd);
+    return resolveAntennaSectorRenderMode(
+      sector,
+      startPixel ? [startPixel[0], startPixel[1]] : undefined,
+      endPixel ? [endPixel[0], endPixel[1]] : undefined,
+    );
+    // mapLayoutRevision 用于 updateSize() 后强制按新像素尺寸重新判定窄波束渲染模式。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSectorNumber, antennaSectors, mapInstanceRef, mapLayoutRevision, selectedDevice, viewport?.zoom]);
 
   // 当搜索结果设备变化时，自动高亮并定位
   useEffect(() => {
@@ -344,7 +390,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     } else {
       // 进入测距模式时关闭锁定的弹窗，避免遮挡
       setClickedDevice(null);
-      setClickedPosition(null);
       startMeasure();
       setIsMeasuring(true);
     }
@@ -391,41 +436,14 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     }, 5000);
   }, [highlightAndSpiderfyIfNeeded, clearHighlight]);
 
-  /**
-   * 计算设备在地图上的屏幕像素位置
-   * @param mapRef - OpenLayers 地图实例 ref
-   * @param lng - 经度
-   * @param lat - 纬度
-   * @returns 像素坐标 {x, y} 或 null
-   */
-  const calculateDevicePixelPosition = useCallback((
-    mapRef: typeof mapInstanceRef,
-    lng: number,
-    lat: number
-  ): { x: number; y: number } | null => {
-    const map = mapRef.current;
-    if (!map) return null;
-    try {
-      // OL 内部坐标系为 EPSG:3857，必须通过 fromLonLat 转换再取像素坐标
-      const pixel = map.getPixelFromCoordinate(fromLonLat([lng, lat]));
-      return pixel ? { x: pixel[0], y: pixel[1] } : null;
-    } catch {
-      return null;
-    }
-  }, []);
-
   useEffect(() => {
     if (!isReady || !selectedDevice || selectedDevice.id !== searchResultDevice?.id) return;
 
     const timer = setTimeout(() => {
       setClickedDevice(selectedDevice);
-      const position = calculateDevicePixelPosition(mapInstanceRef, selectedDevice.lng, selectedDevice.lat);
-      if (position) {
-        setClickedPosition(position);
-      }
     }, 400);
     return () => clearTimeout(timer);
-  }, [calculateDevicePixelPosition, isReady, mapInstanceRef, searchResultDevice?.id, selectedDevice]);
+  }, [isReady, searchResultDevice?.id, selectedDevice]);
 
   /**
    * 高亮设备并显示卡片（用于搜索定位）
@@ -456,7 +474,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     clearHighlight();
     if (autoCloseOldCard) {
       setClickedDevice(null);
-      setClickedPosition(null);
     }
 
     const map = mapInstanceRef.current;
@@ -535,13 +552,9 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
         // skipFlyTo: true 避免打断渐进式动画（动画由外层的 flyTo 完成）
         highlightAndSpiderfyIfNeeded(device, true);
 
-        // 计算屏幕位置并显示卡片
+        // 显示右侧设备详情
         highlightWithCardInnerTimerRef.current = setTimeout(() => {
-          const pixel = calculateDevicePixelPosition(mapInstanceRef, device.lng, device.lat);
-          if (pixel) {
-            setClickedDevice(device);
-            setClickedPosition(pixel);
-          }
+          setClickedDevice(device);
 
           // 5秒后取消高亮（卡片保持显示）
           setTimeout(() => {
@@ -553,7 +566,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   }, [
     clearHighlight,
     highlightAndSpiderfyIfNeeded,
-    calculateDevicePixelPosition,
     mapInstanceRef,
     metadata,
     flyTo,
@@ -562,7 +574,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   // 关闭当前锁定的卡片
   const closeClickedCard = useCallback(() => {
     setClickedDevice(null);
-    setClickedPosition(null);
   }, []);
 
   // 暴露方法给父组件
@@ -604,12 +615,21 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   // 容器样式
   const containerStyle: React.CSSProperties = {
     position: 'relative',
+    display: 'flex',
     width: '100%',
     height,
     background: token.colorBgLayout,
-    overflow: 'visible', // 允许悬浮提示显示在容器外
+    overflow: 'hidden',
     borderRadius: 8,
     ...style,
+  };
+
+  const mapAreaStyle: React.CSSProperties = {
+    position: 'relative',
+    flex: 1,
+    minWidth: 0,
+    height: '100%',
+    overflow: 'hidden',
   };
 
   const mapContainerStyle: React.CSSProperties = {
@@ -653,73 +673,90 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       style={containerStyle}
       className={`gis-map-container ${styles.gisMapContainer} ${className || ''}`}
     >
-      {/* 地图容器 */}
-      <div ref={mapRef} style={mapContainerStyle} />
+      <div style={mapAreaStyle}>
+        {/* 地图容器 */}
+        <div ref={mapRef} style={mapContainerStyle} />
 
-      {/* 加载状态 */}
-      {!isReady && (
-        <div style={loadingStyle}>
-          <Spin size="large" indicator={<LoadingOutlined spin />} />
-        </div>
-      )}
+        {/* 加载状态 */}
+        {!isReady && (
+          <div style={loadingStyle}>
+            <Spin size="large" indicator={<LoadingOutlined spin />} />
+          </div>
+        )}
 
-      {/* 元数据加载提示 */}
-      {isReady && metadataAlert && (
-        <div style={{
-          position: 'absolute',
-          top: 16,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1000,
-          maxWidth: '80%',
-        }}>
-          <Alert
-            title={metadataAlert.message}
-            description={metadataAlert.description}
-            type="info"
-            icon={<InfoCircleOutlined />}
-            showIcon
-            closable
-            onClose={() => setShouldShowMetadataAlert(false)}
-            style={{ fontSize: 12 }}
+        {/* 元数据加载提示 */}
+        {isReady && metadataAlert && (
+          <div style={{
+            position: 'absolute',
+            top: 16,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            maxWidth: '80%',
+          }}>
+            <Alert
+              title={metadataAlert.message}
+              description={metadataAlert.description}
+              type="info"
+              icon={<InfoCircleOutlined />}
+              showIcon
+              closable
+              onClose={() => setShouldShowMetadataAlert(false)}
+              style={{ fontSize: 12 }}
+            />
+          </div>
+        )}
+
+        {/* 缩放控制 */}
+        {showControls && isReady && (
+          <MapControls
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            zoomInDisabled={viewport?.zoom !== undefined && viewport.zoom >= MAP_CONFIG.maxZoom}
+            zoomOutDisabled={viewport?.zoom !== undefined && viewport.zoom <= MAP_CONFIG.minZoom}
+            isMeasuring={isMeasuring}
+            onMeasureToggle={handleMeasureToggle}
           />
-        </div>
-      )}
+        )}
 
-      {/* 缩放控制 */}
-      {showControls && isReady && (
-        <MapControls
-          onZoomIn={handleZoomIn}
-          onZoomOut={handleZoomOut}
-          zoomInDisabled={viewport?.zoom !== undefined && viewport.zoom >= MAP_CONFIG.maxZoom}
-          zoomOutDisabled={viewport?.zoom !== undefined && viewport.zoom <= MAP_CONFIG.minZoom}
-          isMeasuring={isMeasuring}
-          onMeasureToggle={handleMeasureToggle}
-        />
-      )}
+        {/* 统计面板 */}
+        {showStats && isReady && <MapStatsPanel stats={stats} visible />}
 
-      {/* 统计面板 */}
-      {showStats && isReady && <MapStatsPanel stats={stats} visible />}
+        {/* hover 仅显示轻量设备提示，不承载天线编辑。 */}
+        {!clickedDevice && hoveredDevice && popupPosition && (
+          <MapPopup
+            device={hoveredDevice}
+            visible
+            variant="tooltip"
+            position={popupPosition}
+            onAlarmClick={onAlarmClick}
+          />
+        )}
+      </div>
 
-      {/* 悬浮提示：优先显示点击锁定的设备，否则显示 hover 的设备 */}
-      {(clickedDevice || hoveredDevice) && (clickedPosition || popupPosition) && (
-        <MapPopup
-          device={clickedDevice ?? hoveredDevice!}
-          visible
-          position={clickedPosition ?? popupPosition!}
-          onAlarmClick={onAlarmClick}
-		  antennaSectors={clickedDevice?.id === selectedDevice?.id ? antennaSectors : []}
-          onAntennaPreviewChange={onAntennaPreviewChange}
-          onAntennaCancel={onAntennaCancel}
-          onAntennaSave={onAntennaSave}
-          antennaSaving={antennaSaving}
-          onClose={() => {
-            setClickedDevice(null);
-            setClickedPosition(null);
-            setHoveredDevice(null);
-            setPopupPosition(null);
-          }}
-        />
+      {clickedDevice && (
+        <aside className={styles.deviceDetailsPanel} aria-label={intl.formatMessage({ id: 'gis.deviceDetails' })}>
+          <MapPopup
+            device={clickedDevice}
+            visible
+            variant="panel"
+            onAlarmClick={onAlarmClick}
+            antennaSectors={clickedDevice.id === selectedDevice?.id ? antennaSectors : []}
+            activeSectorNumber={activeSectorNumber}
+            activeSectorRenderMode={activeSectorRenderMode}
+            onActiveSectorChange={setActiveSectorNumber}
+            onAntennaPreviewChange={onAntennaPreviewChange}
+            onAntennaCancel={onAntennaCancel}
+            onAntennaSave={onAntennaSave}
+            antennaSaving={antennaSaving}
+            onClose={() => {
+              setClickedDevice(null);
+              setHoveredDevice(null);
+              setPopupPosition(null);
+              onMapClick?.();
+            }}
+          />
+        </aside>
       )}
     </div>
   );

@@ -86,8 +86,16 @@ const messages: Record<string, string> = {
   'gis.antenna.verticalBeamwidth': 'Vertical beamwidth',
   'gis.antenna.coverageRange': 'Coverage range',
   'gis.antenna.incompleteFields': 'Missing fields: {fields}',
+  'gis.antenna.narrowBeam': 'The beam is too narrow to show its area at this zoom level. The map shows its actual direction and coverage distance.',
+  'gis.antenna.invalidGeometry': 'Invalid coverage parameter combination: {reason}',
+  'gis.antenna.coverageIssue.far_angle_not_positive': 'Mechanical downtilt must exceed half of the vertical beamwidth',
+  'gis.antenna.coverageIssue.near_angle_out_of_range': 'The near coverage angle must be less than 90°',
+  'gis.antenna.coverageIssue.radius_not_finite': 'The coverage radius cannot be calculated',
+  'gis.antenna.coverageIssue.radius_order_invalid': 'The near and far coverage radii are in an invalid order',
+  'gis.antenna.coverageIssue.unknown': 'The coverage geometry cannot be calculated',
   'gis.antenna.updateSubmitted': 'Antenna planning parameters saved',
   'gis.antenna.updateFailed': 'Failed to save antenna planning parameters',
+  'gis.deviceDetails': 'Device details',
 
   // GIS geofence
   'geofence.title': 'Geo-fence',

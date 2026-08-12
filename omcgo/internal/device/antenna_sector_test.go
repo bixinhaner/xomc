@@ -30,6 +30,8 @@ func TestAssembleAntennaSectors_AssemblesUnnumberedAntennaInfo(t *testing.T) {
 	require.True(t, sector.CoverageAvailable)
 	require.InDelta(t, 102.08, *sector.NearRadiusMeters, 0.01)
 	require.InDelta(t, 515.45, *sector.FarRadiusMeters, 0.01)
+	require.Equal(t, antennaCoverageStatusAvailable, sector.CoverageStatus)
+	require.Empty(t, sector.CoverageIssue)
 	require.Empty(t, sector.MissingFields)
 }
 
@@ -106,8 +108,25 @@ func TestAssembleAntennaSectors_PreservesZeroAzimuthInJSON(t *testing.T) {
 		"field_sources":{"azimuth":"Device.DeviceInfo.AntennaInfo.Azimuth"},
 		"direction_available":true,
 		"coverage_available":false,
+		"coverage_status":"incomplete",
 		"missing_fields":["antennaHeight","mechanicalDowntilt","horizontalBeamwidth","verticalBeamwidth"]
 	}`, string(payload))
+}
+
+func TestAssembleAntennaSectors_ReportsInvalidGeometrySeparatelyFromMissingFields(t *testing.T) {
+	sectors := AssembleAntennaSectors([]model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.AntennaInfo.Azimuth", ParameterValue: "110"},
+		{ParameterPath: "Device.DeviceInfo.AntennaInfo.Height", ParameterValue: "27"},
+		{ParameterPath: "Device.DeviceInfo.AntennaInfo.Downtilt", ParameterValue: "1"},
+		{ParameterPath: "Device.DeviceInfo.AntennaInfo.Beamwidth", ParameterValue: "3"},
+		{ParameterPath: "Device.DeviceInfo.AntennaInfo.VerticalBeamwidth", ParameterValue: "3"},
+	})
+
+	require.Len(t, sectors, 1)
+	require.False(t, sectors[0].CoverageAvailable)
+	require.Equal(t, antennaCoverageStatusInvalidGeometry, sectors[0].CoverageStatus)
+	require.Equal(t, antennaCoverageIssueFarAngleNotPositive, sectors[0].CoverageIssue)
+	require.Empty(t, sectors[0].MissingFields)
 }
 
 func TestMergeAntennaSectorPlans_OverridesReportedValues(t *testing.T) {

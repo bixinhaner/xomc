@@ -6,10 +6,12 @@
 
 import React, { useState } from 'react';
 import { Button, Form, InputNumber, message, Tabs } from 'antd';
+import { CloseOutlined } from '@ant-design/icons';
 import { useIntl } from 'react-intl';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import type { AntennaEditableField, AntennaSector, MapDevice } from '@core/types/map';
 import { DEVICE_STATUS_CONFIG, ALARM_BADGE_CONFIG } from './constants';
+import type { AntennaSectorRenderMode } from './antennaSectorRender';
 import styles from './styles.module.css';
 
 /** 告警级别颜色配置（label 通过 i18n key 在组件内动态获取） */
@@ -40,6 +42,12 @@ interface MapPopupProps {
   /** 保存 OMC 本地天线规划参数。 */
   onAntennaSave?: (sectorNumber: number) => Promise<unknown>;
   antennaSaving?: boolean;
+  /** 展示模式：地图 hover 提示或右侧完整详情。 */
+  variant?: 'tooltip' | 'panel';
+  /** 当前活动扇区，由地图容器统一维护以同步高亮。 */
+  activeSectorNumber?: number;
+  onActiveSectorChange?: (sectorNumber: number) => void;
+  activeSectorRenderMode?: AntennaSectorRenderMode;
 }
 
 /**
@@ -56,17 +64,21 @@ const MapPopup: React.FC<MapPopupProps> = ({
   device,
   visible = true,
   position,
+  onClose,
   onAlarmClick,
   antennaSectors = [],
   onAntennaPreviewChange,
   onAntennaCancel,
   onAntennaSave,
   antennaSaving = false,
+  variant = 'tooltip',
+  activeSectorNumber,
+  onActiveSectorChange,
+  activeSectorRenderMode,
 }) => {
   const token = useThemeToken();
   const intl = useIntl();
   const [alarmHovered, setAlarmHovered] = useState(false);
-  const [activeSectorNumber, setActiveSectorNumber] = useState<number | null>(null);
   const [editingSector, setEditingSector] = useState(false);
 
   if (!visible || !device) return null;
@@ -91,7 +103,12 @@ const MapPopup: React.FC<MapPopupProps> = ({
   };
 
   // 卡片容器样式
-  const containerStyle: React.CSSProperties = {
+  const isPanel = variant === 'panel';
+  const containerStyle: React.CSSProperties = isPanel ? {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+  } : {
     position: 'absolute',
     left: (position?.x ?? 0) + 15, // 箭头指向设备，所以偏移
     top: position?.y ?? 0,
@@ -114,11 +131,12 @@ const MapPopup: React.FC<MapPopupProps> = ({
 
   // 卡片样式
   const cardStyle: React.CSSProperties = {
-    width: 288,
-    maxHeight: '70vh',
+    width: isPanel ? '100%' : 288,
+    height: isPanel ? '100%' : undefined,
+    maxHeight: isPanel ? 'none' : '70vh',
     background: '#FFF',
-    borderRadius: 12,
-    boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+    borderRadius: isPanel ? 0 : 12,
+    boxShadow: isPanel ? '-4px 0 12px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.12)',
     border: '1px solid #E8E8E8',
     overflowY: 'auto',
     marginLeft: -1, // 与箭头重叠消除缝隙
@@ -227,15 +245,24 @@ const MapPopup: React.FC<MapPopupProps> = ({
   return (
     <div style={containerStyle}>
       {/* 左侧箭头 */}
-      <div style={arrowStyle} />
+      {!isPanel && <div style={arrowStyle} />}
 
       {/* 卡片 */}
       <div style={cardStyle}>
         {/* Header */}
-        <div style={headerStyle}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-neutral-800)' }}>
+        <div style={{ ...headerStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <span style={{ minWidth: 0, fontSize: 14, fontWeight: 600, color: 'var(--color-neutral-800)' }}>
             📍 {device.name}
           </span>
+          {isPanel && (
+            <Button
+              type="text"
+              size="small"
+              icon={<CloseOutlined />}
+              aria-label={intl.formatMessage({ id: 'common.close' })}
+              onClick={onClose}
+            />
+          )}
         </div>
 
         {/* 状态行 */}
@@ -299,42 +326,46 @@ const MapPopup: React.FC<MapPopupProps> = ({
             <span style={{ ...valueStyle, fontFamily: 'monospace' }}>{device.sn}</span>
           </div>
 
-          {/* 网络信息（常用） */}
-          <div style={detailRowStyle}>
-            <span style={labelStyle}>IP:</span>
-            <span style={{ ...valueStyle, fontFamily: 'monospace' }}>
-              {device.ip_address || <span style={{ color: '#BFBFBF' }}>--</span>}
-            </span>
-          </div>
+          {isPanel && (
+            <>
+              {/* 网络信息（常用） */}
+              <div style={detailRowStyle}>
+                <span style={labelStyle}>IP:</span>
+                <span style={{ ...valueStyle, fontFamily: 'monospace' }}>
+                  {device.ip_address || <span style={{ color: '#BFBFBF' }}>--</span>}
+                </span>
+              </div>
 
-          <div style={detailRowStyle}>
-            <span style={labelStyle}>MAC:</span>
-            <span style={{ ...valueStyle, fontFamily: 'monospace' }}>
-              {device.mac || <span style={{ color: '#BFBFBF' }}>--</span>}
-            </span>
-          </div>
+              <div style={detailRowStyle}>
+                <span style={labelStyle}>MAC:</span>
+                <span style={{ ...valueStyle, fontFamily: 'monospace' }}>
+                  {device.mac || <span style={{ color: '#BFBFBF' }}>--</span>}
+                </span>
+              </div>
 
-          {/* 可读名称 */}
-          <div style={detailRowStyle}>
-            <span style={labelStyle}>{intl.formatMessage({ id: 'device.name' })}:</span>
-            <span style={valueStyle}>{device.device_name || <span style={{ color: '#BFBFBF' }}>--</span>}</span>
-          </div>
+              {/* 可读名称 */}
+              <div style={detailRowStyle}>
+                <span style={labelStyle}>{intl.formatMessage({ id: 'device.name' })}:</span>
+                <span style={valueStyle}>{device.device_name || <span style={{ color: '#BFBFBF' }}>--</span>}</span>
+              </div>
 
-          {/* 无线参数 */}
-          <div style={detailRowStyle}>
-            <span style={labelStyle}>PCI:</span>
-            <span style={{ ...valueStyle, fontFamily: 'monospace' }}>
-              {device.pci || <span style={{ color: '#BFBFBF' }}>--</span>}
-            </span>
-          </div>
+              {/* 无线参数 */}
+              <div style={detailRowStyle}>
+                <span style={labelStyle}>PCI:</span>
+                <span style={{ ...valueStyle, fontFamily: 'monospace' }}>
+                  {device.pci || <span style={{ color: '#BFBFBF' }}>--</span>}
+                </span>
+              </div>
 
-          {/* UE 数 */}
-          <div style={detailRowStyle}>
-            <span style={labelStyle}>{intl.formatMessage({ id: 'device.ueCount' })}:</span>
-            <span style={{ ...valueStyle, fontFamily: 'monospace', color: (device.ueCount ?? 0) > 0 ? '#52C41A' : '#8C8C8C' }}>
-              {device.ueCount ?? 0}
-            </span>
-          </div>
+              {/* UE 数 */}
+              <div style={detailRowStyle}>
+                <span style={labelStyle}>{intl.formatMessage({ id: 'device.ueCount' })}:</span>
+                <span style={{ ...valueStyle, fontFamily: 'monospace', color: (device.ueCount ?? 0) > 0 ? '#52C41A' : '#8C8C8C' }}>
+                  {device.ueCount ?? 0}
+                </span>
+              </div>
+            </>
+          )}
 
           {/* 位置信息 */}
           {device.groupName && (
@@ -344,19 +375,21 @@ const MapPopup: React.FC<MapPopupProps> = ({
             </div>
           )}
 
-          {device.address && (
+          {isPanel && device.address && (
             <div style={detailRowStyle}>
               <span style={labelStyle}>{intl.formatMessage({ id: 'gis.popup.address' })}:</span>
               <span style={valueStyle}>{device.address}</span>
             </div>
           )}
 
-          <div style={{ ...detailRowStyle, marginBottom: 0 }}>
-            <span style={labelStyle}>{intl.formatMessage({ id: 'gis.popup.coordinates' })}:</span>
-            <span style={{ ...valueStyle, fontFamily: 'monospace', fontSize: 11 }}>
-              {device.lng.toFixed(4)}, {device.lat.toFixed(4)}
-            </span>
-          </div>
+          {isPanel && (
+            <div style={{ ...detailRowStyle, marginBottom: 0 }}>
+              <span style={labelStyle}>{intl.formatMessage({ id: 'gis.popup.coordinates' })}:</span>
+              <span style={{ ...valueStyle, fontFamily: 'monospace', fontSize: 11 }}>
+                {device.lng.toFixed(4)}, {device.lat.toFixed(4)}
+              </span>
+            </div>
+          )}
 
           {antennaSectors.length > 0 && (
             <div style={{ borderTop: '1px solid #F0F0F0', marginTop: 12, paddingTop: 10 }}>
@@ -371,7 +404,10 @@ const MapPopup: React.FC<MapPopupProps> = ({
               <Tabs
                 className={styles.sectorTabs}
                 activeKey={String(activeSector.number)}
-                onChange={(key) => setActiveSectorNumber(Number(key))}
+                onChange={(key) => {
+                  setEditingSector(false);
+                  onActiveSectorChange?.(Number(key));
+                }}
                 size="small"
                 items={antennaSectors.map((sector) => ({
                   key: String(sector.number),
@@ -400,9 +436,28 @@ const MapPopup: React.FC<MapPopupProps> = ({
                   <span style={sectorValueStyle}>{activeSector.verticalBeamwidth === undefined ? '--' : `${activeSector.verticalBeamwidth}°`}</span>
                 </div>
                 {activeSector.coverageAvailable ? (
-                  <div style={{ ...sectorDetailRowStyle, marginBottom: 0 }}>
-                    <span style={sectorLabelStyle}>{intl.formatMessage({ id: 'gis.antenna.coverageRange' })}:</span>
-                    <span style={sectorValueStyle}>{Math.round(activeSector.nearRadiusMeters ?? 0)} - {Math.round(activeSector.farRadiusMeters ?? 0)} m</span>
+                  <>
+                    <div style={{ ...sectorDetailRowStyle, marginBottom: 0 }}>
+                      <span style={sectorLabelStyle}>{intl.formatMessage({ id: 'gis.antenna.coverageRange' })}:</span>
+                      <span style={sectorValueStyle}>{Math.round(activeSector.nearRadiusMeters ?? 0)} - {Math.round(activeSector.farRadiusMeters ?? 0)} m</span>
+                    </div>
+                    {activeSectorRenderMode === 'narrow' && (
+                      <div style={{ marginTop: 8, color: '#0958d9', fontSize: 11 }}>
+                        {intl.formatMessage({ id: 'gis.antenna.narrowBeam' })}
+                      </div>
+                    )}
+                    {activeSectorRenderMode === 'unavailable' && (
+                      <div style={{ marginTop: 8, color: '#d48806', fontSize: 11 }}>
+                        {intl.formatMessage({ id: 'gis.antenna.zoomRequired' })}
+                      </div>
+                    )}
+                  </>
+                ) : activeSector.coverageStatus === 'invalid_geometry' ? (
+                  <div style={{ color: '#cf1322', fontSize: 11 }}>
+                    {intl.formatMessage(
+                      { id: 'gis.antenna.invalidGeometry' },
+                      { reason: intl.formatMessage({ id: `gis.antenna.coverageIssue.${activeSector.coverageIssue ?? 'unknown'}` }) },
+                    )}
                   </div>
                 ) : (
                   <div style={{ color: '#d48806', fontSize: 11 }}>
@@ -427,7 +482,14 @@ const MapPopup: React.FC<MapPopupProps> = ({
                       </Form.Item>
                     ))}
                     <div className={styles.sectorEditorActions}>
-                      <Button type="primary" loading={antennaSaving} onClick={() => void saveAntennaSector()}>{intl.formatMessage({ id: 'common.save' })}</Button>
+                      <Button
+                        type="primary"
+                        loading={antennaSaving}
+                        disabled={activeSector.coverageStatus === 'invalid_geometry'}
+                        onClick={() => void saveAntennaSector()}
+                      >
+                        {intl.formatMessage({ id: 'common.save' })}
+                      </Button>
                     </div>
                   </Form>
                 )}

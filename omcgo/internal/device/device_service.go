@@ -1973,7 +1973,7 @@ func (s *DeviceService) UpdateAntennaSectorPlan(
 	if device == nil {
 		return nil, commonerrors.ErrNotFound
 	}
-	if err := s.antennaPlanRepo.Upsert(ctx, AntennaSectorPlan{
+	plan := AntennaSectorPlan{
 		DeviceID:            deviceID,
 		SectorNumber:        sectorNumber,
 		Azimuth:             req.Azimuth,
@@ -1981,7 +1981,26 @@ func (s *DeviceService) UpdateAntennaSectorPlan(
 		MechanicalDowntilt:  req.MechanicalDowntilt,
 		HorizontalBeamwidth: req.HorizontalBeamwidth,
 		VerticalBeamwidth:   req.VerticalBeamwidth,
-	}); err != nil {
+	}
+	params, err := s.paramRepo.GetByGroup(ctx, deviceID, "antenna")
+	if err != nil {
+		return nil, fmt.Errorf("get antenna params for plan validation: %w", err)
+	}
+	effectiveSectors := mergeAntennaSectorPlans(AssembleAntennaSectors(params), []AntennaSectorPlan{plan})
+	for i := range effectiveSectors {
+		if effectiveSectors[i].Number != sectorNumber {
+			continue
+		}
+		if effectiveSectors[i].CoverageStatus == antennaCoverageStatusInvalidGeometry {
+			return nil, fmt.Errorf(
+				"invalid antenna coverage geometry (%s): %w",
+				effectiveSectors[i].CoverageIssue,
+				commonerrors.ErrInvalidInput,
+			)
+		}
+		break
+	}
+	if err := s.antennaPlanRepo.Upsert(ctx, plan); err != nil {
 		return nil, fmt.Errorf("save antenna sector plan: %w", err)
 	}
 	sectors, err := s.GetAntennaSectors(ctx, deviceID)

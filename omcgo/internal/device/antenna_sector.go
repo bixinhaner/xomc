@@ -29,8 +29,21 @@ type AntennaSector struct {
 	FieldSources        map[string]string `json:"field_sources"`
 	DirectionAvailable  bool              `json:"direction_available"`
 	CoverageAvailable   bool              `json:"coverage_available"`
+	CoverageStatus      string            `json:"coverage_status"`
+	CoverageIssue       string            `json:"coverage_issue,omitempty"`
 	MissingFields       []string          `json:"missing_fields"`
 }
+
+const (
+	antennaCoverageStatusAvailable       = "available"
+	antennaCoverageStatusIncomplete      = "incomplete"
+	antennaCoverageStatusInvalidGeometry = "invalid_geometry"
+
+	antennaCoverageIssueFarAngleNotPositive = "far_angle_not_positive"
+	antennaCoverageIssueNearAngleOutOfRange = "near_angle_out_of_range"
+	antennaCoverageIssueRadiusNotFinite     = "radius_not_finite"
+	antennaCoverageIssueRadiusOrderInvalid  = "radius_order_invalid"
+)
 
 type antennaSectorRaw struct {
 	sector AntennaSector
@@ -163,6 +176,8 @@ func antennaFloat(value float64) *float64 {
 func validateAntennaSector(sector *AntennaSector) {
 	sector.DirectionAvailable = false
 	sector.CoverageAvailable = false
+	sector.CoverageStatus = antennaCoverageStatusIncomplete
+	sector.CoverageIssue = ""
 	sector.NearRadiusMeters = nil
 	sector.FarRadiusMeters = nil
 	sector.MissingFields = nil
@@ -192,18 +207,34 @@ func validateAntennaSector(sector *AntennaSector) {
 
 	nearAngle := *sector.MechanicalDowntilt + *sector.VerticalBeamwidth/2
 	farAngle := *sector.MechanicalDowntilt - *sector.VerticalBeamwidth/2
-	if farAngle <= 0 || nearAngle >= 90 {
-		sector.MissingFields = append(sector.MissingFields, "coverageGeometry")
+	if farAngle <= 0 {
+		sector.CoverageStatus = antennaCoverageStatusInvalidGeometry
+		sector.CoverageIssue = antennaCoverageIssueFarAngleNotPositive
+		return
+	}
+	if nearAngle >= 90 {
+		sector.CoverageStatus = antennaCoverageStatusInvalidGeometry
+		sector.CoverageIssue = antennaCoverageIssueNearAngleOutOfRange
 		return
 	}
 
 	nearRadius := *sector.AntennaHeight / math.Tan(degreesToRadians(nearAngle))
 	farRadius := *sector.AntennaHeight / math.Tan(degreesToRadians(farAngle))
-	if nearRadius > 0 && nearRadius < farRadius {
-		sector.NearRadiusMeters = antennaFloat(nearRadius)
-		sector.FarRadiusMeters = antennaFloat(farRadius)
-		sector.CoverageAvailable = true
+	if math.IsNaN(nearRadius) || math.IsInf(nearRadius, 0) || math.IsNaN(farRadius) || math.IsInf(farRadius, 0) {
+		sector.CoverageStatus = antennaCoverageStatusInvalidGeometry
+		sector.CoverageIssue = antennaCoverageIssueRadiusNotFinite
+		return
 	}
+	if nearRadius <= 0 || nearRadius >= farRadius {
+		sector.CoverageStatus = antennaCoverageStatusInvalidGeometry
+		sector.CoverageIssue = antennaCoverageIssueRadiusOrderInvalid
+		return
+	}
+
+	sector.NearRadiusMeters = antennaFloat(nearRadius)
+	sector.FarRadiusMeters = antennaFloat(farRadius)
+	sector.CoverageAvailable = true
+	sector.CoverageStatus = antennaCoverageStatusAvailable
 }
 
 func degreesToRadians(degrees float64) float64 {

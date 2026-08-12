@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -78,4 +79,80 @@ func TestUpdateAntennaSectorPlan_SavesLocallyAndRecalculates(t *testing.T) {
 	require.True(t, sector.CoverageAvailable)
 	require.Equal(t, 120.0, *sector.Azimuth)
 	require.Len(t, planRepo.plans, 1)
+}
+
+func TestUpdateAntennaSectorPlan_ValidatesMergedReportedValues(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := newFakeDeviceRepo()
+	deviceRepo.devices[deviceID] = &model.Device{ID: deviceID}
+	paramRepo := newFakeParamRepo()
+	paramRepo.groupParams[deviceID] = map[string][]model.DeviceParameter{"antenna": {
+		{ParameterPath: "Device.DeviceInfo.AntennaInfo.Azimuth", ParameterValue: "90"},
+		{ParameterPath: "Device.DeviceInfo.AntennaInfo.Height", ParameterValue: "18"},
+		{ParameterPath: "Device.DeviceInfo.AntennaInfo.Downtilt", ParameterValue: "6"},
+		{ParameterPath: "Device.DeviceInfo.AntennaInfo.Beamwidth", ParameterValue: "65"},
+		{ParameterPath: "Device.DeviceInfo.AntennaInfo.VerticalBeamwidth", ParameterValue: "8"},
+	}}
+	planRepo := &memoryAntennaPlanRepo{}
+	service := NewDeviceService(deviceRepo, paramRepo, nil, nil, zap.NewNop())
+	service.SetAntennaSectorPlanRepository(planRepo)
+
+	azimuth := 120.0
+	sector, err := service.UpdateAntennaSectorPlan(context.Background(), deviceID, 1, UpdateAntennaSectorPlanRequest{
+		Azimuth: &azimuth,
+	})
+
+	require.NoError(t, err)
+	require.True(t, sector.CoverageAvailable)
+	require.Equal(t, antennaCoverageStatusAvailable, sector.CoverageStatus)
+	require.Equal(t, 120.0, *sector.Azimuth)
+	require.Len(t, planRepo.plans, 1)
+}
+
+func TestUpdateAntennaSectorPlan_RejectsInvalidCoverageGeometry(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := newFakeDeviceRepo()
+	deviceRepo.devices[deviceID] = &model.Device{ID: deviceID}
+	paramRepo := newFakeParamRepo()
+	planRepo := &memoryAntennaPlanRepo{}
+	service := NewDeviceService(deviceRepo, paramRepo, nil, nil, zap.NewNop())
+	service.SetAntennaSectorPlanRepository(planRepo)
+
+	azimuth, height, downtilt := 110.0, 27.0, 1.0
+	horizontal, vertical := 3.0, 3.0
+	_, err := service.UpdateAntennaSectorPlan(context.Background(), deviceID, 1, UpdateAntennaSectorPlanRequest{
+		Azimuth:             &azimuth,
+		AntennaHeight:       &height,
+		MechanicalDowntilt:  &downtilt,
+		HorizontalBeamwidth: &horizontal,
+		VerticalBeamwidth:   &vertical,
+	})
+
+	require.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	require.Contains(t, err.Error(), antennaCoverageIssueFarAngleNotPositive)
+	require.Empty(t, planRepo.plans)
+}
+
+func TestUpdateAntennaSectorPlan_AllowsNarrowHorizontalBeamwidth(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := newFakeDeviceRepo()
+	deviceRepo.devices[deviceID] = &model.Device{ID: deviceID}
+	paramRepo := newFakeParamRepo()
+	planRepo := &memoryAntennaPlanRepo{}
+	service := NewDeviceService(deviceRepo, paramRepo, nil, nil, zap.NewNop())
+	service.SetAntennaSectorPlanRepository(planRepo)
+
+	azimuth, height, downtilt := 120.0, 27.0, 1.0
+	horizontal, vertical := 0.01, 1.0
+	sector, err := service.UpdateAntennaSectorPlan(context.Background(), deviceID, 1, UpdateAntennaSectorPlanRequest{
+		Azimuth:             &azimuth,
+		AntennaHeight:       &height,
+		MechanicalDowntilt:  &downtilt,
+		HorizontalBeamwidth: &horizontal,
+		VerticalBeamwidth:   &vertical,
+	})
+
+	require.NoError(t, err)
+	require.True(t, sector.CoverageAvailable)
+	require.Equal(t, 0.01, *sector.HorizontalBeamwidth)
 }

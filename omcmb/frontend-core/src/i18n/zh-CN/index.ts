@@ -86,8 +86,16 @@ const messages: Record<string, string> = {
   'gis.antenna.verticalBeamwidth': '垂直波瓣宽度',
   'gis.antenna.coverageRange': '覆盖距离',
   'gis.antenna.incompleteFields': '缺失字段：{fields}',
+  'gis.antenna.narrowBeam': '当前波瓣过窄，在此缩放级别无法显示覆盖面积；地图已标出真实方向和覆盖距离。',
+  'gis.antenna.invalidGeometry': '覆盖参数组合无效：{reason}',
+  'gis.antenna.coverageIssue.far_angle_not_positive': '机械下倾角必须大于垂直波宽的一半',
+  'gis.antenna.coverageIssue.near_angle_out_of_range': '近端覆盖角度必须小于 90°',
+  'gis.antenna.coverageIssue.radius_not_finite': '覆盖半径无法计算',
+  'gis.antenna.coverageIssue.radius_order_invalid': '近端和远端覆盖半径顺序无效',
+  'gis.antenna.coverageIssue.unknown': '覆盖几何无法计算',
   'gis.antenna.updateSubmitted': '天线规划参数已保存',
   'gis.antenna.updateFailed': '保存天线规划参数失败',
+  'gis.deviceDetails': '设备详情',
 
   // GIS 电子围栏
   'geofence.title': '电子围栏',
