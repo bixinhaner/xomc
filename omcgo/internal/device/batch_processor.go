@@ -590,14 +590,9 @@ func prepareDeviceUpdate(device *model.Device, inform *tr069.InformMessage) ([]m
 		device.Technology = inferredTech
 	}
 	device.FirmwareVersion = findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")
-	device.ConnectionRequestURL = findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL")
+	updateConnectionRequestSummary(device, inform.ParameterList)
 	device.LastInformAt = &now
 	device.LastInformEvents = tr069.EventCodes(inform.Event)
-
-	// #440: 与 DeviceService.UpdateFromInform / RegisterFromInform 路径对齐——
-	// 从 ConnectionRequestURL 派生 IPAddress；无 UDP（非 NAT）场景这是唯一来源。
-	// 此前批处理路径漏掉这一步，导致已上线 7+ 小时的 TR-069 设备 ip_address 仍为空。
-	device.IPAddress = deriveInformIPAddress("", device.ConnectionRequestURL)
 
 	udpAddr := deriveUDPConnectionRequestAddress(inform.ParameterList)
 	stunChanged := false

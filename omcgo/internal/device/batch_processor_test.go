@@ -67,12 +67,30 @@ func TestPrepareDeviceUpdate_DerivesIPFromConnectionRequestURL(t *testing.T) {
 			wantNATted: false,
 		},
 		{
-			name: "empty ConnectionRequestURL keeps IP empty (no override of stale value either)",
+			name: "missing ConnectionRequestURL preserves existing summary",
 			params: []tr069.ParameterValueStruct{
 				{Name: "Device.DeviceInfo.SoftwareVersion", Value: "1.0.0"},
 			},
 			initialIP:  "192.168.1.100",
-			wantIP:     "",
+			wantIP:     "192.168.1.100",
+			wantNATted: false,
+		},
+		{
+			name: "empty ConnectionRequestURL preserves existing summary",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.ManagementServer.ConnectionRequestURL", Value: ""},
+			},
+			initialIP:  "192.168.1.101",
+			wantIP:     "192.168.1.101",
+			wantNATted: false,
+		},
+		{
+			name: "invalid ConnectionRequestURL preserves existing summary",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "://invalid"},
+			},
+			initialIP:  "192.168.1.102",
+			wantIP:     "192.168.1.102",
 			wantNATted: false,
 		},
 	}
