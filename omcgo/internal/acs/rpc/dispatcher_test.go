@@ -515,3 +515,135 @@ func TestDownloadHandler_LicenseReResolvesAbsoluteURLAtSOAPBuild(t *testing.T) {
 	assert.Equal(t, deviceID, resolver.seenDeviceID)
 	assert.Equal(t, transfercfg.TransferDirectionDownload, resolver.seenDirection)
 }
+
+func TestDownloadHandler_SoftwareUpgradeReResolvesAbsoluteURLAtSOAPBuild(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		fileType  string
+		staleURL  string
+		wantURL   string
+		notInBody string
+	}{
+		{
+			name:      "IMG",
+			fileType:  "1 Firmware Upgrade Image",
+			staleURL:  "http://stale.example.com/old/smallcell/FileDownloadService/firmware/img/product/V2.0.0/fw.bin",
+			wantURL:   "https://fresh-upgrade.example.com:9443/secure/smallcell/FileDownloadService/firmware/img/product/V2.0.0/fw.bin",
+			notInBody: "stale.example.com",
+		},
+		{
+			name:      "PATCH with encoded name",
+			fileType:  "X 48BF74 Software Upgrade Patch",
+			staleURL:  "http://stale.example.com/old/smallcell/FileDownloadService/firmware/patch/product%20A/V2.0.0/%E8%A1%A5%20%E4%B8%81.bin",
+			wantURL:   "https://fresh-upgrade.example.com:9443/secure/smallcell/FileDownloadService/firmware/patch/product%20A/V2.0.0/%E8%A1%A5%20%E4%B8%81.bin",
+			notInBody: "stale.example.com",
+		},
+		{
+			name:      "FPGA",
+			fileType:  "Firmware Upgrade Fpga",
+			staleURL:  "firmware/fpga/product/V2.0.0/fpga.bin",
+			wantURL:   "https://fresh-upgrade.example.com:9443/secure/smallcell/FileDownloadService/firmware/fpga/product/V2.0.0/fpga.bin",
+			notInBody: "http://old.example.com",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deviceID := uuid.New()
+			resolver := &staticAddressResolver{decision: transfercfg.AddressDecision{
+				Direction: transfercfg.TransferDirectionDownload,
+				Protocol:  transfercfg.TransferProtocolHTTPS,
+				BaseURL:   "https://fresh-upgrade.example.com:9443/secure",
+			}}
+			d := NewDispatcher(DispatcherConfig{
+				TransferConfigProvider: staticTransferProvider{snapshot: transfercfg.Snapshot{
+					Download: transfercfg.DownloadSettings{
+						BaseURL:      "http://old.example.com",
+						HTTPSBaseURL: "https://fresh-upgrade.example.com:9443/secure",
+						Path:         "/smallcell/FileDownloadService",
+					},
+				}},
+				TransferAddressResolver: resolver,
+				DownloadDeviceLookup:    staticDownloadDeviceLookup{device: &model.Device{ID: deviceID, SerialNumber: "SN-UPG"}},
+			})
+			cmd := &Command{
+				DeviceSN:   "SN-UPG",
+				Method:     "Download",
+				CommandKey: "30000000-0000-4000-8000-000000000001",
+				Params: json.RawMessage(fmt.Sprintf(`{
+						"command_key": "Download Upgrade,30000000-0000-4000-8000-000000000001",
+						"file_type": %q,
+						"url": %q,
+						"transfer_policy_managed": true,
+						"target_file_name": "pkg.bin",
+						"md5": "d41d8cd98f00b204e9800998ecf8427e"
+				}`, tc.fileType, tc.staleURL)),
+			}
+
+			result, err := d.BuildRequest(cmd, "cwmp-upgrade")
+
+			require.NoError(t, err)
+			body := string(result)
+			assert.Contains(t, body, tc.wantURL)
+			assert.NotContains(t, body, tc.notInBody)
+			assert.Contains(t, body, "<CommandKey>30000000-0000-4000-8000-000000000001</CommandKey>")
+			assert.Equal(t, deviceID, resolver.seenDeviceID)
+			assert.Equal(t, transfercfg.TransferDirectionDownload, resolver.seenDirection)
+		})
+	}
+}
+
+func TestDownloadHandler_SoftwareUpgradeDoesNotReResolveAPOrExternalVendorURL(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		url     string
+		managed bool
+	}{
+		{
+			name:    "AP firmware object",
+			url:     "firmware/ap/product/V2.0.0/ap.bin",
+			managed: true,
+		},
+		{
+			name: "external vendor URL",
+			url:  "http://vendor.example.com/downloads/firmware/patch/pkg.bin",
+		},
+		{
+			name: "external vendor URL with FileDownloadService-looking path",
+			url:  "http://vendor.example.com/smallcell/FileDownloadService/firmware/patch/pkg.bin",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver := &staticAddressResolver{decision: transfercfg.AddressDecision{
+				Direction: transfercfg.TransferDirectionDownload,
+				Protocol:  transfercfg.TransferProtocolHTTPS,
+				BaseURL:   "https://fresh-upgrade.example.com:9443/secure",
+			}}
+			d := NewDispatcher(DispatcherConfig{
+				TransferConfigProvider: staticTransferProvider{snapshot: transfercfg.Snapshot{
+					Download: transfercfg.DownloadSettings{
+						BaseURL: "http://old.example.com",
+						Path:    "/smallcell/FileDownloadService",
+					},
+				}},
+				TransferAddressResolver: resolver,
+				DownloadDeviceLookup:    staticDownloadDeviceLookup{device: &model.Device{ID: uuid.New(), SerialNumber: "SN-UPG"}},
+			})
+			cmd := &Command{
+				DeviceSN:   "SN-UPG",
+				Method:     "Download",
+				CommandKey: "30000000-0000-4000-8000-000000000002",
+				Params: json.RawMessage(fmt.Sprintf(`{
+						"command_key": "Download Upgrade,30000000-0000-4000-8000-000000000002",
+						"file_type": "1 Firmware Upgrade Image",
+						"url": %q,
+						"transfer_policy_managed": %t
+					}`, tc.url, tc.managed)),
+			}
+
+			result, err := d.BuildRequest(cmd, "cwmp-upgrade")
+
+			require.NoError(t, err)
+			assert.Contains(t, string(result), tc.url)
+			assert.Equal(t, uuid.Nil, resolver.seenDeviceID)
+		})
+	}
+}

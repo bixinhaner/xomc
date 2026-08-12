@@ -112,8 +112,7 @@ func (e *UpgradeExecutor) SetUploadAddressResolver(r transferAddressResolver) {
 }
 
 // SetDownloadAddressResolver injects the unified HTTP/HTTPS address decision
-// used by ordinary IMG Download dispatch. Non-IMG paths keep their legacy
-// relative URL behavior until their own rollout issues wire into transfercfg.
+// used by IMG/PATCH/FPGA Download dispatch.
 func (e *UpgradeExecutor) SetDownloadAddressResolver(r transferAddressResolver) {
 	e.downloadResolver = r
 }
@@ -203,10 +202,10 @@ func (e *UpgradeExecutor) SetFirmwareMetrics(m *FirmwareMetrics) {
 // ExecuteOne runs the upgrade flow for a single sub-task.
 // Flow: Step 1 (online check) → Step 2 (send Download cmd) → Step 3 (monitor download) → wait for events.
 func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTask, fw *FirmwareVersion, isKeepConfig bool, downloadFileType string) {
-	e.executeOne(ctx, subTask, fw, isKeepConfig, downloadFileType, true)
+	e.executeOne(ctx, subTask, fw, isKeepConfig, downloadFileType)
 }
 
-func (e *UpgradeExecutor) executeOne(ctx context.Context, subTask *UpgradeSubTask, fw *FirmwareVersion, isKeepConfig bool, downloadFileType string, resolveIMGDownload bool) {
+func (e *UpgradeExecutor) executeOne(ctx context.Context, subTask *UpgradeSubTask, fw *FirmwareVersion, isKeepConfig bool, downloadFileType string) {
 	// #59 Problem 3 紧急叫停（第一道）：ctx 已被取消（任务被 Suspend/Terminate/阈值暂停）
 	// 时整批 goroutine 还没轮到执行就提前退出，绝不下发。ctx.Err() 非阻塞，比 select 更直白。
 	if ctx.Err() != nil {
@@ -289,8 +288,9 @@ func (e *UpgradeExecutor) executeOne(ctx context.Context, subTask *UpgradeSubTas
 	if effectiveDownloadFileType == "" {
 		effectiveDownloadFileType = e.adapter.DownloadFileType(fw.FileType)
 	}
-	if resolveIMGDownload && shouldResolveIMGDownloadURL(fw) && e.downloadResolver != nil {
-		resolvedURL, err := e.resolveIMGDownloadURL(ctx, dev.ID, fw)
+	transferPolicyManaged := shouldResolveManagedFirmwareDownloadURL(fw) && e.downloadResolver != nil
+	if transferPolicyManaged {
+		resolvedURL, err := e.resolveManagedFirmwareDownloadURL(ctx, dev.ID, fw)
 		if err != nil {
 			e.releaseDeviceLock(context.Background(), dev.SerialNumber, subTask.ID)
 			e.failSubTask(ctx, subTask, fmt.Sprintf("Upgrade can not be started, invalid download URL: %v", err), FailureInternalError)
@@ -313,6 +313,8 @@ func (e *UpgradeExecutor) executeOne(ctx context.Context, subTask *UpgradeSubTas
 		"target_filename": fw.FileName,
 		"md5":             fw.MD5Val,
 		"raw_mode":        rawMode,
+		// ACS SOAP 渲染时用这个标记区分 OMC 内部 FileDownloadService 地址和外部厂商 URL。
+		"transfer_policy_managed": transferPolicyManaged,
 	})
 	if err != nil {
 		e.releaseDeviceLock(ctx, dev.SerialNumber, subTask.ID)
@@ -382,11 +384,19 @@ func (e *UpgradeExecutor) executeOne(ctx context.Context, subTask *UpgradeSubTas
 	go e.monitorDownloadProgress(context.Background(), subTask, dev.SerialNumber)
 }
 
-func shouldResolveIMGDownloadURL(fw *FirmwareVersion) bool {
-	return fw != nil && fw.FileType == FileTypeIMG
+func shouldResolveManagedFirmwareDownloadURL(fw *FirmwareVersion) bool {
+	if fw == nil {
+		return false
+	}
+	switch fw.FileType {
+	case FileTypeIMG, FileTypePATCH, FileTypeFPGA:
+		return true
+	default:
+		return false
+	}
 }
 
-func (e *UpgradeExecutor) resolveIMGDownloadURL(ctx context.Context, deviceID uuid.UUID, fw *FirmwareVersion) (string, error) {
+func (e *UpgradeExecutor) resolveManagedFirmwareDownloadURL(ctx context.Context, deviceID uuid.UUID, fw *FirmwareVersion) (string, error) {
 	if e.downloadResolver == nil {
 		return "", fmt.Errorf("download address resolver is not configured")
 	}
@@ -1428,7 +1438,7 @@ func (e *UpgradeExecutor) HandleDeviceOnline(ctx context.Context, evt event.Even
 		// Reset status to pending for re-execution
 		e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradePending, "")
 
-		go e.executeOne(context.Background(), subTask, fw, isKeepConfig, downloadFileType, false)
+		go e.executeOne(context.Background(), subTask, fw, isKeepConfig, downloadFileType)
 		return nil
 	}
 
