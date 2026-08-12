@@ -297,8 +297,7 @@ sudo bash deploy/install.sh</pre>
 
 <h3>场景 D：清理旧数据后全新部署（危险·不可恢复）</h3>
 <pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;
-sudo bash deploy/install.sh --fresh-install --lang cn --yes \
-    --public-host &lt;基站可达IP，如 11.22.33.44&gt;</pre>
+sudo bash deploy/install.sh --fresh-install --yes --public-host &lt;基站可达IP，如:11.22.33.44&gt;</pre>
 <p class="lead">先停旧 OMC 栈 → <b>永久删除</b>所有 bind-mount 数据目录（PG/TSDB/Redis/Redis-PM/NATS/MinIO）+ <code>/opt/omc/{data,etc,current,run/logs}</code> + 项目全部 Docker volumes → 按本机重新规划 <code>resources.env</code>（见 4.5）→ 走正常首次安装流程。等效 <code>uninstall.sh --purge --force</code> 后再 <code>install.sh</code>，一步完成。</p>
 <div class="danger">⚠️ <code>--fresh-install</code> 数据删除<b>不可恢复</b>。全新安装需要基站可达地址：通过 <code>--public-host</code> 传入，或 <code>deploy/.env</code> 已配有效的 <code>OMC_PUBLIC_HOST</code>（不能用 localhost/127.0.0.1，详 §9.5）；两者皆无则报错退出。省略 <code>--yes</code> 会在删除前二次交互确认。低内存主机可追加 <code>--skip-monitoring</code>，或 <code>--floor-tolerance-pct</code>（0-99，默认 60）放宽组件下限缺口容忍度。</div>
 
