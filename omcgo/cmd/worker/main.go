@@ -747,8 +747,24 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	}
 	logger.Info("backup transfer-complete router started (active restore verification: downloaded→verify; no device verifier wired → stays downloaded)")
 
-	// PM 设备上线自动下发 PM 上传配置（KPI 上报参数整理.md 三参数）
-	// 仅在 cfg.PM.AutoSetupOnOnline=true 时启用；test 环境默认关闭防止干扰压测
+	pmOnlineSub := pm.NewOnlineSubscriber(
+		w.TaskService,
+		cfg.PM.UploadURLTemplate,
+		cfg.PM.EnableValue,
+		cfg.PM.PeriodicUploadInterval,
+		logger,
+	)
+	pmOnlineSub.SetAdmissionGate(pm.NewRedisPMSetupAdmissionGate(w.Redis, 0))
+	pmParameterRepo := device.NewPgDeviceParameterRepository(w.PgPool)
+	pmOnlineSub.SetUploadAddressResolver(newTransferAddressResolver(
+		transferPolicy,
+		pmParameterRepo,
+	))
+	pmOnlineSub.SetParamSyncPMCompensationReaders(pmDeviceRepo, pmParameterRepo)
+
+	// PM 设备上线自动下发 PM 上传配置（KPI 上报参数整理.md 三参数）。
+	// device.online/device.registered 仅在 cfg.PM.AutoSetupOnOnline=true 时启用；
+	// 参数同步后的 HTTPS 补偿不受该开关影响，避免首次未知能力下发 HTTP 后无法收敛。
 	if cfg.PM.AutoSetupOnOnline {
 		// 启动期一次性校验 PM 上传 URL 模板的 host：渲染后 host 为空（如生产 .env
 		// 漏配 OMC_PUBLIC_HOST，模板渲染成 "http://:7557/..."）则醒目 Error 告警，
@@ -761,25 +777,17 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 				zap.String("rendered", rendered),
 				zap.Error(verr))
 		}
-		pmOnlineSub := pm.NewOnlineSubscriber(
-			w.TaskService,
-			cfg.PM.UploadURLTemplate,
-			cfg.PM.EnableValue,
-			cfg.PM.PeriodicUploadInterval,
-			logger,
-		)
-		pmOnlineSub.SetAdmissionGate(pm.NewRedisPMSetupAdmissionGate(w.Redis, 0))
-		pmOnlineSub.SetUploadAddressResolver(newTransferAddressResolver(
-			transferPolicy,
-			device.NewPgDeviceParameterRepository(w.PgPool),
-		))
 		if err := pmOnlineSub.Subscribe(w.EventBus); err != nil {
 			logger.Warn("subscribe pm online subscriber failed", zap.Error(err))
 		} else {
 			logger.Info("pm online subscriber started (auto SPV on device.registered/online)")
 		}
 	} else {
-		logger.Info("pm online subscriber disabled (cfg.pm.auto_setup_on_online=false)")
+		if err := pmOnlineSub.SubscribeParamSyncCompleted(w.EventBus); err != nil {
+			logger.Warn("subscribe pm param sync HTTPS compensation failed", zap.Error(err))
+		} else {
+			logger.Info("pm online subscriber disabled (cfg.pm.auto_setup_on_online=false); param sync HTTPS compensation enabled")
+		}
 	}
 
 	// T-0164-P5 / G5 + T-0164-P8 / G8：PM 自然桶聚合 + asyncjob 框架接入。
