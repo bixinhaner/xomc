@@ -66,7 +66,7 @@ func Setup(r *gin.Engine, c *Container) error {
 	})
 	graph.Add(components.ModuleInitializer{
 		Name:    "geofence",
-		Depends: []string{"device", "productregistry", "paramregistry"},
+		Depends: []string{"admin", "device", "productregistry", "paramregistry"},
 		Init:    func() error { return initGeofenceModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{

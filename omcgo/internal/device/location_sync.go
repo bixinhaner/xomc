@@ -204,7 +204,7 @@ func normalizeReportedLocation(observation ReportedLocation, receivedFallback ti
 	}
 	if observation.DeviceReportedAt != nil {
 		observation.ObservedAt = *observation.DeviceReportedAt
-	} else {
+	} else if observation.ObservedAt.IsZero() {
 		observation.ObservedAt = observation.ReceivedAt
 	}
 	return observation

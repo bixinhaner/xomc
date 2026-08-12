@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLocationSourceAllowedSeparatesTR069AndExternalModes(t *testing.T) {
+func TestLocationSourceAllowedSupportsThirdPartyCompatibilityAndExternalIsolation(t *testing.T) {
 	assert.True(t, locationSourceAllowed(model.LocationSourceTR069, "Device.FAP.GPS"))
-	assert.False(t, locationSourceAllowed(
+	assert.True(t, locationSourceAllowed(
 		model.LocationSourceTR069,
 		"third_party:fence/batchUpdateDeviceLocation",
 	))
@@ -21,6 +21,11 @@ func TestLocationSourceAllowedSeparatesTR069AndExternalModes(t *testing.T) {
 		"third_party:fence/batchUpdateDeviceLocation",
 	))
 	assert.False(t, locationSourceAllowed(model.LocationSourceExternal, "Device.FAP.GPS"))
+	assert.False(t, locationSourceAllowed(
+		model.LocationSourceMode("invalid"),
+		"third_party:fence/batchUpdateDeviceLocation",
+	))
+	assert.False(t, locationSourceAllowed(model.LocationSourceMode("invalid"), "Device.FAP.GPS"))
 }
 
 func TestNormalizeReportedLocationUsesReceiveTimeWithoutDeviceSampleTime(t *testing.T) {
@@ -48,6 +53,24 @@ func TestNormalizeReportedLocationUsesTrustedDeviceSampleTime(t *testing.T) {
 
 	assert.Equal(t, receivedAt, got.ReceivedAt)
 	assert.Equal(t, reportedAt, got.ObservedAt)
+}
+
+func TestNormalizeReportedLocationPreservesExplicitObservationTime(t *testing.T) {
+	receivedAt := time.Date(2026, 8, 12, 6, 30, 1, 0, time.UTC)
+	observedAt := receivedAt.Add(-time.Second)
+	observation := ReportedLocation{
+		Latitude:   31.2345,
+		Longitude:  121.2347,
+		ObservedAt: observedAt,
+		ReceivedAt: receivedAt,
+		SourcePath: "third_party:fence/batchUpdateDeviceLocation",
+	}
+
+	got := normalizeReportedLocation(observation, receivedAt.Add(time.Minute))
+
+	assert.Equal(t, receivedAt, got.ReceivedAt)
+	assert.Equal(t, observedAt, got.ObservedAt)
+	assert.Nil(t, got.DeviceReportedAt)
 }
 
 func TestMovementEvidenceCalculatesDistanceElapsedAndSpeed(t *testing.T) {

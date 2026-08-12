@@ -51,6 +51,10 @@ type ThirdPartyLocationBatchRepository interface {
 	Complete(context.Context, string, ThirdPartyLocationResult) error
 }
 
+type ThirdPartyLocationTimezoneProvider interface {
+	Location(context.Context) *time.Location
+}
+
 type thirdPartyLocationItemResult struct {
 	success bool
 	failure ThirdPartyLocationFailure
@@ -80,7 +84,11 @@ func validateThirdPartyLocationRequest(
 
 func parseThirdPartyLocation(
 	item ThirdPartyLocationDevice,
+	location *time.Location,
 ) (time.Time, float64, float64, error) {
+	if location == nil {
+		location = time.UTC
+	}
 	if strings.TrimSpace(item.VesselName) == "" || len([]rune(item.VesselName)) > 128 {
 		return time.Time{}, 0, 0, fmt.Errorf("vesselName is required and must not exceed 128 characters")
 	}
@@ -98,7 +106,7 @@ func parseThirdPartyLocation(
 	observedAt, err := time.ParseInLocation(
 		thirdPartyTimeLayout,
 		strings.TrimSpace(item.UpdateTime),
-		time.UTC,
+		location,
 	)
 	if err != nil {
 		return time.Time{}, 0, 0, fmt.Errorf("invalid updateTime: expected %s", thirdPartyTimeLayout)
@@ -144,6 +152,12 @@ func (s *Service) UpdateThirdPartyLocations(
 		TotalCount:    len(request.Devices),
 		FailedDevices: make([]ThirdPartyLocationFailure, 0),
 	}
+	location := time.UTC
+	if s.thirdPartyLocationTimezone != nil {
+		if configured := s.thirdPartyLocationTimezone.Location(ctx); configured != nil {
+			location = configured
+		}
+	}
 	itemResults := make([]thirdPartyLocationItemResult, len(request.Devices))
 	for start := 0; start < len(request.Devices); start += thirdPartyLocationBatchSize {
 		end := start + thirdPartyLocationBatchSize
@@ -157,7 +171,7 @@ func (s *Service) UpdateThirdPartyLocations(
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				observedAt, longitude, latitude, err := parseThirdPartyLocation(item)
+				observedAt, longitude, latitude, err := parseThirdPartyLocation(item, location)
 				if err == nil && duplicateSerialNumber(request.Devices, index, item.SerialNumber) {
 					err = fmt.Errorf("duplicate serialNumber")
 				}
