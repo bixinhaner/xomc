@@ -17,12 +17,11 @@ type RequestConsumer struct {
 	bus     event.EventBus
 	service *Service
 	devices RequestDeviceResolver
-	flags   FeatureFlags
 	sub     event.Subscription
 }
 
-func NewRequestConsumer(bus event.EventBus, service *Service, devices RequestDeviceResolver, flags FeatureFlags) *RequestConsumer {
-	return &RequestConsumer{bus: bus, service: service, devices: devices, flags: flags}
+func NewRequestConsumer(bus event.EventBus, service *Service, devices RequestDeviceResolver) *RequestConsumer {
+	return &RequestConsumer{bus: bus, service: service, devices: devices}
 }
 
 func (c *RequestConsumer) Start() error {
@@ -48,9 +47,6 @@ func (c *RequestConsumer) Handle(ctx context.Context, evt event.Event) error {
 	}
 	if dev == nil {
 		return fmt.Errorf("parameter sync request device %s not found", payload.DeviceSN)
-	}
-	if !c.flags.EnabledForDevice(dev.ID.String()) {
-		return nil
 	}
 	reason := TriggerReason(strings.TrimSpace(payload.TriggerReason))
 	if !reason.Valid() {

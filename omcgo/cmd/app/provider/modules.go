@@ -10,7 +10,9 @@ import (
 	"strconv"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
@@ -32,6 +34,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/dashboard"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/eventlog"
@@ -69,6 +72,41 @@ import (
 	transferrepo "github.com/omcgo/omcgo/internal/transfer/repo"
 	"github.com/omcgo/omcgo/internal/ufte"
 )
+
+type startupOnlineDeviceLister struct{ pool *pgxpool.Pool }
+
+func (l startupOnlineDeviceLister) ListOnlineDevices(ctx context.Context, afterID uuid.UUID, pageSize int) ([]*model.Device, error) {
+	queryBuilder := storage.Psql.Select("id", "serial_number").
+		From("devices").
+		Where("deleted_at IS NULL").
+		Where(sq.Eq{"is_online": true}).
+		OrderBy("id").
+		Limit(uint64(pageSize))
+	if afterID != uuid.Nil {
+		queryBuilder = queryBuilder.Where(sq.Gt{"id": afterID})
+	}
+	query, args, err := queryBuilder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build online device startup page query: %w", err)
+	}
+	rows, err := l.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query online device startup page: %w", err)
+	}
+	defer rows.Close()
+	devices := make([]*model.Device, 0, pageSize)
+	for rows.Next() {
+		dev := &model.Device{}
+		if err := rows.Scan(&dev.ID, &dev.SerialNumber); err != nil {
+			return nil, fmt.Errorf("scan online device startup page: %w", err)
+		}
+		devices = append(devices, dev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate online device startup page: %w", err)
+	}
+	return devices, nil
+}
 
 // initMRModule 初始化 F05 测量报告模块。
 func initMRModule(c *Container) error {
@@ -652,7 +690,6 @@ func initProvisionModule(c *Container) error {
 		c.Carriers, c.TaskSvc, c.EventBus, c.Cfg.Provision, logger,
 	)
 	provisionEngine.SetDeduper(c.Deduper)
-	provisionEngine.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
 	provisionEngine.SetActivationStateReader(c.DeviceInfoRepo)
 	provisionEngine.SetActivationStateRefresher(device.NewInfoSyncer(
 		c.DeviceInfoRepo,
@@ -696,6 +733,23 @@ func initProvisionModule(c *Container) error {
 		logger.Info("model upload service enabled",
 			zap.String("upload_url", c.Cfg.Provision.ModelUpload.UploadURL))
 	}
+	// Durable parameter sync is the only manual/license data path. Its wiring is
+	// independent of the periodic AutoSync policy switch.
+	if c.DeviceService != nil && c.miscDeps.paramSyncStarter != nil {
+		c.DeviceService.SetParamSyncManualOfflineMode(c.Cfg.ParamSync.ManualOfflineMode)
+		c.DeviceService.SetParamSyncStarter(c.miscDeps.paramSyncStarter)
+	}
+	if c.DeviceRepo != nil && c.ParamRepo != nil &&
+		c.ProductRegistry != nil && c.ParamRegistry != nil &&
+		c.miscDeps.paramSyncStarter != nil {
+		licenseParamSvc := device.NewLicenseParamService(
+			c.DeviceRepo, c.ParamRepo,
+			c.ProductRegistry, c.ParamRegistry,
+			c.miscDeps.paramSyncStarter, c.Redis, logger,
+		)
+		c.miscDeps.licenseParamHandler = device.NewLicenseParamHandler(licenseParamSvc, logger)
+		logger.Info("device license params handler initialized")
+	}
 	var periodicSyncStarter provision.PathBSyncStarter
 	if c.Cfg.Provision.AutoSync.Enabled {
 		planStore := provision.NewSyncPlanStore(c.Redis)
@@ -731,41 +785,35 @@ func initProvisionModule(c *Container) error {
 			syncSvc.SetDurableStarter(c.miscDeps.paramSyncStarter)
 		}
 		provisionEngine.SetSyncService(syncSvc)
-		// T-0126: 注入 ParamSyncStarter 让手动同步先走 durable parameter_sync_*。
-		// 旧 sync-gpv Path B 仅作为临时兜底，待 param_sync_running 稳定后删除。
-		if c.DeviceService != nil {
-			c.DeviceService.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
-			c.DeviceService.SetParamSyncManualOfflineMode(c.Cfg.ParamSync.ManualOfflineMode)
-			if c.miscDeps.paramSyncStarter != nil {
-				c.miscDeps.paramSyncStarter.SetLegacy(syncSvc)
-				c.DeviceService.SetParamSyncStarter(c.miscDeps.paramSyncStarter)
-			} else {
-				c.DeviceService.SetParamSyncStarter(syncSvc)
-			}
-		}
 		logger.Info("auto-sync service enabled")
-
-		// License Params Tab 后端装配（DeviceDetail "License 参数" tab）。
-		// 刷新直接提交到 durable paramsync 数据面，不经过 provision.SyncService
-		// 或旧 Path B 调度器。
-		if c.DeviceRepo != nil && c.ParamRepo != nil &&
-			c.ProductRegistry != nil && c.ParamRegistry != nil &&
-			c.miscDeps.paramSyncStarter != nil {
-			licenseParamSvc := device.NewLicenseParamService(
-				c.DeviceRepo, c.ParamRepo,
-				c.ProductRegistry, c.ParamRegistry,
-				c.miscDeps.paramSyncStarter, c.Redis, logger,
-			)
-			c.miscDeps.licenseParamHandler = device.NewLicenseParamHandler(licenseParamSvc, logger)
-			logger.Info("device license params handler initialized")
-		}
-
 	}
 
 	releaseCampaignID, hasReleaseIdentity := buildinfo.ReleaseCampaignID()
-	releaseSyncReady := hasReleaseIdentity &&
-		c.miscDeps.paramSyncStarter != nil &&
-		c.Cfg.ParamSync.RoutingMode == "durable"
+	if c.DeviceRepo != nil && c.miscDeps.paramSyncStarter != nil {
+		startupLeader := provision.NewPGAdvisoryLeaderElector(c.PgPool, "startup_param_syncer", logger)
+		startupSyncer := provision.NewStartupSyncer(
+			startupOnlineDeviceLister{pool: c.PgPool},
+			c.miscDeps.paramSyncStarter,
+			startupLeader,
+			200,
+			logger,
+		)
+		startupSyncCtx, cancelStartupSync := context.WithCancel(context.Background())
+		if c.GS != nil {
+			c.GS.Register("startup-param-sync", 1, func(context.Context) error {
+				cancelStartupSync()
+				return nil
+			})
+		}
+		go func() {
+			defer cancelStartupSync()
+			if err := startupSyncer.Run(startupSyncCtx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("OMC redeploy full parameter sync exited with error", zap.Error(err))
+			}
+		}()
+		logger.Info("OMC redeploy full parameter sync scheduled for all online devices")
+	}
+	releaseSyncReady := hasReleaseIdentity && c.miscDeps.paramSyncStarter != nil
 	if periodicSyncStarter != nil || releaseSyncReady {
 		// T-0124 周期同步与 Issue #148 发布同步共用同一个 scheduler、
 		// PG leader、批次、并发和 stagger 参数。
@@ -792,7 +840,6 @@ func initProvisionModule(c *Container) error {
 			c.DeviceRepo, periodicSyncStarter, leader,
 			periodicSyncPolicy, logger,
 		)
-		periodicSyncer.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
 		if releaseSyncReady {
 			periodicSyncer.SetReleaseSync(
 				paramsync.NewPGRepository(c.PgPool),

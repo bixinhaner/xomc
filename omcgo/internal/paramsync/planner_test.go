@@ -143,6 +143,7 @@ func TestPlanner_ScopeIsStructuralAndDeterministic(t *testing.T) {
 	assert.Equal(t, []string{"Device.X.Radio.7."}, flattenPaths(objectReadback.Batches))
 	require.Len(t, objectReadback.Coverage, 1)
 	assert.True(t, objectReadback.Coverage[0].Subtree)
+	assert.False(t, objectReadback.Coverage[0].Complete, "SPV/AddObject readback must not delete absent sibling data")
 	require.Len(t, objectReadback.Coverage[0].Mappings, 1)
 
 	privateObjectReadback, err := planner.Plan(context.Background(), PlanCommand{
@@ -153,6 +154,45 @@ func TestPlanner_ScopeIsStructuralAndDeterministic(t *testing.T) {
 	assert.Equal(t, []string{"Device.X.Radio.7."}, flattenPaths(privateObjectReadback.Batches))
 	assert.True(t, privateObjectReadback.Coverage[0].Subtree)
 	require.Len(t, privateObjectReadback.Coverage[0].Mappings, 1)
+}
+
+func TestBuildCoverage_SeparatesNestedMultiInstanceObjectsAndMakesPartialObjectAuthoritative(t *testing.T) {
+	mappings := []parammodel.ParamMapping{
+		{StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.Enable", PrivatePath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.Enable", EntryType: "parameter", IsStorable: true, IsSupported: true},
+		{StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.Enable", PrivatePath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.Enable", EntryType: "parameter", IsStorable: true, IsSupported: true},
+	}
+
+	full := buildCoverage(mappings, SyncScopeFull, nil)
+	require.Len(t, full, 2)
+	assert.Equal(t, "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.", full[0].Path)
+	assert.Equal(t, "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.", full[1].Path)
+	assert.True(t, full[0].Complete)
+	assert.True(t, full[1].Complete)
+	require.Len(t, full[0].Mappings, 1)
+	require.Len(t, full[1].Mappings, 1)
+	assert.NotEqual(t, full[0].Mappings[0].StandardPath, full[1].Mappings[0].StandardPath)
+
+	partial := buildCoverage(mappings, SyncScopePartial, []string{
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.",
+	})
+	require.Len(t, partial, 1)
+	assert.Equal(t, "Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.", partial[0].Path)
+	assert.True(t, partial[0].Subtree)
+	assert.True(t, partial[0].Complete, "an explicit object-prefix refresh is an authoritative snapshot")
+}
+
+func TestBuildCoverage_AddsObjectBoundaryToPartialObjectWithoutTrailingDot(t *testing.T) {
+	mappings := []parammodel.ParamMapping{{
+		StandardPath: "Device.Radio.{i}.", PrivatePath: "Device.Radio.{i}.",
+		EntryType: "object", IsStorable: true, IsSupported: true,
+	}}
+
+	coverage := buildCoverage(mappings, SyncScopePartial, []string{"Device.Radio.1"})
+
+	require.Len(t, coverage, 1)
+	assert.Equal(t, "Device.Radio.1.", coverage[0].Path)
+	assert.True(t, coverage[0].Subtree)
+	assert.True(t, coverage[0].Complete)
 }
 
 func TestPlanner_MLNDCFullSyncQueriesAuthoritativeRFStateForEveryCarrier(t *testing.T) {

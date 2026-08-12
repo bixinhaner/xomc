@@ -172,9 +172,13 @@ func buildCoverage(mappings []parammodel.ParamMapping, scope SyncScope, requeste
 	seen := make(map[string]bool)
 	if !scope.IsFull() {
 		for _, path := range requested {
-			path = strings.TrimSpace(path)
+			path = normalizeRequestedCoveragePath(path)
 			if path != "" {
-				seen[path] = requestedPathIsSubtree(path, mappings)
+				subtree := requestedPathIsSubtree(path, mappings)
+				if subtree {
+					path = ensureObjectCoveragePath(path)
+				}
+				seen[path] = subtree
 			}
 		}
 	} else {
@@ -182,12 +186,7 @@ func buildCoverage(mappings []parammodel.ParamMapping, scope SyncScope, requeste
 			if !mapping.IsStorable || !mapping.IsSupported {
 				continue
 			}
-			path := mapping.StandardPath
-			subtree := mapping.EntryType == "object"
-			if idx := strings.Index(path, "{i}"); idx >= 0 {
-				path = path[:idx]
-				subtree = true
-			}
+			path, subtree := fullCoveragePath(mapping)
 			if path != "" {
 				seen[path] = seen[path] || subtree
 			}
@@ -200,9 +199,18 @@ func buildCoverage(mappings []parammodel.ParamMapping, scope SyncScope, requeste
 	sort.Strings(paths)
 	coverage := make([]CoverageScope, 0, len(paths))
 	for _, path := range paths {
-		item := CoverageScope{Path: path, Complete: scope.IsFull(), Subtree: seen[path]}
+		complete := scope.IsFull() || (scope == SyncScopePartial && seen[path])
+		item := CoverageScope{Path: path, Complete: complete, Subtree: seen[path]}
 		for _, mapping := range mappings {
-			if !mapping.IsSupported || !mappingBelongsToCoverage(mapping.StandardPath, item) {
+			if !mapping.IsSupported {
+				continue
+			}
+			if scope.IsFull() {
+				mappingPath, _ := fullCoveragePath(mapping)
+				if mappingPath != path {
+					continue
+				}
+			} else if !mappingBelongsToCoverage(mapping.StandardPath, item) {
 				continue
 			}
 			item.Mappings = append(item.Mappings, FrozenMapping{
@@ -216,6 +224,33 @@ func buildCoverage(mappings []parammodel.ParamMapping, scope SyncScope, requeste
 		coverage = append(coverage, item)
 	}
 	return coverage
+}
+
+func normalizeRequestedCoveragePath(path string) string {
+	path = strings.TrimSpace(path)
+	if strings.HasSuffix(path, "{i}.") {
+		return strings.TrimSuffix(path, "{i}.")
+	}
+	return path
+}
+
+func ensureObjectCoveragePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || strings.HasSuffix(path, ".") {
+		return path
+	}
+	return path + "."
+}
+
+// fullCoveragePath keeps failure and deletion coverage at the deepest repeated
+// object represented by a mapping. Collapsing at the first {i} made one 9005
+// under FAPService protect every unrelated table below it from reconciliation.
+func fullCoveragePath(mapping parammodel.ParamMapping) (string, bool) {
+	path := mapping.StandardPath
+	if idx := strings.LastIndex(path, "{i}"); idx >= 0 {
+		return path[:idx], true
+	}
+	return path, mapping.EntryType == "object"
 }
 
 func requestedPathIsSubtree(path string, mappings []parammodel.ParamMapping) bool {

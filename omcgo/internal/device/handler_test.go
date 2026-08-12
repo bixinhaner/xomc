@@ -788,6 +788,11 @@ func (f *fakeParamSyncStarter) StartManualSync(_ context.Context, dev *model.Dev
 	return f.defaultUsed, f.defaultGPVTaskCount, f.defaultErr
 }
 
+func (f *fakeParamSyncStarter) StartManualSyncDetailed(_ context.Context, dev *model.Device, sourceID string, parameterPaths []string) (*ManualParamSyncStart, error) {
+	f.calls = append(f.calls, syncStarterCall{deviceID: dev.ID, sourceID: sourceID, parameterPaths: parameterPaths})
+	return &ManualParamSyncStart{Used: f.defaultUsed, TaskCount: f.defaultGPVTaskCount, Status: "queued"}, f.defaultErr
+}
+
 func TestHandler_SyncDeviceParams_Success(t *testing.T) {
 	h, deviceRepo, _ := newTestHandler()
 	starter := &fakeParamSyncStarter{defaultUsed: true, defaultGPVTaskCount: 7}

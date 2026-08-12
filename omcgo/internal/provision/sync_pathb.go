@@ -47,129 +47,21 @@ func (s *SyncService) PathBEnabled(ctx context.Context, dev *model.Device) bool 
 // 返回 (true, nil) 表示已切到 Path B；(false, nil) 表示无法走新栈，调用方应降级旧栈；
 // (false, err) 表示新栈选中后执行出错（不再降级，由 engine 处理）。
 func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, int, error) {
-	return s.startPathBSync(ctx, dev, sourceID, true, opts...)
-}
-
-func (s *SyncService) startPathBSync(
-	ctx context.Context,
-	dev *model.Device,
-	sourceID string,
-	preferDurable bool,
-	opts ...PathBOption,
-) (bool, int, error) {
 	var pbOpts pathBOptions
 	for _, opt := range opts {
 		opt(&pbOpts)
 	}
-	if preferDurable && s.durableStarter != nil {
-		// Transition rule: every trigger reaches the durable parameter_sync_*
-		// data plane first. Returning handled=false intentionally falls back to
-		// the legacy sync-gpv Path B pipeline for now; remove this fallback once
-		// param_sync_running has proven stable in production.
-		handled, taskCount, err := s.durableStarter.StartDurableSync(ctx, dev, sourceID, pbOpts.reason, pbOpts.parameterPaths)
-		if err != nil || handled {
-			return handled, taskCount, err
-		}
+	if s.durableStarter == nil {
+		return true, 0, fmt.Errorf("durable parameter sync starter unavailable")
 	}
-	matchedProduct, ok := s.resolveMatchedProduct(ctx, dev)
-	if !ok {
-		return false, 0, nil
+	handled, taskCount, err := s.durableStarter.StartDurableSync(ctx, dev, sourceID, pbOpts.reason, pbOpts.parameterPaths)
+	if err != nil {
+		return true, taskCount, err
 	}
-	set, ok := s.resolveMappingSet(ctx, dev)
-	if !ok {
-		return false, 0, nil
+	if !handled {
+		return true, taskCount, fmt.Errorf("durable parameter sync did not handle request")
 	}
-
-	fullSync := len(pbOpts.parameterPaths) == 0
-	if strings.TrimSpace(sourceID) == "" {
-		sourceID = uuid.NewString()
-	}
-	if pbOpts.reason != "manual" {
-		if locker, ok := s.taskSvc.(syncGPVDeviceLocker); ok {
-			release, lockErr := locker.AcquireSyncGPVDeviceLock(ctx, dev.SerialNumber)
-			if lockErr != nil {
-				return true, 0, fmt.Errorf("lock path-b sync start: %w", lockErr)
-			}
-			defer release()
-		}
-		if guard, ok := s.taskSvc.(syncGPVOpenGuard); ok {
-			hasOpen, guardErr := guard.HasOpenSyncGPVTasksByDevice(ctx, dev.SerialNumber)
-			if guardErr != nil {
-				return true, 0, fmt.Errorf("check path-b sync running: %w", guardErr)
-			}
-			if hasOpen {
-				if s.logger != nil {
-					s.logger.Info("path-b sync skipped: sync already running",
-						zap.String("device_sn", dev.SerialNumber),
-						zap.String("reason", pbOpts.reason),
-						zap.String("source_id", sourceID))
-				}
-				return true, 0, nil
-			}
-		}
-	}
-
-	effectiveMappings := set.Mappings
-	if fullSync {
-		effectiveMappings = s.filterReadUnsupportedMappings(ctx, matchedProduct.ID, effectiveMappings)
-	}
-
-	prefixes := extractStorablePrefixes(effectiveMappings)
-	if !fullSync {
-		prefixes = extractStorablePrefixesForStandardPaths(set.Mappings, pbOpts.parameterPaths)
-	}
-	if len(prefixes) == 0 {
-		s.logger.Info("path-b sync skipped: no storable prefixes",
-			zap.String("device_sn", dev.SerialNumber),
-			zap.String("source", string(set.Source)),
-			zap.Int("requested_paths", len(pbOpts.parameterPaths)),
-		)
-		// 仍标 syncing → completed，避免下游 stuck
-		log, _ := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
-		if log != nil {
-			_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryCompleted, "")
-		}
-		return true, 0, nil
-	}
-
-	// T-NATS-PAYLOAD: 5MB payload 预算内保留 object-level GPV,让所有实例一次同步。
-	// 只有估算 single-prefix 响应字节数 > expandThreshold (5MB) 时,才把 object prefix
-	// 展开成 instance-level prefix 作为异常保护。详见 sync_pathb_expand.go 文件注释。
-	prefixes = s.expandLargeObjectPrefixes(ctx, dev.ID, set.Mappings, prefixes)
-
-	// T-0123: 提取 reason 写 Redis 临时映射供 HandleSyncResultPathB 完成时读取（TTL=10min 覆盖 GPV 上界）。
-	if pbOpts.reason != "" && s.redisClient != nil {
-		runKey := fmt.Sprintf("provision:syncreason:%s", sourceID)
-		deviceKey := fmt.Sprintf("provision:syncreason:%s", dev.ID.String())
-		if err := s.redisClient.Set(ctx, runKey, pbOpts.reason, 10*time.Minute).Err(); err != nil {
-			// Reason 写入失败不阻断 sync，差异日志降级为 reason=unknown
-			s.logger.Warn("write path-b sync reason failed",
-				zap.String("device_sn", dev.SerialNumber),
-				zap.String("source_id", sourceID),
-				zap.String("reason", pbOpts.reason),
-				zap.Error(err))
-		}
-		// Backward-compatible device-scoped hint for older result paths and logs.
-		_ = s.redisClient.Set(ctx, deviceKey, pbOpts.reason, 10*time.Minute).Err()
-	}
-
-	gpvTaskCount := len(buildGPVBatches(prefixes, s.batchSize))
-	if err := s.enqueueGPVPrefixes(ctx, dev, prefixes, sourceID); err != nil {
-		return true, gpvTaskCount, fmt.Errorf("enqueue path-b GPV: %w", err)
-	}
-	s.recordPathBSyncPendingBatches(ctx, dev.ID, gpvTaskCount)
-
-	s.logger.Info("path-b sync started",
-		zap.String("device_sn", dev.SerialNumber),
-		zap.String("source", string(set.Source)),
-		zap.String("source_id", sourceID),
-		zap.String("reason", pbOpts.reason),
-		zap.Int("requested_paths", len(pbOpts.parameterPaths)),
-		zap.Int("prefixes", len(prefixes)),
-		zap.Int("total_mappings", len(set.Mappings)),
-		zap.Int("effective_mappings", len(effectiveMappings)),
-	)
-	return true, gpvTaskCount, nil
+	return true, taskCount, nil
 }
 
 // HandleSyncResultPathB 处理新栈 GPV 响应。

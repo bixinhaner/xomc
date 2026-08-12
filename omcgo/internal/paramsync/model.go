@@ -3,8 +3,6 @@ package paramsync
 
 import (
 	"encoding/json"
-	"fmt"
-	"hash/fnv"
 	"time"
 
 	"github.com/google/uuid"
@@ -238,46 +236,4 @@ type SubmitResult struct {
 	TriggerReason TriggerReason `json:"trigger_reason"`
 	TaskCount     int           `json:"task_count"`
 	ActiveRunID   *uuid.UUID    `json:"active_run_id,omitempty"`
-}
-
-type FeatureFlags struct {
-	RunEnabled            bool `mapstructure:"run_enabled" json:"run_enabled"`
-	ResultConsumerEnabled bool `mapstructure:"result_consumer_enabled" json:"result_consumer_enabled"`
-	StagingEnabled        bool `mapstructure:"staging_enabled" json:"staging_enabled"`
-	CanaryPercent         int  `mapstructure:"canary_percent" json:"canary_percent"`
-	LegacyFallbackEnabled bool `mapstructure:"legacy_fallback_enabled" json:"legacy_fallback_enabled"`
-}
-
-func (f FeatureFlags) Validate() error {
-	if f.CanaryPercent < 0 || f.CanaryPercent > 100 {
-		return fmt.Errorf("param_sync.canary_percent must be between 0 and 100, got %d", f.CanaryPercent)
-	}
-	if !f.RunEnabled {
-		if f.ResultConsumerEnabled || f.StagingEnabled || f.CanaryPercent != 0 {
-			return fmt.Errorf("param_sync consumer, staging, and canary settings require run_enabled=true")
-		}
-		return nil
-	}
-	if !f.ResultConsumerEnabled {
-		return fmt.Errorf("param_sync.result_consumer_enabled must be true when run_enabled=true")
-	}
-	if !f.StagingEnabled {
-		return fmt.Errorf("param_sync.staging_enabled must be true when run_enabled=true")
-	}
-	if f.CanaryPercent <= 0 {
-		return fmt.Errorf("param_sync.canary_percent must be greater than 0 when run_enabled=true")
-	}
-	return nil
-}
-
-func (f FeatureFlags) EnabledForDevice(deviceID string) bool {
-	if !f.RunEnabled || f.CanaryPercent <= 0 {
-		return false
-	}
-	if f.CanaryPercent >= 100 {
-		return true
-	}
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(deviceID))
-	return int(h.Sum64()%100) < f.CanaryPercent
 }

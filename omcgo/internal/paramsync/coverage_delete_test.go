@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -99,6 +100,60 @@ func TestBuildFullSyncReconcileDeleteKeepsSQLAndBindCountBounded(t *testing.T) {
 	require.Less(t, len(sql), 500, "mapping cardinality must not expand SQL text")
 	require.Len(t, args, 4, "device, exact array, runtime regex, and run are the only binds")
 	require.Len(t, args[1], 400)
+}
+
+func TestBuildPartialSyncReconcileDeleteScopesEmptyObjectResponse(t *testing.T) {
+	deviceID := uuid.New()
+	runID := uuid.New()
+	runStartedAt := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+	neighborPath := "Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell."
+	sql, args, ok, err := buildPartialSyncReconcileDelete(deviceID, runID, runStartedAt, []CoverageScope{{
+		Path: neighborPath, Complete: true, Subtree: true,
+		Mappings: []FrozenMapping{{
+			StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.Enable",
+			IsStorable:   true,
+		}},
+	}})
+
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Contains(t, sql, "DELETE FROM device_parameters")
+	require.Contains(t, sql, "parameter_path LIKE")
+	require.Contains(t, sql, "last_updated_at <=")
+	require.Contains(t, sql, "NOT EXISTS")
+	require.Equal(t, []string{neighborPath + "%"}, args[1])
+	require.Contains(t, args, runStartedAt)
+	require.Contains(t, args, runID)
+}
+
+func TestBuildPartialSyncReconcileDeleteKeepsSQLAndBindCountBounded(t *testing.T) {
+	coverage := make([]CoverageScope, 1000)
+	for i := range coverage {
+		coverage[i] = CoverageScope{
+			Path: fmt.Sprintf("Device.Table.%d.", i), Complete: true, Subtree: true,
+		}
+	}
+
+	sql, args, ok, err := buildPartialSyncReconcileDelete(uuid.New(), uuid.New(), time.Now(), coverage)
+
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Less(t, len(sql), 500, "coverage cardinality must not expand SQL text")
+	require.Len(t, args, 4, "device, prefix array, start time, and run are the only binds")
+	require.Len(t, args[1], 1000)
+}
+
+func TestBuildPartialSyncReconcileDeleteDoesNotDeleteLeafOrIncompleteObject(t *testing.T) {
+	deviceID := uuid.New()
+	runID := uuid.New()
+	coverage := []CoverageScope{
+		{Path: "Device.Radio.1.Enable", Complete: false, Subtree: false},
+		{Path: "Device.Radio.1.", Complete: false, Subtree: true},
+	}
+
+	_, _, ok, err := buildPartialSyncReconcileDelete(deviceID, runID, time.Now(), coverage)
+	require.NoError(t, err)
+	assert.False(t, ok)
 }
 
 func TestRecoveredPrivateLeafMarksOnlyItsFrozenStandardCoverageIncomplete(t *testing.T) {

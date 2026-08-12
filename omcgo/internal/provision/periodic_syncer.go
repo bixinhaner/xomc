@@ -3,7 +3,6 @@ package provision
 import (
 	"context"
 	"math/rand"
-	"strings"
 	"sync"
 	"time"
 
@@ -40,9 +39,8 @@ type ReleaseSyncStarter interface {
 // PeriodicSyncer 周期性参数同步兜底（T-0124 设计 §2）。
 //
 // 按 Policy.Snapshot().Interval 扫描 active 设备中 last_param_sync_at NULL 或
-// 过期的，逐个调 StartPathBSync(WithReason("periodic"))。该入口会先提交
-// durable parameter_sync_*，旧 sync-gpv Path B 仅作为临时兜底，待
-// param_sync_running 稳定后删除。
+// 过期的，逐个调 StartPathBSync(WithReason("periodic"))，统一提交到
+// durable parameter_sync_* 数据面。
 //
 // 本同步作为"配置漂移检测"的兜底链路（事件驱动链路 device_online / firmware_changed /
 // manual 已覆盖大部分场景；本兜底覆盖"长期在线无变化但本地被改过参数"的盲点）。
@@ -61,18 +59,10 @@ type PeriodicSyncer struct {
 	policy *PeriodicSyncPolicy
 	logger *zap.Logger
 
-	paramSyncRoutingMode string
-	releaseLister        ReleaseCandidateLister
-	releaseStarter       ReleaseSyncStarter
-	releaseCampaignID    uuid.UUID
-	releaseStaggerDelay  func(time.Duration) time.Duration
-}
-
-// SetParamSyncRoutingMode is kept for provider compatibility. Periodic sync is
-// an allowed automatic entry and must still call StartPathBSync so the durable
-// parameter_sync path can accept it before any legacy fallback decision.
-func (p *PeriodicSyncer) SetParamSyncRoutingMode(mode string) {
-	p.paramSyncRoutingMode = strings.TrimSpace(mode)
+	releaseLister       ReleaseCandidateLister
+	releaseStarter      ReleaseSyncStarter
+	releaseCampaignID   uuid.UUID
+	releaseStaggerDelay func(time.Duration) time.Duration
 }
 
 func (p *PeriodicSyncer) SetReleaseSync(
@@ -200,8 +190,7 @@ func (p *PeriodicSyncer) runOnce(ctx context.Context, snap PeriodicSyncSnapshot)
 }
 
 func (p *PeriodicSyncer) runReleaseOnce(ctx context.Context, snap PeriodicSyncSnapshot) bool {
-	if p.paramSyncRoutingMode != "durable" ||
-		p.releaseLister == nil ||
+	if p.releaseLister == nil ||
 		p.releaseStarter == nil ||
 		p.releaseCampaignID == uuid.Nil {
 		return false

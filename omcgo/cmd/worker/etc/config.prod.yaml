@@ -42,14 +42,6 @@ pm_redis:
   db: 0
   pool_size: 100
 
-# Reliable parameter-sync data plane. Production requires migration 000021.
-param_sync:
-  run_enabled: true
-  result_consumer_enabled: true
-  staging_enabled: true
-  canary_percent: 100
-  legacy_fallback_enabled: false
-
 nats:
   url: "nats://nats:4222"
   max_reconnect: -1
