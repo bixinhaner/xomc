@@ -640,6 +640,11 @@ func lookupWANMAC(paramValues map[string]string) (string, bool) {
 	if v, ok := paramValues["Device.Ethernet.Interface.MACAddress"]; ok && v != "" {
 		return v, true
 	}
+	// 部分 BM 固件会把参数模型的实例占位符原样上报并持久化，而不是展开成
+	// 数字实例。该值仍是设备明确上报的接口 MAC，应在数字实例遍历前识别。
+	if v, ok := paramValues["Device.Ethernet.Interface.{i}.MACAddress"]; ok && v != "" {
+		return v, true
+	}
 
 	candidates := make([]ethernetInterfaceCandidate, 0)
 	for path, mac := range paramValues {
