@@ -176,6 +176,17 @@ func (r *PgRepository) CreateDraftVersion(
 func buildLifecycleImpactQuery(
 	geofenceID uuid.UUID,
 ) (string, []any, error) {
+	deactivationCountQuery := lifecycleDeactivationCandidateQuery(
+		geofenceID,
+		"COUNT(DISTINCT b.device_id)",
+	)
+	deactivationSignatureQuery := lifecycleDeactivationCandidateQuery(
+		geofenceID,
+		"COALESCE(string_agg("+
+			"b.id::text || ':' || b.device_id::text || ':' || "+
+			"COALESCE(s.last_observation_version::text, ''), "+
+			"',' ORDER BY b.id), '')",
+	)
 	query, args, err := storage.Psql.
 		Select(
 			"d.id",
@@ -184,13 +195,32 @@ func buildLifecycleImpactQuery(
 			"COUNT(b.id) FILTER (WHERE b.status IN ('active','suspended'))",
 			"COUNT(DISTINCT b.device_id) FILTER "+
 				"(WHERE b.status IN ('active','suspended'))",
+			"COALESCE(string_agg("+
+				"b.id::text || ':' || b.device_id::text || ':' || b.status::text, "+
+				"',' ORDER BY b.id) FILTER "+
+				"(WHERE b.status IN ('active','suspended')), '')",
 		).
+		Column(sq.Alias(
+			deactivationCountQuery.Prefix("(").Suffix(")"),
+			"deactivation_device_count",
+		)).
+		Column(sq.Alias(
+			deactivationSignatureQuery.Prefix("(").Suffix(")"),
+			"deactivation_signature",
+		)).
 		Column(sq.Alias(
 			activeManualBindJobCountQuery().
 				Where(sq.Expr("i.geofence_id = d.id")).
 				Prefix("(").
 				Suffix(")"),
 			"active_batch_job_count",
+		)).
+		Column(sq.Alias(
+			activeManualBindJobSignatureQuery().
+				Where(sq.Expr("i.geofence_id = d.id")).
+				Prefix("(").
+				Suffix(")"),
+			"active_batch_job_signature",
 		)).
 		From("geofence_definitions d").
 		LeftJoin(
@@ -208,6 +238,18 @@ func buildLifecycleImpactQuery(
 func activeManualBindJobCountQuery() sq.SelectBuilder {
 	return sq.StatementBuilder.PlaceholderFormat(sq.Question).
 		Select("COUNT(DISTINCT i.job_id)").
+		From("geofence_batch_items i").
+		Join("async_jobs j ON j.id = i.job_id").
+		Where(sq.Eq{"j.job_type": ManualBindJobType}).
+		Where(sq.Eq{"j.status": []string{"pending", "running"}}).
+		Where(sq.Expr("j.payload->>'geofence_id' = i.geofence_id::text"))
+}
+
+func activeManualBindJobSignatureQuery() sq.SelectBuilder {
+	return sq.StatementBuilder.PlaceholderFormat(sq.Question).
+		Select(
+			"COALESCE(string_agg(DISTINCT j.id::text, ',' ORDER BY j.id::text), '')",
+		).
 		From("geofence_batch_items i").
 		Join("async_jobs j ON j.id = i.job_id").
 		Where(sq.Eq{"j.job_type": ManualBindJobType}).
@@ -292,8 +334,32 @@ func buildListLifecycleBindingDeviceIDsQuery(
 func buildLifecycleDeactivationCandidatesQuery(
 	geofenceID uuid.UUID,
 ) (string, []any, error) {
-	query, args, err := storage.Psql.
-		Select("b.device_id", "d.serial_number").
+	query, args, err := lifecycleDeactivationCandidateQuery(
+		geofenceID,
+		"b.id",
+		"b.device_id",
+		"d.serial_number",
+		"s.last_observation_version",
+	).
+		OrderBy("b.id").
+		Suffix("FOR UPDATE OF s").
+		PlaceholderFormat(sq.Dollar).
+		ToSql()
+	if err != nil {
+		return "", nil, fmt.Errorf(
+			"build lifecycle deactivation candidates: %w",
+			err,
+		)
+	}
+	return query, args, nil
+}
+
+func lifecycleDeactivationCandidateQuery(
+	geofenceID uuid.UUID,
+	columns ...string,
+) sq.SelectBuilder {
+	return sq.StatementBuilder.PlaceholderFormat(sq.Question).
+		Select(columns...).
 		From("device_geofence_bindings b").
 		Join("device_geofence_states s ON s.binding_id = b.id").
 		Join("devices d ON d.id = b.device_id").
@@ -308,17 +374,7 @@ func buildLifecycleDeactivationCandidatesQuery(
 		Where(sq.Expr(
 			"gv.policy_json ->> 'exit_action' = ?",
 			string(ActionLevelDeactivate),
-		)).
-		OrderBy("b.id").
-		Suffix("FOR UPDATE OF s").
-		ToSql()
-	if err != nil {
-		return "", nil, fmt.Errorf(
-			"build lifecycle deactivation candidates: %w",
-			err,
-		)
-	}
-	return query, args, nil
+		))
 }
 
 func buildUpdateDefinitionStatusQuery(
@@ -411,7 +467,11 @@ func getLifecycleImpact(
 		&impact.CurrentStatus,
 		&impact.BindingCount,
 		&impact.DeviceCount,
+		&impact.bindingSignature,
+		&impact.DeactivationDeviceCount,
+		&impact.deactivationSignature,
 		&impact.ActiveBatchJobCount,
+		&impact.activeBatchJobSignature,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return LifecycleImpact{}, commonerrors.ErrNotFound
@@ -547,6 +607,7 @@ func (r *PgRepository) TransitionDefinition(
 	}
 	var bindingCount int64
 	devices := make(map[uuid.UUID]struct{})
+	bindingSignatureParts := make([]string, 0)
 	for rows.Next() {
 		var bindingID, deviceID uuid.UUID
 		var status BindingStatus
@@ -556,6 +617,10 @@ func (r *PgRepository) TransitionDefinition(
 		}
 		bindingCount++
 		devices[deviceID] = struct{}{}
+		bindingSignatureParts = append(
+			bindingSignatureParts,
+			fmt.Sprintf("%s:%s:%s", bindingID, deviceID, status),
+		)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -563,10 +628,14 @@ func (r *PgRepository) TransitionDefinition(
 	}
 	rows.Close()
 	type lifecycleDeactivationCandidate struct {
+		bindingID    uuid.UUID
 		deviceID     uuid.UUID
 		serialNumber string
+		observation  *int64
 	}
 	deactivationCandidates := make([]lifecycleDeactivationCandidate, 0)
+	deactivationDevices := make(map[uuid.UUID]struct{})
+	deactivationSignatureParts := make([]string, 0)
 	if target == DefinitionStatusDisabled || target == DefinitionStatusArchived {
 		candidateSQL, candidateArgs, err :=
 			buildLifecycleDeactivationCandidatesQuery(geofenceID)
@@ -580,13 +649,29 @@ func (r *PgRepository) TransitionDefinition(
 		for candidateRows.Next() {
 			var candidate lifecycleDeactivationCandidate
 			if err := candidateRows.Scan(
+				&candidate.bindingID,
 				&candidate.deviceID,
 				&candidate.serialNumber,
+				&candidate.observation,
 			); err != nil {
 				candidateRows.Close()
 				return fmt.Errorf("scan lifecycle deactivation candidate: %w", err)
 			}
 			deactivationCandidates = append(deactivationCandidates, candidate)
+			deactivationDevices[candidate.deviceID] = struct{}{}
+			observation := ""
+			if candidate.observation != nil {
+				observation = fmt.Sprintf("%d", *candidate.observation)
+			}
+			deactivationSignatureParts = append(
+				deactivationSignatureParts,
+				fmt.Sprintf(
+					"%s:%s:%s",
+					candidate.bindingID,
+					candidate.deviceID,
+					observation,
+				),
+			)
 		}
 		if err := candidateRows.Err(); err != nil {
 			candidateRows.Close()
@@ -607,18 +692,38 @@ func (r *PgRepository) TransitionDefinition(
 	).Scan(&activeBatchJobCount); err != nil {
 		return lifecycleDatabaseError("count active manual bind jobs", err)
 	}
+	activeBatchJobSignatureSQL, activeBatchJobSignatureArgs, err :=
+		activeManualBindJobSignatureQuery().
+			Where(sq.Eq{"i.geofence_id": geofenceID}).
+			PlaceholderFormat(sq.Dollar).
+			ToSql()
+	if err != nil {
+		return fmt.Errorf("build active manual bind job signature: %w", err)
+	}
+	var activeBatchJobSignature string
+	if err := tx.QueryRow(
+		ctx,
+		activeBatchJobSignatureSQL,
+		activeBatchJobSignatureArgs...,
+	).Scan(&activeBatchJobSignature); err != nil {
+		return lifecycleDatabaseError("get active manual bind job signature", err)
+	}
 	if target == DefinitionStatusArchived && activeBatchJobCount != 0 {
 		return ErrActiveBatchJobs
 	}
 	impact := LifecycleImpact{
-		GeofenceID:          geofenceID,
-		CurrentVersionID:    currentVersionID,
-		CurrentStatus:       currentStatus,
-		TargetStatus:        target,
-		BindingCount:        bindingCount,
-		DeviceCount:         int64(len(devices)),
-		ActiveBatchJobCount: activeBatchJobCount,
-		PreviewFingerprint:  expectedFingerprint,
+		GeofenceID:              geofenceID,
+		CurrentVersionID:        currentVersionID,
+		CurrentStatus:           currentStatus,
+		TargetStatus:            target,
+		BindingCount:            bindingCount,
+		DeviceCount:             int64(len(devices)),
+		DeactivationDeviceCount: int64(len(deactivationDevices)),
+		ActiveBatchJobCount:     activeBatchJobCount,
+		PreviewFingerprint:      expectedFingerprint,
+		bindingSignature:        canonicalLifecycleSignature(bindingSignatureParts),
+		deactivationSignature:   canonicalLifecycleSignature(deactivationSignatureParts),
+		activeBatchJobSignature: activeBatchJobSignature,
 	}
 	if lifecyclePreviewFingerprint(impact) != expectedFingerprint {
 		return ErrStaleLifecyclePreview
@@ -705,6 +810,11 @@ func (r *PgRepository) TransitionDefinition(
 		return fmt.Errorf("commit geofence lifecycle transition: %w", err)
 	}
 	return nil
+}
+
+func canonicalLifecycleSignature(parts []string) string {
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
 }
 
 func (r *PgRepository) UpdateDefinitionName(

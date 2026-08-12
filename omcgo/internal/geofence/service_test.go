@@ -563,6 +563,27 @@ func TestService_PreviewDefinitionTransitionReturnsImpactFingerprint(t *testing.
 	assert.Equal(t, int64(3), impact.DeviceCount)
 }
 
+func TestService_EnablePreviewExcludesDeactivationImpact(t *testing.T) {
+	geofenceID := uuid.New()
+	repository := &fakeRepository{lifecycleImpact: LifecycleImpact{
+		GeofenceID:              geofenceID,
+		CurrentStatus:           DefinitionStatusDisabled,
+		DeactivationDeviceCount: 2,
+		deactivationSignature:   "candidate-a,candidate-b",
+	}}
+	service := NewService(repository, nil)
+
+	impact, err := service.PreviewDefinitionTransition(
+		context.Background(),
+		geofenceID,
+		DefinitionStatusEnabled,
+	)
+
+	require.NoError(t, err)
+	assert.Zero(t, impact.DeactivationDeviceCount)
+	assert.Empty(t, impact.deactivationSignature)
+}
+
 func TestService_TransitionDefinitionRequiresReasonAndValidPreview(t *testing.T) {
 	geofenceID := uuid.New()
 	repository := &fakeRepository{}

@@ -467,7 +467,8 @@
   gap: 8px;
   margin: 0;
   padding: 4px 12px 12px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   list-style: none;
 }
 

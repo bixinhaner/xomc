@@ -79,20 +79,47 @@ func TestLifecyclePreviewFingerprintChangesWithActiveBatchJobs(t *testing.T) {
 	)
 }
 
+func TestLifecyclePreviewFingerprintChangesWithActionableImpact(t *testing.T) {
+	base := LifecycleImpact{
+		GeofenceID:              uuid.New(),
+		CurrentStatus:           DefinitionStatusEnabled,
+		TargetStatus:            DefinitionStatusDisabled,
+		BindingCount:            1,
+		DeviceCount:             1,
+		DeactivationDeviceCount: 1,
+		bindingSignature:        "binding-a:device-a:active",
+		deactivationSignature:   "binding-a:device-a:7",
+	}
+
+	changedCandidate := base
+	changedCandidate.deactivationSignature = "binding-b:device-b:7"
+	require.NotEqual(
+		t,
+		lifecyclePreviewFingerprint(base),
+		lifecyclePreviewFingerprint(changedCandidate),
+	)
+
+	changedBinding := base
+	changedBinding.bindingSignature = "binding-b:device-b:active"
+	require.NotEqual(
+		t,
+		lifecyclePreviewFingerprint(base),
+		lifecyclePreviewFingerprint(changedBinding),
+	)
+}
+
 func TestLifecycleImpactQueryBindsGeofenceAfterActiveJobFilters(t *testing.T) {
 	geofenceID := uuid.New()
 	query, args, err := buildLifecycleImpactQuery(geofenceID)
 	require.NoError(t, err)
 
-	assert.Contains(t, query, "j.job_type = $1")
-	assert.Contains(t, query, "j.status IN ($2,$3)")
-	assert.Contains(t, query, "WHERE d.id = $4")
-	require.Equal(t, []any{
-		ManualBindJobType,
-		"pending",
-		"running",
-		geofenceID.String(),
-	}, args)
+	assert.Contains(t, query, "j.job_type = $9")
+	assert.Contains(t, query, "j.status IN ($10,$11)")
+	assert.Contains(t, query, "WHERE d.id = $15")
+	require.Len(t, args, 15)
+	assert.Equal(t, geofenceID.String(), args[0])
+	assert.Equal(t, geofenceID.String(), args[4])
+	assert.Equal(t, geofenceID.String(), args[14])
 }
 
 func TestGetLifecycleImpactDoesNotExposePostgresError(t *testing.T) {

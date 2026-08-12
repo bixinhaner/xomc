@@ -327,6 +327,10 @@ func (s *Service) PreviewDefinitionTransition(
 		return LifecycleImpact{}, err
 	}
 	impact.TargetStatus = target
+	if target != DefinitionStatusDisabled && target != DefinitionStatusArchived {
+		impact.DeactivationDeviceCount = 0
+		impact.deactivationSignature = ""
+	}
 	impact.PreviewFingerprint = lifecyclePreviewFingerprint(impact)
 	return impact, nil
 }

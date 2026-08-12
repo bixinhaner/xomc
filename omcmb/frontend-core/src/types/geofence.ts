@@ -175,6 +175,7 @@ export interface GeofenceLifecycleImpact {
   targetStatus: GeofenceDefinitionStatus;
   bindingCount: number;
   deviceCount: number;
+  deactivationDeviceCount: number;
   activeBatchJobCount: number;
   previewFingerprint: string;
 }

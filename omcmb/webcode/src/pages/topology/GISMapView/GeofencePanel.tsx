@@ -5,6 +5,7 @@ import {
   Button,
   Checkbox,
   Descriptions,
+  Form,
   Input,
   Modal,
   Select,
@@ -68,6 +69,36 @@ interface PendingSettingsToggle {
   enabled: boolean;
   input: UpdateGeofenceSettingsInput;
   preview: GeofenceSettingsPreview;
+}
+
+function lifecycleImpactItems(pending: PendingTransition) {
+  switch (pending.target) {
+    case 'enabled':
+      return [[
+        'geofence.lifecycle.reevaluationDeviceCount',
+        pending.impact.deviceCount,
+      ]] as const;
+    case 'disabled':
+      return [
+        ['geofence.lifecycle.boundDeviceCount', pending.impact.deviceCount],
+        [
+          'geofence.lifecycle.deactivationDeviceCount',
+          pending.impact.deactivationDeviceCount,
+        ],
+      ] as const;
+    case 'archived':
+      return [
+        ['geofence.lifecycle.removedBindingCount', pending.impact.bindingCount],
+        [
+          'geofence.lifecycle.deactivationDeviceCount',
+          pending.impact.deactivationDeviceCount,
+        ],
+        [
+          'geofence.lifecycle.activeJobs',
+          pending.impact.activeBatchJobCount,
+        ],
+      ] as const;
+  }
 }
 
 export default function GeofencePanel({
@@ -449,20 +480,40 @@ export default function GeofencePanel({
                           </Button>
                         )}
                         {definition.status === 'enabled' && (
-                          <Button
-                            size="small"
-                            type="text"
-                            danger
-                            icon={<PauseCircleOutlined aria-hidden="true" />}
-                            disabled={!canManage}
-                            onClick={() =>
-                              void startTransition(item, 'disabled')
-                            }
-                          >
-                            {intl.formatMessage({
-                              id: 'geofence.action.disable',
-                            })}
-                          </Button>
+                          <>
+                            <Button
+                              size="small"
+                              type="text"
+                              danger
+                              icon={<PauseCircleOutlined aria-hidden="true" />}
+                              disabled={!canManage}
+                              onClick={() =>
+                                void startTransition(item, 'disabled')
+                              }
+                            >
+                              {intl.formatMessage({
+                                id: 'geofence.action.disable',
+                              })}
+                            </Button>
+                            <Tooltip
+                              title={intl.formatMessage({
+                                id: 'geofence.action.deleteRequiresDisable',
+                              })}
+                            >
+                              <span>
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  danger
+                                  aria-label={intl.formatMessage({
+                                    id: 'geofence.action.delete',
+                                  })}
+                                  icon={<DeleteOutlined aria-hidden="true" />}
+                                  disabled
+                                />
+                              </span>
+                            </Tooltip>
+                          </>
                         )}
                         {definition.status === 'disabled' && (
                           <>
@@ -491,7 +542,7 @@ export default function GeofencePanel({
                               }
                             >
                               {intl.formatMessage({
-                                id: 'geofence.action.archive',
+                                id: 'geofence.action.delete',
                               })}
                             </Button>
                           </>
@@ -636,23 +687,43 @@ export default function GeofencePanel({
       >
         {pending && (
           <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-            <div
-              className="geofence-lifecycle-impact"
-              aria-label={intl.formatMessage({
-                id: 'geofence.lifecycle.previewTitle',
-              })}
-            >
-              {[
-                ['geofence.lifecycle.bindingCount', pending.impact.bindingCount],
-                ['geofence.lifecycle.deviceCount', pending.impact.deviceCount],
-                ['geofence.lifecycle.activeJobs', pending.impact.activeBatchJobCount],
-              ].map(([label, value]) => (
-                <div className="geofence-lifecycle-impact-item" key={String(label)}>
-                  <span>{intl.formatMessage({ id: String(label) })}</span>
-                  <strong>{value}</strong>
-                </div>
-              ))}
-            </div>
+            {pending.target === 'disabled' &&
+            pending.impact.deviceCount === 0 &&
+            pending.impact.deactivationDeviceCount === 0 ? (
+              <Alert
+                type="info"
+                showIcon
+                title={intl.formatMessage({
+                  id: 'geofence.lifecycle.zeroImpact',
+                })}
+              />
+            ) : (
+              <div
+                className="geofence-lifecycle-impact"
+                aria-label={intl.formatMessage({
+                  id: 'geofence.lifecycle.previewTitle',
+                })}
+              >
+                {lifecycleImpactItems(pending).map(([label, value]) => (
+                  <div
+                    className="geofence-lifecycle-impact-item"
+                    key={label}
+                  >
+                    <span>{intl.formatMessage({ id: label })}</span>
+                    <strong>{value}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
+            {pending.target === 'enabled' && (
+              <Alert
+                type="info"
+                showIcon
+                title={intl.formatMessage({
+                  id: 'geofence.message.enableDoesNotReactivate',
+                })}
+              />
+            )}
             {pending.target === 'disabled' && (
               <Alert
                 type="warning"
@@ -681,17 +752,24 @@ export default function GeofencePanel({
                   })}
                 />
               )}
-            <Input.TextArea
-              aria-label={intl.formatMessage({
-                id: 'geofence.field.reason',
-              })}
-              value={reason}
-              rows={3}
-              placeholder={intl.formatMessage({
-                id: 'geofence.lifecycle.reasonRequired',
-              })}
-              onChange={(event) => setReason(event.target.value)}
-            />
+            <Form layout="vertical" requiredMark>
+              <Form.Item
+                label={intl.formatMessage({ id: 'geofence.field.reason' })}
+                required
+              >
+                <Input.TextArea
+                  aria-label={intl.formatMessage({
+                    id: 'geofence.field.reason',
+                  })}
+                  value={reason}
+                  rows={3}
+                  placeholder={intl.formatMessage({
+                    id: 'geofence.lifecycle.reasonRequired',
+                  })}
+                  onChange={(event) => setReason(event.target.value)}
+                />
+              </Form.Item>
+            </Form>
           </Space>
         )}
       </Modal>

@@ -613,6 +613,7 @@ describe('geofenceApi write contract', () => {
             target_status: target,
             binding_count: 12,
             device_count: 10,
+            deactivation_device_count: 4,
             active_batch_job_count: 0,
             preview_fingerprint: 'fingerprint-1',
           },
@@ -649,6 +650,7 @@ describe('geofenceApi write contract', () => {
         currentStatus: 'disabled',
         targetStatus: target,
         bindingCount: 12,
+        deactivationDeviceCount: 4,
         activeBatchJobCount: 0,
       });
     },
