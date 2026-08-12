@@ -369,6 +369,14 @@ func TestLookupWANMAC(t *testing.T) {
 			ok:   true,
 		},
 		{
+			name: "literal instance template falls back to its mac",
+			paths: map[string]string{
+				"Device.Ethernet.Interface.{i}.MACAddress": "48:bf:74:37:84:e2",
+			},
+			want: "48:bf:74:37:84:e2",
+			ok:   true,
+		},
+		{
 			name: "name based WAN hint wins when port type missing",
 			paths: map[string]string{
 				"Device.Ethernet.Interface.1.MACAddress": "00:00:00:00:00:01",
