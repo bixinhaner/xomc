@@ -1,14 +1,18 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="BM" totalEntries="542">
+<parameterModel paramModel="BM" totalEntries="585">
     <objects>
         <object name="Device.DeviceInfo.EU." standardPath="Device.DeviceInfo.EU." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.DeviceInfo.EU.{i}.RU." standardPath="Device.DeviceInfo.EU.{i}.RU." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FAP.Ipsec." standardPath="Device.FAP.Ipsec." access="READ_WRITE" changeApplies="Immediate"/>
-        <object name="Device.IP.Interface.{i}." standardPath="Device.Ethernet.Interface.{i}." access="READ_WRITE" changeApplies="Immediate"/>
-        <object name="Device.IP.Interface.{i}.IPv4Address.{i}." standardPath="Device.Ethernet.Interface.{i}.IPv4Address.{i}." access="READ_WRITE" changeApplies="Immediate"/>
-        <object name="Device.IP.Interface.{i}.IPv6Address.{i}." standardPath="Device.Ethernet.Interface.{i}.IPv6Address.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Ethernet.Interface.{i}." standardPath="Device.Ethernet.Interface.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Ethernet.Interface.{i}.IPv4Address.{i}." standardPath="Device.Ethernet.Interface.{i}.IPv4Address.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Ethernet.Interface.{i}.IPv6Address.{i}." standardPath="Device.Ethernet.Interface.{i}.IPv6Address.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Ethernet.Interface.{i}.VlanInterface.{i}." standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}." standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}." standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.DeviceInfo.OpticalModInfo.{i}." standardPath="Device.DeviceInfo.OpticalModInfo.{i}." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell." access="READ_WRITE" changeApplies="Immediate"/>
@@ -18,6 +22,30 @@
         <object name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity." access="READ_ONLY" changeApplies="Immediate"/>
     </objects>
     <parameters>
+        <param name="Device.DeviceInfo.LTE_WAN_IFNAME" standardPath="Device.DeviceInfo.LTE_WAN_IFNAME" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.STATIC_DNS_ENABLE" standardPath="Device.DeviceInfo.STATIC_DNS_ENABLE" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumLabels="Dynamic DNS,Static DNS" enumValues="0,1"/>
+        <param name="Device.DeviceInfo.StaticDns" standardPath="Device.DeviceInfo.StaticDns" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.DhcpDns" standardPath="Device.DeviceInfo.DhcpDns" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.X_COM_ETH0_CONFIG_MTU" standardPath="Device.DeviceInfo.X_COM_ETH0_CONFIG_MTU" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="700" max="1600"/>
+        <param name="Device.DeviceInfo.LTE_S1C_BIND_MIB" standardPath="Device.DeviceInfo.LTE_S1C_BIND_MIB" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.LTE_S1U_BIND_MIB" standardPath="Device.DeviceInfo.LTE_S1U_BIND_MIB" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.LTE_X2_BIND_MIB" standardPath="Device.DeviceInfo.LTE_X2_BIND_MIB" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.LTE_TR069_BIND_MIB" standardPath="Device.DeviceInfo.LTE_TR069_BIND_MIB" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.LTE_LBO_BIND_MIB" standardPath="Device.DeviceInfo.LTE_LBO_BIND_MIB" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.identifier" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.identifier" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.connector" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.connector" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.transmissionMedia" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.transmissionMedia" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.encodeing" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.encodeing" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.linkLength" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.linkLength" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.vendorName" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.vendorName" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.vendorPn" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.vendorPn" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.wavelength" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.wavelength" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.options" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.options" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.bitRate" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.bitRate" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.txOpticalOutputPower" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.txOpticalOutputPower" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.rxOpticalInputPower" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.rxOpticalInputPower" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.OpticalModInfo.{i}.linkStatus" standardPath="Device.DeviceInfo.OpticalModInfo.{i}.linkStatus" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.WebConfig.WanVisitEnable" standardPath="Device.WebConfig.WanVisitEnable" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumLabels="ON,OFF" enumValues="1,0"/>
         <param name="Device.DeviceInfo.3GPPSpecVersion" standardPath="Device.DeviceInfo.3GPPSpecVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" max="64" min="0"/>
         <param name="Device.DeviceInfo.AmbrLimitSwitch" standardPath="Device.DeviceInfo.AmbrLimitSwitch" access="READ_WRITE" type="STRING" changeApplies="Immediate" defaultValue="0"/>
         <param name="Device.DeviceInfo.AntennaInfo.Azimuth" standardPath="Device.DeviceInfo.AntennaInfo.Azimuth" access="READ_WRITE" type="INT" changeApplies="Immediate" max="359" min="0"/>
@@ -241,14 +269,29 @@
         <param name="Device.FaultMgmt.ExpeditedEvent.{i}.SpecificProblem" standardPath="Device.FaultMgmt.ExpeditedEvent.{i}.SpecificProblem" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="128"/>
         <param name="Device.HaltReason.DetailReason" standardPath="Device.HaltReason.DetailReason" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.HaltReason.MainReason" standardPath="Device.HaltReason.MainReason" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.IP.Interface.{i}.Enable" standardPath="Device.Ethernet.Interface.{i}.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
-        <param name="Device.IP.Interface.{i}.IPv4Address.{i}.AddressingType" standardPath="Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress" standardPath="Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress" access="READ_WRITE" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5]).(\d{1,2}|1\d\d|2[0-4]\d|25[0-5]).(\d{1,2}|1\d\d|2[0-4]\d|25[0-5]).(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
-        <param name="Device.IP.Interface.{i}.IPv4Address.{i}.SubnetMask" standardPath="Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.IP.Interface.{i}.IPv6Address.{i}.IPAddress" standardPath="Device.Ethernet.Interface.{i}.IPv6Address.{i}.IPAddress" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.IP.Interface.{i}.IPv6Address.{i}.Origin" standardPath="Device.Ethernet.Interface.{i}.IPv6Address.{i}.Origin" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.IP.Interface.{i}.Name" standardPath="Device.Ethernet.Interface.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="64"/>
-        <param name="Device.IP.Interface.{i}.Status" standardPath="Device.Ethernet.Interface.{i}.Status" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.Enable" standardPath="Device.Ethernet.Interface.{i}.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType" standardPath="Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress" standardPath="Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress" access="READ_WRITE" type="STRING" changeApplies="Immediate" validationPattern="/^(\d{1,2}|1\d\d|2[0-4]\d|25[0-5]).(\d{1,2}|1\d\d|2[0-4]\d|25[0-5]).(\d{1,2}|1\d\d|2[0-4]\d|25[0-5]).(\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$/"/>
+        <param name="Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask" standardPath="Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.IPv4Address.{i}.DefaultGateway" standardPath="Device.Ethernet.Interface.{i}.IPv4Address.{i}.DefaultGateway" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.IPv6Address.{i}.IPAddress" standardPath="Device.Ethernet.Interface.{i}.IPv6Address.{i}.IPAddress" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.IPv6Address.{i}.Origin" standardPath="Device.Ethernet.Interface.{i}.IPv6Address.{i}.Origin" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.IPv6Address.{i}.PrefixLength" standardPath="Device.Ethernet.Interface.{i}.IPv6Address.{i}.PrefixLength" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="64" max="128"/>
+        <param name="Device.Ethernet.Interface.{i}.IPv6Address.{i}.DefaultGateway" standardPath="Device.Ethernet.Interface.{i}.IPv6Address.{i}.DefaultGateway" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.Name" standardPath="Device.Ethernet.Interface.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="64"/>
+        <param name="Device.Ethernet.Interface.{i}.Status" standardPath="Device.Ethernet.Interface.{i}.Status" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.interfaceType" standardPath="Device.Ethernet.Interface.{i}.interfaceType" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.Name" standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.Name" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="13"/>
+        <param name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.Id" standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.Id" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="2" max="4094"/>
+        <param name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.Enable" standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.AddressingType" standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.AddressingType" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.IPAddress" standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.IPAddress" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.SubnetMask" standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.SubnetMask" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.DefaultGateway" standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.DefaultGateway" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.Origin" standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.Origin" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.IPAddress" standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.IPAddress" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.PrefixLength" standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.PrefixLength" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="64" max="128"/>
+        <param name="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.DefaultGateway" standardPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.DefaultGateway" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.ManagementServer.ConnectionRequestURL" standardPath="Device.ManagementServer.ConnectionRequestURL" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256"/>
         <param name="Device.ManagementServer.NATDetected" standardPath="Device.ManagementServer.NATDetected" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.ManagementServer.ParameterKey" standardPath="Device.ManagementServer.ParameterKey" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="32"/>

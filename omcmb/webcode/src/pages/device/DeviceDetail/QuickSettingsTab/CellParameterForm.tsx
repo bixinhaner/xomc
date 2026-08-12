@@ -67,6 +67,7 @@ import {
   refreshDeviceParameterSearchQueries,
 } from './parameterSearchRefresh';
 import { useT } from '@/hooks/useT';
+import { buildInterfaceBindingOptions } from './interfaceBindingOptions';
 
 const { Text } = Typography;
 const ERROR_FEEDBACK_DURATION_SECONDS = 2;
@@ -78,6 +79,7 @@ const BITMASK_SELECT_PATHS = new Set([
 ]);
 const BM_PPS_TIME_MODE_PATH = 'Device.FAP.Synchronization.PpsTimeMode';
 const BM_GNSS_SYNC_SOURCE_PATH = 'Device.FAP.GNSS.SyncSource';
+const BM_INTERFACE_BINDING_PARAMS = new Set(['S1CBind', 'S1UBind', 'X2Bind', 'Tr069Bind', 'LboBind']);
 const BM_PTP_CONFIG_PREFIX = 'Device.FAP.PTP1588.';
 const BM_GNSS_SYNC_SOURCE_BITS = {
   GPS: '1',
@@ -1293,6 +1295,8 @@ export default function CellParameterForm({
   const watchedPpsTimeMode = Form.useWatch('PpsTimeMode', form);
   const watchedDeviceTimeEnable = Form.useWatch('Enable', form);
   const watchedConnectType = Form.useWatch('ConnectType', form);
+  const watchedStaticDnsEnable = Form.useWatch('StaticDnsEnable', form);
+  const watchedWanInterface = Form.useWatch('WanInterface', form);
   const dlSubCarrierSpacing = Form.useWatch('DLSubCarrierSpacing', form);
   const ulSubCarrierSpacing = Form.useWatch('ULSubCarrierSpacing', form);
   const [deviceTimeShowNtpServerFields, setDeviceTimeShowNtpServerFields] = useState(true);
@@ -1420,7 +1424,13 @@ export default function CellParameterForm({
   const { data: ethernetSchemaResp } = useParameterSchema(
     deviceId,
     'Device.Ethernet.Interface.',
-    active && (group.id === 'gsm-abis' || group.id === 'gnb-core'),
+    active && (group.id === 'gsm-abis' || group.id === 'gnb-core' || group.id === 'bm-network-settings'),
+  );
+  const interfaceBindingOptions = useMemo(
+    () => group.id === 'bm-network-settings'
+      ? buildInterfaceBindingOptions(ethernetSchemaResp?.parameters ?? [], String(watchedWanInterface ?? ''))
+      : [],
+    [ethernetSchemaResp?.parameters, group.id, watchedWanInterface],
   );
   const { data: mmeIpPlmnParams } = useSearchParameters(
     deviceId,
@@ -1545,6 +1555,9 @@ export default function CellParameterForm({
       });
     }
     if (!isDeviceTimeGroup) {
+      if (group.id === 'bm-network-settings' && String(watchedStaticDnsEnable ?? '') === '0') {
+        return effectiveParams.filter((param) => param.name !== 'StaticDns');
+      }
       return effectiveParams;
     }
     return effectiveParams.filter((param) => {
@@ -1554,7 +1567,7 @@ export default function CellParameterForm({
       }
       return true;
     });
-  }, [bmPpsTimeModeParams, draft, deviceTimeShowNtpServerFields, effectiveParams, gnbSyncFapSchemaResp, isBmSyncSourceGroup, isDeviceTimeGroup, isGnbSyncSourceGroup, watchedPpsTimeMode, resolveReadPath]);
+  }, [bmPpsTimeModeParams, draft, deviceTimeShowNtpServerFields, effectiveParams, gnbSyncFapSchemaResp, group.id, isBmSyncSourceGroup, isDeviceTimeGroup, isGnbSyncSourceGroup, watchedPpsTimeMode, watchedStaticDnsEnable, resolveReadPath]);
   const visibleParamNameSet = useMemo(
     () => new Set(visibleParams.map((param) => param.name)),
     [visibleParams],
@@ -2771,9 +2784,11 @@ export default function CellParameterForm({
             // XML 驱动枚举:quicksettings <param> 上的 <option value=".." label=".."/> 优先于 schema
             // constraints。用于不宜修改 param-mapping 只想在 UI 层展示友好选项的场景
             // (如 RFEnable: 1→ON / 0→OFF)。
-            const runtimeEnumOptions = p.name === 'TR069Interface' && tr069InterfaceOptions.length > 0
-              ? tr069InterfaceOptions
-              : p.enumOptions;
+            const runtimeEnumOptions = BM_INTERFACE_BINDING_PARAMS.has(p.name) && interfaceBindingOptions.length > 0
+              ? interfaceBindingOptions
+              : p.name === 'TR069Interface' && tr069InterfaceOptions.length > 0
+                ? tr069InterfaceOptions
+                : p.enumOptions;
             const xmlEnumValues = runtimeEnumOptions?.map((o) => o.value) ?? [];
             const xmlEnumLabels = runtimeEnumOptions?.map((o) => o.label) ?? [];
             const nrCarrierBandwidthOptions = getNrCarrierBandwidthOptions(p.name, dlSubCarrierSpacing, ulSubCarrierSpacing);

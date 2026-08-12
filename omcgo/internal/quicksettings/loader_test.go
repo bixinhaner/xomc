@@ -682,6 +682,48 @@ func paramNames(group xmlGroup) []string {
 	return names
 }
 
+func TestBuiltinBM_IncludesNetworkConfiguration(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "BM.xml"))
+	require.NoError(t, err)
+
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+
+	groups := make(map[string]xmlGroup, len(doc.Groups))
+	for _, group := range doc.Groups {
+		groups[group.ID] = group
+	}
+
+	interfaces, ok := groups["gnb-network-interface"]
+	require.True(t, ok)
+	assert.Equal(t, "table", interfaces.Style)
+	assert.Equal(t, "Device.Ethernet.Interface.{i}.", interfaces.ObjectPath)
+	assert.ElementsMatch(t, []string{"Name", "Status", "InterfaceType"}, paramNames(interfaces))
+
+	for _, groupID := range []string{
+		"gnb-interface-ipv4",
+		"gnb-interface-ipv6",
+		"gnb-interface-vlan",
+		"gnb-interface-vlan-ipv4",
+		"gnb-interface-vlan-ipv6",
+	} {
+		group, exists := groups[groupID]
+		require.True(t, exists, "%s missing", groupID)
+		assert.Equal(t, "true", group.MultiInstance)
+		assert.Equal(t, "subtable", group.Style)
+	}
+
+	settings, ok := groups["bm-network-settings"]
+	require.True(t, ok)
+	assert.ElementsMatch(t, []string{
+		"WanInterface", "StaticDnsEnable", "StaticDns", "Mtu",
+		"WanVisitEnable", "S1CBind", "S1UBind", "X2Bind", "Tr069Bind", "LboBind",
+	}, paramNames(settings))
+
+	_, ok = groups["bm-sfp-information"]
+	assert.False(t, ok, "read-only SFP status belongs on the device detail page")
+}
+
 func TestBuiltinLTENeighborCellIncludesRequiredTACAndNumericConstraints(t *testing.T) {
 	for _, model := range []string{"BM", "BLQ", "MLN", "MLQ", "ENB_DEFAULT_181"} {
 		t.Run(model, func(t *testing.T) {
