@@ -75,7 +75,7 @@
     <param name="DNS1" titleZh="DNS 地址 1" titleEn="DNS Address 1" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS1"/>
     <param name="DNS2" titleZh="DNS 地址 2" titleEn="DNS Address 2" standardPath="Device.DeviceInfo.HOST_CONFIG_DNS2"/>
     <param name="MTU" titleZh="MTU" titleEn="MTU" standardPath="Device.DeviceInfo.X_COM_OMC_ETH_CONFIG_MTU" type="unsignedInt" minValue="700" maxValue="1600"/>
-    <param name="TR069Interface" titleZh="TR-069 接口绑定" titleEn="Quick Interface Binding" standardPath="Device.DeviceInfo.LTE_TR069_IFNAME"/>
+    <param name="TR069Interface" titleZh="快速接口绑定" titleEn="Quick Interface Binding" standardPath="Device.DeviceInfo.LTE_TR069_IFNAME"/>
     <param name="LmtWanEnable" titleZh="允许从 WAN 访问 LMT" titleEn="Access LMT via WAN" standardPath="Device.DeviceInfo.X_COM_LmtEnable">
       <option value="1" label="ON"/>
       <option value="0" label="OFF"/>

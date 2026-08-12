@@ -259,13 +259,17 @@ export default function FixedScalarSettingsTable({
   };
 
   const columns = useMemo<ColumnsType<TableRow>>(() => {
+    const hasEnableColumn = kind === 'wan'
+      ? rows.some((row) => Boolean(parameterByName(row.group, 'Enable')))
+      : rows.length > 0 && rows.every((row) => Boolean(parameterByName(row.group, 'Enable')));
     const effectiveColumn = {
-      title: locale === 'zh-CN' ? '是否生效' : 'Effective Or Not',
+      title: locale === 'zh-CN' ? '是否生效' : 'Enabled',
       key: 'effective',
       width: 145,
       render: (_value: unknown, row: TableRow) => {
         const param = parameterByName(row.group, 'Enable');
-        return <Text>{param ? displayValue(param, parameterValue(param, schemaByPath), schemaByPath, locale) : '-'}</Text>;
+        if (!param) return kind === 'wan' && row.index === 1 ? <Text>ON</Text> : null;
+        return <Text>{displayValue(param, parameterValue(param, schemaByPath), schemaByPath, locale)}</Text>;
       },
     };
     const operationColumn = {
@@ -294,7 +298,7 @@ export default function FixedScalarSettingsTable({
       return [
         indexColumn,
         operationColumn,
-        effectiveColumn,
+        ...(hasEnableColumn ? [effectiveColumn] : []),
         {
           title: locale === 'zh-CN' ? 'WAN 名称' : 'WAN Name',
           key: 'wanName',
@@ -334,7 +338,7 @@ export default function FixedScalarSettingsTable({
     return [
       indexColumn,
       operationColumn,
-      effectiveColumn,
+      ...(hasEnableColumn ? [effectiveColumn] : []),
       {
         title: locale === 'zh-CN' ? '目的网络' : 'Destination Network',
         key: 'destinationNetwork',
@@ -354,7 +358,7 @@ export default function FixedScalarSettingsTable({
         render: (_value: unknown, row: TableRow) => parameterValue(parameterByName(row.group, 'Gateway'), schemaByPath) || '-',
       },
     ];
-  }, [kind, locale, schemaByPath, t, updateMutation.isPending]);
+  }, [kind, locale, rows, schemaByPath, t, updateMutation.isPending]);
 
   const title = kind === 'wan'
     ? (locale === 'zh-CN' ? 'WAN 配置' : 'WAN Config')

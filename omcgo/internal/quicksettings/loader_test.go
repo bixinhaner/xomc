@@ -506,14 +506,23 @@ func TestBuiltinMLQ_IncludesIndependentPLMNList(t *testing.T) {
 		require.True(t, ok)
 		require.NotEmpty(t, group.Params)
 		var ipModePath string
+		var enablePath string
 		expectedPath := fmt.Sprintf("Device.DeviceInfo.WAN_CONFIG%d_IPMODE", index)
+		expectedEnablePath := fmt.Sprintf("Device.DeviceInfo.WAN_CONFIG%d_ENABLE", index)
 		for _, param := range group.Params {
 			if param.StandardPath == expectedPath {
 				ipModePath = param.StandardPath
-				break
+			}
+			if param.StandardPath == expectedEnablePath {
+				enablePath = param.StandardPath
 			}
 		}
 		assert.Equal(t, expectedPath, ipModePath)
+		if index == 1 {
+			assert.Empty(t, enablePath)
+		} else {
+			assert.Equal(t, expectedEnablePath, enablePath)
+		}
 	}
 }
 
@@ -569,6 +578,48 @@ func TestBuiltinBLN_QuickSettingsReferenceParamModel(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 104, checked)
+}
+
+func TestBuiltinNetworkModels_WAN1OmitsUnsupportedEnableParameter(t *testing.T) {
+	for _, model := range []string{"BLN", "BLQ", "MLN", "MLQ"} {
+		t.Run(model, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", model+".xml"))
+			require.NoError(t, err)
+
+			var doc xmlQuickSettings
+			require.NoError(t, xml.Unmarshal(data, &doc))
+
+			var enablePath string
+			for _, group := range doc.Groups {
+				if group.ID != "device-wan-1" {
+					continue
+				}
+				for _, param := range group.Params {
+					if param.StandardPath == "Device.DeviceInfo.WAN_CONFIG1_ENABLE" {
+						enablePath = param.StandardPath
+					}
+				}
+			}
+			assert.Empty(t, enablePath)
+
+			mappingData, err := os.ReadFile(filepath.Join("..", "..", "data", "param-mappings", model+".xml"))
+			require.NoError(t, err)
+			var mapping struct {
+				Params []struct {
+					StandardPath string `xml:"standardPath,attr"`
+				} `xml:"parameters>param"`
+			}
+			require.NoError(t, xml.Unmarshal(mappingData, &mapping))
+			mapped := false
+			for _, param := range mapping.Params {
+				if param.StandardPath == "Device.DeviceInfo.WAN_CONFIG1_ENABLE" {
+					mapped = true
+					break
+				}
+			}
+			assert.False(t, mapped, "%s parameter model must omit unsupported WAN_CONFIG1_ENABLE", model)
+		})
+	}
 }
 
 func TestBuiltinLteNetworkGroupsCoverWanLanAndStaticRouting(t *testing.T) {
