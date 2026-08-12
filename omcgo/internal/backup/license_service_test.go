@@ -2,14 +2,17 @@ package backup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
@@ -123,6 +126,31 @@ func newTestLicenseService(repo LicenseRepository, devices LicenseDeviceLookup, 
 	return NewLicenseService(repo, &fakeMover{}, devices, tasks, LicenseBucketDefault, zap.NewNop())
 }
 
+func setLicenseTransferPolicy(t *testing.T, svc *LicenseService, policyValue string, capability transfercfg.HTTPSCapabilityStatus) *restoreCapabilityReader {
+	t.Helper()
+	policy := transfercfg.NewPolicy(transfercfg.Snapshot{
+		ProtocolPolicy: policyValue,
+		Download: transfercfg.DownloadSettings{
+			BaseURL:      "http://license-download.example.com:8080/proxy",
+			HTTPSBaseURL: "https://license-download.example.com:9443/secure",
+			Path:         "/smallcell/FileDownloadService",
+		},
+	}, nil)
+	reader := &restoreCapabilityReader{status: capability}
+	svc.SetTransferProvider(policy)
+	svc.SetDownloadAddressResolver(transfercfg.NewAddressResolver(policy, reader))
+	return reader
+}
+
+func licenseQueuedURL(t *testing.T, req *devtask.CreateTaskRequest) string {
+	t.Helper()
+	var params struct {
+		URL string `json:"url"`
+	}
+	require.NoError(t, json.Unmarshal(req.Params, &params))
+	return params.URL
+}
+
 func TestLicenseImportAllowsUnknownDeviceAndKeepsPreinstallPending(t *testing.T) {
 	repo := newFakeLicenseRepo()
 	tasks := &fakeLicenseTaskEnqueuer{}
@@ -165,6 +193,128 @@ func TestLicensePreinstallDispatchesOnceWhenDeviceIsOnline(t *testing.T) {
 	stored, err := repo.GetBySerialNumber(t.Context(), sn)
 	require.NoError(t, err)
 	assert.False(t, stored.AutoDispatchPending)
+}
+
+func TestLicensePreinstallUsesHTTPSDownloadResolver(t *testing.T) {
+	const sn = "SN-LIC-HTTPS"
+	deviceID := uuid.New()
+	repo := newFakeLicenseRepo()
+	tasks := &fakeLicenseTaskEnqueuer{}
+	svc := newTestLicenseService(repo, &fakeLicenseDeviceLookup{bySN: map[string]*model.Device{
+		sn: {ID: deviceID, SerialNumber: sn, IsOnline: true},
+	}}, tasks)
+	reader := setLicenseTransferPolicy(t, svc, transfercfg.ProtocolPolicyPreferHTTPS, transfercfg.HTTPSCapabilityEnabled)
+
+	result, err := svc.ImportFromUpload(t.Context(), []LicenseImportItem{{
+		FileName: sn + ".lic",
+		Content:  []byte("license-body"),
+	}}, "operator")
+
+	require.NoError(t, err)
+	require.Empty(t, result.Failed)
+	require.Len(t, tasks.requests, 1)
+	assert.Equal(t, 1, reader.calls)
+	assert.Equal(t,
+		"https://license-download.example.com:9443/secure/smallcell/FileDownloadService/device-licenses/SN-LIC-HTTPS.lic",
+		licenseQueuedURL(t, tasks.requests[0]),
+	)
+	assert.Equal(t, "Download", tasks.requests[0].Method)
+	assert.Contains(t, tasks.requests[0].CommandKey, "LICENSE_PREINSTALL_")
+	assert.Contains(t, string(tasks.requests[0].Params), `"file_type":"License File"`)
+	assert.Contains(t, string(tasks.requests[0].Params), `"target_file_name":"SN-LIC-HTTPS.lic"`)
+}
+
+func TestLicenseUpgradeUsesHTTPSDownloadResolverAndEncodesObjectPath(t *testing.T) {
+	const sn = "SN-LIC-ENCODE"
+	repo := newFakeLicenseRepo()
+	repo.rows[sn] = &DeviceLicense{
+		SerialNumber: sn,
+		FileName:     "License A+B.lic",
+		FileExt:      "lic",
+		ObjectBucket: LicenseBucketDefault,
+		ObjectPath:   "nested/License A+B.lic",
+	}
+	tasks := &fakeLicenseTaskEnqueuer{}
+	svc := newTestLicenseService(repo, &fakeLicenseDeviceLookup{bySN: map[string]*model.Device{
+		sn: {ID: uuid.New(), SerialNumber: sn},
+	}}, tasks)
+	reader := setLicenseTransferPolicy(t, svc, transfercfg.ProtocolPolicyPreferHTTPS, transfercfg.HTTPSCapabilityEnabled)
+
+	_, dispatched, missing, err := svc.DispatchLicenseUpgradeBySN(t.Context(), []string{sn}, "operator", uuid.MustParse("29900000-0000-4000-8000-000000000002"))
+
+	require.NoError(t, err)
+	require.Empty(t, missing)
+	require.Equal(t, map[string]string{sn: "License A+B.lic"}, dispatched)
+	require.Len(t, tasks.requests, 1)
+	assert.Equal(t, 1, reader.calls)
+	assert.Equal(t,
+		"https://license-download.example.com:9443/secure/smallcell/FileDownloadService/device-licenses/nested/License%20A+B.lic",
+		licenseQueuedURL(t, tasks.requests[0]),
+	)
+	assert.Contains(t, string(tasks.requests[0].Params), `"target_file_name":"License A+B.lic"`)
+}
+
+func TestLicenseUpgradeForceHTTPDoesNotReadCapability(t *testing.T) {
+	const sn = "SN-LIC-FORCE"
+	repo := newFakeLicenseRepo()
+	repo.rows[sn] = &DeviceLicense{
+		SerialNumber: sn,
+		FileName:     sn + ".lic",
+		FileExt:      "lic",
+		ObjectBucket: LicenseBucketDefault,
+		ObjectPath:   sn + ".lic",
+	}
+	tasks := &fakeLicenseTaskEnqueuer{}
+	svc := newTestLicenseService(repo, &fakeLicenseDeviceLookup{bySN: map[string]*model.Device{
+		sn: {ID: uuid.New(), SerialNumber: sn},
+	}}, tasks)
+	reader := setLicenseTransferPolicy(t, svc, transfercfg.ProtocolPolicyForceHTTP, transfercfg.HTTPSCapabilityEnabled)
+
+	_, dispatched, missing, err := svc.DispatchLicenseUpgradeBySN(t.Context(), []string{sn}, "operator", uuid.MustParse("29900000-0000-4000-8000-000000000001"))
+
+	require.NoError(t, err)
+	require.Empty(t, missing)
+	require.Equal(t, map[string]string{sn: sn + ".lic"}, dispatched)
+	require.Len(t, tasks.requests, 1)
+	assert.Equal(t, 0, reader.calls)
+	assert.Equal(t,
+		"http://license-download.example.com:8080/proxy/smallcell/FileDownloadService/device-licenses/SN-LIC-FORCE.lic",
+		licenseQueuedURL(t, tasks.requests[0]),
+	)
+	assert.Contains(t, tasks.requests[0].CommandKey, "LICENSE_UPGRADE_")
+}
+
+func TestLicenseDownloadResolverErrorFailsClosedWithoutEnqueue(t *testing.T) {
+	const sn = "SN-LIC-FAIL"
+	repo := newFakeLicenseRepo()
+	repo.rows[sn] = &DeviceLicense{
+		SerialNumber: sn,
+		FileName:     sn + ".lic",
+		FileExt:      "lic",
+		ObjectBucket: LicenseBucketDefault,
+		ObjectPath:   sn + ".lic",
+	}
+	tasks := &fakeLicenseTaskEnqueuer{}
+	svc := newTestLicenseService(repo, &fakeLicenseDeviceLookup{bySN: map[string]*model.Device{
+		sn: {ID: uuid.New(), SerialNumber: sn},
+	}}, tasks)
+	policy := transfercfg.NewPolicy(transfercfg.Snapshot{
+		ProtocolPolicy: transfercfg.ProtocolPolicyPreferHTTPS,
+		Download: transfercfg.DownloadSettings{
+			BaseURL:      "http://license-download.example.com:8080",
+			HTTPSBaseURL: "https://license-download.example.com:9443",
+			Path:         "/smallcell/FileDownloadService",
+		},
+	}, nil)
+	svc.SetTransferProvider(policy)
+	svc.SetDownloadAddressResolver(failingTransferResolver{err: errors.New("resolver down")})
+
+	_, dispatched, missing, err := svc.DispatchLicenseUpgradeBySN(t.Context(), []string{sn}, "operator", uuid.New())
+
+	require.NoError(t, err)
+	require.Empty(t, missing)
+	assert.Empty(t, dispatched)
+	assert.Empty(t, tasks.requests, "resolver failure must not enqueue stale or naked Download URL")
 }
 
 func TestLicensePreinstallEnqueueFailureRemainsRetryable(t *testing.T) {

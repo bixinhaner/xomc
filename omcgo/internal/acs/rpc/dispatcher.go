@@ -222,8 +222,8 @@ func (h *DownloadHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	// 应该是空标签。Params.URL 上层若已显式塞凭据走透传；空字符串则渲染成空标签。
 	params.URL = appconfig.NormalizeConfigBackupReference(params.URL)
 	current := h.currentSettings()
-	if isConfigRestoreDownloadCommand(cmd.CommandKey) && strings.TrimSpace(params.URL) != "" {
-		rewrittenURL, ok, err := h.resolveConfigRestoreDownloadURL(cmd, params.URL, current)
+	if isPolicyResolvedDownloadCommand(cmd.CommandKey) && strings.TrimSpace(params.URL) != "" {
+		rewrittenURL, ok, err := h.resolvePolicyDownloadURL(cmd, params.URL, current)
 		if err != nil {
 			return nil, err
 		}
@@ -262,7 +262,7 @@ func (h *DownloadHandler) currentSettings() transfercfg.DownloadSettings {
 	}
 }
 
-func (h *DownloadHandler) resolveConfigRestoreDownloadURL(
+func (h *DownloadHandler) resolvePolicyDownloadURL(
 	cmd *Command,
 	rawURL string,
 	current transfercfg.DownloadSettings,
@@ -273,37 +273,41 @@ func (h *DownloadHandler) resolveConfigRestoreDownloadURL(
 	}
 	objectSegments, ok, err := downloadObjectSegments(rawURL, servicePath)
 	if err != nil {
-		return "", false, fmt.Errorf("resolve config restore Download URL: %w", err)
+		return "", false, fmt.Errorf("resolve policy-managed Download URL: %w", err)
 	}
 	if !ok {
 		return "", false, nil
 	}
 	if h.AddressResolver == nil {
-		return "", false, fmt.Errorf("resolve config restore Download URL: transfer address resolver is required")
+		return "", false, fmt.Errorf("resolve policy-managed Download URL: transfer address resolver is required")
 	}
 	if h.DeviceLookup == nil {
-		return "", false, fmt.Errorf("resolve config restore Download URL: device lookup is required")
+		return "", false, fmt.Errorf("resolve policy-managed Download URL: device lookup is required")
 	}
 	deviceSN := strings.TrimSpace(cmd.DeviceSN)
 	if deviceSN == "" {
-		return "", false, fmt.Errorf("resolve config restore Download URL: device serial number is required")
+		return "", false, fmt.Errorf("resolve policy-managed Download URL: device serial number is required")
 	}
 	device, err := h.DeviceLookup.GetBySerialNumber(context.Background(), deviceSN)
 	if err != nil {
-		return "", false, fmt.Errorf("lookup device %q for config restore Download URL: %w", deviceSN, err)
+		return "", false, fmt.Errorf("lookup device %q for policy-managed Download URL: %w", deviceSN, err)
 	}
 	if device == nil {
-		return "", false, fmt.Errorf("lookup device %q for config restore Download URL: not found", deviceSN)
+		return "", false, fmt.Errorf("lookup device %q for policy-managed Download URL: not found", deviceSN)
 	}
 	decision, err := h.AddressResolver.Resolve(context.Background(), device.ID, transfercfg.TransferDirectionDownload)
 	if err != nil {
-		return "", false, fmt.Errorf("resolve config restore Download address: %w", err)
+		return "", false, fmt.Errorf("resolve policy-managed Download address: %w", err)
 	}
 	builtURL, err := transfercfg.BuildURL(decision.BaseURL, servicePath, objectSegments, nil)
 	if err != nil {
-		return "", false, fmt.Errorf("build config restore Download URL: %w", err)
+		return "", false, fmt.Errorf("build policy-managed Download URL: %w", err)
 	}
 	return builtURL, true, nil
+}
+
+func isPolicyResolvedDownloadCommand(commandKey string) bool {
+	return isConfigRestoreDownloadCommand(commandKey) || isLicenseDownloadCommand(commandKey)
 }
 
 func isConfigRestoreDownloadCommand(commandKey string) bool {
@@ -311,6 +315,12 @@ func isConfigRestoreDownloadCommand(commandKey string) bool {
 	return strings.HasPrefix(commandKey, "CONFIG_RESTORE_") ||
 		strings.Contains(commandKey, "_RESTORE_") ||
 		strings.HasPrefix(commandKey, "restore-")
+}
+
+func isLicenseDownloadCommand(commandKey string) bool {
+	commandKey = strings.TrimSpace(commandKey)
+	return strings.HasPrefix(commandKey, "LICENSE_UPGRADE_") ||
+		strings.HasPrefix(commandKey, "LICENSE_PREINSTALL_")
 }
 
 func downloadObjectSegments(rawURL, servicePath string) ([]string, bool, error) {

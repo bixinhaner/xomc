@@ -1128,6 +1128,11 @@ func initBackupModule(c *Container) error {
 		licenseRepo, c.MinIO, c.DeviceRepo,
 		c.miscDeps.taskSvc, backup.LicenseBucketDefault, logger,
 	)
+	licenseService.SetTransferProvider(restoreTransferPolicy)
+	licenseService.SetDownloadAddressResolver(newTransferAddressResolver(
+		restoreTransferPolicy,
+		device.NewPgDeviceParameterRepository(c.PgPool),
+	))
 	licenseService.SetStorageAdmission(c.StorageProtection)
 	backupHandler.SetLicenseService(licenseService)
 	licensePreinstallSubscriber := backup.NewLicensePreinstallSubscriber(licenseService, logger)
