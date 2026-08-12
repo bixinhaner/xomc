@@ -247,7 +247,7 @@ interface SnmpVarBindRow {
 }
 
 type ApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
-type ApiKind = '正式北向' | '业务复用' | '鉴权管理';
+type ApiKind = '正式北向' | '业务复用' | '鉴权管理' | '日志管理';
 type ApiFieldContract = '完整返回字段' | '当前返回字段' | '示例返回字段';
 
 const csvSeparatorOptions = [
@@ -351,6 +351,7 @@ interface NorthboundApiRow {
   key: string;
   configKey?: string;
   apiKind?: ApiKind;
+  dataType?: string;
   module: string;
   name: string;
   method: ApiMethod;
@@ -3949,6 +3950,7 @@ function mapApiConfig(row: NorthboundAPIConfig): NorthboundApiRow {
     key: row.key,
     configKey: row.key,
     apiKind: (row.kind as ApiKind) || fallback?.apiKind,
+    dataType: row.data_type,
     module: fallback?.module ?? apiModuleLabel(row.data_type),
     name: row.name,
     method: row.method,
@@ -3964,13 +3966,31 @@ function mapApiConfig(row: NorthboundAPIConfig): NorthboundApiRow {
 
 function apiModuleLabel(dataType: string): string {
   const labels: Record<string, string> = {
-    auth: '鉴权',
-    device: '设备',
-    group: '设备组',
-    config: '配置',
-    task: '任务',
+    auth: '认证鉴权',
+    鉴权: '认证鉴权',
+    api_user: '北向用户管理',
+    api_log: '北向接口日志',
+    device: '设备管理',
+    设备: '设备管理',
+    group: '设备组管理',
+    设备组: '设备组管理',
+    config: '参数配置',
+    参数: '参数配置',
+    配置: '参数配置',
+    task: '异步任务',
+    任务: '异步任务',
     advanced_task: '高级任务',
-    log_collect: '日志采集',
+    log_collect: '设备日志收集',
+    日志: '设备日志收集',
+    alarm: '告警查询',
+    告警: '告警查询',
+    pm: '性能管理',
+    PM: '性能管理',
+    mr: 'MR 数据',
+    MR: 'MR 数据',
+    同步: '数据同步',
+    Inventory: 'Inventory 导出',
+    '主备服务': '主备服务器',
   };
   return labels[dataType] ?? dataType;
 }
@@ -4257,6 +4277,8 @@ function buildSnmpReportStatus(row: SnmpAlarmTargetRow): ReportStatusInfo {
 function buildApiReportStatus(row: NorthboundApiRow): ReportStatusInfo {
   const meta = getApiMeta(row);
   const responseFields = row.responseFields ?? meta.responseFields ?? currentEnvelopeFields;
+  const module = apiModuleDisplay(row);
+  const kind = apiKindLabel(meta.apiKind);
   return {
     key: `api:${row.key}`,
     capabilityName: row.name,
@@ -4267,13 +4289,15 @@ function buildApiReportStatus(row: NorthboundApiRow): ReportStatusInfo {
     artifactName: `${row.method} ${row.name}`,
     artifactPath: row.url,
     size: `${responseFields.length} 字段`,
-    targetSummary: `${row.module || '北向 API'} / 返回字段 ${responseFields.length} 项`,
+    targetSummary: `${module} / ${kind} / 返回字段 ${responseFields.length} 项`,
     detail: '已按当前系统配置生成接口调用说明和返回字段清单。',
     payload: JSON.stringify({
       接口名称: row.name,
-      所属模块: row.module || '北向 API',
+      业务模块: module,
+      接口类型: kind,
       请求方式: row.method,
       接口地址: row.url,
+      认证方式: normalizeLegacyApiText(row.auth),
       返回字段范围: meta.fieldContract,
       请求示例: normalizeLegacyApiText(row.requestExample),
       返回字段: responseFields,
@@ -4953,21 +4977,85 @@ function getApiMeta(row: NorthboundApiRow) {
   };
 }
 
+function apiModuleDisplay(row: NorthboundApiRow): string {
+  const normalizedModule = apiModuleLabel(row.module);
+  if (normalizedModule !== row.module) return normalizedModule;
+  if (row.dataType) return apiModuleLabel(row.dataType);
+  const fallbackKey = row.key.split('-')[0] ?? '';
+  const fallbackModule = apiModuleLabel(fallbackKey);
+  if (fallbackModule && fallbackModule !== fallbackKey) return fallbackModule;
+  return row.module || '北向接口';
+}
+
+function apiModuleColor(module: string): string {
+  const colors: Record<string, string> = {
+    认证鉴权: 'geekblue',
+    北向用户管理: 'cyan',
+    北向接口日志: 'gold',
+    数据同步: 'blue',
+    设备管理: 'green',
+    设备组管理: 'lime',
+    参数配置: 'purple',
+    异步任务: 'orange',
+    高级任务: 'volcano',
+    设备日志收集: 'magenta',
+    告警查询: 'red',
+    性能管理: 'blue',
+    'MR 数据': 'purple',
+    'Inventory 导出': 'cyan',
+    'HTTP Push': 'cyan',
+    主备服务器: 'geekblue',
+  };
+  return colors[module] ?? 'default';
+}
+
+function apiModuleTag(row: NorthboundApiRow) {
+  const module = apiModuleDisplay(row);
+  return <Tag color={apiModuleColor(module)}>{module}</Tag>;
+}
+
+function apiKindLabel(kind?: ApiKind): string {
+  const labels: Record<ApiKind, string> = {
+    正式北向: '标准北向',
+    业务复用: '旧系统兼容',
+    鉴权管理: '认证管理',
+    日志管理: '日志管理',
+  };
+  return labels[(kind ?? '业务复用') as ApiKind] ?? kind ?? '旧系统兼容';
+}
+
+function apiKindTag(kind?: ApiKind) {
+  const label = apiKindLabel(kind);
+  const colors: Record<string, string> = {
+    标准北向: 'processing',
+    旧系统兼容: 'default',
+    认证管理: 'geekblue',
+    日志管理: 'gold',
+  };
+  return <Tag color={colors[label] ?? 'default'}>{label}</Tag>;
+}
+
 function normalizeLegacyApiText(value: string) {
   return value
     .replaceAll('JWT 或 API Key，', 'JWT，');
 }
 
 function apiUsageSummary(row: NorthboundApiRow): string {
-  if (row.module === '鉴权') return '外部系统先调用该接口获取访问 Token，再调用其它北向 API。';
-  if (row.module === '设备') return '用于外部系统查询设备清单、设备详情、设备状态、注册设备或触发设备操作。';
-  if (row.module === '设备组') return '用于外部系统同步和维护设备分组，以及维护分组内设备关系。';
-  if (row.module === '参数') return '用于外部系统查询或设置设备参数，返回结果以当前系统设备参数能力为准。';
-  if (row.module === '告警') return '用于外部系统查询当前告警、历史告警或告警统计信息。';
-  if (row.module === 'PM') return '用于外部系统导出性能数据或查询聚合指标。';
-  if (row.module === 'MR') return '用于外部系统查询或导出 MR 数据。';
-  if (row.module === '日志') return '用于外部系统触发设备日志收集并查询处理结果。';
-  if (row.module === '任务') return '用于外部系统查询异步任务执行结果。';
+  const module = apiModuleDisplay(row);
+  if (module === '认证鉴权') return '外部系统先调用该接口获取访问 Token，再调用其它北向 API。';
+  if (module === '北向用户管理') return '用于外部系统维护北向 API 调用账号，包括查询、新增、修改和删除。';
+  if (module === '北向接口日志') return '用于外部系统查询或导出北向 API 调用日志。';
+  if (module === '数据同步') return '用于外部系统拉取设备、告警等北向同步数据。';
+  if (module === '设备管理') return '用于外部系统查询设备清单、设备详情、设备状态、注册设备或触发设备操作。';
+  if (module === '设备组管理') return '用于外部系统同步和维护设备分组，以及维护分组内设备关系。';
+  if (module === '参数配置') return '用于外部系统查询或设置设备参数，返回结果以当前系统设备参数能力为准。';
+  if (module === '告警查询') return '用于外部系统查询当前告警、历史告警或告警统计信息。';
+  if (module === '性能管理') return '用于外部系统导出性能数据或查询聚合指标。';
+  if (module === 'MR 数据') return '用于外部系统查询或导出 MR 数据。';
+  if (module === '设备日志收集') return '用于外部系统触发设备运行/故障日志收集并查询处理结果。';
+  if (module === '异步任务' || module === '高级任务') return '用于外部系统查询或创建异步任务，并通过任务 ID 查看执行结果。';
+  if (module === 'HTTP Push') return '用于外部系统维护 HTTP Push 目标、熔断和死信重放。';
+  if (module === '主备服务器') return '用于外部系统查询或维护北向主备服务器配置。';
   return '用于外部系统调用当前系统已开放的北向业务能力。';
 }
 
@@ -5071,30 +5159,74 @@ function getSocketAccountPurpose(type: SocketAccountRow['type']) {
   return type === 'ftp' ? '登录、告警文件同步请求' : '登录、实时告警、历史消息同步';
 }
 
-function socketCredentialValue(value?: string) {
-  return value && value !== storedCredentialText ? value : '';
-}
-
 function socketCredentialPlaceholder(value?: string) {
   return value === storedCredentialText ? '未修改保持原密码' : '请输入密码';
 }
 
-function SocketCredentialPreview({ value }: { value?: string }) {
-  const credential = socketCredentialValue(value);
-  if (!credential) {
-    return value === storedCredentialText
-      ? <Tag>{credentialMaskText}</Tag>
-      : <Typography.Text type="secondary">-</Typography.Text>;
+interface MaskedCredentialInputProps {
+  value?: string;
+  placeholder?: string;
+  readOnly?: boolean;
+  width?: number | string;
+  minLength?: number;
+  storedValues?: string[];
+  onChange?: (value: string) => void;
+}
+
+function normalizeMaskedCredentialInput(
+  nextValue: string,
+  currentValue: string,
+  visible: boolean,
+  storedValues: string[],
+): string {
+  const isStored = storedValues.includes(currentValue);
+  if (!nextValue) return '';
+  if ((!visible || isStored) && nextValue.startsWith(credentialMaskText)) {
+    return nextValue.slice(credentialMaskText.length);
   }
+  if (!visible && currentValue && credentialMaskText.startsWith(nextValue)) return '';
+  return nextValue;
+}
+
+function MaskedCredentialInput({
+  value,
+  placeholder = '请输入密码',
+  readOnly = false,
+  width = '100%',
+  minLength,
+  storedValues = [storedCredentialText],
+  onChange,
+}: MaskedCredentialInputProps) {
+  const [visible, setVisible] = useState(false);
+  const currentValue = value ?? '';
+  const hasValue = currentValue !== '';
+  const isStored = storedValues.includes(currentValue);
+  const displayValue = hasValue && (!visible || isStored) ? credentialMaskText : currentValue;
+
   return (
     <Input.Password
-      value={credential}
-      readOnly
+      value={displayValue}
+      readOnly={readOnly}
       size="small"
+      minLength={minLength}
+      placeholder={placeholder}
       className={styles.monoText}
-      style={{ width: 150 }}
+      style={{ width }}
+      visibilityToggle={{
+        visible,
+        onVisibleChange: setVisible,
+      }}
+      onChange={(event) => {
+        if (!onChange || readOnly) return;
+        onChange(normalizeMaskedCredentialInput(event.target.value, currentValue, visible, storedValues));
+      }}
     />
   );
+}
+
+function MaskedCredentialPreview({ value, width = 150 }: { value?: string; width?: number | string }) {
+  if (!value) return <span />;
+  return <MaskedCredentialInput value={value} readOnly width={width} />;
 }
 
 function cloneDefaultSocketAccounts(profile: SocketProfile, configKey: string) {
@@ -5622,7 +5754,6 @@ export default function NorthboundPageConfig() {
   const [apiUsers, setApiUsers] = useState<ApiUserRow[]>([]);
   const [apiUserSaving, setApiUserSaving] = useState(false);
   const [apiSwitchSaving, setApiSwitchSaving] = useState(false);
-  const [apiUserPasswordVisible, setApiUserPasswordVisible] = useState<Record<string, boolean>>({});
   const [apiCatalogOpen, setApiCatalogOpen] = useState(false);
   const [selectedApi, setSelectedApi] = useState<NorthboundApiRow | null>(null);
   const pageConfigLoadingRef = useRef(false);
@@ -7346,14 +7477,13 @@ export default function NorthboundPageConfig() {
     },
     {
       title: '模块',
-      dataIndex: 'module',
-      width: 96,
-      render: (value: string) => <Tag color="blue">{value}</Tag>,
+      width: 150,
+      render: (_, row) => apiModuleTag(row),
     },
     {
       title: '接口名称',
       dataIndex: 'name',
-      width: 260,
+      width: 330,
       render: (value: string) => (
         <Tooltip title={value}>
           <Typography.Text strong ellipsis>{value}</Typography.Text>
@@ -7407,29 +7537,14 @@ export default function NorthboundPageConfig() {
       title: '密码',
       dataIndex: 'password',
       width: 220,
-      render: (value: string, row) => {
-        const visible = Boolean(apiUserPasswordVisible[row.key]);
-        return (
-          <Input.Password
-            value={visible ? value : (value ? apiUserPasswordMask : '')}
-            placeholder={row.passwordSet ? '未修改保持原密码' : '请输入密码'}
-            visibilityToggle={{
-              visible,
-              onVisibleChange: (nextVisible) => {
-                setApiUserPasswordVisible((prev) => ({ ...prev, [row.key]: nextVisible }));
-              },
-            }}
-            onChange={(event) => {
-              const nextValue = event.target.value;
-              patchApiUser(row.key, {
-                password: !visible && nextValue.startsWith(apiUserPasswordMask)
-                  ? nextValue.slice(apiUserPasswordMask.length)
-                  : nextValue,
-              });
-            }}
-          />
-        );
-      },
+      render: (value: string, row) => (
+        <MaskedCredentialInput
+          value={value}
+          placeholder={row.passwordSet ? '未修改保持原密码' : '请输入密码'}
+          storedValues={[apiUserPasswordMask]}
+          onChange={(password) => patchApiUser(row.key, { password })}
+        />
+      ),
     },
     {
       title: '创建时间',
@@ -7544,13 +7659,16 @@ export default function NorthboundPageConfig() {
     { title: '类型', dataIndex: 'dataType', width: 150, render: (value: string) => <Tag>{value}</Tag> },
   ];
 
+  const deliveryTargetTableScroll = { x: 1140 };
+  const deliveryTargetEditorTableScroll = { x: 1460 };
+
   const deliveryTargetColumns: ColumnsType<DeliveryTargetRow> = [
-    { title: '启用', dataIndex: 'enabled', width: 76, fixed: 'left', render: (value: boolean) => <Switch size="small" checked={value} disabled checkedChildren="开" unCheckedChildren="关" /> },
-    { title: '目标名称', dataIndex: 'name', width: 150, fixed: 'left', render: (value: string) => <Typography.Text strong ellipsis>{value}</Typography.Text> },
+    { title: '启用', dataIndex: 'enabled', width: 76, render: (value: boolean) => <Switch size="small" checked={value} disabled checkedChildren="开" unCheckedChildren="关" /> },
+    { title: '目标名称', dataIndex: 'name', width: 150, render: (value: string) => <Typography.Text strong ellipsis>{value}</Typography.Text> },
     { title: '协议', dataIndex: 'protocol', width: 86, render: (value: DeliveryProtocol) => deliveryProtocolTag(value) },
     { title: '地址', width: 180, render: (_, row) => <span className={styles.monoText}>{endpointText(row.host || '-', row.port)}</span> },
     { title: '账号', dataIndex: 'username', width: 140, render: (value: string) => <span className={styles.monoText}>{value || '-'}</span> },
-    { title: '密码', width: 150, render: (_, row) => <Tag>{row.credential || '-'}</Tag> },
+    { title: '密码', width: 150, render: (_, row) => <MaskedCredentialPreview value={row.credential} /> },
     { title: '#FTPRoot#', dataIndex: 'remoteRoot', width: 220, render: (value: string) => <span className={styles.monoText}>{value}</span> },
     { title: '重试/超时', width: 130, render: (_, row) => <Tag>{row.retryTimes} 次 / {row.timeoutSeconds}s</Tag> },
   ];
@@ -7566,7 +7684,6 @@ export default function NorthboundPageConfig() {
       title: '启用',
       dataIndex: 'enabled',
       width: 76,
-      fixed: 'left',
       render: (value: boolean, row) => (
         <Switch
           size="small"
@@ -7581,7 +7698,6 @@ export default function NorthboundPageConfig() {
       title: '目标名称',
       dataIndex: 'name',
       width: 160,
-      fixed: 'left',
       render: (value: string, row) => (
         <Input value={value} onChange={(event) => onPatch(row.key, { name: event.target.value })} />
       ),
@@ -7631,9 +7747,12 @@ export default function NorthboundPageConfig() {
       dataIndex: 'credential',
       width: 190,
       render: (value: string, row) => (
-        <Input.Password
-          placeholder={value === '已加密存储' ? '未修改保持原凭据' : '请输入凭据'}
-          onChange={(event) => onPatch(row.key, { credential: event.target.value || value })}
+        <MaskedCredentialInput
+          value={value}
+          placeholder={value === storedCredentialText ? '未修改保持原凭据' : '请输入凭据'}
+          onChange={(credential) => onPatch(row.key, {
+            credential: credential || (value === storedCredentialText ? storedCredentialText : ''),
+          })}
         />
       ),
     },
@@ -7664,7 +7783,6 @@ export default function NorthboundPageConfig() {
     {
       title: '操作',
       width: 104,
-      fixed: 'right',
       render: (_, row) => (
         <Space size={4}>
           <Tooltip title="测试连接">
@@ -7690,7 +7808,7 @@ export default function NorthboundPageConfig() {
     { title: '账号用途', dataIndex: 'channel', width: 150 },
     { title: '用户名', dataIndex: 'username', width: 160, render: (value: string) => <span className={styles.monoText}>{value || '-'}</span> },
     { title: '类型', dataIndex: 'type', width: 90, render: (value: string) => <Tag>{value}</Tag> },
-    { title: '密码', dataIndex: 'credential', width: 180, render: (value: string) => <SocketCredentialPreview value={value} /> },
+    { title: '密码', dataIndex: 'credential', width: 180, render: (value: string) => <MaskedCredentialPreview value={value} width={160} /> },
     { title: '能力范围', dataIndex: 'purpose', width: 220 },
   ];
 
@@ -7753,14 +7871,13 @@ export default function NorthboundPageConfig() {
       dataIndex: 'credential',
       width: 220,
       render: (value: string, row) => (
-        <Input.Password
-          value={socketCredentialValue(value)}
+        <MaskedCredentialInput
+          value={value}
           placeholder={socketCredentialPlaceholder(value)}
-          className={styles.monoText}
-          onChange={(event) => {
+          onChange={(credential) => {
             if (!socketEditor) return;
             updateSocketEditorAccount(row.key, {
-              credential: event.target.value,
+              credential: credential || (value === storedCredentialText ? storedCredentialText : ''),
             });
           }}
         />
@@ -8328,7 +8445,7 @@ export default function NorthboundPageConfig() {
           rowKey="key"
           size="small"
           pagination={renderTablePagination('刷新北向 API')}
-          scroll={{ x: 866, y: 560 }}
+          scroll={{ x: 1100, y: 560 }}
           rowClassName={(row) => (selectedApi?.key === row.key ? styles.selectedRow : '')}
           onRow={(row) => ({ onClick: () => setSelectedApi(row) })}
         />
@@ -8350,9 +8467,11 @@ export default function NorthboundPageConfig() {
               </div>
               <Descriptions bordered size="small" column={2}>
                 <Descriptions.Item label="接口名称">{selectedApi.name}</Descriptions.Item>
-                <Descriptions.Item label="模块">{selectedApi.module}</Descriptions.Item>
+                <Descriptions.Item label="业务模块">{apiModuleTag(selectedApi)}</Descriptions.Item>
                 <Descriptions.Item label="方法">{apiMethodTag(selectedApi.method)}</Descriptions.Item>
+                <Descriptions.Item label="接口类型">{apiKindTag(selectedApiMeta?.apiKind)}</Descriptions.Item>
                 <Descriptions.Item label="总开关状态">{statusTag(Boolean(apiEnabled[apiConfigKey(selectedApi)]))}</Descriptions.Item>
+                <Descriptions.Item label="认证方式">{normalizeLegacyApiText(selectedApi.auth)}</Descriptions.Item>
                 <Descriptions.Item label="返回字段">{selectedApiMeta?.fieldContract ?? '-'}</Descriptions.Item>
                 <Descriptions.Item label="字段数量">{selectedApiResponseFields.length} 项</Descriptions.Item>
                 <Descriptions.Item label="接口 URL" span={2}>
@@ -8472,7 +8591,7 @@ export default function NorthboundPageConfig() {
                   rowKey="key"
                   size="small"
                   pagination={false}
-                  scroll={{ x: 1260 }}
+                  scroll={deliveryTargetTableScroll}
                 />
               </div>
             )}
@@ -8617,7 +8736,7 @@ export default function NorthboundPageConfig() {
                   rowKey="key"
                   size="small"
                   pagination={false}
-                  scroll={{ x: 2160 }}
+                  scroll={deliveryTargetEditorTableScroll}
                 />
               </div>
             )}
@@ -8670,7 +8789,12 @@ export default function NorthboundPageConfig() {
                 )}
                 {selectedSnmp.version === 'v2' && (Boolean(snmpEnabled[selectedSnmp.key]) || selectedSnmp.mibQueryEnabled) && (
                   <Descriptions.Item label="Community" span={2}>
-                    <span className={styles.monoText}>{selectedSnmp.community === storedCredentialText ? '********' : (selectedSnmp.community || snmpDefaultCommunity)}</span>
+                    <MaskedCredentialPreview
+                      value={selectedSnmp.community === storedCredentialText
+                        ? storedCredentialText
+                        : (selectedSnmp.community || snmpDefaultCommunity)}
+                      width={180}
+                    />
                   </Descriptions.Item>
                 )}
                 {selectedSnmp.version === 'v3' && (Boolean(snmpEnabled[selectedSnmp.key]) || selectedSnmp.mibQueryEnabled) && (
@@ -8799,12 +8923,12 @@ export default function NorthboundPageConfig() {
                   <div className={styles.inventoryFormGrid}>
                     {snmpEditor.version === 'v2' && (Boolean(snmpEnabled[snmpEditor.key]) || snmpEditor.mibQueryEnabled) && (
                       <Form.Item label="Community">
-                        <Input.Password
-                          value={snmpEditor.community === storedCredentialText ? '' : (snmpEditor.community || snmpDefaultCommunity)}
+                        <MaskedCredentialInput
+                          value={snmpEditor.community === storedCredentialText ? storedCredentialText : (snmpEditor.community || snmpDefaultCommunity)}
                           placeholder={snmpEditor.community === storedCredentialText ? '未修改保持原 community' : `默认 ${snmpDefaultCommunity}`}
-                          onChange={(event) => setSnmpEditor((current) => (current ? {
+                          onChange={(community) => setSnmpEditor((current) => (current ? {
                             ...current,
-                            community: event.target.value || (current.community === storedCredentialText ? storedCredentialText : ''),
+                            community: community || (current.community === storedCredentialText ? storedCredentialText : ''),
                           } : current))}
                         />
                       </Form.Item>
@@ -8827,7 +8951,15 @@ export default function NorthboundPageConfig() {
                               <Select value={snmpEditor.authProtocol || 'SHA'} options={snmpAuthProtocolOptions} onChange={(authProtocol) => setSnmpEditor((current) => (current ? { ...current, authProtocol } : current))} />
                             </Form.Item>
                             <Form.Item label="认证密码">
-                              <Input.Password minLength={8} placeholder={snmpEditor.authCredential === storedCredentialText ? '未修改保持原密码' : '至少 8 位认证密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, authCredential: event.target.value || current.authCredential } : current))} />
+                              <MaskedCredentialInput
+                                value={snmpEditor.authCredential}
+                                minLength={8}
+                                placeholder={snmpEditor.authCredential === storedCredentialText ? '未修改保持原密码' : '至少 8 位认证密码'}
+                                onChange={(authCredential) => setSnmpEditor((current) => (current ? {
+                                  ...current,
+                                  authCredential: authCredential || (current.authCredential === storedCredentialText ? storedCredentialText : ''),
+                                } : current))}
+                              />
                             </Form.Item>
                           </>
                         )}
@@ -8837,7 +8969,15 @@ export default function NorthboundPageConfig() {
                               <Select value={snmpEditor.privProtocol || 'DES'} options={snmpPrivProtocolOptions} onChange={(privProtocol) => setSnmpEditor((current) => (current ? { ...current, privProtocol } : current))} />
                             </Form.Item>
                             <Form.Item label="加密密码">
-                              <Input.Password minLength={8} placeholder={snmpEditor.privCredential === storedCredentialText ? '未修改保持原密码' : '至少 8 位加密密码'} onChange={(event) => setSnmpEditor((current) => (current ? { ...current, privCredential: event.target.value || current.privCredential } : current))} />
+                              <MaskedCredentialInput
+                                value={snmpEditor.privCredential}
+                                minLength={8}
+                                placeholder={snmpEditor.privCredential === storedCredentialText ? '未修改保持原密码' : '至少 8 位加密密码'}
+                                onChange={(privCredential) => setSnmpEditor((current) => (current ? {
+                                  ...current,
+                                  privCredential: privCredential || (current.privCredential === storedCredentialText ? storedCredentialText : ''),
+                                } : current))}
+                              />
                             </Form.Item>
                           </>
                         )}
@@ -8957,7 +9097,7 @@ export default function NorthboundPageConfig() {
                 rowKey="key"
                 size="small"
                 pagination={false}
-                scroll={{ x: 1260 }}
+                scroll={deliveryTargetTableScroll}
               />
             </div>
 
@@ -9114,7 +9254,7 @@ export default function NorthboundPageConfig() {
                 rowKey="key"
                 size="small"
                 pagination={false}
-                scroll={{ x: 2160 }}
+                scroll={deliveryTargetEditorTableScroll}
               />
             </div>
 
@@ -9266,7 +9406,7 @@ export default function NorthboundPageConfig() {
                 rowKey="key"
                 size="small"
                 pagination={false}
-                scroll={{ x: 1260 }}
+              scroll={deliveryTargetTableScroll}
               />
             </div>
 
@@ -9584,7 +9724,7 @@ export default function NorthboundPageConfig() {
               rowKey="key"
               size="small"
               pagination={false}
-              scroll={{ x: 2160 }}
+              scroll={deliveryTargetEditorTableScroll}
             />
           </div>
           <FieldConfigSection

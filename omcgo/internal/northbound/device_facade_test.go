@@ -399,6 +399,27 @@ func TestLegacyFacadeGroupAddDevicesAcceptsSNS(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"affected":1`)
 }
 
+func TestLegacyFacadeGroupSubCreateUsesCurrentGroupService(t *testing.T) {
+	parentID := uuid.New()
+	groupID := uuid.New()
+	groupSvc := &fakeNBGroupService{
+		createFn: func(_ context.Context, req topology.CreateGroupRequest, _ string) (*topology.DeviceGroup, error) {
+			require.Equal(t, "Sub Group", req.Name)
+			require.Equal(t, parentID.String(), req.ParentID)
+			return &topology.DeviceGroup{ID: groupID, Name: req.Name, ParentID: &parentID}, nil
+		},
+	}
+
+	router := setupDeviceFacadeRouterWithExtras(nil, nil, nil, groupSvc, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/northbound/v1/device/group/sub", bytes.NewBufferString(`{"groupName":"Sub Group","pid":"`+parentID.String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	require.Contains(t, rec.Body.String(), `"Sub Group"`)
+}
+
 func TestLegacyFacadeResetReturnsJobFields(t *testing.T) {
 	deviceID := uuid.New()
 	deviceSvc := &fakeNBDeviceService{
@@ -449,6 +470,30 @@ func TestLegacyFacadeLogCollectUsesUFTE(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, rec.Code)
 	require.Contains(t, rec.Body.String(), `"jobId":"ufte-log-task"`)
 	require.Contains(t, rec.Body.String(), `"typeCode":"RUNTIME_LOG_COLLECT"`)
+}
+
+func TestLegacyFacadeLogCollectAcceptsOldIsGnbQuery(t *testing.T) {
+	deviceID := uuid.New()
+	deviceSvc := &fakeNBDeviceService{
+		getBySNFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{ID: deviceID, SerialNumber: sn, ProductClass: "GNB"}, nil
+		},
+	}
+	transferSvc := &fakeNBTransferTaskService{
+		createFn: func(_ context.Context, req ufte.CreateTaskRequest, _ string, _ []uuid.UUID) (*ufte.Task, error) {
+			require.Equal(t, "RUNTIME_LOG_COLLECT", req.TypeCode)
+			require.Equal(t, "GNB", req.ProductType)
+			return &ufte.Task{ID: "ufte-log-task", TaskName: req.TaskName, TypeCode: req.TypeCode, Status: "in_progress", ExecutionMode: req.ExecutionMode}, nil
+		},
+	}
+
+	router := setupDeviceFacadeRouterWithExtras(deviceSvc, nil, nil, nil, transferSvc)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/northbound/v1/device/log/collect/SN001?isGnb=1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	require.Contains(t, rec.Body.String(), `"jobId":"ufte-log-task"`)
 }
 
 func TestLegacyFacadeTaskDetailFallsBackToUFTE(t *testing.T) {

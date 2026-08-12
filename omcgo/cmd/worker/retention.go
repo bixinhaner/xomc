@@ -199,9 +199,9 @@ func (s *stationLogTaskFileStore) MarkTaskLogDeleted(ctx context.Context, id int
 // startLogRetentionCleanup wire 起「审计/业务日志」按时间保留清理（internal/logretention）。
 //
 // 与 PM/stationlog retention 同范式：RetentionPolicy 从 sys_configs（category=log.retention）读
-// 数据库日志统一保留天数（TTL 缓存）；CleanupRunner 对 8 张日志表（audit/ops_audit/login/oper/task/
-// system/ne_message/event）批量 DELETE 过期行；cron 每日 05:00（与 PM 03:00 / stationlog 04:00
-// 错峰）触发 + 启动补跑。全部 8 表都在主库（w.PgPool）。
+// 数据库日志统一保留天数（TTL 缓存）；CleanupRunner 对 9 张日志表（audit/ops_audit/login/oper/task/
+// system/ne_message/event/northbound_api）批量 DELETE 过期行；cron 每日 05:00（与 PM 03:00 /
+// stationlog 04:00 错峰）触发 + 启动补跑。全部 9 表都在主库（w.PgPool）。
 func startLogRetentionCleanup(
 	ctx context.Context,
 	w *workerInfra,

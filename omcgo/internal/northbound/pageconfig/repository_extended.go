@@ -36,6 +36,24 @@ func (r *PgRepository) ensureExtendedSchema(ctx context.Context) error {
 		`ALTER TABLE northbound_socket_alarm_configs ALTER COLUMN heartbeat_seconds SET DEFAULT 60`,
 		`ALTER TABLE northbound_api_clients ADD COLUMN IF NOT EXISTS access_token_secret text DEFAULT '' NOT NULL`,
 		`ALTER TABLE northbound_api_clients ADD COLUMN IF NOT EXISTS access_token_expires_at timestamptz`,
+		`CREATE TABLE IF NOT EXISTS northbound_api_invocation_logs (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  api_key varchar(128) DEFAULT '' NOT NULL,
+  name varchar(200) DEFAULT '' NOT NULL,
+  method varchar(16) DEFAULT '' NOT NULL,
+  path text DEFAULT '' NOT NULL,
+  request_params text DEFAULT '' NOT NULL,
+  response_body text DEFAULT '' NOT NULL,
+  status_code integer DEFAULT 0 NOT NULL,
+  status varchar(32) DEFAULT '' NOT NULL,
+  create_user varchar(128) DEFAULT '' NOT NULL,
+  ip_address varchar(128) DEFAULT '' NOT NULL,
+  duration_ms bigint DEFAULT 0 NOT NULL,
+  created_at timestamptz DEFAULT now() NOT NULL,
+  updated_at timestamptz DEFAULT now() NOT NULL
+)`,
+		`CREATE INDEX IF NOT EXISTS idx_northbound_api_invocation_logs_created_at ON northbound_api_invocation_logs (created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_northbound_api_invocation_logs_api_key ON northbound_api_invocation_logs (api_key, created_at DESC)`,
 		`DO $$
 BEGIN
   ALTER TABLE northbound_socket_alarm_configs
@@ -693,6 +711,103 @@ RETURNING id::text, client_key, enabled, token_secret <> '' AS password_set,
 	return out, nil
 }
 
+func (r *PgRepository) CreateAPIUser(ctx context.Context, user APIUser) (*APIUser, error) {
+	user = normalizeAPIUser(user)
+	if err := validateAPIUser(user); err != nil {
+		return nil, err
+	}
+	row := r.pool.QueryRow(ctx, `
+INSERT INTO northbound_api_clients (
+  client_key, name, enabled, token_secret, allowed_api_keys, ip_whitelist,
+  expires_at, access_token_secret, access_token_expires_at
+) VALUES ($1,$1,$2,$3,'[]'::jsonb,'[]'::jsonb,NULL,'',NULL)
+ON CONFLICT (client_key) DO NOTHING
+RETURNING id::text, client_key, enabled, token_secret <> '' AS password_set,
+          token_secret, created_at, updated_at`,
+		user.Username, user.Enabled, user.Password)
+	created, err := scanAPIUser(row)
+	if errors.Is(err, commonerrors.ErrNotFound) {
+		return nil, fmt.Errorf("%w: USER_EXIST", commonerrors.ErrInvalidInput)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+func (r *PgRepository) UpdateAPIUser(ctx context.Context, idOrUsername string, req UpdateAPIUserRequest) (*APIUser, error) {
+	idOrUsername = strings.TrimSpace(idOrUsername)
+	if idOrUsername == "" {
+		return nil, fmt.Errorf("%w: northbound API user id or username is required", commonerrors.ErrInvalidInput)
+	}
+	current, err := r.getAPIUserForMutation(ctx, idOrUsername)
+	if err != nil {
+		return nil, err
+	}
+	next := APIUser{
+		Username: current.Username,
+		Password: current.Password,
+		Enabled:  current.Enabled,
+	}
+	if req.Username != "" {
+		next.Username = req.Username
+	}
+	if req.Enabled != nil {
+		next.Enabled = *req.Enabled
+	}
+	next.Password = credentialToPersist(req.Password, current.Password)
+	if err := validateAPIUser(next); err != nil {
+		return nil, err
+	}
+	row := r.pool.QueryRow(ctx, `
+UPDATE northbound_api_clients
+   SET client_key = $2,
+       name = $2,
+       enabled = $3,
+       token_secret = $4,
+       access_token_secret = '',
+       access_token_expires_at = NULL,
+       updated_at = now()
+ WHERE id::text = $1
+RETURNING id::text, client_key, enabled, token_secret <> '' AS password_set,
+          token_secret, created_at, updated_at`,
+		current.ID, next.Username, next.Enabled, next.Password)
+	updated, err := scanAPIUser(row)
+	if err != nil {
+		if strings.Contains(err.Error(), "northbound_api_clients_client_key_key") {
+			return nil, fmt.Errorf("%w: USER_EXIST", commonerrors.ErrInvalidInput)
+		}
+		return nil, err
+	}
+	return updated, nil
+}
+
+func (r *PgRepository) DeleteAPIUser(ctx context.Context, idOrUsername string) error {
+	idOrUsername = strings.TrimSpace(idOrUsername)
+	if idOrUsername == "" {
+		return fmt.Errorf("%w: northbound API user id or username is required", commonerrors.ErrInvalidInput)
+	}
+	tag, err := r.pool.Exec(ctx, `DELETE FROM northbound_api_clients WHERE id::text = $1 OR client_key = $1`, idOrUsername)
+	if err != nil {
+		return fmt.Errorf("delete northbound API user: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+func (r *PgRepository) getAPIUserForMutation(ctx context.Context, idOrUsername string) (*APIUser, error) {
+	row := r.pool.QueryRow(ctx, `
+SELECT id::text, client_key, enabled, token_secret <> '' AS password_set,
+       token_secret, created_at, updated_at
+  FROM northbound_api_clients
+ WHERE id::text = $1 OR client_key = $1
+ ORDER BY client_key ASC
+ LIMIT 1`, idOrUsername)
+	return scanAPIUser(row)
+}
+
 func (r *PgRepository) LoginAPIUser(ctx context.Context, req APIUserLoginRequest) (*APIUserToken, error) {
 	username := strings.TrimSpace(req.Username)
 	password := strings.TrimSpace(req.Password)
@@ -766,6 +881,7 @@ SELECT id::text, client_key, name, enabled, token_secret <> '' AS token_set,
  WHERE enabled = true
    AND access_token_secret = $1
    AND access_token_expires_at > now()
+   AND (expires_at IS NULL OR expires_at > now())
  ORDER BY client_key ASC
  LIMIT 1`, credential)
 	client, err := scanAPIClient(row)
@@ -775,7 +891,137 @@ SELECT id::text, client_key, name, enabled, token_secret <> '' AS token_set,
 	if err != nil {
 		return nil, err
 	}
+	if !apiClientAllowsAPI(*client, apiKey) {
+		return nil, fmt.Errorf("%w: northbound API user is not allowed to call %s", commonerrors.ErrForbidden, apiKey)
+	}
+	if !apiClientAllowsIP(*client, remoteIP) {
+		return nil, fmt.Errorf("%w: northbound API user is not allowed from IP %s", commonerrors.ErrForbidden, remoteIP)
+	}
 	return client, nil
+}
+
+func (r *PgRepository) CreateAPIInvocationLog(ctx context.Context, item APIInvocationLog) error {
+	item.APIKey = strings.TrimSpace(item.APIKey)
+	item.Name = strings.TrimSpace(item.Name)
+	item.Method = strings.ToUpper(strings.TrimSpace(item.Method))
+	item.Path = strings.TrimSpace(item.Path)
+	item.Status = strings.TrimSpace(item.Status)
+	item.CreateUser = strings.TrimSpace(item.CreateUser)
+	item.IPAddress = strings.TrimSpace(item.IPAddress)
+	_, err := r.pool.Exec(ctx, `
+INSERT INTO northbound_api_invocation_logs (
+  api_key, name, method, path, request_params, response_body,
+  status_code, status, create_user, ip_address, duration_ms
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		item.APIKey, item.Name, item.Method, item.Path, item.RequestParams,
+		item.ResponseBody, item.StatusCode, item.Status, item.CreateUser,
+		item.IPAddress, item.DurationMs)
+	if err != nil {
+		return fmt.Errorf("insert northbound_api_invocation_logs: %w", err)
+	}
+	return nil
+}
+
+func (r *PgRepository) ListAPIInvocationLogs(ctx context.Context, filter APIInvocationLogFilter) (APIInvocationLogListResult, error) {
+	args := make([]any, 0, 12)
+	where := []string{"true"}
+	if strings.TrimSpace(filter.APIKey) != "" {
+		args = append(args, strings.TrimSpace(filter.APIKey))
+		where = append(where, fmt.Sprintf("api_key = $%d", len(args)))
+	}
+	if strings.TrimSpace(filter.Name) != "" {
+		args = append(args, "%"+strings.TrimSpace(filter.Name)+"%")
+		where = append(where, fmt.Sprintf("name ILIKE $%d", len(args)))
+	}
+	if strings.TrimSpace(filter.Method) != "" {
+		args = append(args, strings.ToUpper(strings.TrimSpace(filter.Method)))
+		where = append(where, fmt.Sprintf("method = $%d", len(args)))
+	}
+	if strings.TrimSpace(filter.Path) != "" {
+		args = append(args, "%"+strings.TrimSpace(filter.Path)+"%")
+		where = append(where, fmt.Sprintf("path ILIKE $%d", len(args)))
+	}
+	if strings.TrimSpace(filter.Status) != "" {
+		args = append(args, strings.TrimSpace(filter.Status))
+		where = append(where, fmt.Sprintf("status = $%d", len(args)))
+	}
+	if strings.TrimSpace(filter.CreateUser) != "" {
+		args = append(args, strings.TrimSpace(filter.CreateUser))
+		where = append(where, fmt.Sprintf("create_user = $%d", len(args)))
+	}
+	if strings.TrimSpace(filter.IPAddress) != "" {
+		args = append(args, strings.TrimSpace(filter.IPAddress))
+		where = append(where, fmt.Sprintf("ip_address = $%d", len(args)))
+	}
+	if start, ok := parseAPIInvocationLogTime(filter.StartTime); ok {
+		args = append(args, start)
+		where = append(where, fmt.Sprintf("created_at >= $%d", len(args)))
+	}
+	if end, ok := parseAPIInvocationLogTime(filter.EndTime); ok {
+		args = append(args, end)
+		where = append(where, fmt.Sprintf("created_at <= $%d", len(args)))
+	}
+	if strings.TrimSpace(filter.Keyword) != "" {
+		args = append(args, "%"+strings.TrimSpace(filter.Keyword)+"%")
+		idx := len(args)
+		where = append(where, fmt.Sprintf(`(
+  api_key ILIKE $%[1]d OR name ILIKE $%[1]d OR method ILIKE $%[1]d OR path ILIKE $%[1]d OR
+  request_params ILIKE $%[1]d OR response_body ILIKE $%[1]d OR status ILIKE $%[1]d OR
+  create_user ILIKE $%[1]d OR ip_address ILIKE $%[1]d
+)`, idx))
+	}
+	whereClause := strings.Join(where, " AND ")
+	var total int
+	if err := r.pool.QueryRow(ctx, fmt.Sprintf(`
+SELECT COUNT(*)
+  FROM northbound_api_invocation_logs
+ WHERE %s`, whereClause), args...).Scan(&total); err != nil {
+		return APIInvocationLogListResult{}, fmt.Errorf("count northbound_api_invocation_logs: %w", err)
+	}
+	limit := normalizeLimit(filter.Limit)
+	offset := normalizeOffset(filter.Offset)
+	args = append(args, limit, offset)
+	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+SELECT id::text, api_key, name, method, path, request_params, response_body,
+       status_code, status, create_user, ip_address, duration_ms, created_at, updated_at
+  FROM northbound_api_invocation_logs
+ WHERE %s
+ ORDER BY created_at DESC, id DESC
+ LIMIT $%d OFFSET $%d`, whereClause, len(args)-1, len(args)), args...)
+	if err != nil {
+		return APIInvocationLogListResult{}, fmt.Errorf("query northbound_api_invocation_logs: %w", err)
+	}
+	defer rows.Close()
+	items := make([]APIInvocationLog, 0)
+	for rows.Next() {
+		var item APIInvocationLog
+		if err := rows.Scan(
+			&item.ID, &item.APIKey, &item.Name, &item.Method, &item.Path,
+			&item.RequestParams, &item.ResponseBody, &item.StatusCode, &item.Status,
+			&item.CreateUser, &item.IPAddress, &item.DurationMs, &item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
+			return APIInvocationLogListResult{}, fmt.Errorf("scan northbound_api_invocation_logs row: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return APIInvocationLogListResult{}, err
+	}
+	return APIInvocationLogListResult{Items: items, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+func parseAPIInvocationLogTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
+		t, err := time.Parse(layout, value)
+		if err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func scanDeliveryTarget(row scanner) (*DeliveryTarget, error) {

@@ -18,7 +18,8 @@ export function useOperationLogs(
     reason?: string;
     timeRange?: [string, string];
     keyword?: string;
-  } & PageRequest
+  } & PageRequest,
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
     queryKey: ['logs', 'operation', params],
@@ -26,6 +27,30 @@ export function useOperationLogs(
       useMock
         ? logService.getOperationLogs(params)
         : adminApi.getOperationLogs(params),
+    enabled: options?.enabled ?? true,
+  });
+}
+
+export function useNorthboundAPIInvocationLogs(
+  params: {
+    apiKey?: string;
+    name?: string;
+    method?: string;
+    path?: string;
+    status?: string;
+    createUser?: string;
+    ipAddress?: string;
+    timeRange?: [string, string];
+  } & PageRequest,
+  options?: { enabled?: boolean }
+) {
+  return useQuery({
+    queryKey: ['logs', 'northbound-api-invocation', params],
+    queryFn: () =>
+      useMock
+        ? logService.getNorthboundAPIInvocationLogs(params)
+        : adminApi.getNorthboundAPIInvocationLogs(params),
+    enabled: options?.enabled ?? true,
   });
 }
 

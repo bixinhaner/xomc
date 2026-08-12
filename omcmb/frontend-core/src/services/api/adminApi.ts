@@ -9,6 +9,7 @@ import type {
   Role,
   Permission,
   OperationLog,
+  NorthboundAPIInvocationLog,
   OperationType,
   Group,
   ApiEndpoint,
@@ -460,12 +461,40 @@ interface BackendAuditLog {
   createdAt?: string;
 }
 
+interface BackendNorthboundAPIInvocationLog {
+  id: string;
+  api_key?: string;
+  apiKey?: string;
+  name?: string;
+  method?: string;
+  path?: string;
+  request_params?: string;
+  requestParams?: string;
+  response_body?: string;
+  responseBody?: string;
+  status_code?: number;
+  statusCode?: number;
+  status?: string;
+  create_user?: string;
+  createUser?: string;
+  ip_address?: string;
+  ipAddress?: string;
+  duration_ms?: number;
+  durationMs?: number;
+  created_at?: string;
+  createdAt?: string;
+  updated_at?: string;
+  updatedAt?: string;
+}
+
 interface BackendListResponse<T> {
   items: T[];
   total: number;
   page: number;
-  pageSize: number;
-  totalPages: number;
+  pageSize?: number;
+  page_size?: number;
+  totalPages?: number;
+  total_pages?: number;
 }
 
 function mapBackendUser(bu: BackendUser): User {
@@ -590,6 +619,25 @@ function mapBackendAuditLog(ba: BackendAuditLog): OperationLog {
   };
 }
 
+function mapBackendNorthboundAPIInvocationLog(b: BackendNorthboundAPIInvocationLog): NorthboundAPIInvocationLog {
+  return {
+    id: b.id,
+    apiKey: b.api_key ?? b.apiKey ?? '',
+    name: b.name ?? '',
+    method: b.method ?? '',
+    path: b.path ?? '',
+    requestParams: b.request_params ?? b.requestParams ?? '',
+    responseBody: b.response_body ?? b.responseBody ?? '',
+    statusCode: b.status_code ?? b.statusCode ?? 0,
+    status: b.status ?? '',
+    createUser: b.create_user ?? b.createUser ?? '',
+    ipAddress: b.ip_address ?? b.ipAddress ?? '',
+    durationMs: b.duration_ms ?? b.durationMs ?? 0,
+    createdAt: b.created_at ?? b.createdAt ?? '',
+    updatedAt: b.updated_at ?? b.updatedAt ?? '',
+  };
+}
+
 function applyOperationLogNameFilter(query: Record<string, unknown>, logName: string) {
   const mappings: Record<string, { action?: string; resource?: string; keyword?: string }> = {
     config_modify: { action: 'PUT', resource: 'config' },
@@ -635,7 +683,7 @@ function mapUserListResponse(
     items: (resp.items || []).map(mapBackendUser),
     total: resp.total,
     page: resp.page,
-    pageSize: resp.pageSize,
+    pageSize: resp.page_size ?? resp.pageSize ?? 20,
   };
 }
 
@@ -863,7 +911,7 @@ export const adminApi = {
       items: (data.items || []).map(mapBackendRole),
       total: data.total,
       page: data.page,
-      pageSize: data.pageSize,
+      pageSize: data.page_size ?? data.pageSize ?? params.pageSize,
     };
   },
 
@@ -948,7 +996,7 @@ export const adminApi = {
       items: (data.items || []).map(mapBackendGroup),
       total: data.total,
       page: data.page,
-      pageSize: data.pageSize,
+      pageSize: data.page_size ?? data.pageSize ?? params.pageSize,
     };
   },
 
@@ -1041,7 +1089,48 @@ export const adminApi = {
       items: (data.items || []).map(mapBackendAuditLog),
       total: data.total,
       page: data.page,
-      pageSize: data.pageSize,
+      pageSize: data.page_size ?? data.pageSize ?? params.pageSize,
+    };
+  },
+
+  async getNorthboundAPIInvocationLogs(
+    params: {
+      apiKey?: string;
+      name?: string;
+      method?: string;
+      path?: string;
+      status?: string;
+      createUser?: string;
+      ipAddress?: string;
+      timeRange?: [string, string];
+    } & PageRequest
+  ): Promise<PageResponse<NorthboundAPIInvocationLog>> {
+    const query: Record<string, unknown> = {
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+    if (params.apiKey) query.api_key = params.apiKey;
+    if (params.name) query.name = params.name;
+    if (params.method) query.method = params.method;
+    if (params.path) query.path = params.path;
+    if (params.status) query.status = params.status;
+    if (params.createUser) query.create_user = params.createUser;
+    if (params.ipAddress) query.ip_address = params.ipAddress;
+    if (params.timeRange) {
+      query.start_time = params.timeRange[0];
+      query.end_time = params.timeRange[1];
+    }
+
+    const { data } = await http.get<BackendListResponse<BackendNorthboundAPIInvocationLog>>(
+      '/northbound/page-config/api/invocation-logs',
+      { params: query }
+    );
+
+    return {
+      items: (data.items || []).map(mapBackendNorthboundAPIInvocationLog),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size ?? data.pageSize ?? params.pageSize,
     };
   },
 
@@ -1254,7 +1343,7 @@ export const adminApi = {
       items: (data.items || []).map(mapBackendApiEndpoint),
       total: data.total,
       page: data.page,
-      pageSize: data.pageSize,
+      pageSize: data.page_size ?? data.pageSize ?? params.pageSize ?? 20,
     };
   },
 
