@@ -231,19 +231,6 @@ interface MessageFieldRow {
   value: string;
 }
 
-interface MessageRecordRow {
-  key: string;
-  values: Record<string, string>;
-}
-
-interface MessageRecordPreview {
-  title: string;
-  rows: MessageRecordRow[];
-  fields: string[];
-  total?: number;
-  displayed?: number;
-}
-
 interface DelimitedMessageRow {
   key: string;
   command: string;
@@ -299,6 +286,7 @@ const snmpV3SecurityLevelOptions: Array<{ label: string; value: SnmpV3SecurityLe
 
 const snmpDefaultCommunity = 'baicells';
 const storedCredentialText = '已加密存储';
+const credentialMaskText = '********';
 
 interface SocketAlarmConfigRow {
   key: string;
@@ -1508,7 +1496,7 @@ const socketDefaultAccountsByProfile: Record<SocketProfile, SocketAccountRow[]> 
       channel: '实时/消息同步账号',
       username: 'north-msg',
       type: 'msg',
-      credential: '已加密存储',
+      credential: '',
       enabled: true,
       purpose: '登录、实时告警、历史消息同步',
     },
@@ -1519,7 +1507,7 @@ const socketDefaultAccountsByProfile: Record<SocketProfile, SocketAccountRow[]> 
       channel: '实时/消息同步账号',
       username: 'north-msg',
       type: 'msg',
-      credential: '已加密存储',
+      credential: '',
       enabled: true,
       purpose: '登录、实时告警、历史消息同步',
     },
@@ -1528,7 +1516,7 @@ const socketDefaultAccountsByProfile: Record<SocketProfile, SocketAccountRow[]> 
       channel: '文件同步账号',
       username: 'north-file',
       type: 'ftp',
-      credential: '已加密存储',
+      credential: '',
       enabled: true,
       purpose: '登录、告警文件同步请求',
     },
@@ -3922,7 +3910,7 @@ function mapApiSocketAccounts(config: NorthboundSocketAlarmConfig): SocketAccoun
     channel: account.channel,
     username: account.username,
     type: account.type,
-    credential: account.credential_set ? '已加密存储' : '',
+    credential: account.credential || (account.credential_set ? storedCredentialText : ''),
     enabled: account.enabled,
     purpose: account.purpose,
   }));
@@ -3949,7 +3937,7 @@ function serializeSocketConfig(row: SocketAlarmConfigRow, accounts: SocketAccoun
       channel: account.channel,
       username: account.username,
       type: account.type,
-      credential: account.credential === '已加密存储' ? '' : account.credential,
+      credential: account.credential === storedCredentialText ? '' : account.credential,
       purpose: account.purpose,
     })),
   };
@@ -4575,75 +4563,6 @@ function getJsonFieldRows(value: unknown): MessageFieldRow[] {
   }));
 }
 
-const jsonRecordFieldPriority = [
-  'alarmSequenceId',
-  'alarmSeq',
-  'alarmTitle',
-  'alarmStatus',
-  'origSeverity',
-  'eventTime',
-  'neDn',
-  'neUID',
-  'neName',
-  'neType',
-  'objectDn',
-  'objectUID',
-  'objectName',
-  'objectType',
-  'specificProblemID',
-  'specificProblem',
-  'omcReceivedTime',
-  'omcUID',
-];
-
-function getJsonRecordPreview(value: unknown): MessageRecordPreview | null {
-  if (!value) return null;
-  const root = Array.isArray(value) ? { items: value } : value;
-  if (!root || typeof root !== 'object' || Array.isArray(root)) return null;
-  const objectValue = root as Record<string, unknown>;
-  const recordEntries: Array<[string, unknown]> = [
-    ['alarms', objectValue.alarms],
-    ['records', objectValue.records],
-    ['items', objectValue.items],
-    ['messages', objectValue.messages],
-    ['data', objectValue.data],
-  ];
-  const match = recordEntries.find(([, candidate]) => Array.isArray(candidate)
-    && candidate.some((item) => item && typeof item === 'object' && !Array.isArray(item)));
-  if (!match) return null;
-  const [recordKey, rawRows] = match;
-  const rows = (rawRows as unknown[])
-    .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
-    .map((item, index) => ({
-      key: `${recordKey}-${index}`,
-      values: Object.fromEntries(
-        Object.entries(item as Record<string, unknown>).map(([field, fieldValue]) => [field, valuePreview(fieldValue)]),
-      ),
-    }));
-  if (rows.length === 0) return null;
-  const fieldSet = new Set<string>();
-  rows.forEach((row) => {
-    Object.keys(row.values).forEach((field) => fieldSet.add(field));
-  });
-  const priorityFields = jsonRecordFieldPriority.filter((field) => fieldSet.has(field));
-  const remainingFields = Array.from(fieldSet)
-    .filter((field) => !priorityFields.includes(field))
-    .sort((left, right) => left.localeCompare(right));
-  const total = typeof objectValue.total_count === 'number'
-    ? objectValue.total_count
-    : typeof objectValue.count === 'number'
-      ? objectValue.count
-      : undefined;
-  const displayed = typeof objectValue.displayed_count === 'number' ? objectValue.displayed_count : rows.length;
-  return {
-    title: recordKey === 'alarms' ? '告警明细' : '明细列表',
-    rows,
-    fields: [...priorityFields, ...remainingFields].slice(0, 24),
-    total,
-    displayed,
-  };
-}
-
 function parseDelimitedMessages(content: string): DelimitedMessageRow[] {
   return content
     .split(/\r?\n/)
@@ -4688,7 +4607,6 @@ function parseSnmpVarBinds(content: string): SnmpVarBindRow[] {
 function MessageReportPreview({ content }: { content: string }) {
   const formatted = useMemo(() => formatMessagePayload(content), [content]);
   const jsonRows = useMemo(() => getJsonFieldRows(formatted.parsed), [formatted.parsed]);
-  const jsonRecordPreview = useMemo(() => getJsonRecordPreview(formatted.parsed), [formatted.parsed]);
   const delimitedRows = useMemo(() => parseDelimitedMessages(content), [content]);
   const snmpRows = useMemo(() => parseSnmpVarBinds(formatted.text), [formatted.text]);
   const lineCount = content ? content.split(/\r?\n/).length : 0;
@@ -4696,18 +4614,6 @@ function MessageReportPreview({ content }: { content: string }) {
   const fieldColumns: ColumnsType<MessageFieldRow> = [
     { title: '字段', dataIndex: 'field', width: 220, render: (value: string) => <span className={styles.monoText}>{value}</span> },
     { title: '值', dataIndex: 'value', render: (value: string) => <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text> },
-  ];
-  const recordColumns: ColumnsType<MessageRecordRow> = [
-    { title: '序号', width: 70, fixed: 'left', render: (_, __, index) => index + 1 },
-    ...(jsonRecordPreview?.fields ?? []).map((field) => ({
-      title: field,
-      width: field.length > 18 ? 220 : 160,
-      render: (_: unknown, row: MessageRecordRow) => (
-        <Typography.Text ellipsis={{ tooltip: row.values[field] || '-' }}>
-          {row.values[field] || '-'}
-        </Typography.Text>
-      ),
-    })),
   ];
   const snmpColumns: ColumnsType<SnmpVarBindRow> = [
     { title: '序号', dataIndex: 'index', width: 70, fixed: 'left' },
@@ -4751,27 +4657,6 @@ function MessageReportPreview({ content }: { content: string }) {
           pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: jsonRows.length <= 20 }}
           scroll={{ x: 760, y: 260 }}
         />
-      )}
-      {jsonRecordPreview && (
-        <div>
-          <div className={styles.editorSectionHeader}>
-            <Typography.Text strong>{jsonRecordPreview.title}</Typography.Text>
-            <Typography.Text type="secondary">
-              显示 {jsonRecordPreview.displayed ?? jsonRecordPreview.rows.length}
-              {jsonRecordPreview.total !== undefined ? ` / ${jsonRecordPreview.total}` : ''}
-              {' 条'}
-            </Typography.Text>
-          </div>
-          <Table<MessageRecordRow>
-            className={styles.compactScenarioTable}
-            columns={recordColumns}
-            dataSource={jsonRecordPreview.rows}
-            rowKey="key"
-            size="small"
-            pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: jsonRecordPreview.rows.length <= 20 }}
-            scroll={{ x: Math.max(760, (jsonRecordPreview.fields.length + 1) * 150), y: 300 }}
-          />
-        </div>
       )}
       {snmpRows.length === 0 && delimitedRows.length > 0 && (
         <Table<DelimitedMessageRow>
@@ -5184,6 +5069,32 @@ function getSocketFields(profile: SocketProfile) {
 
 function getSocketAccountPurpose(type: SocketAccountRow['type']) {
   return type === 'ftp' ? '登录、告警文件同步请求' : '登录、实时告警、历史消息同步';
+}
+
+function socketCredentialValue(value?: string) {
+  return value && value !== storedCredentialText ? value : '';
+}
+
+function socketCredentialPlaceholder(value?: string) {
+  return value === storedCredentialText ? '未修改保持原密码' : '请输入密码';
+}
+
+function SocketCredentialPreview({ value }: { value?: string }) {
+  const credential = socketCredentialValue(value);
+  if (!credential) {
+    return value === storedCredentialText
+      ? <Tag>{credentialMaskText}</Tag>
+      : <Typography.Text type="secondary">-</Typography.Text>;
+  }
+  return (
+    <Input.Password
+      value={credential}
+      readOnly
+      size="small"
+      className={styles.monoText}
+      style={{ width: 150 }}
+    />
+  );
 }
 
 function cloneDefaultSocketAccounts(profile: SocketProfile, configKey: string) {
@@ -7779,7 +7690,7 @@ export default function NorthboundPageConfig() {
     { title: '账号用途', dataIndex: 'channel', width: 150 },
     { title: '用户名', dataIndex: 'username', width: 160, render: (value: string) => <span className={styles.monoText}>{value || '-'}</span> },
     { title: '类型', dataIndex: 'type', width: 90, render: (value: string) => <Tag>{value}</Tag> },
-    { title: '密码', dataIndex: 'credential', width: 120, render: (value: string) => <Tag>{value}</Tag> },
+    { title: '密码', dataIndex: 'credential', width: 180, render: (value: string) => <SocketCredentialPreview value={value} /> },
     { title: '能力范围', dataIndex: 'purpose', width: 220 },
   ];
 
@@ -7840,14 +7751,16 @@ export default function NorthboundPageConfig() {
     {
       title: '密码',
       dataIndex: 'credential',
-      width: 190,
+      width: 220,
       render: (value: string, row) => (
         <Input.Password
-          placeholder={value === '已加密存储' ? '未修改保持原密码' : '请输入密码'}
+          value={socketCredentialValue(value)}
+          placeholder={socketCredentialPlaceholder(value)}
+          className={styles.monoText}
           onChange={(event) => {
             if (!socketEditor) return;
             updateSocketEditorAccount(row.key, {
-              credential: event.target.value || value,
+              credential: event.target.value,
             });
           }}
         />
@@ -8543,7 +8456,7 @@ export default function NorthboundPageConfig() {
                 rowKey="key"
                 size="small"
                 pagination={false}
-                scroll={{ x: 820 }}
+                scroll={{ x: 900 }}
               />
             </div>
 
@@ -8631,10 +8544,10 @@ export default function NorthboundPageConfig() {
                   <Form.Item label="心跳周期（秒）">
                     <InputNumber value={socketEditor.heartbeatPeriod} min={5} max={3600} style={{ width: '100%' }} onChange={(heartbeatPeriod) => setSocketEditor((current) => (current ? { ...current, heartbeatPeriod: Number(heartbeatPeriod ?? 5) } : current))} />
                   </Form.Item>
-	                  <Form.Item label="超时阈值（次）">
-	                    <InputNumber value={socketEditor.heartbeatTimes} min={1} max={100} style={{ width: '100%' }} onChange={(heartbeatTimes) => setSocketEditor((current) => (current ? { ...current, heartbeatTimes: Number(heartbeatTimes ?? 1) } : current))} />
-	                  </Form.Item>
-	                </div>
+                  <Form.Item label="超时阈值（次）">
+                    <InputNumber value={socketEditor.heartbeatTimes} min={1} max={100} style={{ width: '100%' }} onChange={(heartbeatTimes) => setSocketEditor((current) => (current ? { ...current, heartbeatTimes: Number(heartbeatTimes ?? 1) } : current))} />
+                  </Form.Item>
+                </div>
               </Form>
             </div>
 
@@ -8667,40 +8580,40 @@ export default function NorthboundPageConfig() {
               </Form>
             </div>
 
-	            <div className={styles.editorSection}>
-	              <div className={styles.editorSectionHeader}>
-	                <Typography.Text strong>账号管理</Typography.Text>
-	                <Button size="small" icon={<PlusOutlined />} onClick={() => addSocketEditorAccount(socketEditor)}>
-	                  新增账号
-	                </Button>
-	              </div>
-	              <Table<SocketAccountRow>
-	                columns={socketAccountEditorColumns}
-	                dataSource={socketEditorAccounts}
+            <div className={styles.editorSection}>
+              <div className={styles.editorSectionHeader}>
+                <Typography.Text strong>账号管理</Typography.Text>
+                <Button size="small" icon={<PlusOutlined />} onClick={() => addSocketEditorAccount(socketEditor)}>
+                  新增账号
+                </Button>
+              </div>
+              <Table<SocketAccountRow>
+                columns={socketAccountEditorColumns}
+                dataSource={socketEditorAccounts}
                 rowKey="key"
                 size="small"
                 pagination={false}
-                scroll={{ x: 930 }}
+                scroll={{ x: 1000 }}
               />
             </div>
 
             {socketEditor.profile === 'CUCC' && (
-	              <div className={styles.editorSection}>
-	                <div className={styles.editorSectionHeader}>
-	                  <Typography.Text strong>文件同步传输目标</Typography.Text>
-	                  <Button size="small" icon={<PlusOutlined />} onClick={() => addSocketEditorDeliveryTarget(socketEditor.key)}>
-	                    新增目标
-	                  </Button>
-	                </div>
-	                <Table<DeliveryTargetRow>
-	                  columns={createDeliveryTargetEditorColumns(
-	                    socketEditorDeliveryTargets,
-	                    updateSocketEditorDeliveryTarget,
-	                    removeSocketEditorDeliveryTarget,
-	                    'socket',
-	                    socketEditor.key,
-	                  )}
-	                  dataSource={socketEditorDeliveryTargets}
+              <div className={styles.editorSection}>
+                <div className={styles.editorSectionHeader}>
+                  <Typography.Text strong>文件同步传输目标</Typography.Text>
+                  <Button size="small" icon={<PlusOutlined />} onClick={() => addSocketEditorDeliveryTarget(socketEditor.key)}>
+                    新增目标
+                  </Button>
+                </div>
+                <Table<DeliveryTargetRow>
+                  columns={createDeliveryTargetEditorColumns(
+                    socketEditorDeliveryTargets,
+                    updateSocketEditorDeliveryTarget,
+                    removeSocketEditorDeliveryTarget,
+                    'socket',
+                    socketEditor.key,
+                  )}
+                  dataSource={socketEditorDeliveryTargets}
                   rowKey="key"
                   size="small"
                   pagination={false}
