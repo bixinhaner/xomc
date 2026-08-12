@@ -222,7 +222,7 @@ func (h *DownloadHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	// 应该是空标签。Params.URL 上层若已显式塞凭据走透传；空字符串则渲染成空标签。
 	params.URL = appconfig.NormalizeConfigBackupReference(params.URL)
 	current := h.currentSettings()
-	if isPolicyResolvedDownloadCommand(cmd.CommandKey) && strings.TrimSpace(params.URL) != "" {
+	if strings.TrimSpace(params.URL) != "" {
 		rewrittenURL, ok, err := h.resolvePolicyDownloadURL(cmd, params.URL, current)
 		if err != nil {
 			return nil, err
@@ -278,6 +278,10 @@ func (h *DownloadHandler) resolvePolicyDownloadURL(
 	if !ok {
 		return "", false, nil
 	}
+	params := downloadPolicyParams(cmd)
+	if !isPolicyResolvedDownload(params.policyCommandKey(cmd.CommandKey), params.FileType, params.TransferPolicyManaged, objectSegments) {
+		return "", false, nil
+	}
 	if h.AddressResolver == nil {
 		return "", false, fmt.Errorf("resolve policy-managed Download URL: transfer address resolver is required")
 	}
@@ -306,8 +310,32 @@ func (h *DownloadHandler) resolvePolicyDownloadURL(
 	return builtURL, true, nil
 }
 
-func isPolicyResolvedDownloadCommand(commandKey string) bool {
-	return isConfigRestoreDownloadCommand(commandKey) || isLicenseDownloadCommand(commandKey)
+type policyDownloadParams struct {
+	CommandKey            string `json:"command_key"`
+	FileType              string `json:"file_type"`
+	TransferPolicyManaged bool   `json:"transfer_policy_managed"`
+}
+
+func downloadPolicyParams(cmd *Command) policyDownloadParams {
+	var params policyDownloadParams
+	_ = json.Unmarshal(cmd.Params, &params)
+	return params
+}
+
+func (p policyDownloadParams) policyCommandKey(fallback string) string {
+	if strings.TrimSpace(p.CommandKey) != "" {
+		return p.CommandKey
+	}
+	return fallback
+}
+
+func isPolicyResolvedDownload(commandKey, fileType string, transferPolicyManaged bool, objectSegments []string) bool {
+	return isConfigRestoreDownloadCommand(commandKey) ||
+		isLicenseDownloadCommand(commandKey) ||
+		(transferPolicyManaged &&
+			isSoftwareUpgradeDownloadCommand(commandKey) &&
+			isSoftwareUpgradeDownloadFileType(fileType) &&
+			isManagedSoftwareUpgradeObjectSegments(objectSegments))
 }
 
 func isConfigRestoreDownloadCommand(commandKey string) bool {
@@ -321,6 +349,30 @@ func isLicenseDownloadCommand(commandKey string) bool {
 	commandKey = strings.TrimSpace(commandKey)
 	return strings.HasPrefix(commandKey, "LICENSE_UPGRADE_") ||
 		strings.HasPrefix(commandKey, "LICENSE_PREINSTALL_")
+}
+
+func isSoftwareUpgradeDownloadCommand(commandKey string) bool {
+	return strings.HasPrefix(strings.TrimSpace(commandKey), "Download Upgrade,")
+}
+
+func isSoftwareUpgradeDownloadFileType(fileType string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(fileType))
+	return normalized == "1" ||
+		strings.Contains(normalized, "FIRMWARE UPGRADE IMAGE") ||
+		strings.Contains(normalized, "SOFTWARE UPGRADE PATCH") ||
+		strings.Contains(normalized, "FIRMWARE UPGRADE FPGA")
+}
+
+func isManagedSoftwareUpgradeObjectSegments(segments []string) bool {
+	if len(segments) < 2 || segments[0] != "firmware" {
+		return false
+	}
+	switch strings.ToLower(segments[1]) {
+	case "img", "patch", "fpga":
+		return true
+	default:
+		return false
+	}
 }
 
 func downloadObjectSegments(rawURL, servicePath string) ([]string, bool, error) {
