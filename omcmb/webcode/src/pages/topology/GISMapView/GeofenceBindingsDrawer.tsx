@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   App,
   Alert,
@@ -40,6 +40,7 @@ import {
 import type {
   GeofenceBindingDetail,
   GeofenceControlAction,
+  GeofenceJobStatus,
   GeofenceManualBindingPreview,
   GeofenceMapDefinition,
 } from '@core/types/geofence';
@@ -54,6 +55,141 @@ interface GeofenceBindingsDrawerProps {
 interface BindingAction {
   kind: 'suspend' | 'resume' | 'remove';
   binding: GeofenceBindingDetail;
+}
+
+interface ManualBindJobTracking {
+  jobId: string;
+  targetGeofenceId: string;
+  affectedGeofenceIds: string[];
+  status?: GeofenceJobStatus;
+}
+
+interface ManualBindJobTrackerProps {
+  tracking: ManualBindJobTracking;
+  visible: boolean;
+  onStatusChange: (
+    targetGeofenceId: string,
+    jobId: string,
+    status: GeofenceJobStatus,
+  ) => void;
+}
+
+function ManualBindJobTracker({
+  tracking,
+  visible,
+  onStatusChange,
+}: ManualBindJobTrackerProps) {
+  const intl = useIntl();
+  const appContext = App.useApp();
+  const message = typeof (appContext.message as { success?: unknown }).success === 'function'
+    ? appContext.message
+    : staticMessage;
+  const notifiedTerminalJobRef = useRef<string | undefined>(undefined);
+  const jobQuery = useGeofenceManualBindJob(
+    tracking.jobId,
+    tracking.affectedGeofenceIds,
+  );
+  const itemsQuery = useGeofenceManualBindItems(
+    tracking.jobId,
+    { page: 1, pageSize: 50 },
+    { enabled: visible },
+  );
+  const job = jobQuery.data;
+
+  useEffect(() => {
+    if (!job) return;
+    onStatusChange(
+      tracking.targetGeofenceId,
+      tracking.jobId,
+      job.status,
+    );
+    if (
+      !['succeeded', 'failed', 'canceled'].includes(job.status) ||
+      notifiedTerminalJobRef.current === `${job.id}:${job.status}`
+    ) {
+      return;
+    }
+    notifiedTerminalJobRef.current = `${job.id}:${job.status}`;
+    if (job.status === 'succeeded') {
+      void message.success(
+        intl.formatMessage(
+          { id: 'geofence.message.bindingJobCompleted' },
+          {
+            succeeded: job.progress.succeeded,
+            skipped: job.progress.skipped,
+            failed: job.progress.failed,
+          },
+        ),
+      );
+    } else if (job.status === 'failed') {
+      void message.error(
+        intl.formatMessage({ id: 'geofence.message.bindingJobFailed' }),
+      );
+    } else {
+      void message.warning(
+        intl.formatMessage({ id: 'geofence.message.bindingJobCanceled' }),
+      );
+    }
+  }, [
+    intl,
+    job,
+    message,
+    onStatusChange,
+    tracking.jobId,
+    tracking.targetGeofenceId,
+  ]);
+
+  if (!visible) return null;
+
+  const completed = job
+    ? job.progress.total - job.progress.pending
+    : 0;
+  return (
+    <>
+      {jobQuery.isError && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginTop: 20 }}
+          title={intl.formatMessage({
+            id: 'geofence.message.bindingJobStatusRetrying',
+          })}
+        />
+      )}
+      {job && (
+        <Descriptions
+          column={1}
+          size="small"
+          title={intl.formatMessage({ id: 'geofence.job.title' })}
+          style={{ marginTop: 20 }}
+        >
+          <Descriptions.Item
+            label={intl.formatMessage({
+              id: `geofence.job.status.${job.status}`,
+            })}
+          >
+            {intl.formatMessage(
+              { id: 'geofence.job.progress' },
+              {
+                completed,
+                total: job.progress.total,
+              },
+            )}
+          </Descriptions.Item>
+          {itemsQuery.data?.items.map((jobItem) => (
+            <Descriptions.Item
+              key={jobItem.id}
+              label={jobItem.deviceSN ?? jobItem.inputValue}
+            >
+              {intl.formatMessage({
+                id: `geofence.job.itemStatus.${jobItem.status}`,
+              })}
+            </Descriptions.Item>
+          ))}
+        </Descriptions>
+      )}
+    </>
+  );
 }
 
 const PREVIEW_REASON_MESSAGE_IDS: Record<string, string> = {
@@ -121,7 +257,9 @@ export default function GeofenceBindingsDrawer({
   const [reason, setReason] = useState('');
   const [preview, setPreview] =
     useState<GeofenceManualBindingPreview>();
-  const [jobId, setJobId] = useState<string>();
+  const [jobTrackings, setJobTrackings] = useState<
+    ManualBindJobTracking[]
+  >([]);
   const [bindingView, setBindingView] = useState<'current' | 'history'>(
     'current',
   );
@@ -130,9 +268,14 @@ export default function GeofenceBindingsDrawer({
   const [bindingActionReason, setBindingActionReason] =
     useState('');
   const geofenceId = item?.definition.id;
-  const bindingsQuery = useGeofenceBindings(
+  const currentBindingsQuery = useGeofenceBindings(
     geofenceId,
-    { page: 1, pageSize: 50 },
+    { status: 'current', page: 1, pageSize: 50 },
+    { enabled: open },
+  );
+  const historyBindingsQuery = useGeofenceBindings(
+    geofenceId,
+    { status: 'removed', page: 1, pageSize: 50 },
     { enabled: open },
   );
   const definitionsQuery = useGeofenceDefinitions({}, { enabled: open });
@@ -143,11 +286,8 @@ export default function GeofenceBindingsDrawer({
   const previewMutation = usePreviewGeofenceManualBindings();
   const createJobMutation = useCreateGeofenceManualBindJob();
   const exportMutation = useExportGeofenceBindings();
-  const jobQuery = useGeofenceManualBindJob(jobId, geofenceId);
-  const itemsQuery = useGeofenceManualBindItems(
-    jobId,
-    { page: 1, pageSize: 50 },
-    { enabled: Boolean(jobId) },
+  const currentJobTracking = jobTrackings.find(
+    (tracking) => tracking.targetGeofenceId === geofenceId,
   );
   const suspendMutation = useSuspendGeofenceBinding();
   const resumeMutation = useResumeGeofenceBinding();
@@ -156,19 +296,48 @@ export default function GeofenceBindingsDrawer({
   const executableCount = preview
     ? preview.eligibleCount + preview.moveCount
     : 0;
-  const bindingItems = bindingsQuery.data?.items ?? [];
-  const visibleBindings = bindingItems.filter((binding) =>
-    bindingView === 'current'
-      ? binding.status === 'active' || binding.status === 'suspended'
-      : binding.status === 'removed',
+  const jobInProgress = Boolean(
+    currentJobTracking &&
+      (!currentJobTracking.status ||
+        ['pending', 'running', 'zombie'].includes(
+          currentJobTracking.status,
+        )),
   );
-  const currentBindingCount = bindingItems.filter(
+  const handleJobStatusChange = useCallback(
+    (
+      targetGeofenceId: string,
+      jobId: string,
+      status: GeofenceJobStatus,
+    ) => {
+      setJobTrackings((current) => {
+        const trackedJob = current.find(
+          (tracking) =>
+            tracking.targetGeofenceId === targetGeofenceId &&
+            tracking.jobId === jobId,
+        );
+        if (!trackedJob || trackedJob.status === status) {
+          return current;
+        }
+        return current.map((tracking) =>
+          tracking === trackedJob ? { ...tracking, status } : tracking,
+        );
+      });
+    },
+    [],
+  );
+  const currentBindings = (currentBindingsQuery.data?.items ?? []).filter(
     (binding) =>
       binding.status === 'active' || binding.status === 'suspended',
-  ).length;
-  const historyBindingCount = bindingItems.filter(
+  );
+  const historyBindings = (historyBindingsQuery.data?.items ?? []).filter(
     (binding) => binding.status === 'removed',
-  ).length;
+  );
+  const visibleBindings =
+    bindingView === 'current' ? currentBindings : historyBindings;
+  const currentBindingCount = currentBindingsQuery.data?.total ?? 0;
+  const historyBindingCount = historyBindingsQuery.data?.total ?? 0;
+  const selectedBindingsQuery =
+    bindingView === 'current' ? currentBindingsQuery : historyBindingsQuery;
   const geofenceNameByID = new Map(
     (definitionsQuery.data ?? []).map((geofence) => [
       geofence.id,
@@ -181,7 +350,6 @@ export default function GeofenceBindingsDrawer({
       setInputText('');
       setReason('');
       setPreview(undefined);
-      setJobId(undefined);
       setBindingView('current');
       return;
     }
@@ -249,7 +417,8 @@ export default function GeofenceBindingsDrawer({
       !geofenceId ||
       !preview ||
       executableCount === 0 ||
-      !reason.trim()
+      !reason.trim() ||
+      jobInProgress
     ) {
       return;
     }
@@ -262,7 +431,26 @@ export default function GeofenceBindingsDrawer({
           reason: reason.trim(),
         },
       });
-      setJobId(accepted.jobId);
+      const affectedGeofenceIds = Array.from(
+        new Set([
+          geofenceId,
+          ...preview.items.flatMap((previewItem) =>
+            previewItem.sourceGeofenceId
+              ? [previewItem.sourceGeofenceId]
+              : [],
+          ),
+        ]),
+      );
+      setJobTrackings((current) => [
+        ...current.filter(
+          (tracking) => tracking.targetGeofenceId !== geofenceId,
+        ),
+        {
+          jobId: accepted.jobId,
+          targetGeofenceId: geofenceId,
+          affectedGeofenceIds,
+        },
+      ]);
       void message.success(
         intl.formatMessage({
           id: 'geofence.message.bindingJobCreated',
@@ -284,7 +472,7 @@ export default function GeofenceBindingsDrawer({
     try {
       await exportMutation.mutateAsync({
         id: geofenceId,
-        filter: {},
+        filter: { status: 'current' },
       });
       void message.success(
         intl.formatMessage({
@@ -301,10 +489,6 @@ export default function GeofenceBindingsDrawer({
       );
     }
   };
-
-  const completed = jobQuery.data
-    ? jobQuery.data.progress.total - jobQuery.data.progress.pending
-    : 0;
 
   return (
     <Drawer
@@ -359,9 +543,9 @@ export default function GeofenceBindingsDrawer({
           </Tooltip>
         </Space>
       </div>
-      {bindingsQuery.isLoading ? (
+      {selectedBindingsQuery.isLoading ? (
         <Spin style={{ display: 'block', margin: 24 }} />
-      ) : bindingsQuery.isError ? (
+      ) : selectedBindingsQuery.isError ? (
         <Alert
           type="error"
           showIcon
@@ -371,7 +555,7 @@ export default function GeofenceBindingsDrawer({
           action={
             <Button
               size="small"
-              onClick={() => void bindingsQuery.refetch()}
+              onClick={() => void selectedBindingsQuery.refetch()}
             >
               {intl.formatMessage({ id: 'common.retry' })}
             </Button>
@@ -895,7 +1079,9 @@ export default function GeofenceBindingsDrawer({
             <span>
               <Button
                 type="primary"
-                disabled={executableCount === 0 || !reason.trim()}
+                disabled={
+                  executableCount === 0 || !reason.trim() || jobInProgress
+                }
                 loading={createJobMutation.isPending}
                 onClick={() => void createJob()}
               >
@@ -908,38 +1094,16 @@ export default function GeofenceBindingsDrawer({
         </div>
       )}
 
-      {jobQuery.data && (
-        <Descriptions
-          column={1}
-          size="small"
-          title={intl.formatMessage({ id: 'geofence.job.title' })}
-          style={{ marginTop: 20 }}
-        >
-          <Descriptions.Item
-            label={intl.formatMessage({
-              id: `geofence.job.status.${jobQuery.data.status}`,
-            })}
-          >
-            {intl.formatMessage(
-              { id: 'geofence.job.progress' },
-              {
-                completed,
-                total: jobQuery.data.progress.total,
-              },
-            )}
-          </Descriptions.Item>
-          {itemsQuery.data?.items.map((jobItem) => (
-            <Descriptions.Item
-              key={jobItem.id}
-              label={jobItem.deviceSN ?? jobItem.inputValue}
-            >
-              {intl.formatMessage({
-                id: `geofence.job.itemStatus.${jobItem.status}`,
-              })}
-            </Descriptions.Item>
-          ))}
-        </Descriptions>
-      )}
+      {jobTrackings.map((tracking) => (
+        <ManualBindJobTracker
+          key={tracking.jobId}
+          tracking={tracking}
+          visible={
+            open && tracking.targetGeofenceId === geofenceId
+          }
+          onStatusChange={handleJobStatusChange}
+        />
+      ))}
       <Modal
         open={Boolean(bindingAction)}
         title={intl.formatMessage({

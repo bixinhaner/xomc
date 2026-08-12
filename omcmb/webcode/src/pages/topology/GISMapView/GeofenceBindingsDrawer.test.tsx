@@ -72,6 +72,15 @@ const fence: GeofenceMapDefinition = {
   currentVersion: null,
 };
 
+const secondFence: GeofenceMapDefinition = {
+  ...fence,
+  definition: {
+    ...fence.definition,
+    id: 'fence-2',
+    name: '备用围栏',
+  },
+};
+
 const sourceFence: GeofenceMapDefinition = {
   ...fence,
   definition: {
@@ -108,18 +117,22 @@ const preview: GeofenceManualBindingPreview = {
   previewFingerprint: 'binding-preview',
 };
 
+function drawerElement(open = true, item: GeofenceMapDefinition | undefined = fence) {
+  return (
+    <IntlProvider
+      locale="zh-CN"
+      defaultLocale="zh-CN"
+      messages={getMessages('zh-CN')}
+    >
+      <GeofenceBindingsDrawer open={open} item={item} onClose={vi.fn()} />
+    </IntlProvider>
+  );
+}
+
 function renderDrawer() {
   return {
     user: userEvent.setup(),
-    ...render(
-      <IntlProvider
-        locale="zh-CN"
-        defaultLocale="zh-CN"
-        messages={getMessages('zh-CN')}
-      >
-        <GeofenceBindingsDrawer open item={fence} onClose={vi.fn()} />
-      </IntlProvider>,
-    ),
+    ...render(drawerElement()),
   };
 }
 
@@ -129,7 +142,7 @@ describe('GeofenceBindingsDrawer', () => {
     mocks.definitionsQuery.mockReturnValue({
       data: [fence.definition, sourceFence.definition],
     });
-    mocks.bindingsQuery.mockReturnValue({
+    const currentBindingsResult = {
       data: {
         items: [
           {
@@ -163,7 +176,24 @@ describe('GeofenceBindingsDrawer', () => {
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
-    });
+    };
+    const historyBindingsResult = {
+      data: {
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 50,
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    };
+    mocks.bindingsQuery.mockImplementation(
+      (_id: string, filter: { status?: string }) =>
+        filter?.status === 'removed'
+          ? historyBindingsResult
+          : currentBindingsResult,
+    );
     mocks.actionsQuery.mockReturnValue({
       data: [],
       isLoading: false,
@@ -196,6 +226,7 @@ describe('GeofenceBindingsDrawer', () => {
             },
           }
         : undefined,
+      isError: false,
     }));
     mocks.itemsQuery.mockImplementation((id?: string) => ({
       data: id
@@ -212,6 +243,11 @@ describe('GeofenceBindingsDrawer', () => {
   it('normalizes SN separators, previews eligibility, and creates the existing batch job', async () => {
     const { user } = renderDrawer();
 
+    expect(mocks.bindingsQuery).toHaveBeenCalledWith(
+      'fence-1',
+      { status: 'current', page: 1, pageSize: 50 },
+      { enabled: true },
+    );
     expect(screen.getAllByText('已绑定设备')).toHaveLength(2);
     await user.type(
       screen.getByLabelText('输入设备 SN，支持空格、逗号或分号分隔'),
@@ -249,7 +285,7 @@ describe('GeofenceBindingsDrawer', () => {
     );
     expect(mocks.jobQuery).toHaveBeenLastCalledWith(
       'job-1',
-      'fence-1',
+      ['fence-1'],
     );
     expect(await screen.findByText('已完成 2/2')).toBeInTheDocument();
   });
@@ -292,16 +328,135 @@ describe('GeofenceBindingsDrawer', () => {
     expect(
       screen.getByRole('button', { name: '创建绑定任务' }),
     ).toBeEnabled();
+    await user.click(
+      screen.getByRole('button', { name: '创建绑定任务' }),
+    );
+    await waitFor(() =>
+      expect(mocks.jobQuery).toHaveBeenLastCalledWith(
+        'job-1',
+        ['fence-1', 'old-fence'],
+      ),
+    );
+  });
+
+  it('keeps tracking a submitted job after the drawer closes', async () => {
+    const { user, rerender } = renderDrawer();
+
+    await user.type(
+      screen.getByLabelText('输入设备 SN，支持空格、逗号或分号分隔'),
+      'SN001',
+    );
+    await user.click(screen.getByRole('button', { name: '绑定设备预览' }));
+    await user.type(screen.getByLabelText('操作原因'), '调整围栏归属');
+    await user.click(screen.getByRole('button', { name: '创建绑定任务' }));
+
+    await waitFor(() =>
+      expect(mocks.jobQuery).toHaveBeenLastCalledWith(
+        'job-1',
+        ['fence-1'],
+      ),
+    );
+
+    rerender(drawerElement(false, undefined));
+
+    expect(mocks.jobQuery).toHaveBeenLastCalledWith(
+      'job-1',
+      ['fence-1'],
+    );
+  });
+
+  it('keeps one fence job in the background without leaking it into another fence', async () => {
+    mocks.jobQuery.mockImplementation((id?: string) => ({
+      data: id
+        ? {
+            id,
+            jobType: 'manual_bind',
+            status: 'running',
+            geofenceId: 'fence-1',
+            requestedBy: 'operator',
+            reason: '调整围栏归属',
+            attempt: 1,
+            maxAttempts: 3,
+            createdAt: '2026-07-31T08:00:00Z',
+            progress: {
+              total: 1,
+              pending: 1,
+              succeeded: 0,
+              skipped: 0,
+              failed: 0,
+            },
+          }
+        : undefined,
+      isError: false,
+    }));
+    const { user, rerender } = renderDrawer();
+
+    await user.type(
+      screen.getByLabelText('输入设备 SN，支持空格、逗号或分号分隔'),
+      'SN001',
+    );
+    await user.click(screen.getByRole('button', { name: '绑定设备预览' }));
+    await user.type(screen.getByLabelText('操作原因'), '调整围栏归属');
+    await user.click(screen.getByRole('button', { name: '创建绑定任务' }));
+
+    expect(await screen.findByText('批量绑定任务')).toBeInTheDocument();
+    rerender(drawerElement(true, secondFence));
+
+    await waitFor(() =>
+      expect(mocks.bindingsQuery).toHaveBeenCalledWith(
+        'fence-2',
+        { status: 'current', page: 1, pageSize: 50 },
+        { enabled: true },
+      ),
+    );
+    expect(screen.queryByText('批量绑定任务')).not.toBeInTheDocument();
+    expect(mocks.itemsQuery).toHaveBeenLastCalledWith(
+      'job-1',
+      { page: 1, pageSize: 50 },
+      { enabled: false },
+    );
+
+    await user.type(
+      screen.getByLabelText('输入设备 SN，支持空格、逗号或分号分隔'),
+      'SN002',
+    );
+    await user.click(screen.getByRole('button', { name: '绑定设备预览' }));
+    expect(
+      screen.getByRole('button', { name: '创建绑定任务' }),
+    ).toBeEnabled();
+  });
+
+  it('shows that an unavailable first job response is being retried', async () => {
+    mocks.jobQuery.mockReturnValue({
+      data: undefined,
+      isError: true,
+    });
+    const { user } = renderDrawer();
+
+    await user.type(
+      screen.getByLabelText('输入设备 SN，支持空格、逗号或分号分隔'),
+      'SN001',
+    );
+    await user.click(screen.getByRole('button', { name: '绑定设备预览' }));
+    await user.type(screen.getByLabelText('操作原因'), '调整围栏归属');
+    await user.click(screen.getByRole('button', { name: '创建绑定任务' }));
+
+    expect(
+      await screen.findByText('任务状态暂时无法获取，系统正在自动重试'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '创建绑定任务' }),
+    ).toBeDisabled();
   });
 
   it('separates removed binding history from current assignments', async () => {
     const baseBinding = mocks.bindingsQuery().data.items[0];
-    mocks.bindingsQuery.mockReturnValue({
-      ...mocks.bindingsQuery(),
+    const currentResult = mocks.bindingsQuery();
+    const historyResult = {
+      ...currentResult,
       data: {
-        ...mocks.bindingsQuery().data,
+        ...currentResult.data,
         items: [
-          baseBinding,
           {
             ...baseBinding,
             id: 'binding-removed',
@@ -310,9 +465,13 @@ describe('GeofenceBindingsDrawer', () => {
             status: 'removed',
           },
         ],
-        total: 2,
+        total: 1,
       },
-    });
+    };
+    mocks.bindingsQuery.mockImplementation(
+      (_id: string, filter: { status?: string }) =>
+        filter?.status === 'removed' ? historyResult : currentResult,
+    );
     const { user } = renderDrawer();
 
     expect(screen.getAllByText('已绑定设备')).toHaveLength(2);
@@ -376,7 +535,7 @@ describe('GeofenceBindingsDrawer', () => {
     await waitFor(() =>
       expect(mocks.exportBindings).toHaveBeenCalledWith({
         id: 'fence-1',
-        filter: {},
+        filter: { status: 'current' },
       }),
     );
   });

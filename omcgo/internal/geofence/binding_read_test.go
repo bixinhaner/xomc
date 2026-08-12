@@ -20,6 +20,18 @@ func TestNormalizeBindingDetailFilterDefaultsPagination(t *testing.T) {
 	require.Equal(t, DefaultBindingPageSize, got.PageSize)
 }
 
+func TestNormalizeBindingDetailFilterRejectsCurrentScopeWithExplicitStatus(
+	t *testing.T,
+) {
+	_, err := normalizeBindingDetailFilter(BindingDetailFilter{
+		GeofenceID:  uuid.New(),
+		Status:      BindingStatusActive,
+		CurrentOnly: true,
+	})
+
+	require.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+}
+
 func TestNormalizeBindingDetailFilterRejectsInvalidInputs(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -117,6 +129,21 @@ func TestBuildListBindingDetailsQueryDoesNotFilterSuperAdministrator(
 	require.NotContains(t, query, "d.id IN (SELECT device_id")
 	require.NotContains(t, query, "WHERE FALSE")
 	require.Len(t, args, 1)
+}
+
+func TestBuildListBindingDetailsQueryFiltersCurrentBindings(t *testing.T) {
+	query, args, err := buildListBindingDetailsQuery(BindingDetailFilter{
+		GeofenceID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+		CurrentOnly: true,
+		Page:        1,
+		PageSize:    50,
+	})
+
+	require.NoError(t, err)
+	require.Contains(t, query, "binding.status IN")
+	require.Contains(t, args, BindingStatusActive)
+	require.Contains(t, args, BindingStatusSuspended)
+	require.NotContains(t, args, BindingStatusRemoved)
 }
 
 func (f *fakeRepository) ListBindingDetails(

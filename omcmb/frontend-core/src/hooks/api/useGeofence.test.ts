@@ -96,8 +96,9 @@ describe('geofence query contract', () => {
     },
   );
 
-  it('stops polling when no job is available', () => {
-    expect(geofenceJobRefetchInterval(undefined)).toBe(false);
+  it('keeps polling while the first job response is unavailable', () => {
+    expect(geofenceJobRefetchInterval(undefined)).toBe(2000);
+    expect(geofenceJobRefetchInterval(undefined, 500)).toBe(500);
   });
 });
 
@@ -156,7 +157,7 @@ describe('geofence cache invalidation contract', () => {
     await invalidateGeofenceCompletedJobCaches(
       { invalidateQueries },
       'job-1',
-      'geofence-1',
+      ['geofence-1', 'geofence-2', 'geofence-1'],
     );
 
     expect(invalidateQueries.mock.calls).toEqual([
@@ -164,6 +165,12 @@ describe('geofence cache invalidation contract', () => {
         {
           queryKey:
             geofenceKeys.bindingLists('geofence-1'),
+        },
+      ],
+      [
+        {
+          queryKey:
+            geofenceKeys.bindingLists('geofence-2'),
         },
       ],
       [{ queryKey: geofenceKeys.maps() }],

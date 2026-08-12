@@ -279,7 +279,7 @@ describe('geofenceApi read contract', () => {
     });
 
     const page = await geofenceApi.listBindings('geofence-1', {
-      status: 'active',
+      status: 'current',
       keyword: 'SN001',
       page: 2,
       pageSize: 20,
@@ -289,7 +289,7 @@ describe('geofenceApi read contract', () => {
       '/geofences/geofence-1/bindings',
       {
         params: {
-          status: 'active',
+          status: 'current',
           keyword: 'SN001',
           page: 2,
           page_size: 20,

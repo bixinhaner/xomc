@@ -38,6 +38,10 @@ vi.mock('@/components/GISMap/useMapConfig', () => ({
   }),
 }));
 
+vi.mock('./GeofenceBindingsDrawer', () => ({
+  default: () => null,
+}));
+
 vi.mock('@core/hooks/api/useTopology', () => ({
   useDomainTree: () => ({ data: [], isLoading: false }),
   useDeviceAntennaSectors: () => ({ data: [] }),
