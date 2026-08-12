@@ -41,7 +41,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
-import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
+import { useParameterSchema, useSyncStatus } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import { deviceTaskApi, isAbortError } from '@core/services/api/deviceTaskApi';
 import { useDeviceBySn, useDeviceGroups, useRenameDevice, useSyncDeviceParams } from '@core/hooks/api/useDevices';
@@ -881,6 +881,26 @@ const renderFieldGroup = (group: FieldGroup, device: DetailDevice) => (
   </Descriptions>
 );
 
+const BM_OPTICAL_MODULE_FIELDS = [
+  ['identifier', 'device.optical.identifier'],
+  ['connector', 'device.optical.connector'],
+  ['transmissionMedia', 'device.optical.transmissionMedia'],
+  ['encodeing', 'device.optical.encoding'],
+  ['linkLength', 'device.optical.linkLength'],
+  ['vendorName', 'device.optical.vendorName'],
+  ['vendorPn', 'device.optical.vendorPn'],
+  ['ethComplianceCodes', 'device.optical.complianceCodes'],
+  ['wavelength', 'device.optical.wavelength'],
+  ['options', 'device.optical.options'],
+  ['bitRate', 'device.optical.bitRate'],
+  ['transceiverTemperature', 'device.optical.temperature'],
+  ['supplyVoltage', 'device.optical.supplyVoltage'],
+  ['txBiasionCurrent', 'device.optical.txBiasCurrent'],
+  ['txOpticalOutputPower', 'device.optical.txPower'],
+  ['rxOpticalInputPower', 'device.optical.rxPower'],
+  ['linkStatus', 'device.optical.linkStatus'],
+] as const;
+
 const firstText = (...values: Array<string | number | null | undefined>): string => {
   for (const value of values) {
     if (!isBlankDetailValue(value)) return String(value).trim();
@@ -1615,6 +1635,14 @@ export default function DeviceDetail() {
     ?? '')
     .trim()
     .toUpperCase()) === 'BTS';
+  const { data: opticalModuleSchema, isLoading: opticalModuleLoading } = useParameterSchema(
+    device?.id ?? '',
+    'Device.DeviceInfo.OpticalModInfo.1.',
+    activeTab === 'basic' && isBmProduct,
+  );
+  const opticalModuleValues = useMemo(() => new Map(
+    (opticalModuleSchema?.parameters ?? []).map((parameter) => [parameter.path, parameter.currentValue]),
+  ), [opticalModuleSchema?.parameters]);
 
   // 概览页小区列表的实例过滤规则与「快速设置」tab 完全一致，统一走 useResolvedCellInstances。
   const detailResolved = useResolvedCellInstances({
@@ -2237,6 +2265,32 @@ export default function DeviceDetail() {
               children: (
                 <div style={{ padding: '16px 0' }}>
                   {detailGroups[0] && renderFieldGroup(detailGroups[0], displayDevice)}
+                  {isBmProduct && (
+                    <Descriptions
+                      title={t('device.group.opticalModule')}
+                      bordered
+                      column={{ xs: 1, sm: 2, md: 3, lg: 4 }}
+                      size="small"
+                      style={{ marginBottom: 16 }}
+                    >
+                      {BM_OPTICAL_MODULE_FIELDS.map(([leaf, labelKey]) => {
+                        const rawValue = opticalModuleValues.get(`Device.DeviceInfo.OpticalModInfo.1.${leaf}`);
+                        const value = rawValue == null || String(rawValue).trim() === '' ? '-' : String(rawValue);
+                        const content = leaf === 'linkStatus' && value !== '-'
+                          ? (
+                            <Tag color={value.toLowerCase() === 'true' || value === '1' ? 'success' : 'default'}>
+                              {t(value.toLowerCase() === 'true' || value === '1' ? 'status.online' : 'status.offline')}
+                            </Tag>
+                          )
+                          : value;
+                        return (
+                          <Descriptions.Item key={leaf} label={t(labelKey)}>
+                            {opticalModuleLoading ? <Skeleton.Input active size="small" /> : content}
+                          </Descriptions.Item>
+                        );
+                      })}
+                    </Descriptions>
+                  )}
                   {cellGroup && (
                     <Card
                       size="small"

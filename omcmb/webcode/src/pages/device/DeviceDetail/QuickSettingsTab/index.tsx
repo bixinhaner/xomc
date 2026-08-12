@@ -162,6 +162,7 @@ const OUTER_GROUP_IDS = new Set([
   'device-time', 'bm-sync-source', 'gnb-sync-source',
   'gnb-network-interface', 'gnb-network-default-route', 'gnb-network-dscp',
   'gnb-network-dscp-list', 'gnb-network-static-route',
+  'bm-network-settings',
   'device-ipsec-control', 'device-ipsec', 'gnb-ipsec',
 ]);
 const FIXED_NETWORK_TABLE_MODELS = new Set(['BLN', 'BLQ', 'MLN', 'MLQ']);

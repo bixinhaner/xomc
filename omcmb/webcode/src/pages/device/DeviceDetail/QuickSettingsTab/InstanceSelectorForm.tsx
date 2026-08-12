@@ -58,6 +58,7 @@ import {
   type QuickSettingsInstanceContext,
 } from './validators';
 import MultiInstanceTable from './MultiInstanceTable';
+import { rowsWithNestedInstances } from './subTableExpansion';
 
 /** 字段控件类型(原 bscPanelDefs.ts，现内联，由 XML 驱动)。 */
 type BscFieldType = 'string' | 'int' | 'enum' | 'multiCheckbox';
@@ -331,6 +332,7 @@ function renderSubTable(
   savePending = false,
   expandedRowRender?: (row: { id: number }) => React.ReactNode,
   onEdit?: (rowIdx: number) => void,
+  defaultExpandedRowKeys: number[] = [],
 ): React.ReactNode {
   const dataSource = rowIds.map((id) => ({ key: id, id }));
   const columns = [
@@ -396,10 +398,10 @@ function renderSubTable(
       style={{
         position: 'relative',
         marginBottom: listAddStyle ? 4 : 0,
-        border: listAddStyle ? '1px solid #d7dce5' : undefined,
+        border: listAddStyle ? '1px solid var(--color-border, #d7dce5)' : undefined,
         borderRadius: 0,
         boxShadow: 'none',
-        background: listAddStyle ? '#fff' : undefined,
+        background: listAddStyle ? 'var(--color-bg-container, #fff)' : undefined,
         padding: listAddStyle ? '4px 4px 0' : undefined,
       }}
     >
@@ -428,7 +430,7 @@ function renderSubTable(
         rowKey="key"
         dataSource={dataSource}
         columns={columns}
-        expandable={expandedRowRender ? { expandedRowRender } : undefined}
+        expandable={expandedRowRender ? { expandedRowRender, defaultExpandedRowKeys } : undefined}
         locale={{ emptyText: locale === 'zh-CN' ? '暂无数据' : 'No data' }}
       />
     </div>
@@ -533,18 +535,14 @@ export default function InstanceSelectorForm({
 
   const [selectedInstId, setSelectedInstId] = useState<string | null>(null);
 
-  // schema 加载完成后自动选中第一个实例（若当前没选 / 选中已不存在）
+  // schema 加载完成后优先选中 WAN；用户手动切换到其它物理口后保持其选择。
   useEffect(() => {
     if (instanceIds.length === 0) {
       if (selectedInstId !== null) setSelectedInstId(null);
       return;
     }
-    if (wanInstanceId && selectedInstId !== wanInstanceId) {
-      setSelectedInstId(wanInstanceId);
-      return;
-    }
     if (!selectedInstId || !instanceIds.includes(selectedInstId)) {
-      setSelectedInstId(instanceIds[0]);
+      setSelectedInstId(wanInstanceId ?? instanceIds[0]);
     }
   }, [instanceIds, selectedInstId, wanInstanceId]);
 
@@ -1044,8 +1042,8 @@ export default function InstanceSelectorForm({
   const handleNrWanAdd = useCallback(async () => {
     if (!selectedInstId || !nrWanAdd) return;
     const vlanId = Number(nrWanAdd.vlanId);
-    if (!nrWanAdd.vlanName || nrWanAdd.vlanName.length > 13 || !Number.isInteger(vlanId) || vlanId < 0 || vlanId > 4094) {
-      message.error(locale === 'zh-CN' ? 'VLAN Name 长度需为 1~13，VLAN ID 需为 0~4094 的整数' : 'VLAN Name must be 1-13 characters and VLAN ID an integer from 0 to 4094');
+    if (!nrWanAdd.vlanName || nrWanAdd.vlanName.length > 13 || !Number.isInteger(vlanId) || vlanId < 2 || vlanId > 4094) {
+      message.error(locale === 'zh-CN' ? 'VLAN Name 长度需为 1~13，VLAN ID 需为 2~4094 的整数' : 'VLAN Name must be 1-13 characters and VLAN ID an integer from 2 to 4094');
       return;
     }
     const vlanBase = `${objectPath}${selectedInstId}.VlanInterface.`;
@@ -1074,12 +1072,12 @@ export default function InstanceSelectorForm({
         kind: 'multi', action: 'save', submitStatus: 'queued', taskId: updateResult.taskId,
         savedInstId: selectedInstId, detail: `VLAN ${vlanInstance}`, at: Date.now(),
       });
-      message.success({ content: locale === 'zh-CN' ? 'NR WAN/VLAN 对象已创建并下发' : 'NR WAN/VLAN object created and queued', duration: 6 });
+      message.success({ content: locale === 'zh-CN' ? 'WAN/VLAN 对象已创建并下发' : 'WAN/VLAN object created and queued', duration: 6 });
       setNrWanAdd(null);
       void refetch();
     } catch (err) {
       notification.error({
-        message: locale === 'zh-CN' ? '新增 NR WAN/VLAN 失败' : 'Failed to add NR WAN/VLAN',
+        message: locale === 'zh-CN' ? '新增 WAN/VLAN 失败' : 'Failed to add WAN/VLAN',
         description: err instanceof Error ? err.message : String(err),
         duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
@@ -1101,8 +1099,8 @@ export default function InstanceSelectorForm({
   const handleVlanEdit = useCallback(async () => {
     if (!selectedInstId || !vlanEdit) return;
     const vlanId = Number(vlanEdit.vlanId);
-    if (!vlanEdit.vlanName || vlanEdit.vlanName.length > 13 || !Number.isInteger(vlanId) || vlanId < 0 || vlanId > 4094) {
-      message.error(locale === 'zh-CN' ? 'VLAN Name 长度需为 1~13，VLAN ID 需为 0~4094 的整数' : 'VLAN Name must be 1-13 characters and VLAN ID an integer from 0 to 4094');
+    if (!vlanEdit.vlanName || vlanEdit.vlanName.length > 13 || !Number.isInteger(vlanId) || vlanId < 2 || vlanId > 4094) {
+      message.error(locale === 'zh-CN' ? 'VLAN Name 长度需为 1~13，VLAN ID 需为 2~4094 的整数' : 'VLAN Name must be 1-13 characters and VLAN ID an integer from 2 to 4094');
       return;
     }
     const vlanBase = `${objectPath}${selectedInstId}.VlanInterface.${vlanEdit.instanceId}.`;
@@ -1181,6 +1179,12 @@ export default function InstanceSelectorForm({
   const directChildGroups = childGroups.filter((group) => group.parentSelector === selectorGroup.id);
   const vlanAddressGroups = childGroups.filter((group) => group.parentSelector === 'gnb-interface-vlan');
   const visibleChildGroups = directChildGroups;
+  const selectableNetworkInstanceIds = isGnbNetworkInterface
+    ? instanceIds.filter((id) => schemaByPath.get(`${objectPath}${id}.Name`)?.currentValue !== 'ETH')
+    : instanceIds;
+  const selectedInterfaceName = selectedInstId
+    ? schemaByPath.get(`${objectPath}${selectedInstId}.Name`)?.currentValue
+    : undefined;
   const cardTitle = maxInstances !== undefined
     ? `${title}（${instanceIds.length}/${maxInstances}）`
     : title;
@@ -1282,10 +1286,24 @@ export default function InstanceSelectorForm({
 
       {isGnbNetworkInterface && (
         <>
+          <Space style={{ marginBottom: 12 }} wrap>
+            <Text strong>{locale === 'zh-CN' ? '接口列表：' : 'Interface List:'}</Text>
+            <Select
+              value={selectedInstId ?? undefined}
+              onChange={(value) => setSelectedInstId(String(value))}
+              style={{ width: 240 }}
+              options={selectableNetworkInstanceIds.map((id) => ({
+                value: id,
+                label: schemaByPath.get(`${objectPath}${id}.Name`)?.currentValue || `Interface.${id}`,
+              }))}
+            />
+          </Space>
           <div style={{ marginBottom: 8, fontWeight: 600 }}>
-            {wanInstanceId
-              ? (locale === 'zh-CN' ? `WAN 口设置（Interface.${wanInstanceId}）` : `WAN Port Settings (Interface.${wanInstanceId})`)
-              : (locale === 'zh-CN' ? '未找到 WAN 口' : 'WAN port not found')}
+            {selectedInstId
+              ? (locale === 'zh-CN'
+                  ? `接口设置（${selectedInterfaceName || `Interface.${selectedInstId}`}）`
+                  : `Interface Settings (${selectedInterfaceName || `Interface.${selectedInstId}`})`)
+              : (locale === 'zh-CN' ? '未找到网络接口' : 'No network interface found')}
           </div>
         </>
       )}
@@ -1401,6 +1419,14 @@ export default function InstanceSelectorForm({
                         )
                       : undefined,
                     cg.id === 'gnb-interface-vlan' ? (rowIdx) => openVlanEdit(rowIdx) : undefined,
+                    cg.id === 'gnb-interface-vlan'
+                      ? rowsWithNestedInstances(
+                          schemaByPath.keys(),
+                          `${objectPath}${selectedInstId}.VlanInterface.`,
+                          subInstanceIds(subObject),
+                          vlanAddressGroups.map((group) => extractSubObject(group.objectPath || '', cg.objectPath || '')),
+                        )
+                      : [],
                   ),
                 };
               }
@@ -1484,7 +1510,7 @@ export default function InstanceSelectorForm({
       )}
 
       <Modal
-        title={locale === 'zh-CN' ? '添加 NR WAN(VLAN)' : 'Add NR WAN(VLAN)'}
+        title={locale === 'zh-CN' ? '添加 WAN(VLAN)' : 'Add WAN(VLAN)'}
         open={Boolean(nrWanAdd)}
         onOk={() => void handleNrWanAdd()}
         onCancel={() => setNrWanAdd(null)}
@@ -1510,7 +1536,7 @@ export default function InstanceSelectorForm({
               <Input maxLength={13} value={nrWanAdd.vlanName} onChange={(event) => setNrWanAdd((prev) => prev ? { ...prev, vlanName: event.target.value } : prev)} />
             </div>
             <div>
-              <div style={{ marginBottom: 6 }}>VLAN ID <Text type="secondary">0~4094, Integer</Text></div>
+              <div style={{ marginBottom: 6 }}>VLAN ID <Text type="secondary">2~4094, Integer</Text></div>
               <Input value={nrWanAdd.vlanId} onChange={(event) => setNrWanAdd((prev) => prev ? { ...prev, vlanId: event.target.value } : prev)} />
             </div>
           </div>
@@ -1518,7 +1544,7 @@ export default function InstanceSelectorForm({
       </Modal>
 
       <Modal
-        title={locale === 'zh-CN' ? `修改 NR WAN(VLAN) · 实例 ${vlanEdit?.instanceId ?? ''}` : `Edit NR WAN(VLAN) · Instance ${vlanEdit?.instanceId ?? ''}`}
+        title={locale === 'zh-CN' ? `修改 WAN(VLAN) · 实例 ${vlanEdit?.instanceId ?? ''}` : `Edit WAN(VLAN) · Instance ${vlanEdit?.instanceId ?? ''}`}
         open={Boolean(vlanEdit)}
         onOk={() => void handleVlanEdit()}
         onCancel={() => setVlanEdit(null)}
@@ -1544,7 +1570,7 @@ export default function InstanceSelectorForm({
               <Input maxLength={13} value={vlanEdit.vlanName} onChange={(event) => setVlanEdit((prev) => prev ? { ...prev, vlanName: event.target.value } : prev)} />
             </div>
             <div>
-              <div style={{ marginBottom: 6 }}>VLAN ID <Text type="secondary">0~4094, Integer</Text></div>
+              <div style={{ marginBottom: 6 }}>VLAN ID <Text type="secondary">2~4094, Integer</Text></div>
               <Input value={vlanEdit.vlanId} onChange={(event) => setVlanEdit((prev) => prev ? { ...prev, vlanId: event.target.value } : prev)} />
             </div>
           </div>

@@ -87,7 +87,7 @@ func TestBMNeighborListHasWritableX2Flag(t *testing.T) {
 	t.Fatalf("expected BM.xml to define writable X2Flag mapping at %s", path)
 }
 
-func TestBMWANUsesIPInterfaceAliases(t *testing.T) {
+func TestBMWANUsesVendorEthernetInterfacePaths(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
 	body, err := os.ReadFile(xmlPath)
 	require.NoError(t, err)
@@ -96,9 +96,9 @@ func TestBMWANUsesIPInterfaceAliases(t *testing.T) {
 	require.NoError(t, xml.Unmarshal(body, &doc))
 
 	wantObjects := map[string]string{
-		"Device.IP.Interface.{i}.":                 "Device.Ethernet.Interface.{i}.",
-		"Device.IP.Interface.{i}.IPv4Address.{i}.": "Device.Ethernet.Interface.{i}.IPv4Address.{i}.",
-		"Device.IP.Interface.{i}.IPv6Address.{i}.": "Device.Ethernet.Interface.{i}.IPv6Address.{i}.",
+		"Device.Ethernet.Interface.{i}.":                 "Device.Ethernet.Interface.{i}.",
+		"Device.Ethernet.Interface.{i}.IPv4Address.{i}.": "Device.Ethernet.Interface.{i}.IPv4Address.{i}.",
+		"Device.Ethernet.Interface.{i}.IPv6Address.{i}.": "Device.Ethernet.Interface.{i}.IPv6Address.{i}.",
 	}
 	for privatePath, standardPath := range wantObjects {
 		found := false
@@ -116,15 +116,15 @@ func TestBMWANUsesIPInterfaceAliases(t *testing.T) {
 		standardPath string
 		access       string
 	}{
-		"Device.IP.Interface.{i}.Enable":                         {"Device.Ethernet.Interface.{i}.Enable", "READ_WRITE"},
-		"Device.IP.Interface.{i}.Name":                           {"Device.Ethernet.Interface.{i}.Name", "READ_ONLY"},
-		"Device.IP.Interface.{i}.Status":                         {"Device.Ethernet.Interface.{i}.Status", "READ_ONLY"},
+		"Device.Ethernet.Interface.{i}.Enable":                         {"Device.Ethernet.Interface.{i}.Enable", "READ_WRITE"},
+		"Device.Ethernet.Interface.{i}.Name":                           {"Device.Ethernet.Interface.{i}.Name", "READ_ONLY"},
+		"Device.Ethernet.Interface.{i}.Status":                         {"Device.Ethernet.Interface.{i}.Status", "READ_ONLY"},
 		"Device.DeviceInfo.X_COM_MACAddress":                     {"Device.Ethernet.Interface.{i}.MACAddress", "READ_ONLY"},
-		"Device.IP.Interface.{i}.IPv4Address.{i}.AddressingType": {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType", "READ_ONLY"},
-		"Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress":      {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress", "READ_WRITE"},
-		"Device.IP.Interface.{i}.IPv4Address.{i}.SubnetMask":     {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask", "READ_WRITE"},
-		"Device.IP.Interface.{i}.IPv6Address.{i}.IPAddress":      {"Device.Ethernet.Interface.{i}.IPv6Address.{i}.IPAddress", "READ_WRITE"},
-		"Device.IP.Interface.{i}.IPv6Address.{i}.Origin":         {"Device.Ethernet.Interface.{i}.IPv6Address.{i}.Origin", "READ_ONLY"},
+		"Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType": {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType", "READ_ONLY"},
+		"Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress":      {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress", "READ_WRITE"},
+		"Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask":     {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask", "READ_WRITE"},
+		"Device.Ethernet.Interface.{i}.IPv6Address.{i}.IPAddress":      {"Device.Ethernet.Interface.{i}.IPv6Address.{i}.IPAddress", "READ_WRITE"},
+		"Device.Ethernet.Interface.{i}.IPv6Address.{i}.Origin":         {"Device.Ethernet.Interface.{i}.IPv6Address.{i}.Origin", "READ_ONLY"},
 	}
 	found := make(map[string]xmlParamEntry, len(wantParams))
 	for _, param := range doc.Params {

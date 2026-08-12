@@ -72,6 +72,80 @@
               <param name="NTPServer5" titleZh="NTP 服务器 5" titleEn="NTP Server 5"
                                     standardPath="Device.Time.NTPServer5"/>
        </group>
+  <!-- BM 网络配置：沿用当前 OMC 的父接口选择器 + 地址/VLAN 子表交互。
+       WAN 与 LAN 都来自 Device.Ethernet.Interface，默认选中首个 WAN，仍可切换到 LAN 查看。 -->
+  <group id="gnb-network-interface" titleZh="网络接口（WAN/VLAN/LAN）" titleEn="Network Interfaces (WAN/VLAN/LAN)"
+         multiInstance="true" style="table" maxInstances="16"
+         objectPath="Device.Ethernet.Interface.{i}.">
+    <param name="Name" titleZh="接口名称" titleEn="Interface Name" leaf="Name" readonly="true"/>
+    <param name="Status" titleZh="链路状态" titleEn="Link Status" leaf="Status" readonly="true"/>
+    <param name="InterfaceType" titleZh="接口类型" titleEn="Interface Type" leaf="interfaceType" readonly="true"/>
+  </group>
+  <group id="gnb-interface-ipv4" titleZh="直连 IPv4" titleEn="Direct IPv4"
+         multiInstance="true" style="subtable" parentSelector="gnb-network-interface" maxInstances="12"
+         objectPath="Device.Ethernet.Interface.{i}.IPv4Address.{i}.">
+    <param name="AddressingType" titleZh="IP 模式" titleEn="IP Mode" leaf="AddressingType" type="enum" required="true">
+      <option value="DHCP" label="DHCP"/><option value="Static" label="Static"/>
+    </param>
+    <param name="IPAddress" titleZh="IP 地址" titleEn="IP Address" leaf="IPAddress"/>
+    <param name="SubnetMask" titleZh="子网掩码" titleEn="Subnet Mask" leaf="SubnetMask"/>
+    <param name="DefaultGateway" titleZh="网关" titleEn="Gateway" leaf="DefaultGateway"/>
+  </group>
+  <group id="gnb-interface-ipv6" titleZh="直连 IPv6" titleEn="Direct IPv6"
+         multiInstance="true" style="subtable" parentSelector="gnb-network-interface" maxInstances="12"
+         objectPath="Device.Ethernet.Interface.{i}.IPv6Address.{i}.">
+    <param name="Origin" titleZh="IP 模式" titleEn="IP Mode" leaf="Origin" type="enum" required="true">
+      <option value="DHCPv6" label="DHCPv6"/><option value="Static" label="Static"/>
+    </param>
+    <param name="IPAddress" titleZh="IPv6 地址" titleEn="IPv6 Address" leaf="IPAddress"/>
+    <param name="PrefixLength" titleZh="前缀长度" titleEn="Prefix Length" leaf="PrefixLength" type="unsignedInt" minValue="64" maxValue="128"/>
+    <param name="DefaultGateway" titleZh="网关" titleEn="Gateway" leaf="DefaultGateway"/>
+  </group>
+  <group id="gnb-interface-vlan" titleZh="VLAN" titleEn="VLAN"
+         multiInstance="true" style="subtable" parentSelector="gnb-network-interface" maxInstances="12"
+         objectPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.">
+    <param name="Name" titleZh="VLAN 名称" titleEn="VLAN Name" leaf="Name" required="true" maxValue="13"/>
+    <param name="Id" titleZh="VLAN ID" titleEn="VLAN ID" leaf="Id" type="unsignedInt" required="true" minValue="2" maxValue="4094"/>
+    <param name="Enable" titleZh="启用" titleEn="Enable" leaf="Enable" type="enum">
+      <option value="1" label="ON"/><option value="0" label="OFF"/>
+    </param>
+  </group>
+  <group id="gnb-interface-vlan-ipv4" titleZh="VLAN IPv4" titleEn="VLAN IPv4"
+         multiInstance="true" style="subtable" parentSelector="gnb-interface-vlan" maxInstances="12"
+         objectPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.">
+    <param name="AddressingType" titleZh="IP 模式" titleEn="IP Mode" leaf="AddressingType" type="enum" required="true">
+      <option value="DHCP" label="DHCP"/><option value="Static" label="Static"/>
+    </param>
+    <param name="IPAddress" titleZh="IP 地址" titleEn="IP Address" leaf="IPAddress"/>
+    <param name="SubnetMask" titleZh="子网掩码" titleEn="Subnet Mask" leaf="SubnetMask"/>
+    <param name="DefaultGateway" titleZh="网关" titleEn="Gateway" leaf="DefaultGateway"/>
+  </group>
+  <group id="gnb-interface-vlan-ipv6" titleZh="VLAN IPv6" titleEn="VLAN IPv6"
+         multiInstance="true" style="subtable" parentSelector="gnb-interface-vlan" maxInstances="12"
+         objectPath="Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.">
+    <param name="Origin" titleZh="IP 模式" titleEn="IP Mode" leaf="Origin" type="enum" required="true">
+      <option value="DHCPv6" label="DHCPv6"/><option value="Static" label="Static"/>
+    </param>
+    <param name="IPAddress" titleZh="IPv6 地址" titleEn="IPv6 Address" leaf="IPAddress"/>
+    <param name="PrefixLength" titleZh="前缀长度" titleEn="Prefix Length" leaf="PrefixLength" type="unsignedInt" minValue="64" maxValue="128"/>
+    <param name="DefaultGateway" titleZh="网关" titleEn="Gateway" leaf="DefaultGateway"/>
+  </group>
+  <group id="bm-network-settings" titleZh="网络与管理" titleEn="Network and Management">
+    <param name="WanInterface" titleZh="WAN 物理接口" titleEn="WAN Physical Interface" standardPath="Device.DeviceInfo.LTE_WAN_IFNAME" required="true"/>
+    <param name="StaticDnsEnable" titleZh="DNS 获取方式" titleEn="DNS Mode" standardPath="Device.DeviceInfo.STATIC_DNS_ENABLE" type="enum">
+      <option value="0" label="Dynamic DNS"/><option value="1" label="Static DNS"/>
+    </param>
+    <param name="StaticDns" titleZh="静态 DNS（逗号分隔，最多 2 个）" titleEn="Static DNS (comma-separated, max 2)" standardPath="Device.DeviceInfo.StaticDns"/>
+    <param name="Mtu" titleZh="MTU" titleEn="MTU" standardPath="Device.DeviceInfo.X_COM_ETH0_CONFIG_MTU" type="unsignedInt" minValue="700" maxValue="1600"/>
+    <param name="WanVisitEnable" titleZh="允许从 WAN 访问 LMT" titleEn="Allow LMT Access from WAN" standardPath="Device.WebConfig.WanVisitEnable" type="enum">
+      <option value="1" label="ON"/><option value="0" label="OFF"/>
+    </param>
+    <param name="S1CBind" titleZh="S1-C 接口绑定" titleEn="S1-C Interface Binding" standardPath="Device.DeviceInfo.LTE_S1C_BIND_MIB"/>
+    <param name="S1UBind" titleZh="S1-U 接口绑定" titleEn="S1-U Interface Binding" standardPath="Device.DeviceInfo.LTE_S1U_BIND_MIB"/>
+    <param name="X2Bind" titleZh="X2 接口绑定" titleEn="X2 Interface Binding" standardPath="Device.DeviceInfo.LTE_X2_BIND_MIB"/>
+    <param name="Tr069Bind" titleZh="TR-069 接口绑定" titleEn="TR-069 Interface Binding" standardPath="Device.DeviceInfo.LTE_TR069_BIND_MIB"/>
+    <param name="LboBind" titleZh="LBO 接口绑定" titleEn="LBO Interface Binding" standardPath="Device.DeviceInfo.LTE_LBO_BIND_MIB"/>
+  </group>
        <group id="bm-sync-source" titleZh="同步源设置" titleEn="Sync Source Settings">
               <param name="PpsTimeMode" titleZh="同步源类型" titleEn="Sync Source Type"
                                     standardPath="Device.FAP.Synchronization.PpsTimeMode">
