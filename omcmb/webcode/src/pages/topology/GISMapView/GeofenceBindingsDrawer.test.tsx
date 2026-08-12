@@ -10,6 +10,7 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   bindingsQuery: vi.fn(),
+  definitionsQuery: vi.fn(),
   actionsQuery: vi.fn(),
   preview: vi.fn(),
   createJob: vi.fn(),
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@core/hooks/api/useGeofence', () => ({
   useGeofenceBindings: (...args: unknown[]) => mocks.bindingsQuery(...args),
+  useGeofenceDefinitions: (...args: unknown[]) => mocks.definitionsQuery(...args),
   useGeofenceControlActions: (...args: unknown[]) => mocks.actionsQuery(...args),
   usePreviewGeofenceManualBindings: () => ({
     mutateAsync: mocks.preview,
@@ -70,6 +72,15 @@ const fence: GeofenceMapDefinition = {
   currentVersion: null,
 };
 
+const sourceFence: GeofenceMapDefinition = {
+  ...fence,
+  definition: {
+    ...fence.definition,
+    id: 'old-fence',
+    name: '原活动围栏',
+  },
+};
+
 const preview: GeofenceManualBindingPreview = {
   geofenceId: 'fence-1',
   geofenceVersionId: 'version-1',
@@ -115,6 +126,9 @@ function renderDrawer() {
 describe('GeofenceBindingsDrawer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.definitionsQuery.mockReturnValue({
+      data: [fence.definition, sourceFence.definition],
+    });
     mocks.bindingsQuery.mockReturnValue({
       data: {
         items: [
@@ -213,6 +227,12 @@ describe('GeofenceBindingsDrawer', () => {
     );
     expect(screen.getByText(/可绑定.*1/)).toBeInTheDocument();
     expect(screen.getByText(/已跳过.*1/)).toBeInTheDocument();
+    expect(screen.getByText('直接绑定')).toBeInTheDocument();
+    expect(screen.getByText('设备已绑定到当前围栏')).toBeInTheDocument();
+    expect(screen.getByText('请输入操作原因')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '创建绑定任务' }),
+    ).toBeDisabled();
 
     await user.type(screen.getByLabelText('操作原因'), '新站入网');
     await user.click(screen.getByRole('button', { name: '创建绑定任务' }));
@@ -267,10 +287,41 @@ describe('GeofenceBindingsDrawer', () => {
         '移入会替换设备当前生效的多边形围栏；后续删除或归档当前围栏不会自动恢复原归属。',
       ),
     ).toBeInTheDocument();
+    expect(screen.getByText('将从“原活动围栏”移入')).toBeInTheDocument();
     await user.type(screen.getByLabelText('操作原因'), '调整围栏归属');
     expect(
       screen.getByRole('button', { name: '创建绑定任务' }),
     ).toBeEnabled();
+  });
+
+  it('separates removed binding history from current assignments', async () => {
+    const baseBinding = mocks.bindingsQuery().data.items[0];
+    mocks.bindingsQuery.mockReturnValue({
+      ...mocks.bindingsQuery(),
+      data: {
+        ...mocks.bindingsQuery().data,
+        items: [
+          baseBinding,
+          {
+            ...baseBinding,
+            id: 'binding-removed',
+            deviceSN: 'REMOVED001',
+            deviceName: '历史设备',
+            status: 'removed',
+          },
+        ],
+        total: 2,
+      },
+    });
+    const { user } = renderDrawer();
+
+    expect(screen.getAllByText('已绑定设备')).toHaveLength(2);
+    expect(screen.queryByText('历史设备')).not.toBeInTheDocument();
+
+    await user.click(screen.getByText('历史记录 1'));
+
+    expect(screen.getByText('历史设备')).toBeInTheDocument();
+    expect(screen.getAllByText('已绑定设备')).toHaveLength(1);
   });
 
   it('shows durable device readback instead of treating task completion as success', () => {
