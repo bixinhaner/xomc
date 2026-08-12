@@ -4978,16 +4978,19 @@ function getApiMeta(row: NorthboundApiRow) {
   };
 }
 
+const hiddenApiCatalogFields = new Set(['resparams2']);
+
 function apiFieldDisplayList(fields: string[]): string[] {
   const normalizedFields = fields
     .map((field) => normalizeApiFieldDisplay(field))
-    .filter((field) => field.length > 0);
+    .filter((field) => field.length > 0 && !hiddenApiCatalogFields.has(field.toLowerCase()));
   return [...new Set(normalizedFields)];
 }
 
 function normalizeApiFieldDisplay(field: string): string {
   const normalized = field.trim();
   if (!normalized) return '';
+  if (normalized.startsWith('CSV:')) return normalized.slice(4).trim();
   if (normalized.includes(' ') || normalized.includes('/')) return normalized;
   return normalized.replace(/\?/g, '').replace(/\[\]/g, '');
 }

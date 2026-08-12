@@ -206,7 +206,7 @@ func defaultAPIConfigs() []APIConfig {
 			OldSystemSupported: true,
 			CurrentSupported:   true,
 			Source:             "omcgo/internal/northbound/legacy_admin_facade.go",
-			ResponseContract:   map[string]any{"fields": []string{"CSV:id", "nameEn", "nameCn", "type", "status", "reqParams", "resParams1", "resParams2", "createTime", "updateTime"}},
+			ResponseContract:   map[string]any{"fields": []string{"CSV:id", "nameEn", "nameCn", "type", "status", "reqParams", "resParams1", "createTime", "updateTime"}},
 		},
 		{
 			Key:                "nb-sync-full-device",
