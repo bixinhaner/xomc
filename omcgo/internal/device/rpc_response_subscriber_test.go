@@ -213,6 +213,7 @@ func (r *rpcRespTrackingParamRepo) BatchUpsert(
 
 type rpcRespTrackingInfoRefresher struct {
 	calls int
+	err   error
 }
 
 func (r *rpcRespTrackingInfoRefresher) SyncFromParameters(
@@ -223,7 +224,7 @@ func (r *rpcRespTrackingInfoRefresher) SyncFromParameters(
 	string,
 ) ([]string, error) {
 	r.calls++
-	return nil, nil
+	return nil, r.err
 }
 
 func TestRPCResponseSubscriber_UECountResponsePersistsStandardPathsAndRefreshesInfo(t *testing.T) {
@@ -275,6 +276,50 @@ func TestRPCResponseSubscriber_UECountResponsePersistsStandardPathsAndRefreshesI
 	require.Len(t, paramRepo.rows, 2)
 	require.Equal(t, "Device.DeviceInfo.UE_Count", paramRepo.rows[0].ParameterPath)
 	require.Equal(t, "Device.DeviceInfo.2.UE_Count", paramRepo.rows[1].ParameterPath)
+	require.Equal(t, 1, infoRefresher.calls)
+}
+
+func TestRPCResponseSubscriber_GeofenceRFReadbackPersistsCanonicalValueAndRequiresSummaryRefresh(t *testing.T) {
+	productID := uuid.New()
+	paramModelID := uuid.New()
+	deviceID := uuid.New()
+	privatePath := "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable"
+	standardPath := "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus"
+	tr := parammodel.NewTranslator(&parammodel.MappingSet{
+		Mappings: []parammodel.ParamMapping{{
+			StandardPath: standardPath,
+			PrivatePath:  privatePath,
+		}},
+	}, nil, zap.NewNop())
+	paramRepo := &rpcRespTrackingParamRepo{}
+	refreshErr := errors.New("device_info update unavailable")
+	infoRefresher := &rpcRespTrackingInfoRefresher{err: refreshErr}
+	s := &RPCResponseSubscriber{
+		productMatcher: rpcRespTestMatcher{result: &product.MatchResult{Product: &product.Product{
+			ID: productID, ParamModelID: &paramModelID,
+		}}},
+		translatorFactory: &rpcRespRecordingTranslatorFactory{tr: tr},
+		deviceLookup: rpcRespDeviceLookupStub{device: &model.Device{
+			ID: deviceID, SerialNumber: "SN-GEOFENCE-RF", ProductClass: "FAP/BAIBLQ/SC",
+			Carrier: model.CarrierCMCC, Technology: model.TechLTE,
+		}},
+		paramRepo: paramRepo, infoRefresher: infoRefresher, logger: zap.NewNop(),
+	}
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]interface{}{
+		"device_sn":  "SN-GEOFENCE-RF",
+		"method":     "GetParameterValuesResponse",
+		"command_key": "geofence:device:12:deactivate:verify:0",
+		"parameter_values": []tr069.ParameterValueStruct{{Name: privatePath, Value: "false"}},
+	})
+	require.NoError(t, err)
+
+	err = s.handleGPVResponse(context.Background(), evt)
+
+	require.ErrorIs(t, err, refreshErr)
+	require.Len(t, paramRepo.rows, 1)
+	require.Equal(t, standardPath, paramRepo.rows[0].ParameterPath)
+	require.Equal(t, "false", paramRepo.rows[0].ParameterValue)
+	require.False(t, paramRepo.rows[0].LastUpdatedAt.IsZero())
 	require.Equal(t, 1, infoRefresher.calls)
 }
 

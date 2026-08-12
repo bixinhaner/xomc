@@ -2,6 +2,7 @@ package device
 
 import (
 	"testing"
+	"time"
 
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
@@ -784,6 +785,57 @@ func TestCalcRFStatus(t *testing.T) {
 			assert.Equal(t, tt.wantState, got.State)
 		})
 	}
+}
+
+func TestCalcRFStatusFromDeviceParametersUsesNewestAliasObservation(t *testing.T) {
+	standardPath := "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus"
+	privatePath := "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable"
+	base := time.Date(2026, 8, 12, 16, 40, 0, 0, time.UTC)
+
+	t.Run("newer private false overrides stale standard true", func(t *testing.T) {
+		got := CalcRFStatusFromDeviceParameters([]model.DeviceParameter{
+			{ParameterPath: standardPath, ParameterValue: "true", LastUpdatedAt: base},
+			{ParameterPath: privatePath, ParameterValue: "false", LastUpdatedAt: base.Add(time.Second)},
+		}, model.TechLTE, "FAP/BAIBLQ/SC")
+
+		assert.Equal(t, RFStatusValid, got.State)
+		assert.Equal(t, "off", got.Status)
+	})
+
+	t.Run("newer standard true wins older private false", func(t *testing.T) {
+		got := CalcRFStatusFromDeviceParameters([]model.DeviceParameter{
+			{ParameterPath: standardPath, ParameterValue: "true", LastUpdatedAt: base.Add(time.Second)},
+			{ParameterPath: privatePath, ParameterValue: "false", LastUpdatedAt: base},
+		}, model.TechLTE, "FAP/BAIBLQ/SC")
+
+		assert.Equal(t, RFStatusValid, got.State)
+		assert.Equal(t, "on", got.Status)
+	})
+
+	t.Run("same-time contradictory aliases are inconsistent", func(t *testing.T) {
+		got := CalcRFStatusFromDeviceParameters([]model.DeviceParameter{
+			{ParameterPath: standardPath, ParameterValue: "true", LastUpdatedAt: base},
+			{ParameterPath: privatePath, ParameterValue: "false", LastUpdatedAt: base},
+		}, model.TechLTE, "FAP/BAIBLQ/SC")
+
+		assert.Equal(t, RFStatusInconsistent, got.State)
+		assert.Empty(t, got.Status)
+	})
+
+	t.Run("newest private alias is the single authority", func(t *testing.T) {
+		got := CalcRFStatusFromDeviceParameters([]model.DeviceParameter{
+			{ParameterPath: standardPath, ParameterValue: "true", LastUpdatedAt: base},
+			{ParameterPath: privatePath, ParameterValue: "false", LastUpdatedAt: base.Add(time.Second)},
+			{
+				ParameterPath:  "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.AdminCellState",
+				ParameterValue: "true",
+				LastUpdatedAt:  base.Add(2 * time.Second),
+			},
+		}, model.TechLTE, "FAP/BLN/SC")
+
+		assert.Equal(t, RFStatusValid, got.State)
+		assert.Equal(t, "on", got.Status)
+	})
 }
 
 func TestCalcNumOfCells(t *testing.T) {

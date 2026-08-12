@@ -47,6 +47,34 @@ func TestBuildGeofenceControlPlanRequiresWritableKnownCurrentValue(t *testing.T)
 	require.ErrorContains(t, err, "not writable")
 }
 
+func TestBuildGeofenceControlPlanUsesParamModelAccessOverStaleSnapshotWritable(t *testing.T) {
+	admin := carrier.GeofenceControlParameter{
+		Path:         "Device.Services.FAPService.1.FAPControl.LTE.AdminState",
+		Value:        "0",
+		Role:         carrier.GeofenceRoleAdmin,
+		AccessProven: true,
+	}
+	opState := carrier.GeofenceControlParameter{
+		Path:         "Device.Services.FAPService.1.FAPControl.LTE.OpState",
+		Value:        "0",
+		Role:         carrier.GeofenceRoleOpState,
+		AccessProven: true,
+	}
+
+	plan, err := buildGeofenceControlPlanWithTerminal([]model.DeviceParameter{
+		{ParameterPath: admin.Path, ParameterValue: "1", Writable: false},
+		{ParameterPath: opState.Path, ParameterValue: "1", Writable: true},
+	}, []carrier.GeofenceControlParameter{admin}, []carrier.GeofenceControlParameter{opState}, false)
+
+	require.NoError(t, err)
+	require.Equal(t, []ControlParameterState{{
+		Path: admin.Path, Value: "0", Role: carrier.GeofenceRoleAdmin,
+	}}, plan.Requested)
+	require.Equal(t, []ControlParameterState{{
+		Path: opState.Path, Value: "0", Role: carrier.GeofenceRoleOpState,
+	}}, plan.Terminals)
+}
+
 func TestBuildGeofenceControlPlanMatchesMBS31001PrivateSingleIPSecPath(t *testing.T) {
 	target := carrier.GeofenceControlParameter{
 		Path:  "Device.FAP.Ipsec.1.TUNNEL_ENABLE",
@@ -97,7 +125,9 @@ func TestRestoreTargetsRestoresOnlyParametersChangedByDeactivation(t *testing.T)
 		[]ControlParameterState{{Path: rf, Value: "0"}},
 	)
 
-	require.Equal(t, []carrier.GeofenceControlParameter{{Path: rf, Value: "1"}}, targets)
+	require.Equal(t, []carrier.GeofenceControlParameter{{
+		Path: rf, Value: "1", AccessProven: true,
+	}}, targets)
 }
 
 func TestRestoreTargetsPlacesMultiIPSecBeforeRF(t *testing.T) {
@@ -109,7 +139,44 @@ func TestRestoreTargetsPlacesMultiIPSecBeforeRF(t *testing.T) {
 	)
 
 	require.Equal(t, []carrier.GeofenceControlParameter{
-		{Path: multiIPSec, Value: "1"},
-		{Path: rf, Value: "1"},
+		{Path: multiIPSec, Value: "1", AccessProven: true},
+		{Path: rf, Value: "1", AccessProven: true},
+	}, targets)
+}
+
+func TestRestoreTargetsUsesVerifiedOwnershipAndRestoresAdminLast(t *testing.T) {
+	ipsec := ControlParameterState{Path: "Device.Services.FAPService.Ipsec.IPSEC_ENABLE", Value: "1", Role: carrier.GeofenceRoleIPSec}
+	rf := ControlParameterState{Path: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", Value: "1", Role: carrier.GeofenceRoleRF}
+	admin := ControlParameterState{Path: "Device.Services.FAPService.1.FAPControl.LTE.AdminState", Value: "1", Role: carrier.GeofenceRoleAdmin}
+	opState := ControlParameterState{Path: "Device.Services.FAPService.1.FAPControl.LTE.OpState", Value: "1", Role: carrier.GeofenceRoleOpState}
+
+	targets := restoreTargets(
+		[]ControlParameterState{admin, opState, rf, ipsec},
+		[]ControlParameterState{
+			{Path: admin.Path, Value: "0", Role: admin.Role},
+			{Path: rf.Path, Value: "0", Role: rf.Role},
+			{Path: ipsec.Path, Value: "0", Role: ipsec.Role},
+			{Path: opState.Path, Value: "0", Role: opState.Role},
+		},
+	)
+
+	require.Equal(t, []carrier.GeofenceControlParameter{
+		{Path: ipsec.Path, Value: "1", Role: carrier.GeofenceRoleIPSec, AccessProven: true},
+		{Path: rf.Path, Value: "1", Role: carrier.GeofenceRoleRF, AccessProven: true},
+		{Path: admin.Path, Value: "1", Role: carrier.GeofenceRoleAdmin, AccessProven: true},
+	}, targets)
+}
+
+func TestRestoreTargetsSkipsChangedButUnverifiedControl(t *testing.T) {
+	rf := ControlParameterState{Path: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", Value: "1", Role: carrier.GeofenceRoleRF}
+	admin := ControlParameterState{Path: "Device.Services.FAPService.1.FAPControl.LTE.AdminState", Value: "1", Role: carrier.GeofenceRoleAdmin}
+
+	targets := restoreTargets(
+		[]ControlParameterState{rf, admin},
+		[]ControlParameterState{{Path: rf.Path, Value: "0", Role: rf.Role}},
+	)
+
+	require.Equal(t, []carrier.GeofenceControlParameter{
+		{Path: rf.Path, Value: "1", Role: carrier.GeofenceRoleRF, AccessProven: true},
 	}, targets)
 }

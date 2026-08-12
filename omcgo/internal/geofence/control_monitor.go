@@ -15,7 +15,12 @@ import (
 	"go.uber.org/zap"
 )
 
-const GeofenceControlQueue = "geofence-control"
+const (
+	GeofenceControlQueue                = "geofence-control"
+	geofenceTerminalVerificationDelay   = 5 * time.Second
+	geofenceTerminalVerificationTimeout = 2 * time.Minute
+	geofenceTerminalVerificationLimit   = 24
+)
 
 // GeofenceControlMonitor executes a confirmed state edge through the existing
 // task/CWMP path and restores only values changed by a verified owned action.
@@ -80,6 +85,27 @@ func (m *GeofenceControlMonitor) SetTaskHistoryReader(
 
 func (m *GeofenceControlMonitor) SetActionRepository(actions ControlActionRepository) {
 	m.actions = actions
+}
+
+// RunVerificationLoop durably resumes OpState polling after worker restarts.
+// Each GPV is still an ordinary asynchronous device task; the action row owns
+// the next attempt and deadline.
+func (m *GeofenceControlMonitor) RunVerificationLoop(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = geofenceTerminalVerificationDelay
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if err := m.reconcileDueVerifications(ctx); err != nil && ctx.Err() == nil {
+			m.logger.Error("reconcile geofence terminal verification", zap.Error(err))
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (m *GeofenceControlMonitor) Subscribe(bus event.EventBus) error {
@@ -276,6 +302,21 @@ func (m *GeofenceControlMonitor) handleTaskTerminal(
 	if action == nil {
 		return fmt.Errorf("geofence control action %s not found", actionID)
 	}
+	if action.Status.IsTerminal() {
+		m.logger.Debug("ignore duplicate geofence task event after terminal action",
+			zap.String("action_id", action.ActionKey),
+			zap.String("command_key", completed.CommandKey),
+			zap.String("status", string(action.Status)))
+		return nil
+	}
+	if !taskBelongsToCurrentControlStep(action, &completed) {
+		m.logger.Warn("ignore stale or out-of-order geofence task event",
+			zap.String("action_id", action.ActionKey),
+			zap.String("command_key", completed.CommandKey),
+			zap.String("method", completed.Method),
+			zap.Int("verification_attempt", action.VerificationAttempt))
+		return nil
+	}
 	if evt.Subject == event.SubjectTaskFailed {
 		message := strings.TrimSpace(completed.ErrorMessage)
 		if message == "" {
@@ -297,7 +338,39 @@ func (m *GeofenceControlMonitor) handleTaskTerminal(
 	case "SetParameterValues":
 		return m.queueControlVerification(ctx, action)
 	case "GetParameterValues":
-		verified, status, message := verifyControlTaskResult(completed.Result, action.RequestedState)
+		if action.ContractVersion >= GeofenceControlContractVersion && len(action.TerminalState) == 0 {
+			message := "contract v2 action is missing required OpState terminal evidence"
+			if err := m.actions.CompleteVerification(
+				ctx, action.ID, nil, ControlActionPartialFailed, message, time.Now().UTC(),
+			); err != nil {
+				return fmt.Errorf("reject geofence verification without OpState: %w", err)
+			}
+			return nil
+		}
+		verified, status, message, terminalPending := verifyControlAndTerminalTaskResult(
+			completed.Result, action.RequestedState, action.TerminalState,
+		)
+		if terminalPending {
+			now := time.Now().UTC()
+			if action.VerificationDeadline == nil || !now.Before(*action.VerificationDeadline) ||
+				action.VerificationAttempt >= geofenceTerminalVerificationLimit {
+				message = "OpState terminal verification timed out: " + message
+				if err := m.actions.CompleteVerification(
+					ctx, action.ID, verified, ControlActionPartialFailed, message, now,
+				); err != nil {
+					return fmt.Errorf("timeout geofence terminal verification: %w", err)
+				}
+				return nil
+			}
+			nextAttempt := action.VerificationAttempt + 1
+			if err := m.actions.ScheduleVerification(
+				ctx, action.ID, verified, message, nextAttempt,
+				now.Add(geofenceTerminalVerificationDelay),
+			); err != nil {
+				return fmt.Errorf("schedule geofence terminal verification: %w", err)
+			}
+			return nil
+		}
 		if err := m.actions.CompleteVerification(
 			ctx, action.ID, verified, status, message, time.Now().UTC(),
 		); err != nil {
@@ -315,10 +388,20 @@ func (m *GeofenceControlMonitor) queueControlVerification(
 	ctx context.Context,
 	action *ControlAction,
 ) error {
-	if len(action.RequestedState) == 0 {
+	if len(action.RequestedState) == 0 && len(action.TerminalState) == 0 {
 		return nil
 	}
-	commandKey := action.ActionKey + ":verify"
+	if action.VerificationDeadline == nil {
+		now := time.Now().UTC()
+		deadline := now.Add(geofenceTerminalVerificationTimeout)
+		if err := m.actions.BeginVerification(ctx, action.ID, deadline, now); err != nil {
+			return fmt.Errorf("begin geofence terminal verification window: %w", err)
+		}
+		action.Status = ControlActionVerifying
+		action.VerificationDeadline = &deadline
+		action.NextVerificationAt = &now
+	}
+	commandKey := fmt.Sprintf("%s:verify:%d", action.ActionKey, action.VerificationAttempt)
 	release, err := m.history.AcquireCommandKeyLock(ctx, commandKey)
 	if err != nil {
 		return fmt.Errorf("lock geofence verification command key: %w", err)
@@ -329,10 +412,13 @@ func (m *GeofenceControlMonitor) queueControlVerification(
 		return fmt.Errorf("check geofence verification duplicate: %w", err)
 	}
 	if existing != nil {
-		return nil
+		return m.actions.UpdateStatus(ctx, action.ID, ControlActionVerifying)
 	}
-	names := make([]string, 0, len(action.RequestedState))
+	names := make([]string, 0, len(action.RequestedState)+len(action.TerminalState))
 	for _, state := range action.RequestedState {
+		names = append(names, state.Path)
+	}
+	for _, state := range action.TerminalState {
 		names = append(names, state.Path)
 	}
 	params, err := json.Marshal(map[string]any{"names": names})
@@ -354,10 +440,35 @@ func (m *GeofenceControlMonitor) queueControlVerification(
 	return nil
 }
 
+func taskBelongsToCurrentControlStep(action *ControlAction, completed *task.Task) bool {
+	if action == nil || completed == nil {
+		return false
+	}
+	switch completed.Method {
+	case "SetParameterValues":
+		return (action.Status == ControlActionPending || action.Status == ControlActionExecuting) &&
+			completed.CommandKey == action.ActionKey
+	case "GetParameterValues":
+		expected := fmt.Sprintf("%s:verify:%d", action.ActionKey, action.VerificationAttempt)
+		return action.Status == ControlActionVerifying && completed.CommandKey == expected
+	default:
+		return false
+	}
+}
+
 func verifyControlTaskResult(
 	raw []byte,
 	requested []ControlParameterState,
 ) ([]ControlParameterState, ControlActionStatus, string) {
+	verified, status, message, _ := verifyControlAndTerminalTaskResult(raw, requested, nil)
+	return verified, status, message
+}
+
+func verifyControlAndTerminalTaskResult(
+	raw []byte,
+	requested []ControlParameterState,
+	terminals []ControlParameterState,
+) ([]ControlParameterState, ControlActionStatus, string, bool) {
 	var result struct {
 		Values []struct {
 			Name  string `json:"name"`
@@ -365,7 +476,14 @@ func verifyControlTaskResult(
 		} `json:"standard_parameter_values"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, ControlActionPartialFailed, "readback result is not valid JSON"
+		return nil, ControlActionPartialFailed, "readback result is not valid JSON", false
+	}
+	expectedRoles := make(map[string]carrier.GeofenceParameterRole, len(requested)+len(terminals))
+	for _, expected := range requested {
+		expectedRoles[expected.Path] = expected.Role
+	}
+	for _, expected := range terminals {
+		expectedRoles[expected.Path] = carrier.GeofenceRoleOpState
 	}
 	actual := make(map[string]string, len(result.Values))
 	verified := make([]ControlParameterState, 0, len(result.Values))
@@ -375,7 +493,9 @@ func verifyControlTaskResult(
 			continue
 		}
 		actual[value.Name] = normalized
-		verified = append(verified, ControlParameterState{Path: value.Name, Value: normalized})
+		verified = append(verified, ControlParameterState{
+			Path: value.Name, Value: normalized, Role: expectedRoles[value.Name],
+		})
 	}
 	var mismatches []string
 	for _, expected := range requested {
@@ -391,9 +511,25 @@ func verifyControlTaskResult(
 		}
 	}
 	if len(mismatches) > 0 {
-		return verified, ControlActionPartialFailed, strings.Join(mismatches, "; ")
+		return verified, ControlActionPartialFailed, strings.Join(mismatches, "; "), false
 	}
-	return verified, ControlActionVerified, ""
+	var terminalMismatches []string
+	for _, expected := range terminals {
+		value, ok := actual[expected.Path]
+		if !ok {
+			terminalMismatches = append(terminalMismatches, expected.Path+" missing")
+			continue
+		}
+		if value != expected.Value {
+			terminalMismatches = append(terminalMismatches, fmt.Sprintf(
+				"%s expected %s got %s", expected.Path, expected.Value, value,
+			))
+		}
+	}
+	if len(terminalMismatches) > 0 {
+		return verified, ControlActionVerifying, strings.Join(terminalMismatches, "; "), true
+	}
+	return verified, ControlActionVerified, "", false
 }
 
 func (m *GeofenceControlMonitor) handleEntered(
@@ -434,13 +570,15 @@ func (m *GeofenceControlMonitor) handleEntered(
 		ctx,
 		deviceRecord,
 		true,
-		restoreTargets(deactivation.BeforeState, deactivation.RequestedState),
+		restoreTargets(deactivation.BeforeState, deactivation.VerifiedState),
 		&ControlAction{
 			ID: uuid.New(), ActionKey: activationKey, ParentActionID: &deactivation.ID,
 			DeviceID: deviceRecord.ID, DeviceSN: deviceRecord.SerialNumber,
 			EffectiveStateVersion: payload.EffectiveStateVersion,
 			ActionType:            ControlActionActivate, Status: ControlActionPending,
-			CreatedAt: now, UpdatedAt: now,
+			ContractVersion: GeofenceControlContractVersion,
+			TerminalState:   originalTerminalTargets(deactivation.BeforeState),
+			CreatedAt:       now, UpdatedAt: now,
 		},
 		fmt.Sprintf(
 			"geofence activation after completed deactivation %s",
@@ -523,7 +661,7 @@ func (m *GeofenceControlMonitor) queueDeviceControl(
 			return fmt.Errorf("resolve geofence control carrier: %w", resolveErr)
 		}
 		plan, params, err = m.geofenceControlPlan(
-			ctx, carrierAdapter, deviceRecord, enabled, targets,
+			ctx, carrierAdapter, deviceRecord, enabled, targets, action.TerminalState,
 			action.ActionType == ControlActionActivate,
 		)
 		if err != nil {
@@ -531,19 +669,17 @@ func (m *GeofenceControlMonitor) queueDeviceControl(
 		}
 		action.BeforeState = plan.Before
 		action.RequestedState = plan.Requested
+		action.TerminalState = plan.Terminals
+		if action.ContractVersion == 0 {
+			action.ContractVersion = GeofenceControlContractVersion
+		}
 		stored, _, err = m.actions.Create(ctx, action)
 		if err != nil {
 			return fmt.Errorf("create geofence control action: %w", err)
 		}
 	}
 	if len(plan.Requested) == 0 {
-		now := time.Now().UTC()
-		if err := m.actions.CompleteVerification(
-			ctx, stored.ID, plan.Before, ControlActionVerified, "", now,
-		); err != nil {
-			return fmt.Errorf("complete no-op geofence control action: %w", err)
-		}
-		return nil
+		return m.queueControlVerification(ctx, stored)
 	}
 	_, err = m.tasks.CreateTask(ctx, &task.CreateTaskRequest{
 		DeviceSN:    deviceRecord.SerialNumber,
@@ -575,9 +711,10 @@ func (m *GeofenceControlMonitor) geofenceControlPlan(
 	device *model.Device,
 	enabled bool,
 	targets []carrier.GeofenceControlParameter,
+	terminalTargets []ControlParameterState,
 	forceRequested bool,
 ) (geofenceControlPlan, []byte, error) {
-	resolver, ok := adapter.(carrier.GeofenceControlParameterInstanceResolver)
+	_, ok := adapter.(carrier.GeofenceControlParameterInstanceResolver)
 	if !ok {
 		return geofenceControlPlan{}, nil, fmt.Errorf(
 			"carrier %s does not expose geofence control parameters",
@@ -601,41 +738,35 @@ func (m *GeofenceControlMonitor) geofenceControlPlan(
 				return geofenceControlPlan{}, nil, fmt.Errorf("read geofence ParamModel mappings: %w", err)
 			}
 		}
-		snapshotTargets, snapshotErr := carrier.BuildGeofenceControlParametersForSnapshotWithMappings(
+		capability, capabilityErr := carrier.BuildGeofenceDeactivationCapabilityForSnapshotWithMappings(
 			device.ProductClass,
 			device.Technology,
 			enabled,
 			parameterSnapshot,
 			mappings,
 		)
-		if snapshotErr == nil {
-			targets = snapshotTargets
-		} else if m.mappings == nil {
-			instances, detectErr := carrier.DetectGeofenceControlInstances(
-				parameterSnapshot,
-				device.ProductClass,
-				device.Technology,
-			)
-			if detectErr != nil {
-				return geofenceControlPlan{}, nil, fmt.Errorf("detect geofence RF instances: %w", detectErr)
-			}
-			targets, err = resolver.GeofenceControlParametersForInstances(
-				device.ProductClass,
-				device.Technology,
-				enabled,
-				instances,
-			)
-			if err != nil {
-				return geofenceControlPlan{}, nil, fmt.Errorf("resolve geofence control parameters: %w", err)
-			}
-		} else {
+		if capabilityErr != nil {
 			return geofenceControlPlan{}, nil, fmt.Errorf(
-				"resolve geofence control parameters from ParamModel: %w", snapshotErr,
+				"resolve geofence deactivation capability from ParamModel: %w", capabilityErr,
 			)
 		}
+		targets = capability.Controls
+		terminalTargets = make([]ControlParameterState, 0, len(capability.Terminals))
+		for _, terminal := range capability.Terminals {
+			terminalTargets = append(terminalTargets, ControlParameterState{
+				Path: terminal.Path, Value: terminal.Value, Role: carrier.GeofenceRoleOpState,
+			})
+		}
 	}
-	plan, err := buildGeofenceControlPlanWithRestore(
-		parameterSnapshot, targets, forceRequested,
+	terminals := make([]carrier.GeofenceControlParameter, 0, len(terminalTargets))
+	for _, terminal := range terminalTargets {
+		terminals = append(terminals, carrier.GeofenceControlParameter{
+			Path: terminal.Path, Value: terminal.Value, Role: carrier.GeofenceRoleOpState,
+			AccessProven: true,
+		})
+	}
+	plan, err := buildGeofenceControlPlanWithTerminal(
+		parameterSnapshot, targets, terminals, forceRequested,
 	)
 	if err != nil {
 		return geofenceControlPlan{}, nil, fmt.Errorf("build geofence control plan: %w", err)
@@ -649,4 +780,35 @@ func (m *GeofenceControlMonitor) geofenceControlPlan(
 		return geofenceControlPlan{}, nil, fmt.Errorf("marshal geofence control parameters: %w", err)
 	}
 	return plan, params, nil
+}
+
+func (m *GeofenceControlMonitor) reconcileDueVerifications(ctx context.Context) error {
+	if m.actions == nil || m.history == nil || m.tasks == nil {
+		return fmt.Errorf("geofence terminal verification dependencies are required")
+	}
+	now := time.Now().UTC()
+	actions, err := m.actions.ListDueVerifications(ctx, now, 100)
+	if err != nil {
+		return fmt.Errorf("list due geofence terminal verifications: %w", err)
+	}
+	for index := range actions {
+		action := &actions[index]
+		if action.VerificationDeadline == nil || !now.Before(*action.VerificationDeadline) {
+			message := strings.TrimSpace(action.LastError)
+			if message == "" {
+				message = "OpState terminal verification deadline exceeded"
+			}
+			if err := m.actions.CompleteVerification(
+				ctx, action.ID, action.VerifiedState, ControlActionPartialFailed,
+				message, now,
+			); err != nil {
+				return fmt.Errorf("expire geofence terminal verification: %w", err)
+			}
+			continue
+		}
+		if err := m.queueControlVerification(ctx, action); err != nil {
+			return fmt.Errorf("queue due geofence terminal verification: %w", err)
+		}
+	}
+	return nil
 }

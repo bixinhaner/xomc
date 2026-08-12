@@ -20,8 +20,9 @@ Map 配置围栏
 ```
 
 V1 复用现有 PostgreSQL、EventBus、异步任务、TR-069 和 OpenLayers，不引入 PostGIS、
-新微服务或第二套地图。`enforce` 代码链已实现，但生产启用仍以真实设备完成 IPSec/RF
-写入、关联回读和安全恢复验收为门禁；任务入队或 SPV 完成均不能单独视为控制成功。
+新微服务或第二套地图。`enforce` 代码链按 Issue #304 修订为产品能力驱动的小区去激活状态机，
+生产启用仍以真实设备完成 Admin/AdminRF、RF、IPSec 写入/回读、只读 OpState 终态及安全恢复
+验收为门禁；任务入队、SPV 完成或仅 RF/IPSec 回读均不能单独视为控制成功。
 
 不在当前闭环内：
 
@@ -296,32 +297,34 @@ Content-Type: application/json
 逐围栏边沿仅作为判定事实，不重复产生设备告警。
 
 `observe` 只记录判定和告警，不创建设备控制。`enforce` 已接入现有 CWMP 任务链：先持久化
-控制动作和设备参数快照，再提交 SPV；SPV 终态后提交关联 GPV，只有所有请求值精确回读一致
-才标记 `verified`。缺值、值不一致、设备失败或超时均保持失败状态，不生成影子成功回执。
+控制动作和设备参数快照，再提交 SPV；SPV 终态后提交关联 GPV。Issue #304 起，`verified`
+必须同时满足 RF、IPSec、产品可写小区管理控制回读一致，并且所有目标小区只读 OpState 已进入
+预期终态。缺值、值不一致、OpState 未收敛、设备失败或超时均不得生成影子成功回执。
 
 仓库没有证据表明还存在独立安全网关控制接口，因此不增加 SecGW 占位适配器；如后续取得
 正式协议，再作为独立步骤接入，不能从 `SecGWServer1/2/3` 设备参数反推接口。
 
-### 9.1 已对齐的设备控制参数
+### 9.1 产品能力驱动的小区去激活
 
 设备详情 Quick Settings、参数模型和产品 XML 已确认以下控制路径：
 
-| 产品/技术 | IPSec 参数 | RF 参数 | 当前结论 |
-|---|---|---|---|
-| BLN/MLN LTE | `Device.Services.FAPService.Ipsec.IPSEC_ENABLE` | 标准路径 `Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus` | ACS 按产品模型翻译为私有 `AdminCellState`，值为 `1/0` |
-| BLQ/MLQ LTE | `Device.Services.FAPService.Ipsec.IPSEC_ENABLE` | 标准路径 `Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus` | ACS 按产品模型翻译为私有 `X_COM_RadioEnable`，值为 `1/0` |
-| BM LTE | `Device.Services.FAPService.Ipsec.IPSEC_ENABLE` | 标准路径 `Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus` | ACS 按实际 BM 参数模型翻译；任务层不直接绑定私有路径 |
-| BM GSM | `Device.Services.FAPService.Ipsec.IPSEC_ENABLE` | `Device.Services.GsmBTSCellDT.{i}.RfState` | `RfState` 在 `BM.xml` 为只读，不作为控制参数 |
+完整矩阵、现场证据和启用门禁见
+[2026-08-12-geofence-cell-deactivation-capabilities.md](2026-08-12-geofence-cell-deactivation-capabilities.md)。
+产品差异由 `internal/core/carrier/` 根据 ParamModel 的 Access、标准/私有映射和设备实际快照解析，
+geofence 状态机不得散落 productClass 分支。
 
-IPSec 参数在标准模型中为 `READ_WRITE/BOOLEAN`，IPSec 和已确认 RF 控件的开关值使用
+IPSec 参数在标准模型中为 `READ_WRITE/BOOLEAN`，IPSec、RF 和已确认管理控件的开关值使用
 `1=开启、0=关闭`。`{i}` 是设备实例模型中的动态索引，围栏控制在 Worker 中读取设备当前
-`device_parameters` 快照，只选择实际存在且标记为可写的 RF 实例，按实例编号排序后为每个
-小区生成 RF 参数；不存在可靠可写实例时拒绝创建控制 task，不回退到固定 `.1`。参数路径
+`device_parameters` 快照，只选择实际存在的参数；Access 以匹配的 ParamModel/XML 为权威，
+仅在模型缺失时回退到快照的 Writable 标记。控制按实例编号排序后为每个
+小区生成控制参数；不存在可靠 RF、Admin/AdminRF、IPSec 和只读 OpState 时拒绝创建控制 task，
+不回退到固定 `.1`。参数路径
 确认不等于设备执行成功，仍必须以 TR-069 task 终态和设备回执为准。
 
-控制动作以稳定 `action_key/command_key` 防重；动作记录保存控制前值、请求值、回读值、
-失败原因和父动作。回区只恢复本系统已 `verified` 的去激活动作，并只恢复本次实际改动的
-参数；不存在已验证所有权时不自动激活。
+控制动作以稳定 `action_key/command_key` 防重；动作记录保存契约版本、控制前值、请求值、
+控制回读、OpState 终态、轮询进度、截止时间、失败原因和父动作。回区只恢复本系统按新契约
+`verified` 的去激活动作，并只恢复本次实际改动且已 GPV 验证的参数；不存在已验证所有权时
+不自动激活。旧 RF/IPSec-only `verified` 记录保留历史事实，但不升级为真实小区去激活证据。
 
 仓库核查确认：`SecGWServer1/2/3` 是设备南向参数，不是网关控制协议；老 OMC 的
 `FenceClient/FenceController` 已加密，189 页面也未提供控制请求和回执证据。不得基于
@@ -340,8 +343,8 @@ IPSec 参数在标准模型中为 `READ_WRITE/BOOLEAN`，IPSec 和已确认 RF �
 | 新增、修改、启停、归档、设置和绑定审计 | 已复用现有 `audit_logs` 记录对象、原因、结果和失败原因 | 复用现有审计查询页面 | 已闭环 |
 | 位置上报到连续判定 | 已完成 | 绑定设备视图展示判定状态、候选次数、边界距离、位置版本、时间和错误码 | Observe 业务闭环 |
 | 越界告警与通知 | 已投影到现有活动告警和历史归档 | 复用现有告警页面及通知规则 | Observe 告警闭环 |
-| IPSec/RF 去激活及回执 | 已实现动作持久化、幂等 SPV、关联 GPV 和精确值校验 | 展示请求值、回读值及失败原因 | 代码闭环，待真实设备验收 |
-| 安全返回与恢复 | 只恢复已验证且由本系统去激活的参数 | 展示恢复动作和回读结果 | 代码闭环，待真实设备验收 |
+| 产品能力驱动的小区去激活 | 解析 Admin/AdminRF、RF、IPSec、OpState，持久化轮询终态 | 分开展示 RF、激活状态、请求值、回读值及失败原因 | Issue #304 修订中，按产品证据灰度启用 |
+| 安全返回与恢复 | 只恢复本系统实际改变且验证成功的参数，并恢复原 OpState 终态 | 展示恢复动作、控制回读和运行终态 | Issue #304 修订中，待真实设备验收 |
 
 任何阶段不得把“后端接口存在”“任务已入队”或“页面提示成功”写成整条业务已经闭环。
 
@@ -363,11 +366,11 @@ IPSec 参数在标准模型中为 `READ_WRITE/BOOLEAN`，IPSec 和已确认 RF �
 
 ### 11.2 Enforce 阶段
 
-- 安全网关、设备 IPSec、RF 和告警步骤都有独立回执；
+- 设备 Admin/AdminRF、IPSec、RF、只读 OpState 和告警步骤都有独立证据；尚无安全网关接口时不伪造回执；
 - 相同状态边沿只产生一个逻辑动作；
 - 离线、失败、超时和部分成功可以重试或转人工；
 - 只有 geofence 来源的成功关闭允许恢复；
-- 恢复链任一前置失败都不会开启 RF；
+- 恢复链任一前置失败都不会恢复 Admin/AdminRF；
 - 真实测试站完成越界、去激活、回区和恢复灰度验证。
 
 ## 12. 防止过度开发
@@ -392,7 +395,7 @@ IPSec 参数在标准模型中为 `READ_WRITE/BOOLEAN`，IPSec 和已确认 RF �
 | 运营商级开关 | 已实现 | GIS 明确选择运营商后预览并切换；开启进入 `enforce`，关闭进入 `off`；服务端禁止非超管修改系统模式 |
 | 围栏增删改查 | 已实现管理面 | 真实浏览器流程、名称长度边界、版本发布和软归档回归 |
 | 批量导入绑定设备 | 核心链路已实现 | 已实现 `eligible/move/skipped` 预览、原绑定快照校验和事务内原子改绑；仍需真实 PostgreSQL、2G/4G/5G、权限、部分失败、作业重试和最终回查验收 |
-| 第三方批量位置上报触发激活/去激活 | 代码链已完成 | `/fence/batchUpdateDeviceLocation` 已接入位置事实、Outbox、批次幂等、围栏事件、SPV 与 GPV 回读；仍需 1000 台压测及真实设备验收 |
+| 第三方批量位置上报触发激活/去激活 | 代码链按 #304 修订 | `/fence/batchUpdateDeviceLocation` 已接入位置事实、Outbox、批次幂等、围栏事件、SPV/GPV 和 OpState 轮询；仍需 1000 台压测及逐产品真实设备验收 |
 | 操作日志 | 已实现基础审计 | 严格断言每个业务写操作一条审计，包含 actor、IP、对象、原因、结果和失败原因 |
 | web 进程记录第三方接口 | 已复用全局入口日志 | 已记录请求 ID、路径、响应码、耗时和客户端 IP，且不记录请求体；业务失败明细由接口结果和批次记录查询 |
 
@@ -403,15 +406,15 @@ IPSec 参数在标准模型中为 `READ_WRITE/BOOLEAN`，IPSec 和已确认 RF �
 - 189 实测规范字段 `vesselName/updateTime` 与历史截图别名 `serialName/updatetime` 均可受理；新接口只把前者作为规范，兼容别名必须停留在第三方 Adapter。
 - 189 的手工绑定是单一有效归属：把两台 `fence3` 设备加入临时围栏后，`fence3` 从 15 台降为 13 台；删除临时围栏不会自动恢复原归属。当前代码已由唯一索引、`move` 预览和 worker 原子改绑共同落实；排队期间原绑定发生变化时跳过，避免移动未经用户确认的新归属。
 - 189 使用未绑定离线站 `1202000240194DP0015` 再次完成创建、Batch Input、启用、停用和删除并恢复现场；它证明离线设备也可进入配置流程，但不构成 RF/IPSec 指令送达或执行成功证据。
-- `geofence.device.exited/entered` 已由围栏控制监视器消费；设备详情确认的 IPSec + RF 参数由产品适配器解析，创建专用 `TaskSourceGeofence` 的 `SetParameterValues` task，并在 `command_key` 中按 `geofence:<device>:<effective_state_version>:deactivate|activate` 记录动作。
-- 控制动作在任务前落库；SPV 成功后用同一动作 ID 创建 GPV 回读任务，精确核对每个请求路径和值。任务入队、SPV 完成或页面 toast 都不会被写成设备控制成功。
-- 回围事件只从最近一条 `verified` 且尚未恢复的本系统去激活动作生成 `:activate`；相同动作键防重，没有已验证控制所有权的设备不会因普通回围事件被恢复。
-- `enforce` 代码门禁、动作幂等、失败关闭和恢复所有权已经实现；正式启用仍须通过授权设备的 SPV、GPV、离线、超时和重试验收。
+- `geofence.device.exited/entered` 已由围栏控制监视器消费；产品适配器按 ParamModel 解析 Admin/AdminRF、RF、IPSec 和只读 OpState，创建专用 `TaskSourceGeofence` 任务，并在 `command_key` 中按 `geofence:<device>:<effective_state_version>:deactivate|activate` 记录动作。
+- 控制动作在任务前落库；SPV 成功后用同一动作 ID 创建 GPV，精确核对每个控制路径和值，再持久化轮询 OpState。任务入队、SPV 完成、RF/IPSec 回读或页面 toast 都不会被写成真实去激活成功。
+- 回围事件只从最近一条 `contract_version>=2`、终态 `verified` 且尚未恢复的本系统去激活动作生成 `:activate`；相同动作键防重，没有新契约已验证控制所有权的设备不会因普通回围事件被恢复。
+- `enforce` 状态机、动作幂等、失败关闭和恢复所有权已经实现；缺任一产品能力时 fail closed，正式启用仍须通过授权设备的 SPV、GPV、OpState、离线、超时和重试验收。
 - 关闭系统/运营商开关、禁用围栏、解绑或归档时，既有位置安全告警是否自动清除必须明确产品决策；默认不自动恢复设备，也不能静默清除控制失败。
 - 禁用/归档时，事务内筛选活动绑定、最后确认 `inside` 且当前版本策略明确为 `deactivate`
   的设备，写入
   `geofence.lifecycle.deactivation_required` Outbox；控制监视器使用 Outbox 事件 ID 生成稳定
-  `command_key` 幂等提交 IPSec/RF 去激活。Observe 围栏不会创建设备任务；当前版本又禁止
+  `command_key` 幂等提交完整小区去激活动作。Observe 围栏不会创建设备任务；当前版本又禁止
   发布 `deactivate` 策略，因此该链路不会绕过 enforce 门禁。随后仍通过
   `geofence.lifecycle.reevaluate` 把规则从有效状态计算中移除；该流程不产生自动激活。
 - 设备位置权威来源已收敛为设备级 `tr069/external` 模式；默认 `tr069`，船载且不能自主上报
@@ -442,7 +445,8 @@ TR-069 Value Change 上报经纬度
 - 老设计把精度配置写成 `fence.judge.precision=10` 米，并提出边界缓冲和指令失败重试 3 次；
 - 老方案使用 MySQL、`small_cell_infos.fence_id` 和 RabbitMQ，这些是老项目实现选择，不应原样搬到当前 PostgreSQL、EventBus/outbox 和独立绑定状态模型。
 
-这说明当前项目不再缺控制执行代码，剩余缺口是部署版本一致性和真实设备验收证据。
+这说明当前项目具备控制执行基础设施，但老资料不能证明具体产品的小区管理参数和 OpState 终态；
+剩余门禁是逐产品能力证明、部署版本一致性和真实设备验收证据。
 
 ## 14. 后续开发门禁与垂直切片
 
@@ -453,7 +457,7 @@ TR-069 Value Change 上报经纬度
 必须先从老后端、第三方平台和授权测试站取得脱敏材料：
 
 1. 第三方位置 URL 和主体字段已确认；仍需产品确认生产鉴权、幂等键、时间乱序处理，以及是否长期兼容 `serialName/updatetime` 别名；
-2. 已对齐的设备 IPSec/RF 参数仍需真实设备确认实例范围、下发值和任务完成回执、失败语义；
+2. 各产品 Admin/AdminRF、RF、IPSec 和只读 OpState 仍需真实设备确认实例范围、值语义、下发顺序、终态延迟和失败语义；
 3. 若激活/去激活前后还需要 SecGW IPSec 操作，再取得安全网关请求、响应、超时、错误码和幂等键；若老项目没有独立 SecGW 调用，应形成“无独立网关接口”的确认记录；
 4. 越界冻结时间、回围恢复条件、人工接管和审计要求；
 5. 能同时提供位置样本、请求 ID、网关回执、设备任务回执、告警和日志的测试站。

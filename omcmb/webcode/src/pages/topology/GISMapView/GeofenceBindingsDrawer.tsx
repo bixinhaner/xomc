@@ -218,6 +218,7 @@ function parseDeviceSNs(value: string): string[] {
 
 interface ControlParameterRow {
   path: string;
+  role?: 'admin' | 'admin_rf' | 'rf' | 'ipsec' | 'op_state';
   before?: string;
   requested?: string;
   verified?: string;
@@ -225,16 +226,30 @@ interface ControlParameterRow {
 
 function controlParameterRows(action: GeofenceControlAction): ControlParameterRow[] {
   const rows = new Map<string, ControlParameterRow>();
-  const merge = (field: 'before' | 'requested' | 'verified', path: string, value: string) => {
-    rows.set(path, { ...rows.get(path), path, [field]: value });
+  const merge = (
+    field: 'before' | 'requested' | 'verified',
+    path: string,
+    value: string,
+    role?: ControlParameterRow['role'],
+  ) => {
+    rows.set(path, { ...rows.get(path), path, role: role ?? rows.get(path)?.role, [field]: value });
   };
-  action.beforeState.forEach(({ path, value }) => merge('before', path, value));
-  action.requestedState.forEach(({ path, value }) => merge('requested', path, value));
-  action.verifiedState.forEach(({ path, value }) => merge('verified', path, value));
+  action.beforeState.forEach(({ path, value, role }) => merge('before', path, value, role));
+  action.requestedState.forEach(({ path, value, role }) => merge('requested', path, value, role));
+  (action.terminalState ?? []).forEach(({ path, value, role }) => merge('requested', path, value, role));
+  action.verifiedState.forEach(({ path, value, role }) => merge('verified', path, value, role));
   return Array.from(rows.values()).filter((row) => row.requested !== undefined || row.verified !== undefined);
 }
 
-function controlParameterName(path: string, format: (id: string, values?: Record<string, string>) => string) {
+function controlParameterName(
+  path: string,
+  role: ControlParameterRow['role'],
+  format: (id: string, values?: Record<string, string>) => string,
+) {
+  const cell = path.match(/FAPService\.(\d+)\./i);
+  if (role === 'op_state' && cell) return format('geofence.control.opStateInstance', { instance: cell[1] });
+  if (role === 'admin' && cell) return format('geofence.control.adminInstance', { instance: cell[1] });
+  if (role === 'admin_rf' && cell) return format('geofence.control.adminRFInstance', { instance: cell[1] });
   const rf = path.match(/FAPService\.(\d+)\..*RFTxStatus$/i);
   if (rf) return format('geofence.control.rfInstance', { instance: rf[1] });
   const ipsec = path.match(/Ipsec\.(\d+)\..*(?:TUNNEL_ENABLE|TUNNELENABLE)$/i);
@@ -864,6 +879,7 @@ export default function GeofenceBindingsDrawer({
                         <strong>
                           {controlParameterName(
                             parameter.path,
+                            parameter.role,
                             (id, values) =>
                               intl.formatMessage({ id }, values),
                           )}

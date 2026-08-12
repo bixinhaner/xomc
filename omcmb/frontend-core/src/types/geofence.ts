@@ -284,12 +284,21 @@ export interface GeofenceControlAction {
     | 'verified'
     | 'partial_failed'
     | 'failed';
-  beforeState: Array<{ path: string; value: string }>;
-  requestedState: Array<{ path: string; value: string }>;
-  verifiedState: Array<{ path: string; value: string }>;
+  contractVersion: number;
+  beforeState: GeofenceControlParameterState[];
+  requestedState: GeofenceControlParameterState[];
+  terminalState: GeofenceControlParameterState[];
+  verifiedState: GeofenceControlParameterState[];
+  verificationAttempt: number;
   lastError?: string;
   createdAt: string;
   completedAt?: string;
+}
+
+export interface GeofenceControlParameterState {
+  path: string;
+  value: string;
+  role?: 'admin' | 'admin_rf' | 'rf' | 'ipsec' | 'op_state';
 }
 
 export interface GeofenceBatchProgress {

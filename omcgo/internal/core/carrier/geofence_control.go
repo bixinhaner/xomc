@@ -11,8 +11,10 @@ import (
 )
 
 type GeofenceControlParameter struct {
-	Path  string
-	Value string
+	Path         string
+	Value        string
+	Role         GeofenceParameterRole
+	AccessProven bool
 }
 
 // GeofenceControlMapping is the small ParamModel projection needed by the
@@ -318,6 +320,12 @@ func isReadWriteAccess(access string) bool {
 	access = strings.ToLower(strings.TrimSpace(access))
 	access = strings.NewReplacer("_", "", "-", "", " ", "").Replace(access)
 	return access == "readwrite" || access == "rw"
+}
+
+func isReadOnlyAccess(access string) bool {
+	access = strings.ToLower(strings.TrimSpace(access))
+	access = strings.NewReplacer("_", "", "-", "", " ", "").Replace(access)
+	return access == "readonly" || access == "ro"
 }
 
 func mappingPathMatches(template, concrete string) bool {
