@@ -4277,6 +4277,7 @@ function buildSnmpReportStatus(row: SnmpAlarmTargetRow): ReportStatusInfo {
 function buildApiReportStatus(row: NorthboundApiRow): ReportStatusInfo {
   const meta = getApiMeta(row);
   const responseFields = row.responseFields ?? meta.responseFields ?? currentEnvelopeFields;
+  const displayResponseFields = apiFieldDisplayList(responseFields);
   const module = apiModuleDisplay(row);
   const kind = apiKindLabel(meta.apiKind);
   return {
@@ -4288,8 +4289,8 @@ function buildApiReportStatus(row: NorthboundApiRow): ReportStatusInfo {
     artifactType: 'message',
     artifactName: `${row.method} ${row.name}`,
     artifactPath: row.url,
-    size: `${responseFields.length} 字段`,
-    targetSummary: `${module} / ${kind} / 返回字段 ${responseFields.length} 项`,
+    size: `${displayResponseFields.length} 字段`,
+    targetSummary: `${module} / ${kind} / 返回字段 ${displayResponseFields.length} 项`,
     detail: '已按当前系统配置生成接口调用说明和返回字段清单。',
     payload: JSON.stringify({
       接口名称: row.name,
@@ -4300,7 +4301,7 @@ function buildApiReportStatus(row: NorthboundApiRow): ReportStatusInfo {
       认证方式: normalizeLegacyApiText(row.auth),
       返回字段范围: meta.fieldContract,
       请求示例: normalizeLegacyApiText(row.requestExample),
-      返回字段: responseFields,
+      返回字段: displayResponseFields,
     }, null, 2),
     previewTitle: '接口检查结果',
     copyLabel: '复制结果',
@@ -4975,6 +4976,20 @@ function getApiMeta(row: NorthboundApiRow) {
     fieldContract: row.fieldContract ?? meta.fieldContract ?? '当前返回字段',
     responseFields: row.responseFields ?? meta.responseFields ?? currentEnvelopeFields,
   };
+}
+
+function apiFieldDisplayList(fields: string[]): string[] {
+  const normalizedFields = fields
+    .map((field) => normalizeApiFieldDisplay(field))
+    .filter((field) => field.length > 0);
+  return [...new Set(normalizedFields)];
+}
+
+function normalizeApiFieldDisplay(field: string): string {
+  const normalized = field.trim();
+  if (!normalized) return '';
+  if (normalized.includes(' ') || normalized.includes('/')) return normalized;
+  return normalized.replace(/\?/g, '').replace(/\[\]/g, '');
 }
 
 function apiModuleDisplay(row: NorthboundApiRow): string {
@@ -8269,6 +8284,10 @@ export default function NorthboundPageConfig() {
     : '';
   const selectedApiMeta = selectedApi ? getApiMeta(selectedApi) : null;
   const selectedApiResponseFields = selectedApiMeta?.responseFields ?? [];
+  const selectedApiDisplayResponseFields = useMemo(
+    () => apiFieldDisplayList(selectedApiResponseFields),
+    [selectedApiResponseFields],
+  );
 
   return (
     <NorthboundI18nScope>
@@ -8473,7 +8492,7 @@ export default function NorthboundPageConfig() {
                 <Descriptions.Item label="总开关状态">{statusTag(Boolean(apiEnabled[apiConfigKey(selectedApi)]))}</Descriptions.Item>
                 <Descriptions.Item label="认证方式">{normalizeLegacyApiText(selectedApi.auth)}</Descriptions.Item>
                 <Descriptions.Item label="返回字段">{selectedApiMeta?.fieldContract ?? '-'}</Descriptions.Item>
-                <Descriptions.Item label="字段数量">{selectedApiResponseFields.length} 项</Descriptions.Item>
+                <Descriptions.Item label="字段数量">{selectedApiDisplayResponseFields.length} 项</Descriptions.Item>
                 <Descriptions.Item label="接口 URL" span={2}>
                   <span className={styles.monoText}>{selectedApi.url}</span>
                 </Descriptions.Item>
@@ -8486,10 +8505,10 @@ export default function NorthboundPageConfig() {
             <div className={styles.editorSection}>
               <div className={styles.editorSectionHeader}>
                 <Typography.Text strong>返回字段清单</Typography.Text>
-                <Typography.Text type="secondary">共 {selectedApiResponseFields.length} 项</Typography.Text>
+                <Typography.Text type="secondary">共 {selectedApiDisplayResponseFields.length} 项</Typography.Text>
               </div>
               <div className={styles.apiFieldList}>
-                {selectedApiResponseFields.map((field) => (
+                {selectedApiDisplayResponseFields.map((field) => (
                   <Tag key={field} className={styles.apiFieldTag}>
                     {field}
                   </Tag>
