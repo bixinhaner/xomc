@@ -13,6 +13,22 @@ file_mode() {
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+mkdir -p "$tmp/etc-license-only/license"
+: > "$tmp/etc-license-only/license/omcPublicKey.store"
+if config_dir_has_instance_config "$tmp/etc-license-only"; then
+  echo "FAIL: a license-only etc directory must still be treated as a fresh install" >&2
+  exit 1
+fi
+
+mkdir -p "$tmp/etc-with-app"
+: > "$tmp/etc-with-app/app.prod.yaml"
+config_dir_has_instance_config "$tmp/etc-with-app" || {
+  echo "FAIL: an etc directory with an instance config must be treated as an upgrade" >&2
+  exit 1
+}
+
+echo "PASS: instance config detection ignores auxiliary etc files"
+
 cat > "$tmp/pm-template.yaml" <<'YAML'
 redis:
   addrs:
