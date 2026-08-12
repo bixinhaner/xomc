@@ -684,7 +684,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   }
 
   return (
-    <div style={{ minHeight: '100%', padding: 12, background: '#f4f6f9' }}>
+    <div style={{ minHeight: '100%', padding: 12, background: 'var(--color-neutral-100, #f4f6f9)' }}>
       {nonWanOuterGroups.map((group, index) => renderGroup(group, 'outer', index < 2))}
 
       {wanOuterGroups.map((group) => renderGroup(group, 'wan'))}

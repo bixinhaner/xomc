@@ -409,7 +409,7 @@ export default function FixedScalarSettingsTable({
   if (embedded) {
     return (
       <div style={{ width: '100%', marginBottom: 10 }}>
-        <div style={{ padding: '6px 0', color: '#273246', fontSize: 12, fontWeight: 600 }}>{tableTitle}</div>
+        <div style={{ padding: '6px 0', color: 'var(--color-neutral-900, #273246)', fontSize: 12, fontWeight: 600 }}>{tableTitle}</div>
         {tableContent}
       </div>
     );
@@ -419,7 +419,13 @@ export default function FixedScalarSettingsTable({
     <Card
       title={tableTitle}
       size="small"
-      style={{ marginBottom: 10, border: '1px solid #d7dce5', borderRadius: 0, boxShadow: 'none', background: '#fff' }}
+      style={{
+        marginBottom: 10,
+        border: '1px solid var(--color-border, #d7dce5)',
+        borderRadius: 0,
+        boxShadow: 'none',
+        background: 'var(--color-bg-container, #fff)',
+      }}
     >
       {tableContent}
     </Card>
