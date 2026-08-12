@@ -211,6 +211,8 @@ services:
       OMCGO_JWT_SECRET: ${OMCGO_JWT_SECRET}
       OMC_SHARED_SECRET: ${OMC_SHARED_SECRET}   # TR-069 ConnReq/STUN 共享密钥，见 deploy/.env
       OMC_PUBLIC_HOST: ${OMC_PUBLIC_HOST}   # 本机对外 IP（基站可达），见 deploy/.env
+      # 旧 TrueLicense 公钥库完整性密码；默认值只保护公开 JKS 的完整性，不含签发私钥。
+      OMC_LICENSE_STORE_PASSWORD: "${OMC_LICENSE_STORE_PASSWORD:-bcb9omc6}"
       POSTGRES_DATA_PATH: "${POSTGRES_DATA_PATH:-}"
       TSDB_DATA_PATH: "${TSDB_DATA_PATH:-}"
       REDIS_DATA_PATH: "${REDIS_DATA_PATH:-}"
@@ -237,6 +239,10 @@ services:
       # bind-mount(RW)进容器;镜像不再 COPY data。install.sh 首次播种随包 builtin 基线,
       # 升级"现网赢、新版补充"反向合并 —— 运维上传的自定义 XML + .custom sidecar 不丢。
       - /opt/omc/data:/etc/omcgo/data
+      # 旧 TrueLicense JKS 公钥库由 install.sh 外置播种，只读挂载，便于现场替换 OEM 公钥库。
+      - /opt/omc/etc/license/omcPublicKey.store:/etc/omc/license/omcPublicKey.store:ro
+      # License MAC/UUID 硬件绑定必须读取物理宿主机 sysfs，而不是容器虚拟网卡。
+      - /sys:/host/sys:ro
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed-sql:

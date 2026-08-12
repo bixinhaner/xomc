@@ -69,8 +69,10 @@ EOF
 
 prepare_package() {
   local pkg="$1"
-  mkdir -p "$pkg/deploy" "$pkg/etc" "$pkg/images"
+  mkdir -p "$pkg/deploy" "$pkg/etc" "$pkg/images" "$pkg/license/keystore"
   cp -a "$SCRIPT_DIR/." "$pkg/deploy/"
+  cp "$SCRIPT_DIR/../../../../license-run-time/keystore/omcPublicKey.store" \
+    "$pkg/license/keystore/omcPublicKey.store"
   printf 'OMC_PUBLIC_HOST=10.0.0.1\n' >"$pkg/deploy/.env"
   : >"$pkg/deploy/docker-compose.infra.yml"
   : >"$pkg/deploy/docker-compose.app.yml"
@@ -109,7 +111,7 @@ exit 1
 EOF
   cat >"$bin/sha256sum" <<'EOF'
 #!/usr/bin/env bash
-exit 0
+printf '1650aebbb63f320408ade0bc75128eec45d423d50a6ae61e4e368a30216f3331  %s\n' "${1:-}"
 EOF
   chmod +x "$bin/id" "$bin/docker" "$bin/systemctl" "$bin/sha256sum"
 }

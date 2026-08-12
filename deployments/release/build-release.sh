@@ -77,6 +77,7 @@ done
 log "运行发布前回归门禁 ..."
 RELEASE_VERIFY_SCRIPTS=(
   "$SCRIPT_DIR/bundle/deploy/storage-compose_test.sh"
+  "$SCRIPT_DIR/bundle/deploy/license-keystore-release_test.sh"
   "$REPO_ROOT/deployments/monitoring/tests/validate-tempo-memory-budget.sh"
   "$SCRIPT_DIR/validate-release-archive-portability.sh"
 )
@@ -215,6 +216,9 @@ for ARCH in $ARCHES; do
   cp "$REPO_ROOT/omcgo/cmd/app/etc/config.prod.yaml"    "$STAGE/etc/app.prod.yaml"
   cp "$REPO_ROOT/omcgo/cmd/acs/etc/config.prod.yaml"    "$STAGE/etc/acs.prod.yaml"
   cp "$REPO_ROOT/omcgo/cmd/worker/etc/config.prod.yaml" "$STAGE/etc/worker.prod.yaml"
+  mkdir -p "$STAGE/license/keystore"
+  install -m 0644 "$REPO_ROOT/license-run-time/keystore/omcPublicKey.store" \
+    "$STAGE/license/keystore/omcPublicKey.store"
 
   # 1.4 部署模板 + compose 文件 + nginx 配置 + 监控栈配置
   log "[$ARCH] 拷入部署模板 + 监控栈配置 ..."
