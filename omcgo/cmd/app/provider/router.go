@@ -176,7 +176,9 @@ func Setup(r *gin.Engine, c *Container) error {
 		Name: "northbound",
 		// 依赖 device + admin：northbound 数据导出要复用 DeviceService（按 SN/ID 校验设备归属）
 		// 与 PermissionService（解析用户可见设备组）做多租户隔离，二者必须先就绪。
-		Depends: []string{"alarm", "pm", "device", "admin"},
+		// 依赖 paramsync：北向 PATH 查询返回的 jobId/request_id/run_id 要通过
+		// parameter_sync_* 查询状态，避免 /job/result/{jobId} 退回旧任务表后查不到。
+		Depends: []string{"alarm", "pm", "device", "admin", "paramsync"},
 		Init:    func() error { return initNorthboundModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
@@ -639,7 +641,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	if c.ProductRegistry != nil {
 		mrHandler.SetProductPatternResolver(c.ProductRegistry) // #602 按产品名称下拉过滤
 	}
-	mrHandler.RegisterRoutes(featGroup("pm", "Performance.View"))	// ----- MR Task management (F05 测量任务) → resource "pm" -----
+	mrHandler.RegisterRoutes(featGroup("pm", "Performance.View")) // ----- MR Task management (F05 测量任务) → resource "pm" -----
 	// 复用 initMRTaskModule 已构造的 repo（dispatcher / scheduler / heartbeat / cleaner 共享）。
 	if md.mrTaskRepo != nil {
 		mrTaskSvc := mrtask.NewService(md.mrTaskRepo, c.Logger)
