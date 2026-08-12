@@ -24,6 +24,7 @@ type Service struct {
 	controlActionReader               GeofenceControlActionReader
 	thirdPartyLocationStore           ThirdPartyLocationDeviceStore
 	thirdPartyLocationBatchRepository ThirdPartyLocationBatchRepository
+	thirdPartyLocationTimezone        ThirdPartyLocationTimezoneProvider
 	now                               func() time.Time
 }
 
@@ -50,6 +51,12 @@ func (s *Service) SetThirdPartyLocationBatchRepository(
 	repository ThirdPartyLocationBatchRepository,
 ) {
 	s.thirdPartyLocationBatchRepository = repository
+}
+
+func (s *Service) SetThirdPartyLocationTimezoneProvider(
+	provider ThirdPartyLocationTimezoneProvider,
+) {
+	s.thirdPartyLocationTimezone = provider
 }
 
 func (s *Service) SetGeofenceCandidateReader(reader GeofenceCandidateReader) {

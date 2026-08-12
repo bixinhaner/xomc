@@ -203,10 +203,10 @@ func locationSourceAllowed(mode model.LocationSourceMode, sourcePath string) boo
 		strings.ToLower(strings.TrimSpace(sourcePath)),
 		"third_party:",
 	)
-	if mode == model.LocationSourceExternal {
-		return isExternal
+	if isExternal {
+		return mode == model.LocationSourceTR069 || mode == model.LocationSourceExternal
 	}
-	return mode == model.LocationSourceTR069 && !isExternal
+	return mode == model.LocationSourceTR069
 }
 
 func (r *PgLocationObservationRepository) GetLatest(

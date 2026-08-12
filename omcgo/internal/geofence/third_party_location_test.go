@@ -16,9 +16,18 @@ import (
 )
 
 type thirdPartyLocationStoreStub struct {
-	mu      sync.Mutex
-	items   []ThirdPartyLocationDevice
-	errBySN map[string]error
+	mu         sync.Mutex
+	items      []ThirdPartyLocationDevice
+	observedAt []time.Time
+	errBySN    map[string]error
+}
+
+type fixedThirdPartyLocationTimezone struct {
+	location *time.Location
+}
+
+func (p fixedThirdPartyLocationTimezone) Location(context.Context) *time.Location {
+	return p.location
 }
 
 type thirdPartyLocationBatchRepositoryStub struct {
@@ -58,7 +67,7 @@ func (s *thirdPartyLocationBatchRepositoryStub) Complete(
 func (s *thirdPartyLocationStoreStub) SaveThirdPartyLocation(
 	_ context.Context,
 	item ThirdPartyLocationDevice,
-	_ time.Time,
+	observedAt time.Time,
 	_ float64,
 	_ float64,
 ) error {
@@ -68,6 +77,7 @@ func (s *thirdPartyLocationStoreStub) SaveThirdPartyLocation(
 		return err
 	}
 	s.items = append(s.items, item)
+	s.observedAt = append(s.observedAt, observedAt)
 	return nil
 }
 
@@ -210,14 +220,35 @@ func TestUpdateThirdPartyLocationsNormalizesDeviceIdentifiers(t *testing.T) {
 	require.Equal(t, "SN202501130001", store.items[0].SerialNumber)
 }
 
+func TestUpdateThirdPartyLocationsParsesUpdateTimeInSystemTimezone(t *testing.T) {
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	store := &thirdPartyLocationStoreStub{}
+	service := NewService(nil, nil)
+	service.SetThirdPartyLocationStore(store)
+	service.SetThirdPartyLocationTimezoneProvider(
+		fixedThirdPartyLocationTimezone{location: shanghai},
+	)
+	request := validThirdPartyLocationRequest()
+	request.Devices[0].UpdateTime = "2026-08-12 14:30:00"
+
+	result, err := service.UpdateThirdPartyLocations(context.Background(), request)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.SuccessCount)
+	require.Len(t, store.observedAt, 1)
+	require.Equal(t, time.Date(2026, 8, 12, 6, 30, 0, 0, time.UTC), store.observedAt[0].UTC())
+}
+
 func TestParseThirdPartyLocationRejectsInvalidInput(t *testing.T) {
 	cases := []ThirdPartyLocationDevice{
+		{SerialNumber: "SN", Longitude: "1", Latitude: "1", UpdateTime: "2025-11-25 19:55:00"},
 		{SerialNumber: "SN", VesselName: "v", Longitude: "181", Latitude: "1", UpdateTime: "2025-11-25 19:55:00"},
 		{SerialNumber: "SN", VesselName: "v", Longitude: "1", Latitude: "91", UpdateTime: "2025-11-25 19:55:00"},
 		{SerialNumber: "SN", VesselName: "v", Longitude: "1", Latitude: "1", UpdateTime: "bad"},
 	}
 	for _, item := range cases {
-		_, _, _, err := parseThirdPartyLocation(item)
+		_, _, _, err := parseThirdPartyLocation(item, time.UTC)
 		require.Error(t, err)
 	}
 }

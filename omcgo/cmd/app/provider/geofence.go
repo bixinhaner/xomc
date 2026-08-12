@@ -96,6 +96,7 @@ func initGeofenceModule(c *Container) error {
 		repository,
 		settingsRepository,
 	)
+	service.SetThirdPartyLocationTimezoneProvider(c.SystemTimezone)
 	service.SetThirdPartyLocationStore(thirdPartyLocationStore{
 		devices:      c.DeviceRepo,
 		observations: device.NewPgLocationObservationRepository(c.PgPool),
