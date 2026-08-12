@@ -71,8 +71,6 @@
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.NrcellIdentity"/>
   </group>
   <group id="gnb-tdd" titleZh="TDD 配置" titleEn="TDD Configuration">
-    <param name="ReferenceSubcarrierSpacing" titleZh="参考子载波间隔" titleEn="Reference Subcarrier Spacing"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.ReferenceSubcarrierSpacing"/>
     <param name="DlULTransmissionPeriodicity" titleZh="Pattern1 时隙周期" titleEn="Pattern1 Periodicity"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.TddULDLConfigurationCommon.pattern1.DlULTransmissionPeriodicity"/>
     <param name="NrofDownlinkSlots" titleZh="Pattern1 下行时隙数" titleEn="Pattern1 DL Slots"

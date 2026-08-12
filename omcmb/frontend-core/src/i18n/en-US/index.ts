@@ -4901,7 +4901,6 @@ const messages: Record<string, string> = {
   'provision.nrQuick.gnbId':          'gNB ID',
   'provision.nrQuick.gnbIdLength':    'gNB Length',
   'provision.nrQuick.nci':            'NCI',
-  'provision.nrQuick.referenceSubcarrierSpacing': 'Reference Subcarrier Spacing',
   'provision.nrQuick.patternPeriod':  'Pattern{pattern} Periodicity',
   'provision.nrQuick.patternDlSlots': 'Pattern{pattern} DL Slots',
   'provision.nrQuick.patternDlSymbols': 'Pattern{pattern} DL Symbols',

@@ -194,7 +194,6 @@ export const GNB_QUICK_SETTING_GROUPS: GnbQuickSettingGroup[] = [
     id: 'gnb-tdd',
     titleKey: 'provision.nrTddConfig',
     fields: [
-      { id: 'ReferenceSubcarrierSpacing', name: 'ReferenceSubcarrierSpacing', labelKey: 'provision.nrQuick.referenceSubcarrierSpacing', control: 'readonly' },
       { id: 'DlULTransmissionPeriodicity', name: sheetField('CELL', 'DL ULTransmissionPeriodicity1'), labelKey: 'provision.nrQuick.patternPeriod', labelValues: { pattern: 1 }, range: '0 ~ 7' },
       { id: 'NrofDownlinkSlots', name: sheetField('CELL', 'Nrof DownlinkSlots1'), labelKey: 'provision.nrQuick.patternDlSlots', labelValues: { pattern: 1 }, range: '0 ~ 320' },
       { id: 'NrofDownlinkSymbols', name: sheetField('CELL', 'Nrof DownlinkSymbols1'), labelKey: 'provision.nrQuick.patternDlSymbols', labelValues: { pattern: 1 }, range: '0 ~ 13' },
