@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import {
   Form,
@@ -93,6 +93,7 @@ import {
   type ParamConfigValidationStatus,
 } from './paramConfigInsights';
 import { getPolicyModuleActionAvailability } from './policyActionAvailability';
+import { getPolicySubmitAvailability } from './policySubmitAvailability';
 import ProductClassMultiSelect from './components/ProductClassMultiSelect';
 import PolicyReadOnlySection from './components/PolicyReadOnlySection';
 import GnbQuickSettingsCards, { GnbTemplateExtraFieldGrid } from './GnbQuickSettingsCards';
@@ -570,6 +571,7 @@ export default function AddPolicyPage() {
   );
   const [firmwareImportForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const submittingRef = useRef(false);
 
   // Get mode from URL path
   const pathParts = location.pathname.split('/');
@@ -579,8 +581,16 @@ export default function AddPolicyPage() {
   const moduleActions = getPolicyModuleActionAvailability(
     isView ? 'view' : isEdit ? 'edit' : 'create',
   );
-  const { data: persistedPolicy } = usePlugAndPlayPolicy(isEdit || isView ? id : '');
+  const { data: persistedPolicy, isLoading: policyLoading } = usePlugAndPlayPolicy(isEdit || isView ? id : '');
   const savePolicyMutation = useSavePlugAndPlayPolicy(isEdit ? id : undefined);
+  const hasPersistedPolicy = Boolean(persistedPolicy);
+  const submitAvailability = getPolicySubmitAvailability({
+    isEdit,
+    policyLoading,
+    hasPersistedPolicy,
+    productCatalogLoading,
+    submitting: loading || savePolicyMutation.isPending,
+  });
 
   // State for software upgrade
   const [firmwareImportVisible, setFirmwareImportVisible] = useState(false);
@@ -1161,6 +1171,9 @@ export default function AddPolicyPage() {
 
   // Handle submit
   const handleSubmit = useCallback(async () => {
+    if (submittingRef.current || (isEdit && !hasPersistedPolicy) || productCatalogLoading) return;
+    submittingRef.current = true;
+    setLoading(true);
     try {
       await form.validateFields();
       // Module panels are conditionally mounted. validateFields() only returns
@@ -1180,8 +1193,6 @@ export default function AddPolicyPage() {
         selectedProductNames[0] ?? '',
         productCatalog?.items,
       );
-      setLoading(true);
-
       await savePolicyMutation.mutateAsync({
         name: values.policyName,
         enabled: Boolean(values.selfStartEnable),
@@ -1209,13 +1220,19 @@ export default function AddPolicyPage() {
       navigate('/device/plug-and-play');
     } catch (error) {
       console.error('Validation error:', error);
+      const firstInvalidField = (error as { errorFields?: Array<{ name?: (string | number)[] }> })
+        ?.errorFields?.[0]?.name;
+      if (firstInvalidField) {
+        form.scrollToField(firstInvalidField, { block: 'center' });
+      }
       if ((error as { response?: { status?: number } })?.response?.status === 409) {
         message.error(t('provision.enabledPolicyProductConflict'));
       }
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
-  }, [activeParamDeviceType, commonConfigForm, form, functionModule, navigate, persistedPolicy?.config?.commonParamConfig, productCatalog?.items, t, savePolicyMutation, paramConfigList]);
+  }, [activeParamDeviceType, commonConfigForm, form, functionModule, hasPersistedPolicy, isEdit, navigate, persistedPolicy?.config?.commonParamConfig, productCatalog?.items, productCatalogLoading, t, savePolicyMutation, paramConfigList]);
 
   // Handle cancel
   const handleCancel = useCallback(() => {
@@ -1528,7 +1545,12 @@ export default function AddPolicyPage() {
         {!isView && (
           <Space>
             <Button onClick={handleCancel}>{t('common.cancel')}</Button>
-            <Button type="primary" loading={loading} onClick={handleSubmit}>
+            <Button
+              type="primary"
+              loading={submitAvailability.loading}
+              disabled={submitAvailability.disabled}
+              onClick={handleSubmit}
+            >
               {t('common.confirm')}
             </Button>
           </Space>
