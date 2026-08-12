@@ -1285,6 +1285,7 @@ export default function CellParameterForm({
   const watchedIpsecEnable = Form.useWatch('IPSEC_ENABLE', form);
   const watchedPpsTimeMode = Form.useWatch('PpsTimeMode', form);
   const watchedDeviceTimeEnable = Form.useWatch('Enable', form);
+  const watchedConnectType = Form.useWatch('ConnectType', form);
   const dlSubCarrierSpacing = Form.useWatch('DLSubCarrierSpacing', form);
   const ulSubCarrierSpacing = Form.useWatch('ULSubCarrierSpacing', form);
   const [deviceTimeShowNtpServerFields, setDeviceTimeShowNtpServerFields] = useState(true);
@@ -1376,6 +1377,25 @@ export default function CellParameterForm({
     commonPrefix,
     active && !isDeviceTimeGroup && !isGnbSyncSourceGroup,
   );
+  const tr069InterfaceOptions = useMemo(() => {
+    if (group.id !== 'device-wan' || !group.params.some((param) => param.name === 'TR069Interface')) return [];
+    const parameters = schemaResp?.parameters ?? [];
+    const valuesByPath = new Map(parameters.map((item) => [item.path, String(item.currentValue ?? '')]));
+    const baseInterface = String(watchedConnectType ?? '').toLowerCase() === 'copper' ? 'eth1' : 'eth0';
+    const options = [{ value: baseInterface, label: baseInterface }];
+
+    for (let index = 1; index <= 12; index += 1) {
+      const enabled = index === 1
+        || valuesByPath.get(`Device.DeviceInfo.WAN_CONFIG${index}_ENABLE`) === '1';
+      if (!enabled) continue;
+      const vlan = valuesByPath.get(`Device.DeviceInfo.WAN_CONFIG${index}_VLAN`) ?? '';
+      const value = vlan && vlan !== '0'
+        ? `${baseInterface}.${vlan}:${index}`
+        : `${baseInterface}:${index}`;
+      options.push({ value, label: value });
+    }
+    return options;
+  }, [group.id, group.params, schemaResp?.parameters, watchedConnectType]);
   const { data: deviceTimeSchemaResp, isLoading: isDeviceTimeSchemaLoading, refetch: refetchDeviceTimeSchema } = useParameterSchema(
     deviceId,
     'Device.Time.',
@@ -2738,8 +2758,11 @@ export default function CellParameterForm({
             // XML 驱动枚举:quicksettings <param> 上的 <option value=".." label=".."/> 优先于 schema
             // constraints。用于不宜修改 param-mapping 只想在 UI 层展示友好选项的场景
             // (如 RFEnable: 1→ON / 0→OFF)。
-            const xmlEnumValues = p.enumOptions?.map((o) => o.value) ?? [];
-            const xmlEnumLabels = p.enumOptions?.map((o) => o.label) ?? [];
+            const runtimeEnumOptions = p.name === 'TR069Interface' && tr069InterfaceOptions.length > 0
+              ? tr069InterfaceOptions
+              : p.enumOptions;
+            const xmlEnumValues = runtimeEnumOptions?.map((o) => o.value) ?? [];
+            const xmlEnumLabels = runtimeEnumOptions?.map((o) => o.label) ?? [];
             const nrCarrierBandwidthOptions = getNrCarrierBandwidthOptions(p.name, dlSubCarrierSpacing, ulSubCarrierSpacing);
             const effectiveEnumValues = nrCarrierBandwidthOptions.length > 0
               ? nrCarrierBandwidthOptions.map((o) => o.value)
@@ -2772,7 +2795,7 @@ export default function CellParameterForm({
               ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
               : (rawItem?.parameterValue ?? item?.currentValue ?? '');
             const enumOptions = isEnum && !isBitmaskEnum && !isStringMultiSelectEnum
-              ? appendCurrentEnumOption(baseEnumOptions, currentRawValue, p.enumOptions)
+              ? appendCurrentEnumOption(baseEnumOptions, currentRawValue, runtimeEnumOptions)
               : baseEnumOptions;
             const extra = special?.kind === 'mme-ip-plmn-table'
               ? t(restrictMmePlmnSelection

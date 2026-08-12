@@ -34,29 +34,17 @@ interface EditState {
   errors: Record<string, string>;
 }
 
-function groupMatchesRow(group: QuickSettingsGroup, kind: FixedScalarTableKind, rowIndex: number): boolean {
-  if (group.id === `${kind === 'wan' ? 'device-wan' : 'device-static-route'}-${rowIndex}`) return true;
-  const prefix = kind === 'wan' ? 'WAN_CONFIG' : 'ROUTE_CONFIG';
-  return group.params.some((param) => param.standardPath?.includes(`Device.DeviceInfo.${prefix}${rowIndex}_`));
-}
-
 function sortedRows(groups: QuickSettingsGroup[], kind: FixedScalarTableKind): TableRow[] {
   const prefix = kind === 'wan' ? 'device-wan-' : 'device-static-route-';
-  return Array.from({ length: 4 }, (_, index) => {
-    const rowIndex = index + 1;
-    const group = groups.find((candidate) => groupMatchesRow(candidate, kind, rowIndex));
-    return {
-      key: `${prefix}${rowIndex}`,
-      index: rowIndex,
-      group: group ?? {
-        id: `${prefix}${rowIndex}`,
-        titleZh: `${prefix}${rowIndex}`,
-        titleEn: `${prefix}${rowIndex}`,
-        multiInstance: false,
-        params: [],
-      },
-    };
-  });
+  return groups
+    .filter((group) => group.id.startsWith(prefix))
+    .map((group) => ({
+      key: group.id,
+      index: Number(group.id.slice(prefix.length)),
+      group,
+    }))
+    .filter((row) => Number.isInteger(row.index) && row.index > 0)
+    .sort((left, right) => left.index - right.index);
 }
 
 function parameterByName(group: QuickSettingsGroup, name: string): QuickSettingsParam | undefined {
@@ -66,6 +54,9 @@ function parameterByName(group: QuickSettingsGroup, name: string): QuickSettings
     IPAddress: ['_IPADDR'],
     Netmask: ['_NETMASK'],
     Gateway: ['_DEFAULTGW', '_GW'],
+    IPv6Address: ['_V6_IPADDR'],
+    IPv6Prefix: ['_V6_PREFIX'],
+    IPv6Gateway: ['_V6_GW'],
     DestinationNetwork: ['_NETADDR'],
     VLAN: ['_VLAN'],
     Option60: ['_OPTION60'],
@@ -79,16 +70,18 @@ function parameterByName(group: QuickSettingsGroup, name: string): QuickSettings
 
 function editableParams(group: QuickSettingsGroup, kind: FixedScalarTableKind): QuickSettingsParam[] {
   const names = kind === 'wan'
-    ? ['Enable', 'IPMode', 'IPAddress', 'Netmask', 'Gateway', 'VLAN', 'Option60']
+    ? ['Enable', 'IPMode', 'IPAddress', 'Netmask', 'Gateway', 'IPv6Address', 'IPv6Prefix', 'IPv6Gateway', 'VLAN', 'Option60']
     : ['Enable', 'DestinationNetwork', 'Netmask', 'Gateway'];
   return names
     .map((name) => parameterByName(group, name))
     .filter((param): param is QuickSettingsParam => Boolean(param));
 }
 
-function isStaticIpMode(value: string): boolean {
+function normalizedIpMode(value: string): 'ipv4-static' | 'ipv6-static' | 'dynamic' {
   const normalized = value.trim().toLowerCase();
-  return normalized === '1' || normalized === 'static' || normalized === 'static ip';
+  if (normalized === '1' || normalized === 'static' || normalized === 'static ip') return 'ipv4-static';
+  if (normalized === '4' || normalized === 'ipv6 static' || normalized === 'ipv6 static ip') return 'ipv6-static';
+  return 'dynamic';
 }
 
 function visibleEditableParams(
@@ -99,9 +92,12 @@ function visibleEditableParams(
   const params = editableParams(group, kind);
   if (kind !== 'wan') return params;
 
-  const names = isStaticIpMode(values[parameterByName(group, 'IPMode')?.name ?? ''])
+  const mode = normalizedIpMode(values[parameterByName(group, 'IPMode')?.name ?? '']);
+  const names = mode === 'ipv4-static'
     ? ['Enable', 'IPMode', 'IPAddress', 'Netmask', 'Gateway', 'VLAN']
-    : ['Enable', 'IPMode', 'Option60', 'VLAN'];
+    : mode === 'ipv6-static'
+      ? ['Enable', 'IPMode', 'IPv6Address', 'IPv6Prefix', 'IPv6Gateway', 'VLAN']
+      : ['Enable', 'IPMode', 'Option60', 'VLAN'];
   const visibleNames = new Set(
     names
       .map((name) => parameterByName(group, name)?.name)
@@ -385,7 +381,7 @@ export default function FixedScalarSettingsTable({
         loading={!deviceInfoSchema}
         size="small"
         pagination={false}
-        scroll={{ x: 'max-content' }}
+        scroll={{ x: 'max-content', y: kind === 'wan' ? 168 : undefined }}
       />
       <Modal
         title={locale === 'zh-CN' ? `编辑第 ${editState?.row.index ?? ''} 行` : `Edit row ${editState?.row.index ?? ''}`}
