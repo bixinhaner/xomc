@@ -144,6 +144,7 @@ func (r *Router) rateLimit(endpoint string) gin.HandlerFunc {
 
 func (r *Router) pageConfiguredAPI(apiKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		c.Set("northbound_api_key", apiKey)
 		if !r.requirePageConfiguredAPI(c, apiKey) {
 			return
 		}
@@ -218,6 +219,7 @@ func northboundResponseContext() gin.HandlerFunc {
 
 func (r *Router) pageConfiguredOnly(apiKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		c.Set("northbound_api_key", apiKey)
 		if !r.requirePageConfiguredAPI(c, apiKey) {
 			return
 		}
@@ -239,6 +241,7 @@ func (r *Router) RegisterPublicRoutes(rg *gin.RouterGroup) {
 	nb := rg.Group("/northbound")
 	nb.Use(northboundResponseContext())
 	legacy := nb.Group("/v1")
+	legacy.Use(r.northboundAPILogMiddleware())
 	legacy.POST("/access/token", r.rateLimit("nb:legacy:auth:token"), r.pageConfiguredOnly("auth-login"), r.apiUserLogin)
 	r.registerLegacyV1Routes(legacy)
 }
@@ -299,6 +302,12 @@ func (r *Router) registerLegacyV1Routes(legacy *gin.RouterGroup) {
 	legacy.GET("/device/status/:sn", r.rateLimit("nb:legacy:device:status"), r.pageConfiguredAPI("device-status"), r.legacyDeviceStatus)
 	legacy.GET("/device/infos/:sn", r.rateLimit("nb:legacy:device:infos"), r.pageConfiguredAPI("device-detail"), r.legacyDeviceInfo)
 	legacy.GET("/enodeb/infos/status/:sn", r.rateLimit("nb:legacy:enodeb:status"), r.pageConfiguredAPI("device-status"), r.legacyDeviceStatus)
+	legacy.POST("/user/users", r.rateLimit("nb:legacy:user:list"), r.pageConfiguredAPI("api-user-list"), r.legacyListAPIUsers)
+	legacy.POST("/user", r.rateLimit("nb:legacy:user:create"), r.pageConfiguredAPI("api-user-create"), r.legacyCreateAPIUser)
+	legacy.PUT("/user/update", r.rateLimit("nb:legacy:user:update"), r.pageConfiguredAPI("api-user-update"), r.legacyUpdateAPIUser)
+	legacy.DELETE("/user/:id", r.rateLimit("nb:legacy:user:delete"), r.pageConfiguredAPI("api-user-delete"), r.legacyDeleteAPIUser)
+	legacy.POST("/log/page", r.rateLimit("nb:legacy:log:page"), r.pageConfiguredAPI("api-log-page"), r.legacyListAPILogs)
+	legacy.POST("/log/exportLogToCsvFile", r.rateLimit("nb:legacy:log:export"), r.pageConfiguredAPI("api-log-export"), r.legacyExportAPILogs)
 	legacy.POST("/device/register", r.rateLimit("nb:legacy:device:register:create"), r.pageConfiguredAPI("device-register-create"), r.legacyCreateRegistration)
 	legacy.GET("/device/register/page", r.rateLimit("nb:legacy:device:register:list"), r.pageConfiguredAPI("device-register-list"), r.legacyListRegistrations)
 	legacy.POST("/device/register/page", r.rateLimit("nb:legacy:device:register:list"), r.pageConfiguredAPI("device-register-list"), r.legacyListRegistrations)
@@ -310,6 +319,9 @@ func (r *Router) registerLegacyV1Routes(legacy *gin.RouterGroup) {
 	legacy.DELETE("/device/group", r.rateLimit("nb:legacy:device:group:delete"), r.pageConfiguredAPI("device-group-delete"), r.legacyDeleteDeviceGroup)
 	legacy.DELETE("/device/group/:id", r.rateLimit("nb:legacy:device:group:delete"), r.pageConfiguredAPI("device-group-delete"), r.legacyDeleteDeviceGroup)
 	legacy.POST("/device/group/:id/devices", r.rateLimit("nb:legacy:device:group:add-devices"), r.pageConfiguredAPI("device-group-add-devices"), r.legacyAddDevicesToGroup)
+	legacy.POST("/device/group/sub", r.rateLimit("nb:legacy:device:group:sub:create"), r.pageConfiguredAPI("device-group-sub-create"), r.legacyCreateDeviceGroup)
+	legacy.PUT("/device/group/sub", r.rateLimit("nb:legacy:device:group:sub:update"), r.pageConfiguredAPI("device-group-sub-update"), r.legacyUpdateDeviceGroup)
+	legacy.DELETE("/device/group/sub", r.rateLimit("nb:legacy:device:group:sub:delete"), r.pageConfiguredAPI("device-group-sub-delete"), r.legacyDeleteDeviceGroup)
 	legacy.GET("/device/parameters/:sn", r.rateLimit("nb:legacy:parameters:get"), r.pageConfiguredAPI("parameter-tree"), r.legacyGetDeviceParameters)
 	legacy.POST("/device/parameters/query/:sn", r.rateLimit("nb:legacy:parameters:query"), r.pageConfiguredAPI("config-pull"), r.legacyQueryDeviceParameters)
 	legacy.PUT("/device/parameters/cellname/:sn", r.rateLimit("nb:legacy:cellname:set"), r.pageConfiguredAPI("parameter-cellname"), r.legacySetDeviceName)

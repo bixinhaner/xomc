@@ -58,18 +58,28 @@ func (r *CleanupRunner) Run(ctx context.Context, _ *asyncjob.Job) (json.RawMessa
 	}
 
 	deleted := make(map[string]int, len(Tables))
+	retentionDaysByTable := make(map[string]int, len(Tables))
 	days := r.policy.DatabaseDays(ctx)
 	if days < minDays {
 		r.logger.Warn("database retention days too small; skip cleanup", zap.Int("days", days))
 		return json.Marshal(map[string]any{"skipped": true, "reason": "invalid_days"})
 	}
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	now := time.Now()
 	for _, t := range Tables {
+		tableDays := days
+		if t.RetentionDays > 0 {
+			tableDays = t.RetentionDays
+		}
+		retentionDaysByTable[t.Name] = tableDays
+		cutoff := now.Add(-time.Duration(tableDays) * 24 * time.Hour)
 		deleted[t.Name] = r.cleanupTable(ctx, t, cutoff)
 	}
 
-	r.logger.Info("log retention cleanup done", zap.Int("database_days", days), zap.Any("deleted", deleted))
-	return json.Marshal(map[string]any{"deleted": deleted})
+	r.logger.Info("log retention cleanup done",
+		zap.Int("database_days", days),
+		zap.Any("table_retention_days", retentionDaysByTable),
+		zap.Any("deleted", deleted))
+	return json.Marshal(map[string]any{"deleted": deleted, "retention_days": retentionDaysByTable})
 }
 
 // cleanupTable 分批删除单表过期行。用 ctid 子查询 + LIMIT 自限批量（避免一次性删大量行长事务）。

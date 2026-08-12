@@ -59,6 +59,7 @@ func (h *Handler) RegisterRoutes(nb *gin.RouterGroup) {
 		pc.PUT("/api/configs", h.UpdateAllAPIConfigs)
 		pc.POST("/api/configs/:key/test", h.TestAPIConfig)
 		pc.PUT("/api/configs/:key", h.UpdateAPIConfig)
+		pc.GET("/api/invocation-logs", h.ListAPIInvocationLogs)
 		pc.GET("/api/users", h.ListAPIUsers)
 		pc.PUT("/api/users", h.ReplaceAPIUsers)
 		pc.GET("/api/clients", h.ListAPIClients)
@@ -513,6 +514,59 @@ func (h *Handler) ListAPIUsers(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"items": items, "total": len(items)})
+}
+
+func (h *Handler) ListAPIInvocationLogs(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(firstNonEmpty(c.Query("page_size"), c.Query("pageSize"), c.Query("limit"), "20"))
+	pageSize = normalizeLimit(pageSize)
+
+	offset, err := strconv.Atoi(c.Query("offset"))
+	if err != nil || offset < 0 {
+		offset = (page - 1) * pageSize
+	}
+
+	result, err := h.svc.ListAPIInvocationLogs(c.Request.Context(), APIInvocationLogFilter{
+		APIKey:     c.Query("api_key"),
+		Name:       c.Query("name"),
+		Method:     c.Query("method"),
+		Path:       c.Query("path"),
+		Status:     c.Query("status"),
+		CreateUser: c.Query("create_user"),
+		IPAddress:  c.Query("ip_address"),
+		Keyword:    c.Query("keyword"),
+		StartTime:  c.Query("start_time"),
+		EndTime:    c.Query("end_time"),
+		Limit:      pageSize,
+		Offset:     offset,
+	})
+	if err != nil {
+		h.handleUpdateError(c, "list northbound API invocation logs failed", err)
+		return
+	}
+	response.OK(c, gin.H{
+		"items":       result.Items,
+		"total":       result.Total,
+		"limit":       result.Limit,
+		"offset":      result.Offset,
+		"page":        page,
+		"page_size":   pageSize,
+		"total_pages": totalPages(result.Total, pageSize),
+	})
+}
+
+func totalPages(total, pageSize int) int {
+	if pageSize <= 0 {
+		return 0
+	}
+	pages := total / pageSize
+	if total%pageSize != 0 {
+		pages++
+	}
+	return pages
 }
 
 func (h *Handler) ReplaceAPIUsers(c *gin.Context) {

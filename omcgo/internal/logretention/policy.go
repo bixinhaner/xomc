@@ -2,10 +2,13 @@
 //
 // 背景：审计日志（audit_logs）、运维审计（ops_audit_logs）、登录/操作/任务日志
 // （sys_login_logs / sys_oper_logs / sys_task_logs）、系统日志（system_logs）、网元报文
-// 日志（ne_message_logs）、设备事件日志（event_logs）此前**无任何保留/清理**，无限增长。
+// 日志（ne_message_logs）、设备事件日志（event_logs）、北向接口调用日志
+// （northbound_api_invocation_logs）此前**无任何保留/清理**，无限增长。
 // 本包按统一数据库日志保留时间清理所有受管日志表（sys_configs category=log.retention，
 // key=database_days），由 worker 每日 cron 触发批量 DELETE 过期行。配置 TTL 缓存，热加载
 // （改完下一个采样周期/下一次 Run 生效）。
+//
+// 北向接口调用日志属于对外接口报文留痕，固定保留 30 天，不跟随全局 database_days 拉长。
 //
 // 注：基站日志（station_*_logs，#320）、TR069 报文跟踪（trace_messages，TSDB 3 天）已有各自
 // 保留机制，不在本包范围内，避免重复。
@@ -33,6 +36,9 @@ const KeyDatabaseDays = "database_days"
 // DefaultDatabaseLogDays 是数据库日志统一保留天数的安全默认值。
 const DefaultDatabaseLogDays = 180
 
+// DefaultNorthboundAPIInvocationLogDays 是北向 API 接口调用日志固定保留天数。
+const DefaultNorthboundAPIInvocationLogDays = 30
+
 const (
 	minDays = 1
 	maxDays = 3650
@@ -48,6 +54,8 @@ type LogTable struct {
 	Table string
 	// TimeCol 是判定过期用的时间戳列。
 	TimeCol string
+	// RetentionDays > 0 时该表使用独立保留天数；0 表示跟随全局 database_days。
+	RetentionDays int
 }
 
 // Tables 是受保留管理的全部日志表（列名经 information_schema 现场核对，2026-06-13）。
@@ -61,6 +69,7 @@ var Tables = []LogTable{
 	{Name: "system", Table: "system_logs", TimeCol: "created_at"},
 	{Name: "ne_message", Table: "ne_message_logs", TimeCol: "created_at"},
 	{Name: "event", Table: "event_logs", TimeCol: "occurred_at"},
+	{Name: "northbound_api", Table: "northbound_api_invocation_logs", TimeCol: "created_at", RetentionDays: DefaultNorthboundAPIInvocationLogDays},
 }
 
 // ConfigLookup 读 sys_configs 单值（value, found）。
