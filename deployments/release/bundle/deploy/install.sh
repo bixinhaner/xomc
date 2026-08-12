@@ -347,6 +347,42 @@ install_log_retention_configs() {
   fi
 }
 
+nginx_https_cert_public_fingerprint() { # nginx_https_cert_public_fingerprint <cert|key> <path>
+  local kind="$1" path="$2"
+  case "$kind" in
+    cert) openssl x509 -in "$path" -pubkey -noout ;;
+    key)  openssl pkey -in "$path" -pubout ;;
+    *) return 1 ;;
+  esac | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}'
+}
+
+precheck_nginx_https_cert() {
+  local cert="/etc/nginx/cert/cert.pem"
+  local key="/etc/nginx/cert/key.pem"
+  local cert_fp key_fp
+
+  [ "$SKIP_WEB" = 0 ] || return 0
+  if [ ! -e "$cert" ] && [ ! -e "$key" ]; then
+    warn "未放置 nginx HTTPS 文件入口证书，8443 将不启用；HTTP 8080 文件入口继续可用" "nginx HTTPS file-entry certificate files are not present; :8443 will be disabled and HTTP :8080 remains available"
+    return 0
+  fi
+  [ -f "$cert" ] || die "缺少 nginx HTTPS 文件入口证书：$cert；请补齐证书或同时移除证书/私钥以保持 HTTPS 未启用状态" "Missing nginx HTTPS file-entry certificate: $cert. Add the certificate or remove both certificate files to keep HTTPS disabled." 1
+  [ -f "$key" ] || die "缺少 nginx HTTPS 文件入口私钥：$key；请补齐匹配私钥或同时移除证书/私钥以保持 HTTPS 未启用状态" "Missing nginx HTTPS file-entry private key: $key. Add the matching private key or remove both certificate files to keep HTTPS disabled." 1
+  [ -r "$cert" ] || die "nginx HTTPS 文件入口证书不可读：$cert" "The nginx HTTPS file-entry certificate is not readable: $cert" 1
+  [ -r "$key" ] || die "nginx HTTPS 文件入口私钥不可读：$key" "The nginx HTTPS file-entry private key is not readable: $key" 1
+  command -v openssl >/dev/null 2>&1 ||
+    die "缺少 openssl，无法校验证书与私钥是否匹配；请安装 openssl 后重试" "openssl is required to verify that the certificate and private key match; install openssl and retry." 1
+
+  cert_fp="$(nginx_https_cert_public_fingerprint cert "$cert" 2>/dev/null)" ||
+    die "nginx HTTPS 文件入口证书解析失败：$cert" "Failed to parse the nginx HTTPS file-entry certificate: $cert" 1
+  key_fp="$(nginx_https_cert_public_fingerprint key "$key" 2>/dev/null)" ||
+    die "nginx HTTPS 文件入口私钥解析失败：$key" "Failed to parse the nginx HTTPS file-entry private key: $key" 1
+  [ -n "$cert_fp" ] && [ -n "$key_fp" ] && [ "$cert_fp" = "$key_fp" ] ||
+    die "nginx HTTPS 文件入口证书与私钥不匹配：$cert / $key" "The nginx HTTPS file-entry certificate and private key do not match: $cert / $key" 1
+
+  log "nginx HTTPS 文件入口证书预检通过：$cert / $key" "nginx HTTPS file-entry certificate precheck passed: $cert / $key"
+}
+
 fresh_install_reset() {
   local package_env="$PKG_ROOT/deploy/.env"
   local old_deploy="$OMC_ROOT/current/deploy"
@@ -604,6 +640,7 @@ LICENSE_KEYSTORE_ACTUAL_SHA256="$(sha256sum "$PKG_ROOT/license/keystore/omcPubli
 [ "$SKIP_MONITORING" = 1 ] || [ -f "$PKG_ROOT/deploy/docker-compose.monitoring.yml" ] || die "缺 deploy/docker-compose.monitoring.yml（或加 --skip-monitoring）" "Missing deploy/docker-compose.monitoring.yml (or use --skip-monitoring)" 1
 [ -f "$PKG_ROOT/deploy/logrotate.d/omc-nginx" ]        || die "缺 deploy/logrotate.d/omc-nginx" "Missing deploy/logrotate.d/omc-nginx" 1
 [ -f "$PKG_ROOT/deploy/logrotate.d/omc-db-maintenance" ] || die "缺 deploy/logrotate.d/omc-db-maintenance" "Missing deploy/logrotate.d/omc-db-maintenance" 1
+precheck_nginx_https_cert
 
 # OMC_PUBLIC_HOST 是基站回传 PM/MR 文件所需的运维地址，不能等到复制包、
 # 切换 current 或覆盖 etc 后才校验。新包显式配置优先；新包留空时继承现行

@@ -18,6 +18,50 @@ run a shell, `curl`, or `wget` inside that container. Its `health_check`
 extension listens on port 13133, the release compose publishes that port only
 on `127.0.0.1`, and `healthcheck.sh` probes it externally from the host.
 
+## HTTPS file entry
+
+The web nginx container can publish a base-station file HTTPS entry on `:8443`.
+It terminates TLS with deployment-host files and forwards the request to the
+existing ACS HTTP file service.
+
+Host files required to enable `:8443`:
+
+```bash
+/etc/nginx/cert/cert.pem
+/etc/nginx/cert/key.pem
+```
+
+If both files are absent, `:8443` stays disabled and HTTP `:8080` remains
+available. If only one file exists, either file is unreadable, or the pair does
+not match, the installer or nginx startup fails with an explicit error.
+Certificates and private keys are not shipped in the repository or release
+package.
+
+Device-facing file URLs:
+
+```bash
+https://<OMC_PUBLIC_HOST>:8443/smallcell/FileUploadService
+https://<OMC_PUBLIC_HOST>:8443/smallcell/FileDownloadService
+```
+
+HTTP `:8080` remains available for upload and download compatibility.
+
+After the stack is running, verify a real upload/download loop:
+
+```bash
+bash /opt/omc/current/deploy/smoke-nginx-https-file-entry.sh
+```
+
+The same smoke can be run through the healthcheck entrypoint:
+
+```bash
+bash /opt/omc/current/deploy/healthcheck.sh --file-entry-smoke
+```
+
+The smoke script uploads a small test object through both `:8080` and `:8443`,
+downloads both objects through both entries, and compares the downloaded bytes
+with the original payloads.
+
 ## Log retention and cleanup
 
 The release installer configures host file-log rotation and bounded Docker
