@@ -27,7 +27,19 @@ describe('parseTransferAddress', () => {
     });
   });
 
-  it('保留合法的 HTTPS、自定义端口和反向代理前缀', () => {
+  it('按指定协议和端口识别规范的 HTTPS 8443 地址', () => {
+    expect(parseTransferAddress('https://172.24.224.251:8443', {
+      protocol: 'https',
+      port: '8443',
+    })).toEqual({
+      kind: 'standard',
+      mode: 'standard',
+      raw: 'https://172.24.224.251:8443',
+      host: '172.24.224.251',
+    });
+  });
+
+  it('底层解析保留完整 URL 兼容，页面校验决定是否允许提交', () => {
     for (const raw of [
       'https://edge.example.com:9443/omc',
       'http://edge.example.com:9090',
@@ -101,5 +113,9 @@ describe('standard transfer host', () => {
     expect(buildStandardBaseURL('172.24.224.251')).toBe('http://172.24.224.251:8080');
     expect(buildStandardBaseURL('edge.example.com')).toBe('http://edge.example.com:8080');
     expect(buildStandardBaseURL('fd00::10')).toBe('http://[fd00::10]:8080');
+    expect(buildStandardBaseURL('172.24.224.251', {
+      protocol: 'https',
+      port: '8443',
+    })).toBe('https://172.24.224.251:8443');
   });
 });

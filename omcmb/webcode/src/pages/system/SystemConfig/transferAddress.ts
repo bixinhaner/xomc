@@ -1,5 +1,17 @@
-const FIXED_PROTOCOL = 'http://';
-const FIXED_PORT = '8080';
+const DEFAULT_PROTOCOL = 'http';
+const DEFAULT_PORT = '8080';
+
+export interface TransferAddressOptions {
+  protocol?: 'http' | 'https';
+  port?: string;
+}
+
+function normalizeAddressOptions(options?: TransferAddressOptions): Required<TransferAddressOptions> {
+  return {
+    protocol: options?.protocol ?? DEFAULT_PROTOCOL,
+    port: options?.port ?? DEFAULT_PORT,
+  };
+}
 
 interface EmptyTransferAddress {
   kind: 'empty';
@@ -59,7 +71,7 @@ export function isValidTransferHost(host: string): boolean {
   if (!host || host !== host.trim() || /[\s/?#@\\%]/.test(host)) return false;
   if (host.includes(':')) {
     try {
-      const url = new URL(`${FIXED_PROTOCOL}[${host}]:${FIXED_PORT}`);
+      const url = new URL(`${DEFAULT_PROTOCOL}://[${host}]:${DEFAULT_PORT}`);
       return Boolean(url.hostname);
     } catch {
       return false;
@@ -71,11 +83,12 @@ export function isValidTransferHost(host: string): boolean {
   return /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/.test(host);
 }
 
-export function buildStandardBaseURL(host: string): string {
+export function buildStandardBaseURL(host: string, options?: TransferAddressOptions): string {
   const trimmed = host.trim();
   if (!trimmed) return '';
+  const { protocol, port } = normalizeAddressOptions(options);
   const urlHost = trimmed.includes(':') ? `[${trimmed}]` : trimmed;
-  return `${FIXED_PROTOCOL}${urlHost}:${FIXED_PORT}`;
+  return `${protocol}://${urlHost}:${port}`;
 }
 
 function splitAuthority(authority: string): { host: string; port?: string } | undefined {
@@ -121,13 +134,15 @@ function invalidFull(raw: string): InvalidTransferAddress {
   return { kind: 'invalid', mode: 'full', raw };
 }
 
-export function parseTransferAddress(value?: string): TransferAddressResult {
+export function parseTransferAddress(value?: string, options?: TransferAddressOptions): TransferAddressResult {
   const raw = value ?? '';
+  const { protocol, port } = normalizeAddressOptions(options);
   if (!raw) {
     return { kind: 'empty', mode: 'standard', raw: '', host: '' };
   }
 
-  const standardMatch = raw.match(/^http:\/\/(\[[^\]]+\]|[^/?#:@\\]+):8080$/);
+  const standardPattern = new RegExp(`^${protocol}:\\/\\/(\\[[^\\]]+\\]|[^/?#:@\\\\]+):${port}$`, 'i');
+  const standardMatch = raw.match(standardPattern);
   if (standardMatch) {
     const host = standardMatch[1].replace(/^\[|\]$/g, '');
     if (isValidTransferHost(host)) {
