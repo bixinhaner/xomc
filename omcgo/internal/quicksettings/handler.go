@@ -3,6 +3,7 @@ package quicksettings
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -29,8 +30,9 @@ type ParamModelNameLookup interface {
 // Handler 暴露「快速设置」分组元数据 REST 端点(T-0138)。
 //
 // 解析链路:device_id → DeviceLookup.GetDevice → productRegistry.MatchProductClass
-//          → product.ParamModelID → productRepo.LookupParamModelNameByID
-//          → quicksettings.Registry.GetByParamModel。
+//
+//	→ product.ParamModelID → productRepo.LookupParamModelNameByID
+//	→ quicksettings.Registry.GetByParamModel。
 type Handler struct {
 	registry        *Registry
 	deviceSvc       DeviceLookup
@@ -68,6 +70,13 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 //	422 — 设备 product 未配置 paramModel
 //	500 — 内部反查失败
 func (h *Handler) GetGroups(c *gin.Context) {
+	if paramModelName := strings.TrimSpace(c.Query("param_model")); paramModelName != "" {
+		c.JSON(http.StatusOK, gin.H{
+			"param_model": paramModelName,
+			"groups":      h.registry.GetByParamModel(paramModelName),
+		})
+		return
+	}
 	deviceIDStr := c.Query("device_id")
 	if deviceIDStr == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing required query parameter: device_id"})

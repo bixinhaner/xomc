@@ -140,7 +140,7 @@ var optionalPlanningFields = map[string]struct{}{
 	// with the same name from the full product parameter table.
 	"duplexmode": {}, "prachrootsequenceindex": {}, "prachrootsequencevalue": {},
 	"sd": {}, "sdvalue": {},
-	"addresstype": {}, "ipaddress": {}, "subnetmask": {}, "prefixlength": {},
+	"addresstype": {}, "ipaddress": {}, "subnetmask": {}, "prefixlength": {}, "gateway": {},
 	"beartype": {}, "vlanname": {}, "forceencaps": {},
 	// The shared eNB workbook always carries the complete PTP/1588 section,
 	// while individual product models expose only the subset they support.

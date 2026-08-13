@@ -32,6 +32,9 @@ export interface ParamMapping {
   changeApplies: string;
   minValue?: string;
   maxValue?: string;
+  enumValues?: string;
+  enumLabels?: string;
+  validationPattern?: string;
   isStorable: boolean;
   isActive: boolean;
   softwareVersion?: string;

@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import {
   createParamConfigWorkbook,
   createParamConfigTemplateWorkbook,
+  enrichParamConfigWorkbook,
   mergeImportedParamConfigs,
   ParamConfigWorkbookError,
   parseParamConfigWorkbook,
 } from './paramConfigWorkbook';
+import { getParamConfigExportFields } from './paramConfigExportFields';
 
 describe('parameter config workbook', () => {
   it('creates the GSM template with spreadsheet defaults', () => {
@@ -19,6 +22,114 @@ describe('parameter config workbook', () => {
       ['Serial Number', 'IPA', 'Unit ID', 'Remote IP', 'Bind IP', 'WAN IP', 'Synchronization', 'OMC'],
       ['', '6969', '', '', '', '', 'GNSS', ''],
     ]);
+  });
+
+  it('adds hover notes and dropdowns without occupying a data row', async () => {
+    const workbook = await enrichParamConfigWorkbook(createParamConfigTemplateWorkbook('gNB'));
+    const device = workbook.getWorksheet('DEVICE')!;
+    const ipsec = workbook.getWorksheet('IPSEC')!;
+    const cell = workbook.getWorksheet('CELL')!;
+
+    expect(device.getCell('A1').note).toContain('参数类型：string');
+    expect(device.getCell('A1').note).toContain('取值范围：长度 1-64');
+    expect(device.getCell('C1').note).toContain('参数类型：bool');
+    expect(device.getCell('C2').dataValidation.formulae).toEqual(['"true,false"']);
+    expect(cell.getCell('J2').dataValidation.type).toBe('list');
+    const leftIdentifierColumn = ipsec.getRow(1).values.indexOf('LEFT_IDENTIFIER');
+    expect(ipsec.getCell(1, leftIdentifierColumn).note).toContain('参数类型：string');
+    expect(device.getRow(2).values).not.toContain('参数类型');
+  });
+
+  it('uses quick-setting constraints first and parameter-model constraints as fallback', async () => {
+    const source = createParamConfigTemplateWorkbook('gNB');
+    const workbook = await enrichParamConfigWorkbook(source, {
+      quickSettingsGroups: [{
+        id: 'cell', titleZh: '小区', titleEn: 'Cell', multiInstance: false,
+        params: [{
+          name: 'PCI', titleZh: 'PCI', titleEn: 'PCI', type: 'enum',
+          standardPath: 'Device.Cell.PCI',
+          hint: '快速设置：规划值',
+          enumOptions: [{ value: '10', label: '10' }, { value: '20', label: '20' }],
+        }],
+      }],
+      quickSettingFields: [{
+        id: 'PCI', name: '*PCI', labelKey: 'pci', control: 'select',
+        range: '0 ~ 1007', condition: '射频参数启用',
+        options: [{ value: '10' }, { value: '20' }],
+      }],
+      paramMappings: [{
+        id: '1', paramModelId: 'model', standardPath: 'Device.Cell.PCI',
+        privatePath: 'Device.Cell.PCI', entryType: 'parameter', access: 'readWrite',
+        dataType: 'unsignedInt', changeApplies: 'Immediate', minValue: '0', maxValue: '3279165',
+        isStorable: true, isActive: true,
+      }, {
+        id: '2', paramModelId: 'model', standardPath: 'Device.Cell.NRARFCNDL',
+        privatePath: 'Device.Cell.NRARFCNDL', entryType: 'parameter', access: 'readWrite',
+        dataType: 'unsignedInt', changeApplies: 'Immediate', minValue: '0', maxValue: '3279165',
+        isStorable: true, isActive: true,
+      }],
+    });
+    const cell = workbook.getWorksheet('CELL')!;
+    const pciColumn = cell.getRow(1).values.indexOf('*PCI');
+    const arfcnColumn = cell.getRow(1).values.indexOf('NRARFCNDL');
+
+    expect(cell.getCell(1, pciColumn).note).toContain('参数类型：int');
+    expect(cell.getCell(1, pciColumn).note).toContain('取值范围：0 ~ 1007');
+    expect(cell.getCell(1, pciColumn).note).toContain('显示条件：射频参数启用');
+    expect(cell.getCell(2, pciColumn).dataValidation.formulae).toEqual(['"10,20"']);
+    expect(cell.getCell(1, arfcnColumn).note).toContain('参数类型：int');
+    expect(cell.getCell(1, arfcnColumn).note).toContain('取值范围：0 ~ 3279165');
+    expect(cell.getCell(1, arfcnColumn).note).not.toContain('设备数据模型为准');
+  });
+
+  it('uses each IPSEC TR path enum and carrier planning ranges as dropdowns', async () => {
+    const workbook = await enrichParamConfigWorkbook(createParamConfigTemplateWorkbook('gNB'), {
+      quickSettingsGroups: [{
+        id: 'gnb-ipsec', titleZh: 'IPSec', titleEn: 'IPSec', multiInstance: true,
+        objectPath: 'Device.FAP.Ipsec.{i}.',
+        params: [{ name: 'IKE_ENCRYPTION', titleZh: '加密', titleEn: 'Encryption', leaf: 'IKE_ENCRYPTION' }],
+      }, {
+        id: 'gnb-cell', titleZh: '小区', titleEn: 'Cell', multiInstance: true,
+        params: [
+          { name: 'DLSubCarrierSpacing', titleZh: '载波间隔', titleEn: 'SCS' },
+          { name: 'DLCarrierBandWidth', titleZh: '下行带宽', titleEn: 'DL bandwidth' },
+        ],
+      }, {
+        id: 'device-time', titleZh: '时间', titleEn: 'Time', multiInstance: false,
+        params: [{ name: 'LocalTimeZoneName', titleZh: '时区', titleEn: 'Timezone' }],
+      }],
+      quickSettingFields: getParamConfigExportFields('gNB'),
+      paramMappings: [{
+        id: 'ipsec-1', paramModelId: 'model', standardPath: 'Device.FAP.Ipsec.{i}.IKE_ENCRYPTION',
+        privatePath: 'Device.FAP.Ipsec.{i}.IKE_ENCRYPTION', entryType: 'parameter', access: 'readWrite',
+        dataType: 'STRING', changeApplies: 'Immediate', enumValues: 'aes128,aes256,3des',
+        enumLabels: 'aes128,aes256,3des', isStorable: true, isActive: true,
+      }],
+    });
+    const ipsec = workbook.getWorksheet('IPSEC')!;
+    const cell = workbook.getWorksheet('CELL')!;
+    const encryptionColumn = ipsec.getRow(1).values.indexOf('IKE_ENCRYPTION');
+    const scsColumn = cell.getRow(1).values.indexOf('SubcarrierSpacing(DL)');
+    const bandwidthColumn = cell.getRow(1).values.indexOf('DLBandwidth');
+    const device = workbook.getWorksheet('DEVICE')!;
+    const timezoneColumn = device.getRow(1).values.indexOf('Local Time Zone');
+
+    expect(ipsec.getCell(1, encryptionColumn).note).toContain('可选值：aes128、aes256、3des');
+    expect(ipsec.getCell(1, encryptionColumn).note).not.toContain('显示条件');
+    expect(ipsec.getCell(2, encryptionColumn).dataValidation.formulae).toEqual(['"aes128,aes256,3des"']);
+    expect(cell.getCell(2, scsColumn).dataValidation.formulae).toEqual(['"0,1,2"']);
+    expect(cell.getCell(2, bandwidthColumn).dataValidation.type).toBe('list');
+    expect(cell.getCell(2, bandwidthColumn).dataValidation.formulae)
+      .toEqual([`INDIRECT("XOMC_BW_"&${cell.getColumn(scsColumn).letter}2)`]);
+    expect(device.getCell(2, timezoneColumn).dataValidation.type).toBe('list');
+    expect(device.getCell(2, timezoneColumn).dataValidation.formulae?.[0]).toMatch(/^XOMC_OPTIONS_/);
+    expect(workbook.getWorksheet('__XOMC_OPTIONS')?.state).toBe('veryHidden');
+
+    const serialized = await workbook.xlsx.writeBuffer();
+    const reopened = new ExcelJS.Workbook();
+    await reopened.xlsx.load(serialized);
+    expect(reopened.getWorksheet('__XOMC_OPTIONS')?.state).toBe('veryHidden');
+    expect(reopened.getWorksheet('DEVICE')?.getCell(2, timezoneColumn).dataValidation.type).toBe('list');
   });
 
   it('includes the supported LTE and NR planning fields in generated templates', () => {
@@ -34,6 +145,56 @@ describe('parameter config workbook', () => {
       .not.toContain('OMC IP');
     expect(XLSX.utils.sheet_to_json<unknown[]>(nr.Sheets.CELL, { header: 1 })[0])
       .toEqual(expect.arrayContaining(['PowerModify', 'OffsetToPointA', 'SsbSubcarrierOffset']));
+  });
+
+  it('uses the 5G network address-method values for Address Type', async () => {
+    const workbook = await enrichParamConfigWorkbook(createParamConfigTemplateWorkbook('gNB'));
+    const network = workbook.getWorksheet('INTERFACE')!;
+    const addressTypeColumn = network.getRow(1).values.indexOf('Address Type');
+
+    expect(network.getCell(1, addressTypeColumn).note)
+      .toContain('可选值：DHCP、Static、DHCPv6、Staticv6');
+    expect(network.getCell(2, addressTypeColumn).dataValidation.formulae)
+      .toEqual(['"DHCP,Static,DHCPv6,Staticv6"']);
+  });
+
+  it('imports 5G static network rows using the new Address Type semantics', () => {
+    const workbook = createParamConfigTemplateWorkbook('gNB');
+    XLSX.utils.sheet_add_aoa(workbook.Sheets.INTERFACE, [[
+      'NR-SN-001', 'eth0', 'Static', '192.0.2.10', '255.255.255.0', '',
+      '192.0.2.1', 'OAM', 'wan', '100',
+    ]], { origin: 'A2' });
+
+    const rows = parseParamConfigWorkbook(
+      XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }),
+      'gNB',
+      'now',
+    );
+    expect(rows[0].sheetParameters?.INTERFACE?.[0]).toMatchObject({
+      'Address Type': 'Static',
+      'IP Address': '192.0.2.10',
+      'Subnet Mask': '255.255.255.0',
+      Gateway: '192.0.2.1',
+    });
+  });
+
+  it.each([
+    ['IPv4', '192.0.2.10', '255.255.255.0', '', '192.0.2.1', 'Address Type'],
+    ['Static', '192.0.2.10', '', '', '192.0.2.1', 'Subnet Mask'],
+    ['Staticv6', '2001:db8::10', '', '129', '2001:db8::1', 'Prefix Length'],
+  ])('rejects invalid 5G network import values for %s', (
+    addressType, ip, mask, prefix, gateway, field,
+  ) => {
+    const workbook = createParamConfigTemplateWorkbook('gNB');
+    XLSX.utils.sheet_add_aoa(workbook.Sheets.INTERFACE, [[
+      'NR-SN-001', 'eth0', addressType, ip, mask, prefix, gateway, 'OAM', 'wan', '100',
+    ]], { origin: 'A2' });
+
+    expect(() => parseParamConfigWorkbook(
+      XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }),
+      'gNB',
+      'now',
+    )).toThrowError(expect.objectContaining({ code: 'invalid_row', field }));
   });
 
   it('round-trips exported parameter configuration rows', () => {
@@ -209,6 +370,85 @@ describe('parameter config workbook', () => {
           }],
         },
       }]);
+  });
+
+  it.each([
+    ['abc', 'Periodic Inform Interval'],
+    ['86401', 'Periodic Inform Interval'],
+  ])('validates imported values against selected product metadata: %s', (value, field) => {
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      ['Serial Number', 'Periodic Inform Interval'],
+      ['5G-SN-MODEL-001', value],
+    ]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'DEVICE');
+    const bytes = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+
+    expect(() => parseParamConfigWorkbook(bytes, 'gNB', 'now', {
+      quickSettingsGroups: [{
+        id: 'management', titleZh: '管理', titleEn: 'Management', multiInstance: false,
+        params: [{
+          name: 'PeriodicInformInterval', titleZh: '上报周期', titleEn: 'Interval',
+          standardPath: 'Device.ManagementServer.PeriodicInformInterval',
+        }],
+      }],
+      quickSettingFields: [{
+        id: 'PeriodicInformInterval', name: ['sheetParameters', 'DEVICE', 0, field],
+        labelKey: 'interval', range: '1 ~ 86400',
+      }],
+      paramMappings: [{
+        id: 'interval', paramModelId: 'model',
+        standardPath: 'Device.ManagementServer.PeriodicInformInterval',
+        privatePath: 'Device.ManagementServer.PeriodicInformInterval',
+        entryType: 'parameter', access: 'readWrite', dataType: 'unsignedInt',
+        changeApplies: 'Immediate', minValue: '1', maxValue: '86400',
+        isStorable: true, isActive: true,
+      }],
+    })).toThrowError(expect.objectContaining({ code: 'invalid_row', field }));
+  });
+
+  it('rejects a carrier bandwidth that is invalid for the imported SCS', () => {
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      ['*Serial Number', 'SubcarrierSpacing(DL)', 'DLBandwidth'],
+      ['5G-SN-BW-001', '0', '273'],
+    ]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'CELL');
+    const bytes = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+
+    expect(() => parseParamConfigWorkbook(bytes, 'gNB', 'now', {
+      quickSettingsGroups: [{
+        id: 'cell', titleZh: '小区', titleEn: 'Cell', multiInstance: true,
+        params: [
+          { name: 'DLSubCarrierSpacing', titleZh: '间隔', titleEn: 'SCS' },
+          { name: 'DLCarrierBandWidth', titleZh: '带宽', titleEn: 'Bandwidth' },
+        ],
+      }],
+      quickSettingFields: getParamConfigExportFields('gNB'),
+    })).toThrowError(expect.objectContaining({ code: 'invalid_row', field: 'DLBandwidth' }));
+  });
+
+  it.each([
+    ['A', 'string length'],
+    ['abc-123', 'validation pattern'],
+  ])('validates imported strings against product model %s', (value) => {
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      ['Serial Number', 'SiteCode'],
+      ['5G-SN-MODEL-002', value],
+    ]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'DEVICE');
+    const bytes = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+
+    expect(() => parseParamConfigWorkbook(bytes, 'gNB', 'now', {
+      paramMappings: [{
+        id: 'site-code', paramModelId: 'model',
+        standardPath: 'Device.DeviceInfo.SiteCode', privatePath: 'Device.DeviceInfo.SiteCode',
+        entryType: 'parameter', access: 'readWrite', dataType: 'string',
+        changeApplies: 'Immediate', minValue: '2', maxValue: '6',
+        validationPattern: '/^[A-Z]+$/', isStorable: true, isActive: true,
+      }],
+    })).toThrowError(expect.objectContaining({ code: 'invalid_row', field: 'SiteCode' }));
   });
 
   it('merges parameters for the same station across multiple sheets', () => {

@@ -1,9 +1,16 @@
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import {
   getParamConfigTemplateDefaults,
   getParamConfigTemplateSheets,
 } from './paramConfigTemplate';
 import { sanitizeRetiredParamConfigFields } from './retiredParamConfigFields';
+import type { ParamMapping } from '@core/types/paramModel';
+import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quicksettings';
+import {
+  NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS,
+  type GnbQuickSettingField,
+} from './gnbQuickSettingsFields';
 
 export type ParamConfigDeviceType = 'eNB' | 'gNB' | 'GSM';
 
@@ -31,12 +38,12 @@ export type ParamConfigImportMode = 'append' | 'replace';
 export class ParamConfigWorkbookError extends Error {
   readonly code: ParamConfigWorkbookErrorCode;
   readonly row?: number;
-  readonly field?: keyof ParamConfigSpreadsheetRow;
+  readonly field?: keyof ParamConfigSpreadsheetRow | string;
 
   constructor(
     code: ParamConfigWorkbookErrorCode,
     row?: number,
-    field?: keyof ParamConfigSpreadsheetRow,
+    field?: keyof ParamConfigSpreadsheetRow | string,
   ) {
     super(code);
     this.name = 'ParamConfigWorkbookError';
@@ -66,6 +73,184 @@ const COLUMNS: readonly Column[] = [
   { key: 'updatedBy', header: '更新人', aliases: ['更新人', 'updatedBy', 'updated_by'], width: 14 },
   { key: 'updatedAt', header: '更新时间', aliases: ['更新时间', 'updatedAt', 'updated_at'], width: 22 },
 ] as const;
+
+const BOOLEAN_HEADER_PATTERN = /(?:ENABLE|ENABLED|PRIMARY|FRAGMENTATION|FORCEENCAPS|IS\s*DEFAULT)/i;
+const INTEGER_HEADER_PATTERN = /(?:NUMBER|INDEX|BAND|FREQ|ARFCN|PCI|ECI|TAC|RANAC|NCI|(?:GNB|PLMN|VLAN|UNIT)[ _]?ID|INTERVAL|LENGTH|LENTH|POWER|OFFSET|SLOT|SYMBOL|SPACING|VLAN|DOMAIN|ASYMMETRY|TIMEOUT|KEYLIFE|LIFETIME|DELAY|MARGIN|支持频段|频点|子帧配比)/i;
+
+interface ParameterConstraint {
+  type: 'bool' | 'int' | 'string' | 'enum';
+  range: string;
+  options?: readonly string[];
+  condition?: string;
+  dependentOptions?: Readonly<Record<string, readonly string[]>>;
+  dependsOnHeader?: string;
+  minValue?: number;
+  maxValue?: number;
+  validationPattern?: string;
+}
+
+export interface ParamConfigWorkbookMetadata {
+  quickSettingsGroups?: readonly QuickSettingsGroup[];
+  paramMappings?: readonly ParamMapping[];
+  quickSettingFields?: readonly (GnbQuickSettingField & { condition?: string })[];
+}
+
+const ENUM_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+  BANDWIDTH: ['5MHz', '6MHz', '10MHz', '15MHz', '20MHz', '25MHz', '50MHz', '75MHz', '100MHz'],
+  BANDWIDTHDL: ['5MHz', '6MHz', '10MHz', '15MHz', '20MHz'],
+  DLBANDWIDTH: ['5MHz', '10MHz', '15MHz', '20MHz', '25MHz', '30MHz', '40MHz', '50MHz', '60MHz', '70MHz', '80MHz', '90MHz', '100MHz'],
+  ULBANDWIDTH: ['5MHz', '10MHz', '15MHz', '20MHz', '25MHz', '30MHz', '40MHz', '50MHz', '60MHz', '70MHz', '80MHz', '90MHz', '100MHz'],
+  DUPLEXMODE: ['FDD', 'TDD'],
+  SUBFRAMEASSIGNMENT: ['0', '1', '2', '6'],
+  SYNCHRONIZATION: ['GNSS', 'PTP'],
+  ADDRESSTYPE: ['DHCP', 'Static', 'DHCPv6', 'Staticv6'],
+};
+
+function metadataKeys(value: string): string[] {
+  const normalized = canonicalHeader(value);
+  const leaf = value.split('.').filter(Boolean).pop() ?? value;
+  return Array.from(new Set([normalized, canonicalHeader(leaf)]));
+}
+
+function normalizePath(value: string): string {
+  return value.trim().replace(/\.\d+(?=\.|$)/g, '.{i}').toLowerCase();
+}
+
+function quickSettingConstraint(
+  param: QuickSettingsParam,
+  mapping: ParamMapping | undefined,
+  field: (GnbQuickSettingField & { condition?: string }) | undefined,
+): ParameterConstraint {
+  const modelConstraint = mapping ? mappingConstraint(mapping) : undefined;
+  const options = field?.options?.map((option) => option.value)
+    ?? param.enumOptions?.map((option) => option.value)
+    ?? param.checkboxOptions
+    ?? modelConstraint?.options;
+  const normalizedType = String(param.type ?? '').toLowerCase();
+  const type = modelConstraint?.type
+    ?? (normalizedType === 'boolean' || normalizedType === 'bool' ? 'bool'
+      : normalizedType.includes('int') ? 'int' : options?.length ? 'enum' : 'string');
+  const range = field?.range
+    || param.hint?.trim()
+    || (param.minValue !== undefined || param.maxValue !== undefined
+      ? `${param.minValue ?? '-∞'} ~ ${param.maxValue ?? '+∞'}`
+      : options?.join('、'))
+    || modelConstraint?.range
+    || (type === 'bool' ? 'true、false' : type === 'int' ? '整数' : '字符串');
+  return {
+    type,
+    range,
+    condition: field?.condition,
+    options: options?.length ? options : type === 'bool' ? ['true', 'false'] : undefined,
+    dependentOptions: field?.control === 'dl-bandwidth' || field?.control === 'ul-bandwidth'
+      ? Object.fromEntries(Object.entries(NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS).map(([scs, entries]) => (
+        [scs, entries.map((entry) => entry.value)]
+      )))
+      : undefined,
+    dependsOnHeader: field?.control === 'dl-bandwidth'
+      ? 'SubcarrierSpacing(DL)'
+      : field?.control === 'ul-bandwidth' ? 'SubcarrierSpacing(UL)' : undefined,
+    minValue: modelConstraint?.minValue,
+    maxValue: modelConstraint?.maxValue,
+    validationPattern: modelConstraint?.validationPattern,
+  };
+}
+
+function mappingConstraint(mapping: ParamMapping): ParameterConstraint {
+  const normalizedType = mapping.dataType.toLowerCase().replace(/[\s_-]+/g, '');
+  const type = normalizedType === 'boolean' || normalizedType === 'bool'
+    ? 'bool' : normalizedType.includes('int') ? 'int' : 'string';
+  const range = mapping.minValue !== undefined || mapping.maxValue !== undefined
+    ? `${mapping.minValue ?? '-∞'} ~ ${mapping.maxValue ?? '+∞'}`
+    : type === 'bool' ? 'true、false' : type === 'int' ? '整数' : '字符串';
+  const enumOptions = mapping.enumValues?.split(',').map((value) => value.trim()).filter(Boolean);
+  const min = Number(mapping.minValue);
+  const max = Number(mapping.maxValue);
+  const integerOptions = type === 'int' && Number.isInteger(min) && Number.isInteger(max)
+    && max >= min && max - min <= 32
+    ? Array.from({ length: max - min + 1 }, (_, index) => String(min + index))
+    : undefined;
+  return {
+    type,
+    range,
+    options: enumOptions?.length ? enumOptions : type === 'bool' ? ['true', 'false'] : integerOptions,
+    minValue: Number.isFinite(min) ? min : undefined,
+    maxValue: Number.isFinite(max) ? max : undefined,
+    validationPattern: mapping.validationPattern,
+  };
+}
+
+function modelPattern(pattern: string): RegExp | undefined {
+  try {
+    const literal = pattern.match(/^\/(.*)\/([dgimsuvy]*)$/);
+    return literal ? new RegExp(literal[1], literal[2]) : new RegExp(pattern);
+  } catch {
+    return undefined;
+  }
+}
+
+function metadataConstraint(
+  header: string,
+  metadata?: ParamConfigWorkbookMetadata,
+): ParameterConstraint | undefined {
+  const key = canonicalHeader(header);
+  const configuredField = metadata?.quickSettingFields?.find((field) => {
+    const name = Array.isArray(field.name) ? String(field.name[field.name.length - 1] ?? '') : String(field.name);
+    return [field.id, name].flatMap(metadataKeys).includes(key);
+  });
+  for (const group of metadata?.quickSettingsGroups ?? []) {
+    for (const param of group.params) {
+      const keys = [param.name, param.leaf, param.standardPath].filter(Boolean) as string[];
+      if (!keys.flatMap(metadataKeys).includes(key)
+        && (!configuredField || canonicalHeader(param.name) !== canonicalHeader(configuredField.id))) continue;
+      const trPath = param.standardPath
+        || (group.objectPath && param.leaf ? `${group.objectPath}${param.leaf}` : '');
+      const mapping = metadata?.paramMappings?.find((item) => (
+        normalizePath(item.standardPath) === normalizePath(trPath)
+        || normalizePath(item.privatePath) === normalizePath(trPath)
+      ));
+      return quickSettingConstraint(param, mapping, configuredField);
+    }
+  }
+  for (const mapping of metadata?.paramMappings ?? []) {
+    if ([mapping.standardPath, mapping.privatePath].flatMap(metadataKeys).includes(key)) {
+      return mappingConstraint(mapping);
+    }
+  }
+  return undefined;
+}
+
+function parameterConstraint(header: string, metadata?: ParamConfigWorkbookMetadata): ParameterConstraint {
+  const configured = metadataConstraint(header, metadata);
+  if (configured) return configured;
+  const canonical = canonicalHeader(header);
+  const enumOptions = ENUM_OPTIONS[canonical] ?? ENUM_OPTIONS[normalizeHeader(header).toUpperCase()];
+  if (enumOptions) return { type: 'enum', range: enumOptions.join('、'), options: enumOptions };
+  if (canonical === 'SERIALNUMBER') return { type: 'string', range: '长度 1-64' };
+  if (BOOLEAN_HEADER_PATTERN.test(header)) {
+    return { type: 'bool', range: 'true、false', options: ['true', 'false'] };
+  }
+  if (/(?:PCI)/i.test(header)) return { type: 'int', range: '0-1007' };
+  if (/(?:ARFCN|FREQUENCY|频点)/i.test(header)) return { type: 'int', range: '0-3279165' };
+  if (/(?:TAC)/i.test(header)) return { type: 'int', range: '0-16777215' };
+  if (/(?:RANAC)/i.test(header)) return { type: 'int', range: '0-255' };
+  if (/(?:NCI)/i.test(header)) return { type: 'int', range: '0-68719476735' };
+  if (/VLAN[ _]?ID/i.test(header)) return { type: 'int', range: '2-4094' };
+  if (/PREFIX[ _]?LENGTH/i.test(header)) return { type: 'int', range: '0-128' };
+  if (INTEGER_HEADER_PATTERN.test(header)) return { type: 'int', range: '整数' };
+  return { type: 'string', range: '字符串' };
+}
+
+function parameterNote(header: string, metadata?: ParamConfigWorkbookMetadata): string {
+  const constraint = parameterConstraint(header, metadata);
+  const type = constraint.type === 'enum' ? '枚举' : constraint.type;
+  return [
+    `参数类型：${type}`,
+    `取值范围：${constraint.range}`,
+    constraint.options?.length ? `可选值：${constraint.options.join('、')}` : '',
+    constraint.condition ? `显示条件：${constraint.condition}` : '',
+  ].filter(Boolean).join('\n');
+}
 
 function normalizeHeader(value: unknown): string {
   return String(value ?? '').trim();
@@ -145,7 +330,11 @@ export function createParamConfigWorkbook(
         sanitizeRetiredParamConfigFields(config.sheetParameters ?? {})[sheetName] ?? []
       ));
       if (rows.length === 0) continue;
-      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const headers = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+      const worksheet = XLSX.utils.aoa_to_sheet([
+        headers,
+        ...rows.map((row) => headers.map((header) => row[header] ?? '')),
+      ]);
       XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
     }
     return workbook;
@@ -162,9 +351,10 @@ export function createParamConfigWorkbook(
     更新人: config.updatedBy ?? '',
     更新时间: config.updatedAt ?? '',
   }));
-  const worksheet = data.length > 0
-    ? XLSX.utils.json_to_sheet(data, { header: headers })
-    : XLSX.utils.aoa_to_sheet([headers]);
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    headers,
+    ...data.map((row) => headers.map((header) => row[header as keyof typeof row] ?? '')),
+  ]);
   worksheet['!cols'] = COLUMNS.map((column) => ({ wch: column.width }));
   worksheet['!autofilter'] = { ref: `A1:H${Math.max(data.length + 1, 1)}` };
 
@@ -195,13 +385,102 @@ export function createParamConfigTemplateWorkbook(
   return workbook;
 }
 
+export async function enrichParamConfigWorkbook(
+  workbook: XLSX.WorkBook,
+  metadata?: ParamConfigWorkbookMetadata,
+): Promise<ExcelJS.Workbook> {
+  const source = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+  const enriched = new ExcelJS.Workbook();
+  await enriched.xlsx.load(source);
+
+  const dataWorksheets = [...enriched.worksheets];
+  let optionSheet: ExcelJS.Worksheet | undefined;
+  let optionColumn = 0;
+  const namedOptionCache = new Map<string, string>();
+  const namedOptions = (options: readonly string[], prefix = 'XOMC_OPTIONS'): string => {
+    const cacheKey = `${prefix}:${options.join('\u0000')}`;
+    const cached = namedOptionCache.get(cacheKey);
+    if (cached) return cached;
+    optionSheet ??= enriched.addWorksheet('__XOMC_OPTIONS', { state: 'veryHidden' });
+    optionColumn += 1;
+    options.forEach((option, index) => {
+      optionSheet!.getCell(index + 1, optionColumn).value = option;
+    });
+    const name = prefix === 'XOMC_OPTIONS' ? `${prefix}_${optionColumn}` : prefix;
+    const column = optionSheet.getColumn(optionColumn).letter;
+    enriched.definedNames.add(`'${optionSheet.name}'!$${column}$1:$${column}$${options.length}`, name);
+    namedOptionCache.set(cacheKey, name);
+    return name;
+  };
+
+  dataWorksheets.forEach((worksheet) => {
+    worksheet.getRow(1).eachCell((headerCell, columnNumber) => {
+      const header = String(headerCell.value ?? '');
+      const constraint = parameterConstraint(header, metadata);
+      headerCell.note = parameterNote(header, metadata);
+      if (!constraint.options) return;
+      let formula = `"${constraint.options.join(',')}"`;
+      if (constraint.dependentOptions && constraint.dependsOnHeader) {
+        Object.entries(constraint.dependentOptions).forEach(([key, options]) => {
+          namedOptions(options, `XOMC_BW_${key}`);
+        });
+        const headerValues = worksheet.getRow(1).values;
+        const dependencyColumn = Array.isArray(headerValues) ? headerValues.findIndex(
+          (value) => canonicalHeader(value) === canonicalHeader(constraint.dependsOnHeader),
+        ) : -1;
+        if (dependencyColumn > 0) {
+          const dependencyLetter = worksheet.getColumn(dependencyColumn).letter;
+          formula = `INDIRECT("XOMC_BW_"&${dependencyLetter}2)`;
+        }
+      } else if (formula.length > 255) {
+        formula = namedOptions(constraint.options);
+      }
+      for (let rowNumber = 2; rowNumber <= 1000; rowNumber += 1) {
+        const rowFormula = constraint.dependentOptions
+          ? formula.replace(/2\)$/, `${rowNumber})`)
+          : formula;
+        worksheet.getCell(rowNumber, columnNumber).dataValidation = {
+          type: 'list',
+          allowBlank: true,
+          formulae: [rowFormula],
+          showErrorMessage: true,
+          errorTitle: '数据类型错误',
+          error: '请从下拉列表选择有效值',
+        };
+      }
+    });
+  });
+  return enriched;
+}
+
+/** Writes a workbook with hover notes and native dropdowns for bool/enum fields. */
+export async function writeParamConfigWorkbookFile(
+  workbook: XLSX.WorkBook,
+  fileName: string,
+  metadata?: ParamConfigWorkbookMetadata,
+): Promise<void> {
+  const enriched = await enrichParamConfigWorkbook(workbook, metadata);
+
+  const bytes = await enriched.xlsx.writeBuffer();
+  const blob = new Blob([bytes], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export function parseParamConfigWorkbook(
   bytes: ArrayBuffer,
   deviceType: ParamConfigDeviceType,
   importedAt: string,
+  metadata?: ParamConfigWorkbookMetadata,
 ): ParamConfigSpreadsheetRow[] {
   const workbook = XLSX.read(bytes, { type: 'array' });
-  const templateRows = parseDefaultTemplateWorkbook(workbook, deviceType, importedAt);
+  const templateRows = parseDefaultTemplateWorkbook(workbook, deviceType, importedAt, metadata);
   if (templateRows) return templateRows;
 
   const firstSheetName = workbook.SheetNames[0];
@@ -220,10 +499,12 @@ export function parseParamConfigWorkbook(
     defval: '',
     raw: true,
   });
-  if (rows.length === 0) throw new ParamConfigWorkbookError('empty_workbook');
+  const dataRows = rows
+    .map((row, index) => ({ row, sheetRow: index + 2 }))
+    .filter(({ row }) => !String(findValue(row, COLUMNS[0]) ?? '').startsWith('string（'));
+  if (dataRows.length === 0) throw new ParamConfigWorkbookError('empty_workbook');
 
-  return rows.map((row, index) => {
-    const sheetRow = index + 2;
+  return dataRows.map(({ row, sheetRow }) => {
     const serialNumber = requiredText(findValue(row, COLUMNS[0]), sheetRow, 'serialNumber');
     const bandsSupport = integerInRange(findValue(row, COLUMNS[2]), sheetRow, 'bandsSupport', 1, 85);
     const bandWidth = normalizeBandwidth(findValue(row, COLUMNS[3]), sheetRow);
@@ -257,6 +538,7 @@ function parseDefaultTemplateWorkbook(
   workbook: XLSX.WorkBook,
   deviceType: ParamConfigDeviceType,
   importedAt: string,
+  metadata?: ParamConfigWorkbookMetadata,
 ): ParamConfigSpreadsheetRow[] | undefined {
   const hasSerialNumberSheet = workbook.SheetNames.some((sheetName) => {
     const worksheet = workbook.Sheets[sheetName];
@@ -297,7 +579,7 @@ function parseDefaultTemplateWorkbook(
 
     matrix.slice(headerRowIndex + 1).forEach((row, rowOffset) => {
       const serialNumber = String(row[serialIndex] ?? '').trim();
-      if (!serialNumber || /^length\s*:/i.test(serialNumber)) return;
+      if (!serialNumber || /^length\s*:/i.test(serialNumber) || serialNumber.startsWith('string（')) return;
 
       const sheetRow = headerRowIndex + rowOffset + 2;
       const rawParameters = sanitizeRetiredParamConfigFields({
@@ -305,6 +587,10 @@ function parseDefaultTemplateWorkbook(
           header ? [[header, row[index] ?? '']] : []
         )))],
       })[sheetName][0];
+      validateTemplateRow(headers, rawParameters, sheetRow, metadata);
+      if (deviceType === 'gNB' && sheetName === 'INTERFACE') {
+        validateGnbNetworkRow(rawParameters, sheetRow);
+      }
       const previous = rowsBySerial.get(serialNumber);
       const sheetParameters = {
         ...(previous?.sheetParameters ?? {}),
@@ -378,6 +664,82 @@ function parseDefaultTemplateWorkbook(
 
   if (rowsBySerial.size === 0) throw new ParamConfigWorkbookError('template_no_data');
   return Array.from(rowsBySerial.values());
+}
+
+function validateTemplateRow(
+  headers: readonly string[],
+  row: Record<string, unknown>,
+  sheetRow: number,
+  metadata?: ParamConfigWorkbookMetadata,
+): void {
+  for (const header of headers) {
+    if (!header || canonicalHeader(header) === 'SERIALNUMBER') continue;
+    const value = String(row[header] ?? '').trim();
+    if (header.trim().startsWith('*') && !value) {
+      throw new ParamConfigWorkbookError('invalid_row', sheetRow, header);
+    }
+    if (!value) continue;
+
+    const constraint = metadataConstraint(header, metadata);
+    if (!constraint) continue;
+    if (constraint.options?.length && !constraint.options.map(String).includes(value)) {
+      throw new ParamConfigWorkbookError('invalid_row', sheetRow, header);
+    }
+    if (constraint.type === 'int') {
+      if (!/^-?\d+$/.test(value)) {
+        throw new ParamConfigWorkbookError('invalid_row', sheetRow, header);
+      }
+      const numeric = Number(value);
+      if ((constraint.minValue !== undefined && numeric < constraint.minValue)
+        || (constraint.maxValue !== undefined && numeric > constraint.maxValue)) {
+        throw new ParamConfigWorkbookError('invalid_row', sheetRow, header);
+      }
+    }
+    if (constraint.type === 'string'
+      && ((constraint.minValue !== undefined && value.length < constraint.minValue)
+        || (constraint.maxValue !== undefined && value.length > constraint.maxValue))) {
+      throw new ParamConfigWorkbookError('invalid_row', sheetRow, header);
+    }
+    const pattern = constraint.validationPattern ? modelPattern(constraint.validationPattern) : undefined;
+    if (pattern && !pattern.test(value)) {
+      throw new ParamConfigWorkbookError('invalid_row', sheetRow, header);
+    }
+    if (constraint.dependentOptions && constraint.dependsOnHeader) {
+      const dependency = String(row[constraint.dependsOnHeader] ?? '').trim();
+      const allowed = constraint.dependentOptions[dependency];
+      if (!allowed?.includes(value)) {
+        throw new ParamConfigWorkbookError('invalid_row', sheetRow, header);
+      }
+    }
+  }
+}
+
+const GNB_ADDRESS_TYPES = new Set(['DHCP', 'Static', 'DHCPv6', 'Staticv6']);
+
+function validateGnbNetworkRow(row: Record<string, unknown>, sheetRow: number): void {
+  const addressType = String(row['Address Type'] ?? '').trim();
+  if (!GNB_ADDRESS_TYPES.has(addressType)) {
+    throw new ParamConfigWorkbookError('invalid_row', sheetRow, 'Address Type');
+  }
+
+  const requireValue = (header: string) => {
+    if (!String(row[header] ?? '').trim()) {
+      throw new ParamConfigWorkbookError('invalid_row', sheetRow, header);
+    }
+  };
+  if (addressType === 'Static' || addressType === 'Staticv6') {
+    requireValue('IP Address');
+    requireValue('Gateway');
+  }
+  if (addressType === 'Static') {
+    requireValue('Subnet Mask');
+  }
+  if (addressType === 'Staticv6') {
+    const prefix = Number(String(row['Prefix Length'] ?? '').trim());
+    if (!Number.isInteger(prefix) || prefix < 0 || prefix > 128) {
+      throw new ParamConfigWorkbookError('invalid_row', sheetRow, 'Prefix Length');
+    }
+  }
 }
 
 export function mergeImportedParamConfigs<T extends { serialNumber: string }>(
