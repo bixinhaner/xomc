@@ -255,8 +255,6 @@ type paramSyncService interface {
 
 type paramSyncStarter struct {
 	service paramSyncService
-	flags   paramsync.FeatureFlags
-	legacy  device.ParamSyncStarter
 	binding *paramsync.BindingCoordinator
 	devices device.DeviceRepository
 }
@@ -370,9 +368,6 @@ func submitReleaseSync(
 }
 
 func (s *paramSyncStarter) StartLicenseSync(ctx context.Context, dev *model.Device, paths []string, sourceID string) (int, error) {
-	if !s.flags.EnabledForDevice(dev.ID.String()) {
-		return 0, fmt.Errorf("durable license parameter sync is disabled for this device")
-	}
 	return submitLicenseParamSync(ctx, s.service, dev, sourceID, paths)
 }
 
@@ -381,9 +376,6 @@ func (s *paramSyncStarter) StartRegisteredDeviceSync(
 	dev *model.Device,
 	sourceID string,
 ) error {
-	if !s.flags.RunEnabled {
-		return nil
-	}
 	return submitRegisteredDeviceSync(ctx, s.service, dev, sourceID)
 }
 
@@ -396,9 +388,6 @@ func (s *paramSyncStarter) SubmitDeviceOnlineFullSync(
 ) (*provision.DeviceOnlineFullSyncResult, error) {
 	if dev == nil {
 		return nil, fmt.Errorf("durable device-online parameter sync requires a device")
-	}
-	if !s.flags.EnabledForDevice(dev.ID.String()) {
-		return nil, fmt.Errorf("durable device-online parameter sync is disabled for device %s", dev.ID)
 	}
 	result, err := s.service.Submit(ctx, paramsync.SubmitCommand{
 		DeviceID:        dev.ID,
@@ -432,9 +421,6 @@ func (s *paramSyncStarter) StartReleaseSync(
 	campaignID uuid.UUID,
 	attemptID uuid.UUID,
 ) (bool, error) {
-	if !s.flags.RunEnabled {
-		return false, nil
-	}
 	return submitReleaseSync(
 		ctx,
 		s.service,
@@ -445,9 +431,6 @@ func (s *paramSyncStarter) StartReleaseSync(
 }
 
 func (s *paramSyncStarter) SubmitModelUploadParamSync(ctx context.Context, dev *model.Device, sourceID string, modelUploadID uuid.UUID, status string) (bool, int, error) {
-	if !s.flags.EnabledForDevice(dev.ID.String()) {
-		return false, 0, fmt.Errorf("durable model-upload parameter sync is disabled for this device")
-	}
 	result, err := s.service.Submit(ctx, paramsync.SubmitCommand{
 		DeviceID: dev.ID, DeviceSN: dev.SerialNumber, CallerType: "provision",
 		TriggerReason: paramsync.TriggerModelUpload, Scope: paramsync.SyncScopeFull,
@@ -474,9 +457,6 @@ func (s *paramSyncStarter) SubmitConfigPull(ctx context.Context, deviceSN string
 	if dev == nil {
 		return config.DurablePullResult{}, fmt.Errorf("config-pull device %s not found", deviceSN)
 	}
-	if !s.flags.EnabledForDevice(dev.ID.String()) {
-		return config.DurablePullResult{Handled: false}, nil
-	}
 	if key == "" {
 		key = uuid.NewString()
 	}
@@ -487,9 +467,6 @@ func (s *paramSyncStarter) SubmitConfigPull(ctx context.Context, deviceSN string
 	})
 	if err != nil {
 		return config.DurablePullResult{}, err
-	}
-	if result.ResultCode == paramsync.ResultCodePathBUnavailable && s.flags.LegacyFallbackEnabled {
-		return config.DurablePullResult{Handled: false}, nil
 	}
 	runID := ""
 	if result.RunID != nil {
@@ -513,13 +490,6 @@ func (s *paramSyncStarter) StartDurableSync(ctx context.Context, dev *model.Devi
 	if trigger == "" {
 		return true, 0, fmt.Errorf("durable parameter sync trigger reason is required")
 	}
-	if !s.flags.EnabledForDevice(dev.ID.String()) {
-		// All parameter sync triggers enter the durable parameter_sync_* path
-		// first. The legacy sync-gpv Path B path is retained only as a
-		// temporary fallback until param_sync_running is stable enough to remove
-		// the old pipeline.
-		return false, 0, nil
-	}
 	scope := paramsync.SyncScopeFull
 	if len(paths) > 0 {
 		scope = paramsync.SyncScopePartial
@@ -532,12 +502,6 @@ func (s *paramSyncStarter) StartDurableSync(ctx context.Context, dev *model.Devi
 		return true, 0, err
 	}
 	if result.ResultCode == paramsync.ResultCodePathBUnavailable {
-		if s.flags.LegacyFallbackEnabled {
-			// Temporary fallback: all triggers prefer parameter_sync_*; legacy
-			// sync-gpv Path B remains only while param_sync_running rollout is
-			// being stabilized.
-			return false, 0, nil
-		}
 		return true, 0, fmt.Errorf("durable parameter sync unavailable: %s", result.ResultCode)
 	}
 	if result.Status == paramsync.RequestStatusRejected && result.ResultCode == paramsync.ResultCodeActiveSyncExists {
@@ -561,29 +525,26 @@ func (s *paramSyncStarter) StartDurableSync(ctx context.Context, dev *model.Devi
 	return true, result.TaskCount, nil
 }
 
-func (s *paramSyncStarter) SetLegacy(legacy device.ParamSyncStarter) { s.legacy = legacy }
-
-func (s *paramSyncStarter) StartManualSync(ctx context.Context, dev *model.Device, sourceID string, paths []string) (bool, int, error) {
-	result, err := s.StartManualSyncDetailed(ctx, dev, sourceID, paths)
-	if result == nil {
-		return false, 0, err
+// SubmitStartupDeviceOnlineFullSync uses the exact device.online durable full
+// sync semantics for startup reconciliation of every online device.
+func (s *paramSyncStarter) SubmitStartupDeviceOnlineFullSync(ctx context.Context, dev *model.Device, idempotencyKey, sourceEventID string) (*provision.DeviceOnlineFullSyncResult, error) {
+	result, err := s.service.Submit(ctx, paramsync.SubmitCommand{
+		DeviceID: dev.ID, DeviceSN: dev.SerialNumber, CallerType: "provision",
+		TriggerReason: paramsync.TriggerDeviceOnline, Scope: paramsync.SyncScopeFull,
+		IdempotencyKey: idempotencyKey, SourceEventID: sourceEventID,
+		OriginEventType: "omc.redeploy",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("submit startup device-online full sync: %w", err)
 	}
-	return result.Used, result.TaskCount, err
+	runID := result.RunID
+	if runID == nil {
+		runID = result.ActiveRunID
+	}
+	return &provision.DeviceOnlineFullSyncResult{RequestID: result.RequestID, RunID: runID, Status: string(result.Status), ResultCode: string(result.ResultCode), TaskCount: result.TaskCount}, nil
 }
 
 func (s *paramSyncStarter) StartManualSyncDetailed(ctx context.Context, dev *model.Device, sourceID string, paths []string) (*device.ManualParamSyncStart, error) {
-	if !s.flags.EnabledForDevice(dev.ID.String()) {
-		// Manual sync follows the same transition rule as periodic,
-		// device_online, firmware_changed, bootstrap, and model_upload:
-		// parameter_sync_* first; legacy sync-gpv Path B only as a temporary
-		// fallback until param_sync_running is stable and the old path can be
-		// deleted.
-		if s.legacy == nil {
-			return &device.ManualParamSyncStart{}, nil
-		}
-		used, count, err := s.legacy.StartManualSync(ctx, dev, sourceID, paths)
-		return &device.ManualParamSyncStart{Used: used, TaskCount: count, Status: "queued"}, err
-	}
 	scope := paramsync.SyncScopeFull
 	if len(paths) > 0 {
 		scope = paramsync.SyncScopePartial
@@ -596,10 +557,6 @@ func (s *paramSyncStarter) StartManualSyncDetailed(ctx context.Context, dev *mod
 		return &device.ManualParamSyncStart{Used: true}, err
 	}
 	if result.ResultCode == paramsync.ResultCodePathBUnavailable {
-		if s.flags.LegacyFallbackEnabled && s.legacy != nil {
-			used, count, err := s.legacy.StartManualSync(ctx, dev, sourceID, paths)
-			return &device.ManualParamSyncStart{Used: used, TaskCount: count, Status: "queued"}, err
-		}
 		return &device.ManualParamSyncStart{RequestID: result.RequestID, Status: string(result.Status), ResultCode: string(result.ResultCode)}, nil
 	}
 	if result.Status == paramsync.RequestStatusRejected && result.ResultCode == paramsync.ResultCodeActiveSyncExists {
@@ -614,19 +571,6 @@ func (s *paramSyncStarter) StartManualSyncDetailed(ctx context.Context, dev *mod
 
 func initParamSyncModule(c *Container) error {
 	logger := c.Logger.Named("param-sync")
-	flags := paramsync.FeatureFlags{
-		RunEnabled: c.Cfg.ParamSync.RunEnabled, ResultConsumerEnabled: c.Cfg.ParamSync.ResultConsumerEnabled,
-		StagingEnabled: c.Cfg.ParamSync.StagingEnabled, CanaryPercent: c.Cfg.ParamSync.CanaryPercent,
-		LegacyFallbackEnabled: c.Cfg.ParamSync.LegacyFallbackEnabled,
-	}
-	if err := flags.Validate(); err != nil {
-		return err
-	}
-	if !flags.RunEnabled {
-		logger.Info("reliable parameter sync module disabled")
-		return nil
-	}
-
 	repo := paramsync.NewPGRepository(c.PgPool)
 	unsupportedPaths := paramsync.NewPGReadUnsupportedPathRepository(c.PgPool)
 	planner := paramsync.NewPlanner(paramSyncMappingProvider{c: c}, c.Cfg.Provision.AutoSync.GPVBatchSize).
@@ -640,12 +584,9 @@ func initParamSyncModule(c *Container) error {
 	outbox := paramsync.NewOutboxDispatcher(c.PgPool, c.TaskSvc, 20).WithEventBus(c.EventBus)
 	resultProcessor := paramsync.NewPGResultProcessor(c.PgPool).WithMetrics(metrics)
 	reconciler := paramsync.NewReconciler(c.PgPool, c.EventBus, metrics).WithResultProcessor(resultProcessor)
-	var registeredSyncReconciler *registeredDeviceSyncReconciler
-	if c.Cfg.ParamSync.RoutingMode == "durable" {
-		registeredSyncReconciler = &registeredDeviceSyncReconciler{
-			repo:      repo,
-			submitter: service,
-		}
+	registeredSyncReconciler := &registeredDeviceSyncReconciler{
+		repo:      repo,
+		submitter: service,
 	}
 	bridge := paramsync.NewTaskTerminalBridge(c.EventBus)
 	binding := paramsync.NewBindingCoordinator(c.PgPool, c.EventBus)
@@ -665,7 +606,7 @@ func initParamSyncModule(c *Container) error {
 	projector := paramsync.NewCompletionProjector(c.PgPool, c.EventBus, &paramSyncFullRunProjection{
 		devices: c.DeviceRepo, info: infoSyncer, nameSync: nameSyncHook,
 	})
-	requestConsumer := paramsync.NewRequestConsumer(c.EventBus, service, c.DeviceRepo, flags)
+	requestConsumer := paramsync.NewRequestConsumer(c.EventBus, service, c.DeviceRepo)
 	var resultConsumer *paramsync.ResultConsumer
 	initialized := false
 	defer func() {
@@ -680,7 +621,7 @@ func initParamSyncModule(c *Container) error {
 			_ = resultConsumer.Stop()
 		}
 	}()
-	starter := &paramSyncStarter{service: service, flags: flags, binding: binding, devices: c.DeviceRepo}
+	starter := &paramSyncStarter{service: service, binding: binding, devices: c.DeviceRepo}
 	c.miscDeps.paramSyncService = service
 	if c.miscDeps.nbRouter != nil {
 		c.miscDeps.nbRouter.SetParamSyncService(service)
@@ -708,17 +649,15 @@ func initParamSyncModule(c *Container) error {
 		c.GS.Register("param-sync-completion-projector", 2, func(context.Context) error { return projector.Stop() })
 		c.GS.Register("param-sync-request-consumer", 2, func(context.Context) error { return requestConsumer.Stop() })
 	}
-	if flags.ResultConsumerEnabled {
-		resultConsumer = paramsync.NewResultConsumer(c.EventBus, resultProcessor).
-			WithMetrics(metrics).
-			WithWorkerConfig(c.Cfg.ParamSync.ResultConsumerShardCount, c.Cfg.ParamSync.ResultConsumerQueueDepth)
-		if err := resultConsumer.Start(); err != nil {
-			return err
-		}
-		c.miscDeps.paramSyncConsumer = resultConsumer
-		if c.GS != nil {
-			c.GS.Register("param-sync-result-consumer", 2, func(context.Context) error { return resultConsumer.Stop() })
-		}
+	resultConsumer = paramsync.NewResultConsumer(c.EventBus, resultProcessor).
+		WithMetrics(metrics).
+		WithWorkerConfig(c.Cfg.ParamSync.ResultConsumerShardCount, c.Cfg.ParamSync.ResultConsumerQueueDepth)
+	if err := resultConsumer.Start(); err != nil {
+		return err
+	}
+	c.miscDeps.paramSyncConsumer = resultConsumer
+	if c.GS != nil {
+		c.GS.Register("param-sync-result-consumer", 2, func(context.Context) error { return resultConsumer.Stop() })
 	}
 
 	maintenanceCtx, maintenanceCancel := context.WithCancel(context.Background())
@@ -799,8 +738,7 @@ func initParamSyncModule(c *Container) error {
 		})
 	}
 	logger.Info("reliable parameter sync module initialized",
-		zap.Bool("run_enabled", flags.RunEnabled), zap.Int("canary_percent", flags.CanaryPercent),
-		zap.Bool("result_consumer_enabled", flags.ResultConsumerEnabled), zap.Bool("staging_enabled", flags.StagingEnabled))
+		zap.Int("result_consumer_shards", c.Cfg.ParamSync.ResultConsumerShardCount))
 	initialized = true
 	return nil
 }

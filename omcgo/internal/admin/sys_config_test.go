@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
@@ -24,6 +25,37 @@ type stubSysConfigRepo struct {
 	deleteFn      func(ctx context.Context, id uuid.UUID) error
 	batchUpsertFn func(ctx context.Context, category string, items []BatchItem) (int, error)
 	listFn        func(ctx context.Context, category string, publicOnly bool) ([]SysConfig, error)
+}
+
+type atomicValidationSysConfigRepo struct {
+	stubSysConfigRepo
+	called bool
+}
+
+func (r *atomicValidationSysConfigRepo) BatchUpsertWithApplyValidated(
+	_ context.Context,
+	category string,
+	items []BatchItem,
+	targets []ConfigApplyTarget,
+	validator SysConfigCategoryValidator,
+) (BatchUpsertResult, error) {
+	r.called = true
+	values := make(map[string]string, len(items))
+	for _, item := range items {
+		values[item.Key] = item.Value
+	}
+	if err := validator(values); err != nil {
+		return BatchUpsertResult{}, err
+	}
+	return BatchUpsertResult{
+		Updated: len(items),
+		Batch: ConfigApplyBatch{
+			ID:       uuid.New(),
+			Category: category,
+			Status:   summarizeConfigApplyStatus(targets),
+			Targets:  targets,
+		},
+	}, nil
 }
 
 func (s *stubSysConfigRepo) Create(ctx context.Context, cfg *SysConfig) error {
@@ -409,6 +441,217 @@ func TestSysConfigService_RegisterValidator_NilFnDeletes(t *testing.T) {
 		Items:    []BatchItem{{Key: "k", Value: "v"}},
 	})
 	require.NoError(t, err)
+}
+
+func TestBatchUpsertRejectsInvalidACSTransferProtocolPolicy(t *testing.T) {
+	var repoCalled atomic.Bool
+	repo := &stubSysConfigRepo{
+		batchUpsertFn: func(_ context.Context, _ string, items []BatchItem) (int, error) {
+			repoCalled.Store(true)
+			return len(items), nil
+		},
+	}
+	svc := NewSysConfigService(repo)
+	svc.RegisterCategoryValidator(transfercfg.Category, transfercfg.ValidateConfig)
+
+	_, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: transfercfg.Category,
+		Items: []BatchItem{
+			{Key: transfercfg.KeyProtocolPolicy, Value: "automatic"},
+		},
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, repoCalled.Load(), "非法协议策略不得写入批次中的任何配置")
+}
+
+func TestBatchUpsertDelegatesCategoryValidationToAtomicRepository(t *testing.T) {
+	repo := &atomicValidationSysConfigRepo{}
+	repo.listFn = func(context.Context, string, bool) ([]SysConfig, error) {
+		return nil, errors.New("category validation escaped the repository transaction")
+	}
+	svc := NewSysConfigService(repo)
+	validatorCalled := false
+	svc.RegisterCategoryValidator("atomic", func(values map[string]string) error {
+		validatorCalled = true
+		assert.Equal(t, "value", values["key"])
+		return nil
+	})
+
+	result, err := svc.BatchUpsertWithResult(context.Background(), BatchUpdateSysConfigRequest{
+		Category: "atomic",
+		Items:    []BatchItem{{Key: "key", Value: "value"}},
+	})
+
+	require.NoError(t, err)
+	assert.True(t, repo.called)
+	assert.True(t, validatorCalled)
+	assert.Equal(t, 1, result.Updated)
+}
+
+func TestBatchUpsertRejectsPreferHTTPSWithoutBothHTTPSAddresses(t *testing.T) {
+	var repoCalled atomic.Bool
+	repo := &stubSysConfigRepo{
+		batchUpsertFn: func(_ context.Context, _ string, items []BatchItem) (int, error) {
+			repoCalled.Store(true)
+			return len(items), nil
+		},
+	}
+	svc := NewSysConfigService(repo)
+	svc.RegisterCategoryValidator(transfercfg.Category, transfercfg.ValidateConfig)
+
+	_, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: transfercfg.Category,
+		Items: []BatchItem{
+			{Key: transfercfg.KeyProtocolPolicy, Value: transfercfg.ProtocolPolicyPreferHTTPS},
+		},
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, repoCalled.Load(), "HTTPS 地址不完整时不得写入策略")
+}
+
+func TestBatchUpsertRejectsHTTPAddressForPreferHTTPS(t *testing.T) {
+	var repoCalled atomic.Bool
+	repo := &stubSysConfigRepo{
+		batchUpsertFn: func(_ context.Context, _ string, items []BatchItem) (int, error) {
+			repoCalled.Store(true)
+			return len(items), nil
+		},
+	}
+	svc := NewSysConfigService(repo)
+	svc.RegisterCategoryValidator(transfercfg.Category, transfercfg.ValidateConfig)
+
+	_, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: transfercfg.Category,
+		Items: []BatchItem{
+			{Key: transfercfg.KeyProtocolPolicy, Value: transfercfg.ProtocolPolicyPreferHTTPS},
+			{Key: transfercfg.KeyHTTPSUploadBaseURL, Value: "http://acs.example.com:8080"},
+			{Key: transfercfg.KeyHTTPSDownloadBaseURL, Value: "https://acs.example.com:8443"},
+		},
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, repoCalled.Load(), "HTTPS 字段使用 HTTP scheme 时不得写入任何配置")
+}
+
+func TestBatchUpsertRejectsNonHTTPSOptionalAddressForForceHTTP(t *testing.T) {
+	var repoCalled atomic.Bool
+	repo := &stubSysConfigRepo{
+		batchUpsertFn: func(_ context.Context, _ string, items []BatchItem) (int, error) {
+			repoCalled.Store(true)
+			return len(items), nil
+		},
+	}
+	svc := NewSysConfigService(repo)
+	svc.RegisterCategoryValidator(transfercfg.Category, transfercfg.ValidateConfig)
+
+	_, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: transfercfg.Category,
+		Items: []BatchItem{
+			{Key: transfercfg.KeyProtocolPolicy, Value: transfercfg.ProtocolPolicyForceHTTP},
+			{Key: transfercfg.KeyHTTPSUploadBaseURL, Value: "http://acs.example.com:8080"},
+		},
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, repoCalled.Load(), "force_http 下填写的 HTTPS 地址非法时仍不得写入")
+}
+
+func TestBatchUpsertRejectsHTTPSAddressInHTTPTransferField(t *testing.T) {
+	var repoCalled atomic.Bool
+	repo := &stubSysConfigRepo{
+		batchUpsertFn: func(_ context.Context, _ string, items []BatchItem) (int, error) {
+			repoCalled.Store(true)
+			return len(items), nil
+		},
+	}
+	svc := NewSysConfigService(repo)
+	svc.RegisterValidator(transfercfg.Category, transfercfg.KeyUploadBaseURL, transfercfg.ValidateHTTPBaseURL)
+	svc.RegisterCategoryValidator(transfercfg.Category, transfercfg.ValidateConfig)
+
+	_, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: transfercfg.Category,
+		Items: []BatchItem{
+			{Key: transfercfg.KeyUploadBaseURL, Value: "https://acs.example.com:8443"},
+		},
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, repoCalled.Load(), "HTTP 地址字段使用 HTTPS scheme 时不得写入")
+}
+
+func TestBatchUpsertRejectsPartialUpdateWhenPersistedHTTPFieldUsesHTTPS(t *testing.T) {
+	var repoCalled atomic.Bool
+	repo := &stubSysConfigRepo{
+		listFn: func(_ context.Context, category string, _ bool) ([]SysConfig, error) {
+			return []SysConfig{
+				{Category: category, Key: transfercfg.KeyUploadBaseURL, Value: "https://legacy.example.com:8443/upload"},
+			}, nil
+		},
+		batchUpsertFn: func(_ context.Context, _ string, items []BatchItem) (int, error) {
+			repoCalled.Store(true)
+			return len(items), nil
+		},
+	}
+	svc := NewSysConfigService(repo)
+	svc.RegisterCategoryValidator(transfercfg.Category, transfercfg.ValidateConfig)
+
+	_, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: transfercfg.Category,
+		Items: []BatchItem{
+			{Key: transfercfg.KeyProtocolPolicy, Value: transfercfg.ProtocolPolicyForceHTTP},
+		},
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput)
+	assert.False(t, repoCalled.Load(), "部分更新不得保留违反 HTTP 字段语义的存量值")
+}
+
+func TestBatchUpsertAllowsPreferHTTPSUsingPersistedHTTPSAddresses(t *testing.T) {
+	repo := &stubSysConfigRepo{
+		listFn: func(_ context.Context, category string, _ bool) ([]SysConfig, error) {
+			return []SysConfig{
+				{Category: category, Key: transfercfg.KeyHTTPSUploadBaseURL, Value: "https://acs.example.com:8443/upload"},
+				{Category: category, Key: transfercfg.KeyHTTPSDownloadBaseURL, Value: "https://acs.example.com:8443/download"},
+			}, nil
+		},
+	}
+	svc := NewSysConfigService(repo)
+	svc.RegisterCategoryValidator(transfercfg.Category, transfercfg.ValidateConfig)
+
+	updated, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: transfercfg.Category,
+		Items: []BatchItem{
+			{Key: transfercfg.KeyProtocolPolicy, Value: transfercfg.ProtocolPolicyPreferHTTPS},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, updated)
+}
+
+func TestBatchUpsertAllowsForceHTTPWithoutHTTPSAddresses(t *testing.T) {
+	svc := NewSysConfigService(&stubSysConfigRepo{})
+	svc.RegisterCategoryValidator(transfercfg.Category, transfercfg.ValidateConfig)
+
+	updated, err := svc.BatchUpsert(context.Background(), BatchUpdateSysConfigRequest{
+		Category: transfercfg.Category,
+		Items: []BatchItem{
+			{Key: transfercfg.KeyProtocolPolicy, Value: transfercfg.ProtocolPolicyForceHTTP},
+			{Key: transfercfg.KeyHTTPSUploadBaseURL, Value: ""},
+			{Key: transfercfg.KeyHTTPSDownloadBaseURL, Value: ""},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, updated)
 }
 
 func TestBatchItemsToApplyState_RedactsSecrets(t *testing.T) {

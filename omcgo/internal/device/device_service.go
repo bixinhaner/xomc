@@ -84,7 +84,6 @@ type DeviceService struct {
 	licenseEnforcer        LicenseEnforcer
 	carrierRegistry        *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
 	paramSyncStarter       ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
-	paramSyncRoutingMode   string
 	manualOfflineMode      string
 	abnormalRecorder       AbnormalRebootRecorder // T-0158: 异常重启识别即落库（nil = 禁用）
 	bootEventRecorder      BootEventRecorder      // 普通 1 BOOT 事件日志写入（nil = 禁用）
@@ -374,46 +373,14 @@ func (s *DeviceService) SyncDeviceParamsManualDetailed(ctx context.Context, devi
 	if s.paramSyncStarter == nil {
 		return nil, dev, fmt.Errorf("paramSyncStarter not configured")
 	}
-	detailed, hasDurableStarter := s.paramSyncStarter.(DetailedParamSyncStarter)
-	if s.blocksLegacyParamSync() && !hasDurableStarter {
-		return nil, dev, fmt.Errorf("parameter sync routing mode %q does not expose the manual legacy path: %w", s.paramSyncRoutingMode, commonerrors.ErrUnavailable)
-	}
-	if !dev.IsOnline && s.manualOfflineModeRejects(hasDurableStarter) {
+	if !dev.IsOnline && s.manualOfflineModeRejects() {
 		return nil, dev, commonerrors.NewBusinessError(
 			global.ErrCodeDeviceOffline,
 			"device is offline; parameter sync can only be started for online devices",
 			commonerrors.ErrUnavailable,
 		)
 	}
-	if !hasDurableStarter {
-		if locker, ok := s.taskSvc.(syncGPVDeviceLocker); ok {
-			release, lockErr := locker.AcquireSyncGPVDeviceLock(ctx, dev.SerialNumber)
-			if lockErr != nil {
-				return nil, dev, fmt.Errorf("lock manual parameter sync: %w", lockErr)
-			}
-			defer release()
-		}
-		if guard, ok := s.taskSvc.(syncGPVOpenGuard); ok {
-			hasOpen, guardErr := guard.HasOpenSyncGPVTasksByDevice(ctx, dev.SerialNumber)
-			if guardErr != nil {
-				return nil, dev, fmt.Errorf("check manual sync running: %w", guardErr)
-			}
-			if hasOpen {
-				return nil, dev, commonerrors.NewBusinessError(
-					global.ErrCodeRuleTaskRunning,
-					"parameter sync already running for this device, try again in a few seconds",
-					commonerrors.ErrAlreadyExists,
-				)
-			}
-		}
-	}
-
-	if hasDurableStarter {
-		result, err = detailed.StartManualSyncDetailed(ctx, dev, sourceID, parameterPaths)
-	} else {
-		used, taskCount, startErr := s.paramSyncStarter.StartManualSync(ctx, dev, sourceID, parameterPaths)
-		result, err = &ManualParamSyncStart{Used: used, TaskCount: taskCount, Status: "queued"}, startErr
-	}
+	result, err = s.paramSyncStarter.StartManualSyncDetailed(ctx, dev, sourceID, parameterPaths)
 	if err != nil {
 		return result, dev, fmt.Errorf("start manual sync: %w", err)
 	}
@@ -435,32 +402,13 @@ func (s *DeviceService) SetParamSyncStarter(starter ParamSyncStarter) {
 	s.paramSyncStarter = starter
 }
 
-// SetParamSyncRoutingMode applies the P0 fail-closed gate to the manual
-// legacy starter. The durable manual submitter will replace this path before
-// routing_mode=durable is enabled.
-func (s *DeviceService) SetParamSyncRoutingMode(mode string) {
-	s.paramSyncRoutingMode = strings.TrimSpace(mode)
-}
-
 // SetParamSyncManualOfflineMode controls whether manual durable requests for
 // offline devices are queued or rejected before reaching the durable submitter.
 func (s *DeviceService) SetParamSyncManualOfflineMode(mode string) {
 	s.manualOfflineMode = strings.TrimSpace(mode)
 }
 
-func (s *DeviceService) blocksLegacyParamSync() bool {
-	switch s.paramSyncRoutingMode {
-	case "durable_shadow", "durable", "closed":
-		return true
-	default:
-		return false
-	}
-}
-
-func (s *DeviceService) manualOfflineModeRejects(hasDurableStarter bool) bool {
-	if !hasDurableStarter {
-		return true
-	}
+func (s *DeviceService) manualOfflineModeRejects() bool {
 	return s.manualOfflineMode != "queue"
 }
 

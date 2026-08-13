@@ -13,6 +13,7 @@
 #   bash healthcheck.sh                # 默认完整检查
 #   bash healthcheck.sh --startup      # 安装阶段轻量启动就绪检查
 #   bash healthcheck.sh --lang en      # 指定输出语言（cn 或 en）
+#   bash healthcheck.sh --file-entry-smoke  # 真实上传/下载验证（会创建临时测试对象）
 #   bash healthcheck.sh -h | --help    # 本帮助
 #
 # 参数：
@@ -22,10 +23,12 @@
 # 退出码：0 全部通过 / 1 存在失败项
 # =============================================================================
 STARTUP_CHECK=0
+FILE_ENTRY_SMOKE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) sed -n '3,17p' "$0"; exit 0 ;;
     --startup) STARTUP_CHECK=1; shift ;;
+    --file-entry-smoke) FILE_ENTRY_SMOKE=1; shift ;;
     --lang|--language) OMC_LANG="${2:?--lang 需要 cn 或 en}"; shift 2 ;;
     --lang=*|--language=*) OMC_LANG="${1#*=}"; shift ;;
     *) echo "  [FAIL] 未知参数：$1"; exit 1 ;;
@@ -165,6 +168,30 @@ web_acs_upstream_pool_loaded() {
   printf '%s\n' "$rendered" | grep -Fq 'proxy_pass http://acs_backend;'
 }
 
+web_https_file_entry_loaded() {
+  local rendered rendered_flat
+  rendered="$("${DC[@]}" exec -T web nginx -T 2>&1)" || return 1
+  rendered_flat="$(printf '%s\n' "$rendered" | tr -s '[:space:]' ' ')"
+  printf '%s\n' "$rendered_flat" | grep -Fq 'listen 8443 ssl;' &&
+    printf '%s\n' "$rendered_flat" | grep -Fq 'ssl_certificate /etc/nginx/cert/cert.pem;' &&
+    printf '%s\n' "$rendered_flat" | grep -Fq 'ssl_certificate_key /etc/nginx/cert/key.pem;' &&
+    printf '%s\n' "$rendered_flat" | grep -Fq 'proxy_set_header X-Forwarded-Proto https;'
+}
+
+web_https_file_entry_has_cert() {
+  "${DC[@]}" exec -T web sh -c 'test -r /etc/nginx/cert/cert.pem && test -r /etc/nginx/cert/key.pem'
+}
+
+web_https_file_entry_disabled() {
+  "${DC[@]}" exec -T web sh -c 'test ! -e /etc/nginx/cert/cert.pem && test ! -e /etc/nginx/cert/key.pem && test ! -e /etc/nginx/conf.d/https-file-entry.conf'
+}
+
+https_file_entry_status_is() { # https_file_entry_status_is <path> <expected_status>
+  local path="$1" expected="$2" status
+  status="$(curl -k -sS --max-time 3 -o /dev/null -w '%{http_code}' "https://127.0.0.1:8443${path}")" || return 1
+  [ "$status" = "$expected" ]
+}
+
 acs_service_ready() {
   local service="$1" cid ip
   cid="$("${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
@@ -211,6 +238,14 @@ if [ "$STARTUP_CHECK" = 1 ]; then
   check "worker /healthz (:9092)" curl -fsS --max-time 3 http://127.0.0.1:9092/healthz
   check "app /metrics (:9091)" curl -fsS --max-time 3 http://127.0.0.1:9091/metrics
   check "$(health_text '前端 SPA (:8081)' 'Frontend SPA (:8081)')" curl -fsS --max-time 3 http://127.0.0.1:8081/ -o /dev/null
+  if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
+    if web_https_file_entry_has_cert; then
+      check "$(health_text 'HTTPS 文件上传入口 TLS 可达 ACS (:8443)' 'HTTPS file upload TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileUploadService 405
+      check "$(health_text 'HTTPS 文件下载入口 TLS 可达 ACS (:8443)' 'HTTPS file download TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileDownloadService/__healthcheck__/missing 404
+    else
+      check "$(health_text 'HTTPS 文件入口未启用且 HTTP 保持可用' 'HTTPS file entry disabled and HTTP remains available')" web_https_file_entry_disabled
+    fi
+  fi
   echo
   echo "$(health_text '启动检查已跳过 Redis 路由、实例身份和 ACS candidate /readyz 深审计；完整 healthcheck 将在部署后执行。' 'Startup check skips deep Redis routing, instance identity, and ACS candidate /readyz audits; the full healthcheck runs after deployment.')"
   echo "$(health_text "启动检查结果：通过 $ok 项，失败 $fail 项" "Startup check result: $ok passed, $fail failed")"
@@ -242,6 +277,11 @@ if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
   echo "== $(health_text 'docker compose web 容器' 'Docker Compose web container') =="
   check "web 容器 running" container_running web
   check "web ACS upstream 连接池已加载" web_acs_upstream_pool_loaded
+  if web_https_file_entry_has_cert; then
+    check "web HTTPS 文件入口已加载" web_https_file_entry_loaded
+  else
+    check "HTTPS 文件入口未启用且 HTTP 保持可用" web_https_file_entry_disabled
+  fi
   check "web 临时端口范围" container_sysctl_equals web net.ipv4.ip_local_port_range "10240 65535"
 fi
 
@@ -271,6 +311,19 @@ check "worker /healthz (:9092)"  curl -fsS --max-time 3 http://127.0.0.1:9092/he
 check "app    /metrics (:9091)"  curl -fsS --max-time 3 http://127.0.0.1:9091/metrics
 # 前端 SPA：web 容器 nginx :8081 served（:8080 是 ACS CWMP 反代，GET / 不响应，不检）。
 check "前端 SPA (:8081)"          curl -fsS --max-time 3 http://127.0.0.1:8081/ -o /dev/null
+if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
+  if web_https_file_entry_has_cert; then
+    check "HTTPS 文件上传入口 TLS 可达 ACS (:8443)" https_file_entry_status_is /smallcell/FileUploadService 405
+    check "HTTPS 文件下载入口 TLS 可达 ACS (:8443)" https_file_entry_status_is /smallcell/FileDownloadService/__healthcheck__/missing 404
+  else
+    check "HTTPS 文件入口未启用且 HTTP 保持可用" web_https_file_entry_disabled
+  fi
+fi
+
+if [ "$FILE_ENTRY_SMOKE" = 1 ]; then
+  echo "== $(health_text 'HTTPS 文件入口真实上传下载' 'HTTPS file-entry real upload/download smoke') =="
+  check "HTTP/HTTPS 文件上传下载闭环" bash "$DEPLOY_DIR/smoke-nginx-https-file-entry.sh"
+fi
 
 echo "== $(health_text '基站可达地址实际值核对' 'Verify effective base-station reachable address') =="
 effective_public_host="$(deploy_env_effective_value OMC_PUBLIC_HOST "$DEPLOY_DIR/.env" "$DEPLOY_DIR/resources.env" 2>/dev/null || true)"

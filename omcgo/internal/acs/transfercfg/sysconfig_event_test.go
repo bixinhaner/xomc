@@ -23,6 +23,38 @@ func TestHandleSysConfigSavedEvent_InvalidatesMatchingCategory(t *testing.T) {
 	assert.Nil(t, policy.cache.Load())
 }
 
+func TestHandleSysConfigSavedEvent_RefreshesProtocolAndHTTPSAddresses(t *testing.T) {
+	values := map[string]string{
+		KeyProtocolPolicy:       ProtocolPolicyForceHTTP,
+		KeyHTTPSUploadBaseURL:   "https://old-upload.example.com",
+		KeyHTTPSDownloadBaseURL: "https://old-download.example.com",
+	}
+	policy := NewPolicy(Snapshot{}, func(_ context.Context, category, key string) (string, bool) {
+		if category != Category {
+			return "", false
+		}
+		value, ok := values[key]
+		return value, ok
+	})
+
+	initial := policy.Snapshot(context.Background())
+	require.Equal(t, ProtocolPolicyForceHTTP, initial.ProtocolPolicy)
+	require.Equal(t, "https://old-upload.example.com", initial.Upload.HTTPSBaseURL)
+
+	values[KeyProtocolPolicy] = ProtocolPolicyPreferHTTPS
+	values[KeyHTTPSUploadBaseURL] = "https://new-upload.example.com"
+	values[KeyHTTPSDownloadBaseURL] = "https://new-download.example.com"
+	handler := HandleSysConfigSavedEvent(policy, zap.NewNop())
+	evt, err := coreevent.NewEvent(coreevent.SubjectSysConfigSaved, coreevent.SysConfigSavedPayload{Category: Category})
+	require.NoError(t, err)
+	require.NoError(t, handler(context.Background(), evt))
+
+	refreshed := policy.Snapshot(context.Background())
+	assert.Equal(t, ProtocolPolicyPreferHTTPS, refreshed.ProtocolPolicy)
+	assert.Equal(t, "https://new-upload.example.com", refreshed.Upload.HTTPSBaseURL)
+	assert.Equal(t, "https://new-download.example.com", refreshed.Download.HTTPSBaseURL)
+}
+
 func TestHandleSysConfigSavedEvent_IgnoresOtherCategories(t *testing.T) {
 	policy := NewPolicy(Snapshot{}, nil)
 	cached := &Snapshot{expiresAt: time.Now().Add(time.Minute)}

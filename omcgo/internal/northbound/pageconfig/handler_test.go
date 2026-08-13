@@ -48,6 +48,7 @@ type fakeRepository struct {
 	apiConfigs        []APIConfig
 	apiClients        []APIClient
 	apiTokens         map[string]string
+	apiInvocationLogs []APIInvocationLog
 	events            []PageConfigEvent
 	deviceRows        []ExportDataRow
 	pmRows            []ExportDataRow
@@ -570,6 +571,102 @@ func (r *fakeRepository) ReplaceAPIUsers(_ context.Context, req ReplaceAPIUsersR
 	return r.ListAPIUsers(context.Background())
 }
 
+func (r *fakeRepository) CreateAPIUser(_ context.Context, user APIUser) (*APIUser, error) {
+	user = normalizeAPIUser(user)
+	if err := validateAPIUser(user); err != nil {
+		return nil, err
+	}
+	for _, client := range r.apiClients {
+		if strings.EqualFold(client.ClientKey, user.Username) {
+			return nil, fmt.Errorf("%w: USER_EXIST", commonerrors.ErrInvalidInput)
+		}
+	}
+	if user.ID == "" {
+		user.ID = fmt.Sprintf("api-user-%d", len(r.apiClients)+1)
+	}
+	now := time.Now()
+	if user.CreatedAt.IsZero() {
+		user.CreatedAt = now
+	}
+	if user.UpdatedAt.IsZero() {
+		user.UpdatedAt = now
+	}
+	r.apiClients = append(r.apiClients, APIClient{
+		ID:          user.ID,
+		ClientKey:   user.Username,
+		Name:        user.Username,
+		Enabled:     user.Enabled,
+		TokenSecret: user.Password,
+		TokenSet:    strings.TrimSpace(user.Password) != "",
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+	})
+	created := APIUser{
+		ID:          user.ID,
+		Username:    user.Username,
+		Enabled:     user.Enabled,
+		Password:    user.Password,
+		PasswordSet: strings.TrimSpace(user.Password) != "",
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+	}
+	return &created, nil
+}
+
+func (r *fakeRepository) UpdateAPIUser(_ context.Context, idOrUsername string, req UpdateAPIUserRequest) (*APIUser, error) {
+	idOrUsername = strings.TrimSpace(idOrUsername)
+	for i := range r.apiClients {
+		client := &r.apiClients[i]
+		if client.ID != idOrUsername && client.ClientKey != idOrUsername {
+			continue
+		}
+		nextUsername := client.ClientKey
+		if strings.TrimSpace(req.Username) != "" {
+			nextUsername = strings.TrimSpace(req.Username)
+		}
+		for j := range r.apiClients {
+			if i != j && strings.EqualFold(r.apiClients[j].ClientKey, nextUsername) {
+				return nil, fmt.Errorf("%w: USER_EXIST", commonerrors.ErrInvalidInput)
+			}
+		}
+		nextEnabled := client.Enabled
+		if req.Enabled != nil {
+			nextEnabled = *req.Enabled
+		}
+		password := credentialToPersist(req.Password, client.TokenSecret)
+		if err := validateAPIUser(APIUser{Username: nextUsername, Enabled: nextEnabled, Password: password}); err != nil {
+			return nil, err
+		}
+		client.ClientKey = nextUsername
+		client.Name = nextUsername
+		client.Enabled = nextEnabled
+		client.TokenSecret = password
+		client.TokenSet = strings.TrimSpace(password) != ""
+		client.UpdatedAt = time.Now()
+		return &APIUser{
+			ID:          client.ID,
+			Username:    client.ClientKey,
+			Enabled:     client.Enabled,
+			Password:    client.TokenSecret,
+			PasswordSet: client.TokenSet,
+			CreatedAt:   client.CreatedAt,
+			UpdatedAt:   client.UpdatedAt,
+		}, nil
+	}
+	return nil, commonerrors.ErrNotFound
+}
+
+func (r *fakeRepository) DeleteAPIUser(_ context.Context, idOrUsername string) error {
+	idOrUsername = strings.TrimSpace(idOrUsername)
+	for i := range r.apiClients {
+		if r.apiClients[i].ID == idOrUsername || r.apiClients[i].ClientKey == idOrUsername {
+			r.apiClients = append(r.apiClients[:i], r.apiClients[i+1:]...)
+			return nil
+		}
+	}
+	return commonerrors.ErrNotFound
+}
+
 func (r *fakeRepository) LoginAPIUser(_ context.Context, req APIUserLoginRequest) (*APIUserToken, error) {
 	for _, client := range r.apiClients {
 		if client.ClientKey != strings.TrimSpace(req.Username) {
@@ -598,6 +695,92 @@ func (r *fakeRepository) LoginAPIUser(_ context.Context, req APIUserLoginRequest
 	return nil, commonerrors.ErrUnauthorized
 }
 
+func (r *fakeRepository) CreateAPIInvocationLog(_ context.Context, item APIInvocationLog) error {
+	if item.ID == "" {
+		item.ID = fmt.Sprintf("api-log-%d", len(r.apiInvocationLogs)+1)
+	}
+	now := time.Now()
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = now
+	}
+	if item.UpdatedAt.IsZero() {
+		item.UpdatedAt = item.CreatedAt
+	}
+	r.apiInvocationLogs = append(r.apiInvocationLogs, item)
+	return nil
+}
+
+func (r *fakeRepository) ListAPIInvocationLogs(_ context.Context, filter APIInvocationLogFilter) (APIInvocationLogListResult, error) {
+	start, hasStart := parseAPIInvocationLogTime(filter.StartTime)
+	end, hasEnd := parseAPIInvocationLogTime(filter.EndTime)
+	out := make([]APIInvocationLog, 0, len(r.apiInvocationLogs))
+	for _, item := range r.apiInvocationLogs {
+		if filter.APIKey != "" && item.APIKey != filter.APIKey {
+			continue
+		}
+		if filter.Name != "" && !containsFold(item.Name, filter.Name) {
+			continue
+		}
+		if filter.Method != "" && !strings.EqualFold(item.Method, filter.Method) {
+			continue
+		}
+		if filter.Path != "" && !containsFold(item.Path, filter.Path) {
+			continue
+		}
+		if filter.Status != "" && item.Status != filter.Status {
+			continue
+		}
+		if filter.CreateUser != "" && item.CreateUser != filter.CreateUser {
+			continue
+		}
+		if filter.IPAddress != "" && item.IPAddress != filter.IPAddress {
+			continue
+		}
+		if hasStart && item.CreatedAt.Before(start) {
+			continue
+		}
+		if hasEnd && item.CreatedAt.After(end) {
+			continue
+		}
+		if filter.Keyword != "" && !apiInvocationLogMatchesKeyword(item, filter.Keyword) {
+			continue
+		}
+		out = append(out, item)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	total := len(out)
+	limit := normalizeLimit(filter.Limit)
+	offset := normalizeOffset(filter.Offset)
+	if offset > len(out) {
+		out = []APIInvocationLog{}
+	} else {
+		endOffset := offset + limit
+		if endOffset > len(out) {
+			endOffset = len(out)
+		}
+		out = out[offset:endOffset]
+	}
+	return APIInvocationLogListResult{Items: out, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+func apiInvocationLogMatchesKeyword(item APIInvocationLog, keyword string) bool {
+	return containsFold(item.APIKey, keyword) ||
+		containsFold(item.Name, keyword) ||
+		containsFold(item.Method, keyword) ||
+		containsFold(item.Path, keyword) ||
+		containsFold(item.RequestParams, keyword) ||
+		containsFold(item.ResponseBody, keyword) ||
+		containsFold(item.Status, keyword) ||
+		containsFold(item.CreateUser, keyword) ||
+		containsFold(item.IPAddress, keyword)
+}
+
+func containsFold(value, keyword string) bool {
+	return strings.Contains(strings.ToLower(value), strings.ToLower(strings.TrimSpace(keyword)))
+}
+
 func (r *fakeRepository) AuthenticateAPIClient(_ context.Context, credential string, remoteIP string, apiKey string) (*APIClient, error) {
 	active := 0
 	for _, client := range r.apiClients {
@@ -613,6 +796,12 @@ func (r *fakeRepository) AuthenticateAPIClient(_ context.Context, credential str
 		client := r.apiClients[i]
 		if !client.Enabled || client.ClientKey != username {
 			continue
+		}
+		if !apiClientAllowsAPI(client, apiKey) {
+			return nil, commonerrors.ErrForbidden
+		}
+		if !apiClientAllowsIP(client, remoteIP) {
+			return nil, commonerrors.ErrForbidden
 		}
 		return &client, nil
 	}
@@ -2073,9 +2262,15 @@ func TestAPIUserLoginIssuesNorthboundOnlyToken(t *testing.T) {
 	require.NotEmpty(t, token.Token)
 	require.Equal(t, 1800, token.Expires)
 
-	client, err := svc.AuthenticateAPIClient(context.Background(), token.Token, "10.0.0.10", "nb-export-config")
+	client, err := svc.AuthenticateAPIClient(context.Background(), token.Token, "127.0.0.1", "nb-sync-full-device")
 	require.NoError(t, err)
 	require.Equal(t, "oss-a", client.ClientKey)
+
+	_, err = svc.AuthenticateAPIClient(context.Background(), token.Token, "127.0.0.1", "nb-export-config")
+	require.ErrorIs(t, err, commonerrors.ErrForbidden)
+
+	_, err = svc.AuthenticateAPIClient(context.Background(), token.Token, "10.0.0.10", "nb-sync-full-device")
+	require.ErrorIs(t, err, commonerrors.ErrForbidden)
 
 	_, err = svc.AuthenticateAPIClient(context.Background(), "bad-token", "127.0.0.1", "nb-sync-full-device")
 	require.ErrorIs(t, err, commonerrors.ErrUnauthorized)
@@ -2102,6 +2297,39 @@ func TestReplaceAPIUsersReturnsPasswordForManagementPage(t *testing.T) {
 	require.Contains(t, rr.Body.String(), `"password":"secret-password"`)
 }
 
+func TestAPIUserSingleMutationsPreserveExistingClientScopes(t *testing.T) {
+	repo := newFakeRepository()
+	repo.apiClients = []APIClient{{
+		ID:             "existing-id",
+		ClientKey:      "oss-a",
+		Name:           "OSS A",
+		Enabled:        true,
+		TokenSecret:    "secret-a",
+		TokenSet:       true,
+		AllowedAPIKeys: []string{"device-list"},
+		IPWhitelist:    []string{"127.0.0.1/32"},
+	}}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	created, err := svc.CreateAPIUser(context.Background(), APIUser{
+		Username: "oss-b",
+		Password: "secret-b",
+		Enabled:  true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "oss-b", created.Username)
+
+	disabled := false
+	updated, err := svc.UpdateAPIUser(context.Background(), "oss-b", UpdateAPIUserRequest{Enabled: &disabled})
+	require.NoError(t, err)
+	require.False(t, updated.Enabled)
+
+	require.NoError(t, svc.DeleteAPIUser(context.Background(), "oss-b"))
+	require.Len(t, repo.apiClients, 1)
+	require.Equal(t, []string{"device-list"}, repo.apiClients[0].AllowedAPIKeys)
+	require.Equal(t, []string{"127.0.0.1/32"}, repo.apiClients[0].IPWhitelist)
+}
+
 func TestCleanupExpiredResultsRemovesOldRunsAndEvents(t *testing.T) {
 	repo := newFakeRepository()
 	now := time.Now()
@@ -2126,6 +2354,56 @@ func TestCleanupExpiredResultsRemovesOldRunsAndEvents(t *testing.T) {
 	require.Equal(t, "fresh-run", repo.runs[0].ID)
 	require.Len(t, repo.events, 1)
 	require.Equal(t, "fresh-event", repo.events[0].ID)
+}
+
+func TestListAPIInvocationLogsEndpointFiltersAndPaginates(t *testing.T) {
+	repo := newFakeRepository()
+	base := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+	repo.apiInvocationLogs = []APIInvocationLog{
+		{
+			ID:            "new-device-query",
+			APIKey:        "device-list",
+			Name:          "设备列表查询",
+			Method:        http.MethodPost,
+			Path:          "/api/v1/northbound/v1/device/query",
+			RequestParams: `{"sn":"SN001"}`,
+			ResponseBody:  `{"ret":1}`,
+			StatusCode:    http.StatusOK,
+			Status:        "success",
+			CreateUser:    "oss",
+			IPAddress:     "127.0.0.1",
+			DurationMs:    12,
+			CreatedAt:     base.Add(time.Hour),
+			UpdatedAt:     base.Add(time.Hour),
+		},
+		{
+			ID:            "old-token",
+			APIKey:        "auth-login",
+			Name:          "用户认证",
+			Method:        http.MethodPost,
+			Path:          "/api/v1/northbound/v1/access/token",
+			RequestParams: `{"user":"oss"}`,
+			ResponseBody:  `{"ret":0}`,
+			StatusCode:    http.StatusUnauthorized,
+			Status:        "failed",
+			CreateUser:    "oss",
+			IPAddress:     "127.0.0.2",
+			DurationMs:    7,
+			CreatedAt:     base,
+			UpdatedAt:     base,
+		},
+	}
+	r := setupTestRouterWithRepository(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/page-config/api/invocation-logs?method=POST&status=success&keyword=SN001&page=1&page_size=10", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), `"total":1`)
+	require.Contains(t, rr.Body.String(), `"id":"new-device-query"`)
+	require.NotContains(t, rr.Body.String(), `"id":"old-token"`)
+	require.Contains(t, rr.Body.String(), `"page_size":10`)
 }
 
 func TestListAndGetEvents(t *testing.T) {

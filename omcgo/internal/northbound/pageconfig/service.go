@@ -62,6 +62,17 @@ type MRSourceStore interface {
 	Get(ctx context.Context, objectKey string) ([]byte, error)
 }
 
+type apiUserMutationRepository interface {
+	CreateAPIUser(ctx context.Context, user APIUser) (*APIUser, error)
+	UpdateAPIUser(ctx context.Context, idOrUsername string, req UpdateAPIUserRequest) (*APIUser, error)
+	DeleteAPIUser(ctx context.Context, idOrUsername string) error
+}
+
+type apiInvocationLogRepository interface {
+	CreateAPIInvocationLog(ctx context.Context, item APIInvocationLog) error
+	ListAPIInvocationLogs(ctx context.Context, filter APIInvocationLogFilter) (APIInvocationLogListResult, error)
+}
+
 type Service struct {
 	catalog             *Catalog
 	repo                Repository
@@ -581,6 +592,79 @@ func (s *Service) ReplaceAPIUsers(ctx context.Context, req ReplaceAPIUsersReques
 		seen[req.Items[i].Username] = struct{}{}
 	}
 	return s.repo.ReplaceAPIUsers(ctx, req)
+}
+
+func (s *Service) CreateAPIUser(ctx context.Context, user APIUser) (*APIUser, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("northbound page-config repository is not configured")
+	}
+	if err := s.repo.EnsureExtendedDefaults(ctx); err != nil {
+		return nil, err
+	}
+	repo, ok := s.repo.(apiUserMutationRepository)
+	if !ok {
+		return nil, fmt.Errorf("northbound API user mutation repository is not configured")
+	}
+	user = normalizeAPIUser(user)
+	return repo.CreateAPIUser(ctx, user)
+}
+
+func (s *Service) UpdateAPIUser(ctx context.Context, idOrUsername string, req UpdateAPIUserRequest) (*APIUser, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("northbound page-config repository is not configured")
+	}
+	if err := s.repo.EnsureExtendedDefaults(ctx); err != nil {
+		return nil, err
+	}
+	repo, ok := s.repo.(apiUserMutationRepository)
+	if !ok {
+		return nil, fmt.Errorf("northbound API user mutation repository is not configured")
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	req.Password = strings.TrimSpace(req.Password)
+	return repo.UpdateAPIUser(ctx, strings.TrimSpace(idOrUsername), req)
+}
+
+func (s *Service) DeleteAPIUser(ctx context.Context, idOrUsername string) error {
+	if s.repo == nil {
+		return fmt.Errorf("northbound page-config repository is not configured")
+	}
+	if err := s.repo.EnsureExtendedDefaults(ctx); err != nil {
+		return err
+	}
+	repo, ok := s.repo.(apiUserMutationRepository)
+	if !ok {
+		return fmt.Errorf("northbound API user mutation repository is not configured")
+	}
+	return repo.DeleteAPIUser(ctx, strings.TrimSpace(idOrUsername))
+}
+
+func (s *Service) CreateAPIInvocationLog(ctx context.Context, item APIInvocationLog) error {
+	if s == nil || s.repo == nil {
+		return nil
+	}
+	if err := s.repo.EnsureExtendedDefaults(ctx); err != nil {
+		return err
+	}
+	repo, ok := s.repo.(apiInvocationLogRepository)
+	if !ok {
+		return nil
+	}
+	return repo.CreateAPIInvocationLog(ctx, item)
+}
+
+func (s *Service) ListAPIInvocationLogs(ctx context.Context, filter APIInvocationLogFilter) (APIInvocationLogListResult, error) {
+	if s == nil || s.repo == nil {
+		return APIInvocationLogListResult{}, fmt.Errorf("northbound page-config repository is not configured")
+	}
+	if err := s.repo.EnsureExtendedDefaults(ctx); err != nil {
+		return APIInvocationLogListResult{}, err
+	}
+	repo, ok := s.repo.(apiInvocationLogRepository)
+	if !ok {
+		return APIInvocationLogListResult{}, fmt.Errorf("northbound API invocation log repository is not configured")
+	}
+	return repo.ListAPIInvocationLogs(ctx, filter)
 }
 
 func (s *Service) LoginAPIUser(ctx context.Context, req APIUserLoginRequest) (*APIUserToken, error) {

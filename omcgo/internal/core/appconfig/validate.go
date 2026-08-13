@@ -321,18 +321,8 @@ func (c ParamRegistryConfig) validate() error {
 }
 
 func (c ParamSyncConfig) validate() error {
-	if c.RoutingMode != "" {
-		switch c.RoutingMode {
-		case "legacy", "durable_shadow", "durable", "closed":
-		default:
-			return fmt.Errorf("param_sync.routing_mode must be one of legacy, durable_shadow, durable, closed, got %q", c.RoutingMode)
-		}
-	}
 	if c.ManualOfflineMode != "" && c.ManualOfflineMode != "queue" && c.ManualOfflineMode != "reject" {
 		return fmt.Errorf("param_sync.manual_offline_mode must be queue or reject, got %q", c.ManualOfflineMode)
-	}
-	if c.CanaryPercent < 0 || c.CanaryPercent > 100 {
-		return fmt.Errorf("param_sync.canary_percent must be between 0 and 100, got %d", c.CanaryPercent)
 	}
 	if c.ResultConsumerShardCount < 0 {
 		return fmt.Errorf("param_sync.result_consumer_shard_count must not be negative, got %d", c.ResultConsumerShardCount)
@@ -360,21 +350,6 @@ func (c ParamSyncConfig) validate() error {
 	}
 	if c.RecoveryTaskBudget < 0 {
 		return fmt.Errorf("param_sync.recovery_task_budget must not be negative, got %d", c.RecoveryTaskBudget)
-	}
-	if !c.RunEnabled {
-		if c.ResultConsumerEnabled || c.StagingEnabled || c.CanaryPercent != 0 {
-			return fmt.Errorf("param_sync consumer, staging, and canary settings require run_enabled=true")
-		}
-		return nil
-	}
-	if !c.ResultConsumerEnabled {
-		return fmt.Errorf("param_sync.result_consumer_enabled must be true when run_enabled=true")
-	}
-	if !c.StagingEnabled {
-		return fmt.Errorf("param_sync.staging_enabled must be true when run_enabled=true")
-	}
-	if c.CanaryPercent <= 0 {
-		return fmt.Errorf("param_sync.canary_percent must be greater than 0 when run_enabled=true")
 	}
 	return nil
 }

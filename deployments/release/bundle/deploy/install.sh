@@ -347,6 +347,42 @@ install_log_retention_configs() {
   fi
 }
 
+nginx_https_cert_public_fingerprint() { # nginx_https_cert_public_fingerprint <cert|key> <path>
+  local kind="$1" path="$2"
+  case "$kind" in
+    cert) openssl x509 -in "$path" -pubkey -noout ;;
+    key)  openssl pkey -in "$path" -pubout ;;
+    *) return 1 ;;
+  esac | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}'
+}
+
+precheck_nginx_https_cert() {
+  local cert="/etc/nginx/cert/cert.pem"
+  local key="/etc/nginx/cert/key.pem"
+  local cert_fp key_fp
+
+  [ "$SKIP_WEB" = 0 ] || return 0
+  if [ ! -e "$cert" ] && [ ! -e "$key" ]; then
+    warn "未放置 nginx HTTPS 文件入口证书，8443 将不启用；HTTP 8080 文件入口继续可用" "nginx HTTPS file-entry certificate files are not present; :8443 will be disabled and HTTP :8080 remains available"
+    return 0
+  fi
+  [ -f "$cert" ] || die "缺少 nginx HTTPS 文件入口证书：$cert；请补齐证书或同时移除证书/私钥以保持 HTTPS 未启用状态" "Missing nginx HTTPS file-entry certificate: $cert. Add the certificate or remove both certificate files to keep HTTPS disabled." 1
+  [ -f "$key" ] || die "缺少 nginx HTTPS 文件入口私钥：$key；请补齐匹配私钥或同时移除证书/私钥以保持 HTTPS 未启用状态" "Missing nginx HTTPS file-entry private key: $key. Add the matching private key or remove both certificate files to keep HTTPS disabled." 1
+  [ -r "$cert" ] || die "nginx HTTPS 文件入口证书不可读：$cert" "The nginx HTTPS file-entry certificate is not readable: $cert" 1
+  [ -r "$key" ] || die "nginx HTTPS 文件入口私钥不可读：$key" "The nginx HTTPS file-entry private key is not readable: $key" 1
+  command -v openssl >/dev/null 2>&1 ||
+    die "缺少 openssl，无法校验证书与私钥是否匹配；请安装 openssl 后重试" "openssl is required to verify that the certificate and private key match; install openssl and retry." 1
+
+  cert_fp="$(nginx_https_cert_public_fingerprint cert "$cert" 2>/dev/null)" ||
+    die "nginx HTTPS 文件入口证书解析失败：$cert" "Failed to parse the nginx HTTPS file-entry certificate: $cert" 1
+  key_fp="$(nginx_https_cert_public_fingerprint key "$key" 2>/dev/null)" ||
+    die "nginx HTTPS 文件入口私钥解析失败：$key" "Failed to parse the nginx HTTPS file-entry private key: $key" 1
+  [ -n "$cert_fp" ] && [ -n "$key_fp" ] && [ "$cert_fp" = "$key_fp" ] ||
+    die "nginx HTTPS 文件入口证书与私钥不匹配：$cert / $key" "The nginx HTTPS file-entry certificate and private key do not match: $cert / $key" 1
+
+  log "nginx HTTPS 文件入口证书预检通过：$cert / $key" "nginx HTTPS file-entry certificate precheck passed: $cert / $key"
+}
+
 fresh_install_reset() {
   local package_env="$PKG_ROOT/deploy/.env"
   local old_deploy="$OMC_ROOT/current/deploy"
@@ -604,6 +640,7 @@ LICENSE_KEYSTORE_ACTUAL_SHA256="$(sha256sum "$PKG_ROOT/license/keystore/omcPubli
 [ "$SKIP_MONITORING" = 1 ] || [ -f "$PKG_ROOT/deploy/docker-compose.monitoring.yml" ] || die "缺 deploy/docker-compose.monitoring.yml（或加 --skip-monitoring）" "Missing deploy/docker-compose.monitoring.yml (or use --skip-monitoring)" 1
 [ -f "$PKG_ROOT/deploy/logrotate.d/omc-nginx" ]        || die "缺 deploy/logrotate.d/omc-nginx" "Missing deploy/logrotate.d/omc-nginx" 1
 [ -f "$PKG_ROOT/deploy/logrotate.d/omc-db-maintenance" ] || die "缺 deploy/logrotate.d/omc-db-maintenance" "Missing deploy/logrotate.d/omc-db-maintenance" 1
+precheck_nginx_https_cert
 
 # OMC_PUBLIC_HOST 是基站回传 PM/MR 文件所需的运维地址，不能等到复制包、
 # 切换 current 或覆盖 etc 后才校验。新包显式配置优先；新包留空时继承现行
@@ -906,7 +943,7 @@ else
     warn "$OMC_ROOT/etc/ 已有实例配置（包含可能已改好的强口令 / JWT 密钥 / TLS 证书路径等）" "$OMC_ROOT/etc/ contains instance configuration (possibly including custom credentials, JWT keys, and TLS certificate paths)"
     warn "  选 y 将覆盖为新包模板（原 etc 自动备份到 etc.bak.<时间戳>）" "  Enter y to replace it with the package template (the old etc is backed up automatically)"
     warn "  选 N 保留现有配置不动（默认）" "  Enter N to keep the current configuration (default)"
-    read -rp "$(install_message "是否用新包模板覆盖 $OMC_ROOT/etc/？" "Replace $OMC_ROOT/etc/ with the package template?") [y/N] " yn
+    read -rp "$(install_message "是否用新包的配置文件模板覆盖 $OMC_ROOT/etc/？" "Replace $OMC_ROOT/etc/ with the new configuration file template?") [y/N] " yn
     case "${yn:-N}" in [Yy]*) do_overwrite=1 ;; esac
   fi
 
@@ -1500,18 +1537,14 @@ else
   "${DC[@]}" up --pull never -d --no-deps "${remaining_services[@]}"
 fi
 
-# Compose records the resolved bind-mount source inode when a container is
-# created. OMC_ROOT/current is switched to the new immutable release above,
-# but an unchanged monitoring image/config leaves the old container attached
-# to the previous release directory. Recreate only the stateless services that
-# mount release-local configuration; --no-deps protects all data services and
-# named volumes remain attached.
-if [ "$SKIP_MONITORING" = 0 ]; then
-  log "刷新版本目录 bind mount（仅监控无状态容器，保留数据卷）..." "Refreshing release bind mounts (monitoring stateless containers only; data volumes preserved) ..."
-  "${DC[@]}" up --pull never -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo \
-    nats-exporter nginx-exporter node-exporter cadvisor
-fi
-
+# ── 业务就绪健康检查（必须在重建监控栈之前执行）──────────────────────────
+# healthcheck.sh --startup 只校验「业务 + 基础设施 + web」容器与端点，不检监控容器，
+# 因此可在下方监控栈 force-recreate 之前完成。这一点至关重要：重建监控会拉起
+# cadvisor，其启动期经 docker socket 对 daemon 做全量容器盘点，短时间内令
+# `docker ps/inspect` 显著变慢；若在此期间跑健康检查（每轮约 24 次 docker CLI 调用），
+# 会被单轮 timeout 中途砍掉、误报安装失败，而部署后人工 healthcheck（daemon 已空闲）
+# 却全通过。放在重建前，此刻 daemon 与 app_wait_ready 一样空闲（业务刚起、尚无
+# cadvisor），启动检查通常 <10s 即过。监控容器留给部署后人工完整 healthcheck。
 HEALTHCHECK_INTERVAL=5
 HEALTHCHECK_TIMEOUT="${OMC_HEALTHCHECK_TIMEOUT:-90}"
 HEALTHCHECK_FINAL_GRACE="${OMC_HEALTHCHECK_FINAL_GRACE:-0}"
@@ -1548,8 +1581,25 @@ while :; do
   sleep "$HEALTHCHECK_SLEEP"
 done
 
-# 初始化期间监控/字典/业务端点可能恰好跨过主窗口；再给一次短复核，避免把
-# “容器已稳定、端点刚完成启动”误报为安装失败。最终仍以完整 healthcheck 为准。
+# Compose records the resolved bind-mount source inode when a container is
+# created. OMC_ROOT/current is switched to the new immutable release above,
+# but an unchanged monitoring image/config leaves the old container attached
+# to the previous release directory. Recreate only the stateless services that
+# mount release-local configuration; --no-deps protects all data services and
+# named volumes remain attached. 放在业务健康检查之后：重建监控会拉起 cadvisor
+# 短暂拖慢 docker daemon，故不在其后再做依赖 docker CLI 的健康探针。
+if [ "$SKIP_MONITORING" = 0 ]; then
+  log "刷新版本目录 bind mount（仅监控无状态容器，保留数据卷）..." "Refreshing release bind mounts (monitoring stateless containers only; data volumes preserved) ..."
+  "${DC[@]}" up --pull never -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo \
+    nats-exporter nginx-exporter node-exporter cadvisor
+fi
+
+# 启动窗口（轻量 --startup）未通过时，可选地以完整 healthcheck 做最终复核。
+# 默认关闭（OMC_HEALTHCHECK_FINAL_GRACE=0）：完整检查含监控容器与 docker exec /
+# psql 深审计，放在监控重建后会落入 cadvisor 启动 storm 而挂起；启动检查（业务
+# 就绪）已是安装门禁，完整 healthcheck 留给部署后人工执行。仅在 daemon 已空闲、
+# 需要在安装内做一次完整复核时显式启用（值即最终复核预算秒数，单轮上限不超过
+# HEALTHCHECK_PROBE_TIMEOUT）。
 if [ "$HEALTH_OK" -eq 0 ] && [ "$HEALTHCHECK_FINAL_GRACE" -gt 0 ]; then
   log "主健康等待窗口结束，进行 ${HEALTHCHECK_FINAL_GRACE}s 最终复核 ..." "The primary health-check window ended; running the ${HEALTHCHECK_FINAL_GRACE}s final probe ..."
   HEALTHCHECK_FINAL_PROBE_TIMEOUT="$HEALTHCHECK_FINAL_GRACE"

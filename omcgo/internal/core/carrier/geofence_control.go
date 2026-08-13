@@ -11,20 +11,26 @@ import (
 )
 
 type GeofenceControlParameter struct {
-	Path  string
-	Value string
+	Path              string
+	SnapshotPath      string
+	Value             string
+	Role              GeofenceParameterRole
+	AccessProven      bool
+	AppliesToAllCells bool
 }
 
 // GeofenceControlMapping is the small ParamModel projection needed by the
 // geofence capability resolver. The private path is retained for diagnostics;
 // control tasks still carry StandardPath and ACS performs the final translation.
 type GeofenceControlMapping struct {
-	StandardPath string
-	PrivatePath  string
-	EntryType    string
-	Access       string
-	IsActive     bool
-	IsSupported  bool
+	StandardPath      string
+	PrivatePath       string
+	EntryType         string
+	Access            string
+	EnumValues        string
+	ProductRadioModes string
+	IsActive          bool
+	IsSupported       bool
 }
 
 type GeofenceControlParameterInstanceResolver interface {
@@ -318,6 +324,12 @@ func isReadWriteAccess(access string) bool {
 	access = strings.ToLower(strings.TrimSpace(access))
 	access = strings.NewReplacer("_", "", "-", "", " ", "").Replace(access)
 	return access == "readwrite" || access == "rw"
+}
+
+func isReadOnlyAccess(access string) bool {
+	access = strings.ToLower(strings.TrimSpace(access))
+	access = strings.NewReplacer("_", "", "-", "", " ", "").Replace(access)
+	return access == "readonly" || access == "ro"
 }
 
 func mappingPathMatches(template, concrete string) bool {

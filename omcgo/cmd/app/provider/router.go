@@ -119,7 +119,7 @@ func Setup(r *gin.Engine, c *Container) error {
 	})
 	graph.Add(components.ModuleInitializer{
 		Name:    "software",
-		Depends: []string{"device"},
+		Depends: []string{"device", "admin"},
 		Init:    func() error { return initSoftwareModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{

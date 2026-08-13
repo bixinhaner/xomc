@@ -1,18 +1,22 @@
 import { useState, useMemo, useCallback } from 'react';
 import {
+  Button,
   Card,
+  Modal,
   Tabs,
   Tag,
+  theme,
   Tooltip,
 } from 'antd';
+import { EyeOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import { useOperationLogs } from '@core/hooks/api/useLogs';
-import type { OperationLog } from '@core/types/system';
+import { useNorthboundAPIInvocationLogs, useOperationLogs } from '@core/hooks/api/useLogs';
+import type { NorthboundAPIInvocationLog, OperationLog } from '@core/types/system';
 import { useT } from '@/hooks/useT';
 import {
   localizeAuditAction,
@@ -20,12 +24,11 @@ import {
 } from './geofenceAuditText';
 
 // 日志类型
-// northbound（北向接口日志）暂不在此页展示：后端 northbound 模块只有 push/sync/deadletter，
-// 没有「报文日志」列表端点，过去该 tab 复用 useOperationLogs（audit_logs）显示的是错配数据。
-// 待后端补北向报文日志端点后再恢复（另开 issue）。
-type LogType = 'operation' | 'security' | 'system';
+type LogType = 'operation' | 'security' | 'system' | 'northbound';
+type LogTableRow = (OperationLog | NorthboundAPIInvocationLog) & Record<string, unknown>;
+type PayloadDetail = { title: string; content: string };
 
-const TAB_ACTION_FILTERS: Record<LogType, string> = {
+const TAB_ACTION_FILTERS: Record<Exclude<LogType, 'northbound'>, string> = {
   operation: 'config,delete,user_create,password_reset',
   security: 'login_success,login_failure,logout,password_change,permission_change',
   system: 'software_upgrade,reboot',
@@ -37,8 +40,35 @@ function truncate(str: string, maxLen = 50): string {
   return str.substring(0, maxLen) + '...';
 }
 
+function normalizePayloadText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value.trim();
+  return JSON.stringify(value);
+}
+
+function formatPayloadForDisplay(value: unknown): string {
+  const text = normalizePayloadText(value);
+  if (!text) return '-';
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+function payloadSummary(value: unknown): string {
+  const text = normalizePayloadText(value);
+  if (!text) return '-';
+  try {
+    return truncate(JSON.stringify(JSON.parse(text)), 86);
+  } catch {
+    return truncate(text.replace(/\s+/g, ' '), 86);
+  }
+}
+
 export default function OperationLogPage() {
   const t = useT();
+  const { token } = theme.useToken();
 
   // Tab 状态
   const [activeTab, setActiveTab] = useState<LogType>('operation');
@@ -47,22 +77,45 @@ export default function OperationLogPage() {
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [payloadDetail, setPayloadDetail] = useState<PayloadDetail | null>(null);
+
+  const isNorthboundTab = activeTab === 'northbound';
+  const auditTab: Exclude<LogType, 'northbound'> = isNorthboundTab
+    ? 'operation'
+    : (activeTab as Exclude<LogType, 'northbound'>);
+  const timeRange = Array.isArray(filters.timeRange) && filters.timeRange.length === 2
+    ? [filters.timeRange[0] as string, filters.timeRange[1] as string] as [string, string]
+    : undefined;
 
   // 查询日志
-  const { data, isLoading, refetch } = useOperationLogs({
+  const operationLogsQuery = useOperationLogs({
     operator: filters.operator as string | undefined,
     clientIp: filters.operateIp as string | undefined,
     module: filters.logName as string | undefined,
-    action: TAB_ACTION_FILTERS[activeTab],
+    action: TAB_ACTION_FILTERS[auditTab],
     reason: filters.reason as string | undefined,
     keyword: filters.searchText as string | undefined,
     result: (filters.result as 'success' | 'failure' | undefined),
-    timeRange: Array.isArray(filters.timeRange) && filters.timeRange.length === 2
-      ? [filters.timeRange[0] as string, filters.timeRange[1] as string]
-      : undefined,
+    timeRange,
     page,
     pageSize,
-  });
+  }, { enabled: !isNorthboundTab });
+
+  const northboundLogsQuery = useNorthboundAPIInvocationLogs({
+    apiKey: filters.apiKey as string | undefined,
+    name: filters.apiName as string | undefined,
+    method: filters.method as string | undefined,
+    path: filters.path as string | undefined,
+    status: filters.status as string | undefined,
+    createUser: filters.createUser as string | undefined,
+    ipAddress: filters.ipAddress as string | undefined,
+    timeRange,
+    page,
+    pageSize,
+  }, { enabled: isNorthboundTab });
+
+  const data = isNorthboundTab ? northboundLogsQuery.data : operationLogsQuery.data;
+  const isLoading = isNorthboundTab ? northboundLogsQuery.isLoading : operationLogsQuery.isLoading;
 
   // 重置搜索
   const handleReset = useCallback(() => {
@@ -75,9 +128,13 @@ export default function OperationLogPage() {
     setFilters(values);
     setPage(1);
     setTimeout(() => {
-      void refetch();
+      if (isNorthboundTab) {
+        void northboundLogsQuery.refetch();
+        return;
+      }
+      void operationLogsQuery.refetch();
     }, 0);
-  }, [refetch]);
+  }, [isNorthboundTab, northboundLogsQuery, operationLogsQuery]);
 
   // Tab 切换时重置
   const handleTabChange = useCallback((key: string) => {
@@ -89,8 +146,8 @@ export default function OperationLogPage() {
   const getOperationLogNameOptions = useMemo(() => [
     { label: t('log.modifyConfig'), value: 'config_modify' },
     { label: t('log.deleteDevice'), value: 'device_delete' },
-    { label: '用户创建', value: 'user_create' },
-    { label: '密码重置', value: 'password_reset' },
+    { label: t('log.userCreate'), value: 'user_create' },
+    { label: t('log.passwordReset'), value: 'password_reset' },
   ], [t]);
 
   // 获取安全日志名称选项
@@ -105,7 +162,7 @@ export default function OperationLogPage() {
   // 获取系统日志名称选项
   const getSystemLogNameOptions = useMemo(() => [
     { label: t('log.softwareUpgrade'), value: 'software_upgrade' },
-    { label: '重启', value: 'reboot' },
+    { label: t('log.reboot'), value: 'reboot' },
   ], [t]);
 
   // 结果颜色映射
@@ -123,6 +180,42 @@ export default function OperationLogPage() {
     success: t('log.success'),
     failure: t('log.failure'),
   }), [t]);
+
+  const openPayloadDetail = useCallback((title: string, value: unknown) => {
+    setPayloadDetail({ title, content: formatPayloadForDisplay(value) });
+  }, []);
+
+  const renderPayloadCell = useCallback((value: unknown, title: string) => {
+    const text = normalizePayloadText(value);
+    if (!text) return <span>-</span>;
+    const summary = payloadSummary(text);
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            fontFamily: 'monospace',
+            fontSize: 12,
+          }}
+        >
+          {summary}
+        </span>
+        <Tooltip title={t('log.viewPayload', { name: title })}>
+          <Button
+            aria-label={t('log.viewPayload', { name: title })}
+            icon={<EyeOutlined />}
+            size="small"
+            type="text"
+            onClick={() => openPayloadDetail(title, text)}
+          />
+        </Tooltip>
+      </div>
+    );
+  }, [openPayloadDetail, t]);
 
   // Mock 用户选项 - 实际应从 API 获取
   const mockUserOptions = useMemo(() => [
@@ -186,9 +279,42 @@ export default function OperationLogPage() {
     { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', showTime: true, width: 320 },
   ], [t, mockUserOptions, getSystemLogNameOptions]);
 
+  const northboundFilterFields: FilterField[] = useMemo(() => [
+    { name: 'apiKey', label: 'API Key', type: 'input', width: 180 },
+    { name: 'apiName', label: t('log.northbound.apiName'), type: 'input', width: 180 },
+    {
+      name: 'method',
+      label: t('log.northbound.method'),
+      type: 'select',
+      options: [
+        { label: 'GET', value: 'GET' },
+        { label: 'POST', value: 'POST' },
+        { label: 'PUT', value: 'PUT' },
+        { label: 'DELETE', value: 'DELETE' },
+      ],
+      width: 120,
+    },
+    { name: 'path', label: 'PATH', type: 'input', width: 240 },
+    { name: 'createUser', label: t('log.northbound.callAccount'), type: 'input', width: 160 },
+    { name: 'ipAddress', label: t('log.clientIp'), type: 'input', width: 160 },
+    {
+      name: 'status',
+      label: t('log.result'),
+      type: 'select',
+      options: [
+        { label: t('log.success'), value: 'success' },
+        { label: t('log.failure'), value: 'failed' },
+      ],
+      width: 140,
+    },
+    { name: 'timeRange', label: t('log.timeRange'), type: 'date-range', showTime: true, width: 320 },
+  ], [t]);
+
   // 根据当前 tab 获取筛选字段
   const getFilterFields = useCallback(() => {
     switch (activeTab) {
+      case 'northbound':
+        return northboundFilterFields;
       case 'security':
         return securityFilterFields;
       case 'system':
@@ -196,10 +322,10 @@ export default function OperationLogPage() {
       default:
         return operationFilterFields;
     }
-  }, [activeTab, operationFilterFields, securityFilterFields, systemFilterFields]);
+  }, [activeTab, northboundFilterFields, operationFilterFields, securityFilterFields, systemFilterFields]);
 
   // 操作日志表格列
-  const operationColumns: DataTableColumn<OperationLog & Record<string, unknown>>[] = useMemo(() => [
+  const operationColumns: DataTableColumn<LogTableRow>[] = useMemo(() => [
     {
       key: 'operator',
       title: t('log.operator'),
@@ -273,9 +399,108 @@ export default function OperationLogPage() {
     },
   ], [t, resultTextMap]);
 
+  const northboundColumns: DataTableColumn<LogTableRow>[] = useMemo(() => [
+    {
+      key: 'name',
+      title: t('log.northbound.apiName'),
+      dataIndex: 'name',
+      width: 180,
+      ellipsis: true,
+      render: (val) => <span>{String(val || '-')}</span>,
+    },
+    {
+      key: 'apiKey',
+      title: 'API Key',
+      dataIndex: 'apiKey',
+      width: 170,
+      render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(val || '-')}</span>,
+    },
+    {
+      key: 'method',
+      title: t('log.northbound.method'),
+      dataIndex: 'method',
+      width: 90,
+      render: (val) => <Tag color="processing">{String(val || '-')}</Tag>,
+    },
+    {
+      key: 'path',
+      title: 'PATH',
+      dataIndex: 'path',
+      width: 300,
+      ellipsis: true,
+      render: (val) => (
+        <Tooltip title={String(val || '-')}>
+          <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{truncate(String(val || '-'), 60)}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      key: 'createUser',
+      title: t('log.northbound.callAccount'),
+      dataIndex: 'createUser',
+      width: 130,
+    },
+    {
+      key: 'ipAddress',
+      title: t('log.clientIp'),
+      dataIndex: 'ipAddress',
+      width: 150,
+      render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(val || '-')}</span>,
+    },
+    {
+      key: 'status',
+      title: t('log.result'),
+      dataIndex: 'status',
+      width: 100,
+      render: (val, record) => {
+        const status = String(val || '');
+        const statusCode = Number(record.statusCode || 0);
+        const failed = status === 'failed' || statusCode >= 400;
+        return <Tag color={failed ? 'error' : 'success'}>{failed ? t('log.failure') : t('log.success')}</Tag>;
+      },
+    },
+    {
+      key: 'statusCode',
+      title: t('log.northbound.statusCode'),
+      dataIndex: 'statusCode',
+      width: 90,
+    },
+    {
+      key: 'durationMs',
+      title: t('log.northbound.durationMs'),
+      dataIndex: 'durationMs',
+      width: 100,
+    },
+    {
+      key: 'requestParams',
+      title: t('log.northbound.requestMessage'),
+      dataIndex: 'requestParams',
+      width: 300,
+      ellipsis: true,
+      render: (val) => renderPayloadCell(val, t('log.northbound.requestMessage')),
+    },
+    {
+      key: 'responseBody',
+      title: t('log.northbound.responseMessage'),
+      dataIndex: 'responseBody',
+      width: 300,
+      ellipsis: true,
+      render: (val) => renderPayloadCell(val, t('log.northbound.responseMessage')),
+    },
+    {
+      key: 'createdAt',
+      title: t('log.northbound.callTime'),
+      dataIndex: 'createdAt',
+      width: 160,
+      render: (val) => (val ? dayjs(String(val)).format('YYYY-MM-DD HH:mm:ss') : '-'),
+    },
+  ], [renderPayloadCell, t]);
+
   // 获取表格列
   const getColumns = useCallback(() => {
     switch (activeTab) {
+      case 'northbound':
+        return northboundColumns;
       case 'security':
         return operationColumns.filter((col) => col.key !== 'endTime');
       case 'system':
@@ -283,7 +508,7 @@ export default function OperationLogPage() {
       default:
         return operationColumns;
     }
-  }, [activeTab, operationColumns]);
+  }, [activeTab, northboundColumns, operationColumns]);
 
   return (
     <ListPageLayout>
@@ -292,9 +517,10 @@ export default function OperationLogPage() {
         activeKey={activeTab}
         onChange={handleTabChange}
         items={[
-          { key: 'operation', label: `${t('log.operationLog')}（配置/删除/用户管理）` },
-          { key: 'security', label: `${t('log.securityLog')}（登录/退出）` },
-          { key: 'system', label: '系统管理审计（升级/重启）' },
+          { key: 'operation', label: t('log.operationLogTab') },
+          { key: 'security', label: t('log.securityLogTab') },
+          { key: 'system', label: t('log.systemAuditLogTab') },
+          { key: 'northbound', label: t('log.northboundLog') },
         ]}
       />
 
@@ -315,10 +541,10 @@ export default function OperationLogPage() {
         style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
       >
-        <DataTable<OperationLog & Record<string, unknown>>
+        <DataTable<LogTableRow>
           tableId={`${activeTab}-log-list`}
-          columns={getColumns() as DataTableColumn<OperationLog & Record<string, unknown>>[]}
-          dataSource={(data?.items ?? []) as (OperationLog & Record<string, unknown>)[]}
+          columns={getColumns()}
+          dataSource={(data?.items ?? []) as LogTableRow[]}
           loading={isLoading}
           rowKey="id"
           total={data?.total ?? 0}
@@ -326,9 +552,37 @@ export default function OperationLogPage() {
           currentPage={page}
           onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
           hideToolbar
-          scroll={{ x: 1400, y: 'calc(100vh - 420px)' }}
+          scroll={{ x: isNorthboundTab ? 1900 : 1400, y: 'calc(100vh - 420px)' }}
         />
       </Card>
+
+      <Modal
+        title={payloadDetail?.title}
+        open={Boolean(payloadDetail)}
+        onCancel={() => setPayloadDetail(null)}
+        footer={null}
+        width="min(960px, 92vw)"
+      >
+        <pre
+          style={{
+            maxHeight: '65vh',
+            overflow: 'auto',
+            margin: 0,
+            padding: 12,
+            border: `1px solid ${token.colorBorderSecondary}`,
+            borderRadius: token.borderRadiusSM,
+            background: token.colorFillQuaternary,
+            color: token.colorText,
+            fontFamily: 'Menlo, Monaco, Consolas, monospace',
+            fontSize: 12,
+            lineHeight: 1.6,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          {payloadDetail?.content || '-'}
+        </pre>
+      </Modal>
     </ListPageLayout>
   );
 }

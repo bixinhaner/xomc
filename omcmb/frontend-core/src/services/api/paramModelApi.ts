@@ -45,6 +45,9 @@ interface BackendMapping {
   change_applies: string;
   min_value?: string;
   max_value?: string;
+  enum_values?: string;
+  enum_labels?: string;
+  validation_pattern?: string;
   is_storable: boolean;
   is_active: boolean;
   software_version?: string;
@@ -109,6 +112,9 @@ function mapMapping(b: BackendMapping): ParamMapping {
     changeApplies: b.change_applies,
     minValue: b.min_value,
     maxValue: b.max_value,
+    enumValues: b.enum_values,
+    enumLabels: b.enum_labels,
+    validationPattern: b.validation_pattern,
     isStorable: b.is_storable,
     isActive: b.is_active,
     softwareVersion: b.software_version,

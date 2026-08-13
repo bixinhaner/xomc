@@ -218,6 +218,7 @@ function parseDeviceSNs(value: string): string[] {
 
 interface ControlParameterRow {
   path: string;
+  role?: 'admin' | 'admin_rf' | 'rf' | 'ipsec' | 'op_state';
   before?: string;
   requested?: string;
   verified?: string;
@@ -225,16 +226,30 @@ interface ControlParameterRow {
 
 function controlParameterRows(action: GeofenceControlAction): ControlParameterRow[] {
   const rows = new Map<string, ControlParameterRow>();
-  const merge = (field: 'before' | 'requested' | 'verified', path: string, value: string) => {
-    rows.set(path, { ...rows.get(path), path, [field]: value });
+  const merge = (
+    field: 'before' | 'requested' | 'verified',
+    path: string,
+    value: string,
+    role?: ControlParameterRow['role'],
+  ) => {
+    rows.set(path, { ...rows.get(path), path, role: role ?? rows.get(path)?.role, [field]: value });
   };
-  action.beforeState.forEach(({ path, value }) => merge('before', path, value));
-  action.requestedState.forEach(({ path, value }) => merge('requested', path, value));
-  action.verifiedState.forEach(({ path, value }) => merge('verified', path, value));
+  action.beforeState.forEach(({ path, value, role }) => merge('before', path, value, role));
+  action.requestedState.forEach(({ path, value, role }) => merge('requested', path, value, role));
+  (action.terminalState ?? []).forEach(({ path, value, role }) => merge('requested', path, value, role));
+  action.verifiedState.forEach(({ path, value, role }) => merge('verified', path, value, role));
   return Array.from(rows.values()).filter((row) => row.requested !== undefined || row.verified !== undefined);
 }
 
-function controlParameterName(path: string, format: (id: string, values?: Record<string, string>) => string) {
+function controlParameterName(
+  path: string,
+  role: ControlParameterRow['role'],
+  format: (id: string, values?: Record<string, string>) => string,
+) {
+  const cell = path.match(/FAPService\.(\d+)\./i);
+  if (role === 'op_state' && cell) return format('geofence.control.opStateInstance', { instance: cell[1] });
+  if (role === 'admin' && cell) return format('geofence.control.adminInstance', { instance: cell[1] });
+  if (role === 'admin_rf' && cell) return format('geofence.control.adminRFInstance', { instance: cell[1] });
   const rf = path.match(/FAPService\.(\d+)\..*RFTxStatus$/i);
   if (rf) return format('geofence.control.rfInstance', { instance: rf[1] });
   const ipsec = path.match(/Ipsec\.(\d+)\..*(?:TUNNEL_ENABLE|TUNNELENABLE)$/i);
@@ -768,55 +783,76 @@ export default function GeofenceBindingsDrawer({
             {intl.formatMessage({ id: 'geofence.control.empty' })}
           </div>
         ) : (
-          (actionsQuery.data ?? []).map((action) => (
-            <article
-              className="geofence-control-action-card"
-              key={action.id}
-            >
-              <header className="geofence-control-action-header">
-                <div className="geofence-control-action-identity">
-                  <strong>{action.deviceSN}</strong>
-                  <Typography.Text type="secondary">
-                    {intl.formatDate(
-                      action.completedAt ?? action.createdAt,
-                      {
-                        year: 'numeric',
-                        month: 'numeric',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                        hour12: false,
-                      },
-                    )}
-                  </Typography.Text>
-                </div>
-                <Space size={6} wrap>
-                  <Tag>
-                    {action.actionType === 'activate'
-                      ? intl.formatMessage({
-                          id: 'geofence.control.activate',
-                        })
-                      : intl.formatMessage({
-                          id: 'geofence.control.deactivate',
-                        })}
-                  </Tag>
-                  <Tag
-                    color={
-                      action.status === 'verified'
-                        ? 'success'
-                        : action.status === 'failed' ||
-                            action.status === 'partial_failed'
-                          ? 'error'
-                          : 'processing'
-                    }
+          (actionsQuery.data ?? []).map((action) => {
+            const parameters = controlParameterRows(action);
+            const matchedParameters = parameters.filter(
+              (parameter) =>
+                parameter.requested !== undefined &&
+                parameter.verified === parameter.requested,
+            ).length;
+            return (
+              <details
+                className="geofence-control-action-card"
+                key={action.id}
+              >
+                <summary className="geofence-control-action-header">
+                  <div className="geofence-control-action-identity">
+                    <strong>{action.deviceSN}</strong>
+                    <Typography.Text type="secondary">
+                      {intl.formatDate(
+                        action.completedAt ?? action.createdAt,
+                        {
+                          year: 'numeric',
+                          month: 'numeric',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                          hour12: false,
+                        },
+                      )}
+                    </Typography.Text>
+                  </div>
+                  <Space
+                    className="geofence-control-action-summary"
+                    size={6}
+                    wrap
                   >
-                    {intl.formatMessage({
-                      id: `geofence.control.status.${action.status}`,
-                    })}
-                  </Tag>
-                </Space>
-              </header>
+                    <Tag>
+                      {action.actionType === 'activate'
+                        ? intl.formatMessage({
+                            id: 'geofence.control.activate',
+                          })
+                        : intl.formatMessage({
+                            id: 'geofence.control.deactivate',
+                          })}
+                    </Tag>
+                    <Tag
+                      color={
+                        action.status === 'verified'
+                          ? 'success'
+                          : action.status === 'failed' ||
+                              action.status === 'partial_failed'
+                            ? 'error'
+                            : 'processing'
+                      }
+                    >
+                      {intl.formatMessage({
+                        id: `geofence.control.status.${action.status}`,
+                      })}
+                    </Tag>
+                    <Tag
+                      color={
+                        matchedParameters === parameters.length
+                          ? 'success'
+                          : 'warning'
+                      }
+                    >
+                      {matchedParameters}/{parameters.length}{' '}
+                      {intl.formatMessage({ id: 'geofence.control.match' })}
+                    </Tag>
+                  </Space>
+                </summary>
               <div
                 className="geofence-control-parameter-table"
                 role="table"
@@ -847,7 +883,7 @@ export default function GeofenceBindingsDrawer({
                     {intl.formatMessage({ id: 'geofence.control.result' })}
                   </span>
                 </div>
-                {controlParameterRows(action).map((parameter) => {
+                {parameters.map((parameter) => {
                   const matched =
                     parameter.requested !== undefined &&
                     parameter.verified === parameter.requested;
@@ -864,6 +900,7 @@ export default function GeofenceBindingsDrawer({
                         <strong>
                           {controlParameterName(
                             parameter.path,
+                            parameter.role,
                             (id, values) =>
                               intl.formatMessage({ id }, values),
                           )}
@@ -900,8 +937,9 @@ export default function GeofenceBindingsDrawer({
                   title={action.lastError}
                 />
               )}
-            </article>
-          ))
+              </details>
+            );
+          })
         )}
       </details>
 

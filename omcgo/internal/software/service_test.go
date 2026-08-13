@@ -98,6 +98,7 @@ type svcMockSubTaskRepo struct {
 	createFn            func(ctx context.Context, task *UpgradeSubTask) error
 	updateStatusFn      func(ctx context.Context, id uuid.UUID, status UpgradeState, msg string) error
 	listByTaskIDFn      func(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)
+	getByIDFn           func(ctx context.Context, id uuid.UUID) (*UpgradeSubTask, error)
 	getActiveByDeviceFn func(ctx context.Context, deviceID uuid.UUID) (*UpgradeSubTask, error)
 	getByCommandKeyFn   func(ctx context.Context, commandKey string) (*UpgradeSubTask, error)
 	batchCreateFn       func(ctx context.Context, tasks []*UpgradeSubTask) error
@@ -113,7 +114,10 @@ func (m *svcMockSubTaskRepo) Create(ctx context.Context, task *UpgradeSubTask) e
 	task.ID = uuid.New()
 	return nil
 }
-func (m *svcMockSubTaskRepo) GetByID(_ context.Context, _ uuid.UUID) (*UpgradeSubTask, error) {
+func (m *svcMockSubTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (*UpgradeSubTask, error) {
+	if m.getByIDFn != nil {
+		return m.getByIDFn(ctx, id)
+	}
 	return nil, commonerrors.ErrNotFound
 }
 func (m *svcMockSubTaskRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status UpgradeState, msg string) error {

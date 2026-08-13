@@ -14,10 +14,14 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/pkg/soap"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -47,7 +51,10 @@ type OnlineSubscriber struct {
 	// acs_transfer.uploadBaseURL，与「系统配置→ACS 传输」页同源）。非空合法时
 	// 覆盖 urlTemplate 的 scheme/host（path+query 仍取自 urlTemplate）；为空回退 urlTemplate。
 	resolveBaseURL func(ctx context.Context) string
+	resolveAddress PMUploadAddressResolver
 	admissionGate  PMSetupAdmissionGate
+	deviceLookup   PMDeviceLookup
+	parameterRead  PMDeviceParameterReader
 	logger         *zap.Logger
 }
 
@@ -57,6 +64,9 @@ const defaultPMUploadPathQuery = "/smallcell/FileUploadService?fileType=PM&filen
 const automatedPMTaskRetryIntervalSeconds = 30
 const pmSetupAdmissionTTL = 30 * time.Second
 const pmSetupCommandKey = "pm_upload_setup_on_online"
+const pmHTTPSCompensationCommandKey = "pm_upload_https_compensation"
+const pmHTTPSCompensationDescription = "Compensate PM upload URL to HTTPS after parameter sync"
+const pmUploadURLParameterPath = "Device.FAP.PerfMgmt.Config.1.URL"
 
 // TaskCreator 是 OnlineSubscriber 入队 SPV task 的最小依赖。
 // 真实实现是 *task.TaskService。
@@ -66,6 +76,11 @@ type TaskCreator interface {
 		ctx context.Context,
 		deviceSN, method, description string,
 	) (*task.Task, error)
+	ListOpenTasksByDeviceAndMethods(
+		ctx context.Context,
+		deviceSN string,
+		methods []string,
+	) ([]*task.Task, error)
 	LatestCompletedTaskByDeviceAndCommandKey(
 		ctx context.Context,
 		deviceSN, commandKey string,
@@ -78,6 +93,22 @@ type PMSetupAdmissionGate interface {
 	Acquire(ctx context.Context, deviceSN string) (leaseToken string, acquired bool, err error)
 	Renew(ctx context.Context, deviceSN, leaseToken string) (renewed bool, err error)
 	Release(ctx context.Context, deviceSN, leaseToken string) error
+}
+
+type PMUploadAddressResolver interface {
+	Resolve(
+		ctx context.Context,
+		deviceID uuid.UUID,
+		direction transfercfg.TransferDirection,
+	) (transfercfg.AddressDecision, error)
+}
+
+type PMDeviceLookup interface {
+	GetByID(ctx context.Context, deviceID uuid.UUID) (*model.Device, error)
+}
+
+type PMDeviceParameterReader interface {
+	GetByPath(ctx context.Context, deviceID uuid.UUID, path string) (*model.DeviceParameter, error)
 }
 
 type redisPMSetupAdmissionGate struct {
@@ -214,8 +245,20 @@ func (s *OnlineSubscriber) SetUploadBaseURLResolver(fn func(ctx context.Context)
 	s.resolveBaseURL = fn
 }
 
+func (s *OnlineSubscriber) SetUploadAddressResolver(resolver PMUploadAddressResolver) {
+	s.resolveAddress = resolver
+}
+
 func (s *OnlineSubscriber) SetAdmissionGate(gate PMSetupAdmissionGate) {
 	s.admissionGate = gate
+}
+
+func (s *OnlineSubscriber) SetParamSyncPMCompensationReaders(
+	deviceLookup PMDeviceLookup,
+	parameterReader PMDeviceParameterReader,
+) {
+	s.deviceLookup = deviceLookup
+	s.parameterRead = parameterReader
 }
 
 // Subscribe 把 OnlineSubscriber 挂到 EventBus。使用 QueueSubscribe 让多 worker 实例
@@ -236,10 +279,27 @@ func (s *OnlineSubscriber) Subscribe(bus event.EventBus) error {
 	if _, err := bus.QueueSubscribe(event.SubjectDeviceRegistered, registeredQueue, s.handleRegistered); err != nil {
 		return fmt.Errorf("subscribe %s: %w", event.SubjectDeviceRegistered, err)
 	}
+	if err := s.SubscribeParamSyncCompleted(bus); err != nil {
+		return err
+	}
 	s.logger.Info("pm online subscriber registered",
-		zap.String("subjects", event.SubjectDeviceOnline+","+event.SubjectDeviceRegistered),
+		zap.String("subjects", event.SubjectDeviceOnline+","+event.SubjectDeviceRegistered+","+event.SubjectParamSyncRunCompleted),
 		zap.String("url_template", s.urlTemplate),
 		zap.Int("interval_seconds", s.intervalSec))
+	return nil
+}
+
+func (s *OnlineSubscriber) SubscribeParamSyncCompleted(bus event.EventBus) error {
+	if s.deviceLookup != nil && s.parameterRead != nil && s.resolveAddress != nil {
+		const paramSyncQueue = "pm-param-sync-https-compensation"
+		if _, err := bus.QueueSubscribe(
+			event.SubjectParamSyncRunCompleted,
+			paramSyncQueue,
+			s.handleParamSyncCompleted,
+		); err != nil {
+			return fmt.Errorf("subscribe %s: %w", event.SubjectParamSyncRunCompleted, err)
+		}
+	}
 	return nil
 }
 
@@ -270,6 +330,220 @@ func (s *OnlineSubscriber) handleRegistered(ctx context.Context, evt event.Event
 	return s.enqueuePMSetup(ctx, payload.SerialNumber, payload.DeviceID, payload.Created)
 }
 
+func (s *OnlineSubscriber) handleParamSyncCompleted(ctx context.Context, evt event.Event) error {
+	var payload struct {
+		RunID     uuid.UUID `json:"run_id"`
+		DeviceID  uuid.UUID `json:"device_id"`
+		Status    string    `json:"status"`
+		SyncScope string    `json:"sync_scope"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil {
+		s.logger.Warn("decode param_sync.run.completed payload failed",
+			zap.String("event_id", evt.ID), zap.Error(err))
+		return nil
+	}
+	if payload.RunID == uuid.Nil {
+		s.logger.Info("skip PM HTTPS compensation: parameter sync event missing run_id",
+			zap.String("event_id", evt.ID))
+		return nil
+	}
+	if payload.DeviceID == uuid.Nil {
+		s.logger.Info("skip PM HTTPS compensation: parameter sync event missing device_id",
+			zap.String("event_id", evt.ID),
+			zap.String("run_id", payload.RunID.String()))
+		return nil
+	}
+	if payload.Status != string(paramsync.RunStatusSucceeded) {
+		s.logger.Info("skip PM HTTPS compensation: parameter sync did not succeed",
+			zap.String("event_id", evt.ID),
+			zap.String("run_id", payload.RunID.String()),
+			zap.String("device_id", payload.DeviceID.String()),
+			zap.String("status", payload.Status))
+		return nil
+	}
+	if payload.SyncScope != string(paramsync.SyncScopeFull) {
+		s.logger.Info("skip PM HTTPS compensation: parameter sync scope is not full",
+			zap.String("event_id", evt.ID),
+			zap.String("run_id", payload.RunID.String()),
+			zap.String("device_id", payload.DeviceID.String()),
+			zap.String("sync_scope", payload.SyncScope))
+		return nil
+	}
+	return s.compensatePMUploadURLToHTTPS(ctx, payload.DeviceID, payload.RunID)
+}
+
+func (s *OnlineSubscriber) compensatePMUploadURLToHTTPS(
+	ctx context.Context,
+	deviceID uuid.UUID,
+	runID uuid.UUID,
+) error {
+	if s.deviceLookup == nil || s.parameterRead == nil || s.resolveAddress == nil {
+		return nil
+	}
+	dev, err := s.deviceLookup.GetByID(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("lookup device for PM HTTPS compensation: %w", err)
+	}
+	if dev == nil || strings.TrimSpace(dev.SerialNumber) == "" {
+		s.logger.Debug("skip PM HTTPS compensation: device not found or missing serial number",
+			zap.String("device_id", deviceID.String()))
+		return nil
+	}
+
+	decision, err := s.resolveAddress.Resolve(ctx, deviceID, transfercfg.TransferDirectionUpload)
+	if err != nil {
+		return fmt.Errorf("resolve PM HTTPS compensation upload address: %w", err)
+	}
+	if decision.Protocol != transfercfg.TransferProtocolHTTPS ||
+		decision.Capability != transfercfg.HTTPSCapabilityEnabled {
+		s.logger.Info("skip PM HTTPS compensation: transfer policy is not eligible",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("device_id", deviceID.String()),
+			zap.String("protocol", string(decision.Protocol)),
+			zap.String("capability", string(decision.Capability)))
+		return nil
+	}
+
+	current, err := s.parameterRead.GetByPath(ctx, deviceID, pmUploadURLParameterPath)
+	if err != nil {
+		return fmt.Errorf("read current PM upload URL: %w", err)
+	}
+	if current == nil || !isHTTPURL(current.ParameterValue) {
+		s.logger.Info("skip PM HTTPS compensation: current PM upload URL is not HTTP",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("device_id", deviceID.String()),
+			zap.String("current_protocol", urlProtocol(currentParameterValue(current))))
+		return nil
+	}
+
+	desiredURL, err := uploadURLWithBase(expandEnv(s.urlTemplate), decision.BaseURL)
+	if err != nil {
+		return fmt.Errorf("build PM HTTPS compensation URL: %w", err)
+	}
+	if !isHTTPSURL(desiredURL) {
+		return fmt.Errorf("resolved PM HTTPS compensation URL is not HTTPS")
+	}
+
+	paramsJSON, err := json.Marshal(buildURLOnlySPVParams(desiredURL))
+	if err != nil {
+		return fmt.Errorf("marshal PM HTTPS compensation params: %w", err)
+	}
+	commandKey := pmHTTPSCompensationCommandKeyForRun(deviceID, runID)
+
+	var leaseToken string
+	if s.admissionGate != nil {
+		var acquired bool
+		leaseToken, acquired, err = s.admissionGate.Acquire(ctx, dev.SerialNumber)
+		if err != nil {
+			return fmt.Errorf("acquire PM HTTPS compensation admission: %w", err)
+		}
+		if !acquired {
+			s.logger.Info("skip PM HTTPS compensation: another worker is handling device",
+				zap.String("device_sn", dev.SerialNumber),
+				zap.String("device_id", deviceID.String()),
+				zap.String("old_protocol", "http"),
+				zap.String("new_protocol", "https"))
+			return nil
+		}
+		defer func() {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			defer cancel()
+			if releaseErr := s.admissionGate.Release(releaseCtx, dev.SerialNumber, leaseToken); releaseErr != nil {
+				s.logger.Warn("release PM HTTPS compensation admission failed",
+					zap.String("device_sn", dev.SerialNumber), zap.Error(releaseErr))
+			}
+		}()
+	}
+
+	open, err := s.equivalentOpenSetParameterValuesTask(
+		ctx,
+		dev.SerialNumber,
+		desiredURL,
+	)
+	if err != nil {
+		return fmt.Errorf("query open PM HTTPS compensation task: %w", err)
+	}
+	if open != nil {
+		s.logger.Info("skip PM HTTPS compensation: equivalent open task exists",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("device_id", deviceID.String()),
+			zap.String("task_id", open.ID),
+			zap.String("old_protocol", "http"),
+			zap.String("new_protocol", "https"))
+		return nil
+	}
+
+	completed, err := s.taskSvc.LatestCompletedTaskByDeviceAndCommandKey(ctx, dev.SerialNumber, commandKey)
+	if err != nil {
+		return fmt.Errorf("query completed PM HTTPS compensation task: %w", err)
+	}
+	if completed != nil && spvParamsSetPMUploadURL(completed.Params, desiredURL) {
+		s.logger.Info("skip PM HTTPS compensation: equivalent completed task exists for this parameter sync run",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("device_id", deviceID.String()),
+			zap.String("run_id", runID.String()),
+			zap.String("task_id", completed.ID),
+			zap.String("old_protocol", "http"),
+			zap.String("new_protocol", "https"))
+		return nil
+	}
+
+	if s.admissionGate != nil {
+		renewed, renewErr := s.admissionGate.Renew(ctx, dev.SerialNumber, leaseToken)
+		if renewErr != nil {
+			return fmt.Errorf("renew PM HTTPS compensation admission before create: %w", renewErr)
+		}
+		if !renewed {
+			return fmt.Errorf("PM HTTPS compensation admission lost before create for %s", dev.SerialNumber)
+		}
+	}
+
+	maxRetries := task.RetryBudgetCoveringExpiry(3600, automatedPMTaskRetryIntervalSeconds)
+	_, err = s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:             dev.SerialNumber,
+		Method:               string(soap.MethodSetParameterValues),
+		Params:               paramsJSON,
+		Priority:             20,
+		Source:               task.TaskSourceSystem,
+		CreatorID:            "",
+		Description:          pmHTTPSCompensationDescription,
+		CommandKey:           commandKey,
+		ExpiresIn:            3600,
+		MaxRetries:           &maxRetries,
+		RetryIntervalSeconds: automatedPMTaskRetryIntervalSeconds,
+	})
+	if err != nil {
+		return fmt.Errorf("enqueue PM HTTPS compensation SPV task: %w", err)
+	}
+	s.logger.Info("PM HTTPS compensation SPV task enqueued",
+		zap.String("device_sn", dev.SerialNumber),
+		zap.String("device_id", deviceID.String()),
+		zap.String("old_protocol", "http"),
+		zap.String("new_protocol", "https"))
+	return nil
+}
+
+func (s *OnlineSubscriber) equivalentOpenSetParameterValuesTask(
+	ctx context.Context,
+	deviceSN string,
+	desiredURL string,
+) (*task.Task, error) {
+	openTasks, err := s.taskSvc.ListOpenTasksByDeviceAndMethods(ctx, deviceSN, []string{string(soap.MethodSetParameterValues)})
+	if err != nil {
+		return nil, err
+	}
+	for _, open := range openTasks {
+		if open != nil && spvParamsSetPMUploadURL(open.Params, desiredURL) {
+			return open, nil
+		}
+	}
+	return nil, nil
+}
+
+func pmHTTPSCompensationCommandKeyForRun(deviceID, runID uuid.UUID) string {
+	return pmHTTPSCompensationCommandKey + ":" + deviceID.String() + ":" + runID.String()
+}
+
 // enqueuePMSetup 解析上传 URL → host 守卫 → 入队 1 个 SPV task 带 3 个 PM 参数。
 func (s *OnlineSubscriber) enqueuePMSetup(
 	ctx context.Context,
@@ -281,7 +555,14 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 		return nil
 	}
 
-	url := s.resolveUploadURL(ctx)
+	url, err := s.resolveUploadURL(ctx, deviceID)
+	if err != nil {
+		s.logger.Warn("resolve PM upload URL failed",
+			zap.String("device_sn", serialNumber),
+			zap.String("device_id", deviceID),
+			zap.Error(err))
+		return fmt.Errorf("resolve PM upload URL: %w", err)
+	}
 	// host 非空守卫：渲染后若缺 scheme 或 host（如 OMC_PUBLIC_HOST 漏配渲染成
 	// "http://:7557/..."，u.Hostname() 返空；或 "${...}" 残留），跳过 SPV 不污染设备。
 	if u, perr := neturl.Parse(url); perr != nil || u.Scheme == "" || u.Hostname() == "" {
@@ -346,7 +627,7 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 	open, err := s.taskSvc.LatestOpenTaskByDeviceAndMethod(
 		ctx,
 		serialNumber,
-		"SetParameterValues",
+		string(soap.MethodSetParameterValues),
 		"Auto-setup PM file upload on device onboard/online",
 	)
 	if err != nil {
@@ -411,7 +692,7 @@ func (s *OnlineSubscriber) enqueuePMSetup(
 	maxRetries := task.RetryBudgetCoveringExpiry(3600, automatedPMTaskRetryIntervalSeconds)
 	req := &task.CreateTaskRequest{
 		DeviceSN:             serialNumber,
-		Method:               "SetParameterValues",
+		Method:               string(soap.MethodSetParameterValues),
 		Params:               paramsJSON,
 		Priority:             20, // 低于业务关键命令（默认 10），但高于纯监控类
 		Source:               task.TaskSourceSystem,
@@ -484,32 +765,72 @@ func jsonSemanticallyEqual(left, right json.RawMessage) bool {
 	return reflect.DeepEqual(leftValue, rightValue)
 }
 
+func spvParamsSetPMUploadURL(paramsJSON json.RawMessage, desiredURL string) bool {
+	var params spvParams
+	if json.Unmarshal(paramsJSON, &params) != nil {
+		return false
+	}
+	for _, value := range params.Values {
+		if value.Name == pmUploadURLParameterPath && value.Value == desiredURL {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveUploadURL 计算 PM 上传 URL：
-//   - 无 resolveBaseURL（未注入）或解析为空/非法 → 回退 expandEnv(urlTemplate)；
-//   - 解析到合法 base（如 sys_configs.acs_transfer.uploadBaseURL=http://172.19.1.173:8080）
-//     → 用 base 的 scheme/host，path+query 仍取自 urlTemplate（保留 fileType=PM&filename= 等），
-//     使上传地址与「系统配置→ACS 传输」页同源、改 IP 即时生效、无需重建镜像。
-func (s *OnlineSubscriber) resolveUploadURL(ctx context.Context) string {
+//   - 优先走统一 transfercfg.AddressResolver，按设备 HTTPS 能力和策略选择上传基址；
+//   - 无统一 resolver 时保留旧 resolveBaseURL 兼容路径；
+//   - 最终 URL 用所选 base 的 scheme/host，path+query 仍取自 urlTemplate
+//     （保留 fileType=PM&filename= 等 PM 端约定）。
+func (s *OnlineSubscriber) resolveUploadURL(ctx context.Context, deviceID string) (string, error) {
 	rendered := expandEnv(s.urlTemplate)
+	if s.resolveAddress != nil {
+		parsedDeviceID := uuid.Nil
+		if trimmed := strings.TrimSpace(deviceID); trimmed != "" {
+			parsed, err := uuid.Parse(trimmed)
+			if err != nil {
+				s.logger.Warn("PM upload address resolver received invalid device_id; treating capability as unknown",
+					zap.String("device_id", deviceID),
+					zap.Error(err))
+			} else {
+				parsedDeviceID = parsed
+			}
+		}
+		decision, err := s.resolveAddress.Resolve(ctx, parsedDeviceID, transfercfg.TransferDirectionUpload)
+		if err != nil {
+			return "", fmt.Errorf("resolve transfer upload address: %w", err)
+		}
+		return uploadURLWithBase(rendered, decision.BaseURL)
+	}
 	if s.resolveBaseURL == nil {
-		return rendered
+		return rendered, nil
 	}
 	base := strings.TrimSpace(s.resolveBaseURL(ctx))
 	if base == "" {
-		return rendered
+		return rendered, nil
 	}
-	bu, err := neturl.Parse(base)
-	if err != nil || bu.Scheme == "" || bu.Host == "" {
-		return rendered // base 非法，回退模板
+	resolved, err := uploadURLWithBase(rendered, base)
+	if err != nil {
+		return rendered, nil // legacy base resolver 非法时仍回退模板
 	}
-	tu, terr := neturl.Parse(rendered)
-	if terr != nil || tu.Path == "" {
-		// 模板不可解析/无 path：用 base + 默认 PM 上传 path+query
-		return strings.TrimRight(base, "/") + defaultPMUploadPathQuery
+	return resolved, nil
+}
+
+func uploadURLWithBase(rendered, base string) (string, error) {
+	return transfercfg.BuildTemplateURL(base, pmUploadRelativeReference(rendered))
+}
+
+func pmUploadRelativeReference(rendered string) string {
+	tu, err := neturl.Parse(rendered)
+	if err != nil || tu.Path == "" {
+		return defaultPMUploadPathQuery
 	}
-	tu.Scheme = bu.Scheme
-	tu.Host = bu.Host
-	return tu.String()
+	relative := tu.EscapedPath()
+	if tu.RawQuery != "" || tu.ForceQuery {
+		relative += "?" + tu.RawQuery
+	}
+	return relative
 }
 
 // spvParam 是 SetParameterValuesHandler.BuildRequest 解析期望的 params.values[] 项。
@@ -538,7 +859,7 @@ func buildSPVParams(enableValue string, url string, intervalSec int) spvParams {
 	return spvParams{
 		Values: []spvParam{
 			{Name: "Device.FAP.PerfMgmt.Config.1.Enable", Value: enableValue, Type: "xsd:boolean"},
-			{Name: "Device.FAP.PerfMgmt.Config.1.URL", Value: url, Type: "xsd:string"},
+			{Name: pmUploadURLParameterPath, Value: url, Type: "xsd:string"},
 			{
 				Name:  "Device.FAP.PerfMgmt.Config.1.PeriodicUploadInterval",
 				Value: strconv.Itoa(intervalSec),
@@ -546,6 +867,39 @@ func buildSPVParams(enableValue string, url string, intervalSec int) spvParams {
 			},
 		},
 	}
+}
+
+func buildURLOnlySPVParams(url string) spvParams {
+	return spvParams{
+		Values: []spvParam{
+			{Name: pmUploadURLParameterPath, Value: url, Type: "xsd:string"},
+		},
+	}
+}
+
+func isHTTPURL(value string) bool {
+	u, err := neturl.Parse(strings.TrimSpace(value))
+	return err == nil && strings.EqualFold(u.Scheme, "http") && u.Hostname() != ""
+}
+
+func isHTTPSURL(value string) bool {
+	u, err := neturl.Parse(strings.TrimSpace(value))
+	return err == nil && strings.EqualFold(u.Scheme, "https") && u.Hostname() != ""
+}
+
+func currentParameterValue(param *model.DeviceParameter) string {
+	if param == nil {
+		return ""
+	}
+	return param.ParameterValue
+}
+
+func urlProtocol(value string) string {
+	u, err := neturl.Parse(strings.TrimSpace(value))
+	if err != nil || u.Scheme == "" {
+		return "unknown"
+	}
+	return strings.ToLower(u.Scheme)
 }
 
 // expandEnv 展开 ${VAR} 与 ${VAR:-default} 占位符。

@@ -137,6 +137,20 @@ type SysConfigApplyRepository interface {
 	CompleteApplyTarget(ctx context.Context, work ConfigApplyWork, actualValue map[string]any, applyErr error) error
 }
 
+// SysConfigAtomicCategoryValidationRepository optionally lets a repository run
+// cross-key validation and the complete batch write in one serialized storage
+// transaction. Repositories without this capability keep the legacy service
+// validation path for compatibility.
+type SysConfigAtomicCategoryValidationRepository interface {
+	BatchUpsertWithApplyValidated(
+		ctx context.Context,
+		category string,
+		items []BatchItem,
+		targets []ConfigApplyTarget,
+		validator SysConfigCategoryValidator,
+	) (BatchUpsertResult, error)
+}
+
 // ConfigApplyWork 是执行器独占领取的一项配置应用任务。
 type ConfigApplyWork struct {
 	Batch          ConfigApplyBatch
@@ -303,6 +317,29 @@ func (r *PgSysConfigRepository) BatchUpsert(ctx context.Context, category string
 // 调用方传入的 target 状态代表“需要外部应用”或“仅本地缓存已失效”；后续执行器只会推进
 // pending/failed 目标，因而写入提交与应用意图不可分离。
 func (r *PgSysConfigRepository) BatchUpsertWithApply(ctx context.Context, category string, items []BatchItem, targets []ConfigApplyTarget) (BatchUpsertResult, error) {
+	return r.batchUpsertWithApply(ctx, category, items, targets, nil)
+}
+
+// BatchUpsertWithApplyValidated serializes writers for one category on its
+// config_apply_versions row, validates the merged final state, and persists the
+// KV values plus apply intent in the same PostgreSQL transaction.
+func (r *PgSysConfigRepository) BatchUpsertWithApplyValidated(
+	ctx context.Context,
+	category string,
+	items []BatchItem,
+	targets []ConfigApplyTarget,
+	validator SysConfigCategoryValidator,
+) (BatchUpsertResult, error) {
+	return r.batchUpsertWithApply(ctx, category, items, targets, validator)
+}
+
+func (r *PgSysConfigRepository) batchUpsertWithApply(
+	ctx context.Context,
+	category string,
+	items []BatchItem,
+	targets []ConfigApplyTarget,
+	validator SysConfigCategoryValidator,
+) (BatchUpsertResult, error) {
 	if len(items) == 0 {
 		return BatchUpsertResult{}, nil
 	}
@@ -314,6 +351,54 @@ func (r *PgSysConfigRepository) BatchUpsertWithApply(ctx context.Context, catego
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+
+	if _, err := tx.Exec(ctx, `
+INSERT INTO config_apply_versions (category, config_version, updated_at)
+VALUES ($1, 0, NOW())
+ON CONFLICT (category) DO NOTHING
+`, category); err != nil {
+		return BatchUpsertResult{}, fmt.Errorf("ensure config apply version for %s: %w", category, err)
+	}
+	var lockedVersion int64
+	if err := tx.QueryRow(ctx, `
+SELECT config_version
+FROM config_apply_versions
+WHERE category = $1
+FOR UPDATE
+`, category).Scan(&lockedVersion); err != nil {
+		return BatchUpsertResult{}, fmt.Errorf("lock config category %s: %w", category, err)
+	}
+
+	if validator != nil {
+		rows, err := tx.Query(ctx, `
+SELECT key, value
+FROM sys_configs
+WHERE category = $1
+`, category)
+		if err != nil {
+			return BatchUpsertResult{}, fmt.Errorf("list locked sys_config category %s: %w", category, err)
+		}
+		values := make(map[string]string, len(items))
+		for rows.Next() {
+			var key, value string
+			if err := rows.Scan(&key, &value); err != nil {
+				rows.Close()
+				return BatchUpsertResult{}, fmt.Errorf("scan locked sys_config category %s: %w", category, err)
+			}
+			values[key] = value
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return BatchUpsertResult{}, fmt.Errorf("iterate locked sys_config category %s: %w", category, err)
+		}
+		rows.Close()
+		for _, item := range items {
+			values[item.Key] = item.Value
+		}
+		if err := validator(values); err != nil {
+			return BatchUpsertResult{}, err
+		}
+	}
 
 	count := 0
 	for _, item := range items {
@@ -340,11 +425,10 @@ SET value = EXCLUDED.value,
 
 	var configVersion int64
 	if err := tx.QueryRow(ctx, `
-INSERT INTO config_apply_versions (category, config_version, updated_at)
-VALUES ($1, 1, NOW())
-ON CONFLICT (category) DO UPDATE
-SET config_version = config_apply_versions.config_version + 1,
+UPDATE config_apply_versions
+SET config_version = config_version + 1,
     updated_at = NOW()
+WHERE category = $1
 RETURNING config_version
 `, category).Scan(&configVersion); err != nil {
 		return BatchUpsertResult{}, fmt.Errorf("increment config apply version for %s: %w", category, err)
@@ -618,6 +702,11 @@ type SysConfigSavedHook func(ctx context.Context, category string)
 // 做格式守门（如 host[:port] 无 scheme，issue #548 切片 2 D 后端）。
 type SysConfigValidator func(value string) error
 
+// SysConfigCategoryValidator validates the final value set for one category.
+// The service merges persisted values with the submitted batch before calling
+// it, so cross-key contracts cannot be bypassed by a partial API request.
+type SysConfigCategoryValidator func(values map[string]string) error
+
 // validatorKey 用 (category, key) 锁定一个 validator。
 type validatorKey struct {
 	Category string
@@ -629,6 +718,7 @@ type SysConfigService struct {
 	repo                    SysConfigRepository
 	hooks                   []SysConfigSavedHook
 	validators              map[validatorKey]SysConfigValidator
+	categoryValidators      map[string]SysConfigCategoryValidator
 	appliers                map[string]map[string]ConfigApplyHandler
 	applyObserver           ConfigApplyObserver
 	applyLeaseDuration      time.Duration
@@ -698,6 +788,19 @@ func (s *SysConfigService) RegisterValidator(category, key string, fn SysConfigV
 	s.validators[k] = fn
 }
 
+// RegisterCategoryValidator registers a cross-key validator for a category.
+// A nil function removes the validator.
+func (s *SysConfigService) RegisterCategoryValidator(category string, fn SysConfigCategoryValidator) {
+	if s.categoryValidators == nil {
+		s.categoryValidators = make(map[string]SysConfigCategoryValidator)
+	}
+	if fn == nil {
+		delete(s.categoryValidators, category)
+		return
+	}
+	s.categoryValidators[category] = fn
+}
+
 // Create creates a new config entry.
 func (s *SysConfigService) Create(context.Context, CreateSysConfigRequest) (*SysConfig, error) {
 	return nil, directSysConfigMutationError()
@@ -762,6 +865,30 @@ func (s *SysConfigService) BatchUpsertWithResult(ctx context.Context, req BatchU
 		return BatchUpsertResult{}, err
 	}
 	targets := s.configApplyTargetsForCategory(req.Category)
+	if validator, ok := s.categoryValidators[req.Category]; ok {
+		if atomicRepo, atomicOK := s.repo.(SysConfigAtomicCategoryValidationRepository); atomicOK {
+			result, err := atomicRepo.BatchUpsertWithApplyValidated(
+				ctx,
+				req.Category,
+				req.Items,
+				targets,
+				func(values map[string]string) error {
+					if err := validator(values); err != nil {
+						return fmt.Errorf("%w: sys_config %s: %v", commonerrors.ErrInvalidInput, req.Category, err)
+					}
+					return nil
+				},
+			)
+			if err != nil {
+				return BatchUpsertResult{}, err
+			}
+			s.fireSavedHooks(ctx, req.Category)
+			return s.refreshCommittedApplyBatch(ctx, result), nil
+		}
+		if err := s.runCategoryValidator(ctx, req.Category, req.Items); err != nil {
+			return BatchUpsertResult{}, err
+		}
+	}
 	applyRepo, ok := s.repo.(SysConfigApplyRepository)
 	if !ok {
 		n, err := s.repo.BatchUpsert(ctx, req.Category, req.Items)
@@ -781,16 +908,22 @@ func (s *SysConfigService) BatchUpsertWithResult(ctx context.Context, req BatchU
 		return BatchUpsertResult{}, err
 	}
 	s.fireSavedHooks(ctx, req.Category)
+	return s.refreshCommittedApplyBatch(ctx, result), nil
+}
+
+func (s *SysConfigService) refreshCommittedApplyBatch(ctx context.Context, result BatchUpsertResult) BatchUpsertResult {
 	if result.Batch.Status == ConfigApplyStatusPending {
 		// The intent and retry target are already committed. Immediate execution
 		// is best effort: returning an HTTP failure here would hide the durable
 		// batch ID and encourage the caller to create a duplicate version.
-		_ = s.ApplyBatch(ctx, result.Batch.ID)
-		if refreshed, err := applyRepo.GetApplyBatch(ctx, result.Batch.ID); err == nil {
-			result.Batch = *refreshed
+		if applyRepo, ok := s.repo.(SysConfigApplyRepository); ok {
+			_ = s.ApplyBatch(ctx, result.Batch.ID)
+			if refreshed, err := applyRepo.GetApplyBatch(ctx, result.Batch.ID); err == nil {
+				result.Batch = *refreshed
+			}
 		}
 	}
-	return result, nil
+	return result
 }
 
 func (s *SysConfigService) configApplyTargetsForCategory(category string) []ConfigApplyTarget {
@@ -1030,6 +1163,29 @@ func (s *SysConfigService) runValidators(category string, items []BatchItem) err
 			// 包 ErrInvalidInput 让 HTTPStatusFromError 映射成 400。
 			return fmt.Errorf("%w: sys_config %s.%s: %v", commonerrors.ErrInvalidInput, category, item.Key, err)
 		}
+	}
+	return nil
+}
+
+func (s *SysConfigService) runCategoryValidator(ctx context.Context, category string, items []BatchItem) error {
+	validator, ok := s.categoryValidators[category]
+	if !ok {
+		return nil
+	}
+
+	current, err := s.repo.List(ctx, category, false)
+	if err != nil {
+		return fmt.Errorf("list sys_config category %s for validation: %w", category, err)
+	}
+	values := make(map[string]string, len(current)+len(items))
+	for _, item := range current {
+		values[item.Key] = item.Value
+	}
+	for _, item := range items {
+		values[item.Key] = item.Value
+	}
+	if err := validator(values); err != nil {
+		return fmt.Errorf("%w: sys_config %s: %v", commonerrors.ErrInvalidInput, category, err)
 	}
 	return nil
 }

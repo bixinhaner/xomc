@@ -502,6 +502,17 @@ func (s *TaskService) LatestOpenTaskByDeviceAndMethod(ctx context.Context, devic
 	return s.repo.LatestOpenByDeviceMethodDescription(ctx, deviceSN, method, description)
 }
 
+func (s *TaskService) ListOpenTasksByDeviceAndMethods(
+	ctx context.Context,
+	deviceSN string,
+	methods []string,
+) ([]*Task, error) {
+	if s.repo == nil {
+		return nil, nil
+	}
+	return s.repo.ListOpenByDeviceAndMethods(ctx, deviceSN, methods)
+}
+
 func (s *TaskService) LatestCompletedTaskByDeviceAndCommandKey(
 	ctx context.Context,
 	deviceSN, commandKey string,

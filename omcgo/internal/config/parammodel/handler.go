@@ -692,20 +692,23 @@ func (h *Handler) DownloadFile(c *gin.Context) {
 // ── Mappings ────────────────────────────────────────────────────────
 
 type mappingView struct {
-	ID            uuid.UUID `json:"id"`
-	ParamModelID  uuid.UUID `json:"param_model_id"`
-	StandardPath  string    `json:"standard_path"`
-	PrivatePath   string    `json:"private_path"`
-	EntryType     string    `json:"entry_type"`
-	Access        string    `json:"access"`
-	DataType      string    `json:"data_type"`
-	ChangeApplies string    `json:"change_applies"`
-	MinValue      *int64    `json:"min_value,omitempty"`
-	MaxValue      *int64    `json:"max_value,omitempty"`
-	IsStorable    bool      `json:"is_storable"`
-	IsActive      bool      `json:"is_active"`
-	IsSupported   bool      `json:"is_supported"`
-	SoftwareVer   *string   `json:"software_version,omitempty"`
+	ID                uuid.UUID `json:"id"`
+	ParamModelID      uuid.UUID `json:"param_model_id"`
+	StandardPath      string    `json:"standard_path"`
+	PrivatePath       string    `json:"private_path"`
+	EntryType         string    `json:"entry_type"`
+	Access            string    `json:"access"`
+	DataType          string    `json:"data_type"`
+	ChangeApplies     string    `json:"change_applies"`
+	MinValue          *int64    `json:"min_value,omitempty"`
+	MaxValue          *int64    `json:"max_value,omitempty"`
+	EnumValues        *string   `json:"enum_values,omitempty"`
+	EnumLabels        *string   `json:"enum_labels,omitempty"`
+	ValidationPattern *string   `json:"validation_pattern,omitempty"`
+	IsStorable        bool      `json:"is_storable"`
+	IsActive          bool      `json:"is_active"`
+	IsSupported       bool      `json:"is_supported"`
+	SoftwareVer       *string   `json:"software_version,omitempty"`
 	// T-PMSRC: 行级来源("builtin"/"custom")与可删标志(仅 custom 可删),前端据此渲染来源 Tag + 删除按钮。
 	Source    string `json:"source"`
 	Deletable bool   `json:"deletable"`
@@ -720,8 +723,9 @@ func toMappingView(m *ParamMapping) mappingView {
 		ID: m.ID, ParamModelID: m.ParamModelID,
 		StandardPath: m.StandardPath, PrivatePath: m.PrivatePath, EntryType: m.EntryType,
 		Access: m.Access, DataType: m.DataType, ChangeApplies: m.ChangeApplies,
-		MinValue: m.MinValue, MaxValue: m.MaxValue,
-		IsStorable: m.IsStorable, IsActive: m.IsActive, IsSupported: m.IsSupported, SoftwareVer: m.SoftwareVersion,
+		MinValue: m.MinValue, MaxValue: m.MaxValue, EnumValues: m.EnumValues, EnumLabels: m.EnumLabels,
+		ValidationPattern: m.ValidationPattern,
+		IsStorable:        m.IsStorable, IsActive: m.IsActive, IsSupported: m.IsSupported, SoftwareVer: m.SoftwareVersion,
 		Source: source, Deletable: source == "custom",
 	}
 }

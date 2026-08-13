@@ -5,7 +5,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/carrier"
 )
+
+const GeofenceControlContractVersion = 2
 
 type ControlActionType string
 
@@ -25,12 +28,24 @@ const (
 	ControlActionFailed        ControlActionStatus = "failed"
 )
 
+func (status ControlActionStatus) IsTerminal() bool {
+	switch status {
+	case ControlActionVerified, ControlActionPartialFailed, ControlActionFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 // ControlParameterState is the immutable parameter evidence attached to one
 // geofence control action. Paths are stored in the standard model so the
 // record remains stable when a product-private mapping changes.
 type ControlParameterState struct {
-	Path  string `json:"path"`
-	Value string `json:"value"`
+	Path              string                        `json:"path"`
+	ObservedPath      string                        `json:"observed_path,omitempty"`
+	Value             string                        `json:"value"`
+	Role              carrier.GeofenceParameterRole `json:"role,omitempty"`
+	AppliesToAllCells bool                          `json:"applies_to_all_cells,omitempty"`
 }
 
 // ControlAction is the durable ownership boundary between a geofence state
@@ -51,9 +66,14 @@ type ControlAction struct {
 	EffectiveStateVersion     int64                   `json:"effective_state_version"`
 	ActionType                ControlActionType       `json:"action_type"`
 	Status                    ControlActionStatus     `json:"status"`
+	ContractVersion           int                     `json:"contract_version"`
 	BeforeState               []ControlParameterState `json:"before_state"`
 	RequestedState            []ControlParameterState `json:"requested_state"`
+	TerminalState             []ControlParameterState `json:"terminal_state"`
 	VerifiedState             []ControlParameterState `json:"verified_state"`
+	VerificationAttempt       int                     `json:"verification_attempt"`
+	NextVerificationAt        *time.Time              `json:"next_verification_at,omitempty"`
+	VerificationDeadline      *time.Time              `json:"verification_deadline,omitempty"`
 	LastError                 string                  `json:"last_error,omitempty"`
 	CreatedAt                 time.Time               `json:"created_at"`
 	UpdatedAt                 time.Time               `json:"updated_at"`

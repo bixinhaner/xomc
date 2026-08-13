@@ -522,8 +522,11 @@ Idempotency-Key: 105820-UAT-YYYYMMDD-001
 前置：
 
 - 测试设备在线；
-- 已记录 IPSec 和所有可写 RF 实例原值；
-- 产品模型解析到实际存在、可写的参数；
+- 已记录 IPSec、RF、可写 Admin/AdminRF 和所有目标小区只读 OpState 原值；
+- 已记录 `InUse`、`NumOfCells`、产品 `radioModes`、ParamModel `NumOfCells.enumValues` 最大能力及
+  最终目标实例集合；无法确认有效小区时记录回退到产品/模型最大能力的原因；若最大集合缺少任一
+  必要快照证据，记录动作失败而不是缩小目标集；
+- 产品模型解析到实际存在、可写的控制参数及只读运行终态；缺任一角色时 fail closed；
 - 系统与运营商均为 `enforce`；
 - 围栏策略为 `deactivate`。
 
@@ -532,17 +535,19 @@ Idempotency-Key: 105820-UAT-YYYYMMDD-001
 1. 先让设备稳定处于围栏内。
 2. 上报连续越界位置直至 outside 边沿。
 3. 记录 effective state version、事件 ID 和 control action ID。
-4. 检查 SPV 请求参数和值。
-5. 等待 SPV 终态，再检查关联 GPV。
-6. 核对设备参数树最终值、告警和控制动作详情。
-7. 重复上报相同越界状态。
+4. 检查 SPV 请求参数和值，并确认未向已明确 `InUse=false` 或超过合法 `NumOfCells` 的实例下发。
+5. 等待 SPV 终态，再检查 RF、IPSec、Admin/AdminRF 的关联 GPV。
+6. 轮询每个目标小区 OpState，直到全部 inactive 或超过产品终态窗口。
+7. 核对设备参数树、设备列表独立 RF/激活列、告警和控制动作详情。
+8. 重复上报相同越界状态。
 
 预期：
 
 - 动作键为同一设备、状态版本和动作类型的稳定幂等键；
-- IPSec/RF 按已确认产品映射写入关闭值；
-- SPV 后必须 GPV 精确回读一致，才标记 `verified`；
-- 缺值、不可写、超时、部分失败或回读不一致不能标记成功；
+- IPSec、RF、Admin/AdminRF 按已确认产品映射写入关闭值；
+- SPV 后控制参数必须 GPV 精确回读一致，并且所有目标小区 OpState=inactive，才标记 `verified`；
+- 控制值一致但 OpState 尚未 inactive 时保持 `verifying`；终态超时为 `partial_failed/failed`；
+- 缺值、不可写、能力歧义、超时、部分失败或回读不一致不能标记成功；
 - 重复越界不创建第二个逻辑去激活动作。
 
 ### GF-17 回区安全恢复与失败场景
@@ -551,16 +556,18 @@ Idempotency-Key: 105820-UAT-YYYYMMDD-001
 
 1. 对 GF-16 已 verified 的设备上报连续回区位置。
 2. 检查恢复动作只引用最近一条尚未恢复的 verified 去激活动作。
-3. 检查恢复参数只包含本系统实际修改的项。
-4. 验证恢复顺序和关联 GPV 回读。
-5. 分别验证：无 verified 所有权、设备离线、SPV 超时、部分参数失败、GPV 不一致。
-6. 完成后恢复所有设备原值并再次回读。
+3. 检查恢复参数只包含本系统实际修改且 GPV 已验证的项，并与回区时当前有效小区求交集；无法
+   确认时最多恢复原动作拥有的最大实例集合。
+4. 验证 IPSec → RF → Admin/AdminRF 的恢复顺序和关联 GPV 回读。
+5. 若控制前 OpState=active，轮询并验证恢复后 OpState=active。
+6. 分别验证：旧契约 verified、无 verified 所有权、设备离线、SPV 超时、部分参数失败、GPV 不一致、OpState 超时。
+7. 完成后恢复所有设备原值并再次回读。
 
 预期：
 
 - 无本系统 verified 去激活记录时不自动激活；
-- 前置失败不得打开 RF；
-- 成功恢复后参数与测试前记录一致，动作有父子关联；
+- 前置失败不得恢复 Admin/AdminRF；
+- 成功恢复后控制参数与测试前记录一致；原来 active 的小区最终 OpState=active，动作有父子关联；
 - 失败、超时和部分成功保留真实状态，可重试或转人工，不产生影子成功。
 
 ## 10. 审计、权限与可靠性验收
@@ -1446,3 +1453,30 @@ RSA-OAEP 登录流程直接调用 104 的真实 API；所有写操作都限定�
 
 本轮结论：**修复提交重部署后，主设备 RF 去激活和回区恢复均已取得标准路径、私有路径、SPV/GPV、
 UI 五列一致性和告警清理的真实证据；本次 RF 恢复缺陷验收通过。**
+
+### 21.8 Issue #304 语义门禁修订与 2026-08-12 现场补证
+
+21.3、21.6、21.7 的历史结论按当时 GF-16/GF-17 的 RF/IPSec 契约成立，但没有检查只读
+`OpState`，不得继续引用为“真实小区去激活”通过证据。老需求文字写“去激活 IPSec 和射频”及
+“下发激活/去激活 TR-069 指令”，但旧 `FenceClient/FenceController` 加密，189 也没有实际控制路径
+和终态证据，因此不能证明新实现与老系统真实运行终态一致。
+
+Issue #304 的 251 BLQ 现场形成反例：`X_COM_RadioEnable=false` 与 `FAPControl.LTE.OpState=true`
+可同时存在，基站本机显示“射频关、已激活”，OMC 列表又因陈旧标准 RF 别名显示“射频开”。由此确认：
+
+1. RF/IPSec-only 动作门禁属于设计和验收语义缺口，不是单一 BLQ 固件问题；
+2. 新契约必须验证可写 Admin/AdminRF、RF、IPSec 和只读 OpState；
+3. RF 与 OpState 必须独立投影；标准/私有 RF 别名按观测时间归一，最新私有 false 不得被陈旧标准
+   true 覆盖；
+4. 历史动作默认 `contract_version=1`，不追认为真实去激活，也不作为新契约自动恢复所有权。
+
+同日 452 产品在 251 测试服务器补证：SN `120200055922C8B0068`（仓库设备清单归类为 MLN）在
+17:48:01 对三个 FAPService 实例下发私有 `CellConfig.LTE.RAN.RF.AdminCellState=0`，随后设备列表
+显示“未激活、射频关”。该证据证明 MLN/452 产品的 `AdminCellState` 可以作为 `AdminRF` 组合控制，
+而不是要求每种产品物理上都存在两个不同参数；证据不得外推到 BLN、BM 或仅有同名路径的产品。
+但正式 GF-16 签署仍必须补齐该动作的 GPV、目标有效小区 OpState=0、IPSec 和动作终态；历史
+SPV 中出现三个实例不能替代 `InUse/NumOfCells` 有效范围证据。
+
+产品能力矩阵和新状态机详见
+`docs/superpowers/specs/2026-08-12-geofence-cell-deactivation-capabilities.md`。从本节起，GF-16/GF-17
+只按新门禁签署。

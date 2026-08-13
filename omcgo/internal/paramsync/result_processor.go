@@ -136,12 +136,13 @@ func (p *PGResultProcessor) Process(ctx context.Context, result event.ParamSyncT
 			return ResultProcessOutcome{}, err
 		}
 		values = append(values, recoveredValues...)
-		if run.SyncScope.IsFull() {
-			if err := writeStagingValues(ctx, tx, run, result.TaskID, values, p.now()); err != nil {
+		if err := writeStagingValues(ctx, tx, run, result.TaskID, values, p.now()); err != nil {
+			return ResultProcessOutcome{}, err
+		}
+		if !run.SyncScope.IsFull() {
+			if err := upsertOfficialValues(ctx, tx, run.DeviceID, values, p.now()); err != nil {
 				return ResultProcessOutcome{}, err
 			}
-		} else if err := upsertOfficialValues(ctx, tx, run.DeviceID, values, p.now()); err != nil {
-			return ResultProcessOutcome{}, err
 		}
 	}
 
@@ -900,6 +901,19 @@ WHERE ` + deviceParameterUnchangedGuard
 				return fmt.Errorf("reconcile full parameter sync: %w", err)
 			}
 		}
+	} else if run.SyncScope == SyncScopePartial {
+		if err := device.AcquireParameterWriteLocks(ctx, tx, run.DeviceID); err != nil {
+			return err
+		}
+		query, args, ok, err := buildPartialSyncReconcileDelete(run.DeviceID, run.ID, run.StartedAt, run.Coverage)
+		if err != nil {
+			return err
+		}
+		if ok {
+			if _, err := tx.Exec(ctx, query, args...); err != nil {
+				return fmt.Errorf("reconcile partial parameter object sync: %w", err)
+			}
+		}
 	}
 	deviceUpdate, deviceArgs, err := storage.Psql.Update("devices").Set("last_param_sync_at", now).
 		Set("last_param_sync_failed_at", nil).Set("last_param_sync_error", nil).
@@ -927,6 +941,40 @@ WHERE ` + deviceParameterUnchangedGuard
 		return fmt.Errorf("clean parameter sync staging: %w", err)
 	}
 	return nil
+}
+
+func buildPartialSyncReconcileDelete(deviceID, runID uuid.UUID, runStartedAt time.Time, coverage []CoverageScope) (string, []any, bool, error) {
+	completeObjects := make([]CoverageScope, 0)
+	for _, scope := range coverage {
+		if scope.Complete && scope.Subtree && strings.TrimSpace(scope.Path) != "" {
+			completeObjects = append(completeObjects, scope)
+		}
+	}
+	if len(completeObjects) == 0 {
+		return "", nil, false, nil
+	}
+	patterns := make([]string, 0, len(completeObjects))
+	for _, scope := range completeObjects {
+		// An explicit object-prefix GPV is authoritative for the whole object,
+		// including vendor-extension leaves not present in the current mapping.
+		patterns = append(patterns, escapeLikePattern(scope.Path)+"%")
+	}
+	query, args, err := storage.Psql.Delete("device_parameters").
+		Where(sq.Eq{"device_id": deviceID}).
+		Where("parameter_path LIKE ANY(?::text[])", patterns).
+		Where(sq.LtOrEq{"last_updated_at": runStartedAt}).
+		Where("NOT EXISTS (SELECT 1 FROM parameter_sync_staging_values s WHERE s.run_id = ? AND s.parameter_path = device_parameters.parameter_path)", runID).
+		ToSql()
+	if err != nil {
+		return "", nil, false, fmt.Errorf("build reconcile partial parameter object sync: %w", err)
+	}
+	return query, args, true, nil
+}
+
+func escapeLikePattern(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `%`, `\%`)
+	return strings.ReplaceAll(value, `_`, `\_`)
 }
 
 func buildFullSyncReconcileDelete(deviceID, runID uuid.UUID, coverage []CoverageScope) (string, []any, bool, error) {

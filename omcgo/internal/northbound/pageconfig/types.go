@@ -481,6 +481,12 @@ type ReplaceAPIUsersRequest struct {
 	Items []APIUser `json:"items"`
 }
 
+type UpdateAPIUserRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password,omitempty"`
+	Enabled  *bool  `json:"enabled,omitempty"`
+}
+
 type APIUserLoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -535,6 +541,45 @@ type EventListResult struct {
 	Total  int               `json:"total"`
 	Limit  int               `json:"limit"`
 	Offset int               `json:"offset"`
+}
+
+type APIInvocationLog struct {
+	ID            string    `json:"id"`
+	APIKey        string    `json:"api_key"`
+	Name          string    `json:"name"`
+	Method        string    `json:"method"`
+	Path          string    `json:"path"`
+	RequestParams string    `json:"request_params"`
+	ResponseBody  string    `json:"response_body"`
+	StatusCode    int       `json:"status_code"`
+	Status        string    `json:"status"`
+	CreateUser    string    `json:"create_user"`
+	IPAddress     string    `json:"ip_address"`
+	DurationMs    int64     `json:"duration_ms"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type APIInvocationLogFilter struct {
+	APIKey     string
+	Name       string
+	Method     string
+	Path       string
+	Status     string
+	CreateUser string
+	IPAddress  string
+	Keyword    string
+	StartTime  string
+	EndTime    string
+	Limit      int
+	Offset     int
+}
+
+type APIInvocationLogListResult struct {
+	Items  []APIInvocationLog `json:"items"`
+	Total  int                `json:"total"`
+	Limit  int                `json:"limit"`
+	Offset int                `json:"offset"`
 }
 
 type DeliveryConnectionResult struct {

@@ -441,6 +441,12 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	if err := geofenceControlMonitor.Subscribe(w.EventBus); err != nil {
 		return fmt.Errorf("subscribe geofence control monitor: %w", err)
 	} else {
+		verificationCtx, cancelVerification := context.WithCancel(context.Background())
+		w.GS.Register("geofence-control-verifier", 1, func(context.Context) error {
+			cancelVerification()
+			return nil
+		})
+		go geofenceControlMonitor.RunVerificationLoop(verificationCtx, 5*time.Second)
 		logger.Info("geofence control monitor started")
 	}
 
@@ -637,19 +643,22 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 		w.EventBus, logger,
 	)
 	// 从 sys_configs 读取 ACS 传输配置（界面「系统管理 → ACS 传输」可配置，运行时生效）。
-	// YAML 不再提供默认值，配置全部源自 DB。
+	// 全新部署的 seed 只落协议开关和 HTTPS 字段；HTTP 地址沿用启动配置作为兜底，避免
+	// 未填写页面时 PM 首次自动下发拿不到默认 upload base。
 	sysConfigRepo := admin.NewPgSysConfigRepository(w.PgPool)
-	backupTransferPolicy := transfercfg.NewPolicy(
-		transfercfg.Snapshot{},
-		func(ctx context.Context, category, key string) (string, bool) {
-			cfg, err := sysConfigRepo.GetByKey(ctx, category, key)
-			if err != nil || cfg == nil {
-				return "", false
-			}
-			return cfg.Value, true
-		},
+	transferPolicy := transfercfg.NewPolicy(
+		newWorkerTransferDefaults(cfg.PM),
+		newTransferSysConfigLookup(sysConfigRepo),
 	)
-	backupExecutor.SetTransferProvider(backupTransferPolicy)
+	// SYS is a WorkQueue stream and ACS owns the existing sys.config.saved
+	// consumer. Worker policies therefore use the bounded Policy TTL instead of
+	// registering a competing filtered consumer.
+	backupExecutor.SetTransferProvider(transferPolicy)
+	transferParamRepo := device.NewPgDeviceParameterRepository(w.PgPool)
+	backupExecutor.SetUploadAddressResolver(newTransferAddressResolver(
+		transferPolicy,
+		transferParamRepo,
+	))
 	// T-0073 Phase 1: opt-in backup-failure alarm publish via PolicyService.
 	// Worker shares the same backup_policies table as app; reads policy on each
 	// failure to honour latest AlertOnFailure flag.
@@ -749,46 +758,47 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	}
 	logger.Info("backup transfer-complete router started (active restore verification: downloaded→verify; no device verifier wired → stays downloaded)")
 
-	// PM 设备上线自动下发 PM 上传配置（KPI 上报参数整理.md 三参数）
-	// 仅在 cfg.PM.AutoSetupOnOnline=true 时启用；test 环境默认关闭防止干扰压测
+	pmOnlineSub := pm.NewOnlineSubscriber(
+		w.TaskService,
+		cfg.PM.UploadURLTemplate,
+		cfg.PM.EnableValue,
+		cfg.PM.PeriodicUploadInterval,
+		logger,
+	)
+	pmOnlineSub.SetAdmissionGate(pm.NewRedisPMSetupAdmissionGate(w.Redis, 0))
+	pmParameterRepo := transferParamRepo
+	pmOnlineSub.SetUploadAddressResolver(newTransferAddressResolver(
+		transferPolicy,
+		pmParameterRepo,
+	))
+	pmOnlineSub.SetParamSyncPMCompensationReaders(pmDeviceRepo, pmParameterRepo)
+
+	// PM 设备上线自动下发 PM 上传配置（KPI 上报参数整理.md 三参数）。
+	// device.online/device.registered 仅在 cfg.PM.AutoSetupOnOnline=true 时启用；
+	// 参数同步后的 HTTPS 补偿不受该开关影响，避免首次未知能力下发 HTTP 后无法收敛。
 	if cfg.PM.AutoSetupOnOnline {
 		// 启动期一次性校验 PM 上传 URL 模板的 host：渲染后 host 为空（如生产 .env
 		// 漏配 OMC_PUBLIC_HOST，模板渲染成 "http://:7557/..."）则醒目 Error 告警，
-		// 把运维漏配从「设备上线时静默跳过下发」前移到「部署即可见」。不 fail-fast：
-		// worker 还跑 PM 解析/聚合等关键流程，单个配置项不应阻断整个 worker；
-		// 真正下发时 OnlineSubscriber.handle 仍有 per-event host 守卫兜底。
+		// 把运维漏配从「设备上线时才发现」前移到「部署即可见」。不 fail-fast：
+		// worker 还跑 PM 解析/聚合等关键流程，单个配置项不应阻断整个 worker。
+		// 真正下发优先使用统一 transfercfg.AddressResolver 决策的 base URL。
 		if rendered, verr := pm.ValidateUploadURLTemplate(cfg.PM.UploadURLTemplate); verr != nil {
-			logger.Error("PM upload URL template invalid; auto-SPV will be skipped until fixed (check OMC_PUBLIC_HOST)",
+			logger.Error("PM upload URL template invalid; unified transfer base URL will be used when available (check OMC_PUBLIC_HOST fallback)",
 				zap.String("url_template", cfg.PM.UploadURLTemplate),
 				zap.String("rendered", rendered),
 				zap.Error(verr))
 		}
-		pmOnlineSub := pm.NewOnlineSubscriber(
-			w.TaskService,
-			cfg.PM.UploadURLTemplate,
-			cfg.PM.EnableValue,
-			cfg.PM.PeriodicUploadInterval,
-			logger,
-		)
-		pmOnlineSub.SetAdmissionGate(pm.NewRedisPMSetupAdmissionGate(w.Redis, 0))
-		// PM 上传 URL 基址与「系统配置→ACS 传输」同源：运行时读 sys_configs
-		// acs_transfer.uploadBaseURL，非空则覆盖 ${OMC_PUBLIC_HOST} 模板的 host
-		// （修「URL 渲染成 localhost 不可达」+ 统一真值源，改 IP 即时生效无需重建）。
-		pmUploadSysCfg := admin.NewPgSysConfigRepository(w.PgPool)
-		pmOnlineSub.SetUploadBaseURLResolver(func(ctx context.Context) string {
-			row, gerr := pmUploadSysCfg.GetByKey(ctx, "acs_transfer", "uploadBaseURL")
-			if gerr != nil || row == nil {
-				return ""
-			}
-			return row.Value
-		})
 		if err := pmOnlineSub.Subscribe(w.EventBus); err != nil {
 			logger.Warn("subscribe pm online subscriber failed", zap.Error(err))
 		} else {
 			logger.Info("pm online subscriber started (auto SPV on device.registered/online)")
 		}
 	} else {
-		logger.Info("pm online subscriber disabled (cfg.pm.auto_setup_on_online=false)")
+		if err := pmOnlineSub.SubscribeParamSyncCompleted(w.EventBus); err != nil {
+			logger.Warn("subscribe pm param sync HTTPS compensation failed", zap.Error(err))
+		} else {
+			logger.Info("pm online subscriber disabled (cfg.pm.auto_setup_on_online=false); param sync HTTPS compensation enabled")
+		}
 	}
 
 	// T-0164-P5 / G5 + T-0164-P8 / G8：PM 自然桶聚合 + asyncjob 框架接入。

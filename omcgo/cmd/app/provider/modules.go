@@ -10,7 +10,9 @@ import (
 	"strconv"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
@@ -32,6 +34,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/dashboard"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/eventlog"
@@ -70,6 +73,41 @@ import (
 	"github.com/omcgo/omcgo/internal/ufte"
 )
 
+type startupOnlineDeviceLister struct{ pool *pgxpool.Pool }
+
+func (l startupOnlineDeviceLister) ListOnlineDevices(ctx context.Context, afterID uuid.UUID, pageSize int) ([]*model.Device, error) {
+	queryBuilder := storage.Psql.Select("id", "serial_number").
+		From("devices").
+		Where("deleted_at IS NULL").
+		Where(sq.Eq{"is_online": true}).
+		OrderBy("id").
+		Limit(uint64(pageSize))
+	if afterID != uuid.Nil {
+		queryBuilder = queryBuilder.Where(sq.Gt{"id": afterID})
+	}
+	query, args, err := queryBuilder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build online device startup page query: %w", err)
+	}
+	rows, err := l.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query online device startup page: %w", err)
+	}
+	defer rows.Close()
+	devices := make([]*model.Device, 0, pageSize)
+	for rows.Next() {
+		dev := &model.Device{}
+		if err := rows.Scan(&dev.ID, &dev.SerialNumber); err != nil {
+			return nil, fmt.Errorf("scan online device startup page: %w", err)
+		}
+		devices = append(devices, dev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate online device startup page: %w", err)
+	}
+	return devices, nil
+}
+
 // initMRModule 初始化 F05 测量报告模块。
 func initMRModule(c *Container) error {
 	logger := c.Logger.Named("mr")
@@ -106,34 +144,6 @@ func initMRTaskModule(c *Container) error {
 	logger := c.Logger.Named("mr-task")
 
 	mrCfg := c.Cfg.MR.Defaults()
-	// mr.url_base 为空时回退到 sys_configs.acs_transfer.uploadBaseURL（运行时配置，
-	// 跟 FAULT_LOG_COLLECT / CONFIG_RESTORE 等其它 ACS 上传链路共用同一个真值源）。
-	// YAML 里的 acs_upload_base_url 是 deploy-time 兜底，sys_configs 表才是
-	// "系统管理 → ACS 传输"页面修改后的真实运行时值。
-	// 原 dispatcher 在 base="" 时直接下发相对 path `/smallcell/...`，设备拿到
-	// 拒收 / 拼错 host → MR 文件 0 上传，progress 推到 openSuccess 但 health 永远 abnormal。
-	if mrCfg.URLBase == "" {
-		sysCfg := admin.NewPgSysConfigRepository(c.PgPool)
-		mrPolicy := transfercfg.NewPolicy(transfercfg.Snapshot{},
-			func(ctx context.Context, category, key string) (string, bool) {
-				row, err := sysCfg.GetByKey(ctx, category, key)
-				if err != nil || row == nil {
-					return "", false
-				}
-				return row.Value, true
-			})
-		if snap := mrPolicy.Snapshot(context.Background()); snap.Upload.BaseURL != "" {
-			mrCfg.URLBase = snap.Upload.BaseURL
-			logger.Info("mr.url_base empty; resolved via sys_configs.acs_transfer.uploadBaseURL",
-				zap.String("base", mrCfg.URLBase))
-		} else if c.Cfg.Upgrade.ACSUploadBaseURL != "" {
-			mrCfg.URLBase = c.Cfg.Upgrade.ACSUploadBaseURL
-			logger.Info("mr.url_base empty; sys_configs empty too, fell back to YAML acs_upload_base_url",
-				zap.String("base", mrCfg.URLBase))
-		} else {
-			logger.Warn("mr.url_base empty AND no fallback found; MrUrl will be path-only and devices will reject")
-		}
-	}
 	taskRepo := mrtask.NewPgRepository(c.PgPool)
 	// Prometheus 指标（4 + 2 共 6 个）；c.MetricsReg 为 nil 时所有 IncXxx 退化为 no-op。
 	metrics := mrtask.NewMetrics(c.MetricsReg)
@@ -148,6 +158,22 @@ func initMRTaskModule(c *Container) error {
 		logger,
 	)
 	dispatcher.SetMetrics(metrics)
+	mrSysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
+	mrTransferPolicy := transfercfg.NewPolicy(
+		newMRTransferDefaults(c.Cfg.Upgrade),
+		newTransferSysConfigLookup(mrSysConfigRepo),
+	)
+	mrParamRepo := c.ParamRepo
+	if mrParamRepo == nil {
+		mrParamRepo = device.NewPgDeviceParameterRepository(c.PgPool)
+	}
+	dispatcher.SetUploadAddressResolver(newTransferAddressResolver(
+		mrTransferPolicy,
+		mrParamRepo,
+	))
+	if c.SysConfigSvc != nil {
+		registerTransferPolicyInvalidation(c.SysConfigSvc, mrTransferPolicy)
+	}
 	// 平台判断走"productClass → ProductRegistry → param_model.name → 允许列表"。
 	// c.ParamModelRepo 由 paramregistry 模块初始化（PgRepository）。
 	dispatcher.SetPlatformResolver(NewMRPlatformResolver(c.ProductRegistry, c.ParamModelRepo, logger))
@@ -311,21 +337,30 @@ func initSoftwareModule(c *Container) error {
 		softwareService.SetUploadConfig(c.Cfg.Upgrade.ACSUploadBaseURL)
 	}
 	// 注入运行时 ACS 传输配置：从 sys_config 'acs_transfer' 类别读 BaseURL / Username /
-	// Password / Path。前端"系统管理 → ACS 传输"页面修改后 30 秒内自动生效，
-	// 优先级高于 YAML 静态兜底。worker 进程 / acs 进程也各自起一份 Policy（详见
+	// Password / Path。前端"系统管理 → ACS 传输"页面保存后通过 SavedHook 立即
+	// 失效本进程缓存，优先级高于 YAML 静态兜底。worker 进程 / acs 进程也各自起一份 Policy（详见
 	// cmd/worker/main.go / cmd/acs/main.go），共享同一张 sys_configs 表。
 	softwareSysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
 	softwareTransferPolicy := transfercfg.NewPolicy(
-		transfercfg.Snapshot{},
-		func(ctx context.Context, category, key string) (string, bool) {
-			row, err := softwareSysConfigRepo.GetByKey(ctx, category, key)
-			if err != nil || row == nil {
-				return "", false
-			}
-			return row.Value, true
-		},
+		newSoftwareTransferDefaults(c.Cfg.Upgrade),
+		newTransferSysConfigLookup(softwareSysConfigRepo),
 	)
 	softwareService.SetTransferProvider(softwareTransferPolicy)
+	softwareParamRepo := c.ParamRepo
+	if softwareParamRepo == nil {
+		softwareParamRepo = device.NewPgDeviceParameterRepository(c.PgPool)
+	}
+	softwareService.SetUploadAddressResolver(newTransferAddressResolver(
+		softwareTransferPolicy,
+		softwareParamRepo,
+	))
+	softwareService.SetDownloadAddressResolver(newTransferAddressResolver(
+		softwareTransferPolicy,
+		softwareParamRepo,
+	))
+	if c.SysConfigSvc != nil {
+		registerTransferPolicyInvalidation(c.SysConfigSvc, softwareTransferPolicy)
+	}
 
 	// Canary monitor + metrics (T-0018 / R-101)
 	canaryMetrics := software.NewCanaryMetrics(c.MetricsReg)
@@ -442,14 +477,11 @@ func initUFTEModule(c *Container) error {
 	ufteSysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
 	ufteTransferPolicy := transfercfg.NewPolicy(
 		transfercfg.Snapshot{},
-		func(ctx context.Context, category, key string) (string, bool) {
-			row, err := ufteSysConfigRepo.GetByKey(ctx, category, key)
-			if err != nil || row == nil {
-				return "", false
-			}
-			return row.Value, true
-		},
+		newTransferSysConfigLookup(ufteSysConfigRepo),
 	)
+	if c.SysConfigSvc != nil {
+		registerTransferPolicyInvalidation(c.SysConfigSvc, ufteTransferPolicy)
+	}
 	service.SetDownloadURLLookup(func(ctx context.Context, sn, fileName string) (string, error) {
 		if minioClient == nil || sn == "" || fileName == "" {
 			return "", nil
@@ -656,7 +688,6 @@ func initProvisionModule(c *Container) error {
 		c.Carriers, c.TaskSvc, c.EventBus, c.Cfg.Provision, logger,
 	)
 	provisionEngine.SetDeduper(c.Deduper)
-	provisionEngine.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
 	provisionEngine.SetActivationStateReader(c.DeviceInfoRepo)
 	provisionEngine.SetActivationStateRefresher(device.NewInfoSyncer(
 		c.DeviceInfoRepo,
@@ -700,6 +731,23 @@ func initProvisionModule(c *Container) error {
 		logger.Info("model upload service enabled",
 			zap.String("upload_url", c.Cfg.Provision.ModelUpload.UploadURL))
 	}
+	// Durable parameter sync is the only manual/license data path. Its wiring is
+	// independent of the periodic AutoSync policy switch.
+	if c.DeviceService != nil && c.miscDeps.paramSyncStarter != nil {
+		c.DeviceService.SetParamSyncManualOfflineMode(c.Cfg.ParamSync.ManualOfflineMode)
+		c.DeviceService.SetParamSyncStarter(c.miscDeps.paramSyncStarter)
+	}
+	if c.DeviceRepo != nil && c.ParamRepo != nil &&
+		c.ProductRegistry != nil && c.ParamRegistry != nil &&
+		c.miscDeps.paramSyncStarter != nil {
+		licenseParamSvc := device.NewLicenseParamService(
+			c.DeviceRepo, c.ParamRepo,
+			c.ProductRegistry, c.ParamRegistry,
+			c.miscDeps.paramSyncStarter, c.Redis, logger,
+		)
+		c.miscDeps.licenseParamHandler = device.NewLicenseParamHandler(licenseParamSvc, logger)
+		logger.Info("device license params handler initialized")
+	}
 	var periodicSyncStarter provision.PathBSyncStarter
 	if c.Cfg.Provision.AutoSync.Enabled {
 		planStore := provision.NewSyncPlanStore(c.Redis)
@@ -735,41 +783,35 @@ func initProvisionModule(c *Container) error {
 			syncSvc.SetDurableStarter(c.miscDeps.paramSyncStarter)
 		}
 		provisionEngine.SetSyncService(syncSvc)
-		// T-0126: 注入 ParamSyncStarter 让手动同步先走 durable parameter_sync_*。
-		// 旧 sync-gpv Path B 仅作为临时兜底，待 param_sync_running 稳定后删除。
-		if c.DeviceService != nil {
-			c.DeviceService.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
-			c.DeviceService.SetParamSyncManualOfflineMode(c.Cfg.ParamSync.ManualOfflineMode)
-			if c.miscDeps.paramSyncStarter != nil {
-				c.miscDeps.paramSyncStarter.SetLegacy(syncSvc)
-				c.DeviceService.SetParamSyncStarter(c.miscDeps.paramSyncStarter)
-			} else {
-				c.DeviceService.SetParamSyncStarter(syncSvc)
-			}
-		}
 		logger.Info("auto-sync service enabled")
-
-		// License Params Tab 后端装配（DeviceDetail "License 参数" tab）。
-		// 刷新直接提交到 durable paramsync 数据面，不经过 provision.SyncService
-		// 或旧 Path B 调度器。
-		if c.DeviceRepo != nil && c.ParamRepo != nil &&
-			c.ProductRegistry != nil && c.ParamRegistry != nil &&
-			c.miscDeps.paramSyncStarter != nil {
-			licenseParamSvc := device.NewLicenseParamService(
-				c.DeviceRepo, c.ParamRepo,
-				c.ProductRegistry, c.ParamRegistry,
-				c.miscDeps.paramSyncStarter, c.Redis, logger,
-			)
-			c.miscDeps.licenseParamHandler = device.NewLicenseParamHandler(licenseParamSvc, logger)
-			logger.Info("device license params handler initialized")
-		}
-
 	}
 
 	releaseCampaignID, hasReleaseIdentity := buildinfo.ReleaseCampaignID()
-	releaseSyncReady := hasReleaseIdentity &&
-		c.miscDeps.paramSyncStarter != nil &&
-		c.Cfg.ParamSync.RoutingMode == "durable"
+	if c.DeviceRepo != nil && c.miscDeps.paramSyncStarter != nil {
+		startupLeader := provision.NewPGAdvisoryLeaderElector(c.PgPool, "startup_param_syncer", logger)
+		startupSyncer := provision.NewStartupSyncer(
+			startupOnlineDeviceLister{pool: c.PgPool},
+			c.miscDeps.paramSyncStarter,
+			startupLeader,
+			200,
+			logger,
+		)
+		startupSyncCtx, cancelStartupSync := context.WithCancel(context.Background())
+		if c.GS != nil {
+			c.GS.Register("startup-param-sync", 1, func(context.Context) error {
+				cancelStartupSync()
+				return nil
+			})
+		}
+		go func() {
+			defer cancelStartupSync()
+			if err := startupSyncer.Run(startupSyncCtx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("OMC redeploy full parameter sync exited with error", zap.Error(err))
+			}
+		}()
+		logger.Info("OMC redeploy full parameter sync scheduled for all online devices")
+	}
+	releaseSyncReady := hasReleaseIdentity && c.miscDeps.paramSyncStarter != nil
 	if periodicSyncStarter != nil || releaseSyncReady {
 		// T-0124 周期同步与 Issue #148 发布同步共用同一个 scheduler、
 		// PG leader、批次、并发和 stagger 参数。
@@ -796,7 +838,6 @@ func initProvisionModule(c *Container) error {
 			c.DeviceRepo, periodicSyncStarter, leader,
 			periodicSyncPolicy, logger,
 		)
-		periodicSyncer.SetParamSyncRoutingMode(c.Cfg.ParamSync.RoutingMode)
 		if releaseSyncReady {
 			periodicSyncer.SetReleaseSync(
 				paramsync.NewPGRepository(c.PgPool),
@@ -965,6 +1006,23 @@ func initBackupModule(c *Container) error {
 	restoreService := backup.NewRestoreService(
 		restoreRepo, c.DeviceRepo, c.TaskSvc, c.MinIO, restoreMetrics, logger,
 	)
+	restoreSysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
+	restoreTransferPolicy := transfercfg.NewPolicy(
+		newSoftwareTransferDefaults(c.Cfg.Upgrade),
+		newTransferSysConfigLookup(restoreSysConfigRepo),
+	)
+	restoreParamRepo := c.ParamRepo
+	if restoreParamRepo == nil {
+		restoreParamRepo = device.NewPgDeviceParameterRepository(c.PgPool)
+	}
+	restoreService.SetTransferProvider(restoreTransferPolicy)
+	restoreService.SetDownloadAddressResolver(newTransferAddressResolver(
+		restoreTransferPolicy,
+		restoreParamRepo,
+	))
+	if c.SysConfigSvc != nil {
+		registerTransferPolicyInvalidation(c.SysConfigSvc, restoreTransferPolicy)
+	}
 	// 配置文件恢复在下发时读 MinIO 文件流现算 Download MD5（Download 报文必填字段）。
 	restoreService.SetObjectReader(backup.NewMinIOObjectReader(c.MinIO))
 	// #70 task 3：跨版本检查（快照来源版本 vs 目标设备当前固件版本）。默认 warn+audit
@@ -1070,6 +1128,11 @@ func initBackupModule(c *Container) error {
 		licenseRepo, c.MinIO, c.DeviceRepo,
 		c.miscDeps.taskSvc, backup.LicenseBucketDefault, logger,
 	)
+	licenseService.SetTransferProvider(restoreTransferPolicy)
+	licenseService.SetDownloadAddressResolver(newTransferAddressResolver(
+		restoreTransferPolicy,
+		device.NewPgDeviceParameterRepository(c.PgPool),
+	))
 	licenseService.SetStorageAdmission(c.StorageProtection)
 	backupHandler.SetLicenseService(licenseService)
 	licensePreinstallSubscriber := backup.NewLicensePreinstallSubscriber(licenseService, logger)

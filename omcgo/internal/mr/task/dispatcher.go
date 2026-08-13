@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -22,16 +23,16 @@ import (
 // {i} 在调用时按设备的 MRMgmt.Config 实例号替换，无对应实例时默认 1（设备
 // 首次开启 MR 时该路径必然只有 1 个实例）。
 const (
-	paramMrEnable             = "Device.FAP.MRMgmt.Config.{i}.MrEnable"
-	paramVendor               = "Device.FAP.MRMgmt.Config.{i}.Vendor"
-	paramOmcName              = "Device.FAP.MRMgmt.Config.{i}.OmcName"
-	paramMrURL                = "Device.FAP.MRMgmt.Config.{i}.MrUrl"
-	paramPeriodicReport       = "Device.FAP.MRMgmt.Config.{i}.PeriodicReportInterval"
-	paramUploadPeriod         = "Device.FAP.MRMgmt.Config.{i}.UploadPeriod"
-	defaultMRMgmtInstanceIdx  = 1
-	methodSetParameterValues  = "SetParameterValues"
-	commandKeyOpenPrefix      = "mr-open-"
-	commandKeyClosePrefix     = "mr-close-"
+	paramMrEnable            = "Device.FAP.MRMgmt.Config.{i}.MrEnable"
+	paramVendor              = "Device.FAP.MRMgmt.Config.{i}.Vendor"
+	paramOmcName             = "Device.FAP.MRMgmt.Config.{i}.OmcName"
+	paramMrURL               = "Device.FAP.MRMgmt.Config.{i}.MrUrl"
+	paramPeriodicReport      = "Device.FAP.MRMgmt.Config.{i}.PeriodicReportInterval"
+	paramUploadPeriod        = "Device.FAP.MRMgmt.Config.{i}.UploadPeriod"
+	defaultMRMgmtInstanceIdx = 1
+	methodSetParameterValues = "SetParameterValues"
+	commandKeyOpenPrefix     = "mr-open-"
+	commandKeyClosePrefix    = "mr-close-"
 )
 
 // DeviceContext 抽象"设备 SN → *model.Device"查询，由 internal/device.DeviceRepository
@@ -52,6 +53,10 @@ type TranslatorResolver interface {
 	ResolveForDevice(ctx context.Context, dev *model.Device) (*parammodel.Translator, bool)
 }
 
+type uploadAddressResolver interface {
+	Resolve(ctx context.Context, deviceID uuid.UUID, direction transfercfg.TransferDirection) (transfercfg.AddressDecision, error)
+}
+
 // Dispatcher 负责把"开启/关闭 MR"动作转换成实际下发的 SPV task。
 // 它与 scheduler 的关系：scheduler 决定"何时"、对"哪些 cell"动手；
 // dispatcher 负责"怎么拼参数"和"如何派发"。
@@ -69,6 +74,8 @@ type Dispatcher struct {
 	repo      Repository
 	logger    *zap.Logger
 	metrics   *Metrics // 可 nil；nil-safe 调用方法
+
+	uploadResolver uploadAddressResolver
 }
 
 // SetMetrics 注入 Prometheus 指标（可选，nil 表示禁用）。
@@ -77,6 +84,9 @@ func (d *Dispatcher) SetMetrics(m *Metrics) { d.metrics = m }
 // SetPlatformResolver 注入平台解析器（productClass → param_model.name 链路）。
 // 不注入则所有设备都按 unsupport 处理（防呆：避免漏配 ProductRegistry 时静默乱发）。
 func (d *Dispatcher) SetPlatformResolver(p PlatformResolver) { d.platforms = p }
+
+// SetUploadAddressResolver 注入统一 ACS 传输地址策略。
+func (d *Dispatcher) SetUploadAddressResolver(r uploadAddressResolver) { d.uploadResolver = r }
 
 // NewDispatcher 创建 dispatcher 实例。
 //   - cfg：MR yaml 配置，经 Defaults() 兜底
@@ -153,7 +163,12 @@ func (d *Dispatcher) Open(ctx context.Context, task *Task, cell Progress) error 
 	// 解析 Translator：失败 / 字典未收录 → 降级（dispatcher 仍下发 standardPath）。
 	// 与 internal/provision/orchestrator.go BuildProvisioningStepsTranslated 行为一致。
 	translator := d.resolveTranslator(ctx, dev)
-	values := d.buildOpenParameters(task, cell, translator)
+	values, transferDecision, err := d.buildOpenParameters(ctx, task, cell, dev, translator)
+	if err != nil {
+		_ = d.repo.UpdateProgressDispatch(ctx, task.TaskID, cell.SmallCellCode, ProgressOpenFailure, strPtr("invalid_mr_upload_url"))
+		d.metrics.IncDispatched("open", "invalid_url")
+		return fmt.Errorf("build MR open SPV parameters for %s: %w", cell.SerialNumber, err)
+	}
 	cmdKey := commandKeyOpenPrefix + shortID(task.TaskID) + "-" + cell.SmallCellCode
 
 	if err := d.enqueueSPV(ctx, cell.SerialNumber, values, cmdKey, task.TaskID); err != nil {
@@ -169,6 +184,9 @@ func (d *Dispatcher) Open(ctx context.Context, task *Task, cell Progress) error 
 		zap.String("sn", cell.SerialNumber),
 		zap.String("command_key", cmdKey),
 		zap.Bool("translator", translator != nil),
+		zap.String("transfer_protocol", string(transferDecision.Protocol)),
+		zap.String("transfer_reason", string(transferDecision.Reason)),
+		zap.String("https_capability", string(transferDecision.Capability)),
 	)
 	return nil
 }
@@ -231,17 +249,27 @@ type spvValue struct {
 // buildOpenParameters 构造开启 SPV 的 6 个参数。
 // path 命名严格按文档 §4 / §5 报文示例（standardPath），经 translatePath
 // 翻译为 privatePath 后塞入 SPV。
-func (d *Dispatcher) buildOpenParameters(task *Task, cell Progress, translator *parammodel.Translator) []spvValue {
+func (d *Dispatcher) buildOpenParameters(
+	ctx context.Context,
+	task *Task,
+	cell Progress,
+	dev *model.Device,
+	translator *parammodel.Translator,
+) ([]spvValue, transfercfg.AddressDecision, error) {
 	uploadPeriodSec, _ := UploadPeriodSeconds(task.ReportPeriod) // service 已校验过合法
+	mrURL, transferDecision, err := d.buildMrURL(ctx, dev.ID, cell.SmallCellCode)
+	if err != nil {
+		return nil, transfercfg.AddressDecision{}, err
+	}
 
 	return []spvValue{
 		{Name: d.translatePath(paramMrEnable, translator), Value: "true", Type: "xsd:string"},
 		{Name: d.translatePath(paramVendor, translator), Value: d.cfg.Vendor, Type: "xsd:string"},
 		{Name: d.translatePath(paramOmcName, translator), Value: d.cfg.OmcName, Type: "xsd:string"},
-		{Name: d.translatePath(paramMrURL, translator), Value: d.buildMrURL(cell.SmallCellCode), Type: "xsd:string"},
+		{Name: d.translatePath(paramMrURL, translator), Value: mrURL, Type: "xsd:string"},
 		{Name: d.translatePath(paramPeriodicReport, translator), Value: task.StatisPeriod, Type: "xsd:string"},
 		{Name: d.translatePath(paramUploadPeriod, translator), Value: fmt.Sprintf("%d", uploadPeriodSec), Type: "xsd:string"},
-	}
+	}, transferDecision, nil
 }
 
 // resolveTranslator 拿设备对应的 Translator。resolver 未注入或解析失败时返回 nil
@@ -263,8 +291,8 @@ func (d *Dispatcher) resolveTranslator(ctx context.Context, dev *model.Device) *
 //  1. {i} 替换为 defaultMRMgmtInstanceIdx（当前固定 1，多任务并存时再扩展）
 //  2. 若 translator 为 nil → 直接返回 substituted standardPath（fail-soft）
 //  3. translator.ToPrivate：
-//      - Found=true → 返回 privatePath
-//      - Found=false → 返回 standardPath（与 provision orchestrator 一致策略）
+//     - Found=true → 返回 privatePath
+//     - Found=false → 返回 standardPath（与 provision orchestrator 一致策略）
 //
 // metrics 上的 translator 命中/未命中已由 parammodel 包内置 Prometheus 计数器统计。
 func (d *Dispatcher) translatePath(standardPath string, translator *parammodel.Translator) string {
@@ -276,15 +304,26 @@ func (d *Dispatcher) translatePath(standardPath string, translator *parammodel.T
 }
 
 // buildMrURL 拼装设备 HTTP POST 上传地址（文档 §6）：
-//   {URLBase}/smallcell/FileUploadService?fileType=MR&cellCode={cellCode}&filename=
 //
-// IndependentEnable=true 时用 URLBase 作前缀；否则前缀留空（OMC 主地址由设备
-// 端从 ACS URL 推断或部署侧通过 URLBase 显式给出）。filename 段保留为空字符串
-// 是规范要求 —— 让设备自行决定上传文件名。
-func (d *Dispatcher) buildMrURL(cellCode string) string {
-	base := strings.TrimRight(d.cfg.URLBase, "/")
-	return fmt.Sprintf("%s/smallcell/FileUploadService?fileType=MR&cellCode=%s&filename=",
-		base, url.QueryEscape(cellCode))
+//	{URLBase}/smallcell/FileUploadService?fileType=MR&cellCode={cellCode}&filename=
+//
+// filename 段保留为空字符串是规范要求 —— 让设备自行决定上传文件名。
+func (d *Dispatcher) buildMrURL(ctx context.Context, deviceID uuid.UUID, cellCode string) (string, transfercfg.AddressDecision, error) {
+	if d.uploadResolver == nil {
+		return "", transfercfg.AddressDecision{}, fmt.Errorf("MR upload address resolver is not configured")
+	}
+
+	decision, err := d.uploadResolver.Resolve(ctx, deviceID, transfercfg.TransferDirectionUpload)
+	if err != nil {
+		return "", transfercfg.AddressDecision{}, fmt.Errorf("resolve MR upload address: %w", err)
+	}
+	relativeReference := fmt.Sprintf("/smallcell/FileUploadService?fileType=MR&cellCode=%s&filename=",
+		url.QueryEscape(cellCode))
+	mrURL, err := transfercfg.BuildTemplateURL(decision.BaseURL, relativeReference)
+	if err != nil {
+		return "", transfercfg.AddressDecision{}, err
+	}
+	return mrURL, decision, nil
 }
 
 // substInstance 替换路径里的 {i} 为默认实例号 1。

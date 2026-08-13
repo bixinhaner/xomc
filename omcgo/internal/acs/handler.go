@@ -736,6 +736,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		// 使用 CWMP ID 构建 RPC 请求
 		cmd := &rpc.Command{
 			ID:         taskItem.ID,
+			DeviceSN:   deviceSN,
 			Method:     taskItem.Method,
 			Params:     taskItem.Params,
 			CommandKey: taskItem.CommandKey,
@@ -1009,6 +1010,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 
 		cmd := &rpc.Command{
 			ID:         nextTask.ID,
+			DeviceSN:   deviceSN,
 			Method:     nextTask.Method,
 			Params:     nextTask.Params,
 			CommandKey: nextTask.CommandKey,
@@ -1465,6 +1467,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 
 		cmd := &rpc.Command{
 			ID:         nextTask.ID,
+			DeviceSN:   deviceSN,
 			Method:     nextTask.Method,
 			Params:     nextTask.Params,
 			CommandKey: nextTask.CommandKey,

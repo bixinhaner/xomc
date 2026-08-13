@@ -220,8 +220,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 		inf.Logger.Info("periodic UE count query enabled (#220)")
 	}
 	deps.GPVFaultRecoverer = paramsync.NewGPVFaultRecoverer(inf.PgPool, taskService)
-	deps.DurableReadbackEnabled = cfg.ParamSync.RunEnabled && cfg.ParamSync.ResultConsumerEnabled &&
-		cfg.ParamSync.StagingEnabled && cfg.ParamSync.CanaryPercent == 100
+	deps.DurableReadbackEnabled = true
 
 	// #746: 心跳周期自动调整策略 — BOOTSTRAP/BOOT 时 GPV 查询当前值，与配置目标比较后 SPV 调整。
 	// 依赖 sys_configs(device.enbInformPeriodAdjustEnable/enbInformPeriod/cpeInformPeriodAdjustEnable/cpeInformPeriod)。
@@ -245,9 +244,10 @@ func runACS(cmd *cobra.Command, args []string) error {
 	)
 	deps.TransferConfigProvider = transferPolicy
 	if inf.EventBus != nil {
-		sub, err := inf.EventBus.Subscribe(
-			event.SubjectSysConfigSaved,
-			transfercfg.HandleSysConfigSavedEvent(transferPolicy, inf.Logger.Named("transfercfg")),
+		sub, err := subscribeTransferPolicyInvalidation(
+			inf.EventBus,
+			transferPolicy,
+			inf.Logger.Named("transfercfg"),
 		)
 		if err != nil {
 			inf.Logger.Warn("subscribe sys config saved events for transfer config", zap.Error(err))
@@ -259,7 +259,15 @@ func runACS(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	deps.RPCDispatcher = rpc.NewDispatcher(rpc.DispatcherConfig{TransferConfigProvider: transferPolicy})
+	transferParamRepo := device.NewPgDeviceParameterRepository(inf.PgPool)
+	deps.RPCDispatcher = rpc.NewDispatcher(rpc.DispatcherConfig{
+		TransferConfigProvider: transferPolicy,
+		TransferAddressResolver: transfercfg.NewAddressResolver(
+			transferPolicy,
+			transfercfg.NewDeviceParameterHTTPSCapabilityReader(transferParamRepo),
+		),
+		DownloadDeviceLookup: device.NewPgDeviceRepository(inf.PgPool),
+	})
 
 	// PM queue-health metrics have an independent lifecycle: they must continue
 	// to sample when uploads/backpressure are disabled or when MinIO/TSDB is not

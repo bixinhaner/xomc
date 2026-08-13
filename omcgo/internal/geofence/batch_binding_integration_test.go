@@ -377,6 +377,25 @@ func TestPgRepositoryProcessManualBindItemAtomicallyReassignsActiveRuleBindingIn
 	repo, fixture := newBatchRepositoryFixture(t)
 	fixture.insertConflictingActiveBinding(t, fixture.deviceIDs[0])
 	sourceBindingID := fixture.otherBindingIDs[len(fixture.otherBindingIDs)-1]
+	_, err := fixture.pool.Exec(
+		context.Background(),
+		`INSERT INTO device_geofence_states
+		    (binding_id, device_id, confirmed_state, candidate_count, state_version)
+		 VALUES ($1, $2, 'outside', 0, 7)`,
+		sourceBindingID,
+		fixture.deviceIDs[0],
+	)
+	require.NoError(t, err)
+	_, err = fixture.pool.Exec(
+		context.Background(),
+		`INSERT INTO device_geofence_effective_states
+		    (device_id, effective_state, required_action_level, state_version,
+		     evaluation_health, trigger_binding_id)
+		 VALUES ($1, 'outside', 'deactivate', 9, 'healthy', $2)`,
+		fixture.deviceIDs[0],
+		sourceBindingID,
+	)
+	require.NoError(t, err)
 	params := fixture.validCreateJobParams(t)
 	accepted, err := repo.CreateManualBindJob(context.Background(), params)
 	require.NoError(t, err)
@@ -425,6 +444,31 @@ func TestPgRepositoryProcessManualBindItemAtomicallyReassignsActiveRuleBindingIn
 		RuleTypePolygonAllowZone,
 	).Scan(&activeCount))
 	require.Equal(t, 1, activeCount)
+
+	var (
+		newConfirmedState ConfirmedState
+		candidateState    CandidateState
+		candidateCount    int
+		effectiveState    EffectiveState
+	)
+	require.NoError(t, fixture.pool.QueryRow(
+		context.Background(),
+		`SELECT confirmed_state, candidate_state, candidate_count
+		   FROM device_geofence_states
+		  WHERE binding_id = $1`,
+		*result.BindingID,
+	).Scan(&newConfirmedState, &candidateState, &candidateCount))
+	require.Equal(t, ConfirmedStateOutside, newConfirmedState)
+	require.Equal(t, CandidateStateNone, candidateState)
+	require.Zero(t, candidateCount)
+	require.NoError(t, fixture.pool.QueryRow(
+		context.Background(),
+		`SELECT effective_state
+		   FROM device_geofence_effective_states
+		  WHERE device_id = $1`,
+		fixture.deviceIDs[0],
+	).Scan(&effectiveState))
+	require.Equal(t, EffectiveStateOutside, effectiveState)
 }
 
 func TestPgRepositoryProcessManualBindItemDoesNotMoveUnconfirmedBindingIntegration(

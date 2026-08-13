@@ -147,6 +147,7 @@ contains "安装在升级写操作前校验基站地址" 'OMC_PUBLIC_HOST 预检
 contains "安装健康检查支持最终复核" 'HEALTHCHECK_FINAL_GRACE' "$INSTALL"
 contains "安装健康检查默认动态等待 90 秒" 'OMC_HEALTHCHECK_TIMEOUT:-90' "$INSTALL"
 contains "安装健康检查默认总窗口不额外延长" 'OMC_HEALTHCHECK_FINAL_GRACE:-0' "$INSTALL"
+appears_before "安装健康检查在监控重建（cadvisor storm）前执行" '动态等待业务容器启动' '刷新版本目录 bind mount' "$INSTALL"
 contains "安装失败只输出健康检查失败摘要" '健康检查失败摘要（仅显示失败项）' "$INSTALL"
 contains "安装稳定业务容器跳过正常日志" '业务容器均稳定运行，跳过正常运行日志' "$INSTALL"
 for key in GPV_PROVISION_QUEUE GPV_PROVISION_CONCURRENCY GPV_PROVISION_QUEUE_DEPTH \

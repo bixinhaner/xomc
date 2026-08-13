@@ -222,6 +222,23 @@ export interface OperationLog {
   endTime?: string;
 }
 
+export interface NorthboundAPIInvocationLog {
+  id: string;
+  apiKey: string;
+  name: string;
+  method: string;
+  path: string;
+  requestParams: string;
+  responseBody: string;
+  statusCode: number;
+  status: string;
+  createUser: string;
+  ipAddress: string;
+  durationMs: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 // ---- Menu types (admin RBAC) ----
 export type MenuType = 'menu' | 'button' | 'link';
 export type MenuStatus = 'active' | 'disabled';

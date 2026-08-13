@@ -33,4 +33,14 @@ export const quicksettingsApi = {
       groups: data.groups ?? [],
     };
   },
+  async getGroupsByParamModel(paramModel: string): Promise<QuickSettingsGroupsResponse> {
+    const { data } = await http.get<QuickSettingsGroupsResponseRaw>(
+      '/quicksettings/groups',
+      { params: { param_model: paramModel } },
+    );
+    return {
+      paramModel: data.paramModel ?? data.param_model ?? '',
+      groups: data.groups ?? [],
+    };
+  },
 };

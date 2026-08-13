@@ -167,3 +167,22 @@ func TestCleanupRunner_UsesCorrectTimeColumn(t *testing.T) {
 		assert.Equal(t, tbl.TimeCol, byTable[tbl.Table], "table %s should filter on %s", tbl.Table, tbl.TimeCol)
 	}
 }
+
+func TestCleanupRunner_UsesTableSpecificRetentionDays(t *testing.T) {
+	pool := newFakePool()
+	for _, tbl := range Tables {
+		pool.rowsByTable[tbl.Table] = []int64{0}
+	}
+	p := NewRetentionPolicy(staticLookup(map[string]string{KeyDatabaseDays: "365"}), nil)
+	r := NewCleanupRunner(pool, p, nil)
+
+	res, err := r.Run(context.Background(), nil)
+	require.NoError(t, err)
+
+	var m struct {
+		RetentionDays map[string]int `json:"retention_days"`
+	}
+	require.NoError(t, json.Unmarshal(res, &m))
+	assert.Equal(t, 365, m.RetentionDays["audit"])
+	assert.Equal(t, DefaultNorthboundAPIInvocationLogDays, m.RetentionDays["northbound_api"])
+}

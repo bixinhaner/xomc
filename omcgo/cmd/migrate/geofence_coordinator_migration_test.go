@@ -71,15 +71,27 @@ func TestGeofenceControlSchemaKeepsOneMinimalOwnershipTable(t *testing.T) {
 	sql := string(contents)
 
 	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS public.geofence_control_actions")
+	require.Contains(t, sql, "ALTER TABLE public.geofence_control_actions")
 	for _, evidenceColumn := range []string{
 		"action_key varchar(255)",
 		"parent_action_id uuid",
+		"trigger_evaluation_id uuid",
+		"trigger_reason_code varchar(64)",
+		"trigger_observation_version bigint",
 		"before_state jsonb",
 		"requested_state jsonb",
+		"terminal_state jsonb",
 		"verified_state jsonb",
+		"contract_version integer",
+		"verification_attempt integer",
+		"next_verification_at timestamptz",
+		"verification_deadline timestamptz",
 	} {
 		require.Contains(t, sql, evidenceColumn)
 	}
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS trigger_evaluation_id")
+	require.Contains(t, sql, "geofence_control_actions_observation_version_check")
+	require.Contains(t, sql, "geofence_control_actions_trigger_evaluation_fk")
 
 	for _, speculativeContract := range []string{
 		"CREATE TABLE public.geofence_control_steps",

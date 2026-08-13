@@ -103,7 +103,8 @@ type Container struct {
 	// ConfigModule 设置（T-0098 P5-01：旧 DMRegistry / DMImporter 已删除）
 	TemplateService *template.ConfigTemplateService
 
-	// 参数同步服务（AutoSync.Enabled 时由 provisionModule.Init 创建，否则为 nil）。
+	// 兼容参数同步服务（AutoSync.Enabled 时由 provisionModule.Init 创建，否则为 nil）。
+	// durable 请求入口由 paramSyncStarter 独立装配，不受 AutoSync 开关影响。
 	// 用途：让 config.SyncHandler.PullConfig 也能拿到统一的批次拆分能力，从而触发
 	// ACS handler.tryRecoverGPVFault 的 Fault 自愈循环。
 	SyncSvc *provision.SyncService

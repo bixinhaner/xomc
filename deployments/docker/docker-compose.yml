@@ -605,6 +605,7 @@ services:
     ports:
       - "8080:8080"
       - "8081:8081"
+      - "8443:8443"
     environment:
       TZ: "Asia/Shanghai"
     sysctls:
@@ -625,6 +626,7 @@ services:
           cpus: "0.25"
           memory: 128m
     volumes:
+      - /etc/nginx/cert:/etc/nginx/cert:ro
       - ../../run/logs/nginx:/var/log/nginx
       - ../../../tiles:/usr/share/nginx/tiles:ro
       - /etc/localtime:/etc/localtime:ro

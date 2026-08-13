@@ -34,13 +34,14 @@ var geofenceMappedStandardRFControlPathPattern = regexp.MustCompile(
 type geofenceControlPlan struct {
 	Before    []ControlParameterState
 	Requested []ControlParameterState
+	Terminals []ControlParameterState
 }
 
 func buildGeofenceControlPlan(
 	snapshot []model.DeviceParameter,
 	targets []carrier.GeofenceControlParameter,
 ) (geofenceControlPlan, error) {
-	return buildGeofenceControlPlanWithRestore(snapshot, targets, false)
+	return buildGeofenceControlPlanWithTerminal(snapshot, targets, nil, false)
 }
 
 func buildGeofenceControlPlanWithRestore(
@@ -48,9 +49,19 @@ func buildGeofenceControlPlanWithRestore(
 	targets []carrier.GeofenceControlParameter,
 	forceRequested bool,
 ) (geofenceControlPlan, error) {
+	return buildGeofenceControlPlanWithTerminal(snapshot, targets, nil, forceRequested)
+}
+
+func buildGeofenceControlPlanWithTerminal(
+	snapshot []model.DeviceParameter,
+	targets []carrier.GeofenceControlParameter,
+	terminals []carrier.GeofenceControlParameter,
+	forceRequested bool,
+) (geofenceControlPlan, error) {
 	plan := geofenceControlPlan{
-		Before:    make([]ControlParameterState, 0, len(targets)),
+		Before:    make([]ControlParameterState, 0, len(targets)+len(terminals)),
 		Requested: make([]ControlParameterState, 0, len(targets)),
+		Terminals: make([]ControlParameterState, 0, len(terminals)),
 	}
 	for _, target := range targets {
 		if target.Path == "" || strings.Contains(target.Path, "{i}") {
@@ -64,13 +75,18 @@ func buildGeofenceControlPlanWithRestore(
 				"normalize geofence target %s: %w", target.Path, err,
 			)
 		}
-		current, ok := findControlParameterSnapshot(snapshot, target.Path)
+		snapshotPath := target.SnapshotPath
+		if snapshotPath == "" {
+			snapshotPath = target.Path
+		}
+		current, ok := findControlParameterSnapshot(snapshot, snapshotPath)
 		if !ok {
 			return geofenceControlPlan{}, fmt.Errorf(
 				"geofence control parameter %s is missing from the device snapshot", target.Path,
 			)
 		}
-		if !current.Writable && !geofenceMappedStandardRFControlPathPattern.MatchString(target.Path) {
+		if !current.Writable && !target.AccessProven &&
+			!geofenceMappedStandardRFControlPathPattern.MatchString(target.Path) {
 			return geofenceControlPlan{}, fmt.Errorf(
 				"geofence control parameter %s is not writable", target.Path,
 			)
@@ -82,13 +98,52 @@ func buildGeofenceControlPlanWithRestore(
 			)
 		}
 		plan.Before = append(plan.Before, ControlParameterState{
-			Path: target.Path, Value: currentValue,
+			Path: target.Path, ObservedPath: target.SnapshotPath,
+			Value: currentValue, Role: target.Role,
+			AppliesToAllCells: target.AppliesToAllCells,
 		})
 		if forceRequested || currentValue != targetValue {
 			plan.Requested = append(plan.Requested, ControlParameterState{
-				Path: target.Path, Value: targetValue,
+				Path: target.Path, Value: targetValue, Role: target.Role,
+				AppliesToAllCells: target.AppliesToAllCells,
 			})
 		}
+	}
+	for _, terminal := range terminals {
+		if terminal.Path == "" || strings.Contains(terminal.Path, "{i}") {
+			return geofenceControlPlan{}, fmt.Errorf(
+				"geofence terminal parameter path is unresolved: %q", terminal.Path,
+			)
+		}
+		targetValue, err := normalizeControlBoolean(terminal.Value)
+		if err != nil {
+			return geofenceControlPlan{}, fmt.Errorf(
+				"normalize geofence terminal target %s: %w", terminal.Path, err,
+			)
+		}
+		current, ok := findControlParameterSnapshot(snapshot, terminal.Path)
+		if !ok {
+			return geofenceControlPlan{}, fmt.Errorf(
+				"geofence terminal parameter %s is missing from the device snapshot", terminal.Path,
+			)
+		}
+		if current.Writable && !terminal.AccessProven {
+			return geofenceControlPlan{}, fmt.Errorf(
+				"geofence terminal parameter %s is writable; refusing to use it as OpState", terminal.Path,
+			)
+		}
+		currentValue, err := normalizeControlBoolean(current.ParameterValue)
+		if err != nil {
+			return geofenceControlPlan{}, fmt.Errorf(
+				"normalize current geofence terminal %s: %w", terminal.Path, err,
+			)
+		}
+		plan.Before = append(plan.Before, ControlParameterState{
+			Path: terminal.Path, Value: currentValue, Role: carrier.GeofenceRoleOpState,
+		})
+		plan.Terminals = append(plan.Terminals, ControlParameterState{
+			Path: terminal.Path, Value: targetValue, Role: carrier.GeofenceRoleOpState,
+		})
 	}
 	return plan, nil
 }
@@ -125,9 +180,9 @@ func findControlParameterSnapshot(
 
 func normalizeControlBoolean(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true", "on", "enabled", "enable":
+	case "1", "true", "on", "enabled", "enable", "active":
 		return "1", nil
-	case "0", "false", "off", "disabled", "disable":
+	case "0", "false", "off", "disabled", "disable", "inactive":
 		return "0", nil
 	default:
 		return "", fmt.Errorf("unsupported boolean value %q", value)
@@ -154,20 +209,107 @@ func restoreTargets(
 	}
 	targets := make([]carrier.GeofenceControlParameter, 0, len(changedPaths))
 	for _, state := range before {
+		if state.Role == carrier.GeofenceRoleOpState {
+			continue
+		}
 		if _, ok := changedPaths[state.Path]; !ok {
 			continue
 		}
 		targets = append(targets, carrier.GeofenceControlParameter{
-			Path: state.Path, Value: state.Value,
+			Path: state.Path, SnapshotPath: state.ObservedPath,
+			Value: state.Value, Role: state.Role, AccessProven: true,
+			AppliesToAllCells: state.AppliesToAllCells,
 		})
 	}
 	sort.SliceStable(targets, func(i, j int) bool {
-		// Recovery establishes every IPSec representation before RF.
-		iIPSec := isGeofenceIPSecPath(targets[i].Path)
-		jIPSec := isGeofenceIPSecPath(targets[j].Path)
-		return iIPSec && !jIPSec
+		return geofenceRestoreRolePriority(targets[i]) < geofenceRestoreRolePriority(targets[j])
 	})
 	return targets
+}
+
+func filterRestoreToEffectiveCells(
+	snapshot []model.DeviceParameter,
+	tech model.Technology,
+	targets []carrier.GeofenceControlParameter,
+	terminals []ControlParameterState,
+) ([]carrier.GeofenceControlParameter, []ControlParameterState) {
+	maximumSet := make(map[int]struct{})
+	for _, terminal := range terminals {
+		if instance, ok := carrier.GeofenceCellInstance(
+			tech, carrier.GeofenceRoleOpState, terminal.Path,
+		); ok {
+			maximumSet[instance] = struct{}{}
+		}
+	}
+	if len(maximumSet) == 0 {
+		return targets, terminals
+	}
+	maximum := make([]int, 0, len(maximumSet))
+	for instance := range maximumSet {
+		maximum = append(maximum, instance)
+	}
+	effectiveList := carrier.ResolveEffectiveGeofenceCellInstances(snapshot, tech, maximum)
+	effective := make(map[int]struct{}, len(effectiveList))
+	for _, instance := range effectiveList {
+		effective[instance] = struct{}{}
+	}
+
+	filteredTargets := make([]carrier.GeofenceControlParameter, 0, len(targets))
+	for _, target := range targets {
+		if target.AppliesToAllCells {
+			filteredTargets = append(filteredTargets, target)
+			continue
+		}
+		instance, cellScoped := carrier.GeofenceCellInstance(tech, target.Role, target.Path)
+		if !cellScoped {
+			filteredTargets = append(filteredTargets, target)
+			continue
+		}
+		if _, exists := effective[instance]; exists {
+			filteredTargets = append(filteredTargets, target)
+		}
+	}
+	filteredTerminals := make([]ControlParameterState, 0, len(terminals))
+	for _, terminal := range terminals {
+		instance, cellScoped := carrier.GeofenceCellInstance(
+			tech, carrier.GeofenceRoleOpState, terminal.Path,
+		)
+		if !cellScoped {
+			continue
+		}
+		if _, exists := effective[instance]; exists {
+			filteredTerminals = append(filteredTerminals, terminal)
+		}
+	}
+	return filteredTargets, filteredTerminals
+}
+
+func geofenceRestoreRolePriority(parameter carrier.GeofenceControlParameter) int {
+	switch parameter.Role {
+	case carrier.GeofenceRoleIPSec:
+		return 10
+	case carrier.GeofenceRoleRF:
+		return 20
+	case carrier.GeofenceRoleAdmin:
+		return 30
+	case carrier.GeofenceRoleAdminRF:
+		return 30
+	}
+	if isGeofenceIPSecPath(parameter.Path) {
+		return 10
+	}
+	return 20
+}
+
+func originalTerminalTargets(before []ControlParameterState) []ControlParameterState {
+	result := make([]ControlParameterState, 0)
+	for _, state := range before {
+		if state.Role != carrier.GeofenceRoleOpState {
+			continue
+		}
+		result = append(result, state)
+	}
+	return result
 }
 
 func isGeofenceIPSecPath(path string) bool {

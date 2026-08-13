@@ -179,7 +179,6 @@ func TestPeriodicSyncer_ReleasePassRunsWhenPeriodicDisabled(t *testing.T) {
 		Enabled: false, Interval: time.Hour, BatchSize: 200, MaxConcurrent: 10,
 	})
 	p := NewPeriodicSyncer(nil, nil, nil, policy, zap.NewNop())
-	p.SetParamSyncRoutingMode("durable")
 	p.SetReleaseSync(store, starter, campaignID)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -201,19 +200,6 @@ func TestPeriodicSyncer_ReleasePassRunsWhenPeriodicDisabled(t *testing.T) {
 	assert.Equal(t, 200, store.listLimit)
 }
 
-func TestPeriodicSyncer_ReleasePassClosedModeSkips(t *testing.T) {
-	store := &fakeReleaseCandidateLister{devices: mkDevices(1)}
-	starter := &fakeReleaseSyncStarter{perDevice: map[uuid.UUID]error{}}
-	p := NewPeriodicSyncer(nil, nil, nil, nil, zap.NewNop())
-	p.SetParamSyncRoutingMode("closed")
-	p.SetReleaseSync(store, starter, uuid.New())
-
-	p.runReleaseOnce(context.Background(), defaultPeriodicSyncSnapshot())
-
-	assert.Zero(t, store.listCalls)
-	assert.Zero(t, starter.callCount())
-}
-
 func TestPeriodicSyncer_ReleasePassFailureDoesNotStopOtherDevices(t *testing.T) {
 	devices := mkDevices(3)
 	store := &fakeReleaseCandidateLister{devices: devices}
@@ -221,7 +207,6 @@ func TestPeriodicSyncer_ReleasePassFailureDoesNotStopOtherDevices(t *testing.T) 
 		devices[1].ID: errors.New("submit failed"),
 	}}
 	p := NewPeriodicSyncer(nil, nil, nil, nil, zap.NewNop())
-	p.SetParamSyncRoutingMode("durable")
 	p.SetReleaseSync(store, starter, uuid.New())
 
 	p.runReleaseOnce(context.Background(), PeriodicSyncSnapshot{
@@ -260,7 +245,6 @@ func TestPeriodicSyncer_ReleasePassRespectsMaxConcurrent(t *testing.T) {
 	store := &fakeReleaseCandidateLister{devices: mkDevices(12)}
 	starter := &trackingReleaseSyncStarter{}
 	p := NewPeriodicSyncer(nil, nil, nil, nil, zap.NewNop())
-	p.SetParamSyncRoutingMode("durable")
 	p.SetReleaseSync(store, starter, uuid.New())
 
 	p.runReleaseOnce(context.Background(), PeriodicSyncSnapshot{
@@ -506,12 +490,11 @@ func TestPeriodicSyncer_DurableUnavailable_CountsAsSkipped(t *testing.T) {
 	assert.Equal(t, 3, syncer.callCount(), "仍调同步入口但内部 used=false → 跳过不算失败")
 }
 
-func TestPeriodicSyncer_ClosedRoutingModeStillCallsDurableFirstEntry(t *testing.T) {
+func TestPeriodicSyncer_CallsDurableEntry(t *testing.T) {
 	devices := mkDevices(2)
 	lister := &fakeStaleLister{devices: devices}
 	syncer := newFakeSyncStarter(true)
 	p := NewPeriodicSyncer(lister, syncer, nil, nil, zap.NewNop())
-	p.SetParamSyncRoutingMode("closed")
 
 	p.runOnce(context.Background(), PeriodicSyncSnapshot{Interval: time.Hour, BatchSize: 200, MaxConcurrent: 10})
 
