@@ -48,29 +48,8 @@ func (s *Service) deliveryTargetsForRun(ctx context.Context, run FileRun) ([]Del
 	scope := DeliveryScopeFile
 	if run.ProfileKind == ProfileKindInventory {
 		scope = DeliveryScopeInventory
-		return s.repo.ListActiveDeliveryTargets(ctx, scope, run.ProfileCode)
 	}
-
-	profileTargets, err := s.repo.ListActiveDeliveryTargets(ctx, scope, run.ProfileCode)
-	if err != nil {
-		return nil, err
-	}
-	globalTargets, err := s.repo.ListActiveDeliveryTargets(ctx, scope, "")
-	if err != nil {
-		return nil, err
-	}
-	targets := append([]DeliveryTarget{}, profileTargets...)
-	seen := make(map[string]bool, len(targets)+len(globalTargets))
-	for _, target := range targets {
-		seen[target.Key] = true
-	}
-	for _, target := range globalTargets {
-		if seen[target.Key] {
-			continue
-		}
-		targets = append(targets, target)
-	}
-	return targets, nil
+	return s.repo.ListActiveDeliveryTargets(ctx, scope, run.ProfileCode)
 }
 
 func uploadRunArtifact(ctx context.Context, target DeliveryTarget, run FileRun, artifact []byte) DeliveryUploadResult {
