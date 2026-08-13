@@ -181,17 +181,22 @@ func legacyPayloadStrings(value any) []string {
 	return result
 }
 
-// HasActiveLicense reports whether a system license is currently configured.
-// Satisfies admin.LicenseFeatureGate. No license (GetCurrent → 404 NotConfigured)
-// returns (false, nil); a transient error returns (false, err) so the caller can
-// fail-open on the menu path (the frontend licenseOnlyMode only triggers on 404).
+// HasActiveLicense reports whether an effective (configured AND non-expired)
+// system license is in place. Satisfies admin.LicenseFeatureGate.
+//   - No license (GetCurrent → 404 NotConfigured) → (false, nil)
+//   - Expired license (IsExpired, 日期过期或累计超限) → (false, nil)：与无 license
+//     同等处理，菜单只剩 /license，前端进入 licenseOnlyMode（issue #310）。
+//   - Transient error → (false, err)，调用方在菜单路径 fail-open。
 func (s *SystemLicenseService) HasActiveLicense(ctx context.Context) (bool, error) {
-	_, err := s.GetCurrent(ctx)
+	lic, err := s.GetCurrent(ctx)
 	if err != nil {
 		if errors.Is(err, commonerrors.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
+	}
+	if lic.IsExpired {
+		return false, nil
 	}
 	return true, nil
 }
@@ -201,10 +206,17 @@ func (s *SystemLicenseService) HasActiveLicense(ctx context.Context) (bool, erro
 // import of admin). Fail-open: on no-license (GetCurrent 404) or transient
 // error returns the input unchanged (menu visibility must not lock the UI out;
 // device-level enforcement is fail-closed via the Enforcer).
+//
+// 过期 license（IsExpired）→ 返回空集：与无 license 的菜单裁剪口径一致，
+// 菜单闸门已在 HasActiveLicense 处短路到 filterLicenseOnlyMenus，此处为防御
+// 性兜底，避免未来直接调用方误把过期 license 当成全授权（issue #310）。
 func (s *SystemLicenseService) FilterAuthorized(ctx context.Context, codes []string) ([]string, error) {
 	lic, err := s.GetCurrent(ctx)
 	if err != nil {
 		return codes, nil
+	}
+	if lic.IsExpired {
+		return nil, nil
 	}
 	tree := extractAuthorizationTree(lic.FeatureList)
 	authorized := make([]string, 0, len(codes))
@@ -225,6 +237,10 @@ func (s *SystemLicenseService) FilterAuthorized(ctx context.Context, codes []str
 }
 
 // CheckFeature evaluates one dot-separated feature path against the current license.
+//
+// 过期 license（IsExpired）→ (false, nil)：API 中间件 RequireFeature 据此
+// fail-closed 返回 403，与设备 enforcer 的过期拦截口径一致（issue #310）。
+// license 管理路由不挂 RequireFeature，上传/查看不受影响。
 func (s *SystemLicenseService) CheckFeature(ctx context.Context, path string) (bool, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -249,6 +265,9 @@ func (s *SystemLicenseService) CheckFeature(ctx context.Context, path string) (b
 	lic, err := s.GetCurrent(ctx)
 	if err != nil {
 		return false, err
+	}
+	if lic.IsExpired {
+		return false, nil
 	}
 	return HasFeature(FeatureList(extractAuthorizationTree(lic.FeatureList)), parts...), nil
 }
@@ -275,13 +294,16 @@ type UpdateResult struct {
 //
 //  1. 解码旧项目 TrueLicense .lic → parsedLicense
 //  2. PBE/GZIP/XML 解密、JKS/DSA 验签和旧字段映射
-//  4. license_id 重复预检（current 表或 history 表存在 → 12110）
-//  5. 构造 SystemLicense + repo.Replace（事务 + SELECT FOR UPDATE）
+//  3. 硬件绑定校验（MAC / SystemUUID 不匹配 → 403）
+//  4. 构造 SystemLicense + repo.Replace（事务 + SELECT FOR UPDATE，singleton 删除语义）
+//
+// 允许重传任意 license_id（含历史里用过的）：license 文件 license_id 由厂商固定签发，
+// 传错后需能恢复。Replace 删旧行再插新行，不撞 UNIQUE；history 允许同 id 多行。
 //
 // 错误：
 //   - JSON 解析 / 必填缺失 → 12111 (400)
 //   - 签名校验失败（strict） → 12109 (400)
-//   - license_id 已存在     → 12110 (409)
+//   - 硬件绑定不匹配       → 12115 (403)
 //   - 其他 DB 错误          → 500
 func (s *SystemLicenseService) Update(ctx context.Context, req UpdateRequest) (*UpdateResult, error) {
 	if strings.TrimSpace(req.RawContent) == "" {
@@ -310,19 +332,11 @@ func (s *SystemLicenseService) Update(ctx context.Context, req UpdateRequest) (*
 		return nil, commonerrors.NewBusinessError(global.ErrCodeSystemLicenseHardwareMismatch, hwErr.Error(), commonerrors.ErrLicenseHardwareMismatch)
 	}
 
-	// license_id 重复预检：current 行 + history 表都查一遍。Replace 内部
-	// 还会撞 UNIQUE 兜底，但这里前置可以给出更友好的 409。
-	exists, err := s.repo.ExistsByLicenseID(ctx, parsed.LicenseID)
-	if err != nil {
-		return nil, fmt.Errorf("pre-check license_id exists: %w", err)
-	}
-	if exists {
-		return nil, commonerrors.NewBusinessError(
-			global.ErrCodeSystemLicenseIDExists,
-			fmt.Sprintf("license_id %q already exists (current or history)", parsed.LicenseID),
-			commonerrors.ErrAlreadyExists,
-		)
-	}
+	// 注意：不再做 license_id 重复预检。license 文件的 license_id 由厂商固定签发，
+	// 传错（如过期 license）后必须能重传原 license 恢复。Replace 采用 singleton 删除
+	// 语义（DELETE 旧行再 INSERT 新行），不会撞 system_license_license_id_key UNIQUE；
+	// history 表本就允许同 license_id 多行（仅非唯一索引）。Repo 内仍保留 UNIQUE 撞击
+	// 翻译为 ErrSystemLicenseIDExists 作为并发兜底（SELECT FOR UPDATE 下理论不会触发）。
 
 	now := nowFunc()
 	lic := &SystemLicense{
