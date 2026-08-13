@@ -39,7 +39,6 @@ import {
   InboxOutlined,
   MoreOutlined,
 } from '@ant-design/icons';
-import * as XLSX from 'xlsx';
 import { useT } from '@/hooks/useT';
 import {
   usePlugAndPlayPolicy,
@@ -54,6 +53,8 @@ import {
   useDeviceLicenses,
 } from '@core/hooks/api/useDeviceLicense';
 import type { DeviceLicense } from '@core/services/api/deviceLicenseApi';
+import { paramModelApi } from '@core/services/api/paramModelApi';
+import { quicksettingsApi } from '@core/services/api/quicksettingsApi';
 import LicenseImportDrawer from '@/pages/backup/DeviceLicenseLibrary/ImportDrawer';
 import {
   normalizeProductTechnology,
@@ -72,9 +73,11 @@ import {
   mergeImportedParamConfigs,
   ParamConfigWorkbookError,
   parseParamConfigWorkbook,
+  writeParamConfigWorkbookFile,
   type ParamConfigDeviceType,
 } from './paramConfigWorkbook';
 import { getParamConfigTemplate, toParamConfigDeviceType } from './paramConfigTemplate';
+import { getParamConfigExportFields } from './paramConfigExportFields';
 import {
   mergeParamConfigFormValues,
   toParamConfigFormValues,
@@ -296,7 +299,7 @@ interface ParamConfig {
   dns1?: string;
   dns2?: string;
   // ========== gNB WAN配置 ==========
-  addressType?: 'IPv4' | 'IPv6';
+  addressType?: 'DHCP' | 'Static' | 'DHCPv6' | 'Staticv6';
   bearType?: string;
   ipAddress?: string;
   subnetMask?: string;
@@ -486,7 +489,7 @@ const _MOCK_PARAM_CONFIGS: ParamConfig[] = [
     serviceVlan: 100,
     mgmtVlan: 200,
     // WAN Config
-    addressType: 'IPv4',
+    addressType: 'Static',
     bearType: 'Ethernet',
     ipAddress: '192.168.1.50',
     subnetMask: '255.255.255.0',
@@ -1036,7 +1039,7 @@ export default function AddPolicyPage() {
     productClass,
   ]);
 
-  const handleExportConfig = useCallback(() => {
+  const handleExportConfig = useCallback(async () => {
     if (!productClass) {
       void message.warning(t('provision.selectProductClassFirst'));
       return;
@@ -1046,15 +1049,30 @@ export default function AddPolicyPage() {
       return;
     }
 
+    const paramModelName = selectedProduct?.paramModelName;
+    const [quickSettings, mappings] = paramModelName
+      ? await Promise.all([
+        quicksettingsApi.getGroupsByParamModel(paramModelName),
+        paramModelApi.listMappings(paramModelName),
+      ])
+      : [{ groups: [] }, { items: [] }];
     const workbook = createParamConfigWorkbook(filteredParamConfigList);
     const safeProductClass = (productClass || 'parameter-config').replace(/[\\/:*?"<>|]+/g, '_');
-    XLSX.writeFile(workbook, `${safeProductClass}-${t('provision.paramConfigExportFileSuffix')}.xlsx`);
+    await writeParamConfigWorkbookFile(
+      workbook,
+      `${safeProductClass}-${t('provision.paramConfigExportFileSuffix')}.xlsx`,
+      {
+        quickSettingsGroups: quickSettings.groups,
+        paramMappings: mappings.items,
+        quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
+      },
+    );
     void message.success(t('provision.paramConfigExportSuccess', {
       count: filteredParamConfigList.length,
     }));
-  }, [filteredParamConfigList, productClass, t]);
+  }, [activeParamDeviceType, filteredParamConfigList, productClass, selectedProduct?.paramModelName, t]);
 
-  const handleDownloadParamConfigTemplate = useCallback(() => {
+  const handleDownloadParamConfigTemplate = useCallback(async () => {
     if (!productClass) {
       void message.warning(t('provision.selectProductClassFirst'));
       return;
@@ -1066,9 +1084,24 @@ export default function AddPolicyPage() {
     }
 
     if (!activeParamDeviceType) return;
-    XLSX.writeFile(createParamConfigTemplateWorkbook(activeParamDeviceType), template.fileName);
+    const paramModelName = selectedProduct?.paramModelName;
+    const [quickSettings, mappings] = paramModelName
+      ? await Promise.all([
+        quicksettingsApi.getGroupsByParamModel(paramModelName),
+        paramModelApi.listMappings(paramModelName),
+      ])
+      : [{ groups: [] }, { items: [] }];
+    await writeParamConfigWorkbookFile(
+      createParamConfigTemplateWorkbook(activeParamDeviceType),
+      template.fileName,
+      {
+        quickSettingsGroups: quickSettings.groups,
+        paramMappings: mappings.items,
+        quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
+      },
+    );
     void message.success(t('provision.paramConfigTemplateDownloaded'));
-  }, [activeParamDeviceType, productClass, t]);
+  }, [activeParamDeviceType, productClass, selectedProduct?.paramModelName, t]);
 
   const handleOpenParamConfigImport = useCallback(() => {
     if (!productClass) {
@@ -1108,10 +1141,22 @@ export default function AddPolicyPage() {
 
     try {
       const importedAt = new Date().toLocaleString();
+      const paramModelName = selectedProduct?.paramModelName;
+      const [quickSettings, mappings] = paramModelName
+        ? await Promise.all([
+          quicksettingsApi.getGroupsByParamModel(paramModelName),
+          paramModelApi.listMappings(paramModelName),
+        ])
+        : [{ groups: [] }, { items: [] }];
       const rows = parseParamConfigWorkbook(
         await file.arrayBuffer(),
         activeParamDeviceType,
         importedAt,
+        {
+          quickSettingsGroups: quickSettings.groups,
+          paramMappings: mappings.items,
+          quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
+        },
       );
       const importId = Date.now();
       const importedConfigs: ParamConfig[] = rows.map((row, index) => ({
@@ -1150,7 +1195,7 @@ export default function AddPolicyPage() {
       }
       setImportPreviewError(t('provision.paramConfigImportFailed'));
     }
-  }, [activeParamDeviceType, paramConfigList, t]);
+  }, [activeParamDeviceType, paramConfigList, selectedProduct?.paramModelName, t]);
 
   const applyImportConfig = useCallback(() => {
     if (pendingImportedConfigs.length === 0 || importPreview.some((item) => item.action === 'duplicate')) {
