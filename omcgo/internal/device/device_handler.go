@@ -464,6 +464,22 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	if opState := c.Query("op_state"); opState != "" {
 		filter.OpState = &opState
 	}
+	if controlSource := c.Query("control_source"); controlSource != "" {
+		if controlSource != DeviceControlSourceGeofence {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		filter.ControlSource = &controlSource
+	}
+	if controlPhases := c.Query("control_phase"); controlPhases != "" {
+		for _, phase := range SplitCSV(controlPhases) {
+			if !validDeviceControlPhase(phase) {
+				commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+				return
+			}
+			filter.ControlPhases = append(filter.ControlPhases, phase)
+		}
+	}
 	if groupID := c.Query("group_id"); groupID != "" {
 		groupIDs := SplitCSV(groupID)
 		if len(groupIDs) == 1 {

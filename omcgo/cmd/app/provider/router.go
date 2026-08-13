@@ -458,6 +458,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	columnConfigHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 
 	exportService := device.NewExportService(c.DeviceInfoRepo, c.Logger)
+	exportService.SetControlSummaryReader(device.NewPgDeviceControlSummaryReader(c.PgPool))
 	exportHandler := device.NewExportHandler(exportService)
 	exportHandler.SetPermissionService(c.PermService)
 	exportHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))

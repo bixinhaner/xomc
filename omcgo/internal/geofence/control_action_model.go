@@ -38,23 +38,26 @@ type ControlParameterState struct {
 // record preserves the pre-control state and verified outcome that a generic
 // task row cannot represent.
 type ControlAction struct {
-	ID                    uuid.UUID               `json:"id"`
-	ActionKey             string                  `json:"action_key"`
-	ParentActionID        *uuid.UUID              `json:"parent_action_id,omitempty"`
-	DeviceID              uuid.UUID               `json:"device_id"`
-	DeviceSN              string                  `json:"device_sn"`
-	GeofenceID            *uuid.UUID              `json:"geofence_id,omitempty"`
-	BindingID             *uuid.UUID              `json:"binding_id,omitempty"`
-	EffectiveStateVersion int64                   `json:"effective_state_version"`
-	ActionType            ControlActionType       `json:"action_type"`
-	Status                ControlActionStatus     `json:"status"`
-	BeforeState           []ControlParameterState `json:"before_state"`
-	RequestedState        []ControlParameterState `json:"requested_state"`
-	VerifiedState         []ControlParameterState `json:"verified_state"`
-	LastError             string                  `json:"last_error,omitempty"`
-	CreatedAt             time.Time               `json:"created_at"`
-	UpdatedAt             time.Time               `json:"updated_at"`
-	CompletedAt           *time.Time              `json:"completed_at,omitempty"`
+	ID                        uuid.UUID               `json:"id"`
+	ActionKey                 string                  `json:"action_key"`
+	ParentActionID            *uuid.UUID              `json:"parent_action_id,omitempty"`
+	DeviceID                  uuid.UUID               `json:"device_id"`
+	DeviceSN                  string                  `json:"device_sn"`
+	GeofenceID                *uuid.UUID              `json:"geofence_id,omitempty"`
+	BindingID                 *uuid.UUID              `json:"binding_id,omitempty"`
+	TriggerEvaluationID       *uuid.UUID              `json:"trigger_evaluation_id,omitempty"`
+	TriggerReasonCode         string                  `json:"trigger_reason_code"`
+	TriggerObservationVersion *int64                  `json:"trigger_observation_version,omitempty"`
+	EffectiveStateVersion     int64                   `json:"effective_state_version"`
+	ActionType                ControlActionType       `json:"action_type"`
+	Status                    ControlActionStatus     `json:"status"`
+	BeforeState               []ControlParameterState `json:"before_state"`
+	RequestedState            []ControlParameterState `json:"requested_state"`
+	VerifiedState             []ControlParameterState `json:"verified_state"`
+	LastError                 string                  `json:"last_error,omitempty"`
+	CreatedAt                 time.Time               `json:"created_at"`
+	UpdatedAt                 time.Time               `json:"updated_at"`
+	CompletedAt               *time.Time              `json:"completed_at,omitempty"`
 }
 
 func marshalControlState(value []ControlParameterState) (json.RawMessage, error) {

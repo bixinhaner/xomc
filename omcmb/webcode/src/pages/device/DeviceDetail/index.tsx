@@ -23,6 +23,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   Alert,
   App,
@@ -33,6 +34,7 @@ import {
   CloseCircleOutlined,
   ClockCircleOutlined,
   EditOutlined,
+  ExclamationCircleFilled,
   MoreOutlined,
   ReloadOutlined,
   SyncOutlined,
@@ -77,6 +79,7 @@ import ParameterTreeTab from './ParameterTreeTab';
 import QuickSettingsTab from './QuickSettingsTab';
 import LicenseParamsTab from './LicenseParamsTab';
 import PasswordManagementTab from './PasswordManagementTab';
+import { DeviceControlReasonContent } from '../DeviceControlReason';
 import { formatLteBandwidthDisplay } from './QuickSettingsTab/validators';
 import AlarmDetail from '@/pages/alarm/AlarmDetail';
 import AutoRefreshDropdown from '@/pages/alarm/components/AutoRefreshDropdown';
@@ -2225,6 +2228,21 @@ export default function DeviceDetail() {
                 </Tag>
               );
             })()}
+            {displayDevice.controlSummary && (
+              <Tooltip
+                title={`${displayDevice.controlSummary.sourceName || t('device.control.source.geofence')} · ${formatSystemTime(displayDevice.controlSummary.triggeredAt)}`}
+              >
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<ExclamationCircleFilled style={{ color: displayDevice.controlSummary.phase === 'deactivated' ? '#ff4d4f' : '#fa8c16' }} />}
+                  onClick={() => setActiveTab('control')}
+                  style={{ paddingInline: 4 }}
+                >
+                  {t(`device.control.phaseShort.${displayDevice.controlSummary.phase}`)}
+                </Button>
+              </Tooltip>
+            )}
             {displayDevice.alarmLevel !== 'none' && (
               <Tag color={SEVERITY_COLOR[displayDevice.alarmLevel]}>
                 {SEVERITY_LABEL[displayDevice.alarmLevel]}
@@ -2234,7 +2252,7 @@ export default function DeviceDetail() {
           <Space>
             {passwordTaskTag}
             {/* parameters tab 自带全量同步入口；quickSettings/license 使用页头刷新触发同一套参数同步。 */}
-            {activeTab !== 'parameters' && activeTab !== 'password' && (
+            {activeTab !== 'parameters' && activeTab !== 'password' && activeTab !== 'control' && (
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleHeaderRefresh}
@@ -2257,6 +2275,7 @@ export default function DeviceDetail() {
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
+          tabBarGutter={24}
           style={{ padding: '0 16px' }}
           items={[
             {
@@ -2325,6 +2344,22 @@ export default function DeviceDetail() {
                     </Card>
                   )}
                   {detailGroups.slice(1).map((group) => renderFieldGroup(group, displayDevice))}
+                </div>
+              ),
+            },
+            {
+              key: 'control',
+              label: (
+                <span>
+                  {t('device.control.tabTitle')}
+                  {displayDevice.controlSummary && <Badge status="error" style={{ marginLeft: 6 }} />}
+                </span>
+              ),
+              children: (
+                <div style={{ padding: '16px 0' }}>
+                  <ErrorBoundary>
+                    <DeviceControlReasonContent device={displayDevice} enabled={activeTab === 'control'} />
+                  </ErrorBoundary>
                 </div>
               ),
             },

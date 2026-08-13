@@ -184,6 +184,16 @@ function generateDevice(index: number): Device {
       }
       return pickRandom(opStates);
     })(),
+    controlSummary: index === 0 ? {
+      sourceType: 'geofence',
+      sourceId: 'mock-geofence-1',
+      sourceName: '北京测试围栏',
+      reasonCode: 'confirmed_exit',
+      phase: 'deactivated',
+      actionId: 'mock-control-action-1',
+      triggeredAt: '2026-08-13T10:15:00+08:00',
+      completedAt: '2026-08-13T10:15:08+08:00',
+    } : null,
     mmeStatus: (() => {
       if (!isLTE) return '';
       // 多 MME 场景: 70% JSON 数组, 15% 旧格式 "1"/"0", 15% 空

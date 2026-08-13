@@ -35,12 +35,41 @@ func (h *DeviceInfoHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.GET("/enums", h.GetEnums)
 		devices.GET("/:id/info", h.GetDeviceInfo)
 		devices.GET("/:id/detail", h.GetDeviceDetail)
+		devices.GET("/:id/control-actions", h.GetDeviceControlActions)
 		devices.GET("/:id/antenna-sectors", h.GetAntennaSectors)
 		devices.PUT("/:id/antenna-sectors/:sectorNo", h.UpdateAntennaSectorPlan)
 		devices.PUT("/:id/info", h.UpdateDeviceInfo)
 		devices.PUT("/:id/activate", h.ActivateDevice)
 		devices.PUT("/:id/deactivate", h.DeactivateDevice)
 	}
+}
+
+// GetDeviceControlActions returns the durable OMC-control evidence for one device.
+func (h *DeviceInfoHandler) GetDeviceControlActions(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	if !authorizeDeviceAccess(c, h.service, h.permService, id) {
+		return
+	}
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if err != nil || page < 1 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	pageSize, err := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if err != nil || pageSize < 1 || pageSize > 100 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	result, err := h.service.ListDeviceControlHistory(c.Request.Context(), id, page, pageSize)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, result)
 }
 
 // UpdateAntennaSectorPlan saves OMC-local planning values for one sector.

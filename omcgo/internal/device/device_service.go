@@ -67,6 +67,7 @@ type DeviceService struct {
 	paramRepo              DeviceParameterRepository
 	antennaPlanRepo        AntennaSectorPlanRepository
 	deviceInfoRepo         DeviceInfoRepository
+	controlSummaryReader   DeviceControlSummaryReader
 	disconnectAlarms       disconnectedAlarmStore
 	disconnectClearer      disconnectedAlarmClearer
 	regRepo                RegistrationRepository
@@ -140,6 +141,10 @@ func (s *DeviceService) SetRedis(r redis.UniversalClient) {
 // SetDeviceGroupCountsInvalidator wires the topology count-cache invalidator.
 func (s *DeviceService) SetDeviceGroupCountsInvalidator(invalidator DeviceGroupCountsInvalidator) {
 	s.groupCountsInvalidator = invalidator
+}
+
+func (s *DeviceService) SetControlSummaryReader(reader DeviceControlSummaryReader) {
+	s.controlSummaryReader = reader
 }
 
 func NewDeviceService(
@@ -1276,6 +1281,22 @@ func (s *DeviceService) ListDevicesWithInfo(ctx context.Context, filter DeviceFi
 	if statsErr == nil {
 		result.Stats = stats
 	}
+	if s.controlSummaryReader != nil && len(result.Items) > 0 {
+		deviceIDs := make([]uuid.UUID, 0, len(result.Items))
+		for index := range result.Items {
+			deviceIDs = append(deviceIDs, result.Items[index].ID)
+		}
+		summaries, summaryErr := s.controlSummaryReader.ListCurrentByDeviceIDs(ctx, deviceIDs)
+		if summaryErr != nil {
+			return nil, fmt.Errorf("list device control summaries: %w", summaryErr)
+		}
+		for index := range result.Items {
+			if summary, ok := summaries[result.Items[index].ID]; ok {
+				summaryCopy := summary
+				result.Items[index].ControlSummary = &summaryCopy
+			}
+		}
+	}
 	return result, nil
 }
 
@@ -1290,7 +1311,36 @@ func (s *DeviceService) GetDeviceWithInfo(ctx context.Context, id uuid.UUID) (*D
 		}
 		return &DeviceWithInfo{Device: *d}, nil
 	}
-	return s.deviceInfoRepo.GetByIDWithInfo(ctx, id)
+	result, err := s.deviceInfoRepo.GetByIDWithInfo(ctx, id)
+	if err != nil || result == nil || s.controlSummaryReader == nil {
+		return result, err
+	}
+	summaries, err := s.controlSummaryReader.ListCurrentByDeviceIDs(ctx, []uuid.UUID{id})
+	if err != nil {
+		return nil, fmt.Errorf("get device control summary: %w", err)
+	}
+	if summary, ok := summaries[id]; ok {
+		result.ControlSummary = &summary
+	}
+	return result, nil
+}
+
+func (s *DeviceService) ListDeviceControlHistory(
+	ctx context.Context,
+	id uuid.UUID,
+	page int,
+	pageSize int,
+) (*DeviceControlActionHistoryList, error) {
+	if s.controlSummaryReader == nil {
+		return &DeviceControlActionHistoryList{
+			Items: []DeviceControlActionHistory{}, Page: page, PageSize: pageSize,
+		}, nil
+	}
+	result, err := s.controlSummaryReader.ListHistoryByDeviceID(ctx, id, page, pageSize)
+	if err != nil {
+		return nil, fmt.Errorf("list device control history: %w", err)
+	}
+	return result, nil
 }
 
 // applyProductMetadata 在 Inform 路径上把 ProductRegistry 装配件元数据
