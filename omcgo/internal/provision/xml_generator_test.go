@@ -534,6 +534,36 @@ func TestCompilePolicyParametersAcceptsCurrentBaiBNQWorkbookWithProductMappings(
 	assert.Equal(t, "46000", byPath["Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.PLMNList.1.PLMNID"])
 }
 
+func TestCompilePolicyParametersUsesProductEnumValuesForLegacyLTEBandwidth(t *testing.T) {
+	registry := quicksettings.NewRegistry()
+	loader := quicksettings.NewLoader(
+		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
+		"../../data", registry, zap.NewNop(),
+	)
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+
+	values := "25,50,75,100"
+	labels := "CELL_BW_25(5M),CELL_BW_50(10M),CELL_BW_75(15M),CELL_BW_100(20M)"
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{"serialNumber":"BLQ-001","bandWidth":"n50"}]
+	}`)}
+	got, err := CompilePolicyParametersWithMappings(
+		policy,
+		&model.Device{SerialNumber: "BLQ-001", Technology: model.TechLTE},
+		"BLQ",
+		registry.GetByParamModel("BLQ"),
+		[]parammodel.ParamMapping{{
+			StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth",
+			EntryType:    "parameter", Access: "READ_WRITE", DataType: "INT", IsSupported: true,
+			EnumValues: &values, EnumLabels: &labels,
+		}},
+	)
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	assert.Equal(t, "50", got.Parameters[0].Value)
+}
+
 func TestCompilePolicyParametersAcceptsMLNDefaultWorkbookSynchronizationMode(t *testing.T) {
 	registry := quicksettings.NewRegistry()
 	loader := quicksettings.NewLoader(

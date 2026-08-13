@@ -1,7 +1,9 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Card, Divider, Form, Input } from 'antd';
 import { useT } from '@/hooks/useT';
+import { quicksettingsApi } from '@core/services/api/quicksettingsApi';
+import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import { GnbQuickSettingFieldGrid } from './GnbQuickSettingsCards';
 import {
   ENB_IPSEC_TEMPLATE_EXTRA_FIELDS,
@@ -10,6 +12,25 @@ import {
 } from './enbQuickSettingsFields';
 import { getEnbProductSyncConfig } from './enbProductSyncFields';
 import { isIpsecParametersVisible } from './quickSettingsVisibility';
+
+export function withProductEnumOptions(groups: typeof ENB_QUICK_SETTING_GROUPS, metadata: QuickSettingsGroup[]) {
+  return groups.map((group) => {
+    const productGroup = metadata.find((item) => item.id === group.id);
+    if (!productGroup) return group;
+    return {
+      ...group,
+      fields: group.fields.map((field) => {
+        const productParam = productGroup.params.find((item) => item.name === field.id);
+        if (!productParam?.enumOptions?.length) return field;
+        return {
+          ...field,
+          control: 'select' as const,
+          options: productParam.enumOptions.map((option) => ({ value: option.value, label: option.label })),
+        };
+      }),
+    };
+  });
+}
 
 function MmeListCard() {
   const t = useT();
@@ -96,6 +117,22 @@ export default function EnbQuickSettingsCards({
 }) {
   const t = useT();
   const form = Form.useFormInstance();
+  const [productGroups, setProductGroups] = useState<QuickSettingsGroup[]>([]);
+  useEffect(() => {
+    let active = true;
+    if (!paramModelName) {
+      setProductGroups([]);
+      return () => { active = false; };
+    }
+    void quicksettingsApi.getGroupsByParamModel(paramModelName)
+      .then((response) => { if (active) setProductGroups(response.groups); })
+      .catch(() => { if (active) setProductGroups([]); });
+    return () => { active = false; };
+  }, [paramModelName]);
+  const resolvedGroups = useMemo(
+    () => withProductEnumOptions(ENB_QUICK_SETTING_GROUPS, productGroups),
+    [productGroups],
+  );
   const ipsecEnable = Form.useWatch('ipsecEnable', form);
   const syncConfig = getEnbProductSyncConfig(paramModelName);
   const syncMode = Form.useWatch(syncConfig.modeFieldName ?? '__unsupportedSyncMode', form);
@@ -106,7 +143,7 @@ export default function EnbQuickSettingsCards({
 
   return (
     <>
-      {ENB_QUICK_SETTING_GROUPS
+      {resolvedGroups
         .filter((group) => group.id !== 'device-ipsec' || isIpsecParametersVisible(ipsecEnable))
         .map((group) => (
         <Fragment key={group.id}>
