@@ -33,6 +33,7 @@ type Repository interface {
 	ValidatePMMetricPaths(ctx context.Context, metricPaths []string) ([]string, error)
 	EnsureExtendedDefaults(ctx context.Context) error
 	ListDeliveryTargets(ctx context.Context, filter DeliveryTargetFilter) ([]DeliveryTarget, error)
+	GetDeliveryTargetForSend(ctx context.Context, scope DeliveryScope, ownerCode string, key string) (*DeliveryTarget, error)
 	ListActiveDeliveryTargets(ctx context.Context, scope DeliveryScope, ownerCode string) ([]DeliveryTarget, error)
 	ReplaceDeliveryTargets(ctx context.Context, req ReplaceDeliveryTargetsRequest) ([]DeliveryTarget, error)
 	ListSNMPAlarmTargets(ctx context.Context) ([]SNMPAlarmTarget, error)
@@ -740,7 +741,18 @@ func (s *Service) TestDeliveryTarget(ctx context.Context, target DeliveryTarget)
 	if s.repo == nil {
 		return nil, fmt.Errorf("northbound page-config repository is not configured")
 	}
+	if err := s.repo.EnsureExtendedDefaults(ctx); err != nil {
+		return nil, err
+	}
 	target = normalizeDeliveryTarget(target)
+	if strings.TrimSpace(target.Credential) == "" && target.CredentialSet {
+		stored, err := s.repo.GetDeliveryTargetForSend(ctx, target.Scope, target.OwnerCode, target.Key)
+		if err != nil {
+			return nil, err
+		}
+		target.Credential = stored.Credential
+		target.CredentialSet = stored.CredentialSet
+	}
 	if err := validateDeliveryTargets(ReplaceDeliveryTargetsRequest{
 		Scope:     target.Scope,
 		OwnerCode: target.OwnerCode,

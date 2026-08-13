@@ -260,6 +260,18 @@ SELECT id::text, scope, owner_code, target_key, name, enabled, protocol, host, p
 	return out, rows.Err()
 }
 
+func (r *PgRepository) GetDeliveryTargetForSend(ctx context.Context, scope DeliveryScope, ownerCode string, key string) (*DeliveryTarget, error) {
+	row := r.pool.QueryRow(ctx, `
+SELECT id::text, scope, owner_code, target_key, name, enabled, protocol, host, port,
+       username, credential_secret <> '' AS credential_set, auth_mode, remote_root,
+       retry_times, timeout_seconds, passive_mode, host_key_policy,
+       host_key_fingerprint, created_at, updated_at,
+       credential_secret
+  FROM northbound_delivery_targets
+ WHERE scope=$1 AND owner_code=$2 AND target_key=$3`, scope, ownerCode, key)
+	return scanDeliveryTargetWithCredential(row)
+}
+
 func (r *PgRepository) ListActiveDeliveryTargets(ctx context.Context, scope DeliveryScope, ownerCode string) ([]DeliveryTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 SELECT id::text, scope, owner_code, target_key, name, enabled, protocol, host, port,

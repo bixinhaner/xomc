@@ -222,10 +222,11 @@ type FieldFilter struct {
 }
 
 type RunProfileRequest struct {
-	GroupID     string     `json:"group_id"`
-	WindowStart *time.Time `json:"window_start"`
-	WindowEnd   *time.Time `json:"window_end"`
-	Limit       int        `json:"limit"`
+	GroupID       string     `json:"group_id"`
+	WindowStart   *time.Time `json:"window_start"`
+	WindowEnd     *time.Time `json:"window_end"`
+	Limit         int        `json:"limit"`
+	TriggerReason string     `json:"trigger_reason,omitempty"`
 }
 
 type RunProfileResponse struct {

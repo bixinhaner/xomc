@@ -1319,16 +1319,20 @@ function cloneDeliveryTargets(scopeKey: string): DeliveryTargetRow[] {
   }));
 }
 
+function createDeliveryTargetKey(scopeKey: string): string {
+  return `${scopeKey}-delivery-custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function createDeliveryTarget(scopeKey: string, index: number): DeliveryTargetRow {
   return {
-    key: `${scopeKey}-delivery-custom-${Date.now()}`,
+    key: createDeliveryTargetKey(scopeKey),
     name: `新增传输目标 ${index}`,
     enabled: false,
     protocol: 'SFTP',
     host: '',
     port: 22,
     username: '',
-    credential: '未设置',
+    credential: '',
     authMode: 'PASSWORD',
     remoteRoot: '/northupload',
     retryTimes: 3,
@@ -3766,7 +3770,8 @@ function serializeDeliveryTargets(
       host: row.host,
       port: row.port,
       username: row.username,
-      credential: row.credential === '已加密存储' ? '' : row.credential,
+      credential: row.credential === storedCredentialText ? '' : row.credential,
+      credential_set: row.credential === storedCredentialText,
       auth_mode: row.authMode,
       remote_root: row.remoteRoot,
       retry_times: row.retryTimes,
@@ -3784,6 +3789,11 @@ function serializeDeliveryTarget(
   row: DeliveryTargetRow,
 ) {
   return serializeDeliveryTargets(scope, ownerCode, [row]).items[0];
+}
+
+function deliveryTargetHasCredential(row: DeliveryTargetRow): boolean {
+  const credential = row.credential ?? '';
+  return credential === storedCredentialText || credential.trim() !== '';
 }
 
 function normalizeFileDeliveryOwnerCode(code?: string): string {
@@ -4328,6 +4338,16 @@ function effectiveReportStatus(info: ReportStatusInfo, enabled: boolean): Report
   };
 }
 
+function runTriggerDescription(run: NorthboundFileRun): string {
+  const triggerReason = typeof run.summary?.trigger_reason === 'string'
+    ? run.summary.trigger_reason.toLowerCase()
+    : '';
+  const triggerText = triggerReason === 'auto' || triggerReason === 'automatic' || triggerReason === 'scheduled'
+    ? '自动生成记录'
+    : '手动生成记录';
+  return `${run.profile_code} / ${run.group_id || run.object_code} ${triggerText}。`;
+}
+
 function buildRunReportStatus(run: NorthboundFileRun, fallbackCapabilityName: string): ReportStatusInfo {
   const state: ReportState = run.status === 'success'
     ? 'success'
@@ -4349,7 +4369,7 @@ function buildRunReportStatus(run: NorthboundFileRun, fallbackCapabilityName: st
     artifactPath: run.artifact_path || '-',
     size: formatBytes(run.artifact_size),
     targetSummary: `生成 ${run.row_count} 行，可在传输目标中测试连接`,
-    detail: run.error_message || `${run.profile_code} / ${run.group_id || run.object_code} 手动生成记录。`,
+    detail: run.error_message || runTriggerDescription(run),
     payload,
   };
 }
@@ -4807,6 +4827,21 @@ function summarizeDeliveryNote(events: NorthboundPageConfigEvent[]): string {
   return `投递 ${events.length} 个目标（成功 ${success} / 失败 ${failed}）：${lines.join('；')}`;
 }
 
+function mergeRunDeliveryStatus(info: ReportStatusInfo, events: NorthboundPageConfigEvent[]): ReportStatusInfo {
+  const deliveryNote = summarizeDeliveryNote(events);
+  if (!deliveryNote) return info;
+  const failed = events.some((event) => event.status !== 'success');
+  if (!failed || info.state !== 'success') return { ...info, deliveryNote };
+  return {
+    ...info,
+    state: 'failed',
+    statusText: '生成成功，上传FTP失败',
+    targetSummary: deliveryNote,
+    detail: `${info.detail} FTP/SFTP 投递存在失败，请查看投递结果。`,
+    deliveryNote,
+  };
+}
+
 function eventStatusText(event: NorthboundPageConfigEvent): string {
   if (event.status === 'success') return '正常';
   if (event.status === 'running') return '处理中';
@@ -5208,10 +5243,10 @@ function normalizeMaskedCredentialInput(
 ): string {
   const isStored = storedValues.includes(currentValue);
   if (!nextValue) return '';
-  if ((!visible || isStored) && nextValue.startsWith(credentialMaskText)) {
+  if (isStored && nextValue.startsWith(credentialMaskText)) {
     return nextValue.slice(credentialMaskText.length);
   }
-  if (!visible && currentValue && credentialMaskText.startsWith(nextValue)) return '';
+  if (isStored && !visible && credentialMaskText.startsWith(nextValue)) return '';
   return nextValue;
 }
 
@@ -5228,7 +5263,7 @@ function MaskedCredentialInput({
   const currentValue = value ?? '';
   const hasValue = currentValue !== '';
   const isStored = storedValues.includes(currentValue);
-  const displayValue = hasValue && (!visible || isStored) ? credentialMaskText : currentValue;
+  const displayValue = hasValue && isStored ? credentialMaskText : currentValue;
 
   return (
     <Input.Password
@@ -5988,10 +6023,11 @@ export default function NorthboundPageConfig() {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'hidden') return;
       if (pageConfigLoadingRef.current || apiUserDirtyRef.current || apiUserSavingRef.current) return;
+      if (editorOpen || inventoryEditorOpen || socketEditor) return;
       void loadPageConfig(true);
     }, 30000);
     return () => window.clearInterval(timer);
-  }, [loadPageConfig]);
+  }, [editorOpen, inventoryEditorOpen, loadPageConfig, socketEditor]);
 
   const selectedInventoryConfig = useMemo(
     () => inventoryConfigs.find((row) => row.key === selectedInventoryType) ?? inventoryConfigs[0],
@@ -6131,13 +6167,17 @@ export default function NorthboundPageConfig() {
     scope: 'file' | 'inventory' | 'socket',
     ownerCode: string,
   ) => {
-    if (!row.host || !row.username) {
-      void message.warning(nt('请先填写主机地址和用户名'));
+    const missingFields: string[] = [];
+    if (!row.host.trim()) missingFields.push('主机地址');
+    if (!row.username.trim()) missingFields.push('用户名');
+    if (!deliveryTargetHasCredential(row)) missingFields.push('密码');
+    if (missingFields.length > 0) {
+      void message.warning(nt(`请先填写${missingFields.join('、')}`));
       return;
     }
-	    void northboundPageConfigApi.testDeliveryTarget(serializeDeliveryTarget(scope, ownerCode, row))
-	      .then((event) => {
-	        openSingleEventReport(event, `${row.name} ${row.protocol}`);
+    void northboundPageConfigApi.testDeliveryTarget(serializeDeliveryTarget(scope, ownerCode, row))
+      .then((event) => {
+        openSingleEventReport(event, `${row.name} ${row.protocol}`);
         if (event.status === 'success') {
           void message.success(nt(`${row.name} ${row.protocol} 连接测试通过`));
         } else {
@@ -6822,7 +6862,7 @@ export default function NorthboundPageConfig() {
       // Precisely match this run's delivery events by summary.run_id. Never fall
       // back to an unrelated event — the old `?? events.items[0]` crossed objects.
       const deliveries = events.items.filter((event) => event.summary?.run_id === run.id);
-      return { ...runStatus, deliveryNote: summarizeDeliveryNote(deliveries) };
+      return mergeRunDeliveryStatus(runStatus, deliveries);
     } catch {
       return runStatus;
     }
@@ -7740,7 +7780,6 @@ export default function NorthboundPageConfig() {
   ];
 
   const createDeliveryTargetEditorColumns = (
-    rows: DeliveryTargetRow[],
     onPatch: (key: string, patch: Partial<DeliveryTargetRow>) => void,
     onRemove: (key: string) => void,
     scope: 'file' | 'inventory' | 'socket',
@@ -7860,7 +7899,6 @@ export default function NorthboundPageConfig() {
               size="small"
               type="text"
               icon={<DeleteOutlined />}
-              disabled={rows.length <= 1}
               onClick={() => onRemove(row.key)}
             />
           </Tooltip>
@@ -8796,7 +8834,6 @@ export default function NorthboundPageConfig() {
                 </div>
                 <Table<DeliveryTargetRow>
                   columns={createDeliveryTargetEditorColumns(
-                    socketEditorDeliveryTargets,
                     updateSocketEditorDeliveryTarget,
                     removeSocketEditorDeliveryTarget,
                     'socket',
@@ -9314,7 +9351,6 @@ export default function NorthboundPageConfig() {
               </div>
               <Table<DeliveryTargetRow>
                 columns={createDeliveryTargetEditorColumns(
-                  selectedInventoryDeliveryTargets,
                   (targetKey, patch) => updateInventoryDeliveryTarget(selectedInventoryConfig.key, targetKey, patch),
                   (targetKey) => removeInventoryDeliveryTarget(selectedInventoryConfig.key, targetKey),
                   'inventory',
@@ -9789,7 +9825,6 @@ export default function NorthboundPageConfig() {
             </div>
             <Table<DeliveryTargetRow>
               columns={createDeliveryTargetEditorColumns(
-                editorFileDeliveryTargets,
                 (targetKey, patch) => updateFileDeliveryTarget(editorFileOwnerCode, targetKey, patch),
                 (targetKey) => removeFileDeliveryTarget(editorFileOwnerCode, targetKey),
                 'file',

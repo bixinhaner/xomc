@@ -387,6 +387,15 @@ func (r *fakeRepository) ListDeliveryTargets(_ context.Context, filter DeliveryT
 	return out, nil
 }
 
+func (r *fakeRepository) GetDeliveryTargetForSend(_ context.Context, scope DeliveryScope, ownerCode string, key string) (*DeliveryTarget, error) {
+	for _, target := range r.deliveryTargets {
+		if target.Scope == scope && target.OwnerCode == ownerCode && target.Key == key {
+			return &target, nil
+		}
+	}
+	return nil, commonerrors.ErrNotFound
+}
+
 func (r *fakeRepository) ListActiveDeliveryTargets(_ context.Context, scope DeliveryScope, ownerCode string) ([]DeliveryTarget, error) {
 	out := make([]DeliveryTarget, 0, len(r.deliveryTargets))
 	for _, target := range r.deliveryTargets {
@@ -400,8 +409,10 @@ func (r *fakeRepository) ListActiveDeliveryTargets(_ context.Context, scope Deli
 
 func (r *fakeRepository) ReplaceDeliveryTargets(_ context.Context, req ReplaceDeliveryTargetsRequest) ([]DeliveryTarget, error) {
 	next := r.deliveryTargets[:0]
+	existingSecrets := map[string]string{}
 	for _, target := range r.deliveryTargets {
 		if target.Scope == req.Scope && target.OwnerCode == req.OwnerCode {
+			existingSecrets[target.Key] = target.Credential
 			continue
 		}
 		next = append(next, target)
@@ -409,8 +420,10 @@ func (r *fakeRepository) ReplaceDeliveryTargets(_ context.Context, req ReplaceDe
 	for _, target := range req.Items {
 		target.Scope = req.Scope
 		target.OwnerCode = req.OwnerCode
-		target.CredentialSet = target.Credential != ""
-		target.Credential = ""
+		if strings.TrimSpace(target.Credential) == "" && target.CredentialSet {
+			target.Credential = existingSecrets[target.Key]
+		}
+		target.CredentialSet = strings.TrimSpace(target.Credential) != ""
 		next = append(next, target)
 	}
 	r.deliveryTargets = next
@@ -1695,7 +1708,7 @@ func TestRunFileProfileUploadsToEnabledFTPTarget(t *testing.T) {
 	}
 	repo.deliveryTargets = []DeliveryTarget{{
 		Scope:          DeliveryScopeFile,
-		OwnerCode:      "",
+		OwnerCode:      "S9002",
 		Key:            "oss-main",
 		Name:           "OSS Main",
 		Enabled:        true,
@@ -2674,6 +2687,52 @@ func TestUploadSFTPPasswordAuth(t *testing.T) {
 	uploaded, err := os.ReadFile(filepath.Join(srv.root, "alarm.csv"))
 	require.NoError(t, err)
 	require.Equal(t, artifact, uploaded)
+}
+
+func TestDeliveryTargetConnectionTestUsesStoredCredential(t *testing.T) {
+	srv := startTestSFTPServer(t)
+	repo := newFakeRepository()
+	repo.deliveryTargets = []DeliveryTarget{{
+		Scope:          DeliveryScopeFile,
+		OwnerCode:      "S0312",
+		Key:            "sftp-stored",
+		Name:           "SFTP Stored",
+		Enabled:        true,
+		Protocol:       DeliveryProtocolSFTP,
+		Host:           srv.host,
+		Port:           srv.port,
+		Username:       "north",
+		Credential:     "secret",
+		CredentialSet:  true,
+		AuthMode:       DeliveryAuthPassword,
+		RemoteRoot:     "/northupload",
+		RetryTimes:     0,
+		TimeoutSeconds: 5,
+	}}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	event, err := svc.TestDeliveryTarget(context.Background(), DeliveryTarget{
+		Scope:          DeliveryScopeFile,
+		OwnerCode:      "S0312",
+		Key:            "sftp-stored",
+		Name:           "SFTP Stored",
+		Protocol:       DeliveryProtocolSFTP,
+		Host:           srv.host,
+		Port:           srv.port,
+		Username:       "north",
+		CredentialSet:  true,
+		AuthMode:       DeliveryAuthPassword,
+		RemoteRoot:     "/northupload",
+		RetryTimes:     0,
+		TimeoutSeconds: 5,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, RunStatusSuccess, event.Status)
+	passed, ok := event.Summary["auth_probe_passed"].(*bool)
+	require.True(t, ok)
+	require.NotNil(t, passed)
+	require.True(t, *passed)
 }
 
 type testSFTPServer struct {

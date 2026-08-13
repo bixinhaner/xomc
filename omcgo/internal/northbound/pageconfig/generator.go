@@ -12,9 +12,30 @@ import (
 )
 
 const (
-	defaultRunLimit = 200
-	maxRunLimit     = 5000
+	defaultRunLimit  = 200
+	maxRunLimit      = 5000
+	runTriggerManual = "manual"
+	runTriggerAuto   = "auto"
 )
+
+func normalizeRunTriggerReason(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case runTriggerAuto, "automatic", "schedule", "scheduled":
+		return runTriggerAuto
+	case runTriggerManual:
+		return runTriggerManual
+	default:
+		return ""
+	}
+}
+
+func runTriggerReason(req RunProfileRequest) string {
+	reason := normalizeRunTriggerReason(req.TriggerReason)
+	if reason == "" {
+		return runTriggerManual
+	}
+	return reason
+}
 
 func (s *Service) RunFileProfile(ctx context.Context, idOrCode string, req RunProfileRequest) (RunProfileResponse, error) {
 	if s.repo == nil {
@@ -162,9 +183,10 @@ func (s *Service) buildFileRun(ctx context.Context, profile FileProfile, group F
 		CompressionEnabled: group.CompressionEnabled,
 		CompressionFormat:  compressionFormatOrDefault(group.CompressionFormat),
 		Summary: map[string]any{
-			"profile_name": profile.Name,
-			"format":       group.Format,
-			"period":       group.Period,
+			"profile_name":   profile.Name,
+			"format":         group.Format,
+			"period":         group.Period,
+			"trigger_reason": runTriggerReason(req),
 		},
 	}, nil
 }
@@ -196,6 +218,7 @@ func (s *Service) buildMRPassthroughRun(ctx context.Context, profile FileProfile
 				"profile_name":   profile.Name,
 				"format":         group.Format,
 				"period":         group.Period,
+				"trigger_reason": runTriggerReason(req),
 				"mr_passthrough": true,
 			},
 		}, nil
@@ -227,6 +250,7 @@ func (s *Service) buildMRPassthroughRun(ctx context.Context, profile FileProfile
 			"profile_name":       profile.Name,
 			"format":             group.Format,
 			"period":             group.Period,
+			"trigger_reason":     runTriggerReason(req),
 			"mr_passthrough":     true,
 			"source_file_name":   sourceName,
 			"source_object_path": sourcePath,
@@ -274,9 +298,10 @@ func (s *Service) buildInventoryRun(ctx context.Context, profile InventoryProfil
 		CompressionEnabled: profile.CompressionEnabled,
 		CompressionFormat:  compressionFormatOrDefault(profile.CompressionFormat),
 		Summary: map[string]any{
-			"profile_name": profile.Name,
-			"format":       FormatCSV,
-			"period":       profile.Period,
+			"profile_name":   profile.Name,
+			"format":         FormatCSV,
+			"period":         profile.Period,
+			"trigger_reason": runTriggerReason(req),
 		},
 	}, nil
 }
@@ -966,8 +991,9 @@ func failedFileRun(profileKind ProfileKind, profileCode string, group FileGroup,
 		CompressionFormat:  compressionFormatOrDefault(group.CompressionFormat),
 		ErrorMessage:       err.Error(),
 		Summary: map[string]any{
-			"format": group.Format,
-			"period": group.Period,
+			"format":         group.Format,
+			"period":         group.Period,
+			"trigger_reason": runTriggerReason(req),
 		},
 	}
 }
