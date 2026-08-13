@@ -523,6 +523,9 @@ Idempotency-Key: 105820-UAT-YYYYMMDD-001
 
 - 测试设备在线；
 - 已记录 IPSec、RF、可写 Admin/AdminRF 和所有目标小区只读 OpState 原值；
+- 已记录 `InUse`、`NumOfCells`、产品 `radioModes`、ParamModel `NumOfCells.enumValues` 最大能力及
+  最终目标实例集合；无法确认有效小区时记录回退到产品/模型最大能力的原因；若最大集合缺少任一
+  必要快照证据，记录动作失败而不是缩小目标集；
 - 产品模型解析到实际存在、可写的控制参数及只读运行终态；缺任一角色时 fail closed；
 - 系统与运营商均为 `enforce`；
 - 围栏策略为 `deactivate`。
@@ -532,7 +535,7 @@ Idempotency-Key: 105820-UAT-YYYYMMDD-001
 1. 先让设备稳定处于围栏内。
 2. 上报连续越界位置直至 outside 边沿。
 3. 记录 effective state version、事件 ID 和 control action ID。
-4. 检查 SPV 请求参数和值。
+4. 检查 SPV 请求参数和值，并确认未向已明确 `InUse=false` 或超过合法 `NumOfCells` 的实例下发。
 5. 等待 SPV 终态，再检查 RF、IPSec、Admin/AdminRF 的关联 GPV。
 6. 轮询每个目标小区 OpState，直到全部 inactive 或超过产品终态窗口。
 7. 核对设备参数树、设备列表独立 RF/激活列、告警和控制动作详情。
@@ -553,7 +556,8 @@ Idempotency-Key: 105820-UAT-YYYYMMDD-001
 
 1. 对 GF-16 已 verified 的设备上报连续回区位置。
 2. 检查恢复动作只引用最近一条尚未恢复的 verified 去激活动作。
-3. 检查恢复参数只包含本系统实际修改且 GPV 已验证的项。
+3. 检查恢复参数只包含本系统实际修改且 GPV 已验证的项，并与回区时当前有效小区求交集；无法
+   确认时最多恢复原动作拥有的最大实例集合。
 4. 验证 IPSec → RF → Admin/AdminRF 的恢复顺序和关联 GPV 回读。
 5. 若控制前 OpState=active，轮询并验证恢复后 OpState=active。
 6. 分别验证：旧契约 verified、无 verified 所有权、设备离线、SPV 超时、部分参数失败、GPV 不一致、OpState 超时。
@@ -1469,7 +1473,8 @@ Issue #304 的 251 BLQ 现场形成反例：`X_COM_RadioEnable=false` 与 `FAPCo
 17:48:01 对三个 FAPService 实例下发私有 `CellConfig.LTE.RAN.RF.AdminCellState=0`，随后设备列表
 显示“未激活、射频关”。该证据证明 MLN/452 产品的 `AdminCellState` 可以作为 `AdminRF` 组合控制，
 而不是要求每种产品物理上都存在两个不同参数；证据不得外推到 BLN、BM 或仅有同名路径的产品。
-但正式 GF-16 签署仍必须补齐该动作的 GPV、三小区 OpState=0、IPSec 和动作终态。
+但正式 GF-16 签署仍必须补齐该动作的 GPV、目标有效小区 OpState=0、IPSec 和动作终态；历史
+SPV 中出现三个实例不能替代 `InUse/NumOfCells` 有效范围证据。
 
 产品能力矩阵和新状态机详见
 `docs/superpowers/specs/2026-08-12-geofence-cell-deactivation-capabilities.md`。从本节起，GF-16/GF-17

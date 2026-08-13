@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -62,6 +63,34 @@ func TestBMNeighborListHasPrivateArfcnAlias(t *testing.T) {
 	}
 
 	t.Fatalf("expected BM.xml to define alias %s -> %s", privatePath, standardPath)
+}
+
+func TestBLQAdminStateUsesConcreteBidirectionalAlias(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BLQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+	const privatePath = "Device.DeviceInfo.FAP_adminstate"
+	const standardPath = "Device.Services.FAPService.1.FAPControl.LTE.AdminState"
+	for _, param := range doc.Params {
+		if param.Name != privatePath {
+			continue
+		}
+		require.Equal(t, standardPath, param.StandardPath)
+		translator := NewTranslator(&MappingSet{
+			Source: MappingSourceDefault,
+			Mappings: []ParamMapping{{
+				ID: uuid.New(), StandardPath: param.StandardPath,
+				PrivatePath: param.Name, EntryType: "parameter",
+			}},
+		}, NewRegistryMetrics(nil), nil)
+		require.Equal(t, privatePath, translator.ToPrivate(standardPath).Translated)
+		require.Equal(t, standardPath, translator.ToStandard(privatePath).Translated)
+		return
+	}
+	t.Fatalf("expected BLQ admin alias %s -> %s", privatePath, standardPath)
 }
 
 func TestBMNeighborListHasWritableX2Flag(t *testing.T) {

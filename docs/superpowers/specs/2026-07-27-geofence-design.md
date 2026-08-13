@@ -316,15 +316,23 @@ geofence 状态机不得散落 productClass 分支。
 IPSec 参数在标准模型中为 `READ_WRITE/BOOLEAN`，IPSec、RF 和已确认管理控件的开关值使用
 `1=开启、0=关闭`。`{i}` 是设备实例模型中的动态索引，围栏控制在 Worker 中读取设备当前
 `device_parameters` 快照，只选择实际存在的参数；Access 以匹配的 ParamModel/XML 为权威，
-仅在模型缺失时回退到快照的 Writable 标记。控制按实例编号排序后为每个
-小区生成控制参数；不存在可靠 RF、Admin/AdminRF、IPSec 和只读 OpState 时拒绝创建控制 task，
-不回退到固定 `.1`。参数路径
+仅在模型缺失时回退到快照的 Writable 标记。目标小区优先采用明确的 `InUse=true` 集合，其次采用
+合法 `NumOfCells` 的 `1..N`；两者缺失、非法或与当前快照矛盾时，为保证业务连续性，回退到
+产品装配 `radioModes` 与 ParamModel `NumOfCells.enumValues` 共同声明的设备最大能力。例如 MLN
+最大能力为三小区，即使当前产品类为 SC，无法确认有效小区时仍以 `1..3` 为目标；共享 BLQ 模型的
+BAIBLQ/SC 与 QRTB（436Q，例如 mBS31001）则分别按产品装配收敛为最大 1 和 2。249 属于 MLQ，
+不得与这里的 BAIBLQ 混称。目标集中每个实例仍必须在当前快照具备完整
+RF/OpState 证据；缺项时动作失败，不能静默缩小集合或按未建模路径猜测下发。
+控制按实例编号排序后为每个目标小区生成参数；不存在可靠 RF、Admin/AdminRF、IPSec 和只读
+OpState 时拒绝创建控制 task，不回退到固定 `.1`。参数路径
 确认不等于设备执行成功，仍必须以 TR-069 task 终态和设备回执为准。
 
 控制动作以稳定 `action_key/command_key` 防重；动作记录保存契约版本、控制前值、请求值、
 控制回读、OpState 终态、轮询进度、截止时间、失败原因和父动作。回区只恢复本系统按新契约
-`verified` 的去激活动作，并只恢复本次实际改动且已 GPV 验证的参数；不存在已验证所有权时
-不自动激活。旧 RF/IPSec-only `verified` 记录保留历史事实，但不升级为真实小区去激活证据。
+`verified` 的去激活动作，并只恢复本次实际改动且已 GPV 验证的参数；恢复小区集合还要与当前
+`InUse/NumOfCells` 解析结果求交集，无法确认时只回退到原动作已拥有的最大实例集合，不能扩展到
+新出现的实例。不存在已验证所有权时不自动激活。旧 RF/IPSec-only `verified` 记录保留历史事实，
+但不升级为真实小区去激活证据。
 
 仓库核查确认：`SecGWServer1/2/3` 是设备南向参数，不是网关控制协议；老 OMC 的
 `FenceClient/FenceController` 已加密，189 页面也未提供控制请求和回执证据。不得基于

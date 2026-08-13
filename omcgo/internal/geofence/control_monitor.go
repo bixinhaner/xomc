@@ -191,7 +191,7 @@ func (m *GeofenceControlMonitor) handleExited(
 		payload.EffectiveStateVersion,
 	)
 	now := time.Now().UTC()
-	if err := m.queueDeviceControl(
+	queued, err := m.queueDeviceControl(
 		ctx,
 		deviceRecord,
 		false,
@@ -207,8 +207,12 @@ func (m *GeofenceControlMonitor) handleExited(
 			"geofence deactivation for effective state version %d",
 			payload.EffectiveStateVersion,
 		),
-	); err != nil {
+	)
+	if err != nil {
 		return err
+	}
+	if !queued {
+		return nil
 	}
 	m.logger.Info("geofence deactivation queued",
 		zap.String("device_id", payload.DeviceID.String()),
@@ -247,7 +251,7 @@ func (m *GeofenceControlMonitor) handleLifecycleDeactivation(
 		evt.ID,
 	)
 	now := time.Now().UTC()
-	if err := m.queueDeviceControl(
+	queued, err := m.queueDeviceControl(
 		ctx,
 		deviceRecord,
 		false,
@@ -263,8 +267,12 @@ func (m *GeofenceControlMonitor) handleLifecycleDeactivation(
 			payload.TargetStatus,
 			payload.GeofenceID,
 		),
-	); err != nil {
+	)
+	if err != nil {
 		return err
+	}
+	if !queued {
+		return nil
 	}
 	m.logger.Info("geofence lifecycle deactivation queued",
 		zap.String("serial_number", payload.SerialNumber),
@@ -565,27 +573,40 @@ func (m *GeofenceControlMonitor) handleEntered(
 	if deviceRecord == nil {
 		return fmt.Errorf("geofence activation device %q not found", payload.SerialNumber)
 	}
+	parameterSnapshot, err := m.parameters.GetByDevice(ctx, deviceRecord.ID)
+	if err != nil {
+		return fmt.Errorf("read current cell scope for geofence activation: %w", err)
+	}
+	restore := restoreTargets(deactivation.BeforeState, deactivation.VerifiedState)
+	terminals := originalTerminalTargets(deactivation.BeforeState)
+	restore, terminals = filterRestoreToEffectiveCells(
+		parameterSnapshot, deviceRecord.Technology, restore, terminals,
+	)
 	now := time.Now().UTC()
-	if err := m.queueDeviceControl(
+	queued, err := m.queueDeviceControl(
 		ctx,
 		deviceRecord,
 		true,
-		restoreTargets(deactivation.BeforeState, deactivation.VerifiedState),
+		restore,
 		&ControlAction{
 			ID: uuid.New(), ActionKey: activationKey, ParentActionID: &deactivation.ID,
 			DeviceID: deviceRecord.ID, DeviceSN: deviceRecord.SerialNumber,
 			EffectiveStateVersion: payload.EffectiveStateVersion,
 			ActionType:            ControlActionActivate, Status: ControlActionPending,
 			ContractVersion: GeofenceControlContractVersion,
-			TerminalState:   originalTerminalTargets(deactivation.BeforeState),
+			TerminalState:   terminals,
 			CreatedAt:       now, UpdatedAt: now,
 		},
 		fmt.Sprintf(
 			"geofence activation after completed deactivation %s",
 			deactivation.ActionKey,
 		),
-	); err != nil {
+	)
+	if err != nil {
 		return err
+	}
+	if !queued {
+		return nil
 	}
 	m.logger.Info("geofence activation queued",
 		zap.String("serial_number", payload.SerialNumber),
@@ -600,72 +621,88 @@ func (m *GeofenceControlMonitor) queueDeviceControl(
 	targets []carrier.GeofenceControlParameter,
 	action *ControlAction,
 	description string,
-) error {
+) (bool, error) {
 	if m.history == nil {
-		return fmt.Errorf("geofence control task history is not configured")
+		return false, fmt.Errorf("geofence control task history is not configured")
 	}
 	if m.actions == nil {
-		return fmt.Errorf("geofence control action repository is not configured")
+		return false, fmt.Errorf("geofence control action repository is not configured")
 	}
 	if action == nil || strings.TrimSpace(action.ActionKey) == "" {
-		return fmt.Errorf("geofence control action is required")
+		return false, fmt.Errorf("geofence control action is required")
 	}
 	release, err := m.history.AcquireCommandKeyLock(ctx, action.ActionKey)
 	if err != nil {
-		return fmt.Errorf("lock geofence control command key: %w", err)
+		return false, fmt.Errorf("lock geofence control command key: %w", err)
 	}
 	defer release()
 
 	existing, err := m.history.GetByCommandKey(ctx, action.ActionKey)
 	if err != nil {
-		return fmt.Errorf("check geofence control duplicate: %w", err)
+		return false, fmt.Errorf("check geofence control duplicate: %w", err)
 	}
 	if existing != nil {
 		stored, loadErr := m.actions.GetByActionKey(ctx, action.ActionKey)
 		if loadErr != nil {
-			return fmt.Errorf("load duplicate geofence control action: %w", loadErr)
+			return false, fmt.Errorf("load duplicate geofence control action: %w", loadErr)
 		}
 		if stored != nil && stored.Status == ControlActionPending {
 			if updateErr := m.actions.UpdateStatus(
 				ctx, stored.ID, ControlActionExecuting,
 			); updateErr != nil {
-				return fmt.Errorf("mark queued geofence action executing: %w", updateErr)
+				return false, fmt.Errorf("mark queued geofence action executing: %w", updateErr)
 			}
 		}
 		m.logger.Info("skip duplicate geofence control",
 			zap.String("serial_number", deviceRecord.SerialNumber),
 			zap.String("action_id", action.ActionKey),
 		)
-		return nil
+		return false, nil
 	}
 	stored, err := m.actions.GetByActionKey(ctx, action.ActionKey)
 	if err != nil {
-		return fmt.Errorf("load geofence control action: %w", err)
+		return false, fmt.Errorf("load geofence control action: %w", err)
 	}
 	var plan geofenceControlPlan
 	var params []byte
 	if stored != nil {
 		if stored.Status != ControlActionPending {
-			return nil
+			return false, nil
 		}
 		plan = geofenceControlPlan{
 			Before: stored.BeforeState, Requested: stored.RequestedState,
 		}
 		params, err = marshalGeofenceControlPayload(plan.Requested)
 		if err != nil {
-			return fmt.Errorf("marshal pending geofence control parameters: %w", err)
+			return false, fmt.Errorf("marshal pending geofence control parameters: %w", err)
 		}
 	} else {
 		carrierAdapter, resolveErr := m.carriers.Get(deviceRecord.Carrier)
 		if resolveErr != nil {
-			return fmt.Errorf("resolve geofence control carrier: %w", resolveErr)
+			return false, fmt.Errorf("resolve geofence control carrier: %w", resolveErr)
 		}
 		plan, params, err = m.geofenceControlPlan(
 			ctx, carrierAdapter, deviceRecord, enabled, targets, action.TerminalState,
 			action.ActionType == ControlActionActivate,
 		)
 		if err != nil {
-			return err
+			completedAt := time.Now().UTC()
+			action.Status = ControlActionFailed
+			action.LastError = err.Error()
+			action.CompletedAt = &completedAt
+			action.UpdatedAt = completedAt
+			if action.ContractVersion == 0 {
+				action.ContractVersion = GeofenceControlContractVersion
+			}
+			if _, _, createErr := m.actions.Create(ctx, action); createErr != nil {
+				return false, fmt.Errorf("persist failed geofence control action after %v: %w", err, createErr)
+			}
+			m.logger.Warn("geofence control rejected before dispatch",
+				zap.String("serial_number", deviceRecord.SerialNumber),
+				zap.String("action_id", action.ActionKey),
+				zap.Error(err),
+			)
+			return false, nil
 		}
 		action.BeforeState = plan.Before
 		action.RequestedState = plan.Requested
@@ -675,11 +712,14 @@ func (m *GeofenceControlMonitor) queueDeviceControl(
 		}
 		stored, _, err = m.actions.Create(ctx, action)
 		if err != nil {
-			return fmt.Errorf("create geofence control action: %w", err)
+			return false, fmt.Errorf("create geofence control action: %w", err)
 		}
 	}
 	if len(plan.Requested) == 0 {
-		return m.queueControlVerification(ctx, stored)
+		if err := m.queueControlVerification(ctx, stored); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	_, err = m.tasks.CreateTask(ctx, &task.CreateTaskRequest{
 		DeviceSN:    deviceRecord.SerialNumber,
@@ -693,12 +733,12 @@ func (m *GeofenceControlMonitor) queueDeviceControl(
 		Description: description,
 	})
 	if err != nil {
-		return fmt.Errorf("queue geofence control: %w", err)
+		return false, fmt.Errorf("queue geofence control: %w", err)
 	}
 	if err := m.actions.UpdateStatus(ctx, stored.ID, ControlActionExecuting); err != nil {
-		return fmt.Errorf("mark geofence action executing: %w", err)
+		return false, fmt.Errorf("mark geofence action executing: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func intPtr(value int) *int {

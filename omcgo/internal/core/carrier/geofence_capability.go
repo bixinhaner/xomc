@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -49,7 +50,15 @@ var (
 	globalIPSecPathPattern = regexp.MustCompile(
 		`^Device\.Services\.FAPService\.Ipsec\.IPSEC_ENABLE$`,
 	)
+	lteInUsePathPattern = regexp.MustCompile(
+		`^Device\.Services\.FAPService\.([0-9]+)\.FAPControl\.LTE\.InUse$`,
+	)
 )
+
+var geofenceCellCountPaths = []string{
+	"Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells",
+	"Device.Services.FAPService.1.CellConfig.NR.RAN.CA.PARAMS.NumOfCells",
+}
 
 // BuildGeofenceDeactivationCapabilityForSnapshotWithMappings resolves the
 // complete mandatory contract: writable Admin, RF and IPSec controls plus a
@@ -80,19 +89,51 @@ func BuildGeofenceDeactivationCapabilityForSnapshotWithMappings(
 		)
 	}
 
-	adminPaths := selectCapabilityPaths(parameters, mappings, tech, GeofenceRoleAdmin, true)
-	combinedAdminRF := selectAdminRFControlPaths(productClass, rfPaths, mappings)
-	if len(adminPaths) == 0 && len(combinedAdminRF) == 0 {
-		return GeofenceDeactivationCapability{}, fmt.Errorf(
-			"product class %q has no model-proven writable cell administration control", productClass,
-		)
-	}
 	opStatePaths := selectCapabilityPaths(
 		parameters, mappings, tech, GeofenceRoleOpState, false,
 	)
 	if len(opStatePaths) == 0 {
 		return GeofenceDeactivationCapability{}, fmt.Errorf(
 			"product class %q has no model-proven read-only cell runtime state", productClass,
+		)
+	}
+	observedInstances := capabilityInstances(tech, GeofenceRoleOpState, opStatePaths)
+	maximumInstances := modelMaximumGeofenceCellInstances(mappings)
+	if len(maximumInstances) == 0 {
+		maximumInstances = observedInstances
+	}
+	effectiveInstances := resolveEffectiveGeofenceCellInstances(
+		parameters, tech, maximumInstances,
+	)
+	rfPaths = filterCapabilityPathsByInstances(
+		tech, GeofenceRoleRF, rfPaths, effectiveInstances,
+	)
+	opStatePaths = filterCapabilityPathsByInstances(
+		tech, GeofenceRoleOpState, opStatePaths, effectiveInstances,
+	)
+	adminPaths := filterCapabilityPathsByInstances(
+		tech,
+		GeofenceRoleAdmin,
+		selectCapabilityPaths(parameters, mappings, tech, GeofenceRoleAdmin, true),
+		effectiveInstances,
+	)
+	adminControls := make([]GeofenceControlParameter, 0, len(adminPaths))
+	for _, path := range adminPaths {
+		adminControls = append(adminControls, GeofenceControlParameter{
+			Path: path, Role: GeofenceRoleAdmin, AccessProven: true,
+			AppliesToAllCells: mappedAdminAppliesToAllCells(path, mappings),
+		})
+	}
+	if len(adminControls) == 0 {
+		adminControls = selectPrivateMappedAdminControls(
+			parameters, mappings, tech, effectiveInstances,
+		)
+		adminPaths = controlParameterPaths(adminControls)
+	}
+	combinedAdminRF := selectAdminRFControlPaths(productClass, rfPaths, mappings)
+	if len(adminPaths) == 0 && len(combinedAdminRF) == 0 {
+		return GeofenceDeactivationCapability{}, fmt.Errorf(
+			"product class %q has no model-proven writable cell administration control", productClass,
 		)
 	}
 	adminCoverage := adminPaths
@@ -103,6 +144,7 @@ func BuildGeofenceDeactivationCapabilityForSnapshotWithMappings(
 	}
 	if err := validateCellCapabilityCoverage(
 		tech, adminRole, adminCoverage, rfPaths, opStatePaths,
+		effectiveInstances, hasAllCellAdminControl(adminControls),
 	); err != nil {
 		return GeofenceDeactivationCapability{}, fmt.Errorf(
 			"product class %q cell capability is incomplete: %w", productClass, err,
@@ -117,7 +159,7 @@ func BuildGeofenceDeactivationCapabilityForSnapshotWithMappings(
 	}
 
 	capability := GeofenceDeactivationCapability{
-		Controls:  make([]GeofenceControlParameter, 0, len(adminPaths)+len(rfPaths)+len(ipsecPaths)),
+		Controls:  make([]GeofenceControlParameter, 0, len(adminControls)+len(rfPaths)+len(ipsecPaths)),
 		Terminals: make([]GeofenceControlParameter, 0, len(opStatePaths)),
 	}
 	// Deactivation order is Admin -> RF -> IPSec. Restoration is reordered by
@@ -129,10 +171,9 @@ func BuildGeofenceDeactivationCapabilityForSnapshotWithMappings(
 			})
 		}
 	} else {
-		for _, path := range adminPaths {
-			capability.Controls = append(capability.Controls, GeofenceControlParameter{
-				Path: path, Value: value, Role: GeofenceRoleAdmin, AccessProven: true,
-			})
+		for _, control := range adminControls {
+			control.Value = value
+			capability.Controls = append(capability.Controls, control)
 		}
 	}
 	for _, path := range rfPaths {
@@ -154,6 +195,319 @@ func BuildGeofenceDeactivationCapabilityForSnapshotWithMappings(
 		})
 	}
 	return capability, nil
+}
+
+// resolveEffectiveGeofenceCellInstances applies the device's current cell-use
+// facts when they are reliable. If they are absent or contradictory, the
+// caller-approved business fallback is the product model's maximum cell set.
+func resolveEffectiveGeofenceCellInstances(
+	parameters []model.DeviceParameter,
+	tech model.Technology,
+	maximum map[int]struct{},
+) map[int]struct{} {
+	if len(maximum) == 0 {
+		return maximum
+	}
+	if tech == model.TechLTE {
+		inUse, observed, valid := geofenceLTEInUseInstances(parameters)
+		if valid && len(inUse) > 0 && sameInstances(observed, maximum) {
+			return inUse
+		}
+	}
+	if count, observed, valid := geofenceConfiguredCellCount(parameters); observed && valid {
+		configured := make(map[int]struct{}, count)
+		for instance := 1; instance <= count; instance++ {
+			configured[instance] = struct{}{}
+		}
+		if instancesSubset(configured, maximum) {
+			return configured
+		}
+	}
+	return maximum
+}
+
+// ResolveEffectiveGeofenceCellInstances is also used when restoring a verified
+// action. The maximum input is the immutable cell set owned by that action;
+// current InUse/NumOfCells may narrow it, but can never expand it.
+func ResolveEffectiveGeofenceCellInstances(
+	parameters []model.DeviceParameter,
+	tech model.Technology,
+	maximum []int,
+) []int {
+	maximumSet := make(map[int]struct{}, len(maximum))
+	for _, instance := range maximum {
+		if instance > 0 {
+			maximumSet[instance] = struct{}{}
+		}
+	}
+	effective := resolveEffectiveGeofenceCellInstances(parameters, tech, maximumSet)
+	result := make([]int, 0, len(effective))
+	for instance := range effective {
+		result = append(result, instance)
+	}
+	sort.Ints(result)
+	return result
+}
+
+// GeofenceCellInstance extracts the physical cell index for a canonical
+// geofence role. Device-scoped controls such as IPSec intentionally return no
+// instance and are not removed by cell filtering.
+func GeofenceCellInstance(
+	tech model.Technology,
+	role GeofenceParameterRole,
+	path string,
+) (int, bool) {
+	instances := capabilityInstances(tech, role, []string{path})
+	if len(instances) != 1 {
+		return 0, false
+	}
+	for instance := range instances {
+		return instance, true
+	}
+	return 0, false
+}
+
+func geofenceLTEInUseInstances(
+	parameters []model.DeviceParameter,
+) (map[int]struct{}, map[int]struct{}, bool) {
+	result := make(map[int]struct{})
+	observed := make(map[int]struct{})
+	for _, parameter := range parameters {
+		matches := lteInUsePathPattern.FindStringSubmatch(parameter.ParameterPath)
+		if len(matches) != 2 {
+			continue
+		}
+		instance, err := strconv.Atoi(matches[1])
+		if err != nil || instance < 1 {
+			return nil, observed, false
+		}
+		observed[instance] = struct{}{}
+		enabled, valid := geofenceBooleanValue(parameter.ParameterValue)
+		if !valid {
+			return nil, observed, false
+		}
+		if enabled {
+			result[instance] = struct{}{}
+		}
+	}
+	return result, observed, true
+}
+
+func geofenceConfiguredCellCount(
+	parameters []model.DeviceParameter,
+) (int, bool, bool) {
+	count := 0
+	observed := false
+	for _, parameter := range parameters {
+		if !stringInSet(parameter.ParameterPath, geofenceCellCountPaths) {
+			continue
+		}
+		parsed, err := strconv.Atoi(strings.TrimSpace(parameter.ParameterValue))
+		if err != nil || parsed < 1 {
+			return 0, true, false
+		}
+		if observed && count != parsed {
+			return 0, true, false
+		}
+		count, observed = parsed, true
+	}
+	return count, observed, true
+}
+
+func modelMaximumGeofenceCellInstances(
+	mappings []GeofenceControlMapping,
+) map[int]struct{} {
+	enumMaximum := 0
+	radioModes := ""
+	for _, mapping := range mappings {
+		if radioModes == "" {
+			radioModes = strings.TrimSpace(mapping.ProductRadioModes)
+		}
+		if !mapping.IsActive || !mapping.IsSupported || !isParameterEntry(mapping.EntryType) ||
+			(!stringInSet(mapping.StandardPath, geofenceCellCountPaths) &&
+				!stringInSet(mapping.PrivatePath, geofenceCellCountPaths) &&
+				!strings.HasSuffix(mapping.StandardPath, ".CellConfig.LTE.RAN.CA.PARAMS.NumOfCells") &&
+				!strings.HasSuffix(mapping.StandardPath, ".CellConfig.NR.RAN.CA.PARAMS.NumOfCells")) {
+			continue
+		}
+		for _, raw := range strings.Split(mapping.EnumValues, ",") {
+			value, err := strconv.Atoi(strings.TrimSpace(raw))
+			if err == nil && value > enumMaximum {
+				enumMaximum = value
+			}
+		}
+	}
+	maximum := maximumCellCountForRadioModes(radioModes, enumMaximum)
+	instances := make(map[int]struct{}, maximum)
+	for instance := 1; instance <= maximum; instance++ {
+		instances[instance] = struct{}{}
+	}
+	return instances
+}
+
+func maximumCellCountForRadioModes(radioModes string, enumMaximum int) int {
+	modeMaximum := 0
+	carrierAggregation := false
+	for _, raw := range strings.Split(radioModes, ",") {
+		switch strings.ToUpper(strings.TrimSpace(raw)) {
+		case "SC":
+			if modeMaximum < 1 {
+				modeMaximum = 1
+			}
+		case "DC":
+			if modeMaximum < 2 {
+				modeMaximum = 2
+			}
+		case "TC":
+			if modeMaximum < 3 {
+				modeMaximum = 3
+			}
+		case "CA":
+			carrierAggregation = true
+		}
+	}
+	if carrierAggregation && enumMaximum > modeMaximum {
+		return enumMaximum
+	}
+	if modeMaximum > 0 {
+		return modeMaximum
+	}
+	return enumMaximum
+}
+
+func geofenceBooleanValue(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "on", "enabled", "enable", "active":
+		return true, true
+	case "0", "false", "off", "disabled", "disable", "inactive":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func instancesSubset(subset, set map[int]struct{}) bool {
+	for instance := range subset {
+		if _, exists := set[instance]; !exists {
+			return false
+		}
+	}
+	return true
+}
+
+func sameInstances(left, right map[int]struct{}) bool {
+	return len(left) == len(right) && instancesSubset(left, right)
+}
+
+func filterCapabilityPathsByInstances(
+	tech model.Technology,
+	role GeofenceParameterRole,
+	paths []string,
+	instances map[int]struct{},
+) []string {
+	result := make([]string, 0, len(paths))
+	for _, path := range paths {
+		pathInstances := capabilityInstances(tech, role, []string{path})
+		for instance := range pathInstances {
+			if _, exists := instances[instance]; exists {
+				result = append(result, path)
+			}
+		}
+	}
+	return result
+}
+
+func selectPrivateMappedAdminControls(
+	parameters []model.DeviceParameter,
+	mappings []GeofenceControlMapping,
+	tech model.Technology,
+	effective map[int]struct{},
+) []GeofenceControlParameter {
+	result := make([]GeofenceControlParameter, 0)
+	seen := make(map[string]struct{})
+	for _, parameter := range parameters {
+		for _, mapping := range mappings {
+			if !mapping.IsActive || !mapping.IsSupported || !isParameterEntry(mapping.EntryType) ||
+				!isReadWriteAccess(mapping.Access) ||
+				!pathHasCapabilityRole(mapping.StandardPath, tech, GeofenceRoleAdmin) ||
+				!mappingPathMatches(mapping.PrivatePath, parameter.ParameterPath) {
+				continue
+			}
+			standardPath, resolved := instantiateMappedPath(
+				mapping.StandardPath, mapping.PrivatePath, parameter.ParameterPath,
+			)
+			if !resolved && !strings.Contains(mapping.PrivatePath, "{i}") && len(effective) == 1 {
+				for instance := range effective {
+					standardPath = strings.ReplaceAll(mapping.StandardPath, "{i}", strconv.Itoa(instance))
+				}
+				resolved = !strings.Contains(standardPath, "{i}")
+			}
+			if !resolved || !pathHasCapabilityRole(standardPath, tech, GeofenceRoleAdmin) {
+				continue
+			}
+			if _, exists := seen[standardPath]; exists {
+				continue
+			}
+			seen[standardPath] = struct{}{}
+			result = append(result, GeofenceControlParameter{
+				Path: standardPath, SnapshotPath: parameter.ParameterPath,
+				Role: GeofenceRoleAdmin, AccessProven: true,
+				AppliesToAllCells: !strings.Contains(mapping.PrivatePath, "{i}") &&
+					!pathHasNumericCellInstance(mapping.PrivatePath),
+			})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Path < result[j].Path })
+	return result
+}
+
+func pathHasNumericCellInstance(path string) bool {
+	return lteAdminPathPattern.MatchString(strings.TrimSpace(path)) ||
+		nrAdminPathPattern.MatchString(strings.TrimSpace(path))
+}
+
+func mappedAdminAppliesToAllCells(
+	standardPath string,
+	mappings []GeofenceControlMapping,
+) bool {
+	for _, mapping := range mappings {
+		if !mapping.IsActive || !mapping.IsSupported || !isParameterEntry(mapping.EntryType) ||
+			!isReadWriteAccess(mapping.Access) ||
+			!mappingPathMatches(mapping.StandardPath, standardPath) {
+			continue
+		}
+		if !strings.Contains(mapping.PrivatePath, "{i}") &&
+			!pathHasNumericCellInstance(mapping.PrivatePath) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAllCellAdminControl(controls []GeofenceControlParameter) bool {
+	for _, control := range controls {
+		if control.AppliesToAllCells {
+			return true
+		}
+	}
+	return false
+}
+
+func controlParameterPaths(parameters []GeofenceControlParameter) []string {
+	result := make([]string, 0, len(parameters))
+	for _, parameter := range parameters {
+		result = append(result, parameter.Path)
+	}
+	return result
+}
+
+func stringInSet(target string, values []string) bool {
+	for _, value := range values {
+		if target == value {
+			return true
+		}
+	}
+	return false
 }
 
 // selectAdminRFControlPaths recognizes a product-model-proven combined cell
@@ -338,16 +692,23 @@ func validateCellCapabilityCoverage(
 	admins []string,
 	rfPaths []string,
 	opStates []string,
+	expectedInstances map[int]struct{},
+	allCellAdmin bool,
 ) error {
 	adminInstances := capabilityInstances(tech, adminRole, admins)
 	rfInstances := capabilityInstances(tech, GeofenceRoleRF, rfPaths)
 	opStateInstances := capabilityInstances(tech, GeofenceRoleOpState, opStates)
-	if len(adminInstances) != len(opStateInstances) {
+	if err := validateExpectedGeofenceInstances("OpState", opStateInstances, expectedInstances); err != nil {
+		return err
+	}
+	if !allCellAdmin && len(adminInstances) != len(opStateInstances) {
 		return fmt.Errorf("Admin/OpState instance count differs (%d/%d)", len(adminInstances), len(opStateInstances))
 	}
-	for instance := range adminInstances {
-		if _, ok := opStateInstances[instance]; !ok {
-			return fmt.Errorf("Admin instance %d has no read-only OpState", instance)
+	if !allCellAdmin {
+		for instance := range adminInstances {
+			if _, ok := opStateInstances[instance]; !ok {
+				return fmt.Errorf("Admin instance %d has no read-only OpState", instance)
+			}
 		}
 	}
 	if adminRole != GeofenceRoleAdminRF {
@@ -358,6 +719,22 @@ func validateCellCapabilityCoverage(
 			if _, ok := rfInstances[instance]; !ok {
 				return fmt.Errorf("OpState instance %d has no writable RF control", instance)
 			}
+		}
+	}
+	return nil
+}
+
+func validateExpectedGeofenceInstances(
+	role string,
+	actual map[int]struct{},
+	expected map[int]struct{},
+) error {
+	if len(actual) != len(expected) {
+		return fmt.Errorf("%s/model maximum instance count differs (%d/%d)", role, len(actual), len(expected))
+	}
+	for instance := range expected {
+		if _, exists := actual[instance]; !exists {
+			return fmt.Errorf("%s instance %d is missing from the current snapshot", role, instance)
 		}
 	}
 	return nil

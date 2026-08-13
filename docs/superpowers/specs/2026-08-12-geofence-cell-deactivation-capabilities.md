@@ -25,11 +25,27 @@
 恢复顺序统一为 IPSec → RF → Admin/AdminRF，最后轮询原始运行终态。只恢复本围栏实际修改且
 GPV 已验证的控制。
 
+目标小区实例按以下顺序解析：
+
+1. 当前快照存在合法 `FAPControl.LTE.InUse` 时，只控制 `InUse=true` 的实例；
+2. 否则使用合法 `NumOfCells` 对应的连续 `1..N`；
+3. 两者缺失、非法或与当前运行快照冲突时，按业务连续性要求回退到产品装配 `radioModes` 与
+   ParamModel `NumOfCells.enumValues` 共同声明的设备最大能力。例如 MLN/0041 的最大能力是三小区，
+   当前 SC 模式不改变该产品能力上限；BAIBLQ/SC 与共享 BLQ 模型的 QRTB（436Q）则分别收敛为
+   最大 1 和 2；249 属于 MLQ，不与 BAIBLQ 混称。
+   最大集合中的每个实例仍须具备可写控制和只读终态快照证据；缺项时明确失败，不能静默缩成较小
+   集合，也不允许合成无法回读或无法恢复的路径。
+
+回区恢复使用“原动作实际修改且验证成功的实例 ∩ 当前有效实例”；当前有效实例仍无法确认时，
+最多恢复原动作拥有的实例，不能扩展到后来新出现的实例。`OpState` 只判断运行终态，不用于判断
+小区是否配置有效。
+
 ## 产品矩阵
 
 | 产品 / ParamModel | RF / 私有映射 | 管理控制 | 只读终态 | IPSec | 联动证据与启用结论 |
 |---|---|---|---|---|---|
-| BLQ、BLX、QRTB、mBS31001 / BLQ | `RFTxStatus` → `X_COM_RadioEnable`，1/0 | 当前运行模型缺失；交付参考 XML 存在 `Device.DeviceInfo.FAP_adminstate` → `FAPControl.LTE.AdminState` 候选，但未进入运行模型且 251 未回读到该路径 | `FAPControl.LTE.OpState` RO | 全局及 tunnel enable | 251 已实证 RF=false、OpState=true，不联动；Admin 路径和语义经真机确认前 fail closed |
+| BLQ / BLQ | `RFTxStatus` → `X_COM_RadioEnable`，1/0 | 运行模型补齐 `Device.DeviceInfo.FAP_adminstate` ↔ `FAPService.1.FAPControl.LTE.AdminState` 双向映射，按独立 Admin + RF 控制 | `FAPControl.LTE.OpState` RO | 全局及 tunnel enable | 251 已实证 RF=false、OpState=true，不联动；代码门禁已补齐，须以 104 的 0005 完整 SPV/GPV/OpState/恢复验收签署 |
+| BLX、QRTB、mBS31001 / BLQ | `RFTxStatus` → `X_COM_RadioEnable` | 私有 `FAP_adminstate` 为设备级无实例路径，尚无多小区覆盖语义证据 | `FAPControl.LTE.OpState` RO | 全局及 tunnel enable | 不把 BLQ/SC 的具体实例映射外推到多小区产品；管理覆盖不完整时 fail closed |
 | MLQ / MLQ | `RFTxStatus` → `X_COM_RadioEnable` | 交付模型缺失 | `FAPControl.LTE.OpState` RO | 全局、tunnel、MultiIpsec | 未取得 Admin 真机证据，fail closed |
 | BLN / BLN | `RFTxStatus` → `AdminCellState` | 模型另有 `AdminState`；因 452 证据属于 MLN，BLN 不继承 `AdminRF` 联动语义，按独立 Admin + RF 控制 | `FAPControl.LTE.OpState` RO | 全局及 tunnel | 静态能力完整；必须以 OpState 轮询判断终态，不假设 RF 自动联动 |
 | MLN / MLN（452 产品） | `RFTxStatus` → `AdminCellState` | 251 现场已验证 `AdminCellState` 作为 `AdminRF` 组合控制，避免与 `AdminState` 重复下发 | `FAPControl.LTE.OpState` RO | 全局及 tunnel | SN `120200055922C8B0068` 已在 251 验证越界后去激活；新门禁仍要求 GPV 控制值和 OpState=0 才标记 Verified |
@@ -56,7 +72,8 @@ GPV 已验证的控制。
 ### 452 产品（251 测试服务器），SN 120200055922C8B0068
 
 - 2026-08-12 17:48:01，真实 SPV 对 FAPService 1/2/3 下发私有
-  `CellConfig.LTE.RAN.RF.AdminCellState=0`；
+  `CellConfig.LTE.RAN.RF.AdminCellState=0`；该历史请求包含三个模型实例，不再作为“三个实例均为
+  当前有效小区”的依据；新实现必须先按 `InUse/NumOfCells` 解析目标集合；
 - 设备返回 `SetParameterValuesResponse/Status=1`；无论 SPV 协议响应如何，仍需后续 GPV 和
   OpState 终态，不能单独作为新控制动作的 Verified；
 - 17:49:54 设备列表显示“未激活、射频关”。
@@ -70,7 +87,7 @@ GPV、三个小区 OpState=0、IPSec 以及控制动作终态。
 
 ```text
 outside
-  → capability resolve / fail closed
+  → capability resolve + effective cells (InUse → NumOfCells → product/model maximum capability)
   → snapshot controls + OpState
   → SPV(Admin/AdminRF → RF → IPSec)
   → GPV controls
@@ -78,7 +95,7 @@ outside
   → Verified
 
 inside
-  → select only changed-and-verified owned controls
+  → select changed-and-verified owned controls ∩ current effective cells
   → SPV(IPSec → RF → Admin/AdminRF)
   → GPV controls
   → poll original OpState (active if originally active)

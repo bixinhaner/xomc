@@ -41,9 +41,11 @@ func (status ControlActionStatus) IsTerminal() bool {
 // geofence control action. Paths are stored in the standard model so the
 // record remains stable when a product-private mapping changes.
 type ControlParameterState struct {
-	Path  string                        `json:"path"`
-	Value string                        `json:"value"`
-	Role  carrier.GeofenceParameterRole `json:"role,omitempty"`
+	Path              string                        `json:"path"`
+	ObservedPath      string                        `json:"observed_path,omitempty"`
+	Value             string                        `json:"value"`
+	Role              carrier.GeofenceParameterRole `json:"role,omitempty"`
+	AppliesToAllCells bool                          `json:"applies_to_all_cells,omitempty"`
 }
 
 // ControlAction is the durable ownership boundary between a geofence state

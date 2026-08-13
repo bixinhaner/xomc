@@ -342,6 +342,35 @@ func TestGeofenceControlMonitorNoOpControlsStillVerifyOpState(t *testing.T) {
 	require.NotContains(t, string(tasks.request.Params), "X_COM_RadioEnable")
 }
 
+func TestGeofenceControlMonitorPersistsCapabilityFailure(t *testing.T) {
+	tasks := &controlTaskStub{}
+	actions := newControlActionRepositoryStub()
+	monitor := NewGeofenceControlMonitor(
+		controlDeviceReaderStub{device: &model.Device{
+			ID: uuid.New(), SerialNumber: "SN-CONTROL-1", ProductClass: "FAP/BAIBLQ/SC",
+			Carrier: model.CarrierCMCC, Technology: model.TechLTE,
+		}},
+		controlCarrierRegistry(), tasks, zap.NewNop(),
+	)
+	monitor.SetParameterReader(controlParameterReader(1))
+	monitor.SetMappingReader(controlMappingReaderStub{})
+	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
+	monitor.SetActionRepository(actions)
+
+	err := monitor.handleExited(
+		context.Background(), controlExitEvent(t, string(ActionLevelDeactivate)),
+	)
+
+	require.NoError(t, err)
+	require.Nil(t, tasks.request)
+	require.Len(t, actions.actions, 1)
+	for _, action := range actions.actions {
+		require.Equal(t, ControlActionFailed, action.Status)
+		require.Contains(t, action.LastError, "has no ParamModel mappings")
+		require.NotNil(t, action.CompletedAt)
+	}
+}
+
 func TestGeofenceControlMonitorQueuesMBS31001IPSecDeactivation(t *testing.T) {
 	tasks := &controlTaskStub{}
 	monitor := NewGeofenceControlMonitor(

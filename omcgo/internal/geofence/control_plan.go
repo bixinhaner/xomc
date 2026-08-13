@@ -75,7 +75,11 @@ func buildGeofenceControlPlanWithTerminal(
 				"normalize geofence target %s: %w", target.Path, err,
 			)
 		}
-		current, ok := findControlParameterSnapshot(snapshot, target.Path)
+		snapshotPath := target.SnapshotPath
+		if snapshotPath == "" {
+			snapshotPath = target.Path
+		}
+		current, ok := findControlParameterSnapshot(snapshot, snapshotPath)
 		if !ok {
 			return geofenceControlPlan{}, fmt.Errorf(
 				"geofence control parameter %s is missing from the device snapshot", target.Path,
@@ -94,11 +98,14 @@ func buildGeofenceControlPlanWithTerminal(
 			)
 		}
 		plan.Before = append(plan.Before, ControlParameterState{
-			Path: target.Path, Value: currentValue, Role: target.Role,
+			Path: target.Path, ObservedPath: target.SnapshotPath,
+			Value: currentValue, Role: target.Role,
+			AppliesToAllCells: target.AppliesToAllCells,
 		})
 		if forceRequested || currentValue != targetValue {
 			plan.Requested = append(plan.Requested, ControlParameterState{
 				Path: target.Path, Value: targetValue, Role: target.Role,
+				AppliesToAllCells: target.AppliesToAllCells,
 			})
 		}
 	}
@@ -209,13 +216,72 @@ func restoreTargets(
 			continue
 		}
 		targets = append(targets, carrier.GeofenceControlParameter{
-			Path: state.Path, Value: state.Value, Role: state.Role, AccessProven: true,
+			Path: state.Path, SnapshotPath: state.ObservedPath,
+			Value: state.Value, Role: state.Role, AccessProven: true,
+			AppliesToAllCells: state.AppliesToAllCells,
 		})
 	}
 	sort.SliceStable(targets, func(i, j int) bool {
 		return geofenceRestoreRolePriority(targets[i]) < geofenceRestoreRolePriority(targets[j])
 	})
 	return targets
+}
+
+func filterRestoreToEffectiveCells(
+	snapshot []model.DeviceParameter,
+	tech model.Technology,
+	targets []carrier.GeofenceControlParameter,
+	terminals []ControlParameterState,
+) ([]carrier.GeofenceControlParameter, []ControlParameterState) {
+	maximumSet := make(map[int]struct{})
+	for _, terminal := range terminals {
+		if instance, ok := carrier.GeofenceCellInstance(
+			tech, carrier.GeofenceRoleOpState, terminal.Path,
+		); ok {
+			maximumSet[instance] = struct{}{}
+		}
+	}
+	if len(maximumSet) == 0 {
+		return targets, terminals
+	}
+	maximum := make([]int, 0, len(maximumSet))
+	for instance := range maximumSet {
+		maximum = append(maximum, instance)
+	}
+	effectiveList := carrier.ResolveEffectiveGeofenceCellInstances(snapshot, tech, maximum)
+	effective := make(map[int]struct{}, len(effectiveList))
+	for _, instance := range effectiveList {
+		effective[instance] = struct{}{}
+	}
+
+	filteredTargets := make([]carrier.GeofenceControlParameter, 0, len(targets))
+	for _, target := range targets {
+		if target.AppliesToAllCells {
+			filteredTargets = append(filteredTargets, target)
+			continue
+		}
+		instance, cellScoped := carrier.GeofenceCellInstance(tech, target.Role, target.Path)
+		if !cellScoped {
+			filteredTargets = append(filteredTargets, target)
+			continue
+		}
+		if _, exists := effective[instance]; exists {
+			filteredTargets = append(filteredTargets, target)
+		}
+	}
+	filteredTerminals := make([]ControlParameterState, 0, len(terminals))
+	for _, terminal := range terminals {
+		instance, cellScoped := carrier.GeofenceCellInstance(
+			tech, carrier.GeofenceRoleOpState, terminal.Path,
+		)
+		if !cellScoped {
+			continue
+		}
+		if _, exists := effective[instance]; exists {
+			filteredTerminals = append(filteredTerminals, terminal)
+		}
+	}
+	return filteredTargets, filteredTerminals
 }
 
 func geofenceRestoreRolePriority(parameter carrier.GeofenceControlParameter) int {
