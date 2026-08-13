@@ -32,6 +32,7 @@ interface ParamConfigDetailSource {
   bearType?: unknown;
   prefixLength?: unknown;
   vlanName?: unknown;
+  workbookMappings?: Array<{ sheet: string; header: string; trPath: string }>;
 }
 
 const ENB_IPSEC_FIELD_MAPPINGS = [
@@ -116,6 +117,15 @@ function serialHeader(headers: readonly string[]): string | undefined {
   return headers.find((header) => (
     header.replace(/^\*/, '').replace(/[\s_]+/g, '').toLowerCase() === 'serialnumber'
   ));
+}
+
+function mappedParameterValues(config: ParamConfigDetailSource): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const mapping of config.workbookMappings ?? []) {
+    const mappedValue = config.sheetParameters?.[mapping.sheet]?.[0]?.[mapping.header];
+    if (mappedValue !== undefined) values[mapping.trPath] = mappedValue;
+  }
+  return values;
 }
 
 export function withTemplateSheetParameters<T extends ParamConfigDetailSource>(
@@ -224,6 +234,19 @@ export function mergeParamConfigFormValues<T extends ParamConfigDetailSource>(
   const sheets = sanitizeRetiredParamConfigFields(
     cloneSheets(submitted.sheetParameters as ImportedSheetParameters),
   );
+  const networkParameterValues = submitted.networkParameterValues as Record<string, unknown> | undefined;
+  if (networkParameterValues) {
+    for (const mapping of current.workbookMappings ?? []) {
+      if (Object.prototype.hasOwnProperty.call(networkParameterValues, mapping.trPath)) {
+        setFirstSheetValue(
+          sheets,
+          mapping.sheet,
+          mapping.header,
+          networkParameterValues[mapping.trPath],
+        );
+      }
+    }
+  }
   const mappings = current.deviceType === 'gNB'
     ? GNB_SHEET_FIELD_MAPPINGS
     : current.deviceType === 'eNB'
@@ -325,6 +348,7 @@ export function toParamConfigFormValues(
   config: ParamConfigDetailSource,
 ): Record<string, unknown> {
   const sheets = config.sheetParameters;
+  const networkParameterValues = mappedParameterValues(config);
   const cell = firstRow(sheets, 'CELL');
   const plmnRows = sheets?.PLMN ?? [];
   const firstPlmn = plmnRows[0] ?? {};
@@ -348,6 +372,7 @@ export function toParamConfigFormValues(
     });
     return {
       ...config,
+      ...(Object.keys(networkParameterValues).length > 0 ? { networkParameterValues } : {}),
       ...compact({
         IPSEC_ENABLE: configuredIpsecEnable || (populatedIpsecRows.length > 0 ? '1' : '0'),
         gnbName: value(cell, 'gNB Name') ?? config.cellName,
@@ -413,6 +438,7 @@ export function toParamConfigFormValues(
     const ipsecRows = sheets?.NETWORK_IPSEC ?? [];
     return {
       ...config,
+      ...(Object.keys(networkParameterValues).length > 0 ? { networkParameterValues } : {}),
       ...compact({
         cellName: value(cell, 'CELL_NAME', 'Cell Name') ?? config.cellName,
         cellIdentity: value(cell, '*ECI', 'ECI'),
@@ -459,5 +485,8 @@ export function toParamConfigFormValues(
     };
   }
 
-  return { ...config };
+  return {
+    ...config,
+    ...(Object.keys(networkParameterValues).length > 0 ? { networkParameterValues } : {}),
+  };
 }

@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Card, Divider, Form, Input } from 'antd';
 import { useT } from '@/hooks/useT';
@@ -89,8 +89,10 @@ function IpsecListCard() {
 
 export default function EnbQuickSettingsCards({
   paramModelName,
+  beforeIpsec,
 }: {
   paramModelName?: string;
+  beforeIpsec?: ReactNode;
 }) {
   const t = useT();
   const form = Form.useFormInstance();
@@ -108,6 +110,7 @@ export default function EnbQuickSettingsCards({
         .filter((group) => group.id !== 'device-ipsec' || isIpsecParametersVisible(ipsecEnable))
         .map((group) => (
         <Fragment key={group.id}>
+          {group.id === 'device-ipsec-control' && beforeIpsec}
           <Card size="small" title={t(group.titleKey)} style={{ marginBottom: 16 }}>
             {group.id === 'enb-plmn'
               ? <ServingPlmnListCard />

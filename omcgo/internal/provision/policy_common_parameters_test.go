@@ -61,6 +61,41 @@ func TestMaterializePolicyParametersMergesDeviceOverrideOnCommonValues(t *testin
 	require.Equal(t, float64(0), row["pci"])
 }
 
+func TestMaterializePolicyParametersExpandsCommonNetworkInstancesInListOrder(t *testing.T) {
+	device := model.Device{ID: uuid.New(), SerialNumber: "SN-1"}
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"commonParamConfig":{
+			"deviceType":"gNB","gnbIdLength":24,
+			"gnbIdAllocation":{"start":1,"end":10,"step":1},
+			"pciAllocation":{"start":0,"end":1007,"step":1},
+			"networkInterfaces":[{
+				"name":"eth","ipv4Addresses":[
+					{"addressingType":"Static","ipAddress":"172.17.1.14","subnetMask":"255.255.255.0","portType":"Other"},
+					{"addressingType":"DHCP"}
+				],
+				"vlans":[{"name":"wan100","id":"100","enable":"1","ipv6Addresses":[{"origin":"Static","ipAddress":"2001:db8::1","prefixLength":"64"}]}]
+			}],
+			"customParams":[{"trPath":"Device.Ethernet.Interface.1.Name","value":"override-eth"}]
+		}
+	}`)}
+
+	materialized, err := materializePolicyParameters(policy, &device, []model.Device{device})
+	require.NoError(t, err)
+	var root map[string]any
+	require.NoError(t, json.Unmarshal(materialized.Config, &root))
+	row := mapSlice(root["paramConfigList"])[0]
+	require.NotContains(t, row, "networkInterfaces")
+	values := make(map[string]string)
+	for _, item := range mapSlice(row["customParams"]) {
+		values[valueString(item["trPath"])] = valueString(item["value"])
+	}
+	require.Equal(t, "override-eth", values["Device.Ethernet.Interface.1.Name"])
+	require.Equal(t, "172.17.1.14", values["Device.Ethernet.Interface.1.IPv4Address.1.IPAddress"])
+	require.Equal(t, "DHCP", values["Device.Ethernet.Interface.1.IPv4Address.2.AddressingType"])
+	require.Equal(t, "wan100", values["Device.Ethernet.Interface.1.VlanInterface.1.Name"])
+	require.Equal(t, "2001:db8::1", values["Device.Ethernet.Interface.1.VlanInterface.1.IPv6Address.1.IPAddress"])
+}
+
 func TestMaterializePolicyParametersRemovesFieldsExcludedFromCommonConfiguration(t *testing.T) {
 	device := model.Device{ID: uuid.New(), SerialNumber: "SN-1"}
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{

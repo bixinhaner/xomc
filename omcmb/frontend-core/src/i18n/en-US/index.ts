@@ -4845,7 +4845,7 @@ const messages: Record<string, string> = {
   'provision.importedSheetParameters': 'Imported File Parameters',
   'provision.importedSheetParametersHint': 'Values from the imported file are shown in full by worksheet and can be edited individually in edit mode; device serial numbers are read-only.',
   'provision.importedSheetRow': 'Data Row {index}',
-  'provision.paramConfigImportMissingColumns': 'The template is incomplete; download the latest template and try again',
+  'provision.paramConfigImportMissingColumns': 'The template mapping is incomplete: {field}. Check the Parameter Mapping sheet',
   'provision.paramConfigImportInvalidRow': 'Invalid value in row {row}, field {field}',
   'provision.paramConfigImportFailed': 'Parameter configuration import failed; check the file format',
   'provision.importType':             'Import Type',
@@ -9107,6 +9107,11 @@ const messages: Record<string, string> = {
   'mml.scriptExecution.executionActions':     'Execution Actions',
   'mml.scriptExecution.validationFailed':     'Execution validation failed',
   'mml.scriptExecution.confirmWarnings':      'Confirm to continue execution.',
+  'provision.network.interfaceName': 'Interface Name',
+  'provision.network.wanConfig': 'WAN Config',
+  'provision.network.staticRouting': 'Static Routing',
+  'provision.network.instance': 'Instance',
+  'provision.network.editInstance': 'Edit Instance {index}',
 };
 
 export default messages;

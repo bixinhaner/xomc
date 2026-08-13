@@ -1,5 +1,6 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Card, Form, Input, Select, Switch, Typography } from 'antd';
+import { Fragment, type ReactNode } from 'react';
 import { getTimezoneAliasOptions } from '@core/utils/timezoneAliasConfig';
 import { useT } from '@/hooks/useT';
 import {
@@ -227,8 +228,10 @@ function IpsecListCard({ fields }: { fields: GnbQuickSettingField[] }) {
 
 export default function GnbQuickSettingsCards({
   excludedFieldIds = [],
+  beforeIpsec,
 }: {
   excludedFieldIds?: string[];
+  beforeIpsec?: ReactNode;
 }) {
   const t = useT();
   const form = Form.useFormInstance();
@@ -239,20 +242,22 @@ export default function GnbQuickSettingsCards({
       {GNB_QUICK_SETTING_GROUPS
         .filter((group) => group.id !== 'gnb-ipsec' || isIpsecParametersVisible(ipsecEnable))
         .map((group) => (
-        <Card
-          key={group.id}
-          size="small"
-          title={t(group.titleKey)}
-          style={{ marginBottom: 16 }}
-        >
-          {group.multiInstance
-            ? <IpsecListCard fields={group.fields} />
-            : <GnbQuickSettingFieldGrid fields={
-              (group.id === 'gnb-sync-source' && !isPtpDetailsVisible(syncMode)
-                ? group.fields.slice(0, 3)
-                : group.fields).filter((field) => !excludedFieldIds.includes(field.id))
-            } />}
-        </Card>
+          <Fragment key={group.id}>
+            {group.id === 'device-ipsec-control' && beforeIpsec}
+            <Card
+              size="small"
+              title={t(group.titleKey)}
+              style={{ marginBottom: 16 }}
+            >
+              {group.multiInstance
+                ? <IpsecListCard fields={group.fields} />
+                : <GnbQuickSettingFieldGrid fields={
+                  (group.id === 'gnb-sync-source' && !isPtpDetailsVisible(syncMode)
+                    ? group.fields.slice(0, 3)
+                    : group.fields).filter((field) => !excludedFieldIds.includes(field.id))
+                } />}
+            </Card>
+          </Fragment>
         ))}
     </>
   );

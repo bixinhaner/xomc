@@ -4879,7 +4879,7 @@ const messages: Record<string, string> = {
   'provision.importedSheetParameters': '导入文件参数',
   'provision.importedSheetParametersHint': '以下内容来自导入文件，并按工作表完整展示；编辑策略时可逐项修改，设备序列号不可修改。',
   'provision.importedSheetRow': '数据行 {index}',
-  'provision.paramConfigImportMissingColumns': '模板字段不完整，请下载最新模板后重试',
+  'provision.paramConfigImportMissingColumns': '模板字段映射不完整：{field}，请检查参数映射 Sheet',
   'provision.paramConfigImportInvalidRow': '第 {row} 行字段 {field} 格式不正确',
   'provision.paramConfigImportFailed': '参数配置导入失败，请检查文件格式',
   'provision.confirmDeleteConfig':    '确定要删除该配置吗？',
@@ -9142,6 +9142,11 @@ const messages: Record<string, string> = {
   'mml.scriptExecution.executionActions':     '执行操作',
   'mml.scriptExecution.validationFailed':     '执行校验失败',
   'mml.scriptExecution.confirmWarnings':      '请确认后继续执行。',
+  'provision.network.interfaceName': '接口名称',
+  'provision.network.wanConfig': 'WAN 配置',
+  'provision.network.staticRouting': '静态路由',
+  'provision.network.instance': '实例',
+  'provision.network.editInstance': '编辑实例 {index}',
 };
 
 export default messages;

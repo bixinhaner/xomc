@@ -203,8 +203,12 @@ func CompilePolicyParametersWithMappings(
 	definitions, aliases := buildParameterDefinitions(groups, mappings)
 	compiled := make(map[string]ResolvedParameter)
 	for rowIndex, row := range selected {
+		rowAliases, err := applyWorkbookParameterMappings(row, definitions, aliases)
+		if err != nil {
+			return nil, err
+		}
 		cellIndex := rowIndex + 1
-		hasSheetData, err := compileSheetParameters(row, definitions, aliases, cellIndex, compiled)
+		hasSheetData, err := compileSheetParameters(row, definitions, rowAliases, cellIndex, compiled)
 		if err != nil {
 			return nil, err
 		}
@@ -255,6 +259,82 @@ func CompilePolicyParametersWithMappings(
 		NetworkType: networkType, DataModelVersion: version,
 		Parameters: params, VendorSpecific: vendorSpecific,
 	}, nil
+}
+
+func applyWorkbookParameterMappings(
+	row map[string]any,
+	definitions map[string]parameterDefinition,
+	base map[string]string,
+) (map[string]string, error) {
+	aliases := make(map[string]string, len(base))
+	for key, value := range base {
+		aliases[key] = value
+	}
+	for _, mapping := range mapSlice(row["workbookMappings"]) {
+		header := strings.TrimSpace(valueString(mapping["header"]))
+		sheet := strings.TrimSpace(valueString(mapping["sheet"]))
+		path := strings.TrimSpace(valueString(mapping["trPath"]))
+		if header == "" && path == "" {
+			continue
+		}
+		if header == "" || path == "" {
+			return nil, &ConfigValidationError{Message: "workbook parameter mapping requires header and TRPath"}
+		}
+		if !workbookMappingHasValue(row, sheet, header) {
+			continue
+		}
+		definitionKey := ""
+		for key, definition := range definitions {
+			if path == definition.Template {
+				definitionKey = key
+				break
+			}
+			if concretePathMatchesTemplate(path, definition.Template) {
+				definitionKey = "workbook:" + path
+				definition.Template = path
+				definitions[definitionKey] = definition
+				break
+			}
+		}
+		if definitionKey == "" {
+			return nil, &ConfigValidationError{Message: fmt.Sprintf(
+				"workbook parameter mapping path is not registered in quick settings or product parameter mappings: %s", path)}
+		}
+		alias := normalizeParameterKey(header)
+		if sheet != "" {
+			qualifiedAlias := normalizeParameterKey(sheet + "." + header)
+			if previous, exists := aliases[qualifiedAlias]; exists && previous != definitionKey {
+				return nil, &ConfigValidationError{Message: fmt.Sprintf(
+					"workbook parameter column %s maps to conflicting TRPaths", header)}
+			}
+			aliases[qualifiedAlias] = definitionKey
+			continue
+		}
+		if previous, exists := aliases[alias]; exists && previous != definitionKey {
+			return nil, &ConfigValidationError{Message: fmt.Sprintf(
+				"workbook parameter column %s maps to conflicting TRPaths", header)}
+		}
+		aliases[alias] = definitionKey
+	}
+	return aliases, nil
+}
+
+func workbookMappingHasValue(row map[string]any, sheet, header string) bool {
+	wantedSheet := normalizeParameterKey(sheet)
+	wantedHeader := normalizeParameterKey(header)
+	for sheetName, rawRows := range mapValue(row["sheetParameters"]) {
+		if wantedSheet != "" && normalizeParameterKey(sheetName) != wantedSheet {
+			continue
+		}
+		for _, sheetRow := range mapSlice(rawRows) {
+			for column, value := range sheetRow {
+				if normalizeParameterKey(column) == wantedHeader && valueString(value) != "" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func buildParameterDefinitions(
@@ -362,6 +442,15 @@ func buildParameterDefinitions(
 			aliases[alias] = path
 		}
 	}
+	// The shared GSM workbook has business-facing column names, while BTS and
+	// BSC expose different paths. Bind those columns only when the selected
+	// product model contains the corresponding path.
+	if path := "DeviceGSM.Bts.{i}.IpaUnitId"; definitions[path].Template != "" {
+		aliases["ipaunitid"] = path
+	}
+	if path := "DeviceGSM.Bts.{i}.IpaRslIp"; definitions[path].Template != "" {
+		aliases["remoteip"] = path
+	}
 	return definitions, aliases
 }
 
@@ -408,6 +497,7 @@ func compileSheetParameters(
 	if !ok || len(sheets) == 0 {
 		return false, nil
 	}
+	strictWorkbookMappings := len(mapSlice(row["workbookMappings"])) > 0
 	for sheetName, rawRows := range sheets {
 		for rowIndex, sheetRow := range mapSlice(rawRows) {
 			cellIndex := defaultCell + rowIndex
@@ -415,8 +505,8 @@ func compileSheetParameters(
 			ipa, hasIPA := valueByNormalizedKey(sheetRow, "ipa")
 			unitID, hasUnitID := valueByNormalizedKey(sheetRow, "unitid")
 			if hasIPA && hasUnitID && valueString(ipa) != "" && valueString(unitID) != "" {
-				if id, exists := aliases["ipaunitid"]; exists &&
-					strings.Contains(definitions[id].Template, "GsmBTSCellDT") {
+				if id, exists := aliases["ipaunitid"]; exists && (strings.Contains(definitions[id].Template, "GsmBTSCellDT") ||
+					strings.Contains(definitions[id].Template, "DeviceGSM.Bts.{i}")) {
 					if err := compileValue("IPAUnitID", fmt.Sprintf("%s-%s", valueString(ipa), valueString(unitID)),
 						"import", fmt.Sprintf("%s[%d].IPAUnitID", sheetName, rowIndex+1),
 						cellIndex, rowIndex+1, definitions, aliases, compiled); err != nil {
@@ -437,12 +527,26 @@ func compileSheetParameters(
 				if !isScalarValue(value) || valueString(value) == "" {
 					continue
 				}
+				qualifiedKey := normalizeParameterKey(sheetName + "." + header)
+				if strictWorkbookMappings {
+					_, hasQualifiedMapping := aliases[qualifiedKey]
+					_, hasRegisteredAlias := aliases[normalized]
+					_, optionalPlanningField := optionalPlanningFields[normalized]
+					if !hasQualifiedMapping && !hasRegisteredAlias && !optionalPlanningField {
+						return true, &ConfigValidationError{Message: fmt.Sprintf(
+							"workbook parameter column has no mapping: %s.%s", sheetName, header)}
+					}
+				}
 				if _, supported := aliases[normalized]; !supported {
 					if _, optional := optionalPlanningFields[normalized]; optional {
 						continue
 					}
 				}
-				if err := compileValue(header, value, "import",
+				compileKey := header
+				if _, exists := aliases[qualifiedKey]; exists {
+					compileKey = sheetName + "." + header
+				}
+				if err := compileValue(compileKey, value, "import",
 					fmt.Sprintf("%s[%d].%s", sheetName, rowIndex+1, header),
 					cellIndex, rowIndex+1, definitions, aliases, compiled); err != nil {
 					return true, err
@@ -639,6 +743,7 @@ func resolveInstancePath(template string, cellIndex, listIndex int) (string, err
 		{"NguIpBind{i}", listIndex},
 		{"FAP.Ipsec.{i}", listIndex},
 		{"GsmBTSCellDT.{i}", cellIndex},
+		{"DeviceGSM.Bts.{i}", cellIndex},
 	}
 	for _, replacement := range replacements {
 		path = strings.ReplaceAll(path, replacement.pattern,

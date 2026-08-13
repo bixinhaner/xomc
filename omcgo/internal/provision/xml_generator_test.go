@@ -864,3 +864,241 @@ func TestCompilePolicyParametersCombinesGSMIPAAndUnitID(t *testing.T) {
 	assert.Equal(t, "192.0.2.20", byPath["Device.Services.GsmBTSCellDT.1.GsmBtsBindMib"])
 	assert.Equal(t, "1", byPath["Device.FAP.Synchronization.PpsTimeMode"])
 }
+
+func TestCompilePolicyParametersUsesBSCSpecificGSMPaths(t *testing.T) {
+	registry := quicksettings.NewRegistry()
+	loader := quicksettings.NewLoader(
+		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
+		"../../data", registry, zap.NewNop(),
+	)
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{"serialNumber":"BSC-PLAN-001","sheetParameters":{"GSM":[{
+			"IPA":"6969","Unit ID":"36","Remote IP":"198.51.100.10"
+		}]}}]}`)}
+	got, err := CompilePolicyParameters(policy,
+		&model.Device{SerialNumber: "BSC-PLAN-001", Technology: model.TechGSM},
+		"BSC", registry.GetByParamModel("BSC"))
+	require.NoError(t, err)
+
+	byPath := make(map[string]string)
+	for _, parameter := range got.Parameters {
+		byPath[parameter.TRPath] = parameter.Value
+	}
+	assert.Equal(t, "6969-36", byPath["DeviceGSM.Bts.1.IpaUnitId"])
+	assert.Equal(t, "198.51.100.10", byPath["DeviceGSM.Bts.1.IpaRslIp"])
+}
+
+func TestCompilePolicyParametersUsesWorkbookCustomMapping(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"NR-CUSTOM-001",
+			"sheetParameters":{"DEVICE":[{"Custom Header":"custom-value"}]},
+			"workbookMappings":[{
+				"sheet":"DEVICE","header":"Custom Header","trPath":"Device.Custom.1.Value"
+			}]
+		}]
+	}`)}
+	mappings := []parammodel.ParamMapping{{
+		StandardPath: "Device.Custom.{i}.Value", EntryType: "parameter",
+		Access: "READ_WRITE", DataType: "STRING", IsSupported: true,
+	}}
+	got, err := CompilePolicyParametersWithMappings(policy,
+		&model.Device{SerialNumber: "NR-CUSTOM-001", Technology: model.TechNR},
+		"BaiBNQ", nil, mappings)
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	assert.Equal(t, "Device.Custom.1.Value", got.Parameters[0].TRPath)
+	assert.Equal(t, "custom-value", got.Parameters[0].Value)
+}
+
+func TestCompilePolicyParametersAllowsConcreteWorkbookPathForRegisteredAlias(t *testing.T) {
+	registry := quicksettings.NewRegistry()
+	loader := quicksettings.NewLoader(
+		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
+		"../../data", registry, zap.NewNop(),
+	)
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"NR-WORKBOOK-ALIAS-001",
+			"sheetParameters":{"CELL":[{"SSB Frequency":"633984"}]},
+			"workbookMappings":[{
+				"sheet":"CELL","header":"SSB Frequency",
+				"trPath":"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.SsbFrequency"
+			}]
+		}]
+	}`)}
+	got, err := CompilePolicyParameters(policy,
+		&model.Device{SerialNumber: "NR-WORKBOOK-ALIAS-001", Technology: model.TechNR},
+		"BaiBNQ", registry.GetByParamModel("BaiBNQ"))
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	assert.Equal(t, "Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.SsbFrequency", got.Parameters[0].TRPath)
+	assert.Equal(t, "633984", got.Parameters[0].Value)
+}
+
+func TestWorkbookMappingsAcceptConcretePathsForEveryQuickSettingAlias(t *testing.T) {
+	registry := quicksettings.NewRegistry()
+	loader := quicksettings.NewLoader(
+		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
+		"../../data", registry, zap.NewNop(),
+	)
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+
+	for _, modelName := range registry.KnownParamModels() {
+		groups := registry.GetByParamModel(modelName)
+		for _, group := range groups {
+			for _, param := range group.Params {
+				template := param.StandardPath
+				if template == "" && group.ObjectPath != "" && param.Leaf != "" {
+					template = group.ObjectPath + param.Leaf
+				}
+				if template == "" {
+					continue
+				}
+				header := param.TitleEn
+				if header == "" {
+					header = param.TitleZh
+				}
+				if header == "" {
+					header = param.Name
+				}
+				concretePath := strings.ReplaceAll(template, "{i}", "1")
+				t.Run(modelName+"/"+group.ID+"/"+param.Name, func(t *testing.T) {
+					definitions, aliases := buildParameterDefinitions(groups, nil)
+					row := map[string]any{
+						"sheetParameters": map[string]any{"TEST": []any{map[string]any{header: "value"}}},
+						"workbookMappings": []any{map[string]any{
+							"sheet": "TEST", "header": header, "trPath": concretePath,
+						}},
+					}
+					mappedAliases, mapErr := applyWorkbookParameterMappings(row, definitions, aliases)
+					require.NoError(t, mapErr)
+					definitionKey := mappedAliases[normalizeParameterKey("TEST."+header)]
+					require.NotEmpty(t, definitionKey)
+					assert.Equal(t, concretePath, definitions[definitionKey].Template)
+				})
+			}
+		}
+	}
+}
+
+func TestWorkbookMappingsAllowSameHeaderInDifferentSheets(t *testing.T) {
+	definitions := map[string]parameterDefinition{
+		"Device.Custom.1.Value": {ID: "first", Template: "Device.Custom.1.Value"},
+		"Device.Other.1.Value":  {ID: "second", Template: "Device.Other.1.Value"},
+	}
+	row := map[string]any{
+		"sheetParameters": map[string]any{
+			"FIRST":  []any{map[string]any{"Enable": "1"}},
+			"SECOND": []any{map[string]any{"Enable": "0"}},
+		},
+		"workbookMappings": []any{
+			map[string]any{"sheet": "FIRST", "header": "Enable", "trPath": "Device.Custom.1.Value"},
+			map[string]any{"sheet": "SECOND", "header": "Enable", "trPath": "Device.Other.1.Value"},
+		},
+	}
+	aliases, err := applyWorkbookParameterMappings(row, definitions, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "Device.Custom.1.Value", aliases[normalizeParameterKey("FIRST.Enable")])
+	assert.Equal(t, "Device.Other.1.Value", aliases[normalizeParameterKey("SECOND.Enable")])
+}
+
+func TestStrictWorkbookMappingsAllowRegisteredLegacyAliasFallback(t *testing.T) {
+	registry := quicksettings.NewRegistry()
+	loader := quicksettings.NewLoader(
+		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
+		"../../data", registry, zap.NewNop(),
+	)
+	_, err := loader.LoadOnce(context.Background())
+	require.NoError(t, err)
+
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"NR-LEGACY-ALIAS-001",
+			"sheetParameters":{"CELL":[{"*gNB ID":"12"}]},
+			"workbookMappings":[{
+				"sheet":"DEVICE","header":"gNB ID",
+				"trPath":"Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBId"
+			}]
+		}]
+	}`)}
+	got, err := CompilePolicyParameters(policy,
+		&model.Device{SerialNumber: "NR-LEGACY-ALIAS-001", Technology: model.TechNR},
+		"BaiBNQ", registry.GetByParamModel("BaiBNQ"))
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	assert.Equal(t, "Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBId", got.Parameters[0].TRPath)
+	assert.Equal(t, "12", got.Parameters[0].Value)
+}
+
+func TestCompilePolicyParametersRejectsConflictingMappingsForSameSheetColumn(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"NR-WORKBOOK-CONFLICT-001",
+			"sheetParameters":{"DEVICE":[{"Mapped":"value"}]},
+			"workbookMappings":[
+				{"sheet":"DEVICE","header":"Mapped","trPath":"Device.Custom.1.Value"},
+				{"sheet":"DEVICE","header":"Mapped","trPath":"Device.Other.1.Value"}
+			]
+		}]
+	}`)}
+	mappings := []parammodel.ParamMapping{
+		{StandardPath: "Device.Custom.{i}.Value", EntryType: "parameter", Access: "READ_WRITE", DataType: "STRING", IsSupported: true},
+		{StandardPath: "Device.Other.{i}.Value", EntryType: "parameter", Access: "READ_WRITE", DataType: "STRING", IsSupported: true},
+	}
+	_, err := CompilePolicyParametersWithMappings(policy,
+		&model.Device{SerialNumber: "NR-WORKBOOK-CONFLICT-001", Technology: model.TechNR},
+		"BaiBNQ", nil, mappings)
+	require.ErrorContains(t, err, "workbook parameter column Mapped maps to conflicting TRPaths")
+}
+
+func TestCompilePolicyParametersRejectsUnmappedWorkbookColumn(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"NR-CUSTOM-002",
+			"sheetParameters":{"DEVICE":[{"Mapped":"ok","Unmapped":"bad"}]},
+			"workbookMappings":[{
+				"sheet":"DEVICE","header":"Mapped","trPath":"Device.Custom.1.Value"
+			}]
+		}]
+	}`)}
+	mappings := []parammodel.ParamMapping{{
+		StandardPath: "Device.Custom.{i}.Value", EntryType: "parameter",
+		Access: "READ_WRITE", DataType: "STRING", IsSupported: true,
+	}}
+	_, err := CompilePolicyParametersWithMappings(policy,
+		&model.Device{SerialNumber: "NR-CUSTOM-002", Technology: model.TechNR},
+		"BaiBNQ", nil, mappings)
+	require.ErrorContains(t, err, "workbook parameter column has no mapping: DEVICE.Unmapped")
+}
+
+func TestCompilePolicyParametersIgnoresBlankWorkbookParameterMapping(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"NR-CUSTOM-003",
+			"sheetParameters":{"DEVICE":[{"Mapped":"ok","Optional Unsupported":""}]},
+			"workbookMappings":[
+				{"sheet":"DEVICE","header":"Mapped","trPath":"Device.Custom.1.Value"},
+				{"sheet":"DEVICE","header":"Optional Unsupported","trPath":"Device.Unsupported.1.Value"}
+			]
+		}]
+	}`)}
+	mappings := []parammodel.ParamMapping{{
+		StandardPath: "Device.Custom.{i}.Value", EntryType: "parameter",
+		Access: "READ_WRITE", DataType: "STRING", IsSupported: true,
+	}}
+	got, err := CompilePolicyParametersWithMappings(policy,
+		&model.Device{SerialNumber: "NR-CUSTOM-003", Technology: model.TechNR},
+		"BaiBNQ", nil, mappings)
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	assert.Equal(t, "Device.Custom.1.Value", got.Parameters[0].TRPath)
+	assert.Equal(t, "ok", got.Parameters[0].Value)
+}
