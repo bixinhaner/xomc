@@ -15,7 +15,7 @@ interface UserStoreShape {
 
 let userStoreState: UserStoreShape;
 let systemLicenseState: {
-  data: { id: string } | undefined;
+  data: { id: string; isExpired?: boolean } | undefined;
   isLoading: boolean;
   error: unknown;
 };
@@ -183,6 +183,44 @@ describe('PrivateRoute', () => {
       data: undefined,
       isLoading: false,
       error: { bizCode: 12113 },
+    };
+
+    renderRoute('/license');
+
+    expect(screen.getByTestId('license')).toBeInTheDocument();
+  });
+
+  it('redirects non-license routes to license when license is expired (#310)', () => {
+    userStoreState = {
+      isAuthenticated: true,
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      isTokenExpired: () => false,
+      currentUser: { role: 'admin', isSuperAdmin: true },
+    };
+    systemLicenseState = {
+      data: { id: 'license-1', isExpired: true },
+      isLoading: false,
+      error: null,
+    };
+
+    renderRoute();
+
+    expect(screen.getByTestId('license')).toBeInTheDocument();
+    expect(screen.queryByTestId('protected')).not.toBeInTheDocument();
+  });
+
+  it('keeps the license route available when license is expired (#310)', () => {
+    userStoreState = {
+      isAuthenticated: true,
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      isTokenExpired: () => false,
+    };
+    systemLicenseState = {
+      data: { id: 'license-1', isExpired: true },
+      isLoading: false,
+      error: null,
     };
 
     renderRoute('/license');

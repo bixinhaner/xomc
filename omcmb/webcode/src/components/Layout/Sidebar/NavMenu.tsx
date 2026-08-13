@@ -297,9 +297,12 @@ export default function NavMenu({
 
   const dynamicMenus = useMenuStore((s) => s.menus);
   const { data: currentLicense, isLoading: isLicenseLoading, error: licenseError } = useSystemLicense();
+  // licenseOnlyMode：无 license（404/12113）OR license 已过期（is_expired），
+  // 与 PrivateRoute 保持同口径（issue #310）。
   const licenseOnlyMode = !isLicenseLoading
-    && !currentLicense
-    && extractLicenseErrorCode(licenseError) === SystemLicenseErrorCodes.NotConfigured;
+    && (currentLicense?.isExpired === true
+      || (!currentLicense
+        && extractLicenseErrorCode(licenseError) === SystemLicenseErrorCodes.NotConfigured));
   const visibleDynamicMenus = useMemo(
     () => (licenseOnlyMode ? filterSystemLicenseMenus(dynamicMenus || []) : dynamicMenus || []),
     [dynamicMenus, licenseOnlyMode],

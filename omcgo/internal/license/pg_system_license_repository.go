@@ -121,14 +121,16 @@ func (r *PgSystemLicenseRepository) Replace(ctx context.Context, newLic *SystemL
 	}
 
 	var historyRow *SystemLicenseHistory
-	if hasCurrent {
-		// Step 2a: UPDATE is_current=false（让 partial unique index 释放）
-		if _, err := tx.Exec(ctx,
-			`UPDATE system_license SET is_current = false, updated_at = NOW() WHERE id = $1`,
-			current.ID,
-		); err != nil {
-			return nil, fmt.Errorf("clear is_current: %w", err)
-		}
+	// Step 2a: 删除 system_license 全部旧行（singleton 模型：该表只保留当前生效
+	// license，历史归档进 system_license_history）。
+	//   - 删 old current（随后在 Step 2b 整行 COPY 进 history）
+	//   - 顺带清掉旧版本 Replace 残留的 is_current=false 行，避免其 license_id 撞
+	//     system_license_license_id_key UNIQUE 导致重传同一 license_id 被拒
+	//    （issue #310 验证暴露的问题：license 文件 license_id 固定，传错后无法恢复）。
+	//   - FK fk_replaced_by 为 ON DELETE SET NULL：被删 id 对应的 history 行保留归档
+	//     数据，仅 replaced_by_id 置 NULL。
+	if _, err := tx.Exec(ctx, `DELETE FROM system_license`); err != nil {
+		return nil, fmt.Errorf("clear existing system_license rows: %w", err)
 	}
 
 	// Step 3: INSERT newLic（is_current=true）
@@ -229,23 +231,6 @@ func (r *PgSystemLicenseRepository) ListHistory(
 	}
 
 	return model.NewListResponse(items, total, page, limit), nil
-}
-
-// ExistsByLicenseID 判断 license_id 是否在 current 或 history 中出现过。
-//
-// 用于 Update 前置检查：同 license_id 不允许重复使用（防回滚后再上传旧文件造成混淆）。
-func (r *PgSystemLicenseRepository) ExistsByLicenseID(ctx context.Context, licenseID string) (bool, error) {
-	const q = `
-SELECT EXISTS (
-    SELECT 1 FROM system_license          WHERE license_id = $1
-    UNION ALL
-    SELECT 1 FROM system_license_history  WHERE license_id = $1
-) AS exists`
-	var exists bool
-	if err := r.pool.QueryRow(ctx, q, licenseID).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check license_id exists: %w", err)
-	}
-	return exists, nil
 }
 
 // ---- internal helpers ----

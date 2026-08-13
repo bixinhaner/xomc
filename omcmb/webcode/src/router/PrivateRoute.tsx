@@ -95,9 +95,12 @@ export default function PrivateRoute({
   const routePaths = useMenuStore((s) => s.routePaths);
   const location = useLocation();
   const { data: currentLicense, isLoading: isLicenseLoading, error: licenseError } = useSystemLicense();
+  // licenseOnlyMode：无 license（404/12113）OR license 已过期（is_expired）。
+  // 两种情况都把非 /license 路由重定向到 /license，与后端菜单裁剪口径一致（issue #310）。
   const licenseOnlyMode = !isLicenseLoading
-    && !currentLicense
-    && extractLicenseErrorCode(licenseError) === SystemLicenseErrorCodes.NotConfigured;
+    && (currentLicense?.isExpired === true
+      || (!currentLicense
+        && extractLicenseErrorCode(licenseError) === SystemLicenseErrorCodes.NotConfigured));
 
   // Not authenticated at all → redirect to login
   if (!isAuthenticated) {

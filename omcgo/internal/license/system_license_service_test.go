@@ -21,17 +21,16 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
-// mockSystemLicenseRepo — 进程内 mock，覆盖 SystemLicenseRepository 全部 4 个方法。
+// mockSystemLicenseRepo — 进程内 mock，覆盖 SystemLicenseRepository 全部 3 个方法。
 //
 // 行为：
 //   - current 字段模拟 system_license 唯一行；nil = ErrSystemLicenseNotFound
 //   - history 切片模拟 system_license_history
-//   - existingIDs 模拟 license_id 唯一约束（current.LicenseID + history.LicenseID 集合）
+//   - Replace（默认实现）模拟 singleton 删除语义：旧 current 归档进 history，新 lic 成为 current
 type mockSystemLicenseRepo struct {
 	current   *SystemLicense
 	history   []SystemLicenseHistory
 	replaceFn func(ctx context.Context, lic *SystemLicense) (*SystemLicenseHistory, error)
-	existsFn  func(ctx context.Context, id string) (bool, error)
 }
 
 func (m *mockSystemLicenseRepo) GetCurrent(_ context.Context) (*SystemLicense, error) {
@@ -65,21 +64,6 @@ func (m *mockSystemLicenseRepo) ListHistory(_ context.Context, _ SystemLicenseHi
 		Items: m.history,
 		Total: int64(len(m.history)),
 	}, nil
-}
-
-func (m *mockSystemLicenseRepo) ExistsByLicenseID(ctx context.Context, id string) (bool, error) {
-	if m.existsFn != nil {
-		return m.existsFn(ctx, id)
-	}
-	if m.current != nil && m.current.LicenseID == id {
-		return true, nil
-	}
-	for _, h := range m.history {
-		if h.LicenseID == id {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func configureRepositoryLegacyLicense(t *testing.T, svc *SystemLicenseService) string {
@@ -171,6 +155,24 @@ func TestSystemLicenseService_CheckFeature(t *testing.T) {
 
 	_, err = svc.CheckFeature(context.Background(), "eNB..Monitor")
 	require.Error(t, err)
+
+	t.Run("expired license → not authorized (#310)", func(t *testing.T) {
+		past := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		orig := nowFunc
+		defer func() { nowFunc = orig }()
+		nowFunc = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
+		expiredRepo := &mockSystemLicenseRepo{current: &SystemLicense{
+			LicenseID:   "LIC-EXPIRED",
+			LicenseType: SystemLicenseTypeCommercial,
+			FeatureList: FeatureList(`{"legacy_feature_codes":["CODE_ENB_MONITOR"],"authorization_tree":{"eNB":{"Monitor":"All"}}}`),
+			ExpiryDate:  &past,
+			IsCurrent:   true,
+		}}
+		expiredSvc := newTestSystemLicenseService(expiredRepo)
+		ok, err := expiredSvc.CheckFeature(context.Background(), "eNB.Monitor")
+		require.NoError(t, err)
+		assert.False(t, ok, "expired license must not authorize any feature path")
+	})
 }
 
 func TestSystemLicenseService_GetCurrentEnrichesPersistedLegacyFeatures(t *testing.T) {
@@ -289,6 +291,24 @@ func TestSystemLicenseService_FilterAuthorized(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"CODE_ENB_MONITOR"}, auth)
 	})
+	t.Run("expired license → authorize nothing (#310)", func(t *testing.T) {
+		past := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		orig := nowFunc
+		defer func() { nowFunc = orig }()
+		nowFunc = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
+		repo := &mockSystemLicenseRepo{current: &SystemLicense{
+			LicenseID:   "LIC-EXPIRED",
+			LicenseType: SystemLicenseTypeCommercial,
+			FeatureList: FeatureList(`{"legacy_feature_codes":["CODE_ENB_MONITOR"]}`),
+			ExpiryDate:  &past,
+			IsCurrent:   true,
+		}}
+		svc := newTestSystemLicenseService(repo)
+		svc.SetLegacyFeatureMapping(mapping)
+		auth, err := svc.FilterAuthorized(context.Background(), []string{"CODE_ENB_MONITOR"})
+		require.NoError(t, err)
+		assert.Empty(t, auth, "expired license must not authorize any feature code")
+	})
 }
 
 func TestSystemLicenseService_HasActiveLicense(t *testing.T) {
@@ -306,6 +326,20 @@ func TestSystemLicenseService_HasActiveLicense(t *testing.T) {
 		active, err := svc.HasActiveLicense(context.Background())
 		require.NoError(t, err)
 		assert.True(t, active)
+	})
+	t.Run("expired license treated as inactive (#310)", func(t *testing.T) {
+		past := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		orig := nowFunc
+		defer func() { nowFunc = orig }()
+		nowFunc = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
+		repo := &mockSystemLicenseRepo{current: &SystemLicense{
+			LicenseID: "LIC-EXPIRED", LicenseType: SystemLicenseTypeCommercial,
+			ExpiryDate: &past, IsCurrent: true,
+		}}
+		svc := newTestSystemLicenseService(repo)
+		active, err := svc.HasActiveLicense(context.Background())
+		require.NoError(t, err)
+		assert.False(t, active, "expired license must not be treated as active")
 	})
 }
 
@@ -353,6 +387,30 @@ func TestSystemLicenseService_Update(t *testing.T) {
 		features, ok := payload["features"].([]any)
 		require.True(t, ok)
 		require.NotEmpty(t, features)
+	})
+
+	t.Run("re-upload same license_id succeeds (no 12110)", func(t *testing.T) {
+		repo := &mockSystemLicenseRepo{}
+		svc := newTestSystemLicenseService(repo)
+		raw := configureRepositoryLegacyLicense(t, svc)
+
+		// 第一次上传
+		_, err := svc.Update(context.Background(), UpdateRequest{
+			RawContent: raw, RawContentEncoding: "base64",
+		})
+		require.NoError(t, err)
+		require.Len(t, repo.history, 0, "first install archives nothing")
+
+		// 第二次上传同一 license 文件（license_id 已在 current）：必须成功，旧 current 归档进 history
+		result, err := svc.Update(context.Background(), UpdateRequest{
+			RawContent: raw, RawContentEncoding: "base64",
+		})
+		require.NoError(t, err, "re-uploading a license_id already in use must not be rejected")
+		require.NotNil(t, result.Current)
+		assert.Equal(t, "NO2022-03-14002", result.Current.LicenseID)
+		require.NotNil(t, result.Replaced, "previous current must be archived to history")
+		assert.Equal(t, "NO2022-03-14002", result.Replaced.LicenseID)
+		require.Len(t, repo.history, 1, "history grows by one on re-upload")
 	})
 }
 
