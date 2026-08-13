@@ -417,6 +417,33 @@ func (r *fakeRepository) ReplaceDeliveryTargets(_ context.Context, req ReplaceDe
 	return r.ListDeliveryTargets(context.Background(), DeliveryTargetFilter{Scope: req.Scope, OwnerCode: req.OwnerCode})
 }
 
+func TestDeliveryTargetsForRunUsesTemplateOwnerOnly(t *testing.T) {
+	repo := &fakeRepository{
+		deliveryTargets: []DeliveryTarget{
+			{Scope: DeliveryScopeFile, OwnerCode: "", Key: "global", Name: "global target", Enabled: true},
+			{Scope: DeliveryScopeFile, OwnerCode: "S0001", Key: "s0001", Name: "S0001 target", Enabled: true},
+			{Scope: DeliveryScopeFile, OwnerCode: "S0002", Key: "s0002", Name: "S0002 target", Enabled: true},
+			{Scope: DeliveryScopeFile, OwnerCode: "S0001", Key: "s0001-disabled", Name: "disabled", Enabled: false},
+		},
+	}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	targets, err := svc.deliveryTargetsForRun(context.Background(), FileRun{
+		ProfileKind: ProfileKindFile,
+		ProfileCode: "S0001",
+	})
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	require.Equal(t, "s0001", targets[0].Key)
+
+	targets, err = svc.deliveryTargetsForRun(context.Background(), FileRun{
+		ProfileKind: ProfileKindFile,
+		ProfileCode: "S0003",
+	})
+	require.NoError(t, err)
+	require.Empty(t, targets)
+}
+
 func (r *fakeRepository) ListSNMPAlarmTargets(context.Context) ([]SNMPAlarmTarget, error) {
 	out := make([]SNMPAlarmTarget, len(r.snmpTargets))
 	copy(out, r.snmpTargets)

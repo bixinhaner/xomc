@@ -3786,6 +3786,15 @@ function serializeDeliveryTarget(
   return serializeDeliveryTargets(scope, ownerCode, [row]).items[0];
 }
 
+function normalizeFileDeliveryOwnerCode(code?: string): string {
+  return (code ?? '').trim().toUpperCase();
+}
+
+function fileDeliveryScopeKey(ownerCode?: string): string {
+  const normalized = normalizeFileDeliveryOwnerCode(ownerCode);
+  return normalized ? `file-${normalized.toLowerCase()}` : 'file';
+}
+
 function mapApiSnmpTarget(target: NorthboundSNMPAlarmTarget): SnmpAlarmTargetRow {
   const fallback = snmpAlarmTargets.find((row) => row.key === target.key);
   const version = snmpVersionForKey(target.key, target.version);
@@ -5749,9 +5758,8 @@ export default function NorthboundPageConfig() {
   const [editorSession, setEditorSession] = useState(0);
   const [initialFieldRows, setInitialFieldRows] = useState<Record<string, ReportFieldRow[]>>({});
   const [editorMode, setEditorMode] = useState<'create' | 'edit'>('create');
-  const [fileDeliveryTargets, setFileDeliveryTargets] = useState<DeliveryTargetRow[]>(
-    () => cloneDeliveryTargets('file'),
-  );
+  const editorScenarioCodeValue = Form.useWatch('scenarioCode', configForm);
+  const [fileDeliveryTargetsByProfile, setFileDeliveryTargetsByProfile] = useState<Record<string, DeliveryTargetRow[]>>({});
   const [selectedInventoryType, setSelectedInventoryType] = useState<InventoryType>('ENB');
   const [viewInventoryType, setViewInventoryType] = useState<InventoryType | null>(null);
   const [inventoryEditorOpen, setInventoryEditorOpen] = useState(false);
@@ -5896,9 +5904,12 @@ export default function NorthboundPageConfig() {
         current && nextInventoryProfiles.some((row) => row.key === current) ? current : null
       ));
 
-      if (fileDeliveryResp.items.length > 0) {
-        setFileDeliveryTargets(fileDeliveryResp.items.map(mapApiDeliveryTarget));
-      }
+      const nextFileTargets = fileDeliveryResp.items.reduce<Record<string, DeliveryTargetRow[]>>((acc, item) => {
+        const ownerCode = normalizeFileDeliveryOwnerCode(item.owner_code);
+        acc[ownerCode] = [...(acc[ownerCode] ?? []), mapApiDeliveryTarget(item)];
+        return acc;
+      }, {});
+      setFileDeliveryTargetsByProfile(nextFileTargets);
       const nextInventoryTargets = inventoryDeliveryResp.items.reduce<Record<InventoryType, DeliveryTargetRow[]>>((acc, item) => {
         const key = normalizeInventoryType(item.owner_code);
         acc[key] = [...(acc[key] ?? []), mapApiDeliveryTarget(item)];
@@ -6030,6 +6041,23 @@ export default function NorthboundPageConfig() {
     inventoryDeliveryTargetsByType[key] ?? cloneDeliveryTargets(`inventory-${key.toLowerCase()}`)
   );
 
+  const getFileDeliveryTargets = (ownerCode?: string) => {
+    const key = normalizeFileDeliveryOwnerCode(ownerCode);
+    if (!key) return cloneDeliveryTargets(fileDeliveryScopeKey(key));
+    return fileDeliveryTargetsByProfile[key] ?? cloneDeliveryTargets(fileDeliveryScopeKey(key));
+  };
+
+  const setFileDeliveryTargetsForOwner = (
+    ownerCode: string,
+    updater: (rows: DeliveryTargetRow[]) => DeliveryTargetRow[],
+  ) => {
+    const key = normalizeFileDeliveryOwnerCode(ownerCode);
+    setFileDeliveryTargetsByProfile((prev) => {
+      const currentRows = prev[key] ?? cloneDeliveryTargets(fileDeliveryScopeKey(key));
+      return { ...prev, [key]: updater(currentRows) };
+    });
+  };
+
   const getSocketDeliveryTargets = (config: SocketAlarmConfigRow) => (
     socketDeliveryTargetsByConfig[config.key] ?? cloneDeliveryTargets(`${config.key}-file-sync`)
   );
@@ -6040,16 +6068,19 @@ export default function NorthboundPageConfig() {
     return enabledRows.map((row) => `${row.name}(${row.protocol})`).join('、');
   };
 
-  const updateFileDeliveryTarget = (key: string, patch: Partial<DeliveryTargetRow>) => {
-    setFileDeliveryTargets((rows) => rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+  const updateFileDeliveryTarget = (ownerCode: string, key: string, patch: Partial<DeliveryTargetRow>) => {
+    setFileDeliveryTargetsForOwner(ownerCode, (rows) => rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   };
 
-  const addFileDeliveryTarget = () => {
-    setFileDeliveryTargets((rows) => [...rows, createDeliveryTarget('file', rows.length + 1)]);
+  const addFileDeliveryTarget = (ownerCode: string) => {
+    setFileDeliveryTargetsForOwner(ownerCode, (rows) => [
+      ...rows,
+      createDeliveryTarget(fileDeliveryScopeKey(ownerCode), rows.length + 1),
+    ]);
   };
 
-  const removeFileDeliveryTarget = (key: string) => {
-    setFileDeliveryTargets((rows) => rows.filter((row) => row.key !== key));
+  const removeFileDeliveryTarget = (ownerCode: string, key: string) => {
+    setFileDeliveryTargetsForOwner(ownerCode, (rows) => rows.filter((row) => row.key !== key));
   };
 
   const updateInventoryDeliveryTarget = (inventoryType: InventoryType, key: string, patch: Partial<DeliveryTargetRow>) => {
@@ -6357,6 +6388,15 @@ export default function NorthboundPageConfig() {
       .filter((row) => rowMatchesTechFilter(row, activeViewFieldTechFilter)),
     [pmMetricRows, selectedViewFieldTarget, activeViewFieldTechFilter],
   );
+  const viewFileDeliveryTargets = selectedScenario ? getFileDeliveryTargets(selectedScenario.code) : [];
+  const editorFileOwnerCode = normalizeFileDeliveryOwnerCode(
+    typeof editorScenarioCodeValue === 'string'
+      ? editorScenarioCodeValue
+      : editorMode === 'edit'
+        ? selectedScenario?.code
+        : undefined,
+  );
+  const editorFileDeliveryTargets = getFileDeliveryTargets(editorFileOwnerCode);
 
   useEffect(() => {
     setInventoryCandidateKey(undefined);
@@ -6505,12 +6545,16 @@ export default function NorthboundPageConfig() {
         void Promise.all([
           northboundPageConfigApi.createFileProfile(createRequest),
           northboundPageConfigApi.replaceDeliveryTargets(
-            serializeDeliveryTargets('file', '', fileDeliveryTargets),
+            serializeDeliveryTargets('file', code, getFileDeliveryTargets(code)),
           ),
         ])
-          .then(([profile]) => {
+          .then(([profile, deliveryResp]) => {
             applyFileProfile(profile);
             setSelectedScenario(mapApiFileProfile(profile));
+            setFileDeliveryTargetsByProfile((prev) => ({
+              ...prev,
+              [normalizeFileDeliveryOwnerCode(profile.code || code)]: deliveryResp.items.map(mapApiDeliveryTarget),
+            }));
             void message.success(nt(`新增配置已保存：${profile.name}`));
             setEditorOpen(false);
           })
@@ -6524,11 +6568,15 @@ export default function NorthboundPageConfig() {
       void Promise.all([
         northboundPageConfigApi.updateFileProfile(code, request),
         northboundPageConfigApi.replaceDeliveryTargets(
-          serializeDeliveryTargets('file', '', fileDeliveryTargets),
+          serializeDeliveryTargets('file', code, getFileDeliveryTargets(code)),
         ),
       ])
-        .then(([profile]) => {
+        .then(([profile, deliveryResp]) => {
           applyFileProfile(profile);
+          setFileDeliveryTargetsByProfile((prev) => ({
+            ...prev,
+            [normalizeFileDeliveryOwnerCode(profile.code || code)]: deliveryResp.items.map(mapApiDeliveryTarget),
+          }));
           void message.success(nt(`编辑配置已保存：${profile.name}`));
           setEditorOpen(false);
         })
@@ -9420,11 +9468,11 @@ export default function NorthboundPageConfig() {
             <div className={styles.editorSection}>
               <div className={styles.editorSectionHeader}>
                 <Typography.Text strong>传输目标</Typography.Text>
-                <Typography.Text type="secondary">{enabledDeliverySummary(fileDeliveryTargets)}</Typography.Text>
+                <Typography.Text type="secondary">{enabledDeliverySummary(viewFileDeliveryTargets)}</Typography.Text>
               </div>
               <Table<DeliveryTargetRow>
                 columns={deliveryTargetColumns}
-                dataSource={fileDeliveryTargets}
+                dataSource={viewFileDeliveryTargets}
                 rowKey="key"
                 size="small"
                 pagination={false}
@@ -9491,7 +9539,7 @@ export default function NorthboundPageConfig() {
             <Button
               aria-label="保存配置草稿"
               type="primary"
-              loading={Boolean(selectedScenario && fileProfileSaving[selectedScenario.code])}
+              loading={Boolean(editorFileOwnerCode && fileProfileSaving[editorFileOwnerCode])}
               onClick={saveEditorDraft}
             >
               保存草稿
@@ -9730,19 +9778,24 @@ export default function NorthboundPageConfig() {
           <div className={styles.editorSection}>
             <div className={styles.editorSectionHeader}>
               <Typography.Text strong>传输目标</Typography.Text>
-              <Button size="small" icon={<PlusOutlined />} onClick={addFileDeliveryTarget}>
+              <Button
+                size="small"
+                icon={<PlusOutlined />}
+                disabled={!editorFileOwnerCode}
+                onClick={() => addFileDeliveryTarget(editorFileOwnerCode)}
+              >
                 新增目标
               </Button>
             </div>
             <Table<DeliveryTargetRow>
               columns={createDeliveryTargetEditorColumns(
-                fileDeliveryTargets,
-                updateFileDeliveryTarget,
-                removeFileDeliveryTarget,
+                editorFileDeliveryTargets,
+                (targetKey, patch) => updateFileDeliveryTarget(editorFileOwnerCode, targetKey, patch),
+                (targetKey) => removeFileDeliveryTarget(editorFileOwnerCode, targetKey),
                 'file',
-                '',
+                editorFileOwnerCode,
               )}
-              dataSource={fileDeliveryTargets}
+              dataSource={editorFileDeliveryTargets}
               rowKey="key"
               size="small"
               pagination={false}
