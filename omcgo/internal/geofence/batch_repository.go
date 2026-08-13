@@ -1253,7 +1253,31 @@ func (r *PgRepository) processManualBindItemTx(
 			ReasonBindingChanged,
 		)
 	}
+	initialConfirmedState := ConfirmedStateUnknown
 	if sourceBinding != nil {
+		if _, found, lockErr := lockEffectiveState(
+			ctx,
+			tx,
+			device.ID,
+		); lockErr != nil {
+			return BatchItemResult{}, fmt.Errorf(
+				"lock effective state before geofence reassignment: %w",
+				lockErr,
+			)
+		} else if !found {
+			return BatchItemResult{}, fmt.Errorf(
+				"effective state for reassigned geofence binding is missing: %w",
+				commonerrors.ErrInvalidInput,
+			)
+		}
+		initialConfirmedState, err = lockManualBindSourceConfirmedState(
+			ctx,
+			tx,
+			sourceBinding.ID,
+		)
+		if err != nil {
+			return BatchItemResult{}, err
+		}
 		if err := removeManualBindSourceBinding(
 			ctx,
 			tx,
@@ -1276,7 +1300,12 @@ func (r *PgRepository) processManualBindItemTx(
 		BoundBy:    req.ActorID,
 		BoundAt:    req.ProcessedAt,
 	}
-	if err := createBindingTx(ctx, tx, binding); err != nil {
+	if err := createBindingTxWithConfirmedState(
+		ctx,
+		tx,
+		binding,
+		initialConfirmedState,
+	); err != nil {
 		return BatchItemResult{}, err
 	}
 	if err := enqueueManualBindLatestLocationReplay(
@@ -1540,6 +1569,48 @@ func removeManualBindSourceBinding(
 		return fmt.Errorf("remove reassigned geofence binding: %w", commonerrors.ErrAlreadyExists)
 	}
 	return nil
+}
+
+func lockManualBindSourceConfirmedState(
+	ctx context.Context,
+	tx pgx.Tx,
+	bindingID uuid.UUID,
+) (ConfirmedState, error) {
+	query, args, err := storage.Psql.
+		Select("confirmed_state").
+		From("device_geofence_states").
+		Where(sq.Eq{"binding_id": bindingID}).
+		Suffix("FOR UPDATE").
+		ToSql()
+	if err != nil {
+		return ConfirmedStateUnknown, fmt.Errorf(
+			"build lock reassigned geofence binding state: %w",
+			err,
+		)
+	}
+	var confirmedState ConfirmedState
+	if err := tx.QueryRow(ctx, query, args...).Scan(&confirmedState); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ConfirmedStateUnknown, fmt.Errorf(
+				"reassigned geofence binding state is missing: %w",
+				commonerrors.ErrInvalidInput,
+			)
+		}
+		return ConfirmedStateUnknown, batchDatabaseError(
+			"lock reassigned geofence binding state",
+			err,
+		)
+	}
+	switch confirmedState {
+	case ConfirmedStateUnknown, ConfirmedStateInside, ConfirmedStateOutside:
+		return confirmedState, nil
+	default:
+		return ConfirmedStateUnknown, fmt.Errorf(
+			"reassigned geofence binding state %q is invalid: %w",
+			confirmedState,
+			commonerrors.ErrInvalidInput,
+		)
+	}
 }
 
 func finishSkippedManualBindItem(
