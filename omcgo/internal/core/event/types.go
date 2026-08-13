@@ -137,6 +137,7 @@ type GeofenceDeviceStatePayload struct {
 	SerialNumber          string     `json:"serial_number"`
 	Carrier               string     `json:"carrier"`
 	TriggerBindingID      *uuid.UUID `json:"binding_id,omitempty"`
+	TriggerEvaluationID   *uuid.UUID `json:"evaluation_id,omitempty"`
 	ObservationVersion    int64      `json:"observation_version"`
 	EffectiveState        string     `json:"effective_state"`
 	RequiredActionLevel   string     `json:"required_action_level"`

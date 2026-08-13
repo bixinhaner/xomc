@@ -120,6 +120,14 @@ export function useDeviceById(id: string) {
   });
 }
 
+export function useDeviceControlActions(id: string, page = 1, pageSize = 20, enabled = true) {
+  return useQuery({
+    queryKey: ['devices', 'control-actions', id, page, pageSize],
+    queryFn: () => api.getControlActions(id, page, pageSize),
+    enabled: Boolean(id) && enabled,
+  });
+}
+
 export function useDevicesByIds(ids: string[]) {
   const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
 

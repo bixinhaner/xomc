@@ -20589,6 +20589,9 @@ CREATE TABLE IF NOT EXISTS public.geofence_control_actions (
         REFERENCES public.geofence_definitions(id) ON DELETE RESTRICT,
     binding_id uuid
         REFERENCES public.device_geofence_bindings(id) ON DELETE SET NULL,
+    trigger_evaluation_id uuid,
+    trigger_reason_code varchar(64) NOT NULL DEFAULT '',
+    trigger_observation_version bigint,
     effective_state_version bigint NOT NULL,
     action_type varchar(16) NOT NULL,
     status varchar(32) NOT NULL DEFAULT 'pending',
@@ -20606,6 +20609,8 @@ CREATE TABLE IF NOT EXISTS public.geofence_control_actions (
     completed_at timestamptz,
     CONSTRAINT geofence_control_actions_state_version_check
         CHECK (effective_state_version >= 0),
+    CONSTRAINT geofence_control_actions_observation_version_check
+        CHECK (trigger_observation_version IS NULL OR trigger_observation_version > 0),
     CONSTRAINT geofence_control_actions_type_check
         CHECK (action_type IN ('deactivate', 'activate')),
     CONSTRAINT geofence_control_actions_status_check CHECK (status IN (
@@ -20626,14 +20631,43 @@ CREATE TABLE IF NOT EXISTS public.geofence_control_actions (
 -- Historical rows stay on contract v1 and are therefore never mistaken for
 -- actions that proved the OpState terminal condition.
 ALTER TABLE public.geofence_control_actions
+    ADD COLUMN IF NOT EXISTS trigger_evaluation_id uuid,
+    ADD COLUMN IF NOT EXISTS trigger_reason_code varchar(64) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS trigger_observation_version bigint,
     ADD COLUMN IF NOT EXISTS contract_version integer NOT NULL DEFAULT 1,
     ADD COLUMN IF NOT EXISTS terminal_state jsonb NOT NULL DEFAULT '[]'::jsonb,
     ADD COLUMN IF NOT EXISTS verification_attempt integer NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS next_verification_at timestamptz,
     ADD COLUMN IF NOT EXISTS verification_deadline timestamptz;
 
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.geofence_control_actions'::regclass
+          AND conname = 'geofence_control_actions_observation_version_check'
+    ) THEN
+        ALTER TABLE public.geofence_control_actions
+            ADD CONSTRAINT geofence_control_actions_observation_version_check
+            CHECK (trigger_observation_version IS NULL OR trigger_observation_version > 0);
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
 CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_device_time
     ON public.geofence_control_actions (device_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_parent
+    ON public.geofence_control_actions (parent_action_id)
+    WHERE parent_action_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_active_deactivation
+    ON public.geofence_control_actions (device_id, created_at DESC)
+    WHERE action_type = 'deactivate'
+      AND status IN ('verified', 'partial_failed');
 
 CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_status
     ON public.geofence_control_actions (status, updated_at)
@@ -20790,6 +20824,24 @@ CREATE INDEX IF NOT EXISTS idx_geofence_evaluations_device_time
 
 CREATE INDEX IF NOT EXISTS idx_geofence_evaluations_status_time
     ON public.geofence_evaluations (status, evaluated_at DESC);
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.geofence_control_actions'::regclass
+          AND conname = 'geofence_control_actions_trigger_evaluation_fk'
+    ) THEN
+        ALTER TABLE public.geofence_control_actions
+            ADD CONSTRAINT geofence_control_actions_trigger_evaluation_fk
+            FOREIGN KEY (trigger_evaluation_id)
+            REFERENCES public.geofence_evaluations(id) ON DELETE RESTRICT;
+    END IF;
+END
+$$;
+-- +goose StatementEnd
 
 -- +goose StatementBegin
 DO $$

@@ -50,7 +50,8 @@ func NewPgControlActionRepository(pool *pgxpool.Pool) *PgControlActionRepository
 
 var controlActionColumns = []string{
 	"id", "action_key", "parent_action_id", "device_id", "device_sn",
-	"geofence_id", "binding_id", "effective_state_version", "action_type",
+	"geofence_id", "binding_id", "trigger_evaluation_id", "trigger_reason_code",
+	"trigger_observation_version", "effective_state_version", "action_type",
 	"status", "contract_version", "before_state", "requested_state", "terminal_state", "verified_state",
 	"verification_attempt", "next_verification_at", "verification_deadline",
 	"last_error", "created_at", "updated_at",
@@ -82,6 +83,8 @@ func buildCreateControlActionQuery(action *ControlAction) (string, []any, error)
 		Values(
 			action.ID, action.ActionKey, action.ParentActionID, action.DeviceID,
 			action.DeviceSN, action.GeofenceID, action.BindingID,
+			action.TriggerEvaluationID, action.TriggerReasonCode,
+			action.TriggerObservationVersion,
 			action.EffectiveStateVersion, action.ActionType, action.Status,
 			action.ContractVersion, beforeState, requestedState, terminalState, verifiedState,
 			action.VerificationAttempt, action.NextVerificationAt, action.VerificationDeadline,
@@ -91,7 +94,8 @@ func buildCreateControlActionQuery(action *ControlAction) (string, []any, error)
 		).
 		Suffix("ON CONFLICT (action_key) DO NOTHING RETURNING " +
 			"id, action_key, parent_action_id, device_id, device_sn, geofence_id, " +
-			"binding_id, effective_state_version, action_type, status, contract_version, " +
+			"binding_id, trigger_evaluation_id, trigger_reason_code, " +
+			"trigger_observation_version, effective_state_version, action_type, status, " +
 			"before_state, requested_state, terminal_state, verified_state, " +
 			"verification_attempt, next_verification_at, verification_deadline, last_error, " +
 			"created_at, updated_at, completed_at").
@@ -263,6 +267,8 @@ func scanControlAction(row controlActionScanner) (*ControlAction, error) {
 	if err := row.Scan(
 		&action.ID, &action.ActionKey, &action.ParentActionID, &action.DeviceID,
 		&action.DeviceSN, &action.GeofenceID, &action.BindingID,
+		&action.TriggerEvaluationID, &action.TriggerReasonCode,
+		&action.TriggerObservationVersion,
 		&action.EffectiveStateVersion, &action.ActionType, &action.Status,
 		&action.ContractVersion, &beforeState, &requestedState, &terminalState, &verifiedState,
 		&action.VerificationAttempt, &action.NextVerificationAt, &action.VerificationDeadline,

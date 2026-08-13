@@ -19,6 +19,10 @@ type DeviceWithInfo struct {
 	// valid device-reported observation for list/detail reconciliation.
 	LocationSync *LocationSync `json:"location_sync,omitempty"`
 
+	// ControlSummary is the current OMC-owned control projection. It is nil
+	// when no geofence control action currently owns device deactivation.
+	ControlSummary *DeviceControlSummary `json:"control_summary"`
+
 	// ===== 设备分组信息（可能为空）=====
 
 	// GroupID 设备分组 ID

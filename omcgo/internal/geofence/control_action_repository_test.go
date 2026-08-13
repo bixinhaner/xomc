@@ -12,10 +12,14 @@ import (
 func TestBuildCreateControlActionQueryPersistsOwnershipEvidence(t *testing.T) {
 	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 	bindingID := uuid.New()
+	evaluationID := uuid.New()
+	observationVersion := int64(19)
 	action := &ControlAction{
 		ID: uuid.New(), ActionKey: "geofence:device:8:deactivate",
 		DeviceID: uuid.New(), DeviceSN: "SN-1", BindingID: &bindingID,
-		EffectiveStateVersion: 8, ActionType: ControlActionDeactivate,
+		TriggerEvaluationID: &evaluationID, TriggerReasonCode: "effective_state_outside",
+		TriggerObservationVersion: &observationVersion,
+		EffectiveStateVersion:     8, ActionType: ControlActionDeactivate,
 		Status: ControlActionPending,
 		BeforeState: []ControlParameterState{
 			{Path: "Device.Services.FAPService.Ipsec.IPSEC_ENABLE", Value: "0"},
@@ -34,6 +38,9 @@ func TestBuildCreateControlActionQueryPersistsOwnershipEvidence(t *testing.T) {
 	require.Contains(t, query, "ON CONFLICT (action_key) DO NOTHING")
 	require.Contains(t, args, action.ActionKey)
 	require.Contains(t, args, action.DeviceID)
+	require.Contains(t, args, action.TriggerEvaluationID)
+	require.Contains(t, args, "effective_state_outside")
+	require.Contains(t, args, action.TriggerObservationVersion)
 	require.Contains(t, args, ControlActionDeactivate)
 	require.Contains(t, args, json.RawMessage("[]"))
 }

@@ -226,6 +226,8 @@ export interface Device {
   // 状态信息组 (Status)
   cellStatus: string;
   opState: string;
+  /** 当前由 OMC 持有的设备管控状态；恢复核验成功后为空，历史仍可查询。 */
+  controlSummary?: DeviceControlSummary | null;
   mmeStatus: string;
   amfStatus: string;
   rfStatus: string;
@@ -387,6 +389,10 @@ export interface DeviceFilter {
   groupId?: string | string[];
   /** 激活状态：'1'=激活，'0'=未激活 */
   opState?: string;
+  /** OMC 管控来源；当前仅电子围栏。 */
+  controlSource?: 'geofence';
+  /** OMC 当前管控阶段，多选 OR。 */
+  controlPhase?: DeviceControlPhase[];
   /** 产品装配件 UUID（下拉来自 /products），对应后端 ?product_id= → devices.product_id */
   productId?: string;
   /** 产品型号（如 PM-B4860, QAFA 等），对应后端 product_class */
@@ -397,6 +403,72 @@ export interface DeviceFilter {
   softwareVersion?: string;
   /** T-0162: 固件版本（字典 firmware_version 提供下拉），后端 ?firmware_version= */
   firmwareVersion?: string;
+}
+
+export type DeviceControlPhase =
+  | 'deactivating'
+  | 'verifying'
+  | 'deactivated'
+  | 'partial_failed'
+  | 'failed'
+  | 'recovering'
+  | 'recovery_failed';
+
+export interface DeviceControlSummary {
+  sourceType: 'geofence';
+  sourceId?: string;
+  sourceName: string;
+  reasonCode: string;
+  phase: DeviceControlPhase;
+  actionId: string;
+  triggeredAt: string;
+  completedAt?: string;
+  lastError?: string;
+}
+
+export interface DeviceControlParameterState {
+  path: string;
+  value: string;
+}
+
+export interface DeviceControlEvaluationEvidence {
+  id: string;
+  observationVersion: number;
+  latitude: number;
+  longitude: number;
+  observedAt: string;
+  ruleType: string;
+  signedDistanceMeters?: number;
+  confirmedState: string;
+  reasonCode: string;
+}
+
+export interface DeviceControlActionHistory {
+  id: string;
+  parentActionId?: string;
+  sourceType: 'geofence';
+  sourceId?: string;
+  sourceName: string;
+  reasonCode: string;
+  observationVersion?: number;
+  effectiveStateVersion: number;
+  actionType: 'activate' | 'deactivate';
+  status: string;
+  beforeState: DeviceControlParameterState[];
+  requestedState: DeviceControlParameterState[];
+  verifiedState: DeviceControlParameterState[];
+  evaluation?: DeviceControlEvaluationEvidence;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface DeviceControlActionHistoryList {
+  items: DeviceControlActionHistory[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 /** 设备统计数据 — 按状态分类的设备数量 */
