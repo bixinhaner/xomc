@@ -478,6 +478,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 			c.DeviceService,
 			c.ProductRegistry,
 			c.ProductRepo,
+			c.ParamRegistry,
 		)
 		quickSettingsHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	}

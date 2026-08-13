@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/product"
 )
@@ -52,6 +53,30 @@ func setupRouter(h *Handler) *gin.Engine {
 	api := r.Group("/api/v1")
 	h.RegisterRoutes(api)
 	return r
+}
+
+func TestEnrichGroupsWithMappingsUsesProductEnumWireValues(t *testing.T) {
+	values := "25,50,75,100"
+	labels := "5MHz,10MHz,15MHz,20MHz"
+	groups := []Group{{ID: "enb-cell", Params: []Param{{
+		Name: "DLBandWidth", Type: "enum",
+		StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth",
+		EnumOptions:  []EnumOption{{Value: "n50", Label: "10MHz"}},
+	}}}}
+
+	got := enrichGroupsWithMappings(groups, []parammodel.ParamMapping{{
+		StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth",
+		EntryType:    "parameter", Access: "READ_WRITE", DataType: "INT", IsSupported: true,
+		EnumValues: &values, EnumLabels: &labels,
+	}})
+
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Params, 1)
+	assert.Equal(t, "int", got[0].Params[0].Type)
+	assert.Equal(t, []EnumOption{
+		{Value: "25", Label: "5MHz"}, {Value: "50", Label: "10MHz"},
+		{Value: "75", Label: "15MHz"}, {Value: "100", Label: "20MHz"},
+	}, got[0].Params[0].EnumOptions)
 }
 
 // makeMatchResult 构造一个含有 ParamModelID 的 MatchResult fixture。

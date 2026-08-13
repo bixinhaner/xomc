@@ -402,11 +402,31 @@ func buildParameterDefinitions(
 				continue
 			}
 			definitionKey := template
-			definitions[definitionKey] = parameterDefinition{
+			definition := parameterDefinition{
 				ID: param.Name, Template: template, Type: param.Type, Required: param.Required,
 				Readonly: param.Readonly, MinValue: param.MinValue, MaxValue: param.MaxValue,
 				EnumOptions: param.EnumOptions,
 			}
+			if productDefinition, exists := definitions[definitionKey]; exists {
+				// Product mappings describe the device wire contract. Quick settings
+				// may add presentation metadata, but must not replace product-specific
+				// types, ranges or enum wire values (for example BLQ uses 50 while
+				// ENB_DEFAULT uses n50 for the same LTE bandwidth path).
+				if productDefinition.Type != "" {
+					definition.Type = productDefinition.Type
+				}
+				definition.Readonly = definition.Readonly || productDefinition.Readonly
+				if productDefinition.MinValue != nil {
+					definition.MinValue = productDefinition.MinValue
+				}
+				if productDefinition.MaxValue != nil {
+					definition.MaxValue = productDefinition.MaxValue
+				}
+				if len(productDefinition.EnumOptions) > 0 {
+					definition.EnumOptions = productDefinition.EnumOptions
+				}
+			}
+			definitions[definitionKey] = definition
 			addKey(keysByName, param.Name, definitionKey)
 			addKey(quickSettingKeysByName, param.Name, definitionKey)
 			for _, alias := range []string{param.Name, param.TitleZh, param.TitleEn} {
@@ -757,10 +777,31 @@ func resolveInstancePath(template string, cellIndex, listIndex int) (string, err
 
 func convertParameterValue(raw any, definition parameterDefinition) (string, error) {
 	value := valueString(raw)
-	for _, option := range definition.EnumOptions {
-		if value == option.Value || strings.EqualFold(value, option.Label) {
-			value = option.Value
-			break
+	if len(definition.EnumOptions) > 0 {
+		matched := false
+		for _, option := range definition.EnumOptions {
+			if value == option.Value || strings.EqualFold(value, option.Label) {
+				value = option.Value
+				matched = true
+				break
+			}
+		}
+		// Compatibility for saved LTE bandwidth policies created by the old
+		// product-agnostic UI. Convert only when the target product explicitly
+		// declares the counterpart as a legal enum value.
+		if !matched && isLegacyLTEBandwidthValue(value) {
+			candidate := strings.TrimPrefix(strings.ToLower(value), "n")
+			for _, option := range definition.EnumOptions {
+				optionCandidate := strings.TrimPrefix(strings.ToLower(option.Value), "n")
+				if isLegacyLTEBandwidthValue(option.Value) && candidate == optionCandidate {
+					value = option.Value
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			return "", fmt.Errorf("expected one of the configured enum values")
 		}
 	}
 	if definition.MinValue != nil || definition.MaxValue != nil {
@@ -776,6 +817,15 @@ func convertParameterValue(raw any, definition parameterDefinition) (string, err
 		}
 	}
 	return value, nil
+}
+
+func isLegacyLTEBandwidthValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "25", "50", "75", "100", "n25", "n50", "n75", "n100":
+		return true
+	default:
+		return false
+	}
 }
 
 func networkProfile(device *model.Device, paramModel string) (string, string) {

@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/product"
 )
@@ -38,6 +39,7 @@ type Handler struct {
 	deviceSvc       DeviceLookup
 	productRegistry ProductClassMatcher
 	productRepo     ParamModelNameLookup
+	paramRegistry   *parammodel.Registry
 }
 
 // NewHandler 构造 Handler。任一依赖为 nil 时,路由层应跳过 Register(避免运行时 panic)。
@@ -46,12 +48,18 @@ func NewHandler(
 	deviceSvc DeviceLookup,
 	productRegistry ProductClassMatcher,
 	productRepo ParamModelNameLookup,
+	paramRegistries ...*parammodel.Registry,
 ) *Handler {
+	var paramRegistry *parammodel.Registry
+	if len(paramRegistries) > 0 {
+		paramRegistry = paramRegistries[0]
+	}
 	return &Handler{
 		registry:        registry,
 		deviceSvc:       deviceSvc,
 		productRegistry: productRegistry,
 		productRepo:     productRepo,
+		paramRegistry:   paramRegistry,
 	}
 }
 
@@ -71,9 +79,17 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 //	500 — 内部反查失败
 func (h *Handler) GetGroups(c *gin.Context) {
 	if paramModelName := strings.TrimSpace(c.Query("param_model")); paramModelName != "" {
+		groups := h.registry.GetByParamModel(paramModelName)
+		if lookup, ok := h.productRepo.(interface {
+			LookupParamModelIDByName(context.Context, string) (uuid.UUID, error)
+		}); ok {
+			if paramModelID, err := lookup.LookupParamModelIDByName(c.Request.Context(), paramModelName); err == nil {
+				groups = h.enrichGroups(c.Request.Context(), paramModelID, groups)
+			}
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"param_model": paramModelName,
-			"groups":      h.registry.GetByParamModel(paramModelName),
+			"groups":      groups,
 		})
 		return
 	}
@@ -123,9 +139,85 @@ func (h *Handler) GetGroups(c *gin.Context) {
 		return
 	}
 
-	groups := h.registry.GetByParamModel(paramModelName)
+	groups := h.enrichGroups(c.Request.Context(), *mr.Product.ParamModelID, h.registry.GetByParamModel(paramModelName))
 	c.JSON(http.StatusOK, gin.H{
 		"param_model": paramModelName,
 		"groups":      groups,
 	})
+}
+
+func (h *Handler) enrichGroups(ctx context.Context, paramModelID uuid.UUID, groups []Group) []Group {
+	if h.paramRegistry == nil {
+		return groups
+	}
+	set, err := h.paramRegistry.GetByParamModel(ctx, paramModelID)
+	if err != nil || set == nil {
+		return groups
+	}
+	return enrichGroupsWithMappings(groups, set.Mappings)
+}
+
+func enrichGroupsWithMappings(groups []Group, mappings []parammodel.ParamMapping) []Group {
+	byPath := make(map[string]parammodel.ParamMapping, len(mappings))
+	for _, mapping := range mappings {
+		if mapping.IsSupported && strings.EqualFold(mapping.EntryType, "parameter") {
+			path := strings.TrimSpace(mapping.StandardPath)
+			if path == "" {
+				path = strings.TrimSpace(mapping.PrivatePath)
+			}
+			if path != "" {
+				byPath[path] = mapping
+			}
+		}
+	}
+	for groupIndex := range groups {
+		for paramIndex := range groups[groupIndex].Params {
+			param := &groups[groupIndex].Params[paramIndex]
+			path := strings.TrimSpace(param.StandardPath)
+			if path == "" && groups[groupIndex].ObjectPath != "" && param.Leaf != "" {
+				path = groups[groupIndex].ObjectPath + param.Leaf
+			}
+			mapping, exists := byPath[path]
+			if !exists {
+				continue
+			}
+			if mapping.DataType != "" {
+				param.Type = strings.ToLower(strings.ReplaceAll(mapping.DataType, "_", ""))
+			}
+			param.Readonly = param.Readonly || strings.EqualFold(mapping.Access, "READ_ONLY") || strings.EqualFold(mapping.Access, "readonly")
+			if mapping.MinValue != nil {
+				param.MinValue = mapping.MinValue
+			}
+			if mapping.MaxValue != nil {
+				param.MaxValue = mapping.MaxValue
+			}
+			if mapping.EnumValues != nil && strings.TrimSpace(*mapping.EnumValues) != "" {
+				values := splitEnumCSV(*mapping.EnumValues)
+				labels := []string(nil)
+				if mapping.EnumLabels != nil {
+					labels = splitEnumCSV(*mapping.EnumLabels)
+				}
+				param.EnumOptions = make([]EnumOption, 0, len(values))
+				for index, value := range values {
+					label := value
+					if index < len(labels) {
+						label = labels[index]
+					}
+					param.EnumOptions = append(param.EnumOptions, EnumOption{Value: value, Label: label})
+				}
+			}
+		}
+	}
+	return groups
+}
+
+func splitEnumCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
