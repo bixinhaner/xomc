@@ -206,6 +206,7 @@ func materializePolicyParameters(
 			selected["pci"] = value
 		}
 	}
+	materializeCommonNetworkParameters(selected)
 	root["paramConfigList"] = []any{selected}
 	encoded, err := json.Marshal(root)
 	if err != nil {
@@ -214,6 +215,78 @@ func materializePolicyParameters(
 	copyPolicy := *policy
 	copyPolicy.Config = encoded
 	return &copyPolicy, nil
+}
+
+func materializeCommonNetworkParameters(selected map[string]any) {
+	parameterValues := mapValue(selected["networkParameterValues"])
+	interfaces := mapSlice(selected["networkInterfaces"])
+	if len(interfaces) == 0 && len(parameterValues) == 0 {
+		return
+	}
+	byPath := make(map[string]map[string]any)
+	order := make([]string, 0)
+	put := func(path string, raw any) {
+		value := valueString(raw)
+		if path == "" || value == "" {
+			return
+		}
+		if _, exists := byPath[path]; !exists {
+			order = append(order, path)
+		}
+		byPath[path] = map[string]any{"trPath": path, "value": value}
+	}
+	for path, value := range parameterValues {
+		put(strings.TrimSpace(path), value)
+	}
+	putAddressRows := func(prefix, object string, rows []map[string]any, ipv6 bool) {
+		for rowIndex, row := range rows {
+			rowPrefix := fmt.Sprintf("%s.%s.%d", prefix, object, rowIndex+1)
+			if ipv6 {
+				put(rowPrefix+".Origin", row["origin"])
+				put(rowPrefix+".PrefixLength", row["prefixLength"])
+			} else {
+				put(rowPrefix+".AddressingType", row["addressingType"])
+				put(rowPrefix+".SubnetMask", row["subnetMask"])
+			}
+			put(rowPrefix+".IPAddress", row["ipAddress"])
+			put(rowPrefix+".DefaultGateway", row["defaultGateway"])
+			put(rowPrefix+".PortType", row["portType"])
+		}
+	}
+	for interfaceIndex, item := range interfaces {
+		prefix := fmt.Sprintf("Device.Ethernet.Interface.%d", interfaceIndex+1)
+		put(prefix+".Name", item["name"])
+		putAddressRows(prefix, "IPv4Address", mapSlice(item["ipv4Addresses"]), false)
+		putAddressRows(prefix, "IPv6Address", mapSlice(item["ipv6Addresses"]), true)
+		for vlanIndex, vlan := range mapSlice(item["vlans"]) {
+			vlanPrefix := fmt.Sprintf("%s.VlanInterface.%d", prefix, vlanIndex+1)
+			put(vlanPrefix+".Name", vlan["name"])
+			put(vlanPrefix+".Id", vlan["id"])
+			put(vlanPrefix+".Enable", vlan["enable"])
+			putAddressRows(vlanPrefix, "IPv4Address", mapSlice(vlan["ipv4Addresses"]), false)
+			putAddressRows(vlanPrefix, "IPv6Address", mapSlice(vlan["ipv6Addresses"]), true)
+		}
+	}
+	// Explicit device custom parameters retain override priority over generated
+	// product-level network paths.
+	for _, item := range mapSlice(selected["customParams"]) {
+		path := strings.TrimSpace(valueString(item["trPath"]))
+		if path == "" || valueString(item["value"]) == "" {
+			continue
+		}
+		if _, exists := byPath[path]; !exists {
+			order = append(order, path)
+		}
+		byPath[path] = item
+	}
+	custom := make([]any, 0, len(order))
+	for _, path := range order {
+		custom = append(custom, byPath[path])
+	}
+	selected["customParams"] = custom
+	delete(selected, "networkInterfaces")
+	delete(selected, "networkParameterValues")
+	delete(selected, "networkObjectInstances")
 }
 
 func sanitizePolicyCommonParameters(common map[string]any) map[string]any {

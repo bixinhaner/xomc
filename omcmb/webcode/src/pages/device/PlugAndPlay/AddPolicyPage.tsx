@@ -17,7 +17,6 @@ import {
   message,
   Modal,
   Drawer,
-  Collapse,
   Descriptions,
   Alert,
   Tag,
@@ -29,7 +28,6 @@ import {
 import {
   ArrowLeftOutlined,
   UploadOutlined,
-  PlusOutlined,
   DeleteOutlined,
   SearchOutlined,
   CheckCircleOutlined,
@@ -75,6 +73,7 @@ import {
   parseParamConfigWorkbook,
   writeParamConfigWorkbookFile,
   type ParamConfigDeviceType,
+  type ParamConfigWorkbookMapping,
 } from './paramConfigWorkbook';
 import { getParamConfigTemplate, toParamConfigDeviceType } from './paramConfigTemplate';
 import { getParamConfigExportFields } from './paramConfigExportFields';
@@ -83,10 +82,6 @@ import {
   toParamConfigFormValues,
   withTemplateSheetParameters,
 } from './paramConfigDetail';
-import {
-  GSM_GROUPED_TEMPLATE_FIELDS,
-  type TemplateFieldRef,
-} from './paramConfigGroupedFields';
 import { isParamConfigToolbarEnabled } from './paramConfigToolbarAvailability';
 import {
   buildParamConfigImportPreview,
@@ -97,34 +92,12 @@ import {
 } from './paramConfigInsights';
 import { getPolicyModuleActionAvailability } from './policyActionAvailability';
 import { getPolicySubmitAvailability } from './policySubmitAvailability';
-import ProductClassMultiSelect from './components/ProductClassMultiSelect';
+import ProductClassSelect from './components/ProductClassSelect';
 import PolicyReadOnlySection from './components/PolicyReadOnlySection';
-import GnbQuickSettingsCards, { GnbTemplateExtraFieldGrid } from './GnbQuickSettingsCards';
-import EnbQuickSettingsCards, { EnbTemplateExtraFieldGrid } from './EnbQuickSettingsCards';
-import CommonParameterConfigPanel from './CommonParameterConfigPanel';
+import CommonParameterConfigPanel, { ParameterConfigFields } from './CommonParameterConfigPanel';
 import { sanitizeCommonParamConfig } from './commonParameterConfig';
-import GnbNetworkConfigCards from './GnbNetworkConfigCards';
 
 const { Text, Title } = Typography;
-
-function TemplateFieldGrid({ fields }: { fields: readonly TemplateFieldRef[] }) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', columnGap: 16 }}>
-      {fields.map(({ sheet, header }) => (
-        <Form.Item
-          key={`${sheet}.${header}`}
-          name={['sheetParameters', sheet, 0, header]}
-          label={header.replace(/^\*/, '')}
-          getValueProps={(inputValue) => ({
-            value: inputValue === undefined || inputValue === null ? '' : String(inputValue),
-          })}
-        >
-          <Input style={{ width: '100%' }} />
-        </Form.Item>
-      ))}
-    </div>
-  );
-}
 
 // Types
 type ExecuteType = '0' | '1';
@@ -212,6 +185,7 @@ interface ParamConfig {
   updatedBy: string;
   updatedAt: string;
   sheetParameters?: Record<string, Record<string, unknown>[]>;
+  workbookMappings?: ParamConfigWorkbookMapping[];
   // ========== eNB 基础配置字段 ==========
   eNodeBId?: string;
   bandsSupport?: number;
@@ -761,8 +735,8 @@ export default function AddPolicyPage() {
   }, [isView, isEdit, t]);
 
   // Handle product type change
-  const handleProductClassChange = useCallback((values: string[]) => {
-    setProductClasses(values);
+  const handleProductClassChange = useCallback((value: string) => {
+    setProductClasses(value ? [value] : []);
     form.setFieldsValue({ originalVersion: [], targetVersion: undefined });
   }, [form]);
 
@@ -881,10 +855,33 @@ export default function AddPolicyPage() {
     return result;
   }, [parameterTaskData]);
 
+  const handleDownloadParamConfig = useCallback(async (record: ParamConfig) => {
+    const paramModelName = selectedProduct?.paramModelName;
+    const [quickSettings, mappings] = paramModelName
+      ? await Promise.all([
+        quicksettingsApi.getGroupsByParamModel(paramModelName),
+        paramModelApi.listMappings(paramModelName),
+      ])
+      : [{ groups: [] }, { items: [] }];
+    const safeSerialNumber = record.serialNumber.replace(/[\\/:*?"<>|]+/g, '_');
+    await writeParamConfigWorkbookFile(
+      createParamConfigWorkbook([withTemplateSheetParameters(record)]),
+      `${safeSerialNumber}-${t('provision.paramConfigExportFileSuffix')}.xlsx`,
+      {
+        deviceType: record.deviceType as ParamConfigDeviceType,
+        productClass,
+        quickSettingsGroups: quickSettings.groups,
+        paramMappings: mappings.items,
+        quickSettingFields: getParamConfigExportFields(record.deviceType as ParamConfigDeviceType),
+      },
+    );
+    void message.success(t('provision.paramConfigExportSuccess', { count: 1 }));
+  }, [productClass, selectedProduct?.paramModelName, t]);
+
   const operationColumn = {
     title: t('table.operation'),
     key: 'action',
-    width: 100,
+    width: 180,
     fixed: 'right' as const,
     render: (_: unknown, record: ParamConfig) => {
       const items: MenuProps['items'] = [
@@ -911,6 +908,16 @@ export default function AddPolicyPage() {
             }}>
             {t('common.view')}
           </Button>
+          {moduleActions.download && (
+            <Button
+              type="link"
+              size="small"
+              icon={<DownloadOutlined />}
+              onClick={() => { void handleDownloadParamConfig(record); }}
+            >
+              {t('common.download')}
+            </Button>
+          )}
           {moduleActions.edit && moduleActions.delete && (
             <Dropdown menu={{ items }} trigger={['click']}>
               <Button type="text" size="small" icon={<MoreOutlined />} />
@@ -1062,6 +1069,8 @@ export default function AddPolicyPage() {
       workbook,
       `${safeProductClass}-${t('provision.paramConfigExportFileSuffix')}.xlsx`,
       {
+        deviceType: activeParamDeviceType,
+        productClass,
         quickSettingsGroups: quickSettings.groups,
         paramMappings: mappings.items,
         quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
@@ -1092,9 +1101,17 @@ export default function AddPolicyPage() {
       ])
       : [{ groups: [] }, { items: [] }];
     await writeParamConfigWorkbookFile(
-      createParamConfigTemplateWorkbook(activeParamDeviceType),
+      createParamConfigTemplateWorkbook(activeParamDeviceType, {
+        deviceType: activeParamDeviceType,
+        productClass,
+        quickSettingsGroups: quickSettings.groups,
+        paramMappings: mappings.items,
+        quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
+      }),
       template.fileName,
       {
+        deviceType: activeParamDeviceType,
+        productClass,
         quickSettingsGroups: quickSettings.groups,
         paramMappings: mappings.items,
         quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
@@ -1153,6 +1170,8 @@ export default function AddPolicyPage() {
         activeParamDeviceType,
         importedAt,
         {
+          deviceType: activeParamDeviceType,
+          productClass,
           quickSettingsGroups: quickSettings.groups,
           paramMappings: mappings.items,
           quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
@@ -1169,6 +1188,7 @@ export default function AddPolicyPage() {
         frequency: row.frequency,
         subframeAssignment: row.subframeAssignment,
         sheetParameters: row.sheetParameters,
+        workbookMappings: row.workbookMappings,
         updatedBy: row.updatedBy ?? 'import',
         updatedAt: row.updatedAt ?? importedAt,
       }));
@@ -1185,7 +1205,7 @@ export default function AddPolicyPage() {
           : error.code === 'template_no_data'
             ? t('provision.paramConfigTemplateNoData')
             : error.code === 'missing_columns'
-              ? t('provision.paramConfigImportMissingColumns')
+              ? t('provision.paramConfigImportMissingColumns', { field: error.field ?? '-' })
               : t('provision.paramConfigImportInvalidRow', {
             row: error.row ?? '-',
             field: error.field ?? '-',
@@ -1643,8 +1663,14 @@ export default function AddPolicyPage() {
                   </Form.Item>
                 </Descriptions.Item>
                 <Descriptions.Item label={t('provision.productName')}>
-                  <Form.Item name="productClasses" noStyle rules={[{ required: true, message: t('common.pleaseSelect') }]}>
-                    <ProductClassMultiSelect
+                  <Form.Item
+                    name="productClasses"
+                    noStyle
+                    getValueProps={(value: string[] | undefined) => ({ value: value?.[0] })}
+                    normalize={(value: string | undefined) => value ? [value] : []}
+                    rules={[{ required: true, message: t('common.pleaseSelect') }]}
+                  >
+                    <ProductClassSelect
                       placeholder={productTechnology
                         ? t('common.pleaseSelect')
                         : t('provision.selectProductTechnologyFirst')}
@@ -1721,173 +1747,18 @@ export default function AddPolicyPage() {
         destroyOnHidden
       >
         <Form form={configForm} layout="vertical" disabled={configDetailMode === 'view'} style={{ paddingBottom: 60 }}>
-          {/* eNB fields aligned with device quick settings; template-only fields follow. */}
-          {currentConfig?.deviceType === 'eNB' && (
-            <>
-              <EnbQuickSettingsCards paramModelName={selectedProduct?.paramModelName} />
-              <Card size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16 }}>
-                <EnbTemplateExtraFieldGrid />
-              </Card>
-              <Card size="small" title={t('provision.customParams')} style={{ marginBottom: 16 }}>
-                <Form.List name="customParams">
-                  {(fields, { add, remove }) => (
-                    <>
-                      {fields.map(({ key, name, ...restField }) => (
-                        <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.customParam')} ${name + 1}`} extra={
-                          <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                        }>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', columnGap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'name']} label={t('provision.nrQuick.name')}><Input /></Form.Item>
-                            <Form.Item {...restField} name={[name, 'value']} label={t('provision.nrQuick.value')}><Input /></Form.Item>
-                            <Form.Item {...restField} name={[name, 'trPath']} label={t('provision.nrQuick.trPath')}><Input /></Form.Item>
-                          </div>
-                        </Card>
-                      ))}
-                      <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                        {t('provision.addCustomParam')}
-                      </Button>
-                    </>
-                  )}
-                </Form.List>
-              </Card>
-            </>
-          )}
-          {/* gNB specific fields */}
-          {currentConfig?.deviceType === 'gNB' && (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <GnbQuickSettingsCards />
-              <div key="gnb-network" style={{ order: 10 }}>
-                <GnbNetworkConfigCards readOnly={configDetailMode === 'view'} />
-              </div>
-              <Card key="gnb-plmn-extra" size="small" title={t('provision.plmnConfigList')} style={{ marginBottom: 16, order: 9 }}>
-                <Form.List name="plmnConfigList">
-                  {(fields, { add, remove }) => (
-                    <>
-                      {fields.map(({ key, name, ...restField }) => (
-                        <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.plmnConfig')} ${name + 1}`} extra={
-                          <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                        }>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', columnGap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'plmnId']} label={t('provision.nrQuick.plmn')}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'primary']} label={t('provision.primary')}>
-                              <Select options={[
-                                { label: t('common.yes'), value: '1' },
-                                { label: t('common.no'), value: '0' },
-                              ]} />
-                            </Form.Item>
-                          </div>
-                        </Card>
-                      ))}
-                      <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                        {t('provision.addPlmnConfig')}
-                      </Button>
-                    </>
-                  )}
-                </Form.List>
-              </Card>
-              <Card key="gnb-slice" size="small" title={t('provision.sliceConfigList')} style={{ marginBottom: 16, order: 11 }}>
-                <Form.List name="sliceConfigList">
-                  {(fields, { add, remove }) => (
-                    <>
-                      {fields.map(({ key, name, ...restField }) => (
-                        <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.sliceConfig')} ${name + 1}`} extra={
-                          <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                        }>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'sd']} label={t('provision.nrQuick.sd')} style={{ flex: '1 1 200px' }}>
-                              <Select options={[
-                                { label: t('provision.sdEmpty'), value: '0' },
-                                { label: t('provision.sdNotEmpty'), value: '1' },
-                              ]} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'sdValue']} label={t('provision.nrQuick.sdValue')} style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} placeholder="e.g. 010203" />
-                            </Form.Item>
-                          </div>
-                        </Card>
-                      ))}
-                      <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                        {t('provision.addSliceConfig')}
-                      </Button>
-                    </>
-                  )}
-                </Form.List>
-              </Card>
-              <Card key="gnb-other" size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16, order: 8 }}>
-                <GnbTemplateExtraFieldGrid />
-              </Card>
-              <Card key="gnb-custom" size="small" title={t('provision.customParams')} style={{ marginBottom: 16, order: 12 }}>
-                <Form.List name="customParams">
-                  {(fields, { add, remove }) => (
-                    <>
-                      {fields.map(({ key, name, ...restField }) => (
-                        <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.customParam')} ${name + 1}`} extra={
-                          <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                        }>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'name']} label={t('provision.nrQuick.name')} style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'value']} label={t('provision.nrQuick.value')} style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'trPath']} label={t('provision.nrQuick.trPath')} style={{ flex: '1 1 300px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                          </div>
-                        </Card>
-                      ))}
-                      <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                        {t('provision.addCustomParam')}
-                      </Button>
-                    </>
-                  )}
-                </Form.List>
-              </Card>
-            </div>
-          )}
-
-          {/* GSM specific fields */}
-          {currentConfig?.deviceType === 'GSM' && (
-            <Collapse defaultActiveKey={['gsm-basic', 'gsm-other', 'gsm-custom']} ghost>
-              <Collapse.Panel key="gsm-basic" header={t('provision.gsmBasicConfig')}>
-                <TemplateFieldGrid fields={GSM_GROUPED_TEMPLATE_FIELDS.quickAbis} />
-              </Collapse.Panel>
-              <Collapse.Panel key="gsm-other" header={t('provision.otherParams')}>
-                <TemplateFieldGrid fields={GSM_GROUPED_TEMPLATE_FIELDS.other} />
-              </Collapse.Panel>
-              <Collapse.Panel key="gsm-custom" header={t('provision.customParams')}>
-                <Form.List name="customParams">
-                  {(fields, { add, remove }) => (
-                    <>
-                      {fields.map(({ key, name, ...restField }) => (
-                        <Card key={key} size="small" style={{ marginBottom: 12 }} title={`${t('provision.customParam')} ${name + 1}`} extra={
-                          <Button type="link" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                        }>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                            <Form.Item {...restField} name={[name, 'name']} label="Name" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'value']} label="Value" style={{ flex: '1 1 200px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                            <Form.Item {...restField} name={[name, 'trPath']} label="TR Path" style={{ flex: '1 1 300px' }}>
-                              <Input style={{ width: '100%' }} />
-                            </Form.Item>
-                          </div>
-                        </Card>
-                      ))}
-                      <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                        {t('provision.addCustomParam')}
-                      </Button>
-                    </>
-                  )}
-                </Form.List>
-              </Collapse.Panel>
-            </Collapse>
-          )}
+          <Alert
+            type="info"
+            showIcon
+            title={t('provision.deviceParameterOverridesHint')}
+            style={{ marginBottom: 16 }}
+          />
+          <ParameterConfigFields
+            deviceType={currentConfig?.deviceType as ParamConfigDeviceType | undefined}
+            paramModelName={selectedProduct?.paramModelName}
+            scope="device"
+            onRequestEdit={() => setConfigDetailMode('edit')}
+          />
         </Form>
 
 

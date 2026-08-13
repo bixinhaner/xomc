@@ -38,6 +38,37 @@ describe('parameter configuration insights', () => {
     expect(insights.get('C')?.validationStatus).toBe('incomplete');
   });
 
+  it('uses workbook TRPath mappings to validate dynamically named template fields', () => {
+    const insights = buildParamConfigInsights([{
+      serialNumber: 'SN-DYNAMIC',
+      deviceType: 'gNB',
+      updatedBy: 'import',
+      sheetParameters: {
+        DEVICE: [{ 'Base Station Identifier': 101 }],
+        CELL: [{ 'Physical Cell Identifier': 22 }],
+      },
+      workbookMappings: [{
+        displayName: 'Base Station Identifier',
+        sheet: 'DEVICE',
+        header: 'Base Station Identifier',
+        trPath: 'Device.Services.FAPService.1.CellConfig.NR.RAN.GNBID',
+        source: 'system',
+      }, {
+        displayName: 'Physical Cell Identifier',
+        sheet: 'CELL',
+        header: 'Physical Cell Identifier',
+        trPath: 'Device.Services.FAPService.1.CellConfig.NR.RAN.PCI',
+        source: 'system',
+      }],
+    }]);
+
+    expect(insights.get('SN-DYNAMIC')).toMatchObject({
+      validationStatus: 'valid',
+      gnbId: '101',
+      pci: '22',
+    });
+  });
+
   it('previews add, update and duplicate import actions', () => {
     expect(buildParamConfigImportPreview(
       [{ serialNumber: 'SN-001' }],

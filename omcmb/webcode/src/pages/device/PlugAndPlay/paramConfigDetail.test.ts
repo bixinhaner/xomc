@@ -473,4 +473,23 @@ describe('parameter configuration detail mapping', () => {
       IPSEC_ENABLE: '1',
     });
   });
+
+  it('loads and saves product-model network parameters through workbook mappings', () => {
+    const path = 'Device.IP.Interface.1.IPv4Address.1.IPAddress';
+    const current = withTemplateSheetParameters({
+      deviceType: 'gNB',
+      serialNumber: '5G-SN-NETWORK',
+      workbookMappings: [{ sheet: 'INTERFACE', header: 'IP Address', trPath: path }],
+      sheetParameters: {
+        INTERFACE: [{ 'Serial Number': '5G-SN-NETWORK', 'IP Address': '192.0.2.10' }],
+      },
+    });
+    const form = toParamConfigFormValues(current);
+
+    expect(form.networkParameterValues).toEqual({ [path]: '192.0.2.10' });
+    expect(mergeParamConfigFormValues(current, {
+      ...form,
+      networkParameterValues: { [path]: '192.0.2.20' },
+    }).sheetParameters.INTERFACE[0]['IP Address']).toBe('192.0.2.20');
+  });
 });

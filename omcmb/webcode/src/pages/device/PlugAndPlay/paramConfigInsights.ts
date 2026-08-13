@@ -16,6 +16,11 @@ export interface ParamConfigInsightSource {
   ssbFrequency?: unknown;
   tac?: unknown;
   sheetParameters?: Record<string, Record<string, unknown>[]>;
+  workbookMappings?: Array<{
+    sheet: string;
+    header: string;
+    trPath: string;
+  }>;
 }
 
 export interface ParamConfigInsight {
@@ -49,6 +54,23 @@ function firstSheetValue(
   return undefined;
 }
 
+function mappedPathValue(
+  source: ParamConfigInsightSource,
+  leafNames: readonly string[],
+): string | undefined {
+  const expected = new Set(leafNames.map((name) => name.replace(/[^a-z0-9]/gi, '').toUpperCase()));
+  for (const mapping of source.workbookMappings ?? []) {
+    if (/\.NeighborList\./i.test(mapping.trPath)) continue;
+    const leaf = mapping.trPath.split('.').filter(Boolean).at(-1)?.replace(/[^a-z0-9]/gi, '').toUpperCase();
+    if (!leaf || !expected.has(leaf)) continue;
+    for (const row of source.sheetParameters?.[mapping.sheet] ?? []) {
+      const value = text(row[mapping.header]);
+      if (value !== undefined) return value;
+    }
+  }
+  return undefined;
+}
+
 export function paramConfigSource(source: ParamConfigInsightSource): ParamConfigSource {
   const updatedBy = source.updatedBy?.trim().toLowerCase();
   if (updatedBy === 'batch-plan' || updatedBy === 'batch_plan') return 'batch_plan';
@@ -62,8 +84,12 @@ export function buildParamConfigInsights(
   const gnbIdCounts = new Map<string, number>();
   const pciCounts = new Map<string, number>();
   const extracted = configs.map((config) => {
-    const gnbId = text(config.gnbId) ?? firstSheetValue(config, 'CELL', '*gNB ID');
-    const pci = text(config.pci) ?? firstSheetValue(config, 'CELL', '*PCI');
+    const gnbId = text(config.gnbId)
+      ?? mappedPathValue(config, ['GNBID'])
+      ?? firstSheetValue(config, 'CELL', '*gNB ID');
+    const pci = text(config.pci)
+      ?? mappedPathValue(config, ['PCI', 'PhysicalCellID'])
+      ?? firstSheetValue(config, 'CELL', '*PCI');
     if (config.deviceType === 'gNB' && gnbId) gnbIdCounts.set(gnbId, (gnbIdCounts.get(gnbId) ?? 0) + 1);
     if (config.deviceType === 'gNB' && pci) pciCounts.set(pci, (pciCounts.get(pci) ?? 0) + 1);
     return { config, gnbId, pci };
@@ -79,14 +105,20 @@ export function buildParamConfigInsights(
       gnbId,
       pci,
       band: text(config.freqBandIndicator ?? config.bandsSupport)
+        ?? mappedPathValue(config, ['FreqBandIndicator', 'Band'])
         ?? firstSheetValue(config, 'CELL', 'Freq BandIndicator', '*BAND'),
       bandwidth: text(config.dlbandwidth ?? config.bandWidth)
+        ?? mappedPathValue(config, ['DLBandwidth', 'Bandwidth'])
         ?? firstSheetValue(config, 'CELL', 'DLBandwidth', '*BANDWIDTH_DL'),
       frequency: text(config.nrarfcnndl ?? config.frequency)
+        ?? mappedPathValue(config, ['NRARFCNDL', 'EARFCNDL'])
         ?? firstSheetValue(config, 'CELL', 'NRARFCNDL', '*EARFCN_DL'),
       ssbFrequency: text(config.ssbFrequency)
+        ?? mappedPathValue(config, ['SSBFrequency'])
         ?? firstSheetValue(config, 'CELL', 'SSB Frequency'),
-      tac: text(config.tac) ?? firstSheetValue(config, 'PLMN', '*TAC'),
+      tac: text(config.tac)
+        ?? mappedPathValue(config, ['TAC'])
+        ?? firstSheetValue(config, 'PLMN', '*TAC'),
     };
     return [config.serialNumber, insight];
   }));

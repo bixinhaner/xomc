@@ -2,25 +2,26 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const pageSource = readFileSync(
-  resolve(process.cwd(), 'src/pages/device/PlugAndPlay/AddPolicyPage.tsx'),
+const panelSource = readFileSync(
+  resolve(process.cwd(), 'src/pages/device/PlugAndPlay/CommonParameterConfigPanel.tsx'),
   'utf8',
 );
 const cardsSource = readFileSync(
   resolve(process.cwd(), 'src/pages/device/PlugAndPlay/EnbQuickSettingsCards.tsx'),
   'utf8',
 );
-const enbSection = pageSource.slice(
-  pageSource.indexOf('{/* eNB fields aligned with device quick settings; template-only fields follow. */}'),
-  pageSource.indexOf('{/* gNB specific fields */}'),
+const enbSection = panelSource.slice(
+  panelSource.indexOf("{deviceType === 'eNB'"),
+  panelSource.indexOf("{deviceType === 'GSM'"),
 );
 
 describe('eNB parameter editor', () => {
   it('uses the LTE quick-settings cards and puts template extensions after them', () => {
-    expect(enbSection).toContain('<EnbQuickSettingsCards paramModelName={selectedProduct?.paramModelName} />');
+    expect(enbSection).toContain('<EnbQuickSettingsCards');
+    expect(enbSection).toContain('<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />');
     expect(enbSection).toContain('<EnbTemplateExtraFieldGrid />');
     expect(enbSection.indexOf('<EnbTemplateExtraFieldGrid />'))
-      .toBeGreaterThan(enbSection.indexOf('<EnbQuickSettingsCards paramModelName={selectedProduct?.paramModelName} />'));
+      .toBeGreaterThan(enbSection.indexOf('<EnbQuickSettingsCards'));
   });
 
   it('shows product-specific sync-source fields and gates supported PTP details by mode', () => {

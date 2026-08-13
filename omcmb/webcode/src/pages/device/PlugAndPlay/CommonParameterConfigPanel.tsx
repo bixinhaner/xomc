@@ -6,6 +6,7 @@ import GnbQuickSettingsCards, { GnbTemplateExtraFieldGrid } from './GnbQuickSett
 import EnbQuickSettingsCards, { EnbTemplateExtraFieldGrid } from './EnbQuickSettingsCards';
 import { GSM_GROUPED_TEMPLATE_FIELDS, type TemplateFieldRef } from './paramConfigGroupedFields';
 import { GNB_COMMON_EXCLUDED_EXTRA_FIELD_IDS } from './gnbQuickSettingsFields';
+import CommonQuickSettingsNetworkCards from './CommonQuickSettingsNetworkCards';
 
 const { Text } = Typography;
 
@@ -122,6 +123,75 @@ export interface CommonParameterConfigPanelProps {
   disabled?: boolean;
 }
 
+export interface ParameterConfigFieldsProps {
+  deviceType?: ParamConfigDeviceType;
+  paramModelName?: string;
+  scope?: 'common' | 'device';
+  onRequestEdit?: () => void;
+}
+
+export function ParameterConfigFields({
+  deviceType,
+  paramModelName,
+  scope = 'common',
+  onRequestEdit,
+}: ParameterConfigFieldsProps) {
+  const t = useT();
+  const commonScope = scope === 'common';
+  return (
+    <>
+      {deviceType === 'gNB' && (
+        <>
+          {commonScope && (
+            <>
+              <Card size="small" title={t('provision.batchAllocationRules')} style={{ marginBottom: 16 }}>
+                <Text type="secondary">{t('provision.batchAllocationRulesHint')}</Text>
+              </Card>
+              <AllocationRuleFields name="gnbIdAllocation" title="gNB ID" maximum={4_294_967_295} />
+              <AllocationRuleFields name="pciAllocation" title="PCI" maximum={1007} />
+            </>
+          )}
+          <GnbQuickSettingsCards
+            excludedFieldIds={commonScope ? ['gNBId', 'PCI'] : []}
+            beforeIpsec={<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />}
+          />
+          <Card size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16 }}>
+            <GnbTemplateExtraFieldGrid
+              excludedFieldIds={commonScope ? GNB_COMMON_EXCLUDED_EXTRA_FIELD_IDS : []}
+            />
+          </Card>
+          <CustomParameters />
+        </>
+      )}
+      {deviceType === 'eNB' && (
+        <>
+          <EnbQuickSettingsCards
+            paramModelName={paramModelName}
+            beforeIpsec={<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />}
+          />
+          <Card size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16 }}>
+            <EnbTemplateExtraFieldGrid />
+          </Card>
+          <CustomParameters />
+        </>
+      )}
+      {deviceType === 'GSM' && (
+        <>
+          <CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />
+          <Card size="small" title={t('provision.gsmBasicConfig')} style={{ marginBottom: 16 }}>
+            <GsmFields fields={GSM_GROUPED_TEMPLATE_FIELDS.quickAbis} />
+          </Card>
+          <Card size="small" title={t('provision.otherParams')} style={{ marginBottom: 16 }}>
+            <GsmFields fields={GSM_GROUPED_TEMPLATE_FIELDS.other} />
+          </Card>
+          <CustomParameters />
+        </>
+      )}
+      {!deviceType && <Alert type="warning" showIcon title={t('provision.paramConfigDeviceTypeUnavailable')} />}
+    </>
+  );
+}
+
 export default function CommonParameterConfigPanel({
   form,
   deviceType,
@@ -137,41 +207,11 @@ export default function CommonParameterConfigPanel({
         title={t('provision.commonParamConfigHint')}
         style={{ marginBottom: 16 }}
       />
-      {deviceType === 'gNB' && (
-        <>
-          <Card size="small" title={t('provision.batchAllocationRules')} style={{ marginBottom: 16 }}>
-            <Text type="secondary">{t('provision.batchAllocationRulesHint')}</Text>
-          </Card>
-          <AllocationRuleFields name="gnbIdAllocation" title="gNB ID" maximum={4_294_967_295} />
-          <AllocationRuleFields name="pciAllocation" title="PCI" maximum={1007} />
-          <GnbQuickSettingsCards excludedFieldIds={['gNBId', 'PCI']} />
-          <Card size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16 }}>
-            <GnbTemplateExtraFieldGrid excludedFieldIds={GNB_COMMON_EXCLUDED_EXTRA_FIELD_IDS} />
-          </Card>
-          <CustomParameters />
-        </>
-      )}
-      {deviceType === 'eNB' && (
-        <>
-          <EnbQuickSettingsCards paramModelName={paramModelName} />
-          <Card size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16 }}>
-            <EnbTemplateExtraFieldGrid />
-          </Card>
-          <CustomParameters />
-        </>
-      )}
-      {deviceType === 'GSM' && (
-        <>
-          <Card size="small" title={t('provision.gsmBasicConfig')} style={{ marginBottom: 16 }}>
-            <GsmFields fields={GSM_GROUPED_TEMPLATE_FIELDS.quickAbis} />
-          </Card>
-          <Card size="small" title={t('provision.otherParams')} style={{ marginBottom: 16 }}>
-            <GsmFields fields={GSM_GROUPED_TEMPLATE_FIELDS.other} />
-          </Card>
-          <CustomParameters />
-        </>
-      )}
-      {!deviceType && <Alert type="warning" showIcon title={t('provision.paramConfigDeviceTypeUnavailable')} />}
+      <ParameterConfigFields
+        deviceType={deviceType}
+        paramModelName={paramModelName}
+        scope="common"
+      />
     </Form>
   );
 }
