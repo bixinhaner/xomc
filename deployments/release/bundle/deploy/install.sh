@@ -943,7 +943,7 @@ else
     warn "$OMC_ROOT/etc/ 已有实例配置（包含可能已改好的强口令 / JWT 密钥 / TLS 证书路径等）" "$OMC_ROOT/etc/ contains instance configuration (possibly including custom credentials, JWT keys, and TLS certificate paths)"
     warn "  选 y 将覆盖为新包模板（原 etc 自动备份到 etc.bak.<时间戳>）" "  Enter y to replace it with the package template (the old etc is backed up automatically)"
     warn "  选 N 保留现有配置不动（默认）" "  Enter N to keep the current configuration (default)"
-    read -rp "$(install_message "是否用新包模板覆盖 $OMC_ROOT/etc/？" "Replace $OMC_ROOT/etc/ with the package template?") [y/N] " yn
+    read -rp "$(install_message "是否用新包的配置文件模板覆盖 $OMC_ROOT/etc/？" "Replace $OMC_ROOT/etc/ with the new configuration file template?") [y/N] " yn
     case "${yn:-N}" in [Yy]*) do_overwrite=1 ;; esac
   fi
 
@@ -1537,18 +1537,14 @@ else
   "${DC[@]}" up --pull never -d --no-deps "${remaining_services[@]}"
 fi
 
-# Compose records the resolved bind-mount source inode when a container is
-# created. OMC_ROOT/current is switched to the new immutable release above,
-# but an unchanged monitoring image/config leaves the old container attached
-# to the previous release directory. Recreate only the stateless services that
-# mount release-local configuration; --no-deps protects all data services and
-# named volumes remain attached.
-if [ "$SKIP_MONITORING" = 0 ]; then
-  log "刷新版本目录 bind mount（仅监控无状态容器，保留数据卷）..." "Refreshing release bind mounts (monitoring stateless containers only; data volumes preserved) ..."
-  "${DC[@]}" up --pull never -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo \
-    nats-exporter nginx-exporter node-exporter cadvisor
-fi
-
+# ── 业务就绪健康检查（必须在重建监控栈之前执行）──────────────────────────
+# healthcheck.sh --startup 只校验「业务 + 基础设施 + web」容器与端点，不检监控容器，
+# 因此可在下方监控栈 force-recreate 之前完成。这一点至关重要：重建监控会拉起
+# cadvisor，其启动期经 docker socket 对 daemon 做全量容器盘点，短时间内令
+# `docker ps/inspect` 显著变慢；若在此期间跑健康检查（每轮约 24 次 docker CLI 调用），
+# 会被单轮 timeout 中途砍掉、误报安装失败，而部署后人工 healthcheck（daemon 已空闲）
+# 却全通过。放在重建前，此刻 daemon 与 app_wait_ready 一样空闲（业务刚起、尚无
+# cadvisor），启动检查通常 <10s 即过。监控容器留给部署后人工完整 healthcheck。
 HEALTHCHECK_INTERVAL=5
 HEALTHCHECK_TIMEOUT="${OMC_HEALTHCHECK_TIMEOUT:-90}"
 HEALTHCHECK_FINAL_GRACE="${OMC_HEALTHCHECK_FINAL_GRACE:-0}"
@@ -1585,8 +1581,25 @@ while :; do
   sleep "$HEALTHCHECK_SLEEP"
 done
 
-# 初始化期间监控/字典/业务端点可能恰好跨过主窗口；再给一次短复核，避免把
-# “容器已稳定、端点刚完成启动”误报为安装失败。最终仍以完整 healthcheck 为准。
+# Compose records the resolved bind-mount source inode when a container is
+# created. OMC_ROOT/current is switched to the new immutable release above,
+# but an unchanged monitoring image/config leaves the old container attached
+# to the previous release directory. Recreate only the stateless services that
+# mount release-local configuration; --no-deps protects all data services and
+# named volumes remain attached. 放在业务健康检查之后：重建监控会拉起 cadvisor
+# 短暂拖慢 docker daemon，故不在其后再做依赖 docker CLI 的健康探针。
+if [ "$SKIP_MONITORING" = 0 ]; then
+  log "刷新版本目录 bind mount（仅监控无状态容器，保留数据卷）..." "Refreshing release bind mounts (monitoring stateless containers only; data volumes preserved) ..."
+  "${DC[@]}" up --pull never -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo \
+    nats-exporter nginx-exporter node-exporter cadvisor
+fi
+
+# 启动窗口（轻量 --startup）未通过时，可选地以完整 healthcheck 做最终复核。
+# 默认关闭（OMC_HEALTHCHECK_FINAL_GRACE=0）：完整检查含监控容器与 docker exec /
+# psql 深审计，放在监控重建后会落入 cadvisor 启动 storm 而挂起；启动检查（业务
+# 就绪）已是安装门禁，完整 healthcheck 留给部署后人工执行。仅在 daemon 已空闲、
+# 需要在安装内做一次完整复核时显式启用（值即最终复核预算秒数，单轮上限不超过
+# HEALTHCHECK_PROBE_TIMEOUT）。
 if [ "$HEALTH_OK" -eq 0 ] && [ "$HEALTHCHECK_FINAL_GRACE" -gt 0 ]; then
   log "主健康等待窗口结束，进行 ${HEALTHCHECK_FINAL_GRACE}s 最终复核 ..." "The primary health-check window ended; running the ${HEALTHCHECK_FINAL_GRACE}s final probe ..."
   HEALTHCHECK_FINAL_PROBE_TIMEOUT="$HEALTHCHECK_FINAL_GRACE"
