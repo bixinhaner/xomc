@@ -518,6 +518,11 @@ describe('GeofenceBindingsDrawer', () => {
     renderDrawer();
 
     expect(screen.getByText('部分失败')).toBeInTheDocument();
+    expect(screen.getByText('0/2 一致')).toBeInTheDocument();
+    const actionDevice = screen
+      .getAllByText('BOUND001')
+      .find((element) => element.tagName === 'STRONG');
+    expect(actionDevice?.closest('details')).not.toHaveAttribute('open');
     expect(screen.getByText('控制参数')).toBeInTheDocument();
     expect(screen.getAllByText('rf')).toHaveLength(2);
     expect(screen.getByText('LTE 小区 1 运行状态')).toBeInTheDocument();
