@@ -1550,14 +1550,23 @@ if [ "$SKIP_MONITORING" = 0 ]; then
 fi
 
 HEALTHCHECK_INTERVAL=5
-HEALTHCHECK_TIMEOUT="${OMC_HEALTHCHECK_TIMEOUT:-90}"
-HEALTHCHECK_FINAL_GRACE="${OMC_HEALTHCHECK_FINAL_GRACE:-0}"
-HEALTHCHECK_PROBE_TIMEOUT="${OMC_HEALTHCHECK_PROBE_TIMEOUT:-30}"
+# 启动期刚 force-recreate 完监控容器，docker daemon 负载高、CLI 调用偏慢。
+# 单轮探针上限要容得下一整轮 --startup（容器标签 + 端点探针，无 docker exec），
+# 否则健康的启动会被 timeout 中途砍掉，误报为安装失败（与部署后人工 healthcheck 结论矛盾）。
+# 启动循环首轮成功即 break，健康系统通常 <10s 即过，这些预算只在 daemon 慢时才被消耗。
+HEALTHCHECK_TIMEOUT="${OMC_HEALTHCHECK_TIMEOUT:-180}"
+HEALTHCHECK_FINAL_GRACE="${OMC_HEALTHCHECK_FINAL_GRACE:-120}"
+HEALTHCHECK_PROBE_TIMEOUT="${OMC_HEALTHCHECK_PROBE_TIMEOUT:-90}"
+# 最终复核跑的是完整 healthcheck（含 docker exec / psql 深审计，比 --startup 重得多），
+# 其单轮上限独立于启动探针，不能被 PROBE_TIMEOUT 反向夹紧。
+HEALTHCHECK_FINAL_PROBE_TIMEOUT="${OMC_HEALTHCHECK_FINAL_PROBE_TIMEOUT:-120}"
 case "$HEALTHCHECK_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_TIMEOUT 必须是正整数" "OMC_HEALTHCHECK_TIMEOUT must be a positive integer" 1 ;; esac
 case "$HEALTHCHECK_FINAL_GRACE" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_FINAL_GRACE 必须是非负整数" "OMC_HEALTHCHECK_FINAL_GRACE must be a non-negative integer" 1 ;; esac
 case "$HEALTHCHECK_PROBE_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_PROBE_TIMEOUT 必须是正整数" "OMC_HEALTHCHECK_PROBE_TIMEOUT must be a positive integer" 1 ;; esac
+case "$HEALTHCHECK_FINAL_PROBE_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_FINAL_PROBE_TIMEOUT 必须是正整数" "OMC_HEALTHCHECK_FINAL_PROBE_TIMEOUT must be a positive integer" 1 ;; esac
 [ "$HEALTHCHECK_TIMEOUT" -gt 0 ] || die "OMC_HEALTHCHECK_TIMEOUT 必须大于 0" "OMC_HEALTHCHECK_TIMEOUT must be greater than 0" 1
 [ "$HEALTHCHECK_PROBE_TIMEOUT" -gt 0 ] || die "OMC_HEALTHCHECK_PROBE_TIMEOUT 必须大于 0" "OMC_HEALTHCHECK_PROBE_TIMEOUT must be greater than 0" 1
+[ "$HEALTHCHECK_FINAL_PROBE_TIMEOUT" -gt 0 ] || die "OMC_HEALTHCHECK_FINAL_PROBE_TIMEOUT 必须大于 0" "OMC_HEALTHCHECK_FINAL_PROBE_TIMEOUT must be greater than 0" 1
 log "动态等待业务容器启动（最长 ${HEALTHCHECK_TIMEOUT}s，单轮探针最多 ${HEALTHCHECK_PROBE_TIMEOUT}s，每 ${HEALTHCHECK_INTERVAL}s 重试；通过后立即继续）..." "Waiting for business containers (up to ${HEALTHCHECK_TIMEOUT}s, retry every ${HEALTHCHECK_INTERVAL}s) ..."
 HEALTHCHECK_LOG="$(mktemp)"
 HEALTH_OK=0
@@ -1585,16 +1594,38 @@ while :; do
   sleep "$HEALTHCHECK_SLEEP"
 done
 
-# 初始化期间监控/字典/业务端点可能恰好跨过主窗口；再给一次短复核，避免把
-# “容器已稳定、端点刚完成启动”误报为安装失败。最终仍以完整 healthcheck 为准。
+# 启动窗口（轻量 --startup）可能因初始化负载跨过主窗口而未通过。此时以「完整
+# healthcheck」——即部署后人工执行的同款脚本——作为最终裁决者，在 FINAL_GRACE
+# 预算内重试。完整检查含 docker exec / psql 深审计，单轮上限独立于启动探针
+# （HEALTHCHECK_FINAL_PROBE_TIMEOUT），不被 PROBE_TIMEOUT 反向夹紧，否则健康轮
+# 会被中途砍掉，与人工 healthcheck 结论矛盾。任一轮通过即判安装成功。
 if [ "$HEALTH_OK" -eq 0 ] && [ "$HEALTHCHECK_FINAL_GRACE" -gt 0 ]; then
-  log "主健康等待窗口结束，进行 ${HEALTHCHECK_FINAL_GRACE}s 最终复核 ..." "The primary health-check window ended; running the ${HEALTHCHECK_FINAL_GRACE}s final probe ..."
-  HEALTHCHECK_FINAL_PROBE_TIMEOUT="$HEALTHCHECK_FINAL_GRACE"
-  [ "$HEALTHCHECK_FINAL_PROBE_TIMEOUT" -gt "$HEALTHCHECK_PROBE_TIMEOUT" ] &&
-    HEALTHCHECK_FINAL_PROBE_TIMEOUT="$HEALTHCHECK_PROBE_TIMEOUT"
-  if timeout "${HEALTHCHECK_FINAL_PROBE_TIMEOUT}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" --lang "$OMC_LANG" >"$HEALTHCHECK_LOG" 2>&1; then
-    HEALTH_OK=1
-  fi
+  log "启动窗口结束，进行最终复核：完整 healthcheck（与部署后人工执行一致），总预算 ${HEALTHCHECK_FINAL_GRACE}s、单轮最多 ${HEALTHCHECK_FINAL_PROBE_TIMEOUT}s ..." \
+      "Startup window ended; running the final full healthcheck (same as the post-deploy manual run): budget ${HEALTHCHECK_FINAL_GRACE}s, per-round cap ${HEALTHCHECK_FINAL_PROBE_TIMEOUT}s ..."
+  HEALTHCHECK_FINAL_DEADLINE=$(( $(date +%s) + HEALTHCHECK_FINAL_GRACE ))
+  HEALTHCHECK_FINAL_PROBE_TIMEOUTS=0
+  while :; do
+    HEALTHCHECK_FINAL_REMAINING=$(( HEALTHCHECK_FINAL_DEADLINE - $(date +%s) ))
+    [ "$HEALTHCHECK_FINAL_REMAINING" -gt 0 ] || break
+    HEALTHCHECK_FINAL_PROBE_REMAINING="$HEALTHCHECK_FINAL_PROBE_TIMEOUT"
+    [ "$HEALTHCHECK_FINAL_REMAINING" -lt "$HEALTHCHECK_FINAL_PROBE_REMAINING" ] &&
+      HEALTHCHECK_FINAL_PROBE_REMAINING="$HEALTHCHECK_FINAL_REMAINING"
+    if timeout "${HEALTHCHECK_FINAL_PROBE_REMAINING}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" --lang "$OMC_LANG" >"$HEALTHCHECK_LOG" 2>&1; then
+      HEALTH_OK=1
+      break
+    elif [ "$?" -eq 124 ]; then
+      HEALTHCHECK_FINAL_PROBE_TIMEOUTS=$((HEALTHCHECK_FINAL_PROBE_TIMEOUTS + 1))
+      log "最终复核单轮超过 ${HEALTHCHECK_FINAL_PROBE_REMAINING}s，继续第 ${HEALTHCHECK_FINAL_PROBE_TIMEOUTS} 次重试 ..." \
+          "Final probe exceeded ${HEALTHCHECK_FINAL_PROBE_REMAINING}s; continuing with retry ${HEALTHCHECK_FINAL_PROBE_TIMEOUTS} ..."
+    fi
+    HEALTHCHECK_FINAL_REMAINING=$(( HEALTHCHECK_FINAL_DEADLINE - $(date +%s) ))
+    [ "$HEALTHCHECK_FINAL_REMAINING" -gt 0 ] || break
+    HEALTHCHECK_FINAL_SLEEP="$HEALTHCHECK_INTERVAL"
+    [ "$HEALTHCHECK_FINAL_REMAINING" -lt "$HEALTHCHECK_FINAL_SLEEP" ] && HEALTHCHECK_FINAL_SLEEP="$HEALTHCHECK_FINAL_REMAINING"
+    sleep "$HEALTHCHECK_FINAL_SLEEP"
+  done
+  # 把最终复核的单轮超时计入总诊断计数，供 Step 9 文案展示。
+  HEALTHCHECK_PROBE_TIMEOUTS=$((HEALTHCHECK_PROBE_TIMEOUTS + HEALTHCHECK_FINAL_PROBE_TIMEOUTS))
 fi
 
 # =============================================================================
