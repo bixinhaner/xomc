@@ -46,6 +46,10 @@ describe('TransferSettings', () => {
       expect(form?.getFieldValue('protocolPolicy')).toBe('force_http');
     });
     expect(screen.getByText('基站文件传输协议')).toBeInTheDocument();
+    expect(screen.getByText(/在这里选择基站上传和下载文件时使用的访问方式/)).toBeInTheDocument();
+    expect(screen.queryByText(/sys_configs|环境变量|字段留空/)).not.toBeInTheDocument();
+    expect(screen.getByText('所有基站文件上传和下载都使用 HTTP。')).toBeInTheDocument();
+    expect(screen.getByText('支持 HTTPS 的基站使用 HTTPS，其他基站自动使用 HTTP。')).toBeInTheDocument();
     expect(screen.getByLabelText('HTTP 上传地址')).toBeInTheDocument();
     expect(screen.getByLabelText('HTTPS 上传地址')).toBeInTheDocument();
     expect(screen.getByLabelText('HTTP 下载地址')).toBeInTheDocument();
@@ -64,7 +68,7 @@ describe('TransferSettings', () => {
       />,
     );
 
-    await user.click(screen.getByText('优先使用 HTTPS 协议'));
+    await user.click(screen.getByText('HTTPS 优先'));
 
     await waitFor(() => {
       expect(form?.getFieldValue('protocolPolicy')).toBe('prefer_https');
@@ -91,7 +95,7 @@ describe('TransferSettings', () => {
 
     await expect(form!.validateFields(['httpsUploadBaseURL'])).rejects.toBeDefined();
     expect(
-      await screen.findByText('请输入以 https:// 开头的合法基础地址，且不能包含账号、查询参数、片段或目录跳转'),
+      await screen.findByText('请输入有效的 IP 地址或主机名，HTTPS 端口固定为 8443'),
     ).toBeInTheDocument();
   });
 
@@ -133,12 +137,12 @@ describe('TransferSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('回显并保存 HTTPS 优先策略与两个 HTTPS 地址', async () => {
+  it('回显并保存 HTTPS 优先策略与固定 8443 地址', async () => {
     let form: ReturnType<typeof Form.useForm>[0] | undefined;
     const values = {
       protocolPolicy: 'prefer_https',
-      httpsUploadBaseURL: 'https://acs.example.com:8443/upload',
-      httpsDownloadBaseURL: 'https://acs.example.com:8443/download',
+      httpsUploadBaseURL: 'https://upload.example.com:8443',
+      httpsDownloadBaseURL: 'https://download.example.com:8443',
     };
     render(
       <TransferSettingsHarness
@@ -151,9 +155,11 @@ describe('TransferSettings', () => {
 
     await waitFor(() => {
       expect(form?.getFieldValue('protocolPolicy')).toBe('prefer_https');
-      expect(screen.getByDisplayValue(values.httpsUploadBaseURL)).toBeInTheDocument();
-      expect(screen.getByDisplayValue(values.httpsDownloadBaseURL)).toBeInTheDocument();
+      expect(screen.getByLabelText('HTTPS 上传地址')).toHaveValue('upload.example.com');
+      expect(screen.getByLabelText('HTTPS 下载地址')).toHaveValue('download.example.com');
     });
+    expect(screen.getAllByText('https://')).toHaveLength(2);
+    expect(screen.getAllByText(':8443')).toHaveLength(2);
 
     const submitted = await form!.validateFields([
       'protocolPolicy',
@@ -167,14 +173,73 @@ describe('TransferSettings', () => {
     ]);
   });
 
-  it('为标准 ACS 网关显示两个独立 IP 输入框和固定的 HTTP 8080', () => {
+  it('为标准 ACS 网关显示独立 IP 输入框和固定端口', () => {
     render(<TransferSettingsHarness values={{}} />);
 
     expect(screen.getByLabelText('HTTP 上传地址')).toBeInTheDocument();
     expect(screen.getByLabelText('HTTP 下载地址')).toBeInTheDocument();
     expect(screen.getAllByText('http://')).toHaveLength(2);
     expect(screen.getAllByText(':8080')).toHaveLength(2);
-    expect(screen.getByText(/生产环境允许运营商网络中基站可达的私网地址/)).toBeInTheDocument();
+    expect(screen.getAllByText('https://')).toHaveLength(2);
+    expect(screen.getAllByText(':8443')).toHaveLength(2);
+    expect(screen.getAllByText(/协议固定为 HTTP，端口固定为 8080/)).toHaveLength(2);
+  });
+
+  it('用户分别输入两个 HTTPS 主机后保存为完整的 HTTPS 8443 Base URL', async () => {
+    let form: ReturnType<typeof Form.useForm>[0] | undefined;
+    render(
+      <TransferSettingsHarness
+        values={{}}
+        onFormReady={(instance) => {
+          form = instance;
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('HTTPS 上传地址'), {
+      target: { value: 'upload.example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('HTTPS 下载地址'), {
+      target: { value: 'download.example.com' },
+    });
+
+    await waitFor(() => {
+      expect(form?.getFieldValue('httpsUploadBaseURL')).toBe('https://upload.example.com:8443');
+      expect(form?.getFieldValue('httpsDownloadBaseURL')).toBe('https://download.example.com:8443');
+      expect(form?.isFieldTouched('httpsUploadBaseURL')).toBe(true);
+      expect(form?.isFieldTouched('httpsDownloadBaseURL')).toBe(true);
+    });
+
+    const values = await form!.validateFields(['httpsUploadBaseURL', 'httpsDownloadBaseURL']);
+    expect(buildBatchItems(values, [])).toEqual([
+      {
+        key: 'httpsUploadBaseURL',
+        value: 'https://upload.example.com:8443',
+        value_type: 'string',
+      },
+      {
+        key: 'httpsDownloadBaseURL',
+        value: 'https://download.example.com:8443',
+        value_type: 'string',
+      },
+    ]);
+  });
+
+  it('HTTPS 地址拒绝自定义端口和代理前缀', async () => {
+    let form: ReturnType<typeof Form.useForm>[0] | undefined;
+    render(
+      <TransferSettingsHarness
+        values={{
+          httpsUploadBaseURL: 'https://edge.example.com:9443/omc',
+        }}
+        onFormReady={(instance) => {
+          form = instance;
+        }}
+      />,
+    );
+
+    await expect(form!.validateFields(['httpsUploadBaseURL'])).rejects.toBeDefined();
+    expect(await screen.findByText('请输入有效的 IP 地址或主机名，HTTPS 端口固定为 8443')).toBeInTheDocument();
   });
 
   it('提供正确且可编辑的上传和下载服务路径默认值', () => {
@@ -325,7 +390,7 @@ describe('TransferSettings', () => {
     });
   });
 
-  it('允许 HTTP 地址使用自定义端口和反向代理前缀', async () => {
+  it('HTTP 地址拒绝自定义端口和反向代理前缀', async () => {
     let form: ReturnType<typeof Form.useForm>[0] | undefined;
     render(
       <TransferSettingsHarness
@@ -345,7 +410,8 @@ describe('TransferSettings', () => {
       expect(form?.getFieldValue('uploadBaseURL')).toBe(customURL);
       expect(screen.getByDisplayValue(customURL)).toBeInTheDocument();
     });
-    await expect(form!.validateFields(['uploadBaseURL'])).resolves.toEqual({ uploadBaseURL: customURL });
+    await expect(form!.validateFields(['uploadBaseURL'])).rejects.toBeDefined();
+    expect(await screen.findByText('请输入有效的 IP 地址或主机名，HTTP 端口固定为 8080')).toBeInTheDocument();
   });
 
   it('允许把存量自定义 URL 直接替换为标准部署 IP', async () => {

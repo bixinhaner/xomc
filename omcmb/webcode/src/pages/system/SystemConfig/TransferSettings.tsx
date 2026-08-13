@@ -1,4 +1,4 @@
-import { Card, Form, Input, Segmented, Space, Typography } from 'antd';
+import { Card, Form, Input, Radio, Space, Typography } from 'antd';
 import { AddonInput, AddonInputNumber } from '@/components/common/InputAddon';
 import { useT } from '@/hooks/useT';
 import {
@@ -14,8 +14,10 @@ interface TransferSettingsProps {
 const DEFAULT_MAX_FILE_SIZE = 1073741824; // 1 GiB
 // 系统级（跨任务）升级设备并发上限默认值，与后端 software.DefaultGlobalUpgradeConcurrency 一致
 const DEFAULT_MAX_GLOBAL_UPGRADE_CONCURRENCY = 100;
-const FIXED_PROTOCOL = 'http://';
-const FIXED_PORT = '8080';
+const HTTP_PROTOCOL = 'http';
+const HTTP_PORT = '8080';
+const HTTPS_PROTOCOL = 'https';
+const HTTPS_PORT = '8443';
 const DEFAULT_UPLOAD_PATH = '/smallcell/FileUploadService';
 const DEFAULT_DOWNLOAD_PATH = '/smallcell/FileDownloadService';
 const STANDARD_ADDRESS_MAX_WIDTH = 520;
@@ -23,6 +25,39 @@ const STANDARD_ADDRESS_MAX_WIDTH = 520;
 const cardTitleStyle: React.CSSProperties = {
 	fontSize: 14,
 	fontWeight: 600,
+};
+
+const protocolOptionsStyle: React.CSSProperties = {
+	width: '100%',
+};
+
+const protocolOptionStyle: React.CSSProperties = {
+	display: 'flex',
+	alignItems: 'flex-start',
+	gap: 10,
+	width: '100%',
+	padding: '10px 12px',
+	border: '1px solid var(--color-border)',
+	borderRadius: 6,
+	background: 'var(--color-neutral-0)',
+	cursor: 'pointer',
+};
+
+const protocolOptionSelectedStyle: React.CSSProperties = {
+	border: '1px solid var(--color-primary-500)',
+	background: 'var(--color-primary-50)',
+};
+
+const protocolOptionTitleStyle: React.CSSProperties = {
+	fontWeight: 600,
+};
+
+const protocolOptionDescriptionStyle: React.CSSProperties = {
+	display: 'block',
+	marginTop: 2,
+	fontSize: 12,
+	lineHeight: 1.5,
+	color: 'var(--color-text-secondary)',
 };
 
 function isValidServicePath(value: string): boolean {
@@ -38,49 +73,27 @@ function isValidServicePath(value: string): boolean {
 	}
 }
 
-function validateTransferAddress(
-	value: unknown,
-	hostError: string,
-	baseURLError: string,
-): Promise<void> {
-	const raw = typeof value === 'string' ? value : '';
-	const result = parseTransferAddress(raw);
-	if (result.kind !== 'invalid') return Promise.resolve();
-	return Promise.reject(new Error(/^https?:/i.test(raw) ? baseURLError : hostError));
-}
-
 async function validateHTTPTransferAddress(
 	value: unknown,
 	hostError: string,
 	baseURLError: string,
 	httpSchemeError: string,
 ): Promise<void> {
-	await validateTransferAddress(value, hostError, baseURLError);
 	const raw = typeof value === 'string' ? value : '';
 	if (!raw) return;
-	let protocol: string;
-	try {
-		protocol = new URL(raw).protocol;
-	} catch (error) {
-		throw new Error(baseURLError, { cause: error });
-	}
-	if (protocol !== 'http:') {
-		throw new Error(httpSchemeError);
-	}
+	const result = parseTransferAddress(raw, { protocol: HTTP_PROTOCOL, port: HTTP_PORT });
+	if (result.kind === 'standard') return;
+	if (/^https:/i.test(raw)) throw new Error(httpSchemeError);
+	throw new Error(/^https?:/i.test(raw) ? baseURLError : hostError);
 }
 
 function validateHTTPSBaseURL(value: unknown, errorMessage: string): Promise<void> {
 	const raw = typeof value === 'string' ? value : '';
 	if (!raw) return Promise.resolve();
-	const result = parseTransferAddress(raw);
-	if (result.kind === 'invalid') return Promise.reject(new Error(errorMessage));
-	try {
-		return new URL(raw).protocol === 'https:'
-			? Promise.resolve()
-			: Promise.reject(new Error(errorMessage));
-	} catch {
-		return Promise.reject(new Error(errorMessage));
-	}
+	const result = parseTransferAddress(raw, { protocol: HTTPS_PROTOCOL, port: HTTPS_PORT });
+	return result.kind === 'standard'
+		? Promise.resolve()
+		: Promise.reject(new Error(errorMessage));
 }
 
 interface TransferAddressInputProps extends Omit<
@@ -89,36 +102,28 @@ interface TransferAddressInputProps extends Omit<
 > {
 	value?: string;
 	onChange?: (value: string) => void;
+	protocol?: 'http' | 'https';
+	port?: string;
 }
 
 function TransferAddressInput({
 	value,
 	onChange,
+	protocol = HTTP_PROTOCOL,
+	port = HTTP_PORT,
 	...inputProps
 }: TransferAddressInputProps) {
-	const parsed = parseTransferAddress(value);
-	// 标准部署只填写 IP；存量或主动粘贴的完整 URL 原样展示，避免把
-	// HTTPS、自定义端口、反向代理前缀静默改写为 HTTP:8080。
-	if (parsed.mode === 'full') {
-		return (
-			<Input
-				{...inputProps}
-				value={parsed.raw}
-				onChange={(event) => {
-					const input = event.target.value;
-					onChange?.(!input || isValidTransferHost(input) ? buildStandardBaseURL(input) : input);
-				}}
-			/>
-		);
-	}
+	const parsed = parseTransferAddress(value, { protocol, port });
+	const raw = typeof value === 'string' ? value : '';
+	const displayValue = parsed.mode === 'standard' ? parsed.host : raw;
 
 	return (
 		<AddonInput
 			{...inputProps}
-			addonBefore={FIXED_PROTOCOL}
-			addonAfter={`:${FIXED_PORT}`}
+			addonBefore={`${protocol}://`}
+			addonAfter={`:${port}`}
 			compactStyle={{ width: '100%', maxWidth: STANDARD_ADDRESS_MAX_WIDTH }}
-			value={parsed.host}
+			value={displayValue}
 			onChange={(event) => {
 				const input = event.target.value;
 				const isFullURL = /^https?:/i.test(input);
@@ -128,7 +133,7 @@ function TransferAddressInput({
 				onChange?.(
 					isFullURL || hasURLSyntax || hasInvalidWhitespace || isInvalidColonInput
 						? input
-						: buildStandardBaseURL(input),
+						: buildStandardBaseURL(input, { protocol, port }),
 				);
 			}}
 		/>
@@ -137,6 +142,19 @@ function TransferAddressInput({
 
 export default function TransferSettings({ form }: TransferSettingsProps) {
 	const t = useT();
+	const selectedProtocolPolicy = Form.useWatch('protocolPolicy', form) ?? 'force_http';
+	const protocolOptions = [
+		{
+			value: 'force_http',
+			title: t('system.transfer.forceHTTP'),
+			description: t('system.transfer.forceHTTPDescription'),
+		},
+		{
+			value: 'prefer_https',
+			title: t('system.transfer.preferHTTPS'),
+			description: t('system.transfer.preferHTTPSDescription'),
+		},
+	];
 
 	return (
 		<Form
@@ -152,19 +170,32 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 			}}
 		>
 			<Typography.Paragraph type="secondary">
-				{t('system.transfer.inheritHint')} {t('system.transfer.deviceReachabilityHelp')}
+				{t('system.transfer.inheritHint')}
 			</Typography.Paragraph>
 
 			<Form.Item
 				name="protocolPolicy"
 				label={t('system.transfer.protocolPolicy')}
 			>
-				<Segmented
-					options={[
-						{ label: t('system.transfer.forceHTTP'), value: 'force_http' },
-						{ label: t('system.transfer.preferHTTPS'), value: 'prefer_https' },
-					]}
-				/>
+				<Radio.Group style={protocolOptionsStyle}>
+					<Space orientation="vertical" size={8} style={protocolOptionsStyle}>
+						{protocolOptions.map((option) => (
+							<Radio
+								key={option.value}
+								value={option.value}
+								style={{
+									...protocolOptionStyle,
+									...(selectedProtocolPolicy === option.value ? protocolOptionSelectedStyle : {}),
+								}}
+							>
+								<span>
+									<span style={protocolOptionTitleStyle}>{option.title}</span>
+									<span style={protocolOptionDescriptionStyle}>{option.description}</span>
+								</span>
+							</Radio>
+						))}
+					</Space>
+				</Radio.Group>
 			</Form.Item>
 
 			<Card
@@ -207,7 +238,11 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 						},
 					]}
 				>
-					<Input placeholder={t('system.transfer.httpsBaseURLPlaceholder')} />
+					<TransferAddressInput
+						protocol={HTTPS_PROTOCOL}
+						port={HTTPS_PORT}
+						placeholder={t('system.transfer.serverIPPlaceholder')}
+					/>
 				</Form.Item>
 				<Space orientation="vertical" style={{ width: '100%' }} size={12}>
 					<Form.Item
@@ -275,7 +310,11 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 						},
 					]}
 				>
-					<Input placeholder={t('system.transfer.httpsBaseURLPlaceholder')} />
+					<TransferAddressInput
+						protocol={HTTPS_PROTOCOL}
+						port={HTTPS_PORT}
+						placeholder={t('system.transfer.serverIPPlaceholder')}
+					/>
 				</Form.Item>
 				<Form.Item
 					name="downloadPath"
