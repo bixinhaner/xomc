@@ -58,6 +58,10 @@ type controlActionRepositoryStub struct {
 	verifiedState []ControlParameterState
 	completed     ControlActionStatus
 	lastError     string
+	due           []ControlAction
+	scheduled     bool
+	nextAttempt   int
+	beginDeadline *time.Time
 }
 
 func newControlActionRepositoryStub() *controlActionRepositoryStub {
@@ -107,6 +111,14 @@ func (s *controlActionRepositoryStub) FindRecoverableDeactivation(
 	return s.recoverable, nil
 }
 
+func (s *controlActionRepositoryStub) ListDueVerifications(
+	context.Context,
+	time.Time,
+	int,
+) ([]ControlAction, error) {
+	return s.due, nil
+}
+
 func (s *controlActionRepositoryStub) UpdateStatus(
 	_ context.Context,
 	id uuid.UUID,
@@ -121,9 +133,46 @@ func (s *controlActionRepositoryStub) UpdateStatus(
 	return nil
 }
 
+func (s *controlActionRepositoryStub) BeginVerification(
+	_ context.Context,
+	id uuid.UUID,
+	deadline time.Time,
+	nextAt time.Time,
+) error {
+	s.beginDeadline = &deadline
+	for _, action := range s.actions {
+		if action.ID == id {
+			action.Status = ControlActionVerifying
+			action.VerificationDeadline = &deadline
+			action.NextVerificationAt = &nextAt
+		}
+	}
+	return nil
+}
+
+func (s *controlActionRepositoryStub) ScheduleVerification(
+	_ context.Context,
+	id uuid.UUID,
+	verified []ControlParameterState,
+	lastError string,
+	attempt int,
+	_ time.Time,
+) error {
+	s.scheduled = true
+	s.verifiedState = verified
+	s.lastError = lastError
+	s.nextAttempt = attempt
+	for _, action := range s.actions {
+		if action.ID == id {
+			action.VerificationAttempt = attempt
+		}
+	}
+	return nil
+}
+
 func (s *controlActionRepositoryStub) CompleteVerification(
 	_ context.Context,
-	_ uuid.UUID,
+	id uuid.UUID,
 	verified []ControlParameterState,
 	status ControlActionStatus,
 	lastError string,
@@ -132,6 +181,11 @@ func (s *controlActionRepositoryStub) CompleteVerification(
 	s.verifiedState = verified
 	s.completed = status
 	s.lastError = lastError
+	for _, action := range s.actions {
+		if action.ID == id {
+			action.Status = status
+		}
+	}
 	return nil
 }
 
@@ -167,13 +221,47 @@ func controlParameterReader(instances ...int) controlParameterReaderStub {
 		ParameterValue: "1", Writable: true,
 	}}
 	for _, instance := range instances {
-		parameters = append(parameters, model.DeviceParameter{
-			ParameterPath:  fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.LTE.RAN.RF.X_COM_RadioEnable", instance),
-			ParameterValue: "1", Writable: true,
-			FAPInstance: instance,
-		})
+		parameters = append(parameters,
+			model.DeviceParameter{
+				ParameterPath:  fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.LTE.RAN.RF.X_COM_RadioEnable", instance),
+				ParameterValue: "1", Writable: true, FAPInstance: instance,
+			},
+			model.DeviceParameter{
+				ParameterPath:  fmt.Sprintf("Device.Services.FAPService.%d.FAPControl.LTE.AdminState", instance),
+				ParameterValue: "1", Writable: true, FAPInstance: instance,
+			},
+			model.DeviceParameter{
+				ParameterPath:  fmt.Sprintf("Device.Services.FAPService.%d.FAPControl.LTE.OpState", instance),
+				ParameterValue: "1", Writable: false, FAPInstance: instance,
+			},
+		)
 	}
 	return controlParameterReaderStub{parameters: parameters}
+}
+
+func controlMappings() controlMappingReaderStub {
+	return controlMappingReaderStub{mappings: []carrier.GeofenceControlMapping{
+		{
+			StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+			PrivatePath:  "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable",
+			EntryType:    "parameter", Access: "READ_WRITE", IsActive: true, IsSupported: true,
+		},
+		{
+			StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.AdminState",
+			PrivatePath:  "Device.Services.FAPService.{i}.FAPControl.LTE.AdminState",
+			EntryType:    "parameter", Access: "READ_WRITE", IsActive: true, IsSupported: true,
+		},
+		{
+			StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.OpState",
+			PrivatePath:  "Device.Services.FAPService.{i}.FAPControl.LTE.OpState",
+			EntryType:    "parameter", Access: "READ_ONLY", IsActive: true, IsSupported: true,
+		},
+		{
+			StandardPath: "Device.Services.FAPService.Ipsec.IPSEC_ENABLE",
+			PrivatePath:  "Device.Services.FAPService.Ipsec.IPSEC_ENABLE",
+			EntryType:    "parameter", Access: "READ_WRITE", IsActive: true, IsSupported: true,
+		},
+	}}
 }
 
 func controlExitEvent(t *testing.T, actionLevel string) event.Event {
@@ -204,6 +292,7 @@ func TestGeofenceControlMonitorQueuesRFDeactivation(t *testing.T) {
 		zap.NewNop(),
 	)
 	monitor.SetParameterReader(controlParameterReader(2, 5))
+	monitor.SetMappingReader(controlMappings())
 	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
 	monitor.SetActionRepository(newControlActionRepositoryStub())
 
@@ -215,12 +304,71 @@ func TestGeofenceControlMonitorQueuesRFDeactivation(t *testing.T) {
 	require.Equal(t, task.TaskSourceGeofence, tasks.request.Source)
 	require.Contains(t, tasks.request.CommandKey, ":8:deactivate")
 	require.Contains(t, string(tasks.request.Params), "IPSEC_ENABLE")
-	require.Contains(t, string(tasks.request.Params), "FAPControl.LTE.RFTxStatus")
-	require.Contains(t, string(tasks.request.Params), "FAPService.2.FAPControl")
-	require.Contains(t, string(tasks.request.Params), "FAPService.5.FAPControl")
+	require.Contains(t, string(tasks.request.Params), "FAPService.2.FAPControl.LTE.RFTxStatus")
+	require.Contains(t, string(tasks.request.Params), "FAPService.5.FAPControl.LTE.RFTxStatus")
+	require.Contains(t, string(tasks.request.Params), "FAPService.2.FAPControl.LTE.AdminState")
+	require.Contains(t, string(tasks.request.Params), "FAPService.5.FAPControl.LTE.AdminState")
 	require.Contains(t, string(tasks.request.Params), `"value":"0"`)
 	require.Contains(t, string(tasks.request.Params), `"type":"xsd:boolean"`)
 	require.NotContains(t, string(tasks.request.Params), "ParameterList")
+}
+
+func TestGeofenceControlMonitorNoOpControlsStillVerifyOpState(t *testing.T) {
+	tasks := &controlTaskStub{}
+	deviceID := uuid.New()
+	monitor := NewGeofenceControlMonitor(
+		controlDeviceReaderStub{device: &model.Device{
+			ID: deviceID, SerialNumber: "SN-NOOP-ACTIVE", ProductClass: "BLQ",
+			Carrier: model.CarrierCMCC, Technology: model.TechLTE,
+		}},
+		controlCarrierRegistry(), tasks, zap.NewNop(),
+	)
+	monitor.SetParameterReader(controlParameterReaderStub{parameters: []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.Ipsec.IPSEC_ENABLE", ParameterValue: "0", Writable: true},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable", ParameterValue: "0", Writable: true},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.AdminState", ParameterValue: "0", Writable: true},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.OpState", ParameterValue: "1", Writable: false},
+	}})
+	monitor.SetMappingReader(controlMappings())
+	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
+	monitor.SetActionRepository(newControlActionRepositoryStub())
+
+	err := monitor.handleExited(context.Background(), controlExitEvent(t, string(ActionLevelDeactivate)))
+
+	require.NoError(t, err)
+	require.NotNil(t, tasks.request)
+	require.Equal(t, "GetParameterValues", tasks.request.Method)
+	require.Contains(t, string(tasks.request.Params), "FAPControl.LTE.OpState")
+	require.NotContains(t, string(tasks.request.Params), "X_COM_RadioEnable")
+}
+
+func TestGeofenceControlMonitorPersistsCapabilityFailure(t *testing.T) {
+	tasks := &controlTaskStub{}
+	actions := newControlActionRepositoryStub()
+	monitor := NewGeofenceControlMonitor(
+		controlDeviceReaderStub{device: &model.Device{
+			ID: uuid.New(), SerialNumber: "SN-CONTROL-1", ProductClass: "FAP/BAIBLQ/SC",
+			Carrier: model.CarrierCMCC, Technology: model.TechLTE,
+		}},
+		controlCarrierRegistry(), tasks, zap.NewNop(),
+	)
+	monitor.SetParameterReader(controlParameterReader(1))
+	monitor.SetMappingReader(controlMappingReaderStub{})
+	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
+	monitor.SetActionRepository(actions)
+
+	err := monitor.handleExited(
+		context.Background(), controlExitEvent(t, string(ActionLevelDeactivate)),
+	)
+
+	require.NoError(t, err)
+	require.Nil(t, tasks.request)
+	require.Len(t, actions.actions, 1)
+	for _, action := range actions.actions {
+		require.Equal(t, ControlActionFailed, action.Status)
+		require.Contains(t, action.LastError, "has no ParamModel mappings")
+		require.NotNil(t, action.CompletedAt)
+	}
 }
 
 func TestGeofenceControlMonitorQueuesMBS31001IPSecDeactivation(t *testing.T) {
@@ -240,8 +388,32 @@ func TestGeofenceControlMonitorQueuesMBS31001IPSecDeactivation(t *testing.T) {
 	monitor.SetParameterReader(controlParameterReaderStub{parameters: []model.DeviceParameter{
 		{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", ParameterValue: "false", Writable: true},
 		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", ParameterValue: "true", Writable: false},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.AdminState", ParameterValue: "true", Writable: true},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.OpState", ParameterValue: "true", Writable: false},
 		{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "true", Writable: true},
 		{ParameterPath: "Device.FAP.Ipsec.2.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "true", Writable: true},
+	}})
+	monitor.SetMappingReader(controlMappingReaderStub{mappings: []carrier.GeofenceControlMapping{
+		{
+			StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+			PrivatePath:  "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus",
+			EntryType:    "parameter", Access: "READ_WRITE", IsActive: true, IsSupported: true,
+		},
+		{
+			StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.AdminState",
+			PrivatePath:  "Device.Services.FAPService.{i}.FAPControl.LTE.AdminState",
+			EntryType:    "parameter", Access: "READ_WRITE", IsActive: true, IsSupported: true,
+		},
+		{
+			StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.OpState",
+			PrivatePath:  "Device.Services.FAPService.{i}.FAPControl.LTE.OpState",
+			EntryType:    "parameter", Access: "READ_ONLY", IsActive: true, IsSupported: true,
+		},
+		{
+			StandardPath: "Device.FAP.Ipsec.{i}.TUNNEL_ENABLE",
+			PrivatePath:  "Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_TUNNELENABLE",
+			EntryType:    "parameter", Access: "READ_WRITE", IsActive: true, IsSupported: true,
+		},
 	}})
 	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
 	monitor.SetActionRepository(newControlActionRepositoryStub())
@@ -284,6 +456,7 @@ func TestGeofenceControlMonitorUsesParamModelRFMapping(t *testing.T) {
 	monitor.SetParameterReader(controlParameterReaderStub{parameters: []model.DeviceParameter{
 		{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", ParameterValue: "false", Writable: true},
 		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", ParameterValue: "true", Writable: false},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.OpState", ParameterValue: "true", Writable: false},
 		{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_ENABLE", ParameterValue: "true", Writable: true},
 	}})
 	monitor.SetMappingReader(controlMappingReaderStub{mappings: []carrier.GeofenceControlMapping{
@@ -294,6 +467,16 @@ func TestGeofenceControlMonitorUsesParamModelRFMapping(t *testing.T) {
 			Access:       "READ_WRITE",
 			IsActive:     true,
 			IsSupported:  true,
+		},
+		{
+			StandardPath: "Device.Services.FAPService.{i}.FAPControl.LTE.OpState",
+			PrivatePath:  "Device.Services.FAPService.{i}.FAPControl.LTE.OpState",
+			EntryType:    "parameter", Access: "READ_ONLY", IsActive: true, IsSupported: true,
+		},
+		{
+			StandardPath: "Device.FAP.Ipsec.{i}.TUNNEL_ENABLE",
+			PrivatePath:  "Device.FAP.Ipsec.{i}.TUNNEL_ENABLE",
+			EntryType:    "parameter", Access: "READ_WRITE", IsActive: true, IsSupported: true,
 		},
 	}})
 	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
@@ -350,6 +533,7 @@ func TestGeofenceControlMonitorQueuesEscalatedDeactivation(t *testing.T) {
 		controlCarrierRegistry(), tasks, zap.NewNop(),
 	)
 	monitor.SetParameterReader(controlParameterReader(1))
+	monitor.SetMappingReader(controlMappings())
 	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
 	monitor.SetActionRepository(newControlActionRepositoryStub())
 	evt := controlExitEvent(t, string(ActionLevelDeactivate))
@@ -423,6 +607,7 @@ func TestGeofenceControlMonitorLocksCommandKeyDuringCreate(t *testing.T) {
 		controlCarrierRegistry(), tasks, zap.NewNop(),
 	)
 	monitor.SetParameterReader(controlParameterReader(2))
+	monitor.SetMappingReader(controlMappings())
 	monitor.SetTaskHistoryReader(history)
 	monitor.SetActionRepository(newControlActionRepositoryStub())
 
@@ -448,6 +633,7 @@ func TestGeofenceControlMonitorRetriesPendingActionAfterQueueFailure(t *testing.
 		controlCarrierRegistry(), tasks, zap.NewNop(),
 	)
 	monitor.SetParameterReader(controlParameterReader(2))
+	monitor.SetMappingReader(controlMappings())
 	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
 	monitor.SetActionRepository(actions)
 	evt := controlExitEvent(t, string(ActionLevelDeactivate))
@@ -473,6 +659,7 @@ func TestGeofenceControlMonitorQueuesLifecycleDeactivation(t *testing.T) {
 		controlCarrierRegistry(), tasks, zap.NewNop(),
 	)
 	monitor.SetParameterReader(controlParameterReader(2))
+	monitor.SetMappingReader(controlMappings())
 	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
 	monitor.SetActionRepository(newControlActionRepositoryStub())
 	payload, err := json.Marshal(event.GeofenceLifecycleDeactivationPayload{
@@ -520,6 +707,7 @@ func TestGeofenceControlMonitorRejectsControlWithoutTaskHistory(t *testing.T) {
 		controlCarrierRegistry(), tasks, zap.NewNop(),
 	)
 	monitor.SetParameterReader(controlParameterReader(2))
+	monitor.SetMappingReader(controlMappings())
 
 	err := monitor.handleExited(
 		context.Background(),
@@ -557,6 +745,7 @@ func TestGeofenceControlMonitorQueuesCorrelatedReadbackAfterSPV(t *testing.T) {
 	actions := newControlActionRepositoryStub()
 	action := &ControlAction{
 		ID: uuid.New(), ActionKey: "geofence:device:8:deactivate", DeviceSN: "SN-1",
+		Status: ControlActionExecuting,
 		RequestedState: []ControlParameterState{{
 			Path: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", Value: "0",
 		}},
@@ -580,15 +769,66 @@ func TestGeofenceControlMonitorQueuesCorrelatedReadbackAfterSPV(t *testing.T) {
 	require.NotNil(t, tasks.request)
 	require.Equal(t, "GetParameterValues", tasks.request.Method)
 	require.Equal(t, action.ID.String(), tasks.request.SourceID)
-	require.Equal(t, action.ActionKey+":verify", tasks.request.CommandKey)
+	require.Equal(t, action.ActionKey+":verify:0", tasks.request.CommandKey)
 	require.Contains(t, string(tasks.request.Params), action.RequestedState[0].Path)
 	require.Equal(t, ControlActionVerifying, actions.updatedStatus)
+	require.NotNil(t, actions.beginDeadline)
+	require.WithinDuration(t, time.Now().UTC().Add(geofenceTerminalVerificationTimeout), *actions.beginDeadline, time.Second)
+}
+
+func TestGeofenceControlMonitorIgnoresTaskFailureAfterActionVerified(t *testing.T) {
+	actions := newControlActionRepositoryStub()
+	action := &ControlAction{
+		ID: uuid.New(), ActionKey: "geofence:device:8:deactivate", DeviceSN: "SN-1",
+		Status: ControlActionVerified,
+	}
+	actions.actions[action.ActionKey] = action
+	monitor := NewGeofenceControlMonitor(nil, nil, nil, zap.NewNop())
+	monitor.SetActionRepository(actions)
+	payload, err := json.Marshal(task.Task{
+		ID: "late-spv-failure", DeviceSN: action.DeviceSN, Method: "SetParameterValues",
+		CommandKey: action.ActionKey, Source: task.TaskSourceGeofence,
+		SourceID: action.ID.String(), ErrorMessage: "late duplicate failure",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, monitor.handleTaskTerminal(context.Background(), event.Event{
+		Subject: event.SubjectTaskFailed, Payload: payload,
+	}))
+	require.Equal(t, ControlActionVerified, action.Status)
+	require.Empty(t, actions.completed)
+	require.Empty(t, actions.lastError)
+}
+
+func TestGeofenceControlMonitorIgnoresStaleVerificationAttempt(t *testing.T) {
+	actions := newControlActionRepositoryStub()
+	action := &ControlAction{
+		ID: uuid.New(), ActionKey: "geofence:device:8:deactivate", DeviceSN: "SN-1",
+		Status: ControlActionVerifying, VerificationAttempt: 1,
+	}
+	actions.actions[action.ActionKey] = action
+	monitor := NewGeofenceControlMonitor(nil, nil, nil, zap.NewNop())
+	monitor.SetActionRepository(actions)
+	payload, err := json.Marshal(task.Task{
+		ID: "stale-gpv", DeviceSN: action.DeviceSN, Method: "GetParameterValues",
+		CommandKey: action.ActionKey + ":verify:0", Source: task.TaskSourceGeofence,
+		SourceID: action.ID.String(), ErrorMessage: "stale attempt failure",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, monitor.handleTaskTerminal(context.Background(), event.Event{
+		Subject: event.SubjectTaskFailed, Payload: payload,
+	}))
+	require.Equal(t, ControlActionVerifying, action.Status)
+	require.Empty(t, actions.completed)
+	require.False(t, actions.scheduled)
 }
 
 func TestGeofenceControlMonitorMarksVerifiedOnlyAfterMatchingReadback(t *testing.T) {
 	actions := newControlActionRepositoryStub()
 	action := &ControlAction{
 		ID: uuid.New(), ActionKey: "geofence:device:8:deactivate", DeviceSN: "SN-1",
+		Status: ControlActionVerifying,
 		RequestedState: []ControlParameterState{{
 			Path: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", Value: "0",
 		}},
@@ -599,7 +839,7 @@ func TestGeofenceControlMonitorMarksVerifiedOnlyAfterMatchingReadback(t *testing
 	result := json.RawMessage(`{"standard_parameter_values":[{"name":"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus","value":"false"}]}`)
 	payload, err := json.Marshal(task.Task{
 		ID: "gpv-1", DeviceSN: action.DeviceSN, Method: "GetParameterValues",
-		CommandKey: action.ActionKey + ":verify", Source: task.TaskSourceGeofence,
+		CommandKey: action.ActionKey + ":verify:0", Source: task.TaskSourceGeofence,
 		SourceID: action.ID.String(), Result: result,
 	})
 	require.NoError(t, err)
@@ -618,13 +858,14 @@ func TestGeofenceControlMonitorDoesNotClaimVerificationOnReadbackMismatch(t *tes
 	actions := newControlActionRepositoryStub()
 	action := &ControlAction{
 		ID: uuid.New(), ActionKey: "geofence:device:8:deactivate", DeviceSN: "SN-1",
+		Status:         ControlActionVerifying,
 		RequestedState: []ControlParameterState{{Path: "Device.Services.FAPService.Ipsec.IPSEC_ENABLE", Value: "0"}},
 	}
 	actions.actions[action.ActionKey] = action
 	monitor := NewGeofenceControlMonitor(nil, nil, nil, zap.NewNop())
 	monitor.SetActionRepository(actions)
 	payload, err := json.Marshal(task.Task{
-		ID: "gpv-1", Method: "GetParameterValues", CommandKey: action.ActionKey + ":verify",
+		ID: "gpv-1", Method: "GetParameterValues", CommandKey: action.ActionKey + ":verify:0",
 		Source: task.TaskSourceGeofence, SourceID: action.ID.String(),
 		Result: json.RawMessage(`{"standard_parameter_values":[{"name":"Device.Services.FAPService.Ipsec.IPSEC_ENABLE","value":"1"}]}`),
 	})
@@ -639,6 +880,103 @@ func TestGeofenceControlMonitorDoesNotClaimVerificationOnReadbackMismatch(t *tes
 	require.Contains(t, actions.lastError, "expected 0 got 1")
 }
 
+func TestGeofenceControlMonitorContractV2CannotVerifyWithoutOpState(t *testing.T) {
+	actions := newControlActionRepositoryStub()
+	action := &ControlAction{
+		ID: uuid.New(), ActionKey: "geofence:device:8:deactivate", DeviceSN: "SN-1",
+		Status:          ControlActionVerifying,
+		ContractVersion: GeofenceControlContractVersion,
+		RequestedState: []ControlParameterState{{
+			Path:  "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus",
+			Value: "0", Role: carrier.GeofenceRoleRF,
+		}},
+	}
+	actions.actions[action.ActionKey] = action
+	monitor := NewGeofenceControlMonitor(nil, nil, nil, zap.NewNop())
+	monitor.SetActionRepository(actions)
+	payload, err := json.Marshal(task.Task{
+		ID: "gpv-no-terminal", Method: "GetParameterValues",
+		CommandKey: action.ActionKey + ":verify:0", Source: task.TaskSourceGeofence,
+		SourceID: action.ID.String(),
+		Result:   json.RawMessage(`{"standard_parameter_values":[{"name":"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus","value":"0"}]}`),
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, monitor.handleTaskTerminal(context.Background(), event.Event{
+		Subject: event.SubjectTaskCompleted, Payload: payload,
+	}))
+	require.Equal(t, ControlActionPartialFailed, actions.completed)
+	require.Contains(t, actions.lastError, "missing required OpState")
+}
+
+func TestGeofenceControlMonitorKeepsVerifyingUntilOpStateInactive(t *testing.T) {
+	actions := newControlActionRepositoryStub()
+	deadline := time.Now().UTC().Add(time.Minute)
+	rfPath := "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus"
+	opStatePath := "Device.Services.FAPService.1.FAPControl.LTE.OpState"
+	action := &ControlAction{
+		ID: uuid.New(), ActionKey: "geofence:device:9:deactivate", DeviceSN: "SN-1",
+		Status:          ControlActionVerifying,
+		ContractVersion: GeofenceControlContractVersion, VerificationDeadline: &deadline,
+		RequestedState: []ControlParameterState{{Path: rfPath, Value: "0", Role: carrier.GeofenceRoleRF}},
+		TerminalState:  []ControlParameterState{{Path: opStatePath, Value: "0", Role: carrier.GeofenceRoleOpState}},
+	}
+	actions.actions[action.ActionKey] = action
+	monitor := NewGeofenceControlMonitor(nil, nil, nil, zap.NewNop())
+	monitor.SetActionRepository(actions)
+	payload, err := json.Marshal(task.Task{
+		ID: "gpv-terminal-active", Method: "GetParameterValues",
+		CommandKey: action.ActionKey + ":verify:0", Source: task.TaskSourceGeofence,
+		SourceID: action.ID.String(),
+		Result: json.RawMessage(fmt.Sprintf(
+			`{"standard_parameter_values":[{"name":%q,"value":"false"},{"name":%q,"value":"true"}]}`,
+			rfPath, opStatePath,
+		)),
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, monitor.handleTaskTerminal(context.Background(), event.Event{
+		Subject: event.SubjectTaskCompleted, Payload: payload,
+	}))
+	require.True(t, actions.scheduled)
+	require.Equal(t, 1, actions.nextAttempt)
+	require.Empty(t, actions.completed)
+	require.Contains(t, actions.lastError, "expected 0 got 1")
+}
+
+func TestGeofenceControlMonitorVerifiesAfterOpStateInactive(t *testing.T) {
+	actions := newControlActionRepositoryStub()
+	deadline := time.Now().UTC().Add(time.Minute)
+	rfPath := "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus"
+	opStatePath := "Device.Services.FAPService.1.FAPControl.LTE.OpState"
+	action := &ControlAction{
+		ID: uuid.New(), ActionKey: "geofence:device:10:deactivate", DeviceSN: "SN-1",
+		Status:          ControlActionVerifying,
+		ContractVersion: GeofenceControlContractVersion, VerificationDeadline: &deadline,
+		RequestedState: []ControlParameterState{{Path: rfPath, Value: "0", Role: carrier.GeofenceRoleRF}},
+		TerminalState:  []ControlParameterState{{Path: opStatePath, Value: "0", Role: carrier.GeofenceRoleOpState}},
+	}
+	actions.actions[action.ActionKey] = action
+	monitor := NewGeofenceControlMonitor(nil, nil, nil, zap.NewNop())
+	monitor.SetActionRepository(actions)
+	payload, err := json.Marshal(task.Task{
+		ID: "gpv-terminal-inactive", Method: "GetParameterValues",
+		CommandKey: action.ActionKey + ":verify:0", Source: task.TaskSourceGeofence,
+		SourceID: action.ID.String(),
+		Result: json.RawMessage(fmt.Sprintf(
+			`{"standard_parameter_values":[{"name":%q,"value":"0"},{"name":%q,"value":"false"}]}`,
+			rfPath, opStatePath,
+		)),
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, monitor.handleTaskTerminal(context.Background(), event.Event{
+		Subject: event.SubjectTaskCompleted, Payload: payload,
+	}))
+	require.Equal(t, ControlActionVerified, actions.completed)
+	require.False(t, actions.scheduled)
+}
+
 func TestGeofenceControlMonitorQueuesActivationOnlyAfterCompletedDeactivation(t *testing.T) {
 	tasks := &controlTaskStub{}
 	actions := newControlActionRepositoryStub()
@@ -646,13 +984,20 @@ func TestGeofenceControlMonitorQueuesActivationOnlyAfterCompletedDeactivation(t 
 	actions.recoverable = &ControlAction{
 		ID: deactivationID, ActionKey: "geofence:device:8:deactivate",
 		ActionType: ControlActionDeactivate, Status: ControlActionVerified,
+		ContractVersion: GeofenceControlContractVersion,
 		BeforeState: []ControlParameterState{
-			{Path: "Device.Services.FAPService.Ipsec.IPSEC_ENABLE", Value: "0"},
-			{Path: "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus", Value: "1"},
+			{Path: "Device.Services.FAPService.Ipsec.IPSEC_ENABLE", Value: "0", Role: carrier.GeofenceRoleIPSec},
+			{Path: "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus", Value: "1", Role: carrier.GeofenceRoleRF},
+			{Path: "Device.Services.FAPService.2.FAPControl.LTE.OpState", Value: "1", Role: carrier.GeofenceRoleOpState},
 		},
 		RequestedState: []ControlParameterState{{
-			Path: "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus", Value: "0",
+			Path: "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus", Value: "0", Role: carrier.GeofenceRoleRF,
 		}},
+		TerminalState: []ControlParameterState{{Path: "Device.Services.FAPService.2.FAPControl.LTE.OpState", Value: "0", Role: carrier.GeofenceRoleOpState}},
+		VerifiedState: []ControlParameterState{
+			{Path: "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus", Value: "0", Role: carrier.GeofenceRoleRF},
+			{Path: "Device.Services.FAPService.2.FAPControl.LTE.OpState", Value: "0", Role: carrier.GeofenceRoleOpState},
+		},
 	}
 	monitor := NewGeofenceControlMonitor(
 		controlDeviceReaderStub{device: &model.Device{
@@ -665,6 +1010,7 @@ func TestGeofenceControlMonitorQueuesActivationOnlyAfterCompletedDeactivation(t 
 			ParameterPath:  "Device.Services.FAPService.Ipsec.IPSEC_ENABLE",
 			ParameterValue: "0", Writable: true,
 		},
+		{ParameterPath: "Device.Services.FAPService.2.FAPControl.LTE.OpState", ParameterValue: "0", Writable: false, FAPInstance: 2},
 		{
 			ParameterPath:  "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.X_COM_RadioEnable",
 			ParameterValue: "0", Writable: true, FAPInstance: 2,
@@ -710,11 +1056,21 @@ func TestGeofenceControlMonitorRestoresEveryOwnedRFAndIPSecChange(t *testing.T) 
 	actions.recoverable = &ControlAction{
 		ID: deactivationID, ActionKey: "geofence:device:10:deactivate",
 		ActionType: ControlActionDeactivate, Status: ControlActionVerified,
+		ContractVersion: GeofenceControlContractVersion,
 		BeforeState: []ControlParameterState{
-			{Path: rfPath, Value: "1"}, {Path: ipsecPath, Value: "1"},
+			{Path: rfPath, Value: "1", Role: carrier.GeofenceRoleRF},
+			{Path: ipsecPath, Value: "1", Role: carrier.GeofenceRoleIPSec},
+			{Path: "Device.Services.FAPService.1.FAPControl.LTE.OpState", Value: "1", Role: carrier.GeofenceRoleOpState},
 		},
 		RequestedState: []ControlParameterState{
-			{Path: rfPath, Value: "0"}, {Path: ipsecPath, Value: "0"},
+			{Path: rfPath, Value: "0", Role: carrier.GeofenceRoleRF},
+			{Path: ipsecPath, Value: "0", Role: carrier.GeofenceRoleIPSec},
+		},
+		TerminalState: []ControlParameterState{{Path: "Device.Services.FAPService.1.FAPControl.LTE.OpState", Value: "0", Role: carrier.GeofenceRoleOpState}},
+		VerifiedState: []ControlParameterState{
+			{Path: rfPath, Value: "0", Role: carrier.GeofenceRoleRF},
+			{Path: ipsecPath, Value: "0", Role: carrier.GeofenceRoleIPSec},
+			{Path: "Device.Services.FAPService.1.FAPControl.LTE.OpState", Value: "0", Role: carrier.GeofenceRoleOpState},
 		},
 	}
 	monitor := NewGeofenceControlMonitor(
@@ -727,6 +1083,7 @@ func TestGeofenceControlMonitorRestoresEveryOwnedRFAndIPSecChange(t *testing.T) 
 	monitor.SetParameterReader(controlParameterReaderStub{parameters: []model.DeviceParameter{
 		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable", ParameterValue: "0", Writable: true, FAPInstance: 1},
 		{ParameterPath: "Device.FAP.Ipsec.1.TUNNEL_CONFIG_TUNNELENABLE", ParameterValue: "0", Writable: true},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.OpState", ParameterValue: "0", Writable: false},
 	}})
 	monitor.SetTaskHistoryReader(controlTaskHistoryStub{})
 	monitor.SetActionRepository(actions)

@@ -75,8 +75,23 @@ func TestBuildFindRecoverableDeactivationRequiresVerifiedUnrecoveredOwnership(t 
 	require.Contains(t, query, "action.status =")
 	require.Contains(t, query, "NOT EXISTS")
 	require.Contains(t, query, "child.parent_action_id = action.id")
+	require.Contains(t, query, "action.contract_version >=")
+	require.Contains(t, query, "jsonb_array_length(action.terminal_state) > 0")
 	require.Contains(t, args, deviceID.String())
 	require.Contains(t, args, ControlActionVerified)
+}
+
+func TestBuildListDueControlVerificationsUsesDurableSchedule(t *testing.T) {
+	now := time.Date(2026, 8, 12, 18, 0, 0, 0, time.UTC)
+	query, args, err := buildListDueControlVerificationsQuery(now, 100)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "status =")
+	require.Contains(t, query, "contract_version >=")
+	require.Contains(t, query, "next_verification_at <=")
+	require.Contains(t, query, "ORDER BY next_verification_at ASC")
+	require.Contains(t, args, ControlActionVerifying)
+	require.Contains(t, args, now)
 }
 
 func TestBuildUpdateControlActionStatusMovesState(t *testing.T) {
@@ -85,6 +100,55 @@ func TestBuildUpdateControlActionStatusMovesState(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Contains(t, query, "UPDATE geofence_control_actions")
+	require.Contains(t, query, "status IN")
 	require.Contains(t, args, actionID.String())
 	require.Contains(t, args, ControlActionExecuting)
+	require.Contains(t, args, ControlActionPending)
+	require.NotContains(t, args, ControlActionVerified)
+}
+
+func TestBuildBeginControlVerificationStartsWindowOnlyOnce(t *testing.T) {
+	actionID := uuid.New()
+	deadline := time.Date(2026, 8, 12, 18, 2, 0, 0, time.UTC)
+	nextAt := time.Date(2026, 8, 12, 18, 0, 0, 0, time.UTC)
+
+	query, args, err := buildBeginControlVerificationQuery(actionID, deadline, nextAt)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "verification_deadline IS NULL")
+	require.Contains(t, query, "status IN")
+	require.Contains(t, args, actionID.String())
+	require.Contains(t, args, deadline)
+	require.Contains(t, args, nextAt)
+	require.NotContains(t, args, ControlActionVerified)
+}
+
+func TestBuildCompleteControlVerificationCannotOverwriteTerminalAction(t *testing.T) {
+	actionID := uuid.New()
+	completedAt := time.Date(2026, 8, 12, 18, 2, 0, 0, time.UTC)
+
+	query, args, err := buildCompleteControlVerificationQuery(
+		actionID, nil, ControlActionFailed, "late failure", completedAt,
+	)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "status IN")
+	require.Contains(t, args, ControlActionFailed)
+	require.Contains(t, args, ControlActionVerifying)
+	require.NotContains(t, args, ControlActionVerified)
+}
+
+func TestBuildScheduleControlVerificationRequiresCurrentAttempt(t *testing.T) {
+	actionID := uuid.New()
+	nextAt := time.Date(2026, 8, 12, 18, 0, 5, 0, time.UTC)
+
+	query, args, err := buildScheduleControlVerificationQuery(
+		actionID, nil, "OpState active", 2, nextAt,
+	)
+
+	require.NoError(t, err)
+	require.Contains(t, query, "verification_attempt =")
+	require.Contains(t, args, 2)
+	require.Contains(t, args, 1)
+	require.Contains(t, args, ControlActionVerifying)
 }

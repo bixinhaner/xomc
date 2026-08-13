@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/omcgo/omcgo/internal/core/model"
 )
@@ -265,14 +266,15 @@ type rfStatusPathFamily struct {
 }
 
 var (
-	nrCellRFStatusPattern  = regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.(\d+)\.NR\.RAN\.rftxEnable$`)
-	sasCellRFStatusPattern = regexp.MustCompile(`^Device\.DeviceInfo\.CellConfig\.(\d+)\.SAS\.RadioEnable$`)
-	lteFAPRFStatusPattern  = regexp.MustCompile(`^Device\.Services\.FAPService\.(\d+)\.FAPControl\.LTE\.RFTxStatus$`)
-	ranRFStatusPattern     = regexp.MustCompile(`^Device\.Services\.FAPService\.(\d+)\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.X_COM_RadioEnable$`)
-	gsmCellRFStatusPattern = regexp.MustCompile(`^Device\.Services\.GsmBTSCellDT\.(\d+)\.RfState$`)
-	sasRFStatusPattern     = regexp.MustCompile(`^Device\.DeviceInfo\.SAS\.RadioEnable(\d*)$`)
-	ruRFStatusPattern      = regexp.MustCompile(`^Device\.DeviceInfo\.(?:EU\.\d+\.)?RU\.(\d+)\.RFTxStatus$`)
-	legacyRFStatusPattern  = regexp.MustCompile(`^Device\.Services\.FAPService\.(\d+)\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.RFTxStatus$`)
+	nrCellRFStatusPattern     = regexp.MustCompile(`^Device\.Services\.FAPService\.\d+\.CellConfig\.(\d+)\.NR\.RAN\.rftxEnable$`)
+	sasCellRFStatusPattern    = regexp.MustCompile(`^Device\.DeviceInfo\.CellConfig\.(\d+)\.SAS\.RadioEnable$`)
+	lteFAPRFStatusPattern     = regexp.MustCompile(`^Device\.Services\.FAPService\.(\d+)\.FAPControl\.LTE\.RFTxStatus$`)
+	ranRFStatusPattern        = regexp.MustCompile(`^Device\.Services\.FAPService\.(\d+)\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.(?:X_COM_RadioEnable|AdminCellState)$`)
+	ltePrivateRFStatusPattern = regexp.MustCompile(`^Device\.Services\.FAPService\.(\d+)\.CellConfig\.LTE\.RAN\.RF\.(?:X_COM_RadioEnable|AdminCellState)$`)
+	gsmCellRFStatusPattern    = regexp.MustCompile(`^Device\.Services\.GsmBTSCellDT\.(\d+)\.RfState$`)
+	sasRFStatusPattern        = regexp.MustCompile(`^Device\.DeviceInfo\.SAS\.RadioEnable(\d*)$`)
+	ruRFStatusPattern         = regexp.MustCompile(`^Device\.DeviceInfo\.(?:EU\.\d+\.)?RU\.(\d+)\.RFTxStatus$`)
+	legacyRFStatusPattern     = regexp.MustCompile(`^Device\.Services\.FAPService\.(\d+)\.CellConfig\.(?:LTE|NR)\.RAN\.RF\.RFTxStatus$`)
 )
 
 var rfStatusPathFamilies = []rfStatusPathFamily{
@@ -407,6 +409,82 @@ func CalcRFStatus(params map[string]string, tech model.Technology, productClass 
 		}
 	}
 	return RFStatusProjection{State: RFStatusUnknown, Reason: lastReason, ExpectedCount: expectedCount}
+}
+
+// CalcRFStatusFromDeviceParameters reconciles equivalent standard/private RF
+// observations before projecting the list column. A newer private false must
+// not be hidden by an older standard true. Equal-time contradictory aliases
+// are reported as inconsistent instead of guessing.
+func CalcRFStatusFromDeviceParameters(
+	parameters []model.DeviceParameter,
+	tech model.Technology,
+	productClass string,
+) RFStatusProjection {
+	type aliasObservation struct {
+		path       string
+		rawValue   string
+		status     string
+		statusOK   bool
+		observedAt time.Time
+	}
+	values := make(map[string]string, len(parameters))
+	aliasGroups := make(map[string][]aliasObservation)
+	for _, parameter := range parameters {
+		path := strings.TrimSpace(parameter.ParameterPath)
+		if path == "" {
+			continue
+		}
+		values[path] = parameter.ParameterValue
+		matches := lteFAPRFStatusPattern.FindStringSubmatch(path)
+		if len(matches) != 2 {
+			matches = ltePrivateRFStatusPattern.FindStringSubmatch(path)
+		}
+		if len(matches) != 2 {
+			continue
+		}
+		canonicalPath := fmt.Sprintf(
+			"Device.Services.FAPService.%s.FAPControl.LTE.RFTxStatus", matches[1],
+		)
+		status, statusOK := normalizeRFStatusValue(parameter.ParameterValue)
+		aliasGroups[canonicalPath] = append(aliasGroups[canonicalPath], aliasObservation{
+			path: path, rawValue: parameter.ParameterValue, status: status,
+			statusOK: statusOK, observedAt: parameter.LastUpdatedAt,
+		})
+	}
+	for canonicalPath, observations := range aliasGroups {
+		if len(observations) < 2 {
+			continue
+		}
+		var newestAt time.Time
+		for index := range observations {
+			observation := &observations[index]
+			delete(values, observation.path)
+			if observation.statusOK && observation.observedAt.After(newestAt) {
+				newestAt = observation.observedAt
+			}
+		}
+		var newest *aliasObservation
+		for index := range observations {
+			observation := &observations[index]
+			if !observation.statusOK || !observation.observedAt.Equal(newestAt) {
+				continue
+			}
+			if newest != nil && observation.status != newest.status {
+				return RFStatusProjection{
+					State: RFStatusInconsistent,
+					Reason: fmt.Sprintf(
+						"RF aliases for %s have contradictory values at %s",
+						canonicalPath, observation.observedAt.UTC().Format(time.RFC3339Nano),
+					),
+				}
+			}
+			newest = observation
+		}
+		if newest != nil {
+			values[canonicalPath] = newest.rawValue
+		}
+	}
+	return CalcRFStatus(values, tech, productClass)
 }
 
 func regexRFPhysicalIndex(pattern *regexp.Regexp) func(string) (int, bool) {

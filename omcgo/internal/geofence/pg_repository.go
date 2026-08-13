@@ -1646,6 +1646,16 @@ func (r *PgRepository) PublishVersion(
 }
 
 func buildBindingStateQueries(binding *Binding) (repositoryQuery, repositoryQuery, error) {
+	return buildBindingStateQueriesWithConfirmedState(
+		binding,
+		ConfirmedStateUnknown,
+	)
+}
+
+func buildBindingStateQueriesWithConfirmedState(
+	binding *Binding,
+	confirmedState ConfirmedState,
+) (repositoryQuery, repositoryQuery, error) {
 	bindingStateSQL, bindingStateArgs, err := storage.Psql.
 		Insert("device_geofence_states").
 		Columns(
@@ -1655,7 +1665,7 @@ func buildBindingStateQueries(binding *Binding) (repositoryQuery, repositoryQuer
 			"candidate_count",
 			"state_version",
 		).
-		Values(binding.ID, binding.DeviceID, "unknown", 0, 1).
+		Values(binding.ID, binding.DeviceID, confirmedState, 0, 1).
 		ToSql()
 	if err != nil {
 		return repositoryQuery{}, repositoryQuery{},
@@ -1754,6 +1764,20 @@ func createBindingTx(
 	tx pgx.Tx,
 	binding *Binding,
 ) error {
+	return createBindingTxWithConfirmedState(
+		ctx,
+		tx,
+		binding,
+		ConfirmedStateUnknown,
+	)
+}
+
+func createBindingTxWithConfirmedState(
+	ctx context.Context,
+	tx pgx.Tx,
+	binding *Binding,
+	confirmedState ConfirmedState,
+) error {
 	query, args, err := storage.Psql.Insert("device_geofence_bindings").
 		Columns(
 			"id", "device_id", "geofence_id", "rule_type", "status",
@@ -1772,7 +1796,10 @@ func createBindingTx(
 		}
 		return fmt.Errorf("create geofence binding: %w", err)
 	}
-	bindingState, effectiveState, err := buildBindingStateQueries(binding)
+	bindingState, effectiveState, err := buildBindingStateQueriesWithConfirmedState(
+		binding,
+		confirmedState,
+	)
 	if err != nil {
 		return err
 	}

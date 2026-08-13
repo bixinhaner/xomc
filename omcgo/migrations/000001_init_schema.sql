@@ -20592,9 +20592,14 @@ CREATE TABLE IF NOT EXISTS public.geofence_control_actions (
     effective_state_version bigint NOT NULL,
     action_type varchar(16) NOT NULL,
     status varchar(32) NOT NULL DEFAULT 'pending',
+    contract_version integer NOT NULL DEFAULT 1,
     before_state jsonb NOT NULL DEFAULT '[]'::jsonb,
     requested_state jsonb NOT NULL DEFAULT '[]'::jsonb,
+    terminal_state jsonb NOT NULL DEFAULT '[]'::jsonb,
     verified_state jsonb NOT NULL DEFAULT '[]'::jsonb,
+    verification_attempt integer NOT NULL DEFAULT 0,
+    next_verification_at timestamptz,
+    verification_deadline timestamptz,
     last_error text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -20611,9 +20616,21 @@ CREATE TABLE IF NOT EXISTS public.geofence_control_actions (
         CHECK (jsonb_typeof(before_state) = 'array'),
     CONSTRAINT geofence_control_actions_requested_state_array_check
         CHECK (jsonb_typeof(requested_state) = 'array'),
+    CONSTRAINT geofence_control_actions_terminal_state_array_check
+        CHECK (jsonb_typeof(terminal_state) = 'array'),
     CONSTRAINT geofence_control_actions_verified_state_array_check
         CHECK (jsonb_typeof(verified_state) = 'array')
 );
+
+-- Keep the single baseline rerunnable against pre-contract-v2 installations.
+-- Historical rows stay on contract v1 and are therefore never mistaken for
+-- actions that proved the OpState terminal condition.
+ALTER TABLE public.geofence_control_actions
+    ADD COLUMN IF NOT EXISTS contract_version integer NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS terminal_state jsonb NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS verification_attempt integer NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS next_verification_at timestamptz,
+    ADD COLUMN IF NOT EXISTS verification_deadline timestamptz;
 
 CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_device_time
     ON public.geofence_control_actions (device_id, created_at DESC);
@@ -20621,6 +20638,10 @@ CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_device_time
 CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_status
     ON public.geofence_control_actions (status, updated_at)
     WHERE status IN ('pending', 'executing', 'verifying');
+
+CREATE INDEX IF NOT EXISTS idx_geofence_control_actions_verification_due
+    ON public.geofence_control_actions (next_verification_at, updated_at)
+    WHERE status = 'verifying' AND contract_version >= 2;
 
 ALTER TABLE public.device_location_observations
     ADD COLUMN IF NOT EXISTS received_at timestamptz,

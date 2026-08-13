@@ -212,9 +212,12 @@ interface GeofenceControlActionRaw {
   action_key: string;
   action_type: GeofenceControlAction['actionType'];
   status: GeofenceControlAction['status'];
-  before_state?: Array<{ path: string; value: string }>;
-  requested_state?: Array<{ path: string; value: string }>;
-  verified_state?: Array<{ path: string; value: string }>;
+  contract_version?: number;
+  before_state?: GeofenceControlAction['beforeState'];
+  requested_state?: GeofenceControlAction['requestedState'];
+  terminal_state?: GeofenceControlAction['terminalState'];
+  verified_state?: GeofenceControlAction['verifiedState'];
+  verification_attempt?: number;
   last_error?: string;
   created_at: string;
   completed_at?: string;
@@ -786,9 +789,12 @@ export const geofenceApi = {
       commandKey: item.action_key,
       actionType: item.action_type,
       status: item.status,
+      contractVersion: item.contract_version ?? 1,
       beforeState: item.before_state ?? [],
       requestedState: item.requested_state ?? [],
+      terminalState: item.terminal_state ?? [],
       verifiedState: item.verified_state ?? [],
+      verificationAttempt: item.verification_attempt ?? 0,
       lastError: item.last_error,
       createdAt: item.created_at,
       completedAt: item.completed_at,

@@ -479,7 +479,14 @@ func (s *RPCResponseSubscriber) handleGPVResponse(ctx context.Context, evt event
 		)
 	}
 
-	return s.persist(ctx, device, persistParams, translated, !isPathBSyncCommandKey(commandKey))
+	return s.persist(
+		ctx,
+		device,
+		persistParams,
+		translated,
+		!isPathBSyncCommandKey(commandKey),
+		strings.HasPrefix(commandKey, "geofence:"),
+	)
 }
 
 // resolveTranslator 重复 mml/fanout.go translateParamRefs 的路由解析；
@@ -519,7 +526,12 @@ func (s *RPCResponseSubscriber) resolveTranslator(ctx context.Context, device *m
 // persist 把翻译后的参数批量写 device_parameters。translated 参数仅供日志，
 // 区分本次入库的 parameter_path 是 standardPath 还是 privatePath。
 func (s *RPCResponseSubscriber) persist(
-	ctx context.Context, device *model.Device, params []tr069.ParameterValueStruct, translated bool, refreshInfo bool,
+	ctx context.Context,
+	device *model.Device,
+	params []tr069.ParameterValueStruct,
+	translated bool,
+	refreshInfo bool,
+	strictInfoRefresh bool,
 ) error {
 	if device == nil || device.ID == uuid.Nil || len(params) == 0 {
 		return nil
@@ -558,6 +570,9 @@ func (s *RPCResponseSubscriber) persist(
 				zap.String("device_sn", device.SerialNumber),
 				zap.Error(err),
 			)
+			if strictInfoRefresh {
+				return fmt.Errorf("refresh geofence device summary after GPV: %w", err)
+			}
 		}
 	}
 	s.logger.Info("rpc response parameters persisted",

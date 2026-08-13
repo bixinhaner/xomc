@@ -491,9 +491,22 @@ describe('GeofenceBindingsDrawer', () => {
         commandKey: 'geofence:device:8:deactivate',
         actionType: 'deactivate',
         status: 'partial_failed',
-        beforeState: [{ path: 'rf', value: '1' }],
+        contractVersion: 2,
+        beforeState: [
+          { path: 'rf', value: '1', role: 'rf' },
+          { path: 'Device.Services.FAPService.1.FAPControl.LTE.OpState', value: '1', role: 'op_state' },
+        ],
         requestedState: [{ path: 'rf', value: '0' }],
-        verifiedState: [{ path: 'rf', value: '1' }],
+        terminalState: [{
+          path: 'Device.Services.FAPService.1.FAPControl.LTE.OpState',
+          value: '0',
+          role: 'op_state',
+        }],
+        verifiedState: [
+          { path: 'rf', value: '1' },
+          { path: 'Device.Services.FAPService.1.FAPControl.LTE.OpState', value: '1', role: 'op_state' },
+        ],
+        verificationAttempt: 0,
         lastError: 'rf expected 0 got 1',
         createdAt: '2026-08-05T08:00:00Z',
         completedAt: '2026-08-05T08:00:05Z',
@@ -505,9 +518,15 @@ describe('GeofenceBindingsDrawer', () => {
     renderDrawer();
 
     expect(screen.getByText('部分失败')).toBeInTheDocument();
+    expect(screen.getByText('0/2 一致')).toBeInTheDocument();
+    const actionDevice = screen
+      .getAllByText('BOUND001')
+      .find((element) => element.tagName === 'STRONG');
+    expect(actionDevice?.closest('details')).not.toHaveAttribute('open');
     expect(screen.getByText('控制参数')).toBeInTheDocument();
     expect(screen.getAllByText('rf')).toHaveLength(2);
-    expect(screen.getByText('不一致')).toBeInTheDocument();
+    expect(screen.getByText('LTE 小区 1 运行状态')).toBeInTheDocument();
+    expect(screen.getAllByText('不一致')).toHaveLength(2);
     expect(screen.getAllByText('0').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1').length).toBeGreaterThan(0);
     expect(screen.getByText('rf expected 0 got 1')).toBeInTheDocument();

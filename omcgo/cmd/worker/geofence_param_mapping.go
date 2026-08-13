@@ -46,13 +46,19 @@ func (r *workerGeofenceMappingReader) GetByProductClass(
 	mappings := translator.Mappings()
 	result := make([]carrier.GeofenceControlMapping, 0, len(mappings))
 	for _, mapping := range mappings {
+		enumValues := ""
+		if mapping.EnumValues != nil {
+			enumValues = *mapping.EnumValues
+		}
 		result = append(result, carrier.GeofenceControlMapping{
-			StandardPath: mapping.StandardPath,
-			PrivatePath:  mapping.PrivatePath,
-			EntryType:    mapping.EntryType,
-			Access:       mapping.Access,
-			IsActive:     mapping.IsActive,
-			IsSupported:  mapping.IsSupported,
+			StandardPath:      mapping.StandardPath,
+			PrivatePath:       mapping.PrivatePath,
+			EntryType:         mapping.EntryType,
+			Access:            mapping.Access,
+			EnumValues:        enumValues,
+			ProductRadioModes: matched.Product.RadioModes,
+			IsActive:          mapping.IsActive,
+			IsSupported:       mapping.IsSupported,
 		})
 	}
 	return result, nil

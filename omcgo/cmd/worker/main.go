@@ -441,6 +441,12 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	if err := geofenceControlMonitor.Subscribe(w.EventBus); err != nil {
 		return fmt.Errorf("subscribe geofence control monitor: %w", err)
 	} else {
+		verificationCtx, cancelVerification := context.WithCancel(context.Background())
+		w.GS.Register("geofence-control-verifier", 1, func(context.Context) error {
+			cancelVerification()
+			return nil
+		})
+		go geofenceControlMonitor.RunVerificationLoop(verificationCtx, 5*time.Second)
 		logger.Info("geofence control monitor started")
 	}
 
