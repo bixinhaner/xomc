@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Pagination,
   Select,
   Space,
@@ -228,6 +229,20 @@ interface ReportStatusInfo {
   previewTitle?: string;
   copyLabel?: string;
   resultTitle?: string;
+}
+
+interface DeliveryTestResultInfo {
+  event: NorthboundPageConfigEvent;
+  title: string;
+}
+
+interface DeliveryTestDisplayInfo {
+  state: ReportState;
+  statusText: string;
+  target: string;
+  tcpText: string;
+  authText: string;
+  message: string;
 }
 
 type DeliveryEventsByRunId = Record<string, NorthboundPageConfigEvent[]>;
@@ -4761,6 +4776,65 @@ function buildEventReportStatus(event: NorthboundPageConfigEvent, fallbackCapabi
   };
 }
 
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function boolValue(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function deliveryTargetTestKey(scope: 'file' | 'inventory' | 'socket', ownerCode: string, key: string) {
+  return `${scope}:${ownerCode}:${key}`;
+}
+
+function deliveryTargetTestTitle(row: DeliveryTargetRow): string {
+  const name = row.name.trim() || '传输目标';
+  const protocolPattern = new RegExp(`(^|[^A-Z0-9])${row.protocol}($|[^A-Z0-9])`, 'i');
+  return protocolPattern.test(name) ? name : `${name} ${row.protocol}`;
+}
+
+function deliveryTestEventValue(event: NorthboundPageConfigEvent, key: string): unknown {
+  const summary = event.summary ?? {};
+  const payload = parseJSONPayload(event.payload || '') ?? {};
+  return summary[key] ?? payload[key];
+}
+
+function deliveryTestTargetText(event: NorthboundPageConfigEvent): string {
+  const protocol = stringValue(deliveryTestEventValue(event, 'protocol'));
+  const host = stringValue(deliveryTestEventValue(event, 'host'));
+  const port = deliveryTestEventValue(event, 'port');
+  if (protocol && host) {
+    return `${protocol.toLowerCase()}://${host}${port ? `:${port}` : ''}`;
+  }
+  return event.artifact_path || '-';
+}
+
+function deliveryTestAuthText(event: NorthboundPageConfigEvent): string {
+  const supported = boolValue(deliveryTestEventValue(event, 'auth_probe_supported'));
+  const passed = boolValue(deliveryTestEventValue(event, 'auth_probe_passed'));
+  if (supported === false) return '未执行认证探测';
+  if (passed === true) return '认证通过';
+  if (passed === false) return '认证失败';
+  return '-';
+}
+
+function buildDeliveryTestDisplay(event: NorthboundPageConfigEvent): DeliveryTestDisplayInfo {
+  const state = reportStateFromEvent(event);
+  const message = event.error_message
+    || stringValue(deliveryTestEventValue(event, 'message'))
+    || (state === 'success' ? '连接测试通过' : '连接测试失败');
+  const tcpReachable = boolValue(deliveryTestEventValue(event, 'tcp_reachable'));
+  return {
+    state,
+    statusText: state === 'success' ? '测试通过' : '测试失败',
+    target: deliveryTestTargetText(event),
+    tcpText: tcpReachable === true ? 'TCP 可达' : tcpReachable === false ? 'TCP 不可达' : '-',
+    authText: deliveryTestAuthText(event),
+    message: state === 'success' ? '连接测试通过' : message,
+  };
+}
+
 function reportStateFromEvent(event: NorthboundPageConfigEvent): ReportState {
   if (event.status === 'success') return 'success';
   if (event.status === 'running') return 'running';
@@ -5884,6 +5958,8 @@ export default function NorthboundPageConfig() {
   const [reportEventLoading, setReportEventLoading] = useState(false);
   const [reportCapabilityName, setReportCapabilityName] = useState<string>('');
   const [reportDeliveryEventsByRunId, setReportDeliveryEventsByRunId] = useState<DeliveryEventsByRunId>({});
+  const [deliveryTestResult, setDeliveryTestResult] = useState<DeliveryTestResultInfo | null>(null);
+  const [testingDeliveryTargetKey, setTestingDeliveryTargetKey] = useState('');
   const [fileLatestSuccessRuns, setFileLatestSuccessRuns] = useState<Record<string, NorthboundFileRun>>({});
   const [inventoryLatestSuccessRuns, setInventoryLatestSuccessRuns] = useState<Record<string, NorthboundFileRun>>({});
   const [fileProfileRunning, setFileProfileRunning] = useState<Record<string, boolean>>({});
@@ -6233,17 +6309,23 @@ export default function NorthboundPageConfig() {
       void message.warning(nt(`请先填写${missingFields.join('、')}`));
       return;
     }
+    const testKey = deliveryTargetTestKey(scope, ownerCode, row.key);
+    const testTitle = deliveryTargetTestTitle(row);
+    setTestingDeliveryTargetKey(testKey);
     void northboundPageConfigApi.testDeliveryTarget(serializeDeliveryTarget(scope, ownerCode, row))
       .then((event) => {
-        openSingleEventReport(event, `${row.name} ${row.protocol}`);
+        setDeliveryTestResult({ event, title: testTitle });
         if (event.status === 'success') {
-          void message.success(nt(`${row.name} ${row.protocol} 连接测试通过`));
+          void message.success(nt(`${testTitle} 连接测试通过`));
         } else {
-          void message.warning(nt(`${row.name} ${row.protocol} 连接测试未通过`));
+          void message.warning(nt(`${testTitle} 连接测试未通过`));
         }
       })
       .catch(() => {
-        void message.error(nt(`${row.name} ${row.protocol} 连接测试失败`));
+        void message.error(nt(`${testTitle} 连接测试失败`));
+      })
+      .finally(() => {
+        setTestingDeliveryTargetKey((current) => (current === testKey ? '' : current));
       });
   };
 
@@ -8081,7 +8163,13 @@ export default function NorthboundPageConfig() {
       render: (_, row) => (
         <Space size={4}>
           <Tooltip title="测试连接">
-            <Button size="small" type="text" icon={<PlayCircleOutlined />} onClick={() => testDeliveryTarget(row, scope, ownerCode)} />
+            <Button
+              size="small"
+              type="text"
+              icon={<PlayCircleOutlined />}
+              loading={testingDeliveryTargetKey === deliveryTargetTestKey(scope, ownerCode, row.key)}
+              onClick={() => testDeliveryTarget(row, scope, ownerCode)}
+            />
           </Tooltip>
           <Tooltip title="删除目标">
             <Button
@@ -8570,6 +8658,9 @@ export default function NorthboundPageConfig() {
     () => apiFieldDisplayList(selectedApiResponseFields),
     [selectedApiResponseFields],
   );
+  const deliveryTestDisplay = deliveryTestResult
+    ? buildDeliveryTestDisplay(deliveryTestResult.event)
+    : null;
 
   return (
     <NorthboundI18nScope>
@@ -8587,6 +8678,54 @@ export default function NorthboundPageConfig() {
           ]}
         />
       </ListPageLayout>
+
+      <Modal
+        title={deliveryTestResult ? `${deliveryTestResult.title} 测试结果` : '传输目标测试结果'}
+        open={Boolean(deliveryTestResult)}
+        onCancel={() => setDeliveryTestResult(null)}
+        width={480}
+        destroyOnClose
+        footer={(
+          <Button type="primary" onClick={() => setDeliveryTestResult(null)}>
+            知道了
+          </Button>
+        )}
+      >
+        {deliveryTestDisplay && (
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <Typography.Text type="secondary">测试结果</Typography.Text>
+              {reportStateTag(deliveryTestDisplay.state, deliveryTestDisplay.statusText)}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '72px minmax(0, 1fr)', gap: '8px 12px' }}>
+              <Typography.Text type="secondary">目标地址</Typography.Text>
+              <Typography.Text ellipsis={{ tooltip: deliveryTestDisplay.target }}>
+                {deliveryTestDisplay.target}
+              </Typography.Text>
+              <Typography.Text type="secondary">网络连接</Typography.Text>
+              <Typography.Text>{deliveryTestDisplay.tcpText}</Typography.Text>
+              <Typography.Text type="secondary">账号认证</Typography.Text>
+              <Typography.Text>{deliveryTestDisplay.authText}</Typography.Text>
+            </div>
+            <div>
+              <Typography.Text type="secondary">
+                {deliveryTestDisplay.state === 'success' ? '结果说明' : '失败信息'}
+              </Typography.Text>
+              <Typography.Paragraph
+                style={{
+                  margin: '6px 0 0',
+                  maxHeight: 96,
+                  overflowY: 'auto',
+                  wordBreak: 'break-word',
+                }}
+                type={deliveryTestDisplay.state === 'failed' ? 'danger' : undefined}
+              >
+                {deliveryTestDisplay.message}
+              </Typography.Paragraph>
+            </div>
+          </Space>
+        )}
+      </Modal>
 
       <Drawer
         title={
