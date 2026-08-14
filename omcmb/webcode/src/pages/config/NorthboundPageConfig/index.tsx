@@ -4376,7 +4376,7 @@ function buildRunReportStatus(run: NorthboundFileRun, fallbackCapabilityName: st
     artifactName: run.artifact_name || '-',
     artifactPath: run.artifact_path || '-',
     size: formatBytes(run.artifact_size),
-    targetSummary: `生成 ${run.row_count} 行，可在传输目标中测试连接`,
+    targetSummary: `生成 ${run.row_count} 行`,
     detail: run.error_message || runTriggerDescription(run),
     payload,
   };
