@@ -235,8 +235,21 @@ func materializeCommonNetworkParameters(selected map[string]any) {
 		}
 		byPath[path] = map[string]any{"trPath": path, "value": value}
 	}
+	mappedWorkbookPaths := make(map[string]struct{})
+	for _, mapping := range mapSlice(selected["workbookMappings"]) {
+		path := strings.TrimSpace(valueString(mapping["trPath"]))
+		sheet := strings.TrimSpace(valueString(mapping["sheet"]))
+		header := strings.TrimSpace(valueString(mapping["header"]))
+		if path != "" && workbookMappingHasValue(selected, sheet, header) {
+			mappedWorkbookPaths[path] = struct{}{}
+		}
+	}
 	for path, value := range parameterValues {
-		put(strings.TrimSpace(path), value)
+		path = strings.TrimSpace(path)
+		if _, mapped := mappedWorkbookPaths[path]; mapped {
+			continue
+		}
+		put(path, value)
 	}
 	putAddressRows := func(prefix, object string, rows []map[string]any, ipv6 bool) {
 		for rowIndex, row := range rows {

@@ -22,7 +22,6 @@ describe('parameter configuration detail mapping', () => {
           NRARFCNDL: 360000,
           NRARFCNUL: 361000,
           DLBandwidth: '100MHz',
-          'Duplex Mode': 'TDD',
         }],
         PLMN: [{
           'Serial Number': '5G-SN-001',
@@ -43,7 +42,6 @@ describe('parameter configuration detail mapping', () => {
       nrarfcnndl: 360000,
       nrarfcnul: 361000,
       dlbandwidth: '100',
-      duplexMode: 'TDD',
       nci: 123456789,
       tac: 100,
       ranac: 2,
@@ -250,12 +248,141 @@ describe('parameter configuration detail mapping', () => {
     });
   });
 
-  it('backfills all 5G template fields for historical configurations', () => {
+  it('preserves the complete imported workbook when the editor submits only mounted fields', () => {
+    const current = {
+      deviceType: 'gNB',
+      serialNumber: 'EXAMPLE-SN-001',
+      sheetParameters: {
+        DEVICE: [{ 'Serial Number': 'EXAMPLE-SN-001', 'gNB Name': 'Original', 'gNB ID': '22' }],
+        CELL: [{ 'Serial Number': 'EXAMPLE-SN-001', Band: '1', PCI: '10' }],
+        PLMN: [{ 'Serial Number': 'EXAMPLE-SN-001', PLMN: '46000' }],
+        INTERFACE: [{ 'Serial Number': 'EXAMPLE-SN-001', 'IP Type [1.1]': 'DHCP' }],
+        '1588_CONFIGURATION': [{ 'Serial Number': 'EXAMPLE-SN-001', Mode: 'FREE_OSCILLATION' }],
+        IPSEC: [{ 'Serial Number': 'EXAMPLE-SN-001', 'IPSec Enable': '1' }],
+      },
+    };
+
+    const merged = mergeParamConfigFormValues(current, {
+      ...toParamConfigFormValues(current),
+      sheetParameters: {
+        DEVICE: [{ 'gNB Name': 'Edited', URL: 'must-not-be-added' }],
+        CELL: [{ PCI: '20', ULBandwidth: 'must-not-be-added' }],
+        PLMN: [{ PLMN: '46001' }],
+        IPSEC: [{ 'IPSec Enable': '0' }],
+      },
+    });
+
+    expect(Object.keys(merged.sheetParameters)).toEqual([
+      'DEVICE', 'CELL', 'PLMN', 'INTERFACE', '1588_CONFIGURATION', 'IPSEC',
+    ]);
+    expect(merged.sheetParameters).toMatchObject({
+      DEVICE: [{ 'gNB Name': 'Edited', 'gNB ID': '22' }],
+      CELL: [{ Band: '1', PCI: '20' }],
+      INTERFACE: [{ 'IP Type [1.1]': 'DHCP' }],
+      '1588_CONFIGURATION': [{ Mode: 'FREE_OSCILLATION' }],
+    });
+    expect(merged.sheetParameters.DEVICE[0]).not.toHaveProperty('URL');
+    expect(merged.sheetParameters.CELL[0]).not.toHaveProperty('ULBandwidth');
+  });
+
+  it('writes both edited carrier bandwidths back to their imported dynamic columns', () => {
+    const current = {
+      deviceType: 'gNB',
+      serialNumber: 'NR-SN-001',
+      sheetParameters: {
+        CELL: [{
+          'Serial Number': 'NR-SN-001',
+          'DL Carrier Bandwidth': '',
+          'UL Carrier Bandwidth': '',
+        }],
+      },
+    };
+
+    const merged = mergeParamConfigFormValues(current, {
+      ...toParamConfigFormValues(current),
+      dlbandwidth: '106',
+      ulbandwidth: '106',
+    });
+
+    expect(merged.sheetParameters.CELL[0]).toEqual({
+      'Serial Number': 'NR-SN-001',
+      'DL Carrier Bandwidth': '106',
+      'UL Carrier Bandwidth': '106',
+    });
+    expect(merged.sheetParameters.CELL[0]).not.toHaveProperty('DLBandwidth');
+    expect(merged.sheetParameters.CELL[0]).not.toHaveProperty('ULBandwidth');
+  });
+
+  it('preserves all imported eNB sheets when the editor submits only mounted fields', () => {
+    const current = {
+      deviceType: 'eNB',
+      serialNumber: 'LTE-SN-001',
+      sheetParameters: {
+        CELL: [{ '*SERIAL_NUMBER': 'LTE-SN-001', CELL_NAME: 'Original', '*PCI': '10' }],
+        NETWORK_ENABLE: [{ '*SERIAL_NUMBER': 'LTE-SN-001', '*PLMN': '46000' }],
+        NETWORK_IPSEC: [{ '*SERIAL_NUMBER': 'LTE-SN-001', '*TUNNEL_INDEX': '1' }],
+        '1588_CONFIGURATION': [{ '*SERIAL_NUMBER': 'LTE-SN-001', '*DOMAIN': '24' }],
+        NETWORK: [{ '*SERIAL_NUMBER': 'LTE-SN-001', 'WAN IP': '192.0.2.10' }],
+      },
+    };
+
+    const merged = mergeParamConfigFormValues(current, {
+      ...toParamConfigFormValues(current),
+      sheetParameters: {
+        CELL: [{ CELL_NAME: 'Edited', '*PCI': '20', URL: 'must-not-be-added' }],
+      },
+    });
+
+    expect(Object.keys(merged.sheetParameters)).toEqual([
+      'CELL', 'NETWORK_ENABLE', 'NETWORK_IPSEC', '1588_CONFIGURATION', 'NETWORK',
+    ]);
+    expect(merged.sheetParameters).toMatchObject({
+      CELL: [{ CELL_NAME: 'Edited', '*PCI': '20' }],
+      NETWORK_ENABLE: [{ '*PLMN': '46000' }],
+      NETWORK_IPSEC: [{ '*TUNNEL_INDEX': '1' }],
+      '1588_CONFIGURATION': [{ '*DOMAIN': '24' }],
+      NETWORK: [{ 'WAN IP': '192.0.2.10' }],
+    });
+    expect(merged.sheetParameters.CELL[0]).not.toHaveProperty('URL');
+  });
+
+  it('preserves unmounted imported GSM columns after a partial editor save', () => {
+    const current = {
+      deviceType: 'GSM',
+      serialNumber: 'GSM-SN-001',
+      sheetParameters: {
+        GSM: [{
+          'Serial Number': 'GSM-SN-001',
+          IPA: '6969',
+          'Unit ID': '7',
+          'Remote IP': '192.0.2.20',
+          OMC: '192.0.2.30',
+        }],
+      },
+    };
+
+    const merged = mergeParamConfigFormValues(current, {
+      ...toParamConfigFormValues(current),
+      sheetParameters: {
+        GSM: [{ IPA: '6970', URL: 'must-not-be-added' }],
+      },
+    });
+
+    expect(merged.sheetParameters.GSM[0]).toEqual({
+      'Serial Number': 'GSM-SN-001',
+      IPA: '6970',
+      'Unit ID': '7',
+      'Remote IP': '192.0.2.20',
+      OMC: '192.0.2.30',
+    });
+  });
+
+  it('backfills all current 5G template fields without Duplex Mode', () => {
     const hydrated = withTemplateSheetParameters({
       deviceType: 'gNB',
       serialNumber: '5G-HISTORY-001',
       sheetParameters: {
-        CELL: [{ '*Serial Number': '5G-HISTORY-001', '*PCI': 321 }],
+        CELL: [{ '*Serial Number': '5G-HISTORY-001', '*PCI': 321, 'Duplex Mode': 'TDD' }],
       },
     });
 
@@ -263,7 +390,8 @@ describe('parameter configuration detail mapping', () => {
       'DEVICE', 'CELL', 'PLMN', 'INTERFACE', 'IPSEC',
     ]);
     expect(Object.values(hydrated.sheetParameters ?? {})
-      .flatMap((rows) => Object.keys(rows[0] ?? {}))).toHaveLength(88);
+      .flatMap((rows) => Object.keys(rows[0] ?? {}))).toHaveLength(87);
+    expect(hydrated.sheetParameters?.CELL[0]).not.toHaveProperty('Duplex Mode');
     expect(hydrated.sheetParameters?.CELL[0]).toMatchObject({
       '*Serial Number': '5G-HISTORY-001',
       '*PCI': 321,
@@ -487,9 +615,19 @@ describe('parameter configuration detail mapping', () => {
     const form = toParamConfigFormValues(current);
 
     expect(form.networkParameterValues).toEqual({ [path]: '192.0.2.10' });
-    expect(mergeParamConfigFormValues(current, {
+    const firstSave = mergeParamConfigFormValues(current, {
       ...form,
       networkParameterValues: { [path]: '192.0.2.20' },
-    }).sheetParameters.INTERFACE[0]['IP Address']).toBe('192.0.2.20');
+    });
+    expect(firstSave.sheetParameters.INTERFACE[0]['IP Address']).toBe('192.0.2.20');
+    expect(firstSave).not.toHaveProperty('networkParameterValues');
+
+    const secondForm = toParamConfigFormValues(firstSave);
+    const secondSave = mergeParamConfigFormValues(firstSave, {
+      ...secondForm,
+      networkParameterValues: { [path]: '192.0.2.30' },
+    });
+    expect(secondSave.sheetParameters.INTERFACE[0]['IP Address']).toBe('192.0.2.30');
+    expect(secondSave).not.toHaveProperty('networkParameterValues');
   });
 });

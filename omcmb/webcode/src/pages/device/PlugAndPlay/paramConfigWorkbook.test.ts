@@ -13,7 +13,180 @@ import {
 import { getParamConfigExportFields } from './paramConfigExportFields';
 
 describe('parameter config workbook', () => {
-  it('deduplicates columns by TRPath and keeps mapped parameters in mapping order', () => {
+  it('puts a serial-number column first on every generated business sheet', () => {
+    const workbook = createParamConfigTemplateWorkbook('gNB', {
+      deviceType: 'gNB',
+      quickSettingsGroups: [{
+        id: 'device', titleZh: '设备', titleEn: 'Device', multiInstance: false,
+        params: [{
+          name: 'URL', titleZh: '地址', titleEn: 'URL',
+          standardPath: 'Device.ManagementServer.URL',
+        }],
+      }, {
+        id: 'cell', titleZh: '小区', titleEn: 'Cell', multiInstance: false,
+        params: [{
+          name: 'PCI', titleZh: 'PCI', titleEn: 'PCI',
+          standardPath: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.PCI',
+        }],
+      }, {
+        id: 'core', titleZh: '核心网', titleEn: 'Core Network', multiInstance: false,
+        params: [{
+          name: 'PLMNID', titleZh: 'PLMN', titleEn: 'PLMN',
+          standardPath: 'Device.Services.FAPService.1.CellConfig.1.NR.CN.PLMNID',
+        }],
+      }, {
+        id: 'sync', titleZh: '同步', titleEn: 'Synchronization', multiInstance: false,
+        params: [{
+          name: 'PTPDomain', titleZh: 'PTP域', titleEn: 'PTP Domain',
+          standardPath: 'Device.Time.PTPDomain',
+        }],
+      }, {
+        id: 'ipsec', titleZh: 'IPSec', titleEn: 'IPSec', multiInstance: false,
+        params: [{
+          name: 'Enable', titleZh: '启用', titleEn: 'Enable',
+          standardPath: 'Device.FAP.IPSec.1.Enable',
+        }],
+      }],
+    });
+
+    for (const sheetName of workbook.SheetNames) {
+      const headers = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], {
+        header: 1,
+        defval: '',
+      })[0] as string[];
+      expect(headers[0], sheetName).toBe('Serial Number');
+    }
+  });
+
+  it('preserves imported columns without adding fixed-template planning fields', () => {
+    const workbook = createParamConfigWorkbook([{
+      deviceType: 'gNB',
+      serialNumber: 'SN-001',
+      sheetParameters: {
+        PLMN: [{
+          'Serial Number': 'SN-001',
+          '*NCI': '1',
+          '*TAC': '2',
+          '*RANAC': '3',
+          '*PLMN ID': '46001',
+          '*PRIMARY': '1',
+        }],
+      },
+      workbookMappings: [],
+    }]);
+
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.PLMN, {
+      header: 1,
+      defval: '',
+    });
+    expect(rows[0]).toEqual([
+      'Serial Number', '*NCI', '*TAC', '*RANAC', '*PLMN ID', '*PRIMARY',
+    ]);
+    expect(rows[0]).not.toEqual(expect.arrayContaining([
+      'SD', 'SD Value', 'AMF IP:DEFAULT', 'NguBindInterface',
+    ]));
+  });
+
+  it('removes obsolete unmapped fields and 5G Duplex Mode from downloads', () => {
+    const workbook = createParamConfigWorkbook([{
+      deviceType: 'gNB',
+      serialNumber: 'SN-001',
+      sheetParameters: {
+        CELL: [{
+          'Serial Number': 'SN-001',
+          PCI: 10,
+          DLBandwidth: '106',
+          'DL Carrier Bandwidth': '25',
+          'Duplex Mode': 'TDD',
+        }],
+      },
+      workbookMappings: [
+        { displayName: 'PCI', sheet: 'CELL', header: 'PCI', trPath: 'Device.Radio.1.PCI', source: 'system' },
+        { displayName: 'DL Carrier Bandwidth', sheet: 'CELL', header: 'DL Carrier Bandwidth', trPath: 'Device.Radio.1.DLBandwidth', source: 'system' },
+        { displayName: 'Duplex Mode', sheet: 'CELL', header: 'Duplex Mode', trPath: 'Device.Ethernet.Interface.1.DuplexMode', source: 'system' },
+      ],
+    }]);
+
+    const cellRows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.CELL, { header: 1, defval: '' });
+    expect(cellRows[0]).toEqual(['Serial Number', 'PCI', 'DL Carrier Bandwidth']);
+    expect(cellRows[1]).toEqual(['SN-001', 10, '25']);
+    const mappingRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+      workbook.Sheets['参数映射'], { defval: '' },
+    );
+    expect(mappingRows.map((row) => row['参数列名'])).toEqual(['PCI', 'DL Carrier Bandwidth']);
+  });
+
+  it('rejects placeholder serial numbers instead of guessing their target device', () => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['Serial Number', 'URL'],
+      ['REAL-SN-001', 'http://acs.example.test'],
+    ]), 'DEVICE');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['Serial Number', 'Sync Source', 'Domain'],
+      [PARAM_TEMPLATE_EXAMPLE_SERIAL, 'GPS', '24'],
+    ]), '1588_CONFIGURATION');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['页面显示名称', '数据工作表', '参数列名', 'TRPath', '来源', '说明'],
+      ['URL', 'DEVICE', 'URL', 'Device.ManagementServer.URL', '系统预置', ''],
+      ['同步源', '1588_CONFIGURATION', 'Sync Source', 'Device.Time.SyncSource', '系统预置', ''],
+      ['域', '1588_CONFIGURATION', 'Domain', 'Device.Time.Domain', '系统预置', ''],
+    ]), PARAM_MAPPING_SHEET);
+
+    expect(() => parseParamConfigWorkbook(
+      XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }),
+      'gNB',
+      'now',
+    )).toThrowError(expect.objectContaining({
+      code: 'invalid_row',
+      field: '1588_CONFIGURATION.Serial Number',
+    }));
+  });
+
+  it('adds only the explicit serial-number column when an imported sheet row lacks it', () => {
+    const downloaded = createParamConfigWorkbook([{
+      deviceType: 'gNB',
+      serialNumber: 'REAL-SN-001',
+      sheetParameters: { DEVICE: [{ URL: 'http://acs.example.test' }] },
+      workbookMappings: [],
+    }]);
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(downloaded.Sheets.DEVICE, {
+      header: 1,
+      defval: '',
+    });
+    expect(rows).toEqual([
+      ['Serial Number', 'URL'],
+      ['REAL-SN-001', 'http://acs.example.test'],
+    ]);
+  });
+
+  it.each(['Serial Number', '*Serial Number', '*SERIAL_NUMBER'])(
+    'keeps the %s alias as the first exported column',
+    (serialHeader) => {
+      const downloaded = createParamConfigWorkbook([{
+        deviceType: 'gNB',
+        serialNumber: 'REAL-SN-001',
+        sheetParameters: {
+          DEVICE: [{ URL: 'http://acs.example.test', [serialHeader]: 'REAL-SN-001' }],
+        },
+        workbookMappings: [{
+          displayName: 'ACS URL',
+          sheet: 'DEVICE',
+          header: 'URL',
+          trPath: 'Device.ManagementServer.URL',
+          source: 'system',
+        }],
+      }]);
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(downloaded.Sheets.DEVICE, {
+        header: 1,
+        defval: '',
+      });
+      expect(rows[0]).toEqual([serialHeader, 'URL']);
+      expect(rows[1]).toEqual(['REAL-SN-001', 'http://acs.example.test']);
+    },
+  );
+
+  it('preserves imported column order and aliases even when they share a TRPath', () => {
     const workbook = createParamConfigWorkbook([{
       deviceType: 'gNB',
       serialNumber: 'SN-001',
@@ -38,10 +211,10 @@ describe('parameter config workbook', () => {
 
     const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.CELL, { header: 1, defval: '' });
     const headers = rows[0] as string[];
-    expect(headers.filter((header) => ['*gNB Lenth', 'gNB ID Length'].includes(header)))
-      .toEqual(['*gNB Lenth']);
-    expect(headers.indexOf('Custom A')).toBeLessThan(headers.indexOf('Custom B'));
-    expect(rows[1][headers.indexOf('*gNB Lenth')]).toBe(24);
+    expect(headers).toEqual([
+      '*Serial Number', '*gNB Lenth', 'Custom B', 'gNB ID Length', 'Custom A',
+    ]);
+    expect(rows[1]).toEqual(['SN-001', '', 'b', 24, 'a']);
     const mappingRows = XLSX.utils.sheet_to_json<Record<string, string>>(
       workbook.Sheets[PARAM_MAPPING_SHEET],
       { defval: '' },
@@ -50,19 +223,7 @@ describe('parameter config workbook', () => {
       .toEqual(['Unmapped A', 'Unmapped B']);
   });
 
-  it('creates the GSM template with spreadsheet defaults', () => {
-    const workbook = createParamConfigTemplateWorkbook('GSM');
-    expect(workbook.SheetNames).toEqual(['GSM']);
-    expect(XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.GSM, {
-      header: 1,
-      defval: '',
-    })).toEqual([
-      ['Serial Number', 'IPA', 'Unit ID', 'Remote IP', 'Bind IP', 'WAN IP', 'Synchronization', 'OMC'],
-      [PARAM_TEMPLATE_EXAMPLE_SERIAL, '6969', '', '', '', '', 'GNSS', ''],
-    ]);
-  });
-
-  it('keeps the GSM template aligned with its fixed common parameters', () => {
+  it('creates the GSM template from its current public parameters', () => {
     const workbook = createParamConfigTemplateWorkbook('GSM', {
       deviceType: 'GSM',
       quickSettingsGroups: [{
@@ -78,30 +239,35 @@ describe('parameter config workbook', () => {
       header: 1,
       defval: '',
     })[0]).toEqual([
-      'Serial Number', 'IPA', 'Unit ID', 'Remote IP', 'Bind IP', 'WAN IP',
-      'Synchronization', 'OMC',
+      'Serial Number', 'Band', 'Bsic',
     ]);
   });
 
   it('adds hover notes and dropdowns without occupying a data row', async () => {
-    const workbook = await enrichParamConfigWorkbook(createParamConfigTemplateWorkbook('gNB'));
+    const metadata = {
+      deviceType: 'gNB' as const,
+      quickSettingsGroups: [{
+        id: 'device', titleZh: '设备', titleEn: 'Device', multiInstance: false,
+        params: [{
+          name: 'Enabled', titleZh: '启用', titleEn: 'Enabled', type: 'bool',
+          standardPath: 'Device.Example.Enabled',
+        }],
+      }],
+    };
+    const workbook = await enrichParamConfigWorkbook(
+      createParamConfigTemplateWorkbook('gNB', metadata), metadata,
+    );
     const device = workbook.getWorksheet('DEVICE')!;
-    const ipsec = workbook.getWorksheet('IPSEC')!;
-    const cell = workbook.getWorksheet('CELL')!;
 
     expect(device.getCell('A1').note).toContain('参数类型：string');
-    expect(device.getCell('A1').note).toContain('取值范围：长度 1-64');
-    expect(device.getCell('C1').note).toContain('参数类型：bool');
-    expect(device.getCell('C2').dataValidation.formulae).toEqual(['"true,false"']);
-    expect(cell.getCell('J2').dataValidation.type).toBe('list');
-    const leftIdentifierColumn = ipsec.getRow(1).values.indexOf('LEFT_IDENTIFIER');
-    expect(ipsec.getCell(1, leftIdentifierColumn).note).toContain('参数类型：string');
+    expect(device.getCell('B1').note).toContain('参数类型：bool');
+    expect(device.getCell('B2').dataValidation.formulae).toEqual(['"true,false"']);
     expect(device.getRow(2).values).not.toContain('参数类型');
   });
 
   it('uses quick-setting constraints first and parameter-model constraints as fallback', async () => {
-    const source = createParamConfigTemplateWorkbook('gNB');
-    const workbook = await enrichParamConfigWorkbook(source, {
+    const metadata = {
+      deviceType: 'gNB' as const,
       quickSettingsGroups: [{
         id: 'cell', titleZh: '小区', titleEn: 'Cell', multiInstance: false,
         params: [{
@@ -121,28 +287,21 @@ describe('parameter config workbook', () => {
         privatePath: 'Device.Cell.PCI', entryType: 'parameter', access: 'readWrite',
         dataType: 'unsignedInt', changeApplies: 'Immediate', minValue: '0', maxValue: '3279165',
         isStorable: true, isActive: true,
-      }, {
-        id: '2', paramModelId: 'model', standardPath: 'Device.Cell.NRARFCNDL',
-        privatePath: 'Device.Cell.NRARFCNDL', entryType: 'parameter', access: 'readWrite',
-        dataType: 'unsignedInt', changeApplies: 'Immediate', minValue: '0', maxValue: '3279165',
-        isStorable: true, isActive: true,
       }],
-    });
+    };
+    const source = createParamConfigTemplateWorkbook('gNB', metadata);
+    const workbook = await enrichParamConfigWorkbook(source, metadata);
     const cell = workbook.getWorksheet('CELL')!;
-    const pciColumn = cell.getRow(1).values.indexOf('*PCI');
-    const arfcnColumn = cell.getRow(1).values.indexOf('NRARFCNDL');
+    const pciColumn = cell.getRow(1).values.indexOf('PCI');
 
     expect(cell.getCell(1, pciColumn).note).toContain('参数类型：int');
     expect(cell.getCell(1, pciColumn).note).toContain('取值范围：0 ~ 1007');
     expect(cell.getCell(1, pciColumn).note).toContain('显示条件：射频参数启用');
     expect(cell.getCell(2, pciColumn).dataValidation.formulae).toEqual(['"10,20"']);
-    expect(cell.getCell(1, arfcnColumn).note).toContain('参数类型：int');
-    expect(cell.getCell(1, arfcnColumn).note).toContain('取值范围：0 ~ 3279165');
-    expect(cell.getCell(1, arfcnColumn).note).not.toContain('设备数据模型为准');
   });
 
   it('appends a final parameter mapping sheet with page labels and TRPaths', async () => {
-    const workbook = await enrichParamConfigWorkbook(createParamConfigTemplateWorkbook('gNB'), {
+    const metadata = {
       deviceType: 'gNB',
       quickSettingsGroups: [{
         id: 'cell', titleZh: '小区参数', titleEn: 'Cell', multiInstance: false,
@@ -151,7 +310,10 @@ describe('parameter config workbook', () => {
           standardPath: 'Device.Cell.{i}.PCI',
         }],
       }],
-    });
+    } as const;
+    const workbook = await enrichParamConfigWorkbook(
+      createParamConfigTemplateWorkbook('gNB', metadata), metadata,
+    );
     const mapping = workbook.getWorksheet(PARAM_MAPPING_SHEET)!;
     expect(mapping.getRow(1).values).toEqual([
       undefined, '页面显示名称', '数据工作表', '参数列名', 'TRPath', '来源', '说明',
@@ -163,7 +325,7 @@ describe('parameter config workbook', () => {
     expect(visibleSheets.at(-1)?.name).toBe(PARAM_MAPPING_SHEET);
   });
 
-  it('keeps legacy sheet divisions but generates current page fields with at most two instances', async () => {
+  it('generates only sheets represented by current public parameters', async () => {
     const metadata = {
       deviceType: 'gNB' as const,
       quickSettingsGroups: [{
@@ -176,7 +338,7 @@ describe('parameter config workbook', () => {
       }],
     };
     const source = createParamConfigTemplateWorkbook('gNB', metadata);
-    expect(source.SheetNames).toEqual(['DEVICE', 'CELL', 'PLMN', 'INTERFACE', 'IPSEC']);
+    expect(source.SheetNames).toEqual(['INTERFACE']);
     expect(XLSX.utils.sheet_to_json<unknown[]>(source.Sheets.INTERFACE, { header: 1, defval: '' })[0])
       .toEqual([
         'Serial Number',
@@ -221,7 +383,7 @@ describe('parameter config workbook', () => {
       .toEqual(['Serial Number', 'Enable']);
   });
 
-  it('excludes VLAN and IPv6 only from generated network template fields', async () => {
+  it('keeps VLAN and IPv6 out of generated network templates', async () => {
     const metadata = {
       deviceType: 'gNB' as const,
       quickSettingsGroups: [{
@@ -246,7 +408,54 @@ describe('parameter config workbook', () => {
     ]));
   });
 
-  it('excludes 4G neighbor parameters from generated templates and mappings', async () => {
+  it('filters DSCP and static routes and limits repeated parameter groups', async () => {
+    const metadata = {
+      deviceType: 'gNB' as const,
+      quickSettingsGroups: [{
+        id: 'dscp', titleZh: 'DSCP', titleEn: 'DSCP', multiInstance: false,
+        params: [{
+          name: 'DSCPMark', titleZh: 'DSCP标记', titleEn: 'DSCP Mark',
+          standardPath: 'Device.QoS.DSCPMark',
+        }],
+      }, {
+        id: 'static-route', titleZh: '静态路由', titleEn: 'Static Route', multiInstance: false,
+        params: [{
+          name: 'Destination', titleZh: '目的地址', titleEn: 'Destination',
+          standardPath: 'Device.Routing.Router.1.IPv4Forwarding.1.DestIPAddress',
+        }],
+      }, ...[1, 2, 3].map((instance) => ({
+        id: `management-${instance}`,
+        titleZh: `管理地址${instance}`,
+        titleEn: `Management ${instance}`,
+        multiInstance: false,
+        params: [{
+          name: 'URL', titleZh: '地址', titleEn: 'URL',
+          standardPath: `Device.ManagementServer.${instance}.URL`,
+        }],
+      }))],
+    };
+    const source = createParamConfigTemplateWorkbook('gNB', metadata);
+    const headers = source.SheetNames.flatMap((sheetName) => (
+      XLSX.utils.sheet_to_json<unknown[]>(source.Sheets[sheetName], { header: 1, defval: '' })[0] as string[]
+    ));
+    expect(headers).toEqual(expect.arrayContaining(['URL [1]', 'URL [2]']));
+    expect(headers).not.toEqual(expect.arrayContaining([
+      'DSCP Mark', 'Destination', 'URL [3]',
+    ]));
+
+    const workbook = await enrichParamConfigWorkbook(source, metadata);
+    const paths = workbook.getWorksheet(PARAM_MAPPING_SHEET)?.getColumn(4).values.map(String);
+    expect(paths).toEqual(expect.arrayContaining([
+      'Device.ManagementServer.1.URL', 'Device.ManagementServer.2.URL',
+    ]));
+    expect(paths).not.toEqual(expect.arrayContaining([
+      'Device.QoS.DSCPMark',
+      'Device.Routing.Router.1.IPv4Forwarding.1.DestIPAddress',
+      'Device.ManagementServer.3.URL',
+    ]));
+  });
+
+  it('keeps 4G neighbor parameters out of generated templates and mappings', async () => {
     const metadata = {
       deviceType: 'eNB' as const,
       quickSettingsGroups: [{
@@ -269,7 +478,7 @@ describe('parameter config workbook', () => {
     const mappingPaths = workbook.getWorksheet(PARAM_MAPPING_SHEET)?.getColumn(4).values.map(String);
 
     expect(allHeaders).toContain('Cell Identity');
-    expect(allHeaders).not.toContain('PCI [1]');
+    expect(allHeaders).not.toContain('PCI');
     expect(mappingPaths).toEqual(expect.arrayContaining([
       'Device.Services.FAPService.1.CellConfig.LTE.RAN.CellIdentity',
     ]));
@@ -315,13 +524,9 @@ describe('parameter config workbook', () => {
       }],
     };
     const source = createParamConfigTemplateWorkbook('gNB', metadata);
-    expect(source.SheetNames).toEqual([
-      'DEVICE', 'CELL', 'PLMN', 'INTERFACE', '1588_CONFIGURATION', 'IPSEC',
-    ]);
+    expect(source.SheetNames).toEqual(['1588_CONFIGURATION']);
     expect(XLSX.utils.sheet_to_json<unknown[]>(source.Sheets['1588_CONFIGURATION'], { header: 1, defval: '' })[0])
       .toEqual(['Serial Number', 'Sync Source', 'PTP Domain']);
-    expect(XLSX.utils.sheet_to_json<unknown[]>(source.Sheets.DEVICE, { header: 1, defval: '' })[0])
-      .toEqual(['Serial Number']);
     const workbook = await enrichParamConfigWorkbook(source, metadata);
     expect(workbook.worksheets.filter((sheet) => sheet.state === 'visible').at(-1)?.name)
       .toBe(PARAM_MAPPING_SHEET);
@@ -346,7 +551,7 @@ describe('parameter config workbook', () => {
       .toEqual(['Serial Number', 'NTP Server 1']);
   });
 
-  it('provides one importable default parameter example across generated sheets', async () => {
+  it('uses only explicitly configured defaults in the template example row', async () => {
     const metadata = {
       deviceType: 'gNB' as const,
       quickSettingsGroups: [{
@@ -370,7 +575,7 @@ describe('parameter config workbook', () => {
     };
     const source = createParamConfigTemplateWorkbook('gNB', metadata);
     expect(XLSX.utils.sheet_to_json<unknown[]>(source.Sheets.DEVICE, { header: 1, defval: '' })[1])
-      .toEqual([PARAM_TEMPLATE_EXAMPLE_SERIAL, 'Auto', '1', '192.0.2.1']);
+      .toEqual([PARAM_TEMPLATE_EXAMPLE_SERIAL, '', '', '192.0.2.1']);
 
     const enriched = await enrichParamConfigWorkbook(source, metadata);
     const parsed = parseParamConfigWorkbook(
@@ -382,12 +587,12 @@ describe('parameter config workbook', () => {
     expect(parsed[0]).toMatchObject({
       serialNumber: PARAM_TEMPLATE_EXAMPLE_SERIAL,
       sheetParameters: {
-        DEVICE: [{ Mode: 'Auto', Priority: '1', Endpoint: '192.0.2.1' }],
+        DEVICE: [{ Mode: '', Priority: '', Endpoint: '192.0.2.1' }],
       },
     });
   });
 
-  it('round-trips quick-setting enum examples when the parameter model reports an integer type', async () => {
+  it('keeps parameters blank when only enum and range constraints are configured', async () => {
     const metadata = {
       deviceType: 'eNB' as const,
       quickSettingsGroups: [{
@@ -440,38 +645,21 @@ describe('parameter config workbook', () => {
 
     expect(parsed[0].sheetParameters.CELL).toEqual([
       expect.objectContaining({
-        Bandwidth: 'n25',
-        CellReselectPenaltyTime: '0',
-        'handover2.min.rxlev': '-110',
+        Bandwidth: '',
+        CellReselectPenaltyTime: '',
+        'handover2.min.rxlev': '',
       }),
     ]);
   });
 
-  it.each(['eNB', 'gNB', 'GSM'] as const)(
-    'round-trips a downloaded %s template when product mappings are unavailable',
-    async (deviceType) => {
-      const metadata = {
-        deviceType,
-        productClass: `SELFTEST-${deviceType}`,
-        quickSettingsGroups: [],
-        paramMappings: [],
-        quickSettingFields: getParamConfigExportFields(deviceType),
-      };
-      const downloaded = await enrichParamConfigWorkbook(
-        createParamConfigTemplateWorkbook(deviceType, metadata),
-        metadata,
-      );
+  it('rejects template generation when the product has no public parameters', () => {
+    expect(() => createParamConfigTemplateWorkbook('gNB', {
+      deviceType: 'gNB',
+      quickSettingsGroups: [],
+    })).toThrowError(expect.objectContaining({ code: 'empty_workbook' }));
+  });
 
-      expect(parseParamConfigWorkbook(
-        await downloaded.xlsx.writeBuffer(),
-        deviceType,
-        'now',
-        metadata,
-      )[0].serialNumber).toBe(PARAM_TEMPLATE_EXAMPLE_SERIAL);
-    },
-  );
-
-  it('uniquifies repeated headers from different product parameter groups', async () => {
+  it('keeps only one copy of repeated cell parameters', async () => {
     const metadata = {
       deviceType: 'gNB' as const,
       quickSettingsGroups: [{
@@ -484,9 +672,13 @@ describe('parameter config workbook', () => {
     };
     const source = createParamConfigTemplateWorkbook('gNB', metadata);
     expect(XLSX.utils.sheet_to_json<unknown[]>(source.Sheets.CELL, { header: 1, defval: '' })[0])
-      .toEqual(['Serial Number', 'PCI', 'PCI [2]']);
+      .toEqual(['Serial Number', 'PCI']);
 
     const downloaded = await enrichParamConfigWorkbook(source, metadata);
+    expect(downloaded.getWorksheet(PARAM_MAPPING_SHEET)?.getColumn(4).values)
+      .toEqual(expect.arrayContaining(['Device.Cell.1.PCI']));
+    expect(downloaded.getWorksheet(PARAM_MAPPING_SHEET)?.getColumn(4).values)
+      .not.toEqual(expect.arrayContaining(['Device.Neighbor.1.PCI']));
     expect(parseParamConfigWorkbook(
       await downloaded.xlsx.writeBuffer(), 'gNB', 'now', metadata,
     )[0].serialNumber).toBe(PARAM_TEMPLATE_EXAMPLE_SERIAL);
@@ -715,20 +907,30 @@ describe('parameter config workbook', () => {
   });
 
   it('uses each IPSEC TR path enum and carrier planning ranges as dropdowns', async () => {
-    const workbook = await enrichParamConfigWorkbook(createParamConfigTemplateWorkbook('gNB'), {
+    const metadata = {
+      deviceType: 'gNB' as const,
       quickSettingsGroups: [{
         id: 'gnb-ipsec', titleZh: 'IPSec', titleEn: 'IPSec', multiInstance: true,
         objectPath: 'Device.FAP.Ipsec.{i}.',
-        params: [{ name: 'IKE_ENCRYPTION', titleZh: '加密', titleEn: 'Encryption', leaf: 'IKE_ENCRYPTION' }],
+        params: [{ name: 'IKE_ENCRYPTION', titleZh: '加密', titleEn: 'IKE_ENCRYPTION', leaf: 'IKE_ENCRYPTION' }],
       }, {
         id: 'gnb-cell', titleZh: '小区', titleEn: 'Cell', multiInstance: true,
         params: [
-          { name: 'DLSubCarrierSpacing', titleZh: '载波间隔', titleEn: 'SCS' },
-          { name: 'DLCarrierBandWidth', titleZh: '下行带宽', titleEn: 'DL bandwidth' },
+          {
+            name: 'DLSubCarrierSpacing', titleZh: '载波间隔', titleEn: 'SubcarrierSpacing(DL)',
+            standardPath: 'Device.Cell.1.DLSubCarrierSpacing',
+          },
+          {
+            name: 'DLCarrierBandWidth', titleZh: '下行带宽', titleEn: 'DLBandwidth',
+            standardPath: 'Device.Cell.1.DLCarrierBandWidth',
+          },
         ],
       }, {
         id: 'device-time', titleZh: '时间', titleEn: 'Time', multiInstance: false,
-        params: [{ name: 'LocalTimeZoneName', titleZh: '时区', titleEn: 'Timezone' }],
+        params: [{
+          name: 'LocalTimeZoneName', titleZh: '时区', titleEn: 'Local Time Zone',
+          standardPath: 'Device.Time.LocalTimeZoneName',
+        }],
       }],
       quickSettingFields: getParamConfigExportFields('gNB'),
       paramMappings: [{
@@ -737,7 +939,10 @@ describe('parameter config workbook', () => {
         dataType: 'STRING', changeApplies: 'Immediate', enumValues: 'aes128,aes256,3des',
         enumLabels: 'aes128,aes256,3des', isStorable: true, isActive: true,
       }],
-    });
+    };
+    const workbook = await enrichParamConfigWorkbook(
+      createParamConfigTemplateWorkbook('gNB', metadata), metadata,
+    );
     const ipsec = workbook.getWorksheet('IPSEC')!;
     const cell = workbook.getWorksheet('CELL')!;
     const encryptionColumn = ipsec.getRow(1).values.indexOf('IKE_ENCRYPTION');
@@ -764,23 +969,21 @@ describe('parameter config workbook', () => {
     expect(reopened.getWorksheet('DEVICE')?.getCell(2, timezoneColumn).dataValidation.type).toBe('list');
   });
 
-  it('includes the supported LTE and NR planning fields in generated templates', () => {
-    const lte = createParamConfigTemplateWorkbook('eNB');
-    const nr = createParamConfigTemplateWorkbook('gNB');
-    expect(XLSX.utils.sheet_to_json<unknown[]>(lte.Sheets.NETWORK, { header: 1 })[0])
-      .toEqual(['*SERIAL_NUMBER', 'WAN IP', 'NTP Enable', 'NTP Server1', 'Local Time Zone']);
-    expect(XLSX.utils.sheet_to_json<unknown[]>(nr.Sheets.IPSEC, { header: 1 })[0])
-      .toContain('LEFT_INTERFACE');
-    expect(XLSX.utils.sheet_to_json<unknown[]>(nr.Sheets.DEVICE, { header: 1 })[0])
-      .not.toContain('Time Zone Term');
-    expect(XLSX.utils.sheet_to_json<unknown[]>(nr.Sheets.INTERFACE, { header: 1 })[0])
-      .not.toContain('OMC IP');
-    expect(XLSX.utils.sheet_to_json<unknown[]>(nr.Sheets.CELL, { header: 1 })[0])
-      .toEqual(expect.arrayContaining(['PowerModify', 'OffsetToPointA', 'SsbSubcarrierOffset']));
-  });
-
-  it('uses the 5G network address-method values for Address Type', async () => {
-    const workbook = await enrichParamConfigWorkbook(createParamConfigTemplateWorkbook('gNB'));
+  it('uses the public 5G network address-method values for Address Type', async () => {
+    const metadata = {
+      deviceType: 'gNB' as const,
+      quickSettingsGroups: [{
+        id: 'gnb-network', titleZh: '网络', titleEn: 'Network', multiInstance: false,
+        params: [{
+          name: 'AddressType', titleZh: '地址类型', titleEn: 'Address Type', type: 'enum',
+          standardPath: 'Device.IP.Interface.1.AddressType',
+          enumOptions: ['DHCP', 'Static', 'DHCPv6', 'Staticv6'].map((value) => ({ value, label: value })),
+        }],
+      }],
+    };
+    const workbook = await enrichParamConfigWorkbook(
+      createParamConfigTemplateWorkbook('gNB', metadata), metadata,
+    );
     const network = workbook.getWorksheet('INTERFACE')!;
     const addressTypeColumn = network.getRow(1).values.indexOf('Address Type');
 

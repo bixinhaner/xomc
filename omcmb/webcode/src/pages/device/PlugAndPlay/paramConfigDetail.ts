@@ -113,6 +113,27 @@ function cloneSheets(sheets: ImportedSheetParameters): ImportedSheetParameters {
   ]));
 }
 
+function mergeExistingSheetCells(
+  current: ImportedSheetParameters,
+  submitted: ImportedSheetParameters,
+): ImportedSheetParameters {
+  const merged = cloneSheets(current);
+  for (const [sheetName, submittedRows] of Object.entries(submitted)) {
+    const currentRows = merged[sheetName];
+    if (!currentRows) continue;
+    submittedRows.forEach((submittedRow, rowIndex) => {
+      const currentRow = currentRows[rowIndex];
+      if (!currentRow) return;
+      for (const [header, submittedValue] of Object.entries(submittedRow)) {
+        if (Object.prototype.hasOwnProperty.call(currentRow, header)) {
+          currentRow[header] = submittedValue;
+        }
+      }
+    });
+  }
+  return merged;
+}
+
 function serialHeader(headers: readonly string[]): string | undefined {
   return headers.find((header) => (
     header.replace(/^\*/, '').replace(/[\s_]+/g, '').toLowerCase() === 'serialnumber'
@@ -136,7 +157,7 @@ export function withTemplateSheetParameters<T extends ParamConfigDetailSource>(
   );
   if (!templateSheets) return config;
 
-  const existing = sanitizeRetiredParamConfigFields(config.sheetParameters ?? {});
+  const existing = sanitizeRetiredParamConfigFields(config.sheetParameters ?? {}, config.deviceType);
   const defaults = getParamConfigTemplateDefaults(
     config.deviceType as 'eNB' | 'gNB' | 'GSM' | undefined,
   );
@@ -174,7 +195,24 @@ function setFirstSheetValue(
 ): void {
   const row = sheets[sheetName]?.[0];
   if (!row) return;
-  row[header] = valueToSet ?? '';
+  const canonical = (valueToNormalize: string): string => valueToNormalize
+    .replace(/^\*/, '')
+    .replace(/[\s_]+/g, '')
+    .toUpperCase();
+  const aliasGroups = [
+    ['DL Carrier Bandwidth', 'DLBandwidth'],
+    ['UL Carrier Bandwidth', 'ULBandwidth'],
+    ['Power Level', 'PowerModify'],
+    ['Offset To Point A', 'OffsetToPointA'],
+    ['SSB Subcarrier Offset', 'SsbSubcarrierOffset'],
+  ];
+  const requestedAliases = aliasGroups.find((aliases) => (
+    aliases.some((alias) => canonical(alias) === canonical(header))
+  )) ?? [header];
+  const actualHeader = Object.keys(row).find((candidate) => (
+    requestedAliases.some((alias) => canonical(candidate) === canonical(alias))
+  ));
+  if (actualHeader) row[actualHeader] = valueToSet ?? '';
 }
 
 function replaceSheetRows(
@@ -231,9 +269,15 @@ export function mergeParamConfigFormValues<T extends ParamConfigDetailSource>(
   }
 
   const originalForm = toParamConfigFormValues(current);
-  const sheets = sanitizeRetiredParamConfigFields(
-    cloneSheets(submitted.sheetParameters as ImportedSheetParameters),
-  );
+  // validateFields() only returns mounted Form.Item values. Imported workbooks
+  // contain product-specific sheets and columns that are intentionally not all
+  // rendered by the editor, so the imported structure must remain canonical.
+  // Only overlay cells that already exist in that structure; structured editors
+  // below handle intentional row additions/replacements.
+  const sheets = sanitizeRetiredParamConfigFields(mergeExistingSheetCells(
+    current.sheetParameters,
+    submitted.sheetParameters as ImportedSheetParameters,
+  ), current.deviceType);
   const networkParameterValues = submitted.networkParameterValues as Record<string, unknown> | undefined;
   if (networkParameterValues) {
     for (const mapping of current.workbookMappings ?? []) {
@@ -333,7 +377,7 @@ export function mergeParamConfigFormValues<T extends ParamConfigDetailSource>(
       ? submitted.plmnConfigList as Array<{ plmnId?: unknown; primary?: unknown }> | undefined
       : undefined,
   });
-  return {
+  const result = {
     ...current,
     ...submitted,
     ...refreshed,
@@ -342,6 +386,12 @@ export function mergeParamConfigFormValues<T extends ParamConfigDetailSource>(
       : {}),
     sheetParameters: sheets,
   } as T & Record<string, unknown>;
+  // networkParameterValues is transient form state reconstructed from the
+  // workbook mappings. Persisting it on a device override makes common-policy
+  // materialization convert the same public parameters into customParams,
+  // producing a second stale value on subsequent edits and executions.
+  delete result.networkParameterValues;
+  return result;
 }
 
 export function toParamConfigFormValues(
@@ -354,7 +404,8 @@ export function toParamConfigFormValues(
   const firstPlmn = plmnRows[0] ?? {};
 
   if (config.deviceType === 'gNB') {
-    const dlBandwidth = stringValue(value(cell, 'DLBandwidth'));
+    const dlBandwidth = stringValue(value(cell, 'DL Carrier Bandwidth', 'DLBandwidth'));
+    const ulBandwidth = stringValue(value(cell, 'UL Carrier Bandwidth', 'ULBandwidth'));
     const ipsecRows = sheets?.IPSEC ?? [];
     const populatedIpsecRows = ipsecRows.filter(hasMeaningfulSheetValues);
     const configuredIpsecEnable = binaryStringValue(config.IPSEC_ENABLE ?? config.ipsecEnable);
@@ -384,7 +435,7 @@ export function toParamConfigFormValues(
         nrarfcnndl: value(cell, 'NRARFCNDL'),
         nrarfcnul: value(cell, 'NRARFCNUL'),
         dlbandwidth: dlBandwidth?.replace(/\s*MHz$/i, ''),
-        duplexMode: value(cell, 'Duplex Mode'),
+        ulbandwidth: ulBandwidth?.replace(/\s*MHz$/i, ''),
         nci: value(firstPlmn, '*NCI', 'NCI'),
         tac: value(firstPlmn, '*TAC', 'TAC'),
         ranac: value(firstPlmn, '*RANAC', 'RANAC'),

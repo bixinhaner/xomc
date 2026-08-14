@@ -418,7 +418,7 @@ func TestBaiBNQWorkbookTemplateHeadersResolveAgainstProductionDefinitions(t *tes
 		"CELL": {
 			"*Serial Number", "gNB Name", "*gNB ID", "*gNB Lenth", "*PCI",
 			"SSB Frequency", "Freq BandIndicator", "NRARFCNDL", "NRARFCNUL",
-			"DLBandwidth", "ULBandwidth", "Duplex Mode", "DLAntNum", "ULAntNum",
+			"DLBandwidth", "ULBandwidth", "DLAntNum", "ULAntNum",
 			"DL ULTransmissionPeriodicity1", "Nrof DownlinkSlots1",
 			"Nrof DownlinkSymbols1", "Nrof  UplinkSlots1", "Nrof  UplinkSymbols1",
 			"DL ULTransmissionPeriodicity2", "Nrof  DownlinkSlots2",
@@ -451,10 +451,13 @@ func TestBaiBNQWorkbookTemplateHeadersResolveAgainstProductionDefinitions(t *tes
 			if _, ignored := ignoredPolicyFields[normalized]; ignored {
 				continue
 			}
-			if _, optional := optionalPlanningFields[normalized]; optional {
-				continue
+			if _, exists := aliases[normalized]; !exists {
+				assert.Contains(t, []string{
+					"prachrootsequenceindex", "prachrootsequencevalue", "sd", "sdvalue",
+					"addresstype", "ipaddress", "subnetmask", "prefixlength", "gateway",
+					"beartype", "forceencaps",
+				}, normalized, "%s.%s must either resolve or be excluded from generated templates", sheet, header)
 			}
-			assert.Contains(t, aliases, normalized, "%s.%s", sheet, header)
 		}
 	}
 }
@@ -655,7 +658,7 @@ func TestCompilePolicyParametersExpandsMultiInstanceServingPLMNList(t *testing.T
 	assert.Equal(t, "46001", byPath["Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList.2.PLMNID"])
 }
 
-func TestCompilePolicyParametersSkipsUnsupportedMLN1588PlanningFields(t *testing.T) {
+func TestCompilePolicyParametersRejectsUnsupportedMLN1588PlanningFields(t *testing.T) {
 	registry := quicksettings.NewRegistry()
 	loader := quicksettings.NewLoader(
 		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
@@ -691,10 +694,8 @@ func TestCompilePolicyParametersSkipsUnsupportedMLN1588PlanningFields(t *testing
 		"MLN",
 		registry.GetByParamModel("MLN"),
 	)
-	require.NoError(t, err)
-	require.Len(t, got.Parameters, 1)
-	assert.Equal(t, "Device.ManagementServer.tfcsManagerPrimsrc", got.Parameters[0].TRPath)
-	assert.Equal(t, "3", got.Parameters[0].Value)
+	require.Nil(t, got)
+	require.ErrorContains(t, err, "is not registered in quick settings or product parameter mappings")
 }
 
 func TestCompilePolicyParametersCompilesSupported1588PlanningFields(t *testing.T) {
@@ -878,7 +879,7 @@ func TestCompilePolicyParametersCombinesGSMIPAAndUnitID(t *testing.T) {
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
 		"paramConfigList":[{"serialNumber":"GSM-PLAN-001","sheetParameters":{"GSM":[{
 			"IPA":"6969","Unit ID":"36","Remote IP":"198.51.100.10","Bind IP":"192.0.2.20",
-			"WAN IP":"192.0.2.20","Synchronization":"GNSS","OMC":"192.0.2.100"
+			"Synchronization":"GNSS"
 		}]}}]}`)}
 	got, err := CompilePolicyParameters(policy,
 		&model.Device{SerialNumber: "GSM-PLAN-001", Technology: model.TechGSM},
@@ -1040,7 +1041,7 @@ func TestWorkbookMappingsAllowSameHeaderInDifferentSheets(t *testing.T) {
 	assert.Equal(t, "Device.Other.1.Value", aliases[normalizeParameterKey("SECOND.Enable")])
 }
 
-func TestStrictWorkbookMappingsAllowRegisteredLegacyAliasFallback(t *testing.T) {
+func TestStrictWorkbookMappingsIgnoreRegisteredLegacyAliasFallback(t *testing.T) {
 	registry := quicksettings.NewRegistry()
 	loader := quicksettings.NewLoader(
 		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
@@ -1052,20 +1053,104 @@ func TestStrictWorkbookMappingsAllowRegisteredLegacyAliasFallback(t *testing.T) 
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
 		"paramConfigList":[{
 			"serialNumber":"NR-LEGACY-ALIAS-001",
-			"sheetParameters":{"CELL":[{"*gNB ID":"12"}]},
+			"sheetParameters":{"CELL":[{"*gNB ID":"12","Mapped":"ok"}]},
 			"workbookMappings":[{
-				"sheet":"DEVICE","header":"gNB ID",
-				"trPath":"Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBId"
+				"sheet":"CELL","header":"Mapped","trPath":"Device.Custom.1.Value"
 			}]
 		}]
 	}`)}
-	got, err := CompilePolicyParameters(policy,
+	got, err := CompilePolicyParametersWithMappings(policy,
 		&model.Device{SerialNumber: "NR-LEGACY-ALIAS-001", Technology: model.TechNR},
-		"BaiBNQ", registry.GetByParamModel("BaiBNQ"))
+		"BaiBNQ", registry.GetByParamModel("BaiBNQ"), []parammodel.ParamMapping{{
+			StandardPath: "Device.Custom.{i}.Value", EntryType: "parameter",
+			Access: "READ_WRITE", DataType: "STRING", IsSupported: true,
+		}})
 	require.NoError(t, err)
 	require.Len(t, got.Parameters, 1)
-	assert.Equal(t, "Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBId", got.Parameters[0].TRPath)
-	assert.Equal(t, "12", got.Parameters[0].Value)
+	assert.Equal(t, "Device.Custom.1.Value", got.Parameters[0].TRPath)
+	assert.Equal(t, "ok", got.Parameters[0].Value)
+}
+
+func TestCompilePolicyParametersUsesMappedWorkbookValueInsteadOfDuplicateLegacyFields(t *testing.T) {
+	const bandwidthPath = "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth"
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"NR-MAPPED-001",
+			"dlbandwidth":"106",
+			"sheetParameters":{"CELL":[{
+				"DL Carrier Bandwidth":"25",
+				"DLBandwidth":"106"
+			}]},
+			"workbookMappings":[{
+				"sheet":"CELL","header":"DL Carrier Bandwidth",
+				"trPath":"Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.1.SCSSpecificCarrier.CarrierBandwidth"
+			}]
+		}]
+	}`)}
+	groups := []quicksettings.Group{{Params: []quicksettings.Param{{
+		Name: "DLCarrierBandWidth", StandardPath: bandwidthPath, Type: "U_INT",
+	}}}}
+
+	got, err := CompilePolicyParameters(policy,
+		&model.Device{SerialNumber: "NR-MAPPED-001", Technology: model.TechNR},
+		"BaiBNQ", groups)
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	assert.Equal(t, "25", got.Parameters[0].Value)
+}
+
+func TestCompilePolicyParametersPrefersMappedWorkbookValueOverDuplicateCustomParameter(t *testing.T) {
+	const ssbTemplate = "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.SsbFrequency"
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"NR-CUSTOM-DUPLICATE-001",
+			"sheetParameters":{"CELL":[{"SSB Frequency":"2324"}]},
+			"workbookMappings":[{
+				"sheet":"CELL","header":"SSB Frequency",
+				"trPath":"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.SsbFrequency"
+			}],
+			"customParams":[
+				{"trPath":"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.SsbFrequency","value":"23244232"},
+				{"trPath":"Device.Custom.1.Value","value":"custom-value"}
+			]
+		}]
+	}`)}
+	groups := []quicksettings.Group{{Params: []quicksettings.Param{
+		{Name: "SsbFrequency", StandardPath: ssbTemplate, Type: "U_INT"},
+		{Name: "CustomValue", StandardPath: "Device.Custom.{i}.Value", Type: "STRING"},
+	}}}
+
+	got, err := CompilePolicyParameters(policy,
+		&model.Device{SerialNumber: "NR-CUSTOM-DUPLICATE-001", Technology: model.TechNR},
+		"BaiBNQ", groups)
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 2)
+	byPath := make(map[string]string, len(got.Parameters))
+	for _, parameter := range got.Parameters {
+		byPath[parameter.TRPath] = parameter.Value
+	}
+	assert.Equal(t, "2324", byPath["Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.SsbFrequency"])
+	assert.Equal(t, "custom-value", byPath["Device.Custom.1.Value"])
+}
+
+func TestCompilePolicyParametersStillRejectsConflictingCustomParameters(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"NR-CUSTOM-CONFLICT-001",
+			"customParams":[
+				{"trPath":"Device.Custom.1.Value","value":"first"},
+				{"trPath":"Device.Custom.1.Value","value":"second"}
+			]
+		}]
+	}`)}
+	groups := []quicksettings.Group{{Params: []quicksettings.Param{{
+		Name: "CustomValue", StandardPath: "Device.Custom.{i}.Value", Type: "STRING",
+	}}}}
+
+	_, err := CompilePolicyParameters(policy,
+		&model.Device{SerialNumber: "NR-CUSTOM-CONFLICT-001", Technology: model.TechNR},
+		"BaiBNQ", groups)
+	require.ErrorContains(t, err, "conflicting values for Device.Custom.1.Value")
 }
 
 func TestCompilePolicyParametersRejectsConflictingMappingsForSameSheetColumn(t *testing.T) {
@@ -1089,7 +1174,7 @@ func TestCompilePolicyParametersRejectsConflictingMappingsForSameSheetColumn(t *
 	require.ErrorContains(t, err, "workbook parameter column Mapped maps to conflicting TRPaths")
 }
 
-func TestCompilePolicyParametersRejectsUnmappedWorkbookColumn(t *testing.T) {
+func TestCompilePolicyParametersIgnoresUnmappedWorkbookColumn(t *testing.T) {
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
 		"paramConfigList":[{
 			"serialNumber":"NR-CUSTOM-002",
@@ -1103,10 +1188,60 @@ func TestCompilePolicyParametersRejectsUnmappedWorkbookColumn(t *testing.T) {
 		StandardPath: "Device.Custom.{i}.Value", EntryType: "parameter",
 		Access: "READ_WRITE", DataType: "STRING", IsSupported: true,
 	}}
-	_, err := CompilePolicyParametersWithMappings(policy,
+	got, err := CompilePolicyParametersWithMappings(policy,
 		&model.Device{SerialNumber: "NR-CUSTOM-002", Technology: model.TechNR},
 		"BaiBNQ", nil, mappings)
-	require.ErrorContains(t, err, "workbook parameter column has no mapping: DEVICE.Unmapped")
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	assert.Equal(t, "Device.Custom.1.Value", got.Parameters[0].TRPath)
+	assert.Equal(t, "ok", got.Parameters[0].Value)
+}
+
+func TestCompilePolicyParametersOmitsDuplexModeForNR(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"NR-DUPLEX-001",
+			"duplexMode":"TDD",
+			"sheetParameters":{"CELL":[{"Duplex Mode":"TDD","DL Carrier Bandwidth":"106"}]},
+			"workbookMappings":[
+				{"sheet":"CELL","header":"DL Carrier Bandwidth","trPath":"Device.Radio.1.DLBandwidth"},
+				{"sheet":"CELL","header":"Duplex Mode","trPath":"Device.Unregistered.1.DuplexMode"}
+			]
+		}]
+	}`)}
+	mappings := []parammodel.ParamMapping{
+		{StandardPath: "Device.Ethernet.Interface.{i}.DuplexMode", EntryType: "parameter", Access: "READ_WRITE", DataType: "U_INT", IsSupported: true},
+		{StandardPath: "Device.Radio.{i}.DLBandwidth", EntryType: "parameter", Access: "READ_WRITE", DataType: "U_INT", IsSupported: true},
+	}
+
+	got, err := CompilePolicyParametersWithMappings(policy,
+		&model.Device{SerialNumber: "NR-DUPLEX-001", Technology: model.TechNR},
+		"BaiBNQ", nil, mappings)
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	assert.Equal(t, "Device.Radio.1.DLBandwidth", got.Parameters[0].TRPath)
+	assert.Equal(t, "106", got.Parameters[0].Value)
+}
+
+func TestCompilePolicyParametersKeepsDuplexModeForNonNR(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"LTE-DUPLEX-001",
+			"sheetParameters":{"INTERFACE":[{"Duplex Mode":1}]}
+		}]
+	}`)}
+	mappings := []parammodel.ParamMapping{{
+		StandardPath: "Device.Ethernet.Interface.1.DuplexMode", EntryType: "parameter",
+		Access: "READ_WRITE", DataType: "U_INT", IsSupported: true,
+	}}
+
+	got, err := CompilePolicyParametersWithMappings(policy,
+		&model.Device{SerialNumber: "LTE-DUPLEX-001", Technology: model.TechLTE},
+		"LTE", nil, mappings)
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	assert.Equal(t, "Device.Ethernet.Interface.1.DuplexMode", got.Parameters[0].TRPath)
+	assert.Equal(t, "1", got.Parameters[0].Value)
 }
 
 func TestCompilePolicyParametersIgnoresBlankWorkbookParameterMapping(t *testing.T) {

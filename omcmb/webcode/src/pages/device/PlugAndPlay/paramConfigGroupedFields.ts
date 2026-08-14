@@ -83,7 +83,7 @@ const ENB_STRUCTURED_FIELDS = [
 const GNB_STRUCTURED_FIELDS = [
   ...fields('CELL', [
     'gNB Name', '*gNB ID', '*gNB Lenth', '*PCI', 'SSB Frequency',
-    'Freq BandIndicator', 'NRARFCNDL', 'NRARFCNUL', 'DLBandwidth', 'Duplex Mode',
+    'Freq BandIndicator', 'NRARFCNDL', 'NRARFCNUL', 'DLBandwidth',
     'PowerModify', 'OffsetToPointA', 'SsbSubcarrierOffset',
   ]),
   ...fields('DEVICE', ['NTP Enable']),

@@ -96,6 +96,38 @@ func TestMaterializePolicyParametersExpandsCommonNetworkInstancesInListOrder(t *
 	require.Equal(t, "2001:db8::1", values["Device.Ethernet.Interface.1.VlanInterface.1.IPv6Address.1.IPAddress"])
 }
 
+func TestMaterializePolicyParametersDoesNotTurnMappedWorkbookValuesIntoCustomParameters(t *testing.T) {
+	device := model.Device{ID: uuid.New(), SerialNumber: "SN-MAPPED-1"}
+	const path = "Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.SsbFrequency"
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"commonParamConfig":{
+			"deviceType":"gNB","gnbIdLength":24,
+			"gnbIdAllocation":{"start":1,"end":10,"step":1},
+			"pciAllocation":{"start":0,"end":1007,"step":1}
+		},
+		"paramConfigList":[{
+			"serialNumber":"SN-MAPPED-1",
+			"sheetParameters":{"CELL":[{"SSB Frequency":"2324"}]},
+			"workbookMappings":[{
+				"sheet":"CELL","header":"SSB Frequency",
+				"trPath":"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.SsbFrequency"
+			}],
+			"networkParameterValues":{
+				"Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.SsbFrequency":"23244232"
+			}
+		}]
+	}`)}
+
+	materialized, err := materializePolicyParameters(policy, &device, []model.Device{device})
+	require.NoError(t, err)
+	var root map[string]any
+	require.NoError(t, json.Unmarshal(materialized.Config, &root))
+	row := mapSlice(root["paramConfigList"])[0]
+	for _, item := range mapSlice(row["customParams"]) {
+		require.NotEqual(t, path, valueString(item["trPath"]))
+	}
+}
+
 func TestMaterializePolicyParametersRemovesFieldsExcludedFromCommonConfiguration(t *testing.T) {
 	device := model.Device{ID: uuid.New(), SerialNumber: "SN-1"}
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{

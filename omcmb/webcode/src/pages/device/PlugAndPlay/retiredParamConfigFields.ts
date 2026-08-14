@@ -8,9 +8,13 @@ const RETIRED_PARAM_CONFIG_FIELDS: Record<string, readonly string[]> = {
 
 export function sanitizeRetiredParamConfigFields<T extends ParamConfigSheetRows>(
   sheets: T,
+  deviceType?: string,
 ): T {
   return Object.fromEntries(Object.entries(sheets).map(([sheetName, rows]) => {
-    const retired = RETIRED_PARAM_CONFIG_FIELDS[sheetName] ?? [];
+    const retired = [
+      ...(RETIRED_PARAM_CONFIG_FIELDS[sheetName] ?? []),
+      ...(deviceType === 'gNB' && sheetName === 'CELL' ? ['Duplex Mode'] : []),
+    ];
     if (retired.length === 0) return [sheetName, rows.map((row) => ({ ...row }))];
     return [sheetName, rows.map((row) => {
       const sanitized = { ...row };
