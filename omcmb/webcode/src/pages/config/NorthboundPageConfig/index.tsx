@@ -4352,7 +4352,8 @@ function runTriggerDescription(run: NorthboundFileRun): string {
   const triggerText = triggerReason === 'auto' || triggerReason === 'automatic' || triggerReason === 'scheduled'
     ? '自动生成记录'
     : '手动生成记录';
-  return `${run.profile_code} / ${run.group_id || run.object_code} ${triggerText}。`;
+  const subject = run.profile_code || run.object_code || '当前任务';
+  return `${subject} ${triggerText}。`;
 }
 
 function buildRunReportStatus(run: NorthboundFileRun, fallbackCapabilityName: string): ReportStatusInfo {
