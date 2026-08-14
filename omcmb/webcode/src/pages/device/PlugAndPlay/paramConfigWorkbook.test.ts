@@ -6,7 +6,6 @@ import {
   createParamConfigTemplateWorkbook,
   enrichParamConfigWorkbook,
   mergeImportedParamConfigs,
-  ParamConfigWorkbookError,
   parseParamConfigWorkbook,
   PARAM_MAPPING_SHEET,
   PARAM_TEMPLATE_EXAMPLE_SERIAL,
@@ -14,6 +13,43 @@ import {
 import { getParamConfigExportFields } from './paramConfigExportFields';
 
 describe('parameter config workbook', () => {
+  it('deduplicates columns by TRPath and keeps mapped parameters in mapping order', () => {
+    const workbook = createParamConfigWorkbook([{
+      deviceType: 'gNB',
+      serialNumber: 'SN-001',
+      sheetParameters: {
+        CELL: [{
+          '*gNB Lenth': '',
+          'Custom B': 'b',
+          'gNB ID Length': 24,
+          'Custom A': 'a',
+          '*Serial Number': 'SN-001',
+        }],
+      },
+      workbookMappings: [
+        { displayName: '标识长度', sheet: 'CELL', header: '*gNB Lenth', trPath: 'Device.Cell.GNBIDLength', source: 'system' },
+        { displayName: '标识长度', sheet: 'CELL', header: 'gNB ID Length', trPath: 'Device.Cell.GNBIDLength', source: 'system' },
+        { displayName: '参数 A', sheet: 'CELL', header: 'Custom A', trPath: 'Device.Cell.Related.A', source: 'custom' },
+        { displayName: '参数 B', sheet: 'CELL', header: 'Custom B', trPath: 'Device.Cell.Related.B', source: 'custom' },
+        { displayName: '未映射 A', sheet: 'CELL', header: 'Unmapped A', trPath: '', source: 'custom' },
+        { displayName: '未映射 B', sheet: 'CELL', header: 'Unmapped B', trPath: '', source: 'custom' },
+      ],
+    }]);
+
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.CELL, { header: 1, defval: '' });
+    const headers = rows[0] as string[];
+    expect(headers.filter((header) => ['*gNB Lenth', 'gNB ID Length'].includes(header)))
+      .toEqual(['*gNB Lenth']);
+    expect(headers.indexOf('Custom A')).toBeLessThan(headers.indexOf('Custom B'));
+    expect(rows[1][headers.indexOf('*gNB Lenth')]).toBe(24);
+    const mappingRows = XLSX.utils.sheet_to_json<Record<string, string>>(
+      workbook.Sheets[PARAM_MAPPING_SHEET],
+      { defval: '' },
+    );
+    expect(mappingRows.filter((row) => row.TRPath === '').map((row) => row['参数列名']))
+      .toEqual(['Unmapped A', 'Unmapped B']);
+  });
+
   it('creates the GSM template with spreadsheet defaults', () => {
     const workbook = createParamConfigTemplateWorkbook('GSM');
     expect(workbook.SheetNames).toEqual(['GSM']);

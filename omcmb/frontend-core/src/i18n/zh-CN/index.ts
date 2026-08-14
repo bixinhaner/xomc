@@ -4733,7 +4733,7 @@ const messages: Record<string, string> = {
   'provision.parameterConfiguration': '参数配置',
   'provision.cellActivation':         '小区激活',
   'provision.waitStartupResult':      '等待单站结果',
-  'provision.verifyOnline':           '校验设备在线',
+  'provision.verifyOnline':           '校验小区激活',
   'provision.orchestrationCompleted': '编排完成',
 
   // Add Policy Page
