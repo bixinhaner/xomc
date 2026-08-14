@@ -4,9 +4,9 @@ import { useT } from '@/hooks/useT';
 import type { ParamConfigDeviceType } from './paramConfigWorkbook';
 import GnbQuickSettingsCards, { GnbTemplateExtraFieldGrid } from './GnbQuickSettingsCards';
 import EnbQuickSettingsCards, { EnbTemplateExtraFieldGrid } from './EnbQuickSettingsCards';
-import { GSM_GROUPED_TEMPLATE_FIELDS, type TemplateFieldRef } from './paramConfigGroupedFields';
 import { GNB_COMMON_EXCLUDED_EXTRA_FIELD_IDS } from './gnbQuickSettingsFields';
 import CommonQuickSettingsNetworkCards from './CommonQuickSettingsNetworkCards';
+import PrimaryRadioInstanceEditor from './PrimaryRadioInstanceEditor';
 
 const { Text } = Typography;
 
@@ -104,28 +104,18 @@ function CustomParameters() {
   );
 }
 
-function GsmFields({ fields }: { fields: readonly TemplateFieldRef[] }) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
-      {fields.map(({ sheet, header }) => (
-        <Form.Item key={`${sheet}.${header}`} name={['sheetParameters', sheet, 0, header]} label={header.replace(/^\*/, '')}>
-          <Input />
-        </Form.Item>
-      ))}
-    </div>
-  );
-}
-
 export interface CommonParameterConfigPanelProps {
   form: FormInstance;
   deviceType?: ParamConfigDeviceType;
   paramModelName?: string;
+  productClass?: string;
   disabled?: boolean;
 }
 
 export interface ParameterConfigFieldsProps {
   deviceType?: ParamConfigDeviceType;
   paramModelName?: string;
+  productClass?: string;
   scope?: 'common' | 'device';
   onRequestEdit?: () => void;
 }
@@ -133,6 +123,7 @@ export interface ParameterConfigFieldsProps {
 export function ParameterConfigFields({
   deviceType,
   paramModelName,
+  productClass,
   scope = 'common',
   onRequestEdit,
 }: ParameterConfigFieldsProps) {
@@ -140,6 +131,9 @@ export function ParameterConfigFields({
   const commonScope = scope === 'common';
   return (
     <>
+      {deviceType && (
+        <PrimaryRadioInstanceEditor deviceType={deviceType} productClass={productClass} />
+      )}
       {deviceType === 'gNB' && (
         <>
           {commonScope && (
@@ -153,11 +147,14 @@ export function ParameterConfigFields({
           )}
           <GnbQuickSettingsCards
             excludedFieldIds={commonScope ? ['gNBId', 'PCI'] : []}
+            excludedGroupIds={['gnb-cell', 'gnb-tdd']}
             beforeIpsec={<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />}
           />
           <Card size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16 }}>
             <GnbTemplateExtraFieldGrid
-              excludedFieldIds={commonScope ? GNB_COMMON_EXCLUDED_EXTRA_FIELD_IDS : []}
+              excludedFieldIds={commonScope
+                ? [...GNB_COMMON_EXCLUDED_EXTRA_FIELD_IDS, 'PrachRootSequenceIndex', 'PrachRootSequenceValue']
+                : ['PrachRootSequenceIndex', 'PrachRootSequenceValue']}
             />
           </Card>
           <CustomParameters />
@@ -167,10 +164,11 @@ export function ParameterConfigFields({
         <>
           <EnbQuickSettingsCards
             paramModelName={paramModelName}
+            excludedGroupIds={['enb-cell']}
             beforeIpsec={<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />}
           />
           <Card size="small" title={t('provision.otherTemplateParams')} style={{ marginBottom: 16 }}>
-            <EnbTemplateExtraFieldGrid />
+            <EnbTemplateExtraFieldGrid excludedFieldIds={['CELL_NUMBER']} />
           </Card>
           <CustomParameters />
         </>
@@ -178,12 +176,6 @@ export function ParameterConfigFields({
       {deviceType === 'GSM' && (
         <>
           <CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />
-          <Card size="small" title={t('provision.gsmBasicConfig')} style={{ marginBottom: 16 }}>
-            <GsmFields fields={GSM_GROUPED_TEMPLATE_FIELDS.quickAbis} />
-          </Card>
-          <Card size="small" title={t('provision.otherParams')} style={{ marginBottom: 16 }}>
-            <GsmFields fields={GSM_GROUPED_TEMPLATE_FIELDS.other} />
-          </Card>
           <CustomParameters />
         </>
       )}
@@ -196,6 +188,7 @@ export default function CommonParameterConfigPanel({
   form,
   deviceType,
   paramModelName,
+  productClass,
   disabled = false,
 }: CommonParameterConfigPanelProps) {
   const t = useT();
@@ -210,6 +203,7 @@ export default function CommonParameterConfigPanel({
       <ParameterConfigFields
         deviceType={deviceType}
         paramModelName={paramModelName}
+        productClass={productClass}
         scope="common"
       />
     </Form>

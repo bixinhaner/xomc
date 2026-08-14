@@ -31,6 +31,7 @@ describe('parameter configuration default templates', () => {
     expect(toParamConfigDeviceType('lte')).toBe('eNB');
     expect(toParamConfigDeviceType('nr')).toBe('gNB');
     expect(toParamConfigDeviceType('gsm')).toBe('GSM');
+    expect(toParamConfigDeviceType('lte', 'BM')).toBe('GSM');
     expect(toParamConfigDeviceType(undefined)).toBeUndefined();
   });
 });

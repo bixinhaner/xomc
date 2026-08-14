@@ -377,6 +377,34 @@ describe('parameter configuration detail mapping', () => {
     });
   });
 
+  it('persists added and deleted primary radio instances without renumbering', () => {
+    const current = {
+      deviceType: 'gNB',
+      serialNumber: 'NR-MULTI-001',
+      sheetParameters: {
+        CELL: [
+          { '*Serial Number': 'NR-MULTI-001', 'Cell Index': 1, '*PCI': '10' },
+          { '*Serial Number': 'NR-MULTI-001', 'Cell Index': 3, '*PCI': '30' },
+        ],
+      },
+    };
+
+    const merged = mergeParamConfigFormValues(current, {
+      ...toParamConfigFormValues(current),
+      sheetParameters: {
+        CELL: [
+          { 'Cell Index': 3, '*PCI': '31' },
+          { 'Cell Index': 4, '*PCI': '40' },
+        ],
+      },
+    });
+
+    expect(merged.sheetParameters.CELL).toEqual([
+      { '*Serial Number': 'NR-MULTI-001', 'Cell Index': 3, '*PCI': '31' },
+      { 'Cell Index': 4, '*PCI': '40' },
+    ]);
+  });
+
   it('backfills all current 5G template fields without Duplex Mode', () => {
     const hydrated = withTemplateSheetParameters({
       deviceType: 'gNB',

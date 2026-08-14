@@ -26,6 +26,7 @@ describe('specified-device parameter editor', () => {
     expect(drawerSection).not.toContain('<GnbNetworkConfigCards');
     expect(drawerSection).not.toContain('<Collapse.Panel');
     expect(sharedPanelSource).toContain('export function ParameterConfigFields');
+    expect(sharedPanelSource).toContain('<PrimaryRadioInstanceEditor deviceType={deviceType} productClass={productClass} />');
     expect(sharedPanelSource).toContain('<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />');
   });
 
@@ -37,7 +38,7 @@ describe('specified-device parameter editor', () => {
 
   it('offers a per-device download for the latest edited workbook', () => {
     expect(pageSource).toContain('handleDownloadParamConfig(record)');
-    expect(pageSource).toContain('createParamConfigWorkbook([record])');
+    expect(pageSource).toContain('createParamConfigWorkbook([record], { productClass })');
     expect(pageSource).not.toContain('withTemplateSheetParameters(record)');
     expect(pageSource).toContain("{t('common.download')}");
   });

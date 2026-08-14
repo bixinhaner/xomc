@@ -110,9 +110,11 @@ function IpsecListCard() {
 
 export default function EnbQuickSettingsCards({
   paramModelName,
+  excludedGroupIds = [],
   beforeIpsec,
 }: {
   paramModelName?: string;
+  excludedGroupIds?: string[];
   beforeIpsec?: ReactNode;
 }) {
   const t = useT();
@@ -144,6 +146,7 @@ export default function EnbQuickSettingsCards({
   return (
     <>
       {resolvedGroups
+        .filter((group) => !excludedGroupIds.includes(group.id))
         .filter((group) => group.id !== 'device-ipsec' || isIpsecParametersVisible(ipsecEnable))
         .map((group) => (
         <Fragment key={group.id}>
@@ -172,6 +175,10 @@ export default function EnbQuickSettingsCards({
   );
 }
 
-export function EnbTemplateExtraFieldGrid() {
-  return <GnbQuickSettingFieldGrid fields={ENB_TEMPLATE_EXTRA_FIELDS} />;
+export function EnbTemplateExtraFieldGrid({
+  excludedFieldIds = [],
+}: {
+  excludedFieldIds?: readonly string[];
+}) {
+  return <GnbQuickSettingFieldGrid fields={ENB_TEMPLATE_EXTRA_FIELDS.filter((field) => !excludedFieldIds.includes(field.id))} />;
 }

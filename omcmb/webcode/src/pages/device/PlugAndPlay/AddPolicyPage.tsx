@@ -94,7 +94,7 @@ import { getPolicySubmitAvailability } from './policySubmitAvailability';
 import ProductClassSelect from './components/ProductClassSelect';
 import PolicyReadOnlySection from './components/PolicyReadOnlySection';
 import CommonParameterConfigPanel, { ParameterConfigFields } from './CommonParameterConfigPanel';
-import { sanitizeCommonParamConfig } from './commonParameterConfig';
+import { sanitizeCommonParamConfig, withInitialCommonRadioInstance } from './commonParameterConfig';
 import { buildParamConfigListPolicyUpdate } from './paramConfigPersistence';
 
 const { Text, Title } = Typography;
@@ -606,6 +606,14 @@ export default function AddPolicyPage() {
     (item) => item.name.trim().toLowerCase() === productName.trim().toLowerCase(),
   );
   const productClass = resolveProductClassForName(productName, productCatalog?.items);
+  // A literal southbound ProductClass (for example FAP/PGSM) does not always
+  // identify the UI instance model. Include the catalog/model names so GSM
+  // BSC workbooks and editors can select BTS Index instead of Cell Index.
+  const radioInstanceProductIdentity = [
+    productClass,
+    selectedProduct?.name,
+    selectedProduct?.paramModelName,
+  ].filter(Boolean).join(' ');
   const { data: productDevicesData, isLoading: actualVersionsLoading } = useDeviceList(
     {
       page: 1,
@@ -629,23 +637,31 @@ export default function AddPolicyPage() {
     data: productMatchData,
   } = useProductMatch(selectedProduct?.id ? '' : productClass);
   const activeParamDeviceType = useMemo<ParamConfigDeviceType | undefined>(
-    () => toParamConfigDeviceType(selectedProduct?.tech ?? productMatchData?.product?.tech),
-    [productMatchData, selectedProduct?.tech],
+    () => toParamConfigDeviceType(
+      selectedProduct?.tech ?? productMatchData?.product?.tech,
+      selectedProduct?.paramModelName,
+    ),
+    [productMatchData, selectedProduct?.paramModelName, selectedProduct?.tech],
   );
   useEffect(() => {
     if (!activeParamDeviceType || functionModule !== '2') return;
-    const current = commonConfigForm.getFieldsValue(true);
     const saved = persistedPolicy?.config?.commonParamConfig;
-    commonConfigForm.setFieldsValue({
+    const initial = {
       deviceType: activeParamDeviceType,
       ...(saved && typeof saved === 'object' ? saved : {}),
-      ...(activeParamDeviceType === 'gNB' && !current.gnbIdAllocation && !saved ? {
+      ...(activeParamDeviceType === 'gNB' && !saved ? {
         gnbIdAllocation: { start: 1, end: 16_777_215, step: 1, reserved: [] },
         pciAllocation: { start: 0, end: 1007, step: 1, reserved: [] },
         gnbIdLength: 24,
       } : {}),
-    });
-  }, [activeParamDeviceType, commonConfigForm, functionModule, persistedPolicy]);
+    };
+    commonConfigForm.resetFields();
+    commonConfigForm.setFieldsValue(withInitialCommonRadioInstance(
+      initial,
+      activeParamDeviceType,
+      radioInstanceProductIdentity,
+    ));
+  }, [activeParamDeviceType, commonConfigForm, functionModule, persistedPolicy, radioInstanceProductIdentity]);
   const matchedProductId = selectedProduct?.id ?? productMatchData?.product?.id;
   const {
     data: licenseData,
@@ -863,18 +879,18 @@ export default function AddPolicyPage() {
       : [{ groups: [] }, { items: [] }];
     const safeSerialNumber = record.serialNumber.replace(/[\\/:*?"<>|]+/g, '_');
     await writeParamConfigWorkbookFile(
-      createParamConfigWorkbook([record]),
+      createParamConfigWorkbook([record], { productClass }),
       `${safeSerialNumber}-${t('provision.paramConfigExportFileSuffix')}.xlsx`,
       {
         deviceType: record.deviceType as ParamConfigDeviceType,
-        productClass,
+        productClass: radioInstanceProductIdentity,
         quickSettingsGroups: quickSettings.groups,
         paramMappings: mappings.items,
         quickSettingFields: getParamConfigExportFields(record.deviceType as ParamConfigDeviceType),
       },
     );
     void message.success(t('provision.paramConfigExportSuccess', { count: 1 }));
-  }, [productClass, selectedProduct?.paramModelName, t]);
+  }, [productClass, radioInstanceProductIdentity, selectedProduct?.paramModelName, t]);
 
   const handleDeleteParamConfig = useCallback(async (record: ParamConfig) => {
     const previous = paramConfigList;
@@ -1078,14 +1094,16 @@ export default function AddPolicyPage() {
         paramModelApi.listMappings(paramModelName),
       ])
       : [{ groups: [] }, { items: [] }];
-    const workbook = createParamConfigWorkbook(filteredParamConfigList);
+    const workbook = createParamConfigWorkbook(filteredParamConfigList, {
+      productClass: radioInstanceProductIdentity,
+    });
     const safeProductClass = (productClass || 'parameter-config').replace(/[\\/:*?"<>|]+/g, '_');
     await writeParamConfigWorkbookFile(
       workbook,
       `${safeProductClass}-${t('provision.paramConfigExportFileSuffix')}.xlsx`,
       {
         deviceType: activeParamDeviceType,
-        productClass,
+        productClass: radioInstanceProductIdentity,
         quickSettingsGroups: quickSettings.groups,
         paramMappings: mappings.items,
         quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
@@ -1094,7 +1112,7 @@ export default function AddPolicyPage() {
     void message.success(t('provision.paramConfigExportSuccess', {
       count: filteredParamConfigList.length,
     }));
-  }, [activeParamDeviceType, filteredParamConfigList, productClass, selectedProduct?.paramModelName, t]);
+  }, [activeParamDeviceType, filteredParamConfigList, productClass, radioInstanceProductIdentity, selectedProduct?.paramModelName, t]);
 
   const handleDownloadParamConfigTemplate = useCallback(async () => {
     if (!productClass) {
@@ -1116,7 +1134,7 @@ export default function AddPolicyPage() {
     await writeParamConfigWorkbookFile(
       createParamConfigTemplateWorkbook(activeParamDeviceType, {
         deviceType: activeParamDeviceType,
-        productClass,
+        productClass: radioInstanceProductIdentity,
         quickSettingsGroups: quickSettings.groups,
         paramMappings: mappings.items,
         quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
@@ -1124,14 +1142,14 @@ export default function AddPolicyPage() {
       `${productClass.replace(/[\\/:*?"<>|]+/g, '_')}-${t('provision.paramConfigExportFileSuffix')}.xlsx`,
       {
         deviceType: activeParamDeviceType,
-        productClass,
+        productClass: radioInstanceProductIdentity,
         quickSettingsGroups: quickSettings.groups,
         paramMappings: mappings.items,
         quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
       },
     );
     void message.success(t('provision.paramConfigTemplateDownloaded'));
-  }, [activeParamDeviceType, productClass, selectedProduct?.paramModelName, t]);
+  }, [activeParamDeviceType, productClass, radioInstanceProductIdentity, selectedProduct?.paramModelName, t]);
 
   const handleOpenParamConfigImport = useCallback(() => {
     if (!productClass) {
@@ -1185,7 +1203,7 @@ export default function AddPolicyPage() {
         importedAt,
         {
           deviceType: activeParamDeviceType,
-          productClass,
+          productClass: radioInstanceProductIdentity,
           quickSettingsGroups: quickSettings.groups,
           paramMappings: mappings.items,
           quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
@@ -1229,7 +1247,7 @@ export default function AddPolicyPage() {
       }
       setImportPreviewError(t('provision.paramConfigImportFailed'));
     }
-  }, [activeParamDeviceType, paramConfigList, selectedProduct?.paramModelName, t]);
+  }, [activeParamDeviceType, paramConfigList, radioInstanceProductIdentity, selectedProduct?.paramModelName, t]);
 
   const applyImportConfig = useCallback(() => {
     if (pendingImportedConfigs.length === 0 || importPreview.some((item) => item.action === 'duplicate')) {
@@ -1511,6 +1529,7 @@ export default function AddPolicyPage() {
                   form={commonConfigForm}
                   deviceType={activeParamDeviceType}
                   paramModelName={selectedProduct?.paramModelName}
+                  productClass={radioInstanceProductIdentity}
                   disabled={isView || !paramConfigToolbarEnabled}
                 />
               </div>
@@ -1770,6 +1789,7 @@ export default function AddPolicyPage() {
           <ParameterConfigFields
             deviceType={currentConfig?.deviceType as ParamConfigDeviceType | undefined}
             paramModelName={selectedProduct?.paramModelName}
+            productClass={radioInstanceProductIdentity}
             scope="device"
             onRequestEdit={() => setConfigDetailMode('edit')}
           />

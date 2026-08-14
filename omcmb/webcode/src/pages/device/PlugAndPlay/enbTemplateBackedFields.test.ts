@@ -19,8 +19,8 @@ describe('eNB parameter editor', () => {
   it('uses the LTE quick-settings cards and puts template extensions after them', () => {
     expect(enbSection).toContain('<EnbQuickSettingsCards');
     expect(enbSection).toContain('<CommonQuickSettingsNetworkCards paramModelName={paramModelName} onRequestEdit={onRequestEdit} />');
-    expect(enbSection).toContain('<EnbTemplateExtraFieldGrid />');
-    expect(enbSection.indexOf('<EnbTemplateExtraFieldGrid />'))
+    expect(enbSection).toContain("<EnbTemplateExtraFieldGrid excludedFieldIds={['CELL_NUMBER']} />");
+    expect(enbSection.indexOf("<EnbTemplateExtraFieldGrid excludedFieldIds={['CELL_NUMBER']} />"))
       .toBeGreaterThan(enbSection.indexOf('<EnbQuickSettingsCards'));
   });
 

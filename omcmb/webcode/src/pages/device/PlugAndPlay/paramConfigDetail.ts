@@ -116,9 +116,29 @@ function cloneSheets(sheets: ImportedSheetParameters): ImportedSheetParameters {
 function mergeExistingSheetCells(
   current: ImportedSheetParameters,
   submitted: ImportedSheetParameters,
+  replacedSheets: ReadonlySet<string> = new Set(),
 ): ImportedSheetParameters {
   const merged = cloneSheets(current);
   for (const [sheetName, submittedRows] of Object.entries(submitted)) {
+    if (replacedSheets.has(sheetName)) {
+      const currentRows = current[sheetName] ?? [];
+      const controlHeaders = ['Cell Index', '*CELL_NUMBER', 'BTS Index'];
+      merged[sheetName] = submittedRows.map((submittedRow, rowIndex) => {
+        const controlHeader = controlHeaders.find((header) => submittedRow[header] !== undefined);
+        const currentRow = controlHeader
+          ? currentRows.find((row) => Number(row[controlHeader]) === Number(submittedRow[controlHeader]))
+          : currentRows[rowIndex];
+        if (!currentRow) return { ...submittedRow };
+        const next = { ...currentRow };
+        for (const [header, submittedValue] of Object.entries(submittedRow)) {
+          if (Object.prototype.hasOwnProperty.call(currentRow, header) || controlHeaders.includes(header)) {
+            next[header] = submittedValue;
+          }
+        }
+        return next;
+      });
+      continue;
+    }
     const currentRows = merged[sheetName];
     if (!currentRows) continue;
     submittedRows.forEach((submittedRow, rowIndex) => {
@@ -274,9 +294,11 @@ export function mergeParamConfigFormValues<T extends ParamConfigDetailSource>(
   // rendered by the editor, so the imported structure must remain canonical.
   // Only overlay cells that already exist in that structure; structured editors
   // below handle intentional row additions/replacements.
+  const primarySheet = current.deviceType === 'GSM' ? 'GSM' : 'CELL';
   const sheets = sanitizeRetiredParamConfigFields(mergeExistingSheetCells(
     current.sheetParameters,
     submitted.sheetParameters as ImportedSheetParameters,
+    new Set([primarySheet]),
   ), current.deviceType);
   const networkParameterValues = submitted.networkParameterValues as Record<string, unknown> | undefined;
   if (networkParameterValues) {

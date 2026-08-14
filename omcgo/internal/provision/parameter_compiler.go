@@ -124,6 +124,11 @@ var servingPLMNPattern = regexp.MustCompile(`^\d{5,6}$`)
 var ignoredPolicyFields = map[string]struct{}{
 	"id": {}, "devicetype": {}, "serialnumber": {}, "updatedby": {}, "updatedat": {},
 	"sheetparameters": {}, "customparams": {}, "amflist": {}, "plmnconfiglist": {},
+	// Workbook instance-control columns select concrete TR-069 object instances.
+	// They are metadata, not parameters to be sent to the device.
+	"cellindex": {}, "cellnumber": {}, "btsindex": {}, "plmnindex": {},
+	"neighborindex": {}, "carrierindex": {}, "trxindex": {},
+	"interfaceindex": {}, "tunnelindex": {},
 	// Removed Plug-and-Play planning fields. Ignore historical policy values so
 	// they cannot be resolved through a product-specific alias and downlinked.
 	"timezoneterm": {}, "omcip": {},
@@ -177,6 +182,10 @@ func CompilePolicyParametersWithMappings(
 		return nil, &ConfigValidationError{Message: fmt.Sprintf(
 			"policy has no parameter configuration for device %s", device.SerialNumber)}
 	}
+	if len(selected) > 1 {
+		return nil, &ConfigValidationError{Message: fmt.Sprintf(
+			"policy has multiple top-level parameter configurations for device %s", device.SerialNumber)}
+	}
 
 	definitions, aliases := buildParameterDefinitions(groups, mappings)
 	networkType, defaultVersion := networkProfile(device, paramModel)
@@ -191,8 +200,10 @@ func CompilePolicyParametersWithMappings(
 		if err != nil {
 			return nil, err
 		}
-		cellIndex := rowIndex + 1
-		hasSheetData, err := compileSheetParameters(compileRow, definitions, rowAliases, cellIndex, omitDuplexMode, compiled)
+		cellIndex := 1
+		hasSheetData, err := compileSheetParameters(
+			compileRow, definitions, rowAliases, cellIndex, networkType, omitDuplexMode, compiled,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -215,12 +226,14 @@ func CompilePolicyParametersWithMappings(
 				continue
 			}
 			if err := compileValue(key, raw, "page", fmt.Sprintf("paramConfigList[%d].%s", rowIndex, key),
-				cellIndex, 1, definitions, aliases, compiled); err != nil {
+				cellIndex, 1, networkType, definitions, aliases, compiled); err != nil {
 				return nil, err
 			}
 		}
 		if !hasAuthoritativeWorkbook {
-			if err := compileListValues(compileRow, rowIndex, cellIndex, definitions, aliases, compiled); err != nil {
+			if err := compileListValues(
+				compileRow, rowIndex, cellIndex, networkType, definitions, aliases, compiled,
+			); err != nil {
 				return nil, err
 			}
 		}
@@ -527,6 +540,7 @@ func compileSheetParameters(
 	definitions map[string]parameterDefinition,
 	aliases map[string]string,
 	defaultCell int,
+	networkType string,
 	omitDuplexMode bool,
 	compiled map[string]ResolvedParameter,
 ) (bool, error) {
@@ -536,8 +550,22 @@ func compileSheetParameters(
 	}
 	strictWorkbookMappings := len(mapSlice(row["workbookMappings"])) > 0
 	for sheetName, rawRows := range sheets {
-		for rowIndex, sheetRow := range mapSlice(rawRows) {
-			cellIndex := defaultCell + rowIndex
+		seenPrimary := make(map[int]struct{})
+		sheetRows := mapSlice(rawRows)
+		for rowIndex, sheetRow := range sheetRows {
+			cellIndex, listIndex, err := workbookRowInstances(
+				sheetName, sheetRow, rowIndex, len(sheetRows), defaultCell, networkType,
+			)
+			if err != nil {
+				return true, err
+			}
+			if isPrimaryInstanceSheet(sheetName, networkType) {
+				if _, duplicate := seenPrimary[cellIndex]; duplicate {
+					return true, &ConfigValidationError{Message: fmt.Sprintf(
+						"duplicate primary instance %d in %s", cellIndex, sheetName)}
+				}
+				seenPrimary[cellIndex] = struct{}{}
+			}
 			handled := make(map[string]struct{})
 			ipa, hasIPA := valueByNormalizedKey(sheetRow, "ipa")
 			unitID, hasUnitID := valueByNormalizedKey(sheetRow, "unitid")
@@ -546,7 +574,7 @@ func compileSheetParameters(
 					strings.Contains(definitions[id].Template, "DeviceGSM.Bts.{i}")) {
 					if err := compileValue("IPAUnitID", fmt.Sprintf("%s-%s", valueString(ipa), valueString(unitID)),
 						"import", fmt.Sprintf("%s[%d].IPAUnitID", sheetName, rowIndex+1),
-						cellIndex, rowIndex+1, definitions, aliases, compiled); err != nil {
+						cellIndex, listIndex, networkType, definitions, aliases, compiled); err != nil {
 						return true, err
 					}
 					handled["ipa"] = struct{}{}
@@ -579,13 +607,77 @@ func compileSheetParameters(
 				}
 				if err := compileValue(compileKey, value, "import",
 					fmt.Sprintf("%s[%d].%s", sheetName, rowIndex+1, header),
-					cellIndex, rowIndex+1, definitions, aliases, compiled); err != nil {
+					cellIndex, listIndex, networkType, definitions, aliases, compiled); err != nil {
 					return true, err
 				}
 			}
 		}
 	}
 	return true, nil
+}
+
+func workbookRowInstances(
+	sheetName string,
+	row map[string]any,
+	rowIndex, rowCount, defaultPrimary int,
+	networkType string,
+) (int, int, error) {
+	primary := defaultPrimary
+	primaryValue, hasPrimary := firstNormalizedValue(row, "cellindex", "cellnumber", "btsindex")
+	if hasPrimary && strings.TrimSpace(valueString(primaryValue)) != "" {
+		parsed, err := positiveInstanceIndex(primaryValue)
+		if err != nil {
+			return 0, 0, &ConfigValidationError{Message: fmt.Sprintf(
+				"invalid primary instance in %s[%d]: %v", sheetName, rowIndex+1, err)}
+		}
+		primary = parsed
+	} else if isPrimaryInstanceSheet(sheetName, networkType) && rowCount > 1 {
+		return 0, 0, &ConfigValidationError{Message: fmt.Sprintf(
+			"%s[%d] requires an explicit instance index", sheetName, rowIndex+1)}
+	}
+
+	listIndex := rowIndex + 1
+	if raw, ok := firstNormalizedValue(
+		row, "plmnindex", "neighborindex", "carrierindex", "trxindex", "interfaceindex", "tunnelindex",
+	); ok && strings.TrimSpace(valueString(raw)) != "" {
+		parsed, err := positiveInstanceIndex(raw)
+		if err != nil {
+			return 0, 0, &ConfigValidationError{Message: fmt.Sprintf(
+				"invalid child instance in %s[%d]: %v", sheetName, rowIndex+1, err)}
+		}
+		listIndex = parsed
+	}
+	return primary, listIndex, nil
+}
+
+func firstNormalizedValue(values map[string]any, wanted ...string) (any, bool) {
+	for _, key := range wanted {
+		if value, exists := valueByNormalizedKey(values, key); exists {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func positiveInstanceIndex(raw any) (int, error) {
+	text := strings.TrimSpace(valueString(raw))
+	value, err := strconv.Atoi(text)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("instance index must be a positive integer, got %q", text)
+	}
+	return value, nil
+}
+
+func isPrimaryInstanceSheet(sheetName, networkType string) bool {
+	normalized := normalizeParameterKey(sheetName)
+	switch networkType {
+	case "NR", "LTE":
+		return normalized == "cell"
+	case "GSM":
+		return normalized == "gsm" || normalized == "gsmbts"
+	default:
+		return false
+	}
 }
 
 func valueByNormalizedKey(values map[string]any, wanted string) (any, bool) {
@@ -600,6 +692,7 @@ func valueByNormalizedKey(values map[string]any, wanted string) (any, bool) {
 func compileListValues(
 	row map[string]any,
 	rowIndex, cellIndex int,
+	networkType string,
 	definitions map[string]parameterDefinition,
 	aliases map[string]string,
 	compiled map[string]ResolvedParameter,
@@ -608,7 +701,7 @@ func compileListValues(
 		if value := item["amfIp"]; valueString(value) != "" {
 			if err := compileValue("AmfIP1", value, "page",
 				fmt.Sprintf("paramConfigList[%d].amfList[%d].amfIp", rowIndex, index),
-				cellIndex, index+1, definitions, aliases, compiled); err != nil {
+				cellIndex, index+1, networkType, definitions, aliases, compiled); err != nil {
 				return err
 			}
 		}
@@ -635,7 +728,7 @@ func compileListValues(
 				return &ConfigValidationError{Message: fmt.Sprintf(
 					"serving PLMN list exceeds maximum %d", *definition.MaxValue)}
 			}
-			path, err := resolveInstancePath(definition.Template, cellIndex, 1)
+			path, err := resolveInstancePath(definition.Template, cellIndex, 1, networkType)
 			if err != nil {
 				return &ConfigValidationError{Message: fmt.Sprintf(
 					"ExistPlmnidList at paramConfigList[%d].plmnConfigList: %v", rowIndex, err)}
@@ -654,7 +747,7 @@ func compileListValues(
 		if value := item["plmnId"]; valueString(value) != "" {
 			if err := compileValue("PLMNID", value, "page",
 				fmt.Sprintf("paramConfigList[%d].plmnConfigList[%d].plmnId", rowIndex, index),
-				cellIndex, index+1, definitions, aliases, compiled); err != nil {
+				cellIndex, index+1, networkType, definitions, aliases, compiled); err != nil {
 				return err
 			}
 		}
@@ -714,6 +807,7 @@ func compileValue(
 	raw any,
 	source, location string,
 	cellIndex, listIndex int,
+	networkType string,
 	definitions map[string]parameterDefinition,
 	aliases map[string]string,
 	compiled map[string]ResolvedParameter,
@@ -739,7 +833,7 @@ func compileValue(
 	if err != nil {
 		return &ConfigValidationError{Message: fmt.Sprintf("%s at %s: %v", id, location, err)}
 	}
-	path, err := resolveInstancePath(definition.Template, cellIndex, listIndex)
+	path, err := resolveInstancePath(definition.Template, cellIndex, listIndex, networkType)
 	if err != nil {
 		return &ConfigValidationError{Message: fmt.Sprintf("%s at %s: %v", id, location, err)}
 	}
@@ -765,14 +859,24 @@ func putResolved(target map[string]ResolvedParameter, value ResolvedParameter) e
 	return nil
 }
 
-func resolveInstancePath(template string, cellIndex, listIndex int) (string, error) {
+func resolveInstancePath(template string, cellIndex, listIndex int, networkType string) (string, error) {
 	path := template
+	fapServiceIndex := 1
+	if networkType == "LTE" {
+		fapServiceIndex = cellIndex
+	}
 	replacements := []struct {
 		pattern string
 		value   int
 	}{
-		{"FAPService.{i}", 1},
+		{"FAPService.{i}", fapServiceIndex},
 		{"CellConfig.{i}", cellIndex},
+		{"NeighborList.NRCell.{i}", listIndex},
+		{"NeighborList.LTECell.{i}", listIndex},
+		{"Neighbor4G.{i}", listIndex},
+		{"Neighbor2G.{i}", listIndex},
+		{"InterFreq.Carrier.{i}", listIndex},
+		{"Trx.{i}", listIndex},
 		{"AMFPoolConfigParam.{i}", listIndex},
 		{"ScsSpecificCarrierList.{i}", 1},
 		{"MultiFrequencyBandListNRSIB.{i}", 1},

@@ -106,6 +106,10 @@ export interface ParamConfigWorkbookMetadata {
 export const PARAM_MAPPING_SHEET = '参数映射';
 export const PARAM_TEMPLATE_EXAMPLE_SERIAL = 'EXAMPLE-SN-001';
 const PARAM_MAPPING_HEADERS = ['页面显示名称', '数据工作表', '参数列名', 'TRPath', '来源', '说明'] as const;
+const PRIMARY_INSTANCE_CANONICAL_HEADERS = new Set(['CELLINDEX', 'CELLNUMBER', 'BTSINDEX']);
+const CHILD_INSTANCE_CANONICAL_HEADERS = new Set([
+  'PLMNINDEX', 'NEIGHBORINDEX', 'CARRIERINDEX', 'TRXINDEX', 'INTERFACEINDEX', 'TUNNELINDEX',
+]);
 
 interface DynamicTemplateField {
   sheet: string;
@@ -288,9 +292,11 @@ function appendParameterMappingSheet(
   ));
   const seen = new Set<string>();
   const dynamicFields = uniqueDynamicTemplateFields(metadata);
-  const rows: string[][] = dynamicFields.length > 0 ? dynamicFields.map((field) => [
+  const rows: string[][] = dynamicFields.length > 0 ? dynamicFields
+    .filter((field) => !isInstanceControlHeader(field.header))
+    .map((field) => [
     field.displayName, field.sheet, field.header, field.trPath, '系统预置', '当前产品即插即用页面字段映射',
-  ]) : (metadata.quickSettingsGroups ?? [])
+    ]) : (metadata.quickSettingsGroups ?? [])
     .filter((group) => !/(?:dscp|static-route)/i.test(group.id))
     .flatMap((group) => group.params)
     .filter((param) => !param.readonly)
@@ -510,6 +516,47 @@ function canonicalHeader(value: unknown): string {
     .toUpperCase();
 }
 
+function isInstanceControlHeader(value: unknown): boolean {
+  const canonical = canonicalHeader(value);
+  return PRIMARY_INSTANCE_CANONICAL_HEADERS.has(canonical)
+    || CHILD_INSTANCE_CANONICAL_HEADERS.has(canonical);
+}
+
+export function primaryInstanceHeader(
+  deviceType: ParamConfigDeviceType,
+  sheetName: string,
+  productClass?: string,
+): string | undefined {
+  const sheet = canonicalHeader(sheetName);
+  if (deviceType === 'gNB' && sheet === 'CELL') return 'Cell Index';
+  if (deviceType === 'eNB' && sheet === 'CELL') return '*CELL_NUMBER';
+  if (deviceType === 'GSM' && (sheet === 'GSM' || sheet === 'GSMBTS')) {
+    return /(?:^|[^A-Z])BSC(?:[^A-Z]|$)/i.test(productClass ?? '') ? 'BTS Index' : 'Cell Index';
+  }
+  return undefined;
+}
+
+function rowPrimaryInstance(row: Record<string, unknown>): unknown {
+  const header = Object.keys(row).find((key) => PRIMARY_INSTANCE_CANONICAL_HEADERS.has(canonicalHeader(key)));
+  return header ? row[header] : undefined;
+}
+
+function withExplicitPrimaryInstances(
+  rows: Array<Record<string, unknown>>,
+  deviceType: ParamConfigDeviceType | undefined,
+  sheetName: string,
+  productClass?: string,
+): Array<Record<string, unknown>> {
+  if (!deviceType) return rows;
+  const header = primaryInstanceHeader(deviceType, sheetName, productClass);
+  if (!header) return rows;
+  return rows.map((row, index) => (
+    rowPrimaryInstance(row) === undefined || String(rowPrimaryInstance(row) ?? '').trim() === ''
+      ? { [header]: index + 1, ...row }
+      : row
+  ));
+}
+
 function appendPreservedParameterMappingSheet(
   workbook: XLSX.WorkBook,
   configs: readonly ParamConfigSpreadsheetRow[],
@@ -581,12 +628,15 @@ function mappedWorkbookRow(
     .filter((mapping) => canonicalHeader(mapping.sheet) === canonicalHeader(sheetName))
     .map((mapping) => canonicalHeader(mapping.header)));
   return Object.fromEntries(Object.entries(row).filter(([header]) => (
-    canonicalHeader(header) === 'SERIALNUMBER' || mappedHeaders.has(canonicalHeader(header))
+    canonicalHeader(header) === 'SERIALNUMBER'
+      || isInstanceControlHeader(header)
+      || mappedHeaders.has(canonicalHeader(header))
   )));
 }
 
 export function createParamConfigWorkbook(
   configs: readonly ParamConfigSpreadsheetRow[],
+  metadata?: Pick<ParamConfigWorkbookMetadata, 'productClass'>,
 ): XLSX.WorkBook {
   const sourceSheetNames = Array.from(new Set(
     configs.flatMap((config) => Object.keys(config.sheetParameters ?? {})),
@@ -594,8 +644,11 @@ export function createParamConfigWorkbook(
   if (sourceSheetNames.length > 0) {
     const workbook = XLSX.utils.book_new();
     for (const sheetName of sourceSheetNames) {
-      const rows = configs.flatMap((config) => (
-        sanitizeRetiredParamConfigFields(config.sheetParameters ?? {}, config.deviceType)[sheetName] ?? []
+      const rows = configs.flatMap((config) => withExplicitPrimaryInstances(
+        sanitizeRetiredParamConfigFields(config.sheetParameters ?? {}, config.deviceType)[sheetName] ?? [],
+        config.deviceType,
+        sheetName,
+        metadata?.productClass,
       ).map((row) => rowWithExplicitSerialNumber(
         mappedWorkbookRow(config, sheetName, row),
         config.serialNumber,
@@ -647,10 +700,18 @@ export function createParamConfigTemplateWorkbook(
   const sheetNames = Array.from(new Set(dynamicFields.map((field) => field.sheet)));
   for (const sheetName of sheetNames) {
     const fields = dynamicFields.filter((field) => field.sheet === sheetName);
-    const headers = ['Serial Number', ...fields.map((field) => field.header)];
+    const instanceHeader = primaryInstanceHeader(deviceType, sheetName, metadata?.productClass);
+    const fieldHeaders = fields.map((field) => field.header)
+      .filter((header) => !isInstanceControlHeader(header));
+    const headers = ['Serial Number', ...(instanceHeader ? [instanceHeader] : []), ...fieldHeaders];
     const worksheet = XLSX.utils.aoa_to_sheet([
       headers,
-      [PARAM_TEMPLATE_EXAMPLE_SERIAL, ...fields.map((field) => field.defaultValue)],
+      [
+        PARAM_TEMPLATE_EXAMPLE_SERIAL,
+        ...(instanceHeader ? [1] : []),
+        ...fields.filter((field) => !isInstanceControlHeader(field.header))
+          .map((field) => field.defaultValue),
+      ],
     ]);
     worksheet['!cols'] = headers.map((header) => ({
       wch: Math.min(Math.max(header.length + 2, 16), 38),
@@ -762,15 +823,60 @@ export function parseParamConfigWorkbook(
     throw new ParamConfigWorkbookError('missing_columns', undefined, PARAM_MAPPING_SHEET);
   }
   if (workbookMappings.length === 0) {
-    return parseGeneratedUnmappedTemplateWorkbook(workbook, deviceType, importedAt);
+    return validatePrimaryInstanceRows(
+      parseGeneratedUnmappedTemplateWorkbook(workbook, deviceType, importedAt),
+      deviceType,
+      metadata?.productClass,
+    );
   }
-  return parseMappedTemplateWorkbook(
-    workbook,
-    workbookMappings,
+  return validatePrimaryInstanceRows(
+    parseMappedTemplateWorkbook(
+      workbook,
+      workbookMappings,
+      deviceType,
+      importedAt,
+      metadata,
+    ),
     deviceType,
-    importedAt,
-    metadata,
+    metadata?.productClass,
   );
+}
+
+function validatePrimaryInstanceRows(
+  configs: ParamConfigSpreadsheetRow[],
+  deviceType: ParamConfigDeviceType,
+  productClass?: string,
+): ParamConfigSpreadsheetRow[] {
+  for (const config of configs) {
+    for (const [sheetName, rows] of Object.entries(config.sheetParameters ?? {})) {
+      const expectedHeader = primaryInstanceHeader(deviceType, sheetName, productClass);
+      if (!expectedHeader || rows.length === 0) continue;
+      const expectedCanonical = canonicalHeader(expectedHeader);
+      const seen = new Set<number>();
+      rows.forEach((row, rowIndex) => {
+        const suppliedPrimaryHeader = Object.keys(row).find((header) => (
+          PRIMARY_INSTANCE_CANONICAL_HEADERS.has(canonicalHeader(header))
+        ));
+        if (suppliedPrimaryHeader && canonicalHeader(suppliedPrimaryHeader) !== expectedCanonical) {
+          throw new ParamConfigWorkbookError('invalid_row', rowIndex + 2, `${sheetName}.${expectedHeader}`);
+        }
+        const actualHeader = Object.keys(row).find((header) => canonicalHeader(header) === expectedCanonical);
+        if (!actualHeader || String(row[actualHeader] ?? '').trim() === '') {
+          if (rows.length === 1) {
+            row[expectedHeader] = 1;
+            return;
+          }
+          throw new ParamConfigWorkbookError('invalid_row', rowIndex + 2, `${sheetName}.${expectedHeader}`);
+        }
+        const text = String(row[actualHeader] ?? '').trim();
+        if (!/^\d+$/.test(text) || Number(text) <= 0 || seen.has(Number(text))) {
+          throw new ParamConfigWorkbookError('invalid_row', rowIndex + 2, `${sheetName}.${expectedHeader}`);
+        }
+        seen.add(Number(text));
+      });
+    }
+  }
+  return configs;
 }
 
 function parseGeneratedUnmappedTemplateWorkbook(
@@ -948,7 +1054,8 @@ function parseMappedTemplateWorkbook(
       return mappingByColumn.get(`${canonicalHeader(sheetName)}.${canonicalHeader(header)}`);
     });
     headers.forEach((header, index) => {
-      if (!header || canonicalHeader(header) === 'SERIALNUMBER' || columnMappings[index]) return;
+      if (!header || canonicalHeader(header) === 'SERIALNUMBER'
+        || isInstanceControlHeader(header) || columnMappings[index]) return;
       const hasValue = matrix.slice(1).some((values) => String(values[index] ?? '').trim() !== '');
       if (hasValue) throw new ParamConfigWorkbookError('missing_columns', 1, `${sheetName}.${header}`);
     });
@@ -966,7 +1073,8 @@ function parseMappedTemplateWorkbook(
       const parameters = Object.fromEntries(headers.flatMap((header, index) => {
         if (!header) return [];
         const mapping = columnMappings[index];
-        if (canonicalHeader(header) !== 'SERIALNUMBER' && !mapping) return [];
+        if (canonicalHeader(header) !== 'SERIALNUMBER' && !mapping
+          && !isInstanceControlHeader(header)) return [];
         if (mapping) validateMappedValue(values[index], mapping, sheetRow, metadata);
         return [[header, values[index] ?? '']];
       }));

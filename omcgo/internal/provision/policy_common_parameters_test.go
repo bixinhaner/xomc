@@ -61,6 +61,59 @@ func TestMaterializePolicyParametersMergesDeviceOverrideOnCommonValues(t *testin
 	require.Equal(t, float64(0), row["pci"])
 }
 
+func TestMaterializePolicyParametersPreservesCommonRadioInstanceList(t *testing.T) {
+	device := model.Device{ID: uuid.New(), SerialNumber: "SN-MULTI-1"}
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"commonParamConfig":{
+			"deviceType":"gNB","gnbIdLength":24,
+			"gnbIdAllocation":{"start":1,"end":10,"step":1},
+			"pciAllocation":{"start":0,"end":1007,"step":1},
+			"sheetParameters":{"CELL":[
+				{"Cell Index":1,"*PCI":"10","SSB Frequency":"633984"},
+				{"Cell Index":3,"*PCI":"12","SSB Frequency":"634560"}
+			]}
+		}
+	}`)}
+
+	materialized, err := materializePolicyParameters(policy, &device, []model.Device{device})
+	require.NoError(t, err)
+	var root map[string]any
+	require.NoError(t, json.Unmarshal(materialized.Config, &root))
+	row := mapSlice(root["paramConfigList"])[0]
+	cells := mapSlice(mapValue(row["sheetParameters"])["CELL"])
+	require.Len(t, cells, 2)
+	require.Equal(t, float64(1), cells[0]["Cell Index"])
+	require.Equal(t, "633984", cells[0]["SSB Frequency"])
+	require.Equal(t, float64(3), cells[1]["Cell Index"])
+	require.Equal(t, "634560", cells[1]["SSB Frequency"])
+}
+
+func TestMaterializePolicyParametersDeviceRadioInstanceListOverridesCommonList(t *testing.T) {
+	device := model.Device{ID: uuid.New(), SerialNumber: "SN-MULTI-1"}
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{
+		"commonParamConfig":{
+			"deviceType":"eNB",
+			"sheetParameters":{"CELL":[
+				{"*CELL_NUMBER":1,"*PCI":"10"},
+				{"*CELL_NUMBER":2,"*PCI":"11"}
+			]}
+		},
+		"paramConfigList":[{
+			"serialNumber":"SN-MULTI-1",
+			"sheetParameters":{"CELL":[{"*CELL_NUMBER":4,"*PCI":"20"}]}
+		}]
+	}`)}
+
+	materialized, err := materializePolicyParameters(policy, &device, []model.Device{device})
+	require.NoError(t, err)
+	var root map[string]any
+	require.NoError(t, json.Unmarshal(materialized.Config, &root))
+	cells := mapSlice(mapValue(mapSlice(root["paramConfigList"])[0]["sheetParameters"])["CELL"])
+	require.Len(t, cells, 1)
+	require.Equal(t, float64(4), cells[0]["*CELL_NUMBER"])
+	require.Equal(t, "20", cells[0]["*PCI"])
+}
+
 func TestMaterializePolicyParametersExpandsCommonNetworkInstancesInListOrder(t *testing.T) {
 	device := model.Device{ID: uuid.New(), SerialNumber: "SN-1"}
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: json.RawMessage(`{

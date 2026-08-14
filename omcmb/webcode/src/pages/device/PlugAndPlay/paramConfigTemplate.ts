@@ -109,7 +109,11 @@ const PARAM_CONFIG_TEMPLATE_DEFAULTS: Partial<
 
 export function toParamConfigDeviceType(
   technology: string | undefined,
+  paramModelName?: string,
 ): ParamConfigDeviceType | undefined {
+  // BM is catalogued as a 4G/eNB product for inventory and KPI purposes, but
+  // its plug-and-play radio instances are GSM GsmBTSCellDT objects.
+  if (paramModelName?.trim().toUpperCase() === 'BM') return 'GSM';
   const normalized = technology?.trim().toLowerCase();
   if (normalized === 'lte' || normalized === 'enb') return 'eNB';
   if (normalized === 'nr' || normalized === 'gnb') return 'gNB';

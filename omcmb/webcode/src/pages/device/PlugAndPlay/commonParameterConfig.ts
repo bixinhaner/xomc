@@ -1,3 +1,6 @@
+import { getParamConfigTemplateSheets } from './paramConfigTemplate';
+import { primaryInstanceHeader, type ParamConfigDeviceType } from './paramConfigWorkbook';
+
 const COMMON_EXCLUDED_SHEET_FIELDS: Record<string, readonly string[]> = {
   DEVICE: ['Time Zone Term'],
   INTERFACE: ['Interface Name', 'Address Type', 'Prefix Length', 'Bear Type', 'Vlan Name', 'OMC IP'],
@@ -23,4 +26,32 @@ export function sanitizeCommonParamConfig<T extends Record<string, unknown>>(con
   }
 
   return { ...config, sheetParameters: sanitizedSheets };
+}
+
+export function withInitialCommonRadioInstance<T extends Record<string, unknown>>(
+  config: T,
+  deviceType: ParamConfigDeviceType,
+  productClass?: string,
+): T & { sheetParameters: Record<string, unknown> } {
+  const sheetName = deviceType === 'GSM' ? 'GSM' : 'CELL';
+  const header = primaryInstanceHeader(deviceType, sheetName, productClass);
+  if (!header) return config as T & { sheetParameters: Record<string, unknown> };
+
+  const sheets = config.sheetParameters && typeof config.sheetParameters === 'object'
+    && !Array.isArray(config.sheetParameters)
+    ? config.sheetParameters as Record<string, unknown>
+    : {};
+  if (Array.isArray(sheets[sheetName])) {
+    return { ...config, sheetParameters: sheets };
+  }
+
+  const templateHeaders = getParamConfigTemplateSheets(deviceType)?.[sheetName] ?? [];
+  const row = Object.fromEntries(templateHeaders.map((field) => [field, '']));
+  return {
+    ...config,
+    sheetParameters: {
+      ...sheets,
+      [sheetName]: [{ ...row, [header]: 1 }],
+    },
+  };
 }
