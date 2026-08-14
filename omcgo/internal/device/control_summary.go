@@ -107,14 +107,16 @@ func NewPgDeviceControlSummaryReader(pool *pgxpool.Pool) *PgDeviceControlSummary
 func buildCurrentDeviceControlSummariesQuery(
 	deviceIDs []uuid.UUID,
 ) (string, []any, error) {
-	recovery := storage.Psql.
-		Select(
-			"child.id",
-			"child.status",
-			"child.last_error",
-			"child.created_at",
-			"child.completed_at",
-		).
+	// Keep nested builders on question-mark placeholders. The outer PostgreSQL
+	// builder performs the single final Dollar conversion; converting a nested
+	// query early makes its $1 collide with the outer query's parameters.
+	recovery := sq.Select(
+		"child.id",
+		"child.status",
+		"child.last_error",
+		"child.created_at",
+		"child.completed_at",
+	).
 		From("geofence_control_actions child").
 		Where("child.parent_action_id = deactivation.id").
 		Where(sq.Eq{"child.action_type": "activate"}).
@@ -200,15 +202,16 @@ func currentDeviceControlFilterCondition(filter DeviceFilter) sq.Sqlizer {
 		return sq.Expr("FALSE")
 	}
 
-	recovery := storage.Psql.
-		Select("child.id", "child.status").
+	// This condition is embedded into list/count builders that may already have
+	// parameters. Leave all nested placeholders as '?' so the parent builder can
+	// number the complete statement exactly once.
+	recovery := sq.Select("child.id", "child.status").
 		From("geofence_control_actions child").
 		Where("child.parent_action_id = deactivation.id").
 		Where(sq.Eq{"child.action_type": "activate"}).
 		OrderBy("child.created_at DESC").
 		Limit(1)
-	current := storage.Psql.
-		Select("1").
+	current := sq.Select("1").
 		From("geofence_control_actions deactivation").
 		JoinClause(sq.Expr("LEFT JOIN LATERAL (?) recovery ON TRUE", recovery)).
 		Where(`deactivation.id = (
