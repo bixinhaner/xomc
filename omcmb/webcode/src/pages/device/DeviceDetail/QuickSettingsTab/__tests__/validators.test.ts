@@ -4,6 +4,7 @@ import {
   formatEnumDisplayValue,
   formatLteBandwidthDisplay,
   LTE_BANDWIDTH_PATH,
+  normalizeEnumValue,
   resolveQuickSettingsParameterType,
   validateLteQOffsetValue,
   validateValue,
@@ -139,5 +140,41 @@ describe('MME IP + PLMN validation', () => {
       { mmeIp: '10.0.0.1', plmn: '46000' },
       { mmeIp: '10.0.0.2', plmn: '4600000' },
     ])).toBe('第 2 行 PLMN 必须为 5-6 位数字');
+  });
+});
+
+describe('enum value normalization for dirty check (issue #317)', () => {
+  const oneZeroOptions = [
+    { value: '1', label: 'NTP Server' },
+    { value: '0', label: 'NTP Client' },
+  ];
+  const trueFalseOptions = [
+    { value: 'true', label: 'Enable' },
+    { value: 'false', label: 'Disable' },
+  ];
+
+  it('maps device boolean serialization "true" onto 1/0 option space', () => {
+    expect(normalizeEnumValue('true', oneZeroOptions)).toBe('1');
+    expect(normalizeEnumValue('false', oneZeroOptions)).toBe('0');
+  });
+
+  it('keeps exact option values untouched in true/false option space (BM style)', () => {
+    expect(normalizeEnumValue('true', trueFalseOptions)).toBe('true');
+    expect(normalizeEnumValue('false', trueFalseOptions)).toBe('false');
+  });
+
+  it('returns raw value unchanged when no options are declared', () => {
+    expect(normalizeEnumValue('true', undefined)).toBe('true');
+    expect(normalizeEnumValue('fiber', [])).toBe('fiber');
+  });
+
+  it('matches option values case-insensitively and by label', () => {
+    expect(normalizeEnumValue('TRUE', trueFalseOptions)).toBe('true');
+    expect(normalizeEnumValue('Enable', trueFalseOptions)).toBe('true');
+    expect(normalizeEnumValue('ntp server', oneZeroOptions)).toBe('1');
+  });
+
+  it('preserves unknown values instead of forcing a match', () => {
+    expect(normalizeEnumValue('3', oneZeroOptions)).toBe('3');
   });
 });

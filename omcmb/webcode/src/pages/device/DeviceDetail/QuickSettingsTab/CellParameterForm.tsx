@@ -23,6 +23,7 @@ import {
   isBscCodecSupportParam,
   localizeEnumLabel,
   normalizeBscCodecSupportValue,
+  normalizeEnumValue,
   parseQuickSettingsMultiCheckboxValue,
   resolveQuickSettingsParameterType,
   serializeBscCodecSupportValue,
@@ -2047,13 +2048,19 @@ export default function CellParameterForm({
         : (preferSchemaCurrentValue
           ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
           : (rawItem?.parameterValue ?? item?.currentValue ?? ''));
+      // 脏检查必须与表单初值在同一取值空间比较:初值经过 normalizeEnumValue 归一化
+      // (如 TR-069 BOOLEAN 设备上报 "true"/"false",XML 选项值为 "1"/"0"),
+      // oldVal 若用原始设备值会导致未修改也判脏、点保存即下发(issue #317)。
       const oldVal = isSwitchField
         ? normalizeSwitchComparableValue(rawOldVal)
         : isMultiCheckboxField
         ? isCodecSupportField
           ? serializeBscCodecSupportValue(rawOldVal)
           : serializeQuickSettingsMultiCheckboxValue(rawOldVal)
-        : rawOldVal;
+        : normalizeEnumValue(
+          rawOldVal,
+          isDeviceTimeGroup && p.name === 'Enable' ? deviceTimeModeOptions : p.enumOptions,
+        );
       if (newVal === oldVal) continue;
 
       const parameterType = resolveQuickSettingsParameterType(p.type, item?.type, rawItem?.parameterType);
@@ -3001,31 +3008,7 @@ function validateExtraInfoBounds(value: string, bounds: [number, number]): strin
   return null;
 }
 
-// normalizeEnumValue 把设备上送的字符串(可能是 "true"/"false"、"True"/"FALSE"、"1"/"0")
-// 归一到 XML <option value="..."/> 的真实值,确保 Select 能选中正确项。
-// 仅在 enumOptions 非空时生效;不存在等价匹配时原样返回(保留原始值,Select 留空)。
-function normalizeEnumValue(raw: unknown, enumOptions?: { value: string; label: string }[]): string {
-  const s = String(raw ?? '');
-  if (!enumOptions || enumOptions.length === 0) return s;
-  if (enumOptions.some((o) => o.value === s)) return s;
-  const ci = s.toLowerCase();
-  const direct = enumOptions.find((o) => o.value.toLowerCase() === ci);
-  if (direct) return direct.value;
-  const labelMatch = enumOptions.find((o) => o.label.toLowerCase() === ci);
-  if (labelMatch) return labelMatch.value;
-  // BOOLEAN 等价:true/1 与 false/0 互转,适配 TR-069 BOOLEAN 字段两种序列化。
-  if ((ci === 'true' || ci === '1') && enumOptions.some((o) => o.value === '1')) return '1';
-  if ((ci === 'false' || ci === '0') && enumOptions.some((o) => o.value === '0')) return '0';
-  if ((ci === 'true' || ci === '1')) {
-    const m = enumOptions.find((o) => o.value.toLowerCase() === 'true');
-    if (m) return m.value;
-  }
-  if ((ci === 'false' || ci === '0')) {
-    const m = enumOptions.find((o) => o.value.toLowerCase() === 'false');
-    if (m) return m.value;
-  }
-  return s;
-}
+// normalizeEnumValue 已迁至 validators.ts(表单初值与保存脏检查共用,保证同一取值空间比较)。
 
 // formatConstraintHint 把 schema 取值范围渲染成 label 后的灰色提示。
 // 后端 MinValue/MaxValue 是按类型复用的字段：string → 长度边界；int/unsignedInt → 值范围。
