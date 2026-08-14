@@ -226,6 +226,7 @@ func TestBuildDeviceEdgeOnlyEmitsRealEffectiveTransitions(t *testing.T) {
 				"SN-1",
 				"cmcc",
 				9,
+				nil,
 				tt.previous,
 				tt.next,
 				now,

@@ -464,11 +464,22 @@ func (r *PgCoordinatorRepository) evaluateLocation(
 
 	next := aggregateEffectiveState(aggregates)
 	stateChanged := effectiveStateChanged(previous, next)
+	var triggerEvaluationID *uuid.UUID
+	if next.TriggerBindingID != nil {
+		for index := range evaluations {
+			if evaluations[index].BindingID == *next.TriggerBindingID {
+				evaluationID := evaluations[index].ID
+				triggerEvaluationID = &evaluationID
+				break
+			}
+		}
+	}
 	deviceRecord, hasDeviceEdge, err := buildDeviceEdgeOutboxRecord(
 		payload.DeviceID,
 		payload.SerialNumber,
 		payload.Carrier,
 		payload.ObservationVersion,
+		triggerEvaluationID,
 		previous,
 		next,
 		evaluatedAt,
@@ -1126,6 +1137,7 @@ func buildDeviceEdgeOutboxRecord(
 	serialNumber string,
 	carrier string,
 	observationVersion int64,
+	triggerEvaluationID *uuid.UUID,
 	previous lockedEffectiveState,
 	next EffectiveSnapshot,
 	occurredAt time.Time,
@@ -1158,6 +1170,7 @@ func buildDeviceEdgeOutboxRecord(
 		SerialNumber:          serialNumber,
 		Carrier:               carrier,
 		TriggerBindingID:      next.TriggerBindingID,
+		TriggerEvaluationID:   triggerEvaluationID,
 		ObservationVersion:    observationVersion,
 		EffectiveState:        string(next.State),
 		RequiredActionLevel:   string(next.RequiredActionLevel),

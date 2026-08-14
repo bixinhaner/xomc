@@ -59,6 +59,39 @@ beforeEach(() => {
 });
 
 describe('deviceApi.getList — filter → query 映射', () => {
+	it('映射 OMC 管控摘要并提交来源/阶段筛选', async () => {
+		getMock.mockResolvedValue({
+			data: {
+				items: [backendDevice({
+					control_summary: {
+						source_type: 'geofence',
+						source_id: 'fence-1',
+						source_name: '园区围栏',
+						reason_code: 'confirmed_exit',
+						phase: 'deactivated',
+						action_id: 'action-1',
+						triggered_at: '2026-08-13T08:00:00+08:00',
+					},
+				})],
+				total: 1, page: 1, page_size: 20, total_pages: 1,
+			},
+		});
+
+		const out = await deviceApi.getList({
+			page: 1,
+			pageSize: 20,
+			controlSource: 'geofence',
+			controlPhase: ['deactivated', 'recovery_failed'],
+		});
+
+		expect(getMock.mock.calls[0][1].params).toMatchObject({
+			control_source: 'geofence',
+			control_phase: 'deactivated,recovery_failed',
+		});
+		expect(out.items[0].controlSummary).toMatchObject({
+			sourceType: 'geofence', sourceName: '园区围栏', phase: 'deactivated',
+		});
+	});
 	it('映射 location_sync 对账状态及设备上报坐标', async () => {
 		getMock.mockResolvedValue({
 			data: {
@@ -342,6 +375,38 @@ describe('deviceApi.getList — filter → query 映射', () => {
     const out = await deviceApi.getList({ page: 1, pageSize: 20 });
     expect(out.items).toEqual([]);
   });
+});
+
+describe('deviceApi.getControlActions', () => {
+	it('映射动作、参数状态和围栏评估证据', async () => {
+		getMock.mockResolvedValue({
+			data: {
+				items: [{
+					id: 'action-1', source_type: 'geofence', source_name: '园区围栏',
+					reason_code: 'confirmed_exit', effective_state_version: 3,
+					action_type: 'deactivate', status: 'verified',
+					before_state: [{ path: 'Device.Cell.AdminState', value: '1' }],
+					requested_state: [{ path: 'Device.Cell.AdminState', value: '0' }],
+					verified_state: [{ path: 'Device.Cell.AdminState', value: '0' }],
+					evaluation: {
+						id: 'eval-1', observation_version: 9, latitude: 30, longitude: 120,
+						observed_at: '2026-08-13T08:00:00+08:00', rule_type: 'polygon_allow_zone',
+						signed_distance_meters: 12.4, confirmed_state: 'outside', reason_code: 'confirmed_exit',
+					},
+					created_at: '2026-08-13T08:00:01+08:00', updated_at: '2026-08-13T08:00:02+08:00',
+				}],
+				total: 1, page: 1, page_size: 20,
+			},
+		});
+
+		const out = await deviceApi.getControlActions('device-1');
+
+		expect(getMock).toHaveBeenCalledWith('/devices/device-1/control-actions', {
+			params: { page: 1, page_size: 20 },
+		});
+		expect(out.items[0].beforeState[0]).toEqual({ path: 'Device.Cell.AdminState', value: '1' });
+		expect(out.items[0].evaluation).toMatchObject({ observationVersion: 9, confirmedState: 'outside' });
+	});
 });
 
 describe('deviceApi.getById', () => {

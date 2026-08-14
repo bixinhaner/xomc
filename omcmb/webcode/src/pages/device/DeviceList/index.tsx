@@ -9,6 +9,7 @@ import {
   CheckOutlined,
   CloseOutlined,
   EditOutlined,
+  ExclamationCircleFilled,
   ExportOutlined,
   FileTextOutlined,
   LinkOutlined,
@@ -66,6 +67,8 @@ import {
 import { shouldShowLocationSyncIndicator } from './deviceGpsSyncIndicator';
 import GpsSyncConfirmModal from './GpsSyncConfirmModal';
 import GpsSyncTrigger from './GpsSyncTrigger';
+import DeviceControlReasonDrawer from '../DeviceControlReason';
+import controlMarkerStyles from './DeviceControlMarker.module.css';
 import { applyLocationSyncResult, applyLocationSyncResultToList } from './deviceLocationSync';
 import type { Device, DeviceListResponse } from '@core/types/device';
 import { formatSystemTime } from '@core/utils/systemTime';
@@ -239,6 +242,7 @@ const URL_ARRAY_FIELDS = new Set<string>([
   'modelName',
   'softwareVersion',
   'groupId',
+  'controlPhase',
 ]);
 
 function parseUrlValue(key: string, value: string): unknown {
@@ -310,6 +314,7 @@ export default function DeviceList() {
     return params;
   });
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [controlDrawerDevice, setControlDrawerDevice] = useState<Device | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [periodicSyncModalOpen, setPeriodicSyncModalOpen] = useState(false);
   const [periodicSyncForm] = Form.useForm();
@@ -929,6 +934,24 @@ export default function DeviceList() {
       type: 'multi-select',
       width: 400,
       options: groupOptions,
+    },
+    // OMC 自动处置属于低频排障条件，放入展开区域，避免挤占设备列表的高频筛选位。
+    {
+      name: 'controlPhase',
+      label: t('device.control.phase'),
+      type: 'multi-select',
+      width: 220,
+      options: [
+        'deactivating', 'verifying', 'deactivated', 'partial_failed',
+        'failed', 'recovering', 'recovery_failed',
+      ].map((phase) => ({ label: t(`device.control.phase.${phase}`), value: phase })),
+    },
+    {
+      name: 'controlSource',
+      label: t('device.control.source'),
+      type: 'select',
+      width: 160,
+      options: [{ label: t('device.control.source.geofence'), value: 'geofence' }],
     },
   ], [
     t,
@@ -1941,7 +1964,55 @@ export default function DeviceList() {
         width: 140,
         group: 'common',
         // 激活状态 = 设备是否曾首次上线（op_state），与在线/小区状态正交。
-        render: (_val, record) => renderActivationStatus(record.opState, record.isOnline),
+        render: (_val, record) => {
+          const summary = record.controlSummary;
+          const activationStatus = renderActivationStatus(record.opState, record.isOnline);
+          if (!summary) return activationStatus;
+          const markerTone = summary.phase === 'deactivated'
+            ? 'danger'
+            : summary.phase.includes('failed') || summary.phase === 'partial_failed'
+              ? 'warning'
+              : 'processing';
+          const phaseLabel = t(`device.control.phase.${summary.phase}`);
+          const markerIcon = markerTone === 'processing'
+            ? <ClockCircleOutlined />
+            : <ExclamationCircleFilled />;
+          return (
+            <Space size={4}>
+              {activationStatus}
+              <Tooltip
+                placement="top"
+                title={(
+                  <div className={controlMarkerStyles.tooltip}>
+                    <div className={controlMarkerStyles.tooltipTitle}>
+                      {markerIcon}
+                      <span>{phaseLabel}</span>
+                    </div>
+                    <div className={controlMarkerStyles.tooltipGrid}>
+                      <span className={controlMarkerStyles.tooltipLabel}>{t('device.control.sourceName')}</span>
+                      <span className={controlMarkerStyles.tooltipValue}>{summary.sourceName || '-'}</span>
+                      <span className={controlMarkerStyles.tooltipLabel}>{t('device.control.triggeredAt')}</span>
+                      <span className={controlMarkerStyles.tooltipValue}>{fmtTime(summary.triggeredAt)}</span>
+                    </div>
+                    <div className={controlMarkerStyles.tooltipHint}>{t('device.control.tooltipHint')}</div>
+                  </div>
+                )}
+              >
+              <button
+                type="button"
+                className={`${controlMarkerStyles.marker} ${controlMarkerStyles[markerTone]}`}
+                aria-label={t('device.control.markerAria', { phase: phaseLabel })}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setControlDrawerDevice(record);
+                }}
+              >
+                {markerIcon}
+              </button>
+              </Tooltip>
+            </Space>
+          );
+        },
       },
       {
         key: 'mmeStatus',
@@ -2255,6 +2326,12 @@ export default function DeviceList() {
             active: t('status.active'),
             inactive: t('status.inactive'),
           }, appLocale) || '-';
+        }
+        case 'controlSummary': {
+          const summary = record.controlSummary;
+          return summary
+            ? `${t(`device.control.phase.${summary.phase}`)} · ${summary.sourceName || t('device.control.source.geofence')} · ${summary.reasonCode}`
+            : t('device.control.none');
         }
         case 'rfStatus':
           return record.rfStatus || '';
@@ -2641,6 +2718,19 @@ export default function DeviceList() {
           </Card>
         </ListPageLayout>
       </div>
+
+      <DeviceControlReasonDrawer
+        key={controlDrawerDevice?.id ?? 'closed'}
+        device={controlDrawerDevice}
+        open={controlDrawerDevice != null}
+        onClose={() => setControlDrawerDevice(null)}
+        onOpenDetail={() => {
+          if (!controlDrawerDevice) return;
+          const target = controlDrawerDevice;
+          setControlDrawerDevice(null);
+          void navigate(`/device/detail/${target.sn}?tab=control`);
+        }}
+      />
 
       {/* 收集任务抽屉 */}
       <Drawer

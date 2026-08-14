@@ -1,4 +1,4 @@
-import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse } from '../../types/device';
+import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceControlActionHistoryList } from '../../types/device';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { mockDevices } from '../data/devices';
 import { mockNEs } from '../data/nes';
@@ -128,6 +128,13 @@ export const deviceService = {
         return true;
       });
     }
+    if (params.controlSource) {
+      filtered = filtered.filter((d) => d.controlSummary?.sourceType === params.controlSource);
+    }
+    if (params.controlPhase && params.controlPhase.length > 0) {
+      const phases = new Set(params.controlPhase);
+      filtered = filtered.filter((d) => d.controlSummary && phases.has(d.controlSummary.phase));
+    }
     if (params.productModel) filtered = filtered.filter((d) => d.productClass === params.productModel);
     if (params.alarmLevel) filtered = filtered.filter((d) => d.alarmLevel === params.alarmLevel);
     if (params.region) filtered = filtered.filter((d) => d.region === params.region);
@@ -157,6 +164,52 @@ export const deviceService = {
   async getBySn(sn: string): Promise<Device | null> {
     await delay(80, 150);
     return devices.find((d) => d.sn === sn) ?? null;
+  },
+
+  async getControlActions(id: string): Promise<DeviceControlActionHistoryList> {
+    await delay(80, 150);
+    const device = devices.find((item) => item.id === id);
+    if (!device?.controlSummary) {
+      return { items: [], total: 0, page: 1, pageSize: 20 };
+    }
+    return {
+      items: [{
+        id: 'mock-control-action-1',
+        sourceType: 'geofence',
+        sourceId: 'mock-geofence-1',
+        sourceName: device.controlSummary.sourceName,
+        reasonCode: device.controlSummary.reasonCode,
+        observationVersion: 12,
+        effectiveStateVersion: 4,
+        actionType: 'deactivate',
+        status: 'verified',
+        beforeState: [
+          { path: 'Device.Services.FAPService.Ipsec.IPSEC_ENABLE', value: '1' },
+          { path: 'Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus', value: '1' },
+        ],
+        requestedState: [
+          { path: 'Device.Services.FAPService.Ipsec.IPSEC_ENABLE', value: '0' },
+          { path: 'Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus', value: '0' },
+        ],
+        verifiedState: [
+          { path: 'Device.Services.FAPService.Ipsec.IPSEC_ENABLE', value: '0' },
+          { path: 'Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus', value: '0' },
+        ],
+        evaluation: {
+          id: 'mock-evaluation-1', observationVersion: 12,
+          latitude: 39.9042, longitude: 116.4074,
+          observedAt: '2026-08-13T10:14:55+08:00',
+          ruleType: 'polygon_allow_zone', signedDistanceMeters: 18.6,
+          confirmedState: 'outside', reasonCode: 'confirmed_exit',
+        },
+        createdAt: device.controlSummary.triggeredAt,
+        updatedAt: device.controlSummary.completedAt ?? device.controlSummary.triggeredAt,
+        completedAt: device.controlSummary.completedAt,
+      }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    };
   },
 
   async create(data: Omit<Device, 'id' | 'createTime'>): Promise<Device> {

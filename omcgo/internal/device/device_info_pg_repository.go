@@ -498,6 +498,10 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 			countBuilder = countBuilder.Where(cond)
 		}
 	}
+	if cond := currentDeviceControlFilterCondition(filter); cond != nil {
+		builder = builder.Where(cond)
+		countBuilder = countBuilder.Where(cond)
+	}
 
 	// Multi-field fuzzy search (G07) — 升级为多关键字（英文逗号分隔，最多 50）。
 	// 任一关键字命中任一字段即匹配（设备级 OR）。单值场景与老行为完全等价。
@@ -780,6 +784,9 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 		if cond := opStateFilterCond(*filter.OpState); cond != nil {
 			b = b.Where(cond)
 		}
+	}
+	if cond := currentDeviceControlFilterCondition(filter); cond != nil {
+		b = b.Where(cond)
 	}
 	return b
 }

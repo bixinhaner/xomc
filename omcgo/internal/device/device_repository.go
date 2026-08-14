@@ -57,6 +57,8 @@ type DeviceFilter struct {
 	AlarmSeverity *string     // device_info.alarm_severity exact match
 	LicenseStatus *string     // device_info.license_status exact match
 	OpState       *string     // "1" = activated (first_online_time NOT NULL), "0" = not activated
+	ControlSource *string     // current OMC control source; currently only "geofence"
+	ControlPhases []string    // current OMC control phases (OR semantics)
 
 	// T-0162 新增 3 个 device list 筛选维度（之前前端下拉空、后端无字段）
 	ModelName *string // devices.model_name exact match (字典 device_model)

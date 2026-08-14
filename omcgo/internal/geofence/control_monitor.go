@@ -191,6 +191,11 @@ func (m *GeofenceControlMonitor) handleExited(
 		payload.EffectiveStateVersion,
 	)
 	now := time.Now().UTC()
+	var triggerObservationVersion *int64
+	if payload.ObservationVersion > 0 {
+		observationVersion := payload.ObservationVersion
+		triggerObservationVersion = &observationVersion
+	}
 	queued, err := m.queueDeviceControl(
 		ctx,
 		deviceRecord,
@@ -199,8 +204,11 @@ func (m *GeofenceControlMonitor) handleExited(
 		&ControlAction{
 			ID: uuid.New(), ActionKey: actionID, DeviceID: deviceRecord.ID,
 			DeviceSN: deviceRecord.SerialNumber, BindingID: payload.TriggerBindingID,
-			EffectiveStateVersion: payload.EffectiveStateVersion,
-			ActionType:            ControlActionDeactivate, Status: ControlActionPending,
+			TriggerEvaluationID:       payload.TriggerEvaluationID,
+			TriggerReasonCode:         payload.ReasonCode,
+			TriggerObservationVersion: triggerObservationVersion,
+			EffectiveStateVersion:     payload.EffectiveStateVersion,
+			ActionType:                ControlActionDeactivate, Status: ControlActionPending,
 			CreatedAt: now, UpdatedAt: now,
 		},
 		fmt.Sprintf(
@@ -259,7 +267,8 @@ func (m *GeofenceControlMonitor) handleLifecycleDeactivation(
 		&ControlAction{
 			ID: uuid.New(), ActionKey: actionID, DeviceID: deviceRecord.ID,
 			DeviceSN: deviceRecord.SerialNumber, GeofenceID: &payload.GeofenceID,
-			ActionType: ControlActionDeactivate, Status: ControlActionPending,
+			TriggerReasonCode: "geofence_" + payload.TargetStatus,
+			ActionType:        ControlActionDeactivate, Status: ControlActionPending,
 			CreatedAt: now, UpdatedAt: now,
 		},
 		fmt.Sprintf(

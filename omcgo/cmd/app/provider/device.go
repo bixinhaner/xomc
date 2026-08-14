@@ -76,6 +76,7 @@ func initDeviceModule(c *Container) error {
 	deviceService.SetDisconnectedAlarmCleaner(c.AlarmPgStore, c.AlarmEngine)
 	deviceService.SetDeviceCache(deviceCache)
 	deviceService.SetDeviceInfoRepo(deviceInfoRepo)
+	deviceService.SetControlSummaryReader(device.NewPgDeviceControlSummaryReader(c.PgPool))
 	deviceService.SetDeviceGroupCountsInvalidator(c.GroupRepo)
 	// IDOR 防护：按 ID 直读端点据此判定调用者对设备所属设备组的归属。
 	deviceService.SetDeviceGroupReader(device.NewPgDeviceGroupReader(c.PgPool))

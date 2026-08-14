@@ -55,6 +55,22 @@ func (h *ExportHandler) ExportDevices(c *gin.Context) {
 		}
 		filter.GroupID = &gid
 	}
+	if controlSource := c.Query("control_source"); controlSource != "" {
+		if controlSource != DeviceControlSourceGeofence {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		filter.ControlSource = &controlSource
+	}
+	if controlPhases := c.Query("control_phase"); controlPhases != "" {
+		for _, phase := range SplitCSV(controlPhases) {
+			if !validDeviceControlPhase(phase) {
+				commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+				return
+			}
+			filter.ControlPhases = append(filter.ControlPhases, phase)
+		}
+	}
 
 	// Inject data permission: restrict to user-visible groups.
 	// v1.0：超管判定走 source = 'builtIn'（来自 ctx CtxKeyIsSuperAdmin）。

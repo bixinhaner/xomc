@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse, BatchPreRegisterRequest, BatchPreRegisterResponse, LocationSync, ReportedLocation } from '../../types/device';
+import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse, BatchPreRegisterRequest, BatchPreRegisterResponse, LocationSync, ReportedLocation, DeviceControlSummary, DeviceControlActionHistoryList } from '../../types/device';
 import type { AntennaSector } from '../../types/map';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import { normalizeDeviceSyncStatus } from '../../utils/deviceSyncStatus';
@@ -122,6 +122,7 @@ interface BackendDevice {
   // #361: 该设备未 cleared 活动告警数；无活动告警 → null → 前端归 0。
   active_alarm_count?: number | null;
   op_state?: string;
+  control_summary?: BackendDeviceControlSummary | null;
   // T-2026-06-18: device_info.cell_status 透传（后端 CalcCellStatus 派生 ：任一 cell active → "active"，
   // 全部 inactive / 无 cell 数据 → "inactive"）。之前 T-0162 误以为后端不再透出此列。
   cell_status?: string;
@@ -179,6 +180,69 @@ interface BackendDevice {
   energy_saving?: string;
   gnb_topo_cellmgr?: string;
   ssl_cert_validity?: string;
+}
+
+interface BackendDeviceControlSummary {
+  source_type: 'geofence';
+  source_id?: string;
+  source_name: string;
+  reason_code: string;
+  phase: DeviceControlSummary['phase'];
+  action_id: string;
+  triggered_at: string;
+  completed_at?: string;
+  last_error?: string;
+}
+
+interface BackendDeviceControlActionHistoryList {
+  items: Array<{
+    id: string;
+    parent_action_id?: string;
+    source_type: 'geofence';
+    source_id?: string;
+    source_name: string;
+    reason_code: string;
+    observation_version?: number;
+    effective_state_version: number;
+    action_type: 'activate' | 'deactivate';
+    status: string;
+    before_state: Array<{ path: string; value: string }>;
+    requested_state: Array<{ path: string; value: string }>;
+    verified_state: Array<{ path: string; value: string }>;
+    evaluation?: {
+      id: string;
+      observation_version: number;
+      latitude: number;
+      longitude: number;
+      observed_at: string;
+      rule_type: string;
+      signed_distance_meters?: number;
+      confirmed_state: string;
+      reason_code: string;
+    };
+    last_error?: string;
+    created_at: string;
+    updated_at: string;
+    completed_at?: string;
+  }>;
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+function mapDeviceControlSummary(summary?: BackendDeviceControlSummary | null): DeviceControlSummary | null {
+  if (!summary) return null;
+  return {
+    sourceType: summary.source_type,
+    sourceId: summary.source_id,
+    sourceName: summary.source_name,
+    reasonCode: summary.reason_code,
+    phase: summary.phase,
+    actionId: summary.action_id,
+    triggeredAt: summary.triggered_at,
+    completedAt: summary.completed_at,
+    lastError: summary.last_error,
+  };
 }
 
 interface BackendLocationSync {
@@ -609,6 +673,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     // 全部 inactive / 无 cell 数据 → "inactive"）。之前 T-0162 误以为后端不再透出此列写死 ''，导致 BTS 详情页「小区状态」恒为 '-'。
     cellStatus: bd.cell_status || '',
     opState: bd.op_state || 'unknown',
+    controlSummary: mapDeviceControlSummary(bd.control_summary),
     // device_info.mme_status 是后端按制式归一的核心网状态：LTE=MME，NR=AMF。
     // 这里按制式分流，避免 5G/2G 设备误显示 MME。
     mmeStatus: networkType === 'eNB' ? bd.mme_status || '' : '',
@@ -804,6 +869,10 @@ export const deviceApi = {
       }
     }
     if (params.opState) query.op_state = params.opState;
+    if (params.controlSource) query.control_source = params.controlSource;
+    if (params.controlPhase && params.controlPhase.length > 0) {
+      query.control_phase = params.controlPhase.join(',');
+    }
     // productModel / productClass 都映射到 product_class（前者是 multi-select，
     // 后者是历史单值字段），统一走 csv() 处理。
     if (params.productModel) query.product_class = csv(params.productModel);
@@ -821,6 +890,52 @@ export const deviceApi = {
     } catch {
       return null;
     }
+  },
+
+  async getControlActions(
+    id: string,
+    page = 1,
+    pageSize = 20,
+  ): Promise<DeviceControlActionHistoryList> {
+    const { data } = await http.get<BackendDeviceControlActionHistoryList>(
+      `/devices/${id}/control-actions`,
+      { params: { page, page_size: pageSize } },
+    );
+    return {
+      items: data.items.map((item) => ({
+        id: item.id,
+        parentActionId: item.parent_action_id,
+        sourceType: item.source_type,
+        sourceId: item.source_id,
+        sourceName: item.source_name,
+        reasonCode: item.reason_code,
+        observationVersion: item.observation_version,
+        effectiveStateVersion: item.effective_state_version,
+        actionType: item.action_type,
+        status: item.status,
+        beforeState: item.before_state ?? [],
+        requestedState: item.requested_state ?? [],
+        verifiedState: item.verified_state ?? [],
+        evaluation: item.evaluation ? {
+          id: item.evaluation.id,
+          observationVersion: item.evaluation.observation_version,
+          latitude: item.evaluation.latitude,
+          longitude: item.evaluation.longitude,
+          observedAt: item.evaluation.observed_at,
+          ruleType: item.evaluation.rule_type,
+          signedDistanceMeters: item.evaluation.signed_distance_meters,
+          confirmedState: item.evaluation.confirmed_state,
+          reasonCode: item.evaluation.reason_code,
+        } : undefined,
+        lastError: item.last_error,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+        completedAt: item.completed_at,
+      })),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
   },
 
   async acceptLocationSync(id: string, reportedVersion: number): Promise<LocationSync> {
