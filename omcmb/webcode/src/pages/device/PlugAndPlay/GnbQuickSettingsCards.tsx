@@ -228,9 +228,11 @@ function IpsecListCard({ fields }: { fields: GnbQuickSettingField[] }) {
 
 export default function GnbQuickSettingsCards({
   excludedFieldIds = [],
+  excludedGroupIds = [],
   beforeIpsec,
 }: {
   excludedFieldIds?: string[];
+  excludedGroupIds?: string[];
   beforeIpsec?: ReactNode;
 }) {
   const t = useT();
@@ -240,6 +242,7 @@ export default function GnbQuickSettingsCards({
   return (
     <>
       {GNB_QUICK_SETTING_GROUPS
+        .filter((group) => !excludedGroupIds.includes(group.id))
         .filter((group) => group.id !== 'gnb-ipsec' || isIpsecParametersVisible(ipsecEnable))
         .map((group) => (
           <Fragment key={group.id}>

@@ -108,8 +108,8 @@ describe('parameter config workbook', () => {
     }]);
 
     const cellRows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.CELL, { header: 1, defval: '' });
-    expect(cellRows[0]).toEqual(['Serial Number', 'PCI', 'DL Carrier Bandwidth']);
-    expect(cellRows[1]).toEqual(['SN-001', 10, '25']);
+    expect(cellRows[0]).toEqual(['Serial Number', 'Cell Index', 'PCI', 'DL Carrier Bandwidth']);
+    expect(cellRows[1]).toEqual(['SN-001', 1, 10, '25']);
     const mappingRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
       workbook.Sheets['参数映射'], { defval: '' },
     );
@@ -212,9 +212,9 @@ describe('parameter config workbook', () => {
     const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.CELL, { header: 1, defval: '' });
     const headers = rows[0] as string[];
     expect(headers).toEqual([
-      '*Serial Number', '*gNB Lenth', 'Custom B', 'gNB ID Length', 'Custom A',
+      '*Serial Number', 'Cell Index', '*gNB Lenth', 'Custom B', 'gNB ID Length', 'Custom A',
     ]);
-    expect(rows[1]).toEqual(['SN-001', '', 'b', 24, 'a']);
+    expect(rows[1]).toEqual(['SN-001', 1, '', 'b', 24, 'a']);
     const mappingRows = XLSX.utils.sheet_to_json<Record<string, string>>(
       workbook.Sheets[PARAM_MAPPING_SHEET],
       { defval: '' },
@@ -239,8 +239,132 @@ describe('parameter config workbook', () => {
       header: 1,
       defval: '',
     })[0]).toEqual([
-      'Serial Number', 'Band', 'Bsic',
+      'Serial Number', 'Cell Index', 'Band', 'Bsic',
     ]);
+  });
+
+  it('uses a BTS index for BSC workbooks', () => {
+    const workbook = createParamConfigTemplateWorkbook('GSM', {
+      deviceType: 'GSM',
+      productClass: 'BSC',
+      quickSettingsGroups: [{
+        id: 'bsc-bts-config', titleZh: 'BTS', titleEn: 'BTS', multiInstance: false,
+        params: [{
+          name: 'IpaRslIp', titleZh: 'RSL IP', titleEn: 'Remote IP',
+          standardPath: 'DeviceGSM.Bts.{i}.IpaRslIp',
+        }],
+      }],
+    });
+
+    expect(XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.GSM, {
+      header: 1,
+      defval: '',
+    })[0]).toEqual(['Serial Number', 'BTS Index', 'Remote IP']);
+  });
+
+  it('uses the BSC parameter-model identity when the literal product class is PGSM', () => {
+    const workbook = createParamConfigTemplateWorkbook('GSM', {
+      deviceType: 'GSM',
+      productClass: 'FAP/PGSM BSC BSC',
+      quickSettingsGroups: [{
+        id: 'bsc-bts-config', titleZh: 'BTS', titleEn: 'BTS', multiInstance: false,
+        params: [{
+          name: 'IpaRslIp', titleZh: 'RSL IP', titleEn: 'Remote IP',
+          standardPath: 'DeviceGSM.Bts.{i}.IpaRslIp',
+        }],
+      }],
+    });
+
+    expect(XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.GSM, {
+      header: 1,
+      defval: '',
+    })[0]).toEqual(['Serial Number', 'BTS Index', 'Remote IP']);
+  });
+
+  it('adds a BTS index when exporting a legacy single-row BSC config', () => {
+    const workbook = createParamConfigWorkbook([{
+      deviceType: 'GSM',
+      serialNumber: 'BSC-001',
+      sheetParameters: { GSM: [{ 'Serial Number': 'BSC-001', IPA: '6969' }] },
+    }], { productClass: 'BSC' });
+
+    expect(XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.GSM, {
+      header: 1,
+      defval: '',
+    })).toEqual([
+      ['Serial Number', 'BTS Index', 'IPA'],
+      ['BSC-001', 1, '6969'],
+    ]);
+  });
+
+  it('rejects a primary instance column that does not match the GSM product', () => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['Serial Number', 'Cell Index', 'IPA'],
+      ['BSC-001', 1, '6969'],
+    ]), 'GSM');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['页面显示名称', '数据工作表', '参数列名', 'TRPath', '来源', '说明'],
+      ['IPA', 'GSM', 'IPA', 'DeviceGSM.Bts.{i}.IPA', '系统预置', ''],
+    ]), PARAM_MAPPING_SHEET);
+
+    expect(() => parseParamConfigWorkbook(
+      XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }),
+      'GSM',
+      'now',
+      { productClass: 'BSC' },
+    )).toThrowError(expect.objectContaining({ code: 'invalid_row', field: 'GSM.BTS Index' }));
+  });
+
+  it('imports explicit cell indexes independently of row order', () => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['Serial Number', 'Cell Index', 'PCI'],
+      ['NR-MULTI-1', 2, 202],
+      ['NR-MULTI-1', 1, 101],
+    ]), 'CELL');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ['页面显示名称', '数据工作表', '参数列名', 'TRPath', '来源', '说明'],
+      ['PCI', 'CELL', 'PCI', 'Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.RF.PhyCellID', '系统预置', ''],
+    ]), PARAM_MAPPING_SHEET);
+
+    const [parsed] = parseParamConfigWorkbook(
+      XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }),
+      'gNB',
+      'now',
+    );
+    expect(parsed.sheetParameters?.CELL).toEqual([
+      expect.objectContaining({ 'Cell Index': 2, PCI: 202 }),
+      expect.objectContaining({ 'Cell Index': 1, PCI: 101 }),
+    ]);
+  });
+
+  it('rejects ambiguous or duplicate primary instance rows', () => {
+    const parseRows = (rows: unknown[][]) => {
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+        ['Serial Number', 'Cell Index', 'PCI'],
+        ...rows,
+      ]), 'CELL');
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+        ['页面显示名称', '数据工作表', '参数列名', 'TRPath', '来源', '说明'],
+        ['PCI', 'CELL', 'PCI', 'Device.Cell.{i}.PCI', '系统预置', ''],
+      ]), PARAM_MAPPING_SHEET);
+      return parseParamConfigWorkbook(
+        XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }),
+        'gNB',
+        'now',
+      );
+    };
+
+    expect(() => parseRows([
+      ['NR-MULTI-1', '', 1],
+      ['NR-MULTI-1', '', 2],
+    ])).toThrowError(expect.objectContaining({ code: 'invalid_row', field: 'CELL.Cell Index' }));
+    expect(() => parseRows([
+      ['NR-MULTI-1', 1, 1],
+      ['NR-MULTI-1', 1, 2],
+    ])).toThrowError(expect.objectContaining({ code: 'invalid_row', field: 'CELL.Cell Index' }));
   });
 
   it('adds hover notes and dropdowns without occupying a data row', async () => {
@@ -672,7 +796,7 @@ describe('parameter config workbook', () => {
     };
     const source = createParamConfigTemplateWorkbook('gNB', metadata);
     expect(XLSX.utils.sheet_to_json<unknown[]>(source.Sheets.CELL, { header: 1, defval: '' })[0])
-      .toEqual(['Serial Number', 'PCI']);
+      .toEqual(['Serial Number', 'Cell Index', 'PCI']);
 
     const downloaded = await enrichParamConfigWorkbook(source, metadata);
     expect(downloaded.getWorksheet(PARAM_MAPPING_SHEET)?.getColumn(4).values)
@@ -700,7 +824,7 @@ describe('parameter config workbook', () => {
     };
     const source = createParamConfigTemplateWorkbook('eNB', metadata);
     expect(XLSX.utils.sheet_to_json<unknown[]>(source.Sheets.CELL, { header: 1, defval: '' })[0])
-      .toEqual(['Serial Number', 'Cell Type', 'Power Class']);
+      .toEqual(['Serial Number', '*CELL_NUMBER', 'Cell Type', 'Power Class']);
 
     const workbook = await enrichParamConfigWorkbook(source, metadata);
     const cell = workbook.getWorksheet('CELL')!;
@@ -748,7 +872,9 @@ describe('parameter config workbook', () => {
       };
       const source = createParamConfigTemplateWorkbook(deviceType, metadata);
       expect(XLSX.utils.sheet_to_json<unknown[]>(source.Sheets.CELL, { header: 1, defval: '' })[0])
-        .toEqual(['Serial Number', 'Power Class']);
+        .toEqual([
+          'Serial Number', deviceType === 'eNB' ? '*CELL_NUMBER' : 'Cell Index', 'Power Class',
+        ]);
     }
   });
 

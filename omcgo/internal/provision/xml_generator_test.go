@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/xml"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -104,6 +105,123 @@ func TestGenerateAutoStartXMLRejectsUnresolvedAndConflictingPaths(t *testing.T) 
 	require.ErrorContains(t, err, "conflicting values")
 }
 
+func TestMultiRadioInstancePoliciesGenerateExpectedXMLForEveryRadioFamily(t *testing.T) {
+	generatedAt := time.Date(2026, 8, 14, 9, 30, 0, 0, time.UTC)
+	tests := []struct {
+		name       string
+		serial     string
+		technology model.Technology
+		paramModel string
+		config     string
+		groups     []quicksettings.Group
+		expected   string
+	}{
+		{
+			name: "NR gNB uses CellConfig indexes", serial: "NR-XML-MULTI-1",
+			technology: model.TechNR, paramModel: "BaiBNQ",
+			config: `{"paramConfigList":[{"serialNumber":"NR-XML-MULTI-1","sheetParameters":{"CELL":[
+				{"Cell Index":1,"*PCI":"10"},{"Cell Index":3,"*PCI":"12"}]}}]}`,
+			groups: []quicksettings.Group{{ID: "cell", Params: []quicksettings.Param{{
+				Name: "PCI", StandardPath: "Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.RF.PhyCellID",
+			}}}},
+			expected: `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<autoConfigFile generateTime="2026-08-14T09:30:00.000" networkType="NR" serialNumber="NR-XML-MULTI-1" vendor="TEST-VENDOR">
+    <dataModelSpecific version="v1.7">
+        <config name="Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID" value="10"></config>
+        <config name="Device.Services.FAPService.1.CellConfig.3.NR.RAN.RF.PhyCellID" value="12"></config>
+    </dataModelSpecific>
+    <vendorSpecific></vendorSpecific>
+</autoConfigFile>`,
+		},
+		{
+			name: "LTE eNB uses FAPService indexes", serial: "LTE-XML-MULTI-1",
+			technology: model.TechLTE, paramModel: "MLN",
+			config: `{"paramConfigList":[{"serialNumber":"LTE-XML-MULTI-1","sheetParameters":{"CELL":[
+				{"*CELL_NUMBER":2,"*PCI":"20"},{"*CELL_NUMBER":4,"*PCI":"22"}]}}]}`,
+			groups: []quicksettings.Group{{ID: "cell", Params: []quicksettings.Param{{
+				Name: "PCI", StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID",
+			}}}},
+			expected: `<?xml version="1.0" encoding="UTF-8"?>
+
+<auto_start>
+    <param>
+        <name>Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.PhyCellID</name>
+        <value>20</value>
+    </param>
+    <param>
+        <name>Device.Services.FAPService.4.CellConfig.LTE.RAN.RF.PhyCellID</name>
+        <value>22</value>
+    </param>
+</auto_start>`,
+		},
+		{
+			name: "GSM BM uses GsmBTSCellDT indexes", serial: "GSM-BM-XML-MULTI-1",
+			technology: model.TechGSM, paramModel: "GSM-BM",
+			config: `{"paramConfigList":[{"serialNumber":"GSM-BM-XML-MULTI-1","sheetParameters":{"GSM":[
+				{"Cell Index":1,"Synchronization":"GNSS"},{"Cell Index":3,"Synchronization":"1588"}]}}]}`,
+			groups: []quicksettings.Group{{ID: "cell", Params: []quicksettings.Param{{
+				Name: "PpsTimeMode", StandardPath: "Device.Services.GsmBTSCellDT.{i}.PpsTimeMode",
+			}}}},
+			expected: `<?xml version="1.0" encoding="UTF-8"?>
+
+<auto_start>
+    <param>
+        <name>Device.Services.GsmBTSCellDT.1.PpsTimeMode</name>
+        <value>GNSS</value>
+    </param>
+    <param>
+        <name>Device.Services.GsmBTSCellDT.3.PpsTimeMode</name>
+        <value>1588</value>
+    </param>
+</auto_start>`,
+		},
+		{
+			name: "GSM BSC uses BTS indexes", serial: "GSM-BSC-XML-MULTI-1",
+			technology: model.TechGSM, paramModel: "BSC",
+			config: `{"paramConfigList":[{"serialNumber":"GSM-BSC-XML-MULTI-1","sheetParameters":{"GSM":[
+				{"BTS Index":2,"Synchronization":"GPS"},{"BTS Index":5,"Synchronization":"NTP"}]}}]}`,
+			groups: []quicksettings.Group{{ID: "bts", Params: []quicksettings.Param{{
+				Name: "PpsTimeMode", StandardPath: "DeviceGSM.Bts.{i}.PpsTimeMode",
+			}}}},
+			expected: `<?xml version="1.0" encoding="UTF-8"?>
+
+<auto_start>
+    <param>
+        <name>DeviceGSM.Bts.2.PpsTimeMode</name>
+        <value>GPS</value>
+    </param>
+    <param>
+        <name>DeviceGSM.Bts.5.PpsTimeMode</name>
+        <value>NTP</value>
+    </param>
+</auto_start>`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			device := &model.Device{
+				ID: uuid.New(), SerialNumber: tc.serial, Technology: tc.technology,
+				Manufacturer: "TEST-VENDOR",
+			}
+			compiled, err := CompilePolicyParameters(
+				&PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(tc.config)},
+				device, tc.paramModel, tc.groups,
+			)
+			require.NoError(t, err)
+			content, err := GenerateAutoStartXML(AutoStartXMLDocument{
+				NetworkType: compiled.NetworkType, Vendor: device.Manufacturer,
+				SerialNumber: device.SerialNumber, GeneratedAt: generatedAt,
+				DataModelVersion: compiled.DataModelVersion, Parameters: compiled.Parameters,
+				VendorSpecific: compiled.VendorSpecific,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, string(content))
+			assert.NotContains(t, string(content), "{i}")
+		})
+	}
+}
+
 func TestCompilePolicyParametersUsesQuickSettingsAndConcreteInstances(t *testing.T) {
 	policy := &PlugAndPlayPolicy{
 		ID: uuid.New(), SelfConfigEnabled: true,
@@ -145,6 +263,179 @@ func TestCompilePolicyParametersUsesQuickSettingsAndConcreteInstances(t *testing
 	assert.Equal(t, "321", byPath["Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID"])
 	assert.Equal(t, "10.10.10.1", byPath["Device.Services.FAPService.1.FAPControl.NR.AMFPoolConfigParam.1.AmfIP1"])
 	assert.Equal(t, "10.10.10.2", byPath["Device.Services.FAPService.1.FAPControl.NR.AMFPoolConfigParam.2.AmfIP1"])
+}
+
+func TestCompilePolicyParametersUsesExplicitNRCellIndexes(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{"serialNumber":"NR-MULTI-1","sheetParameters":{"CELL":[
+			{"Cell Index":2,"PCI":202},
+			{"Cell Index":1,"PCI":101}
+		]}}]
+	}`)}
+	groups := []quicksettings.Group{{Params: []quicksettings.Param{{
+		Name: "PCI", StandardPath: "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.PhyCellID",
+	}}}}
+
+	got, err := CompilePolicyParameters(policy, &model.Device{
+		SerialNumber: "NR-MULTI-1", Technology: model.TechNR,
+	}, "BaiBNQ", groups)
+	require.NoError(t, err)
+
+	byPath := make(map[string]string)
+	for _, parameter := range got.Parameters {
+		byPath[parameter.TRPath] = parameter.Value
+	}
+	assert.Equal(t, "101", byPath["Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID"])
+	assert.Equal(t, "202", byPath["Device.Services.FAPService.1.CellConfig.2.NR.RAN.RF.PhyCellID"])
+}
+
+func TestCompilePolicyParametersUsesLTECellNumberAsFAPServiceIndex(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{"serialNumber":"LTE-MULTI-1","sheetParameters":{"CELL":[
+			{"*CELL_NUMBER":1,"*PCI":11},
+			{"*CELL_NUMBER":2,"*PCI":22}
+		]}}]
+	}`)}
+	groups := []quicksettings.Group{{Params: []quicksettings.Param{{
+		Name: "PCI", StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID",
+	}}}}
+
+	got, err := CompilePolicyParameters(policy, &model.Device{
+		SerialNumber: "LTE-MULTI-1", Technology: model.TechLTE,
+	}, "BLQ", groups)
+	require.NoError(t, err)
+
+	byPath := make(map[string]string)
+	for _, parameter := range got.Parameters {
+		byPath[parameter.TRPath] = parameter.Value
+	}
+	assert.Equal(t, "11", byPath["Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID"])
+	assert.Equal(t, "22", byPath["Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.PhyCellID"])
+}
+
+func TestCompilePolicyParametersUsesExplicitGSMBTSIndexes(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{"serialNumber":"BSC-MULTI-1","sheetParameters":{"GSM":[
+			{"BTS Index":1,"Remote IP":"192.0.2.1"},
+			{"BTS Index":2,"Remote IP":"192.0.2.2"}
+		]}}]
+	}`)}
+	groups := []quicksettings.Group{{Params: []quicksettings.Param{{
+		Name: "IpaRslIp", TitleEn: "Remote IP", StandardPath: "DeviceGSM.Bts.{i}.IpaRslIp",
+	}}}}
+
+	got, err := CompilePolicyParameters(policy, &model.Device{
+		SerialNumber: "BSC-MULTI-1", Technology: model.TechGSM,
+	}, "BSC", groups)
+	require.NoError(t, err)
+
+	byPath := make(map[string]string)
+	for _, parameter := range got.Parameters {
+		byPath[parameter.TRPath] = parameter.Value
+	}
+	assert.Equal(t, "192.0.2.1", byPath["DeviceGSM.Bts.1.IpaRslIp"])
+	assert.Equal(t, "192.0.2.2", byPath["DeviceGSM.Bts.2.IpaRslIp"])
+}
+
+func TestCompilePolicyParametersUsesExplicitGSMCellIndexes(t *testing.T) {
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{"serialNumber":"GSM-MULTI-1","sheetParameters":{"GSM":[
+			{"Cell Index":2,"IPAUnitID":"6969-2"},
+			{"Cell Index":1,"IPAUnitID":"6969-1"}
+		]}}]
+	}`)}
+	groups := []quicksettings.Group{{Params: []quicksettings.Param{{
+		Name: "IPAUnitID", StandardPath: "Device.Services.GsmBTSCellDT.{i}.IPAUnitID",
+	}}}}
+
+	got, err := CompilePolicyParameters(policy, &model.Device{
+		SerialNumber: "GSM-MULTI-1", Technology: model.TechGSM,
+	}, "GSM-BM", groups)
+	require.NoError(t, err)
+
+	byPath := make(map[string]string)
+	for _, parameter := range got.Parameters {
+		byPath[parameter.TRPath] = parameter.Value
+	}
+	assert.Equal(t, "6969-1", byPath["Device.Services.GsmBTSCellDT.1.IPAUnitID"])
+	assert.Equal(t, "6969-2", byPath["Device.Services.GsmBTSCellDT.2.IPAUnitID"])
+}
+
+func TestCompilePolicyParametersKeepsPrimaryAndChildIndexesIndependent(t *testing.T) {
+	tests := []struct {
+		name       string
+		technology model.Technology
+		paramModel string
+		sheet      string
+		rows       string
+		parameter  quicksettings.Param
+		expected   map[string]string
+	}{
+		{
+			name: "NR PLMN", technology: model.TechNR, paramModel: "BaiBNQ", sheet: "PLMN",
+			rows:      `[{"Cell Index":2,"PLMN Index":1,"PLMNID":"46002"},{"Cell Index":1,"PLMN Index":2,"PLMNID":"46001"}]`,
+			parameter: quicksettings.Param{Name: "PLMNID", StandardPath: "Device.Services.FAPService.{i}.CellConfig.{i}.NR.CN.TA.{i}.PLMNList.{i}.PLMNID"},
+			expected: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.2.NR.CN.TA.1.PLMNList.1.PLMNID": "46002",
+				"Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.PLMNList.2.PLMNID": "46001",
+			},
+		},
+		{
+			name: "LTE PLMN", technology: model.TechLTE, paramModel: "BLQ", sheet: "PLMN",
+			rows:      `[{"*CELL_NUMBER":2,"PLMN Index":3,"PLMNID":"46003"}]`,
+			parameter: quicksettings.Param{Name: "PLMNID", StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.PLMNID"},
+			expected: map[string]string{
+				"Device.Services.FAPService.2.CellConfig.LTE.EPC.PLMNList.3.PLMNID": "46003",
+			},
+		},
+		{
+			name: "BSC TRX", technology: model.TechGSM, paramModel: "BSC", sheet: "GSM_TRX",
+			rows:      `[{"BTS Index":2,"TRX Index":4,"Arfcn":"100"}]`,
+			parameter: quicksettings.Param{Name: "Arfcn", StandardPath: "DeviceGSM.Bts.{i}.Trx.{i}.Arfcn"},
+			expected:  map[string]string{"DeviceGSM.Bts.2.Trx.4.Arfcn": "100"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(fmt.Sprintf(
+				`{"paramConfigList":[{"serialNumber":"MULTI-CHILD","sheetParameters":{"%s":%s}}]}`,
+				test.sheet, test.rows,
+			))}
+			got, err := CompilePolicyParameters(policy, &model.Device{
+				SerialNumber: "MULTI-CHILD", Technology: test.technology,
+			}, test.paramModel, []quicksettings.Group{{Params: []quicksettings.Param{test.parameter}}})
+			require.NoError(t, err)
+			byPath := make(map[string]string)
+			for _, parameter := range got.Parameters {
+				byPath[parameter.TRPath] = parameter.Value
+			}
+			for path, value := range test.expected {
+				assert.Equal(t, value, byPath[path], path)
+			}
+		})
+	}
+}
+
+func TestCompilePolicyParametersRejectsAmbiguousOrDuplicatePrimaryInstances(t *testing.T) {
+	groups := []quicksettings.Group{{Params: []quicksettings.Param{{
+		Name: "PCI", StandardPath: "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.PhyCellID",
+	}}}}
+	device := &model.Device{SerialNumber: "NR-BAD-1", Technology: model.TechNR}
+
+	ambiguous := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{"serialNumber":"NR-BAD-1","sheetParameters":{"CELL":[{"PCI":1},{"PCI":2}]}}]
+	}`)}
+	_, err := CompilePolicyParameters(ambiguous, device, "BaiBNQ", groups)
+	require.ErrorContains(t, err, "requires an explicit instance index")
+
+	duplicate := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{"serialNumber":"NR-BAD-1","sheetParameters":{"CELL":[
+			{"Cell Index":1,"PCI":1},{"Cell Index":1,"PCI":2}
+		]}}]
+	}`)}
+	_, err = CompilePolicyParameters(duplicate, device, "BaiBNQ", groups)
+	require.ErrorContains(t, err, "duplicate primary instance 1")
 }
 
 func TestCompilePolicyParametersRejectsUnknownCustomPath(t *testing.T) {
