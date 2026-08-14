@@ -340,6 +340,28 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 		Tech:       object.Tech,
 		Profile:    object.Profile,
 	})
+	if group.Domain == DomainPM {
+		pmTech := pmExportTech(object.Tech)
+		pmFields, metricPaths, err := s.pmExportFields(ctx, group, object, fields, pmTech)
+		if err != nil {
+			return "", 0, err
+		}
+		rows, err := s.repo.LoadPMMetricRows(ctx, PMMetricQuery{
+			MetricPaths: metricPaths,
+			Tech:        pmTech,
+			WindowStart: &windowStart,
+			WindowEnd:   &windowEnd,
+			Limit:       normalizeLimit(limit),
+		})
+		if err != nil {
+			return "", 0, err
+		}
+		rows = enrichRowsWithLocalHost(rows, object, windowStart, windowEnd, s.configuredLocalHostToken(ctx))
+		if len(rows) == 0 {
+			return "", 0, nil
+		}
+		return renderRowsForGroup(group, pmFields, pivotPMMetricRows(rows))
+	}
 	// Honor per-profile field selection: empty SelectedFields = all catalog fields
 	// (default); non-empty = only the listed field keys, preserving catalog order.
 	fields = applySelectedFields(group.Domain, object.Code, fields, group.SelectedFields)
@@ -352,20 +374,6 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 	switch group.Domain {
 	case DomainCM:
 		rows, err = s.repo.LoadDeviceSnapshotRows(ctx, object.Tech, normalizeLimit(limit))
-	case DomainPM:
-		// PM exports in fixed-column long format; per-profile selection filters WHICH
-		// metric_paths are exported (SelectedFields carries metric paths for PM).
-		metricPaths := metricPathsFromFields(fields)
-		if len(group.SelectedFields) > 0 {
-			metricPaths = group.SelectedFields
-		}
-		rows, err = s.repo.LoadPMMetricRows(ctx, PMMetricQuery{
-			MetricPaths: metricPaths,
-			Tech:        object.Tech,
-			WindowStart: &windowStart,
-			WindowEnd:   &windowEnd,
-			Limit:       normalizeLimit(limit),
-		})
 	case DomainLOG:
 		rows, err = s.repo.LoadLogRows(ctx, object.Code, windowStart, windowEnd, normalizeLimit(limit))
 	default:
@@ -387,6 +395,128 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 		return renderLogRows(object.Code, rows)
 	}
 	return renderRowsForGroup(group, fields, rows)
+}
+
+func (s *Service) pmExportFields(ctx context.Context, group FileGroup, object ScenarioObject, baseFields []FieldDefinition, tech string) ([]FieldDefinition, []string, error) {
+	metricFields, err := s.repo.ListPMMetricFields(ctx, FieldFilter{
+		Domain:     DomainPM,
+		ObjectCode: object.Code,
+		Tech:       pmExportTech(tech),
+		Profile:    object.Profile,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	metricFields = selectPMMetricFields(metricFields, group.SelectedFields)
+	if len(metricFields) == 0 {
+		return nil, nil, fmt.Errorf("%w: no supported fields for %s %s", commonerrors.ErrInvalidInput, group.Domain, object.Code)
+	}
+	fields := make([]FieldDefinition, 0, len(baseFields)+len(metricFields))
+	fields = append(fields, pmWideBaseFields(baseFields)...)
+	fields = append(fields, metricFields...)
+	return fields, metricPathsFromFields(metricFields), nil
+}
+
+func pmExportTech(tech string) string {
+	normalized := normalizeTech(tech)
+	if normalized == "" {
+		return "LTE"
+	}
+	return normalized
+}
+
+func pmWideBaseFields(fields []FieldDefinition) []FieldDefinition {
+	keep := map[string]struct{}{
+		"pm.device_sn":   {},
+		"pm.granularity": {},
+		"pm.end_time":    {},
+		"pm.object_ldn":  {},
+	}
+	out := make([]FieldDefinition, 0, len(keep))
+	for _, field := range fields {
+		if _, ok := keep[field.SystemField]; ok {
+			out = append(out, field)
+		}
+	}
+	return out
+}
+
+func selectPMMetricFields(fields []FieldDefinition, wanted []string) []FieldDefinition {
+	if len(wanted) == 0 {
+		return fields
+	}
+	byIdentity := make(map[string]FieldDefinition, len(fields)*3)
+	for _, field := range fields {
+		for _, identity := range pmMetricFieldIdentities(field) {
+			byIdentity[identity] = field
+		}
+	}
+	added := make(map[string]struct{}, len(wanted))
+	out := make([]FieldDefinition, 0, len(wanted))
+	for _, candidate := range wanted {
+		field, ok := byIdentity[strings.ToLower(strings.TrimSpace(candidate))]
+		if !ok {
+			continue
+		}
+		key := strings.ToLower(field.Key)
+		if key == "" {
+			key = strings.ToLower(field.SystemField)
+		}
+		if _, exists := added[key]; exists {
+			continue
+		}
+		added[key] = struct{}{}
+		out = append(out, field)
+	}
+	if len(out) == 0 {
+		return fields
+	}
+	return out
+}
+
+func pmMetricFieldIdentities(field FieldDefinition) []string {
+	values := []string{field.SystemField, field.Key, field.OutputAlias}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if normalized != "" {
+			out = append(out, normalized)
+		}
+	}
+	return out
+}
+
+func pivotPMMetricRows(rows []ExportDataRow) []ExportDataRow {
+	out := make([]ExportDataRow, 0, len(rows))
+	indexByKey := make(map[string]int, len(rows))
+	for _, row := range rows {
+		key := pmMetricRowGroupKey(row)
+		index, ok := indexByKey[key]
+		if !ok {
+			index = len(out)
+			indexByKey[key] = index
+			out = append(out, ExportDataRow{
+				"pm.device_sn":   row["pm.device_sn"],
+				"pm.granularity": row["pm.granularity"],
+				"pm.end_time":    row["pm.end_time"],
+				"pm.object_ldn":  row["pm.object_ldn"],
+			})
+		}
+		metricPath := strings.TrimSpace(row["pm.metric_path"])
+		if metricPath != "" {
+			out[index][metricPath] = row["pm.metric_value"]
+		}
+	}
+	return out
+}
+
+func pmMetricRowGroupKey(row ExportDataRow) string {
+	return strings.Join([]string{
+		row["pm.device_sn"],
+		row["pm.object_ldn"],
+		row["pm.granularity"],
+		row["pm.end_time"],
+	}, "\x1f")
 }
 
 func (s *Service) generateInventoryContent(ctx context.Context, profile InventoryProfile, limit int) (string, int, error) {
@@ -962,7 +1092,7 @@ func metricPathsFromFields(fields []FieldDefinition) []string {
 	out := make([]string, 0, len(fields))
 	seen := make(map[string]struct{}, len(fields))
 	for _, field := range fields {
-		if field.Source != "pm_metric_dictionary.metric_path" || field.SystemField == "" {
+		if field.Domain != DomainPM || field.MetricType == "" || field.SystemField == "" {
 			continue
 		}
 		if _, ok := seen[field.SystemField]; ok {
