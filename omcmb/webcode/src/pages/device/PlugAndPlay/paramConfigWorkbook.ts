@@ -1,9 +1,6 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
-import {
-  getParamConfigTemplateDefaults,
-  getParamConfigTemplateSheets,
-} from './paramConfigTemplate';
+import { getParamConfigTemplateSheets } from './paramConfigTemplate';
 import { sanitizeRetiredParamConfigFields } from './retiredParamConfigFields';
 import type { ParamMapping } from '@core/types/paramModel';
 import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quicksettings';
@@ -216,32 +213,13 @@ function excludeEnbNeighborTemplateParam(
 
 function exampleValueForParam(
   param: QuickSettingsParam,
-  metadata: ParamConfigWorkbookMetadata,
 ): string {
   if (param.defaultValue !== undefined && param.defaultValue !== '') return String(param.defaultValue);
-  const path = param.standardPath ?? param.leaf ?? param.name;
-  const mappings = metadata.paramMappings ?? [];
-  const normalizedPath = normalizePath(path);
-  const modelMapping = mappings.find((item) => (
-    normalizePath(item.standardPath) === normalizedPath
-    || normalizePath(item.privatePath) === normalizedPath
-  )) ?? mappings.find((item) => {
-    return [item.standardPath, item.privatePath].flatMap(metadataKeys).some(
-      (key) => metadataKeys(path).includes(key),
-    );
-  });
-  const configuredField = (metadata.quickSettingFields ?? []).find(
-    (field) => canonicalHeader(field.id) === canonicalHeader(param.name),
-  );
-  const constraint = quickSettingConstraint(param, modelMapping, configuredField);
-  if (constraint.options?.length) return String(constraint.options[0]);
-  if (constraint.type === 'bool') return 'false';
-  if (constraint.type === 'int') return String(constraint.minValue ?? 0);
   return '';
 }
 
 function dynamicTemplateFields(metadata?: ParamConfigWorkbookMetadata): DynamicTemplateField[] {
-  if (!metadata?.deviceType || metadata.deviceType === 'GSM') return [];
+  if (!metadata?.deviceType) return [];
   const fixedFamilySeen = new Map<string, number>();
   return (metadata.quickSettingsGroups ?? []).flatMap((group) => {
     if (/(?:dscp|static-route)/i.test(group.id)) return [];
@@ -267,7 +245,7 @@ function dynamicTemplateFields(metadata?: ParamConfigWorkbookMetadata): DynamicT
           header: `${baseLabel}${variant.suffix || (fixedInstance ? ` [${fixedInstance}]` : '')}`,
           displayName: baseLabel,
           trPath: variant.path,
-          defaultValue: exampleValueForParam(param, metadata),
+          defaultValue: exampleValueForParam(param),
         }));
     });
     if (group.multiInstance && !cellLevel && !ipsecTunnel && !fixedMatch) {
@@ -284,11 +262,18 @@ function dynamicTemplateFields(metadata?: ParamConfigWorkbookMetadata): DynamicT
 
 function uniqueDynamicTemplateFields(metadata?: ParamConfigWorkbookMetadata): DynamicTemplateField[] {
   const occurrences = new Map<string, number>();
-  return dynamicTemplateFields(metadata).map((field) => {
+  const cellHeaders = new Set<string>();
+  return dynamicTemplateFields(metadata).flatMap((field) => {
+    if (canonicalHeader(field.sheet) === 'CELL') {
+      const header = canonicalHeader(field.header);
+      if (cellHeaders.has(header)) return [];
+      cellHeaders.add(header);
+      return [field];
+    }
     const key = `${canonicalHeader(field.sheet)}.${canonicalHeader(field.header)}`;
     const occurrence = (occurrences.get(key) ?? 0) + 1;
     occurrences.set(key, occurrence);
-    return occurrence === 1 ? field : { ...field, header: `${field.header} [${occurrence}]` };
+    return [occurrence === 1 ? field : { ...field, header: `${field.header} [${occurrence}]` }];
   });
 }
 
@@ -468,7 +453,10 @@ function metadataConstraint(
         normalizePath(item.standardPath) === normalizePath(trPath)
         || normalizePath(item.privatePath) === normalizePath(trPath)
       ));
-      return quickSettingConstraint(param, mapping, configuredField);
+      const paramField = configuredField ?? metadata?.quickSettingFields?.find(
+        (field) => canonicalHeader(field.id) === canonicalHeader(param.name),
+      );
+      return quickSettingConstraint(param, mapping, paramField);
     }
   }
   for (const mapping of metadata?.paramMappings ?? []) {
@@ -529,7 +517,11 @@ function appendPreservedParameterMappingSheet(
   if (workbook.Sheets[PARAM_MAPPING_SHEET]
     || !configs.some((config) => config.workbookMappings !== undefined)) return;
   const seen = new Set<string>();
-  const mappings = configs.flatMap((config) => config.workbookMappings ?? []).filter((mapping) => {
+  const mappings = configs.flatMap((config) => (config.workbookMappings ?? []).filter((mapping) => !(
+    config.deviceType === 'gNB'
+      && canonicalHeader(mapping.sheet) === 'CELL'
+      && canonicalHeader(mapping.header) === 'DUPLEXMODE'
+  ))).filter((mapping) => {
     const pathIdentity = mapping.trPath.trim().toLowerCase();
     const key = `${canonicalHeader(mapping.sheet)}.${pathIdentity || `header:${canonicalHeader(mapping.header)}`}`;
     if (seen.has(key)) return false;
@@ -550,62 +542,47 @@ function appendPreservedParameterMappingSheet(
   XLSX.utils.book_append_sheet(workbook, worksheet, PARAM_MAPPING_SHEET);
 }
 
-function orderedDeduplicatedSheetRows(
-  configs: readonly ParamConfigSpreadsheetRow[],
-  sheetName: string,
+function orderedImportedSheetRows(
   rows: Array<Record<string, unknown>>,
 ): { headers: string[]; rows: Array<Record<string, unknown>> } {
   const rawHeaders = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
-  const rawHeaderSet = new Set(rawHeaders);
-  const mappings = configs.flatMap((config) => config.workbookMappings ?? [])
-    .filter((mapping) => canonicalHeader(mapping.sheet) === canonicalHeader(sheetName));
-  const mappingByHeader = new Map<string, ParamConfigWorkbookMapping>();
-  for (const mapping of mappings) {
-    const key = canonicalHeader(mapping.header);
-    if (!mappingByHeader.has(key)) mappingByHeader.set(key, mapping);
-  }
-  const templateHeaders = configs.flatMap((config) => (
-    getParamConfigTemplateSheets(config.deviceType)?.[sheetName] ?? []
-  )).filter((header, index, all) => rawHeaderSet.has(header) && all.indexOf(header) === index);
-  const candidates = Array.from(new Set([
-    ...templateHeaders,
-    ...mappings.map((mapping) => mapping.header).filter((header) => rawHeaderSet.has(header)),
-    ...rawHeaders,
-  ]));
-  const aliasesByIdentity = new Map<string, string[]>();
-  const headers: string[] = [];
-  for (const header of candidates) {
-    const mapping = mappingByHeader.get(canonicalHeader(header));
-    const identity = mapping?.trPath.trim()
-      ? `path:${mapping.trPath.trim().toLowerCase()}`
-      : `header:${canonicalHeader(header)}`;
-    const aliases = aliasesByIdentity.get(identity);
-    if (aliases) {
-      aliases.push(header);
-    } else {
-      aliasesByIdentity.set(identity, [header]);
-      headers.push(header);
-    }
-  }
-  const aliasesByHeader = new Map(headers.map((header) => {
-    const mapping = mappingByHeader.get(canonicalHeader(header));
-    const identity = mapping?.trPath.trim()
-      ? `path:${mapping.trPath.trim().toLowerCase()}`
-      : `header:${canonicalHeader(header)}`;
-    return [header, aliasesByIdentity.get(identity) ?? [header]] as const;
-  }));
+  const headers = rawHeaders.sort((left, right) => {
+    const leftIsSerial = canonicalHeader(left) === 'SERIALNUMBER';
+    const rightIsSerial = canonicalHeader(right) === 'SERIALNUMBER';
+    return leftIsSerial === rightIsSerial ? 0 : leftIsSerial ? -1 : 1;
+  });
   return {
     headers,
-    rows: rows.map((row) => Object.fromEntries(headers.map((header) => {
-      const aliases = aliasesByHeader.get(header) ?? [header];
-      const populatedAlias = aliases.find((alias) => {
-        const value = row[alias];
-        return value !== undefined && value !== null && String(value).trim() !== '';
-      });
-      const fallbackAlias = aliases.find((alias) => row[alias] !== undefined);
-      return [header, row[populatedAlias ?? fallbackAlias ?? header] ?? ''];
-    }))),
+    rows,
   };
+}
+
+function rowWithExplicitSerialNumber(
+  row: Record<string, unknown>,
+  serialNumber: string,
+): Record<string, unknown> {
+  const serialHeader = Object.keys(row).find((header) => canonicalHeader(header) === 'SERIALNUMBER');
+  if (serialHeader) {
+    return {
+      [serialHeader]: String(row[serialHeader] ?? '').trim() || serialNumber,
+      ...Object.fromEntries(Object.entries(row).filter(([header]) => header !== serialHeader)),
+    };
+  }
+  return { 'Serial Number': serialNumber, ...row };
+}
+
+function mappedWorkbookRow(
+  config: ParamConfigSpreadsheetRow,
+  sheetName: string,
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!config.workbookMappings?.length) return row;
+  const mappedHeaders = new Set(config.workbookMappings
+    .filter((mapping) => canonicalHeader(mapping.sheet) === canonicalHeader(sheetName))
+    .map((mapping) => canonicalHeader(mapping.header)));
+  return Object.fromEntries(Object.entries(row).filter(([header]) => (
+    canonicalHeader(header) === 'SERIALNUMBER' || mappedHeaders.has(canonicalHeader(header))
+  )));
 }
 
 export function createParamConfigWorkbook(
@@ -618,10 +595,13 @@ export function createParamConfigWorkbook(
     const workbook = XLSX.utils.book_new();
     for (const sheetName of sourceSheetNames) {
       const rows = configs.flatMap((config) => (
-        sanitizeRetiredParamConfigFields(config.sheetParameters ?? {})[sheetName] ?? []
-      ));
+        sanitizeRetiredParamConfigFields(config.sheetParameters ?? {}, config.deviceType)[sheetName] ?? []
+      ).map((row) => rowWithExplicitSerialNumber(
+        mappedWorkbookRow(config, sheetName, row),
+        config.serialNumber,
+      )));
       if (rows.length === 0) continue;
-      const normalized = orderedDeduplicatedSheetRows(configs, sheetName, rows);
+      const normalized = orderedImportedSheetRows(rows);
       const { headers } = normalized;
       const worksheet = XLSX.utils.aoa_to_sheet([
         headers,
@@ -661,44 +641,19 @@ export function createParamConfigTemplateWorkbook(
   deviceType: ParamConfigDeviceType,
   metadata?: ParamConfigWorkbookMetadata,
 ): XLSX.WorkBook {
-  const sheets = getParamConfigTemplateSheets(deviceType);
-  if (!sheets) throw new ParamConfigWorkbookError('empty_workbook');
   const dynamicFields = uniqueDynamicTemplateFields({ ...metadata, deviceType });
-  if (dynamicFields.length > 0) {
-    const workbook = XLSX.utils.book_new();
-    const sheetNames = [...Object.keys(sheets)];
-    if (dynamicFields.some((field) => field.sheet === '1588_CONFIGURATION')
-      && !sheetNames.includes('1588_CONFIGURATION')) {
-      const ipsecIndex = sheetNames.indexOf('IPSEC');
-      sheetNames.splice(ipsecIndex >= 0 ? ipsecIndex : sheetNames.length, 0, '1588_CONFIGURATION');
-    }
-    for (const sheetName of sheetNames) {
-      const fields = dynamicFields.filter((field) => field.sheet === sheetName);
-      const headers = ['Serial Number', ...fields.map((field) => field.header)];
-      const worksheet = XLSX.utils.aoa_to_sheet([
-        headers,
-        [PARAM_TEMPLATE_EXAMPLE_SERIAL, ...fields.map((field) => field.defaultValue)],
-      ]);
-      worksheet['!cols'] = headers.map((header) => ({ wch: Math.min(Math.max(header.length + 2, 16), 38) }));
-      worksheet['!autofilter'] = { ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}2` };
-      XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
-    }
-    return workbook;
-  }
-  const defaults = getParamConfigTemplateDefaults(deviceType);
+  if (dynamicFields.length === 0) throw new ParamConfigWorkbookError('empty_workbook');
   const workbook = XLSX.utils.book_new();
-  for (const [sheetName, headers] of Object.entries(sheets)) {
-    const defaultRow = defaults[sheetName] ?? {};
+  const sheetNames = Array.from(new Set(dynamicFields.map((field) => field.sheet)));
+  for (const sheetName of sheetNames) {
+    const fields = dynamicFields.filter((field) => field.sheet === sheetName);
+    const headers = ['Serial Number', ...fields.map((field) => field.header)];
     const worksheet = XLSX.utils.aoa_to_sheet([
-      [...headers],
-      headers.map((header) => (
-        canonicalHeader(header) === 'SERIALNUMBER'
-          ? PARAM_TEMPLATE_EXAMPLE_SERIAL
-          : defaultRow[header] ?? ''
-      )),
+      headers,
+      [PARAM_TEMPLATE_EXAMPLE_SERIAL, ...fields.map((field) => field.defaultValue)],
     ]);
     worksheet['!cols'] = headers.map((header) => ({
-      wch: Math.min(Math.max(header.length + 2, 14), 34),
+      wch: Math.min(Math.max(header.length + 2, 16), 38),
     }));
     worksheet['!autofilter'] = { ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}2` };
     XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
@@ -962,6 +917,22 @@ function parseMappedTemplateWorkbook(
     mappingByColumn.set(key, mapping);
   }
 
+  const realSerialNumbers = new Set<string>();
+  for (const sheetName of workbook.SheetNames) {
+    if (sheetName === PARAM_MAPPING_SHEET || sheetName === '__XOMC_OPTIONS') continue;
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) continue;
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1, defval: '', raw: true });
+    const headers = (matrix[0] ?? []).map(normalizeHeader);
+    const serialIndex = headers.findIndex((header) => canonicalHeader(header) === 'SERIALNUMBER');
+    if (serialIndex < 0) continue;
+    for (const values of matrix.slice(1)) {
+      const serialNumber = String(values[serialIndex] ?? '').trim();
+      if (serialNumber && serialNumber !== PARAM_TEMPLATE_EXAMPLE_SERIAL) {
+        realSerialNumbers.add(serialNumber);
+      }
+    }
+  }
   const rowsBySerial = new Map<string, ParamConfigSpreadsheetRow>();
   for (const sheetName of workbook.SheetNames) {
     if (sheetName === PARAM_MAPPING_SHEET || sheetName === '__XOMC_OPTIONS') continue;
@@ -988,6 +959,9 @@ function parseMappedTemplateWorkbook(
       if (!serialNumber) {
         if (values.every((value) => String(value ?? '').trim() === '')) return;
         throw new ParamConfigWorkbookError('invalid_row', sheetRow, 'serialNumber');
+      }
+      if (serialNumber === PARAM_TEMPLATE_EXAMPLE_SERIAL && realSerialNumbers.size > 0) {
+        throw new ParamConfigWorkbookError('invalid_row', sheetRow, `${sheetName}.Serial Number`);
       }
       const parameters = Object.fromEntries(headers.flatMap((header, index) => {
         if (!header) return [];

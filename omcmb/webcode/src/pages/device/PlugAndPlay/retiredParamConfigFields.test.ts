@@ -13,4 +13,13 @@ describe('sanitizeRetiredParamConfigFields', () => {
       NETWORK: [{ 'WAN IP': '192.0.2.20' }],
     });
   });
+
+  it('removes Duplex Mode only from 5G CELL parameters', () => {
+    const sheets = { CELL: [{ 'Duplex Mode': 'TDD', PCI: 10 }] };
+
+    expect(sanitizeRetiredParamConfigFields(sheets, 'gNB')).toEqual({
+      CELL: [{ PCI: 10 }],
+    });
+    expect(sanitizeRetiredParamConfigFields(sheets, 'eNB')).toEqual(sheets);
+  });
 });

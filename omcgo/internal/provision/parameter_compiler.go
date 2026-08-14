@@ -129,28 +129,6 @@ var ignoredPolicyFields = map[string]struct{}{
 	"timezoneterm": {}, "omcip": {},
 }
 
-// These planning-workbook fields are shared across product families, but a
-// particular device model may not expose a writable TR-069 parameter for one
-// of them. Preserve them in the policy while compiling every supported field.
-var optionalPlanningFields = map[string]struct{}{
-	"ipa": {}, "bindip": {}, "wanip": {}, "synchronization": {}, "omc": {},
-	// The shared gNB planning workbook contains composite or informational
-	// fields that do not have a safe one-to-one BaiBNQ TR-069 path. Preserve
-	// them in the policy snapshot instead of binding them to an unrelated leaf
-	// with the same name from the full product parameter table.
-	"duplexmode": {}, "prachrootsequenceindex": {}, "prachrootsequencevalue": {},
-	"sd": {}, "sdvalue": {},
-	"addresstype": {}, "ipaddress": {}, "subnetmask": {}, "prefixlength": {}, "gateway": {},
-	"beartype": {}, "vlanname": {}, "forceencaps": {},
-	// The shared eNB workbook always carries the complete PTP/1588 section,
-	// while individual product models expose only the subset they support.
-	// Keep unsupported planning values in the policy snapshot and compile the
-	// supported ones through quick-settings/product mappings.
-	"1588enable": {}, "syncmode": {}, "modeswitch": {}, "domain": {},
-	"syncinterval": {}, "delayinterval": {}, "asymmetry": {}, "startuptime": {},
-	"unicastserveripaddress": {},
-}
-
 // CompilePolicyParameters resolves the current UI/import snapshot against
 // quick-settings definitions only. Production execution uses
 // CompilePolicyParametersWithMappings to add product parameter-table fallback.
@@ -201,20 +179,33 @@ func CompilePolicyParametersWithMappings(
 	}
 
 	definitions, aliases := buildParameterDefinitions(groups, mappings)
+	networkType, defaultVersion := networkProfile(device, paramModel)
+	omitDuplexMode := networkType == "NR"
 	compiled := make(map[string]ResolvedParameter)
 	for rowIndex, row := range selected {
-		rowAliases, err := applyWorkbookParameterMappings(row, definitions, aliases)
+		compileRow := row
+		if omitDuplexMode {
+			compileRow = withoutWorkbookFieldMappings(row, "duplexmode")
+		}
+		rowAliases, err := applyWorkbookParameterMappings(compileRow, definitions, aliases)
 		if err != nil {
 			return nil, err
 		}
 		cellIndex := rowIndex + 1
-		hasSheetData, err := compileSheetParameters(row, definitions, rowAliases, cellIndex, compiled)
+		hasSheetData, err := compileSheetParameters(compileRow, definitions, rowAliases, cellIndex, omitDuplexMode, compiled)
 		if err != nil {
 			return nil, err
 		}
-		for key, raw := range row {
+		hasAuthoritativeWorkbook := hasSheetData && len(mapSlice(compileRow["workbookMappings"])) > 0
+		for key, raw := range compileRow {
 			normalized := normalizeParameterKey(key)
 			if _, ignored := ignoredPolicyFields[normalized]; ignored {
+				continue
+			}
+			if omitDuplexMode && normalized == "duplexmode" {
+				continue
+			}
+			if hasAuthoritativeWorkbook {
 				continue
 			}
 			if hasSheetData && isWorkbookSummaryField(normalized) {
@@ -228,10 +219,12 @@ func CompilePolicyParametersWithMappings(
 				return nil, err
 			}
 		}
-		if err := compileListValues(row, rowIndex, cellIndex, definitions, aliases, compiled); err != nil {
-			return nil, err
+		if !hasAuthoritativeWorkbook {
+			if err := compileListValues(compileRow, rowIndex, cellIndex, definitions, aliases, compiled); err != nil {
+				return nil, err
+			}
 		}
-		if err := compileCustomParameters(row, rowIndex, definitions, compiled); err != nil {
+		if err := compileCustomParameters(compileRow, rowIndex, definitions, compiled); err != nil {
 			return nil, err
 		}
 	}
@@ -246,7 +239,6 @@ func CompilePolicyParametersWithMappings(
 	}
 	sort.Slice(params, func(i, j int) bool { return params[i].TRPath < params[j].TRPath })
 
-	networkType, defaultVersion := networkProfile(device, paramModel)
 	version := strings.TrimSpace(valueString(root["dataModelVersion"]))
 	if version == "" {
 		version = defaultVersion
@@ -259,6 +251,30 @@ func CompilePolicyParametersWithMappings(
 		NetworkType: networkType, DataModelVersion: version,
 		Parameters: params, VendorSpecific: vendorSpecific,
 	}, nil
+}
+
+func withoutWorkbookFieldMappings(row map[string]any, normalizedHeader string) map[string]any {
+	mappings, ok := row["workbookMappings"].([]any)
+	if !ok || len(mappings) == 0 {
+		return row
+	}
+	filtered := make([]any, 0, len(mappings))
+	for _, raw := range mappings {
+		mapping, ok := raw.(map[string]any)
+		if ok && normalizeParameterKey(valueString(mapping["header"])) == normalizedHeader {
+			continue
+		}
+		filtered = append(filtered, raw)
+	}
+	if len(filtered) == len(mappings) {
+		return row
+	}
+	copy := make(map[string]any, len(row))
+	for key, value := range row {
+		copy[key] = value
+	}
+	copy["workbookMappings"] = filtered
+	return copy
 }
 
 func applyWorkbookParameterMappings(
@@ -511,6 +527,7 @@ func compileSheetParameters(
 	definitions map[string]parameterDefinition,
 	aliases map[string]string,
 	defaultCell int,
+	omitDuplexMode bool,
 	compiled map[string]ResolvedParameter,
 ) (bool, error) {
 	sheets, ok := row["sheetParameters"].(map[string]any)
@@ -524,7 +541,7 @@ func compileSheetParameters(
 			handled := make(map[string]struct{})
 			ipa, hasIPA := valueByNormalizedKey(sheetRow, "ipa")
 			unitID, hasUnitID := valueByNormalizedKey(sheetRow, "unitid")
-			if hasIPA && hasUnitID && valueString(ipa) != "" && valueString(unitID) != "" {
+			if !strictWorkbookMappings && hasIPA && hasUnitID && valueString(ipa) != "" && valueString(unitID) != "" {
 				if id, exists := aliases["ipaunitid"]; exists && (strings.Contains(definitions[id].Template, "GsmBTSCellDT") ||
 					strings.Contains(definitions[id].Template, "DeviceGSM.Bts.{i}")) {
 					if err := compileValue("IPAUnitID", fmt.Sprintf("%s-%s", valueString(ipa), valueString(unitID)),
@@ -538,6 +555,9 @@ func compileSheetParameters(
 			}
 			for header, value := range sheetRow {
 				normalized := normalizeParameterKey(header)
+				if omitDuplexMode && normalized == "duplexmode" {
+					continue
+				}
 				if _, alreadyHandled := handled[normalized]; alreadyHandled {
 					continue
 				}
@@ -549,16 +569,7 @@ func compileSheetParameters(
 				}
 				qualifiedKey := normalizeParameterKey(sheetName + "." + header)
 				if strictWorkbookMappings {
-					_, hasQualifiedMapping := aliases[qualifiedKey]
-					_, hasRegisteredAlias := aliases[normalized]
-					_, optionalPlanningField := optionalPlanningFields[normalized]
-					if !hasQualifiedMapping && !hasRegisteredAlias && !optionalPlanningField {
-						return true, &ConfigValidationError{Message: fmt.Sprintf(
-							"workbook parameter column has no mapping: %s.%s", sheetName, header)}
-					}
-				}
-				if _, supported := aliases[normalized]; !supported {
-					if _, optional := optionalPlanningFields[normalized]; optional {
+					if _, hasQualifiedMapping := aliases[qualifiedKey]; !hasQualifiedMapping {
 						continue
 					}
 				}
@@ -664,6 +675,13 @@ func compileCustomParameters(
 			continue
 		}
 		if isDeviceMatchOnlyParameter(path) {
+			continue
+		}
+		if existing, exists := compiled[path]; exists && existing.Source == "import" {
+			// A workbook column with an explicit parameter mapping is the
+			// canonical public-parameter value. Old editor snapshots may retain
+			// the same path in customParams; do not let that stale copy override
+			// or conflict with the mapped value.
 			continue
 		}
 		var matched *parameterDefinition

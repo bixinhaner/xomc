@@ -75,12 +75,11 @@ import {
   type ParamConfigDeviceType,
   type ParamConfigWorkbookMapping,
 } from './paramConfigWorkbook';
-import { getParamConfigTemplate, toParamConfigDeviceType } from './paramConfigTemplate';
+import { toParamConfigDeviceType } from './paramConfigTemplate';
 import { getParamConfigExportFields } from './paramConfigExportFields';
 import {
   mergeParamConfigFormValues,
   toParamConfigFormValues,
-  withTemplateSheetParameters,
 } from './paramConfigDetail';
 import { isParamConfigToolbarEnabled } from './paramConfigToolbarAvailability';
 import {
@@ -96,6 +95,7 @@ import ProductClassSelect from './components/ProductClassSelect';
 import PolicyReadOnlySection from './components/PolicyReadOnlySection';
 import CommonParameterConfigPanel, { ParameterConfigFields } from './CommonParameterConfigPanel';
 import { sanitizeCommonParamConfig } from './commonParameterConfig';
+import { buildParamConfigListPolicyUpdate } from './paramConfigPersistence';
 
 const { Text, Title } = Typography;
 
@@ -237,7 +237,6 @@ interface ParamConfig {
   dlbandwidth?: string;  // 下行带宽
   ssbFrequency?: number;  // SSB频率号，范围0~3279165
   nrarfcnul?: number;  // 上行NRARFCN
-  duplexMode?: 'TDD' | 'FDD';  // 基站制式
   frameOffset?: number;
   arfcn?: number;
   ssbAbsoluteFrequency?: number;
@@ -422,7 +421,6 @@ const _MOCK_PARAM_CONFIGS: ParamConfig[] = [
     nrarfcnndl: 360000,
     dlbandwidth: '100MHz',
     ssbFrequency: 3600000,
-    duplexMode: 'TDD',
     arfcn: 360000,
     ssbAbsoluteFrequency: 3600000,
     frameOffset: 0,
@@ -865,7 +863,7 @@ export default function AddPolicyPage() {
       : [{ groups: [] }, { items: [] }];
     const safeSerialNumber = record.serialNumber.replace(/[\\/:*?"<>|]+/g, '_');
     await writeParamConfigWorkbookFile(
-      createParamConfigWorkbook([withTemplateSheetParameters(record)]),
+      createParamConfigWorkbook([record]),
       `${safeSerialNumber}-${t('provision.paramConfigExportFileSuffix')}.xlsx`,
       {
         deviceType: record.deviceType as ParamConfigDeviceType,
@@ -878,6 +876,25 @@ export default function AddPolicyPage() {
     void message.success(t('provision.paramConfigExportSuccess', { count: 1 }));
   }, [productClass, selectedProduct?.paramModelName, t]);
 
+  const handleDeleteParamConfig = useCallback(async (record: ParamConfig) => {
+    const previous = paramConfigList;
+    const next = previous.filter((item) => item.id !== record.id);
+    setParamConfigList(next);
+    if (!isEdit || !persistedPolicy) {
+      void message.success(t('common.success'));
+      return;
+    }
+    try {
+      await savePolicyMutation.mutateAsync(
+        buildParamConfigListPolicyUpdate(persistedPolicy, next),
+      );
+      void message.success(t('common.success'));
+    } catch {
+      setParamConfigList(previous);
+      void message.error(t('common.failed'));
+    }
+  }, [isEdit, paramConfigList, persistedPolicy, savePolicyMutation, t]);
+
   const operationColumn = {
     title: t('table.operation'),
     key: 'action',
@@ -887,22 +904,20 @@ export default function AddPolicyPage() {
       const items: MenuProps['items'] = [
         { key: 'edit', label: t('common.edit'), icon: <EditOutlined />,
           onClick: () => {
-            const hydrated = withTemplateSheetParameters(record);
-            setCurrentConfig(hydrated);
+            setCurrentConfig(record);
             setConfigDetailMode('edit');
             setConfigDetailVisible(true);
           },
         },
         { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true,
-          onClick: () => { setParamConfigList(prev => prev.filter(item => item.id !== record.id)); void message.success(t('common.success')); },
+          onClick: () => { void handleDeleteParamConfig(record); },
         },
       ];
       return (
         <Space size={4}>
           <Button type="link" size="small" icon={<EyeOutlined />}
             onClick={() => {
-              const hydrated = withTemplateSheetParameters(record);
-              setCurrentConfig(hydrated);
+              setCurrentConfig(record);
               setConfigDetailMode('view');
               setConfigDetailVisible(true);
             }}>
@@ -1086,12 +1101,6 @@ export default function AddPolicyPage() {
       void message.warning(t('provision.selectProductClassFirst'));
       return;
     }
-    const template = getParamConfigTemplate(activeParamDeviceType);
-    if (!template) {
-      void message.warning(t('provision.paramConfigTemplateUnavailable'));
-      return;
-    }
-
     if (!activeParamDeviceType) return;
     const paramModelName = selectedProduct?.paramModelName;
     const [quickSettings, mappings] = paramModelName
@@ -1100,6 +1109,10 @@ export default function AddPolicyPage() {
         paramModelApi.listMappings(paramModelName),
       ])
       : [{ groups: [] }, { items: [] }];
+    if (quickSettings.groups.length === 0) {
+      void message.warning(t('provision.paramConfigTemplateUnavailable'));
+      return;
+    }
     await writeParamConfigWorkbookFile(
       createParamConfigTemplateWorkbook(activeParamDeviceType, {
         deviceType: activeParamDeviceType,
@@ -1108,7 +1121,7 @@ export default function AddPolicyPage() {
         paramMappings: mappings.items,
         quickSettingFields: getParamConfigExportFields(activeParamDeviceType),
       }),
-      template.fileName,
+      `${productClass.replace(/[\\/:*?"<>|]+/g, '_')}-${t('provision.paramConfigExportFileSuffix')}.xlsx`,
       {
         deviceType: activeParamDeviceType,
         productClass,
@@ -1134,7 +1147,8 @@ export default function AddPolicyPage() {
 
   // Handle config form submit
   const handleConfigFormSubmit = useCallback(() => {
-    configForm.validateFields().then(values => {
+    configForm.validateFields().then(() => {
+      const values = configForm.getFieldsValue(true);
       if (currentConfig) {
         // Edit mode
         setParamConfigList(prev => prev.map(item =>

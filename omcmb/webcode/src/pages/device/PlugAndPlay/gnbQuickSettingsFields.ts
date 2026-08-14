@@ -164,7 +164,7 @@ export const GNB_QUICK_SETTING_GROUPS: GnbQuickSettingGroup[] = [
       { id: 'DLSubCarrierSpacing', name: sheetField('CELL', 'SubcarrierSpacing(DL)'), labelKey: 'provision.nrQuick.dlSubcarrierSpacing', control: 'select', options: scsOptions },
       { id: 'ULSubCarrierSpacing', name: sheetField('CELL', 'SubcarrierSpacing(UL)'), labelKey: 'provision.nrQuick.ulSubcarrierSpacing', control: 'select', options: scsOptions },
       { id: 'DLCarrierBandWidth', name: 'dlbandwidth', labelKey: 'provision.nrQuick.dlCarrierBandwidth', control: 'dl-bandwidth' },
-      { id: 'ULCarrierBandWidth', name: sheetField('CELL', 'ULBandwidth'), labelKey: 'provision.nrQuick.ulCarrierBandwidth', control: 'ul-bandwidth' },
+      { id: 'ULCarrierBandWidth', name: 'ulbandwidth', labelKey: 'provision.nrQuick.ulCarrierBandwidth', control: 'ul-bandwidth' },
       { id: 'NRARFCNDL', name: 'nrarfcnndl', labelKey: 'provision.nrQuick.nrDlArfcn', range: '0 ~ 3279165' },
       { id: 'NRARFCNUL', name: 'nrarfcnul', labelKey: 'provision.nrQuick.nrUlArfcn', range: '0 ~ 3279165' },
       { id: 'NumOfRxAntenna', name: sheetField('CELL', 'ULAntNum'), labelKey: 'provision.nrQuick.rxAntennaCount', range: '1 ~ 4' },
@@ -210,7 +210,6 @@ export const GNB_QUICK_SETTING_GROUPS: GnbQuickSettingGroup[] = [
 
 export const GNB_TEMPLATE_EXTRA_FIELDS: GnbQuickSettingField[] = [
   { id: 'RANAC', name: 'ranac', labelKey: 'provision.nrQuick.ranac', range: '0 ~ 255' },
-  { id: 'DuplexMode', name: 'duplexMode', labelKey: 'provision.nrQuick.duplexMode', control: 'select', options: technicalOptions(['TDD', 'FDD']) },
   { id: 'PrachRootSequenceIndex', name: sheetField('CELL', 'Prach RootSequenceIndex'), labelKey: 'provision.nrQuick.prachRootSequenceIndex' },
   { id: 'PrachRootSequenceValue', name: sheetField('CELL', 'Prach RootSequenceValue'), labelKey: 'provision.nrQuick.prachRootSequenceValue' },
   { id: 'FORCEENCAPS', name: sheetField('IPSEC', 'FORCEENCAPS'), labelKey: 'provision.nrQuick.forceEncapsulation' },

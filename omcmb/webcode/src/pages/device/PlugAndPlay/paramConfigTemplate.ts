@@ -60,7 +60,7 @@ const PARAM_CONFIG_TEMPLATE_SHEETS: Partial<
     CELL: [
       '*Serial Number', 'gNB Name', '*gNB ID', '*gNB Lenth', '*PCI',
       'SSB Frequency', 'Freq BandIndicator', 'NRARFCNDL', 'NRARFCNUL',
-      'DLBandwidth', 'ULBandwidth', 'Duplex Mode', 'DLAntNum', 'ULAntNum',
+      'DLBandwidth', 'ULBandwidth', 'DLAntNum', 'ULAntNum',
       'DL ULTransmissionPeriodicity1', 'Nrof DownlinkSlots1',
       'Nrof DownlinkSymbols1', 'Nrof  UplinkSlots1', 'Nrof  UplinkSymbols1',
       'DL ULTransmissionPeriodicity2', 'Nrof  DownlinkSlots2',
