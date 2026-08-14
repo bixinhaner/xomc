@@ -394,6 +394,22 @@
   margin-bottom: 10px;
 }
 
+.deliveryTargetValidationSummary {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.deliveryTargetEditorField {
+  display: grid;
+  gap: 3px;
+}
+
+.deliveryTargetFieldError {
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
 .fieldConfigTools {
   justify-content: flex-end;
 }
