@@ -349,10 +349,10 @@ func (r *PgRepository) ListSNMPAlarmTargets(ctx context.Context) ([]SNMPAlarmTar
 	rows, err := r.pool.Query(ctx, `
 SELECT id::text, target_key, name, enabled, version, notification_type, listen_ip,
        listen_port, target_host, target_port, community_secret <> '' AS community_set,
-       CASE WHEN community_secret = 'baicells' THEN community_secret ELSE '' END AS community,
        security_name, auth_protocol, auth_secret <> '' AS auth_credential_set,
        priv_protocol, priv_secret <> '' AS priv_credential_set, clear_severity_policy,
-       mib_query_enabled, timeout_seconds, retries, mib_fields, created_at, updated_at
+       mib_query_enabled, timeout_seconds, retries, mib_fields, created_at, updated_at,
+       community_secret, auth_secret, priv_secret
   FROM northbound_snmp_alarm_targets
  ORDER BY target_key ASC`)
 	if err != nil {
@@ -361,7 +361,7 @@ SELECT id::text, target_key, name, enabled, version, notification_type, listen_i
 	defer rows.Close()
 	out := make([]SNMPAlarmTarget, 0)
 	for rows.Next() {
-		target, err := scanSNMPAlarmTarget(rows)
+		target, err := scanSNMPAlarmTargetWithSecrets(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -461,17 +461,17 @@ ON CONFLICT (target_key) DO UPDATE SET
   retries=EXCLUDED.retries, mib_fields=EXCLUDED.mib_fields
 RETURNING id::text, target_key, name, enabled, version, notification_type, listen_ip,
           listen_port, target_host, target_port, community_secret <> '' AS community_set,
-          CASE WHEN community_secret = 'baicells' THEN community_secret ELSE '' END AS community,
           security_name, auth_protocol, auth_secret <> '' AS auth_credential_set,
           priv_protocol, priv_secret <> '' AS priv_credential_set, clear_severity_policy,
-          mib_query_enabled, timeout_seconds, retries, mib_fields, created_at, updated_at`,
+          mib_query_enabled, timeout_seconds, retries, mib_fields, created_at, updated_at,
+          community_secret, auth_secret, priv_secret`,
 		target.Key, target.Name, target.Enabled, target.Version, target.NotificationType,
 		target.ListenIP, target.ListenPort, target.TargetHost, target.TargetPort,
 		credentialToPersist(target.Community, current.community), target.SecurityName, target.AuthProtocol,
 		credentialToPersist(target.AuthCredential, current.auth), target.PrivProtocol,
 		credentialToPersist(target.PrivCredential, current.priv), target.ClearSeverityPolicy,
 		target.MIBQueryEnabled, target.TimeoutSeconds, target.Retries, fields)
-	return scanSNMPAlarmTarget(row)
+	return scanSNMPAlarmTargetWithSecrets(row)
 }
 
 func (r *PgRepository) ListSocketAlarmConfigs(ctx context.Context) ([]SocketAlarmConfig, error) {
@@ -488,7 +488,7 @@ SELECT id::text, config_key, name, enabled, profile, mode, listen_ip, listen_por
 	defer rows.Close()
 	out := make([]SocketAlarmConfig, 0)
 	for rows.Next() {
-		config, err := scanSocketAlarmConfig(rows)
+		config, err := scanSocketAlarmConfigWithSecrets(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -553,7 +553,7 @@ RETURNING id::text, config_key, name, enabled, profile, mode, listen_ip, listen_
 		config.Key, config.Name, config.Enabled, config.Profile, config.Mode, config.ListenIP,
 		config.ListenPort, config.MaxClients, config.RealtimePushEnabled, config.ClientSyncEnabled,
 		config.HeartbeatSeconds, config.HeartbeatTimes, config.IdleTimeoutSeconds, accounts)
-	return scanSocketAlarmConfig(row)
+	return scanSocketAlarmConfigWithSecrets(row)
 }
 
 func (r *PgRepository) ListAPIConfigs(ctx context.Context) ([]APIConfig, error) {
