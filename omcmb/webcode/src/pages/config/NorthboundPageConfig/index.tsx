@@ -181,6 +181,10 @@ type ReportState = 'success' | 'failed' | 'running' | 'idle';
 type ReportArtifactType = 'file' | 'message';
 type ProfileHealthState = 'normal' | 'broken' | 'pending' | 'terminated';
 
+const REPORT_TRANSFER_FAILED_TEXT = '生成成功，传输失败';
+const REPORT_TRANSFER_FAILED_SHORT_TEXT = '传输失败';
+const REPORT_TRANSFER_FAILED_DETAIL = '文件已生成，但 FTP/SFTP 传输目标上传失败，请查看投递结果。';
+
 interface ProfileHealthInfo {
   state: ProfileHealthState;
   label: string;
@@ -4838,9 +4842,9 @@ function mergeRunDeliveryStatus(info: ReportStatusInfo, events: NorthboundPageCo
   return {
     ...info,
     state: 'failed',
-    statusText: '生成成功，上传FTP失败',
+    statusText: REPORT_TRANSFER_FAILED_TEXT,
     targetSummary: deliveryNote,
-    detail: `${info.detail} FTP/SFTP 投递存在失败，请查看投递结果。`,
+    detail: [info.detail, REPORT_TRANSFER_FAILED_DETAIL].filter(Boolean).join(' '),
     deliveryNote,
   };
 }
@@ -4877,9 +4881,15 @@ function selectInitialReportRun(
 function reportRunDisplayState(
   run: NorthboundFileRun,
   eventsByRunId: DeliveryEventsByRunId,
-): { state: ReportState; label: string } {
-  if (runHasFailedDelivery(run, eventsByRunId)) {
-    return { state: 'failed', label: '生成成功，上传FTP失败' };
+): { state: ReportState; label: string; tooltip?: string } {
+  const deliveryEvents = eventsByRunId[run.id] ?? [];
+  if (run.status === 'success' && deliveryEvents.some((event) => event.status !== 'success')) {
+    const note = summarizeDeliveryNote(deliveryEvents);
+    return {
+      state: 'failed',
+      label: REPORT_TRANSFER_FAILED_SHORT_TEXT,
+      tooltip: note ? `${REPORT_TRANSFER_FAILED_TEXT}：${note}` : REPORT_TRANSFER_FAILED_TEXT,
+    };
   }
   if (run.status === 'success') return { state: 'success', label: '成功' };
   if (run.status === 'running') return { state: 'running', label: '生成中' };
@@ -5169,14 +5179,16 @@ function statusTag(enabled: boolean) {
   return enabled ? <Tag color="success">启用</Tag> : <Tag color="default">关闭</Tag>;
 }
 
-function reportStateTag(state: ReportState, label: string) {
+function reportStateTag(state: ReportState, label: string, tooltip?: string) {
   const colors: Record<ReportState, string> = {
     success: 'success',
     failed: 'error',
     running: 'processing',
     idle: 'default',
   };
-  return <Tag color={colors[state]}>{label}</Tag>;
+  const tag = <Tag color={colors[state]}>{label}</Tag>;
+  if (tooltip && tooltip !== label) return <Tooltip title={tooltip}>{tag}</Tooltip>;
+  return tag;
 }
 
 function deliveryProtocolTag(protocol: DeliveryProtocol) {
@@ -7076,7 +7088,7 @@ export default function NorthboundPageConfig() {
     void message.open({
       key: messageKey,
       type: 'loading',
-      content: nt(`${row.code} 正在生成文件并上传传输目标...`),
+      content: nt(`${row.code} 正在生成文件并上传到传输目标...`),
       duration: 0,
     });
     void northboundPageConfigApi.runFileProfile(row.code, { limit: 200 })
@@ -7091,7 +7103,7 @@ export default function NorthboundPageConfig() {
           key: messageKey,
           type: deliveryFailed ? 'warning' : 'success',
           content: nt(deliveryFailed
-            ? `${row.code} 文件生成完成，上传FTP失败，请查看上报结果`
+            ? `${row.code} 文件生成完成，传输目标上传失败，请查看上报结果`
             : `${row.code} 已生成 ${result.total} 条上报记录`),
           duration: deliveryFailed ? 5 : 3,
         });
@@ -7124,7 +7136,7 @@ export default function NorthboundPageConfig() {
     void message.open({
       key: messageKey,
       type: 'loading',
-      content: nt(`${row.objectCode} Inventory 正在生成文件并上传传输目标...`),
+      content: nt(`${row.objectCode} Inventory 正在生成文件并上传到传输目标...`),
       duration: 0,
     });
     void northboundPageConfigApi.runInventoryProfile(row.key, { limit: 200 })
@@ -7139,7 +7151,7 @@ export default function NorthboundPageConfig() {
           key: messageKey,
           type: deliveryFailed ? 'warning' : 'success',
           content: nt(deliveryFailed
-            ? `${row.objectCode} Inventory 生成完成，上传FTP失败，请查看上报结果`
+            ? `${row.objectCode} Inventory 生成完成，传输目标上传失败，请查看上报结果`
             : `${row.objectCode} Inventory 已生成上报记录`),
           duration: deliveryFailed ? 5 : 3,
         });
@@ -8510,10 +8522,10 @@ export default function NorthboundPageConfig() {
     {
       title: '状态',
       dataIndex: 'status',
-      width: 88,
+      width: 112,
       render: (_, run) => {
-        const { state, label } = reportRunDisplayState(run, reportDeliveryEventsByRunId);
-        return reportStateTag(state, label);
+        const { state, label, tooltip } = reportRunDisplayState(run, reportDeliveryEventsByRunId);
+        return reportStateTag(state, label, tooltip);
       },
     },
     { title: '最近时间', dataIndex: 'created_at', width: 160, render: (v: string) => formatRunTime(v) },
@@ -8544,9 +8556,12 @@ export default function NorthboundPageConfig() {
       },
     },
   ];
-  const reportSuccessCount = reportRunList.filter((item) => item.status === 'success').length;
+  const reportRunDisplayStates = reportRunList.map((item) => reportRunDisplayState(item, reportDeliveryEventsByRunId).state);
+  const reportSuccessCount = reportRunDisplayStates.filter((state) => state === 'success').length;
+  const reportFailedCount = reportRunDisplayStates.filter((state) => state === 'failed').length;
+  const reportRunningCount = reportRunDisplayStates.filter((state) => state === 'running').length;
   const reportSummary = reportRunList.length > 1
-    ? `共 ${reportRunList.length} 个对象：成功 ${reportSuccessCount} · 失败 ${reportRunList.length - reportSuccessCount}`
+    ? `共 ${reportRunList.length} 个对象：成功 ${reportSuccessCount} · 失败 ${reportFailedCount}${reportRunningCount > 0 ? ` · 生成中 ${reportRunningCount}` : ''}`
     : '';
   const selectedApiMeta = selectedApi ? getApiMeta(selectedApi) : null;
   const selectedApiResponseFields = selectedApiMeta?.responseFields ?? [];
