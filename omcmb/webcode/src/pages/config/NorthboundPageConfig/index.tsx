@@ -30,6 +30,7 @@ import {
   EyeOutlined,
   FileSearchOutlined,
   FileTextOutlined,
+  LoadingOutlined,
   MoreOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -224,6 +225,8 @@ interface ReportStatusInfo {
   copyLabel?: string;
   resultTitle?: string;
 }
+
+type DeliveryEventsByRunId = Record<string, NorthboundPageConfigEvent[]>;
 
 interface MessageFieldRow {
   key: string;
@@ -3741,7 +3744,7 @@ function mapApiDeliveryTarget(target: NorthboundDeliveryTarget): DeliveryTargetR
     host: target.host,
     port: target.port,
     username: target.username,
-    credential: target.credential_set ? '已加密存储' : '',
+    credential: target.credential || (target.credential_set ? storedCredentialText : ''),
     authMode: target.auth_mode,
     remoteRoot: target.remote_root,
     retryTimes: target.retry_times,
@@ -4842,6 +4845,47 @@ function mergeRunDeliveryStatus(info: ReportStatusInfo, events: NorthboundPageCo
   };
 }
 
+function eventRunId(event: NorthboundPageConfigEvent): string {
+  const value = event.summary?.run_id;
+  return typeof value === 'string' ? value : '';
+}
+
+function groupDeliveryEventsByRunId(events: NorthboundPageConfigEvent[]): DeliveryEventsByRunId {
+  return events.reduce<DeliveryEventsByRunId>((acc, event) => {
+    if (event.event_type !== 'delivery') return acc;
+    const runId = eventRunId(event);
+    if (!runId) return acc;
+    acc[runId] = [...(acc[runId] ?? []), event];
+    return acc;
+  }, {});
+}
+
+function runHasFailedDelivery(run: NorthboundFileRun, eventsByRunId: DeliveryEventsByRunId): boolean {
+  if (run.status !== 'success') return false;
+  return (eventsByRunId[run.id] ?? []).some((event) => event.status !== 'success');
+}
+
+function selectInitialReportRun(
+  items: NorthboundFileRun[],
+  eventsByRunId: DeliveryEventsByRunId,
+): NorthboundFileRun | undefined {
+  return items.find((item) => runHasFailedDelivery(item, eventsByRunId))
+    ?? items.find((item) => item.status === 'success')
+    ?? items[0];
+}
+
+function reportRunDisplayState(
+  run: NorthboundFileRun,
+  eventsByRunId: DeliveryEventsByRunId,
+): { state: ReportState; label: string } {
+  if (runHasFailedDelivery(run, eventsByRunId)) {
+    return { state: 'failed', label: '生成成功，上传FTP失败' };
+  }
+  if (run.status === 'success') return { state: 'success', label: '成功' };
+  if (run.status === 'running') return { state: 'running', label: '生成中' };
+  return { state: 'failed', label: '失败' };
+}
+
 function eventStatusText(event: NorthboundPageConfigEvent): string {
   if (event.status === 'success') return '正常';
   if (event.status === 'running') return '处理中';
@@ -5826,6 +5870,7 @@ export default function NorthboundPageConfig() {
   const [reportEventTotal, setReportEventTotal] = useState(0);
   const [reportEventLoading, setReportEventLoading] = useState(false);
   const [reportCapabilityName, setReportCapabilityName] = useState<string>('');
+  const [reportDeliveryEventsByRunId, setReportDeliveryEventsByRunId] = useState<DeliveryEventsByRunId>({});
   const [fileLatestSuccessRuns, setFileLatestSuccessRuns] = useState<Record<string, NorthboundFileRun>>({});
   const [inventoryLatestSuccessRuns, setInventoryLatestSuccessRuns] = useState<Record<string, NorthboundFileRun>>({});
   const [fileProfileRunning, setFileProfileRunning] = useState<Record<string, boolean>>({});
@@ -6777,6 +6822,7 @@ export default function NorthboundPageConfig() {
     setReportEventTotal(1);
     setReportEventLoading(false);
     setReportCapabilityName(capabilityName);
+    setReportDeliveryEventsByRunId({});
     setSelectedReportStatus(buildEventReportStatus(event, capabilityName));
   };
 
@@ -6790,6 +6836,14 @@ export default function NorthboundPageConfig() {
     );
   };
 
+  const renderRunningStatusCell = (detail: string) => (
+    <Tooltip title={nt(detail)}>
+      <Tag color="processing" icon={<LoadingOutlined spin />}>
+        {nt('执行中')}
+      </Tag>
+    </Tooltip>
+  );
+
   const showLatestRunReport = (
     profileKind: 'file' | 'inventory',
     profileCode: string,
@@ -6799,6 +6853,7 @@ export default function NorthboundPageConfig() {
     setReportEventList([]);
     setReportEventTotal(0);
     setReportEventLoading(false);
+    setReportDeliveryEventsByRunId({});
     setReportCapabilityName(fallback.capabilityName);
     void northboundPageConfigApi
       .listRuns({ profile_kind: profileKind, profile_code: profileCode, limit: isFile ? 200 : 1 })
@@ -6840,6 +6895,7 @@ export default function NorthboundPageConfig() {
   const resolveRunReportStatus = async (
     run: NorthboundFileRun,
     fallbackCapabilityName: string,
+    deliveryEvents?: NorthboundPageConfigEvent[],
   ): Promise<ReportStatusInfo> => {
     // listRuns / dedupe items omit artifact_content; fetch the full run so the
     // preview reflects the selected object's actual file content.
@@ -6851,17 +6907,20 @@ export default function NorthboundPageConfig() {
         fullRun = run;
       }
     }
-	    const runStatus = buildRunReportStatus(fullRun, fallbackCapabilityName);
-	    try {
-	      const events = await northboundPageConfigApi.listEvents({
-	        capability: 'delivery',
-	        owner_code: run.profile_code,
-	        limit: 50,
-	        include_payload: false,
-	      });
+    const runStatus = buildRunReportStatus(fullRun, fallbackCapabilityName);
+    if (deliveryEvents) {
+      return mergeRunDeliveryStatus(runStatus, deliveryEvents);
+    }
+    try {
+      const events = await northboundPageConfigApi.listEvents({
+        capability: 'delivery',
+        owner_code: run.profile_code,
+        limit: 50,
+        include_payload: false,
+      });
       // Precisely match this run's delivery events by summary.run_id. Never fall
       // back to an unrelated event — the old `?? events.items[0]` crossed objects.
-      const deliveries = events.items.filter((event) => event.summary?.run_id === run.id);
+      const deliveries = events.items.filter((event) => eventRunId(event) === run.id);
       return mergeRunDeliveryStatus(runStatus, deliveries);
     } catch {
       return runStatus;
@@ -6877,14 +6936,32 @@ export default function NorthboundPageConfig() {
     setReportRunList(items);
     setReportEventList([]);
     setReportEventTotal(0);
-    const firstRun = items.find((item) => item.status === 'success') ?? items[0];
-    if (firstRun) {
-      void resolveRunReportStatus(firstRun, capabilityName).then((info) => {
-        setSelectedReportStatus(info ?? fallback);
-      });
-    } else {
+    setReportDeliveryEventsByRunId({});
+    const firstAvailableRun = items.find((item) => item.status === 'success') ?? items[0];
+    if (!firstAvailableRun) {
       setSelectedReportStatus(fallback);
+      return;
     }
+    void northboundPageConfigApi.listEvents({
+      capability: 'delivery',
+      owner_code: firstAvailableRun.profile_code,
+      limit: 200,
+      include_payload: false,
+    })
+      .then((events) => {
+        const eventsByRunId = groupDeliveryEventsByRunId(events.items);
+        setReportDeliveryEventsByRunId(eventsByRunId);
+        const firstRun = selectInitialReportRun(items, eventsByRunId) ?? firstAvailableRun;
+        void resolveRunReportStatus(firstRun, capabilityName, eventsByRunId[firstRun.id] ?? [])
+          .then((info) => {
+            setSelectedReportStatus(info ?? fallback);
+          });
+      })
+      .catch(() => {
+        void resolveRunReportStatus(firstAvailableRun, capabilityName).then((info) => {
+          setSelectedReportStatus(info ?? fallback);
+        });
+      });
   };
 
   const selectReportEvent = (event: NorthboundPageConfigEvent, capabilityName: string) => {
@@ -6906,6 +6983,7 @@ export default function NorthboundPageConfig() {
     setReportRunList([]);
     setReportEventList([]);
     setReportEventTotal(0);
+    setReportDeliveryEventsByRunId({});
     setReportCapabilityName(fallback.capabilityName);
     setSelectedReportStatus(fallback);
     setReportEventLoading(true);
@@ -6966,19 +7044,65 @@ export default function NorthboundPageConfig() {
       .finally(() => setInventorySaving(row.key, false));
   };
 
+  const hasFailedDeliveryForRuns = async (profileCode: string, runs: NorthboundFileRun[]) => {
+    const runIds = new Set(runs.filter((run) => run.status === 'success').map((run) => run.id));
+    if (runIds.size === 0) return false;
+    try {
+      const events = await northboundPageConfigApi.listEvents({
+        capability: 'delivery',
+        owner_code: profileCode,
+        limit: 200,
+        include_payload: false,
+      });
+      const eventsByRunId = groupDeliveryEventsByRunId(events.items);
+      return runs.some((run) => runIds.has(run.id) && runHasFailedDelivery(run, eventsByRunId));
+    } catch {
+      return false;
+    }
+  };
+
   const runFileProfile = (row: ScenarioRow) => {
+    if (fileProfileRunning[row.code]) {
+      void message.open({
+        key: `northbound-file-run-${row.code}`,
+        type: 'info',
+        content: nt(`${row.code} 正在生成并上传，请稍候`),
+        duration: 2,
+      });
+      return;
+    }
+    const messageKey = `northbound-file-run-${row.code}`;
     setFileProfileRunning((prev) => ({ ...prev, [row.code]: true }));
+    void message.open({
+      key: messageKey,
+      type: 'loading',
+      content: nt(`${row.code} 正在生成文件并上传传输目标...`),
+      duration: 0,
+    });
     void northboundPageConfigApi.runFileProfile(row.code, { limit: 200 })
-      .then((result) => {
+      .then(async (result) => {
         const latestSuccess = latestSuccessRunMap(result.items)[row.code];
         if (latestSuccess) {
           setFileLatestSuccessRuns((prev) => ({ ...prev, [row.code]: latestSuccess }));
         }
         openReportDrawer(result.items, `${row.code} 北向文件`, null);
-        void message.success(nt(`${row.code} 已生成 ${result.total} 条上报记录`));
+        const deliveryFailed = await hasFailedDeliveryForRuns(row.code, result.items);
+        void message.open({
+          key: messageKey,
+          type: deliveryFailed ? 'warning' : 'success',
+          content: nt(deliveryFailed
+            ? `${row.code} 文件生成完成，上传FTP失败，请查看上报结果`
+            : `${row.code} 已生成 ${result.total} 条上报记录`),
+          duration: deliveryFailed ? 5 : 3,
+        });
       })
       .catch(() => {
-        void message.error(nt(`${row.code} 手动执行失败`));
+        void message.open({
+          key: messageKey,
+          type: 'error',
+          content: nt(`${row.code} 手动执行失败`),
+          duration: 5,
+        });
       })
       .finally(() => {
         setFileProfileRunning((prev) => ({ ...prev, [row.code]: false }));
@@ -6986,18 +7110,47 @@ export default function NorthboundPageConfig() {
   };
 
   const runInventoryProfile = (row: InventoryConfigRow) => {
+    if (inventoryProfileRunning[row.key]) {
+      void message.open({
+        key: `northbound-inventory-run-${row.key}`,
+        type: 'info',
+        content: nt(`${row.objectCode} Inventory 正在生成并上传，请稍候`),
+        duration: 2,
+      });
+      return;
+    }
+    const messageKey = `northbound-inventory-run-${row.key}`;
     setInventoryProfileRunning((prev) => ({ ...prev, [row.key]: true }));
+    void message.open({
+      key: messageKey,
+      type: 'loading',
+      content: nt(`${row.objectCode} Inventory 正在生成文件并上传传输目标...`),
+      duration: 0,
+    });
     void northboundPageConfigApi.runInventoryProfile(row.key, { limit: 200 })
-      .then((run) => {
+      .then(async (run) => {
         if (run.status === 'success') {
           setInventoryLatestSuccessRuns((prev) => ({ ...prev, [row.key]: run }));
         }
         void resolveRunReportStatus(run, `${row.objectCode} Inventory`)
           .then(setSelectedReportStatus);
-        void message.success(nt(`${row.objectCode} Inventory 已生成上报记录`));
+        const deliveryFailed = await hasFailedDeliveryForRuns(row.key, [run]);
+        void message.open({
+          key: messageKey,
+          type: deliveryFailed ? 'warning' : 'success',
+          content: nt(deliveryFailed
+            ? `${row.objectCode} Inventory 生成完成，上传FTP失败，请查看上报结果`
+            : `${row.objectCode} Inventory 已生成上报记录`),
+          duration: deliveryFailed ? 5 : 3,
+        });
       })
       .catch(() => {
-        void message.error(nt(`${row.objectCode} Inventory 手动执行失败`));
+        void message.open({
+          key: messageKey,
+          type: 'error',
+          content: nt(`${row.objectCode} Inventory 手动执行失败`),
+          duration: 5,
+        });
       })
       .finally(() => {
         setInventoryProfileRunning((prev) => ({ ...prev, [row.key]: false }));
@@ -7200,63 +7353,71 @@ export default function NorthboundPageConfig() {
       title: '操作',
       width: 104,
       fixed: 'left',
-      render: (_, row) => (
-        <div className={styles.rowControl}>
-          <Switch
-            size="small"
-            checked={scenarioEnabled[row.code]}
-            checkedChildren="开"
-            unCheckedChildren="关"
-            loading={Boolean(fileProfileSaving[row.code])}
-            onClick={(_, event) => event.stopPropagation()}
-            onChange={(checked) => persistFileProfileEnabled(row, checked)}
-          />
-          <Dropdown
-            trigger={['click']}
-            menu={{
-              items: [
-                { key: 'view', icon: <EyeOutlined />, label: '查看' },
-                { key: 'edit', icon: <EditOutlined />, label: '编辑' },
-                { key: 'report', icon: <FileSearchOutlined />, label: '上报结果' },
-                { key: 'copy', icon: <CopyOutlined />, label: '复制模板' },
-                { key: 'run', icon: <PlayCircleOutlined />, label: '手动执行', disabled: Boolean(fileProfileRunning[row.code]) },
-              ],
-              onClick: ({ key, domEvent }) => {
-                domEvent.stopPropagation();
-                if (key === 'view') {
-                  openViewDrawer(row);
-                  return;
-                }
-                if (key === 'edit') {
-                  openEditEditor(row);
-                  return;
-                }
-                if (key === 'report') {
-                  showLatestRunReport(
-                    'file',
-                    row.code,
-                    effectiveReportStatus(buildFileReportStatus(row), Boolean(scenarioEnabled[row.code])),
-                  );
-                  return;
-                }
-                if (key === 'copy') {
-                  void message.info(nt(`${row.code} 已复制为草稿`));
-                  return;
-                }
-                runFileProfile(row);
-              },
-            }}
-          >
-            <Button
-              aria-label={`更多操作 ${row.code}`}
-              type="text"
+      render: (_, row) => {
+        const running = Boolean(fileProfileRunning[row.code]);
+        return (
+          <div className={styles.rowControl}>
+            <Switch
               size="small"
-              icon={<MoreOutlined />}
-              onClick={(event) => event.stopPropagation()}
+              checked={scenarioEnabled[row.code]}
+              checkedChildren="开"
+              unCheckedChildren="关"
+              loading={Boolean(fileProfileSaving[row.code])}
+              onClick={(_, event) => event.stopPropagation()}
+              onChange={(checked) => persistFileProfileEnabled(row, checked)}
             />
-          </Dropdown>
-        </div>
-      ),
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'view', icon: <EyeOutlined />, label: '查看' },
+                  { key: 'edit', icon: <EditOutlined />, label: '编辑' },
+                  { key: 'report', icon: <FileSearchOutlined />, label: '上报结果' },
+                  { key: 'copy', icon: <CopyOutlined />, label: '复制模板' },
+                  {
+                    key: 'run',
+                    icon: running ? <LoadingOutlined spin /> : <PlayCircleOutlined />,
+                    label: running ? '执行中' : '手动执行',
+                    disabled: running,
+                  },
+                ],
+                onClick: ({ key, domEvent }) => {
+                  domEvent.stopPropagation();
+                  if (key === 'view') {
+                    openViewDrawer(row);
+                    return;
+                  }
+                  if (key === 'edit') {
+                    openEditEditor(row);
+                    return;
+                  }
+                  if (key === 'report') {
+                    showLatestRunReport(
+                      'file',
+                      row.code,
+                      effectiveReportStatus(buildFileReportStatus(row), Boolean(scenarioEnabled[row.code])),
+                    );
+                    return;
+                  }
+                  if (key === 'copy') {
+                    void message.info(nt(`${row.code} 已复制为草稿`));
+                    return;
+                  }
+                  runFileProfile(row);
+                },
+              }}
+            >
+              <Button
+                aria-label={`更多操作 ${row.code}`}
+                type="text"
+                size="small"
+                icon={running ? <LoadingOutlined spin /> : <MoreOutlined />}
+                onClick={(event) => event.stopPropagation()}
+              />
+            </Dropdown>
+          </div>
+        );
+      },
     },
     {
       title: '场景号',
@@ -7272,13 +7433,17 @@ export default function NorthboundPageConfig() {
     {
       title: '状态',
       width: 104,
-      render: (_, row) => renderStatusCell(buildProfileHealth(
-        Boolean(scenarioEnabled[row.code]),
-        scenarioMaxPeriodMinutes(row),
-        fileLatestSuccessRuns[row.code],
-        row.createdAt,
-        row.updatedAt,
-      )),
+      render: (_, row) => (
+        fileProfileRunning[row.code]
+          ? renderRunningStatusCell(`${row.code} 正在生成文件并上传传输目标`)
+          : renderStatusCell(buildProfileHealth(
+            Boolean(scenarioEnabled[row.code]),
+            scenarioMaxPeriodMinutes(row),
+            fileLatestSuccessRuns[row.code],
+            row.createdAt,
+            row.updatedAt,
+          ))
+      ),
     },
     {
       title: '输出内容',
@@ -7348,58 +7513,66 @@ export default function NorthboundPageConfig() {
       title: '操作',
       width: 104,
       fixed: 'left',
-      render: (_, row) => (
-        <div className={styles.rowControl}>
-          <Switch
-            size="small"
-            checked={inventoryEnabled[row.key]}
-            checkedChildren="开"
-            unCheckedChildren="关"
-            loading={Boolean(inventoryProfileSaving[row.key])}
-            onClick={(_, event) => event.stopPropagation()}
-            onChange={(checked) => persistInventoryEnabled(row, checked)}
-          />
-          <Dropdown
-            trigger={['click']}
-            menu={{
-              items: [
-                { key: 'view', icon: <EyeOutlined />, label: '查看' },
-                { key: 'edit', icon: <EditOutlined />, label: '编辑' },
-                { key: 'report', icon: <FileSearchOutlined />, label: '上报结果' },
-                { key: 'run', icon: <PlayCircleOutlined />, label: '手动执行', disabled: Boolean(inventoryProfileRunning[row.key]) },
-              ],
-              onClick: ({ key, domEvent }) => {
-                domEvent.stopPropagation();
-                if (key === 'view') {
-                  openInventoryView(row);
-                  return;
-                }
-                if (key === 'edit') {
-                  openInventoryEditor(row);
-                  return;
-                }
-                if (key === 'report') {
-                  showLatestRunReport(
-                    'inventory',
-                    row.key,
-                    effectiveReportStatus(buildInventoryReportStatus(row), Boolean(inventoryEnabled[row.key])),
-                  );
-                  return;
-                }
-                runInventoryProfile(row);
-              },
-            }}
-          >
-            <Button
-              aria-label={`更多操作 ${row.objectCode} Inventory`}
-              type="text"
+      render: (_, row) => {
+        const running = Boolean(inventoryProfileRunning[row.key]);
+        return (
+          <div className={styles.rowControl}>
+            <Switch
               size="small"
-              icon={<MoreOutlined />}
-              onClick={(event) => event.stopPropagation()}
+              checked={inventoryEnabled[row.key]}
+              checkedChildren="开"
+              unCheckedChildren="关"
+              loading={Boolean(inventoryProfileSaving[row.key])}
+              onClick={(_, event) => event.stopPropagation()}
+              onChange={(checked) => persistInventoryEnabled(row, checked)}
             />
-          </Dropdown>
-        </div>
-      ),
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'view', icon: <EyeOutlined />, label: '查看' },
+                  { key: 'edit', icon: <EditOutlined />, label: '编辑' },
+                  { key: 'report', icon: <FileSearchOutlined />, label: '上报结果' },
+                  {
+                    key: 'run',
+                    icon: running ? <LoadingOutlined spin /> : <PlayCircleOutlined />,
+                    label: running ? '执行中' : '手动执行',
+                    disabled: running,
+                  },
+                ],
+                onClick: ({ key, domEvent }) => {
+                  domEvent.stopPropagation();
+                  if (key === 'view') {
+                    openInventoryView(row);
+                    return;
+                  }
+                  if (key === 'edit') {
+                    openInventoryEditor(row);
+                    return;
+                  }
+                  if (key === 'report') {
+                    showLatestRunReport(
+                      'inventory',
+                      row.key,
+                      effectiveReportStatus(buildInventoryReportStatus(row), Boolean(inventoryEnabled[row.key])),
+                    );
+                    return;
+                  }
+                  runInventoryProfile(row);
+                },
+              }}
+            >
+              <Button
+                aria-label={`更多操作 ${row.objectCode} Inventory`}
+                type="text"
+                size="small"
+                icon={running ? <LoadingOutlined spin /> : <MoreOutlined />}
+                onClick={(event) => event.stopPropagation()}
+              />
+            </Dropdown>
+          </div>
+        );
+      },
     },
     {
       title: '类型',
@@ -7417,13 +7590,17 @@ export default function NorthboundPageConfig() {
     {
       title: '状态',
       width: 104,
-      render: (_, row) => renderStatusCell(buildProfileHealth(
-        Boolean(inventoryEnabled[row.key]),
-        getPeriodMinutes(row.period),
-        inventoryLatestSuccessRuns[row.key],
-        row.createdAt,
-        row.updatedAt,
-      )),
+      render: (_, row) => (
+        inventoryProfileRunning[row.key]
+          ? renderRunningStatusCell(`${row.objectCode} Inventory 正在生成文件并上传传输目标`)
+          : renderStatusCell(buildProfileHealth(
+            Boolean(inventoryEnabled[row.key]),
+            getPeriodMinutes(row.period),
+            inventoryLatestSuccessRuns[row.key],
+            row.createdAt,
+            row.updatedAt,
+          ))
+      ),
     },
     {
       title: '输出内容',
@@ -8334,9 +8511,9 @@ export default function NorthboundPageConfig() {
       title: '状态',
       dataIndex: 'status',
       width: 88,
-      render: (status: string) => {
-        const state: ReportState = status === 'success' ? 'success' : status === 'running' ? 'running' : 'failed';
-        return reportStateTag(state, state === 'success' ? '成功' : state === 'running' ? '生成中' : '失败');
+      render: (_, run) => {
+        const { state, label } = reportRunDisplayState(run, reportDeliveryEventsByRunId);
+        return reportStateTag(state, label);
       },
     },
     { title: '最近时间', dataIndex: 'created_at', width: 160, render: (v: string) => formatRunTime(v) },
@@ -8403,84 +8580,85 @@ export default function NorthboundPageConfig() {
               : '上报结果')
         }
         open={Boolean(selectedReportStatus)}
-	        onClose={() => {
-	          setSelectedReportStatus(null);
-	          setReportRunList([]);
-	          setReportEventList([]);
-	          setReportEventTotal(0);
-	          setReportEventLoading(false);
-	          setReportCapabilityName('');
-	        }}
-	        size="large"
-	        rootClassName={styles.inventoryDrawer}
-	        destroyOnClose
-	        extra={selectedReportStatus ? (
-	          <Space>
-	            {selectedReportStatus.artifactType === 'message' && (
-	              <Button
-	                icon={<CopyOutlined />}
-	                onClick={() => copyReportPayload(selectedReportStatus)}
-	              >
-	                {selectedReportStatus.copyLabel ?? '复制报文'}
-	              </Button>
-	            )}
-	            {selectedReportStatus.artifactType === 'file' && (
-	              <Button
-	                type="primary"
-	                icon={<DownloadOutlined />}
-	                onClick={() => {
-	                  void downloadReportArtifact(selectedReportStatus).catch(() => {
-	                    void message.error(nt('上报文件下载失败'));
-	                  });
-	                }}
-	              >
-	                下载最新文件
-	              </Button>
-	            )}
-	          </Space>
-	        ) : undefined}
-	      >
-	        {selectedReportStatus && (
-	          <Space orientation="vertical" size={16} className={styles.drawerBody}>
-	            <div className={styles.editorSection}>
-	              <Descriptions bordered size="small" column={2}>
-	                <Descriptions.Item label="状态">{reportStateTag(selectedReportStatus.state, selectedReportStatus.statusText)}</Descriptions.Item>
-	                <Descriptions.Item label="最近时间">{selectedReportStatus.lastTime || '-'}</Descriptions.Item>
-	                <Descriptions.Item label="目标/地址" span={2}>
-	                  <Typography.Text ellipsis={{ tooltip: selectedReportStatus.artifactPath }}>
-	                    {selectedReportStatus.artifactPath}
-	                  </Typography.Text>
-	                </Descriptions.Item>
-	                <Descriptions.Item label="结果摘要" span={2}>{selectedReportStatus.targetSummary}</Descriptions.Item>
-	                <Descriptions.Item label="说明" span={2}>{selectedReportStatus.detail}</Descriptions.Item>
-	              </Descriptions>
-	            </div>
-	            {(reportEventLoading || reportEventList.length > 0) && (
-	              <div className={styles.editorSection}>
-	                <div className={styles.editorSectionHeader}>
-	                  <Typography.Text strong>最近事件</Typography.Text>
-	                  <Typography.Text type="secondary">
-	                    共 {reportEventTotal} 条，显示最近 {reportEventList.length} 条
-	                  </Typography.Text>
-	                </div>
-	                <Table<NorthboundPageConfigEvent>
-	                  className={styles.compactScenarioTable}
-	                  columns={reportEventColumns}
-	                  dataSource={reportEventList}
-	                  rowKey="id"
-	                  size="small"
-	                  loading={reportEventLoading}
-	                  pagination={{ pageSize: 10, showSizeChanger: false, hideOnSinglePage: reportEventList.length <= 10 }}
-	                  scroll={{ x: 980, y: 280 }}
-	                  rowClassName={(row) => (selectedReportStatus?.key === `event:${row.id}` ? styles.selectedRow : '')}
-	                  onRow={(row) => ({
-	                    onClick: () => selectReportEvent(row, reportCapabilityName || selectedReportStatus?.capabilityName || ''),
-	                  })}
-	                />
-	              </div>
-	            )}
-	            {reportRunList.length > 1 && (
-	              <div className={styles.editorSection}>
+        onClose={() => {
+          setSelectedReportStatus(null);
+          setReportRunList([]);
+          setReportEventList([]);
+          setReportEventTotal(0);
+          setReportEventLoading(false);
+          setReportCapabilityName('');
+          setReportDeliveryEventsByRunId({});
+        }}
+        size="large"
+        rootClassName={styles.inventoryDrawer}
+        destroyOnClose
+        extra={selectedReportStatus ? (
+          <Space>
+            {selectedReportStatus.artifactType === 'message' && (
+              <Button
+                icon={<CopyOutlined />}
+                onClick={() => copyReportPayload(selectedReportStatus)}
+              >
+                {selectedReportStatus.copyLabel ?? '复制报文'}
+              </Button>
+            )}
+            {selectedReportStatus.artifactType === 'file' && (
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                onClick={() => {
+                  void downloadReportArtifact(selectedReportStatus).catch(() => {
+                    void message.error(nt('上报文件下载失败'));
+                  });
+                }}
+              >
+                下载最新文件
+              </Button>
+            )}
+          </Space>
+        ) : undefined}
+      >
+        {selectedReportStatus && (
+          <Space orientation="vertical" size={16} className={styles.drawerBody}>
+            <div className={styles.editorSection}>
+              <Descriptions bordered size="small" column={2}>
+                <Descriptions.Item label="状态">{reportStateTag(selectedReportStatus.state, selectedReportStatus.statusText)}</Descriptions.Item>
+                <Descriptions.Item label="最近时间">{selectedReportStatus.lastTime || '-'}</Descriptions.Item>
+                <Descriptions.Item label="目标/地址" span={2}>
+                  <Typography.Text ellipsis={{ tooltip: selectedReportStatus.artifactPath }}>
+                    {selectedReportStatus.artifactPath}
+                  </Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="结果摘要" span={2}>{selectedReportStatus.targetSummary}</Descriptions.Item>
+                <Descriptions.Item label="说明" span={2}>{selectedReportStatus.detail}</Descriptions.Item>
+              </Descriptions>
+            </div>
+            {(reportEventLoading || reportEventList.length > 0) && (
+              <div className={styles.editorSection}>
+                <div className={styles.editorSectionHeader}>
+                  <Typography.Text strong>最近事件</Typography.Text>
+                  <Typography.Text type="secondary">
+                    共 {reportEventTotal} 条，显示最近 {reportEventList.length} 条
+                  </Typography.Text>
+                </div>
+                <Table<NorthboundPageConfigEvent>
+                  className={styles.compactScenarioTable}
+                  columns={reportEventColumns}
+                  dataSource={reportEventList}
+                  rowKey="id"
+                  size="small"
+                  loading={reportEventLoading}
+                  pagination={{ pageSize: 10, showSizeChanger: false, hideOnSinglePage: reportEventList.length <= 10 }}
+                  scroll={{ x: 980, y: 280 }}
+                  rowClassName={(row) => (selectedReportStatus?.key === `event:${row.id}` ? styles.selectedRow : '')}
+                  onRow={(row) => ({
+                    onClick: () => selectReportEvent(row, reportCapabilityName || selectedReportStatus?.capabilityName || ''),
+                  })}
+                />
+              </div>
+            )}
+            {reportRunList.length > 1 && (
+              <div className={styles.editorSection}>
                 <div className={styles.editorSectionHeader}>
                   <Typography.Text strong>对象上报结果</Typography.Text>
                 </div>
@@ -8496,7 +8674,11 @@ export default function NorthboundPageConfig() {
                   rowClassName={(row) => (selectedReportStatus?.runId === row.id ? styles.selectedRow : '')}
                   onRow={(row) => ({
                     onClick: () => {
-                      void resolveRunReportStatus(row, reportCapabilityName || selectedReportStatus?.capabilityName || '')
+                      void resolveRunReportStatus(
+                        row,
+                        reportCapabilityName || selectedReportStatus?.capabilityName || '',
+                        reportDeliveryEventsByRunId[row.id] ?? [],
+                      )
                         .then(setSelectedReportStatus);
                     },
                   })}

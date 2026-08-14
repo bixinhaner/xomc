@@ -381,7 +381,6 @@ func (r *fakeRepository) ListDeliveryTargets(_ context.Context, filter DeliveryT
 		if filter.OwnerCode != "" && target.OwnerCode != filter.OwnerCode {
 			continue
 		}
-		target.Credential = ""
 		out = append(out, target)
 	}
 	return out, nil
@@ -1914,7 +1913,7 @@ func TestListRunsLatestPerProfileUsesLatestSuccessfulRun(t *testing.T) {
 	require.Equal(t, "s2-success", body.Data.Items[1].ID)
 }
 
-func TestReplaceDeliveryTargetsRedactsCredential(t *testing.T) {
+func TestReplaceDeliveryTargetsReturnsCredentialForReveal(t *testing.T) {
 	repo := newFakeRepository()
 	r := setupTestRouterWithRepository(repo)
 	body := []byte(`{
@@ -1946,7 +1945,7 @@ func TestReplaceDeliveryTargetsRedactsCredential(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rr.Code)
 	require.Contains(t, rr.Body.String(), `"credential_set":true`)
-	require.NotContains(t, rr.Body.String(), "secret")
+	require.Contains(t, rr.Body.String(), `"credential":"secret"`)
 }
 
 func TestSNMPFieldsFollowMIBOrder(t *testing.T) {
