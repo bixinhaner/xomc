@@ -18,7 +18,6 @@ TARGET_ENV=""
 CONFIG_FILE=""
 ACTION="apply"
 NO_RECREATE=0
-CONFIG_CHANGED=0
 GENERATED_FILE=""
 MERGE_TEMP=""
 
@@ -135,7 +134,10 @@ validate_settings() {
     die "USERNAME 与 PASSWORD 必须同时填写；内网免认证 Relay 则两者都留空"
   fi
   case "$password" in REPLACE_ME|CHANGE_ME|REPLACE_WITH_AUTH_CODE) die "SMTP PASSWORD 仍是占位值" ;; esac
-  case "$timeout" in ''|*[!0-9a-zA-Z.]*) die "SMTP TIMEOUT 格式无效（示例 10s）" ;; esac
+  if ! printf '%s' "$timeout" | LC_ALL=C grep -Eq '^([0-9]+(ms|s|m|h))+$' ||
+     ! printf '%s' "$timeout" | grep -q '[1-9]'; then
+    die "SMTP TIMEOUT 必须是大于 0 的 duration（支持 1500ms、10s、1m30s、2h）"
+  fi
   case "$max_bytes" in ''|*[!0-9]*) die "MAX_ATTACHMENT_BYTES 必须是正整数" ;; esac
   [ "$max_bytes" -gt 0 ] || die "MAX_ATTACHMENT_BYTES 必须大于 0"
   validate_no_control_or_quote HOST "$host"
@@ -176,8 +178,7 @@ merge_settings() { # merge_settings <generated-file> <keys>
   if cmp -s "$TARGET_ENV" "$MERGE_TEMP"; then
     rm -f "$MERGE_TEMP"
     MERGE_TEMP=""
-    CONFIG_CHANGED=0
-    log "SMTP 配置未变化，跳过写入和容器重建"
+    log "SMTP 配置未变化，跳过写入；继续收敛 app/worker 运行状态"
     return 0
   fi
   stamp="$(date +%Y%m%d%H%M%S)"
@@ -191,14 +192,10 @@ merge_settings() { # merge_settings <generated-file> <keys>
   chmod 600 "$backup" 2>/dev/null || true
   mv "$MERGE_TEMP" "$TARGET_ENV" || die "原子替换 $TARGET_ENV 失败；备份在 $backup"
   MERGE_TEMP=""
-  CONFIG_CHANGED=1
   log "已更新 ${TARGET_ENV}（备份：${backup}）"
 }
 
 recreate_services() {
-  if [ "$CONFIG_CHANGED" -eq 0 ]; then
-    return 0
-  fi
   if [ "$NO_RECREATE" -eq 1 ]; then
     log "已跳过容器重建；稍后必须执行：bash '$DEPLOY_DIR/svc.sh' start app worker"
     return 0

@@ -180,6 +180,10 @@ ENV_PRESERVE_KEYS="POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_TSDB_USE
 merge_env_preserve() {
   local prev="$1" new="$2" tmp
   [ -f "$new" ] || return 0
+  chmod 600 "$new" 2>/dev/null || {
+    warn ".env 权限收紧为 600 失败：$new" "Failed to restrict .env permissions to 0600: $new"
+    return 1
+  }
   if [ -z "$prev" ] || [ ! -f "$prev" ]; then
     log ".env:首次部署(无上一版),使用交付包默认值 —— 记得在 $new 填 OMC_PUBLIC_HOST 与强口令" ".env: first deployment (no previous release); using delivery package defaults. Remember to set OMC_PUBLIC_HOST and strong credentials in $new"
     return 0
@@ -1031,7 +1035,12 @@ log "current → $RELEASE_DIR" "current -> $RELEASE_DIR"
 
 # 凭据落点 $OMC_ROOT/etc/.env.saved：留给 uninstall.sh 删 release 后、下次 install 继承用。
 # 始终用当前生效 .env 刷新,保证与正在使用的数据卷口令一致。
-cp -f "$RELEASE_DIR/deploy/.env" "$OMC_ROOT/etc/.env.saved" 2>/dev/null || true
+if cp -f "$RELEASE_DIR/deploy/.env" "$OMC_ROOT/etc/.env.saved" 2>/dev/null; then
+  chmod 600 "$OMC_ROOT/etc/.env.saved" ||
+    die ".env.saved 权限收紧为 600 失败" "Failed to restrict .env.saved permissions to 0600" 1
+else
+  warn ".env.saved 刷新失败；卸载重装前必须人工备份当前 .env" ".env.saved refresh failed; back up the current .env manually before uninstalling and reinstalling"
+fi
 # resources.env 同样落 etc/ 快照,供 uninstall→reinstall 继承(与 .env.saved 对称)。
 [ -f "$RELEASE_DIR/deploy/resources.env" ] && cp -f "$RELEASE_DIR/deploy/resources.env" "$OMC_ROOT/etc/resources.env.saved" 2>/dev/null || true
 

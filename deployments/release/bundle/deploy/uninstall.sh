@@ -303,9 +303,13 @@ if [ -d "$OMC_ROOT" ]; then
     # 删前先把当前生效凭据快照到 etc/.env.saved,供下次 install.sh 继承(口令/JWT 与保留的数据卷一致)。
     if [ -f "$OMC_ROOT/current/deploy/.env" ]; then
       mkdir -p "$OMC_ROOT/etc"
-      cp -f "$OMC_ROOT/current/deploy/.env" "$OMC_ROOT/etc/.env.saved" 2>/dev/null \
-        && log "[3/5] 已保存凭据快照 → $OMC_ROOT/etc/.env.saved(重装继承用)" "[3/5] Saved credential snapshot -> $OMC_ROOT/etc/.env.saved (used for reinstall inheritance)" \
-        || warn "[3/5] 凭据快照失败;重装前请手动核对 $OMC_ROOT/etc 与数据卷口令一致" "[3/5] Failed to save the credential snapshot; verify that $OMC_ROOT/etc credentials match the data volumes before reinstalling."
+      if cp -f "$OMC_ROOT/current/deploy/.env" "$OMC_ROOT/etc/.env.saved" 2>/dev/null; then
+        chmod 600 "$OMC_ROOT/etc/.env.saved" ||
+          die "[3/5] 凭据快照权限收紧为 600 失败，停止卸载" "[3/5] Failed to restrict the credential snapshot to 0600; uninstall stopped" 1
+        log "[3/5] 已保存凭据快照 → $OMC_ROOT/etc/.env.saved(重装继承用)" "[3/5] Saved credential snapshot -> $OMC_ROOT/etc/.env.saved (used for reinstall inheritance)"
+      else
+        warn "[3/5] 凭据快照失败;重装前请手动核对 $OMC_ROOT/etc 与数据卷口令一致" "[3/5] Failed to save the credential snapshot; verify that $OMC_ROOT/etc credentials match the data volumes before reinstalling."
+      fi
     fi
     log "[3/5] 删代码运行目录(current/releases/run/packages),保留 data/ etc/ ..." "[3/5] Deleting runtime directories (current/releases/run/packages), keeping data/ and etc/ ..."
     for sub in current releases run packages; do

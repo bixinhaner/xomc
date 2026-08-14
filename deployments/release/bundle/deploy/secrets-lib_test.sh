@@ -8,6 +8,7 @@ PASS=0; FAIL=0
 ok()   { PASS=$((PASS+1)); }
 bad()  { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $*"; }
 chk()  { if [ "$2" = "$3" ]; then ok; else bad "$1: got '$2' want '$3'"; fi; }
+file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 echo "── secrets_get_val ──"
@@ -105,6 +106,8 @@ PWA="$(secrets_get_val POSTGRES_PASSWORD "$OMC_ROOT/etc/secrets.env")"
 { [ -n "$PWA" ] && ! secrets_is_default_value POSTGRES_PASSWORD "$PWA"; } && ok || bad "A: 应生成强随机 PG 口令"
 chk "A: .env 被覆盖为强随机" "$(secrets_get_val POSTGRES_PASSWORD "$OMC_ROOT/current/deploy/.env")" "$PWA"
 chk "A: .env 非密钥键保留" "$(secrets_get_val OMC_PUBLIC_HOST "$OMC_ROOT/current/deploy/.env")" "1.2.3.4"
+chk "A: 含凭据的 .env 权限" "$(file_mode "$OMC_ROOT/current/deploy/.env")" "600"
+chk "A: .env.saved 安全快照权限" "$(file_mode "$OMC_ROOT/etc/.env.saved")" "600"
 
 # B. 存量卷迁移：卷存在、.env 有旧强口令 → 导入，绝不新生成
 DOCKER_VOL_EXISTS=1

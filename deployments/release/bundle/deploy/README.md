@@ -16,10 +16,11 @@ sudo bash /opt/omc/current/deploy/configure-smtp.sh --check
 The example contains no usable credentials. The configuration file must be a
 regular non-symlink file with mode `0600` or `0400`. The script never sources
 the file or prints the password. A changed configuration is backed up and
-written atomically, then App and Worker are recreated with `svc.sh start` so
-Compose reloads the environment. An unchanged rerun skips both write and
-recreate. `--check` validates syntax only; it does not test SMTP connectivity
-or delivery. Use `--disable` as the infrastructure rollback switch.
+written atomically, then App and Worker are reconciled with `svc.sh start` so
+Compose reloads the environment. An unchanged rerun skips the file write but
+still invokes Compose reconciliation, allowing a failed previous apply to be
+retried safely. `--check` validates syntax only; it does not test SMTP
+connectivity or delivery. Use `--disable` as the infrastructure rollback switch.
 
 For a fleet, keep per-environment SMTP secrets in the existing Vault/secret
 manager and invoke this same host-local script through the deployment

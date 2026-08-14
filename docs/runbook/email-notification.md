@@ -50,7 +50,7 @@ OMCGO_NOTIFICATION_SMTP_TIMEOUT=10s
 OMCGO_NOTIFICATION_SMTP_MAX_ATTACHMENT_BYTES=20971520
 ```
 
-脚本不会 `source` 密钥文件或输出密码；它会校验参数、备份并原子更新 `/opt/omc/current/deploy/.env`，然后用 `svc.sh start app worker` 重建 app/worker，使新环境变量生效。`docker compose restart` 不会重读环境变量，不能用于本次变更。配置相同的脚本重跑会直接跳过写入和容器重建。
+脚本不会 `source` 密钥文件或输出密码；它会校验参数、备份并原子更新 `/opt/omc/current/deploy/.env`，然后用 `svc.sh start app worker` 收敛 app/worker，使新环境变量生效。`docker compose restart` 不会重读环境变量，不能用于本次变更。配置相同的脚本重跑会跳过文件写入，但仍执行 `docker compose up -d` 状态收敛；若上一次因 Docker 或资源契约异常未应用成功，重试不会假成功。
 
 只检查当前格式或紧急关闭 SMTP：
 

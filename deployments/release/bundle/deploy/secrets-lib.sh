@@ -183,6 +183,14 @@ ensure_secrets() {
   # secrets.env 为密钥键权威源 → 覆盖进 current/deploy/.env（取代 .env.saved 对密钥的脆弱继承）
   secrets_apply_to_env "$SECRETS_FILE" "$target_env" \
     || warn "secrets：覆盖 $target_env 失败，请人工核对其 6 个密钥键" "Secrets: failed to apply credentials to $target_env; verify its six secret keys"
+  chmod 600 "$target_env" 2>/dev/null || {
+    warn "secrets：$target_env 权限收紧为 600 失败" "Secrets: failed to restrict $target_env permissions to 0600"
+    return 1
+  }
   # .env.saved 同步刷新（供 uninstall→reinstall 一致；但密钥真权威是 secrets.env）
-  cp -f "$target_env" "$OMC_ROOT/etc/.env.saved" 2>/dev/null || true
+  if ! cp -f "$target_env" "$OMC_ROOT/etc/.env.saved" 2>/dev/null ||
+     ! chmod 600 "$OMC_ROOT/etc/.env.saved" 2>/dev/null; then
+    warn "secrets：.env.saved 安全快照失败" "Secrets: failed to create a secure .env.saved snapshot"
+    return 1
+  fi
 }
