@@ -31,6 +31,7 @@ type ProvisioningTask struct {
 	PolicyName      string            `json:"policy_name,omitempty"`
 	ExecuteType     string            `json:"execute_type,omitempty"`
 	Module          string            `json:"module,omitempty"`
+	Technology      string            `json:"technology,omitempty"`
 	TemplateID      *uuid.UUID        `json:"template_id,omitempty"`
 	PolicyID        *uuid.UUID        `json:"policy_id,omitempty"`
 	XMLFileID       *uuid.UUID        `json:"xml_file_id,omitempty"`

@@ -1213,6 +1213,28 @@ func TestCompilePolicyParametersUsesBSCSpecificGSMPaths(t *testing.T) {
 	assert.Equal(t, "198.51.100.10", byPath["DeviceGSM.Bts.1.IpaRslIp"])
 }
 
+func TestCompilePolicyParametersTreatsStringMappingRangeAsLength(t *testing.T) {
+	minimum, maximum := int64(0), int64(16)
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{"serialNumber":"BSC-STRING-RANGE-001","sheetParameters":{"GSM":[{
+			"IPA":"2","Unit ID":"2323"
+		}]}}]
+	}`)}
+	mappings := []parammodel.ParamMapping{{
+		StandardPath: "DeviceGSM.Bts.{i}.IpaUnitId", EntryType: "parameter",
+		Access: "READ_WRITE", DataType: "STRING", MinValue: &minimum, MaxValue: &maximum,
+		IsSupported: true,
+	}}
+
+	got, err := CompilePolicyParametersWithMappings(policy,
+		&model.Device{SerialNumber: "BSC-STRING-RANGE-001", Technology: model.TechGSM},
+		"BSC", nil, mappings)
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 1)
+	assert.Equal(t, "DeviceGSM.Bts.1.IpaUnitId", got.Parameters[0].TRPath)
+	assert.Equal(t, "2-2323", got.Parameters[0].Value)
+}
+
 func TestCompilePolicyParametersUsesWorkbookCustomMapping(t *testing.T) {
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
 		"paramConfigList":[{

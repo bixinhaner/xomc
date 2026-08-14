@@ -12,6 +12,7 @@ interface BackendProvisioningTask {
   policy_name?: string;
   execute_type?: 'auto' | 'manual' | '';
   module?: 'software_upgrade' | 'license' | 'self_config' | '';
+  technology?: string;
   template_id: string | null;
   policy_id?: string | null;
   xml_file_id?: string | null;
@@ -39,6 +40,7 @@ export interface ProvisioningTask {
   policyName: string;
   executeType: 'auto' | 'manual' | '';
   module: 'software_upgrade' | 'license' | 'self_config' | '';
+  technology: string;
   templateId: string | null;
   policyId: string | null;
   xmlFileId: string | null;
@@ -144,6 +146,7 @@ export interface ProvisioningExecuteView {
   policyName: string;
   executeType: 'auto' | 'manual' | '';
   module: 'software_upgrade' | 'license' | 'self_config' | '';
+  technology: string;
   status: ProvisioningTaskStatusCode;
   startTime: string;
   endTime: string;
@@ -185,6 +188,7 @@ export function mapTaskToExecuteView(t: ProvisioningTask): ProvisioningExecuteVi
     policyName: t.policyName,
     executeType: t.executeType,
     module: t.module,
+    technology: t.technology,
     status: provisioningStatusCode(t.status),
     startTime: t.startedAt ?? '',
     endTime: t.completedAt ?? '',
@@ -210,6 +214,7 @@ function mapBackendTask(t: BackendProvisioningTask): ProvisioningTask {
     policyName: t.policy_name ?? '',
     executeType: t.execute_type ?? '',
     module: t.module ?? '',
+    technology: t.technology ?? '',
     templateId: t.template_id,
     policyId: t.policy_id ?? null,
     xmlFileId: t.xml_file_id ?? null,

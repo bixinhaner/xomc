@@ -766,6 +766,7 @@ export default function PlugAndPlay() {
             currentStep: detailTask.currentStep,
             totalSteps: detailTask.totalSteps,
             currentStepName: detailTask.currentStepName,
+            technology: detailTask.technology,
             xmlFileId: detailTask.xmlFileId,
           } : undefined}
           onClose={() => setDetailTaskId(null)}

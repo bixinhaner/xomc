@@ -40,6 +40,7 @@ var listTaskColumns = append(
 		WHEN pt.current_step_name LIKE 'license%' THEN 'license'
 		ELSE 'self_config'
 	END`,
+	"COALESCE(d.technology, '')",
 )
 
 // PgProvisioningTaskRepository implements ProvisioningTaskRepository using PostgreSQL.
@@ -83,15 +84,14 @@ func (r *PgProvisioningTaskRepository) Create(ctx context.Context, task *Provisi
 }
 
 func (r *PgProvisioningTaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*ProvisioningTask, error) {
-	query, args, err := storage.Psql.Select(taskColumns...).
-		From("provisioning_tasks").
-		Where(sq.Eq{"id": id}).
+	query, args, err := provisioningTaskQueryBase(storage.Psql.Select(listTaskColumns...)).
+		Where(sq.Eq{"pt.id": id}).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build select task SQL: %w", err)
 	}
 
-	task, err := scanTask(r.pool.QueryRow(ctx, query, args...))
+	task, err := scanEnrichedTask(r.pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		return nil, err
 	}
@@ -528,52 +528,59 @@ func scanTask(row pgx.Row) (*ProvisioningTask, error) {
 func scanTasks(rows pgx.Rows) ([]ProvisioningTask, error) {
 	var items []ProvisioningTask
 	for rows.Next() {
-		var task ProvisioningTask
-		var (
-			templateID   sql.NullString
-			policyID     sql.NullString
-			xmlFileID    sql.NullString
-			deviceTaskID sql.NullString
-			stepName     sql.NullString
-			errorMessage sql.NullString
-			startedAt    sql.NullTime
-			completedAt  sql.NullTime
-		)
-
-		err := rows.Scan(
-			&task.ID, &task.DeviceID, &templateID, &policyID, &xmlFileID, &deviceTaskID, &task.Status,
-			&task.CurrentStep, &stepName, &task.TotalSteps, &errorMessage,
-			&task.RetryCount, &task.MaxRetries,
-			&startedAt, &completedAt, &task.CreatedAt, &task.UpdatedAt, &task.SerialNumber,
-			&task.ProductName, &task.PolicyName, &task.ExecuteType, &task.Module,
-		)
+		task, err := scanEnrichedTask(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan task row: %w", err)
+			return nil, err
 		}
-
-		if templateID.Valid {
-			id, _ := uuid.Parse(templateID.String)
-			task.TemplateID = &id
-		}
-		setOptionalUUID(policyID, &task.PolicyID)
-		setOptionalUUID(xmlFileID, &task.XMLFileID)
-		setOptionalUUID(deviceTaskID, &task.DeviceTaskID)
-		if stepName.Valid {
-			task.CurrentStepName = stepName.String
-		}
-		if errorMessage.Valid {
-			task.ErrorMessage = errorMessage.String
-		}
-		if startedAt.Valid {
-			task.StartedAt = &startedAt.Time
-		}
-		if completedAt.Valid {
-			task.CompletedAt = &completedAt.Time
-		}
-
-		items = append(items, task)
+		items = append(items, *task)
 	}
 	return items, rows.Err()
+}
+
+func scanEnrichedTask(row pgx.Row) (*ProvisioningTask, error) {
+	var task ProvisioningTask
+	var (
+		templateID   sql.NullString
+		policyID     sql.NullString
+		xmlFileID    sql.NullString
+		deviceTaskID sql.NullString
+		stepName     sql.NullString
+		errorMessage sql.NullString
+		startedAt    sql.NullTime
+		completedAt  sql.NullTime
+	)
+	if err := row.Scan(
+		&task.ID, &task.DeviceID, &templateID, &policyID, &xmlFileID, &deviceTaskID, &task.Status,
+		&task.CurrentStep, &stepName, &task.TotalSteps, &errorMessage,
+		&task.RetryCount, &task.MaxRetries,
+		&startedAt, &completedAt, &task.CreatedAt, &task.UpdatedAt, &task.SerialNumber,
+		&task.ProductName, &task.PolicyName, &task.ExecuteType, &task.Module, &task.Technology,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("scan enriched task row: %w", err)
+	}
+	if templateID.Valid {
+		id, _ := uuid.Parse(templateID.String)
+		task.TemplateID = &id
+	}
+	setOptionalUUID(policyID, &task.PolicyID)
+	setOptionalUUID(xmlFileID, &task.XMLFileID)
+	setOptionalUUID(deviceTaskID, &task.DeviceTaskID)
+	if stepName.Valid {
+		task.CurrentStepName = stepName.String
+	}
+	if errorMessage.Valid {
+		task.ErrorMessage = errorMessage.String
+	}
+	if startedAt.Valid {
+		task.StartedAt = &startedAt.Time
+	}
+	if completedAt.Valid {
+		task.CompletedAt = &completedAt.Time
+	}
+	return &task, nil
 }
 
 func setOptionalUUID(value sql.NullString, target **uuid.UUID) {

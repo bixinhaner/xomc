@@ -1593,6 +1593,8 @@ func (e *ProvisioningEngine) recordActivationCheckResult(
 		}
 		return nil
 	}
+	pt.CurrentStep = 11
+	pt.CurrentStepName = "verify_startup_result"
 	if err := e.taskRepo.Update(ctx, pt); err != nil {
 		return fmt.Errorf("record final activation check for device %s: %w", pt.DeviceID, err)
 	}
@@ -1726,7 +1728,13 @@ func (e *ProvisioningEngine) completeTask(ctx context.Context, task *Provisionin
 	task.Status = StateCompleted
 	task.CompletedAt = &now
 
-	if err := e.taskRepo.UpdateStatus(ctx, task.ID, StateCompleted, ""); err != nil {
+	var err error
+	if task.CurrentStepName == "activation_verified" {
+		err = e.taskRepo.Update(ctx, task)
+	} else {
+		err = e.taskRepo.UpdateStatus(ctx, task.ID, StateCompleted, "")
+	}
+	if err != nil {
 		return fmt.Errorf("complete task: %w", err)
 	}
 
