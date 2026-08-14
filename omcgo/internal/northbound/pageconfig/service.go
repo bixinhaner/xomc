@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/alarm"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	nbsnmp "github.com/omcgo/omcgo/internal/northbound/snmp"
@@ -82,6 +83,8 @@ type Service struct {
 	localArchive        LocalArchiveStore
 	localArchiveOptions LocalArchiveOptions
 	mrSourceStore       MRSourceStore
+	localHostToken      string
+	transferProvider    transfercfg.Provider
 
 	socketConfigListenersMu sync.RWMutex
 	socketConfigListeners   []func()
@@ -117,6 +120,21 @@ func (s *Service) SetLocalArchive(store LocalArchiveStore, opts LocalArchiveOpti
 
 func (s *Service) SetMRSourceStore(store MRSourceStore) {
 	s.mrSourceStore = store
+}
+
+func (s *Service) SetLocalHostToken(host string) {
+	s.localHostToken = normalizeLocalHostToken(host)
+}
+
+func (s *Service) SetTransferConfigProvider(provider transfercfg.Provider) {
+	s.transferProvider = provider
+}
+
+func (s *Service) configuredLocalHostToken(ctx context.Context) string {
+	if s == nil {
+		return configuredLocalHostTokenWithProvider(ctx, "", nil)
+	}
+	return configuredLocalHostTokenWithProvider(ctx, s.localHostToken, s.transferProvider)
 }
 
 func (s *Service) RegisterSocketConfigChangeListener(listener func()) {
@@ -269,7 +287,7 @@ func (s *Service) PreviewFileProfile(ctx context.Context, idOrCode string) (File
 	if err != nil {
 		return FileProfilePreview{}, err
 	}
-	return buildFileProfilePreview(*profile), nil
+	return buildFileProfilePreviewWithLocalHost(*profile, s.configuredLocalHostToken(ctx)), nil
 }
 
 func (s *Service) getFileProfile(ctx context.Context, idOrCode string) (*FileProfile, error) {

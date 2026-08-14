@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	nbsnmp "github.com/omcgo/omcgo/internal/northbound/snmp"
 	"github.com/pkg/sftp"
@@ -67,6 +68,14 @@ type fakeLocalArchiveStore struct {
 
 type fakeMRSourceStore struct {
 	objects map[string][]byte
+}
+
+type fakeTransferConfigProvider struct {
+	snapshot transfercfg.Snapshot
+}
+
+func (p fakeTransferConfigProvider) Snapshot(context.Context) transfercfg.Snapshot {
+	return p.snapshot
 }
 
 func (s *fakeMRSourceStore) Get(_ context.Context, objectKey string) ([]byte, error) {
@@ -1558,6 +1567,39 @@ func TestRunFileProfileHonorsCSVSeparator(t *testing.T) {
 	require.Contains(t, lines[1], "SN0001|InternetGatewayDevice.Services.FAPService.1.PerfMgmt.PM.Counter.PUSCHPRBUsage|counter|12|avg|15min|2026-08-04 16:45:00+08|")
 }
 
+func TestRunFileProfileWithNoPMDataMarksNoArtifact(t *testing.T) {
+	repo := newFakeRepository()
+	repo.pmRows = nil
+	pmGroup := group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, []ScenarioObject{{Code: "PC", Tech: "LTE"}})
+	pmGroup.CompressionEnabled = true
+	pmGroup.CompressionFormat = CompressionZip
+	repo.fileProfiles = []FileProfile{
+		fileProfile("S0001", "Northbound PM", "Standard", "Standard", []string{"baseline"}, []FileGroup{pmGroup}),
+	}
+	archive := &fakeLocalArchiveStore{bucket: "northbound"}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	svc.SetLocalArchive(archive, LocalArchiveOptions{RetentionDays: 7})
+	windowEnd := time.Date(2026, 8, 13, 17, 0, 0, 0, time.UTC)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S0001", RunProfileRequest{
+		GroupID:   "pm-15m",
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	run := resp.Items[0]
+	require.Equal(t, RunStatusTerminated, run.Status)
+	require.Equal(t, 0, run.RowCount)
+	require.Empty(t, run.ArtifactName)
+	require.Empty(t, run.ArtifactPath)
+	require.Empty(t, run.ArtifactContent)
+	require.Contains(t, run.ErrorMessage, "no source data")
+	require.Equal(t, true, run.Summary["no_artifact"])
+	require.Empty(t, archive.puts)
+}
+
 func TestCSVCommaAcceptsTabAliases(t *testing.T) {
 	for _, separator := range []string{"\t", `\t`, "tab", "Tab"} {
 		comma, ok := csvComma(separator)
@@ -1590,6 +1632,60 @@ func TestRunFileProfileUsesMRSourceObjectContent(t *testing.T) {
 	require.Equal(t, 1, run.RowCount)
 	require.Equal(t, true, run.Summary["mr_passthrough"])
 	require.Equal(t, "source-mro.xml", run.Summary["source_file_name"])
+}
+
+func TestNormalizeLocalHostToken(t *testing.T) {
+	require.Equal(t, "172.24.224.251", normalizeLocalHostToken(" 172.24.224.251 "))
+	require.Equal(t, "172.24.224.251", normalizeLocalHostToken("172.24.224.251:8080"))
+	require.Equal(t, "172.24.224.251", normalizeLocalHostToken("http://172.24.224.251:8080/smallcell/FileUploadService"))
+	require.Empty(t, normalizeLocalHostToken("172.24.224.251/export"))
+	require.Equal(t, "172.24.224.251", localHostTokenFromTransferSnapshot(transfercfg.Snapshot{
+		Upload: transfercfg.UploadSettings{BaseURL: "http://172.24.224.251:8080"},
+	}))
+	require.Equal(t, "172.24.224.252", localHostTokenFromTransferSnapshot(transfercfg.Snapshot{
+		ProtocolPolicy: transfercfg.ProtocolPolicyPreferHTTPS,
+		Upload: transfercfg.UploadSettings{
+			BaseURL:      "http://172.24.224.251:8080",
+			HTTPSBaseURL: "https://172.24.224.252:8443",
+		},
+	}))
+	require.Empty(t, localHostTokenFromTransferSnapshot(transfercfg.Snapshot{
+		Upload: transfercfg.UploadSettings{BaseURL: "http://127.0.0.1:8080"},
+	}))
+}
+
+func TestRunFileProfileUsesConfiguredHostAndFlatArchivePath(t *testing.T) {
+	t.Setenv("OMC_PUBLIC_HOST", "10.10.10.10")
+	repo := newFakeRepository()
+	pmGroup := group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, []ScenarioObject{{Code: "PC", Tech: "LTE"}})
+	pmGroup.CompressionEnabled = true
+	pmGroup.CompressionFormat = CompressionZip
+	repo.fileProfiles = []FileProfile{
+		fileProfile("S0001", "Northbound PM", "Standard", "Standard", []string{"baseline"}, []FileGroup{pmGroup}),
+	}
+	repo.deliveryTargets = nil
+	archive := &fakeLocalArchiveStore{bucket: "northbound"}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	svc.SetTransferConfigProvider(fakeTransferConfigProvider{snapshot: transfercfg.Snapshot{
+		Upload: transfercfg.UploadSettings{BaseURL: "http://172.24.224.251:8080/smallcell/FileUploadService"},
+	}})
+	svc.SetLocalArchive(archive, LocalArchiveOptions{RetentionDays: 7})
+	windowEnd := time.Date(2026, 8, 13, 17, 0, 0, 0, time.UTC)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S0001", RunProfileRequest{
+		GroupID:   "pm-15m",
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	require.Len(t, archive.puts, 1)
+	require.Equal(t, "Baicells-PC-172.24.224.251-1.0-20260813170000-15.csv.zip", resp.Items[0].ArtifactName)
+	require.Equal(t, resp.Items[0].CreatedAt.Local().Format("2006-01-02")+"/S0001/pm-15m/Baicells-PC-172.24.224.251-1.0-20260813170000-15.csv.zip", archive.puts[0].Key)
+	require.NotContains(t, archive.puts[0].Key, resp.Items[0].ID)
+	require.NotContains(t, archive.puts[0].Key, "127.0.0.1")
+	require.NotContains(t, archive.puts[0].Key, "10.10.10.10")
 }
 
 func TestRunInventoryProfileGoldenContentAndName(t *testing.T) {
@@ -1626,6 +1722,41 @@ func TestRunInventoryProfileGoldenContentAndName(t *testing.T) {
 	}, "\n"), run.ArtifactContent)
 }
 
+func TestRunInventoryProfileUsesTransferHostAndFlatArchivePath(t *testing.T) {
+	t.Setenv("OMC_PUBLIC_HOST", "10.10.10.10")
+	repo := newFakeRepository()
+	for i := range repo.inventoryProfiles {
+		if repo.inventoryProfiles[i].Code == "ENB" {
+			repo.inventoryProfiles[i].FileNameTemplate = "inventory_#Object#_#LocalHost#_#DateTime#.csv"
+			repo.inventoryProfiles[i].CompressionEnabled = true
+			repo.inventoryProfiles[i].CompressionFormat = CompressionZip
+			break
+		}
+	}
+	repo.deliveryTargets = nil
+	archive := &fakeLocalArchiveStore{bucket: "northbound"}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	svc.SetTransferConfigProvider(fakeTransferConfigProvider{snapshot: transfercfg.Snapshot{
+		Upload: transfercfg.UploadSettings{BaseURL: "http://172.24.224.251:8080/smallcell/FileUploadService"},
+	}})
+	svc.SetLocalArchive(archive, LocalArchiveOptions{RetentionDays: 7})
+	windowEnd := time.Date(2026, 8, 13, 17, 0, 0, 0, time.UTC)
+
+	run, err := svc.RunInventoryProfile(context.Background(), "ENB", RunProfileRequest{
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, archive.puts, 1)
+	require.Equal(t, "inventory_eNB_172.24.224.251_20260813170000.csv.zip", run.ArtifactName)
+	require.Equal(t, run.CreatedAt.Local().Format("2006-01-02")+"/ENB/inventory_eNB_172.24.224.251_20260813170000.csv.zip", archive.puts[0].Key)
+	require.Empty(t, run.ArtifactContent)
+	require.NotContains(t, archive.puts[0].Key, run.ID)
+	require.NotContains(t, archive.puts[0].Key, "127.0.0.1")
+	require.NotContains(t, archive.puts[0].Key, "10.10.10.10")
+}
+
 func TestRunFileProfileArchivesArtifactLocally(t *testing.T) {
 	repo := newFakeRepository()
 	cmGroup := group("cm-one", DomainCM, FormatCSV, Period24H, 1, pathCM, nameCM, []ScenarioObject{{Code: "CP"}})
@@ -1649,7 +1780,8 @@ func TestRunFileProfileArchivesArtifactLocally(t *testing.T) {
 	require.Empty(t, resp.Items[0].ArtifactContent)
 	require.Contains(t, string(archive.puts[0].Content), "Serial Number")
 	require.Equal(t, "text/csv; charset=utf-8", archive.puts[0].ContentType)
-	require.Contains(t, archive.puts[0].Key, resp.Items[0].CreatedAt.Local().Format("2006-01-02")+"/S9301/cm-one/run-1/")
+	require.Contains(t, archive.puts[0].Key, resp.Items[0].CreatedAt.Local().Format("2006-01-02")+"/S9301/cm-one/")
+	require.NotContains(t, archive.puts[0].Key, "/"+resp.Items[0].ID+"/")
 	require.Contains(t, archive.puts[0].Key, ".csv")
 	require.Len(t, repo.events, 2)
 	require.Equal(t, "run", repo.events[0].EventType)
@@ -1881,6 +2013,33 @@ func TestRunDueSchedulesWaitsForStartMinuteAndRetriesFailedWindow(t *testing.T) 
 	require.Len(t, repo.runs, 3)
 	require.Equal(t, RunStatusSuccess, repo.runs[2].Status)
 	require.Equal(t, "20260804100000", repo.runs[2].WindowEnd.Format("20060102150405"))
+}
+
+func TestRunDueSchedulesTreatsNoArtifactWindowAsComplete(t *testing.T) {
+	repo := newFakeRepository()
+	repo.pmRows = nil
+	pmGroup := group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, []ScenarioObject{{Code: "PC", Tech: "LTE"}})
+	pmGroup.CompressionEnabled = false
+	repo.fileProfiles = []FileProfile{
+		fileProfile("S9103", "Scheduled PM", "Custom", "Custom", []string{"custom"}, []FileGroup{pmGroup}),
+	}
+	repo.fileProfiles[0].Enabled = true
+	repo.fileProfiles[0].Status = StatusNormal
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	now := time.Date(2026, 8, 4, 10, 5, 0, 0, time.Local)
+	summary, err := svc.RunDueSchedules(context.Background(), now, ScheduleRunOptions{MaxRuns: 10})
+	require.NoError(t, err)
+	require.Equal(t, 1, summary.Ran)
+	require.Len(t, repo.runs, 1)
+	require.Equal(t, RunStatusTerminated, repo.runs[0].Status)
+	require.Equal(t, true, repo.runs[0].Summary["no_artifact"])
+
+	summary, err = svc.RunDueSchedules(context.Background(), now.Add(time.Minute), ScheduleRunOptions{MaxRuns: 10})
+	require.NoError(t, err)
+	require.Equal(t, 0, summary.Due)
+	require.Equal(t, 0, summary.Ran)
+	require.Len(t, repo.runs, 1)
 }
 
 func TestListAndDownloadRun(t *testing.T) {
