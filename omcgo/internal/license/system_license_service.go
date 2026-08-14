@@ -24,6 +24,14 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+// CapacityOffliner 按 license 各网元类型容量上限，批量把超出的在线设备置离线
+// （不删除）。device.DeviceService 实现。license 降容（上传更小容量 license）后
+// 调用——在线口径（issue #316）：离线设备不占容量，故腾容量只需置离线，设备仍保留
+// 在系统，容量恢复后可重新上线。
+type CapacityOffliner interface {
+	OfflineExcessDevices(ctx context.Context, typeCapacity map[string]int) (int, error)
+}
+
 // SystemLicenseService — singleton system_license 业务编排：
 //  1. GetCurrent → repo.GetCurrent，NotFound 翻译成 12113
 //  2. Update     → 解析 raw → 验签（可选 strict）→ 重复 ID 预检 → repo.Replace
@@ -34,7 +42,8 @@ import (
 type SystemLicenseService struct {
 	repo                  SystemLicenseRepository
 	logger                *zap.Logger
-	enforcer              Enforcer // 可选；Update 成功后调 Invalidate 让 enforcer 重读
+	enforcer              Enforcer         // 可选；Update 成功后调 Invalidate 让 enforcer 重读
+	capacityOffliner      CapacityOffliner // 可选；Update 后把超容在线设备置离线（降容清理）
 	legacyKeyStore        []byte
 	legacyStorePassword   string
 	legacyKeyAlias        string
@@ -73,9 +82,15 @@ func (s *SystemLicenseService) SetLegacyFeatureMapping(mapping *LegacyFeatureMap
 }
 
 // SetUsageRepo 注入累计使用时长仓储，启用 GetCurrent 响应里的累计状态填充
-//（cumulative_used_hours / cumulative_limit_hours / is_expired）。
+// （cumulative_used_hours / cumulative_limit_hours / is_expired）。
 func (s *SystemLicenseService) SetUsageRepo(r SystemLicenseUsageRepository) {
 	s.usageRepo = r
+}
+
+// SetCapacityOffliner 注入降容清理器，启用 Update 后把超出新容量的在线设备置离线
+// （不删除）。不注入（nil）时跳过降容清理。
+func (s *SystemLicenseService) SetCapacityOffliner(o CapacityOffliner) {
+	s.capacityOffliner = o
 }
 
 // GetCurrent 返回当前生效 license。无 license 时返业务错误 12113 +
@@ -357,6 +372,11 @@ func (s *SystemLicenseService) Update(ctx context.Context, req UpdateRequest) (*
 		IsCurrent:        true,
 	}
 
+	// 降容清理（issue #316）：新 license 容量可能小于当前在线设备数。采用"允许降容 +
+	// 踢超容离线"策略（在线口径：离线不占容量，设备不删除，容量恢复后可重新上线）：
+	// 先 Replace 落地新 license，再按 created_at 把超出新容量的在线设备置离线。
+	// deviceCounter 不再用于"拒绝"，仅 capacityOffliner 负责清理（见 Replace 后）。
+
 	replaced, err := s.repo.Replace(ctx, lic)
 	if err != nil {
 		if errors.Is(err, ErrSystemLicenseIDExists) {
@@ -374,6 +394,20 @@ func (s *SystemLicenseService) Update(ctx context.Context, req UpdateRequest) (*
 	// 仍走旧容量裁决。nil-safe（enforcer 未注入时 noop）。
 	if s.enforcer != nil {
 		s.enforcer.Invalidate()
+	}
+
+	// 降容清理（issue #316）：按新 license 各网元类型容量，把超出（created_at 晚接入
+	// 的）在线设备置离线。失败仅告警不回滚 license（新 license 已生效，清理可由运维
+	// 或下次 Inform 容量校验兜底）。nil-safe（capacityOffliner 未注入时跳过）。
+	if s.capacityOffliner != nil && len(lic.DevicesSupport) > 0 {
+		offlined, offErr := s.capacityOffliner.OfflineExcessDevices(ctx, lic.DevicesSupport)
+		if offErr != nil {
+			s.logger.Warn("offline excess devices after license update failed (non-fatal)",
+				zap.String("license_id", lic.LicenseID), zap.Error(offErr))
+		} else if offlined > 0 {
+			s.logger.Info("excess devices offlined after license downgrade",
+				zap.String("license_id", lic.LicenseID), zap.Int("offlined", offlined))
+		}
 	}
 
 	s.logger.Info("system license updated",

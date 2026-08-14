@@ -81,6 +81,7 @@ type DeviceService struct {
 	cache                  *DeviceCache
 	metrics                *DeviceMetrics
 	licenseEnforcer        LicenseEnforcer
+	excessOffliner         ExcessOffliner           // license 降容清理：批量置离线超容设备（nil = 禁用）
 	carrierRegistry        *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
 	paramSyncStarter       ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
 	manualOfflineMode      string
@@ -109,11 +110,21 @@ type disconnectedAlarmClearer interface {
 // license package. Defined here on the consumer side so DeviceService stays
 // independent of the full license model. Wired via SetLicenseEnforcer.
 //
+// EnforceCapacity 走 per-type gating（issue #316）：deviceType 为网元类型
+// (product.alarm_ne_type)，license 按 DevicesSupport[deviceType] 独立限额。
 // Both methods may be called as nil-safe gates: SetLicenseEnforcer with a
 // nil value is fine and disables enforcement (used in dev/test).
 type LicenseEnforcer interface {
-	EnforceCapacity(ctx context.Context, additional int) error
+	EnforceCapacity(ctx context.Context, deviceType string, additional int) error
 	EnforceExpiry(ctx context.Context, operation string) error
+}
+
+// ExcessOffliner 按各网元类型容量上限批量置离线超容在线设备，供 license 降容
+// 清理使用（issue #316，在线口径：离线不占容量）。PgDeviceRepository 实现。
+// 返回被置离线设备的 serial_number 列表（用于清 Redis 缓存）。
+// 单独窄接口，避免扩大 DeviceRepository（mockgen 生成）。
+type ExcessOffliner interface {
+	OfflineExcessByTypeCapacity(ctx context.Context, typeCapacity map[string]int) ([]string, error)
 }
 
 // ConnectionRequester sends Connection Request to wake a CPE device.
@@ -249,6 +260,37 @@ func (s *DeviceService) BatchAssignToGroup(ctx context.Context, groupID uuid.UUI
 // against capacity/expiry. Pass nil to disable (default in tests).
 func (s *DeviceService) SetLicenseEnforcer(e LicenseEnforcer) {
 	s.licenseEnforcer = e
+}
+
+// SetExcessOffliner 注入批量置离线能力（PgDeviceRepository），启用 license 降容
+// 清理（OfflineExcessDevices）。nil = 禁用降容清理。
+func (s *DeviceService) SetExcessOffliner(o ExcessOffliner) {
+	s.excessOffliner = o
+}
+
+// OfflineExcessDevices 按 license 各网元类型容量上限，把超出（created_at 晚接入的）
+// 在线设备置离线（不删除）。实现 license.CapacityOffliner，供 license 降容后清理。
+// 在线口径（issue #316）：离线设备不占容量，故腾容量只需置离线。
+// 置离线后**清这些设备的 Redis 缓存**——否则缓存里 stale 的 is_online=true 会让被踢
+// 设备下次 Inform 读到 oldIsOnline=true、跳过容量校验又上线，降容清理白做。
+func (s *DeviceService) OfflineExcessDevices(ctx context.Context, typeCapacity map[string]int) (int, error) {
+	if s.excessOffliner == nil || len(typeCapacity) == 0 {
+		return 0, nil
+	}
+	sns, err := s.excessOffliner.OfflineExcessByTypeCapacity(ctx, typeCapacity)
+	if err != nil {
+		return 0, fmt.Errorf("offline excess devices: %w", err)
+	}
+	// 清被踢设备的缓存，让下次 Inform 重新从 DB load is_online=false → 触发容量校验。
+	if s.cache != nil {
+		for _, sn := range sns {
+			s.cache.Delete(ctx, sn)
+		}
+	}
+	if len(sns) > 0 {
+		s.logger.Info("excess devices offlined after license capacity change", zap.Int("count", len(sns)))
+	}
+	return len(sns), nil
 }
 
 // ProductClassMatcher 是 DeviceService 反查 productClass → product 装配件的最小依赖。
@@ -640,15 +682,21 @@ func (s *DeviceService) RegisterFromInformEvent(
 		return nil, commonerrors.ErrNotFound
 	}
 
-	// License enforcement (E-04)：南向 Inform 自动注册同样受 license 容量/过期/
-	// fail-closed 约束，与管理面 CreateDevice（:2088）对齐，避免南向绕过容量限制。
-	// 仅对全新设备生效——已注册设备的更新路径不走这里（上方 existing != nil 分支
-	// 已提前返回）。nil enforcer = 执法未启用（轻量部署/测试）。
+	// License enforcement (E-04 + issue #316)：南向 Inform 自动注册同样受 license
+	// 过期/fail-closed 约束；容量按网元类型独立限额（per-type）——先解析
+	// productClass → ne_type，类型未知/未授权/超配额一律拒绝，与管理面
+	// CreateDevice 对齐，避免南向绕过容量限制。仅对全新设备生效——已注册设备的
+	// 更新路径不走这里（上方 existing != nil 分支已提前返回）。nil enforcer =
+	// 执法未启用（轻量部署/测试）。
 	if s.licenseEnforcer != nil {
 		if err := s.licenseEnforcer.EnforceExpiry(ctx, "device.inform.register"); err != nil {
 			return nil, err
 		}
-		if err := s.licenseEnforcer.EnforceCapacity(ctx, 1); err != nil {
+		neType, err := s.resolveNEType(ctx, inform.DeviceId.ProductClass)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.licenseEnforcer.EnforceCapacity(ctx, neType, 1); err != nil {
 			return nil, err
 		}
 	}
@@ -929,7 +977,20 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	// T-0162: 收到 Inform 即视为在线。对于已 scan 出 lifecycle_state 的设备，
 	// normalizeDeviceForPersist 不会再从老 Status 反推新双字段；这里必须显式置 true，
 	// 否则设备一旦被 OfflineDetector 标记成 is_online=false，后续正常 Inform 也无法恢复在线展示。
-	device.IsOnline = true
+	//
+	// license 容量校验（在线口径，issue #316）：仅离线→在线转换时校验，若该类型
+	// 在线容量已满则保持离线（拒绝上线，不占容量）。已在线设备的周期 Inform 不重复校验。
+	// 走 EnforceOnlineCapacity 与 periodic batch 路径统一，避免口径分裂。
+	if !oldIsOnline && s.licenseEnforcer != nil {
+		if capErr := s.EnforceOnlineCapacity(ctx, device.ProductClass); capErr != nil {
+			s.logger.Warn("UpdateFromInform: device kept offline by license capacity",
+				zap.String("serial_number", device.SerialNumber), zap.Error(capErr))
+		} else {
+			device.IsOnline = true
+		}
+	} else {
+		device.IsOnline = true
+	}
 	udpAddr := deriveUDPConnectionRequestAddress(inform.ParameterList)
 	if udpAddr != "" {
 		device.IPAddress = deriveInformIPAddress(udpAddr, device.ConnectionRequestURL)
@@ -1298,6 +1359,53 @@ func (s *DeviceService) applyProductMetadata(ctx context.Context, device *model.
 			device.Technology = normalized
 		}
 	}
+}
+
+// resolveNEType 解析 productClass 对应的网元类型（products.alarm_ne_type），
+// 供 per-type license 容量校验（EnforceCapacity）使用。
+//
+// 严格模式（issue #316）：以下任一情况都返回错误 → 调用方拒绝注册/创建：
+//   - productMatcher 未注入（生产不应发生）；
+//   - productClass 为空；
+//   - 匹配返回 ErrOrphan（productClass 未在产品字典登记）；
+//   - 命中但产品未配置 alarm_ne_type。
+//
+// 仅在 licenseEnforcer != nil 时调用，故 dev/test 不注入 enforcer 时不受影响。
+func (s *DeviceService) resolveNEType(ctx context.Context, productClass string) (string, error) {
+	pc := strings.TrimSpace(productClass)
+	if pc == "" {
+		return "", fmt.Errorf("product_class empty; cannot resolve ne_type for license enforcement: %w", commonerrors.ErrLicenseCapacityExceeded)
+	}
+	if s.productMatcher == nil {
+		return "", fmt.Errorf("product matcher not configured; cannot resolve ne_type for license enforcement: %w", commonerrors.ErrLicenseCapacityExceeded)
+	}
+	mr, err := s.productMatcher.MatchProductClass(ctx, pc)
+	if err != nil {
+		if errors.Is(err, product.ErrOrphan) {
+			return "", fmt.Errorf("product_class %q is not registered (orphan); device rejected by license enforcement: %w", pc, commonerrors.ErrLicenseCapacityExceeded)
+		}
+		return "", fmt.Errorf("resolve product (class=%s) for ne_type: %w", pc, err)
+	}
+	if mr == nil || mr.Product == nil || strings.TrimSpace(mr.Product.AlarmNeType) == "" {
+		return "", fmt.Errorf("product_class %q matched no network-element type (alarm_ne_type); device rejected by license enforcement: %w", pc, commonerrors.ErrLicenseCapacityExceeded)
+	}
+	return mr.Product.AlarmNeType, nil
+}
+
+// EnforceOnlineCapacity 在设备即将从离线转为在线时，校验该网元类型的 license
+// 容量（在线口径，issue #316）。返回 nil 表示容量充足、允许上线；返回非 nil
+// （license 错误）表示该类型在线数已满、应保持离线。licenseEnforcer 未注入时
+// 恒返回 nil。供 UpdateFromInform 与 periodic batch 路径统一调用——避免 batch
+// 路径绕过容量限制（生产默认启用 batch processor）。
+func (s *DeviceService) EnforceOnlineCapacity(ctx context.Context, productClass string) error {
+	if s.licenseEnforcer == nil {
+		return nil
+	}
+	neType, err := s.resolveNEType(ctx, productClass)
+	if err != nil {
+		return err
+	}
+	return s.licenseEnforcer.EnforceCapacity(ctx, neType, 1)
 }
 
 // GetDeviceInfo retrieves extended info for a device.
@@ -2165,12 +2273,12 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req CreateDeviceReques
 		return nil, commonerrors.ErrAlreadyExists
 	}
 
-	// License enforcement (T-0015 / R-103). nil enforcer = enforcement disabled.
+	// License enforcement (T-0015 / R-103). nil enforcer = disabled.
+	// 仅校验过期：CreateDevice 创建的是初始离线设备（is_online=false），不占在线
+	// 容量（issue #316 在线口径）；设备真正上线（Inform）时由 RegisterFromInform /
+	// UpdateFromInform 校验容量，故此处不做容量校验。
 	if s.licenseEnforcer != nil {
 		if err := s.licenseEnforcer.EnforceExpiry(ctx, "device.create"); err != nil {
-			return nil, err
-		}
-		if err := s.licenseEnforcer.EnforceCapacity(ctx, 1); err != nil {
 			return nil, err
 		}
 	}

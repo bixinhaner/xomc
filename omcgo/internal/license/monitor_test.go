@@ -246,6 +246,31 @@ func TestMonitor_CheckCapacity_ClearsWhenLicenseRemoved(t *testing.T) {
 		sink.clears)
 }
 
+func TestMonitor_CheckCapacity_RaisesAndClearsExhaustedAlert(t *testing.T) {
+	defer fixedClock(time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC))()
+	lic := systemLicense("L", DevicesSupport{"eNB": 2}, 365*24*time.Hour)
+	repo := &mockSystemLicenseRepo{current: lic}
+	dev := &fakeDeviceCounter{count: 2, countByType: map[string]int{"ENB": 2}}
+	m, sink, _ := newMonitorForTest(repo, dev, nil)
+
+	// Tick 1: eNB 满（2/2）→ raise exhausted（warning）
+	require.NoError(t, m.CheckCapacity(context.Background()))
+	found := false
+	for _, a := range sink.alerts {
+		if a.Identifier == CapacityExhaustedIdentifier {
+			found = true
+			assert.Equal(t, AlertSeverityWarning, a.Severity)
+		}
+	}
+	require.True(t, found, "should raise capacity_exhausted alert when type full")
+
+	// Tick 2: 恢复（删设备，ENB=1<2）→ clear exhausted
+	dev.countByType = map[string]int{"ENB": 1}
+	sink.clears = nil
+	require.NoError(t, m.CheckCapacity(context.Background()))
+	assert.Contains(t, sink.clears, CapacityExhaustedIdentifier)
+}
+
 func TestMonitor_CheckCumulativeUsage_ExceededAlerts(t *testing.T) {
 	defer fixedClock(time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))()
 	lic := &SystemLicense{

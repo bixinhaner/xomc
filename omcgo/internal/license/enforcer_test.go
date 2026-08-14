@@ -23,8 +23,9 @@ func fixedClock(t time.Time) func() {
 
 // fakeDeviceCounter — DeviceCounter 简化 mock。
 type fakeDeviceCounter struct {
-	count int
-	err   error
+	count       int
+	countByType map[string]int
+	err         error
 }
 
 func (f *fakeDeviceCounter) CountDevices(_ context.Context) (int, error) {
@@ -32,6 +33,13 @@ func (f *fakeDeviceCounter) CountDevices(_ context.Context) (int, error) {
 		return 0, f.err
 	}
 	return f.count, nil
+}
+
+func (f *fakeDeviceCounter) CountDevicesByType(_ context.Context) (map[string]int, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.countByType, nil
 }
 
 // systemLicense 构造一个 active system_license fixture。
@@ -55,42 +63,73 @@ func TestEnforcer_EnforceCapacity(t *testing.T) {
 	tests := []struct {
 		name       string
 		licCurrent *SystemLicense
-		used       int
+		usedByType map[string]int
+		deviceType string
 		additional int
 		wantErr    error
 	}{
 		{
 			name:       "no license configured → fail-closed reject",
 			licCurrent: nil,
-			used:       9999,
+			deviceType: "eNB",
 			additional: 1,
 			wantErr:    commonerrors.ErrLicenseUnavailable,
 		},
 		{
-			name:       "well under capacity allowed",
-			licCurrent: systemLicense("L1", DevicesSupport{"eNB": 100, "gNB": 100}, 0),
-			used:       50,
-			additional: 1,
-			wantErr:    nil,
-		},
-		{
-			name:       "exactly at total boundary allowed",
-			licCurrent: systemLicense("L2", DevicesSupport{"eNB": 50, "gNB": 50}, 0),
-			used:       99,
-			additional: 1,
-			wantErr:    nil,
-		},
-		{
-			name:       "over total capacity rejected",
-			licCurrent: systemLicense("L3", DevicesSupport{"eNB": 10, "gNB": 10}, 0),
-			used:       20,
+			name:       "empty deviceType → unknown NE type rejected",
+			licCurrent: systemLicense("L1", DevicesSupport{"eNB": 100}, 0),
+			deviceType: "",
 			additional: 1,
 			wantErr:    commonerrors.ErrLicenseCapacityExceeded,
 		},
 		{
-			name:       "zero capacity = unlimited (degenerate, not gated)",
-			licCurrent: systemLicense("L4", DevicesSupport{}, 0),
-			used:       1000000,
+			name:       "well under per-type capacity allowed",
+			licCurrent: systemLicense("L1", DevicesSupport{"eNB": 100, "gNB": 100}, 0),
+			usedByType: map[string]int{"ENB": 50},
+			deviceType: "eNB",
+			additional: 1,
+			wantErr:    nil,
+		},
+		{
+			name:       "exactly at per-type boundary allowed",
+			licCurrent: systemLicense("L2", DevicesSupport{"eNB": 50, "gNB": 50}, 0),
+			usedByType: map[string]int{"ENB": 49},
+			deviceType: "eNB",
+			additional: 1,
+			wantErr:    nil,
+		},
+		{
+			name:       "over per-type capacity rejected (single type exceeds)",
+			licCurrent: systemLicense("L3", DevicesSupport{"eNB": 10, "gNB": 10}, 0),
+			usedByType: map[string]int{"ENB": 10, "GNB": 0},
+			deviceType: "eNB",
+			additional: 1,
+			wantErr:    commonerrors.ErrLicenseCapacityExceeded,
+		},
+		{
+			// per-type 核心用例（issue #316）：eNB 已满但 gNB=0，gNB 仍可接入，互不影响。
+			name:       "other type full does not block this type",
+			licCurrent: systemLicense("L4", DevicesSupport{"eNB": 10, "gNB": 10}, 0),
+			usedByType: map[string]int{"ENB": 10, "GNB": 0},
+			deviceType: "gNB",
+			additional: 1,
+			wantErr:    nil,
+		},
+		{
+			// license 未授权该网元类型（map 无该 key）→ 严格拒绝。
+			name:       "device type not authorized by license rejected",
+			licCurrent: systemLicense("L5", DevicesSupport{"eNB": 100}, 0),
+			usedByType: map[string]int{"ENB": 0},
+			deviceType: "gNB",
+			additional: 1,
+			wantErr:    commonerrors.ErrLicenseCapacityExceeded,
+		},
+		{
+			// 大小写不敏感：设备 ne_type=ENB 匹配 license key=eNB。
+			name:       "case-insensitive type matching allowed",
+			licCurrent: systemLicense("L6", DevicesSupport{"eNB": 5}, 0),
+			usedByType: map[string]int{"ENB": 2},
+			deviceType: "ENB",
 			additional: 1,
 			wantErr:    nil,
 		},
@@ -98,9 +137,9 @@ func TestEnforcer_EnforceCapacity(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &mockSystemLicenseRepo{current: tc.licCurrent}
-			dev := &fakeDeviceCounter{count: tc.used}
+			dev := &fakeDeviceCounter{countByType: tc.usedByType}
 			e := NewEnforcer(repo, dev, zap.NewNop(), nil)
-			err := e.EnforceCapacity(context.Background(), tc.additional)
+			err := e.EnforceCapacity(context.Background(), tc.deviceType, tc.additional)
 			if tc.wantErr == nil {
 				require.NoError(t, err)
 				return
@@ -115,9 +154,29 @@ func TestEnforcer_EnforceCapacity_NegativeAdditional(t *testing.T) {
 	repo := &mockSystemLicenseRepo{}
 	dev := &fakeDeviceCounter{}
 	e := NewEnforcer(repo, dev, zap.NewNop(), nil)
-	err := e.EnforceCapacity(context.Background(), -1)
+	err := e.EnforceCapacity(context.Background(), "eNB", -1)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
+}
+
+func TestEnforcer_RaisesExhaustedAlertOnCapacityDenied(t *testing.T) {
+	lic := systemLicense("L", DevicesSupport{"eNB": 1}, 0)
+	repo := &mockSystemLicenseRepo{current: lic}
+	dev := &fakeDeviceCounter{countByType: map[string]int{"ENB": 1}}
+	e := NewEnforcer(repo, dev, zap.NewNop(), nil)
+	sink := &captureSink{}
+	e.SetAlertSink(sink)
+
+	err := e.EnforceCapacity(context.Background(), "eNB", 1)
+	require.Error(t, err)
+	require.Len(t, sink.alerts, 1)
+	assert.Equal(t, CapacityExhaustedIdentifier, sink.alerts[0].Identifier)
+	assert.Equal(t, AlertSeverityWarning, sink.alerts[0].Severity)
+
+	// 1h 去重窗口：再次容量满拒绝不重复 Send。
+	sink.alerts = nil
+	_ = e.EnforceCapacity(context.Background(), "eNB", 1)
+	assert.Empty(t, sink.alerts, "dedup window should suppress repeated exhausted alert")
 }
 
 func TestEnforcer_EnforceExpiry(t *testing.T) {
@@ -182,7 +241,7 @@ func TestEnforcer_Quota(t *testing.T) {
 	t.Run("with license + per-type map", func(t *testing.T) {
 		lic := systemLicense("L1", DevicesSupport{"eNB": 100, "gNB": 200}, 30*24*time.Hour)
 		repo := &mockSystemLicenseRepo{current: lic}
-		dev := &fakeDeviceCounter{count: 50}
+		dev := &fakeDeviceCounter{count: 50, countByType: map[string]int{"ENB": 20, "GNB": 30}}
 		e := NewEnforcer(repo, dev, zap.NewNop(), nil)
 		q, err := e.Quota(context.Background())
 		require.NoError(t, err)
@@ -193,7 +252,9 @@ func TestEnforcer_Quota(t *testing.T) {
 		assert.Equal(t, 30, q.DaysRemaining)
 		assert.Len(t, q.PerType, 2)
 		assert.Equal(t, 100, q.PerType["eNB"].Max)
+		assert.Equal(t, 20, q.PerType["eNB"].Used)
 		assert.Equal(t, 200, q.PerType["gNB"].Max)
+		assert.Equal(t, 30, q.PerType["gNB"].Used)
 	})
 
 	t.Run("perpetual (NULL expiry) days_remaining=-1", func(t *testing.T) {

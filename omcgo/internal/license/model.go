@@ -30,8 +30,8 @@ type Quota struct {
 
 // TypeQuotaItem 是 device_type 维度配额条目。
 //
-// Max 来自 SystemLicense.DevicesSupport[type]；Used 在 Phase 7 RBAC 联动
-// per-type 精细化 gating 上线前固定 0。
+// Max 来自 SystemLicense.DevicesSupport[type]；Used 来自 CountDevicesByType
+// 按 alarm_ne_type 分组的设备计数（大小写归一化匹配）。
 type TypeQuotaItem struct {
 	Max   int     `json:"max"`
 	Used  int     `json:"used"`

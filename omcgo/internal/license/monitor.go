@@ -75,6 +75,17 @@ func (NoopAlertSink) Clear(_ context.Context, _ string) error { return nil }
 // same threshold. Crossing into a new (higher) threshold short-circuits this.
 const CapacityDedupWindow = 6 * time.Hour
 
+// CapacityExhaustedIdentifier 是 OMC 告警库（data/alarm-definitions/OMC.xml）
+// 中"License容量已满"告警的数字 identifier（跨 ne_type 全局唯一）。alarm engine
+// 持久化后前端按 identifier JOIN alarm_definitions 取本地化名（cn_name/en_name）。
+// enforcer 在 EnforceCapacity 因容量满拒绝设备时 Send（warning，1h 时间窗去重）；
+// monitor 在所有授权类型都未满时 Clear。
+const CapacityExhaustedIdentifier = "40"
+
+// capacityExhaustedAlertDedup 是 enforcer 容量满告警的时间窗去重：1h 内不重发。
+// monitor hourly Clear 后，若容量仍满，enforcer 最多 1h 后重新 Send。
+const capacityExhaustedAlertDedup = 1 * time.Hour
+
 // ExpiryWindowsDays defines the days-before-expiry breakpoints; ordered
 // most-severe-first so the loop picks the smallest matching window (e.g.
 // days=5 matches both {7} and {30} but should fire 7d-major).
@@ -122,6 +133,11 @@ type Monitor struct {
 	expiryAlertActive bool // 仅 CheckExpiringSoon 串行访问，无需额外锁
 
 	cumulativeAlertActive bool // 仅 CheckCumulativeUsage 串行访问
+
+	// exhaustedAlertActive 标记"容量满"告警是否活跃（受 capacityDedupMu 保护）。
+	// enforcer 实时 raise（拒绝时），monitor hourly 兜底 raise + 负责恢复 clear；
+	// 两者 Send 同 identifier，alarm engine 幂等。标志让 monitor 健康态不重复 Clear。
+	exhaustedAlertActive bool
 }
 
 // NewMonitor constructs a Monitor. sink defaults to NoopAlertSink when nil.
@@ -280,6 +296,9 @@ func (m *Monitor) CheckCapacity(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// 无论走哪个分支，退出前都评估"容量满"告警：检测到某授权类型已满则兜底
+	// raise（enforcer 实时 raise 的补充），全部未满则 Clear。hourly 频率可接受。
+	defer m.evaluateCapacityExhausted(ctx, lic)
 	if lic == nil {
 		m.metrics.SetCapacity(0, 0, 0)
 		m.clearCapacityAlerts(ctx)
@@ -424,6 +443,83 @@ func (m *Monitor) clearCapacityAlerts(ctx context.Context) {
 	m.logger.Info("license capacity alerts cleared on recovery")
 }
 
+// evaluateCapacityExhausted 评估 per-type 容量满告警的 raise/clear，与 enforcer
+// 互补：enforcer 在 EnforceCapacity 拒绝时实时 raise（1h 去重），本方法 hourly
+// 兜底 raise（覆盖 enforcer 去重空窗）+ 负责恢复 clear。两者 Send 同 identifier，
+// alarm engine 按 (DeviceSN, AlarmIdentifier) 幂等去重。exhaustedAlertActive 标志
+// 保证健康态不重复 Clear。
+func (m *Monitor) evaluateCapacityExhausted(ctx context.Context, lic *SystemLicense) {
+	if lic == nil || len(lic.DevicesSupport) == 0 {
+		m.clearExhaustedAlert(ctx)
+		return
+	}
+	usedByType, err := m.devices.CountDevicesByType(ctx)
+	if err != nil {
+		m.logger.Warn("count devices by type for exhausted check failed", zap.Error(err))
+		return
+	}
+	anyExhausted := false
+	var sampleType string
+	for t, max := range lic.DevicesSupport {
+		if max > 0 && usedByType[upperKey(t)] >= max {
+			anyExhausted = true
+			sampleType = t
+			break
+		}
+	}
+
+	m.capacityDedupMu.Lock()
+	active := m.exhaustedAlertActive
+	m.capacityDedupMu.Unlock()
+
+	if anyExhausted {
+		if active {
+			return // 已活跃，不重复 raise
+		}
+		alert := Alert{
+			LicenseID:  lic.ID,
+			Identifier: CapacityExhaustedIdentifier,
+			Severity:   AlertSeverityWarning,
+			Summary:    fmt.Sprintf("License capacity exhausted for %s, new device rejected", sampleType),
+			Details: map[string]interface{}{
+				"license_id":      lic.LicenseID,
+				"device_type":     sampleType,
+				"devices_support": lic.DevicesSupport,
+			},
+		}
+		if err := m.sink.Send(ctx, alert); err != nil {
+			m.logger.Warn("send capacity-exhausted alert failed", zap.Error(err))
+			return
+		}
+		m.capacityDedupMu.Lock()
+		m.exhaustedAlertActive = true
+		m.capacityDedupMu.Unlock()
+		m.logger.Warn("license capacity exhausted",
+			zap.String("audit", "capacity_alert"),
+			zap.String("identifier", CapacityExhaustedIdentifier),
+			zap.String("device_type", sampleType))
+		return
+	}
+	m.clearExhaustedAlert(ctx)
+}
+
+// clearExhaustedAlert 撤销容量满告警（仅在 exhaustedAlertActive=true 时）。
+func (m *Monitor) clearExhaustedAlert(ctx context.Context) {
+	m.capacityDedupMu.Lock()
+	if !m.exhaustedAlertActive {
+		m.capacityDedupMu.Unlock()
+		return
+	}
+	m.exhaustedAlertActive = false
+	m.capacityDedupMu.Unlock()
+
+	if err := m.sink.Clear(ctx, CapacityExhaustedIdentifier); err != nil {
+		m.logger.Warn("clear capacity exhausted alert failed", zap.Error(err))
+		return
+	}
+	m.logger.Info("license capacity exhausted alert cleared (all authorized types recovered)")
+}
+
 // CheckCumulativeUsage 每 5min 推进累计使用时长并检查是否超限。
 //
 // 设计要点：
@@ -466,9 +562,9 @@ func (m *Monitor) CheckCumulativeUsage(ctx context.Context) error {
 				Severity:   AlertSeverityCritical,
 				Summary:    "System license time rollback detected",
 				Details: map[string]interface{}{
-					"license_id":    lic.LicenseID,
-					"now":           now.UTC().Format(time.RFC3339),
-					"last_visited":  lastVisited.UTC().Format(time.RFC3339),
+					"license_id":   lic.LicenseID,
+					"now":          now.UTC().Format(time.RFC3339),
+					"last_visited": lastVisited.UTC().Format(time.RFC3339),
 				},
 			}
 			m.sink.Send(ctx, alert)
@@ -493,9 +589,9 @@ func (m *Monitor) CheckCumulativeUsage(ctx context.Context) error {
 				Severity:   AlertSeverityCritical,
 				Summary:    fmt.Sprintf("System license cumulative usage %.1fh >= limit %dh", total, timeLimit),
 				Details: map[string]interface{}{
-					"license_id":     lic.LicenseID,
-					"used_hours":     total,
-					"limit_hours":    timeLimit,
+					"license_id":  lic.LicenseID,
+					"used_hours":  total,
+					"limit_hours": timeLimit,
 				},
 			}
 			m.sink.Send(ctx, alert)

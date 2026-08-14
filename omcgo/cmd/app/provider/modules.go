@@ -2481,6 +2481,7 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	licenseEnforcer := license.NewEnforcer(systemLicenseRepo, deviceCounter, logger, licenseMetrics)
 	licenseEnforcer.SetUsageRepo(licenseUsageRepo)
 	licenseAlertSink := newSystemLicenseAlertSink(c.AlarmEngine, logger)
+	licenseEnforcer.SetAlertSink(licenseAlertSink)
 	licenseMonitor := license.NewMonitor(systemLicenseRepo, deviceCounter, licenseAlertSink, licenseMetrics, logger)
 	licenseMonitor.SetUsageRepo(licenseUsageRepo)
 
@@ -2492,6 +2493,7 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 	systemLicenseSvc := license.NewSystemLicenseService(systemLicenseRepo, logger)
 	systemLicenseSvc.SetEnforcer(licenseEnforcer)
 	systemLicenseSvc.SetUsageRepo(licenseUsageRepo)
+	systemLicenseSvc.SetCapacityOffliner(c.DeviceService)
 	c.miscDeps.systemLicenseSvc = systemLicenseSvc // P7-B: middleware 需要 feature check 能力
 	featureMappingPath := filepath.Join(c.Cfg.DictLoader.XMLBaseDir, "license-feature-mapping.json")
 	if mapping, mappingErr := license.LoadLegacyFeatureMapping(featureMappingPath); mappingErr != nil {

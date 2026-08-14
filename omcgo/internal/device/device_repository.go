@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -792,6 +793,73 @@ func (r *PgDeviceRepository) UpdateOnlineStatus(ctx context.Context, id uuid.UUI
 		return fmt.Errorf("update device is_online: %w", err)
 	}
 	return nil
+}
+
+// OfflineExcessByTypeCapacity 把各网元类型超出容量上限的在线设备（按 created_at
+// 晚接入的）置为离线，用于 license 降容清理（issue #316，在线口径：离线不占容量，
+// 故腾容量无需删除设备）。typeCapacity key 为 ne_type（大小写不敏感匹配
+// alarm_ne_type），value 为容量上限。未出现在 typeCapacity 中但有在线设备的类型
+// 视为未授权（容量 0），其在线设备全部置离线。返回被置离线设备的 serial_number
+// 列表（caller 据此清 Redis 设备缓存，避免缓存 stale 的 is_online=true 让被踢
+// 设备下次 Inform 跳过容量校验又上线）。
+//
+// 满足 ExcessOffliner 接口；两条静态 SQL 全参数化，无字符串拼接。
+func (r *PgDeviceRepository) OfflineExcessByTypeCapacity(ctx context.Context, typeCapacity map[string]int) ([]string, error) {
+	offlined := make([]string, 0)
+	if len(typeCapacity) == 0 {
+		return offlined, nil
+	}
+	configuredUpper := make([]string, 0, len(typeCapacity))
+	// 静态 SQL：踢某类型 created_at 最晚的超出部分（rn > capacity）。$1=ne_type, $2=capacity。
+	const excessByType = `WITH ranked AS (
+		SELECT d.id, ROW_NUMBER() OVER (ORDER BY d.created_at) AS rn
+		FROM devices d JOIN products p ON d.product_id = p.id
+		WHERE UPPER(p.alarm_ne_type) = UPPER($1) AND d.is_online = true AND d.deleted_at IS NULL
+	)
+	UPDATE devices SET is_online = false, updated_at = now()
+	WHERE id IN (SELECT id FROM ranked WHERE rn > $2)
+	RETURNING serial_number`
+	for nt, cap := range typeCapacity {
+		configuredUpper = append(configuredUpper, strings.ToUpper(nt))
+		if cap < 0 {
+			cap = 0
+		}
+		rows, err := r.pool.Query(ctx, excessByType, nt, cap)
+		if err != nil {
+			return offlined, fmt.Errorf("offline excess devices for type %s: %w", nt, err)
+		}
+		for rows.Next() {
+			var sn string
+			if err := rows.Scan(&sn); err != nil {
+				rows.Close()
+				return offlined, fmt.Errorf("scan offlined serial_number: %w", err)
+			}
+			offlined = append(offlined, sn)
+		}
+		rows.Close()
+	}
+	// 未配置类型（有在线设备但新 license 未授权）：全部置离线。$1=text[] 配置类型（UPPER）。
+	const unconfigured = `UPDATE devices SET is_online = false, updated_at = now()
+		WHERE id IN (
+			SELECT d.id FROM devices d LEFT JOIN products p ON d.product_id = p.id
+			WHERE d.is_online = true AND d.deleted_at IS NULL
+			  AND UPPER(COALESCE(p.alarm_ne_type,'')) <> ALL($1::text[])
+		)
+		RETURNING serial_number`
+	rows, err := r.pool.Query(ctx, unconfigured, configuredUpper)
+	if err != nil {
+		return offlined, fmt.Errorf("offline unconfigured types: %w", err)
+	}
+	for rows.Next() {
+		var sn string
+		if err := rows.Scan(&sn); err != nil {
+			rows.Close()
+			return offlined, fmt.Errorf("scan offlined serial_number (unconfigured): %w", err)
+		}
+		offlined = append(offlined, sn)
+	}
+	rows.Close()
+	return offlined, nil
 }
 
 func (r *PgDeviceRepository) UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error {

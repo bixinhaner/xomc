@@ -91,6 +91,35 @@ func (h *InformHandler) SetGroupAssigner(ga HeartbeatGroupAssigner) {
 	h.groupAssigner = ga
 }
 
+// licenseEnforcementRecoverable reports whether err is a recoverable license
+// enforcement rejection: capacity exhausted / expired / unavailable（per-type
+// 容量满、网元类型未授权、ne_type 未知、license 过期/未配置均归入此类）。
+//
+// 这些都是可恢复的运维状态——删设备腾容量、换更大 license、登记产品、续期后
+// 设备即可接入。因此 Inform 消费侧对它们 Ack（不重试单条消息）：
+//   - 单条 Inform 重试无意义（几秒内容量不会变化）；
+//   - 永久 Term 又危险：容量腾出后设备应能在下次 periodic Inform（新消息）重新
+//     注册，Term 会让它错过这次机会。
+func licenseEnforcementRecoverable(err error) bool {
+	return errors.Is(err, commonerrors.ErrLicenseCapacityExceeded) ||
+		errors.Is(err, commonerrors.ErrLicenseExpired) ||
+		errors.Is(err, commonerrors.ErrLicenseUnavailable)
+}
+
+// ackIfLicenseRejected 在注册被 license enforcement 拒绝（可恢复）时记一条 warn
+// 并返回 true，调用方据此 return nil 让 NATS Ack 当前 Inform。其他错误返回 false
+// 透传给调用方按原逻辑处理（Error 日志 + 触发 NATS 重试）。
+func (h *InformHandler) ackIfLicenseRejected(err error, sn, handler string) bool {
+	if !licenseEnforcementRecoverable(err) {
+		return false
+	}
+	h.logger.Warn("auto-register skipped: rejected by license enforcement (recoverable; will retry on next inform)",
+		zap.String("handler", handler),
+		zap.String("serial_number", sn),
+		zap.Error(err))
+	return true
+}
+
 // Subscribe registers event handlers on the event bus for device Inform events.
 func (h *InformHandler) Subscribe(bus event.EventBus) error {
 	h.logger.Info("subscribing to device inform events...")
@@ -198,6 +227,9 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 		return nil
 	}
 	if err != nil {
+		if h.ackIfLicenseRejected(err, payload.DeviceId.SerialNumber, "handleBootstrap") {
+			return nil
+		}
 		h.logger.Error("handleBootstrap: RegisterFromInform failed",
 			zap.Error(err),
 			zap.String("serial_number", payload.DeviceId.SerialNumber),
@@ -276,6 +308,9 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 			return nil
 		}
 		if regErr != nil {
+			if h.ackIfLicenseRejected(regErr, sn, "handleRebootComplete") {
+				return nil
+			}
 			h.logger.Error("handleRebootComplete: auto-register failed",
 				zap.Error(regErr), zap.String("serial_number", sn))
 			return regErr
@@ -364,6 +399,9 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 			return nil
 		}
 		if regErr != nil {
+			if h.ackIfLicenseRejected(regErr, sn, "handlePeriodic") {
+				return nil
+			}
 			h.logger.Error("handlePeriodic: auto-register failed",
 				zap.Error(regErr), zap.String("serial_number", sn))
 			return regErr
@@ -387,7 +425,18 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 		// device.online / device.firmware.changed 事件（与 UpdateFromInform 非 batch 路径对齐）。
 		oldStatus := device.Status
 		oldVersion := device.FirmwareVersion
+		oldIsOnline := device.IsOnline
 		params, _ := prepareDeviceUpdate(device, inform)
+		// license 容量校验（在线口径，issue #316）：prepareDeviceUpdate 已无条件置
+		// is_online=true；若设备从离线→在线且该类型在线容量已满，回滚为离线，避免
+		// batch 路径绕过容量限制（生产默认启用 batch，此分支是设备上线主路径）。
+		if !oldIsOnline && device.IsOnline {
+			if capErr := h.service.EnforceOnlineCapacity(ctx, device.ProductClass); capErr != nil {
+				device.IsOnline = false
+				h.logger.Warn("handlePeriodic: device kept offline by license capacity (batch path)",
+					zap.String("serial_number", sn), zap.Error(capErr))
+			}
+		}
 		h.batchProcessor.Submit(device, inform, params, oldStatus, oldVersion)
 		h.logger.Debug("handlePeriodic: submitted to batch processor",
 			zap.String("device_id", device.ID.String()),
@@ -422,6 +471,9 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 			return nil
 		}
 		if regErr != nil {
+			if h.ackIfLicenseRejected(regErr, sn, "handlePeriodic(stale-cache)") {
+				return nil
+			}
 			h.logger.Error("handlePeriodic: stale-cache fall-through register failed",
 				zap.Error(regErr), zap.String("serial_number", sn))
 			return regErr

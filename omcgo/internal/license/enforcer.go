@@ -11,10 +11,11 @@
 //   - 数据源：`SystemLicenseRepository.GetCurrent` — 全系统唯一 license 行；
 //     空表 = fail-closed：受控业务返回 ErrLicenseUnavailable（对齐旧项目"无 License
 //     安全拒绝"语义；进程不退出，仅受控业务全部拒绝）
-//   - 容量：`SystemLicense.DevicesSupport` 是 map[device_type]int；本期
-//     `EnforceCapacity(ctx, additional)` 暂用所有 type 容量**之和**作为总容量
-//     （接口签名保留，device.Service 零改动），per-type 精细 gating 留给
-//     Phase 7 RBAC 联动 sprint
+//   - 容量：`SystemLicense.DevicesSupport` 是 map[device_type]int；
+//     `EnforceCapacity(ctx, deviceType, additional)` 按**网元类型独立限额** ——
+//     license 未显式授权该类型（map 查不到或配额<=0）一律拒绝（严格模式，
+//     对齐 issue #316 "各网元最大接入设备数必须分别生效"）。大小写不敏感
+//     匹配（license key `eNB`/`gNB` ↔ 设备 ne_type `ENB`/`GNB`）。
 //   - 过期：`SystemLicense.ExpiryDate` 直接判断（新模型无 grace_period_days
 //     / 无 perpetual 类型；NULL expiry_date 视为永不过期，对应老 perpetual 语义）
 //   - 缓存：5min TTL，Replace（POST /system-license）后由 SystemLicenseService
@@ -25,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,15 +40,16 @@ import (
 // implementation; this avoids forcing every consumer to import the full
 // license model.
 //
-// Step 3：接口签名完全保留向后兼容 — device.LicenseEnforcer 接口（在
-// internal/device/device_service.go 上定义）仍是 EnforceCapacity(ctx, additional)
-// + EnforceExpiry(ctx, op)，caller 端零改动。
+// Step 3：接口签名 EnforceExpiry 完全保留向后兼容；EnforceCapacity 已升级为
+// per-type gating（新增 deviceType 入参），device.LicenseEnforcer 同步更新。
 type Enforcer interface {
 	// EnforceCapacity returns ErrLicenseCapacityExceeded if adding `additional`
-	// devices would cross the system-license total capacity (sum of all
-	// device_type quotas). Returns ErrLicenseUnavailable when no license is
-	// configured (fail-closed).
-	EnforceCapacity(ctx context.Context, additional int) error
+	// devices of `deviceType` would cross that device_type's quota in the
+	// system-license DevicesSupport map. Returns ErrLicenseCapacityExceeded
+	// (wrapped, "not authorized") when the license does not authorize the
+	// given deviceType, and ErrLicenseUnavailable when no license is
+	// configured (fail-closed). deviceType=="" rejects (unknown NE type).
+	EnforceCapacity(ctx context.Context, deviceType string, additional int) error
 
 	// EnforceExpiry returns ErrLicenseExpired if the current license is past
 	// expiry_date, or ErrLicenseUnavailable when no license is configured
@@ -82,7 +85,12 @@ var nowFunc = time.Now
 // enforcer consumer side so enforcer doesn't import the device package
 // directly (avoids module cycle). Satisfied by PgLicenseRepository.CountDevices.
 type DeviceCounter interface {
+	// CountDevices 返回已纳管设备总数（不分类型），用于 monitor 容量阈值告警
+	// 与 Quota 的总量展示。
 	CountDevices(ctx context.Context) (int, error)
+	// CountDevicesByType 按网元类型（products.alarm_ne_type，UPPER 归一化）分组
+	// 计数，用于 EnforceCapacity 的 per-type 限额。key 为大写 ne_type。
+	CountDevicesByType(ctx context.Context) (map[string]int, error)
 }
 
 // EnforcerImpl is the concrete Enforcer.
@@ -91,16 +99,24 @@ type DeviceCounter interface {
 // Prometheus counter（recordEnforcement(…, "denied_capacity"/"denied_expired")）。
 // 合规审计在生产部署里由 Loki/journald 抓 stdout 日志归档。
 type EnforcerImpl struct {
-	repo    SystemLicenseRepository
-	devices DeviceCounter
-	logger  *zap.Logger
-	metrics *EnforcementMetrics
+	repo      SystemLicenseRepository
+	devices   DeviceCounter
+	logger    *zap.Logger
+	metrics   *EnforcementMetrics
 	usageRepo SystemLicenseUsageRepository
+	alertSink AlertSink
 
 	cacheMu      sync.RWMutex
 	cachedActive *SystemLicense
 	cachedAt     time.Time
 	cacheTTL     time.Duration
+
+	// capacityExhaustedAlert 去重（进程内时间窗）：避免每次 periodic Inform 拒绝
+	// 都 Send 告警。Clear 由 monitor 负责（所有授权类型未满时），两者无状态共享，
+	// 故用时间窗而非活跃标记——monitor Clear 后若仍满，最多 capacityExhaustedAlertDedup
+	// 后重发。
+	exhaustedAlertMu     sync.Mutex
+	lastExhaustedAlertAt time.Time
 }
 
 // NewEnforcer constructs an EnforcerImpl with the default 5min cache TTL.
@@ -111,11 +127,12 @@ type EnforcerImpl struct {
 // （Step 5 起注入 device 模块的实现）。
 func NewEnforcer(repo SystemLicenseRepository, devices DeviceCounter, logger *zap.Logger, metrics *EnforcementMetrics) *EnforcerImpl {
 	return &EnforcerImpl{
-		repo:     repo,
-		devices:  devices,
-		logger:   logger.Named("license-enforcer"),
-		metrics:  metrics,
-		cacheTTL: DefaultCacheTTL,
+		repo:      repo,
+		devices:   devices,
+		logger:    logger.Named("license-enforcer"),
+		metrics:   metrics,
+		alertSink: NoopAlertSink{},
+		cacheTTL:  DefaultCacheTTL,
 	}
 }
 
@@ -130,6 +147,15 @@ func (e *EnforcerImpl) SetCacheTTL(ttl time.Duration) {
 // 不调用（nil）时 EnforceExpiry 只做日期过期校验（兼容旧测试/轻量部署）。
 func (e *EnforcerImpl) SetUsageRepo(r SystemLicenseUsageRepository) {
 	e.usageRepo = r
+}
+
+// SetAlertSink 注入告警 sink，启用容量满告警（warning）。
+// 不调用（nil）时退化为 NoopAlertSink（不发告警，仅 zap + 指标）。
+func (e *EnforcerImpl) SetAlertSink(sink AlertSink) {
+	if sink == nil {
+		sink = NoopAlertSink{}
+	}
+	e.alertSink = sink
 }
 
 // Invalidate clears the cached system license.
@@ -179,9 +205,8 @@ func (e *EnforcerImpl) ActiveLicense(ctx context.Context) (*SystemLicense, error
 
 // totalCapacity 返回 license.DevicesSupport map 所有 type 容量之和。
 //
-// 设计取舍：Step 3 阶段 EnforceCapacity 接口签名保留（无 device_type 入参），
-// 内部用总和近似总容量。语义在 device.create+1 场景与老多 license 模型保持一致；
-// per-type 精细 gating 留给 Phase 7 RBAC 联动 sprint。
+// 仅用于 Quota 端点的总量展示与 monitor 告警阈值；EnforceCapacity 走 per-type
+// 独立限额（见 lookupCapacity），不再用总和做拦截判断。
 func totalCapacity(lic *SystemLicense) int {
 	if lic == nil {
 		return 0
@@ -195,12 +220,47 @@ func totalCapacity(lic *SystemLicense) int {
 	return total
 }
 
-// EnforceCapacity rejects when current device count + additional exceeds the
-// total capacity (sum of all device_type quotas), or when no license is
-// configured (fail-closed → ErrLicenseUnavailable).
-func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, additional int) error {
+// upperKey 把网元类型归一化为大写键，用于 license 配额与设备 ne_type 的
+// 大小写不敏感匹配（license key 形如 "eNB"/"gNB"，设备 alarm_ne_type 形如
+// "ENB"/"GNB"）。
+func upperKey(s string) string {
+	return strings.ToUpper(strings.TrimSpace(s))
+}
+
+// lookupCapacity 在 license.DevicesSupport 中大小写不敏感地查找 deviceType 的
+// 配额。返回 (quota, true) 表示该类型被显式授权；返回 (0, false) 表示未授权。
+func lookupCapacity(ds DevicesSupport, deviceType string) (int, bool) {
+	target := upperKey(deviceType)
+	if target == "" {
+		return 0, false
+	}
+	for k, v := range ds {
+		if upperKey(k) == target {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
+// EnforceCapacity rejects (per-type gating) when:
+//   - deviceType=="" → unknown NE type (product not registered): reject;
+//   - no license configured → fail-closed (ErrLicenseUnavailable);
+//   - license does not authorize deviceType (absent from DevicesSupport or
+//     quota<=0) → reject (strict, issue #316);
+//   - current count of deviceType + additional exceeds that type's quota →
+//     reject.
+func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, deviceType string, additional int) error {
 	if additional < 0 {
 		return fmt.Errorf("additional must be >= 0: %w", commonerrors.ErrInvalidInput)
+	}
+
+	target := upperKey(deviceType)
+	if target == "" {
+		e.recordEnforcement("capacity", "denied_unknown_type")
+		e.logger.Warn("license capacity denied: device network-element type unknown (product not registered)",
+			zap.String("audit", "enforcement_capacity"),
+		)
+		return fmt.Errorf("device ne_type is empty (product not registered): %w", commonerrors.ErrLicenseCapacityExceeded)
 	}
 
 	lic, err := e.ActiveLicense(ctx)
@@ -215,28 +275,74 @@ func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, additional int) erro
 		return fmt.Errorf("no system license configured: %w", commonerrors.ErrLicenseUnavailable)
 	}
 
-	used, err := e.devices.CountDevices(ctx)
-	if err != nil {
-		return fmt.Errorf("count devices for enforcement: %w", err)
+	maxForType, authorized := lookupCapacity(lic.DevicesSupport, deviceType)
+	if !authorized || maxForType <= 0 {
+		e.recordEnforcement("capacity", "denied_unauthorized_type")
+		e.logger.Warn("license capacity denied: device type not authorized by license",
+			zap.String("audit", "enforcement_capacity"),
+			zap.String("license_id", lic.LicenseID),
+			zap.String("device_type", deviceType),
+			zap.Any("devices_support", lic.DevicesSupport),
+		)
+		return fmt.Errorf("device type %q not authorized by license (devices_support has no quota for it): %w",
+			deviceType, commonerrors.ErrLicenseCapacityExceeded)
 	}
 
-	maxDevices := totalCapacity(lic)
-	if maxDevices > 0 && used+additional > maxDevices {
+	usedByType, err := e.devices.CountDevicesByType(ctx)
+	if err != nil {
+		return fmt.Errorf("count devices by type for enforcement: %w", err)
+	}
+	used := usedByType[target]
+	if used+additional > maxForType {
 		e.recordEnforcement("capacity", "denied_capacity")
 		e.logger.Warn("license capacity exceeded — device.create denied",
 			zap.String("audit", "enforcement_capacity"),
 			zap.String("license_id", lic.LicenseID),
-			zap.Int("total_capacity", maxDevices),
-			zap.Int("used_devices", used),
+			zap.String("device_type", deviceType),
+			zap.Int("type_capacity", maxForType),
+			zap.Int("type_used", used),
 			zap.Int("additional", additional),
 			zap.Any("devices_support", lic.DevicesSupport),
 		)
-		return fmt.Errorf("used=%d, max=%d, additional=%d: %w",
-			used, maxDevices, additional, commonerrors.ErrLicenseCapacityExceeded)
+		e.raiseCapacityExhaustedAlert(ctx, lic, deviceType, used, maxForType)
+		return fmt.Errorf("type=%s used=%d, max=%d, additional=%d: %w",
+			deviceType, used, maxForType, additional, commonerrors.ErrLicenseCapacityExceeded)
 	}
 
 	e.recordEnforcement("capacity", "allowed")
 	return nil
+}
+
+// raiseCapacityExhaustedAlert 在容量满拒绝时上报一条 warning 告警（issue #316）。
+// 用 capacityExhaustedAlertDedup 时间窗去重，避免每次 periodic Inform 拒绝都 Send。
+// 告警清除由 Monitor.CheckCapacity 负责（所有授权类型未满时 Clear），本方法不做 Clear。
+// alarm engine 按 (DeviceSN=OMC-SYSTEM, AlarmIdentifier) 幂等去重，故 Send 安全。
+func (e *EnforcerImpl) raiseCapacityExhaustedAlert(ctx context.Context, lic *SystemLicense, deviceType string, used, max int) {
+	e.exhaustedAlertMu.Lock()
+	if nowFunc().Sub(e.lastExhaustedAlertAt) < capacityExhaustedAlertDedup {
+		e.exhaustedAlertMu.Unlock()
+		return
+	}
+	e.lastExhaustedAlertAt = nowFunc()
+	e.exhaustedAlertMu.Unlock()
+
+	alert := Alert{
+		LicenseID:  lic.ID,
+		Identifier: CapacityExhaustedIdentifier,
+		Severity:   AlertSeverityWarning,
+		Summary:    fmt.Sprintf("License capacity exhausted for %s (%d/%d), new device rejected", deviceType, used, max),
+		Details: map[string]interface{}{
+			"license_id":       lic.LicenseID,
+			"device_type":      deviceType,
+			"type_used":        used,
+			"type_capacity":    max,
+			"devices_support":  lic.DevicesSupport,
+			"recoverable_hint": "delete devices / upload a larger license to free capacity",
+		},
+	}
+	if err := e.alertSink.Send(ctx, alert); err != nil {
+		e.logger.Warn("send capacity-exhausted alert failed", zap.Error(err))
+	}
 }
 
 // EnforceExpiry rejects when the current license is past expiry_date, when
@@ -355,9 +461,18 @@ func (e *EnforcerImpl) Quota(ctx context.Context) (*Quota, error) {
 		q.DaysRemaining = days
 	}
 	if len(lic.DevicesSupport) > 0 {
+		usedByType, err := e.devices.CountDevicesByType(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("count devices by type for quota: %w", err)
+		}
 		q.PerType = make(map[string]TypeQuotaItem, len(lic.DevicesSupport))
 		for t, m := range lic.DevicesSupport {
-			q.PerType[t] = TypeQuotaItem{Max: m}
+			used := usedByType[upperKey(t)]
+			item := TypeQuotaItem{Max: m, Used: used}
+			if m > 0 {
+				item.Ratio = float64(used) / float64(m)
+			}
+			q.PerType[t] = item
 		}
 	}
 	return q, nil
