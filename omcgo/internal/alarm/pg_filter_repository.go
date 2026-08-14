@@ -112,12 +112,12 @@ func (r *PgAlarmFilterRuleRepository) Create(ctx context.Context, rule *AlarmFil
 		Insert("alarm_filters").
 		Columns(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
-			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
+			"device_ids", "device_group_ids", "action", "acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients", "effective_start", "effective_end",
 			"priority", "enabled", "created_by", "created_at", "updated_by", "updated_at",
 		).
 		Values(
 			rule.ID, rule.Name, rule.FilterType, rule.AlarmSources, rule.AlarmIdentifiers,
-			rule.DeviceIDs, rule.DeviceGroupIDs, rule.Action, rule.AcknowledgeDesc, rule.WebhookURL, rule.WebhookSecret, rule.EmailRecipients,
+			rule.DeviceIDs, rule.DeviceGroupIDs, rule.Action, rule.AcknowledgeDesc, rule.WebhookURL, rule.WebhookSecret, rule.EmailRecipients, rule.EffectiveStart, rule.EffectiveEnd,
 			rule.Priority, rule.Enabled, rule.CreatedBy, rule.CreatedAt, rule.UpdatedBy, rule.UpdatedAt,
 		).
 		Suffix("RETURNING id")
@@ -134,7 +134,7 @@ func (r *PgAlarmFilterRuleRepository) GetByID(ctx context.Context, id uuid.UUID)
 	query := storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
-			"device_ids", "device_group_ids", "action", "COALESCE(acknowledge_desc, '') AS acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
+			"device_ids", "device_group_ids", "action", "COALESCE(acknowledge_desc, '') AS acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients", "effective_start", "effective_end",
 			"priority", "enabled", "COALESCE(created_by, '') AS created_by", "created_at", "COALESCE(updated_by, '') AS updated_by", "updated_at",
 		).
 		From("alarm_filters").
@@ -148,7 +148,7 @@ func (r *PgAlarmFilterRuleRepository) GetByID(ctx context.Context, id uuid.UUID)
 	rule := &AlarmFilterRule{}
 	err = r.db.QueryRow(ctx, sql, args...).Scan(
 		&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmIdentifiers,
-		&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL, &rule.WebhookSecret, &rule.EmailRecipients,
+		&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL, &rule.WebhookSecret, &rule.EmailRecipients, &rule.EffectiveStart, &rule.EffectiveEnd,
 		&rule.Priority, &rule.Enabled, &rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedBy, &rule.UpdatedAt,
 	)
 	if err != nil {
@@ -178,6 +178,8 @@ func (r *PgAlarmFilterRuleRepository) Update(ctx context.Context, rule *AlarmFil
 		Set("webhook_url", rule.WebhookURL).
 		Set("webhook_secret", rule.WebhookSecret).
 		Set("email_recipients", rule.EmailRecipients).
+		Set("effective_start", rule.EffectiveStart).
+		Set("effective_end", rule.EffectiveEnd).
 		Set("priority", rule.Priority).
 		Set("enabled", rule.Enabled).
 		Set("updated_by", rule.UpdatedBy).
@@ -227,7 +229,7 @@ func (r *PgAlarmFilterRuleRepository) List(ctx context.Context, filter AlarmFilt
 	query := applyAlarmFilterRuleFilters(applyAlarmFilterRuleOrdering(storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
-			"device_ids", "device_group_ids", "action", "COALESCE(acknowledge_desc, '') AS acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
+			"device_ids", "device_group_ids", "action", "COALESCE(acknowledge_desc, '') AS acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients", "effective_start", "effective_end",
 			"priority", "enabled", "COALESCE(created_by, '') AS created_by", "created_at", "COALESCE(updated_by, '') AS updated_by", "updated_at",
 		).
 		From("alarm_filters")), filter)
@@ -253,7 +255,7 @@ func (r *PgAlarmFilterRuleRepository) List(ctx context.Context, filter AlarmFilt
 		rule := AlarmFilterRule{}
 		err := rows.Scan(
 			&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmIdentifiers,
-			&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL, &rule.WebhookSecret, &rule.EmailRecipients,
+			&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL, &rule.WebhookSecret, &rule.EmailRecipients, &rule.EffectiveStart, &rule.EffectiveEnd,
 			&rule.Priority, &rule.Enabled, &rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedBy, &rule.UpdatedAt,
 		)
 		if err != nil {
@@ -317,7 +319,7 @@ func (r *PgAlarmFilterRuleRepository) ListEnabled(ctx context.Context) ([]AlarmF
 	query := applyAlarmFilterRuleOrdering(storage.Psql.
 		Select(
 			"id", "name", "filter_type", "alarm_sources", "alarm_identifiers",
-			"device_ids", "device_group_ids", "action", "COALESCE(acknowledge_desc, '') AS acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients",
+			"device_ids", "device_group_ids", "action", "COALESCE(acknowledge_desc, '') AS acknowledge_desc", "webhook_url", "webhook_secret", "email_recipients", "effective_start", "effective_end",
 			"priority", "enabled", "COALESCE(created_by, '') AS created_by", "created_at", "COALESCE(updated_by, '') AS updated_by", "updated_at",
 		).
 		From("alarm_filters").
@@ -339,7 +341,7 @@ func (r *PgAlarmFilterRuleRepository) ListEnabled(ctx context.Context) ([]AlarmF
 		rule := AlarmFilterRule{}
 		err := rows.Scan(
 			&rule.ID, &rule.Name, &rule.FilterType, &rule.AlarmSources, &rule.AlarmIdentifiers,
-			&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL, &rule.WebhookSecret, &rule.EmailRecipients,
+			&rule.DeviceIDs, &rule.DeviceGroupIDs, &rule.Action, &rule.AcknowledgeDesc, &rule.WebhookURL, &rule.WebhookSecret, &rule.EmailRecipients, &rule.EffectiveStart, &rule.EffectiveEnd,
 			&rule.Priority, &rule.Enabled, &rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedBy, &rule.UpdatedAt,
 		)
 		if err != nil {

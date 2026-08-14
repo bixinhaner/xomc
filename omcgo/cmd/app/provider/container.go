@@ -25,6 +25,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/systimezone"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/geofence"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	kpirouter "github.com/omcgo/omcgo/internal/pm/kpi/router"
@@ -66,6 +67,7 @@ type Container struct {
 	StorageProtection        *storageprotection.Service
 	StorageProtectionHandler *storageprotection.Handler
 	StorageCollector         components.StorageCollector
+	EmailTransport           notification.EmailTransport
 
 	// ===== 共享服务（由各模块 Init 设置）=====
 

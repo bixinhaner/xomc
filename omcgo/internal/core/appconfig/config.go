@@ -499,17 +499,18 @@ type NotificationConfig struct {
 	AlertWebhook AlertWebhookConfig `mapstructure:"alert_webhook"`
 }
 
-// SMTPConfig 配置 SMTP 邮件发送。Username 为空表示不做 SMTP AUTH；
-// StartTLS 由 SMTP 服务器能力决定。
+// SMTPConfig 配置 SMTP 邮件发送。Username 为空表示不做 SMTP AUTH。
+// TLSMode 支持 implicit（通常为 465）、starttls（通常为 587）和 none。
 type SMTPConfig struct {
-	Enabled  bool          `mapstructure:"enabled"`
-	Host     string        `mapstructure:"host"`
-	Port     int           `mapstructure:"port"`
-	Username string        `mapstructure:"username"`
-	Password string        `mapstructure:"password"`
-	From     string        `mapstructure:"from"`
-	StartTLS bool          `mapstructure:"starttls"`
-	Timeout  time.Duration `mapstructure:"timeout"`
+	Enabled            bool          `mapstructure:"enabled"`
+	Host               string        `mapstructure:"host"`
+	Port               int           `mapstructure:"port"`
+	Username           string        `mapstructure:"username"`
+	Password           string        `mapstructure:"password"`
+	From               string        `mapstructure:"from"`
+	TLSMode            string        `mapstructure:"tls_mode"`
+	Timeout            time.Duration `mapstructure:"timeout"`
+	MaxAttachmentBytes int64         `mapstructure:"max_attachment_bytes"`
 }
 
 // AlertWebhookConfig 配置 Alertmanager → POST /api/v1/alerts/webhook 入口。
@@ -812,12 +813,13 @@ type WorkerConfig struct {
 	// PMKPIWindowFromDB：KPI 计算是否从 DB 回读 counter（true）还是用内存刚解析的 counter 直接算
 	// （false，默认，省每文件一次全量回读 SELECT）。仅当部署存在"同一窗口拆成多文件上报、需跨文件
 	// 聚合 KPI"时才置 true。
-	PMKPIWindowFromDB bool             `mapstructure:"pm_kpi_window_from_db"`
-	DictLoader        DictLoaderConfig `mapstructure:"dict_loader"` // T-0178: worker BackupCleanup 需读 XMLBaseDir + ParamModel 子配置
-	Metrics           MetricsConfig    `mapstructure:"metrics"`
-	Tracer            TracerConfig     `mapstructure:"tracer"`
-	Log               LogConfig        `mapstructure:"log"`
-	RequestIDPrefix   string           `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "worker"
+	PMKPIWindowFromDB bool               `mapstructure:"pm_kpi_window_from_db"`
+	DictLoader        DictLoaderConfig   `mapstructure:"dict_loader"`  // T-0178: worker BackupCleanup 需读 XMLBaseDir + ParamModel 子配置
+	Notification      NotificationConfig `mapstructure:"notification"` // 告警/KPI 异步邮件共用 SMTP 配置
+	Metrics           MetricsConfig      `mapstructure:"metrics"`
+	Tracer            TracerConfig       `mapstructure:"tracer"`
+	Log               LogConfig          `mapstructure:"log"`
+	RequestIDPrefix   string             `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "worker"
 }
 
 const (

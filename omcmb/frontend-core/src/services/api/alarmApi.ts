@@ -90,8 +90,11 @@ interface BackendAlarmRule {
   alarm_identifiers: string[];
   device_ids: string[];
   device_group_ids: string[];
-  action: string; // default | ignore | auto_acknowledge | auto_clear
+  action: string; // default | ignore | auto_acknowledge | auto_clear | notify_webhook | notify_email
   acknowledge_desc: string;
+  email_recipients?: string[];
+  effective_start?: string;
+  effective_end?: string;
   priority: number;
   enabled: boolean;
   created_by?: string;
@@ -297,6 +300,11 @@ function mapBackendAlarmRule(br: BackendAlarmRule): AlarmRule {
       type: 'suppress',
       target: 'ignore',
     });
+  } else if (br.action === 'notify_email') {
+    actions.push({
+      type: 'email',
+      target: (br.email_recipients || []).join(';'),
+    });
   }
 
   return {
@@ -308,6 +316,9 @@ function mapBackendAlarmRule(br: BackendAlarmRule): AlarmRule {
     userCode: br.updated_by || br.created_by || undefined,
     conditions,
     actions,
+    emailRecipients: br.email_recipients || [],
+    effectiveStart: br.effective_start,
+    effectiveEnd: br.effective_end,
     createTime: br.created_at,
     updateTime: br.updated_at,
   };
@@ -348,6 +359,13 @@ function ruleToBackendPayload(
   if (data.ruleName !== undefined) payload.name = data.ruleName;
   if (data.enabled !== undefined) payload.enabled = data.enabled;
   if (data.ruleType !== undefined) payload.action = data.ruleType;
+  if (data.emailRecipients !== undefined) payload.email_recipients = data.emailRecipients;
+  if (data.effectiveStart !== undefined && data.effectiveEnd !== undefined) {
+    payload.effective_start = data.effectiveStart;
+    payload.effective_end = data.effectiveEnd;
+  } else if (data.clearEffectiveWindow) {
+    payload.clear_effective_window = true;
+  }
 
   // Extract conditions into backend fields
   const conditions = data.conditions || [];

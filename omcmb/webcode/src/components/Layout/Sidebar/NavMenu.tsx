@@ -51,6 +51,13 @@ import type { NavGroup, NavChild } from './navConfig';
 
 type MenuItem = Required<MenuProps>['items'][number];
 
+// antd Menu 的 key 在整棵树内必须唯一。NAV_CONFIG 中允许目录与其唯一子项
+// 共享业务 key（例如 dashboard、license），渲染时为目录加命名空间，避免
+// React/antd 报 duplicated key，同时不改变路由项的 key 和选中态映射。
+function staticGroupMenuKey(groupKey: string): string {
+  return `group:${groupKey}`;
+}
+
 // 静态模式（VITE_DYNAMIC_MENU=false）兜底图标映射，仅给 NAV_CONFIG iconName 用。
 // 动态模式优先调 resolveIcon（IconPicker 116 个白名单）。
 // AppstoreAddOutlined 来自 T-0098-P4-02 产品中心目录（origin/main）。
@@ -93,7 +100,7 @@ function buildStaticMenuItems(groups: NavGroup[], t: (id: string) => string): Me
     // 单子节点也保持为可展开子菜单（不扁平化），与动态菜单行为一致。
     return {
       type: 'submenu' as const,
-      key: group.key,
+      key: staticGroupMenuKey(group.key),
       icon: STATIC_ICON_MAP[group.iconName],
       label: t(group.label),
       children: children.map(
@@ -384,7 +391,7 @@ export default function NavMenu({
     const selectedKey = staticPathToKey.get(location.pathname);
     if (!selectedKey) return [];
     const group = (filteredNav || []).find((g) => (g.children || [])?.some((c) => c.key === selectedKey));
-    return group ? [group.key] : [];
+    return group ? [staticGroupMenuKey(group.key)] : [];
   }, [useDynamic, visibleDynamicMenus, staticPathToKey, filteredNav, location.pathname]);
 
   const handleMenuClick: MenuProps['onClick'] = ({ key }) => {

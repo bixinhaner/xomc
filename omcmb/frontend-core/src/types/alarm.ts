@@ -61,6 +61,10 @@ export interface AlarmRule {
   userCode?: string;           // 操作人
   conditions: AlarmRuleCondition[];
   actions: AlarmRuleAction[];
+  emailRecipients?: string[];  // 邮件通知动作的收件人（最多 50 个）
+  effectiveStart?: string;     // 规则生效时间（ISO 8601）
+  effectiveEnd?: string;       // 规则失效时间（ISO 8601，左闭右开）
+  clearEffectiveWindow?: boolean; // 更新时显式清除生效区间
   createTime: string;
   updateTime: string;
 }

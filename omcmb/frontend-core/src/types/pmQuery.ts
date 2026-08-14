@@ -77,6 +77,61 @@ export interface BackendQueryTemplate {
   updated_at: string;
 }
 
+export type ReportPeriod = '15min' | 'hourly' | 'daily';
+
+export interface QueryReportSubscription {
+  id: string;
+  queryTemplateId: string;
+  enabled: boolean;
+  period: ReportPeriod;
+  sendTimes: string[];
+  recipients: string[];
+  timezoneName: string;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  lastStatus?: 'pending' | 'running' | 'sent' | 'export_failed' | 'delivery_failed';
+  lastError?: string;
+}
+
+export interface UpsertQueryReportSubscriptionInput {
+  enabled: boolean;
+  period: ReportPeriod;
+  sendTimes: string[];
+  recipients: string[];
+}
+
+export interface BackendQueryReportSubscription {
+  id: string;
+  query_template_id: string;
+  enabled: boolean;
+  period: ReportPeriod;
+  send_times: string[];
+  recipients?: string[];
+  timezone_name: string;
+  next_run_at?: string;
+  last_run_at?: string;
+  last_status?: 'pending' | 'running' | 'sent' | 'export_failed' | 'delivery_failed';
+  last_error?: string;
+}
+
+export function mapBackendQueryReportSubscription(
+  value: BackendQueryReportSubscription,
+): QueryReportSubscription {
+  return {
+    id: value.id,
+    queryTemplateId: value.query_template_id,
+    enabled: value.enabled,
+    period: value.period,
+    sendTimes: value.send_times ?? [],
+    recipients: value.recipients ?? [],
+    timezoneName: value.timezone_name,
+    nextRunAt: value.next_run_at,
+    lastRunAt: value.last_run_at,
+    lastStatus: value.last_status,
+    lastError: value.last_error,
+  };
+}
+
 // payload 的后端 JSONB 字段名（snake_case 由前端写入）— 与上面 QueryTemplatePayload 一一对应。
 interface BackendPayload {
   device_sns?: string[];

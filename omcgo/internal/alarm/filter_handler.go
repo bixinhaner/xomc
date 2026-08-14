@@ -1,9 +1,11 @@
 package alarm
 
 import (
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -11,8 +13,11 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/notification"
 	"go.uber.org/zap"
 )
+
+const maxAlarmEmailRecipients = 50
 
 // FilterHandler 告警过滤规则 HTTP 处理器。
 type FilterHandler struct {
@@ -61,6 +66,31 @@ func splitCSVQuery(value string) []string {
 		items = append(items, trimmed)
 	}
 	return items
+}
+
+func normalizeAlarmRuleEmailRecipients(action string, recipients []string) ([]string, error) {
+	if action != FilterActionNotifyEmail {
+		return []string{}, nil
+	}
+
+	normalized, err := notification.NormalizeRecipients(recipients)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid email recipients: %v", commonerrors.ErrInvalidInput, err)
+	}
+	if len(normalized) > maxAlarmEmailRecipients {
+		return nil, fmt.Errorf("%w: email recipients exceed limit %d", commonerrors.ErrInvalidInput, maxAlarmEmailRecipients)
+	}
+	return normalized, nil
+}
+
+func validateAlarmRuleEffectiveWindow(start, end *time.Time) error {
+	if (start == nil) != (end == nil) {
+		return fmt.Errorf("%w: effective_start and effective_end must be provided together", commonerrors.ErrInvalidInput)
+	}
+	if start != nil && !end.After(*start) {
+		return fmt.Errorf("%w: effective_end must be after effective_start", commonerrors.ErrInvalidInput)
+	}
+	return nil
 }
 
 func (h *FilterHandler) List(c *gin.Context) {
@@ -115,19 +145,32 @@ func (h *FilterHandler) Create(c *gin.Context) {
 		return
 	}
 	rule := &AlarmFilterRule{
-		ID:              uuid.New(),
-		Name:            req.Name,
-		FilterType:      req.FilterType,
-		AlarmSources:    req.AlarmSources,
-		AlarmIdentifiers:      req.AlarmIdentifiers,
-		DeviceIDs:       req.DeviceIDs,
-		DeviceGroupIDs:  req.DeviceGroupIDs,
-		Action:          req.Action,
-		AcknowledgeDesc: req.AcknowledgeDesc,
-		WebhookURL:      req.WebhookURL,
-		WebhookSecret:   req.WebhookSecret,
-		Priority:        req.Priority,
-		Enabled:         true,
+		ID:               uuid.New(),
+		Name:             req.Name,
+		FilterType:       req.FilterType,
+		AlarmSources:     req.AlarmSources,
+		AlarmIdentifiers: req.AlarmIdentifiers,
+		DeviceIDs:        req.DeviceIDs,
+		DeviceGroupIDs:   req.DeviceGroupIDs,
+		Action:           req.Action,
+		AcknowledgeDesc:  req.AcknowledgeDesc,
+		WebhookURL:       req.WebhookURL,
+		WebhookSecret:    req.WebhookSecret,
+		EmailRecipients:  req.EmailRecipients,
+		EffectiveStart:   req.EffectiveStart,
+		EffectiveEnd:     req.EffectiveEnd,
+		Priority:         req.Priority,
+		Enabled:          true,
+	}
+	var err error
+	rule.EmailRecipients, err = normalizeAlarmRuleEmailRecipients(rule.Action, rule.EmailRecipients)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := validateAlarmRuleEffectiveWindow(rule.EffectiveStart, rule.EffectiveEnd); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
 	}
 	if operator := getOperator(c); operator != "" {
 		rule.CreatedBy = operator
@@ -202,6 +245,24 @@ func (h *FilterHandler) Update(c *gin.Context) {
 	if req.WebhookSecret != nil {
 		rule.WebhookSecret = req.WebhookSecret
 	}
+	if req.EmailRecipients != nil {
+		rule.EmailRecipients = req.EmailRecipients
+	}
+	if req.ClearEffectiveWindow {
+		if req.EffectiveStart != nil || req.EffectiveEnd != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("%w: cannot clear and set effective window together", commonerrors.ErrInvalidInput))
+			return
+		}
+		rule.EffectiveStart = nil
+		rule.EffectiveEnd = nil
+	} else if req.EffectiveStart != nil || req.EffectiveEnd != nil {
+		if err := validateAlarmRuleEffectiveWindow(req.EffectiveStart, req.EffectiveEnd); err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+			return
+		}
+		rule.EffectiveStart = req.EffectiveStart
+		rule.EffectiveEnd = req.EffectiveEnd
+	}
 	if req.Priority != nil {
 		rule.Priority = *req.Priority
 	}
@@ -210,6 +271,11 @@ func (h *FilterHandler) Update(c *gin.Context) {
 	}
 	if operator := getOperator(c); operator != "" {
 		rule.UpdatedBy = operator
+	}
+	rule.EmailRecipients, err = normalizeAlarmRuleEmailRecipients(rule.Action, rule.EmailRecipients)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
 	}
 
 	if err := h.repo.Update(c.Request.Context(), rule); err != nil {

@@ -82,6 +82,8 @@ type CreateInput struct {
 	EventType       *int
 	CnProbableCause string
 	EnProbableCause string
+	CnSuggestion    string
+	EnSuggestion    string
 	IsShow          bool
 	Description     string
 }
@@ -95,6 +97,8 @@ type UpdateInput struct {
 	EventType       *int
 	CnProbableCause *string
 	EnProbableCause *string
+	CnSuggestion    *string
+	EnSuggestion    *string
 	IsShow          *bool
 	Description     *string
 }

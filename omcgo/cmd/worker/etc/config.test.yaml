@@ -105,6 +105,18 @@ tracer:
   endpoint: "otelcol:4317"
   sample_rate: 1.0
 
+notification:
+  smtp:
+    enabled: false
+    host: ""
+    port: 25
+    username: ""
+    password: ""
+    from: "omc-alert@example.com"
+    tls_mode: "none"
+    timeout: 10s
+    max_attachment_bytes: 20971520
+
 log:
   level: "info"
   format: "json"

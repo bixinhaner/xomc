@@ -6,15 +6,18 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/geofence"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	pmexport "github.com/omcgo/omcgo/internal/pm/export"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	pmmetrics "github.com/omcgo/omcgo/internal/pm/metrics"
+	"github.com/omcgo/omcgo/internal/pm/reportsubscription"
 	"github.com/omcgo/omcgo/internal/pm/resultnorm"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 	"go.uber.org/zap"
@@ -294,8 +297,9 @@ func startPMExportOnly(
 	registry := asyncjob.NewRegistry(jobRepo, buildLockOwner(), logger)
 	asyncMetrics := asyncjob.NewMetrics(w.MetricsReg)
 	registry.SetMetrics(asyncMetrics)
+	exportRepo := pmexport.NewPgRepository(w.PgPool)
 	exportRunner := pmexport.NewRunner(pmexport.RunnerDeps{
-		Repo: pmexport.NewPgRepository(w.PgPool), Aggr: aggr,
+		Repo: exportRepo, Aggr: aggr,
 		MetricDB: w.TsPool, AdhocDB: w.TsPool, TaskMetaDB: w.PgPool,
 		Uploader: w.MinIO, Bucket: exportBucket, Logger: logger,
 		TimezoneProvider: exportTimezoneProvider(tz),
@@ -303,6 +307,34 @@ func startPMExportOnly(
 	})
 	registry.Register(exportRunner)
 	go runJobTypeWorker(ctx, registry, exportRunner.JobType(), logger)
+
+	// KPI 查询模板定时报表：调度器创建自然窗口 run/job，runner 复用现有 KPI CSV
+	// 导出任务，成功后从对象存储流式读取为附件并通过共享 SMTP 发送。
+	historyService := notification.NewHistoryService(notification.NewPgHistoryRepository(w.PgPool), logger)
+	mailer := notification.NewMailer(nil, historyService, w.EmailTransport, logger)
+	reportRepo := reportsubscription.NewPgRepository(w.PgPool)
+	reportRunner := reportsubscription.NewRunner(reportsubscription.RunnerDeps{
+		Repository:   reportRepo,
+		Exports:      pmexport.NewService(exportRepo, jobRepo),
+		ExportReader: exportRepo,
+		Objects:      w.MinIO,
+		Mailer:       mailer,
+		History:      historyService,
+		Logger:       logger,
+	})
+	registry.Register(reportRunner)
+	go runJobTypeWorker(ctx, registry, reportRunner.JobType(), logger.Named("report-email"))
+	reportLocation := func() *time.Location {
+		if tz == nil {
+			return time.UTC
+		}
+		return tz.Current()
+	}
+	reportScheduler := reportsubscription.NewScheduler(w.PgPool, reportLocation, logger)
+	go reportScheduler.Run(ctx, 30*time.Second)
+	alarmEmailRunner := alarm.NewEmailJobRunner(mailer, logger)
+	registry.Register(alarmEmailRunner)
+	go runJobTypeWorker(ctx, registry, alarmEmailRunner.JobType(), logger.Named("alarm-email"))
 	geofenceRepository := geofence.NewPgRepository(w.PgPool)
 	geofenceMetrics := geofence.NewBatchMetrics(w.MetricsReg)
 	geofenceRunner := registerGeofenceManualBindRunner(

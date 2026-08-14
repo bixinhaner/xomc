@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +23,7 @@ import (
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -411,8 +411,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	filterEngine := alarm.NewFilterEngine(alarmFilterRuleRepo, alarmPgStore, webhookDispatcher, deadLetterRepo, webhookMetrics, logger)
 	filterEngine.SetDeviceGroupResolver(alarm.NewPgDeviceGroupResolver(w.PgPool))
 	emailMetrics := alarm.NewEmailMetrics(w.MetricsReg)
-	emailCfg := loadEmailConfigFromEnv()
-	emailDispatcher := alarm.NewSMTPEmailDispatcher(emailCfg, logger.Named("email"), emailMetrics)
+	emailDispatcher := alarm.NewAsyncEmailDispatcher(asyncjob.NewPgRepository(w.PgPool), emailMetrics)
 	filterEngine.SetEmailDispatcher(emailDispatcher)
 	alarmEngine.SetFilterEngine(filterEngine)
 
@@ -471,6 +470,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	alarmDefRepo := definition.NewPgRepository(w.PgPool)
 	alarmDefMetrics := definition.NewRegistryMetrics(w.MetricsReg)
 	alarmDefRegistry := definition.NewRegistry(alarmDefRepo, alarmDefMetrics, logger)
+	// 告警邮件与接收/同步链路共用同一份 Registry；即使首次 Refresh 失败，
+	// 后续启动追赶刷新成功后也会自动为邮件补全可能原因和处理建议。
+	filterEngine.SetAlarmDefLookup(alarmDefRegistry)
 	if err := alarmDefRegistry.Refresh(context.Background()); err != nil {
 		logger.Warn("alarm-definition registry refresh failed; fallback disabled", zap.Error(err))
 	} else {
@@ -812,6 +814,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 	// WorkQueue 流，其唯一 consumer 已被 ACS transfercfg 占用，worker 不能在同 filter
 	// subject 再开第二个 consumer（必报 "filtered consumer not unique on workqueue stream"）。
 	pmTz := newTzManager(context.Background(), w.PgPool, logger)
+	filterEngine.SetEmailLocationProvider(func(context.Context) *time.Location {
+		return pmTz.Current()
+	})
 	// KPI 导出文件落地桶：复用报表桶（设计 §5.6）；缺省回退 "reports"。
 	exportBucket := cfg.MinIO.Buckets.Reports
 	if exportBucket == "" {
@@ -1753,17 +1758,4 @@ func parseStringSlice(s string) []string {
 		}
 	}
 	return result
-}
-
-func loadEmailConfigFromEnv() alarm.EmailConfig {
-	port, _ := strconv.Atoi(os.Getenv("OMC_SMTP_PORT"))
-	return alarm.EmailConfig{
-		Host:        os.Getenv("OMC_SMTP_HOST"),
-		Port:        port,
-		Username:    os.Getenv("OMC_SMTP_USERNAME"),
-		Password:    os.Getenv("OMC_SMTP_PASSWORD"),
-		From:        os.Getenv("OMC_SMTP_FROM"),
-		UseTLS:      os.Getenv("OMC_SMTP_USE_TLS") == "true",
-		UseSTARTTLS: os.Getenv("OMC_SMTP_USE_STARTTLS") == "true",
-	}
 }

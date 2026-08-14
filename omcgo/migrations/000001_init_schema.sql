@@ -333,6 +333,8 @@ CREATE TABLE public.alarm_definitions (
     event_type integer,
     cn_probable_cause text,
     en_probable_cause text,
+    cn_suggestion text,
+    en_suggestion text,
     is_show boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -399,7 +401,10 @@ CREATE TABLE public.alarm_filters (
     webhook_url text,
     webhook_secret text,
     email_recipients text[],
-    CONSTRAINT chk_alarm_filters_webhook_url_required CHECK ((((action)::text <> 'notify_webhook'::text) OR ((webhook_url IS NOT NULL) AND (webhook_url <> ''::text))))
+    effective_start timestamp with time zone,
+    effective_end timestamp with time zone,
+    CONSTRAINT chk_alarm_filters_webhook_url_required CHECK ((((action)::text <> 'notify_webhook'::text) OR ((webhook_url IS NOT NULL) AND (webhook_url <> ''::text)))),
+    CONSTRAINT chk_alarm_filters_effective_window CHECK (((effective_start IS NULL) = (effective_end IS NULL)) AND (effective_start IS NULL OR effective_end > effective_start))
 );
 
 
@@ -5164,7 +5169,11 @@ CREATE TABLE public.notification_history (
     status character varying(32) NOT NULL,
     error_message text,
     alarm_id uuid,
+    business_type character varying(64),
+    business_id character varying(128),
+    dedup_key character varying(256),
     retry_count integer DEFAULT 0 NOT NULL,
+    attempted_at timestamp with time zone,
     sent_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT notification_history_channel_check CHECK (((channel)::text = ANY (ARRAY[('email'::character varying)::text, ('sms'::character varying)::text, ('webhook'::character varying)::text]))),
@@ -6145,6 +6154,66 @@ COMMENT ON COLUMN public.pm_query_templates.creator_id IS '逻辑关联 admin_us
 --
 
 COMMENT ON COLUMN public.pm_query_templates.payload IS 'JSONB 表单序列化：{ device_sns, metric_paths, granularity, time_range_preset, custom_start, custom_end, ... }';
+
+
+--
+-- Name: pm_query_report_subscriptions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pm_query_report_subscriptions (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    query_template_id uuid NOT NULL UNIQUE,
+    enabled boolean DEFAULT true NOT NULL,
+    period character varying(16) NOT NULL,
+    send_times time without time zone[] NOT NULL,
+    recipients text[] NOT NULL,
+    timezone_name character varying(64) DEFAULT 'UTC'::character varying NOT NULL,
+    next_run_at timestamp with time zone,
+    last_run_at timestamp with time zone,
+    last_status character varying(16),
+    last_error text,
+    created_by uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pm_query_report_subscriptions_period_check CHECK (((period)::text = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text]))),
+    CONSTRAINT pm_query_report_subscriptions_send_times_check CHECK ((cardinality(send_times) BETWEEN 1 AND 8)),
+    CONSTRAINT pm_query_report_subscriptions_recipients_check CHECK ((cardinality(recipients) BETWEEN 1 AND 50)),
+    CONSTRAINT pm_query_report_subscriptions_last_status_check CHECK ((last_status IS NULL) OR ((last_status)::text = ANY (ARRAY['pending'::text, 'running'::text, 'sent'::text, 'export_failed'::text, 'delivery_failed'::text])))
+);
+
+CREATE INDEX idx_pm_query_report_subscriptions_due ON public.pm_query_report_subscriptions USING btree (next_run_at) WHERE (enabled = true);
+
+
+--
+-- Name: pm_query_report_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pm_query_report_runs (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    subscription_id uuid REFERENCES public.pm_query_report_subscriptions(id) ON DELETE SET NULL,
+    query_template_id uuid NOT NULL,
+    query_template_name character varying(128) NOT NULL,
+    query_payload jsonb NOT NULL,
+    period character varying(16) NOT NULL,
+    recipients text[] NOT NULL,
+    window_start timestamp with time zone NOT NULL,
+    window_end timestamp with time zone NOT NULL,
+    job_id uuid,
+    export_task_id uuid,
+    notification_history_id uuid,
+    status character varying(16) DEFAULT 'pending'::character varying NOT NULL,
+    attachment_name text,
+    error_message text,
+    started_at timestamp with time zone,
+    finished_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pm_query_report_runs_period_check CHECK (((period)::text = ANY (ARRAY['15min'::text, 'hourly'::text, 'daily'::text]))),
+    CONSTRAINT pm_query_report_runs_status_check CHECK (((status)::text = ANY (ARRAY['pending'::text, 'running'::text, 'sent'::text, 'export_failed'::text, 'delivery_failed'::text]))),
+    CONSTRAINT pm_query_report_runs_window_check CHECK ((window_end > window_start)),
+    CONSTRAINT pm_query_report_runs_natural_window_unique UNIQUE (subscription_id, window_start, window_end)
+);
+
+CREATE INDEX idx_pm_query_report_runs_subscription_created ON public.pm_query_report_runs USING btree (subscription_id, created_at DESC);
 
 
 --
@@ -14410,6 +14479,13 @@ CREATE INDEX idx_notification_history_template_id ON public.notification_history
 
 
 --
+-- Name: uq_notification_history_dedup_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_notification_history_dedup_key ON public.notification_history USING btree (dedup_key) WHERE (dedup_key IS NOT NULL);
+
+
+--
 -- Name: idx_notification_templates_channel; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -19562,6 +19638,38 @@ ALTER TABLE ONLY public.notification_history
 
 
 --
+-- Name: pm_query_report_subscriptions pm_query_report_subscriptions_query_template_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pm_query_report_subscriptions
+    ADD CONSTRAINT pm_query_report_subscriptions_query_template_id_fkey FOREIGN KEY (query_template_id) REFERENCES public.pm_query_templates(id) ON DELETE CASCADE;
+
+
+--
+-- Name: pm_query_report_runs pm_query_report_runs_job_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pm_query_report_runs
+    ADD CONSTRAINT pm_query_report_runs_job_id_fkey FOREIGN KEY (job_id) REFERENCES public.async_jobs(id) ON DELETE SET NULL;
+
+
+--
+-- Name: pm_query_report_runs pm_query_report_runs_export_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pm_query_report_runs
+    ADD CONSTRAINT pm_query_report_runs_export_task_id_fkey FOREIGN KEY (export_task_id) REFERENCES public.pm_kpi_export_tasks(id) ON DELETE SET NULL;
+
+
+--
+-- Name: pm_query_report_runs pm_query_report_runs_notification_history_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pm_query_report_runs
+    ADD CONSTRAINT pm_query_report_runs_notification_history_id_fkey FOREIGN KEY (notification_history_id) REFERENCES public.notification_history(id) ON DELETE SET NULL;
+
+
+--
 -- Name: ops_audit_logs ops_audit_logs_approver_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -20391,6 +20499,149 @@ CREATE INDEX IF NOT EXISTS storage_protection_events_target_time_idx
 -- Consolidated pre-release geofence Observe schema.
 
 -- +omcgo MainReconcileBegin
+-- Email notification additions must also be applied to pre-release databases
+-- that already record goose version 1. Keep this block additive and idempotent.
+ALTER TABLE public.alarm_definitions
+    ADD COLUMN IF NOT EXISTS cn_suggestion text,
+    ADD COLUMN IF NOT EXISTS en_suggestion text;
+
+ALTER TABLE public.alarm_filters
+    ADD COLUMN IF NOT EXISTS effective_start timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS effective_end timestamp with time zone;
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_alarm_filters_effective_window'
+          AND conrelid = 'public.alarm_filters'::regclass
+    ) THEN
+        ALTER TABLE public.alarm_filters
+            ADD CONSTRAINT chk_alarm_filters_effective_window
+            CHECK (((effective_start IS NULL) = (effective_end IS NULL)) AND (effective_start IS NULL OR effective_end > effective_start));
+    END IF;
+END $$;
+-- +goose StatementEnd
+
+ALTER TABLE public.notification_history
+    ADD COLUMN IF NOT EXISTS business_type character varying(64),
+    ADD COLUMN IF NOT EXISTS business_id character varying(128),
+    ADD COLUMN IF NOT EXISTS dedup_key character varying(256),
+    ADD COLUMN IF NOT EXISTS attempted_at timestamp with time zone;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_notification_history_dedup_key
+    ON public.notification_history (dedup_key)
+    WHERE dedup_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.pm_query_report_subscriptions (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    query_template_id uuid NOT NULL UNIQUE
+        REFERENCES public.pm_query_templates(id) ON DELETE CASCADE,
+    enabled boolean DEFAULT true NOT NULL,
+    period character varying(16) NOT NULL,
+    send_times time without time zone[] NOT NULL,
+    recipients text[] NOT NULL,
+    timezone_name character varying(64) DEFAULT 'UTC' NOT NULL,
+    next_run_at timestamp with time zone,
+    last_run_at timestamp with time zone,
+    last_status character varying(16),
+    last_error text,
+    created_by uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pm_query_report_subscriptions_period_check
+        CHECK (period IN ('15min', 'hourly', 'daily')),
+    CONSTRAINT pm_query_report_subscriptions_send_times_check
+        CHECK (cardinality(send_times) BETWEEN 1 AND 8),
+    CONSTRAINT pm_query_report_subscriptions_recipients_check
+        CHECK (cardinality(recipients) BETWEEN 1 AND 50),
+    CONSTRAINT pm_query_report_subscriptions_last_status_check
+        CHECK (last_status IS NULL OR last_status IN ('pending', 'running', 'sent', 'export_failed', 'delivery_failed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pm_query_report_subscriptions_due
+    ON public.pm_query_report_subscriptions (next_run_at)
+    WHERE enabled = true;
+
+ALTER TABLE public.pm_query_report_subscriptions
+    ADD COLUMN IF NOT EXISTS timezone_name character varying(64)
+        NOT NULL DEFAULT 'UTC';
+
+CREATE TABLE IF NOT EXISTS public.pm_query_report_runs (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    subscription_id uuid
+        REFERENCES public.pm_query_report_subscriptions(id) ON DELETE SET NULL,
+    query_template_id uuid NOT NULL,
+    query_template_name character varying(128) NOT NULL,
+    query_payload jsonb NOT NULL,
+    period character varying(16) NOT NULL,
+    recipients text[] NOT NULL,
+    window_start timestamp with time zone NOT NULL,
+    window_end timestamp with time zone NOT NULL,
+    job_id uuid REFERENCES public.async_jobs(id) ON DELETE SET NULL,
+    export_task_id uuid REFERENCES public.pm_kpi_export_tasks(id) ON DELETE SET NULL,
+    notification_history_id uuid
+        REFERENCES public.notification_history(id) ON DELETE SET NULL,
+    status character varying(16) DEFAULT 'pending' NOT NULL,
+    attachment_name text,
+    error_message text,
+    started_at timestamp with time zone,
+    finished_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT pm_query_report_runs_period_check
+        CHECK (period IN ('15min', 'hourly', 'daily')),
+    CONSTRAINT pm_query_report_runs_status_check
+        CHECK (status IN ('pending', 'running', 'sent', 'export_failed', 'delivery_failed')),
+    CONSTRAINT pm_query_report_runs_window_check
+        CHECK (window_end > window_start),
+    CONSTRAINT pm_query_report_runs_natural_window_unique
+        UNIQUE (subscription_id, window_start, window_end)
+);
+
+ALTER TABLE public.pm_query_report_runs
+    ADD COLUMN IF NOT EXISTS export_task_id uuid;
+
+UPDATE public.pm_query_report_subscriptions
+SET last_status = 'delivery_failed'
+WHERE last_status = 'failed';
+
+UPDATE public.pm_query_report_runs
+SET status = 'delivery_failed'
+WHERE status = 'failed';
+
+ALTER TABLE public.pm_query_report_subscriptions
+    DROP CONSTRAINT IF EXISTS pm_query_report_subscriptions_last_status_check,
+    ADD CONSTRAINT pm_query_report_subscriptions_last_status_check
+        CHECK (last_status IS NULL OR last_status IN ('pending', 'running', 'sent', 'export_failed', 'delivery_failed'));
+
+ALTER TABLE public.pm_query_report_runs
+    DROP CONSTRAINT IF EXISTS pm_query_report_runs_status_check,
+    ADD CONSTRAINT pm_query_report_runs_status_check
+        CHECK (status IN ('pending', 'running', 'sent', 'export_failed', 'delivery_failed'));
+
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.pm_query_report_runs'::regclass
+          AND conname = 'pm_query_report_runs_export_task_id_fkey'
+    ) THEN
+        ALTER TABLE public.pm_query_report_runs
+            ADD CONSTRAINT pm_query_report_runs_export_task_id_fkey
+            FOREIGN KEY (export_task_id)
+            REFERENCES public.pm_kpi_export_tasks(id)
+            ON DELETE SET NULL;
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+CREATE INDEX IF NOT EXISTS idx_pm_query_report_runs_subscription_created
+    ON public.pm_query_report_runs (subscription_id, created_at DESC);
+
 ALTER TABLE public.devices
     ADD COLUMN IF NOT EXISTS location_source_mode varchar(16)
         NOT NULL DEFAULT 'tr069';

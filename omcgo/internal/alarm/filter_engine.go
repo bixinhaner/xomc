@@ -24,15 +24,17 @@ type alarmDefLookup interface {
 
 // FilterEngine 告警过滤引擎，根据告警过滤规则处理入站告警。
 type FilterEngine struct {
-	filterRepo      AlarmFilterRuleRepository
-	store           AlarmStore
-	dispatcher      WebhookDispatcher
-	deadLetterRepo  DeadLetterRepository
+	filterRepo          AlarmFilterRuleRepository
+	store               AlarmStore
+	dispatcher          WebhookDispatcher
+	deadLetterRepo      DeadLetterRepository
 	deviceGroupResolver DeviceGroupResolver
-	alarmDefs       alarmDefLookup
-	metrics         *WebhookMetrics
-	emailDispatcher EmailDispatcher
-	logger          *zap.Logger
+	alarmDefs           alarmDefLookup
+	metrics             *WebhookMetrics
+	emailDispatcher     EmailDispatcher
+	emailLocation       func(context.Context) *time.Location
+	now                 func() time.Time
+	logger              *zap.Logger
 }
 
 // NewFilterEngine 创建告警过滤引擎。
@@ -62,6 +64,7 @@ func NewFilterEngine(
 		deadLetterRepo:  deadLetterRepo,
 		metrics:         metrics,
 		emailDispatcher: noopEmailDispatcher{}, // 默认 noop；DI 后通过 SetEmailDispatcher 切换
+		now:             time.Now,
 		logger:          logger,
 	}
 }
@@ -69,13 +72,18 @@ func NewFilterEngine(
 // SetEmailDispatcher 注入邮件派发器（W2.A.1/T-0007 整合）。
 //
 // 与 WebhookDispatcher 走构造函数参数不同，邮件 dispatcher 用 setter 是因为
-// SMTP 配置依赖运行时（OMC_SMTP_*  env），DI 装配晚于 NewFilterEngine 调用，
-// 也方便既有测试零改保持向后兼容。dispatcher == nil 时回退到 noopEmailDispatcher。
+// 邮件传输由 app/worker 的 notification.smtp 统一装配；dispatcher == nil 时回退到 noop。
 func (e *FilterEngine) SetEmailDispatcher(dispatcher EmailDispatcher) {
 	if dispatcher == nil {
 		dispatcher = noopEmailDispatcher{}
 	}
 	e.emailDispatcher = dispatcher
+}
+
+// SetEmailLocationProvider 注入告警邮件展示时区。provider 每次生成邮件时调用，
+// 因而系统时区运行期变更无需重启；nil 时保留 time.Time 自带时区。
+func (e *FilterEngine) SetEmailLocationProvider(provider func(context.Context) *time.Location) {
+	e.emailLocation = provider
 }
 
 // SetDeviceGroupResolver injects the resolver used by device_group filter rules.
@@ -95,12 +103,23 @@ func (e *FilterEngine) SetAlarmDefLookup(lookup alarmDefLookup) {
 
 // ProcessResult 过滤处理结果。
 type ProcessResult struct {
-	Handled bool   // 是否被过滤规则处理
-	Action  string // 执行的动作
+	Handled     bool             // 是否被过滤规则处理
+	Action      string           // 执行的动作
+	matchedRule *AlarmFilterRule // 仅供 AlarmEngine 延迟邮件入队，不暴露到 API
 }
 
 // ProcessAlarm 处理入站告警，返回处理结果。
 func (e *FilterEngine) ProcessAlarm(ctx context.Context, alarm *model.Alarm, deviceID uuid.UUID) (*ProcessResult, error) {
+	return e.processAlarm(ctx, alarm, deviceID, true)
+}
+
+// evaluateAlarm 供 AlarmEngine 的生产接收链路使用。邮件动作只返回命中规则，
+// 等确认是新告警并成功落库后再冻结快照入队，避免重复上报产生重复邮件。
+func (e *FilterEngine) evaluateAlarm(ctx context.Context, alarm *model.Alarm, deviceID uuid.UUID) (*ProcessResult, error) {
+	return e.processAlarm(ctx, alarm, deviceID, false)
+}
+
+func (e *FilterEngine) processAlarm(ctx context.Context, alarm *model.Alarm, deviceID uuid.UUID, dispatchEmailNow bool) (*ProcessResult, error) {
 	// 1. 从告警库补充信息
 	e.enrichFromLibrary(ctx, alarm)
 
@@ -114,7 +133,7 @@ func (e *FilterEngine) ProcessAlarm(ctx context.Context, alarm *model.Alarm, dev
 	// 3. 按优先级匹配规则
 	for _, rule := range rules {
 		if e.match(ctx, alarm, deviceID, &rule) {
-			result, err := e.executeAction(ctx, alarm, &rule)
+			result, err := e.executeAction(ctx, alarm, &rule, dispatchEmailNow)
 			if err != nil {
 				return nil, err
 			}
@@ -126,9 +145,49 @@ func (e *FilterEngine) ProcessAlarm(ctx context.Context, alarm *model.Alarm, dev
 	return &ProcessResult{Handled: false, Action: FilterActionDefault}, nil
 }
 
+// NotifyClearedAlarm 为已经完成归档和活动库删除的告警派发恢复邮件。
+//
+// 清除阶段只复用规则匹配，不执行 ignore/auto_ack/auto_clear/webhook 等入站动作；
+// 第一条命中规则仍保持与 ProcessAlarm 一致的优先级语义，只有 notify_email 才派发。
+// 查询规则或入队失败均只记日志，不能回滚已经成功的告警清除业务。
+func (e *FilterEngine) NotifyClearedAlarm(ctx context.Context, alarm *model.Alarm, deviceID uuid.UUID) {
+	if alarm == nil {
+		return
+	}
+	e.enrichFromLibrary(ctx, alarm)
+
+	rules, err := e.filterRepo.ListEnabled(ctx)
+	if err != nil {
+		e.logger.Warn("list enabled filter rules for cleared alarm failed", zap.Error(err))
+		return
+	}
+
+	for i := range rules {
+		rule := &rules[i]
+		if !e.match(ctx, alarm, deviceID, rule) {
+			continue
+		}
+		if rule.Action == FilterActionNotifyEmail {
+			e.dispatchEmail(ctx, alarm, rule)
+		}
+		return
+	}
+}
+
 // match 检查告警是否匹配过滤规则。
 // 规则中凡是填了值的维度都必须同时命中；filter_type 仅保留给存量契约和列表展示。
 func (e *FilterEngine) match(ctx context.Context, alarm *model.Alarm, deviceID uuid.UUID, rule *AlarmFilterRule) bool {
+	now := time.Now()
+	if e.now != nil {
+		now = e.now()
+	}
+	if rule.EffectiveStart != nil && now.Before(*rule.EffectiveStart) {
+		return false
+	}
+	if rule.EffectiveEnd != nil && !now.Before(*rule.EffectiveEnd) {
+		return false
+	}
+
 	if len(rule.AlarmSources) > 0 {
 		if alarm.AlarmSource == nil {
 			return false
@@ -208,7 +267,7 @@ func (e *FilterEngine) match(ctx context.Context, alarm *model.Alarm, deviceID u
 }
 
 // executeAction 执行过滤动作。
-func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, rule *AlarmFilterRule) (*ProcessResult, error) {
+func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, rule *AlarmFilterRule, dispatchEmailNow bool) (*ProcessResult, error) {
 	switch rule.Action {
 	case FilterActionIgnore:
 		e.logger.Debug("alarm ignored by filter rule",
@@ -244,9 +303,11 @@ func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, ru
 		return &ProcessResult{Handled: true, Action: FilterActionNotifyWebhook}, nil
 
 	case FilterActionNotifyEmail:
-		e.dispatchEmail(ctx, alarm, rule)
+		if dispatchEmailNow {
+			e.dispatchEmail(ctx, alarm, rule)
+		}
 		// 与 webhook 一致：rule 命中即视为已处理，dispatch 失败仅在 emailDispatcher 内部记 metric
-		return &ProcessResult{Handled: true, Action: FilterActionNotifyEmail}, nil
+		return &ProcessResult{Handled: true, Action: FilterActionNotifyEmail, matchedRule: rule}, nil
 
 	default:
 		return &ProcessResult{Handled: false, Action: FilterActionDefault}, nil
@@ -350,13 +411,26 @@ func (e *FilterEngine) dispatchEmail(ctx context.Context, alarm *model.Alarm, ru
 	}
 
 	subject := buildEmailSubject(alarm)
-	body := buildEmailBody(alarm)
+	body := buildEmailBody(alarm, e.resolveEmailLocation(ctx))
 
-	if err := e.emailDispatcher.Dispatch(ctx, rule.EmailRecipients, subject, body); err != nil {
+	var err error
+	if dispatcher, ok := e.emailDispatcher.(AlarmContextEmailDispatcher); ok {
+		lifecycle := AlarmEmailLifecycleRaised
+		if alarm.Status == model.AlarmCleared {
+			lifecycle = AlarmEmailLifecycleCleared
+		}
+		err = dispatcher.DispatchAlarm(ctx, AlarmEmailDispatchRequest{
+			AlarmID: alarm.ID, RuleID: rule.ID, Lifecycle: lifecycle,
+			Recipients: rule.EmailRecipients, Subject: subject, Body: body,
+		})
+	} else {
+		err = e.emailDispatcher.Dispatch(ctx, rule.EmailRecipients, subject, body)
+	}
+	if err != nil {
 		e.logger.Warn("email dispatch returned error",
 			zap.String("rule_name", rule.Name),
 			zap.String("alarm_identifier", alarm.AlarmIdentifier),
-			zap.Strings("to", rule.EmailRecipients),
+			zap.Int("recipient_count", len(rule.EmailRecipients)),
 			zap.Error(err))
 		return
 	}
@@ -364,20 +438,23 @@ func (e *FilterEngine) dispatchEmail(ctx context.Context, alarm *model.Alarm, ru
 	e.logger.Info("alarm notify_email dispatched",
 		zap.String("rule_name", rule.Name),
 		zap.String("alarm_identifier", alarm.AlarmIdentifier),
-		zap.Strings("to", rule.EmailRecipients))
+		zap.Int("recipient_count", len(rule.EmailRecipients)))
 }
 
-// buildEmailSubject 拼最小可用的邮件标题。模板化由 T-0043 通知模板/历史 UI 任务接管。
-func buildEmailSubject(alarm *model.Alarm) string {
-	host := alarm.DeviceSN
-	if host == "" {
-		host = alarm.DeviceID.String()
+func (e *FilterEngine) resolveEmailLocation(ctx context.Context) *time.Location {
+	if e.emailLocation == nil {
+		return nil
 	}
-	return fmt.Sprintf("[OMC告警-Sev%d] %s on %s", int(alarm.Severity), alarm.AlarmIdentifier, host)
+	return e.emailLocation(ctx)
+}
+
+// buildEmailSubject 使用 #31315/#31316 明确要求的双语固定标题。
+func buildEmailSubject(_ *model.Alarm) string {
+	return "告警通知/Alarm Notification"
 }
 
 // buildEmailBody 拼纯文本邮件正文。字段集合与 webhookPayload 一致。
-func buildEmailBody(alarm *model.Alarm) string {
+func buildEmailBody(alarm *model.Alarm, location *time.Location) string {
 	var sb strings.Builder
 	sb.WriteString("OMC 告警通知\n\n")
 	sb.WriteString(fmt.Sprintf("告警标识: %s\n", alarm.AlarmIdentifier))
@@ -389,12 +466,36 @@ func buildEmailBody(alarm *model.Alarm) string {
 	if alarm.DeviceSN != "" {
 		sb.WriteString(fmt.Sprintf("设备 SN: %s\n", alarm.DeviceSN))
 	}
-	sb.WriteString(fmt.Sprintf("发生时间: %s\n", alarm.RaisedAt.Format(time.RFC3339)))
-	sb.WriteString(fmt.Sprintf("当前状态: %s\n", alarm.Status))
-	if alarm.ProbableCause != nil && *alarm.ProbableCause != "" {
-		sb.WriteString(fmt.Sprintf("可能原因: %s\n", *alarm.ProbableCause))
+	description := strings.TrimSpace(alarm.Description)
+	if description == "" {
+		description = "-"
 	}
+	sb.WriteString(fmt.Sprintf("告警描述: %s\n", description))
+	sb.WriteString(fmt.Sprintf("发生时间: %s\n", formatEmailTime(alarm.RaisedAt, location)))
+	sb.WriteString(fmt.Sprintf("当前状态: %s\n", alarm.Status))
+	probableCause := "-"
+	if alarm.ProbableCause != nil && strings.TrimSpace(*alarm.ProbableCause) != "" {
+		probableCause = *alarm.ProbableCause
+	}
+	sb.WriteString(fmt.Sprintf("可能原因: %s\n", probableCause))
+	suggestion := "-"
+	if alarm.Suggestion != nil && strings.TrimSpace(*alarm.Suggestion) != "" {
+		suggestion = *alarm.Suggestion
+	}
+	sb.WriteString(fmt.Sprintf("处理建议: %s\n", suggestion))
+	clearedAt := "-"
+	if alarm.ClearedAt != nil {
+		clearedAt = formatEmailTime(*alarm.ClearedAt, location)
+	}
+	sb.WriteString(fmt.Sprintf("清除时间: %s\n", clearedAt))
 	return sb.String()
+}
+
+func formatEmailTime(value time.Time, location *time.Location) string {
+	if location != nil {
+		value = value.In(location)
+	}
+	return value.Format(time.RFC3339)
 }
 
 // webhookPayload 是当前的 alarm webhook 负载结构。
@@ -430,7 +531,7 @@ func buildWebhookPayload(alarm *model.Alarm) webhookPayload {
 
 // enrichFromLibrary 从告警字典（alarm_definitions）按请求 locale 补全告警信息（issue #67）。
 //
-// 补全规则（以 ctx locale 选 cn/en 列，COALESCE(NULLIF(en,''),cn) 退化）：
+// 补全规则（以 ctx locale 选 cn/en 列，COALESCE(NULLIF(en,”),cn) 退化）：
 //   - Description（告警名）：字典命中则用字典本地化名覆盖；命中失败（unknown identifier）
 //     保留设备上报原文，绝不置空。
 //   - ProbableCause（可能原因）：设备未上报时用字典本地化 probable_cause 补；设备已上报则尊重原文。
@@ -465,11 +566,15 @@ func (e *FilterEngine) enrichFromLibrary(ctx context.Context, alarm *model.Alarm
 			alarm.ProbableCause = &cause
 		}
 	}
+	if suggestion := localizedName(loc, rd.CnSuggestion, rd.EnSuggestion); suggestion != "" {
+		alarm.Suggestion = &suggestion
+	}
 }
 
-// localizedName 按 locale 在中/英文之间取值，并做 COALESCE(NULLIF(en,''),cn) 式退化：
+// localizedName 按 locale 在中/英文之间取值，并做 COALESCE(NULLIF(en,”),cn) 式退化：
 //   - en-US：优先英文，英文空则回退中文；
 //   - 其它（含 zh-CN / 缺省）：优先中文，中文空则回退英文。
+//
 // 两者皆空返回空串，调用方据此决定是否保留原文。
 func localizedName(loc appcontext.Locale, cn, en string) string {
 	if loc == appcontext.LocaleEN {

@@ -26104,6 +26104,64 @@ UPDATE public.discovered_param_mappings d
  WHERE d.product_id = p.id
    AND d.private_path = fixes.private_path;
 
+-- KPI query report subscription endpoints. Keep these in the single seed
+-- baseline so RequireAPIPermission can resolve them on both clean installs and
+-- baseline reconciliation. The built-in role grants below apply the existing
+-- policy: admin/operator receive all methods and viewer receives GET only.
+INSERT INTO public.api_endpoints (
+    id, path, method, name, description, group_name, is_active,
+    created_at, updated_at, is_public
+) VALUES
+    (
+        '42492000-0000-4000-8000-000000000001',
+        '/api/v1/pm/query-templates/:id/report-subscription',
+        'GET',
+        'GET /api/v1/pm/query-templates/:id/report-subscription',
+        '查询 KPI 报表订阅',
+        'pm',
+        true,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '42492000-0000-4000-8000-000000000002',
+        '/api/v1/pm/query-templates/:id/report-subscription',
+        'PUT',
+        'PUT /api/v1/pm/query-templates/:id/report-subscription',
+        '保存 KPI 报表订阅',
+        'pm',
+        true,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '42492000-0000-4000-8000-000000000003',
+        '/api/v1/pm/query-templates/:id/report-subscription',
+        'DELETE',
+        'DELETE /api/v1/pm/query-templates/:id/report-subscription',
+        '删除 KPI 报表订阅',
+        'pm',
+        true,
+        now(),
+        now(),
+        false
+    ),
+    (
+        '42492000-0000-4000-8000-000000000004',
+        '/api/v1/pm/query-templates/:id/report-subscription/runs',
+        'GET',
+        'GET /api/v1/pm/query-templates/:id/report-subscription/runs',
+        '查询 KPI 报表发送记录',
+        'pm',
+        true,
+        now(),
+        now(),
+        false
+    )
+ON CONFLICT DO NOTHING;
+
 
 -- Consolidated from former incremental migrations: seed 000002-000003
 

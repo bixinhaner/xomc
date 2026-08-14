@@ -160,6 +160,9 @@ func (c *WorkerConfig) Validate() error {
 	if err := c.ParamSync.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.Notification.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if err := c.MinIO.Buckets.validateConfigBackup(); err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -304,6 +307,17 @@ func (c NotificationConfig) validate() error {
 		}
 		if c.SMTP.From == "" {
 			return fmt.Errorf("notification.smtp.from must not be empty when smtp.enabled=true")
+		}
+		switch c.SMTP.TLSMode {
+		case "implicit", "starttls", "none":
+		default:
+			return fmt.Errorf("notification.smtp.tls_mode must be implicit, starttls, or none when smtp.enabled=true, got %q", c.SMTP.TLSMode)
+		}
+		if c.SMTP.Timeout <= 0 {
+			return fmt.Errorf("notification.smtp.timeout must be > 0 when smtp.enabled=true, got %s", c.SMTP.Timeout)
+		}
+		if c.SMTP.MaxAttachmentBytes < 0 {
+			return fmt.Errorf("notification.smtp.max_attachment_bytes must not be negative, got %d", c.SMTP.MaxAttachmentBytes)
 		}
 	}
 	return nil

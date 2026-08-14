@@ -11,6 +11,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/carrier/ctcc"
 	"github.com/omcgo/omcgo/internal/core/carrier/cucc"
 	"github.com/omcgo/omcgo/internal/core/components"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/prometheus/client_golang/prometheus"
@@ -29,6 +30,7 @@ type workerInfra struct {
 	// 在 RestorePendingQueues 之前就绪，确保启动期 recovery 动作能被记到指标。
 	TaskMetrics       *task.TaskMetrics
 	StorageProtection *storageprotection.Service
+	EmailTransport    notification.EmailTransport
 }
 
 // initWorker initializes all infrastructure for the background worker.
@@ -69,6 +71,18 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	inf.CreateEventBus()
 
 	w := &workerInfra{Infra: inf}
+	smtpCfg := cfg.Notification.SMTP
+	w.EmailTransport = notification.NewEmailSender(notification.SMTPOptions{
+		Enabled:            smtpCfg.Enabled,
+		Host:               smtpCfg.Host,
+		Port:               smtpCfg.Port,
+		Username:           smtpCfg.Username,
+		Password:           smtpCfg.Password,
+		From:               smtpCfg.From,
+		TLSMode:            notification.SMTPTLSMode(smtpCfg.TLSMode),
+		Timeout:            smtpCfg.Timeout,
+		MaxAttachmentBytes: smtpCfg.MaxAttachmentBytes,
+	}, inf.Logger)
 	w.registerCarriers()
 
 	// 创建统一任务队列：TaskService（Redis + PG）

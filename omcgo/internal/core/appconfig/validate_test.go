@@ -272,6 +272,43 @@ func TestLoad_ValidatesConfig(t *testing.T) {
 	})
 }
 
+func TestNotificationConfigValidate(t *testing.T) {
+	t.Parallel()
+	valid := SMTPConfig{
+		Enabled: true, Host: "smtp.example.com", Port: 465,
+		From: "omc@example.com", TLSMode: "implicit", Timeout: 10 * time.Second,
+	}
+	tests := []struct {
+		name    string
+		mutate  func(*SMTPConfig)
+		wantErr string
+	}{
+		{name: "valid implicit"},
+		{name: "valid starttls", mutate: func(c *SMTPConfig) { c.TLSMode = "starttls" }},
+		{name: "valid none", mutate: func(c *SMTPConfig) { c.TLSMode = "none" }},
+		{name: "invalid tls mode", mutate: func(c *SMTPConfig) { c.TLSMode = "auto" }, wantErr: "tls_mode"},
+		{name: "missing timeout", mutate: func(c *SMTPConfig) { c.Timeout = 0 }, wantErr: "timeout"},
+		{name: "negative attachment limit", mutate: func(c *SMTPConfig) { c.MaxAttachmentBytes = -1 }, wantErr: "max_attachment_bytes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := valid
+			if tt.mutate != nil {
+				tt.mutate(&cfg)
+			}
+			err := (NotificationConfig{SMTP: cfg}).validate()
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+
+	// SMTP 未启用时允许占位配置，避免开发/测试环境启动失败。
+	require.NoError(t, (NotificationConfig{}).validate())
+}
+
 // validAppConfig returns a minimal valid AppConfig for testing.
 func validAppConfig() AppConfig {
 	return AppConfig{

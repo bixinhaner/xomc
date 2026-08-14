@@ -208,6 +208,10 @@ func initAdminModule(c *Container) error {
 	tzProvider := systimezone.New(tzFetcher, logger.Named("systimezone"))
 	response.SetTimezoneProvider(tzProvider)
 	c.SystemTimezone = tzProvider
+	// ModuleGraph 允许 admin/alarm 并列初始化；若 alarm 已先完成，在此回填邮件时区。
+	if c.AlarmFilterEngine != nil {
+		c.AlarmFilterEngine.SetEmailLocationProvider(tzProvider.Location)
+	}
 	// 配置页保存"基础设置"（category='basic'，含 timezoneCode）后，立刻失效时区缓存，
 	// 使后续响应即按新系统时区展示，无需重启 app。
 	sysConfigService.RegisterSavedHook(func(_ context.Context, category string) {

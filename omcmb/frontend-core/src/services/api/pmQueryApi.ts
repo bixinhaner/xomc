@@ -11,8 +11,15 @@ import type {
   ListTemplateParams,
   CreateTemplateInput,
   UpdateTemplateInput,
+  BackendQueryReportSubscription,
+  QueryReportSubscription,
+  UpsertQueryReportSubscriptionInput,
 } from '../../types/pmQuery';
-import { mapBackendQueryTemplate, templatePayloadToBackend } from '../../types/pmQuery';
+import {
+  mapBackendQueryReportSubscription,
+  mapBackendQueryTemplate,
+  templatePayloadToBackend,
+} from '../../types/pmQuery';
 
 interface ListResponse {
   items: BackendQueryTemplate[];
@@ -62,5 +69,32 @@ export const pmQueryApi = {
 
   async remove(id: string): Promise<void> {
     await http.delete(`/pm/query-templates/${id}`);
+  },
+
+  async getReportSubscription(id: string): Promise<QueryReportSubscription> {
+    const { data } = await http.get<BackendQueryReportSubscription>(
+      `/pm/query-templates/${id}/report-subscription`,
+    );
+    return mapBackendQueryReportSubscription(data);
+  },
+
+  async upsertReportSubscription(
+    id: string,
+    input: UpsertQueryReportSubscriptionInput,
+  ): Promise<QueryReportSubscription> {
+    const { data } = await http.put<BackendQueryReportSubscription>(
+      `/pm/query-templates/${id}/report-subscription`,
+      {
+        enabled: input.enabled,
+        period: input.period,
+        send_times: input.sendTimes,
+        recipients: input.recipients,
+      },
+    );
+    return mapBackendQueryReportSubscription(data);
+  },
+
+  async deleteReportSubscription(id: string): Promise<void> {
+    await http.delete(`/pm/query-templates/${id}/report-subscription`);
   },
 };

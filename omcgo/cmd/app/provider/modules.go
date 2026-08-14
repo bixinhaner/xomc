@@ -1815,24 +1815,13 @@ func initMiscModules(c *Container) error {
 
 	// T-0152: SMTP 邮件发送器 + Mailer（模板渲染→发送→历史）+ Alertmanager
 	// 告警 webhook 入口。SMTP 默认 disabled，配好邮件服务器后由配置启用。
-	emailSender := notification.NewEmailSender(notification.SMTPOptions{
-		Enabled:  c.Cfg.Notification.SMTP.Enabled,
-		Host:     c.Cfg.Notification.SMTP.Host,
-		Port:     c.Cfg.Notification.SMTP.Port,
-		Username: c.Cfg.Notification.SMTP.Username,
-		Password: c.Cfg.Notification.SMTP.Password,
-		From:     c.Cfg.Notification.SMTP.From,
-		StartTLS: c.Cfg.Notification.SMTP.StartTLS,
-		Timeout:  c.Cfg.Notification.SMTP.Timeout,
-	}, logger)
-	mailer := notification.NewMailer(templateService, historyService, emailSender, logger)
+	mailer := notification.NewMailer(templateService, historyService, c.EmailTransport, logger)
 	c.miscDeps.alertWebhookHandler = notification.NewAlertWebhookHandler(mailer, notification.AlertWebhookOptions{
 		Token:      c.Cfg.Notification.AlertWebhook.Token,
 		Recipients: c.Cfg.Notification.AlertWebhook.Recipients,
 	}, logger)
 
-	logger.Info("notification module initialized",
-		zap.Bool("smtp_enabled", c.Cfg.Notification.SMTP.Enabled))
+	logger.Info("notification module initialized")
 
 	// MML Console module
 	mmlCmdRepo := mml.NewPgCommandRepository(c.PgPool)

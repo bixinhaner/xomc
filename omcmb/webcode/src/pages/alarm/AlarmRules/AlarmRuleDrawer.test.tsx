@@ -4,7 +4,7 @@
  * 故断言该 class 即等价验证了「规则名称必填」这一改动。
  */
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from 'antd';
 import { IntlProvider } from 'react-intl';
 import { zhCN } from '@core/i18n';
@@ -18,6 +18,9 @@ const deviceHooks = vi.hoisted(() => ({
 }));
 
 const emptyDeviceQueries: unknown[] = [];
+const alarmDefinitionHooks = vi.hoisted(() => ({
+  useAllAlarmDefinitions: vi.fn(() => ({ data: { items: [] }, isLoading: false })),
+}));
 
 vi.mock('@core/hooks/api/useDevices', () => ({
   useDeviceList: deviceHooks.useDeviceList,
@@ -25,7 +28,7 @@ vi.mock('@core/hooks/api/useDevices', () => ({
   useDevicesByIds: deviceHooks.useDevicesByIds,
 }));
 vi.mock('@core/hooks/api/useAlarmDefinitions', () => ({
-  useAllAlarmDefinitions: () => ({ data: [], isLoading: false }),
+  useAllAlarmDefinitions: alarmDefinitionHooks.useAllAlarmDefinitions,
 }));
 
 import AlarmRuleDrawer from './AlarmRuleDrawer';
@@ -63,11 +66,15 @@ function makeDevice(index: number): Device {
   } as Device;
 }
 
-function makeRule(selectedDevices: string[]): AlarmRule {
+function makeRule(
+  selectedDevices: string[],
+  ruleType = 'ignore',
+  emailRecipients: string[] = [],
+): AlarmRule {
   return {
     id: 'rule-1',
     ruleName: 'rule-1',
-    ruleType: 'ignore',
+    ruleType,
     severity: 'warning',
     enabled: false,
     conditions: [
@@ -75,6 +82,7 @@ function makeRule(selectedDevices: string[]): AlarmRule {
       { field: 'alarm_identifier', operator: 'contains', value: ['30000'] },
     ],
     actions: [],
+    emailRecipients,
     createTime: '2026-06-18T00:00:00Z',
     updateTime: '2026-06-18T00:00:00Z',
   };
@@ -85,6 +93,7 @@ beforeEach(() => {
   deviceHooks.useDeviceList.mockReturnValue({ data: makeDeviceListResponse([]), isLoading: false });
   deviceHooks.useDeviceGroups.mockReturnValue({ data: { groups: [] }, isLoading: false });
   deviceHooks.useDevicesByIds.mockReturnValue(emptyDeviceQueries);
+  alarmDefinitionHooks.useAllAlarmDefinitions.mockReturnValue({ data: { items: [] }, isLoading: false });
 });
 
 function renderDrawer(props: Partial<React.ComponentProps<typeof AlarmRuleDrawer>> = {}) {
@@ -193,4 +202,55 @@ describe('AlarmRuleDrawer 规则名必填 (#236)', () => {
     expect(screen.getAllByText('已选 2 台')).toHaveLength(2);
     expect(screen.getAllByText('共 2 台')).not.toHaveLength(0);
   }, 12000);
+
+  it('邮件通知规则显示并提交回填的收件人', async () => {
+    const onSubmit = vi.fn(async () => {});
+    renderDrawer({
+      mode: 'edit',
+      rule: makeRule([], 'notify_email', ['noc@example.com']),
+      onSubmit,
+    });
+
+    expect(screen.getByText('邮件收件人')).toBeInTheDocument();
+    expect(screen.getByText(/最多 50 个/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      emailRecipients: ['noc@example.com'],
+    })));
+  });
+
+  it('编辑规则时回填并提交生效时间范围', async () => {
+    const onSubmit = vi.fn(async () => {});
+    const rule = makeRule([]);
+    rule.effectiveStart = '2026-08-12T01:00:00.000Z';
+    rule.effectiveEnd = '2026-08-12T02:00:00.000Z';
+    renderDrawer({ mode: 'edit', rule, onSubmit });
+
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      timeRange: ['2026-08-12T01:00:00.000Z', '2026-08-12T02:00:00.000Z'],
+    })));
+  });
+
+  it('已选告警摘要使用主题容器并支持一键清空', () => {
+    alarmDefinitionHooks.useAllAlarmDefinitions.mockReturnValue({
+      data: {
+        items: [{
+          identifier: '30000',
+          cnProbableCause: '本地验证告警',
+          severityCode: 31001,
+          eventType: 'communication',
+        }],
+      },
+      isLoading: false,
+    });
+
+    renderDrawer({ mode: 'edit', rule: makeRule([]) });
+
+    const summary = screen.getByTestId('selected-alarm-summary');
+    expect(summary).toBeInTheDocument();
+    expect(summary).toHaveTextContent('30000');
+    fireEvent.click(screen.getByRole('button', { name: '清空' }));
+    expect(screen.queryByTestId('selected-alarm-summary')).not.toBeInTheDocument();
+  });
 });

@@ -82,6 +82,13 @@ vi.mock('@core/hooks/api/usePmQuery', () => ({
   useCreateQueryTemplate: () => ({ mutateAsync: createTemplateSpy, isPending: false }),
   useUpdateQueryTemplate: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteQueryTemplate: () => ({ mutateAsync: vi.fn() }),
+  useQueryReportSubscription: () => ({
+    data: undefined,
+    error: null,
+    isError: false,
+  }),
+  useUpsertQueryReportSubscription: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteQueryReportSubscription: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAggregatedMetricsByDevices: (
     baseParams: Record<string, unknown>,
     deviceSns: string[],
@@ -104,6 +111,10 @@ vi.mock('@core/hooks/api/usePmQuery', () => ({
 vi.mock('@core/store/userStore', () => ({
   useUserStore: (selector: (state: { currentUser: { id: string; isSuperAdmin: boolean } }) => unknown) =>
     selector({ currentUser: { id: 'user-1', isSuperAdmin: false } }),
+}));
+
+vi.mock('@core/hooks/usePermission', () => ({
+  usePermission: () => true,
 }));
 
 vi.mock('@core/hooks/api/useSystemTimezone', () => ({

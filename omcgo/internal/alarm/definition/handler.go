@@ -92,6 +92,8 @@ type createReq struct {
 	EventType       *int   `json:"event_type"`
 	CnProbableCause string `json:"cn_probable_cause"`
 	EnProbableCause string `json:"en_probable_cause"`
+	CnSuggestion    string `json:"cn_suggestion"`
+	EnSuggestion    string `json:"en_suggestion"`
 	IsShow          *bool  `json:"is_show"`
 	Description     string `json:"description"`
 }
@@ -104,6 +106,8 @@ type updateReq struct {
 	EventType       *int    `json:"event_type"`
 	CnProbableCause *string `json:"cn_probable_cause"`
 	EnProbableCause *string `json:"en_probable_cause"`
+	CnSuggestion    *string `json:"cn_suggestion"`
+	EnSuggestion    *string `json:"en_suggestion"`
 	IsShow          *bool   `json:"is_show"`
 	Description     *string `json:"description"`
 }
@@ -120,6 +124,8 @@ type defView struct {
 	EventType       *int      `json:"event_type,omitempty"`
 	CnProbableCause string    `json:"cn_probable_cause"`
 	EnProbableCause string    `json:"en_probable_cause"`
+	CnSuggestion    string    `json:"cn_suggestion"`
+	EnSuggestion    string    `json:"en_suggestion"`
 	IsShow          bool      `json:"is_show"`
 	Description     string    `json:"description"`
 }
@@ -137,6 +143,8 @@ func toView(rd *ResolvedDefinition) defView {
 		EventType:       rd.EventType,
 		CnProbableCause: rd.CnProbableCause,
 		EnProbableCause: rd.EnProbableCause,
+		CnSuggestion:    rd.CnSuggestion,
+		EnSuggestion:    rd.EnSuggestion,
 		IsShow:          rd.IsShow,
 		Description:     rd.Description,
 	}
@@ -220,6 +228,8 @@ func (h *Handler) Create(c *gin.Context) {
 		EventType:       req.EventType,
 		CnProbableCause: req.CnProbableCause,
 		EnProbableCause: req.EnProbableCause,
+		CnSuggestion:    req.CnSuggestion,
+		EnSuggestion:    req.EnSuggestion,
 		Description:     req.Description,
 		IsShow:          true,
 	}
@@ -250,6 +260,8 @@ func (h *Handler) Update(c *gin.Context) {
 		EventType:       req.EventType,
 		CnProbableCause: req.CnProbableCause,
 		EnProbableCause: req.EnProbableCause,
+		CnSuggestion:    req.CnSuggestion,
+		EnSuggestion:    req.EnSuggestion,
 		IsShow:          req.IsShow,
 		Description:     req.Description,
 	})

@@ -51,6 +51,10 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init: func() error { return initTopologyModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
+		Name: "notification-email",
+		Init: func() error { return initNotificationEmailTransport(c) },
+	})
+	graph.Add(components.ModuleInitializer{
 		Name:    "admin",
 		Depends: []string{"topology"},
 		Init:    func() error { return initAdminModule(c) },
@@ -71,7 +75,7 @@ func Setup(r *gin.Engine, c *Container) error {
 	})
 	graph.Add(components.ModuleInitializer{
 		Name:    "alarm",
-		Depends: []string{"productregistry"},
+		Depends: []string{"productregistry", "notification-email"},
 		Init:    func() error { return initAlarmModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
@@ -188,7 +192,7 @@ func Setup(r *gin.Engine, c *Container) error {
 	})
 	graph.Add(components.ModuleInitializer{
 		Name:    "misc",
-		Depends: []string{"task", "admin", "minio-presign-bridge"},
+		Depends: []string{"task", "admin", "minio-presign-bridge", "notification-email"},
 		Init:    func() error { return initMiscModules(c) },
 	})
 	// T-0098 P1-06：字典加载（4 域 paramModel/indicator/alarm-definition/product）
@@ -559,6 +563,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	if ph.pmQueryTemplateHandler != nil {
 		ph.pmQueryTemplateHandler.RegisterRoutes(featGroup("pm", "Performance.View"))
 	}
+	if ph.pmReportSubscriptionHandler != nil {
+		ph.pmReportSubscriptionHandler.RegisterRoutes(featGroup("pm", "Performance.View"))
+	}
 	// KPI-EXPORT T1：KPI 导出 REST 路由（建任务/列任务/列文件/下载/删除，同 pm 权限组）
 	if ph.pmExportHandler != nil {
 		ph.pmExportHandler.RegisterRoutes(featGroup("pm", "Performance.View"))
@@ -740,9 +747,14 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- W2.A.4 / T-0043: Notification template + history → resource "alarms" -----
 	// 路径前缀 /notifications，handler 内部挂 /templates 和 /history 子路由：
 	//   final paths: /api/v1/notifications/templates[...] + /api/v1/notifications/history[...]
-	notifGroup := featGroup("alarms", "Alarm.View").Group("/notifications")
-	md.notifTemplateHandler.RegisterRoutes(notifGroup)
-	md.notifHistoryHandler.RegisterRoutes(notifGroup)
+	notifTemplateGroup := featGroup("alarms", "Alarm.View").Group("/notifications")
+	md.notifTemplateHandler.RegisterRoutes(notifTemplateGroup)
+	// Notification history contains recipient addresses and rendered message
+	// bodies. Keep those sensitive delivery records behind the system-wide
+	// super-administrator boundary instead of exposing them to every operator
+	// with Alarm.View permission.
+	notifHistoryGroup := superAdminGroup.Group("/notifications")
+	md.notifHistoryHandler.RegisterRoutes(notifHistoryGroup)
 
 	// ----- T-0152: Alertmanager 告警 webhook → publicV1（无 JWT）-----
 	// Alertmanager 无法携带 JWT，故挂在无鉴权的 publicV1 上；可选 Bearer token

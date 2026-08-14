@@ -73,6 +73,18 @@ func (m *memHistoryRepo) GetByID(_ context.Context, id uuid.UUID) (*Notification
 	return &cp, nil
 }
 
+func (m *memHistoryRepo) GetByDedupKey(_ context.Context, dedupKey string) (*NotificationHistory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, h := range m.items {
+		if h.DedupKey != nil && *h.DedupKey == dedupKey {
+			cp := *h
+			return &cp, nil
+		}
+	}
+	return nil, commonerrors.ErrNotFound
+}
+
 func (m *memHistoryRepo) Insert(_ context.Context, h *NotificationHistory) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -85,6 +97,47 @@ func (m *memHistoryRepo) Insert(_ context.Context, h *NotificationHistory) error
 	cp := *h
 	m.items[h.ID] = &cp
 	return nil
+}
+
+func (m *memHistoryRepo) InsertIfAbsent(_ context.Context, h *NotificationHistory) (*NotificationHistory, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if h.DedupKey != nil {
+		for _, existing := range m.items {
+			if existing.DedupKey != nil && *existing.DedupKey == *h.DedupKey {
+				cp := *existing
+				return &cp, false, nil
+			}
+		}
+	}
+	if h.ID == uuid.Nil {
+		h.ID = uuid.New()
+	}
+	if h.CreatedAt.IsZero() {
+		h.CreatedAt = time.Now()
+	}
+	cp := *h
+	m.items[h.ID] = &cp
+	return h, true, nil
+}
+
+func (m *memHistoryRepo) ClaimAttempt(_ context.Context, id uuid.UUID, attemptedAt, staleBefore time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	h, ok := m.items[id]
+	if !ok {
+		return false, commonerrors.ErrNotFound
+	}
+	claimable := h.Status == HistoryStatusFailed ||
+		(h.Status == HistoryStatusPending && (h.AttemptedAt == nil || !h.AttemptedAt.After(staleBefore)))
+	if !claimable {
+		return false, nil
+	}
+	h.Status = HistoryStatusPending
+	h.AttemptedAt = &attemptedAt
+	h.ErrorMessage = nil
+	h.RetryCount++
+	return true, nil
 }
 
 func (m *memHistoryRepo) UpdateStatus(_ context.Context, id uuid.UUID, status string, errorMessage *string, sentAt *time.Time) error {

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { App, Button, Card, Space, Switch, Tag, Typography, message } from 'antd';
+import { App, Button, Card, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import {
   CheckCircleOutlined,
   DeleteOutlined,
@@ -17,6 +17,7 @@ import type { AlarmRule, AlarmRuleCondition, AlarmRuleAction } from '@core/types
 import type { PageRequest } from '@core/types/pagination';
 import AlarmRuleDrawer, { type AlarmRuleFormData } from './AlarmRuleDrawer';
 import { formatSystemTime } from '@core/utils/systemTime';
+import { usePermission } from '@core/hooks/usePermission';
 
 const { Text } = Typography;
 
@@ -63,7 +64,10 @@ function getRuleFilterDimensions(rule: AlarmRule, t: TranslateFn): string[] {
 
 export default function AlarmRules() {
   const t = useT();
-  const { modal } = App.useApp();
+  const { modal, message } = App.useApp();
+  const canAdd = usePermission('alarm:rules:add');
+  const canEdit = usePermission('alarm:rules:edit');
+  const canDelete = usePermission('alarm:rules:delete');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
@@ -102,6 +106,7 @@ export default function AlarmRules() {
         { label: t('alarm.ruleType.forbidReport'), value: 'ignore' },
         { label: t('alarm.ruleType.autoConfirm'), value: 'auto_acknowledge' },
         { label: t('alarm.ruleType.autoClear'), value: 'auto_clear' },
+        { label: t('alarm.ruleType.notifyEmail'), value: 'notify_email' },
       ],
       minWidth: 120,
     },
@@ -142,7 +147,7 @@ export default function AlarmRules() {
   const updateRule = useUpdateAlarmRule();
   const createRule = useCreateAlarmRule();
 
-  const rules: AlarmRule[] = data?.items ?? [];
+  const rules = useMemo<AlarmRule[]>(() => data?.items ?? [], [data?.items]);
   const total = data?.total ?? 0;
   const selectedRules = useMemo(
     () => rules.filter((rule) => selectedRowKeys.includes(rule.id)),
@@ -164,7 +169,7 @@ export default function AlarmRules() {
         setTogglingId(null);
       }
     },
-    [updateRule, refetch, t]
+    [message, updateRule, refetch, t]
   );
 
   // 打开添加抽屉
@@ -223,6 +228,8 @@ export default function AlarmRules() {
       actions.push({ type: 'suppress', target: 'auto_acknowledge' });
     } else if (formData.ruleType === 'auto_clear') {
       actions.push({ type: 'suppress', target: 'auto_clear' });
+    } else if (formData.ruleType === 'notify_email') {
+      actions.push({ type: 'email', target: formData.emailRecipients.join(';') });
     }
 
     const ruleData = {
@@ -232,6 +239,10 @@ export default function AlarmRules() {
       severity: 'warning' as const,
       conditions,
       actions,
+      emailRecipients: formData.ruleType === 'notify_email' ? formData.emailRecipients : [],
+      effectiveStart: formData.timeRange?.[0],
+      effectiveEnd: formData.timeRange?.[1],
+      clearEffectiveWindow: !formData.timeRange,
     };
 
     if (drawerMode === 'add') {
@@ -332,7 +343,7 @@ export default function AlarmRules() {
         },
       });
     },
-    [modal, refetch, rules, selectedRowKeys, t, updateRule]
+    [message, modal, refetch, rules, selectedRowKeys, t, updateRule]
   );
 
   const batchActions = useMemo<BatchAction[]>(
@@ -341,14 +352,14 @@ export default function AlarmRules() {
         key: 'enable',
         label: t('common.enable'),
         icon: <CheckCircleOutlined />,
-        disabled: selectedRules.length === 0 || selectedRules.every((rule) => rule.enabled),
+        disabled: !canEdit || selectedRules.length === 0 || selectedRules.every((rule) => rule.enabled),
         onClick: () => handleBatchToggle(true),
       },
       {
         key: 'disable',
         label: t('common.disable'),
         icon: <StopOutlined />,
-        disabled: selectedRules.length === 0 || selectedRules.every((rule) => !rule.enabled),
+        disabled: !canEdit || selectedRules.length === 0 || selectedRules.every((rule) => !rule.enabled),
         onClick: () => handleBatchToggle(false),
       },
       {
@@ -356,10 +367,11 @@ export default function AlarmRules() {
         label: t('common.batchDelete'),
         icon: <DeleteOutlined />,
         danger: true,
+        disabled: !canDelete,
         onClick: handleBatchDelete,
       },
     ],
-    [handleBatchDelete, handleBatchToggle, selectedRules, t]
+    [canDelete, canEdit, handleBatchDelete, handleBatchToggle, selectedRules, t]
   );
 
   const columns = useMemo(
@@ -376,18 +388,22 @@ export default function AlarmRules() {
               <Button type="link" size="small" onClick={() => handleView(record)}>
                 {t('common.view')}
               </Button>
-              <Button type="link" size="small" disabled={record.enabled} onClick={() => handleEdit(record)}>
-                {t('common.edit')}
-              </Button>
-              <Button
-                type="link"
-                size="small"
-                danger
-                disabled={record.enabled || record.isDefault}
-                onClick={() => handleDelete(record)}
-              >
-                {t('common.delete')}
-              </Button>
+              <Tooltip title={canEdit ? undefined : t('common.noPermission')}>
+                <Button type="link" size="small" disabled={!canEdit || record.enabled} onClick={() => handleEdit(record)}>
+                  {t('common.edit')}
+                </Button>
+              </Tooltip>
+              <Tooltip title={canDelete ? undefined : t('common.noPermission')}>
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  disabled={!canDelete || record.enabled || record.isDefault}
+                  onClick={() => handleDelete(record)}
+                >
+                  {t('common.delete')}
+                </Button>
+              </Tooltip>
             </Space>
           );
         },
@@ -401,6 +417,7 @@ export default function AlarmRules() {
           <Switch
             checked={record.enabled}
             size="small"
+            disabled={!canEdit}
             loading={togglingId === record.id}
             onChange={(checked) => void handleToggle(record, checked)}
           />
@@ -468,7 +485,7 @@ export default function AlarmRules() {
         render: (v) => v ? formatSystemTime(String(v)) : '-',
       },
     ],
-    [handleToggle, handleEdit, handleView, handleDelete, togglingId, t]
+    [canDelete, canEdit, handleToggle, handleEdit, handleView, handleDelete, togglingId, t]
   );
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
@@ -487,9 +504,11 @@ export default function AlarmRules() {
     <ListPageLayout
       title={t('nav.alarm.rules')}
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-          {t('common.add')}
-        </Button>
+        <Tooltip title={canAdd ? undefined : t('common.noPermission')}>
+          <Button type="primary" icon={<PlusOutlined />} disabled={!canAdd} onClick={handleAdd}>
+            {t('common.add')}
+          </Button>
+        </Tooltip>
       }
     >
       <FilterBar
@@ -530,14 +549,16 @@ export default function AlarmRules() {
         />
       </Card>
 
-      <AlarmRuleDrawer
-        open={drawerOpen}
-        mode={drawerMode}
-        rule={currentRule}
-        existingNames={rules.map(r => r.ruleName)}
-        onClose={handleDrawerClose}
-        onSubmit={handleDrawerSubmit}
-      />
+      {drawerOpen && (
+        <AlarmRuleDrawer
+          open
+          mode={drawerMode}
+          rule={currentRule}
+          existingNames={rules.map(r => r.ruleName)}
+          onClose={handleDrawerClose}
+          onSubmit={handleDrawerSubmit}
+        />
+      )}
     </ListPageLayout>
   );
 }

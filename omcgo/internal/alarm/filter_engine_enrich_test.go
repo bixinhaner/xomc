@@ -49,6 +49,8 @@ func sampleLookup() *stubAlarmDefLookup {
 				EnName:          "Cell Out of Service",
 				CnProbableCause: "传输中断",
 				EnProbableCause: "Transport interrupted",
+				CnSuggestion:    "检查传输链路并复测",
+				EnSuggestion:    "Check the transport link and retest",
 			},
 		},
 		"ALM-2002": {
@@ -71,6 +73,8 @@ func TestEnrichFromLibrary_ZhLocale_UsesCnName(t *testing.T) {
 	assert.Equal(t, "小区退服", a.Description, "zh locale 应取 cn_name")
 	require.NotNil(t, a.ProbableCause)
 	assert.Equal(t, "传输中断", *a.ProbableCause, "zh locale 可能原因应取 cn_probable_cause")
+	require.NotNil(t, a.Suggestion)
+	assert.Equal(t, "检查传输链路并复测", *a.Suggestion)
 }
 
 func TestEnrichFromLibrary_EnLocale_UsesEnName(t *testing.T) {
@@ -83,6 +87,8 @@ func TestEnrichFromLibrary_EnLocale_UsesEnName(t *testing.T) {
 	assert.Equal(t, "Cell Out of Service", a.Description, "en locale 应取 en_name")
 	require.NotNil(t, a.ProbableCause)
 	assert.Equal(t, "Transport interrupted", *a.ProbableCause)
+	require.NotNil(t, a.Suggestion)
+	assert.Equal(t, "Check the transport link and retest", *a.Suggestion)
 }
 
 func TestEnrichFromLibrary_EnLocale_FallsBackToCnWhenEnEmpty(t *testing.T) {

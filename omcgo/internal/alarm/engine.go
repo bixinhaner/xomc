@@ -127,13 +127,17 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 	//    ignore     → 直接返回，不入库
 	//    auto_clear → 直接返回，不入库（设备-发起的清除走 AutoClear 路径）
 	//    auto_ack / notify_webhook → 仅修改 alarm 状态或派发 webhook，仍继续走 dedup + 入库
+	var pendingEmailRule *AlarmFilterRule
 	if e.filterEngine != nil {
-		result, err := e.filterEngine.ProcessAlarm(ctx, alarm, alarm.DeviceID)
+		result, err := e.filterEngine.evaluateAlarm(ctx, alarm, alarm.DeviceID)
 		if err != nil {
 			e.logger.Warn("filter engine processing failed, falling through to default flow",
 				zap.Error(err),
 				zap.String("alarm_identifier", alarm.AlarmIdentifier))
 		} else if result != nil && result.Handled {
+			if result.Action == FilterActionNotifyEmail {
+				pendingEmailRule = result.matchedRule
+			}
 			switch result.Action {
 			case FilterActionIgnore:
 				e.logger.Debug("alarm short-circuited by filter",
@@ -254,6 +258,9 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) (err erro
 			}
 		}
 	}
+	if pendingEmailRule != nil {
+		e.filterEngine.dispatchEmail(ctx, alarm, pendingEmailRule)
+	}
 
 	e.logger.Info("new alarm raised",
 		zap.String("alarm_id", alarm.ID.String()),
@@ -353,6 +360,10 @@ func (e *AlarmEngine) clearActiveAlarm(ctx context.Context, alarm *model.Alarm) 
 				e.logger.Warn("publish alarm.cleared event", zap.Error(pubErr))
 			}
 		}
+	}
+
+	if e.filterEngine != nil {
+		e.filterEngine.NotifyClearedAlarm(ctx, alarm, alarm.DeviceID)
 	}
 
 	e.logger.Info("alarm cleared",
@@ -534,6 +545,9 @@ func (e *AlarmEngine) ClearBySync(ctx context.Context, alarm *model.Alarm) (err 
 	}
 	if e.metrics != nil {
 		e.metrics.ActiveTotal.WithLabelValues(severityLabel(alarm.Severity), string(alarm.Carrier)).Dec()
+	}
+	if e.filterEngine != nil {
+		e.filterEngine.NotifyClearedAlarm(ctx, alarm, alarm.DeviceID)
 	}
 	e.logger.Debug("alarm cleared from sync",
 		zap.String("alarm_id", alarm.ID.String()),

@@ -21,44 +21,70 @@ type mockFilterRuleRepo struct {
 	rules []AlarmFilterRule
 }
 
-func (m *mockFilterRuleRepo) Create(ctx context.Context, rule *AlarmFilterRule) error                                           { return nil }
-func (m *mockFilterRuleRepo) GetByID(ctx context.Context, id uuid.UUID) (*AlarmFilterRule, error)                             { return nil, nil }
-func (m *mockFilterRuleRepo) Update(ctx context.Context, rule *AlarmFilterRule) error                                       { return nil }
-func (m *mockFilterRuleRepo) Delete(ctx context.Context, id uuid.UUID) error                                               { return nil }
-func (m *mockFilterRuleRepo) List(ctx context.Context, filter AlarmFilterRuleFilter) (*model.ListResponse[AlarmFilterRule], error) { return nil, nil }
-func (m *mockFilterRuleRepo) Toggle(ctx context.Context, id uuid.UUID) error                                               { return nil }
-func (m *mockFilterRuleRepo) ListEnabled(ctx context.Context) ([]AlarmFilterRule, error)                                    { return m.rules, nil }
+func (m *mockFilterRuleRepo) Create(ctx context.Context, rule *AlarmFilterRule) error { return nil }
+func (m *mockFilterRuleRepo) GetByID(ctx context.Context, id uuid.UUID) (*AlarmFilterRule, error) {
+	return nil, nil
+}
+func (m *mockFilterRuleRepo) Update(ctx context.Context, rule *AlarmFilterRule) error { return nil }
+func (m *mockFilterRuleRepo) Delete(ctx context.Context, id uuid.UUID) error          { return nil }
+func (m *mockFilterRuleRepo) List(ctx context.Context, filter AlarmFilterRuleFilter) (*model.ListResponse[AlarmFilterRule], error) {
+	return nil, nil
+}
+func (m *mockFilterRuleRepo) Toggle(ctx context.Context, id uuid.UUID) error { return nil }
+func (m *mockFilterRuleRepo) ListEnabled(ctx context.Context) ([]AlarmFilterRule, error) {
+	return m.rules, nil
+}
 
 // mockStoreForEngine 模拟告警存储
 type mockStoreForEngine struct{}
 
-func (m *mockStoreForEngine) SaveActive(ctx context.Context, alarm *model.Alarm) error       { return nil }
-func (m *mockStoreForEngine) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) { return nil, nil }
-func (m *mockStoreForEngine) GetHistoryByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) { return nil, nil }
+func (m *mockStoreForEngine) SaveActive(ctx context.Context, alarm *model.Alarm) error { return nil }
+func (m *mockStoreForEngine) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
+	return nil, nil
+}
+func (m *mockStoreForEngine) GetHistoryByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
+	return nil, nil
+}
 func (m *mockStoreForEngine) GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error) {
 	return nil, nil
 }
 func (m *mockStoreForEngine) GetActiveByDeviceSN(ctx context.Context, deviceSN string) ([]*model.Alarm, error) {
 	return nil, nil
 }
-func (m *mockStoreForEngine) UpdateActive(ctx context.Context, alarm *model.Alarm) error          { return nil }
-func (m *mockStoreForEngine) RemoveActive(ctx context.Context, id uuid.UUID) error              { return nil }
+func (m *mockStoreForEngine) UpdateActive(ctx context.Context, alarm *model.Alarm) error { return nil }
+func (m *mockStoreForEngine) RemoveActive(ctx context.Context, id uuid.UUID) error       { return nil }
 func (m *mockStoreForEngine) ListActive(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
 	return nil, nil
 }
-func (m *mockStoreForEngine) Archive(ctx context.Context, alarm *model.Alarm) error              { return nil }
+func (m *mockStoreForEngine) Archive(ctx context.Context, alarm *model.Alarm) error { return nil }
 func (m *mockStoreForEngine) ListHistory(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
 	return nil, nil
 }
-func (m *mockStoreForEngine) Statistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) { return nil, nil }
-func (m *mockStoreForEngine) HistoryStatistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) { return nil, nil }
-func (m *mockStoreForEngine) BatchAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error { return nil }
-func (m *mockStoreForEngine) BatchUnacknowledge(ctx context.Context, ids []uuid.UUID) error                { return nil }
-func (m *mockStoreForEngine) BatchClear(ctx context.Context, ids []uuid.UUID, by string, note string) error       { return nil }
-func (m *mockStoreForEngine) BatchHistoryAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error { return nil }
-func (m *mockStoreForEngine) BatchHistoryUnacknowledge(ctx context.Context, ids []uuid.UUID) error                { return nil }
-func (m *mockStoreForEngine) BatchHistoryDelete(ctx context.Context, ids []uuid.UUID) error                       { return nil }
-func (m *mockStoreForEngine) MarkRead(ctx context.Context, id uuid.UUID) error                                    { return nil }
+func (m *mockStoreForEngine) Statistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
+	return nil, nil
+}
+func (m *mockStoreForEngine) HistoryStatistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
+	return nil, nil
+}
+func (m *mockStoreForEngine) BatchAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error {
+	return nil
+}
+func (m *mockStoreForEngine) BatchUnacknowledge(ctx context.Context, ids []uuid.UUID) error {
+	return nil
+}
+func (m *mockStoreForEngine) BatchClear(ctx context.Context, ids []uuid.UUID, by string, note string) error {
+	return nil
+}
+func (m *mockStoreForEngine) BatchHistoryAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error {
+	return nil
+}
+func (m *mockStoreForEngine) BatchHistoryUnacknowledge(ctx context.Context, ids []uuid.UUID) error {
+	return nil
+}
+func (m *mockStoreForEngine) BatchHistoryDelete(ctx context.Context, ids []uuid.UUID) error {
+	return nil
+}
+func (m *mockStoreForEngine) MarkRead(ctx context.Context, id uuid.UUID) error { return nil }
 
 // mockDispatcher 记录所有 Dispatch 调用，用于断言。
 type mockDispatcher struct {
@@ -136,6 +162,30 @@ func TestMatch_NoMatch(t *testing.T) {
 	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"CPU_OVERLOAD"}, Action: FilterActionIgnore}
 	alarm := &model.Alarm{AlarmIdentifier: "GPS_LOSS"}
 	assert.False(t, engine.match(context.Background(), alarm, uuid.UUID{}, rule))
+}
+
+func TestMatch_EffectiveWindow(t *testing.T) {
+	now := time.Date(2026, 8, 12, 9, 30, 0, 0, time.UTC)
+	engine := newTestFilterEngine(nil, nil)
+	engine.now = func() time.Time { return now }
+	alarm := &model.Alarm{AlarmIdentifier: "GPS_LOSS"}
+
+	start := now.Add(-time.Minute)
+	end := now.Add(time.Minute)
+	rule := &AlarmFilterRule{AlarmIdentifiers: []string{"GPS_LOSS"}, EffectiveStart: &start, EffectiveEnd: &end}
+	assert.True(t, engine.match(context.Background(), alarm, uuid.Nil, rule))
+
+	futureStart := now.Add(time.Minute)
+	futureEnd := now.Add(2 * time.Minute)
+	rule.EffectiveStart = &futureStart
+	rule.EffectiveEnd = &futureEnd
+	assert.False(t, engine.match(context.Background(), alarm, uuid.Nil, rule))
+
+	pastStart := now.Add(-2 * time.Minute)
+	pastEnd := now
+	rule.EffectiveStart = &pastStart
+	rule.EffectiveEnd = &pastEnd
+	assert.False(t, engine.match(context.Background(), alarm, uuid.Nil, rule), "effective end is exclusive")
 }
 
 func TestMatch_MultipleDimensionsRequireAll(t *testing.T) {
@@ -354,11 +404,13 @@ func TestProcessAlarm_NotifyEmail_Dispatched(t *testing.T) {
 	calls := dispatcher.Calls()
 	assert.Len(t, calls, 1, "email dispatcher should be invoked once")
 	assert.Equal(t, []string{"oncall@omc.local", "ops@omc.local"}, calls[0].To)
-	assert.Contains(t, calls[0].Subject, "DEVICE_OFFLINE")
-	assert.Contains(t, calls[0].Subject, "SN-OFFLINE")
+	assert.Equal(t, "告警通知/Alarm Notification", calls[0].Subject)
 	assert.Contains(t, calls[0].Body, "DEVICE_OFFLINE")
 	assert.Contains(t, calls[0].Body, "Device")
 	assert.Contains(t, calls[0].Body, "SN-OFFLINE")
+	assert.Contains(t, calls[0].Body, "告警描述: -")
+	assert.Contains(t, calls[0].Body, "处理建议: -")
+	assert.Contains(t, calls[0].Body, "清除时间: -")
 }
 
 // W2.A.1 兜底：收件人列表为空时，dispatcher 不被调用，rule 仍记 Handled=true。
@@ -383,21 +435,74 @@ func TestProcessAlarm_NotifyEmail_MissingRecipients_Skipped(t *testing.T) {
 	assert.Empty(t, dispatcher.Calls(), "dispatcher should not be called when recipients empty")
 }
 
-// W2.A.1 章程：notify_email 与真实 SMTP 服务对接（复用 email_dispatcher_test.go 的 mockSMTPServer）。
-func TestProcessAlarm_NotifyEmail_EndToEnd(t *testing.T) {
-	srv := newMockSMTPServer(t, mockSMTPBehavior{})
-	t.Cleanup(srv.Close)
-
-	dispatcher := NewSMTPEmailDispatcher(
-		EmailConfig{
-			Host:    srv.host,
-			Port:    srv.port,
-			From:    "alarm@omc.test",
-			Timeout: 2 * time.Second,
+func TestNotifyClearedAlarm_DispatchesRecoveryEmailInSystemTimezone(t *testing.T) {
+	dispatcher := &mockEmailDispatcher{}
+	engine := newTestFilterEngine([]AlarmFilterRule{
+		{
+			FilterType:       FilterTypeAlarmIdentifier,
+			AlarmIdentifiers: []string{"DEVICE_OFFLINE"},
+			Action:           FilterActionNotifyEmail,
+			EmailRecipients:  []string{"noc@omc.local"},
+			Name:             "email-offline",
 		},
-		zap.NewNop(),
-		NewEmailMetrics(nil),
-	)
+	}, nil)
+	engine.SetEmailDispatcher(dispatcher)
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	engine.SetEmailLocationProvider(func(context.Context) *time.Location { return shanghai })
+
+	clearedAt := time.Date(2026, 8, 12, 2, 30, 0, 0, time.UTC)
+	alarm := &model.Alarm{
+		ID:              uuid.New(),
+		DeviceID:        uuid.New(),
+		DeviceSN:        "SN-RECOVERED",
+		Severity:        model.AlarmMajor,
+		AlarmIdentifier: "DEVICE_OFFLINE",
+		Status:          model.AlarmCleared,
+		RaisedAt:        time.Date(2026, 8, 12, 2, 0, 0, 0, time.UTC),
+		ClearedAt:       &clearedAt,
+	}
+
+	engine.NotifyClearedAlarm(context.Background(), alarm, alarm.DeviceID)
+
+	calls := dispatcher.Calls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, []string{"noc@omc.local"}, calls[0].To)
+	assert.Contains(t, calls[0].Body, "当前状态: cleared")
+	assert.Contains(t, calls[0].Body, "发生时间: 2026-08-12T10:00:00+08:00")
+	assert.Contains(t, calls[0].Body, "清除时间: 2026-08-12T10:30:00+08:00")
+}
+
+func TestNotifyClearedAlarm_DoesNotExecuteNonEmailAction(t *testing.T) {
+	dispatcher := &mockEmailDispatcher{}
+	engine := newTestFilterEngine([]AlarmFilterRule{
+		{
+			FilterType:       FilterTypeAlarmIdentifier,
+			AlarmIdentifiers: []string{"DEVICE_OFFLINE"},
+			Action:           FilterActionAutoAcknowledge,
+			Name:             "auto-ack-first",
+		},
+		{
+			FilterType:       FilterTypeAlarmIdentifier,
+			AlarmIdentifiers: []string{"DEVICE_OFFLINE"},
+			Action:           FilterActionNotifyEmail,
+			EmailRecipients:  []string{"noc@omc.local"},
+			Name:             "email-second",
+		},
+	}, nil)
+	engine.SetEmailDispatcher(dispatcher)
+	alarm := &model.Alarm{DeviceID: uuid.New(), AlarmIdentifier: "DEVICE_OFFLINE", Status: model.AlarmCleared}
+
+	engine.NotifyClearedAlarm(context.Background(), alarm, alarm.DeviceID)
+
+	assert.Empty(t, dispatcher.Calls(), "the first matching rule keeps priority semantics on clear")
+	assert.Equal(t, model.AlarmCleared, alarm.Status)
+}
+
+// notify_email 端到端经过告警适配器提交给共享邮件传输。
+func TestProcessAlarm_NotifyEmail_EndToEnd(t *testing.T) {
+	transport := &alarmEmailTransportStub{}
+	dispatcher := NewNotificationEmailDispatcher(transport, zap.NewNop(), NewEmailMetrics(nil))
 
 	repo := &mockFilterRuleRepo{rules: []AlarmFilterRule{
 		{
@@ -430,13 +535,10 @@ func TestProcessAlarm_NotifyEmail_EndToEnd(t *testing.T) {
 	assert.True(t, result.Handled)
 	assert.Equal(t, FilterActionNotifyEmail, result.Action)
 
-	// 等 SMTP server 收到 DATA（Dispatch 同步完成时已落数据）
-	body := srv.DataBody()
-	assert.NotEmpty(t, body, "mock SMTP should receive DATA body")
-	assert.Contains(t, body, "Subject: ")
-	assert.Contains(t, body, "DEVICE_OFFLINE")
-	assert.Contains(t, body, "From: alarm@omc.test")
-	assert.Contains(t, body, "To: oncall@omc.test, ops@omc.test")
+	assert.Equal(t, 1, transport.calls)
+	assert.Equal(t, "告警通知/Alarm Notification", transport.message.Subject)
+	assert.Contains(t, transport.message.TextBody, "DEVICE_OFFLINE")
+	assert.Equal(t, []string{"oncall@omc.test", "ops@omc.test"}, transport.message.To)
 }
 
 // W1.5 charter 步骤 4：与真实 HTTP 服务对接，httptest.Server 替代 webhook.site。

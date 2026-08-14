@@ -30,6 +30,7 @@ func (r *PgRepository) ListAll(ctx context.Context) ([]ResolvedDefinition, error
 		Select(
 			"d.id", "d.identifier", "d.ne_type", "d.cn_name", "d.en_name",
 			"d.severity_id", "d.event_type", "d.cn_probable_cause", "d.en_probable_cause",
+			"d.cn_suggestion", "d.en_suggestion",
 			"d.is_show", "d.description",
 			"l.code", "l.name",
 		).
@@ -49,12 +50,13 @@ func (r *PgRepository) ListAll(ctx context.Context) ([]ResolvedDefinition, error
 	for rows.Next() {
 		var rd ResolvedDefinition
 		var (
-			cnName, enName, cnProbCause, enProbCause, description *string
-			eventType                                             *int
+			cnName, enName, cnProbCause, enProbCause, cnSuggestion, enSuggestion, description *string
+			eventType                                                                         *int
 		)
 		if err := rows.Scan(
 			&rd.ID, &rd.Identifier, &rd.NeType, &cnName, &enName,
 			&rd.SeverityID, &eventType, &cnProbCause, &enProbCause,
+			&cnSuggestion, &enSuggestion,
 			&rd.IsShow, &description,
 			&rd.SeverityCode, &rd.SeverityName,
 		); err != nil {
@@ -64,6 +66,8 @@ func (r *PgRepository) ListAll(ctx context.Context) ([]ResolvedDefinition, error
 		rd.EnName = strDeref(enName)
 		rd.CnProbableCause = strDeref(cnProbCause)
 		rd.EnProbableCause = strDeref(enProbCause)
+		rd.CnSuggestion = strDeref(cnSuggestion)
+		rd.EnSuggestion = strDeref(enSuggestion)
 		rd.Description = strDeref(description)
 		rd.EventType = eventType
 		out = append(out, rd)
@@ -116,6 +120,7 @@ func strDeref(p *string) string {
 const baseAlarmDefSelect = `
 SELECT d.id, d.identifier, d.ne_type, d.cn_name, d.en_name,
        d.severity_id, d.event_type, d.cn_probable_cause, d.en_probable_cause,
+       d.cn_suggestion, d.en_suggestion,
        d.is_show, d.description,
        l.code, l.name
 FROM alarm_definitions d
@@ -178,6 +183,7 @@ func (r *PgRepository) ListWithFilter(ctx context.Context, f ListFilter) ([]Reso
 	lb := psql.Select(
 		"d.id", "d.identifier", "d.ne_type", "d.cn_name", "d.en_name",
 		"d.severity_id", "d.event_type", "d.cn_probable_cause", "d.en_probable_cause",
+		"d.cn_suggestion", "d.en_suggestion",
 		"d.is_show", "d.description",
 		"l.code", "l.name",
 	).
@@ -242,14 +248,14 @@ func (r *PgRepository) Create(ctx context.Context, in CreateInput) (*ResolvedDef
 	const insertSQL = `
 INSERT INTO alarm_definitions (
     identifier, ne_type, cn_name, en_name, severity_id, event_type,
-    cn_probable_cause, en_probable_cause, is_show, description
+    cn_probable_cause, en_probable_cause, cn_suggestion, en_suggestion, is_show, description
 ) VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), $5, $6,
-          NULLIF($7,''), NULLIF($8,''), $9, NULLIF($10,''))
+          NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), $11, NULLIF($12,''))
 RETURNING id`
 	var id uuid.UUID
 	if err := r.pool.QueryRow(ctx, insertSQL,
 		in.Identifier, in.NeType, in.CnName, in.EnName, severityID, in.EventType,
-		in.CnProbableCause, in.EnProbableCause, in.IsShow, in.Description,
+		in.CnProbableCause, in.EnProbableCause, in.CnSuggestion, in.EnSuggestion, in.IsShow, in.Description,
 	).Scan(&id); err != nil {
 		return nil, fmt.Errorf("insert alarm_definition: %w", err)
 	}
@@ -298,6 +304,14 @@ func (r *PgRepository) Update(ctx context.Context, identifier string, in UpdateI
 	}
 	if in.EnProbableCause != nil {
 		ub = ub.Set("en_probable_cause", nullIfEmptyAny(*in.EnProbableCause))
+		dirty = true
+	}
+	if in.CnSuggestion != nil {
+		ub = ub.Set("cn_suggestion", nullIfEmptyAny(*in.CnSuggestion))
+		dirty = true
+	}
+	if in.EnSuggestion != nil {
+		ub = ub.Set("en_suggestion", nullIfEmptyAny(*in.EnSuggestion))
 		dirty = true
 	}
 	if in.IsShow != nil {
@@ -448,12 +462,13 @@ func nullIfEmptyAny(s string) any {
 func scanOneResolved(row pgx.Row) (*ResolvedDefinition, error) {
 	var rd ResolvedDefinition
 	var (
-		cnName, enName, cnProbCause, enProbCause, description *string
-		eventType                                             *int
+		cnName, enName, cnProbCause, enProbCause, cnSuggestion, enSuggestion, description *string
+		eventType                                                                         *int
 	)
 	if err := row.Scan(
 		&rd.ID, &rd.Identifier, &rd.NeType, &cnName, &enName,
 		&rd.SeverityID, &eventType, &cnProbCause, &enProbCause,
+		&cnSuggestion, &enSuggestion,
 		&rd.IsShow, &description,
 		&rd.SeverityCode, &rd.SeverityName,
 	); err != nil {
@@ -463,6 +478,8 @@ func scanOneResolved(row pgx.Row) (*ResolvedDefinition, error) {
 	rd.EnName = strDeref(enName)
 	rd.CnProbableCause = strDeref(cnProbCause)
 	rd.EnProbableCause = strDeref(enProbCause)
+	rd.CnSuggestion = strDeref(cnSuggestion)
+	rd.EnSuggestion = strDeref(enSuggestion)
 	rd.Description = strDeref(description)
 	rd.EventType = eventType
 	return &rd, nil
@@ -473,12 +490,13 @@ func scanResolvedDefs(rows pgx.Rows) ([]ResolvedDefinition, error) {
 	for rows.Next() {
 		var rd ResolvedDefinition
 		var (
-			cnName, enName, cnProbCause, enProbCause, description *string
-			eventType                                             *int
+			cnName, enName, cnProbCause, enProbCause, cnSuggestion, enSuggestion, description *string
+			eventType                                                                         *int
 		)
 		if err := rows.Scan(
 			&rd.ID, &rd.Identifier, &rd.NeType, &cnName, &enName,
 			&rd.SeverityID, &eventType, &cnProbCause, &enProbCause,
+			&cnSuggestion, &enSuggestion,
 			&rd.IsShow, &description,
 			&rd.SeverityCode, &rd.SeverityName,
 		); err != nil {
@@ -488,6 +506,8 @@ func scanResolvedDefs(rows pgx.Rows) ([]ResolvedDefinition, error) {
 		rd.EnName = strDeref(enName)
 		rd.CnProbableCause = strDeref(cnProbCause)
 		rd.EnProbableCause = strDeref(enProbCause)
+		rd.CnSuggestion = strDeref(cnSuggestion)
+		rd.EnSuggestion = strDeref(enSuggestion)
 		rd.Description = strDeref(description)
 		rd.EventType = eventType
 		out = append(out, rd)

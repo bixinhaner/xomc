@@ -22,7 +22,11 @@ func TestPgHistoryRepository_ColumnsCoverAllFields(t *testing.T) {
 		"status":        false,
 		"error_message": false,
 		"alarm_id":      false,
+		"business_type": false,
+		"business_id":   false,
+		"dedup_key":     false,
 		"retry_count":   false,
+		"attempted_at":  false,
 		"sent_at":       false,
 		"created_at":    false,
 	}

@@ -14,7 +14,7 @@ import (
 func init() { gin.SetMode(gin.TestMode) }
 
 // newTestWebhook 装配一个 AlertWebhookHandler（Mailer 内存 repo + 给定 transport）。
-func newTestWebhook(t *testing.T, opts AlertWebhookOptions, tr emailTransport) (*AlertWebhookHandler, *memHistoryRepo) {
+func newTestWebhook(t *testing.T, opts AlertWebhookOptions, tr EmailTransport) (*AlertWebhookHandler, *memHistoryRepo) {
 	t.Helper()
 	histRepo := newMemHistoryRepo()
 	m := NewMailer(

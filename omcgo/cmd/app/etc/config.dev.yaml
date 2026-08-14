@@ -279,8 +279,9 @@ notification:
     username: ""                # 留空 = 不做 SMTP AUTH
     password: ""
     from: "omc-alert@example.com"
-    starttls: false             # SMTP 支持 STARTTLS 时改 true
+    tls_mode: "none"            # 阿里企业邮箱常用 implicit:465；按部署参数配置
     timeout: 10s
+    max_attachment_bytes: 20971520
   alert_webhook:
     token: ""                   # 非空时校验 Authorization: Bearer <token>
     recipients: []              # 告警邮件收件人，如 ["ops@example.com"]

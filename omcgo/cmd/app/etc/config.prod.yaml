@@ -242,18 +242,19 @@ batch_processor:
   shutdown_timeout: 30s   # 优雅关闭超时
 
 # 通知中心（T-0152）：SMTP 邮件发送器 + Alertmanager 告警 webhook 入口
-# ⚠️ 生产部署：配好内网 SMTP 后把 smtp.enabled 改 true 并填 host/from；
+# ⚠️ 生产部署：配好阿里企业邮箱 SMTP 后把 smtp.enabled 改 true 并填 host/from；
 #    告警邮件需在 alert_webhook.recipients 填收件人。
 notification:
   smtp:
-    enabled: false              # 配好内网 SMTP 服务器后改 true
-    host: ""                    # 内网 SMTP 服务器地址
-    port: 25
-    username: ""                # 留空 = 不做 SMTP AUTH
+    enabled: false              # 配好阿里企业邮箱 SMTP 后改 true
+    host: ""                    # 阿里企业邮箱 SMTP 主机，以租户管理员提供值为准
+    port: 465
+    username: ""
     password: ""
     from: "omc-alert@example.com"
-    starttls: false             # SMTP 支持 STARTTLS 时改 true
+    tls_mode: "implicit"        # 阿里企业邮箱常用 implicit:465；以租户参数为准
     timeout: 10s
+    max_attachment_bytes: 20971520
   alert_webhook:
     token: ""                   # 建议生产填随机串，Alertmanager 侧带 Bearer
     recipients: []              # 告警邮件收件人，如 ["ops@example.com"]

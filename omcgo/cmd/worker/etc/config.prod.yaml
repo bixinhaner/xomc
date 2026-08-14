@@ -145,6 +145,18 @@ dict_loader:
     backup_retention_days: 30          # .deleted/.bak 保留天数(空→默认 30)
     backup_cleanup_cron: "0 3 * * *"   # 每天凌晨 3 点扫(空→默认同左)
 
+notification:
+  smtp:
+    enabled: false       # 配好阿里企业邮箱 SMTP 后改 true
+    host: ""             # 阿里企业邮箱 SMTP 主机，以租户管理员提供值为准
+    port: 465
+    username: ""
+    password: ""
+    from: "omc-alert@example.com"
+    tls_mode: "implicit" # 阿里企业邮箱常用 implicit:465；以租户参数为准
+    timeout: 10s
+    max_attachment_bytes: 20971520
+
 log:
   level: "warn"
   format: "json"

@@ -77,6 +77,8 @@ export const alarmDefinitionService = {
       eventType: input.eventType,
       cnProbableCause: input.cnProbableCause,
       enProbableCause: input.enProbableCause,
+      cnSuggestion: input.cnSuggestion,
+      enSuggestion: input.enSuggestion,
       isShow: input.isShow ?? true,
       isUnknown: false,
     };
@@ -100,6 +102,8 @@ export const alarmDefinitionService = {
       ...(input.eventType !== undefined && { eventType: input.eventType }),
       ...(input.cnProbableCause !== undefined && { cnProbableCause: input.cnProbableCause }),
       ...(input.enProbableCause !== undefined && { enProbableCause: input.enProbableCause }),
+      ...(input.cnSuggestion !== undefined && { cnSuggestion: input.cnSuggestion }),
+      ...(input.enSuggestion !== undefined && { enSuggestion: input.enSuggestion }),
       ...(input.isShow !== undefined && { isShow: input.isShow }),
     };
     return clone(definitions[idx]);

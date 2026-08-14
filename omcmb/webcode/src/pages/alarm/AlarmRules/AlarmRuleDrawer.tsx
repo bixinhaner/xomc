@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
+  App,
   Button,
   Checkbox,
   DatePicker,
@@ -13,7 +14,8 @@ import {
   Table,
   Tag,
   Tooltip,
-  message,
+  Typography,
+  theme,
 } from 'antd';
 import type { TableProps } from 'antd';
 import { useT } from '@/hooks/useT';
@@ -23,7 +25,7 @@ import type { AlarmRule } from '@core/types/alarm';
 import type { AlarmDefinition } from '@core/types/alarmDefinition';
 import type { AlarmSeverity } from '@core/types/common';
 import type { Device, DeviceGroup } from '@core/types/device';
-import { Dayjs } from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 
 const { RangePicker } = DatePicker;
 
@@ -32,7 +34,11 @@ const RULE_TYPE_OPTIONS: { value: string; labelKey: string }[] = [
   { value: 'ignore', labelKey: 'alarm.rule.action.ignore' },
   { value: 'auto_acknowledge', labelKey: 'alarm.rule.action.autoAck' },
   { value: 'auto_clear', labelKey: 'alarm.rule.action.autoClear' },
+  { value: 'notify_email', labelKey: 'alarm.rule.action.notifyEmail' },
 ];
+
+const MAX_EMAIL_RECIPIENTS = 50;
+const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // 事件类型配置
 const EVENT_TYPE_OPTIONS: { value: string; labelKey: string }[] = [
@@ -86,6 +92,7 @@ export interface AlarmRuleFormData {
   selectedDevices: string[];
   selectedGroups: string[];
   selectedAlarms: string[];
+  emailRecipients: string[];
   timeRange?: [string, string];
 }
 
@@ -241,20 +248,31 @@ interface DeviceGroupWithLevel extends DeviceGroup {
 }
 
 export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], onClose, onSubmit }: AlarmRuleDrawerProps) {
+  const { message } = App.useApp();
   const t = useT();
+  const { token } = theme.useToken();
   const [form] = Form.useForm<AlarmRuleFormData>();
   const [loading, setLoading] = useState(false);
+  const [currentRuleType, setCurrentRuleType] = useState<string | undefined>(() => rule?.ruleType);
   const [deviceTablePage, setDeviceTablePage] = useState(1);
   const [deviceTablePageSize, setDeviceTablePageSize] = useState(DEVICE_TABLE_DEFAULT_PAGE_SIZE);
   const [alarmTablePage, setAlarmTablePage] = useState(1);
   const [alarmTablePageSize, setAlarmTablePageSize] = useState(5);
-  const [deviceSelectionMode, setDeviceSelectionMode] = useState<'devices' | 'groups'>('devices');
-  const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
-  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
-  const [selectedAlarms, setSelectedAlarms] = useState<string[]>([]);
+  const initialSelectedDevices = useMemo(() => getConditionValues(rule, 'device_id'), [rule]);
+  const initialSelectedGroups = useMemo(() => getConditionValues(rule, 'device_group_id'), [rule]);
+  const [deviceSelectionMode, setDeviceSelectionMode] = useState<'devices' | 'groups'>(() =>
+    initialSelectedGroups.length > 0 && initialSelectedDevices.length === 0 ? 'groups' : 'devices',
+  );
+  const [selectedDevices, setSelectedDevices] = useState<string[]>(initialSelectedDevices);
+  const [selectedGroups, setSelectedGroups] = useState<string[]>(initialSelectedGroups);
+  const [selectedAlarms, setSelectedAlarms] = useState<string[]>(() => getConditionValues(rule, 'alarm_identifier'));
   const [selectedDeviceModalOpen, setSelectedDeviceModalOpen] = useState(false);
   const [selectedDeviceKeyword, setSelectedDeviceKeyword] = useState('');
-  const [timeRange, setTimeRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [timeRange, setTimeRange] = useState<[Dayjs, Dayjs] | null>(() =>
+    rule?.effectiveStart && rule.effectiveEnd
+      ? [dayjs(rule.effectiveStart), dayjs(rule.effectiveEnd)]
+      : null,
+  );
   const [alarmFilter, setAlarmFilter] = useState({
     keyword: '',
     eventType: undefined as string | undefined,
@@ -397,52 +415,6 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     );
   }, [selectedDeviceKeyword, selectedDeviceRows]);
 
-  // 初始化表单数据
-  useEffect(() => {
-    if (open && rule) {
-      const nextSelectedDevices = getConditionValues(rule, 'device_id');
-      const nextSelectedGroups = getConditionValues(rule, 'device_group_id');
-      const nextSelectedAlarms = getConditionValues(rule, 'alarm_identifier');
-      const nextDeviceSelectionMode = nextSelectedGroups.length > 0 && nextSelectedDevices.length === 0
-        ? 'groups'
-        : 'devices';
-
-      form.setFieldsValue({
-        ruleName: rule.ruleName,
-        status: rule.enabled,
-        ruleType: rule.ruleType,
-      });
-      setDeviceSelectionMode(nextDeviceSelectionMode);
-      setSelectedDevices(nextSelectedDevices);
-      setSelectedGroups(nextSelectedGroups);
-      setSelectedAlarms(nextSelectedAlarms);
-      setTimeRange(null);
-    } else if (open) {
-      form.resetFields();
-      setDeviceSelectionMode('devices');
-      setSelectedDevices([]);
-      setSelectedGroups([]);
-      setSelectedAlarms([]);
-      setTimeRange(null);
-    }
-    setAlarmTablePage(1);
-    setAlarmTablePageSize(5);
-    setDeviceTablePage(1);
-    setDeviceTablePageSize(DEVICE_TABLE_DEFAULT_PAGE_SIZE);
-    setAlarmError(null);
-    setSelectedDeviceKeyword('');
-    setAlarmFilter({ keyword: '', eventType: undefined, severity: undefined });
-    setDeviceFilter({ deviceTypes: [], snKeyword: '' });
-  }, [open, rule, form]);
-
-  useEffect(() => {
-    setDeviceTablePage(1);
-  }, [deviceFilter]);
-
-  useEffect(() => {
-    setAlarmTablePage(1);
-  }, [alarmFilter]);
-
   const alarmLibrary = useMemo<AlarmLibraryItem[]>(
     () => (alarmDefinitionData?.items || []).map(mapAlarmDefinitionToLibraryItem),
     [alarmDefinitionData]
@@ -518,7 +490,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     } finally {
       setLoading(false);
     }
-  }, [form, onSubmit, deviceSelectionMode, selectedDevices, selectedGroups, selectedAlarms, timeRange, t, onClose]);
+  }, [form, message, onSubmit, deviceSelectionMode, selectedDevices, selectedGroups, selectedAlarms, timeRange, t, onClose]);
 
   // 规则名称验证器
   const validateRuleName = useCallback((_: unknown, value: string) => {
@@ -535,6 +507,23 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     }
     return Promise.resolve();
   }, [existingNames, rule?.ruleName, t]);
+
+  const validateEmailRecipients = useCallback((_: unknown, values: string[] | undefined) => {
+    if (currentRuleType !== 'notify_email') {
+      return Promise.resolve();
+    }
+    const recipients = (values || []).map((value) => value.trim()).filter(Boolean);
+    if (recipients.length === 0) {
+      return Promise.reject(new Error(t('alarm.rule.emailRecipientsRequired')));
+    }
+    if (recipients.length > MAX_EMAIL_RECIPIENTS) {
+      return Promise.reject(new Error(t('alarm.rule.emailRecipientsMax', { max: MAX_EMAIL_RECIPIENTS })));
+    }
+    if (recipients.some((recipient) => !EMAIL_ADDRESS_PATTERN.test(recipient))) {
+      return Promise.reject(new Error(t('alarm.rule.emailRecipientsInvalid')));
+    }
+    return Promise.resolve();
+  }, [currentRuleType, t]);
 
   // 设备列表列配置
   const deviceColumns: TableProps<DeviceWithType>['columns'] = [
@@ -729,7 +718,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       title={title}
       open={open}
       onClose={onClose}
-      width={720}
+      size="large"
       destroyOnHidden
       footer={
         isViewMode ? null : (
@@ -746,7 +735,12 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
         form={form}
         layout="vertical"
         disabled={isViewMode}
-        initialValues={{ status: true }}
+        initialValues={{
+          ruleName: rule?.ruleName,
+          status: rule?.enabled ?? true,
+          ruleType: rule?.ruleType,
+          emailRecipients: rule?.emailRecipients ?? [],
+        }}
       >
         <Form.Item
           name="ruleName"
@@ -776,12 +770,31 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
           label={t('alarm.ruleType')}
           rules={[{ required: true }]}
         >
-          <Select options={ruleTypeOptions} placeholder={t('filter.selectField', { label: t('alarm.ruleType') })} />
+          <Select
+            options={ruleTypeOptions}
+            placeholder={t('filter.selectField', { label: t('alarm.ruleType') })}
+            onChange={setCurrentRuleType}
+          />
+        </Form.Item>
+
+        <Form.Item
+          name="emailRecipients"
+          label={t('alarm.rule.emailRecipients')}
+          extra={t('alarm.rule.emailRecipientsHint')}
+          hidden={currentRuleType !== 'notify_email'}
+          rules={[{ validator: validateEmailRecipients }]}
+        >
+          <Select
+            mode="tags"
+            tokenSeparators={[',', ';', ' ']}
+            placeholder={t('alarm.rule.emailRecipientsPlaceholder')}
+            maxTagCount="responsive"
+          />
         </Form.Item>
 
         {/* 设备选择方式 */}
         <Form.Item label={t('alarm.deviceSelection')}>
-          <Space direction="vertical" style={{ width: '100%' }} size="small">
+          <Space orientation="vertical" style={{ width: '100%' }} size="small">
             <Radio.Group
               value={deviceSelectionMode}
               onChange={(e) => setDeviceSelectionMode(e.target.value)}
@@ -801,13 +814,19 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                     <Checkbox.Group
                       options={DEVICE_TYPE_OPTIONS}
                       value={deviceFilter.deviceTypes}
-                      onChange={(values) => setDeviceFilter(prev => ({ ...prev, deviceTypes: values as string[] }))}
+                      onChange={(values) => {
+                        setDeviceFilter(prev => ({ ...prev, deviceTypes: values as string[] }));
+                        setDeviceTablePage(1);
+                      }}
                     />
                     <Input.Search
                       placeholder={t('alarm.searchDeviceSnPlaceholder')}
                       style={{ width: 200 }}
                       value={deviceFilter.snKeyword}
-                      onChange={(e) => setDeviceFilter(prev => ({ ...prev, snKeyword: e.target.value }))}
+                      onChange={(e) => {
+                        setDeviceFilter(prev => ({ ...prev, snKeyword: e.target.value }));
+                        setDeviceTablePage(1);
+                      }}
                       allowClear
                       size="small"
                     />
@@ -881,7 +900,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                   scroll={{ y: 180 }}
                 />
                 {selectedGroups.length > 0 && (
-                  <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
+                  <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
                     {t('table.selected', { count: selectedGroups.length })}
                   </div>
                 )}
@@ -892,22 +911,21 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
 
         {/* 告警选择 */}
         <Form.Item
-          label={
-            <span>
-              {t('alarm.filter.title')}
-              <span style={{ color: '#ff4d4f', marginLeft: 4 }}>*</span>
-            </span>
-          }
+          label={t('alarm.filter.title')}
+          required
           validateStatus={alarmError ? 'error' : ''}
           help={alarmError}
         >
-          <Space direction="vertical" style={{ width: '100%' }} size="small">
+          <Space orientation="vertical" style={{ width: '100%' }} size="small">
             <Space wrap size="small" style={{ width: '100%', justifyContent: 'space-between' }}>
               <Space wrap size="small">
                 <Input.Search
                   placeholder={t('alarm.librarySearchPlaceholder')}
                   style={{ width: 220 }}
-                  onChange={(e) => setAlarmFilter(prev => ({ ...prev, keyword: e.target.value }))}
+                  onChange={(e) => {
+                    setAlarmFilter(prev => ({ ...prev, keyword: e.target.value }));
+                    setAlarmTablePage(1);
+                  }}
                   allowClear
                   size="small"
                 />
@@ -915,7 +933,10 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                   placeholder={t('alarm.eventType')}
                   style={{ width: 130 }}
                   options={eventTypeOptions}
-                  onChange={(v) => setAlarmFilter(prev => ({ ...prev, eventType: v }))}
+                  onChange={(v) => {
+                    setAlarmFilter(prev => ({ ...prev, eventType: v }));
+                    setAlarmTablePage(1);
+                  }}
                   allowClear
                   size="small"
                 />
@@ -923,15 +944,18 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                   placeholder={t('alarm.severity')}
                   style={{ width: 90 }}
                   options={severityOptions}
-                  onChange={(v) => setAlarmFilter(prev => ({ ...prev, severity: v }))}
+                  onChange={(v) => {
+                    setAlarmFilter(prev => ({ ...prev, severity: v }));
+                    setAlarmTablePage(1);
+                  }}
                   allowClear
                   size="small"
                 />
               </Space>
               <Space wrap size="small">
-                <span style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
+                <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
                   {t('alarm.rule.selectedAlarmCount', { count: selectedAlarms.length })}
-                </span>
+                </Typography.Text>
                 <Checkbox
                   checked={isAllAlarmsSelected}
                   indeterminate={isIndeterminateAlarms}
@@ -943,27 +967,49 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
               </Space>
             </Space>
             {selectedAlarmItems.length > 0 && (
-              <div style={{
-                padding: 8,
-                border: '1px solid #f0f0f0',
-                borderRadius: 6,
-                background: '#fafafa',
-              }}>
-                <div style={{ marginBottom: 8, fontSize: 12, color: 'rgba(0,0,0,0.65)' }}>
-                  {t('alarm.rule.selectedAlarmIds')}
+              <div
+                data-testid="selected-alarm-summary"
+                style={{
+                  padding: token.paddingSM,
+                  border: `1px solid ${token.colorBorderSecondary}`,
+                  borderRadius: token.borderRadiusLG,
+                  background: token.colorFillAlter,
+                }}
+              >
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: token.marginSM,
+                  marginBottom: token.marginXS,
+                }}>
+                  <Typography.Text strong style={{ fontSize: token.fontSizeSM }}>
+                    {t('alarm.rule.selectedAlarmIds')}
+                  </Typography.Text>
+                  {!isViewMode && (
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ height: 'auto', padding: 0 }}
+                      onClick={() => setSelectedAlarms([])}
+                    >
+                      {t('alarm.clearAll')}
+                    </Button>
+                  )}
                 </div>
                 <Space wrap size={[4, 8]}>
                   {visibleSelectedAlarmItems.map((alarm) => (
-                    <Tag
-                      key={alarm.alarmIdentifier}
-                      closable={!isViewMode}
-                      onClose={() => {
-                        setSelectedAlarms((previousKeys) => previousKeys.filter((key) => key !== alarm.alarmIdentifier));
-                      }}
-                      style={{ marginInlineEnd: 0 }}
-                    >
-                      {alarm.alarmIdentifier}
-                    </Tag>
+                    <Tooltip key={alarm.alarmIdentifier} title={alarm.alarmName}>
+                      <Tag
+                        closable={!isViewMode}
+                        onClose={() => {
+                          setSelectedAlarms((previousKeys) => previousKeys.filter((key) => key !== alarm.alarmIdentifier));
+                        }}
+                        style={{ marginInlineEnd: 0 }}
+                      >
+                        {alarm.alarmIdentifier}
+                      </Tag>
+                    </Tooltip>
                   ))}
                   {hiddenSelectedAlarmItems.length > 0 && (
                     <Tooltip title={hiddenSelectedAlarmItems.map((alarm) => alarm.alarmIdentifier).join(', ')}>
@@ -1030,7 +1076,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
           width={640}
           destroyOnHidden
         >
-          <Space direction="vertical" size={12} style={{ width: '100%', marginBottom: 12 }}>
+          <Space orientation="vertical" size={12} style={{ width: '100%', marginBottom: 12 }}>
             <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
               <Input.Search
                 placeholder={t('alarm.searchDeviceSnPlaceholder')}

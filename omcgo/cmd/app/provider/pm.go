@@ -23,6 +23,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/pm/querytemplate"
+	"github.com/omcgo/omcgo/internal/pm/reportsubscription"
 	pmstream "github.com/omcgo/omcgo/internal/pm/stream"
 )
 
@@ -128,6 +129,13 @@ func initPMModule(c *Container) error {
 	pmQueryTemplateRepo := querytemplate.NewPgRepository(c.PgPool)
 	pmQueryTemplateHandler := querytemplate.NewHandler(pmQueryTemplateRepo, logger.Named("querytemplate")).
 		WithEnabledMetricPayloadService(querytemplate.NewEnabledMetricPayloadService(enabledRepo))
+	// 指标查询模板的定时报表邮件订阅；与模板复用同一套可见性/写权限规则。
+	pmReportSubscriptionRepo := reportsubscription.NewPgRepository(c.PgPool)
+	pmReportSubscriptionHandler := reportsubscription.NewHandler(reportsubscription.NewService(
+		pmReportSubscriptionRepo,
+		pmQueryTemplateRepo,
+		c.SystemTimezone,
+	))
 
 	// KPI-EXPORT T1：KPI 数据导出 REST 入口（建任务落表 + 入队 pm_kpi_export job）。
 	// 文件管理下载默认走 app 同源流式响应；presign client 仅保留给 ?mode=url 兼容路径。
@@ -207,21 +215,22 @@ func initPMModule(c *Container) error {
 
 	// Store deps for route registration
 	c.pmHandlerDeps = &pmHandlerDeps{
-		pmCounterRepo:          pmCounterRepo,
-		pmKPIRepo:              pmKPIRepo,
-		pmKPIEngine:            pmKPIEngine,
-		pmTaskRepo:             pmTaskRepo,
-		pmFileStore:            pmFileStore,
-		pmIndicatorRepo:        indicatorRepo,
-		pmAggregator:           pmAggregator,
-		pmAsyncJobRepo:         pmAsyncJobRepo,
-		pmProgressService:      progressService,
-		pmAdhocHandler:         pmAdhocHandler,
-		pmQueryTemplateHandler: pmQueryTemplateHandler,
-		pmExportHandler:        pmExportHandler,
-		indicatorHandler:       indicatorHandler,
-		indicatorRESTHandler:   indicatorRESTHandler,
-		indicatorFileHandler:   indicatorFileHandler,
+		pmCounterRepo:               pmCounterRepo,
+		pmKPIRepo:                   pmKPIRepo,
+		pmKPIEngine:                 pmKPIEngine,
+		pmTaskRepo:                  pmTaskRepo,
+		pmFileStore:                 pmFileStore,
+		pmIndicatorRepo:             indicatorRepo,
+		pmAggregator:                pmAggregator,
+		pmAsyncJobRepo:              pmAsyncJobRepo,
+		pmProgressService:           progressService,
+		pmAdhocHandler:              pmAdhocHandler,
+		pmQueryTemplateHandler:      pmQueryTemplateHandler,
+		pmReportSubscriptionHandler: pmReportSubscriptionHandler,
+		pmExportHandler:             pmExportHandler,
+		indicatorHandler:            indicatorHandler,
+		indicatorRESTHandler:        indicatorRESTHandler,
+		indicatorFileHandler:        indicatorFileHandler,
 	}
 
 	logger.Info("PM module initialized")
@@ -254,18 +263,19 @@ func (r *indicatorReloader) ReloadOne(ctx context.Context, name string) error {
 }
 
 type pmHandlerDeps struct {
-	pmCounterRepo          *counter.PgCounterRepository
-	pmKPIRepo              *kpi.PgKPIRepository
-	pmKPIEngine            *kpi.KPIEngine
-	pmTaskRepo             *pm.PgTaskRepository
-	pmFileStore            *pm.PgPMFileStore
-	pmIndicatorRepo        indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
-	pmAggregator           *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
-	pmAsyncJobRepo         asyncjob.Repository           // T-0164 收尾 G5-Gap-2 手动重算端点
-	pmProgressService      *pmstream.ProgressService     // 当前日/周只读预览，adhoc 与首页共用
-	pmAdhocHandler         *adhoc.Handler                // T-0164-P7 自定义聚合任务 REST 入口
-	pmQueryTemplateHandler *querytemplate.Handler        // T-0174 指标查询模板 REST 入口
-	pmExportHandler        *pmexport.Handler             // KPI-EXPORT T1 KPI 导出 REST 入口
+	pmCounterRepo               *counter.PgCounterRepository
+	pmKPIRepo                   *kpi.PgKPIRepository
+	pmKPIEngine                 *kpi.KPIEngine
+	pmTaskRepo                  *pm.PgTaskRepository
+	pmFileStore                 *pm.PgPMFileStore
+	pmIndicatorRepo             indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
+	pmAggregator                *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
+	pmAsyncJobRepo              asyncjob.Repository           // T-0164 收尾 G5-Gap-2 手动重算端点
+	pmProgressService           *pmstream.ProgressService     // 当前日/周只读预览，adhoc 与首页共用
+	pmAdhocHandler              *adhoc.Handler                // T-0164-P7 自定义聚合任务 REST 入口
+	pmQueryTemplateHandler      *querytemplate.Handler        // T-0174 指标查询模板 REST 入口
+	pmReportSubscriptionHandler *reportsubscription.Handler   // KPI 定时报表邮件订阅
+	pmExportHandler             *pmexport.Handler             // KPI-EXPORT T1 KPI 导出 REST 入口
 
 	// Indicator management handler
 	indicatorHandler     *indicator.IndicatorHandler

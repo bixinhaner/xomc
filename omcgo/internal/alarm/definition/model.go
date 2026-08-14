@@ -24,6 +24,8 @@ type AlarmDefinition struct {
 	EventType       *int
 	CnProbableCause string
 	EnProbableCause string
+	CnSuggestion    string
+	EnSuggestion    string
 	IsShow          bool
 	Description     string // 用户可编辑的描述/备注（不来自 XML）
 }
@@ -56,5 +58,7 @@ type xmlAlarm struct {
 	EventType       string `xml:"eventType,attr"`
 	CnProbableCause string `xml:"cnProbableCause,attr"`
 	EnProbableCause string `xml:"enProbableCause,attr"`
+	CnSuggestion    string `xml:"cnSuggestion,attr"`
+	EnSuggestion    string `xml:"enSuggestion,attr"`
 	IsShow          string `xml:"isShow,attr"` // "Y" / "N"
 }

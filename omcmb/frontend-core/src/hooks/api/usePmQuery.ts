@@ -16,6 +16,7 @@ import type {
   CreateTemplateInput,
   QueryTemplate,
   UpdateTemplateInput,
+  UpsertQueryReportSubscriptionInput,
 } from '../../types/pmQuery';
 import type { AggregatedQueryMeta, AggregatedQueryParams, AggregatedQueryResult, AggregatedRow } from '../../types/pmDashboard';
 import type { MetricObject } from '../../types/pmObject';
@@ -76,6 +77,36 @@ export function useDeleteQueryTemplate() {
     mutationFn: (id: string) => pmQueryApi.remove(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: [...KEY, 'list'] });
+    },
+  });
+}
+
+export function useQueryReportSubscription(templateId?: string) {
+  return useQuery({
+    queryKey: [...KEY, 'report-subscription', templateId],
+    queryFn: () => pmQueryApi.getReportSubscription(templateId!),
+    enabled: Boolean(templateId),
+    retry: false,
+  });
+}
+
+export function useUpsertQueryReportSubscription() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ templateId, input }: { templateId: string; input: UpsertQueryReportSubscriptionInput }) =>
+      pmQueryApi.upsertReportSubscription(templateId, input),
+    onSuccess: (subscription) => {
+      qc.setQueryData([...KEY, 'report-subscription', subscription.queryTemplateId], subscription);
+    },
+  });
+}
+
+export function useDeleteQueryReportSubscription() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (templateId: string) => pmQueryApi.deleteReportSubscription(templateId),
+    onSuccess: (_data, templateId) => {
+      qc.removeQueries({ queryKey: [...KEY, 'report-subscription', templateId] });
     },
   });
 }

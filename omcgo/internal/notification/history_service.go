@@ -42,10 +42,29 @@ func (s *HistoryService) GetByID(ctx context.Context, id uuid.UUID) (*Notificati
 	return s.repo.GetByID(ctx, id)
 }
 
+func (s *HistoryService) GetByDedupKey(ctx context.Context, dedupKey string) (*NotificationHistory, error) {
+	return s.repo.GetByDedupKey(ctx, dedupKey)
+}
+
 // Insert persists a new history entry. Intended for internal dispatchers, not
 // HTTP clients. The dispatcher passes a pre-populated NotificationHistory; this
 // method validates required fields and applies defaults.
 func (s *HistoryService) Insert(ctx context.Context, h *NotificationHistory) error {
+	if err := validateHistory(h); err != nil {
+		return err
+	}
+	return s.repo.Insert(ctx, h)
+}
+
+// InsertIfAbsent 原子创建带幂等键的发送记录。
+func (s *HistoryService) InsertIfAbsent(ctx context.Context, h *NotificationHistory) (*NotificationHistory, bool, error) {
+	if err := validateHistory(h); err != nil {
+		return nil, false, err
+	}
+	return s.repo.InsertIfAbsent(ctx, h)
+}
+
+func validateHistory(h *NotificationHistory) error {
 	if h == nil {
 		return commonerrors.ErrInvalidInput
 	}
@@ -58,7 +77,21 @@ func (s *HistoryService) Insert(ctx context.Context, h *NotificationHistory) err
 	if len(h.Recipients) == 0 {
 		return fmt.Errorf("%w: at least one recipient required", commonerrors.ErrInvalidInput)
 	}
-	return s.repo.Insert(ctx, h)
+	if h.DedupKey != nil {
+		key := strings.TrimSpace(*h.DedupKey)
+		if key == "" {
+			h.DedupKey = nil
+		} else {
+			h.DedupKey = &key
+		}
+	}
+	return nil
+}
+
+// ClaimAttempt 原子抢占一次实际发送尝试。只有失败记录或超时的
+// pending 记录可以被抢占，避免多个异步任务重复投递同一封邮件。
+func (s *HistoryService) ClaimAttempt(ctx context.Context, id uuid.UUID, attemptedAt, staleBefore time.Time) (bool, error) {
+	return s.repo.ClaimAttempt(ctx, id, attemptedAt, staleBefore)
 }
 
 // MarkSent updates the entry to "sent" with the supplied timestamp.

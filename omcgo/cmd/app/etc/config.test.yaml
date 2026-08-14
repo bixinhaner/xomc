@@ -215,8 +215,9 @@ notification:
     username: ""
     password: ""
     from: "omc-alert@example.com"
-    starttls: false
+    tls_mode: "none"
     timeout: 10s
+    max_attachment_bytes: 20971520
   alert_webhook:
     token: ""
     recipients: []

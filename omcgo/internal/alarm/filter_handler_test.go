@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -102,6 +103,53 @@ func TestFilterHandlerCreate_SetsOperatorAuditFields(t *testing.T) {
 	require.NotNil(t, captured)
 	require.Equal(t, "alice", captured.CreatedBy)
 	require.Equal(t, "alice", captured.UpdatedBy)
+}
+
+func TestFilterHandlerCreate_ValidatesEffectiveWindow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &stubAlarmFilterRuleRepository{}
+	handler := NewFilterHandler(repo, zap.NewNop())
+	router := gin.New()
+	router.POST("/rules", handler.Create)
+
+	req := httptest.NewRequest(http.MethodPost, "/rules", strings.NewReader(`{"name":"rule-a","filter_type":"device","action":"ignore","effective_start":"2026-08-12T09:00:00+08:00"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusBadRequest, resp.Code)
+}
+
+func TestFilterHandlerUpdate_ClearsEffectiveWindow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	id := uuid.New()
+	start := time.Date(2026, 8, 12, 9, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	end := start.Add(time.Hour)
+	var captured *AlarmFilterRule
+	repo := &stubAlarmFilterRuleRepository{
+		getByIDFn: func(context.Context, uuid.UUID) (*AlarmFilterRule, error) {
+			return &AlarmFilterRule{ID: id, Name: "rule-a", FilterType: FilterTypeDevice, Action: FilterActionIgnore, EffectiveStart: &start, EffectiveEnd: &end}, nil
+		},
+		updateFn: func(_ context.Context, rule *AlarmFilterRule) error {
+			captured = rule
+			return nil
+		},
+	}
+	handler := NewFilterHandler(repo, zap.NewNop())
+	router := gin.New()
+	router.PUT("/rules/:id", handler.Update)
+
+	req := httptest.NewRequest(http.MethodPut, "/rules/"+id.String(), strings.NewReader(`{"clear_effective_window":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusOK, resp.Code)
+	require.NotNil(t, captured)
+	require.Nil(t, captured.EffectiveStart)
+	require.Nil(t, captured.EffectiveEnd)
 }
 
 func TestFilterHandlerUpdate_SetsUpdatedByFromContext(t *testing.T) {

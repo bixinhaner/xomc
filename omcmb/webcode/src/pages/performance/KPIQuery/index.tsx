@@ -46,6 +46,7 @@ import {
   FullscreenOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  BellOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useIntl } from 'react-intl';
@@ -86,8 +87,10 @@ import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
 import { getEffectiveLdnsWithNrRecommendedDefault, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
 import { synchronizeUpdatedTemplateState } from './templateUpdateState';
 import QueryTemplateDetailModal from './QueryTemplateDetailModal';
+import ReportSubscriptionModal from './ReportSubscriptionModal';
 import { resolveTemplateMetricPaths } from './templateMetricResolver';
 import { PM_QUERY_SELECTION_LIMIT } from '@/constants/pmQueryLimits';
+import { usePermission } from '@core/hooks/usePermission';
 import {
   buildKpiQueryStateSnapshot,
   buildKpiQuerySubmittedSnapshot,
@@ -165,12 +168,26 @@ export default function KPIQuery() {
   const { message } = App.useApp();
   const currentUser = useUserStore((s) => s.currentUser);
   const isSuperAdmin = currentUser?.isSuperAdmin ?? false;
+  const canQuery = usePermission('performance:query:query');
+  const canAddTemplate = usePermission('performance:query:add');
+  const canEditTemplate = usePermission('performance:query:edit');
+  const canDeleteTemplate = usePermission('performance:query:delete');
   // #459 子单 D：自定义时间范围按系统时区附加偏移后再发后端（后端按 RFC3339 解析为 UTC）。
   const systemTimezone = useSystemTimezoneValue();
   const {
     deviceTypeOptions,
     isLoading: deviceTypeOptionsLoading,
   } = useTechnologyDictionary();
+  const firstAvailableDeviceType = deviceTypeOptions[0]?.value;
+  const hasAvailableDeviceTypes = deviceTypeOptions.length > 0;
+  const availableDeviceTypes = useMemo(
+    () => new Set(deviceTypeOptions.map((option) => option.value)),
+    [deviceTypeOptions],
+  );
+  const isAvailableDeviceType = useCallback(
+    (deviceType?: DeviceType): boolean => Boolean(deviceType && availableDeviceTypes.has(deviceType)),
+    [availableDeviceTypes],
+  );
   const restoredState = useMemo(
     () => restoreKpiQueryState(usePmPageStateStore.getState().getPageState(PM_KPI_QUERY_PAGE_KEY)),
     [],
@@ -178,12 +195,31 @@ export default function KPIQuery() {
   const skipNextSaveRef = useRef(false);
 
   // ── 查询表单状态 ─────────────────────────────────────────────────
-  const [payload, setPayload] = useState<QueryTemplatePayload>(restoredState.payload);
+  const [storedPayload, setPayload] = useState<QueryTemplatePayload>(restoredState.payload);
+  const payload = useMemo<QueryTemplatePayload>(() => {
+    if (
+      deviceTypeOptionsLoading ||
+      !firstAvailableDeviceType ||
+      isAvailableDeviceType(storedPayload.deviceType)
+    ) {
+      return storedPayload;
+    }
+    return {
+      ...storedPayload,
+      deviceType: firstAvailableDeviceType,
+      deviceSns: [],
+      metricPaths: [],
+    };
+  }, [deviceTypeOptionsLoading, firstAvailableDeviceType, isAvailableDeviceType, storedPayload]);
   const [customRange, setCustomRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(restoredState.customRange);
   // #595: 用户手动修改过时间范围后标记 dirty，粒度切换不再覆盖
   const [timeRangeDirty, setTimeRangeDirty] = useState(restoredState.timeRangeDirty);
   // #619：测量对象（小区）下钻选择，按设备勾选要查的小区子集。
-  const [cellSel, setCellSel] = useState<CellSelection>(restoredState.cellSel);
+  const [storedCellSel, setCellSel] = useState<CellSelection>(restoredState.cellSel);
+  const cellSel = useMemo<CellSelection>(
+    () => (payload === storedPayload ? storedCellSel : {}),
+    [payload, storedCellSel, storedPayload],
+  );
   // 指标选中值（KPI=编号）→ 友好名，供「已选 N 个」摘要展示，避免露出 K 编号。
   const [metricLabels, setMetricLabels] = useState<Record<string, string>>({});
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
@@ -198,6 +234,7 @@ export default function KPIQuery() {
   const [templateTab, setTemplateTab] = useState<'public' | 'private'>(restoredState.templateTab);
   const [activeTemplateId, setActiveTemplateId] = useState<string | undefined>(restoredState.activeTemplateId);
   const [detailTemplateId, setDetailTemplateId] = useState<string | undefined>(undefined);
+  const [reportTemplateId, setReportTemplateId] = useState<string | undefined>(undefined);
   // 左侧模板栏折叠态也属于本页轻量现场；不保存模板列表结果。
   const [sidebarCollapsed, setSidebarCollapsed] = useState(restoredState.sidebarCollapsed);
 
@@ -220,6 +257,10 @@ export default function KPIQuery() {
     () => (templatesData?.items ?? []).find((tpl) => tpl.id === detailTemplateId) ?? null,
     [detailTemplateId, templatesData],
   );
+  const reportTemplate = useMemo(
+    () => (templatesData?.items ?? []).find((tpl) => tpl.id === reportTemplateId) ?? null,
+    [reportTemplateId, templatesData],
+  );
 
   const granularityOptions = useMemo(
     () => GRANULARITY_OPTIONS.map((o) => ({ label: t(o.labelKey), value: o.value })),
@@ -231,7 +272,25 @@ export default function KPIQuery() {
   );
 
   // ── 存为模板 Modal ───────────────────────────────────────────────
-  const [saveForm, setSaveForm] = useState<SaveTemplateFormState>(() => createBlankSaveTemplateForm(false));
+  const [storedSaveForm, setSaveForm] = useState<SaveTemplateFormState>(() => createBlankSaveTemplateForm(false));
+  const saveForm = useMemo<SaveTemplateFormState>(() => {
+    if (
+      deviceTypeOptionsLoading ||
+      !firstAvailableDeviceType ||
+      isAvailableDeviceType(storedSaveForm.payload.deviceType)
+    ) {
+      return storedSaveForm;
+    }
+    return {
+      ...storedSaveForm,
+      payload: {
+        ...storedSaveForm.payload,
+        deviceType: firstAvailableDeviceType,
+        deviceSns: [],
+        metricPaths: [],
+      },
+    };
+  }, [deviceTypeOptionsLoading, firstAvailableDeviceType, isAvailableDeviceType, storedSaveForm]);
 
   // ── 查询执行状态 ─────────────────────────────────────────────────
   // submitted 是真正用于查询的快照；表单编辑时不立即查询，等用户点"查询"
@@ -239,17 +298,12 @@ export default function KPIQuery() {
   const [pivotPage, setPivotPage] = useState(restoredState.pivotPage);
   const [pivotPageSize, setPivotPageSize] = useState(restoredState.pivotPageSize);
   const [resultsMaximized, setResultsMaximized] = useState(restoredState.resultsMaximized);
-  const initialRestoredQueryDelayMs = restoredState.shouldRestoreQuery
-    ? restoredKpiQueryDelayMs(restoredState.savedAt, Date.now())
-    : 0;
+  const [initialRestoredQueryDelayMs] = useState(() => (
+    restoredState.shouldRestoreQuery
+      ? restoredKpiQueryDelayMs(restoredState.savedAt, Date.now())
+      : 0
+  ));
   const [resultsQueryReady, setResultsQueryReady] = useState(!restoredState.shouldRestoreQuery);
-  const firstAvailableDeviceType = deviceTypeOptions[0]?.value;
-  const hasAvailableDeviceTypes = deviceTypeOptions.length > 0;
-  const isAvailableDeviceType = useCallback(
-    (deviceType?: DeviceType): boolean =>
-      Boolean(deviceType && deviceTypeOptions.some((option) => option.value === deviceType)),
-    [deviceTypeOptions],
-  );
 
   useEffect(() => {
     if (!restoredState.shouldRestoreQuery) return undefined;
@@ -258,46 +312,7 @@ export default function KPIQuery() {
       setResultsQueryReady(true);
     }, initialRestoredQueryDelayMs);
     return () => window.clearTimeout(timer);
-  }, [initialRestoredQueryDelayMs, queryClient, restoredState.shouldRestoreQuery]);
-
-  useEffect(() => {
-    if (deviceTypeOptionsLoading || !firstAvailableDeviceType || isAvailableDeviceType(payload.deviceType)) {
-      return;
-    }
-    setPayload((current) => ({
-      ...current,
-      deviceType: firstAvailableDeviceType,
-      deviceSns: [],
-      metricPaths: [],
-    }));
-    setCellSel({});
-  }, [deviceTypeOptionsLoading, firstAvailableDeviceType, isAvailableDeviceType, payload.deviceType]);
-
-  useEffect(() => {
-    if (
-      !saveForm.open ||
-      deviceTypeOptionsLoading ||
-      !firstAvailableDeviceType ||
-      isAvailableDeviceType(saveForm.payload.deviceType)
-    ) {
-      return;
-    }
-    setSaveForm((current) => ({
-      ...current,
-      payload: {
-        ...current.payload,
-        deviceType: firstAvailableDeviceType,
-        deviceSns: [],
-        metricPaths: [],
-      },
-    }));
-  }, [
-    saveForm.open,
-    saveForm.payload.deviceType,
-    deviceTypeOptionsLoading,
-    firstAvailableDeviceType,
-    isAvailableDeviceType,
-  ]);
+  }, [initialRestoredQueryDelayMs, restoredState.shouldRestoreQuery]);
 
   const currentTechnology = payload.deviceType ? deviceTypeToTechnology(payload.deviceType) : undefined;
   const { isLoading: currentObjectsLoading } = useMetricObjectsByDevices(payload.deviceSns, currentTechnology);
@@ -685,7 +700,9 @@ export default function KPIQuery() {
 
   // ── 渲染辅助 ─────────────────────────────────────────────────────
   const renderTemplateItem = (tpl: QueryTemplate) => {
-    const canEdit = isSuperAdmin || tpl.creatorId === currentUser?.id;
+    const canManageByOwnership = isSuperAdmin || tpl.creatorId === currentUser?.id;
+    const canManageReport = isSuperAdmin || (tpl.visibility === 'private' && tpl.creatorId === currentUser?.id);
+    const reportActionEnabled = canManageReport && canEditTemplate;
     return (
       <List.Item
         key={tpl.id}
@@ -709,12 +726,26 @@ export default function KPIQuery() {
                 }}
               />
             </Tooltip>,
-            ...(canEdit ? [
-                <Tooltip key="edit" title={t('common.edit')}>
+            ...(canManageByOwnership ? [
+                <Tooltip key="report" title={reportActionEnabled ? t('perf.kpiQuery.report.action') : t('common.noPermission')}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<BellOutlined />}
+                    disabled={!reportActionEnabled}
+                    aria-label={t('perf.kpiQuery.report.action')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setReportTemplateId(tpl.id);
+                    }}
+                  />
+                </Tooltip>,
+                <Tooltip key="edit" title={canEditTemplate ? t('common.edit') : t('common.noPermission')}>
                   <Button
                     type="text"
                     size="small"
                     icon={<EditOutlined />}
+                    disabled={!canEditTemplate}
                     aria-label={t('common.edit')}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -722,23 +753,26 @@ export default function KPIQuery() {
                     }}
                   />
                 </Tooltip>,
-                <Popconfirm
-                  key="del"
-                  title={t('perf.kpiQuery.confirmDeleteTemplate')}
-                  onConfirm={(e) => {
-                    e?.stopPropagation();
-                    void handleDeleteTemplate(tpl.id);
-                  }}
-                  onCancel={(e) => e?.stopPropagation()}
-                >
-                  <Button
-                    type="text"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </Popconfirm>,
+                <Tooltip key="del" title={canDeleteTemplate ? t('common.delete') : t('common.noPermission')}>
+                  <Popconfirm
+                    disabled={!canDeleteTemplate}
+                    title={t('perf.kpiQuery.confirmDeleteTemplate')}
+                    onConfirm={(e) => {
+                      e?.stopPropagation();
+                      void handleDeleteTemplate(tpl.id);
+                    }}
+                    onCancel={(e) => e?.stopPropagation()}
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      disabled={!canDeleteTemplate}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </Popconfirm>
+                </Tooltip>,
               ] : []),
           ]
         }
@@ -771,11 +805,12 @@ export default function KPIQuery() {
             {t('perf.kpiQuery.queryTemplates')}
           </Title>
           <Space size={2}>
-            <Tooltip title={t('perf.kpiQuery.newTemplateTip')}>
+            <Tooltip title={canAddTemplate ? t('perf.kpiQuery.newTemplateTip') : t('common.noPermission')}>
               <Button
                 type="text"
                 size="small"
                 icon={<PlusOutlined />}
+                disabled={!canAddTemplate}
                 aria-label={t('perf.kpiQuery.newTemplate')}
                 onClick={handleOpenCreateModal}
               />
@@ -1057,18 +1092,22 @@ export default function KPIQuery() {
 
             <div style={{ flexShrink: 0, marginTop: 12, borderTop: `1px dashed ${token.colorBorderSecondary}`, paddingTop: 12 }}>
               <Space>
-                <Button
-                  type="primary"
-                  icon={<TableOutlined />}
-                  loading={aggFetching}
-                  disabled={!hasAvailableDeviceTypes || currentObjectsLoading}
-                  onClick={handleQuery}
-                >
-                  {t('common.query')}
-                </Button>
-                <Button icon={<SaveOutlined />} disabled={!hasAvailableDeviceTypes} onClick={handleOpenSaveAsModal}>
-                  {t('perf.kpiQuery.saveAsTemplate')}
-                </Button>
+                <Tooltip title={canQuery ? undefined : t('common.noPermission')}>
+                  <Button
+                    type="primary"
+                    icon={<TableOutlined />}
+                    loading={aggFetching}
+                    disabled={!canQuery || !hasAvailableDeviceTypes || currentObjectsLoading}
+                    onClick={handleQuery}
+                  >
+                    {t('common.query')}
+                  </Button>
+                </Tooltip>
+                <Tooltip title={canAddTemplate ? undefined : t('common.noPermission')}>
+                  <Button icon={<SaveOutlined />} disabled={!canAddTemplate || !hasAvailableDeviceTypes} onClick={handleOpenSaveAsModal}>
+                    {t('perf.kpiQuery.saveAsTemplate')}
+                  </Button>
+                </Tooltip>
                 <Button
                   icon={<ExportOutlined />}
                   onClick={handleExport}
@@ -1218,6 +1257,12 @@ export default function KPIQuery() {
           template={detailTemplate}
           metricLabels={metricLabels}
           onClose={() => setDetailTemplateId(undefined)}
+        />
+
+        <ReportSubscriptionModal
+          open={reportTemplate != null}
+          template={reportTemplate}
+          onClose={() => setReportTemplateId(undefined)}
         />
 
         <Modal

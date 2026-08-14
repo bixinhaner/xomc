@@ -25,6 +25,8 @@ interface BackendDefinition {
   event_type?: number | string;
   cn_probable_cause?: string;
   en_probable_cause?: string;
+  cn_suggestion?: string;
+  en_suggestion?: string;
   description?: string;
   is_show: boolean;
   is_unknown?: boolean;
@@ -113,6 +115,8 @@ function mapDef(b: BackendDefinition): AlarmDefinition {
     eventType: normalizeDefinitionEventType(b.event_type),
     cnProbableCause: b.cn_probable_cause,
     enProbableCause: b.en_probable_cause,
+    cnSuggestion: b.cn_suggestion,
+    enSuggestion: b.en_suggestion,
     description: b.description,
     isShow: b.is_show,
     isUnknown: b.is_unknown,
@@ -154,6 +158,8 @@ function defPayload(
   if (input.eventType !== undefined) p.event_type = input.eventType;
   if (input.cnProbableCause !== undefined) p.cn_probable_cause = input.cnProbableCause;
   if (input.enProbableCause !== undefined) p.en_probable_cause = input.enProbableCause;
+  if (input.cnSuggestion !== undefined) p.cn_suggestion = input.cnSuggestion;
+  if (input.enSuggestion !== undefined) p.en_suggestion = input.enSuggestion;
   if (input.description !== undefined) p.description = input.description;
   if (input.isShow !== undefined) p.is_show = input.isShow;
   return p;
@@ -202,7 +208,7 @@ export const alarmDefinitionApi = {
       : 500;
     const items: AlarmDefinition[] = [];
     let page = 1;
-    let total = 0;
+    let total: number;
 
     while (true) {
       const result = await alarmDefinitionApi.list({

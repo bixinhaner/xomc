@@ -165,7 +165,7 @@ func (h *Handler) Get(c *gin.Context) {
 		return
 	}
 	callerID, isSuperAdmin := callerInfo(c)
-	if !canRead(t, callerID, isSuperAdmin) {
+	if !CanRead(t, callerID, isSuperAdmin) {
 		response.Fail(c, http.StatusForbidden, "no permission to read this template")
 		return
 	}
@@ -247,7 +247,7 @@ func (h *Handler) Update(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if !canWrite(t, callerID, isSuperAdmin) {
+	if !CanWrite(t, callerID, isSuperAdmin) {
 		response.Fail(c, http.StatusForbidden, "no permission to update this template")
 		return
 	}
@@ -314,7 +314,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if !canWrite(t, callerID, isSuperAdmin) {
+	if !CanWrite(t, callerID, isSuperAdmin) {
 		response.Fail(c, http.StatusForbidden, "no permission to delete this template")
 		return
 	}
@@ -345,7 +345,7 @@ func callerInfo(c *gin.Context) (uuid.UUID, bool) {
 	return callerID, isSuper
 }
 
-func canRead(t *Template, caller uuid.UUID, isSuperAdmin bool) bool {
+func CanRead(t *Template, caller uuid.UUID, isSuperAdmin bool) bool {
 	if isSuperAdmin {
 		return true
 	}
@@ -355,7 +355,7 @@ func canRead(t *Template, caller uuid.UUID, isSuperAdmin bool) bool {
 	return t.CreatorID == caller
 }
 
-func canWrite(t *Template, caller uuid.UUID, isSuperAdmin bool) bool {
+func CanWrite(t *Template, caller uuid.UUID, isSuperAdmin bool) bool {
 	if isSuperAdmin {
 		return true
 	}

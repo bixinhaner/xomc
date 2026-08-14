@@ -1,6 +1,7 @@
 package definition
 
 import (
+	"encoding/xml"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,16 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 )
+
+func TestXMLAlarmSuggestions(t *testing.T) {
+	t.Parallel()
+	const raw = `<alarmModel neType="ENB"><alarms><alarm identifier="1001" cnSuggestion="检查电源&amp;链路&#10;然后复测" enSuggestion="Check power and link"/></alarms></alarmModel>`
+	var doc xmlAlarmModel
+	require.NoError(t, xml.Unmarshal([]byte(raw), &doc))
+	require.Len(t, doc.Alarms, 1)
+	require.Equal(t, "检查电源&链路\n然后复测", doc.Alarms[0].CnSuggestion)
+	require.Equal(t, "Check power and link", doc.Alarms[0].EnSuggestion)
+}
 
 // TestResolveSources_SingleDir 验证单目录扫描:仅扫 alarm-definitions/,跳过 sidecar/隐藏/非 xml,
 // LoadedFrom 带 alarm-definitions/ 前缀,按 basename 字典序排序;不再合并 custom 目录。

@@ -177,6 +177,43 @@ func TestFilterEngine_ProcessAlarm_LiveInReceiver(t *testing.T) {
 	})
 }
 
+func TestFilterEngine_NotifyEmail_CoversRaiseAndClearLifecycle(t *testing.T) {
+	store := newMockAlarmStore()
+	emailDispatcher := &mockEmailDispatcher{}
+	filterEngine := NewFilterEngine(&mockFilterRuleRepo{rules: []AlarmFilterRule{
+		{
+			FilterType:       FilterTypeAlarmIdentifier,
+			AlarmIdentifiers: []string{"DEVICE_OFFLINE"},
+			Action:           FilterActionNotifyEmail,
+			EmailRecipients:  []string{"noc@omc.local"},
+			Name:             "email-offline",
+		},
+	}}, store, nil, nil, nil, zap.NewNop())
+	filterEngine.SetEmailDispatcher(emailDispatcher)
+	engine := NewAlarmEngine(store, nil, nil, nil, zap.NewNop())
+	engine.SetFilterEngine(filterEngine)
+
+	alarm := &model.Alarm{
+		ID:              uuid.New(),
+		DeviceID:        uuid.New(),
+		DeviceSN:        "SN-LIFECYCLE",
+		AlarmIdentifier: "DEVICE_OFFLINE",
+		Severity:        model.AlarmMajor,
+		Status:          model.AlarmActive,
+		RaisedAt:        time.Now().Add(-time.Minute),
+	}
+	assert.NoError(t, engine.Process(context.Background(), alarm))
+	assert.NoError(t, engine.Process(context.Background(), alarm), "duplicate device report must not enqueue another raised email")
+	assert.Len(t, emailDispatcher.Calls(), 1)
+	assert.NoError(t, engine.Clear(context.Background(), alarm.ID))
+
+	calls := emailDispatcher.Calls()
+	assert.Len(t, calls, 2)
+	assert.Contains(t, calls[0].Body, "当前状态: active")
+	assert.Contains(t, calls[1].Body, "当前状态: cleared")
+	assert.Contains(t, calls[1].Body, "清除时间:")
+}
+
 // countingStore 仅记录 SaveActive 调用次数，其它方法回退到 mockStoreForEngine 行为。
 type countingStore struct {
 	mockStoreForEngine
