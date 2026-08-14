@@ -1,4 +1,4 @@
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, memo, type ReactNode, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   AutoComplete,
   Button,
@@ -180,6 +180,9 @@ interface FileProfileEditorValues {
 type DeliveryProtocol = 'FTP' | 'SFTP';
 type DeliveryAuthMode = 'PASSWORD' | 'PRIVATE_KEY';
 type DeliveryHostKeyPolicy = 'INSECURE' | 'FINGERPRINT';
+type DeliveryTargetScope = 'file' | 'inventory' | 'socket';
+type DeliveryTargetValidationField = 'host' | 'username' | 'credential';
+type DeliveryTargetValidationErrors = Record<string, Partial<Record<DeliveryTargetValidationField, string>>>;
 type ReportState = 'success' | 'failed' | 'running' | 'idle';
 type ReportArtifactType = 'file' | 'message';
 type ProfileHealthState = 'normal' | 'broken' | 'pending' | 'terminated';
@@ -4786,14 +4789,73 @@ function boolValue(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
-function deliveryTargetTestKey(scope: 'file' | 'inventory' | 'socket', ownerCode: string, key: string) {
-  return `${scope}:${ownerCode}:${key}`;
+function deliveryTargetScopePrefix(scope: DeliveryTargetScope, ownerCode: string) {
+  return `${scope}:${ownerCode}:`;
+}
+
+function deliveryTargetTestKey(scope: DeliveryTargetScope, ownerCode: string, key: string) {
+  return `${deliveryTargetScopePrefix(scope, ownerCode)}${key}`;
 }
 
 function deliveryTargetTestTitle(row: DeliveryTargetRow): string {
   const name = row.name.trim() || '传输目标';
   const protocolPattern = new RegExp(`(^|[^A-Z0-9])${row.protocol}($|[^A-Z0-9])`, 'i');
   return protocolPattern.test(name) ? name : `${name} ${row.protocol}`;
+}
+
+function validateDeliveryTargetRows(
+  scope: DeliveryTargetScope,
+  ownerCode: string,
+  rows: DeliveryTargetRow[],
+) {
+  const errors: DeliveryTargetValidationErrors = {};
+  const rowMessages: string[] = [];
+  rows.forEach((row, index) => {
+    const rowErrors: Partial<Record<DeliveryTargetValidationField, string>> = {};
+    const missingFields: string[] = [];
+    if (!row.host.trim()) {
+      rowErrors.host = '请输入主机';
+      missingFields.push('主机');
+    }
+    if (!row.username.trim()) {
+      rowErrors.username = '请输入用户名';
+      missingFields.push('用户名');
+    }
+    if (!deliveryTargetHasCredential(row)) {
+      rowErrors.credential = '请输入密码';
+      missingFields.push('密码');
+    }
+    if (missingFields.length > 0) {
+      errors[deliveryTargetTestKey(scope, ownerCode, row.key)] = rowErrors;
+      rowMessages.push(`第 ${index + 1} 行缺少${missingFields.join('、')}`);
+    }
+  });
+  return {
+    errors,
+    message: rowMessages.join('；'),
+    valid: rowMessages.length === 0,
+  };
+}
+
+function replaceDeliveryTargetValidationErrors(
+  current: DeliveryTargetValidationErrors,
+  scope: DeliveryTargetScope,
+  ownerCode: string,
+  errors: DeliveryTargetValidationErrors,
+) {
+  const prefix = deliveryTargetScopePrefix(scope, ownerCode);
+  const next = Object.fromEntries(
+    Object.entries(current).filter(([key]) => !key.startsWith(prefix)),
+  ) as DeliveryTargetValidationErrors;
+  return { ...next, ...errors };
+}
+
+function deliveryTargetValidationFieldsForPatch(patch: Partial<DeliveryTargetRow>): DeliveryTargetValidationField[] {
+  const fields: DeliveryTargetValidationField[] = [];
+  if ('host' in patch) fields.push('host');
+  if ('username' in patch) fields.push('username');
+  if ('credential' in patch) fields.push('credential');
+  return fields;
 }
 
 function deliveryTestEventValue(event: NorthboundPageConfigEvent, key: string): unknown {
@@ -5362,6 +5424,7 @@ interface MaskedCredentialInputProps {
   value?: string;
   placeholder?: string;
   readOnly?: boolean;
+  status?: 'error' | 'warning';
   width?: number | string;
   minLength?: number;
   storedValues?: string[];
@@ -5387,6 +5450,7 @@ function MaskedCredentialInput({
   value,
   placeholder = '请输入密码',
   readOnly = false,
+  status,
   width = '100%',
   minLength,
   storedValues = [storedCredentialText],
@@ -5405,6 +5469,7 @@ function MaskedCredentialInput({
       size="small"
       minLength={minLength}
       placeholder={placeholder}
+      status={status}
       className={styles.monoText}
       style={{ width }}
       visibilityToggle={{
@@ -5766,12 +5831,28 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
 
     const editableFieldConfigColumns: ColumnsType<ReportFieldRow> = [
       {
+        title: '操作',
+        width: 74,
+        fixed: 'left',
+        render: (_, row) => (
+          <Tooltip title="从当前模板删除">
+            <Button
+              aria-label={`删除字段 ${row.outputAlias}`}
+              type="text"
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              onClick={() => removeFieldConfigRow(row)}
+            />
+          </Tooltip>
+        ),
+      },
+      {
         title: '上报',
         width: 76,
-        fixed: 'left',
         render: (_, row) => <Switch size="small" checked={row.enabled} onChange={(checked) => toggleFieldEnabled(row, checked)} checkedChildren="开" unCheckedChildren="关" />,
       },
-      { title: '对象', width: 90, fixed: 'left', render: (_, row) => <Tag>{formatReportFieldObject(row)}</Tag> },
+      { title: '对象', width: 90, render: (_, row) => <Tag>{formatReportFieldObject(row)}</Tag> },
       { title: '制式', width: 80, render: (_, row) => <Tag>{formatReportFieldTech(row)}</Tag> },
       {
         title: '输出别名',
@@ -5810,23 +5891,6 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
         render: (_, row) => row.unit ? <span>{row.unit}</span> : <Tag>{row.renderer}</Tag>,
       },
       { title: '中文名', dataIndex: 'cnName', width: 220, render: (value?: string) => value || '-' },
-      {
-        title: '操作',
-        width: 74,
-        fixed: 'right',
-        render: (_, row) => (
-          <Tooltip title="从当前模板删除">
-            <Button
-              aria-label={`删除字段 ${row.outputAlias}`}
-              type="text"
-              danger
-              size="small"
-              icon={<DeleteOutlined />}
-              onClick={() => removeFieldConfigRow(row)}
-            />
-          </Tooltip>
-        ),
-      },
     ];
 
     return (
@@ -5960,6 +6024,7 @@ export default function NorthboundPageConfig() {
   const [reportEventLoading, setReportEventLoading] = useState(false);
   const [reportCapabilityName, setReportCapabilityName] = useState<string>('');
   const [reportDeliveryEventsByRunId, setReportDeliveryEventsByRunId] = useState<DeliveryEventsByRunId>({});
+  const [deliveryTargetValidationErrors, setDeliveryTargetValidationErrors] = useState<DeliveryTargetValidationErrors>({});
   const [deliveryTestResult, setDeliveryTestResult] = useState<DeliveryTestResultInfo | null>(null);
   const [testingDeliveryTargetKey, setTestingDeliveryTargetKey] = useState('');
   const [fileLatestSuccessRuns, setFileLatestSuccessRuns] = useState<Record<string, NorthboundFileRun>>({});
@@ -6240,7 +6305,82 @@ export default function NorthboundPageConfig() {
     return enabledRows.map((row) => `${row.name}(${row.protocol})`).join('、');
   };
 
+  const setDeliveryTargetValidationResult = (
+    scope: DeliveryTargetScope,
+    ownerCode: string,
+    errors: DeliveryTargetValidationErrors,
+  ) => {
+    setDeliveryTargetValidationErrors((prev) => replaceDeliveryTargetValidationErrors(prev, scope, ownerCode, errors));
+  };
+
+  const validateDeliveryTargetsBeforeSave = (
+    scope: DeliveryTargetScope,
+    ownerCode: string,
+    rows: DeliveryTargetRow[],
+  ) => {
+    const result = validateDeliveryTargetRows(scope, ownerCode, rows);
+    setDeliveryTargetValidationResult(scope, ownerCode, result.errors);
+    if (!result.valid) {
+      void message.warning(nt(`传输目标填写不完整，请补充或删除空行：${result.message}`));
+    }
+    return result.valid;
+  };
+
+  const clearDeliveryTargetValidationFields = (
+    scope: DeliveryTargetScope,
+    ownerCode: string,
+    key: string,
+    fields?: DeliveryTargetValidationField[],
+  ) => {
+    const validationKey = deliveryTargetTestKey(scope, ownerCode, key);
+    setDeliveryTargetValidationErrors((prev) => {
+      const current = prev[validationKey];
+      if (!current) return prev;
+      const next = { ...prev };
+      if (!fields || fields.length === 0) {
+        delete next[validationKey];
+        return next;
+      }
+      const nextRowErrors = { ...current };
+      fields.forEach((field) => {
+        delete nextRowErrors[field];
+      });
+      if (Object.keys(nextRowErrors).length === 0) delete next[validationKey];
+      else next[validationKey] = nextRowErrors;
+      return next;
+    });
+  };
+
+  const deliveryTargetValidationSummary = (scope: DeliveryTargetScope, ownerCode: string) => {
+    if (!ownerCode) return '';
+    const prefix = deliveryTargetScopePrefix(scope, ownerCode);
+    return Object.keys(deliveryTargetValidationErrors).some((key) => key.startsWith(prefix))
+      ? '传输目标填写不完整，请补充必填项或删除空行'
+      : '';
+  };
+
+  const renderDeliveryTargetValidationSummary = (scope: DeliveryTargetScope, ownerCode: string) => {
+    const summary = deliveryTargetValidationSummary(scope, ownerCode);
+    return summary ? (
+      <Typography.Text type="danger" className={styles.deliveryTargetValidationSummary}>
+        {nt(summary)}
+      </Typography.Text>
+    ) : null;
+  };
+
+  const renderDeliveryTargetEditorField = (node: ReactNode, error?: string) => (
+    <div className={styles.deliveryTargetEditorField}>
+      {node}
+      {error ? (
+        <Typography.Text type="danger" className={styles.deliveryTargetFieldError}>
+          {nt(error)}
+        </Typography.Text>
+      ) : null}
+    </div>
+  );
+
   const updateFileDeliveryTarget = (ownerCode: string, key: string, patch: Partial<DeliveryTargetRow>) => {
+    clearDeliveryTargetValidationFields('file', ownerCode, key, deliveryTargetValidationFieldsForPatch(patch));
     setFileDeliveryTargetsForOwner(ownerCode, (rows) => rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   };
 
@@ -6252,10 +6392,12 @@ export default function NorthboundPageConfig() {
   };
 
   const removeFileDeliveryTarget = (ownerCode: string, key: string) => {
+    clearDeliveryTargetValidationFields('file', ownerCode, key);
     setFileDeliveryTargetsForOwner(ownerCode, (rows) => rows.filter((row) => row.key !== key));
   };
 
   const updateInventoryDeliveryTarget = (inventoryType: InventoryType, key: string, patch: Partial<DeliveryTargetRow>) => {
+    clearDeliveryTargetValidationFields('inventory', inventoryType, key, deliveryTargetValidationFieldsForPatch(patch));
     setInventoryDeliveryTargetsByType((prev) => ({
       ...prev,
       [inventoryType]: (prev[inventoryType] ?? cloneDeliveryTargets(`inventory-${inventoryType.toLowerCase()}`)).map((row) => (
@@ -6275,6 +6417,7 @@ export default function NorthboundPageConfig() {
   };
 
   const removeInventoryDeliveryTarget = (inventoryType: InventoryType, key: string) => {
+    clearDeliveryTargetValidationFields('inventory', inventoryType, key);
     setInventoryDeliveryTargetsByType((prev) => ({
       ...prev,
       [inventoryType]: (prev[inventoryType] ?? cloneDeliveryTargets(`inventory-${inventoryType.toLowerCase()}`)).filter((row) => row.key !== key),
@@ -6282,6 +6425,9 @@ export default function NorthboundPageConfig() {
   };
 
   const updateSocketEditorDeliveryTarget = (key: string, patch: Partial<DeliveryTargetRow>) => {
+    if (socketEditor) {
+      clearDeliveryTargetValidationFields('socket', socketEditor.key, key, deliveryTargetValidationFieldsForPatch(patch));
+    }
     setSocketEditorDeliveryTargets((rows) => rows.map((row) => (
       row.key === key ? { ...row, ...patch } : row
     )));
@@ -6295,12 +6441,13 @@ export default function NorthboundPageConfig() {
   };
 
   const removeSocketEditorDeliveryTarget = (key: string) => {
+    if (socketEditor) clearDeliveryTargetValidationFields('socket', socketEditor.key, key);
     setSocketEditorDeliveryTargets((rows) => rows.filter((row) => row.key !== key));
   };
 
   const testDeliveryTarget = (
     row: DeliveryTargetRow,
-    scope: 'file' | 'inventory' | 'socket',
+    scope: DeliveryTargetScope,
     ownerCode: string,
   ) => {
     const missingFields: string[] = [];
@@ -6485,6 +6632,8 @@ export default function NorthboundPageConfig() {
     if (!selectedInventoryConfig) return;
     const enabled = Boolean(inventoryEnabled[selectedInventoryConfig.key]);
     const fields = inventoryFieldRowsByType[selectedInventoryConfig.key] ?? [];
+    const deliveryRows = getInventoryDeliveryTargets(selectedInventoryConfig.key);
+    if (!validateDeliveryTargetsBeforeSave('inventory', selectedInventoryConfig.key, deliveryRows)) return;
     setInventorySaving(selectedInventoryConfig.key, true);
     void Promise.all([
       northboundPageConfigApi.updateInventoryProfile(
@@ -6495,7 +6644,7 @@ export default function NorthboundPageConfig() {
         serializeDeliveryTargets(
           'inventory',
           selectedInventoryConfig.key,
-          getInventoryDeliveryTargets(selectedInventoryConfig.key),
+          deliveryRows,
         ),
       ),
     ])
@@ -6696,6 +6845,8 @@ export default function NorthboundPageConfig() {
         void message.warning(nt(periodValidationError));
         return;
       }
+      const deliveryRows = getFileDeliveryTargets(code);
+      if (!validateDeliveryTargetsBeforeSave('file', code, deliveryRows)) return;
       const groups = serializeEditorPeriodRows(editorPeriodRows, fieldRowsByTarget);
       const request: NorthboundUpdateFileProfileRequest = {
         name: values.name.trim(),
@@ -6727,7 +6878,7 @@ export default function NorthboundPageConfig() {
         void Promise.all([
           northboundPageConfigApi.createFileProfile(createRequest),
           northboundPageConfigApi.replaceDeliveryTargets(
-            serializeDeliveryTargets('file', code, getFileDeliveryTargets(code)),
+            serializeDeliveryTargets('file', code, deliveryRows),
           ),
         ])
           .then(([profile, deliveryResp]) => {
@@ -6750,7 +6901,7 @@ export default function NorthboundPageConfig() {
       void Promise.all([
         northboundPageConfigApi.updateFileProfile(code, request),
         northboundPageConfigApi.replaceDeliveryTargets(
-          serializeDeliveryTargets('file', code, getFileDeliveryTargets(code)),
+          serializeDeliveryTargets('file', code, deliveryRows),
         ),
       ])
         .then(([profile, deliveryResp]) => {
@@ -7399,10 +7550,12 @@ export default function NorthboundPageConfig() {
   const saveSocketEditor = (row: SocketAlarmConfigRow) => {
     const enabled = socketEditorEnabled;
     const accounts = socketEditorAccounts;
+    const deliveryRows = socketEditorDeliveryTargets;
+    if (!validateDeliveryTargetsBeforeSave('socket', row.key, deliveryRows)) return;
     void Promise.all([
       northboundPageConfigApi.updateSocketAlarmConfig(row.key, serializeSocketConfig(row, accounts, enabled)),
       northboundPageConfigApi.replaceDeliveryTargets(
-        serializeDeliveryTargets('socket', row.key, socketEditorDeliveryTargets),
+        serializeDeliveryTargets('socket', row.key, deliveryRows),
       ),
     ])
       .then(([config, deliveryResp]) => {
@@ -8056,9 +8209,36 @@ export default function NorthboundPageConfig() {
   const createDeliveryTargetEditorColumns = (
     onPatch: (key: string, patch: Partial<DeliveryTargetRow>) => void,
     onRemove: (key: string) => void,
-    scope: 'file' | 'inventory' | 'socket',
+    scope: DeliveryTargetScope,
     ownerCode: string,
   ): ColumnsType<DeliveryTargetRow> => [
+    {
+      title: '操作',
+      width: 104,
+      fixed: 'left',
+      render: (_, row) => (
+        <Space size={4}>
+          <Tooltip title="测试连接">
+            <Button
+              size="small"
+              type="text"
+              icon={<PlayCircleOutlined />}
+              loading={testingDeliveryTargetKey === deliveryTargetTestKey(scope, ownerCode, row.key)}
+              onClick={() => testDeliveryTarget(row, scope, ownerCode)}
+            />
+          </Tooltip>
+          <Tooltip title="删除目标">
+            <Button
+              danger
+              size="small"
+              type="text"
+              icon={<DeleteOutlined />}
+              onClick={() => onRemove(row.key)}
+            />
+          </Tooltip>
+        </Space>
+      ),
+    },
     {
       title: '启用',
       dataIndex: 'enabled',
@@ -8101,9 +8281,19 @@ export default function NorthboundPageConfig() {
       title: '主机',
       dataIndex: 'host',
       width: 170,
-      render: (value: string, row) => (
-        <Input value={value} className={styles.monoText} placeholder="IP/域名" onChange={(event) => onPatch(row.key, { host: event.target.value })} />
-      ),
+      render: (value: string, row) => {
+        const error = deliveryTargetValidationErrors[deliveryTargetTestKey(scope, ownerCode, row.key)]?.host;
+        return renderDeliveryTargetEditorField(
+          <Input
+            value={value}
+            status={error ? 'error' : undefined}
+            className={styles.monoText}
+            placeholder="IP/域名"
+            onChange={(event) => onPatch(row.key, { host: event.target.value })}
+          />,
+          error,
+        );
+      },
     },
     {
       title: '端口',
@@ -8117,23 +8307,38 @@ export default function NorthboundPageConfig() {
       title: '用户名',
       dataIndex: 'username',
       width: 150,
-      render: (value: string, row) => (
-        <Input value={value} className={styles.monoText} placeholder="用户名" onChange={(event) => onPatch(row.key, { username: event.target.value })} />
-      ),
+      render: (value: string, row) => {
+        const error = deliveryTargetValidationErrors[deliveryTargetTestKey(scope, ownerCode, row.key)]?.username;
+        return renderDeliveryTargetEditorField(
+          <Input
+            value={value}
+            status={error ? 'error' : undefined}
+            className={styles.monoText}
+            placeholder="用户名"
+            onChange={(event) => onPatch(row.key, { username: event.target.value })}
+          />,
+          error,
+        );
+      },
     },
     {
       title: '密码',
       dataIndex: 'credential',
       width: 190,
-      render: (value: string, row) => (
-        <MaskedCredentialInput
-          value={value}
-          placeholder={value === storedCredentialText ? '未修改保持原凭据' : '请输入凭据'}
-          onChange={(credential) => onPatch(row.key, {
-            credential: credential || (value === storedCredentialText ? storedCredentialText : ''),
-          })}
-        />
-      ),
+      render: (value: string, row) => {
+        const error = deliveryTargetValidationErrors[deliveryTargetTestKey(scope, ownerCode, row.key)]?.credential;
+        return renderDeliveryTargetEditorField(
+          <MaskedCredentialInput
+            value={value}
+            status={error ? 'error' : undefined}
+            placeholder={value === storedCredentialText ? '未修改保持原凭据' : '请输入凭据'}
+            onChange={(credential) => onPatch(row.key, {
+              credential: credential || (value === storedCredentialText ? storedCredentialText : ''),
+            })}
+          />,
+          error,
+        );
+      },
     },
     {
       title: '#FTPRoot#',
@@ -8157,32 +8362,6 @@ export default function NorthboundPageConfig() {
       width: 96,
       render: (value: number, row) => (
         <InputNumber value={value} min={1} max={300} style={{ width: 78 }} onChange={(timeoutSeconds) => onPatch(row.key, { timeoutSeconds: Number(timeoutSeconds ?? 1) })} />
-      ),
-    },
-    {
-      title: '操作',
-      width: 104,
-      render: (_, row) => (
-        <Space size={4}>
-          <Tooltip title="测试连接">
-            <Button
-              size="small"
-              type="text"
-              icon={<PlayCircleOutlined />}
-              loading={testingDeliveryTargetKey === deliveryTargetTestKey(scope, ownerCode, row.key)}
-              onClick={() => testDeliveryTarget(row, scope, ownerCode)}
-            />
-          </Tooltip>
-          <Tooltip title="删除目标">
-            <Button
-              danger
-              size="small"
-              type="text"
-              icon={<DeleteOutlined />}
-              onClick={() => onRemove(row.key)}
-            />
-          </Tooltip>
-        </Space>
       ),
     },
   ];
@@ -9191,7 +9370,10 @@ export default function NorthboundPageConfig() {
             {socketEditor.profile === 'CUCC' && (
               <div className={styles.editorSection}>
                 <div className={styles.editorSectionHeader}>
-                  <Typography.Text strong>文件同步传输目标</Typography.Text>
+                  <Space size={8} wrap>
+                    <Typography.Text strong>文件同步传输目标</Typography.Text>
+                    {renderDeliveryTargetValidationSummary('socket', socketEditor.key)}
+                  </Space>
                   <Button size="small" icon={<PlusOutlined />} onClick={() => addSocketEditorDeliveryTarget(socketEditor.key)}>
                     新增目标
                   </Button>
@@ -9708,7 +9890,10 @@ export default function NorthboundPageConfig() {
 
             <div className={styles.editorSection}>
               <div className={styles.editorSectionHeader}>
-                <Typography.Text strong>传输目标</Typography.Text>
+                <Space size={8} wrap>
+                  <Typography.Text strong>传输目标</Typography.Text>
+                  {renderDeliveryTargetValidationSummary('inventory', selectedInventoryConfig.key)}
+                </Space>
                 <Button size="small" icon={<PlusOutlined />} onClick={() => addInventoryDeliveryTarget(selectedInventoryConfig.key)}>
                   新增目标
                 </Button>
@@ -9990,6 +10175,24 @@ export default function NorthboundPageConfig() {
             <Table<ScenarioPeriodRow>
               columns={[
                 {
+                  title: '操作',
+                  width: 80,
+                  fixed: 'left',
+                  render: (_, record) => (
+                    <Tooltip title="删除对象">
+                      <Button
+                        aria-label={`删除 ${record.domain} 对象`}
+                        type="text"
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        onClick={() => removeEditorPeriodRow(record.key)}
+                        disabled={editorMode === 'edit' && editorPeriodRows.length <= 1}
+                      />
+                    </Tooltip>
+                  ),
+                },
+                {
                   title: '业务域',
                   dataIndex: 'domain',
                   width: 112,
@@ -10148,24 +10351,6 @@ export default function NorthboundPageConfig() {
 	                    );
 	                  },
 	                },
-	                {
-	                  title: '操作',
-	                  width: 80,
-                  fixed: 'right',
-                  render: (_, record) => (
-                    <Tooltip title="删除对象">
-                      <Button
-                        aria-label={`删除 ${record.domain} 对象`}
-                        type="text"
-                        danger
-                        size="small"
-                        icon={<DeleteOutlined />}
-                        onClick={() => removeEditorPeriodRow(record.key)}
-                        disabled={editorMode === 'edit' && editorPeriodRows.length <= 1}
-                      />
-                    </Tooltip>
-                  ),
-                },
               ]}
               dataSource={editorPeriodRows}
               rowKey="key"
@@ -10177,7 +10362,10 @@ export default function NorthboundPageConfig() {
           </div>
           <div className={styles.editorSection}>
             <div className={styles.editorSectionHeader}>
-              <Typography.Text strong>传输目标</Typography.Text>
+              <Space size={8} wrap>
+                <Typography.Text strong>传输目标</Typography.Text>
+                {renderDeliveryTargetValidationSummary('file', editorFileOwnerCode)}
+              </Space>
               <Button
                 size="small"
                 icon={<PlusOutlined />}
