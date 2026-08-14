@@ -1580,6 +1580,15 @@ func initNorthboundModule(c *Container) error {
 	}
 	pageConfigRepo := nbpageconfig.NewPgRepository(c.PgPool).WithTsPool(c.TsPool)
 	pageConfigService := nbpageconfig.NewServiceWithRepository(nbpageconfig.NewDefaultCatalog(), pageConfigRepo)
+	pageConfigSysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
+	pageConfigTransferPolicy := transfercfg.NewPolicy(
+		newMRTransferDefaults(c.Cfg.Upgrade),
+		newTransferSysConfigLookup(pageConfigSysConfigRepo),
+	)
+	pageConfigService.SetTransferConfigProvider(pageConfigTransferPolicy)
+	if c.SysConfigSvc != nil {
+		registerTransferPolicyInvalidation(c.SysConfigSvc, pageConfigTransferPolicy)
+	}
 	pageConfigService.SetAlarmStore(c.AlarmPgStore)
 	pageConfigService.SetSNMPSender(nbsnmp.NewGoSNMPSender(logger.Named("page-config-snmp")))
 	if c.MinIO != nil {

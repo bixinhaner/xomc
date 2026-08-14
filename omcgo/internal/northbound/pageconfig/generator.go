@@ -58,7 +58,7 @@ func (s *Service) RunFileProfile(ctx context.Context, idOrCode string, req RunPr
 		for _, object := range group.Objects {
 			run, runErr := s.buildFileRun(ctx, *profile, group, object, req)
 			if runErr != nil {
-				run = failedFileRun(ProfileKindFile, profile.Code, group, object, req, runErr)
+				run = failedFileRun(ProfileKindFile, profile.Code, group, object, req, s.configuredLocalHostToken(ctx), runErr)
 			}
 			created, err := s.repo.CreateFileRun(ctx, run)
 			if err != nil {
@@ -99,7 +99,7 @@ func (s *Service) RunInventoryProfile(ctx context.Context, idOrCode string, req 
 
 	run, runErr := s.buildInventoryRun(ctx, *profile, req)
 	if runErr != nil {
-		run = failedInventoryRun(*profile, req, runErr)
+		run = failedInventoryRun(*profile, req, s.configuredLocalHostToken(ctx), runErr)
 	}
 	created, err := s.repo.CreateFileRun(ctx, run)
 	if err != nil {
@@ -165,7 +165,10 @@ func (s *Service) buildFileRun(ctx context.Context, profile FileProfile, group F
 	if err != nil {
 		return FileRun{}, err
 	}
-	artifactPath, artifactName := renderArtifactName(group, object, windowStart, windowEnd, 1)
+	artifactPath, artifactName := s.renderArtifactName(ctx, group, object, windowStart, windowEnd, 1)
+	if rowCount == 0 && strings.TrimSpace(content) == "" {
+		return noArtifactFileRun(ProfileKindFile, profile.Code, profile.Name, group, object, req, "no source data matched export window; artifact not generated"), nil
+	}
 	return FileRun{
 		ProfileKind:        ProfileKindFile,
 		ProfileCode:        profile.Code,
@@ -199,29 +202,9 @@ func (s *Service) buildMRPassthroughRun(ctx context.Context, profile FileProfile
 	if err != nil {
 		return FileRun{}, err
 	}
-	artifactPath, artifactName := renderArtifactName(group, object, windowStart, windowEnd, 1)
+	artifactPath, artifactName := s.renderArtifactName(ctx, group, object, windowStart, windowEnd, 1)
 	if len(rows) == 0 {
-		return FileRun{
-			ProfileKind:        ProfileKindFile,
-			ProfileCode:        profile.Code,
-			GroupID:            group.ID,
-			Domain:             group.Domain,
-			ObjectCode:         object.Code,
-			Status:             RunStatusSuccess,
-			WindowStart:        &windowStart,
-			WindowEnd:          &windowEnd,
-			ArtifactPath:       artifactPath,
-			ArtifactName:       artifactName,
-			CompressionEnabled: group.CompressionEnabled,
-			CompressionFormat:  compressionFormatOrDefault(group.CompressionFormat),
-			Summary: map[string]any{
-				"profile_name":   profile.Name,
-				"format":         group.Format,
-				"period":         group.Period,
-				"trigger_reason": runTriggerReason(req),
-				"mr_passthrough": true,
-			},
-		}, nil
+		return noArtifactFileRun(ProfileKindFile, profile.Code, profile.Name, group, object, req, "no MR source data matched export window; artifact not generated"), nil
 	}
 	sourceName := rows[0]["mr.file_name"]
 	sourcePath := firstNonEmpty(rows[0]["mr.minio_path"], rows[0]["mr.object_key"], rows[0]["minio_path"])
@@ -280,7 +263,7 @@ func (s *Service) buildInventoryRun(ctx context.Context, profile InventoryProfil
 	if err != nil {
 		return FileRun{}, err
 	}
-	artifactPath, artifactName := renderArtifactName(group, object, windowStart, windowEnd, 1)
+	artifactPath, artifactName := s.renderArtifactName(ctx, group, object, windowStart, windowEnd, 1)
 	return FileRun{
 		ProfileKind:        ProfileKindInventory,
 		ProfileCode:        profile.Code,
@@ -391,7 +374,7 @@ func (s *Service) generateFileContent(ctx context.Context, group FileGroup, obje
 	if err != nil {
 		return "", 0, err
 	}
-	rows = enrichRows(rows, object, windowStart, windowEnd)
+	rows = enrichRowsWithLocalHost(rows, object, windowStart, windowEnd, s.configuredLocalHostToken(ctx))
 	// No real data in the window → produce no file (do not fabricate or deliver empties).
 	if len(rows) == 0 {
 		return "", 0, nil
@@ -422,7 +405,7 @@ func (s *Service) generateInventoryContent(ctx context.Context, profile Inventor
 		return "", 0, err
 	}
 	now := time.Now()
-	rows = enrichRows(rows, ScenarioObject{Code: profile.ObjectCode, Tech: profile.Tech}, now, now)
+	rows = enrichRowsWithLocalHost(rows, ScenarioObject{Code: profile.ObjectCode, Tech: profile.Tech}, now, now, s.configuredLocalHostToken(ctx))
 	return renderRows(FormatCSV, fields, rows)
 }
 
@@ -843,10 +826,18 @@ func normalizeOffset(offset int) int {
 }
 
 func renderArtifactName(group FileGroup, object ScenarioObject, windowStart, windowEnd time.Time, fileID int) (string, string) {
+	return renderArtifactNameWithLocalHost(group, object, windowStart, windowEnd, fileID, configuredLocalHostToken(""))
+}
+
+func (s *Service) renderArtifactName(ctx context.Context, group FileGroup, object ScenarioObject, windowStart, windowEnd time.Time, fileID int) (string, string) {
+	return renderArtifactNameWithLocalHost(group, object, windowStart, windowEnd, fileID, s.configuredLocalHostToken(ctx))
+}
+
+func renderArtifactNameWithLocalHost(group FileGroup, object ScenarioObject, windowStart, windowEnd time.Time, fileID int, localHost string) (string, string) {
 	if group.Domain == DomainLOG {
-		return renderLogArtifactName(group, object, windowStart, windowEnd, fileID)
+		return renderLogArtifactNameWithLocalHost(group, object, windowStart, windowEnd, fileID, localHost)
 	}
-	tokens := runtimeTokenValues(group, object, windowStart, windowEnd, fileID)
+	tokens := runtimeTokenValues(group, object, windowStart, windowEnd, fileID, localHost)
 	path, _ := renderTemplate(group.PathTemplate, tokens)
 	fileName, _ := renderTemplate(group.FileNameTemplate, tokens)
 	fileName = ensurePreviewFileExtension(fileName, group.Format)
@@ -858,11 +849,15 @@ func renderArtifactName(group FileGroup, object ScenarioObject, windowStart, win
 }
 
 func renderLogArtifactName(group FileGroup, object ScenarioObject, windowStart, windowEnd time.Time, fileID int) (string, string) {
+	return renderLogArtifactNameWithLocalHost(group, object, windowStart, windowEnd, fileID, configuredLocalHostToken(""))
+}
+
+func renderLogArtifactNameWithLocalHost(group FileGroup, object ScenarioObject, windowStart, windowEnd time.Time, fileID int, localHost string) (string, string) {
 	date := windowStart.Format("20060102")
 	timestamp := windowStart.Format("20060102150405")
 	path := "/northupload/LOGS/" + date + "/"
 	if strings.TrimSpace(group.PathTemplate) != "" && !isLegacyLogPathTemplate(group.PathTemplate) {
-		tokens := runtimeTokenValues(group, object, windowStart, windowEnd, fileID)
+		tokens := runtimeTokenValues(group, object, windowStart, windowEnd, fileID, localHost)
 		renderedPath, _ := renderTemplate(group.PathTemplate, tokens)
 		if strings.TrimSpace(renderedPath) != "" {
 			path = renderedPath
@@ -880,7 +875,7 @@ func renderLogArtifactName(group FileGroup, object ScenarioObject, windowStart, 
 	case "operation_fix":
 		fileName = fmt.Sprintf("OperationLogs_%s-%dH.csv", timestamp, logPeriodHours(group.Period))
 	default:
-		tokens := runtimeTokenValues(group, object, windowStart, windowEnd, fileID)
+		tokens := runtimeTokenValues(group, object, windowStart, windowEnd, fileID, localHost)
 		fileName, _ = renderTemplate(group.FileNameTemplate, tokens)
 		fileName = ensurePreviewFileExtension(fileName, group.Format)
 	}
@@ -903,11 +898,12 @@ func logPeriodHours(period Period) int {
 	return hours
 }
 
-func runtimeTokenValues(group FileGroup, object ScenarioObject, windowStart, windowEnd time.Time, fileID int) map[string]string {
+func runtimeTokenValues(group FileGroup, object ScenarioObject, windowStart, windowEnd time.Time, fileID int, localHost string) map[string]string {
 	objectCode := strings.TrimSpace(object.Code)
 	if objectCode == "" {
 		objectCode = previewObjectCode(group)
 	}
+	localHost = configuredLocalHostToken(localHost)
 	return map[string]string{
 		"#FTPRoot#":         "northupload",
 		"#Province#":        "GD",
@@ -916,7 +912,7 @@ func runtimeTokenValues(group FileGroup, object ScenarioObject, windowStart, win
 		"#Date#":            windowStart.Format("20060102"),
 		"#PeriodStartTime#": windowStart.Format("20060102150405"),
 		"#PeriodEndTime#":   windowEnd.Format("20060102150405"),
-		"#LocalHost#":       "127.0.0.1",
+		"#LocalHost#":       localHost,
 		"#DataVersion#":     "1.0",
 		"#DataPeriod#":      previewDataPeriod(group.Period),
 		"#Object#":          objectCode,
@@ -928,7 +924,12 @@ func runtimeTokenValues(group FileGroup, object ScenarioObject, windowStart, win
 }
 
 func enrichRows(rows []ExportDataRow, object ScenarioObject, windowStart, windowEnd time.Time) []ExportDataRow {
+	return enrichRowsWithLocalHost(rows, object, windowStart, windowEnd, configuredLocalHostToken(""))
+}
+
+func enrichRowsWithLocalHost(rows []ExportDataRow, object ScenarioObject, windowStart, windowEnd time.Time, localHost string) []ExportDataRow {
 	out := make([]ExportDataRow, 0, len(rows))
+	localHost = configuredLocalHostToken(localHost)
 	for _, row := range rows {
 		next := make(ExportDataRow, len(row)+10)
 		for key, value := range row {
@@ -937,7 +938,7 @@ func enrichRows(rows []ExportDataRow, object ScenarioObject, windowStart, window
 		next["system.omc_r"] = valueOrDefault(next["system.omc_r"], "BaiOMC")
 		next["system.province"] = valueOrDefault(next["system.province"], "GD")
 		next["runtime.data_version"] = valueOrDefault(next["runtime.data_version"], "1.0")
-		next["runtime.local_host"] = valueOrDefault(next["runtime.local_host"], "127.0.0.1")
+		next["runtime.local_host"] = valueOrDefault(next["runtime.local_host"], localHost)
 		next["runtime.object"] = valueOrDefault(next["runtime.object"], object.Code)
 		next["runtime.tech"] = valueOrDefault(next["runtime.tech"], object.Tech)
 		next["task.window_start"] = valueOrDefault(next["task.window_start"], windowStart.Format(time.RFC3339))
@@ -973,9 +974,9 @@ func metricPathsFromFields(fields []FieldDefinition) []string {
 	return out
 }
 
-func failedFileRun(profileKind ProfileKind, profileCode string, group FileGroup, object ScenarioObject, req RunProfileRequest, err error) FileRun {
+func failedFileRun(profileKind ProfileKind, profileCode string, group FileGroup, object ScenarioObject, req RunProfileRequest, localHost string, err error) FileRun {
 	windowStart, windowEnd := normalizeRunWindow(group.Period, req)
-	artifactPath, artifactName := renderArtifactName(group, object, windowStart, windowEnd, 1)
+	artifactPath, artifactName := renderArtifactNameWithLocalHost(group, object, windowStart, windowEnd, 1, localHost)
 	return FileRun{
 		ProfileKind:        profileKind,
 		ProfileCode:        profileCode,
@@ -998,7 +999,37 @@ func failedFileRun(profileKind ProfileKind, profileCode string, group FileGroup,
 	}
 }
 
-func failedInventoryRun(profile InventoryProfile, req RunProfileRequest, err error) FileRun {
+func noArtifactFileRun(profileKind ProfileKind, profileCode, profileName string, group FileGroup, object ScenarioObject, req RunProfileRequest, message string) FileRun {
+	windowStart, windowEnd := normalizeRunWindow(group.Period, req)
+	if strings.TrimSpace(message) == "" {
+		message = "no source data matched export window; artifact not generated"
+	}
+	return FileRun{
+		ProfileKind:        profileKind,
+		ProfileCode:        profileCode,
+		GroupID:            group.ID,
+		Domain:             group.Domain,
+		ObjectCode:         object.Code,
+		Status:             RunStatusTerminated,
+		WindowStart:        &windowStart,
+		WindowEnd:          &windowEnd,
+		CompressionEnabled: group.CompressionEnabled,
+		CompressionFormat:  compressionFormatOrDefault(group.CompressionFormat),
+		ErrorMessage:       message,
+		Summary: map[string]any{
+			"profile_name":    profileName,
+			"format":          group.Format,
+			"period":          group.Period,
+			"trigger_reason":  runTriggerReason(req),
+			"no_artifact":     true,
+			"no_data":         true,
+			"skip_reason":     "no_source_data",
+			"artifact_status": "not_generated",
+		},
+	}
+}
+
+func failedInventoryRun(profile InventoryProfile, req RunProfileRequest, localHost string, err error) FileRun {
 	group := FileGroup{
 		ID:                 profile.Code,
 		Domain:             DomainInventory,
@@ -1009,7 +1040,7 @@ func failedInventoryRun(profile InventoryProfile, req RunProfileRequest, err err
 		CompressionEnabled: profile.CompressionEnabled,
 		CompressionFormat:  profile.CompressionFormat,
 	}
-	return failedFileRun(ProfileKindInventory, profile.Code, group, ScenarioObject{Code: profile.ObjectCode, Tech: profile.Tech}, req, err)
+	return failedFileRun(ProfileKindInventory, profile.Code, group, ScenarioObject{Code: profile.ObjectCode, Tech: profile.Tech}, req, localHost, err)
 }
 
 func xmlTag(value string) string {

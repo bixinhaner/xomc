@@ -450,11 +450,7 @@ func scheduleWindowStatsByEnd(runs []FileRun, unit scheduleUnit) map[time.Time]s
 		}
 		switch run.Status {
 		case RunStatusSuccess:
-			key := strings.TrimSpace(run.ObjectCode)
-			if key == "" {
-				key = run.ID
-			}
-			stats.successObjects[key] = struct{}{}
+			markScheduleObjectComplete(stats.successObjects, run)
 			stats.successCount = len(stats.successObjects)
 		case RunStatusRunning:
 			stats.running = true
@@ -462,10 +458,31 @@ func scheduleWindowStatsByEnd(runs []FileRun, unit scheduleUnit) map[time.Time]s
 			if run.CreatedAt.After(stats.lastFailedAt) {
 				stats.lastFailedAt = run.CreatedAt
 			}
+		case RunStatusTerminated:
+			if runNoArtifact(run) {
+				markScheduleObjectComplete(stats.successObjects, run)
+				stats.successCount = len(stats.successObjects)
+			}
 		}
 		out[end] = stats
 	}
 	return out
+}
+
+func markScheduleObjectComplete(objects map[string]struct{}, run FileRun) {
+	key := strings.TrimSpace(run.ObjectCode)
+	if key == "" {
+		key = run.ID
+	}
+	objects[key] = struct{}{}
+}
+
+func runNoArtifact(run FileRun) bool {
+	if run.Summary == nil {
+		return false
+	}
+	value, ok := run.Summary["no_artifact"].(bool)
+	return ok && value
 }
 
 func scheduleWindowKey(t time.Time) time.Time {

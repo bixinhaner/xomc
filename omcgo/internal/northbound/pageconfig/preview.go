@@ -34,9 +34,13 @@ var supportedTemplateTokens = map[string]struct{}{
 }
 
 func buildFileProfilePreview(profile FileProfile) FileProfilePreview {
+	return buildFileProfilePreviewWithLocalHost(profile, configuredLocalHostToken(""))
+}
+
+func buildFileProfilePreviewWithLocalHost(profile FileProfile, localHost string) FileProfilePreview {
 	items := make([]FileGroupPreview, 0, len(profile.Groups))
 	for _, group := range profile.Groups {
-		items = append(items, buildFileGroupPreview(group))
+		items = append(items, buildFileGroupPreviewWithLocalHost(group, localHost))
 	}
 	return FileProfilePreview{
 		ProfileCode: profile.Code,
@@ -45,10 +49,14 @@ func buildFileProfilePreview(profile FileProfile) FileProfilePreview {
 }
 
 func buildFileGroupPreview(group FileGroup) FileGroupPreview {
+	return buildFileGroupPreviewWithLocalHost(group, configuredLocalHostToken(""))
+}
+
+func buildFileGroupPreviewWithLocalHost(group FileGroup, localHost string) FileGroupPreview {
 	if group.Domain == DomainLOG {
-		return buildLogFileGroupPreview(group)
+		return buildLogFileGroupPreviewWithLocalHost(group, localHost)
 	}
-	tokens := previewTokenValues(group)
+	tokens := previewTokenValues(group, localHost)
 	path, pathUnknownTokens := renderTemplate(group.PathTemplate, tokens)
 	fileName, fileUnknownTokens := renderTemplate(group.FileNameTemplate, tokens)
 	fileName = ensurePreviewFileExtension(fileName, group.Format)
@@ -82,10 +90,14 @@ func buildFileGroupPreview(group FileGroup) FileGroupPreview {
 }
 
 func buildLogFileGroupPreview(group FileGroup) FileGroupPreview {
+	return buildLogFileGroupPreviewWithLocalHost(group, configuredLocalHostToken(""))
+}
+
+func buildLogFileGroupPreviewWithLocalHost(group FileGroup, localHost string) FileGroupPreview {
 	windowEnd := time.Date(2026, 8, 4, 0, 0, 0, 0, time.Local)
 	windowStart := windowEnd.Add(-periodDuration(group.Period))
 	previewObject := ScenarioObject{Code: previewObjectCode(group)}
-	path, artifactName := renderLogArtifactName(group, previewObject, windowStart, windowEnd, 1)
+	path, artifactName := renderLogArtifactNameWithLocalHost(group, previewObject, windowStart, windowEnd, 1, localHost)
 	fileName := artifactName
 	if group.CompressionEnabled {
 		suffix := "." + string(compressionFormatOrDefault(group.CompressionFormat))
@@ -109,8 +121,9 @@ func buildLogFileGroupPreview(group FileGroup) FileGroupPreview {
 	}
 }
 
-func previewTokenValues(group FileGroup) map[string]string {
+func previewTokenValues(group FileGroup, localHost string) map[string]string {
 	objectCode := previewObjectCode(group)
+	localHost = configuredLocalHostToken(localHost)
 	return map[string]string{
 		"#FTPRoot#":         "northupload",
 		"#Province#":        "GD",
@@ -119,7 +132,7 @@ func previewTokenValues(group FileGroup) map[string]string {
 		"#Date#":            "20260804",
 		"#PeriodStartTime#": "20260803234500",
 		"#PeriodEndTime#":   "20260804000000",
-		"#LocalHost#":       "127.0.0.1",
+		"#LocalHost#":       localHost,
 		"#DataVersion#":     "1.0",
 		"#DataPeriod#":      previewDataPeriod(group.Period),
 		"#Object#":          objectCode,

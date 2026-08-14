@@ -381,18 +381,16 @@ func localArchiveObjectKey(prefix string, run FileRun) string {
 	if createdAt.IsZero() {
 		createdAt = time.Now()
 	}
-	runID := safeLocalArchiveSegment(run.ID)
-	if runID == "_" {
-		runID = createdAt.Format("20060102150405")
-	}
-	return pathpkg.Join(
+	parts := []string{
 		cleanLocalArchivePrefix(prefix),
 		createdAt.Local().Format("2006-01-02"),
 		safeLocalArchiveSegment(run.ProfileCode),
-		safeLocalArchiveSegment(run.GroupID),
-		runID,
-		safeRemoteBase(run.ArtifactName),
-	)
+	}
+	if groupID := strings.TrimSpace(run.GroupID); groupID != "" && !strings.EqualFold(groupID, strings.TrimSpace(run.ProfileCode)) {
+		parts = append(parts, safeLocalArchiveSegment(groupID))
+	}
+	parts = append(parts, safeRemoteBase(run.ArtifactName))
+	return pathpkg.Join(parts...)
 }
 
 func cleanLocalArchivePrefix(prefix string) string {
