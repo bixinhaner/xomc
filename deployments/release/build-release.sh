@@ -76,6 +76,8 @@ done
 
 log "运行发布前回归门禁 ..."
 RELEASE_VERIFY_SCRIPTS=(
+  "$SCRIPT_DIR/smtp-release-wiring_test.sh"
+  "$SCRIPT_DIR/bundle/deploy/configure-smtp_test.sh"
   "$SCRIPT_DIR/bundle/deploy/storage-compose_test.sh"
   "$SCRIPT_DIR/bundle/deploy/nginx-https-file-entry_test.sh"
   "$SCRIPT_DIR/bundle/deploy/license-keystore-release_test.sh"
@@ -303,6 +305,16 @@ OMC_SHARED_SECRET=REPLACE_ME
 # worker 据此生成 PM 文件上传 URL 下发给基站；不能用 localhost / 127.0.0.1，
 # 否则基站无法回传文件。示例：OMC_PUBLIC_HOST=172.19.1.132
 OMC_PUBLIC_HOST=
+# 邮件通知（首次部署默认禁用）。推荐用 deploy/configure-smtp.sh 写入；密码不进 Git/交付包。
+OMCGO_NOTIFICATION_SMTP_ENABLED=false
+OMCGO_NOTIFICATION_SMTP_HOST=
+OMCGO_NOTIFICATION_SMTP_PORT=465
+OMCGO_NOTIFICATION_SMTP_USERNAME=
+OMCGO_NOTIFICATION_SMTP_PASSWORD=
+OMCGO_NOTIFICATION_SMTP_FROM=omc-alert@example.com
+OMCGO_NOTIFICATION_SMTP_TLS_MODE=implicit
+OMCGO_NOTIFICATION_SMTP_TIMEOUT=10s
+OMCGO_NOTIFICATION_SMTP_MAX_ATTACHMENT_BYTES=20971520
 EOF
 
   # 1.5 运维侧部署文档

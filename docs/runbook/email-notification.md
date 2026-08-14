@@ -11,7 +11,101 @@
 
 ## 2. 阿里企业邮箱配置
 
-app 和 worker 必须使用同一组配置。主机、端口、发件地址和授权码以邮件管理员提供的租户信息为准，不在代码中硬编码。
+app 和 worker 必须使用同一组配置。主机、端口、发件地址和授权码以邮件管理员提供的租户信息为准，不在代码中硬编码，也不再使用 Office365 参数。
+
+邮件管理员需要提供并确认以下信息。下面只是格式示例，不是真实阿里企业邮箱地址或凭据：
+
+| 项目 | 模拟值 | 需要管理员确认的内容 |
+| --- | --- | --- |
+| SMTP 主机 | `smtp.qiye.example.com` | 企业租户实际 SMTP 主机，只填主机名，不带 `https://` |
+| SMTP 端口 | `465` | 端口及对应 TLS 模式 |
+| TLS 模式 | `implicit` | `465` 常见为 `implicit`；`587` 常见为 `starttls`，以管理员答复为准 |
+| SMTP 账号 | `omc-alert@example.com` | 独立通知账号，或留空表示使用内网免认证 Relay |
+| SMTP 授权码 | `REPLACE_WITH_AUTH_CODE` | SMTP 专用授权码，不优先使用网页登录密码 |
+| 发件地址 | `omc-alert@example.com` | 账号允许使用的 From 地址或别名 |
+| 来源限制 | `10.20.0.0/16` | 是否需要把各 OMC 服务器出口 IP 加入白名单 |
+| 收件限制 | `omc-test@example.com` | 测试环境收件人白名单、单封/每日限额和反垃圾策略 |
+
+### 2.1 单台服务器配置
+
+发布包已带 `deploy/configure-smtp.sh` 和模拟模板 `deploy/smtp.env.example`。在发布包外复制一份仅 root 可读的配置，不要直接修改或提交示例文件：
+
+```bash
+sudo install -m 600 /opt/omc/current/deploy/smtp.env.example /root/omc-smtp.env
+sudo vi /root/omc-smtp.env
+sudo bash /opt/omc/current/deploy/configure-smtp.sh --config /root/omc-smtp.env
+sudo bash /opt/omc/current/deploy/configure-smtp.sh --check
+```
+
+模拟配置内容如下：
+
+```dotenv
+OMCGO_NOTIFICATION_SMTP_HOST=smtp.qiye.example.com
+OMCGO_NOTIFICATION_SMTP_PORT=465
+OMCGO_NOTIFICATION_SMTP_USERNAME=omc-alert@example.com
+OMCGO_NOTIFICATION_SMTP_PASSWORD=REPLACE_WITH_AUTH_CODE
+OMCGO_NOTIFICATION_SMTP_FROM=omc-alert@example.com
+OMCGO_NOTIFICATION_SMTP_TLS_MODE=implicit
+OMCGO_NOTIFICATION_SMTP_TIMEOUT=10s
+OMCGO_NOTIFICATION_SMTP_MAX_ATTACHMENT_BYTES=20971520
+```
+
+脚本不会 `source` 密钥文件或输出密码；它会校验参数、备份并原子更新 `/opt/omc/current/deploy/.env`，然后用 `svc.sh start app worker` 重建 app/worker，使新环境变量生效。`docker compose restart` 不会重读环境变量，不能用于本次变更。配置相同的脚本重跑会直接跳过写入和容器重建。
+
+只检查当前格式或紧急关闭 SMTP：
+
+```bash
+sudo bash /opt/omc/current/deploy/configure-smtp.sh --check
+sudo bash /opt/omc/current/deploy/configure-smtp.sh --disable
+```
+
+`--check` 只检查本机配置格式，不验证 DNS、网络、认证或真实投递。每台独立 OMC 服务器首次接入时仍需应用一次配置；以后正常安装升级会继承这些 SMTP 键，不需要每个版本重新配置。
+
+### 2.2 多环境、多服务器策略
+
+不要在服务器之间复制完整的部署 `.env`，其中还包含数据库、JWT、MinIO 等与单机绑定的秘密。应把 SMTP 作为独立秘密配置，按环境分组管理：
+
+| 环境 | 建议账号/Relay 策略 | 收件策略 | 发布策略 |
+| --- | --- | --- | --- |
+| 个人测试 | 独立测试账号或测试 Relay | 只允许本人/测试邮箱 | 默认关闭，验证时临时启用 |
+| 共享测试 | 公共测试账号或测试 Relay | 固定测试白名单，禁止真实客户地址 | 可批量部署，先在一台 canary 验证 |
+| 生产 | 生产专用账号；更推荐内网生产 Relay | 正式收件人及发送限额由邮件侧控制 | 加密保管凭据，逐台/分批执行并验收 |
+
+服务器较少时，在每台机器上传对应环境的 `/root/omc-smtp.env`，重复执行同一个 `configure-smtp.sh` 即可。服务器较多时，推荐用现有 Ansible/堡垒机流水线统一执行，而不是再写一个保存密码的 SSH 循环脚本：
+
+1. inventory 分为 `omc_personal_test`、`omc_shared_test`、`omc_prod`；
+2. SMTP 文件放在 Ansible Vault 或企业密钥系统，不进入 Git；
+3. 临时下发文件权限设为 `0600`，远端执行 `configure-smtp.sh --config <临时文件>`，执行后删除临时文件；
+4. 密钥相关任务启用 `no_log: true`，生产使用 `serial: 1` 或小批次滚动；
+5. 先 `--check`，再按第 3、4 节完成真实业务验收，失败时停止后续批次。
+
+当前提交只提供每台服务器内可幂等执行的配置入口，不擅自引入 Ansible inventory、服务器地址或企业密钥系统；这些属于部署现场资产，确定现有发布平台后再接入。
+
+### 2.3 推荐的内网 SMTP Relay
+
+多台 OMC 的长期优选方案是在内网建设一个 SMTP Relay：企业邮箱账号/授权码只保存在 Relay，所有 OMC 服务器只连接 Relay。Relay 根据来源 IP、发件地址和环境限制收件人，再统一转发到阿里企业邮箱。这样授权码轮换只改 Relay 一处，不必登录每台 OMC。
+
+OMC 已支持免认证 Relay：`USERNAME` 和 `PASSWORD` 必须同时留空；`HOST` 指向 Relay，端口和 `TLS_MODE` 按 Relay 配置。生产优先使用 `starttls` 或 `implicit`；只有安全团队批准的隔离内网才使用 `none`。测试和生产应使用不同 Relay 策略或至少不同来源网段、From 地址和收件白名单，防止测试告警发给真实用户。
+
+若暂时没有 Relay，先采用每环境一份加密秘密 + 幂等脚本/Ansible 分发。以后切换 Relay 仍只需替换同一组 SMTP 参数，不改业务代码。
+
+### 2.4 应用配置键
+
+发布环境由下列环境变量覆盖 YAML，app 和 worker 都会接收同一份值：
+
+```text
+OMCGO_NOTIFICATION_SMTP_ENABLED
+OMCGO_NOTIFICATION_SMTP_HOST
+OMCGO_NOTIFICATION_SMTP_PORT
+OMCGO_NOTIFICATION_SMTP_USERNAME
+OMCGO_NOTIFICATION_SMTP_PASSWORD
+OMCGO_NOTIFICATION_SMTP_FROM
+OMCGO_NOTIFICATION_SMTP_TLS_MODE
+OMCGO_NOTIFICATION_SMTP_TIMEOUT
+OMCGO_NOTIFICATION_SMTP_MAX_ATTACHMENT_BYTES
+```
+
+对应的应用 YAML 结构为：
 
 ```yaml
 notification:
@@ -31,14 +125,14 @@ TLS 模式：
 
 - `implicit`：连接建立时立即 TLS，常用于 465；
 - `starttls`：先建立 SMTP 连接，必须成功升级 TLS 才会认证；
-- `none`：只允许在受信内网测试使用，生产禁用。
+- `none`：默认禁止用于生产；仅限安全团队批准、网络隔离且按来源 IP 授权的内网 Relay。
 
-也可用 `OMCGO_NOTIFICATION_SMTP_ENABLED/HOST/PORT/USERNAME/PASSWORD/FROM/TLS_MODE/TIMEOUT/MAX_ATTACHMENT_BYTES` 覆盖对应 YAML 键。密码必须从 Secret 注入，不写入 Git、日志或截图。
+密码必须从 Secret 注入，不写入 Git、工单、日志或截图。
 
 ## 3. 启用步骤
 
 1. 保持 app 和 worker 的 `enabled=false` 完成发布和基线建库。
-2. 配置阿里企业邮箱测试账号和测试收件人，重启 app 与 worker。
+2. 配置阿里企业邮箱测试账号和测试收件人，通过 `configure-smtp.sh` 重建 app 与 worker。
 3. 在“告警规则”中新建一条低风险规则：选择告警标识和设备/设备组，将执行动作设为“邮件通知”，填写测试收件人并启用；验证新增与清除邮件的主题、时间、原因和处理建议。
 4. 在 KPI Query 列表中只对测试模板开启邮件订阅，检查 CSV 附件与页面查询窗口一致。
 5. 观察至少一个完整发送周期后，再逐步扩大收件人。
@@ -115,7 +209,7 @@ KPI 调度器恢复时不会逐个追发全部过期窗口；每个订阅只折�
 ## 6. 回退
 
 1. 先禁用 KPI 邮件订阅和告警 `notify_email` 规则。
-2. 再将 app 和 worker 的 `notification.smtp.enabled` 改为 `false` 并重启。
+2. 再执行 `configure-smtp.sh --disable`，由脚本关闭基础设施开关并重建 app/worker。
 3. 不停止告警入库、PM 采集、KPI 查询或通用 worker。
 4. 未封版阶段数据结构已折入 `000001_init_schema.sql`；测试环境按整套基线重建，不新增 `000002+` 回退迁移。
 
@@ -139,4 +233,4 @@ KPI 调度器恢复时不会逐个追发全部过期窗口；每个订阅只折�
 
 本次 UI 状态收口修改后，V1 Mock 已重新启动，但应用内浏览器的 URL 安全策略拒绝自动重载 `127.0.0.1:3300`；因此本次抽屉关闭重开和 KPI 订阅的最终页面回归仍需人工刷新已保留的本地页面补验，不将自动化阻断冒充为通过。
 
-尚未完成且不能用本地模拟替代的唯一外部项，是使用真实阿里企业邮箱测试账号、授权码、白名单收件人和生产出站网络进行 SMTP 认证与投递。拿到凭据前保持 `notification.smtp.enabled=false`；不得改回 Office365，也不得把测试密码写入配置文件或日志。
+尚未完成且不能用本地模拟替代的唯一外部项，是使用真实阿里企业邮箱测试账号、授权码、白名单收件人和生产出站网络进行 SMTP 认证与投递。拿到凭据前保持 `notification.smtp.enabled=false`；不得改回 Office365，也不得把测试密码写入 Git、普通应用配置、工单或日志。真实凭据只能进入权限为 `0600` 的临时 Secret 文件或企业密钥系统。

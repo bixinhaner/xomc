@@ -1,5 +1,33 @@
 # Release deployment observability
 
+## SMTP notification configuration
+
+The release package keeps SMTP disabled by default. App and Worker receive the
+same `OMCGO_NOTIFICATION_SMTP_*` values from `deploy/.env`; upgrades preserve
+those keys. Configure one installed host with the bundled idempotent entrypoint:
+
+```bash
+sudo install -m 600 /opt/omc/current/deploy/smtp.env.example /root/omc-smtp.env
+sudo vi /root/omc-smtp.env
+sudo bash /opt/omc/current/deploy/configure-smtp.sh --config /root/omc-smtp.env
+sudo bash /opt/omc/current/deploy/configure-smtp.sh --check
+```
+
+The example contains no usable credentials. The configuration file must be a
+regular non-symlink file with mode `0600` or `0400`. The script never sources
+the file or prints the password. A changed configuration is backed up and
+written atomically, then App and Worker are recreated with `svc.sh start` so
+Compose reloads the environment. An unchanged rerun skips both write and
+recreate. `--check` validates syntax only; it does not test SMTP connectivity
+or delivery. Use `--disable` as the infrastructure rollback switch.
+
+For a fleet, keep per-environment SMTP secrets in the existing Vault/secret
+manager and invoke this same host-local script through the deployment
+orchestrator. Do not copy the full `deploy/.env` between hosts. An internal SMTP
+Relay is preferred for larger fleets: leave username and password both empty
+for an IP-authorized Relay, and enforce environment-specific sender/recipient
+policies at the Relay.
+
 The default production installation starts the complete monitoring compose
 profile. The app, ACS, and worker production configs enable OTLP tracing and
 send spans to the bundled `otelcol:4317` collector.
