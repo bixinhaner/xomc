@@ -26,6 +26,27 @@ describe('parameter config workbook', () => {
     ]);
   });
 
+  it('keeps the GSM template aligned with its fixed common parameters', () => {
+    const workbook = createParamConfigTemplateWorkbook('GSM', {
+      deviceType: 'GSM',
+      quickSettingsGroups: [{
+        id: 'gsm-radio', titleZh: 'GSM 无线参数', titleEn: 'GSM Radio', multiInstance: false,
+        params: [
+          { name: 'Band', titleZh: '频段', titleEn: 'Band', standardPath: 'Device.GSM.Radio.Band' },
+          { name: 'Bsic', titleZh: 'BSIC', titleEn: 'Bsic', standardPath: 'Device.GSM.Radio.Bsic' },
+        ],
+      }],
+    });
+
+    expect(XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.GSM, {
+      header: 1,
+      defval: '',
+    })[0]).toEqual([
+      'Serial Number', 'IPA', 'Unit ID', 'Remote IP', 'Bind IP', 'WAN IP',
+      'Synchronization', 'OMC',
+    ]);
+  });
+
   it('adds hover notes and dropdowns without occupying a data row', async () => {
     const workbook = await enrichParamConfigWorkbook(createParamConfigTemplateWorkbook('gNB'));
     const device = workbook.getWorksheet('DEVICE')!;
