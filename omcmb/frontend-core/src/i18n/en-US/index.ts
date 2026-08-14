@@ -4706,7 +4706,7 @@ const messages: Record<string, string> = {
   'provision.parameterConfiguration': 'Parameter Configuration',
   'provision.cellActivation':         'Cell Activation',
   'provision.waitStartupResult':      'Wait for Startup Result',
-  'provision.verifyOnline':           'Verify Device Online',
+  'provision.verifyOnline':           'Verify Cell Activation',
   'provision.orchestrationCompleted': 'Completed',
 
   // Add Policy Page

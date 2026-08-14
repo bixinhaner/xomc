@@ -530,7 +530,8 @@ function appendPreservedParameterMappingSheet(
     || !configs.some((config) => config.workbookMappings !== undefined)) return;
   const seen = new Set<string>();
   const mappings = configs.flatMap((config) => config.workbookMappings ?? []).filter((mapping) => {
-    const key = `${canonicalHeader(mapping.sheet)}.${canonicalHeader(mapping.header)}.${mapping.trPath.trim().toLowerCase()}`;
+    const pathIdentity = mapping.trPath.trim().toLowerCase();
+    const key = `${canonicalHeader(mapping.sheet)}.${pathIdentity || `header:${canonicalHeader(mapping.header)}`}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -549,6 +550,64 @@ function appendPreservedParameterMappingSheet(
   XLSX.utils.book_append_sheet(workbook, worksheet, PARAM_MAPPING_SHEET);
 }
 
+function orderedDeduplicatedSheetRows(
+  configs: readonly ParamConfigSpreadsheetRow[],
+  sheetName: string,
+  rows: Array<Record<string, unknown>>,
+): { headers: string[]; rows: Array<Record<string, unknown>> } {
+  const rawHeaders = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  const rawHeaderSet = new Set(rawHeaders);
+  const mappings = configs.flatMap((config) => config.workbookMappings ?? [])
+    .filter((mapping) => canonicalHeader(mapping.sheet) === canonicalHeader(sheetName));
+  const mappingByHeader = new Map<string, ParamConfigWorkbookMapping>();
+  for (const mapping of mappings) {
+    const key = canonicalHeader(mapping.header);
+    if (!mappingByHeader.has(key)) mappingByHeader.set(key, mapping);
+  }
+  const templateHeaders = configs.flatMap((config) => (
+    getParamConfigTemplateSheets(config.deviceType)?.[sheetName] ?? []
+  )).filter((header, index, all) => rawHeaderSet.has(header) && all.indexOf(header) === index);
+  const candidates = Array.from(new Set([
+    ...templateHeaders,
+    ...mappings.map((mapping) => mapping.header).filter((header) => rawHeaderSet.has(header)),
+    ...rawHeaders,
+  ]));
+  const aliasesByIdentity = new Map<string, string[]>();
+  const headers: string[] = [];
+  for (const header of candidates) {
+    const mapping = mappingByHeader.get(canonicalHeader(header));
+    const identity = mapping?.trPath.trim()
+      ? `path:${mapping.trPath.trim().toLowerCase()}`
+      : `header:${canonicalHeader(header)}`;
+    const aliases = aliasesByIdentity.get(identity);
+    if (aliases) {
+      aliases.push(header);
+    } else {
+      aliasesByIdentity.set(identity, [header]);
+      headers.push(header);
+    }
+  }
+  const aliasesByHeader = new Map(headers.map((header) => {
+    const mapping = mappingByHeader.get(canonicalHeader(header));
+    const identity = mapping?.trPath.trim()
+      ? `path:${mapping.trPath.trim().toLowerCase()}`
+      : `header:${canonicalHeader(header)}`;
+    return [header, aliasesByIdentity.get(identity) ?? [header]] as const;
+  }));
+  return {
+    headers,
+    rows: rows.map((row) => Object.fromEntries(headers.map((header) => {
+      const aliases = aliasesByHeader.get(header) ?? [header];
+      const populatedAlias = aliases.find((alias) => {
+        const value = row[alias];
+        return value !== undefined && value !== null && String(value).trim() !== '';
+      });
+      const fallbackAlias = aliases.find((alias) => row[alias] !== undefined);
+      return [header, row[populatedAlias ?? fallbackAlias ?? header] ?? ''];
+    }))),
+  };
+}
+
 export function createParamConfigWorkbook(
   configs: readonly ParamConfigSpreadsheetRow[],
 ): XLSX.WorkBook {
@@ -562,10 +621,11 @@ export function createParamConfigWorkbook(
         sanitizeRetiredParamConfigFields(config.sheetParameters ?? {})[sheetName] ?? []
       ));
       if (rows.length === 0) continue;
-      const headers = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+      const normalized = orderedDeduplicatedSheetRows(configs, sheetName, rows);
+      const { headers } = normalized;
       const worksheet = XLSX.utils.aoa_to_sheet([
         headers,
-        ...rows.map((row) => headers.map((header) => row[header] ?? '')),
+        ...normalized.rows.map((row) => headers.map((header) => row[header] ?? '')),
       ]);
       XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
     }
