@@ -8812,7 +8812,6 @@ export default function NorthboundPageConfig() {
                     {selectedReportStatus.artifactPath}
                   </Typography.Text>
                 </Descriptions.Item>
-                <Descriptions.Item label="结果摘要" span={2}>{selectedReportStatus.targetSummary}</Descriptions.Item>
                 <Descriptions.Item label="说明" span={2}>{selectedReportStatus.detail}</Descriptions.Item>
               </Descriptions>
             </div>

@@ -91,10 +91,10 @@ type FileGroup struct {
 	CompressionEnabled bool              `json:"compression_enabled"`
 	CompressionFormat  CompressionFormat `json:"compression_format,omitempty"`
 	Objects            []ScenarioObject  `json:"objects"`
-	// SelectedFields narrows which catalog field keys this group exports.
-	// Empty/nil = export all catalog fields for each object (default, backward compatible);
-	// non-empty = export only fields whose Key is listed. Keys are domain+object scoped
-	// (see FieldDefinition.Key), so a group-level union list partitions correctly per object.
+	// SelectedFields narrows which fields this group exports.
+	// Empty/nil = export all fields for each object (default, backward compatible).
+	// Non-PM domains store FieldDefinition.Key; PM stores metric IDs/paths because
+	// generated columns come from the PM indicator dictionary.
 	SelectedFields []string `json:"selected_fields,omitempty"`
 }
 

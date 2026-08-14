@@ -516,12 +516,13 @@ func (r *PgRepository) UpdateFileRunLocalArchive(ctx context.Context, id string,
 	row := r.pool.QueryRow(ctx, `
 UPDATE northbound_file_runs
    SET artifact_content = CASE WHEN $3 THEN '' ELSE artifact_content END,
+       artifact_size = $4,
        summary = COALESCE(summary, '{}'::jsonb) || $2::jsonb
  WHERE id::text = $1
  RETURNING id::text, profile_kind, profile_code, group_id, domain, object_code, status,
            window_start, window_end, artifact_path, artifact_name, artifact_content,
            artifact_size, row_count, compression_enabled, COALESCE(compression_format, ''),
-           error_message, summary, created_at, updated_at`, id, patch, clearContent)
+           error_message, summary, created_at, updated_at`, id, patch, clearContent, result.Bytes)
 	return scanFileRun(row)
 }
 
@@ -763,19 +764,74 @@ func (r *PgRepository) LoadPMMetricRows(ctx context.Context, req PMMetricQuery) 
 	}
 	args = append(args, normalizeLimit(req.Limit))
 	query := fmt.Sprintf(`
-SELECT
-  COALESCE(device_sn, ''),
-  COALESCE(metric_path, ''),
-  COALESCE(metric_type, ''),
-  COALESCE(metric_value::text, ''),
-  COALESCE(statis_type, ''),
-  COALESCE(granularity, ''),
-  COALESCE(end_time::text, ''),
-  COALESCE(object_ldn, '')
-FROM pm_metrics
-WHERE %s
-ORDER BY end_time DESC
-LIMIT $%d`, strings.Join(where, " AND "), len(args))
+WITH filtered AS (
+	SELECT
+	  id,
+	  device_sn,
+	  metric_path,
+	  metric_type,
+	  metric_value,
+	  statis_type,
+	  granularity,
+	  end_time,
+	  object_ldn,
+	  ingest_time
+	FROM pm_metrics
+	WHERE %s
+),
+row_keys AS (
+	SELECT
+	  COALESCE(device_sn, '') AS device_sn,
+	  COALESCE(object_ldn, '') AS object_ldn,
+	  COALESCE(granularity, '') AS granularity,
+	  end_time
+	FROM filtered
+	GROUP BY COALESCE(device_sn, ''), COALESCE(object_ldn, ''), COALESCE(granularity, ''), end_time
+	ORDER BY end_time DESC, device_sn ASC, object_ldn ASC, granularity ASC
+	LIMIT $%d
+),
+latest AS (
+	SELECT DISTINCT ON (
+	  COALESCE(f.device_sn, ''),
+	  COALESCE(f.object_ldn, ''),
+	  COALESCE(f.granularity, ''),
+	  f.end_time,
+	  COALESCE(f.metric_path, '')
+	)
+	  COALESCE(f.device_sn, '') AS device_sn,
+	  COALESCE(f.metric_path, '') AS metric_path,
+	  COALESCE(f.metric_type, '') AS metric_type,
+	  COALESCE(f.metric_value::text, '') AS metric_value,
+	  COALESCE(f.statis_type, '') AS statis_type,
+	  COALESCE(f.granularity, '') AS granularity,
+	  COALESCE(f.end_time::text, '') AS end_time,
+	  COALESCE(f.object_ldn, '') AS object_ldn
+	FROM filtered f
+	JOIN row_keys k
+	  ON COALESCE(f.device_sn, '') = k.device_sn
+	 AND COALESCE(f.object_ldn, '') = k.object_ldn
+	 AND COALESCE(f.granularity, '') = k.granularity
+	 AND f.end_time = k.end_time
+	ORDER BY
+	  COALESCE(f.device_sn, ''),
+	  COALESCE(f.object_ldn, ''),
+	  COALESCE(f.granularity, ''),
+	  f.end_time,
+	  COALESCE(f.metric_path, ''),
+	  f.ingest_time DESC,
+	  f.id DESC
+)
+	SELECT
+	  device_sn,
+	  metric_path,
+	  metric_type,
+	  metric_value,
+	  statis_type,
+	  granularity,
+	  end_time,
+	  object_ldn
+	FROM latest
+	ORDER BY end_time DESC, device_sn ASC, object_ldn ASC, granularity ASC, metric_path ASC`, strings.Join(where, " AND "), len(args))
 
 	rows, err := r.tsPool.Query(ctx, query, args...)
 	if err != nil {

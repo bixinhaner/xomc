@@ -53,6 +53,9 @@ type fakeRepository struct {
 	events            []PageConfigEvent
 	deviceRows        []ExportDataRow
 	pmRows            []ExportDataRow
+	pmMetricQueries   []PMMetricQuery
+	pmFieldFilters    []FieldFilter
+	pmFieldsByCombo   map[string][]FieldDefinition
 	mrRows            []ExportDataRow
 	logRows           []ExportDataRow
 }
@@ -156,7 +159,7 @@ func newFakeRepository() *fakeRepository {
 		}},
 		pmRows: []ExportDataRow{{
 			"pm.device_sn":    "SN0001",
-			"pm.metric_path":  "InternetGatewayDevice.Services.FAPService.1.PerfMgmt.PM.Counter.PUSCHPRBUsage",
+			"pm.metric_path":  "C001",
 			"pm.metric_type":  "counter",
 			"pm.metric_value": "12",
 			"pm.statis_type":  "avg",
@@ -312,6 +315,7 @@ func (r *fakeRepository) UpdateFileRunLocalArchive(_ context.Context, id string,
 		if clearContent {
 			r.runs[i].ArtifactContent = ""
 		}
+		r.runs[i].ArtifactSize = result.Bytes
 		r.runs[i].UpdatedAt = time.Now()
 		return &r.runs[i], nil
 	}
@@ -330,7 +334,8 @@ func (r *fakeRepository) LoadOMCInventoryRows(context.Context) ([]ExportDataRow,
 	}}, nil
 }
 
-func (r *fakeRepository) LoadPMMetricRows(context.Context, PMMetricQuery) ([]ExportDataRow, error) {
+func (r *fakeRepository) LoadPMMetricRows(_ context.Context, req PMMetricQuery) ([]ExportDataRow, error) {
+	r.pmMetricQueries = append(r.pmMetricQueries, req)
 	return r.pmRows, nil
 }
 
@@ -342,23 +347,43 @@ func (r *fakeRepository) LoadLogRows(context.Context, string, time.Time, time.Ti
 	return r.logRows, nil
 }
 
-func (r *fakeRepository) ListPMMetricFields(context.Context, FieldFilter) ([]FieldDefinition, error) {
-	return []FieldDefinition{{
-		Key:           "pm.pc.lte.C001",
-		Domain:        DomainPM,
-		ObjectCode:    "PC",
-		Tech:          "LTE",
-		OutputAlias:   "PUSCHPRBUsage",
-		SystemField:   "C001",
-		Source:        "perf_indicators_enb.id -> pm_metrics.metric_path",
-		DataType:      "number",
-		Renderer:      "number",
-		MetricType:    "counter",
-		StatisType:    "avg",
-		Unit:          "%",
-		CnName:        "PUSCH PRB 使用率",
-		SupportStatus: SupportSupported,
-	}}, nil
+func (r *fakeRepository) ListPMMetricFields(_ context.Context, filter FieldFilter) ([]FieldDefinition, error) {
+	r.pmFieldFilters = append(r.pmFieldFilters, filter)
+	if r.pmFieldsByCombo != nil {
+		return r.pmFieldsByCombo[pmFieldComboKey(filter.ObjectCode, filter.Tech)], nil
+	}
+	return []FieldDefinition{
+		{
+			Key:           "pm.pc.lte.C001",
+			Domain:        DomainPM,
+			ObjectCode:    "PC",
+			Tech:          "LTE",
+			OutputAlias:   "PUSCHPRBUsage",
+			SystemField:   "C001",
+			Source:        "perf_indicators_enb.id -> pm_metrics.metric_path",
+			DataType:      "number",
+			Renderer:      "number",
+			MetricType:    "counter",
+			StatisType:    "avg",
+			Unit:          "%",
+			CnName:        "PUSCH PRB 使用率",
+			SupportStatus: SupportSupported,
+		},
+		{
+			Key:           "pm.pc.lte.C002",
+			Domain:        DomainPM,
+			ObjectCode:    "PC",
+			Tech:          "LTE",
+			OutputAlias:   "EmptyCounter",
+			SystemField:   "C002",
+			Source:        "perf_indicators_enb.id -> pm_metrics.metric_path",
+			DataType:      "number",
+			Renderer:      "number",
+			MetricType:    "counter",
+			StatisType:    "sum",
+			SupportStatus: SupportSupported,
+		},
+	}, nil
 }
 
 func (r *fakeRepository) ListDeviceInfoFields(_ context.Context, filter FieldFilter) ([]FieldDefinition, error) {
@@ -374,11 +399,35 @@ func (r *fakeRepository) ListDeviceInfoFields(_ context.Context, filter FieldFil
 func (r *fakeRepository) ValidatePMMetricPaths(_ context.Context, metricPaths []string) ([]string, error) {
 	missing := make([]string, 0)
 	for _, path := range normalizeMetricPaths(metricPaths) {
-		if path != "C001" && path != "InternetGatewayDevice.Services.FAPService.1.PerfMgmt.PM.Counter.PUSCHPRBUsage" {
+		if path != "C001" && path != "C002" && path != "InternetGatewayDevice.Services.FAPService.1.PerfMgmt.PM.Counter.PUSCHPRBUsage" {
 			missing = append(missing, path)
 		}
 	}
 	return missing, nil
+}
+
+func pmFieldComboKey(objectCode, tech string) string {
+	return strings.ToUpper(strings.TrimSpace(objectCode)) + "/" + pmExportTech(tech)
+}
+
+func pmTestMetricField(objectCode, tech, id string) FieldDefinition {
+	metricType := "counter"
+	if strings.EqualFold(objectCode, "PE") {
+		metricType = "kpi"
+	}
+	return FieldDefinition{
+		Key:           strings.ToLower("pm." + objectCode + "." + tech + "." + id),
+		Domain:        DomainPM,
+		ObjectCode:    objectCode,
+		Tech:          pmExportTech(tech),
+		OutputAlias:   id + "_Alias",
+		SystemField:   id,
+		Source:        "test_indicator.id -> pm_metrics.metric_path",
+		DataType:      "number",
+		Renderer:      "number",
+		MetricType:    metricType,
+		SupportStatus: SupportSupported,
+	}
 }
 
 func (r *fakeRepository) ListDeliveryTargets(_ context.Context, filter DeliveryTargetFilter) ([]DeliveryTarget, error) {
@@ -1563,8 +1612,116 @@ func TestRunFileProfileHonorsCSVSeparator(t *testing.T) {
 	run := resp.Items[0]
 	lines := strings.Split(strings.TrimSpace(run.ArtifactContent), "\n")
 	require.NotEmpty(t, lines)
-	require.Equal(t, "Device SN|Metric Path|Metric Type|Metric Value|Statis Type|Granularity|End Time|Object LDN", lines[0])
-	require.Contains(t, lines[1], "SN0001|InternetGatewayDevice.Services.FAPService.1.PerfMgmt.PM.Counter.PUSCHPRBUsage|counter|12|avg|15min|2026-08-04 16:45:00+08|")
+	require.Equal(t, "Device SN|Granularity|End Time|Object LDN|PUSCHPRBUsage|EmptyCounter", lines[0])
+	require.Equal(t, "SN0001|15min|2026-08-04 16:45:00+08||12|", lines[1])
+}
+
+func TestRunFileProfilePMWideExportKeepsEmptyMetricColumns(t *testing.T) {
+	repo := newFakeRepository()
+	pmGroup := group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, []ScenarioObject{{Code: "PC", Tech: "LTE"}})
+	pmGroup.CompressionEnabled = false
+	repo.fileProfiles = []FileProfile{
+		fileProfile("S0001", "Northbound PM", "Standard", "Standard", []string{"baseline"}, []FileGroup{pmGroup}),
+	}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	windowEnd := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S0001", RunProfileRequest{
+		GroupID:   "pm-15m",
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	run := resp.Items[0]
+	require.Equal(t, 1, run.RowCount)
+	lines := strings.Split(strings.TrimSpace(run.ArtifactContent), "\n")
+	require.Equal(t, "Device SN,Granularity,End Time,Object LDN,PUSCHPRBUsage,EmptyCounter", lines[0])
+	require.Equal(t, "SN0001,15min,2026-08-04 16:45:00+08,,12,", lines[1])
+}
+
+func TestDefaultPMFileProfilesResolveDictionaryFieldsForEveryScenario(t *testing.T) {
+	catalog := NewDefaultCatalog()
+	repo := newFakeRepository()
+	repo.pmFieldsByCombo = map[string][]FieldDefinition{
+		pmFieldComboKey("PC", "LTE"): {pmTestMetricField("PC", "LTE", "LTE_PC_C001")},
+		pmFieldComboKey("PE", "LTE"): {pmTestMetricField("PE", "LTE", "LTE_PE_K001")},
+		pmFieldComboKey("PC", "GNB"): {pmTestMetricField("PC", "GNB", "GNB_PC_C001")},
+		pmFieldComboKey("PC", "GSM"): {pmTestMetricField("PC", "GSM", "GSM_PC_C001")},
+	}
+	svc := NewServiceWithRepository(catalog, repo)
+
+	checked := make(map[string]int)
+	totalPMObjects := 0
+	for _, profile := range catalog.FileProfiles() {
+		for _, group := range profile.Groups {
+			if group.Domain != DomainPM {
+				continue
+			}
+			require.Empty(t, group.SelectedFields, "%s/%s default PM group should not pin non-system metric IDs", profile.Code, group.ID)
+			for _, object := range group.Objects {
+				baseFields := catalog.Fields(FieldFilter{
+					Domain:     group.Domain,
+					ObjectCode: object.Code,
+					Tech:       object.Tech,
+					Profile:    object.Profile,
+				})
+				fields, metricPaths, err := svc.pmExportFields(context.Background(), group, object, baseFields, pmExportTech(object.Tech))
+				require.NoError(t, err, "%s/%s/%s/%s", profile.Code, group.ID, object.Code, object.Tech)
+				require.NotEmpty(t, fields, "%s/%s/%s/%s", profile.Code, group.ID, object.Code, object.Tech)
+				require.NotEmpty(t, metricPaths, "%s/%s/%s/%s", profile.Code, group.ID, object.Code, object.Tech)
+
+				combo := pmFieldComboKey(object.Code, object.Tech)
+				require.NotEmpty(t, repo.pmFieldsByCombo[combo], "missing PM dictionary fields for %s", combo)
+				require.Equal(t, repo.pmFieldsByCombo[combo][0].SystemField, metricPaths[0])
+				checked[combo]++
+				totalPMObjects++
+			}
+		}
+	}
+
+	require.Equal(t, 26, totalPMObjects)
+	require.Equal(t, map[string]int{
+		pmFieldComboKey("PC", "LTE"): 17,
+		pmFieldComboKey("PE", "LTE"): 5,
+		pmFieldComboKey("PC", "GNB"): 2,
+		pmFieldComboKey("PC", "GSM"): 2,
+	}, checked)
+	for _, filter := range repo.pmFieldFilters {
+		require.Contains(t, []string{"LTE", "GNB", "GSM"}, filter.Tech)
+	}
+}
+
+func TestRunDefaultPMProfileTreatsBlankTechAsLTE(t *testing.T) {
+	repo := newFakeRepository()
+	repo.pmFieldsByCombo = map[string][]FieldDefinition{
+		pmFieldComboKey("PC", "LTE"): {pmTestMetricField("PC", "LTE", "LTE_PC_C001")},
+	}
+	repo.pmRows = []ExportDataRow{{
+		"pm.device_sn":    "SN0001",
+		"pm.metric_path":  "LTE_PC_C001",
+		"pm.metric_type":  "counter",
+		"pm.metric_value": "12",
+		"pm.statis_type":  "avg",
+		"pm.granularity":  "15min",
+		"pm.end_time":     "2026-08-04 16:45:00+08",
+		"pm.object_ldn":   "",
+	}}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	windowEnd := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S0001", RunProfileRequest{
+		GroupID:   "pm-15m",
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	require.Equal(t, RunStatusSuccess, resp.Items[0].Status)
+	require.NotEmpty(t, repo.pmMetricQueries)
+	require.Equal(t, "LTE", repo.pmMetricQueries[0].Tech)
 }
 
 func TestRunFileProfileWithNoPMDataMarksNoArtifact(t *testing.T) {
@@ -1683,6 +1840,7 @@ func TestRunFileProfileUsesConfiguredHostAndFlatArchivePath(t *testing.T) {
 	require.Len(t, archive.puts, 1)
 	require.Equal(t, "Baicells-PC-172.24.224.251-1.0-20260813170000-15.csv.zip", resp.Items[0].ArtifactName)
 	require.Equal(t, resp.Items[0].CreatedAt.Local().Format("2006-01-02")+"/S0001/pm-15m/Baicells-PC-172.24.224.251-1.0-20260813170000-15.csv.zip", archive.puts[0].Key)
+	require.Equal(t, int64(len(archive.puts[0].Content)), resp.Items[0].ArtifactSize)
 	require.NotContains(t, archive.puts[0].Key, resp.Items[0].ID)
 	require.NotContains(t, archive.puts[0].Key, "127.0.0.1")
 	require.NotContains(t, archive.puts[0].Key, "10.10.10.10")
@@ -1751,6 +1909,7 @@ func TestRunInventoryProfileUsesTransferHostAndFlatArchivePath(t *testing.T) {
 	require.Len(t, archive.puts, 1)
 	require.Equal(t, "inventory_eNB_172.24.224.251_20260813170000.csv.zip", run.ArtifactName)
 	require.Equal(t, run.CreatedAt.Local().Format("2006-01-02")+"/ENB/inventory_eNB_172.24.224.251_20260813170000.csv.zip", archive.puts[0].Key)
+	require.Equal(t, int64(len(archive.puts[0].Content)), run.ArtifactSize)
 	require.Empty(t, run.ArtifactContent)
 	require.NotContains(t, archive.puts[0].Key, run.ID)
 	require.NotContains(t, archive.puts[0].Key, "127.0.0.1")
