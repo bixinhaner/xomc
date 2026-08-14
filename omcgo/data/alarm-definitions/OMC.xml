@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<alarmModel neType="OMC" deviceType="0" totalCount="28">
+<alarmModel neType="OMC" deviceType="0" totalCount="29">
     <alarms>
         <alarm identifier="9" cnName="CPE网络断开" enName="CPE Disconnected" severity="Critical" eventType="30000" cnProbableCause="CPE与网管之间连线断开" enProbableCause="The connection between the CPE and the OMC is disconnected.Network failure between CPE and OMC." cnSuggestion="（1）检测传输链路是否正常
 （2）检查网管地址配置是否正确" enSuggestion="1. Check if the network is avaliable.
@@ -70,5 +70,8 @@
         <alarm identifier="7" cnName="eNB网络断开" enName="eNB Disconnected" severity="Critical" eventType="30000" cnProbableCause="基站与网管之间连线断开" enProbableCause="The connection between the base station and the OMC is disconnected.Network failure between base station and OMC." cnSuggestion="（1）检测传输链路是否正常
 （2）检查网管地址配置是否正确" enSuggestion="1. Check if the network is avaliable.
 2. Check if the configuration of OMC server address is correct." isShow="Y" />
+        <alarm identifier="40" cnName="License容量已满" enName="License Capacity Exhausted" severity="Warning" eventType="30003" cnProbableCause="某网元类型已接入设备数达到License容量上限，新设备被拒绝接入" enProbableCause="The number of registered devices of a network-element type has reached the license capacity limit; new device registration is rejected." cnSuggestion="（1）删除不再需要的设备以释放容量
+（2）上传容量更大的License" enSuggestion="1. Delete unneeded devices to free capacity.
+2. Upload a license with a larger capacity." isShow="Y" />
     </alarms>
 </alarmModel>

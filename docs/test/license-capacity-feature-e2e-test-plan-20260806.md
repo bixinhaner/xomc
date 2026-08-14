@@ -25,7 +25,11 @@
 - **绕过签名的 dev 测试**：可直接 SQL 伪造 `system_license` 行（设 `feature_list.authorization_tree` / `expiry_date` / `devices_support`），见 recap §C。
 
 ### 2.2 容量口径
-`EnforceCapacity` 把 `devices_support` 所有正容量求和作为总容量；设备计数是**全表 `SELECT COUNT(*) FROM devices`**（不分类型/状态/运营商）。→ 容量边界按全表设备数算；测试库要干净或算上存量。
+`EnforceCapacity(ctx, deviceType, additional)` 按**网元类型独立限额**（per-type，issue #316）：先解析 `productClass → product.alarm_ne_type`，再查 `devices_support[deviceType]`（大小写不敏感：license key `eNB`/`gNB` ↔ 设备 `ENB`/`GNB`）。
+- license 未授权该类型（map 无此 key 或配额<=0）→ 拒绝 `ErrLicenseCapacityExceeded`（严格模式）。
+- productClass 未登记产品（orphan）/ 取不到 ne_type → 拒绝注册（严格模式）。
+- 该类型已用 + 新增 > 配额 → 拒绝；各类型互不影响（eNB 满不挡 gNB）。
+- 设备计数按 `SELECT UPPER(alarm_ne_type), COUNT(*) FROM devices LEFT JOIN products GROUP BY` 分类型统计；`quota.max_devices`/`used_devices` 总量展示仍用全表 `COUNT(*)`。
 
 ### 2.3 过期口径
 `EnforceExpiry` 三层：①`expiry_date` 日期过期；②累计使用时长 `>= time_limit_hours`；③系统时间回拨（`now < last_visited_time`）。NULL `expiry_date` = 永久（仅跳过①，②③仍生效）。
@@ -285,8 +289,8 @@ curl -X POST http://localhost:18081/api/v1/devices -H "X-API-Key: $KEY" -H 'Cont
 
 | 风险 | 状态/建议 |
 |---|---|
-| CPE Inform 自动注册绕过 enforcer | 待产品决策；要全链路拦截需接 `RegisterFromInform`（E-04） |
-| 容量是各类型配额之和，无 per-type gating | 增 `device_type` 维度 enforcer + 独立计数（Phase 7 RBAC） |
+| ~~CPE Inform 自动注册绕过 enforcer~~ | 已修复：`RegisterFromInform`（device_service.go）接入 enforcer（E-04） |
+| ~~容量是各类型配额之和，无 per-type gating~~ | 已修复（issue #316）：per-type gating 上线，按网元类型独立限额；license 未授权类型 / ne_type 未知一律严格拒绝 |
 | monitor 用真实 cron，30/7/1 天慢 | 注入 clock / 直调 monitor 检查方法 |
 | 测试签发工具不在仓库 | 受控外部签发环境生成 fixture |
 | 前端 typecheck 受既有依赖影响 | 浏览器验收与 Docker Vite 构建分别记录 |

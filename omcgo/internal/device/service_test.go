@@ -13,6 +13,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -516,13 +517,15 @@ func TestDeviceService_RegisterFromInform_DeletedDeviceSkipped(t *testing.T) {
 
 // mockLicenseEnforcer 是 device.LicenseEnforcer 的测试 stub。
 type mockLicenseEnforcer struct {
-	capacityErr error
-	expiryErr   error
-	capacityArg int
-	expiryOp    string
+	capacityErr  error
+	expiryErr    error
+	capacityArg  int
+	capacityType string
+	expiryOp     string
 }
 
-func (m *mockLicenseEnforcer) EnforceCapacity(_ context.Context, additional int) error {
+func (m *mockLicenseEnforcer) EnforceCapacity(_ context.Context, deviceType string, additional int) error {
+	m.capacityType = deviceType
 	m.capacityArg = additional
 	return m.capacityErr
 }
@@ -530,6 +533,14 @@ func (m *mockLicenseEnforcer) EnforceCapacity(_ context.Context, additional int)
 func (m *mockLicenseEnforcer) EnforceExpiry(_ context.Context, operation string) error {
 	m.expiryOp = operation
 	return m.expiryErr
+}
+
+// fixedNETypeMatcher 固定返回某个网元类型的 ProductClassMatcher stub，
+// 让 resolveNEType 在 per-type 容量校验测试中能成功解析出 ne_type。
+type fixedNETypeMatcher struct{ neType string }
+
+func (m *fixedNETypeMatcher) MatchProductClass(_ context.Context, _ string) (*product.MatchResult, error) {
+	return &product.MatchResult{Product: &product.Product{AlarmNeType: m.neType}}, nil
 }
 
 func TestDeviceService_RegisterFromInform_LicenseCapacityExceeded(t *testing.T) {
@@ -544,6 +555,7 @@ func TestDeviceService_RegisterFromInform_LicenseCapacityExceeded(t *testing.T) 
 		},
 	}
 	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	svc.SetProductMatcher(&fixedNETypeMatcher{neType: "eNB"})
 	enforcer := &mockLicenseEnforcer{capacityErr: commonerrors.ErrLicenseCapacityExceeded}
 	svc.SetLicenseEnforcer(enforcer)
 
@@ -551,6 +563,28 @@ func TestDeviceService_RegisterFromInform_LicenseCapacityExceeded(t *testing.T) 
 	require.ErrorIs(t, err, commonerrors.ErrLicenseCapacityExceeded)
 	assert.False(t, createCalled, "Create 不应在容量超限时被调用")
 	assert.Equal(t, 1, enforcer.capacityArg)
+	assert.Equal(t, "eNB", enforcer.capacityType)
+}
+
+func TestDeviceService_RegisterFromInform_LicenseCapacity_ProductNotRegistered(t *testing.T) {
+	// issue #316：productClass 未登记产品（resolveNEType 失败）→ 注册被拒。
+	createCalled := false
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(ctx context.Context, sn string) (*model.Device, error) {
+			return nil, nil
+		},
+		createFn: func(ctx context.Context, device *model.Device) error {
+			createCalled = true
+			return nil
+		},
+	}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	// 不注入 productMatcher → resolveNEType 返回 ErrLicenseCapacityExceeded
+	svc.SetLicenseEnforcer(&mockLicenseEnforcer{})
+
+	_, err := svc.RegisterFromInform(context.Background(), sampleInform("SN-ORPHAN"), model.CarrierCMCC)
+	require.ErrorIs(t, err, commonerrors.ErrLicenseCapacityExceeded)
+	assert.False(t, createCalled, "Create 不应在产品未登记时被调用")
 }
 
 func TestDeviceService_RegisterFromInform_LicenseExpired(t *testing.T) {

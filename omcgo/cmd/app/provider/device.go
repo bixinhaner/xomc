@@ -94,6 +94,8 @@ func initDeviceModule(c *Container) error {
 	}
 	deviceService.SetConnectionRequester(&taskCRSender{dispatcher: crDispatcher, serverAddr: c.Cfg.ConnReq.ServerAddr})
 	deviceService.SetStunAddressUpdater(stunStore)
+	// license 降容清理：DeviceService.OfflineExcessDevices 委托 deviceRepo 批量置离线。
+	deviceService.SetExcessOffliner(deviceRepo)
 	deviceMetrics := device.NewDeviceMetrics(c.MetricsReg)
 	deviceService.SetMetrics(deviceMetrics)
 
