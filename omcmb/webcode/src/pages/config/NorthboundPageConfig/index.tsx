@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Pagination,
   Select,
   Space,
@@ -22,6 +23,8 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import {
   ApiOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
   CopyOutlined,
   DatabaseOutlined,
   DeleteOutlined,
@@ -30,6 +33,7 @@ import {
   EyeOutlined,
   FileSearchOutlined,
   FileTextOutlined,
+  LoadingOutlined,
   MoreOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -180,6 +184,10 @@ type ReportState = 'success' | 'failed' | 'running' | 'idle';
 type ReportArtifactType = 'file' | 'message';
 type ProfileHealthState = 'normal' | 'broken' | 'pending' | 'terminated';
 
+const REPORT_TRANSFER_FAILED_TEXT = '生成成功，传输失败';
+const REPORT_TRANSFER_FAILED_SHORT_TEXT = '传输失败';
+const REPORT_TRANSFER_FAILED_DETAIL = '文件已生成，但 FTP/SFTP 传输目标上传失败，请查看投递结果。';
+
 interface ProfileHealthInfo {
   state: ProfileHealthState;
   label: string;
@@ -224,6 +232,22 @@ interface ReportStatusInfo {
   copyLabel?: string;
   resultTitle?: string;
 }
+
+interface DeliveryTestResultInfo {
+  event: NorthboundPageConfigEvent;
+  title: string;
+}
+
+interface DeliveryTestDisplayInfo {
+  state: ReportState;
+  statusText: string;
+  target: string;
+  tcpText: string;
+  authText: string;
+  message: string;
+}
+
+type DeliveryEventsByRunId = Record<string, NorthboundPageConfigEvent[]>;
 
 interface MessageFieldRow {
   key: string;
@@ -1319,16 +1343,20 @@ function cloneDeliveryTargets(scopeKey: string): DeliveryTargetRow[] {
   }));
 }
 
+function createDeliveryTargetKey(scopeKey: string): string {
+  return `${scopeKey}-delivery-custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function createDeliveryTarget(scopeKey: string, index: number): DeliveryTargetRow {
   return {
-    key: `${scopeKey}-delivery-custom-${Date.now()}`,
+    key: createDeliveryTargetKey(scopeKey),
     name: `新增传输目标 ${index}`,
     enabled: false,
     protocol: 'SFTP',
     host: '',
     port: 22,
     username: '',
-    credential: '未设置',
+    credential: '',
     authMode: 'PASSWORD',
     remoteRoot: '/northupload',
     retryTimes: 3,
@@ -3737,7 +3765,7 @@ function mapApiDeliveryTarget(target: NorthboundDeliveryTarget): DeliveryTargetR
     host: target.host,
     port: target.port,
     username: target.username,
-    credential: target.credential_set ? '已加密存储' : '',
+    credential: target.credential || (target.credential_set ? storedCredentialText : ''),
     authMode: target.auth_mode,
     remoteRoot: target.remote_root,
     retryTimes: target.retry_times,
@@ -3766,7 +3794,8 @@ function serializeDeliveryTargets(
       host: row.host,
       port: row.port,
       username: row.username,
-      credential: row.credential === '已加密存储' ? '' : row.credential,
+      credential: row.credential === storedCredentialText ? '' : row.credential,
+      credential_set: row.credential === storedCredentialText,
       auth_mode: row.authMode,
       remote_root: row.remoteRoot,
       retry_times: row.retryTimes,
@@ -3784,6 +3813,11 @@ function serializeDeliveryTarget(
   row: DeliveryTargetRow,
 ) {
   return serializeDeliveryTargets(scope, ownerCode, [row]).items[0];
+}
+
+function deliveryTargetHasCredential(row: DeliveryTargetRow): boolean {
+  const credential = row.credential ?? '';
+  return credential === storedCredentialText || credential.trim() !== '';
 }
 
 function normalizeFileDeliveryOwnerCode(code?: string): string {
@@ -3813,9 +3847,9 @@ function mapApiSnmpTarget(target: NorthboundSNMPAlarmTarget): SnmpAlarmTargetRow
     community,
     securityName: target.security_name,
     authProtocol: target.auth_protocol,
-    authCredential: target.auth_credential_set ? storedCredentialText : target.auth_credential,
+    authCredential: target.auth_credential || (target.auth_credential_set ? storedCredentialText : ''),
     privProtocol: target.priv_protocol,
-    privCredential: target.priv_credential_set ? storedCredentialText : target.priv_credential,
+    privCredential: target.priv_credential || (target.priv_credential_set ? storedCredentialText : ''),
     mibQueryEnabled: target.mib_query_enabled,
     clearSeverityPolicy: target.clear_severity_policy,
     timeoutSeconds: target.timeout_seconds,
@@ -4328,6 +4362,17 @@ function effectiveReportStatus(info: ReportStatusInfo, enabled: boolean): Report
   };
 }
 
+function runTriggerDescription(run: NorthboundFileRun): string {
+  const triggerReason = typeof run.summary?.trigger_reason === 'string'
+    ? run.summary.trigger_reason.toLowerCase()
+    : '';
+  const triggerText = triggerReason === 'auto' || triggerReason === 'automatic' || triggerReason === 'scheduled'
+    ? '自动生成记录'
+    : '手动生成记录';
+  const subject = run.profile_code || run.object_code || '当前任务';
+  return `${subject} ${triggerText}。`;
+}
+
 function buildRunReportStatus(run: NorthboundFileRun, fallbackCapabilityName: string): ReportStatusInfo {
   const state: ReportState = run.status === 'success'
     ? 'success'
@@ -4348,8 +4393,8 @@ function buildRunReportStatus(run: NorthboundFileRun, fallbackCapabilityName: st
     artifactName: run.artifact_name || '-',
     artifactPath: run.artifact_path || '-',
     size: formatBytes(run.artifact_size),
-    targetSummary: `生成 ${run.row_count} 行，可在传输目标中测试连接`,
-    detail: run.error_message || `${run.profile_code} / ${run.group_id || run.object_code} 手动生成记录。`,
+    targetSummary: `生成 ${run.row_count} 行`,
+    detail: run.error_message || runTriggerDescription(run),
     payload,
   };
 }
@@ -4733,6 +4778,65 @@ function buildEventReportStatus(event: NorthboundPageConfigEvent, fallbackCapabi
   };
 }
 
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function boolValue(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function deliveryTargetTestKey(scope: 'file' | 'inventory' | 'socket', ownerCode: string, key: string) {
+  return `${scope}:${ownerCode}:${key}`;
+}
+
+function deliveryTargetTestTitle(row: DeliveryTargetRow): string {
+  const name = row.name.trim() || '传输目标';
+  const protocolPattern = new RegExp(`(^|[^A-Z0-9])${row.protocol}($|[^A-Z0-9])`, 'i');
+  return protocolPattern.test(name) ? name : `${name} ${row.protocol}`;
+}
+
+function deliveryTestEventValue(event: NorthboundPageConfigEvent, key: string): unknown {
+  const summary = event.summary ?? {};
+  const payload = parseJSONPayload(event.payload || '') ?? {};
+  return summary[key] ?? payload[key];
+}
+
+function deliveryTestTargetText(event: NorthboundPageConfigEvent): string {
+  const protocol = stringValue(deliveryTestEventValue(event, 'protocol'));
+  const host = stringValue(deliveryTestEventValue(event, 'host'));
+  const port = deliveryTestEventValue(event, 'port');
+  if (protocol && host) {
+    return `${protocol.toLowerCase()}://${host}${port ? `:${port}` : ''}`;
+  }
+  return event.artifact_path || '-';
+}
+
+function deliveryTestAuthText(event: NorthboundPageConfigEvent): string {
+  const supported = boolValue(deliveryTestEventValue(event, 'auth_probe_supported'));
+  const passed = boolValue(deliveryTestEventValue(event, 'auth_probe_passed'));
+  if (supported === false) return '未执行认证探测';
+  if (passed === true) return '认证通过';
+  if (passed === false) return '认证失败';
+  return '-';
+}
+
+function buildDeliveryTestDisplay(event: NorthboundPageConfigEvent): DeliveryTestDisplayInfo {
+  const state = reportStateFromEvent(event);
+  const message = event.error_message
+    || stringValue(deliveryTestEventValue(event, 'message'))
+    || (state === 'success' ? '连接测试通过' : '连接测试失败');
+  const tcpReachable = boolValue(deliveryTestEventValue(event, 'tcp_reachable'));
+  return {
+    state,
+    statusText: state === 'success' ? '测试通过' : '测试失败',
+    target: deliveryTestTargetText(event),
+    tcpText: tcpReachable === true ? 'TCP 可达' : tcpReachable === false ? 'TCP 不可达' : '-',
+    authText: deliveryTestAuthText(event),
+    message: state === 'success' ? '连接测试通过' : message,
+  };
+}
+
 function reportStateFromEvent(event: NorthboundPageConfigEvent): ReportState {
   if (event.status === 'success') return 'success';
   if (event.status === 'running') return 'running';
@@ -4805,6 +4909,68 @@ function summarizeDeliveryNote(events: NorthboundPageConfigEvent[]): string {
     return `${target} 失败（${reason}）`;
   });
   return `投递 ${events.length} 个目标（成功 ${success} / 失败 ${failed}）：${lines.join('；')}`;
+}
+
+function mergeRunDeliveryStatus(info: ReportStatusInfo, events: NorthboundPageConfigEvent[]): ReportStatusInfo {
+  const deliveryNote = summarizeDeliveryNote(events);
+  if (!deliveryNote) return info;
+  const failed = events.some((event) => event.status !== 'success');
+  if (!failed || info.state !== 'success') return { ...info, deliveryNote };
+  return {
+    ...info,
+    state: 'failed',
+    statusText: REPORT_TRANSFER_FAILED_TEXT,
+    targetSummary: deliveryNote,
+    detail: [info.detail, REPORT_TRANSFER_FAILED_DETAIL].filter(Boolean).join(' '),
+    deliveryNote,
+  };
+}
+
+function eventRunId(event: NorthboundPageConfigEvent): string {
+  const value = event.summary?.run_id;
+  return typeof value === 'string' ? value : '';
+}
+
+function groupDeliveryEventsByRunId(events: NorthboundPageConfigEvent[]): DeliveryEventsByRunId {
+  return events.reduce<DeliveryEventsByRunId>((acc, event) => {
+    if (event.event_type !== 'delivery') return acc;
+    const runId = eventRunId(event);
+    if (!runId) return acc;
+    acc[runId] = [...(acc[runId] ?? []), event];
+    return acc;
+  }, {});
+}
+
+function runHasFailedDelivery(run: NorthboundFileRun, eventsByRunId: DeliveryEventsByRunId): boolean {
+  if (run.status !== 'success') return false;
+  return (eventsByRunId[run.id] ?? []).some((event) => event.status !== 'success');
+}
+
+function selectInitialReportRun(
+  items: NorthboundFileRun[],
+  eventsByRunId: DeliveryEventsByRunId,
+): NorthboundFileRun | undefined {
+  return items.find((item) => runHasFailedDelivery(item, eventsByRunId))
+    ?? items.find((item) => item.status === 'success')
+    ?? items[0];
+}
+
+function reportRunDisplayState(
+  run: NorthboundFileRun,
+  eventsByRunId: DeliveryEventsByRunId,
+): { state: ReportState; label: string; tooltip?: string } {
+  const deliveryEvents = eventsByRunId[run.id] ?? [];
+  if (run.status === 'success' && deliveryEvents.some((event) => event.status !== 'success')) {
+    const note = summarizeDeliveryNote(deliveryEvents);
+    return {
+      state: 'failed',
+      label: REPORT_TRANSFER_FAILED_SHORT_TEXT,
+      tooltip: note ? `${REPORT_TRANSFER_FAILED_TEXT}：${note}` : REPORT_TRANSFER_FAILED_TEXT,
+    };
+  }
+  if (run.status === 'success') return { state: 'success', label: '成功' };
+  if (run.status === 'running') return { state: 'running', label: '生成中' };
+  return { state: 'failed', label: '失败' };
 }
 
 function eventStatusText(event: NorthboundPageConfigEvent): string {
@@ -5090,14 +5256,16 @@ function statusTag(enabled: boolean) {
   return enabled ? <Tag color="success">启用</Tag> : <Tag color="default">关闭</Tag>;
 }
 
-function reportStateTag(state: ReportState, label: string) {
+function reportStateTag(state: ReportState, label: string, tooltip?: string) {
   const colors: Record<ReportState, string> = {
     success: 'success',
     failed: 'error',
     running: 'processing',
     idle: 'default',
   };
-  return <Tag color={colors[state]}>{label}</Tag>;
+  const tag = <Tag color={colors[state]}>{label}</Tag>;
+  if (tooltip && tooltip !== label) return <Tooltip title={tooltip}>{tag}</Tooltip>;
+  return tag;
 }
 
 function deliveryProtocolTag(protocol: DeliveryProtocol) {
@@ -5208,10 +5376,10 @@ function normalizeMaskedCredentialInput(
 ): string {
   const isStored = storedValues.includes(currentValue);
   if (!nextValue) return '';
-  if ((!visible || isStored) && nextValue.startsWith(credentialMaskText)) {
+  if (isStored && nextValue.startsWith(credentialMaskText)) {
     return nextValue.slice(credentialMaskText.length);
   }
-  if (!visible && currentValue && credentialMaskText.startsWith(nextValue)) return '';
+  if (isStored && !visible && credentialMaskText.startsWith(nextValue)) return '';
   return nextValue;
 }
 
@@ -5228,7 +5396,7 @@ function MaskedCredentialInput({
   const currentValue = value ?? '';
   const hasValue = currentValue !== '';
   const isStored = storedValues.includes(currentValue);
-  const displayValue = hasValue && (!visible || isStored) ? credentialMaskText : currentValue;
+  const displayValue = hasValue && isStored ? credentialMaskText : currentValue;
 
   return (
     <Input.Password
@@ -5791,6 +5959,9 @@ export default function NorthboundPageConfig() {
   const [reportEventTotal, setReportEventTotal] = useState(0);
   const [reportEventLoading, setReportEventLoading] = useState(false);
   const [reportCapabilityName, setReportCapabilityName] = useState<string>('');
+  const [reportDeliveryEventsByRunId, setReportDeliveryEventsByRunId] = useState<DeliveryEventsByRunId>({});
+  const [deliveryTestResult, setDeliveryTestResult] = useState<DeliveryTestResultInfo | null>(null);
+  const [testingDeliveryTargetKey, setTestingDeliveryTargetKey] = useState('');
   const [fileLatestSuccessRuns, setFileLatestSuccessRuns] = useState<Record<string, NorthboundFileRun>>({});
   const [inventoryLatestSuccessRuns, setInventoryLatestSuccessRuns] = useState<Record<string, NorthboundFileRun>>({});
   const [fileProfileRunning, setFileProfileRunning] = useState<Record<string, boolean>>({});
@@ -5988,10 +6159,11 @@ export default function NorthboundPageConfig() {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'hidden') return;
       if (pageConfigLoadingRef.current || apiUserDirtyRef.current || apiUserSavingRef.current) return;
+      if (editorOpen || inventoryEditorOpen || socketEditor) return;
       void loadPageConfig(true);
     }, 30000);
     return () => window.clearInterval(timer);
-  }, [loadPageConfig]);
+  }, [editorOpen, inventoryEditorOpen, loadPageConfig, socketEditor]);
 
   const selectedInventoryConfig = useMemo(
     () => inventoryConfigs.find((row) => row.key === selectedInventoryType) ?? inventoryConfigs[0],
@@ -6131,21 +6303,31 @@ export default function NorthboundPageConfig() {
     scope: 'file' | 'inventory' | 'socket',
     ownerCode: string,
   ) => {
-    if (!row.host || !row.username) {
-      void message.warning(nt('请先填写主机地址和用户名'));
+    const missingFields: string[] = [];
+    if (!row.host.trim()) missingFields.push('主机地址');
+    if (!row.username.trim()) missingFields.push('用户名');
+    if (!deliveryTargetHasCredential(row)) missingFields.push('密码');
+    if (missingFields.length > 0) {
+      void message.warning(nt(`请先填写${missingFields.join('、')}`));
       return;
     }
-	    void northboundPageConfigApi.testDeliveryTarget(serializeDeliveryTarget(scope, ownerCode, row))
-	      .then((event) => {
-	        openSingleEventReport(event, `${row.name} ${row.protocol}`);
+    const testKey = deliveryTargetTestKey(scope, ownerCode, row.key);
+    const testTitle = deliveryTargetTestTitle(row);
+    setTestingDeliveryTargetKey(testKey);
+    void northboundPageConfigApi.testDeliveryTarget(serializeDeliveryTarget(scope, ownerCode, row))
+      .then((event) => {
+        setDeliveryTestResult({ event, title: testTitle });
         if (event.status === 'success') {
-          void message.success(nt(`${row.name} ${row.protocol} 连接测试通过`));
+          void message.success(nt(`${testTitle} 连接测试通过`));
         } else {
-          void message.warning(nt(`${row.name} ${row.protocol} 连接测试未通过`));
+          void message.warning(nt(`${testTitle} 连接测试未通过`));
         }
       })
       .catch(() => {
-        void message.error(nt(`${row.name} ${row.protocol} 连接测试失败`));
+        void message.error(nt(`${testTitle} 连接测试失败`));
+      })
+      .finally(() => {
+        setTestingDeliveryTargetKey((current) => (current === testKey ? '' : current));
       });
   };
 
@@ -6737,6 +6919,7 @@ export default function NorthboundPageConfig() {
     setReportEventTotal(1);
     setReportEventLoading(false);
     setReportCapabilityName(capabilityName);
+    setReportDeliveryEventsByRunId({});
     setSelectedReportStatus(buildEventReportStatus(event, capabilityName));
   };
 
@@ -6750,6 +6933,14 @@ export default function NorthboundPageConfig() {
     );
   };
 
+  const renderRunningStatusCell = (detail: string) => (
+    <Tooltip title={nt(detail)}>
+      <Tag color="processing" icon={<LoadingOutlined spin />}>
+        {nt('执行中')}
+      </Tag>
+    </Tooltip>
+  );
+
   const showLatestRunReport = (
     profileKind: 'file' | 'inventory',
     profileCode: string,
@@ -6759,6 +6950,7 @@ export default function NorthboundPageConfig() {
     setReportEventList([]);
     setReportEventTotal(0);
     setReportEventLoading(false);
+    setReportDeliveryEventsByRunId({});
     setReportCapabilityName(fallback.capabilityName);
     void northboundPageConfigApi
       .listRuns({ profile_kind: profileKind, profile_code: profileCode, limit: isFile ? 200 : 1 })
@@ -6800,6 +6992,7 @@ export default function NorthboundPageConfig() {
   const resolveRunReportStatus = async (
     run: NorthboundFileRun,
     fallbackCapabilityName: string,
+    deliveryEvents?: NorthboundPageConfigEvent[],
   ): Promise<ReportStatusInfo> => {
     // listRuns / dedupe items omit artifact_content; fetch the full run so the
     // preview reflects the selected object's actual file content.
@@ -6811,18 +7004,21 @@ export default function NorthboundPageConfig() {
         fullRun = run;
       }
     }
-	    const runStatus = buildRunReportStatus(fullRun, fallbackCapabilityName);
-	    try {
-	      const events = await northboundPageConfigApi.listEvents({
-	        capability: 'delivery',
-	        owner_code: run.profile_code,
-	        limit: 50,
-	        include_payload: false,
-	      });
+    const runStatus = buildRunReportStatus(fullRun, fallbackCapabilityName);
+    if (deliveryEvents) {
+      return mergeRunDeliveryStatus(runStatus, deliveryEvents);
+    }
+    try {
+      const events = await northboundPageConfigApi.listEvents({
+        capability: 'delivery',
+        owner_code: run.profile_code,
+        limit: 50,
+        include_payload: false,
+      });
       // Precisely match this run's delivery events by summary.run_id. Never fall
       // back to an unrelated event — the old `?? events.items[0]` crossed objects.
-      const deliveries = events.items.filter((event) => event.summary?.run_id === run.id);
-      return { ...runStatus, deliveryNote: summarizeDeliveryNote(deliveries) };
+      const deliveries = events.items.filter((event) => eventRunId(event) === run.id);
+      return mergeRunDeliveryStatus(runStatus, deliveries);
     } catch {
       return runStatus;
     }
@@ -6837,14 +7033,32 @@ export default function NorthboundPageConfig() {
     setReportRunList(items);
     setReportEventList([]);
     setReportEventTotal(0);
-    const firstRun = items.find((item) => item.status === 'success') ?? items[0];
-    if (firstRun) {
-      void resolveRunReportStatus(firstRun, capabilityName).then((info) => {
-        setSelectedReportStatus(info ?? fallback);
-      });
-    } else {
+    setReportDeliveryEventsByRunId({});
+    const firstAvailableRun = items.find((item) => item.status === 'success') ?? items[0];
+    if (!firstAvailableRun) {
       setSelectedReportStatus(fallback);
+      return;
     }
+    void northboundPageConfigApi.listEvents({
+      capability: 'delivery',
+      owner_code: firstAvailableRun.profile_code,
+      limit: 200,
+      include_payload: false,
+    })
+      .then((events) => {
+        const eventsByRunId = groupDeliveryEventsByRunId(events.items);
+        setReportDeliveryEventsByRunId(eventsByRunId);
+        const firstRun = selectInitialReportRun(items, eventsByRunId) ?? firstAvailableRun;
+        void resolveRunReportStatus(firstRun, capabilityName, eventsByRunId[firstRun.id] ?? [])
+          .then((info) => {
+            setSelectedReportStatus(info ?? fallback);
+          });
+      })
+      .catch(() => {
+        void resolveRunReportStatus(firstAvailableRun, capabilityName).then((info) => {
+          setSelectedReportStatus(info ?? fallback);
+        });
+      });
   };
 
   const selectReportEvent = (event: NorthboundPageConfigEvent, capabilityName: string) => {
@@ -6866,6 +7080,7 @@ export default function NorthboundPageConfig() {
     setReportRunList([]);
     setReportEventList([]);
     setReportEventTotal(0);
+    setReportDeliveryEventsByRunId({});
     setReportCapabilityName(fallback.capabilityName);
     setSelectedReportStatus(fallback);
     setReportEventLoading(true);
@@ -6926,19 +7141,65 @@ export default function NorthboundPageConfig() {
       .finally(() => setInventorySaving(row.key, false));
   };
 
+  const hasFailedDeliveryForRuns = async (profileCode: string, runs: NorthboundFileRun[]) => {
+    const runIds = new Set(runs.filter((run) => run.status === 'success').map((run) => run.id));
+    if (runIds.size === 0) return false;
+    try {
+      const events = await northboundPageConfigApi.listEvents({
+        capability: 'delivery',
+        owner_code: profileCode,
+        limit: 200,
+        include_payload: false,
+      });
+      const eventsByRunId = groupDeliveryEventsByRunId(events.items);
+      return runs.some((run) => runIds.has(run.id) && runHasFailedDelivery(run, eventsByRunId));
+    } catch {
+      return false;
+    }
+  };
+
   const runFileProfile = (row: ScenarioRow) => {
+    if (fileProfileRunning[row.code]) {
+      void message.open({
+        key: `northbound-file-run-${row.code}`,
+        type: 'info',
+        content: nt(`${row.code} 正在生成并上传，请稍候`),
+        duration: 2,
+      });
+      return;
+    }
+    const messageKey = `northbound-file-run-${row.code}`;
     setFileProfileRunning((prev) => ({ ...prev, [row.code]: true }));
+    void message.open({
+      key: messageKey,
+      type: 'loading',
+      content: nt(`${row.code} 正在生成文件并上传到传输目标...`),
+      duration: 0,
+    });
     void northboundPageConfigApi.runFileProfile(row.code, { limit: 200 })
-      .then((result) => {
+      .then(async (result) => {
         const latestSuccess = latestSuccessRunMap(result.items)[row.code];
         if (latestSuccess) {
           setFileLatestSuccessRuns((prev) => ({ ...prev, [row.code]: latestSuccess }));
         }
         openReportDrawer(result.items, `${row.code} 北向文件`, null);
-        void message.success(nt(`${row.code} 已生成 ${result.total} 条上报记录`));
+        const deliveryFailed = await hasFailedDeliveryForRuns(row.code, result.items);
+        void message.open({
+          key: messageKey,
+          type: deliveryFailed ? 'warning' : 'success',
+          content: nt(deliveryFailed
+            ? `${row.code} 文件生成完成，传输目标上传失败，请查看上报结果`
+            : `${row.code} 已生成 ${result.total} 条上报记录`),
+          duration: deliveryFailed ? 5 : 3,
+        });
       })
       .catch(() => {
-        void message.error(nt(`${row.code} 手动执行失败`));
+        void message.open({
+          key: messageKey,
+          type: 'error',
+          content: nt(`${row.code} 手动执行失败`),
+          duration: 5,
+        });
       })
       .finally(() => {
         setFileProfileRunning((prev) => ({ ...prev, [row.code]: false }));
@@ -6946,18 +7207,47 @@ export default function NorthboundPageConfig() {
   };
 
   const runInventoryProfile = (row: InventoryConfigRow) => {
+    if (inventoryProfileRunning[row.key]) {
+      void message.open({
+        key: `northbound-inventory-run-${row.key}`,
+        type: 'info',
+        content: nt(`${row.objectCode} Inventory 正在生成并上传，请稍候`),
+        duration: 2,
+      });
+      return;
+    }
+    const messageKey = `northbound-inventory-run-${row.key}`;
     setInventoryProfileRunning((prev) => ({ ...prev, [row.key]: true }));
+    void message.open({
+      key: messageKey,
+      type: 'loading',
+      content: nt(`${row.objectCode} Inventory 正在生成文件并上传到传输目标...`),
+      duration: 0,
+    });
     void northboundPageConfigApi.runInventoryProfile(row.key, { limit: 200 })
-      .then((run) => {
+      .then(async (run) => {
         if (run.status === 'success') {
           setInventoryLatestSuccessRuns((prev) => ({ ...prev, [row.key]: run }));
         }
         void resolveRunReportStatus(run, `${row.objectCode} Inventory`)
           .then(setSelectedReportStatus);
-        void message.success(nt(`${row.objectCode} Inventory 已生成上报记录`));
+        const deliveryFailed = await hasFailedDeliveryForRuns(row.key, [run]);
+        void message.open({
+          key: messageKey,
+          type: deliveryFailed ? 'warning' : 'success',
+          content: nt(deliveryFailed
+            ? `${row.objectCode} Inventory 生成完成，传输目标上传失败，请查看上报结果`
+            : `${row.objectCode} Inventory 已生成上报记录`),
+          duration: deliveryFailed ? 5 : 3,
+        });
       })
       .catch(() => {
-        void message.error(nt(`${row.objectCode} Inventory 手动执行失败`));
+        void message.open({
+          key: messageKey,
+          type: 'error',
+          content: nt(`${row.objectCode} Inventory 手动执行失败`),
+          duration: 5,
+        });
       })
       .finally(() => {
         setInventoryProfileRunning((prev) => ({ ...prev, [row.key]: false }));
@@ -7160,63 +7450,71 @@ export default function NorthboundPageConfig() {
       title: '操作',
       width: 104,
       fixed: 'left',
-      render: (_, row) => (
-        <div className={styles.rowControl}>
-          <Switch
-            size="small"
-            checked={scenarioEnabled[row.code]}
-            checkedChildren="开"
-            unCheckedChildren="关"
-            loading={Boolean(fileProfileSaving[row.code])}
-            onClick={(_, event) => event.stopPropagation()}
-            onChange={(checked) => persistFileProfileEnabled(row, checked)}
-          />
-          <Dropdown
-            trigger={['click']}
-            menu={{
-              items: [
-                { key: 'view', icon: <EyeOutlined />, label: '查看' },
-                { key: 'edit', icon: <EditOutlined />, label: '编辑' },
-                { key: 'report', icon: <FileSearchOutlined />, label: '上报结果' },
-                { key: 'copy', icon: <CopyOutlined />, label: '复制模板' },
-                { key: 'run', icon: <PlayCircleOutlined />, label: '手动执行', disabled: Boolean(fileProfileRunning[row.code]) },
-              ],
-              onClick: ({ key, domEvent }) => {
-                domEvent.stopPropagation();
-                if (key === 'view') {
-                  openViewDrawer(row);
-                  return;
-                }
-                if (key === 'edit') {
-                  openEditEditor(row);
-                  return;
-                }
-                if (key === 'report') {
-                  showLatestRunReport(
-                    'file',
-                    row.code,
-                    effectiveReportStatus(buildFileReportStatus(row), Boolean(scenarioEnabled[row.code])),
-                  );
-                  return;
-                }
-                if (key === 'copy') {
-                  void message.info(nt(`${row.code} 已复制为草稿`));
-                  return;
-                }
-                runFileProfile(row);
-              },
-            }}
-          >
-            <Button
-              aria-label={`更多操作 ${row.code}`}
-              type="text"
+      render: (_, row) => {
+        const running = Boolean(fileProfileRunning[row.code]);
+        return (
+          <div className={styles.rowControl}>
+            <Switch
               size="small"
-              icon={<MoreOutlined />}
-              onClick={(event) => event.stopPropagation()}
+              checked={scenarioEnabled[row.code]}
+              checkedChildren="开"
+              unCheckedChildren="关"
+              loading={Boolean(fileProfileSaving[row.code])}
+              onClick={(_, event) => event.stopPropagation()}
+              onChange={(checked) => persistFileProfileEnabled(row, checked)}
             />
-          </Dropdown>
-        </div>
-      ),
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'view', icon: <EyeOutlined />, label: '查看' },
+                  { key: 'edit', icon: <EditOutlined />, label: '编辑' },
+                  { key: 'report', icon: <FileSearchOutlined />, label: '上报结果' },
+                  { key: 'copy', icon: <CopyOutlined />, label: '复制模板' },
+                  {
+                    key: 'run',
+                    icon: running ? <LoadingOutlined spin /> : <PlayCircleOutlined />,
+                    label: running ? '执行中' : '手动执行',
+                    disabled: running,
+                  },
+                ],
+                onClick: ({ key, domEvent }) => {
+                  domEvent.stopPropagation();
+                  if (key === 'view') {
+                    openViewDrawer(row);
+                    return;
+                  }
+                  if (key === 'edit') {
+                    openEditEditor(row);
+                    return;
+                  }
+                  if (key === 'report') {
+                    showLatestRunReport(
+                      'file',
+                      row.code,
+                      effectiveReportStatus(buildFileReportStatus(row), Boolean(scenarioEnabled[row.code])),
+                    );
+                    return;
+                  }
+                  if (key === 'copy') {
+                    void message.info(nt(`${row.code} 已复制为草稿`));
+                    return;
+                  }
+                  runFileProfile(row);
+                },
+              }}
+            >
+              <Button
+                aria-label={`更多操作 ${row.code}`}
+                type="text"
+                size="small"
+                icon={running ? <LoadingOutlined spin /> : <MoreOutlined />}
+                onClick={(event) => event.stopPropagation()}
+              />
+            </Dropdown>
+          </div>
+        );
+      },
     },
     {
       title: '场景号',
@@ -7232,13 +7530,17 @@ export default function NorthboundPageConfig() {
     {
       title: '状态',
       width: 104,
-      render: (_, row) => renderStatusCell(buildProfileHealth(
-        Boolean(scenarioEnabled[row.code]),
-        scenarioMaxPeriodMinutes(row),
-        fileLatestSuccessRuns[row.code],
-        row.createdAt,
-        row.updatedAt,
-      )),
+      render: (_, row) => (
+        fileProfileRunning[row.code]
+          ? renderRunningStatusCell(`${row.code} 正在生成文件并上传传输目标`)
+          : renderStatusCell(buildProfileHealth(
+            Boolean(scenarioEnabled[row.code]),
+            scenarioMaxPeriodMinutes(row),
+            fileLatestSuccessRuns[row.code],
+            row.createdAt,
+            row.updatedAt,
+          ))
+      ),
     },
     {
       title: '输出内容',
@@ -7308,58 +7610,66 @@ export default function NorthboundPageConfig() {
       title: '操作',
       width: 104,
       fixed: 'left',
-      render: (_, row) => (
-        <div className={styles.rowControl}>
-          <Switch
-            size="small"
-            checked={inventoryEnabled[row.key]}
-            checkedChildren="开"
-            unCheckedChildren="关"
-            loading={Boolean(inventoryProfileSaving[row.key])}
-            onClick={(_, event) => event.stopPropagation()}
-            onChange={(checked) => persistInventoryEnabled(row, checked)}
-          />
-          <Dropdown
-            trigger={['click']}
-            menu={{
-              items: [
-                { key: 'view', icon: <EyeOutlined />, label: '查看' },
-                { key: 'edit', icon: <EditOutlined />, label: '编辑' },
-                { key: 'report', icon: <FileSearchOutlined />, label: '上报结果' },
-                { key: 'run', icon: <PlayCircleOutlined />, label: '手动执行', disabled: Boolean(inventoryProfileRunning[row.key]) },
-              ],
-              onClick: ({ key, domEvent }) => {
-                domEvent.stopPropagation();
-                if (key === 'view') {
-                  openInventoryView(row);
-                  return;
-                }
-                if (key === 'edit') {
-                  openInventoryEditor(row);
-                  return;
-                }
-                if (key === 'report') {
-                  showLatestRunReport(
-                    'inventory',
-                    row.key,
-                    effectiveReportStatus(buildInventoryReportStatus(row), Boolean(inventoryEnabled[row.key])),
-                  );
-                  return;
-                }
-                runInventoryProfile(row);
-              },
-            }}
-          >
-            <Button
-              aria-label={`更多操作 ${row.objectCode} Inventory`}
-              type="text"
+      render: (_, row) => {
+        const running = Boolean(inventoryProfileRunning[row.key]);
+        return (
+          <div className={styles.rowControl}>
+            <Switch
               size="small"
-              icon={<MoreOutlined />}
-              onClick={(event) => event.stopPropagation()}
+              checked={inventoryEnabled[row.key]}
+              checkedChildren="开"
+              unCheckedChildren="关"
+              loading={Boolean(inventoryProfileSaving[row.key])}
+              onClick={(_, event) => event.stopPropagation()}
+              onChange={(checked) => persistInventoryEnabled(row, checked)}
             />
-          </Dropdown>
-        </div>
-      ),
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'view', icon: <EyeOutlined />, label: '查看' },
+                  { key: 'edit', icon: <EditOutlined />, label: '编辑' },
+                  { key: 'report', icon: <FileSearchOutlined />, label: '上报结果' },
+                  {
+                    key: 'run',
+                    icon: running ? <LoadingOutlined spin /> : <PlayCircleOutlined />,
+                    label: running ? '执行中' : '手动执行',
+                    disabled: running,
+                  },
+                ],
+                onClick: ({ key, domEvent }) => {
+                  domEvent.stopPropagation();
+                  if (key === 'view') {
+                    openInventoryView(row);
+                    return;
+                  }
+                  if (key === 'edit') {
+                    openInventoryEditor(row);
+                    return;
+                  }
+                  if (key === 'report') {
+                    showLatestRunReport(
+                      'inventory',
+                      row.key,
+                      effectiveReportStatus(buildInventoryReportStatus(row), Boolean(inventoryEnabled[row.key])),
+                    );
+                    return;
+                  }
+                  runInventoryProfile(row);
+                },
+              }}
+            >
+              <Button
+                aria-label={`更多操作 ${row.objectCode} Inventory`}
+                type="text"
+                size="small"
+                icon={running ? <LoadingOutlined spin /> : <MoreOutlined />}
+                onClick={(event) => event.stopPropagation()}
+              />
+            </Dropdown>
+          </div>
+        );
+      },
     },
     {
       title: '类型',
@@ -7377,13 +7687,17 @@ export default function NorthboundPageConfig() {
     {
       title: '状态',
       width: 104,
-      render: (_, row) => renderStatusCell(buildProfileHealth(
-        Boolean(inventoryEnabled[row.key]),
-        getPeriodMinutes(row.period),
-        inventoryLatestSuccessRuns[row.key],
-        row.createdAt,
-        row.updatedAt,
-      )),
+      render: (_, row) => (
+        inventoryProfileRunning[row.key]
+          ? renderRunningStatusCell(`${row.objectCode} Inventory 正在生成文件并上传传输目标`)
+          : renderStatusCell(buildProfileHealth(
+            Boolean(inventoryEnabled[row.key]),
+            getPeriodMinutes(row.period),
+            inventoryLatestSuccessRuns[row.key],
+            row.createdAt,
+            row.updatedAt,
+          ))
+      ),
     },
     {
       title: '输出内容',
@@ -7740,7 +8054,6 @@ export default function NorthboundPageConfig() {
   ];
 
   const createDeliveryTargetEditorColumns = (
-    rows: DeliveryTargetRow[],
     onPatch: (key: string, patch: Partial<DeliveryTargetRow>) => void,
     onRemove: (key: string) => void,
     scope: 'file' | 'inventory' | 'socket',
@@ -7852,7 +8165,13 @@ export default function NorthboundPageConfig() {
       render: (_, row) => (
         <Space size={4}>
           <Tooltip title="测试连接">
-            <Button size="small" type="text" icon={<PlayCircleOutlined />} onClick={() => testDeliveryTarget(row, scope, ownerCode)} />
+            <Button
+              size="small"
+              type="text"
+              icon={<PlayCircleOutlined />}
+              loading={testingDeliveryTargetKey === deliveryTargetTestKey(scope, ownerCode, row.key)}
+              onClick={() => testDeliveryTarget(row, scope, ownerCode)}
+            />
           </Tooltip>
           <Tooltip title="删除目标">
             <Button
@@ -7860,7 +8179,6 @@ export default function NorthboundPageConfig() {
               size="small"
               type="text"
               icon={<DeleteOutlined />}
-              disabled={rows.length <= 1}
               onClick={() => onRemove(row.key)}
             />
           </Tooltip>
@@ -8295,10 +8613,10 @@ export default function NorthboundPageConfig() {
     {
       title: '状态',
       dataIndex: 'status',
-      width: 88,
-      render: (status: string) => {
-        const state: ReportState = status === 'success' ? 'success' : status === 'running' ? 'running' : 'failed';
-        return reportStateTag(state, state === 'success' ? '成功' : state === 'running' ? '生成中' : '失败');
+      width: 112,
+      render: (_, run) => {
+        const { state, label, tooltip } = reportRunDisplayState(run, reportDeliveryEventsByRunId);
+        return reportStateTag(state, label, tooltip);
       },
     },
     { title: '最近时间', dataIndex: 'created_at', width: 160, render: (v: string) => formatRunTime(v) },
@@ -8329,9 +8647,12 @@ export default function NorthboundPageConfig() {
       },
     },
   ];
-  const reportSuccessCount = reportRunList.filter((item) => item.status === 'success').length;
+  const reportRunDisplayStates = reportRunList.map((item) => reportRunDisplayState(item, reportDeliveryEventsByRunId).state);
+  const reportSuccessCount = reportRunDisplayStates.filter((state) => state === 'success').length;
+  const reportFailedCount = reportRunDisplayStates.filter((state) => state === 'failed').length;
+  const reportRunningCount = reportRunDisplayStates.filter((state) => state === 'running').length;
   const reportSummary = reportRunList.length > 1
-    ? `共 ${reportRunList.length} 个对象：成功 ${reportSuccessCount} · 失败 ${reportRunList.length - reportSuccessCount}`
+    ? `共 ${reportRunList.length} 个对象：成功 ${reportSuccessCount} · 失败 ${reportFailedCount}${reportRunningCount > 0 ? ` · 生成中 ${reportRunningCount}` : ''}`
     : '';
   const selectedApiMeta = selectedApi ? getApiMeta(selectedApi) : null;
   const selectedApiResponseFields = selectedApiMeta?.responseFields ?? [];
@@ -8339,6 +8660,9 @@ export default function NorthboundPageConfig() {
     () => apiFieldDisplayList(selectedApiResponseFields),
     [selectedApiResponseFields],
   );
+  const deliveryTestDisplay = deliveryTestResult
+    ? buildDeliveryTestDisplay(deliveryTestResult.event)
+    : null;
 
   return (
     <NorthboundI18nScope>
@@ -8357,6 +8681,80 @@ export default function NorthboundPageConfig() {
         />
       </ListPageLayout>
 
+      <Modal
+        title={deliveryTestResult ? `${deliveryTestResult.title} 测试结果` : '传输目标测试结果'}
+        open={Boolean(deliveryTestResult)}
+        onCancel={() => setDeliveryTestResult(null)}
+        width={480}
+        className={styles.deliveryTestModal}
+        destroyOnClose
+        footer={(
+          <Button type="primary" onClick={() => setDeliveryTestResult(null)}>
+            知道了
+          </Button>
+        )}
+      >
+        {deliveryTestDisplay && (
+          <div className={styles.deliveryTestPanel}>
+            <div
+              className={[
+                styles.deliveryTestStatus,
+                deliveryTestDisplay.state === 'success'
+                  ? styles.deliveryTestStatusSuccess
+                  : styles.deliveryTestStatusFailed,
+              ].join(' ')}
+            >
+              <span className={styles.deliveryTestStatusIcon}>
+                {deliveryTestDisplay.state === 'success'
+                  ? <CheckCircleOutlined />
+                  : <CloseCircleOutlined />}
+              </span>
+              <div className={styles.deliveryTestStatusText}>
+                <Typography.Text strong className={styles.deliveryTestStatusTitle}>
+                  {deliveryTestDisplay.statusText}
+                </Typography.Text>
+                <Typography.Text type="secondary" className={styles.deliveryTestStatusSummary}>
+                  {deliveryTestDisplay.state === 'success' ? '传输目标连接正常' : '传输目标连接未通过'}
+                </Typography.Text>
+              </div>
+            </div>
+            <div className={styles.deliveryTestInfoGrid}>
+              <div className={`${styles.deliveryTestInfoItem} ${styles.deliveryTestInfoWide}`}>
+                <span className={styles.deliveryTestLabel}>目标地址</span>
+                <Typography.Text
+                  className={`${styles.deliveryTestValue} ${styles.deliveryTestMono}`}
+                  ellipsis={{ tooltip: deliveryTestDisplay.target }}
+                >
+                  {deliveryTestDisplay.target}
+                </Typography.Text>
+              </div>
+              <div className={styles.deliveryTestInfoItem}>
+                <span className={styles.deliveryTestLabel}>网络连接</span>
+                <span className={styles.deliveryTestValue}>{deliveryTestDisplay.tcpText}</span>
+              </div>
+              <div className={styles.deliveryTestInfoItem}>
+                <span className={styles.deliveryTestLabel}>账号认证</span>
+                <span className={styles.deliveryTestValue}>{deliveryTestDisplay.authText}</span>
+              </div>
+            </div>
+            <div className={styles.deliveryTestMessage}>
+              <span className={styles.deliveryTestLabel}>
+                {deliveryTestDisplay.state === 'success' ? '结果说明' : '失败信息'}
+              </span>
+              <Typography.Paragraph
+                className={[
+                  styles.deliveryTestMessageText,
+                  deliveryTestDisplay.state === 'failed' ? styles.deliveryTestFailureText : '',
+                ].join(' ')}
+                type={deliveryTestDisplay.state === 'failed' ? 'danger' : undefined}
+              >
+                {deliveryTestDisplay.message}
+              </Typography.Paragraph>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <Drawer
         title={
           selectedReportStatus?.resultTitle
@@ -8365,84 +8763,85 @@ export default function NorthboundPageConfig() {
               : '上报结果')
         }
         open={Boolean(selectedReportStatus)}
-	        onClose={() => {
-	          setSelectedReportStatus(null);
-	          setReportRunList([]);
-	          setReportEventList([]);
-	          setReportEventTotal(0);
-	          setReportEventLoading(false);
-	          setReportCapabilityName('');
-	        }}
-	        size="large"
-	        rootClassName={styles.inventoryDrawer}
-	        destroyOnClose
-	        extra={selectedReportStatus ? (
-	          <Space>
-	            {selectedReportStatus.artifactType === 'message' && (
-	              <Button
-	                icon={<CopyOutlined />}
-	                onClick={() => copyReportPayload(selectedReportStatus)}
-	              >
-	                {selectedReportStatus.copyLabel ?? '复制报文'}
-	              </Button>
-	            )}
-	            {selectedReportStatus.artifactType === 'file' && (
-	              <Button
-	                type="primary"
-	                icon={<DownloadOutlined />}
-	                onClick={() => {
-	                  void downloadReportArtifact(selectedReportStatus).catch(() => {
-	                    void message.error(nt('上报文件下载失败'));
-	                  });
-	                }}
-	              >
-	                下载最新文件
-	              </Button>
-	            )}
-	          </Space>
-	        ) : undefined}
-	      >
-	        {selectedReportStatus && (
-	          <Space orientation="vertical" size={16} className={styles.drawerBody}>
-	            <div className={styles.editorSection}>
-	              <Descriptions bordered size="small" column={2}>
-	                <Descriptions.Item label="状态">{reportStateTag(selectedReportStatus.state, selectedReportStatus.statusText)}</Descriptions.Item>
-	                <Descriptions.Item label="最近时间">{selectedReportStatus.lastTime || '-'}</Descriptions.Item>
-	                <Descriptions.Item label="目标/地址" span={2}>
-	                  <Typography.Text ellipsis={{ tooltip: selectedReportStatus.artifactPath }}>
-	                    {selectedReportStatus.artifactPath}
-	                  </Typography.Text>
-	                </Descriptions.Item>
-	                <Descriptions.Item label="结果摘要" span={2}>{selectedReportStatus.targetSummary}</Descriptions.Item>
-	                <Descriptions.Item label="说明" span={2}>{selectedReportStatus.detail}</Descriptions.Item>
-	              </Descriptions>
-	            </div>
-	            {(reportEventLoading || reportEventList.length > 0) && (
-	              <div className={styles.editorSection}>
-	                <div className={styles.editorSectionHeader}>
-	                  <Typography.Text strong>最近事件</Typography.Text>
-	                  <Typography.Text type="secondary">
-	                    共 {reportEventTotal} 条，显示最近 {reportEventList.length} 条
-	                  </Typography.Text>
-	                </div>
-	                <Table<NorthboundPageConfigEvent>
-	                  className={styles.compactScenarioTable}
-	                  columns={reportEventColumns}
-	                  dataSource={reportEventList}
-	                  rowKey="id"
-	                  size="small"
-	                  loading={reportEventLoading}
-	                  pagination={{ pageSize: 10, showSizeChanger: false, hideOnSinglePage: reportEventList.length <= 10 }}
-	                  scroll={{ x: 980, y: 280 }}
-	                  rowClassName={(row) => (selectedReportStatus?.key === `event:${row.id}` ? styles.selectedRow : '')}
-	                  onRow={(row) => ({
-	                    onClick: () => selectReportEvent(row, reportCapabilityName || selectedReportStatus?.capabilityName || ''),
-	                  })}
-	                />
-	              </div>
-	            )}
-	            {reportRunList.length > 1 && (
-	              <div className={styles.editorSection}>
+        onClose={() => {
+          setSelectedReportStatus(null);
+          setReportRunList([]);
+          setReportEventList([]);
+          setReportEventTotal(0);
+          setReportEventLoading(false);
+          setReportCapabilityName('');
+          setReportDeliveryEventsByRunId({});
+        }}
+        size="large"
+        rootClassName={styles.inventoryDrawer}
+        destroyOnClose
+        extra={selectedReportStatus ? (
+          <Space>
+            {selectedReportStatus.artifactType === 'message' && (
+              <Button
+                icon={<CopyOutlined />}
+                onClick={() => copyReportPayload(selectedReportStatus)}
+              >
+                {selectedReportStatus.copyLabel ?? '复制报文'}
+              </Button>
+            )}
+            {selectedReportStatus.artifactType === 'file' && (
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                onClick={() => {
+                  void downloadReportArtifact(selectedReportStatus).catch(() => {
+                    void message.error(nt('上报文件下载失败'));
+                  });
+                }}
+              >
+                下载最新文件
+              </Button>
+            )}
+          </Space>
+        ) : undefined}
+      >
+        {selectedReportStatus && (
+          <Space orientation="vertical" size={16} className={styles.drawerBody}>
+            <div className={styles.editorSection}>
+              <Descriptions bordered size="small" column={2}>
+                <Descriptions.Item label="状态">{reportStateTag(selectedReportStatus.state, selectedReportStatus.statusText)}</Descriptions.Item>
+                <Descriptions.Item label="最近时间">{selectedReportStatus.lastTime || '-'}</Descriptions.Item>
+                <Descriptions.Item label="目标/地址" span={2}>
+                  <Typography.Text ellipsis={{ tooltip: selectedReportStatus.artifactPath }}>
+                    {selectedReportStatus.artifactPath}
+                  </Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="结果摘要" span={2}>{selectedReportStatus.targetSummary}</Descriptions.Item>
+                <Descriptions.Item label="说明" span={2}>{selectedReportStatus.detail}</Descriptions.Item>
+              </Descriptions>
+            </div>
+            {(reportEventLoading || reportEventList.length > 0) && (
+              <div className={styles.editorSection}>
+                <div className={styles.editorSectionHeader}>
+                  <Typography.Text strong>最近事件</Typography.Text>
+                  <Typography.Text type="secondary">
+                    共 {reportEventTotal} 条，显示最近 {reportEventList.length} 条
+                  </Typography.Text>
+                </div>
+                <Table<NorthboundPageConfigEvent>
+                  className={styles.compactScenarioTable}
+                  columns={reportEventColumns}
+                  dataSource={reportEventList}
+                  rowKey="id"
+                  size="small"
+                  loading={reportEventLoading}
+                  pagination={{ pageSize: 10, showSizeChanger: false, hideOnSinglePage: reportEventList.length <= 10 }}
+                  scroll={{ x: 980, y: 280 }}
+                  rowClassName={(row) => (selectedReportStatus?.key === `event:${row.id}` ? styles.selectedRow : '')}
+                  onRow={(row) => ({
+                    onClick: () => selectReportEvent(row, reportCapabilityName || selectedReportStatus?.capabilityName || ''),
+                  })}
+                />
+              </div>
+            )}
+            {reportRunList.length > 1 && (
+              <div className={styles.editorSection}>
                 <div className={styles.editorSectionHeader}>
                   <Typography.Text strong>对象上报结果</Typography.Text>
                 </div>
@@ -8458,7 +8857,11 @@ export default function NorthboundPageConfig() {
                   rowClassName={(row) => (selectedReportStatus?.runId === row.id ? styles.selectedRow : '')}
                   onRow={(row) => ({
                     onClick: () => {
-                      void resolveRunReportStatus(row, reportCapabilityName || selectedReportStatus?.capabilityName || '')
+                      void resolveRunReportStatus(
+                        row,
+                        reportCapabilityName || selectedReportStatus?.capabilityName || '',
+                        reportDeliveryEventsByRunId[row.id] ?? [],
+                      )
                         .then(setSelectedReportStatus);
                     },
                   })}
@@ -8796,7 +9199,6 @@ export default function NorthboundPageConfig() {
                 </div>
                 <Table<DeliveryTargetRow>
                   columns={createDeliveryTargetEditorColumns(
-                    socketEditorDeliveryTargets,
                     updateSocketEditorDeliveryTarget,
                     removeSocketEditorDeliveryTarget,
                     'socket',
@@ -9314,7 +9716,6 @@ export default function NorthboundPageConfig() {
               </div>
               <Table<DeliveryTargetRow>
                 columns={createDeliveryTargetEditorColumns(
-                  selectedInventoryDeliveryTargets,
                   (targetKey, patch) => updateInventoryDeliveryTarget(selectedInventoryConfig.key, targetKey, patch),
                   (targetKey) => removeInventoryDeliveryTarget(selectedInventoryConfig.key, targetKey),
                   'inventory',
@@ -9789,7 +10190,6 @@ export default function NorthboundPageConfig() {
             </div>
             <Table<DeliveryTargetRow>
               columns={createDeliveryTargetEditorColumns(
-                editorFileDeliveryTargets,
                 (targetKey, patch) => updateFileDeliveryTarget(editorFileOwnerCode, targetKey, patch),
                 (targetKey) => removeFileDeliveryTarget(editorFileOwnerCode, targetKey),
                 'file',

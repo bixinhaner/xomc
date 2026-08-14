@@ -381,10 +381,18 @@ func (r *fakeRepository) ListDeliveryTargets(_ context.Context, filter DeliveryT
 		if filter.OwnerCode != "" && target.OwnerCode != filter.OwnerCode {
 			continue
 		}
-		target.Credential = ""
 		out = append(out, target)
 	}
 	return out, nil
+}
+
+func (r *fakeRepository) GetDeliveryTargetForSend(_ context.Context, scope DeliveryScope, ownerCode string, key string) (*DeliveryTarget, error) {
+	for _, target := range r.deliveryTargets {
+		if target.Scope == scope && target.OwnerCode == ownerCode && target.Key == key {
+			return &target, nil
+		}
+	}
+	return nil, commonerrors.ErrNotFound
 }
 
 func (r *fakeRepository) ListActiveDeliveryTargets(_ context.Context, scope DeliveryScope, ownerCode string) ([]DeliveryTarget, error) {
@@ -400,8 +408,10 @@ func (r *fakeRepository) ListActiveDeliveryTargets(_ context.Context, scope Deli
 
 func (r *fakeRepository) ReplaceDeliveryTargets(_ context.Context, req ReplaceDeliveryTargetsRequest) ([]DeliveryTarget, error) {
 	next := r.deliveryTargets[:0]
+	existingSecrets := map[string]string{}
 	for _, target := range r.deliveryTargets {
 		if target.Scope == req.Scope && target.OwnerCode == req.OwnerCode {
+			existingSecrets[target.Key] = target.Credential
 			continue
 		}
 		next = append(next, target)
@@ -409,8 +419,10 @@ func (r *fakeRepository) ReplaceDeliveryTargets(_ context.Context, req ReplaceDe
 	for _, target := range req.Items {
 		target.Scope = req.Scope
 		target.OwnerCode = req.OwnerCode
-		target.CredentialSet = target.Credential != ""
-		target.Credential = ""
+		if strings.TrimSpace(target.Credential) == "" && target.CredentialSet {
+			target.Credential = existingSecrets[target.Key]
+		}
+		target.CredentialSet = strings.TrimSpace(target.Credential) != ""
 		next = append(next, target)
 	}
 	r.deliveryTargets = next
@@ -447,6 +459,9 @@ func TestDeliveryTargetsForRunUsesTemplateOwnerOnly(t *testing.T) {
 func (r *fakeRepository) ListSNMPAlarmTargets(context.Context) ([]SNMPAlarmTarget, error) {
 	out := make([]SNMPAlarmTarget, len(r.snmpTargets))
 	copy(out, r.snmpTargets)
+	for i := range out {
+		markSNMPAlarmTargetCredentialSet(&out[i])
+	}
 	return out, nil
 }
 
@@ -483,17 +498,41 @@ func (r *fakeRepository) UpdateSNMPAlarmTarget(_ context.Context, key string, ta
 	target = normalizeSNMPAlarmTarget(key, target)
 	for i := range r.snmpTargets {
 		if r.snmpTargets[i].Key == key {
+			mergeSNMPAlarmTargetSecrets(&target, r.snmpTargets[i])
+			markSNMPAlarmTargetCredentialSet(&target)
 			r.snmpTargets[i] = target
 			return &r.snmpTargets[i], nil
 		}
 	}
+	markSNMPAlarmTargetCredentialSet(&target)
 	r.snmpTargets = append(r.snmpTargets, target)
 	return &r.snmpTargets[len(r.snmpTargets)-1], nil
+}
+
+func mergeSNMPAlarmTargetSecrets(target *SNMPAlarmTarget, current SNMPAlarmTarget) {
+	if strings.TrimSpace(target.Community) == "" && target.CommunitySet {
+		target.Community = current.Community
+	}
+	if strings.TrimSpace(target.AuthCredential) == "" && target.AuthCredentialSet {
+		target.AuthCredential = current.AuthCredential
+	}
+	if strings.TrimSpace(target.PrivCredential) == "" && target.PrivCredentialSet {
+		target.PrivCredential = current.PrivCredential
+	}
+}
+
+func markSNMPAlarmTargetCredentialSet(target *SNMPAlarmTarget) {
+	target.CommunitySet = strings.TrimSpace(target.Community) != ""
+	target.AuthCredentialSet = strings.TrimSpace(target.AuthCredential) != ""
+	target.PrivCredentialSet = strings.TrimSpace(target.PrivCredential) != ""
 }
 
 func (r *fakeRepository) ListSocketAlarmConfigs(context.Context) ([]SocketAlarmConfig, error) {
 	out := make([]SocketAlarmConfig, len(r.socketConfigs))
 	copy(out, r.socketConfigs)
+	for i := range out {
+		markSocketAccountCredentialSet(out[i].Accounts)
+	}
 	return out, nil
 }
 
@@ -511,12 +550,23 @@ func (r *fakeRepository) UpdateSocketAlarmConfig(_ context.Context, key string, 
 	config = normalizeSocketAlarmConfig(key, config)
 	for i := range r.socketConfigs {
 		if r.socketConfigs[i].Key == key {
+			config.Accounts = mergeSocketAccountSecrets(config.Accounts, socketAccountSecrets(r.socketConfigs[i].Accounts))
+			markSocketAccountCredentialSet(config.Accounts)
 			r.socketConfigs[i] = config
 			return &r.socketConfigs[i], nil
 		}
 	}
+	markSocketAccountCredentialSet(config.Accounts)
 	r.socketConfigs = append(r.socketConfigs, config)
 	return &r.socketConfigs[len(r.socketConfigs)-1], nil
+}
+
+func socketAccountSecrets(accounts []SocketAccount) map[string]string {
+	out := map[string]string{}
+	for _, account := range accounts {
+		out[account.Key] = account.Credential
+	}
+	return out
 }
 
 func (r *fakeRepository) ListAPIConfigs(context.Context) ([]APIConfig, error) {
@@ -1695,7 +1745,7 @@ func TestRunFileProfileUploadsToEnabledFTPTarget(t *testing.T) {
 	}
 	repo.deliveryTargets = []DeliveryTarget{{
 		Scope:          DeliveryScopeFile,
-		OwnerCode:      "",
+		OwnerCode:      "S9002",
 		Key:            "oss-main",
 		Name:           "OSS Main",
 		Enabled:        true,
@@ -1901,7 +1951,7 @@ func TestListRunsLatestPerProfileUsesLatestSuccessfulRun(t *testing.T) {
 	require.Equal(t, "s2-success", body.Data.Items[1].ID)
 }
 
-func TestReplaceDeliveryTargetsRedactsCredential(t *testing.T) {
+func TestReplaceDeliveryTargetsReturnsCredentialForReveal(t *testing.T) {
 	repo := newFakeRepository()
 	r := setupTestRouterWithRepository(repo)
 	body := []byte(`{
@@ -1933,7 +1983,7 @@ func TestReplaceDeliveryTargetsRedactsCredential(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rr.Code)
 	require.Contains(t, rr.Body.String(), `"credential_set":true`)
-	require.NotContains(t, rr.Body.String(), "secret")
+	require.Contains(t, rr.Body.String(), `"credential":"secret"`)
 }
 
 func TestSNMPFieldsFollowMIBOrder(t *testing.T) {
@@ -1947,6 +1997,117 @@ func TestSNMPFieldsFollowMIBOrder(t *testing.T) {
 	require.Contains(t, rr.Body.String(), `"field":"notificationID"`)
 	require.Contains(t, rr.Body.String(), `"oid":"1.3.6.1.4.1.53058.1.1.1.1.1.1"`)
 	require.Contains(t, rr.Body.String(), `"field":"additionalInformation"`)
+}
+
+func TestSNMPAlarmTargetsReturnCredentialsForManagementPage(t *testing.T) {
+	repo := newFakeRepository()
+	repo.snmpTargets = []SNMPAlarmTarget{
+		{
+			Key:                 "snmp-v2-primary",
+			Name:                "SNMP V2C",
+			Enabled:             false,
+			Version:             "v2",
+			NotificationType:    "Trap",
+			ListenIP:            "0.0.0.0",
+			ListenPort:          161,
+			TargetPort:          162,
+			Community:           "private",
+			ClearSeverityPolicy: "保留原级别",
+			MIBQueryEnabled:     true,
+			TimeoutSeconds:      5,
+			Retries:             1,
+			MIBFields:           defaultSNMPAlarmFields(),
+		},
+		{
+			Key:                 "snmp-v3-inform",
+			Name:                "SNMP V3",
+			Enabled:             false,
+			Version:             "v3",
+			NotificationType:    "Inform",
+			ListenIP:            "0.0.0.0",
+			ListenPort:          161,
+			TargetPort:          163,
+			SecurityName:        "queryV3",
+			AuthProtocol:        "SHA",
+			AuthCredential:      "AuthSecret1",
+			PrivProtocol:        "DES",
+			PrivCredential:      "PrivSecret1",
+			ClearSeverityPolicy: "保留原级别",
+			MIBQueryEnabled:     true,
+			TimeoutSeconds:      5,
+			Retries:             1,
+			MIBFields:           defaultSNMPAlarmFields(),
+		},
+	}
+	r := setupTestRouterWithRepository(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/page-config/alarm/snmp/targets", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), `"community_set":true`)
+	require.Contains(t, rr.Body.String(), `"community":"private"`)
+	require.Contains(t, rr.Body.String(), `"auth_credential_set":true`)
+	require.Contains(t, rr.Body.String(), `"auth_credential":"AuthSecret1"`)
+	require.Contains(t, rr.Body.String(), `"priv_credential_set":true`)
+	require.Contains(t, rr.Body.String(), `"priv_credential":"PrivSecret1"`)
+}
+
+func TestUpdateSNMPAlarmTargetPreservesStoredCredentialsForReveal(t *testing.T) {
+	repo := newFakeRepository()
+	repo.snmpTargets = []SNMPAlarmTarget{{
+		Key:                 "snmp-v3-inform",
+		Name:                "SNMP V3",
+		Enabled:             false,
+		Version:             "v3",
+		NotificationType:    "Inform",
+		ListenIP:            "0.0.0.0",
+		ListenPort:          161,
+		TargetPort:          163,
+		SecurityName:        "queryV3",
+		AuthProtocol:        "SHA",
+		AuthCredential:      "AuthSecret1",
+		PrivProtocol:        "DES",
+		PrivCredential:      "PrivSecret1",
+		ClearSeverityPolicy: "保留原级别",
+		MIBQueryEnabled:     true,
+		TimeoutSeconds:      5,
+		Retries:             1,
+		MIBFields:           defaultSNMPAlarmFields(),
+	}}
+	r := setupTestRouterWithRepository(repo)
+	body, err := json.Marshal(SNMPAlarmTarget{
+		Key:                 "snmp-v3-inform",
+		Name:                "SNMP V3",
+		Enabled:             false,
+		Version:             "v3",
+		NotificationType:    "Inform",
+		ListenIP:            "0.0.0.0",
+		ListenPort:          161,
+		TargetPort:          163,
+		SecurityName:        "queryV3",
+		AuthProtocol:        "SHA",
+		AuthCredentialSet:   true,
+		PrivProtocol:        "DES",
+		PrivCredentialSet:   true,
+		ClearSeverityPolicy: "保留原级别",
+		MIBQueryEnabled:     true,
+		TimeoutSeconds:      5,
+		Retries:             1,
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/northbound/page-config/alarm/snmp/targets/snmp-v3-inform", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), `"auth_credential_set":true`)
+	require.Contains(t, rr.Body.String(), `"auth_credential":"AuthSecret1"`)
+	require.Contains(t, rr.Body.String(), `"priv_credential_set":true`)
+	require.Contains(t, rr.Body.String(), `"priv_credential":"PrivSecret1"`)
 }
 
 func TestUpdateSNMPV2TargetDefaultsCommunity(t *testing.T) {
@@ -2216,6 +2377,106 @@ func TestUpdateSocketConfigRequiresServerMode(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 	require.Contains(t, rr.Body.String(), "socket mode must be server")
+}
+
+func TestSocketAlarmConfigsReturnAccountCredentialsForManagementPage(t *testing.T) {
+	repo := newFakeRepository()
+	repo.socketConfigs = []SocketAlarmConfig{{
+		Key:                 "socket-ctcc-server",
+		Name:                "CTCC Socket 告警服务端",
+		Enabled:             false,
+		Profile:             "CTCC",
+		Mode:                "server",
+		ListenIP:            "0.0.0.0",
+		ListenPort:          31232,
+		MaxClients:          20,
+		RealtimePushEnabled: true,
+		ClientSyncEnabled:   true,
+		HeartbeatSeconds:    60,
+		HeartbeatTimes:      3,
+		IdleTimeoutSeconds:  180,
+		Accounts: []SocketAccount{{
+			Key:        "ctcc-msg",
+			Enabled:    true,
+			Channel:    "实时/同步账号",
+			Username:   "north",
+			Type:       "msg",
+			Credential: "SocketSecret1",
+			Purpose:    "实时推送和客户端同步告警",
+		}},
+	}}
+	r := setupTestRouterWithRepository(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/page-config/alarm/socket/configs", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), `"credential_set":true`)
+	require.Contains(t, rr.Body.String(), `"credential":"SocketSecret1"`)
+}
+
+func TestUpdateSocketAlarmConfigPreservesStoredAccountCredentialForReveal(t *testing.T) {
+	repo := newFakeRepository()
+	repo.socketConfigs = []SocketAlarmConfig{{
+		Key:                 "socket-ctcc-server",
+		Name:                "CTCC Socket 告警服务端",
+		Enabled:             false,
+		Profile:             "CTCC",
+		Mode:                "server",
+		ListenIP:            "0.0.0.0",
+		ListenPort:          31232,
+		MaxClients:          20,
+		RealtimePushEnabled: true,
+		ClientSyncEnabled:   true,
+		HeartbeatSeconds:    60,
+		HeartbeatTimes:      3,
+		IdleTimeoutSeconds:  180,
+		Accounts: []SocketAccount{{
+			Key:        "ctcc-msg",
+			Enabled:    true,
+			Channel:    "实时/同步账号",
+			Username:   "north",
+			Type:       "msg",
+			Credential: "SocketSecret1",
+			Purpose:    "实时推送和客户端同步告警",
+		}},
+	}}
+	r := setupTestRouterWithRepository(repo)
+	body, err := json.Marshal(SocketAlarmConfig{
+		Key:                 "socket-ctcc-server",
+		Name:                "CTCC Socket 告警服务端",
+		Enabled:             false,
+		Profile:             "CTCC",
+		Mode:                "server",
+		ListenIP:            "0.0.0.0",
+		ListenPort:          31232,
+		MaxClients:          20,
+		RealtimePushEnabled: true,
+		ClientSyncEnabled:   true,
+		HeartbeatSeconds:    60,
+		HeartbeatTimes:      3,
+		IdleTimeoutSeconds:  180,
+		Accounts: []SocketAccount{{
+			Key:           "ctcc-msg",
+			Enabled:       true,
+			Channel:       "实时/同步账号",
+			Username:      "north",
+			Type:          "msg",
+			CredentialSet: true,
+			Purpose:       "实时推送和客户端同步告警",
+		}},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/northbound/page-config/alarm/socket/configs/socket-ctcc-server", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), `"credential_set":true`)
+	require.Contains(t, rr.Body.String(), `"credential":"SocketSecret1"`)
 }
 
 func TestUpdateAPIConfigOnlyTogglesSupportedConfig(t *testing.T) {
@@ -2674,6 +2935,52 @@ func TestUploadSFTPPasswordAuth(t *testing.T) {
 	uploaded, err := os.ReadFile(filepath.Join(srv.root, "alarm.csv"))
 	require.NoError(t, err)
 	require.Equal(t, artifact, uploaded)
+}
+
+func TestDeliveryTargetConnectionTestUsesStoredCredential(t *testing.T) {
+	srv := startTestSFTPServer(t)
+	repo := newFakeRepository()
+	repo.deliveryTargets = []DeliveryTarget{{
+		Scope:          DeliveryScopeFile,
+		OwnerCode:      "S0312",
+		Key:            "sftp-stored",
+		Name:           "SFTP Stored",
+		Enabled:        true,
+		Protocol:       DeliveryProtocolSFTP,
+		Host:           srv.host,
+		Port:           srv.port,
+		Username:       "north",
+		Credential:     "secret",
+		CredentialSet:  true,
+		AuthMode:       DeliveryAuthPassword,
+		RemoteRoot:     "/northupload",
+		RetryTimes:     0,
+		TimeoutSeconds: 5,
+	}}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	event, err := svc.TestDeliveryTarget(context.Background(), DeliveryTarget{
+		Scope:          DeliveryScopeFile,
+		OwnerCode:      "S0312",
+		Key:            "sftp-stored",
+		Name:           "SFTP Stored",
+		Protocol:       DeliveryProtocolSFTP,
+		Host:           srv.host,
+		Port:           srv.port,
+		Username:       "north",
+		CredentialSet:  true,
+		AuthMode:       DeliveryAuthPassword,
+		RemoteRoot:     "/northupload",
+		RetryTimes:     0,
+		TimeoutSeconds: 5,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, RunStatusSuccess, event.Status)
+	passed, ok := event.Summary["auth_probe_passed"].(*bool)
+	require.True(t, ok)
+	require.NotNil(t, passed)
+	require.True(t, *passed)
 }
 
 type testSFTPServer struct {

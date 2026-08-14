@@ -181,6 +181,7 @@ func (h *Handler) RunFileProfile(c *gin.Context) {
 	if !ok {
 		return
 	}
+	req.TriggerReason = runTriggerManual
 	result, err := h.svc.RunFileProfile(c.Request.Context(), c.Param("id"), req)
 	h.auditPageConfig(c, "run_file_profile", c.Param("id"), err == nil, err, map[string]interface{}{
 		"capability": "file",
@@ -220,6 +221,7 @@ func (h *Handler) RunInventoryProfile(c *gin.Context) {
 	if !ok {
 		return
 	}
+	req.TriggerReason = runTriggerManual
 	result, err := h.svc.RunInventoryProfile(c.Request.Context(), c.Param("id"), req)
 	h.auditPageConfig(c, "run_inventory_profile", c.Param("id"), err == nil, err, map[string]interface{}{
 		"capability": "inventory",

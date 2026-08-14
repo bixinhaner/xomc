@@ -407,10 +407,11 @@ func (s *Service) runScheduleCandidate(ctx context.Context, candidate scheduleCa
 			return nil
 		}
 		req := RunProfileRequest{
-			GroupID:     candidate.GroupID,
-			WindowStart: &candidate.WindowStart,
-			WindowEnd:   &candidate.WindowEnd,
-			Limit:       candidate.Limit,
+			GroupID:       candidate.GroupID,
+			WindowStart:   &candidate.WindowStart,
+			WindowEnd:     &candidate.WindowEnd,
+			Limit:         candidate.Limit,
+			TriggerReason: runTriggerAuto,
 		}
 		if candidate.Kind == ProfileKindInventory {
 			executed = true
