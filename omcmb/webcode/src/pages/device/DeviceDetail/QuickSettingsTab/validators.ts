@@ -305,6 +305,37 @@ export function resolveQuickSettingsParameterType(
     ?? 'string';
 }
 
+/**
+ * 把设备上送的字符串(可能是 "true"/"false"、"True"/"FALSE"、"1"/"0")
+ * 归一到 XML <option value="..."/> 的真实值,确保 Select 能选中正确项。
+ * 仅在 enumOptions 非空时生效;不存在等价匹配时原样返回(保留原始值,Select 留空)。
+ *
+ * 同时用于保存前脏检查:表单初值与设备当前值(oldVal)必须经同一归一化后比较,
+ * 否则设备上报 "true" 而选项值为 "1"/"0" 时,未修改也会判脏导致无效下发(issue #317)。
+ */
+export function normalizeEnumValue(raw: unknown, enumOptions?: { value: string; label: string }[]): string {
+  const s = String(raw ?? '');
+  if (!enumOptions || enumOptions.length === 0) return s;
+  if (enumOptions.some((o) => o.value === s)) return s;
+  const ci = s.toLowerCase();
+  const direct = enumOptions.find((o) => o.value.toLowerCase() === ci);
+  if (direct) return direct.value;
+  const labelMatch = enumOptions.find((o) => o.label.toLowerCase() === ci);
+  if (labelMatch) return labelMatch.value;
+  // BOOLEAN 等价:true/1 与 false/0 互转,适配 TR-069 BOOLEAN 字段两种序列化。
+  if ((ci === 'true' || ci === '1') && enumOptions.some((o) => o.value === '1')) return '1';
+  if ((ci === 'false' || ci === '0') && enumOptions.some((o) => o.value === '0')) return '0';
+  if ((ci === 'true' || ci === '1')) {
+    const m = enumOptions.find((o) => o.value.toLowerCase() === 'true');
+    if (m) return m.value;
+  }
+  if ((ci === 'false' || ci === '0')) {
+    const m = enumOptions.find((o) => o.value.toLowerCase() === 'false');
+    if (m) return m.value;
+  }
+  return s;
+}
+
 interface ApplyInstanceContextOptions {
   preserveTrailingInstance?: boolean;
 }
