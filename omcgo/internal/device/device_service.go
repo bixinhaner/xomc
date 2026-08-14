@@ -1236,7 +1236,15 @@ func (s *DeviceService) ListDevicesWithInfo(ctx context.Context, filter DeviceFi
 		}
 		summaries, summaryErr := s.controlSummaryReader.ListCurrentByDeviceIDs(ctx, deviceIDs)
 		if summaryErr != nil {
-			return nil, fmt.Errorf("list device control summaries: %w", summaryErr)
+			// The control summary is an optional device-list decoration. A summary
+			// query failure must not make the primary device inventory unavailable.
+			if s.logger != nil {
+				s.logger.Warn("list device control summaries failed; returning devices without summaries",
+					zap.Error(summaryErr),
+					zap.Int("device_count", len(deviceIDs)),
+				)
+			}
+			return result, nil
 		}
 		for index := range result.Items {
 			if summary, ok := summaries[result.Items[index].ID]; ok {
