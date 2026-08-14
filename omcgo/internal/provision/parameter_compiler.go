@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -927,6 +928,16 @@ func convertParameterValue(raw any, definition parameterDefinition) (string, err
 		}
 	}
 	if definition.MinValue != nil || definition.MaxValue != nil {
+		if strings.EqualFold(definition.Type, "string") {
+			length := int64(utf8.RuneCountInString(value))
+			if definition.MinValue != nil && length < *definition.MinValue {
+				return "", fmt.Errorf("length is below minimum %d", *definition.MinValue)
+			}
+			if definition.MaxValue != nil && length > *definition.MaxValue {
+				return "", fmt.Errorf("length exceeds maximum %d", *definition.MaxValue)
+			}
+			return value, nil
+		}
 		number, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return "", fmt.Errorf("expected an integer")

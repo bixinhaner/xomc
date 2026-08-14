@@ -364,6 +364,14 @@ func TestActivationSyncCompletionUsesFreshCellStatus(t *testing.T) {
 			refresher := &recordingActivationStateRefresher{}
 			h.engine.SetActivationStateRefresher(refresher)
 			var gotStatus ProvisioningState
+			var persistedSteps []ProvisioningTask
+			h.taskRepo.UpdateFn = func(_ context.Context, task *ProvisioningTask) error {
+				persistedSteps = append(persistedSteps, *task)
+				if IsTerminal(task.Status) {
+					gotStatus = task.Status
+				}
+				return nil
+			}
 			h.taskRepo.UpdateStatusFn = func(_ context.Context, _ uuid.UUID, status ProvisioningState, _ string) error {
 				gotStatus = status
 				return nil
@@ -379,6 +387,17 @@ func TestActivationSyncCompletionUsesFreshCellStatus(t *testing.T) {
 			assert.Equal(t, tc.wantRetry, item.RetryCount)
 			if tc.wantRetry > 0 && tc.wantStatus == "" {
 				assert.Equal(t, "wait_activation_check", item.CurrentStepName)
+			}
+			if tc.wantStatus == StateFailed {
+				assert.Equal(t, "verify_startup_result", item.CurrentStepName)
+				assert.Equal(t, 11, item.CurrentStep)
+			}
+			if tc.wantStatus == StateCompleted {
+				require.Len(t, persistedSteps, 1)
+				assert.Equal(t, "activation_verified", persistedSteps[0].CurrentStepName)
+				assert.Equal(t, 12, persistedSteps[0].CurrentStep)
+				assert.Equal(t, StateCompleted, persistedSteps[0].Status)
+				assert.NotNil(t, persistedSteps[0].CompletedAt)
 			}
 		})
 	}

@@ -54,7 +54,7 @@ describe('provisionApi.getTasks', () => {
       items: [{
         id: 'task-id', device_id: 'device-id', serial_number: 'SN-001',
         product_name: 'BaiBNQ', policy_name: 'NR policy', execute_type: 'manual',
-        module: 'self_config', template_id: null, policy_id: 'policy-id', status: 'failed',
+        module: 'self_config', technology: 'nr', template_id: null, policy_id: 'policy-id', status: 'failed',
         current_step: 1, total_steps: 1, error_message: 'cell inactive',
         retry_count: 0, max_retries: 3, started_at: null, completed_at: null,
         created_at: '2026-08-07T00:00:00Z', updated_at: '2026-08-07T00:00:00Z',
@@ -78,7 +78,7 @@ describe('provisionApi.getTasks', () => {
     } });
     expect(result.statusCounts).toEqual({ completed: 7, failed: 2 });
     expect(mapTaskToExecuteView(result.items[0])).toMatchObject({
-      productName: 'BaiBNQ', policyName: 'NR policy', executeType: 'manual', module: 'self_config',
+      productName: 'BaiBNQ', policyName: 'NR policy', executeType: 'manual', module: 'self_config', technology: 'nr',
     });
   });
 });

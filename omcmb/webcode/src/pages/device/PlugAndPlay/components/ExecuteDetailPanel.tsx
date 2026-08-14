@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useT } from '@/hooks/useT';
 import { provisionApi } from '@core/services/api/provisionApi';
-import { buildProvisioningSteps } from '../provisioningSteps';
+import { buildProvisioningSteps, normalizeProvisioningStepName } from '../provisioningSteps';
 
 interface Props {
   taskId: string;
@@ -23,6 +23,7 @@ interface Props {
     currentStep: number;
     totalSteps: number;
     currentStepName?: string;
+    technology?: string;
     xmlFileId?: string | null;
   };
   onClose: () => void;
@@ -49,11 +50,7 @@ export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
   const t = useT();
   const { message } = App.useApp();
   const [downloading, setDownloading] = useState(false);
-  const currentStepLabel = taskData?.currentStepName === 'completed'
-    ? t('status.success')
-    : taskData?.currentStepName === 'download_xml'
-      ? `${t('common.download')} XML`
-      : taskData?.currentStepName || '-';
+  const xmlFileId = taskData?.xmlFileId;
 
   const getStatusText = useCallback((status: string) => {
     const map: Record<string, string> = {
@@ -84,26 +81,45 @@ export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
     'upload_file': t('provision.uploadFile'),
     'download_xml': t('provision.downloadXml'),
     'wait_transfer_complete': t('provision.waitTransferComplete'),
+    'reboot_device': t('provision.rebootDevice'),
+    'wait_device_online': t('provision.waitDeviceOnline'),
+    'wait_state_stabilization': t('provision.waitStateStabilization'),
+    'wait_activation_check': t('provision.waitStateStabilization'),
+    'wait_status_sync': t('provision.waitStatusSync'),
+    'wait_activation_sync': t('provision.waitStatusSync'),
+    'verify_startup_result': t('provision.verifyStartupResult'),
     'wait_startup_stage': t('provision.waitStartupStage'),
     'parameter_validation': t('provision.parameterValidation'),
     'parameter_configuration': t('provision.parameterConfiguration'),
-    'cell_activation': t('provision.cellActivation'),
-    'wait_startup_result': t('provision.waitStartupResult'),
-    'verify_online': t('provision.verifyOnline'),
+    'startup_stage_report': t('provision.startupStageReport'),
+    'cell_activation': t('provision.startupStageReport'),
+    'confirm_startup_result': t('provision.confirmStartupResult'),
+    'wait_startup_result': t('provision.confirmStartupResult'),
+    'record_startup_success': t('provision.recordStartupSuccess'),
+    'verify_online': t('provision.recordStartupSuccess'),
     'completed': t('provision.orchestrationCompleted'),
   }), [t]);
+  const normalizedCurrentStepName = normalizeProvisioningStepName({
+    currentStepName: taskData?.currentStepName,
+    technology: taskData?.technology,
+  });
+  const currentStepLabel = normalizedCurrentStepName === 'completed'
+    ? t('status.success')
+    : normalizedCurrentStepName === 'download_xml'
+      ? `${t('common.download')} XML`
+      : stepNameMap[normalizedCurrentStepName ?? ''] || normalizedCurrentStepName || '-';
 
   const downloadXML = useCallback(async () => {
-    if (!taskData?.xmlFileId) return;
+    if (!xmlFileId) return;
     setDownloading(true);
     try {
-      await provisionApi.downloadXML(taskData.xmlFileId);
+      await provisionApi.downloadXML(xmlFileId);
     } catch {
       void message.error(t('common.downloadFailed'));
     } finally {
       setDownloading(false);
     }
-  }, [message, t, taskData?.xmlFileId]);
+  }, [message, t, xmlFileId]);
 
   // Parse executeProcedure into step records
   const records: TaskRecord[] = useMemo(() => {
@@ -118,7 +134,9 @@ export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
     const orchestrationSteps = buildProvisioningSteps({
       status: taskStatus,
       currentStep: taskData.currentStep,
+      currentStepName: taskData.currentStepName,
       totalSteps: taskData.totalSteps,
+      technology: taskData.technology,
       failureReason,
     });
     if (orchestrationSteps.length > 0) {
@@ -211,7 +229,7 @@ export default function ExecuteDetailPanel({ taskData, onClose }: Props) {
       onClose={onClose}
       styles={{ body: { padding: 16 } }}
     >
-      {taskData?.xmlFileId && (
+      {xmlFileId && (
         <Space style={{ marginBottom: 16 }}>
           <Typography.Text>
             {t('provision.stepProgress')}: {currentStepLabel}
