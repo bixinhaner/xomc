@@ -241,7 +241,7 @@ function exampleValueForParam(
 }
 
 function dynamicTemplateFields(metadata?: ParamConfigWorkbookMetadata): DynamicTemplateField[] {
-  if (!metadata?.deviceType) return [];
+  if (!metadata?.deviceType || metadata.deviceType === 'GSM') return [];
   const fixedFamilySeen = new Map<string, number>();
   return (metadata.quickSettingsGroups ?? []).flatMap((group) => {
     if (/(?:dscp|static-route)/i.test(group.id)) return [];
