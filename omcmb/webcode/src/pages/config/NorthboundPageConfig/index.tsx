@@ -23,6 +23,8 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import {
   ApiOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
   CopyOutlined,
   DatabaseOutlined,
   DeleteOutlined,
@@ -8684,6 +8686,7 @@ export default function NorthboundPageConfig() {
         open={Boolean(deliveryTestResult)}
         onCancel={() => setDeliveryTestResult(null)}
         width={480}
+        className={styles.deliveryTestModal}
         destroyOnClose
         footer={(
           <Button type="primary" onClick={() => setDeliveryTestResult(null)}>
@@ -8692,38 +8695,63 @@ export default function NorthboundPageConfig() {
         )}
       >
         {deliveryTestDisplay && (
-          <Space direction="vertical" size={10} style={{ width: '100%' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <Typography.Text type="secondary">测试结果</Typography.Text>
-              {reportStateTag(deliveryTestDisplay.state, deliveryTestDisplay.statusText)}
+          <div className={styles.deliveryTestPanel}>
+            <div
+              className={[
+                styles.deliveryTestStatus,
+                deliveryTestDisplay.state === 'success'
+                  ? styles.deliveryTestStatusSuccess
+                  : styles.deliveryTestStatusFailed,
+              ].join(' ')}
+            >
+              <span className={styles.deliveryTestStatusIcon}>
+                {deliveryTestDisplay.state === 'success'
+                  ? <CheckCircleOutlined />
+                  : <CloseCircleOutlined />}
+              </span>
+              <div className={styles.deliveryTestStatusText}>
+                <Typography.Text strong className={styles.deliveryTestStatusTitle}>
+                  {deliveryTestDisplay.statusText}
+                </Typography.Text>
+                <Typography.Text type="secondary" className={styles.deliveryTestStatusSummary}>
+                  {deliveryTestDisplay.state === 'success' ? '传输目标连接正常' : '传输目标连接未通过'}
+                </Typography.Text>
+              </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '72px minmax(0, 1fr)', gap: '8px 12px' }}>
-              <Typography.Text type="secondary">目标地址</Typography.Text>
-              <Typography.Text ellipsis={{ tooltip: deliveryTestDisplay.target }}>
-                {deliveryTestDisplay.target}
-              </Typography.Text>
-              <Typography.Text type="secondary">网络连接</Typography.Text>
-              <Typography.Text>{deliveryTestDisplay.tcpText}</Typography.Text>
-              <Typography.Text type="secondary">账号认证</Typography.Text>
-              <Typography.Text>{deliveryTestDisplay.authText}</Typography.Text>
+            <div className={styles.deliveryTestInfoGrid}>
+              <div className={`${styles.deliveryTestInfoItem} ${styles.deliveryTestInfoWide}`}>
+                <span className={styles.deliveryTestLabel}>目标地址</span>
+                <Typography.Text
+                  className={`${styles.deliveryTestValue} ${styles.deliveryTestMono}`}
+                  ellipsis={{ tooltip: deliveryTestDisplay.target }}
+                >
+                  {deliveryTestDisplay.target}
+                </Typography.Text>
+              </div>
+              <div className={styles.deliveryTestInfoItem}>
+                <span className={styles.deliveryTestLabel}>网络连接</span>
+                <span className={styles.deliveryTestValue}>{deliveryTestDisplay.tcpText}</span>
+              </div>
+              <div className={styles.deliveryTestInfoItem}>
+                <span className={styles.deliveryTestLabel}>账号认证</span>
+                <span className={styles.deliveryTestValue}>{deliveryTestDisplay.authText}</span>
+              </div>
             </div>
-            <div>
-              <Typography.Text type="secondary">
+            <div className={styles.deliveryTestMessage}>
+              <span className={styles.deliveryTestLabel}>
                 {deliveryTestDisplay.state === 'success' ? '结果说明' : '失败信息'}
-              </Typography.Text>
+              </span>
               <Typography.Paragraph
-                style={{
-                  margin: '6px 0 0',
-                  maxHeight: 96,
-                  overflowY: 'auto',
-                  wordBreak: 'break-word',
-                }}
+                className={[
+                  styles.deliveryTestMessageText,
+                  deliveryTestDisplay.state === 'failed' ? styles.deliveryTestFailureText : '',
+                ].join(' ')}
                 type={deliveryTestDisplay.state === 'failed' ? 'danger' : undefined}
               >
                 {deliveryTestDisplay.message}
               </Typography.Paragraph>
             </div>
-          </Space>
+          </div>
         )}
       </Modal>
 

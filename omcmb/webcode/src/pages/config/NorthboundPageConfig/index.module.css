@@ -433,6 +433,143 @@
   width: 100%;
 }
 
+.deliveryTestModal :global(.ant-modal-content) {
+  border-radius: 8px;
+}
+
+.deliveryTestModal :global(.ant-modal-header) {
+  margin-bottom: 14px;
+}
+
+.deliveryTestModal :global(.ant-modal-title) {
+  line-height: 24px;
+}
+
+.deliveryTestModal :global(.ant-modal-footer) {
+  margin-top: 16px;
+}
+
+.deliveryTestPanel {
+  display: grid;
+  gap: 10px;
+}
+
+.deliveryTestStatus {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  padding: 10px 12px;
+}
+
+.deliveryTestStatusSuccess {
+  border-color: rgb(82 196 26 / 32%);
+  background: rgb(82 196 26 / 8%);
+}
+
+.deliveryTestStatusFailed {
+  border-color: rgb(255 77 79 / 34%);
+  background: rgb(255 77 79 / 8%);
+}
+
+.deliveryTestStatusIcon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--color-bg-container);
+  font-size: 18px;
+}
+
+.deliveryTestStatusSuccess .deliveryTestStatusIcon {
+  color: #52c41a;
+}
+
+.deliveryTestStatusFailed .deliveryTestStatusIcon {
+  color: #ff4d4f;
+}
+
+.deliveryTestStatusText {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.deliveryTestStatusTitle {
+  color: var(--color-neutral-900) !important;
+  font-size: 15px;
+  line-height: 21px;
+}
+
+.deliveryTestStatusSummary {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.deliveryTestInfoGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.deliveryTestInfoItem,
+.deliveryTestMessage {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-container);
+  padding: 8px 10px;
+}
+
+.deliveryTestInfoWide {
+  grid-column: 1 / -1;
+}
+
+.deliveryTestLabel {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--color-neutral-500);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.deliveryTestValue {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-neutral-900);
+  font-size: 13px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deliveryTestMono {
+  font-family: var(--font-family-mono);
+}
+
+.deliveryTestMessageText {
+  max-height: 76px;
+  overflow-y: auto;
+  margin: 0 !important;
+  color: var(--color-neutral-900);
+  font-size: 13px;
+  line-height: 21px;
+  word-break: break-word;
+}
+
+.deliveryTestFailureText {
+  color: #ff4d4f !important;
+}
+
 .inventoryDrawer :global(.ant-drawer-content-wrapper) {
   width: min(900px, calc(100vw - 48px)) !important;
 }
@@ -657,5 +794,9 @@
   .section,
   .toolbarBand {
     padding: 10px;
+  }
+
+  .deliveryTestInfoGrid {
+    grid-template-columns: 1fr;
   }
 }
