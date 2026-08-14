@@ -19,7 +19,6 @@ import {
   Col,
   Descriptions,
   Empty,
-  Modal,
   Result,
   Row,
   Space,
@@ -31,7 +30,6 @@ import {
 import {
   CloudUploadOutlined,
   DownloadOutlined,
-  EyeOutlined,
   HistoryOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -122,7 +120,6 @@ export default function SystemLicensePage() {
   const t = useT();
   const navigate = useNavigate();
   const [updateOpen, setUpdateOpen] = useState(false);
-  const [rawOpen, setRawOpen] = useState(false);
 
   const { data: lic, isLoading, error, refetch } = useSystemLicense();
 
@@ -205,9 +202,6 @@ export default function SystemLicensePage() {
           <Button icon={<HistoryOutlined />} onClick={() => navigate('/license/history')}>
             {t('systemLicense.history.title')}
           </Button>
-          <Button icon={<EyeOutlined />} onClick={() => setRawOpen(true)}>
-            {t('systemLicense.raw.view')}
-          </Button>
           <Button icon={<DownloadOutlined />} onClick={downloadRawLicense}>
             {t('systemLicense.raw.download')}
           </Button>
@@ -271,18 +265,6 @@ export default function SystemLicensePage() {
 
       {/* "Update" 弹窗 */}
       <UpdateModal open={updateOpen} onClose={() => setUpdateOpen(false)} />
-
-      <Modal
-        title={t('systemLicense.raw.title')}
-        open={rawOpen}
-        onCancel={() => setRawOpen(false)}
-        footer={null}
-        width={860}
-      >
-        <pre style={{ maxHeight: 520, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap' }}>
-          {lic.rawContent}
-        </pre>
-      </Modal>
 
       {/* 友好提示：右下角微小 raw_content 摘要（可选） */}
       <Paragraph type="secondary" style={{ marginTop: 16, fontSize: 12 }}>
