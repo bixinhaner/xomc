@@ -5833,7 +5833,6 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
       {
         title: '操作',
         width: 74,
-        fixed: 'left',
         render: (_, row) => (
           <Tooltip title="从当前模板删除">
             <Button
@@ -10177,7 +10176,6 @@ export default function NorthboundPageConfig() {
                 {
                   title: '操作',
                   width: 80,
-                  fixed: 'left',
                   render: (_, record) => (
                     <Tooltip title="删除对象">
                       <Button
