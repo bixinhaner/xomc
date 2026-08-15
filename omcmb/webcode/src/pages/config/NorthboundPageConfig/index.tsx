@@ -10,6 +10,7 @@ import {
   InputNumber,
   Modal,
   Pagination,
+  Popconfirm,
   Select,
   Space,
   Switch,
@@ -5599,6 +5600,7 @@ export interface FieldConfigSectionHandle {
 // selection back via the imperative ref at save time.
 const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfigSectionProps>(
   function FieldConfigSection({ periodRows, pmMetricRows, pmLoading, initialFieldRowsByTarget }, ref) {
+    const nt = useNorthboundI18n();
     const firstTarget = getFirstFieldTarget(periodRows);
     const [fieldConfigDomain, setFieldConfigDomain] = useState<Domain>(firstTarget?.domain ?? 'CM');
     const [fieldConfigTargetKey, setFieldConfigTargetKey] = useState(firstTarget?.key ?? '');
@@ -5835,16 +5837,24 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
         width: 74,
         fixed: 'left',
         render: (_, row) => (
-          <Tooltip title="从当前模板删除">
-            <Button
-              aria-label={`删除字段 ${row.outputAlias}`}
-              type="text"
-              danger
-              size="small"
-              icon={<DeleteOutlined />}
-              onClick={() => removeFieldConfigRow(row)}
-            />
-          </Tooltip>
+          <Popconfirm
+            title={nt('确认删除该字段/指标？')}
+            description={nt('删除后需保存草稿才会生效。')}
+            okText={nt('删除')}
+            cancelText={nt('取消')}
+            okButtonProps={{ danger: true }}
+            onConfirm={() => removeFieldConfigRow(row)}
+          >
+            <Tooltip title="从当前模板删除">
+              <Button
+                aria-label={`删除字段 ${row.outputAlias}`}
+                type="text"
+                danger
+                size="small"
+                icon={<DeleteOutlined />}
+              />
+            </Tooltip>
+          </Popconfirm>
         ),
       },
       {
@@ -6976,8 +6986,8 @@ export default function NorthboundPageConfig() {
     void loadPageConfig();
   };
 
-  const renderTablePagination = (ariaLabel: string) => ({
-    pageSize: 10,
+  const renderTablePagination = (ariaLabel: string, pageSize = 10) => ({
+    pageSize,
     showSizeChanger: false,
     showTotal: () => (
       <Tooltip title="刷新">
@@ -8194,6 +8204,7 @@ export default function NorthboundPageConfig() {
 
   const deliveryTargetTableScroll = { x: 1140 };
   const deliveryTargetEditorTableScroll = { x: 1460 };
+  const fileListTableScroll = { x: 1378, y: 'calc(100vh - 260px)' };
 
   const deliveryTargetColumns: ColumnsType<DeliveryTargetRow> = [
     { title: '启用', dataIndex: 'enabled', width: 76, render: (value: boolean) => <Switch size="small" checked={value} disabled checkedChildren="开" unCheckedChildren="关" /> },
@@ -8227,15 +8238,24 @@ export default function NorthboundPageConfig() {
               onClick={() => testDeliveryTarget(row, scope, ownerCode)}
             />
           </Tooltip>
-          <Tooltip title="删除目标">
-            <Button
-              danger
-              size="small"
-              type="text"
-              icon={<DeleteOutlined />}
-              onClick={() => onRemove(row.key)}
-            />
-          </Tooltip>
+          <Popconfirm
+            title={nt('确认删除该传输目标？')}
+            description={nt('删除后需保存草稿才会生效。')}
+            okText={nt('删除')}
+            cancelText={nt('取消')}
+            okButtonProps={{ danger: true }}
+            onConfirm={() => onRemove(row.key)}
+          >
+            <Tooltip title="删除目标">
+              <Button
+                aria-label={`删除传输目标 ${row.name || row.key}`}
+                danger
+                size="small"
+                type="text"
+                icon={<DeleteOutlined />}
+              />
+            </Tooltip>
+          </Popconfirm>
         </Space>
       ),
     },
@@ -8651,14 +8671,14 @@ export default function NorthboundPageConfig() {
         </Button>
       </div>
       <Table<ScenarioRow>
-        className={styles.compactScenarioTable}
+        className={`${styles.compactScenarioTable} ${styles.mainListTable}`}
         columns={scenarioColumns}
         dataSource={fileProfiles}
         rowKey="code"
         size="small"
         loading={pageConfigLoading}
-        pagination={renderTablePagination('刷新北向文件配置')}
-        scroll={{ x: 1378, y: 560 }}
+        pagination={renderTablePagination('刷新北向文件配置', 20)}
+        scroll={fileListTableScroll}
         rowClassName={(row) => (selectedScenario?.code === row.code ? styles.selectedRow : '')}
         onRow={(row) => ({ onClick: () => openViewDrawer(row) })}
       />
@@ -10179,17 +10199,26 @@ export default function NorthboundPageConfig() {
                   width: 80,
                   fixed: 'left',
                   render: (_, record) => (
-                    <Tooltip title="删除对象">
-                      <Button
-                        aria-label={`删除 ${record.domain} 对象`}
-                        type="text"
-                        danger
-                        size="small"
-                        icon={<DeleteOutlined />}
-                        onClick={() => removeEditorPeriodRow(record.key)}
-                        disabled={editorMode === 'edit' && editorPeriodRows.length <= 1}
-                      />
-                    </Tooltip>
+                    <Popconfirm
+                      title={nt('确认删除该对象？')}
+                      description={nt('删除后需保存草稿才会生效。')}
+                      okText={nt('删除')}
+                      cancelText={nt('取消')}
+                      okButtonProps={{ danger: true }}
+                      disabled={editorMode === 'edit' && editorPeriodRows.length <= 1}
+                      onConfirm={() => removeEditorPeriodRow(record.key)}
+                    >
+                      <Tooltip title="删除对象">
+                        <Button
+                          aria-label={`删除 ${record.domain} 对象`}
+                          type="text"
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          disabled={editorMode === 'edit' && editorPeriodRows.length <= 1}
+                        />
+                      </Tooltip>
+                    </Popconfirm>
                   ),
                 },
                 {
