@@ -1540,15 +1540,13 @@ fi
 # ── 业务就绪健康检查（必须在重建监控栈之前执行）──────────────────────────
 # healthcheck.sh --startup 只校验「业务 + 基础设施 + web」容器与端点，不检监控容器，
 # 因此可在下方监控栈 force-recreate 之前完成。放在重建前避开 cadvisor 启动盘点对
-# daemon 的冲击；但安装/升级刚批量建完十余个容器，daemon 本身仍可能短时繁忙，
-# 单次 docker ps/inspect 走秒级（每轮 startup ≈ 36 次 docker CLI 调用 + 1-2 次
-# compose exec），整轮 30-80s 属正常。
+# daemon 的冲击；healthcheck.sh 只做一次 docker ps 快照，容器内探针直接 docker exec，
+# 正常整轮应保持秒级，不再为每个检查项启动独立 timeout 或输出 [SKIP]。
 #
-# 判定机制与 healthcheck.sh 对齐 —— 依据「完整的结构化逐项结果」，而非外层秒表：
-#   · healthcheck.sh 侧每个检查项自带上限（curl --max-time 3 / docker 调用
-#     timeout 5 / compose exec timeout 15），单轮不会再被某个探针无限拖住；
-#   · 这里单轮预算（HEALTHCHECK_PROBE_TIMEOUT，默认 90s）必须覆盖一整轮，
-#     确保 daemon 慢时轮次仍能跑完并产出完整 [OK]/[FAIL] 结果供重试与判定；
+# 判定机制与 healthcheck.sh 对齐 —— 依据「完整的结构化逐项结果」，同时保留整轮外层秒表：
+#   · healthcheck.sh 正常路径直接输出 [OK]/[FAIL]，不把每个慢探针拆成 [SKIP]；
+#   · 这里单轮预算（HEALTHCHECK_PROBE_TIMEOUT，默认 90s）只作为整轮兜底，
+#     防止 Docker daemon 完全失去响应时安装流程无限等待；
 #     线上事故教训：曾设 30s，3 轮全部被拦腰砍断、90s 总窗耗尽且拿不到任何
 #     结构化失败项，安装误报失败，而部署后人工 healthcheck 106/106 全过；
 #   · 总窗耗尽仍无结构化失败项、且业务容器全部稳定（running/无重启/无 OOM）
