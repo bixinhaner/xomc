@@ -580,6 +580,36 @@ func TestBuiltinBLN_QuickSettingsReferenceParamModel(t *testing.T) {
 	assert.Equal(t, 104, checked)
 }
 
+func TestBuiltinDeviceReferenceInstanceLimits(t *testing.T) {
+	tests := []struct {
+		model string
+		group string
+		max   int
+	}{
+		{model: "BLN", group: "device-ipsec", max: 3},
+		{model: "BLN", group: "enb-neighbor-freq", max: 8},
+		{model: "BLN", group: "enb-neighbor-cell", max: 160},
+		{model: "BaiBNQ", group: "gnb-network-dscp-list", max: 64},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model+"/"+tt.group, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", tt.model+".xml"))
+			require.NoError(t, err)
+
+			var doc xmlQuickSettings
+			require.NoError(t, xml.Unmarshal(data, &doc))
+			for _, group := range doc.Groups {
+				if group.ID == tt.group {
+					assert.Equal(t, tt.max, group.MaxInstances)
+					return
+				}
+			}
+			t.Fatalf("expected %s quick settings group %s", tt.model, tt.group)
+		})
+	}
+}
+
 func TestBuiltinNetworkModels_WAN1OmitsUnsupportedEnableParameter(t *testing.T) {
 	for _, model := range []string{"BLN", "BLQ", "MLN", "MLQ"} {
 		t.Run(model, func(t *testing.T) {

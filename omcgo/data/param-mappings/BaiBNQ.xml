@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="BaiBNQ" totalEntries="856">
+<parameterModel paramModel="BaiBNQ" totalEntries="857">
     <objects>
         <object name="Device.FAP.License." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FAP.License.LicenseItem." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity." access="READ_ONLY" changeApplies="Immediate"/>
@@ -22,6 +22,7 @@
         <object name="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}." standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.{i}." standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}." standardPath="Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}." standardPath="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}." standardPath="Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}." access="READ_WRITE" changeApplies="Immediate"/>
     </objects>
     <parameters>
@@ -791,8 +792,8 @@
         <param name="Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.NR_AMF_IS_DEFAULT" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.NR_AMF_IS_DEFAULT" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.PLMNID" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}.PLMNID" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="5" max="6" validationPattern="/^\d{5,6}$/"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}.Dscp" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}.Dscp" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
-        <param name="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}.VlanPrio" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}.VlanPrio" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}.Dscp" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}.Dscp" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="63" defaultValue="46"/>
+        <param name="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}.VlanPrio" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}.VlanPrio" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="7" defaultValue="0"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.NR.DumgrProvLog.DumgrFileCount" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.DumgrProvLog.DumgrFileCount" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.NR.DumgrProvLog.DumgrLogLevel" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.DumgrProvLog.DumgrLogLevel" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.NR.DumgrProvLog.DumgrMaxLogFilesize" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.DumgrProvLog.DumgrMaxLogFilesize" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>

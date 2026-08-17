@@ -163,7 +163,7 @@
               <param name="Gateway" titleZh="隧道网关" titleEn="Tunnel Gateway" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_GW"/>
        </group>
   <group id="device-ipsec" titleZh="IPSec 参数" titleEn="IPSec Settings"
-         multiInstance="true" maxInstances="4"
+         multiInstance="true" maxInstances="3"
          objectPath="Device.FAP.Ipsec.{i}.">
     <param name="TUNNEL_ENABLE" titleZh="TunnelEnable" titleEn="Tunnel Enable" leaf="TUNNEL_ENABLE"/>
     <param name="TUNNEL_GATEWAY" titleZh="网关地址" titleEn="Gateway" leaf="TUNNEL_GATEWAY"/>
@@ -201,7 +201,7 @@
     <param name="ReselectionPriority" titleZh="重选优先级" titleEn="Reselection Priority" leaf="CellReselectionPriority"/>
   </group>
   <group id="enb-neighbor-cell" titleZh="邻区列表" titleEn="Neighbor Cell List"
-         multiInstance="true" maxInstances="32"
+         multiInstance="true" maxInstances="160"
          objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.">
     <param name="CellID" titleZh="小区ID" titleEn="Cell ID" leaf="CID"/>
     <param name="PLMN" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>

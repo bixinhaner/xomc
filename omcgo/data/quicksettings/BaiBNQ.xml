@@ -286,7 +286,7 @@
     <param name="OamDscp" titleZh="OAM DSCP" titleEn="OAM DSCP" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.OamDscp.Dscp"/>
     <param name="OamVlanPrio" titleZh="OAM VLAN 优先级" titleEn="OAM VLAN Priority" standardPath="Device.Services.FAPService.{i}.FAPControl.NR.OamDscp.VlanPrio"/>
   </group>
-  <group id="gnb-network-dscp-list" titleZh="DSCP 映射列表" titleEn="DSCP Mapping List" multiInstance="true" maxInstances="16" objectPath="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}.">
+  <group id="gnb-network-dscp-list" titleZh="DSCP 映射列表" titleEn="DSCP Mapping List" multiInstance="true" maxInstances="64" objectPath="Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}.">
     <param name="Dscp" titleZh="DSCP" titleEn="DSCP" leaf="Dscp"/>
     <param name="VlanPrio" titleZh="VLAN 优先级" titleEn="VLAN Priority" leaf="VlanPrio"/>
   </group>

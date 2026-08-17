@@ -29,8 +29,11 @@ func TestWritableMultiInstanceObjectsMatchDeviceReferences(t *testing.T) {
 	}
 	models := map[string][]expectedReferenceObject{
 		"BLN": {
+			sameReferenceObject("Device.FAP.Ipsec.{i}."),
 			sameReferenceObject("Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}."),
+			sameReferenceObject("Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}."),
 			sameReferenceObject("Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}."),
+			sameReferenceObject("Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}."),
 			{privatePath: "Device.Services.FAPService.MmePoolConfigParam.{i}.", standardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}."},
 		},
 		"BLQ": {
@@ -85,6 +88,7 @@ func TestWritableMultiInstanceObjectsMatchDeviceReferences(t *testing.T) {
 			sameReferenceObject("Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}."),
 			sameReferenceObject("Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.{i}."),
 			sameReferenceObject("Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.{i}."),
+			sameReferenceObject("Device.Services.FAPService.{i}.FAPControl.NR.DscpList.{i}."),
 			sameReferenceObject("Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.{i}."),
 		},
 	}
