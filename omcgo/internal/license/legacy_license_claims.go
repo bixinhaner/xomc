@@ -25,9 +25,15 @@ type LegacyLicenseClaims struct {
 	IsCloud          bool
 	FeatureIDs       []string
 	FeatureCodes     []string
-	LegacyExtra      map[string]LegacyXMLValue
-	UnknownFields    map[string]LegacyXMLValue
-	RawSHA256        string
+	// 北向授权（旧 OMC 语义，issue #311）：
+	//   NInfType（extra.NInfType）=1 开启北向能力，=0 关闭；
+	//   NorthAlarmTypes（extra.northAlarmType，如 "snmp,socket"）在开启时决定派生
+	//   CODE_NINF_SNMP / CODE_NINF_SOCKET（两者可同时包含）。
+	NInfType        string
+	NorthAlarmTypes []string
+	LegacyExtra     map[string]LegacyXMLValue
+	UnknownFields   map[string]LegacyXMLValue
+	RawSHA256       string
 }
 
 // MapLegacyTrueLicense converts a decoded TrueLicense artifact without applying
@@ -104,6 +110,8 @@ func MapLegacyTrueLicense(artifact *LegacyTrueLicenseArtifact) (*LegacyLicenseCl
 	claims.HardwareLimit = legacyString(artifact.Extra, "hardwareLimit")
 	claims.FeatureIDs = splitLegacyList(legacyString(artifact.Extra, "supportFeatureIdStr"))
 	claims.FeatureCodes = splitLegacyList(legacyString(artifact.Extra, "supportFeatureCode"))
+	claims.NInfType = legacyString(artifact.Extra, "NInfType")
+	claims.NorthAlarmTypes = splitLegacyList(legacyString(artifact.Extra, "northAlarmType"))
 	return claims, nil
 }
 

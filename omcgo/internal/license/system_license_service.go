@@ -459,7 +459,8 @@ func (s *SystemLicenseService) parseLegacyUpdate(encodedRaw string) (*parsedLice
 	// 旧项目 supportFeatureCode 一致。无 mapping 时退回原始 codes。
 	effectiveCodes := claims.FeatureCodes
 	if s.legacyFeatureMapping != nil {
-		effectiveCodes = s.legacyFeatureMapping.ExpandFeatureCodes(claims.FeatureIDs, claims.FeatureCodes, claims.IsCloud)
+		ninfEnabled := strings.TrimSpace(claims.NInfType) == "1"
+		effectiveCodes = s.legacyFeatureMapping.ExpandFeatureCodes(claims.FeatureIDs, claims.FeatureCodes, claims.IsCloud, ninfEnabled, claims.NorthAlarmTypes)
 	}
 	featurePayloadData := map[string]any{
 		"legacy_feature_ids":   claims.FeatureIDs,

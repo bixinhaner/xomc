@@ -34,6 +34,8 @@ export interface SystemLicenseFeature {
   source: string;
   recognized: boolean;
   licensed: boolean;
+  /** 现网 OMC 无对应功能（如独立 Monitor 页、设备激活、射频开关）→ 特性列表不展示；授权不受影响 */
+  hidden?: boolean;
   rawIds?: string[];
   rawCodes?: string[];
 }

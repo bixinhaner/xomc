@@ -1,6 +1,7 @@
 package license
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
@@ -39,4 +40,31 @@ func TestLoadLegacyFeatureMappingSkipsCatalogNodes(t *testing.T) {
 	features := mapping.Normalize([]string{"5", "99", "100", "80"}, nil)
 	require.Len(t, features, 1)
 	require.Equal(t, "DHCP", features[0].NameZH)
+}
+
+// issue #311: 现网无独立 Monitor 页/设备激活/射频开关 → 特性列表隐藏展示，
+// 但授权树必须仍按 code 授权（设备列表等菜单由 *_MONITOR 门禁，不能因隐藏而失效）。
+func TestLoadLegacyFeatureMappingHiddenStillAuthorized(t *testing.T) {
+	mapping, err := LoadLegacyFeatureMapping(filepath.Join("..", "..", "data", "license-feature-mapping.json"))
+	require.NoError(t, err)
+
+	features := mapping.Normalize(nil, []string{"CODE_ENB_MONITOR", "CODE_GNB_ACTIVE", "CODE_ENB_RF_ENABLE", "CODE_DASHBOARD"})
+	require.Len(t, features, 4)
+	hidden := 0
+	for _, f := range features {
+		if f.FeatureCode == "CODE_DASHBOARD" {
+			require.False(t, f.Hidden, "dashboard feature stays visible")
+			continue
+		}
+		require.True(t, f.Hidden, "feature %s should be hidden from display", f.FeatureCode)
+		require.True(t, f.Licensed, "hidden feature %s must stay licensed", f.FeatureCode)
+		hidden++
+	}
+	require.Equal(t, 3, hidden)
+
+	tree := mapping.AuthorizationTree(nil, []string{"CODE_ENB_MONITOR"})
+	raw, err := json.Marshal(tree)
+	require.NoError(t, err)
+	require.True(t, HasFeature(FeatureList(raw), "eNB", "Monitor"),
+		"hidden monitor code must still authorize eNB.Monitor")
 }

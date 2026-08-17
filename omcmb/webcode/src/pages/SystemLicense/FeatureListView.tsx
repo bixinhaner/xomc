@@ -62,20 +62,32 @@ interface NormalizedFeatureGroupsProps {
   features: SystemLicenseFeature[];
 }
 
+// issue #311: 特性列表按现网 OMC 菜单结构展示，不再复刻旧 OMC 的 eNB/gNB/CPE 一级分组。
+// root = mapping path 第一段（现网菜单目录：设备管理/软件管理/告警管理…）；
+// section = path 第二段（现网菜单：设备详情/版本升级…）；
+// 同名功能跨设备类型合并为一个条目，后缀注明包含的设备类型（eNB、gNB、CPE…）。
 function NormalizedFeatureGroups({ features }: NormalizedFeatureGroupsProps) {
   const t = useT();
   const locale = useAppStore((state) => state.locale);
   const groups = useMemo(() => {
-    const result = new Map<string, Map<string, SystemLicenseFeature[]>>();
+    const result = new Map<string, Map<string, Map<string, Set<string>>>>();
     for (const feature of features) {
+      if (feature.hidden) continue;
+      if (!(feature.recognized || feature.nameZh || feature.nameEn)) continue;
       const path = locale === 'en-US' ? (feature.pathEn ?? feature.path) : feature.path;
       const parts = (path ?? '').split(' / ').filter(Boolean);
-      const root = featureGroupRoot(feature, parts[0] || t('systemLicense.featureList.other'));
+      const root = parts[0] || t('systemLicense.featureList.other');
       const section = parts[1] || t('systemLicense.featureList.other');
-      const sections = result.get(root) ?? new Map<string, SystemLicenseFeature[]>();
-      const items = sections.get(section) ?? [];
-      items.push(feature);
-      sections.set(section, items);
+      const label = moduleLevelCode(feature.featureCode)
+        ? t('systemLicense.featureList.all')
+        : featureLabel(feature, locale);
+      const sections = result.get(root) ?? new Map<string, Map<string, Set<string>>>();
+      const merged = sections.get(section) ?? new Map<string, Set<string>>();
+      const types = merged.get(label) ?? new Set<string>();
+      const deviceType = deviceTypeOf(feature.featureCode);
+      if (deviceType) types.add(deviceType);
+      merged.set(label, types);
+      sections.set(section, merged);
       result.set(root, sections);
     }
     return [...result.entries()].sort(([left], [right]) => compareFeatureNames(left, right, rootOrder));
@@ -85,40 +97,34 @@ function NormalizedFeatureGroups({ features }: NormalizedFeatureGroupsProps) {
     <div>
       {groups.map(([root, sections]) => (
         <div key={root} style={rowStyle}>
-          <div style={labelStyle}>{localizeRoot(technicalRootLabel(root), locale)}</div>
+          <div style={labelStyle}>{root}</div>
           <div style={sectionGridStyle}>
             {[...sections.entries()]
               .sort(([left], [right]) => compareFeatureNames(left, right, sectionOrder))
-              .map(([section, items]) => {
-                  const visibleItems = items.filter((feature) =>
-                    feature.recognized || feature.nameZh || feature.nameEn,
-                  );
-                  if (visibleItems.length === 0) return null;
-                const direct = (visibleItems.length === 1 && section === featureLabel(visibleItems[0], locale))
+              .map(([section, merged]) => {
+                const tags = [...merged.entries()]
+                  .map(([name, types]) => mergedTagLabel(name, types, locale))
+                  .sort((left, right) => left.localeCompare(right));
+                const direct = (merged.size === 1 && section === [...merged.keys()][0])
                   || (sections.size === 1 && (
                     section === root || section === t('systemLicense.featureList.other')
                   ));
-                  const sortedItems = visibleItems
-                  .slice()
-                  .sort((left, right) => featureLabel(left, locale).localeCompare(featureLabel(right, locale)));
                 return (
                   <div key={section} style={direct ? directSectionStyle : sectionStyle}>
                     {direct ? null : (
                       <div style={sectionTitleStyle}>
                         <Text strong>{section}</Text>
-                        <Text type="secondary" style={{ marginLeft: 6 }}>({visibleItems.length})</Text>
+                        <Text type="secondary" style={{ marginLeft: 6 }}>({tags.length})</Text>
                       </div>
                     )}
                     <div style={itemsStyle}>
-                      {sortedItems.map((feature, index) => (
-                        <Tag key={`${feature.featureCode ?? feature.featureId ?? 'feature'}-${index}`}>
-                          {featureTagLabel(feature, root, t, locale)}
-                        </Tag>
+                      {tags.map((label) => (
+                        <Tag key={label}>{label}</Tag>
                       ))}
                     </div>
                   </div>
                 );
-                })}
+              })}
           </div>
         </div>
       ))}
@@ -126,8 +132,25 @@ function NormalizedFeatureGroups({ features }: NormalizedFeatureGroupsProps) {
   );
 }
 
-const rootOrder = ['Dashboard', '地图', 'eNB', 'gNB', 'CPE', 'EGW', 'UPS', 'EPC', '告警', '性能', '高级', '系统'];
-const sectionOrder = ['监控', 'Monitor', '维护', 'Maintenance', '升级&回退', 'Upgrade&Rollback', '升级', 'Upgrade', '设备', 'Inventory'];
+// root/section 与 mapping path 对齐后的现网菜单目录顺序（未列出的按字母序）
+const rootOrder = [
+  '首页', 'Dashboard',
+  '设备管理', '告警管理', '性能管理', 'MML管理', '拓扑管理', '软件管理', '运维管理', '产品中心', '系统管理', '高级', '帮助', '其他',
+  'Device Mgmt', 'Alarm Mgmt', 'Performance', 'MML', 'Topology', 'Software', 'O&M', 'Product', 'System', 'Advanced', 'Help', 'Other',
+];
+const sectionOrder = [
+  '设备列表', 'Device List', '设备注册', 'Registration', '即插即用', 'Plug-and-Play', '批量配置', 'Batch Config',
+  '设备详情', 'Device Detail', '核心网', 'Core Network',
+  '当前告警', 'Current Alarms', '历史告警', 'Historical Alarms', '告警规则', 'Rules', '告警统计', 'Statistics', '告警库', 'Library',
+  '指标查询', 'KPI Query', '指标库', 'KPI Library', '测量任务管理', 'Measurement Tasks',
+  '拓扑图', 'Canvas',
+  '版本升级', 'Upgrade', '升级文件', 'Firmware Files', '版本回退', 'Rollback',
+  'MML控制台', 'MML Console',
+  '设备日志', 'Device Logs', '运维命令', 'Commands', '网络诊断', 'Diagnostics', 'TR069报文跟踪', 'Message Trace',
+  '备份恢复', 'Backup & Restore',
+  '系统配置', 'Configuration', '用户管理', 'Users', '角色管理', 'Roles', '日志', 'Logs', 'License',
+  '参数模型库', 'Param Model',
+];
 
 function compareFeatureNames(left: string, right: string, preferred: string[]): number {
   const leftIndex = preferred.indexOf(left);
@@ -139,21 +162,35 @@ function compareFeatureNames(left: string, right: string, preferred: string[]): 
   return left.localeCompare(right);
 }
 
-function featureGroupRoot(feature: SystemLicenseFeature, fallback: string): string {
-  const code = feature.featureCode ?? '';
+// 模块级整体授权（整个模块一个开关）：首页 / 地图
+function moduleLevelCode(code?: string): boolean {
+  return code === 'CODE_DASHBOARD' || code === 'CODE_TOPO';
+}
+
+// 旧 license code 前缀 → 设备类型；无前缀的裸 code 显式指认
+const explicitDeviceTypes: Record<string, string> = {
+  CODE_EGW: 'EGW',
+  CODE_UPS: 'UPS',
+  CODE_EPC: 'EPC',
+  CODE_IPSEC_CERT: 'eNB',
+};
+const deviceTypeOrder = ['eNB', 'gNB', 'CPE', 'EGW', 'UPS', 'EPC'];
+
+function deviceTypeOf(code?: string): string | null {
+  if (!code) return null;
+  if (explicitDeviceTypes[code]) return explicitDeviceTypes[code];
   if (code.startsWith('CODE_ENB_')) return 'eNB';
   if (code.startsWith('CODE_GNB_') || code === 'CODE_GNB') return 'gNB';
-  if (code.startsWith('CODE_CPE_')) return 'CPE';
-  if (code === 'CODE_EGW') return 'EGW';
-  if (code === 'CODE_UPS') return 'UPS';
-  if (code === 'CODE_EPC') return 'EPC';
-  if (code.startsWith('CODE_ALARM_')) return '告警';
-  if (code.startsWith('CODE_PERFORMANCE_')) return '性能';
-  if (code.startsWith('CODE_SYSTEM_')) return '系统';
-  if (code.startsWith('CODE_ADVANCE_')) return '高级';
-  if (code === 'CODE_TOPO') return '地图';
-  if (code === 'CODE_DASHBOARD') return 'Dashboard';
-  return fallback;
+  if (code.startsWith('CODE_CPE_') || code === 'CODE_CPE') return 'CPE';
+  return null;
+}
+
+function mergedTagLabel(name: string, types: Set<string>, locale: string): string {
+  if (types.size === 0) return name;
+  const ordered = deviceTypeOrder.filter((type) => types.has(type));
+  return locale === 'en-US'
+    ? `${name} (${ordered.join(', ')})`
+    : `${name}（${ordered.join('、')}）`;
 }
 
 function featureLabel(feature: SystemLicenseFeature, locale: string): string {
@@ -161,37 +198,6 @@ function featureLabel(feature: SystemLicenseFeature, locale: string): string {
     return feature.nameEn || feature.nameZh || feature.featureCode || feature.featureId || '-';
   }
   return feature.nameZh || feature.nameEn || feature.featureCode || feature.featureId || '-';
-}
-
-function featureTagLabel(feature: SystemLicenseFeature, root: string, t: ReturnType<typeof useT>, locale: string): string {
-  if (root === 'Dashboard' || root === '地图') {
-    return t('systemLicense.featureList.all');
-  }
-  return featureLabel(feature, locale);
-}
-
-function technicalRootLabel(root: string): string {
-  switch (root) {
-    case '4G基站':
-      return 'eNB';
-    case '5G基站':
-      return 'gNB';
-    default:
-      return root;
-  }
-}
-
-function localizeRoot(root: string, locale: string): string {
-  if (locale !== 'en-US') return root;
-  const labels: Record<string, string> = {
-    地图: 'MAP',
-    告警: 'Alarm',
-    性能: 'Performance',
-    高级: 'Advanced',
-    系统: 'System',
-    其他: 'Other',
-  };
-  return labels[root] ?? root;
 }
 
 const sectionStyle: React.CSSProperties = {

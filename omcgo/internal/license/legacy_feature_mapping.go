@@ -16,6 +16,9 @@ type LegacyFeatureDefinition struct {
 	ParentID string `json:"parent_id"`
 	Path     string `json:"path"`
 	PathEN   string `json:"path_en"`
+	// Hidden：现网 OMC 已无对应功能（如独立 Monitor 页、设备激活、射频开关），
+	// 仅控制特性列表展示；授权树仍按 code 授权（菜单/接口闸门不受影响）。
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 type LegacyFeatureMapping struct {
@@ -34,6 +37,7 @@ type LegacyFeatureDisplay struct {
 	Source      string   `json:"source"`
 	Recognized  bool     `json:"recognized"`
 	Licensed    bool     `json:"licensed"`
+	Hidden      bool     `json:"hidden,omitempty"`
 	RawIDs      []string `json:"raw_ids,omitempty"`
 	RawCodes    []string `json:"raw_codes,omitempty"`
 }
@@ -132,6 +136,7 @@ func (m *LegacyFeatureMapping) display(code, id, source string, rawIDs, rawCodes
 	item.NameEN = definition.NameEN
 	item.Path = definition.Path
 	item.PathEN = definition.PathEN
+	item.Hidden = definition.Hidden
 	item.Recognized = recognized || item.NameZH != "" || item.NameEN != ""
 	if !item.Recognized {
 		item.Source = "unknown"
@@ -169,6 +174,7 @@ var codeModuleNames = map[string]string{
 	"ALARM":       "Alarm",
 	"PERFORMANCE": "Performance",
 	"SYSTEM":      "System",
+	"NINF":        "Northbound",
 	"TOPO":        "Topo",
 	"TOOL":        "Tool",
 	"HELP":        "Help",
@@ -281,11 +287,14 @@ var legacyGNBList = []string{
 // 一致。规则：
 //   - featureCodes 为空（旧格式仅 ID）：ID→code，补 sysList，再按特定 ID 补 RF_ENABLE/UPGRADE_FILE
 //   - featureCodes 非空（新格式）：原样保留；若含 CODE_GNB 则补 gnbList
+//   - 北向（旧 OMC 语义，issue #311）：NInfType=1 开启北向；开启时 northAlarmType（如
+//     "snmp,socket"）包含 snmp/socket 则分别派生 CODE_NINF_SNMP / CODE_NINF_SOCKET（可同时）；
+//     NInfType=0 时无论 northAlarmType 为何值都不派生
 //   - 公共：Cloud 版剔 CODE_ADVANCE_ACCESS_CONTROL；有 SELFSTART 无 PNP 则补 PNP
 //
 // 注：旧 Java 的 delAlarmCode 结果被下一行覆盖（实际不生效），且其 alarmCode 常量不在 ID 映射中，
 // 故此处不复刻（等价 no-op）。
-func (m *LegacyFeatureMapping) ExpandFeatureCodes(featureIDs, featureCodes []string, isCloud bool) []string {
+func (m *LegacyFeatureMapping) ExpandFeatureCodes(featureIDs, featureCodes []string, isCloud bool, ninfEnabled bool, northAlarmTypes []string) []string {
 	seen := make(map[string]bool)
 	add := func(c string) {
 		if c = strings.TrimSpace(c); c != "" {
@@ -338,6 +347,20 @@ func (m *LegacyFeatureMapping) ExpandFeatureCodes(featureIDs, featureCodes []str
 	}
 	if seen["CODE_ADVANCE_SELFSTART"] && !seen["CODE_PLUG_AND_PLAY"] {
 		add("CODE_PLUG_AND_PLAY")
+	}
+
+	// 北向派生（issue #311）：NInfType=1 才开启；northAlarmType 只在开启时决定派生哪些协议
+	// code（snmp→SNMP、socket→SOCKET，可同时）。northAlarmType 是协议偏好字段，未开启北向的
+	// license 也会带值，不能单独作为授权依据。
+	if ninfEnabled {
+		for _, alarmType := range northAlarmTypes {
+			switch strings.ToLower(strings.TrimSpace(alarmType)) {
+			case "snmp":
+				add("CODE_NINF_SNMP")
+			case "socket":
+				add("CODE_NINF_SOCKET")
+			}
+		}
 	}
 
 	result := make([]string, 0, len(seen))
