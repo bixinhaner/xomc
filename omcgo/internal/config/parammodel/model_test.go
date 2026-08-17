@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -218,7 +219,7 @@ func TestMLQPLMNListObjectIsWritable(t *testing.T) {
 	var doc xmlParameterModel
 	require.NoError(t, xml.Unmarshal(body, &doc))
 
-	const path = "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList."
+	const path = "Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}."
 	for _, object := range doc.Objects {
 		if object.StandardPath == path {
 			assert.Equal(t, path, object.Name)
@@ -272,6 +273,57 @@ func TestBaiBNQGNBNameIsWritableNRCommonPath(t *testing.T) {
 	}
 
 	t.Fatalf("expected BaiBNQ.xml to define writable gNBName mapping at %s", path)
+}
+
+func TestBaiBNQNrSibParamsUsesInstancePlaceholder(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const prefix = "Device.Services.FAPService.{i}.CellConfig.{i}.NrSibParams.{i}."
+	var mappings []ParamMapping
+	for _, param := range doc.Params {
+		if !strings.HasPrefix(param.StandardPath, prefix) {
+			continue
+		}
+		assert.Equal(t, param.StandardPath, param.Name, "BaiBNQ SIB instance must not be fixed")
+		mappings = append(mappings, ParamMapping{
+			StandardPath: param.StandardPath,
+			PrivatePath:  param.Name,
+		})
+	}
+	require.Len(t, mappings, 7)
+
+	translator := NewTranslator(&MappingSet{Mappings: mappings}, nil, nil)
+	candidates := translator.ToPrivateCandidates("Device.Services.FAPService.1.CellConfig.1.NrSibParams.")
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "Device.Services.FAPService.1.CellConfig.1.NrSibParams.", candidates[0].Translated)
+}
+
+func TestBaiBNQNeighborCollectionsUseInstanceObjectMappings(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	wantObjects := map[string]string{
+		"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell.{i}.": "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.",
+		"Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.":   "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.",
+	}
+
+	found := make(map[string]string, len(wantObjects))
+	for _, object := range doc.Objects {
+		if _, ok := wantObjects[object.StandardPath]; ok {
+			found[object.StandardPath] = object.Name
+		}
+	}
+	require.Equal(t, wantObjects, found,
+		"ADD/RMV filtering requires an explicit {i}. object mapping for each neighbor collection")
 }
 
 func TestBaiBNQIncludesNRWANInterfaceParameters(t *testing.T) {
@@ -430,7 +482,7 @@ func TestBaiBNQLTEIdleReselectionCarrierObjectIsWritable(t *testing.T) {
 	var doc xmlParameterModel
 	require.NoError(t, xml.Unmarshal(body, &doc))
 
-	const path = "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier."
+	const path = "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.IdleMode.EUTRA.Carrier.{i}."
 
 	for _, object := range doc.Objects {
 		if object.Name == path {

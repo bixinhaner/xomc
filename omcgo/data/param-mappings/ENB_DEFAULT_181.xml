@@ -1,13 +1,15 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="ENB_DEFAULT_181" totalEntries="512">
+<parameterModel paramModel="ENB_DEFAULT_181" totalEntries="515">
     <objects>
         <object name="Device.DeviceInfo.EU." standardPath="Device.DeviceInfo.EU." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.DeviceInfo.EU.{i}.RU." standardPath="Device.DeviceInfo.EU.{i}.RU." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS." access="READ_ONLY" changeApplies="Immediate"/>
-        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}." access="READ_WRITE" changeApplies="Immediate"/>
     </objects>
     <parameters>
         <param name="Device.DeviceInfo.3GPPSpecVersion" standardPath="Device.DeviceInfo.3GPPSpecVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
