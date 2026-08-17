@@ -127,16 +127,21 @@ DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 #   · docker_cli     —— 单容器元数据查询（ps/inspect），5s
 #   · compose_cli    —— compose exec / ps（compose 文件解析 + daemon 往返），15s
 #   · compose_render —— compose config 全量渲染，30s
-# daemon 变慢只表现为对应检查项 [FAIL]，脚本总能跑完并产出完整结果。
+# 包装器超时统一返回 124。124 是「探针没能运行」—— daemon 层故障，不是被检
+# 对象异常；各检查函数须把 124 透传出来，check() 对 124 记 [SKIP]（探针超时
+# 未判定）而不计失败，避免宿主机繁忙时误报服务异常 / 误判安装失败。
 docker_cli() { timeout -k 5 5 docker "$@"; }
 compose_cli() { timeout -k 5 15 "${DC[@]}" "$@"; }
 compose_render() { timeout -k 5 30 "${DC[@]}" "$@"; }
 
-ok=0; fail=0
+ok=0; fail=0; probe_skipped=0
 check() {  # check <描述> <命令...>
   local desc="$1"; shift
   if "$@" >/dev/null 2>&1; then
     echo "  [OK]   $(health_text "$desc")"; ok=$((ok+1))
+  elif [ "$?" -eq 124 ]; then
+    echo "  [SKIP] $(health_text "$desc")$(health_text '（探针超时，未判定）' ' (probe timed out, undetermined)')"
+    probe_skipped=$((probe_skipped+1))
   else
     echo "  [FAIL] $(health_text "$desc")"; fail=$((fail+1))
   fi
@@ -163,31 +168,45 @@ check_value() { # check_value <描述> <期望> <实际>
 # 完整的结构化结果（安装门禁依据逐项结果判定，而不是被外层秒表拦腰砍断）。
 # daemon 短暂变慢只表现为该项 FAIL，随安装脚本重试轮次自愈。
 container_running() {
-  local svc="$1"
-  local cid
-  cid="$(docker_cli ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
-    --filter "label=com.docker.compose.service=$svc" --format '{{.ID}}' | head -n1)"
+  local svc="$1" cid out rc state
+  out="$(docker_cli ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter "label=com.docker.compose.service=$svc" --format '{{.ID}}')"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  cid="$(printf '%s\n' "$out" | head -n1)"
   [ -n "$cid" ] || return 1
-  [ "$(docker_cli inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "true" ]
+  state="$(docker_cli inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  [ "$state" = "true" ]
 }
 
 container_sysctl_equals() { # container_sysctl_equals <service> <key> <expected>
-  local svc="$1" key="$2" expected="$3" actual
-  actual="$(compose_cli exec -T "$svc" sysctl -n "$key" 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
+  local svc="$1" key="$2" expected="$3" actual rc
+  actual="$(compose_cli exec -T "$svc" sysctl -n "$key" 2>/dev/null)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  actual="$(printf '%s' "$actual" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
   [ "$actual" = "$expected" ]
 }
 
 web_acs_upstream_pool_loaded() {
-  local rendered
-  rendered="$(compose_cli exec -T web nginx -T 2>&1)" || return 1
+  local rendered rc
+  rendered="$(compose_cli exec -T web nginx -T 2>&1)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  [ "$rc" -ne 0 ] && return 1
   printf '%s\n' "$rendered" | grep -Fq 'server acs:7557 resolve;'
   printf '%s\n' "$rendered" | grep -Fq 'keepalive 4096;'
   printf '%s\n' "$rendered" | grep -Fq 'proxy_pass http://acs_backend;'
 }
 
 web_https_file_entry_loaded() {
-  local rendered rendered_flat
-  rendered="$(compose_cli exec -T web nginx -T 2>&1)" || return 1
+  local rendered rendered_flat rc
+  rendered="$(compose_cli exec -T web nginx -T 2>&1)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  [ "$rc" -ne 0 ] && return 1
   rendered_flat="$(printf '%s\n' "$rendered" | tr -s '[:space:]' ' ')"
   printf '%s\n' "$rendered_flat" | grep -Fq 'listen 8443 ssl;' &&
     printf '%s\n' "$rendered_flat" | grep -Fq 'ssl_certificate /etc/nginx/cert/cert.pem;' &&
@@ -210,24 +229,38 @@ https_file_entry_status_is() { # https_file_entry_status_is <path> <expected_sta
 }
 
 acs_service_ready() {
-  local service="$1" cid ip
-  cid="$(compose_cli ps -q "$service" 2>/dev/null | head -n1)"
+  local service="$1" cid ip rc
+  cid="$(compose_cli ps -q "$service" 2>/dev/null)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  cid="$(printf '%s\n' "$cid" | head -n1)"
   [ -n "$cid" ] || return 1
   ip="$(docker_cli inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$cid" 2>/dev/null)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
   [ -n "$ip" ] || return 1
   curl -fsS --max-time 3 "http://${ip}:7557/readyz"
 }
 
 redis_instance_run_id() {
-  local service="$1"
-  compose_cli exec -T "$service" redis-cli --raw INFO server 2>/dev/null |
-    awk -F: '$1 == "run_id" { gsub(/\r/, "", $2); print $2; exit }'
+  local service="$1" out rc
+  out="$(compose_cli exec -T "$service" redis-cli --raw INFO server 2>/dev/null)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  [ "$rc" -ne 0 ] && return 1
+  printf '%s' "$out" | awk -F: '$1 == "run_id" { gsub(/\r/, "", $2); print $2; exit }'
 }
 
 redis_instances_distinct() {
-  local core_id pm_id
-  core_id="$(redis_instance_run_id redis-core)" || return 1
-  pm_id="$(redis_instance_run_id redis-pm)" || return 1
+  local core_id pm_id rc
+  core_id="$(redis_instance_run_id redis-core)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  [ "$rc" -ne 0 ] && return 1
+  pm_id="$(redis_instance_run_id redis-pm)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  [ "$rc" -ne 0 ] && return 1
   [ -n "$core_id" ] && [ -n "$pm_id" ] && [ "$core_id" != "$pm_id" ]
 }
 
@@ -265,7 +298,9 @@ if [ "$STARTUP_CHECK" = 1 ]; then
   fi
   echo
   echo "$(health_text '启动检查已跳过 Redis 路由、实例身份和 ACS candidate /readyz 深审计；完整 healthcheck 将在部署后执行。' 'Startup check skips deep Redis routing, instance identity, and ACS candidate /readyz audits; the full healthcheck runs after deployment.')"
-  echo "$(health_text "启动检查结果：通过 $ok 项，失败 $fail 项" "Startup check result: $ok passed, $fail failed")"
+  probe_skip_note=""
+  [ "$probe_skipped" -gt 0 ] && probe_skip_note="$(health_text "（另有 ${probe_skipped} 项探针超时未判定，daemon 空闲后可复核）" " (${probe_skipped} probe timeouts undetermined; review when the daemon is idle)")"
+  echo "$(health_text "启动检查结果：通过 $ok 项，失败 $fail 项" "Startup check result: $ok passed, $fail failed")$probe_skip_note"
   [ "$fail" -eq 0 ] || { echo "$(health_text '启动核心服务尚未就绪。' 'Core services are not ready.')"; exit 1; }
   echo "$(health_text '启动核心服务已就绪。' 'Core services are ready.')"
   exit 0
@@ -472,6 +507,8 @@ echo "$(health_text 'compose ps 详情：' 'Compose ps details:')"
 compose_cli ps 2>/dev/null || echo "  (无法读取 compose 状态)"
 
 echo
-echo "$(health_text "结果：通过 $ok 项，失败 $fail 项" "Result: $ok passed, $fail failed")"
+probe_skip_note=""
+[ "$probe_skipped" -gt 0 ] && probe_skip_note="$(health_text "（另有 ${probe_skipped} 项探针超时未判定，daemon 空闲后可复核）" " (${probe_skipped} probe timeouts undetermined; review when the daemon is idle)")"
+echo "$(health_text "结果：通过 $ok 项，失败 $fail 项" "Result: $ok passed, $fail failed")$probe_skip_note"
 [ "$fail" -eq 0 ] || { echo "$(health_text '存在失败项，参见部署方案故障排查章节。' 'Failures found; see the deployment troubleshooting section.')"; exit 1; }
 echo "$(health_text '校验通过。' 'Healthcheck passed.')"
