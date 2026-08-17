@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
 // 把 MML 控制台/脚本里"用户友好的命令参数"翻译为 ACS RPC handler 需要的
@@ -187,20 +189,10 @@ func BuildTR069Params(
 	}
 }
 
-// xsdType 把 standard_params.data_type 映射为 TR-069 SOAP 报文的 xsd 类型字符串。
+// xsdType 把参数模型的数据类型映射为 TR-069 SOAP 报文的 xsd 类型字符串。
 // 列表型（stringList / unsignedIntList）按 TR-069 规范以 CSV string 传输。
 func xsdType(valueType string) string {
-	switch canonicalValueType(valueType) {
-	case "boolean", "bool":
-		return "xsd:boolean"
-	case "unsignedint", "unsignedinteger", "u_int", "uint", "uint32", "uint64":
-		return "xsd:unsignedInt"
-	case "int", "integer", "int32", "int64", "uniqueint":
-		return "xsd:int"
-	default:
-		// string / enum / stringList / unsignedIntList → xsd:string
-		return "xsd:string"
-	}
+	return tr069.XSDType(valueType)
 }
 
 // xsdTypeForPath applies device compatibility overrides to the SOAP wire type.
@@ -208,17 +200,11 @@ func xsdType(valueType string) string {
 // numeric boolean value is sent as xsd:string (the standard xsd:boolean form
 // is acknowledged but not applied by the device).
 func xsdTypeForPath(path, valueType string) string {
-	if path == "Device.DeviceInfo.SignallingTrace.Enable" {
-		return "xsd:string"
-	}
-	return xsdType(valueType)
+	return tr069.XSDTypeForPath(path, valueType)
 }
 
 func normalizeTR069ValueForPath(path, value, valueType string) string {
-	if path == "Device.DeviceInfo.SignallingTrace.Enable" {
-		return normalizeTR069Value(value, "boolean")
-	}
-	return normalizeTR069Value(value, valueType)
+	return tr069.NormalizeValueForPath(path, value, valueType)
 }
 
 // buildParameterNames 收集所有 paramRefs 的 tr069_path → {"names":[...]}。
@@ -598,17 +584,7 @@ func stringifyValue(v interface{}) (string, bool) {
 // normalizeTR069Value 规范化需要兼容基站数字布尔约定的协议值。
 // 输入可能来自前端表单（"true"/"false"）、JSON bool 或历史脚本（"1"/"0"）。
 func normalizeTR069Value(value, valueType string) string {
-	if strings.ToLower(strings.TrimSpace(valueType)) != "boolean" {
-		return value
-	}
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "true", "1":
-		return "1"
-	case "false", "0":
-		return "0"
-	default:
-		return value
-	}
+	return tr069.NormalizeValueForPath("", value, valueType)
 }
 
 // SchemaSummary 返回一个 payload 的 schema 形态摘要，用于日志诊断。

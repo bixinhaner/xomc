@@ -23,8 +23,8 @@
         <param name="Device.DeviceInfo.AntennaInfo.Downtilt2" standardPath="Device.DeviceInfo.AntennaInfo.Downtilt2" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-90" max="90" />
         <param name="Device.DeviceInfo.AntennaInfo.Gain" standardPath="Device.DeviceInfo.AntennaInfo.Gain" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-5" max="30" />
         <param name="Device.DeviceInfo.AntennaInfo.Gain2" standardPath="Device.DeviceInfo.AntennaInfo.Gain2" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-5" max="30" />
-        <param name="Device.DeviceInfo.AntennaInfo.Height" standardPath="Device.DeviceInfo.AntennaInfo.Height" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.AntennaInfo.Height2" standardPath="Device.DeviceInfo.AntennaInfo.Height2" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.AntennaInfo.Height" standardPath="Device.DeviceInfo.AntennaInfo.Height" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.AntennaInfo.Height2" standardPath="Device.DeviceInfo.AntennaInfo.Height2" access="READ_WRITE" type="INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.AntennaInfo.HeightType" standardPath="Device.DeviceInfo.AntennaInfo.HeightType" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.AntennaInfo.HeightType2" standardPath="Device.DeviceInfo.AntennaInfo.HeightType2" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.cbsdCategory" standardPath="Device.DeviceInfo.cbsdCategory" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
@@ -32,7 +32,7 @@
         <param name="Device.DeviceInfo.CPI_InstallCertificationTime" standardPath="Device.DeviceInfo.SAS.CpiInstallCertificationTime" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.CPI_InstallCertificationTime2" standardPath="Device.DeviceInfo.SAS.CpiInstallCertificationTime2" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.CPI_Name" standardPath="Device.DeviceInfo.SAS.CpiName" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.EU.{i}.AlarmEvent" standardPath="Device.DeviceInfo.EU.{i}.AlarmEvent" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.EU.{i}.AlarmEvent" standardPath="Device.DeviceInfo.EU.{i}.AlarmEvent" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.EU.{i}.HardwareVersion" standardPath="Device.DeviceInfo.EU.{i}.HardwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64" />
         <param name="Device.DeviceInfo.EU.{i}.Hop" standardPath="Device.DeviceInfo.EU.{i}.Hop" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64" />
         <param name="Device.DeviceInfo.EU.{i}.IpAddress" standardPath="Device.DeviceInfo.EU.{i}.IpAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64" />
@@ -43,7 +43,7 @@
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.AlarmEvent" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.AlarmEvent" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.Distance" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.Distance" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64" />
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.HardwareVersion" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.HardwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64" />
-        <param name="Device.DeviceInfo.EU.{i}.RU.{i}.Hop" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.Hop" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.EU.{i}.RU.{i}.Hop" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.Hop" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.IpAddress" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.IpAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64" />
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.Mac" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.Mac" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64" />
         <param name="Device.DeviceInfo.EU.{i}.RU.{i}.MaxTxPower" standardPath="Device.DeviceInfo.EU.{i}.RU.{i}.MaxTxPower" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
@@ -59,95 +59,95 @@
         <param name="Device.DeviceInfo.EU.{i}.SoftwareVersion" standardPath="Device.DeviceInfo.EU.{i}.SoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="64" />
         <param name="Device.DeviceInfo.EU.{i}.Status" standardPath="Device.DeviceInfo.EU.{i}.Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.EU.{i}.Type" standardPath="Device.DeviceInfo.EU.{i}.Type" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.GPS.horizontalAccuracy" standardPath="Device.DeviceInfo.GPS.horizontalAccuracy" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.GPS.verticalAccuracy" standardPath="Device.DeviceInfo.GPS.verticalAccuracy" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.GPS.horizontalAccuracy" standardPath="Device.DeviceInfo.GPS.horizontalAccuracy" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.GPS.verticalAccuracy" standardPath="Device.DeviceInfo.GPS.verticalAccuracy" access="READ_WRITE" type="INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.HardwareVersion" standardPath="Device.DeviceInfo.HardwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.highFrequency" standardPath="Device.DeviceInfo.highFrequency" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.indoorDeployment" standardPath="Device.DeviceInfo.indoorDeployment" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.lowFrequency" standardPath="Device.DeviceInfo.lowFrequency" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.highFrequency" standardPath="Device.DeviceInfo.highFrequency" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.indoorDeployment" standardPath="Device.DeviceInfo.indoorDeployment" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.lowFrequency" standardPath="Device.DeviceInfo.lowFrequency" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ManufacturerOUI" standardPath="Device.DeviceInfo.ManufacturerOUI" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="6" />
-        <param name="Device.DeviceInfo.PowerSpectralDensity" standardPath="Device.DeviceInfo.PowerSpectralDensity" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.PowerSpectralDensity1" standardPath="Device.DeviceInfo.PowerSpectralDensity1" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.PowerSpectralDensity2" standardPath="Device.DeviceInfo.PowerSpectralDensity2" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.PowerSpectralDensity" standardPath="Device.DeviceInfo.PowerSpectralDensity" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.PowerSpectralDensity1" standardPath="Device.DeviceInfo.PowerSpectralDensity1" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.PowerSpectralDensity2" standardPath="Device.DeviceInfo.PowerSpectralDensity2" access="READ_WRITE" type="INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ProductClass" standardPath="Device.DeviceInfo.ProductClass" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="64" />
         <param name="Device.DeviceInfo.SAS.CallSign" standardPath="Device.DeviceInfo.SAS.CallSign" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256" />
         <param name="Device.DeviceInfo.SAS.CpiSignatureData" standardPath="Device.DeviceInfo.SAS.CpiSignatureData" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SAS.CpiSignatureData2" standardPath="Device.DeviceInfo.SAS.CpiSignatureData2" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SAS.enableMode" standardPath="Device.DeviceInfo.SAS.enableMode" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SAS.enableMode" standardPath="Device.DeviceInfo.SAS.enableMode" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SAS.FccId" standardPath="Device.DeviceInfo.SAS.FccId" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="19" />
         <param name="Device.DeviceInfo.SAS.FrequencySelectionLogic" standardPath="Device.DeviceInfo.SAS.FrequencySelectionLogic" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SAS.groupId" standardPath="Device.DeviceInfo.SAS.groupId" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="128" />
         <param name="Device.DeviceInfo.SAS.groupType" standardPath="Device.DeviceInfo.SAS.groupType" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="128" />
-        <param name="Device.DeviceInfo.SAS.LegacyMode" standardPath="Device.DeviceInfo.SAS.LegacyMode" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SAS.MaxEIRP" standardPath="Device.DeviceInfo.SAS.MaxEIRP" access="READ_WRITE" type="INT" changeApplies="Immediate" max="37" />
+        <param name="Device.DeviceInfo.SAS.LegacyMode" standardPath="Device.DeviceInfo.SAS.LegacyMode" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SAS.MaxEIRP" standardPath="Device.DeviceInfo.SAS.MaxEIRP" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="37" />
         <param name="Device.DeviceInfo.SAS.PreferredBandwidth" standardPath="Device.DeviceInfo.SAS.PreferredBandwidth" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SAS.PreferredFrequency" standardPath="Device.DeviceInfo.SAS.PreferredFrequency" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SAS.PreferredPower" standardPath="Device.DeviceInfo.SAS.PreferredPower" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SAS.RadioEnable" standardPath="Device.DeviceInfo.SAS.RadioEnable" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SAS.RadioEnable1" standardPath="Device.DeviceInfo.SAS.RadioEnable1" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SAS.RadioEnable2" standardPath="Device.DeviceInfo.SAS.RadioEnable2" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SAS.PreferredPower" standardPath="Device.DeviceInfo.SAS.PreferredPower" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SAS.RadioEnable" standardPath="Device.DeviceInfo.SAS.RadioEnable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SAS.RadioEnable1" standardPath="Device.DeviceInfo.SAS.RadioEnable1" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SAS.RadioEnable2" standardPath="Device.DeviceInfo.SAS.RadioEnable2" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SAS.RegistrationType" standardPath="Device.DeviceInfo.SAS.RegistrationType" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SAS.reqHighFrequency" standardPath="Device.DeviceInfo.SAS.reqHighFrequency" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SAS.reqLowFrequency" standardPath="Device.DeviceInfo.SAS.reqLowFrequency" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SAS.reqHighFrequency" standardPath="Device.DeviceInfo.SAS.reqHighFrequency" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SAS.reqLowFrequency" standardPath="Device.DeviceInfo.SAS.reqLowFrequency" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SAS.UserId" standardPath="Device.DeviceInfo.SAS.UserId" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256" />
         <param name="Device.DeviceInfo.SerialNumber" standardPath="Device.DeviceInfo.SerialNumber" access="READ_ONLY" type="STRING" changeApplies="Immediate" max="64" />
-        <param name="Device.DeviceInfo.SignallingTrace.Enable" standardPath="Device.DeviceInfo.SignallingTrace.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SignallingTrace.Enable" standardPath="Device.DeviceInfo.SignallingTrace.Enable" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SignallingTrace.IP" standardPath="Device.DeviceInfo.SignallingTrace.IP" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SignallingTrace.Period" standardPath="Device.DeviceInfo.SignallingTrace.Period" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SignallingTrace.Port" standardPath="Device.DeviceInfo.SignallingTrace.Port" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SignallingTrace.TraceID" standardPath="Device.DeviceInfo.SignallingTrace.TraceID" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SignallingTrace.Period" standardPath="Device.DeviceInfo.SignallingTrace.Period" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SignallingTrace.Port" standardPath="Device.DeviceInfo.SignallingTrace.Port" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SignallingTrace.TraceID" standardPath="Device.DeviceInfo.SignallingTrace.TraceID" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SignallingTrace.TraceType" standardPath="Device.DeviceInfo.SignallingTrace.TraceType" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SoftwareVersion" standardPath="Device.DeviceInfo.SoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SupportedPowerRange" standardPath="Device.DeviceInfo.SupportedPowerRange" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.X_COM.LTE.UE.X_BAICELLS_UE_SPEED_STATISTICS" standardPath="Device.Services.FAPService.{i}.UE_SPEED_STATISTICS" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.X_COM_1588_Status" standardPath="Device.DeviceInfo.1588_Status" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.X_COM_1588_Status" standardPath="Device.DeviceInfo.1588_Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.X_COM_CloudKey" standardPath="Device.DeviceInfo.CloudKey" access="READ_ONLY" type="STRING" changeApplies="Immediate" max="6" />
         <param name="Device.DeviceInfo.X_COM_GPS_Satellite_count" standardPath="Device.FAP.GPS.NumberOfSatellites" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.X_COM_GPS_Satellite_level" standardPath="Device.DeviceInfo.GPS_Satellite_level" access="READ_ONLY" type="INT" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.X_COM_GPS_Status" standardPath="Device.DeviceInfo.GPS_Status" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.X_COM_GPS_Satellite_level" standardPath="Device.DeviceInfo.GPS_Satellite_level" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.X_COM_GPS_Status" standardPath="Device.DeviceInfo.GPS_Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.X_COM_KERNAL_Version" standardPath="Device.DeviceInfo.KERNAL_Version" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.X_COM_Log.FaultLogURL" standardPath="Device.DeviceInfo.FaultLogURL" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.X_COM_LTE_LGW_TRANSFER_Mode" standardPath="Device.DeviceInfo.LTE_LGW_TRANSFER_Mode" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.X_COM_LTE_LGW_TRANSFER_Mode" standardPath="Device.DeviceInfo.LTE_LGW_TRANSFER_Mode" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.X_COM_MACAddress" standardPath="Device.Ethernet.Interface.{i}.MACAddress" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.X_COM_MME_Status" standardPath="Device.DeviceInfo.MME_Status" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.X_COM_MME_Status" standardPath="Device.DeviceInfo.MME_Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.X_COM_MODULE_TYPE" standardPath="Device.DeviceInfo.MODULE_TYPE" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.X_COM_REM_Status" standardPath="Device.DeviceInfo.REM_Status" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.X_COM_ROLLBACK_CONTROL" standardPath="Device.DeviceInfo.ROLLBACK_CONTROL" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.X_COM_ROLLBACK_ENABLE" standardPath="Device.DeviceInfo.ROLLBACK_ENABLE" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.X_COM_REM_Status" standardPath="Device.DeviceInfo.REM_Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.X_COM_ROLLBACK_CONTROL" standardPath="Device.DeviceInfo.ROLLBACK_CONTROL" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.X_COM_ROLLBACK_ENABLE" standardPath="Device.DeviceInfo.ROLLBACK_ENABLE" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.X_COM_SERVING_UNIT1_IPSEC_Address" standardPath="Device.DeviceInfo.SERVING_UNIT1_IPSEC_Address" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.X_COM_STATION_RUN_Time" standardPath="Device.DeviceInfo.UpTime" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.X_COM_U_BOOT_Version" standardPath="Device.DeviceInfo.U_BOOT_Version" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.X_COM_UE_Count" standardPath="Device.DeviceInfo.UE_Count" access="READ_ONLY" type="INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.X_COM_UE_Count" standardPath="Device.DeviceInfo.UE_Count" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.FAP.GPS.altidute" standardPath="Device.FAP.GPS.Height" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.FAP.GPS.LockedLatitude" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-90000000" max="90000000" />
         <param name="Device.FAP.GPS.LockedLatitude2" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude2" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-90000000" max="90000000" />
         <param name="Device.FAP.GPS.LockedLongitude" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-180000000" max="180000000" />
         <param name="Device.FAP.GPS.LockedLongitude2" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude2" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-180000000" max="180000000" />
-        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_DPDACTION" standardPath="Device.FAP.Ipsec.{i}.DPDACTION" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_DPDACTION" standardPath="Device.FAP.Ipsec.{i}.DPDACTION" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_DPDDELAY" standardPath="Device.FAP.Ipsec.{i}.DPDDELAY" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256" />
-        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_ESPAUTHENTICATION" standardPath="Device.FAP.Ipsec.{i}.ESP_AUTHENTICATION" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_ESPDHGROUP" standardPath="Device.FAP.Ipsec.{i}.ESP_DH_GROUP" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_ESPENCRYPTION" standardPath="Device.FAP.Ipsec.{i}.ESP_ENCRYPTION" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_FRAGMENTATION" standardPath="Device.FAP.Ipsec.{i}.FRAGMENTATION" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_IKEAUTHENTICATION" standardPath="Device.FAP.Ipsec.{i}.IKE_AUTHENTICATION" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_IKEDHGROUP" standardPath="Device.FAP.Ipsec.{i}.IKE_DH_GROUP" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_IKEENCRYPTION" standardPath="Device.FAP.Ipsec.{i}.IKE_ENCRYPTION" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_ESPAUTHENTICATION" standardPath="Device.FAP.Ipsec.{i}.ESP_AUTHENTICATION" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_ESPDHGROUP" standardPath="Device.FAP.Ipsec.{i}.ESP_DH_GROUP" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_ESPENCRYPTION" standardPath="Device.FAP.Ipsec.{i}.ESP_ENCRYPTION" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_FRAGMENTATION" standardPath="Device.FAP.Ipsec.{i}.FRAGMENTATION" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_IKEAUTHENTICATION" standardPath="Device.FAP.Ipsec.{i}.IKE_AUTHENTICATION" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_IKEDHGROUP" standardPath="Device.FAP.Ipsec.{i}.IKE_DH_GROUP" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_IKEENCRYPTION" standardPath="Device.FAP.Ipsec.{i}.IKE_ENCRYPTION" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_IKELIFETIME" standardPath="Device.FAP.Ipsec.{i}.IKELIFETIME" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_KEYLIFE" standardPath="Device.FAP.Ipsec.{i}.KEYLIFE" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256" />
-        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_LEFTAUTH" standardPath="Device.FAP.Ipsec.{i}.LEFT_AUTH" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_LEFTAUTH" standardPath="Device.FAP.Ipsec.{i}.LEFT_AUTH" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_LEFTCERT" standardPath="Device.FAP.Ipsec.{i}.LEFT_CERT" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_LEFTID" standardPath="Device.FAP.Ipsec.{i}.LEFT_IDENTIFIER" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_LEFTSOURCEIP" standardPath="Device.FAP.Ipsec.{i}.LEFTSOURCEIP" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_LEFTSUBNET" standardPath="Device.FAP.Ipsec.{i}.LEFT_SUBNET" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_REKEYMARGIN" standardPath="Device.FAP.Ipsec.{i}.REKEYMARGIN" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_RIGHT" standardPath="Device.FAP.Ipsec.{i}.TUNNEL_GATEWAY" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="64" />
-        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_RIGHTAUTH" standardPath="Device.FAP.Ipsec.{i}.RIGHT_AUTH" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_RIGHTAUTH" standardPath="Device.FAP.Ipsec.{i}.RIGHT_AUTH" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_RIGHTID" standardPath="Device.FAP.Ipsec.{i}.RIGHT_IDENTIFIER" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_RIGHTSUBNET" standardPath="Device.FAP.Ipsec.{i}.RIGHT_SUBNET" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_SECRETKEY" standardPath="Device.FAP.Ipsec.{i}.SECRET_KEY" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64" />
         <param name="Device.FAP.Ipsec.{i}.TUNNEL_CONFIG_TUNNELENABLE" standardPath="Device.FAP.Ipsec.{i}.TUNNEL_ENABLE" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
         <param name="Device.FAP.PerfMgmt.Config.{i}.Enable" standardPath="Device.FAP.PerfMgmt.Config.{i}.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
-        <param name="Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadInterval" standardPath="Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadInterval" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadInterval" standardPath="Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadInterval" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.FAP.PerfMgmt.Config.{i}.URL" standardPath="Device.FAP.PerfMgmt.Config.{i}.URL" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalInformation" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalInformation" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256" />
         <param name="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalText" standardPath="Device.FaultMgmt.CurrentAlarm.{i}.AdditionalText" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="1" max="256" />
@@ -184,70 +184,70 @@
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeHigh" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeHigh" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeMedium" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeMedium" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.Qhyst" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.Qhyst" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.Qhyst" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.Qhyst" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.QHystSFHigh" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.QHystSFHigh" access="READ_WRITE" type="INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.QHystSFMedium" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.QHystSFMedium" access="READ_WRITE" type="INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.TEvaluation" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.TEvaluation" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.THystNormal" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.THystNormal" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-60" max="50" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="-60" max="50" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus" access="READ_WRITE" type="U_INT" changeApplies="Immediate" enumValues="0,1" enumLabels="Inactive,Active" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302" access="READ_WRITE" type="INT" changeApplies="OnReboot" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA" access="READ_WRITE" type="INT" changeApplies="OnReboot" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT" access="READ_WRITE" type="INT" changeApplies="OnReboot" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320" access="READ_WRITE" type="INT" changeApplies="OnReboot" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302" access="READ_WRITE" type="U_INT" changeApplies="OnReboot" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA" access="READ_WRITE" type="U_INT" changeApplies="OnReboot" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT" access="READ_WRITE" type="U_INT" changeApplies="OnReboot" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320" access="READ_WRITE" type="U_INT" changeApplies="OnReboot" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.S1SigLinkServerList" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.S1SigLinkServerList" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.Enable" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool1IpsecAddr" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool1IpsecAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool1List" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool1List" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool1Status" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool1Status" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool1Status" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool1Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool2IpsecAddr" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool2IpsecAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool2List" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool2List" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool2Status" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool2Status" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.OpState" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.OpState" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool2Status" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmePool.MmePool2Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.OpState" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.OpState" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_HSS.SubInfoList.{i}.APNINFO" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.HSS.SubInfoList.{i}.APNINFO" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_HSS.HaloBEnableState" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.HSS.HaloBEnableState" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_HSS.HaloBMode" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.HSS.HaloBMode" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_HSS.HaloBEnableState" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.HSS.HaloBEnableState" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_HSS.HaloBMode" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.HSS.HaloBMode" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_HSS.IMSI" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.HSS.IMSI" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_HSS.SubInfoList.{i}.SUBINFO" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.HSS.SubInfoList.{i}.SUBINFO" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.ID" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.ID" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.Description" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.Description" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.ValidPeriod" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.ValidPeriod" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.RemainingPeriod" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.RemainingPeriod" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.ValidPeriod" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.ValidPeriod" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.RemainingPeriod" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.RemainingPeriod" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.Value" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.Value" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Author" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Author" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.CapacityListNumberOfEntries" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.CapacityListNumberOfEntries" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.CapacityListNumberOfEntries" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.CapacityListNumberOfEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Code" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Code" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.GenerateDate" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.GenerateDate" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.HaloBCentralizedModeAvailable" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.HaloBCentralizedModeAvailable" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.HaloBSingleModeAvailable" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.HaloBSingleModeAvailable" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.SeqNum" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.SeqNum" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.HaloBCentralizedModeAvailable" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.HaloBCentralizedModeAvailable" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.HaloBSingleModeAvailable" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.HaloBSingleModeAvailable" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.SeqNum" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.SeqNum" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Version" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Version" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.X_RADISYS_COM_AUTO_START_ENABLE" standardPath="Device.Services.FAPService.{i}.FAPControl.AUTO_START_ENABLE" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.X_RADISYS_COM_AUTO_START_ENABLE" standardPath="Device.Services.FAPService.{i}.FAPControl.AUTO_START_ENABLE" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.X_COM_CONFIG_STATS_FLOW.STATS_FLOW_SWITCH" standardPath="Device.Services.FAPService.{i}.FAPControl.CONFIG_STATS_FLOW.STATS_FLOW_SWITCH" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.X_COM_CONFIG_STATS_FLOW.STATS_FLOW_UPLOAD_ADDRESS" standardPath="Device.Services.FAPService.{i}.FAPControl.CONFIG_STATS_FLOW.STATS_FLOW_UPLOAD_ADDRESS" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.FAPControl.X_COM_CONFIG_STATS_FLOW.STATS_FLOW_UPLOAD_INTERVAL" standardPath="Device.Services.FAPService.{i}.FAPControl.CONFIG_STATS_FLOW.STATS_FLOW_UPLOAD_INTERVAL" access="READ_WRITE" type="INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.2.CellConfig.LTE.RAN.CA.PARAMS.CARRIER_MODE" standardPath="Device.Services.FAPService.2.CellConfig.LTE.RAN.CA.PARAMS.CARRIER_MODE" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.2.X_COM.LTE.LteUECount" standardPath="Device.DeviceInfo.2.UE_Count" access="READ_ONLY" type="INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.FAPControl.X_COM_CONFIG_STATS_FLOW.STATS_FLOW_UPLOAD_INTERVAL" standardPath="Device.Services.FAPService.{i}.FAPControl.CONFIG_STATS_FLOW.STATS_FLOW_UPLOAD_INTERVAL" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.2.CellConfig.LTE.RAN.CA.PARAMS.CARRIER_MODE" standardPath="Device.Services.FAPService.2.CellConfig.LTE.RAN.CA.PARAMS.CARRIER_MODE" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.2.X_COM.LTE.LteUECount" standardPath="Device.DeviceInfo.2.UE_Count" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.Ipsec.IPSEC_ENABLE" standardPath="Device.Services.FAPService.Ipsec.IPSEC_ENABLE" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
         <param name="Device.SoftwareCtrl.SystemBackupVersion" standardPath="Device.SoftwareCtrl.SystemBackupVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="FAPService.{i}.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="FAPService.{i}.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SAS.ChannelReuse" standardPath="Device.DeviceInfo.SAS.ChannelReuse" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SAS.Status" standardPath="Device.DeviceInfo.SAS.Status" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SAS.Status2" standardPath="Device.DeviceInfo.SAS.Status2" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
@@ -261,15 +261,15 @@
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.CIO" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.CIO" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-24" max="24" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X_COM_TAC" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.TAC" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.EUTRACarrierARFCN" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.EUTRACarrierARFCN" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-70" max="-22" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QOffsetFreq" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QOffsetFreq" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="-70" max="-22" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QOffsetFreq" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QOffsetFreq" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.CellReselectionPriority" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.CellReselectionPriority" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHigh" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHigh" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLow" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLow" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.PMax" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.PMax" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-30" max="33" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.TReselectionEUTRA" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.TReselectionEUTRA" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.TReselectionEUTRA" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.TReselectionEUTRA" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ETH1_STATUS_SPEED" standardPath="Device.DeviceInfo.ETH1_STATUS_SPEED" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.3.X_COM.LTE.LteUECount" standardPath="Device.DeviceInfo.3.UE_Count" access="READ_ONLY" type="INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.3.X_COM.LTE.LteUECount" standardPath="Device.DeviceInfo.3.UE_Count" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.ExistPlmnidList" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.ExistPlmnidList" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.Enable256QAM" standardPath="Device.DeviceInfo.Enable256QAM" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
@@ -277,10 +277,10 @@
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}.DelayControl" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}.DelayControl" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_HSS.ims" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.HSS.IMS" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_HSS.IMSInfo" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.HSS.SubInfoList.{i}.IMSINFO" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SAS.RadioEnable3" standardPath="Device.DeviceInfo.SAS.RadioEnable3" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SAS.RadioEnable3" standardPath="Device.DeviceInfo.SAS.RadioEnable3" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
         <param name="Device.FAP.GPS.LockedLatitude3" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLatitude3" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-90000000" max="90000000" />
         <param name="Device.FAP.GPS.LockedLongitude3" standardPath="Device.DeviceInfo.SAS.FAP.GPS.LockedLongitude3" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-180000000" max="180000000" />
-        <param name="Device.DeviceInfo.AntennaInfo.Height3" standardPath="Device.DeviceInfo.AntennaInfo.Height3" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.AntennaInfo.Height3" standardPath="Device.DeviceInfo.AntennaInfo.Height3" access="READ_WRITE" type="INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.AntennaInfo.HeightType3" standardPath="Device.DeviceInfo.AntennaInfo.HeightType3" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.AntennaInfo.Azimuth3" standardPath="Device.DeviceInfo.AntennaInfo.Azimuth3" access="READ_WRITE" type="INT" changeApplies="Immediate" max="359" />
         <param name="Device.DeviceInfo.AntennaInfo.Downtilt3" standardPath="Device.DeviceInfo.AntennaInfo.Downtilt3" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-90" max="90" />
@@ -289,12 +289,12 @@
         <param name="Device.DeviceInfo.CPI_InstallCertificationTime3" standardPath="Device.DeviceInfo.SAS.CpiInstallCertificationTime3" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SAS.CpiSignatureData3" standardPath="Device.DeviceInfo.SAS.CpiSignatureData3" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.SAS.Status3" standardPath="Device.DeviceInfo.SAS.Status3" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.PowerSpectralDensity3" standardPath="Device.DeviceInfo.PowerSpectralDensity3" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="boardconf.HALOD.HALOD_MODE" standardPath="boardconf.HaloD.baseStationForm" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.PowerSpectralDensity3" standardPath="Device.DeviceInfo.PowerSpectralDensity3" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="boardconf.HALOD.HALOD_MODE" standardPath="boardconf.HaloD.baseStationForm" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.MmePoolConfigParam.{i}.PLMNID" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}.PLMNID" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.MmePoolConfigParam.{i}.MMEIp" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}.MMEIp1" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.X_COM_BDS_Status" standardPath="Device.DeviceInfo.BDS_Status" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.SAS.FrequencyContiguous" standardPath="Device.DeviceInfo.SAS.FrequencyContiguous" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.X_COM_BDS_Status" standardPath="Device.DeviceInfo.BDS_Status" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.SAS.FrequencyContiguous" standardPath="Device.DeviceInfo.SAS.FrequencyContiguous" access="READ_ONLY" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_HSS.APN" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.HSS.APN" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.HaltReason.MainReason" standardPath="Device.HaltReason.MainReason" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.HaltReason.DetailReason" standardPath="Device.HaltReason.DetailReason" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
@@ -311,21 +311,21 @@
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.LAC" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.LAC" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.BSIC" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.BSIC" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.CI" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.CI" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.Enable" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.Enable" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.Enable" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
         <param name="Device.FAP.MRMgmt.Config.{i}.MrEnable" standardPath="Device.FAP.MRMgmt.Config.{i}.MrEnable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
-        <param name="Device.FAP.MRMgmt.Config.{i}.OmcName" standardPath="Device.FAP.MRMgmt.Config.{i}.OmcName" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
-        <param name="Device.FAP.MRMgmt.Config.{i}.UploadPeriod" standardPath="Device.FAP.MRMgmt.Config.{i}.UploadPeriod" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
-        <param name="Device.FAP.MRMgmt.Config.{i}.SamplePeriod" standardPath="Device.FAP.MRMgmt.Config.{i}.PeriodicReportInterval" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
-        <param name="Device.FAP.MRMgmt.Config.{i}.MrVendor" standardPath="Device.FAP.MRMgmt.Config.{i}.Vendor" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
-        <param name="Device.FAP.MRMgmt.Config.{i}.MrUrl" standardPath="Device.FAP.MRMgmt.Config.{i}.MrUrl" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
-        <param name="Device.ManagementServer.tfcsManagerPrimsrc" standardPath="Device.ManagementServer.tfcsManagerPrimsrc" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.FAP.MRMgmt.Config.{i}.OmcName" standardPath="Device.FAP.MRMgmt.Config.{i}.OmcName" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.FAP.MRMgmt.Config.{i}.UploadPeriod" standardPath="Device.FAP.MRMgmt.Config.{i}.UploadPeriod" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.FAP.MRMgmt.Config.{i}.SamplePeriod" standardPath="Device.FAP.MRMgmt.Config.{i}.PeriodicReportInterval" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.FAP.MRMgmt.Config.{i}.MrVendor" standardPath="Device.FAP.MRMgmt.Config.{i}.Vendor" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.FAP.MRMgmt.Config.{i}.MrUrl" standardPath="Device.FAP.MRMgmt.Config.{i}.MrUrl" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.ManagementServer.tfcsManagerPrimsrc" standardPath="Device.ManagementServer.tfcsManagerPrimsrc" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.ManagementServer.tfcsSyncState" standardPath="Device.ManagementServer.tfcsSyncState" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.ManagementServer.sslStatus.startDate" standardPath="Device.ManagementServer.sslStatus.startDate" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
         <param name="Device.ManagementServer.sslStatus.endDate" standardPath="Device.ManagementServer.sslStatus.endDate" access="READ_ONLY" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.AmbrLimitSwitch" standardPath="Device.DeviceInfo.AmbrLimitSwitch" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.UeAmbrDl" standardPath="Device.DeviceInfo.UeAmbrDl" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.UeAmbrUl" standardPath="Device.DeviceInfo.UeAmbrUl" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.FAP.MRMgmt.Config.{i}.MrGnssReportEnable" standardPath="Device.FAP.MRMgmt.Config.{i}.MrGnssReportEnable" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.AmbrLimitSwitch" standardPath="Device.DeviceInfo.AmbrLimitSwitch" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.UeAmbrDl" standardPath="Device.DeviceInfo.UeAmbrDl" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.UeAmbrUl" standardPath="Device.DeviceInfo.UeAmbrUl" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.FAP.MRMgmt.Config.{i}.MrGnssReportEnable" standardPath="Device.FAP.MRMgmt.Config.{i}.MrGnssReportEnable" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.FAPService.UeAccess.Enable" standardPath="Device.DeviceInfo.FAPService.UeAccess.Enable" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.X_COM_Localweb_password" standardPath="Device.Services.lmt.userConfig.{i}.pass" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="5" max="64" />
         <param name="Device.DeviceInfo.DNS_CONFIG_IPMODE" standardPath="Device.DeviceInfo.DNS_CONFIG_IPMODE" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="dhcp,static" />
@@ -336,51 +336,51 @@
         <param name="Device.DeviceInfo.WAN_CONFIG1_CONNECT_TYPE" standardPath="Device.DeviceInfo.WAN_CONFIG1_CONNECT_TYPE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG1_DEFAULTGW" standardPath="Device.DeviceInfo.WAN_CONFIG1_DEFAULTGW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG1_IPADDR" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.WAN_CONFIG1_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPMODE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG1_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG1_IPMODE" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG1_NETMASK" standardPath="Device.DeviceInfo.WAN_CONFIG1_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG1_OPTION60" standardPath="Device.DeviceInfo.WAN_CONFIG1_OPTION60" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG1_VLAN" standardPath="Device.DeviceInfo.WAN_CONFIG1_VLAN" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="4094" />
         <param name="Device.DeviceInfo.WAN_CONFIG2_DEFAULTGW" standardPath="Device.DeviceInfo.WAN_CONFIG2_DEFAULTGW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.WAN_CONFIG2_ENABLE" standardPath="Device.DeviceInfo.WAN_CONFIG2_ENABLE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG2_ENABLE" standardPath="Device.DeviceInfo.WAN_CONFIG2_ENABLE" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG2_IPADDR" standardPath="Device.DeviceInfo.WAN_CONFIG2_IPADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.WAN_CONFIG2_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG2_IPMODE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG2_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG2_IPMODE" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG2_NETMASK" standardPath="Device.DeviceInfo.WAN_CONFIG2_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG2_OPTION60" standardPath="Device.DeviceInfo.WAN_CONFIG2_OPTION60" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG2_VLAN" standardPath="Device.DeviceInfo.WAN_CONFIG2_VLAN" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="4094" />
         <param name="Device.DeviceInfo.WAN_CONFIG3_DEFAULTGW" standardPath="Device.DeviceInfo.WAN_CONFIG3_DEFAULTGW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.WAN_CONFIG3_ENABLE" standardPath="Device.DeviceInfo.WAN_CONFIG3_ENABLE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG3_ENABLE" standardPath="Device.DeviceInfo.WAN_CONFIG3_ENABLE" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG3_IPADDR" standardPath="Device.DeviceInfo.WAN_CONFIG3_IPADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.WAN_CONFIG3_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG3_IPMODE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG3_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG3_IPMODE" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG3_NETMASK" standardPath="Device.DeviceInfo.WAN_CONFIG3_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG3_OPTION60" standardPath="Device.DeviceInfo.WAN_CONFIG3_OPTION60" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG3_VLAN" standardPath="Device.DeviceInfo.WAN_CONFIG3_VLAN" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="4094" />
         <param name="Device.DeviceInfo.WAN_CONFIG4_DEFAULTGW" standardPath="Device.DeviceInfo.WAN_CONFIG4_DEFAULTGW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.WAN_CONFIG4_ENABLE" standardPath="Device.DeviceInfo.WAN_CONFIG4_ENABLE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG4_ENABLE" standardPath="Device.DeviceInfo.WAN_CONFIG4_ENABLE" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG4_IPADDR" standardPath="Device.DeviceInfo.WAN_CONFIG4_IPADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.WAN_CONFIG4_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG4_IPMODE" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.WAN_CONFIG4_IPMODE" standardPath="Device.DeviceInfo.WAN_CONFIG4_IPMODE" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG4_NETMASK" standardPath="Device.DeviceInfo.WAN_CONFIG4_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG4_OPTION60" standardPath="Device.DeviceInfo.WAN_CONFIG4_OPTION60" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.WAN_CONFIG4_VLAN" standardPath="Device.DeviceInfo.WAN_CONFIG4_VLAN" access="READ_WRITE" type="U_INT" changeApplies="Immediate" min="0" max="4094" />
-        <param name="Device.DeviceInfo.WanLinkSpeed" standardPath="Device.DeviceInfo.WanLinkSpeed" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,2" enumLabels="Auto Negotiation,1000M" defaultValue="0" />
+        <param name="Device.DeviceInfo.WanLinkSpeed" standardPath="Device.DeviceInfo.WanLinkSpeed" access="READ_WRITE" type="U_INT" changeApplies="Immediate" enumValues="0,2" enumLabels="Auto Negotiation,1000M" defaultValue="0" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG1_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG1_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG1_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG2_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG2_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG2_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG3_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG3_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG3_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.ROUTE_CONFIG3_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG3_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG3_ONBOOTENB" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG4_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG4_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.ROUTE_CONFIG4_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.ROUTE_CONFIG4_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.WebConfig.WanVisitEnable" standardPath="Device.WebConfig.WanVisitEnable" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.DeviceInfo.RunningStatus" standardPath="Device.DeviceInfo.RunningStatus" access="READ_WRITE" type="STRING" changeApplies="Immediate" />
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.NeighCellTypeContainer" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.EnbType" access="READ_WRITE" type="INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.ROUTE_CONFIG4_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG4_ONBOOTENB" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.WebConfig.WanVisitEnable" standardPath="Device.WebConfig.WanVisitEnable" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.DeviceInfo.RunningStatus" standardPath="Device.DeviceInfo.RunningStatus" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.NeighCellTypeContainer" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.EnbType" access="READ_WRITE" type="U_INT" changeApplies="Immediate" />
         <param name="Device.ManagementServer.X_COM_ssl_enable" standardPath="Device.Https.HttpsEnable" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.UeInfoUpload.Enable" standardPath="Device.DeviceInfo.UeInfoUpload.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" />
         <param name="Device.DeviceInfo.UeInfoUpload.Url" standardPath="Device.DeviceInfo.UeInfoUpload.Url" access="READ_WRITE" type="STRING" changeApplies="Immediate" />

@@ -489,6 +489,8 @@ func TestXSDType(t *testing.T) {
 		"u_int":           "xsd:unsignedInt",
 		"int":             "xsd:int",
 		"uniqueInt":       "xsd:int",
+		"DATE_TIME":       "xsd:dateTime",
+		"U_LONG":          "xsd:unsignedLong",
 		"string":          "xsd:string",
 		"enum":            "xsd:string",
 		"stringList":      "xsd:string",

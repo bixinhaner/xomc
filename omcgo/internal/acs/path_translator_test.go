@@ -67,6 +67,19 @@ func buildTranslator(t *testing.T, pairs map[string]string) *parammodel.Translat
 	return tr
 }
 
+func buildTypedTranslator(t *testing.T, standardPath, privatePath, dataType string) *parammodel.Translator {
+	t.Helper()
+	set := &parammodel.MappingSet{
+		Source: parammodel.MappingSourceDefault,
+		Mappings: []parammodel.ParamMapping{{
+			StandardPath: standardPath,
+			PrivatePath:  privatePath,
+			DataType:     dataType,
+		}},
+	}
+	return parammodel.NewTranslator(set, nil, zap.NewNop())
+}
+
 func TestPathTranslationService_Enabled(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -157,6 +170,51 @@ func TestTranslateTaskParams_MapsGeofenceStandardRFPathToQRTBPrivatePath(t *test
 
 	assert.True(t, changed)
 	assert.JSONEq(t, `{"values":[{"name":"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable","value":"0","type":"xsd:boolean"}]}`, string(output))
+}
+
+func TestTranslateTaskParams_RewritesSPVTypeFromProductMapping(t *testing.T) {
+	dev := &coremodel.Device{ProductClass: "X-BLQ", FirmwareVersion: "1.0.0"}
+	modelID := uuid.New()
+	prod := &product.Product{ID: uuid.New(), ParamModelID: &modelID}
+	const standardPath = "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity"
+	const privatePath = "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity"
+	tr := buildTypedTranslator(t, standardPath, privatePath, "U_INT")
+	service := NewPathTranslationService(
+		&stubDeviceLookup{dev: dev},
+		&stubProductMatcher{res: &product.MatchResult{Product: prod}},
+		&stubTranslatorFactory{tr: tr},
+		zap.NewNop(),
+	)
+
+	input := json.RawMessage(`{"values":[{"name":"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity","value":"123","type":"xsd:string"}]}`)
+	taskRecord := &task.Task{ID: "typed-spv", DeviceSN: "SN-BLQ-1", Method: "SetParameterValues", Params: input}
+
+	output, changed := service.TranslateTaskParams(context.Background(), taskRecord)
+
+	assert.True(t, changed)
+	assert.JSONEq(t, `{"values":[{"name":"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity","value":"123","type":"xsd:unsignedInt"}]}`, string(output))
+}
+
+func TestTranslateTaskParams_NormalizesBooleanFromProductMapping(t *testing.T) {
+	dev := &coremodel.Device{ProductClass: "X-BLQ", FirmwareVersion: "1.0.0"}
+	modelID := uuid.New()
+	prod := &product.Product{ID: uuid.New(), ParamModelID: &modelID}
+	const standardPath = "Device.DeviceInfo.SAS.RadioEnable"
+	tr := buildTypedTranslator(t, standardPath, standardPath, "BOOLEAN")
+	service := NewPathTranslationService(
+		&stubDeviceLookup{dev: dev},
+		&stubProductMatcher{res: &product.MatchResult{Product: prod}},
+		&stubTranslatorFactory{tr: tr},
+		zap.NewNop(),
+	)
+
+	input := json.RawMessage(`{"values":[{"name":"Device.DeviceInfo.SAS.RadioEnable","value":"true","type":"xsd:string"}]}`)
+	taskRecord := &task.Task{ID: "boolean-spv", DeviceSN: "SN-BLQ-1", Method: "SetParameterValues", Params: input}
+
+	output, changed := service.TranslateTaskParams(context.Background(), taskRecord)
+
+	assert.True(t, changed)
+	assert.JSONEq(t, `{"values":[{"name":"Device.DeviceInfo.SAS.RadioEnable","value":"1","type":"xsd:boolean"}]}`, string(output))
 }
 
 func TestTranslateTaskParams_TranslatesGPVNames(t *testing.T) {
