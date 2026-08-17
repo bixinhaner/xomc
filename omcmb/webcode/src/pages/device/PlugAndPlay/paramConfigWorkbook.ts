@@ -371,6 +371,9 @@ function quickSettingConstraint(
   field: (GnbQuickSettingField & { condition?: string }) | undefined,
 ): ParameterConstraint {
   const modelConstraint = mapping ? mappingConstraint(mapping) : undefined;
+  const dependsOnHeader = field?.control === 'dl-bandwidth'
+    ? 'SubcarrierSpacing(DL)'
+    : field?.control === 'ul-bandwidth' ? 'SubcarrierSpacing(UL)' : undefined;
   const options = field?.options?.map((option) => option.value)
     ?? param.enumOptions?.map((option) => option.value)
     ?? param.checkboxOptions
@@ -383,7 +386,7 @@ function quickSettingConstraint(
     || param.hint?.trim()
     || (param.minValue !== undefined || param.maxValue !== undefined
       ? `${param.minValue ?? '-∞'} ~ ${param.maxValue ?? '+∞'}`
-      : options?.join('、'))
+      : dependsOnHeader ? modelConstraint?.range : options?.join('、'))
     || modelConstraint?.range
     || (type === 'bool' ? 'true、false' : type === 'int' ? '整数' : '字符串');
   return {
@@ -396,9 +399,7 @@ function quickSettingConstraint(
         [scs, entries.map((entry) => entry.value)]
       )))
       : undefined,
-    dependsOnHeader: field?.control === 'dl-bandwidth'
-      ? 'SubcarrierSpacing(DL)'
-      : field?.control === 'ul-bandwidth' ? 'SubcarrierSpacing(UL)' : undefined,
+    dependsOnHeader,
     minValue: modelConstraint?.minValue ?? param.minValue,
     maxValue: modelConstraint?.maxValue ?? param.maxValue,
     validationPattern: modelConstraint?.validationPattern,
@@ -500,9 +501,23 @@ function parameterNote(header: string, metadata?: ParamConfigWorkbookMetadata): 
   return [
     `参数类型：${type}`,
     `取值范围：${constraint.range}`,
-    constraint.options?.length ? `可选值：${constraint.options.join('、')}` : '',
+    constraint.dependentOptions && constraint.dependsOnHeader
+      ? `可选值：随 ${constraint.dependsOnHeader} 联动`
+      : constraint.options?.length ? `可选值：${constraint.options.join('、')}` : '',
     constraint.condition ? `显示条件：${constraint.condition}` : '',
   ].filter(Boolean).join('\n');
+}
+
+function matchesDependentHeader(candidate: unknown, expected: string): boolean {
+  const normalizedCandidate = canonicalHeader(candidate).replace(/[^A-Z0-9]/g, '');
+  const normalizedExpected = canonicalHeader(expected).replace(/[^A-Z0-9]/g, '');
+  if (normalizedCandidate === normalizedExpected) return true;
+  const direction = normalizedExpected.includes('DL') ? 'DL'
+    : normalizedExpected.includes('UL') ? 'UL' : '';
+  return direction !== ''
+    && normalizedCandidate.includes(direction)
+    && normalizedCandidate.includes('SUBCARRIERSPACING')
+    && normalizedExpected.includes('SUBCARRIERSPACING');
 }
 
 function normalizeHeader(value: unknown): string {
@@ -764,7 +779,7 @@ export async function enrichParamConfigWorkbook(
         });
         const headerValues = worksheet.getRow(1).values;
         const dependencyColumn = Array.isArray(headerValues) ? headerValues.findIndex(
-          (value) => canonicalHeader(value) === canonicalHeader(constraint.dependsOnHeader),
+          (value) => matchesDependentHeader(value, constraint.dependsOnHeader!),
         ) : -1;
         if (dependencyColumn > 0) {
           const dependencyLetter = worksheet.getColumn(dependencyColumn).letter;

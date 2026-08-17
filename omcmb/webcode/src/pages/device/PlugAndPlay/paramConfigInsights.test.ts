@@ -69,6 +69,43 @@ describe('parameter configuration insights', () => {
     });
   });
 
+  it('extracts BaiBNQ summary values from the generated workbook paths', () => {
+    const insights = buildParamConfigInsights([{
+      serialNumber: '120200054822CHB0004',
+      deviceType: 'gNB',
+      updatedBy: 'import',
+      sheetParameters: {
+        CELL: [{
+          Band: 78,
+          PCI: 500,
+          'DL Carrier Bandwidth': 51,
+          NRARFCNDL: 377483,
+          'SSB Frequency': 614522,
+          TAC: 1,
+        }],
+        DEVICE: [{ 'gNB ID': 2451329 }],
+      },
+      workbookMappings: [
+        { displayName: 'Band', sheet: 'CELL', header: 'Band', trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.1.FreqBandIndicatorNR', source: 'system' },
+        { displayName: 'PCI', sheet: 'CELL', header: 'PCI', trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID', source: 'system' },
+        { displayName: 'DL Carrier Bandwidth', sheet: 'CELL', header: 'DL Carrier Bandwidth', trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.1.SCSSpecificCarrier.CarrierBandwidth', source: 'system' },
+        { displayName: 'TAC', sheet: 'CELL', header: 'TAC', trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.TAC', source: 'system' },
+        { displayName: 'gNB ID', sheet: 'DEVICE', header: 'gNB ID', trPath: 'Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBId', source: 'system' },
+      ],
+    }]);
+
+    expect(insights.get('120200054822CHB0004')).toMatchObject({
+      validationStatus: 'valid',
+      gnbId: '2451329',
+      pci: '500',
+      band: '78',
+      bandwidth: '51',
+      frequency: '377483',
+      ssbFrequency: '614522',
+      tac: '1',
+    });
+  });
+
   it('previews add, update and duplicate import actions', () => {
     expect(buildParamConfigImportPreview(
       [{ serialNumber: 'SN-001' }],

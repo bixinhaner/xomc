@@ -30,7 +30,7 @@ func TestBuiltinAlarmLibraries_GSMDefinitionsAreOwnedByGSM(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, paths, 8, "内置告警库应包含独立的 GSM.xml")
 
-	identifierOwner := make(map[string]string, 442)
+	identifierOwner := make(map[string]string, 443)
 	modelsByNeType := make(map[string]xmlAlarmModel, len(paths))
 	total := 0
 
@@ -53,7 +53,7 @@ func TestBuiltinAlarmLibraries_GSMDefinitionsAreOwnedByGSM(t *testing.T) {
 
 	}
 
-	assert.Equal(t, 442, total, "拆分 GSM 库不应改变内置告警定义总数")
+	assert.Equal(t, 443, total, "内置告警定义总数必须与当前数据资产一致")
 	assert.Equal(t, 212, modelsByNeType["ENB"].TotalCount)
 	gsmModel := modelsByNeType["GSM"]
 	assert.Equal(t, "2", gsmModel.DeviceType)

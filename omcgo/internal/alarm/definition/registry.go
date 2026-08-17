@@ -11,7 +11,7 @@ import (
 
 // Registry 提供告警定义的 O(1) identifier → ResolvedDefinition 查询能力（设计 §3.3）。
 //
-// 数据规模 ~442 行 alarm_definitions + 4 行 severity，可一次性全量装内存，
+// 数据规模 ~443 行 alarm_definitions + 4 行 severity，可一次性全量装内存，
 // 故不引入 L2 Redis（与 ParamRegistry / ProductRegistry 不同——后者数据规模更大）。
 //
 // 启动期 Refresh 一次：Loader 加载 XML → DB → 本 Registry 从 DB 重读到 sync.Map。

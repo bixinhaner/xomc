@@ -1095,6 +1095,37 @@ describe('parameter config workbook', () => {
     expect(reopened.getWorksheet('DEVICE')?.getCell(2, timezoneColumn).dataValidation.type).toBe('list');
   });
 
+  it('binds BaiBNQ carrier-bandwidth dropdowns to the generated SCS headers', async () => {
+    const metadata = {
+      deviceType: 'gNB' as const,
+      quickSettingsGroups: [{
+        id: 'gnb-cell', titleZh: '小区', titleEn: 'Cell', multiInstance: false,
+        params: [
+          {
+            name: 'DLSubCarrierSpacing', titleZh: '下行子载波间隔', titleEn: 'DL SubCarrier Spacing',
+            type: 'enum', standardPath: 'Device.Cell.1.DLSubCarrierSpacing',
+            enumOptions: ['0', '1', '2'].map((value) => ({ value, label: value })),
+          },
+          {
+            name: 'DLCarrierBandWidth', titleZh: '下行载波带宽', titleEn: 'DL Carrier Bandwidth',
+            standardPath: 'Device.Cell.1.DLCarrierBandWidth',
+          },
+        ],
+      }],
+      quickSettingFields: getParamConfigExportFields('gNB'),
+    };
+    const workbook = await enrichParamConfigWorkbook(
+      createParamConfigTemplateWorkbook('gNB', metadata), metadata,
+    );
+    const cell = workbook.getWorksheet('CELL')!;
+    const scsColumn = cell.getRow(1).values.indexOf('DL SubCarrier Spacing');
+    const bandwidthColumn = cell.getRow(1).values.indexOf('DL Carrier Bandwidth');
+
+    expect(cell.getCell(2, bandwidthColumn).dataValidation.formulae)
+      .toEqual([`INDIRECT("XOMC_BW_"&${cell.getColumn(scsColumn).letter}2)`]);
+    expect(String(cell.getCell(1, bandwidthColumn).note)).not.toContain('25、52、79');
+  });
+
   it('uses the public 5G network address-method values for Address Type', async () => {
     const metadata = {
       deviceType: 'gNB' as const,
