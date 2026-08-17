@@ -4,7 +4,9 @@
  * 与 PRD F06-system-license-redesign §6 wireframe 对齐：
  *   - 顶部 toolbar：刷新 + Update 按钮（左下角"Update"按钮的 wireframe 改到右上
  *     toolbar，与其他模块风格一致；功能等价）
- *   - Basic Info：License ID / Type / Expiry / Signature / Issued / Uploaded
+ *   - Basic Info（单行）：License ID / Type / Expiry / Uploaded（issue #319 精简：
+ *     Issuer/Licensee 恒为空、Issued 为厂商写死的 2019 占位值、状态与签名状态冗余，
+ *     均已移除）
  *   - Devices Support：所有 device_type 的方块卡片
  *   - Feature List：三级嵌套展示
  *   - 空态：未配置 license 时引导用户上传
@@ -40,7 +42,6 @@ import {
 } from '@core/hooks/api/useSystemLicense';
 import type {
   SystemLicense,
-  SystemLicenseSignatureStatus,
 } from '@core/services/api/systemLicenseApi';
 import {
   decodeSystemLicenseRawContent,
@@ -52,28 +53,6 @@ import { FeatureListView } from './FeatureListView';
 import { formatSystemTime } from '@core/utils/systemTime';
 
 const { Title, Text, Paragraph } = Typography;
-
-function signatureTagColor(status: SystemLicenseSignatureStatus): string {
-  switch (status) {
-    case 'verified':
-      return 'success';
-    case 'invalid':
-      return 'error';
-    default:
-      return 'warning';
-  }
-}
-
-function signatureTagLabelKey(status: SystemLicenseSignatureStatus): string {
-  switch (status) {
-    case 'verified':
-      return 'systemLicense.signature.verified';
-    case 'invalid':
-      return 'systemLicense.signature.invalid';
-    default:
-      return 'systemLicense.signature.unverified';
-  }
-}
 
 function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '-';
@@ -211,14 +190,15 @@ export default function SystemLicensePage() {
         </Space>
       </div>
 
-      {/* Basic Info */}
+      {/* Basic Info（issue #319 后精简为单行：License ID / Type / Expiry / Uploaded） */}
       <Card title={t('systemLicense.basicInfo')} style={{ marginBottom: 16 }}>
-        <Descriptions column={{ xs: 1, sm: 2, md: 2, lg: 3 }} bordered size="small">
-          <Descriptions.Item label={t('systemLicense.basicInfo.status')}>
-            <Tag color={lic.isExpired ? 'error' : 'success'}>
-              {t(lic.isExpired ? 'systemLicense.basicInfo.statusExpired' : 'systemLicense.basicInfo.statusValid')}
-            </Tag>
-          </Descriptions.Item>
+        {/* antd v6 会把 column 对象与默认映射（xl:3/xxl:3…）合并，桌面宽屏必须
+            显式覆盖到 xl/xxl/xxxl，否则 1200px+ 仍按默认 3 列折行 */}
+        <Descriptions
+          column={{ xs: 1, sm: 2, md: 4, lg: 4, xl: 4, xxl: 4, xxxl: 4 }}
+          bordered
+          size="small"
+        >
           <Descriptions.Item label={t('systemLicense.basicInfo.licenseId')}>
             <Text copyable>{lic.licenseId}</Text>
           </Descriptions.Item>
@@ -227,25 +207,6 @@ export default function SystemLicensePage() {
           </Descriptions.Item>
           <Descriptions.Item label={t('systemLicense.basicInfo.expiryDate')}>
             {expiryLabel}
-          </Descriptions.Item>
-          <Descriptions.Item label={t('systemLicense.basicInfo.issuer')}>
-            {lic.issuer ?? '-'}
-          </Descriptions.Item>
-          <Descriptions.Item label={t('systemLicense.basicInfo.licensee')}>
-            {lic.licensee ?? '-'}
-          </Descriptions.Item>
-          <Descriptions.Item label={t('systemLicense.basicInfo.signature')}>
-            <Tag color={signatureTagColor(lic.signatureStatus)}>
-              {t(signatureTagLabelKey(lic.signatureStatus))}
-            </Tag>
-            {lic.signatureKeyId ? (
-              <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                key: {lic.signatureKeyId.slice(0, 12)}…
-              </Text>
-            ) : null}
-          </Descriptions.Item>
-          <Descriptions.Item label={t('systemLicense.basicInfo.issuedAt')}>
-            {formatDateTime(lic.issuedAt)}
           </Descriptions.Item>
           <Descriptions.Item label={t('systemLicense.basicInfo.uploadedAt')}>
             {formatDateTime(lic.uploadedAt)}
