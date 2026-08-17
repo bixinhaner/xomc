@@ -120,6 +120,18 @@ ENV_FILES=()
 [ -f "$DEPLOY_DIR/resources.env" ] && ENV_FILES+=( --env-file "$DEPLOY_DIR/resources.env" )
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 
+# docker/compose CLI 自身无客户端超时：daemon 繁忙/半死（安装后 cadvisor 盘点、
+# 存储抖动）时单次调用可能无限挂起，整个 healthcheck 随之卡死且无任何输出
+# （线上事故：完整检查卡在 web HTTPS 入口的 nginx -T 一步不动）。因此所有
+# docker/compose 调用统一走带 SIGKILL 兜底（-k 5）的包装：
+#   · docker_cli     —— 单容器元数据查询（ps/inspect），5s
+#   · compose_cli    —— compose exec / ps（compose 文件解析 + daemon 往返），15s
+#   · compose_render —— compose config 全量渲染，30s
+# daemon 变慢只表现为对应检查项 [FAIL]，脚本总能跑完并产出完整结果。
+docker_cli() { timeout -k 5 5 docker "$@"; }
+compose_cli() { timeout -k 5 15 "${DC[@]}" "$@"; }
+compose_render() { timeout -k 5 30 "${DC[@]}" "$@"; }
+
 ok=0; fail=0
 check() {  # check <描述> <命令...>
   local desc="$1"; shift
@@ -153,21 +165,21 @@ check_value() { # check_value <描述> <期望> <实际>
 container_running() {
   local svc="$1"
   local cid
-  cid="$(timeout 5 docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+  cid="$(docker_cli ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
     --filter "label=com.docker.compose.service=$svc" --format '{{.ID}}' | head -n1)"
   [ -n "$cid" ] || return 1
-  [ "$(timeout 5 docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "true" ]
+  [ "$(docker_cli inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "true" ]
 }
 
 container_sysctl_equals() { # container_sysctl_equals <service> <key> <expected>
   local svc="$1" key="$2" expected="$3" actual
-  actual="$("${DC[@]}" exec -T "$svc" sysctl -n "$key" 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
+  actual="$(compose_cli exec -T "$svc" sysctl -n "$key" 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
   [ "$actual" = "$expected" ]
 }
 
 web_acs_upstream_pool_loaded() {
   local rendered
-  rendered="$("${DC[@]}" exec -T web nginx -T 2>&1)" || return 1
+  rendered="$(compose_cli exec -T web nginx -T 2>&1)" || return 1
   printf '%s\n' "$rendered" | grep -Fq 'server acs:7557 resolve;'
   printf '%s\n' "$rendered" | grep -Fq 'keepalive 4096;'
   printf '%s\n' "$rendered" | grep -Fq 'proxy_pass http://acs_backend;'
@@ -175,7 +187,7 @@ web_acs_upstream_pool_loaded() {
 
 web_https_file_entry_loaded() {
   local rendered rendered_flat
-  rendered="$("${DC[@]}" exec -T web nginx -T 2>&1)" || return 1
+  rendered="$(compose_cli exec -T web nginx -T 2>&1)" || return 1
   rendered_flat="$(printf '%s\n' "$rendered" | tr -s '[:space:]' ' ')"
   printf '%s\n' "$rendered_flat" | grep -Fq 'listen 8443 ssl;' &&
     printf '%s\n' "$rendered_flat" | grep -Fq 'ssl_certificate /etc/nginx/cert/cert.pem;' &&
@@ -184,11 +196,11 @@ web_https_file_entry_loaded() {
 }
 
 web_https_file_entry_has_cert() {
-  timeout 15 "${DC[@]}" exec -T web sh -c 'test -r /etc/nginx/cert/cert.pem && test -r /etc/nginx/cert/key.pem'
+  compose_cli exec -T web sh -c 'test -r /etc/nginx/cert/cert.pem && test -r /etc/nginx/cert/key.pem'
 }
 
 web_https_file_entry_disabled() {
-  timeout 15 "${DC[@]}" exec -T web sh -c 'test ! -e /etc/nginx/cert/cert.pem && test ! -e /etc/nginx/cert/key.pem && test ! -e /etc/nginx/conf.d/https-file-entry.conf'
+  compose_cli exec -T web sh -c 'test ! -e /etc/nginx/cert/cert.pem && test ! -e /etc/nginx/cert/key.pem && test ! -e /etc/nginx/conf.d/https-file-entry.conf'
 }
 
 https_file_entry_status_is() { # https_file_entry_status_is <path> <expected_status>
@@ -199,16 +211,16 @@ https_file_entry_status_is() { # https_file_entry_status_is <path> <expected_sta
 
 acs_service_ready() {
   local service="$1" cid ip
-  cid="$("${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
+  cid="$(compose_cli ps -q "$service" 2>/dev/null | head -n1)"
   [ -n "$cid" ] || return 1
-  ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$cid" 2>/dev/null)"
+  ip="$(docker_cli inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$cid" 2>/dev/null)"
   [ -n "$ip" ] || return 1
   curl -fsS --max-time 3 "http://${ip}:7557/readyz"
 }
 
 redis_instance_run_id() {
   local service="$1"
-  "${DC[@]}" exec -T "$service" redis-cli --raw INFO server 2>/dev/null |
+  compose_cli exec -T "$service" redis-cli --raw INFO server 2>/dev/null |
     awk -F: '$1 == "run_id" { gsub(/\r/, "", $2); print $2; exit }'
 }
 
@@ -339,9 +351,9 @@ else
 fi
 container_env_value() { # container_env_value <service> <key>
   local svc="$1" key="$2" cid
-  cid="$("${DC[@]}" ps -q "$svc" 2>/dev/null | head -n1)"
+  cid="$(compose_cli ps -q "$svc" 2>/dev/null | head -n1)"
   [ -n "$cid" ] || return 1
-  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null |
+  docker_cli inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null |
     awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); exit }'
 }
 for svc in app acs acs-candidate worker; do
@@ -356,7 +368,7 @@ if [ -f "$DEPLOY_DIR/resources.env" ]; then
     echo "  [FAIL] $(health_text 'resources.env 完整资源契约' 'Complete resources.env contract')"; fail=$((fail+1))
   else
     echo "  [OK]   $(health_text 'resources.env 完整资源契约' 'Complete resources.env contract')"; ok=$((ok+1))
-    COMPOSE_RENDERED="$("${DC[@]}" config 2>/dev/null || true)"
+    COMPOSE_RENDERED="$(compose_render config 2>/dev/null || true)"
 
     compose_limit() { # compose_limit <服务> <cpus|memory>
       local svc="$1" field="$2"
@@ -392,12 +404,12 @@ if [ -f "$DEPLOY_DIR/resources.env" ]; then
       fi
       check_value "$svc compose cpus" "$expected_cpu" "$rendered_cpu"
       check_value "$svc compose memory (bytes)" "$expected_bytes" "$rendered_bytes"
-      cid="$("${DC[@]}" ps -q "$svc" 2>/dev/null | head -n1)"
+      cid="$(compose_cli ps -q "$svc" 2>/dev/null | head -n1)"
       if [ -z "$cid" ]; then
         echo "  [FAIL] $(health_text "$svc docker inspect（未找到容器）" "$svc docker inspect (container not found)")"; fail=$((fail+1)); return
       fi
       read -r actual_nano actual_bytes <<EOF
-$(docker inspect -f '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}' "$cid" 2>/dev/null)
+$(docker_cli inspect -f '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}' "$cid" 2>/dev/null)
 EOF
       expected_nano="$(awk -v cpu="$expected_cpu" 'BEGIN { printf "%.0f", cpu * 1000000000 }')"
       check_value "$svc docker inspect NanoCpus" "$expected_nano" "$actual_nano"
@@ -411,7 +423,7 @@ EOF
     check_gomaxprocs() { # name port resource key
       local name="$1" port="$2" key="$3" expected actual
       expected="$(resource_env_get "$DEPLOY_DIR/resources.env" "$key")"
-      actual="$(curl -fsS "http://127.0.0.1:$port/metrics" 2>/dev/null | awk '/^go_sched_gomaxprocs_threads / { print $2; exit }')"
+      actual="$(curl -fsS --max-time 10 "http://127.0.0.1:$port/metrics" 2>/dev/null | awk '/^go_sched_gomaxprocs_threads / { print $2; exit }')"
       check_value "$name go_sched_gomaxprocs_threads" "$expected" "$actual"
     }
     check_gomaxprocs app 9091 APP_GOMAXPROCS
@@ -421,9 +433,9 @@ EOF
     for redis_spec in 'redis-core REDIS_CORE' 'redis-pm REDIS_PM'; do
       read -r redis_svc redis_prefix <<<"$redis_spec"
       redis_expected="$(resource_bytes "$(resource_env_get "$DEPLOY_DIR/resources.env" "${redis_prefix}_MAXMEMORY")")"
-      redis_actual="$("${DC[@]}" exec -T "$redis_svc" redis-cli CONFIG GET maxmemory 2>/dev/null | tail -n1)"
-      redis_policy="$("${DC[@]}" exec -T "$redis_svc" redis-cli CONFIG GET maxmemory-policy 2>/dev/null | tail -n1)"
-      redis_aof="$("${DC[@]}" exec -T "$redis_svc" redis-cli CONFIG GET appendonly 2>/dev/null | tail -n1)"
+      redis_actual="$(compose_cli exec -T "$redis_svc" redis-cli CONFIG GET maxmemory 2>/dev/null | tail -n1)"
+      redis_policy="$(compose_cli exec -T "$redis_svc" redis-cli CONFIG GET maxmemory-policy 2>/dev/null | tail -n1)"
+      redis_aof="$(compose_cli exec -T "$redis_svc" redis-cli CONFIG GET appendonly 2>/dev/null | tail -n1)"
       check_value "$redis_svc CONFIG GET maxmemory" "$redis_expected" "$redis_actual"
       check_value "$redis_svc CONFIG GET maxmemory-policy" "noeviction" "$redis_policy"
       check_value "$redis_svc CONFIG GET appendonly" "yes" "$redis_aof"
@@ -440,7 +452,7 @@ EOF
           work_mem) expected="$(resource_env_get "$DEPLOY_DIR/resources.env" "${prefix}_WORK_MEM")" ;;
           max_connections) expected="$(resource_env_get "$DEPLOY_DIR/resources.env" "${prefix}_MAX_CONNECTIONS")" ;;
         esac
-        actual="$("${DC[@]}" exec -T "$svc" psql -U "$user" -d postgres -tAc "SHOW $setting" 2>/dev/null | tr -d '[:space:]')"
+        actual="$(compose_cli exec -T "$svc" psql -U "$user" -d postgres -tAc "SHOW $setting" 2>/dev/null | tr -d '[:space:]')"
         if [ "$setting" = "max_connections" ]; then
           check_value "$svc SHOW $setting" "$expected" "$actual"
         else
@@ -457,7 +469,7 @@ fi
 
 echo
 echo "$(health_text 'compose ps 详情：' 'Compose ps details:')"
-"${DC[@]}" ps 2>/dev/null || echo "  (无法读取 compose 状态)"
+compose_cli ps 2>/dev/null || echo "  (无法读取 compose 状态)"
 
 echo
 echo "$(health_text "结果：通过 $ok 项，失败 $fail 项" "Result: $ok passed, $fail failed")"
