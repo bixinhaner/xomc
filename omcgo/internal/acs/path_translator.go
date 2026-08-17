@@ -33,6 +33,7 @@ import (
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
 // pathTranslatorDeviceLookup 按 SN 反查 *coremodel.Device，仅取 ProductClass +
@@ -519,6 +520,12 @@ func translateValuesArray(raw json.RawMessage, tr *parammodel.Translator) (json.
 			continue
 		}
 		if res := tr.ToPrivate(name); res.Found {
+			if res.Mapping != nil && strings.TrimSpace(res.Mapping.DataType) != "" {
+				if value, valueOK := v["value"].(string); valueOK {
+					v["value"] = tr069.NormalizeValueForPath(name, value, res.Mapping.DataType)
+				}
+				v["type"] = tr069.XSDTypeForPath(name, res.Mapping.DataType)
+			}
 			v["name"] = res.Translated
 		}
 	}
