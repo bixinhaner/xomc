@@ -626,6 +626,39 @@ describe('ConfigParamsModal', () => {
     }));
   });
 
+  it('submits the U32 enum value for RFTxStatus', () => {
+    const onConfirmAndExecute = vi.fn();
+    renderModal({
+      command: {
+        ...command,
+        operationType: 'MOD',
+        paramPaths: [{
+          path: 'Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus',
+          label: 'RFTxStatus',
+          writable: true,
+          isObject: false,
+          valueType: 'U_INT',
+          defaultValue: '1',
+          enumOptions: [
+            { value: '0', label: 'Inactive' },
+            { value: '1', label: 'Active' },
+          ],
+        }],
+      },
+      selectedPathKeys: ['Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus'],
+      onConfirmAndExecute,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /mml.consoleV2.config.confirmAndExecute/ }));
+
+    expect(screen.queryByText('mml.consoleV2.config.validation.enumValue')).not.toBeInTheDocument();
+    expect(onConfirmAndExecute).toHaveBeenCalledWith(expect.objectContaining({
+      values: {
+        'Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus': '1',
+      },
+    }));
+  });
+
   it('defaults a boolean value to false when no default is provided', () => {
     renderModal({
       command: {

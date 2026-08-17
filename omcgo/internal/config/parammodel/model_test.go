@@ -93,6 +93,47 @@ func TestBLQAdminStateUsesConcreteBidirectionalAlias(t *testing.T) {
 	t.Fatalf("expected BLQ admin alias %s -> %s", privatePath, standardPath)
 }
 
+func Test2GAnd4GRFTxStatusMappingsUseU32Enum(t *testing.T) {
+	const standardPath = "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus"
+	tests := []struct {
+		model       string
+		privatePath string
+	}{
+		{"BLN", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState"},
+		{"BLQ", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable"},
+		{"BM", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable"},
+		{"BTS", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable"},
+		{"MLN", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.AdminCellState"},
+		{"MLQ", "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable"},
+		{"ENB_DEFAULT_098", "InternetGatewayDevice.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus"},
+		{"ENB_DEFAULT_181", "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", tt.model+".xml")
+			body, err := os.ReadFile(xmlPath)
+			require.NoError(t, err)
+
+			var doc xmlParameterModel
+			require.NoError(t, xml.Unmarshal(body, &doc))
+
+			for _, param := range doc.Params {
+				if param.Name != tt.privatePath {
+					continue
+				}
+				require.Equal(t, standardPath, param.StandardPath)
+				assert.Equal(t, "U_INT", param.DataType)
+				assert.Equal(t, "0,1", param.EnumValues)
+				assert.NotEmpty(t, param.EnumLabels)
+				return
+			}
+
+			t.Fatalf("expected %s RFTxStatus mapping %s -> %s", tt.model, tt.privatePath, standardPath)
+		})
+	}
+}
+
 func TestBMNeighborListHasWritableX2Flag(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
 	body, err := os.ReadFile(xmlPath)
@@ -148,7 +189,7 @@ func TestBMWANUsesVendorEthernetInterfacePaths(t *testing.T) {
 		"Device.Ethernet.Interface.{i}.Enable":                         {"Device.Ethernet.Interface.{i}.Enable", "READ_WRITE"},
 		"Device.Ethernet.Interface.{i}.Name":                           {"Device.Ethernet.Interface.{i}.Name", "READ_ONLY"},
 		"Device.Ethernet.Interface.{i}.Status":                         {"Device.Ethernet.Interface.{i}.Status", "READ_ONLY"},
-		"Device.DeviceInfo.X_COM_MACAddress":                     {"Device.Ethernet.Interface.{i}.MACAddress", "READ_ONLY"},
+		"Device.DeviceInfo.X_COM_MACAddress":                           {"Device.Ethernet.Interface.{i}.MACAddress", "READ_ONLY"},
 		"Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType": {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType", "READ_ONLY"},
 		"Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress":      {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress", "READ_WRITE"},
 		"Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask":     {"Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask", "READ_WRITE"},

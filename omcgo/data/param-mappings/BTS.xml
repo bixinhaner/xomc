@@ -53,7 +53,7 @@
         <param name="Device.LogMgmt.PeriodicUploadInterval" standardPath="Device.LogMgmt.PeriodicUploadInterval" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.LogMgmt.URL" standardPath="Device.LogMgmt.URL" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.LogMgmt.Username" standardPath="Device.LogMgmt.Username" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate" enumValues="0,1" enumLabels="Inactive,Active"/>
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus" access="READ_WRITE" type="U_INT" changeApplies="Immediate" enumValues="0,1" enumLabels="Inactive,Active"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.OpState" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.OpState" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate" enumValues="0,1" enumLabels="OFF,ON"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Author" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Author" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.{i}" standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity.{i}" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>

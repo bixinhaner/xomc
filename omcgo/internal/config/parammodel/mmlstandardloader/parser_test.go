@@ -96,6 +96,9 @@ func TestParseStandardXMLFile_RealData(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "Azimuth 必须存在")
+
+	rfTxStatus := findParam(t, params, "Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus")
+	assert.Equal(t, "U_INT", rfTxStatus.Type, "RFTxStatus must be sent as xsd:unsignedInt")
 }
 
 // ============================================================
