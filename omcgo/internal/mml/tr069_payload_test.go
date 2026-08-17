@@ -162,6 +162,28 @@ func TestBuildTR069Params_SetParameterValues(t *testing.T) {
 	assert.Equal(t, "xsd:int", byName["Device.X_BAICELLS_LTE.NriBitLen"].Type)
 }
 
+func TestBuildTR069Params_RFTxStatusUsesU32WireType(t *testing.T) {
+	const path = "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus"
+	refs := []MMLParamRef{{ParamCode: "RFTX_STATUS", Tr069Path: path, ValueType: "U_INT"}}
+
+	payload, err := BuildTR069Params("SetParameterValues", refs,
+		map[string]interface{}{"RFTX_STATUS": "1"}, "MOD")
+	require.NoError(t, err)
+
+	var got struct {
+		Values []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+			Type  string `json:"type"`
+		} `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &got))
+	require.Len(t, got.Values, 1)
+	assert.Equal(t, path, got.Values[0].Name)
+	assert.Equal(t, "1", got.Values[0].Value)
+	assert.Equal(t, "xsd:unsignedInt", got.Values[0].Type)
+}
+
 func TestBuildTR069Params_SetParameterValues_NormalizesBooleanToNumericWireValue(t *testing.T) {
 	refs := []MMLParamRef{
 		{ParamCode: "ENABLE", Tr069Path: "Device.DeviceInfo.SignallingTrace.Enable", ValueType: "boolean"},
@@ -463,6 +485,8 @@ func TestXSDType(t *testing.T) {
 	cases := map[string]string{
 		"boolean":         "xsd:boolean",
 		"unsignedInt":     "xsd:unsignedInt",
+		"U_INT":           "xsd:unsignedInt",
+		"u_int":           "xsd:unsignedInt",
 		"int":             "xsd:int",
 		"uniqueInt":       "xsd:int",
 		"string":          "xsd:string",

@@ -190,12 +190,12 @@ func BuildTR069Params(
 // xsdType 把 standard_params.data_type 映射为 TR-069 SOAP 报文的 xsd 类型字符串。
 // 列表型（stringList / unsignedIntList）按 TR-069 规范以 CSV string 传输。
 func xsdType(valueType string) string {
-	switch valueType {
-	case "boolean":
+	switch canonicalValueType(valueType) {
+	case "boolean", "bool":
 		return "xsd:boolean"
-	case "unsignedInt":
+	case "unsignedint", "unsignedinteger", "u_int", "uint", "uint32", "uint64":
 		return "xsd:unsignedInt"
-	case "int", "uniqueInt":
+	case "int", "integer", "int32", "int64", "uniqueint":
 		return "xsd:int"
 	default:
 		// string / enum / stringList / unsignedIntList → xsd:string

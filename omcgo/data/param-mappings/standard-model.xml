@@ -1671,7 +1671,7 @@
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.SeqNum" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Version" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.OpState" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
+        <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.RFTxStatus" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.RUHOControlEnable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ANREnable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ANRGERANEnable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
