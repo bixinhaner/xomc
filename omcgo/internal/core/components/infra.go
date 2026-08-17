@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -52,6 +53,11 @@ type Infra struct {
 	Health     *HealthChecker
 
 	metricsPort int
+
+	// metricsOnce 保证 /metrics + /healthz 服务器只启动一次：启动期一次性重活
+	// （worker 的 PM 聚合升级整理）会让进程长时间到不了 WaitAndShutdown，需要
+	// 提前 StartMetrics；之后 ListenAndServe / WaitAndShutdown 的兜底调用必须幂等。
+	metricsOnce sync.Once
 
 	// pprof 开关：由 SetPprof 注入（通常来自 cfg.Metrics.Pprof）；
 	// 与原始短 env OMCGO_PPROF / OMCGO_PPROF_CONTENTION 取或，便于临时强开。
@@ -274,11 +280,20 @@ func (inf *Infra) CreateEventBus() {
 
 // --- server lifecycle ---
 
+// StartMetrics 提前启动 metrics/healthz 服务器（幂等，可重复调用）。
+// 供启动期含长耗时一次性工作的进程（worker 的 PM 聚合升级整理可能以小时计）
+// 在进入阻塞步骤前调用：/healthz 与 /metrics 先于重活可被探测，部署健康门禁
+// 与监控不再出现大数据升级期间的长盲区。未显式调用时由
+// ListenAndServe / WaitAndShutdown 兜底启动，既有进程行为不变。
+func (inf *Infra) StartMetrics() {
+	inf.metricsOnce.Do(inf.startMetrics)
+}
+
 // ListenAndServe 启动 HTTP 服务器和 Prometheus 指标服务器，
 // 阻塞直到收到 SIGINT/SIGTERM 信号，然后依优先级逐步优雅关机。
 // 适用于 App/ACS 等需要外露 HTTP 端口的服务。
 func (inf *Infra) ListenAndServe(handler http.Handler, addr string, readTimeout, writeTimeout, idleTimeout time.Duration) error {
-	inf.startMetrics()
+	inf.StartMetrics()
 	if readTimeout <= 0 {
 		readTimeout = 30 * time.Second
 	}
@@ -312,7 +327,7 @@ func (inf *Infra) ListenAndServe(handler http.Handler, addr string, readTimeout,
 // WaitAndShutdown 启动指标服务器，然后阻塞直到收到信号或 errCh 发送错误。
 // 适用于 Worker 等无 HTTP 服务器的后台进程，errCh 为 nil 时仅等信号。
 func (inf *Infra) WaitAndShutdown(errCh <-chan error) error {
-	inf.startMetrics()
+	inf.StartMetrics()
 	return inf.waitForShutdown(errCh)
 }
 

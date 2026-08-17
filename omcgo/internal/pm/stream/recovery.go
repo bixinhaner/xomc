@@ -61,10 +61,25 @@ func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
 	var cursor *WindowKey
 	missing := make(map[recoverySource][]WindowKey)
 	const pageSize = uint64(1000)
+	// 大数据升级恢复时活跃窗口以十万计，本扫描 = 每页一条查询、可能持续数十分钟。
+	// 每 progressEveryPages 页打一次进度；收尾摘要仅在实际耗时超过阈值时输出
+	// （周期性 Run 的稳态扫描只有一两页，保持静默避免刷屏）。
+	const progressEveryPages = 25
+	const restoreSummaryLogThreshold = 5 * time.Second
+	restoreStart := time.Now()
+	pages, scanned := 0, 0
 	for {
 		active, err := r.windows.ListActiveAfter(ctx, cursor, pageSize)
 		if err != nil {
 			return errors.Join(append(restoreErrors, err)...)
+		}
+		pages++
+		scanned += len(active)
+		if pages%progressEveryPages == 0 {
+			r.logger.Info("PM aggregation active-window restore in progress",
+				zap.Int("pages", pages),
+				zap.Int("scanned_windows", scanned),
+				zap.Duration("elapsed", time.Since(restoreStart)))
 		}
 		for _, record := range active {
 			exists, existsErr := r.store.Exists(ctx, record.Key)
@@ -93,6 +108,17 @@ func (r *Recovery) RestoreActiveWindows(ctx context.Context) error {
 		}
 		last := active[len(active)-1].Key
 		cursor = &last
+	}
+	if elapsed := time.Since(restoreStart); elapsed > restoreSummaryLogThreshold {
+		missingTotal := 0
+		for _, keys := range missing {
+			missingTotal += len(keys)
+		}
+		r.logger.Info("PM aggregation active-window restore scan completed",
+			zap.Int("pages", pages),
+			zap.Int("scanned_windows", scanned),
+			zap.Int("missing_windows", missingTotal),
+			zap.Duration("duration", elapsed))
 	}
 	for source, keys := range missing {
 		matched, replayErr := r.replayWindowBatch(ctx, source, keys)

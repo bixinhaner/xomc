@@ -139,6 +139,12 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	defer w.Logger.Sync()
 	w.Logger.Info("omcgo-worker starting", zap.String("config", cfgPath))
 
+	// 大数据增量升级：registerSubscribers 内 PM 聚合的一次性升级整理（版本元数据
+	// 回填 / 活跃窗口恢复 / 补建索引）在时序库历史窗口量大时可能以小时计。metrics
+	// /healthz 先于此启动 —— 否则 :9092 长时间无人监听，部署健康门禁与监控全盲
+	// （线上事故：升级后 install 因 worker /healthz 探测失败而中止）。
+	w.StartMetrics()
+
 	// Register all event subscribers. Geofence consumers are part of the
 	// acceptance-critical control plane, so a missing JetStream stream must
 	// fail startup instead of silently disabling alarms and device control.
