@@ -1,187 +1,306 @@
-import { Form, Input, InputNumber, Checkbox, Button, Card, Space, Select, message, theme } from 'antd';
-import { MailOutlined, MobileOutlined } from '@ant-design/icons';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  InputNumber,
+  message,
+  Row,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Tag,
+} from 'antd';
+import { MailOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons';
+import {
+  useBatchUpdateSysConfigs,
+  useSendTestEmail,
+  useSysConfigsByCategory,
+} from '@core/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
+import { buildBatchItems } from './sysConfigSerialize';
 
-interface NotificationSettingsProps {
-  form: ReturnType<typeof Form.useForm>[0];
+const EMAIL_CATEGORY = 'notification.email';
+
+interface EmailSettingsFormValues {
+  enabled: boolean;
+  host: string;
+  port: number;
+  security_mode: 'none' | 'starttls' | 'implicit_tls';
+  auth_enabled: boolean;
+  username: string;
+  password?: string;
+  from_address: string;
+  from_name: string;
+  timeout_seconds: number;
 }
 
-// 设置行样式
-const settingRowStyle: React.CSSProperties = {
-  marginBottom: 16,
+const defaultValues: EmailSettingsFormValues = {
+  enabled: false,
+  host: '',
+  port: 587,
+  security_mode: 'starttls',
+  auth_enabled: true,
+  username: '',
+  password: '',
+  from_address: '',
+  from_name: '',
+  timeout_seconds: 10,
 };
 
-// 子设置区域布局（颜色随主题，见组件内 subSettingStyle）
-const subSettingBaseStyle: React.CSSProperties = {
-  marginTop: 16,
-  padding: '16px',
-  borderRadius: 4,
-};
-
-// 表单项组样式
-const formGroupStyle: React.CSSProperties = {
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: 16,
-  marginBottom: 8,
-};
-
-export default function NotificationSettings({ form }: NotificationSettingsProps) {
+export default function NotificationSettings() {
   const t = useT();
-  const { token } = theme.useToken();
-  // 子设置区域背景跟随明/暗主题，不再写死 #fafafa
-  const subSettingStyle: React.CSSProperties = { ...subSettingBaseStyle, backgroundColor: token.colorFillAlter };
+  const [form] = Form.useForm<EmailSettingsFormValues>();
+  const [dirty, setDirty] = useState(false);
+  const [testRecipient, setTestRecipient] = useState('');
+  const {
+    data: configs,
+    isLoading,
+    isFetching,
+    isError,
+    isSuccess,
+    refetch,
+  } = useSysConfigsByCategory(EMAIL_CATEGORY);
+  const batchUpdate = useBatchUpdateSysConfigs();
+  const sendTestEmail = useSendTestEmail();
+  const enabled = Form.useWatch('enabled', form) ?? false;
+  const authEnabled = Form.useWatch('auth_enabled', form) ?? false;
+  const securityMode = Form.useWatch('security_mode', form);
 
-  // 监听复选框状态
-  const emEnabel = Form.useWatch('emEnabel', form);
-  const smsEnable = Form.useWatch('smsEnable', form);
+  const passwordConfigured = useMemo(
+    () => configs?.some((item) => item.key === 'password' && item.isSecret && item.isConfigured) ?? false,
+    [configs],
+  );
 
-  const handleTestEmail = () => {
-    void message.info(t('system.notification.sendingTestEmail'));
-    setTimeout(() => {
-      void message.success(t('system.notification.testEmailSent'));
-    }, 1000);
-  };
+  useEffect(() => {
+    if (!isSuccess) return;
+    const values: Record<string, unknown> = { ...defaultValues };
+    for (const item of configs ?? []) {
+      if (item.isSecret) continue;
+      if (item.valueType === 'bool') values[item.key] = item.value === 'true' || item.value === '1';
+      else if (item.valueType === 'int') values[item.key] = Number.parseInt(item.value, 10);
+      else values[item.key] = item.value;
+    }
+    form.setFieldsValue({ ...values, password: '' } as EmailSettingsFormValues);
+    setDirty(false);
+  }, [configs, form, isSuccess]);
 
-  const handleTestSms = () => {
-    const phone = form.getFieldValue('smsTestPhone') as string | undefined;
-    if (!phone) {
-      void message.warning(t('system.notification.pleaseInputSmsTestPhone'));
+  const handleSave = async () => {
+    if (!isSuccess || isFetching) {
+      void message.error(t('empty.loadFailed'));
       return;
     }
-    void message.info(t('system.notification.sendingTestSms'));
-    setTimeout(() => {
-      void message.success(t('system.notification.testSmsSent'));
-    }, 1000);
+    try {
+      const values = await form.validateFields();
+      const items = buildBatchItems(values as unknown as Record<string, unknown>, configs);
+      await batchUpdate.mutateAsync({ category: EMAIL_CATEGORY, items });
+      await refetch();
+      form.setFieldValue('password', '');
+      setDirty(false);
+      void message.success(t('system.notification.saveSuccess'));
+    } catch (error) {
+      if (error instanceof Error) void message.error(error.message);
+    }
+  };
+
+  const handleTest = async () => {
+    const recipient = testRecipient.trim();
+    if (!recipient) {
+      void message.warning(t('system.notification.testRecipientRequired'));
+      return;
+    }
+    try {
+      await sendTestEmail.mutateAsync(recipient);
+      void message.success(t('system.notification.testEmailSent'));
+    } catch (error) {
+      const text = error instanceof Error ? error.message : t('system.notification.testEmailFailed');
+      void message.error(text);
+    }
   };
 
   return (
-    <Form form={form} layout="vertical" size="small" initialValues={{
-      emEnabel: false,
-      mailUsername: '',
-      mailPassword: '',
-      mailHost: '',
-      mailPort: '',
-      smsEnable: false,
-      smsProvider: 'aliyun',
-      smsApiUrl: '',
-      smsAccessKey: '',
-      smsAccessSecret: '',
-      smsSignName: '',
-      smsTemplateCode: '',
-      smsTestPhone: '',
-    }}>
-      {/* 邮件通知服务 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.notification.emailService')}</span>}>
-        <div style={settingRowStyle}>
-          <Form.Item name="emEnabel" valuePropName="checked" noStyle>
-            <Checkbox>{t('system.notification.enableEmailServer')}</Checkbox>
-          </Form.Item>
-        </div>
-
-        <div style={subSettingStyle}>
-          <div style={{ marginBottom: 12, fontWeight: 500, color: token.colorTextSecondary }}>{t('system.notification.mailServerConfig')}</div>
-
-          <div style={formGroupStyle}>
-            <Form.Item label={t('system.notification.email')} name="mailUsername" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 280 }} placeholder="noreply@example.com" prefix={<MailOutlined />} disabled={!emEnabel} />
-            </Form.Item>
-            <Form.Item label={t('common.password')} name="mailPassword" style={{ marginBottom: 0 }}>
-              <Input.Password style={{ width: 180 }} placeholder={t('system.notification.pleaseInputEmailPassword')} maxLength={50} disabled={!emEnabel} />
-            </Form.Item>
-          </div>
-
-          <div style={formGroupStyle}>
-            <Form.Item label={t('system.notification.smtpServer')} name="mailHost" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 280 }} placeholder="smtp.example.com" disabled={!emEnabel} />
-            </Form.Item>
-            <Space>
-              <Form.Item label={t('common.port')} name="mailPort" style={{ marginBottom: 0 }}>
-                <InputNumber min={1} max={65535} style={{ width: 100 }} disabled={!emEnabel} />
-              </Form.Item>
-              <Form.Item style={{ marginBottom: 0, marginTop: 24 }}>
-                <Button type="primary" size="small" onClick={handleTestEmail} disabled={!emEnabel}>
-                  {t('common.test')}
-                </Button>
-              </Form.Item>
-            </Space>
-          </div>
-        </div>
-      </Card>
-
-      {/* 短信通知服务 */}
-      <Card
-        size="small"
-        title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.notification.smsService')}</span>}
-        style={{ marginTop: 16 }}
+    <Spin spinning={isLoading}>
+      {isError && (
+        <Alert
+          type="error"
+          showIcon
+          title={t('empty.loadFailed')}
+          action={<Button onClick={() => void refetch()}>{t('common.retry')}</Button>}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      <Form<EmailSettingsFormValues>
+        form={form}
+        layout="vertical"
+        initialValues={defaultValues}
+        onValuesChange={() => setDirty(true)}
       >
-        <div style={settingRowStyle}>
-          <Form.Item name="smsEnable" valuePropName="checked" noStyle>
-            <Checkbox>{t('system.notification.enableSmsServer')}</Checkbox>
+        <Card
+          size="small"
+          title={t('system.notification.emailService')}
+          extra={enabled ? <Tag color="success">{t('common.enabled')}</Tag> : <Tag>{t('common.disabled')}</Tag>}
+        >
+          <Alert
+            type="info"
+            showIcon
+            title={t('system.notification.scopeHint')}
+            style={{ marginBottom: 16 }}
+          />
+
+          <Form.Item name="enabled" label={t('system.notification.channelEnabled')} valuePropName="checked">
+            <Switch />
           </Form.Item>
-        </div>
 
-        <div style={subSettingStyle}>
-          <div style={{ marginBottom: 12, fontWeight: 500, color: token.colorTextSecondary }}>{t('system.notification.smsServerConfig')}</div>
+          <Row gutter={[24, 0]}>
+            <Col xs={24} md={12} xl={8}>
+              <Form.Item
+                name="host"
+                label={t('system.notification.smtpServer')}
+                rules={[{ required: enabled, message: t('system.notification.smtpServerRequired') }]}
+              >
+                <Input placeholder="smtp.example.com" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={6} xl={4}>
+              <Form.Item
+                name="port"
+                label={t('common.port')}
+                rules={[{ required: true }]}
+              >
+                <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={6} xl={6}>
+              <Form.Item name="security_mode" label={t('system.notification.securityMode')} rules={[{ required: true }]}>
+                <Select
+                  options={[
+                    { value: 'starttls', label: 'STARTTLS' },
+                    { value: 'implicit_tls', label: t('system.notification.implicitTls') },
+                    { value: 'none', label: t('system.notification.noTls') },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={6} xl={4}>
+              <Form.Item name="timeout_seconds" label={t('system.notification.timeoutSeconds')} rules={[{ required: true }]}>
+                <InputNumber min={1} max={120} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
 
-          <div style={formGroupStyle}>
-            <Form.Item label={t('system.notification.smsProvider')} name="smsProvider" style={{ marginBottom: 0 }}>
-              <Select style={{ width: 160 }} disabled={!smsEnable}>
-                <Select.Option value="aliyun">{t('sysconfig.notification.provider.aliyun')}</Select.Option>
-                <Select.Option value="tencent">{t('sysconfig.notification.provider.tencent')}</Select.Option>
-                <Select.Option value="huawei">{t('sysconfig.notification.provider.huawei')}</Select.Option>
-                <Select.Option value="custom">{t('sysconfig.notification.provider.custom')}</Select.Option>
-              </Select>
-            </Form.Item>
-            <Form.Item label={t('system.notification.smsApiUrl')} name="smsApiUrl" style={{ marginBottom: 0 }}>
-              <Input
-                style={{ width: 320 }}
-                placeholder="https://dysmsapi.aliyuncs.com"
-                prefix={<MobileOutlined />}
-                disabled={!smsEnable}
-              />
-            </Form.Item>
+          {securityMode === 'none' && (
+            <Alert
+              type="warning"
+              showIcon
+              title={t('system.notification.noTlsWarning')}
+              style={{ marginBottom: 16 }}
+            />
+          )}
+
+          <Form.Item name="auth_enabled" label={t('system.notification.authEnabled')} valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Row gutter={[24, 0]}>
+            <Col xs={24} md={12} xl={8}>
+              <Form.Item
+                name="username"
+                label={t('system.notification.username')}
+                rules={[{ required: enabled && authEnabled, message: t('system.notification.usernameRequired') }]}
+              >
+                <Input autoComplete="off" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12} xl={8}>
+              <Form.Item
+                name="password"
+                label={t('common.password')}
+                rules={[{
+                  validator: async (_, value: string | undefined) => {
+                    if (enabled && authEnabled && !passwordConfigured && !value) {
+                      throw new Error(t('system.notification.passwordRequired'));
+                    }
+                  },
+                }]}
+              >
+                <Input.Password
+                  autoComplete="new-password"
+                  visibilityToggle={false}
+                  placeholder={t(passwordConfigured
+                    ? 'system.notification.passwordConfiguredPlaceholder'
+                    : 'system.notification.passwordUnsetPlaceholder')}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={[24, 0]}>
+            <Col xs={24} md={12} xl={8}>
+              <Form.Item
+                name="from_address"
+                label={t('system.notification.fromAddress')}
+                rules={[
+                  { required: enabled, message: t('system.notification.fromAddressRequired') },
+                  { type: 'email', message: t('system.notification.emailInvalid') },
+                ]}
+              >
+                <Input prefix={<MailOutlined />} placeholder="omc@example.com" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12} xl={8}>
+              <Form.Item name="from_name" label={t('system.notification.fromName')}>
+                <Input placeholder={t('system.notification.fromNamePlaceholder')} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <div
+            data-testid="email-settings-actions"
+            style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8 }}
+          >
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              loading={batchUpdate.isPending}
+              disabled={!isSuccess || isFetching}
+              onClick={() => void handleSave()}
+            >
+              {t('common.save')}
+            </Button>
           </div>
+        </Card>
 
-          <div style={formGroupStyle}>
-            <Form.Item label={t('system.notification.smsAccessKey')} name="smsAccessKey" style={{ marginBottom: 0 }}>
-              <Input
-                style={{ width: 280 }}
-                placeholder={t('system.notification.pleaseInputSmsAccessKey')}
-                disabled={!smsEnable}
-              />
-            </Form.Item>
-            <Form.Item label={t('system.notification.smsAccessSecret')} name="smsAccessSecret" style={{ marginBottom: 0 }}>
-              <Input.Password style={{ width: 240 }} maxLength={128} disabled={!smsEnable} />
-            </Form.Item>
-          </div>
-
-          <div style={formGroupStyle}>
-            <Form.Item label={t('system.notification.smsSignName')} name="smsSignName" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 200 }} placeholder={t('sysconfig.notification.omcAlertPlaceholder')} disabled={!smsEnable} />
-            </Form.Item>
-            <Form.Item label={t('system.notification.smsTemplateCode')} name="smsTemplateCode" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 220 }} placeholder="SMS_123456789" disabled={!smsEnable} />
-            </Form.Item>
-          </div>
-
-          <div style={formGroupStyle}>
-            <Form.Item label={t('system.notification.smsTestPhone')} name="smsTestPhone" style={{ marginBottom: 0 }}>
-              <Input
-                style={{ width: 180 }}
-                placeholder="13800138000"
-                maxLength={11}
-                disabled={!smsEnable}
-              />
-            </Form.Item>
-            <Form.Item style={{ marginBottom: 0, marginTop: 24 }}>
-              <Button type="primary" size="small" onClick={handleTestSms} disabled={!smsEnable}>
-                {t('common.test')}
-              </Button>
-            </Form.Item>
-          </div>
-        </div>
-      </Card>
-    </Form>
+        <Card size="small" title={t('system.notification.testEmail')} style={{ marginTop: 16 }}>
+          <Alert
+            type={dirty ? 'warning' : 'info'}
+            showIcon
+            title={t(dirty
+              ? 'system.notification.testSavedOnlyDirty'
+              : 'system.notification.testSavedOnly')}
+            style={{ marginBottom: 16 }}
+          />
+          <Space wrap align="start">
+            <Input
+              value={testRecipient}
+              onChange={(event) => setTestRecipient(event.target.value)}
+              prefix={<MailOutlined />}
+              placeholder={t('system.notification.testRecipientPlaceholder')}
+              style={{ width: 340 }}
+            />
+            <Button
+              icon={<SendOutlined />}
+              loading={sendTestEmail.isPending}
+              disabled={!enabled || dirty || !testRecipient.trim()}
+              onClick={() => void handleTest()}
+            >
+              {t('common.test')}
+            </Button>
+          </Space>
+        </Card>
+      </Form>
+    </Spin>
   );
 }

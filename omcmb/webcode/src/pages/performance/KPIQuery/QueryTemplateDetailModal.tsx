@@ -112,6 +112,28 @@ function QueryTemplateDetailModalContent({ open, template, metricLabels, onClose
           {t(granularityLabels[template.payload.granularity] ?? template.payload.granularity)}
         </Descriptions.Item>
         <Descriptions.Item label={t('perf.kpiQuery.timeRange')}>{range}</Descriptions.Item>
+        <Descriptions.Item label={t('perf.kpiQuery.regularReport.title')}>
+          <Tag color={template.payload.regularReport?.enabled ? 'blue' : 'default'}>
+            {t(template.payload.regularReport?.enabled ? 'common.enabled' : 'common.disabled')}
+          </Tag>
+        </Descriptions.Item>
+        {template.payload.regularReport?.enabled && (
+          <>
+            <Descriptions.Item label={t('perf.kpiQuery.regularReport.sendTime')}>
+              {template.payload.regularReport.sendTime}
+            </Descriptions.Item>
+            <Descriptions.Item label={t('perf.kpiQuery.regularReport.period')}>
+              <Space wrap>
+                {template.payload.regularReport.periods.map((period) => (
+                  <Tag key={period}>{t(`perf.kpiQuery.regularReport.period.${period === 'daily' ? 'day' : period === 'hourly' ? 'hour' : '15min'}`)}</Tag>
+                ))}
+              </Space>
+            </Descriptions.Item>
+            <Descriptions.Item label={t('perf.kpiQuery.regularReport.recipients')}>
+              {template.payload.regularReport.recipients.join('; ') || '-'}
+            </Descriptions.Item>
+          </>
+        )}
         <Descriptions.Item label={t('perf.kpiQuery.detail.createdAt')}><Text>{formatTimestamp(template.createdAt)}</Text></Descriptions.Item>
         <Descriptions.Item label={t('perf.kpiQuery.detail.updatedAt')}><Text>{formatTimestamp(template.updatedAt)}</Text></Descriptions.Item>
       </Descriptions>

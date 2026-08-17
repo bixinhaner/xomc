@@ -499,17 +499,37 @@ type NotificationConfig struct {
 	AlertWebhook AlertWebhookConfig `mapstructure:"alert_webhook"`
 }
 
-// SMTPConfig 配置 SMTP 邮件发送。Username 为空表示不做 SMTP AUTH；
-// StartTLS 由 SMTP 服务器能力决定。
+// SMTPConfig 配置服务商无关的 SMTP 邮件通道。
 type SMTPConfig struct {
-	Enabled  bool          `mapstructure:"enabled"`
-	Host     string        `mapstructure:"host"`
-	Port     int           `mapstructure:"port"`
-	Username string        `mapstructure:"username"`
-	Password string        `mapstructure:"password"`
-	From     string        `mapstructure:"from"`
+	Enabled      bool   `mapstructure:"enabled"`
+	Host         string `mapstructure:"host"`
+	Port         int    `mapstructure:"port"`
+	SecurityMode string `mapstructure:"security_mode"`
+	AuthEnabled  bool   `mapstructure:"auth_enabled"`
+	Username     string `mapstructure:"username"`
+	Password     string `mapstructure:"password"`
+	From         string `mapstructure:"from"`
+	// StartTLS is retained only for upgrades from the former YAML contract.
+	// New deployments must use security_mode.
 	StartTLS bool          `mapstructure:"starttls"`
 	Timeout  time.Duration `mapstructure:"timeout"`
+}
+
+// Effective preserves the former YAML semantics while returning the unified
+// provider-neutral SMTP contract used by app and worker. In the old contract,
+// a non-empty username implicitly enabled AUTH and starttls selected STARTTLS.
+func (c SMTPConfig) Effective() SMTPConfig {
+	out := c
+	if strings.TrimSpace(out.SecurityMode) == "" {
+		out.SecurityMode = "none"
+		if out.StartTLS {
+			out.SecurityMode = "starttls"
+		}
+	}
+	if !out.AuthEnabled && strings.TrimSpace(out.Username) != "" {
+		out.AuthEnabled = true
+	}
+	return out
 }
 
 // AlertWebhookConfig 配置 Alertmanager → POST /api/v1/alerts/webhook 入口。
@@ -799,6 +819,7 @@ type WorkerConfig struct {
 	OfflineAlarmCleanup OfflineAlarmCleanupConfig `mapstructure:"offline_alarm_cleanup"` // #358: 离线设备活动告警清理阈值/周期/批量可配
 	PM                  PMConfig                  `mapstructure:"pm"`                    // 设备上线时自动下发 PM 上传配置
 	RawCleanup          RawCleanupConfig          `mapstructure:"raw_cleanup"`           // PM/MR 原始对象精确分批清理
+	Notification        NotificationConfig        `mapstructure:"notification"`          // 告警/KPI 邮件任务使用的统一 SMTP 通道
 	// PMConsumerConcurrency 是 PM 文件入库消费者的进程内并发订阅数（pm.file.received → 解析入库）。
 	// NATS push 订阅 async 回调由 nats.go 单 goroutine 串行投递，单订阅只用 ~1 核；N 个订阅共享同一
 	// durable consumer "pm-workers" 由 JetStream 负载均衡，吃满 worker 多核。<=0 时 worker 启动期

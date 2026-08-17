@@ -52,8 +52,7 @@
             "ignore",
             "auto_acknowledge",
             "auto_clear",
-            "notify_webhook",
-            "notify_email"
+            "notify_webhook"
           ],
           "nullable": true,
           "type": "string"

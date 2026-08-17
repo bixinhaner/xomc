@@ -58,5 +58,7 @@ type xmlAlarm struct {
 	EventType       string `xml:"eventType,attr"`
 	CnProbableCause string `xml:"cnProbableCause,attr"`
 	EnProbableCause string `xml:"enProbableCause,attr"`
+	CnSuggestion    string `xml:"cnSuggestion,attr"`
+	EnSuggestion    string `xml:"enSuggestion,attr"`
 	IsShow          string `xml:"isShow,attr"` // "Y" / "N"
 }

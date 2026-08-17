@@ -483,6 +483,12 @@ export function useBatchUpdateSysConfigs() {
   });
 }
 
+export function useSendTestEmail() {
+  return useMutation({
+    mutationFn: (recipient: string) => adminApi.sendTestEmail(recipient),
+  });
+}
+
 export function sysConfigApplyRefetchInterval(status: ConfigApplyStatus | undefined): number | false {
   if (status === 'applied') return false;
   if (status === 'failed') return 15_000;

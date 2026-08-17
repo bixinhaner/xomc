@@ -63,9 +63,21 @@ func TestMainBaselineReconcileSectionsAreAdditiveAndIdempotent(t *testing.T) {
 		"CREATE TABLE IF NOT EXISTS public.device_access_actions",
 		"ADD COLUMN IF NOT EXISTS admission_class",
 		"CREATE UNIQUE INDEX IF NOT EXISTS uq_async_jobs_geofence_manual_bind_request",
+		"CREATE TABLE IF NOT EXISTS public.alarm_email_global_settings",
+		"CREATE TABLE IF NOT EXISTS public.alarm_email_subscriptions",
+		"ADD COLUMN IF NOT EXISTS legacy_filter_id",
+		"CREATE TABLE IF NOT EXISTS public.alarm_email_runs",
+		"CREATE TABLE IF NOT EXISTS public.alarm_email_deliveries",
+		"ADD COLUMN IF NOT EXISTS subscription_snapshot",
+		"ADD COLUMN IF NOT EXISTS recipients_snapshot",
+		"uq_alarm_email_runs_subscription_window",
+		"uq_alarm_email_deliveries_run_recipient",
+		"uq_alarm_email_subscriptions_legacy_filter",
 		"main baseline reconcile missing devices.location_source_mode",
 		"'public.device_access_states'",
 		"main baseline reconcile missing relation %",
+		"main baseline reconcile missing alarm email run snapshots",
+		"main baseline reconcile missing legacy alarm email linkage",
 		"main baseline reconcile missing device_tasks.admission_class",
 	} {
 		require.Contains(t, schemaSQL, contract)
@@ -85,6 +97,13 @@ func TestMainBaselineReconcileSectionsAreAdditiveAndIdempotent(t *testing.T) {
 	require.Contains(t, seedSQL, "INSERT INTO public.menus")
 	require.Contains(t, seedSQL, "'device:access-control'")
 	require.Contains(t, seedSQL, "'/api/v1/device-access/states'")
+	require.Contains(t, seedSQL, "'notification.email', 'enabled'")
+	require.Contains(t, seedSQL, "'/api/v1/admin/notification/email/test'")
+	require.Contains(t, seedSQL, "'/api/v1/alarms/email-subscriptions'")
+	require.Contains(t, seedSQL, "'/api/v1/notifications/email-runs'")
+	require.Contains(t, seedSQL, "filter_rule.action = 'notify_email'")
+	require.Contains(t, seedSQL, "legacy_filter_id")
+	require.Contains(t, seedSQL, "migrated_legacy_email_rules")
 	require.Contains(t, seedSQL, "ON CONFLICT")
 }
 
@@ -165,6 +184,18 @@ WHERE api_group = 'device-access';
 `)
 	require.NoError(t, err)
 
+	legacyFilterID := uuid.New()
+	_, err = db.Exec(`
+INSERT INTO public.alarm_filters (
+    id, name, filter_type, alarm_sources, alarm_identifiers,
+    action, email_recipients, priority, enabled
+) VALUES (
+    $1, 'legacy-email-rule', 'alarm_identifier', ARRAY['device']::varchar[], ARRAY['11500']::varchar[],
+    'notify_email', ARRAY['OPS@example.com', 'ops@example.com'], 10, true
+)
+`, legacyFilterID)
+	require.NoError(t, err)
+
 	seedDir := filepath.Join(migrationDir, "seed")
 	for range 2 {
 		require.NoError(t, reconcileMainBaselineSchema(db, seedDir))
@@ -212,4 +243,63 @@ SELECT COUNT(*) FROM public.menus WHERE permission_key = 'device:access-control'
 SELECT COUNT(*) FROM public.api_endpoints WHERE api_group = 'device-access'
 `).Scan(&accessEndpoints))
 	require.Equal(t, 14, accessEndpoints)
+
+	var emailConfigRows int
+	require.NoError(t, db.QueryRow(`
+SELECT COUNT(*)
+FROM public.sys_configs
+WHERE category = 'notification.email'
+`).Scan(&emailConfigRows))
+	require.Equal(t, 10, emailConfigRows)
+
+	var emailEndpointRows int
+	require.NoError(t, db.QueryRow(`
+SELECT COUNT(*)
+FROM public.api_endpoints
+WHERE path IN (
+    '/api/v1/admin/notification/email/test',
+    '/api/v1/alarms/email-settings',
+    '/api/v1/alarms/email-subscriptions',
+    '/api/v1/alarms/email-subscriptions/:id',
+    '/api/v1/notifications/email-runs',
+    '/api/v1/notifications/email-runs/:business/:id/deliveries'
+)
+`).Scan(&emailEndpointRows))
+	require.Equal(t, 9, emailEndpointRows)
+
+	var emailPermissionRows int
+	require.NoError(t, db.QueryRow(`
+SELECT COUNT(*)
+FROM public.role_api_permissions AS permission
+JOIN public.api_endpoints AS endpoint ON endpoint.id = permission.endpoint_id
+WHERE endpoint.path IN (
+    '/api/v1/admin/notification/email/test',
+    '/api/v1/alarms/email-settings',
+    '/api/v1/alarms/email-subscriptions',
+    '/api/v1/alarms/email-subscriptions/:id',
+    '/api/v1/notifications/email-runs',
+    '/api/v1/notifications/email-runs/:business/:id/deliveries'
+)
+`).Scan(&emailPermissionRows))
+	require.Equal(t, 22, emailPermissionRows)
+
+	var migratedLegacyRules int
+	require.NoError(t, db.QueryRow(`
+SELECT COUNT(*)
+FROM public.alarm_email_subscriptions
+WHERE legacy_filter_id = $1
+  AND enabled
+  AND interval_minutes = 0
+  AND tolerance_minutes = 0
+  AND NOT include_default_recipients
+  AND recipients = ARRAY['ops@example.com']::text[]
+  AND alarm_identifiers = ARRAY['11500']::text[]
+`, legacyFilterID).Scan(&migratedLegacyRules))
+	require.Equal(t, 1, migratedLegacyRules)
+
+	var alarmEmailEnabled bool
+	require.NoError(t, db.QueryRow(`
+SELECT enabled FROM public.alarm_email_global_settings WHERE id = 1
+`).Scan(&alarmEmailEnabled))
+	require.True(t, alarmEmailEnabled)
 }

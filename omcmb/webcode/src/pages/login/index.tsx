@@ -147,6 +147,7 @@ export default function LoginPage() {
       email: `${username}@omc.example.com`,
       phone: '18800000000',
       role: 'admin',
+      isSuperAdmin: username === 'superadmin',
       status: 'active',
       lastLoginTime: new Date().toISOString(),
       createTime: '2024-01-01T00:00:00.000Z',

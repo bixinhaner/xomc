@@ -46,6 +46,7 @@ func TestIsSecretSysConfig_UsesExactRegistry(t *testing.T) {
 		{name: "Agent Studio token", category: "agent", key: "agent_studio_service_token", want: true},
 		{name: "ACS upload password", category: "acs_transfer", key: "uploadPassword", want: true},
 		{name: "ACS download password", category: "acs_transfer", key: "downloadPassword", want: true},
+		{name: "SMTP password", category: "notification.email", key: "password", want: true},
 		{name: "same password key wrong category", category: "basic", key: "defaultPasswd", want: false},
 		{name: "ordinary security setting", category: "security", key: "passwordMinLength", want: false},
 	}
@@ -136,6 +137,23 @@ func TestPreserveBlankSecretsKeepsNonEmptyRotationAndDropsBlankPlaceholder(t *te
 		{Key: "downloadPassword", Value: "rotated"},
 		{Key: "uploadBaseURL", Value: "https://acs.example.com"},
 	}, items)
+}
+
+func TestSMTPPasswordIsWriteOnlyAndBlankPreservesExistingValue(t *testing.T) {
+	configured := toSysConfigResponse(SysConfig{
+		Category: "notification.email",
+		Key:      "password",
+		Value:    "smtp-secret",
+	})
+	assert.Empty(t, configured.Value)
+	assert.True(t, configured.IsSecret)
+	assert.True(t, configured.IsConfigured)
+
+	items := preserveBlankSecrets("notification.email", []BatchItem{
+		{Key: "password", Value: ""},
+		{Key: "host", Value: "smtp.example.test"},
+	})
+	assert.Equal(t, []BatchItem{{Key: "host", Value: "smtp.example.test"}}, items)
 }
 
 func TestValidateGenericBatchWrite_RejectsEmptyDefaultPassword(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/stretchr/testify/assert"
@@ -38,17 +39,17 @@ func setupHandlerTest() (*Handler, *mockAlarmStore, *AlarmEngine, *gin.Engine) {
 func seedActiveAlarm(store *mockAlarmStore, opts ...func(*model.Alarm)) *model.Alarm {
 	now := time.Now()
 	alarm := &model.Alarm{
-		ID:        uuid.New(),
-		DeviceID:  uuid.New(),
-		DeviceSN:  "SN-TEST-001",
-		Carrier:   model.CarrierCMCC,
-		Severity:  model.AlarmMajor,
-		AlarmType: "equipment",
+		ID:              uuid.New(),
+		DeviceID:        uuid.New(),
+		DeviceSN:        "SN-TEST-001",
+		Carrier:         model.CarrierCMCC,
+		Severity:        model.AlarmMajor,
+		AlarmType:       "equipment",
 		AlarmIdentifier: "ALM001",
-		Status:    model.AlarmActive,
-		RaisedAt:  now,
-		CreatedAt: now,
-		UpdatedAt: now,
+		Status:          model.AlarmActive,
+		RaisedAt:        now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	for _, fn := range opts {
 		fn(alarm)
@@ -162,11 +163,11 @@ func TestHandler_ListHistory_OK(t *testing.T) {
 
 	now := time.Now()
 	cleared := &model.Alarm{
-		ID:        uuid.New(),
-		DeviceSN:  "SN-TEST-001",
+		ID:              uuid.New(),
+		DeviceSN:        "SN-TEST-001",
 		AlarmIdentifier: "ALM001",
-		Status:    model.AlarmCleared,
-		ClearedAt: &now,
+		Status:          model.AlarmCleared,
+		ClearedAt:       &now,
 	}
 	store.history = append(store.history, cleared)
 
@@ -442,6 +443,52 @@ func TestHandler_ClearAlarm_NotFound(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandler_BatchClearPublishesEmailEventAndPreservesMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := newMockAlarmStore()
+	bus := &recordingAlarmEmailEventBus{}
+	engine := NewAlarmEngine(store, nil, nil, bus, zap.NewNop())
+	handler := NewHandler(engine, store, nil, zap.NewNop())
+	router := gin.New()
+	handler.RegisterRoutes(router.Group(""))
+
+	alarm := seedActiveAlarm(store)
+	body := fmt.Sprintf(`{"ids":["%s"],"clear_note":"UAT recovery notification"}`, alarm.ID)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/alarms/active/batch/clear", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, store.history, 1)
+	require.NotNil(t, store.history[0].ClearedBy)
+	assert.Equal(t, "operator", *store.history[0].ClearedBy)
+	require.NotNil(t, store.history[0].ClearNote)
+	assert.Equal(t, "UAT recovery notification", *store.history[0].ClearNote)
+	assert.Equal(t, []string{event.SubjectAlarmCleared, event.SubjectAlarmEmailCleared}, bus.published)
+}
+
+func TestHandler_BatchClearSkipsMissingAlarm(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := newMockAlarmStore()
+	bus := &recordingAlarmEmailEventBus{}
+	engine := NewAlarmEngine(store, nil, nil, bus, zap.NewNop())
+	handler := NewHandler(engine, store, nil, zap.NewNop())
+	router := gin.New()
+	handler.RegisterRoutes(router.Group(""))
+
+	alarm := seedActiveAlarm(store)
+	body := fmt.Sprintf(`{"ids":["%s","%s"],"clear_note":"batch clear"}`, uuid.New(), alarm.ID)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/alarms/active/batch/clear", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, store.history, 1)
+	assert.Equal(t, []string{event.SubjectAlarmCleared, event.SubjectAlarmEmailCleared}, bus.published)
 }
 
 // TestClear_NotFound_Returns404 ensures that POST /alarms/:id/clear against a

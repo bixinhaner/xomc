@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/dashboard"
+	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
@@ -127,7 +128,12 @@ func initPMModule(c *Container) error {
 	// T-0174 阶段 1：指标查询页"查询模板"REST 入口（5 CRUD：list/get/create/update/delete）。
 	pmQueryTemplateRepo := querytemplate.NewPgRepository(c.PgPool)
 	pmQueryTemplateHandler := querytemplate.NewHandler(pmQueryTemplateRepo, logger.Named("querytemplate")).
-		WithEnabledMetricPayloadService(querytemplate.NewEnabledMetricPayloadService(enabledRepo))
+		WithEnabledMetricPayloadService(querytemplate.NewEnabledMetricPayloadService(enabledRepo)).
+		WithDeviceScopeValidator(querytemplate.NewDeviceScopeValidator(
+			c.PermService,
+			c.DeviceService,
+			device.NewPgDeviceGroupReader(c.PgPool),
+		))
 
 	// KPI-EXPORT T1：KPI 数据导出 REST 入口（建任务落表 + 入队 pm_kpi_export job）。
 	// 文件管理下载默认走 app 同源流式响应；presign client 仅保留给 ?mode=url 兼容路径。

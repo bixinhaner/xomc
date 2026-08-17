@@ -136,7 +136,12 @@ vi.mock('../PmDashboard/CellDrilldownSelector', () => ({
 }));
 
 vi.mock('./components/DevicePickerModal', () => ({
-  default: () => null,
+  default: (props: { open: boolean; onConfirm: (deviceSns: string[]) => void }) =>
+    props.open ? (
+      <button type="button" onClick={() => props.onConfirm(['SN-NEW'])}>
+        模拟选择设备
+      </button>
+    ) : null,
 }));
 
 vi.mock('@/components/MetricPickerModal', () => ({
@@ -577,6 +582,32 @@ describe('KPIQuery 模板弹窗初始值', () => {
     expect(within(dialog).getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('已选 1 个：SN-OK');
     expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('已选 1 个：K-1 小区可用率');
     expect(within(dialog).getByText('近 1 小时')).toBeTruthy();
+  });
+
+  it('启用定时报表但未选择指标时阻止保存模板', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '新建查询模板' }));
+    const dialog = await findModalByTitle('新建查询模板');
+    fireEvent.change(within(dialog).getByPlaceholderText('例如：eNB 基础 KPI'), {
+      target: { value: '无指标定时报表' },
+    });
+    fireEvent.click(within(dialog).getAllByRole('button', { name: '列表选' })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: '模拟选择设备' }));
+    await waitFor(() => {
+      expect(within(dialog).getByPlaceholderText('点击右侧按钮选择设备')).toHaveValue('已选 1 个：SN-NEW');
+    });
+    fireEvent.click(within(dialog).getByRole('switch'));
+    await within(dialog).findByText('系统按配置时间生成最近一个完整统计周期的 CSV，并作为邮件附件发送。发件账号在系统设置中统一配置。');
+    fireEvent.change(within(dialog).getByPlaceholderText('多个邮箱用分号、逗号或换行分隔'), {
+      target: { value: 'ops@example.com' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }));
+
+    await waitFor(() => {
+      expect(createTemplateSpy).not.toHaveBeenCalled();
+      expect(within(dialog).getByPlaceholderText('点击右侧按钮选择指标')).toHaveValue('');
+    });
   });
 
   it('编辑模板弹窗仍回填待编辑模板数据', async () => {

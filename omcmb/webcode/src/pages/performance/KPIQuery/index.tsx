@@ -29,6 +29,10 @@ import {
   Spin,
   DatePicker,
   Divider,
+  Switch,
+  TimePicker,
+  Checkbox,
+  Tag,
 } from 'antd';
 import {
   ReloadOutlined,
@@ -77,6 +81,7 @@ import type {
   QueryTemplatePayload,
   TemplateVisibility,
   TimeRangePreset,
+  RegularReportPeriod,
 } from '@core/types/pmQuery';
 import { buildAlignedPresetRange, getDefaultTimeRangeForGranularity } from '@core/utils/granularityTimeRange';
 import DevicePickerModal from './components/DevicePickerModal';
@@ -127,7 +132,24 @@ const DEFAULT_PAYLOAD: QueryTemplatePayload = {
   // 与 #595 联动表保持一致：15min → 近 3 小时
   timeRangePreset: getDefaultTimeRangeForGranularity('15min'),
   deviceType: 'ENB',
+  regularReport: {
+    enabled: false,
+    sendTime: '08:00',
+    periods: ['daily'],
+    emailEnabled: true,
+    recipients: [],
+  },
 };
+
+const REGULAR_REPORT_PERIODS: { value: RegularReportPeriod; labelKey: string }[] = [
+  { value: 'daily', labelKey: 'perf.kpiQuery.regularReport.period.day' },
+  { value: 'hourly', labelKey: 'perf.kpiQuery.regularReport.period.hour' },
+  { value: '15min', labelKey: 'perf.kpiQuery.regularReport.period.15min' },
+];
+
+function splitEmailRecipients(value: string): string[] {
+  return value.split(/[;,\n]/).map((item) => item.trim()).filter(Boolean);
+}
 
 function formatMetricDisplay(id: string, label?: string): string {
   return label && label !== id ? `${id} ${label}` : id;
@@ -148,6 +170,7 @@ interface SaveTemplateFormState {
   visibility: TemplateVisibility;
   payload: QueryTemplatePayload;
   customRange: [dayjs.Dayjs, dayjs.Dayjs] | null;
+  recipientText: string;
 }
 
 const createBlankSaveTemplateForm = (open: boolean): SaveTemplateFormState => ({
@@ -158,6 +181,7 @@ const createBlankSaveTemplateForm = (open: boolean): SaveTemplateFormState => ({
   visibility: 'private',
   payload: createDefaultTemplatePayload(),
   customRange: null,
+  recipientText: '',
 });
 
 export default function KPIQuery() {
@@ -533,6 +557,7 @@ export default function KPIQuery() {
       visibility: 'private',
       payload: { ...payload },
       customRange,
+      recipientText: payload.regularReport?.recipients.join('; ') ?? '',
     });
   };
 
@@ -552,6 +577,7 @@ export default function KPIQuery() {
         tpl.payload.timeRangePreset === 'custom' && tpl.payload.absoluteStart && tpl.payload.absoluteEnd
           ? [dayjs(tpl.payload.absoluteStart), dayjs(tpl.payload.absoluteEnd)]
           : null,
+      recipientText: tpl.payload.regularReport?.recipients.join('; ') ?? '',
     });
   };
 
@@ -574,9 +600,31 @@ export default function KPIQuery() {
     if (warnIfSelectionExceedsLimit(saveForm.payload)) {
       return;
     }
+    const report = saveForm.payload.regularReport
+      ? { ...saveForm.payload.regularReport, recipients: splitEmailRecipients(saveForm.recipientText) }
+      : undefined;
+    if (report?.enabled) {
+      if (saveForm.payload.deviceSns.length === 0) {
+        message.warning(t('perf.kpiQuery.selectDeviceRequired'));
+        return;
+      }
+      if (saveForm.payload.metricPaths.length === 0) {
+        message.warning(t('perf.kpiQuery.selectMetricRequired'));
+        return;
+      }
+      if (report.periods.length === 0) {
+        message.warning(t('perf.kpiQuery.regularReport.periodRequired'));
+        return;
+      }
+      if (!report.emailEnabled || report.recipients.length === 0) {
+        message.warning(t('perf.kpiQuery.regularReport.recipientRequired'));
+        return;
+      }
+    }
     // 保存时回填 custom 模式的绝对时间（使用 Modal 内部的 payload + customRange，不是主表单）
     const payloadToSave: QueryTemplatePayload = {
       ...saveForm.payload,
+      regularReport: report,
       absoluteStart:
         saveForm.payload.timeRangePreset === 'custom' && saveForm.customRange
           ? toSystemTimezoneRFC3339(saveForm.customRange[0], systemTimezone) ?? saveForm.customRange[0].toISOString()
@@ -749,6 +797,11 @@ export default function KPIQuery() {
               <Text ellipsis={{ tooltip: tpl.name }} style={{ flex: 1, minWidth: 0 }}>
                 {tpl.name}
               </Text>
+              {tpl.payload.regularReport?.enabled && (
+                <Tag color="blue" style={{ marginInlineEnd: 0 }}>
+                  {t('perf.kpiQuery.regularReport.title')}
+                </Tag>
+              )}
             </Space>
           }
           description={
@@ -1368,6 +1421,91 @@ export default function KPIQuery() {
                 </Button>
               </Space.Compact>
             </Form.Item>
+
+            <Divider titlePlacement="left" style={{ margin: '16px 0' }}>
+              {t('perf.kpiQuery.regularReport.title')}
+            </Divider>
+
+            <Form.Item label={t('perf.kpiQuery.regularReport.enable')} style={{ marginBottom: 12 }}>
+              <Switch
+                checked={saveForm.payload.regularReport?.enabled ?? false}
+                onChange={(enabled) => setSaveForm((s) => ({
+                  ...s,
+                  payload: {
+                    ...s.payload,
+                    regularReport: {
+                      enabled,
+                      sendTime: s.payload.regularReport?.sendTime ?? '08:00',
+                      periods: s.payload.regularReport?.periods ?? ['daily'],
+                      emailEnabled: s.payload.regularReport?.emailEnabled ?? true,
+                      recipients: s.payload.regularReport?.recipients ?? [],
+                    },
+                  },
+                }))}
+              />
+            </Form.Item>
+
+            {saveForm.payload.regularReport?.enabled && (
+              <>
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message={t('perf.kpiQuery.regularReport.hint')}
+                />
+                <Space wrap size="large" align="start">
+                  <Form.Item label={t('perf.kpiQuery.regularReport.sendTime')} required>
+                    <TimePicker
+                      format="HH:mm"
+                      minuteStep={1}
+                      value={dayjs(`2000-01-01T${saveForm.payload.regularReport.sendTime}:00`)}
+                      onChange={(value) => value && setSaveForm((s) => ({
+                        ...s,
+                        payload: {
+                          ...s.payload,
+                          regularReport: { ...s.payload.regularReport!, sendTime: value.format('HH:mm') },
+                        },
+                      }))}
+                    />
+                  </Form.Item>
+                  <Form.Item label={t('perf.kpiQuery.regularReport.period')} required>
+                    <Checkbox.Group
+                      value={saveForm.payload.regularReport.periods}
+                      options={REGULAR_REPORT_PERIODS.map((item) => ({ value: item.value, label: t(item.labelKey) }))}
+                      onChange={(values) => setSaveForm((s) => ({
+                        ...s,
+                        payload: {
+                          ...s.payload,
+                          regularReport: { ...s.payload.regularReport!, periods: values as RegularReportPeriod[] },
+                        },
+                      }))}
+                    />
+                  </Form.Item>
+                </Space>
+                <Form.Item label={t('perf.kpiQuery.regularReport.emailEnable')} style={{ marginBottom: 12 }}>
+                  <Switch
+                    checked={saveForm.payload.regularReport.emailEnabled}
+                    onChange={(emailEnabled) => setSaveForm((s) => ({
+                      ...s,
+                      payload: {
+                        ...s.payload,
+                        regularReport: { ...s.payload.regularReport!, emailEnabled },
+                      },
+                    }))}
+                  />
+                </Form.Item>
+                {saveForm.payload.regularReport.emailEnabled && (
+                  <Form.Item label={t('perf.kpiQuery.regularReport.recipients')} required>
+                    <Input.TextArea
+                      rows={2}
+                      value={saveForm.recipientText}
+                      placeholder={t('perf.kpiQuery.regularReport.recipientsPlaceholder')}
+                      onChange={(event) => setSaveForm((s) => ({ ...s, recipientText: event.target.value }))}
+                    />
+                  </Form.Item>
+                )}
+              </>
+            )}
           </Form>
         </Modal>
       </div>

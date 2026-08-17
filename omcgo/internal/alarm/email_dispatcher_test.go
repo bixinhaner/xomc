@@ -224,6 +224,7 @@ func TestSMTPEmailDispatcher_Dispatch_Success(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	cfg := EmailConfig{
+		Enabled: true,
 		Host:    srv.host,
 		Port:    srv.port,
 		From:    "alarm@omc.test",
@@ -257,7 +258,7 @@ func TestSMTPEmailDispatcher_Dispatch_Success(t *testing.T) {
 	assert.Contains(t, body, "From: alarm@omc.test")
 	assert.Contains(t, body, "To: ops@omc.test, noc@omc.test")
 	assert.Contains(t, body, "MIME-Version: 1.0")
-	assert.Contains(t, body, "Content-Type: text/plain; charset=utf-8")
+	assert.Contains(t, body, "Content-Type: text/plain; charset=\"utf-8\"")
 	assert.Contains(t, body, "Body line")
 }
 
@@ -268,6 +269,7 @@ func TestSMTPEmailDispatcher_Dispatch_Timeout(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	cfg := EmailConfig{
+		Enabled: true,
 		Host:    srv.host,
 		Port:    srv.port,
 		From:    "alarm@omc.test",
@@ -291,12 +293,14 @@ func TestSMTPEmailDispatcher_Dispatch_AuthFail(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	cfg := EmailConfig{
-		Host:     srv.host,
-		Port:     srv.port,
-		From:     "alarm@omc.test",
-		Username: "user",
-		Password: "wrong",
-		Timeout:  2 * time.Second,
+		Enabled:     true,
+		AuthEnabled: true,
+		Host:        srv.host,
+		Port:        srv.port,
+		From:        "alarm@omc.test",
+		Username:    "user",
+		Password:    "wrong",
+		Timeout:     2 * time.Second,
 	}
 	d := NewSMTPEmailDispatcher(cfg, zap.NewNop(), NewEmailMetrics(prometheus.NewRegistry()))
 
@@ -309,9 +313,10 @@ func TestSMTPEmailDispatcher_Dispatch_ParamValidation(t *testing.T) {
 	t.Parallel()
 
 	d := NewSMTPEmailDispatcher(EmailConfig{
-		Host: "127.0.0.1",
-		Port: 1, // never reached
-		From: "alarm@omc.test",
+		Enabled: true,
+		Host:    "127.0.0.1",
+		Port:    1, // never reached
+		From:    "alarm@omc.test",
 	}, zap.NewNop(), NewEmailMetrics(prometheus.NewRegistry()))
 
 	cases := []struct {
@@ -320,9 +325,9 @@ func TestSMTPEmailDispatcher_Dispatch_ParamValidation(t *testing.T) {
 		subject string
 		want    string
 	}{
-		{"empty to", nil, "subj", "recipient list empty"},
-		{"empty addr in list", []string{"ok@omc.test", " "}, "subj", "empty recipient"},
-		{"empty subject", []string{"ok@omc.test"}, " ", "subject empty"},
+		{"empty to", nil, "subj", "no recipients"},
+		{"empty addr in list", []string{"ok@omc.test", " "}, "subj", "invalid recipient address"},
+		{"empty subject", []string{"ok@omc.test"}, " ", "email subject is required"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -333,22 +338,6 @@ func TestSMTPEmailDispatcher_Dispatch_ParamValidation(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.want)
 		})
 	}
-}
-
-func TestBuildEmailMessage(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, 4, 28, 10, 30, 0, 0, time.UTC)
-	msg := buildEmailMessage("alarm@omc.test", []string{"a@x", "b@y"}, "Hi", "hello", now)
-	s := string(msg)
-
-	assert.True(t, strings.HasPrefix(s, "Date: "), "must start with Date header")
-	assert.Contains(t, s, "From: alarm@omc.test\r\n")
-	assert.Contains(t, s, "To: a@x, b@y\r\n")
-	assert.Contains(t, s, "Subject: Hi\r\n")
-	assert.Contains(t, s, "MIME-Version: 1.0\r\n")
-	assert.Contains(t, s, "Content-Type: text/plain; charset=utf-8\r\n")
-	assert.True(t, strings.HasSuffix(s, "\r\n\r\nhello"), "body must follow blank line; got: %q", s)
 }
 
 // ---------- helpers ----------

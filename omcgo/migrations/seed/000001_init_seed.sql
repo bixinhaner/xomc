@@ -648,6 +648,15 @@ INSERT INTO public.api_endpoints VALUES
 	('54f68bad-c0bf-4345-8b0b-1c40ccd62d42', '/api/v1/northbound/export/alarms', 'POST', 'POST /api/v1/northbound/export/alarms', '', 'northbound', true, '2026-05-31 12:11:47.707804+08', '2026-05-31 12:52:24.017235+08', false),
 	('c9be6bce-cb40-46f2-981e-1ae606552f86', '/api/v1/notifications/sync-stale', 'POST', 'POST /api/v1/notifications/sync-stale', '', 'notifications', true, '2026-05-31 12:11:47.70808+08', '2026-05-31 12:52:24.017486+08', false),
 	('c552a14d-106e-40db-bb15-0eaf775016b2', '/api/v1/notifications/templates', 'POST', 'POST /api/v1/notifications/templates', '', 'notifications', true, '2026-05-31 12:11:47.708379+08', '2026-05-31 12:52:24.017763+08', false),
+	('28f6be65-1db8-4e1a-979a-3d214617fb01', '/api/v1/admin/notification/email/test', 'POST', 'POST /api/v1/admin/notification/email/test', '发送 SMTP 通道测试邮件', 'notification', true, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', false),
+	('28f6be65-1db8-4e1a-979a-3d214617fb02', '/api/v1/alarms/email-settings', 'GET', 'GET /api/v1/alarms/email-settings', '查询告警邮件全局设置', 'alarms', true, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', false),
+	('28f6be65-1db8-4e1a-979a-3d214617fb03', '/api/v1/alarms/email-settings', 'PUT', 'PUT /api/v1/alarms/email-settings', '更新告警邮件全局设置', 'alarms', true, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', false),
+	('28f6be65-1db8-4e1a-979a-3d214617fb04', '/api/v1/alarms/email-subscriptions', 'GET', 'GET /api/v1/alarms/email-subscriptions', '查询告警邮件订阅', 'alarms', true, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', false),
+	('28f6be65-1db8-4e1a-979a-3d214617fb05', '/api/v1/alarms/email-subscriptions', 'POST', 'POST /api/v1/alarms/email-subscriptions', '创建告警邮件订阅', 'alarms', true, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', false),
+	('28f6be65-1db8-4e1a-979a-3d214617fb06', '/api/v1/alarms/email-subscriptions/:id', 'PUT', 'PUT /api/v1/alarms/email-subscriptions/:id', '更新告警邮件订阅', 'alarms', true, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', false),
+	('28f6be65-1db8-4e1a-979a-3d214617fb07', '/api/v1/alarms/email-subscriptions/:id', 'DELETE', 'DELETE /api/v1/alarms/email-subscriptions/:id', '删除告警邮件订阅', 'alarms', true, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', false),
+	('28f6be65-1db8-4e1a-979a-3d214617fb08', '/api/v1/notifications/email-runs', 'GET', 'GET /api/v1/notifications/email-runs', '查询邮件业务发送记录', 'notifications', true, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', false),
+	('28f6be65-1db8-4e1a-979a-3d214617fb09', '/api/v1/notifications/email-runs/:business/:id/deliveries', 'GET', 'GET /api/v1/notifications/email-runs/:business/:id/deliveries', '查询逐收件人投递明细', 'notifications', true, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', false),
 	('dc7c1d35-cb04-48ef-8ec4-079498e9c254', '/api/v1/config/sync/push/:deviceId', 'POST', 'POST /api/v1/config/sync/push/:deviceId', '', 'config', true, '2026-05-31 12:11:47.708644+08', '2026-05-31 12:52:24.018039+08', false),
 	('844e4861-a904-498f-8c84-86f1fe71e723', '/api/v1/config/sync/pull/:deviceId', 'POST', 'POST /api/v1/config/sync/pull/:deviceId', '', 'config', true, '2026-05-31 12:11:47.708998+08', '2026-05-31 12:52:24.018301+08', false),
 	('f6b8585f-fd3e-4a3a-b7e0-0bb100f2ceb0', '/api/v1/config/baselines', 'POST', 'POST /api/v1/config/baselines', '', 'config', true, '2026-05-31 12:11:47.70928+08', '2026-05-31 12:52:24.018574+08', false),
@@ -10863,6 +10872,16 @@ ALTER TABLE public.sys_configs DISABLE TRIGGER ALL;
 INSERT INTO public.sys_configs VALUES
 	('7c5911d8-d906-4a17-91ed-6b3d2148123f', 'system', 'system_name', 'OMC 网管系统', 'string', '系统名称', true, '2026-05-31 11:28:43.435931+08', '2026-05-31 11:28:43.435931+08', '{}'),
 	('dc902fbd-dc9c-40e1-9d40-592c05ee8fb5', 'system', 'system_version', '1.0.0', 'string', '系统版本', true, '2026-05-31 11:28:43.435931+08', '2026-05-31 11:28:43.435931+08', '{}'),
+	('28f6be65-1db8-4e1a-979a-3d214617fc01', 'notification.email', 'enabled', 'false', 'bool', '邮件发送总通道开关', false, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', '{}'),
+	('28f6be65-1db8-4e1a-979a-3d214617fc02', 'notification.email', 'host', '', 'string', 'SMTP 服务器地址', false, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', '{}'),
+	('28f6be65-1db8-4e1a-979a-3d214617fc03', 'notification.email', 'port', '587', 'int', 'SMTP 服务器端口', false, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', '{}'),
+	('28f6be65-1db8-4e1a-979a-3d214617fc04', 'notification.email', 'security_mode', 'starttls', 'string', 'SMTP 安全模式：none/starttls/implicit_tls', false, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', '{}'),
+	('28f6be65-1db8-4e1a-979a-3d214617fc05', 'notification.email', 'auth_enabled', 'true', 'bool', '是否启用 SMTP 认证', false, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', '{}'),
+	('28f6be65-1db8-4e1a-979a-3d214617fc06', 'notification.email', 'username', '', 'string', 'SMTP 认证用户名', false, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', '{}'),
+	('28f6be65-1db8-4e1a-979a-3d214617fc07', 'notification.email', 'password', '', 'string', 'SMTP 认证密码（只写）', false, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', '{}'),
+	('28f6be65-1db8-4e1a-979a-3d214617fc08', 'notification.email', 'from_address', '', 'string', 'SMTP 发件地址', false, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', '{}'),
+	('28f6be65-1db8-4e1a-979a-3d214617fc09', 'notification.email', 'from_name', '', 'string', '邮件发件人展示名称', false, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', '{}'),
+	('28f6be65-1db8-4e1a-979a-3d214617fc0a', 'notification.email', 'timeout_seconds', '10', 'int', 'SMTP 会话超时（秒）', false, '2026-08-17 00:00:00+08', '2026-08-17 00:00:00+08', '{}'),
 	('754d6b1b-9c28-4ae0-9e20-d89f1e6b7abf', 'system', 'session_timeout', '30', 'int', '会话超时时间（分钟）', false, '2026-05-31 11:28:43.435931+08', '2026-05-31 11:28:43.435931+08', '{}'),
 	('545a081d-12cd-4fc5-b2c2-ab6e3494d45c', 'system', 'max_login_attempts', '5', 'int', '最大登录尝试次数', false, '2026-05-31 11:28:43.435931+08', '2026-05-31 11:28:43.435931+08', '{}'),
 	('b1fc8340-afee-4d64-9c08-366191bc941c', 'system', 'lockout_duration', '30', 'int', '锁定时长（分钟）', false, '2026-05-31 11:28:43.435931+08', '2026-05-31 11:28:43.435931+08', '{}'),
@@ -27163,9 +27182,188 @@ VALUES (
 )
 ON CONFLICT (role_id, menu_id) DO NOTHING;
 
+-- +omcgo MainReconcileBegin
+-- Email notification baseline data must also be present when upgrading an
+-- existing pre-release database whose 000001 seed is already marked applied.
+INSERT INTO public.sys_configs (
+    id, category, key, value, value_type, description, is_public,
+    created_at, updated_at, description_i18n
+) VALUES
+    ('28f6be65-1db8-4e1a-979a-3d214617fc01', 'notification.email', 'enabled', 'false', 'bool', '邮件发送总通道开关', false, now(), now(), '{}'),
+    ('28f6be65-1db8-4e1a-979a-3d214617fc02', 'notification.email', 'host', '', 'string', 'SMTP 服务器地址', false, now(), now(), '{}'),
+    ('28f6be65-1db8-4e1a-979a-3d214617fc03', 'notification.email', 'port', '587', 'int', 'SMTP 服务器端口', false, now(), now(), '{}'),
+    ('28f6be65-1db8-4e1a-979a-3d214617fc04', 'notification.email', 'security_mode', 'starttls', 'string', 'SMTP 安全模式：none/starttls/implicit_tls', false, now(), now(), '{}'),
+    ('28f6be65-1db8-4e1a-979a-3d214617fc05', 'notification.email', 'auth_enabled', 'true', 'bool', '是否启用 SMTP 认证', false, now(), now(), '{}'),
+    ('28f6be65-1db8-4e1a-979a-3d214617fc06', 'notification.email', 'username', '', 'string', 'SMTP 认证用户名', false, now(), now(), '{}'),
+    ('28f6be65-1db8-4e1a-979a-3d214617fc07', 'notification.email', 'password', '', 'string', 'SMTP 认证密码（只写）', false, now(), now(), '{}'),
+    ('28f6be65-1db8-4e1a-979a-3d214617fc08', 'notification.email', 'from_address', '', 'string', 'SMTP 发件地址', false, now(), now(), '{}'),
+    ('28f6be65-1db8-4e1a-979a-3d214617fc09', 'notification.email', 'from_name', '', 'string', '邮件发件人展示名称', false, now(), now(), '{}'),
+    ('28f6be65-1db8-4e1a-979a-3d214617fc0a', 'notification.email', 'timeout_seconds', '10', 'int', 'SMTP 会话超时（秒）', false, now(), now(), '{}')
+ON CONFLICT DO NOTHING;
+
+-- Convert the retired synchronous notify_email rules exactly once. The
+-- migrated subscription keeps the old explicit recipients and filter scope,
+-- uses real-time delivery (the former rule was synchronous), and records the
+-- source rule for audit/idempotency. A built-in administrator owns orphaned
+-- legacy rows so runtime device-scope authorization remains enforceable.
+WITH legacy_email_rules AS (
+    SELECT
+        filter_rule.*,
+        ARRAY(
+            SELECT DISTINCT lower(btrim(recipient))
+            FROM unnest(COALESCE(filter_rule.email_recipients, '{}'::text[])) AS recipient
+            WHERE btrim(recipient) <> ''
+            ORDER BY lower(btrim(recipient))
+        ) AS normalized_recipients,
+        COALESCE(
+            (
+                SELECT app_user.id
+                FROM public.users AS app_user
+                WHERE app_user.username = filter_rule.created_by
+                   OR app_user.id::text = filter_rule.created_by
+                ORDER BY (app_user.username = filter_rule.created_by) DESC, app_user.id
+                LIMIT 1
+            ),
+            (
+                SELECT app_user.id
+                FROM public.users AS app_user
+                WHERE app_user.source = 'builtIn'
+                ORDER BY app_user.created_at, app_user.id
+                LIMIT 1
+            )
+        ) AS actor_id
+    FROM public.alarm_filters AS filter_rule
+    WHERE filter_rule.action = 'notify_email'
+), migrated_legacy_email_rules AS (
+    INSERT INTO public.alarm_email_subscriptions (
+        name, description, enabled, interval_minutes, tolerance_minutes,
+        recipients, include_default_recipients, alarm_identifiers, severities,
+        alarm_sources, event_types, device_ids, device_group_ids,
+        created_by, updated_by, created_at, updated_at, legacy_filter_id
+    )
+    SELECT
+        left('Legacy ' || legacy_rule.name, 105)
+            || ' [' || left(legacy_rule.id::text, 8) || ']',
+        'Automatically migrated from alarm_filters.notify_email; review scope and schedule after upgrade.',
+        legacy_rule.enabled
+            AND cardinality(legacy_rule.normalized_recipients) > 0
+            AND legacy_rule.actor_id IS NOT NULL,
+        0,
+        0,
+        legacy_rule.normalized_recipients,
+        false,
+        COALESCE(legacy_rule.alarm_identifiers::text[], '{}'::text[]),
+        '{}'::smallint[],
+        COALESCE(legacy_rule.alarm_sources::text[], '{}'::text[]),
+        '{}'::text[],
+        COALESCE(legacy_rule.device_ids, '{}'::uuid[]),
+        COALESCE(legacy_rule.device_group_ids, '{}'::uuid[]),
+        legacy_rule.actor_id,
+        legacy_rule.actor_id,
+        legacy_rule.created_at,
+        legacy_rule.updated_at,
+        legacy_rule.id
+    FROM legacy_email_rules AS legacy_rule
+    ON CONFLICT DO NOTHING
+    RETURNING enabled
+)
+UPDATE public.alarm_email_global_settings
+SET enabled = true,
+    updated_at = now()
+WHERE id = 1
+  AND EXISTS (
+      SELECT 1
+      FROM migrated_legacy_email_rules
+      WHERE enabled
+  );
+
+INSERT INTO public.api_endpoints (
+    id, path, method, name, description, api_group, is_auto,
+    created_at, updated_at, is_user_modified
+) VALUES
+    ('28f6be65-1db8-4e1a-979a-3d214617fb01', '/api/v1/admin/notification/email/test', 'POST', 'POST /api/v1/admin/notification/email/test', '发送 SMTP 通道测试邮件', 'notification', true, now(), now(), false),
+    ('28f6be65-1db8-4e1a-979a-3d214617fb02', '/api/v1/alarms/email-settings', 'GET', 'GET /api/v1/alarms/email-settings', '查询告警邮件全局设置', 'alarms', true, now(), now(), false),
+    ('28f6be65-1db8-4e1a-979a-3d214617fb03', '/api/v1/alarms/email-settings', 'PUT', 'PUT /api/v1/alarms/email-settings', '更新告警邮件全局设置', 'alarms', true, now(), now(), false),
+    ('28f6be65-1db8-4e1a-979a-3d214617fb04', '/api/v1/alarms/email-subscriptions', 'GET', 'GET /api/v1/alarms/email-subscriptions', '查询告警邮件订阅', 'alarms', true, now(), now(), false),
+    ('28f6be65-1db8-4e1a-979a-3d214617fb05', '/api/v1/alarms/email-subscriptions', 'POST', 'POST /api/v1/alarms/email-subscriptions', '创建告警邮件订阅', 'alarms', true, now(), now(), false),
+    ('28f6be65-1db8-4e1a-979a-3d214617fb06', '/api/v1/alarms/email-subscriptions/:id', 'PUT', 'PUT /api/v1/alarms/email-subscriptions/:id', '更新告警邮件订阅', 'alarms', true, now(), now(), false),
+    ('28f6be65-1db8-4e1a-979a-3d214617fb07', '/api/v1/alarms/email-subscriptions/:id', 'DELETE', 'DELETE /api/v1/alarms/email-subscriptions/:id', '删除告警邮件订阅', 'alarms', true, now(), now(), false),
+    ('28f6be65-1db8-4e1a-979a-3d214617fb08', '/api/v1/notifications/email-runs', 'GET', 'GET /api/v1/notifications/email-runs', '查询邮件业务发送记录', 'notifications', true, now(), now(), false),
+    ('28f6be65-1db8-4e1a-979a-3d214617fb09', '/api/v1/notifications/email-runs/:business/:id/deliveries', 'GET', 'GET /api/v1/notifications/email-runs/:business/:id/deliveries', '查询逐收件人投递明细', 'notifications', true, now(), now(), false)
+ON CONFLICT DO NOTHING;
+
+-- Keep the built-in role compatibility contract used by the main baseline:
+-- admin/operator receive registered APIs; viewer receives read-only APIs.
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT role_id, endpoint.id
+FROM (
+    VALUES
+        ('10000000-0000-0000-0000-000000000001'::uuid),
+        ('10000000-0000-0000-0000-000000000002'::uuid)
+) AS built_in_roles(role_id)
+CROSS JOIN public.api_endpoints AS endpoint
+WHERE endpoint.path IN (
+    '/api/v1/admin/notification/email/test',
+    '/api/v1/alarms/email-settings',
+    '/api/v1/alarms/email-subscriptions',
+    '/api/v1/alarms/email-subscriptions/:id',
+    '/api/v1/notifications/email-runs',
+    '/api/v1/notifications/email-runs/:business/:id/deliveries'
+)
+ON CONFLICT (role_id, endpoint_id) DO NOTHING;
+
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT '10000000-0000-0000-0000-000000000003'::uuid, endpoint.id
+FROM public.api_endpoints AS endpoint
+WHERE endpoint.method = 'GET'
+  AND endpoint.path IN (
+      '/api/v1/alarms/email-settings',
+      '/api/v1/alarms/email-subscriptions',
+      '/api/v1/notifications/email-runs',
+      '/api/v1/notifications/email-runs/:business/:id/deliveries'
+  )
+ON CONFLICT (role_id, endpoint_id) DO NOTHING;
+
+-- Alarm email is a business configuration page under Alarm Management. Sender
+-- account and SMTP transport remain under System Settings.
+INSERT INTO public.menus (
+    id, name, type, permission_key, parent_id, sort_order, route_path,
+    component_path, icon, show_status, status, name_i18n
+) VALUES (
+    'aaaa0011-1000-0000-0000-000000000004',
+	'告警邮件订阅',
+    'menu',
+    'alarm:email-subscriptions',
+    '11111111-1111-1111-1111-111111111105',
+    5,
+    '/alarm/email-subscriptions',
+    'alarm/AlarmEmailSubscriptions',
+    'MailOutlined',
+    'show',
+    'normal',
+	'{"en-US":"Alarm Email Subscriptions","zh-CN":"告警邮件订阅"}'::jsonb
+)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    permission_key = EXCLUDED.permission_key,
+    parent_id = EXCLUDED.parent_id,
+    sort_order = EXCLUDED.sort_order,
+    route_path = EXCLUDED.route_path,
+    component_path = EXCLUDED.component_path,
+    icon = EXCLUDED.icon,
+    show_status = EXCLUDED.show_status,
+    status = EXCLUDED.status,
+    name_i18n = EXCLUDED.name_i18n,
+    updated_at = NOW();
+
+INSERT INTO public.role_menus (role_id, menu_id)
+VALUES
+    ('10000000-0000-0000-0000-000000000001', 'aaaa0011-1000-0000-0000-000000000004'),
+    ('10000000-0000-0000-0000-000000000002', 'aaaa0011-1000-0000-0000-000000000004')
+ON CONFLICT (role_id, menu_id) DO NOTHING;
+
 -- GIS 电子围栏按钮权限。系统开关决定入口是否存在；这两个权限只决定
 -- 已开启时谁可以查看、谁可以执行配置变更。
--- +omcgo MainReconcileBegin
 INSERT INTO public.menus (
     id, name, type, permission_key, parent_id, sort_order, route_path,
     component_path, icon, show_status, status, name_i18n

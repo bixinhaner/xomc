@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { App, Button, Card, Space, Switch, Tag, Typography, message } from 'antd';
+import { App, Button, Card, Space, Switch, Tag, Tooltip, Typography, message } from 'antd';
 import {
   CheckCircleOutlined,
   DeleteOutlined,
@@ -27,8 +27,10 @@ const RULE_TYPE_CONFIG: Record<string, { label: string; color: string }> = {
   auto_acknowledge: { label: 'alarm.ruleType.autoConfirm', color: 'green' },
   auto_clear: { label: 'alarm.ruleType.autoClear', color: 'orange' },
   notify_webhook: { label: 'alarm.ruleType.notifyWebhook', color: 'purple' },
-  notify_email: { label: 'alarm.ruleType.notifyEmail', color: 'cyan' },
+  notify_email: { label: 'alarm.ruleType.notifyEmailRetired', color: 'default' },
 };
+
+const isLegacyEmailRule = (rule: AlarmRule): boolean => rule.ruleType === 'notify_email';
 
 type DrawerMode = 'add' | 'edit' | 'view';
 type AlarmRuleListParams = PageRequest & {
@@ -142,7 +144,7 @@ export default function AlarmRules() {
   const updateRule = useUpdateAlarmRule();
   const createRule = useCreateAlarmRule();
 
-  const rules: AlarmRule[] = data?.items ?? [];
+  const rules = useMemo<AlarmRule[]>(() => data?.items ?? [], [data?.items]);
   const total = data?.total ?? 0;
   const selectedRules = useMemo(
     () => rules.filter((rule) => selectedRowKeys.includes(rule.id)),
@@ -152,6 +154,10 @@ export default function AlarmRules() {
   // 启用/禁用规则
   const handleToggle = useCallback(
     async (rule: AlarmRule, checked: boolean) => {
+      if (isLegacyEmailRule(rule)) {
+        message.warning(t('alarm.legacyEmailRuleHint'));
+        return;
+      }
       setTogglingId(rule.id);
       try {
         await updateRule.mutateAsync({ id: rule.id, data: { enabled: checked } });
@@ -176,6 +182,13 @@ export default function AlarmRules() {
 
   // 打开编辑抽屉
   const handleEdit = useCallback((rule: AlarmRule) => {
+    if (isLegacyEmailRule(rule)) {
+      modal.warning({
+        title: t('common.warning'),
+        content: t('alarm.legacyEmailRuleHint'),
+      });
+      return;
+    }
     if (rule.enabled) {
       modal.warning({
         title: t('common.warning'),
@@ -252,7 +265,7 @@ export default function AlarmRules() {
         });
         return;
       }
-      if (rule.enabled) {
+      if (rule.enabled && !isLegacyEmailRule(rule)) {
         modal.warning({
           title: t('common.warning'),
           content: t('alarm.cannotDeleteEnabledRule'),
@@ -286,7 +299,7 @@ export default function AlarmRules() {
         });
         return;
       }
-      if (targetRules.some((rule) => rule.enabled)) {
+      if (targetRules.some((rule) => rule.enabled && !isLegacyEmailRule(rule))) {
         modal.warning({
           title: t('common.warning'),
           content: t('alarm.cannotDeleteEnabledRule'),
@@ -311,7 +324,11 @@ export default function AlarmRules() {
 
   const handleBatchToggle = useCallback(
     (targetEnabled: boolean) => {
-      const targetRules = rules.filter((rule) => selectedRowKeys.includes(rule.id) && rule.enabled !== targetEnabled);
+      const targetRules = rules.filter((rule) =>
+        selectedRowKeys.includes(rule.id)
+        && rule.enabled !== targetEnabled
+        && (!targetEnabled || !isLegacyEmailRule(rule))
+      );
       if (targetRules.length === 0) {
         return;
       }
@@ -341,7 +358,7 @@ export default function AlarmRules() {
         key: 'enable',
         label: t('common.enable'),
         icon: <CheckCircleOutlined />,
-        disabled: selectedRules.length === 0 || selectedRules.every((rule) => rule.enabled),
+        disabled: selectedRules.length === 0 || selectedRules.every((rule) => rule.enabled || isLegacyEmailRule(rule)),
         onClick: () => handleBatchToggle(true),
       },
       {
@@ -376,14 +393,14 @@ export default function AlarmRules() {
               <Button type="link" size="small" onClick={() => handleView(record)}>
                 {t('common.view')}
               </Button>
-              <Button type="link" size="small" disabled={record.enabled} onClick={() => handleEdit(record)}>
+              <Button type="link" size="small" disabled={record.enabled || isLegacyEmailRule(record)} onClick={() => handleEdit(record)}>
                 {t('common.edit')}
               </Button>
               <Button
                 type="link"
                 size="small"
                 danger
-                disabled={record.enabled || record.isDefault}
+                disabled={(record.enabled && !isLegacyEmailRule(record)) || record.isDefault}
                 onClick={() => handleDelete(record)}
               >
                 {t('common.delete')}
@@ -397,14 +414,21 @@ export default function AlarmRules() {
         title: t('alarm.ruleEffectiveStatus'),
         dataIndex: 'enabled',
         width: 100,
-        render: (_val, record) => (
-          <Switch
-            checked={record.enabled}
-            size="small"
-            loading={togglingId === record.id}
-            onChange={(checked) => void handleToggle(record, checked)}
-          />
-        ),
+        render: (_val, record) => {
+          const legacy = isLegacyEmailRule(record);
+          const toggle = (
+            <Switch
+              checked={legacy ? false : record.enabled}
+              disabled={legacy}
+              size="small"
+              loading={togglingId === record.id}
+              onChange={(checked) => void handleToggle(record, checked)}
+            />
+          );
+          return legacy
+            ? <Tooltip title={t('alarm.legacyEmailRuleHint')}><span>{toggle}</span></Tooltip>
+            : toggle;
+        },
       },
       {
         key: 'ruleName',
@@ -446,11 +470,14 @@ export default function AlarmRules() {
         render: (val: unknown) => {
           const s = String(val ?? '');
           const config = RULE_TYPE_CONFIG[s];
-          return (
+          const tag = (
             <Tag color={config?.color || 'default'}>
               {config ? t(config.label) : s}
             </Tag>
           );
+          return s === 'notify_email'
+            ? <Tooltip title={t('alarm.legacyEmailRuleHint')}>{tag}</Tooltip>
+            : tag;
         },
       },
       {

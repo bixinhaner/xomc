@@ -24,15 +24,14 @@ type alarmDefLookup interface {
 
 // FilterEngine 告警过滤引擎，根据告警过滤规则处理入站告警。
 type FilterEngine struct {
-	filterRepo      AlarmFilterRuleRepository
-	store           AlarmStore
-	dispatcher      WebhookDispatcher
-	deadLetterRepo  DeadLetterRepository
+	filterRepo          AlarmFilterRuleRepository
+	store               AlarmStore
+	dispatcher          WebhookDispatcher
+	deadLetterRepo      DeadLetterRepository
 	deviceGroupResolver DeviceGroupResolver
-	alarmDefs       alarmDefLookup
-	metrics         *WebhookMetrics
-	emailDispatcher EmailDispatcher
-	logger          *zap.Logger
+	alarmDefs           alarmDefLookup
+	metrics             *WebhookMetrics
+	logger              *zap.Logger
 }
 
 // NewFilterEngine 创建告警过滤引擎。
@@ -56,26 +55,13 @@ func NewFilterEngine(
 		logger = zap.NewNop()
 	}
 	return &FilterEngine{
-		filterRepo:      filterRepo,
-		store:           store,
-		dispatcher:      dispatcher,
-		deadLetterRepo:  deadLetterRepo,
-		metrics:         metrics,
-		emailDispatcher: noopEmailDispatcher{}, // 默认 noop；DI 后通过 SetEmailDispatcher 切换
-		logger:          logger,
+		filterRepo:     filterRepo,
+		store:          store,
+		dispatcher:     dispatcher,
+		deadLetterRepo: deadLetterRepo,
+		metrics:        metrics,
+		logger:         logger,
 	}
-}
-
-// SetEmailDispatcher 注入邮件派发器（W2.A.1/T-0007 整合）。
-//
-// 与 WebhookDispatcher 走构造函数参数不同，邮件 dispatcher 用 setter 是因为
-// SMTP 配置依赖运行时（OMC_SMTP_*  env），DI 装配晚于 NewFilterEngine 调用，
-// 也方便既有测试零改保持向后兼容。dispatcher == nil 时回退到 noopEmailDispatcher。
-func (e *FilterEngine) SetEmailDispatcher(dispatcher EmailDispatcher) {
-	if dispatcher == nil {
-		dispatcher = noopEmailDispatcher{}
-	}
-	e.emailDispatcher = dispatcher
 }
 
 // SetDeviceGroupResolver injects the resolver used by device_group filter rules.
@@ -244,8 +230,11 @@ func (e *FilterEngine) executeAction(ctx context.Context, alarm *model.Alarm, ru
 		return &ProcessResult{Handled: true, Action: FilterActionNotifyWebhook}, nil
 
 	case FilterActionNotifyEmail:
-		e.dispatchEmail(ctx, alarm, rule)
-		// 与 webhook 一致：rule 命中即视为已处理，dispatch 失败仅在 emailDispatcher 内部记 metric
+		// 旧同步动作只保留为可读兼容值，不再执行发送。新的订阅任务统一
+		// 负责聚合、权限复核、失败重试和投递记录，避免同一告警重复发信。
+		e.logger.Warn("legacy notify_email action skipped; migrate to alarm email subscription",
+			zap.String("rule_name", rule.Name),
+			zap.String("alarm_identifier", alarm.AlarmIdentifier))
 		return &ProcessResult{Handled: true, Action: FilterActionNotifyEmail}, nil
 
 	default:
@@ -335,68 +324,6 @@ func (e *FilterEngine) dispatchWebhook(ctx context.Context, alarm *model.Alarm, 
 		zap.String("webhook_url", *rule.WebhookURL))
 }
 
-// dispatchEmail 构建告警邮件并交给 emailDispatcher 发送（W2.A.1/T-0007 整合）。
-//
-// emailDispatcher 内部已实现 timeout + metrics（success/failure/timeout）。
-// 这里负责：
-//   - skipped 路径：rule.EmailRecipients 为空 → 仅记日志（DB 列允许 NULL，但 action=notify_email 时应非空，应用层校验由 handler 层负责）；
-//   - dispatch 失败：仅记日志，不阻塞；rule 命中视为已处理（与 dispatchWebhook 风格一致）。
-func (e *FilterEngine) dispatchEmail(ctx context.Context, alarm *model.Alarm, rule *AlarmFilterRule) {
-	if len(rule.EmailRecipients) == 0 {
-		e.logger.Warn("notify_email rule missing recipients",
-			zap.String("rule_name", rule.Name),
-			zap.String("alarm_identifier", alarm.AlarmIdentifier))
-		return
-	}
-
-	subject := buildEmailSubject(alarm)
-	body := buildEmailBody(alarm)
-
-	if err := e.emailDispatcher.Dispatch(ctx, rule.EmailRecipients, subject, body); err != nil {
-		e.logger.Warn("email dispatch returned error",
-			zap.String("rule_name", rule.Name),
-			zap.String("alarm_identifier", alarm.AlarmIdentifier),
-			zap.Strings("to", rule.EmailRecipients),
-			zap.Error(err))
-		return
-	}
-
-	e.logger.Info("alarm notify_email dispatched",
-		zap.String("rule_name", rule.Name),
-		zap.String("alarm_identifier", alarm.AlarmIdentifier),
-		zap.Strings("to", rule.EmailRecipients))
-}
-
-// buildEmailSubject 拼最小可用的邮件标题。模板化由 T-0043 通知模板/历史 UI 任务接管。
-func buildEmailSubject(alarm *model.Alarm) string {
-	host := alarm.DeviceSN
-	if host == "" {
-		host = alarm.DeviceID.String()
-	}
-	return fmt.Sprintf("[OMC告警-Sev%d] %s on %s", int(alarm.Severity), alarm.AlarmIdentifier, host)
-}
-
-// buildEmailBody 拼纯文本邮件正文。字段集合与 webhookPayload 一致。
-func buildEmailBody(alarm *model.Alarm) string {
-	var sb strings.Builder
-	sb.WriteString("OMC 告警通知\n\n")
-	sb.WriteString(fmt.Sprintf("告警标识: %s\n", alarm.AlarmIdentifier))
-	sb.WriteString(fmt.Sprintf("严重等级: %d\n", int(alarm.Severity)))
-	if alarm.AlarmSource != nil && *alarm.AlarmSource != "" {
-		sb.WriteString(fmt.Sprintf("告警源: %s\n", *alarm.AlarmSource))
-	}
-	sb.WriteString(fmt.Sprintf("设备 ID: %s\n", alarm.DeviceID.String()))
-	if alarm.DeviceSN != "" {
-		sb.WriteString(fmt.Sprintf("设备 SN: %s\n", alarm.DeviceSN))
-	}
-	sb.WriteString(fmt.Sprintf("发生时间: %s\n", alarm.RaisedAt.Format(time.RFC3339)))
-	sb.WriteString(fmt.Sprintf("当前状态: %s\n", alarm.Status))
-	if alarm.ProbableCause != nil && *alarm.ProbableCause != "" {
-		sb.WriteString(fmt.Sprintf("可能原因: %s\n", *alarm.ProbableCause))
-	}
-	return sb.String()
-}
-
 // webhookPayload 是当前的 alarm webhook 负载结构。
 // 后续任务（用户可配模板）将此结构作为默认模板的字段集。
 type webhookPayload struct {
@@ -430,7 +357,7 @@ func buildWebhookPayload(alarm *model.Alarm) webhookPayload {
 
 // enrichFromLibrary 从告警字典（alarm_definitions）按请求 locale 补全告警信息（issue #67）。
 //
-// 补全规则（以 ctx locale 选 cn/en 列，COALESCE(NULLIF(en,''),cn) 退化）：
+// 补全规则（以 ctx locale 选 cn/en 列，COALESCE(NULLIF(en,”),cn) 退化）：
 //   - Description（告警名）：字典命中则用字典本地化名覆盖；命中失败（unknown identifier）
 //     保留设备上报原文，绝不置空。
 //   - ProbableCause（可能原因）：设备未上报时用字典本地化 probable_cause 补；设备已上报则尊重原文。
@@ -467,9 +394,10 @@ func (e *FilterEngine) enrichFromLibrary(ctx context.Context, alarm *model.Alarm
 	}
 }
 
-// localizedName 按 locale 在中/英文之间取值，并做 COALESCE(NULLIF(en,''),cn) 式退化：
+// localizedName 按 locale 在中/英文之间取值，并做 COALESCE(NULLIF(en,”),cn) 式退化：
 //   - en-US：优先英文，英文空则回退中文；
 //   - 其它（含 zh-CN / 缺省）：优先中文，中文空则回退英文。
+//
 // 两者皆空返回空串，调用方据此决定是否保留原文。
 func localizedName(loc appcontext.Locale, cn, en string) string {
 	if loc == appcontext.LocaleEN {

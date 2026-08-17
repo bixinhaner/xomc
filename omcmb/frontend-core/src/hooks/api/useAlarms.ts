@@ -223,6 +223,53 @@ export function useToggleAlarmRule() {
   });
 }
 
+export function useAlarmEmailSetting() {
+  return useQuery({
+    queryKey: ['alarms', 'email-setting'],
+    queryFn: () => api.getAlarmEmailSetting(),
+  });
+}
+
+export function useUpdateAlarmEmailSetting() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.updateAlarmEmailSetting,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alarms', 'email-setting'] }),
+  });
+}
+
+export function useAlarmEmailSubscriptions() {
+  return useQuery({
+    queryKey: ['alarms', 'email-subscriptions'],
+    queryFn: () => api.getAlarmEmailSubscriptions(),
+  });
+}
+
+export function useCreateAlarmEmailSubscription() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.createAlarmEmailSubscription,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alarms', 'email-subscriptions'] }),
+  });
+}
+
+export function useUpdateAlarmEmailSubscription() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Parameters<typeof api.updateAlarmEmailSubscription>[1] }) =>
+      api.updateAlarmEmailSubscription(id, input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alarms', 'email-subscriptions'] }),
+  });
+}
+
+export function useDeleteAlarmEmailSubscription() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteAlarmEmailSubscription,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alarms', 'email-subscriptions'] }),
+  });
+}
+
 // T-0098-P5-06：旧 useAlarmLibraries / useCreate|Update|DeleteAlarmLibrary 已下线，
 // 治理 hook 走 useAlarmDefinitions（@core/hooks/api/useAlarmDefinitions）。
 

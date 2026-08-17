@@ -100,6 +100,36 @@ interface BackendAlarmRule {
   updated_at: string;
 }
 
+export interface AlarmEmailGlobalSetting {
+  enabled: boolean;
+  default_recipients: string[];
+  updated_at?: string;
+}
+
+export interface AlarmEmailSubscription {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  interval_minutes: 0 | 10 | 30 | 60;
+  tolerance_minutes: 0 | 10 | 30 | 60;
+  recipients: string[];
+  include_default_recipients: boolean;
+  alarm_identifiers: string[];
+  severities: number[];
+  alarm_sources: string[];
+  event_types: string[];
+  device_ids: string[];
+  device_group_ids: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type AlarmEmailSubscriptionInput = Omit<
+  AlarmEmailSubscription,
+  'id' | 'created_at' | 'updated_at'
+>;
+
 // ---------------------------------------------------------------------------
 // Severity helpers
 // ---------------------------------------------------------------------------
@@ -631,6 +661,35 @@ export const alarmApi = {
       `/alarms/alarm-filters/${id}/toggle`
     );
     return mapBackendAlarmRule(updated);
+  },
+
+  async getAlarmEmailSetting(): Promise<AlarmEmailGlobalSetting> {
+    const { data } = await http.get<AlarmEmailGlobalSetting>('/alarms/email-settings');
+    return data;
+  },
+
+  async updateAlarmEmailSetting(setting: AlarmEmailGlobalSetting): Promise<AlarmEmailGlobalSetting> {
+    const { data } = await http.put<AlarmEmailGlobalSetting>('/alarms/email-settings', setting);
+    return data;
+  },
+
+  async getAlarmEmailSubscriptions(): Promise<AlarmEmailSubscription[]> {
+    const { data } = await http.get<{ items: AlarmEmailSubscription[] }>('/alarms/email-subscriptions');
+    return data.items ?? [];
+  },
+
+  async createAlarmEmailSubscription(input: AlarmEmailSubscriptionInput): Promise<AlarmEmailSubscription> {
+    const { data } = await http.post<AlarmEmailSubscription>('/alarms/email-subscriptions', input);
+    return data;
+  },
+
+  async updateAlarmEmailSubscription(id: string, input: AlarmEmailSubscriptionInput): Promise<AlarmEmailSubscription> {
+    const { data } = await http.put<AlarmEmailSubscription>(`/alarms/email-subscriptions/${id}`, input);
+    return data;
+  },
+
+  async deleteAlarmEmailSubscription(id: string): Promise<void> {
+    await http.delete(`/alarms/email-subscriptions/${id}`);
   },
 
   // T-0098-P5-06：旧 /alarms/alarm-libraries 接口已下线，治理走 alarmDefinitionApi（/alarms/alarm-definitions）。

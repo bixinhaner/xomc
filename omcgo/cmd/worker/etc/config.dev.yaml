@@ -127,6 +127,18 @@ pm:
 # worker 端不再需要 mr 配置段。Collector（mr.file.received → 解析）仍在 worker，
 # 它本身不读 mr.* 配置。
 
+notification:
+  smtp:
+    enabled: false
+    host: ""
+    port: 25
+    security_mode: "none"
+    auth_enabled: false
+    username: ""
+    password: ""
+    from: "omc-alert@example.com"
+    timeout: 10s
+
 metrics:
   port: 9092
   # pprof 性能剖析（默认关）。排查 CPU/内存时改 enabled: true 并重启 worker，

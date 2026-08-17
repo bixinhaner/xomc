@@ -25,6 +25,7 @@ var secretSysConfigs = map[validatorKey]struct{}{
 	{Category: "agent", Key: "agent_studio_service_token"}: {},
 	{Category: "acs_transfer", Key: "uploadPassword"}:      {},
 	{Category: "acs_transfer", Key: "downloadPassword"}:    {},
+	{Category: "notification.email", Key: "password"}:      {},
 }
 
 func isPublicSysConfig(category, key string) bool {
@@ -38,7 +39,8 @@ func isSecretSysConfig(category, key string) bool {
 }
 
 func isPreserveOnBlankSecret(category, key string) bool {
-	return category == "acs_transfer" && (key == "uploadPassword" || key == "downloadPassword")
+	return (category == "acs_transfer" && (key == "uploadPassword" || key == "downloadPassword")) ||
+		(category == "notification.email" && key == "password")
 }
 
 func preserveBlankSecrets(category string, items []BatchItem) []BatchItem {

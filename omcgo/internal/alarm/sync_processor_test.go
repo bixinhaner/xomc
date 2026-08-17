@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/alarm/definition"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/stretchr/testify/assert"
@@ -51,6 +52,37 @@ func TestProcessSync_BackfillsDeviceFieldsForAddedAlarm(t *testing.T) {
 	require.NotNil(t, alarm.Technology)
 	assert.Equal(t, string(model.TechLTE), *alarm.Technology)
 	assert.Equal(t, model.CarrierCode("cmcc"), alarm.Carrier)
+}
+
+func TestProcessSync_PublishesDedicatedEmailRaisedEventForAddedAlarm(t *testing.T) {
+	store := newMockAlarmStore()
+	bus := &recordingAlarmEmailEventBus{}
+	engine := NewAlarmEngine(store, nil, nil, bus, zap.NewNop())
+	processor := NewAlarmSyncProcessor(engine, store, nil, bus, zap.NewNop()).WithDeviceReader(&rcvMockDeviceReader{
+		deviceBySN: map[string]*model.Device{
+			"SN-SYNC-EMAIL": {
+				ID:           uuid.New(),
+				SerialNumber: "SN-SYNC-EMAIL",
+				Carrier:      model.CarrierCode("cmcc"),
+				Technology:   model.TechLTE,
+			},
+		},
+	})
+
+	params := []tr069.ParameterValueStruct{
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.AlarmIdentifier", Value: "11500"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.AlarmRaisedTime", Value: "2026-08-19T04:43:04Z"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.EventType", Value: "Equipment Alarm"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.ProbableCause", Value: "Radio frequency shutdown"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.SpecificProblem", Value: "Radio frequency shutdown"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.PerceivedSeverity", Value: "Critical"},
+	}
+
+	result := processor.processSync(context.Background(), "SN-SYNC-EMAIL", params)
+
+	require.Equal(t, 1, result.Added)
+	require.Zero(t, result.FailedAdd)
+	assert.Equal(t, []string{event.SubjectAlarmRaised, event.SubjectAlarmEmailRaised}, bus.published)
 }
 
 func TestProcessSync_UsesExistingAlarmDeviceFieldsWhenLookupMissing(t *testing.T) {

@@ -58,6 +58,34 @@ func TestSysConfigHandler_ListRedactsSecrets(t *testing.T) {
 	assert.Equal(t, true, item["is_configured"])
 }
 
+func TestSysConfigHandler_EmailCategoryRequiresSuperAdmin(t *testing.T) {
+	repoCalled := false
+	repo := &stubSysConfigRepo{
+		listFn: func(_ context.Context, _ string, _ bool) ([]SysConfig, error) {
+			repoCalled = true
+			return nil, nil
+		},
+	}
+	r := newSysConfigTestRouter(repo)
+	req := httptest.NewRequest(http.MethodGet, "/admin/sysConfig?category=notification.email", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.False(t, repoCalled)
+
+	superRouter := gin.New()
+	superRouter.Use(func(c *gin.Context) {
+		c.Set(CtxKeyIsSuperAdmin, true)
+		c.Next()
+	})
+	NewSysConfigHandler(NewSysConfigService(repo)).RegisterRoutes(superRouter.Group("/admin"))
+	w = httptest.NewRecorder()
+	superRouter.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.True(t, repoCalled)
+}
+
 func TestSysConfigHandler_GetRedactsSecrets(t *testing.T) {
 	id := uuid.New()
 	repo := &stubSysConfigRepo{
@@ -83,6 +111,28 @@ func TestSysConfigHandler_GetRedactsSecrets(t *testing.T) {
 	assert.Equal(t, "", item["value"])
 	assert.Equal(t, true, item["is_secret"])
 	assert.Equal(t, true, item["is_configured"])
+}
+
+func TestSysConfigHandler_GetEmailConfigRequiresSuperAdmin(t *testing.T) {
+	id := uuid.New()
+	repo := &stubSysConfigRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*SysConfig, error) {
+			return &SysConfig{
+				ID:       id,
+				Category: "notification.email",
+				Key:      "host",
+				Value:    "smtp.example.com",
+			}, nil
+		},
+	}
+	r := newSysConfigTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/sysConfig/"+id.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.NotContains(t, w.Body.String(), "smtp.example.com")
 }
 
 func TestSysConfigHandler_ListPublicUsesSafeDTO(t *testing.T) {

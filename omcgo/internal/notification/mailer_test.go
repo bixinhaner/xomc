@@ -88,6 +88,25 @@ func TestMailer_SendRaw_NoRecipients(t *testing.T) {
 	require.Equal(t, 0, tr.calls)
 }
 
+func TestMailer_SendRawRecorded_StopsWhenHistoryInsertFails(t *testing.T) {
+	t.Parallel()
+	tr := &fakeTransport{}
+	m, histRepo, _ := newTestMailer(t, tr)
+	histRepo.insertErr = errors.New("database unavailable")
+
+	err := m.SendRawRecorded(context.Background(), []string{"ops@x.com"}, "主题", "正文", nil)
+	require.ErrorContains(t, err, "record notification history")
+	require.Equal(t, 0, tr.calls)
+}
+
+func TestMaskEmailAddresses(t *testing.T) {
+	t.Parallel()
+	require.Equal(t,
+		[]string{"o***@example.com", "n***@example.com", "***"},
+		maskEmailAddresses([]string{"operator@example.com", "Name <noc@example.com>", "invalid"}),
+	)
+}
+
 func TestMailer_SendByTemplate_Success(t *testing.T) {
 	t.Parallel()
 	tr := &fakeTransport{}

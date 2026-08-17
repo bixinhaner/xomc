@@ -97,6 +97,18 @@ pm:
     # T-0182 聚合结果落库范围：true=全存（默认），false=仅存所选
     store_all_metrics: true
 
+notification:
+  smtp:
+    enabled: false
+    host: ""
+    port: 25
+    security_mode: "none"
+    auth_enabled: false
+    username: ""
+    password: ""
+    from: "omc-alert@example.com"
+    timeout: 10s
+
 metrics:
   port: 9092
 
