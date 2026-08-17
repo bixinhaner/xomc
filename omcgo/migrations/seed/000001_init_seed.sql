@@ -2703,6 +2703,8 @@ UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITO
 UPDATE public.menus SET feature_code = ARRAY['CODE_ENB_MONITOR','CODE_GNB_MONITOR','CODE_CPE_MONITOR'] WHERE id = 'aaaa0007-1000-0000-0000-000000000002';
 UPDATE public.menus SET feature_code = ARRAY['CODE_PERFORMANCE_MANAGEMENT'] WHERE id = 'aaaa0126-1000-0000-0000-000000000004';
 UPDATE public.menus SET feature_code = ARRAY['CODE_ALARM_VIEW'] WHERE id = 'aaaa0011-1000-0000-0000-000000000003';
+-- issue #311: 北向配置菜单受 license 控制（北向接口设置）；license 未含该 code 时菜单不显示
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_NORTH_INTERFACE','CODE_NINF_SNMP','CODE_NINF_SOCKET'] WHERE id = 'aaaa0120-1000-0000-0000-000000000008';
 
 
 ALTER TABLE public.menus ENABLE TRIGGER ALL;
@@ -27070,6 +27072,11 @@ VALUES
         '6d1f0b32-37ac-4e58-98e8-32a90c648ed2'
     )
 ON CONFLICT (role_id, menu_id) DO NOTHING;
+
+-- issue #311: 北向配置菜单回填 license feature_code（北向接口设置）。
+-- 放回放段：P7-A 块属 goose 一次性区域，已建库环境只有此段每次 migrate 会重放。
+UPDATE public.menus SET feature_code = ARRAY['CODE_SYSTEM_NORTH_INTERFACE','CODE_NINF_SNMP','CODE_NINF_SOCKET']
+WHERE id = 'aaaa0120-1000-0000-0000-000000000008';
 -- +omcgo MainReconcileEnd
 
 INSERT INTO public.role_menus (role_id, menu_id)

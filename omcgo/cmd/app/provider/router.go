@@ -782,7 +782,12 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	sysInfoGroup.GET("/system/info", md.sysInfoHandler.GetSystemInfo)
 
 	// ----- Northbound routes → resource "northbound" -----
-	md.nbRouter.RegisterRoutes(permGroup("northbound"))
+	// issue #311: 北向功能受 license 控制，与菜单 P7-A 闸门口径一致（OR 语义）：
+	//   System.NorthInterface（CODE_SYSTEM_NORTH_INTERFACE）/
+	//   Northbound.Snmp、Northbound.Socket（license NInfType=1 时按 northAlarmType 派生）
+	// 未授权 license 下 API 直接 403（fail-closed）。
+	md.nbRouter.RegisterRoutes(featGroup(
+		"northbound", "System.NorthInterface", "Northbound.Snmp", "Northbound.Socket"))
 
 	// ----- API Key management routes (authenticated users) -----
 	ad.apiKeyHandler.RegisterRoutes(v1)

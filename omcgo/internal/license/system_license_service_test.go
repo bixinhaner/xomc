@@ -220,25 +220,51 @@ func TestLegacyFeatureMapping_ExpandFeatureCodes(t *testing.T) {
 
 	t.Run("branch1 IDs auto-add sysList + RF_ENABLE", func(t *testing.T) {
 		// IDs 6 (ENB_MONITOR) + 40 (ALARM_VIEW): ID6 补 RF_ENABLE；sysList 默认补
-		got := mapping.ExpandFeatureCodes([]string{"6", "40"}, nil, false)
+		got := mapping.ExpandFeatureCodes([]string{"6", "40"}, nil, false, false, nil)
 		contains(got, "CODE_ENB_MONITOR", "CODE_ALARM_VIEW", "CODE_ENB_RF_ENABLE",
 			"CODE_SYSTEM_USERS", "CODE_SYSTEM_SETTINGS", "CODE_HELP_GUIDE")
 	})
 
 	t.Run("branch2 CODE_GNB auto-add gnbList", func(t *testing.T) {
-		got := mapping.ExpandFeatureCodes(nil, []string{"CODE_GNB", "CODE_DASHBOARD"}, false)
+		got := mapping.ExpandFeatureCodes(nil, []string{"CODE_GNB", "CODE_DASHBOARD"}, false, false, nil)
 		contains(got, "CODE_GNB_MONITOR", "CODE_GNB_MML", "CODE_GNB_DEVICE_REGISTER", "CODE_DASHBOARD")
 	})
 
 	t.Run("cloud strips ACCESS_CONTROL", func(t *testing.T) {
-		got := mapping.ExpandFeatureCodes(nil, []string{"CODE_ADVANCE_ACCESS_CONTROL", "CODE_DASHBOARD"}, true)
+		got := mapping.ExpandFeatureCodes(nil, []string{"CODE_ADVANCE_ACCESS_CONTROL", "CODE_DASHBOARD"}, true, false, nil)
 		contains(got, "CODE_DASHBOARD")
 		assert.NotContains(t, got, "CODE_ADVANCE_ACCESS_CONTROL")
 	})
 
 	t.Run("SELFSTART without PNP adds PNP", func(t *testing.T) {
-		got := mapping.ExpandFeatureCodes(nil, []string{"CODE_ADVANCE_SELFSTART"}, false)
+		got := mapping.ExpandFeatureCodes(nil, []string{"CODE_ADVANCE_SELFSTART"}, false, false, nil)
 		contains(got, "CODE_ADVANCE_SELFSTART", "CODE_PLUG_AND_PLAY")
+	})
+
+	t.Run("NInfType=1 时按 northAlarmType 派生 CODE_NINF_* (#311)", func(t *testing.T) {
+		got := mapping.ExpandFeatureCodes(nil, []string{"CODE_DASHBOARD"}, false, true, []string{"snmp", "socket"})
+		contains(got, "CODE_NINF_SNMP", "CODE_NINF_SOCKET", "CODE_DASHBOARD")
+
+		onlySnmp := mapping.ExpandFeatureCodes(nil, []string{"CODE_DASHBOARD"}, false, true, []string{"snmp"})
+		contains(onlySnmp, "CODE_NINF_SNMP")
+		assert.NotContains(t, onlySnmp, "CODE_NINF_SOCKET")
+
+		// NInfType=1 但 northAlarmType 为空：两个协议都未指定，均不派生
+		noTypes := mapping.ExpandFeatureCodes(nil, []string{"CODE_DASHBOARD"}, false, true, nil)
+		assert.NotContains(t, noTypes, "CODE_NINF_SNMP")
+		assert.NotContains(t, noTypes, "CODE_NINF_SOCKET")
+	})
+
+	t.Run("NInfType=0 时 northAlarmType 有值也不派生 (#311 回归)", func(t *testing.T) {
+		// 真实场景：未购北向的 license 也会带协议偏好字段（如 northAlarmType=socket），
+		// 授权只看总开关 NInfType。
+		got := mapping.ExpandFeatureCodes(nil, []string{"CODE_DASHBOARD"}, false, false, []string{"socket"})
+		assert.NotContains(t, got, "CODE_NINF_SNMP")
+		assert.NotContains(t, got, "CODE_NINF_SOCKET")
+
+		none := mapping.ExpandFeatureCodes(nil, []string{"CODE_DASHBOARD"}, false, false, nil)
+		assert.NotContains(t, none, "CODE_NINF_SNMP")
+		assert.NotContains(t, none, "CODE_NINF_SOCKET")
 	})
 }
 
@@ -290,6 +316,69 @@ func TestSystemLicenseService_FilterAuthorized(t *testing.T) {
 		auth, err := svc.FilterAuthorized(context.Background(), []string{"CODE_ENB_MONITOR"})
 		require.NoError(t, err)
 		assert.Equal(t, []string{"CODE_ENB_MONITOR"}, auth)
+	})
+	t.Run("license without north code → 北向菜单/接口不授权 (#311)", func(t *testing.T) {
+		repo := &mockSystemLicenseRepo{current: &SystemLicense{
+			LicenseID:   "LIC-NO-NORTH",
+			LicenseType: SystemLicenseTypeCommercial,
+			// 覆盖系统基础功能但不含 CODE_SYSTEM_NORTH_INTERFACE 的 license
+			FeatureList: FeatureList(`{"legacy_feature_codes":["CODE_SYSTEM_SETTINGS","CODE_SYSTEM_LOGS_OPERATION","CODE_ENB_MONITOR"]}`),
+			IsCurrent:   true,
+		}}
+		svc := newTestSystemLicenseService(repo)
+		svc.SetLegacyFeatureMapping(mapping)
+
+		auth, err := svc.FilterAuthorized(context.Background(),
+			[]string{"CODE_SYSTEM_NORTH_INTERFACE", "CODE_SYSTEM_SETTINGS"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"CODE_SYSTEM_SETTINGS"}, auth,
+			"north menu feature_code must stay unauthorized when license has no north code")
+
+		ok, err := svc.CheckFeature(context.Background(), "System.NorthInterface")
+		require.NoError(t, err)
+		assert.False(t, ok, "northbound API RequireFeature path must be denied")
+	})
+	t.Run("license with north code → 北向授权 (#311)", func(t *testing.T) {
+		repo := &mockSystemLicenseRepo{current: &SystemLicense{
+			LicenseID:   "LIC-NORTH",
+			LicenseType: SystemLicenseTypeCommercial,
+			FeatureList: FeatureList(`{"legacy_feature_codes":["CODE_SYSTEM_NORTH_INTERFACE"]}`),
+			IsCurrent:   true,
+		}}
+		svc := newTestSystemLicenseService(repo)
+		svc.SetLegacyFeatureMapping(mapping)
+
+		auth, err := svc.FilterAuthorized(context.Background(), []string{"CODE_SYSTEM_NORTH_INTERFACE"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"CODE_SYSTEM_NORTH_INTERFACE"}, auth)
+
+		ok, err := svc.CheckFeature(context.Background(), "System.NorthInterface")
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+	t.Run("license with northAlarmType → NINF 授权北向 (#311)", func(t *testing.T) {
+		// 真实北向 license：extra.northAlarmType="snmp,socket" 在上传时被 ExpandFeatureCodes
+		// 展开进 legacy_feature_codes，菜单/接口凭 CODE_NINF_* 放行。
+		repo := &mockSystemLicenseRepo{current: &SystemLicense{
+			LicenseID:   "LIC-NINF",
+			LicenseType: SystemLicenseTypeCommercial,
+			FeatureList: FeatureList(`{"legacy_feature_codes":["CODE_DASHBOARD","CODE_NINF_SNMP","CODE_NINF_SOCKET"]}`),
+			IsCurrent:   true,
+		}}
+		svc := newTestSystemLicenseService(repo)
+		svc.SetLegacyFeatureMapping(mapping)
+
+		auth, err := svc.FilterAuthorized(context.Background(),
+			[]string{"CODE_SYSTEM_NORTH_INTERFACE", "CODE_NINF_SNMP", "CODE_NINF_SOCKET"})
+		require.NoError(t, err)
+		sort.Strings(auth)
+		assert.Equal(t, []string{"CODE_NINF_SNMP", "CODE_NINF_SOCKET"}, auth)
+
+		for _, path := range []string{"Northbound.Snmp", "Northbound.Socket"} {
+			ok, err := svc.CheckFeature(context.Background(), path)
+			require.NoError(t, err)
+			assert.True(t, ok, "path %s must be authorized", path)
+		}
 	})
 	t.Run("expired license → authorize nothing (#310)", func(t *testing.T) {
 		past := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
