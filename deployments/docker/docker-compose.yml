@@ -679,8 +679,10 @@ services:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      # 与 release 包 monitoring 栈同款预算（对齐 loki/tempo）：负载尖峰下探针可能
+      # 连续超时，预算过紧会把正常启动误判为 unhealthy 并拖死 grafana/otelcol 依赖。
+      retries: 10
+      start_period: 30s
 
   alertmanager:
     image: prom/alertmanager:v0.27.0

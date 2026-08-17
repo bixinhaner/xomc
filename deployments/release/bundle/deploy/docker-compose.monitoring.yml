@@ -60,8 +60,12 @@ services:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      # 预算对齐 loki/tempo（start_period 30s + retries 10）：升级窗口 10 个监控容器
+      # 同时 --force-recreate 叠加 cadvisor 启动抖动，宿主负载尖峰下 5s 的 wget 探针
+      # 可能连续超时；预算过紧会把正常启动误判为 unhealthy，连锁拖死 grafana/otelcol
+      # 依赖并使 install 中止（线上事故：prometheus 实际 16s 就绪却被判死）。
+      retries: 10
+      start_period: 30s
     networks:
       - omcgo-net
 

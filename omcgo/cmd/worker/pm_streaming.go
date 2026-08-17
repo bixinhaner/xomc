@@ -115,29 +115,49 @@ func startPMAggregationStream(ctx context.Context, w *workerInfra, tz *tzManager
 		zap.String("timezone", locationProvider().String()))
 	matcher := pmstream.NewMatcherWithLocationProvider(locationProvider)
 	windowRepo := pmstream.NewWindowRepository(w.TsPool)
+	// 大数据升级时下面四步（元数据回填 / 活跃窗口恢复 / 补建两个索引）是启动期
+	// 最重的一段，每步都可能分钟~小时级；逐步打耗时让"还在推进"可见，避免静默
+	// 长跑被误判为卡死（且此时 metrics/healthz 已提前启动，探活不受影响）。
+	backfillStart := time.Now()
 	if err := windowRepo.BackfillVersionMetadata(ctx, snapshot.Current()); err != nil {
-		logger.Error("backfill PM aggregation window version metadata", zap.Error(err))
+		logger.Error("backfill PM aggregation window version metadata",
+			zap.Duration("duration", time.Since(backfillStart)), zap.Error(err))
 		return
 	}
+	logger.Info("PM aggregation window version metadata backfill completed",
+		zap.Duration("duration", time.Since(backfillStart)))
 	finalizer := pmstream.NewFinalizer(windowRepo, store, logger).
 		SetConcurrency(cfg.FinalizeConcurrency).
 		SetSnapshot(snapshot).
 		SetLocationProvider(locationProvider).
 		SetMetrics(streamMetrics)
 	recovery := pmstream.NewRecovery(w.NATS.JS, windowRepo, store, snapshot, matcher, logger)
+	restoreStart := time.Now()
 	if err := recovery.RestoreActiveWindows(ctx); err != nil {
-		logger.Error("restore active PM aggregation windows", zap.Error(err))
+		logger.Error("restore active PM aggregation windows",
+			zap.Duration("duration", time.Since(restoreStart)), zap.Error(err))
+	} else {
+		logger.Info("active PM aggregation windows restored",
+			zap.Duration("duration", time.Since(restoreStart)))
 	}
 	outboxRepo := pmstream.NewOutboxRepository(w.TsPool)
 	rollupOutboxRepo := pmstream.NewRollupOutboxRepository(w.TsPool)
+	rebuildIndexStart := time.Now()
 	if err := rollupOutboxRepo.EnsurePeriodRebuildIndex(ctx); err != nil {
-		logger.Error("ensure PM rollup period rebuild index", zap.Error(err))
+		logger.Error("ensure PM rollup period rebuild index",
+			zap.Duration("duration", time.Since(rebuildIndexStart)), zap.Error(err))
 		return
 	}
+	logger.Info("PM rollup period rebuild index ensured",
+		zap.Duration("duration", time.Since(rebuildIndexStart)))
+	cleanupIndexStart := time.Now()
 	if err := rollupOutboxRepo.EnsureRevisionCleanupIndexes(ctx); err != nil {
-		logger.Error("ensure PM rollup revision cleanup indexes", zap.Error(err))
+		logger.Error("ensure PM rollup revision cleanup indexes",
+			zap.Duration("duration", time.Since(cleanupIndexStart)), zap.Error(err))
 		return
 	}
+	logger.Info("PM rollup revision cleanup indexes ensured",
+		zap.Duration("duration", time.Since(cleanupIndexStart)))
 	rebuildRepo := pmstream.NewRebuildRepository(w.TsPool)
 	consumer := pmstream.NewConsumer(
 		w.EventBus, snapshot, matcher, windowRepo, store, finalizer, logger,
