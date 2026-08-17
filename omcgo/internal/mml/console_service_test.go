@@ -453,6 +453,58 @@ func TestBuildGroupTreeFilteredByDeviceKeepsSupportedLTEBackedCommandsForNRProdu
 	assert.Equal(t, nrCommand.ID, got[0].Commands[3].ID)
 }
 
+func TestBuildGroupTreeFilteredByDeviceMovesAMFStatusOutOfLTEGroupForNRProduct(t *testing.T) {
+	lteAccess := GroupTreeCommand{
+		ID:            uuid.New(),
+		CommandCode:   "LST STD_TRPATH_G08",
+		OperationType: "LST",
+		LogicalName:   "查询 LTE接入CA/RAN",
+	}
+	lteAccess.SetTargetPathsRaw([]byte(`[
+		"Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount"
+	]`))
+	nrStatus := GroupTreeCommand{
+		ID:            uuid.New(),
+		CommandCode:   "LST SF_NR_SJ_SUB_04",
+		OperationType: "LST",
+		LogicalName:   "查询 小区状态参数",
+	}
+	nrStatus.SetTargetPathsRaw([]byte(`[
+		"Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.OpState",
+		"Device.Services.FAPService.{i}.AmfsStatus"
+	]`))
+
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandEnriched[lteAccess.ID] = []MMLCommandSubFieldEnriched{{
+		Tr069Path: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount",
+	}}
+	sfRepo.byCommandEnriched[nrStatus.ID] = []MMLCommandSubFieldEnriched{
+		{Tr069Path: "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.OpState"},
+		{Tr069Path: "Device.Services.FAPService.{i}.AmfsStatus"},
+	}
+	svc := NewConsoleService(&fakeGroupTreeRepo{tree: []GroupTreeNode{
+		{ID: uuid.New(), GroupCode: "MML_STD_TRPATH_G08", Commands: []GroupTreeCommand{lteAccess}},
+		{ID: uuid.New(), GroupCode: "SF_NR_SJ_SUB_04", Commands: []GroupTreeCommand{nrStatus}},
+	}}, sfRepo, newFakeCommandRepo(), nil)
+	svc.SetDeviceSupportedPathsResolver(func(context.Context, string) (*SupportedSet, error) {
+		return &SupportedSet{
+			ProductTech:     "nr",
+			ProductResolved: true,
+			Paths: map[string]struct{}{
+				"Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.OpState": {},
+				"Device.Services.FAPService.{i}.AmfsStatus":                    {},
+			},
+		}, nil
+	})
+
+	got, err := svc.BuildGroupTreeFilteredByDevice(context.Background(), "", "zh-CN", "SN-NR")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "SF_NR_SJ_SUB_04", got[0].GroupCode)
+	require.Len(t, got[0].Commands, 1)
+	assert.Equal(t, nrStatus.ID, got[0].Commands[0].ID)
+}
+
 func TestBuildFlatGroupTreeFilteredByDeviceUsesSupportedPaths(t *testing.T) {
 	commandA := FlatCommand{ID: uuid.New(), Name: "LST A", ObjectPath: []string{"Device.A"}}
 	commandB := FlatCommand{ID: uuid.New(), Name: "LST B", ObjectPath: []string{"Device.B"}}

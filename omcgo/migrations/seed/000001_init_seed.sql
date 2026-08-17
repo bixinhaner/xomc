@@ -17686,6 +17686,7 @@ WITH wanted(command_code, mml_code, label_zh, standard_path, sort_order) AS (
     ('LST SF_NR_SJ_SUB_03', 'ADMINSTATE', '小区管理状态', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.CellEnable.AdminState', 1),
     ('MOD SF_NR_SJ_SUB_03', 'ADMINSTATE', '小区管理状态', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.CellEnable.AdminState', 1),
     ('LST SF_NR_SJ_SUB_04', 'OPSTATE', '小区运行状态', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.OpState', 1),
+    ('LST SF_NR_SJ_SUB_04', 'AMFSSTATUS', 'AMF状态', 'Device.Services.FAPService.{i}.AmfsStatus', 2),
     ('LST SF_NR_SJ_SUB_05', 'MULTIBANDINFOLISTSIB1', 'SIB1中多频段指示参数', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.SysInfoCtrlParam.MultiBandInfoListSIB1', 1),
     ('LST SF_NR_SJ_SUB_05', 'MULTIBANDINFOLISTSIB5', 'SIB5中多频段指示参数', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.SysInfoCtrlParam.IdleModeRATMobile.{i}.MultiBandInfoListSIB5', 2),
     ('MOD SF_NR_SJ_SUB_05', 'MULTIBANDINFOLISTSIB5', 'SIB5中多频段指示参数', 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.SysInfoCtrlParam.IdleModeRATMobile.{i}.MultiBandInfoListSIB5', 2),
@@ -18205,22 +18206,47 @@ WITH canonical(command_code, group_code, logical_zh, logical_en, command_zh, com
       ]'::jsonb
     )
 )
-UPDATE public.mml_commands c
-SET group_id = g.id,
-    command_name = canonical.command_zh,
-    command_name_i18n = jsonb_build_object('zh-CN', canonical.command_zh, 'en-US', canonical.command_en),
-    logical_name_i18n = jsonb_build_object('zh-CN', canonical.logical_zh, 'en-US', canonical.logical_en),
-    target_paths = canonical.target_paths,
-    tree_node_refs = canonical.target_paths,
-    deprecated_at = NULL,
-    updated_at = NOW()
+INSERT INTO public.mml_commands (
+    command_name, command_code, category, description, rpc_method,
+    operation_type, target_paths, tree_node_refs, group_id,
+    command_name_i18n, logical_name_i18n, require_confirm,
+    confirm_msg_i18n, source, catalog_protected, platform_tags
+)
+SELECT
+    canonical.command_zh,
+    canonical.command_code,
+    'mml-350-20260704',
+    '接口绑定分组整理：按 F1/NG 接口绑定合并展示',
+    'GetParameterValues',
+    'LST',
+    canonical.target_paths,
+    canonical.target_paths,
+    g.id,
+    jsonb_build_object('zh-CN', canonical.command_zh, 'en-US', canonical.command_en),
+    jsonb_build_object('zh-CN', canonical.logical_zh, 'en-US', canonical.logical_en),
+    false,
+    '{}'::jsonb,
+    'admin',
+    false,
+    '{}'::jsonb
 FROM canonical
 JOIN public.mml_command_groups g
   ON g.param_version = 'cmcc-td-lte-v2.3'
  AND g.group_code = canonical.group_code
  AND g.deleted_at IS NULL
-WHERE c.command_code = canonical.command_code
-  AND c.source = 'admin';
+ON CONFLICT (command_code) DO UPDATE
+SET command_name = EXCLUDED.command_name,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description,
+    rpc_method = EXCLUDED.rpc_method,
+    operation_type = EXCLUDED.operation_type,
+    target_paths = EXCLUDED.target_paths,
+    tree_node_refs = EXCLUDED.tree_node_refs,
+    group_id = EXCLUDED.group_id,
+    command_name_i18n = EXCLUDED.command_name_i18n,
+    logical_name_i18n = EXCLUDED.logical_name_i18n,
+    deprecated_at = NULL,
+    updated_at = NOW();
 
 WITH merged_fields(command_code, standard_path, mml_code, sort_order) AS (
   VALUES
@@ -24997,7 +25023,6 @@ WITH command_defs(command_code, group_code, operation_type, command_name_zh, com
             ('LST STD_TRPATH_G08', 'Device.Services.FAPService.MmePoolConfigParam.{i}.MMEIp', 1),
             ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName', 2),
             ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.AccessMgmt.LTE.MaxUEsServed', 3),
-            ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.AmfsStatus', 4),
             ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse', 5),
             ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CA.CaEnable', 6),
             ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CA.PARAMS.CARRIER_MODE', 7),
@@ -25476,7 +25501,6 @@ WITH desired_fields(command_code, standard_path, mml_code, label_zh, sort_order)
     ('LST STD_TRPATH_G08', 'Device.Services.FAPService.MmePoolConfigParam.{i}.MMEIp', 'MMEIP', 'MMEIp', 1),
     ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName', 'HNBNAME', 'HNBName', 2),
     ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.AccessMgmt.LTE.MaxUEsServed', 'MAX_UES_SERVED', 'MaxUEsServed', 3),
-    ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.AmfsStatus', 'AMFS_STATUS', 'AmfsStatus', 4),
     ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse', 'CELL_RESERVED_FOR_OPERATOR_USE', '小区预留标识', 5),
     ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CA.CaEnable', 'CA_ENABLE', 'CaEnable', 6),
     ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CA.PARAMS.CARRIER_MODE', 'CARRIER_MODE', 'CARRIER_MODE', 7),
@@ -25761,6 +25785,7 @@ WITH retired_bindings(command_code, standard_path) AS (
         ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateEnable'),
         ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.ActivateTime'),
         ('MOD STD_TRPATH_G06', 'Device.SoftwareCtrl.AutoActivateEnable'),
+        ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.AmfsStatus'),
         ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse'),
         ('MOD STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse'),
         ('LST STD_TRPATH_G08', 'Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.RohcEn'),
@@ -25775,8 +25800,6 @@ WHERE sf.command_id = c.id
 
 DELETE FROM public.mml_commands
 WHERE command_code IN (
-    'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NGAPMGMT',
-    'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRCU',
     'LST MML350_DEVICE_LAN_HOSTCONFIGMANAGEMENT__IPINTERFACE_NRDU',
     'LST SN_SUB_01',
     'MOD SN_SUB_01'

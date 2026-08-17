@@ -1,15 +1,16 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="MLN" totalEntries="527">
+<parameterModel paramModel="MLN" totalEntries="537">
     <objects>
         <object name="Device.DeviceInfo.EU." standardPath="Device.DeviceInfo.EU." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.DeviceInfo.EU.{i}.RU." standardPath="Device.DeviceInfo.EU.{i}.RU." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
-        <object name="Device.FAP.Ipsec." standardPath="Device.FAP.Ipsec." access="READ_WRITE" changeApplies="Immediate"/>
-        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
-        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.FAP.Ipsec.{i}." standardPath="Device.FAP.Ipsec.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." access="READ_ONLY" changeApplies="Immediate"/>
-        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell." access="READ_WRITE" changeApplies="Immediate"/>
+        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity." standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity." access="READ_ONLY" changeApplies="Immediate"/>
     </objects>
