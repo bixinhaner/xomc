@@ -127,21 +127,38 @@ DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 #   · docker_cli     —— 单容器元数据查询（ps/inspect），5s
 #   · compose_cli    —— compose exec / ps（compose 文件解析 + daemon 往返），15s
 #   · compose_render —— compose config 全量渲染，30s
-# 包装器超时统一返回 124。124 是「探针没能运行」—— daemon 层故障，不是被检
-# 对象异常；各检查函数须把 124 透传出来，check() 对 124 记 [SKIP]（探针超时
-# 未判定）而不计失败，避免宿主机繁忙时误报服务异常 / 误判安装失败。
-docker_cli() { timeout -k 5 5 docker "$@"; }
-compose_cli() { timeout -k 5 15 "${DC[@]}" "$@"; }
-compose_render() { timeout -k 5 30 "${DC[@]}" "$@"; }
+# 包装器超时统一返回 124。GNU timeout 在 SIGTERM 后继续无响应时，会由 -k
+# 发送 SIGKILL 并返回 137；这同样表示「探针没能运行」，不是被检对象异常。
+# 各检查函数须把 124 透传出来，check() 对 124 记 [SKIP]（探针超时未判定）而
+# 不计失败，避免宿主机繁忙时误报服务异常 / 误判安装失败。
+timeout_probe() {
+  local duration="$1" kill_after="$2" rc
+  shift 2
+  timeout -k "$kill_after" "$duration" "$@"
+  rc=$?
+  case "$rc" in
+    124|137) return 124 ;;
+    *) return "$rc" ;;
+  esac
+}
+docker_cli() { timeout_probe 5 5 docker "$@"; }
+compose_cli() { timeout_probe 15 5 "${DC[@]}" "$@"; }
+compose_render() { timeout_probe 30 5 "${DC[@]}" "$@"; }
 
 ok=0; fail=0; probe_skipped=0
+check_probe_skipped() { # check_probe_skipped <描述>
+  local desc="$1"
+  echo "  [SKIP] $(health_text "$desc")$(health_text '（探针超时，未判定）' ' (probe timed out, undetermined)')"
+  probe_skipped=$((probe_skipped+1))
+}
 check() {  # check <描述> <命令...>
-  local desc="$1"; shift
-  if "$@" >/dev/null 2>&1; then
+  local desc="$1" rc; shift
+  "$@" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
     echo "  [OK]   $(health_text "$desc")"; ok=$((ok+1))
-  elif [ "$?" -eq 124 ]; then
-    echo "  [SKIP] $(health_text "$desc")$(health_text '（探针超时，未判定）' ' (probe timed out, undetermined)')"
-    probe_skipped=$((probe_skipped+1))
+  elif [ "$rc" -eq 124 ]; then
+    check_probe_skipped "$desc"
   else
     echo "  [FAIL] $(health_text "$desc")"; fail=$((fail+1))
   fi
@@ -215,11 +232,30 @@ web_https_file_entry_loaded() {
 }
 
 web_https_file_entry_has_cert() {
-  compose_cli exec -T web sh -c 'test -r /etc/nginx/cert/cert.pem && test -r /etc/nginx/cert/key.pem'
+  compose_cli exec -T web sh -c 'test -r /etc/nginx/cert/cert.pem && test -r /etc/nginx/cert/key.pem' 2>/dev/null
 }
 
 web_https_file_entry_disabled() {
   compose_cli exec -T web sh -c 'test ! -e /etc/nginx/cert/cert.pem && test ! -e /etc/nginx/cert/key.pem && test ! -e /etc/nginx/conf.d/https-file-entry.conf'
+}
+
+check_web_https_file_entry() {
+  local mode="${1:-startup}" cert_rc
+  if web_https_file_entry_has_cert; then
+    if [ "$mode" = full ]; then
+      check "$(health_text 'web HTTPS 文件入口已加载' 'web HTTPS file entry loaded')" web_https_file_entry_loaded
+    else
+      check "$(health_text 'HTTPS 文件上传入口 TLS 可达 ACS (:8443)' 'HTTPS file upload TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileUploadService 405
+      check "$(health_text 'HTTPS 文件下载入口 TLS 可达 ACS (:8443)' 'HTTPS file download TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileDownloadService/__healthcheck__/missing 404
+    fi
+  else
+    cert_rc=$?
+    if [ "$cert_rc" -eq 124 ]; then
+      check_probe_skipped "$(health_text 'HTTPS 文件入口状态' 'HTTPS file entry state')"
+    else
+      check "$(health_text 'HTTPS 文件入口未启用且 HTTP 保持可用' 'HTTPS file entry disabled and HTTP remains available')" web_https_file_entry_disabled
+    fi
+  fi
 }
 
 https_file_entry_status_is() { # https_file_entry_status_is <path> <expected_status>
@@ -268,6 +304,24 @@ check_redis_routing_config() {
   redis_routing_configs_valid /opt/omc/etc
 }
 
+redis_config_value() { # redis_config_value <service> <setting>
+  local service="$1" setting="$2" output rc
+  output="$(compose_cli exec -T "$service" redis-cli CONFIG GET "$setting" 2>/dev/null)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  [ "$rc" -ne 0 ] && return "$rc"
+  printf '%s\n' "$output" | awk 'NF { value=$0 } END { print value }'
+}
+
+pg_setting_value() { # pg_setting_value <service> <user> <setting>
+  local service="$1" user="$2" setting="$3" output rc
+  output="$(compose_cli exec -T "$service" psql -U "$user" -d postgres -tAc "SHOW $setting" 2>/dev/null)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  [ "$rc" -ne 0 ] && return "$rc"
+  printf '%s' "$output" | tr -d '[:space:]'
+}
+
 # 安装阶段的启动就绪检查必须在完整审计之前结束。完整检查中的 nginx -T、
 # 容器 sysctl、Compose config、资源限额和数据库参数可能因初始化负载变慢，
 # 不应阻塞“服务是否已经能接收请求”的判定。
@@ -289,12 +343,7 @@ if [ "$STARTUP_CHECK" = 1 ]; then
   check "app /metrics (:9091)" curl -fsS --max-time 3 http://127.0.0.1:9091/metrics
   check "$(health_text '前端 SPA (:8081)' 'Frontend SPA (:8081)')" curl -fsS --max-time 3 http://127.0.0.1:8081/ -o /dev/null
   if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
-    if web_https_file_entry_has_cert; then
-      check "$(health_text 'HTTPS 文件上传入口 TLS 可达 ACS (:8443)' 'HTTPS file upload TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileUploadService 405
-      check "$(health_text 'HTTPS 文件下载入口 TLS 可达 ACS (:8443)' 'HTTPS file download TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileDownloadService/__healthcheck__/missing 404
-    else
-      check "$(health_text 'HTTPS 文件入口未启用且 HTTP 保持可用' 'HTTPS file entry disabled and HTTP remains available')" web_https_file_entry_disabled
-    fi
+    check_web_https_file_entry startup
   fi
   echo
   echo "$(health_text '启动检查已跳过 Redis 路由、实例身份和 ACS candidate /readyz 深审计；完整 healthcheck 将在部署后执行。' 'Startup check skips deep Redis routing, instance identity, and ACS candidate /readyz audits; the full healthcheck runs after deployment.')"
@@ -329,11 +378,7 @@ if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
   echo "== $(health_text 'docker compose web 容器' 'Docker Compose web container') =="
   check "web 容器 running" container_running web
   check "web ACS upstream 连接池已加载" web_acs_upstream_pool_loaded
-  if web_https_file_entry_has_cert; then
-    check "web HTTPS 文件入口已加载" web_https_file_entry_loaded
-  else
-    check "HTTPS 文件入口未启用且 HTTP 保持可用" web_https_file_entry_disabled
-  fi
+  check_web_https_file_entry full
   check "web 临时端口范围" container_sysctl_equals web net.ipv4.ip_local_port_range "10240 65535"
 fi
 
@@ -364,12 +409,7 @@ check "app    /metrics (:9091)"  curl -fsS --max-time 3 http://127.0.0.1:9091/me
 # 前端 SPA：web 容器 nginx :8081 served（:8080 是 ACS CWMP 反代，GET / 不响应，不检）。
 check "前端 SPA (:8081)"          curl -fsS --max-time 3 http://127.0.0.1:8081/ -o /dev/null
 if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
-  if web_https_file_entry_has_cert; then
-    check "HTTPS 文件上传入口 TLS 可达 ACS (:8443)" https_file_entry_status_is /smallcell/FileUploadService 405
-    check "HTTPS 文件下载入口 TLS 可达 ACS (:8443)" https_file_entry_status_is /smallcell/FileDownloadService/__healthcheck__/missing 404
-  else
-    check "HTTPS 文件入口未启用且 HTTP 保持可用" web_https_file_entry_disabled
-  fi
+  check_web_https_file_entry startup
 fi
 
 if [ "$FILE_ENTRY_SMOKE" = 1 ]; then
@@ -385,14 +425,28 @@ else
   echo "  [FAIL] $(health_text "OMC_PUBLIC_HOST 必须配置为基站可达主机（当前: ${effective_public_host:-<空>}）" "OMC_PUBLIC_HOST must be reachable by base stations (current: ${effective_public_host:-<empty>})")"; fail=$((fail+1))
 fi
 container_env_value() { # container_env_value <service> <key>
-  local svc="$1" key="$2" cid
-  cid="$(compose_cli ps -q "$svc" 2>/dev/null | head -n1)"
+  local svc="$1" key="$2" cid cid_output inspect_output rc
+  cid_output="$(compose_cli ps -q "$svc" 2>/dev/null)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  [ "$rc" -ne 0 ] && return 1
+  cid="$(printf '%s\n' "$cid_output" | head -n1)"
   [ -n "$cid" ] || return 1
-  docker_cli inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null |
+  inspect_output="$(docker_cli inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null)"
+  rc=$?
+  [ "$rc" -eq 124 ] && return 124
+  [ "$rc" -ne 0 ] && return 1
+  printf '%s\n' "$inspect_output" |
     awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); exit }'
 }
 for svc in app acs acs-candidate worker; do
-  check_value "$svc 容器 OMC_PUBLIC_HOST" "$effective_public_host" "$(container_env_value "$svc" OMC_PUBLIC_HOST)"
+  container_host="$(container_env_value "$svc" OMC_PUBLIC_HOST)"
+  env_rc=$?
+  if [ "$env_rc" -eq 124 ]; then
+    check_probe_skipped "$svc 容器 OMC_PUBLIC_HOST"
+  else
+    check_value "$svc 容器 OMC_PUBLIC_HOST" "$effective_public_host" "$container_host"
+  fi
 done
 
 # resources.env 存在时，必须同时证明「文件 → compose 渲染 → 容器/进程实际值」没有漂移。
@@ -468,12 +522,21 @@ EOF
     for redis_spec in 'redis-core REDIS_CORE' 'redis-pm REDIS_PM'; do
       read -r redis_svc redis_prefix <<<"$redis_spec"
       redis_expected="$(resource_bytes "$(resource_env_get "$DEPLOY_DIR/resources.env" "${redis_prefix}_MAXMEMORY")")"
-      redis_actual="$(compose_cli exec -T "$redis_svc" redis-cli CONFIG GET maxmemory 2>/dev/null | tail -n1)"
-      redis_policy="$(compose_cli exec -T "$redis_svc" redis-cli CONFIG GET maxmemory-policy 2>/dev/null | tail -n1)"
-      redis_aof="$(compose_cli exec -T "$redis_svc" redis-cli CONFIG GET appendonly 2>/dev/null | tail -n1)"
-      check_value "$redis_svc CONFIG GET maxmemory" "$redis_expected" "$redis_actual"
-      check_value "$redis_svc CONFIG GET maxmemory-policy" "noeviction" "$redis_policy"
-      check_value "$redis_svc CONFIG GET appendonly" "yes" "$redis_aof"
+      for redis_setting in maxmemory maxmemory-policy appendonly; do
+        case "$redis_setting" in
+          maxmemory) redis_expected_value="$redis_expected" ;;
+          maxmemory-policy) redis_expected_value="noeviction" ;;
+          appendonly) redis_expected_value="yes" ;;
+        esac
+        redis_actual="$(redis_config_value "$redis_svc" "$redis_setting")"
+        rc=$?
+        redis_desc="$redis_svc CONFIG GET $redis_setting"
+        if [ "$rc" -eq 124 ]; then
+          check_probe_skipped "$redis_desc"
+        else
+          check_value "$redis_desc" "$redis_expected_value" "$redis_actual"
+        fi
+      done
     done
 
     deploy_env_get() { awk -F= -v key="$2" '$1 == key { print substr($0, length(key)+2); exit }' "$1"; }
@@ -487,8 +550,11 @@ EOF
           work_mem) expected="$(resource_env_get "$DEPLOY_DIR/resources.env" "${prefix}_WORK_MEM")" ;;
           max_connections) expected="$(resource_env_get "$DEPLOY_DIR/resources.env" "${prefix}_MAX_CONNECTIONS")" ;;
         esac
-        actual="$(compose_cli exec -T "$svc" psql -U "$user" -d postgres -tAc "SHOW $setting" 2>/dev/null | tr -d '[:space:]')"
-        if [ "$setting" = "max_connections" ]; then
+        actual="$(pg_setting_value "$svc" "$user" "$setting")"
+        rc=$?
+        if [ "$rc" -eq 124 ]; then
+          check_probe_skipped "$svc SHOW $setting"
+        elif [ "$setting" = "max_connections" ]; then
           check_value "$svc SHOW $setting" "$expected" "$actual"
         else
           expected_mib="$(resource_env_memory_mib "$expected")"

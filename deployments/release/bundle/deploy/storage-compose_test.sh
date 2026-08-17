@@ -363,6 +363,11 @@ contains "healthcheck 核对 ACS upstream 连接池" 'nginx -T' "$RELEASE_HEALTH
 contains "healthcheck 核对 web 临时端口范围" 'net.ipv4.ip_local_port_range' "$RELEASE_HEALTHCHECK"
 contains "healthcheck 核对 ACS accept backlog" 'net.core.somaxconn' "$RELEASE_HEALTHCHECK"
 contains "healthcheck 核对 ACS SYN backlog" 'net.ipv4.tcp_max_syn_backlog' "$RELEASE_HEALTHCHECK"
+contains "healthcheck 将 SIGKILL 超时归一为探针超时" '124|137) return 124' "$RELEASE_HEALTHCHECK"
+contains "healthcheck Redis 参数先捕获 exec 返回码" 'redis_actual="$(redis_config_value "$redis_svc" "$redis_setting")"' "$RELEASE_HEALTHCHECK"
+contains "healthcheck PostgreSQL 参数先捕获 exec 返回码" 'actual="$(pg_setting_value "$svc" "$user" "$setting")"' "$RELEASE_HEALTHCHECK"
+not_contains "healthcheck Redis 不直接管道读取 CONFIG GET" 'compose_cli exec -T "$redis_svc" redis-cli CONFIG GET maxmemory 2>/dev/null | tail -n1' "$RELEASE_HEALTHCHECK"
+not_contains "healthcheck PostgreSQL 不直接管道读取 SHOW" 'compose_cli exec -T "$svc" psql -U "$user" -d postgres -tAc "SHOW $setting" 2>/dev/null | tr -d' "$RELEASE_HEALTHCHECK"
 contains "ACS 全局会话拒绝告警" 'alert: ACSGlobalAdmissionRejected' "$REPO_ROOT/deployments/monitoring/alerts/runtime-alerts.yml"
 
 echo "── PM 指标漂移与禁用值监控 ──"
