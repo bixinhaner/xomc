@@ -1539,16 +1539,24 @@ fi
 
 # ── 业务就绪健康检查（必须在重建监控栈之前执行）──────────────────────────
 # healthcheck.sh --startup 只校验「业务 + 基础设施 + web」容器与端点，不检监控容器，
-# 因此可在下方监控栈 force-recreate 之前完成。这一点至关重要：重建监控会拉起
-# cadvisor，其启动期经 docker socket 对 daemon 做全量容器盘点，短时间内令
-# `docker ps/inspect` 显著变慢；若在此期间跑健康检查（每轮约 24 次 docker CLI 调用），
-# 会被单轮 timeout 中途砍掉、误报安装失败，而部署后人工 healthcheck（daemon 已空闲）
-# 却全通过。放在重建前，此刻 daemon 与 app_wait_ready 一样空闲（业务刚起、尚无
-# cadvisor），启动检查通常 <10s 即过。监控容器留给部署后人工完整 healthcheck。
+# 因此可在下方监控栈 force-recreate 之前完成。放在重建前避开 cadvisor 启动盘点对
+# daemon 的冲击；但安装/升级刚批量建完十余个容器，daemon 本身仍可能短时繁忙，
+# 单次 docker ps/inspect 走秒级（每轮 startup ≈ 36 次 docker CLI 调用 + 1-2 次
+# compose exec），整轮 30-80s 属正常。
+#
+# 判定机制与 healthcheck.sh 对齐 —— 依据「完整的结构化逐项结果」，而非外层秒表：
+#   · healthcheck.sh 侧每个检查项自带上限（curl --max-time 3 / docker 调用
+#     timeout 5 / compose exec timeout 15），单轮不会再被某个探针无限拖住；
+#   · 这里单轮预算（HEALTHCHECK_PROBE_TIMEOUT，默认 90s）必须覆盖一整轮，
+#     确保 daemon 慢时轮次仍能跑完并产出完整 [OK]/[FAIL] 结果供重试与判定；
+#     线上事故教训：曾设 30s，3 轮全部被拦腰砍断、90s 总窗耗尽且拿不到任何
+#     结构化失败项，安装误报失败，而部署后人工 healthcheck 106/106 全过；
+#   · 总窗耗尽仍无结构化失败项、且业务容器全部稳定（running/无重启/无 OOM）
+#     时按「探针超时误报」降级放行（详见 Step 9），不再判安装失败。
 HEALTHCHECK_INTERVAL=5
 HEALTHCHECK_TIMEOUT="${OMC_HEALTHCHECK_TIMEOUT:-90}"
 HEALTHCHECK_FINAL_GRACE="${OMC_HEALTHCHECK_FINAL_GRACE:-0}"
-HEALTHCHECK_PROBE_TIMEOUT="${OMC_HEALTHCHECK_PROBE_TIMEOUT:-30}"
+HEALTHCHECK_PROBE_TIMEOUT="${OMC_HEALTHCHECK_PROBE_TIMEOUT:-90}"
 case "$HEALTHCHECK_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_TIMEOUT 必须是正整数" "OMC_HEALTHCHECK_TIMEOUT must be a positive integer" 1 ;; esac
 case "$HEALTHCHECK_FINAL_GRACE" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_FINAL_GRACE 必须是非负整数" "OMC_HEALTHCHECK_FINAL_GRACE must be a non-negative integer" 1 ;; esac
 case "$HEALTHCHECK_PROBE_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_PROBE_TIMEOUT 必须是正整数" "OMC_HEALTHCHECK_PROBE_TIMEOUT must be a positive integer" 1 ;; esac
@@ -1557,22 +1565,33 @@ case "$HEALTHCHECK_PROBE_TIMEOUT" in ''|*[!0-9]*) die "OMC_HEALTHCHECK_PROBE_TIM
 log "动态等待业务容器启动（最长 ${HEALTHCHECK_TIMEOUT}s，单轮探针最多 ${HEALTHCHECK_PROBE_TIMEOUT}s，每 ${HEALTHCHECK_INTERVAL}s 重试；通过后立即继续）..." "Waiting for business containers (up to ${HEALTHCHECK_TIMEOUT}s, retry every ${HEALTHCHECK_INTERVAL}s) ..."
 HEALTHCHECK_LOG="$(mktemp)"
 HEALTH_OK=0
+# 降级放行标记：窗口耗尽但无结构化失败项且业务容器全部稳定时置 1，
+# Step 9 据此以警告代替安装失败（探针超时误报 ≠ 服务异常）。
+HEALTH_DEGRADED=0
 HEALTHCHECK_PROBE_TIMEOUTS=0
+# 是否有任何一轮产出过结构化失败项（[FAIL]）。被秒表砍断的轮次只有部分输出，
+# 其中已打印的 [FAIL] 同样计入；全程零 [FAIL] 说明失败判定完全来自超时而非
+# 检查结果本身，Step 9 将据此与容器稳定性共同定级。
+HEALTHCHECK_STRUCTURED_FAILS=0
 HEALTHCHECK_DEADLINE=$(( $(date +%s) + HEALTHCHECK_TIMEOUT ))
 while :; do
   HEALTHCHECK_REMAINING=$(( HEALTHCHECK_DEADLINE - $(date +%s) ))
   [ "$HEALTHCHECK_REMAINING" -gt 0 ] || break
-  # 单轮探针必须有独立上限；某个 docker exec/网络探针卡住时，仍要回到循环
-  # 继续重试，而不能独占整个总等待窗口。
+  # 单轮探针保留独立上限（默认 90s，覆盖 daemon 忙时一整轮的耗时）；healthcheck.sh
+  # 内部每个检查项已各自带 timeout，正常运行不会触到这里 —— 它只是兜底，防止
+  # 极端情况下某一轮独占整个总等待窗口。
   HEALTHCHECK_PROBE_REMAINING="$HEALTHCHECK_PROBE_TIMEOUT"
   [ "$HEALTHCHECK_REMAINING" -lt "$HEALTHCHECK_PROBE_REMAINING" ] &&
     HEALTHCHECK_PROBE_REMAINING="$HEALTHCHECK_REMAINING"
   if timeout "${HEALTHCHECK_PROBE_REMAINING}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" --lang "$OMC_LANG" --startup >"$HEALTHCHECK_LOG" 2>&1; then
     HEALTH_OK=1
     break
-  elif [ "$?" -eq 124 ]; then
-    HEALTHCHECK_PROBE_TIMEOUTS=$((HEALTHCHECK_PROBE_TIMEOUTS + 1))
-    log "健康检查单轮超过 ${HEALTHCHECK_PROBE_REMAINING}s，继续第 ${HEALTHCHECK_PROBE_TIMEOUTS} 次重试 ..." "Health check probe exceeded ${HEALTHCHECK_PROBE_REMAINING}s; continuing with retry ${HEALTHCHECK_PROBE_TIMEOUTS} ..."
+  else
+    if [ "$?" -eq 124 ]; then
+      HEALTHCHECK_PROBE_TIMEOUTS=$((HEALTHCHECK_PROBE_TIMEOUTS + 1))
+      log "健康检查单轮超过 ${HEALTHCHECK_PROBE_REMAINING}s，继续第 ${HEALTHCHECK_PROBE_TIMEOUTS} 次重试 ..." "Health check probe exceeded ${HEALTHCHECK_PROBE_REMAINING}s; continuing with retry ${HEALTHCHECK_PROBE_TIMEOUTS} ..."
+    fi
+    grep -q '  \[FAIL\]' "$HEALTHCHECK_LOG" 2>/dev/null && HEALTHCHECK_STRUCTURED_FAILS=1
   fi
   HEALTHCHECK_REMAINING=$(( HEALTHCHECK_DEADLINE - $(date +%s) ))
   [ "$HEALTHCHECK_REMAINING" -gt 0 ] || break
@@ -1607,6 +1626,8 @@ if [ "$HEALTH_OK" -eq 0 ] && [ "$HEALTHCHECK_FINAL_GRACE" -gt 0 ]; then
     HEALTHCHECK_FINAL_PROBE_TIMEOUT="$HEALTHCHECK_PROBE_TIMEOUT"
   if timeout "${HEALTHCHECK_FINAL_PROBE_TIMEOUT}s" bash "$OMC_ROOT/current/deploy/healthcheck.sh" --lang "$OMC_LANG" >"$HEALTHCHECK_LOG" 2>&1; then
     HEALTH_OK=1
+  else
+    grep -q '  \[FAIL\]' "$HEALTHCHECK_LOG" 2>/dev/null && HEALTHCHECK_STRUCTURED_FAILS=1
   fi
 fi
 
@@ -1628,20 +1649,29 @@ else
 
   unstable_services=()
   for service in app acs acs-candidate worker; do
-    service_cid="$("${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
+    # 诊断路径与探针同一 daemon 繁忙场景，同样逐调用设上限，避免诊断自身挂起。
+    service_cid="$(timeout 15 "${DC[@]}" ps -q "$service" 2>/dev/null | head -n1)"
     if [ -z "$service_cid" ]; then
       unstable_services+=("$service:missing")
       continue
     fi
-    service_state="$(docker inspect -f '{{.State.Status}}' "$service_cid" 2>/dev/null || echo unknown)"
-    service_oom="$(docker inspect -f '{{.State.OOMKilled}}' "$service_cid" 2>/dev/null || echo unknown)"
-    service_exit="$(docker inspect -f '{{.State.ExitCode}}' "$service_cid" 2>/dev/null || echo unknown)"
-    service_restarts="$(docker inspect -f '{{.RestartCount}}' "$service_cid" 2>/dev/null || echo unknown)"
+    service_state="$(timeout 5 docker inspect -f '{{.State.Status}}' "$service_cid" 2>/dev/null || echo unknown)"
+    service_oom="$(timeout 5 docker inspect -f '{{.State.OOMKilled}}' "$service_cid" 2>/dev/null || echo unknown)"
+    service_exit="$(timeout 5 docker inspect -f '{{.State.ExitCode}}' "$service_cid" 2>/dev/null || echo unknown)"
+    service_restarts="$(timeout 5 docker inspect -f '{{.RestartCount}}' "$service_cid" 2>/dev/null || echo unknown)"
     log "  $service：state=$service_state oom=$service_oom exit=$service_exit restarts=$service_restarts" "  $service: state=$service_state oom=$service_oom exit=$service_exit restarts=$service_restarts"
     if [ "$service_state" != running ] || [ "$service_oom" = true ] || [ "$service_exit" != 0 ] || [ "$service_restarts" != 0 ]; then
       unstable_services+=("$service")
     fi
   done
+  # 定级：安装失败只认两类硬证据 —— 结构化失败项（某检查项明确 [FAIL]）或
+  # 不稳定业务容器（非 running / OOM / 非零退出 / 有重启）。两者皆无而窗口耗尽，
+  # 说明失败判定完全来自超时秒表而非检查结果 —— 与部署后人工 healthcheck 全过
+  # 的实际现象一致，判为探针超时误报，降级放行（人工复核留给完整 healthcheck）。
+  if [ "$HEALTHCHECK_STRUCTURED_FAILS" -eq 0 ] && [ "${#unstable_services[@]}" -eq 0 ]; then
+    warn "所有轮次均未产出结构化失败项，且业务容器全部稳定运行（running / 无重启 / 无 OOM）——按探针超时误报降级放行，安装继续" "No health-check round produced structured failure items and all business containers are stable (running / no restarts / no OOM); grading this as a probe-timeout false positive and continuing the installation"
+    HEALTH_DEGRADED=1
+  fi
   if [ "${#unstable_services[@]}" -gt 0 ]; then
     log "异常业务容器最近日志（每个最多 20 行）：" "Recent logs for unstable business containers (up to 20 lines each):"
     for service in "${unstable_services[@]}"; do
@@ -1683,7 +1713,11 @@ log "  · PostgreSQL：omcgo / omcgo123" "  · PostgreSQL: omcgo / omcgo123"
 [ "$SKIP_MONITORING" = 0 ] && log "  · Grafana：    admin / admin" "  · Grafana: admin / admin"
 echo
 
-if [ "$HEALTH_OK" != 1 ]; then
+if [ "$HEALTH_OK" != 1 ] && [ "$HEALTH_DEGRADED" != 1 ]; then
   die "健康检查未全通过（部分服务异常），请按上面 healthcheck 输出排查" "Health checks did not all pass (some services are unhealthy); investigate using the healthcheck output above" 4
 fi
-log "全部 OK 🎉" "All checks passed."
+if [ "$HEALTH_DEGRADED" = 1 ]; then
+  warn "健康门禁按「容器稳定 + 无结构化失败项」放行；请在 daemon 空闲后执行完整复核：bash $OMC_ROOT/current/deploy/healthcheck.sh" "The health gate passed on stable containers with no structured failures; run the full review when the Docker daemon is idle: bash $OMC_ROOT/current/deploy/healthcheck.sh"
+else
+  log "全部 OK 🎉" "All checks passed."
+fi

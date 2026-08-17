@@ -144,14 +144,19 @@ check_value() { # check_value <描述> <期望> <实际>
   fi
 }
 
-# container_running <service> —— 通过 docker compose ps 拿容器 ID 并检查 State=running
+# container_running <service> —— 通过 docker ps 拿容器 ID 并检查 State=running。
+# docker CLI 自带无客户端超时：daemon 忙（安装期批量建容器 / cadvisor 启动盘点 /
+# 镜像层事件）时单次 ps/inspect 可阻塞数秒甚至挂起。与 curl --max-time 3 同理，
+# 每次调用加 5s 上限 —— 单个检查项有界，整轮 startup 检查才能在有限时间内产出
+# 完整的结构化结果（安装门禁依据逐项结果判定，而不是被外层秒表拦腰砍断）。
+# daemon 短暂变慢只表现为该项 FAIL，随安装脚本重试轮次自愈。
 container_running() {
   local svc="$1"
   local cid
-  cid="$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+  cid="$(timeout 5 docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
     --filter "label=com.docker.compose.service=$svc" --format '{{.ID}}' | head -n1)"
   [ -n "$cid" ] || return 1
-  [ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "true" ]
+  [ "$(timeout 5 docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "true" ]
 }
 
 container_sysctl_equals() { # container_sysctl_equals <service> <key> <expected>
@@ -179,11 +184,11 @@ web_https_file_entry_loaded() {
 }
 
 web_https_file_entry_has_cert() {
-  "${DC[@]}" exec -T web sh -c 'test -r /etc/nginx/cert/cert.pem && test -r /etc/nginx/cert/key.pem'
+  timeout 15 "${DC[@]}" exec -T web sh -c 'test -r /etc/nginx/cert/cert.pem && test -r /etc/nginx/cert/key.pem'
 }
 
 web_https_file_entry_disabled() {
-  "${DC[@]}" exec -T web sh -c 'test ! -e /etc/nginx/cert/cert.pem && test ! -e /etc/nginx/cert/key.pem && test ! -e /etc/nginx/conf.d/https-file-entry.conf'
+  timeout 15 "${DC[@]}" exec -T web sh -c 'test ! -e /etc/nginx/cert/cert.pem && test ! -e /etc/nginx/cert/key.pem && test ! -e /etc/nginx/conf.d/https-file-entry.conf'
 }
 
 https_file_entry_status_is() { # https_file_entry_status_is <path> <expected_status>
