@@ -4,6 +4,7 @@ import enUS from '@core/i18n/en-US';
 import {
   GNB_QUICK_SETTING_GROUPS,
   GNB_TEMPLATE_EXTRA_FIELDS,
+  NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS,
 } from './gnbQuickSettingsFields';
 
 describe('gNB plug-and-play quick-setting fields', () => {
@@ -42,6 +43,13 @@ describe('gNB plug-and-play quick-setting fields', () => {
     expect(fields.find((field) => field.id === 'DLCarrierBandWidth')?.control).toBe('dl-bandwidth');
     expect(fields.find((field) => field.id === 'RFEnable')?.control).toBe('select');
     expect(fields.map((field) => field.labelKey)).not.toContain('SubcarrierSpacing(DL)');
+  });
+
+  it('excludes unsupported 5MHz, 15MHz and 25MHz NR carrier bandwidths for every SCS', () => {
+    for (const options of Object.values(NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS)) {
+      const labels = options.map((option) => option.label);
+      expect(labels.some((label) => /^(5|15|25)MHz\(/.test(label ?? ''))).toBe(false);
+    }
   });
 
   it('defines every group, field and option label in both supported locales', () => {

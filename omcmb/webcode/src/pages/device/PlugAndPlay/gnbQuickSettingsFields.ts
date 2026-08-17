@@ -78,17 +78,17 @@ const ipsecFields: GnbQuickSettingField[] = [
 ].map(([id, name, labelKey]) => ({ id, name, labelKey }));
 
 export const NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS: Record<string, GnbQuickSettingOption[]> = {
-  '0': technicalOptions(['25', '52', '79', '106', '133', '160', '216', '270']).map((option, index) => ({
+  '0': technicalOptions(['52', '106', '160', '216', '270']).map((option, index) => ({
     ...option,
-    label: ['5MHz(25RB)', '10MHz(52RB)', '15MHz(79RB)', '20MHz(106RB)', '25MHz(133RB)', '30MHz(160RB)', '40MHz(216RB)', '50MHz(270RB)'][index],
+    label: ['10MHz(52RB)', '20MHz(106RB)', '30MHz(160RB)', '40MHz(216RB)', '50MHz(270RB)'][index],
   })),
-  '1': technicalOptions(['11', '24', '38', '51', '65', '78', '106', '133', '162', '189', '217', '245', '273']).map((option, index) => ({
+  '1': technicalOptions(['24', '51', '78', '106', '133', '162', '189', '217', '245', '273']).map((option, index) => ({
     ...option,
-    label: ['5MHz(11RB)', '10MHz(24RB)', '15MHz(38RB)', '20MHz(51RB)', '25MHz(65RB)', '30MHz(78RB)', '40MHz(106RB)', '50MHz(133RB)', '60MHz(162RB)', '70MHz(189RB)', '80MHz(217RB)', '90MHz(245RB)', '100MHz(273RB)'][index],
+    label: ['10MHz(24RB)', '20MHz(51RB)', '30MHz(78RB)', '40MHz(106RB)', '50MHz(133RB)', '60MHz(162RB)', '70MHz(189RB)', '80MHz(217RB)', '90MHz(245RB)', '100MHz(273RB)'][index],
   })),
-  '2': technicalOptions(['11', '18', '24', '31', '38', '51', '65', '79', '93', '107', '121', '135']).map((option, index) => ({
+  '2': technicalOptions(['11', '24', '38', '51', '65', '79', '93', '107', '121', '135']).map((option, index) => ({
     ...option,
-    label: ['10MHz(11RB)', '15MHz(18RB)', '20MHz(24RB)', '25MHz(31RB)', '30MHz(38RB)', '40MHz(51RB)', '50MHz(65RB)', '60MHz(79RB)', '70MHz(93RB)', '80MHz(107RB)', '90MHz(121RB)', '100MHz(135RB)'][index],
+    label: ['10MHz(11RB)', '20MHz(24RB)', '30MHz(38RB)', '40MHz(51RB)', '50MHz(65RB)', '60MHz(79RB)', '70MHz(93RB)', '80MHz(107RB)', '90MHz(121RB)', '100MHz(135RB)'][index],
   })),
 };
 

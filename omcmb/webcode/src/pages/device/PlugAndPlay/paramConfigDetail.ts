@@ -169,6 +169,21 @@ function mappedParameterValues(config: ParamConfigDetailSource): Record<string, 
   return values;
 }
 
+function mappedPathValue(
+  config: ParamConfigDetailSource,
+  leafNames: readonly string[],
+): unknown {
+  const canonical = (input: string): string => input.replace(/[^a-z0-9]/gi, '').toUpperCase();
+  const expected = new Set(leafNames.map(canonical));
+  for (const mapping of config.workbookMappings ?? []) {
+    const leaf = mapping.trPath.split('.').filter(Boolean).at(-1);
+    if (!leaf || !expected.has(canonical(leaf))) continue;
+    const mapped = config.sheetParameters?.[mapping.sheet]?.[0]?.[mapping.header];
+    if (mapped !== undefined && mapped !== null && String(mapped).trim() !== '') return mapped;
+  }
+  return undefined;
+}
+
 export function withTemplateSheetParameters<T extends ParamConfigDetailSource>(
   config: T,
 ): T {
@@ -449,11 +464,12 @@ export function toParamConfigFormValues(
       ...compact({
         IPSEC_ENABLE: configuredIpsecEnable || (populatedIpsecRows.length > 0 ? '1' : '0'),
         gnbName: value(cell, 'gNB Name') ?? config.cellName,
-        gnbId: value(cell, '*gNB ID', 'gNB ID'),
+        gnbId: value(cell, '*gNB ID', 'gNB ID') ?? mappedPathValue(config, ['GNBID']),
         gnbIdLength: value(cell, '*gNB Lenth', '*gNB Length', 'gNB ID Length'),
-        pci: value(cell, '*PCI', 'PCI'),
+        pci: value(cell, '*PCI', 'PCI') ?? mappedPathValue(config, ['PCI', 'PhyCellID', 'PhysicalCellID']),
         ssbFrequency: value(cell, 'SSB Frequency'),
-        freqBandIndicator: value(cell, 'Freq BandIndicator'),
+        freqBandIndicator: value(cell, 'Freq BandIndicator', 'Band')
+          ?? mappedPathValue(config, ['FreqBandIndicator', 'FreqBandIndicatorNR', 'Band']),
         nrarfcnndl: value(cell, 'NRARFCNDL'),
         nrarfcnul: value(cell, 'NRARFCNUL'),
         dlbandwidth: dlBandwidth?.replace(/\s*MHz$/i, ''),

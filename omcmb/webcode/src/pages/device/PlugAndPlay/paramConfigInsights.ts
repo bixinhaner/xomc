@@ -86,10 +86,11 @@ export function buildParamConfigInsights(
   const extracted = configs.map((config) => {
     const gnbId = text(config.gnbId)
       ?? mappedPathValue(config, ['GNBID'])
-      ?? firstSheetValue(config, 'CELL', '*gNB ID');
+      ?? firstSheetValue(config, 'CELL', '*gNB ID', 'gNB ID')
+      ?? firstSheetValue(config, 'DEVICE', '*gNB ID', 'gNB ID');
     const pci = text(config.pci)
-      ?? mappedPathValue(config, ['PCI', 'PhysicalCellID'])
-      ?? firstSheetValue(config, 'CELL', '*PCI');
+      ?? mappedPathValue(config, ['PCI', 'PhyCellID', 'PhysicalCellID'])
+      ?? firstSheetValue(config, 'CELL', '*PCI', 'PCI');
     if (config.deviceType === 'gNB' && gnbId) gnbIdCounts.set(gnbId, (gnbIdCounts.get(gnbId) ?? 0) + 1);
     if (config.deviceType === 'gNB' && pci) pciCounts.set(pci, (pciCounts.get(pci) ?? 0) + 1);
     return { config, gnbId, pci };
@@ -105,11 +106,11 @@ export function buildParamConfigInsights(
       gnbId,
       pci,
       band: text(config.freqBandIndicator ?? config.bandsSupport)
-        ?? mappedPathValue(config, ['FreqBandIndicator', 'Band'])
-        ?? firstSheetValue(config, 'CELL', 'Freq BandIndicator', '*BAND'),
+        ?? mappedPathValue(config, ['FreqBandIndicator', 'FreqBandIndicatorNR', 'Band'])
+        ?? firstSheetValue(config, 'CELL', 'Freq BandIndicator', '*BAND', 'Band'),
       bandwidth: text(config.dlbandwidth ?? config.bandWidth)
-        ?? mappedPathValue(config, ['DLBandwidth', 'Bandwidth'])
-        ?? firstSheetValue(config, 'CELL', 'DLBandwidth', '*BANDWIDTH_DL'),
+        ?? mappedPathValue(config, ['DLBandwidth', 'CarrierBandwidth', 'Bandwidth'])
+        ?? firstSheetValue(config, 'CELL', 'DLBandwidth', '*BANDWIDTH_DL', 'DL Carrier Bandwidth'),
       frequency: text(config.nrarfcnndl ?? config.frequency)
         ?? mappedPathValue(config, ['NRARFCNDL', 'EARFCNDL'])
         ?? firstSheetValue(config, 'CELL', 'NRARFCNDL', '*EARFCN_DL'),

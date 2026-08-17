@@ -50,6 +50,33 @@ describe('parameter configuration detail mapping', () => {
     });
   });
 
+  it('maps BaiBNQ generated headers and paths into the detail form', () => {
+    expect(toParamConfigFormValues({
+      deviceType: 'gNB',
+      serialNumber: '120200054822CHB0004',
+      sheetParameters: {
+        CELL: [{
+          Band: 78,
+          PCI: 500,
+          'DL Carrier Bandwidth': 51,
+          'UL Carrier Bandwidth': 51,
+        }],
+        DEVICE: [{ 'gNB ID': 2451329 }],
+      },
+      workbookMappings: [
+        { sheet: 'CELL', header: 'Band', trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.1.FreqBandIndicatorNR' },
+        { sheet: 'CELL', header: 'PCI', trPath: 'Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID' },
+        { sheet: 'DEVICE', header: 'gNB ID', trPath: 'Device.Services.FAPService.1.FAPControl.NR.RAN.Common.gNBId' },
+      ],
+    })).toMatchObject({
+      gnbId: 2451329,
+      pci: 500,
+      freqBandIndicator: 78,
+      dlbandwidth: '51',
+      ulbandwidth: '51',
+    });
+  });
+
   it('shows populated imported 5G device, interface and IPsec values', () => {
     expect(toParamConfigFormValues({
       deviceType: 'gNB',
