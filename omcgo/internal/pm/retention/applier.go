@@ -42,6 +42,8 @@ FROM timescaledb_information.jobs
 WHERE proc_name = 'policy_retention'
   AND format('%I.%I', hypertable_schema, hypertable_name) = $1`
 
+const retentionPolicyExpectedDropAfterSQL = `SELECT ($1::int * INTERVAL '1 day')::text`
+
 // PMRetentionApplier 对 TimescaleDB 的 retention policy 做 remove+add 幂等更新。
 // 仅操作允许自动清理的 hypertable；原始稀疏表由 worker 做水位安全清理，
 // daily/weekly/monthly 由 cleanup_runner cron 处理，均不在本 applier 范畴。
@@ -119,19 +121,22 @@ func (a *PMRetentionApplier) applyPoliciesAtomic(ctx context.Context, policies m
 		if _, _, err := retentionPolicyDropAfter(ctx, tx, table); err != nil {
 			return fmt.Errorf("read existing retention policy for %s: %w", table, err)
 		}
+		expectedDropAfter, err := retentionPolicyExpectedDropAfter(ctx, tx, days)
+		if err != nil {
+			return fmt.Errorf("normalize retention policy drop_after for %s: %w", table, err)
+		}
 		if _, err := tx.Exec(ctx, "SELECT remove_retention_policy($1, if_exists => TRUE)", table); err != nil {
 			return fmt.Errorf("remove retention policy for %s: %w", table, err)
 		}
-		interval := fmt.Sprintf("%d days", days)
-		if _, err := tx.Exec(ctx, "SELECT add_retention_policy($1, $2::interval)", table, interval); err != nil {
+		if _, err := tx.Exec(ctx, "SELECT add_retention_policy($1, $2::int * INTERVAL '1 day')", table, days); err != nil {
 			return fmt.Errorf("add retention policy for %s: %w", table, err)
 		}
 		actualDropAfter, policyExists, err := retentionPolicyDropAfter(ctx, tx, table)
 		if err != nil {
 			return fmt.Errorf("post-check retention policy for %s: %w", table, err)
 		}
-		if !policyExists || actualDropAfter != interval {
-			return fmt.Errorf("post-check retention policy for %s: expected drop_after %q, got %q", table, interval, actualDropAfter)
+		if !policyExists || actualDropAfter != expectedDropAfter {
+			return fmt.Errorf("post-check retention policy for %s: expected drop_after %q, got %q", table, expectedDropAfter, actualDropAfter)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -142,6 +147,14 @@ func (a *PMRetentionApplier) applyPoliciesAtomic(ctx context.Context, policies m
 		a.logger.Info("PM retention policy updated", zap.String("table", table), zap.Int("days", policies[table]))
 	}
 	return nil
+}
+
+func retentionPolicyExpectedDropAfter(ctx context.Context, q retentionPolicyQuerier, days int) (string, error) {
+	var dropAfter string
+	if err := q.QueryRow(ctx, retentionPolicyExpectedDropAfterSQL, days).Scan(&dropAfter); err != nil {
+		return "", err
+	}
+	return dropAfter, nil
 }
 
 func retentionPolicyDropAfter(ctx context.Context, q retentionPolicyQuerier, table string) (string, bool, error) {

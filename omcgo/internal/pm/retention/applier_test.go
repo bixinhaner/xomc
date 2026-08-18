@@ -3,6 +3,7 @@ package retention
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -98,7 +99,7 @@ func (db *atomicRetentionDB) exec(sql string, args ...any) (pgconn.CommandTag, e
 		if db.failAdd {
 			return pgconn.CommandTag{}, errors.New("add retention policy failed")
 		}
-		db.policyDropAfter = args[1].(string)
+		db.policyDropAfter = normalizedDropAfter(args[1].(int))
 	}
 	return pgconn.NewCommandTag("SELECT 1"), nil
 }
@@ -134,14 +135,20 @@ func (tx *atomicRetentionTx) Exec(_ context.Context, sql string, args ...any) (p
 func (tx *atomicRetentionTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return nil, errors.New("not implemented")
 }
-func (tx *atomicRetentionTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+func (tx *atomicRetentionTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	if strings.Contains(sql, "INTERVAL '1 day'") {
+		return atomicRetentionRow{value: normalizedDropAfter(args[0].(int))}
+	}
 	return atomicRetentionRow{value: tx.db.policyDropAfter}
 }
 func (tx *atomicRetentionTx) Conn() *pgx.Conn { return nil }
 
-func (s *stubRetentionQuerier) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+func (s *stubRetentionQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	if strings.Contains(sql, "pg_extension") {
 		return &stubRow{scanErr: s.queryRowErr, value: 1}
+	}
+	if strings.Contains(sql, "INTERVAL '1 day'") {
+		return &stubRow{value: normalizedDropAfter(args[0].(int))}
 	}
 	if s.policyDropAfter == "" {
 		return &stubRow{scanErr: pgx.ErrNoRows}
@@ -158,7 +165,7 @@ func (s *stubRetentionQuerier) Exec(_ context.Context, sql string, args ...any) 
 		s.policyDropAfter = ""
 	}
 	if strings.Contains(sql, "add_retention_policy") {
-		s.policyDropAfter = args[1].(string)
+		s.policyDropAfter = normalizedDropAfter(args[1].(int))
 	}
 	return pgconn.CommandTag{}, nil
 }
@@ -206,6 +213,13 @@ func newApplierWithStub(stub *stubRetentionQuerier) *PMRetentionApplier {
 	return &PMRetentionApplier{db: stub, logger: zap.NewNop()}
 }
 
+func normalizedDropAfter(days int) string {
+	if days == 1 {
+		return "1 day"
+	}
+	return strconv.Itoa(days) + " days"
+}
+
 // TestPMRetentionApplierApplyExecutesRemoveAndAddPolicy 验证 Apply 在 timescaledb
 // 存在时依次调用 remove_retention_policy + add_retention_policy。
 func TestPMRetentionApplierApplyExecutesRemoveAndAddPolicy(t *testing.T) {
@@ -229,6 +243,31 @@ func TestPMRetentionApplierApplyRollsBackOldPolicyWhenAddFailsAtomic(t *testing.
 	require.ErrorContains(t, err, "add retention policy failed")
 	require.Equal(t, "30 days", db.policyDropAfter, "rollback must preserve the old policy")
 	require.Equal(t, []string{"begin", "rollback"}, db.transactionCalls)
+}
+
+func TestPMRetentionApplierApplyNormalizesPostCheckDropAfter(t *testing.T) {
+	tests := []struct {
+		name     string
+		days     int
+		expected string
+	}{
+		{name: "one day singular", days: 1, expected: "1 day"},
+		{name: "two days plural", days: 2, expected: "2 days"},
+		{name: "thirty days plural", days: 30, expected: "30 days"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := &atomicRetentionDB{policyDropAfter: "30 days"}
+			a := &PMRetentionApplier{db: db, logger: zap.NewNop()}
+
+			err := a.Apply(context.Background(), "public.pm_metrics", tt.days)
+
+			require.NoError(t, err)
+			require.Equal(t, tt.expected, db.policyDropAfter)
+			require.Equal(t, []string{"begin", "commit"}, db.transactionCalls)
+		})
+	}
 }
 
 // TestPMRetentionApplierApplySkipsWhenTimescaleDBMissing 验证 timescaledb 未安装时

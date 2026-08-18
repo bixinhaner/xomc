@@ -1531,6 +1531,8 @@ const messages: Record<string, string> = {
   'sysconfig.apply.applied':              'Configuration is active.',
   'sysconfig.apply.delivered':            'The configuration event was delivered; ACS cluster loading is not yet confirmed.',
   'sysconfig.apply.failed':               'Configuration was saved, but runtime application failed; retry is scheduled.',
+  'sysconfig.apply.failed.description':   'Refresh later to confirm the result. Expand technical details if troubleshooting is needed.',
+  'sysconfig.apply.failed.detail':        'Technical details',
   'device.multi.actionAdd':               'Add',
   'device.multi.actionDelete':            'Delete',
   'device.multi.actionAddRollback':       'Auto-delete',

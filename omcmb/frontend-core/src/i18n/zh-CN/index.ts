@@ -1533,6 +1533,8 @@ const messages: Record<string, string> = {
   'sysconfig.apply.applied':              '配置已生效',
   'sysconfig.apply.delivered':            '配置事件已可靠投递；ACS 集群是否已加载尚未确认',
   'sysconfig.apply.failed':               '配置已保存，但运行策略应用失败；系统将自动重试',
+  'sysconfig.apply.failed.description':   '请稍后刷新确认结果；如需排查，可展开查看技术详情。',
+  'sysconfig.apply.failed.detail':        '技术详情',
   'device.multi.actionAdd':               '新增',
   'device.multi.actionDelete':            '删除',
   'device.multi.actionAddRollback':       '自动删除',
