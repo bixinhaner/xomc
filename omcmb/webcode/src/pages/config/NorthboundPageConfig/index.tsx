@@ -4528,7 +4528,7 @@ function buildRunReportStatus(run: NorthboundFileRun, fallbackCapabilityName: st
     runId: run.id,
     capabilityName: fallbackCapabilityName,
     state,
-    statusText: state === 'success' ? '生成成功' : state === 'running' ? '生成中' : noArtifact ? '无数据' : '生成失败',
+    statusText: state === 'success' ? '成功' : state === 'running' ? '生成中' : noArtifact ? '无数据' : '生成失败',
     lastTime: formatRunTime(run.created_at),
     artifactType: 'file',
     artifactName: run.artifact_name || '-',
