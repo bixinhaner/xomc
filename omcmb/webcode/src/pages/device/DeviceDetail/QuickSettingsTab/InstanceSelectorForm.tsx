@@ -40,6 +40,7 @@ import {
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import { notificationKeys } from '@core/hooks/api/useNotificationCenter';
 import { deviceTaskApi } from '@core/services/api/deviceTaskApi';
+import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
 import {
   feedbackKey,
   useQuickSettingsFeedbackStore,
@@ -59,6 +60,11 @@ import {
 } from './validators';
 import MultiInstanceTable from './MultiInstanceTable';
 import { rowsWithNestedInstances } from './subTableExpansion';
+import {
+  parameterReadbackValuesMatch,
+  waitForExpectedParameterValues,
+  waitForReadback,
+} from './parameterReadback';
 
 /** 字段控件类型(原 bscPanelDefs.ts，现内联，由 XML 驱动)。 */
 type BscFieldType = 'string' | 'int' | 'enum' | 'multiCheckbox';
@@ -592,11 +598,61 @@ export default function InstanceSelectorForm({
   useEffect(() => {
     if (!active) return;
     if (!lastTask || !isDeviceTaskTerminal(lastTask.status)) return;
+    if (lastAction?.syncedForTaskId === lastTask.id) return;
     let cancelled = false;
+    const abortController = new AbortController();
     void (async () => {
       try {
-        await refetch();
+        const expected = new Map(Object.entries(lastAction?.expectedReadback ?? {}));
+        if (lastTask.status === 'completed' && expected.size > 0) {
+          await waitForExpectedParameterValues({
+            expected,
+            read: async () => {
+              deviceParameterApi.invalidateParameterSchemaCache(deviceId, objectPath);
+              const refreshed = await refetch();
+              return new Map(
+                (refreshed.data?.parameters ?? []).map((item) => [
+                  item.path,
+                  String(item.currentValue ?? ''),
+                ]),
+              );
+            },
+            intervalMs: 500,
+            timeoutMs: 30_000,
+            signal: abortController.signal,
+          });
+        } else if (
+          lastTask.status === 'completed'
+          && lastAction?.readbackObjectPath
+          && (lastAction.action === 'add' || lastAction.action === 'delete')
+        ) {
+          const readbackObjectPath = lastAction.readbackObjectPath;
+          const beforeInstances = new Set(lastAction.readbackInstancesBefore ?? []);
+          const deletedInstances = new Set(lastAction.deletedInstIds ?? []);
+          await waitForReadback({
+            read: async () => {
+              deviceParameterApi.invalidateParameterSchemaCache(deviceId, objectPath);
+              return (await refetch()).data;
+            },
+            matches: (data) => {
+              const actualInstances = data?.objects
+                .find((item) => item.path === readbackObjectPath)
+                ?.currentInstances.map(String) ?? [];
+              if (lastAction.action === 'delete') {
+                return [...deletedInstances].every((instanceId) => !actualInstances.includes(instanceId));
+              }
+              return actualInstances.some((instanceId) => !beforeInstances.has(instanceId));
+            },
+            intervalMs: 500,
+            timeoutMs: 30_000,
+            signal: abortController.signal,
+          });
+        } else {
+          deviceParameterApi.invalidateParameterSchemaCache(deviceId, objectPath);
+          await refetch();
+        }
       } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
         if (!cancelled) {
           notification.error({
             message: `设备侧数据回读失败(${selectorGroup.titleZh})`,
@@ -609,15 +665,44 @@ export default function InstanceSelectorForm({
       if (cancelled) return;
       // 仅 save 操作影响当前实例字段；add/delete 已通过 setSelectedInstId 副作用处理
       if (lastAction?.action === 'save' && lastAction.savedInstId === selectedInstId) {
-        setFormEdits({});
+        if (lastTask.status === 'completed') {
+          const expected = lastAction.expectedReadback ?? {};
+          setFormEdits((previous) => {
+            const next = { ...previous };
+            for (const [path, expectedValue] of Object.entries(expected)) {
+              const leaf = path.split('.').pop() ?? '';
+              const param = paramByLeaf.get(leaf);
+              const currentEdit = next[path];
+              if (
+                currentEdit !== undefined
+                && parameterReadbackValuesMatch(
+                  expectedValue,
+                  normalizeComparableFieldValue(currentEdit, param),
+                )
+              ) {
+                delete next[path];
+              }
+            }
+            return next;
+          });
+        } else {
+          setFormEdits({});
+        }
         setFormErrors({});
       }
+      patchFeedback(fbKey, { syncedForTaskId: lastTask.id });
     })();
     return () => {
       cancelled = true;
+      abortController.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, lastTask?.id, lastTask?.status]);
+  }, [active, deviceId, fbKey, lastAction, lastTask, objectPath, paramByLeaf, patchFeedback, refetch, selectedInstId, selectorGroup.titleZh]);
+
+  const awaitingSubmittedReadback = Boolean(
+    lastAction?.taskId
+    && lastAction.syncedForTaskId !== lastAction.taskId
+    && lastAction.submitStatus === 'queued',
+  );
 
   // 基站应答失败 → notification（只首次提示）
   useEffect(() => {
@@ -782,9 +867,22 @@ export default function InstanceSelectorForm({
       if (addTask.status !== 'completed') {
         throw new Error(addTask.errorMessage || (locale === 'zh-CN' ? `新增实例失败(${addTask.status})` : `Add instance failed(${addTask.status})`));
       }
-      const refreshed = await refetch();
-      const nextObject = refreshed.data?.objects.find((o) => o.path === objectPath);
       const knownInstances = new Set(instanceIds);
+      const refreshedData = await waitForReadback({
+        read: async () => {
+          deviceParameterApi.invalidateParameterSchemaCache(deviceId, objectPath);
+          return (await refetch()).data;
+        },
+        matches: (data) => {
+          const refreshedObject = data?.objects.find((item) => item.path === objectPath);
+          return refreshedObject?.currentInstances
+            .map(String)
+            .some((id) => !knownInstances.has(id)) ?? false;
+        },
+        intervalMs: 500,
+        timeoutMs: 30_000,
+      });
+      const nextObject = refreshedData?.objects.find((o) => o.path === objectPath);
       newInstanceId = nextObject?.currentInstances
         .map((n) => String(n))
         .find((id) => !knownInstances.has(id));
@@ -835,6 +933,9 @@ export default function InstanceSelectorForm({
         submitStatus: 'queued',
         taskId: result.taskId,
         savedInstId: newInstanceId,
+        expectedReadback: Object.fromEntries(
+          updates.map((update) => [update.parameterPath, update.parameterValue]),
+        ),
         detail: `新增实例 ${newInstanceId} ${updates.length} 项`,
         at: Date.now(),
       });
@@ -895,6 +996,8 @@ export default function InstanceSelectorForm({
         action: 'delete',
         submitStatus: 'queued',
         taskId: result.taskId,
+        deletedInstIds: [instanceId],
+        readbackObjectPath: objectPath,
         detail: `实例 ${instanceId}`,
         at: Date.now(),
       });
@@ -963,6 +1066,9 @@ export default function InstanceSelectorForm({
         submitStatus: 'queued',
         taskId: result.taskId,
         savedInstId: selectedInstId,
+        expectedReadback: Object.fromEntries(
+          updates.map((update) => [update.parameterPath, update.parameterValue]),
+        ),
         detail: `实例 ${selectedInstId} ${updates.length} 项`,
         at: Date.now(),
       });
@@ -1014,6 +1120,8 @@ export default function InstanceSelectorForm({
           action: 'add',
           submitStatus: 'queued',
           taskId: result.taskId,
+          readbackObjectPath: subPath,
+          readbackInstancesBefore: subInstanceIds(subObject).map(String),
           detail: subObject,
           at: Date.now(),
         });
@@ -1036,7 +1144,7 @@ export default function InstanceSelectorForm({
         void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
       }
     },
-    [addMutation, deviceId, fbKey, objectPath, queryClient, refetch, selectedInstId, setFeedback],
+    [addMutation, deviceId, fbKey, objectPath, queryClient, refetch, selectedInstId, setFeedback, subInstanceIds],
   );
 
   const handleNrWanAdd = useCallback(async () => {
@@ -1053,8 +1161,21 @@ export default function InstanceSelectorForm({
       const vlanTask = await waitForTaskTerminal(vlanResult.taskId);
       if (vlanTask.status !== 'completed') throw new Error(vlanTask.errorMessage || `AddObject VlanInterface ${vlanTask.status}`);
 
-      const vlanRefresh = await refetch();
-      const vlanObject = vlanRefresh.data?.objects.find((item) => item.path === vlanBase);
+      const vlanSchema = await waitForReadback({
+        read: async () => {
+          deviceParameterApi.invalidateParameterSchemaCache(deviceId, objectPath);
+          return (await refetch()).data;
+        },
+        matches: (data) => {
+          const refreshedObject = data?.objects.find((item) => item.path === vlanBase);
+          return refreshedObject?.currentInstances
+            .map(String)
+            .some((id) => !knownVlanIds.has(id)) ?? false;
+        },
+        intervalMs: 500,
+        timeoutMs: 30_000,
+      });
+      const vlanObject = vlanSchema?.objects.find((item) => item.path === vlanBase);
       const vlanInstance = vlanObject?.currentInstances.map(String).find((id) => !knownVlanIds.has(id));
       if (!vlanInstance) throw new Error(locale === 'zh-CN' ? '未能识别新增 VLAN 对象编号' : 'Unable to identify the new VLAN object');
 
@@ -1070,7 +1191,11 @@ export default function InstanceSelectorForm({
       }));
       setFeedback(fbKey, {
         kind: 'multi', action: 'save', submitStatus: 'queued', taskId: updateResult.taskId,
-        savedInstId: selectedInstId, detail: `VLAN ${vlanInstance}`, at: Date.now(),
+        savedInstId: selectedInstId,
+        expectedReadback: Object.fromEntries(
+          parameters.map((parameter) => [parameter.parameterPath, parameter.parameterValue]),
+        ),
+        detail: `VLAN ${vlanInstance}`, at: Date.now(),
       });
       message.success({ content: locale === 'zh-CN' ? 'WAN/VLAN 对象已创建并下发' : 'WAN/VLAN object created and queued', duration: 6 });
       setNrWanAdd(null);
@@ -1117,7 +1242,11 @@ export default function InstanceSelectorForm({
       }));
       setFeedback(fbKey, {
         kind: 'multi', action: 'save', submitStatus: 'queued', taskId: result.taskId,
-        savedInstId: selectedInstId, detail: `VLAN ${vlanEdit.instanceId}`, at: Date.now(),
+        savedInstId: selectedInstId,
+        expectedReadback: Object.fromEntries(
+          parameters.map((parameter) => [parameter.parameterPath, parameter.parameterValue]),
+        ),
+        detail: `VLAN ${vlanEdit.instanceId}`, at: Date.now(),
       });
       setVlanEdit(null);
       message.success({ content: locale === 'zh-CN' ? 'VLAN 修改已下发' : 'VLAN update queued', duration: 5 });
@@ -1147,6 +1276,8 @@ export default function InstanceSelectorForm({
           action: 'delete',
           submitStatus: 'queued',
           taskId: result.taskId,
+          deletedInstIds: [String(rowIdx)],
+          readbackObjectPath: `${objectPath}${selectedInstId}.${subObject}.`,
           detail: `${subObject}.${rowIdx}`,
           at: Date.now(),
         });
@@ -1193,7 +1324,7 @@ export default function InstanceSelectorForm({
     <Button
       icon={<PlusOutlined />}
       onClick={openAddModal}
-      disabled={!canAdd || reachedMax || addMutation.isPending || updateMutation.isPending}
+      disabled={!canAdd || reachedMax || addMutation.isPending || updateMutation.isPending || awaitingSubmittedReadback}
     >
       新 增
     </Button>
@@ -1207,7 +1338,12 @@ export default function InstanceSelectorForm({
       extra={
         lastAction
           ? (() => {
-              const spec = statusTagSpec(lastAction, lastTask?.status, locale);
+              const visibleTaskStatus = lastTask?.status === 'completed'
+                && lastAction.taskId
+                && lastAction.syncedForTaskId !== lastTask.id
+                ? 'sent'
+                : lastTask?.status;
+              const spec = statusTagSpec(lastAction, visibleTaskStatus, locale);
               return (
                 <Tag icon={spec.icon} color={spec.color}>
                   {spec.label} · {lastAction.detail} · {formatTime(lastAction.at)}
@@ -1247,12 +1383,12 @@ export default function InstanceSelectorForm({
         <Popconfirm
           title={locale === 'zh-CN' ? `确认删除实例 ${selectedInstId ?? ''}？` : `Delete instance ${selectedInstId ?? ''}?`}
           onConfirm={() => void handleDelete()}
-          disabled={!canDelete || !selectedInstId || deleteMutation.isPending}
+          disabled={!canDelete || !selectedInstId || deleteMutation.isPending || awaitingSubmittedReadback}
         >
           <Button
             danger
             icon={<DeleteOutlined />}
-            disabled={!canDelete || !selectedInstId || deleteMutation.isPending}
+            disabled={!canDelete || !selectedInstId || deleteMutation.isPending || awaitingSubmittedReadback}
             loading={deleteMutation.isPending}
           >
             {locale === 'zh-CN' ? '删 除' : 'Delete'}
@@ -1389,7 +1525,9 @@ export default function InstanceSelectorForm({
                     locale,
                     selectorGroup.id === 'gnb-network-interface',
                     cg.id === 'gnb-interface-vlan' ? () => void handleSave() : undefined,
-                    cg.id === 'gnb-interface-vlan' ? updateMutation.isPending : false,
+                    cg.id === 'gnb-interface-vlan'
+                      ? updateMutation.isPending || awaitingSubmittedReadback
+                      : false,
                     cg.id === 'gnb-interface-vlan'
                       ? (row) => (
                           <Space direction="vertical" size={4} style={{ width: '100%' }}>
@@ -1453,8 +1591,8 @@ export default function InstanceSelectorForm({
               type="primary"
               icon={<SaveOutlined />}
               onClick={() => void handleSave()}
-              loading={updateMutation.isPending}
-              disabled={Object.keys(formEdits).length === 0}
+              loading={updateMutation.isPending || awaitingSubmittedReadback}
+              disabled={Object.keys(formEdits).length === 0 || awaitingSubmittedReadback}
             >
               {locale === 'zh-CN' ? '保 存' : 'Save'}
             </Button>

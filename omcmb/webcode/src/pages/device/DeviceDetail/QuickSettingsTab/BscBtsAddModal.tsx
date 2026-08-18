@@ -278,11 +278,13 @@ export default function BscBtsAddModal({
 
     // 1) AddObject
     let newInstanceNumber: number | undefined;
+    let addTaskId: string | undefined;
     try {
       const addResp = await addMutation.mutateAsync({
         deviceId,
         objectPath: BSC_BTS_OBJECT_PREFIX,
       });
+      addTaskId = addResp.taskId;
       const task = await waitForTaskTerminal(addResp.taskId);
       if (task.status !== 'completed') {
         throw new Error(task.errorMessage || `AddObject ${task.status}`);
@@ -332,10 +334,12 @@ export default function BscBtsAddModal({
         kind: 'multi',
         action: 'add',
         submitStatus: 'queued',
-        taskId: undefined,
+        taskId: addTaskId,
         detail: `BTS #${newInstanceNumber}`,
         at: Date.now(),
         instanceNumber: newInstanceNumber,
+        addedInstIds: [String(newInstanceNumber)],
+        readbackObjectPath: BSC_BTS_OBJECT_PREFIX,
       });
       resetState();
       onClose();
@@ -356,6 +360,11 @@ export default function BscBtsAddModal({
         detail: `BTS #${newInstanceNumber} · ${updates.length} 项参数`,
         at: Date.now(),
         instanceNumber: newInstanceNumber,
+        addedInstIds: [String(newInstanceNumber)],
+        readbackObjectPath: BSC_BTS_OBJECT_PREFIX,
+        expectedReadback: Object.fromEntries(
+          updates.map((update) => [update.parameterPath, update.parameterValue]),
+        ),
       });
       resetState();
       onClose();

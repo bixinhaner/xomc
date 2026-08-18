@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Input, Modal, Select, Space, Table, Typography, message } from 'antd';
+import { Button, Card, Input, Modal, Select, Space, Table, Typography, message, notification } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { EditOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
@@ -11,6 +11,11 @@ import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quickse
 import { formatEnumDisplayValue, resolveQuickSettingsParameterType, validateValue } from './validators';
 import { useT } from '@/hooks/useT';
 import { refreshQuickSettingsRelatedLists } from './quickSettingsTerminalRefresh';
+import { deviceParameterApi } from '@core/services/api/deviceParameterApi';
+import {
+  ParameterReadbackTimeoutError,
+  waitForExpectedParameterValues,
+} from './parameterReadback';
 
 const { Text } = Typography;
 
@@ -35,6 +40,12 @@ interface EditState {
   row: TableRow;
   values: Record<string, string>;
   errors: Record<string, string>;
+}
+
+interface PendingSubmission {
+  taskId: string;
+  expectedReadback: Record<string, string>;
+  groupTitle: string;
 }
 
 function sortedRows(groups: QuickSettingsGroup[], kind: FixedScalarTableKind): TableRow[] {
@@ -154,13 +165,13 @@ export default function FixedScalarSettingsTable({
   const queryClient = useQueryClient();
   const updateMutation = useUpdateParameters();
   const [editState, setEditState] = useState<EditState | null>(null);
-  const [lastTaskId, setLastTaskId] = useState<string>();
+  const [lastSubmission, setLastSubmission] = useState<PendingSubmission>();
 
   const rows = useMemo(
     () => sortedRows(groups, kind),
     [groups, kind],
   );
-  const { data: deviceInfoSchema } = useParameterSchema(
+  const { data: deviceInfoSchema, refetch: refetchDeviceInfoSchema } = useParameterSchema(
     deviceId,
     'Device.DeviceInfo.',
     active,
@@ -172,27 +183,66 @@ export default function FixedScalarSettingsTable({
     }
     return map;
   }, [deviceInfoSchema]);
+  const lastTaskId = lastSubmission?.taskId;
   const { data: lastTask } = useDeviceTaskStatus(active ? lastTaskId : undefined);
   const lastTaskStatus = lastTask?.status;
 
   useEffect(() => {
     if (!active || !lastTaskId || !isDeviceTaskTerminal(lastTaskStatus)) return;
     let cancelled = false;
-    void refreshQuickSettingsRelatedLists(queryClient, deviceId)
-      .catch((error) => {
-        console.warn('FixedScalarSettingsTable: refresh after device response failed', error);
-      })
-      .finally(() => {
-        if (!cancelled) setLastTaskId(undefined);
-      });
+    const abortController = new AbortController();
+    void (async () => {
+      try {
+        const expected = new Map(Object.entries(lastSubmission?.expectedReadback ?? {}));
+        if (lastTaskStatus === 'completed' && expected.size > 0) {
+          await waitForExpectedParameterValues({
+            expected,
+            read: async () => {
+              deviceParameterApi.invalidateParameterSchemaCache(deviceId);
+              const refreshed = await refetchDeviceInfoSchema();
+              return new Map(
+                (refreshed.data?.parameters ?? []).map((item) => [
+                  item.path,
+                  String(item.currentValue ?? ''),
+                ]),
+              );
+            },
+            intervalMs: 500,
+            timeoutMs: 30_000,
+            signal: abortController.signal,
+          });
+        }
+        await refreshQuickSettingsRelatedLists(queryClient, deviceId);
+        if (!cancelled) {
+          setLastSubmission((current) => current?.taskId === lastTaskId ? undefined : current);
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') return;
+        if (!cancelled) {
+          notification.error({
+            message: t('device.multi.readbackFailed', { group: lastSubmission?.groupTitle ?? '' }),
+            description: error instanceof ParameterReadbackTimeoutError
+              ? t('device.cell.readbackPendingTimeout')
+              : error instanceof Error ? error.message : String(error),
+            duration: 0,
+          });
+        }
+      }
+    })();
     return () => {
       cancelled = true;
+      abortController.abort();
     };
-  }, [active, lastTaskId, lastTaskStatus, queryClient, deviceId]);
+  }, [active, lastSubmission, lastTaskId, lastTaskStatus, queryClient, deviceId, refetchDeviceInfoSchema, t]);
 
   const openEdit = (row: TableRow) => {
     const values = Object.fromEntries(
-      editableParams(row.group, kind).map((param) => [param.name, parameterValue(param, schemaByPath)]),
+      editableParams(row.group, kind).map((param) => [
+        param.name,
+        (param.standardPath && lastSubmission?.expectedReadback[param.standardPath] !== undefined)
+          ? lastSubmission.expectedReadback[param.standardPath]
+          : parameterValue(param, schemaByPath),
+      ]),
     );
     setEditState({ row, values, errors: {} });
   };
@@ -215,7 +265,10 @@ export default function FixedScalarSettingsTable({
       const type = parameterType(param, schemaByPath);
       const error = validateValue(value, type, schema?.constraints);
       if (error) errors[param.name] = error;
-      if (param.standardPath && value !== parameterValue(param, schemaByPath)) {
+      const baselineValue = param.standardPath && lastSubmission?.expectedReadback[param.standardPath] !== undefined
+        ? lastSubmission.expectedReadback[param.standardPath]
+        : parameterValue(param, schemaByPath);
+      if (param.standardPath && value !== baselineValue) {
         updates.push({
           parameterPath: param.standardPath,
           parameterValue: value,
@@ -235,7 +288,14 @@ export default function FixedScalarSettingsTable({
 
     try {
       const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
-      setLastTaskId(result.taskId);
+      if (!result.taskId) throw new Error(t('device.multi.unknownErrorHint'));
+      setLastSubmission({
+        taskId: result.taskId,
+        groupTitle: locale === 'zh-CN' ? row.group.titleZh : row.group.titleEn,
+        expectedReadback: Object.fromEntries(
+          updates.map((update) => [update.parameterPath, update.parameterValue]),
+        ),
+      });
       setEditState(null);
       message.success(locale === 'zh-CN' ? '配置已提交' : 'Configuration submitted');
     } catch (error) {
@@ -303,7 +363,7 @@ export default function FixedScalarSettingsTable({
           icon={<EditOutlined />}
           aria-label={locale === 'zh-CN' ? `编辑第 ${row.index} 行` : `Edit row ${row.index}`}
           onClick={() => openEdit(row)}
-          disabled={updateMutation.isPending}
+          disabled={Boolean(lastSubmission) || updateMutation.isPending}
         />
       ),
     };
@@ -378,7 +438,7 @@ export default function FixedScalarSettingsTable({
         render: (_value: unknown, row: TableRow) => parameterValue(parameterByName(row.group, 'Gateway'), schemaByPath) || '-',
       },
     ];
-  }, [kind, locale, rows, schemaByPath, t, updateMutation.isPending]);
+  }, [kind, lastSubmission, locale, rows, schemaByPath, t, updateMutation.isPending]);
 
   const title = kind === 'wan'
     ? (locale === 'zh-CN' ? 'WAN 配置' : 'WAN Config')

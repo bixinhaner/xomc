@@ -18,6 +18,7 @@ import BscBtsAddModal from './BscBtsAddModal';
 import { BSC_BTS_FEEDBACK_GROUP_ID } from './bscBtsFeedback';
 import { applyInstanceContext, type QuickSettingsInstanceContext } from './validators';
 import { getMlnMmePoolSyncPaths, isMlnIndexedMmePoolModel } from './mmeIpPlmnIndexed';
+import { parameterReadbackMapsMatch, waitForReadback } from './parameterReadback';
 import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
@@ -522,7 +523,11 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   // BSC 下拉显示 "实例号 · IpaUnitId=xxx"，让运维能直接看出 BTS 与 IPA 单元映射。
   // 复用 useResolvedCellInstances 已经发过的同一份 schema 查询（react-query
   // 按 (deviceId, 'DeviceGSM.Bts.') key 去重，不会额外触发请求）。
-  const { data: bscBtsSchema } = useParameterSchema(deviceId, BSC_BTS_OBJECT_PREFIX, queryActive && isBSC);
+  const { data: bscBtsSchema, refetch: refetchBscBtsSchema } = useParameterSchema(
+    deviceId,
+    BSC_BTS_OBJECT_PREFIX,
+    queryActive && isBSC,
+  );
   const bscBtsIpaUnitIdByInstance = useMemo(() => {
     const m = new Map<number, string>();
     if (!isBSC || !bscBtsSchema) return m;
@@ -553,6 +558,54 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
   const setBscFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchBscFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
   const { data: bscLastTask } = useDeviceTaskStatus(bscLastAction?.taskId);
+  const bscAwaitingReadback = Boolean(
+    bscLastAction?.submitStatus === 'queued'
+    && bscLastAction.taskId
+    && bscLastAction.syncedForTaskId !== bscLastAction.taskId
+    && !['failed', 'expired', 'cancelled'].includes(bscLastTask?.status ?? ''),
+  );
+
+  useEffect(() => {
+    if (!isBSC || !bscLastAction?.taskId || !bscLastTask) return;
+    if (bscLastTask.status !== 'completed') return;
+    if (bscLastAction.syncedForTaskId === bscLastTask.id) return;
+    let cancelled = false;
+    const abortController = new AbortController();
+    void waitForReadback({
+      read: async () => {
+        deviceParameterApi.invalidateParameterSchemaCache(deviceId, BSC_BTS_OBJECT_PREFIX);
+        return (await refetchBscBtsSchema()).data;
+      },
+      matches: (schema) => {
+        if (!schema) return false;
+        const expected = new Map(Object.entries(bscLastAction.expectedReadback ?? {}));
+        const actual = new Map(
+          schema.parameters.map((item) => [item.path, String(item.currentValue ?? '')]),
+        );
+        if (!parameterReadbackMapsMatch(expected, actual)) return false;
+        const instances = schema.objects
+          .find((item) => item.path === (bscLastAction.readbackObjectPath ?? BSC_BTS_OBJECT_PREFIX))
+          ?.currentInstances.map(String) ?? [];
+        const addedOk = (bscLastAction.addedInstIds ?? []).every((id) => instances.includes(id));
+        const deletedOk = (bscLastAction.deletedInstIds ?? []).every((id) => !instances.includes(id));
+        return addedOk && deletedOk;
+      },
+      intervalMs: 500,
+      timeoutMs: 30_000,
+      signal: abortController.signal,
+    }).then(() => {
+      if (!cancelled) patchBscFeedback(bscFbKey, { syncedForTaskId: bscLastTask.id });
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      if (!cancelled) {
+        message.error(t('device.multi.readbackFailed', { group: 'BTS' }));
+      }
+    });
+    return () => {
+      cancelled = true;
+      abortController.abort();
+    };
+  }, [bscFbKey, bscLastAction, bscLastTask, deviceId, isBSC, patchBscFeedback, refetchBscBtsSchema, t]);
 
   // 任务终态(completed/failed/expired/cancelled)→ 让 schema/parameters/tree 都过期,
   // 触发实例下拉重新拉取(看到新增/已删的实例号)。
@@ -595,6 +648,8 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
             at: Date.now(),
             instanceNumber: inst,
             originFaultBrief: brief,
+            deletedInstIds: [String(inst)],
+            readbackObjectPath: BSC_BTS_OBJECT_PREFIX,
           });
           // 当前下拉若停在被回滚的实例上,清掉让 selector 自动落回首条存活实例
           setUserPickedInstance((prev) => (prev === inst ? null : prev));
@@ -640,6 +695,8 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
         action: 'delete',
         submitStatus: 'queued',
         taskId,
+        deletedInstIds: [String(selectedInstance)],
+        readbackObjectPath: BSC_BTS_OBJECT_PREFIX,
         detail: `BTS #${selectedInstance}`,
         at: Date.now(),
       });
@@ -756,6 +813,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
                 size="small"
                 icon={<PlusOutlined />}
                 loading={btsAddPending}
+                disabled={bscAwaitingReadback}
                 onClick={handleAddBts}
                 title={t('device.quickSettings.btsAdd')}
               >
@@ -766,20 +824,25 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
                 onConfirm={handleDeleteBts}
                 okText={t('common.confirm')}
                 cancelText={t('common.cancel')}
-                disabled={selectableInstances.length === 0 || btsDeletePending}
+                disabled={selectableInstances.length === 0 || btsDeletePending || bscAwaitingReadback}
               >
                 <Button
                   size="small"
                   danger
                   icon={<MinusOutlined />}
                   loading={btsDeletePending}
-                  disabled={selectableInstances.length === 0}
+                  disabled={selectableInstances.length === 0 || bscAwaitingReadback}
                   title={t('device.quickSettings.btsDelete')}
                 >
                   {t('device.quickSettings.btsDelete')}
                 </Button>
               </Popconfirm>
               {bscLastAction && (() => {
+                const visibleBscTaskStatus = bscLastTask?.status === 'completed'
+                  && bscLastAction.taskId
+                  && bscLastAction.syncedForTaskId !== bscLastTask.id
+                  ? 'sent'
+                  : bscLastTask?.status;
                 // 普通新增/保存/删除走 statusTagSpec(失败时由外层渲染附加 briefFault + Tooltip 全文)。
                 // add_rollback 是 SPV 部分被拒后自动 DeleteObject 的反馈:
                 //  - 入队失败:红色"自动回滚入队失败,请手动删除"
@@ -791,7 +854,7 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
                   if (bscLastAction.submitStatus === 'failed_to_queue') {
                     spec = { color: 'error', icon: <ExclamationCircleOutlined />, label: '新增失败 · 自动回滚入队失败' };
                   } else {
-                    switch (bscLastTask?.status) {
+                    switch (visibleBscTaskStatus) {
                       case 'completed':
                         spec = { color: 'warning', icon: <ExclamationCircleOutlined />, label: '新增失败已自动回滚' };
                         break;
@@ -805,10 +868,10 @@ export default function QuickSettingsTab({ deviceId, networkType, active = true,
                     }
                   }
                 } else {
-                  spec = statusTagSpec(bscLastAction, bscLastTask?.status, t);
+                  spec = statusTagSpec(bscLastAction, visibleBscTaskStatus, t);
                 }
 
-                const isFailedTooltip = bscLastTask?.status === 'failed' && Boolean(bscLastTask?.errorMessage);
+                const isFailedTooltip = visibleBscTaskStatus === 'failed' && Boolean(bscLastTask?.errorMessage);
                 const briefFault = bscLastAction.action === 'add_rollback'
                   ? (bscLastAction.originFaultBrief ?? '')
                   : (isFailedTooltip ? formatDeviceFaultBrief(bscLastTask?.errorMessage) : '');

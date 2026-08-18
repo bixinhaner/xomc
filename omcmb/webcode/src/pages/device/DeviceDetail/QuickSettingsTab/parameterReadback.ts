@@ -6,6 +6,14 @@ export interface WaitForExpectedParameterValuesOptions {
   signal?: AbortSignal;
 }
 
+export interface WaitForReadbackOptions<T> {
+  read: (signal: AbortSignal) => Promise<T>;
+  matches: (actual: T) => boolean;
+  intervalMs?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 export interface SubmittedReadbackState {
   taskId?: string;
   syncedForTaskId?: string;
@@ -75,19 +83,19 @@ async function delayWithSignal(delayMs: number, signal?: AbortSignal): Promise<v
   });
 }
 
-async function readWithDeadline(
-  read: (signal: AbortSignal) => Promise<ReadonlyMap<string, string>>,
+async function readWithDeadline<T>(
+  read: (signal: AbortSignal) => Promise<T>,
   remainingMs: number,
   signal?: AbortSignal,
-): Promise<ReadonlyMap<string, string>> {
+): Promise<T> {
   throwIfAborted(signal);
   const readController = new AbortController();
 
-  return new Promise<ReadonlyMap<string, string>>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     let settled = false;
     const finish = (
-      callback: (value: ReadonlyMap<string, string> | Error) => void,
-      value: ReadonlyMap<string, string> | Error,
+      callback: (value: T | Error) => void,
+      value: T | Error,
     ) => {
       if (settled) return;
       settled = true;
@@ -112,7 +120,7 @@ async function readWithDeadline(
     void Promise.resolve()
       .then(() => read(readController.signal))
       .then(
-        (value) => finish((result) => resolve(result as ReadonlyMap<string, string>), value),
+        (value) => finish((result) => resolve(result as T), value),
         (error: unknown) => finish(
           (reason) => reject(reason),
           error instanceof Error ? error : new Error(String(error)),
@@ -121,25 +129,42 @@ async function readWithDeadline(
   });
 }
 
-function parameterValuesMatch(
+function booleanReadbackValue(value: string): boolean | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'on', 'enable', 'enabled'].includes(normalized)) return true;
+  if (['0', 'false', 'off', 'disable', 'disabled'].includes(normalized)) return false;
+  return undefined;
+}
+
+export function parameterReadbackValuesMatch(expected: string, actual: string): boolean {
+  if (expected === actual) return true;
+  const expectedBoolean = booleanReadbackValue(expected);
+  const actualBoolean = booleanReadbackValue(actual);
+  return expectedBoolean !== undefined
+    && actualBoolean !== undefined
+    && expectedBoolean === actualBoolean;
+}
+
+export function parameterReadbackMapsMatch(
   expected: ReadonlyMap<string, string>,
   actual: ReadonlyMap<string, string>,
 ): boolean {
   for (const [path, expectedValue] of expected) {
-    if (actual.get(path) !== expectedValue) {
+    const actualValue = actual.get(path);
+    if (actualValue === undefined || !parameterReadbackValuesMatch(expectedValue, actualValue)) {
       return false;
     }
   }
   return true;
 }
 
-export async function waitForExpectedParameterValues({
-  expected,
+export async function waitForReadback<T>({
   read,
+  matches,
   intervalMs = 500,
   timeoutMs = 30_000,
   signal,
-}: WaitForExpectedParameterValuesOptions): Promise<ReadonlyMap<string, string>> {
+}: WaitForReadbackOptions<T>): Promise<T> {
   const deadlineAt = Date.now() + timeoutMs;
   while (true) {
     throwIfAborted(signal);
@@ -149,7 +174,7 @@ export async function waitForExpectedParameterValues({
     }
     const actual = await readWithDeadline(read, remainingBeforeRead, signal);
     throwIfAborted(signal);
-    if (parameterValuesMatch(expected, actual)) {
+    if (matches(actual)) {
       return actual;
     }
     const remainingBeforeDelay = deadlineAt - Date.now();
@@ -158,4 +183,20 @@ export async function waitForExpectedParameterValues({
     }
     await delayWithSignal(Math.min(intervalMs, remainingBeforeDelay), signal);
   }
+}
+
+export async function waitForExpectedParameterValues({
+  expected,
+  read,
+  intervalMs = 500,
+  timeoutMs = 30_000,
+  signal,
+}: WaitForExpectedParameterValuesOptions): Promise<ReadonlyMap<string, string>> {
+  return waitForReadback({
+    read,
+    matches: (actual) => parameterReadbackMapsMatch(expected, actual),
+    intervalMs,
+    timeoutMs,
+    signal,
+  });
 }

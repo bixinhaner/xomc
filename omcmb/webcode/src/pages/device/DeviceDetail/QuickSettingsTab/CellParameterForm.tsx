@@ -2020,13 +2020,17 @@ export default function CellParameterForm({
         : isSwitchField
         ? serializeSwitchValue(values[p.name])
         : String(values[p.name] ?? '');
-      const rawOldVal = special?.kind === 'mme-ip-plmn-table'
-        ? (preferSchemaCurrentValue
-          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
-          : (rawItem?.parameterValue ?? item?.currentValue ?? ''))
-        : (preferSchemaCurrentValue
-          ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
-          : (rawItem?.parameterValue ?? item?.currentValue ?? ''));
+      const schemaOldVal = preferSchemaCurrentValue
+        ? (item?.currentValue ?? rawItem?.parameterValue ?? '')
+        : (rawItem?.parameterValue ?? item?.currentValue ?? '');
+      // SPV 完成到目标值 GPV 落库之间，schema 仍是提交前的旧值。此窗口再次编辑时
+      // 必须以上一次尚未回读确认的提交值为基线，否则“改新值后马上改回旧值”会被
+      // 误判为无变更，第二次 SPV 根本不会入队。
+      const rawOldVal = lastSubmit?.taskId && lastSubmit.syncedForTaskId !== lastSubmit.taskId
+        ? (lastSubmit.expectedReadback?.[rawItem?.parameterPath ?? path]
+          ?? lastSubmit.expectedReadback?.[path]
+          ?? schemaOldVal)
+        : schemaOldVal;
       // 脏检查必须与表单初值在同一取值空间比较:初值经过 normalizeEnumValue 归一化
       // (如 TR-069 BOOLEAN 设备上报 "true"/"false",XML 选项值为 "1"/"0"),
       // oldVal 若用原始设备值会导致未修改也判脏、点保存即下发(issue #317)。
@@ -2228,7 +2232,7 @@ export default function CellParameterForm({
       };
       try {
         const expectedReadback = new Map(Object.entries(lastSubmit?.expectedReadback ?? {}));
-        if (taskCompleted && group.id === 'enb-mme' && expectedReadback.size > 0) {
+        if (taskCompleted && expectedReadback.size > 0) {
           // SPV completed 只代表设备接受设置。后端自动 GPV 落库前 schema 仍可能是旧值，
           // 因此持续读取目标 path，只有实际观察到本次提交值才允许覆盖表单和清理草稿。
           await waitForExpectedParameterValues({
@@ -2247,7 +2251,7 @@ export default function CellParameterForm({
             signal: abortController.signal,
           });
         } else if (taskCompleted) {
-          // 其它既有快速设置分组保持原有刷新节奏；Issue 158 的 MME 路径不再依赖该固定延时。
+          // 兼容没有记录 expectedReadback 的旧反馈；新提交均应进入上面的目标值确认分支。
           await new Promise((resolve) => window.setTimeout(resolve, 500));
           if (cancelled) return;
           refreshedSchemaByPath = await fetchRefreshedSchema();
