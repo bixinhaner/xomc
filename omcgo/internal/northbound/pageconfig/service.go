@@ -334,6 +334,9 @@ func (s *Service) ListFields(ctx context.Context, filter FieldFilter) []FieldDef
 		}
 	}
 	fields := s.catalog.Fields(filter)
+	if strings.TrimSpace(filter.Profile) != "" {
+		return fields
+	}
 	if s.repo != nil && (filter.Domain == DomainCM || filter.Domain == DomainInventory) {
 		if dynamicFields, err := s.repo.ListDeviceInfoFields(ctx, filter); err == nil && len(dynamicFields) > 0 {
 			return appendMissingFieldDefinitions(fields, dynamicFields)

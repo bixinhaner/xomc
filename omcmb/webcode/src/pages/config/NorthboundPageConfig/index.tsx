@@ -138,6 +138,7 @@ interface ScenarioPeriodRow {
   compressionEnabled: boolean;
   compressionFormat: CompressionFormat;
   selectedFields?: string[];
+  objectProfiles?: Record<string, string>;
 }
 
 interface InventoryField {
@@ -2888,6 +2889,25 @@ function formatObjectToken(token: string): string {
   return parsed.tech ? `${parsed.code} / ${formatTechLabel(parsed.tech)}` : parsed.code;
 }
 
+function objectProfileKey(objectCode: string, tech?: Tech): string {
+  return `${objectCode.trim().toUpperCase()}:${tech ?? ''}`;
+}
+
+function getStoredObjectProfile(row: ScenarioPeriodRow, objectCode: string, tech?: Tech): string | undefined {
+  if (!row.objectProfiles) return undefined;
+  const exact = row.objectProfiles[objectProfileKey(objectCode, tech)];
+  if (exact !== undefined) return exact;
+  return row.objectProfiles[objectProfileKey(objectCode)];
+}
+
+function profileMatchesPeriodFormat(profile: string, format: Format): boolean {
+  if (!profile) return true;
+  const normalized = profile.toLowerCase();
+  if (normalized.includes('.xml.')) return format === 'XML';
+  if (normalized.includes('.csv.')) return format === 'CSV';
+  return true;
+}
+
 function formatFieldTargetLabel(target: FieldTarget): string {
   const tech = getTargetTech(target);
   return tech ? `${target.objectCode} / ${formatTechLabel(tech)}` : target.objectCode;
@@ -2967,6 +2987,10 @@ function getPmTechsFromScope(scope: string): Tech[] {
 }
 
 function resolveEditorProfile(row: ScenarioPeriodRow, objectCode: string, tech?: Tech): string {
+  const storedProfile = getStoredObjectProfile(row, objectCode, tech);
+  if (storedProfile !== undefined && profileMatchesPeriodFormat(storedProfile, row.format)) {
+    return storedProfile;
+  }
   const objectName = objectCode.toLowerCase();
   const format = row.format.toLowerCase();
   if (row.domain === 'CM' && row.scope === 'GNB') return `cm.${objectName}.gnb.${format}.v1`;
@@ -3047,6 +3071,33 @@ function buildFieldRows(
     productClasses: field.productClasses ?? productClasses,
     enabled: true,
   }));
+}
+
+function mapApiFieldToReportRow(
+  field: NorthboundFieldDefinition,
+  target: FieldTarget,
+  index: number,
+): ReportFieldRow {
+  return {
+    key: field.key || `${target.domain}-${target.objectCode}-${field.system_field}-${index}`,
+    domain: target.domain,
+    objectCode: target.objectCode,
+    scope: target.scope,
+    tech: isTech(field.tech) ? field.tech : target.tech,
+    outputAlias: field.output_alias,
+    systemField: field.system_field,
+    source: field.source,
+    dataType: field.data_type,
+    renderer: field.renderer,
+    productClasses: field.product_class
+      ? field.product_class.split(',').map((item) => item.trim()).filter(Boolean)
+      : getTargetProductClasses(target),
+    metricType: field.metric_type === 'counter' || field.metric_type === 'kpi' ? field.metric_type : undefined,
+    statisType: field.statis_type,
+    unit: field.unit,
+    cnName: field.cn_name,
+    enabled: true,
+  };
 }
 
 function getInventoryFieldRows(target: FieldTarget): ReportFieldRow[] {
@@ -3330,6 +3381,19 @@ function getGroupTechLabel(groupItem: FileGroup): string {
 
 function getGroupObjectsLabel(groupItem: FileGroup): string {
   return [...new Set(groupItem.objects.map((object) => object.code))].join(', ');
+}
+
+function getGroupObjectProfiles(groupItem: FileGroup): Record<string, string> | undefined {
+  const profiles: Record<string, string> = {};
+  groupItem.objects.forEach((object) => {
+    const tech = getScenarioObjectTech(groupItem, object);
+    const profile = object.profile ?? '';
+    profiles[objectProfileKey(object.code, tech)] = profile;
+    if (profiles[objectProfileKey(object.code)] === undefined) {
+      profiles[objectProfileKey(object.code)] = profile;
+    }
+  });
+  return Object.keys(profiles).length > 0 ? profiles : undefined;
 }
 
 function getGroupFileNameTemplate(groupItem: FileGroup): string {
@@ -4123,10 +4187,11 @@ function serializeEditorPeriodRows(
       objects: splitObjects(row.objects).map((objectToken) => {
         const parsed = parseObjectToken(objectToken);
         const tech = parsed.tech ?? normalizeTechValue(row.scope);
+        const profile = resolveEditorProfile(row, parsed.code, tech);
         return {
           code: parsed.code,
           tech,
-          profile: resolveEditorProfile(row, parsed.code, tech),
+          profile: profile || undefined,
         };
       }),
     };
@@ -5093,6 +5158,7 @@ function getScenarioPeriodRows(scenario: ScenarioRow): ScenarioPeriodRow[] {
     compressionEnabled: groupItem.compressionEnabled,
     compressionFormat: groupItem.compressionFormat,
     selectedFields: groupItem.selectedFields,
+    objectProfiles: getGroupObjectProfiles(groupItem),
   }));
 
   if (scenario.logs) {
@@ -5685,48 +5751,37 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
       || Boolean(fieldCandidateKey)
       || Boolean(fieldCandidateSearch.trim())
       || selectedFieldKeysForTarget.length > 0;
+    const shouldLoadBackendFieldCatalog = shouldBuildFieldCandidates || Boolean(selectedFieldTarget?.profile);
     useEffect(() => {
       const target = selectedFieldTarget;
       if (!target) return;
       const cacheKey = backendCatalogKey;
-      if (!shouldBuildFieldCandidates || !cacheKey || backendFieldCatalog[cacheKey]) return;
+      if (!shouldLoadBackendFieldCatalog || !cacheKey || backendFieldCatalog[cacheKey]) return;
       const tech = getTargetTech(target);
       let cancelled = false;
       void northboundPageConfigApi.getFields({
         domain: target.domain,
         object: target.objectCode,
-        ...(target.domain === 'PM' && tech ? { tech, profile: target.profile } : {}),
+        ...(tech ? { tech } : {}),
+        ...(target.profile ? { profile: target.profile } : {}),
       })
         .then((resp) => {
           if (cancelled) return;
-          const rows: ReportFieldRow[] = (resp.items ?? []).map((f) => ({
-            key: `${target.domain}-${target.objectCode}-${f.system_field}`,
-            domain: target.domain,
-            objectCode: target.objectCode,
-            scope: target.scope,
-            tech: isTech(f.tech) ? f.tech : target.tech,
-            outputAlias: f.output_alias,
-            systemField: f.system_field,
-            source: f.source,
-            dataType: f.data_type,
-            renderer: f.renderer,
-            productClasses: f.product_class
-              ? f.product_class.split(',').map((item) => item.trim()).filter(Boolean)
-              : getTargetProductClasses(target),
-            metricType: f.metric_type === 'counter' || f.metric_type === 'kpi' ? f.metric_type : undefined,
-            statisType: f.statis_type,
-            unit: f.unit,
-            cnName: f.cn_name,
-            enabled: true,
-          }));
+          const rows: ReportFieldRow[] = (resp.items ?? []).map((f, index) => mapApiFieldToReportRow(f, target, index));
           setBackendFieldCatalog((prev) => (prev[cacheKey] ? prev : { ...prev, [cacheKey]: rows }));
         })
         .catch(() => { /* fall back to static catalog */ });
       return () => { cancelled = true; };
-    }, [backendCatalogKey, selectedFieldTarget, backendFieldCatalog, shouldBuildFieldCandidates]);
+    }, [backendCatalogKey, selectedFieldTarget, backendFieldCatalog, shouldLoadBackendFieldCatalog]);
+    const backendRowsForSelectedTarget = backendCatalogKey ? backendFieldCatalog[backendCatalogKey] : undefined;
     const fieldBaseRows = useMemo(
-      () => getReportFieldRows(selectedFieldTarget, pmMetricRows),
-      [selectedFieldTarget, pmMetricRows],
+      () => {
+        if (selectedFieldTarget?.profile && backendRowsForSelectedTarget && backendRowsForSelectedTarget.length > 0) {
+          return backendRowsForSelectedTarget;
+        }
+        return getReportFieldRows(selectedFieldTarget, pmMetricRows);
+      },
+      [backendRowsForSelectedTarget, selectedFieldTarget, pmMetricRows],
     );
     const fieldCandidatePoolRows = useMemo(
       () => {
@@ -5990,6 +6045,7 @@ export default function NorthboundPageConfig() {
   const [viewFieldConfigDomain, setViewFieldConfigDomain] = useState<Domain>(defaultFieldTarget?.domain ?? 'CM');
   const [viewFieldConfigTargetKey, setViewFieldConfigTargetKey] = useState(defaultFieldTarget?.key ?? '');
   const [viewFieldTechFilter, setViewFieldTechFilter] = useState<FieldTechFilter>(() => getFieldTechFilterForTarget(defaultFieldTarget));
+  const [viewBackendFieldCatalog, setViewBackendFieldCatalog] = useState<Record<string, ReportFieldRow[]>>({});
   const [scenarioEnabled, setScenarioEnabled] = useState<Record<string, boolean>>(
     () => Object.fromEntries(scenarioRows.map((s) => [s.code, s.enabled])),
   );
@@ -6724,10 +6780,37 @@ export default function NorthboundPageConfig() {
     () => visibleViewFieldTargets.find((target) => target.key === viewFieldConfigTargetKey) ?? visibleViewFieldTargets[0],
     [viewFieldConfigTargetKey, visibleViewFieldTargets],
   );
+  const viewBackendCatalogKey = selectedViewFieldTarget
+    ? `${selectedViewFieldTarget.domain}:${selectedViewFieldTarget.objectCode}:${getTargetTech(selectedViewFieldTarget) ?? 'ALL'}:${selectedViewFieldTarget.profile}`
+    : '';
+  useEffect(() => {
+    const target = selectedViewFieldTarget;
+    if (!target?.profile || !viewBackendCatalogKey || viewBackendFieldCatalog[viewBackendCatalogKey]) return;
+    const tech = getTargetTech(target);
+    let cancelled = false;
+    void northboundPageConfigApi.getFields({
+      domain: target.domain,
+      object: target.objectCode,
+      ...(tech ? { tech } : {}),
+      profile: target.profile,
+    })
+      .then((resp) => {
+        if (cancelled) return;
+        const rows = (resp.items ?? []).map((field, index) => mapApiFieldToReportRow(field, target, index));
+        setViewBackendFieldCatalog((prev) => (prev[viewBackendCatalogKey] ? prev : { ...prev, [viewBackendCatalogKey]: rows }));
+      })
+      .catch(() => { /* fall back to static catalog */ });
+    return () => { cancelled = true; };
+  }, [selectedViewFieldTarget, viewBackendCatalogKey, viewBackendFieldCatalog]);
+  const viewBackendRowsForSelectedTarget = viewBackendCatalogKey ? viewBackendFieldCatalog[viewBackendCatalogKey] : undefined;
   const viewFieldRows = useMemo(
-    () => getReportFieldRows(selectedViewFieldTarget, pmMetricRows)
-      .filter((row) => rowMatchesTechFilter(row, activeViewFieldTechFilter)),
-    [pmMetricRows, selectedViewFieldTarget, activeViewFieldTechFilter],
+    () => {
+      const rows = selectedViewFieldTarget?.profile && viewBackendRowsForSelectedTarget && viewBackendRowsForSelectedTarget.length > 0
+        ? viewBackendRowsForSelectedTarget
+        : getReportFieldRows(selectedViewFieldTarget, pmMetricRows);
+      return rows.filter((row) => rowMatchesTechFilter(row, activeViewFieldTechFilter));
+    },
+    [activeViewFieldTechFilter, pmMetricRows, selectedViewFieldTarget, viewBackendRowsForSelectedTarget],
   );
   const viewFileDeliveryTargets = selectedScenario ? getFileDeliveryTargets(selectedScenario.code) : [];
   const editorFileOwnerCode = normalizeFileDeliveryOwnerCode(

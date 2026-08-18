@@ -145,6 +145,10 @@ func (r *PgRepository) backfillDefaultFileProfileGroupMetadata(ctx context.Conte
 				changed = true
 			}
 		}
+		if groups[i].Domain == defaultGroup.Domain && groups[i].Format == defaultGroup.Format &&
+			backfillDefaultFileProfileObjectProfiles(groups[i].Domain, groups[i].Format, groups[i].Objects, defaultGroup.Objects) {
+			changed = true
+		}
 	}
 	if !changed {
 		return nil
@@ -199,6 +203,61 @@ func normalizeScenarioLogObjects(objects []ScenarioObject) bool {
 		normalized := normalizeLogObjectCode(objects[i].Code)
 		if normalized != objects[i].Code {
 			objects[i].Code = normalized
+			changed = true
+		}
+	}
+	return changed
+}
+
+func backfillDefaultFileProfileObjectProfiles(domain Domain, format OutputFormat, objects, defaultObjects []ScenarioObject) bool {
+	if domain != DomainCM || len(objects) == 0 || len(defaultObjects) == 0 {
+		return false
+	}
+	defaultByCodeTech := make(map[string]ScenarioObject, len(defaultObjects))
+	defaultByCode := make(map[string]ScenarioObject, len(defaultObjects))
+	defaultByCodeCount := make(map[string]int, len(defaultObjects))
+	for _, object := range defaultObjects {
+		code := strings.ToUpper(strings.TrimSpace(object.Code))
+		tech := strings.ToUpper(strings.TrimSpace(object.Tech))
+		if code == "" {
+			continue
+		}
+		defaultByCodeTech[code+"\x00"+tech] = object
+		defaultByCode[code] = object
+		defaultByCodeCount[code]++
+	}
+	changed := false
+	for i := range objects {
+		code := strings.ToUpper(strings.TrimSpace(objects[i].Code))
+		if code == "" {
+			continue
+		}
+		tech := strings.ToUpper(strings.TrimSpace(objects[i].Tech))
+		defaultObject, ok := defaultByCodeTech[code+"\x00"+tech]
+		if !ok && tech == "" && defaultByCodeCount[code] == 1 {
+			defaultObject, ok = defaultByCode[code]
+		}
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(objects[i].Tech) == "" && strings.TrimSpace(defaultObject.Tech) != "" {
+			objects[i].Tech = defaultObject.Tech
+			changed = true
+		}
+		targetProfile := strings.TrimSpace(defaultObject.Profile)
+		currentProfile := strings.TrimSpace(objects[i].Profile)
+		if targetProfile == "" {
+			if currentProfile != "" && strings.EqualFold(currentProfile, legacyCMProfile(format, code)) {
+				objects[i].Profile = ""
+				changed = true
+			}
+			continue
+		}
+		if strings.EqualFold(currentProfile, targetProfile) {
+			continue
+		}
+		if currentProfile == "" || strings.EqualFold(currentProfile, legacyCMProfile(format, code)) {
+			objects[i].Profile = targetProfile
 			changed = true
 		}
 	}
@@ -608,9 +667,98 @@ SELECT
   COALESCE(di.lmt_device_name, '') AS "device_info.lmt_device_name",
   COALESCE(di.highest_alarm_severity::text, '') AS "device_info.highest_alarm_severity",
   COALESCE(di.highest_severity_alarm_count::text, '') AS "device_info.highest_severity_alarm_count",
+  COALESCE(nbp.drx_alg_switch, '') AS "device_param.DrxAlgSwitch",
+  COALESCE(nbp.short_drx_switch, '') AS "device_param.ShortDrxSwitch",
+  COALESCE(nbp.on_duration_timer, '') AS "device_param.OnDurationTimer",
+  COALESCE(nbp.drx_inactivity_timer, '') AS "device_param.DrxInactivityTimer",
+  COALESCE(nbp.drx_retx_timer, '') AS "device_param.DrxReTxTimer",
+  COALESCE(nbp.long_drx_cycle, '') AS "device_param.LongDrxCycle",
+  COALESCE(nbp.short_drx_cycle, '') AS "device_param.ShortDrxCycle",
+  COALESCE(nbp.drx_short_cycle_timer, '') AS "device_param.DrxShortCycleTimer",
+  COALESCE(nbp.ue_inactive_timer, '') AS "device_param.UeInactiveTimer",
+  COALESCE(nbp.t304_for_eutran, '') AS "device_param.T304ForEutran",
+  COALESCE(nbp.t310, '') AS "device_param.T310",
+  COALESCE(nbp.default_paging_cycle, '') AS "device_param.DefaultPagingCycle",
+  COALESCE(nbp.sys_time_cfg_ind, '') AS "device_param.SysTimeCfgInd",
+  COALESCE(nbp.encryp_alg_priority, '') AS "device_param.encrypAlgPriority",
+  COALESCE(nbp.integ_prot_alg_priority, '') AS "device_param.integProtAlgPriority",
+  COALESCE(nbp.lcg, '') AS "device_param.Lcg",
+  COALESCE(nbp.volte_switch, '') AS "device_param.VoLTESwitch",
+  COALESCE(nbp.pa, '') AS "device_param.PA",
+  COALESCE(nbp.pb, '') AS "device_param.PB",
+  COALESCE(nbp.preamble_initial_received_target_power, '') AS "device_param.PreambInitRcvTargetPwr",
+  COALESCE(nbp.power_ramping_step, '') AS "device_param.powerRampingStep",
+  COALESCE(nbp.n310, '') AS "device_param.N310",
+  COALESCE(nbp.n311, '') AS "device_param.N311",
+  COALESCE(nbp.t311, '') AS "device_param.T311",
+  COALESCE(nbp.t300, '') AS "device_param.T300",
+  COALESCE(nbp.t301, '') AS "device_param.T301",
+  COALESCE(nbp.t302, '') AS "device_param.T302",
   COALESCE(to_jsonb(di), '{}'::jsonb)::text AS "device_info.__json"
 FROM devices d
 LEFT JOIN device_info di ON di.device_id = d.id
+LEFT JOIN LATERAL (
+  SELECT
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.DRX.DRXEnabled'), '') AS drx_alg_switch,
+    COALESCE(
+      MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path IN (
+        'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.DRX.ShortDRXEnabled'
+      )),
+      MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.DRX.DRXEnabled'),
+      ''
+    ) AS short_drx_switch,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.DrxInitialParam.1.ONDurationTimer'), '') AS on_duration_timer,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.DrxInitialParam.1.DRXInactivityTimer'), '') AS drx_inactivity_timer,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.DrxInitialParam.1.DRXRetransmissionTimer'), '') AS drx_retx_timer,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.DrxInitialParam.1.LongDRXCycle'), '') AS long_drx_cycle,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.DrxInitialParam.1.ShortDRXCycle'), '') AS short_drx_cycle,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.DrxInitialParam.1.DRXShortCycleTimer'), '') AS drx_short_cycle_timer,
+    COALESCE(
+      MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path IN (
+        'Device.Services.FAPService.1.CellConfig.Capabilities.LTE.UeInactiveTimer',
+        'Device.Services.FAPService.1.Capabilities.LTE.UeInactiveTimer'
+      )),
+      ''
+    ) AS ue_inactive_timer,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.T304EUTRA'), '') AS t304_for_eutran,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.T310'), '') AS t310,
+    COALESCE(
+      MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path IN (
+        'Device.Services.FAPService.1.X_COM.LTE.PCCH.DefaultPagingCycle',
+        'Device.Services.FAPService.1.CellConfig.LTE.RAN.PCCHConfig.DefaultPagingCycle'
+      )),
+      ''
+    ) AS default_paging_cycle,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.SysTimeCfgInd'), '') AS sys_time_cfg_ind,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.EPC.AllowedCipheringAlgorithmList'), '') AS encryp_alg_priority,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.EPC.AllowedIntegrityProtectionAlgorithmList'), '') AS integ_prot_alg_priority,
+    COALESCE(
+      MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path IN (
+        'Device.Services.FAPService.1.CellConfig.LTE.QOS.Lcg',
+        'Device.Services.FAPService.1.CellConfig.LTE.RAN.QOS.1.Lcg'
+      )),
+      ''
+    ) AS lcg,
+    COALESCE(
+      MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path IN (
+        'Device.Services.FAPService.1.CellConfig.LTE.VoLTEParam.SPSSwitchQCI1Ul',
+        'Device.Services.FAPService.1.CellConfig.LTE.VoLTE.Switch'
+      )),
+      ''
+    ) AS volte_switch,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.PDSCH.Pa'), '') AS pa,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.PDSCH.Pb'), '') AS pb,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.RACH.PreambleInitialReceivedTargetPower'), '') AS preamble_initial_received_target_power,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.MAC.RACH.PowerRampingStep'), '') AS power_ramping_step,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.N310'), '') AS n310,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.N311'), '') AS n311,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.T311'), '') AS t311,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.T300'), '') AS t300,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.T301'), '') AS t301,
+    COALESCE(MAX(dp.parameter_value) FILTER (WHERE dp.parameter_path = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RRCTimers.T302'), '') AS t302
+  FROM device_parameters dp
+  WHERE dp.device_id = d.id
+) nbp ON true
 WHERE d.deleted_at IS NULL
   AND ($1 = '' OR UPPER(d.technology) = UPPER($1))
 ORDER BY d.serial_number ASC
