@@ -8082,6 +8082,7 @@ const messages: Record<string, string> = {
   'systemLicense.basicInfo.uploadedAt':             'Uploaded At',
   'systemLicense.devicesSupport':                   'Devices Support',
   'systemLicense.devicesSupport.empty':             'No device-type capacity configured',
+  'systemLicense.devicesSupport.sharedGsm':         'Includes 2G GSM/BTS (shared capacity)',
   'systemLicense.featureList':                      'Feature List',
   'systemLicense.featureList.all':                  'All',
   'systemLicense.featureList.recognized':           'Recognized',

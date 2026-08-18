@@ -797,13 +797,18 @@ func (r *PgDeviceRepository) UpdateOnlineStatus(ctx context.Context, id uuid.UUI
 	return nil
 }
 
-// OfflineExcessByTypeCapacity 把各网元类型超出容量上限的在线设备（按 created_at
+// OfflineExcessByTypeCapacity 把各容量组超出容量上限的在线设备（按 created_at
 // 晚接入的）置为离线，用于 license 降容清理（issue #316，在线口径：离线不占容量，
 // 故腾容量无需删除设备）。typeCapacity key 为 ne_type（大小写不敏感匹配
 // alarm_ne_type），value 为容量上限。未出现在 typeCapacity 中但有在线设备的类型
 // 视为未授权（容量 0），其在线设备全部置离线。返回被置离线设备的 serial_number
 // 列表（caller 据此清 Redis 设备缓存，避免缓存 stale 的 is_online=true 让被踢
 // 设备下次 Inform 跳过容量校验又上线）。
+//
+// 容量分组（issue #318）：GSM 与 eNB 共用容量。两条 SQL 内的 CASE 把 ne_type
+// 归一到容量组 key（GSM→ENB，与 license 包 neTypeCapacityGroups 保持一致），
+// 使超容排名跨组内类型混合按 created_at，且 eNB 已配置时 GSM 不落入"未配置
+// 类型"分支。修改分组规则时必须同步 license/capacity_group.go。
 //
 // 满足 ExcessOffliner 接口；两条静态 SQL 全参数化，无字符串拼接。
 func (r *PgDeviceRepository) OfflineExcessByTypeCapacity(ctx context.Context, typeCapacity map[string]int) ([]string, error) {
@@ -812,11 +817,13 @@ func (r *PgDeviceRepository) OfflineExcessByTypeCapacity(ctx context.Context, ty
 		return offlined, nil
 	}
 	configuredUpper := make([]string, 0, len(typeCapacity))
-	// 静态 SQL：踢某类型 created_at 最晚的超出部分（rn > capacity）。$1=ne_type, $2=capacity。
+	// 静态 SQL：踢某容量组 created_at 最晚的超出部分（rn > capacity）。
+	// $1=容量组 key（如 eNB），$2=capacity。
 	const excessByType = `WITH ranked AS (
 		SELECT d.id, ROW_NUMBER() OVER (ORDER BY d.created_at) AS rn
 		FROM devices d JOIN products p ON d.product_id = p.id
-		WHERE UPPER(p.alarm_ne_type) = UPPER($1) AND d.is_online = true AND d.deleted_at IS NULL
+		WHERE CASE WHEN UPPER(p.alarm_ne_type) = 'GSM' THEN 'ENB' ELSE UPPER(p.alarm_ne_type) END = UPPER($1)
+		  AND d.is_online = true AND d.deleted_at IS NULL
 	)
 	UPDATE devices SET is_online = false, updated_at = now()
 	WHERE id IN (SELECT id FROM ranked WHERE rn > $2)
@@ -840,12 +847,13 @@ func (r *PgDeviceRepository) OfflineExcessByTypeCapacity(ctx context.Context, ty
 		}
 		rows.Close()
 	}
-	// 未配置类型（有在线设备但新 license 未授权）：全部置离线。$1=text[] 配置类型（UPPER）。
+	// 未配置类型（有在线设备但新 license 未授权）：全部置离线。$1=text[] 已配置
+	// 容量组 key（UPPER；CASE 归一后 GSM 设备归入 ENB 组）。
 	const unconfigured = `UPDATE devices SET is_online = false, updated_at = now()
 		WHERE id IN (
 			SELECT d.id FROM devices d LEFT JOIN products p ON d.product_id = p.id
 			WHERE d.is_online = true AND d.deleted_at IS NULL
-			  AND UPPER(COALESCE(p.alarm_ne_type,'')) <> ALL($1::text[])
+			  AND CASE WHEN UPPER(COALESCE(p.alarm_ne_type,'')) = 'GSM' THEN 'ENB' ELSE UPPER(COALESCE(p.alarm_ne_type,'')) END <> ALL($1::text[])
 		)
 		RETURNING serial_number`
 	rows, err := r.pool.Query(ctx, unconfigured, configuredUpper)

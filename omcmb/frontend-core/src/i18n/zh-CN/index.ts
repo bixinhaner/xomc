@@ -8109,6 +8109,7 @@ const messages: Record<string, string> = {
   'systemLicense.basicInfo.uploadedAt':             '上传时间',
   'systemLicense.devicesSupport':                   'Devices Support',
   'systemLicense.devicesSupport.empty':             '未配置设备类型容量',
+  'systemLicense.devicesSupport.sharedGsm':         '含 2G GSM/BTS，共用此容量',
   'systemLicense.featureList':                      'Feature List',
   'systemLicense.featureList.all':                  '全部',
   'systemLicense.featureList.recognized':           '已识别',

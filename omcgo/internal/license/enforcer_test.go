@@ -133,6 +133,43 @@ func TestEnforcer_EnforceCapacity(t *testing.T) {
 			additional: 1,
 			wantErr:    nil,
 		},
+		{
+			// issue #318：GSM 与 eNB 共用容量——license 只授权 eNB 也允许 GSM 接入。
+			name:       "gsm authorized via shared eNB capacity",
+			licCurrent: systemLicense("L7", DevicesSupport{"eNB": 10}, 0),
+			usedByType: map[string]int{"ENB": 3, "GSM": 4},
+			deviceType: "GSM",
+			additional: 1,
+			wantErr:    nil,
+		},
+		{
+			// issue #318：用量按 eNB+GSM 合计控制（6+4+1 > 10 拒绝）。
+			name:       "gsm rejected when shared eNB pool full",
+			licCurrent: systemLicense("L8", DevicesSupport{"eNB": 10}, 0),
+			usedByType: map[string]int{"ENB": 6, "GSM": 4},
+			deviceType: "GSM",
+			additional: 1,
+			wantErr:    commonerrors.ErrLicenseCapacityExceeded,
+		},
+		{
+			// issue #318：GSM 占用把 eNB 也挤满（5+5+1 > 10 拒绝）。
+			name:       "enb rejected when shared pool full due to gsm usage",
+			licCurrent: systemLicense("L9", DevicesSupport{"eNB": 10}, 0),
+			usedByType: map[string]int{"ENB": 5, "GSM": 5},
+			deviceType: "eNB",
+			additional: 1,
+			wantErr:    commonerrors.ErrLicenseCapacityExceeded,
+		},
+		{
+			// issue #318：共用容量意味着没有独立的 GSM 配额——license 未授权 eNB
+			// 时 GSM 同样拒绝。
+			name:       "gsm rejected when eNB not authorized",
+			licCurrent: systemLicense("L10", DevicesSupport{"gNB": 10}, 0),
+			usedByType: map[string]int{"GNB": 0},
+			deviceType: "GSM",
+			additional: 1,
+			wantErr:    commonerrors.ErrLicenseCapacityExceeded,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

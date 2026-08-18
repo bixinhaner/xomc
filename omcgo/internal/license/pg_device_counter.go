@@ -41,7 +41,9 @@ func (c *PgDeviceCounter) CountDevices(ctx context.Context) (int, error) {
 // 设备计数，供 EnforceCapacity 的 per-type 限额使用。
 //
 // key 为 UPPER 归一化后的 ne_type（与 enforcer.upperKey 对齐：license key
-// `eNB`/`gNB` ↔ alarm_ne_type `ENB`/`GNB` 大小写不敏感匹配）。product_id 为
+// `eNB`/`gNB` ↔ alarm_ne_type `ENB`/`GNB` 大小写不敏感匹配）。计数保持原始
+// per-ne_type；容量分组（issue #318：GSM 与 eNB 共用容量）由消费侧
+// capacityGroupUsage 合计，本方法不做归并。product_id 为
 // NULL 的设备（孤儿）计入空串 key ""。只数在线设备（is_online=true 且未进回收站）。
 func (c *PgDeviceCounter) CountDevicesByType(ctx context.Context) (map[string]int, error) {
 	const q = `SELECT UPPER(COALESCE(p.alarm_ne_type, '')) AS ne_type, COUNT(*) AS cnt

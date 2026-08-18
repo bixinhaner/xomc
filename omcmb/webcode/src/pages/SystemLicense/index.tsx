@@ -88,6 +88,12 @@ function DevicesSupportCards({ devicesSupport }: DevicesSupportCardsProps) {
               value={capacity}
               valueStyle={{ fontSize: 24, color: '#1677ff' }}
             />
+            {/* issue #318：GSM（2G BSC/BTS）与 eNB 共用容量，无独立卡片 */}
+            {deviceType.toLowerCase() === 'enb' && (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t('systemLicense.devicesSupport.sharedGsm')}
+              </Text>
+            )}
           </Card>
         </Col>
       ))}
