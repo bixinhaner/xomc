@@ -54,6 +54,7 @@ import {
   type StorageProtectionTarget,
   type StorageUnknownBehavior,
 } from '@core/services/api/storageProtectionApi';
+import { formatSystemTime } from '@core/utils/systemTime';
 import { useT, type TranslateFn } from '@/hooks/useT';
 
 type FieldType = 'int' | 'float' | 'bool';
@@ -453,10 +454,15 @@ function StorageProtectionSection() {
           {events.length > 0 ? (
             <Space direction="vertical" style={{ width: '100%' }}>
               {events.map((event) => (
-                <span key={`${event.policyId}-${event.createdAt}`}>
-                  <Tag color={stateColors[event.newState]}>{t(`system.storageProtection.state.${event.newState}`)}</Tag>
-                  {formatEventReason(event, t, unavailable)}
-                </span>
+                <Space key={`${event.policyId}-${event.createdAt}`} direction="vertical" size={2}>
+                  <span>
+                    <Tag color={stateColors[event.newState]}>{t(`system.storageProtection.state.${event.newState}`)}</Tag>
+                    {formatEventReason(event, t, unavailable)}
+                  </span>
+                  <span style={{ color: '#888', fontSize: 12 }}>
+                    {t('system.storageProtection.event.triggeredAt')}: {formatSystemTime(event.createdAt)}
+                  </span>
+                </Space>
               ))}
             </Space>
           ) : (
