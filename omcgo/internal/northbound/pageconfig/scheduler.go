@@ -355,7 +355,7 @@ func (s *Service) nextScheduleCandidate(ctx context.Context, unit scheduleUnit, 
 		return scheduleCandidate{}, false, err
 	}
 
-	statsByEnd := scheduleWindowStatsByEnd(runResult.Items, unit)
+	statsByEnd := scheduleWindowStatsByEnd(runResult.Items, unit, opts.Location)
 	latestCompleteEnd := time.Time{}
 	for end, stats := range statsByEnd {
 		if end.After(dueEnd) {
@@ -437,10 +437,16 @@ type scheduleWindowStats struct {
 	lastFailedAt   time.Time
 }
 
-func scheduleWindowStatsByEnd(runs []FileRun, unit scheduleUnit) map[time.Time]scheduleWindowStats {
+func scheduleWindowStatsByEnd(runs []FileRun, unit scheduleUnit, loc *time.Location) map[time.Time]scheduleWindowStats {
 	out := make(map[time.Time]scheduleWindowStats)
 	for _, run := range runs {
 		if run.GroupID != unit.GroupID || run.WindowEnd == nil {
+			continue
+		}
+		if runScheduleTriggerReason(run) != runTriggerAuto {
+			continue
+		}
+		if !scheduledRunWindowEndMatchesUnit(run, unit, loc) {
 			continue
 		}
 		end := scheduleWindowKey(*run.WindowEnd)
@@ -467,6 +473,28 @@ func scheduleWindowStatsByEnd(runs []FileRun, unit scheduleUnit) map[time.Time]s
 		out[end] = stats
 	}
 	return out
+}
+
+func runScheduleTriggerReason(run FileRun) string {
+	if run.Summary == nil {
+		return ""
+	}
+	value, ok := run.Summary["trigger_reason"].(string)
+	if !ok {
+		return ""
+	}
+	return normalizeRunTriggerReason(value)
+}
+
+func scheduledRunWindowEndMatchesUnit(run FileRun, unit scheduleUnit, loc *time.Location) bool {
+	if run.WindowEnd == nil || run.WindowEnd.IsZero() {
+		return false
+	}
+	if loc == nil {
+		loc = time.Local
+	}
+	end := run.WindowEnd.In(loc).Truncate(time.Minute)
+	return currentPeriodBoundary(unit.Period, end).Equal(end)
 }
 
 func markScheduleObjectComplete(objects map[string]struct{}, run FileRun) {
