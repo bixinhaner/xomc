@@ -96,6 +96,7 @@ import PolicyReadOnlySection from './components/PolicyReadOnlySection';
 import CommonParameterConfigPanel, { ParameterConfigFields } from './CommonParameterConfigPanel';
 import { sanitizeCommonParamConfig, withInitialCommonRadioInstance } from './commonParameterConfig';
 import { buildParamConfigListPolicyUpdate } from './paramConfigPersistence';
+import { buildPlugAndPlayLicenseListParams } from './licenseListParams';
 
 const { Text, Title } = Typography;
 
@@ -667,12 +668,7 @@ export default function AddPolicyPage() {
     data: licenseData,
     isLoading: licensesLoading,
     refetch: refetchLicenses,
-  } = useDeviceLicenses({
-    page: 1,
-    pageSize: 1000,
-    serialNumber: licenseSearchText || undefined,
-    productId: matchedProductId,
-  });
+  } = useDeviceLicenses(buildPlugAndPlayLicenseListParams(licenseSearchText));
   const deleteLicenseMutation = useDeleteDeviceLicense();
   const {
     data: productFirmwareData,
