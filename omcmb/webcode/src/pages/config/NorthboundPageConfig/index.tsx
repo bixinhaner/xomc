@@ -4499,28 +4499,43 @@ function runTriggerDescription(run: NorthboundFileRun): string {
   return `${subject} ${triggerText}。`;
 }
 
+function runHasNoArtifact(run: NorthboundFileRun): boolean {
+  return run.summary?.no_artifact === true || run.summary?.artifact_status === 'not_generated';
+}
+
+function runReportDedupeKey(run: NorthboundFileRun): string {
+  const groupID = String(run.group_id ?? '').trim();
+  const objectCode = String(run.object_code ?? '').trim();
+  const domain = String(run.domain ?? '').trim();
+  const parts = [groupID, domain, objectCode].filter(Boolean);
+  return parts.length > 0 ? parts.join('\u001f') : run.id;
+}
+
 function buildRunReportStatus(run: NorthboundFileRun, fallbackCapabilityName: string): ReportStatusInfo {
+  const noArtifact = runHasNoArtifact(run);
   const state: ReportState = run.status === 'success'
     ? 'success'
     : run.status === 'running'
       ? 'running'
-      : 'failed';
+      : noArtifact
+        ? 'idle'
+        : 'failed';
   const payload = run.artifact_content
-    || run.error_message
+    || (noArtifact ? '（当前窗口内无源数据，未生成文件）' : run.error_message)
     || '（未获取到文件内容：该记录窗口内无数据，或内容已被保留期清理）';
   return {
     key: `run:${run.id}`,
     runId: run.id,
     capabilityName: fallbackCapabilityName,
     state,
-    statusText: state === 'success' ? '生成成功' : state === 'running' ? '生成中' : '生成失败',
+    statusText: state === 'success' ? '生成成功' : state === 'running' ? '生成中' : noArtifact ? '无数据' : '生成失败',
     lastTime: formatRunTime(run.created_at),
     artifactType: 'file',
     artifactName: run.artifact_name || '-',
     artifactPath: run.artifact_path || '-',
     size: formatBytes(run.artifact_size),
-    targetSummary: `生成 ${run.row_count} 行`,
-    detail: run.error_message || runTriggerDescription(run),
+    targetSummary: noArtifact ? '未生成文件' : `生成 ${run.row_count} 行`,
+    detail: noArtifact ? run.error_message || '当前窗口内无源数据，未生成文件。' : run.error_message || runTriggerDescription(run),
     payload,
   };
 }
@@ -5155,6 +5170,13 @@ function reportRunDisplayState(
   }
   if (run.status === 'success') return { state: 'success', label: '成功' };
   if (run.status === 'running') return { state: 'running', label: '生成中' };
+  if (runHasNoArtifact(run)) {
+    return {
+      state: 'idle',
+      label: '无数据',
+      tooltip: run.error_message || '当前窗口内无源数据，未生成文件。',
+    };
+  }
   return { state: 'failed', label: '失败' };
 }
 
@@ -7271,10 +7293,10 @@ export default function NorthboundPageConfig() {
       .listRuns({ profile_kind: profileKind, profile_code: profileCode, limit: isFile ? 200 : 1 })
       .then(async (result) => {
         if (isFile) {
-          // listRuns 默认 created_at DESC，按 object_code 去重保留每个对象最新一条
+          // listRuns 默认 created_at DESC，按分组 + 对象去重保留每个上报对象最新一条
           const seen = new Set<string>();
           const deduped = result.items.filter((item) => {
-            const key = item.object_code || item.id;
+            const key = runReportDedupeKey(item);
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
@@ -9004,8 +9026,15 @@ export default function NorthboundPageConfig() {
   const reportSuccessCount = reportRunDisplayStates.filter((state) => state === 'success').length;
   const reportFailedCount = reportRunDisplayStates.filter((state) => state === 'failed').length;
   const reportRunningCount = reportRunDisplayStates.filter((state) => state === 'running').length;
+  const reportIdleCount = reportRunDisplayStates.filter((state) => state === 'idle').length;
+  const reportSummaryParts = [
+    `成功 ${reportSuccessCount}`,
+    reportIdleCount > 0 ? `无数据 ${reportIdleCount}` : '',
+    `失败 ${reportFailedCount}`,
+    reportRunningCount > 0 ? `生成中 ${reportRunningCount}` : '',
+  ].filter(Boolean);
   const reportSummary = reportRunList.length > 1
-    ? `共 ${reportRunList.length} 个对象：成功 ${reportSuccessCount} · 失败 ${reportFailedCount}${reportRunningCount > 0 ? ` · 生成中 ${reportRunningCount}` : ''}`
+    ? `共 ${reportRunList.length} 个对象：${reportSummaryParts.join(' · ')}`
     : '';
   const selectedApiMeta = selectedApi ? getApiMeta(selectedApi) : null;
   const selectedApiResponseFields = selectedApiMeta?.responseFields ?? [];

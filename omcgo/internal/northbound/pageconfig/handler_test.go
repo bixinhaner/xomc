@@ -2624,6 +2624,9 @@ func TestRunDueSchedulesWaitsForStartMinuteAndRetriesFailedWindow(t *testing.T) 
 		Status:      RunStatusSuccess,
 		WindowStart: timePtr(previousEnd.Add(-15 * time.Minute)),
 		WindowEnd:   timePtr(previousEnd),
+		Summary: map[string]any{
+			"trigger_reason": runTriggerAuto,
+		},
 	})
 	require.NoError(t, err)
 
@@ -2644,6 +2647,9 @@ func TestRunDueSchedulesWaitsForStartMinuteAndRetriesFailedWindow(t *testing.T) 
 		WindowStart: timePtr(failedEnd.Add(-15 * time.Minute)),
 		WindowEnd:   timePtr(failedEnd),
 		CreatedAt:   failedEnd.Add(5 * time.Minute),
+		Summary: map[string]any{
+			"trigger_reason": runTriggerAuto,
+		},
 	})
 	require.NoError(t, err)
 
@@ -2658,6 +2664,59 @@ func TestRunDueSchedulesWaitsForStartMinuteAndRetriesFailedWindow(t *testing.T) 
 	require.Len(t, repo.runs, 3)
 	require.Equal(t, RunStatusSuccess, repo.runs[2].Status)
 	require.Equal(t, "20260804100000", repo.runs[2].WindowEnd.Format("20060102150405"))
+}
+
+func TestRunDueSchedulesIgnoresManualAndOffBoundaryAutoRuns(t *testing.T) {
+	repo := newFakeRepository()
+	cmGroup := group("cm-daily", DomainCM, FormatCSV, Period24H, 1, pathCM, nameCM, []ScenarioObject{{Code: "CP"}})
+	cmGroup.CompressionEnabled = false
+	repo.fileProfiles = []FileProfile{
+		fileProfile("S9104", "Scheduled Boundary", "Custom", "Custom", []string{"custom"}, []FileGroup{cmGroup}),
+	}
+	repo.fileProfiles[0].Enabled = true
+	repo.fileProfiles[0].Status = StatusNormal
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	manualEnd := time.Date(2026, 8, 3, 15, 51, 0, 0, time.Local)
+	_, err := repo.CreateFileRun(context.Background(), FileRun{
+		ProfileKind: ProfileKindFile,
+		ProfileCode: "S9104",
+		GroupID:     "cm-daily",
+		Domain:      DomainCM,
+		ObjectCode:  "CP",
+		Status:      RunStatusSuccess,
+		WindowStart: timePtr(manualEnd.Add(-24 * time.Hour)),
+		WindowEnd:   timePtr(manualEnd),
+		Summary: map[string]any{
+			"trigger_reason": runTriggerManual,
+		},
+	})
+	require.NoError(t, err)
+
+	offBoundaryAutoEnd := time.Date(2026, 8, 4, 15, 51, 0, 0, time.Local)
+	_, err = repo.CreateFileRun(context.Background(), FileRun{
+		ProfileKind: ProfileKindFile,
+		ProfileCode: "S9104",
+		GroupID:     "cm-daily",
+		Domain:      DomainCM,
+		ObjectCode:  "CP",
+		Status:      RunStatusSuccess,
+		WindowStart: timePtr(offBoundaryAutoEnd.Add(-24 * time.Hour)),
+		WindowEnd:   timePtr(offBoundaryAutoEnd),
+		Summary: map[string]any{
+			"trigger_reason": runTriggerAuto,
+		},
+	})
+	require.NoError(t, err)
+
+	now := time.Date(2026, 8, 5, 0, 1, 0, 0, time.Local)
+	summary, err := svc.RunDueSchedules(context.Background(), now, ScheduleRunOptions{MaxRuns: 10})
+	require.NoError(t, err)
+	require.Equal(t, 1, summary.Due)
+	require.Equal(t, 1, summary.Ran)
+	require.Len(t, repo.runs, 3)
+	require.Equal(t, "20260805000000", repo.runs[2].WindowEnd.Format("20060102150405"))
+	require.Equal(t, runTriggerAuto, repo.runs[2].Summary["trigger_reason"])
 }
 
 func TestRunDueSchedulesTreatsNoArtifactWindowAsComplete(t *testing.T) {
