@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -136,26 +137,41 @@ func newFakeRepository() *fakeRepository {
 		apiConfigs:        defaultAPIConfigs(),
 		apiTokens:         map[string]string{},
 		deviceRows: []ExportDataRow{{
-			"device.serial_number":         "SN0001",
-			"device.manufacturer":          "Baicells",
-			"device.model_name":            "Nova",
-			"device.product_class":         "pBS11004",
-			"device.firmware_version":      "BaiBS_RTS_1.0",
-			"device.ip_address":            "10.0.0.1",
-			"device.is_online":             "true",
-			"device_info.hardware_version": "HW1",
-			"device_info.mac":              "00:11:22:33:44:55",
-			"device_info.plmn":             "46000",
-			"device_info.sync_status":      "synced",
-			"device_info.enb_id":           "100001",
-			"device_info.eci":              "25600257",
-			"device_info.cell_id":          "1",
-			"device_info.bandwidth":        "20",
-			"device_info.op_state":         "1",
-			"device_info.ue_count":         "7",
-			"device_info.device_name":      "Nova-001",
-			"device.site_name":             "Site-A",
-			"device.last_inform_at":        "2026-08-04 16:45:00+08",
+			"device.serial_number":            "SN0001",
+			"device.manufacturer":             "Baicells",
+			"device.model_name":               "Nova",
+			"device.product_class":            "pBS11004",
+			"device.firmware_version":         "BaiBS_RTS_1.0",
+			"device.ip_address":               "10.0.0.1",
+			"device.site_id":                  "SHOP-001",
+			"device.longitude":                "113.1234",
+			"device.latitude":                 "23.1234",
+			"device.is_online":                "true",
+			"device_info.hardware_version":    "HW1",
+			"device_info.mac":                 "00:11:22:33:44:55",
+			"device_info.plmn":                "46000",
+			"device_info.sync_status":         "synced",
+			"device_info.enb_id":              "100001",
+			"device_info.eci":                 "25600257",
+			"device_info.cell_id":             "1",
+			"device_info.freq_point":          "38400",
+			"device_info.bandwidth":           "20",
+			"device_info.tac":                 "21",
+			"device_info.band":                "41",
+			"device_info.ul_earfcn":           "38400",
+			"device_info.subframe_assignment": "2",
+			"device_info.special_subframe":    "7",
+			"device_info.root_index":          "99",
+			"device_info.rf_status":           "1",
+			"device_info.network_model":       "TDD",
+			"device_info.gps_height":          "18.5",
+			"device_info.address":             "No. 1 Test Road",
+			"device_info.lac":                 "LAC-1",
+			"device_info.op_state":            "1",
+			"device_info.ue_count":            "7",
+			"device_info.device_name":         "Nova-001",
+			"device.site_name":                "Site-A",
+			"device.last_inform_at":           "2026-08-04 16:45:00+08",
 		}},
 		pmRows: []ExportDataRow{{
 			"pm.device_sn":    "SN0001",
@@ -1152,6 +1168,26 @@ func TestDeviceInfoFieldsComeFromRepositoryWhenConfigured(t *testing.T) {
 	require.Contains(t, rr.Body.String(), `"system_field":"device_info.project_status"`)
 }
 
+func TestProfileFieldsDoNotAppendDeviceInfoCandidates(t *testing.T) {
+	r := setupTestRouterWithRepository(newFakeRepository())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/page-config/fields?domain=CM&object=EP&tech=LTE&profile="+legacyS0001EPProfile, nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		Data struct {
+			Items []FieldDefinition `json:"items"`
+			Total int               `json:"total"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	require.Equal(t, legacyEPTemplateAliases(), outputAliases(body.Data.Items))
+	require.Equal(t, len(legacyEPTemplateAliases()), body.Data.Total)
+	require.NotContains(t, rr.Body.String(), `"system_field":"device_info.project_status"`)
+}
+
 func TestInventoryDeviceInfoFieldsComeFromRepositoryWhenConfigured(t *testing.T) {
 	r := setupTestRouterWithRepository(newFakeRepository())
 
@@ -1538,10 +1574,412 @@ func TestRunFileProfileCreatesRuns(t *testing.T) {
 	require.Len(t, repo.runs, 4)
 	require.Len(t, repo.events, 4)
 	require.Equal(t, RunStatusSuccess, repo.runs[0].Status)
-	require.Contains(t, repo.runs[0].ArtifactContent, "Serial Number")
+	require.Contains(t, repo.runs[0].ArtifactContent, "related_enb_dn")
 	require.Contains(t, repo.runs[0].ArtifactName, ".xml.zip")
 	require.Equal(t, "file", repo.events[0].Capability)
 	require.Equal(t, "run", repo.events[0].EventType)
+}
+
+func fillLegacyEPRow(row ExportDataRow) {
+	row["device_param.ShortDrxSwitch"] = "true"
+	row["device_param.OnDurationTimer"] = "6"
+	row["device_param.DrxInactivityTimer"] = "1280"
+	row["device_param.DrxReTxTimer"] = "16"
+	row["device_param.LongDrxCycle"] = "20"
+	row["device_param.ShortDrxCycle"] = "2"
+	row["device_param.DrxShortCycleTimer"] = "1"
+	row["device_param.UeInactiveTimer"] = "600000"
+	row["device_param.T304ForEutran"] = "500"
+	row["device_param.T310"] = "1000"
+	row["device_param.DefaultPagingCycle"] = "0"
+	row["device_param.SysTimeCfgInd"] = "true"
+	row["device_param.encrypAlgPriority"] = "EEA0"
+	row["device_param.integProtAlgPriority"] = "128-EIA1"
+	row["device_param.Lcg"] = "1"
+	row["device_param.VoLTESwitch"] = "0"
+}
+
+func fillLegacyCMParameterRow(row ExportDataRow) {
+	row["device_info.transmit_power"] = "2"
+	row["device_param.DrxAlgSwitch"] = "1"
+	row["device_param.PA"] = "-3"
+	row["device_param.PB"] = "1"
+	row["device_param.PreambInitRcvTargetPwr"] = "-104"
+	row["device_param.powerRampingStep"] = "dB2"
+	row["device_param.N310"] = "n1"
+	row["device_param.N311"] = "n1"
+	row["device_param.T311"] = "1000"
+	row["device_param.T300"] = "1000"
+	row["device_param.T301"] = "1000"
+	row["device_param.T302"] = "1000"
+	fillLegacyEPRow(row)
+}
+
+func legacyEPTemplateAliases() []string {
+	return []string{
+		"dn", "enb_id", "enb_userlabel", "ShortDrxSwitch", "OnDurationTimer",
+		"DrxInactivityTimer", "DrxReTxTimer", "LongDrxCycle", "ShortDrxCycle",
+		"DrxShortCycleTimer", "UeInactiveTimer", "T304ForEutran", "T310",
+		"DefaultPagingCycle", "SysTimeCfgInd", "encrypAlgPriority",
+		"integProtAlgPriority", "Lcg", "VoLTESwitch",
+	}
+}
+
+func legacyCPBaseSupportedAliases() []string {
+	return []string{
+		"dn", "related_enb_dn", "related_enb_id", "related_enb_userlabel",
+		"cel_id", "cel_userlabel", "DrxAlgSwitch", "ShortDrxSwitch",
+		"OnDurationTimer", "DrxInactivityTimer", "DrxReTxTimer",
+		"LongDrxCycle", "ShortDrxCycle", "DrxShortCycleTimer",
+		"UeInactiveTimer", "T304ForEutran", "T310", "DefaultPagingCycle",
+		"SysTimeCfgInd", "referenceSignalPower", "PA", "PB",
+		"PreambInitRcvTargetPwr", "powerRampingStep", "N310", "N311",
+		"T311", "T300", "T301", "T302", "VoLTESwitch", "Lcg",
+	}
+}
+
+func legacyCCBaseSupportedAliases() []string {
+	return []string{
+		"dn", "related_enb_dn", "related_enb_id", "related_enb_userlabel",
+		"cel_id", "userlabel", "pci", "freq_mode", "bandIndicator", "tac",
+		"zc_idx", "freq_pointno_ul", "freq_pointno_dl", "bandwidth_ul",
+		"bandwidth_dl", "td_sfassignment", "td_specialsfpatterns",
+	}
+}
+
+func legacyCEBaseSupportedAliases() []string {
+	return []string{
+		"dn", "enb_id", "userlabel", "enb_model", "ip_address",
+		"software_version", "freq_mode", "cel_num", "serialid",
+	}
+}
+
+func legacyCEHeNBSupportedAliases() []string {
+	return []string{
+		"dn", "enb_id", "userlabel", "enb_model", "ip_address",
+		"software_version", "freq_mode", "cel_num", "HeNB_longitude",
+		"HeNB_latitude", "serialid",
+	}
+}
+
+func legacyS0007COMSSupportedAliases() []string {
+	return []string{
+		"DATE_TIME", "DUPLEXING", "TXRX_MODE", "ENODEB_ID", "ENODEB_NAME",
+		"CELL_ID", "CELL_NAME", "CELL_STATUS", "SITE_CODE",
+		"SITE_DEPLOYMENT", "SECTOR_TYPE", "MCC", "MNC", "TAC_DEC", "PCI",
+		"UL_EARFCN", "DL_EARFCN", "BAND", "BANDWIDTH", "MAXTXPOWER",
+		"RS_POWER", "CELL_RANGE", "PA", "PB", "SFN_NO",
+	}
+}
+
+func legacyS0008COMSSupportedAliases() []string {
+	return []string{
+		"Serial Number", "Femto ID", "BSR Name", "External IP",
+		"Last Sync Date", "Vendor", "Model", "Cell ID", "LAC", "MCC",
+		"MNC", "eNODEB ID", "TAC",
+	}
+}
+
+func appendAliasList(base []string, extra ...string) []string {
+	out := append([]string{}, base...)
+	return append(out, extra...)
+}
+
+func TestDefaultCMProfilesUseLegacySupportedTemplateFields(t *testing.T) {
+	catalog := NewDefaultCatalog()
+	cases := []struct {
+		name    string
+		object  string
+		profile string
+		want    []string
+		absent  []string
+	}{
+		{
+			name:    "CP base XML",
+			object:  "CP",
+			profile: legacyCMCPXMLProfile,
+			want:    legacyCPBaseSupportedAliases(),
+			absent:  []string{"timeAlignTimer", "dlRsBoost", "P0NominalPUCCH"},
+		},
+		{
+			name:    "CP S0003 S0015 extension",
+			object:  "CP",
+			profile: legacyCMPlmnCPXMLProfile,
+			want:    appendAliasList(legacyCPBaseSupportedAliases(), "PlmnIdList"),
+			absent:  []string{"eMTCSwitch", "B1_EN-DC"},
+		},
+		{
+			name:    "CP S0006 extension",
+			object:  "CP",
+			profile: legacyCMS0006CPXMLProfile,
+			want: appendAliasList(
+				legacyCPBaseSupportedAliases(),
+				"Shop Id", "Latitude", "Longitude", "Height", "Site Name",
+				"Install Detail Address", "Last Period Time", "Cell Active State",
+				"Cell Admin State",
+			),
+			absent: []string{"Circuit Ref.", "ROM", "Contact", "Femto Vendor"},
+		},
+		{
+			name:    "EP base XML",
+			object:  "EP",
+			profile: legacyCMEPXMLProfile,
+			want:    legacyEPTemplateAliases(),
+			absent:  []string{"IP Address", "MAC Address"},
+		},
+		{
+			name:    "CC base XML",
+			object:  "CC",
+			profile: legacyCMCCXMLProfile,
+			want:    legacyCCBaseSupportedAliases(),
+			absent:  []string{"cel_id_local", "freq_ul", "freq_dl", "ca_cel_tag", "supper_cel_tag", "ref_ca_cel"},
+		},
+		{
+			name:    "CC S0005 extension",
+			object:  "CC",
+			profile: legacyCMS0005CCXMLProfile,
+			want:    appendAliasList(legacyCCBaseSupportedAliases(), "mac_address", "cell_status"),
+			absent:  []string{"cel_id_local", "freq_ul", "freq_dl", "ca_cel_tag", "supper_cel_tag", "ref_ca_cel"},
+		},
+		{
+			name:    "CE base XML",
+			object:  "CE",
+			profile: legacyCMCEXMLProfile,
+			want:    legacyCEBaseSupportedAliases(),
+			absent:  []string{"ip_mask", "ip_gateway", "s1_bandwidth", "related_mme"},
+		},
+		{
+			name:    "CE HeNB extension",
+			object:  "CE",
+			profile: legacyCMHeNBCEXMLProfile,
+			want:    legacyCEHeNBSupportedAliases(),
+			absent:  []string{"ip_mask", "ip_gateway", "s1_bandwidth", "related_mme"},
+		},
+		{
+			name:    "COMS S0007 CSV",
+			object:  "COMS",
+			profile: legacyCMS0007COMSCSVProfile,
+			want:    legacyS0007COMSSupportedAliases(),
+			absent:  []string{"TRANS_DATE", "MME_IP", "RESOURCE_BLOCK", "TAC_HEX", "FREQUENCY"},
+		},
+		{
+			name:    "COMS S0008 CSV",
+			object:  "COMS",
+			profile: legacyCMCOMSCSVProfile,
+			want:    legacyS0008COMSSupportedAliases(),
+			absent:  []string{"Internal IP", "FGW ID"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fields := catalog.Fields(FieldFilter{
+				Domain:     DomainCM,
+				ObjectCode: tc.object,
+				Tech:       "LTE",
+				Profile:    tc.profile,
+			})
+			require.Equal(t, tc.want, outputAliases(fields))
+			for _, alias := range tc.absent {
+				require.NotContains(t, outputAliases(fields), alias)
+			}
+		})
+	}
+}
+
+func TestDefaultCMScenariosAttachLegacyProfiles(t *testing.T) {
+	profiles := NewDefaultCatalog().FileProfiles()
+	s0007 := requireFileProfile(t, profiles, "S0007")
+	require.Equal(t, legacyCMS0007COMSCSVProfile, requireScenarioObject(t, s0007, "cm-daily-csv", "COMS").Profile)
+	require.Equal(t, legacyCMEPCSVProfile, requireScenarioObject(t, s0007, "cm-daily-csv", "EP").Profile)
+
+	s0008 := requireFileProfile(t, profiles, "S0008")
+	require.Equal(t, legacyCMCOMSCSVProfile, requireScenarioObject(t, s0008, "cm-daily-csv", "COMS").Profile)
+
+	s0005 := requireFileProfile(t, profiles, "S0005")
+	require.Equal(t, legacyCMS0005CCXMLProfile, requireScenarioObject(t, s0005, "cm-daily", "CC").Profile)
+	require.Equal(t, legacyCMHeNBCEXMLProfile, requireScenarioObject(t, s0005, "cm-daily", "CE").Profile)
+
+	s0012 := requireFileProfile(t, profiles, "S0012")
+	require.Empty(t, requireScenarioObject(t, s0012, "cm-daily-gnb", "CP").Profile)
+}
+
+func TestBackfillDefaultCMObjectProfilesHonorsTech(t *testing.T) {
+	objects := []ScenarioObject{{Code: "CP"}}
+	changed := backfillDefaultFileProfileObjectProfiles(DomainCM, FormatXML, objects, []ScenarioObject{{
+		Code:    "CP",
+		Tech:    "LTE",
+		Profile: legacyCMPlmnCPXMLProfile,
+	}})
+	require.True(t, changed)
+	require.Equal(t, "LTE", objects[0].Tech)
+	require.Equal(t, legacyCMPlmnCPXMLProfile, objects[0].Profile)
+
+	objects = []ScenarioObject{{Code: "CP", Tech: "GNB", Profile: legacyCMCPCSVProfile}}
+	changed = backfillDefaultFileProfileObjectProfiles(DomainCM, FormatXML, objects, []ScenarioObject{{
+		Code: "CP",
+		Tech: "LTE",
+	}})
+	require.False(t, changed)
+	require.Equal(t, legacyCMCPCSVProfile, objects[0].Profile)
+
+	objects = []ScenarioObject{{Code: "CP", Tech: "GNB", Profile: legacyCMCPXMLProfile}}
+	changed = backfillDefaultFileProfileObjectProfiles(DomainCM, FormatXML, objects, []ScenarioObject{{
+		Code: "CP",
+		Tech: "GNB",
+	}})
+	require.True(t, changed)
+	require.Empty(t, objects[0].Profile)
+
+	objects = []ScenarioObject{{Code: "CP", Tech: "GNB", Profile: legacyCMCPCSVProfile}}
+	changed = backfillDefaultFileProfileObjectProfiles(DomainCM, FormatXML, objects, []ScenarioObject{{
+		Code: "CP",
+		Tech: "GNB",
+	}})
+	require.False(t, changed)
+	require.Equal(t, legacyCMCPCSVProfile, objects[0].Profile)
+}
+
+func requireFileProfile(t *testing.T, profiles []FileProfile, code string) FileProfile {
+	t.Helper()
+	for _, profile := range profiles {
+		if profile.Code == code {
+			return profile
+		}
+	}
+	require.FailNowf(t, "file profile not found", "code=%s", code)
+	return FileProfile{}
+}
+
+func requireScenarioObject(t *testing.T, profile FileProfile, groupID, objectCode string) ScenarioObject {
+	t.Helper()
+	for _, group := range profile.Groups {
+		if group.ID != groupID {
+			continue
+		}
+		for _, object := range group.Objects {
+			if strings.EqualFold(object.Code, objectCode) {
+				return object
+			}
+		}
+	}
+	require.FailNowf(t, "scenario object not found", "profile=%s group=%s object=%s", profile.Code, groupID, objectCode)
+	return ScenarioObject{}
+}
+
+func TestRunDefaultCMScenarioUsesLegacySupportedContent(t *testing.T) {
+	repo := newFakeRepository()
+	fillLegacyCMParameterRow(repo.deviceRows[0])
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S0007", RunProfileRequest{
+		GroupID: "cm-daily-csv",
+		Limit:   1,
+	})
+
+	require.NoError(t, err)
+	var comsRun *FileRun
+	for i := range resp.Items {
+		if resp.Items[i].ObjectCode == "COMS" {
+			comsRun = &resp.Items[i]
+			break
+		}
+	}
+	require.NotNil(t, comsRun)
+	records, err := csv.NewReader(strings.NewReader(comsRun.ArtifactContent)).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.Equal(t, legacyS0007COMSSupportedAliases(), records[0])
+	require.Equal(t, "4", records[1][1])
+	require.Equal(t, "100001", records[1][3])
+	require.Equal(t, "ACTIVE", records[1][7])
+	require.Equal(t, "460", records[1][11])
+	require.Equal(t, "00", records[1][12])
+	require.Equal(t, "-3", records[1][22])
+	require.Equal(t, "1", records[1][23])
+	require.NotContains(t, records[0], "TRANS_DATE")
+	require.NotContains(t, records[0], "RESOURCE_BLOCK")
+}
+
+func TestRunS0001EPUsesLegacyTemplateDataFields(t *testing.T) {
+	repo := newFakeRepository()
+	fillLegacyEPRow(repo.deviceRows[0])
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	windowEnd := time.Date(2026, 8, 5, 8, 1, 30, 0, time.Local)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S0001", RunProfileRequest{
+		GroupID:   "cm-daily",
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+
+	require.NoError(t, err)
+	var epRun *FileRun
+	for i := range resp.Items {
+		if resp.Items[i].ObjectCode == "EP" {
+			epRun = &resp.Items[i]
+			break
+		}
+	}
+	require.NotNil(t, epRun)
+	require.NotContains(t, epRun.ArtifactContent, ">dn</N>")
+	require.Contains(t, epRun.ArtifactContent, `<Object Dn="SN0001">`)
+	require.Contains(t, epRun.ArtifactContent, "<N i=\"1\">enb_id</N>")
+	require.Contains(t, epRun.ArtifactContent, "<N i=\"2\">enb_userlabel</N>")
+	require.Contains(t, epRun.ArtifactContent, "<N i=\"3\">ShortDrxSwitch</N>")
+	require.Contains(t, epRun.ArtifactContent, "<N i=\"15\">encrypAlgPriority</N>")
+	require.Contains(t, epRun.ArtifactContent, "<N i=\"16\">integProtAlgPriority</N>")
+	require.Contains(t, epRun.ArtifactContent, "<N i=\"17\">Lcg</N>")
+	require.Contains(t, epRun.ArtifactContent, "<N i=\"18\">VoLTESwitch</N>")
+	require.Contains(t, epRun.ArtifactContent, "<V i=\"1\">100001</V>")
+	require.Contains(t, epRun.ArtifactContent, "<V i=\"2\">Site-A</V>")
+	require.Contains(t, epRun.ArtifactContent, "<V i=\"3\">true</V>")
+	require.Contains(t, epRun.ArtifactContent, "<V i=\"15\">EEA0</V>")
+	require.Contains(t, epRun.ArtifactContent, "<V i=\"16\">128-EIA1</V>")
+	require.Contains(t, epRun.ArtifactContent, "<V i=\"17\">1</V>")
+	require.Contains(t, epRun.ArtifactContent, "<V i=\"18\">0</V>")
+}
+
+func TestRunCMEPCSVProfileUsesLegacyTemplateDataFields(t *testing.T) {
+	repo := newFakeRepository()
+	fillLegacyEPRow(repo.deviceRows[0])
+	repo.fileProfiles = append(repo.fileProfiles, fileProfile(
+		"S9404",
+		"CM EP CSV legacy field profile",
+		"CSV legacy",
+		"CSV legacy",
+		nil,
+		[]FileGroup{
+			group("cm-ep-csv", DomainCM, FormatCSV, Period24H, 0, pathCM, nameCM, []ScenarioObject{
+				{Code: "EP", Profile: legacyCMEPCSVProfile},
+			}),
+		},
+	))
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S9404", RunProfileRequest{
+		GroupID: "cm-ep-csv",
+		Limit:   1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	epRun := resp.Items[0]
+	require.Equal(t, "EP", epRun.ObjectCode)
+	require.Contains(t, epRun.ArtifactName, ".csv.zip")
+	records, err := csv.NewReader(strings.NewReader(epRun.ArtifactContent)).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.Equal(t, legacyEPTemplateAliases(), records[0])
+	require.NotContains(t, records[0], "IP Address")
+	require.Equal(t, "SN0001", records[1][0])
+	require.Equal(t, "100001", records[1][1])
+	require.Equal(t, "Site-A", records[1][2])
+	require.Equal(t, "true", records[1][3])
+	require.Equal(t, "EEA0", records[1][15])
+	require.Equal(t, "128-EIA1", records[1][16])
+	require.Equal(t, "1", records[1][17])
+	require.Equal(t, "0", records[1][18])
 }
 
 func TestRunInventoryProfileCreatesRun(t *testing.T) {

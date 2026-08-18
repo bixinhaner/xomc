@@ -1073,12 +1073,88 @@ func enrichRowsWithLocalHost(rows []ExportDataRow, object ScenarioObject, window
 		next["runtime.tech"] = valueOrDefault(next["runtime.tech"], object.Tech)
 		next["task.window_start"] = valueOrDefault(next["task.window_start"], windowStart.Format(time.RFC3339))
 		next["task.window_end"] = valueOrDefault(next["task.window_end"], windowEnd.Format(time.RFC3339))
+		enrichLegacyCMDerivedFields(next, windowEnd)
 		out = append(out, next)
 	}
 	// No placeholder row when there is no source data: a northbound file must reflect
 	// real device/PM/MR data only. Empty input yields zero rows, and generateFileContent
 	// then produces no artifact (no fabrication, no delivery of an empty file).
 	return out
+}
+
+func enrichLegacyCMDerivedFields(row ExportDataRow, windowEnd time.Time) {
+	row["nbi.coms_date_time"] = valueOrDefault(row["nbi.coms_date_time"], windowEnd.Format("02/01/2006 00:00"))
+	if freqMode := legacyCMFreqMode(row["device_info.network_model"]); freqMode != "" {
+		row["nbi.freq_mode"] = valueOrDefault(row["nbi.freq_mode"], freqMode)
+	}
+	if mcc, mnc := legacyCMMCCMNC(row["device_info.plmn"]); mcc != "" || mnc != "" {
+		row["nbi.mcc"] = valueOrDefault(row["nbi.mcc"], mcc)
+		row["nbi.mnc"] = valueOrDefault(row["nbi.mnc"], mnc)
+	}
+	if cellStatus := legacyCMCellStatus(row["device_info.op_state"]); cellStatus != "" {
+		row["nbi.cell_status"] = valueOrDefault(row["nbi.cell_status"], cellStatus)
+	}
+	if activeState := legacyCMCellActiveState(row["device_info.op_state"]); activeState != "" {
+		row["nbi.cell_active_state"] = valueOrDefault(row["nbi.cell_active_state"], activeState)
+	}
+	if adminState := legacyCMCellAdminState(row["device_info.rf_status"]); adminState != "" {
+		row["nbi.cell_admin_state"] = valueOrDefault(row["nbi.cell_admin_state"], adminState)
+	}
+}
+
+func legacyCMFreqMode(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch {
+	case normalized == "2" || strings.Contains(normalized, "fdd"):
+		return "2"
+	case normalized == "4" || strings.Contains(normalized, "tdd"):
+		return "4"
+	default:
+		return ""
+	}
+}
+
+func legacyCMMCCMNC(plmn string) (string, string) {
+	plmn = strings.TrimSpace(plmn)
+	if len(plmn) < 3 {
+		return "", ""
+	}
+	return plmn[:3], plmn[3:]
+}
+
+func legacyCMCellStatus(value string) string {
+	if legacyCMTruthyState(value) {
+		return "ACTIVE"
+	}
+	if strings.TrimSpace(value) != "" {
+		return "DEACTIVE"
+	}
+	return ""
+}
+
+func legacyCMCellActiveState(value string) string {
+	if legacyCMTruthyState(value) {
+		return "Active"
+	}
+	if strings.TrimSpace(value) != "" {
+		return "Deactivated"
+	}
+	return ""
+}
+
+func legacyCMCellAdminState(value string) string {
+	if legacyCMTruthyState(value) {
+		return "Unblock"
+	}
+	if strings.TrimSpace(value) != "" {
+		return "Block"
+	}
+	return ""
+}
+
+func legacyCMTruthyState(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	return normalized == "1" || normalized == "true" || normalized == "on" || normalized == "active" || normalized == "unblock" || normalized == "unblocked"
 }
 
 func valueOrDefault(value, fallback string) string {
@@ -1208,6 +1284,8 @@ func escapeXML(value string) string {
 // </FieldValue></Objects></DataFile>. Matches the sample files under doc/20260805/cm/.
 func renderCMXML(fields []FieldDefinition, rows []ExportDataRow, ts time.Time) string {
 	var b strings.Builder
+	valueFields := cmXMLValueFields(fields)
+	dnField := cmXMLDNField(fields)
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString("<DataFile>\n")
 	b.WriteString("<FileHeader>\n")
@@ -1216,14 +1294,18 @@ func renderCMXML(fields []FieldDefinition, rows []ExportDataRow, ts time.Time) s
 	b.WriteString("</FileHeader>")
 	b.WriteString("<Objects>\n")
 	b.WriteString("<FieldName>\n")
-	for i, f := range fields {
+	for i, f := range valueFields {
 		fmt.Fprintf(&b, "    <N i=\"%d\">%s</N>\n", i+1, escapeXML(f.OutputAlias))
 	}
 	b.WriteString("</FieldName>")
 	b.WriteString("<FieldValue>\n")
 	for _, row := range rows {
-		fmt.Fprintf(&b, "<Object Dn=\"%s\">\n", escapeXML(row["device.serial_number"]))
-		for i, f := range fields {
+		dn := row["device.serial_number"]
+		if dnField.SystemField != "" {
+			dn = row[dnField.SystemField]
+		}
+		fmt.Fprintf(&b, "<Object Dn=\"%s\">\n", escapeXML(dn))
+		for i, f := range valueFields {
 			fmt.Fprintf(&b, "    <V i=\"%d\">%s</V>\n", i+1, escapeXML(row[f.SystemField]))
 		}
 		b.WriteString("</Object>\n")
@@ -1232,4 +1314,24 @@ func renderCMXML(fields []FieldDefinition, rows []ExportDataRow, ts time.Time) s
 	b.WriteString("</Objects>\n")
 	b.WriteString("</DataFile>\n")
 	return b.String()
+}
+
+func cmXMLValueFields(fields []FieldDefinition) []FieldDefinition {
+	out := make([]FieldDefinition, 0, len(fields))
+	for _, field := range fields {
+		if strings.EqualFold(field.OutputAlias, "dn") {
+			continue
+		}
+		out = append(out, field)
+	}
+	return out
+}
+
+func cmXMLDNField(fields []FieldDefinition) FieldDefinition {
+	for _, field := range fields {
+		if strings.EqualFold(field.OutputAlias, "dn") {
+			return field
+		}
+	}
+	return FieldDefinition{}
 }

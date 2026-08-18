@@ -17,6 +17,23 @@ const (
 	nameMR        = "#ModuleType#-Baicells-#Object#-#LocalHost#-#eNBID#-#DateTime#[-#Ri#].xml"
 	nameLOG       = "#Object#_#Date#.txt"
 	nameInventory = "BaiOMC_#Object#_#DateTime#.csv"
+
+	legacyCMCPXMLProfile   = "cm.cp.xml.v1"
+	legacyCMEPXMLProfile   = "cm.ep.xml.v1"
+	legacyCMCCXMLProfile   = "cm.cc.xml.v1"
+	legacyCMCEXMLProfile   = "cm.ce.xml.v1"
+	legacyCMCPCSVProfile   = "cm.cp.csv.v1"
+	legacyCMEPCSVProfile   = "cm.ep.csv.v1"
+	legacyCMCCCSVProfile   = "cm.cc.csv.v1"
+	legacyCMCECSVProfile   = "cm.ce.csv.v1"
+	legacyCMCOMSCSVProfile = "cm.coms.csv.v1"
+
+	legacyS0001EPProfile        = "cm.s0001.ep.legacy"
+	legacyCMPlmnCPXMLProfile    = "cm.cp.xml.s0003-s0015.v1"
+	legacyCMHeNBCEXMLProfile    = "cm.ce.xml.henb-location.v1"
+	legacyCMS0005CCXMLProfile   = "cm.cc.xml.s0005.v1"
+	legacyCMS0006CPXMLProfile   = "cm.cp.xml.s0006.v1"
+	legacyCMS0007COMSCSVProfile = "cm.coms.csv.s0007.v1"
 )
 
 // Catalog is the read model used by the page-config API. It is deliberately
@@ -59,6 +76,7 @@ func (c *Catalog) InventoryProfiles() []InventoryProfile {
 
 func (c *Catalog) Fields(filter FieldFilter) []FieldDefinition {
 	out := make([]FieldDefinition, 0, len(c.fields))
+	profileOut := make([]FieldDefinition, 0, len(c.fields))
 	for _, f := range c.fields {
 		if filter.Domain != "" && f.Domain != filter.Domain {
 			continue
@@ -69,7 +87,17 @@ func (c *Catalog) Fields(filter FieldFilter) []FieldDefinition {
 		if filter.Tech != "" && f.Tech != "" && !strings.EqualFold(f.Tech, filter.Tech) {
 			continue
 		}
+		if filter.Profile != "" && f.Profile != "" && strings.EqualFold(f.Profile, filter.Profile) {
+			profileOut = append(profileOut, f)
+			continue
+		}
+		if f.Profile != "" {
+			continue
+		}
 		out = append(out, f)
+	}
+	if filter.Profile != "" && len(profileOut) > 0 {
+		return profileOut
 	}
 	return out
 }
@@ -120,98 +148,155 @@ func obj(codes ...string) []ScenarioObject {
 	return out
 }
 
+func cmLTEObjects(format OutputFormat, codes ...string) []ScenarioObject {
+	out := make([]ScenarioObject, 0, len(codes))
+	for _, code := range codes {
+		out = append(out, ScenarioObject{Code: code, Tech: "LTE", Profile: legacyCMProfile(format, code)})
+	}
+	return out
+}
+
+func legacyCMProfile(format OutputFormat, code string) string {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	switch format {
+	case FormatCSV:
+		switch code {
+		case "CP":
+			return legacyCMCPCSVProfile
+		case "EP":
+			return legacyCMEPCSVProfile
+		case "CC":
+			return legacyCMCCCSVProfile
+		case "CE":
+			return legacyCMCECSVProfile
+		case "COMS":
+			return legacyCMCOMSCSVProfile
+		}
+	case FormatXML:
+		switch code {
+		case "CP":
+			return legacyCMCPXMLProfile
+		case "EP":
+			return legacyCMEPXMLProfile
+		case "CC":
+			return legacyCMCCXMLProfile
+		case "CE":
+			return legacyCMCEXMLProfile
+		}
+	}
+	return ""
+}
+
+func withObjectProfile(objects []ScenarioObject, code, profile string) []ScenarioObject {
+	out := make([]ScenarioObject, len(objects))
+	copy(out, objects)
+	for i := range out {
+		if strings.EqualFold(out[i].Code, code) {
+			out[i].Profile = profile
+		}
+	}
+	return out
+}
+
 func defaultFileProfiles() []FileProfile {
-	cm := obj("CP", "EP", "CC", "CE")
-	cmComs := obj("CP", "EP", "CC", "CE", "COMS")
+	cmXML := cmLTEObjects(FormatXML, "CP", "EP", "CC", "CE")
+	cmCSV := cmLTEObjects(FormatCSV, "CP", "EP", "CC", "CE")
+	cmS0001 := withObjectProfile(cmXML, "EP", legacyS0001EPProfile)
+	cmS0003 := withObjectProfile(cmXML, "CP", legacyCMPlmnCPXMLProfile)
+	cmS0004 := withObjectProfile(cmXML, "CE", legacyCMHeNBCEXMLProfile)
+	cmS0005 := withObjectProfile(withObjectProfile(cmXML, "CC", legacyCMS0005CCXMLProfile), "CE", legacyCMHeNBCEXMLProfile)
+	cmS0006 := withObjectProfile(cmXML, "CP", legacyCMS0006CPXMLProfile)
+	cmS0007 := append(cmLTEObjects(FormatCSV, "CP", "EP", "CC", "CE"), ScenarioObject{Code: "COMS", Tech: "LTE", Profile: legacyCMS0007COMSCSVProfile})
+	cmS0008 := append(cmCSV, ScenarioObject{Code: "COMS", Tech: "LTE", Profile: legacyCMCOMSCSVProfile})
 	mr := obj("MRO", "MRE", "MRS")
 	return []FileProfile{
 		fileProfile("S0001", "CM + PM PC + MR standard 15M", "标准场景", "Standard", []string{"baseline"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0001),
 			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0002", "CM + PM PE/PC + MR", "电信场景", "Telecom", []string{"PE/PC", "csv |"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
 			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0003", "SH Telecom", "上海电信", "SH-Tele", []string{"PE/PC", "csv |"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0003),
 			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0004", "Shaanxi Telecom", "陕西电信", "SN-Tele", []string{"PE/PC", "alarm cn", "csv |"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0004),
 			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0005", "Jiangsu Telecom delayed PM + custom log", "江苏电信", "JS-Tele", []string{"PE/PC", "log type1", "csv |"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0005),
 			pipeCSV(group("pm-15m-delayed", DomainPM, FormatCSV, Period15M, 14, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 			gzipGroup(group("log-custom-daily", DomainLOG, FormatTXT, Period24H, 5, pathLOG, nameLOG, obj("login", "operation"))),
 		}),
 		fileProfile("S0006", "CM/PM without MR", "泰国 True", "Thai-True", []string{"no MR"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0006),
 			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 		}),
 		fileProfile("S0007", "CM CSV + COMS + PM 60M", "泰国 AIS", "Thai-AIS", []string{"CM CSV", "COMS", "PM 60M"}, []FileGroup{
-			group("cm-daily-csv", DomainCM, FormatCSV, Period24H, 0, pathCM, nameCM, cmComs),
+			group("cm-daily-csv", DomainCM, FormatCSV, Period24H, 0, pathCM, nameCM, cmS0007),
 			group("pm-60m", DomainPM, FormatCSV, Period60M, 20, pathPM, namePM, obj("PC")),
 		}),
 		fileProfile("S0008", "CM CSV + COMS + fixed log", "V1 场景", "V1", []string{"CM CSV", "COMS", "log type2"}, []FileGroup{
-			group("cm-daily-csv", DomainCM, FormatCSV, Period24H, 1, pathCM, nameCM, cmComs),
+			group("cm-daily-csv", DomainCM, FormatCSV, Period24H, 1, pathCM, nameCM, cmS0008),
 			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 			gzipGroup(group("log-fixed-daily", DomainLOG, FormatCSV, Period24H, 5, pathLOG, "#Object#_#PeriodStartTime#-24H.csv", obj("login_fix", "operation_fix"))),
 		}),
 		fileProfile("S0009", "PC 60M + MR", "老挝电信", "Laos-Tele", []string{"PM 60M"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
 			group("pm-pc-60m", DomainPM, FormatCSV, Period60M, 0, pathPM, namePM, obj("PC")),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0010", "Object directory output", "上海联通", "SHUcom", []string{"object dirs", "socket"}, []FileGroup{
-			group("cm-daily-by-object", DomainCM, FormatXML, Period24H, 1, pathCM+"#Object#/", nameCM, cm),
+			group("cm-daily-by-object", DomainCM, FormatXML, Period24H, 1, pathCM+"#Object#/", nameCM, cmXML),
 			group("pm-15m-by-object", DomainPM, FormatCSV, Period15M, 5, pathPM+"#Object#/", namePM, obj("PC")),
 			group("mr-15m-by-object", DomainMR, FormatXML, Period15M, 0, pathMR+"#Object#/", nameMR, mr),
 		}),
 		fileProfile("S0011", "ISAT MTN standard", "ISAT MTN", "ISAT-NBI-MTN", []string{"standard"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
 			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0012", "ENB + GNB dual technology", "陕西移动", "Shaanxi Mobile", []string{"ENB/GNB"}, []FileGroup{
-			group("cm-daily-lte", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily-lte", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
 			group("cm-daily-gnb", DomainCM, FormatXML, Period24H, 3, pathCM+"GNB/", nameCM, []ScenarioObject{{Code: "CP", Tech: "GNB"}, {Code: "EP", Tech: "GNB"}, {Code: "CC", Tech: "GNB"}, {Code: "CE", Tech: "GNB"}}),
 			group("pm-15m-lte", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 			group("pm-pc-15m-gnb", DomainPM, FormatCSV, Period15M, 8, pathPM+"GNB/", namePM, []ScenarioObject{{Code: "PC", Tech: "GNB", Profile: "pm.pc.gnb.csv.v1"}}),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0013", "pmresult 60M multi-technology", "ZED 场景", "ZED", []string{"ENB/GSM/GNB", "PM 60M", "pmresult"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
 			group("pm-pc-60m-lte", DomainPM, FormatCSV, Period60M, 25, pathPM, "pmresult_152XXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Profile: "pm.pc.pmresult.csv.v1"}}),
 			group("pm-pc-60m-gsm", DomainPM, FormatCSV, Period60M, 20, pathPM, "pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Tech: "GSM", Profile: "pm.pc.gsm.pmresult.csv.v1"}}),
 			group("pm-pc-60m-gnb", DomainPM, FormatCSV, Period60M, 30, pathPM+"GNB/", "pmresult_XXXXXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Tech: "GNB", Profile: "pm.pc.gnb.csv.v1"}}),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0014", "Indonesia Telkomsel standard", "印尼 Telkomsel", "YinNi_Telkomsel_MNO", []string{"standard"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
 			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0015", "Philippines DITO", "菲律宾 DITO", "FeiLvBin-DITO", []string{"PE/PC", "csv |"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0003),
 			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PE", "PC"))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0016", "ENB + GSM PM", "MTN 场景", "MTN", []string{"ENB/GSM"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
 			group("pm-15m-lte", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 			group("pm-pc-15m-gsm", DomainPM, FormatCSV, Period15M, 5, pathPM+"gsm/", "pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Tech: "GSM", Profile: "pm.pc.gsm.pmresult.csv.v1"}}),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0017", "Heilongjiang standard", "黑龙江场景", "HLongjianng", []string{"standard"}, []FileGroup{
-			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cm),
+			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
 			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPM, namePM, obj("PC")),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
@@ -663,7 +748,7 @@ func defaultFields() []FieldDefinition {
 		field(DomainInventory, "OMC", "UE Count", "inventory.omc.ue_count", "SUM(device_info.ue_count)", "number", "number", "UE count"),
 		field(DomainInventory, "OMC", "Version", "inventory.omc.version", "buildinfo.ReleaseVersion", "string", "quote", "Version"),
 	)
-	return fields
+	return appendLegacyCMFields(fields)
 }
 
 func field(domain Domain, objectCode, outputAlias, systemField, source, dataType, renderer, cnName string) FieldDefinition {
@@ -679,4 +764,228 @@ func field(domain Domain, objectCode, outputAlias, systemField, source, dataType
 		CnName:        cnName,
 		SupportStatus: SupportSupported,
 	}
+}
+
+func profileField(profile string, domain Domain, objectCode, outputAlias, systemField, source, dataType, renderer, cnName string) FieldDefinition {
+	definition := field(domain, objectCode, outputAlias, systemField, source, dataType, renderer, cnName)
+	definition.Profile = profile
+	definition.Key = strings.ToLower(string(domain) + "." + objectCode + "." + profile + "." + systemField)
+	return definition
+}
+
+func legacyCMField(profile, objectCode, outputAlias, systemField, source, dataType, renderer, cnName string) FieldDefinition {
+	definition := profileField(profile, DomainCM, objectCode, outputAlias, systemField, source, dataType, renderer, cnName)
+	definition.Tech = "LTE"
+	return definition
+}
+
+type legacyCMFieldSeed struct {
+	outputAlias string
+	systemField string
+	source      string
+	dataType    string
+	renderer    string
+	cnName      string
+}
+
+func legacyCMFields(profile, objectCode string, seeds []legacyCMFieldSeed) []FieldDefinition {
+	out := make([]FieldDefinition, 0, len(seeds))
+	for _, seed := range seeds {
+		out = append(out, legacyCMField(profile, objectCode, seed.outputAlias, seed.systemField, seed.source, seed.dataType, seed.renderer, seed.cnName))
+	}
+	return out
+}
+
+func legacyCMEPFields(profile string) []FieldDefinition {
+	return legacyCMFields(profile, "EP", legacyCMEPFieldSeeds)
+}
+
+var legacyCMCPBaseFieldSeeds = []legacyCMFieldSeed{
+	{"dn", "device_info.eci", "device_info.eci", "string", "preserve text", "Cell DN / ECI"},
+	{"related_enb_dn", "device.serial_number", "devices.serial_number", "string", "quote", "Related eNB DN"},
+	{"related_enb_id", "device_info.enb_id", "device_info.enb_id", "string", "quote", "Related eNB ID"},
+	{"related_enb_userlabel", "device.site_name", "devices.site_name / device_info.device_name", "string", "quote", "Related eNB label"},
+	{"cel_id", "device_info.cell_id", "device_info.cell_id", "string", "quote", "Cell ID"},
+	{"cel_userlabel", "device_info.device_name", "device_info.device_name / devices.site_name", "string", "quote", "Cell label"},
+	{"DrxAlgSwitch", "device_param.DrxAlgSwitch", "device_parameters LTE DRX enabled", "bool", "enum", "DRX algorithm switch"},
+	{"ShortDrxSwitch", "device_param.ShortDrxSwitch", "device_parameters LTE short DRX enabled", "bool", "enum", "Short DRX switch"},
+	{"OnDurationTimer", "device_param.OnDurationTimer", "device_parameters LTE DRX on-duration timer", "string", "quote", "On duration timer"},
+	{"DrxInactivityTimer", "device_param.DrxInactivityTimer", "device_parameters LTE DRX inactivity timer", "string", "quote", "DRX inactivity timer"},
+	{"DrxReTxTimer", "device_param.DrxReTxTimer", "device_parameters LTE DRX retransmission timer", "string", "quote", "DRX retransmission timer"},
+	{"LongDrxCycle", "device_param.LongDrxCycle", "device_parameters LTE long DRX cycle", "string", "quote", "Long DRX cycle"},
+	{"ShortDrxCycle", "device_param.ShortDrxCycle", "device_parameters LTE short DRX cycle", "string", "quote", "Short DRX cycle"},
+	{"DrxShortCycleTimer", "device_param.DrxShortCycleTimer", "device_parameters LTE short DRX cycle timer", "string", "quote", "DRX short cycle timer"},
+	{"UeInactiveTimer", "device_param.UeInactiveTimer", "device_parameters LTE UE inactive timer", "string", "quote", "UE inactive timer"},
+	{"T304ForEutran", "device_param.T304ForEutran", "device_parameters LTE T304 EUTRA timer", "string", "quote", "T304 for EUTRAN"},
+	{"T310", "device_param.T310", "device_parameters LTE T310 timer", "string", "quote", "T310 timer"},
+	{"DefaultPagingCycle", "device_param.DefaultPagingCycle", "device_parameters LTE default paging cycle", "string", "quote", "Default paging cycle"},
+	{"SysTimeCfgInd", "device_param.SysTimeCfgInd", "device_parameters LTE system time config indicator", "bool", "enum", "System time config indicator"},
+	{"referenceSignalPower", "device_info.transmit_power", "device_info.transmit_power", "number", "number", "Reference signal power"},
+	{"PA", "device_param.PA", "device_parameters LTE PDSCH Pa", "string", "quote", "PDSCH PA"},
+	{"PB", "device_param.PB", "device_parameters LTE PDSCH Pb", "string", "quote", "PDSCH PB"},
+	{"PreambInitRcvTargetPwr", "device_param.PreambInitRcvTargetPwr", "device_parameters LTE preamble initial received target power", "string", "quote", "Preamble initial received target power"},
+	{"powerRampingStep", "device_param.powerRampingStep", "device_parameters LTE power ramping step", "string", "quote", "Power ramping step"},
+	{"N310", "device_param.N310", "device_parameters LTE N310 timer", "string", "quote", "N310"},
+	{"N311", "device_param.N311", "device_parameters LTE N311 timer", "string", "quote", "N311"},
+	{"T311", "device_param.T311", "device_parameters LTE T311 timer", "string", "quote", "T311"},
+	{"T300", "device_param.T300", "device_parameters LTE T300 timer", "string", "quote", "T300"},
+	{"T301", "device_param.T301", "device_parameters LTE T301 timer", "string", "quote", "T301"},
+	{"T302", "device_param.T302", "device_parameters LTE T302 timer", "string", "quote", "T302"},
+	{"VoLTESwitch", "device_param.VoLTESwitch", "device_parameters LTE VoLTE switch", "string", "quote", "VoLTE switch"},
+	{"Lcg", "device_param.Lcg", "device_parameters LTE LCG", "string", "quote", "LCG"},
+}
+
+var legacyCMCPPlmnFieldSeeds = append(append([]legacyCMFieldSeed{}, legacyCMCPBaseFieldSeeds...),
+	legacyCMFieldSeed{"PlmnIdList", "device_info.plmn", "device_info.plmn", "string", "preserve text", "PLMN ID list"},
+)
+
+var legacyCMCPThaiTrueFieldSeeds = append(append([]legacyCMFieldSeed{}, legacyCMCPBaseFieldSeeds...),
+	legacyCMFieldSeed{"Shop Id", "device.site_id", "devices.site_id", "string", "quote", "Shop ID"},
+	legacyCMFieldSeed{"Latitude", "device.latitude", "devices.latitude", "number", "number", "Latitude"},
+	legacyCMFieldSeed{"Longitude", "device.longitude", "devices.longitude", "number", "number", "Longitude"},
+	legacyCMFieldSeed{"Height", "device_info.gps_height", "device_info.gps_height", "number", "number", "GPS height"},
+	legacyCMFieldSeed{"Site Name", "device.site_name", "devices.site_name / device_info.device_name", "string", "quote", "Site name"},
+	legacyCMFieldSeed{"Install Detail Address", "device_info.address", "device_info.address", "string", "quote", "Installation address"},
+	legacyCMFieldSeed{"Last Period Time", "device.last_inform_at", "devices.last_inform_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Last period time"},
+	legacyCMFieldSeed{"Cell Active State", "nbi.cell_active_state", "derived from device_info.op_state", "string", "enum", "Cell active state"},
+	legacyCMFieldSeed{"Cell Admin State", "nbi.cell_admin_state", "derived from device_info.rf_status", "string", "enum", "Cell admin state"},
+)
+
+var legacyCMEPFieldSeeds = []legacyCMFieldSeed{
+	{"dn", "device.serial_number", "devices.serial_number", "string", "quote", "DN / device serial number"},
+	{"enb_id", "device_info.enb_id", "device_info.enb_id", "string", "quote", "eNB ID"},
+	{"enb_userlabel", "device.site_name", "devices.site_name / device_info.device_name", "string", "quote", "eNB label"},
+	{"ShortDrxSwitch", "device_param.ShortDrxSwitch", "device_parameters LTE short DRX enabled", "bool", "enum", "Short DRX switch"},
+	{"OnDurationTimer", "device_param.OnDurationTimer", "device_parameters LTE DRX on-duration timer", "string", "quote", "On duration timer"},
+	{"DrxInactivityTimer", "device_param.DrxInactivityTimer", "device_parameters LTE DRX inactivity timer", "string", "quote", "DRX inactivity timer"},
+	{"DrxReTxTimer", "device_param.DrxReTxTimer", "device_parameters LTE DRX retransmission timer", "string", "quote", "DRX retransmission timer"},
+	{"LongDrxCycle", "device_param.LongDrxCycle", "device_parameters LTE long DRX cycle", "string", "quote", "Long DRX cycle"},
+	{"ShortDrxCycle", "device_param.ShortDrxCycle", "device_parameters LTE short DRX cycle", "string", "quote", "Short DRX cycle"},
+	{"DrxShortCycleTimer", "device_param.DrxShortCycleTimer", "device_parameters LTE short DRX cycle timer", "string", "quote", "DRX short cycle timer"},
+	{"UeInactiveTimer", "device_param.UeInactiveTimer", "device_parameters LTE UE inactive timer", "string", "quote", "UE inactive timer"},
+	{"T304ForEutran", "device_param.T304ForEutran", "device_parameters LTE T304 EUTRA timer", "string", "quote", "T304 for EUTRAN"},
+	{"T310", "device_param.T310", "device_parameters LTE T310 timer", "string", "quote", "T310 timer"},
+	{"DefaultPagingCycle", "device_param.DefaultPagingCycle", "device_parameters LTE default paging cycle", "string", "quote", "Default paging cycle"},
+	{"SysTimeCfgInd", "device_param.SysTimeCfgInd", "device_parameters LTE system time config indicator", "bool", "enum", "System time config indicator"},
+	{"encrypAlgPriority", "device_param.encrypAlgPriority", "device_parameters LTE allowed ciphering algorithm list", "string", "quote", "Encryption algorithm priority"},
+	{"integProtAlgPriority", "device_param.integProtAlgPriority", "device_parameters LTE allowed integrity protection algorithm list", "string", "quote", "Integrity protection algorithm priority"},
+	{"Lcg", "device_param.Lcg", "device_parameters LTE LCG", "string", "quote", "LCG"},
+	{"VoLTESwitch", "device_param.VoLTESwitch", "device_parameters LTE VoLTE switch", "string", "quote", "VoLTE switch"},
+}
+
+var legacyCMCCBaseFieldSeeds = []legacyCMFieldSeed{
+	{"dn", "device_info.eci", "device_info.eci", "string", "preserve text", "Cell DN / ECI"},
+	{"related_enb_dn", "device.serial_number", "devices.serial_number", "string", "quote", "Related eNB DN"},
+	{"related_enb_id", "device_info.enb_id", "device_info.enb_id", "string", "quote", "Related eNB ID"},
+	{"related_enb_userlabel", "device.site_name", "devices.site_name / device_info.device_name", "string", "quote", "Related eNB label"},
+	{"cel_id", "device_info.cell_id", "device_info.cell_id", "string", "quote", "Cell ID"},
+	{"userlabel", "device_info.device_name", "device_info.device_name / devices.site_name", "string", "quote", "Cell label"},
+	{"pci", "device_info.pci", "device_info.pci", "string", "preserve text", "PCI"},
+	{"freq_mode", "nbi.freq_mode", "derived from device_info.network_model", "string", "enum", "Duplex mode"},
+	{"bandIndicator", "device_info.band", "device_info.band", "string", "quote", "Band indicator"},
+	{"tac", "device_info.tac", "device_info.tac", "string", "quote", "TAC"},
+	{"zc_idx", "device_info.root_index", "device_info.root_index", "number", "number", "Root index"},
+	{"freq_pointno_ul", "device_info.ul_earfcn", "device_info.ul_earfcn", "number", "preserve text", "UL EARFCN"},
+	{"freq_pointno_dl", "device_info.freq_point", "device_info.freq_point", "number", "preserve text", "DL EARFCN"},
+	{"bandwidth_ul", "device_info.bandwidth", "device_info.bandwidth", "number", "number", "UL bandwidth"},
+	{"bandwidth_dl", "device_info.bandwidth", "device_info.bandwidth", "number", "number", "DL bandwidth"},
+	{"td_sfassignment", "device_info.subframe_assignment", "device_info.subframe_assignment", "string", "quote", "TDD subframe assignment"},
+	{"td_specialsfpatterns", "device_info.special_subframe", "device_info.special_subframe", "string", "quote", "TDD special subframe patterns"},
+}
+
+var legacyCMS0005CCFieldSeeds = append(append([]legacyCMFieldSeed{}, legacyCMCCBaseFieldSeeds...),
+	legacyCMFieldSeed{"mac_address", "device_info.mac", "device_info.mac", "string", "quote", "MAC address"},
+	legacyCMFieldSeed{"cell_status", "device_info.op_state", "device_info.op_state", "string", "enum", "Cell status"},
+)
+
+var legacyCMCEBaseFieldSeeds = []legacyCMFieldSeed{
+	{"dn", "device.serial_number", "devices.serial_number", "string", "quote", "DN / device serial number"},
+	{"enb_id", "device_info.enb_id", "device_info.enb_id", "string", "quote", "eNB ID"},
+	{"userlabel", "device.site_name", "devices.site_name / device_info.device_name", "string", "quote", "Device label"},
+	{"enb_model", "device.model_name", "devices.model_name / devices.product_class", "string", "quote", "eNB model"},
+	{"ip_address", "device.ip_address", "devices.ip_address", "string", "quote", "IP address"},
+	{"software_version", "device.firmware_version", "devices.firmware_version", "string", "quote", "Software version"},
+	{"freq_mode", "nbi.freq_mode", "derived from device_info.network_model", "string", "enum", "Duplex mode"},
+	{"cel_num", "device_info.num_of_cells", "device_info.num_of_cells", "number", "number", "Cell count"},
+	{"serialid", "device.serial_number", "devices.serial_number", "string", "quote", "Serial ID"},
+}
+
+var legacyCMCEHeNBFieldSeeds = []legacyCMFieldSeed{
+	{"dn", "device.serial_number", "devices.serial_number", "string", "quote", "DN / device serial number"},
+	{"enb_id", "device_info.enb_id", "device_info.enb_id", "string", "quote", "eNB ID"},
+	{"userlabel", "device.site_name", "devices.site_name / device_info.device_name", "string", "quote", "Device label"},
+	{"enb_model", "device.model_name", "devices.model_name / devices.product_class", "string", "quote", "eNB model"},
+	{"ip_address", "device.ip_address", "devices.ip_address", "string", "quote", "IP address"},
+	{"software_version", "device.firmware_version", "devices.firmware_version", "string", "quote", "Software version"},
+	{"freq_mode", "nbi.freq_mode", "derived from device_info.network_model", "string", "enum", "Duplex mode"},
+	{"cel_num", "device_info.num_of_cells", "device_info.num_of_cells", "number", "number", "Cell count"},
+	{"HeNB_longitude", "device.longitude", "devices.longitude", "number", "number", "HeNB longitude"},
+	{"HeNB_latitude", "device.latitude", "devices.latitude", "number", "number", "HeNB latitude"},
+	{"serialid", "device.serial_number", "devices.serial_number", "string", "quote", "Serial ID"},
+}
+
+var legacyCMS0007COMSFieldSeeds = []legacyCMFieldSeed{
+	{"DATE_TIME", "nbi.coms_date_time", "derived from export window", "datetime", "dd/MM/yyyy HH:mm", "Date time"},
+	{"DUPLEXING", "nbi.freq_mode", "derived from device_info.network_model", "string", "enum", "Duplexing"},
+	{"TXRX_MODE", "device.model_name", "devices.model_name / devices.product_class", "string", "quote", "Tx/Rx mode"},
+	{"ENODEB_ID", "device_info.enb_id", "device_info.enb_id", "string", "quote", "eNB ID"},
+	{"ENODEB_NAME", "device.site_name", "devices.site_name / device_info.device_name", "string", "quote", "eNB name"},
+	{"CELL_ID", "device_info.cell_id", "device_info.cell_id", "string", "quote", "Cell ID"},
+	{"CELL_NAME", "device_info.device_name", "device_info.device_name / devices.site_name", "string", "quote", "Cell name"},
+	{"CELL_STATUS", "nbi.cell_status", "derived from device_info.op_state", "string", "enum", "Cell status"},
+	{"SITE_CODE", "device.site_id", "devices.site_id", "string", "quote", "Site code"},
+	{"SITE_DEPLOYMENT", "device.model_name", "devices.model_name / devices.product_class", "string", "quote", "Site deployment"},
+	{"SECTOR_TYPE", "device.model_name", "devices.model_name / devices.product_class", "string", "quote", "Sector type"},
+	{"MCC", "nbi.mcc", "derived from device_info.plmn", "string", "quote", "MCC"},
+	{"MNC", "nbi.mnc", "derived from device_info.plmn", "string", "quote", "MNC"},
+	{"TAC_DEC", "device_info.tac", "device_info.tac", "string", "quote", "TAC decimal"},
+	{"PCI", "device_info.pci", "device_info.pci", "string", "preserve text", "PCI"},
+	{"UL_EARFCN", "device_info.ul_earfcn", "device_info.ul_earfcn", "number", "preserve text", "UL EARFCN"},
+	{"DL_EARFCN", "device_info.freq_point", "device_info.freq_point", "number", "preserve text", "DL EARFCN"},
+	{"BAND", "device_info.band", "device_info.band", "string", "quote", "Band"},
+	{"BANDWIDTH", "device_info.bandwidth", "device_info.bandwidth", "number", "number", "Bandwidth"},
+	{"MAXTXPOWER", "device_info.transmit_power", "device_info.transmit_power", "number", "number", "Max transmit power"},
+	{"RS_POWER", "device_info.transmit_power", "device_info.transmit_power", "number", "number", "Reference signal power"},
+	{"CELL_RANGE", "device_info.num_of_cells", "device_info.num_of_cells", "number", "number", "Cell range"},
+	{"PA", "device_param.PA", "device_parameters LTE PDSCH Pa", "string", "quote", "PDSCH PA"},
+	{"PB", "device_param.PB", "device_parameters LTE PDSCH Pb", "string", "quote", "PDSCH PB"},
+	{"SFN_NO", "device.serial_number", "devices.serial_number", "string", "quote", "SFN number"},
+}
+
+var legacyCMCOMSFieldSeeds = []legacyCMFieldSeed{
+	{"Serial Number", "device.serial_number", "devices.serial_number", "string", "quote", "Device serial number"},
+	{"Femto ID", "device_info.cell_id", "device_info.cell_id", "string", "quote", "Femto ID"},
+	{"BSR Name", "device_info.device_name", "device_info.device_name / devices.site_name", "string", "quote", "BSR name"},
+	{"External IP", "device.ip_address", "devices.ip_address", "string", "quote", "External IP"},
+	{"Last Sync Date", "device.last_inform_at", "devices.last_inform_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Last sync date"},
+	{"Vendor", "device.manufacturer", "devices.manufacturer", "string", "quote", "Vendor"},
+	{"Model", "device.model_name", "devices.model_name", "string", "quote", "Model"},
+	{"Cell ID", "device_info.cell_id", "device_info.cell_id", "string", "quote", "Cell ID"},
+	{"LAC", "device_info.lac", "device_info.lac", "string", "quote", "LAC"},
+	{"MCC", "nbi.mcc", "derived from device_info.plmn", "string", "quote", "MCC"},
+	{"MNC", "nbi.mnc", "derived from device_info.plmn", "string", "quote", "MNC"},
+	{"eNODEB ID", "device_info.enb_id", "device_info.enb_id", "string", "quote", "eNodeB ID"},
+	{"TAC", "device_info.tac", "device_info.tac", "string", "quote", "TAC"},
+}
+
+func appendLegacyCMFields(fields []FieldDefinition) []FieldDefinition {
+	for _, profile := range []string{legacyCMCPXMLProfile, legacyCMCPCSVProfile} {
+		fields = append(fields, legacyCMFields(profile, "CP", legacyCMCPBaseFieldSeeds)...)
+	}
+	fields = append(fields, legacyCMFields(legacyCMPlmnCPXMLProfile, "CP", legacyCMCPPlmnFieldSeeds)...)
+	fields = append(fields, legacyCMFields(legacyCMS0006CPXMLProfile, "CP", legacyCMCPThaiTrueFieldSeeds)...)
+	for _, profile := range []string{legacyS0001EPProfile, legacyCMEPXMLProfile, legacyCMEPCSVProfile} {
+		fields = append(fields, legacyCMEPFields(profile)...)
+	}
+	for _, profile := range []string{legacyCMCCXMLProfile, legacyCMCCCSVProfile} {
+		fields = append(fields, legacyCMFields(profile, "CC", legacyCMCCBaseFieldSeeds)...)
+	}
+	fields = append(fields, legacyCMFields(legacyCMS0005CCXMLProfile, "CC", legacyCMS0005CCFieldSeeds)...)
+	for _, profile := range []string{legacyCMCEXMLProfile, legacyCMCECSVProfile} {
+		fields = append(fields, legacyCMFields(profile, "CE", legacyCMCEBaseFieldSeeds)...)
+	}
+	fields = append(fields, legacyCMFields(legacyCMHeNBCEXMLProfile, "CE", legacyCMCEHeNBFieldSeeds)...)
+	fields = append(fields, legacyCMFields(legacyCMS0007COMSCSVProfile, "COMS", legacyCMS0007COMSFieldSeeds)...)
+	fields = append(fields, legacyCMFields(legacyCMCOMSCSVProfile, "COMS", legacyCMCOMSFieldSeeds)...)
+	return fields
 }

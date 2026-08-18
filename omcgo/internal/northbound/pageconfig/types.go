@@ -199,6 +199,7 @@ type FieldDefinition struct {
 	Key           string        `json:"key"`
 	Domain        Domain        `json:"domain"`
 	ObjectCode    string        `json:"object_code"`
+	Profile       string        `json:"profile,omitempty"`
 	Scope         string        `json:"scope,omitempty"`
 	Tech          string        `json:"tech,omitempty"`
 	OutputAlias   string        `json:"output_alias"`
