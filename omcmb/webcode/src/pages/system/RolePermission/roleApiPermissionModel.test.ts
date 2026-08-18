@@ -59,6 +59,16 @@ const menus: Menu[] = [
     showStatus: 'show',
     status: 'normal',
   },
+  {
+    id: 'menu-device-access-control',
+    name: '接入控制',
+    type: 'menu',
+    permissionKey: 'device:access-control',
+    parentId: null,
+    sortOrder: 5,
+    showStatus: 'show',
+    status: 'normal',
+  },
 ];
 
 const endpoints: ApiEndpoint[] = [
@@ -116,6 +126,24 @@ const endpoints: ApiEndpoint[] = [
     module: 'device',
     description: '读取设备列表',
   },
+  {
+    id: 'endpoint-get-device-access-states',
+    path: '/api/v1/device-access/states',
+    method: 'GET',
+    name: '接入状态',
+    apiGroup: 'device-access',
+    module: 'device-access',
+    description: '读取接入状态',
+  },
+  {
+    id: 'endpoint-post-device-access-review',
+    path: '/api/v1/device-access/candidates/:candidateID/review',
+    method: 'POST',
+    name: '候选审核',
+    apiGroup: 'device-access',
+    module: 'device-access',
+    description: '审核候选设备',
+  },
 ];
 
 describe('inferReadApiEndpointIds', () => {
@@ -149,6 +177,14 @@ describe('inferReadApiEndpointIds', () => {
       menus,
       endpoints,
     )).toEqual(['endpoint-get-dashboard', 'endpoint-get-devices']);
+  });
+
+  it('suggests only read APIs when access-control menu is granted', () => {
+    expect(inferReadApiEndpointIds(
+      ['menu-device-access-control'],
+      menus,
+      endpoints,
+    )).toEqual(['endpoint-get-device-access-states']);
   });
 });
 

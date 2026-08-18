@@ -9,9 +9,11 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/authz"
 	"github.com/omcgo/omcgo/internal/core/components/redisx"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/deviceaccess"
 )
 
 // initDeviceModule 初始化 F06 设备管理模块。
@@ -153,6 +155,58 @@ func initDeviceModule(c *Container) error {
 		}
 	}
 	informHandler := device.NewInformHandler(deviceService, c.Carriers, defaultCarrier, logger)
+	{
+		accessRepository := deviceaccess.NewPgRepository(c.PgPool)
+		runtimeSettings := deviceaccess.NewPgRuntimeSettingsStore(c.PgPool)
+		assetResolver := deviceaccess.NewAssetEvidenceResolver(accessRepository)
+		policyProvider := deviceaccess.NewPgPolicyProvider(c.PgPool)
+		accessGate := deviceaccess.NewAccessGate(accessRepository, assetResolver, policyProvider)
+		accessCoordinator := deviceaccess.NewReevaluationCoordinator(accessRepository, assetResolver, policyProvider)
+		accessGate.SetRuntimeSettingsReader(runtimeSettings)
+		accessCoordinator.SetRuntimeSettingsReader(runtimeSettings)
+		gpsProbes := deviceaccess.NewGPSProbeService(
+			deviceaccess.NewProductGPSPathResolver(c.ProductRegistry, c.ParamRegistry),
+			c.TaskSvc,
+			accessRepository,
+			accessCoordinator,
+			logger,
+		)
+		probeQueue := deviceaccess.NewPgGPSProbeQueue(c.PgPool)
+		accessGate.SetGPSProbePlanner(probeQueue)
+		accessCoordinator.SetGPSProbePlanner(probeQueue)
+		informHandler.SetAccessGate(accessGate)
+		c.DeviceAccessGPSProbes = gpsProbes
+
+		reevaluationQueue := deviceaccess.NewPgReevaluationQueue(c.PgPool)
+		accessStore := deviceaccess.NewPgPolicyStore(c.PgPool)
+		policyService := deviceaccess.NewPolicyService(accessStore, reevaluationQueue)
+		listService := deviceaccess.NewListService(accessStore)
+		identityVisibility := deviceaccess.NewPgCarrierVisibilityChecker(c.PgPool)
+		policyService.SetIdentityVisibilityChecker(identityVisibility)
+		listService.SetIdentityVisibilityChecker(identityVisibility)
+		c.DeviceAccessHTTPHandler = deviceaccess.NewPolicyHTTPHandler(
+			policyService,
+			listService,
+			deviceaccess.NewContextActorResolver(
+				authz.NewResolver(c.PermService),
+				identityVisibility,
+			),
+		)
+		c.DeviceAccessHTTPHandler.SetRuntimeSettingsStore(runtimeSettings)
+		managementActionStore := deviceaccess.NewPgActionStore(c.PgPool)
+		managementStore := deviceaccess.NewPgManagementStore(c.PgPool, managementActionStore)
+		managementStore.SetCandidateOwnershipRegistrar(candidateOwnershipRegistrar{repository: regRepo})
+		c.DeviceAccessHTTPHandler.SetManagementStore(managementStore)
+		// Keep action history visible in observe mode and when execution is disabled.
+		// initMiscModules replaces this read-only service with the executable workflow
+		// only after the southbound device dependencies are available.
+		actionReader := deviceaccess.NewActionService(
+			managementActionStore, nil, accessRepository, c.Carriers, logger,
+		)
+		actionReader.SetRuntimeSettingsReader(runtimeSettings)
+		c.DeviceAccessHTTPHandler.SetActionReader(actionReader)
+		logger.Info("device access gate initialized; business switch defaults to disabled")
+	}
 	if batchProcessor != nil {
 		// T-0123 / T-0125 batch path：注入 transition publisher，让 batch flush 完成后能
 		// 触发 device.online / device.firmware.changed 事件（与 UpdateFromInform 非 batch

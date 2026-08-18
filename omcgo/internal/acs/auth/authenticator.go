@@ -25,8 +25,13 @@ const (
 
 // DeviceIdentity holds identifying information extracted during authentication.
 type DeviceIdentity struct {
-	SerialNumber string
-	OUI          string
+	// CredentialID is the identity presented by the HTTP authentication
+	// mechanism. It is deliberately not treated as the TR-069 serial number:
+	// many carrier deployments use one shared ACS credential for a device
+	// population.
+	CredentialID  string
+	Authenticated bool
+	Method        string
 }
 
 // DeviceAuthenticator defines the interface for CPE authentication.
@@ -35,11 +40,12 @@ type DeviceAuthenticator interface {
 	Challenge(w http.ResponseWriter)
 }
 
-// NoopAuthenticator always allows access (for development).
+// NoopAuthenticator allows the protocol request to continue for compatibility
+// while explicitly reporting that no device authentication was performed.
 type NoopAuthenticator struct{}
 
 func (a *NoopAuthenticator) Authenticate(r *http.Request) (*DeviceIdentity, error) {
-	return &DeviceIdentity{}, nil
+	return &DeviceIdentity{Method: "none"}, nil
 }
 
 func (a *NoopAuthenticator) Challenge(w http.ResponseWriter) {}
@@ -59,7 +65,7 @@ func (a *BasicAuthenticator) Authenticate(r *http.Request) (*DeviceIdentity, err
 		subtle.ConstantTimeCompare([]byte(password), []byte(a.Password)) != 1 {
 		return nil, fmt.Errorf("invalid credentials")
 	}
-	return &DeviceIdentity{SerialNumber: username}, nil
+	return &DeviceIdentity{CredentialID: username, Authenticated: true, Method: "basic"}, nil
 }
 
 func (a *BasicAuthenticator) Challenge(w http.ResponseWriter) {
@@ -112,6 +118,9 @@ func (a *DigestAuthenticator) Authenticate(r *http.Request) (*DeviceIdentity, er
 	nc := params["nc"]
 	cnonce := params["cnonce"]
 	qop := params["qop"]
+	if subtle.ConstantTimeCompare([]byte(username), []byte(a.Username)) != 1 {
+		return nil, fmt.Errorf("invalid digest credentials")
+	}
 
 	// 原子消费 nonce（一次性）：命中即有效，未命中表示不存在 / 已过期 / 已被用过。
 	if !a.nonces.Consume(r.Context(), nonce) {
@@ -137,7 +146,7 @@ func (a *DigestAuthenticator) Authenticate(r *http.Request) (*DeviceIdentity, er
 		return nil, fmt.Errorf("invalid digest response")
 	}
 
-	return &DeviceIdentity{SerialNumber: username}, nil
+	return &DeviceIdentity{CredentialID: username, Authenticated: true, Method: "digest"}, nil
 }
 
 func (a *DigestAuthenticator) Challenge(w http.ResponseWriter) {

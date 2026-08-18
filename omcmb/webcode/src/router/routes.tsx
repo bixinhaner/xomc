@@ -29,6 +29,7 @@ const ResourceStats      = React.lazy(() => import('@/pages/device/ResourceStati
 const ImportExport       = React.lazy(() => import('@/pages/device/ImportExport'));
 const RecycleBin         = React.lazy(() => import('@/pages/device/RecycleBin'));
 const UeDetail           = React.lazy(() => import('@/pages/device/UeDetail'));
+const AccessControl      = React.lazy(() => import('@/pages/device/AccessControl'));
 
 // Alarm Management
 const CurrentAlarms      = React.lazy(() => import('@/pages/alarm/CurrentAlarms'));
@@ -238,6 +239,7 @@ export const routes: RouteObject[] = [
       // T-0158: 异常重启记录
       { path: 'device/abnormal-reboot', element: withSuspense(AbnormalReboot) },
       { path: 'device/ue-detail/:sn', element: withSuspense(UeDetail) },
+      { path: 'device/access-control', element: withSuspense(AccessControl) },
 
       // Alarm Management
       { path: 'alarm/current',    element: withSuspense(CurrentAlarms) },

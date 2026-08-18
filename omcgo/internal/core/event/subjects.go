@@ -14,6 +14,16 @@ const (
 	SubjectGeofenceLifecycleDeactivationRequired = "geofence.lifecycle.deactivation_required"
 )
 
+const (
+	SubjectDeviceAccessObserved         = "device.access.observed"
+	SubjectDeviceAccessCollectRequested = "device.access.collect.requested"
+	SubjectDeviceAccessAccepted         = "device.access.accepted"
+	SubjectDeviceAccessReviewRequired   = "device.access.review_required"
+	SubjectDeviceAccessRevalidating     = "device.access.revalidating"
+	SubjectDeviceAccessRejected         = "device.access.rejected"
+	SubjectDeviceAccessRevoked          = "device.access.revoked"
+)
+
 // Device events
 //
 // 这类事件由 ACS Handler 在处理 CPE TR-069 Inform 报文时发布。
@@ -146,6 +156,17 @@ const (
 	// 发布者：acs/handler.go（检测到 Device.FaultMgmt.ExpeditedEvent.* 参数时）。
 	// 订阅者：alarm.ExpeditedEventReceiver（解析参数并路由到告警引擎）。
 	SubjectDeviceExpeditedAlarm = "device.inform.expedited_alarm"
+
+	// SubjectDeviceAccessReevaluationRequested is the durable hand-off from
+	// device-access policy/list APIs to the background reevaluation consumer.
+	// The payload contains carrier, serial number, trigger type and a stable
+	// trigger event ID; the consumer reloads the currently published policy
+	// before evaluating.
+	SubjectDeviceAccessReevaluationRequested = "device.access.reevaluation.requested"
+
+	// SubjectDeviceAccessProbeRequested carries the durable request for the
+	// bounded TAC/ECGI/GPS evidence task created by the device-access workflow.
+	SubjectDeviceAccessProbeRequested = "device.access.probe.requested"
 
 	// SubjectDeviceFaultDetected 是 ACS 检测到设备异常重启并携带故障原因时发布。
 	// Inform 事件码包含 "1 BOOT" 且满足设备类型对应的 HaltReason 口径；或 5G 软重启（"4 VALUE_CHANGE" + soft_reboot）。

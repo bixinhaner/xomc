@@ -1351,6 +1351,59 @@ func TestHandlePeriodic_Success(t *testing.T) {
 	assert.NotNil(t, updatedDevice.LastInformAt)
 }
 
+type recordingAccessGate struct {
+	observation AccessObservation
+	decision    AccessDecision
+	err         error
+}
+
+func (g *recordingAccessGate) Admit(_ context.Context, observation AccessObservation) (AccessDecision, error) {
+	g.observation = observation
+	return g.decision, g.err
+}
+
+func TestHandlePeriodic_ReevaluatesExistingDeviceWithoutFalsifyingHeartbeat(t *testing.T) {
+	deviceID := uuid.New()
+	updated := false
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID: deviceID, SerialNumber: sn, OUI: "48BF74", Carrier: model.CarrierCMCC,
+				Status: model.DeviceActive, InformInterval: 300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error {
+			updated = true
+			return nil
+		},
+	}
+	svc := newInfTestDeviceService(deviceRepo, &infMockParamRepo{})
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+	gate := &recordingAccessGate{decision: AccessDecision{
+		State: AccessDecisionRejected, ReasonCode: "rule_mismatch_confirmed",
+	}}
+	h.SetAccessGate(gate)
+	payload := sampleInformPayload("SN-PER-ACCESS")
+	payload.Events = []string{"2 PERIODIC"}
+	payload.RemoteIP = "198.51.100.20"
+	payload.Authenticated = true
+	payload.AuthMethod = "digest"
+	payload.CredentialID = "cpe"
+	evt, err := event.NewEvent(event.SubjectDevicePeriodic, payload)
+	require.NoError(t, err)
+
+	err = h.handlePeriodic(context.Background(), evt)
+
+	require.NoError(t, err)
+	assert.True(t, updated, "access rejection must not rewrite the heartbeat as offline")
+	assert.Equal(t, "SN-PER-ACCESS", gate.observation.SerialNumber)
+	assert.Equal(t, model.CarrierCMCC, gate.observation.Carrier)
+	assert.Equal(t, "198.51.100.20", gate.observation.RemoteIP)
+	assert.True(t, gate.observation.Authenticated)
+	assert.Equal(t, "digest", gate.observation.AuthMethod)
+	assert.Equal(t, "cpe", gate.observation.CredentialID)
+}
+
 type recordingHeartbeatGroupAssigner struct {
 	calls chan GroupAssignRequest
 }

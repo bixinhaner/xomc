@@ -21,6 +21,8 @@ func TestNoopAuthenticator_Authenticate(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, identity)
+	assert.False(t, identity.Authenticated)
+	assert.Equal(t, "none", identity.Method)
 }
 
 func TestBasicAuthenticator_Success(t *testing.T) {
@@ -32,7 +34,9 @@ func TestBasicAuthenticator_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, identity)
-	assert.Equal(t, "cpe-user", identity.SerialNumber)
+	assert.Equal(t, "cpe-user", identity.CredentialID)
+	assert.True(t, identity.Authenticated)
+	assert.Equal(t, "basic", identity.Method)
 }
 
 func TestBasicAuthenticator_WrongPassword(t *testing.T) {
@@ -112,7 +116,9 @@ func TestDigestAuthenticator_Success_MD5(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, identity)
-	assert.Equal(t, "cpe-user", identity.SerialNumber)
+	assert.Equal(t, "cpe-user", identity.CredentialID)
+	assert.True(t, identity.Authenticated)
+	assert.Equal(t, "digest", identity.Method)
 }
 
 func TestDigestAuthenticator_Success_MD5_NoAlgorithmParam(t *testing.T) {
@@ -143,7 +149,7 @@ func TestDigestAuthenticator_Success_MD5_NoAlgorithmParam(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, identity)
-	assert.Equal(t, "cpe-user", identity.SerialNumber)
+	assert.Equal(t, "cpe-user", identity.CredentialID)
 }
 
 func TestDigestAuthenticator_Success_SHA256(t *testing.T) {
@@ -173,7 +179,7 @@ func TestDigestAuthenticator_Success_SHA256(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, identity)
-	assert.Equal(t, "cpe-user", identity.SerialNumber)
+	assert.Equal(t, "cpe-user", identity.CredentialID)
 }
 
 func TestDigestAuthenticator_Success_SHA256_WithQopAuth(t *testing.T) {
@@ -207,7 +213,7 @@ func TestDigestAuthenticator_Success_SHA256_WithQopAuth(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, identity)
-	assert.Equal(t, "cpe-user", identity.SerialNumber)
+	assert.Equal(t, "cpe-user", identity.CredentialID)
 }
 
 func TestDigestAuthenticator_Success_MD5_WithQopAuth(t *testing.T) {
@@ -241,7 +247,7 @@ func TestDigestAuthenticator_Success_MD5_WithQopAuth(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, identity)
-	assert.Equal(t, "cpe-user", identity.SerialNumber)
+	assert.Equal(t, "cpe-user", identity.CredentialID)
 }
 
 func TestDigestAuthenticator_InvalidNonce(t *testing.T) {
@@ -290,6 +296,27 @@ func TestDigestAuthenticator_MissingAuth(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, identity)
 	assert.Contains(t, err.Error(), "missing digest auth")
+}
+
+func TestDigestAuthenticator_RejectsUnexpectedUsername(t *testing.T) {
+	a := NewDigestAuthenticator("cpe-user", "cpe-pass")
+	w := httptest.NewRecorder()
+	a.Challenge(w)
+	nonce := extractDigestField(w.Header().Values("WWW-Authenticate")[1], "nonce")
+	uri := "/acs"
+	ha1 := testMD5(fmt.Sprintf("%s:%s:%s", "other-user", "ACS", "cpe-pass"))
+	ha2 := testMD5(fmt.Sprintf("%s:%s", http.MethodPost, uri))
+	response := testMD5(fmt.Sprintf("%s:%s:%s", ha1, nonce, ha2))
+	req := httptest.NewRequest(http.MethodPost, uri, nil)
+	req.Header.Set("Authorization", fmt.Sprintf(
+		`Digest username="other-user", realm="ACS", nonce="%s", uri="%s", response="%s", algorithm=MD5`,
+		nonce, uri, response,
+	))
+
+	identity, err := a.Authenticate(req)
+
+	assert.Error(t, err)
+	assert.Nil(t, identity)
 }
 
 func TestNewAuthenticator_Basic(t *testing.T) {

@@ -995,6 +995,10 @@ else
     else
       warn "ACS session.max_concurrent 自动迁移失败，保留现网配置；请人工核对新包模板" "Automatic ACS session.max_concurrent migration failed; keeping the live configuration. Verify it against the new package template"
     fi
+    upgrade_acs_trusted_proxy_cidrs \
+      "$OMC_ROOT/etc/acs.prod.yaml" \
+      "$RELEASE_DIR/etc/acs.prod.yaml" ||
+      die "acs.prod.yaml 缺少可信 ACS 网关配置且自动补齐失败；未切换 current" "acs.prod.yaml is missing the trusted ACS gateway configuration and automatic completion failed; current was not switched" 1
     for service_config in acs.prod.yaml app.prod.yaml worker.prod.yaml; do
       if upgrade_prod_database_dsns \
         "$OMC_ROOT/etc/$service_config" \

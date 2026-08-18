@@ -91,6 +91,14 @@ func (KeyBuilder) ACSConnReqURL(deviceSN string) string { return acsConnReqURLPr
 // ACSConnReqURLPrefix ConnectionRequestURL 键前缀。
 func (KeyBuilder) ACSConnReqURLPrefix() string { return acsConnReqURLPrefix }
 
+// ACSAccessSnapshot 设备接入授权摘要（ACS 热路径读取，TTL）。
+func (KeyBuilder) ACSAccessSnapshot(deviceSN string) string {
+	return acsAccessSnapshotPrefix + deviceSN
+}
+
+// ACSAccessSnapshotPrefix 接入授权摘要键前缀。
+func (KeyBuilder) ACSAccessSnapshotPrefix() string { return acsAccessSnapshotPrefix }
+
 // ACSAuthNonce HTTP Digest 一次性 nonce（SETEX + GETDEL，TTL）。跨实例共享，
 // 使 Challenge 与 Authenticate 可落在不同实例而不丢 nonce。
 func (KeyBuilder) ACSAuthNonce(nonce string) string { return acsAuthNoncePrefix + nonce }
@@ -345,10 +353,11 @@ const (
 	acsCWMP2TaskPrefix          = "acs:cwmp2task:"
 	acsTaskTransitionPendingKey = "acs:task:transition:pending"
 	// issue #65（Option B）— ACS 横扩去进程态：准入槽位 / 设备会话指针 / CR URL / nonce
-	acsAdmissionSlotsKey   = "acs:admission:slots"
-	acsDeviceSessionPrefix = "acs:device:session:"
-	acsConnReqURLPrefix    = "acs:connreq:url:"
-	acsAuthNoncePrefix     = "acs:auth:nonce:"
+	acsAdmissionSlotsKey    = "acs:admission:slots"
+	acsDeviceSessionPrefix  = "acs:device:session:"
+	acsConnReqURLPrefix     = "acs:connreq:url:"
+	acsAccessSnapshotPrefix = "acs:access:snapshot:"
+	acsAuthNoncePrefix      = "acs:auth:nonce:"
 
 	// pm
 	pmUploadSetupAdmissionPrefix = "pm:upload_setup:admission:"

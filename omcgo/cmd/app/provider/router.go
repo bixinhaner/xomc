@@ -61,7 +61,7 @@ func Setup(r *gin.Engine, c *Container) error {
 		// 才能回填 devices.model_name；ModuleGraph 必须保证 productregistry 先于
 		// device 初始化。漏掉此依赖会让 SetProductMatcher 跳过 → productMatcher=nil
 		// → applyProductMetadata 第一行 return → 永远不调 MatchProductClass。
-		Depends: []string{"topology", "productregistry", "alarm"},
+		Depends: []string{"topology", "productregistry", "paramregistry", "alarm"},
 		Init:    func() error { return initDeviceModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
@@ -440,6 +440,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	deviceHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
 	if c.GeofenceHandler != nil {
 		c.GeofenceHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))
+	}
+	if c.DeviceAccessHTTPHandler != nil {
+		c.DeviceAccessHTTPHandler.RegisterRoutes(permGroup("devices"))
 	}
 	if c.miscDeps.paramSyncHandler != nil {
 		c.miscDeps.paramSyncHandler.RegisterRoutes(featGroup("devices", "eNB.Monitor", "gNB.Monitor", "CPE.Monitor"))

@@ -35,3 +35,4 @@ export { fileApi } from './fileApi';
 export { mmlApi } from './mmlApi';
 export { traceApi } from './traceApi';
 export { geofenceApi } from './geofenceApi';
+export { deviceAccessApi } from './deviceAccessApi';

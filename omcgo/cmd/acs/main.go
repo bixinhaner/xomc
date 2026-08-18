@@ -24,12 +24,17 @@ import (
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/carrier"
+	"github.com/omcgo/omcgo/internal/core/carrier/cmcc"
+	"github.com/omcgo/omcgo/internal/core/carrier/ctcc"
+	"github.com/omcgo/omcgo/internal/core/carrier/cucc"
 	"github.com/omcgo/omcgo/internal/core/components"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	miniocomp "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/health"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/deviceaccess"
 	"github.com/omcgo/omcgo/internal/paramsync"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/storageprotection"
@@ -80,7 +85,6 @@ func runACS(cmd *cobra.Command, args []string) error {
 	); err != nil {
 		return fmt.Errorf("生产凭证校验失败: %w", err)
 	}
-
 	inf, err := initACS(context.Background(), &cfg)
 	if err != nil {
 		return err
@@ -102,6 +106,32 @@ func runACS(cmd *cobra.Command, args []string) error {
 	taskQueue := task.NewRedisTaskQueueWithTerminalTTL(inf.Redis, effectiveTerminalTTL)
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	taskService := task.NewTaskService(taskQueue, taskRepo, inf.Logger)
+	var accessSnapshots *acs.RedisAccessSnapshotStore
+	if inf.Redis != nil {
+		accessSnapshots = acs.NewRedisAccessSnapshotStore(inf.Redis, 2*time.Minute)
+	}
+	accessRepository := deviceaccess.NewPgRepository(inf.PgPool)
+	guard := deviceaccess.NewAccessTaskGuard(accessRepository, accessRepository)
+	runtimeSettings := deviceaccess.NewPgRuntimeSettingsStore(inf.PgPool)
+	guard.SetRuntimeSettingsReader(runtimeSettings)
+	if accessSnapshots != nil {
+		guard.SetAccessSnapshotReader(deviceaccess.AccessSnapshotStateReader(func(ctx context.Context, serialNumber string) (string, bool, bool, error) {
+			snapshot, found, err := accessSnapshots.Get(ctx, serialNumber, "", "")
+			return snapshot.State, snapshot.NormalTasksFrozen, found, err
+		}))
+	}
+	actionStore := deviceaccess.NewPgActionStore(inf.PgPool)
+	carriers := carrier.NewRegistry()
+	carriers.Register(cmcc.New())
+	carriers.Register(ctcc.New())
+	carriers.Register(cucc.New())
+	actionService := deviceaccess.NewActionService(
+		actionStore, nil, accessRepository, carriers, inf.Logger,
+	)
+	actionService.SetRuntimeSettingsReader(runtimeSettings)
+	guard.SetSecurityActionAuthorizer(actionService)
+	taskService.SetAdmissionGuard(guard)
+	inf.Logger.Info("device access task admission guard initialized")
 	// Broadcast terminal task states so APP/Worker subscribers (MML ResultAggregator)
 	// can update mml_tasks without being in the ACS process.
 	if inf.EventBus != nil {
@@ -194,6 +224,16 @@ func runACS(cmd *cobra.Command, args []string) error {
 		inf.Logger.Info("ACS stateless redis state enabled (issue #65 option B)",
 			zap.Int64("max_concurrent", cfg.Session.MaxConcurrent),
 			zap.Duration("device_session_ttl", deviceSessionTTL))
+		deps.AccessSnapshotStore = accessSnapshots
+		if inf.EventBus != nil {
+			projector := acs.NewAccessSnapshotProjector(inf.EventBus, accessSnapshots, inf.Logger)
+			if err := projector.Start(); err != nil {
+				return fmt.Errorf("start access snapshot projector: %w", err)
+			}
+			inf.GS.Register("access-snapshot-projector", 1, func(context.Context) error {
+				return projector.Stop()
+			})
+		}
 	} else {
 		inf.Logger.Warn("ACS redis unavailable; falling back to per-instance in-process session state (single-instance only)")
 	}

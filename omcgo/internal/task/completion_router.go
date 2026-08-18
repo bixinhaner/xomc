@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -84,8 +85,16 @@ func (r *CompletionRouter) RegisterObserver(observer TaskCompletionCallback) {
 // handler 执行过程中的 panic 会被 recover 并记录，保证其它订阅不受影响。
 // 同时按 source/status 累计 Prometheus 指标（metrics 已注入时生效）。
 func (r *CompletionRouter) Dispatch(ctx context.Context, t *Task) {
+	if err := r.DispatchReliable(ctx, t); err != nil {
+		r.logger.Error("completion handler failed", zap.Error(err))
+	}
+}
+
+// DispatchReliable dispatches a terminal task and returns projection errors so
+// the durable event consumer can NAK and retry the transition.
+func (r *CompletionRouter) DispatchReliable(ctx context.Context, t *Task) error {
 	if t == nil {
-		return
+		return nil
 	}
 	r.mu.RLock()
 	handlers, ok := r.handlers[t.Source]
@@ -101,12 +110,6 @@ func (r *CompletionRouter) Dispatch(ctx context.Context, t *Task) {
 		}
 	}
 
-	// source 无关的横切观察者先跑（#122 终态写 sys_task_logs 等），
-	// 与 per-source 路由结果无关，且不影响 NoHandlerTotal 计数语义。
-	for _, obs := range observers {
-		r.safeCall(ctx, obs, t)
-	}
-
 	if !ok || len(handlers) == 0 {
 		if metrics != nil {
 			metrics.NoHandlerTotal.WithLabelValues(string(t.Source)).Inc()
@@ -114,11 +117,26 @@ func (r *CompletionRouter) Dispatch(ctx context.Context, t *Task) {
 		if unknown != nil {
 			r.safeCall(ctx, unknown, t)
 		}
-		return
+		for _, obs := range observers {
+			r.safeCall(ctx, obs, t)
+		}
+		return nil
 	}
+	var firstErr error
 	for _, h := range handlers {
-		r.safeCall(ctx, h, t)
+		if err := r.safeCallReliable(ctx, h, t); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
+	// Cross-cutting terminal observers run only after durable business
+	// projection succeeds. Otherwise a NAK/redelivery would append duplicate
+	// terminal logs before the retryable handler has committed.
+	if firstErr == nil {
+		for _, obs := range observers {
+			r.safeCall(ctx, obs, t)
+		}
+	}
+	return firstErr
 }
 
 func (r *CompletionRouter) safeCall(ctx context.Context, h TaskCompletionCallback, t *Task) {
@@ -132,6 +150,19 @@ func (r *CompletionRouter) safeCall(ctx context.Context, h TaskCompletionCallbac
 		}
 	}()
 	h.OnTaskCompleted(ctx, t)
+}
+
+func (r *CompletionRouter) safeCallReliable(ctx context.Context, h TaskCompletionCallback, t *Task) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("completion handler panic for task %s: %v", t.ID, p)
+		}
+	}()
+	if reliable, ok := h.(ReliableTaskCompletionCallback); ok {
+		return reliable.OnTaskCompletedReliable(ctx, t)
+	}
+	h.OnTaskCompleted(ctx, t)
+	return nil
 }
 
 // warnOnlyHandler 是默认的未知 source 处理器：只记 warn 日志，不中断流程。

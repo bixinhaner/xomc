@@ -18,17 +18,26 @@ const (
 	TaskStatusCancelled TaskStatus = "cancelled" // 任务取消
 )
 
+type AdmissionClass string
+
+const (
+	AdmissionClassNormal         AdmissionClass = "normal"
+	AdmissionClassAccessProbe    AdmissionClass = "access_probe"
+	AdmissionClassSecurityAction AdmissionClass = "security_action"
+)
+
 // TaskSource 任务来源
 type TaskSource string
 
 const (
-	TaskSourceAPI       TaskSource = "api"        // REST API 创建
-	TaskSourceScheduler TaskSource = "scheduler"  // 定时任务创建
-	TaskSourceSystem    TaskSource = "system"     // 系统内部创建
-	TaskSourceMML       TaskSource = "mml"        // MML 批量任务扇出
-	TaskSourceOps       TaskSource = "ops"        // F06 运维即时命令 (T-0102-c)
-	TaskSourceParamSync TaskSource = "param_sync" // durable parameter-sync run task
-	TaskSourceGeofence  TaskSource = "geofence"   // geofence location control task
+	TaskSourceAPI          TaskSource = "api"           // REST API 创建
+	TaskSourceScheduler    TaskSource = "scheduler"     // 定时任务创建
+	TaskSourceSystem       TaskSource = "system"        // 系统内部创建
+	TaskSourceMML          TaskSource = "mml"           // MML 批量任务扇出
+	TaskSourceOps          TaskSource = "ops"           // F06 运维即时命令 (T-0102-c)
+	TaskSourceParamSync    TaskSource = "param_sync"    // durable parameter-sync run task
+	TaskSourceGeofence     TaskSource = "geofence"      // geofence location control task
+	TaskSourceDeviceAccess TaskSource = "device_access" // access evidence probe task
 )
 
 // Task 表示一个设备任务
@@ -81,7 +90,8 @@ type Task struct {
 	// T-0168: per-device 翻译来源（同 mml_tasks.path_translation_source 枚举）。
 	// 首版由 fanout 从 task 直接复制（R-8.4 保证 task 内 product_class 一致）。
 	// 枚举值：discovered/default/passthrough/orphan_passthrough/mixed；空值=非 MML 来源。
-	PathTranslationSource string `json:"path_translation_source,omitempty"`
+	PathTranslationSource string         `json:"path_translation_source,omitempty"`
+	AdmissionClass        AdmissionClass `json:"admission_class"`
 }
 
 // CreateTaskRequest 创建任务请求
@@ -108,9 +118,10 @@ type CreateTaskRequest struct {
 	DeviceIndex  int    `json:"device_index"`
 
 	// 路径翻译元数据（MML fanout 阶段写入；详见 Task.HasPathTranslationMiss 注释）
-	HasPathTranslationMiss   bool   `json:"has_path_translation_miss"`
-	PathTranslationMissCount int    `json:"path_translation_miss_count"`
-	PathTranslationSource    string `json:"path_translation_source,omitempty"` // T-0168
+	HasPathTranslationMiss   bool           `json:"has_path_translation_miss"`
+	PathTranslationMissCount int            `json:"path_translation_miss_count"`
+	PathTranslationSource    string         `json:"path_translation_source,omitempty"` // T-0168
+	AdmissionClass           AdmissionClass `json:"admission_class"`
 
 	// FailImmediately creates a terminal failed task row without enqueueing it.
 	// It is used by callers that already know an RPC cannot be delivered, such
@@ -193,6 +204,7 @@ func NewTask(req *CreateTaskRequest) *Task {
 		HasPathTranslationMiss:   req.HasPathTranslationMiss,
 		PathTranslationMissCount: req.PathTranslationMissCount,
 		PathTranslationSource:    req.PathTranslationSource,
+		AdmissionClass:           req.AdmissionClass,
 	}
 
 	// 设置默认值
@@ -217,6 +229,9 @@ func NewTask(req *CreateTaskRequest) *Task {
 	}
 	if req.Source != "" {
 		task.Source = req.Source
+	}
+	if task.AdmissionClass == "" {
+		task.AdmissionClass = AdmissionClassNormal
 	}
 	if req.FailImmediately {
 		reason := req.FailReason

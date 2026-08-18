@@ -196,6 +196,54 @@ func TestCheckPermission_RoleInheritance(t *testing.T) {
 	assert.True(t, ok)
 }
 
+func TestCheckPermission_BuiltInHierarchyDoesNotElevateViewer(t *testing.T) {
+	auth := newTestAuthorizer(t)
+	auth.enforcer.AddPolicy("role:admin", "system", "/api/v1/device-access/policies/drafts", "POST")
+	auth.enforcer.AddPolicy("role:operator", "system", "/api/v1/device-access/devices/:serialNumber/reevaluate", "POST")
+	auth.enforcer.AddPolicy("role:viewer", "system", "/api/v1/device-access/states", "GET")
+	auth.enforcer.AddNamedGroupingPolicy("g", "role:admin", "role:operator", "system")
+	auth.enforcer.AddNamedGroupingPolicy("g", "role:operator", "role:viewer", "system")
+
+	viewerID := uuid.New()
+	auth.enforcer.AddNamedGroupingPolicy("g", viewerID.String(), "role:viewer", "system")
+
+	allowed, err := auth.CheckPermission(context.Background(), viewerID, "devices", "read")
+	require.NoError(t, err)
+	require.True(t, allowed)
+
+	allowed, err = auth.CheckPermission(context.Background(), viewerID, "devices", "write")
+	require.NoError(t, err)
+	require.False(t, allowed)
+
+	allowed, err = auth.CheckPermission(context.Background(), viewerID, "users", "create")
+	require.NoError(t, err)
+	require.False(t, allowed)
+
+	allowed, err = auth.CheckPermission(context.Background(), viewerID, "/api/v1/device-access/states", "GET")
+	require.NoError(t, err)
+	require.True(t, allowed)
+
+	allowed, err = auth.CheckPermission(context.Background(), viewerID, "/api/v1/device-access/policies/drafts", "POST")
+	require.NoError(t, err)
+	require.False(t, allowed)
+
+	allowed, err = auth.CheckPermission(context.Background(), viewerID, "/api/v1/device-access/devices/:serialNumber/reevaluate", "POST")
+	require.NoError(t, err)
+	require.False(t, allowed)
+
+	operatorID := uuid.New()
+	auth.enforcer.AddNamedGroupingPolicy("g", operatorID.String(), "role:operator", "system")
+	allowed, err = auth.CheckPermission(context.Background(), operatorID, "/api/v1/device-access/devices/:serialNumber/reevaluate", "POST")
+	require.NoError(t, err)
+	require.True(t, allowed)
+
+	adminID := uuid.New()
+	auth.enforcer.AddNamedGroupingPolicy("g", adminID.String(), "role:admin", "system")
+	allowed, err = auth.CheckPermission(context.Background(), adminID, "/api/v1/device-access/devices/:serialNumber/reevaluate", "POST")
+	require.NoError(t, err)
+	require.True(t, allowed)
+}
+
 // --- CheckPermission: domain isolation ---
 // v1.0：domain 已统一为 "system"（详见 PRD §11.11 决议 Q3），多 carrier domain 隔离测试已废弃。
 // 旧 TestCheckPermission_DomainIsolation 与 carrier-specific group policy 一同移除。

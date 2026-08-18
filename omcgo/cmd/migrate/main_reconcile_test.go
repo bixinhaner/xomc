@@ -59,8 +59,14 @@ func TestMainBaselineReconcileSectionsAreAdditiveAndIdempotent(t *testing.T) {
 		"CREATE TABLE IF NOT EXISTS public.geofence_definitions",
 		"CREATE TABLE IF NOT EXISTS public.event_outbox",
 		"CREATE TABLE IF NOT EXISTS public.geofence_batch_items",
+		"CREATE TABLE IF NOT EXISTS public.device_access_policy_sets",
+		"CREATE TABLE IF NOT EXISTS public.device_access_actions",
+		"ADD COLUMN IF NOT EXISTS admission_class",
 		"CREATE UNIQUE INDEX IF NOT EXISTS uq_async_jobs_geofence_manual_bind_request",
 		"main baseline reconcile missing devices.location_source_mode",
+		"'public.device_access_states'",
+		"main baseline reconcile missing relation %",
+		"main baseline reconcile missing device_tasks.admission_class",
 	} {
 		require.Contains(t, schemaSQL, contract)
 	}
@@ -77,6 +83,8 @@ func TestMainBaselineReconcileSectionsAreAdditiveAndIdempotent(t *testing.T) {
 	require.Contains(t, seedSQL, "INSERT INTO public.api_endpoints")
 	require.Contains(t, seedSQL, "INSERT INTO public.role_api_permissions")
 	require.Contains(t, seedSQL, "INSERT INTO public.menus")
+	require.Contains(t, seedSQL, "'device:access-control'")
+	require.Contains(t, seedSQL, "'/api/v1/device-access/states'")
 	require.Contains(t, seedSQL, "ON CONFLICT")
 }
 
@@ -85,6 +93,11 @@ func TestMainSeedMigrationDirTriggersBaselineReconcile(t *testing.T) {
 	require.True(t, isMainSeedMigrationDir("migrations/seed/"))
 	require.False(t, isMainSeedMigrationDir("/etc/omcgo/migrations"))
 	require.False(t, isMainSeedMigrationDir("/etc/omcgo/migrations/tsdb"))
+	require.False(t, isMainSeedMigrationDir("/etc/omcgo/migrations/tsdb/seed"))
+	require.True(t, isMainSchemaMigrationDir("/etc/omcgo/migrations"))
+	require.True(t, isMainSchemaMigrationDir("migrations/"))
+	require.False(t, isMainSchemaMigrationDir("/etc/omcgo/migrations/seed"))
+	require.False(t, isMainSchemaMigrationDir("/etc/omcgo/migrations/tsdb"))
 }
 
 func TestMainBaselineReconcileRepairsAndReplaysPostgreSQL16(t *testing.T) {
@@ -120,10 +133,35 @@ func TestMainBaselineReconcileRepairsAndReplaysPostgreSQL16(t *testing.T) {
 
 	_, err = db.Exec(`
 DROP TABLE public.geofence_carrier_settings;
+DROP TABLE
+    public.device_access_actions,
+    public.device_access_decision_checks,
+    public.device_access_decisions,
+    public.device_access_states,
+    public.device_access_evidence,
+    public.device_access_candidates,
+    public.device_access_conditions,
+    public.device_access_rules,
+    public.device_access_policy_versions,
+    public.device_access_policy_sets,
+    public.device_access_list_entries,
+    public.device_access_outbox;
+ALTER TABLE public.device_tasks DROP COLUMN admission_class;
 ALTER TABLE public.devices DROP COLUMN location_source_mode;
 ALTER TABLE public.provisioning_tasks
     DROP COLUMN policy_id,
     DROP COLUMN current_step_name;
+
+DELETE FROM public.role_menus
+WHERE menu_id::text LIKE 'da000001-%';
+DELETE FROM public.menus
+WHERE id::text LIKE 'da000001-%';
+DELETE FROM public.role_api_permissions
+WHERE endpoint_id IN (
+    SELECT id FROM public.api_endpoints WHERE api_group = 'device-access'
+);
+DELETE FROM public.api_endpoints
+WHERE api_group = 'device-access';
 `)
 	require.NoError(t, err)
 
@@ -138,6 +176,9 @@ ALTER TABLE public.provisioning_tasks
 		"public.geofence_carrier_settings",
 		"public.geofence_definitions",
 		"public.event_outbox",
+		"public.device_access_policy_sets",
+		"public.device_access_states",
+		"public.device_access_actions",
 	} {
 		var exists bool
 		require.NoError(t, db.QueryRow(`SELECT to_regclass($1) IS NOT NULL`, relation).Scan(&exists))
@@ -145,6 +186,7 @@ ALTER TABLE public.provisioning_tasks
 	}
 	for table, column := range map[string]string{
 		"devices":            "location_source_mode",
+		"device_tasks":       "admission_class",
 		"provisioning_tasks": "policy_id",
 	} {
 		var exists bool
@@ -160,4 +202,14 @@ SELECT EXISTS (
 	var carrierRows int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM public.geofence_carrier_settings`).Scan(&carrierRows))
 	require.Equal(t, 3, carrierRows)
+
+	var accessMenus, accessEndpoints int
+	require.NoError(t, db.QueryRow(`
+SELECT COUNT(*) FROM public.menus WHERE permission_key = 'device:access-control'
+`).Scan(&accessMenus))
+	require.Equal(t, 1, accessMenus)
+	require.NoError(t, db.QueryRow(`
+SELECT COUNT(*) FROM public.api_endpoints WHERE api_group = 'device-access'
+`).Scan(&accessEndpoints))
+	require.Equal(t, 14, accessEndpoints)
 }

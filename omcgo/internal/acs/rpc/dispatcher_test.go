@@ -159,6 +159,15 @@ func TestSetParameterValuesHandler_WithType(t *testing.T) {
 	assert.NotContains(t, body, "xsd:string")
 }
 
+func TestSetParameterValuesHandlerRejectsEmptyValues(t *testing.T) {
+	d := NewDispatcher()
+	cmd := &Command{Method: "SetParameterValues", Params: json.RawMessage(`{"values":[]}`)}
+
+	_, err := d.BuildRequest(cmd, "cwmp-id-empty-spv")
+
+	require.ErrorContains(t, err, "values must not be empty")
+}
+
 func TestGetParameterNamesHandler(t *testing.T) {
 	d := NewDispatcher()
 	cmd := &Command{

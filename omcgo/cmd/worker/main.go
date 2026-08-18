@@ -151,6 +151,9 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	if err := registerSubscribers(w, &cfg); err != nil {
 		return err
 	}
+	if err := startDeviceAccessWorkers(w); err != nil {
+		return fmt.Errorf("start device access workers: %w", err)
+	}
 
 	// 启动时把 device_tasks 里仍为 pending 的任务重灌进 Redis 设备队列。
 	// 大库冷启动时即使有专用索引，恢复也可能受机械盘或 autovacuum 影响；放到后台
@@ -244,6 +247,7 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) error {
 		pmProductCache = product.NewRedisCache(w.Redis)
 	}
 	pmProductRegistry := product.NewRegistry(pmProductRepo, pmProductCache, pmProductMetrics, logger)
+	w.ProductRegistry = pmProductRegistry
 	if err := pmProductRegistry.Refresh(context.Background()); err != nil {
 		// 与 alarm-definition fallback 相同的容错策略：refresh 失败仅 WARN，让 KPI Router 跑
 		// 在零 patterns 状态（所有设备都会被判 orphan，KPI 跳过 + log warn）。比 worker 整体启动失败更稳。

@@ -3,7 +3,9 @@ package device
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -27,6 +29,120 @@ var regColumns = []string{
 // PgRegistrationRepository implements RegistrationRepository using PostgreSQL.
 type PgRegistrationRepository struct {
 	pool *pgxpool.Pool
+}
+
+var ErrRegistrationOwnershipConflict = errors.New("registration ownership conflict")
+
+// EnsureCandidateOwnershipTx establishes the pre-registration evidence used by
+// device access control. It intentionally accepts the caller transaction so
+// candidate review, allow-list mutation and reevaluation outbox remain atomic.
+func (r *PgRegistrationRepository) EnsureCandidateOwnershipTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	reg *DeviceRegistration,
+) error {
+	if tx == nil {
+		return fmt.Errorf("ensure candidate ownership: transaction is required")
+	}
+	if reg == nil || strings.TrimSpace(reg.SerialNumber) == "" || strings.TrimSpace(string(reg.Carrier)) == "" || reg.GroupID == nil {
+		return fmt.Errorf("ensure candidate ownership: serial number, carrier and group are required")
+	}
+
+	conflictQuery, conflictArgs, err := storage.Psql.Select(`EXISTS (
+		SELECT 1 FROM devices d, requested_identity requested
+		WHERE d.serial_number = requested.serial_number AND d.carrier <> requested.carrier AND d.deleted_at IS NULL
+	) OR EXISTS (
+		SELECT 1 FROM device_registrations dr, requested_identity requested
+		WHERE dr.serial_number = requested.serial_number AND dr.carrier <> requested.carrier
+	)`).Prefix(
+		"WITH requested_identity AS (SELECT ?::varchar AS serial_number, ?::varchar AS carrier)",
+		reg.SerialNumber, string(reg.Carrier),
+	).ToSql()
+	if err != nil {
+		return fmt.Errorf("build candidate ownership conflict query: %w", err)
+	}
+	var conflict bool
+	if err := tx.QueryRow(ctx, conflictQuery, conflictArgs...).Scan(&conflict); err != nil {
+		return fmt.Errorf("check candidate ownership conflict: %w", err)
+	}
+	if conflict {
+		return fmt.Errorf("serial number belongs to another carrier: %w", ErrRegistrationOwnershipConflict)
+	}
+
+	existingDeviceQuery, existingDeviceArgs, err := storage.Psql.Select(`EXISTS (
+		SELECT 1 FROM devices d, requested_identity requested
+		WHERE d.serial_number = requested.serial_number AND d.carrier = requested.carrier AND d.deleted_at IS NULL
+	)`).Prefix(
+		"WITH requested_identity AS (SELECT ?::varchar AS serial_number, ?::varchar AS carrier)",
+		reg.SerialNumber, string(reg.Carrier),
+	).ToSql()
+	if err != nil {
+		return fmt.Errorf("build candidate ownership device query: %w", err)
+	}
+	var deviceExists bool
+	if err := tx.QueryRow(ctx, existingDeviceQuery, existingDeviceArgs...).Scan(&deviceExists); err != nil {
+		return fmt.Errorf("check candidate ownership device: %w", err)
+	}
+	if deviceExists {
+		return nil
+	}
+
+	existingRegistrationQuery, existingRegistrationArgs, err := storage.Psql.Select("id", "status").
+		From("device_registrations").
+		Where(sq.Eq{"serial_number": reg.SerialNumber, "carrier": string(reg.Carrier)}).
+		OrderBy("created_at DESC").Limit(1).Suffix("FOR UPDATE").ToSql()
+	if err != nil {
+		return fmt.Errorf("build candidate ownership registration query: %w", err)
+	}
+	var existingRegistrationID uuid.UUID
+	var existingRegistrationStatus string
+	err = tx.QueryRow(ctx, existingRegistrationQuery, existingRegistrationArgs...).Scan(
+		&existingRegistrationID, &existingRegistrationStatus,
+	)
+	if err == nil {
+		if existingRegistrationStatus != string(global.RegistrationExpired) {
+			return nil
+		}
+		query, args, buildErr := storage.Psql.Update("device_registrations").
+			Set("status", string(global.RegistrationPending)).
+			Set("remark", nullableStr(reg.Remark)).
+			Set("created_by", nullableStr(reg.CreatedBy)).
+			Set("updated_at", time.Now().UTC()).
+			Where(sq.Eq{"id": existingRegistrationID}).ToSql()
+		if buildErr != nil {
+			return fmt.Errorf("build candidate ownership registration renewal: %w", buildErr)
+		}
+		if _, execErr := tx.Exec(ctx, query, args...); execErr != nil {
+			return fmt.Errorf("renew candidate ownership registration: %w", execErr)
+		}
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("check candidate ownership registration: %w", err)
+	}
+
+	if reg.ID == uuid.Nil {
+		reg.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	reg.Status = global.RegistrationPending
+	reg.CreatedAt = now
+	reg.UpdatedAt = now
+	query, args, err := storage.Psql.Insert("device_registrations").
+		Columns(regColumns...).
+		Values(
+			reg.ID, reg.SerialNumber, nullableUUID(reg.GroupID), reg.Carrier,
+			nullableStr(reg.SiteName), reg.Longitude, reg.Latitude,
+			string(reg.Status), nullableStr(reg.Remark), nullableStr(reg.CreatedBy),
+			reg.CreatedAt, reg.UpdatedAt,
+		).ToSql()
+	if err != nil {
+		return fmt.Errorf("build candidate ownership registration: %w", err)
+	}
+	if _, err := tx.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("insert candidate ownership registration: %w", err)
+	}
+	return nil
 }
 
 var _ RegistrationRepository = (*PgRegistrationRepository)(nil)

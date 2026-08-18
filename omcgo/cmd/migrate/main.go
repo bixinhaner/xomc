@@ -154,12 +154,23 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	// If --paths is set, run goose.Up on each directory in sequence.
+	// If --paths is set, run goose.Up on each directory in sequence. The main
+	// baseline still needs reconciliation when Goose is already at version 1.
 	if dirs := migratePaths(cmd); dirs != nil {
 		for _, dir := range dirs {
+			if isMainSchemaMigrationDir(dir) {
+				if err := reconcileMainBaselineSchema(db, filepath.Join(dir, "seed")); err != nil {
+					return fmt.Errorf("reconcile main baseline schema: %w", err)
+				}
+			}
 			fmt.Printf("Migrating directory: %s\n", dir)
 			if err := goose.Up(db, dir, goose.WithAllowMissing()); err != nil {
 				return fmt.Errorf("migrate up %s: %w", dir, err)
+			}
+			if isMainSeedMigrationDir(dir) && filepath.Base(filepath.Dir(filepath.Clean(dir))) == "migrations" {
+				if err := reconcileMainBaselineSeed(db, dir); err != nil {
+					return fmt.Errorf("reconcile main baseline seed: %w", err)
+				}
 			}
 		}
 		version, err := goose.GetDBVersion(db)
@@ -171,8 +182,7 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 	}
 
 	migrationDir := migrateDir(cmd)
-	reconcileMain := isMainSeedMigrationDir(migrationDir)
-	if reconcileMain {
+	if isMainSchemaMigrationDir(migrationDir) || isMainSeedMigrationDir(migrationDir) {
 		if err := reconcileMainBaselineSchema(db, migrationDir); err != nil {
 			return fmt.Errorf("reconcile main baseline schema: %w", err)
 		}
@@ -181,7 +191,7 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 	if err := goose.Up(db, migrationDir, goose.WithAllowMissing()); err != nil {
 		return fmt.Errorf("migrate up: %w", err)
 	}
-	if reconcileMain {
+	if isMainSeedMigrationDir(migrationDir) {
 		if err := reconcileMainBaselineSeed(db, migrationDir); err != nil {
 			return fmt.Errorf("reconcile main baseline seed: %w", err)
 		}
@@ -201,7 +211,12 @@ const (
 )
 
 func isMainSeedMigrationDir(migrationDir string) bool {
-	return filepath.Base(filepath.Clean(migrationDir)) == "seed"
+	clean := filepath.Clean(migrationDir)
+	return filepath.Base(clean) == "seed" && filepath.Base(filepath.Dir(clean)) == "migrations"
+}
+
+func isMainSchemaMigrationDir(migrationDir string) bool {
+	return filepath.Base(filepath.Clean(migrationDir)) == "migrations"
 }
 
 func mainBaselineRootDir(migrationDir string) string {
@@ -217,6 +232,16 @@ func mainBaselineRootDir(migrationDir string) string {
 // The seed flow replays explicitly marked schema sections before Goose seed,
 // then marked seed sections afterwards, without a forbidden 000002 migration.
 func reconcileMainBaselineSchema(db *sql.DB, migrationDir string) error {
+	var baselineExists bool
+	if err := db.QueryRow("SELECT to_regclass('public.devices') IS NOT NULL").Scan(&baselineExists); err != nil {
+		return fmt.Errorf("detect main baseline schema: %w", err)
+	}
+	// A fresh database is created by goose.Up below. Reconcile sections are only
+	// for pre-release databases that already recorded version 1 and therefore
+	// will not replay changes folded back into 000001.
+	if !baselineExists {
+		return nil
+	}
 	rootDir := mainBaselineRootDir(migrationDir)
 	schemaSQL, err := readMainReconcileSQL(filepath.Join(rootDir, "000001_init_schema.sql"))
 	if err != nil {

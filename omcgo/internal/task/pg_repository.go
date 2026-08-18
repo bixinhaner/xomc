@@ -140,6 +140,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			"source_id", "command_index", "device_index",
 			"has_path_translation_miss", "path_translation_miss_count",
 			"path_translation_source", // T-0168
+			"admission_class",
 		).
 		Values(
 			task.ID, task.DeviceSN, task.Method, task.Params, task.Priority,
@@ -150,6 +151,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			nilUUID(task.SourceID), task.CommandIndex, task.DeviceIndex,
 			task.HasPathTranslationMiss, task.PathTranslationMissCount,
 			nilString(task.PathTranslationSource), // T-0168: 空字符串 → NULL
+			admissionClassOrDefault(task.AdmissionClass),
 		).
 		ToSql()
 	if err != nil {
@@ -183,6 +185,7 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *Task) error {
 		Set("result", task.Result).
 		Set("error_code", task.ErrorCode).
 		Set("error_message", task.ErrorMessage).
+		Set("admission_class", admissionClassOrDefault(task.AdmissionClass)).
 		Where(sq.Eq{"id": task.ID})
 	if task.Status == TaskStatusSent {
 		// A fast CPE can complete before the sent-state PG sync returns. The
@@ -1212,6 +1215,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 		"source_id", "command_index", "device_index",
 		"has_path_translation_miss", "path_translation_miss_count",
 		"path_translation_source", // T-0168
+		"admission_class",
 	}
 
 	insertBuilder := storage.Psql.Insert("device_tasks").Columns(columns...)
@@ -1226,6 +1230,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 			task.SourceID, task.CommandIndex, task.DeviceIndex,
 			task.HasPathTranslationMiss, task.PathTranslationMissCount,
 			nilString(task.PathTranslationSource), // T-0168
+			admissionClassOrDefault(task.AdmissionClass),
 		)
 	}
 
@@ -1240,6 +1245,13 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 	}
 
 	return nil
+}
+
+func admissionClassOrDefault(class AdmissionClass) AdmissionClass {
+	if class == "" {
+		return AdmissionClassNormal
+	}
+	return class
 }
 
 // PathTranslationMissStats 是按 source_id 聚合的 device_tasks 路径翻译 miss 统计。
@@ -1459,6 +1471,7 @@ func taskColumns() []string {
 		"source_id", "command_index", "device_index",
 		"has_path_translation_miss", "path_translation_miss_count",
 		"path_translation_source", // T-0168
+		"admission_class",
 	}
 }
 
@@ -1486,7 +1499,7 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 		&task.Source, &task.CreatorID, &task.Description,
 		&sourceID, &task.CommandIndex, &task.DeviceIndex,
 		&task.HasPathTranslationMiss, &task.PathTranslationMissCount,
-		&pathTranslationSource,
+		&pathTranslationSource, &task.AdmissionClass,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -1506,6 +1519,9 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 	}
 	if pathTranslationSource.Valid {
 		task.PathTranslationSource = pathTranslationSource.String
+	}
+	if task.AdmissionClass == "" {
+		task.AdmissionClass = AdmissionClassNormal
 	}
 
 	return &task, nil

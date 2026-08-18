@@ -30,13 +30,13 @@ func NewHandler(service *TaskService) *Handler {
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	tasks := r.Group("/devices/tasks")
 	{
-		tasks.POST("", h.CreateTask)              // POST /api/v1/devices/tasks?device_sn=xxx
-		tasks.GET("", h.GetTaskHistory)           // GET /api/v1/devices/tasks?device_sn=xxx
-		tasks.GET("/pending", h.GetPendingTasks)  // GET /api/v1/devices/tasks/pending?device_sn=xxx
-		tasks.GET("/:task_id", h.GetTask)         // GET /api/v1/devices/tasks/:task_id
-		tasks.DELETE("/:task_id", h.CancelTask)   // DELETE /api/v1/devices/tasks/:task_id
-		tasks.GET("/stats", h.GetTaskStats)       // GET /api/v1/devices/tasks/stats?device_sn=xxx
-		tasks.POST("/batch", h.BatchCreateTasks)  // POST /api/v1/devices/tasks/batch?device_sn=xxx
+		tasks.POST("", h.CreateTask)               // POST /api/v1/devices/tasks?device_sn=xxx
+		tasks.GET("", h.GetTaskHistory)            // GET /api/v1/devices/tasks?device_sn=xxx
+		tasks.GET("/pending", h.GetPendingTasks)   // GET /api/v1/devices/tasks/pending?device_sn=xxx
+		tasks.GET("/:task_id", h.GetTask)          // GET /api/v1/devices/tasks/:task_id
+		tasks.DELETE("/:task_id", h.CancelTask)    // DELETE /api/v1/devices/tasks/:task_id
+		tasks.GET("/stats", h.GetTaskStats)        // GET /api/v1/devices/tasks/stats?device_sn=xxx
+		tasks.POST("/batch", h.BatchCreateTasks)   // POST /api/v1/devices/tasks/batch?device_sn=xxx
 		tasks.POST("/:task_id/retry", h.RetryTask) // POST /api/v1/devices/tasks/:task_id/retry
 	}
 
@@ -62,10 +62,10 @@ func (h *Handler) CreateTask(c *gin.Context) {
 	// 设置设备 SN
 	req.DeviceSN = deviceSN
 
-	// 设置默认值
-	if req.Source == "" {
-		req.Source = TaskSourceAPI
-	}
+	// REST callers must not be able to impersonate an internal task source or
+	// opt into the privileged access-probe/security-action admission classes.
+	req.Source = TaskSourceAPI
+	req.AdmissionClass = AdmissionClassNormal
 	if req.CreatorID == "" {
 		req.CreatorID = admin.UserIDStringFromCtx(c)
 	}
@@ -76,6 +76,10 @@ func (h *Handler) CreateTask(c *gin.Context) {
 			zap.Error(err),
 			zap.String("device_sn", deviceSN),
 			zap.String("method", req.Method))
+		if stderrors.Is(err, ErrTaskAdmissionDenied) {
+			errors.AbortWithError(c, http.StatusConflict, ErrTaskAdmissionDenied)
+			return
+		}
 		errors.AbortWithError(c, http.StatusInternalServerError, errors.ErrInternal)
 		return
 	}
@@ -240,10 +244,13 @@ func (h *Handler) BatchCreateTasks(c *gin.Context) {
 	// 设置设备 SN 和默认值
 	creatorID := admin.UserIDStringFromCtx(c)
 	for _, req := range reqs {
-		req.DeviceSN = deviceSN
-		if req.Source == "" {
-			req.Source = TaskSourceAPI
+		if req == nil {
+			errors.AbortWithError(c, http.StatusBadRequest, errors.ErrInvalidInput)
+			return
 		}
+		req.DeviceSN = deviceSN
+		req.Source = TaskSourceAPI
+		req.AdmissionClass = AdmissionClassNormal
 		if req.CreatorID == "" {
 			req.CreatorID = creatorID
 		}
@@ -255,6 +262,10 @@ func (h *Handler) BatchCreateTasks(c *gin.Context) {
 			zap.Error(err),
 			zap.String("device_sn", deviceSN),
 			zap.Int("count", len(reqs)))
+		if stderrors.Is(err, ErrTaskAdmissionDenied) {
+			errors.AbortWithError(c, http.StatusConflict, ErrTaskAdmissionDenied)
+			return
+		}
 		errors.AbortWithError(c, http.StatusInternalServerError, errors.ErrInternal)
 		return
 	}

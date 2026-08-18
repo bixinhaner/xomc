@@ -67,6 +67,38 @@ func TestHandler_CreateTask_BadJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestHandler_CreateTask_AdmissionDeniedReturnsConflict(t *testing.T) {
+	h, _, _ := newRealHandler(t)
+	h.service.SetAdmissionGuard(TaskAdmissionGuardFunc(func(context.Context, TaskAdmissionRequest) (bool, string, error) {
+		return false, "device is not accepted", nil
+	}))
+	r := setupRealRouter(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/tasks?device_sn=SN-REVIEW", bytes.NewBufferString(`{"method":"Reboot"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), ErrTaskAdmissionDenied.Error())
+}
+
+func TestHandler_BatchCreate_AdmissionDeniedReturnsConflict(t *testing.T) {
+	h, _, _ := newRealHandler(t)
+	h.service.SetAdmissionGuard(TaskAdmissionGuardFunc(func(context.Context, TaskAdmissionRequest) (bool, string, error) {
+		return false, "device is not accepted", nil
+	}))
+	r := setupRealRouter(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/tasks/batch?device_sn=SN-REVIEW", bytes.NewBufferString(`[{"method":"Reboot"}]`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), ErrTaskAdmissionDenied.Error())
+}
+
 func TestHandler_GetTaskHistory_MissingDeviceSN(t *testing.T) {
 	h, _, _ := newRealHandler(t)
 	r := setupRealRouter(h)

@@ -70,6 +70,9 @@
 | **MML 脚本任务** | `mml-script-txt-import-redesign-20260710.md` · `mml-script-task-device-bound-redesign-20260708.md` | TXT 导入式脚本库 + 按设备编排执行（本次设计以 TXT 导入重设计为首选）|
 | **MML 控制台** | `mml-console-redesign-20260603.md` · `mml-console-architecture-overview-20260521.md` · `mml-empty-path-commands-spec-mapping-20260609.md` | 控制台重设计、架构总览与空 PATH 命令规范映射（MML 多代历史方案见归档区）|
 | **设备管理** | `device-lifecycle-online-status-decouple-20260520.md` · `device-list-and-group-improvements-20260520.md` · `device-detail-basic-fields-from-parameters-20260525.md` | 生命周期/在线状态解耦 + 列表分组 + 详情字段 |
+| **基站接入控制** | `design/0026-base-station-access-control-implementation.md` | 单一业务总开关、名单与规则判定、自动 RF 去激活/恢复、任务保护 |
+| **基站接入控制验收** | `test/20260811-基站接入控制部署验收标准.md` | 部署、页面、权限、决定、任务、真实 RF 回执与恢复验收标准 |
+| **Redmine 需求单追溯** | `test/20260811-Redmine接入控制需求单验收追溯分析.md` | #31672/#51449/#45094/#31732/#31675/#21156/#21155 核心业务与证据矩阵 |
 | **跨域基础设施** | `统一文件传输任务引擎-设计方案.md` · `notification-center-design-20260519.md` | 统一文件传输任务引擎 / 通知中心 |
 | **模块设计回填** | `参数设置页-设计.md`（↔ quicksettings）· `TR069报文跟踪-设计.md`（↔ trace）| 模块代码与设计对应 |
 | **可观测性迁移** | `observability-otelcol-migration-plan-20260520.md` | OTel Collector 迁移计划（落地手册见活文档 `operations/OMC可观测性使用手册.md`）|

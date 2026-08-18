@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
@@ -85,6 +87,7 @@ type Handler struct {
 	connReqSender      ConnectionRequester
 	postSessionWakeCfg appconfig.PostSessionWakeConfig
 	redisClient        redis.Cmdable // 用于连续唤醒计数器
+	accessSnapshots    AccessSnapshotStore
 	// onlineIndex 在线设备索引（acs:online ZSET）。issue #397：收 Inform 当场、发 NATS
 	// 之前同步 ZADD，作为「免 NATS」的存活信号。nil 时 Mark 安全 no-op。
 	onlineIndex *redisx.OnlineIndex
@@ -121,6 +124,18 @@ type Handler struct {
 	ueCountPolicy          *UECountPolicy
 	gpvFaultRecoverer      GPVFaultRecoverer
 	durableReadbackEnabled bool
+	trustedProxyCIDRs      []netip.Prefix
+}
+
+type informAccessContext struct {
+	RemoteIP                string
+	Authenticated           bool
+	AuthMethod              string
+	CredentialID            string
+	SnapshotFound           bool
+	SnapshotState           string
+	SnapshotDecisionVersion int64
+	SnapshotEvidenceVersion int64
 }
 
 // sessionRPCLimitReached 判断会话是否已达到单会话 RPC 上限。
@@ -460,6 +475,45 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		zap.String("cwmp_id", cwmpID),
 	)
 
+	// HTTP authentication is performed on the Inform that starts the CWMP
+	// session. Subsequent empty POSTs and RPC responses are bound to the
+	// established session and must not consume a Digest nonce again.
+	authIdentity := &auth.DeviceIdentity{Method: "none"}
+	if h.authenticator != nil {
+		authIdentity, err = h.authenticator.Authenticate(r)
+		if err != nil {
+			tracing.RecordError(span, err)
+			log.Warn("ACS Inform authentication failed",
+				zap.String("device_sn", deviceSN),
+				zap.Error(err))
+			h.authenticator.Challenge(w)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+	if authIdentity == nil {
+		authIdentity = &auth.DeviceIdentity{Method: "none"}
+	}
+	accessContext := informAccessContext{
+		RemoteIP:      requestClientIP(r, h.trustedProxyCIDRs),
+		Authenticated: authIdentity.Authenticated,
+		AuthMethod:    authIdentity.Method,
+		CredentialID:  authIdentity.CredentialID,
+	}
+	if h.accessSnapshots != nil {
+		snapshot, found, snapshotErr := h.accessSnapshots.Get(
+			r.Context(), deviceSN, inform.DeviceId.OUI, inform.DeviceId.ProductClass,
+		)
+		if snapshotErr != nil {
+			log.Warn("read device access snapshot failed", zap.String("device_sn", deviceSN), zap.Error(snapshotErr))
+		} else if found {
+			accessContext.SnapshotFound = true
+			accessContext.SnapshotState = snapshot.State
+			accessContext.SnapshotDecisionVersion = snapshot.DecisionVersion
+			accessContext.SnapshotEvidenceVersion = snapshot.EvidenceVersion
+		}
+	}
+
 	// 速率限制
 	if !h.rateLimiter.Allow(deviceSN) {
 		h.metrics.RateLimitRejected.Inc()
@@ -609,7 +663,7 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 	}
 
 	// 发布事件
-	h.publishInformEvents(r.Context(), inform, eventCodes, log)
+	h.publishInformEvents(r.Context(), inform, eventCodes, accessContext, log)
 
 	// #746: 心跳周期自动调整 — BOOTSTRAP/BOOT 事件时入队 GPV 查询当前心跳周期。
 	// GPV 响应后由 handleRPCResponse 中的 processInformPeriodGPV 比较并决定是否 SPV。
@@ -936,6 +990,11 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 					resultMap["private_parameter_values"] = pvs
 				}
 			}
+			if method == soap.MethodGetParameterNamesResp {
+				if infos, _, decErr := soap.DecodeGetParameterNamesResponse(bytes.NewReader(body)); decErr == nil {
+					resultMap["parameter_infos"] = infos
+				}
+			}
 			// AddObject 提前解析 InstanceNumber 写入 result,供 notification 渲染
 			// 标题"InterFreq.Carrier.6"等场景使用,避免下游再解一次 SOAP body。
 			if method == soap.MethodAddObjectResp {
@@ -997,11 +1056,12 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	if err != nil {
 		log.Error("pop sendable task from queue", zap.Error(err))
 	} else if nextTask != nil {
+		originalParams := append(json.RawMessage(nil), nextTask.Params...)
 		h.translateTaskParamsInPlace(r.Context(), nextTask, log)
 
 		session.State = StateRPCPending
 		session.LastRPC = nextTask.Method
-		session.LastCommandParams = nextTask.Params
+		session.LastCommandParams = originalParams
 		session.LastTaskID = nextTask.ID
 		session.LastTaskCWMPID = newCWMPID
 		session.RPCCount++
@@ -1454,11 +1514,12 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 	if err != nil {
 		log.Error("pop next sendable task after fault", zap.Error(err))
 	} else if nextTask != nil {
+		originalParams := append(json.RawMessage(nil), nextTask.Params...)
 		h.translateTaskParamsInPlace(r.Context(), nextTask, log)
 
 		session.State = StateRPCPending
 		session.LastRPC = nextTask.Method
-		session.LastCommandParams = nextTask.Params
+		session.LastCommandParams = originalParams
 		session.LastTaskID = nextTask.ID
 		session.LastTaskCWMPID = newCWMPID
 		session.RPCCount++
@@ -1879,7 +1940,13 @@ func (h *Handler) handleAutonomousTransferComplete(w http.ResponseWriter, r *htt
 	h.sendSOAPResponse(w, resp, log)
 }
 
-func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformMessage, eventCodes []string, log *zap.Logger) {
+func (h *Handler) publishInformEvents(
+	ctx context.Context,
+	inform *tr069.InformMessage,
+	eventCodes []string,
+	accessContext informAccessContext,
+	log *zap.Logger,
+) {
 	// issue #397：发 NATS 事件之前，先同步把设备写入在线索引（acs:online ZSET）。
 	// 这是「免 NATS」的存活信号 —— PM 上报洪峰压垮 NATS 时此写入不受影响，供在线计数
 	// 与后续离线判定使用。ZADD O(log N)；Redis 不可用时 Mark 内部降级 no-op，
@@ -1891,12 +1958,20 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 
 	// 构建事件载荷
 	payload := map[string]interface{}{
-		"device_id":      inform.DeviceId,
-		"events":         eventCodes,
-		"event_structs":  inform.Event,
-		"parameter_list": inform.ParameterList,
-		"current_time":   inform.CurrentTime,
-		"retry_count":    inform.RetryCount,
+		"device_id":                        inform.DeviceId,
+		"events":                           eventCodes,
+		"event_structs":                    inform.Event,
+		"parameter_list":                   inform.ParameterList,
+		"current_time":                     inform.CurrentTime,
+		"retry_count":                      inform.RetryCount,
+		"remote_ip":                        accessContext.RemoteIP,
+		"authenticated":                    accessContext.Authenticated,
+		"auth_method":                      accessContext.AuthMethod,
+		"credential_id":                    accessContext.CredentialID,
+		"access_snapshot_found":            accessContext.SnapshotFound,
+		"access_snapshot_state":            accessContext.SnapshotState,
+		"access_snapshot_decision_version": accessContext.SnapshotDecisionVersion,
+		"access_snapshot_evidence_version": accessContext.SnapshotEvidenceVersion,
 	}
 
 	// 根据事件码确定主事件主题（按优先级排序）。
@@ -1970,6 +2045,53 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 				zap.String("event_id", expEvt.ID))
 		}
 	}
+}
+
+// transportPeerIP returns only the TCP transport peer. Forwarded headers are
+// intentionally ignored until trusted proxy CIDRs are explicitly configured.
+func transportPeerIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(remoteAddr))
+	if err != nil {
+		host = strings.TrimSpace(remoteAddr)
+	}
+	addr, err := netip.ParseAddr(strings.Trim(host, "[]"))
+	if err != nil {
+		return ""
+	}
+	return addr.WithZone("").Unmap().String()
+}
+
+func requestClientIP(r *http.Request, trustedProxies []netip.Prefix) string {
+	peer := transportPeerIP(r.RemoteAddr)
+	peerAddr, err := netip.ParseAddr(peer)
+	if err != nil || !prefixesContain(trustedProxies, peerAddr) {
+		return peer
+	}
+
+	parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		addr, parseErr := netip.ParseAddr(strings.TrimSpace(parts[i]))
+		if parseErr != nil {
+			continue
+		}
+		addr = addr.WithZone("").Unmap()
+		if !prefixesContain(trustedProxies, addr) {
+			return addr.String()
+		}
+	}
+	if addr, parseErr := netip.ParseAddr(strings.TrimSpace(r.Header.Get("X-Real-IP"))); parseErr == nil {
+		return addr.WithZone("").Unmap().String()
+	}
+	return peer
+}
+
+func prefixesContain(prefixes []netip.Prefix, addr netip.Addr) bool {
+	for _, prefix := range prefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod, body []byte, lastCmdParams json.RawMessage, taskItem *task.Task, log *zap.Logger) {
@@ -2167,7 +2289,7 @@ func (h *Handler) queueAutoGPVAfterSPV(ctx context.Context, spvTask *task.Task, 
 	// Geofence actions own a correlated readback task and must not also create
 	// the generic T-0147 readback. The correlated task carries SourceID so the
 	// action can distinguish "SPV accepted" from "requested values verified".
-	if spvTask.Source == task.TaskSourceGeofence {
+	if spvTask.Source == task.TaskSourceGeofence || spvTask.Source == task.TaskSourceDeviceAccess {
 		return
 	}
 

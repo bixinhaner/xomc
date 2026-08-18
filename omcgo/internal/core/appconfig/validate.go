@@ -2,6 +2,7 @@ package appconfig
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -251,6 +252,11 @@ func (c ACSServerConfig) validateACS() error {
 	if c.TLS.Enabled {
 		if c.TLSPort < 1 || c.TLSPort > 65535 {
 			return fmt.Errorf("server.tls_port must be between 1 and 65535 when TLS enabled, got %d", c.TLSPort)
+		}
+	}
+	for _, raw := range c.TrustedProxyCIDRs {
+		if _, err := netip.ParsePrefix(strings.TrimSpace(raw)); err != nil {
+			return fmt.Errorf("server.trusted_proxy_cidrs contains invalid CIDR %q: %w", raw, err)
 		}
 	}
 	return nil

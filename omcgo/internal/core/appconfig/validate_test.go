@@ -203,6 +203,11 @@ func TestACSConfig_Validate(t *testing.T) {
 	}
 }
 
+func TestACSServerConfigRejectsInvalidTrustedProxyCIDR(t *testing.T) {
+	err := (ACSServerConfig{Port: 7547, TrustedProxyCIDRs: []string{"not-a-cidr"}}).validateACS()
+	require.ErrorContains(t, err, "server.trusted_proxy_cidrs")
+}
+
 func TestBackpressureConfigDefaults(t *testing.T) {
 	cfg := (BackpressureConfig{}).Defaults()
 	assert.Equal(t, 5000, cfg.QueuePendingHigh)

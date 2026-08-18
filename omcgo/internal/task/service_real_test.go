@@ -199,6 +199,70 @@ func TestService_PopTaskEmpty(t *testing.T) {
 	assert.Nil(t, got)
 }
 
+func TestService_PopTaskAdmissionDoesNotStarveAllowedProbe(t *testing.T) {
+	svc, _, q := newServiceWithMiniRedis(t)
+	ctx := context.Background()
+	const deviceSN = "SN-ACCESS-REVIEW"
+
+	normal := newTaskForQueue("t-normal", deviceSN, "Reboot")
+	normal.AdmissionClass = AdmissionClassNormal
+	probe := newTaskForQueue("t-probe", deviceSN, "GetParameterValues")
+	probe.AdmissionClass = AdmissionClassAccessProbe
+	probe.Source = TaskSourceDeviceAccess
+	probe.CreatedAt = normal.CreatedAt.Add(time.Millisecond)
+
+	require.NoError(t, q.Push(ctx, normal))
+	require.NoError(t, q.Push(ctx, probe))
+	svc.SetAdmissionGuard(TaskAdmissionGuardFunc(func(_ context.Context, request TaskAdmissionRequest) (bool, string, error) {
+		return request.AdmissionClass == AdmissionClassAccessProbe, "device_not_accepted", nil
+	}))
+
+	got, err := svc.PopTask(ctx, deviceSN)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, probe.ID, got.ID)
+
+	held, err := q.GetByID(ctx, normal.ID)
+	require.NoError(t, err)
+	require.NotNil(t, held)
+	require.NotNil(t, held.NextAttemptAt)
+	assert.True(t, held.NextAttemptAt.After(time.Now()))
+	depth, err := q.Len(ctx, deviceSN)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), depth)
+}
+
+func TestService_PopTaskAdmissionScansPastRedisBatchOfDeniedTasks(t *testing.T) {
+	svc, _, q := newServiceWithMiniRedis(t)
+	ctx := context.Background()
+	const deviceSN = "SN-ACCESS-DEEP-QUEUE"
+	baseTime := time.Now().Add(-time.Minute)
+
+	for index := 0; index < queuePeekLimit+8; index++ {
+		normal := newTaskForQueue(fmt.Sprintf("t-normal-%02d", index), deviceSN, "Reboot")
+		normal.AdmissionClass = AdmissionClassNormal
+		normal.CreatedAt = baseTime.Add(time.Duration(index) * time.Millisecond)
+		require.NoError(t, q.Push(ctx, normal))
+	}
+	probe := newTaskForQueue("t-deep-probe", deviceSN, "GetParameterValues")
+	probe.AdmissionClass = AdmissionClassAccessProbe
+	probe.Source = TaskSourceDeviceAccess
+	probe.CreatedAt = baseTime.Add(time.Duration(queuePeekLimit+8) * time.Millisecond)
+	require.NoError(t, q.Push(ctx, probe))
+	svc.SetAdmissionGuard(TaskAdmissionGuardFunc(func(_ context.Context, request TaskAdmissionRequest) (bool, string, error) {
+		return request.AdmissionClass == AdmissionClassAccessProbe, "device_not_accepted", nil
+	}))
+
+	got, err := svc.PopTask(ctx, deviceSN)
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, probe.ID, got.ID)
+	depth, err := q.Len(ctx, deviceSN)
+	require.NoError(t, err)
+	require.Equal(t, int64(queuePeekLimit+8), depth)
+}
+
 func TestService_GetTask_FoundInQueue(t *testing.T) {
 	svc, _, q := newServiceWithMiniRedis(t)
 	ctx := context.Background()
@@ -328,8 +392,8 @@ func TestCWMPMapping_GenerateAndParseRoundTrip(t *testing.T) {
 
 // fakeBrokenEnqueuer Push 失败的入队器
 type fakeBrokenEnqueuer struct {
-	exists []bool
-	pushed []*Task
+	exists  []bool
+	pushed  []*Task
 	pushErr error
 }
 
