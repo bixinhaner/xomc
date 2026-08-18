@@ -5781,7 +5781,6 @@ const messages: Record<string, string> = {
   'system.storageProtection.state.warning': 'Notice',
   'system.storageProtection.state.blocked': 'Blocked',
   'system.storageProtection.state.unknown': 'Unknown',
-  'system.storageProtection.event.triggeredAt': 'Triggered At',
   'system.storageProtection.event.reason.warningThreshold': 'State changed from {previous} to {current}: usage reached the notice watermark for two checks. Last observed usage: {ratio}.',
   'system.storageProtection.event.reason.blockPending':     'State changed from {previous} to {current}: usage reached the block watermark and is waiting for the second confirmation. Last observed usage: {ratio}.',
   'system.storageProtection.event.reason.blockThreshold':   'State changed from {previous} to {current}: usage reached the block watermark for two checks, so new writes are being rejected. Last observed usage: {ratio}.',

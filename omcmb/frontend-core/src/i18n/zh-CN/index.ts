@@ -5810,7 +5810,6 @@ const messages: Record<string, string> = {
   'system.storageProtection.state.warning': '提示',
   'system.storageProtection.state.blocked': '已阻断',
   'system.storageProtection.state.unknown': '未知',
-  'system.storageProtection.event.triggeredAt': '触发时间',
   'system.storageProtection.event.reason.warningThreshold': '状态从 {previous} 变为 {current}：连续两次达到提示线，最近占用率 {ratio}。',
   'system.storageProtection.event.reason.blockPending':     '状态从 {previous} 变为 {current}：已达到阻断线，正在等待第二次确认，最近占用率 {ratio}。',
   'system.storageProtection.event.reason.blockThreshold':   '状态从 {previous} 变为 {current}：连续两次达到阻断线，已开始拒绝新的写入，最近占用率 {ratio}。',

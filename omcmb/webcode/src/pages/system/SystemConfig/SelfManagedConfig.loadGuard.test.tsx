@@ -299,7 +299,7 @@ describe('self-managed system config load guard', () => {
     expect(hookMocks.refetchTargets).not.toHaveBeenCalled();
   });
 
-  it('资源保留与背压状态记录展示触发时间且保留后端时区钟面', () => {
+  it('资源保留与背压状态记录按时间、状态、原因顺序展示且保留后端时区钟面', () => {
     hookMocks.query.mockReturnValue({
       data: [],
       isLoading: false,
@@ -326,7 +326,10 @@ describe('self-managed system config load guard', () => {
 
     render(<RetentionBackpressureSection />);
 
-    expect(screen.getByText('system.storageProtection.event.triggeredAt: 2026-08-18 10:30:00')).toBeInTheDocument();
+    const recordRow = screen.getByText('system.storageProtection.event.reason.blockThreshold').closest('.ant-space');
+    expect(recordRow).toHaveTextContent(
+      /^2026-08-18 10:30:00system\.storageProtection\.state\.blockedsystem\.storageProtection\.event\.reason\.blockThreshold$/,
+    );
   });
 
   it('资源保留与背压支持保存基站日志清理周期并校验范围', async () => {
