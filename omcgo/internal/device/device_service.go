@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -467,28 +468,43 @@ func (s *DeviceService) manualOfflineModeRejects() bool {
 // carrier/tech combination has no path, the method returns a clear error
 // rather than queuing an unkeyed command.
 func (s *DeviceService) SetRFSwitch(ctx context.Context, deviceID uuid.UUID, enabled bool) error {
-	device, err := s.deviceRepo.GetByID(ctx, deviceID)
-	if err != nil {
-		return fmt.Errorf("get device for RF switch: %w", err)
-	}
-	if device == nil {
-		return commonerrors.ErrNotFound
-	}
-	if s.taskSvc == nil {
-		return fmt.Errorf("task service not configured")
-	}
-	if s.carrierRegistry == nil {
-		return fmt.Errorf("carrier registry not configured (T-0029 DI gap)")
-	}
+	_, err := s.QueueRFSwitch(ctx, deviceID, enabled, RFSwitchTaskOptions{})
+	return err
+}
 
-	c, err := s.carrierRegistry.Get(device.Carrier)
+// RFSwitchTaskOptions carries the unified-task metadata for an RF command.
+// Empty options preserve the existing manual API behaviour. Device-access
+// containment uses the same RF path resolution and queue, but supplies its
+// audited source, idempotency key and security_action admission class.
+type RFSwitchTaskOptions struct {
+	Source         task.TaskSource
+	SourceID       string
+	CreatorID      string
+	Description    string
+	CommandKey     string
+	AdmissionClass task.AdmissionClass
+	// TargetPaths pins SPV/GPV to the exact RF instances owned by the action.
+	TargetPaths []string
+}
+
+// QueueRFSwitch resolves the carrier-specific RF path and queues the command
+// through TaskService. It returns the durable task so callers can correlate
+// dispatch and device response without creating a second RF path.
+func (s *DeviceService) QueueRFSwitch(
+	ctx context.Context,
+	deviceID uuid.UUID,
+	enabled bool,
+	options RFSwitchTaskOptions,
+) (*task.Task, error) {
+	device, rfPaths, err := s.resolveRFControlTargets(ctx, deviceID)
 	if err != nil {
-		return fmt.Errorf("resolve carrier=%s for RF switch: %w", device.Carrier, err)
+		return nil, err
 	}
-	rfPath := c.RFControlPath(device.Technology)
-	if rfPath == "" {
-		return fmt.Errorf("carrier=%s does not support RF control for technology=%s: %w",
-			device.Carrier, device.Technology, commonerrors.ErrInvalidInput)
+	if len(options.TargetPaths) > 0 {
+		rfPaths, err = pinRFControlTargets(rfPaths, options.TargetPaths)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// RF switch value: "1" for enabled, "0" for disabled.
@@ -497,20 +513,43 @@ func (s *DeviceService) SetRFSwitch(ctx context.Context, deviceID uuid.UUID, ena
 		value = "1"
 	}
 
-	rfParamsJSON, _ := json.Marshal(map[string]interface{}{
-		"ParameterList": []map[string]string{
-			{"Name": rfPath, "Value": value},
-		},
-	})
-	commandKey := uuid.New().String()
-	if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+	values := make([]map[string]string, 0, len(rfPaths))
+	for _, rfPath := range rfPaths {
+		values = append(values, map[string]string{
+			"name": rfPath, "value": value, "type": "xsd:boolean",
+		})
+	}
+	rfParamsJSON, err := json.Marshal(map[string]interface{}{"values": values})
+	if err != nil {
+		return nil, fmt.Errorf("encode RF switch task parameters: %w", err)
+	}
+	if options.Source == "" {
+		options.Source = task.TaskSourceAPI
+	}
+	if options.AdmissionClass == "" {
+		options.AdmissionClass = task.AdmissionClassNormal
+	}
+	if options.CommandKey == "" {
+		options.CommandKey = uuid.New().String()
+	}
+	created, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
 		DeviceSN:   device.SerialNumber,
 		Method:     "SetParameterValues",
 		Params:     rfParamsJSON,
-		CommandKey: commandKey,
-		Source:     task.TaskSourceAPI,
-	}); err != nil {
-		return fmt.Errorf("queue RF switch command: %w", err)
+		CommandKey: options.CommandKey,
+		Source:     options.Source,
+		SourceID:   options.SourceID,
+		CreatorID:  options.CreatorID,
+		Description: func() string {
+			if options.Description != "" {
+				return options.Description
+			}
+			return "RF switch"
+		}(),
+		AdmissionClass: options.AdmissionClass,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("queue RF switch command: %w", err)
 	}
 
 	s.logger.Info("RF switch command queued",
@@ -524,7 +563,128 @@ func (s *DeviceService) SetRFSwitch(ctx context.Context, deviceID uuid.UUID, ena
 		}()
 	}
 
-	return nil
+	return created, nil
+}
+
+// QueueRFReadback queues the correlated GPV used to verify an RF security
+// action. It deliberately shares the same target/path resolution as the SPV;
+// action ownership is established only after this task returns the requested
+// value, not merely after SetParameterValuesResponse.
+func (s *DeviceService) QueueRFReadback(
+	ctx context.Context,
+	deviceID uuid.UUID,
+	options RFSwitchTaskOptions,
+) (*task.Task, error) {
+	device, rfPaths, err := s.resolveRFControlTargets(ctx, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	if len(options.TargetPaths) > 0 {
+		rfPaths, err = pinRFControlTargets(rfPaths, options.TargetPaths)
+		if err != nil {
+			return nil, err
+		}
+	}
+	params, err := json.Marshal(map[string]interface{}{"names": rfPaths})
+	if err != nil {
+		return nil, fmt.Errorf("encode RF readback parameters: %w", err)
+	}
+	if options.Source == "" {
+		options.Source = task.TaskSourceAPI
+	}
+	if options.AdmissionClass == "" {
+		options.AdmissionClass = task.AdmissionClassNormal
+	}
+	if options.CommandKey == "" {
+		options.CommandKey = uuid.New().String()
+	}
+	created, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN: device.SerialNumber, Method: "GetParameterValues", Params: params,
+		Priority: 5, CommandKey: options.CommandKey, Source: options.Source,
+		SourceID: options.SourceID, CreatorID: options.CreatorID,
+		Description: options.Description, AdmissionClass: options.AdmissionClass,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("queue RF readback command: %w", err)
+	}
+	return created, nil
+}
+
+func pinRFControlTargets(resolved, requested []string) ([]string, error) {
+	allowed := make(map[string]struct{}, len(resolved))
+	for _, path := range resolved {
+		if path = strings.TrimSpace(path); path != "" {
+			allowed[path] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{}, len(requested))
+	pinned := make([]string, 0, len(requested))
+	for _, path := range requested {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if _, ok := allowed[path]; !ok {
+			return nil, fmt.Errorf("RF target path %q is not writable for current device snapshot: %w", path, commonerrors.ErrInvalidInput)
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		pinned = append(pinned, path)
+	}
+	if len(pinned) == 0 {
+		return nil, fmt.Errorf("RF target paths are empty: %w", commonerrors.ErrInvalidInput)
+	}
+	sort.Strings(pinned)
+	return pinned, nil
+}
+
+func (s *DeviceService) resolveRFControlTargets(
+	ctx context.Context,
+	deviceID uuid.UUID,
+) (*model.Device, []string, error) {
+	device, err := s.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get device for RF control: %w", err)
+	}
+	if device == nil {
+		return nil, nil, commonerrors.ErrNotFound
+	}
+	if s.taskSvc == nil {
+		return nil, nil, fmt.Errorf("task service not configured")
+	}
+	if s.carrierRegistry == nil {
+		return nil, nil, fmt.Errorf("carrier registry not configured (T-0029 DI gap)")
+	}
+	c, err := s.carrierRegistry.Get(device.Carrier)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve carrier=%s for RF control: %w", device.Carrier, err)
+	}
+	rfPath := c.RFControlPath(device.Technology)
+	if rfPath == "" {
+		return nil, nil, fmt.Errorf("carrier=%s does not support RF control for technology=%s: %w",
+			device.Carrier, device.Technology, commonerrors.ErrInvalidInput)
+	}
+	if device.Technology == model.TechLTE && s.paramRepo != nil {
+		parameters, loadErr := s.paramRepo.GetByDevice(ctx, deviceID)
+		if loadErr != nil {
+			return nil, nil, fmt.Errorf("load device parameters for RF control: %w", loadErr)
+		}
+		if len(parameters) > 0 {
+			paths := carrier.ResolveWritableRFControlPathsForProduct(device.ProductClass, parameters)
+			if len(paths) > 0 {
+				return device, paths, nil
+			}
+			if carrier.IsMBS31001ProductClass(device.ProductClass) {
+				return nil, nil, fmt.Errorf(
+					"mBS31001 RF control requires reported Device.DeviceInfo.SAS.RadioEnable: %w",
+					commonerrors.ErrInvalidInput,
+				)
+			}
+		}
+	}
+	return device, []string{rfPath}, nil
 }
 
 // SetParameters queues a SetParameterValues RPC command for the given device.

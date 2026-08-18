@@ -77,7 +77,7 @@ func TestDigestAuth_CrossInstance_ChallengeOnA_AuthenticateOnB(t *testing.T) {
 	identity, err := instanceB.Authenticate(r)
 	require.NoError(t, err, "cross-instance digest auth must succeed via shared Redis nonce")
 	require.NotNil(t, identity)
-	assert.Equal(t, "cpe-user", identity.SerialNumber)
+	assert.Equal(t, "cpe-user", identity.CredentialID)
 
 	// 4) 同一 nonce 再次在任一实例使用必失败（一次性消费）。
 	r2 := httptest.NewRequest(method, uri, nil)

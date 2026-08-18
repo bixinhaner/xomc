@@ -92,9 +92,11 @@ func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 		return err
 	}
 
-	// 3. Load role inheritance: g = (child, parent, domain)
+	// 3. Load role inheritance: parent_role_id inherits child_role_id.
+	// The built-in hierarchy is admin -> operator -> viewer, so lower-privilege
+	// roles must never inherit permissions from their parents.
 	rows3, err := a.pool.Query(ctx, `
-		SELECT rc.name AS child, rp.name AS parent, ri.domain
+		SELECT rp.name AS parent, rc.name AS child, ri.domain
 		FROM role_inheritance ri
 		JOIN roles rp ON rp.id = ri.parent_role_id
 		JOIN roles rc ON rc.id = ri.child_role_id
@@ -106,13 +108,17 @@ func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 	defer rows3.Close()
 
 	for rows3.Next() {
-		var child, parent, domain string
-		if err := rows3.Scan(&child, &parent, &domain); err != nil {
+		var parent, child, domain string
+		if err := rows3.Scan(&parent, &child, &domain); err != nil {
 			return fmt.Errorf("scan role inheritance: %w", err)
 		}
-		m.AddPolicy("g", "g", []string{"role:" + child, "role:" + parent, domain})
+		addRoleInheritancePolicy(m, parent, child, domain)
 	}
 	return rows3.Err()
+}
+
+func addRoleInheritancePolicy(m casbinModel.Model, parent, child, domain string) {
+	m.AddPolicy("g", "g", []string{"role:" + parent, "role:" + child, domain})
 }
 
 func (a *pgAdapter) SavePolicy(m casbinModel.Model) error {

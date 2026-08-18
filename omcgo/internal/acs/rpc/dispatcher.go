@@ -129,12 +129,18 @@ func (h *SetParameterValuesHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	if err := json.Unmarshal(cmd.Params, &params); err != nil {
 		return nil, fmt.Errorf("parse SetParameterValues params: %w", err)
 	}
+	if len(params.Values) == 0 {
+		return nil, fmt.Errorf("build SetParameterValues request: values must not be empty")
+	}
 
 	data := soap.SetParameterValuesData{
 		ID:  cmd.CWMPID,
 		Key: cmd.CommandKey,
 	}
 	for _, v := range params.Values {
+		if strings.TrimSpace(v.Name) == "" {
+			return nil, fmt.Errorf("build SetParameterValues request: parameter name must not be empty")
+		}
 		typ := v.Type
 		if typ == "" {
 			typ = "xsd:string"

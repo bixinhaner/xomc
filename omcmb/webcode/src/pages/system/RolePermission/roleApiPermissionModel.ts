@@ -4,6 +4,7 @@ import type { ApiEndpoint } from '@core/types/system';
 const READ_API_GROUPS_BY_MENU_KEY: Readonly<Record<string, readonly string[]>> = {
   'dashboard:home': ['dashboard'],
   'device:list': ['devices', 'device-groups'],
+  'device:access-control': ['device-access'],
   'system:user': ['users', 'roles'],
   'system:role': ['roles', 'menus', 'api-endpoints', 'device-groups', 'groups'],
   'system:menu': ['menus'],

@@ -2,11 +2,19 @@ package task
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
+
+type failingReliableHandler struct{ err error }
+
+func (h *failingReliableHandler) OnTaskCompleted(context.Context, *Task) {}
+func (h *failingReliableHandler) OnTaskCompletedReliable(context.Context, *Task) error {
+	return h.err
+}
 
 // recordingHandler 记录被调用的 Task，供断言比对。
 type recordingHandler struct {
@@ -54,6 +62,19 @@ func Test_CompletionRouter_MultipleHandlersInvokedInOrder(t *testing.T) {
 
 	assert.Len(t, a.got, 1)
 	assert.Len(t, b.got, 1)
+}
+
+func Test_CompletionRouter_ReliableErrorReturnedToConsumer(t *testing.T) {
+	r := NewCompletionRouter(zap.NewNop())
+	want := errors.New("projection unavailable")
+	r.Register(TaskSourceDeviceAccess, &failingReliableHandler{err: want})
+	observer := &recordingHandler{}
+	r.RegisterObserver(observer)
+
+	err := r.DispatchReliable(context.Background(), &Task{ID: "t-retry", Source: TaskSourceDeviceAccess})
+
+	assert.ErrorIs(t, err, want)
+	assert.Empty(t, observer.got, "retryable projection failure must not append a duplicate terminal observation")
 }
 
 func Test_CompletionRouter_HandlerPanicIsolated(t *testing.T) {

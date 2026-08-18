@@ -37,6 +37,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/dashboard"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/deviceaccess"
 	"github.com/omcgo/omcgo/internal/eventlog"
 	"github.com/omcgo/omcgo/internal/events"
 	"github.com/omcgo/omcgo/internal/filemanager"
@@ -938,6 +939,12 @@ func initTaskModule(c *Container) error {
 		&taskDeviceLookup{repo: c.DeviceRepo},
 		&taskCRSender{dispatcher: crDispatcher, serverAddr: c.Cfg.ConnReq.ServerAddr},
 	)
+	accessRepository := deviceaccess.NewPgRepository(c.PgPool)
+	guard := deviceaccess.NewAccessTaskGuard(accessRepository, accessRepository)
+	guard.SetRuntimeSettingsReader(deviceaccess.NewPgRuntimeSettingsStore(c.PgPool))
+	taskService.SetAdmissionGuard(guard)
+	c.DeviceAccessTaskGuard = guard
+	logger.Info("device access task admission guard initialized")
 
 	c.miscDeps.taskHandler = task.NewHandler(taskService)
 	c.miscDeps.taskSvc = taskService
@@ -2433,6 +2440,9 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			// 允许 bridge.Subscribe 之后再追加 handler — 启动序无 race（pre-traffic 阶段）。
 			c.miscDeps.completionRouter = task.NewCompletionRouter(logger)
 			c.miscDeps.completionRouter.Register(task.TaskSourceParamSync, paramSyncCompletionHandled{})
+			if c.DeviceAccessGPSProbes != nil {
+				c.miscDeps.completionRouter.Register(task.TaskSourceDeviceAccess, c.DeviceAccessGPSProbes)
+			}
 			// #122：source 无关的终态观察者，把每个终态任务写入 sys_task_logs。
 			// 必须在 per-source handler 之前用 RegisterObserver 注册，覆盖全部 source。
 			if c.adminHandlerDeps != nil && c.adminHandlerDeps.logRepo != nil {
@@ -2457,6 +2467,9 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			if c.adminHandlerDeps != nil && c.adminHandlerDeps.logRepo != nil {
 				c.miscDeps.taskSvc.AddCompletionCallback(
 					newTaskLogObserver(c.adminHandlerDeps.logRepo, logger))
+			}
+			if c.DeviceAccessGPSProbes != nil {
+				c.miscDeps.taskSvc.AddCompletionCallback(c.DeviceAccessGPSProbes)
 			}
 			// 顺序同上：Sequencer 先注册，聚合器后注册（见 finalizeIfComplete 注释）。
 			c.miscDeps.taskSvc.AddCompletionCallback(sequencer) // Sprint B Q-V3-3
@@ -2614,6 +2627,37 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			logger.Info("ops completion aggregator registered to taskSvc (single-process)")
 		}
 	}
+
+	// RF containment/recovery is deliberately attached after DeviceService and
+	// TaskService are ready. Access control owns the automatic action record;
+	// DeviceService/TaskService remain the only southbound RF execution path.
+	actionStore := deviceaccess.NewPgActionStore(c.PgPool)
+	accessRepository := deviceaccess.NewPgRepository(c.PgPool)
+	actionService := deviceaccess.NewActionService(
+		actionStore, c.DeviceService,
+		accessRepository, c.Carriers, logger,
+	)
+	actionService.SetRuntimeSettingsReader(deviceaccess.NewPgRuntimeSettingsStore(c.PgPool))
+	actionService.SetGroupReader(device.NewPgDeviceGroupReader(c.PgPool))
+	if c.DeviceAccessHTTPHandler != nil {
+		c.DeviceAccessHTTPHandler.SetActionService(actionService)
+	}
+	if c.DeviceAccessTaskGuard != nil {
+		c.DeviceAccessTaskGuard.SetSecurityActionAuthorizer(actionService)
+	}
+	if c.miscDeps.completionRouter != nil {
+		c.miscDeps.completionRouter.Register(task.TaskSourceDeviceAccess, actionService)
+	} else if c.miscDeps.taskSvc != nil {
+		c.miscDeps.taskSvc.AddCompletionCallback(actionService)
+	}
+	actionConsumer := deviceaccess.NewActionConsumer(c.EventBus, actionService)
+	if err := actionConsumer.Start(); err != nil {
+		return fmt.Errorf("start device access action consumer: %w", err)
+	}
+	c.GS.Register("device-access-actions", 2, func(context.Context) error {
+		return actionConsumer.Stop()
+	})
+	logger.Info("automatic device access RF action workflow initialized; business switch controls dispatch")
 
 	logger.Info("ops tools module initialized (incl. F06 ext T-0101..T-0112)")
 

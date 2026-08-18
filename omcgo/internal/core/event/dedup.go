@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
@@ -36,6 +37,26 @@ func NewDeduper(rdb redis.UniversalClient, ttl time.Duration, logger *zap.Logger
 
 // ErrDedupRedis 表示 Redis 通信失败。调用方据此决定降级策略。
 var ErrDedupRedis = errors.New("dedup redis error")
+
+// ErrDedupInProgress keeps a concurrent delivery unacknowledged until the
+// delivery that owns the processing lease either succeeds or releases it.
+var ErrDedupInProgress = errors.New("event deduplication is in progress")
+
+const dedupProcessingLease = 5 * time.Minute
+
+var releaseDedupLeaseScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0`)
+
+var completeDedupLeaseScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  redis.call("SET", KEYS[2], "1", "PX", ARGV[2])
+  redis.call("DEL", KEYS[1])
+  return 1
+end
+return 0`)
 
 // FirstTime 检查 (namespace, eventID) 是否首次见。
 //   - 首次：返回 (true, nil)
@@ -82,5 +103,61 @@ func (d *Deduper) Wrap(namespace string, handler EventHandler) EventHandler {
 			return nil
 		}
 		return handler(ctx, evt)
+	}
+}
+
+// WrapAfterSuccess suppresses redelivery only after the wrapped handler has
+// completed successfully. It is intended for handlers that rely on the event
+// bus NAK/redelivery contract: a failed attempt is left unmarked and can run
+// again, while a successfully projected event remains idempotent.
+//
+// The Redis check is deliberately fail-open. A Redis outage may cause a
+// duplicate projection, but must never acknowledge an event whose durable
+// projection failed.
+func (d *Deduper) WrapAfterSuccess(namespace string, handler EventHandler) EventHandler {
+	return func(ctx context.Context, evt Event) error {
+		if evt.ID == "" || d == nil || d.rdb == nil {
+			return handler(ctx, evt)
+		}
+		doneKey := fmt.Sprintf("dedup:%s:%s", namespace, evt.ID)
+		leaseKey := doneKey + ":processing"
+		seen, err := d.rdb.Exists(ctx, doneKey).Result()
+		if err != nil {
+			d.logger.Warn("dedup check failed, falling open",
+				zap.String("namespace", namespace),
+				zap.String("event_id", evt.ID),
+				zap.String("subject", evt.Subject),
+				zap.Error(err))
+		} else if seen > 0 {
+			return nil
+		}
+		token := uuid.NewString()
+		acquired, err := d.rdb.SetNX(ctx, leaseKey, token, dedupProcessingLease).Result()
+		if err != nil {
+			d.logger.Warn("dedup processing lease failed, falling open",
+				zap.String("namespace", namespace), zap.String("event_id", evt.ID), zap.Error(err))
+			return handler(ctx, evt)
+		}
+		if !acquired {
+			return ErrDedupInProgress
+		}
+
+		if err := handler(ctx, evt); err != nil {
+			if releaseErr := releaseDedupLeaseScript.Run(ctx, d.rdb, []string{leaseKey}, token).Err(); releaseErr != nil {
+				d.logger.Warn("release failed event dedup lease",
+					zap.String("namespace", namespace), zap.String("event_id", evt.ID), zap.Error(releaseErr))
+			}
+			return err
+		}
+		if err := completeDedupLeaseScript.Run(
+			ctx, d.rdb, []string{leaseKey, doneKey}, token, d.ttl.Milliseconds(),
+		).Err(); err != nil {
+			d.logger.Warn("record completed event dedup marker",
+				zap.String("namespace", namespace),
+				zap.String("event_id", evt.ID),
+				zap.String("subject", evt.Subject),
+				zap.Error(err))
+		}
+		return nil
 	}
 }

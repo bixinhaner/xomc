@@ -92,6 +92,12 @@ else
   echo "  [FAIL] 缺 $DEPLOY_DIR/redis-routing-check-lib.sh"
   exit 1
 fi
+if [ -f "$DEPLOY_DIR/config-upgrade-lib.sh" ]; then
+  . "$DEPLOY_DIR/config-upgrade-lib.sh"
+else
+  echo "  [FAIL] 缺 $DEPLOY_DIR/config-upgrade-lib.sh"
+  exit 1
+fi
 monitoring_profile_apply_runtime "$DEPLOY_DIR/.env" "$SKIP_MONITORING" || {
   echo "  [FAIL] 无法读取 monitoring profile"
   exit 1
@@ -173,6 +179,21 @@ container_running() {
   state="$(printf '%s\n' "$CONTAINER_SNAPSHOT" |
     awk -F '\t' -v svc="$svc" '$1 == svc { print $3; exit }')"
   [ "$state" = running ]
+}
+
+package_metadata_value() { # package_metadata_value <key>
+  local key="$1" version_file
+  version_file="$(cd "$DEPLOY_DIR/.." && pwd -P)/VERSION"
+  [ -f "$version_file" ] || return 1
+  awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); found=1; exit } END { if (!found) exit 1 }' "$version_file"
+}
+
+container_image_identity() { # container_image_identity <service>
+  local svc="$1" cid
+  cid="$(docker ps --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter "label=com.docker.compose.service=$svc" --format '{{.ID}}' | head -n1)"
+  [ -n "$cid" ] || return 1
+  docker inspect -f '{{.Config.Image}} | {{.Image}}' "$cid" 2>/dev/null
 }
 
 container_sysctl_equals() { # container_sysctl_equals <service> <key> <expected>
@@ -342,6 +363,19 @@ if [ "$STARTUP_CHECK" = 1 ]; then
   exit 0
 fi
 
+echo "== $(health_text '部署版本与镜像摘要' 'Deployment version and image digests') =="
+release_root="$(cd "$DEPLOY_DIR/.." && pwd -P)"
+check "$(health_text '交付包 VERSION 存在' 'Release VERSION exists')" test -f "$release_root/VERSION"
+for metadata_key in project_version git_commit build_time arch; do
+  metadata_value="$(package_metadata_value "$metadata_key" 2>/dev/null || printf '<missing>')"
+  echo "  · $metadata_key: $metadata_value"
+done
+echo "  · current: $(readlink -f /opt/omc/current 2>/dev/null || printf '<unresolved>')"
+for svc in app acs worker web; do
+  image_identity="$(container_image_identity "$svc" 2>/dev/null || printf '<container-not-found>')"
+  echo "  · $svc: $image_identity"
+done
+
 echo "== $(health_text 'docker compose 业务容器' 'Docker Compose business containers') =="
 for svc in app acs worker; do
   check "$svc 容器 running" container_running "$svc"
@@ -360,6 +394,10 @@ for config_file in app.prod.yaml worker.prod.yaml; do
   check "$config_file PM Redis 指向 redis-pm" yaml_top_level_section_has_address "/opt/omc/etc/$config_file" pm_redis redis-pm:6379
 done
 check "redis-core / redis-pm 运行实例身份不同" redis_instances_distinct
+
+echo "== $(health_text 'ACS 可信网关' 'ACS trusted gateway') =="
+check "$(health_text 'acs.prod.yaml 已声明可信 Web ACS 网关' 'acs.prod.yaml declares the trusted Web ACS gateway')" \
+  acs_has_trusted_proxy_cidrs /opt/omc/etc/acs.prod.yaml
 
 if [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]; then
   echo "== $(health_text 'docker compose web 容器' 'Docker Compose web container') =="

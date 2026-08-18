@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync"
 	"testing"
@@ -555,6 +556,80 @@ func TestServeHTTP_Inform_Periodic_PublishesPeriodicEvent(t *testing.T) {
 	defer bus.mu.Unlock()
 	require.Len(t, bus.published, 1)
 	assert.Equal(t, event.SubjectDevicePeriodic, bus.published[0].Subject)
+	var payload struct {
+		RemoteIP      string `json:"remote_ip"`
+		Authenticated bool   `json:"authenticated"`
+		AuthMethod    string `json:"auth_method"`
+	}
+	require.NoError(t, bus.published[0].Event.DecodePayload(&payload))
+	assert.Equal(t, "192.168.1.2", payload.RemoteIP)
+	assert.False(t, payload.Authenticated)
+	assert.Equal(t, "none", payload.AuthMethod)
+}
+
+func TestServeHTTP_Inform_AuthenticationFailureReturnsChallenge(t *testing.T) {
+	h := newTestACSHandler()
+	h.authenticator = &auth.BasicAuthenticator{Username: "cpe", Password: "secret"}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, `Basic realm="ACS"`, w.Header().Get("WWW-Authenticate"))
+	assert.Empty(t, w.Result().Cookies())
+}
+
+func TestServeHTTP_Inform_PublishesAuthenticatedCredentialIdentity(t *testing.T) {
+	bus := &acsHEventBus{}
+	h := newTestACSHandlerWithDeps(newAcsHSessionStore(), bus)
+	h.authenticator = &auth.BasicAuthenticator{Username: "cpe", Password: "secret"}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/acs", strings.NewReader(acsHInformPeriodicXML))
+	req.SetBasicAuth("cpe", "secret")
+	h.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, bus.published, 1)
+	var payload struct {
+		Authenticated bool   `json:"authenticated"`
+		AuthMethod    string `json:"auth_method"`
+		CredentialID  string `json:"credential_id"`
+	}
+	require.NoError(t, bus.published[0].Event.DecodePayload(&payload))
+	assert.True(t, payload.Authenticated)
+	assert.Equal(t, "basic", payload.AuthMethod)
+	assert.Equal(t, "cpe", payload.CredentialID)
+}
+
+func TestTransportPeerIPDoesNotTrustForwardedHeaders(t *testing.T) {
+	assert.Equal(t, "192.0.2.10", transportPeerIP("192.0.2.10:7547"))
+	assert.Equal(t, "2001:db8::10", transportPeerIP("[2001:db8::10]:7547"))
+	assert.Empty(t, transportPeerIP("not-an-address"))
+}
+
+func TestRequestClientIPTrustsOnlyConfiguredProxy(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("173.18.0.0/16")}
+
+	proxied := httptest.NewRequest(http.MethodPost, "/acs", nil)
+	proxied.RemoteAddr = "173.18.0.10:43120"
+	proxied.Header.Set("X-Forwarded-For", "172.24.224.35")
+	assert.Equal(t, "172.24.224.35", requestClientIP(proxied, trusted))
+
+	direct := httptest.NewRequest(http.MethodPost, "/acs", nil)
+	direct.RemoteAddr = "172.24.224.35:43120"
+	direct.Header.Set("X-Forwarded-For", "203.0.113.99")
+	assert.Equal(t, "172.24.224.35", requestClientIP(direct, trusted))
+}
+
+func TestRequestClientIPWalksForwardedChainFromNearestHop(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("173.18.0.0/16")}
+	req := httptest.NewRequest(http.MethodPost, "/acs", nil)
+	req.RemoteAddr = "173.18.0.10:43120"
+	req.Header.Set("X-Forwarded-For", "203.0.113.99, 172.24.224.35")
+
+	assert.Equal(t, "172.24.224.35", requestClientIP(req, trusted))
 }
 
 func TestServeHTTP_Inform_Periodic_EnqueuesUECountQuery(t *testing.T) {
@@ -1293,6 +1368,26 @@ func (m *acsHTaskService) CreateTask(ctx context.Context, req *task.CreateTaskRe
 	}
 	m.tasks = append(m.tasks, t)
 	return t, nil
+}
+
+func TestQueueAutoGPVAfterSPVSkipsCorrelatedDeviceAccessAction(t *testing.T) {
+	taskSvc := newAcsHTaskService()
+	h := &Handler{taskService: taskSvc}
+	params := json.RawMessage(`{"values":[{"name":"Device.Services.FAPService.1.FAPControl.LTE.AdminState","value":"0","type":"xsd:boolean"}]}`)
+
+	h.queueAutoGPVAfterSPV(context.Background(), &task.Task{
+		ID: "access-spv", DeviceSN: "SN-ACCESS", Params: params,
+		Source: task.TaskSourceDeviceAccess,
+	}, zap.NewNop())
+
+	require.Empty(t, taskSvc.tasks)
+
+	h.queueAutoGPVAfterSPV(context.Background(), &task.Task{
+		ID: "api-spv-1", DeviceSN: "SN-API", Params: params,
+		Source: task.TaskSourceAPI,
+	}, zap.NewNop())
+	require.Len(t, taskSvc.tasks, 1)
+	require.Equal(t, "GetParameterValues", taskSvc.tasks[0].Method)
 }
 
 func (m *acsHTaskService) LatestOpenTaskByDeviceAndMethod(

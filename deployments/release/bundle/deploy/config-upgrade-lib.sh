@@ -247,6 +247,53 @@ config_dir_has_instance_config() {
   return 1
 }
 
+acs_has_trusted_proxy_cidrs() {
+  local config="$1"
+  [ -f "$config" ] || return 1
+  awk '
+    /^[^[:space:]#][^:]*:/ { in_server = ($0 ~ /^server:[[:space:]]*(#.*)?$/) }
+    in_server && /^[[:space:]]+trusted_proxy_cidrs:[[:space:]]*/ { found=1; exit }
+    END { if (!found) exit 1 }
+  ' "$config"
+}
+
+# Older retained ACS configs predate the trusted Web gateway declaration. Copy
+# only this server child from the release template; never rewrite other server
+# timeouts, TLS paths, or operator settings.
+upgrade_acs_trusted_proxy_cidrs() {
+  local live_config="$1" template_config="$2" template_line tmp
+  [ -f "$live_config" ] || return 1
+  [ -f "$template_config" ] || return 1
+  acs_has_trusted_proxy_cidrs "$live_config" && return 0
+  template_line="$(awk '
+    /^[^[:space:]#][^:]*:/ { in_server = ($0 ~ /^server:[[:space:]]*(#.*)?$/) }
+    in_server && /^[[:space:]]+trusted_proxy_cidrs:[[:space:]]*/ { print; found=1; exit }
+    END { if (!found) exit 1 }
+  ' "$template_config")" || return 1
+
+  tmp="$(mktemp "${live_config}.trusted-proxy.tmp.XXXXXX")" || return 1
+  if ! awk -v addition="$template_line" '
+      /^[^[:space:]#][^:]*:/ {
+        if (in_server && !inserted) { print addition; inserted=1 }
+        in_server = ($0 ~ /^server:[[:space:]]*(#.*)?$/)
+        if (in_server) saw_server=1
+      }
+      { print }
+      END {
+        if (in_server && !inserted) { print addition; inserted=1 }
+        if (!saw_server || !inserted) exit 42
+      }
+    ' "$live_config" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! mv -f "$tmp" "$live_config"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  acs_has_trusted_proxy_cidrs "$live_config"
+}
+
 # upgrade_pm_redis_config <现网配置> <新包模板>
 #
 # 旧版本保留的 app/worker 配置没有 pm_redis。只追加新模板中的完整顶层段，

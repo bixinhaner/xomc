@@ -1,0 +1,152 @@
+.policyEditorModal :global(.ant-modal-content) {
+  overflow: hidden;
+  padding: 0;
+}
+
+.policyEditorModal :global(.ant-modal-header) {
+  margin: 0;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.policyEditorModal :global(.ant-modal-close) {
+  top: 17px;
+  inset-inline-end: 18px;
+}
+
+.policyEditorModal :global(.ant-modal-footer) {
+  position: relative;
+  z-index: 2;
+  margin: 0;
+  padding: 14px 24px;
+  border-top: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-bg-elevated);
+  box-shadow: 0 -8px 22px rgb(0 0 0 / 8%);
+}
+
+.titleIcon {
+  color: var(--ant-color-primary);
+}
+
+.editorHint {
+  margin-bottom: 16px;
+}
+
+.summaryCard {
+  margin-bottom: 20px;
+  border-color: var(--ant-color-border-secondary);
+  background: var(--ant-color-fill-quaternary);
+}
+
+.summaryCard :global(.ant-form-item:last-child) {
+  margin-bottom: 0;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 2px 12px;
+}
+
+.sectionHeader :global(.ant-typography) {
+  margin: 0;
+}
+
+.ruleCard {
+  margin-bottom: 18px;
+  border-color: var(--ant-color-border);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 5%);
+}
+
+.ruleCard :global(.ant-card-head) {
+  min-height: 50px;
+  background: var(--ant-color-fill-quaternary);
+}
+
+.indexBadge,
+.conditionIndex {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--ant-color-primary);
+  background: var(--ant-color-primary-bg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.conditionsStack {
+  display: grid;
+  gap: 12px;
+}
+
+.conditionCard {
+  border-color: var(--ant-color-border-secondary);
+  background: var(--ant-color-bg-container);
+}
+
+.conditionCard :global(.ant-card-head) {
+  min-height: 42px;
+  padding: 0 14px;
+  border-bottom-color: var(--ant-color-border-secondary);
+}
+
+.conditionCard :global(.ant-card-body) {
+  padding: 16px 16px 4px;
+}
+
+.conditionIndex {
+  width: 20px;
+  height: 20px;
+  color: var(--ant-color-text-secondary);
+  background: var(--ant-color-fill-secondary);
+}
+
+.conditionOptions {
+  margin: 0 -16px;
+  padding: 12px 16px 0;
+  border-top: 1px dashed var(--ant-color-border-secondary);
+  background: var(--ant-color-fill-quaternary);
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+.scopeHintColumn {
+  padding-top: 30px;
+}
+
+.scopeHint {
+  min-height: 32px;
+  padding-block: 5px;
+}
+
+.addRuleButton {
+  height: 44px;
+  margin-top: 4px;
+}
+
+@media (max-width: 768px) {
+  .policyEditorModal {
+    max-width: calc(100vw - 24px);
+  }
+
+  .policyEditorModal :global(.ant-modal-header),
+  .policyEditorModal :global(.ant-modal-footer) {
+    padding-inline: 16px;
+  }
+
+  .sectionHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .scopeHintColumn {
+    padding-top: 0;
+  }
+}

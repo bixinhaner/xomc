@@ -173,3 +173,47 @@ func TestDeduper_Wrap_DifferentEventsBothInvoke(t *testing.T) {
 	require.NoError(t, wrapped(context.Background(), Event{ID: "evt-2"}))
 	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
 }
+
+func TestDeduper_WrapAfterSuccess_RetriesFailureThenDeduplicatesSuccess(t *testing.T) {
+	rdb, _ := newMiniredisForDedup(t)
+	d := NewDeduper(rdb, time.Hour, nil)
+
+	var calls int32
+	wrapped := d.WrapAfterSuccess("ns", func(context.Context, Event) error {
+		attempt := atomic.AddInt32(&calls, 1)
+		if attempt == 1 {
+			return errors.New("temporary projection failure")
+		}
+		return nil
+	})
+	evt := Event{ID: "evt-retry"}
+
+	require.Error(t, wrapped(context.Background(), evt))
+	require.NoError(t, wrapped(context.Background(), evt))
+	require.NoError(t, wrapped(context.Background(), evt))
+	assert.Equal(t, int32(2), atomic.LoadInt32(&calls))
+}
+
+func TestDeduper_WrapAfterSuccess_RejectsConcurrentDeliveryUntilOwnerCompletes(t *testing.T) {
+	rdb, _ := newMiniredisForDedup(t)
+	d := NewDeduper(rdb, time.Hour, nil)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var calls int32
+	wrapped := d.WrapAfterSuccess("ns", func(context.Context, Event) error {
+		atomic.AddInt32(&calls, 1)
+		close(started)
+		<-release
+		return nil
+	})
+	evt := Event{ID: "evt-concurrent"}
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- wrapped(context.Background(), evt) }()
+	<-started
+
+	require.ErrorIs(t, wrapped(context.Background(), evt), ErrDedupInProgress)
+	close(release)
+	require.NoError(t, <-firstDone)
+	require.NoError(t, wrapped(context.Background(), evt))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls))
+}

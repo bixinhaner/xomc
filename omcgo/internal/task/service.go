@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +76,12 @@ type TaskCompletionCallback interface {
 	OnTaskCompleted(ctx context.Context, task *Task)
 }
 
+// ReliableTaskCompletionCallback is implemented by projections whose failure
+// must keep the durable task-transition event pending for retry.
+type ReliableTaskCompletionCallback interface {
+	OnTaskCompletedReliable(ctx context.Context, task *Task) error
+}
+
 // TaskService 任务管理服务
 // 协调 Redis 队列（运行时）和 PostgreSQL（持久化）
 type TaskService struct {
@@ -108,7 +115,37 @@ type TaskService struct {
 	// maxQueueDepth: issue #7 — 每设备 pending 队列深度上限（背压）。
 	// 0 表示不限制（向后兼容历史行为）；生产由 SetMaxQueueDepth 注入。
 	maxQueueDepth int
+
+	// admissionGuard is an optional execution-plane check. When configured,
+	// task creation and ACS dequeue both verify that the device may receive
+	// ordinary OMC tasks.
+	admissionGuard TaskAdmissionGuard
 }
+
+// TaskAdmissionRequest carries the complete execution contract that admission
+// guards need to validate. Checking only the class is unsafe because a caller
+// could otherwise label an arbitrary RPC as an access probe.
+type TaskAdmissionRequest struct {
+	DeviceSN       string
+	AdmissionClass AdmissionClass
+	Source         TaskSource
+	SourceID       string
+	Method         string
+	Params         json.RawMessage
+}
+
+type TaskAdmissionGuard interface {
+	Allow(ctx context.Context, request TaskAdmissionRequest) (bool, string, error)
+}
+
+var ErrTaskAdmissionDenied = errors.New("task admission denied")
+
+// A denied pending task remains durable, but moving its next attempt a short
+// distance into the future lets an allowed access-evidence probe behind it run
+// in the same CWMP session. Without this hold, re-pushing the task with its
+// original score can permanently starve the probe needed to change the access
+// decision.
+const taskAdmissionHoldDelay = time.Second
 
 // CreateFailureNotifier 在 CreateTask 入队失败时被调用，把失败信息写入消息中心。
 // 实现端（internal/notification）负责按 task.CreatorID 隔离 + 渲染文案 + UpsertByDedup。
@@ -140,6 +177,10 @@ func NewTaskService(queue *RedisTaskQueue, repo *PgTaskRepository, log *zap.Logg
 		logger:        log,
 		maxQueueDepth: defaultMaxQueueDepth, // issue #7: 默认开启每设备队列背压，可经 SetMaxQueueDepth 调整
 	}
+}
+
+func (s *TaskService) SetAdmissionGuard(guard TaskAdmissionGuard) {
+	s.admissionGuard = guard
 }
 
 // AggregatePathTranslationMissBySourceID 透传到底层 PgTaskRepository，
@@ -252,6 +293,9 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 		attribute.String("task.method", req.Method),
 	)
 	defer span.End()
+	if err := s.checkCreateAdmission(ctx, req); err != nil {
+		return nil, err
+	}
 
 	// issue #7: 每设备 pending 队列深度背压 —— 防止面向不可达 / 不可信设备的任务
 	// 无界堆积耗尽 Redis/PG。命中上限直接拒绝（不落库、不入队），调用方按 429 处理。
@@ -330,6 +374,53 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 	return task, nil
 }
 
+func (s *TaskService) EnsureTaskByCommandKey(ctx context.Context, req *CreateTaskRequest) (*Task, error) {
+	if req == nil || strings.TrimSpace(req.CommandKey) == "" {
+		return nil, errors.New("idempotent task command key is required")
+	}
+	release, err := s.repo.AcquireCommandKeyLock(ctx, req.CommandKey)
+	if err != nil {
+		return nil, fmt.Errorf("acquire task command key lock: %w", err)
+	}
+	defer release()
+	existing, err := s.repo.GetByCommandKey(ctx, req.CommandKey)
+	if err != nil {
+		return nil, fmt.Errorf("load task by command key: %w", err)
+	}
+	if existing != nil {
+		return existing, nil
+	}
+	return s.CreateTask(ctx, req)
+}
+
+func (s *TaskService) checkCreateAdmission(ctx context.Context, req *CreateTaskRequest) error {
+	if s.admissionGuard == nil || req == nil || req.FailImmediately {
+		return nil
+	}
+	admissionClass := req.AdmissionClass
+	if admissionClass == "" {
+		admissionClass = AdmissionClassNormal
+	}
+	allowed, reason, err := s.admissionGuard.Allow(ctx, TaskAdmissionRequest{
+		DeviceSN:       req.DeviceSN,
+		AdmissionClass: admissionClass,
+		Source:         req.Source,
+		SourceID:       req.SourceID,
+		Method:         req.Method,
+		Params:         req.Params,
+	})
+	if err != nil {
+		return fmt.Errorf("check task admission: %w", err)
+	}
+	if allowed {
+		return nil
+	}
+	if reason == "" {
+		reason = ErrTaskAdmissionDenied.Error()
+	}
+	return fmt.Errorf("device %s: %w: %s", req.DeviceSN, ErrTaskAdmissionDenied, reason)
+}
+
 // GetTask 获取任务详情
 func (s *TaskService) GetTask(ctx context.Context, taskID string) (*Task, error) {
 	// 优先从 Redis 获取（更实时）
@@ -403,16 +494,81 @@ func (s *TaskService) PopTask(ctx context.Context, deviceSN string) (*Task, erro
 	)
 	defer span.End()
 
-	t, err := s.queue.Pop(ctx, deviceSN)
-	if err != nil {
-		tracing.RecordError(span, err)
-	} else if t != nil {
-		span.SetAttributes(
-			attribute.String("task.id", t.ID),
-			attribute.String("task.method", t.Method),
-		)
+	maxAttempts := 1
+	if s.admissionGuard != nil {
+		depth, err := s.queue.Len(ctx, deviceSN)
+		if err != nil {
+			tracing.RecordError(span, err)
+			return nil, fmt.Errorf("get task queue length for admission scan: %w", err)
+		}
+		if depth == 0 {
+			return nil, nil
+		}
+		if depth > queuePopScanLimit {
+			depth = queuePopScanLimit
+		}
+		maxAttempts = int(depth)
 	}
-	return t, err
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		t, err := s.queue.Pop(ctx, deviceSN)
+		if err != nil {
+			tracing.RecordError(span, err)
+			return nil, err
+		}
+		if t == nil {
+			return nil, nil
+		}
+		if s.admissionGuard == nil {
+			span.SetAttributes(
+				attribute.String("task.id", t.ID),
+				attribute.String("task.method", t.Method),
+			)
+			return t, nil
+		}
+
+		admissionClass := t.AdmissionClass
+		if admissionClass == "" {
+			admissionClass = AdmissionClassNormal
+		}
+		allowed, reason, guardErr := s.admissionGuard.Allow(ctx, TaskAdmissionRequest{
+			DeviceSN:       t.DeviceSN,
+			AdmissionClass: admissionClass,
+			Source:         t.Source,
+			SourceID:       t.SourceID,
+			Method:         t.Method,
+			Params:         t.Params,
+		})
+		if guardErr != nil {
+			if pushErr := s.queue.Push(ctx, t); pushErr != nil {
+				return nil, fmt.Errorf("restore task after admission check failed (%v): %w", guardErr, pushErr)
+			}
+			return nil, fmt.Errorf("check popped task admission: %w", guardErr)
+		}
+		if allowed {
+			span.SetAttributes(
+				attribute.String("task.id", t.ID),
+				attribute.String("task.method", t.Method),
+			)
+			return t, nil
+		}
+
+		if reason == "" {
+			reason = ErrTaskAdmissionDenied.Error()
+		}
+		nextAttempt := time.Now().Add(taskAdmissionHoldDelay)
+		t.NextAttemptAt = &nextAttempt
+		if updateErr := s.queue.Update(ctx, t); updateErr != nil {
+			if pushErr := s.queue.Push(ctx, t); pushErr != nil {
+				return nil, fmt.Errorf("hold denied task failed (%v), restore task: %w", updateErr, pushErr)
+			}
+			return nil, fmt.Errorf("hold denied task: %w", updateErr)
+		}
+		logger.L(ctx).Info("task held by device access admission",
+			zap.String("task_id", t.ID), zap.String("device_sn", t.DeviceSN), zap.String("reason", reason))
+	}
+
+	return nil, nil
 }
 
 // GetQueueLength 获取队列长度
@@ -1147,6 +1303,12 @@ func (s *TaskService) RetryTask(ctx context.Context, task *Task) error {
 func (s *TaskService) BatchCreateTasks(ctx context.Context, reqs []*CreateTaskRequest) ([]*Task, error) {
 	var tasks []*Task
 	for _, req := range reqs {
+		if req == nil {
+			return nil, fmt.Errorf("batch task request is nil")
+		}
+		if err := s.checkCreateAdmission(ctx, req); err != nil {
+			return nil, err
+		}
 		s.applyDefaultExpiresIn(req)
 		task := NewTask(req)
 		tasks = append(tasks, task)
@@ -1308,6 +1470,12 @@ func (s *TaskService) PublishTransitionEvent(
 		}
 	} else {
 		for _, cb := range s.callbacks {
+			if reliable, ok := cb.(ReliableTaskCompletionCallback); ok {
+				if err := reliable.OnTaskCompletedReliable(ctx, task); err != nil {
+					return fmt.Errorf("project task transition %s: %w", task.ID, err)
+				}
+				continue
+			}
 			cb.OnTaskCompleted(ctx, task)
 		}
 	}

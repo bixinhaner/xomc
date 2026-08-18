@@ -508,11 +508,10 @@ func (r *PgMaintenanceWindowRepository) List(ctx context.Context, filter Mainten
 }
 
 func (r *PgMaintenanceWindowRepository) ListActive(ctx context.Context, now time.Time) ([]OpsMaintenanceWindow, error) {
-	q := maintenanceSelect().
-		Where(sq.Eq{"status": string(MWActive)}).
-		Where(sq.LtOrEq{"start_at": now}).
-		Where(sq.GtOrEq{"end_at": now})
-	query, args, _ := q.ToSql()
+	query, args, err := activeMaintenanceWindowQuery(now).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build active maintenance_windows query: %w", err)
+	}
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query active maintenance_windows: %w", err)
@@ -527,6 +526,13 @@ func (r *PgMaintenanceWindowRepository) ListActive(ctx context.Context, now time
 		out = append(out, w)
 	}
 	return out, rows.Err()
+}
+
+func activeMaintenanceWindowQuery(now time.Time) sq.SelectBuilder {
+	return maintenanceSelect().
+		Where(sq.Eq{"status": []string{string(MWApproved), string(MWActive)}}).
+		Where(sq.LtOrEq{"start_at": now}).
+		Where(sq.GtOrEq{"end_at": now})
 }
 
 func maintenanceSelect() sq.SelectBuilder {

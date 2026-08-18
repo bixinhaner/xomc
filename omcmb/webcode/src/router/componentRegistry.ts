@@ -33,6 +33,7 @@ export const componentRegistry: Record<string, ComponentType> = {
   'device/ImportExport': lazy(() => import('@/pages/device/ImportExport')),
   'device/RecycleBin': lazy(() => import('@/pages/device/RecycleBin')),
   'device/UeDetail': lazy(() => import('@/pages/device/UeDetail')),
+  'device/AccessControl': lazy(() => import('@/pages/device/AccessControl')),
   'device/PlugAndPlay': lazy(() => import('@/pages/device/PlugAndPlay')),
   'device/PlugAndPlay/AddPolicyPage': lazy(
     () => import('@/pages/device/PlugAndPlay/AddPolicyPage'),

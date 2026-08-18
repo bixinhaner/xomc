@@ -11,6 +11,8 @@ import (
 	"github.com/omcgo/omcgo/internal/core/carrier/ctcc"
 	"github.com/omcgo/omcgo/internal/core/carrier/cucc"
 	"github.com/omcgo/omcgo/internal/core/components"
+	"github.com/omcgo/omcgo/internal/deviceaccess"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/storageprotection"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/prometheus/client_golang/prometheus"
@@ -29,6 +31,7 @@ type workerInfra struct {
 	// 在 RestorePendingQueues 之前就绪，确保启动期 recovery 动作能被记到指标。
 	TaskMetrics       *task.TaskMetrics
 	StorageProtection *storageprotection.Service
+	ProductRegistry   *product.Registry
 }
 
 // initWorker initializes all infrastructure for the background worker.
@@ -82,6 +85,11 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	// 进度卡 pending 直到下游 reaper 兜底（甚至永久卡住）。app 那边
 	// cmd/app/bootstrap.go:70 已设；这里补上同款注入。
 	taskSvc.SetEventBus(inf.EventBus)
+	accessRepository := deviceaccess.NewPgRepository(inf.PgPool)
+	guard := deviceaccess.NewAccessTaskGuard(accessRepository, accessRepository)
+	guard.SetRuntimeSettingsReader(deviceaccess.NewPgRuntimeSettingsStore(inf.PgPool))
+	taskSvc.SetAdmissionGuard(guard)
+	inf.Logger.Info("device access task admission guard initialized")
 	// issue #20：任务指标在这里就构造并注入 —— 必须早于 runWorker 里的
 	// RestorePendingQueues，否则启动期 recovery 动作（restore_pending）打点时
 	// metrics 还是 nil。reconciler / 双写中断指标复用同一实例。

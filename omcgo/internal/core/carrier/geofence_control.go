@@ -316,6 +316,47 @@ func isRFControlPath(path string) bool {
 	return false
 }
 
+// ResolveWritableRFControlPaths returns the concrete RF control paths exposed
+// by a device parameter snapshot. It is shared by geofence and device-access
+// RF actions so product-private and multi-instance paths are resolved once.
+func ResolveWritableRFControlPaths(parameters []model.DeviceParameter) []string {
+	return selectWritableRFControlPaths(parameters)
+}
+
+// ResolveWritableRFControlPathsForProduct keeps device-access RF operations on
+// the same product-specific control surface as the established geofence flow.
+// mBS31001 exposes per-cell X_COM_RadioEnable values for status projection, but
+// the durable device control switch is DeviceInfo.SAS.RadioEnable. Writing the
+// per-cell status aliases can return SPV/GPV success and then immediately fall
+// back, which must not be treated as a successful RF action.
+//
+// Do not gate this product-specific path on device_parameters.writable. That
+// flag comes from an early CPE GetParameterNames snapshot and may disagree with
+// the ParamModel READ_WRITE mapping used by the parameter-tree write path (see
+// T-0148). Requiring the exact reported path keeps the resolver fail-closed
+// without reintroducing the stale snapshot as a second write-authority source.
+func ResolveWritableRFControlPathsForProduct(
+	productClass string,
+	parameters []model.DeviceParameter,
+) []string {
+	if IsMBS31001ProductClass(productClass) {
+		const radioPath = "Device.DeviceInfo.SAS.RadioEnable"
+		for _, parameter := range parameters {
+			if strings.TrimSpace(parameter.ParameterPath) == radioPath {
+				return []string{radioPath}
+			}
+		}
+		return nil
+	}
+	return selectWritableRFControlPaths(parameters)
+}
+
+// IsRFControlPath reports whether path is one of the supported RF control
+// parameter families. Callers use it to validate queued security actions.
+func IsRFControlPath(path string) bool {
+	return isRFControlPath(strings.TrimSpace(path))
+}
+
 func isParameterEntry(entryType string) bool {
 	return strings.EqualFold(strings.TrimSpace(entryType), "parameter")
 }
@@ -441,7 +482,7 @@ func isMBS31001ProductClass(productClass string) bool {
 // IsMBS31001ProductClass identifies the 4G mBS31001 product family without
 // coupling callers to a specific /SC, /DC, or /CA suffix.
 func IsMBS31001ProductClass(productClass string) bool {
-	return strings.HasPrefix(productClass, "FAP/MBS31001/")
+	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(productClass)), "FAP/MBS31001/")
 }
 
 func detectMBS31001IPSecInstances(

@@ -24,6 +24,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/realtime"
 	"github.com/omcgo/omcgo/internal/core/systimezone"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/deviceaccess"
 	"github.com/omcgo/omcgo/internal/geofence"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -144,7 +145,10 @@ type Container struct {
 	// InformHandler 暴露给后续模块（如 topology matcher）注入"心跳自动分组"钩子。
 	// 在 initDeviceModule 创建时尚无 matcher，由 initMiscModules 创建 matcher 后
 	// 反向注入 SetGroupAssigner — 避免循环依赖（device → topology）。
-	InformHandler *device.InformHandler
+	InformHandler           *device.InformHandler
+	DeviceAccessHTTPHandler *deviceaccess.PolicyHTTPHandler
+	DeviceAccessGPSProbes   *deviceaccess.GPSProbeService
+	DeviceAccessTaskGuard   *deviceaccess.AccessTaskGuard
 
 	// GeofenceModule 设置。Phase 1 仅提供配置、版本和绑定能力，不连接设备控制。
 	GeofenceService *geofence.Service

@@ -58,5 +58,8 @@ func geofenceSeedBaselineSection(t *testing.T, sql string) string {
 	const marker = "-- Consolidated pre-release geofence defaults and administrator permissions."
 	index := strings.LastIndex(sql, marker)
 	require.NotEqual(t, -1, index)
-	return sql[index:]
+	section := sql[index:]
+	end := strings.Index(section, "-- +omcgo MainReconcileEnd")
+	require.NotEqual(t, -1, end)
+	return section[:end]
 }

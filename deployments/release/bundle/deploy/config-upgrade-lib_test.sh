@@ -65,6 +65,38 @@ upgrade_pm_redis_config "$tmp/pm-legacy.yaml" "$tmp/pm-template.yaml"
 
 echo "PASS: production config upgrade adds dedicated PM Redis"
 
+cat > "$tmp/acs-proxy-template.yaml" <<'YAML'
+server:
+  host: "0.0.0.0"
+  trusted_proxy_cidrs: ["173.18.0.0/16"]
+session:
+  timeout: 5m
+YAML
+cat > "$tmp/acs-proxy-legacy.yaml" <<'YAML'
+server:
+  host: "operator-host"
+  read_timeout: 45s
+session:
+  timeout: 7m
+YAML
+upgrade_acs_trusted_proxy_cidrs "$tmp/acs-proxy-legacy.yaml" "$tmp/acs-proxy-template.yaml"
+grep -Fq '  trusted_proxy_cidrs: ["173.18.0.0/16"]' "$tmp/acs-proxy-legacy.yaml" || {
+  echo "FAIL: legacy ACS config did not receive the trusted gateway CIDR" >&2
+  exit 1
+}
+grep -Fq '  host: "operator-host"' "$tmp/acs-proxy-legacy.yaml" || {
+  echo "FAIL: trusted gateway migration changed operator server settings" >&2
+  exit 1
+}
+before_acs_proxy="$(cksum < "$tmp/acs-proxy-legacy.yaml")"
+upgrade_acs_trusted_proxy_cidrs "$tmp/acs-proxy-legacy.yaml" "$tmp/acs-proxy-template.yaml"
+[ "$(cksum < "$tmp/acs-proxy-legacy.yaml")" = "$before_acs_proxy" ] || {
+  echo "FAIL: trusted gateway migration must be idempotent" >&2
+  exit 1
+}
+
+echo "PASS: ACS trusted gateway migration is additive and idempotent"
+
 cat > "$tmp/template.yaml" <<'YAML'
 session:
   timeout: 5m

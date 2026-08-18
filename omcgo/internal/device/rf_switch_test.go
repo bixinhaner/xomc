@@ -36,20 +36,41 @@ func (f *fakeEnqueuer) GetQueueLength(_ context.Context, _ string) (int64, error
 	return 0, nil
 }
 
-// rfSwitchEmittedPath extracts the ParameterList[0].Name from a captured
+// rfSwitchEmittedPath extracts values[0].name from a captured
 // CreateTaskRequest so tests can assert path correctness without parsing
 // the full SetParameterValues body shape.
 func rfSwitchEmittedPath(t *testing.T, req task.CreateTaskRequest) string {
 	t.Helper()
 	var payload struct {
-		ParameterList []struct {
-			Name  string `json:"Name"`
-			Value string `json:"Value"`
-		} `json:"ParameterList"`
+		Values []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+			Type  string `json:"type"`
+		} `json:"values"`
 	}
 	require.NoError(t, json.Unmarshal(req.Params, &payload))
-	require.Len(t, payload.ParameterList, 1)
-	return payload.ParameterList[0].Name
+	require.Len(t, payload.Values, 1)
+	require.Equal(t, "xsd:boolean", payload.Values[0].Type)
+	return payload.Values[0].Name
+}
+
+func rfSwitchEmittedPaths(t *testing.T, req task.CreateTaskRequest) []string {
+	t.Helper()
+	var payload struct {
+		Values []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+			Type  string `json:"type"`
+		} `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal(req.Params, &payload))
+	paths := make([]string, 0, len(payload.Values))
+	for _, value := range payload.Values {
+		require.Equal(t, "0", value.Value)
+		require.Equal(t, "xsd:boolean", value.Type)
+		paths = append(paths, value.Name)
+	}
+	return paths
 }
 
 // realCarrierRegistry returns a registry with the production cmcc/ctcc/cucc
@@ -136,7 +157,12 @@ func TestSetRFSwitch_T0029_CUCC_LTE_Rejected(t *testing.T) {
 		},
 	}
 	enq := &fakeEnqueuer{}
-	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	paramRepo := &mockParamRepo{getByDeviceFn: func(context.Context, uuid.UUID) ([]model.DeviceParameter, error) {
+		return []model.DeviceParameter{{
+			ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", Writable: true,
+		}}, nil
+	}}
+	svc := newTestDeviceService(deviceRepo, paramRepo)
 	svc.SetTaskService(enq)
 	svc.SetCarrierRegistry(realCarrierRegistry(t))
 
@@ -252,4 +278,179 @@ func TestSetRFSwitch_T0029_TaskServiceError(t *testing.T) {
 	err := svc.SetRFSwitch(context.Background(), deviceID, true)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "queue RF switch command")
+}
+
+func TestQueueRFReadbackUsesSameCarrierPathAndSecurityMetadata(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{
+				ID: deviceID, SerialNumber: "SN-RF-VERIFY",
+				Carrier: model.CarrierCMCC, Technology: model.TechLTE,
+			}, nil
+		},
+	}
+	enq := &fakeEnqueuer{}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	svc.SetTaskService(enq)
+	svc.SetCarrierRegistry(realCarrierRegistry(t))
+
+	created, err := svc.QueueRFReadback(context.Background(), deviceID, RFSwitchTaskOptions{
+		Source: task.TaskSourceDeviceAccess, SourceID: "action-1",
+		CommandKey:     "device-access-action:action-1:1:verify",
+		AdmissionClass: task.AdmissionClassSecurityAction,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Len(t, enq.calls, 1)
+	require.Equal(t, "GetParameterValues", enq.calls[0].Method)
+	require.Equal(t, task.TaskSourceDeviceAccess, enq.calls[0].Source)
+	require.Equal(t, "action-1", enq.calls[0].SourceID)
+	require.Equal(t, task.AdmissionClassSecurityAction, enq.calls[0].AdmissionClass)
+	var payload struct {
+		Names []string `json:"names"`
+	}
+	require.NoError(t, json.Unmarshal(enq.calls[0].Params, &payload))
+	require.Equal(t, []string{"Device.Services.FAPService.1.FAPControl.LTE.AdminState"}, payload.Names)
+}
+
+func TestQueueRFReadbackUsesPinnedSPVTargets(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{
+				ID: deviceID, SerialNumber: "SN-RF-PINNED",
+				Carrier: model.CarrierCMCC, Technology: model.TechLTE,
+			}, nil
+		},
+	}
+	paramRepo := &mockParamRepo{getByDeviceFn: func(context.Context, uuid.UUID) ([]model.DeviceParameter, error) {
+		return []model.DeviceParameter{
+			{ParameterPath: "Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus", Writable: true},
+			{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", Writable: true},
+		}, nil
+	}}
+	enq := &fakeEnqueuer{}
+	svc := newTestDeviceService(deviceRepo, paramRepo)
+	svc.SetTaskService(enq)
+	svc.SetCarrierRegistry(realCarrierRegistry(t))
+	want := []string{
+		"Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus",
+		"Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus",
+	}
+
+	_, err := svc.QueueRFReadback(context.Background(), deviceID, RFSwitchTaskOptions{TargetPaths: want})
+	require.NoError(t, err)
+	require.Len(t, enq.calls, 1)
+	var payload struct {
+		Names []string `json:"names"`
+	}
+	require.NoError(t, json.Unmarshal(enq.calls[0].Params, &payload))
+	require.Equal(t, want, payload.Names)
+}
+
+func TestQueueRFSwitchRejectsPinnedTargetOutsideCurrentSnapshot(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{getByIDFn: func(context.Context, uuid.UUID) (*model.Device, error) {
+		return &model.Device{ID: deviceID, SerialNumber: "SN-RF-STALE", Carrier: model.CarrierCMCC, Technology: model.TechLTE}, nil
+	}}
+	paramRepo := &mockParamRepo{getByDeviceFn: func(context.Context, uuid.UUID) ([]model.DeviceParameter, error) {
+		return []model.DeviceParameter{{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", Writable: true}}, nil
+	}}
+	svc := newTestDeviceService(deviceRepo, paramRepo)
+	svc.SetTaskService(&fakeEnqueuer{})
+	svc.SetCarrierRegistry(realCarrierRegistry(t))
+	_, err := svc.QueueRFSwitch(context.Background(), deviceID, false, RFSwitchTaskOptions{TargetPaths: []string{
+		"Device.Services.FAPService.2.FAPControl.LTE.RFTxStatus",
+	}})
+	require.ErrorContains(t, err, "not writable for current device snapshot")
+}
+
+func TestQueueRFSwitchAndReadbackResolveBLQMultiInstanceSnapshot(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{
+				ID: deviceID, SerialNumber: "SN-BLQ", ProductClass: "FAP/BAIBLQ/SC",
+				Carrier: model.CarrierCMCC, Technology: model.TechLTE,
+			}, nil
+		},
+	}
+	paramRepo := &mockParamRepo{
+		getByDeviceFn: func(_ context.Context, _ uuid.UUID) ([]model.DeviceParameter, error) {
+			return []model.DeviceParameter{
+				{ParameterPath: "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.X_COM_RadioEnable", Writable: true},
+				{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable", Writable: true},
+			}, nil
+		},
+	}
+	enq := &fakeEnqueuer{}
+	svc := newTestDeviceService(deviceRepo, paramRepo)
+	svc.SetTaskService(enq)
+	svc.SetCarrierRegistry(realCarrierRegistry(t))
+
+	_, err := svc.QueueRFSwitch(context.Background(), deviceID, false, RFSwitchTaskOptions{})
+	require.NoError(t, err)
+	_, err = svc.QueueRFReadback(context.Background(), deviceID, RFSwitchTaskOptions{})
+	require.NoError(t, err)
+	require.Len(t, enq.calls, 2)
+	want := []string{
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable",
+		"Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.X_COM_RadioEnable",
+	}
+	require.Equal(t, want, rfSwitchEmittedPaths(t, enq.calls[0]))
+	var readback struct {
+		Names []string `json:"names"`
+	}
+	require.NoError(t, json.Unmarshal(enq.calls[1].Params, &readback))
+	require.Equal(t, want, readback.Names)
+}
+
+func TestQueueRFSwitchUsesMBS31001SASControlInsteadOfPerCellStatusAliases(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{getByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+		return &model.Device{ID: deviceID, SerialNumber: "SN-QRTB", ProductClass: "FAP/mBS31001/DC",
+			Carrier: model.CarrierCMCC, Technology: model.TechLTE}, nil
+	}}
+	paramRepo := &mockParamRepo{getByDeviceFn: func(_ context.Context, _ uuid.UUID) ([]model.DeviceParameter, error) {
+		return []model.DeviceParameter{
+			{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable", Writable: true},
+			{ParameterPath: "Device.Services.FAPService.2.CellConfig.LTE.RAN.RF.X_COM_RadioEnable", Writable: true},
+			// device_parameters.writable is an early CPE snapshot and may be
+			// false even though the ParamModel exposes this exact path as
+			// READ_WRITE. The product resolver must follow the same T-0148
+			// single-source rule as the parameter-tree write path.
+			{ParameterPath: "Device.DeviceInfo.SAS.RadioEnable", Writable: false},
+		}, nil
+	}}
+	enq := &fakeEnqueuer{}
+	svc := newTestDeviceService(deviceRepo, paramRepo)
+	svc.SetTaskService(enq)
+	svc.SetCarrierRegistry(realCarrierRegistry(t))
+
+	_, err := svc.QueueRFSwitch(context.Background(), deviceID, true, RFSwitchTaskOptions{})
+	require.NoError(t, err)
+	require.Len(t, enq.calls, 1)
+	require.Equal(t, "Device.DeviceInfo.SAS.RadioEnable", rfSwitchEmittedPath(t, enq.calls[0]))
+	require.Contains(t, string(enq.calls[0].Params), `"value":"1"`)
+}
+
+func TestQueueRFSwitchRejectsMBS31001WithoutReportedSASControl(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{getByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+		return &model.Device{ID: deviceID, SerialNumber: "SN-QRTB", ProductClass: "FAP/mBS31001/DC",
+			Carrier: model.CarrierCMCC, Technology: model.TechLTE}, nil
+	}}
+	paramRepo := &mockParamRepo{getByDeviceFn: func(_ context.Context, _ uuid.UUID) ([]model.DeviceParameter, error) {
+		return []model.DeviceParameter{{
+			ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.X_COM_RadioEnable", Writable: true,
+		}}, nil
+	}}
+	svc := newTestDeviceService(deviceRepo, paramRepo)
+	svc.SetTaskService(&fakeEnqueuer{})
+	svc.SetCarrierRegistry(realCarrierRegistry(t))
+
+	_, err := svc.QueueRFSwitch(context.Background(), deviceID, true, RFSwitchTaskOptions{})
+	require.ErrorContains(t, err, "requires reported Device.DeviceInfo.SAS.RadioEnable")
 }

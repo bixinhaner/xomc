@@ -14,3 +14,9 @@ type Enqueuer interface {
 	CreateTask(ctx context.Context, req *CreateTaskRequest) (*Task, error)
 	GetQueueLength(ctx context.Context, deviceSN string) (int64, error)
 }
+
+// IdempotentEnqueuer creates at most one durable task for a deterministic
+// command key. It is used by at-least-once business event consumers.
+type IdempotentEnqueuer interface {
+	EnsureTaskByCommandKey(ctx context.Context, req *CreateTaskRequest) (*Task, error)
+}

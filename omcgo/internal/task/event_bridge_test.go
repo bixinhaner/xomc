@@ -13,9 +13,9 @@ import (
 
 // fakeEventBus 实现 event.EventBus，记录订阅信息以便断言。
 type fakeEventBus struct {
-	queueSubs    []string
-	queueGroups  []string
-	queueErr     error
+	queueSubs   []string
+	queueGroups []string
+	queueErr    error
 }
 
 func (b *fakeEventBus) Publish(_ context.Context, _ string, _ event.Event) error { return nil }
@@ -116,6 +116,5 @@ func TestCompletionEventBridge_HandleBadPayload(t *testing.T) {
 	evt, err := event.NewEvent(event.SubjectTaskCompleted, 12345)
 	require.NoError(t, err)
 
-	// handle 在 decode 失败时只记 warn 不返回错误（best-effort）。
-	require.NoError(t, bridge.handle(context.Background(), evt))
+	require.Error(t, bridge.handle(context.Background(), evt))
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/auth"
@@ -64,6 +66,7 @@ type ServerDeps struct {
 	ConnReqSender          ConnectionRequester             // post-session wake: send CR when queue not empty
 	PostSessionWakeCfg     appconfig.PostSessionWakeConfig // post-session wake configuration
 	RedisClient            redis.Cmdable                   // Redis client for continuous wake counter
+	AccessSnapshotStore    AccessSnapshotStore             // shared authorization summary for ACS hot path
 	StunStore              *stun.Store                     // STUN address cache (shared with STUN server)
 	ProtocolLogger         *zap.Logger                     // dedicated logger for protocol XML (nil = disabled)
 	MaxBodySize            int                             // XML truncation threshold for protocol log (0 = no truncation)
@@ -89,6 +92,12 @@ type ServerDeps struct {
 
 // NewACSServer creates a new ACS server with all dependencies wired.
 func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
+	trustedProxyCIDRs := make([]netip.Prefix, 0, len(cfg.Server.TrustedProxyCIDRs))
+	for _, raw := range cfg.Server.TrustedProxyCIDRs {
+		if prefix, err := netip.ParsePrefix(strings.TrimSpace(raw)); err == nil {
+			trustedProxyCIDRs = append(trustedProxyCIDRs, prefix.Masked())
+		}
+	}
 	h := &Handler{
 		sessionStore:            deps.SessionStore,
 		taskService:             deps.TaskService,
@@ -110,6 +119,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		connReqSender:           deps.ConnReqSender,
 		postSessionWakeCfg:      deps.PostSessionWakeCfg,
 		redisClient:             deps.RedisClient,
+		accessSnapshots:         deps.AccessSnapshotStore,
 		onlineIndex:             newOnlineIndexFromRedis(deps.RedisClient),
 		stunStore:               deps.StunStore,
 		protocolLogger:          deps.ProtocolLogger,
@@ -122,6 +132,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		ueCountPolicy:           deps.UECountPolicy,
 		gpvFaultRecoverer:       deps.GPVFaultRecoverer,
 		durableReadbackEnabled:  deps.DurableReadbackEnabled,
+		trustedProxyCIDRs:       trustedProxyCIDRs,
 	}
 
 	mux := http.NewServeMux()

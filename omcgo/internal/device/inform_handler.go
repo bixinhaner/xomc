@@ -53,6 +53,10 @@ type InformEventPayload struct {
 	ParameterList []tr069.ParameterValueStruct `json:"parameter_list"`
 	CurrentTime   string                       `json:"current_time"`
 	RetryCount    int                          `json:"retry_count"`
+	RemoteIP      string                       `json:"remote_ip"`
+	Authenticated bool                         `json:"authenticated"`
+	AuthMethod    string                       `json:"auth_method"`
+	CredentialID  string                       `json:"credential_id"`
 }
 
 // InformHandler subscribes to device Inform events and routes them to DeviceService.
@@ -61,6 +65,7 @@ type InformHandler struct {
 	batchProcessor  *BatchInformProcessor
 	carrierRegistry *carrier.CarrierRegistry
 	defaultCarrier  model.CarrierCode
+	accessGate      AccessGate
 	groupAssigner   HeartbeatGroupAssigner // 兼容注入点；Periodic 不再触发，归组由领域事件负责
 	logger          *zap.Logger
 }
@@ -118,6 +123,12 @@ func (h *InformHandler) ackIfLicenseRejected(err error, sn, handler string) bool
 		zap.String("serial_number", sn),
 		zap.Error(err))
 	return true
+}
+
+// SetAccessGate installs the business admission check used before formal
+// registration and for reevaluating subsequent Inform sessions.
+func (h *InformHandler) SetAccessGate(gate AccessGate) {
+	h.accessGate = gate
 }
 
 // Subscribe registers event handlers on the event bus for device Inform events.
@@ -219,7 +230,7 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 	h.logger.Info("handleBootstrap: calling DeviceService.RegisterFromInform",
 		zap.String("serial_number", payload.DeviceId.SerialNumber))
 
-	registration, err := h.service.RegisterFromInformEvent(ctx, inform, carrierCode, evt.ID)
+	registration, admitted, err := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID)
 	if errors.Is(err, commonerrors.ErrNotFound) {
 		h.logger.Info("handleBootstrap: device is in recycle bin, skipping auto-register",
 			zap.String("serial_number", payload.DeviceId.SerialNumber),
@@ -235,6 +246,9 @@ func (h *InformHandler) handleBootstrap(ctx context.Context, evt event.Event) er
 			zap.String("serial_number", payload.DeviceId.SerialNumber),
 		)
 		return err
+	}
+	if !admitted {
+		return nil
 	}
 	device := registration.Device
 
@@ -300,7 +314,7 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 		if resolveErr != nil {
 			return fmt.Errorf("resolve reboot carrier: %w", resolveErr)
 		}
-		registration, regErr := h.service.RegisterFromInformEvent(ctx, inform, carrierCode, evt.ID)
+		registration, admitted, regErr := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID)
 		if errors.Is(regErr, commonerrors.ErrNotFound) {
 			h.logger.Info("handleRebootComplete: device is in recycle bin, skipping auto-register",
 				zap.String("serial_number", sn),
@@ -315,6 +329,9 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 				zap.Error(regErr), zap.String("serial_number", sn))
 			return regErr
 		}
+		if !admitted {
+			return nil
+		}
 		device = registration.Device
 		// First-time registration via reboot_complete path is equivalent to bootstrap;
 		// publish device.registered so ProvisioningEngine can route productClass and
@@ -327,6 +344,9 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 		preRebootSnapshot := *device
 		preRebootDevice = &preRebootSnapshot
 		preRebootRunTime = h.service.GetDevicePreRebootRunTime(ctx, device.ID)
+		if _, accessErr := h.evaluateInformAccess(ctx, payload, inform, device.Carrier, evt.ID); accessErr != nil {
+			return fmt.Errorf("evaluate reboot access: %w", accessErr)
+		}
 
 		// issue #212：收到 BOOT 即无条件强制驱动一次 "下线 → 上线" 翻转。
 		// 先把设备显式置离线（即便当前显示在线），再由紧随其后的 UpdateFromInform
@@ -391,7 +411,7 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 		if resolveErr != nil {
 			return fmt.Errorf("resolve periodic carrier: %w", resolveErr)
 		}
-		registration, regErr := h.service.RegisterFromInformEvent(ctx, inform, carrierCode, evt.ID)
+		registration, admitted, regErr := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID)
 		if errors.Is(regErr, commonerrors.ErrNotFound) {
 			h.logger.Info("handlePeriodic: device is in recycle bin, skipping auto-register",
 				zap.String("serial_number", sn),
@@ -406,6 +426,9 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 				zap.Error(regErr), zap.String("serial_number", sn))
 			return regErr
 		}
+		if !admitted {
+			return nil
+		}
 		registered := registration.Device
 		h.logger.Info("handlePeriodic: device auto-registered",
 			zap.String("device_id", registered.ID.String()),
@@ -418,6 +441,13 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 	}
 
 	// Step 3: Device exists → update
+	// Access state is evaluated independently from online/lifecycle state. A
+	// rejected result freezes protected tasks but does not falsify the heartbeat
+	// or force the formal device row offline.
+	if _, accessErr := h.evaluateInformAccess(ctx, payload, inform, device.Carrier, evt.ID); accessErr != nil {
+		return fmt.Errorf("evaluate periodic access: %w", accessErr)
+	}
+
 	// 如果启用了批量处理器，走异步批量路径
 	if h.batchProcessor != nil {
 		// T-0123 / T-0125 batch path 补完：在 prepareDeviceUpdate 覆盖字段前捕获旧值，
@@ -463,7 +493,7 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 		if resolveErr != nil {
 			return fmt.Errorf("resolve stale-cache carrier: %w", resolveErr)
 		}
-		registration, regErr := h.service.RegisterFromInformEvent(ctx, inform, carrierCode, evt.ID)
+		registration, admitted, regErr := h.registerFromInformIfAdmitted(ctx, payload, inform, carrierCode, evt.ID)
 		if errors.Is(regErr, commonerrors.ErrNotFound) {
 			h.logger.Info("handlePeriodic: recycle-bin device skipped during stale-cache fall-through",
 				zap.String("serial_number", sn),
@@ -478,6 +508,9 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 				zap.Error(regErr), zap.String("serial_number", sn))
 			return regErr
 		}
+		if !admitted {
+			return nil
+		}
 		if err := h.service.PublishDeviceRegistered(ctx, registration.Device, registration.Created, evt.ID); err != nil {
 			return fmt.Errorf("publish device.registered after stale-cache auto-register: %w", err)
 		}
@@ -488,6 +521,72 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber))
 	return nil
+}
+
+func (h *InformHandler) registerFromInformIfAdmitted(
+	ctx context.Context,
+	payload InformEventPayload,
+	inform *tr069.InformMessage,
+	carrierCode model.CarrierCode,
+	eventID string,
+) (*InformRegistration, bool, error) {
+	decision, err := h.evaluateInformAccess(ctx, payload, inform, carrierCode, eventID)
+	if err != nil {
+		return nil, false, fmt.Errorf("admit device inform: %w", err)
+	}
+	if !accessDecisionAllowsRegistration(decision) {
+		h.logger.Info("device inform held outside formal registration",
+			zap.String("serial_number", inform.DeviceId.SerialNumber),
+			zap.String("carrier", string(carrierCode)),
+			zap.String("decision_state", decision.State),
+			zap.String("reason_code", decision.ReasonCode),
+		)
+		return nil, false, nil
+	}
+
+	registration, err := h.service.RegisterFromInformEvent(ctx, inform, carrierCode, eventID)
+	if err != nil {
+		return nil, false, err
+	}
+	return registration, true, nil
+}
+
+func (h *InformHandler) evaluateInformAccess(
+	ctx context.Context,
+	payload InformEventPayload,
+	inform *tr069.InformMessage,
+	carrierCode model.CarrierCode,
+	eventID string,
+) (AccessDecision, error) {
+	if h.accessGate == nil {
+		return AccessDecision{State: AccessDecisionBypassed}, nil
+	}
+	return h.accessGate.Admit(ctx, AccessObservation{
+		Carrier:         carrierCode,
+		SerialNumber:    inform.DeviceId.SerialNumber,
+		OUI:             inform.DeviceId.OUI,
+		ProductClass:    inform.DeviceId.ProductClass,
+		SoftwareVersion: findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion"),
+		RemoteIP:        payload.RemoteIP,
+		Authenticated:   payload.Authenticated,
+		AuthMethod:      payload.AuthMethod,
+		CredentialID:    payload.CredentialID,
+		CarrierIdentityResolved: h.carrierIdentityResolved(
+			inform.DeviceId.OUI,
+			inform.DeviceId.ProductClass,
+			carrierCode,
+		),
+		Inform:  inform,
+		EventID: eventID,
+	})
+}
+
+func (h *InformHandler) carrierIdentityResolved(oui, productClass string, expected model.CarrierCode) bool {
+	if h.carrierRegistry == nil || strings.TrimSpace(string(expected)) == "" {
+		return false
+	}
+	resolved, err := h.carrierRegistry.ResolveByIdentity(oui, productClass)
+	return err == nil && resolved != "" && resolved == expected
 }
 
 // resolveCarrier resolves the carrier from the complete TR-069 device

@@ -26966,6 +26966,98 @@ INSERT INTO public.storage_protection_policies (
 )
 ON CONFLICT (target_type, target_id, write_scope) DO NOTHING;
 
+-- Device access control V1 management entry and button-level permissions.
+-- +omcgo MainReconcileBegin
+INSERT INTO public.menus (
+    id, name, type, permission_key, parent_id, sort_order, route_path,
+    component_path, icon, show_status, status, name_i18n
+) VALUES
+    ('da000001-0000-0000-0000-000000000001', '接入控制', 'menu', 'device:access-control',
+     '11111111-1111-1111-1111-111111111101', 6, '/device/access-control',
+     'device/AccessControl', 'SafetyCertificateOutlined', 'show', 'normal',
+     '{"en-US":"Access Control","zh-CN":"接入控制"}'::jsonb),
+    ('da000001-0000-0000-0000-000000000002', '名单维护', 'button', 'device:access-control:manage-list',
+     'da000001-0000-0000-0000-000000000001', 1, NULL, NULL, NULL, 'show', 'normal',
+     '{"en-US":"Manage Access Lists","zh-CN":"名单维护"}'::jsonb),
+    ('da000001-0000-0000-0000-000000000003', '候选审核', 'button', 'device:access-control:review',
+     'da000001-0000-0000-0000-000000000001', 2, NULL, NULL, NULL, 'show', 'normal',
+     '{"en-US":"Review Candidates","zh-CN":"候选审核"}'::jsonb),
+    ('da000001-0000-0000-0000-000000000004', 'RF 动作审批', 'button', 'device:access-control:action',
+     'da000001-0000-0000-0000-000000000001', 3, NULL, NULL, NULL, 'show', 'normal',
+     '{"en-US":"Approve RF Actions","zh-CN":"RF 动作审批"}'::jsonb),
+    ('da000001-0000-0000-0000-000000000005', '策略发布', 'button', 'device:access-control:publish',
+     'da000001-0000-0000-0000-000000000001', 4, NULL, NULL, NULL, 'show', 'normal',
+     '{"en-US":"Publish Policies","zh-CN":"策略发布"}'::jsonb),
+    ('da000001-0000-0000-0000-000000000006', '接入控制开关', 'button', 'device:access-control:settings',
+     'da000001-0000-0000-0000-000000000001', 5, NULL, NULL, NULL, 'show', 'normal',
+     '{"en-US":"Access-control Switch","zh-CN":"接入控制开关"}'::jsonb)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name, type = EXCLUDED.type, permission_key = EXCLUDED.permission_key,
+    parent_id = EXCLUDED.parent_id, sort_order = EXCLUDED.sort_order,
+    route_path = EXCLUDED.route_path, component_path = EXCLUDED.component_path,
+    icon = EXCLUDED.icon, show_status = EXCLUDED.show_status, status = EXCLUDED.status,
+    name_i18n = EXCLUDED.name_i18n, updated_at = NOW();
+
+INSERT INTO public.role_menus (role_id, menu_id)
+SELECT role_id, menu_id
+FROM (VALUES
+    ('10000000-0000-0000-0000-000000000001'::uuid, 'da000001-0000-0000-0000-000000000001'::uuid),
+    ('10000000-0000-0000-0000-000000000002'::uuid, 'da000001-0000-0000-0000-000000000001'::uuid),
+    ('10000000-0000-0000-0000-000000000003'::uuid, 'da000001-0000-0000-0000-000000000001'::uuid),
+    ('10000000-0000-0000-0000-000000000001'::uuid, 'da000001-0000-0000-0000-000000000002'::uuid),
+    ('10000000-0000-0000-0000-000000000001'::uuid, 'da000001-0000-0000-0000-000000000003'::uuid),
+    ('10000000-0000-0000-0000-000000000001'::uuid, 'da000001-0000-0000-0000-000000000004'::uuid),
+    ('10000000-0000-0000-0000-000000000001'::uuid, 'da000001-0000-0000-0000-000000000005'::uuid),
+    ('10000000-0000-0000-0000-000000000002'::uuid, 'da000001-0000-0000-0000-000000000002'::uuid),
+    ('10000000-0000-0000-0000-000000000002'::uuid, 'da000001-0000-0000-0000-000000000003'::uuid),
+    ('10000000-0000-0000-0000-000000000002'::uuid, 'da000001-0000-0000-0000-000000000004'::uuid),
+    ('10000000-0000-0000-0000-000000000002'::uuid, 'da000001-0000-0000-0000-000000000005'::uuid),
+    ('10000000-0000-0000-0000-000000000001'::uuid, 'da000001-0000-0000-0000-000000000006'::uuid),
+    ('10000000-0000-0000-0000-000000000002'::uuid, 'da000001-0000-0000-0000-000000000006'::uuid)
+) AS assignments(role_id, menu_id)
+ON CONFLICT (role_id, menu_id) DO NOTHING;
+
+INSERT INTO public.api_endpoints (
+    id, path, method, name, description, api_group, is_auto, created_at, updated_at, is_user_modified
+) VALUES
+    ('da000002-0000-0000-0000-000000000001', '/api/v1/device-access/policies/drafts', 'POST', 'POST /api/v1/device-access/policies/drafts', '创建接入策略草稿', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000002', '/api/v1/device-access/policies/:versionID/publish', 'POST', 'POST /api/v1/device-access/policies/:versionID/publish', '发布接入策略', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000003', '/api/v1/device-access/policies/:versionID', 'GET', 'GET /api/v1/device-access/policies/:versionID', '查询接入策略详情', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000004', '/api/v1/device-access/devices/:serialNumber/reevaluate', 'POST', 'POST /api/v1/device-access/devices/:serialNumber/reevaluate', '重新判定单设备', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000006', '/api/v1/device-access/access-list', 'POST', 'POST /api/v1/device-access/access-list', '维护接入名单', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000007', '/api/v1/device-access/states', 'GET', 'GET /api/v1/device-access/states', '查询接入状态', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000008', '/api/v1/device-access/states/:serialNumber', 'GET', 'GET /api/v1/device-access/states/:serialNumber', '查询接入决定详情', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000009', '/api/v1/device-access/policies', 'GET', 'GET /api/v1/device-access/policies', '查询策略版本', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000010', '/api/v1/device-access/access-list', 'GET', 'GET /api/v1/device-access/access-list', '查询接入名单', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000011', '/api/v1/device-access/candidates', 'GET', 'GET /api/v1/device-access/candidates', '查询候选设备', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000012', '/api/v1/device-access/candidates/:candidateID/review', 'POST', 'POST /api/v1/device-access/candidates/:candidateID/review', '审核候选设备', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000013', '/api/v1/device-access/actions', 'GET', 'GET /api/v1/device-access/actions', '查询 RF 动作', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000015', '/api/v1/device-access/actions/:actionID/retry', 'POST', 'POST /api/v1/device-access/actions/:actionID/retry', '重试 RF 动作', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000016', '/api/v1/device-access/policies/:versionID', 'DELETE', 'DELETE /api/v1/device-access/policies/:versionID', '删除未发布接入策略草稿', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000017', '/api/v1/device-access/settings', 'GET', 'GET /api/v1/device-access/settings', '查询接入控制业务开关', 'device-access', false, now(), now(), false),
+    ('da000002-0000-0000-0000-000000000018', '/api/v1/device-access/settings', 'PUT', 'PUT /api/v1/device-access/settings', '更新接入控制业务开关', 'device-access', false, now(), now(), false)
+ON CONFLICT (path, method) DO UPDATE SET
+    name = EXCLUDED.name, description = EXCLUDED.description, api_group = EXCLUDED.api_group,
+    is_auto = EXCLUDED.is_auto, updated_at = NOW();
+
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT role_id, endpoint_id
+FROM (VALUES
+    ('10000000-0000-0000-0000-000000000001'::uuid),
+    ('10000000-0000-0000-0000-000000000002'::uuid)
+) AS roles(role_id)
+CROSS JOIN (
+    SELECT id AS endpoint_id FROM public.api_endpoints WHERE api_group = 'device-access'
+) AS endpoints
+ON CONFLICT (role_id, endpoint_id) DO NOTHING;
+
+INSERT INTO public.role_api_permissions (role_id, endpoint_id)
+SELECT '10000000-0000-0000-0000-000000000003'::uuid, id
+FROM public.api_endpoints
+WHERE api_group = 'device-access' AND method = 'GET'
+ON CONFLICT (role_id, endpoint_id) DO NOTHING;
+-- +omcgo MainReconcileEnd
+
 -- Consolidated from the pre-release storage protection menu seed migration.
 INSERT INTO public.menus (
     id, name, type, permission_key, parent_id, sort_order, route_path,

@@ -24,8 +24,8 @@ type CompletionEventBridge struct {
 }
 
 // NewCompletionEventBridge 构造事件桥接。router 不能为 nil。
-// deduper 为 nil 时关闭幂等检查（NATS InterestPolicy 下重投会导致 ResultAggregator
-// 重复累加 → 上线 InterestPolicy 必须传非 nil）。
+// Completion projections must be idempotent themselves because their errors
+// are returned to NATS for redelivery; pre-consumption deduplication is unsafe.
 func NewCompletionEventBridge(logger *zap.Logger, router *CompletionRouter, deduper *event.Deduper) *CompletionEventBridge {
 	return &CompletionEventBridge{
 		router:  router,
@@ -49,9 +49,12 @@ func (b *CompletionEventBridge) Subscribe(bus event.EventBus) error {
 		event.SubjectTaskCompleted: "task-completion-bridge-completed",
 		event.SubjectTaskFailed:    "task-completion-bridge-failed",
 	}
+	// Completion projections participate in the durable NAK/retry contract.
+	// Do not pre-mark them with Deduper.Wrap: that wrapper intentionally skips a
+	// redelivery after the first handler failure.
 	handler := event.EventHandler(b.handle)
 	if b.deduper != nil {
-		handler = b.deduper.Wrap("task-completion-bridge", handler)
+		handler = b.deduper.WrapAfterSuccess("task-completion-bridge", handler)
 	}
 	for subject, queue := range subs {
 		if _, err := bus.QueueSubscribe(subject, queue, handler); err != nil {
@@ -73,8 +76,10 @@ func (b *CompletionEventBridge) handle(ctx context.Context, evt event.Event) err
 		b.logger.Warn("decode task event payload",
 			zap.String("subject", evt.Subject),
 			zap.Error(err))
-		return nil
+		return fmt.Errorf("decode task event payload: %w", err)
 	}
-	b.router.Dispatch(ctx, &t)
+	if err := b.router.DispatchReliable(ctx, &t); err != nil {
+		return fmt.Errorf("dispatch task completion: %w", err)
+	}
 	return nil
 }

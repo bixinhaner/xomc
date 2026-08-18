@@ -932,6 +932,9 @@ type ACSServerConfig struct {
 	MaxRequestBodySize int64 `mapstructure:"max_request_body_size"`
 	// MaxHeaderBytes 限制 HTTP 请求头总字节数。0 表示用默认 1MB（http.DefaultMaxHeaderBytes）。
 	MaxHeaderBytes int `mapstructure:"max_header_bytes"`
+	// TrustedProxyCIDRs 仅用于恢复受信 HTTP 网关转发的 CPE 来源地址。
+	// 留空时始终使用 TCP peer，防止直连 CPE 伪造转发头。
+	TrustedProxyCIDRs []string `mapstructure:"trusted_proxy_cidrs"`
 }
 
 // AppServerConfig 配置 App 服务的 HTTP/gRPC 监听参数。

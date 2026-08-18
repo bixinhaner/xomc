@@ -35,6 +35,28 @@ func Test_TaskSource_Constants(t *testing.T) {
 	assert.Equal(t, TaskSource("system"), TaskSourceSystem)
 }
 
+func TestAdmissionClassDefaultsToNormal(t *testing.T) {
+	task := NewTask(&CreateTaskRequest{DeviceSN: "SN-1", Method: "GetParameterValues"})
+	if task.AdmissionClass != AdmissionClassNormal {
+		t.Fatalf("default admission class = %q, want %q", task.AdmissionClass, AdmissionClassNormal)
+	}
+}
+
+func TestAdmissionClassPreservesProbeAndSecurityAction(t *testing.T) {
+	for _, admissionClass := range []AdmissionClass{AdmissionClassAccessProbe, AdmissionClassSecurityAction} {
+		t.Run(string(admissionClass), func(t *testing.T) {
+			task := NewTask(&CreateTaskRequest{
+				DeviceSN:       "SN-1",
+				Method:         "GetParameterValues",
+				AdmissionClass: admissionClass,
+			})
+			if task.AdmissionClass != admissionClass {
+				t.Fatalf("admission class = %q, want %q", task.AdmissionClass, admissionClass)
+			}
+		})
+	}
+}
+
 func Test_Task_JSONMarshal(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	task := &Task{
