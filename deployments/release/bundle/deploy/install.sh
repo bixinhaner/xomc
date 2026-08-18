@@ -347,6 +347,11 @@ install_log_retention_configs() {
   fi
 }
 
+NGINX_HTTPS_CERT_PACKAGE_DIR="deploy/nginx-cert"
+NGINX_HTTPS_CERT_HOST_DIR="/etc/nginx/cert"
+NGINX_HTTPS_CERT_NAME="cert.pem"
+NGINX_HTTPS_KEY_NAME="key.pem"
+
 nginx_https_cert_public_fingerprint() { # nginx_https_cert_public_fingerprint <cert|key> <path>
   local kind="$1" path="$2"
   case "$kind" in
@@ -356,31 +361,51 @@ nginx_https_cert_public_fingerprint() { # nginx_https_cert_public_fingerprint <c
   esac | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}'
 }
 
-precheck_nginx_https_cert() {
-  local cert="/etc/nginx/cert/cert.pem"
-  local key="/etc/nginx/cert/key.pem"
+validate_nginx_https_cert_pair() { # validate_nginx_https_cert_pair <cert> <key> <label-cn> <label-en>
+  local cert="$1" key="$2" label_cn="$3" label_en="$4"
   local cert_fp key_fp
 
-  [ "$SKIP_WEB" = 0 ] || return 0
-  if [ ! -e "$cert" ] && [ ! -e "$key" ]; then
-    warn "未放置 nginx HTTPS 文件入口证书，8443 将不启用；HTTP 8080 文件入口继续可用" "nginx HTTPS file-entry certificate files are not present; :8443 will be disabled and HTTP :8080 remains available"
-    return 0
-  fi
-  [ -f "$cert" ] || die "缺少 nginx HTTPS 文件入口证书：$cert；请补齐证书或同时移除证书/私钥以保持 HTTPS 未启用状态" "Missing nginx HTTPS file-entry certificate: $cert. Add the certificate or remove both certificate files to keep HTTPS disabled." 1
-  [ -f "$key" ] || die "缺少 nginx HTTPS 文件入口私钥：$key；请补齐匹配私钥或同时移除证书/私钥以保持 HTTPS 未启用状态" "Missing nginx HTTPS file-entry private key: $key. Add the matching private key or remove both certificate files to keep HTTPS disabled." 1
-  [ -r "$cert" ] || die "nginx HTTPS 文件入口证书不可读：$cert" "The nginx HTTPS file-entry certificate is not readable: $cert" 1
-  [ -r "$key" ] || die "nginx HTTPS 文件入口私钥不可读：$key" "The nginx HTTPS file-entry private key is not readable: $key" 1
+  [ -f "$cert" ] || die "缺少 ${label_cn}证书：$cert" "Missing ${label_en} certificate: $cert" 1
+  [ -f "$key" ] || die "缺少 ${label_cn}私钥：$key" "Missing ${label_en} private key: $key" 1
+  [ -r "$cert" ] || die "${label_cn}证书不可读：$cert" "The ${label_en} certificate is not readable: $cert" 1
+  [ -r "$key" ] || die "${label_cn}私钥不可读：$key" "The ${label_en} private key is not readable: $key" 1
   command -v openssl >/dev/null 2>&1 ||
-    die "缺少 openssl，无法校验证书与私钥是否匹配；请安装 openssl 后重试" "openssl is required to verify that the certificate and private key match; install openssl and retry." 1
+    die "缺少 openssl，无法校验 ${label_cn}证书与私钥是否匹配；请安装 openssl 后重试" "openssl is required to verify that the ${label_en} certificate and private key match; install openssl and retry." 1
 
   cert_fp="$(nginx_https_cert_public_fingerprint cert "$cert" 2>/dev/null)" ||
-    die "nginx HTTPS 文件入口证书解析失败：$cert" "Failed to parse the nginx HTTPS file-entry certificate: $cert" 1
+    die "${label_cn}证书解析失败：$cert" "Failed to parse the ${label_en} certificate: $cert" 1
   key_fp="$(nginx_https_cert_public_fingerprint key "$key" 2>/dev/null)" ||
-    die "nginx HTTPS 文件入口私钥解析失败：$key" "Failed to parse the nginx HTTPS file-entry private key: $key" 1
+    die "${label_cn}私钥解析失败：$key" "Failed to parse the ${label_en} private key: $key" 1
   [ -n "$cert_fp" ] && [ -n "$key_fp" ] && [ "$cert_fp" = "$key_fp" ] ||
-    die "nginx HTTPS 文件入口证书与私钥不匹配：$cert / $key" "The nginx HTTPS file-entry certificate and private key do not match: $cert / $key" 1
+    die "${label_cn}证书与私钥不匹配：$cert / $key" "The ${label_en} certificate and private key do not match: $cert / $key" 1
+}
 
-  log "nginx HTTPS 文件入口证书预检通过：$cert / $key" "nginx HTTPS file-entry certificate precheck passed: $cert / $key"
+precheck_nginx_https_cert() {
+  local cert="$PKG_ROOT/$NGINX_HTTPS_CERT_PACKAGE_DIR/$NGINX_HTTPS_CERT_NAME"
+  local key="$PKG_ROOT/$NGINX_HTTPS_CERT_PACKAGE_DIR/$NGINX_HTTPS_KEY_NAME"
+
+  [ "$SKIP_WEB" = 0 ] || return 0
+  validate_nginx_https_cert_pair "$cert" "$key" "发布包 nginx HTTPS 文件入口" "packaged nginx HTTPS file-entry"
+  log "发布包 nginx HTTPS 文件入口证书预检通过：$cert / $key" "Packaged nginx HTTPS file-entry certificate precheck passed: $cert / $key"
+}
+
+install_nginx_https_cert() {
+  local src_dir="$RELEASE_DIR/$NGINX_HTTPS_CERT_PACKAGE_DIR"
+  local src_cert="$src_dir/$NGINX_HTTPS_CERT_NAME"
+  local src_key="$src_dir/$NGINX_HTTPS_KEY_NAME"
+  local dst_cert="$NGINX_HTTPS_CERT_HOST_DIR/$NGINX_HTTPS_CERT_NAME"
+  local dst_key="$NGINX_HTTPS_CERT_HOST_DIR/$NGINX_HTTPS_KEY_NAME"
+
+  [ "$SKIP_WEB" = 0 ] || return 0
+  validate_nginx_https_cert_pair "$src_cert" "$src_key" "发布包 nginx HTTPS 文件入口" "packaged nginx HTTPS file-entry"
+  install -d -m 0755 "$NGINX_HTTPS_CERT_HOST_DIR" ||
+    die "创建 nginx HTTPS 文件入口证书目录失败：$NGINX_HTTPS_CERT_HOST_DIR" "Failed to create nginx HTTPS file-entry certificate directory: $NGINX_HTTPS_CERT_HOST_DIR" 1
+  install -m 0644 "$src_cert" "$dst_cert" ||
+    die "安装 nginx HTTPS 文件入口证书失败：$dst_cert" "Failed to install nginx HTTPS file-entry certificate: $dst_cert" 1
+  install -m 0600 "$src_key" "$dst_key" ||
+    die "安装 nginx HTTPS 文件入口私钥失败：$dst_key" "Failed to install nginx HTTPS file-entry private key: $dst_key" 1
+  validate_nginx_https_cert_pair "$dst_cert" "$dst_key" "宿主机 nginx HTTPS 文件入口" "host nginx HTTPS file-entry"
+  log "已安装 nginx HTTPS 文件入口证书：$dst_cert / $dst_key" "Installed nginx HTTPS file-entry certificate: $dst_cert / $dst_key"
 }
 
 fresh_install_reset() {
@@ -1172,6 +1197,8 @@ COMPOSE_FILES=( -f docker-compose.infra.yml -f docker-compose.app.yml )
 DC=( $COMPOSE -p "$COMPOSE_PROJECT" "${ENV_FILES[@]}" "${COMPOSE_FILES[@]}" )
 log "compose 命令：${DC[*]}" "Compose command: ${DC[*]}"
 
+install_nginx_https_cert
+
 APP_CID="$("${DC[@]}" ps -q app 2>/dev/null || true)"
 NATS_CID="$("${DC[@]}" ps -q nats 2>/dev/null || true)"
 APP_RUNNING=0
@@ -1700,6 +1727,7 @@ echo
 log "访问地址：" "Access URLs:"
 log "  · Web 管理界面：  http://<服务器IP>:8081   （运维浏览器登录）" "  · Web console: http://<server-ip>:8081 (operator login)"
 log "  · 基站 ACS URL：  http://<服务器IP>:8080   （TR-069，基站设备侧填，人不浏览）" "  · ACS URL for devices: http://<server-ip>:8080 (TR-069)"
+[ "$SKIP_WEB" = 1 ] || log "  · 基站 ACS HTTPS URL：https://<服务器IP>:8443/smallcell/AcsService" "  · ACS HTTPS URL for devices: https://<server-ip>:8443/smallcell/AcsService"
 log "  · MinIO Console：http://<服务器IP>:9001" "  · MinIO Console: http://<server-ip>:9001"
 [ "$SKIP_MONITORING" = 0 ] && log "  · Grafana：       http://<服务器IP>:3030   （宿主 3030 → 容器 3000）" "  · Grafana: http://<server-ip>:3030"
 log "  · 健康检查：       bash $OMC_ROOT/current/deploy/healthcheck.sh" "  · Health check: bash $OMC_ROOT/current/deploy/healthcheck.sh"

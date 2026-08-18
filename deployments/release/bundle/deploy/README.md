@@ -24,27 +24,55 @@ The web nginx container can publish a base-station file HTTPS entry on `:8443`.
 It terminates TLS with deployment-host files and forwards the request to the
 existing ACS HTTP file service.
 
-Host files required to enable `:8443`:
+Standard release packages must include these files:
+
+```bash
+deploy/nginx-cert/cert.pem
+deploy/nginx-cert/key.pem
+deploy/nginx-cert/source.txt
+```
+
+`build-release.sh` copies them from the private build input directory
+`deployments/release/private/nginx-cert/`. Override the source with
+`OMC_RELEASE_HTTPS_CERT_SOURCE_DIR=/path/to/nginx-cert` when the private assets
+come from another build context. `source.txt` must declare the old OMC source:
+
+```text
+cert.pem: root@172.21.175.129:/etc/nginx/cert/cert.pem
+key.pem: root@172.21.175.129:/etc/nginx/cert/key.pem
+```
+
+The private input directory is ignored by git; do not commit real certificates
+or private keys to the public source tree.
+
+During install, `deploy/install.sh` validates the packaged pair, installs it to
+the host, and fails before the web container starts if either file is missing,
+unreadable, unparsable, or the pair does not match:
 
 ```bash
 /etc/nginx/cert/cert.pem
 /etc/nginx/cert/key.pem
 ```
 
-If both files are absent, `:8443` stays disabled and HTTP `:8080` remains
-available. If only one file exists, either file is unreadable, or the pair does
-not match, the installer or nginx startup fails with an explicit error.
-Certificates and private keys are not shipped in the repository or release
-package.
+HTTP `:8080` remains available for upload and download compatibility, but the
+standard release/deploy path requires HTTPS `:8443` to be enabled. Do not use
+`install.sh --skip-web` for HTTPS 8443 acceptance, because that option
+intentionally skips web startup and certificate installation.
 
 Device-facing file URLs:
 
 ```bash
 https://<OMC_PUBLIC_HOST>:8443/smallcell/FileUploadService
 https://<OMC_PUBLIC_HOST>:8443/smallcell/FileDownloadService
+https://<OMC_PUBLIC_HOST>:8443/smallcell/AcsService
 ```
 
-HTTP `:8080` remains available for upload and download compatibility.
+The health check verifies `https://127.0.0.1:8443/healthz` and confirms
+`/smallcell/AcsService` reaches ACS through nginx on `:8443`.
+
+Final field acceptance still requires a real base station Inform through
+`https://<OMC_PUBLIC_HOST>:8443/smallcell/AcsService` and confirmation that the
+device online state or latest Inform time refreshes in the OMC UI.
 
 After the stack is running, verify a real upload/download loop:
 

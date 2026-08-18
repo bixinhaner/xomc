@@ -186,7 +186,6 @@ container_sysctl_equals() { # container_sysctl_equals <service> <key> <expected>
 WEB_NGINX_CONFIG=""
 WEB_NGINX_CONFIG_STATE=0
 WEB_HTTPS_CERT_STATE=0
-WEB_HTTPS_DISABLED_STATE=0
 web_nginx_config() {
   if [ "$WEB_NGINX_CONFIG_STATE" -eq 1 ]; then
     return 0
@@ -231,24 +230,11 @@ web_https_file_entry_has_cert() {
   return 1
 }
 
-web_https_file_entry_disabled() {
-  if [ "$WEB_HTTPS_DISABLED_STATE" -eq 1 ]; then
-    return 0
-  fi
-  if [ "$WEB_HTTPS_DISABLED_STATE" -eq 2 ]; then
-    return 1
-  fi
-  if container_exec web sh -c 'test ! -e /etc/nginx/cert/cert.pem && test ! -e /etc/nginx/cert/key.pem && test ! -e /etc/nginx/conf.d/https-file-entry.conf'; then
-    WEB_HTTPS_DISABLED_STATE=1
-    return 0
-  fi
-  WEB_HTTPS_DISABLED_STATE=2
-  return 1
-}
-
 check_web_https_file_entry() {
   local mode="${1:-startup}"
   if web_https_file_entry_has_cert; then
+    check "$(health_text 'HTTPS ACS /healthz (:8443)' 'HTTPS ACS /healthz (:8443)')" https_file_entry_status_is /healthz 200
+    check "$(health_text 'HTTPS ACS service 路径到达 ACS (:8443)' 'HTTPS ACS service path reaches ACS (:8443)')" https_file_entry_status_is /smallcell/AcsService 405
     if [ "$mode" = full ]; then
       check "$(health_text 'web HTTPS 文件入口已加载' 'web HTTPS file entry loaded')" web_https_file_entry_loaded
     else
@@ -256,7 +242,7 @@ check_web_https_file_entry() {
       check "$(health_text 'HTTPS 文件下载入口 TLS 可达 ACS (:8443)' 'HTTPS file download TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileDownloadService/__healthcheck__/missing 404
     fi
   else
-    check "$(health_text 'HTTPS 文件入口未启用且 HTTP 保持可用' 'HTTPS file entry disabled and HTTP remains available')" web_https_file_entry_disabled
+    check "$(health_text 'web HTTPS 文件入口证书已安装' 'web HTTPS file-entry certificate installed')" web_https_file_entry_has_cert
   fi
 }
 

@@ -3,6 +3,8 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 RELEASE_DEPLOY="$REPO_ROOT/deployments/release/bundle/deploy"
+BUILD_RELEASE="$REPO_ROOT/deployments/release/build-release.sh"
+GITIGNORE="$REPO_ROOT/.gitignore"
 NGINX_DEFAULT="$REPO_ROOT/deployments/docker/default.conf"
 ENTRYPOINT="$REPO_ROOT/deployments/docker/docker-entrypoint.d/10-enable-https-file-entry.sh"
 DEV_COMPOSE="$REPO_ROOT/deployments/docker/docker-compose.yml"
@@ -25,6 +27,17 @@ contains() {
 not_contains() {
   local name="$1" pattern="$2" file="$3"
   if grep -Fq -- "$pattern" "$file"; then bad "$name: $file must not contain [$pattern]"; else ok; fi
+}
+appears_before() {
+  local name="$1" first="$2" second="$3" file="$4"
+  local first_line second_line
+  first_line="$(grep -nF -- "$first" "$file" | head -1 | cut -d: -f1)"
+  second_line="$(grep -nF -- "$second" "$file" | head -1 | cut -d: -f1)"
+  if [ -n "$first_line" ] && [ -n "$second_line" ] && [ "$first_line" -lt "$second_line" ]; then
+    ok
+  else
+    bad "$name: [$first] must appear before [$second]"
+  fi
 }
 valid_bash() {
   local name="$1" file="$2"
@@ -81,8 +94,8 @@ trap cleanup EXIT
 missing_cert="$TMP/missing-cert.pem"
 missing_key="$TMP/missing-key.pem"
 out_conf="$TMP/https-file-entry.conf"
-expect_success "both certificate files absent keeps HTTPS disabled without breaking HTTP" env OMC_NGINX_HTTPS_CERT="$missing_cert" OMC_NGINX_HTTPS_KEY="$missing_key" OMC_NGINX_HTTPS_CONF="$out_conf" sh "$ENTRYPOINT"
-[ ! -e "$out_conf" ] && ok || bad "disabled HTTPS entrypoint must not generate 8443 config"
+expect_success "container entrypoint keeps local HTTP-only startup when both certificate files are absent" env OMC_NGINX_HTTPS_CERT="$missing_cert" OMC_NGINX_HTTPS_KEY="$missing_key" OMC_NGINX_HTTPS_CONF="$out_conf" sh "$ENTRYPOINT"
+[ ! -e "$out_conf" ] && ok || bad "local HTTP-only entrypoint compatibility must not generate 8443 config"
 
 if command -v openssl >/dev/null 2>&1; then
   cert_a="$TMP/cert-a.pem"; key_a="$TMP/key-a.pem"
@@ -95,6 +108,22 @@ if command -v openssl >/dev/null 2>&1; then
   expect_fail "unparseable certificate fails startup" env OMC_NGINX_HTTPS_CERT="$TMP/bad-cert.pem" OMC_NGINX_HTTPS_KEY="$key_a" OMC_NGINX_HTTPS_CONF="$out_conf" sh "$ENTRYPOINT"
 	  expect_success "valid certificate pair generates HTTPS config" env OMC_NGINX_HTTPS_CERT="$cert_a" OMC_NGINX_HTTPS_KEY="$key_a" OMC_NGINX_HTTPS_CONF="$out_conf" sh "$ENTRYPOINT"
 	  contains "generated config listens on 8443" "listen 8443 ssl;" "$out_conf"
+	  release_cert_dir="$TMP/release-nginx-cert"
+	  mkdir -p "$release_cert_dir"
+	  cp "$cert_a" "$release_cert_dir/cert.pem"
+	  cp "$key_a" "$release_cert_dir/key.pem"
+	  cat >"$release_cert_dir/source.txt" <<'EOF'
+cert.pem: root@172.21.175.129:/etc/nginx/cert/cert.pem
+key.pem: root@172.21.175.129:/etc/nginx/cert/key.pem
+EOF
+	  expect_success "release build accepts a valid private certificate asset input directory" env OMC_RELEASE_HTTPS_CERT_SOURCE_DIR="$release_cert_dir" bash "$BUILD_RELEASE" --verify-https-cert-assets-only
+	  expect_fail "release build rejects a missing private certificate asset input directory" env OMC_RELEASE_HTTPS_CERT_SOURCE_DIR="$TMP/missing-release-nginx-cert" bash "$BUILD_RELEASE" --verify-https-cert-assets-only
+	  mv "$release_cert_dir/source.txt" "$release_cert_dir/source.txt.bak"
+	  expect_fail "release build rejects private certificate assets without old-OMC source proof" env OMC_RELEASE_HTTPS_CERT_SOURCE_DIR="$release_cert_dir" bash "$BUILD_RELEASE" --verify-https-cert-assets-only
+	  mv "$release_cert_dir/source.txt.bak" "$release_cert_dir/source.txt"
+	  cp "$key_b" "$release_cert_dir/key.pem"
+	  expect_fail "release build rejects mismatched private certificate assets" env OMC_RELEASE_HTTPS_CERT_SOURCE_DIR="$release_cert_dir" bash "$BUILD_RELEASE" --verify-https-cert-assets-only
+	  cp "$key_a" "$release_cert_dir/key.pem"
 	  if command -v python3 >/dev/null 2>&1; then
 	    fixture_py="$TMP/file-entry-fixture.py"
 	    ports_file="$TMP/file-entry-ports"
@@ -187,17 +216,31 @@ PY
 	fi
 
 echo "-- install and healthcheck guards --"
+valid_bash "build release script" "$BUILD_RELEASE"
 valid_bash "install script" "$INSTALL"
 valid_bash "healthcheck script" "$HEALTHCHECK"
 valid_bash "real file-entry smoke script" "$SMOKE"
-contains "install prechecks missing certificate" "Missing nginx HTTPS file-entry certificate" "$INSTALL"
-contains "install prechecks missing private key" "Missing nginx HTTPS file-entry private key" "$INSTALL"
-contains "install checks certificate/key match" "nginx HTTPS 文件入口证书与私钥不匹配" "$INSTALL"
-contains "install keeps HTTP when HTTPS certificate is absent" "HTTP 8080 文件入口继续可用" "$INSTALL"
+contains "release build uses private certificate input path" "deployments/release/private/nginx-cert" "$BUILD_RELEASE"
+contains "release build supports private certificate input override" "OMC_RELEASE_HTTPS_CERT_SOURCE_DIR" "$BUILD_RELEASE"
+contains "release build requires old OMC certificate source proof" "source.txt" "$BUILD_RELEASE"
+contains "release build pins old OMC cert source" "root@172.21.175.129:/etc/nginx/cert/cert.pem" "$BUILD_RELEASE"
+contains "release build pins old OMC key source" "root@172.21.175.129:/etc/nginx/cert/key.pem" "$BUILD_RELEASE"
+contains "release build copies certificate assets into package" "copy_release_https_cert_assets" "$BUILD_RELEASE"
+contains "release build packages fixed certificate path" "deploy/nginx-cert" "$BUILD_RELEASE"
+contains "gitignore blocks private release certificate assets" "deployments/release/private/" "$GITIGNORE"
+contains "install prechecks packaged certificate" "Packaged nginx HTTPS file-entry certificate precheck passed" "$INSTALL"
+contains "install installs packaged certificate to host" "install_nginx_https_cert" "$INSTALL"
+appears_before "install installs HTTPS certificate before web container startup" "install_nginx_https_cert" '"${DC[@]}" up --pull never -d' "$INSTALL"
+contains "install writes host certificate path" "/etc/nginx/cert" "$INSTALL"
+contains "install writes host private key with restrictive mode" "install -m 0600" "$INSTALL"
+contains "install checks certificate/key match" "证书与私钥不匹配" "$INSTALL"
+not_contains "install must not allow missing certificate as release success" "8443 将不启用" "$INSTALL"
 contains "healthcheck verifies nginx 8443 config" "web_https_file_entry_loaded" "$HEALTHCHECK"
 contains "healthcheck requires every nginx 8443 config token" "grep -Fq 'listen 8443 ssl;' &&" "$HEALTHCHECK"
-contains "healthcheck accepts disabled HTTPS entry" "web_https_file_entry_disabled" "$HEALTHCHECK"
+contains "healthcheck requires installed HTTPS certificate" "web HTTPS file-entry certificate installed" "$HEALTHCHECK"
 contains "healthcheck tolerates nginx formatting whitespace" "tr -s '[:space:]' ' '" "$HEALTHCHECK"
+contains "healthcheck verifies HTTPS ACS healthz" "https_file_entry_status_is /healthz 200" "$HEALTHCHECK"
+contains "healthcheck verifies HTTPS ACS service path" "https_file_entry_status_is /smallcell/AcsService 405" "$HEALTHCHECK"
 contains "healthcheck verifies upload TLS reaches ACS" "https_file_entry_status_is /smallcell/FileUploadService 405" "$HEALTHCHECK"
 contains "healthcheck verifies download TLS reaches ACS" "https_file_entry_status_is /smallcell/FileDownloadService/__healthcheck__/missing 404" "$HEALTHCHECK"
 contains "healthcheck supports explicit real smoke" "--file-entry-smoke" "$HEALTHCHECK"
@@ -211,13 +254,21 @@ contains "smoke compares downloaded content" "cmp -s" "$SMOKE"
 contains "smoke uses ACS download bucket path" "/smallcell/FileDownloadService/logs/" "$SMOKE"
 
 echo "-- release README operator contract --"
+contains "README documents packaged certificate path" "deploy/nginx-cert/cert.pem" "$README"
+contains "README documents packaged source proof path" "deploy/nginx-cert/source.txt" "$README"
+contains "README documents private asset input path" "deployments/release/private/nginx-cert/" "$README"
+contains "README documents old OMC certificate source" "root@172.21.175.129:/etc/nginx/cert/cert.pem" "$README"
 contains "README documents certificate path" "/etc/nginx/cert/cert.pem" "$README"
 contains "README documents private-key path" "/etc/nginx/cert/key.pem" "$README"
-contains "README documents absent certificate behavior" 'If both files are absent, `:8443` stays disabled' "$README"
-contains "README documents HTTP compatibility when HTTPS disabled" 'available. If only one file exists' "$README"
+contains "README documents install-time certificate copy" "installs it to" "$README"
+contains "README documents missing certificate as failure" "fails before the web container starts" "$README"
+contains "README documents skip-web is not valid for HTTPS 8443 acceptance" "Do not use" "$README"
 contains "README documents HTTPS upload URL" "https://<OMC_PUBLIC_HOST>:8443/smallcell/FileUploadService" "$README"
 contains "README documents HTTPS download URL" "https://<OMC_PUBLIC_HOST>:8443/smallcell/FileDownloadService" "$README"
+contains "README documents HTTPS ACS service URL" "https://<OMC_PUBLIC_HOST>:8443/smallcell/AcsService" "$README"
+contains "README documents real base-station final acceptance" "real base station Inform" "$README"
 contains "README states HTTP compatibility" 'HTTP `:8080` remains available' "$README"
+contains "README documents 8443 healthz check" "https://127.0.0.1:8443/healthz" "$README"
 contains "README documents smoke command" "smoke-nginx-https-file-entry.sh" "$README"
 
 echo "Results: PASS=$PASS FAIL=$FAIL"

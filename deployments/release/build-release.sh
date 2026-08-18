@@ -38,6 +38,59 @@ source "$SCRIPT_DIR/release.conf"
 log()  { echo -e "\033[1;32m[release]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[release][警告]\033[0m $*" >&2; }
 die()  { echo -e "\033[1;31m[release][错误]\033[0m $*" >&2; exit 1; }
+RELEASE_HTTPS_CERT_SOURCE_DIR="${OMC_RELEASE_HTTPS_CERT_SOURCE_DIR:-$REPO_ROOT/deployments/release/private/nginx-cert}"
+RELEASE_HTTPS_CERT_PACKAGE_DIR="deploy/nginx-cert"
+RELEASE_HTTPS_CERT_SOURCE_PROOF="source.txt"
+RELEASE_HTTPS_CERT_EXPECTED_CERT_SOURCE="root@172.21.175.129:/etc/nginx/cert/cert.pem"
+RELEASE_HTTPS_CERT_EXPECTED_KEY_SOURCE="root@172.21.175.129:/etc/nginx/cert/key.pem"
+
+release_https_cert_public_fingerprint() { # release_https_cert_public_fingerprint <cert|key> <path>
+  local kind="$1" path="$2"
+  case "$kind" in
+    cert) openssl x509 -in "$path" -pubkey -noout ;;
+    key)  openssl pkey -in "$path" -pubout ;;
+    *) return 1 ;;
+  esac | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}'
+}
+
+validate_release_https_cert_assets() { # validate_release_https_cert_assets <dir>
+  local dir="$1" cert key source_proof cert_fp key_fp
+  cert="$dir/cert.pem"
+  key="$dir/key.pem"
+  source_proof="$dir/$RELEASE_HTTPS_CERT_SOURCE_PROOF"
+
+  [ -d "$dir" ] ||
+    die "缺少 OMC HTTPS 8443 证书资产目录：$dir
+      请从老 OMC /etc/nginx/cert/ 或私有构建上下文放入 cert.pem/key.pem/source.txt；
+      也可用 OMC_RELEASE_HTTPS_CERT_SOURCE_DIR 指定固定私有资产目录。"
+  [ -f "$cert" ] || die "缺少 OMC HTTPS 8443 证书资产：$cert"
+  [ -f "$key" ] || die "缺少 OMC HTTPS 8443 私钥资产：$key"
+  [ -f "$source_proof" ] || die "缺少 OMC HTTPS 8443 证书来源声明：$source_proof"
+  [ -r "$cert" ] || die "OMC HTTPS 8443 证书资产不可读：$cert"
+  [ -r "$key" ] || die "OMC HTTPS 8443 私钥资产不可读：$key"
+  grep -Fqx "cert.pem: $RELEASE_HTTPS_CERT_EXPECTED_CERT_SOURCE" "$source_proof" ||
+    die "OMC HTTPS 8443 证书来源声明不匹配：$source_proof 必须包含 cert.pem: $RELEASE_HTTPS_CERT_EXPECTED_CERT_SOURCE"
+  grep -Fqx "key.pem: $RELEASE_HTTPS_CERT_EXPECTED_KEY_SOURCE" "$source_proof" ||
+    die "OMC HTTPS 8443 私钥来源声明不匹配：$source_proof 必须包含 key.pem: $RELEASE_HTTPS_CERT_EXPECTED_KEY_SOURCE"
+  command -v openssl >/dev/null 2>&1 ||
+    die "缺少 openssl，无法校验 OMC HTTPS 8443 证书与私钥是否匹配"
+
+  cert_fp="$(release_https_cert_public_fingerprint cert "$cert" 2>/dev/null)" ||
+    die "OMC HTTPS 8443 证书资产解析失败：$cert"
+  key_fp="$(release_https_cert_public_fingerprint key "$key" 2>/dev/null)" ||
+    die "OMC HTTPS 8443 私钥资产解析失败：$key"
+  [ -n "$cert_fp" ] && [ -n "$key_fp" ] && [ "$cert_fp" = "$key_fp" ] ||
+    die "OMC HTTPS 8443 证书与私钥不匹配：$cert / $key"
+}
+
+copy_release_https_cert_assets() { # copy_release_https_cert_assets <stage>
+  local stage="$1" dst="$stage/$RELEASE_HTTPS_CERT_PACKAGE_DIR"
+  mkdir -p "$dst"
+  install -m 0644 "$RELEASE_HTTPS_CERT_SOURCE_DIR/cert.pem" "$dst/cert.pem"
+  install -m 0600 "$RELEASE_HTTPS_CERT_SOURCE_DIR/key.pem" "$dst/key.pem"
+  install -m 0644 "$RELEASE_HTTPS_CERT_SOURCE_DIR/$RELEASE_HTTPS_CERT_SOURCE_PROOF" "$dst/$RELEASE_HTTPS_CERT_SOURCE_PROOF"
+}
+
 # 使用构建机当地时间，并保留时区偏移（例如 +08:00），避免与版本目录中的
 # 本地时间戳（YYYYMMDD-HHMM）相差数小时。%z 同时兼容 GNU/Linux 与 BSD/macOS。
 iso_time() {
@@ -51,12 +104,14 @@ iso_time() {
 VERSION=""
 CHANNEL="${RELEASE_CHANNEL:-test}"
 VERIFY_ONLY=0
+VERIFY_HTTPS_CERT_ASSETS_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -v|--version) VERSION="$2"; shift 2 ;;
     --channel)    CHANNEL="$2"; shift 2 ;;
     --arch)       ARCHES="$2"; shift 2 ;;
     --verify-only) VERIFY_ONLY=1; shift ;;
+    --verify-https-cert-assets-only) VERIFY_HTTPS_CERT_ASSETS_ONLY=1; shift ;;
     -h|--help)    sed -n '3,26p' "$0"; exit 0 ;;
     *)            die "未知参数：$1（-h 查看用法）" ;;
   esac
@@ -73,6 +128,13 @@ for _a in $ARCHES; do
         如确实需要 arm64：见 release.conf 中关于 架构支持 的注释,
         改 ARCHES + 移除本脚本的校验后自行验证。"
 done
+
+if [ "$VERIFY_HTTPS_CERT_ASSETS_ONLY" = 1 ]; then
+  command -v sha256sum >/dev/null 2>&1 || die "缺少构建工具：sha256sum"
+  validate_release_https_cert_assets "$RELEASE_HTTPS_CERT_SOURCE_DIR"
+  log "OMC HTTPS 8443 证书资产校验通过：$RELEASE_HTTPS_CERT_SOURCE_DIR"
+  exit 0
+fi
 
 log "运行发布前回归门禁 ..."
 RELEASE_VERIFY_SCRIPTS=(
@@ -101,6 +163,8 @@ fi
 for tool in docker tar sha256sum; do
   command -v "$tool" >/dev/null 2>&1 || die "缺少构建工具：$tool"
 done
+validate_release_https_cert_assets "$RELEASE_HTTPS_CERT_SOURCE_DIR"
+log "OMC HTTPS 8443 证书资产：$RELEASE_HTTPS_CERT_SOURCE_DIR → $RELEASE_HTTPS_CERT_PACKAGE_DIR"
 if ! docker info >/dev/null 2>&1; then
   die "docker 不可用：当前用户可能不在 docker 组。请执行：
       sudo usermod -aG docker \$USER && newgrp docker   （或重新登录）
@@ -227,6 +291,7 @@ for ARCH in $ARCHES; do
   cp -r "$REPO_ROOT/deployments/monitoring" "$STAGE/deploy/monitoring"
   cp "$REPO_ROOT/deployments/docker/nginx.conf"   "$STAGE/deploy/nginx.conf"
   cp "$REPO_ROOT/deployments/docker/default.conf" "$STAGE/deploy/default.conf"
+  copy_release_https_cert_assets "$STAGE"
 
   # 关键：强制 world-read。cp 不带 -p 时会按构建机 umask 写入 mode，
   # 若 umask=027 则配置文件落 0640，prometheus/loki/tempo/alertmanager 等
@@ -331,6 +396,9 @@ EOF
 文件 + 配置模板 + 迁移 / 字典 / Casbin（可挂载覆盖）+ 监控栈配置 + 运维脚本。
 Docker 引擎、compose v2 二进制、基础镜像在【独立的基础设施包 omc-infra-*】里——
 首次部署需先用基础设施包装好 Docker / Compose、导入基础镜像，再部署本包。
+包内 \`deploy/nginx-cert/cert.pem\` 与 \`deploy/nginx-cert/key.pem\` 会由
+\`deploy/install.sh\` 自动安装到宿主机 \`/etc/nginx/cert/\`，用于启用基站
+HTTPS 8443 ACS 入口。
 
 部署步骤见 \`docs/OMC内网离线部署手册（运维侧）.md\`。先校验完整性：
 \`\`\`bash
