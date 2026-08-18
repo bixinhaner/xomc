@@ -55,7 +55,7 @@ func TestBackfillDefaultFileProfileGroupsAlignsLegacyFormatOnce(t *testing.T) {
 		}},
 	}}
 
-	if !backfillDefaultFileProfileGroups(groups, defaults, true) {
+	if !backfillDefaultFileProfileGroups(groups, defaults, true, false) {
 		t.Fatal("expected legacy format alignment to report a change")
 	}
 	if groups[0].Format != FormatXML || groups[0].Objects[0].Profile != legacyCMCPXMLProfile {
@@ -72,11 +72,62 @@ func TestBackfillDefaultFileProfileGroupsAlignsLegacyFormatOnce(t *testing.T) {
 			Profile: legacyCMCPCSVProfile,
 		}},
 	}}
-	if backfillDefaultFileProfileGroups(groups, defaults, false) {
+	if backfillDefaultFileProfileGroups(groups, defaults, false, false) {
 		t.Fatal("did not expect a second legacy format alignment after marker is present")
 	}
 	if groups[0].Format != FormatCSV || groups[0].Objects[0].Profile != legacyCMCPCSVProfile {
 		t.Fatalf("marked profiles should preserve user-selected format: %#v", groups[0])
+	}
+}
+
+func TestBackfillDefaultFileProfileGroupsAddsPMTechnologyPathForLegacyDefaults(t *testing.T) {
+	defaults := map[string]FileGroup{
+		"pm-pc-60m-lte": {
+			ID:           "pm-pc-60m-lte",
+			Domain:       DomainPM,
+			Format:       FormatCSV,
+			PathTemplate: pathPMTech,
+		},
+		"pm-pc-60m-gsm": {
+			ID:           "pm-pc-60m-gsm",
+			Domain:       DomainPM,
+			Format:       FormatCSV,
+			PathTemplate: pathPMTech,
+		},
+		"pm-pc-60m-gnb": {
+			ID:           "pm-pc-60m-gnb",
+			Domain:       DomainPM,
+			Format:       FormatCSV,
+			PathTemplate: pathPMTech,
+		},
+		"pm-custom": {
+			ID:           "pm-custom",
+			Domain:       DomainPM,
+			Format:       FormatCSV,
+			PathTemplate: pathPMTech,
+		},
+	}
+	groups := []FileGroup{
+		{ID: "pm-pc-60m-lte", Domain: DomainPM, Format: FormatCSV, PathTemplate: pathPM},
+		{ID: "pm-pc-60m-gsm", Domain: DomainPM, Format: FormatCSV, PathTemplate: pathPM},
+		{ID: "pm-pc-60m-gnb", Domain: DomainPM, Format: FormatCSV, PathTemplate: pathPM + "GNB/"},
+		{ID: "pm-custom", Domain: DomainPM, Format: FormatCSV, PathTemplate: "/operator/PM/#DateTime#/"},
+	}
+
+	if !backfillDefaultFileProfileGroups(groups, defaults, false, true) {
+		t.Fatal("expected PM technology path alignment to report a change")
+	}
+	for _, index := range []int{0, 1, 2} {
+		if groups[index].PathTemplate != pathPMTech {
+			t.Fatalf("group %s path = %s, want %s", groups[index].ID, groups[index].PathTemplate, pathPMTech)
+		}
+	}
+	if groups[3].PathTemplate != "/operator/PM/#DateTime#/" {
+		t.Fatalf("custom PM path should be preserved: %s", groups[3].PathTemplate)
+	}
+
+	if backfillDefaultFileProfileGroups(groups, defaults, false, false) {
+		t.Fatal("did not expect PM technology path alignment after marker is present")
 	}
 }
 

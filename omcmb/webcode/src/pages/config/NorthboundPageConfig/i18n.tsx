@@ -64,6 +64,7 @@ const exactEn: Record<string, string> = {
   '摘要': 'Summary',
   '目标/内容': 'Target / Content',
   '目标/地址': 'Target / Address',
+  '对象/制式': 'Object / Technology',
   '目标名称': 'Target Name',
   '地址': 'Address',
   '结果摘要': 'Result Summary',

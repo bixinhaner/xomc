@@ -2146,6 +2146,7 @@ func TestDefaultPMFileProfilesResolveDictionaryFieldsForEveryScenario(t *testing
 				continue
 			}
 			require.Empty(t, group.SelectedFields, "%s/%s default PM group should not pin non-system metric IDs", profile.Code, group.ID)
+			require.Contains(t, group.PathTemplate, "#Tech#", "%s/%s default PM group should separate ENB/GNB/GSM directories", profile.Code, group.ID)
 			for _, object := range group.Objects {
 				baseFields := catalog.Fields(FieldFilter{
 					Domain:     group.Domain,
@@ -2243,6 +2244,50 @@ func TestRunFileProfileWithNoPMDataMarksNoArtifact(t *testing.T) {
 	require.Empty(t, archive.puts)
 }
 
+func TestRunFileProfileIsolatesPMTechnologyFailureAndArchivePaths(t *testing.T) {
+	repo := newFakeRepository()
+	repo.pmFieldsByCombo = map[string][]FieldDefinition{
+		pmFieldComboKey("PC", "LTE"): {pmTestMetricField("PC", "LTE", "C001")},
+		pmFieldComboKey("PC", "GNB"): {pmTestMetricField("PC", "GNB", "C001")},
+	}
+	repo.fileProfiles = []FileProfile{
+		fileProfile("S9335", "PM technology isolation", "Custom", "Custom", []string{"custom"}, []FileGroup{
+			group("pm-lte", DomainPM, FormatCSV, Period60M, 25, pathPMTech, namePM, []ScenarioObject{{Code: "PC", Tech: "LTE"}}),
+			group("pm-gsm", DomainPM, FormatCSV, Period60M, 20, pathPMTech, namePM, []ScenarioObject{{Code: "PC", Tech: "GSM", Profile: "pm.pc.gsm.pmresult.csv.v1"}}),
+			group("pm-gnb", DomainPM, FormatCSV, Period60M, 30, pathPMTech, namePM, []ScenarioObject{{Code: "PC", Tech: "GNB", Profile: "pm.pc.gnb.csv.v1"}}),
+		}),
+	}
+	archive := &fakeLocalArchiveStore{bucket: "northbound"}
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+	svc.SetLocalArchive(archive, LocalArchiveOptions{RetentionDays: 7})
+	windowEnd := time.Date(2026, 8, 13, 17, 0, 0, 0, time.UTC)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S9335", RunProfileRequest{
+		WindowEnd: &windowEnd,
+		Limit:     1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 3)
+	runsByGroup := map[string]FileRun{}
+	for _, run := range resp.Items {
+		runsByGroup[run.GroupID] = run
+	}
+	require.Equal(t, RunStatusSuccess, runsByGroup["pm-lte"].Status)
+	require.Equal(t, RunStatusFailed, runsByGroup["pm-gsm"].Status)
+	require.Equal(t, RunStatusSuccess, runsByGroup["pm-gnb"].Status)
+	require.Contains(t, runsByGroup["pm-lte"].ArtifactPath, "/PM/ENB/20260813170000/")
+	require.Contains(t, runsByGroup["pm-gsm"].ArtifactPath, "/PM/GSM/20260813170000/")
+	require.Contains(t, runsByGroup["pm-gnb"].ArtifactPath, "/PM/GNB/20260813170000/")
+	require.Equal(t, "eNB", runsByGroup["pm-lte"].Summary["technology_label"])
+	require.Equal(t, "GSM", runsByGroup["pm-gsm"].Summary["technology_label"])
+	require.Equal(t, "gNB", runsByGroup["pm-gnb"].Summary["technology_label"])
+	require.Contains(t, runsByGroup["pm-gsm"].ErrorMessage, "no supported fields")
+	require.Len(t, archive.puts, 2)
+	require.Contains(t, archive.puts[0].Key, "/pm-lte/ENB/")
+	require.Contains(t, archive.puts[1].Key, "/pm-gnb/GNB/")
+}
+
 func TestCSVCommaAcceptsTabAliases(t *testing.T) {
 	for _, separator := range []string{"\t", `\t`, "tab", "Tab"} {
 		comma, ok := csvComma(separator)
@@ -2325,7 +2370,7 @@ func TestRunFileProfileUsesConfiguredHostAndFlatArchivePath(t *testing.T) {
 	require.Len(t, resp.Items, 1)
 	require.Len(t, archive.puts, 1)
 	require.Equal(t, "Baicells-PC-172.24.224.251-1.0-20260813170000-15.csv.zip", resp.Items[0].ArtifactName)
-	require.Equal(t, resp.Items[0].CreatedAt.Local().Format("2006-01-02")+"/S0001/pm-15m/Baicells-PC-172.24.224.251-1.0-20260813170000-15.csv.zip", archive.puts[0].Key)
+	require.Equal(t, resp.Items[0].CreatedAt.Local().Format("2006-01-02")+"/S0001/pm-15m/ENB/Baicells-PC-172.24.224.251-1.0-20260813170000-15.csv.zip", archive.puts[0].Key)
 	require.Equal(t, int64(len(archive.puts[0].Content)), resp.Items[0].ArtifactSize)
 	require.NotContains(t, archive.puts[0].Key, resp.Items[0].ID)
 	require.NotContains(t, archive.puts[0].Key, "127.0.0.1")
@@ -2744,6 +2789,49 @@ func TestRunDueSchedulesTreatsNoArtifactWindowAsComplete(t *testing.T) {
 	require.Equal(t, 0, summary.Due)
 	require.Equal(t, 0, summary.Ran)
 	require.Len(t, repo.runs, 1)
+}
+
+func TestScheduleWindowStatsDistinguishesPMTechnologyObjects(t *testing.T) {
+	windowEnd := time.Date(2026, 8, 4, 10, 0, 0, 0, time.Local)
+	runs := []FileRun{
+		{
+			ID:         "lte",
+			GroupID:    "pm-multi",
+			Domain:     DomainPM,
+			ObjectCode: "PC",
+			Status:     RunStatusSuccess,
+			WindowEnd:  timePtr(windowEnd),
+			Summary:    map[string]any{"trigger_reason": runTriggerAuto, "technology": "LTE", "technology_directory": "ENB"},
+		},
+		{
+			ID:         "gsm",
+			GroupID:    "pm-multi",
+			Domain:     DomainPM,
+			ObjectCode: "PC",
+			Status:     RunStatusTerminated,
+			WindowEnd:  timePtr(windowEnd),
+			Summary:    map[string]any{"trigger_reason": runTriggerAuto, "technology": "GSM", "technology_directory": "GSM", "no_artifact": true},
+		},
+		{
+			ID:         "gnb",
+			GroupID:    "pm-multi",
+			Domain:     DomainPM,
+			ObjectCode: "PC",
+			Status:     RunStatusSuccess,
+			WindowEnd:  timePtr(windowEnd),
+			Summary:    map[string]any{"trigger_reason": runTriggerAuto, "technology": "GNB", "technology_directory": "GNB"},
+		},
+	}
+
+	stats := scheduleWindowStatsByEnd(runs, scheduleUnit{
+		Kind:        ProfileKindFile,
+		ProfileCode: "S9335",
+		GroupID:     "pm-multi",
+		Period:      Period60M,
+		ObjectCount: 3,
+	}, time.Local)
+
+	require.Equal(t, 3, stats[scheduleWindowKey(windowEnd)].successCount)
 }
 
 func TestListAndDownloadRun(t *testing.T) {

@@ -27,6 +27,7 @@ var supportedTemplateTokens = map[string]struct{}{
 	"#DataVersion#":     {},
 	"#DataPeriod#":      {},
 	"#Object#":          {},
+	"#Tech#":            {},
 	"#ModuleType#":      {},
 	"#eNBID#":           {},
 	"#Ri#":              {},
@@ -124,6 +125,12 @@ func buildLogFileGroupPreviewWithLocalHost(group FileGroup, localHost string) Fi
 func previewTokenValues(group FileGroup, localHost string) map[string]string {
 	objectCode := previewObjectCode(group)
 	localHost = configuredLocalHostToken(localHost)
+	tech := ""
+	if len(group.Objects) > 0 {
+		if code := runObjectTechnologyCode(group.Domain, group.Objects[0]); code != "" {
+			tech = technologyDirectoryName(code)
+		}
+	}
 	return map[string]string{
 		"#FTPRoot#":         "northupload",
 		"#Province#":        "GD",
@@ -136,6 +143,7 @@ func previewTokenValues(group FileGroup, localHost string) map[string]string {
 		"#DataVersion#":     "1.0",
 		"#DataPeriod#":      previewDataPeriod(group.Period),
 		"#Object#":          objectCode,
+		"#Tech#":            tech,
 		"#ModuleType#":      objectCode,
 		"#eNBID#":           "100001",
 		"#Ri#":              "1",
