@@ -21,8 +21,10 @@
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator"/>
     <param name="DLEarfcn" titleZh="频点" titleEn="EARFCN"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL"/>
-    <param name="DLBandWidth" titleZh="带宽" titleEn="Bandwidth"
+    <param name="DLBandWidth" titleZh="下行带宽" titleEn="DL Bandwidth"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"/>
+    <param name="ULBandWidth" titleZh="上行带宽" titleEn="UL Bandwidth"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth"/>
     <param name="SubFrameAssignment" titleZh="子帧配比" titleEn="SubFrame Assignment"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment"/>
     <param name="SpecialSubFramePatterns" titleZh="特殊子帧配置" titleEn="Special SubFrame Patterns"

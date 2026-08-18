@@ -828,7 +828,7 @@ func TestCompilePolicyParametersAcceptsCurrentBaiBNQWorkbookWithProductMappings(
 	assert.Equal(t, "46000", byPath["Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.PLMNList.1.PLMNID"])
 }
 
-func TestCompilePolicyParametersUsesProductEnumValuesForLegacyLTEBandwidth(t *testing.T) {
+func TestCompilePolicyParametersUsesProductLTEBandwidthValueAndMirrorsUplink(t *testing.T) {
 	registry := quicksettings.NewRegistry()
 	loader := quicksettings.NewLoader(
 		appconfig.QuickSettingsLoaderConfig{Directory: "quicksettings"},
@@ -839,6 +839,8 @@ func TestCompilePolicyParametersUsesProductEnumValuesForLegacyLTEBandwidth(t *te
 
 	values := "25,50,75,100"
 	labels := "CELL_BW_25(5M),CELL_BW_50(10M),CELL_BW_75(15M),CELL_BW_100(20M)"
+	dlPath := "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"
+	ulPath := "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth"
 	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
 		"paramConfigList":[{"serialNumber":"BLQ-001","bandWidth":"n50"}]
 	}`)}
@@ -847,15 +849,63 @@ func TestCompilePolicyParametersUsesProductEnumValuesForLegacyLTEBandwidth(t *te
 		&model.Device{SerialNumber: "BLQ-001", Technology: model.TechLTE},
 		"BLQ",
 		registry.GetByParamModel("BLQ"),
-		[]parammodel.ParamMapping{{
-			StandardPath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth",
-			EntryType:    "parameter", Access: "READ_WRITE", DataType: "INT", IsSupported: true,
-			EnumValues: &values, EnumLabels: &labels,
-		}},
+		[]parammodel.ParamMapping{
+			{
+				StandardPath: dlPath, EntryType: "parameter", Access: "READ_WRITE",
+				DataType: "U_INT", IsSupported: true, EnumValues: &values, EnumLabels: &labels,
+				MirrorWith: &ulPath,
+			},
+			{
+				StandardPath: ulPath, EntryType: "parameter", Access: "READ_WRITE",
+				DataType: "U_INT", IsSupported: true, EnumValues: &values, EnumLabels: &labels,
+				MirrorWith: &dlPath,
+			},
+		},
 	)
 	require.NoError(t, err)
-	require.Len(t, got.Parameters, 1)
-	assert.Equal(t, "50", got.Parameters[0].Value)
+	require.Len(t, got.Parameters, 2)
+	assert.Equal(t, []ResolvedParameter{
+		{ParameterID: dlPath, TRPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth", Value: "50", Source: "page", SourceLocation: "paramConfigList[0].bandWidth"},
+		{ParameterID: "ULBandWidth", TRPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ULBandwidth", Value: "50", Source: "page", SourceLocation: "paramConfigList[0].bandWidth (mirrored)"},
+	}, got.Parameters)
+}
+
+func TestCompilePolicyParametersResolvesConcreteMirrorTargetThroughGenericDefinition(t *testing.T) {
+	const genericUL = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth"
+	const concreteDL = "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth"
+	const concreteUL = "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ULBandwidth"
+	concreteULMirror := concreteUL
+	values := "25,50,75,100"
+	labels := "CELL_BW_25(5M),CELL_BW_50(10M),CELL_BW_75(15M),CELL_BW_100(20M)"
+	policy := &PlugAndPlayPolicy{SelfConfigEnabled: true, Config: []byte(`{
+		"paramConfigList":[{
+			"serialNumber":"LTE-CONCRETE-MIRROR-001",
+			"sheetParameters":{"CELL":[{"Bandwidth":"50"}]},
+			"workbookMappings":[{"sheet":"CELL","header":"Bandwidth","trPath":"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth"}]
+		}]
+	}`)}
+
+	got, err := CompilePolicyParametersWithMappings(
+		policy,
+		&model.Device{SerialNumber: "LTE-CONCRETE-MIRROR-001", Technology: model.TechLTE},
+		"BLQ",
+		nil,
+		[]parammodel.ParamMapping{
+			{
+				StandardPath: concreteDL, EntryType: "parameter", Access: "READ_WRITE",
+				DataType: "U_INT", IsSupported: true, EnumValues: &values, EnumLabels: &labels,
+				MirrorWith: &concreteULMirror,
+			},
+			{
+				StandardPath: genericUL, EntryType: "parameter", Access: "READ_WRITE",
+				DataType: "U_INT", IsSupported: true, EnumValues: &values, EnumLabels: &labels,
+			},
+		},
+	)
+	require.NoError(t, err)
+	require.Len(t, got.Parameters, 2)
+	assert.Equal(t, concreteDL, got.Parameters[0].TRPath)
+	assert.Equal(t, concreteUL, got.Parameters[1].TRPath)
 }
 
 func TestCompilePolicyParametersAcceptsMLNDefaultWorkbookSynchronizationMode(t *testing.T) {

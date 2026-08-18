@@ -31,6 +31,7 @@ type compiledPolicyConfig struct {
 type parameterDefinition struct {
 	ID          string
 	Template    string
+	MirrorWith  string
 	Type        string
 	Required    bool
 	Readonly    bool
@@ -411,8 +412,12 @@ func buildParameterDefinitions(
 			continue
 		}
 		name := parameterLeaf(template)
+		mirrorWith := ""
+		if mapping.MirrorWith != nil {
+			mirrorWith = strings.TrimSpace(*mapping.MirrorWith)
+		}
 		definitions[template] = parameterDefinition{
-			ID: name, Template: template, Type: mapping.DataType,
+			ID: name, Template: template, MirrorWith: mirrorWith, Type: mapping.DataType,
 			Readonly: strings.EqualFold(mapping.Access, "READ_ONLY") ||
 				strings.EqualFold(mapping.Access, "readonly"),
 			MinValue: mapping.MinValue, MaxValue: mapping.MaxValue,
@@ -440,8 +445,7 @@ func buildParameterDefinitions(
 			if productDefinition, exists := definitions[definitionKey]; exists {
 				// Product mappings describe the device wire contract. Quick settings
 				// may add presentation metadata, but must not replace product-specific
-				// types, ranges or enum wire values (for example BLQ uses 50 while
-				// ENB_DEFAULT uses n50 for the same LTE bandwidth path).
+				// types, ranges, enum wire values, or cross-field constraints.
 				if productDefinition.Type != "" {
 					definition.Type = productDefinition.Type
 				}
@@ -455,6 +459,7 @@ func buildParameterDefinitions(
 				if len(productDefinition.EnumOptions) > 0 {
 					definition.EnumOptions = productDefinition.EnumOptions
 				}
+				definition.MirrorWith = productDefinition.MirrorWith
 			}
 			definitions[definitionKey] = definition
 			addKey(keysByName, param.Name, definitionKey)
@@ -838,9 +843,70 @@ func compileValue(
 	if err != nil {
 		return &ConfigValidationError{Message: fmt.Sprintf("%s at %s: %v", id, location, err)}
 	}
-	return putResolved(compiled, ResolvedParameter{
+	if err := putResolved(compiled, ResolvedParameter{
 		ParameterID: id, TRPath: path, Value: value, Source: source, SourceLocation: location,
+	}); err != nil {
+		return err
+	}
+	if definition.MirrorWith == "" {
+		return nil
+	}
+	mirrorDefinition, exists := resolveMirrorDefinition(
+		definition.MirrorWith, cellIndex, listIndex, networkType, definitions,
+	)
+	if !exists {
+		return &ConfigValidationError{Message: fmt.Sprintf(
+			"%s at %s: mirrored parameter is not registered: %s", id, location, definition.MirrorWith)}
+	}
+	if mirrorDefinition.Readonly {
+		return &ConfigValidationError{Message: fmt.Sprintf(
+			"%s at %s: mirrored parameter is read-only: %s", id, location, definition.MirrorWith)}
+	}
+	mirrorValue, err := convertParameterValue(raw, mirrorDefinition)
+	if err != nil {
+		return &ConfigValidationError{Message: fmt.Sprintf(
+			"%s at %s: mirrored parameter %s: %v", id, location, definition.MirrorWith, err)}
+	}
+	mirrorPath, err := resolveInstancePath(
+		mirrorDefinition.Template, cellIndex, listIndex, networkType,
+	)
+	if err != nil {
+		return &ConfigValidationError{Message: fmt.Sprintf(
+			"%s at %s: mirrored parameter %s: %v", id, location, definition.MirrorWith, err)}
+	}
+	return putResolved(compiled, ResolvedParameter{
+		ParameterID: mirrorDefinition.ID,
+		TRPath:      mirrorPath, Value: mirrorValue, Source: source,
+		SourceLocation: location + " (mirrored)",
 	})
+}
+
+func resolveMirrorDefinition(
+	targetPath string,
+	cellIndex, listIndex int,
+	networkType string,
+	definitions map[string]parameterDefinition,
+) (parameterDefinition, bool) {
+	if definition, exists := definitions[targetPath]; exists {
+		return definition, true
+	}
+
+	keys := make([]string, 0, len(definitions))
+	for key := range definitions {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		definition := definitions[key]
+		if !strings.Contains(definition.Template, "{i}") {
+			continue
+		}
+		resolved, err := resolveInstancePath(definition.Template, cellIndex, listIndex, networkType)
+		if err == nil && resolved == targetPath {
+			return definition, true
+		}
+	}
+	return parameterDefinition{}, false
 }
 
 func isDeviceMatchOnlyParameter(path string) bool {

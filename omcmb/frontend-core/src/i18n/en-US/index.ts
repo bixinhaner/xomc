@@ -1507,6 +1507,8 @@ const messages: Record<string, string> = {
   'device.quickSettings.hintBm':           '(BM: cellModeIdx={mode}(GSM/LTE) · {tech} currently has {count} enabled)',
   'device.quickSettings.hintLte':          '(shown by {path}={configured} · {count} cells total)',
   'device.quickSettings.hintFap':          '(showing FAPService instances actually present on device · {count} total)',
+  'device.quickSettings.lteBandwidthHint': 'Configure DL and UL bandwidth separately. In TDD mode, the two values must match.',
+  'device.quickSettings.lteBandwidthMismatch': 'DL and UL bandwidth must match',
   'device.quickSettings.hintNr':           "(enumerated by Device.Services.FAPService.1.CellConfig.'{'i'}'. · {count} cells total)",
   'device.quickSettings.hintBsc':          "(enumerated by DeviceGSM.Bts.'{'i'}'. · {count} BTS instance(s) total)",
   'device.quickSettings.btsAdd':           'Add BTS',

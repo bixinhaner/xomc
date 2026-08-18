@@ -1509,6 +1509,8 @@ const messages: Record<string, string> = {
   'device.quickSettings.hintBm':           '(BM: cellModeIdx={mode}(GSM/LTE) · 当前{tech}已启用 {count} 个)',
   'device.quickSettings.hintLte':          '(按 {path}={configured} 显示 · 共 {count} 个小区)',
   'device.quickSettings.hintFap':          '(显示设备上实际存在的 FAPService 实例 · 共 {count} 个)',
+  'device.quickSettings.lteBandwidthHint': '请分别配置下行带宽和上行带宽；TDD 模式下两者需保持一致。',
+  'device.quickSettings.lteBandwidthMismatch': '上下行带宽需保持一致',
   'device.quickSettings.hintNr':           "(按 Device.Services.FAPService.1.CellConfig.'{'i'}'. 枚举 · 共 {count} 个小区)",
   'device.quickSettings.hintBsc':          "(按 DeviceGSM.Bts.'{'i'}'. 枚举 · 共 {count} 个 BTS 实例)",
   'device.quickSettings.btsAdd':           '新增 BTS',

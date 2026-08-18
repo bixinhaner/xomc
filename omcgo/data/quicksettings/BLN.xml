@@ -7,8 +7,10 @@
   <group id="enb-cell" titleZh="小区参数" titleEn="Cell Parameters">
     <param name="BandIndicator" titleZh="频段标识" titleEn="Band"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator"/>
-    <param name="DLBandWidth" titleZh="带宽" titleEn="Bandwidth"
+    <param name="DLBandWidth" titleZh="下行带宽" titleEn="DL Bandwidth"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"/>
+    <param name="ULBandWidth" titleZh="上行带宽" titleEn="UL Bandwidth"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth"/>
     <param name="DLEarfcn" titleZh="频点" titleEn="EARFCN"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL"/>
     <param name="ULEarfcn" titleZh="频点(UL)" titleEn="EARFCN UL"
