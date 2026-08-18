@@ -416,6 +416,12 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 			return nil, fmt.Errorf("LST: no usable sub_fields (selected=%d, total=%d)",
 				len(stmt.SelectedSubFieldIDs), len(subFields))
 		}
+		// 查询实例留空时，多个叶子会折叠成同一个对象前缀。保留折叠前的标准路径，
+		// 供任务历史重建结果列时只展示用户实际勾选的叶子，而不是对象下全部参数。
+		selectedStandardPaths := paramRefTR069Paths(refs)
+		if len(selectedStandardPaths) > 0 {
+			entry["selected_standard_paths"] = selectedStandardPaths
+		}
 		applyQueryInstanceSelectorsToRefs(refs, stmt.InstanceSelectors)
 		entry["rpc_method"] = "GetParameterValues"
 		entry["param_refs"] = refs
@@ -677,6 +683,23 @@ func indexParamsByID(refs []MMLParamRef) map[uuid.UUID]MMLParamRef {
 		out[ref.ID] = ref
 	}
 	return out
+}
+
+func paramRefTR069Paths(refs []MMLParamRef) []string {
+	paths := make([]string, 0, len(refs))
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		path := strings.TrimSpace(ref.Tr069Path)
+		if path == "" {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	return paths
 }
 
 func stringMapToInterface(m map[string]string) map[string]interface{} {

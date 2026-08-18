@@ -136,6 +136,27 @@ describe('parseMmlDeviceTaskResult', () => {
     }, { maxParams: 2 })?.params).toHaveLength(2);
   });
 
+  it('GPV → 先按调用方条件过滤，再应用 maxParams', () => {
+    const values = [
+      ...Array.from({ length: 85 }, (_v, i) => ({ name: `Device.Noise.${i}`, value: `n${i}` })),
+      { name: 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth', value: '100' },
+      { name: 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ULBandwidth', value: '100' },
+    ];
+    const got = parseMmlDeviceTaskResult({
+      method: 'GetParameterValuesResponse',
+      raw_response: gpvSample,
+      standard_parameter_values: values,
+    }, {
+      maxParams: 80,
+      includeParam: (param) => param.name.endsWith('Bandwidth'),
+    });
+
+    expect(got?.params).toEqual([
+      { name: 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth', value: '100', type: undefined },
+      { name: 'Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.ULBandwidth', value: '100', type: undefined },
+    ]);
+  });
+
   it('SPV Status=0 → 立即生效', () => {
     const got = parseMmlDeviceTaskResult({
       method: 'SetParameterValuesResponse',

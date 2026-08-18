@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<standardModel totalPaths="2001" totalObjects="16" totalParams="1985">
+<standardModel totalPaths="2007" totalObjects="16" totalParams="1991">
     <objects>
         <object standardPath="Device.DeviceInfo.EU." access="READ_ONLY" changeApplies="Immediate"/>
         <object standardPath="Device.DeviceInfo.EU.{i}.RU." access="READ_ONLY" changeApplies="Immediate"/>
@@ -1542,6 +1542,7 @@
         <param standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PowerMaxLimit" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PowerMinLimit" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PowerModify" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
+        <param standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.CellEnable.AdminState" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.{i}" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.{i}.5QI" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.{i}.AllowedIntegrityAlgo" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>

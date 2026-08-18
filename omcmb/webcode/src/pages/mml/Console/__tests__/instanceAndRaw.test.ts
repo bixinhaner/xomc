@@ -252,6 +252,21 @@ describe('buildStandardQueryColumns', () => {
       { key: 'c0', path: 'Device.A.1.B.' },
     ]);
   });
+
+  it('多个选中叶子折叠为对象查询时保留全部原始 Path 模板', () => {
+    const paths = [
+      'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth',
+      'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth',
+    ];
+    const command = cmd('LST', paths.map((value) => path(value)));
+
+    expect(buildStandardQueryColumns(command, paths, { i01: '' })).toEqual([
+      expect.objectContaining({
+        path: 'Device.Services.FAPService.',
+        selectedPathTemplates: paths,
+      }),
+    ]);
+  });
 });
 
 describe('buildPerPathStatementPaths', () => {

@@ -276,6 +276,8 @@ export interface MMLTaskCommandDetail {
   commandName?: string;
   operationType?: MMLOperationType | string;
   paramPaths?: string[];
+  /** 实例留空导致叶子折叠为对象前缀前，用户实际勾选的标准路径模板。 */
+  selectedStandardPaths?: string[];
   /** 参数引用的命令码与 TR-069 path 对应关系；结构化 MOD 的 parameters 以命令码为 key。 */
   paramRefs?: Array<{ paramCode?: string; tr069Path?: string }>;
   /** MOD 操作的下发值；与 paramPaths 同序对应 */

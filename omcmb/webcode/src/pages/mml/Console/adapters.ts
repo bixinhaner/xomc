@@ -20,7 +20,10 @@ import type {
   MMLTask,
   MMLTaskCommandDetail,
 } from '@core/types/mml';
-import { parseMmlDeviceTaskResult } from '@core/utils/mmlResultParser';
+import {
+  parseMmlDeviceTaskResult,
+  type ParseMmlResultOptions,
+} from '@core/utils/mmlResultParser';
 import { isReadOp } from './constants';
 import type {
   CommandItem,
@@ -45,8 +48,6 @@ export const PATH_TASK_FAILED_FALLBACK = '__MML_PATH_TASK_FAILED__';
 export const PARTIAL_PATH_FAILED_FALLBACK = '__MML_PARTIAL_PATH_FAILED__';
 export const DISPATCH_FAILED_FALLBACK = '__MML_DISPATCH_FAILED__';
 export const READBACK_FAILED_FALLBACK = '__MML_READBACK_FAILED__';
-export const MAX_OBJECT_PATH_COLUMNS = 80;
-const CONSOLE_PARSE_OPTIONS = { maxParams: MAX_OBJECT_PATH_COLUMNS };
 
 /** 真实设备 → 设备弹框行视图。 */
 export function mapDeviceToItem(d: Device): DeviceItem {
@@ -193,6 +194,52 @@ export function buildColumnsFromRawPaths(paths: string[]): ResultColumn[] {
     .map((path, idx) => ({ key: `c${idx}`, label: leafName(path), path }));
 }
 
+function templateDescendsFromResolvedPath(template: string, resolvedPath: string): boolean {
+  const templateSegments = template.split('.').filter(Boolean);
+  const resolvedSegments = resolvedPath.split('.').filter(Boolean);
+  if (templateSegments.length <= resolvedSegments.length) return false;
+  return resolvedSegments.every((segment, index) => {
+    const templateSegment = templateSegments[index];
+    return templateSegment === '{i}' ? /^\d+$/.test(segment) : templateSegment === segment;
+  });
+}
+
+function buildTaskResultColumns(details: MMLTaskCommandDetail[]): ResultColumn[] {
+  const byPath = new Map<string, ResultColumn>();
+  details.forEach((detail) => {
+    const selectedTemplates = detail.selectedStandardPaths ?? [];
+    (detail.paramPaths ?? []).forEach((rawPath) => {
+      const path = rawPath.trim();
+      if (!path) return;
+      const existing = byPath.get(path);
+      const matchingTemplates = path.endsWith('.')
+        ? selectedTemplates.filter((template) => (
+            !template.endsWith('.')
+            && !template.endsWith('{i}')
+            && templateDescendsFromResolvedPath(template, path)
+          ))
+        : [];
+      if (!existing) {
+        byPath.set(path, {
+          key: `c${byPath.size}`,
+          label: leafName(path),
+          path,
+          ...(matchingTemplates.length > 0
+            ? { selectedPathTemplates: [...new Set(matchingTemplates)] }
+            : {}),
+        });
+        return;
+      }
+      if (matchingTemplates.length > 0) {
+        existing.selectedPathTemplates = [
+          ...new Set([...(existing.selectedPathTemplates ?? []), ...matchingTemplates]),
+        ];
+      }
+    });
+  });
+  return [...byPath.values()];
+}
+
 // ── 执行入参构造（设计 §3.12.2）────────────────────────────────────────────────
 
 const SUPPORTED_OPS: ReadonlySet<string> = new Set(['LST', 'MOD', 'ADD', 'RMV']);
@@ -327,17 +374,40 @@ export function buildStandardQueryColumns(
   checkedPaths: string[],
   instanceSelectors?: Record<string, string>,
 ): ResultColumn[] {
-  const seen = new Set<string>();
-  return buildColumns(command, checkedPaths)
-    .map((column) => ({
-      ...column,
-      path: resolveQueryPath(column.path, instanceSelectors),
-    }))
-    .filter((column) => {
-      if (seen.has(column.path)) return false;
-      seen.add(column.path);
-      return true;
-    });
+  const paramsByPath = new Map(command.paramPaths.map((param) => [param.path, param]));
+  const byResolvedPath = new Map<string, ResultColumn>();
+  for (const column of buildColumns(command, checkedPaths)) {
+    const originalPath = column.path;
+    const resolvedPath = resolveQueryPath(originalPath, instanceSelectors);
+    const sourceParam = paramsByPath.get(originalPath);
+    const selectedPathTemplates = resolvedPath.endsWith('.')
+      && resolvedPath !== originalPath
+      && !sourceParam?.isObject
+      ? [originalPath]
+      : undefined;
+    const existing = byResolvedPath.get(resolvedPath);
+    if (!existing) {
+      byResolvedPath.set(resolvedPath, {
+        ...column,
+        path: resolvedPath,
+        ...(selectedPathTemplates ? { selectedPathTemplates } : {}),
+      });
+      continue;
+    }
+
+    // 同一对象前缀可能由多个叶子折叠而来，必须合并所有原始选择；如果其中一项本身
+    // 是显式对象查询，则不设过滤模板，保留“展示全部后代”的对象查询语义。
+    if (!selectedPathTemplates) {
+      delete existing.selectedPathTemplates;
+      continue;
+    }
+    if (existing.selectedPathTemplates) {
+      existing.selectedPathTemplates = [
+        ...new Set([...existing.selectedPathTemplates, ...selectedPathTemplates]),
+      ];
+    }
+  }
+  return [...byResolvedPath.values()];
 }
 
 /**
@@ -448,6 +518,128 @@ function leafName(path: string): string {
   return path.split('.').filter(Boolean).pop() ?? path;
 }
 
+function pathMatchesTemplate(path: string, template: string): boolean {
+  const pathSegments = path.split('.').filter(Boolean);
+  const templateSegments = template.split('.').filter(Boolean);
+  if (pathSegments.length !== templateSegments.length) return false;
+  return templateSegments.every((segment, index) => (
+    segment === '{i}' ? /^\d+$/.test(pathSegments[index] ?? '') : segment === pathSegments[index]
+  ));
+}
+
+function resultPathMatchesColumn(path: string, column: ResultColumn): boolean {
+  if (!column.path.endsWith('.')) {
+    return path === column.path || leafName(path) === leafName(column.path);
+  }
+  if (path === column.path || !path.startsWith(column.path)) return false;
+  const templates = column.selectedPathTemplates;
+  return !templates?.length || templates.some((template) => pathMatchesTemplate(path, template));
+}
+
+function objectDescendantLabel(path: string, column: ResultColumn): string {
+  const baseLabel = leafName(path);
+  const pathSegments = path.split('.').filter(Boolean);
+  const prefixSegments = column.path.split('.').filter(Boolean);
+  const matchingTemplate = column.selectedPathTemplates?.find(
+    (template) => pathMatchesTemplate(path, template),
+  );
+  const contexts: string[] = [];
+
+  if (matchingTemplate) {
+    const templateSegments = matchingTemplate.split('.').filter(Boolean);
+    for (let index = prefixSegments.length; index < templateSegments.length; index += 1) {
+      if (templateSegments[index] !== '{i}' || !/^\d+$/.test(pathSegments[index] ?? '')) continue;
+      const objectName = templateSegments[index - 1];
+      if (objectName && objectName !== '{i}') {
+        contexts.push(`${objectName}.${pathSegments[index]}`);
+      }
+    }
+  } else {
+    // 显式对象查询没有原始叶子模板，按返回 PATH 中“对象名.数字实例”的结构兜底提取。
+    let objectName = prefixSegments[prefixSegments.length - 1];
+    for (let index = prefixSegments.length; index < pathSegments.length - 1; index += 1) {
+      const segment = pathSegments[index];
+      if (/^\d+$/.test(segment)) {
+        if (objectName) contexts.push(`${objectName}.${segment}`);
+      } else {
+        objectName = segment;
+      }
+    }
+  }
+
+  return contexts.length > 0 ? `${baseLabel} [${contexts.join('/')}]` : baseLabel;
+}
+
+function objectInstanceSortKey(path: string, column: ResultColumn): number[] {
+  const pathSegments = path.split('.').filter(Boolean);
+  const prefixLength = column.path.split('.').filter(Boolean).length;
+  const matchingTemplate = column.selectedPathTemplates?.find(
+    (template) => pathMatchesTemplate(path, template),
+  );
+
+  if (matchingTemplate) {
+    const templateSegments = matchingTemplate.split('.').filter(Boolean);
+    return templateSegments.flatMap((segment, index) => (
+      index >= prefixLength && segment === '{i}' && /^\d+$/.test(pathSegments[index] ?? '')
+        ? [Number(pathSegments[index])]
+        : []
+    ));
+  }
+
+  // 显式对象查询没有原始叶子模板：对象前缀之后的数字段均视为动态实例层级。
+  return pathSegments.slice(prefixLength, -1).flatMap((segment) => (
+    /^\d+$/.test(segment) ? [Number(segment)] : []
+  ));
+}
+
+function compareInstanceSortKeys(left: number[], right: number[]): number {
+  const levels = Math.max(left.length, right.length);
+  for (let index = 0; index < levels; index += 1) {
+    const leftValue = left[index];
+    const rightValue = right[index];
+    if (leftValue === undefined) return -1;
+    if (rightValue === undefined) return 1;
+    if (leftValue !== rightValue) return leftValue - rightValue;
+  }
+  return 0;
+}
+
+function sortObjectDescendantPaths(paths: string[], column: ResultColumn): string[] {
+  const templateOrder = (path: string): number => {
+    const index = column.selectedPathTemplates?.findIndex(
+      (template) => pathMatchesTemplate(path, template),
+    ) ?? -1;
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  };
+
+  return paths
+    .map((path, originalIndex) => ({
+      path,
+      originalIndex,
+      instanceSortKey: objectInstanceSortKey(path, column),
+    }))
+    .sort((left, right) => {
+      const instanceDifference = compareInstanceSortKeys(
+        left.instanceSortKey,
+        right.instanceSortKey,
+      );
+      if (instanceDifference) return instanceDifference;
+
+      const templateDifference = templateOrder(left.path) - templateOrder(right.path);
+      return templateDifference || left.originalIndex - right.originalIndex;
+    })
+    .map(({ path }) => path);
+}
+
+function parseOptionsForColumns(columns: ResultColumn[]): ParseMmlResultOptions {
+  if (!columns.some((column) => column.selectedPathTemplates?.length)) {
+    return {};
+  }
+  return {
+    includeParam: (param) => columns.some((column) => resultPathMatchesColumn(param.name, column)),
+  };
+}
+
 /**
  * GPV partial path（以 `.` 结尾）会返回该对象下的多个叶子参数。控制台初始列只有
  * 用户输入的对象路径，因此要用设备实际返回并保存在 cells 中的叶子路径替换该占位列。
@@ -460,7 +652,6 @@ export function expandObjectPathColumns(
   const expanded: ResultColumn[] = [];
   const emittedPaths = new Set<string>();
   const expandedDescendantPaths = new Set<string>();
-  let objectPathColumnCount = 0;
   for (const column of columns) {
     if (!column.path.endsWith('.')) {
       if (emittedPaths.has(column.path)) continue;
@@ -470,16 +661,14 @@ export function expandObjectPathColumns(
     }
 
     const descendantPaths: string[] = [];
+    const seenDescendantPaths = new Set<string>();
     let hasDescendant = false;
     for (const row of rows) {
       for (const path of Object.keys(row.cells)) {
-        if (path === column.path || !path.startsWith(column.path)) continue;
-        if (objectPathColumnCount >= MAX_OBJECT_PATH_COLUMNS) continue;
+        if (!resultPathMatchesColumn(path, column)) continue;
         hasDescendant = true;
-        if (emittedPaths.has(path)) continue;
-        emittedPaths.add(path);
-        expandedDescendantPaths.add(path);
-        objectPathColumnCount += 1;
+        if (emittedPaths.has(path) || seenDescendantPaths.has(path)) continue;
+        seenDescendantPaths.add(path);
         descendantPaths.push(path);
       }
     }
@@ -490,8 +679,26 @@ export function expandObjectPathColumns(
       expanded.push(column);
       continue;
     }
-    descendantPaths.forEach((path, index) => {
-      expanded.push({ key: `${column.key}:child:${index}`, label: leafName(path), path });
+    // 设备返回顺序不稳定，先按实例号数值排序再展开全部后代参数。
+    // 不能在这里设置固定列数上限：例如 QOS 10 个实例 × 35 个参数，
+    // 截断会导致后续实例数据已返回却无法在列表和详情中查看。
+    const sortedDescendantPaths = sortObjectDescendantPaths(descendantPaths, column);
+    sortedDescendantPaths.forEach((path) => {
+      emittedPaths.add(path);
+      expandedDescendantPaths.add(path);
+    });
+    const leafCounts = new Map<string, number>();
+    sortedDescendantPaths.forEach((path) => {
+      const leaf = leafName(path);
+      leafCounts.set(leaf, (leafCounts.get(leaf) ?? 0) + 1);
+    });
+    sortedDescendantPaths.forEach((path, index) => {
+      const leaf = leafName(path);
+      expanded.push({
+        key: `${column.key}:child:${index}`,
+        label: (leafCounts.get(leaf) ?? 0) > 1 ? objectDescendantLabel(path, column) : leaf,
+        path,
+      });
     });
   }
 
@@ -567,7 +774,7 @@ export function applyFrameToRow(
       raw = typeof frame.result === 'string' ? frame.result : JSON.stringify(frame.result, null, 2);
     }
     if (read && status === 'success') {
-      const parsed = parseMmlDeviceTaskResult(frame.result, CONSOLE_PARSE_OPTIONS);
+      const parsed = parseMmlDeviceTaskResult(frame.result, parseOptionsForColumns(columns));
       if (parsed?.kind === 'gpv' && parsed.params) {
         const byPath = new Map(parsed.params.map((p) => [p.name, p.value]));
         const byLeaf = new Map(parsed.params.map((p) => [leafName(p.name), p.value]));
@@ -606,7 +813,7 @@ export function mapResultItemToRow(
   if (read && status === 'success' && item.result.parsedData) {
     // parsedData 是结果信封 {method, raw_response}，需解析 raw_response 的 GPV 取 name→value
     // （与 SSE 路径 applyFrameToRow 一致）；早前直接把信封当 name→value 映射导致读回值全空。
-    const parsed = parseMmlDeviceTaskResult(item.result.parsedData, CONSOLE_PARSE_OPTIONS);
+    const parsed = parseMmlDeviceTaskResult(item.result.parsedData, parseOptionsForColumns(columns));
     if (parsed?.kind === 'gpv' && parsed.params) {
       const byPath = new Map(parsed.params.map((p) => [p.name, p.value]));
       const byLeaf = new Map(parsed.params.map((p) => [leafName(p.name), p.value]));
@@ -733,7 +940,7 @@ export function buildMODReadbackRows(
 ): ResultRow[] {
   // 按结果报文判别下发(SPV)/回读(GPV)，不依赖 commands_detail 是否透出回读命令。
   const isLst = (it: DeviceTaskResultItem): boolean =>
-    !!it.result?.parsedData && parseMmlDeviceTaskResult(it.result.parsedData, CONSOLE_PARSE_OPTIONS)?.kind === 'gpv';
+    !!it.result?.parsedData && parseMmlDeviceTaskResult(it.result.parsedData)?.kind === 'gpv';
 
   const byDevice = new Map<string, DeviceTaskResultItem[]>();
   for (const it of items) {
@@ -755,7 +962,7 @@ export function buildMODReadbackRows(
     const readbackPairs: { path: string; value: string; item: DeviceTaskResultItem }[] = [];
     for (const item of lstItems) {
       if (!item.result?.parsedData) continue;
-      const parsed = parseMmlDeviceTaskResult(item.result.parsedData, CONSOLE_PARSE_OPTIONS);
+      const parsed = parseMmlDeviceTaskResult(item.result.parsedData);
       if (parsed?.kind === 'gpv' && parsed.params) {
         for (const p of parsed.params) {
           readback.set(p.name, p.value);
@@ -892,8 +1099,7 @@ export function mapTaskToRecord(task: MMLTask): ExecRecord {
   }
   // 逐 PATH 任务有多条 command（每 path 一条）→ 列取所有 command 的 path 展平（按 command_index 序，
   // 与 buildDeviceRows 的 columns[command_index] 定位一致）；整体下发时即首条 command 的全部 path。
-  const allPaths = (task.commandsDetail ?? []).flatMap((c) => c.paramPaths ?? []);
-  const columns = allPaths.length ? buildColumnsFromRawPaths(allPaths) : [];
+  const columns = buildTaskResultColumns(task.commandsDetail ?? []);
   // 裸路径任务（后端 command_code = "RAW LST/MOD/ADD/RMV"）用执行 path 命名（跨刷新重建时
   // 无字典异步查询，回退路径叶子名）；结构化命令优先用后端注入的友好命令名（command_name，
   // 如「列出 设备基本信息」），缺失再回退 command_code → task_name。
