@@ -454,14 +454,12 @@ function StorageProtectionSection() {
           {events.length > 0 ? (
             <Space direction="vertical" style={{ width: '100%' }}>
               {events.map((event) => (
-                <Space key={`${event.policyId}-${event.createdAt}`} direction="vertical" size={2}>
-                  <span>
-                    <Tag color={stateColors[event.newState]}>{t(`system.storageProtection.state.${event.newState}`)}</Tag>
-                    {formatEventReason(event, t, unavailable)}
+                <Space key={`${event.policyId}-${event.createdAt}`} align="start" size={8} wrap>
+                  <span style={{ color: '#888', fontSize: 12, flexShrink: 0 }}>
+                    {formatSystemTime(event.createdAt)}
                   </span>
-                  <span style={{ color: '#888', fontSize: 12 }}>
-                    {t('system.storageProtection.event.triggeredAt')}: {formatSystemTime(event.createdAt)}
-                  </span>
+                  <Tag color={stateColors[event.newState]}>{t(`system.storageProtection.state.${event.newState}`)}</Tag>
+                  <span>{formatEventReason(event, t, unavailable)}</span>
                 </Space>
               ))}
             </Space>
