@@ -47,6 +47,10 @@ import {
   applyDeviceParameterSearchReadback,
   refreshDeviceParameterSearchQueries,
 } from './parameterSearchRefresh';
+import {
+  waitForExpectedParameterValues,
+  waitForReadback,
+} from './parameterReadback';
 
 import { useT } from '@/hooks/useT';
 
@@ -379,6 +383,22 @@ function parsePackedNeighborList(packed: string): string[][] {
     .map((entry) => entry.split('-'));
 }
 
+function packedRowsEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+export function packedNeighborChangeObserved(
+  before: string[][],
+  actual: string[][],
+  target: string[],
+  operation: 'add' | 'del',
+): boolean {
+  const count = (rows: string[][]) => rows.filter((row) => packedRowsEqual(row, target)).length;
+  return operation === 'add'
+    ? count(actual) > count(before)
+    : count(actual) < count(before);
+}
+
 /** 单条邻区转字符串：字段用 `-` 拼接，与设备格式一致；cells 中任何字段都不能含空白/`-`。 */
 function serializeNeighborEntry(cells: string[]): string {
   return cells.map((c) => c.trim()).join('-');
@@ -649,13 +669,16 @@ function PackedScalarNeighborTable({
       submittingRef.current = true;
       setIsSubmitting(true);
       const value = opType === 'add' ? serializeNeighborEntry(cells) : spec.delKey(cells);
+      const beforeRows = cellsList;
       const parameterPath = opType === 'add' ? addPath : delPath;
       const actionLabel = opType === 'add' ? t('device.multi.actionAdd') : t('device.multi.actionDelete');
+      let submittedTaskId: string | undefined;
       try {
         const result = await updateMutation.mutateAsync({
           deviceId,
           parameters: [{ parameterPath, parameterValue: value, parameterType: 'string' }],
         });
+        submittedTaskId = result.taskId;
         setFeedback(fbKey, {
           kind: 'multi',
           action: opType === 'add' ? 'add' : 'delete',
@@ -664,13 +687,11 @@ function PackedScalarNeighborTable({
           detail: opSuccessMsg,
           at: Date.now(),
         });
-        message.success(opSuccessMsg);
         // 等设备侧任务终态，防止按钮提前释放后用户双击造成重复 Add/Del。
         if (result.taskId) {
-          try {
-            await waitForTaskTerminal(result.taskId);
-          } catch {
-            // 超时不阻断：Tag 后续仍会随 useDeviceTaskStatus 轮询更新。
+          const terminalTask = await waitForTaskTerminal(result.taskId);
+          if (terminalTask.status !== 'completed') {
+            throw new Error(terminalTask.errorMessage || t('device.multi.unknownErrorHint'));
           }
         }
         // Del 后额外拉一次 listLeaf，同步最新设备状态到 DB。Add 不需要（listLeaf===addLeaf）。
@@ -678,25 +699,43 @@ function PackedScalarNeighborTable({
         if (opType === 'del' && spec.listLeaf !== spec.delLeaf && deviceSn) {
           try {
             await configSyncApi.pullConfig(deviceSn, [scalarPath]);
-            // GPV 是异步任务，给 ACS+设备 一点时间完成后再 refetch，避免 device_parameters 滞后导致 UI 仍显示已删行。
-            await new Promise((resolve) => setTimeout(resolve, 1500));
           } catch (pullErr) {
             // 同步失败不阻断主流程；UI 表头计数可能滞后，下次手动刷新会拼正。
             console.warn('[PackedScalarNeighborTable] pullConfig listLeaf failed', pullErr);
           }
         }
-        await refetch();
+        await waitForReadback({
+          read: async () => {
+            deviceParameterApi.invalidateParameterSchemaCache(deviceId, parentPath);
+            const refreshed = await refetch();
+            const refreshedValue = refreshed.data?.parameters.find(
+              (item) => item.path === scalarPath,
+            )?.currentValue ?? '';
+            return parsePackedNeighborList(refreshedValue);
+          },
+          matches: (actualRows) => packedNeighborChangeObserved(beforeRows, actualRows, cells, opType),
+          intervalMs: 500,
+          timeoutMs: 30_000,
+        });
+        if (submittedTaskId) {
+          patchFeedback(fbKey, { syncedForTaskId: submittedTaskId });
+        }
+        message.success(opSuccessMsg);
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
-        setFeedback(fbKey, {
-          kind: 'multi',
-          action: opType === 'add' ? 'add' : 'delete',
-          submitStatus: 'failed_to_queue',
-          detail: t('device.multi.detailFailed', { target: actionLabel, err: detail }),
-          at: Date.now(),
-        });
+        if (!submittedTaskId) {
+          setFeedback(fbKey, {
+            kind: 'multi',
+            action: opType === 'add' ? 'add' : 'delete',
+            submitStatus: 'failed_to_queue',
+            detail: t('device.multi.detailFailed', { target: actionLabel, err: detail }),
+            at: Date.now(),
+          });
+        }
         notification.error({
-          message: t('device.multi.tagQueueFailed', { action: actionLabel }),
+          message: submittedTaskId
+            ? t('device.multi.readbackFailed', { group: group.titleZh })
+            : t('device.multi.tagQueueFailed', { action: actionLabel }),
           description: detail,
           duration: ERROR_FEEDBACK_DURATION_SECONDS,
         });
@@ -706,7 +745,7 @@ function PackedScalarNeighborTable({
         setIsSubmitting(false);
       }
     },
-    [addPath, delPath, deviceId, deviceSn, fbKey, queryClient, refetch, scalarPath, setFeedback, spec, t, updateMutation, waitForTaskTerminal],
+    [addPath, cellsList, delPath, deviceId, deviceSn, fbKey, group.titleZh, parentPath, patchFeedback, queryClient, refetch, scalarPath, setFeedback, spec, t, updateMutation, waitForTaskTerminal],
   );
 
   const openAddModal = useCallback(() => {
@@ -878,8 +917,13 @@ function PackedScalarNeighborTable({
       extra={
         <Space>
           {lastAction && lastAction.action !== 'add_rollback' && (() => {
-            const tagSpec = statusTagSpec(lastAction, lastTask?.status, t);
-            const isFailed = lastTask?.status === 'failed' && Boolean(lastTask?.errorMessage);
+            const visibleTaskStatus = lastTask?.status === 'completed'
+              && lastAction.taskId
+              && lastAction.syncedForTaskId !== lastTask.id
+              ? 'sent'
+              : lastTask?.status;
+            const tagSpec = statusTagSpec(lastAction, visibleTaskStatus, t);
+            const isFailed = visibleTaskStatus === 'failed' && Boolean(lastTask?.errorMessage);
             const briefFault = isFailed ? formatDeviceFaultBrief(lastTask?.errorMessage) : '';
             const tag = (
               <Tag icon={tagSpec.icon} color={tagSpec.color} style={feedbackTagStyle()}>
@@ -1530,18 +1574,25 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       && !(lastAction.savedInstIds && lastAction.savedInstIds.length > 0)
     ) return;
     let cancelled = false;
+    const abortController = new AbortController();
     void (async () => {
       const ids = lastAction?.savedInstIds ?? (
         lastAction?.action === 'save' && lastAction.savedInstId ? [lastAction.savedInstId] : []
       );
-      if (ids.length > 0) {
+      const submittedDraftIsCurrent = () => {
+        if (lastAction?.submittedDraftRevision === undefined) return true;
+        const currentRevision = useQuickSettingsFeedbackStore.getState().draftRevisions[fbKey] ?? 0;
+        return currentRevision === lastAction.submittedDraftRevision;
+      };
+      const clearSubmittedRows = () => {
+        if (!submittedDraftIsCurrent()) return;
         setRowEdits((prev) => {
           const next = new Map(prev);
           for (const id of ids) next.delete(id);
           return next;
         });
         for (const id of ids) clearDraftPrefix(fbKey, `${id}.`);
-      }
+      };
 
       const deleteInstIds = (() => {
         if (!lastAction || lastAction.action !== 'delete') return undefined;
@@ -1634,7 +1685,30 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       }
       if (!cancelled && !didRollbackAddedInstance) {
         try {
-          const syncResult = await syncRelatedParameters();
+          const syncResult = await syncRelatedParameters({ preserveLocalEdits: true });
+          const expectedReadback = new Map(Object.entries(lastAction?.expectedReadback ?? {}));
+          if (lastTask.status === 'completed' && expectedReadback.size > 0) {
+            await waitForExpectedParameterValues({
+              expected: expectedReadback,
+              read: async () => {
+                deviceParameterApi.invalidateParameterSchemaCache(deviceId, objectPath);
+                const refreshed = await refetch();
+                syncResult.schema = refreshed.data;
+                return new Map(
+                  (refreshed.data?.parameters ?? []).map((item) => [
+                    item.path,
+                    String(item.currentValue ?? ''),
+                  ]),
+                );
+              },
+              intervalMs: 500,
+              timeoutMs: 30_000,
+              signal: abortController.signal,
+            });
+          }
+          if (lastTask.status !== 'completed') {
+            clearSubmittedRows();
+          }
           if (lastTask.status === 'completed' && group.id === 'enb-plmn') {
             const plmnParameters = (syncResult.schema?.parameters ?? [])
               .filter(
@@ -1701,7 +1775,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
             if (listMatchesAction) {
               syncedSuccessNotifiedTaskIdsRef.current.add(lastTask.id);
               patchFeedback(fbKey, { syncedForTaskId: lastTask.id });
-              clearLocalBatchChanges();
+              if (submittedDraftIsCurrent()) {
+                clearLocalBatchChanges();
+              }
               message.success({
                 content: lastAction.detail,
                 duration: 6,
@@ -1722,6 +1798,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     })();
     return () => {
       cancelled = true;
+      abortController.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, lastTask?.id, lastTask?.status]);
@@ -2266,6 +2343,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     const submittedDeletedInstIds: string[] = [];
     const submittedEditedInstIds: string[] = [];
     const submittedTaskIds: string[] = [];
+    const submittedExpectedReadback: Record<string, string> = {};
     const completedIpsecPhases: IpsecSubmissionPhase[] = [];
     let activeIpsecPhase: IpsecSubmissionPhase | undefined;
     let lastTaskId: string | undefined;
@@ -2317,14 +2395,16 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     };
 
     const submitGlobalPhase = async (phase: 'enable-global' | 'disable-global') => {
+      const parameterValue = targetIpsecEnabled ? '1' : '0';
       const result = await updateMutation.mutateAsync({
         deviceId,
         parameters: [{
           parameterPath: ipsecGlobalEnablePath,
-          parameterValue: targetIpsecEnabled ? '1' : '0',
+          parameterValue,
           parameterType: 'boolean',
         }],
       });
+      submittedExpectedReadback[ipsecGlobalEnablePath] = parameterValue;
       recordTask(result.taskId);
       if (result.taskId) {
         await requireCompletedTask(result.taskId, phase);
@@ -2371,6 +2451,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
       if (editUpdates.length > 0) {
         const result = await updateMutation.mutateAsync({ deviceId, parameters: editUpdates });
         recordTask(result.taskId);
+        editUpdates.forEach((update) => {
+          submittedExpectedReadback[update.parameterPath] = update.parameterValue;
+        });
         if (isIpsecGroup && result.taskId) {
           await requireCompletedTask(result.taskId, 'apply-tunnels');
         }
@@ -2407,6 +2490,9 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
         if (updates.length > 0) {
           const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
           recordTask(result.taskId);
+          updates.forEach((update) => {
+            submittedExpectedReadback[update.parameterPath] = update.parameterValue;
+          });
           if (result.taskId) {
             const spvTask = await waitForTaskTerminal(result.taskId);
             if (spvTask.status !== 'completed') {
@@ -2463,11 +2549,34 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
           detail: t('device.ipsec.confirmingReadback'),
         });
         const syncResult = await syncRelatedParameters({ preserveLocalEdits: true });
-        const globalParams = await deviceParameterApi.searchParameters(
-          deviceId,
-          ipsecGlobalEnableQuery,
-          20,
-        );
+        let globalParams = await deviceParameterApi.searchParameters(deviceId, ipsecGlobalEnableQuery, 20);
+        const expectedReadback = new Map(Object.entries(submittedExpectedReadback));
+        if (expectedReadback.size > 0) {
+          await waitForExpectedParameterValues({
+            expected: expectedReadback,
+            read: async () => {
+              deviceParameterApi.invalidateParameterSchemaCache(deviceId, objectPath);
+              const [refreshed, refreshedGlobalParams] = await Promise.all([
+                refetch(),
+                deviceParameterApi.searchParameters(deviceId, ipsecGlobalEnableQuery, 20),
+              ]);
+              syncResult.schema = refreshed.data;
+              globalParams = refreshedGlobalParams;
+              return new Map([
+                ...(refreshed.data?.parameters ?? []).map((item) => [
+                  item.path,
+                  String(item.currentValue ?? ''),
+                ] as [string, string]),
+                ...refreshedGlobalParams.map((item) => [
+                  item.parameterPath,
+                  String(item.parameterValue ?? ''),
+                ] as [string, string]),
+              ]);
+            },
+            intervalMs: 500,
+            timeoutMs: 30_000,
+          });
+        }
         const globalValue = globalParams.find(
           (item) => item.parameterPath === ipsecGlobalEnablePath,
         )?.parameterValue;
@@ -2522,6 +2631,8 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
             (instId) => !submittedDeletedInstIds.includes(instId),
           ),
           syncedForTaskId: lastTaskId,
+          expectedReadback: submittedExpectedReadback,
+          submittedDraftRevision: submittedTunnelDraftRevision,
           ipsecTaskIds: [...submittedTaskIds],
           ipsecTargetEnabled: targetIpsecEnabled,
           ipsecCompletedPhases: [...completedIpsecPhases],
@@ -2541,6 +2652,8 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
           deletedInstIds: submittedDeletedInstIds,
           editedInstIds: submittedEditedInstIds,
           pendingAddRows: addRows,
+          expectedReadback: submittedExpectedReadback,
+          submittedDraftRevision: submittedTunnelDraftRevision,
           detail: submittedDetail,
           at: Date.now(),
         });
@@ -2627,6 +2740,7 @@ export default function MultiInstanceTable({ deviceId, active = true, group, ins
     isIpsecGroup,
     patchFeedback,
     queryClient,
+    refetch,
     rollbackAddedInstance,
     rowEdits,
     schemaByPath,

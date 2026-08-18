@@ -99,6 +99,14 @@ describe('FixedScalarSettingsTable terminal refresh', () => {
     invalidateQueries.mockClear();
     mocks.invalidateParameterSchemaCache.mockClear();
     mocks.taskStatus = terminalStatus;
+    if (terminalStatus === 'completed') {
+      mocks.refetchSchema.mockResolvedValue({
+        data: {
+          ...schema,
+          parameters: [{ ...schema.parameters[0], currentValue: '10.1.0.0' }],
+        },
+      });
+    }
     view.rerender(
       <FixedScalarSettingsTable
         deviceId="device-1"
@@ -115,4 +123,37 @@ describe('FixedScalarSettingsTable terminal refresh', () => {
       }));
     });
   });
+
+  it('keeps polling after success while the first schema read still contains the old value', async () => {
+    mocks.taskStatus = 'completed';
+    mocks.refetchSchema
+      .mockResolvedValueOnce({ data: schema })
+      .mockResolvedValue({
+        data: {
+          ...schema,
+          parameters: [{ ...schema.parameters[0], currentValue: '10.1.0.0' }],
+        },
+      });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <FixedScalarSettingsTable
+          deviceId="device-1"
+          groups={groups}
+          locale="zh-CN"
+          kind="static-route"
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑第 1 行' }));
+    fireEvent.change(screen.getByLabelText('目的网络'), { target: { value: '10.1.0.0' } });
+    fireEvent.click(screen.getByRole('button', { name: /提\s*交/ }));
+
+    await waitFor(() => expect(mocks.refetchSchema).toHaveBeenCalledTimes(2), { timeout: 2_000 });
+  });
+
 });

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   canApplySubmittedReadback,
+  parameterReadbackValuesMatch,
   ParameterReadbackTimeoutError,
+  waitForReadback,
   waitForExpectedParameterValues,
 } from '../parameterReadback';
 
@@ -79,6 +81,28 @@ describe('waitForExpectedParameterValues', () => {
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     expect(readSignal?.aborted).toBe(true);
   }, 250);
+});
+
+describe('readback matching', () => {
+  it('treats boolean wire aliases as the same value without weakening other comparisons', () => {
+    expect(parameterReadbackValuesMatch('1', 'true')).toBe(true);
+    expect(parameterReadbackValuesMatch('0', 'off')).toBe(true);
+    expect(parameterReadbackValuesMatch('25', '50')).toBe(false);
+  });
+
+  it('supports polling non-parameter state such as instance and packed-list membership', async () => {
+    const reads = [['old'], ['old', 'new']];
+    let calls = 0;
+    const result = await waitForReadback({
+      read: async () => reads[Math.min(calls++, reads.length - 1)],
+      matches: (actual) => actual.includes('new'),
+      intervalMs: 0,
+      timeoutMs: 100,
+    });
+
+    expect(calls).toBe(2);
+    expect(result).toContain('new');
+  });
 });
 
 describe('canApplySubmittedReadback', () => {

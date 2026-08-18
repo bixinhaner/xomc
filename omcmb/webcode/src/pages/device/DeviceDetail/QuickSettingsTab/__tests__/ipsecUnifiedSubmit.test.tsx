@@ -164,7 +164,16 @@ describe('IPSec unified submit actions', () => {
     mocks.readbackGlobalValue = '1';
     mocks.taskStatus = 'completed';
     mocks.refetchSchema.mockReset();
-    mocks.refetchSchema.mockResolvedValue({ data: ipsecSchema });
+    mocks.refetchSchema.mockResolvedValue({
+      data: {
+        ...ipsecSchema,
+        parameters: ipsecSchema.parameters.map((item) => (
+          item.path === 'Device.FAP.Ipsec.1.TUNNEL_ENABLE'
+            ? { ...item, currentValue: 'false' }
+            : item
+        )),
+      },
+    });
     mocks.invalidateParameterSchemaCache.mockReset();
     mocks.searchParameters.mockImplementation(async () => [{
       parameterPath: 'Device.Services.FAPService.Ipsec.IPSEC_ENABLE',
@@ -543,15 +552,38 @@ describe('IPSec unified submit actions', () => {
   });
 
   it('does not report completion or clear drafts before readback confirmation', async () => {
+    mocks.refetchSchema.mockReset();
+    mocks.refetchSchema
+      .mockResolvedValueOnce({ data: ipsecSchema })
+      .mockResolvedValue({
+        data: {
+          ...ipsecSchema,
+          parameters: ipsecSchema.parameters.map((item) => (
+            item.path === 'Device.FAP.Ipsec.1.TUNNEL_ENABLE'
+              ? { ...item, currentValue: 'false' }
+              : item
+          )),
+        },
+      });
+    let readbackResolved = false;
     let resolveReadback: ((value: Array<{
       parameterPath: string;
       parameterValue: string;
       parameterType: string;
       writable: boolean;
     }>) => void) | undefined;
-    mocks.searchParameters.mockImplementation(() => new Promise((resolve) => {
-      resolveReadback = resolve;
-    }));
+    const confirmedReadback = [{
+      parameterPath: 'Device.Services.FAPService.Ipsec.IPSEC_ENABLE',
+      parameterValue: '1',
+      parameterType: 'BOOLEAN',
+      writable: true,
+    }];
+    mocks.searchParameters.mockImplementation(() => {
+      if (readbackResolved) return Promise.resolve(confirmedReadback);
+      return new Promise((resolve) => {
+        resolveReadback = resolve;
+      });
+    });
     const controlDraftKey = feedbackKey('device-1', 'device-ipsec-control', 1);
     const tunnelDraftKey = feedbackKey('device-1', 'device-ipsec', 1);
     useQuickSettingsFeedbackStore.getState().setDraftField(controlDraftKey, 'IPSEC_ENABLE', '1');
@@ -583,18 +615,19 @@ describe('IPSec unified submit actions', () => {
     expect(useQuickSettingsFeedbackStore.getState().drafts[tunnelDraftKey]).toBeDefined();
 
     await act(async () => {
-      resolveReadback?.([{
-        parameterPath: 'Device.Services.FAPService.Ipsec.IPSEC_ENABLE',
-        parameterValue: '1',
-        parameterType: 'BOOLEAN',
-        writable: true,
-      }]);
+      readbackResolved = true;
+      resolveReadback?.(confirmedReadback);
     });
     await waitFor(() => {
       expect(useQuickSettingsFeedbackStore.getState().entries[tunnelDraftKey]).toMatchObject({
         ipsecOperationStatus: 'completed',
+        expectedReadback: {
+          'Device.Services.FAPService.Ipsec.IPSEC_ENABLE': '1',
+          'Device.FAP.Ipsec.1.TUNNEL_ENABLE': 'false',
+        },
       });
     });
+    expect(mocks.refetchSchema.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it('waits for tunnel edits before disabling global IPSec', async () => {

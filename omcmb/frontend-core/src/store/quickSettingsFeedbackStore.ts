@@ -35,6 +35,10 @@ export interface MultiFeedback {
   invalidatedForTaskId?: string;
   /** 终态 task → 相关多实例参数已回读并刷新列表后才允许展示成功态。 */
   syncedForTaskId?: string;
+  /** SPV 实际提交的 path/value；成功任务必须观察到这些值后才可清除行编辑和草稿。 */
+  expectedReadback?: Record<string, string>;
+  /** 提交时的草稿修订号；回读期间若用户继续编辑，则保留新草稿。 */
+  submittedDraftRevision?: number;
   /** save 动作专用:记录被保存的实例号,task=completed 时据此清掉对应行的 rowEdits + draft,
       避免切 tab 走回后乐观显示的旧用户输入覆盖 schema 新值。 */
   savedInstId?: string;
@@ -44,6 +48,10 @@ export interface MultiFeedback {
   addedInstIds?: string[];
   /** 批量提交动作拆分:删除成功后应从回读列表消失的实例号。 */
   deletedInstIds?: string[];
+  /** Add/DeleteObject 终态后需要核对实例集合的对象路径。 */
+  readbackObjectPath?: string;
+  /** AddObject 提交前的实例集合，用于等待新实例真正出现。 */
+  readbackInstancesBefore?: string[];
   /** 批量提交动作拆分:编辑成功后需要清掉本地编辑态的实例号。 */
   editedInstIds?: string[];
   /** 批量新增已提交但还未完成基站回读时,继续在表格中展示的本地行快照。 */
