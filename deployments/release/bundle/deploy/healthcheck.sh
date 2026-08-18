@@ -266,13 +266,20 @@ https_file_entry_status_is() { # https_file_entry_status_is <path> <expected_sta
   [ "$status" = "$expected" ]
 }
 
+http_ready_with_retry() {
+  local url="$1"
+  curl -fsS --connect-timeout 1 --max-time 6 \
+    --retry 4 --retry-delay 1 --retry-max-time 20 --retry-connrefused \
+    "$url" >/dev/null
+}
+
 acs_service_ready() {
   local service="$1" cid ip
   cid="$(container_id "$service")"
   [ -n "$cid" ] || return 1
   ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$cid" 2>/dev/null)"
   [ -n "$ip" ] || return 1
-  curl -fsS --max-time 3 "http://${ip}:7557/readyz"
+  http_ready_with_retry "http://${ip}:7557/readyz"
 }
 
 redis_instance_run_id() {
@@ -389,7 +396,7 @@ if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "$SKIP_MONITORING" = 
   done
   # otelcol-contrib 是 distroless 镜像，不能假设容器内有 shell/curl/wget。
   # monitoring compose 将 health_check extension 仅映射到宿主回环供外部探测。
-  check "otelcol health extension (:13133)" curl -fsS --max-time 3 http://127.0.0.1:13133/
+  check "otelcol health extension (:13133)" http_ready_with_retry http://127.0.0.1:13133/
 fi
 
 echo "== $(health_text '服务健康端点' 'Service health endpoints') =="
