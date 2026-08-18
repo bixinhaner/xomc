@@ -2,6 +2,84 @@ package pageconfig
 
 import "testing"
 
+func TestDefaultFileProfilesMatchLegacyScenarioFormats(t *testing.T) {
+	csvCMProfiles := map[string]bool{
+		"S0007": true,
+		"S0008": true,
+	}
+	for _, profile := range NewDefaultCatalog().FileProfiles() {
+		for _, group := range profile.Groups {
+			switch group.Domain {
+			case DomainCM:
+				want := FormatXML
+				if csvCMProfiles[profile.Code] {
+					want = FormatCSV
+				}
+				if group.Format != want {
+					t.Fatalf("%s %s CM format = %s, want %s", profile.Code, group.ID, group.Format, want)
+				}
+			case DomainPM:
+				if group.Format != FormatCSV {
+					t.Fatalf("%s %s PM format = %s, want CSV", profile.Code, group.ID, group.Format)
+				}
+			case DomainMR:
+				if group.Format != FormatXML {
+					t.Fatalf("%s %s MR format = %s, want XML", profile.Code, group.ID, group.Format)
+				}
+			}
+		}
+	}
+}
+
+func TestBackfillDefaultFileProfileGroupsAlignsLegacyFormatOnce(t *testing.T) {
+	defaults := map[string]FileGroup{
+		"cm-daily": {
+			ID:     "cm-daily",
+			Domain: DomainCM,
+			Format: FormatXML,
+			Objects: []ScenarioObject{{
+				Code:    "CP",
+				Tech:    "LTE",
+				Profile: legacyCMCPXMLProfile,
+			}},
+		},
+	}
+	groups := []FileGroup{{
+		ID:     "cm-daily",
+		Domain: DomainCM,
+		Format: FormatCSV,
+		Objects: []ScenarioObject{{
+			Code:    "CP",
+			Tech:    "LTE",
+			Profile: legacyCMCPCSVProfile,
+		}},
+	}}
+
+	if !backfillDefaultFileProfileGroups(groups, defaults, true) {
+		t.Fatal("expected legacy format alignment to report a change")
+	}
+	if groups[0].Format != FormatXML || groups[0].Objects[0].Profile != legacyCMCPXMLProfile {
+		t.Fatalf("legacy format alignment did not restore XML defaults: %#v", groups[0])
+	}
+
+	groups = []FileGroup{{
+		ID:     "cm-daily",
+		Domain: DomainCM,
+		Format: FormatCSV,
+		Objects: []ScenarioObject{{
+			Code:    "CP",
+			Tech:    "LTE",
+			Profile: legacyCMCPCSVProfile,
+		}},
+	}}
+	if backfillDefaultFileProfileGroups(groups, defaults, false) {
+		t.Fatal("did not expect a second legacy format alignment after marker is present")
+	}
+	if groups[0].Format != FormatCSV || groups[0].Objects[0].Profile != legacyCMCPCSVProfile {
+		t.Fatalf("marked profiles should preserve user-selected format: %#v", groups[0])
+	}
+}
+
 func TestNormalizeDeviceTechUsesDeviceStorageValues(t *testing.T) {
 	tests := map[string]string{
 		"ENB": "LTE",

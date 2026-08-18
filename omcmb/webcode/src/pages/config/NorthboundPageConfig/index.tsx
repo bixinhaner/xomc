@@ -467,7 +467,7 @@ const formatLabels: Record<Format, string> = {
 };
 
 const supportedFormatsByDomain: Record<Domain, Format[]> = {
-  CM: ['CSV'],
+  CM: ['XML', 'CSV'],
   PM: ['CSV'],
   MR: ['XML'],
   LOG: ['TXT', 'CSV'],
@@ -475,12 +475,22 @@ const supportedFormatsByDomain: Record<Domain, Format[]> = {
 };
 
 const defaultFormatByDomain: Record<Domain, Format> = {
-  CM: 'CSV',
+  CM: 'XML',
   PM: 'CSV',
   MR: 'XML',
   LOG: 'TXT',
   INVENTORY: 'CSV',
 };
+
+const supportedFormatsByCMObject: Record<string, Format[]> = {
+  CP: ['XML', 'CSV'],
+  EP: ['XML', 'CSV'],
+  CC: ['XML', 'CSV'],
+  CE: ['XML', 'CSV'],
+  COMS: ['CSV', 'XML'],
+};
+
+const formatOrder: Format[] = ['XML', 'CSV', 'TXT'];
 
 const defaultRemotePathByDomain: Record<Domain, string> = {
   CM: PATH_CM,
@@ -490,12 +500,52 @@ const defaultRemotePathByDomain: Record<Domain, string> = {
   INVENTORY: PATH_INVENTORY,
 };
 
-function getFormatOptions(domain: Domain) {
-  return supportedFormatsByDomain[domain].map((value) => ({ label: formatLabels[value], value }));
+function intersectFormats(left: Format[], right: Format[]): Format[] {
+  return formatOrder.filter((format) => left.includes(format) && right.includes(format));
 }
 
-function normalizeFormatForDomain(domain: Domain, format: Format): Format {
-  return supportedFormatsByDomain[domain].includes(format) ? format : defaultFormatByDomain[domain];
+function supportedFormatsForObject(domain: Domain, objectCode: string): Format[] {
+  if (domain === 'CM') {
+    return supportedFormatsByCMObject[objectCode.trim().toUpperCase()] ?? supportedFormatsByDomain[domain];
+  }
+  return supportedFormatsByDomain[domain];
+}
+
+function selectedObjectCodes(objectsValue?: string): string[] {
+  return splitObjects(objectsValue ?? '').map((token) => parseObjectToken(token).code).filter(Boolean);
+}
+
+function isCMCOMSOnlySelection(domain: Domain, objectCodes: string[]): boolean {
+  return domain === 'CM' && objectCodes.length > 0 && objectCodes.every((code) => code.trim().toUpperCase() === 'COMS');
+}
+
+function supportedFormatsForSelection(domain: Domain, objectsValue?: string): Format[] {
+  const baseFormats = supportedFormatsByDomain[domain];
+  const objectCodes = selectedObjectCodes(objectsValue);
+  if (objectCodes.length === 0) return baseFormats;
+  if (isCMCOMSOnlySelection(domain, objectCodes)) return supportedFormatsByCMObject.COMS;
+  const formats = objectCodes.reduce(
+    (available, objectCode) => intersectFormats(available, supportedFormatsForObject(domain, objectCode)),
+    baseFormats,
+  );
+  return formats.length > 0 ? formats : baseFormats;
+}
+
+function getFormatOptions(domain: Domain, objectsValue?: string) {
+  return supportedFormatsForSelection(domain, objectsValue).map((value) => ({ label: formatLabels[value], value }));
+}
+
+function normalizeFormatForDomain(domain: Domain, format: Format, objectsValue?: string): Format {
+  const formats = supportedFormatsForSelection(domain, objectsValue);
+  const defaultFormat = defaultFormatForSelection(domain, objectsValue);
+  if (formats.includes(format)) return format;
+  return formats.includes(defaultFormat) ? defaultFormat : formats[0] ?? defaultFormatByDomain[domain];
+}
+
+function defaultFormatForSelection(domain: Domain, objectsValue?: string): Format {
+  const objectCodes = selectedObjectCodes(objectsValue);
+  if (isCMCOMSOnlySelection(domain, objectCodes)) return 'CSV';
+  return defaultFormatByDomain[domain];
 }
 
 const periodOptions = [
@@ -581,10 +631,11 @@ function group(
   compressionEnabled = true,
   compressionFormat: CompressionFormat = 'zip',
 ): FileGroup {
+  const objectsValue = joinObjects(objects.map((object) => object.code));
   return {
     id,
     domain,
-    format: normalizeFormatForDomain(domain, format),
+    format: normalizeFormatForDomain(domain, format, objectsValue),
     period,
     cron,
     path,
@@ -2775,7 +2826,7 @@ const defaultEditorPeriodRows: ScenarioPeriodRow[] = [
     key: 'cm-default',
     domain: 'CM',
     scope: 'LTE',
-    format: 'CSV',
+    format: 'XML',
     period: '24H',
     trigger: '每天 00:01:30',
     cron: '30 1 0 * * ?',
@@ -3309,6 +3360,7 @@ function defaultPeriodRow(domain: Domain = 'CM', includeObjects = true): Scenari
   const firstObjects = includeObjects
     ? objectOptionsByDomain[domain].slice(0, domain === 'CM' ? 4 : 1).map((option) => option.value)
     : [];
+  const objectsValue = joinObjects(firstObjects);
   const periodByDomain: Record<Domain, string> = {
     CM: '24H',
     PM: '15M',
@@ -3329,11 +3381,11 @@ function defaultPeriodRow(domain: Domain = 'CM', includeObjects = true): Scenari
     key: `custom-${Date.now()}`,
     domain,
     scope: scopeByDomain[domain],
-    format: defaultFormatByDomain[domain],
+    format: defaultFormatForSelection(domain, objectsValue),
     period,
     trigger: formatScheduleLabel(period, cron),
     cron,
-    objects: joinObjects(firstObjects),
+    objects: objectsValue,
     path: defaultRemotePathByDomain[domain],
     fileName: domain === 'CM'
       ? 'Baicells-{CP|EP|CC|CE}-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#][-#FileID#]'
@@ -3604,8 +3656,8 @@ function normalizeApiPeriod(period: string | undefined): NorthboundPageConfigPer
     : '24H';
 }
 
-function normalizeApiFormat(domain: Domain, format: string | undefined): NorthboundPageConfigFormat {
-  return normalizeFormatForDomain(domain, (format ?? defaultFormatByDomain[domain]) as Format) as NorthboundPageConfigFormat;
+function normalizeApiFormat(domain: Domain, format: string | undefined, objectsValue?: string): NorthboundPageConfigFormat {
+  return normalizeFormatForDomain(domain, (format ?? defaultFormatByDomain[domain]) as Format, objectsValue) as NorthboundPageConfigFormat;
 }
 
 function normalizeApiCompressionFormat(format: string | undefined): NorthboundPageConfigCompressionFormat {
@@ -3698,10 +3750,12 @@ function mapApiFileProfile(profile: NorthboundFileProfile): ScenarioRow {
     ? profile.groups.map((item) => {
         const domain = item.domain as Domain;
         const period = normalizeApiPeriod(item.period);
+        const objects = item.objects.map(mapApiScenarioObject);
+        const objectsValue = joinObjects(objects.map((object) => object.code));
         return {
           id: item.id,
           domain,
-          format: normalizeApiFormat(domain, item.format),
+          format: normalizeApiFormat(domain, item.format, objectsValue),
           period,
           cron: cronFromPeriodStartMinute(period, item.start_minute),
           path: item.path_template,
@@ -3709,7 +3763,7 @@ function mapApiFileProfile(profile: NorthboundFileProfile): ScenarioRow {
           csvSeparator: item.csv_separator,
           compressionEnabled: item.compression_enabled,
           compressionFormat: normalizeApiCompressionFormat(item.compression_format),
-          objects: item.objects.map(mapApiScenarioObject),
+          objects,
           selectedFields: item.selected_fields,
         };
       })
@@ -4160,7 +4214,7 @@ function serializeEditorPeriodRows(
   fieldRowsByTarget: Record<string, ReportFieldRow[]> = {},
 ): NorthboundFileGroup[] {
   return rows.map((row) => {
-    const format = normalizeApiFormat(row.domain, row.format);
+    const format = normalizeApiFormat(row.domain, row.format, row.objects);
     const period = normalizeApiPeriod(row.period);
     // Collect this group's selected field keys (backend Key format) from any field
     // target that belongs to it and has been edited. Omitted when empty = export all.
@@ -4208,6 +4262,9 @@ function validateEditorPeriodRows(rows: ScenarioPeriodRow[]): string | undefined
     }
     if (splitObjects(row.objects).length === 0) {
       return `${row.domain} 请至少选择一个对象`;
+    }
+    if (!supportedFormatsForSelection(row.domain, row.objects).includes(row.format)) {
+      return `${row.domain} 当前对象不支持 ${row.format} 格式`;
     }
     if (!row.path.trim()) {
       return `${row.domain} 请填写上传目录模板`;
@@ -4278,7 +4335,7 @@ function ensureOutputExtension(fileName: string, format: Format): string {
 }
 
 function getOutputTemplatePreview(row: ScenarioPeriodRow): { path: string; fileName: string } {
-  const normalizedFormat = normalizeFormatForDomain(row.domain, row.format);
+  const normalizedFormat = normalizeFormatForDomain(row.domain, row.format, row.objects);
   const pathTemplate = row.path || defaultRemotePathByDomain[row.domain];
   const fileNameTemplate = row.fileName || defaultPeriodRow(row.domain).fileName;
   const path = replaceTemplateTokens(pathTemplate, row, true);
@@ -7014,7 +7071,21 @@ export default function NorthboundPageConfig() {
   };
 
   const updateEditorPeriodRow = useCallback((key: string, patch: Partial<ScenarioPeriodRow>) => {
-    setEditorPeriodRows((rows) => rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+    setEditorPeriodRows((rows) => rows.map((row) => {
+      if (row.key !== key) return row;
+      const nextRow = { ...row, ...patch };
+      const hasFormatPatch = Object.prototype.hasOwnProperty.call(patch, 'format');
+      const hasSelectionPatch = Object.prototype.hasOwnProperty.call(patch, 'domain') || Object.prototype.hasOwnProperty.call(patch, 'objects');
+      const oldDefaultFormat = defaultFormatForSelection(row.domain, row.objects);
+      const nextDefaultFormat = defaultFormatForSelection(nextRow.domain, nextRow.objects);
+      const preferredFormat = !hasFormatPatch && hasSelectionPatch && row.format === oldDefaultFormat
+        ? nextDefaultFormat
+        : nextRow.format;
+      return {
+        ...nextRow,
+        format: normalizeFormatForDomain(nextRow.domain, preferredFormat, nextRow.objects),
+      };
+    }));
   }, []);
 
   // Stable commit handler for PeriodTextInput (identity-stable so the memoized cell does
@@ -10116,7 +10187,7 @@ export default function NorthboundPageConfig() {
                     dataIndex: 'csvSeparator',
                     width: 132,
                     render: (value: string | undefined, record) => (
-                      normalizeFormatForDomain(record.domain, record.format) === 'CSV'
+                      normalizeFormatForDomain(record.domain, record.format, record.objects) === 'CSV'
                         ? <Tag>{csvSeparatorDisplay(value)}</Tag>
                         : <Tag>不适用</Tag>
                     ),
@@ -10351,10 +10422,10 @@ export default function NorthboundPageConfig() {
                   width: 104,
                   render: (value: Format, record) => (
                     <Select
-                      value={normalizeFormatForDomain(record.domain, value)}
+                      value={normalizeFormatForDomain(record.domain, value, record.objects)}
                       style={{ width: 86 }}
-                      options={getFormatOptions(record.domain)}
-                      onChange={(nextFormat) => updateEditorPeriodRow(record.key, { format: normalizeFormatForDomain(record.domain, nextFormat as Format) })}
+                      options={getFormatOptions(record.domain, record.objects)}
+                      onChange={(nextFormat) => updateEditorPeriodRow(record.key, { format: normalizeFormatForDomain(record.domain, nextFormat as Format, record.objects) })}
                     />
                   ),
                 },
@@ -10363,7 +10434,7 @@ export default function NorthboundPageConfig() {
                   dataIndex: 'csvSeparator',
                   width: 142,
                   render: (value: string | undefined, record) => (
-                    normalizeFormatForDomain(record.domain, record.format) === 'CSV'
+                    normalizeFormatForDomain(record.domain, record.format, record.objects) === 'CSV'
                       ? (
                           <CSVSeparatorInput
                             value={value}
