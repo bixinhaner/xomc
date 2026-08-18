@@ -48,6 +48,23 @@ export const mockAlarmDefinitions: AlarmDefinition[] = [
     isShow: true,
     isUnknown: true,
   },
+  // #268 e2e:手工新增定义(loadedFrom 为空) — 一级表出现独立"手工新增"行,
+  // 镜像测试环境 ENB 手工新增告警的场景。
+  {
+    id: 'ad-1004',
+    identifier: '101099',
+    neType: 'eNodeB',
+    cnName: '手工新增测试告警',
+    enName: 'Manual Added Test Alarm',
+    severityCode: 1,
+    severityName: 'Critical',
+    eventType: 'device',
+    cnProbableCause: '手工新增',
+    enProbableCause: 'manual added',
+    isShow: true,
+    isUnknown: false,
+    loadedFrom: '',
+  },
 ];
 
 export const mockUnknownStats: UnknownAlarmStat[] = [

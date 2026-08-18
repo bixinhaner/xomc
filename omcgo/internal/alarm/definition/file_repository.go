@@ -23,6 +23,9 @@ type FileRepository interface {
 	// 导入 XML 覆盖调整(2026-06-05):上传遇到重复 neType 时,用它定位"归属文件",
 	// force 覆盖即替换该文件(常态恰好一个;空 loaded_from 行被忽略)。
 	LoadedFromsByNeType(ctx context.Context, neType string) ([]string, error)
+	// ListManualByNeType 返回某 ne_type 下全部手工新增定义(loaded_from 为空)，
+	// JOIN severity_levels 带出名称。#268: file-content 生成模式的数据源。
+	ListManualByNeType(ctx context.Context, neType string) ([]ResolvedDefinition, error)
 }
 
 // PgFileRepository 是 FileRepository 的 PostgreSQL 实现。
@@ -89,6 +92,38 @@ func (r *PgFileRepository) LoadedFromsByNeType(ctx context.Context, neType strin
 		out = append(out, lf)
 	}
 	return out, rows.Err()
+}
+
+// ListManualByNeType 实现 FileRepository:按 ne_type 取 loaded_from 为空
+// (NULL 或 '')的全量行,与一级表"手工新增"行的 drill-down 口径一致。
+// 单 ne_type 手工定义远小于 pageSize 上限,不分页,按 identifier 排序保证导出稳定。
+func (r *PgFileRepository) ListManualByNeType(ctx context.Context, neType string) ([]ResolvedDefinition, error) {
+	sb := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
+		Select(
+			"d.id", "d.identifier", "d.ne_type", "d.cn_name", "d.en_name",
+			"d.severity_id", "d.event_type", "d.cn_probable_cause", "d.en_probable_cause",
+			"d.is_show", "d.description",
+			"l.code", "l.name",
+		).
+		From("alarm_definitions d").
+		Join("alarm_severity_levels l ON d.severity_id = l.id").
+		Where(sq.Eq{"d.ne_type": neType}).
+		Where(sq.Expr("COALESCE(d.loaded_from, '') = ''")).
+		OrderBy("d.identifier ASC")
+	sqlStr, args, err := sb.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build manual-by-netype sql: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query manual alarm_definitions by ne_type %q: %w", neType, err)
+	}
+	defer rows.Close()
+	out, err := scanResolvedDefs(rows)
+	if err != nil {
+		return nil, fmt.Errorf("scan manual definitions by ne_type %q: %w", neType, err)
+	}
+	return out, nil
 }
 
 var _ FileRepository = (*PgFileRepository)(nil)

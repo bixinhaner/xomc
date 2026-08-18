@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -66,14 +67,24 @@ func (h *FileHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	files.DELETE("/*loadedFrom", h.DeleteFile)
 }
 
-// DownloadFile GET /api/v1/alarm-definitions/file-content?loaded_from=alarm-definitions/<file>.xml
+// DownloadFile GET /api/v1/alarm-definitions/file-content
 //
-// 下载 XML 原文件(2026-06-05 操作列下载功能)。builtin 与 custom 均可下载(只读无守门);
-// 路径校验与 DeleteFile 同口径:validAlarmFilePath + pathContainedIn 双重防遍历。
+// 两种模式(#268):
+//   - ?loaded_from=alarm-definitions/<file>.xml — 下载磁盘原文件(builtin 与 custom
+//     均可,只读无守门);路径校验与 DeleteFile 同口径:validAlarmFilePath +
+//     pathContainedIn 双重防遍历。
+//   - ?ne_type=ENB(不带 loaded_from) — 手工新增行没有落盘文件,从 DB 取该
+//     ne_type 下 loaded_from 为空的全量定义,动态生成 alarmModel XML 返回。
+//     字段与导入格式对齐(severity 用名称 / isShow Y|N / eventType 数字),
+//     导出文件可直接回传 upload-xml。
 func (h *FileHandler) DownloadFile(c *gin.Context) {
 	raw := strings.TrimSpace(c.Query("loaded_from"))
+	if raw == "" {
+		h.downloadGenerated(c)
+		return
+	}
 	loadedFrom := filepath.ToSlash(filepath.Clean(raw))
-	if raw == "" || !validAlarmFilePath(loadedFrom) {
+	if !validAlarmFilePath(loadedFrom) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
 			fmt.Errorf("invalid loaded_from %q (expected %s<file>.xml)", raw, BuiltinDirPrefix))
 		return
@@ -93,6 +104,76 @@ func (h *FileHandler) DownloadFile(c *gin.Context) {
 		return
 	}
 	c.FileAttachment(absPath, filepath.Base(absPath))
+}
+
+// downloadGenerated 是 DownloadFile 的生成模式:按 ne_type 从 DB 生成手工新增
+// 告警的 alarmModel XML。description 是 DB 侧备注字段、XML 格式没有,导出即丢;
+// deviceType 未入库,省略(回传导入只校验根元素与 neType 属性,不受影响)。
+func (h *FileHandler) downloadGenerated(c *gin.Context) {
+	neType := strings.TrimSpace(c.Query("ne_type"))
+	if neType == "" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("either loaded_from or ne_type query is required"))
+		return
+	}
+	defs, err := h.repo.ListManualByNeType(c.Request.Context(), neType)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			fmt.Errorf("load manual definitions: %w", err))
+		return
+	}
+	if len(defs) == 0 {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return
+	}
+
+	model := xmlAlarmModel{NeType: neType, TotalCount: len(defs), Alarms: make([]xmlAlarm, 0, len(defs))}
+	for i := range defs {
+		d := &defs[i]
+		eventType := ""
+		if d.EventType != nil {
+			eventType = strconv.Itoa(*d.EventType)
+		}
+		model.Alarms = append(model.Alarms, xmlAlarm{
+			Identifier:      d.Identifier,
+			CnName:          d.CnName,
+			EnName:          d.EnName,
+			Severity:        d.SeverityName,
+			EventType:       eventType,
+			CnProbableCause: d.CnProbableCause,
+			EnProbableCause: d.EnProbableCause,
+			IsShow:          map[bool]string{true: "Y", false: "N"}[d.IsShow],
+		})
+	}
+	body, err := xml.MarshalIndent(model, "", "    ")
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			fmt.Errorf("marshal alarmModel: %w", err))
+		return
+	}
+	out := append([]byte(xml.Header), body...)
+
+	c.Header("Content-Disposition",
+		fmt.Sprintf("attachment; filename=%q", sanitizeDownloadName(neType)))
+	c.Data(http.StatusOK, "application/xml; charset=utf-8", out)
+}
+
+// sanitizeDownloadName 把 neType 收敛成合法下载文件名 <neType>-manual.xml:
+// 仅保留 [A-Za-z0-9_-],其余字符替换为 '_',防 Content-Disposition 注入。
+// 收敛后必匹配 uploadFilenamePattern(neType ≤ 16 字符),下载文件可直接回传
+// upload-xml。
+func sanitizeDownloadName(neType string) string {
+	var b strings.Builder
+	b.Grow(len(neType) + len("-manual.xml"))
+	for _, r := range neType {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String() + "-manual.xml"
 }
 
 // acquireFileLock 取/建 per-basename mutex,Upload / Delete 共享,防同名文件并发写半截。

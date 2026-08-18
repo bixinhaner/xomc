@@ -22,17 +22,30 @@ function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
 }
 
+// mock 行级加载源:显式 loadedFrom('' = 手工新增)优先,缺省视为 <neType>.xml
+// 文件行 — 与后端 alarm_definitions.loaded_from 语义对齐(#268)。
+function effectiveLoadedFrom(d: AlarmDefinition): string {
+  return d.loadedFrom ?? `${d.neType}.xml`;
+}
+
+function applyCommonFilter(items: AlarmDefinition[], filter?: AlarmDefinitionFilter) {
+  let out = items;
+  if (filter?.neType) out = out.filter((d) => d.neType === filter.neType);
+  if (filter?.loadedFrom !== undefined)
+    out = out.filter((d) => effectiveLoadedFrom(d) === filter.loadedFrom);
+  if (filter?.severityCode !== undefined)
+    out = out.filter((d) => d.severityCode === filter.severityCode);
+  if (filter?.keyword) {
+    const k = filter.keyword.toLowerCase();
+    out = out.filter((d) => (d.identifier + d.cnName + d.enName).toLowerCase().includes(k));
+  }
+  if (filter?.isUnknown !== undefined) out = out.filter((d) => Boolean(d.isUnknown) === filter.isUnknown);
+  return out;
+}
+
 export const alarmDefinitionService = {
   async list(filter?: AlarmDefinitionFilter) {
-    let items = [...definitions];
-    if (filter?.neType) items = items.filter((d) => d.neType === filter.neType);
-    if (filter?.severityCode !== undefined)
-      items = items.filter((d) => d.severityCode === filter.severityCode);
-    if (filter?.keyword) {
-      const k = filter.keyword.toLowerCase();
-      items = items.filter((d) => (d.identifier + d.cnName + d.enName).toLowerCase().includes(k));
-    }
-    if (filter?.isUnknown !== undefined) items = items.filter((d) => Boolean(d.isUnknown) === filter.isUnknown);
+    const items = applyCommonFilter([...definitions], filter);
     const page = filter?.page || 1;
     const pageSize = filter?.pageSize || 20;
     const start = (page - 1) * pageSize;
@@ -46,15 +59,7 @@ export const alarmDefinitionService = {
 
   // 2026-06-03:与 real api 对齐 — 全量返回(mock 数据量小,一次性返回,不分页)。
   async listAll(filter?: Omit<AlarmDefinitionFilter, 'page'>) {
-    let items = [...definitions];
-    if (filter?.neType) items = items.filter((d) => d.neType === filter.neType);
-    if (filter?.severityCode !== undefined)
-      items = items.filter((d) => d.severityCode === filter.severityCode);
-    if (filter?.keyword) {
-      const k = filter.keyword.toLowerCase();
-      items = items.filter((d) => (d.identifier + d.cnName + d.enName).toLowerCase().includes(k));
-    }
-    if (filter?.isUnknown !== undefined) items = items.filter((d) => Boolean(d.isUnknown) === filter.isUnknown);
+    const items = applyCommonFilter([...definitions], filter);
     return { items: clone(items), total: items.length, page: 1, pageSize: items.length };
   },
 
@@ -79,6 +84,7 @@ export const alarmDefinitionService = {
       enProbableCause: input.enProbableCause,
       isShow: input.isShow ?? true,
       isUnknown: false,
+      loadedFrom: '',
     };
     definitions.push(created);
     return clone(created);
@@ -120,14 +126,17 @@ export const alarmDefinitionService = {
   },
 
   async listNeTypes(): Promise<{ items: AlarmNeTypeStat[] }> {
+    // 按 (ne_type, loaded_from) 双键聚合,与后端 ListNeTypes 同口径;
+    // 手工新增(loadedFrom '')单独成行(#268)。
     const grouped = new Map<string, AlarmNeTypeStat>();
     for (const d of definitions) {
-      const key = `${d.neType}__`;
+      const lf = effectiveLoadedFrom(d);
+      const key = `${d.neType}__${lf}`;
       let stat = grouped.get(key);
       if (!stat) {
         stat = {
           neType: d.neType,
-          loadedFrom: `${d.neType}.xml`,
+          loadedFrom: lf,
           total: 0,
           criticalCnt: 0,
           majorCnt: 0,
@@ -137,11 +146,12 @@ export const alarmDefinitionService = {
         grouped.set(key, stat);
       }
       stat.total += 1;
+      // mock severity 用 1-4 编码(severityLevels 种子),兼容真后端 31001-31004。
       switch (d.severityCode) {
-        case 31001: stat.criticalCnt += 1; break;
-        case 31002: stat.majorCnt += 1; break;
-        case 31003: stat.minorCnt += 1; break;
-        case 31004: stat.warningCnt += 1; break;
+        case 1: case 31001: stat.criticalCnt += 1; break;
+        case 2: case 31002: stat.majorCnt += 1; break;
+        case 3: case 31003: stat.minorCnt += 1; break;
+        case 4: case 31004: stat.warningCnt += 1; break;
       }
     }
     return { items: Array.from(grouped.values()).sort((a, b) => a.neType.localeCompare(b.neType)) };
@@ -162,9 +172,15 @@ export const alarmDefinitionService = {
   },
 
   // mock 下载:生成占位 XML 触发浏览器另存(无真实文件)。
-  async downloadXml(loadedFrom: string): Promise<void> {
-    const name = loadedFrom.split('/').pop() || 'alarm.xml';
-    saveBlob(`<?xml version="1.0" encoding="UTF-8"?>\n<!-- mock ${name} -->\n<alarmModel neType="${name.replace(/\.xml$/i, '')}"></alarmModel>\n`, name);
+  // #268: 手工新增行只带 neType,同样生成占位模型。
+  async downloadXml(target: { loadedFrom?: string; neType?: string }): Promise<void> {
+    if (target.loadedFrom) {
+      const name = target.loadedFrom.split('/').pop() || 'alarm.xml';
+      saveBlob(`<?xml version="1.0" encoding="UTF-8"?>\n<!-- mock ${name} -->\n<alarmModel neType="${name.replace(/\.xml$/i, '')}"></alarmModel>\n`, name);
+      return;
+    }
+    const neType = target.neType ?? '';
+    saveBlob(`<?xml version="1.0" encoding="UTF-8"?>\n<!-- mock manual ${neType} -->\n<alarmModel neType="${neType}" totalCount="0"><alarms></alarms></alarmModel>\n`, `${neType}-manual.xml`);
   },
 
   async deleteFile(loadedFrom: string): Promise<AlarmDeleteFileResult> {
