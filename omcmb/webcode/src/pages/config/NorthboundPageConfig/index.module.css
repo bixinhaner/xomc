@@ -619,6 +619,38 @@
   width: min(900px, calc(100vw - 48px)) !important;
 }
 
+.apiCatalogDrawer :global(.ant-drawer-content-wrapper) {
+  width: 100vw !important;
+}
+
+.apiCatalogDrawer :global(.ant-drawer-body) {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px 16px 16px;
+}
+
+.apiCatalogTable {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.apiCatalogTable :global(.ant-spin-nested-loading),
+.apiCatalogTable :global(.ant-spin-container) {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.apiCatalogTable :global(.ant-table) {
+  min-height: 0;
+  flex: 1;
+}
+
 .contentBlock {
   border: 1px solid var(--color-border);
   border-radius: 8px;
