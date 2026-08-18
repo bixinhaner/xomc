@@ -24,26 +24,30 @@ The web nginx container can publish a base-station file HTTPS entry on `:8443`.
 It terminates TLS with deployment-host files and forwards the request to the
 existing ACS HTTP file service.
 
-Standard release packages must include these files:
+Standard release packages include these files:
 
 ```bash
 deploy/nginx-cert/cert.pem
 deploy/nginx-cert/key.pem
-deploy/nginx-cert/source.txt
 ```
 
-`build-release.sh` copies them from the private build input directory
-`deployments/release/private/nginx-cert/`. Override the source with
-`OMC_RELEASE_HTTPS_CERT_SOURCE_DIR=/path/to/nginx-cert` when the private assets
-come from another build context. `source.txt` must declare the old OMC source:
+The source repository carries the same files at:
+
+```bash
+deployments/release/bundle/deploy/nginx-cert/cert.pem
+deployments/release/bundle/deploy/nginx-cert/key.pem
+```
+
+They are copied from the old OMC host:
 
 ```text
-cert.pem: root@172.21.175.129:/etc/nginx/cert/cert.pem
-key.pem: root@172.21.175.129:/etc/nginx/cert/key.pem
+root@172.21.175.129:/etc/nginx/cert/cert.pem
+root@172.21.175.129:/etc/nginx/cert/key.pem
 ```
 
-The private input directory is ignored by git; do not commit real certificates
-or private keys to the public source tree.
+`build-release.sh` validates this repository copy and writes the pair into the
+final package fixed path `deploy/nginx-cert/`. A standard release build must not
+depend on any local private certificate directory.
 
 During install, `deploy/install.sh` validates the packaged pair, installs it to
 the host, and fails before the web container starts if either file is missing,

@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 RELEASE_DEPLOY="$REPO_ROOT/deployments/release/bundle/deploy"
 BUILD_RELEASE="$REPO_ROOT/deployments/release/build-release.sh"
 GITIGNORE="$REPO_ROOT/.gitignore"
+REPO_CERT_DIR="$RELEASE_DEPLOY/nginx-cert"
 NGINX_DEFAULT="$REPO_ROOT/deployments/docker/default.conf"
 ENTRYPOINT="$REPO_ROOT/deployments/docker/docker-entrypoint.d/10-enable-https-file-entry.sh"
 DEV_COMPOSE="$REPO_ROOT/deployments/docker/docker-compose.yml"
@@ -108,22 +109,6 @@ if command -v openssl >/dev/null 2>&1; then
   expect_fail "unparseable certificate fails startup" env OMC_NGINX_HTTPS_CERT="$TMP/bad-cert.pem" OMC_NGINX_HTTPS_KEY="$key_a" OMC_NGINX_HTTPS_CONF="$out_conf" sh "$ENTRYPOINT"
 	  expect_success "valid certificate pair generates HTTPS config" env OMC_NGINX_HTTPS_CERT="$cert_a" OMC_NGINX_HTTPS_KEY="$key_a" OMC_NGINX_HTTPS_CONF="$out_conf" sh "$ENTRYPOINT"
 	  contains "generated config listens on 8443" "listen 8443 ssl;" "$out_conf"
-	  release_cert_dir="$TMP/release-nginx-cert"
-	  mkdir -p "$release_cert_dir"
-	  cp "$cert_a" "$release_cert_dir/cert.pem"
-	  cp "$key_a" "$release_cert_dir/key.pem"
-	  cat >"$release_cert_dir/source.txt" <<'EOF'
-cert.pem: root@172.21.175.129:/etc/nginx/cert/cert.pem
-key.pem: root@172.21.175.129:/etc/nginx/cert/key.pem
-EOF
-	  expect_success "release build accepts a valid private certificate asset input directory" env OMC_RELEASE_HTTPS_CERT_SOURCE_DIR="$release_cert_dir" bash "$BUILD_RELEASE" --verify-https-cert-assets-only
-	  expect_fail "release build rejects a missing private certificate asset input directory" env OMC_RELEASE_HTTPS_CERT_SOURCE_DIR="$TMP/missing-release-nginx-cert" bash "$BUILD_RELEASE" --verify-https-cert-assets-only
-	  mv "$release_cert_dir/source.txt" "$release_cert_dir/source.txt.bak"
-	  expect_fail "release build rejects private certificate assets without old-OMC source proof" env OMC_RELEASE_HTTPS_CERT_SOURCE_DIR="$release_cert_dir" bash "$BUILD_RELEASE" --verify-https-cert-assets-only
-	  mv "$release_cert_dir/source.txt.bak" "$release_cert_dir/source.txt"
-	  cp "$key_b" "$release_cert_dir/key.pem"
-	  expect_fail "release build rejects mismatched private certificate assets" env OMC_RELEASE_HTTPS_CERT_SOURCE_DIR="$release_cert_dir" bash "$BUILD_RELEASE" --verify-https-cert-assets-only
-	  cp "$key_a" "$release_cert_dir/key.pem"
 	  if command -v python3 >/dev/null 2>&1; then
 	    fixture_py="$TMP/file-entry-fixture.py"
 	    ports_file="$TMP/file-entry-ports"
@@ -220,14 +205,23 @@ valid_bash "build release script" "$BUILD_RELEASE"
 valid_bash "install script" "$INSTALL"
 valid_bash "healthcheck script" "$HEALTHCHECK"
 valid_bash "real file-entry smoke script" "$SMOKE"
-contains "release build uses private certificate input path" "deployments/release/private/nginx-cert" "$BUILD_RELEASE"
-contains "release build supports private certificate input override" "OMC_RELEASE_HTTPS_CERT_SOURCE_DIR" "$BUILD_RELEASE"
-contains "release build requires old OMC certificate source proof" "source.txt" "$BUILD_RELEASE"
-contains "release build pins old OMC cert source" "root@172.21.175.129:/etc/nginx/cert/cert.pem" "$BUILD_RELEASE"
-contains "release build pins old OMC key source" "root@172.21.175.129:/etc/nginx/cert/key.pem" "$BUILD_RELEASE"
+contains "release build uses repository certificate path" "deployments/release/bundle/deploy/nginx-cert" "$BUILD_RELEASE"
+not_contains "release build must not depend on private certificate override" "OMC_RELEASE_HTTPS_CERT_SOURCE_DIR" "$BUILD_RELEASE"
 contains "release build copies certificate assets into package" "copy_release_https_cert_assets" "$BUILD_RELEASE"
 contains "release build packages fixed certificate path" "deploy/nginx-cert" "$BUILD_RELEASE"
-contains "gitignore blocks private release certificate assets" "deployments/release/private/" "$GITIGNORE"
+not_contains "gitignore must not block repository release certificate assets" "deployments/release/private/" "$GITIGNORE"
+contains "repository carries old OMC certificate" "BEGIN CERTIFICATE" "$REPO_CERT_DIR/cert.pem"
+contains "repository carries old OMC private key" "BEGIN PRIVATE KEY" "$REPO_CERT_DIR/key.pem"
+expect_success "release build validates repository certificate assets by default" bash "$BUILD_RELEASE" --verify-https-cert-assets-only
+expect_success "release build verifies final package certificate layout" bash "$BUILD_RELEASE" --verify-https-cert-package-layout-only
+if command -v git >/dev/null 2>&1; then
+  expect_fail "repository certificate must not be ignored by git" git -C "$REPO_ROOT" check-ignore deployments/release/bundle/deploy/nginx-cert/cert.pem
+  expect_fail "repository private key must not be ignored by git" git -C "$REPO_ROOT" check-ignore deployments/release/bundle/deploy/nginx-cert/key.pem
+  expect_success "repository certificate is tracked by git" git -C "$REPO_ROOT" ls-files --error-unmatch deployments/release/bundle/deploy/nginx-cert/cert.pem
+  expect_success "repository private key is tracked by git" git -C "$REPO_ROOT" ls-files --error-unmatch deployments/release/bundle/deploy/nginx-cert/key.pem
+else
+  bad "git is required to verify repository certificate ignore rules"
+fi
 contains "install prechecks packaged certificate" "Packaged nginx HTTPS file-entry certificate precheck passed" "$INSTALL"
 contains "install installs packaged certificate to host" "install_nginx_https_cert" "$INSTALL"
 appears_before "install installs HTTPS certificate before web container startup" "install_nginx_https_cert" '"${DC[@]}" up --pull never -d' "$INSTALL"
@@ -255,9 +249,9 @@ contains "smoke uses ACS download bucket path" "/smallcell/FileDownloadService/l
 
 echo "-- release README operator contract --"
 contains "README documents packaged certificate path" "deploy/nginx-cert/cert.pem" "$README"
-contains "README documents packaged source proof path" "deploy/nginx-cert/source.txt" "$README"
-contains "README documents private asset input path" "deployments/release/private/nginx-cert/" "$README"
+contains "README documents repository certificate path" "deployments/release/bundle/deploy/nginx-cert/cert.pem" "$README"
 contains "README documents old OMC certificate source" "root@172.21.175.129:/etc/nginx/cert/cert.pem" "$README"
+contains "README says release build does not depend on local private certificate directory" "depend on any local private certificate directory" "$README"
 contains "README documents certificate path" "/etc/nginx/cert/cert.pem" "$README"
 contains "README documents private-key path" "/etc/nginx/cert/key.pem" "$README"
 contains "README documents install-time certificate copy" "installs it to" "$README"

@@ -38,11 +38,9 @@ source "$SCRIPT_DIR/release.conf"
 log()  { echo -e "\033[1;32m[release]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[release][警告]\033[0m $*" >&2; }
 die()  { echo -e "\033[1;31m[release][错误]\033[0m $*" >&2; exit 1; }
-RELEASE_HTTPS_CERT_SOURCE_DIR="${OMC_RELEASE_HTTPS_CERT_SOURCE_DIR:-$REPO_ROOT/deployments/release/private/nginx-cert}"
+RELEASE_HTTPS_CERT_REPO_DIR="$REPO_ROOT/deployments/release/bundle/deploy/nginx-cert"
+RELEASE_HTTPS_CERT_SOURCE_DIR="$RELEASE_HTTPS_CERT_REPO_DIR"
 RELEASE_HTTPS_CERT_PACKAGE_DIR="deploy/nginx-cert"
-RELEASE_HTTPS_CERT_SOURCE_PROOF="source.txt"
-RELEASE_HTTPS_CERT_EXPECTED_CERT_SOURCE="root@172.21.175.129:/etc/nginx/cert/cert.pem"
-RELEASE_HTTPS_CERT_EXPECTED_KEY_SOURCE="root@172.21.175.129:/etc/nginx/cert/key.pem"
 
 release_https_cert_public_fingerprint() { # release_https_cert_public_fingerprint <cert|key> <path>
   local kind="$1" path="$2"
@@ -54,24 +52,17 @@ release_https_cert_public_fingerprint() { # release_https_cert_public_fingerprin
 }
 
 validate_release_https_cert_assets() { # validate_release_https_cert_assets <dir>
-  local dir="$1" cert key source_proof cert_fp key_fp
+  local dir="$1" cert key cert_fp key_fp
   cert="$dir/cert.pem"
   key="$dir/key.pem"
-  source_proof="$dir/$RELEASE_HTTPS_CERT_SOURCE_PROOF"
 
   [ -d "$dir" ] ||
     die "缺少 OMC HTTPS 8443 证书资产目录：$dir
-      请从老 OMC /etc/nginx/cert/ 或私有构建上下文放入 cert.pem/key.pem/source.txt；
-      也可用 OMC_RELEASE_HTTPS_CERT_SOURCE_DIR 指定固定私有资产目录。"
+      请把老 OMC 的 cert.pem/key.pem 放入仓库固定目录 deployments/release/bundle/deploy/nginx-cert/。"
   [ -f "$cert" ] || die "缺少 OMC HTTPS 8443 证书资产：$cert"
   [ -f "$key" ] || die "缺少 OMC HTTPS 8443 私钥资产：$key"
-  [ -f "$source_proof" ] || die "缺少 OMC HTTPS 8443 证书来源声明：$source_proof"
   [ -r "$cert" ] || die "OMC HTTPS 8443 证书资产不可读：$cert"
   [ -r "$key" ] || die "OMC HTTPS 8443 私钥资产不可读：$key"
-  grep -Fqx "cert.pem: $RELEASE_HTTPS_CERT_EXPECTED_CERT_SOURCE" "$source_proof" ||
-    die "OMC HTTPS 8443 证书来源声明不匹配：$source_proof 必须包含 cert.pem: $RELEASE_HTTPS_CERT_EXPECTED_CERT_SOURCE"
-  grep -Fqx "key.pem: $RELEASE_HTTPS_CERT_EXPECTED_KEY_SOURCE" "$source_proof" ||
-    die "OMC HTTPS 8443 私钥来源声明不匹配：$source_proof 必须包含 key.pem: $RELEASE_HTTPS_CERT_EXPECTED_KEY_SOURCE"
   command -v openssl >/dev/null 2>&1 ||
     die "缺少 openssl，无法校验 OMC HTTPS 8443 证书与私钥是否匹配"
 
@@ -84,11 +75,11 @@ validate_release_https_cert_assets() { # validate_release_https_cert_assets <dir
 }
 
 copy_release_https_cert_assets() { # copy_release_https_cert_assets <stage>
-  local stage="$1" dst="$stage/$RELEASE_HTTPS_CERT_PACKAGE_DIR"
+  local stage="$1" dst
+  dst="$stage/$RELEASE_HTTPS_CERT_PACKAGE_DIR"
   mkdir -p "$dst"
   install -m 0644 "$RELEASE_HTTPS_CERT_SOURCE_DIR/cert.pem" "$dst/cert.pem"
   install -m 0600 "$RELEASE_HTTPS_CERT_SOURCE_DIR/key.pem" "$dst/key.pem"
-  install -m 0644 "$RELEASE_HTTPS_CERT_SOURCE_DIR/$RELEASE_HTTPS_CERT_SOURCE_PROOF" "$dst/$RELEASE_HTTPS_CERT_SOURCE_PROOF"
 }
 
 # 使用构建机当地时间，并保留时区偏移（例如 +08:00），避免与版本目录中的
@@ -105,6 +96,7 @@ VERSION=""
 CHANNEL="${RELEASE_CHANNEL:-test}"
 VERIFY_ONLY=0
 VERIFY_HTTPS_CERT_ASSETS_ONLY=0
+VERIFY_HTTPS_CERT_PACKAGE_LAYOUT_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -v|--version) VERSION="$2"; shift 2 ;;
@@ -112,6 +104,7 @@ while [ $# -gt 0 ]; do
     --arch)       ARCHES="$2"; shift 2 ;;
     --verify-only) VERIFY_ONLY=1; shift ;;
     --verify-https-cert-assets-only) VERIFY_HTTPS_CERT_ASSETS_ONLY=1; shift ;;
+    --verify-https-cert-package-layout-only) VERIFY_HTTPS_CERT_PACKAGE_LAYOUT_ONLY=1; shift ;;
     -h|--help)    sed -n '3,26p' "$0"; exit 0 ;;
     *)            die "未知参数：$1（-h 查看用法）" ;;
   esac
@@ -133,6 +126,21 @@ if [ "$VERIFY_HTTPS_CERT_ASSETS_ONLY" = 1 ]; then
   command -v sha256sum >/dev/null 2>&1 || die "缺少构建工具：sha256sum"
   validate_release_https_cert_assets "$RELEASE_HTTPS_CERT_SOURCE_DIR"
   log "OMC HTTPS 8443 证书资产校验通过：$RELEASE_HTTPS_CERT_SOURCE_DIR"
+  exit 0
+fi
+
+if [ "$VERIFY_HTTPS_CERT_PACKAGE_LAYOUT_ONLY" = 1 ]; then
+  command -v sha256sum >/dev/null 2>&1 || die "缺少构建工具：sha256sum"
+  validate_release_https_cert_assets "$RELEASE_HTTPS_CERT_SOURCE_DIR"
+  cert_stage="$(mktemp -d "${TMPDIR:-/tmp}/omc-release-cert-stage.XXXXXX")"
+  trap 'rm -rf "$cert_stage"' EXIT
+  copy_release_https_cert_assets "$cert_stage"
+  [ -f "$cert_stage/$RELEASE_HTTPS_CERT_PACKAGE_DIR/cert.pem" ] ||
+    die "最终发布包证书路径缺失：$RELEASE_HTTPS_CERT_PACKAGE_DIR/cert.pem"
+  [ -f "$cert_stage/$RELEASE_HTTPS_CERT_PACKAGE_DIR/key.pem" ] ||
+    die "最终发布包私钥路径缺失：$RELEASE_HTTPS_CERT_PACKAGE_DIR/key.pem"
+  validate_release_https_cert_assets "$cert_stage/$RELEASE_HTTPS_CERT_PACKAGE_DIR"
+  log "OMC HTTPS 8443 证书发布包路径校验通过：$RELEASE_HTTPS_CERT_PACKAGE_DIR/cert.pem / key.pem"
   exit 0
 fi
 

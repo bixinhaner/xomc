@@ -49,8 +49,6 @@ backups/
 # T-0118 TLS 自签证书 + 本地化 nginx TLS conf — 不入库
 deployments/docker/certs/
 deployments/docker/default-tls.conf
-# OMC 8443 HTTPS 发布包私有证书输入目录（真实 cert/key 永不入库）
-deployments/release/private/
 
 # 离线交付构建产物（勿入库；目录由构建脚本自动创建）
 deployments/release/dist/
