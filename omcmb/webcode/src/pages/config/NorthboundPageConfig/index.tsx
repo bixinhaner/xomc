@@ -45,6 +45,7 @@ import {
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { northboundPageConfigApi } from '@core/services/api/northboundPageConfigApi';
+import { saveBlob } from '@core/utils/saveBlob';
 import type {
   NorthboundFileGroup,
   NorthboundFileProfile,
@@ -316,6 +317,21 @@ const snmpV3SecurityLevelOptions: Array<{ label: string; value: SnmpV3SecurityLe
 const snmpDefaultCommunity = 'baicells';
 const storedCredentialText = '已加密存储';
 const credentialMaskText = '********';
+const apiCatalogRowHeight = 48;
+const apiCatalogHeaderHeight = 48;
+const apiCatalogVerticalChrome = 178;
+
+interface ApiCatalogLayout {
+  pageSize: number;
+  tableY: number;
+}
+
+function resolveApiCatalogLayout(): ApiCatalogLayout {
+  const viewportHeight = typeof window === 'undefined' ? 900 : window.innerHeight;
+  const tableY = Math.max(360, viewportHeight - apiCatalogVerticalChrome);
+  const pageSize = Math.max(10, Math.floor((tableY - apiCatalogHeaderHeight) / apiCatalogRowHeight));
+  return { pageSize, tableY };
+}
 
 interface SocketAlarmConfigRow {
   key: string;
@@ -5378,6 +5394,50 @@ function normalizeApiFieldDisplay(field: string): string {
   return normalized.replace(/\?/g, '').replace(/\[\]/g, '');
 }
 
+function escapeApiCatalogCsvCell(value: unknown): string {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function buildApiCatalogCsv(
+  rows: NorthboundApiRow[],
+  enabledMap: Record<string, boolean>,
+  translate: (value: string) => string,
+): string {
+  const headers = [
+    '序号',
+    '接口类型',
+    '业务模块',
+    '接口名称',
+    '方法',
+    '接口 URL',
+    '启用状态',
+    '认证方式',
+    '返回字段',
+    '字段数量',
+    '字段清单',
+    '后端来源',
+  ].map(translate);
+  const csvRows = rows.map((row, index) => {
+    const meta = getApiMeta(row);
+    const fields = apiFieldDisplayList(meta.responseFields);
+    return [
+      String(index + 1),
+      translate(apiKindLabel(meta.apiKind)),
+      translate(apiModuleDisplay(row)),
+      translate(row.name),
+      row.method,
+      row.url,
+      translate(enabledMap[apiConfigKey(row)] ? '启用' : '关闭'),
+      translate(normalizeLegacyApiText(row.auth)),
+      translate(meta.fieldContract),
+      String(fields.length),
+      fields.join('; '),
+      row.backendSource || '',
+    ];
+  });
+  return [headers, ...csvRows].map((row) => row.map(escapeApiCatalogCsvCell).join(',')).join('\r\n');
+}
+
 function apiModuleDisplay(row: NorthboundApiRow): string {
   const normalizedModule = apiModuleLabel(row.module);
   if (normalizedModule !== row.module) return normalizedModule;
@@ -6158,6 +6218,7 @@ export default function NorthboundPageConfig() {
   const [apiUserSaving, setApiUserSaving] = useState(false);
   const [apiSwitchSaving, setApiSwitchSaving] = useState(false);
   const [apiCatalogOpen, setApiCatalogOpen] = useState(false);
+  const [apiCatalogLayout, setApiCatalogLayout] = useState<ApiCatalogLayout>(() => resolveApiCatalogLayout());
   const [selectedApi, setSelectedApi] = useState<NorthboundApiRow | null>(null);
   const pageConfigLoadingRef = useRef(false);
   const apiUserDirtyRef = useRef(false);
@@ -6364,6 +6425,14 @@ export default function NorthboundPageConfig() {
   useEffect(() => {
     void loadPageConfig(true);
   }, [loadPageConfig]);
+
+  useEffect(() => {
+    if (!apiCatalogOpen || typeof window === 'undefined') return undefined;
+    const updateLayout = () => setApiCatalogLayout(resolveApiCatalogLayout());
+    updateLayout();
+    window.addEventListener('resize', updateLayout);
+    return () => window.removeEventListener('resize', updateLayout);
+  }, [apiCatalogOpen]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -7175,6 +7244,31 @@ export default function NorthboundPageConfig() {
           onClick={refreshScenarioList}
         />
       </Tooltip>
+    ),
+  });
+
+  const exportApiCatalog = useCallback(() => {
+    const csv = buildApiCatalogCsv(apiRows, apiEnabled, nt);
+    saveBlob(`\ufeff${csv}`, `northbound-api-catalog_${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
+    void message.success(nt('接口清单已导出'));
+  }, [apiEnabled, apiRows, nt]);
+
+  const renderApiCatalogPagination = () => ({
+    pageSize: apiCatalogLayout.pageSize,
+    showSizeChanger: false,
+    showTotal: (total: number) => (
+      <Space size={8}>
+        <Typography.Text type="secondary">{nt(`共 ${total} 个接口`)}</Typography.Text>
+        <Tooltip title={nt('刷新')}>
+          <Button
+            aria-label={nt('刷新北向 API')}
+            type="text"
+            size="small"
+            icon={<ReloadOutlined />}
+            onClick={refreshScenarioList}
+          />
+        </Tooltip>
+      </Space>
     ),
   });
 
@@ -8195,8 +8289,13 @@ export default function NorthboundPageConfig() {
       ),
     },
     {
+      title: '接口类型',
+      width: 120,
+      render: (_, row) => apiKindTag(getApiMeta(row).apiKind),
+    },
+    {
       title: '模块',
-      width: 150,
+      width: 140,
       render: (_, row) => apiModuleTag(row),
     },
     {
@@ -8214,6 +8313,11 @@ export default function NorthboundPageConfig() {
       dataIndex: 'method',
       width: 86,
       render: (value: ApiMethod) => apiMethodTag(value),
+    },
+    {
+      title: '启用状态',
+      width: 96,
+      render: (_, row) => statusTag(Boolean(apiEnabled[apiConfigKey(row)])),
     },
     {
       title: '接口 URL',
@@ -9275,31 +9379,45 @@ export default function NorthboundPageConfig() {
       </Drawer>
 
       <Drawer
-        title="北向 API 接口清单"
+        title={(
+          <Space size={12}>
+            <span>{nt('北向 API 接口清单')}</span>
+            <Tag>{nt(`共 ${apiRows.length} 个接口`)}</Tag>
+          </Space>
+        )}
         open={apiCatalogOpen}
         onClose={() => setApiCatalogOpen(false)}
         size="large"
-        rootClassName={styles.inventoryDrawer}
+        rootClassName={styles.apiCatalogDrawer}
         destroyOnClose
         extra={(
-          <Button
-            size="small"
-            icon={<ReloadOutlined />}
-            loading={pageConfigLoading}
-            onClick={() => loadPageConfig(false)}
-          >
-            刷新
-          </Button>
+          <Space>
+            <Button
+              size="small"
+              icon={<DownloadOutlined />}
+              onClick={exportApiCatalog}
+            >
+              {nt('导出接口清单')}
+            </Button>
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={pageConfigLoading}
+              onClick={() => loadPageConfig(false)}
+            >
+              {nt('刷新')}
+            </Button>
+          </Space>
         )}
       >
         <Table<NorthboundApiRow>
-          className={styles.compactScenarioTable}
+          className={`${styles.compactScenarioTable} ${styles.apiCatalogTable}`}
           columns={apiColumns}
           dataSource={apiRows}
           rowKey="key"
           size="small"
-          pagination={renderTablePagination('刷新北向 API')}
-          scroll={{ x: 1100, y: 560 }}
+          pagination={renderApiCatalogPagination()}
+          scroll={{ x: 1320, y: apiCatalogLayout.tableY }}
           rowClassName={(row) => (selectedApi?.key === row.key ? styles.selectedRow : '')}
           onRow={(row) => ({ onClick: () => setSelectedApi(row) })}
         />
