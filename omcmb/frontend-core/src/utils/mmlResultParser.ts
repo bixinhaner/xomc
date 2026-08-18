@@ -42,6 +42,8 @@ const MAX_DOM_PARSE_XML_CHARS = 500_000;
 export interface ParseMmlResultOptions {
   /** Limit parsed GPV params for summary/table views. Omitted means keep full parser semantics. */
   maxParams?: number;
+  /** Optional inclusion predicate applied before maxParams. */
+  includeParam?: (param: ParsedParamValue) => boolean;
 }
 
 /** ACS 写入 device_tasks.result 的 shape（与 handler.go resultMap 保持一致）。 */
@@ -76,8 +78,9 @@ export function parseMmlDeviceTaskResult(result: unknown, options: ParseMmlResul
     if (Array.isArray(std) && std.length > 0) {
       const params = std
         .filter((p) => p && typeof p.name === 'string' && p.name)
-        .slice(0, options.maxParams)
-        .map((p) => ({ name: p.name, value: String(p.value ?? ''), type: p.type }));
+        .map((p) => ({ name: p.name, value: String(p.value ?? ''), type: p.type }))
+        .filter((p) => options.includeParam?.(p) ?? true)
+        .slice(0, options.maxParams);
       if (params.length > 0) return { kind: 'gpv', params };
     }
     return { kind: 'gpv', params: parseGPVResponse(xml, options) };
@@ -110,7 +113,7 @@ export function parseMmlDeviceTaskResult(result: unknown, options: ParseMmlResul
  */
 function parseGPVResponse(xml: string, options: ParseMmlResultOptions = {}): ParsedParamValue[] {
   if (xml.length > MAX_DOM_PARSE_XML_CHARS) {
-    return parseGPVResponseLight(xml, options.maxParams);
+    return parseGPVResponseLight(xml, options);
   }
   if (typeof DOMParser === 'undefined') return [];
   let doc: Document;
@@ -132,13 +135,15 @@ function parseGPVResponse(xml: string, options: ParseMmlResultOptions = {}): Par
     if (!name) continue;
     const value = (valEl?.textContent ?? '').trim();
     const type = valEl ? readTypeAttr(valEl) : undefined;
-    out.push({ name, value, type });
+    const param = { name, value, type };
+    if (!(options.includeParam?.(param) ?? true)) continue;
+    out.push(param);
     if (options.maxParams && out.length >= options.maxParams) break;
   }
   return out;
 }
 
-function parseGPVResponseLight(xml: string, limit?: number): ParsedParamValue[] {
+function parseGPVResponseLight(xml: string, options: ParseMmlResultOptions = {}): ParsedParamValue[] {
   const out: ParsedParamValue[] = [];
   const structRe = /<(?:[\w-]+:)?ParameterValueStruct\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?ParameterValueStruct>/g;
   let match: RegExpExecArray | null;
@@ -148,8 +153,10 @@ function parseGPVResponseLight(xml: string, limit?: number): ParsedParamValue[] 
     if (!name) continue;
     const value = readXmlTagText(block, 'Value') ?? '';
     const type = readValueType(block);
-    out.push({ name, value, type });
-    if (limit && out.length >= limit) break;
+    const param = { name, value, type };
+    if (!(options.includeParam?.(param) ?? true)) continue;
+    out.push(param);
+    if (options.maxParams && out.length >= options.maxParams) break;
   }
   return out;
 }

@@ -256,6 +256,7 @@ export default function CommandSelectModal({
     locale,
     deviceSn,
     productClass,
+    open,
   );
   const { data: customPathDefs, isFetching: customPathsLoading } = useCustomCommandPaths(
     selectedCustomId ?? undefined,

@@ -77,6 +77,114 @@ func TestBuiltinLTEBandwidthKeepsProductWireValuesAndMirrorConstraint(t *testing
 	}
 }
 
+func TestBuiltinBaiBNQBandwidthUsesNativeNRPaths(t *testing.T) {
+	const dlPath = "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.DLBandwidth"
+	const ulPath = "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.RF.ULBandwidth"
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml"))
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+	found := make(map[string]xmlParamEntry)
+	for _, param := range doc.Params {
+		if param.Name == dlPath || param.Name == ulPath {
+			found[param.Name] = param
+		}
+	}
+
+	for path, mirror := range map[string]string{dlPath: ulPath, ulPath: dlPath} {
+		param, ok := found[path]
+		require.True(t, ok, "missing BaiBNQ mapping %s", path)
+		require.Equal(t, path, param.StandardPath)
+		require.Equal(t, mirror, param.MirrorWith)
+		require.Equal(t, strings.Count(param.StandardPath, "{i}"), strings.Count(param.Name, "{i}"))
+
+		translator := NewTranslator(&MappingSet{
+			Source: MappingSourceDefault,
+			Mappings: []ParamMapping{{
+				ID: uuid.New(), StandardPath: param.StandardPath,
+				PrivatePath: param.Name, EntryType: "parameter",
+			}},
+		}, NewRegistryMetrics(nil), nil)
+		runtimePath := strings.ReplaceAll(path, "{i}", "1")
+		translated := translator.ToPrivate(runtimePath)
+		require.True(t, translated.Found)
+		require.Equal(t, runtimePath, translated.Translated)
+	}
+}
+
+func TestBuiltinParamMappingsHaveUniquePrivatePathsAndSafePlaceholders(t *testing.T) {
+	mappingDir := filepath.Join("..", "..", "..", "data", "param-mappings")
+	files, err := filepath.Glob(filepath.Join(mappingDir, "*.xml"))
+	require.NoError(t, err)
+
+	for _, xmlPath := range files {
+		base := filepath.Base(xmlPath)
+		if base == "standard-model.xml" || base == "products.xml" ||
+			base == "product-name-routing.xml" || base == "param-model-routing.xml" {
+			continue
+		}
+		t.Run(strings.TrimSuffix(base, filepath.Ext(base)), func(t *testing.T) {
+			body, readErr := os.ReadFile(xmlPath)
+			require.NoError(t, readErr)
+			var doc xmlParameterModel
+			require.NoError(t, xml.Unmarshal(body, &doc))
+
+			checkEntries := func(entryType string, entries []xmlParamEntry) {
+				privatePaths := make(map[string]string, len(entries))
+				mappingPairs := make(map[string]struct{}, len(entries))
+				for _, entry := range entries {
+					require.NotEmpty(t, entry.Name, "%s private path must not be empty", entryType)
+					require.NotEmpty(t, entry.StandardPath, "%s standard path must not be empty: %s", entryType, entry.Name)
+					assert.LessOrEqual(t, strings.Count(entry.Name, "{i}"), strings.Count(entry.StandardPath, "{i}"),
+						"%s placeholder mismatch: standard=%s private=%s", entryType, entry.StandardPath, entry.Name)
+					if previous, exists := privatePaths[entry.Name]; exists {
+						t.Errorf("duplicate %s private path %s: %s and %s", entryType, entry.Name, previous, entry.StandardPath)
+					} else {
+						privatePaths[entry.Name] = entry.StandardPath
+					}
+					pair := entry.StandardPath + "\x00" + entry.Name
+					if _, exists := mappingPairs[pair]; exists {
+						t.Errorf("duplicate %s mapping: standard=%s private=%s", entryType, entry.StandardPath, entry.Name)
+					} else {
+						mappingPairs[pair] = struct{}{}
+					}
+				}
+			}
+
+			checkEntries("object", doc.Objects)
+			checkEntries("parameter", doc.Params)
+		})
+	}
+}
+
+func TestBuiltinBaiBNQDynamicNRMappingsDoNotHaveFixedInstanceAliases(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BaiBNQ.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	wantUnique := map[string]string{
+		"Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.rftxEnable":                                                                 "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.rftxEnable",
+		"Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PowerModify":                                                                "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PowerModify",
+		"Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{i}.FreqBandIndicatorNR": "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{i}.FreqBandIndicatorNR",
+		"Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.CellEnable.AdminState":                                                      "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.CellEnable.AdminState",
+	}
+	counts := make(map[string]int, len(wantUnique))
+	for _, param := range doc.Params {
+		privatePath, tracked := wantUnique[param.StandardPath]
+		if !tracked {
+			continue
+		}
+		counts[param.StandardPath]++
+		assert.Equal(t, privatePath, param.Name, "BaiBNQ dynamic NR mapping must preserve every instance level")
+	}
+	for standardPath := range wantUnique {
+		assert.Equal(t, 1, counts[standardPath], "expected one BaiBNQ mapping for %s", standardPath)
+	}
+}
+
 func TestBMNeighborListHasPrivateArfcnAlias(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
 	body, err := os.ReadFile(xmlPath)

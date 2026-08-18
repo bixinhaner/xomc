@@ -143,6 +143,11 @@ export interface ResultColumn {
   key: string;
   label: string;
   path: string;
+  /**
+   * 叶子查询因空实例选择器折叠为对象 GPV 时，保留用户原始勾选的标准 Path 模板。
+   * 对象响应动态展开只接纳匹配这些模板的实例化叶子；缺省表示显式对象查询，展示全部后代。
+   */
+  selectedPathTemplates?: string[];
 }
 
 /** 执行模式 */

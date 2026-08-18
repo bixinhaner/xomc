@@ -81,14 +81,15 @@ export function useGroupTreeFlat(
 /**
  * 命令的 sub-fields（join standard_params 元数据；mml_params 表已下线）。
  *
- * enabled = Boolean(commandId) 防止首次渲染没选命令时空查。
- * staleTime 与 GroupTree 一致。
+ * enabled = Boolean(commandId) && active，防止未选命令或弹框关闭时空查。
+ * 参数模型支持热加载，因此缓存立即视为 stale，弹框重新打开时重新校验。
  */
 export function useCommandSubFields(
   commandId: string | undefined,
   lang: string = 'zh-CN',
   deviceKey?: string,
   productClass?: string,
+  active: boolean = true,
 ): ReturnType<typeof useQuery<SubFieldDef[]>> {
   return useQuery({
     // T-0170: queryKey 含设备/产品上下文，让切换目标后重新拉对应支持集合的 sub_field。
@@ -100,8 +101,10 @@ export function useCommandSubFields(
       productClass ?? '',
     ],
     queryFn: () => mmlApi.getCommandSubFields(commandId!, lang, deviceKey, productClass),
-    staleTime: 30 * 60 * 1000,
-    enabled: Boolean(commandId),
+    // 参数模型/命令目录支持热加载；旧的空交集不能在命令弹框中缓存 30 分钟。
+    // 弹框关闭时 caller 传 active=false，重新打开后把缓存视为 stale 并重新校验。
+    staleTime: 0,
+    enabled: Boolean(commandId) && active,
   });
 }
 

@@ -188,7 +188,7 @@ describe('CommandSelectModal', () => {
     fireEvent.click(await screen.findByText('查询设备信息'));
 
     expect(fixtures.groupTreeCalls).toContainEqual([undefined, 'zh-CN', 'FAP/BU1810', 'device-1']);
-    expect(fixtures.subFieldCalls).toContainEqual(['lst-1', 'zh-CN', 'device-1', 'FAP/BU1810']);
+    expect(fixtures.subFieldCalls).toContainEqual(['lst-1', 'zh-CN', 'device-1', 'FAP/BU1810', true]);
   });
 
   it('filters standard commands by target path', async () => {

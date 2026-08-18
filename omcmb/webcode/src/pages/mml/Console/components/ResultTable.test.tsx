@@ -91,6 +91,34 @@ describe('ResultTable', () => {
     expect(container.querySelectorAll('tbody button')).toHaveLength(3);
   });
 
+  it('uses one fixed numeric table width so sticky header and body columns cannot diverge', () => {
+    const { container } = render(
+      <ResultTable
+        execMeta={{ operationType: 'LST', read: true, label: 'LST PERF_MGMT_CONFIG' }}
+        commandId="command-wide"
+        columns={[
+          { key: 'value-1', label: 'Very Long Parameter Header 1', path: 'Device.Test.Value1' },
+          { key: 'value-2', label: 'Very Long Parameter Header 2', path: 'Device.Test.Value2' },
+        ]}
+        rows={[{
+          ...row,
+          cells: {
+            'Device.Test.Value1': '1',
+            'Device.Test.Value2': '2',
+          },
+        }]}
+        running={false}
+        hasExecuted
+      />,
+    );
+
+    const tables = Array.from(container.querySelectorAll('.ant-table table')) as HTMLTableElement[];
+    expect(tables.length).toBeGreaterThan(0);
+    // 4 个基础列 570 + 2 个动态列 280 + 2 个时间列 208 = 1058px。
+    expect(tables.every((table) => table.style.width === '1058px')).toBe(true);
+    expect(tables.every((table) => table.style.tableLayout === 'fixed')).toBe(true);
+  });
+
   it('falls back to the selected command metadata when a MOD readback row has no command fields', () => {
     const { container } = render(
       <ResultTable

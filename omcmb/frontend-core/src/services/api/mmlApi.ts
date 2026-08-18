@@ -759,6 +759,9 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
       ? (c.param_paths as unknown[]).filter((p): p is string => typeof p === 'string')
       : [];
     const paramPaths = pathsFromRefs.length > 0 ? pathsFromRefs : pathsFromLegacy;
+    const selectedStandardPaths = Array.isArray(c.selected_standard_paths)
+      ? (c.selected_standard_paths as unknown[]).filter((p): p is string => typeof p === 'string')
+      : [];
     const paramRefs = refsRaw.flatMap((r) => {
       if (!r || typeof r !== 'object') return [];
       const ref = r as { param_code?: unknown; tr069_path?: unknown };
@@ -777,6 +780,7 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
           ? (c.operation_type as MMLTaskCommandDetail['operationType'])
           : undefined,
       paramPaths: paramPaths.length > 0 ? paramPaths : undefined,
+      selectedStandardPaths: selectedStandardPaths.length > 0 ? selectedStandardPaths : undefined,
       paramRefs: paramRefs.length > 0 ? paramRefs : undefined,
       paramValues: Array.isArray(c.param_values) ? (c.param_values as unknown[]) : undefined,
       // 裸路径/自定义 MOD 把下发值存于 parameters（path→value map），非 param_values 数组。

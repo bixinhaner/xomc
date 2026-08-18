@@ -293,6 +293,7 @@ func TestBuildEntry_LST_BlankFinalInstanceUsesPartialPath(t *testing.T) {
 	refs := entry["param_refs"].([]MMLParamRef)
 	require.Len(t, refs, 1)
 	assert.Equal(t, "Device.A.1.B.", refs[0].Tr069Path)
+	assert.Equal(t, []string{"Device.A.{i}.B.{i}.Value"}, entry["selected_standard_paths"])
 
 	payload, err := BuildTR069Params(
 		entry["rpc_method"].(string),

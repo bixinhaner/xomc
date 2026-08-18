@@ -47,6 +47,10 @@ interface ResultTableProps {
 
 type StatusFilter = 'all' | 'success' | 'failed';
 
+const BASE_RESULT_COLUMNS_WIDTH = 190 + 110 + 120 + 150;
+const DYNAMIC_RESULT_COLUMN_WIDTH = 140;
+const TAIL_RESULT_COLUMNS_WIDTH = 104 + 104;
+
 /** 状态 Tag；unverified 悬浮显示原因（只写/重启生效/查询失败，设计 §3.11.2）。 */
 function StatusTag({
   status,
@@ -95,6 +99,9 @@ export default function ResultTable({
     () => expandObjectPathColumns(columns, rows),
     [columns, rows],
   );
+  const tableScrollWidth = BASE_RESULT_COLUMNS_WIDTH
+    + displayColumns.length * DYNAMIC_RESULT_COLUMN_WIDTH
+    + TAIL_RESULT_COLUMNS_WIDTH;
 
   const handleExportAllCsv = (): void => {
     const exportTaskIds = commandIds.length > 0 ? commandIds : (commandId ? [commandId] : []);
@@ -234,7 +241,7 @@ export default function ResultTable({
     const dynamic: ColumnsType<ResultRow> = displayColumns.map((c) => ({
       title: c.label,
       key: c.key,
-      width: 140,
+      width: DYNAMIC_RESULT_COLUMN_WIDTH,
       ellipsis: true,
       render: (_v, r) => {
         const val = r.cells[c.path];
@@ -365,7 +372,8 @@ export default function ResultTable({
             loading={running}
             columns={tableColumns}
             dataSource={filteredRows}
-            scroll={{ x: 'max-content' }}
+            tableLayout="fixed"
+            scroll={{ x: tableScrollWidth }}
             sticky
             pagination={{ pageSize: 20, size: 'small', showTotal: (count) => t('mml.consoleV2.result.totalRows', { count }) }}
           />
