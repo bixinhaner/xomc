@@ -237,7 +237,7 @@ func eventFromFileRun(run FileRun) PageConfigEvent {
 		Payload:            payload,
 		PayloadContentType: "text/plain; charset=utf-8",
 		ErrorMessage:       run.ErrorMessage,
-		Summary: map[string]any{
+		Summary: mergeSummary(map[string]any{
 			"run_id":              run.ID,
 			"domain":              run.Domain,
 			"object_code":         run.ObjectCode,
@@ -245,7 +245,7 @@ func eventFromFileRun(run FileRun) PageConfigEvent {
 			"artifact_size":       run.ArtifactSize,
 			"compression_enabled": run.CompressionEnabled,
 			"compression_format":  run.CompressionFormat,
-		},
+		}, run.Summary),
 	}
 }
 

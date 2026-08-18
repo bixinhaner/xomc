@@ -233,6 +233,7 @@ interface ReportStatusInfo {
   targetSummary: string;
   detail: string;
   payload: string;
+  subject?: string;
   deliveryNote?: string;
   previewTitle?: string;
   copyLabel?: string;
@@ -455,7 +456,7 @@ interface FieldTarget {
 }
 
 const PATH_CM = '/#FTPRoot#/#Province#/#OMC-R#/CM/#DateTime#/';
-const PATH_PM = '/#FTPRoot#/#Province#/#OMC-R#/PM/#DateTime#/';
+const PATH_PM_TECH = '/#FTPRoot#/#Province#/#OMC-R#/PM/#Tech#/#DateTime#/';
 const PATH_MR = '/#FTPRoot#/#Province#/#OMC-R#/MR/#DateTime#/';
 const PATH_LOG = '/#FTPRoot#/LOGS/#Date#/';
 const PATH_INVENTORY = '/#FTPRoot#/#Province#/#OMC-R#/Inventory/#Object#/#DateTime#/';
@@ -510,7 +511,7 @@ const formatOrder: Format[] = ['XML', 'CSV', 'TXT'];
 
 const defaultRemotePathByDomain: Record<Domain, string> = {
   CM: PATH_CM,
-  PM: PATH_PM,
+  PM: PATH_PM_TECH,
   MR: PATH_MR,
   LOG: PATH_LOG,
   INVENTORY: PATH_INVENTORY,
@@ -669,7 +670,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -679,7 +680,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -689,7 +690,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -699,7 +700,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -709,7 +710,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m-delayed', 'PM', 'CSV', '15M', '0 14/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
+      group('pm-15m-delayed', 'PM', 'CSV', '15M', '0 14/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
     logs: { mode: 'custom', cron: '30 5 16 * * ?', period: '24H', compression: 'gz' },
@@ -720,7 +721,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
     ],
   },
   {
@@ -729,7 +730,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily-csv', 'CM', 'CSV', '24H', '0 0 17 * * ?', PATH_CM, CM_NAME, cmObjectsWithComs),
-      group('pm-60m', 'PM', 'CSV', '60M', '0 20 * * * ?', PATH_PM, PM_NAME, [{ code: 'PC' }]),
+      group('pm-60m', 'PM', 'CSV', '60M', '0 20 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
     ],
   },
   {
@@ -738,7 +739,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily-csv', 'CM', 'CSV', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjectsWithComs),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
     logs: { mode: 'fix', cron: '30 5 16 * * ?', period: '24H', compression: 'gz' },
@@ -749,7 +750,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-pc-60m', 'PM', 'CSV', '60M', '0 0 1 * * ?', PATH_PM, PM_NAME, [{ code: 'PC' }]),
+      group('pm-pc-60m', 'PM', 'CSV', '60M', '0 0 1 * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -759,7 +760,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily-by-object', 'CM', 'XML', '24H', '30 1 0 * * ?', `${PATH_CM}#Object#/`, CM_NAME, cmObjects),
-      group('pm-15m-by-object', 'PM', 'CSV', '15M', '0 5/15 * * * ?', `${PATH_PM}#Object#/`, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m-by-object', 'PM', 'CSV', '15M', '0 5/15 * * * ?', `${PATH_PM_TECH}#Object#/`, PM_NAME, [{ code: 'PC' }]),
       group('mr-15m-by-object', 'MR', 'XML', '15M', '0 0/15 * * * ?', `${PATH_MR}#Object#/`, MR_NAME, mrObjects),
     ],
   },
@@ -769,7 +770,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -780,8 +781,8 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     groups: [
       group('cm-daily-lte', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
       group('cm-daily-gnb', 'CM', 'XML', '24H', '30 3 0 * * ?', `${PATH_CM}GNB/`, CM_NAME, cmGnbObjects),
-      group('pm-15m-lte', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PC' }]),
-      group('pm-pc-15m-gnb', 'PM', 'CSV', '15M', '0 8/15 * * * ?', `${PATH_PM}GNB/`, PM_NAME, [{ code: 'PC', tech: 'GNB', profile: 'pm.pc.gnb.csv.v1' }]),
+      group('pm-15m-lte', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
+      group('pm-pc-15m-gnb', 'PM', 'CSV', '15M', '0 8/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'GNB', profile: 'pm.pc.gnb.csv.v1' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -791,9 +792,9 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-pc-60m-lte', 'PM', 'CSV', '60M', '0 25 * * * ?', PATH_PM, 'pmresult_152XXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', profile: 'pm.pc.pmresult.csv.v1' }]),
-      group('pm-pc-60m-gsm', 'PM', 'CSV', '60M', '0 20 * * * ?', PATH_PM, 'pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GSM', profile: 'pm.pc.gsm.pmresult.csv.v1' }]),
-      group('pm-pc-60m-gnb', 'PM', 'CSV', '60M', '0 30 * * * ?', `${PATH_PM}GNB/`, 'pmresult_XXXXXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GNB', profile: 'pm.pc.gnb.csv.v1' }]),
+      group('pm-pc-60m-lte', 'PM', 'CSV', '60M', '0 25 * * * ?', PATH_PM_TECH, 'pmresult_152XXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', profile: 'pm.pc.pmresult.csv.v1' }]),
+      group('pm-pc-60m-gsm', 'PM', 'CSV', '60M', '0 20 * * * ?', PATH_PM_TECH, 'pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GSM', profile: 'pm.pc.gsm.pmresult.csv.v1' }]),
+      group('pm-pc-60m-gnb', 'PM', 'CSV', '60M', '0 30 * * * ?', PATH_PM_TECH, 'pmresult_XXXXXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GNB', profile: 'pm.pc.gnb.csv.v1' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -803,7 +804,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -813,7 +814,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -823,8 +824,8 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m-lte', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PC' }]),
-      group('pm-pc-15m-gsm', 'PM', 'CSV', '15M', '0 5/15 * * * ?', `${PATH_PM}gsm/`, 'pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GSM', profile: 'pm.pc.gsm.pmresult.csv.v1' }]),
+      group('pm-15m-lte', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
+      group('pm-pc-15m-gsm', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, 'pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GSM', profile: 'pm.pc.gsm.pmresult.csv.v1' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -834,7 +835,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -2861,7 +2862,7 @@ const defaultEditorPeriodRows: ScenarioPeriodRow[] = [
     trigger: '每 15 分钟，05 分起',
     cron: '0 5/15 * * * ?',
     objects: 'PC',
-    path: PATH_PM,
+    path: PATH_PM_TECH,
     fileName: 'Baicells-PC-#LocalHost#-#DataVersion#-#DateTime#[-#Ri#]-#DataPeriod#[-#FileID#]',
     compressionEnabled: false,
     compressionFormat: 'zip',
@@ -4323,6 +4324,7 @@ function serializeInventoryConfig(
 
 function replaceTemplateTokens(template: string, row: ScenarioPeriodRow, dateOnly: boolean): string {
   const objectCode = getFirstObjectCode(row);
+  const tech = normalizeTechValue(row.scope);
   const tokens: Record<string, string> = {
     '#FTPRoot#': 'northupload',
     '#Province#': 'GD',
@@ -4337,6 +4339,7 @@ function replaceTemplateTokens(template: string, row: ScenarioPeriodRow, dateOnl
     '#ModuleType#': 'OMC',
     '#eNBID#': '100001',
     '#Object#': objectCode,
+    '#Tech#': tech ? formatTechLabel(tech) : '',
   };
   return Object.entries(tokens).reduce(
     (result, [token, value]) => result.split(token).join(value),
@@ -4519,16 +4522,52 @@ function runHasNoArtifact(run: NorthboundFileRun): boolean {
   return run.summary?.no_artifact === true || run.summary?.artifact_status === 'not_generated';
 }
 
+function runSummaryString(run: NorthboundFileRun, key: string): string {
+  const value = run.summary?.[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function runTechnologyKey(run: NorthboundFileRun): string {
+  const raw = runSummaryString(run, 'technology')
+    || runSummaryString(run, 'technology_directory')
+    || runSummaryString(run, 'technology_label');
+  const normalized = normalizeTechValue(raw);
+  if (normalized) return normalized;
+  if (run.domain === 'PM') {
+    const artifactHint = `${run.artifact_path || ''}/${run.group_id || ''}`;
+    if (/\/GSM(?:\/|$)|(?:^|-)gsm(?:-|$)/i.test(artifactHint)) return 'GSM';
+    if (/\/GNB(?:\/|$)|(?:^|-)gnb(?:-|$)/i.test(artifactHint)) return 'GNB';
+    return 'LTE';
+  }
+  return '';
+}
+
+function runTechnologyLabel(run: NorthboundFileRun): string {
+  const label = runSummaryString(run, 'technology_label');
+  if (label) return label;
+  const tech = normalizeTechValue(runTechnologyKey(run));
+  return tech ? formatTechLabel(tech) : '-';
+}
+
+function runReportSubject(run: NorthboundFileRun): string {
+  const parts = [run.domain, run.object_code, runTechnologyLabel(run)].filter((part) => part && part !== '-');
+  return parts.length > 0 ? parts.join(' / ') : '-';
+}
+
 function runReportDedupeKey(run: NorthboundFileRun): string {
   const groupID = String(run.group_id ?? '').trim();
   const objectCode = String(run.object_code ?? '').trim();
   const domain = String(run.domain ?? '').trim();
-  const parts = [groupID, domain, objectCode].filter(Boolean);
+  const tech = runTechnologyKey(run);
+  const parts = [groupID, domain, objectCode, tech].filter(Boolean);
   return parts.length > 0 ? parts.join('\u001f') : run.id;
 }
 
 function buildRunReportStatus(run: NorthboundFileRun, fallbackCapabilityName: string): ReportStatusInfo {
   const noArtifact = runHasNoArtifact(run);
+  const subject = runReportSubject(run);
+  const technologyLabel = runTechnologyLabel(run);
+  const targetSummary = noArtifact ? '未生成文件' : `生成 ${run.row_count} 行`;
   const state: ReportState = run.status === 'success'
     ? 'success'
     : run.status === 'running'
@@ -4550,9 +4589,10 @@ function buildRunReportStatus(run: NorthboundFileRun, fallbackCapabilityName: st
     artifactName: run.artifact_name || '-',
     artifactPath: run.artifact_path || '-',
     size: formatBytes(run.artifact_size),
-    targetSummary: noArtifact ? '未生成文件' : `生成 ${run.row_count} 行`,
+    targetSummary: technologyLabel !== '-' && run.domain === 'PM' ? `${technologyLabel} ${targetSummary}` : targetSummary,
     detail: noArtifact ? run.error_message || '当前窗口内无源数据，未生成文件。' : run.error_message || runTriggerDescription(run),
     payload,
+    subject,
   };
 }
 
@@ -9090,6 +9130,14 @@ export default function NorthboundPageConfig() {
     { title: '业务域', dataIndex: 'domain', width: 72, render: (v: string) => v || '-' },
     { title: '对象', dataIndex: 'object_code', width: 96, render: (v: string) => v || '-' },
     {
+      title: '制式',
+      width: 88,
+      render: (_, run) => {
+        const label = runTechnologyLabel(run);
+        return label === '-' ? '-' : <Tag>{label}</Tag>;
+      },
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       width: 112,
@@ -9293,6 +9341,9 @@ export default function NorthboundPageConfig() {
               <Descriptions bordered size="small" column={2}>
                 <Descriptions.Item label="状态">{reportStateTag(selectedReportStatus.state, selectedReportStatus.statusText)}</Descriptions.Item>
                 <Descriptions.Item label="最近时间">{selectedReportStatus.lastTime || '-'}</Descriptions.Item>
+                {selectedReportStatus.subject && (
+                  <Descriptions.Item label="对象/制式" span={2}>{selectedReportStatus.subject}</Descriptions.Item>
+                )}
                 <Descriptions.Item label="目标/地址" span={2}>
                   <Typography.Text ellipsis={{ tooltip: selectedReportStatus.artifactPath }}>
                     {selectedReportStatus.artifactPath}

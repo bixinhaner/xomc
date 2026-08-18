@@ -31,7 +31,10 @@ type PgRepository struct {
 
 var _ Repository = (*PgRepository)(nil)
 
-const defaultFileProfileLegacyFormatAlignedConfigKey = "legacy_scene_format_aligned_v333"
+const (
+	defaultFileProfileLegacyFormatAlignedConfigKey = "legacy_scene_format_aligned_v333"
+	defaultFileProfilePMTechPathConfigKey          = "pm_technology_path_aligned_v335"
+)
 
 func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
 	return &PgRepository{pool: pool}
@@ -127,10 +130,15 @@ func (r *PgRepository) backfillDefaultFileProfileGroupMetadata(ctx context.Conte
 		}
 	}
 	legacyFormatAligned := configBool(config, defaultFileProfileLegacyFormatAlignedConfigKey)
-	changed := backfillDefaultFileProfileGroups(groups, defaultGroupsByID, !legacyFormatAligned)
+	pmTechPathAligned := configBool(config, defaultFileProfilePMTechPathConfigKey)
+	changed := backfillDefaultFileProfileGroups(groups, defaultGroupsByID, !legacyFormatAligned, !pmTechPathAligned)
 	configChanged := false
 	if !legacyFormatAligned {
 		config[defaultFileProfileLegacyFormatAlignedConfigKey] = true
+		configChanged = true
+	}
+	if !pmTechPathAligned {
+		config[defaultFileProfilePMTechPathConfigKey] = true
 		configChanged = true
 	}
 	if !changed && !configChanged {
@@ -167,7 +175,7 @@ func configBool(config map[string]any, key string) bool {
 	}
 }
 
-func backfillDefaultFileProfileGroups(groups []FileGroup, defaultGroupsByID map[string]FileGroup, alignLegacyFormats bool) bool {
+func backfillDefaultFileProfileGroups(groups []FileGroup, defaultGroupsByID map[string]FileGroup, alignLegacyFormats bool, alignPMTechnologyPaths bool) bool {
 	changed := false
 	for i := range groups {
 		defaultGroup, ok := defaultGroupsByID[groups[i].ID]
@@ -211,8 +219,46 @@ func backfillDefaultFileProfileGroups(groups []FileGroup, defaultGroupsByID map[
 			backfillDefaultFileProfileObjectProfilesWithOptions(groups[i].Domain, groups[i].Format, groups[i].Objects, defaultGroup.Objects, alignLegacyFormats) {
 			changed = true
 		}
+		if alignPMTechnologyPaths && groups[i].Domain == DomainPM && defaultGroup.Domain == DomainPM {
+			if backfillDefaultPMTechnologyPath(&groups[i], defaultGroup) {
+				changed = true
+			}
+		}
 	}
 	return changed
+}
+
+func backfillDefaultPMTechnologyPath(group *FileGroup, defaultGroup FileGroup) bool {
+	if group == nil || strings.TrimSpace(defaultGroup.PathTemplate) == "" {
+		return false
+	}
+	if sameTemplate(group.PathTemplate, defaultGroup.PathTemplate) {
+		return false
+	}
+	if strings.TrimSpace(group.PathTemplate) != "" && !isLegacyPMTechnologyPathTemplate(group.PathTemplate) {
+		return false
+	}
+	group.PathTemplate = defaultGroup.PathTemplate
+	return true
+}
+
+func isLegacyPMTechnologyPathTemplate(template string) bool {
+	for _, candidate := range []string{
+		pathPM,
+		pathPM + "#Object#/",
+		pathPM + "GNB/",
+		pathPM + "gsm/",
+		pathPM + "GSM/",
+	} {
+		if sameTemplate(template, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameTemplate(left, right string) bool {
+	return strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right))
 }
 
 func (r *PgRepository) backfillDefaultFileProfileScenarioNames(ctx context.Context, profile FileProfile) error {

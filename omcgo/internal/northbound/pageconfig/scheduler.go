@@ -498,7 +498,7 @@ func scheduledRunWindowEndMatchesUnit(run FileRun, unit scheduleUnit, loc *time.
 }
 
 func markScheduleObjectComplete(objects map[string]struct{}, run FileRun) {
-	key := strings.TrimSpace(run.ObjectCode)
+	key := strings.TrimSpace(runObjectIdentityKey(run))
 	if key == "" {
 		key = run.ID
 	}

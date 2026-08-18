@@ -185,12 +185,7 @@ func (s *Service) buildFileRun(ctx context.Context, profile FileProfile, group F
 		RowCount:           rowCount,
 		CompressionEnabled: group.CompressionEnabled,
 		CompressionFormat:  compressionFormatOrDefault(group.CompressionFormat),
-		Summary: map[string]any{
-			"profile_name":   profile.Name,
-			"format":         group.Format,
-			"period":         group.Period,
-			"trigger_reason": runTriggerReason(req),
-		},
+		Summary:            fileRunBaseSummary(profile.Name, group, object, req),
 	}, nil
 }
 
@@ -229,15 +224,11 @@ func (s *Service) buildMRPassthroughRun(ctx context.Context, profile FileProfile
 		RowCount:           1,
 		CompressionEnabled: group.CompressionEnabled,
 		CompressionFormat:  compressionFormatOrDefault(group.CompressionFormat),
-		Summary: map[string]any{
-			"profile_name":       profile.Name,
-			"format":             group.Format,
-			"period":             group.Period,
-			"trigger_reason":     runTriggerReason(req),
+		Summary: mergeSummary(fileRunBaseSummary(profile.Name, group, object, req), map[string]any{
 			"mr_passthrough":     true,
 			"source_file_name":   sourceName,
 			"source_object_path": sourcePath,
-		},
+		}),
 	}, nil
 }
 
@@ -280,12 +271,7 @@ func (s *Service) buildInventoryRun(ctx context.Context, profile InventoryProfil
 		RowCount:           rowCount,
 		CompressionEnabled: profile.CompressionEnabled,
 		CompressionFormat:  compressionFormatOrDefault(profile.CompressionFormat),
-		Summary: map[string]any{
-			"profile_name":   profile.Name,
-			"format":         FormatCSV,
-			"period":         profile.Period,
-			"trigger_reason": runTriggerReason(req),
-		},
+		Summary:            fileRunBaseSummary(profile.Name, group, object, req),
 	}, nil
 }
 
@@ -1033,6 +1019,10 @@ func runtimeTokenValues(group FileGroup, object ScenarioObject, windowStart, win
 	if objectCode == "" {
 		objectCode = previewObjectCode(group)
 	}
+	tech := ""
+	if code := runObjectTechnologyCode(group.Domain, object); code != "" {
+		tech = technologyDirectoryName(code)
+	}
 	localHost = configuredLocalHostToken(localHost)
 	return map[string]string{
 		"#FTPRoot#":         "northupload",
@@ -1046,6 +1036,7 @@ func runtimeTokenValues(group FileGroup, object ScenarioObject, windowStart, win
 		"#DataVersion#":     "1.0",
 		"#DataPeriod#":      previewDataPeriod(group.Period),
 		"#Object#":          objectCode,
+		"#Tech#":            tech,
 		"#ModuleType#":      objectCode,
 		"#eNBID#":           "100001",
 		"#Ri#":              "1",
@@ -1197,11 +1188,7 @@ func failedFileRun(profileKind ProfileKind, profileCode string, group FileGroup,
 		CompressionEnabled: group.CompressionEnabled,
 		CompressionFormat:  compressionFormatOrDefault(group.CompressionFormat),
 		ErrorMessage:       err.Error(),
-		Summary: map[string]any{
-			"format":         group.Format,
-			"period":         group.Period,
-			"trigger_reason": runTriggerReason(req),
-		},
+		Summary:            fileRunBaseSummary("", group, object, req),
 	}
 }
 
@@ -1222,16 +1209,12 @@ func noArtifactFileRun(profileKind ProfileKind, profileCode, profileName string,
 		CompressionEnabled: group.CompressionEnabled,
 		CompressionFormat:  compressionFormatOrDefault(group.CompressionFormat),
 		ErrorMessage:       message,
-		Summary: map[string]any{
-			"profile_name":    profileName,
-			"format":          group.Format,
-			"period":          group.Period,
-			"trigger_reason":  runTriggerReason(req),
+		Summary: mergeSummary(fileRunBaseSummary(profileName, group, object, req), map[string]any{
 			"no_artifact":     true,
 			"no_data":         true,
 			"skip_reason":     "no_source_data",
 			"artifact_status": "not_generated",
-		},
+		}),
 	}
 }
 

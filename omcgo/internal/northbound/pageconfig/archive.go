@@ -389,6 +389,9 @@ func localArchiveObjectKey(prefix string, run FileRun) string {
 	if groupID := strings.TrimSpace(run.GroupID); groupID != "" && !strings.EqualFold(groupID, strings.TrimSpace(run.ProfileCode)) {
 		parts = append(parts, safeLocalArchiveSegment(groupID))
 	}
+	if tech := runTechnologyDirectory(run); tech != "" {
+		parts = append(parts, safeLocalArchiveSegment(tech))
+	}
 	parts = append(parts, safeRemoteBase(run.ArtifactName))
 	return pathpkg.Join(parts...)
 }
@@ -530,16 +533,19 @@ func eventFromLocalArchiveRun(run FileRun, result LocalArchiveResult, archiveErr
 		PayloadContentType: "application/json; charset=utf-8",
 		ErrorMessage:       errorMessage,
 		Summary: map[string]any{
-			"run_id":       run.ID,
-			"profile_kind": run.ProfileKind,
-			"profile_code": run.ProfileCode,
-			"group_id":     run.GroupID,
-			"domain":       run.Domain,
-			"object_code":  run.ObjectCode,
-			"bucket":       result.Bucket,
-			"object_key":   result.ObjectKey,
-			"bytes":        result.Bytes,
-			"content_type": result.ContentType,
+			"run_id":               run.ID,
+			"profile_kind":         run.ProfileKind,
+			"profile_code":         run.ProfileCode,
+			"group_id":             run.GroupID,
+			"domain":               run.Domain,
+			"object_code":          run.ObjectCode,
+			"technology":           run.Summary["technology"],
+			"technology_label":     run.Summary["technology_label"],
+			"technology_directory": run.Summary["technology_directory"],
+			"bucket":               result.Bucket,
+			"object_key":           result.ObjectKey,
+			"bytes":                result.Bytes,
+			"content_type":         result.ContentType,
 		},
 	}
 }
