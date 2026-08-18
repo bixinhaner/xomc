@@ -305,13 +305,23 @@ export const alarmDefinitionApi = {
     };
   },
 
-  /** 下载告警 XML 原文件(builtin / custom 均可,2026-06-05 操作列下载功能)。 */
-  async downloadXml(loadedFrom: string): Promise<void> {
+  /** 下载告警 XML。#268: loadedFrom 有值下载磁盘原文件(builtin / custom 均可);
+   * 仅传 neType(手工新增行)时后端从 DB 动态生成 alarmModel XML。 */
+  async downloadXml(target: { loadedFrom?: string; neType?: string }): Promise<void> {
+    if (target.loadedFrom) {
+      const resp = await http.get('/alarm-definitions/file-content', {
+        params: { loaded_from: target.loadedFrom },
+        responseType: 'blob',
+      });
+      saveBlob(resp.data as BlobPart, target.loadedFrom.split('/').pop() || 'alarm.xml');
+      return;
+    }
+    const neType = target.neType ?? '';
     const resp = await http.get('/alarm-definitions/file-content', {
-      params: { loaded_from: loadedFrom },
+      params: { ne_type: neType },
       responseType: 'blob',
     });
-    saveBlob(resp.data as BlobPart, loadedFrom.split('/').pop() || 'alarm.xml');
+    saveBlob(resp.data as BlobPart, `${neType}-manual.xml`);
   },
 
   /** 删除自定义告警 XML(loadedFrom 含 / 须 encodeURIComponent)。仅 custom 可删,内置后端返 403。 */

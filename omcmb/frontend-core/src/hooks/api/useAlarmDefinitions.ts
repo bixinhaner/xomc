@@ -50,9 +50,11 @@ export function useUpdateAlarmDefinition() {
   return useMutation({
     mutationFn: ({ identifier, input }: { identifier: string; input: UpdateAlarmDefinitionInput }) =>
       api.update(identifier, input),
-    onSuccess: (_data, vars) => {
-      void qc.invalidateQueries({ queryKey: [...AD_KEY, 'detail', vars.identifier] });
-      void qc.invalidateQueries({ queryKey: [...AD_KEY, 'list'] });
+    onSuccess: () => {
+      // #268: 与 create/delete 对齐失效整个 AD_KEY。此前只失效 detail+list,
+      // 一级表 ne-types 聚合(按严重性统计)不刷新 —— 一级/二级是同组件内切换,
+      // useAlarmNeTypeStats 常驻挂载不会 remount 触发 refetch。
+      void qc.invalidateQueries({ queryKey: AD_KEY });
     },
   });
 }
@@ -104,10 +106,12 @@ export function useAlarmUploadXml() {
   });
 }
 
-// 下载 XML 原文件(操作列下载图标,builtin / custom 均可)。
+// 下载 XML(操作列下载图标)。#268: 两种目标 ——
+//   loadedFrom 有值:下载磁盘原文件(builtin / custom 均可);
+//   仅 neType(手工新增行,无加载源):后端从 DB 动态生成 alarmModel XML。
 export function useAlarmDownloadXml() {
   return useMutation({
-    mutationFn: ({ loadedFrom }: { loadedFrom: string }) => api.downloadXml(loadedFrom),
+    mutationFn: (target: { loadedFrom?: string; neType?: string }) => api.downloadXml(target),
   });
 }
 

@@ -40,10 +40,12 @@ type SeverityLevel struct {
 }
 
 // xmlAlarmModel 解析 8 个 ne_type 的 alarm xml（设计 §3.4）。
+// DeviceType 带 omitempty 仅影响 marshal:手工新增导出(#268)未入库 deviceType,
+// 省略该属性;解析侧 encoding/xml 忽略 omitempty,行为不变。
 type xmlAlarmModel struct {
 	XMLName    xml.Name   `xml:"alarmModel"`
 	NeType     string     `xml:"neType,attr"`
-	DeviceType string     `xml:"deviceType,attr"`
+	DeviceType string     `xml:"deviceType,attr,omitempty"`
 	TotalCount int        `xml:"totalCount,attr"`
 	Alarms     []xmlAlarm `xml:"alarms>alarm"`
 }

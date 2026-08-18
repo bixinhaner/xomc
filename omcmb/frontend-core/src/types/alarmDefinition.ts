@@ -16,6 +16,9 @@ export interface AlarmDefinition {
   description?: string;
   isShow: boolean;
   isUnknown?: boolean;
+  // 仅 mock 建模用:真实 defView 不返回行级 loaded_from(一级表经 /ne-types 聚合)。
+  // '' = 手工新增(无 XML 来源);缺省 = 来自 <neType>.xml 文件。
+  loadedFrom?: string;
   createdAt?: string;
   updatedAt?: string;
 }

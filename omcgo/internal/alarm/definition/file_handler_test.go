@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"mime/multipart"
@@ -15,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
@@ -36,6 +38,10 @@ type mockFileRepository struct {
 	// 导入 XML 覆盖调整:neType → 归属文件 stub
 	neTypeLoadedFroms    []string
 	neTypeLoadedFromsErr error
+
+	// #268 生成模式:ne_type → 手工新增定义 stub
+	manualDefs    []ResolvedDefinition
+	manualDefsErr error
 }
 
 func (m *mockFileRepository) CountByLoadedFrom(ctx context.Context, loadedFrom string) (int, error) {
@@ -73,6 +79,13 @@ func (m *mockFileRepository) LoadedFromsByNeType(ctx context.Context, neType str
 		return []string{BuiltinDirPrefix + neType + ".xml"}, nil
 	}
 	return nil, nil
+}
+
+func (m *mockFileRepository) ListManualByNeType(ctx context.Context, neType string) ([]ResolvedDefinition, error) {
+	if m.manualDefsErr != nil {
+		return nil, m.manualDefsErr
+	}
+	return m.manualDefs, nil
 }
 
 // stubReloader 记录 ReloadOne 调用,可注入失败。
@@ -497,6 +510,89 @@ func TestDownloadFile_BadPath_400(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code, "loaded_from=%q", lf)
 	}
+}
+
+// ── DownloadFile 生成模式(#268 手工新增) ─────────────────────────────
+
+func manualDef(identifier, severityName string, eventType *int, isShow bool) ResolvedDefinition {
+	return ResolvedDefinition{
+		AlarmDefinition: AlarmDefinition{
+			ID:              uuid.New(),
+			Identifier:      identifier,
+			NeType:          "ENB",
+			CnName:          "手工告警" + identifier,
+			EnName:          "Manual alarm " + identifier,
+			SeverityID:      uuid.New(),
+			EventType:       eventType,
+			CnProbableCause: "原因" + identifier,
+			EnProbableCause: "Cause " + identifier,
+			IsShow:          isShow,
+		},
+		SeverityCode: 31001,
+		SeverityName: severityName,
+	}
+}
+
+func TestDownloadFile_GeneratedManual_OK(t *testing.T) {
+	baseDir := t.TempDir()
+	et := 30003
+	repo := &mockFileRepository{manualDefs: []ResolvedDefinition{
+		manualDef("11109", "Critical", &et, true),
+		manualDef("11110", "Warning", nil, false),
+	}}
+	r := newTestRouter(t, repo, &stubReloader{}, baseDir)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/alarm-definitions/file-content?ne_type=ENB", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	assert.Equal(t, "application/xml; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Header().Get("Content-Disposition"), `ENB-manual.xml`)
+
+	body := w.Body.Bytes()
+	assert.Contains(t, string(body), `<?xml version="1.0" encoding="UTF-8"?>`)
+	// 导出的 XML 必须能被导入侧同一套结构重新解析(round-trip)。
+	var parsed xmlAlarmModel
+	assert.NoError(t, xml.Unmarshal(body, &parsed))
+	assert.Equal(t, "ENB", parsed.NeType)
+	assert.Equal(t, 2, parsed.TotalCount)
+	assert.Len(t, parsed.Alarms, 2)
+	assert.Equal(t, "11109", parsed.Alarms[0].Identifier)
+	assert.Equal(t, "Critical", parsed.Alarms[0].Severity)
+	assert.Equal(t, "30003", parsed.Alarms[0].EventType)
+	assert.Equal(t, "Y", parsed.Alarms[0].IsShow)
+	assert.Equal(t, "Warning", parsed.Alarms[1].Severity)
+	assert.Equal(t, "", parsed.Alarms[1].EventType)
+	assert.Equal(t, "N", parsed.Alarms[1].IsShow)
+}
+
+func TestDownloadFile_GeneratedManual_Empty_404(t *testing.T) {
+	baseDir := t.TempDir()
+	r := newTestRouter(t, &mockFileRepository{}, &stubReloader{}, baseDir)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/alarm-definitions/file-content?ne_type=GSM", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestDownloadFile_GeneratedManual_MissingParams_400(t *testing.T) {
+	baseDir := t.TempDir()
+	r := newTestRouter(t, &mockFileRepository{}, &stubReloader{}, baseDir)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/alarm-definitions/file-content", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSanitizeDownloadName(t *testing.T) {
+	assert.Equal(t, "ENB-manual.xml", sanitizeDownloadName("ENB"))
+	assert.Equal(t, "my_ne_1-manual.xml", sanitizeDownloadName("my.ne 1"))
+	// 非 ASCII / 特殊字符 neType 收敛为 '_',仍匹配回传文件名模式
+	assert.Equal(t, "__-manual.xml", sanitizeDownloadName("基站"))
+	assert.Equal(t, "___-manual.xml", sanitizeDownloadName("!!!"))
 }
 
 // ── DeleteFile ──────────────────────────────────────────────────────

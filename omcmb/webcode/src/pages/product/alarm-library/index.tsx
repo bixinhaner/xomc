@@ -108,6 +108,9 @@ export default function AlarmLibraryPage() {
       params.delete('neType');
       params.delete('loadedFrom');
     }
+    // #268: 进入下钻 / 返回列表都清空上一次的二级筛选(搜索词/严重级别/页码)。
+    // 一级↔二级是同组件内切换,state 不随"返回"销毁,须在此显式重置。
+    setDetailFilter({ page: 1, pageSize: PRODUCT_TABLE_DEFAULT_PAGE_SIZE });
     setSearchParams(params, { replace: false });
   };
 
@@ -238,7 +241,8 @@ export default function AlarmLibraryPage() {
     },
     {
       // 2026-06-04 用户决策:内置(builtin)不可删 → 仅 custom 可删,内置置灰 + Tooltip。
-      // 2026-06-05:加下载 XML 图标(builtin / custom 均可;手工新增无加载源禁用)。
+      // 2026-06-05:加下载 XML 图标(builtin / custom 均可)。
+      // #268:手工新增行(无加载源)同样可下载 —— 后端按 ne_type 从 DB 动态生成 XML。
       title: t('alarmLibrary.col.actions'),
       width: 110,
       render: (_: unknown, row: AlarmNeTypeStat) => (
@@ -247,10 +251,13 @@ export default function AlarmLibraryPage() {
             <Button
               size="small"
               icon={<DownloadOutlined />}
-              disabled={!row.loadedFrom}
               onClick={() =>
                 downloadXmlMut
-                  .mutateAsync({ loadedFrom: row.loadedFrom })
+                  .mutateAsync(
+                    row.loadedFrom
+                      ? { loadedFrom: row.loadedFrom }
+                      : { neType: row.neType },
+                  )
                   .catch((e) => message.error((e as Error).message))
               }
             />
