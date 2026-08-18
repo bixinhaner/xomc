@@ -11,6 +11,7 @@ const hookMocks = vi.hoisted(() => ({
   refetchPolicies: vi.fn(),
   refetchTargets: vi.fn(),
   refetchEvents: vi.fn(),
+  storageEvents: vi.fn(),
 }));
 
 vi.mock('@core/hooks/api/useSystem', () => ({
@@ -31,7 +32,7 @@ vi.mock('@core/hooks/api/useStorageProtection', () => ({
     refetch: hookMocks.refetchTargets,
   }),
   useStorageProtectionEvents: () => ({
-    data: [],
+    data: hookMocks.storageEvents(),
     isFetching: false,
     refetch: hookMocks.refetchEvents,
   }),
@@ -65,6 +66,7 @@ describe('self-managed system config load guard', () => {
     hookMocks.refetchPolicies.mockResolvedValue({ isError: false });
     hookMocks.refetchTargets.mockResolvedValue({ isError: false });
     hookMocks.refetchEvents.mockResolvedValue({ isError: false });
+    hookMocks.storageEvents.mockReturnValue([]);
   });
 
   it('PM 保留策略加载失败时禁止保存和重置', () => {
@@ -295,6 +297,36 @@ describe('self-managed system config load guard', () => {
       expect(hookMocks.refetchEvents).toHaveBeenCalledTimes(1);
     });
     expect(hookMocks.refetchTargets).not.toHaveBeenCalled();
+  });
+
+  it('资源保留与背压状态记录展示触发时间且保留后端时区钟面', () => {
+    hookMocks.query.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      isSuccess: true,
+      refetch: hookMocks.refetch,
+    });
+    hookMocks.storageEvents.mockReturnValue([
+      {
+        policyId: 'policy-storage',
+        targetType: 'filesystem',
+        targetId: 'root',
+        writeScope: 'all',
+        previousState: 'warning',
+        newState: 'blocked',
+        reason: 'usage reached block threshold for two checks',
+        observedRatio: 0.92,
+        policyVersion: 1,
+        operatorId: 'system',
+        createdAt: '2026-08-18T10:30:00+08:00',
+      },
+    ]);
+
+    render(<RetentionBackpressureSection />);
+
+    expect(screen.getByText('system.storageProtection.event.triggeredAt: 2026-08-18 10:30:00')).toBeInTheDocument();
   });
 
   it('资源保留与背压支持保存基站日志清理周期并校验范围', async () => {
