@@ -53,6 +53,9 @@ export default function PmRetentionSection() {
   const [submittedBatch, setSubmittedBatch] = useState<ConfigApplyBatch | null>(null);
   const { data: refreshedBatch } = useSysConfigApplyBatch(submittedBatch?.id);
   const applyBatch = refreshedBatch ?? submittedBatch;
+  const applyFailureDetail = applyBatch?.status === 'failed'
+    ? applyBatch.targets.find((target) => target.lastError)?.lastError?.trim()
+    : undefined;
 
   const {
     data: configs,
@@ -208,7 +211,19 @@ export default function PmRetentionSection() {
           showIcon
           message={t(`sysconfig.apply.${applyBatch.status}`)}
           description={applyBatch.status === 'failed'
-            ? applyBatch.targets.find((target) => target.lastError)?.lastError
+            ? (
+                <div>
+                  <div>{t('sysconfig.apply.failed.description')}</div>
+                  {applyFailureDetail && (
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ cursor: 'pointer' }}>
+                        {t('sysconfig.apply.failed.detail')}
+                      </summary>
+                      <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap' }}>{applyFailureDetail}</pre>
+                    </details>
+                  )}
+                </div>
+              )
             : undefined}
         />
       )}
