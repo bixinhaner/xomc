@@ -14,7 +14,7 @@ import {
   type CellFeedback,
 } from '@core/store/quickSettingsFeedbackStore';
 import type { DeviceParameter, ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
-import type { DeviceTaskStatus } from '@core/types/deviceTask';
+import { isDeviceTaskTerminal, type DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quicksettings';
 import {
   applyInstanceContext,
@@ -69,6 +69,13 @@ import {
 } from './parameterSearchRefresh';
 import { useT } from '@/hooks/useT';
 import { buildInterfaceBindingOptions } from './interfaceBindingOptions';
+import {
+  isLteDownlinkBandwidthPath,
+  isLteUplinkBandwidthPath,
+  lteBandwidthValuesMatch,
+} from './lteBandwidthValidation';
+import { refreshQuickSettingsRelatedLists } from './quickSettingsTerminalRefresh';
+import { NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS } from '../../nrCarrierBandwidthOptions';
 
 const { Text } = Typography;
 const ERROR_FEEDBACK_DURATION_SECONDS = 2;
@@ -113,49 +120,7 @@ const GNB_SYNC_MODE_PTP_VALUES = new Set(['1588_PPS', 'GPS_AND_PTP', '2']);
 
 type TFn = (id: string, values?: Record<string, string | number>) => string;
 
-const NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS: Record<string, Array<{ value: string; label: string }>> = {
-  '0': [
-    { value: '25', label: '5MHz(25RB)' },
-    { value: '52', label: '10MHz(52RB)' },
-    { value: '79', label: '15MHz(79RB)' },
-    { value: '106', label: '20MHz(106RB)' },
-    { value: '133', label: '25MHz(133RB)' },
-    { value: '160', label: '30MHz(160RB)' },
-    { value: '216', label: '40MHz(216RB)' },
-    { value: '270', label: '50MHz(270RB)' },
-  ],
-  '1': [
-    { value: '11', label: '5MHz(11RB)' },
-    { value: '24', label: '10MHz(24RB)' },
-    { value: '38', label: '15MHz(38RB)' },
-    { value: '51', label: '20MHz(51RB)' },
-    { value: '65', label: '25MHz(65RB)' },
-    { value: '78', label: '30MHz(78RB)' },
-    { value: '106', label: '40MHz(106RB)' },
-    { value: '133', label: '50MHz(133RB)' },
-    { value: '162', label: '60MHz(162RB)' },
-    { value: '189', label: '70MHz(189RB)' },
-    { value: '217', label: '80MHz(217RB)' },
-    { value: '245', label: '90MHz(245RB)' },
-    { value: '273', label: '100MHz(273RB)' },
-  ],
-  '2': [
-    { value: '11', label: '10MHz(11RB)' },
-    { value: '18', label: '15MHz(18RB)' },
-    { value: '24', label: '20MHz(24RB)' },
-    { value: '31', label: '25MHz(31RB)' },
-    { value: '38', label: '30MHz(38RB)' },
-    { value: '51', label: '40MHz(51RB)' },
-    { value: '65', label: '50MHz(65RB)' },
-    { value: '79', label: '60MHz(79RB)' },
-    { value: '93', label: '70MHz(93RB)' },
-    { value: '107', label: '80MHz(107RB)' },
-    { value: '121', label: '90MHz(121RB)' },
-    { value: '135', label: '100MHz(135RB)' },
-  ],
-};
-
-function getNrCarrierBandwidthOptions(paramName: string, dlScs: unknown, ulScs: unknown): Array<{ value: string; label: string }> {
+export function getNrCarrierBandwidthOptions(paramName: string, dlScs: unknown, ulScs: unknown): Array<{ value: string; label: string }> {
   if (paramName === 'DLCarrierBandWidth') {
     return NR_CARRIER_BANDWIDTH_OPTIONS_BY_SCS[String(dlScs ?? '')] ?? [];
   }
@@ -1833,16 +1798,16 @@ export default function CellParameterForm({
     };
   }, [nrNguParams, rawParameterByPath, specialConfigByName]);
 
-  // T-0159: 交叉镜像 — 反查表 resolved standardPath → form field name，
-  // 让 onValuesChange 时能据 constraints.mirrorWith 找到对端 form field 并 setFieldValue 同步。
-  const paramNameByPath = useMemo(() => {
-    const map = new Map<string, string>();
+  const lteBandwidthFields = useMemo(() => {
+    let downlink = '';
+    let uplink = '';
     for (const p of visibleParams) {
       const path = resolveReadPath(p.standardPath || '');
-      map.set(path, p.name);
+      if (isLteDownlinkBandwidthPath(path)) downlink = p.name;
+      if (isLteUplinkBandwidthPath(path)) uplink = p.name;
     }
-    return map;
-  }, [visibleParams, instanceContext, resolveReadPath]);
+    return downlink && uplink ? { downlink, uplink } : null;
+  }, [visibleParams, resolveReadPath]);
 
   // 初始化字段值 —— 优先级：store draft > 当前会话已 touched > schema 原值。
   // 未保存草稿在跨顶层 TabBar 切换后恢复；任务终态回读后再 clearDraft，统一回到设备侧值。
@@ -1962,7 +1927,21 @@ export default function CellParameterForm({
     const values = form.getFieldsValue() as Record<string, unknown>;
     const updates: ParameterUpdateRequest[] = [];
     const errors: Record<string, string> = {};
-
+    if (
+      lteBandwidthFields
+      && (
+        form.isFieldTouched(lteBandwidthFields.downlink)
+        || form.isFieldTouched(lteBandwidthFields.uplink)
+      )
+      && !lteBandwidthValuesMatch(
+        values[lteBandwidthFields.downlink],
+        values[lteBandwidthFields.uplink],
+      )
+    ) {
+      const mismatchError = t('device.quickSettings.lteBandwidthMismatch');
+      errors[lteBandwidthFields.downlink] = mismatchError;
+      errors[lteBandwidthFields.uplink] = mismatchError;
+    }
     for (const p of visibleParams) {
       // readonly leaf(如 BTS ID / 共享只读状态量)不参与下发:它们的 path 在 param-mappings
       // 里多为 not_found / access=READ_ONLY,带进 SetParameterValues 会被后端 MappingValidator
@@ -2162,21 +2141,30 @@ export default function CellParameterForm({
 
   // T-0146:Save 后用 task_id 轮询真实 CPE 应答状态;到终态后停轮询。
   const { data: lastTask } = useDeviceTaskStatus(active ? lastSubmit?.taskId : undefined);
+  const lastTaskId = lastTask?.id;
+  const lastTaskStatus = lastTask?.status;
 
-  // 任务终态后只 refetch 当前实例的 schema(精确到 commonPrefix 该份查询),
-  // 拿到设备侧最新值后回填表单。不做跨 device 的全量 invalidate。
+  // 设备返回任意终态后都刷新快速设置关联的 schema/参数列表/参数树。
+  useEffect(() => {
+    if (!active || !lastTaskId || !isDeviceTaskTerminal(lastTaskStatus)) return;
+    void refreshQuickSettingsRelatedLists(queryClient, deviceId).catch((err) => {
+      console.warn('CellParameterForm: refresh related quick-settings lists failed', err);
+    });
+  }, [active, lastTaskId, lastTaskStatus, queryClient, deviceId]);
+
+  // 任务终态后 refetch 当前实例的 schema(精确到 commonPrefix 该份查询),
+  // 无论成功或失败都用设备侧最新值回填表单；失败值不能继续留在页面上。
   useEffect(() => {
     if (!active) return;
     if (!lastTask || !['completed', 'failed', 'expired', 'cancelled'].includes(lastTask.status)) return;
-    // 非成功终态必须保留本地草稿，供用户修正后重试；失败提示由下方独立 effect 负责。
-    if (lastTask.status !== 'completed') return;
+    const taskCompleted = lastTask.status === 'completed';
     if (!canApplySubmittedReadback({
       taskId: lastTask.id,
       syncedForTaskId: lastSubmit?.syncedForTaskId,
       submittedDraftRevision: lastSubmit?.submittedDraftRevision,
       currentDraftRevision: draftRevision,
     })) return;
-    if (group.id === 'enb-plmn') {
+    if (taskCompleted && group.id === 'enb-plmn') {
       const submittedPlmn = Object.entries(lastSubmit?.expectedReadback ?? {})
         .find(([path]) => path.endsWith('.ExistPlmnidList'));
       if (submittedPlmn) {
@@ -2240,7 +2228,7 @@ export default function CellParameterForm({
       };
       try {
         const expectedReadback = new Map(Object.entries(lastSubmit?.expectedReadback ?? {}));
-        if (group.id === 'enb-mme' && expectedReadback.size > 0) {
+        if (taskCompleted && group.id === 'enb-mme' && expectedReadback.size > 0) {
           // SPV completed 只代表设备接受设置。后端自动 GPV 落库前 schema 仍可能是旧值，
           // 因此持续读取目标 path，只有实际观察到本次提交值才允许覆盖表单和清理草稿。
           await waitForExpectedParameterValues({
@@ -2258,10 +2246,13 @@ export default function CellParameterForm({
             timeoutMs: 30_000,
             signal: abortController.signal,
           });
-        } else {
+        } else if (taskCompleted) {
           // 其它既有快速设置分组保持原有刷新节奏；Issue 158 的 MME 路径不再依赖该固定延时。
           await new Promise((resolve) => window.setTimeout(resolve, 500));
           if (cancelled) return;
+          refreshedSchemaByPath = await fetchRefreshedSchema();
+        } else {
+          // 失败/超时/取消时设备值不会变更，立即回读并覆盖本次失败草稿。
           refreshedSchemaByPath = await fetchRefreshedSchema();
         }
       } catch (err) {
@@ -2508,24 +2499,6 @@ export default function CellParameterForm({
             form.setFieldValue(bandwidthName, nextBandwidth);
             setDraftField(fbKey, bandwidthName, nextBandwidth);
           }
-          // T-0159: 交叉镜像 — 改 A 字段时把 A 的新值同步写入镜像字段 B（如 TDD 上下行带宽必须相等）。
-          // antd Form.setFieldValue 不会触发 onValuesChange，故不会无限递归。
-          for (const [name, value] of Object.entries(changedValues)) {
-            const p = visibleParams.find((q) => q.name === name);
-            if (!p) continue;
-            const special = resolveRuntimeSpecialConfig(name);
-            const path = special?.configPath ?? resolveReadPath(p.standardPath || '');
-            const sItem = schemaByPath.get(path);
-            const mirrorPath = sItem?.constraints?.mirrorWith;
-            if (!mirrorPath) continue;
-            const resolvedMirror = applyInstanceContext(mirrorPath, instanceContext);
-            const mirrorName = paramNameByPath.get(resolvedMirror);
-            if (!mirrorName || mirrorName === name) continue;
-            const current = form.getFieldValue(mirrorName);
-            if (String(current ?? '') === String(value ?? '')) continue;
-            form.setFieldValue(mirrorName, value);
-            setDraftField(fbKey, mirrorName, String(value ?? ''));
-          }
           // 实时按 schema 取值范围校验，更新 fieldErrors 让 Form.Item 即时标红
           setFieldErrors((prev) => {
             const next = { ...prev };
@@ -2611,21 +2584,25 @@ export default function CellParameterForm({
               const finalErr = err ?? mmeRowsErr ?? mmeLimitErr ?? mmeMembershipErr ?? plmnRowsErr ?? rangeErr;
               if (finalErr) next[name] = finalErr;
               else delete next[name];
-              // 镜像字段同时清/重新校验（值刚被程序性写入，旧 error 应失效）
-              const mirrorPath = sItem?.constraints?.mirrorWith;
-              if (mirrorPath) {
-                const resolvedMirror = applyInstanceContext(mirrorPath, instanceContext);
-                const mirrorName = paramNameByPath.get(resolvedMirror);
-                if (mirrorName && mirrorName !== name) {
-                  const mItem = schemaByPath.get(resolvedMirror);
-                  const mErr = validateValue(
-                    normalizedValue,
-                    (mItem?.type as never) ?? 'string',
-                    mItem?.constraints,
-                  );
-                  if (mErr) next[mirrorName] = mErr;
-                  else delete next[mirrorName];
-                }
+            }
+            if (
+              lteBandwidthFields
+              && (
+                lteBandwidthFields.downlink in changedValues
+                || lteBandwidthFields.uplink in changedValues
+              )
+            ) {
+              const matches = lteBandwidthValuesMatch(
+                form.getFieldValue(lteBandwidthFields.downlink),
+                form.getFieldValue(lteBandwidthFields.uplink),
+              );
+              if (matches) {
+                delete next[lteBandwidthFields.downlink];
+                delete next[lteBandwidthFields.uplink];
+              } else {
+                const mismatchError = t('device.quickSettings.lteBandwidthMismatch');
+                next[lteBandwidthFields.downlink] = mismatchError;
+                next[lteBandwidthFields.uplink] = mismatchError;
               }
             }
             return next;
@@ -2679,6 +2656,14 @@ export default function CellParameterForm({
             </Row>
           );
         })()}
+        {lteBandwidthFields && (
+          <Alert
+            type="info"
+            showIcon
+            title={t('device.quickSettings.lteBandwidthHint')}
+            style={{ marginBottom: 16 }}
+          />
+        )}
         <Row gutter={16}>
           {visibleParams.map((p) => {
             if (isBmGsmCell && p.name === 'GsmCellWithRuRelation') {

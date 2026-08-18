@@ -577,7 +577,42 @@ func TestBuiltinBLN_QuickSettingsReferenceParamModel(t *testing.T) {
 			assert.Containsf(t, standardPaths, standardPath, "quicksettings group %s param %s must reference BLN param model", group.ID, param.Name)
 		}
 	}
-	assert.Equal(t, 104, checked)
+	assert.Equal(t, 105, checked)
+}
+
+func TestBuiltinLTEQuickSettingsExposeDownlinkAndUplinkBandwidth(t *testing.T) {
+	models := []string{"BLN", "MLN", "BLQ", "MLQ", "BM", "ENB_DEFAULT_098", "ENB_DEFAULT_181"}
+	const downlinkPath = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"
+	const uplinkPath = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth"
+
+	for _, model := range models {
+		t.Run(model, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", model+".xml"))
+			require.NoError(t, err)
+			var doc xmlQuickSettings
+			require.NoError(t, xml.Unmarshal(data, &doc))
+
+			var bandwidthParams []xmlParam
+			for _, group := range doc.Groups {
+				if group.ID != "enb-cell" {
+					continue
+				}
+				for _, param := range group.Params {
+					if param.StandardPath == downlinkPath || param.StandardPath == uplinkPath {
+						bandwidthParams = append(bandwidthParams, param)
+					}
+				}
+			}
+
+			require.Len(t, bandwidthParams, 2)
+			assert.Equal(t, downlinkPath, bandwidthParams[0].StandardPath)
+			assert.Equal(t, "下行带宽", bandwidthParams[0].TitleZh)
+			assert.Equal(t, "DL Bandwidth", bandwidthParams[0].TitleEn)
+			assert.Equal(t, uplinkPath, bandwidthParams[1].StandardPath)
+			assert.Equal(t, "上行带宽", bandwidthParams[1].TitleZh)
+			assert.Equal(t, "UL Bandwidth", bandwidthParams[1].TitleEn)
+		})
+	}
 }
 
 func TestBuiltinDeviceReferenceInstanceLimits(t *testing.T) {

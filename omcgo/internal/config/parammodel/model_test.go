@@ -45,6 +45,38 @@ func TestXMLParamEntry_SupportedAttribute(t *testing.T) {
 	assert.Equal(t, "true", byName["A.SupportedTrue"].Supported)
 }
 
+func TestBuiltinLTEBandwidthKeepsProductWireValuesAndMirrorConstraint(t *testing.T) {
+	const dlPath = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"
+	const ulPath = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth"
+	models := map[string]string{
+		"BLN": "25,50,75,100", "BLQ": "25,50,75,100", "BM": "25,50,75,100",
+		"MLQ": "25,50,75,100", "MLN": "25,50,75,100",
+		"ENB_DEFAULT_098": "n25,n50,n75,n100",
+		"ENB_DEFAULT_181": "n25,n50,n75,n100",
+	}
+	for model, expectedValues := range models {
+		t.Run(model, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join("..", "..", "..", "data", "param-mappings", model+".xml"))
+			require.NoError(t, err)
+			var doc xmlParameterModel
+			require.NoError(t, xml.Unmarshal(body, &doc))
+
+			found := make(map[string]xmlParamEntry)
+			for _, param := range doc.Params {
+				if param.StandardPath == dlPath || param.StandardPath == ulPath {
+					found[param.StandardPath] = param
+				}
+			}
+			for path, mirror := range map[string]string{dlPath: ulPath, ulPath: dlPath} {
+				param, ok := found[path]
+				require.True(t, ok, "missing %s", path)
+				assert.Equal(t, expectedValues, param.EnumValues)
+				assert.Equal(t, mirror, param.MirrorWith)
+			}
+		})
+	}
+}
+
 func TestBMNeighborListHasPrivateArfcnAlias(t *testing.T) {
 	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
 	body, err := os.ReadFile(xmlPath)

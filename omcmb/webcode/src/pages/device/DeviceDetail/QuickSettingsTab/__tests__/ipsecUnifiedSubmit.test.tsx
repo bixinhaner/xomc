@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   syncDeviceParams: vi.fn(),
   readbackGlobalValue: '1',
   searchParameters: vi.fn(),
+  taskStatus: 'completed',
+  refetchSchema: vi.fn(),
+  invalidateParameterSchemaCache: vi.fn(),
 }));
 
 const ipsecSchema = {
@@ -47,7 +50,7 @@ vi.mock('@core/hooks/api/useDeviceParameters', () => ({
   useParameterSchema: () => ({
     data: ipsecSchema,
     isLoading: false,
-    refetch: vi.fn().mockResolvedValue({ data: ipsecSchema }),
+    refetch: mocks.refetchSchema,
   }),
   useSearchParameters: () => ({
     data: [{
@@ -67,7 +70,7 @@ vi.mock('@core/hooks/api/useDeviceParameters', () => ({
 
 vi.mock('@core/hooks/api/useDeviceTask', () => ({
   useDeviceTaskStatus: (taskId?: string) => ({
-    data: taskId ? { id: taskId, status: 'completed', result: {} } : undefined,
+    data: taskId ? { id: taskId, status: mocks.taskStatus, result: {} } : undefined,
   }),
 }));
 
@@ -85,7 +88,7 @@ vi.mock('@core/services/api/deviceTaskApi', () => ({
 
 vi.mock('@core/services/api/deviceParameterApi', () => ({
   deviceParameterApi: {
-    invalidateParameterSchemaCache: vi.fn(),
+    invalidateParameterSchemaCache: mocks.invalidateParameterSchemaCache,
     searchParameters: mocks.searchParameters,
   },
 }));
@@ -159,6 +162,10 @@ describe('IPSec unified submit actions', () => {
     mocks.syncDeviceParams.mockReset();
     mocks.searchParameters.mockReset();
     mocks.readbackGlobalValue = '1';
+    mocks.taskStatus = 'completed';
+    mocks.refetchSchema.mockReset();
+    mocks.refetchSchema.mockResolvedValue({ data: ipsecSchema });
+    mocks.invalidateParameterSchemaCache.mockReset();
     mocks.searchParameters.mockImplementation(async () => [{
       parameterPath: 'Device.Services.FAPService.Ipsec.IPSEC_ENABLE',
       parameterValue: mocks.readbackGlobalValue,
@@ -193,6 +200,61 @@ describe('IPSec unified submit actions', () => {
     renderControl('standalone');
 
     expect(screen.getByRole('button', { name: 'common.save' })).toBeInTheDocument();
+  });
+
+  it('refreshes related quick-settings lists after a failed device response', async () => {
+    mocks.taskStatus = 'failed';
+    const fbKey = feedbackKey('device-1', 'device-ipsec-control', 1);
+    useQuickSettingsFeedbackStore.getState().setDraftField(fbKey, 'IPSEC_ENABLE', '1');
+    const submittedDraftRevision = useQuickSettingsFeedbackStore.getState().draftRevisions[fbKey];
+    useQuickSettingsFeedbackStore.getState().setFeedback(fbKey, {
+      kind: 'cell',
+      submitStatus: 'queued',
+      taskId: 'failed-task',
+      count: 1,
+      at: Date.now(),
+      expectedReadback: {
+        'Device.Services.FAPService.Ipsec.IPSEC_ENABLE': '1',
+      },
+      submittedDraftRevision,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CellParameterForm
+          deviceId="device-1"
+          group={ipsecControlGroup}
+          instanceContext={{ networkType: 'lte', fapInstance: 1 }}
+          locale="zh-CN"
+          actionMode="standalone"
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.invalidateParameterSchemaCache).toHaveBeenCalledWith('device-1');
+      expect(invalidateQueries).toHaveBeenCalledWith(expect.objectContaining({
+        queryKey: ['devices', 'parameters', 'device-1'],
+      }));
+      expect(invalidateQueries).toHaveBeenCalledWith(expect.objectContaining({
+        queryKey: ['devices', 'parameter-schema', 'device-1'],
+      }));
+      expect(invalidateQueries).toHaveBeenCalledWith(expect.objectContaining({
+        queryKey: ['devices', 'parameters', 'search', 'device-1'],
+      }));
+      expect(invalidateQueries).toHaveBeenCalledWith(expect.objectContaining({
+        queryKey: ['devices', 'parameter-tree', 'device-1'],
+      }));
+    });
+    await waitFor(() => expect(mocks.refetchSchema).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(useQuickSettingsFeedbackStore.getState().drafts[fbKey]).toBeUndefined();
+      expect(screen.getByText('关闭')).toBeInTheDocument();
+    });
   });
 
   it('shows the unified action when only the global switch changed', () => {

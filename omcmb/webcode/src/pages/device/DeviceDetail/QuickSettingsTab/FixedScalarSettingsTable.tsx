@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Input, Modal, Select, Space, Table, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { EditOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParameterSchema, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
+import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import type { ParameterSchemaItem, ParameterType, ParameterUpdateRequest } from '@core/types/deviceParameter';
+import { isDeviceTaskTerminal } from '@core/types/deviceTask';
 import type { QuickSettingsGroup, QuickSettingsParam } from '@core/types/quicksettings';
 import { formatEnumDisplayValue, resolveQuickSettingsParameterType, validateValue } from './validators';
 import { useT } from '@/hooks/useT';
+import { refreshQuickSettingsRelatedLists } from './quickSettingsTerminalRefresh';
 
 const { Text } = Typography;
 
@@ -151,12 +154,13 @@ export default function FixedScalarSettingsTable({
   const queryClient = useQueryClient();
   const updateMutation = useUpdateParameters();
   const [editState, setEditState] = useState<EditState | null>(null);
+  const [lastTaskId, setLastTaskId] = useState<string>();
 
   const rows = useMemo(
     () => sortedRows(groups, kind),
     [groups, kind],
   );
-  const { data: deviceInfoSchema, refetch: refetchDeviceInfo } = useParameterSchema(
+  const { data: deviceInfoSchema } = useParameterSchema(
     deviceId,
     'Device.DeviceInfo.',
     active,
@@ -168,6 +172,23 @@ export default function FixedScalarSettingsTable({
     }
     return map;
   }, [deviceInfoSchema]);
+  const { data: lastTask } = useDeviceTaskStatus(active ? lastTaskId : undefined);
+  const lastTaskStatus = lastTask?.status;
+
+  useEffect(() => {
+    if (!active || !lastTaskId || !isDeviceTaskTerminal(lastTaskStatus)) return;
+    let cancelled = false;
+    void refreshQuickSettingsRelatedLists(queryClient, deviceId)
+      .catch((error) => {
+        console.warn('FixedScalarSettingsTable: refresh after device response failed', error);
+      })
+      .finally(() => {
+        if (!cancelled) setLastTaskId(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active, lastTaskId, lastTaskStatus, queryClient, deviceId]);
 
   const openEdit = (row: TableRow) => {
     const values = Object.fromEntries(
@@ -213,9 +234,8 @@ export default function FixedScalarSettingsTable({
     }
 
     try {
-      await updateMutation.mutateAsync({ deviceId, parameters: updates });
-      await refetchDeviceInfo();
-      await queryClient.invalidateQueries({ queryKey: ['devices', 'parameters', deviceId] });
+      const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
+      setLastTaskId(result.taskId);
       setEditState(null);
       message.success(locale === 'zh-CN' ? '配置已提交' : 'Configuration submitted');
     } catch (error) {
