@@ -1317,16 +1317,30 @@ func TestValidateRejectsEGWObjects(t *testing.T) {
 func TestValidateAcceptsCMCSVAndXMLProfile(t *testing.T) {
 	r := setupTestRouter()
 
-	for _, format := range []string{"CSV", "XML"} {
-		body := []byte(fmt.Sprintf(`{"profile_kind":"file","domain":"CM","format":"%s","period":"24H","compression_enabled":true,"compression_format":"zip","objects":[{"code":"CP"}]}`, format))
+	cases := []struct {
+		name   string
+		format string
+		object string
+	}{
+		{name: "lte csv", format: "CSV", object: `{"code":"CP"}`},
+		{name: "lte xml", format: "XML", object: `{"code":"CP"}`},
+		{name: "gnb csv", format: "CSV", object: `{"code":"CP","tech":"GNB"}`},
+		{name: "gnb xml", format: "XML", object: `{"code":"CP","tech":"GNB"}`},
+		{name: "coms csv", format: "CSV", object: `{"code":"COMS"}`},
+		{name: "coms xml", format: "XML", object: `{"code":"COMS"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(fmt.Sprintf(`{"profile_kind":"file","domain":"CM","format":"%s","period":"24H","compression_enabled":true,"compression_format":"zip","objects":[%s]}`, tc.format, tc.object))
 
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/northbound/page-config/validate", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		rr := httptest.NewRecorder()
-		r.ServeHTTP(rr, req)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/northbound/page-config/validate", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			r.ServeHTTP(rr, req)
 
-		require.Equal(t, http.StatusOK, rr.Code)
-		require.Contains(t, rr.Body.String(), `"valid":true`)
+			require.Equal(t, http.StatusOK, rr.Code)
+			require.Contains(t, rr.Body.String(), `"valid":true`)
+		})
 	}
 }
 
@@ -1899,6 +1913,40 @@ func TestRunDefaultCMScenarioUsesLegacySupportedContent(t *testing.T) {
 	require.Equal(t, "1", records[1][23])
 	require.NotContains(t, records[0], "TRANS_DATE")
 	require.NotContains(t, records[0], "RESOURCE_BLOCK")
+}
+
+func TestRunCMCOMSXMLProfileUsesGenericCOMSFields(t *testing.T) {
+	repo := newFakeRepository()
+	cmGroup := group("cm-coms-xml", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, []ScenarioObject{
+		{Code: "COMS", Tech: "LTE", Profile: "cm.coms.xml.v1"},
+	})
+	cmGroup.CompressionEnabled = false
+	repo.fileProfiles = append(repo.fileProfiles, fileProfile(
+		"S9405",
+		"CM COMS XML",
+		"COMS XML",
+		"COMS XML",
+		nil,
+		[]FileGroup{cmGroup},
+	))
+	svc := NewServiceWithRepository(NewDefaultCatalog(), repo)
+
+	resp, err := svc.RunFileProfile(context.Background(), "S9405", RunProfileRequest{
+		GroupID: "cm-coms-xml",
+		Limit:   1,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, resp.Items, 1)
+	comsRun := resp.Items[0]
+	require.Equal(t, "COMS", comsRun.ObjectCode)
+	require.Contains(t, comsRun.ArtifactName, ".xml")
+	require.Contains(t, comsRun.ArtifactContent, "<DataFile>")
+	require.Contains(t, comsRun.ArtifactContent, "<N i=\"1\">Serial Number</N>")
+	require.Contains(t, comsRun.ArtifactContent, "<N i=\"4\">ENODEB_ID</N>")
+	require.Contains(t, comsRun.ArtifactContent, `<Object Dn="SN0001">`)
+	require.Contains(t, comsRun.ArtifactContent, "<V i=\"1\">SN0001</V>")
+	require.Contains(t, comsRun.ArtifactContent, "<V i=\"4\">100001</V>")
 }
 
 func TestRunS0001EPUsesLegacyTemplateDataFields(t *testing.T) {

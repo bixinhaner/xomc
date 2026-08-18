@@ -13,6 +13,24 @@ var supportedFormats = map[Domain]map[OutputFormat]struct{}{
 	DomainInventory: {FormatCSV: {}},
 }
 
+func formatSet(formats ...OutputFormat) map[OutputFormat]struct{} {
+	out := make(map[OutputFormat]struct{}, len(formats))
+	for _, format := range formats {
+		out[format] = struct{}{}
+	}
+	return out
+}
+
+func supportedFormatsForObject(domain Domain, objectCode string) map[OutputFormat]struct{} {
+	if domain == DomainCM {
+		switch strings.ToUpper(strings.TrimSpace(objectCode)) {
+		case "CP", "EP", "CC", "CE", "COMS":
+			return formatSet(FormatCSV, FormatXML)
+		}
+	}
+	return supportedFormats[domain]
+}
+
 var supportedObjects = map[Domain]map[string]struct{}{
 	DomainCM:        {"CP": {}, "EP": {}, "CC": {}, "CE": {}, "COMS": {}},
 	DomainPM:        {"PC": {}, "PE": {}},
@@ -73,6 +91,12 @@ func (c *Catalog) Validate(req ValidateRequest) ValidationResult {
 		if len(allowedObjects) > 0 {
 			if _, ok := allowedObjects[code]; !ok {
 				result.Errors = append(result.Errors, fmt.Sprintf("object %q is not supported by domain %q", code, req.Domain))
+				continue
+			}
+		}
+		if formats := supportedFormatsForObject(req.Domain, code); len(formats) > 0 {
+			if _, ok := formats[req.Format]; !ok {
+				result.Errors = append(result.Errors, fmt.Sprintf("format %q is not supported by object %q in domain %q", req.Format, code, req.Domain))
 			}
 		}
 	}

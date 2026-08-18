@@ -31,6 +31,8 @@ type PgRepository struct {
 
 var _ Repository = (*PgRepository)(nil)
 
+const defaultFileProfileLegacyFormatAlignedConfigKey = "legacy_scene_format_aligned_v333"
+
 func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
 	return &PgRepository{pool: pool}
 }
@@ -104,7 +106,8 @@ func (r *PgRepository) backfillDefaultFileProfileGroupMetadata(ctx context.Conte
 	}
 
 	var raw []byte
-	if err := r.pool.QueryRow(ctx, `SELECT groups FROM northbound_file_profiles WHERE code = $1`, profile.Code).Scan(&raw); err != nil {
+	var configRaw []byte
+	if err := r.pool.QueryRow(ctx, `SELECT groups, config FROM northbound_file_profiles WHERE code = $1`, profile.Code).Scan(&raw, &configRaw); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil
 		}
@@ -114,11 +117,70 @@ func (r *PgRepository) backfillDefaultFileProfileGroupMetadata(ctx context.Conte
 	if err := json.Unmarshal(raw, &groups); err != nil {
 		return fmt.Errorf("unmarshal default northbound_file_profiles groups %s: %w", profile.Code, err)
 	}
+	config := map[string]any{}
+	if len(configRaw) > 0 {
+		if err := json.Unmarshal(configRaw, &config); err != nil {
+			return fmt.Errorf("unmarshal default northbound_file_profiles config %s: %w", profile.Code, err)
+		}
+		if config == nil {
+			config = map[string]any{}
+		}
+	}
+	legacyFormatAligned := configBool(config, defaultFileProfileLegacyFormatAlignedConfigKey)
+	changed := backfillDefaultFileProfileGroups(groups, defaultGroupsByID, !legacyFormatAligned)
+	configChanged := false
+	if !legacyFormatAligned {
+		config[defaultFileProfileLegacyFormatAlignedConfigKey] = true
+		configChanged = true
+	}
+	if !changed && !configChanged {
+		return nil
+	}
+	updated, err := json.Marshal(groups)
+	if err != nil {
+		return fmt.Errorf("marshal default northbound_file_profiles groups %s: %w", profile.Code, err)
+	}
+	updatedConfig, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("marshal default northbound_file_profiles config %s: %w", profile.Code, err)
+	}
+	_, err = r.pool.Exec(ctx, `
+UPDATE northbound_file_profiles
+   SET groups = $2,
+       config = $3,
+       updated_at = CASE WHEN $4 THEN now() ELSE updated_at END
+ WHERE code = $1`, profile.Code, updated, updatedConfig, changed)
+	if err != nil {
+		return fmt.Errorf("backfill default northbound_file_profiles groups %s: %w", profile.Code, err)
+	}
+	return nil
+}
+
+func configBool(config map[string]any, key string) bool {
+	switch value := config[key].(type) {
+	case bool:
+		return value
+	case string:
+		return strings.EqualFold(strings.TrimSpace(value), "true")
+	default:
+		return false
+	}
+}
+
+func backfillDefaultFileProfileGroups(groups []FileGroup, defaultGroupsByID map[string]FileGroup, alignLegacyFormats bool) bool {
 	changed := false
 	for i := range groups {
 		defaultGroup, ok := defaultGroupsByID[groups[i].ID]
 		if !ok {
 			continue
+		}
+		if alignLegacyFormats && groups[i].Domain != defaultGroup.Domain {
+			groups[i].Domain = defaultGroup.Domain
+			changed = true
+		}
+		if alignLegacyFormats && groups[i].Format != defaultGroup.Format {
+			groups[i].Format = defaultGroup.Format
+			changed = true
 		}
 		if strings.TrimSpace(groups[i].CSVSeparator) == "" && strings.TrimSpace(defaultGroup.CSVSeparator) != "" {
 			groups[i].CSVSeparator = defaultGroup.CSVSeparator
@@ -146,22 +208,11 @@ func (r *PgRepository) backfillDefaultFileProfileGroupMetadata(ctx context.Conte
 			}
 		}
 		if groups[i].Domain == defaultGroup.Domain && groups[i].Format == defaultGroup.Format &&
-			backfillDefaultFileProfileObjectProfiles(groups[i].Domain, groups[i].Format, groups[i].Objects, defaultGroup.Objects) {
+			backfillDefaultFileProfileObjectProfilesWithOptions(groups[i].Domain, groups[i].Format, groups[i].Objects, defaultGroup.Objects, alignLegacyFormats) {
 			changed = true
 		}
 	}
-	if !changed {
-		return nil
-	}
-	updated, err := json.Marshal(groups)
-	if err != nil {
-		return fmt.Errorf("marshal default northbound_file_profiles groups %s: %w", profile.Code, err)
-	}
-	_, err = r.pool.Exec(ctx, `UPDATE northbound_file_profiles SET groups = $2, updated_at = now() WHERE code = $1`, profile.Code, updated)
-	if err != nil {
-		return fmt.Errorf("backfill default northbound_file_profiles groups %s: %w", profile.Code, err)
-	}
-	return nil
+	return changed
 }
 
 func (r *PgRepository) backfillDefaultFileProfileScenarioNames(ctx context.Context, profile FileProfile) error {
@@ -210,6 +261,10 @@ func normalizeScenarioLogObjects(objects []ScenarioObject) bool {
 }
 
 func backfillDefaultFileProfileObjectProfiles(domain Domain, format OutputFormat, objects, defaultObjects []ScenarioObject) bool {
+	return backfillDefaultFileProfileObjectProfilesWithOptions(domain, format, objects, defaultObjects, false)
+}
+
+func backfillDefaultFileProfileObjectProfilesWithOptions(domain Domain, format OutputFormat, objects, defaultObjects []ScenarioObject, allowAnyLegacyCMProfile bool) bool {
 	if domain != DomainCM || len(objects) == 0 || len(defaultObjects) == 0 {
 		return false
 	}
@@ -247,7 +302,8 @@ func backfillDefaultFileProfileObjectProfiles(domain Domain, format OutputFormat
 		targetProfile := strings.TrimSpace(defaultObject.Profile)
 		currentProfile := strings.TrimSpace(objects[i].Profile)
 		if targetProfile == "" {
-			if currentProfile != "" && strings.EqualFold(currentProfile, legacyCMProfile(format, code)) {
+			if currentProfile != "" && (strings.EqualFold(currentProfile, legacyCMProfile(format, code)) ||
+				(allowAnyLegacyCMProfile && isLegacyCMProfileForObject(currentProfile, code))) {
 				objects[i].Profile = ""
 				changed = true
 			}
@@ -256,12 +312,22 @@ func backfillDefaultFileProfileObjectProfiles(domain Domain, format OutputFormat
 		if strings.EqualFold(currentProfile, targetProfile) {
 			continue
 		}
-		if currentProfile == "" || strings.EqualFold(currentProfile, legacyCMProfile(format, code)) {
+		if currentProfile == "" || strings.EqualFold(currentProfile, legacyCMProfile(format, code)) ||
+			(allowAnyLegacyCMProfile && isLegacyCMProfileForObject(currentProfile, code)) {
 			objects[i].Profile = targetProfile
 			changed = true
 		}
 	}
 	return changed
+}
+
+func isLegacyCMProfileForObject(profile string, code string) bool {
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		return false
+	}
+	return strings.EqualFold(profile, legacyCMProfile(FormatCSV, code)) ||
+		strings.EqualFold(profile, legacyCMProfile(FormatXML, code))
 }
 
 func (r *PgRepository) insertDefaultFileProfile(ctx context.Context, profile FileProfile) error {
