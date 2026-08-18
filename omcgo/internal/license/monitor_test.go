@@ -271,6 +271,25 @@ func TestMonitor_CheckCapacity_RaisesAndClearsExhaustedAlert(t *testing.T) {
 	assert.Contains(t, sink.clears, CapacityExhaustedIdentifier)
 }
 
+func TestMonitor_CheckCapacity_ExhaustedAlertCountsGsmIntoEnbPool(t *testing.T) {
+	// issue #318：GSM 与 eNB 共用容量——eNB 配额的用量按 ENB+GSM 合计评估
+	// （ENB=1、GSM=1 对 eNB=2 已满），即使 ENB 单类型未满也应 raise。
+	defer fixedClock(time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC))()
+	lic := systemLicense("L", DevicesSupport{"eNB": 2}, 365*24*time.Hour)
+	repo := &mockSystemLicenseRepo{current: lic}
+	dev := &fakeDeviceCounter{count: 2, countByType: map[string]int{"ENB": 1, "GSM": 1}}
+	m, sink, _ := newMonitorForTest(repo, dev, nil)
+
+	require.NoError(t, m.CheckCapacity(context.Background()))
+	found := false
+	for _, a := range sink.alerts {
+		if a.Identifier == CapacityExhaustedIdentifier {
+			found = true
+		}
+	}
+	require.True(t, found, "should raise exhausted alert when ENB+GSM combined usage fills the eNB pool")
+}
+
 func TestMonitor_CheckCumulativeUsage_ExceededAlerts(t *testing.T) {
 	defer fixedClock(time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC))()
 	lic := &SystemLicense{

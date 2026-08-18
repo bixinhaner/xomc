@@ -15,7 +15,9 @@
 //     `EnforceCapacity(ctx, deviceType, additional)` 按**网元类型独立限额** ——
 //     license 未显式授权该类型（map 查不到或配额<=0）一律拒绝（严格模式，
 //     对齐 issue #316 "各网元最大接入设备数必须分别生效"）。大小写不敏感
-//     匹配（license key `eNB`/`gNB` ↔ 设备 ne_type `ENB`/`GNB`）。
+//     匹配（license key `eNB`/`gNB` ↔ 设备 ne_type `ENB`/`GNB`）。例外是
+//     容量分组（issue #318）：GSM 网元（2G BSC/BTS）与 eNB 共用容量，
+//     见 capacity_group.go。
 //   - 过期：`SystemLicense.ExpiryDate` 直接判断（新模型无 grace_period_days
 //     / 无 perpetual 类型；NULL expiry_date 视为永不过期，对应老 perpetual 语义）
 //   - 缓存：5min TTL，Replace（POST /system-license）后由 SystemLicenseService
@@ -245,10 +247,13 @@ func lookupCapacity(ds DevicesSupport, deviceType string) (int, bool) {
 // EnforceCapacity rejects (per-type gating) when:
 //   - deviceType=="" → unknown NE type (product not registered): reject;
 //   - no license configured → fail-closed (ErrLicenseUnavailable);
-//   - license does not authorize deviceType (absent from DevicesSupport or
-//     quota<=0) → reject (strict, issue #316);
-//   - current count of deviceType + additional exceeds that type's quota →
-//     reject.
+//   - license does not authorize deviceType's capacity group (absent from
+//     DevicesSupport or quota<=0) → reject (strict, issue #316);
+//   - current count of the capacity group + additional exceeds the group's
+//     quota → reject.
+//
+// 容量分组（issue #318）：GSM 归入 eNB 容量组——授权与用量都看 eNB 配额，
+// 组内 eNB+GSM 在线数合计控制；其余类型各占独立容量组。
 func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, deviceType string, additional int) error {
 	if additional < 0 {
 		return fmt.Errorf("additional must be >= 0: %w", commonerrors.ErrInvalidInput)
@@ -275,38 +280,41 @@ func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, deviceType string, a
 		return fmt.Errorf("no system license configured: %w", commonerrors.ErrLicenseUnavailable)
 	}
 
-	maxForType, authorized := lookupCapacity(lic.DevicesSupport, deviceType)
+	quotaKey := capacityGroupKey(target)
+	maxForType, authorized := lookupCapacity(lic.DevicesSupport, quotaKey)
 	if !authorized || maxForType <= 0 {
 		e.recordEnforcement("capacity", "denied_unauthorized_type")
 		e.logger.Warn("license capacity denied: device type not authorized by license",
 			zap.String("audit", "enforcement_capacity"),
 			zap.String("license_id", lic.LicenseID),
 			zap.String("device_type", deviceType),
+			zap.String("capacity_group", quotaKey),
 			zap.Any("devices_support", lic.DevicesSupport),
 		)
-		return fmt.Errorf("device type %q not authorized by license (devices_support has no quota for it): %w",
-			deviceType, commonerrors.ErrLicenseCapacityExceeded)
+		return fmt.Errorf("device type %q not authorized by license (capacity group %q has no quota for it): %w",
+			deviceType, quotaKey, commonerrors.ErrLicenseCapacityExceeded)
 	}
 
 	usedByType, err := e.devices.CountDevicesByType(ctx)
 	if err != nil {
 		return fmt.Errorf("count devices by type for enforcement: %w", err)
 	}
-	used := usedByType[target]
+	used := capacityGroupUsage(usedByType, quotaKey)
 	if used+additional > maxForType {
 		e.recordEnforcement("capacity", "denied_capacity")
 		e.logger.Warn("license capacity exceeded — device.create denied",
 			zap.String("audit", "enforcement_capacity"),
 			zap.String("license_id", lic.LicenseID),
 			zap.String("device_type", deviceType),
+			zap.String("capacity_group", quotaKey),
 			zap.Int("type_capacity", maxForType),
 			zap.Int("type_used", used),
 			zap.Int("additional", additional),
 			zap.Any("devices_support", lic.DevicesSupport),
 		)
-		e.raiseCapacityExhaustedAlert(ctx, lic, deviceType, used, maxForType)
+		e.raiseCapacityExhaustedAlert(ctx, lic, quotaKey, used, maxForType)
 		return fmt.Errorf("type=%s used=%d, max=%d, additional=%d: %w",
-			deviceType, used, maxForType, additional, commonerrors.ErrLicenseCapacityExceeded)
+			quotaKey, used, maxForType, additional, commonerrors.ErrLicenseCapacityExceeded)
 	}
 
 	e.recordEnforcement("capacity", "allowed")
@@ -467,7 +475,8 @@ func (e *EnforcerImpl) Quota(ctx context.Context) (*Quota, error) {
 		}
 		q.PerType = make(map[string]TypeQuotaItem, len(lic.DevicesSupport))
 		for t, m := range lic.DevicesSupport {
-			used := usedByType[upperKey(t)]
+			// 容量分组（issue #318）：用量按组合计（eNB 卡片的 Used 含 GSM 设备）。
+			used := capacityGroupUsage(usedByType, upperKey(t))
 			item := TypeQuotaItem{Max: m, Used: used}
 			if m > 0 {
 				item.Ratio = float64(used) / float64(m)
