@@ -177,7 +177,7 @@ func (r *Runner) generate(ctx context.Context, task *Task) (genResult, error) {
 		return genResult{}, fmt.Errorf("export bucket not configured")
 	}
 	if r.admission != nil {
-		decision, err := r.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopePM)
+		decision, err := r.admission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, storageprotection.WriteScopePM)
 		if err != nil {
 			return genResult{}, fmt.Errorf("storage admission check: %w", err)
 		}

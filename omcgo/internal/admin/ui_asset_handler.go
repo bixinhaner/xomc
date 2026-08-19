@@ -164,7 +164,7 @@ func (h *UIAssetHandler) Serve(c *gin.Context) {
 // putObject 流式把 multipart 文件写入 MinIO。
 func (h *UIAssetHandler) putObject(ctx context.Context, fh *multipart.FileHeader, objectName, contentType string) error {
 	if h.storageAdmission != nil {
-		decision, err := h.storageAdmission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeUpload)
+		decision, err := h.storageAdmission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, storageprotection.WriteScopeUpload)
 		if err != nil {
 			return fmt.Errorf("storage admission check: %w", err)
 		}

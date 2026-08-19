@@ -134,7 +134,7 @@ func (g *ReportGenerator) handleGenerateRequest(ctx context.Context, evt event.E
 	objectPath := fmt.Sprintf("reports/%s/%s/%s.json", def.ID.String(), record.Period, record.ID.String())
 	reader := bytes.NewReader(jsonBytes)
 	if g.storageAdmission != nil {
-		decision, admissionErr := g.storageAdmission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeReport)
+		decision, admissionErr := g.storageAdmission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, storageprotection.WriteScopeReport)
 		if admissionErr != nil {
 			return fmt.Errorf("storage admission check: %w", admissionErr)
 		}

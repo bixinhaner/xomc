@@ -1131,7 +1131,7 @@ func (h *Handler) stageXMLDownload(
 		return "", fmt.Errorf("plug and play XML file ID is required")
 	}
 	if h.admission != nil {
-		decision, err := h.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeUpload)
+		decision, err := h.admission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, storageprotection.WriteScopeUpload)
 		if err != nil {
 			return "", fmt.Errorf("storage admission check: %w", err)
 		}

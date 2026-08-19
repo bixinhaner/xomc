@@ -82,7 +82,7 @@ func (e *Exporter) ready() bool {
 
 func (e *Exporter) upload(ctx context.Context, key string, data []byte) error {
 	if e.admission != nil {
-		decision, err := e.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeReport)
+		decision, err := e.admission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, storageprotection.WriteScopeReport)
 		if err != nil {
 			return fmt.Errorf("storage admission check: %w", err)
 		}

@@ -77,12 +77,55 @@ func (p *CollectorUsageProvider) ListTargets(ctx context.Context) ([]UsageSnapsh
 	return targets, nil
 }
 
+func (p *CollectorUsageProvider) ResolveProtectedPathTarget(ctx context.Context, protectedPathID string) (UsageSnapshot, bool, error) {
+	paths, err := p.protectedPaths(ctx)
+	if err != nil {
+		return UsageSnapshot{}, false, err
+	}
+	var path string
+	for _, protectedPath := range paths {
+		if protectedPathMatchesID(protectedPath.ID, protectedPathID) {
+			path = protectedPath.Path
+			break
+		}
+	}
+	if path == "" {
+		return UsageSnapshot{}, false, nil
+	}
+	targets, err := p.ListTargets(ctx)
+	if err != nil {
+		return UsageSnapshot{}, false, err
+	}
+	for _, target := range targets {
+		for _, protectedPath := range target.ProtectedPaths {
+			if cleanHostPath(protectedPath) == path {
+				return target, true, nil
+			}
+		}
+	}
+	for _, target := range targets {
+		if pathContains(target.Mountpoint, path) {
+			return target, true, nil
+		}
+	}
+	return UsageSnapshot{}, false, nil
+}
+
 func (p *CollectorUsageProvider) protectedPaths(ctx context.Context) ([]ProtectedPath, error) {
 	resolver := p.resolver
 	if resolver == nil {
 		resolver = NewEnvProtectedPathResolver()
 	}
 	return resolver.ProtectedPaths(ctx)
+}
+
+func protectedPathMatchesID(value, expected string) bool {
+	for _, part := range strings.Split(value, ",") {
+		if strings.TrimSpace(part) == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func unavailableHostFilesystemSnapshot(metrics []components.StorageMetric) *UsageSnapshot {

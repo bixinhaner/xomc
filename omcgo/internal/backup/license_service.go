@@ -226,7 +226,7 @@ func (s *LicenseService) checkStorageAdmission(ctx context.Context) error {
 	if s.admission == nil {
 		return nil
 	}
-	decision, err := s.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeUpload)
+	decision, err := s.admission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, storageprotection.WriteScopeUpload)
 	if err != nil {
 		return fmt.Errorf("storage admission check: %w", err)
 	}

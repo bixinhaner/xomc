@@ -51,7 +51,7 @@ func (b *BulkStore) Put(ctx context.Context, taskID, msgID uuid.UUID, payload st
 		return "", fmt.Errorf("bulk store disabled")
 	}
 	if b.storageAdmission != nil {
-		decision, err := b.storageAdmission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeTrace)
+		decision, err := b.storageAdmission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, storageprotection.WriteScopeTrace)
 		if err != nil {
 			return "", fmt.Errorf("storage admission check: %w", err)
 		}

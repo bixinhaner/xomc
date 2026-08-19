@@ -23,6 +23,11 @@ type UsageTargetLister interface {
 	ListTargets(ctx context.Context) ([]UsageSnapshot, error)
 }
 
+type ProtectedPathTargetResolver interface {
+	ResolveProtectedPathTarget(ctx context.Context, protectedPathID string) (UsageSnapshot, bool, error)
+}
+
 type WriteAdmission interface {
 	Check(ctx context.Context, targetType TargetType, targetID string, scope WriteScope) (AdmissionDecision, error)
+	CheckPath(ctx context.Context, protectedPathID string, scope WriteScope) (AdmissionDecision, error)
 }

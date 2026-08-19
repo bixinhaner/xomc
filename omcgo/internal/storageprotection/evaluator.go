@@ -11,11 +11,11 @@ func validatePolicy(policy *Policy) error {
 	if policy.TargetType == "" || policy.TargetID == "" || policy.WriteScope == "" {
 		return errInvalidPolicy("target type, target id and write scope are required")
 	}
-	if policy.TargetType != TargetFilesystem || policy.TargetID != UnifiedStorageTargetID {
-		return errInvalidPolicy("storage protection only supports the unified physical filesystem target root")
+	if policy.TargetType != TargetFilesystem {
+		return errInvalidPolicy("storage protection only supports filesystem targets")
 	}
 	if policy.WriteScope != WriteScopeAll {
-		return errInvalidPolicy("storage protection thresholds are global; write scope must be all")
+		return errInvalidPolicy("storage protection policies apply to all writes on their target")
 	}
 	if policy.WarnUsedPercent < 0 || policy.WarnUsedPercent >= policy.RecoverUsedPercent ||
 		policy.RecoverUsedPercent >= policy.BlockUsedPercent || policy.BlockUsedPercent > 100 {

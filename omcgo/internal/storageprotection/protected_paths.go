@@ -15,16 +15,28 @@ const (
 	defaultOMCDataPath       = "/opt/omc/data"
 )
 
+const (
+	ProtectedPathIDPostgres = "POSTGRES_DATA_PATH"
+	ProtectedPathIDTSDB     = "TSDB_DATA_PATH"
+	ProtectedPathIDRedis    = "REDIS_DATA_PATH"
+	ProtectedPathIDRedisPM  = "REDIS_PM_DATA_PATH"
+	ProtectedPathIDNATS     = "NATS_DATA_PATH"
+	ProtectedPathIDMinIO    = "MINIO_DATA_PATH"
+	ProtectedPathIDOMCLogs  = "omc-logs"
+	ProtectedPathIDOMCData  = "omc-data"
+	ProtectedPathIDDocker   = "docker-root"
+)
+
 var protectedDataPathKeys = []struct {
 	envKey string
 	volume string
 }{
-	{envKey: "POSTGRES_DATA_PATH", volume: "pgdata"},
-	{envKey: "TSDB_DATA_PATH", volume: "tsdbdata"},
-	{envKey: "REDIS_DATA_PATH", volume: "redisdata"},
-	{envKey: "REDIS_PM_DATA_PATH", volume: "redispmdata"},
-	{envKey: "NATS_DATA_PATH", volume: "natsdata"},
-	{envKey: "MINIO_DATA_PATH", volume: "miniodata"},
+	{envKey: ProtectedPathIDPostgres, volume: "pgdata"},
+	{envKey: ProtectedPathIDTSDB, volume: "tsdbdata"},
+	{envKey: ProtectedPathIDRedis, volume: "redisdata"},
+	{envKey: ProtectedPathIDRedisPM, volume: "redispmdata"},
+	{envKey: ProtectedPathIDNATS, volume: "natsdata"},
+	{envKey: ProtectedPathIDMinIO, volume: "miniodata"},
 }
 
 type ProtectedPath struct {
@@ -82,9 +94,9 @@ func (r *EnvProtectedPathResolver) ProtectedPaths(context.Context) ([]ProtectedP
 		}
 	}
 	paths = append(paths,
-		ProtectedPath{ID: "omc-logs", Path: envAbsolutePath(lookup, "OMCGO_HOST_LOGS_PATH", defaultOMCLogsPath)},
-		ProtectedPath{ID: "omc-data", Path: envAbsolutePath(lookup, "OMCGO_HOST_DATA_PATH", defaultOMCDataPath)},
-		ProtectedPath{ID: "docker-root", Path: dockerRootDir(lookup)},
+		ProtectedPath{ID: ProtectedPathIDOMCLogs, Path: envAbsolutePath(lookup, "OMCGO_HOST_LOGS_PATH", defaultOMCLogsPath)},
+		ProtectedPath{ID: ProtectedPathIDOMCData, Path: envAbsolutePath(lookup, "OMCGO_HOST_DATA_PATH", defaultOMCDataPath)},
+		ProtectedPath{ID: ProtectedPathIDDocker, Path: dockerRootDir(lookup)},
 	)
 
 	return dedupeProtectedPaths(paths), nil

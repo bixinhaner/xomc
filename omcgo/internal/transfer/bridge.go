@@ -326,7 +326,7 @@ func parseLogFilename(filename string) (taskID8, deviceSN string) {
 // downloadAndStore fetches the file from the given URL and stores it in MinIO.
 func (b *TransferBridge) downloadAndStore(ctx context.Context, url, bucket, objectPath string) (int64, error) {
 	if b.admission != nil {
-		decision, err := b.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, b.writeScope(bucket))
+		decision, err := b.admission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, b.writeScope(bucket))
 		if err != nil {
 			return 0, fmt.Errorf("storage admission check: %w", err)
 		}
