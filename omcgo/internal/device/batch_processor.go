@@ -475,6 +475,9 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 		// 的 device.ModelName 真正持久化。SET model_name 不写空字符串覆盖既有非空值。
 		// product_id / param_model_id：按 productClass 命中时回写（随 product_class 变更
 		// 实时重算所属产品）；未命中（$15/$16 为 NULL）则保留既有值，不误清管理员手动绑定 / 孤儿态。
+		// technology：Submit 中 prepareDeviceUpdate（路径推断）与 applyProductMetadataInline
+		// （产品字典覆盖/清空）的最终值在此持久化——缺列会让非无线产品的清空只改内存不落库，
+		// 每个周期从 DB 读回旧值反复"cleared"（与导出的 BatchUpdateDevices 写 technology 对齐）。
 		query := `UPDATE devices SET
 			oui = $1, product_class = $2, manufacturer = $3,
 			lifecycle_state = $4, is_online = $5, firmware_version = $6,
@@ -482,6 +485,7 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 			nat_detected = $9, udp_connection_request_address = $10,
 			last_inform_at = $11, last_inform_events = $12,
 			model_name = CASE WHEN $13::text <> '' THEN $13 ELSE model_name END,
+			technology = $17,
 			product_id = CASE WHEN $15::uuid IS NOT NULL THEN $15 ELSE product_id END,
 			param_model_id = CASE WHEN $15::uuid IS NOT NULL THEN $16 ELSE param_model_id END,
 			updated_at = NOW()
@@ -496,6 +500,7 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 			dev.ModelName,
 			dev.ID,
 			dev.ProductID, dev.ParamModelID,
+			dev.Technology,
 		)
 	}
 
@@ -762,10 +767,13 @@ func applyProductMetadataInline(ctx context.Context, matcher ProductClassMatcher
 	if device.ModelName == "" && matchRes.Product.Name != "" {
 		device.ModelName = matchRes.Product.Name
 	}
-	// 跟 device_service.applyProductMetadata 对齐:产品字典登记了 tech 就以字典覆盖,
-	// 修正首次 Inform 时被错误推断的 Technology(5G 设备被推成 lte 的根因)。
-	if matchRes.Product.Tech != "" {
-		if normalized := model.NormalizeTechnology(matchRes.Product.Tech); normalized != "" && device.Technology != normalized {
+	// 跟 device_service.applyProductMetadata 严格对齐(设计文档 §4.3 方案 X):
+	//   · 产品字典登记了 tech → 以字典覆盖,修正首次 Inform 被错误推断的
+	//     Technology(5G 设备被推成 lte 的根因);
+	//   · 产品已登记但 tech 为空(非无线产品,如核心网) → 清空,避免兜底推断的
+	//     lte 残留(设备列表错误显示 eNB(LTE))。
+	if normalized := model.NormalizeTechnology(matchRes.Product.Tech); normalized != "" {
+		if device.Technology != normalized {
 			logger.Info("batch path applyProductMetadata: technology corrected from ProductRegistry",
 				zap.String("serial_number", device.SerialNumber),
 				zap.String("product_class", device.ProductClass),
@@ -773,6 +781,12 @@ func applyProductMetadataInline(ctx context.Context, matcher ProductClassMatcher
 				zap.String("new", string(normalized)))
 			device.Technology = normalized
 		}
+	} else if device.Technology != "" {
+		logger.Info("batch path applyProductMetadata: technology cleared (product registered without tech)",
+			zap.String("serial_number", device.SerialNumber),
+			zap.String("product_class", device.ProductClass),
+			zap.String("old", string(device.Technology)))
+		device.Technology = ""
 	}
 }
 

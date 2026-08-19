@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alarmModel neType="IMSCORE" deviceType="8" totalCount="8">
+    <alarms>
+        <alarm identifier="880001" cnName="S1-C link ping check failed" enName="S1-C link ping check failed" severity="Critical" eventType="30002" cnProbableCause="S1-C link ping check failed" enProbableCause="S1-C link ping check failed" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="880002" cnName="S1-U link ping check failed" enName="S1-U link ping check failed" severity="Critical" eventType="30002" cnProbableCause="S1-U link ping check failed" enProbableCause="S1-U link ping check failed" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="880003" cnName="SGi link ping check failed" enName="SGi link ping check failed" severity="Critical" eventType="30002" cnProbableCause="SGi link ping check failed" enProbableCause="SGi link ping check failed" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="880004" cnName="BOSS service connection failed" enName="BOSS service connection failed" severity="Major" eventType="30002" cnProbableCause="BOSS service connection failed" enProbableCause="BOSS service connection failed" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="880005" cnName="License validation or loading failed" enName="License validation or loading failed" severity="Major" eventType="30002" cnProbableCause="License validation or loading failed" enProbableCause="License validation or loading failed" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="880006" cnName="Total system memory is insufficient" enName="Total system memory is insufficient" severity="Major" eventType="30002" cnProbableCause="Total system memory is insufficient" enProbableCause="Total system memory is insufficient" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="880007" cnName="Available module memory is insufficient" enName="Available module memory is insufficient" severity="Major" eventType="30002" cnProbableCause="Available module memory is insufficient" enProbableCause="Available module memory is insufficient" cnSuggestion="" enSuggestion="" isShow="Y" />
+        <alarm identifier="880008" cnName="HALOB driver is abnormal" enName="HALOB driver is abnormal" severity="Critical" eventType="30002" cnProbableCause="HALOB driver is abnormal" enProbableCause="HALOB driver is abnormal" cnSuggestion="" enSuggestion="" isShow="Y" />
+    </alarms>
+</alarmModel>

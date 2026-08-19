@@ -137,6 +137,59 @@ func TestApplyProductMetadata_EmptyProductName(t *testing.T) {
 	assert.Equal(t, "", device.ModelName)
 }
 
+// TestApplyProductMetadata_TechlessProductClearsTechnology 覆盖非无线产品语义：
+// 产品已登记但 tech 为空（如核心网 ImsCore）→ 清空设备 Technology，
+// 不保留 detectTechnology 兜底推断的 lte（设备列表会错误显示 eNB(LTE)）。
+func TestApplyProductMetadata_TechlessProductClearsTechnology(t *testing.T) {
+	matcher := &stubProductMatcher{
+		res: &product.MatchResult{
+			Product: &product.Product{ID: uuid.New(), Name: "ImsCore", Tech: ""},
+		},
+	}
+	svc := &DeviceService{productMatcher: matcher, logger: zap.NewNop()}
+
+	device := &model.Device{
+		SerialNumber: "SN001",
+		ProductClass: "ImsCore",
+		Technology:   model.TechLTE, // 首次 Inform 被 detectTechnology 默认推断
+	}
+	svc.applyProductMetadata(context.Background(), device)
+
+	assert.Equal(t, model.Technology(""), device.Technology)
+}
+
+// TestApplyProductMetadata_TechlessProductKeepsEmptyTechnology 验证已为空的
+// Technology 不产生额外写入路径（幂等）。
+func TestApplyProductMetadata_TechlessProductKeepsEmptyTechnology(t *testing.T) {
+	matcher := &stubProductMatcher{
+		res: &product.MatchResult{
+			Product: &product.Product{ID: uuid.New(), Name: "ImsCore", Tech: ""},
+		},
+	}
+	svc := &DeviceService{productMatcher: matcher, logger: zap.NewNop()}
+
+	device := &model.Device{ProductClass: "ImsCore", Technology: ""}
+	svc.applyProductMetadata(context.Background(), device)
+
+	assert.Equal(t, model.Technology(""), device.Technology)
+}
+
+// TestApplyProductMetadata_ProductTechOverridesInferred 验证登记了 tech 的产品
+// 仍以字典覆盖错误推断（既有行为不回归）。
+func TestApplyProductMetadata_ProductTechOverridesInferred(t *testing.T) {
+	matcher := &stubProductMatcher{
+		res: &product.MatchResult{
+			Product: &product.Product{ID: uuid.New(), Name: "BNQ", Tech: "nr"},
+		},
+	}
+	svc := &DeviceService{productMatcher: matcher, logger: zap.NewNop()}
+
+	device := &model.Device{ProductClass: "FAP/BSC7041C243", Technology: model.TechLTE}
+	svc.applyProductMetadata(context.Background(), device)
+
+	assert.Equal(t, model.TechNR, device.Technology)
+}
+
 // counterMatcher 包装 stub 用于断言 MatchProductClass 是否被调用过。
 type counterMatcher struct {
 	inner  ProductClassMatcher

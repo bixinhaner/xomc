@@ -580,6 +580,80 @@ func TestBuiltinBLN_QuickSettingsReferenceParamModel(t *testing.T) {
 	assert.Equal(t, 105, checked)
 }
 
+func TestBuiltinIMSCORE_QuickSettingsReferenceParamModel(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "data", "quicksettings", "IMSCORE.xml"))
+	require.NoError(t, err)
+
+	doc := parseXMLQuickSettings(t, data)
+	assert.Equal(t, "IMSCORE", doc.ParamModel)
+
+	groups, err := buildGroups(doc, "IMSCORE.xml")
+	require.NoError(t, err)
+	require.Len(t, groups, 3)
+
+	assert.Equal(t, "imscore-base-config", groups[0].ID)
+	assert.False(t, groups[0].MultiInstance)
+	assert.Equal(t, "imscore-tal-info", groups[1].ID)
+	assert.True(t, groups[1].MultiInstance)
+	assert.Equal(t, "Device.ImsCore.TalInfoConfig.{i}.", groups[1].ObjectPath)
+	assert.Equal(t, "imscore-core-info", groups[2].ID)
+	assert.True(t, groups[2].MultiInstance)
+	assert.Equal(t, "Device.ImsCore.CoreInfoConfig.{i}.", groups[2].ObjectPath)
+
+	paramModelData, err := os.ReadFile(filepath.Join("..", "..", "data", "param-mappings", "IMSCORE.xml"))
+	require.NoError(t, err)
+
+	var paramModel struct {
+		Params []struct {
+			StandardPath  string `xml:"standardPath,attr"`
+			ChangeApplies string `xml:"changeApplies,attr"`
+		} `xml:"parameters>param"`
+	}
+	require.NoError(t, xml.Unmarshal(paramModelData, &paramModel))
+
+	changeAppliesByPath := make(map[string]string, len(paramModel.Params))
+	for _, param := range paramModel.Params {
+		changeAppliesByPath[param.StandardPath] = param.ChangeApplies
+	}
+
+	// 需求(imscore_quicksetting.csv)口径:BaseConfig 16 参中除 LOG_LEVEL/WEB_LOG_LEVEL
+	// 立即生效外均重启生效;TalInfoConfig 对象增/删/改/删全部需重启;CoreInfoConfig 立即生效。
+	immediateBaseParams := map[string]struct{}{"LOG_LEVEL": {}, "WEB_LOG_LEVEL": {}}
+	checked := 0
+	for _, group := range groups {
+		for _, param := range group.Params {
+			standardPath := param.StandardPath
+			if standardPath == "" {
+				standardPath = group.ObjectPath + param.Leaf
+			}
+			checked++
+			applies, ok := changeAppliesByPath[standardPath]
+			if !ok {
+				assert.Containsf(t, changeAppliesByPath, standardPath, "quicksettings group %s param %s must reference IMSCORE param model", group.ID, param.Name)
+				continue
+			}
+			want := "Immediate"
+			switch group.ID {
+			case "imscore-base-config":
+				if _, immediate := immediateBaseParams[param.Name]; !immediate {
+					want = "RebootRequired"
+				}
+			case "imscore-tal-info":
+				want = "RebootRequired"
+			}
+			assert.Equalf(t, want, applies, "group %s param %s changeApplies mismatch", group.ID, param.Name)
+		}
+	}
+	assert.Equal(t, 27, checked)
+}
+
+func parseXMLQuickSettings(t *testing.T, data []byte) xmlQuickSettings {
+	t.Helper()
+	var doc xmlQuickSettings
+	require.NoError(t, xml.Unmarshal(data, &doc))
+	return doc
+}
+
 func TestBuiltinLTEQuickSettingsExposeDownlinkAndUplinkBandwidth(t *testing.T) {
 	models := []string{"BLN", "MLN", "BLQ", "MLQ", "BM", "ENB_DEFAULT_098", "ENB_DEFAULT_181"}
 	const downlinkPath = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"

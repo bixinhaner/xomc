@@ -131,6 +131,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
       form.resetFields();
       // 新增默认制式=LTE(最常见的 ENB 基站),使「KPI指标名称」字段默认可见可填,与编辑态对齐;
       // 该字段仅 ENB/LTE 适用,切到 GSM/NR 会自动隐藏(保留 2026-06-03「平台仅 ENB」决策)。
+      // 核心网等非无线产品不区分制式,可清空 tech(allowClear)→ indicatorDeviceType 派生为 ''。
       form.setFieldsValue({ tech: 'lte' });
     }
     setActiveTab('basic');
@@ -147,8 +148,8 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           vendor: v.vendor,
           tech: v.tech,
           description: v.description,
-          // 指标设备类型由制式派生(取消单独编辑)
-          indicatorDeviceType: TECH_TO_DEVTYPE[v.tech] ?? product.indicatorDeviceType,
+          // 指标设备类型由制式派生(取消单独编辑);制式为空(核心网等非无线产品)→ 派生为 ''
+          indicatorDeviceType: TECH_TO_DEVTYPE[v.tech] ?? '',
           indicatorPlatform: v.indicatorPlatform,
           alarmNeType: v.alarmNeType,
           enableFiletype11: product.enableFiletype11,
@@ -166,7 +167,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           vendor: v.vendor,
           tech: v.tech,
           description: v.description,
-          // 指标设备类型由制式派生(取消单独编辑)
+          // 指标设备类型由制式派生(取消单独编辑);制式为空(核心网等非无线产品)→ 派生为 ''
           indicatorDeviceType: TECH_TO_DEVTYPE[v.tech] ?? '',
           indicatorPlatform: v.indicatorPlatform,
           alarmNeType: v.alarmNeType,
@@ -344,13 +345,15 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                   <Form.Item name="vendor" label={t('common.vendor')}>
                     <Input placeholder="Comba / Baicells / ..." />
                   </Form.Item>
-                  <Form.Item name="tech" label={t('product.products.tech')} rules={[{ required: true }]}>
+                  <Form.Item name="tech" label={t('product.products.tech')} tooltip={t('product.products.techOptionalTip')}>
                     <Select
                       options={techOptions}
                       loading={technologyOptionsLoading}
+                      allowClear
                       onChange={(val) => {
-                        // 制式变更后:非 ENB(lte) 清空指标平台(平台仅 ENB 适用)
-                        if ((TECH_TO_DEVTYPE[val] || '') !== 'enb') {
+                        // 制式变更后:非 ENB(lte) 清空指标平台(平台仅 ENB 适用)。
+                        // 核心网等非无线产品不区分制式,清空 tech → indicatorDeviceType 派生为 ''。
+                        if ((TECH_TO_DEVTYPE[val as string] || '') !== 'enb') {
                           form.setFieldValue('indicatorPlatform', undefined);
                         }
                       }}

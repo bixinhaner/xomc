@@ -1564,11 +1564,12 @@ func (s *DeviceService) applyProductMetadata(ctx context.Context, device *model.
 	if device.ModelName == "" && matchRes.Product.Name != "" {
 		device.ModelName = matchRes.Product.Name
 	}
-	// Technology 回填:产品字典里登记了 tech("lte"/"nr"/"gsm")就以字典为权威覆盖,
-	// 避免 5G 设备(productClass=FAP/BSC7041C243)的 technology 被首次 Inform 默认
-	// 推断为 lte → UFTE 5G 升级 device-candidates 过滤(WHERE technology='nr')0 行。
-	if matchRes.Product.Tech != "" {
-		if normalized := model.NormalizeTechnology(matchRes.Product.Tech); normalized != "" && device.Technology != normalized {
+	// Technology 回填:以产品字典为权威——
+	//   · 登记了 tech("lte"/"nr"/"gsm") → 覆盖(修正首次 Inform 被默认推断成 LTE 的 5G 设备);
+	//   · 产品已登记但 tech 为空(非无线产品,如核心网 ImsCore) → 清空,
+	//     避免 detectTechnology 兜底推断的 lte 残留(设备列表错误显示 eNB(LTE))。
+	if normalized := model.NormalizeTechnology(matchRes.Product.Tech); normalized != "" {
+		if device.Technology != normalized {
 			s.logger.Info("applyProductMetadata: technology corrected from ProductRegistry",
 				zap.String("serial_number", device.SerialNumber),
 				zap.String("product_class", device.ProductClass),
@@ -1576,6 +1577,12 @@ func (s *DeviceService) applyProductMetadata(ctx context.Context, device *model.
 				zap.String("new", string(normalized)))
 			device.Technology = normalized
 		}
+	} else if device.Technology != "" {
+		s.logger.Info("applyProductMetadata: technology cleared (product registered without tech)",
+			zap.String("serial_number", device.SerialNumber),
+			zap.String("product_class", device.ProductClass),
+			zap.String("old", string(device.Technology)))
+		device.Technology = ""
 	}
 }
 
