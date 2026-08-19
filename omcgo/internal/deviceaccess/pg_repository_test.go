@@ -21,6 +21,7 @@ import (
 type repositoryTestDB struct {
 	storage.DB
 	row      pgx.Row
+	queryRow func(string, ...any) pgx.Row
 	tx       pgx.Tx
 	lastSQL  string
 	lastArgs []any
@@ -33,6 +34,9 @@ func (d *repositoryTestDB) QueryRow(_ context.Context, query string, args ...any
 	d.lastArgs = append([]any(nil), args...)
 	d.allSQL = append(d.allSQL, query)
 	d.allArgs = append(d.allArgs, append([]any(nil), args...))
+	if d.queryRow != nil {
+		return d.queryRow(query, args...)
+	}
 	return d.row
 }
 
@@ -182,7 +186,7 @@ func TestChangedAgainstBasePreservesConcurrentEvidenceTypes(t *testing.T) {
 	require.Equal(t, "gps-new", byType[ConditionTypeGPS].ValueHash)
 }
 
-func TestPgRepositoryResolveCarrierUsesAccessAuthorityAndParametersSerial(t *testing.T) {
+func TestPgRepositoryResolveCarrierUsesDeviceAndAccessAuthority(t *testing.T) {
 	carrier := "cmcc"
 	db := &repositoryTestDB{row: repositoryTestRow{scan: func(dest ...any) error {
 		require.Len(t, dest, 2)
@@ -196,13 +200,91 @@ func TestPgRepositoryResolveCarrierUsesAccessAuthorityAndParametersSerial(t *tes
 
 	require.NoError(t, err)
 	require.Equal(t, "cmcc", got)
-	require.Len(t, db.allSQL, 2)
-	require.Contains(t, db.allSQL[0], "FROM device_access_states")
-	require.Contains(t, db.allSQL[1], "FROM device_access_candidates")
+	require.Len(t, db.allSQL, 3)
+	require.Contains(t, db.allSQL[0], "FROM devices")
+	require.Contains(t, db.allSQL[0], "deleted_at IS NULL")
+	require.Contains(t, db.allSQL[1], "FROM device_access_states")
+	require.Contains(t, db.allSQL[2], "FROM device_access_candidates")
 	for i := range db.allSQL {
 		require.Contains(t, db.allSQL[i], "$1")
 		require.Equal(t, []any{"SN-CARRIER"}, db.allArgs[i])
 	}
+}
+
+func TestPgRepositoryResolveCarrierSupportsFreshRegisteredDevice(t *testing.T) {
+	db := &repositoryTestDB{queryRow: func(query string, _ ...any) pgx.Row {
+		if strings.Contains(query, "FROM devices") {
+			return carrierResolutionRow(1, "cmcc")
+		}
+		return carrierResolutionRow(0, "")
+	}}
+	repo := newPgRepositoryWithDB(db)
+
+	got, err := repo.ResolveCarrier(context.Background(), "SN-FRESH")
+
+	require.NoError(t, err)
+	require.Equal(t, "cmcc", got)
+	require.Len(t, db.allSQL, 3)
+}
+
+func TestPgRepositoryResolveCarrierSupportsCandidateBeforeRegistration(t *testing.T) {
+	db := &repositoryTestDB{queryRow: func(query string, _ ...any) pgx.Row {
+		if strings.Contains(query, "FROM device_access_candidates") {
+			return carrierResolutionRow(1, "ctcc")
+		}
+		return carrierResolutionRow(0, "")
+	}}
+	repo := newPgRepositoryWithDB(db)
+
+	got, err := repo.ResolveCarrier(context.Background(), "SN-CANDIDATE")
+
+	require.NoError(t, err)
+	require.Equal(t, "ctcc", got)
+}
+
+func TestPgRepositoryResolveCarrierFailsClosedOnConflictingSources(t *testing.T) {
+	db := &repositoryTestDB{queryRow: func(query string, _ ...any) pgx.Row {
+		switch {
+		case strings.Contains(query, "FROM devices"):
+			return carrierResolutionRow(1, "cmcc")
+		case strings.Contains(query, "FROM device_access_states"):
+			return carrierResolutionRow(1, "ctcc")
+		default:
+			return carrierResolutionRow(0, "")
+		}
+	}}
+	repo := newPgRepositoryWithDB(db)
+
+	_, err := repo.ResolveCarrier(context.Background(), "SN-CONFLICT")
+
+	require.ErrorIs(t, err, ErrCarrierAmbiguous)
+}
+
+func TestPgRepositoryResolveCarrierExcludesSoftDeletedDevice(t *testing.T) {
+	db := &repositoryTestDB{queryRow: func(_ string, _ ...any) pgx.Row {
+		return carrierResolutionRow(0, "")
+	}}
+	repo := newPgRepositoryWithDB(db)
+
+	_, err := repo.ResolveCarrier(context.Background(), "SN-DELETED")
+
+	require.ErrorIs(t, err, ErrCarrierNotFound)
+	require.NotEmpty(t, db.allSQL)
+	require.Contains(t, db.allSQL[0], "FROM devices")
+	require.Contains(t, db.allSQL[0], "deleted_at IS NULL")
+}
+
+func carrierResolutionRow(count int64, carrier string) pgx.Row {
+	return repositoryTestRow{scan: func(dest ...any) error {
+		*dest[0].(*int64) = count
+		if count == 0 {
+			*dest[1].(**string) = nil
+			return nil
+		}
+		value := carrier
+		*dest[1].(**string) = &value
+		return nil
+	}}
 }
 
 func TestPgRepositoryAssetQueriesAlwaysCarryCarrierScope(t *testing.T) {
