@@ -260,7 +260,7 @@ check_web_https_file_entry() {
       check "$(health_text 'web HTTPS 文件入口已加载' 'web HTTPS file entry loaded')" web_https_file_entry_loaded
     else
       check "$(health_text 'HTTPS 文件上传入口 TLS 可达 ACS (:8443)' 'HTTPS file upload TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileUploadService 405
-      check "$(health_text 'HTTPS 文件下载入口 TLS 可达 ACS (:8443)' 'HTTPS file download TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileDownloadService/__healthcheck__/missing 404
+      check "$(health_text 'HTTPS 文件下载入口 TLS 可达 ACS (:8443)' 'HTTPS file download TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileDownloadService/health-check/missing 404
     fi
   else
     check "$(health_text 'web HTTPS 文件入口证书已安装' 'web HTTPS file-entry certificate installed')" web_https_file_entry_has_cert

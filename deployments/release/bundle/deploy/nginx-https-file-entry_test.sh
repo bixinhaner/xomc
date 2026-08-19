@@ -267,7 +267,7 @@ contains "healthcheck tolerates nginx formatting whitespace" "tr -s '[:space:]' 
 contains "healthcheck verifies HTTPS ACS healthz" "https_file_entry_status_is /healthz 200" "$HEALTHCHECK"
 contains "healthcheck verifies HTTPS ACS service path" "https_file_entry_status_is /smallcell/AcsService 405" "$HEALTHCHECK"
 contains "healthcheck verifies upload TLS reaches ACS" "https_file_entry_status_is /smallcell/FileUploadService 405" "$HEALTHCHECK"
-contains "healthcheck verifies download TLS reaches ACS" "https_file_entry_status_is /smallcell/FileDownloadService/__healthcheck__/missing 404" "$HEALTHCHECK"
+contains "healthcheck verifies download TLS reaches ACS" "https_file_entry_status_is /smallcell/FileDownloadService/health-check/missing 404" "$HEALTHCHECK"
 contains "healthcheck supports explicit real smoke" "--file-entry-smoke" "$HEALTHCHECK"
 
 echo "-- real upload/download smoke contract --"

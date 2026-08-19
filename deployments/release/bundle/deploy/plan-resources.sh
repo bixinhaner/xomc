@@ -300,7 +300,7 @@ BASE_COMP_CEIL=(3072 6144 2048 16384 12288 6144 12288 2048 4096 512)
 COMP_MIN=(512 1024 512 2048 1536 2048 4096 256 512 512)
 COMP_WEIGHT=(10 18 25 25 22 8 15 5 8 0)
 
-MON_FIXED_MIB=4800   # 上述监控服务 + loki-size-retention 64MiB
+MON_FIXED_MIB=4736   # prometheus1024+grafana512+loki512+tempo1024+otelcol512+alertmanager512+exporters(128*3)+cadvisor256
 [ "$SKIP_MONITORING" = 1 ] && MON_FIXED_MIB=0
 
 # 32 GiB 基线只用于计算比例；业务总预算来自当前主机的实际可用内存，且先扣掉
