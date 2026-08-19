@@ -52,7 +52,9 @@ import {
   type StorageProtectionEvent,
   type StorageProtectionState,
   type StorageProtectionTarget,
+  type StorageTargetType,
   type StorageUnknownBehavior,
+  type StorageWriteScope,
 } from '@core/services/api/storageProtectionApi';
 import { formatSystemTime } from '@core/utils/systemTime';
 import { useT, type TranslateFn } from '@/hooks/useT';
@@ -74,7 +76,7 @@ interface CardSpec {
   fields: FieldSpec[];
 }
 
-type PolicyFormValues = Omit<StorageProtectionPolicyPayload, 'targetType' | 'targetId' | 'writeScope'>;
+type PolicyFormValues = StorageProtectionPolicyPayload;
 
 const stateColors: Record<StorageProtectionState, string> = {
   normal: 'green',
@@ -84,6 +86,9 @@ const stateColors: Record<StorageProtectionState, string> = {
 };
 
 const defaultPolicyFormValues: PolicyFormValues = {
+  targetType: UNIFIED_STORAGE_TARGET.targetType,
+  targetId: UNIFIED_STORAGE_TARGET.targetId,
+  writeScope: UNIFIED_STORAGE_TARGET.writeScope,
   enabled: true,
   warnUsedPercent: 80,
   recoverUsedPercent: 85,
@@ -207,7 +212,19 @@ function StorageProtectionSection() {
   const savePolicy = useSaveStorageProtectionPolicy();
   const updatePolicy = useUpdateStorageProtectionPolicy();
   const unavailable = t('common.notAvailable');
-  const policy = policies[0];
+  const targetOptions = useMemo(() => {
+    const options = targets.map((target) => ({
+      value: target.targetId,
+      label: `${targetTitle(target)} (${target.targetId})`,
+    }));
+    if (!options.some((option) => option.value === UNIFIED_STORAGE_TARGET.targetId)) {
+      options.unshift({
+        value: UNIFIED_STORAGE_TARGET.targetId,
+        label: `${t('system.storageProtection.unifiedTarget')} (${UNIFIED_STORAGE_TARGET.targetId})`,
+      });
+    }
+    return options;
+  }, [targets, t]);
 
   const openCreate = () => {
     setEditingId(undefined);
@@ -224,6 +241,9 @@ function StorageProtectionSection() {
   const startEdit = (policy: StorageProtectionPolicy) => {
     setEditingId(policy.id);
     form.setFieldsValue({
+      targetType: policy.targetType,
+      targetId: policy.targetId,
+      writeScope: policy.writeScope,
       enabled: policy.enabled,
       warnUsedPercent: policy.warnUsedPercent,
       recoverUsedPercent: policy.recoverUsedPercent,
@@ -241,9 +261,6 @@ function StorageProtectionSection() {
     }
     const payload: StorageProtectionPolicyPayload = {
       ...values,
-      targetType: UNIFIED_STORAGE_TARGET.targetType,
-      targetId: UNIFIED_STORAGE_TARGET.targetId,
-      writeScope: UNIFIED_STORAGE_TARGET.writeScope,
     };
     try {
       if (editingId) {
@@ -258,7 +275,7 @@ function StorageProtectionSection() {
     }
   };
 
-  const togglePolicy = async (enabled: boolean) => {
+  const togglePolicy = async (policy: StorageProtectionPolicy, enabled: boolean) => {
     if (!policy) return;
     try {
       await updatePolicy.mutateAsync({
@@ -270,9 +287,9 @@ function StorageProtectionSection() {
           blockUsedPercent: policy.blockUsedPercent,
           checkIntervalSeconds: policy.checkIntervalSeconds,
           unknownBehavior: policy.unknownBehavior,
-          targetType: UNIFIED_STORAGE_TARGET.targetType,
-          targetId: UNIFIED_STORAGE_TARGET.targetId,
-          writeScope: UNIFIED_STORAGE_TARGET.writeScope,
+          targetType: policy.targetType,
+          targetId: policy.targetId,
+          writeScope: policy.writeScope,
         },
       });
       message.success(t(enabled ? 'system.storageProtection.enableSuccess' : 'system.storageProtection.disableSuccess'));
@@ -385,58 +402,72 @@ function StorageProtectionSection() {
           <div style={{ fontSize: 14, fontWeight: 600 }}>
             {t('system.storageProtection.policySettings')}
           </div>
-          {policy && (
-            <Space wrap>
-              <Popconfirm
-                title={t(policy.enabled ? 'system.storageProtection.disableConfirm' : 'system.storageProtection.enableConfirm')}
-                onConfirm={() => void togglePolicy(!policy.enabled)}
-                okText={t('common.confirm')}
-                cancelText={t('common.cancel')}
-              >
-                <Button loading={updatePolicy.isPending}>
-                  {t(policy.enabled ? 'system.storageProtection.disablePolicy' : 'system.storageProtection.enablePolicy')}
-                </Button>
-              </Popconfirm>
-              <Button type="primary" onClick={() => startEdit(policy)}>{t('common.edit')}</Button>
-            </Space>
-          )}
+          <Button type="primary" icon={<SettingOutlined />} onClick={openCreate}>
+            {t('system.storageProtection.newPolicy')}
+          </Button>
         </Space>
         <Spin spinning={policiesFetching}>
-          {policy ? (
-            <Descriptions bordered size="small" column={2}>
-              <Descriptions.Item label={t('system.storageProtection.target')}>
-                {t('system.storageProtection.unifiedTarget')}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.storageProtection.enabled')}>
-                <Tag color={policy.enabled ? 'green' : 'default'}>
-                  {t(policy.enabled ? 'common.enabled' : 'common.disabled')}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.storageProtection.thresholds')}>
-                {`${policy.warnUsedPercent}% / ${policy.recoverUsedPercent}% / ${policy.blockUsedPercent}%`}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.storageProtection.checkInterval')}>
-                {`${policy.checkIntervalSeconds} ${t('system.storageProtection.seconds')}`}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.storageProtection.unknownBehavior')}>
-                {t(`system.storageProtection.unknownBehavior.${policy.unknownBehavior}`)}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.storageProtection.state')}>
-                <Tag color={stateColors[policy.currentState]}>
-                  {t(`system.storageProtection.state.${policy.currentState}`)}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('system.storageProtection.currentBlocks')} span={2}>
-                {policy.currentState === 'blocked' ? (
-                  <Space direction="vertical" size={0}>
-                    <Tag color="red">{t('system.storageProtection.state.blocked')}</Tag>
-                    <span style={{ color: '#888' }}>
-                      {t('system.storageProtection.lastObserved')}: {policy.lastObservedRatio === undefined ? unavailable : `${(policy.lastObservedRatio * 100).toFixed(1)}%`}
-                    </span>
+          {policies.length > 0 ? (
+            <Space direction="vertical" style={{ width: '100%' }} size={12}>
+              {policies.map((policy) => (
+                <div key={policy.id}>
+                  <Space align="center" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }} wrap>
+                    <Space wrap>
+                      <Tag color={stateColors[policy.currentState]}>{t(`system.storageProtection.state.${policy.currentState}`)}</Tag>
+                      <span style={{ fontWeight: 600 }}>{policy.targetId}</span>
+                      <span style={{ color: '#888' }}>{t(`system.storageProtection.scope.${policy.writeScope}`)}</span>
+                    </Space>
+                    <Space wrap>
+                      <Popconfirm
+                        title={t(policy.enabled ? 'system.storageProtection.disableConfirm' : 'system.storageProtection.enableConfirm')}
+                        onConfirm={() => void togglePolicy(policy, !policy.enabled)}
+                        okText={t('common.confirm')}
+                        cancelText={t('common.cancel')}
+                      >
+                        <Button loading={updatePolicy.isPending}>
+                          {t(policy.enabled ? 'system.storageProtection.disablePolicy' : 'system.storageProtection.enablePolicy')}
+                        </Button>
+                      </Popconfirm>
+                      <Button type="primary" onClick={() => startEdit(policy)}>{t('common.edit')}</Button>
+                    </Space>
                   </Space>
-                ) : <Tag>{t('system.storageProtection.notBlocked')}</Tag>}
-              </Descriptions.Item>
-            </Descriptions>
+                  <Descriptions bordered size="small" column={2}>
+                    <Descriptions.Item label={t('system.storageProtection.target')}>
+                      {policy.targetId}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t('system.storageProtection.enabled')}>
+                      <Tag color={policy.enabled ? 'green' : 'default'}>
+                        {t(policy.enabled ? 'common.enabled' : 'common.disabled')}
+                      </Tag>
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t('system.storageProtection.thresholds')}>
+                      {`${policy.warnUsedPercent}% / ${policy.recoverUsedPercent}% / ${policy.blockUsedPercent}%`}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t('system.storageProtection.checkInterval')}>
+                      {`${policy.checkIntervalSeconds} ${t('system.storageProtection.seconds')}`}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t('system.storageProtection.unknownBehavior')}>
+                      {t(`system.storageProtection.unknownBehavior.${policy.unknownBehavior}`)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t('system.storageProtection.state')}>
+                      <Tag color={stateColors[policy.currentState]}>
+                        {t(`system.storageProtection.state.${policy.currentState}`)}
+                      </Tag>
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t('system.storageProtection.currentBlocks')} span={2}>
+                      {policy.currentState === 'blocked' ? (
+                        <Space direction="vertical" size={0}>
+                          <Tag color="red">{t('system.storageProtection.state.blocked')}</Tag>
+                          <span style={{ color: '#888' }}>
+                            {t('system.storageProtection.lastObserved')}: {policy.lastObservedRatio === undefined ? unavailable : `${(policy.lastObservedRatio * 100).toFixed(1)}%`}
+                          </span>
+                        </Space>
+                      ) : <Tag>{t('system.storageProtection.notBlocked')}</Tag>}
+                    </Descriptions.Item>
+                  </Descriptions>
+                </div>
+              ))}
+            </Space>
           ) : (
             <Space direction="vertical" align="center" style={{ width: '100%', padding: '24px 0' }}>
               <span>{t('system.storageProtection.noPolicyDescription')}</span>
@@ -477,6 +508,25 @@ function StorageProtectionSection() {
         width={480}
       >
         <Form<PolicyFormValues> form={form} layout="vertical" onFinish={(values) => void handleSavePolicy(values)}>
+          <Form.Item name="targetType" label={t('system.storageProtection.targetType')} rules={[{ required: true }]}>
+            <Select
+              options={(['filesystem'] as StorageTargetType[]).map((value) => ({
+                value,
+                label: t(`system.storageProtection.targetType.${value}`),
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="targetId" label={t('system.storageProtection.targetId')} rules={[{ required: true }]}>
+            <Select showSearch options={targetOptions} />
+          </Form.Item>
+          <Form.Item name="writeScope" label={t('system.storageProtection.scope')} rules={[{ required: true }]}>
+            <Select
+              options={(['all'] as StorageWriteScope[]).map((value) => ({
+                value,
+                label: t(`system.storageProtection.scope.${value}`),
+              }))}
+            />
+          </Form.Item>
           <Row gutter={12}>
             <Col span={8}>
               <Form.Item name="warnUsedPercent" label={t('system.storageProtection.warnThreshold')} rules={[{ required: true }]}>

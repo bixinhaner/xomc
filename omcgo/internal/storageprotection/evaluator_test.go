@@ -2,6 +2,7 @@ package storageprotection
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -12,28 +13,82 @@ import (
 
 type fakeRepository struct {
 	policy        *Policy
+	policies      []Policy
 	events        []Event
+	saveErr       error
 	cleanupCalls  int
 	cleanupBefore time.Time
 	cleanupKeep   int
 }
 
-func (r *fakeRepository) GetEnabledPolicy(context.Context, TargetType, string, WriteScope) (*Policy, error) {
-	if r.policy == nil {
+func (r *fakeRepository) GetEnabledPolicy(_ context.Context, targetType TargetType, targetID string, scope WriteScope) (*Policy, error) {
+	policies := r.policies
+	if r.policy != nil {
+		policies = append([]Policy{*r.policy}, policies...)
+	}
+	if len(policies) == 0 {
 		return nil, nil
 	}
-	copy := *r.policy
-	return &copy, nil
+	for _, candidateScope := range policyLookupScopes(scope) {
+		for _, policy := range policies {
+			if policy.Enabled && policy.TargetType == targetType && policy.TargetID == targetID && policy.WriteScope == candidateScope {
+				copy := policy
+				return &copy, nil
+			}
+		}
+	}
+	return nil, nil
 }
 func (r *fakeRepository) List(context.Context) ([]Policy, error) {
-	if r.policy == nil {
-		return nil, nil
+	policies := append([]Policy(nil), r.policies...)
+	if r.policy != nil {
+		policies = append([]Policy{*r.policy}, policies...)
 	}
-	return []Policy{*r.policy}, nil
+	return policies, nil
 }
-func (r *fakeRepository) Save(context.Context, *Policy) (*Policy, error) { return r.policy, nil }
+func (r *fakeRepository) Save(_ context.Context, policy *Policy) (*Policy, error) {
+	if r.saveErr != nil {
+		return nil, r.saveErr
+	}
+	copy := *policy
+	if copy.ID == "" {
+		copy.ID = "policy-" + copy.TargetID
+	}
+	if copy.CurrentState == "" {
+		copy.CurrentState = StateNormal
+	}
+	if copy.Version == 0 {
+		copy.Version = 1
+	}
+	for i := range r.policies {
+		if r.policies[i].TargetType == copy.TargetType && r.policies[i].TargetID == copy.TargetID && r.policies[i].WriteScope == copy.WriteScope {
+			copy.ID = r.policies[i].ID
+			copy.Version = r.policies[i].Version + 1
+			r.policies[i] = copy
+			return &copy, nil
+		}
+	}
+	if r.policy != nil && r.policy.TargetType == copy.TargetType && r.policy.TargetID == copy.TargetID && r.policy.WriteScope == copy.WriteScope {
+		copy.ID = r.policy.ID
+		copy.Version = r.policy.Version + 1
+		r.policy = &copy
+		return &copy, nil
+	}
+	r.policies = append(r.policies, copy)
+	return &copy, nil
+}
 func (r *fakeRepository) UpdateState(_ context.Context, policy *Policy) error {
 	copy := *policy
+	if r.policy != nil && r.policy.ID == policy.ID {
+		r.policy = &copy
+		return nil
+	}
+	for i := range r.policies {
+		if r.policies[i].ID == policy.ID {
+			r.policies[i] = copy
+			return nil
+		}
+	}
 	r.policy = &copy
 	return nil
 }
@@ -61,7 +116,12 @@ type fakeLogAdmissionController struct{ blocked bool }
 
 func (g *fakeLogAdmissionController) SetBlocked(blocked bool) { g.blocked = blocked }
 
-func (p fakeUsageProvider) Snapshot(context.Context, TargetType, string) (UsageSnapshot, error) {
+func (p fakeUsageProvider) Snapshot(_ context.Context, targetType TargetType, targetID string) (UsageSnapshot, error) {
+	for _, target := range p.targets {
+		if target.TargetType == targetType && target.TargetID == targetID {
+			return target, p.err
+		}
+	}
 	return p.snapshot, p.err
 }
 
@@ -70,6 +130,17 @@ func (p fakeUsageProvider) ListTargets(context.Context) ([]UsageSnapshot, error)
 		return append([]UsageSnapshot(nil), p.targets...), p.err
 	}
 	return []UsageSnapshot{p.snapshot}, p.err
+}
+
+func (p fakeUsageProvider) ResolveProtectedPathTarget(_ context.Context, protectedPathID string) (UsageSnapshot, bool, error) {
+	for _, target := range p.targets {
+		for _, protectedPath := range target.ProtectedPaths {
+			if protectedPathMatchesID(protectedPath, protectedPathID) {
+				return target, true, p.err
+			}
+		}
+	}
+	return UsageSnapshot{}, false, p.err
 }
 
 func TestStorageProtectionStateMachineRequiresConfirmationAndRecovers(t *testing.T) {
@@ -181,18 +252,18 @@ func TestStorageProtectionClosesAndReopensLogAdmission(t *testing.T) {
 	svc := NewService(repo, usage, nil, zap.NewNop())
 	svc.SetLogAdmissionController(gate)
 
-	_, err := svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeAll)
+	_, err := svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeLog)
 	require.NoError(t, err)
 	require.False(t, gate.blocked, "first threshold observation waits for confirmation")
-	_, err = svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeAll)
+	_, err = svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeLog)
 	require.NoError(t, err)
 	require.True(t, gate.blocked, "blocked storage state must close the service log gate")
 
 	usage.snapshot.UsedRatio = .84
-	_, err = svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeAll)
+	_, err = svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeLog)
 	require.NoError(t, err)
 	require.True(t, gate.blocked, "recovery also requires two observations")
-	_, err = svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeAll)
+	_, err = svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeLog)
 	require.NoError(t, err)
 	require.False(t, gate.blocked, "normal storage state must reopen the service log gate")
 }
@@ -208,9 +279,36 @@ func TestStorageProtectionUnknownClosesLogAdmission(t *testing.T) {
 	svc := NewService(repo, fakeUsageProvider{snapshot: UsageSnapshot{Available: false, Reason: "collector unavailable"}}, nil, zap.NewNop())
 	svc.SetLogAdmissionController(gate)
 
-	_, err := svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeAll)
+	_, err := svc.Check(context.Background(), TargetFilesystem, UnifiedStorageTargetID, WriteScopeLog)
 	require.NoError(t, err)
 	require.True(t, gate.blocked, "unknown capacity must fail-closed for logs")
+}
+
+func TestStorageProtectionEvaluateAllDoesNotDoubleCountLogTarget(t *testing.T) {
+	repo := &fakeRepository{policy: &Policy{
+		ID: "policy-root", TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, WriteScope: WriteScopeAll,
+		Enabled: true, WarnUsedPercent: 80, BlockUsedPercent: 90, RecoverUsedPercent: 85,
+		CheckIntervalSeconds: 30, UnknownBehavior: UnknownAllowWithAlarm, CurrentState: StateNormal,
+		Version: 1,
+	}}
+	usage := fakeUsageProvider{targets: []UsageSnapshot{
+		{
+			TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, Mountpoint: UnifiedStorageMountpoint,
+			CapacityBytes: 1000, UsedBytes: 910, UsedRatio: .91, Available: true, ObservedAt: time.Now(),
+			ProtectedPaths: []string{ProtectedPathIDOMCLogs},
+		},
+	}}
+	gate := &fakeLogAdmissionController{}
+	svc := NewService(repo, usage, nil, zap.NewNop())
+	svc.SetLogAdmissionController(gate)
+
+	svc.evaluateAll(context.Background())
+
+	require.Equal(t, StateWarning, repo.policy.CurrentState)
+	require.Equal(t, 1, repo.policy.StateObservations)
+	require.False(t, gate.blocked)
+	require.Len(t, repo.events, 1)
+	require.Equal(t, StateWarning, repo.events[0].NewState)
 }
 
 func TestStorageProtectionBlocksOnWorstProtectedMountpoint(t *testing.T) {
@@ -245,9 +343,139 @@ func TestStorageProtectionBlocksOnWorstProtectedMountpoint(t *testing.T) {
 	require.Contains(t, decision.Reason, "/var/lib/docker")
 }
 
+func TestStorageProtectionPathAdmissionDoesNotBlockUnrelatedMountpoint(t *testing.T) {
+	repo := &fakeRepository{policy: &Policy{
+		ID: "policy-root", TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, WriteScope: WriteScopeAll,
+		Enabled: true, WarnUsedPercent: 80, BlockUsedPercent: 90, RecoverUsedPercent: 85,
+		CheckIntervalSeconds: 30, UnknownBehavior: UnknownAllowWithAlarm, CurrentState: StateNormal,
+		Version: 1,
+	}}
+	at := time.Now()
+	provider := NewCollectorUsageProviderWithResolver(
+		fakeStorageCollector{metrics: []components.StorageMetric{
+			hostMetric("/home", 1000, 500, 50, at),
+			hostMetric("/var", 1000, 950, 95, at),
+		}},
+		staticProtectedPathResolver{paths: []ProtectedPath{
+			{ID: ProtectedPathIDMinIO, Path: "/home/minio"},
+			{ID: ProtectedPathIDPostgres, Path: "/var/lib/docker/volumes/omcgo_pgdata/_data"},
+		}},
+	)
+	svc := NewService(repo, provider, nil, zap.NewNop())
+
+	decision, err := svc.CheckPath(context.Background(), ProtectedPathIDMinIO, WriteScopeUpload)
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Equal(t, StateNormal, decision.State)
+
+	decision, err = svc.CheckPath(context.Background(), ProtectedPathIDPostgres, WriteScopeAll)
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Equal(t, StateWarning, decision.State)
+
+	decision, err = svc.CheckPath(context.Background(), ProtectedPathIDPostgres, WriteScopeAll)
+	require.NoError(t, err)
+	require.False(t, decision.Allowed)
+	require.Equal(t, StateBlocked, decision.State)
+	require.Len(t, repo.events, 2)
+	require.Equal(t, "mount-var", repo.events[0].TargetID)
+	require.Equal(t, "mount-var", repo.events[1].TargetID)
+}
+
+func TestStorageProtectionExplicitMountpointPolicyPersistsIndependentEvents(t *testing.T) {
+	repo := &fakeRepository{policies: []Policy{
+		{
+			ID: "policy-root", TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, WriteScope: WriteScopeAll,
+			Enabled: true, WarnUsedPercent: 80, BlockUsedPercent: 90, RecoverUsedPercent: 85,
+			CheckIntervalSeconds: 30, UnknownBehavior: UnknownAllowWithAlarm, CurrentState: StateNormal,
+			Version: 1,
+		},
+		{
+			ID: "policy-var", TargetType: TargetFilesystem, TargetID: "mount-var", WriteScope: WriteScopeAll,
+			Enabled: true, WarnUsedPercent: 80, BlockUsedPercent: 90, RecoverUsedPercent: 85,
+			CheckIntervalSeconds: 30, UnknownBehavior: UnknownAllowWithAlarm, CurrentState: StateNormal,
+			Version: 1,
+		},
+	}}
+	at := time.Now()
+	provider := fakeUsageProvider{targets: []UsageSnapshot{
+		{TargetType: TargetFilesystem, TargetID: "mount-home", Mountpoint: "/home", CapacityBytes: 1000, UsedBytes: 500, UsedRatio: .50, Available: true, ObservedAt: at, ProtectedPaths: []string{ProtectedPathIDMinIO}},
+		{TargetType: TargetFilesystem, TargetID: "mount-var", Mountpoint: "/var", CapacityBytes: 1000, UsedBytes: 950, UsedRatio: .95, Available: true, ObservedAt: at, ProtectedPaths: []string{ProtectedPathIDPostgres}},
+	}}
+	svc := NewService(repo, provider, nil, zap.NewNop())
+
+	decision, err := svc.CheckPath(context.Background(), ProtectedPathIDPostgres, WriteScopeAll)
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Equal(t, StateWarning, decision.State)
+
+	decision, err = svc.CheckPath(context.Background(), ProtectedPathIDPostgres, WriteScopeAll)
+	require.NoError(t, err)
+	require.False(t, decision.Allowed)
+	require.Equal(t, StateBlocked, decision.State)
+
+	decision, err = svc.CheckPath(context.Background(), ProtectedPathIDMinIO, WriteScopeUpload)
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Equal(t, StateNormal, decision.State)
+
+	require.Equal(t, StateNormal, repo.policies[0].CurrentState)
+	require.Equal(t, StateBlocked, repo.policies[1].CurrentState)
+	require.Len(t, repo.events, 2)
+	require.Equal(t, "policy-var", repo.events[0].PolicyID)
+	require.Equal(t, "mount-var", repo.events[0].TargetID)
+	require.Equal(t, "policy-var", repo.events[1].PolicyID)
+	require.Equal(t, "mount-var", repo.events[1].TargetID)
+}
+
+func TestStorageProtectionMaterializePolicyFailureUsesStatelessAdmission(t *testing.T) {
+	repo := &fakeRepository{
+		policy: &Policy{
+			ID: "policy-root", TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, WriteScope: WriteScopeAll,
+			Enabled: true, WarnUsedPercent: 80, BlockUsedPercent: 90, RecoverUsedPercent: 85,
+			CheckIntervalSeconds: 30, UnknownBehavior: UnknownAllowWithAlarm, CurrentState: StateNormal,
+			Version: 1,
+		},
+		saveErr: errors.New("storage_protection_target_type_chk"),
+	}
+	at := time.Now()
+	provider := fakeUsageProvider{targets: []UsageSnapshot{
+		{TargetType: TargetFilesystem, TargetID: "mount-var", Mountpoint: "/var", CapacityBytes: 1000, UsedBytes: 950, UsedRatio: .95, Available: true, ObservedAt: at, ProtectedPaths: []string{ProtectedPathIDPostgres}},
+	}}
+	svc := NewService(repo, provider, nil, zap.NewNop())
+
+	decision, err := svc.CheckPath(context.Background(), ProtectedPathIDPostgres, WriteScopeAll)
+	require.NoError(t, err)
+	require.False(t, decision.Allowed)
+	require.Equal(t, StateBlocked, decision.State)
+	require.Empty(t, repo.events)
+	require.Len(t, repo.policies, 0)
+}
+
+func TestStorageProtectionPathAdmissionFailsOpenWhenTargetCannotBeResolved(t *testing.T) {
+	repo := &fakeRepository{policy: &Policy{
+		ID: "policy-root", TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, WriteScope: WriteScopeAll,
+		Enabled: true, WarnUsedPercent: 80, BlockUsedPercent: 90, RecoverUsedPercent: 85,
+		CheckIntervalSeconds: 30, UnknownBehavior: UnknownAllowWithAlarm, CurrentState: StateBlocked,
+		Version: 1,
+	}}
+	svc := NewService(repo, fakeUsageProvider{targets: []UsageSnapshot{
+		{TargetType: TargetFilesystem, TargetID: "mount-var", Mountpoint: "/var", CapacityBytes: 1000, UsedBytes: 950, UsedRatio: .95, Available: true, ObservedAt: time.Now(), ProtectedPaths: []string{ProtectedPathIDPostgres}},
+	}}, nil, zap.NewNop())
+
+	decision, err := svc.CheckPath(context.Background(), ProtectedPathIDMinIO, WriteScopeUpload)
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Equal(t, StateNormal, decision.State)
+	require.Contains(t, decision.Reason, "not found")
+}
+
 func TestValidateStorageProtectionPolicy(t *testing.T) {
 	policy := &Policy{TargetType: TargetFilesystem, TargetID: "root", WriteScope: WriteScopeAll, WarnUsedPercent: 80, RecoverUsedPercent: 85, BlockUsedPercent: 90, CheckIntervalSeconds: 30, UnknownBehavior: UnknownAllowWithAlarm}
 	require.NoError(t, validatePolicy(policy))
+	policy.TargetID = "mount-data"
+	require.NoError(t, validatePolicy(policy))
+	policy.TargetID = "root"
 	policy.RecoverUsedPercent = 75
 	require.Error(t, validatePolicy(policy))
 	policy.RecoverUsedPercent = 85

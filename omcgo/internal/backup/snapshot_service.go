@@ -497,7 +497,7 @@ func (s *SnapshotService) checkStorageAdmission(ctx context.Context, scope stora
 	if s.admission == nil {
 		return nil
 	}
-	decision, err := s.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, scope)
+	decision, err := s.admission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, scope)
 	if err != nil {
 		return fmt.Errorf("storage admission check: %w", err)
 	}

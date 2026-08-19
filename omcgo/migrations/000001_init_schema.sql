@@ -21004,8 +21004,9 @@ CREATE INDEX IF NOT EXISTS idx_device_tasks_active_created_id
     ON public.device_tasks (created_at, id)
     WHERE status IN ('pending', 'sent');
 
--- Consolidated from pre-release storage protection migrations. The current
--- deployment has one physical filesystem target; logical components share it.
+-- Consolidated from pre-release storage protection migrations. Policies are
+-- keyed by physical host filesystem mount targets; logical components map to
+-- the mount containing their protected write path.
 CREATE TABLE IF NOT EXISTS public.storage_protection_policies (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     target_type varchar(32) NOT NULL,
@@ -21033,7 +21034,7 @@ CREATE TABLE IF NOT EXISTS public.storage_protection_policies (
         block_used_percent <= 100
     ),
     CONSTRAINT storage_protection_target_type_chk CHECK (
-        target_type = 'filesystem' AND target_id = 'root' AND write_scope = 'all'
+        target_type = 'filesystem' AND write_scope = 'all'
     ),
     CONSTRAINT storage_protection_unknown_behavior_chk CHECK (
         unknown_behavior IN ('allow_with_alarm', 'block_new_uploads')

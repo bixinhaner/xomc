@@ -77,7 +77,10 @@ func (s *Service) setLogAdmissionBlocked(blocked bool) {
 // log gate. Unknown is fail-closed for logs: if the service cannot establish
 // that the filesystem is safe, continuing to emit unbounded logs could make a
 // full disk worse. A normal/warning state re-opens the gate.
-func (s *Service) syncLogAdmission(policy *Policy) {
+func (s *Service) syncLogAdmission(policy *Policy, scope WriteScope) {
+	if scope != WriteScopeLog {
+		return
+	}
 	if policy == nil {
 		s.setLogAdmissionBlocked(false)
 		return
@@ -162,7 +165,13 @@ func (s *Service) evaluateAll(ctx context.Context) {
 			continue
 		}
 		hasEnabledPolicy = true
-		if _, err := s.Check(ctx, policy.TargetType, policy.TargetID, policy.WriteScope); err != nil {
+		var err error
+		if policy.TargetType == TargetFilesystem && policy.TargetID == UnifiedStorageTargetID && policy.WriteScope == WriteScopeAll {
+			err = s.evaluateFilesystemTargets(ctx)
+		} else {
+			_, err = s.Check(ctx, policy.TargetType, policy.TargetID, policy.WriteScope)
+		}
+		if err != nil {
 			s.logger.Warn("evaluate storage protection policy failed", zap.String("policy_id", policy.ID), zap.Error(err))
 		}
 	}
@@ -171,6 +180,42 @@ func (s *Service) evaluateAll(ctx context.Context) {
 		// blocked. Do not leave the process logger permanently closed.
 		s.setLogAdmissionBlocked(false)
 	}
+}
+
+func (s *Service) evaluateFilesystemTargets(ctx context.Context) error {
+	lister, ok := s.usage.(UsageTargetLister)
+	if !ok || lister == nil {
+		_, err := s.Check(ctx, TargetFilesystem, UnifiedStorageTargetID, WriteScopeAll)
+		return err
+	}
+	targets, err := lister.ListTargets(ctx)
+	if err != nil {
+		return err
+	}
+	var logTarget *UsageSnapshot
+	if resolver, ok := s.usage.(ProtectedPathTargetResolver); ok && resolver != nil {
+		if target, found, err := resolver.ResolveProtectedPathTarget(ctx, ProtectedPathIDOMCLogs); err != nil {
+			return err
+		} else if found {
+			logTarget = &target
+		}
+	}
+	logAdmissionSynced := false
+	for _, target := range targets {
+		decision, err := s.Check(ctx, target.TargetType, target.TargetID, WriteScopeAll)
+		if err != nil {
+			return err
+		}
+		if logTarget != nil && target.TargetType == logTarget.TargetType && target.TargetID == logTarget.TargetID {
+			s.setLogAdmissionBlocked(decision.State == StateBlocked || decision.State == StateUnknown)
+			logAdmissionSynced = true
+		}
+	}
+	if logAdmissionSynced {
+		return nil
+	}
+	_, err = s.CheckPath(ctx, ProtectedPathIDOMCLogs, WriteScopeLog)
+	return err
 }
 
 func (s *Service) cleanupEvents(ctx context.Context) {
@@ -198,17 +243,14 @@ func NewService(repo Repository, usage UsageProvider, metrics *Metrics, logger *
 // Check implements WriteAdmission. A missing policy is deliberately fail-open:
 // monitoring alone must not unexpectedly block existing deployments.
 func (s *Service) Check(ctx context.Context, targetType TargetType, targetID string, scope WriteScope) (AdmissionDecision, error) {
-	// Business callers may still identify the destination as MinIO or another
-	// logical component. Those components share one physical filesystem in the
-	// current deployment, so every admission check uses the canonical target.
-	targetType, targetID = TargetFilesystem, UnifiedStorageTargetID
+	targetType, targetID = normalizeAdmissionTarget(targetType, targetID)
 	if s == nil || s.repo == nil {
 		if s != nil {
 			s.setLogAdmissionBlocked(false)
 		}
 		return AdmissionDecision{Allowed: true, State: StateNormal, Reason: "storage protection is not configured", ObservedAt: time.Now()}, nil
 	}
-	policy, err := s.repo.GetEnabledPolicy(ctx, targetType, targetID, scope)
+	policy, persistState, err := s.policyForAdmission(ctx, targetType, targetID, scope)
 	if err != nil {
 		return AdmissionDecision{}, fmt.Errorf("load storage protection policy: %w", err)
 	}
@@ -221,7 +263,7 @@ func (s *Service) Check(ctx context.Context, targetType TargetType, targetID str
 	}
 	s.setPolicyInfo(policy)
 	if s.usage == nil {
-		return s.handleUnknown(ctx, policy, scope, "storage usage provider is unavailable")
+		return s.handleUnknown(ctx, policy, scope, persistState, "storage usage provider is unavailable")
 	}
 	usage, usageErr := s.usage.Snapshot(ctx, targetType, targetID)
 	if usageErr != nil || !usage.Available {
@@ -232,9 +274,16 @@ func (s *Service) Check(ctx context.Context, targetType TargetType, targetID str
 		if s.metrics != nil {
 			s.metrics.CheckFailuresTotal.WithLabelValues(string(targetType), targetID, string(scope)).Inc()
 		}
-		return s.handleUnknown(ctx, policy, scope, reason)
+		return s.handleUnknown(ctx, policy, scope, persistState, reason)
 	}
 	s.observeUsage(policy, scope, usage)
+	if !persistState {
+		policy.CurrentState = targetState(policy, usage)
+		policy.StateObservations = 0
+		policy.LastObservedRatio = floatPtr(usage.UsedRatio)
+		policy.LastObservedAt = timePtr(usage.ObservedAt)
+		return s.decision(policy, scope, usage.ObservedAt, usageReason(statelessTargetReason(policy.CurrentState), usage)), nil
+	}
 	previous := policy.CurrentState
 	if previous == StateUnknown {
 		previous = StateNormal
@@ -250,17 +299,103 @@ func (s *Service) Check(ctx context.Context, targetType TargetType, targetID str
 		now := s.now()
 		policy.LastStateChangedAt = &now
 	}
-	if err := s.repo.UpdateState(ctx, policy); err != nil {
-		return AdmissionDecision{}, fmt.Errorf("persist storage protection state: %w", err)
+	if persistState {
+		if err := s.repo.UpdateState(ctx, policy); err != nil {
+			return AdmissionDecision{}, fmt.Errorf("persist storage protection state: %w", err)
+		}
 	}
-	s.syncLogAdmission(policy)
-	if policy.CurrentState != previous {
+	s.syncLogAdmission(policy, scope)
+	if persistState && policy.CurrentState != previous {
 		event := Event{PolicyID: policy.ID, TargetType: targetType, TargetID: targetID, WriteScope: scope, PreviousState: previous, NewState: policy.CurrentState, Reason: transitionReason(previous, policy.CurrentState, reason), ObservedRatio: floatPtr(usage.UsedRatio), PolicyVersion: policy.Version, OperatorID: "system", CreatedAt: s.now()}
 		if err := s.repo.RecordEvent(ctx, event); err != nil {
 			return AdmissionDecision{}, fmt.Errorf("record storage protection transition: %w", err)
 		}
 	}
 	return s.decision(policy, scope, usage.ObservedAt, reason), nil
+}
+
+func (s *Service) CheckPath(ctx context.Context, protectedPathID string, scope WriteScope) (AdmissionDecision, error) {
+	if resolver, ok := s.usage.(ProtectedPathTargetResolver); ok {
+		target, found, err := resolver.ResolveProtectedPathTarget(ctx, protectedPathID)
+		if err != nil {
+			return AdmissionDecision{}, fmt.Errorf("resolve storage protection target for %s: %w", protectedPathID, err)
+		}
+		if found {
+			return s.Check(ctx, target.TargetType, target.TargetID, scope)
+		}
+	}
+	reason := "protected storage path target was not found"
+	if s != nil && s.logger != nil {
+		s.logger.Warn("protected storage path target was not found", zap.String("protected_path_id", protectedPathID), zap.String("scope", string(scope)))
+	}
+	now := time.Now()
+	if s != nil && s.now != nil {
+		now = s.now()
+	}
+	return AdmissionDecision{Allowed: true, State: StateNormal, Reason: reason, ObservedAt: now}, nil
+}
+
+func normalizeAdmissionTarget(targetType TargetType, targetID string) (TargetType, string) {
+	if targetType != TargetFilesystem {
+		targetType = TargetFilesystem
+	}
+	if targetID == "" {
+		targetID = UnifiedStorageTargetID
+	}
+	return targetType, targetID
+}
+
+func (s *Service) policyForAdmission(ctx context.Context, targetType TargetType, targetID string, scope WriteScope) (*Policy, bool, error) {
+	policy, err := s.repo.GetEnabledPolicy(ctx, targetType, targetID, scope)
+	if err != nil || policy != nil || targetType != TargetFilesystem || targetID == UnifiedStorageTargetID {
+		return policy, policy != nil, err
+	}
+	hasPolicy, err := s.hasPolicy(ctx, targetType, targetID, scope)
+	if err != nil || hasPolicy {
+		return nil, false, err
+	}
+	fallback, err := s.repo.GetEnabledPolicy(ctx, TargetFilesystem, UnifiedStorageTargetID, scope)
+	if err != nil || fallback == nil {
+		return fallback, false, err
+	}
+	copy := *fallback
+	copy.ID = ""
+	copy.TargetType = targetType
+	copy.TargetID = targetID
+	copy.WriteScope = WriteScopeAll
+	copy.CurrentState = StateNormal
+	copy.StateObservations = 0
+	copy.LastObservedRatio = nil
+	copy.LastObservedAt = nil
+	copy.LastStateChangedAt = nil
+	copy.UpdatedBy = "system"
+	saved, err := s.repo.Save(ctx, &copy)
+	if err != nil {
+		s.logger.Warn(
+			"materialize storage protection policy failed; using stateless target admission",
+			zap.String("target_type", string(targetType)),
+			zap.String("target_id", targetID),
+			zap.String("scope", string(scope)),
+			zap.Error(err),
+		)
+		return &copy, false, nil
+	}
+	return saved, true, nil
+}
+
+func (s *Service) hasPolicy(ctx context.Context, targetType TargetType, targetID string, scope WriteScope) (bool, error) {
+	policies, err := s.repo.List(ctx)
+	if err != nil {
+		return false, fmt.Errorf("list storage protection policies: %w", err)
+	}
+	for _, candidateScope := range policyLookupScopes(scope) {
+		for _, policy := range policies {
+			if policy.TargetType == targetType && policy.TargetID == targetID && policy.WriteScope == candidateScope {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func usageReason(reason string, usage UsageSnapshot) string {
@@ -273,7 +408,20 @@ func usageReason(reason string, usage UsageSnapshot) string {
 	return reason + "; " + usage.Reason
 }
 
-func (s *Service) handleUnknown(ctx context.Context, policy *Policy, scope WriteScope, reason string) (AdmissionDecision, error) {
+func statelessTargetReason(state State) string {
+	switch state {
+	case StateBlocked:
+		return "usage reached block threshold"
+	case StateWarning:
+		return "usage reached warning threshold"
+	case StateUnknown:
+		return "storage usage is unavailable"
+	default:
+		return "usage below warning threshold"
+	}
+}
+
+func (s *Service) handleUnknown(ctx context.Context, policy *Policy, scope WriteScope, persistState bool, reason string) (AdmissionDecision, error) {
 	previous := policy.CurrentState
 	if previous == "" {
 		previous = StateNormal
@@ -285,11 +433,13 @@ func (s *Service) handleUnknown(ctx context.Context, policy *Policy, scope Write
 	if previous != StateUnknown {
 		policy.LastStateChangedAt = &now
 	}
-	if err := s.repo.UpdateState(ctx, policy); err != nil {
-		return AdmissionDecision{}, fmt.Errorf("persist unknown storage protection state: %w", err)
+	if persistState {
+		if err := s.repo.UpdateState(ctx, policy); err != nil {
+			return AdmissionDecision{}, fmt.Errorf("persist unknown storage protection state: %w", err)
+		}
 	}
-	s.syncLogAdmission(policy)
-	if previous != StateUnknown {
+	s.syncLogAdmission(policy, scope)
+	if persistState && previous != StateUnknown {
 		event := Event{
 			PolicyID: policy.ID, TargetType: policy.TargetType, TargetID: policy.TargetID,
 			WriteScope: scope, PreviousState: previous, NewState: StateUnknown,
@@ -335,7 +485,7 @@ func (s *Service) setPolicyInfo(policy *Policy) {
 }
 
 func (s *Service) decision(policy *Policy, scope WriteScope, observedAt time.Time, reason string) AdmissionDecision {
-	s.syncLogAdmission(policy)
+	s.syncLogAdmission(policy, scope)
 	allowed := policy.CurrentState != StateBlocked
 	if policy.CurrentState == StateUnknown {
 		allowed = policy.UnknownBehavior == UnknownAllowWithAlarm
@@ -370,17 +520,25 @@ func (s *Service) ListTargets(ctx context.Context) ([]TargetSnapshot, error) {
 	writeScopes := make([]WriteScope, 0)
 	seenScopes := make(map[WriteScope]struct{})
 	var globalPolicy *Policy
+	policiesByTarget := make(map[string]Policy)
 	for _, policy := range policies {
-		if policy.TargetType != TargetFilesystem || policy.TargetID != UnifiedStorageTargetID {
+		if policy.TargetType != TargetFilesystem {
 			continue
 		}
-		if _, ok := seenScopes[policy.WriteScope]; !ok {
-			writeScopes = append(writeScopes, policy.WriteScope)
-			seenScopes[policy.WriteScope] = struct{}{}
+		if policy.Enabled {
+			policiesByTarget[policy.TargetID] = policy
 		}
 		if policy.Enabled && (globalPolicy == nil || policy.WriteScope == WriteScopeAll) {
 			copy := policy
-			globalPolicy = &copy
+			if policy.TargetID == UnifiedStorageTargetID {
+				globalPolicy = &copy
+			}
+		}
+		if policy.TargetID == UnifiedStorageTargetID {
+			if _, ok := seenScopes[policy.WriteScope]; !ok {
+				writeScopes = append(writeScopes, policy.WriteScope)
+				seenScopes[policy.WriteScope] = struct{}{}
+			}
 		}
 	}
 	usageTargets := []UsageSnapshot{{TargetType: TargetFilesystem, TargetID: UnifiedStorageTargetID, Mountpoint: UnifiedStorageMountpoint, Available: false, Reason: "storage usage provider is unavailable"}}
@@ -399,14 +557,34 @@ func (s *Service) ListTargets(ctx context.Context) ([]TargetSnapshot, error) {
 
 	targets := make([]TargetSnapshot, 0, len(usageTargets))
 	for _, usage := range usageTargets {
+		policy := policyForTargetSnapshot(usage, policiesByTarget, globalPolicy)
 		targets = append(targets, TargetSnapshot{
 			TargetType: usage.TargetType, TargetID: usage.TargetID, Mountpoint: usage.Mountpoint, ProtectedPaths: append([]string(nil), usage.ProtectedPaths...),
 			CapacityBytes: usage.CapacityBytes, UsedBytes: usage.UsedBytes, UsedRatio: usage.UsedRatio,
 			Available: usage.Available, Reason: usage.Reason, ObservedAt: usage.ObservedAt,
-			CurrentState: targetState(globalPolicy, usage), WriteScopes: append([]WriteScope(nil), writeScopes...),
+			CurrentState: targetState(policy, usage), WriteScopes: writeScopesForTarget(usage, policiesByTarget, writeScopes),
 		})
 	}
 	return targets, nil
+}
+
+func policyForTargetSnapshot(usage UsageSnapshot, policiesByTarget map[string]Policy, globalPolicy *Policy) *Policy {
+	if policy, ok := policiesByTarget[usage.TargetID]; ok {
+		return &policy
+	}
+	if globalPolicy == nil {
+		return nil
+	}
+	copy := *globalPolicy
+	copy.TargetID = usage.TargetID
+	return &copy
+}
+
+func writeScopesForTarget(usage UsageSnapshot, policiesByTarget map[string]Policy, globalScopes []WriteScope) []WriteScope {
+	if policy, ok := policiesByTarget[usage.TargetID]; ok {
+		return []WriteScope{policy.WriteScope}
+	}
+	return append([]WriteScope(nil), globalScopes...)
 }
 
 func targetState(policy *Policy, usage UsageSnapshot) State {

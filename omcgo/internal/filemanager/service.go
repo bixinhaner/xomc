@@ -56,7 +56,7 @@ func (s *FileService) UploadFile(ctx context.Context, file io.Reader, fileSize i
 		contentType = "application/octet-stream"
 	}
 	if s.storageAdmission != nil {
-		decision, err := s.storageAdmission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeUpload)
+		decision, err := s.storageAdmission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, storageprotection.WriteScopeUpload)
 		if err != nil {
 			return nil, fmt.Errorf("storage admission check: %w", err)
 		}

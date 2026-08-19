@@ -219,7 +219,7 @@ func NewSoftwareService(
 // UploadFirmware stores a firmware file to MinIO and creates a firmware version record.
 func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersion, file io.Reader, fileSize int64) error {
 	if s.storageAdmission != nil {
-		decision, err := s.storageAdmission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeUpload)
+		decision, err := s.storageAdmission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, storageprotection.WriteScopeUpload)
 		if err != nil {
 			return fmt.Errorf("storage admission check: %w", err)
 		}

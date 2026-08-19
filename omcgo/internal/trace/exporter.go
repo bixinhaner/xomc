@@ -165,7 +165,7 @@ func (e *Exporter) run(ctx context.Context, jobID uuid.UUID) {
 	// 就定 octet-stream 一劳永逸。
 	key := fmt.Sprintf("trace-export/%s.xml", job.ID.String())
 	if e.storageAdmission != nil {
-		decision, admissionErr := e.storageAdmission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, storageprotection.WriteScopeTrace)
+		decision, admissionErr := e.storageAdmission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, storageprotection.WriteScopeTrace)
 		if admissionErr != nil {
 			e.failJob(ctx, job, fmt.Sprintf("storage admission check: %v", admissionErr))
 			return

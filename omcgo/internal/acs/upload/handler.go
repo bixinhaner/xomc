@@ -463,7 +463,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case tr069.FileTypeConfig:
 			scope = storageprotection.WriteScopeBackup
 		}
-		decision, admissionErr := h.storageAdmission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, scope)
+		decision, admissionErr := h.storageAdmission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, scope)
 		if admissionErr != nil {
 			h.logger.Error("storage write admission check failed", zap.Error(admissionErr), zap.String("scope", string(scope)))
 			http.Error(w, "storage admission unavailable", http.StatusServiceUnavailable)

@@ -19,9 +19,8 @@ const (
 
 const (
 	// UnifiedStorageTargetID is the canonical storage-protection target for
-	// policy compatibility. Thresholds remain global and are stored on this
-	// target, but runtime evaluation expands it to every protected host
-	// mountpoint that contains an OMC write path.
+	// policy compatibility. Its thresholds are used as the default template for
+	// protected host mountpoints that do not yet have an explicit policy.
 	UnifiedStorageTargetID   = "root"
 	UnifiedStorageMountpoint = "/"
 

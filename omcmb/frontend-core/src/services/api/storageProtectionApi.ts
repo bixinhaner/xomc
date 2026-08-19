@@ -178,12 +178,9 @@ function mapPolicy(policy: BackendStorageProtectionPolicy): StorageProtectionPol
 
 function mapPayload(payload: StorageProtectionPolicyPayload) {
   return {
-    // Keep the API defensive even if an older page or cached form submits a
-    // logical component target. Capacity policy is global to the one physical
-    // filesystem in this deployment.
-    target_type: UNIFIED_STORAGE_TARGET.targetType,
-    target_id: UNIFIED_STORAGE_TARGET.targetId,
-    write_scope: UNIFIED_STORAGE_TARGET.writeScope,
+    target_type: payload.targetType,
+    target_id: payload.targetId,
+    write_scope: payload.writeScope,
     enabled: payload.enabled,
     warn_used_percent: payload.warnUsedPercent,
     block_used_percent: payload.blockUsedPercent,

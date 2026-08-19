@@ -267,7 +267,7 @@ func (a *Archiver) compress(ctx context.Context, bucket, object string) (outcome
 		return outcomeDisabled, 0, object
 	}
 	if a.admission != nil {
-		decision, err := a.admission.Check(ctx, storageprotection.TargetFilesystem, storageprotection.UnifiedStorageTargetID, a.writeScope(bucket))
+		decision, err := a.admission.CheckPath(ctx, storageprotection.ProtectedPathIDMinIO, a.writeScope(bucket))
 		if err != nil {
 			a.warn("storage admission check", bucket, object, err)
 			return outcomeError, 0, object
