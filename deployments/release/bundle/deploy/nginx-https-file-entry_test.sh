@@ -11,6 +11,7 @@ ENTRYPOINT="$REPO_ROOT/deployments/docker/docker-entrypoint.d/10-enable-https-fi
 DEV_COMPOSE="$REPO_ROOT/deployments/docker/docker-compose.yml"
 WEB_DOCKERFILE="$REPO_ROOT/deployments/docker/Dockerfile.web"
 RELEASE_WEB_COMPOSE="$RELEASE_DEPLOY/docker-compose.web.yml"
+OPENSSL_LEGACY_CONF="$RELEASE_DEPLOY/openssl-legacy.cnf"
 INSTALL="$RELEASE_DEPLOY/install.sh"
 HEALTHCHECK="$RELEASE_DEPLOY/healthcheck.sh"
 SMOKE="$RELEASE_DEPLOY/smoke-nginx-https-file-entry.sh"
@@ -81,6 +82,10 @@ contains "web image documents 8443" "EXPOSE 8080 8081 8443" "$WEB_DOCKERFILE"
 contains "web image installs HTTPS file-entry entrypoint" "10-enable-https-file-entry.sh" "$WEB_DOCKERFILE"
 contains "release compose publishes 8443" '- "8443:8443"' "$RELEASE_WEB_COMPOSE"
 contains "release compose mounts deployment certificate directory" "- /etc/nginx/cert:/etc/nginx/cert:ro" "$RELEASE_WEB_COMPOSE"
+contains "release compose sets web-only OpenSSL legacy config" "OPENSSL_CONF: /etc/nginx/openssl-legacy.cnf" "$RELEASE_WEB_COMPOSE"
+contains "release compose mounts OpenSSL legacy config read-only" "- ./openssl-legacy.cnf:/etc/nginx/openssl-legacy.cnf:ro" "$RELEASE_WEB_COMPOSE"
+contains "OpenSSL legacy config exists" "openssl_conf = default_conf" "$OPENSSL_LEGACY_CONF"
+contains "OpenSSL legacy config lowers security level for old 1024-bit certificate" "CipherString = DEFAULT:@SECLEVEL=0" "$OPENSSL_LEGACY_CONF"
 
 echo "-- executable certificate failure paths --"
 TMP="$(mktemp -d)"
@@ -107,12 +112,12 @@ if command -v openssl >/dev/null 2>&1; then
   expect_fail "mismatched certificate and key fail startup" env OMC_NGINX_HTTPS_CERT="$cert_a" OMC_NGINX_HTTPS_KEY="$key_b" OMC_NGINX_HTTPS_CONF="$out_conf" sh "$ENTRYPOINT"
   printf 'not a certificate\n' >"$TMP/bad-cert.pem"
   expect_fail "unparseable certificate fails startup" env OMC_NGINX_HTTPS_CERT="$TMP/bad-cert.pem" OMC_NGINX_HTTPS_KEY="$key_a" OMC_NGINX_HTTPS_CONF="$out_conf" sh "$ENTRYPOINT"
-	  expect_success "valid certificate pair generates HTTPS config" env OMC_NGINX_HTTPS_CERT="$cert_a" OMC_NGINX_HTTPS_KEY="$key_a" OMC_NGINX_HTTPS_CONF="$out_conf" sh "$ENTRYPOINT"
-	  contains "generated config listens on 8443" "listen 8443 ssl;" "$out_conf"
-	  if command -v python3 >/dev/null 2>&1; then
-	    fixture_py="$TMP/file-entry-fixture.py"
-	    ports_file="$TMP/file-entry-ports"
-	    cat >"$fixture_py" <<'PY'
+  expect_success "valid certificate pair generates HTTPS config" env OMC_NGINX_HTTPS_CERT="$cert_a" OMC_NGINX_HTTPS_KEY="$key_a" OMC_NGINX_HTTPS_CONF="$out_conf" sh "$ENTRYPOINT"
+  contains "generated config listens on 8443" "listen 8443 ssl;" "$out_conf"
+  if command -v python3 >/dev/null 2>&1; then
+    fixture_py="$TMP/file-entry-fixture.py"
+    ports_file="$TMP/file-entry-ports"
+    cat >"$fixture_py" <<'PY'
 import http.server
 import json
 import ssl
@@ -179,26 +184,51 @@ with open(ports_file, "w", encoding="utf-8") as fh:
 threading.Thread(target=httpd.serve_forever, daemon=True).start()
 httpsd.serve_forever()
 PY
-	    fixture_log="$TMP/file-entry-fixture.log"
-	    python3 "$fixture_py" "$cert_a" "$key_a" "$ports_file" >"$fixture_log" 2>&1 &
-	    fixture_pid="$!"
-	    for _ in 1 2 3 4 5 6 7 8 9 10; do
-	      [ -s "$ports_file" ] && break
-	      sleep 0.2
-	    done
-	    if [ -s "$ports_file" ]; then
-	      read -r http_port https_port <"$ports_file"
-	      expect_success "real upload/download smoke works with temporary HTTPS certificate" env OMC_FILE_HTTP_BASE="http://127.0.0.1:${http_port}" OMC_FILE_HTTPS_BASE="https://127.0.0.1:${https_port}" OMC_FILE_HTTPS_INSECURE=1 bash "$SMOKE"
-	    else
-	      [ ! -s "$fixture_log" ] || cat "$fixture_log" >&2
-	      bad "temporary HTTP/HTTPS upload/download fixture did not start"
-	    fi
-	  else
-	    bad "python3 is required for temporary-certificate upload/download smoke fixture"
-	  fi
-	else
-	  echo "WARN: openssl unavailable; certificate mismatch execution tests skipped" >&2
-	fi
+    fixture_log="$TMP/file-entry-fixture.log"
+    python3 "$fixture_py" "$cert_a" "$key_a" "$ports_file" >"$fixture_log" 2>&1 &
+    fixture_pid="$!"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      [ -s "$ports_file" ] && break
+      sleep 0.2
+    done
+    if [ -s "$ports_file" ]; then
+      read -r http_port https_port <"$ports_file"
+      expect_success "real upload/download smoke works with temporary HTTPS certificate" env OMC_FILE_HTTP_BASE="http://127.0.0.1:${http_port}" OMC_FILE_HTTPS_BASE="https://127.0.0.1:${https_port}" OMC_FILE_HTTPS_INSECURE=1 bash "$SMOKE"
+    else
+      [ ! -s "$fixture_log" ] || cat "$fixture_log" >&2
+      bad "temporary HTTP/HTTPS upload/download fixture did not start"
+    fi
+  else
+    bad "python3 is required for temporary-certificate upload/download smoke fixture"
+  fi
+  if command -v docker >/dev/null 2>&1 && docker image inspect nginx:alpine >/dev/null 2>&1; then
+    nginx_legacy_conf="$TMP/nginx-1024-test.conf"
+    cat >"$nginx_legacy_conf" <<'NGINX'
+events {}
+http {
+  server {
+    listen 8443 ssl;
+    ssl_certificate /etc/nginx/cert/cert.pem;
+    ssl_certificate_key /etc/nginx/cert/key.pem;
+    location / {
+      return 200 "ok\n";
+    }
+  }
+}
+NGINX
+    expect_success "nginx config test accepts repository 1024-bit certificate with web-only OpenSSL legacy config" \
+      docker run --rm \
+        -e OPENSSL_CONF=/etc/nginx/openssl-legacy.cnf \
+        -v "$OPENSSL_LEGACY_CONF:/etc/nginx/openssl-legacy.cnf:ro" \
+        -v "$REPO_CERT_DIR:/etc/nginx/cert:ro" \
+        -v "$nginx_legacy_conf:/etc/nginx/nginx.conf:ro" \
+        nginx:alpine nginx -t
+  else
+    echo "WARN: docker or local nginx:alpine image unavailable; 1024-bit nginx config execution test skipped" >&2
+  fi
+else
+  echo "WARN: openssl unavailable; certificate mismatch execution tests skipped" >&2
+fi
 
 echo "-- install and healthcheck guards --"
 valid_bash "build release script" "$BUILD_RELEASE"
@@ -206,6 +236,7 @@ valid_bash "install script" "$INSTALL"
 valid_bash "healthcheck script" "$HEALTHCHECK"
 valid_bash "real file-entry smoke script" "$SMOKE"
 contains "release build uses repository certificate path" "deployments/release/bundle/deploy/nginx-cert" "$BUILD_RELEASE"
+contains "release build copies deploy bundle including OpenSSL legacy config" 'cp -r "$SCRIPT_DIR/bundle/deploy"' "$BUILD_RELEASE"
 not_contains "release build must not depend on private certificate override" "OMC_RELEASE_HTTPS_CERT_SOURCE_DIR" "$BUILD_RELEASE"
 contains "release build copies certificate assets into package" "copy_release_https_cert_assets" "$BUILD_RELEASE"
 contains "release build packages fixed certificate path" "deploy/nginx-cert" "$BUILD_RELEASE"
@@ -260,6 +291,9 @@ contains "README documents skip-web is not valid for HTTPS 8443 acceptance" "Do 
 contains "README documents HTTPS upload URL" "https://<OMC_PUBLIC_HOST>:8443/smallcell/FileUploadService" "$README"
 contains "README documents HTTPS download URL" "https://<OMC_PUBLIC_HOST>:8443/smallcell/FileDownloadService" "$README"
 contains "README documents HTTPS ACS service URL" "https://<OMC_PUBLIC_HOST>:8443/smallcell/AcsService" "$README"
+contains "README documents web-only OpenSSL legacy config" "OPENSSL_CONF=/etc/nginx/openssl-legacy.cnf" "$README"
+contains "README documents legacy certificate security exception" "1024-bit" "$README"
+contains "README documents removing legacy exception after certificate replacement" "remove this exception" "$README"
 contains "README documents real base-station final acceptance" "real base station Inform" "$README"
 contains "README states HTTP compatibility" 'HTTP `:8080` remains available' "$README"
 contains "README documents 8443 healthz check" "https://127.0.0.1:8443/healthz" "$README"

@@ -408,6 +408,13 @@ Docker 引擎、compose v2 二进制、基础镜像在【独立的基础设施�
 \`deploy/install.sh\` 自动安装到宿主机 \`/etc/nginx/cert/\`，用于启用基站
 HTTPS 8443 ACS 入口。
 
+兼容说明：当前证书是老 OMC 1024-bit 证书，本包同时交付
+\`deploy/openssl-legacy.cnf\`，并且只让 web 容器通过
+\`OPENSSL_CONF=/etc/nginx/openssl-legacy.cnf\` 降低自身 OpenSSL 安全级别以加载
+该证书。这个例外不改基础镜像、不改 Dockerfile \`FROM\`、不改宿主机全局
+OpenSSL，也不影响 app/acs/worker/db。未来可更换 2048-bit 或更强证书后，应
+从 \`docker-compose.web.yml\` 移除这个例外并删除 \`deploy/openssl-legacy.cnf\`。
+
 部署步骤见 \`docs/OMC内网离线部署手册（运维侧）.md\`。先校验完整性：
 \`\`\`bash
 sha256sum -c checksums.sha256

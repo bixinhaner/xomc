@@ -96,6 +96,14 @@ cd deployments/release
 
 产物归档到 `archive/project/<版本>/`，并自动刷新 `archive/index.html`。
 
+HTTPS 8443 兼容说明：项目包会包含 `deploy/nginx-cert/cert.pem`、
+`deploy/nginx-cert/key.pem` 和 `deploy/openssl-legacy.cnf`。当前证书是老 OMC
+1024-bit 证书，web 容器通过
+`OPENSSL_CONF=/etc/nginx/openssl-legacy.cnf` 降低自身 OpenSSL 安全级别以兼容
+该证书。这个例外只作用于 web/nginx 容器，不改基础镜像、不改 Dockerfile
+`FROM`、不改宿主机全局 OpenSSL，也不影响 app/acs/worker/db。未来换成
+2048-bit 或更强证书后，应移除这个例外配置。
+
 ### ④ 起下载服务
 
 ```bash
