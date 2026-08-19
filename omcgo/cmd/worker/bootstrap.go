@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/carrier/cmcc"
@@ -32,6 +33,7 @@ type workerInfra struct {
 	TaskMetrics       *task.TaskMetrics
 	StorageProtection *storageprotection.Service
 	ProductRegistry   *product.Registry
+	ParamRegistry     *parammodel.Registry
 }
 
 // initWorker initializes all infrastructure for the background worker.
