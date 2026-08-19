@@ -54,6 +54,19 @@ function renderModal(props: Partial<ModalProps> = {}) {
 }
 
 describe('ConfigParamsModal', () => {
+  it('opens the command list directly when switching from raw to standard without a command', () => {
+    const onGotoCommand = vi.fn();
+    renderModal({
+      command: null,
+      initialMode: 'raw',
+      onGotoCommand,
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'mml.consoleV2.config.tabStandard' }));
+
+    expect(onGotoCommand).toHaveBeenCalledOnce();
+  });
+
   it('shows only confirmed query Paths without second-stage checkboxes', () => {
     renderModal({
       command,

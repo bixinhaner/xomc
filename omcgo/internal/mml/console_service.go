@@ -271,11 +271,23 @@ func (s *ConsoleService) availableCommandSubFieldCount(
 	}
 	count := 0
 	for _, field := range enriched {
-		if supported.Contains(field.Tr069Path) && !blocked.blocks(cmd.OperationType, field.Tr069Path) {
+		if commandSubFieldAvailable(cmd.OperationType, field.AccessType) &&
+			supported.Contains(field.Tr069Path) && !blocked.blocks(cmd.OperationType, field.Tr069Path) {
 			count++
 		}
 	}
 	return count, nil
+}
+
+func commandSubFieldAvailable(operationType, accessType string) bool {
+	switch operationType {
+	case "MOD":
+		return accessType == AccessTypeReadWrite
+	case "LST":
+		return accessType != AccessTypeWriteOnly
+	default:
+		return true
+	}
 }
 
 func (s *ConsoleService) unsupportedPathsForProduct(ctx context.Context, productID *uuid.UUID) (*unsupportedPathFilter, error) {
