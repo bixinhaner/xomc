@@ -674,6 +674,7 @@ const messages: Record<string, string> = {
   'product.products.paramModel':     'Param Model Name',
   'product.products.paramModelPh':   'Select param model',
   'product.products.tech':           'Base Station Mode',
+  'product.products.techOptionalTip': 'Select LTE/NR/GSM for base stations; for core network and other non-radio products, leave empty (no radio mode).',
   'product.products.indicatorDevType': 'Indicator device type',
   'product.products.radioModes': 'Radio Modes',
   'product.products.indicatorPlatform': 'KPI Name',

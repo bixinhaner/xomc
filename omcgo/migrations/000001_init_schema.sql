@@ -6600,7 +6600,9 @@ CREATE TABLE public.products (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     is_builtin boolean DEFAULT false NOT NULL,
-    CONSTRAINT chk_products_indicator_device_type CHECK (((indicator_device_type)::text = ANY (ARRAY[('enb'::character varying)::text, ('gsm'::character varying)::text, ('gnb'::character varying)::text])))
+    -- 空字符串 '' 表示"无指标设备类型"（核心网等非无线产品：不区分制式、无 KPI 指标库）。
+    -- KPI 路由器对空 device_type 软返回空路由，不触发 perf_indicators_* 物理表查找。
+    CONSTRAINT chk_products_indicator_device_type CHECK (((indicator_device_type)::text = ANY (ARRAY[(''::text, ('enb'::character varying)::text, ('gsm'::character varying)::text, ('gnb'::character varying)::text])))
 );
 
 
@@ -21653,6 +21655,13 @@ BEGIN
 END
 $$;
 -- +goose StatementEnd
+
+-- 放宽 products.indicator_device_type 的 CHECK：允许空字符串 ''，用于核心网等不区分
+-- 无线制式的非无线产品（无 KPI 指标库，KPI 路由器对空 device_type 软返回空路由）。
+-- 对存量数据安全（仅增加允许值，现有 enb/gsm/gnb 不受影响）。幂等：DROP IF EXISTS + ADD。
+ALTER TABLE public.products DROP CONSTRAINT IF EXISTS chk_products_indicator_device_type;
+ALTER TABLE public.products ADD CONSTRAINT chk_products_indicator_device_type
+    CHECK (indicator_device_type = '' OR indicator_device_type IN ('enb', 'gsm', 'gnb'));
 -- +omcgo MainReconcileEnd
 
 -- Existing pre-release databases may already record goose version 1 without

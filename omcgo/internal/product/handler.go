@@ -311,7 +311,9 @@ type createProductReq struct {
 	Description         string         `json:"description"`
 	ParamModelName      string         `json:"param_model_name"` // 反查 param_models.id
 	ParamModelID        *string        `json:"param_model_id"`   // 直接给 ID 也接受
-	IndicatorDeviceType string         `json:"indicator_device_type" binding:"required"`
+	// IndicatorDeviceType 非必填：核心网等非无线产品不区分制式、无 KPI 指标库，传空串。
+	// 入库前小写归一；CHECK 仅允许 ''/enb/gsm/gnb。空串时 KPI 路由器软返回空路由。
+	IndicatorDeviceType string         `json:"indicator_device_type"`
 	IndicatorPlatform   string         `json:"indicator_platform"` // 仅 ENB 必填，由 service 层按 device_type 校验
 	AlarmNeType         string         `json:"alarm_ne_type" binding:"required"`
 	EnableFileType11    *bool          `json:"enable_filetype11"`

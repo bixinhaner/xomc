@@ -674,6 +674,7 @@ const messages: Record<string, string> = {
   'product.products.paramModel':     '参数模型名称',
   'product.products.paramModelPh':   '选择参数模型',
   'product.products.tech':           '基站制式',
+  'product.products.techOptionalTip': '基站产品选择 LTE/NR/GSM；核心网等非无线产品可不选（清空即可，不区分制式）。',
   'product.products.indicatorDevType': '指标设备类型',
   'product.products.radioModes': '射频模式',
   'product.products.indicatorPlatform': 'KPI指标名称',
