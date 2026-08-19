@@ -329,6 +329,21 @@ func (s *Service) UpdateInventoryProfile(ctx context.Context, idOrCode string, r
 
 func (s *Service) ListFields(ctx context.Context, filter FieldFilter) []FieldDefinition {
 	if s.repo != nil && filter.Domain == DomainPM {
+		if spec, ok := legacyPMProfile(filter.Profile); ok {
+			object := ScenarioObject{Code: firstNonEmpty(filter.ObjectCode, spec.objectCode), Tech: firstNonEmpty(filter.Tech, spec.tech), Profile: filter.Profile}
+			baseFields := s.catalog.Fields(FieldFilter{
+				Domain:     DomainPM,
+				ObjectCode: object.Code,
+				Tech:       object.Tech,
+				Profile:    object.Profile,
+			})
+			fields, _, err := s.pmExportFields(ctx, FileGroup{Domain: DomainPM}, object, baseFields, pmExportTech(object.Tech))
+			if err == nil && len(fields) > 0 {
+				return fields
+			}
+		}
+	}
+	if s.repo != nil && filter.Domain == DomainPM {
 		if fields, err := s.repo.ListPMMetricFields(ctx, filter); err == nil && len(fields) > 0 {
 			return fields
 		}

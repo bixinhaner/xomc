@@ -30,6 +30,18 @@ const (
 	legacyCMCOMSCSVProfile = "cm.coms.csv.v1"
 
 	legacyS0001EPProfile        = "cm.s0001.ep.legacy"
+	legacyPMS0001PCProfile      = "pm.s0001.pc.legacy"
+	legacyPMS0002PEProfile      = "pm.s0002.pe.legacy"
+	legacyPMS0002PCProfile      = "pm.s0002.pc.legacy"
+	legacyPMS0003PCProfile      = "pm.s0003.pc.legacy"
+	legacyPMS0007PCProfile      = "pm.s0007.pc.legacy"
+	legacyPMS0008PCProfile      = "pm.s0008.pc.legacy"
+	legacyPMS0009PCProfile      = "pm.s0009.pc.legacy"
+	legacyPMS0011GSMPCProfile   = "pm.s0011.pc.gsm.legacy"
+	legacyPMS0012GNBPCProfile   = "pm.s0012.pc.gnb.legacy"
+	legacyPMS0013GSMPCProfile   = "pm.s0013.pc.gsm.legacy"
+	legacyPMS0016LTEPCProfile   = "pm.s0016.pc.lte.legacy"
+	legacyPMS0016GSMPCProfile   = "pm.s0016.pc.gsm.legacy"
 	legacyCMPlmnCPXMLProfile    = "cm.cp.xml.s0003-s0015.v1"
 	legacyCMHeNBCEXMLProfile    = "cm.ce.xml.henb-location.v1"
 	legacyCMS0005CCXMLProfile   = "cm.cc.xml.s0005.v1"
@@ -149,6 +161,17 @@ func obj(codes ...string) []ScenarioObject {
 	return out
 }
 
+func legacyPMPCObject(profile string) []ScenarioObject {
+	return []ScenarioObject{{Code: "PC", Tech: "LTE", Profile: profile}}
+}
+
+func legacyPMPEPCObjects(peProfile, pcProfile string) []ScenarioObject {
+	return []ScenarioObject{
+		{Code: "PE", Tech: "LTE", Profile: peProfile},
+		{Code: "PC", Tech: "LTE", Profile: pcProfile},
+	}
+}
+
 func cmLTEObjects(format OutputFormat, codes ...string) []ScenarioObject {
 	out := make([]ScenarioObject, 0, len(codes))
 	for _, code := range codes {
@@ -213,92 +236,92 @@ func defaultFileProfiles() []FileProfile {
 	return []FileProfile{
 		fileProfile("S0001", "CM + PM PC + MR standard 15M", "标准场景", "Standard", []string{"baseline"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0001),
-			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PC")),
+			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, legacyPMPCObject(legacyPMS0001PCProfile)),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0002", "CM + PM PE/PC + MR", "电信场景", "Telecom", []string{"PE/PC", "csv |"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
-			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PE", "PC"))),
+			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, legacyPMPEPCObjects(legacyPMS0002PEProfile, legacyPMS0002PCProfile))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0003", "SH Telecom", "上海电信", "SH-Tele", []string{"PE/PC", "csv |"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0003),
-			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PE", "PC"))),
+			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, legacyPMPEPCObjects(legacyPMS0002PEProfile, legacyPMS0003PCProfile))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0004", "Shaanxi Telecom", "陕西电信", "SN-Tele", []string{"PE/PC", "alarm cn", "csv |"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0004),
-			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PE", "PC"))),
+			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, legacyPMPEPCObjects(legacyPMS0002PEProfile, legacyPMS0002PCProfile))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0005", "Jiangsu Telecom delayed PM + custom log", "江苏电信", "JS-Tele", []string{"PE/PC", "log type1", "csv |"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0005),
-			pipeCSV(group("pm-15m-delayed", DomainPM, FormatCSV, Period15M, 14, pathPMTech, namePM, obj("PE", "PC"))),
+			pipeCSV(group("pm-15m-delayed", DomainPM, FormatCSV, Period15M, 14, pathPMTech, namePM, legacyPMPEPCObjects(legacyPMS0002PEProfile, legacyPMS0002PCProfile))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 			gzipGroup(group("log-custom-daily", DomainLOG, FormatTXT, Period24H, 5, pathLOG, nameLOG, obj("login", "operation"))),
 		}),
 		fileProfile("S0006", "CM/PM without MR", "泰国 True", "Thai-True", []string{"no MR"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0006),
-			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PC")),
+			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, legacyPMPCObject(legacyPMS0001PCProfile)),
 		}),
 		fileProfile("S0007", "CM CSV + COMS + PM 60M", "泰国 AIS", "Thai-AIS", []string{"CM CSV", "COMS", "PM 60M"}, []FileGroup{
 			group("cm-daily-csv", DomainCM, FormatCSV, Period24H, 0, pathCM, nameCM, cmS0007),
-			group("pm-60m", DomainPM, FormatCSV, Period60M, 20, pathPMTech, namePM, obj("PC")),
+			group("pm-60m", DomainPM, FormatCSV, Period60M, 20, pathPMTech, namePM, legacyPMPCObject(legacyPMS0007PCProfile)),
 		}),
 		fileProfile("S0008", "CM CSV + COMS + fixed log", "V1 场景", "V1", []string{"CM CSV", "COMS", "log type2"}, []FileGroup{
 			group("cm-daily-csv", DomainCM, FormatCSV, Period24H, 1, pathCM, nameCM, cmS0008),
-			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PC")),
+			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, legacyPMPCObject(legacyPMS0008PCProfile)),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 			gzipGroup(group("log-fixed-daily", DomainLOG, FormatCSV, Period24H, 5, pathLOG, "#Object#_#PeriodStartTime#-24H.csv", obj("login_fix", "operation_fix"))),
 		}),
 		fileProfile("S0009", "PC 60M + MR", "老挝电信", "Laos-Tele", []string{"PM 60M"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
-			group("pm-pc-60m", DomainPM, FormatCSV, Period60M, 0, pathPMTech, namePM, obj("PC")),
+			group("pm-pc-60m", DomainPM, FormatCSV, Period60M, 0, pathPMTech, namePM, legacyPMPCObject(legacyPMS0009PCProfile)),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0010", "Object directory output", "上海联通", "SHUcom", []string{"object dirs", "socket"}, []FileGroup{
 			group("cm-daily-by-object", DomainCM, FormatXML, Period24H, 1, pathCM+"#Object#/", nameCM, cmXML),
-			group("pm-15m-by-object", DomainPM, FormatCSV, Period15M, 5, pathPMTech+"#Object#/", namePM, obj("PC")),
+			group("pm-15m-by-object", DomainPM, FormatCSV, Period15M, 5, pathPMTech+"#Object#/", namePM, legacyPMPCObject(legacyPMS0001PCProfile)),
 			group("mr-15m-by-object", DomainMR, FormatXML, Period15M, 0, pathMR+"#Object#/", nameMR, mr),
 		}),
 		fileProfile("S0011", "ISAT MTN standard", "ISAT MTN", "ISAT-NBI-MTN", []string{"standard"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
-			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PC")),
+			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, []ScenarioObject{{Code: "PC", Tech: "GSM", Profile: legacyPMS0011GSMPCProfile}}),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0012", "ENB + GNB dual technology", "陕西移动", "Shaanxi Mobile", []string{"ENB/GNB"}, []FileGroup{
 			group("cm-daily-lte", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
 			group("cm-daily-gnb", DomainCM, FormatXML, Period24H, 3, pathCM+"GNB/", nameCM, []ScenarioObject{{Code: "CP", Tech: "GNB"}, {Code: "EP", Tech: "GNB"}, {Code: "CC", Tech: "GNB"}, {Code: "CE", Tech: "GNB"}}),
-			group("pm-15m-lte", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PC")),
-			group("pm-pc-15m-gnb", DomainPM, FormatCSV, Period15M, 8, pathPMTech, namePM, []ScenarioObject{{Code: "PC", Tech: "GNB", Profile: "pm.pc.gnb.csv.v1"}}),
+			group("pm-15m-lte", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, legacyPMPCObject(legacyPMS0001PCProfile)),
+			group("pm-pc-15m-gnb", DomainPM, FormatCSV, Period15M, 8, pathPMTech, namePM, []ScenarioObject{{Code: "PC", Tech: "GNB", Profile: legacyPMS0012GNBPCProfile}}),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0013", "pmresult 60M multi-technology", "ZED 场景", "ZED", []string{"ENB/GSM/GNB", "PM 60M", "pmresult"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
-			group("pm-pc-60m-lte", DomainPM, FormatCSV, Period60M, 25, pathPMTech, "pmresult_152XXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Profile: "pm.pc.pmresult.csv.v1"}}),
-			group("pm-pc-60m-gsm", DomainPM, FormatCSV, Period60M, 20, pathPMTech, "pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Tech: "GSM", Profile: "pm.pc.gsm.pmresult.csv.v1"}}),
-			group("pm-pc-60m-gnb", DomainPM, FormatCSV, Period60M, 30, pathPMTech, "pmresult_XXXXXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Tech: "GNB", Profile: "pm.pc.gnb.csv.v1"}}),
+			group("pm-pc-60m-lte", DomainPM, FormatCSV, Period60M, 25, pathPMTech, "pmresult_152XXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", legacyPMPCObject(legacyPMS0001PCProfile)),
+			group("pm-pc-60m-gsm", DomainPM, FormatCSV, Period60M, 20, pathPMTech, "pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Tech: "GSM", Profile: legacyPMS0013GSMPCProfile}}),
+			group("pm-pc-60m-gnb", DomainPM, FormatCSV, Period60M, 30, pathPMTech, "pmresult_XXXXXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Tech: "GNB", Profile: legacyPMS0012GNBPCProfile}}),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0014", "Indonesia Telkomsel standard", "印尼 Telkomsel", "YinNi_Telkomsel_MNO", []string{"standard"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
-			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PC")),
+			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, legacyPMPCObject(legacyPMS0001PCProfile)),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0015", "Philippines DITO", "菲律宾 DITO", "FeiLvBin-DITO", []string{"PE/PC", "csv |"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmS0003),
-			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PE", "PC"))),
+			pipeCSV(group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, legacyPMPEPCObjects(legacyPMS0002PEProfile, legacyPMS0003PCProfile))),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0016", "ENB + GSM PM", "MTN 场景", "MTN", []string{"ENB/GSM"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
-			group("pm-15m-lte", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PC")),
-			group("pm-pc-15m-gsm", DomainPM, FormatCSV, Period15M, 5, pathPMTech, "pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Tech: "GSM", Profile: "pm.pc.gsm.pmresult.csv.v1"}}),
+			group("pm-15m-lte", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, legacyPMPCObject(legacyPMS0016LTEPCProfile)),
+			group("pm-pc-15m-gsm", DomainPM, FormatCSV, Period15M, 5, pathPMTech, "pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]", []ScenarioObject{{Code: "PC", Tech: "GSM", Profile: legacyPMS0016GSMPCProfile}}),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 		fileProfile("S0017", "Heilongjiang standard", "黑龙江场景", "HLongjianng", []string{"standard"}, []FileGroup{
 			group("cm-daily", DomainCM, FormatXML, Period24H, 1, pathCM, nameCM, cmXML),
-			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, obj("PC")),
+			group("pm-15m", DomainPM, FormatCSV, Period15M, 5, pathPMTech, namePM, legacyPMPCObject(legacyPMS0001PCProfile)),
 			group("mr-15m", DomainMR, FormatXML, Period15M, 0, pathMR, nameMR, mr),
 		}),
 	}
@@ -749,7 +772,8 @@ func defaultFields() []FieldDefinition {
 		field(DomainInventory, "OMC", "UE Count", "inventory.omc.ue_count", "SUM(device_info.ue_count)", "number", "number", "UE count"),
 		field(DomainInventory, "OMC", "Version", "inventory.omc.version", "buildinfo.ReleaseVersion", "string", "quote", "Version"),
 	)
-	return appendLegacyCMFields(fields)
+	fields = appendLegacyCMFields(fields)
+	return appendLegacyPMFields(fields)
 }
 
 func field(domain Domain, objectCode, outputAlias, systemField, source, dataType, renderer, cnName string) FieldDefinition {

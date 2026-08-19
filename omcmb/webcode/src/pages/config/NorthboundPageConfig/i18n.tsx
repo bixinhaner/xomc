@@ -37,6 +37,7 @@ const exactEn: Record<string, string> = {
   '新增目标': 'Add Target',
   '新增': 'Add',
   '保存': 'Save',
+  '删除后需保存才会生效。': 'Changes take effect after saving.',
   '刷新': 'Refresh',
   '查看': 'View',
   '编辑': 'Edit',

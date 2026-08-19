@@ -55,7 +55,7 @@ func TestBackfillDefaultFileProfileGroupsAlignsLegacyFormatOnce(t *testing.T) {
 		}},
 	}}
 
-	if !backfillDefaultFileProfileGroups(groups, defaults, true, false) {
+	if !backfillDefaultFileProfileGroups(groups, defaults, true, false, false) {
 		t.Fatal("expected legacy format alignment to report a change")
 	}
 	if groups[0].Format != FormatXML || groups[0].Objects[0].Profile != legacyCMCPXMLProfile {
@@ -72,7 +72,7 @@ func TestBackfillDefaultFileProfileGroupsAlignsLegacyFormatOnce(t *testing.T) {
 			Profile: legacyCMCPCSVProfile,
 		}},
 	}}
-	if backfillDefaultFileProfileGroups(groups, defaults, false, false) {
+	if backfillDefaultFileProfileGroups(groups, defaults, false, false, false) {
 		t.Fatal("did not expect a second legacy format alignment after marker is present")
 	}
 	if groups[0].Format != FormatCSV || groups[0].Objects[0].Profile != legacyCMCPCSVProfile {
@@ -114,7 +114,7 @@ func TestBackfillDefaultFileProfileGroupsAddsPMTechnologyPathForLegacyDefaults(t
 		{ID: "pm-custom", Domain: DomainPM, Format: FormatCSV, PathTemplate: "/operator/PM/#DateTime#/"},
 	}
 
-	if !backfillDefaultFileProfileGroups(groups, defaults, false, true) {
+	if !backfillDefaultFileProfileGroups(groups, defaults, false, true, false) {
 		t.Fatal("expected PM technology path alignment to report a change")
 	}
 	for _, index := range []int{0, 1, 2} {
@@ -126,8 +126,132 @@ func TestBackfillDefaultFileProfileGroupsAddsPMTechnologyPathForLegacyDefaults(t
 		t.Fatalf("custom PM path should be preserved: %s", groups[3].PathTemplate)
 	}
 
-	if backfillDefaultFileProfileGroups(groups, defaults, false, false) {
+	if backfillDefaultFileProfileGroups(groups, defaults, false, false, false) {
 		t.Fatal("did not expect PM technology path alignment after marker is present")
+	}
+}
+
+func TestBackfillDefaultFileProfileGroupsAddsLegacyPMProfile(t *testing.T) {
+	defaults := map[string]FileGroup{
+		"pm-15m": {
+			ID:     "pm-15m",
+			Domain: DomainPM,
+			Format: FormatCSV,
+			Objects: []ScenarioObject{{
+				Code:    "PC",
+				Tech:    "LTE",
+				Profile: legacyPMS0001PCProfile,
+			}},
+		},
+	}
+	groups := []FileGroup{{
+		ID:     "pm-15m",
+		Domain: DomainPM,
+		Format: FormatCSV,
+		Objects: []ScenarioObject{{
+			Code: "PC",
+		}},
+	}}
+
+	if !backfillDefaultFileProfileGroups(groups, defaults, false, false, false) {
+		t.Fatal("expected legacy PM profile backfill to report a change")
+	}
+	if groups[0].Objects[0].Tech != "LTE" || groups[0].Objects[0].Profile != legacyPMS0001PCProfile {
+		t.Fatalf("legacy PM profile was not restored: %#v", groups[0].Objects[0])
+	}
+
+	groups[0].Objects[0].Profile = "pm.custom"
+	if backfillDefaultFileProfileGroups(groups, defaults, false, false, false) {
+		t.Fatal("custom PM object profile should be preserved")
+	}
+	if groups[0].Objects[0].Profile != "pm.custom" {
+		t.Fatalf("custom PM object profile was overwritten: %#v", groups[0].Objects[0])
+	}
+}
+
+func TestBackfillDefaultFileProfileGroupsMigratesOldDefaultPMProfiles(t *testing.T) {
+	defaults := map[string]FileGroup{
+		"pm-15m": {
+			ID:     "pm-15m",
+			Domain: DomainPM,
+			Format: FormatCSV,
+			Objects: []ScenarioObject{
+				{Code: "PE", Tech: "LTE", Profile: legacyPMS0002PEProfile},
+				{Code: "PC", Tech: "LTE", Profile: legacyPMS0002PCProfile},
+			},
+		},
+		"pm-pc-60m-gsm": {
+			ID:     "pm-pc-60m-gsm",
+			Domain: DomainPM,
+			Format: FormatCSV,
+			Objects: []ScenarioObject{{
+				Code:    "PC",
+				Tech:    "GSM",
+				Profile: legacyPMS0013GSMPCProfile,
+			}},
+		},
+		"pm-pc-15m-gnb": {
+			ID:     "pm-pc-15m-gnb",
+			Domain: DomainPM,
+			Format: FormatCSV,
+			Objects: []ScenarioObject{{
+				Code:    "PC",
+				Tech:    "GNB",
+				Profile: legacyPMS0012GNBPCProfile,
+			}},
+		},
+	}
+	groups := []FileGroup{
+		{
+			ID:     "pm-15m",
+			Domain: DomainPM,
+			Format: FormatCSV,
+			Objects: []ScenarioObject{
+				{Code: "PE", Tech: "LTE", Profile: "pm.pe.csv.v1"},
+				{Code: "PC", Tech: "LTE", Profile: "pm.pc.csv.v1"},
+			},
+		},
+		{
+			ID:     "pm-pc-60m-gsm",
+			Domain: DomainPM,
+			Format: FormatCSV,
+			Objects: []ScenarioObject{{
+				Code:    "PC",
+				Tech:    "GSM",
+				Profile: "pm.pc.gsm.pmresult.csv.v1",
+			}},
+		},
+		{
+			ID:     "pm-pc-15m-gnb",
+			Domain: DomainPM,
+			Format: FormatCSV,
+			Objects: []ScenarioObject{{
+				Code:    "PC",
+				Tech:    "GNB",
+				Profile: "pm.pc.gnb.csv.v1",
+			}},
+		},
+	}
+
+	if !backfillDefaultFileProfileGroups(groups, defaults, false, false, true) {
+		t.Fatal("expected old default PM profile migration to report a change")
+	}
+	if groups[0].Objects[0].Profile != legacyPMS0002PEProfile || groups[0].Objects[1].Profile != legacyPMS0002PCProfile {
+		t.Fatalf("LTE PE/PC profiles were not migrated: %#v", groups[0].Objects)
+	}
+	if groups[1].Objects[0].Profile != legacyPMS0013GSMPCProfile {
+		t.Fatalf("GSM pmresult profile was not migrated: %#v", groups[1].Objects[0])
+	}
+	if groups[2].Objects[0].Profile != legacyPMS0012GNBPCProfile {
+		t.Fatalf("GNB profile was not migrated: %#v", groups[2].Objects[0])
+	}
+
+	groups[0].Objects[1].Profile = "pm.custom"
+	if backfillDefaultFileProfileGroups(groups[:1], defaults, false, false, true) {
+		t.Fatal("custom PM profile should be preserved during legacy migration")
+	}
+	if groups[0].Objects[1].Profile != "pm.custom" {
+		t.Fatalf("custom PM profile was overwritten: %#v", groups[0].Objects[1])
 	}
 }
 

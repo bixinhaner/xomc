@@ -466,6 +466,18 @@ const MR_NAME = '#ModuleType#-Baicells-#Object#-#LocalHost#-#eNBID#-#DateTime#[-
 const LOG_CUSTOM_NAME = '#Object#_#Date#.txt';
 const LOG_FIX_NAME = '#Object#_#PeriodStartTime#-24H.csv';
 const INVENTORY_NAME = 'BaiOMC_#Object#_#DateTime#.csv';
+const LEGACY_PM_S0001_PC_PROFILE = 'pm.s0001.pc.legacy';
+const LEGACY_PM_S0002_PE_PROFILE = 'pm.s0002.pe.legacy';
+const LEGACY_PM_S0002_PC_PROFILE = 'pm.s0002.pc.legacy';
+const LEGACY_PM_S0003_PC_PROFILE = 'pm.s0003.pc.legacy';
+const LEGACY_PM_S0007_PC_PROFILE = 'pm.s0007.pc.legacy';
+const LEGACY_PM_S0008_PC_PROFILE = 'pm.s0008.pc.legacy';
+const LEGACY_PM_S0009_PC_PROFILE = 'pm.s0009.pc.legacy';
+const LEGACY_PM_S0011_GSM_PC_PROFILE = 'pm.s0011.pc.gsm.legacy';
+const LEGACY_PM_S0012_GNB_PC_PROFILE = 'pm.s0012.pc.gnb.legacy';
+const LEGACY_PM_S0013_GSM_PC_PROFILE = 'pm.s0013.pc.gsm.legacy';
+const LEGACY_PM_S0016_LTE_PC_PROFILE = 'pm.s0016.pc.lte.legacy';
+const LEGACY_PM_S0016_GSM_PC_PROFILE = 'pm.s0016.pc.gsm.legacy';
 
 const domainOptions = [
   { label: 'CM', value: 'CM' },
@@ -670,7 +682,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0001_PC_PROFILE }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -680,7 +692,10 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [
+        { code: 'PE', tech: 'LTE', profile: LEGACY_PM_S0002_PE_PROFILE },
+        { code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0002_PC_PROFILE },
+      ]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -690,7 +705,10 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [
+        { code: 'PE', tech: 'LTE', profile: LEGACY_PM_S0002_PE_PROFILE },
+        { code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0003_PC_PROFILE },
+      ]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -700,7 +718,10 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [
+        { code: 'PE', tech: 'LTE', profile: LEGACY_PM_S0002_PE_PROFILE },
+        { code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0002_PC_PROFILE },
+      ]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -710,7 +731,10 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m-delayed', 'PM', 'CSV', '15M', '0 14/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
+      group('pm-15m-delayed', 'PM', 'CSV', '15M', '0 14/15 * * * ?', PATH_PM_TECH, PM_NAME, [
+        { code: 'PE', tech: 'LTE', profile: LEGACY_PM_S0002_PE_PROFILE },
+        { code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0002_PC_PROFILE },
+      ]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
     logs: { mode: 'custom', cron: '30 5 16 * * ?', period: '24H', compression: 'gz' },
@@ -721,7 +745,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0001_PC_PROFILE }]),
     ],
   },
   {
@@ -730,7 +754,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily-csv', 'CM', 'CSV', '24H', '0 0 17 * * ?', PATH_CM, CM_NAME, cmObjectsWithComs),
-      group('pm-60m', 'PM', 'CSV', '60M', '0 20 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
+      group('pm-60m', 'PM', 'CSV', '60M', '0 20 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0007_PC_PROFILE }]),
     ],
   },
   {
@@ -739,7 +763,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily-csv', 'CM', 'CSV', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjectsWithComs),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0008_PC_PROFILE }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
     logs: { mode: 'fix', cron: '30 5 16 * * ?', period: '24H', compression: 'gz' },
@@ -750,7 +774,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-pc-60m', 'PM', 'CSV', '60M', '0 0 1 * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
+      group('pm-pc-60m', 'PM', 'CSV', '60M', '0 0 1 * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0009_PC_PROFILE }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -760,7 +784,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily-by-object', 'CM', 'XML', '24H', '30 1 0 * * ?', `${PATH_CM}#Object#/`, CM_NAME, cmObjects),
-      group('pm-15m-by-object', 'PM', 'CSV', '15M', '0 5/15 * * * ?', `${PATH_PM_TECH}#Object#/`, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m-by-object', 'PM', 'CSV', '15M', '0 5/15 * * * ?', `${PATH_PM_TECH}#Object#/`, PM_NAME, [{ code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0001_PC_PROFILE }]),
       group('mr-15m-by-object', 'MR', 'XML', '15M', '0 0/15 * * * ?', `${PATH_MR}#Object#/`, MR_NAME, mrObjects),
     ],
   },
@@ -770,7 +794,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'GSM', profile: LEGACY_PM_S0011_GSM_PC_PROFILE }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -781,8 +805,8 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     groups: [
       group('cm-daily-lte', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
       group('cm-daily-gnb', 'CM', 'XML', '24H', '30 3 0 * * ?', `${PATH_CM}GNB/`, CM_NAME, cmGnbObjects),
-      group('pm-15m-lte', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
-      group('pm-pc-15m-gnb', 'PM', 'CSV', '15M', '0 8/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'GNB', profile: 'pm.pc.gnb.csv.v1' }]),
+      group('pm-15m-lte', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0001_PC_PROFILE }]),
+      group('pm-pc-15m-gnb', 'PM', 'CSV', '15M', '0 8/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'GNB', profile: LEGACY_PM_S0012_GNB_PC_PROFILE }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -792,9 +816,9 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-pc-60m-lte', 'PM', 'CSV', '60M', '0 25 * * * ?', PATH_PM_TECH, 'pmresult_152XXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', profile: 'pm.pc.pmresult.csv.v1' }]),
-      group('pm-pc-60m-gsm', 'PM', 'CSV', '60M', '0 20 * * * ?', PATH_PM_TECH, 'pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GSM', profile: 'pm.pc.gsm.pmresult.csv.v1' }]),
-      group('pm-pc-60m-gnb', 'PM', 'CSV', '60M', '0 30 * * * ?', PATH_PM_TECH, 'pmresult_XXXXXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GNB', profile: 'pm.pc.gnb.csv.v1' }]),
+      group('pm-pc-60m-lte', 'PM', 'CSV', '60M', '0 25 * * * ?', PATH_PM_TECH, 'pmresult_152XXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0001_PC_PROFILE }]),
+      group('pm-pc-60m-gsm', 'PM', 'CSV', '60M', '0 20 * * * ?', PATH_PM_TECH, 'pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GSM', profile: LEGACY_PM_S0013_GSM_PC_PROFILE }]),
+      group('pm-pc-60m-gnb', 'PM', 'CSV', '60M', '0 30 * * * ?', PATH_PM_TECH, 'pmresult_XXXXXX_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GNB', profile: LEGACY_PM_S0012_GNB_PC_PROFILE }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -804,7 +828,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0001_PC_PROFILE }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -814,7 +838,10 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PE' }, { code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [
+        { code: 'PE', tech: 'LTE', profile: LEGACY_PM_S0002_PE_PROFILE },
+        { code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0003_PC_PROFILE },
+      ]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -824,8 +851,8 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m-lte', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
-      group('pm-pc-15m-gsm', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, 'pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GSM', profile: 'pm.pc.gsm.pmresult.csv.v1' }]),
+      group('pm-15m-lte', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0016_LTE_PC_PROFILE }]),
+      group('pm-pc-15m-gsm', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, 'pmresult_#LocalHost#_#DataPeriod#_#PeriodStartTime#_#PeriodEndTime#[-#FileID#]', [{ code: 'PC', tech: 'GSM', profile: LEGACY_PM_S0016_GSM_PC_PROFILE }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -835,7 +862,7 @@ const rawScenarioRows: Array<Omit<ScenarioRow, 'vendor' | 'scenarioName' | 'scen
     enabled: false,
     groups: [
       group('cm-daily', 'CM', 'XML', '24H', '30 1 0 * * ?', PATH_CM, CM_NAME, cmObjects),
-      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC' }]),
+      group('pm-15m', 'PM', 'CSV', '15M', '0 5/15 * * * ?', PATH_PM_TECH, PM_NAME, [{ code: 'PC', tech: 'LTE', profile: LEGACY_PM_S0001_PC_PROFILE }]),
       group('mr-15m', 'MR', 'XML', '15M', '0 0/15 * * * ?', PATH_MR, MR_NAME, mrObjects),
     ],
   },
@@ -6073,7 +6100,7 @@ const FieldConfigSection = memo(forwardRef<FieldConfigSectionHandle, FieldConfig
         render: (_, row) => (
           <Popconfirm
             title={nt('确认删除该字段/指标？')}
-            description={nt('删除后需保存草稿才会生效。')}
+            description={nt('删除后需保存才会生效。')}
             okText={nt('删除')}
             cancelText={nt('取消')}
             okButtonProps={{ danger: true }}
@@ -7943,7 +7970,6 @@ export default function NorthboundPageConfig() {
                   { key: 'view', icon: <EyeOutlined />, label: '查看' },
                   { key: 'edit', icon: <EditOutlined />, label: '编辑' },
                   { key: 'report', icon: <FileSearchOutlined />, label: '上报结果' },
-                  { key: 'copy', icon: <CopyOutlined />, label: '复制模板' },
                   {
                     key: 'run',
                     icon: running ? <LoadingOutlined spin /> : <PlayCircleOutlined />,
@@ -7967,10 +7993,6 @@ export default function NorthboundPageConfig() {
                       row.code,
                       effectiveReportStatus(buildFileReportStatus(row), Boolean(scenarioEnabled[row.code])),
                     );
-                    return;
-                  }
-                  if (key === 'copy') {
-                    void message.info(nt(`${row.code} 已复制为草稿`));
                     return;
                   }
                   runFileProfile(row);
@@ -8560,7 +8582,7 @@ export default function NorthboundPageConfig() {
           </Tooltip>
           <Popconfirm
             title={nt('确认删除该传输目标？')}
-            description={nt('删除后需保存草稿才会生效。')}
+            description={nt('删除后需保存才会生效。')}
             okText={nt('删除')}
             cancelText={nt('取消')}
             okButtonProps={{ danger: true }}
@@ -10154,12 +10176,12 @@ export default function NorthboundPageConfig() {
           <Space>
             <Button aria-label="取消编辑 Inventory" onClick={() => setInventoryEditorOpen(false)}>取消</Button>
             <Button
-              aria-label="保存 Inventory 配置草稿"
+              aria-label="保存 Inventory 配置"
               type="primary"
               loading={Boolean(selectedInventoryConfig && inventoryProfileSaving[selectedInventoryConfig.key])}
               onClick={saveInventoryDraft}
             >
-              保存草稿
+              保存
             </Button>
           </Space>
         }
@@ -10494,12 +10516,12 @@ export default function NorthboundPageConfig() {
           <Space>
             <Button aria-label="取消编辑" onClick={() => setEditorOpen(false)}>取消</Button>
             <Button
-              aria-label="保存配置草稿"
+              aria-label="保存配置"
               type="primary"
               loading={Boolean(editorFileOwnerCode && fileProfileSaving[editorFileOwnerCode])}
               onClick={saveEditorDraft}
             >
-              保存草稿
+              保存
             </Button>
           </Space>
         }
@@ -10553,7 +10575,7 @@ export default function NorthboundPageConfig() {
                   render: (_, record) => (
                     <Popconfirm
                       title={nt('确认删除该对象？')}
-                      description={nt('删除后需保存草稿才会生效。')}
+                      description={nt('删除后需保存才会生效。')}
                       okText={nt('删除')}
                       cancelText={nt('取消')}
                       okButtonProps={{ danger: true }}

@@ -34,6 +34,7 @@ var _ Repository = (*PgRepository)(nil)
 const (
 	defaultFileProfileLegacyFormatAlignedConfigKey = "legacy_scene_format_aligned_v333"
 	defaultFileProfilePMTechPathConfigKey          = "pm_technology_path_aligned_v335"
+	defaultFileProfileLegacyPMProfileConfigKey     = "legacy_pm_profile_aligned_v328"
 )
 
 func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
@@ -131,7 +132,8 @@ func (r *PgRepository) backfillDefaultFileProfileGroupMetadata(ctx context.Conte
 	}
 	legacyFormatAligned := configBool(config, defaultFileProfileLegacyFormatAlignedConfigKey)
 	pmTechPathAligned := configBool(config, defaultFileProfilePMTechPathConfigKey)
-	changed := backfillDefaultFileProfileGroups(groups, defaultGroupsByID, !legacyFormatAligned, !pmTechPathAligned)
+	legacyPMProfileAligned := configBool(config, defaultFileProfileLegacyPMProfileConfigKey)
+	changed := backfillDefaultFileProfileGroups(groups, defaultGroupsByID, !legacyFormatAligned, !pmTechPathAligned, !legacyPMProfileAligned)
 	configChanged := false
 	if !legacyFormatAligned {
 		config[defaultFileProfileLegacyFormatAlignedConfigKey] = true
@@ -139,6 +141,10 @@ func (r *PgRepository) backfillDefaultFileProfileGroupMetadata(ctx context.Conte
 	}
 	if !pmTechPathAligned {
 		config[defaultFileProfilePMTechPathConfigKey] = true
+		configChanged = true
+	}
+	if !legacyPMProfileAligned {
+		config[defaultFileProfileLegacyPMProfileConfigKey] = true
 		configChanged = true
 	}
 	if !changed && !configChanged {
@@ -175,7 +181,7 @@ func configBool(config map[string]any, key string) bool {
 	}
 }
 
-func backfillDefaultFileProfileGroups(groups []FileGroup, defaultGroupsByID map[string]FileGroup, alignLegacyFormats bool, alignPMTechnologyPaths bool) bool {
+func backfillDefaultFileProfileGroups(groups []FileGroup, defaultGroupsByID map[string]FileGroup, alignLegacyFormats bool, alignPMTechnologyPaths bool, alignLegacyPMProfiles bool) bool {
 	changed := false
 	for i := range groups {
 		defaultGroup, ok := defaultGroupsByID[groups[i].ID]
@@ -216,7 +222,7 @@ func backfillDefaultFileProfileGroups(groups []FileGroup, defaultGroupsByID map[
 			}
 		}
 		if groups[i].Domain == defaultGroup.Domain && groups[i].Format == defaultGroup.Format &&
-			backfillDefaultFileProfileObjectProfilesWithOptions(groups[i].Domain, groups[i].Format, groups[i].Objects, defaultGroup.Objects, alignLegacyFormats) {
+			backfillDefaultFileProfileObjectProfilesWithOptions(groups[i].Domain, groups[i].Format, groups[i].Objects, defaultGroup.Objects, alignLegacyFormats, alignLegacyPMProfiles) {
 			changed = true
 		}
 		if alignPMTechnologyPaths && groups[i].Domain == DomainPM && defaultGroup.Domain == DomainPM {
@@ -307,11 +313,11 @@ func normalizeScenarioLogObjects(objects []ScenarioObject) bool {
 }
 
 func backfillDefaultFileProfileObjectProfiles(domain Domain, format OutputFormat, objects, defaultObjects []ScenarioObject) bool {
-	return backfillDefaultFileProfileObjectProfilesWithOptions(domain, format, objects, defaultObjects, false)
+	return backfillDefaultFileProfileObjectProfilesWithOptions(domain, format, objects, defaultObjects, false, false)
 }
 
-func backfillDefaultFileProfileObjectProfilesWithOptions(domain Domain, format OutputFormat, objects, defaultObjects []ScenarioObject, allowAnyLegacyCMProfile bool) bool {
-	if domain != DomainCM || len(objects) == 0 || len(defaultObjects) == 0 {
+func backfillDefaultFileProfileObjectProfilesWithOptions(domain Domain, format OutputFormat, objects, defaultObjects []ScenarioObject, allowAnyLegacyCMProfile bool, alignLegacyPMProfiles bool) bool {
+	if (domain != DomainCM && domain != DomainPM) || len(objects) == 0 || len(defaultObjects) == 0 {
 		return false
 	}
 	defaultByCodeTech := make(map[string]ScenarioObject, len(defaultObjects))
@@ -343,12 +349,13 @@ func backfillDefaultFileProfileObjectProfilesWithOptions(domain Domain, format O
 		}
 		if strings.TrimSpace(objects[i].Tech) == "" && strings.TrimSpace(defaultObject.Tech) != "" {
 			objects[i].Tech = defaultObject.Tech
+			tech = strings.ToUpper(strings.TrimSpace(objects[i].Tech))
 			changed = true
 		}
 		targetProfile := strings.TrimSpace(defaultObject.Profile)
 		currentProfile := strings.TrimSpace(objects[i].Profile)
 		if targetProfile == "" {
-			if currentProfile != "" && (strings.EqualFold(currentProfile, legacyCMProfile(format, code)) ||
+			if domain == DomainCM && currentProfile != "" && (strings.EqualFold(currentProfile, legacyCMProfile(format, code)) ||
 				(allowAnyLegacyCMProfile && isLegacyCMProfileForObject(currentProfile, code))) {
 				objects[i].Profile = ""
 				changed = true
@@ -358,13 +365,35 @@ func backfillDefaultFileProfileObjectProfilesWithOptions(domain Domain, format O
 		if strings.EqualFold(currentProfile, targetProfile) {
 			continue
 		}
-		if currentProfile == "" || strings.EqualFold(currentProfile, legacyCMProfile(format, code)) ||
-			(allowAnyLegacyCMProfile && isLegacyCMProfileForObject(currentProfile, code)) {
+		if currentProfile == "" ||
+			(domain == DomainCM && strings.EqualFold(currentProfile, legacyCMProfile(format, code))) ||
+			(domain == DomainCM && allowAnyLegacyCMProfile && isLegacyCMProfileForObject(currentProfile, code)) ||
+			(domain == DomainPM && alignLegacyPMProfiles && isDefaultPMProfileForObject(currentProfile, code, tech)) {
 			objects[i].Profile = targetProfile
 			changed = true
 		}
 	}
 	return changed
+}
+
+func isDefaultPMProfileForObject(profile string, code string, tech string) bool {
+	profile = strings.ToLower(strings.TrimSpace(profile))
+	code = strings.ToLower(strings.TrimSpace(code))
+	tech = strings.ToLower(strings.TrimSpace(tech))
+	switch code {
+	case "pc":
+		switch profile {
+		case "pm.pc.csv.v1", "pm.pc.lte.csv.v1", "pm.pc.pmresult.csv.v1":
+			return true
+		case "pm.pc.gnb.csv.v1":
+			return tech == "gnb"
+		case "pm.pc.gsm.pmresult.csv.v1":
+			return tech == "gsm"
+		}
+	case "pe":
+		return profile == "pm.pe.csv.v1" || profile == "pm.pe.lte.csv.v1"
+	}
+	return false
 }
 
 func isLegacyCMProfileForObject(profile string, code string) bool {
