@@ -1,6 +1,10 @@
 package pageconfig
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestDefaultFileProfilesMatchLegacyScenarioFormats(t *testing.T) {
 	csvCMProfiles := map[string]bool{
@@ -271,19 +275,217 @@ func TestNormalizeDeviceTechUsesDeviceStorageValues(t *testing.T) {
 }
 
 func TestDefaultInventoryCatalogContainsCompleteRadioFields(t *testing.T) {
-	fields := NewDefaultCatalog().Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "ENB"})
-	if len(fields) != len(stationInventoryFieldSeeds) {
-		t.Fatalf("ENB inventory field count = %d, want %d", len(fields), len(stationInventoryFieldSeeds))
-	}
-	if fields[5].OutputAlias != "Shop ID" || fields[5].SystemField != "device.site_id" {
-		t.Fatalf("unexpected Shop ID field: %#v", fields[5])
-	}
-	if fields[37].OutputAlias != "Product Name" || fields[37].SystemField != "product.name" {
-		t.Fatalf("unexpected Product Name field: %#v", fields[37])
+	catalog := NewDefaultCatalog()
+	require.Equal(t, []string{
+		"Serial Number", "Cell Status", "Online Status", "Alarms", "Cell Name",
+		"IP Address", "MAC Address", "ECI", "PCI", "Earfcn", "MME Status",
+		"Sync Status", "UE Count", "Last Period Time", "Product Type",
+		"Hardware Version", "Software Version", "Device Group", "RF Status", "Satellites",
+		"Longitude", "Latitude", "Height", "Duplex Mode", "IPsec Address", "PLMN",
+		"First Online Time", "TAC", "Model Name", "Cell Active State", "Manufacturer",
+		"Device Power", "OMC IP", "Installation Detailed Address",
+		"Device Status", "First Period Time", "Product Name", "System Uptime",
+		"Accumulated Online Time(s)", "Bandwidth", "Height(m)", "txPower", "eNB ID",
+		"Cell ID", "Subframe Assignment", "Special Subframe Patterns", "Root Sequence Index",
+	}, outputAliases(catalog.Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "ENB"})))
+
+	require.Equal(t, []string{
+		"Online Status", "Alarms", "Serial Number", "Cell Name", "IP Address", "MAC Address",
+		"NR Cell ID", "PCI", "Cell Status", "Sync Status", "UE Count", "System Uptime",
+		"Last Period Time", "AMF Status", "Duplex Mode", "Product Type", "Product Name",
+		"gNB ID", "BandIndicator", "Hardware Version", "Software Version", "NR ARFCN UL",
+		"NR ARFCN DL", "Device Group", "RF Status", "Satellites", "Longitude", "Latitude",
+		"First Period Time", "TAC", "Model Name", "Manufacturer", "Tx Power",
+		"OMC IP", "Installation Detailed Address", "Device Status",
+	}, outputAliases(catalog.Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "GNB"})))
+
+	require.Equal(t, []string{
+		"Online Status", "Alarms", "Serial Number", "Cell Name", "IP Address", "MAC Address",
+		"Cell Status", "Sync Status", "UE Count", "System Uptime", "Last Period Time",
+		"Product Type", "Product Name", "Accumulated Online Time", "Ipa Unit Id",
+		"Oml Remote Ip", "Oml Remote Ip Bak", "BSC Select", "LAC", "Earfcn",
+		"Hardware Version", "Software Version", "Device Group", "RF Status", "Satellites",
+		"Longitude", "Latitude", "Height", "First Period Time", "Model Name",
+		"Cell Admin State", "Manufacturer", "Tx Power", "OMC IP",
+		"Installation Detailed Address", "Device Status",
+	}, outputAliases(catalog.Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "GSM"})))
+
+	require.Equal(t, []string{
+		"OMC Name", "OMC IP", "Total Devices", "Online Devices", "Active Alarms",
+		"Current Connected UEs", "Version",
+	}, outputAliases(catalog.Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "OMC"})))
+
+	enbFields := catalog.Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "ENB"})
+	require.Equal(t, "inventory.device.active_alarm_count", fieldByAlias(t, enbFields, "Alarms").SystemField)
+	require.NotContains(t, outputAliases(enbFields), "Shop ID")
+	require.NotContains(t, outputAliases(enbFields), "Site Name")
+	require.NotContains(t, outputAliases(enbFields), "KPI Report Status")
+
+	gnbFields := catalog.Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "GNB"})
+	require.Equal(t, "device_info.cell_id", fieldByAlias(t, gnbFields, "NR Cell ID").SystemField)
+	require.Equal(t, "inventory.gnb.gnb_id", fieldByAlias(t, gnbFields, "gNB ID").SystemField)
+	require.Equal(t, "inventory.gnb.amf_status", fieldByAlias(t, gnbFields, "AMF Status").SystemField)
+	require.Contains(t, fieldByAlias(t, gnbFields, "gNB ID").Source, "FAPControl.NR.RAN.Common.gNBId")
+	require.NotContains(t, outputAliases(gnbFields), "MME Status")
+	require.NotContains(t, outputAliases(gnbFields), "Site Name")
+	gnbMMEOptionalField, ok := optionalDeviceInfoFieldFromColumn(DomainInventory, "GNB", "mme_status", "text")
+	require.True(t, ok)
+	require.Equal(t, "AMF Status", gnbMMEOptionalField.OutputAlias)
+	require.True(t, isUnsupportedInventoryDeviceInfoField(DomainInventory, "GNB", "mme_status"))
+	require.False(t, isUnsupportedInventoryDeviceInfoField(DomainInventory, "ENB", "mme_status"))
+
+	gsmFields := catalog.Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "GSM"})
+	require.NotContains(t, outputAliases(gsmFields), "Site Name")
+
+	omcFields := catalog.Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "OMC"})
+	require.Equal(t, "inventory.omc.total_devices", fieldByAlias(t, omcFields, "Total Devices").SystemField)
+	require.Equal(t, "inventory.omc.online_devices", fieldByAlias(t, omcFields, "Online Devices").SystemField)
+	require.Equal(t, "inventory.omc.active_alarms", fieldByAlias(t, omcFields, "Active Alarms").SystemField)
+	require.Equal(t, "inventory.omc.current_connected_ues", fieldByAlias(t, omcFields, "Current Connected UEs").SystemField)
+	require.Contains(t, fieldByAlias(t, omcFields, "OMC Name").Source, "default display name")
+	require.NotContains(t, outputAliases(omcFields), "eNB online")
+	require.NotContains(t, outputAliases(omcFields), "eNB active")
+	require.NotContains(t, outputAliases(omcFields), "MME status")
+	require.NotContains(t, outputAliases(omcFields), "UE Count")
+	require.NotContains(t, outputAliases(omcFields), "Active/Standby state")
+	require.NotContains(t, outputAliases(omcFields), "Hardware Model")
+}
+
+func TestDefaultInventoryProfilesCarryLegacyFieldConfig(t *testing.T) {
+	profiles := NewDefaultCatalog().InventoryProfiles()
+	byCode := make(map[string]InventoryProfile, len(profiles))
+	for _, profile := range profiles {
+		byCode[profile.Code] = profile
+		require.Equal(t, defaultInventoryProfileFieldsRevision, profile.DefaultFieldsRevision)
+		require.False(t, profile.FieldsCustomized)
+		require.NotEmpty(t, profile.Fields)
 	}
 
-	gnb := NewDefaultCatalog().Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "GNB"})
-	if gnb[4].OutputAlias != "gNB Name" || gnb[8].OutputAlias != "NCI" || gnb[10].OutputAlias != "NR-ARFCN" {
-		t.Fatalf("unexpected GNB aliases: %#v, %#v, %#v", gnb[4], gnb[8], gnb[10])
+	require.Equal(t,
+		outputAliases(NewDefaultCatalog().Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "ENB"})),
+		inventoryFieldAliases(byCode["ENB"].Fields),
+	)
+	require.Equal(t,
+		outputAliases(NewDefaultCatalog().Fields(FieldFilter{Domain: DomainInventory, ObjectCode: "GNB"})),
+		inventoryFieldAliases(byCode["GNB"].Fields),
+	)
+	require.NotContains(t, inventoryFieldAliases(byCode["ENB"].Fields), "Operator")
+	require.NotContains(t, inventoryFieldAliases(byCode["ENB"].Fields), "Femto Vendor")
+	require.NotContains(t, inventoryFieldAliases(byCode["GNB"].Fields), "gNB Name")
+	require.NotContains(t, inventoryFieldAliases(byCode["OMC"].Fields), "eNB active number")
+	require.NotContains(t, inventoryFieldAliases(byCode["OMC"].Fields), "eNB online")
+	require.NotContains(t, inventoryFieldAliases(byCode["OMC"].Fields), "MME status")
+	require.NotContains(t, inventoryFieldAliases(byCode["OMC"].Fields), "Hardware Model")
+}
+
+func TestInventoryProfileConfigMetadataDistinguishesDefaultsFromUserFields(t *testing.T) {
+	fields := []InventoryFieldConfig{{
+		Key:         "inventory.enb.1",
+		OutputAlias: "Serial Number",
+		SystemField: "device.serial_number",
+		Enabled:     true,
+	}}
+
+	defaultRaw, err := marshalDefaultInventoryProfileConfig(fields)
+	require.NoError(t, err)
+	var defaultProfile InventoryProfile
+	require.NoError(t, unmarshalInventoryProfileConfig(defaultRaw, &defaultProfile))
+	require.Equal(t, defaultInventoryProfileFieldsRevision, defaultProfile.DefaultFieldsRevision)
+	require.False(t, defaultProfile.FieldsCustomized)
+
+	customRaw, err := marshalInventoryProfileConfig(fields)
+	require.NoError(t, err)
+	var customProfile InventoryProfile
+	require.NoError(t, unmarshalInventoryProfileConfig(customRaw, &customProfile))
+	require.Empty(t, customProfile.DefaultFieldsRevision)
+	require.True(t, customProfile.FieldsCustomized)
+}
+
+func inventoryFieldAliases(fields []InventoryFieldConfig) []string {
+	aliases := make([]string, 0, len(fields))
+	for _, field := range fields {
+		aliases = append(aliases, field.OutputAlias)
 	}
+	return aliases
+}
+
+func fieldByAlias(t *testing.T, fields []FieldDefinition, alias string) FieldDefinition {
+	t.Helper()
+	for _, field := range fields {
+		if field.OutputAlias == alias {
+			return field
+		}
+	}
+	t.Fatalf("field %q not found", alias)
+	return FieldDefinition{}
+}
+
+func TestInventoryDeviceRowUsesLegacyDisplayValues(t *testing.T) {
+	row := ExportDataRow{
+		"device.is_online":                       "true",
+		"device.serial_number":                   "SN-FALLBACK",
+		"device.site_name":                       "Site From Device",
+		"device.lifecycle_state":                 "commissioned",
+		"device.product_class":                   "pBS11004",
+		"product.name":                           "RTS",
+		"device_info.op_state":                   "1",
+		"device_info.sync_status":                "DISP",
+		"device_info.rf_status":                  "1",
+		"device_info.mme_status":                 "partial",
+		"device_info.kpi_status":                 "1",
+		"device_info.run_time":                   "29437",
+		"device_info.cumulative_online_duration": "22638300",
+	}
+
+	enrichInventoryDeviceRow(row)
+
+	require.Equal(t, "Site From Device", row["device_info.device_name"])
+	require.Equal(t, "ON", row["inventory.enb.online_status"])
+	require.Equal(t, "On", row["inventory.gnb.online_status"])
+	require.Equal(t, "Active", row["inventory.enb.cell_status"])
+	require.Equal(t, "GPS Synchronizing", row["inventory.enb.sync_status"])
+	require.Equal(t, "connected", row["inventory.enb.mme_status"])
+	require.Equal(t, "connected", row["inventory.gnb.amf_status"])
+	require.Equal(t, "normal", row["inventory.enb.kpi_status"])
+	require.Equal(t, "ON", row["inventory.enb.rf_status"])
+	require.Equal(t, "ON", row["inventory.enb.cell_active_state"])
+	require.Equal(t, "Unblock", row["inventory.gsm.cell_admin_state"])
+	require.Equal(t, "Install", row["inventory.enb.device_status"])
+	require.Equal(t, "RTS", row["inventory.enb.product_name"])
+	require.Equal(t, "0d 8h 10m 37s", row["inventory.enb.system_uptime"])
+	require.Equal(t, "262d 0h 25m 0s", row["inventory.enb.accumulated_online_time"])
+	row["device.is_online"] = "false"
+	enrichInventoryDeviceRow(row)
+	require.Equal(t, "OFF", row["inventory.enb.online_status"])
+	require.Equal(t, "Inactive", row["inventory.enb.cell_status"])
+}
+
+func TestInventoryStatusDisplayMappingsCoverDeviceListValues(t *testing.T) {
+	require.Equal(t, "connected", legacyInventoryCoreStatus("partial"))
+	require.Equal(t, "connected", legacyInventoryCoreStatus("connected"))
+	require.Equal(t, "disconnected", legacyInventoryCoreStatus("disconnected"))
+
+	require.Equal(t, "GPS Synchronized", legacyInventorySyncStatus("SYNCHRONIZED"))
+	require.Equal(t, "GPS Synchronized", legacyInventorySyncStatus("LOCKED"))
+	require.Equal(t, "GPS Synchronizing", legacyInventorySyncStatus("DISP"))
+	require.Equal(t, "Unsynchronized", legacyInventorySyncStatus("error"))
+	require.Equal(t, "--", legacyInventorySyncStatus("3"))
+}
+
+func TestLegacyInventoryOMCNameFallsBackToDefaultDisplayName(t *testing.T) {
+	t.Setenv("OMC_NAME", "")
+	t.Setenv("OMC_OMC_NAME", "")
+	t.Setenv("MR_OMC_NAME", "")
+
+	require.Equal(t, defaultInventoryOMCName, legacyInventoryOMCName(""))
+	require.Equal(t, defaultInventoryOMCName, legacyInventoryOMCName("   "))
+	require.Equal(t, "Configured OMC", legacyInventoryOMCName(" Configured OMC "))
+}
+
+func TestLegacyInventoryOMCNameEnvOverridesConfiguredValue(t *testing.T) {
+	t.Setenv("OMC_NAME", "Env OMC")
+	t.Setenv("OMC_OMC_NAME", "")
+	t.Setenv("MR_OMC_NAME", "")
+
+	require.Equal(t, "Env OMC", legacyInventoryOMCName("Configured OMC"))
 }

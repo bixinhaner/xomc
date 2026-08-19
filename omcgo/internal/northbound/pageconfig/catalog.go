@@ -84,6 +84,9 @@ func (c *Catalog) FileProfiles() []FileProfile {
 func (c *Catalog) InventoryProfiles() []InventoryProfile {
 	out := make([]InventoryProfile, len(c.inventoryProfiles))
 	copy(out, c.inventoryProfiles)
+	for i := range out {
+		out[i].Fields = append([]InventoryFieldConfig(nil), c.inventoryProfiles[i].Fields...)
+	}
 	return out
 }
 
@@ -344,12 +347,17 @@ func fileProfile(code, name, scenarioName, scenarioNameEn string, flags []string
 }
 
 func defaultInventoryProfiles() []InventoryProfile {
-	return []InventoryProfile{
+	profiles := []InventoryProfile{
 		inventoryProfile("ENB", "eNB Inventory", "eNB", "LTE"),
 		inventoryProfile("GNB", "gNB Inventory", "gNB", "GNB"),
 		inventoryProfile("GSM", "GSM Inventory", "GSM", "GSM"),
 		inventoryProfile("OMC", "OMC Inventory", "OMC", "OMC"),
 	}
+	for i := range profiles {
+		profiles[i].Fields = inventoryFieldConfigsForObject(profiles[i].ObjectCode)
+		profiles[i].DefaultFieldsRevision = defaultInventoryProfileFieldsRevision
+	}
+	return profiles
 }
 
 func inventoryProfile(code, name, objectCode, tech string) InventoryProfile {
@@ -379,28 +387,26 @@ type inventoryFieldSeed struct {
 	cnName      string
 }
 
-var stationInventoryFieldSeeds = []inventoryFieldSeed{
+var enbInventoryFieldSeeds = []inventoryFieldSeed{
 	{"Serial Number", "device.serial_number", "devices.serial_number", "string", "quote", "Device serial number"},
-	{"Cell Status", "device_info.op_state", "device_info.op_state", "string", "quote", "Cell status"},
-	{"Online Status", "device.is_online", "devices.is_online", "bool", "enum", "Online status"},
-	{"Alarms", "device_info.active_alarm_count", "device_info.active_alarm_count", "number", "number", "Active alarm count"},
+	{"Cell Status", "inventory.enb.cell_status", "device_info.op_state", "string", "enum", "Cell status"},
+	{"Online Status", "inventory.enb.online_status", "devices.is_online", "bool", "enum", "Online status"},
+	{"Alarms", "inventory.device.active_alarm_count", "alarms_active aggregate (status <> cleared)", "number", "number", "Active alarm count"},
 	{"Cell Name", "device_info.device_name", "device_info.device_name / devices.site_name", "string", "quote", "Cell name"},
-	{"Shop ID", "device.site_id", "devices.site_id", "string", "quote", "Shop ID"},
 	{"IP Address", "device.ip_address", "devices.ip_address", "string", "quote", "IP address"},
 	{"MAC Address", "device_info.mac", "device_info.mac", "string", "quote", "MAC address"},
 	{"ECI", "device_info.eci", "device_info.eci", "string", "preserve text", "ECI"},
 	{"PCI", "device_info.pci", "device_info.pci", "string", "preserve text", "PCI"},
 	{"Earfcn", "device_info.freq_point", "device_info.freq_point", "number", "preserve text", "EARFCN"},
-	{"MME Status", "device_info.mme_status", "device_info.mme_status", "string", "quote", "MME status"},
-	{"KPI Report Status", "device_info.kpi_status", "device_info.kpi_status", "string", "quote", "KPI report status"},
-	{"Sync Status", "device_info.sync_status", "device_info.sync_status", "string", "quote", "Sync status"},
+	{"MME Status", "inventory.enb.mme_status", "device_info.mme_status", "string", "enum", "MME status"},
+	{"Sync Status", "inventory.enb.sync_status", "device_info.sync_status", "string", "enum", "Sync status"},
 	{"UE Count", "device_info.ue_count", "device_info.ue_count", "number", "number", "UE count"},
 	{"Last Period Time", "device.last_inform_at", "devices.last_inform_at", "datetime", "preserve text", "Last period time"},
 	{"Product Type", "device.product_class", "devices.product_class", "string", "quote", "Product class"},
 	{"Hardware Version", "device_info.hardware_version", "device_info.hardware_version", "string", "quote", "Hardware version"},
 	{"Software Version", "device.firmware_version", "devices.firmware_version", "string", "quote", "Software version"},
 	{"Device Group", "device_groups.name", "device_group_members / device_groups", "string", "quote", "Device group"},
-	{"RF Status", "device_info.rf_status", "device_info.rf_status", "string", "quote", "RF status"},
+	{"RF Status", "inventory.enb.rf_status", "device_info.rf_status", "string", "enum", "RF status"},
 	{"Satellites", "device_info.gps_satellites", "device_info.gps_satellites", "number", "number", "GPS satellites"},
 	{"Longitude", "device.longitude", "devices.longitude", "number", "number", "Longitude"},
 	{"Latitude", "device.latitude", "devices.latitude", "number", "number", "Latitude"},
@@ -409,23 +415,114 @@ var stationInventoryFieldSeeds = []inventoryFieldSeed{
 	{"IPsec Address", "device_info.ipsec_addr", "device_info.ipsec_addr", "string", "quote", "IPsec address"},
 	{"PLMN", "device_info.plmn", "device_info.plmn", "string", "preserve text", "PLMN"},
 	{"First Online Time", "device_info.first_online_time", "device_info.first_online_time", "datetime", "preserve text", "First online time"},
-	{"AMF Status", "device_info.mme_status", "device_info.mme_status as amf_status", "string", "quote", "AMF status"},
 	{"TAC", "device_info.tac", "device_info.tac", "string", "quote", "TAC"},
 	{"Model Name", "device.model_name", "devices.model_name", "string", "quote", "Model name"},
+	{"Cell Active State", "inventory.enb.cell_active_state", "device_info.rf_status", "string", "enum", "Cell active state"},
 	{"Manufacturer", "device.manufacturer", "devices.manufacturer", "string", "quote", "Manufacturer"},
-	{"Site Name", "device.site_name", "devices.site_name / device_info.device_name", "string", "quote", "Site name"},
+	{"Device Power", "device_info.transmit_power", "device_info.transmit_power", "number", "number", "Device power"},
+	{"OMC IP", "runtime.local_host", "runtime.local_host", "string", "quote", "OMC IP"},
 	{"Installation Detailed Address", "device_info.address", "device_info.address", "string", "quote", "Installation address"},
-	{"Device Status", "device.lifecycle_state", "devices.lifecycle_state + devices.is_online", "string", "enum", "Device status"},
+	{"Device Status", "inventory.enb.device_status", "devices.lifecycle_state", "string", "enum", "Device status"},
 	{"First Period Time", "device_info.first_online_time", "device_info.first_online_time", "datetime", "preserve text", "First period time"},
-	{"Product Name", "product.name", "products.product_name / devices.product_class", "string", "quote", "Product name"},
-	{"System Uptime", "device_info.run_time", "device_info.run_time", "number", "number", "System uptime"},
-	{"Accumulated Online Time(s)", "device_info.cumulative_online_duration", "device_info.cumulative_online_duration", "number", "number", "Accumulated online time"},
+	{"Product Name", "inventory.enb.product_name", "products.product_name / devices.product_class", "string", "quote", "Product name"},
+	{"System Uptime", "inventory.enb.system_uptime", "device_info.run_time", "number", "number", "System uptime"},
+	{"Accumulated Online Time(s)", "inventory.enb.accumulated_online_time", "device_info.cumulative_online_duration", "number", "number", "Accumulated online time"},
 	{"Bandwidth", "device_info.bandwidth", "device_info.bandwidth", "number", "number", "Bandwidth"},
 	{"Height(m)", "device_info.gps_height", "device_info.gps_height", "number", "number", "GPS height"},
+	{"txPower", "device_info.transmit_power", "device_info.transmit_power", "number", "number", "Transmit power"},
 	{"eNB ID", "device_info.enb_id", "device_info.enb_id", "string", "quote", "eNB ID"},
 	{"Cell ID", "device_info.cell_id", "device_info.cell_id", "string", "quote", "Cell ID"},
 	{"Subframe Assignment", "device_info.subframe_assignment", "device_info.subframe_assignment", "string", "quote", "Subframe assignment"},
 	{"Special Subframe Patterns", "device_info.special_subframe", "device_info.special_subframe", "string", "quote", "Special subframe patterns"},
+	{"Root Sequence Index", "device_info.root_index", "device_info.root_index", "number", "preserve text", "Root sequence index"},
+}
+
+var gnbInventoryFieldSeeds = []inventoryFieldSeed{
+	{"Online Status", "inventory.gnb.online_status", "devices.is_online", "bool", "enum", "Online status"},
+	{"Alarms", "inventory.device.active_alarm_count", "alarms_active aggregate (status <> cleared)", "number", "number", "Active alarm count"},
+	{"Serial Number", "device.serial_number", "devices.serial_number", "string", "quote", "Device serial number"},
+	{"Cell Name", "device_info.device_name", "device_info.device_name / devices.site_name", "string", "quote", "Cell name"},
+	{"IP Address", "device.ip_address", "devices.ip_address", "string", "quote", "IP address"},
+	{"MAC Address", "device_info.mac", "device_info.mac", "string", "quote", "MAC address"},
+	{"NR Cell ID", "device_info.cell_id", "device_info.cell_id", "string", "preserve text", "NR cell ID"},
+	{"PCI", "device_info.pci", "device_info.pci", "string", "preserve text", "PCI"},
+	{"Cell Status", "inventory.gnb.cell_status", "device_info.op_state", "string", "enum", "Cell status"},
+	{"Sync Status", "inventory.gnb.sync_status", "device_info.sync_status", "string", "enum", "Sync status"},
+	{"UE Count", "device_info.ue_count", "device_info.ue_count", "number", "number", "UE count"},
+	{"System Uptime", "inventory.gnb.system_uptime", "device_info.run_time", "number", "number", "System uptime"},
+	{"Last Period Time", "device.last_inform_at", "devices.last_inform_at", "datetime", "preserve text", "Last period time"},
+	{"AMF Status", "inventory.gnb.amf_status", "device_info.mme_status (NR normalized AMF status)", "string", "enum", "AMF status"},
+	{"Duplex Mode", "device_info.network_model", "device_info.network_model", "string", "quote", "Duplex mode"},
+	{"Product Type", "device.product_class", "devices.product_class", "string", "quote", "Product class"},
+	{"Product Name", "inventory.gnb.product_name", "products.product_name / devices.product_class", "string", "quote", "Product name"},
+	{"gNB ID", "inventory.gnb.gnb_id", "device_parameters.Device.Services.FAPService.{i}.FAPControl.NR.RAN.Common.gNBId", "string", "quote", "gNB ID"},
+	{"BandIndicator", "device_info.band", "device_info.band", "string", "quote", "Band indicator"},
+	{"Hardware Version", "device_info.hardware_version", "device_info.hardware_version", "string", "quote", "Hardware version"},
+	{"Software Version", "device.firmware_version", "devices.firmware_version", "string", "quote", "Software version"},
+	{"NR ARFCN UL", "device_info.ul_earfcn", "device_info.ul_earfcn", "number", "preserve text", "NR ARFCN UL"},
+	{"NR ARFCN DL", "device_info.freq_point", "device_info.freq_point", "number", "preserve text", "NR ARFCN DL"},
+	{"Device Group", "device_groups.name", "device_group_members / device_groups", "string", "quote", "Device group"},
+	{"RF Status", "inventory.gnb.rf_status", "device_info.rf_status", "string", "enum", "RF status"},
+	{"Satellites", "device_info.gps_satellites", "device_info.gps_satellites", "number", "number", "GPS satellites"},
+	{"Longitude", "device.longitude", "devices.longitude", "number", "number", "Longitude"},
+	{"Latitude", "device.latitude", "devices.latitude", "number", "number", "Latitude"},
+	{"First Period Time", "device_info.first_online_time", "device_info.first_online_time", "datetime", "preserve text", "First period time"},
+	{"TAC", "device_info.tac", "device_info.tac", "string", "quote", "TAC"},
+	{"Model Name", "device.model_name", "devices.model_name", "string", "quote", "Model name"},
+	{"Manufacturer", "device.manufacturer", "devices.manufacturer", "string", "quote", "Manufacturer"},
+	{"Tx Power", "device_info.transmit_power", "device_info.transmit_power", "number", "number", "Transmit power"},
+	{"OMC IP", "runtime.local_host", "runtime.local_host", "string", "quote", "OMC IP"},
+	{"Installation Detailed Address", "device_info.address", "device_info.address", "string", "quote", "Installation address"},
+	{"Device Status", "inventory.gnb.device_status", "devices.lifecycle_state", "string", "enum", "Device status"},
+}
+
+var gsmInventoryFieldSeeds = []inventoryFieldSeed{
+	{"Online Status", "inventory.gsm.online_status", "devices.is_online", "bool", "enum", "Online status"},
+	{"Alarms", "inventory.device.active_alarm_count", "alarms_active aggregate (status <> cleared)", "number", "number", "Active alarm count"},
+	{"Serial Number", "device.serial_number", "devices.serial_number", "string", "quote", "Device serial number"},
+	{"Cell Name", "device_info.device_name", "device_info.device_name / devices.site_name", "string", "quote", "Cell name"},
+	{"IP Address", "device.ip_address", "devices.ip_address", "string", "quote", "IP address"},
+	{"MAC Address", "device_info.mac", "device_info.mac", "string", "quote", "MAC address"},
+	{"Cell Status", "inventory.gsm.cell_status", "device_info.op_state", "string", "enum", "Cell status"},
+	{"Sync Status", "inventory.gsm.sync_status", "device_info.sync_status", "string", "enum", "Sync status"},
+	{"UE Count", "device_info.ue_count", "device_info.ue_count", "number", "number", "UE count"},
+	{"System Uptime", "inventory.gsm.system_uptime", "device_info.run_time", "number", "number", "System uptime"},
+	{"Last Period Time", "device.last_inform_at", "devices.last_inform_at", "datetime", "preserve text", "Last period time"},
+	{"Product Type", "device.product_class", "devices.product_class", "string", "quote", "Product class"},
+	{"Product Name", "inventory.gsm.product_name", "products.product_name / devices.product_class", "string", "quote", "Product name"},
+	{"Accumulated Online Time", "inventory.gsm.accumulated_online_time", "device_info.cumulative_online_duration", "number", "number", "Accumulated online time"},
+	{"Ipa Unit Id", "device_info.ipa_unit_id", "device_info.ipa_unit_id", "string", "quote", "IPA unit ID"},
+	{"Oml Remote Ip", "device_info.oml_remote_ip", "device_info.oml_remote_ip", "string", "quote", "OML remote IP"},
+	{"Oml Remote Ip Bak", "device_info.oml_remote_ip_bak", "device_info.oml_remote_ip_bak", "string", "quote", "OML remote IP backup"},
+	{"BSC Select", "device_info.bsc_select", "device_info.bsc_select", "string", "enum", "BSC select"},
+	{"LAC", "device_info.lac", "device_info.lac", "string", "quote", "LAC"},
+	{"Earfcn", "device_info.freq_point", "device_info.freq_point", "number", "preserve text", "EARFCN"},
+	{"Hardware Version", "device_info.hardware_version", "device_info.hardware_version", "string", "quote", "Hardware version"},
+	{"Software Version", "device.firmware_version", "devices.firmware_version", "string", "quote", "Software version"},
+	{"Device Group", "device_groups.name", "device_group_members / device_groups", "string", "quote", "Device group"},
+	{"RF Status", "inventory.gsm.rf_status", "device_info.rf_status", "string", "enum", "RF status"},
+	{"Satellites", "device_info.gps_satellites", "device_info.gps_satellites", "number", "number", "GPS satellites"},
+	{"Longitude", "device.longitude", "devices.longitude", "number", "number", "Longitude"},
+	{"Latitude", "device.latitude", "devices.latitude", "number", "number", "Latitude"},
+	{"Height", "device_info.gps_height", "device_info.gps_height", "number", "number", "GPS height"},
+	{"First Period Time", "device_info.first_online_time", "device_info.first_online_time", "datetime", "preserve text", "First period time"},
+	{"Model Name", "device.model_name", "devices.model_name", "string", "quote", "Model name"},
+	{"Cell Admin State", "inventory.gsm.cell_admin_state", "device_info.rf_status", "string", "enum", "Cell admin state"},
+	{"Manufacturer", "device.manufacturer", "devices.manufacturer", "string", "quote", "Manufacturer"},
+	{"Tx Power", "device_info.transmit_power", "device_info.transmit_power", "number", "number", "Transmit power"},
+	{"OMC IP", "runtime.local_host", "runtime.local_host", "string", "quote", "OMC IP"},
+	{"Installation Detailed Address", "device_info.address", "device_info.address", "string", "quote", "Installation address"},
+	{"Device Status", "inventory.gsm.device_status", "devices.lifecycle_state", "string", "enum", "Device status"},
+}
+
+var omcInventoryFieldSeeds = []inventoryFieldSeed{
+	{"OMC Name", "inventory.omc.omc_name", "sys_configs.basic.mrOMCName / env OMC_NAME / default display name", "string", "quote", "OMC name"},
+	{"OMC IP", "runtime.local_host", "runtime.local_host", "string", "quote", "OMC IP"},
+	{"Total Devices", "inventory.omc.total_devices", "dashboard device list stats total", "number", "number", "Total devices"},
+	{"Online Devices", "inventory.omc.online_devices", "dashboard device list stats online_count", "number", "number", "Online devices"},
+	{"Active Alarms", "inventory.omc.active_alarms", "dashboard alarm_stats.total", "number", "number", "Active alarms"},
+	{"Current Connected UEs", "inventory.omc.current_connected_ues", "dashboard device list stats current_ue_count", "number", "number", "Current connected UEs"},
+	{"Version", "inventory.omc.version", "buildinfo.ReleaseVersion", "string", "quote", "Version"},
 }
 
 var deviceInfoOptionalFieldSeeds = []inventoryFieldSeed{
@@ -489,27 +586,46 @@ var deviceInfoOptionalFieldSeeds = []inventoryFieldSeed{
 	{"Highest Severity Alarm Count", "device_info.highest_severity_alarm_count", "device_info.highest_severity_alarm_count", "number", "number", "Highest severity alarm count"},
 }
 
-var inventoryAliasesByObject = map[string]map[string]string{
-	"GNB": {
-		"Cell Name": "gNB Name", "ECI": "NCI", "Earfcn": "NR-ARFCN", "MME Status": "AMF Status",
-		"eNB ID": "gNB ID", "Subframe Assignment": "Slot Assignment", "Special Subframe Patterns": "Special Slot Patterns",
-	},
-	"GSM": {
-		"Cell Name": "BTS Name", "ECI": "CGI", "PCI": "BSIC", "Earfcn": "BCCH ARFCN", "MME Status": "BSC Status",
-		"eNB ID": "BTS ID", "Subframe Assignment": "Channel Assignment", "Special Subframe Patterns": "Channel Pattern",
-	},
-}
-
 func inventoryField(objectCode string, index int, seed inventoryFieldSeed) FieldDefinition {
-	outputAlias := seed.outputAlias
-	if aliases := inventoryAliasesByObject[objectCode]; aliases != nil {
-		if alias, ok := aliases[outputAlias]; ok {
-			outputAlias = alias
-		}
-	}
-	definition := field(DomainInventory, objectCode, outputAlias, seed.systemField, seed.source, seed.dataType, seed.renderer, seed.cnName)
+	definition := field(DomainInventory, objectCode, seed.outputAlias, seed.systemField, seed.source, seed.dataType, seed.renderer, seed.cnName)
 	definition.Key = strings.ToLower(string(DomainInventory) + "." + objectCode + "." + strconv.Itoa(index+1))
 	return definition
+}
+
+func inventoryFieldConfig(definition FieldDefinition) InventoryFieldConfig {
+	return InventoryFieldConfig{
+		Key:         definition.Key,
+		OutputAlias: definition.OutputAlias,
+		SystemField: definition.SystemField,
+		Source:      definition.Source,
+		DataType:    definition.DataType,
+		Renderer:    definition.Renderer,
+		Enabled:     true,
+	}
+}
+
+func inventoryFieldConfigsForObject(objectCode string) []InventoryFieldConfig {
+	seeds := inventoryFieldSeedsForObject(objectCode)
+	fields := make([]InventoryFieldConfig, 0, len(seeds))
+	for index, seed := range seeds {
+		fields = append(fields, inventoryFieldConfig(inventoryField(objectCode, index, seed)))
+	}
+	return fields
+}
+
+func inventoryFieldSeedsForObject(objectCode string) []inventoryFieldSeed {
+	switch strings.ToUpper(strings.TrimSpace(objectCode)) {
+	case "ENB":
+		return enbInventoryFieldSeeds
+	case "GNB":
+		return gnbInventoryFieldSeeds
+	case "GSM":
+		return gsmInventoryFieldSeeds
+	case "OMC":
+		return omcInventoryFieldSeeds
+	default:
+		return nil
+	}
 }
 
 func optionalDeviceInfoFieldByKey(domain Domain, objectCode, key string) (FieldDefinition, bool) {
@@ -535,6 +651,9 @@ func optionalDeviceInfoFieldFromColumn(domain Domain, objectCode, column, dbType
 	}
 	for _, seed := range deviceInfoOptionalFieldSeeds {
 		if strings.EqualFold(seed.systemField, "device_info."+column) {
+			if domain == DomainInventory && strings.EqualFold(objectCode, "GNB") && column == "mme_status" {
+				return field(domain, objectCode, "AMF Status", seed.systemField, "device_info.mme_status (NR normalized AMF status)", seed.dataType, seed.renderer, "AMF status"), true
+			}
 			return field(domain, objectCode, seed.outputAlias, seed.systemField, seed.source, seed.dataType, seed.renderer, seed.cnName), true
 		}
 	}
@@ -760,18 +879,11 @@ func defaultFields() []FieldDefinition {
 		field(DomainLOG, "operation_fix", "Op Start Time", "log.op_start_time", "sys_oper_logs.created_at", "datetime", "yyyy-MM-dd HH:mm:ss", "Operation start time"),
 		field(DomainLOG, "operation_fix", "Op End Time", "log.op_end_time", "sys_oper_logs.created_at + cost_ms", "datetime", "yyyy-MM-dd HH:mm:ss", "Operation end time"),
 	}
-	for _, objectCode := range []string{"ENB", "GNB", "GSM"} {
-		for index, seed := range stationInventoryFieldSeeds {
+	for _, objectCode := range []string{"ENB", "GNB", "GSM", "OMC"} {
+		for index, seed := range inventoryFieldSeedsForObject(objectCode) {
 			fields = append(fields, inventoryField(objectCode, index, seed))
 		}
 	}
-	fields = append(fields,
-		field(DomainInventory, "OMC", "eNB online", "inventory.omc.enb_online", "devices.is_online aggregate", "number", "number", "eNB online"),
-		field(DomainInventory, "OMC", "eNB active", "inventory.omc.enb_active", "device_info.op_state / lifecycle aggregate", "number", "number", "eNB active"),
-		field(DomainInventory, "OMC", "MME status", "inventory.omc.mme_status", "device_info.mme_status aggregate", "string", "quote", "MME status"),
-		field(DomainInventory, "OMC", "UE Count", "inventory.omc.ue_count", "SUM(device_info.ue_count)", "number", "number", "UE count"),
-		field(DomainInventory, "OMC", "Version", "inventory.omc.version", "buildinfo.ReleaseVersion", "string", "quote", "Version"),
-	)
 	fields = appendLegacyCMFields(fields)
 	return appendLegacyPMFields(fields)
 }
