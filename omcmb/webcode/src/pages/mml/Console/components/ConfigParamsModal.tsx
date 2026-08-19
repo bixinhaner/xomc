@@ -293,6 +293,14 @@ export default function ConfigParamsModal({
     onConfirmAndExecute(buildRequest());
   };
 
+  const handleModeChange = (nextMode: OperationMode): void => {
+    if (nextMode === 'standard' && !command && onGotoCommand) {
+      onGotoCommand();
+      return;
+    }
+    setMode(nextMode);
+  };
+
   const standardBody = !command ? (
     <Empty
       image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -553,7 +561,7 @@ export default function ConfigParamsModal({
       {/* 标签页内容区固定高度，超出竖向滚动 → 弹框总高不随命令/标签页变化（§需求 1/2）。 */}
       <Tabs
         activeKey={mode}
-        onChange={(k) => setMode(k as OperationMode)}
+        onChange={(k) => handleModeChange(k as OperationMode)}
         items={[
           {
             key: 'standard',

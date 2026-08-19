@@ -342,6 +342,36 @@ func TestBuildGroupTreeFilteredByDevicePrunesCommandWithNoSupportedSubFields(t *
 	assert.Empty(t, got, "command whose actual sub_fields are all filtered out must be hidden")
 }
 
+func TestBuildGroupTreeFilteredPrunesMODWithOnlyReadOnlySubFields(t *testing.T) {
+	groupID := uuid.New()
+	command := GroupTreeCommand{ID: uuid.New(), OperationType: "MOD"}
+	command.SetTargetPathsRaw([]byte(`["Device.Capabilities.BandsSupported","Device.Capabilities.DuplexMode"]`))
+	paramModelID := uuid.New()
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandEnriched[command.ID] = []MMLCommandSubFieldEnriched{
+		{Tr069Path: "Device.Capabilities.BandsSupported", AccessType: AccessTypeReadOnly},
+		{Tr069Path: "Device.Capabilities.DuplexMode", AccessType: AccessTypeReadOnly},
+	}
+
+	svc := NewConsoleService(&fakeGroupTreeRepo{tree: []GroupTreeNode{
+		{ID: groupID, GroupCode: "ROOT", Commands: []GroupTreeCommand{command}},
+	}}, sfRepo, newFakeCommandRepo(), nil)
+	svc.SetSupportedPathsRepository(SupportedPathsResolverFunc(func(context.Context, string) (*SupportedSet, error) {
+		return &SupportedSet{
+			ParamModelID:    &paramModelID,
+			ProductResolved: true,
+			Paths: map[string]struct{}{
+				"Device.Capabilities.BandsSupported": {},
+				"Device.Capabilities.DuplexMode":     {},
+			},
+		}, nil
+	}))
+
+	got, err := svc.BuildGroupTreeFiltered(context.Background(), "", "zh-CN", "FAP/BAIBLQ/SC")
+	require.NoError(t, err)
+	assert.Empty(t, got, "MOD command with no writable sub-field must not be shown")
+}
+
 func TestBuildFlatGroupTreeFilteredPrefersProductClassOverDevice(t *testing.T) {
 	productOnly := FlatCommand{ID: uuid.New(), Name: "LST PRODUCT", ObjectPath: []string{"Device.Product"}}
 	deviceOnly := FlatCommand{ID: uuid.New(), Name: "LST DEVICE", ObjectPath: []string{"Device.Device"}}
