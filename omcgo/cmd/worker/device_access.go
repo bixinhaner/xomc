@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/deviceaccess"
 	"go.uber.org/zap"
 )
@@ -24,27 +23,11 @@ func startDeviceAccessWorkers(w *workerInfra) error {
 		policies,
 	)
 	coordinator.SetRuntimeSettingsReader(deviceaccess.NewPgRuntimeSettingsStore(w.PgPool))
-	if w.ProductRegistry == nil {
-		return fmt.Errorf("start device access workers: product registry is required")
-	}
-	paramCache := parammodel.Cache(parammodel.NopCache{})
-	if w.Redis != nil {
-		paramCache = parammodel.NewRedisCache(w.Redis)
-	}
-	paramRegistry := parammodel.NewRegistry(
-		parammodel.NewPgRepository(w.PgPool),
-		paramCache,
-		w.ProductRegistry,
-		parammodel.NewRegistryMetrics(w.MetricsReg),
-		logger,
-	)
-	refreshCtx, refreshCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer refreshCancel()
-	if err := paramRegistry.Refresh(refreshCtx); err != nil {
-		return fmt.Errorf("refresh device access parameter registry: %w", err)
+	if w.ProductRegistry == nil || w.ParamRegistry == nil {
+		return fmt.Errorf("start device access workers: product and parameter registries are required")
 	}
 	probes := deviceaccess.NewGPSProbeService(
-		deviceaccess.NewProductGPSPathResolver(w.ProductRegistry, paramRegistry),
+		deviceaccess.NewProductGPSPathResolver(w.ProductRegistry, w.ParamRegistry),
 		w.TaskService,
 		repository,
 		coordinator,

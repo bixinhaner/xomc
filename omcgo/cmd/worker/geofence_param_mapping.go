@@ -69,6 +69,11 @@ func newWorkerParamRegistry(
 	products *product.Registry,
 	logger *zap.Logger,
 ) *parammodel.Registry {
+	// worker 内所有 ParamModel 消费者共享同一实例。除避免重复缓存外，更重要的是
+	// NewRegistryMetrics 使用 MustRegister，同一 Prometheus Registry 上构造第二套会 panic。
+	if w.ParamRegistry != nil {
+		return w.ParamRegistry
+	}
 	var cache parammodel.Cache = parammodel.NopCache{}
 	if w.Redis != nil {
 		cache = parammodel.NewRedisCache(w.Redis)
@@ -84,5 +89,6 @@ func newWorkerParamRegistry(
 		logger.Warn("geofence ParamRegistry refresh failed; control mapping will fail closed",
 			zap.Error(err))
 	}
+	w.ParamRegistry = registry
 	return registry
 }
