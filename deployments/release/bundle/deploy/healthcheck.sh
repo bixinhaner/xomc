@@ -260,7 +260,7 @@ check_web_https_file_entry() {
       check "$(health_text 'web HTTPS 文件入口已加载' 'web HTTPS file entry loaded')" web_https_file_entry_loaded
     else
       check "$(health_text 'HTTPS 文件上传入口 TLS 可达 ACS (:8443)' 'HTTPS file upload TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileUploadService 405
-      check "$(health_text 'HTTPS 文件下载入口 TLS 可达 ACS (:8443)' 'HTTPS file download TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileDownloadService/__healthcheck__/missing 404
+      check "$(health_text 'HTTPS 文件下载入口 TLS 可达 ACS (:8443)' 'HTTPS file download TLS reaches ACS (:8443)')" https_file_entry_status_is /smallcell/FileDownloadService/health-check/missing 404
     fi
   else
     check "$(health_text 'web HTTPS 文件入口证书已安装' 'web HTTPS file-entry certificate installed')" web_https_file_entry_has_cert
@@ -415,7 +415,7 @@ check "ACS candidate SYN backlog" container_sysctl_equals acs-candidate net.ipv4
 
 if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "$SKIP_MONITORING" = 0 ]; then
   echo "== $(health_text 'docker compose 监控容器' 'Docker Compose monitoring containers') =="
-  for svc in prometheus alertmanager grafana loki tempo otelcol nats-exporter nginx-exporter node-exporter cadvisor; do
+  for svc in prometheus alertmanager grafana loki loki-size-retention tempo otelcol nats-exporter nginx-exporter node-exporter cadvisor; do
     check "$svc 容器 running" container_running "$svc"
   done
   # otelcol-contrib 是 distroless 镜像，不能假设容器内有 shell/curl/wget。

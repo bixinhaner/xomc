@@ -180,6 +180,39 @@ services:
     networks:
       - omcgo-net
 
+  loki-size-retention:
+    image: ${IMAGE_LOKI}
+    restart: unless-stopped
+    logging: *omc-json-log
+    environment:
+      LOKI_URL: http://loki:3100
+      LOKI_MAX_BYTES: "${LOKI_MAX_BYTES:-10737418240}"
+      LOKI_RETENTION_SECONDS: "${LOKI_RETENTION_SECONDS:-604800}"
+      LOKI_CHECK_INTERVAL_SECONDS: "${LOKI_CHECK_INTERVAL_SECONDS:-600}"
+      LOKI_DELETE_COOLDOWN_SECONDS: "${LOKI_DELETE_COOLDOWN_SECONDS:-7200}"
+      LOKI_TIMEZONE_FILE: /var/lib/omcgo/timezone/system-timezone
+    volumes:
+      - lokidata:/loki
+      - omcgo-timezone:/var/lib/omcgo/timezone:ro
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+      - /etc/localtime:/etc/localtime:ro
+      - ./monitoring/loki/loki-size-retention.sh:/usr/local/bin/loki-size-retention.sh:ro
+    entrypoint: ["sh"]
+    command: ["/usr/local/bin/loki-size-retention.sh"]
+    depends_on:
+      loki:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 64m
+        reservations:
+          cpus: "0.05"
+          memory: 16m
+    networks:
+      - omcgo-net
+
   # ── Trace 栈：OpenTelemetry Collector + Grafana Tempo（T-0155）──────────
   # 数据流：app/acs/worker (OTel SDK, OTLP gRPC) → otelcol:4317 → tempo:4317
   #         同时 otelcol filelog 采集 /run/logs → loki，pg/redisreceiver → prometheus

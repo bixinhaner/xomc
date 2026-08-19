@@ -235,6 +235,7 @@ services:
       - /opt/omc/etc/app.prod.yaml:/etc/omcgo/app.prod.yaml:ro
       # 日志卷（promtail / otelcol filelog 同样路径采集）
       - /opt/omc/run/logs/app:/run/logs/app
+      - omcgo-timezone:/var/lib/omcgo/timezone
       # 三库导入XML重构 Phase 2(D1/D2):整个 data 目录外置到宿主 /opt/omc/data,
       # bind-mount(RW)进容器;镜像不再 COPY data。install.sh 首次播种随包 builtin 基线,
       # 升级"现网赢、新版补充"反向合并 —— 运维上传的自定义 XML + .custom sidecar 不丢。
@@ -472,3 +473,6 @@ services:
         condition: service_healthy
     networks:
       - omcgo-net
+
+volumes:
+  omcgo-timezone:

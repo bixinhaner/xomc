@@ -1639,7 +1639,7 @@ done
 if [ "$SKIP_MONITORING" = 0 ]; then
   log "刷新版本目录 bind mount（仅监控无状态容器，保留数据卷）..." "Refreshing release bind mounts (monitoring stateless containers only; data volumes preserved) ..."
   "${DC[@]}" up --pull never -d --force-recreate --no-deps prometheus alertmanager grafana loki otelcol tempo \
-    nats-exporter nginx-exporter node-exporter cadvisor
+    nats-exporter nginx-exporter node-exporter cadvisor loki-size-retention
 fi
 
 # 启动窗口（轻量 --startup）未通过时，可选地以完整 healthcheck 做最终复核。
