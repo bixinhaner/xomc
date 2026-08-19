@@ -71,6 +71,20 @@ func TestAssembleMMEPool_MLNPath(t *testing.T) {
 	assert.Equal(t, "172.24.224.88", entries[0].IP)
 }
 
+func TestAssembleMMEPool_XCOMPoolStatusFallback(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool1List", ParameterValue: "172.24.224.88"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool1Status", ParameterValue: "1"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool2List", ParameterValue: "172.24.224.91"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool2Status", ParameterValue: "0"},
+	}
+
+	assert.Equal(t, []MMEEntry{
+		{Index: 1, IP: "172.24.224.88", Status: "active"},
+		{Index: 2, IP: "172.24.224.91", Status: "inactive"},
+	}, AssembleMMEPool(params))
+}
+
 func TestAssembleLicenseDetail(t *testing.T) {
 	params := []model.DeviceParameter{
 		{ParameterPath: "Device.DeviceInfo.X_COM_LICENSE.LicenseCode", ParameterValue: "ABC-123"},

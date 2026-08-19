@@ -72,14 +72,14 @@ func (s CellStatus) String() string {
 
 // ===== MME/AMF 连接状态 (MMEStatus) =====
 
-// MMEStatus 表示 MME/AMF 池连接状态。
-// 从 TR069 参数 MmePoolConfigParam.*.MME1Status 计算。
+// MMEStatus 表示设备级 MME/AMF 连接状态。
+// LTE 从真实 MME 池实例状态汇总，任一实例连接即为 connected。
 type MMEStatus string
 
 const (
-	// MMEStatusConnected 2+ MME 连接正常
+	// MMEStatusConnected 至少一个 MME/AMF 连接正常
 	MMEStatusConnected MMEStatus = "connected"
-	// MMEStatusPartial 仅 1 个 MME 连接
+	// MMEStatusPartial 历史兼容值；新 LTE 汇总不再生成
 	MMEStatusPartial MMEStatus = "partial"
 	// MMEStatusDisconnected 无 MME 连接
 	MMEStatusDisconnected MMEStatus = "disconnected"

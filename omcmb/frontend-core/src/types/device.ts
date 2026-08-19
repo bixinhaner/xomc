@@ -116,6 +116,13 @@ export interface BatchPreRegisterResponse {
   errors: BatchPreRegisterRowResult[];
 }
 
+export interface MMEPoolEntry {
+  index: number;
+  ip: string;
+  status: string;
+  plmnId: string;
+}
+
 export interface Device {
   id: string;
   sn: string;
@@ -229,6 +236,7 @@ export interface Device {
   /** 当前由 OMC 持有的设备管控状态；恢复核验成功后为空，历史仍可查询。 */
   controlSummary?: DeviceControlSummary | null;
   mmeStatus: string;
+  mmePool?: MMEPoolEntry[];
   amfStatus: string;
   rfStatus: string;
   pmReportStatus: string;

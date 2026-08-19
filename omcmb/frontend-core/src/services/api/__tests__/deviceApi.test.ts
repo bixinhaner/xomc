@@ -259,6 +259,31 @@ describe('deviceApi.getList — filter → query 映射', () => {
     expect(gsm.bscLinkStatus).toBe('connected');
   });
 
+  it('映射设备列表的 MME 池明细', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        items: [backendDevice({
+          technology: 'lte',
+          mme_status: 'connected',
+          mme_pool: [
+            { index: 1, ip: '172.24.224.88', status: 'active', plmn_id: '46068' },
+            { index: 2, ip: '172.24.224.91', status: 'inactive', plmn_id: '46000' },
+          ],
+        })],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
+      },
+    });
+
+    const out = await deviceApi.getList({ page: 1, pageSize: 20 });
+    expect(out.items[0].mmePool).toEqual([
+      { index: 1, ip: '172.24.224.88', status: 'active', plmnId: '46068' },
+      { index: 2, ip: '172.24.224.91', status: 'inactive', plmnId: '46000' },
+    ]);
+  });
+
   it('BackendDevice source_type=auto 映射为 Device.sourceType', async () => {
     getMock.mockResolvedValue({
       data: {

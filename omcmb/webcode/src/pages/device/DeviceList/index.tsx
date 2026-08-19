@@ -62,6 +62,7 @@ import { formatDeviceRadioField, formatDeviceRFStatus } from './deviceRadioField
 import {
   amfStatusMessageIdForDevice,
   bscLinkStatusMessageIdForDevice,
+  mmePoolSummaryForDevice,
   mmeStatusMessageIdForDevice,
 } from './deviceCoreNetworkStatus';
 import { shouldShowLocationSyncIndicator } from './deviceGpsSyncIndicator';
@@ -2022,7 +2023,14 @@ export default function DeviceList() {
         group: 'common',
         render: (_val, record) => {
           const messageId = mmeStatusMessageIdForDevice(record);
-          return messageId ? t(messageId) : '-';
+          if (!messageId) return '-';
+          const summary = mmePoolSummaryForDevice(record);
+          return summary.total > 0
+            ? `${t(messageId)} (${t('device.mmeConnectionRatio', {
+                connected: summary.connectedCount,
+                total: summary.total,
+              })})`
+            : t(messageId);
         },
       },
       {

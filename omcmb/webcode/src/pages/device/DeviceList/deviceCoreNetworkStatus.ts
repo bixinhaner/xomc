@@ -1,14 +1,62 @@
 import type { Device } from '@core/types/device';
 import { connectionStatusMessageId, normalizeConnectionStatus } from '@core/utils/connectionStatus';
 
+export interface MMEPoolSummary {
+  status: string;
+  connectedCount: number;
+  total: number;
+}
+
+const GATEWAY_MME_STATUS_PRODUCTS = new Set(['ENB_DEFAULT_098', 'ENB_DEFAULT_181']);
+
+export function mmePoolSummaryForDevice(device: Device): MMEPoolSummary {
+  if (device.networkType !== 'eNB') {
+    return { status: '', connectedCount: 0, total: 0 };
+  }
+
+  if (GATEWAY_MME_STATUS_PRODUCTS.has((device.productClass ?? '').trim().toUpperCase())) {
+    return {
+      status: normalizeConnectionStatus(device.mmeStatus, true),
+      connectedCount: 0,
+      total: 0,
+    };
+  }
+
+  const observed = (device.mmePool || []).filter((entry) => entry.status.trim() !== '');
+  if (observed.length === 0) {
+    return {
+      status: normalizeConnectionStatus(device.mmeStatus, true),
+      connectedCount: 0,
+      total: 0,
+    };
+  }
+
+  const connectedCount = observed.filter((entry) => {
+    switch (entry.status.trim().toLowerCase()) {
+      case '1':
+      case 'true':
+      case 'connected':
+      case 'active':
+      case 'up':
+      case 'on':
+        return true;
+      default:
+        return false;
+    }
+  }).length;
+  return {
+    status: connectedCount > 0 ? 'connected' : 'disconnected',
+    connectedCount,
+    total: observed.length,
+  };
+}
+
 export function mmeStatusForDevice(device: Device): string {
-  if (device.networkType !== 'eNB') return '';
-  // 兼容升级前已落库的 partial：设备级口径是任一 MME 已连接即 connected。
-  return normalizeConnectionStatus(device.mmeStatus, true);
+  return mmePoolSummaryForDevice(device).status;
 }
 
 export function mmeStatusMessageIdForDevice(device: Device): string {
-  return device.networkType === 'eNB' ? connectionStatusMessageId(device.mmeStatus, true) : '';
+  return connectionStatusMessageId(mmePoolSummaryForDevice(device).status, true);
 }
 
 export function amfStatusForDevice(device: Device): string {

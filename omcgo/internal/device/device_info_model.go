@@ -80,8 +80,7 @@ type DeviceInfo struct {
 	// 取代历史 model.DeriveOpStateActivated(first_online_time) 的一次性持久语义。
 	OpState string `json:"op_state"`
 
-	// MMEStatus MME/AMF 连接状态
-	// 可能值: MMEStatusConnected, MMEStatusPartial, MMEStatusDisconnected
+	// MMEStatus MME/AMF 连接状态；新值为 connected/disconnected，partial 仅历史兼容。
 	// 计算逻辑: CalcMMEStatus()
 	MMEStatus string `json:"mme_status"`
 

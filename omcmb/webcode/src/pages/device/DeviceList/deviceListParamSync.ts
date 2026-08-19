@@ -9,6 +9,8 @@ interface DeviceListSyncParam {
   paths: string[];
 }
 
+const GATEWAY_MME_STATUS_PRODUCTS = new Set(['ENB_DEFAULT_098', 'ENB_DEFAULT_181']);
+
 const DEVICE_LIST_SYNC_PARAMS: DeviceListSyncParam[] = [
   { key: 'deviceModel', scope: 'common', paths: ['Device.DeviceInfo.ModelName'] },
   { key: 'softwareVersion', scope: 'common', paths: ['Device.DeviceInfo.SoftwareVersion'] },
@@ -27,9 +29,11 @@ const DEVICE_LIST_SYNC_PARAMS: DeviceListSyncParam[] = [
     key: 'mmeStatus',
     scope: 'eNB',
     paths: [
-      'Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeStatus',
+      'Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool1Status',
+      'Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool2Status',
       'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.MmePoolConfigParam.{i}.MME1Status',
       'Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}.MME1Status',
+      'Device.Services.FAPService.MmePoolConfigParam.{i}.MMEStatus',
     ],
   },
   { key: 'amfStatus', scope: 'gNB', paths: ['Device.Services.FAPService.1.AmfsStatus'] },
@@ -167,5 +171,8 @@ export function getDeviceListParamSyncPaths(device: Device): string[] {
   const paths = DEVICE_LIST_SYNC_PARAMS
     .filter((param) => paramAppliesToDevice(param, device))
     .flatMap((param) => param.paths);
+  if (device.networkType === 'eNB' && GATEWAY_MME_STATUS_PRODUCTS.has((device.productClass ?? '').trim().toUpperCase())) {
+    paths.push('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeStatus');
+  }
   return Array.from(new Set(paths));
 }

@@ -90,6 +90,14 @@ function generateDevice(index: number): Device {
   const earfcn = String(Math.floor(Math.random() * 65535));
   const longitude = randomOffset(city.lng, 0.5);
   const latitude = randomOffset(city.lat, 0.5);
+  const mmePool = isLTE
+    ? Array.from({ length: 2 + (index % 3) }, (_, mmeIndex) => ({
+        index: mmeIndex + 1,
+        ip: `10.${20 + mmeIndex}.${index % 255}.${mmeIndex + 1}`,
+        status: mmeIndex === 0 && index % 4 !== 3 ? 'active' : 'inactive',
+        plmnId: '46000',
+      }))
+    : [];
 
   return {
     id: `dev-${String(index + 1).padStart(4, '0')}`,
@@ -194,21 +202,8 @@ function generateDevice(index: number): Device {
       triggeredAt: '2026-08-13T10:15:00+08:00',
       completedAt: '2026-08-13T10:15:08+08:00',
     } : null,
-    mmeStatus: (() => {
-      if (!isLTE) return '';
-      // 多 MME 场景: 70% JSON 数组, 15% 旧格式 "1"/"0", 15% 空
-      const r = Math.random();
-      if (r < 0.7) {
-        const count = Math.floor(Math.random() * 3) + 2; // 2-4 MMEs
-        return JSON.stringify(Array.from({ length: count }, (_, i) => ({
-          mmeIp: `10.${20 + i}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`,
-          status: Math.random() > 0.3 ? '1' : '0',
-          plmnId: '46000',
-        })));
-      }
-      if (r < 0.85) return pickRandom(['1', '0']);
-      return '';
-    })(),
+    mmeStatus: isLTE && mmePool.some((entry) => entry.status === 'active') ? 'connected' : isLTE ? 'disconnected' : '',
+    mmePool,
     amfStatus: (() => {
       if (!isNR) return '';
       // 多 AMF 场景: 70% JSON 数组, 15% 旧格式, 15% 空

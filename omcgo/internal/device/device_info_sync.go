@@ -947,7 +947,7 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	// Computed quick-query columns from multiple parameters
 	fields["cell_status"] = CalcCellStatus(paramValues)
 	fields["op_state"] = CalcOpState(paramValues)
-	fields["mme_status"] = CalcCoreNetworkStatus(paramValues, tech)
+	fields["mme_status"] = CalcCoreNetworkStatusForProduct(paramValues, tech, productClass)
 	fields["sync_status"] = CalcSyncStatus(paramValues)
 	rfProjection := CalcRFStatusFromDeviceParameters(params, tech, productClass)
 	fields["rf_status"] = rfProjection.Status

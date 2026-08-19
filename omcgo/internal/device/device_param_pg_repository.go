@@ -379,6 +379,46 @@ func (r *PgDeviceParameterRepository) GetByGroup(ctx context.Context, deviceID u
 	return params, nil
 }
 
+// GetByDeviceIDsAndGroup loads one functional parameter group for a page of
+// devices in a single query. Device-list decorations use this to avoid N+1 reads.
+func (r *PgDeviceParameterRepository) GetByDeviceIDsAndGroup(
+	ctx context.Context,
+	deviceIDs []uuid.UUID,
+	group string,
+) (map[uuid.UUID][]model.DeviceParameter, error) {
+	result := make(map[uuid.UUID][]model.DeviceParameter, len(deviceIDs))
+	if len(deviceIDs) == 0 {
+		return result, nil
+	}
+
+	query, args, err := storage.Psql.Select(paramColumns...).
+		From("device_parameters").
+		Where(sq.Eq{"device_id": deviceIDs, "param_group": group}).
+		OrderBy("device_id ASC", "parameter_path ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build batch group query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query batch group: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		param, scanErr := scanParam(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan batch group parameter: %w", scanErr)
+		}
+		result[param.DeviceID] = append(result[param.DeviceID], param)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate batch group parameters: %w", err)
+	}
+	return result, nil
+}
+
 func (r *PgDeviceParameterRepository) GetByFAPInstance(ctx context.Context, deviceID uuid.UUID, instance int) ([]model.DeviceParameter, error) {
 	query, args, err := storage.Psql.Select(paramColumns...).
 		From("device_parameters").

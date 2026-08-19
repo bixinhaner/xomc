@@ -222,32 +222,43 @@ func TestCalcMMEStatus(t *testing.T) {
 		want   string
 	}{
 		{
-			name: "lte gateway mme status connected",
+			name: "gateway mme status is not an MME connection source",
 			params: map[string]string{
 				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "connected",
 			},
-			want: "connected",
+			want: "",
 		},
 		{
-			name: "lte gateway mme status true",
+			name: "connected indexed MME overrides unrelated gateway value",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "true",
+				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus":                   "disconnected",
+				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
+				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.2.MME1Status": "0",
 			},
 			want: "connected",
 		},
 		{
-			name: "lte gateway mme status disconnected",
+			name: "inactive indexed MMEs ignore unrelated connected gateway value",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "disconnected",
+				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus":               "connected",
+				"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status": "0",
+				"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.2.MME1Status": "0",
 			},
 			want: "disconnected",
 		},
 		{
-			name: "lte gateway mme status has priority over legacy pool",
+			name: "X_COM pool status is connected when either pool is active",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus":                   "disconnected",
-				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
-				"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.2.MME1Status": "1",
+				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool1Status": "0",
+				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool2Status": "1",
+			},
+			want: "connected",
+		},
+		{
+			name: "X_COM pool status is disconnected when all pools are inactive",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool1Status": "0",
+				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool2Status": "0",
 			},
 			want: "disconnected",
 		},
@@ -327,17 +338,45 @@ func TestCalcMMEStatus(t *testing.T) {
 	}
 }
 
-func TestCalcMMEStatus_GatewayPartialNormalizesToConnected(t *testing.T) {
+func TestCalcMMEStatus_GatewayPartialIsIgnoredForPoolProducts(t *testing.T) {
 	params := map[string]string{
 		"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "partial",
 	}
 
-	assert.Equal(t, "connected", CalcMMEStatus(params))
+	assert.Empty(t, CalcMMEStatus(params))
+}
+
+func TestCalcMMEStatusForProduct_UsesGatewayForDefaultProducts(t *testing.T) {
+	params := map[string]string{
+		"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "connected",
+	}
+
+	assert.Equal(t, "connected", CalcMMEStatusForProduct(params, "ENB_DEFAULT_098"))
+	assert.Equal(t, "connected", CalcMMEStatusForProduct(params, "ENB_DEFAULT_181"))
+	assert.Empty(t, CalcMMEStatusForProduct(params, "BLQ"))
+}
+
+func TestCalcMMEStatusForProduct_GatewayTakesPriorityAndSupportsPartial(t *testing.T) {
+	params := map[string]string{
+		"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus":                   "partial",
+		"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "0",
+	}
+
+	assert.Equal(t, "connected", CalcMMEStatusForProduct(params, "ENB_DEFAULT_098"))
+}
+
+func TestCalcMMEStatusForProduct_FallsBackToPoolWhenGatewayIsEmpty(t *testing.T) {
+	params := map[string]string{
+		"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus":                   " ",
+		"Device.Services.FAPService.1.CellConfig.LTE.EPC.MmePoolConfigParam.1.MME1Status": "1",
+	}
+
+	assert.Equal(t, "connected", CalcMMEStatusForProduct(params, "ENB_DEFAULT_181"))
 }
 
 func TestCalcCoreNetworkStatusByTechnology(t *testing.T) {
 	params := map[string]string{
-		"Device.Services.FAPService.1.FAPControl.LTE.Gateway.MmeStatus": "connected",
+		"Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status": "1",
 		amfsStatusPath: "0.0.0.0=0;0.0.0.1=1",
 	}
 

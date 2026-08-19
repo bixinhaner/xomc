@@ -1427,7 +1427,9 @@ func (s *DeviceService) ListDevicesWithInfo(ctx context.Context, filter DeviceFi
 		for i, d := range result.Items {
 			items[i] = DeviceWithInfo{Device: d}
 		}
-		return model.NewListResponse(items, result.Total, result.Page, result.PageSize), nil
+		fallback := model.NewListResponse(items, result.Total, result.Page, result.PageSize)
+		s.decorateListMMEPools(ctx, fallback)
+		return fallback, nil
 	}
 	var (
 		stats    *DeviceListStats
@@ -1450,6 +1452,7 @@ func (s *DeviceService) ListDevicesWithInfo(ctx context.Context, filter DeviceFi
 	if statsErr == nil {
 		result.Stats = stats
 	}
+	s.decorateListMMEPools(ctx, result)
 	if s.controlSummaryReader != nil && len(result.Items) > 0 {
 		deviceIDs := make([]uuid.UUID, 0, len(result.Items))
 		for index := range result.Items {
@@ -1475,6 +1478,52 @@ func (s *DeviceService) ListDevicesWithInfo(ctx context.Context, filter DeviceFi
 		}
 	}
 	return result, nil
+}
+
+func (s *DeviceService) decorateListMMEPools(ctx context.Context, result *model.ListResponse[DeviceWithInfo]) {
+	reader, ok := s.paramRepo.(DeviceParameterGroupBatchReader)
+	if !ok || result == nil || len(result.Items) == 0 {
+		return
+	}
+
+	deviceIDs := make([]uuid.UUID, 0, len(result.Items))
+	for index := range result.Items {
+		if result.Items[index].Technology == model.TechLTE {
+			deviceIDs = append(deviceIDs, result.Items[index].ID)
+		}
+	}
+	if len(deviceIDs) == 0 {
+		return
+	}
+
+	paramsByDevice, err := reader.GetByDeviceIDsAndGroup(ctx, deviceIDs, "mme_pool")
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("list MME pool parameters failed; returning stored device status",
+				zap.Error(err),
+				zap.Int("device_count", len(deviceIDs)))
+		}
+		return
+	}
+
+	for index := range result.Items {
+		item := &result.Items[index]
+		if item.Technology != model.TechLTE {
+			continue
+		}
+		params, exists := paramsByDevice[item.ID]
+		if !exists {
+			continue
+		}
+		item.MMEPool = AssembleMMEPool(params)
+		paramValues := make(map[string]string, len(params))
+		for _, param := range params {
+			paramValues[param.ParameterPath] = param.ParameterValue
+		}
+		if status := CalcMMEStatusForProduct(paramValues, item.ProductClass); status != "" {
+			item.MMEStatus = &status
+		}
+	}
 }
 
 // GetDeviceWithInfo retrieves a single device joined with extended info, for the
@@ -2409,7 +2458,7 @@ func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID u
 		for _, param := range allParams {
 			paramValues[param.ParameterPath] = param.ParameterValue
 		}
-		if mmeStatus := CalcMMEStatus(paramValues); mmeStatus != "" {
+		if mmeStatus := CalcMMEStatusForProduct(paramValues, device.ProductClass); mmeStatus != "" {
 			if result.Info == nil {
 				result.Info = &DeviceInfo{DeviceID: deviceID}
 			}

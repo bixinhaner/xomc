@@ -87,6 +87,9 @@ type DeviceWithInfo struct {
 	// MMEStatus MME 连接状态
 	MMEStatus *string `json:"mme_status"`
 
+	// MMEPool 当前页 LTE 设备的 MME 池明细，由 device_parameters 批量装配。
+	MMEPool []MMEEntry `json:"mme_pool,omitempty"`
+
 	// SyncStatus 时钟同步源状态
 	SyncStatus *string `json:"sync_status"`
 

@@ -162,11 +162,23 @@ describe('getDeviceListParamSyncPaths', () => {
     const ltePaths = getDeviceListParamSyncPaths(baseDevice);
     const nrPaths = getDeviceListParamSyncPaths({ ...baseDevice, networkType: 'gNB' });
 
-    expect(ltePaths).toContain('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeStatus');
+    expect(ltePaths).toContain('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool1Status');
+    expect(ltePaths).toContain('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool2Status');
     expect(ltePaths).toContain('Device.Services.FAPService.{i}.CellConfig.LTE.EPC.MmePoolConfigParam.{i}.MME1Status');
     expect(ltePaths).toContain('Device.Services.FAPService.{i}.CellConfig.LTE.MmePoolConfigParam.{i}.MME1Status');
+    expect(ltePaths).toContain('Device.Services.FAPService.MmePoolConfigParam.{i}.MMEStatus');
+    expect(ltePaths).not.toContain('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeStatus');
     expect(ltePaths).not.toContain('Device.Services.FAPService.1.AmfsStatus');
     expect(nrPaths).toContain('Device.Services.FAPService.1.AmfsStatus');
-    expect(nrPaths).not.toContain('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeStatus');
+    expect(nrPaths).not.toContain('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.X_COM_MmePool.MmePool1Status');
+  });
+
+  it('ENB_DEFAULT_098/181 使用 Gateway.MmeStatus', () => {
+    for (const productClass of ['ENB_DEFAULT_098', 'ENB_DEFAULT_181']) {
+      const paths = getDeviceListParamSyncPaths({ ...baseDevice, productClass });
+      expect(paths).toContain('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeStatus');
+    }
+    expect(getDeviceListParamSyncPaths({ ...baseDevice, productClass: 'BLQ' }))
+      .not.toContain('Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.MmeStatus');
   });
 });
