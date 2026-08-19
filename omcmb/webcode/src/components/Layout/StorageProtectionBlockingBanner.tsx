@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Alert, Button } from 'antd';
 import { ExclamationCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -22,12 +22,6 @@ interface BlockingSummary {
   recoverPercent: string;
 }
 
-interface StorageProtectionBlockingBannerProps {
-  collapsed: boolean;
-  onCollapsedChange: (collapsed: boolean) => void;
-  onBlockedChange?: (blocked: boolean) => void;
-}
-
 function formatPercent(value: number | undefined, fallback: string) {
   if (value === undefined || !Number.isFinite(value)) return fallback;
   const percent = value <= 1 ? value * 100 : value;
@@ -46,6 +40,12 @@ function matchTarget(policy: StorageProtectionPolicy, targets: StorageProtection
   ));
 }
 
+function targetMatchesPolicy(policy: StorageProtectionPolicy, target: StorageProtectionTarget) {
+  return target.targetType === policy.targetType
+    && target.targetId === policy.targetId
+    && target.writeScopes.includes(policy.writeScope);
+}
+
 function targetLabel(target: StorageProtectionTarget | undefined, policy: StorageProtectionPolicy, fallback: string) {
   if (!target) return policy.targetId || fallback;
   const paths = target.protectedPaths.length > 0 ? target.protectedPaths : target.sourcePaths;
@@ -58,12 +58,22 @@ function buildStorageProtectionBlockingSummary(
   fallback: string,
 ): BlockingSummary | undefined {
   const enabledPolicies = policies.filter((item) => item.enabled);
-  const hasBlockedTarget = targets.some((target) => target.currentState === 'blocked');
-  const policy = enabledPolicies.find((item) => item.currentState === 'blocked')
-    ?? (hasBlockedTarget ? enabledPolicies[0] : undefined);
+  const blockedTargets = targets.filter((target) => target.currentState === 'blocked');
+  const blockedPolicy = enabledPolicies.find((item) => item.currentState === 'blocked');
+  const blockedTarget = blockedTargets.length > 0
+    ? blockedTargets.reduce((worst, current) => (
+      current.usedRatio > worst.usedRatio ? current : worst
+    ))
+    : undefined;
+  const policy = blockedTarget
+    ? enabledPolicies.find((item) => item.currentState === 'blocked' && targetMatchesPolicy(item, blockedTarget))
+      ?? enabledPolicies.find((item) => targetMatchesPolicy(item, blockedTarget))
+      ?? blockedPolicy
+      ?? enabledPolicies[0]
+    : blockedPolicy;
   if (!policy) return undefined;
 
-  const target = matchTarget(policy, targets);
+  const target = blockedTarget ?? matchTarget(policy, targets);
   return {
     policy,
     target,
@@ -74,11 +84,7 @@ function buildStorageProtectionBlockingSummary(
   };
 }
 
-export default function StorageProtectionBlockingBanner({
-  collapsed,
-  onCollapsedChange,
-  onBlockedChange,
-}: StorageProtectionBlockingBannerProps) {
+export default function StorageProtectionBlockingBanner() {
   const t = useT();
   const navigate = useNavigate();
   const openTab = useTabStore((s) => s.openTab);
@@ -91,15 +97,7 @@ export default function StorageProtectionBlockingBanner({
     [policies, targets, unavailable],
   );
 
-  useEffect(() => {
-    const blocked = summary !== undefined;
-    onBlockedChange?.(blocked);
-    if (!blocked) {
-      onCollapsedChange(false);
-    }
-  }, [summary, onBlockedChange, onCollapsedChange]);
-
-  if (!summary || collapsed) return null;
+  if (!summary) return null;
 
   const handleViewDetail = () => {
     openTab({
@@ -134,9 +132,6 @@ export default function StorageProtectionBlockingBanner({
           <div className={styles.actions}>
             <Button danger type="primary" size="small" onClick={handleViewDetail}>
               {t('system.storageProtection.globalBlock.viewDetail')}
-            </Button>
-            <Button size="small" onClick={() => onCollapsedChange(true)}>
-              {t('system.storageProtection.globalBlock.collapse')}
             </Button>
           </div>
         </div>

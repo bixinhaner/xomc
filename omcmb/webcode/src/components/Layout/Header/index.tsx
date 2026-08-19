@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Badge, Popover, Tooltip } from 'antd';
 import {
   BellOutlined,
-  ExclamationCircleOutlined,
   MenuOutlined,
   SunOutlined,
   MoonOutlined,
@@ -27,8 +26,6 @@ import styles from './Header.module.css';
 interface HeaderProps {
   agentVisible?: boolean;
   agentOpen?: boolean;
-  storageProtectionBlocked?: boolean;
-  onStorageProtectionClick?: () => void;
   onAgentToggle?: () => void;
 }
 
@@ -43,9 +40,7 @@ const DEVICE_TYPE_KEY: Record<string, string> = {
 export default function Header({
   agentVisible = false,
   agentOpen = false,
-  storageProtectionBlocked = false,
   onAgentToggle,
-  onStorageProtectionClick,
 }: HeaderProps) {
   const deviceType = useAppStore((s) => s.deviceType);
   const theme = useAppStore((s) => s.theme);
@@ -122,19 +117,6 @@ export default function Header({
       <div className={styles.right}>
         {/* Alarm severity badges */}
         <AlarmBadges />
-
-        {storageProtectionBlocked && (
-          <button
-            className={styles.storageBlockPill}
-            onClick={onStorageProtectionClick}
-            title={t('system.storageProtection.globalBlock.expand')}
-            type="button"
-            aria-label={t('system.storageProtection.globalBlock.expand')}
-          >
-            <ExclamationCircleOutlined />
-            <span>{t('system.storageProtection.globalBlock.badge')}</span>
-          </button>
-        )}
 
         <div className={styles.divider} />
 

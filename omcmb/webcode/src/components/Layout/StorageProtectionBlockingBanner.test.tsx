@@ -9,8 +9,6 @@ import StorageProtectionBlockingBanner from './StorageProtectionBlockingBanner';
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
-  onBlockedChange: vi.fn(),
-  onCollapsedChange: vi.fn(),
   openTab: vi.fn(),
   policies: [] as StorageProtectionPolicy[],
   targets: [] as StorageProtectionTarget[],
@@ -82,14 +80,10 @@ function target(overrides: Partial<StorageProtectionTarget> = {}): StorageProtec
   };
 }
 
-function renderBanner(collapsed = false) {
+function renderBanner() {
   return render(
     <MemoryRouter>
-      <StorageProtectionBlockingBanner
-        collapsed={collapsed}
-        onBlockedChange={mocks.onBlockedChange}
-        onCollapsedChange={mocks.onCollapsedChange}
-      />
+      <StorageProtectionBlockingBanner />
     </MemoryRouter>,
   );
 }
@@ -97,8 +91,6 @@ function renderBanner(collapsed = false) {
 describe('StorageProtectionBlockingBanner', () => {
   beforeEach(() => {
     mocks.navigate.mockReset();
-    mocks.onBlockedChange.mockReset();
-    mocks.onCollapsedChange.mockReset();
     mocks.openTab.mockReset();
     mocks.tKeys = [];
     mocks.policies = [];
@@ -118,9 +110,8 @@ describe('StorageProtectionBlockingBanner', () => {
       'system.storageProtection.globalBlock.title',
       'system.storageProtection.globalBlock.description',
       'system.storageProtection.globalBlock.viewDetail',
-      'system.storageProtection.globalBlock.collapse',
     ]));
-    expect(mocks.onBlockedChange).toHaveBeenCalledWith(true);
+    expect(screen.getAllByRole('button')).toHaveLength(1);
   });
 
   it('点击查看详情时打开资源保留与背压页面', () => {
@@ -140,25 +131,13 @@ describe('StorageProtectionBlockingBanner', () => {
     expect(mocks.navigate).toHaveBeenCalledWith('/system/config?tab=retention_bp');
   });
 
-  it('用户收起时通知 AppShell 显示 Header 红色入口', () => {
-    mocks.policies = [blockedPolicy()];
-    mocks.targets = [target()];
-
-    renderBanner();
-    fireEvent.click(screen.getByRole('button', { name: 'system.storageProtection.globalBlock.collapse' }));
-
-    expect(mocks.onCollapsedChange).toHaveBeenCalledWith(true);
-  });
-
-  it('状态恢复为非 blocked 后隐藏并重置收起状态', () => {
+  it('状态恢复为非 blocked 后隐藏', () => {
     mocks.policies = [blockedPolicy({ currentState: 'normal' })];
     mocks.targets = [target({ currentState: 'normal', usedRatio: 0.4 })];
 
-    renderBanner(true);
+    renderBanner();
 
     expect(screen.queryByText('system.storageProtection.globalBlock.title')).not.toBeInTheDocument();
-    expect(mocks.onBlockedChange).toHaveBeenCalledWith(false);
-    expect(mocks.onCollapsedChange).toHaveBeenCalledWith(false);
   });
 
   it('找不到匹配 target 时使用策略目标兜底而不是误报其他目录', () => {
@@ -207,7 +186,35 @@ describe('StorageProtectionBlockingBanner', () => {
 
     expect(screen.getByText('system.storageProtection.globalBlock.title')).toBeInTheDocument();
     expect(screen.getByText('system.storageProtection.globalBlock.description:/data:94.0%:90.0%:85.0%')).toBeInTheDocument();
-    expect(mocks.onBlockedChange).toHaveBeenCalledWith(true);
+  });
+
+  it('容量总览 target blocked 时优先使用匹配 target 的策略阈值', () => {
+    mocks.policies = [
+      blockedPolicy({
+        id: 'policy-root',
+        targetId: 'root',
+        currentState: 'normal',
+        recoverUsedPercent: 85,
+        blockUsedPercent: 90,
+      }),
+      blockedPolicy({
+        id: 'policy-data',
+        targetId: 'data',
+        currentState: 'normal',
+        recoverUsedPercent: 60,
+        blockUsedPercent: 70,
+      }),
+    ];
+    mocks.targets = [target({
+      targetId: 'data',
+      mountpoint: '/data',
+      currentState: 'blocked',
+      usedRatio: 0.94,
+    })];
+
+    renderBanner();
+
+    expect(screen.getByText('system.storageProtection.globalBlock.description:/data:94.0%:70.0%:60.0%')).toBeInTheDocument();
   });
 
   it('多个目录 blocked 时展示占用最高的目录', () => {
