@@ -804,6 +804,35 @@ services:
       retries: 10
       start_period: 30s
 
+  loki-size-retention:
+    image: grafana/loki:3.0.0
+    environment:
+      LOKI_URL: http://loki:3100
+      LOKI_MAX_BYTES: "${LOKI_MAX_BYTES:-10737418240}"
+      LOKI_RETENTION_SECONDS: "${LOKI_RETENTION_SECONDS:-604800}"
+      LOKI_CHECK_INTERVAL_SECONDS: "${LOKI_CHECK_INTERVAL_SECONDS:-600}"
+      LOKI_DELETE_COOLDOWN_SECONDS: "${LOKI_DELETE_COOLDOWN_SECONDS:-7200}"
+      LOKI_TIMEZONE_FILE: /var/lib/omcgo/timezone/system-timezone
+    volumes:
+      - lokidata:/loki
+      - omcgo-timezone:/var/lib/omcgo/timezone:ro
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+      - /etc/localtime:/etc/localtime:ro
+      - ../monitoring/loki/loki-size-retention.sh:/usr/local/bin/loki-size-retention.sh:ro
+    entrypoint: ["sh"]
+    command: ["/usr/local/bin/loki-size-retention.sh"]
+    depends_on:
+      loki:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 64m
+        reservations:
+          cpus: "0.05"
+          memory: 16m
+
   # promtail：T-0155 Phase 3 下线，日志采集与 push Loki 改由 otelcol
   # filelog receiver + loki exporter 接管。配置废弃移到 docs/historic/。
 
@@ -1013,6 +1042,7 @@ volumes:
   alertmanagerdata:
   grafanadata:
   lokidata:
+  omcgo-timezone:
   # promtaildata volume kept for migration safety; remove on next compose down --volumes
   promtaildata:
   tempodata:

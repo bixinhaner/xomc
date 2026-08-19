@@ -291,7 +291,7 @@ log "  CPU 空闲预算  : ${C_G}${C_B}${IDLE_CPU} 核${C_0}  = ${HOST_CPU} − 
 #   nats          1024    2048         5           JetStream backlog + client buffers，避免 512MiB cgroup 临界
 #   minio         3072    4096         8           对象存储；压测发现按可见CPU配额自动估算的并发上限过于保守，且线上巡检 2.5GiB 配额下已到 88%，floor/ceil 一并调大留余量
 #   web            512     512         0           静态+反代，固定
-# 监控栈（固定块，不纵向伸缩，但计入预算）：~4736 MiB
+# 监控栈（固定块，不纵向伸缩，但计入预算）：~4800 MiB
 COMP_NAMES=(app acs worker postgres postgres-tsdb redis-core redis-pm nats minio web)
 BASE_COMP_FLOOR=(1536 4096 1024 7168 4096 4096 8192 1024 3072 512)
 BASE_COMP_CEIL=(3072 6144 2048 16384 12288 6144 12288 2048 4096 512)
@@ -300,7 +300,7 @@ BASE_COMP_CEIL=(3072 6144 2048 16384 12288 6144 12288 2048 4096 512)
 COMP_MIN=(512 1024 512 2048 1536 2048 4096 256 512 512)
 COMP_WEIGHT=(10 18 25 25 22 8 15 5 8 0)
 
-MON_FIXED_MIB=4736   # prometheus1024+loki512+tempo1024+otelcol512+grafana512+alertmgr512+exporters(128*3+256)
+MON_FIXED_MIB=4800   # 上述监控服务 + loki-size-retention 64MiB
 [ "$SKIP_MONITORING" = 1 ] && MON_FIXED_MIB=0
 
 # 32 GiB 基线只用于计算比例；业务总预算来自当前主机的实际可用内存，且先扣掉

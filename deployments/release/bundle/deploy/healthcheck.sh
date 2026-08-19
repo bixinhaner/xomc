@@ -415,7 +415,7 @@ check "ACS candidate SYN backlog" container_sysctl_equals acs-candidate net.ipv4
 
 if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && [ "$SKIP_MONITORING" = 0 ]; then
   echo "== $(health_text 'docker compose 监控容器' 'Docker Compose monitoring containers') =="
-  for svc in prometheus alertmanager grafana loki tempo otelcol nats-exporter nginx-exporter node-exporter cadvisor; do
+  for svc in prometheus alertmanager grafana loki loki-size-retention tempo otelcol nats-exporter nginx-exporter node-exporter cadvisor; do
     check "$svc 容器 running" container_running "$svc"
   done
   # otelcol-contrib 是 distroless 镜像，不能假设容器内有 shell/curl/wget。

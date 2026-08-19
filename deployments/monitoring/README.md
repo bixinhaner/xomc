@@ -21,7 +21,8 @@ deployments/monitoring/
 │   ├── otelcol-alerts.yml        # otelcol 自身管道健康（T-0155 收尾）
 │   └── storage-queue-alerts.yml  # 存储与 Redis/NATS/PG 队列治理
 ├── loki/
-│   └── loki-config.yml           # Loki 单节点 filesystem 存储 + 7d retention
+│   ├── loki-config.yml           # Loki filesystem 存储 + 7d retention
+│   └── loki-size-retention.sh    # /loki 超过 10GiB 时按 OMC 时区最早日期提交删除请求
 ├── promtail/                      # 旧 Promtail 配置（T-0155 P3 后已下线，保留作历史参考）
 │   └── promtail-config.yml
 ├── otelcol/
@@ -73,9 +74,9 @@ deployments/monitoring/
 ## 用法
 
 ```bash
-# 启动监控 + 日志 + 链路追踪栈（7 个服务一起起）
+# 启动监控 + 日志 + 链路追踪栈（8 个服务一起起）
 docker-compose -f deployments/docker/docker-compose.yml up -d \
-  prometheus alertmanager grafana loki promtail tempo otelcol
+  prometheus alertmanager grafana loki loki-size-retention tempo otelcol
 
 # 健康自检
 curl -fsSL http://localhost:9090/-/healthy        # Prometheus
@@ -99,7 +100,7 @@ curl -s -G 'http://localhost:3100/loki/api/v1/query_range' \
 
 # 关闭
 docker-compose -f deployments/docker/docker-compose.yml down \
-  prometheus alertmanager grafana loki promtail tempo otelcol
+  prometheus alertmanager grafana loki loki-size-retention tempo otelcol
 ```
 
 ## 链路追踪（Trace）查询
@@ -396,6 +397,21 @@ omcgo 三进程通过以下端口暴露 `/metrics`（容器内）：
 ## 日志查询（Loki + Grafana）
 
 打开 Grafana <http://localhost:3030> → 左侧 **Explore** → 数据源选 **Loki**。
+
+### 日志清理策略
+
+- **时间条件**：`loki-config.yml` 的 `retention_period: 168h` 由 Loki compactor
+  清理超过 7 天的日志。
+- **容量条件**：`loki-size-retention` 每 10 分钟检查 `/loki` Docker 卷；实际占用
+  超过 10 GiB 时，通过 Loki 删除 API 提交一个按 OMC 系统时区计算的最早完整日期区间
+  删除请求，下一轮再继续推进，直到容量回落。时区来源是系统配置页的
+  `timezoneCode`，app 会同步到 `/var/lib/omcgo/timezone/system-timezone`。
+  时区文件尚未生成、为空或内容无效时，清理器使用容器绑定的系统本地时间继续清理。
+- 两个条件相互独立，任一条件满足都会启动对应清理流程。删除请求不会直接删除 TSDB
+  文件；当前 `retention_delete_delay: 2h`，因此容量清理开始后，磁盘空间通常会在
+  compactor 处理并完成延迟删除后下降。
+- 容量清理进度保存在 `/loki/compactor/size-retention.state`，重启后不会反复提交同一
+  日期区间。
 
 ### Promtail 注入的 label 体系
 

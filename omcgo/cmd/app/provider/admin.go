@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -208,11 +209,29 @@ func initAdminModule(c *Container) error {
 	tzProvider := systimezone.New(tzFetcher, logger.Named("systimezone"))
 	response.SetTimezoneProvider(tzProvider)
 	c.SystemTimezone = tzProvider
+	syncRuntimeTimezone := func(ctx context.Context) {
+		raw, ok := tzFetcher(ctx, systimezone.Category, systimezone.Key)
+		if !ok {
+			logger.Warn("read system timezone for runtime consumers failed")
+			return
+		}
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			name = systimezone.RuntimeSystemTimezone
+		} else if _, err := time.LoadLocation(name); err != nil {
+			name = systimezone.RuntimeSystemTimezone
+		}
+		if err := systimezone.WriteRuntimeTimezoneName(systimezone.RuntimeTimezonePath, name); err != nil {
+			logger.Warn("publish system timezone for runtime consumers failed", zap.Error(err))
+		}
+	}
+	syncRuntimeTimezone(context.Background())
 	// 配置页保存"基础设置"（category='basic'，含 timezoneCode）后，立刻失效时区缓存，
 	// 使后续响应即按新系统时区展示，无需重启 app。
-	sysConfigService.RegisterSavedHook(func(_ context.Context, category string) {
+	sysConfigService.RegisterSavedHook(func(ctx context.Context, category string) {
 		if category == systimezone.Category {
 			tzProvider.Invalidate()
+			syncRuntimeTimezone(ctx)
 		}
 	})
 
