@@ -8399,11 +8399,6 @@ export default function NorthboundPageConfig() {
       ),
     },
     {
-      title: '接口类型',
-      width: 120,
-      render: (_, row) => apiKindTag(getApiMeta(row).apiKind),
-    },
-    {
       title: '模块',
       width: 140,
       render: (_, row) => apiModuleTag(row),
@@ -9538,7 +9533,7 @@ export default function NorthboundPageConfig() {
           rowKey="key"
           size="small"
           pagination={renderApiCatalogPagination()}
-          scroll={{ x: 1320, y: apiCatalogLayout.tableY }}
+          scroll={{ x: 1200, y: apiCatalogLayout.tableY }}
           rowClassName={(row) => (selectedApi?.key === row.key ? styles.selectedRow : '')}
           onRow={(row) => ({ onClick: () => setSelectedApi(row) })}
         />

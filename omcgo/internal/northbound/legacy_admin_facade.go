@@ -202,8 +202,6 @@ func legacyAPIUserPayload(user pageconfig.APIUser, operatorCode string) gin.H {
 		"userId":       user.ID,
 		"username":     user.Username,
 		"userName":     user.Username,
-		"password":     user.Password,
-		"userPwd":      user.Password,
 		"enabled":      user.Enabled,
 		"userEnable":   legacyUserEnable(user.Enabled),
 		"password_set": user.PasswordSet,
