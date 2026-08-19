@@ -25,6 +25,8 @@ services:
     image: ${IMAGE_WEB}
     restart: unless-stopped
     logging: *omc-json-log
+    environment:
+      OPENSSL_CONF: /etc/nginx/openssl-legacy.cnf
     # ACS 代理目标是单一 4-tuple；即使 upstream keepalive 异常退化，也要给
     # 短连接/TIME_WAIT 留足端口余量，避免默认 32768-60999 在波峰期耗尽。
     sysctls:
@@ -52,6 +54,7 @@ services:
       # 镜像内已含 nginx 配置；这里挂载允许运维就地改而不重打镜像（可选）
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./openssl-legacy.cnf:/etc/nginx/openssl-legacy.cnf:ro
       - /etc/nginx/cert:/etc/nginx/cert:ro
       - /opt/omc/run/logs/nginx:/var/log/nginx
       - /etc/localtime:/etc/localtime:ro

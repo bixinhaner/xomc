@@ -58,6 +58,19 @@ unreadable, unparsable, or the pair does not match:
 /etc/nginx/cert/key.pem
 ```
 
+The old OMC certificate is a legacy 1024-bit RSA certificate. Because that
+certificate cannot be replaced in this deployment path yet, the release web
+compose sets `OPENSSL_CONF=/etc/nginx/openssl-legacy.cnf` only on the `web`
+service and bind-mounts `deploy/openssl-legacy.cnf` read-only into that
+container. The file sets `CipherString = DEFAULT:@SECLEVEL=0`, so nginx can
+load the legacy certificate without changing the base image, Dockerfile `FROM`,
+the host OpenSSL policy, or any app/ACS/worker/database container.
+
+This is a web-container-level security exception for compatibility with the
+old 1024-bit certificate. After the deployment can use a modern 2048-bit or
+stronger certificate, remove this exception from `docker-compose.web.yml` and
+delete `deploy/openssl-legacy.cnf`.
+
 HTTP `:8080` remains available for upload and download compatibility, but the
 standard release/deploy path requires HTTPS `:8443` to be enabled. Do not use
 `install.sh --skip-web` for HTTPS 8443 acceptance, because that option
