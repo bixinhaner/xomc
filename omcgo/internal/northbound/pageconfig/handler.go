@@ -515,6 +515,7 @@ func (h *Handler) ListAPIUsers(c *gin.Context) {
 		h.handleUpdateError(c, "list northbound API users failed", err)
 		return
 	}
+	items = redactAPIUserPasswords(items)
 	response.OK(c, gin.H{"items": items, "total": len(items)})
 }
 
@@ -587,7 +588,17 @@ func (h *Handler) ReplaceAPIUsers(c *gin.Context) {
 		h.handleUpdateError(c, "replace northbound API users failed", err)
 		return
 	}
+	items = redactAPIUserPasswords(items)
 	response.OK(c, gin.H{"items": items, "total": len(items)})
+}
+
+func redactAPIUserPasswords(items []APIUser) []APIUser {
+	out := make([]APIUser, len(items))
+	copy(out, items)
+	for i := range out {
+		out[i].Password = ""
+	}
+	return out
 }
 
 func (h *Handler) LoginAPIUser(c *gin.Context) {

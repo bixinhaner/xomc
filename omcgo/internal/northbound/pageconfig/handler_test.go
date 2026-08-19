@@ -3747,7 +3747,7 @@ func TestAPIUserLoginIssuesNorthboundOnlyToken(t *testing.T) {
 	require.ErrorIs(t, err, commonerrors.ErrUnauthorized)
 }
 
-func TestReplaceAPIUsersReturnsPasswordForManagementPage(t *testing.T) {
+func TestReplaceAPIUsersOmitsPasswordForManagementPage(t *testing.T) {
 	r := setupTestRouterWithRepository(newFakeRepository())
 	body := []byte(`{"items":[{"username":"oss-a","enabled":true,"password":"secret-password"}]}`)
 
@@ -3759,7 +3759,33 @@ func TestReplaceAPIUsersReturnsPasswordForManagementPage(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code)
 	require.Contains(t, rr.Body.String(), `"username":"oss-a"`)
 	require.Contains(t, rr.Body.String(), `"password_set":true`)
-	require.Contains(t, rr.Body.String(), `"password":"secret-password"`)
+	require.NotContains(t, rr.Body.String(), `"password"`)
+	require.NotContains(t, rr.Body.String(), "secret-password")
+}
+
+func TestListAPIUsersOmitsPasswordForManagementPage(t *testing.T) {
+	repo := newFakeRepository()
+	repo.apiClients = []APIClient{{
+		ID:          "api-user-id",
+		ClientKey:   "oss-a",
+		Name:        "OSS A",
+		Enabled:     true,
+		TokenSecret: "secret-password",
+		TokenSet:    true,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}}
+	r := setupTestRouterWithRepository(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/northbound/page-config/api/users", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), `"username":"oss-a"`)
+	require.Contains(t, rr.Body.String(), `"password_set":true`)
+	require.NotContains(t, rr.Body.String(), `"password"`)
+	require.NotContains(t, rr.Body.String(), "secret-password")
 }
 
 func TestAPIUserSingleMutationsPreserveExistingClientScopes(t *testing.T) {

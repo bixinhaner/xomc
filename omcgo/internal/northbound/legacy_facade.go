@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -33,6 +34,18 @@ type northboundCreateDeviceTaskRequest struct {
 	CommandKey           string          `json:"command_key"`
 	Description          string          `json:"description"`
 	SourceID             string          `json:"source_id"`
+}
+
+var (
+	legacyRunTimeTokenRegex       = regexp.MustCompile(`(?i)(\d+)\s*(days?|d|天|hours?|hrs?|hr|h|小时|minutes?|mins?|min|m|分钟|seconds?|secs?|sec|s|秒)`)
+	legacyRunTimeColonRegex       = regexp.MustCompile(`^(\d+):(\d{1,2})(?::(\d{1,2}))?$`)
+	legacyLicenseCapacityPathExpr = regexp.MustCompile(`(?i)^(.*X_COM_LICENSE\.Capacity\.\d+)\.(State|RemainingPeriod|RemainDays|RemainingDays)$`)
+)
+
+type legacyLicenseCapacityParams struct {
+	state     string
+	remain    int
+	hasRemain bool
 }
 
 func (r *Router) legacyDeviceQuery(c *gin.Context) {
@@ -84,6 +97,9 @@ func (r *Router) legacyDeviceQuery(c *gin.Context) {
 	if err != nil {
 		failNorthboundFacade(c, err)
 		return
+	}
+	for i := range result.Items {
+		legacyNormalizeDeviceInfoForNorthbound(&result.Items[i])
 	}
 	response.OK(c, result)
 }
@@ -356,7 +372,200 @@ func (r *Router) legacyDeviceInfo(c *gin.Context) {
 	if !ok {
 		return
 	}
+	r.refreshLegacyDeviceInfoFromParameters(c, info)
+	legacyNormalizeDeviceInfoForNorthbound(info)
 	response.OK(c, info)
+}
+
+func (r *Router) refreshLegacyDeviceInfoFromParameters(c *gin.Context, info *device.DeviceWithInfo) {
+	if info == nil || r.deviceService == nil {
+		return
+	}
+	params, err := r.deviceService.GetDeviceParameters(c.Request.Context(), info.ID)
+	if err != nil {
+		return
+	}
+	values := legacyDeviceParameterValues(params)
+	if seconds, ok := legacyResolveRunTimeSeconds(values); ok {
+		info.RunTime = int64Ptr(seconds)
+	}
+	if legacyHasLicenseCapacityParameters(values) {
+		status := legacyCalcLicenseStatus(values)
+		info.LicenseStatus = &status
+	}
+}
+
+func legacyNormalizeDeviceInfoForNorthbound(info *device.DeviceWithInfo) {
+	if info == nil {
+		return
+	}
+	if total, ok := legacyAccumulatedOnlineDuration(info); ok {
+		// Old northbound inventory calls this field online_duration. It means
+		// accumulated online time, not only the current/last online interval.
+		info.OnlineDuration = int64Ptr(total)
+		info.CumulativeOnlineDuration = int64Ptr(total)
+	}
+}
+
+func legacyAccumulatedOnlineDuration(info *device.DeviceWithInfo) (int64, bool) {
+	if info == nil {
+		return 0, false
+	}
+	var total int64
+	hasValue := false
+	if info.CumulativeOnlineDuration != nil {
+		total += *info.CumulativeOnlineDuration
+		hasValue = true
+	}
+	if info.IsOnline && info.OnlineDuration != nil {
+		total += *info.OnlineDuration
+		hasValue = true
+	}
+	if !hasValue && info.OnlineDuration != nil {
+		return *info.OnlineDuration, true
+	}
+	return total, hasValue
+}
+
+func legacyDeviceParameterValues(params []model.DeviceParameter) map[string]string {
+	values := make(map[string]string, len(params))
+	for _, param := range params {
+		values[param.ParameterPath] = param.ParameterValue
+	}
+	return values
+}
+
+func legacyHasLicenseCapacityParameters(values map[string]string) bool {
+	return len(legacyLicenseCapacities(values)) > 0
+}
+
+func legacyResolveRunTimeSeconds(values map[string]string) (int64, bool) {
+	if val := strings.TrimSpace(values[device.ParamUpTime]); val != "" {
+		if seconds, ok := legacyParseRunTimeValue(val); ok {
+			return seconds, true
+		}
+	}
+	if val := strings.TrimSpace(values[device.ParamStationRunTime]); val != "" {
+		if seconds, ok := legacyParseRunTimeValue(val); ok {
+			return seconds, true
+		}
+	}
+	return 0, false
+}
+
+func legacyParseRunTimeValue(raw string) (int64, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		return seconds, true
+	}
+	if matches := legacyRunTimeColonRegex.FindStringSubmatch(trimmed); matches != nil {
+		first, _ := strconv.ParseInt(matches[1], 10, 64)
+		second, _ := strconv.ParseInt(matches[2], 10, 64)
+		if matches[3] == "" {
+			return first*3600 + second*60, true
+		}
+		third, _ := strconv.ParseInt(matches[3], 10, 64)
+		return first*3600 + second*60 + third, true
+	}
+
+	var totalSeconds int64
+	matches := legacyRunTimeTokenRegex.FindAllStringSubmatch(trimmed, -1)
+	if len(matches) == 0 {
+		return 0, false
+	}
+	for _, match := range matches {
+		n, err := strconv.ParseInt(match[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		switch strings.ToLower(match[2]) {
+		case "d", "day", "days", "天":
+			totalSeconds += n * 86400
+		case "h", "hr", "hrs", "hour", "hours", "小时":
+			totalSeconds += n * 3600
+		case "m", "min", "mins", "minute", "minutes", "分钟":
+			totalSeconds += n * 60
+		case "s", "sec", "secs", "second", "seconds", "秒":
+			totalSeconds += n
+		}
+	}
+	return totalSeconds, true
+}
+
+func legacyCalcLicenseStatus(values map[string]string) string {
+	hasActive := false
+	minRemain := int(^uint(0) >> 1)
+	for _, capacity := range legacyLicenseCapacities(values) {
+		if !legacyLicenseCapacityActive(capacity.state, capacity.remain, capacity.hasRemain) {
+			continue
+		}
+		hasActive = true
+		if capacity.hasRemain && capacity.remain < minRemain {
+			minRemain = capacity.remain
+		}
+	}
+	switch {
+	case !hasActive:
+		return "expired"
+	case minRemain <= 30:
+		return "expiring"
+	default:
+		return "active"
+	}
+}
+
+func legacyLicenseCapacities(values map[string]string) map[string]legacyLicenseCapacityParams {
+	capacities := map[string]legacyLicenseCapacityParams{}
+	for path, value := range values {
+		matches := legacyLicenseCapacityPathExpr.FindStringSubmatch(path)
+		if matches == nil {
+			continue
+		}
+		key := strings.ToLower(matches[1])
+		field := strings.ToLower(matches[2])
+		capacity := capacities[key]
+		switch field {
+		case "state":
+			capacity.state = value
+		case "remainingperiod", "remaindays", "remainingdays":
+			if remain, ok := legacyLicenseRemainingPeriod(value); ok {
+				capacity.remain = remain
+				capacity.hasRemain = true
+			}
+		}
+		capacities[key] = capacity
+	}
+	return capacities
+}
+
+func legacyLicenseRemainingPeriod(raw string) (int, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, false
+	}
+	remain, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return 0, false
+	}
+	return remain, true
+}
+
+func legacyLicenseCapacityActive(state string, remain int, hasRemain bool) bool {
+	normalized := strings.ToLower(strings.TrimSpace(state))
+	switch normalized {
+	case "1", "active", "true", "enabled", "valid":
+		return true
+	case "0", "inactive", "false", "disabled", "expired", "invalid":
+		return false
+	}
+	return hasRemain && remain > 0
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
 }
 
 func (r *Router) legacyGetDeviceParameters(c *gin.Context) {
