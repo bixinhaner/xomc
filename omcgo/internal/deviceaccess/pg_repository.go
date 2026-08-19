@@ -524,23 +524,32 @@ func (r *PgRepository) ResolveCarrier(ctx context.Context, serialNumber string) 
 		return "", ErrSerialNumberRequired
 	}
 
-	// Task admission is authorized by access-control authority data, not by a
-	// default carrier or a possibly stale business asset. A first access probe
-	// has a candidate but no state yet; accepted devices have both.
-	carriers := make(map[string]struct{}, 2)
-	for _, table := range []string{"device_access_states", "device_access_candidates"} {
+	// Registered devices are the primary source for normal task admission. The
+	// access state and candidate tables cover devices that are still in the
+	// access-control workflow. Conflicting sources must fail closed.
+	type carrierSource struct {
+		table string
+		where sq.Eq
+	}
+	sources := []carrierSource{
+		{table: "devices", where: sq.Eq{"serial_number": serialNumber, "deleted_at": nil}},
+		{table: "device_access_states", where: sq.Eq{"serial_number": serialNumber}},
+		{table: "device_access_candidates", where: sq.Eq{"serial_number": serialNumber}},
+	}
+	carriers := make(map[string]struct{}, len(sources))
+	for _, source := range sources {
 		query, args, err := storage.Psql.
 			Select("COUNT(DISTINCT carrier)", "MIN(carrier)").
-			From(table).
-			Where(sq.Eq{"serial_number": serialNumber}).
+			From(source.table).
+			Where(source.where).
 			ToSql()
 		if err != nil {
-			return "", fmt.Errorf("build carrier resolution query for %s: %w", table, err)
+			return "", fmt.Errorf("build carrier resolution query for %s: %w", source.table, err)
 		}
 		var count int64
 		var carrier *string
 		if err := r.db.QueryRow(ctx, query, args...).Scan(&count, &carrier); err != nil {
-			return "", fmt.Errorf("resolve carrier from %s: %w", table, err)
+			return "", fmt.Errorf("resolve carrier from %s: %w", source.table, err)
 		}
 		if count > 1 {
 			return "", ErrCarrierAmbiguous
